@@ -2560,6 +2560,7 @@
     <ClCompile Include="kpi_player.cpp" />
     <ClCompile Include="kpi_unarc.cpp" />
     <ClCompile Include="ListSyosai.cpp" />
+    <ClCompile Include="LyricsProgressWnd.cpp" />
     <ClCompile Include="Mp3Image.cpp" />
     <ClCompile Include="Nishi.cpp" />
     <ClCompile Include="ogg.cpp" />
@@ -2807,6 +2808,7 @@
     <ClInclude Include="kpi_unarc.h" />
     <ClInclude Include="libmad\fixed.h" />
     <ClInclude Include="ListSyosai.h" />
+    <ClInclude Include="LyricsProgressWnd.h" />
     <ClInclude Include="m4a.h" />
     <ClInclude Include="Mp3Image.h" />
     <ClInclude Include="Nishi.h" />

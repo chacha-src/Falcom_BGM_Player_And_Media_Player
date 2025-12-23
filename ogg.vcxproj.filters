@@ -384,6 +384,9 @@
     <ClCompile Include="CBlurDialogExBase.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="LyricsProgressWnd.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ogg.rc">
@@ -836,6 +839,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="DwmBlurHelper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="LyricsProgressWnd.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

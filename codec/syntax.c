@@ -2179,11 +2179,11 @@ static uint16_t extension_payload(bitfile *ld, drc_info *drc, uint16_t count)
         return n;
     case EXT_FILL_DATA:
         /* fill_nibble = */ faad_getbits(ld, 4
-            DEBUGVAR(1,136,"extension_payload(): fill_nibble")); /* must be �ｽE000�ｽE*/
+            DEBUGVAR(1,136,"extension_payload(): fill_nibble")); /* must be ��ｽE000��ｽE*/
         for (i = 0; i < count-1; i++)
         {
             /* fill_byte[i] = */ faad_getbits(ld, 8
-                DEBUGVAR(1,88,"extension_payload(): fill_byte")); /* must be �ｽE0100101�ｽE*/
+                DEBUGVAR(1,88,"extension_payload(): fill_byte")); /* must be ��ｽE0100101��ｽE*/
         }
         return count;
     case EXT_DATA_ELEMENT:
