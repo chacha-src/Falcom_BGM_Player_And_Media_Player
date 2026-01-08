@@ -8,10 +8,10 @@
 
 // CZwei ダイアログ
 
-IMPLEMENT_DYNAMIC(CZwei, CDialog)
+IMPLEMENT_DYNAMIC(CZwei, CCustomDialog)
 
 CZwei::CZwei(CWnd* pParent /*=NULL*/)
-	: CDialog(CZwei::IDD, pParent)
+	: CCustomDialog(CZwei::IDD, pParent)
 {
 
 }
@@ -22,14 +22,15 @@ CZwei::~CZwei()
 
 void CZwei::DoDataExchange(CDataExchange* pDX)
 {
-	CDialog::DoDataExchange(pDX);
+	CCustomDialog::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
+	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CZwei, CDialog)
+BEGIN_MESSAGE_MAP(CZwei, CCustomDialog)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
-
+	ON_BN_CLICKED(IDOK, &CZwei::OnBnClickedOk)
 cmn(CZwei);
 
 // CZwei メッセージ ハンドラ
@@ -101,7 +102,7 @@ void CZwei::OnDblclkList1()
 
 BOOL CZwei::OnInitDialog() 
 {
-	CDialog::OnInitDialog();
+	CCustomDialog::OnInitDialog();
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
@@ -121,4 +122,9 @@ BOOL CZwei::OnInitDialog()
 	m_list.SetFocus();
 	return FALSE;  // コントロールにフォーカスを設定しないとき、戻り値は TRUE となります
 	              // 例外: OCX プロパティ ページの戻り値は FALSE となります
+}
+
+void CZwei::OnBnClickedOk()
+{
+	CCustomDialog::OnOK();
 }

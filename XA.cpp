@@ -8,10 +8,10 @@
 extern CString fnn;
 // CXA ダイアログ
 
-IMPLEMENT_DYNAMIC(CXA, CDialog)
+IMPLEMENT_DYNAMIC(CXA, CCustomDialog)
 
 CXA::CXA(CWnd* pParent /*=NULL*/)
-	: CDialog(CXA::IDD, pParent)
+	: CCustomDialog(CXA::IDD, pParent)
 {
 
 }
@@ -23,11 +23,12 @@ CXA::~CXA()
 void CXA::DoDataExchange(CDataExchange* pDX)
 {
 	DDX_Control(pDX, IDC_LIST1, m_list);
-	CDialog::DoDataExchange(pDX);
+	CCustomDialog::DoDataExchange(pDX);
+	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CXA, CDialog)
+BEGIN_MESSAGE_MAP(CXA, CCustomDialog)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CXA);
 
@@ -148,7 +149,7 @@ void CXA::OnDblclkList1()
 
 BOOL CXA::OnInitDialog() 
 {
-	CDialog::OnInitDialog();
+	CCustomDialog::OnInitDialog();
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

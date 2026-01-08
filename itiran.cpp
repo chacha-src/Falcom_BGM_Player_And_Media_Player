@@ -16,7 +16,7 @@ static char THIS_FILE[] = __FILE__;
 
 extern CString fnn;
 itiran::itiran(CWnd* pParent /*=NULL*/)
-	: CDialog(itiran::IDD, pParent)
+	: CCustomDialog(itiran::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(itiran)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -26,17 +26,19 @@ itiran::itiran(CWnd* pParent /*=NULL*/)
 
 void itiran::DoDataExchange(CDataExchange* pDX)
 {
-	CDialog::DoDataExchange(pDX);
+	CCustomDialog::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(itiran)
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	//}}AFX_DATA_MAP
+	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(itiran, CDialog)
+BEGIN_MESSAGE_MAP(itiran, CCustomDialog)
 	//{{AFX_MSG_MAP(itiran)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	//}}AFX_MSG_MAP
+	ON_BN_CLICKED(IDOK, &itiran::OnBnClickedOk)
 	cmn(itiran);
 
 /////////////////////////////////////////////////////////////////////////////
@@ -185,7 +187,7 @@ void itiran::OnDblclkList1()
 
 BOOL itiran::OnInitDialog() 
 {
-	CDialog::OnInitDialog();
+	CCustomDialog::OnInitDialog();
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
@@ -246,5 +248,10 @@ BOOL itiran::OnInitDialog()
 	m_list.SetFocus();
 	return FALSE;  // コントロールにフォーカスを設定しないとき、戻り値は TRUE となります
 	              // 例外: OCX プロパティ ページの戻り値は FALSE となります
+}
+
+void itiran::OnBnClickedOk()
+{
+	CCustomDialog::OnOK();
 }
 

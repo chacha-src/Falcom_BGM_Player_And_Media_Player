@@ -387,6 +387,9 @@
     <ClCompile Include="LyricsProgressWnd.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CCustomControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ogg.rc">
@@ -842,6 +845,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="LyricsProgressWnd.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CCustomControl.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

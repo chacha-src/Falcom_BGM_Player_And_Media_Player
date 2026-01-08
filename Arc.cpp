@@ -13,10 +13,10 @@
 
 
 
-IMPLEMENT_DYNAMIC(CArc, CDialog)
+IMPLEMENT_DYNAMIC(CArc, CCustomDialog)
 
 CArc::CArc(CWnd* pParent /*=NULL*/)
-	: CDialog(CArc::IDD, pParent)
+	: CCustomDialog(CArc::IDD, pParent)
 {
 
 }
@@ -27,14 +27,16 @@ CArc::~CArc()
 
 void CArc::DoDataExchange(CDataExchange* pDX)
 {
-	CDialog::DoDataExchange(pDX);
+	CCustomDialog::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
+	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CArc, CDialog)
+BEGIN_MESSAGE_MAP(CArc, CCustomDialog)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	ON_WM_PAINT()
+	ON_BN_CLICKED(IDOK, &CArc::OnBnClickedOk)
 	cmn(CArc);
 
 
@@ -162,7 +164,7 @@ void CArc::OnDblclkList1()
 
 BOOL CArc::OnInitDialog() 
 {
-	CDialog::OnInitDialog();
+	CCustomDialog::OnInitDialog();
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
@@ -189,7 +191,12 @@ void CArc::OnPaint()
 {
 	CPaintDC dc(this); // device context for painting
 					   // TODO: ここにメッセージ ハンドラー コードを追加します。
-					   // 描画メッセージで CDialog::OnPaint() を呼び出さないでください。
+					   // 描画メッセージで CCustomDialog::OnPaint() を呼び出さないでください。
+}
+
+void CArc::OnBnClickedOk()
+{
+	CCustomDialog::OnOK();
 }
 
 

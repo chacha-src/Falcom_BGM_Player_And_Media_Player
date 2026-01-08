@@ -8,10 +8,10 @@
 
 // CNishi ダイアログ
 
-IMPLEMENT_DYNAMIC(CNishi, CDialog)
+IMPLEMENT_DYNAMIC(CNishi, CCustomDialog)
 
 CNishi::CNishi(CWnd* pParent /*=NULL*/)
-	: CDialog(CNishi::IDD, pParent)
+	: CCustomDialog(CNishi::IDD, pParent)
 {
 
 }
@@ -22,12 +22,13 @@ CNishi::~CNishi()
 
 void CNishi::DoDataExchange(CDataExchange* pDX)
 {
-	CDialog::DoDataExchange(pDX);
+	CCustomDialog::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
+	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CNishi, CDialog)
+BEGIN_MESSAGE_MAP(CNishi, CCustomDialog)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CNishi);
 
@@ -107,7 +108,7 @@ void CNishi::OnDblclkList1()
 
 BOOL CNishi::OnInitDialog() 
 {
-	CDialog::OnInitDialog();
+	CCustomDialog::OnInitDialog();
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

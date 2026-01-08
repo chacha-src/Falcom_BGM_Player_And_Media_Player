@@ -8,10 +8,10 @@
 
 // CED4 ダイアログ
 
-IMPLEMENT_DYNAMIC(CED4, CDialog)
+IMPLEMENT_DYNAMIC(CED4, CCustomDialog)
 
 CED4::CED4(CWnd* pParent /*=NULL*/)
-	: CDialog(CED4::IDD, pParent)
+	: CCustomDialog(CED4::IDD, pParent)
 {
 
 }
@@ -22,12 +22,13 @@ CED4::~CED4()
 
 void CED4::DoDataExchange(CDataExchange* pDX)
 {
-	CDialog::DoDataExchange(pDX);
+	CCustomDialog::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
+	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CED4, CDialog)
+BEGIN_MESSAGE_MAP(CED4, CCustomDialog)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CED4);
 
@@ -135,7 +136,7 @@ void CED4::OnDblclkList1()
 
 BOOL CED4::OnInitDialog() 
 {
-	CDialog::OnInitDialog();
+	CCustomDialog::OnInitDialog();
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

@@ -17,7 +17,7 @@ static char THIS_FILE[] = __FILE__;
 extern CString fnn;
 
 Citiran_YS6::Citiran_YS6(CWnd* pParent /*=NULL*/)
-	: CDialog(Citiran_YS6::IDD, pParent)
+	: CCustomDialog(Citiran_YS6::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(Citiran_YS6)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -27,14 +27,15 @@ Citiran_YS6::Citiran_YS6(CWnd* pParent /*=NULL*/)
 
 void Citiran_YS6::DoDataExchange(CDataExchange* pDX)
 {
-	CDialog::DoDataExchange(pDX);
+	CCustomDialog::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(Citiran_YS6)
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	//}}AFX_DATA_MAP
+	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(Citiran_YS6, CDialog)
+BEGIN_MESSAGE_MAP(Citiran_YS6, CCustomDialog)
 	//{{AFX_MSG_MAP(Citiran_YS6)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	//}}AFX_MSG_MAP
@@ -95,7 +96,7 @@ void Citiran_YS6::Gett(int a){
 
 BOOL Citiran_YS6::OnInitDialog() 
 {
-	CDialog::OnInitDialog();
+	CCustomDialog::OnInitDialog();
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

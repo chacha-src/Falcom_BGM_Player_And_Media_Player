@@ -2416,6 +2416,7 @@
     <ClCompile Include="Br4.cpp" />
     <ClCompile Include="CBlurDialogBase.cpp" />
     <ClCompile Include="CBlurDialogExBase.cpp" />
+    <ClCompile Include="CCustomControl.cpp" />
     <ClCompile Include="CDailog1.cpp" />
     <ClCompile Include="CImageBase.cpp" />
     <ClCompile Include="codec\ag_dec.c" />
@@ -2482,6 +2483,7 @@
     <ClInclude Include="CAFFileALAC.h" />
     <ClInclude Include="CBlurDialogBase.h" />
     <ClInclude Include="CBlurDialogExBase.h" />
+    <ClInclude Include="CCustomControl.h" />
     <ClInclude Include="CDailog1.h" />
     <ClInclude Include="CImageBase.h" />
     <ClInclude Include="codec\ALACEncoder.h" />
