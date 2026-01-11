@@ -276,7 +276,6 @@ private:
 	BOOL m_bMouseOver;
 };
 
-// カスタムスライダー
 class CCustomSliderCtrl : public CSliderCtrl
 {
 	DECLARE_DYNAMIC(CCustomSliderCtrl)
@@ -285,7 +284,13 @@ public:
 	CCustomSliderCtrl();
 	virtual ~CCustomSliderCtrl();
 
+	// モード設定 (0: オーディオ風, 1: 目盛り付き)
+	void SetMode(int nMode);
+	int GetMode() const { return m_nMode; }
+
 protected:
+	int m_nMode; // 現在の描画モード
+
 	virtual void PreSubclassWindow();
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
@@ -296,7 +301,10 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 private:
+	// 描画処理
 	void DrawSlider(CDC* pDC);
+	void DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos); // オーディオモード
+	void DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos); // リニアモード
 };
 
 #pragma once
