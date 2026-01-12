@@ -20,6 +20,8 @@
 #define COLOR_RANGE_SLIDER_THUMB RGB(255, 255, 255) // 白
 #define COLOR_RANGE_SELECTION RGB(221, 160, 221) // うすい紫
 #define COLOR_HANAMARU RGB(255, 0, 0)
+#define COLOR_FLOWER_DECO        RGB(255, 240, 245) // 装飾用の淡い色
+#define COLOR_VINE_DECO          RGB(80, 140, 80)   // 蔓の色
 
 // ダイアログから色を変更するためのユーティリティクラス
 class CCustomControlUtility
@@ -363,9 +365,7 @@ public:
 	CCustomCheckBox();
 	virtual ~CCustomCheckBox();
 
-	// フォント設定は基本不要になりますが、個別に変えたい場合のために残します
 	void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
-
 	int GetCheck();
 	void SetCheck(int nCheck);
 
@@ -377,14 +377,12 @@ protected:
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnMouseLeave();
-
 	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
 
 	DECLARE_MESSAGE_MAP()
 
 private:
 	void OnDrawLayer(CDC* pDC, CRect rect);
-	void DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);
 
 	BOOL m_bIsFlatStyle;
 	BOOL m_bIsPressed;

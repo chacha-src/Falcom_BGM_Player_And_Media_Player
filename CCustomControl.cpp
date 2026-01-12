@@ -10,6 +10,276 @@
 #endif
 
 // ============================================================================
+// 共通ヘルパー関数（クラス内部で使用）
+// ============================================================================
+static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPatternA, BOOL bPushed)
+{
+	// お嬢様のために、四隅に花の飾りを描きます
+	// bPatternA: TRUEなら左上＆右下、FALSEなら右上＆左下
+
+	CPen penVine(PS_SOLID, 1, COLOR_VINE_DECO);
+	CBrush brFlower(RGB(255, 192, 203)); // ピンクの花びら
+	CBrush brCenter(RGB(255, 255, 0));   // 黄色の花芯
+
+	CPen* pOldPen = pDC->SelectObject(&penVine);
+	CBrush* pOldBrush = pDC->SelectObject(&brFlower);
+
+	int offset = bPushed ? 1 : 0; // ボタンが押されているときは少しずらす
+	rect.DeflateRect(2, 2); // 枠線に被らないように少し内側へ
+
+	// 装飾を描くコーナーのリストを作成
+	struct Corner { int x; int y; int dx; int dy; };
+	std::vector<Corner> corners;
+
+	if (bPatternA) {
+		// 左上
+		corners.push_back({ rect.left + offset, rect.top + offset, 1, 1 });
+		// 右下
+		corners.push_back({ rect.right - 1 + offset, rect.bottom - 1 + offset, -1, -1 });
+	}
+	else {
+		// 右上
+		corners.push_back({ rect.right - 1 + offset, rect.top + offset, -1, 1 });
+		// 左下
+		corners.push_back({ rect.left + offset, rect.bottom - 1 + offset, 1, -1 });
+	}
+
+	for (const auto& c : corners)
+	{
+		// 1. 蔓（つる）を描く (ベジェ曲線)
+		// コーナーから内側へ伸びる曲線
+		CPoint pts[4];
+		pts[0] = CPoint(c.x, c.y + (15 * c.dy)); // 始点（縦側）
+		pts[1] = CPoint(c.x + (5 * c.dx), c.y + (5 * c.dy)); // 制御点1
+		pts[2] = CPoint(c.x + (5 * c.dx), c.y + (5 * c.dy)); // 制御点2
+		pts[3] = CPoint(c.x + (15 * c.dx), c.y); // 終点（横側）
+		pDC->PolyBezier(pts, 4);
+
+		// 2. 花を描く
+		// コーナー付近に配置
+		int r = 3; // 花の半径
+		int fx = c.x + (4 * c.dx);
+		int fy = c.y + (4 * c.dy);
+
+		// 花びら（4つの円）
+		pDC->SelectObject(&brFlower);
+		pDC->SelectObject(GetStockObject(NULL_PEN)); // 枠線なし
+		pDC->Ellipse(fx - r, fy - r * 2, fx + r, fy);
+		pDC->Ellipse(fx - r, fy, fx + r, fy + r * 2);
+		pDC->Ellipse(fx - r * 2, fy - r, fx, fy + r);
+		pDC->Ellipse(fx, fy - r, fx + r * 2, fy + r);
+
+		// 花芯
+		pDC->SelectObject(&brCenter);
+		pDC->Ellipse(fx - 2, fy - 2, fx + 2, fy + 2);
+
+		// ペンを戻す
+		pDC->SelectObject(&penVine);
+	}
+
+	pDC->SelectObject(pOldPen);
+	pDC->SelectObject(pOldBrush);
+}
+
+// テキスト描画のロジック（お嬢様のご要望通りに調整）
+static void DrawSmartText(CDC* pDC, CRect rect, CString strText, BOOL bDisabled, BOOL bPushed)
+{
+	if (strText.IsEmpty()) return;
+
+	pDC->SetBkMode(TRANSPARENT);
+	pDC->SetTextColor(bDisabled ? RGB(128, 128, 128) : COLOR_EDIT_TEXT);
+
+	CRect rcText = rect;
+	rcText.DeflateRect(1, 1); // 余白
+	if (bPushed) rcText.OffsetRect(1, 1);
+
+	// 現在のフォント情報を取得
+	CFont* pCurrentFont = pDC->GetCurrentFont();
+	LOGFONT lf;
+	pCurrentFont->GetLogFont(&lf);
+
+	long originalHeight = lf.lfHeight;
+
+	// 【ステップ1】 まず 2px 小さくする
+	// lfHeightは負の値（ピクセル数）であることが多いので、絶対値を小さくする方向で計算
+	long targetHeight = abs(originalHeight);
+	targetHeight = max(8, targetHeight - 2); // 最低でも8pxは確保
+	lf.lfHeight = -targetHeight;
+
+	CFont fontSmall;
+	fontSmall.CreateFontIndirect(&lf);
+	CFont* pOldFont = pDC->SelectObject(&fontSmall);
+
+	// 一行で収まるかチェック
+	CSize szText = pDC->GetTextExtent(strText);
+
+	if (szText.cx <= rcText.Width())
+	{
+		// 収まるならそのまま描画（上下中央）
+		pDC->DrawText(strText, &rcText, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+	}
+	else
+	{
+		// 【ステップ2】 収まらないなら自動折り返しを試みる
+		// 同じフォントサイズ（-2px状態）で計算
+		CRect rcCalc = rcText;
+		int nHeight = pDC->DrawText(strText, &rcCalc, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
+
+		if (nHeight <= rcText.Height())
+		{
+			// 折り返して高さが収まるなら描画
+			CRect rcDraw = rcText;
+			// 縦方向の中央寄せ計算
+			int nTopOffset = (rcText.Height() - nHeight) / 2;
+			rcDraw.top += nTopOffset;
+			rcDraw.bottom = rcDraw.top + nHeight;
+			pDC->DrawText(strText, &rcDraw, DT_CENTER | DT_WORDBREAK);
+		}
+		else
+		{
+			pDC->SelectObject(pOldFont);
+			fontSmall.DeleteObject();
+
+			int nTryHeight = targetHeight;
+			BOOL bPrinted = FALSE;
+
+			// 最小サイズ(例えば6px)までループ
+			while (nTryHeight > 6)
+			{
+				nTryHeight--;
+				lf.lfHeight = -nTryHeight;
+
+				CFont fontTry;
+				fontTry.CreateFontIndirect(&lf);
+				pDC->SelectObject(&fontTry);
+
+				CRect rcTry = rcText;
+				int nH = pDC->DrawText(strText, &rcTry, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
+
+				if (nH <= rcText.Height() && rcTry.Width() <= rcText.Width())
+				{
+					// 収まった！描画
+					CRect rcDraw = rcText;
+					int nTopOffset = (rcText.Height() - nH) / 2;
+					rcDraw.top += nTopOffset;
+					rcDraw.bottom = rcDraw.top + nH;
+					pDC->DrawText(strText, &rcDraw, DT_CENTER | DT_WORDBREAK);
+
+					pDC->SelectObject(pOldFont);
+					fontTry.DeleteObject();
+					bPrinted = TRUE;
+					break;
+				}
+
+				pDC->SelectObject(pOldFont); // ループのために戻す
+				fontTry.DeleteObject();
+			}
+
+			// 万が一最小サイズでも入らない場合は、最小サイズでクリッピングして描画
+			if (!bPrinted)
+			{
+				lf.lfHeight = -6;
+				CFont fontMin;
+				fontMin.CreateFontIndirect(&lf);
+				pDC->SelectObject(&fontMin);
+				pDC->DrawText(strText, &rcText, DT_CENTER | DT_WORDBREAK | DT_VCENTER);
+				pDC->SelectObject(pOldFont);
+			}
+			return; // 処理終了
+		}
+	}
+
+	// ステップ1,2で描画完了した場合の後始末
+	pDC->SelectObject(pOldFont);
+}
+
+static void DrawSmartText2(CDC* pDC, CRect rect, CString strText, UINT nFormat, BOOL bDisabled, BOOL bPushed)
+{
+	if (strText.IsEmpty()) return;
+
+	pDC->SetBkMode(TRANSPARENT);
+	pDC->SetTextColor(bDisabled ? RGB(128, 128, 128) : COLOR_EDIT_TEXT);
+
+	// ---------------------------------------------------------
+	// 描画・判定用の矩形を準備
+	// ---------------------------------------------------------
+	CRect rcLimit = rect;
+
+	// 横方向：最低限の美観のため、左右に2pxずつの余白は確保します
+	// これがないと枠線に文字がくっついてしまいます
+	rcLimit.DeflateRect(2, 0);
+
+	// 押下時は全体を1px右下へずらす（これは見た目のため維持）
+	if (bPushed) rcLimit.OffsetRect(1, 1);
+
+	// ---------------------------------------------------------
+	// フォント縮小ループ
+	// ---------------------------------------------------------
+	CFont* pCurrentFont = pDC->GetCurrentFont();
+	LOGFONT lf;
+	pCurrentFont->GetLogFont(&lf);
+
+	long originalHeight = abs(lf.lfHeight);
+	long targetHeight = originalHeight;
+	const long MIN_HEIGHT = 6;
+
+	CFont fontTry;
+	CFont* pOldFont = NULL;
+
+	while (targetHeight >= MIN_HEIGHT)
+	{
+		if (fontTry.GetSafeHandle()) fontTry.DeleteObject();
+
+		lf.lfHeight = -targetHeight;
+		fontTry.CreateFontIndirect(&lf);
+
+		pOldFont = pDC->SelectObject(&fontTry);
+
+		// サイズ計測
+		// rcCalc には「許容できる最大幅(rcLimit.Width)」が入った状態からスタートし、
+		// DrawText が実際に必要な高さ・幅に書き換えます。
+		CRect rcCalc = rcLimit;
+
+		// DT_CALCRECT: 描画はせずサイズ計算のみ
+		// nFormat (DT_WORDBREAK等) に従って計算されます
+		pDC->DrawText(strText, &rcCalc, nFormat | DT_CALCRECT);
+
+		pDC->SelectObject(pOldFont);
+
+		// 判定
+		// 幅が収まっているか？ (DT_WORDBREAK指定時は自動で折り返すので幅は収まるはずですが、単一行時は重要)
+		// 高さが収まっているか？ (ここが重要)
+		if (rcCalc.Width() <= rcLimit.Width() && rcCalc.Height() <= rcLimit.Height())
+		{
+			// 収まったのでループ終了
+			break;
+		}
+
+		// 収まらない場合、フォントを1px小さくして再挑戦
+		targetHeight--;
+	}
+
+	// ---------------------------------------------------------
+	// 決定したフォントで描画
+	// ---------------------------------------------------------
+	// ループを抜けた時点（または最小サイズ）のフォントを作成・適用
+	if (!fontTry.GetSafeHandle()) // ループせず初回で抜けた場合などの保険
+	{
+		lf.lfHeight = -targetHeight;
+		fontTry.CreateFontIndirect(&lf);
+	}
+
+	pOldFont = pDC->SelectObject(&fontTry);
+
+	// 描画時は rcLimit（縦幅いっぱい）の領域を使います。
+	// DT_VCENTER がある場合、枠の高さ中央に配置されます。
+	pDC->DrawText(strText, &rcLimit, nFormat);
+
+	pDC->SelectObject(pOldFont);
+	fontTry.DeleteObject();
+}
+
+// ============================================================================
 // CCustomEdit
 // ============================================================================
 
@@ -160,8 +430,8 @@ void CCustomStatic::OnPaint()
 	if (dwStyle & SS_CENTERIMAGE)
 		nFormat = (nFormat & ~DT_WORDBREAK) | DT_SINGLELINE;
 
-	dc.DrawText(strText, &rect, nFormat);
-
+//	dc.DrawText(strText, &rect, nFormat);
+	DrawSmartText2(&dc, rect, strText, nFormat, FALSE, FALSE);
 	if (pOldFont)
 		dc.SelectObject(pOldFont);
 }
@@ -247,7 +517,8 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct)
 	pDC->SetBkMode(TRANSPARENT);
 	rect.left += 4;
 	rect.right -= 2;
-	pDC->DrawText(strText, &rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+	DrawSmartText(pDC, rect, strText, FALSE, FALSE);
+	//pDC->DrawText(strText, &rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
 
 void CCustomListBox::MeasureItem(LPMEASUREITEMSTRUCT lpMeasureItemStruct)
@@ -534,22 +805,21 @@ void CCustomStandardButton::OnPaint()
 	CRect rect;
 	GetClientRect(&rect);
 
+	// 状態取得
 	BOOL bPushed = (GetState() & BST_PUSHED) != 0;
 	BOOL bFocused = (GetFocus() == this);
 	BOOL bDisabled = !IsWindowEnabled();
 
-	// BS_PUSHLIKEスタイルのチェックボックスの場合、チェック状態を確認
+	// BS_PUSHLIKE チェックボックス対応
 	LONG lStyle = GetStyle();
 	BOOL bIsPushLikeCheckbox = ((lStyle & BS_CHECKBOX) || (lStyle & BS_AUTOCHECKBOX)) && (lStyle & BS_PUSHLIKE);
-	BOOL bChecked = FALSE;
 	if (bIsPushLikeCheckbox)
 	{
-		bChecked = (GetCheck() == BST_CHECKED);
-		// チェックされている場合は、押された状態として描画
-		if (bChecked)
+		if (GetCheck() == BST_CHECKED)
 			bPushed = TRUE;
 	}
 
+	// 背景色決定
 	COLORREF clrBg = COLOR_BUTTON_BG;
 	if (bDisabled)
 	{
@@ -557,23 +827,31 @@ void CCustomStandardButton::OnPaint()
 	}
 	else if (bPushed)
 	{
-		clrBg = RGB(80, 180, 80);
+		clrBg = COLOR_BUTTON_PUSHED;
 	}
 	else if (m_bMouseOver)
 	{
 		clrBg = COLOR_BUTTON_HOVER;
 	}
 
+	// ダブルバッファリング等は簡易化のため省略し、直接描画
 	CBrush brBg(clrBg);
 	dc.FillRect(&rect, &brBg);
 
-	// 厚みのある3D効果
+	// --- 装飾描画 (ここを追加) ---
+	if (!bDisabled)
+	{
+		DrawDecorations(&dc, rect, 0, bPushed);
+	}
+
+	// 3D枠の描画（お嬢様のご指定通り、凝った枠線は維持）
 	CPen penLight(PS_SOLID, 2, RGB(255, 255, 255));
 	CPen penDark(PS_SOLID, 2, RGB(128, 128, 128));
 	CPen* pOldPen;
 
 	if (bPushed)
 	{
+		// 沈んだ状態
 		pOldPen = dc.SelectObject(&penDark);
 		dc.MoveTo(rect.left, rect.bottom - 1);
 		dc.LineTo(rect.left, rect.top);
@@ -584,6 +862,7 @@ void CCustomStandardButton::OnPaint()
 		dc.LineTo(rect.right - 1, rect.bottom - 1);
 		dc.LineTo(rect.left, rect.bottom - 1);
 
+		// 内側にも影
 		CRect rectInner = rect;
 		rectInner.DeflateRect(2, 2);
 		dc.SelectObject(&penDark);
@@ -593,6 +872,7 @@ void CCustomStandardButton::OnPaint()
 	}
 	else
 	{
+		// 浮いた状態
 		pOldPen = dc.SelectObject(&penLight);
 		dc.MoveTo(rect.left, rect.bottom - 1);
 		dc.LineTo(rect.left, rect.top);
@@ -610,9 +890,9 @@ void CCustomStandardButton::OnPaint()
 		dc.LineTo(rectInner.left, rectInner.top);
 		dc.LineTo(rectInner.right - 1, rectInner.top);
 	}
-
 	dc.SelectObject(pOldPen);
 
+	// フォーカス枠
 	if (bFocused && !bDisabled)
 	{
 		CRect rcFocus = rect;
@@ -620,87 +900,46 @@ void CCustomStandardButton::OnPaint()
 		dc.DrawFocusRect(&rcFocus);
 	}
 
+	// テキスト描画 (スマートフィッティング呼び出し)
 	CString strText;
 	GetWindowText(strText);
-	if (!strText.IsEmpty())
-	{
-		CFont* pOldFont = NULL;
-		CFont* pFont = GetFont();
-		if (pFont)
-			pOldFont = dc.SelectObject(pFont);
 
-		dc.SetBkMode(TRANSPARENT);
-		dc.SetTextColor(bDisabled ? RGB(128, 128, 128) : RGB(0, 0, 0));
+	// フォント設定（親のフォント、なければデフォルト）
+	CFont* pFont = GetFont();
+	CFont* pOldFont = NULL;
+	if (pFont) pOldFont = dc.SelectObject(pFont);
+	else pOldFont = (CFont*)dc.SelectStockObject(DEFAULT_GUI_FONT);
 
-		CRect rcText = rect;
-		if (bPushed)
-			rcText.OffsetRect(1, 1);
+	DrawSmartText(&dc, rect, strText, bDisabled, bPushed);
 
-		// テキストの高さを計算
-		CRect rcCalc = rcText;
-		int nHeight = dc.DrawText(strText, &rcCalc, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
-
-		// 縦中央に配置
-		int nTop = (rcText.Height() - nHeight) / 2;
-		rcText.top += nTop;
-		rcText.bottom = rcText.top + nHeight;
-
-		dc.DrawText(strText, &rcText, DT_CENTER | DT_WORDBREAK);
-
-		if (pOldFont)
-			dc.SelectObject(pOldFont);
-	}
+	if (pOldFont) dc.SelectObject(pOldFont);
 }
 
-BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC)
-{
-	return TRUE;
-}
-
+// その他のイベントハンドラは変更なしですが、フル実装のため記載
+BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC) { return TRUE; }
 void CCustomStandardButton::OnMouseMove(UINT nFlags, CPoint point)
 {
 	if (!m_bMouseOver)
 	{
-		m_bMouseOver = TRUE;
-		Invalidate();
-
 		TRACKMOUSEEVENT tme;
 		tme.cbSize = sizeof(TRACKMOUSEEVENT);
 		tme.dwFlags = TME_LEAVE;
 		tme.hwndTrack = m_hWnd;
-		::TrackMouseEvent(&tme);
-	}
-
-	CButton::OnMouseMove(nFlags, point);
-}
-
-LRESULT CCustomStandardButton::OnMouseLeave(WPARAM wParam, LPARAM lParam)
-{
-	if (m_bMouseOver)
-	{
-		m_bMouseOver = FALSE;
+		TrackMouseEvent(&tme);
+		m_bMouseOver = TRUE;
 		Invalidate();
 	}
+	CButton::OnMouseMove(nFlags, point);
+}
+LRESULT CCustomStandardButton::OnMouseLeave(WPARAM wParam, LPARAM lParam)
+{
+	m_bMouseOver = FALSE;
+	Invalidate();
 	return 0;
 }
-
-void CCustomStandardButton::OnKillFocus(CWnd* pNewWnd)
-{
-	Invalidate();
-	CButton::OnKillFocus(pNewWnd);
-}
-
-void CCustomStandardButton::OnSetFocus(CWnd* pOldWnd)
-{
-	CButton::OnSetFocus(pOldWnd);
-	Invalidate();
-}
-
-void CCustomStandardButton::OnEnable(BOOL bEnable)
-{
-	CButton::OnEnable(bEnable);
-	Invalidate();
-}
+void CCustomStandardButton::OnSetFocus(CWnd* pOldWnd) { CButton::OnSetFocus(pOldWnd); Invalidate(); }
+void CCustomStandardButton::OnKillFocus(CWnd* pNewWnd) { CButton::OnKillFocus(pNewWnd); Invalidate(); }
+void CCustomStandardButton::OnEnable(BOOL bEnable) { CButton::OnEnable(bEnable); Invalidate(); }
 
 // ============================================================================
 // CCustomSliderCtrl
@@ -1294,7 +1533,6 @@ CCustomCheckBox::~CCustomCheckBox()
 
 void CCustomCheckBox::SetFont(CFont* pFont, BOOL bRedraw)
 {
-	// 外部からフォントセットされたら基底クラスに渡す
 	CButton::SetFont(pFont, bRedraw);
 }
 
@@ -1369,6 +1607,30 @@ void CCustomCheckBox::OnMouseLeave()
 	Invalidate();
 }
 
+// 描画メッセージ
+void CCustomCheckBox::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rect;
+	GetClientRect(&rect);
+	OnDrawLayer(&dc, rect);
+}
+
+// 印刷クライアントメッセージ（テーマ描画などで呼ばれることがある）
+LRESULT CCustomCheckBox::OnPrintClient(WPARAM wParam, LPARAM lParam)
+{
+	CDC* pDC = CDC::FromHandle((HDC)wParam);
+	CRect rect;
+	GetClientRect(&rect);
+	OnDrawLayer(pDC, rect);
+	return 0;
+}
+
+BOOL CCustomCheckBox::OnEraseBkgnd(CDC* pDC)
+{
+	return TRUE; // OnPaintで背景を描くのでちらつき防止のため何もしない
+}
+
 void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
 {
 	BOOL bChecked = (m_nCheck == BST_CHECKED);
@@ -1378,8 +1640,10 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
 	CFont* pFont = GetFont();
 	CFont* pOldFont = NULL;
 	if (pFont) pOldFont = pDC->SelectObject(pFont);
+	else pOldFont = (CFont*)pDC->SelectStockObject(DEFAULT_GUI_FONT);
 
 	if (m_bIsFlatStyle) {
+		// --- フラットスタイル（プッシュライク）の描画 ---
 		BOOL bSunken = bChecked || bPressed;
 		COLORREF bg;
 		if (bDisabled) bg = RGB(200, 200, 200);
@@ -1388,18 +1652,27 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
 		else bg = COLOR_BUTTON_BG;
 
 		pDC->FillSolidRect(&rect, bg);
-		pDC->Draw3dRect(&rect, bSunken ? RGB(100, 100, 100) : RGB(255, 255, 255), bSunken ? RGB(255, 255, 255) : RGB(100, 100, 100));
 
-		CString strText; GetWindowText(strText);
-		if (!strText.IsEmpty()) {
-			pDC->SetBkMode(TRANSPARENT);
-			pDC->SetTextColor(COLOR_EDIT_TEXT);
-			CRect rcText = rect;
-			if (bSunken) rcText.OffsetRect(1, 1);
-			pDC->DrawText(strText, &rcText, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+		// 装飾
+		if (!bDisabled) {
+			DrawDecorations(pDC, rect, 0, bSunken);
 		}
+
+		// 枠線の描画
+		pDC->Draw3dRect(&rect,
+			bSunken ? RGB(100, 100, 100) : RGB(255, 255, 255),
+			bSunken ? RGB(255, 255, 255) : RGB(100, 100, 100));
+
+		// テキスト描画（スマートロジック）
+		CString strText; GetWindowText(strText);
+		DrawSmartText(pDC, rect, strText, bDisabled, bSunken);
 	}
 	else {
+		// --- 通常のチェックボックススタイル ---
+		// 背景クリア（親ダイアログの色に合わせるべきですが、ここでは簡易的に白か指定色）
+		// Dialog背景色で塗りつぶし
+		pDC->FillSolidRect(&rect, COLOR_DIALOG_BG);
+
 		int nSize = 16;
 		int cy = rect.Height() / 2;
 
@@ -1408,52 +1681,54 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
 
 		CPen pen(PS_SOLID, 1, RGB(255, 140, 100));
 		CBrush br(RGB(255, 255, 255));
-		pDC->SelectObject(&pen);
-		pDC->SelectObject(&br);
+		CPen* pOldPenBox = pDC->SelectObject(&pen);
+		CBrush* pOldBrBox = pDC->SelectObject(&br);
+
 		pDC->RoundRect(&rcBox, CPoint(4, 4));
 
+		pDC->SelectObject(pOldPenBox);
+		pDC->SelectObject(pOldBrBox);
+
 		if (bChecked) {
-			// 花丸
+			// 花丸（お嬢様のご指定のベジェ曲線）
 			CPen penHanamaru(PS_SOLID, 2, COLOR_HANAMARU);
 			CPen* pOldPen = pDC->SelectObject(&penHanamaru);
 			CPoint center = rcBox.CenterPoint();
 			int r = 6;
 
-			// ベジェ曲線は (3n + 1) 個の点が必要です。(4, 7, 10...)
-			// ここでは7個の点を使って2つのカーブを描きます
+			// ベジェ曲線は (3n + 1) 個の点が必要
+			// 7点使用：Start(1) + Curve1(3) + Curve2(3) = 7点
 			CPoint pts[] = {
-				CPoint(center.x + r, center.y - r / 2), // Start
-				CPoint(center.x + r, center.y + r),     // Control 1
-				CPoint(center.x - r, center.y + r),     // Control 2
-				CPoint(center.x - r, center.y - r),     // End 1 / Start 2
-
-				CPoint(center.x + r / 2, center.y - r),     // Control 3
-				CPoint(center.x + r / 2, center.y + r / 2), // Control 4
-				CPoint(center.x - r / 2, center.y + r / 2), // End 2
+				CPoint(center.x + r, center.y - r / 2),     // Start
+				CPoint(center.x + r, center.y + r),         // C1
+				CPoint(center.x - r, center.y + r),         // C2
+				CPoint(center.x - r, center.y - r),         // End1 / Start2
+				CPoint(center.x + r / 2, center.y - r),     // C3
+				CPoint(center.x + r / 2, center.y + r / 2), // C4
+				CPoint(center.x - r / 2, center.y + r / 2), // End2
 			};
 
-			// ★ここを 8 ではなく 7 に変更
 			pDC->PolyBezier(pts, 7);
-
 			pDC->SelectObject(pOldPen);
 		}
 
 		CString strText; GetWindowText(strText);
 		if (!strText.IsEmpty()) {
-			pDC->SetBkMode(TRANSPARENT);
-			pDC->SetTextColor(COLOR_EDIT_TEXT);
-
+			// チェックボックスの横の文字もスマートロジックを適用しますが、
+			// 領域がチェックボックスの分狭くなっていることに注意
 			CRect rcText = rect;
 			rcText.left = rcBox.right + 6;
 
-			pDC->DrawText(strText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+			// チェックボックスの場合は基本的に左寄せ・一行が好ましいですが、
+			// 要件に合わせてスマートロジック（縮小・折り返し）を適用します。
+			DrawSmartText2(pDC, rcText, strText, DT_LEFT ,bDisabled, FALSE);
 		}
 	}
 
 	if (GetFocus() == this) {
 		CRect rcFocus = rect;
 		if (!m_bIsFlatStyle) {
-			rcFocus.left += 18;
+			rcFocus.left += 18; // ボックス分ずらす
 		}
 		else {
 			rcFocus.DeflateRect(3, 3);
@@ -1462,46 +1737,6 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
 	}
 
 	if (pOldFont) pDC->SelectObject(pOldFont);
-}
-
-void CCustomCheckBox::OnPaint()
-{
-	CPaintDC dc(this);
-	CRect rect; GetClientRect(&rect);
-
-	CDC memDC;
-	CBitmap memBmp;
-	memDC.CreateCompatibleDC(&dc);
-	memBmp.CreateCompatibleBitmap(&dc, rect.Width(), rect.Height());
-	CBitmap* pOldBmp = memDC.SelectObject(&memBmp);
-
-	memDC.FillSolidRect(&rect, COLOR_DIALOG_BG);
-
-	OnDrawLayer(&memDC, rect);
-
-	dc.BitBlt(0, 0, rect.Width(), rect.Height(), &memDC, 0, 0, SRCCOPY);
-	memDC.SelectObject(pOldBmp);
-	memDC.DeleteDC();
-}
-
-LRESULT CCustomCheckBox::OnPrintClient(WPARAM wParam, LPARAM lParam)
-{
-	CDC* pDC = CDC::FromHandle((HDC)wParam);
-	if (pDC) {
-		CRect rect; GetClientRect(&rect);
-		// 背景を塗りつぶして「以前の描画」を消してから描く
-		pDC->FillSolidRect(&rect, COLOR_DIALOG_BG);
-		OnDrawLayer(pDC, rect);
-	}
-	return 1;
-}
-
-BOOL CCustomCheckBox::OnEraseBkgnd(CDC* pDC) { return TRUE; }
-
-void CCustomCheckBox::DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct)
-{
-	CDC* pDC = CDC::FromHandle(lpDrawItemStruct->hDC);
-	OnDrawLayer(pDC, lpDrawItemStruct->rcItem);
 }
 
 // ============================================================================
