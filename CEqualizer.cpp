@@ -192,6 +192,23 @@ BOOL CEqualizer::OnInitDialog()
 	m_pre.AddString(L"クラシック");
 	m_pre.AddString(L"ロック");
 	m_pre.AddString(L"カスタム");
+	m_pre.AddString(L"ジャズ");
+	m_pre.AddString(L"ポップ");
+	m_pre.AddString(L"EDM/エレクトロニック");
+	m_pre.AddString(L"メタル");
+	m_pre.AddString(L"ヒップホップ/R&B");
+	m_pre.AddString(L"アコースティック");
+	m_pre.AddString(L"V字型(ドンシャリ)");
+	m_pre.AddString(L"逆V字型");
+	m_pre.AddString(L"スマイルカーブ");
+	m_pre.AddString(L"ラジオ/Podcast");
+	m_pre.AddString(L"映画/ドラマ");
+	m_pre.AddString(L"ゲーミング");
+	m_pre.AddString(L"ライブ録音");
+	m_pre.AddString(L"トレブルブースト");
+	m_pre.AddString(L"ベースブースト");
+	m_pre.AddString(L"小音量用");
+	m_pre.AddString(L"ヘッドホン用");
 	m_pre.SetCurSel(savedata.eqsoundeq);
 
 	SetTimer(1, 100, NULL);
@@ -231,6 +248,37 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 			m_s12.SetPos(200 - savedata.eq[12]);
 			m_s13.SetPos(200 - savedata.eq[13]);
 			m_s14.SetPos(200 - savedata.eq[14]);
+			CString s;
+			s.Format(L"%d", savedata.eq[0]);
+			m_v0.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[1]);
+			m_v1.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[2]);
+			m_v2.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[3]);
+			m_v3.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[4]);
+			m_v4.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[5]);
+			m_v5.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[6]);
+			m_v6.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[7]);
+			m_v7.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[8]);
+			m_v8.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[9]);
+			m_v9.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[10]);
+			m_v10.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[11]);
+			m_v11.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[12]);
+			m_v12.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[13]);
+			m_v13.SetWindowText(s);
+			s.Format(L"%d", savedata.eq[14]);
+			m_v14.SetWindowText(s);
 		}
 		mod = savedata.eqsoundeq;
 	}
@@ -322,6 +370,38 @@ void CEqualizer::OnBnClickedOk3()
 	m_s12.SetPos(200 - savedata.eq[12]);
 	m_s13.SetPos(200 - savedata.eq[13]);
 	m_s14.SetPos(200 - savedata.eq[14]);
+	CString s;
+	s.Format(L"%d", savedata.eq[0]);
+	m_v0.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[1]);
+	m_v1.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[2]);
+	m_v2.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[3]);
+	m_v3.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[4]);
+	m_v4.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[5]);
+	m_v5.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[6]);
+	m_v6.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[7]);
+	m_v7.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[8]);
+	m_v8.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[9]);
+	m_v9.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[10]);
+	m_v10.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[11]);
+	m_v11.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[12]);
+	m_v12.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[13]);
+	m_v13.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[14]);
+	m_v14.SetWindowText(s);
+
 
 
 }
