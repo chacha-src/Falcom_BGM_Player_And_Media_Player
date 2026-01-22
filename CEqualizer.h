@@ -54,4 +54,14 @@ public:
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnBnClickedOk3();
 	CCustomStandardButton dum;
+	CCustomStatic m_v10;
+	CCustomStatic m_v11;
+	CCustomStatic m_v12;
+	CCustomStatic m_v13;
+	CCustomStatic m_v14;
+	CCustomSliderCtrl m_s14;
+	CCustomSliderCtrl m_s13;
+	CCustomSliderCtrl m_s12;
+	CCustomSliderCtrl m_s11;
+	CCustomSliderCtrl m_s10;
 };

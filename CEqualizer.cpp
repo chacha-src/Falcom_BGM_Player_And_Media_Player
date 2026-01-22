@@ -48,6 +48,16 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_COMBO5, m_pre);
 	DDX_Control(pDX, IDOK, m_ok);
 	DDX_Control(pDX, IDOK3, dum);
+	DDX_Control(pDX, IDC_STATIC_e10, m_v10);
+	DDX_Control(pDX, IDC_STATIC_e11, m_v11);
+	DDX_Control(pDX, IDC_STATIC_e12, m_v12);
+	DDX_Control(pDX, IDC_STATIC_e13, m_v13);
+	DDX_Control(pDX, IDC_STATIC_e14, m_v14);
+	DDX_Control(pDX, IDC_SLIDER21, m_s14);
+	DDX_Control(pDX, IDC_SLIDER20, m_s13);
+	DDX_Control(pDX, IDC_SLIDER19, m_s12);
+	DDX_Control(pDX, IDC_SLIDER18, m_s11);
+	DDX_Control(pDX, IDC_SLIDER17, m_s10);
 }
 
 
@@ -95,6 +105,16 @@ BOOL CEqualizer::OnInitDialog()
 	m_v8.SetWindowText(s);
 	s.Format(L"%d", savedata.eq[9]);
 	m_v9.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[10]);
+	m_v10.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[11]);
+	m_v11.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[12]);
+	m_v12.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[13]);
+	m_v13.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[14]);
+	m_v14.SetWindowText(s);
 
 	m_s0.SetMode(1);
 	m_s1.SetMode(1);
@@ -106,6 +126,11 @@ BOOL CEqualizer::OnInitDialog()
 	m_s7.SetMode(1);
 	m_s8.SetMode(1);
 	m_s9.SetMode(1);
+	m_s10.SetMode(1);
+	m_s11.SetMode(1);
+	m_s12.SetMode(1);
+	m_s13.SetMode(1);
+	m_s14.SetMode(1);
 
 	m_s0.SetRange(0, 200);
 	m_s1.SetRange(0, 200);
@@ -117,6 +142,11 @@ BOOL CEqualizer::OnInitDialog()
 	m_s7.SetRange(0, 200);
 	m_s8.SetRange(0, 200);
 	m_s9.SetRange(0, 200);
+	m_s10.SetRange(0, 200);
+	m_s11.SetRange(0, 200);
+	m_s12.SetRange(0, 200);
+	m_s13.SetRange(0, 200);
+	m_s14.SetRange(0, 200);
 
 	m_s0.SetPos(200 - savedata.eq[0]);
 	m_s1.SetPos(200 - savedata.eq[1]);
@@ -128,23 +158,28 @@ BOOL CEqualizer::OnInitDialog()
 	m_s7.SetPos(200 - savedata.eq[7]);
 	m_s8.SetPos(200 - savedata.eq[8]);
 	m_s9.SetPos(200 - savedata.eq[9]);
+	m_s10.SetPos(200 - savedata.eq[10]);
+	m_s11.SetPos(200 - savedata.eq[11]);
+	m_s12.SetPos(200 - savedata.eq[12]);
+	m_s13.SetPos(200 - savedata.eq[13]);
+	m_s14.SetPos(200 - savedata.eq[14]);
 
 	m_env.AddString(L"なし");
-	m_env.AddString(L"風呂場");
-	m_env.AddString(L"ホール");
-	m_env.AddString(L"教会");
-	m_env.AddString(L"洞窟");
-	m_env.AddString(L"スタジオ");
-	m_env.AddString(L"ライブハウス");
-	m_env.AddString(L"森");
-	m_env.AddString(L"山");
-	m_env.AddString(L"広場");
-	m_env.AddString(L"カテドラル (大聖堂)");
-	m_env.AddString(L"体育館");
-	m_env.AddString(L"峡谷");
-	m_env.AddString(L"地下室");
-	m_env.AddString(L"劇場");
-	m_env.AddString(L"水中");
+	m_env.AddString(L"風呂場 - 短く明るい金属的");
+	m_env.AddString(L"ホール - 中程度でバランス");
+	m_env.AddString(L"教会 - 長く荘厳");
+	m_env.AddString(L"洞窟 - 暗くこもった");
+	m_env.AddString(L"スタジオ - 極めてドライ");
+	m_env.AddString(L"ライブハウス - パンチのある");
+	m_env.AddString(L"森 - 柔らかく自然");
+	m_env.AddString(L"山 - 長いエコー");
+	m_env.AddString(L"広場 - 開放的");
+	m_env.AddString(L"カテドラル (大聖堂) - 超巨大で超長残響");
+	m_env.AddString(L"体育館 - 硬く金属的");
+	m_env.AddString(L"峡谷 - 両側から複数エコー");
+	m_env.AddString(L"地下室 - 圧迫感のある密度");
+	m_env.AddString(L"劇場 - 音響設計された空間");
+	m_env.AddString(L"水中 - 特殊な低域特性");
 	m_env.SetCurSel(savedata.eqsoundenv);
 
 	m_pre.AddString(L"デフォルト");
@@ -191,6 +226,11 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 			m_s7.SetPos(200 - savedata.eq[7]);
 			m_s8.SetPos(200 - savedata.eq[8]);
 			m_s9.SetPos(200 - savedata.eq[9]);
+			m_s10.SetPos(200 - savedata.eq[10]);
+			m_s11.SetPos(200 - savedata.eq[11]);
+			m_s12.SetPos(200 - savedata.eq[12]);
+			m_s13.SetPos(200 - savedata.eq[13]);
+			m_s14.SetPos(200 - savedata.eq[14]);
 		}
 		mod = savedata.eqsoundeq;
 	}
@@ -227,7 +267,23 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	vol = 200 - m_s9.GetPos();
 	if (vol != savedata.eq[9]) { s.Format(L"%d", vol); m_v9.SetWindowText(s); flg = 1;	}
 	savedata.eq[9] = vol;
-	
+
+	vol = 200 - m_s10.GetPos();
+	if (vol != savedata.eq[10]) { s.Format(L"%d", vol); m_v10.SetWindowText(s); flg = 1; }
+	savedata.eq[10] = vol;
+	vol = 200 - m_s11.GetPos();
+	if (vol != savedata.eq[11]) { s.Format(L"%d", vol); m_v11.SetWindowText(s); flg = 1; }
+	savedata.eq[11] = vol;
+	vol = 200 - m_s12.GetPos();
+	if (vol != savedata.eq[12]) { s.Format(L"%d", vol); m_v12.SetWindowText(s); flg = 1; }
+	savedata.eq[12] = vol;
+	vol = 200 - m_s13.GetPos();
+	if (vol != savedata.eq[13]) { s.Format(L"%d", vol); m_v13.SetWindowText(s); flg = 1; }
+	savedata.eq[13] = vol;
+	vol = 200 - m_s14.GetPos();
+	if (vol != savedata.eq[14]) { s.Format(L"%d", vol); m_v14.SetWindowText(s); flg = 1; }
+	savedata.eq[14] = vol;
+
 	if (flg == 1) { m_pre.SetCurSel(9); savedata.eqsoundeq = 9; }
 
 	CCustomDialogEx::OnTimer(nIDEvent);
@@ -246,6 +302,11 @@ void CEqualizer::OnBnClickedOk3()
 	savedata.eq[7] = 100;
 	savedata.eq[8] = 100;
 	savedata.eq[9] = 100;
+	savedata.eq[10] = 100;
+	savedata.eq[11] = 100;
+	savedata.eq[12] = 100;
+	savedata.eq[13] = 100;
+	savedata.eq[14] = 100;
 	m_s0.SetPos(200 - savedata.eq[0]);
 	m_s1.SetPos(200 - savedata.eq[1]);
 	m_s2.SetPos(200 - savedata.eq[2]);
@@ -256,5 +317,11 @@ void CEqualizer::OnBnClickedOk3()
 	m_s7.SetPos(200 - savedata.eq[7]);
 	m_s8.SetPos(200 - savedata.eq[8]);
 	m_s9.SetPos(200 - savedata.eq[9]);
+	m_s10.SetPos(200 - savedata.eq[10]);
+	m_s11.SetPos(200 - savedata.eq[11]);
+	m_s12.SetPos(200 - savedata.eq[12]);
+	m_s13.SetPos(200 - savedata.eq[13]);
+	m_s14.SetPos(200 - savedata.eq[14]);
+
 
 }
