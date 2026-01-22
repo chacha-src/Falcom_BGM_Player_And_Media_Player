@@ -165,21 +165,21 @@ BOOL CEqualizer::OnInitDialog()
 	m_s14.SetPos(200 - savedata.eq[14]);
 
 	m_env.AddString(L"なし");
-	m_env.AddString(L"風呂場 - 短く明るい金属的");
-	m_env.AddString(L"ホール - 中程度でバランス");
-	m_env.AddString(L"教会 - 長く荘厳");
-	m_env.AddString(L"洞窟 - 暗くこもった");
-	m_env.AddString(L"スタジオ - 極めてドライ");
-	m_env.AddString(L"ライブハウス - パンチのある");
-	m_env.AddString(L"森 - 柔らかく自然");
-	m_env.AddString(L"山 - 長いエコー");
-	m_env.AddString(L"広場 - 開放的");
-	m_env.AddString(L"カテドラル (大聖堂) - 超巨大で超長残響");
-	m_env.AddString(L"体育館 - 硬く金属的");
-	m_env.AddString(L"峡谷 - 両側から複数エコー");
-	m_env.AddString(L"地下室 - 圧迫感のある密度");
-	m_env.AddString(L"劇場 - 音響設計された空間");
-	m_env.AddString(L"水中 - 特殊な低域特性");
+	m_env.AddString(L"風呂場 (超短く超明るい、ピーキーな金属反射)");
+	m_env.AddString(L"ホール (中程度だがはっきり響く)");
+	m_env.AddString(L"教会 (超長く超重厚、圧倒的な残響)");
+	m_env.AddString(L"洞窟 (長く暗く湿った、こもった響き)");
+	m_env.AddString(L"スタジオ (極めてドライ、ほぼ無響)");
+	m_env.AddString(L"ライブハウス (パンチがあって賑やか、エネルギッシュ)");
+	m_env.AddString(L"森 (拡散的で柔らかい、包み込む自然)");
+	m_env.AddString(L"山 (超長いエコー、遠くまではっきり響く)");
+	m_env.AddString(L"広場 (開放的、空気を感じる広がり)");
+	m_env.AddString(L"カテドラル (大聖堂)(超巨大空間、圧倒的な残響)");
+	m_env.AddString(L"体育館 (硬く金属的、バスケコート的な響き)");
+	m_env.AddString(L"峡谷 (複数の明確なエコー、両側から反響)");
+	m_env.AddString(L"地下室 (狭く圧迫感、密度の高い反射)");
+	m_env.AddString(L"劇場 (音響設計された空間、明瞭でバランス良好)");
+	m_env.AddString(L"水中 (特殊な密度、こもった独特の響き)");
 	m_env.SetCurSel(savedata.eqsoundenv);
 
 	m_pre.AddString(L"デフォルト");
