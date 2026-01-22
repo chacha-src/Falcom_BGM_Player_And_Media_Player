@@ -139,6 +139,12 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"森");
 	m_env.AddString(L"山");
 	m_env.AddString(L"広場");
+	m_env.AddString(L"カテドラル (大聖堂)");
+	m_env.AddString(L"体育館");
+	m_env.AddString(L"峡谷");
+	m_env.AddString(L"地下室");
+	m_env.AddString(L"劇場");
+	m_env.AddString(L"水中");
 	m_env.SetCurSel(savedata.eqsoundenv);
 
 	m_pre.AddString(L"デフォルト");
