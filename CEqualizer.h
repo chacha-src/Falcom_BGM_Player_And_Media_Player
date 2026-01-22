@@ -17,6 +17,7 @@ public:
 	enum { IDD = IDD_EQUALIZER };
 #endif
 	CToolTipCtrl m_tooltip;
+	int mod = 0;
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV サポート
 

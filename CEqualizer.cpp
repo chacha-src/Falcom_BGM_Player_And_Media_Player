@@ -171,13 +171,29 @@ void CEqualizer::OnCbnSelchangeCombo1()
 void CEqualizer::OnCbnSelchangeCombo5()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
+	KillTimer(1);
 	savedata.eqsoundeq = m_pre.GetCurSel();
+	SetTimer(1, 100, NULL);
 }
 
 void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 {
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
-
+	if (mod != savedata.eqsoundeq) {
+		if (savedata.eqsoundeq != 9) {
+			m_s0.SetPos(200 - savedata.eq[0]);
+			m_s1.SetPos(200 - savedata.eq[1]);
+			m_s2.SetPos(200 - savedata.eq[2]);
+			m_s3.SetPos(200 - savedata.eq[3]);
+			m_s4.SetPos(200 - savedata.eq[4]);
+			m_s5.SetPos(200 - savedata.eq[5]);
+			m_s6.SetPos(200 - savedata.eq[6]);
+			m_s7.SetPos(200 - savedata.eq[7]);
+			m_s8.SetPos(200 - savedata.eq[8]);
+			m_s9.SetPos(200 - savedata.eq[9]);
+		}
+		mod = savedata.eqsoundeq;
+	}
 	CString s;
 	int vol;
 	int flg = 0;
@@ -212,7 +228,7 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	if (vol != savedata.eq[9]) { s.Format(L"%d", vol); m_v9.SetWindowText(s); flg = 1;	}
 	savedata.eq[9] = vol;
 	
-	if (flg == 1) m_pre.SetCurSel(9);
+	if (flg == 1) { m_pre.SetCurSel(9); savedata.eqsoundeq = 9; }
 
 	CCustomDialogEx::OnTimer(nIDEvent);
 }
