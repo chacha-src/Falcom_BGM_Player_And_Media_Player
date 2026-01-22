@@ -174,36 +174,39 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 
 	CString s;
 	int vol;
+	int flg = 0;
 	vol = 200 - m_s0.GetPos();
-	if (vol != savedata.eq[0]) { s.Format(L"%d", vol); m_v0.SetWindowText(s); }
-	savedata.eq[0] = 200;
+	if (vol != savedata.eq[0]) { s.Format(L"%d", vol); m_v0.SetWindowText(s); flg = 1; }
+	savedata.eq[0] = vol;
 	vol = 200 - m_s1.GetPos();
-	if (vol != savedata.eq[1]) { s.Format(L"%d", vol); m_v1.SetWindowText(s); }
+	if (vol != savedata.eq[1]) { s.Format(L"%d", vol); m_v1.SetWindowText(s); flg = 1;}
 	savedata.eq[1] = vol;
 	vol = 200 - m_s2.GetPos();
-	if (vol != savedata.eq[2]) { s.Format(L"%d", vol); m_v2.SetWindowText(s); }
+	if (vol != savedata.eq[2]) { s.Format(L"%d", vol); m_v2.SetWindowText(s); flg = 1;	}
 	savedata.eq[2] = vol;
 	vol = 200 - m_s3.GetPos();
-	if (vol != savedata.eq[3]) { s.Format(L"%d", vol); m_v3.SetWindowText(s); }
+	if (vol != savedata.eq[3]) { s.Format(L"%d", vol); m_v3.SetWindowText(s); flg = 1;	}
 	savedata.eq[3] = vol;
 	vol = 200 - m_s4.GetPos();
-	if (vol != savedata.eq[4]) { s.Format(L"%d", vol); m_v4.SetWindowText(s); }
+	if (vol != savedata.eq[4]) { s.Format(L"%d", vol); m_v4.SetWindowText(s);  flg = 1;	}
 	savedata.eq[4] = vol;
 	vol = 200 - m_s5.GetPos();
-	if (vol != savedata.eq[5]) { s.Format(L"%d", vol); m_v5.SetWindowText(s); }
+	if (vol != savedata.eq[5]) { s.Format(L"%d", vol); m_v5.SetWindowText(s); flg = 1;	}
 	savedata.eq[5] = vol;
 	vol = 200 - m_s6.GetPos();
-	if (vol != savedata.eq[6]) { s.Format(L"%d", vol); m_v6.SetWindowText(s); }
+	if (vol != savedata.eq[6]) { s.Format(L"%d", vol); m_v6.SetWindowText(s); flg = 1;	}
 	savedata.eq[6] = vol;
 	vol = 200 - m_s7.GetPos();
-	if (vol != savedata.eq[7]) { s.Format(L"%d", vol); m_v7.SetWindowText(s); }
+	if (vol != savedata.eq[7]) { s.Format(L"%d", vol); m_v7.SetWindowText(s); flg = 1;	}
 	savedata.eq[7] = vol;
 	vol = 200 - m_s8.GetPos();
-	if (vol != savedata.eq[8]) { s.Format(L"%d", vol); m_v8.SetWindowText(s); }
+	if (vol != savedata.eq[8]) { s.Format(L"%d", vol); m_v8.SetWindowText(s); flg = 1;	}
 	savedata.eq[8] = vol;
 	vol = 200 - m_s9.GetPos();
-	if (vol != savedata.eq[9]) { s.Format(L"%d", vol); m_v9.SetWindowText(s); }
+	if (vol != savedata.eq[9]) { s.Format(L"%d", vol); m_v9.SetWindowText(s); flg = 1;	}
 	savedata.eq[9] = vol;
+	
+	if (flg == 1) m_pre.SetCurSel(9);
 
 	CCustomDialogEx::OnTimer(nIDEvent);
 }
