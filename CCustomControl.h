@@ -289,7 +289,7 @@ public:
 	// モード設定 (0: オーディオ風, 1: 目盛り付き)
 	void SetMode(int nMode);
 	int GetMode() const { return m_nMode; }
-
+	void SetPos(int nPos, BOOL bRedraw = TRUE);
 protected:
 	int m_nMode; // 現在の描画モード
 

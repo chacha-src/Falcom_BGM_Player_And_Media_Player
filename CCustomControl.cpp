@@ -941,10 +941,6 @@ void CCustomStandardButton::OnSetFocus(CWnd* pOldWnd) { CButton::OnSetFocus(pOld
 void CCustomStandardButton::OnKillFocus(CWnd* pNewWnd) { CButton::OnKillFocus(pNewWnd); Invalidate(); }
 void CCustomStandardButton::OnEnable(BOOL bEnable) { CButton::OnEnable(bEnable); Invalidate(); }
 
-// ============================================================================
-// CCustomSliderCtrl
-// ============================================================================
-
 IMPLEMENT_DYNAMIC(CCustomSliderCtrl, CSliderCtrl)
 
 BEGIN_MESSAGE_MAP(CCustomSliderCtrl, CSliderCtrl)
@@ -956,7 +952,7 @@ BEGIN_MESSAGE_MAP(CCustomSliderCtrl, CSliderCtrl)
 END_MESSAGE_MAP()
 
 CCustomSliderCtrl::CCustomSliderCtrl()
-	: m_nMode(0) // 既定はモード0（オーディオ風）
+	: m_nMode(0) // 既定はモード0
 {
 }
 
@@ -976,6 +972,23 @@ void CCustomSliderCtrl::SetMode(int nMode)
 	}
 }
 
+// ============================================================================
+// 【追加】SetPos オーバーライド（隠蔽）
+// 外部から値を変更した際、確実に全体を再描画してゴミを防ぎます。
+// ============================================================================
+void CCustomSliderCtrl::SetPos(int nPos, BOOL bRedraw)
+{
+	// 基底クラスのSetPosを呼び出す
+	CSliderCtrl::SetPos(nPos);
+
+	// 再描画フラグがTRUEなら、コントロール領域全体を無効化して強制再描画
+	if (bRedraw && GetSafeHwnd())
+	{
+		Invalidate();
+		UpdateWindow(); // 即座に反映（アニメーション等を滑らかにするため）
+	}
+}
+
 void CCustomSliderCtrl::PreSubclassWindow()
 {
 	CSliderCtrl::PreSubclassWindow();
@@ -987,14 +1000,14 @@ void CCustomSliderCtrl::OnPaint()
 	CRect rect;
 	GetClientRect(&rect);
 
-	// ダブルバッファリング
+	// ダブルバッファリング準備
 	CDC memDC;
 	CBitmap memBmp;
 	memDC.CreateCompatibleDC(&dc);
 	memBmp.CreateCompatibleBitmap(&dc, rect.Width(), rect.Height());
 	CBitmap* pOldBmp = memDC.SelectObject(&memBmp);
 
-	// 背景塗りつぶし（指定色：薄いピンク）
+	// 背景塗りつぶし（これにより前の描画の残骸を消します）
 	CBrush brDialog(COLOR_DIALOG_BG);
 	memDC.FillRect(&rect, &brDialog);
 
@@ -1004,6 +1017,7 @@ void CCustomSliderCtrl::OnPaint()
 	// 転送
 	dc.BitBlt(0, 0, rect.Width(), rect.Height(), &memDC, 0, 0, SRCCOPY);
 
+	// 後始末
 	memDC.SelectObject(pOldBmp);
 	memBmp.DeleteObject();
 	memDC.DeleteDC();
@@ -1011,12 +1025,12 @@ void CCustomSliderCtrl::OnPaint()
 
 BOOL CCustomSliderCtrl::OnEraseBkgnd(CDC* pDC)
 {
-	return TRUE; // ちらつき防止
+	return TRUE; // ちらつき防止のため標準の背景消去をブロック
 }
 
 LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM wParam, LPARAM lParam)
 {
-	Invalidate(); // マウス移動時に再描画
+	Invalidate(); // マウス移動時も再描画
 	return Default();
 }
 
@@ -1058,170 +1072,288 @@ void CCustomSliderCtrl::DrawSlider(CDC* pDC)
 
 // ----------------------------------------------------------------------------
 // Mode 0: オーディオボリューム風
-// 改修：黒部分を廃止し、指定されたパステルカラーで構成
 // ----------------------------------------------------------------------------
 void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
 {
 	int nRange = nMax - nMin;
+	BOOL bVert = (GetStyle() & TBS_VERT);
 
-	int nMarginX = 12;
-	int nMarginY = 4;
-
-	// トラック領域
-	int nTrackLeft = rect.left + nMarginX;
-	int nTrackRight = rect.right - nMarginX;
-	int nTrackWidth = nTrackRight - nTrackLeft;
-	if (nTrackWidth <= 0) return;
-
-	// つまみの位置計算
-	int nThumbX = nTrackLeft + (int)((double)(nPos - nMin) * nTrackWidth / nRange);
-
-	// 三角形の頂点計算
-	int nMinHeight = 2; // 左端の高さ
-	int nMaxHeight = (rect.Height() - nMarginY * 2) / 2; // 右端の高さ
-	int nCenterY = rect.Height() / 2;
-	int nBottomY = rect.bottom - nMarginY - 4;
-
-	CPoint pts[4];
-	pts[0] = CPoint(nTrackLeft, nBottomY); // 左下
-	pts[1] = CPoint(nTrackLeft, nBottomY - 2); // 左上（最小高さ）
-	pts[2] = CPoint(nTrackRight, rect.top + nMarginY); // 右上（最大高さ）
-	pts[3] = CPoint(nTrackRight, nBottomY); // 右下
-
-	// 1. 背景のくさび形（くぼみ）を描画
+	if (!bVert)
 	{
-		CBrush brBack(COLOR_RANGE_SELECTION);
-		CPen penNull(PS_NULL, 0, RGB(0, 0, 0));
-		CBrush* pOldBr = pDC->SelectObject(&brBack);
-		CPen* pOldPen = pDC->SelectObject(&penNull);
-		pDC->Polygon(pts, 4);
+		// --------------------------------------------------------------------
+		// 水平 (Horizontal)
+		// --------------------------------------------------------------------
+		int nMarginX = 12;
+		int nMarginY = 4;
 
-		pDC->SelectObject(pOldBr);
-		pDC->SelectObject(pOldPen);
+		int nTrackLeft = rect.left + nMarginX;
+		int nTrackRight = rect.right - nMarginX;
+		int nTrackWidth = nTrackRight - nTrackLeft;
+		if (nTrackWidth <= 0) return;
 
-		// 枠線を描画（くぼみの輪郭）
-		CPen penFrame(PS_SOLID, 1, COLOR_SLIDER_THUMB);
-		pDC->SelectObject(&penFrame);
-		pDC->SelectObject(GetStockObject(NULL_BRUSH));
-		pDC->Polygon(pts, 4);
+		int nThumbX = nTrackLeft + (int)((double)(nPos - nMin) * nTrackWidth / nRange);
+		int nCenterY = rect.Height() / 2;
+		int nBottomY = rect.bottom - nMarginY - 4;
+
+		CPoint pts[4];
+		pts[0] = CPoint(nTrackLeft, nBottomY);
+		pts[1] = CPoint(nTrackLeft, nBottomY - 2);
+		pts[2] = CPoint(nTrackRight, rect.top + nMarginY);
+		pts[3] = CPoint(nTrackRight, nBottomY);
+
+		// 背景
+		{
+			CBrush brBack(COLOR_RANGE_SELECTION);
+			CPen penNull(PS_NULL, 0, RGB(0, 0, 0));
+			CBrush* pOldBr = pDC->SelectObject(&brBack);
+			CPen* pOldPen = pDC->SelectObject(&penNull);
+			pDC->Polygon(pts, 4);
+			pDC->SelectObject(pOldBr);
+			pDC->SelectObject(pOldPen);
+
+			CPen penFrame(PS_SOLID, 1, COLOR_SLIDER_THUMB);
+			pDC->SelectObject(&penFrame);
+			pDC->SelectObject(GetStockObject(NULL_BRUSH));
+			pDC->Polygon(pts, 4);
+		}
+
+		// アクティブ（左側）
+		if (nThumbX > nTrackLeft)
+		{
+			CRgn rgnPoly, rgnLeft;
+			rgnPoly.CreatePolygonRgn(pts, 4, WINDING);
+			rgnLeft.CreateRectRgn(rect.left, rect.top, nThumbX, rect.bottom);
+			rgnPoly.CombineRgn(&rgnPoly, &rgnLeft, RGN_AND);
+
+			CBrush brActive(COLOR_LIST_BG);
+			pDC->FillRgn(&rgnPoly, &brActive);
+		}
+
+		// つまみ
+		{
+			int nThumbW = 10;
+			int nThumbH = rect.Height() - 6;
+			CRect rcThumb(nThumbX - nThumbW / 2, nCenterY - nThumbH / 2, nThumbX + nThumbW / 2, nCenterY + nThumbH / 2);
+
+			CBrush brThumb(COLOR_SLIDER_THUMB);
+			pDC->FillRect(&rcThumb, &brThumb);
+			pDC->DrawEdge(&rcThumb, EDGE_RAISED, BF_RECT);
+
+			CPen penGrip(PS_SOLID, 1, COLOR_RANGE_SLIDER_THUMB);
+			CPen* pOldPen = pDC->SelectObject(&penGrip);
+			pDC->MoveTo(nThumbX, rcThumb.top + 3);
+			pDC->LineTo(nThumbX, rcThumb.bottom - 3);
+			pDC->SelectObject(pOldPen);
+		}
 	}
-
-	// 2. アクティブ部分（左側）の塗りつぶし
-	if (nThumbX > nTrackLeft)
+	else
 	{
-		CRgn rgnPoly, rgnLeft;
-		rgnPoly.CreatePolygonRgn(pts, 4, WINDING);
-		rgnLeft.CreateRectRgn(rect.left, rect.top, nThumbX, rect.bottom);
-		rgnPoly.CombineRgn(&rgnPoly, &rgnLeft, RGN_AND);
+		// --------------------------------------------------------------------
+		// 垂直 (Vertical)
+		// 座標：上=Min, 下=Max (MFC標準)
+		// --------------------------------------------------------------------
+		int nMarginX = 4;
+		int nMarginY = 12;
 
-		CBrush brActive(COLOR_LIST_BG);
-		pDC->FillRgn(&rgnPoly, &brActive);
-	}
+		int nTrackTop = rect.top + nMarginY;
+		int nTrackBottom = rect.bottom - nMarginY;
+		int nTrackHeight = nTrackBottom - nTrackTop;
+		if (nTrackHeight <= 0) return;
 
-	// 3. つまみの描画
-	// 長方形
-	{
-		int nThumbW = 10;
-		int nThumbH = rect.Height() - 6;
-		CRect rcThumb(nThumbX - nThumbW / 2, nCenterY - nThumbH / 2, nThumbX + nThumbW / 2, nCenterY + nThumbH / 2);
+		// つまみ位置 (Minが上、Maxが下)
+		int nThumbY = nTrackTop + (int)((double)(nPos - nMin) * nTrackHeight / nRange);
 
-		// つまみ本体：COLOR_SLIDER_THUMB (紫)
-		CBrush brThumb(COLOR_SLIDER_THUMB);
-		pDC->FillRect(&rcThumb, &brThumb);
+		int nCenterX = rect.Width() / 2;
+		int nMinWidth = 2; // 上端（Min）の幅
+		int nMaxWidth = (rect.Width() - nMarginX * 2) / 2; // 下端（Max）の幅
 
-		// 枠線：少し引き締めるため黒（COLOR_EDIT_TEXT）を使用するか、そのまま紫のまま立体感を出すか。
-		// ここでは定義にある COLOR_EDIT_TEXT を使い、くっきりさせます。
-		pDC->DrawEdge(&rcThumb, EDGE_RAISED, BF_RECT); // 立体枠
+		CPoint pts[4];
+		pts[0] = CPoint(nCenterX - nMaxWidth, nTrackBottom); // 左下 (広い)
+		pts[1] = CPoint(nCenterX - nMinWidth, nTrackTop);    // 左上 (狭い)
+		pts[2] = CPoint(nCenterX + nMinWidth, nTrackTop);    // 右上 (狭い)
+		pts[3] = CPoint(nCenterX + nMaxWidth, nTrackBottom); // 右下 (広い)
 
-		// つまみの中央線（滑り止め風）
-		// 紫の上のアクセントとして COLOR_RANGE_SLIDER_THUMB (白) を使用
-		CPen penGrip(PS_SOLID, 1, COLOR_RANGE_SLIDER_THUMB);
-		CPen* pOldPen = pDC->SelectObject(&penGrip);
-		pDC->MoveTo(nThumbX, rcThumb.top + 3);
-		pDC->LineTo(nThumbX, rcThumb.bottom - 3);
-		pDC->SelectObject(pOldPen);
+		// 背景
+		{
+			CBrush brBack(COLOR_RANGE_SELECTION);
+			CPen penNull(PS_NULL, 0, RGB(0, 0, 0));
+			CBrush* pOldBr = pDC->SelectObject(&brBack);
+			CPen* pOldPen = pDC->SelectObject(&penNull);
+			pDC->Polygon(pts, 4);
+			pDC->SelectObject(pOldBr);
+			pDC->SelectObject(pOldPen);
+
+			CPen penFrame(PS_SOLID, 1, COLOR_SLIDER_THUMB);
+			pDC->SelectObject(&penFrame);
+			pDC->SelectObject(GetStockObject(NULL_BRUSH));
+			pDC->Polygon(pts, 4);
+		}
+
+		// アクティブ（ご指示：下(Max)から現在の位置まで）
+		if (nThumbY < nTrackBottom)
+		{
+			CRgn rgnPoly, rgnBottom;
+			rgnPoly.CreatePolygonRgn(pts, 4, WINDING);
+			// つまみ(nThumbY)から下端まで
+			rgnBottom.CreateRectRgn(rect.left, nThumbY, rect.right, rect.bottom);
+			rgnPoly.CombineRgn(&rgnPoly, &rgnBottom, RGN_AND);
+
+			CBrush brActive(COLOR_LIST_BG);
+			pDC->FillRgn(&rgnPoly, &brActive);
+		}
+
+		// つまみ
+		{
+			int nThumbH = 10;
+			int nThumbW = rect.Width() - 6;
+			CRect rcThumb(nCenterX - nThumbW / 2, nThumbY - nThumbH / 2, nCenterX + nThumbW / 2, nThumbY + nThumbH / 2);
+
+			CBrush brThumb(COLOR_SLIDER_THUMB);
+			pDC->FillRect(&rcThumb, &brThumb);
+			pDC->DrawEdge(&rcThumb, EDGE_RAISED, BF_RECT);
+
+			CPen penGrip(PS_SOLID, 1, COLOR_RANGE_SLIDER_THUMB);
+			CPen* pOldPen = pDC->SelectObject(&penGrip);
+			pDC->MoveTo(rcThumb.left + 3, nThumbY);
+			pDC->LineTo(rcThumb.right - 3, nThumbY);
+			pDC->SelectObject(pOldPen);
+		}
 	}
 }
 
 // ----------------------------------------------------------------------------
 // Mode 1: 目盛り付きリニアスライダー
-// 改修：定義色に合わせて調整
 // ----------------------------------------------------------------------------
 void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
 {
 	int nRange = nMax - nMin;
-	int nCenterY = rect.Height() / 2;
-	int nTrackLeft = 12;
-	int nTrackRight = rect.Width() - 12;
-	int nTrackWidth = nTrackRight - nTrackLeft;
+	BOOL bVert = (GetStyle() & TBS_VERT);
 
-	if (nTrackWidth <= 0) return;
-
-	int nThumbPos = nTrackLeft + (int)((double)(nPos - nMin) * nTrackWidth / nRange);
-
-	// 1. 軌道（ライン）の描画
+	if (!bVert)
 	{
-		// 左側（アクティブ）：太線固定
-		// 紫 (COLOR_SLIDER_THUMB) を使用して強調
-		CPen penActive(PS_SOLID, 4, COLOR_SLIDER_THUMB);
-		CPen* pOldPen = pDC->SelectObject(&penActive);
-		pDC->MoveTo(nTrackLeft, nCenterY);
-		pDC->LineTo(nThumbPos, nCenterY);
+		// 水平 (Horizontal)
+		int nCenterY = rect.Height() / 2;
+		int nTrackLeft = 12;
+		int nTrackRight = rect.Width() - 12;
+		int nTrackWidth = nTrackRight - nTrackLeft;
 
-		// 右側（非アクティブ）：細線
-		// 薄い青 (COLOR_LIST_BG) または 薄い緑 (COLOR_BUTTON_BG)
-		// Mode 0の背景と合わせて薄い青にします
-		CPen penInactive(PS_SOLID, 2, COLOR_LIST_BG);
-		pDC->SelectObject(&penInactive);
-		pDC->MoveTo(nThumbPos, nCenterY);
-		pDC->LineTo(nTrackRight, nCenterY);
-		pDC->SelectObject(pOldPen);
-	}
+		if (nTrackWidth <= 0) return;
 
-	// 2. 目盛りの描画
-	{
-		// 目盛りは黒 (COLOR_EDIT_TEXT) でくっきりと
-		CPen penTick(PS_SOLID, 1, COLOR_EDIT_TEXT);
-		CPen* pOldPen = pDC->SelectObject(&penTick);
+		int nThumbPos = nTrackLeft + (int)((double)(nPos - nMin) * nTrackWidth / nRange);
 
-		for (int i = 0; i <= 10; i++)
+		// 軌道
 		{
-			int nTickX = nTrackLeft + (nTrackWidth * i / 10);
-			int nTickH = (i == 0 || i == 5 || i == 10) ? 8 : 4;
+			CPen penActive(PS_SOLID, 4, COLOR_SLIDER_THUMB);
+			CPen* pOldPen = pDC->SelectObject(&penActive);
+			pDC->MoveTo(nTrackLeft, nCenterY);
+			pDC->LineTo(nThumbPos, nCenterY);
 
-			pDC->MoveTo(nTickX, nCenterY - nTickH);
-			pDC->LineTo(nTickX, nCenterY + nTickH);
+			CPen penInactive(PS_SOLID, 2, COLOR_LIST_BG);
+			pDC->SelectObject(&penInactive);
+			pDC->MoveTo(nThumbPos, nCenterY);
+			pDC->LineTo(nTrackRight, nCenterY);
+			pDC->SelectObject(pOldPen);
 		}
-		pDC->SelectObject(pOldPen);
+
+		// 目盛り
+		{
+			CPen penTick(PS_SOLID, 1, COLOR_EDIT_TEXT);
+			CPen* pOldPen = pDC->SelectObject(&penTick);
+			for (int i = 0; i <= 10; i++)
+			{
+				int nTickX = nTrackLeft + (nTrackWidth * i / 10);
+				int nTickH = (i == 0 || i == 5 || i == 10) ? 8 : 4;
+				pDC->MoveTo(nTickX, nCenterY - nTickH);
+				pDC->LineTo(nTickX, nCenterY + nTickH);
+			}
+			pDC->SelectObject(pOldPen);
+		}
+
+		// つまみ
+		{
+			int nThumbW = 14;
+			int nThumbH = 18;
+			CPoint pts[5];
+			pts[0] = CPoint(nThumbPos, nCenterY + 4);
+			pts[1] = CPoint(nThumbPos - nThumbW / 2, nCenterY - 4);
+			pts[2] = CPoint(nThumbPos - nThumbW / 2, nCenterY - nThumbH / 2 - 2);
+			pts[3] = CPoint(nThumbPos + nThumbW / 2, nCenterY - nThumbH / 2 - 2);
+			pts[4] = CPoint(nThumbPos + nThumbW / 2, nCenterY - 4);
+
+			CBrush brThumb(COLOR_SLIDER_THUMB);
+			CBrush* pOldBr = pDC->SelectObject(&brThumb);
+			CPen penFrame(PS_SOLID, 1, COLOR_EDIT_TEXT);
+			CPen* pOldPen = pDC->SelectObject(&penFrame);
+
+			pDC->Polygon(pts, 5);
+			pDC->SelectObject(pOldBr);
+			pDC->SelectObject(pOldPen);
+		}
 	}
-
-	// 3. つまみの描画（ホームベース型）
+	else
 	{
-		int nThumbW = 14;
-		int nThumbH = 18;
+		// 垂直 (Vertical)
+		// 座標：上=Min, 下=Max
+		int nCenterX = rect.Width() / 2;
+		int nTrackTop = 12;
+		int nTrackBottom = rect.Height() - 12;
+		int nTrackHeight = nTrackBottom - nTrackTop;
 
-		CPoint pts[5];
-		pts[0] = CPoint(nThumbPos, nCenterY + 4);
-		pts[1] = CPoint(nThumbPos - nThumbW / 2, nCenterY - 4);
-		pts[2] = CPoint(nThumbPos - nThumbW / 2, nCenterY - nThumbH / 2 - 2);
-		pts[3] = CPoint(nThumbPos + nThumbW / 2, nCenterY - nThumbH / 2 - 2);
-		pts[4] = CPoint(nThumbPos + nThumbW / 2, nCenterY - 4);
+		if (nTrackHeight <= 0) return;
 
-		// つまみの色：COLOR_SLIDER_THUMB (紫)
-		CBrush brThumb(COLOR_SLIDER_THUMB);
-		CBrush* pOldBr = pDC->SelectObject(&brThumb);
+		int nThumbPos = nTrackTop + (int)((double)(nPos - nMin) * nTrackHeight / nRange);
 
-		// 枠線：黒 (COLOR_EDIT_TEXT)
-		CPen penFrame(PS_SOLID, 1, COLOR_EDIT_TEXT);
-		CPen* pOldPen = pDC->SelectObject(&penFrame);
+		// 軌道
+		{
+			// 下(Max)側をアクティブに
+			CPen penActive(PS_SOLID, 4, COLOR_SLIDER_THUMB);
+			CPen* pOldPen = pDC->SelectObject(&penActive);
+			pDC->MoveTo(nCenterX, nThumbPos);
+			pDC->LineTo(nCenterX, nTrackBottom);
 
-		pDC->Polygon(pts, 5);
+			// 上(Min)側を非アクティブに
+			CPen penInactive(PS_SOLID, 2, COLOR_LIST_BG);
+			pDC->SelectObject(&penInactive);
+			pDC->MoveTo(nCenterX, nTrackTop);
+			pDC->LineTo(nCenterX, nThumbPos);
+			pDC->SelectObject(pOldPen);
+		}
 
-		// つまみの中央に小さなアクセント（白丸）などを描画しても可愛いかもしれません
-		// ここではシンプルに
+		// 目盛り
+		{
+			CPen penTick(PS_SOLID, 1, COLOR_EDIT_TEXT);
+			CPen* pOldPen = pDC->SelectObject(&penTick);
+			for (int i = 0; i <= 10; i++)
+			{
+				int nTickY = nTrackTop + (nTrackHeight * i / 10);
+				int nTickW = (i == 0 || i == 5 || i == 10) ? 8 : 4;
+				pDC->MoveTo(nCenterX - nTickW, nTickY);
+				pDC->LineTo(nCenterX + nTickW, nTickY);
+			}
+			pDC->SelectObject(pOldPen);
+		}
 
-		pDC->SelectObject(pOldBr);
-		pDC->SelectObject(pOldPen);
+		// つまみ
+		{
+			int nThumbH = 14;
+			int nThumbW = 18;
+
+			CPoint pts[5];
+			pts[0] = CPoint(nCenterX - 4, nThumbPos);
+			pts[1] = CPoint(nCenterX + 4, nThumbPos - nThumbH / 2);
+			pts[2] = CPoint(nCenterX + nThumbW / 2 + 2, nThumbPos - nThumbH / 2);
+			pts[3] = CPoint(nCenterX + nThumbW / 2 + 2, nThumbPos + nThumbH / 2);
+			pts[4] = CPoint(nCenterX + 4, nThumbPos + nThumbH / 2);
+
+			CBrush brThumb(COLOR_SLIDER_THUMB);
+			CBrush* pOldBr = pDC->SelectObject(&brThumb);
+			CPen penFrame(PS_SOLID, 1, COLOR_EDIT_TEXT);
+			CPen* pOldPen = pDC->SelectObject(&penFrame);
+
+			pDC->Polygon(pts, 5);
+			pDC->SelectObject(pOldBr);
+			pDC->SelectObject(pOldPen);
+		}
 	}
 }
 
