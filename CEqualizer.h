@@ -64,4 +64,5 @@ public:
 	CCustomSliderCtrl m_s12;
 	CCustomSliderCtrl m_s11;
 	CCustomSliderCtrl m_s10;
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 };

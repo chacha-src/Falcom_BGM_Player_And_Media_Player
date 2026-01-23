@@ -211,6 +211,9 @@ BOOL CEqualizer::OnInitDialog()
 	m_pre.AddString(L"ヘッドホン用");
 	m_pre.SetCurSel(savedata.eqsoundeq);
 
+	if(savedata.eqx != -1)
+		SetWindowPos(&CWnd::wndTop, savedata.eqx, savedata.eqy, 0, 0, SWP_NOSIZE| SWP_NOZORDER| SWP_NOOWNERZORDER);
+
 	SetTimer(1, 100, NULL);
 	return TRUE;
 }
@@ -334,6 +337,11 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 
 	if (flg == 1) { m_pre.SetCurSel(9); savedata.eqsoundeq = 9; }
 
+	CRect rect;
+	GetWindowRect(rect);
+	savedata.eqx = rect.left;
+	savedata.eqy = rect.top;
+
 	CCustomDialogEx::OnTimer(nIDEvent);
 }
 
@@ -404,4 +412,11 @@ void CEqualizer::OnBnClickedOk3()
 
 
 
+}
+
+BOOL CEqualizer::PreTranslateMessage(MSG* pMsg)
+{
+	// TODO: ここに特定なコードを追加するか、もしくは基底クラスを呼び出してください。
+	m_tooltip.RelayEvent(pMsg);
+	return CCustomDialogEx::PreTranslateMessage(pMsg);
 }
