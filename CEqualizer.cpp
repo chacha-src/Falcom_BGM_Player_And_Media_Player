@@ -180,6 +180,17 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"地下室 (狭く圧迫感、密度の高い反射)");
 	m_env.AddString(L"劇場 (音響設計された空間、明瞭でバランス良好)");
 	m_env.AddString(L"水中 (特殊な密度、こもった独特の響き)");
+	m_env.AddString(L"トンネル/地下道 (フラッターエコー)");
+	m_env.AddString(L"アリーナ/ドーム (超巨大スポーツ施設)");
+	m_env.AddString(L"小部屋/クローゼット (超小空間デッド)");
+	m_env.AddString(L"階段室 (縦方向の特殊反射)");
+	m_env.AddString(L"地下鉄ホーム (都市的コンクリート)");
+	m_env.AddString(L"倉庫 (大きく空っぽ)");
+	m_env.AddString(L"廊下 (長く狭い直線的)");
+	m_env.AddString(L"工場 (金属的産業的)");
+	m_env.AddString(L"寺社仏閣 (木造の温かみ)");
+	m_env.AddString(L"宇宙空間 (SF特殊空間)");
+	m_env.AddString(L"野球場/サッカー場 (屋外超大型)");
 	m_env.SetCurSel(savedata.eqsoundenv);
 
 	m_pre.AddString(L"デフォルト");
