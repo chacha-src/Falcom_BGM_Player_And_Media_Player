@@ -58,6 +58,8 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SLIDER19, m_s12);
 	DDX_Control(pDX, IDC_SLIDER18, m_s11);
 	DDX_Control(pDX, IDC_SLIDER17, m_s10);
+	DDX_Control(pDX, IDC_STATIC_eff, m_seff);
+	DDX_Control(pDX, IDC_SLIDER22, m_eff);
 }
 
 
@@ -148,6 +150,11 @@ BOOL CEqualizer::OnInitDialog()
 	m_s13.SetRange(0, 200);
 	m_s14.SetRange(0, 200);
 
+	m_eff.SetRange(0, 100);
+	m_eff.SetPos(savedata.eqsoundeffect);
+	s.Format(L"%d", savedata.eqsoundeffect);
+	m_seff.SetWindowText(s);
+
 	m_s0.SetPos(200 - savedata.eq[0]);
 	m_s1.SetPos(200 - savedata.eq[1]);
 	m_s2.SetPos(200 - savedata.eq[2]);
@@ -191,6 +198,10 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"寺社仏閣 (木造の温かみ)");
 	m_env.AddString(L"宇宙空間 (SF特殊空間)");
 	m_env.AddString(L"野球場/サッカー場 (屋外超大型)");
+	m_env.AddString(L"図書館 (静寂、吸音材、控えめな反射)");
+	m_env.AddString(L"プール（室内） (タイル、水面反射、独特の響き)");
+	m_env.AddString(L"エレベーター (超小金属空間)");
+	m_env.AddString(L"駐車場 (広い低天井、コンクリート)");
 	m_env.SetCurSel(savedata.eqsoundenv);
 
 	m_pre.AddString(L"デフォルト");
@@ -347,6 +358,11 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	savedata.eq[14] = vol;
 
 	if (flg == 1) { m_pre.SetCurSel(9); savedata.eqsoundeq = 9; }
+
+	vol = m_eff.GetPos();
+	if(vol != savedata.eqsoundeffect) { s.Format(L"%d", vol); m_seff.SetWindowText(s); }
+	savedata.eqsoundeffect = vol;
+
 
 	CRect rect;
 	GetWindowRect(rect);
