@@ -150,9 +150,9 @@ BOOL CEqualizer::OnInitDialog()
 	m_s13.SetRange(0, 200);
 	m_s14.SetRange(0, 200);
 
-	m_eff.SetRange(0, 100);
-	m_eff.SetPos(savedata.eqsoundeffect);
-	s.Format(L"%d", savedata.eqsoundeffect);
+	m_eff.SetRange(0, 200);
+	m_eff.SetPos(savedata.eqsoundeffect * 2);
+	s.Format(L"%d", savedata.eqsoundeffect * 2);
 	m_seff.SetWindowText(s);
 
 	m_s0.SetPos(200 - savedata.eq[0]);
@@ -202,6 +202,16 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"プール（室内） (タイル、水面反射、独特の響き)");
 	m_env.AddString(L"エレベーター (超小金属空間)");
 	m_env.AddString(L"駐車場 (広い低天井、コンクリート)");
+	m_env.AddString(L"コンサートホール (クラシック用最高峰)");
+	m_env.AddString(L"ジャズクラブ (親密で温かい)");
+	m_env.AddString(L"カラオケボックス (小密室エンタメ)");
+	m_env.AddString(L"映画館 (THX規格的)");
+	m_env.AddString(L"地下鉄車内 (揺れる密室)");
+	m_env.AddString(L"空港ターミナル (巨大公共空間)");
+	m_env.AddString(L"ショッピングモール (賑やか商業施設)");
+	m_env.AddString(L"病院 (静かで清潔)");
+	m_env.AddString(L"レコーディングブース (プロ用極ドライ)");
+	m_env.AddString(L"オペラハウス (劇場の最高峰)");
 	m_env.SetCurSel(savedata.eqsoundenv);
 
 	m_pre.AddString(L"デフォルト");
@@ -231,6 +241,20 @@ BOOL CEqualizer::OnInitDialog()
 	m_pre.AddString(L"ベースブースト");
 	m_pre.AddString(L"小音量用");
 	m_pre.AddString(L"ヘッドホン用");
+	m_pre.AddString(L"ボーカル除去");
+	m_pre.AddString(L"重低音強化");
+	m_pre.AddString(L"ラジオAM");
+	m_pre.AddString(L"ラジオFM");
+	m_pre.AddString(L"テレビ音声");
+	m_pre.AddString(L"電話音声");
+	m_pre.AddString(L"ビンテージ");
+	m_pre.AddString(L"モダン");
+	m_pre.AddString(L"ウォーム");
+	m_pre.AddString(L"ブライト");
+	m_pre.AddString(L"フラット+");
+	m_pre.AddString(L"スーパーベース");
+	m_pre.AddString(L"クリスタル");
+	m_pre.AddString(L"パーフェクト");
 	m_pre.SetCurSel(savedata.eqsoundeq);
 
 	if(savedata.eqx != -1)
@@ -360,8 +384,8 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	if (flg == 1) { m_pre.SetCurSel(9); savedata.eqsoundeq = 9; }
 
 	vol = m_eff.GetPos();
-	if(vol != savedata.eqsoundeffect) { s.Format(L"%d", vol); m_seff.SetWindowText(s); }
-	savedata.eqsoundeffect = vol;
+	if(vol / 2 != savedata.eqsoundeffect) { s.Format(L"%d", vol); m_seff.SetWindowText(s); }
+	savedata.eqsoundeffect = vol / 2;
 
 
 	CRect rect;
