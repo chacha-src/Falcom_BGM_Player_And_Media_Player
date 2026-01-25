@@ -22,6 +22,8 @@
 #define COLOR_HANAMARU RGB(255, 0, 0)
 #define COLOR_FLOWER_DECO        RGB(255, 240, 245) // 装飾用の淡い色
 #define COLOR_VINE_DECO          RGB(80, 140, 80)   // 蔓の色
+#define COLOR_HEART         RGB(255, 105, 180) // 華やかなピンク
+#define COLOR_SEL_BG        RGB(221, 160, 221) // 薄い紫
 
 // ダイアログから色を変更するためのユーティリティクラス
 class CCustomControlUtility
@@ -155,12 +157,16 @@ protected:
 	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnNcPaint();
+	afx_msg void OnSetFocus(CWnd* pOldWnd);
+	afx_msg void OnKillFocus(CWnd* pNewWnd);
 
 	DECLARE_MESSAGE_MAP()
 
 private:
 	CBrush m_brBackground;
 	CFont m_fontBold;
+	BOOL m_bHasFocus;
 };
 
 // カスタムスタティック
@@ -218,17 +224,19 @@ public:
 	virtual ~CCustomComboBox();
 
 protected:
+	CBrush m_brBackground;
+	void UpdateDropDownWidth();
+
 	virtual void PreSubclassWindow();
-	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
-	afx_msg void OnPaint();
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	virtual void DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);
 	virtual void MeasureItem(LPMEASUREITEMSTRUCT lpMeasureItemStruct);
 
-	DECLARE_MESSAGE_MAP()
+	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnDropdown(); // 展開時に幅を調整
 
-private:
-	CBrush m_brBackground;
+	DECLARE_MESSAGE_MAP()
 };
 
 // カスタムリストビュー
@@ -244,11 +252,16 @@ protected:
 	virtual void PreSubclassWindow();
 	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
 	afx_msg void OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnMouseMove(UINT nFlags, CPoint point);  // マウス移動処理
+	afx_msg void OnMouseLeave();                          // マウス離脱処理
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);                  // 背景消去処理
+	afx_msg void OnPaint();                                // 描画処理
 
 	DECLARE_MESSAGE_MAP()
 
 private:
 	CBrush m_brBackground;
+	int m_nHotItem;  // ホバー中のアイテム番号
 };
 
 // 通常ボタン用
@@ -290,6 +303,7 @@ public:
 	void SetMode(int nMode);
 	int GetMode() const { return m_nMode; }
 	void SetPos(int nPos, BOOL bRedraw = TRUE);
+
 protected:
 	int m_nMode; // 現在の描画モード
 
@@ -308,13 +322,6 @@ private:
 	void DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos); // オーディオモード
 	void DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos); // リニアモード
 };
-
-#pragma once
-
-#pragma once
-
-#pragma once
-#include "afxwin.h"
 
 // カスタム範囲指定スライダー
 class CCustomRangeSliderCtrl : public CSliderCtrl
