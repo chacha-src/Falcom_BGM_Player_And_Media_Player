@@ -68,6 +68,7 @@ BEGIN_MESSAGE_MAP(CEqualizer, CCustomDialogEx)
 	ON_CBN_SELCHANGE(IDC_COMBO5, &CEqualizer::OnCbnSelchangeCombo5)
 	ON_WM_TIMER()
 	ON_BN_CLICKED(IDOK3, &CEqualizer::OnBnClickedOk3)
+	ON_BN_CLICKED(IDOK, &CEqualizer::OnBnClickedOk)
 END_MESSAGE_MAP()
 
 extern save savedata;
@@ -491,4 +492,12 @@ BOOL CEqualizer::PreTranslateMessage(MSG* pMsg)
 	// TODO: ここに特定なコードを追加するか、もしくは基底クラスを呼び出してください。
 	m_tooltip.RelayEvent(pMsg);
 	return CCustomDialogEx::PreTranslateMessage(pMsg);
+}
+
+void CEqualizer::OnBnClickedOk()
+{
+	// TODO: ここにコントロール通知ハンドラー コードを追加します。
+	savedata.eqwindow = 0;
+	DestroyWindow();
+
 }

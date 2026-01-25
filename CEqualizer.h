@@ -67,4 +67,5 @@ public:
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	CCustomStatic m_seff;
 	CCustomSliderCtrl m_eff;
+	afx_msg void OnBnClickedOk();
 };
