@@ -68,4 +68,16 @@ public:
 	CCustomStatic m_seff;
 	CCustomSliderCtrl m_eff;
 	afx_msg void OnBnClickedOk();
+	CCustomSliderCtrl m_smaster;
+	CCustomSliderCtrl m_ssenmei;
+	CCustomSliderCtrl m_skoutei;
+	CCustomSliderCtrl m_smitsudo;
+	CCustomSliderCtrl m_srittai;
+	CCustomStatic m_vmaster;
+	CCustomStatic m_vsenmei;
+	CCustomStatic m_vkoutei;
+	CCustomStatic m_vmitsudo;
+	CCustomStatic m_vrittai;
+	afx_msg void OnBnClickedOk4();
+	CCustomStandardButton sdasdsdadsd;
 };

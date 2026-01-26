@@ -60,6 +60,17 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SLIDER17, m_s10);
 	DDX_Control(pDX, IDC_STATIC_eff, m_seff);
 	DDX_Control(pDX, IDC_SLIDER22, m_eff);
+	DDX_Control(pDX, IDC_SLIDER23, m_smaster);
+	DDX_Control(pDX, IDC_SLIDER24, m_ssenmei);
+	DDX_Control(pDX, IDC_SLIDER25, m_skoutei);
+	DDX_Control(pDX, IDC_SLIDER26, m_smitsudo);
+	DDX_Control(pDX, IDC_SLIDER27, m_srittai);
+	DDX_Control(pDX, IDC_STATIC_e15, m_vmaster);
+	DDX_Control(pDX, IDC_STATIC_e16, m_vsenmei);
+	DDX_Control(pDX, IDC_STATIC_e17, m_vkoutei);
+	DDX_Control(pDX, IDC_STATIC_e18, m_vmitsudo);
+	DDX_Control(pDX, IDC_STATIC_e19, m_vrittai);
+	DDX_Control(pDX, IDOK4, sdasdsdadsd);
 }
 
 
@@ -69,6 +80,7 @@ BEGIN_MESSAGE_MAP(CEqualizer, CCustomDialogEx)
 	ON_WM_TIMER()
 	ON_BN_CLICKED(IDOK3, &CEqualizer::OnBnClickedOk3)
 	ON_BN_CLICKED(IDOK, &CEqualizer::OnBnClickedOk)
+	ON_BN_CLICKED(IDOK4, &CEqualizer::OnBnClickedOk4)
 END_MESSAGE_MAP()
 
 extern save savedata;
@@ -83,6 +95,7 @@ BOOL CEqualizer::OnInitDialog()
 	m_tooltip.Activate(TRUE);
 	m_tooltip.AddTool(GetDlgItem(IDOK), _T("閉じます"));
 	m_tooltip.AddTool(GetDlgItem(IDOK3), _T("イコライザーの値をリセットします"));
+	m_tooltip.AddTool(GetDlgItem(IDOK4), _T("グローバルの値をリセットします"));
 	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 
@@ -135,6 +148,14 @@ BOOL CEqualizer::OnInitDialog()
 	m_s13.SetMode(1);
 	m_s14.SetMode(1);
 
+
+	m_smaster.SetMode(1);
+	m_ssenmei.SetMode(1);
+	m_skoutei.SetMode(1);
+	m_smitsudo.SetMode(1);
+	m_srittai.SetMode(1);
+
+
 	m_s0.SetRange(0, 200);
 	m_s1.SetRange(0, 200);
 	m_s2.SetRange(0, 200);
@@ -155,6 +176,31 @@ BOOL CEqualizer::OnInitDialog()
 	m_eff.SetPos(savedata.eqsoundeffect * 2);
 	s.Format(L"%d", savedata.eqsoundeffect * 2);
 	m_seff.SetWindowText(s);
+
+	m_smaster.SetRange(0, 200);
+	m_smaster.SetPos(200 - savedata.eq[15]);
+	s.Format(L"%d", savedata.eq[15]);
+	m_vmaster.SetWindowText(s);
+
+	m_ssenmei.SetRange(0, 200);
+	m_ssenmei.SetPos(200 - savedata.eq[16]);
+	s.Format(L"%d", savedata.eq[16]);
+	m_vsenmei.SetWindowText(s);
+
+	m_skoutei.SetRange(0, 200);
+	m_skoutei.SetPos(200 - savedata.eq[17]);
+	s.Format(L"%d", savedata.eq[17]);
+	m_vkoutei.SetWindowText(s);
+
+	m_smitsudo.SetRange(0, 200);
+	m_smitsudo.SetPos(200 - savedata.eq[18]);
+	s.Format(L"%d", savedata.eq[18]);
+	m_vmitsudo.SetWindowText(s);
+
+	m_srittai.SetRange(0, 200);
+	m_srittai.SetPos(200 - savedata.eq[19]);
+	s.Format(L"%d", savedata.eq[19]);
+	m_vrittai.SetWindowText(s);
 
 	m_s0.SetPos(200 - savedata.eq[0]);
 	m_s1.SetPos(200 - savedata.eq[1]);
@@ -405,6 +451,24 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 
 	if (flg == 1) { m_pre.SetCurSel(9); savedata.eqsoundeq = 9; }
 
+
+	vol = 200 - m_smaster.GetPos();
+	if (vol != savedata.eq[15]) { s.Format(L"%d", vol); m_vmaster.SetWindowText(s); }
+	savedata.eq[15] = vol;
+	vol = 200 - m_ssenmei.GetPos();
+	if (vol != savedata.eq[16]) { s.Format(L"%d", vol); m_vsenmei.SetWindowText(s); }
+	savedata.eq[16] = vol;
+	vol = 200 - m_skoutei.GetPos();
+	if (vol != savedata.eq[17]) { s.Format(L"%d", vol); m_vkoutei.SetWindowText(s); }
+	savedata.eq[17] = vol;
+	vol = 200 - m_smitsudo.GetPos();
+	if (vol != savedata.eq[18]) { s.Format(L"%d", vol); m_vmitsudo.SetWindowText(s); }
+	savedata.eq[18] = vol;
+	vol = 200 - m_srittai.GetPos();
+	if (vol != savedata.eq[19]) { s.Format(L"%d", vol); m_vrittai.SetWindowText(s); }
+	savedata.eq[19] = vol;
+
+
 	vol = m_eff.GetPos();
 	if(vol / 2 != savedata.eqsoundeffect) { s.Format(L"%d", vol); m_seff.SetWindowText(s); }
 	savedata.eqsoundeffect = vol / 2;
@@ -482,9 +546,6 @@ void CEqualizer::OnBnClickedOk3()
 	m_v13.SetWindowText(s);
 	s.Format(L"%d", savedata.eq[14]);
 	m_v14.SetWindowText(s);
-
-
-
 }
 
 BOOL CEqualizer::PreTranslateMessage(MSG* pMsg)
@@ -500,4 +561,30 @@ void CEqualizer::OnBnClickedOk()
 	savedata.eqwindow = 0;
 	DestroyWindow();
 
+}
+
+void CEqualizer::OnBnClickedOk4()
+{
+	// TODO: ここにコントロール通知ハンドラー コードを追加します。
+	savedata.eq[15] = 100;
+	savedata.eq[16] = 100;
+	savedata.eq[17] = 100;
+	savedata.eq[18] = 100;
+	savedata.eq[19] = 100;
+	m_smaster.SetPos(200 - savedata.eq[15]);
+	m_ssenmei.SetPos(200 - savedata.eq[16]);
+	m_skoutei.SetPos(200 - savedata.eq[17]);
+	m_smitsudo.SetPos(200 - savedata.eq[18]);
+	m_srittai.SetPos(200 - savedata.eq[19]);
+	CString s;
+	s.Format(L"%d", savedata.eq[15]);
+	m_vmaster.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[16]);
+	m_vsenmei.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[17]);
+	m_vkoutei.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[18]);
+	m_vmitsudo.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[19]);
+	m_vrittai.SetWindowText(s);
 }
