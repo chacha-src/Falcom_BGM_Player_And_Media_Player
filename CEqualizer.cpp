@@ -84,6 +84,7 @@ BEGIN_MESSAGE_MAP(CEqualizer, CCustomDialogEx)
 END_MESSAGE_MAP()
 
 extern save savedata;
+extern int stflg;
 
 // CEqualizer メッセージ ハンドラー
 BOOL CEqualizer::OnInitDialog()
@@ -149,11 +150,11 @@ BOOL CEqualizer::OnInitDialog()
 	m_s14.SetMode(1);
 
 
-	m_smaster.SetMode(1);
-	m_ssenmei.SetMode(1);
-	m_skoutei.SetMode(1);
-	m_smitsudo.SetMode(1);
-	m_srittai.SetMode(1);
+	m_smaster.SetMode(2);
+	m_ssenmei.SetMode(2);
+	m_skoutei.SetMode(2);
+	m_smitsudo.SetMode(2);
+	m_srittai.SetMode(2);
 
 
 	m_s0.SetRange(0, 200);
@@ -337,13 +338,21 @@ void CEqualizer::OnCbnSelchangeCombo1()
 	savedata.eqsoundenv = m_env.GetCurSel();
 }
 
+void equaliser(void* data, int len, BOOL reset);
+
 void CEqualizer::OnCbnSelchangeCombo5()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	KillTimer(1);
 	savedata.eqsoundeq = m_pre.GetCurSel();
+	extern int eqflg;
+	if (eqflg == TRUE) {
+		equaliser(0, 0, 2);
+	}
+
 	SetTimer(1, 100, NULL);
 }
+
 
 void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 {

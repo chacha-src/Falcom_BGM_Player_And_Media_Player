@@ -1731,8 +1731,12 @@ void CCustomSliderCtrl::DrawSlider(CDC* pDC)
 
 	if (m_nMode == 0)
 		DrawMode0(pDC, r, nMin, nMax, nPos);
-	else
+	else if (m_nMode == 1)
 		DrawMode1(pDC, r, nMin, nMax, nPos);
+	else if (m_nMode == 2)
+		DrawMode2(pDC, r, nMin, nMax, nPos);
+	else
+		DrawMode1(pDC, r, nMin, nMax, nPos); // デフォルトはMode1
 }
 
 /**
@@ -1950,6 +1954,122 @@ void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMa
 	}
 }
 
+/**
+ * @brief 目盛りモード2(ダイヤモンド宝石デザイン - 色違い)
+ */
+void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
+{
+	int nRange = nMax - nMin;
+	BOOL bVert = (GetStyle() & TBS_VERT);
+
+	if (!bVert)
+	{
+		int nCenterY = rect.Height() / 2;
+		int nTrackL = 12;
+		int nTrackR = rect.Width() - 12;
+		int nTrackW = nTrackR - nTrackL;
+
+		if (nTrackW <= 0) return;
+
+		int nThumbPos = nTrackL + (int)((double)(nPos - nMin) * nTrackW / nRange);
+
+		// 選択部分のライン（エメラルド風の緑）
+		CPen penA(PS_SOLID, 5, RGB(100, 200, 150)); // 緑のグラデーション風
+		pDC->SelectObject(&penA);
+		pDC->MoveTo(nTrackL, nCenterY);
+		pDC->LineTo(nThumbPos, nCenterY);
+
+		// 非選択部分のライン
+		CPen penI(PS_SOLID, 3, RGB(220, 220, 230));
+		pDC->SelectObject(&penI);
+		pDC->LineTo(nTrackR, nCenterY);
+
+		// 装飾的な目盛りの描画
+		CPen penT(PS_SOLID, 2, RGB(80, 160, 120));
+		pDC->SelectObject(&penT);
+
+		for (int i = 0; i <= 10; i++)
+		{
+			int nTickX = nTrackL + (nTrackW * i / 10);
+			int nTickH = (i % 5 == 0) ? 10 : 5;
+
+			// 目盛り線
+			pDC->MoveTo(nTickX, nCenterY - nTickH);
+			pDC->LineTo(nTickX, nCenterY + nTickH);
+
+			// 重要な目盛りに小さな宝石
+			if (i % 5 == 0)
+			{
+				CBrush br(RGB(150, 220, 180));
+				CBrush* pOldBr = pDC->SelectObject(&br);
+				pDC->Ellipse(nTickX - 3, nCenterY - nTickH - 5, nTickX + 3, nCenterY - nTickH + 1);
+				pDC->SelectObject(pOldBr);
+			}
+		}
+
+		// サムをエメラルド色のダイヤモンド宝石で描画
+		CRect rcDiamond(nThumbPos - 9, nCenterY - 12, nThumbPos + 9, nCenterY + 12);
+		DrawDiamond(pDC, rcDiamond, RGB(100, 220, 160));
+
+		// ダイヤモンドから放射状の光
+		CPen penLight(PS_SOLID, 1, RGB(200, 255, 220));
+		pDC->SelectObject(&penLight);
+		for (int angle = 0; angle < 360; angle += 45)
+		{
+			double rad = angle * 3.14159 / 180.0;
+			int x1 = nThumbPos + (int)(12 * cos(rad));
+			int y1 = nCenterY + (int)(12 * sin(rad));
+			int x2 = nThumbPos + (int)(18 * cos(rad));
+			int y2 = nCenterY + (int)(18 * sin(rad));
+			pDC->MoveTo(x1, y1);
+			pDC->LineTo(x2, y2);
+		}
+	}
+	else
+	{
+		int nCenterX = rect.Width() / 2;
+		int nTrackT = 12;
+		int nTrackB = rect.Height() - 12;
+		int nTrackH = nTrackB - nTrackT;
+
+		if (nTrackH <= 0) return;
+
+		int nThumbPos = nTrackT + (int)((double)(nPos - nMin) * nTrackH / nRange);
+
+		CPen penA(PS_SOLID, 5, RGB(100, 200, 150));
+		pDC->SelectObject(&penA);
+		pDC->MoveTo(nCenterX, nThumbPos);
+		pDC->LineTo(nCenterX, nTrackB);
+
+		CPen penI(PS_SOLID, 3, RGB(220, 220, 230));
+		pDC->SelectObject(&penI);
+		pDC->MoveTo(nCenterX, nTrackT);
+		pDC->LineTo(nCenterX, nThumbPos);
+
+		CPen penT(PS_SOLID, 2, RGB(80, 160, 120));
+		pDC->SelectObject(&penT);
+
+		for (int i = 0; i <= 10; i++)
+		{
+			int nTickY = nTrackT + (nTrackH * i / 10);
+			int nTickW = (i % 5 == 0) ? 10 : 5;
+			pDC->MoveTo(nCenterX - nTickW, nTickY);
+			pDC->LineTo(nCenterX + nTickW, nTickY);
+
+			if (i % 5 == 0)
+			{
+				CBrush br(RGB(150, 220, 180));
+				CBrush* pOldBr = pDC->SelectObject(&br);
+				pDC->Ellipse(nCenterX + nTickW + 1, nTickY - 3, nCenterX + nTickW + 7, nTickY + 3);
+				pDC->SelectObject(pOldBr);
+			}
+		}
+
+		CRect rcDiamond(nCenterX - 9, nThumbPos - 12, nCenterX + 9, nThumbPos + 12);
+		DrawDiamond(pDC, rcDiamond, RGB(100, 220, 160));
+	}
+}
+
 // ============================================================================
 // CCustomRangeSliderCtrl - カスタム範囲スライダー
 // ============================================================================
@@ -2008,6 +2128,9 @@ void CCustomRangeSliderCtrl::SetPos(int p)
 
 	m_nLogicalPos = p;
 	m_nVisualPos = p;
+
+	// 基底クラスのCSliderCtrlも同期
+	CSliderCtrl::SetPos(p);
 
 	if (::IsWindow(m_hWnd))
 		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
@@ -2172,8 +2295,15 @@ void CCustomRangeSliderCtrl::OnLButtonDown(UINT nF, CPoint p)
 
 	if (m_nDragTarget == 0)
 	{
+		// トラックをクリック → その位置へ移動
 		m_nVisualPos = PixelToValue(p.x);
 		m_nDragTarget = 3;
+
+		// 基底クラスも更新
+		CSliderCtrl::SetPos(m_nVisualPos);
+
+		// 即座に親へ通知（TB_THUMBTRACKで移動開始を通知）
+		GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, m_nVisualPos), (LPARAM)m_hWnd);
 	}
 
 	m_bDragging = TRUE;
@@ -2191,7 +2321,13 @@ void CCustomRangeSliderCtrl::OnLButtonUp(UINT nF, CPoint p)
 		if (m_nDragTarget == 3)
 		{
 			m_nLogicalPos = m_nVisualPos;
+
+			// 基底クラスも更新
+			CSliderCtrl::SetPos(m_nLogicalPos);
+
+			// 親へ通知（TB_THUMBPOSITIONとTB_ENDTRACK）
 			GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, m_nLogicalPos), (LPARAM)m_hWnd);
+			GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, m_nLogicalPos), (LPARAM)m_hWnd);
 		}
 
 		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
@@ -2207,6 +2343,11 @@ void CCustomRangeSliderCtrl::OnMouseMove(UINT nF, CPoint p)
 		if (m_nDragTarget == 3)
 		{
 			m_nVisualPos = max(m_nMin, min(m_nMax, v));
+
+			// 基底クラスも更新
+			CSliderCtrl::SetPos(m_nVisualPos);
+
+			// 親へ通知
 			GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, m_nVisualPos), (LPARAM)m_hWnd);
 		}
 		else if (m_nDragTarget == 1)

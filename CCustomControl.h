@@ -299,7 +299,7 @@ public:
 	CCustomSliderCtrl();
 	virtual ~CCustomSliderCtrl();
 
-	// モード設定 (0: オーディオ風, 1: 目盛り付き)
+	// モード設定 (0: オーディオ風, 1: 目盛り付き(紫), 2: 目盛り付き(緑))
 	void SetMode(int nMode);
 	int GetMode() const { return m_nMode; }
 	void SetPos(int nPos, BOOL bRedraw = TRUE);
@@ -320,7 +320,8 @@ private:
 	// 描画処理
 	void DrawSlider(CDC* pDC);
 	void DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos); // オーディオモード
-	void DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos); // リニアモード
+	void DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos); // 目盛りモード(紫)
+	void DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos); // 目盛りモード(緑)
 };
 
 // カスタム範囲指定スライダー
