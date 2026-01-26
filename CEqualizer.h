@@ -80,4 +80,5 @@ public:
 	CCustomStatic m_vrittai;
 	afx_msg void OnBnClickedOk4();
 	CCustomStandardButton sdasdsdadsd;
+	CCustomStatic m_t;
 };

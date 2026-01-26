@@ -757,17 +757,17 @@ BEGIN
     CONTROL         "",IDC_SLIDER14,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,179,32,16,106
     CONTROL         "",IDC_SLIDER15,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,203,32,16,106
     CONTROL         "",IDC_SLIDER16,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,227,32,16,106
-    LTEXT           "25",IDC_STATIC,15,28,9,8
-    LTEXT           "40",IDC_STATIC,40,28,9,8
-    LTEXT           "63",IDC_STATIC,63,28,9,8
-    LTEXT           "100",IDC_STATIC,86,28,13,8
-    LTEXT           "160",IDC_STATIC,109,28,13,8
-    LTEXT           "250",IDC_STATIC,134,28,13,8
-    LTEXT           "400",IDC_STATIC,157,28,13,8
-    LTEXT           "630",IDC_STATIC,181,28,13,8
-    LTEXT           "1000",IDC_STATIC,203,28,17,8
-    LTEXT           "1600",IDC_STATIC,227,28,17,8
-    LTEXT           "Hz",IDC_STATIC,367,28,9,8
+    LTEXT           "25",IDC_STATIC,15,24,9,8
+    LTEXT           "40",IDC_STATIC,40,24,9,8
+    LTEXT           "63",IDC_STATIC,63,24,9,8
+    LTEXT           "100",IDC_STATIC,86,24,13,8
+    LTEXT           "160",IDC_STATIC,109,24,13,8
+    LTEXT           "250",IDC_STATIC,134,24,13,8
+    LTEXT           "400",IDC_STATIC,157,24,13,8
+    LTEXT           "630",IDC_STATIC,181,24,13,8
+    LTEXT           "1000",IDC_STATIC,203,24,17,8
+    LTEXT           "1600",IDC_STATIC,227,24,17,8
+    LTEXT           "Hz",IDC_STATIC,367,24,9,8
     LTEXT           "100",IDC_STATIC_e0,13,140,13,8
     LTEXT           "100",IDC_STATIC_e1,37,140,13,8
     LTEXT           "100",IDC_STATIC_e2,62,140,13,8
@@ -788,11 +788,11 @@ BEGIN
     CONTROL         "",IDC_SLIDER19,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,299,32,16,106
     CONTROL         "",IDC_SLIDER20,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,323,32,16,106
     CONTROL         "",IDC_SLIDER21,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,347,32,16,106
-    LTEXT           "2500",IDC_STATIC,252,28,17,8
-    LTEXT           "4000",IDC_STATIC,276,28,17,8
-    LTEXT           "6300",IDC_STATIC,299,28,17,8
-    LTEXT           "10000",IDC_STATIC,321,28,21,8
-    LTEXT           "16000",IDC_STATIC,345,28,21,8
+    LTEXT           "2500",IDC_STATIC,252,24,17,8
+    LTEXT           "4000",IDC_STATIC,276,24,17,8
+    LTEXT           "6300",IDC_STATIC,299,24,17,8
+    LTEXT           "10000",IDC_STATIC,321,24,21,8
+    LTEXT           "16000",IDC_STATIC,345,24,21,8
     LTEXT           "100",IDC_STATIC_e10,254,140,13,8
     LTEXT           "100",IDC_STATIC_e11,278,140,13,8
     LTEXT           "100",IDC_STATIC_e12,302,140,13,8
@@ -801,7 +801,7 @@ BEGIN
     LTEXT           "環境効果のかかり具合",IDC_STATIC,9,169,65,8
     CONTROL         "",IDC_SLIDER22,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,76,168,253,12
     LTEXT           "100",IDC_STATIC_eff,331,169,18,8
-    LTEXT           "Hyper equaliser 50 x 15 band",IDC_STATIC,11,14,94,8
+    LTEXT           "Hyper equaliser 50 x 15 band",IDC_STATICf,11,7,145,14
     LTEXT           "％",IDC_STATIC,368,140,8,8
     CONTROL         "",IDC_SLIDER23,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,378,32,16,106
     LTEXT           "100",IDC_STATIC_e15,381,140,13,8
@@ -813,11 +813,11 @@ BEGIN
     LTEXT           "100",IDC_STATIC_e18,452,140,13,8
     CONTROL         "",IDC_SLIDER27,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,473,32,16,106
     LTEXT           "100",IDC_STATIC_e19,475,140,13,8
-    LTEXT           "マスター",IDC_STATIC,379,28,22,8
-    LTEXT           "鮮明",IDC_STATIC,405,28,15,8
-    LTEXT           "低高",IDC_STATIC,428,28,15,8
-    LTEXT           "密度",IDC_STATIC,451,28,15,8
-    LTEXT           "立体感",IDC_STATIC,470,28,22,8
+    LTEXT           "マスター",IDC_STATIC,379,24,22,8
+    LTEXT           "鮮明",IDC_STATIC,405,24,15,8
+    LTEXT           "低高",IDC_STATIC,428,24,15,8
+    LTEXT           "密度",IDC_STATIC,451,24,15,8
+    LTEXT           "立体感",IDC_STATIC,470,24,22,8
     DEFPUSHBUTTON   "グローバルリセット",IDOK4,419,152,71,14
 END
 

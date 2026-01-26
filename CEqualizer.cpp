@@ -71,6 +71,7 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATIC_e18, m_vmitsudo);
 	DDX_Control(pDX, IDC_STATIC_e19, m_vrittai);
 	DDX_Control(pDX, IDOK4, sdasdsdadsd);
+	DDX_Control(pDX, IDC_STATICf, m_t);
 }
 
 
@@ -155,6 +156,37 @@ BOOL CEqualizer::OnInitDialog()
 	m_skoutei.SetMode(2);
 	m_smitsudo.SetMode(2);
 	m_srittai.SetMode(2);
+
+	CFont* pFont = m_t.GetFont();
+	LOGFONT lf;
+	CFont m_newFont;
+
+	if (pFont != NULL)
+	{
+		// 現在のフォント設定をLOGFONT構造体にコピーします
+		pFont->GetLogFont(&lf);
+	}
+	else
+	{
+		// フォントが取得できない場合のデフォルト設定（MS UI Gothicなど）
+		memset(&lf, 0, sizeof(LOGFONT));
+		lf.lfHeight = -12; // 標準的なサイズ
+		_tcscpy_s(lf.lfFaceName, _T("MS UI Gothic"));
+	}
+
+	// 2. サイズを4倍に変更します
+	// lfHeightは通常負の値（デバイス単位）で指定されているため、単純に4倍します
+	lf.lfHeight *= 4;
+	lf.lfItalic = TRUE;
+	// 3. 以前に作成したフォントがあれば削除してから再作成します
+	if (m_newFont.GetSafeHandle())
+	{
+		m_newFont.DeleteObject();
+	}
+	m_newFont.CreateFontIndirect(&lf);
+
+	// 4. コントロールにフォントを適用します
+	m_t.SetFont(&m_newFont);
 
 
 	m_s0.SetRange(0, 200);
