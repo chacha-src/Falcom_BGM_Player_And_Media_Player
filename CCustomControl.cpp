@@ -11,6 +11,264 @@
 // ============================================================================
 
 /**
+ * @brief グラデーション背景を描画する（グローバル関数）
+ * @param pDC デバイスコンテキスト
+ * @param rect 描画領域
+ * @param colorStart 開始色
+ * @param colorEnd 終了色
+ * @param nDirection 方向（0-359度、0=下から上、90=左から右）
+ */
+static void DrawGradientBackground(CDC* pDC, const CRect& rect, COLORREF colorStart, COLORREF colorEnd, int nDirection)
+{
+	double rad = nDirection * 3.14159265358979323846 / 180.0;
+
+	// 256段階でグラデーション描画
+	int steps = 256;
+
+	for (int i = 0; i < steps; i++)
+	{
+		double ratio = (double)i / (steps - 1);
+
+		// 色を補間
+		int r = GetRValue(colorStart) + (int)((GetRValue(colorEnd) - GetRValue(colorStart)) * ratio);
+		int g = GetGValue(colorStart) + (int)((GetGValue(colorEnd) - GetGValue(colorStart)) * ratio);
+		int b = GetBValue(colorStart) + (int)((GetBValue(colorEnd) - GetBValue(colorStart)) * ratio);
+
+		COLORREF clr = RGB(r, g, b);
+		CPen pen(PS_SOLID, 1, clr);
+		CPen* pOldPen = pDC->SelectObject(&pen);
+
+		// 矩形の対角線の長さ
+		double diagonal = sqrt((double)(rect.Width() * rect.Width() + rect.Height() * rect.Height()));
+
+		// 中心点
+		int cx = rect.Width() / 2;
+		int cy = rect.Height() / 2;
+
+		// グラデーションラインの位置計算
+		double t = ratio - 0.5;
+		double dist = t * diagonal;
+
+		// 角度から垂直方向のベクトルを計算
+		double perpAngle = rad + 3.14159265358979323846 / 2.0;
+		double dx = cos(perpAngle);
+		double dy = -sin(perpAngle);
+
+		// グラデーション位置
+		double gradX = cos(rad);
+		double gradY = -sin(rad);
+
+		// グラデーションラインの中心位置
+		int lineX = cx + (int)(gradX * dist);
+		int lineY = cy + (int)(gradY * dist);
+
+		// グラデーションラインを描画
+		int x1 = lineX + (int)(dx * diagonal);
+		int y1 = lineY + (int)(dy * diagonal);
+		int x2 = lineX - (int)(dx * diagonal);
+		int y2 = lineY - (int)(dy * diagonal);
+
+		pDC->MoveTo(x1, y1);
+		pDC->LineTo(x2, y2);
+
+		pDC->SelectObject(pOldPen);
+	}
+}
+
+/**
+ * @brief ドロップシャドウ付きテキストを描画する（グローバル関数）
+ * @param pDC デバイスコンテキスト
+ * @param rect 描画領域
+ * @param strText テキスト
+ * @param nFormat 描画フォーマット
+ * @param clrText テキスト色
+ * @param clrShadow 影の色
+ * @param nShadowDirection 影の方向（0-359度）
+ * @param nShadowDistance 影の距離
+ * @param nShadowBlur 影のぼかし度（0-20）
+ * @param bShadowEnable 影を有効にするか
+ * @param clrBackground 背景色（アルファブレンド計算用）
+ */
+static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& strText, UINT nFormat,
+	COLORREF clrText, COLORREF clrShadow, int nShadowDirection, int nShadowDistance,
+	int nShadowBlur, BOOL bShadowEnable, COLORREF clrBackground)
+{
+	// ドロップシャドウ描画（方向を修正：0度=右、90度=下、180度=左、270度=上）
+	if (bShadowEnable && nShadowDistance > 0)
+	{
+		// 影の方向ベクトル計算（修正版）
+		double rad = nShadowDirection * 3.14159265358979323846 / 180.0;
+		int offsetX = (int)(nShadowDistance * cos(rad));
+		int offsetY = (int)(nShadowDistance * sin(rad)); // sin の符号を反転
+
+		// ブラー効果（複数の影を重ねて描画）
+		for (int blur = nShadowBlur; blur > 0; blur--)
+		{
+			// ブラーの強度に応じて透明度を変える
+			int alpha = 255 / (nShadowBlur + 1) * (nShadowBlur - blur + 1) / nShadowBlur;
+
+			// 影の色（アルファブレンド風）
+			int r = (GetRValue(clrShadow) * alpha + GetRValue(clrBackground) * (255 - alpha)) / 255;
+			int g = (GetGValue(clrShadow) * alpha + GetGValue(clrBackground) * (255 - alpha)) / 255;
+			int b = (GetBValue(clrShadow) * alpha + GetBValue(clrBackground) * (255 - alpha)) / 255;
+
+			pDC->SetTextColor(RGB(r, g, b));
+
+			// ブラー範囲に応じて少しずつずらして描画
+			int blurOffset = blur - nShadowBlur / 2;
+			CRect rcShadow = rect;
+			rcShadow.OffsetRect(offsetX + blurOffset, offsetY + blurOffset);
+			pDC->DrawText(strText, rcShadow, nFormat);
+		}
+	}
+
+	// 本文テキスト描画
+	pDC->SetTextColor(clrText);
+	CRect rcText = rect; // コピーを作成
+	pDC->DrawText(strText, rcText, nFormat);
+}
+
+/**
+ * @brief グラデーション付きテキストを描画する（グローバル関数）
+ * @param pDC デバイスコンテキスト
+ * @param rect 描画領域
+ * @param strText テキスト
+ * @param nFormat 描画フォーマット
+ * @param clrStart 開始色
+ * @param clrEnd 終了色
+ * @param nDirection グラデーション方向（0-359度、0=下から上、90=左から右）
+ * @param clrShadow 影の色
+ * @param nShadowDirection 影の方向
+ * @param nShadowDistance 影の距離
+ * @param nShadowBlur 影のぼかし度
+ * @param bShadowEnable 影を有効にするか
+ * @param clrBackground 背景色
+ */
+static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& strText, UINT nFormat,
+	COLORREF clrStart, COLORREF clrEnd, int nDirection,
+	COLORREF clrShadow, int nShadowDirection, int nShadowDistance, int nShadowBlur, BOOL bShadowEnable, COLORREF clrBackground)
+{
+	if (strText.IsEmpty())
+		return;
+
+	// ドロップシャドウ描画
+	if (bShadowEnable && nShadowDistance > 0)
+	{
+		double rad = nShadowDirection * 3.14159265358979323846 / 180.0;
+		int offsetX = (int)(nShadowDistance * cos(rad));
+		int offsetY = (int)(nShadowDistance * sin(rad));
+
+		for (int blur = nShadowBlur; blur > 0; blur--)
+		{
+			int alpha = 255 / (nShadowBlur + 1) * (nShadowBlur - blur + 1) / nShadowBlur;
+
+			int r = (GetRValue(clrShadow) * alpha + GetRValue(clrBackground) * (255 - alpha)) / 255;
+			int g = (GetGValue(clrShadow) * alpha + GetGValue(clrBackground) * (255 - alpha)) / 255;
+			int b = (GetBValue(clrShadow) * alpha + GetRValue(clrBackground) * (255 - alpha)) / 255;
+
+			pDC->SetTextColor(RGB(r, g, b));
+
+			int blurOffset = blur - nShadowBlur / 2;
+			CRect rcShadow = rect;
+			rcShadow.OffsetRect(offsetX + blurOffset, offsetY + blurOffset);
+			pDC->DrawText(strText, rcShadow, nFormat);
+		}
+	}
+
+	// テキストをグラデーションで描画（1ピクセル幅のクリッピング）
+	// 方向に応じてグラデーションを適用
+	// 0度=下から上、90度=左から右、180度=上から下、270度=右から左
+
+	// 方向を0-359度で正規化
+	int normalizedDir = nDirection % 360;
+	if (normalizedDir < 0) normalizedDir += 360;
+
+	int steps = 0;
+	BOOL bHorizontal = FALSE;
+
+	// 方向に応じてステップ数を決定
+	if (normalizedDir >= 0 && normalizedDir < 90)
+	{
+		// 垂直グラデーション（下から上）
+		steps = rect.Height();
+		bHorizontal = FALSE;
+	}
+	else if (normalizedDir >= 90 && normalizedDir < 180)
+	{
+		// 水平グラデーション（左から右）
+		steps = rect.Width();
+		bHorizontal = TRUE;
+	}
+	else if (normalizedDir >= 180 && normalizedDir < 270)
+	{
+		// 垂直グラデーション（上から下）
+		steps = rect.Height();
+		bHorizontal = FALSE;
+	}
+	else
+	{
+		// 水平グラデーション（右から左）
+		steps = rect.Width();
+		bHorizontal = TRUE;
+	}
+
+	if (steps <= 0) steps = 1;
+
+	for (int i = 0; i < steps; i++)
+	{
+		double ratio = (double)i / (double)(steps - 1);
+
+		// 色を補間
+		int r = GetRValue(clrStart) + (int)((GetRValue(clrEnd) - GetRValue(clrStart)) * ratio);
+		int g = GetGValue(clrStart) + (int)((GetGValue(clrEnd) - GetGValue(clrStart)) * ratio);
+		int b = GetBValue(clrStart) + (int)((GetBValue(clrEnd) - GetBValue(clrStart)) * ratio);
+
+		pDC->SetTextColor(RGB(r, g, b));
+
+		// 1ピクセル幅のクリッピング領域
+		CRgn rgn;
+		CRect rcSlice;
+
+		if (bHorizontal)
+		{
+			// 水平方向のグラデーション
+			if (normalizedDir >= 90 && normalizedDir < 180)
+			{
+				// 左から右
+				rcSlice.SetRect(rect.left + i, rect.top, rect.left + i + 1, rect.bottom);
+			}
+			else
+			{
+				// 右から左
+				rcSlice.SetRect(rect.right - i - 1, rect.top, rect.right - i, rect.bottom);
+			}
+		}
+		else
+		{
+			// 垂直方向のグラデーション
+			if (normalizedDir >= 0 && normalizedDir < 90)
+			{
+				// 下から上
+				rcSlice.SetRect(rect.left, rect.bottom - i - 1, rect.right, rect.bottom - i);
+			}
+			else
+			{
+				// 上から下
+				rcSlice.SetRect(rect.left, rect.top + i, rect.right, rect.top + i + 1);
+			}
+		}
+
+		rgn.CreateRectRgnIndirect(&rcSlice);
+		pDC->SelectClipRgn(&rgn);
+
+		CRect rcText = rect;
+		pDC->DrawText(strText, rcText, nFormat);
+
+		pDC->SelectClipRgn(NULL);
+	}
+}
+
+/**
  * @brief ハート型の図形を描画する
  */
 static void DrawHeart(CDC* pDC, CRect rc, COLORREF color)
@@ -386,11 +644,11 @@ static void DrawHanamaru(CDC* pDC, CRect rc, COLORREF colorCenter, COLORREF colo
 	CRect rcInner(cx - innerRadius, cy - innerRadius, cx + innerRadius, cy + innerRadius);
 	pDC->Ellipse(&rcInner);
 
-	// 中心のさらに小さな丸(黄色でキラキラ)
-	CBrush brYellow(RGB(255, 255, 100));
-	CPen penYellow(PS_SOLID, 1, RGB(255, 215, 0));
-	pDC->SelectObject(&brYellow);
-	pDC->SelectObject(&penYellow);
+	// 中心のさらに小さな丸(オレンジで花の芯らしく)
+	CBrush brOrange(RGB(255, 140, 80));
+	CPen penOrange(PS_SOLID, 1, RGB(255, 100, 50));
+	pDC->SelectObject(&brOrange);
+	pDC->SelectObject(&penOrange);
 
 	int smallRadius = radius / 6;
 	CRect rcSmall(cx - smallRadius, cy - smallRadius, cx + smallRadius, cy + smallRadius);
@@ -399,17 +657,17 @@ static void DrawHanamaru(CDC* pDC, CRect rc, COLORREF colorCenter, COLORREF colo
 	pDC->SelectObject(pOldBr);
 	pDC->SelectObject(pOldPen);
 
-	// キラキラ星を四隅と中間に配置 ✨✨✨
-	DrawStar(pDC, cx - radius * 8 / 10, cy - radius * 8 / 10, 2, RGB(255, 215, 0));
-	DrawStar(pDC, cx + radius * 8 / 10, cy - radius * 8 / 10, 2, RGB(255, 215, 0));
-	DrawStar(pDC, cx - radius * 8 / 10, cy + radius * 8 / 10, 2, RGB(255, 215, 0));
-	DrawStar(pDC, cx + radius * 8 / 10, cy + radius * 8 / 10, 2, RGB(255, 215, 0));
+	// キラキラ星を四隅に配置（ピンクで統一）
+	DrawStar(pDC, cx - radius * 8 / 10, cy - radius * 8 / 10, 2, RGB(255, 140, 180));
+	DrawStar(pDC, cx + radius * 8 / 10, cy - radius * 8 / 10, 2, RGB(255, 140, 180));
+	DrawStar(pDC, cx - radius * 8 / 10, cy + radius * 8 / 10, 2, RGB(255, 140, 180));
+	DrawStar(pDC, cx + radius * 8 / 10, cy + radius * 8 / 10, 2, RGB(255, 140, 180));
 
-	// 上下左右にも小さな星
-	DrawStar(pDC, cx, cy - radius * 9 / 10, 1, RGB(255, 240, 100));
-	DrawStar(pDC, cx, cy + radius * 9 / 10, 1, RGB(255, 240, 100));
-	DrawStar(pDC, cx - radius * 9 / 10, cy, 1, RGB(255, 240, 100));
-	DrawStar(pDC, cx + radius * 9 / 10, cy, 1, RGB(255, 240, 100));
+	// 上下左右にも小さな星（ピンク）
+	DrawStar(pDC, cx, cy - radius * 9 / 10, 1, RGB(255, 180, 200));
+	DrawStar(pDC, cx, cy + radius * 9 / 10, 1, RGB(255, 180, 200));
+	DrawStar(pDC, cx - radius * 9 / 10, cy, 1, RGB(255, 180, 200));
+	DrawStar(pDC, cx + radius * 9 / 10, cy, 1, RGB(255, 180, 200));
 }
 
 /**
@@ -441,7 +699,6 @@ static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPatternA, BOOL bPushed)
 
 	for (const auto& c : corners)
 	{
-		// ベジェ曲線で蔓を描画
 		CPoint pts[4];
 		pts[0] = CPoint(c.x, c.y + (12 * c.dy));
 		pts[1] = CPoint(c.x + (4 * c.dx), c.y + (4 * c.dy));
@@ -456,13 +713,11 @@ static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPatternA, BOOL bPushed)
 		pDC->SelectObject(&brFlower);
 		pDC->SelectObject(GetStockObject(NULL_PEN));
 
-		// 4枚の花弁
 		pDC->Ellipse(fx - r, fy - r * 2, fx + r, fy);
 		pDC->Ellipse(fx - r, fy, fx + r, fy + r * 2);
 		pDC->Ellipse(fx - r * 2, fy - r, fx, fy + r);
 		pDC->Ellipse(fx, fy - r, fx + r * 2, fy + r);
 
-		// 中心
 		pDC->SelectObject(&brCenter);
 		pDC->Ellipse(fx - 1, fy - 1, fx + 1, fy + 1);
 		pDC->SelectObject(&penVine);
@@ -473,8 +728,17 @@ static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPatternA, BOOL bPushed)
 }
 
 /**
- * @brief テキストを自動縮小しながら描画する(中央揃え)
+ * @brief グラデーション背景を描画（グローバル関数）
+ * @param pDC 描画先DC
+ * @param rect 描画範囲
+ * @param colorStart 開始色
+ * @param colorEnd 終了色
+ * @param nDirection 方向（0-359度、0=下から上、90=左から右）
  */
+
+ /**
+  * @brief テキストを自動縮小しながら描画する(中央揃え)
+  */
 static void DrawSmartText(CDC* pDC, CRect rect, CString strText, BOOL bDisabled, BOOL bPushed)
 {
 	if (strText.IsEmpty()) return;
@@ -745,6 +1009,15 @@ BEGIN_MESSAGE_MAP(CCustomStatic, CStatic)
 END_MESSAGE_MAP()
 
 CCustomStatic::CCustomStatic()
+	: m_clrGradStart(RGB(255, 255, 255))
+	, m_clrGradEnd(RGB(255, 255, 255))
+	, m_nGradDirection(0)
+	, m_bGradEnable(FALSE)
+	, m_clrShadow(RGB(0, 0, 0))
+	, m_nShadowDirection(135)
+	, m_nShadowDistance(2)
+	, m_nShadowBlur(3)
+	, m_bShadowEnable(FALSE)
 {
 }
 
@@ -752,6 +1025,48 @@ CCustomStatic::~CCustomStatic()
 {
 	if (m_font.GetSafeHandle())
 		m_font.DeleteObject();
+}
+
+void CCustomStatic::SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDirection, BOOL bEnable)
+{
+	m_clrGradStart = colorStart;
+	m_clrGradEnd = colorEnd;
+	m_nGradDirection = nDirection % 360; // 0-359に正規化
+	if (m_nGradDirection < 0) m_nGradDirection += 360;
+	m_bGradEnable = bEnable;
+
+	if (GetSafeHwnd())
+		Invalidate();
+}
+
+void CCustomStatic::GetGradation(COLORREF* pColorStart, COLORREF* pColorEnd, int* pDirection, BOOL* pbEnable) const
+{
+	if (pColorStart) *pColorStart = m_clrGradStart;
+	if (pColorEnd) *pColorEnd = m_clrGradEnd;
+	if (pDirection) *pDirection = m_nGradDirection;
+	if (pbEnable) *pbEnable = m_bGradEnable;
+}
+
+void CCustomStatic::SetDropShadow(COLORREF color, int nDirection, int nDistance, int nBlur, BOOL bEnable)
+{
+	m_clrShadow = color;
+	m_nShadowDirection = nDirection % 360;
+	if (m_nShadowDirection < 0) m_nShadowDirection += 360;
+	m_nShadowDistance = max(0, nDistance);
+	m_nShadowBlur = max(0, min(20, nBlur)); // 0-20の範囲に制限
+	m_bShadowEnable = bEnable;
+
+	if (GetSafeHwnd())
+		Invalidate();
+}
+
+void CCustomStatic::GetDropShadow(COLORREF* pColor, int* pDirection, int* pDistance, int* pBlur, BOOL* pbEnable) const
+{
+	if (pColor) *pColor = m_clrShadow;
+	if (pDirection) *pDirection = m_nShadowDirection;
+	if (pDistance) *pDistance = m_nShadowDistance;
+	if (pBlur) *pBlur = m_nShadowBlur;
+	if (pbEnable) *pbEnable = m_bShadowEnable;
 }
 
 void CCustomStatic::SetFont(CFont* pFont, BOOL bRedraw)
@@ -788,16 +1103,21 @@ void CCustomStatic::OnPaint()
 	CRect rect;
 	GetClientRect(&rect);
 
+	// 背景は常に通常色
 	dc.FillSolidRect(&rect, COLOR_DIALOG_BG);
 
 	CString strText;
 	GetWindowText(strText);
 
-	CFont* pOldFont = dc.SelectObject(GetFont());
-	dc.SetTextColor(RGB(0, 0, 0));
+	if (strText.IsEmpty())
+		return;
+
+	CFont* pCurrentFont = GetFont();
+	CFont* pOldFont = dc.SelectObject(pCurrentFont);
+	dc.SetBkMode(TRANSPARENT);
 
 	DWORD dwStyle = GetStyle();
-	UINT nFormat = DT_VCENTER | DT_WORDBREAK;
+	UINT nFormat = DT_VCENTER | DT_SINGLELINE;
 
 	if (dwStyle & SS_CENTER)
 		nFormat |= DT_CENTER;
@@ -806,10 +1126,50 @@ void CCustomStatic::OnPaint()
 	else
 		nFormat |= DT_LEFT;
 
-	if (dwStyle & SS_CENTERIMAGE)
-		nFormat = (nFormat & ~DT_WORDBREAK) | DT_SINGLELINE;
+	// テキストが横幅に収まるかチェック＆フォント縮小
+	CSize szText = dc.GetTextExtent(strText);
+	CFont fontScaled;
 
-	DrawSmartText2(&dc, rect, strText, nFormat, FALSE, FALSE);
+	if (szText.cx > rect.Width())
+	{
+		LOGFONT lf;
+		pCurrentFont->GetLogFont(&lf);
+		int nTargetHeight = abs(lf.lfHeight);
+
+		while (nTargetHeight > 6 && szText.cx > rect.Width())
+		{
+			nTargetHeight--;
+			lf.lfHeight = -nTargetHeight;
+
+			if (fontScaled.GetSafeHandle())
+				fontScaled.DeleteObject();
+
+			fontScaled.CreateFontIndirect(&lf);
+			dc.SelectObject(&fontScaled);
+			szText = dc.GetTextExtent(strText);
+		}
+	}
+
+	// グラデーション＆ドロップシャドウ付きテキスト描画
+	if (m_bGradEnable)
+	{
+		// テキストにグラデーション適用
+		DrawTextWithGradient(&dc, rect, strText, nFormat,
+			m_clrGradStart, m_clrGradEnd, m_nGradDirection,
+			m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+			m_bShadowEnable, COLOR_DIALOG_BG);
+	}
+	else
+	{
+		// 通常のテキスト（ドロップシャドウのみ）
+		DrawTextWithShadow(&dc, rect, strText, nFormat, RGB(0, 0, 0),
+			m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+			m_bShadowEnable, COLOR_DIALOG_BG);
+	}
+
+	if (fontScaled.GetSafeHandle())
+		fontScaled.DeleteObject();
+
 	dc.SelectObject(pOldFont);
 }
 
@@ -1435,6 +1795,15 @@ END_MESSAGE_MAP()
 
 CCustomStandardButton::CCustomStandardButton()
 	: m_bMouseOver(FALSE)
+	, m_clrGradStart(RGB(255, 255, 255))
+	, m_clrGradEnd(RGB(255, 255, 255))
+	, m_nGradDirection(0)
+	, m_bGradEnable(FALSE)
+	, m_clrShadow(RGB(0, 0, 0))
+	, m_nShadowDirection(135)
+	, m_nShadowDistance(2)
+	, m_nShadowBlur(3)
+	, m_bShadowEnable(FALSE)
 {
 	m_brBackground.CreateSolidBrush(COLOR_BUTTON_BG);
 }
@@ -1443,6 +1812,48 @@ CCustomStandardButton::~CCustomStandardButton()
 {
 	if (m_brBackground.GetSafeHandle())
 		m_brBackground.DeleteObject();
+}
+
+void CCustomStandardButton::SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDirection, BOOL bEnable)
+{
+	m_clrGradStart = colorStart;
+	m_clrGradEnd = colorEnd;
+	m_nGradDirection = nDirection % 360;
+	if (m_nGradDirection < 0) m_nGradDirection += 360;
+	m_bGradEnable = bEnable;
+
+	if (GetSafeHwnd())
+		Invalidate(FALSE);
+}
+
+void CCustomStandardButton::GetGradation(COLORREF* pColorStart, COLORREF* pColorEnd, int* pDirection, BOOL* pbEnable) const
+{
+	if (pColorStart) *pColorStart = m_clrGradStart;
+	if (pColorEnd) *pColorEnd = m_clrGradEnd;
+	if (pDirection) *pDirection = m_nGradDirection;
+	if (pbEnable) *pbEnable = m_bGradEnable;
+}
+
+void CCustomStandardButton::SetDropShadow(COLORREF color, int nDirection, int nDistance, int nBlur, BOOL bEnable)
+{
+	m_clrShadow = color;
+	m_nShadowDirection = nDirection % 360;
+	if (m_nShadowDirection < 0) m_nShadowDirection += 360;
+	m_nShadowDistance = max(0, nDistance);
+	m_nShadowBlur = max(0, min(20, nBlur));
+	m_bShadowEnable = bEnable;
+
+	if (GetSafeHwnd())
+		Invalidate(FALSE);
+}
+
+void CCustomStandardButton::GetDropShadow(COLORREF* pColor, int* pDirection, int* pDistance, int* pBlur, BOOL* pbEnable) const
+{
+	if (pColor) *pColor = m_clrShadow;
+	if (pDirection) *pDirection = m_nShadowDirection;
+	if (pDistance) *pDistance = m_nShadowDistance;
+	if (pBlur) *pBlur = m_nShadowBlur;
+	if (pbEnable) *pbEnable = m_bShadowEnable;
 }
 
 void CCustomStandardButton::PreSubclassWindow()
@@ -1484,7 +1895,16 @@ void CCustomStandardButton::OnPaint()
 	COLORREF clrBg = bDisabled ? RGB(200, 200, 200) :
 		(bPushed ? COLOR_BUTTON_PUSHED :
 			(m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
-	memDC.FillSolidRect(&rect, clrBg);
+
+	// グラデーション背景
+	if (m_bGradEnable && !bDisabled)
+	{
+		DrawGradientBackground(&memDC, rect, m_clrGradStart, m_clrGradEnd, m_nGradDirection);
+	}
+	else
+	{
+		memDC.FillSolidRect(&rect, clrBg);
+	}
 
 	// 華やかな装飾（花びらとキラキラで控えめに）
 	if (!bDisabled)
@@ -1698,15 +2118,64 @@ BOOL CCustomSliderCtrl::OnEraseBkgnd(CDC* p)
 
 LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM w, LPARAM l)
 {
-	LRESULT result = Default();
-	// マウス移動時は最小限の再描画
-	Invalidate(FALSE);
-	return result;
+	// Mode 1, 2 のみ中央点スナップ機能を有効化
+	if (m_nMode == 1 || m_nMode == 2)
+	{
+		int nMin, nMax;
+		GetRange(nMin, nMax);
+		int nCenter = (nMin + nMax) / 2;
+		int nOldPos = CSliderCtrl::GetPos(); // Default()呼び出し前の位置
+
+		LRESULT result = Default();
+
+		int nNewPos = CSliderCtrl::GetPos(); // Default()呼び出し後の位置
+
+		// 中央点の±2以内なら中央点にスナップ（ただし、中央点から離れる方向は除く）
+		int nSnapRange = 2;
+		if (abs(nNewPos - nCenter) <= nSnapRange)
+		{
+			// 中央点にいた場合は、離れる方向へは自由に移動させる
+			if (nOldPos != nCenter)
+			{
+				// 中央点以外から中央に近づいた → スナップ
+				CSliderCtrl::SetPos(nCenter);
+				GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, nCenter), (LPARAM)m_hWnd);
+			}
+			// nOldPos == nCenter の場合はスナップしない（98, 99, 101, 102に自由に移動可能）
+		}
+
+		Invalidate(FALSE);
+		return result;
+	}
+	else
+	{
+		LRESULT result = Default();
+		Invalidate(FALSE);
+		return result;
+	}
 }
 
 LRESULT CCustomSliderCtrl::OnLButtonDownMsg(WPARAM w, LPARAM l)
 {
 	LRESULT r = Default();
+
+	// Mode 1, 2 のみ中央点スナップ機能を有効化
+	if (m_nMode == 1 || m_nMode == 2)
+	{
+		int nMin, nMax;
+		GetRange(nMin, nMax);
+		int nCenter = (nMin + nMax) / 2;
+		int nPos = CSliderCtrl::GetPos();
+
+		// クリック時は常にスナップ（クリックは新規位置への移動なので）
+		int nSnapRange = 2;
+		if (abs(nPos - nCenter) <= nSnapRange)
+		{
+			CSliderCtrl::SetPos(nCenter);
+			GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, nCenter), (LPARAM)m_hWnd);
+		}
+	}
+
 	Invalidate(FALSE);
 	return r;
 }
@@ -1714,6 +2183,24 @@ LRESULT CCustomSliderCtrl::OnLButtonDownMsg(WPARAM w, LPARAM l)
 LRESULT CCustomSliderCtrl::OnLButtonUpMsg(WPARAM w, LPARAM l)
 {
 	LRESULT r = Default();
+
+	// Mode 1, 2 のみ中央点スナップ機能を有効化
+	if (m_nMode == 1 || m_nMode == 2)
+	{
+		int nMin, nMax;
+		GetRange(nMin, nMax);
+		int nCenter = (nMin + nMax) / 2;
+		int nPos = CSliderCtrl::GetPos();
+
+		// ドラッグ終了時は常にスナップ（最終位置の調整）
+		int nSnapRange = 2;
+		if (abs(nPos - nCenter) <= nSnapRange)
+		{
+			CSliderCtrl::SetPos(nCenter);
+			GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, nCenter), (LPARAM)m_hWnd);
+		}
+	}
+
 	Invalidate(FALSE);
 	return r;
 }
@@ -1749,7 +2236,7 @@ void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMa
 
 	if (!bVert)
 	{
-		int nMarginX = 30;
+		int nMarginX = 12; // Mode 1, 2と統一
 		int nTrackL = rect.left + nMarginX;
 		int nTrackR = rect.right - nMarginX;
 		int nTrackW = nTrackR - nTrackL;
@@ -1797,7 +2284,7 @@ void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMa
 	else
 	{
 		// 垂直スライダー（同様の処理）
-		int nMarginY = 30;
+		int nMarginY = 12; // Mode 1, 2と統一
 		int nTrackT = rect.top + nMarginY;
 		int nTrackB = rect.bottom - nMarginY;
 		int nTrackH = nTrackB - nTrackT;
@@ -2207,6 +2694,11 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
 {
 	CRect r;
 	GetClientRect(&r);
+
+	// ゼロ除算防止：範囲が不正な場合は描画しない
+	if (m_nMax <= m_nMin)
+		return;
+
 	int cy = r.Height() / 2;
 	int cur = m_bDragging ? m_nVisualPos : m_nLogicalPos;
 
@@ -2249,6 +2741,9 @@ int CCustomRangeSliderCtrl::ValueToPixel(int v) const
 
 	if (w <= 0) return 14;
 
+	// ゼロ除算防止
+	if (m_nMax <= m_nMin) return 14;
+
 	int val = max(m_nMin, min(m_nMax, v));
 	return 14 + (int)((long long)(val - m_nMin) * w / (m_nMax - m_nMin));
 }
@@ -2260,6 +2755,9 @@ int CCustomRangeSliderCtrl::PixelToValue(int x) const
 	int w = r.Width() - 28;
 
 	if (w <= 0) return m_nMin;
+
+	// ゼロ除算防止
+	if (m_nMax <= m_nMin) return m_nMin;
 
 	int px = max(14, min(r.Width() - 14, x));
 	return m_nMin + (int)((double)(px - 14) / w * (m_nMax - m_nMin) + 0.5);
@@ -2625,7 +3123,7 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
 	if (s.cx > 0)
 	{
 		pDC->LineTo(rect.left + 6, nT);
-		pDC->MoveTo(rect.left + s.cx + 30, nT); // 王冠+リボン分のスペース
+		pDC->MoveTo(rect.left + s.cx + 16, nT); // リボン分のスペース
 	}
 
 	pDC->LineTo(rect.right - 2, nT);
@@ -2641,7 +3139,7 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
 	if (s.cx > 0)
 	{
 		pDC->LineTo(rect.left + 6 + offset, nT + offset);
-		pDC->MoveTo(rect.left + s.cx + 30, nT + offset);
+		pDC->MoveTo(rect.left + s.cx + 16, nT + offset);
 	}
 
 	pDC->LineTo(rect.right - offset, nT + offset);
@@ -2649,14 +3147,18 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
 	pDC->LineTo(rect.left + offset, rect.bottom - offset);
 	pDC->LineTo(rect.left + offset, nT + offset);
 
-	// 四隅に大きめのリボン装飾
-	int ribbonSize = 10;
-	DrawBigRibbon(pDC, rect.left + ribbonSize + 4, nT + ribbonSize + 4, ribbonSize, RGB(255, 182, 193));
-	DrawBigRibbon(pDC, rect.right - ribbonSize - 4, nT + ribbonSize + 4, ribbonSize, RGB(255, 182, 193));
-	DrawBigRibbon(pDC, rect.left + ribbonSize + 4, rect.bottom - ribbonSize - 4, ribbonSize, RGB(255, 182, 193));
-	DrawBigRibbon(pDC, rect.right - ribbonSize - 4, rect.bottom - ribbonSize - 4, ribbonSize, RGB(255, 182, 193));
+	// 四隅に小さめのリボン装飾（枠線の上に配置）
+	int ribbonSize = 6; // より小さく
+	// 左上
+	DrawRibbon(pDC, CRect(rect.left + 2, nT - 8, rect.left + 14, nT + 4), RGB(255, 182, 193));
+	// 右上
+	DrawRibbon(pDC, CRect(rect.right - 14, nT - 8, rect.right - 2, nT + 4), RGB(255, 182, 193));
+	// 左下
+	DrawRibbon(pDC, CRect(rect.left + 2, rect.bottom - 12, rect.left + 14, rect.bottom), RGB(255, 182, 193));
+	// 右下
+	DrawRibbon(pDC, CRect(rect.right - 14, rect.bottom - 12, rect.right - 2, rect.bottom), RGB(255, 182, 193));
 
-	// タイトルテキスト+王冠+リボン装飾
+	// タイトルテキスト
 	if (!t.IsEmpty())
 	{
 		CRect rcT(rect.left + 8, nT - s.cy / 2, rect.left + 8 + s.cx + 4, nT + s.cy / 2);
@@ -2664,18 +3166,6 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
 		pDC->SetBkMode(TRANSPARENT);
 		pDC->SetTextColor(RGB(0, 0, 0));
 		pDC->DrawText(t, &rcT, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-
-		// タイトルの左に王冠
-		int crownSize = s.cy / 2 - 2;
-		DrawCrown(pDC, rect.left + 4, nT, crownSize, RGB(255, 215, 0));
-
-		// タイトルの右にリボン装飾
-		CRect rcRibbon(rcT.right + 2, nT - 5, rcT.right + 12, nT + 5);
-		DrawRibbon(pDC, rcRibbon, RGB(255, 182, 193));
-
-		// タイトル周りにキラキラ星
-		DrawStar(pDC, rcT.right + 18, nT - 6, 2, RGB(255, 215, 0));
-		DrawStar(pDC, rcT.right + 18, nT + 6, 2, RGB(255, 215, 0));
 	}
 
 	pDC->SelectObject(pOldF);

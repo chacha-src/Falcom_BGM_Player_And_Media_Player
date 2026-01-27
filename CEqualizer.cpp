@@ -187,7 +187,8 @@ BOOL CEqualizer::OnInitDialog()
 
 	// 4. コントロールにフォントを適用します
 	m_t.SetFont(&m_newFont);
-
+	m_t.SetGradation(RGB(0, 0, 0), COLOR_RANGE_SELECTION, 135, TRUE);
+	m_t.SetDropShadow(RGB(0,0,0), 45, 15, 6, TRUE);
 
 	m_s0.SetRange(0, 200);
 	m_s1.SetRange(0, 200);
