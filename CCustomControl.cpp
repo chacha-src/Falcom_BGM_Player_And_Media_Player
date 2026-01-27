@@ -1312,6 +1312,8 @@ BEGIN_MESSAGE_MAP(CCustomComboBox, CComboBox)
 END_MESSAGE_MAP()
 
 CCustomComboBox::CCustomComboBox()
+	: m_clrLabelText(RGB(255, 255, 255))      // デフォルト：黒
+	, m_clrLabelBg(RGB(80, 80, 150))      // デフォルト：濃い紫
 {
 	m_brBackground.CreateSolidBrush(COLOR_COMBO_BG);
 }
@@ -1322,10 +1324,171 @@ CCustomComboBox::~CCustomComboBox()
 		m_brBackground.DeleteObject();
 }
 
+int CCustomComboBox::AddString(LPCTSTR lpszString, BOOL bDisabled)
+{
+	int nIndex = CComboBox::AddString(lpszString);
+
+	if (nIndex >= 0)
+	{
+		// リストのサイズを調整
+		if (nIndex >= (int)m_vDisabledItems.size())
+			m_vDisabledItems.resize(nIndex + 1, FALSE);
+
+		m_vDisabledItems[nIndex] = bDisabled;
+
+		// デバッグ出力
+		TRACE(_T("AddString: index=%d, disabled=%d, text=%s\n"), nIndex, bDisabled, lpszString);
+	}
+
+	return nIndex;
+}
+
+int CCustomComboBox::GetCurSel() const
+{
+	// 実際の項目番号をそのまま返す（既存コードとの互換性）
+	return CComboBox::GetCurSel();
+}
+
+int CCustomComboBox::SetCurSel(int nPhysicalIndex)
+{
+	// 実際の項目番号で直接設定（既存コードとの互換性）
+	if (nPhysicalIndex < 0)
+		return CComboBox::SetCurSel(-1);
+
+	int nTotal = CComboBox::GetCount();
+	if (nPhysicalIndex >= nTotal)
+		return CB_ERR;
+
+	// ラベル項目の場合は次の選択可能な項目を探す
+	if (nPhysicalIndex < (int)m_vDisabledItems.size() && m_vDisabledItems[nPhysicalIndex])
+	{
+		// 下方向に検索
+		for (int i = nPhysicalIndex + 1; i < nTotal; i++)
+		{
+			BOOL bDisabled = (i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]);
+			if (!bDisabled)
+			{
+				return CComboBox::SetCurSel(i);
+			}
+		}
+
+		// 上方向に検索
+		for (int i = nPhysicalIndex - 1; i >= 0; i--)
+		{
+			BOOL bDisabled = (i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]);
+			if (!bDisabled)
+			{
+				return CComboBox::SetCurSel(i);
+			}
+		}
+
+		// 選択可能な項目が見つからない
+		return CB_ERR;
+	}
+
+	return CComboBox::SetCurSel(nPhysicalIndex);
+}
+
+int CCustomComboBox::GetCurSelLogical() const
+{
+	int nPhysical = CComboBox::GetCurSel();
+	if (nPhysical < 0)
+		return -1;
+
+	// 実際の項目番号を選択可能な項目の番号に変換
+	return PhysicalToLogical(nPhysical);
+}
+
+int CCustomComboBox::SetCurSelLogical(int nLogicalIndex)
+{
+	if (nLogicalIndex < 0)
+		return CComboBox::SetCurSel(-1);
+
+	// 選択可能な項目の番号を実際の項目番号に変換
+	int nPhysical = LogicalToPhysical(nLogicalIndex);
+
+	if (nPhysical < 0)
+		return CB_ERR;
+
+	return CComboBox::SetCurSel(nPhysical);
+}
+
+void CCustomComboBox::SetLabelColor(COLORREF clrText, COLORREF clrBackground)
+{
+	m_clrLabelText = clrText;
+	m_clrLabelBg = clrBackground;
+
+	if (GetSafeHwnd())
+		Invalidate();
+}
+
+void CCustomComboBox::GetLabelColor(COLORREF* pClrText, COLORREF* pClrBackground) const
+{
+	if (pClrText) *pClrText = m_clrLabelText;
+	if (pClrBackground) *pClrBackground = m_clrLabelBg;
+}
+
+int CCustomComboBox::LogicalToPhysical(int nLogical) const
+{
+	// 選択可能な項目の番号（0,1,2...）を実際の項目番号に変換
+	int nCount = 0;
+	int nTotal = CComboBox::GetCount();
+
+	for (int i = 0; i < nTotal; i++)
+	{
+		BOOL bDisabled = (i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]);
+
+		if (!bDisabled) // 選択可能な項目
+		{
+			if (nCount == nLogical)
+				return i;
+			nCount++;
+		}
+	}
+
+	return -1;
+}
+
+int CCustomComboBox::PhysicalToLogical(int nPhysical) const
+{
+	// 実際の項目番号を選択可能な項目の番号に変換
+	int nTotal = CComboBox::GetCount();
+
+	if (nPhysical < 0 || nPhysical >= nTotal)
+		return -1;
+
+	// nPhysical自体が選択不可の場合
+	if (nPhysical < (int)m_vDisabledItems.size() && m_vDisabledItems[nPhysical])
+		return -1;
+
+	int nCount = 0;
+
+	for (int i = 0; i < nPhysical; i++)
+	{
+		BOOL bDisabled = (i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]);
+
+		if (!bDisabled) // 選択可能な項目
+			nCount++;
+	}
+
+	return nCount;
+}
+
 void CCustomComboBox::PreSubclassWindow()
 {
 	CComboBox::PreSubclassWindow();
+
+	// 既存のスタイルを確認してOWNERDRAWを強制設定
+	DWORD dwStyle = GetStyle();
+
+	// CBS_SIMPLEやCBS_DROPDOWNなどを保持しながらOWNERDRAWを追加
+	dwStyle &= ~(CBS_OWNERDRAWVARIABLE); // 可変サイズは削除
+	dwStyle |= CBS_OWNERDRAWFIXED | CBS_HASSTRINGS; // 固定サイズで文字列保持
+
 	ModifyStyle(0, CBS_OWNERDRAWFIXED | CBS_HASSTRINGS);
+
+	// 念のため直接スタイルを設定
+	SetWindowLong(GetSafeHwnd(), GWL_STYLE, dwStyle);
 }
 
 HBRUSH CCustomComboBox::CtlColor(CDC* pDC, UINT nCtlColor)
@@ -1396,11 +1559,11 @@ void CCustomComboBox::OnPaint()
 	// キラキラ星を追加
 	DrawStar(&memDC, rect.right - 8, rect.top + 8, 3, RGB(255, 215, 0));
 
-	// 選択中のテキスト
-	int nSel = GetCurSel();
+	// 選択中のテキスト（実際の項目番号を取得）
+	int nPhysicalSel = CComboBox::GetCurSel(); // 基底クラスのGetCurSelを直接呼ぶ
 	CString strText;
-	if (nSel != CB_ERR)
-		GetLBText(nSel, strText);
+	if (nPhysicalSel != CB_ERR)
+		GetLBText(nPhysicalSel, strText);
 
 	memDC.SetTextColor(RGB(0, 0, 0));
 	CFont* pOldFont = memDC.SelectObject(GetFont());
@@ -1409,8 +1572,9 @@ void CCustomComboBox::OnPaint()
 	rcText.left += 12;
 	rcText.right = rcBtn.left - 4;
 
-	// 選択項目には王冠マーク
-	if (nSel != CB_ERR)
+	// 選択項目には王冠マーク（ラベル項目でない場合のみ）
+	BOOL bIsLabel = (nPhysicalSel >= 0 && nPhysicalSel < (int)m_vDisabledItems.size() && m_vDisabledItems[nPhysicalSel]);
+	if (nPhysicalSel != CB_ERR && !bIsLabel)
 	{
 		int crownSize = (rcText.Height() - 8) / 2;
 		DrawCrown(&memDC, rcText.left + crownSize, rcText.Height() / 2, crownSize, RGB(255, 215, 0));
@@ -1439,58 +1603,101 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 
 	BOOL bSel = (lp->itemState & ODS_SELECTED);
 
-	// 背景（ストライプ）
+	// ラベル項目（選択不可）かどうかをチェック
+	BOOL bDisabled = FALSE;
+	if (lp->itemID < (UINT)m_vDisabledItems.size())
+	{
+		bDisabled = m_vDisabledItems[lp->itemID];
+	}
+
+	// 背景
 	COLORREF clrBg;
-	if (bSel)
+	if (bDisabled)
+	{
+		// ラベル項目は常に特別な背景色
+		clrBg = m_clrLabelBg;
+	}
+	else if (bSel)
+	{
 		clrBg = COLOR_SEL_BG;
+	}
 	else if (lp->itemID % 2 == 0)
+	{
 		clrBg = COLOR_COMBO_BG;
+	}
 	else
+	{
 		clrBg = RGB(255, 232, 220); // ストライプ色
+	}
 
 	pDC->FillSolidRect(&rect, clrBg);
 
-	// 各アイテムに小さなアイコン（花、星、ハート、リボン）
-	int iconType = lp->itemID % 4;
-	int iconSize = 8;
-	int iconX = rect.left + 6;
-	int iconY = rect.top + (rect.Height() - iconSize) / 2;
+	// ラベル項目の場合はアイコンを描画しない、それ以外は各アイテムに小さなアイコン
+	if (!bDisabled)
+	{
+		int iconType = lp->itemID % 4;
+		int iconSize = 8;
+		int iconX = rect.left + 6;
+		int iconY = rect.top + (rect.Height() - iconSize) / 2;
 
-	switch (iconType)
-	{
-	case 0:
-		DrawFlower(pDC, iconX + iconSize / 2, iconY + iconSize / 2, iconSize / 2, RGB(255, 200, 220));
-		break;
-	case 1:
-		DrawStar(pDC, iconX + iconSize / 2, iconY + iconSize / 2, iconSize / 3, RGB(255, 215, 0));
-		break;
-	case 2:
-	{
-		CRect rcHeart(iconX, iconY, iconX + iconSize, iconY + iconSize);
-		DrawHeart(pDC, rcHeart, COLOR_HEART);
-		break;
-	}
-	case 3:
-	{
-		CRect rcRibbon(iconX, iconY, iconX + iconSize, iconY + iconSize);
-		DrawRibbon(pDC, rcRibbon, RGB(255, 182, 193));
-		break;
-	}
+		switch (iconType)
+		{
+		case 0:
+			DrawFlower(pDC, iconX + iconSize / 2, iconY + iconSize / 2, iconSize / 2, RGB(255, 200, 220));
+			break;
+		case 1:
+			DrawStar(pDC, iconX + iconSize / 2, iconY + iconSize / 2, iconSize / 3, RGB(255, 215, 0));
+			break;
+		case 2:
+		{
+			CRect rcHeart(iconX, iconY, iconX + iconSize, iconY + iconSize);
+			DrawHeart(pDC, rcHeart, COLOR_HEART);
+			break;
+		}
+		case 3:
+		{
+			CRect rcRibbon(iconX, iconY, iconX + iconSize, iconY + iconSize);
+			DrawRibbon(pDC, rcRibbon, RGB(255, 182, 193));
+			break;
+		}
+		}
 	}
 
 	// テキスト
 	CString strText;
-	GetLBText(lp->itemID, strText);
-	pDC->SetTextColor(RGB(0, 0, 0));
+	GetLBText(lp->itemID, strText);	
+
+	CFont* pFont = GetFont();
+	LOGFONT lf;
+	pFont->GetLogFont(&lf);
+	lf.lfWeight = FW_BOLD;
+
+	CFont fontBold;
+	fontBold.CreateFontIndirect(&lf);
+	CFont* pOldFont = pDC->SelectObject(&fontBold);
+
+	// テキスト色
+	if (bDisabled)
+	{
+		pDC->SetTextColor(m_clrLabelText);
+	}
+	else
+	{
+		pDC->SetTextColor(RGB(0, 0, 0));
+	}
+
 	pDC->SetBkMode(TRANSPARENT);
 
 	CRect rcText = rect;
-	rcText.left += 20; // アイコン分のスペース
+	if (!bDisabled)
+		rcText.left += 20; // アイコン分のスペース
+	else
+		rcText.left += 6; // ラベルは左寄せ
 
 	pDC->DrawText(strText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-	// 選択項目には王冠
-	if (bSel)
+	// 選択項目には王冠（ラベルには表示しない）
+	if (bSel && !bDisabled)
 	{
 		int crownSize = 6;
 		DrawCrown(pDC, rect.right - crownSize - 8, rect.top + rect.Height() / 2, crownSize, RGB(255, 215, 0));
@@ -1511,6 +1718,64 @@ void CCustomComboBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
 void CCustomComboBox::OnDropdown()
 {
 	UpdateDropDownWidth();
+}
+
+BOOL CCustomComboBox::OnCommand(WPARAM wParam, LPARAM lParam)
+{
+	WORD wNotifyCode = HIWORD(wParam);
+
+	// CBN_SELCHANGE または CBN_SELENDOK の場合
+	if (wNotifyCode == CBN_SELCHANGE || wNotifyCode == CBN_SELENDOK)
+	{
+		// 選択された項目がラベル（選択不可）の場合、スキップする
+		int nCurSel = CComboBox::GetCurSel();
+
+		if (nCurSel >= 0)
+		{
+			// ラベル項目かチェック
+			BOOL bDisabled = (nCurSel < (int)m_vDisabledItems.size() && m_vDisabledItems[nCurSel]);
+
+			if (bDisabled)
+			{
+				// ラベル項目が選択されたので、次の選択可能な項目を探す
+				int nCount = CComboBox::GetCount();
+
+				// 下方向に検索
+				for (int i = nCurSel + 1; i < nCount; i++)
+				{
+					BOOL bDisabledItem = (i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]);
+					if (!bDisabledItem)
+					{
+						CComboBox::SetCurSel(i);
+						PostMessage(CB_SHOWDROPDOWN, FALSE, 0);
+						// 親に通知を送る
+						return CComboBox::OnCommand(wParam, lParam);
+					}
+				}
+
+				// 上方向に検索
+				for (int i = nCurSel - 1; i >= 0; i--)
+				{
+					BOOL bDisabledItem = (i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]);
+					if (!bDisabledItem)
+					{
+						CComboBox::SetCurSel(i);
+						PostMessage(CB_SHOWDROPDOWN, FALSE, 0);
+						// 親に通知を送る
+						return CComboBox::OnCommand(wParam, lParam);
+					}
+				}
+
+				// 選択可能な項目が見つからない場合は選択解除
+				CComboBox::SetCurSel(-1);
+				PostMessage(CB_SHOWDROPDOWN, FALSE, 0);
+				// 通知をキャンセル
+				return TRUE;
+			}
+		}
+	}
+
+	return CComboBox::OnCommand(wParam, lParam);
 }
 
 void CCustomComboBox::UpdateDropDownWidth()

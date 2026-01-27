@@ -244,13 +244,44 @@ public:
 	CCustomComboBox();
 	virtual ~CCustomComboBox();
 
+	// 拡張AddString - 第2引数でラベル項目（選択不可）を指定可能
+	int AddString(LPCTSTR lpszString, BOOL bDisabled = FALSE);
+
+	// 通常のGetCurSel - 実際の項目番号を返す（既存コードとの互換性）
+	int GetCurSel() const;
+
+	// 通常のSetCurSel - 実際の項目番号で設定（既存コードとの互換性）
+	int SetCurSel(int nPhysicalIndex);
+
+	// 選択可能な項目のみでカウントしたGet/Set（新機能）
+	int GetCurSelLogical() const;
+	int SetCurSelLogical(int nLogicalIndex);
+
+	// 実際の項目番号でSet/Get（互換性のため、GetCurSelと同じ）
+	int GetCurSelPhysical() const { return GetCurSel(); }
+	int SetCurSelPhysical(int nPhysicalIndex) { return SetCurSel(nPhysicalIndex); }
+
+	// ラベル項目の色設定
+	void SetLabelColor(COLORREF clrText, COLORREF clrBackground);
+	void GetLabelColor(COLORREF* pClrText, COLORREF* pClrBackground) const;
+
 protected:
 	CBrush m_brBackground;
 	void UpdateDropDownWidth();
 
+	// 選択不可項目を管理
+	std::vector<BOOL> m_vDisabledItems; // TRUE = 選択不可（ラベル）
+	COLORREF m_clrLabelText;
+	COLORREF m_clrLabelBg;
+
+	// 実際のインデックス ⇔ 選択可能項目のインデックス変換
+	int LogicalToPhysical(int nLogical) const; // 選択可能な番号 → 実際の項目番号
+	int PhysicalToLogical(int nPhysical) const; // 実際の項目番号 → 選択可能な番号
+
 	virtual void PreSubclassWindow();
 	virtual void DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);
 	virtual void MeasureItem(LPMEASUREITEMSTRUCT lpMeasureItemStruct);
+	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
 
 	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
 	afx_msg void OnPaint();

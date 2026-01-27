@@ -253,6 +253,9 @@ BOOL CEqualizer::OnInitDialog()
 	m_s14.SetPos(200 - savedata.eq[14]);
 
 	// 環境音響プリセット51種
+	
+	m_env.AddString(L"--[[基本空間 0-10]]--", TRUE);
+
 	m_env.AddString(L"なし");
 	m_env.AddString(L"風呂場 (超短く超明るい、ピーキーな金属反射)");
 	m_env.AddString(L"ホール (中程度だがはっきり響く、バランス良好)");
@@ -264,6 +267,9 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"山 (超長いエコー、遠くまではっきり響く)");
 	m_env.AddString(L"広場 (開放的、空気を感じる広がり)");
 	m_env.AddString(L"カテドラル (超巨大空間、圧倒的な残響と重厚感)");
+
+	m_env.AddString(L"--[[公共施設 11-20]]--", TRUE);
+
 	m_env.AddString(L"体育館 (硬く金属的、バスケコート的な響き)");
 	m_env.AddString(L"峡谷 (複数の明確なエコー、両側から反響)");
 	m_env.AddString(L"地下室 (狭く圧迫感、密度の高い反射)");
@@ -274,6 +280,9 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"小部屋/クローゼット (超小空間デッド、ほぼ無反射)");
 	m_env.AddString(L"階段室 (縦方向の特殊反射、螺旋的な響き)");
 	m_env.AddString(L"地下鉄ホーム (都市的コンクリート、硬質な反射)");
+
+	m_env.AddString(L"--[[産業・商業 21-30]]--", TRUE);
+
 	m_env.AddString(L"倉庫 (大きく空っぽ、高天井で硬い床)");
 	m_env.AddString(L"廊下 (長く狭い直線的、方向性のある反響)");
 	m_env.AddString(L"工場 (金属的産業的、複雑な反響)");
@@ -284,6 +293,9 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"プール(室内) (タイル水面反射、独特の明るい響き)");
 	m_env.AddString(L"エレベーター (超小金属空間、密閉された短い反射)");
 	m_env.AddString(L"駐車場 (広い低天井コンクリート、硬質な反響)");
+
+	m_env.AddString(L"--[[文化施設 31-40]]--", TRUE);
+
 	m_env.AddString(L"コンサートホール (クラシック用最高峰、精密な音響設計)");
 	m_env.AddString(L"ジャズクラブ (親密で温かい、程よい残響)");
 	m_env.AddString(L"カラオケボックス (小密室エンタメ、明るく賑やか)");
@@ -294,6 +306,9 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"病院 (静かで清潔、吸音材による落ち着いた空間)");
 	m_env.AddString(L"レコーディングブース (プロ用極ドライ、完全無響に近い)");
 	m_env.AddString(L"オペラハウス (劇場の最高峰、豊かで美しい残響)");
+
+	m_env.AddString(L"--[[生活空間 41-50]]--", TRUE);
+
 	m_env.AddString(L"喫茶店/カフェ (適度な賑わいと吸音、リラックスした空間)");
 	m_env.AddString(L"バー/ラウンジ (暗く落ち着いた雰囲気、中域重視)");
 	m_env.AddString(L"居酒屋 (賑やか木材吸音、温かみのある響き)");
@@ -304,6 +319,45 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"砂漠 (超開放的反射極小、乾いた空気感)");
 	m_env.AddString(L"ガレージ (車庫硬質空間、コンクリートと金属)");
 	m_env.AddString(L"展望台 (高所開放感、風と遠距離エコー)");
+
+	m_env.AddString(L"--[[拡張空間 51-60]]--", TRUE);
+
+	m_env.AddString(L"小さな礼拝堂 (教会より親密で温かい)");
+	m_env.AddString(L"大型ショッピングセンター (モールより巨大)");
+	m_env.AddString(L"地下洞窟(深層) (より深く神秘的)");
+	m_env.AddString(L"古城の大広間 (石造り中世的)");
+	m_env.AddString(L"野外音楽堂 (半開放的ステージ)");
+	m_env.AddString(L"鍾乳洞 (複雑な水滴反射)");
+	m_env.AddString(L"廃墟工場 (荒廃した金属空間)");
+	m_env.AddString(L"和室(畳) (日本的柔らかい吸音)");
+	m_env.AddString(L"温泉施設 (湿度高めタイル反射)");
+	m_env.AddString(L"屋根裏部屋 (斜め天井の特殊空間)");
+
+	m_env.AddString(L"--[[特殊空間 61-70]]--", TRUE);
+
+	m_env.AddString(L"地下駐車場(多層) (階層的複雑反射)");
+	m_env.AddString(L"古い劇場(木造) (温かみある音響設計)");
+	m_env.AddString(L"大型倉庫(空) (極端な空虚感)");
+	m_env.AddString(L"小さな教会 (カテドラルより親密)");
+	m_env.AddString(L"ガラス温室 (硬質ガラス反射)");
+	m_env.AddString(L"石造りトンネル (硬く長い残響)");
+	m_env.AddString(L"コンクリート階段 (硬質縦方向反射)");
+	m_env.AddString(L"大浴場 (広いタイル反射)");
+	m_env.AddString(L"洗面所 (極小タイル空間)");
+	m_env.AddString(L"廊下(カーペット) (吸音的柔らかい)");
+
+	m_env.AddString(L"--[[専門空間 71-80]]--", TRUE);
+
+	m_env.AddString(L"会議室(大) (ビジネス空間)");
+	m_env.AddString(L"会議室(小) (より密閉的)");
+	m_env.AddString(L"防音室 (極端なデッド空間)");
+	m_env.AddString(L"エントランスホール (高天井開放的)");
+	m_env.AddString(L"書斎 (本による吸音)");
+	m_env.AddString(L"キッチン (硬質多反射)");
+	m_env.AddString(L"屋外駐車場 (開放的反射少)");
+	m_env.AddString(L"地下道(狭) (圧迫的狭小空間)");
+	m_env.AddString(L"展示室 (美術館より吸音的)");
+	m_env.AddString(L"アトリエ (創作空間の独特さ)");
 	m_env.SetCurSel(savedata.eqsoundenv);
 
 	m_pre.AddString(L"デフォルト");
@@ -368,7 +422,11 @@ BOOL CEqualizer::OnInitDialog()
 void CEqualizer::OnCbnSelchangeCombo1()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
-	savedata.eqsoundenv = m_env.GetCurSel();
+	int a = m_env.GetCurSel();
+	int c = 0;
+	for (int b = 0; b < (int)ceill(a / 10.0f); b++) c++;
+	a -= c;
+	savedata.eqsoundenv = a;
 }
 
 void equaliser(void* data, int len, BOOL reset);
