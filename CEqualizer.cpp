@@ -254,9 +254,11 @@ BOOL CEqualizer::OnInitDialog()
 
 	// 環境音響プリセット51種
 	
-	m_env.AddString(L"--[[基本空間 0-10]]--", TRUE);
-
+	//0
 	m_env.AddString(L"なし");
+	//1
+	m_env.AddString(L"--[[基本空間 1-10]]--", TRUE);
+	//2
 	m_env.AddString(L"風呂場 (超短く超明るい、ピーキーな金属反射)");
 	m_env.AddString(L"ホール (中程度だがはっきり響く、バランス良好)");
 	m_env.AddString(L"教会 (超長く超重厚、圧倒的な残響)");
@@ -267,9 +269,9 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"山 (超長いエコー、遠くまではっきり響く)");
 	m_env.AddString(L"広場 (開放的、空気を感じる広がり)");
 	m_env.AddString(L"カテドラル (超巨大空間、圧倒的な残響と重厚感)");
-
+	//12
 	m_env.AddString(L"--[[公共施設 11-20]]--", TRUE);
-
+	//13
 	m_env.AddString(L"体育館 (硬く金属的、バスケコート的な響き)");
 	m_env.AddString(L"峡谷 (複数の明確なエコー、両側から反響)");
 	m_env.AddString(L"地下室 (狭く圧迫感、密度の高い反射)");
@@ -358,8 +360,21 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"地下道(狭) (圧迫的狭小空間)");
 	m_env.AddString(L"展示室 (美術館より吸音的)");
 	m_env.AddString(L"アトリエ (創作空間の独特さ)");
-	m_env.SetCurSel(savedata.eqsoundenv);
-
+	{
+		const int l[81] =
+		{   0,
+		     2, 3, 4, 5, 6, 7, 8, 9,10,11,
+		    13,14,15,16,17,18,19,20,21,22,
+		    24,25,26,27,28,29,30,31,32,33,
+		    35,36,37,38,39,40,41,42,43,44,
+			46,47,48,49,50,51,52,53,54,55,
+			57,58,59,60,61,62,63,64,65,66,
+			68,69,70,71,72,73,74,75,76,77,
+			79,80,81,82,83,84,85,86,87,88
+		};
+		const int a = l[savedata.eqsoundenv];
+		m_env.SetCurSel(a);
+	}
 	m_pre.AddString(L"デフォルト");
 	m_pre.AddString(L"低音ブースト");
 	m_pre.AddString(L"高音ブースト");
@@ -419,14 +434,33 @@ BOOL CEqualizer::OnInitDialog()
 	SetTimer(1, 100, NULL);
 	return TRUE;
 }
+extern BOOL reset;
 void CEqualizer::OnCbnSelchangeCombo1()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	int a = m_env.GetCurSel();
 	int c = 0;
-	for (int b = 0; b < (int)ceill(a / 10.0f); b++) c++;
-	a -= c;
-	savedata.eqsoundenv = a;
+	int l[] =
+	{
+		0,1,
+		1,2,3,4,5,6,7,8,9,10,
+		11,
+		11,12,13,14,15,16,17,18,19,20,
+		21,
+		21,22,23,24,25,26,27,28,29,30,
+		31,
+		31,32,33,34,35,36,37,38,39,40,
+		41,
+		41,42,43,44,45,46,47,48,49,50,
+		51,
+		51,52,53,54,55,56,57,58,59,60,
+		61,
+		61,62,63,64,65,66,67,68,69,70,
+		71,
+		71,72,73,74,75,76,77,78,79,80
+	};
+	savedata.eqsoundenv = l[a];
+	reset = TRUE;
 }
 
 void equaliser(void* data, int len, BOOL reset);
@@ -436,11 +470,7 @@ void CEqualizer::OnCbnSelchangeCombo5()
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	KillTimer(1);
 	savedata.eqsoundeq = m_pre.GetCurSel();
-	extern int eqflg;
-	if (eqflg == TRUE) {
-		equaliser(0, 0, 2);
-	}
-
+	equaliser(0, 0, 2);
 	SetTimer(1, 100, NULL);
 }
 

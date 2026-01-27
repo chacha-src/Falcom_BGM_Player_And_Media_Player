@@ -1354,7 +1354,7 @@ int CCustomComboBox::SetCurSel(int nPhysicalIndex)
 	// 実際の項目番号で直接設定（既存コードとの互換性）
 	if (nPhysicalIndex < 0)
 		return CComboBox::SetCurSel(-1);
-
+	return CComboBox::SetCurSel(nPhysicalIndex);
 	int nTotal = CComboBox::GetCount();
 	if (nPhysicalIndex >= nTotal)
 		return CB_ERR;
