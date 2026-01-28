@@ -801,7 +801,7 @@ BEGIN
     LTEXT           "ä¬ã´å¯â ÇÃÇ©Ç©ÇËãÔçá",IDC_STATIC,9,169,65,8
     CONTROL         "",IDC_SLIDER22,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,76,168,267,12
     LTEXT           "100",IDC_STATIC_eff,346,169,18,8
-    LTEXT           "Hyper equaliser 80 x 15 band",IDC_STATICf,11,7,145,14
+    LTEXT           "Hyper equaliser 80 x 15 band",IDC_STATICf,3,2,185,19
     LTEXT           "Åì",IDC_STATIC,368,140,8,8
     CONTROL         "",IDC_SLIDER23,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,378,32,16,106
     LTEXT           "100",IDC_STATIC_e15,381,140,13,8

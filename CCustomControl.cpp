@@ -175,9 +175,34 @@ static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str
 		}
 	}
 
+	// テキストの実際のサイズと位置を取得
+	// GetTextExtentを使って実際の描画幅を取得（DT_CALCRECTより正確）
+	CSize szTextExtent = pDC->GetTextExtent(strText);
+	int nTextWidth = (int)(szTextExtent.cx * 1.1f);
+
+	// テキストの実際の描画位置を計算（配置を考慮）
+	CRect rcActualText = rect;
+
+	if (nFormat & DT_CENTER)
+	{
+		// 中央揃え
+		rcActualText.left = rect.left + (rect.Width() - nTextWidth) / 2;
+		rcActualText.right = rcActualText.left + nTextWidth;
+	}
+	else if (nFormat & DT_RIGHT)
+	{
+		// 右揃え
+		rcActualText.left = rect.right - nTextWidth;
+		rcActualText.right = rect.right;
+	}
+	else
+	{
+		// 左揃え（デフォルト）
+		rcActualText.right = rcActualText.left + nTextWidth;
+	}
+
 	// テキストをグラデーションで描画（1ピクセル幅のクリッピング）
-	// 方向に応じてグラデーションを適用
-	// 0度=下から上、90度=左から右、180度=上から下、270度=右から左
+	// グラデーションは実際のテキスト範囲に対して適用
 
 	// 方向を0-359度で正規化
 	int normalizedDir = nDirection % 360;
@@ -186,33 +211,55 @@ static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str
 	int steps = 0;
 	BOOL bHorizontal = FALSE;
 
-	// 方向に応じてステップ数を決定
-	if (normalizedDir >= 0 && normalizedDir < 90)
+	// 方向に応じてステップ数を決定（実際のテキストサイズを使用）
+	BOOL bDiagonal = FALSE;
+
+	// 斜め方向（45度刻み）の判定
+	if (normalizedDir == 45 || normalizedDir == 135 || normalizedDir == 225 || normalizedDir == 315)
+	{
+		// 斜めグラデーション：対角線の長さを使用
+		int nWidth = rcActualText.Width();
+		int nHeight = rcActualText.Height();
+		steps = (int)sqrt((double)(nWidth * nWidth + nHeight * nHeight));
+		bDiagonal = TRUE;
+		bHorizontal = FALSE;
+
+		TRACE(_T("Diagonal gradient: dir=%d, width=%d, height=%d, diagonal=%d\n"),
+			normalizedDir, nWidth, nHeight, steps);
+	}
+	else if (normalizedDir >= 0 && normalizedDir < 90)
 	{
 		// 垂直グラデーション（下から上）
-		steps = rect.Height();
+		steps = rcActualText.Height();
 		bHorizontal = FALSE;
 	}
 	else if (normalizedDir >= 90 && normalizedDir < 180)
 	{
 		// 水平グラデーション（左から右）
-		steps = rect.Width();
+		steps = rcActualText.Width();
 		bHorizontal = TRUE;
 	}
 	else if (normalizedDir >= 180 && normalizedDir < 270)
 	{
 		// 垂直グラデーション（上から下）
-		steps = rect.Height();
+		steps = rcActualText.Height();
 		bHorizontal = FALSE;
 	}
 	else
 	{
 		// 水平グラデーション（右から左）
-		steps = rect.Width();
+		steps = rcActualText.Width();
 		bHorizontal = TRUE;
 	}
 
 	if (steps <= 0) steps = 1;
+
+	// デバッグ出力
+	TRACE(_T("Gradient: rect(%d,%d,%d,%d), textWidth=%d, actualText(%d,%d,%d,%d), steps=%d, dir=%d\n"),
+		rect.left, rect.top, rect.right, rect.bottom,
+		nTextWidth,
+		rcActualText.left, rcActualText.top, rcActualText.right, rcActualText.bottom,
+		steps, normalizedDir);
 
 	for (int i = 0; i < steps; i++)
 	{
@@ -225,22 +272,37 @@ static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str
 
 		pDC->SetTextColor(RGB(r, g, b));
 
-		// 1ピクセル幅のクリッピング領域
+		// 1ピクセル幅のクリッピング領域（実際のテキスト範囲を使用）
 		CRgn rgn;
 		CRect rcSlice;
 
-		if (bHorizontal)
+		if (bDiagonal)
+		{
+			// 斜めグラデーション（135度：左下から右上）
+			// 対角線上の位置に応じてクリッピング
+			double diagonalRatio = (double)i / (double)(steps - 1);
+			int nWidth = rcActualText.Width();
+			int nHeight = rcActualText.Height();
+
+			// 135度の場合は左下(0, height)から右上(width, 0)へ
+			int x = rcActualText.left + (int)(nWidth * diagonalRatio);
+			int y = rcActualText.bottom - (int)(nHeight * diagonalRatio);
+
+			// 斜めのクリッピング領域（簡略化：垂直線で近似）
+			rcSlice.SetRect(x, rect.top, x + 2, rect.bottom);
+		}
+		else if (bHorizontal)
 		{
 			// 水平方向のグラデーション
 			if (normalizedDir >= 90 && normalizedDir < 180)
 			{
 				// 左から右
-				rcSlice.SetRect(rect.left + i, rect.top, rect.left + i + 1, rect.bottom);
+				rcSlice.SetRect(rcActualText.left + i, rect.top, rcActualText.left + i + 1, rect.bottom);
 			}
 			else
 			{
 				// 右から左
-				rcSlice.SetRect(rect.right - i - 1, rect.top, rect.right - i, rect.bottom);
+				rcSlice.SetRect(rcActualText.right - i - 1, rect.top, rcActualText.right - i, rect.bottom);
 			}
 		}
 		else
@@ -249,20 +311,22 @@ static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str
 			if (normalizedDir >= 0 && normalizedDir < 90)
 			{
 				// 下から上
-				rcSlice.SetRect(rect.left, rect.bottom - i - 1, rect.right, rect.bottom - i);
+				rcSlice.SetRect(rect.left, rcActualText.bottom - i - 1, rect.right, rcActualText.bottom - i);
 			}
 			else
 			{
 				// 上から下
-				rcSlice.SetRect(rect.left, rect.top + i, rect.right, rect.top + i + 1);
+				rcSlice.SetRect(rect.left, rcActualText.top + i, rect.right, rcActualText.top + i + 1);
 			}
 		}
 
 		rgn.CreateRectRgnIndirect(&rcSlice);
 		pDC->SelectClipRgn(&rgn);
 
-		CRect rcText = rect;
-		pDC->DrawText(strText, rcText, nFormat);
+		// 配置フラグを削除して、rcActualTextの位置で左揃え描画
+		// （配置フラグを使うと、rect内で再配置されてしまう）
+		UINT nDrawFormat = (nFormat & ~(DT_CENTER | DT_RIGHT)) | DT_LEFT;
+		pDC->DrawText(strText, rcActualText, nDrawFormat);
 
 		pDC->SelectClipRgn(NULL);
 	}
@@ -1018,6 +1082,7 @@ CCustomStatic::CCustomStatic()
 	, m_nShadowDistance(2)
 	, m_nShadowBlur(3)
 	, m_bShadowEnable(FALSE)
+	, m_bPreferWideMode(FALSE)
 {
 }
 
@@ -1069,6 +1134,18 @@ void CCustomStatic::GetDropShadow(COLORREF* pColor, int* pDirection, int* pDista
 	if (pbEnable) *pbEnable = m_bShadowEnable;
 }
 
+void CCustomStatic::SetPreferWideMode(BOOL bPreferWide)
+{
+	m_bPreferWideMode = bPreferWide;
+	if (GetSafeHwnd())
+		Invalidate();
+}
+
+BOOL CCustomStatic::GetPreferWideMode() const
+{
+	return m_bPreferWideMode;
+}
+
 void CCustomStatic::SetFont(CFont* pFont, BOOL bRedraw)
 {
 	if (pFont)
@@ -1117,7 +1194,7 @@ void CCustomStatic::OnPaint()
 	dc.SetBkMode(TRANSPARENT);
 
 	DWORD dwStyle = GetStyle();
-	UINT nFormat = DT_VCENTER | DT_SINGLELINE;
+	UINT nFormat = DT_SINGLELINE;  // DT_VCENTERを削除
 
 	if (dwStyle & SS_CENTER)
 		nFormat |= DT_CENTER;
@@ -1126,7 +1203,7 @@ void CCustomStatic::OnPaint()
 	else
 		nFormat |= DT_LEFT;
 
-	// テキストが横幅に収まるかチェック＆フォント縮小
+	// テキストが横幅に収まるかチェック＆フォント調整
 	CSize szText = dc.GetTextExtent(strText);
 	CFont fontScaled;
 
@@ -1134,12 +1211,16 @@ void CCustomStatic::OnPaint()
 	{
 		LOGFONT lf;
 		pCurrentFont->GetLogFont(&lf);
-		int nTargetHeight = abs(lf.lfHeight);
+		int nOriginalHeight = abs(lf.lfHeight);
+		int nTargetHeight = nOriginalHeight;
+		int nMinHeight = (nOriginalHeight * 2) / 3; // 2/3が最小サイズ
 
-		while (nTargetHeight > 6 && szText.cx > rect.Width())
+		// Phase 1: まず通常の縮小を試みる（2/3まで）
+		while (nTargetHeight > nMinHeight && szText.cx > rect.Width())
 		{
 			nTargetHeight--;
 			lf.lfHeight = -nTargetHeight;
+			lf.lfWidth = 0; // 自動幅
 
 			if (fontScaled.GetSafeHandle())
 				fontScaled.DeleteObject();
@@ -1148,13 +1229,137 @@ void CCustomStatic::OnPaint()
 			dc.SelectObject(&fontScaled);
 			szText = dc.GetTextExtent(strText);
 		}
+
+		// Phase 2: まだ収まらない場合の処理
+		if (szText.cx > rect.Width())
+		{
+			if (m_bPreferWideMode)
+			{
+				// 横長優先モード：縦長変形を使わずにさらに縮小を続ける
+				while (nTargetHeight > 6 && szText.cx > rect.Width())
+				{
+					nTargetHeight--;
+					lf.lfHeight = -nTargetHeight;
+					lf.lfWidth = 0; // 自動幅
+
+					if (fontScaled.GetSafeHandle())
+						fontScaled.DeleteObject();
+
+					fontScaled.CreateFontIndirect(&lf);
+					dc.SelectObject(&fontScaled);
+					szText = dc.GetTextExtent(strText);
+				}
+			}
+			else
+			{
+				// 通常モード：縦長フォントにする
+				lf.lfHeight = -nOriginalHeight; // 高さは元のまま維持
+				int nWidth = nOriginalHeight / 2; // 初期幅（高さの半分）
+
+				while (nWidth > 2 && szText.cx > rect.Width())
+				{
+					nWidth--;
+					lf.lfWidth = nWidth; // 幅を指定（縦長にする）
+
+					if (fontScaled.GetSafeHandle())
+						fontScaled.DeleteObject();
+
+					fontScaled.CreateFontIndirect(&lf);
+					dc.SelectObject(&fontScaled);
+					szText = dc.GetTextExtent(strText);
+				}
+			}
+		}
+
+		// Phase 3: 横幅が収まった後、ディセンダーが見切れるかチェック
+		if (szText.cx <= rect.Width())
+		{
+			// TEXTMETRICを使って正確なフォント高さを取得
+			TEXTMETRIC tm;
+			dc.GetTextMetrics(&tm);
+			int nFontHeight = tm.tmHeight; // アセンダー+ディセンダーを含む高さ
+
+			// ドロップシャドウが有効な場合は影の距離も考慮
+			int nShadowOffset = 0;
+			if (m_bShadowEnable && m_nShadowDistance > 0)
+			{
+				// 影の方向に応じて縦方向のオフセットを計算
+				double rad = m_nShadowDirection * 3.14159265358979323846 / 180.0;
+				nShadowOffset = (int)(abs(m_nShadowDistance * sin(rad))) + m_nShadowBlur;
+			}
+
+			int nRequiredHeight = nFontHeight + nShadowOffset;
+
+			// ディセンダーが見切れる場合は全体を縮小
+			if (nRequiredHeight > rect.Height())
+			{
+				// 収まる比率を計算
+				double scale = (double)rect.Height() / (double)nRequiredHeight;
+				int nNewHeight = (int)(abs(lf.lfHeight) * scale);
+
+				if (nNewHeight < 6) nNewHeight = 6; // 最小サイズ
+
+				lf.lfHeight = -nNewHeight;
+
+				// 幅も比例して調整（縦長の比率を維持）
+				if (lf.lfWidth > 0)
+				{
+					lf.lfWidth = (int)(lf.lfWidth * scale);
+					if (lf.lfWidth < 2) lf.lfWidth = 2;
+				}
+
+				if (fontScaled.GetSafeHandle())
+					fontScaled.DeleteObject();
+
+				fontScaled.CreateFontIndirect(&lf);
+				dc.SelectObject(&fontScaled);
+			}
+		}
 	}
 
 	// グラデーション＆ドロップシャドウ付きテキスト描画
+	// イタリック体の場合は上部と右側に余白を追加（傾きによるはみ出し対策）
+	CRect rcDraw = rect;
+	LOGFONT lfCheck;
+	memset(&lfCheck, 0, sizeof(LOGFONT));
+
+	if (fontScaled.GetSafeHandle())
+	{
+		fontScaled.GetLogFont(&lfCheck);
+	}
+	else if (pCurrentFont)
+	{
+		pCurrentFont->GetLogFont(&lfCheck);
+	}
+
+	// テキストの実際の高さを取得
+	TEXTMETRIC tm;
+	dc.GetTextMetrics(&tm);
+	int nTextHeight = tm.tmHeight;
+
+	// 手動で垂直中央配置
+	int nVerticalMargin = (rect.Height() - nTextHeight) / 2;
+	if (nVerticalMargin < 0) nVerticalMargin = 0;
+
+	rcDraw.top = rect.top + nVerticalMargin;
+	rcDraw.bottom = rcDraw.top + nTextHeight + nTextHeight; // 十分な高さを確保
+
+	// イタリック体の場合はさらに上部余白を追加
+	if (lfCheck.lfItalic)
+	{
+		int nFontHeight = abs(lfCheck.lfHeight);
+		int nItalicMarginTop = nFontHeight * 50 / 100;    // 上部に50%
+		int nItalicMarginRight = nFontHeight * 50 / 100;  // 右側に50%
+
+		rcDraw.top -= nItalicMarginTop;
+		rcDraw.bottom += nItalicMarginTop;
+		rcDraw.right += nItalicMarginRight;
+	}
+
 	if (m_bGradEnable)
 	{
 		// テキストにグラデーション適用
-		DrawTextWithGradient(&dc, rect, strText, nFormat,
+		DrawTextWithGradient(&dc, rcDraw, strText, nFormat,
 			m_clrGradStart, m_clrGradEnd, m_nGradDirection,
 			m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
 			m_bShadowEnable, COLOR_DIALOG_BG);
@@ -1162,7 +1367,7 @@ void CCustomStatic::OnPaint()
 	else
 	{
 		// 通常のテキスト（ドロップシャドウのみ）
-		DrawTextWithShadow(&dc, rect, strText, nFormat, RGB(0, 0, 0),
+		DrawTextWithShadow(&dc, rcDraw, strText, nFormat, RGB(0, 0, 0),
 			m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
 			m_bShadowEnable, COLOR_DIALOG_BG);
 	}
@@ -1312,8 +1517,8 @@ BEGIN_MESSAGE_MAP(CCustomComboBox, CComboBox)
 END_MESSAGE_MAP()
 
 CCustomComboBox::CCustomComboBox()
-	: m_clrLabelText(RGB(255, 255, 255))      // デフォルト：黒
-	, m_clrLabelBg(RGB(80, 80, 150))      // デフォルト：濃い紫
+	: m_clrLabelText(RGB(240, 240, 255))    // デフォルト：白っぽい色
+	, m_clrLabelBg(RGB(80, 60, 120))        // デフォルト：濃い紫
 {
 	m_brBackground.CreateSolidBrush(COLOR_COMBO_BG);
 }
@@ -1336,8 +1541,15 @@ int CCustomComboBox::AddString(LPCTSTR lpszString, BOOL bDisabled)
 
 		m_vDisabledItems[nIndex] = bDisabled;
 
+		// 選択可能な項目の場合のみ配列に追加
+		if (!bDisabled)
+		{
+			m_vSelectableIndices.push_back(nIndex);
+		}
+
 		// デバッグ出力
-		TRACE(_T("AddString: index=%d, disabled=%d, text=%s\n"), nIndex, bDisabled, lpszString);
+		TRACE(_T("AddString: index=%d, disabled=%d, selectableCount=%d, text=%s\n"),
+			nIndex, bDisabled, (int)m_vSelectableIndices.size(), lpszString);
 	}
 
 	return nIndex;
@@ -1345,71 +1557,53 @@ int CCustomComboBox::AddString(LPCTSTR lpszString, BOOL bDisabled)
 
 int CCustomComboBox::GetCurSel() const
 {
-	// 実際の項目番号をそのまま返す（既存コードとの互換性）
-	return CComboBox::GetCurSel();
-}
-
-int CCustomComboBox::SetCurSel(int nPhysicalIndex)
-{
-	// 実際の項目番号で直接設定（既存コードとの互換性）
-	if (nPhysicalIndex < 0)
-		return CComboBox::SetCurSel(-1);
-	return CComboBox::SetCurSel(nPhysicalIndex);
-	int nTotal = CComboBox::GetCount();
-	if (nPhysicalIndex >= nTotal)
-		return CB_ERR;
-
-	// ラベル項目の場合は次の選択可能な項目を探す
-	if (nPhysicalIndex < (int)m_vDisabledItems.size() && m_vDisabledItems[nPhysicalIndex])
-	{
-		// 下方向に検索
-		for (int i = nPhysicalIndex + 1; i < nTotal; i++)
-		{
-			BOOL bDisabled = (i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]);
-			if (!bDisabled)
-			{
-				return CComboBox::SetCurSel(i);
-			}
-		}
-
-		// 上方向に検索
-		for (int i = nPhysicalIndex - 1; i >= 0; i--)
-		{
-			BOOL bDisabled = (i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]);
-			if (!bDisabled)
-			{
-				return CComboBox::SetCurSel(i);
-			}
-		}
-
-		// 選択可能な項目が見つからない
-		return CB_ERR;
-	}
-
-	return CComboBox::SetCurSel(nPhysicalIndex);
-}
-
-int CCustomComboBox::GetCurSelLogical() const
-{
+	// 実際に選択されている項目番号を取得
 	int nPhysical = CComboBox::GetCurSel();
 	if (nPhysical < 0)
 		return -1;
 
-	// 実際の項目番号を選択可能な項目の番号に変換
-	return PhysicalToLogical(nPhysical);
+	// 選択可能な項目の番号に変換（配列で検索）
+	for (int i = 0; i < (int)m_vSelectableIndices.size(); i++)
+	{
+		if (m_vSelectableIndices[i] == nPhysical)
+		{
+			TRACE(_T("GetCurSel: physical=%d -> logical=%d\n"), nPhysical, i);
+			return i; // 選択可能な項目としての番号（0, 1, 2...）
+		}
+	}
+
+	// 選択不可の項目が選ばれている場合（通常は発生しない）
+	TRACE(_T("GetCurSel: physical=%d is DISABLED, returning -1\n"), nPhysical);
+	return -1;
 }
 
-int CCustomComboBox::SetCurSelLogical(int nLogicalIndex)
+int CCustomComboBox::SetCurSel(int nLogicalIndex)
 {
-	if (nLogicalIndex < 0)
-		return CComboBox::SetCurSel(-1);
-
 	// 選択可能な項目の番号を実際の項目番号に変換
-	int nPhysical = LogicalToPhysical(nLogicalIndex);
+	if (nLogicalIndex < 0)
+	{
+		TRACE(_T("SetCurSel: logical=-1 -> physical=-1 (clear selection)\n"));
+		return CComboBox::SetCurSel(-1);
+	}
 
-	if (nPhysical < 0)
-		return CB_ERR;
+	// 範囲外の場合は最後の有効な項目を選択
+	if (nLogicalIndex >= (int)m_vSelectableIndices.size())
+	{
+		if (m_vSelectableIndices.empty())
+		{
+			TRACE(_T("SetCurSel: no selectable items\n"));
+			return CB_ERR;
+		}
 
+		// 最後の有効な項目を選択
+		nLogicalIndex = (int)m_vSelectableIndices.size() - 1;
+		TRACE(_T("SetCurSel: out of range, using last item logical=%d\n"), nLogicalIndex);
+	}
+
+	// 実際の項目番号を取得
+	int nPhysical = m_vSelectableIndices[nLogicalIndex];
+
+	TRACE(_T("SetCurSel: logical=%d -> physical=%d\n"), nLogicalIndex, nPhysical);
 	return CComboBox::SetCurSel(nPhysical);
 }
 
@@ -1431,47 +1625,22 @@ void CCustomComboBox::GetLabelColor(COLORREF* pClrText, COLORREF* pClrBackground
 int CCustomComboBox::LogicalToPhysical(int nLogical) const
 {
 	// 選択可能な項目の番号（0,1,2...）を実際の項目番号に変換
-	int nCount = 0;
-	int nTotal = CComboBox::GetCount();
+	if (nLogical < 0 || nLogical >= (int)m_vSelectableIndices.size())
+		return -1;
 
-	for (int i = 0; i < nTotal; i++)
-	{
-		BOOL bDisabled = (i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]);
-
-		if (!bDisabled) // 選択可能な項目
-		{
-			if (nCount == nLogical)
-				return i;
-			nCount++;
-		}
-	}
-
-	return -1;
+	return m_vSelectableIndices[nLogical];
 }
 
 int CCustomComboBox::PhysicalToLogical(int nPhysical) const
 {
 	// 実際の項目番号を選択可能な項目の番号に変換
-	int nTotal = CComboBox::GetCount();
-
-	if (nPhysical < 0 || nPhysical >= nTotal)
-		return -1;
-
-	// nPhysical自体が選択不可の場合
-	if (nPhysical < (int)m_vDisabledItems.size() && m_vDisabledItems[nPhysical])
-		return -1;
-
-	int nCount = 0;
-
-	for (int i = 0; i < nPhysical; i++)
+	for (int i = 0; i < (int)m_vSelectableIndices.size(); i++)
 	{
-		BOOL bDisabled = (i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]);
-
-		if (!bDisabled) // 選択可能な項目
-			nCount++;
+		if (m_vSelectableIndices[i] == nPhysical)
+			return i;
 	}
 
-	return nCount;
+	return -1;
 }
 
 void CCustomComboBox::PreSubclassWindow()
@@ -1601,8 +1770,6 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 	CDC* pDC = CDC::FromHandle(lp->hDC);
 	CRect rect = lp->rcItem;
 
-	BOOL bSel = (lp->itemState & ODS_SELECTED);
-
 	// ラベル項目（選択不可）かどうかをチェック
 	BOOL bDisabled = FALSE;
 	if (lp->itemID < (UINT)m_vDisabledItems.size())
@@ -1610,12 +1777,29 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 		bDisabled = m_vDisabledItems[lp->itemID];
 	}
 
+	// ラベル項目の場合は選択状態を無視
+	BOOL bSel = FALSE;
+	if (!bDisabled)
+	{
+		bSel = (lp->itemState & ODS_SELECTED);
+	}
+
+	// デバッグ出力（最初の呼び出しのみ）
+	static BOOL bFirstCall = TRUE;
+	if (bFirstCall)
+	{
+		TRACE(_T("DrawItem called! itemID=%d, disabled=%d, vectorSize=%d\n"),
+			lp->itemID, bDisabled, (int)m_vDisabledItems.size());
+		bFirstCall = FALSE;
+	}
+
 	// 背景
 	COLORREF clrBg;
 	if (bDisabled)
 	{
-		// ラベル項目は常に特別な背景色
+		// ラベル項目は常に特別な背景色（濃い紫、選択状態でも変化なし）
 		clrBg = m_clrLabelBg;
+		TRACE(_T("DrawItem: itemID=%d is LABEL, using dark purple bg\n"), lp->itemID);
 	}
 	else if (bSel)
 	{
@@ -1665,25 +1849,32 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 
 	// テキスト
 	CString strText;
-	GetLBText(lp->itemID, strText);	
+	GetLBText(lp->itemID, strText);
+
+	// テキスト色とフォント
+	CFont* pOldFont = NULL;
+	CFont fontCustom;
 
 	CFont* pFont = GetFont();
 	LOGFONT lf;
 	pFont->GetLogFont(&lf);
-	lf.lfWeight = FW_BOLD;
 
-	CFont fontBold;
-	fontBold.CreateFontIndirect(&lf);
-	CFont* pOldFont = pDC->SelectObject(&fontBold);
-
-	// テキスト色
 	if (bDisabled)
 	{
+		// ラベル項目は太字イタリックにして目立たせる
 		pDC->SetTextColor(m_clrLabelText);
+		lf.lfWeight = FW_BOLD; // 太字
+		lf.lfItalic = TRUE;    // イタリック
+		fontCustom.CreateFontIndirect(&lf);
+		pOldFont = pDC->SelectObject(&fontCustom);
 	}
 	else
 	{
+		// 通常項目は太字
 		pDC->SetTextColor(RGB(0, 0, 0));
+		lf.lfWeight = FW_BOLD; // 太字
+		fontCustom.CreateFontIndirect(&lf);
+		pOldFont = pDC->SelectObject(&fontCustom);
 	}
 
 	pDC->SetBkMode(TRANSPARENT);
@@ -1692,9 +1883,16 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 	if (!bDisabled)
 		rcText.left += 20; // アイコン分のスペース
 	else
-		rcText.left += 6; // ラベルは左寄せ
+		rcText.left += 4; // ラベルは左寄せ（より左に）
 
 	pDC->DrawText(strText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+	// フォントを元に戻す
+	if (pOldFont)
+	{
+		pDC->SelectObject(pOldFont);
+		fontCustom.DeleteObject();
+	}
 
 	// 選択項目には王冠（ラベルには表示しない）
 	if (bSel && !bDisabled)
@@ -1703,10 +1901,39 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 		DrawCrown(pDC, rect.right - crownSize - 8, rect.top + rect.Height() / 2, crownSize, RGB(255, 215, 0));
 	}
 
-	// レース模様の区切り線
-	if (lp->itemID < (UINT)(GetCount() - 1))
+	// ラベル項目の場合は上下に太めの区切り線
+	if (bDisabled)
 	{
-		DrawLaceLine(pDC, rect.left + 15, rect.bottom - 1, rect.right - 15, rect.bottom - 1, RGB(200, 180, 220));
+		CPen penSeparator(PS_SOLID, 2, RGB(200, 200, 240)); // 白っぽい線
+		CPen* pOldPen = pDC->SelectObject(&penSeparator);
+
+		// 上側の線（最初の項目以外）
+		if (lp->itemID > 0)
+		{
+			pDC->MoveTo(rect.left + 2, rect.top);
+			pDC->LineTo(rect.right - 2, rect.top);
+		}
+
+		// 下側の線（常に描画）
+		pDC->MoveTo(rect.left + 2, rect.bottom - 1);
+		pDC->LineTo(rect.right - 2, rect.bottom - 1);
+
+		pDC->SelectObject(pOldPen);
+	}
+	// 通常項目のレース模様の区切り線
+	else if (lp->itemID < (UINT)(GetCount() - 1))
+	{
+		// 次の項目がラベルでない場合のみ区切り線を描画
+		BOOL bNextIsLabel = FALSE;
+		if (lp->itemID + 1 < (UINT)m_vDisabledItems.size())
+		{
+			bNextIsLabel = m_vDisabledItems[lp->itemID + 1];
+		}
+
+		if (!bNextIsLabel)
+		{
+			DrawLaceLine(pDC, rect.left + 15, rect.bottom - 1, rect.right - 15, rect.bottom - 1, RGB(200, 180, 220));
+		}
 	}
 }
 
@@ -1737,8 +1964,11 @@ BOOL CCustomComboBox::OnCommand(WPARAM wParam, LPARAM lParam)
 
 			if (bDisabled)
 			{
+				TRACE(_T("OnCommand: Label item clicked (physical=%d), keeping dropdown open\n"), nCurSel);
+
 				// ラベル項目が選択されたので、次の選択可能な項目を探す
 				int nCount = CComboBox::GetCount();
+				int nOldSel = nCurSel;
 
 				// 下方向に検索
 				for (int i = nCurSel + 1; i < nCount; i++)
@@ -1747,9 +1977,9 @@ BOOL CCustomComboBox::OnCommand(WPARAM wParam, LPARAM lParam)
 					if (!bDisabledItem)
 					{
 						CComboBox::SetCurSel(i);
-						PostMessage(CB_SHOWDROPDOWN, FALSE, 0);
-						// 親に通知を送る
-						return CComboBox::OnCommand(wParam, lParam);
+						// ドロップダウンは開いたまま（閉じない）
+						// 親に通知は送らない（ラベルをクリックしても何も起きない）
+						return TRUE;
 					}
 				}
 
@@ -1760,21 +1990,20 @@ BOOL CCustomComboBox::OnCommand(WPARAM wParam, LPARAM lParam)
 					if (!bDisabledItem)
 					{
 						CComboBox::SetCurSel(i);
-						PostMessage(CB_SHOWDROPDOWN, FALSE, 0);
-						// 親に通知を送る
-						return CComboBox::OnCommand(wParam, lParam);
+						// ドロップダウンは開いたまま（閉じない）
+						// 親に通知は送らない
+						return TRUE;
 					}
 				}
 
-				// 選択可能な項目が見つからない場合は選択解除
+				// 選択可能な項目が見つからない場合
 				CComboBox::SetCurSel(-1);
-				PostMessage(CB_SHOWDROPDOWN, FALSE, 0);
-				// 通知をキャンセル
 				return TRUE;
 			}
 		}
 	}
 
+	// 通常の項目の場合は親に通知を送る
 	return CComboBox::OnCommand(wParam, lParam);
 }
 

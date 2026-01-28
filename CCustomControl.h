@@ -188,6 +188,10 @@ public:
 	void SetDropShadow(COLORREF color, int nDirection, int nDistance, int nBlur, BOOL bEnable);
 	void GetDropShadow(COLORREF* pColor, int* pDirection, int* pDistance, int* pBlur, BOOL* pbEnable) const;
 
+	// 横長優先モード（縦長変形を使わずに縮小を続ける）
+	void SetPreferWideMode(BOOL bPreferWide);
+	BOOL GetPreferWideMode() const;
+
 protected:
 	virtual void PreSubclassWindow();
 	afx_msg void OnPaint();
@@ -210,6 +214,9 @@ private:
 	int m_nShadowDistance;
 	int m_nShadowBlur;
 	BOOL m_bShadowEnable;
+
+	// 横長優先モード
+	BOOL m_bPreferWideMode;
 };
 
 // カスタムリストボックス
@@ -247,19 +254,13 @@ public:
 	// 拡張AddString - 第2引数でラベル項目（選択不可）を指定可能
 	int AddString(LPCTSTR lpszString, BOOL bDisabled = FALSE);
 
-	// 通常のGetCurSel - 実際の項目番号を返す（既存コードとの互換性）
+	// GetCurSel/SetCurSel - 選択可能な項目のみカウント（0, 1, 2...）
 	int GetCurSel() const;
+	int SetCurSel(int nLogicalIndex);
 
-	// 通常のSetCurSel - 実際の項目番号で設定（既存コードとの互換性）
-	int SetCurSel(int nPhysicalIndex);
-
-	// 選択可能な項目のみでカウントしたGet/Set（新機能）
-	int GetCurSelLogical() const;
-	int SetCurSelLogical(int nLogicalIndex);
-
-	// 実際の項目番号でSet/Get（互換性のため、GetCurSelと同じ）
-	int GetCurSelPhysical() const { return GetCurSel(); }
-	int SetCurSelPhysical(int nPhysicalIndex) { return SetCurSel(nPhysicalIndex); }
+	// 実際の項目番号でGet/Set（デバッグ用）
+	int GetCurSelPhysical() const { return CComboBox::GetCurSel(); }
+	int SetCurSelPhysical(int nPhysicalIndex) { return CComboBox::SetCurSel(nPhysicalIndex); }
 
 	// ラベル項目の色設定
 	void SetLabelColor(COLORREF clrText, COLORREF clrBackground);
@@ -271,6 +272,7 @@ protected:
 
 	// 選択不可項目を管理
 	std::vector<BOOL> m_vDisabledItems; // TRUE = 選択不可（ラベル）
+	std::vector<int> m_vSelectableIndices; // 選択可能な項目の実際のインデックス
 	COLORREF m_clrLabelText;
 	COLORREF m_clrLabelBg;
 

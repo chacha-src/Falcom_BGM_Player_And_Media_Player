@@ -187,6 +187,7 @@ BOOL CEqualizer::OnInitDialog()
 
 	// 4. コントロールにフォントを適用します
 	m_t.SetFont(&m_newFont);
+	m_t.SetPreferWideMode(TRUE);
 	m_t.SetGradation(RGB(0, 0, 0), COLOR_RANGE_SELECTION, 135, TRUE);
 	m_t.SetDropShadow(RGB(0,0,0), 45, 15, 6, TRUE);
 
@@ -361,7 +362,7 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"展示室 (美術館より吸音的)");
 	m_env.AddString(L"アトリエ (創作空間の独特さ)");
 	{
-		const int l[81] =
+		/*const int l[81] =
 		{   0,
 		     2, 3, 4, 5, 6, 7, 8, 9,10,11,
 		    13,14,15,16,17,18,19,20,21,22,
@@ -373,7 +374,8 @@ BOOL CEqualizer::OnInitDialog()
 			79,80,81,82,83,84,85,86,87,88
 		};
 		const int a = l[savedata.eqsoundenv];
-		m_env.SetCurSel(a);
+		*/
+		m_env.SetCurSel(savedata.eqsoundenv);
 	}
 	m_pre.AddString(L"デフォルト");
 	m_pre.AddString(L"低音ブースト");
@@ -438,7 +440,7 @@ extern BOOL reset;
 void CEqualizer::OnCbnSelchangeCombo1()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
-	int a = m_env.GetCurSel();
+/*	int a = m_env.GetCurSel();
 	int c = 0;
 	int l[] =
 	{
@@ -459,7 +461,8 @@ void CEqualizer::OnCbnSelchangeCombo1()
 		71,
 		71,72,73,74,75,76,77,78,79,80
 	};
-	savedata.eqsoundenv = l[a];
+	*/
+	savedata.eqsoundenv = m_env.GetCurSel();
 	reset = TRUE;
 }
 
