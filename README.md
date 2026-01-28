@@ -1,3 +1,5 @@
+chachakotorinのgithubから移転です。
+
 # oggYSEDbgm
 日本ファルコム (Nihon Falcom) BGMプレイヤー / 高機能メディアプレイヤー
 
