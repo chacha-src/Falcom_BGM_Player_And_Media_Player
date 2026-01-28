@@ -72,6 +72,7 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATIC_e19, m_vrittai);
 	DDX_Control(pDX, IDOK4, sdasdsdadsd);
 	DDX_Control(pDX, IDC_STATICf, m_t);
+	DDX_Control(pDX, IDC_STATIC_key, m_key);
 }
 
 
@@ -156,7 +157,7 @@ BOOL CEqualizer::OnInitDialog()
 	m_skoutei.SetMode(2);
 	m_smitsudo.SetMode(2);
 	m_srittai.SetMode(2);
-
+	
 	CFont* pFont = m_t.GetFont();
 	LOGFONT lf;
 	CFont m_newFont;
@@ -187,8 +188,9 @@ BOOL CEqualizer::OnInitDialog()
 
 	// 4. コントロールにフォントを適用します
 	m_t.SetFont(&m_newFont);
+	
 	m_t.SetPreferWideMode(TRUE);
-	m_t.SetGradation(RGB(0, 0, 0), COLOR_RANGE_SELECTION, 135, TRUE);
+	m_t.SetGradation(COLOR_GRAD_DARK_GREEN, COLOR_RANGE_SELECTION, 135, TRUE); // 135 左上から右下
 	m_t.SetDropShadow(RGB(0,0,0), 45, 15, 6, TRUE);
 
 	m_s0.SetRange(0, 200);
@@ -474,10 +476,12 @@ void CEqualizer::OnCbnSelchangeCombo5()
 	KillTimer(1);
 	savedata.eqsoundeq = m_pre.GetCurSel();
 	equaliser(0, 0, 2);
-	SetTimer(1, 100, NULL);
+	SetTimer(1, 200, NULL);
 }
 
-
+extern CString KeyCode;
+CString KeyBuf[500];
+int backms = 0;
 void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 {
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
@@ -611,6 +615,19 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	GetWindowRect(rect);
 	savedata.eqx = rect.left;
 	savedata.eqy = rect.top;
+
+	KeyBuf[0] = KeyCode;
+
+	extern int playf;
+	if (playf == 0) KeyBuf[0] = L"";
+
+	static CString buf;
+
+	if (buf != KeyBuf[0]) {
+		m_key.SetWindowText(KeyBuf[0]);
+		buf = KeyBuf[0];
+	}
+
 
 	CCustomDialogEx::OnTimer(nIDEvent);
 }

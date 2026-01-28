@@ -25,6 +25,10 @@
 #define COLOR_HEART         RGB(255, 105, 180) // 華やかなピンク
 #define COLOR_SEL_BG        RGB(221, 160, 221) // 薄い紫
 
+// グラデーション用色定義
+#define COLOR_GRAD_DARK_GREEN  RGB(0, 100, 0)    // 濃い緑
+#define COLOR_GRAD_DARK_PURPLE RGB(75, 0, 130)   // 濃い紫
+
 // ダイアログから色を変更するためのユーティリティクラス
 class CCustomControlUtility
 {

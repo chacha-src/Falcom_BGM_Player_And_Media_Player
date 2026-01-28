@@ -144,14 +144,18 @@ static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& strTe
  * @param bShadowEnable 影を有効にするか
  * @param clrBackground 背景色
  */
+ /**
+  * @brief グラデーション付きテキストを描画する
+  * 全角度対応、DPIに依存せず均一なグラデーションを適用
+  */
 static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& strText, UINT nFormat,
 	COLORREF clrStart, COLORREF clrEnd, int nDirection,
-	COLORREF clrShadow, int nShadowDirection, int nShadowDistance, int nShadowBlur, BOOL bShadowEnable, COLORREF clrBackground)
+	COLORREF clrShadow, int nShadowDirection, int nShadowDistance, int nShadowBlur, BOOL bShadowEnable, COLORREF clrBackground,
+	int nActualTextWidth = -1)
 {
-	if (strText.IsEmpty())
-		return;
+	if (strText.IsEmpty()) return;
 
-	// ドロップシャドウ描画
+	// 1. ドロップシャドウ描画
 	if (bShadowEnable && nShadowDistance > 0)
 	{
 		double rad = nShadowDirection * 3.14159265358979323846 / 180.0;
@@ -161,177 +165,137 @@ static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str
 		for (int blur = nShadowBlur; blur > 0; blur--)
 		{
 			int alpha = 255 / (nShadowBlur + 1) * (nShadowBlur - blur + 1) / nShadowBlur;
-
 			int r = (GetRValue(clrShadow) * alpha + GetRValue(clrBackground) * (255 - alpha)) / 255;
 			int g = (GetGValue(clrShadow) * alpha + GetGValue(clrBackground) * (255 - alpha)) / 255;
-			int b = (GetBValue(clrShadow) * alpha + GetRValue(clrBackground) * (255 - alpha)) / 255;
+			int b = (GetBValue(clrShadow) * alpha + GetBValue(clrBackground) * (255 - alpha)) / 255;
 
 			pDC->SetTextColor(RGB(r, g, b));
-
-			int blurOffset = blur - nShadowBlur / 2;
 			CRect rcShadow = rect;
-			rcShadow.OffsetRect(offsetX + blurOffset, offsetY + blurOffset);
+			rcShadow.OffsetRect(offsetX + (blur - nShadowBlur / 2), offsetY + (blur - nShadowBlur / 2));
 			pDC->DrawText(strText, rcShadow, nFormat);
 		}
 	}
 
-	// テキストの実際のサイズと位置を取得
-	// GetTextExtentを使って実際の描画幅を取得（DT_CALCRECTより正確）
-	CSize szTextExtent = pDC->GetTextExtent(strText);
-	int nTextWidth = (int)(szTextExtent.cx * 1.1f);
+	// 2. テキストサイズ測定
+	CSize szText = pDC->GetTextExtent(strText);
+	int nWidth = (nActualTextWidth > 0) ? nActualTextWidth : szText.cx;
+	int nHeight = szText.cy;
 
-	// テキストの実際の描画位置を計算（配置を考慮）
-	CRect rcActualText = rect;
+	// イタリック体の余白
+	LOGFONT lf;
+	pDC->GetCurrentFont()->GetLogFont(&lf);
+	int italicMargin = lf.lfItalic ? (abs(lf.lfHeight) / 2) : 0;
 
-	if (nFormat & DT_CENTER)
-	{
-		// 中央揃え
-		rcActualText.left = rect.left + (rect.Width() - nTextWidth) / 2;
-		rcActualText.right = rcActualText.left + nTextWidth;
+	// グラデーション領域の決定
+	CRect rcGradArea = rect;
+	if (nFormat & DT_CENTER) {
+		rcGradArea.left = rect.left + (rect.Width() - nWidth) / 2;
 	}
-	else if (nFormat & DT_RIGHT)
-	{
-		// 右揃え
-		rcActualText.left = rect.right - nTextWidth;
-		rcActualText.right = rect.right;
+	else if (nFormat & DT_RIGHT) {
+		rcGradArea.left = rect.right - nWidth;
 	}
-	else
-	{
-		// 左揃え（デフォルト）
-		rcActualText.right = rcActualText.left + nTextWidth;
-	}
+	rcGradArea.right = rcGradArea.left + nWidth + italicMargin;
 
-	// テキストをグラデーションで描画（1ピクセル幅のクリッピング）
-	// グラデーションは実際のテキスト範囲に対して適用
-
-	// 方向を0-359度で正規化
+	// 3. 方向の正規化
 	int normalizedDir = nDirection % 360;
 	if (normalizedDir < 0) normalizedDir += 360;
 
-	int steps = 0;
-	BOOL bHorizontal = FALSE;
+	// 4. 方向別のグラデーション描画
+	pDC->SetBkMode(TRANSPARENT);
 
-	// 方向に応じてステップ数を決定（実際のテキストサイズを使用）
-	BOOL bDiagonal = FALSE;
-
-	// 斜め方向（45度刻み）の判定
+	// 対角線グラデーション（45, 135, 225, 315度）
 	if (normalizedDir == 45 || normalizedDir == 135 || normalizedDir == 225 || normalizedDir == 315)
 	{
-		// 斜めグラデーション：対角線の長さを使用
-		int nWidth = rcActualText.Width();
-		int nHeight = rcActualText.Height();
-		steps = (int)sqrt((double)(nWidth * nWidth + nHeight * nHeight));
-		bDiagonal = TRUE;
-		bHorizontal = FALSE;
+		int diagonal = (int)sqrt((double)(rcGradArea.Width() * rcGradArea.Width() + nHeight * nHeight));
+		if (diagonal <= 0) diagonal = 1;
 
-		TRACE(_T("Diagonal gradient: dir=%d, width=%d, height=%d, diagonal=%d\n"),
-			normalizedDir, nWidth, nHeight, steps);
+		for (int i = 0; i < diagonal; i++)
+		{
+			double ratio = (double)i / diagonal;
+			int r = GetRValue(clrStart) + (int)((GetRValue(clrEnd) - GetRValue(clrStart)) * ratio);
+			int g = GetGValue(clrStart) + (int)((GetGValue(clrEnd) - GetGValue(clrStart)) * ratio);
+			int b = GetBValue(clrStart) + (int)((GetBValue(clrEnd) - GetBValue(clrStart)) * ratio);
+			pDC->SetTextColor(RGB(r, g, b));
+
+			double diagRatio = (double)i / (double)(diagonal - 1);
+			int x = rcGradArea.left + (int)(rcGradArea.Width() * diagRatio);
+
+			CRect rcSlice = rect;
+			rcSlice.left = x;
+			rcSlice.right = x + 2;
+
+			CRgn rgn;
+			rgn.CreateRectRgnIndirect(&rcSlice);
+			pDC->SelectClipRgn(&rgn);
+
+			CRect rcDrawText = rect;
+			rcDrawText.right += italicMargin;
+			pDC->DrawText(strText, rcDrawText, nFormat);
+
+			pDC->SelectClipRgn(NULL);
+		}
 	}
-	else if (normalizedDir >= 0 && normalizedDir < 90)
+	// 水平グラデーション（90-180度: 左→右、270-360度: 右→左）
+	else if ((normalizedDir >= 90 && normalizedDir < 180) || (normalizedDir >= 270 && normalizedDir < 360))
 	{
-		// 垂直グラデーション（下から上）
-		steps = rcActualText.Height();
-		bHorizontal = FALSE;
+		int totalSteps = rcGradArea.Width();
+		if (totalSteps <= 0) totalSteps = 1;
+		BOOL bLeftToRight = (normalizedDir >= 90 && normalizedDir < 180);
+
+		for (int i = 0; i < totalSteps; i++)
+		{
+			double ratio = bLeftToRight ? ((double)i / totalSteps) : (1.0 - (double)i / totalSteps);
+			int r = GetRValue(clrStart) + (int)((GetRValue(clrEnd) - GetRValue(clrStart)) * ratio);
+			int g = GetGValue(clrStart) + (int)((GetGValue(clrEnd) - GetGValue(clrStart)) * ratio);
+			int b = GetBValue(clrStart) + (int)((GetBValue(clrEnd) - GetBValue(clrStart)) * ratio);
+			pDC->SetTextColor(RGB(r, g, b));
+
+			CRect rcSlice = rect;
+			rcSlice.left = rcGradArea.left + i;
+			rcSlice.right = rcSlice.left + 1;
+
+			CRgn rgn;
+			rgn.CreateRectRgnIndirect(&rcSlice);
+			pDC->SelectClipRgn(&rgn);
+
+			CRect rcDrawText = rect;
+			rcDrawText.right += italicMargin;
+			pDC->DrawText(strText, rcDrawText, nFormat);
+
+			pDC->SelectClipRgn(NULL);
+		}
 	}
-	else if (normalizedDir >= 90 && normalizedDir < 180)
-	{
-		// 水平グラデーション（左から右）
-		steps = rcActualText.Width();
-		bHorizontal = TRUE;
-	}
-	else if (normalizedDir >= 180 && normalizedDir < 270)
-	{
-		// 垂直グラデーション（上から下）
-		steps = rcActualText.Height();
-		bHorizontal = FALSE;
-	}
+	// 垂直グラデーション（0-90度: 下→上、180-270度: 上→下）
 	else
 	{
-		// 水平グラデーション（右から左）
-		steps = rcActualText.Width();
-		bHorizontal = TRUE;
-	}
+		int totalSteps = nHeight;
+		if (totalSteps <= 0) totalSteps = 1;
+		BOOL bBottomToTop = (normalizedDir >= 0 && normalizedDir < 90);
 
-	if (steps <= 0) steps = 1;
-
-	// デバッグ出力
-	TRACE(_T("Gradient: rect(%d,%d,%d,%d), textWidth=%d, actualText(%d,%d,%d,%d), steps=%d, dir=%d\n"),
-		rect.left, rect.top, rect.right, rect.bottom,
-		nTextWidth,
-		rcActualText.left, rcActualText.top, rcActualText.right, rcActualText.bottom,
-		steps, normalizedDir);
-
-	for (int i = 0; i < steps; i++)
-	{
-		double ratio = (double)i / (double)(steps - 1);
-
-		// 色を補間
-		int r = GetRValue(clrStart) + (int)((GetRValue(clrEnd) - GetRValue(clrStart)) * ratio);
-		int g = GetGValue(clrStart) + (int)((GetGValue(clrEnd) - GetGValue(clrStart)) * ratio);
-		int b = GetBValue(clrStart) + (int)((GetBValue(clrEnd) - GetBValue(clrStart)) * ratio);
-
-		pDC->SetTextColor(RGB(r, g, b));
-
-		// 1ピクセル幅のクリッピング領域（実際のテキスト範囲を使用）
-		CRgn rgn;
-		CRect rcSlice;
-
-		if (bDiagonal)
+		for (int i = 0; i < totalSteps; i++)
 		{
-			// 斜めグラデーション（135度：左下から右上）
-			// 対角線上の位置に応じてクリッピング
-			double diagonalRatio = (double)i / (double)(steps - 1);
-			int nWidth = rcActualText.Width();
-			int nHeight = rcActualText.Height();
+			double ratio = bBottomToTop ? ((double)i / totalSteps) : (1.0 - (double)i / totalSteps);
+			int r = GetRValue(clrStart) + (int)((GetRValue(clrEnd) - GetRValue(clrStart)) * ratio);
+			int g = GetGValue(clrStart) + (int)((GetGValue(clrEnd) - GetGValue(clrStart)) * ratio);
+			int b = GetBValue(clrStart) + (int)((GetBValue(clrEnd) - GetBValue(clrStart)) * ratio);
+			pDC->SetTextColor(RGB(r, g, b));
 
-			// 135度の場合は左下(0, height)から右上(width, 0)へ
-			int x = rcActualText.left + (int)(nWidth * diagonalRatio);
-			int y = rcActualText.bottom - (int)(nHeight * diagonalRatio);
+			CRect rcSlice = rect;
+			rcSlice.top = bBottomToTop ? (rect.bottom - i - 1) : (rect.top + i);
+			rcSlice.bottom = rcSlice.top + 1;
 
-			// 斜めのクリッピング領域（簡略化：垂直線で近似）
-			rcSlice.SetRect(x, rect.top, x + 2, rect.bottom);
+			CRgn rgn;
+			rgn.CreateRectRgnIndirect(&rcSlice);
+			pDC->SelectClipRgn(&rgn);
+
+			CRect rcDrawText = rect;
+			rcDrawText.right += italicMargin;
+			pDC->DrawText(strText, rcDrawText, nFormat);
+
+			pDC->SelectClipRgn(NULL);
 		}
-		else if (bHorizontal)
-		{
-			// 水平方向のグラデーション
-			if (normalizedDir >= 90 && normalizedDir < 180)
-			{
-				// 左から右
-				rcSlice.SetRect(rcActualText.left + i, rect.top, rcActualText.left + i + 1, rect.bottom);
-			}
-			else
-			{
-				// 右から左
-				rcSlice.SetRect(rcActualText.right - i - 1, rect.top, rcActualText.right - i, rect.bottom);
-			}
-		}
-		else
-		{
-			// 垂直方向のグラデーション
-			if (normalizedDir >= 0 && normalizedDir < 90)
-			{
-				// 下から上
-				rcSlice.SetRect(rect.left, rcActualText.bottom - i - 1, rect.right, rcActualText.bottom - i);
-			}
-			else
-			{
-				// 上から下
-				rcSlice.SetRect(rect.left, rcActualText.top + i, rect.right, rcActualText.top + i + 1);
-			}
-		}
-
-		rgn.CreateRectRgnIndirect(&rcSlice);
-		pDC->SelectClipRgn(&rgn);
-
-		// 配置フラグを削除して、rcActualTextの位置で左揃え描画
-		// （配置フラグを使うと、rect内で再配置されてしまう）
-		UINT nDrawFormat = (nFormat & ~(DT_CENTER | DT_RIGHT)) | DT_LEFT;
-		pDC->DrawText(strText, rcActualText, nDrawFormat);
-
-		pDC->SelectClipRgn(NULL);
 	}
 }
-
 /**
  * @brief ハート型の図形を描画する
  */
@@ -1092,6 +1056,7 @@ CCustomStatic::~CCustomStatic()
 		m_font.DeleteObject();
 }
 
+// 0,45,90,135,180,225,270,315 が設定できる角度 0が下から上、時計回り。
 void CCustomStatic::SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDirection, BOOL bEnable)
 {
 	m_clrGradStart = colorStart;
@@ -1180,201 +1145,60 @@ void CCustomStatic::OnPaint()
 	CRect rect;
 	GetClientRect(&rect);
 
-	// 背景は常に通常色
 	dc.FillSolidRect(&rect, COLOR_DIALOG_BG);
 
 	CString strText;
 	GetWindowText(strText);
+	if (strText.IsEmpty()) return;
 
-	if (strText.IsEmpty())
-		return;
-
-	CFont* pCurrentFont = GetFont();
-	CFont* pOldFont = dc.SelectObject(pCurrentFont);
+	CFont* pBaseFont = GetFont();
+	CFont* pOldFont = dc.SelectObject(pBaseFont);
 	dc.SetBkMode(TRANSPARENT);
 
-	DWORD dwStyle = GetStyle();
-	UINT nFormat = DT_SINGLELINE;  // DT_VCENTERを削除
-
-	if (dwStyle & SS_CENTER)
-		nFormat |= DT_CENTER;
-	else if (dwStyle & SS_RIGHT)
-		nFormat |= DT_RIGHT;
-	else
-		nFormat |= DT_LEFT;
-
-	// テキストが横幅に収まるかチェック＆フォント調整
+	// 自動縮小ロジック
 	CSize szText = dc.GetTextExtent(strText);
 	CFont fontScaled;
 
 	if (szText.cx > rect.Width())
 	{
 		LOGFONT lf;
-		pCurrentFont->GetLogFont(&lf);
-		int nOriginalHeight = abs(lf.lfHeight);
-		int nTargetHeight = nOriginalHeight;
-		int nMinHeight = (nOriginalHeight * 2) / 3; // 2/3が最小サイズ
+		pBaseFont->GetLogFont(&lf);
+		int nTargetHeight = abs(lf.lfHeight);
 
-		// Phase 1: まず通常の縮小を試みる（2/3まで）
-		while (nTargetHeight > nMinHeight && szText.cx > rect.Width())
+		while (nTargetHeight > 6 && szText.cx > rect.Width())
 		{
 			nTargetHeight--;
 			lf.lfHeight = -nTargetHeight;
-			lf.lfWidth = 0; // 自動幅
-
-			if (fontScaled.GetSafeHandle())
-				fontScaled.DeleteObject();
-
+			if (fontScaled.GetSafeHandle()) fontScaled.DeleteObject();
 			fontScaled.CreateFontIndirect(&lf);
 			dc.SelectObject(&fontScaled);
 			szText = dc.GetTextExtent(strText);
 		}
-
-		// Phase 2: まだ収まらない場合の処理
-		if (szText.cx > rect.Width())
-		{
-			if (m_bPreferWideMode)
-			{
-				// 横長優先モード：縦長変形を使わずにさらに縮小を続ける
-				while (nTargetHeight > 6 && szText.cx > rect.Width())
-				{
-					nTargetHeight--;
-					lf.lfHeight = -nTargetHeight;
-					lf.lfWidth = 0; // 自動幅
-
-					if (fontScaled.GetSafeHandle())
-						fontScaled.DeleteObject();
-
-					fontScaled.CreateFontIndirect(&lf);
-					dc.SelectObject(&fontScaled);
-					szText = dc.GetTextExtent(strText);
-				}
-			}
-			else
-			{
-				// 通常モード：縦長フォントにする
-				lf.lfHeight = -nOriginalHeight; // 高さは元のまま維持
-				int nWidth = nOriginalHeight / 2; // 初期幅（高さの半分）
-
-				while (nWidth > 2 && szText.cx > rect.Width())
-				{
-					nWidth--;
-					lf.lfWidth = nWidth; // 幅を指定（縦長にする）
-
-					if (fontScaled.GetSafeHandle())
-						fontScaled.DeleteObject();
-
-					fontScaled.CreateFontIndirect(&lf);
-					dc.SelectObject(&fontScaled);
-					szText = dc.GetTextExtent(strText);
-				}
-			}
-		}
-
-		// Phase 3: 横幅が収まった後、ディセンダーが見切れるかチェック
-		if (szText.cx <= rect.Width())
-		{
-			// TEXTMETRICを使って正確なフォント高さを取得
-			TEXTMETRIC tm;
-			dc.GetTextMetrics(&tm);
-			int nFontHeight = tm.tmHeight; // アセンダー+ディセンダーを含む高さ
-
-			// ドロップシャドウが有効な場合は影の距離も考慮
-			int nShadowOffset = 0;
-			if (m_bShadowEnable && m_nShadowDistance > 0)
-			{
-				// 影の方向に応じて縦方向のオフセットを計算
-				double rad = m_nShadowDirection * 3.14159265358979323846 / 180.0;
-				nShadowOffset = (int)(abs(m_nShadowDistance * sin(rad))) + m_nShadowBlur;
-			}
-
-			int nRequiredHeight = nFontHeight + nShadowOffset;
-
-			// ディセンダーが見切れる場合は全体を縮小
-			if (nRequiredHeight > rect.Height())
-			{
-				// 収まる比率を計算
-				double scale = (double)rect.Height() / (double)nRequiredHeight;
-				int nNewHeight = (int)(abs(lf.lfHeight) * scale);
-
-				if (nNewHeight < 6) nNewHeight = 6; // 最小サイズ
-
-				lf.lfHeight = -nNewHeight;
-
-				// 幅も比例して調整（縦長の比率を維持）
-				if (lf.lfWidth > 0)
-				{
-					lf.lfWidth = (int)(lf.lfWidth * scale);
-					if (lf.lfWidth < 2) lf.lfWidth = 2;
-				}
-
-				if (fontScaled.GetSafeHandle())
-					fontScaled.DeleteObject();
-
-				fontScaled.CreateFontIndirect(&lf);
-				dc.SelectObject(&fontScaled);
-			}
-		}
 	}
 
-	// グラデーション＆ドロップシャドウ付きテキスト描画
-	// イタリック体の場合は上部と右側に余白を追加（傾きによるはみ出し対策）
-	CRect rcDraw = rect;
-	LOGFONT lfCheck;
-	memset(&lfCheck, 0, sizeof(LOGFONT));
+	// フォーマット決定
+	DWORD dwStyle = GetStyle();
+	UINT nFormat = DT_VCENTER | DT_SINGLELINE;
+	if (dwStyle & SS_CENTER) nFormat |= DT_CENTER;
+	else if (dwStyle & SS_RIGHT) nFormat |= DT_RIGHT;
+	else nFormat |= DT_LEFT;
 
-	if (fontScaled.GetSafeHandle())
-	{
-		fontScaled.GetLogFont(&lfCheck);
-	}
-	else if (pCurrentFont)
-	{
-		pCurrentFont->GetLogFont(&lfCheck);
-	}
-
-	// テキストの実際の高さを取得
-	TEXTMETRIC tm;
-	dc.GetTextMetrics(&tm);
-	int nTextHeight = tm.tmHeight;
-
-	// 手動で垂直中央配置
-	int nVerticalMargin = (rect.Height() - nTextHeight) / 2;
-	if (nVerticalMargin < 0) nVerticalMargin = 0;
-
-	rcDraw.top = rect.top + nVerticalMargin;
-	rcDraw.bottom = rcDraw.top + nTextHeight + nTextHeight; // 十分な高さを確保
-
-	// イタリック体の場合はさらに上部余白を追加
-	if (lfCheck.lfItalic)
-	{
-		int nFontHeight = abs(lfCheck.lfHeight);
-		int nItalicMarginTop = nFontHeight * 50 / 100;    // 上部に50%
-		int nItalicMarginRight = nFontHeight * 50 / 100;  // 右側に50%
-
-		rcDraw.top -= nItalicMarginTop;
-		rcDraw.bottom += nItalicMarginTop;
-		rcDraw.right += nItalicMarginRight;
-	}
-
+	// 描画実行
 	if (m_bGradEnable)
 	{
-		// テキストにグラデーション適用
-		DrawTextWithGradient(&dc, rcDraw, strText, nFormat,
+		DrawTextWithGradient(&dc, rect, strText, nFormat,
 			m_clrGradStart, m_clrGradEnd, m_nGradDirection,
 			m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-			m_bShadowEnable, COLOR_DIALOG_BG);
+			m_bShadowEnable, COLOR_DIALOG_BG, szText.cx);
 	}
 	else
 	{
-		// 通常のテキスト（ドロップシャドウのみ）
-		DrawTextWithShadow(&dc, rcDraw, strText, nFormat, RGB(0, 0, 0),
+		DrawTextWithShadow(&dc, rect, strText, nFormat, RGB(0, 0, 0),
 			m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
 			m_bShadowEnable, COLOR_DIALOG_BG);
 	}
 
-	if (fontScaled.GetSafeHandle())
-		fontScaled.DeleteObject();
-
+	if (fontScaled.GetSafeHandle()) fontScaled.DeleteObject();
 	dc.SelectObject(pOldFont);
 }
 
