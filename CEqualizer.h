@@ -81,5 +81,8 @@ public:
 	afx_msg void OnBnClickedOk4();
 	CCustomStandardButton sdasdsdadsd;
 	CCustomStatic m_t;
-	CCustomStatic m_key;
+	CCustomStatic m_keyLow;
+	CCustomStatic m_keyMid;
+	CCustomStatic m_keyHigh;
+	CCustomStatic m_keyAll;
 };

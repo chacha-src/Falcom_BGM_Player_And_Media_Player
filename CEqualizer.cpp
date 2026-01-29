@@ -72,7 +72,10 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATIC_e19, m_vrittai);
 	DDX_Control(pDX, IDOK4, sdasdsdadsd);
 	DDX_Control(pDX, IDC_STATICf, m_t);
-	DDX_Control(pDX, IDC_STATIC_key, m_key);
+	DDX_Control(pDX, IDC_STATIC_key, m_keyLow);
+	DDX_Control(pDX, IDC_STATIC_key2, m_keyMid);
+	DDX_Control(pDX, IDC_STATIC_key3, m_keyHigh);
+	DDX_Control(pDX, IDC_STATIC_key4, m_keyAll);
 }
 
 
@@ -421,7 +424,7 @@ BOOL CEqualizer::OnInitDialog()
 	m_pre.AddString(L"クリスタル");
 	m_pre.AddString(L"パーフェクト");
 	m_pre.AddString(L"ダンス/クラブ");
-	m_pre.AddString(L"R&B/ソウル");
+	m_pre.AddString(L"R&&B/ソウル");
 	m_pre.AddString(L"レゲエ");
 	m_pre.AddString(L"ブルース");
 	m_pre.AddString(L"カントリー");
@@ -435,7 +438,7 @@ BOOL CEqualizer::OnInitDialog()
 	if(savedata.eqx != -1)
 		SetWindowPos(&CWnd::wndTop, savedata.eqx, savedata.eqy, 0, 0, SWP_NOSIZE| SWP_NOZORDER| SWP_NOOWNERZORDER);
 
-	SetTimer(1, 100, NULL);
+	SetTimer(1, 50, NULL);
 	return TRUE;
 }
 extern BOOL reset;
@@ -476,11 +479,10 @@ void CEqualizer::OnCbnSelchangeCombo5()
 	KillTimer(1);
 	savedata.eqsoundeq = m_pre.GetCurSel();
 	equaliser(0, 0, 2);
-	SetTimer(1, 200, NULL);
+	SetTimer(1, 50, NULL);
 }
 
-extern CString KeyCode;
-CString KeyBuf[500];
+extern CString KeyCodeLow, KeyCodeMid, KeyCodeHigh, KeyCodeAll;
 int backms = 0;
 void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 {
@@ -616,16 +618,28 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	savedata.eqx = rect.left;
 	savedata.eqy = rect.top;
 
-	KeyBuf[0] = KeyCode;
 
+	// キーコード表示
 	extern int playf;
-	if (playf == 0) KeyBuf[0] = L"";
+	if (playf == 0) KeyCodeLow = KeyCodeMid = KeyCodeHigh = KeyCodeAll = L"";
 
-	static CString buf;
+	static CString bufLow = L"-", bufMid = L"-", bufHigh = L"-", bufAll = L"-";
 
-	if (buf != KeyBuf[0]) {
-		m_key.SetWindowText(KeyBuf[0]);
-		buf = KeyBuf[0];
+	if (bufLow != KeyCodeLow) {
+		m_keyLow.SetWindowText(L"低音域：" + KeyCodeLow);
+		bufLow = KeyCodeLow;
+	}
+	if (bufMid != KeyCodeMid) {
+		m_keyMid.SetWindowText(L"中音域：" + KeyCodeMid);
+		bufMid = KeyCodeMid;
+	}
+	if (bufHigh != KeyCodeHigh) {
+		m_keyHigh.SetWindowText(L"高音域：" + KeyCodeHigh);
+		bufHigh = KeyCodeHigh;
+	}
+	if (bufAll != KeyCodeAll) {
+		m_keyAll.SetWindowText(L"全音域：" + KeyCodeAll);//
+		bufAll = KeyCodeAll;
 	}
 
 
