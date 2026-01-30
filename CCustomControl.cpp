@@ -1930,6 +1930,9 @@ BEGIN_MESSAGE_MAP(CCustomListCtrl, CListCtrl)
 	ON_NOTIFY_REFLECT(NM_CUSTOMDRAW, OnCustomDraw)
 	ON_WM_MOUSEMOVE()
 	ON_WM_MOUSELEAVE()
+	ON_WM_VSCROLL()
+	ON_WM_HSCROLL()
+	ON_WM_MOUSEWHEEL()
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
@@ -1974,21 +1977,7 @@ void CCustomListCtrl::OnMouseMove(UINT nFlags, CPoint point)
 	LVHITTESTINFO hti;
 	hti.pt = point;
 	int nItem = SubItemHitTest(&hti);
-
-	if (m_nHotItem != nItem)
-	{
-		int nOldHot = m_nHotItem;
-		m_nHotItem = nItem;
-
-		// 最小限の再描画でちらつき防止
-		if (nOldHot >= 0)
-			RedrawItems(nOldHot, nOldHot);
-
-		if (m_nHotItem >= 0)
-			RedrawItems(m_nHotItem, m_nHotItem);
-
-		UpdateWindow();
-	}
+	UpdateHotItem(nItem);
 
 	TRACKMOUSEEVENT tme;
 	tme.cbSize = sizeof(TRACKMOUSEEVENT);
@@ -2001,15 +1990,79 @@ void CCustomListCtrl::OnMouseMove(UINT nFlags, CPoint point)
 
 void CCustomListCtrl::OnMouseLeave()
 {
-	if (m_nHotItem >= 0)
-	{
-		int nOldHot = m_nHotItem;
-		m_nHotItem = -1;
-		RedrawItems(nOldHot, nOldHot);
-		UpdateWindow();
-	}
+	UpdateHotItem(-1);
 
 	CListCtrl::OnMouseLeave();
+}
+
+void CCustomListCtrl::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	CListCtrl::OnVScroll(nSBCode, nPos, pScrollBar);
+	UpdateHotItemFromCursor();
+	RedrawVisibleItems();
+}
+
+void CCustomListCtrl::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	CListCtrl::OnHScroll(nSBCode, nPos, pScrollBar);
+	UpdateHotItemFromCursor();
+	RedrawVisibleItems();
+}
+
+BOOL CCustomListCtrl::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
+{
+	BOOL bResult = CListCtrl::OnMouseWheel(nFlags, zDelta, pt);
+	UpdateHotItemFromCursor();
+	RedrawVisibleItems();
+	return bResult;
+}
+
+void CCustomListCtrl::UpdateHotItem(int nItem)
+{
+	if (m_nHotItem == nItem)
+		return;
+
+	int nOldHot = m_nHotItem;
+	m_nHotItem = nItem;
+
+	// 最小限の再描画でちらつき防止
+	if (nOldHot >= 0)
+		RedrawItems(nOldHot, nOldHot);
+
+	if (m_nHotItem >= 0)
+		RedrawItems(m_nHotItem, m_nHotItem);
+
+	UpdateWindow();
+}
+
+void CCustomListCtrl::UpdateHotItemFromCursor()
+{
+	if (!GetSafeHwnd())
+		return;
+
+	CPoint pt;
+	if (!GetCursorPos(&pt))
+		return;
+
+	ScreenToClient(&pt);
+
+	LVHITTESTINFO hti;
+	hti.pt = pt;
+	int nItem = SubItemHitTest(&hti);
+	UpdateHotItem(nItem);
+}
+
+void CCustomListCtrl::RedrawVisibleItems()
+{
+	int nTop = GetTopIndex();
+	int nBottom = nTop + GetCountPerPage();
+	int nCount = GetItemCount();
+
+	if (nBottom >= nCount)
+		nBottom = nCount - 1;
+
+	if (nTop >= 0 && nBottom >= nTop)
+		RedrawItems(nTop, nBottom);
 }
 
 BOOL CCustomListCtrl::OnEraseBkgnd(CDC* pDC)
@@ -2098,6 +2151,13 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 		// サブアイテム0の処理
 		if (nSubItem == 0)
 		{
+			// 選択時のハート（アイコンの下に配置）
+			if (bSel)
+			{
+				CRect rcHeart(rect.left + 2, rect.top + 4, rect.left + 16, rect.top + 18);
+				DrawHeart(pDC, rcHeart, COLOR_HEART);
+			}
+
 			// アイコン描画
 			CRect rcIcon;
 			if (GetItemRect(nItem, &rcIcon, LVIR_ICON))
@@ -2112,13 +2172,6 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 				{
 					DrawTransparentIcon(pDC, pImgList, lvi.iImage, rcIcon, RGB(255, 255, 255));
 				}
-			}
-
-			// 選択時のハート
-			if (bSel)
-			{
-				CRect rcHeart(rect.left + 2, rect.top + 4, rect.left + 16, rect.top + 18);
-				DrawHeart(pDC, rcHeart, COLOR_HEART);
 			}
 
 			// ホバー時に小さなキラキラ

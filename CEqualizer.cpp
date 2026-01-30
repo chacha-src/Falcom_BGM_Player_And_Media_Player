@@ -258,9 +258,9 @@ BOOL CEqualizer::OnInitDialog()
 	m_s13.SetPos(200 - savedata.eq[13]);
 	m_s14.SetPos(200 - savedata.eq[14]);
 
-	// 環境音響プリセット51種
+	// 環境音響プリセット101種
 	
-	//0
+//0
 	m_env.AddString(L"なし");
 	//1
 	m_env.AddString(L"--[[基本空間 1-10]]--", TRUE);
@@ -366,6 +366,29 @@ BOOL CEqualizer::OnInitDialog()
 	m_env.AddString(L"地下道(狭) (圧迫的狭小空間)");
 	m_env.AddString(L"展示室 (美術館より吸音的)");
 	m_env.AddString(L"アトリエ (創作空間の独特さ)");
+
+	m_env.AddString(L"--[[SFX/未来 81-100]]--", TRUE);
+	m_env.AddString(L"サイバーパンク路地 (金属反射＋狭い空間、ネオン感)");
+	m_env.AddString(L"宇宙船ブリッジ (クリーンで硬質、短い反射)");
+	m_env.AddString(L"ワープトンネル (揺らぎと長い残響、引き伸ばし)");
+	m_env.AddString(L"量子ホール (不安定拡散、浮遊感)");
+	m_env.AddString(L"無限回廊 (規則的エコー、長く続く反射)");
+	m_env.AddString(L"逆再生空間 (早い反射と遅い尾、異常な広がり)");
+	m_env.AddString(L"タイムストップ室 (ほぼ無響＋硬い反射)");
+	m_env.AddString(L"データセンター (低域振動、機械的反射)");
+	m_env.AddString(L"巨大機械内部 (金属共鳴、重い反射)");
+	m_env.AddString(L"AIホログラム室 (透明感、明るい反射)");
+	m_env.AddString(L"重力ゼロ船庫 (低密度で長残響)");
+	m_env.AddString(L"惑星ドーム都市 (超巨大＋ガラス反射)");
+	m_env.AddString(L"VRシミュレーター (過剰ステレオ＋揺れ)");
+	m_env.AddString(L"レーザー通路 (鋭いフラッター、硬質)");
+	m_env.AddString(L"異次元裂け目 (不規則ディレイ、崩れる残響)");
+	m_env.AddString(L"夢の中 (柔らかく滲む、低コントラスト)");
+	m_env.AddString(L"水晶洞 (高域きらめき、長い余韻)");
+	m_env.AddString(L"廃宇宙ステーション (冷たく乾いた残響)");
+	m_env.AddString(L"ブラックホール縁 (超長残響＋低域膨張)");
+	m_env.AddString(L"サイバー聖堂 (金属×巨大空間、光沢残響)");
+
 	{
 		/*const int l[81] =
 		{   0,
@@ -752,3 +775,4 @@ void CEqualizer::OnBnClickedOk4()
 	s.Format(L"%d", savedata.eq[19]);
 	m_vrittai.SetWindowText(s);
 }
+

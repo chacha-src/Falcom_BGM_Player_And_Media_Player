@@ -327,6 +327,9 @@ protected:
 	afx_msg void OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);  // マウス移動処理
 	afx_msg void OnMouseLeave();                          // マウス離脱処理
+	afx_msg void OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);                  // 背景消去処理
 	afx_msg void OnPaint();                                // 描画処理
 
@@ -335,6 +338,9 @@ protected:
 private:
 	CBrush m_brBackground;
 	int m_nHotItem;  // ホバー中のアイテム番号
+	void UpdateHotItem(int nItem);
+	void UpdateHotItemFromCursor();
+	void RedrawVisibleItems();
 };
 
 // 通常ボタン用
