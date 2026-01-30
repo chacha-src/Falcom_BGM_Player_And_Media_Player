@@ -155,9 +155,12 @@ class CCustomEdit : public CEdit
 public:
 	CCustomEdit();
 	virtual ~CCustomEdit();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
 
 protected:
 	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
 	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
@@ -181,6 +184,8 @@ class CCustomStatic : public CStatic
 public:
 	CCustomStatic();
 	virtual ~CCustomStatic();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
 
 	void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
 
@@ -198,6 +203,7 @@ public:
 
 protected:
 	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 
@@ -231,9 +237,12 @@ class CCustomListBox : public CListBox
 public:
 	CCustomListBox();
 	virtual ~CCustomListBox();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
 
 protected:
 	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
 	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
@@ -254,6 +263,8 @@ class CCustomComboBox : public CComboBox
 public:
 	CCustomComboBox();
 	virtual ~CCustomComboBox();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
 
 	// 拡張AddString - 第2引数でラベル項目（選択不可）を指定可能
 	int AddString(LPCTSTR lpszString, BOOL bDisabled = FALSE);
@@ -285,6 +296,7 @@ protected:
 	int PhysicalToLogical(int nPhysical) const; // 実際の項目番号 → 選択可能な番号
 
 	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
 	virtual void DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);
 	virtual void MeasureItem(LPMEASUREITEMSTRUCT lpMeasureItemStruct);
 	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
@@ -305,9 +317,12 @@ class CCustomListCtrl : public CListCtrlA
 public:
 	CCustomListCtrl();
 	virtual ~CCustomListCtrl();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
 
 protected:
+	BOOL m_bAutoDelete;
 	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
 	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
 	afx_msg void OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);  // マウス移動処理
@@ -330,6 +345,8 @@ class CCustomStandardButton : public CButton
 public:
 	CCustomStandardButton();
 	virtual ~CCustomStandardButton();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
 
 	// グラデーション機能
 	void SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDirection, BOOL bEnable);
@@ -341,6 +358,7 @@ public:
 
 protected:
 	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
 	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
@@ -377,6 +395,8 @@ class CCustomSliderCtrl : public CSliderCtrl
 public:
 	CCustomSliderCtrl();
 	virtual ~CCustomSliderCtrl();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
 
 	// モード設定 (0: オーディオ風, 1: 目盛り付き(紫), 2: 目盛り付き(緑))
 	void SetMode(int nMode);
@@ -387,6 +407,7 @@ protected:
 	int m_nMode; // 現在の描画モード
 
 	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg LRESULT OnMouseMoveMsg(WPARAM wParam, LPARAM lParam);
@@ -411,6 +432,8 @@ class CCustomRangeSliderCtrl : public CSliderCtrl
 public:
 	CCustomRangeSliderCtrl();
 	virtual ~CCustomRangeSliderCtrl();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
 
 	void SetRange(int nMin, int nMax, BOOL bRedraw = TRUE);
 	void SetSelection(int nMin, int nMax);
@@ -421,6 +444,7 @@ public:
 
 protected:
 	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
@@ -451,6 +475,8 @@ class CCustomCheckBox : public CButton
 public:
 	CCustomCheckBox();
 	virtual ~CCustomCheckBox();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
 
 	void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
 	int GetCheck();
@@ -458,6 +484,7 @@ public:
 
 protected:
 	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
@@ -486,9 +513,12 @@ class CCustomGroupBox : public CButton
 public:
 	CCustomGroupBox();
 	virtual ~CCustomGroupBox();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
 
 protected:
 	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 

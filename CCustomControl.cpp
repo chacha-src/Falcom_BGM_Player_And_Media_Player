@@ -940,6 +940,11 @@ CCustomEdit::~CCustomEdit()
 		m_brBackground.DeleteObject();
 }
 
+void CCustomEdit::PostNcDestroy()
+{
+	CEdit::PostNcDestroy();
+}
+
 void CCustomEdit::PreSubclassWindow()
 {
 	CEdit::PreSubclassWindow();
@@ -1056,6 +1061,11 @@ CCustomStatic::~CCustomStatic()
 		m_font.DeleteObject();
 }
 
+void CCustomStatic::PostNcDestroy()
+{
+	CStatic::PostNcDestroy();
+}
+
 // 0,45,90,135,180,225,270,315 が設定できる角度 0が下から上、時計回り。
 void CCustomStatic::SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDirection, BOOL bEnable)
 {
@@ -1155,25 +1165,72 @@ void CCustomStatic::OnPaint()
 	CFont* pOldFont = dc.SelectObject(pBaseFont);
 	dc.SetBkMode(TRANSPARENT);
 
-	// 自動縮小ロジック
-	CSize szText = dc.GetTextExtent(strText);
-	CFont fontScaled;
+	// 自動縮小ロジック（横幅優先、必要なら縦長化）
+	LOGFONT lfBase;
+	pBaseFont->GetLogFont(&lfBase);
+	const int kMinHeight = 6;
+	const int baseHeight = abs(lfBase.lfHeight);
 
-	if (szText.cx > rect.Width())
+	auto MeasureText = [&](int height) -> CSize
 	{
-		LOGFONT lf;
-		pBaseFont->GetLogFont(&lf);
-		int nTargetHeight = abs(lf.lfHeight);
+		LOGFONT lfTry = lfBase;
+		lfTry.lfHeight = -height;
+		CFont fontTry;
+		fontTry.CreateFontIndirect(&lfTry);
+		CFont* pOld = dc.SelectObject(&fontTry);
+		CSize size = dc.GetTextExtent(strText);
+		dc.SelectObject(pOld);
+		fontTry.DeleteObject();
+		return size;
+	};
 
-		while (nTargetHeight > 6 && szText.cx > rect.Width())
+	int targetHeight = baseHeight;
+	CSize szText = dc.GetTextExtent(strText);
+	if (szText.cx > rect.Width() || szText.cy > rect.Height())
+	{
+		while (targetHeight > kMinHeight)
 		{
-			nTargetHeight--;
-			lf.lfHeight = -nTargetHeight;
-			if (fontScaled.GetSafeHandle()) fontScaled.DeleteObject();
-			fontScaled.CreateFontIndirect(&lf);
-			dc.SelectObject(&fontScaled);
-			szText = dc.GetTextExtent(strText);
+			CSize sizeTry = MeasureText(targetHeight);
+			if (sizeTry.cx <= rect.Width() && sizeTry.cy <= rect.Height())
+			{
+				szText = sizeTry;
+				break;
+			}
+			targetHeight--;
 		}
+
+		if (targetHeight <= kMinHeight)
+		{
+			targetHeight = kMinHeight;
+			szText = MeasureText(targetHeight);
+		}
+	}
+
+	const BOOL bScaledDown = (targetHeight < baseHeight);
+	if (!m_bPreferWideMode && bScaledDown)
+	{
+		for (int h = targetHeight + 1; h <= baseHeight; ++h)
+		{
+			CSize sizeTry = MeasureText(h);
+			if (sizeTry.cx <= rect.Width() && sizeTry.cy <= rect.Height())
+			{
+				targetHeight = h;
+				szText = sizeTry;
+			}
+			else
+			{
+				break;
+			}
+		}
+	}
+
+	CFont fontScaled;
+	if (targetHeight != baseHeight)
+	{
+		LOGFONT lfScaled = lfBase;
+		lfScaled.lfHeight = -targetHeight;
+		fontScaled.CreateFontIndirect(&lfScaled);
+		dc.SelectObject(&fontScaled);
 	}
 
 	// フォーマット決定
@@ -1230,6 +1287,11 @@ CCustomListBox::~CCustomListBox()
 {
 	if (m_brBackground.GetSafeHandle())
 		m_brBackground.DeleteObject();
+}
+
+void CCustomListBox::PostNcDestroy()
+{
+	CListBox::PostNcDestroy();
 }
 
 void CCustomListBox::PreSubclassWindow()
@@ -1351,6 +1413,11 @@ CCustomComboBox::~CCustomComboBox()
 {
 	if (m_brBackground.GetSafeHandle())
 		m_brBackground.DeleteObject();
+}
+
+void CCustomComboBox::PostNcDestroy()
+{
+	CComboBox::PostNcDestroy();
 }
 
 int CCustomComboBox::AddString(LPCTSTR lpszString, BOOL bDisabled)
@@ -1879,6 +1946,11 @@ CCustomListCtrl::~CCustomListCtrl()
 		m_brBackground.DeleteObject();
 }
 
+void CCustomListCtrl::PostNcDestroy()
+{
+	CListCtrlA::PostNcDestroy();
+}
+
 void CCustomListCtrl::PreSubclassWindow()
 {
 	CListCtrlA::PreSubclassWindow();
@@ -2132,6 +2204,11 @@ CCustomStandardButton::~CCustomStandardButton()
 		m_brBackground.DeleteObject();
 }
 
+void CCustomStandardButton::PostNcDestroy()
+{
+	CButton::PostNcDestroy();
+}
+
 void CCustomStandardButton::SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDirection, BOOL bEnable)
 {
 	m_clrGradStart = colorStart;
@@ -2376,6 +2453,11 @@ CCustomSliderCtrl::CCustomSliderCtrl()
 
 CCustomSliderCtrl::~CCustomSliderCtrl()
 {
+}
+
+void CCustomSliderCtrl::PostNcDestroy()
+{
+	CSliderCtrl::PostNcDestroy();
 }
 
 void CCustomSliderCtrl::SetMode(int m)
@@ -2904,6 +2986,11 @@ CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl()
 {
 }
 
+void CCustomRangeSliderCtrl::PostNcDestroy()
+{
+	CSliderCtrl::PostNcDestroy();
+}
+
 void CCustomRangeSliderCtrl::PreSubclassWindow()
 {
 	CSliderCtrl::PreSubclassWindow();
@@ -3203,6 +3290,11 @@ CCustomCheckBox::~CCustomCheckBox()
 {
 }
 
+void CCustomCheckBox::PostNcDestroy()
+{
+	CButton::PostNcDestroy();
+}
+
 int CCustomCheckBox::GetCheck()
 {
 	return m_nCheck;
@@ -3401,6 +3493,11 @@ CCustomGroupBox::~CCustomGroupBox()
 {
 }
 
+void CCustomGroupBox::PostNcDestroy()
+{
+	CButton::PostNcDestroy();
+}
+
 void CCustomGroupBox::PreSubclassWindow()
 {
 	CButton::PreSubclassWindow();
@@ -3566,26 +3663,31 @@ void CCustomDialog::SubclassChildControls()
 		if (_tcsicmp(szClassName, _T("Edit")) == 0)
 		{
 			CCustomEdit* pEdit = new CCustomEdit();
+			pEdit->EnableAutoDelete();
 			pEdit->SubclassWindow(hWndChild);
 		}
 		else if (_tcsicmp(szClassName, _T("Static")) == 0)
 		{
 			CCustomStatic* pStatic = new CCustomStatic();
+			pStatic->EnableAutoDelete();
 			pStatic->SubclassWindow(hWndChild);
 		}
 		else if (_tcsicmp(szClassName, _T("ListBox")) == 0)
 		{
 			CCustomListBox* pListBox = new CCustomListBox();
+			pListBox->EnableAutoDelete();
 			pListBox->SubclassWindow(hWndChild);
 		}
 		else if (_tcsicmp(szClassName, _T("ComboBox")) == 0)
 		{
 			CCustomComboBox* pCombo = new CCustomComboBox();
+			pCombo->EnableAutoDelete();
 			pCombo->SubclassWindow(hWndChild);
 		}
 		else if (_tcsicmp(szClassName, WC_LISTVIEW) == 0)
 		{
 			CCustomListCtrl* pListCtrl = new CCustomListCtrl();
+			pListCtrl->EnableAutoDelete();
 			pListCtrl->SubclassWindow(hWndChild);
 		}
 		else if (_tcsicmp(szClassName, _T("Button")) == 0)
@@ -3596,16 +3698,19 @@ void CCustomDialog::SubclassChildControls()
 			if (nType == BS_GROUPBOX)
 			{
 				CCustomGroupBox* pGroup = new CCustomGroupBox();
+				pGroup->EnableAutoDelete();
 				pGroup->SubclassWindow(hWndChild);
 			}
 			else if (nType == BS_PUSHBUTTON || nType == BS_DEFPUSHBUTTON || (lStyle & BS_PUSHLIKE))
 			{
 				CCustomStandardButton* pButton = new CCustomStandardButton();
+				pButton->EnableAutoDelete();
 				pButton->SubclassWindow(hWndChild);
 			}
 			else
 			{
 				CCustomCheckBox* pCheck = new CCustomCheckBox();
+				pCheck->EnableAutoDelete();
 				pCheck->SubclassWindow(hWndChild);
 			}
 		}
@@ -3616,11 +3721,13 @@ void CCustomDialog::SubclassChildControls()
 			if (lStyle & TBS_ENABLESELRANGE)
 			{
 				CCustomRangeSliderCtrl* pRangeSlider = new CCustomRangeSliderCtrl();
+				pRangeSlider->EnableAutoDelete();
 				pRangeSlider->SubclassWindow(hWndChild);
 			}
 			else
 			{
 				CCustomSliderCtrl* pSlider = new CCustomSliderCtrl();
+				pSlider->EnableAutoDelete();
 				pSlider->SubclassWindow(hWndChild);
 			}
 		}
@@ -3837,26 +3944,31 @@ void CCustomDialogEx::SubclassChildControls()
 		if (_tcsicmp(szClassName, _T("Edit")) == 0)
 		{
 			CCustomEdit* pEdit = new CCustomEdit();
+			pEdit->EnableAutoDelete();
 			pEdit->SubclassWindow(hWndChild);
 		}
 		else if (_tcsicmp(szClassName, _T("Static")) == 0)
 		{
 			CCustomStatic* pStatic = new CCustomStatic();
+			pStatic->EnableAutoDelete();
 			pStatic->SubclassWindow(hWndChild);
 		}
 		else if (_tcsicmp(szClassName, _T("ListBox")) == 0)
 		{
 			CCustomListBox* pListBox = new CCustomListBox();
+			pListBox->EnableAutoDelete();
 			pListBox->SubclassWindow(hWndChild);
 		}
 		else if (_tcsicmp(szClassName, _T("ComboBox")) == 0)
 		{
 			CCustomComboBox* pCombo = new CCustomComboBox();
+			pCombo->EnableAutoDelete();
 			pCombo->SubclassWindow(hWndChild);
 		}
 		else if (_tcsicmp(szClassName, WC_LISTVIEW) == 0)
 		{
 			CCustomListCtrl* pListCtrl = new CCustomListCtrl();
+			pListCtrl->EnableAutoDelete();
 			pListCtrl->SubclassWindow(hWndChild);
 		}
 		else if (_tcsicmp(szClassName, _T("Button")) == 0)
@@ -3868,22 +3980,26 @@ void CCustomDialogEx::SubclassChildControls()
 				if (lStyle & BS_PUSHLIKE)
 				{
 					CCustomStandardButton* pButton = new CCustomStandardButton();
+				pButton->EnableAutoDelete();
 					pButton->SubclassWindow(hWndChild);
 				}
 				else
 				{
 					CCustomCheckBox* pCheck = new CCustomCheckBox();
+				pCheck->EnableAutoDelete();
 					pCheck->SubclassWindow(hWndChild);
 				}
 			}
 			else if (lStyle & BS_GROUPBOX)
 			{
 				CCustomGroupBox* pGroup = new CCustomGroupBox();
+				pGroup->EnableAutoDelete();
 				pGroup->SubclassWindow(hWndChild);
 			}
 			else
 			{
 				CCustomStandardButton* pButton = new CCustomStandardButton();
+				pButton->EnableAutoDelete();
 				pButton->SubclassWindow(hWndChild);
 			}
 		}
@@ -3894,11 +4010,13 @@ void CCustomDialogEx::SubclassChildControls()
 			if (lStyle & TBS_ENABLESELRANGE)
 			{
 				CCustomRangeSliderCtrl* pRangeSlider = new CCustomRangeSliderCtrl();
+				pRangeSlider->EnableAutoDelete();
 				pRangeSlider->SubclassWindow(hWndChild);
 			}
 			else
 			{
 				CCustomSliderCtrl* pSlider = new CCustomSliderCtrl();
+				pSlider->EnableAutoDelete();
 				pSlider->SubclassWindow(hWndChild);
 			}
 		}
