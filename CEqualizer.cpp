@@ -644,7 +644,12 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 
 	// キーコード表示
 	extern int playf;
-	if (playf == 0) KeyCodeLow = KeyCodeMid = KeyCodeHigh = KeyCodeAll = L"";
+	if (playf == 0) {
+		KeyCodeLow  = L"  , <  >";
+		KeyCodeMid  = L"  , <  >";
+		KeyCodeHigh = L"  , <  >";
+		KeyCodeAll  = L"  , <  >";
+	}
 
 	static CString bufLow = L"-", bufMid = L"-", bufHigh = L"-", bufAll = L"-";
 
