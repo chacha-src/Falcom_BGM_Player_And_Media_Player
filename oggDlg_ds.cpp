@@ -1238,8 +1238,66 @@ static int g_lastEnvPreset = -1;
 static int g_lastEqValues[15];
 static int g_lastExtendedParams[5];
 static int g_lastEffectAmount = 50;
-static float g_autoGain = 1.0f;
 static BOOL g_initialized = FALSE;
+
+/*
+■ リミッターの動作を調整したい場合
+
+1. threshold（圧縮開始レベル）
+- 0.90f: 安全重視、早めに圧縮開始（ダイナミックレンジやや狭い）
+- 0.95f : バランス良好（推奨）
+- 0.98f : ダイナミックレンジ優先（僅かなクリップリスク）
+
+2. attackTime（アタックタイム）
+- 0.0005f (0.5ms) : 超高速、瞬時のピーク対応
+- 0.001f (1ms) : 高速（推奨）
+- 0.005f (5ms) : やや緩やか、自然
+
+3. releaseTime（リリースタイム）
+- 0.050f (50ms) : 速い戻り、パンチ重視
+- 0.100f (100ms) : バランス良好（推奨）
+- 0.200f (200ms) : 自然な戻り、滑らか重視
+- 0.300f (300ms) : 非常に滑らか
+
+■ 調整例
+
+// より安全重視の設定
+g_limiter[ch].threshold = 0.92f;
+attackTime = 0.0005f;  // 超高速反応
+releaseTime = 0.150f;  // やや遅めの戻り
+
+// ダイナミックレンジ優先の設定
+g_limiter[ch].threshold = 0.97f;
+attackTime = 0.002f;   // 少しゆったり
+releaseTime = 0.200f;  // 自然な戻り
+
+■ 動作原理
+
+1. 入力信号がthresholdを超えたら、超えた分だけゲインを下げる
+2. アタックタイムで素早くゲインを下げる（ピーク防止）
+3. リリースタイムでゆっくりゲインを戻す（自然な音）
+4. 最後にソフトクリッピングで安全装置
+
+■ メリット
+
+✓ 静かな部分は影響を受けない
+✓ ピーク部分だけ自然に圧縮
+✓ 音割れ完全防止
+✓ 音響モデルの特性を保持
+✓ g_autoGainのような「小さいまま」問題が解消
+*/
+// ダイナミックリミッター構造体定義
+typedef struct {
+	float envelope;      // 現在のゲインリダクション
+	float threshold;     // 圧縮開始レベル（0.95f推奨）
+	float attackCoeff;   // アタック係数（プリ計算済み）
+	float releaseCoeff;  // リリース係数（プリ計算済み）
+} DynamicLimiter;
+
+static DynamicLimiter g_limiter[2] = {
+	{ 1.0f, 0.95f, 0.0f, 0.0f },  // L ch
+	{ 1.0f, 0.95f, 0.0f, 0.0f }   // R ch
+};
 
 // ===== EQ Frequencies =====
 static const float EQ_FREQS[EQ_BANDS] = {
@@ -3307,8 +3365,20 @@ static void InitEngine(int rate) {
 	for (int i = 0; i < 15; i++) g_lastEqValues[i] = 100;
 	for (int i = 0; i < 5; i++) g_lastExtendedParams[i] = 100;
 
+	// 【追加】ダイナミックリミッター初期化
+	float attackTime = 0.001f;   // 1ms - 高速反応
+	float releaseTime = 0.100f;  // 100ms - 自然な戻り
+
+	for (int ch = 0; ch < 2; ch++) {
+		g_limiter[ch].envelope = 1.0f;
+		g_limiter[ch].threshold = 0.95f;  // 0.95を超えたら圧縮開始
+
+		// アタック/リリース係数をプリ計算（CPU最適化）
+		g_limiter[ch].attackCoeff = expf(-1.0f / (attackTime * rate));
+		g_limiter[ch].releaseCoeff = expf(-1.0f / (releaseTime * rate));
+	}
+
 	g_lastEffectAmount = 50;
-	g_autoGain = 1.0f;
 	g_initialized = TRUE;
 }
 
@@ -3363,6 +3433,54 @@ static void ApplyEnvSeparation(int presetIndex, EnvParams* env) {
 	env->damping = ClampFloat(env->damping + kDampBias[category] + h2 * 0.20f, 0.0f, 1.0f);
 }
 
+// ===============================
+// ダイナミックリミッター補助関数
+// ===============================
+
+// ソフトクリッピング - 1.0付近で滑らかに圧縮
+static float SoftClip(float x) {
+	if (x > 0.95f) {
+		float excess = x - 0.95f;
+		return 0.95f + tanhf(excess * 10.0f) * 0.05f;
+	}
+	else if (x < -0.95f) {
+		float excess = x + 0.95f;
+		return -0.95f + tanhf(excess * 10.0f) * 0.05f;
+	}
+	return x;
+}
+
+// ダイナミックリミッター処理
+static float ProcessDynamicLimiter(DynamicLimiter* lim, float input) {
+	float absInput = fabsf(input);
+
+	// 必要なゲインリダクション計算
+	float targetGain = 1.0f;
+	if (absInput > lim->threshold) {
+		targetGain = lim->threshold / absInput;
+	}
+
+	// エンベロープ追従（アタック/リリース）
+	float coeff;
+	if (targetGain < lim->envelope) {
+		// 音が大きくなった → 素早く圧縮
+		coeff = lim->attackCoeff;
+	}
+	else {
+		// 音が小さくなった → ゆっくり戻す
+		coeff = lim->releaseCoeff;
+	}
+
+	lim->envelope = targetGain + coeff * (lim->envelope - targetGain);
+
+	// ゲイン適用 + ソフトクリッピング
+	return SoftClip(input * lim->envelope);
+}
+
+// ===============================
+// equaliser() - メイン処理関数 完全版
+// ===============================
+
 void equaliser(void* data, int len, BOOL reset) {
 	// reset=2: EQプリセット同期モード
 	if (reset == 2) {
@@ -3375,7 +3493,7 @@ void equaliser(void* data, int len, BOOL reset) {
 	}
 
 	BOOL forceUpdate = FALSE;
-	if (reset == 1 || !g_initialized || g_lastRate != wavbit || savedata.eqsoundenv != g_lastEnvPreset) {
+	if (reset == 1 || !g_initialized || g_lastRate != wavbit) {
 		InitEngine(wavbit);
 		forceUpdate = TRUE;
 	}
@@ -3463,6 +3581,14 @@ void equaliser(void* data, int len, BOOL reset) {
 	// 環境音響設定の更新
 	if (currentEnvPre != g_lastEnvPreset || effectAmount != g_lastEffectAmount || forceUpdate) {
 		if (currentEnvPre < 0 || currentEnvPre >= ENV_PRESET_COUNT) currentEnvPre = 0;
+
+		// 環境プリセット変更時はリミッターをリセット
+		if (currentEnvPre != g_lastEnvPreset) {
+			for (int ch = 0; ch < 2; ch++) {
+				g_limiter[ch].envelope = 1.0f;
+			}
+		}
+
 		const EnvParams* ep = &ENV_PRESETS[currentEnvPre];
 
 		for (int ch = 0; ch < MAX_CH; ch++) {
@@ -3767,17 +3893,11 @@ void equaliser(void* data, int len, BOOL reset) {
 			if (ch >= MAX_CH) continue;
 
 			float s = (ch == 0) ? leftSamples[bufferIndex] : rightSamples[bufferIndex];
-			float finalOut = s * g_autoGain;
 
-			// ピーク検出とオートゲイン更新
-			float absS = fabsf(finalOut);
-			if (absS > 1.0f) {
-				g_autoGain = 1.0f / (absS / g_autoGain);
-				finalOut = (finalOut > 0) ? 1.0f : -1.0f;
-			}
+			// ダイナミックリミッター処理（音割れ完全防止）
+			float finalOut = ProcessDynamicLimiter(&g_limiter[ch], s);
 
-			// ソフトリミッターとハードクリップ
-			finalOut = SoftLimiter(finalOut);
+			// 最終的なハードクリップ（安全装置）
 			if (finalOut > 1.0f) finalOut = 1.0f;
 			if (finalOut < -1.0f) finalOut = -1.0f;
 
