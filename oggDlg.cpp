@@ -14378,7 +14378,7 @@ void COggDlg::gamenkill()
 		//動画画面が閉じるのを待つ
 		for (; killw == 0;)
 			DoEvent();
-		delete pMainFrame1;
+		//delete pMainFrame1;
 		pMainFrame1 = NULL;
 		//		for(int i=0;i<20;i++){DoEvent();Sleep(5);};
 	}
