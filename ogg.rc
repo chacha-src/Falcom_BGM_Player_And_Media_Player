@@ -819,10 +819,10 @@ BEGIN
     LTEXT           "密度",IDC_STATIC,451,35,15,8
     LTEXT           "立体感",IDC_STATIC,470,35,22,8
     DEFPUSHBUTTON   "グローバルリセット",IDOK4,394,164,96,14
-    LTEXT           "",IDC_STATIC_key,260,5,111,8
-    LTEXT           "",IDC_STATIC_key2,377,5,111,8
-    LTEXT           "",IDC_STATIC_key3,260,20,111,8
-    LTEXT           "",IDC_STATIC_key4,377,20,111,8
+    LTEXT           "",IDC_STATIC_key,230,5,130,8
+    LTEXT           "",IDC_STATIC_key2,363,5,130,8
+    LTEXT           "",IDC_STATIC_key3,230,20,130,8
+    LTEXT           "",IDC_STATIC_key4,363,20,130,8
 END
 
 

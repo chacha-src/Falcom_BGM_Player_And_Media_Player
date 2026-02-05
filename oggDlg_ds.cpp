@@ -1302,7 +1302,9 @@ static DynamicLimiter g_limiter[2] = {
 
 // ===== EQ Frequencies =====
 static const float EQ_FREQS[EQ_BANDS] = {
-	32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000, 31.5, 62.5, 125, 250, 500
+	   25.0f, 40.0f, 63.0f, 100.0f, 160.0f,
+	250.0f, 400.0f, 630.0f, 1000.0f, 1600.0f,
+	2500.0f, 4000.0f, 6300.0f, 10000.0f, 16000.0f
 };
 
 // External references (assumed to exist in main program)
@@ -3440,13 +3442,13 @@ static void ApplyEnvSeparation(int presetIndex, EnvParams* env) {
 
 // ソフトクリッピング - 1.0付近で滑らかに圧縮
 static float SoftClip(float x) {
-	if (x > 0.95f) {
-		float excess = x - 0.95f;
-		return 0.95f + tanhf(excess * 10.0f) * 0.05f;
+	if (x > 0.98f) {
+		float excess = x - 0.98f;
+		return 0.98f + tanhf(excess * 10.0f) * 0.02f;
 	}
-	else if (x < -0.95f) {
-		float excess = x + 0.95f;
-		return -0.95f + tanhf(excess * 10.0f) * 0.05f;
+	else if (x < -0.98f) {
+		float excess = x + 0.98f;
+		return -0.98f + tanhf(excess * 10.0f) * 0.02f;
 	}
 	return x;
 }
@@ -3847,17 +3849,34 @@ void equaliser(void* data, int len, BOOL reset) {
 	if (eqChanged || extendedChanged) {
 		memcpy(g_lastEqValues, savedata.eq, sizeof(int) * 15);
 		for (int ch = 0; ch < MAX_CH; ch++) {
+			// EQフィルタ計算（各バンドにsavedata.eq[b]の値を渡す）
 			for (int b = 0; b < EQ_BANDS; b++) {
-				CalcPeakingEQ(&g_channels[ch].eqFilters[b], EQ_FREQS[b], 1.414f, (float)savedata.eq[b], wavbitbackup);
+				// 高域のQを少し下げてキーンとする音を防ぐ
+				float qVal = (b >= 10) ? 1.0f : 1.414f;  // 高域はQ=1.0
+
+				// savedata.eq[b]をそのまま渡す（100が基準、0-200の範囲）
+				CalcPeakingEQ(&g_channels[ch].eqFilters[b],
+					EQ_FREQS[b],           // 低音から順に
+					qVal,                   // 高域はQを下げる
+					savedata.eq[b],         // 直接値を渡す
+					wavbitbackup);
 			}
+
 			float clarityDb = (clarity - 100.0f) * 0.18f;
-			CalcPeakingEQ(&g_channels[ch].clarityFilter, 5000.0f, 1.5f, 100.0f + clarityDb / 0.12f, wavbitbackup);
+			CalcPeakingEQ(&g_channels[ch].clarityFilter, 5000.0f, 1.5f,
+				100.0f + clarityDb / 0.12f, wavbitbackup);
+
 			float balanceDb = (balance - 100.0f) * 0.12f;
-			CalcShelvingEQ(&g_channels[ch].bassBalanceFilter, 0, 250.0f, -balanceDb, wavbitbackup);
-			CalcShelvingEQ(&g_channels[ch].trebleBalanceFilter, 1, 4000.0f, balanceDb, wavbitbackup);
+			CalcShelvingEQ(&g_channels[ch].bassBalanceFilter, 0, 250.0f,
+				-balanceDb, wavbitbackup);
+			CalcShelvingEQ(&g_channels[ch].trebleBalanceFilter, 1, 4000.0f,
+				balanceDb, wavbitbackup);
+
 			float densityDb = (density - 100.0f) * 0.15f;
-			CalcPeakingEQ(&g_channels[ch].densityFilter1, 600.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
-			CalcPeakingEQ(&g_channels[ch].densityFilter2, 1400.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
+			CalcPeakingEQ(&g_channels[ch].densityFilter1, 600.0f, 1.2f,
+				100.0f + densityDb / 0.12f, wavbitbackup);
+			CalcPeakingEQ(&g_channels[ch].densityFilter2, 1400.0f, 1.2f,
+				100.0f + densityDb / 0.12f, wavbitbackup);
 		}
 	}
 
@@ -3976,6 +3995,9 @@ void equaliser(void* data, int len, BOOL reset) {
 
 			float signal = inSample;
 			ChannelState* cs = &g_channels[ch];
+
+			// ===== マスターゲイン（EQ前に適用）=====
+			signal *= masterGain;
 
 			// ===== EQ・拡張フィルタ適用 =====
 			for (int b = 0; b < EQ_BANDS; b++) {
@@ -4133,9 +4155,6 @@ void equaliser(void* data, int len, BOOL reset) {
 			// 明るさ処理
 			mixed = ProcessBrightness(mixed, &cs->brightnessState, env->brightness);
 
-			// マスターゲイン
-			mixed *= masterGain;
-
 			// ステレオ/モノラル分岐
 			if (wavch == 2) {
 				if (ch == 0) leftSamples[bufferIndex] = mixed;
@@ -4169,7 +4188,7 @@ void equaliser(void* data, int len, BOOL reset) {
 		bufferIndex++;
 	}
 
-	// ===== 最終出力とオートゲイン =====
+	// ===== 最終出力とダイナミックリミッター =====
 	bufferIndex = 0;
 	for (int i = 0; i < numSamples; i++) {
 		for (int ch = 0; ch < wavch; ch++) {
@@ -4342,6 +4361,7 @@ void equaliser(void* data, int len, BOOL reset) {
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+#include <deque>
 
 // Windows型定義
 #ifndef OUTPUT_BUFFER_SIZE
@@ -4670,82 +4690,230 @@ static int UpdateViterbi(const std::vector<MelodyCandidate>& currentCandidates) 
 	return -1; // まだバッファが溜まっていない
 }
 
-// ===== クラス集計 =====
-static void AggregateNoteClasses(float* bassClass, float* midClass, float* highClass, float* allClass) {
-	memset(bassClass, 0, 12 * sizeof(float));
-	memset(midClass, 0, 12 * sizeof(float));
-	memset(highClass, 0, 12 * sizeof(float));
-	memset(allClass, 0, 12 * sizeof(float));
+static void AggregateNoteClasses(float* bassClass, float* midClass,
+	float* highClass, float* allClass) {
+	for (int i = 0; i < 12; i++) {
+		bassClass[i] = midClass[i] = highClass[i] = allClass[i] = 0.0f;
+	}
 
-	for (int k = 0; k < 108; k++) {
-		int midiNote = 12 + k;
-		int noteClass = midiNote % 12;
-		float strength = g_noteStrength[k];
+	float octaveMax[9] = { 0 };
+	int octaveMaxNote[9] = { -1 };
 
-		if (midiNote <= 47) bassClass[noteClass] += strength;
-		else if (midiNote <= 71) midClass[noteClass] += strength;
-		else if (midiNote <= 95) highClass[noteClass] += strength;
+	for (int note = 0; note < 108; note++) {
+		int octave = note / 12;
+		if (g_noteStrength[note] > octaveMax[octave]) {
+			octaveMax[octave] = g_noteStrength[note];
+			octaveMaxNote[octave] = note;
+		}
+	}
 
-		allClass[noteClass] += strength;
+	for (int note = 0; note < 108; note++) {
+		float strength = g_noteStrength[note];
+		int pitchClass = note % 12;
+		int octave = note / 12;
+
+		if (octaveMaxNote[octave] >= 0 && note != octaveMaxNote[octave]) {
+			int fundamentalPC = octaveMaxNote[octave] % 12;
+			int interval = (pitchClass - fundamentalPC + 12) % 12;
+			float ratio = strength / octaveMax[octave];
+
+			// ★倍音系列の減衰
+			if (interval == 7) {  // 完全5度（第2倍音）
+				if (ratio < 0.35f) strength *= 0.5f;
+			}
+			else if (interval == 4) {  // 長3度（第5倍音近似）
+				if (ratio < 0.25f) strength *= 0.7f;
+			}
+			else if (interval == 2) {  // ★長2度（第9倍音近似）
+				if (ratio < 0.3f) strength *= 0.4f;  // 60%減衰
+			}
+			else if (interval == 9) {  // ★長6度（倍音系列）
+				if (ratio < 0.25f) strength *= 0.6f;
+			}
+		}
+
+		if (note < 36) {
+			bassClass[pitchClass] += strength;
+		}
+		else if (note < 60) {
+			midClass[pitchClass] += strength;
+		}
+		else {
+			highClass[pitchClass] += strength;
+		}
+
+		allClass[pitchClass] += strength;
 	}
 }
 
 // ===== コード推定 =====
 typedef struct { const WCHAR* name; int pattern[12]; float bonus; } ChordPattern;
 static const ChordPattern CHORD_PATTERNS[] = {
-	{L"", {3,0,0,0,2,0,0,1,0,0,0,0}, 0.3f}, {L"m", {3,0,0,2,0,0,0,1,0,0,0,0}, 0.3f},
-	{L"5", {3,0,0,0,0,0,0,2,0,0,0,0}, 0.2f}, {L"dim", {3,0,0,2,0,0,2,0,0,0,0,0}, 0.2f},
-	{L"aug", {3,0,0,0,2,0,0,0,2,0,0,0}, 0.2f}, {L"sus4", {3,0,0,0,0,3,0,1,0,0,0,0}, 0.2f},
-	{L"sus2", {3,0,3,0,0,0,0,1,0,0,0,0}, 0.2f}, {L"7", {3,0,0,0,2,0,0,1,0,0,2,0}, 0.1f},
-	{L"M7", {3,0,0,0,2,0,0,1,0,0,0,2}, 0.1f}, {L"m7", {3,0,0,2,0,0,0,1,0,0,2,0}, 0.1f},
-	{L"m7b5", {3,0,0,2,0,0,2,0,0,0,2,0}, 0.1f}, {L"dim7", {3,0,0,2,0,0,2,0,0,2,0,0}, 0.1f},
-	{L"7sus4", {3,0,0,0,0,2,0,1,0,0,2,0}, 0.1f}, {L"6", {3,0,0,0,2,0,0,1,0,2,0,0}, 0.1f},
-	{L"m6", {3,0,0,2,0,0,0,1,0,2,0,0}, 0.1f}, {L"add9", {3,0,2,0,2,0,0,1,0,0,0,0}, 0.1f},
-	{L"9", {3,0,2,0,2,0,0,1,0,0,2,0}, 0.0f}, {L"M9", {3,0,2,0,2,0,0,1,0,0,0,2}, 0.0f},
-	{L"m9", {3,0,2,2,0,0,0,1,0,0,2,0}, 0.0f},
+	// 基本3和音（最優先）
+	{L"",      {3,0,0,0,2,0,0,1,0,0,0,0}, 0.5f},
+	{L"m",     {3,0,0,2,0,0,0,1,0,0,0,0}, 0.5f},
+	{L"5",     {3,0,0,0,0,0,0,2,0,0,0,0}, 0.4f},
+
+	// サスペンド系
+	{L"sus4",  {3,0,0,0,0,3,0,1,0,0,0,0}, 0.4f},
+	{L"sus2",  {3,0,3,0,0,0,0,1,0,0,0,0}, 0.4f},
+
+	// ディミニッシュ・オーギュメント
+	{L"dim",   {3,0,0,2,0,0,2,0,0,0,0,0}, 0.3f},
+	{L"aug",   {3,0,0,0,2,0,0,0,2,0,0,0}, 0.3f},
+
+	// 4和音
+	{L"7",     {3,0,0,0,2,0,0,1,0,0,2,0}, 0.3f},
+	{L"M7",    {3,0,0,0,2,0,0,1,0,0,0,2}, 0.3f},
+	{L"m7",    {3,0,0,2,0,0,0,1,0,0,2,0}, 0.3f},
+	{L"6",     {3,0,0,0,2,0,0,1,0,2,0,0}, 0.2f},
+	{L"m6",    {3,0,0,2,0,0,0,1,0,2,0,0}, 0.2f},
+	{L"add9",  {3,0,2,0,2,0,0,1,0,0,0,0}, 0.2f},
+	{L"7sus4", {3,0,0,0,0,2,0,1,0,0,2,0}, 0.2f},
+	{L"m7b5",  {3,0,0,2,0,0,2,0,0,0,2,0}, 0.2f},
+	{L"dim7",  {3,0,0,2,0,0,2,0,0,2,0,0}, 0.2f},
+
+	// ★9th系は大幅にペナルティ（ボーナスをマイナスに）
+	{L"9",     {3,0,2,0,2,0,0,1,0,0,2,0}, -0.5f},
+	{L"M9",    {3,0,2,0,2,0,0,1,0,0,0,2}, -0.5f},
+	{L"m9",    {3,0,2,2,0,0,0,1,0,0,2,0}, -0.5f},
+};
+
+struct ChordCandidate {
+	CString name;
+	float score;
+	int complexity;  // 構成音の数
 };
 
 static CString EstimateChordRaw(float* noteClass, float threshold) {
 	float maxVal = 0.0f;
 	for (int i = 0; i < 12; i++) if (noteClass[i] > maxVal) maxVal = noteClass[i];
 	if (maxVal < 0.001f) return L"";
+
 	float normalized[12];
-	for (int i = 0; i < 12; i++) normalized[i] = noteClass[i] / maxVal;
+	for (int i = 0; i < 12; i++) {
+		normalized[i] = noteClass[i] / maxVal;
+		if (normalized[i] < 0.08f) normalized[i] = 0.0f;
+	}
+
 	int bestRoot = 0;
-	for (int i = 1; i < 12; i++) if (normalized[i] > normalized[bestRoot]) bestRoot = i;
+	for (int i = 1; i < 12; i++)
+		if (normalized[i] > normalized[bestRoot]) bestRoot = i;
+
 	if (normalized[bestRoot] < threshold) return L"";
-	float secondMax = 0.0f;
-	for (int i = 0; i < 12; i++) { if (i != bestRoot && normalized[i] > secondMax) secondMax = normalized[i]; }
-	CString rootName = NOTE_NAMES[bestRoot]; rootName.Trim();
-	if (secondMax < 0.001f || normalized[bestRoot] > secondMax * 2.5f) return rootName;
-	float bestScore = 0.0f;
-	const ChordPattern* bestChord = NULL;
+
+	int activeNotes = 0;
+	for (int i = 0; i < 12; i++)
+		if (normalized[i] > 0.12f) activeNotes++;
+
+	if (activeNotes <= 1) {
+		CString rootName = NOTE_NAMES[bestRoot];
+		rootName.Trim();
+		return rootName;
+	}
+
+	CString rootName = NOTE_NAMES[bestRoot];
+	rootName.Trim();
+
+	// パワーコード判定
+	float third = max(normalized[(bestRoot + 3) % 12], normalized[(bestRoot + 4) % 12]);
+	float fifth = normalized[(bestRoot + 7) % 12];
+	if (fifth > 0.3f && third < 0.15f && activeNotes <= 3) {
+		return rootName + L"[Power]";
+	}
+
+	std::vector<ChordCandidate> candidates;
 	int numPatterns = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
-	for (int r = 0; r < 3; r++) {
-		int root = bestRoot;
-		for (int c = 0; c < numPatterns; c++) {
-			float score = 0.0f;
-			int matched = 0;
-			int ptrnCnt = 0;
-			for (int x = 0; x < 12; x++) if (CHORD_PATTERNS[c].pattern[x] > 0) ptrnCnt++;
-			for (int n = 0; n < 12; n++) {
-				int note = (root + n) % 12;
-				int weight = CHORD_PATTERNS[c].pattern[n];
-				if (weight > 0) { score += normalized[note] * weight; if (normalized[note] > 0.15f) matched++; }
-				else { if (normalized[note] > 0.3f) score -= 1.0f; }
+
+	for (int c = 0; c < numPatterns; c++) {
+		float score = 0.0f;
+		int matched = 0;
+		int required = 0;
+
+		for (int x = 0; x < 12; x++)
+			if (CHORD_PATTERNS[c].pattern[x] > 0) required++;
+
+		// ★9th系コード（5音構成）は厳しく判定
+		bool is9thChord = (required >= 5);
+
+		for (int n = 0; n < 12; n++) {
+			int note = (bestRoot + n) % 12;
+			int weight = CHORD_PATTERNS[c].pattern[n];
+
+			if (weight > 0) {
+				score += normalized[note] * weight * 2.0f;
+				if (normalized[note] > 0.12f) matched++;
 			}
-			if (ptrnCnt >= 4 && matched < 3) score -= 2.0f;
-			if (ptrnCnt == 3 && matched < 2) score -= 2.0f;
-			score += CHORD_PATTERNS[c].bonus;
-			if (score > bestScore) { bestScore = score; bestChord = &CHORD_PATTERNS[c]; }
+			else {
+				if (normalized[note] > 0.25f) {
+					score -= normalized[note] * 1.5f;
+				}
+			}
 		}
-		break;
+
+		// ★9th系は全ての音が揃っていないと大幅減点
+		if (is9thChord) {
+			float matchRatio = (required > 0) ? (float)matched / required : 0.0f;
+			if (matchRatio < 0.8f) score -= 10.0f;  // 80%未満で大幅減点
+
+			// さらに、9thの音（2度）が弱い場合も減点
+			float ninth = normalized[(bestRoot + 2) % 12];
+			if (ninth < 0.2f) score -= 5.0f;
+		}
+		else {
+			float matchRatio = (required > 0) ? (float)matched / required : 0.0f;
+			if (matchRatio < 0.4f) score -= 3.0f;
+		}
+
+		int extraNotes = activeNotes - matched;
+		if (extraNotes > 0) score -= extraNotes * 1.0f;
+
+		score += CHORD_PATTERNS[c].bonus;
+
+		// シンプルさボーナス（3和音を強く優遇）
+		if (required == 3) score += 1.2f;
+		if (required == 4) score += 0.5f;
+		if (required >= 5) score -= 1.0f;  // ★5音以上は減点
+
+		// ★9th系はスコア閾値を高く
+		float minScore = is9thChord ? 3.5f : 0.8f;
+
+		if (score > minScore) {
+			ChordCandidate cand;
+			cand.name = rootName + CHORD_PATTERNS[c].name;
+			cand.score = score;
+			cand.complexity = required;
+			candidates.push_back(cand);
+		}
 	}
-	if (bestScore > 0.8f && bestChord != NULL) {
-		CString rName = NOTE_NAMES[bestRoot]; rName.Trim();
-		return rName + bestChord->name;
+
+	if (candidates.empty()) return rootName;
+
+	std::sort(candidates.begin(), candidates.end(),
+		[](const ChordCandidate& a, const ChordCandidate& b) {
+			if (abs(a.score - b.score) < 0.3f) {
+				return a.complexity < b.complexity;
+			}
+			return a.score > b.score;
+		});
+
+	CString result = candidates[0].name;
+	int count = 1;
+
+	for (size_t i = 1; i < candidates.size() && count < 3; i++) {
+		if (candidates[0].score - candidates[i].score > 2.5f) break;
+		if (candidates[i].name == result) continue;
+
+		// ★9th系は2番目以降には入れにくく
+		if (candidates[i].name.Find(L"9") >= 0 && i > 0) {
+			if (candidates[0].score - candidates[i].score > 1.0f) continue;
+		}
+
+		result += L", " + candidates[i].name;
+		count++;
 	}
-	return rootName;
+
+	return result;
 }
 
 static CString EstimateOverallRaw(float* bassClass, float* midClass, float* highClass, float* allClass) {
@@ -4756,57 +4924,404 @@ static CString EstimateOverallRaw(float* bassClass, float* midClass, float* high
 	return L"";
 }
 
-// ===== メイン =====
+// ★グローバル変数（ファイルスコープ）
+static CString g_prevChordLow = L"";
+static CString g_prevChordMid = L"";
+static CString g_prevChordHigh = L"";
+static CString g_prevChordAll = L"";
+
+// ★履歴バッファ（最大5フレーム分）
+static std::deque<CString> g_historyLow;
+static std::deque<CString> g_historyMid;
+static std::deque<CString> g_historyHigh;
+static std::deque<CString> g_historyAll;
+const int HISTORY_SIZE = 4;  // 5フレーム = 150ms分の履歴
+
+// ★noteStrengthのスムージング用バッファ
+static float g_noteStrengthPrev[108] = { 0 };
+const float SMOOTHING_FACTOR = 0.3f;  // 0.0(完全に新しい値) ~ 1.0(完全に古い値)
+const float SILENCE_THRESHOLD = 0.003f;  // 無音判定閾値（調整可能）
+const int SILENCE_FRAMES_NEEDED = 3;     // 連続で何フレーム無音なら休符とするか
+
+// ★グローバル変数に追加
+static float g_prevRMS = 0.0f;
+static float g_peakRMS = 0.0f;           // 直近のピーク音量
+static bool g_isPlaying = false;          // 曲が演奏中かどうか
+static int g_silenceFrameCount = 0;
+
+const float SILENCE_THRESHOLD_ABS = 0.002f;     // 絶対的な無音閾値
+const float SILENCE_THRESHOLD_REL = 0.15f;      // 相対的な無音閾値（ピークの15%以下）
+const int SILENCE_FRAMES_FOR_STOP = 10;         // 曲終了判定（10フレーム = 300ms）
+const float PLAYING_THRESHOLD = 0.01f;          // 演奏開始判定
+
+// ★RMS計算関数（変更なし）
+static float CalculateRMS(const std::vector<double>& bufferL, const std::vector<double>& bufferR, bool stereo) {
+	if (bufferL.empty()) return 0.0f;
+
+	double sumL = 0.0;
+	double sumR = 0.0;
+	int count = (int)bufferL.size();
+
+	for (int i = 0; i < count; i++) {
+		sumL += bufferL[i] * bufferL[i];
+	}
+
+	if (stereo && bufferR.size() == count) {
+		for (int i = 0; i < count; i++) {
+			sumR += bufferR[i] * bufferR[i];
+		}
+		return (float)sqrt((sumL + sumR) / (count * 2));
+	}
+
+	return (float)sqrt(sumL / count);
+}
+
+// ★履歴から最頻値を取得
+static CString GetMostFrequent(const std::deque<CString>& history) {
+	if (history.empty()) return L"";
+
+	std::map<CString, int> counter;
+	for (const auto& item : history) {
+		if (!item.IsEmpty()) counter[item]++;
+	}
+
+	CString mostFrequent;
+	int maxCount = 0;
+	for (const auto& pair : counter) {
+		if (pair.second > maxCount) {
+			maxCount = pair.second;
+			mostFrequent = pair.first;
+		}
+	}
+
+	return mostFrequent;
+}
+
+// ★ヒステリシス付きコード推定（前回値と同じなら有利）
+static CString EstimateChordRawWithHistory(float* noteClass, float threshold, const CString& prevChord) {
+	float maxVal = 0.0f;
+	for (int i = 0; i < 12; i++) if (noteClass[i] > maxVal) maxVal = noteClass[i];
+	if (maxVal < 0.001f) return L"";
+
+	float normalized[12];
+	for (int i = 0; i < 12; i++) {
+		normalized[i] = noteClass[i] / maxVal;
+		if (normalized[i] < 0.08f) normalized[i] = 0.0f;
+	}
+
+	int bestRoot = 0;
+	for (int i = 1; i < 12; i++)
+		if (normalized[i] > normalized[bestRoot]) bestRoot = i;
+
+	if (normalized[bestRoot] < threshold) return L"";
+
+	int activeNotes = 0;
+	for (int i = 0; i < 12; i++)
+		if (normalized[i] > 0.12f) activeNotes++;
+
+	if (activeNotes <= 1) {
+		CString rootName = NOTE_NAMES[bestRoot];
+		rootName.Trim();
+		return rootName;
+	}
+
+	CString rootName = NOTE_NAMES[bestRoot];
+	rootName.Trim();
+
+	// パワーコード判定
+	float third = max(normalized[(bestRoot + 3) % 12], normalized[(bestRoot + 4) % 12]);
+	float fifth = normalized[(bestRoot + 7) % 12];
+	if (fifth > 0.3f && third < 0.15f && activeNotes <= 3) {
+		return rootName + L"[Power]";
+	}
+
+	std::vector<ChordCandidate> candidates;
+	int numPatterns = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
+
+	for (int c = 0; c < numPatterns; c++) {
+		float score = 0.0f;
+		int matched = 0;
+		int required = 0;
+
+		for (int x = 0; x < 12; x++)
+			if (CHORD_PATTERNS[c].pattern[x] > 0) required++;
+
+		bool is9thChord = (required >= 5);
+
+		for (int n = 0; n < 12; n++) {
+			int note = (bestRoot + n) % 12;
+			int weight = CHORD_PATTERNS[c].pattern[n];
+
+			if (weight > 0) {
+				score += normalized[note] * weight * 2.0f;
+				if (normalized[note] > 0.12f) matched++;
+			}
+			else {
+				if (normalized[note] > 0.25f) {
+					score -= normalized[note] * 1.5f;
+				}
+			}
+		}
+
+		if (is9thChord) {
+			float matchRatio = (required > 0) ? (float)matched / required : 0.0f;
+			if (matchRatio < 0.8f) score -= 10.0f;
+			float ninth = normalized[(bestRoot + 2) % 12];
+			if (ninth < 0.2f) score -= 5.0f;
+		}
+		else {
+			float matchRatio = (required > 0) ? (float)matched / required : 0.0f;
+			if (matchRatio < 0.4f) score -= 3.0f;
+		}
+
+		int extraNotes = activeNotes - matched;
+		if (extraNotes > 0) score -= extraNotes * 1.0f;
+
+		score += CHORD_PATTERNS[c].bonus;
+
+		if (required == 3) score += 1.2f;
+		if (required == 4) score += 0.5f;
+		if (required >= 5) score -= 1.0f;
+
+		// ★ヒステリシスボーナス: 前回と同じコードなら優遇
+		CString currentChord = rootName + CHORD_PATTERNS[c].name;
+		if (!prevChord.IsEmpty() && currentChord == prevChord) {
+			score += 1.5f;  // 前回と同じなら大幅ボーナス
+		}
+
+		float minScore = is9thChord ? 3.5f : 0.8f;
+
+		if (score > minScore) {
+			ChordCandidate cand;
+			cand.name = currentChord;
+			cand.score = score;
+			cand.complexity = required;
+			candidates.push_back(cand);
+		}
+	}
+
+	if (candidates.empty()) return rootName;
+
+	std::sort(candidates.begin(), candidates.end(),
+		[](const ChordCandidate& a, const ChordCandidate& b) {
+			if (abs(a.score - b.score) < 0.3f) {
+				return a.complexity < b.complexity;
+			}
+			return a.score > b.score;
+		});
+
+	// ★前回のコードがトップ3に入っていれば、それを優先
+	if (!prevChord.IsEmpty()) {
+		for (size_t i = 0; i < min((size_t)3, candidates.size()); i++) {
+			if (candidates[i].name == prevChord) {
+				return prevChord;  // 前回のコードを維持
+			}
+		}
+	}
+
+	CString result = candidates[0].name;
+	int count = 1;
+
+	for (size_t i = 1; i < candidates.size() && count < 3; i++) {
+		if (candidates[0].score - candidates[i].score > 2.5f) break;
+		if (candidates[i].name == result) continue;
+
+		if (candidates[i].name.Find(L"9") >= 0 && i > 0) {
+			if (candidates[0].score - candidates[i].score > 1.0f) continue;
+		}
+
+		result += L", " + candidates[i].name;
+		count++;
+	}
+
+	return result;
+}
+
+// ★オーバーロード版（EstimateOverallRaw用）
+static CString EstimateChordRawWithHistory(float* bassClass, float* midClass,
+	float* highClass, float* allClass,
+	const CString& prevChord) {
+	CString allChord = EstimateChordRawWithHistory(allClass, 0.03f, prevChord);
+	if (!allChord.IsEmpty()) return allChord;
+	CString bassChord = EstimateChordRawWithHistory(bassClass, 0.02f, prevChord);
+	if (!bassChord.IsEmpty()) return bassChord;
+	return L"";
+}
+
+static int g_soundFrameCount = 0;  // ★音が鳴っているフレーム数
+
+const int SILENCE_FRAMES_FOR_CLEAR = 10;   // 履歴クリアまでのフレーム数
+
+
 void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<double>& bufferR, int sampleRate) {
 	InitializeAnalysis((double)sampleRate);
-
 	int totalSamples = (int)bufferL.size();
 	bool stereo = (bufferR.size() == totalSamples);
 
+	auto FormatChord = [](CString chordStr) -> CString {
+		if (chordStr.IsEmpty()) return L"  , <  >";
+		CString rootName = chordStr;
+		if (chordStr.GetLength() > 1 && (chordStr[1] == L'#' || chordStr[1] == L'b')) rootName = chordStr.Left(2);
+		else rootName = chordStr.Left(1);
+		if (rootName.GetLength() == 1) rootName += L" ";
+		CString ret; ret.Format(L"%s, <%s>", rootName, chordStr);
+		return ret;
+		};
+
+	// ★音量（RMS）計算
+	float currentRMS = CalculateRMS(bufferL, bufferR, stereo);
+
+	// ★演奏状態の判定
+	if (currentRMS > PLAYING_THRESHOLD) {
+		g_isPlaying = true;
+		g_soundFrameCount++;
+
+		// ★ピーク音量の更新（音が鳴っている時のみ）
+		if (currentRMS > g_peakRMS) {
+			g_peakRMS = currentRMS;
+		}
+		else {
+			// ★音が鳴っている時は減衰させない
+			g_peakRMS *= 0.998f;
+		}
+	}
+	else {
+		g_soundFrameCount = 0;
+	}
+
+	// ★無音判定
+	bool isSilent = false;
+
+	if (!g_isPlaying || g_peakRMS < 0.001f) {
+		// 曲開始前：絶対的な閾値のみ
+		isSilent = (currentRMS < SILENCE_THRESHOLD_ABS);
+	}
+	else {
+		// 曲演奏中：絶対閾値 OR 相対閾値
+		isSilent = (currentRMS < SILENCE_THRESHOLD_ABS) ||
+			(currentRMS < g_peakRMS * SILENCE_THRESHOLD_REL);
+	}
+
+	if (isSilent) {
+		g_silenceFrameCount++;
+	}
+	else {
+		g_silenceFrameCount = 0;
+	}
+
+	// ★長時間無音なら演奏終了
+	if (g_silenceFrameCount >= SILENCE_FRAMES_FOR_CLEAR) {
+		g_isPlaying = false;
+		g_peakRMS = 0.0f;
+		g_soundFrameCount = 0;
+
+		// 履歴クリア
+		g_historyLow.clear();
+		g_historyMid.clear();
+		g_historyHigh.clear();
+		g_historyAll.clear();
+
+		g_prevChordLow = L"";
+		g_prevChordMid = L"";
+		g_prevChordAll = L"";
+		g_prevChordHigh = L"";
+
+		for (int i = 0; i < 108; i++) {
+			g_noteStrengthPrev[i] *= 0.3f;
+		}
+	}
+
+	// ★無音時は即座に空文字列表示（履歴はクリアしない）
+	if (isSilent) {
+		auto FormatChord = [](CString chordStr) -> CString {
+			if (chordStr.IsEmpty()) return L"  , <  >";
+			CString rootName = chordStr;
+			if (chordStr.GetLength() > 1 && (chordStr[1] == L'#' || chordStr[1] == L'b')) rootName = chordStr.Left(2);
+			else rootName = chordStr.Left(1);
+			if (rootName.GetLength() == 1) rootName += L" ";
+			CString ret; ret.Format(L"%s, <%s>", rootName, chordStr);
+			return ret;
+			};
+
+		KeyCodeLow = FormatChord(L"");
+		KeyCodeMid = FormatChord(L"");
+		KeyCodeAll = FormatChord(L"");
+		KeyCodeHigh = FormatChord(L"");
+
+		g_prevRMS = currentRMS;
+		return;
+	}
+
+	// ★スムージングされたRMS
+	float smoothedRMS = g_prevRMS * 0.7f + currentRMS * 0.3f;
+	g_prevRMS = smoothedRMS;
+
+	// --- 以降、通常の処理 ---
 	const int LOW_NOTE_LIMIT = 52;
 	const int LOW_SAMPLES = (totalSamples >= 4096) ? 4096 : totalSamples;
 	const int LOW_START = totalSamples - LOW_SAMPLES;
 	const int HIGH_SAMPLES = (totalSamples >= 2048) ? 2048 : totalSamples;
 	const int HIGH_START = totalSamples - HIGH_SAMPLES;
 
-	// --- 1. コード解析 (Goertzel) ---
 	for (int k = 0; k < LOW_NOTE_LIMIT; k++) {
 		double ampL = GoertzelMagnitude(bufferL.data() + LOW_START, LOW_SAMPLES, g_goertzelCoeffs[k]);
 		double ampR = stereo ? GoertzelMagnitude(bufferR.data() + LOW_START, LOW_SAMPLES, g_goertzelCoeffs[k]) : ampL;
-		g_noteStrength[k] = (float)max(ampL, ampR) * (1.0f + k / 100.0f);
+		float newStrength = (float)max(ampL, ampR) * (1.0f + k / 100.0f);
+
+		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + newStrength * (1.0f - SMOOTHING_FACTOR);
+		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
 	for (int k = LOW_NOTE_LIMIT; k < 108; k++) {
 		double ampL = GoertzelMagnitude(bufferL.data() + HIGH_START, HIGH_SAMPLES, g_goertzelCoeffs[k]);
 		double ampR = stereo ? GoertzelMagnitude(bufferR.data() + HIGH_START, HIGH_SAMPLES, g_goertzelCoeffs[k]) : ampL;
-		g_noteStrength[k] = (float)max(ampL, ampR) * (1.0f + k / 50.0f);
+		float newStrength = (float)max(ampL, ampR) * (1.0f + k / 50.0f);
+
+		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + newStrength * (1.0f - SMOOTHING_FACTOR);
+		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
 
 	float bassClass[12], midClass[12], highClass[12], allClass[12];
 	AggregateNoteClasses(bassClass, midClass, highClass, allClass);
 
-	CString rawBass = EstimateChordRaw(bassClass, 0.02f);
-	CString rawMid = EstimateChordRaw(midClass, 0.03f);
-	CString rawAll = EstimateOverallRaw(bassClass, midClass, highClass, allClass);
-	CString rawHighChord = EstimateChordRaw(highClass, 0.03f);
+	CString rawBass = EstimateChordRawWithHistory(bassClass, 0.02f, g_prevChordLow);
+	CString rawMid = EstimateChordRawWithHistory(midClass, 0.03f, g_prevChordMid);
+	CString rawAll = EstimateChordRawWithHistory(bassClass, midClass, highClass, allClass, g_prevChordAll);
+	CString rawHighChord = EstimateChordRawWithHistory(highClass, 0.03f, g_prevChordHigh);
 
-	// --- 2. ★メロディ解析 (Salience + Viterbi) ---
+	g_historyLow.push_back(rawBass);
+	if (g_historyLow.size() > HISTORY_SIZE) g_historyLow.pop_front();
+
+	g_historyMid.push_back(rawMid);
+	if (g_historyMid.size() > HISTORY_SIZE) g_historyMid.pop_front();
+
+	g_historyHigh.push_back(rawHighChord);
+	if (g_historyHigh.size() > HISTORY_SIZE) g_historyHigh.pop_front();
+
+	g_historyAll.push_back(rawAll);
+	if (g_historyAll.size() > HISTORY_SIZE) g_historyAll.pop_front();
+
+	rawBass = GetMostFrequent(g_historyLow);
+	rawMid = GetMostFrequent(g_historyMid);
+	rawAll = GetMostFrequent(g_historyAll);
+	rawHighChord = GetMostFrequent(g_historyHigh);
+
+	g_prevChordLow = rawBass;
+	g_prevChordMid = rawMid;
+	g_prevChordAll = rawAll;
+	g_prevChordHigh = rawHighChord;
+
+	// --- 2. メロディ解析 ---
 	int fftSize = 4096;
 	int fftStart = totalSamples - fftSize;
 	if (fftStart < 0) fftStart = 0;
-	int fftLen = totalSamples - fftStart;
-
 	std::vector<double> bufL_Part(bufferL.begin() + fftStart, bufferL.end());
 	std::vector<double> bufR_Part;
 	if (stereo) bufR_Part.assign(bufferR.begin() + fftStart, bufferR.end());
 	else bufR_Part = bufL_Part;
 
-	// 候補リスト取得
 	std::vector<MelodyCandidate> candidates = CalculateSalience(bufL_Part, bufR_Part, (double)sampleRate);
-
-	// ビタビ更新 & 確定ノート取得
 	int detectedMidi = UpdateViterbi(candidates);
 
-	// 文字列生成
 	CString rawMelody = L"[   ]";
 	if (detectedMidi != -1) {
 		int octave = (detectedMidi / 12) - 1;
@@ -4815,18 +5330,6 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 		if (noteName.GetLength() == 1) rawMelody.Format(L"[%s%d ]", noteName, octave);
 		else rawMelody.Format(L"[%s%d]", noteName, octave);
 	}
-
-	// フォーマット整形
-	auto FormatChord = [](CString chordStr) -> CString {
-		if (chordStr.IsEmpty()) return L"  , <  >";
-		CString rootName = chordStr;
-		if (chordStr.GetLength() > 1 && (chordStr[1] == L'#' || chordStr[1] == L'b')) rootName = chordStr.Left(2);
-		else rootName = chordStr.Left(1);
-
-		if (rootName.GetLength() == 1) rootName += L" ";
-		CString ret; ret.Format(L"%s, <%s>", rootName, chordStr);
-		return ret;
-		};
 
 	KeyCodeLow = FormatChord(rawBass);
 	KeyCodeMid = FormatChord(rawMid);
@@ -4842,7 +5345,7 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 	}
 
 	if (rawMelody == L"[   ]" && rawHighChord.IsEmpty()) {
-		KeyCodeHigh = L"";
+		KeyCodeHigh = L"  , <  >";
 	}
 	else {
 		CString highChordPart = FormatChord(rawHighChord);
