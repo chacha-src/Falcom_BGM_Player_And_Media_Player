@@ -206,6 +206,7 @@ protected:
 	virtual void PostNcDestroy();
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg LRESULT OnSetText(WPARAM wParam, LPARAM lParam);
 
 	DECLARE_MESSAGE_MAP()
 

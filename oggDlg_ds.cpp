@@ -25,8 +25,11 @@
 #include <FunctionDiscoveryKeys_devpkey.h>
 
 #include "rubberband/RubberBandStretcher.h"
+#if _MSC_VER >= 1950
+#pragma comment(lib,"rubberband-library_2026")
+#else
 #pragma comment(lib,"rubberband-library")
-
+#endif
 extern int fade1;
 extern 	LPDIRECTSOUND8 m_ds;
 extern 	LPDIRECTSOUNDBUFFER m_dsb1;

@@ -1039,6 +1039,7 @@ IMPLEMENT_DYNAMIC(CCustomStatic, CStatic)
 BEGIN_MESSAGE_MAP(CCustomStatic, CStatic)
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
+	ON_MESSAGE(WM_SETTEXT, OnSetText)
 END_MESSAGE_MAP()
 
 CCustomStatic::CCustomStatic()
@@ -1299,6 +1300,18 @@ BOOL CCustomStatic::OnEraseBkgnd(CDC* pDC)
 	GetClientRect(&rect);
 	pDC->FillSolidRect(&rect, COLOR_DIALOG_BG);
 	return TRUE;
+}
+
+LRESULT CCustomStatic::OnSetText(WPARAM wParam, LPARAM lParam)
+{
+	// デフォルトの処理を実行
+	LRESULT result = Default();
+
+	// テキストが変更されたので再描画
+	if (GetSafeHwnd())
+		Invalidate();
+
+	return result;
 }
 
 // ============================================================================
