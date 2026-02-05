@@ -1161,61 +1161,96 @@ void CCustomStatic::OnPaint()
 	GetWindowText(strText);
 	if (strText.IsEmpty()) return;
 
+	// マージン1ピクセル
+	CRect rectWithMargin = rect;
+	rectWithMargin.DeflateRect(1, 1);
+
 	CFont* pBaseFont = GetFont();
 	CFont* pOldFont = dc.SelectObject(pBaseFont);
 	dc.SetBkMode(TRANSPARENT);
 
-	// 自動縮小ロジック（横幅優先、必要なら縦長化）
 	LOGFONT lfBase;
 	pBaseFont->GetLogFont(&lfBase);
 	const int kMinHeight = 6;
 	const int baseHeight = abs(lfBase.lfHeight);
 
-	auto MeasureText = [&](int height) -> CSize
+	auto MeasureText = [&](int height, int width) -> CSize
+		{
+			LOGFONT lfTry = lfBase;
+			lfTry.lfHeight = -height;
+			lfTry.lfWidth = width;
+			CFont fontTry;
+			fontTry.CreateFontIndirect(&lfTry);
+			CFont* pOld = dc.SelectObject(&fontTry);
+			CSize size = dc.GetTextExtent(strText);
+			dc.SelectObject(pOld);
+			fontTry.DeleteObject();
+			return size;
+		};
+
+	// 1. まず横幅に収まる最小の高さを見つける
+	int fitHeight = kMinHeight;
+	int baseWidth = 0;
+	CSize szFit;
+
+	for (int h = baseHeight; h >= kMinHeight; h--)
 	{
 		LOGFONT lfTry = lfBase;
-		lfTry.lfHeight = -height;
+		lfTry.lfHeight = -h;
+		lfTry.lfWidth = 0;
 		CFont fontTry;
 		fontTry.CreateFontIndirect(&lfTry);
 		CFont* pOld = dc.SelectObject(&fontTry);
 		CSize size = dc.GetTextExtent(strText);
+		TEXTMETRIC tm;
+		dc.GetTextMetrics(&tm);
 		dc.SelectObject(pOld);
 		fontTry.DeleteObject();
-		return size;
-	};
 
-	int targetHeight = baseHeight;
-	CSize szText = dc.GetTextExtent(strText);
-	if (szText.cx > rect.Width() || szText.cy > rect.Height())
-	{
-		while (targetHeight > kMinHeight)
+		if (size.cx <= rectWithMargin.Width())
 		{
-			CSize sizeTry = MeasureText(targetHeight);
-			if (sizeTry.cx <= rect.Width() && sizeTry.cy <= rect.Height())
-			{
-				szText = sizeTry;
-				break;
-			}
-			targetHeight--;
-		}
-
-		if (targetHeight <= kMinHeight)
-		{
-			targetHeight = kMinHeight;
-			szText = MeasureText(targetHeight);
+			fitHeight = h;
+			szFit = size;
+			baseWidth = tm.tmAveCharWidth;
+			break;
 		}
 	}
 
-	const BOOL bScaledDown = (targetHeight < baseHeight);
-	if (!m_bPreferWideMode && bScaledDown)
+	// 2. PreferWideMode に応じて縦長化 or 縦横両方引き延ばし
+	int finalHeight = fitHeight;
+	int finalWidth = 0;
+	CSize szFinal = szFit;
+
+	if (szFit.cy < rectWithMargin.Height())
 	{
-		for (int h = targetHeight + 1; h <= baseHeight; ++h)
+		// まず縦方向に引き延ばす(縦長文字化)
+		finalHeight = rectWithMargin.Height();
+
+		// 横幅を維持するために、lfWidthを調整
+		// スケール比を計算
+		double scale = (double)finalHeight / fitHeight;
+
+		// widthをscaleで割って縦長にする
+		finalWidth = max(1, (int)(baseWidth / scale));
+
+		// 実際のサイズを確認
+		szFinal = MeasureText(finalHeight, finalWidth);
+	}
+
+	// 3. PreferWideModeがTRUEの場合は、さらに横方向にも引き延ばす
+	if (m_bPreferWideMode && szFinal.cx < rectWithMargin.Width())
+	{
+		// 横方向にギリギリまで伸ばす
+		int startWidth = (finalWidth > 0) ? finalWidth : baseWidth;
+		int maxWidth = startWidth * 3; // 上限を設定(3倍まで)
+
+		for (int w = startWidth; w <= maxWidth; w++)
 		{
-			CSize sizeTry = MeasureText(h);
-			if (sizeTry.cx <= rect.Width() && sizeTry.cy <= rect.Height())
+			CSize sizeTry = MeasureText(finalHeight, w);
+			if (sizeTry.cx <= rectWithMargin.Width() && sizeTry.cy <= rectWithMargin.Height())
 			{
-				targetHeight = h;
-				szText = sizeTry;
+				finalWidth = w;
+				szFinal = sizeTry;
 			}
 			else
 			{
@@ -1224,14 +1259,13 @@ void CCustomStatic::OnPaint()
 		}
 	}
 
-	CFont fontScaled;
-	if (targetHeight != baseHeight)
-	{
-		LOGFONT lfScaled = lfBase;
-		lfScaled.lfHeight = -targetHeight;
-		fontScaled.CreateFontIndirect(&lfScaled);
-		dc.SelectObject(&fontScaled);
-	}
+	// 3. 最終的なフォントを作成
+	CFont fontFinal;
+	LOGFONT lfFinal = lfBase;
+	lfFinal.lfHeight = -finalHeight;
+	lfFinal.lfWidth = finalWidth;
+	fontFinal.CreateFontIndirect(&lfFinal);
+	dc.SelectObject(&fontFinal);
 
 	// フォーマット決定
 	DWORD dwStyle = GetStyle();
@@ -1246,7 +1280,7 @@ void CCustomStatic::OnPaint()
 		DrawTextWithGradient(&dc, rect, strText, nFormat,
 			m_clrGradStart, m_clrGradEnd, m_nGradDirection,
 			m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-			m_bShadowEnable, COLOR_DIALOG_BG, szText.cx);
+			m_bShadowEnable, COLOR_DIALOG_BG, szFinal.cx);
 	}
 	else
 	{
@@ -1255,7 +1289,7 @@ void CCustomStatic::OnPaint()
 			m_bShadowEnable, COLOR_DIALOG_BG);
 	}
 
-	if (fontScaled.GetSafeHandle()) fontScaled.DeleteObject();
+	fontFinal.DeleteObject();
 	dc.SelectObject(pOldFont);
 }
 
