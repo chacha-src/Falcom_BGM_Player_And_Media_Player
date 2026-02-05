@@ -15646,6 +15646,10 @@ void COggDlg::Speana()
 	// 4096なら -800ms、8192なら -1600ms を基準とします。
 	int latencySetting = (analysisSize == 8192) ? -1600 : -800;
 
+	if (wavbit < 44100) {
+		latencySetting = (int)((float)latencySetting * (44100.0f / (float)wavbit));
+	}
+
 	// 遅延バイト数（負の値）
 	long latencyBytes = (long)(sampleRate * bytesPerFrame * latencySetting / 1000.0);
 
