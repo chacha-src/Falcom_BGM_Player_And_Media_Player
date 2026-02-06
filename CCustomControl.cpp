@@ -1040,6 +1040,8 @@ BEGIN_MESSAGE_MAP(CCustomStatic, CStatic)
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
 	ON_MESSAGE(WM_SETTEXT, OnSetText)
+	ON_MESSAGE(WM_GETTEXT, OnGetText)
+	ON_MESSAGE(WM_GETTEXTLENGTH, OnGetTextLength)
 END_MESSAGE_MAP()
 
 CCustomStatic::CCustomStatic()
@@ -1053,6 +1055,10 @@ CCustomStatic::CCustomStatic()
 	, m_nShadowBlur(3)
 	, m_bShadowEnable(FALSE)
 	, m_bPreferWideMode(FALSE)
+	, m_nCachedHeight(0)
+	, m_nCachedWidth(0)
+	, m_strCachedText(_T(""))
+	, m_strText(_T(""))
 {
 }
 
@@ -1075,6 +1081,9 @@ void CCustomStatic::SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDi
 	m_nGradDirection = nDirection % 360; // 0-359に正規化
 	if (m_nGradDirection < 0) m_nGradDirection += 360;
 	m_bGradEnable = bEnable;
+
+	// キャッシュをクリア
+	m_strCachedText.Empty();
 
 	if (GetSafeHwnd())
 		Invalidate();
@@ -1113,6 +1122,10 @@ void CCustomStatic::GetDropShadow(COLORREF* pColor, int* pDirection, int* pDista
 void CCustomStatic::SetPreferWideMode(BOOL bPreferWide)
 {
 	m_bPreferWideMode = bPreferWide;
+
+	// キャッシュをクリア
+	m_strCachedText.Empty();
+
 	if (GetSafeHwnd())
 		Invalidate();
 }
@@ -1141,6 +1154,9 @@ void CCustomStatic::PreSubclassWindow()
 {
 	CStatic::PreSubclassWindow();
 
+	// 初期テキストを取得
+	CWnd::GetWindowText(m_strText);
+
 	CWnd* pParent = GetParent();
 	if (pParent)
 	{
@@ -1156,162 +1172,247 @@ void CCustomStatic::OnPaint()
 	CRect rect;
 	GetClientRect(&rect);
 
-	dc.FillSolidRect(&rect, COLOR_DIALOG_BG);
+	// ダブルバッファリング用のメモリDCを作成
+	CDC memDC;
+	memDC.CreateCompatibleDC(&dc);
+	CBitmap memBitmap;
+	memBitmap.CreateCompatibleBitmap(&dc, rect.Width(), rect.Height());
+	CBitmap* pOldBitmap = memDC.SelectObject(&memBitmap);
 
-	CString strText;
-	GetWindowText(strText);
-	if (strText.IsEmpty()) return;
+	// メモリDCに描画
+	memDC.FillSolidRect(&rect, COLOR_DIALOG_BG);
 
-	// マージン1ピクセル
-	CRect rectWithMargin = rect;
-	rectWithMargin.DeflateRect(1, 1);
-
-	CFont* pBaseFont = GetFont();
-	CFont* pOldFont = dc.SelectObject(pBaseFont);
-	dc.SetBkMode(TRANSPARENT);
-
-	LOGFONT lfBase;
-	pBaseFont->GetLogFont(&lfBase);
-	const int kMinHeight = 6;
-	const int baseHeight = abs(lfBase.lfHeight);
-
-	auto MeasureText = [&](int height, int width) -> CSize
-		{
-			LOGFONT lfTry = lfBase;
-			lfTry.lfHeight = -height;
-			lfTry.lfWidth = width;
-			CFont fontTry;
-			fontTry.CreateFontIndirect(&lfTry);
-			CFont* pOld = dc.SelectObject(&fontTry);
-			CSize size = dc.GetTextExtent(strText);
-			dc.SelectObject(pOld);
-			fontTry.DeleteObject();
-			return size;
-		};
-
-	// 1. まず横幅に収まる最小の高さを見つける
-	int fitHeight = kMinHeight;
-	int baseWidth = 0;
-	CSize szFit;
-
-	for (int h = baseHeight; h >= kMinHeight; h--)
+	// 初回描画時など、m_strTextが空の場合はCWnd::GetWindowTextから取得
+	if (m_strText.IsEmpty())
 	{
-		LOGFONT lfTry = lfBase;
-		lfTry.lfHeight = -h;
-		lfTry.lfWidth = 0;
-		CFont fontTry;
-		fontTry.CreateFontIndirect(&lfTry);
-		CFont* pOld = dc.SelectObject(&fontTry);
-		CSize size = dc.GetTextExtent(strText);
-		TEXTMETRIC tm;
-		dc.GetTextMetrics(&tm);
-		dc.SelectObject(pOld);
-		fontTry.DeleteObject();
-
-		if (size.cx <= rectWithMargin.Width())
-		{
-			fitHeight = h;
-			szFit = size;
-			baseWidth = tm.tmAveCharWidth;
-			break;
-		}
+		CWnd::GetWindowText(m_strText);
 	}
 
-	// 2. PreferWideMode に応じて縦長化 or 縦横両方引き延ばし
-	int finalHeight = fitHeight;
-	int finalWidth = 0;
-	CSize szFinal = szFit;
-
-	if (szFit.cy < rectWithMargin.Height())
+	if (!m_strText.IsEmpty())
 	{
-		// まず縦方向に引き延ばす(縦長文字化)
-		finalHeight = rectWithMargin.Height();
+		CString strText = m_strText;
 
-		// 横幅を維持するために、lfWidthを調整
-		// スケール比を計算
-		double scale = (double)finalHeight / fitHeight;
+		// マージン1ピクセル
+		CRect rectWithMargin = rect;
+		rectWithMargin.DeflateRect(1, 1);
 
-		// widthをscaleで割って縦長にする
-		finalWidth = max(1, (int)(baseWidth / scale));
+		CFont* pBaseFont = GetFont();
+		CFont* pOldFont = memDC.SelectObject(pBaseFont);
+		memDC.SetBkMode(TRANSPARENT);
 
-		// 実際のサイズを確認
-		szFinal = MeasureText(finalHeight, finalWidth);
-	}
+		LOGFONT lfBase;
+		pBaseFont->GetLogFont(&lfBase);
+		const int kMinHeight = 6;
+		const int baseHeight = abs(lfBase.lfHeight);
 
-	// 3. PreferWideModeがTRUEの場合は、さらに横方向にも引き延ばす
-	if (m_bPreferWideMode && szFinal.cx < rectWithMargin.Width())
-	{
-		// 横方向にギリギリまで伸ばす
-		int startWidth = (finalWidth > 0) ? finalWidth : baseWidth;
-		int maxWidth = startWidth * 3; // 上限を設定(3倍まで)
+		int finalHeight = 0;
+		int finalWidth = 0;
+		CSize szFinal;
 
-		for (int w = startWidth; w <= maxWidth; w++)
+		// キャッシュチェック: テキストとコントロールサイズが同じなら再計算しない
+		BOOL bNeedRecalc = (strText != m_strCachedText) ||
+			(m_nCachedHeight == 0) ||
+			(m_rectCached != rect);
+
+		if (bNeedRecalc)
 		{
-			CSize sizeTry = MeasureText(finalHeight, w);
-			if (sizeTry.cx <= rectWithMargin.Width() && sizeTry.cy <= rectWithMargin.Height())
+			auto MeasureText = [&](int height, int width) -> CSize
+				{
+					LOGFONT lfTry = lfBase;
+					lfTry.lfHeight = -height;
+					lfTry.lfWidth = width;
+					CFont fontTry;
+					fontTry.CreateFontIndirect(&lfTry);
+					CFont* pOld = memDC.SelectObject(&fontTry);
+					CSize size = memDC.GetTextExtent(strText);
+					memDC.SelectObject(pOld);
+					fontTry.DeleteObject();
+					return size;
+				};
+
+			// 1. まず横幅に収まる最小の高さを見つける
+			int fitHeight = kMinHeight;
+			int baseWidth = 0;
+			CSize szFit;
+
+			for (int h = baseHeight; h >= kMinHeight; h--)
 			{
-				finalWidth = w;
-				szFinal = sizeTry;
+				LOGFONT lfTry = lfBase;
+				lfTry.lfHeight = -h;
+				lfTry.lfWidth = 0;
+				CFont fontTry;
+				fontTry.CreateFontIndirect(&lfTry);
+				CFont* pOld = memDC.SelectObject(&fontTry);
+				CSize size = memDC.GetTextExtent(strText);
+				TEXTMETRIC tm;
+				memDC.GetTextMetrics(&tm);
+				memDC.SelectObject(pOld);
+				fontTry.DeleteObject();
+
+				if (size.cx <= rectWithMargin.Width())
+				{
+					fitHeight = h;
+					szFit = size;
+					baseWidth = tm.tmAveCharWidth;
+					break;
+				}
 			}
-			else
+
+			// 2. PreferWideMode に応じて縦長化 or 縦横両方引き延ばし
+			finalHeight = fitHeight;
+			finalWidth = 0;
+			szFinal = szFit;
+
+			if (szFit.cy < rectWithMargin.Height())
 			{
-				break;
+				// まず縦方向に引き延ばす(縦長文字化)
+				finalHeight = rectWithMargin.Height();
+
+				// 横幅を維持するために、lfWidthを調整
+				// スケール比を計算
+				double scale = (double)finalHeight / fitHeight;
+
+				// widthをscaleで割って縦長にする
+				finalWidth = max(1, (int)(baseWidth / scale));
+
+				// 実際のサイズを確認
+				szFinal = MeasureText(finalHeight, finalWidth);
 			}
+
+			// 3. PreferWideModeがTRUEの場合は、さらに横方向にも引き延ばす
+			if (m_bPreferWideMode && szFinal.cx < rectWithMargin.Width())
+			{
+				// 横方向にギリギリまで伸ばす
+				int startWidth = (finalWidth > 0) ? finalWidth : baseWidth;
+				int maxWidth = startWidth * 3; // 上限を設定(3倍まで)
+
+				for (int w = startWidth; w <= maxWidth; w++)
+				{
+					CSize sizeTry = MeasureText(finalHeight, w);
+					if (sizeTry.cx <= rectWithMargin.Width() && sizeTry.cy <= rectWithMargin.Height())
+					{
+						finalWidth = w;
+						szFinal = sizeTry;
+					}
+					else
+					{
+						break;
+					}
+				}
+			}
+
+			// キャッシュに保存
+			m_strCachedText = strText;
+			m_nCachedHeight = finalHeight;
+			m_nCachedWidth = finalWidth;
+			m_rectCached = rect;
 		}
+		else
+		{
+			// キャッシュから取得
+			finalHeight = m_nCachedHeight;
+			finalWidth = m_nCachedWidth;
+		}
+
+		// 4. 最終的なフォントを作成
+		CFont fontFinal;
+		LOGFONT lfFinal = lfBase;
+		lfFinal.lfHeight = -finalHeight;
+		lfFinal.lfWidth = finalWidth;
+		fontFinal.CreateFontIndirect(&lfFinal);
+		memDC.SelectObject(&fontFinal);
+
+		// szFinalを再計算（キャッシュから来た場合のため）
+		szFinal = memDC.GetTextExtent(strText);
+
+		// フォーマット決定
+		DWORD dwStyle = GetStyle();
+		UINT nFormat = DT_VCENTER | DT_SINGLELINE;
+		if (dwStyle & SS_CENTER) nFormat |= DT_CENTER;
+		else if (dwStyle & SS_RIGHT) nFormat |= DT_RIGHT;
+		else nFormat |= DT_LEFT;
+
+		// 描画実行
+		if (m_bGradEnable)
+		{
+			DrawTextWithGradient(&memDC, rect, strText, nFormat,
+				m_clrGradStart, m_clrGradEnd, m_nGradDirection,
+				m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+				m_bShadowEnable, COLOR_DIALOG_BG, szFinal.cx);
+		}
+		else
+		{
+			DrawTextWithShadow(&memDC, rect, strText, nFormat, RGB(0, 0, 0),
+				m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+				m_bShadowEnable, COLOR_DIALOG_BG);
+		}
+
+		fontFinal.DeleteObject();
+		memDC.SelectObject(pOldFont);
 	}
 
-	// 3. 最終的なフォントを作成
-	CFont fontFinal;
-	LOGFONT lfFinal = lfBase;
-	lfFinal.lfHeight = -finalHeight;
-	lfFinal.lfWidth = finalWidth;
-	fontFinal.CreateFontIndirect(&lfFinal);
-	dc.SelectObject(&fontFinal);
+	// メモリDCから実際のDCへ一気に転送（ちらつき防止）
+	dc.BitBlt(0, 0, rect.Width(), rect.Height(), &memDC, 0, 0, SRCCOPY);
 
-	// フォーマット決定
-	DWORD dwStyle = GetStyle();
-	UINT nFormat = DT_VCENTER | DT_SINGLELINE;
-	if (dwStyle & SS_CENTER) nFormat |= DT_CENTER;
-	else if (dwStyle & SS_RIGHT) nFormat |= DT_RIGHT;
-	else nFormat |= DT_LEFT;
-
-	// 描画実行
-	if (m_bGradEnable)
-	{
-		DrawTextWithGradient(&dc, rect, strText, nFormat,
-			m_clrGradStart, m_clrGradEnd, m_nGradDirection,
-			m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-			m_bShadowEnable, COLOR_DIALOG_BG, szFinal.cx);
-	}
-	else
-	{
-		DrawTextWithShadow(&dc, rect, strText, nFormat, RGB(0, 0, 0),
-			m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-			m_bShadowEnable, COLOR_DIALOG_BG);
-	}
-
-	fontFinal.DeleteObject();
-	dc.SelectObject(pOldFont);
+	// 後片付け
+	memDC.SelectObject(pOldBitmap);
+	memBitmap.DeleteObject();
+	memDC.DeleteDC();
 }
 
 BOOL CCustomStatic::OnEraseBkgnd(CDC* pDC)
 {
-	CRect rect;
-	GetClientRect(&rect);
-	pDC->FillSolidRect(&rect, COLOR_DIALOG_BG);
+	// ダブルバッファリングを使用しているため、背景消去はスキップ
 	return TRUE;
 }
 
 LRESULT CCustomStatic::OnSetText(WPARAM wParam, LPARAM lParam)
 {
-	// デフォルトの処理を実行
-	LRESULT result = Default();
+	// Default()を呼ぶとシステムが標準描画してしまうため呼ばない
+	// 代わりに自前でテキストを保存
+	LPCTSTR lpszText = (LPCTSTR)lParam;
+	if (lpszText)
+	{
+		m_strText = lpszText;
+	}
+	else
+	{
+		m_strText.Empty();
+	}
 
-	// テキストが変更されたので再描画
+	// キャッシュをクリア
+	m_strCachedText.Empty();
+
+	// 再描画
 	if (GetSafeHwnd())
 		Invalidate();
 
-	return result;
+	return TRUE;
+}
+
+LRESULT CCustomStatic::OnGetText(WPARAM wParam, LPARAM lParam)
+{
+	int nMaxCount = (int)wParam;
+	LPTSTR lpszText = (LPTSTR)lParam;
+
+	if (lpszText == NULL || nMaxCount <= 0)
+		return 0;
+
+	int nLen = m_strText.GetLength();
+	int nCopyLen = min(nLen, nMaxCount - 1);
+
+	if (nCopyLen > 0)
+	{
+		_tcsncpy_s(lpszText, nMaxCount, (LPCTSTR)m_strText, nCopyLen);
+	}
+	lpszText[nCopyLen] = _T('\0');
+
+	return nCopyLen;
+}
+
+LRESULT CCustomStatic::OnGetTextLength(WPARAM wParam, LPARAM lParam)
+{
+	return m_strText.GetLength();
 }
 
 // ============================================================================

@@ -176,7 +176,7 @@ private:
 	BOOL m_bHasFocus;
 };
 
-// カスタムスタティック
+// CCustomStatic クラス
 class CCustomStatic : public CStatic
 {
 	DECLARE_DYNAMIC(CCustomStatic)
@@ -187,47 +187,61 @@ public:
 	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
 	BOOL m_bAutoDelete;
 
-	void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
-
-	// グラデーション機能
+	// グラデーション設定
 	void SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDirection, BOOL bEnable);
 	void GetGradation(COLORREF* pColorStart, COLORREF* pColorEnd, int* pDirection, BOOL* pbEnable) const;
 
-	// ドロップシャドウ機能
+	// ドロップシャドウ設定
 	void SetDropShadow(COLORREF color, int nDirection, int nDistance, int nBlur, BOOL bEnable);
 	void GetDropShadow(COLORREF* pColor, int* pDirection, int* pDistance, int* pBlur, BOOL* pbEnable) const;
 
-	// 横長優先モード（縦長変形を使わずに縮小を続ける）
+	// PreferWideMode設定
 	void SetPreferWideMode(BOOL bPreferWide);
 	BOOL GetPreferWideMode() const;
+
+	// フォント設定
+	void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
 
 protected:
 	virtual void PreSubclassWindow();
 	virtual void PostNcDestroy();
+
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg LRESULT OnSetText(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnGetText(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnGetTextLength(WPARAM wParam, LPARAM lParam);
 
 	DECLARE_MESSAGE_MAP()
 
 private:
-	CFont m_font;
-
-	// グラデーション設定
+	// グラデーション関連
 	COLORREF m_clrGradStart;
 	COLORREF m_clrGradEnd;
 	int m_nGradDirection;
 	BOOL m_bGradEnable;
 
-	// ドロップシャドウ設定
+	// ドロップシャドウ関連
 	COLORREF m_clrShadow;
 	int m_nShadowDirection;
 	int m_nShadowDistance;
 	int m_nShadowBlur;
 	BOOL m_bShadowEnable;
 
-	// 横長優先モード
+	// フォント
+	CFont m_font;
+
+	// PreferWideMode
 	BOOL m_bPreferWideMode;
+
+	// テキスト保存
+	CString m_strText;
+
+	// フォントサイズキャッシュ
+	CString m_strCachedText;
+	int m_nCachedHeight;
+	int m_nCachedWidth;
+	CRect m_rectCached;
 };
 
 // カスタムリストボックス
