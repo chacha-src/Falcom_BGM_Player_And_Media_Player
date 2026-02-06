@@ -2955,25 +2955,76 @@ static const EnvParams ENV_PRESETS[ENV_PRESET_COUNT] = {
 
 // ===== フィルタ計算関数群 =====
 static void CalcPeakingEQ(Biquad* f, float freq, float q, float gainVal, int rate) {
+	// ゲイン値のクランプ（安全装置）
+	if (gainVal < 0.0f) gainVal = 0.0f;
+	if (gainVal > 200.0f) gainVal = 200.0f;
+
 	float db = (gainVal - 100.0f) * 0.12f;
-	if (fabs(db) < 0.1f) {
-		f->b0 = 1;
-		f->b1 = 0;
-		f->b2 = 0;
-		f->a1 = 0;
-		f->a2 = 0;
+
+	// ±1.2dB以下ならバイパス（閾値を広げる）
+	if (fabs(db) < 1.2f) {
+		f->b0 = 1.0f;
+		f->b1 = 0.0f;
+		f->b2 = 0.0f;
+		f->a1 = 0.0f;
+		f->a2 = 0.0f;
 		return;
 	}
+
+	// 周波数のクランプ（ナイキスト周波数の90%まで）
+	float maxFreq = (float)rate * 0.45f;
+	if (freq > maxFreq) freq = maxFreq;
+	if (freq < 10.0f) freq = 10.0f;
+
+	// Q値のクランプ
+	if (q < 0.1f) q = 0.1f;
+	if (q > 10.0f) q = 10.0f;
+
 	float omega = 2.0f * M_PI * freq / (float)rate;
-	float sn = sinf(omega), cs = cosf(omega);
+	float sn = sinf(omega);
+	float cs = cosf(omega);
 	float alpha = sn / (2.0f * q);
 	float A = powf(10.0f, db / 40.0f);
+
+	// Aの範囲チェック
+	if (!isfinite(A) || A < 0.01f || A > 100.0f) {
+		// 異常値の場合はバイパス
+		f->b0 = 1.0f;
+		f->b1 = 0.0f;
+		f->b2 = 0.0f;
+		f->a1 = 0.0f;
+		f->a2 = 0.0f;
+		return;
+	}
+
 	float a0 = 1.0f + alpha / A;
+
+	// ゼロ除算チェック
+	if (fabs(a0) < 1e-10f) {
+		f->b0 = 1.0f;
+		f->b1 = 0.0f;
+		f->b2 = 0.0f;
+		f->a1 = 0.0f;
+		f->a2 = 0.0f;
+		return;
+	}
+
 	f->b0 = (1.0f + alpha * A) / a0;
 	f->b1 = (-2.0f * cs) / a0;
 	f->b2 = (1.0f - alpha * A) / a0;
 	f->a1 = (-2.0f * cs) / a0;
 	f->a2 = (1.0f - alpha / A) / a0;
+
+	// 最終的な係数の健全性チェック
+	if (!isfinite(f->b0) || !isfinite(f->b1) || !isfinite(f->b2) ||
+		!isfinite(f->a1) || !isfinite(f->a2)) {
+		// 異常値が検出されたらバイパス
+		f->b0 = 1.0f;
+		f->b1 = 0.0f;
+		f->b2 = 0.0f;
+		f->a1 = 0.0f;
+		f->a2 = 0.0f;
+	}
 }
 
 static void CalcFilter(Biquad* f, int type, float freq, float q, int rate) {
@@ -3031,37 +3082,36 @@ static void CalcShelvingEQ(Biquad* f, int type, float freq, float gainDb, int ra
 	}
 }
 
-static inline float ProcessBiquad(Biquad* f, float in) {
-	if (f->b0 == 1.0f && f->b1 == 0.0f && f->a1 == 0.0f) return in;
-	if (f->b0 == 0.0f && f->b1 == 0.0f) return in;
-
+static float ProcessBiquad(Biquad * f, float in) {
+	// 入力の健全性チェック
 	if (!isfinite(in)) return 0.0f;
-	if (fabs(in) > 10.0f) return 0.0f;
 
-	float out = f->b0 * in + f->b1 * f->x1 + f->b2 * f->x2 - f->a1 * f->y1 - f->a2 * f->y2;
+	float out = f->b0 * in + f->b1 * f->x1 + f->b2 * f->x2
+		- f->a1 * f->y1 - f->a2 * f->y2;
 
-	if (!isfinite(out) || fabs(out) > 10.0f) {
-		f->x1 = 0.0f;
-		f->x2 = 0.0f;
-		f->y1 = 0.0f;
-		f->y2 = 0.0f;
-		return 0.0f;
-	}
+	// デノーマル対策（極小値を0にする）
+	if (fabs(out) < 1e-15f) out = 0.0f;
 
-	if (fabs(out) < 1.0e-20f) out = 0.0f;
-
+	// 状態更新
 	f->x2 = f->x1;
 	f->x1 = in;
 	f->y2 = f->y1;
 	f->y1 = out;
 
-	if (fabs(f->x1) < 1.0e-20f) f->x1 = 0.0f;
-	if (fabs(f->x2) < 1.0e-20f) f->x2 = 0.0f;
-	if (fabs(f->y1) < 1.0e-20f) f->y1 = 0.0f;
-	if (fabs(f->y2) < 1.0e-20f) f->y2 = 0.0f;
+	// デノーマル対策（状態変数）
+	if (fabs(f->y1) < 1e-15f) f->y1 = 0.0f;
+	if (fabs(f->y2) < 1e-15f) f->y2 = 0.0f;
 
-	if (fabs(f->y1) > 5.0f) f->y1 *= 0.5f;
-	if (fabs(f->y2) > 5.0f) f->y2 *= 0.5f;
+	// 出力の健全性チェック
+	if (!isfinite(out)) {
+		// フィルタ状態をリセット
+		f->x1 = f->x2 = f->y1 = f->y2 = 0.0f;
+		return 0.0f;
+	}
+
+	// ハードリミット（安全装置）
+	if (out > 10.0f) out = 10.0f;
+	if (out < -10.0f) out = -10.0f;
 
 	return out;
 }
