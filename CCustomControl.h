@@ -176,6 +176,19 @@ private:
 	BOOL m_bHasFocus;
 };
 
+// テキストセグメント情報
+struct TextSegment
+{
+	CString text;
+	BOOL bBold;
+	BOOL bItalic;
+	BOOL bHasColor;
+	COLORREF clrText;
+	int nFontSizeOffset;  // フォントサイズのオフセット(+1, -2など)
+
+	TextSegment() : bBold(FALSE), bItalic(FALSE), bHasColor(FALSE), clrText(RGB(0, 0, 0)), nFontSizeOffset(0) {}
+};
+
 // CCustomStatic クラス
 class CCustomStatic : public CStatic
 {
@@ -184,8 +197,6 @@ class CCustomStatic : public CStatic
 public:
 	CCustomStatic();
 	virtual ~CCustomStatic();
-	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
-	BOOL m_bAutoDelete;
 
 	// グラデーション設定
 	void SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDirection, BOOL bEnable);
@@ -202,6 +213,9 @@ public:
 	// フォント設定
 	void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
 
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
+
 protected:
 	virtual void PreSubclassWindow();
 	virtual void PostNcDestroy();
@@ -215,6 +229,12 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 private:
+	// ヘルパー関数
+	std::vector<TextSegment> ParseFormattedText(const CString& str);
+	CSize MeasureSegmentedText(CDC* pDC, const std::vector<TextSegment>& segments, const LOGFONT& lfBase, int height, int width);
+	void DrawSegmentedText(CDC* pDC, const CRect& rect, const std::vector<TextSegment>& segments,
+		const LOGFONT& lfBase, int height, int width, UINT nFormat);
+
 	// グラデーション関連
 	COLORREF m_clrGradStart;
 	COLORREF m_clrGradEnd;

@@ -4463,7 +4463,8 @@ CString KeyCodeAll;
 
 // ===== 音名テーブル =====
 static const WCHAR* NOTE_NAMES[12] = {
-	L"C ", L"C#", L"D ", L"D#", L"E ", L"F ", L"F#", L"G ", L"G#", L"A ", L"A#", L"B "
+	L"C ", L"C#", L"D ", L"D#", L"E ", L"F ",
+	L"F#", L"G ", L"G#", L"A ", L"A#", L"B "
 };
 
 // ===== 初期化 =====
@@ -4765,23 +4766,26 @@ static void AggregateNoteClasses(float* bassClass, float* midClass,
 		int pitchClass = note % 12;
 		int octave = note / 12;
 
+		// ★倍音抑制を強化
 		if (octaveMaxNote[octave] >= 0 && note != octaveMaxNote[octave]) {
 			int fundamentalPC = octaveMaxNote[octave] % 12;
 			int interval = (pitchClass - fundamentalPC + 12) % 12;
 			float ratio = strength / octaveMax[octave];
 
-			// ★倍音系列の減衰
 			if (interval == 7) {  // 完全5度（第2倍音）
-				if (ratio < 0.35f) strength *= 0.5f;
+				if (ratio < 0.4f) strength *= 0.4f;  // 0.35→0.4、0.5→0.4に厳格化
 			}
 			else if (interval == 4) {  // 長3度（第5倍音近似）
-				if (ratio < 0.25f) strength *= 0.7f;
+				if (ratio < 0.3f) strength *= 0.6f;  // 0.25→0.3、0.7→0.6に厳格化
 			}
-			else if (interval == 2) {  // ★長2度（第9倍音近似）
-				if (ratio < 0.3f) strength *= 0.4f;  // 60%減衰
+			else if (interval == 2) {  // 長2度（第9倍音近似）
+				if (ratio < 0.35f) strength *= 0.3f;  // 0.3→0.35、0.4→0.3に厳格化
 			}
-			else if (interval == 9) {  // ★長6度（倍音系列）
-				if (ratio < 0.25f) strength *= 0.6f;
+			else if (interval == 9) {  // 長6度（倍音系列）
+				if (ratio < 0.3f) strength *= 0.5f;  // 0.25→0.3、0.6→0.5に厳格化
+			}
+			else if (interval == 11) {  // ★長7度（倍音系列）追加
+				if (ratio < 0.25f) strength *= 0.4f;
 			}
 		}
 
@@ -4804,32 +4808,32 @@ typedef struct { const WCHAR* name; int pattern[12]; float bonus; } ChordPattern
 static const ChordPattern CHORD_PATTERNS[] = {
 	// 基本3和音（最優先）
 	{L"",      {3,0,0,0,2,0,0,1,0,0,0,0}, 0.5f},
-	{L"m",     {3,0,0,2,0,0,0,1,0,0,0,0}, 0.5f},
-	{L"5",     {3,0,0,0,0,0,0,2,0,0,0,0}, 0.4f},
+	{L"!@C00ff80m!@C000000",     {3,0,0,2,0,0,0,1,0,0,0,0}, 0.5f},
+	{L"!@Cff40005!@C000000",     {3,0,0,0,0,0,0,2,0,0,0,0}, 0.4f},
 
 	// サスペンド系
-	{L"sus4",  {3,0,0,0,0,3,0,1,0,0,0,0}, 0.4f},
-	{L"sus2",  {3,0,3,0,0,0,0,1,0,0,0,0}, 0.4f},
+	{L"!@C8000ffsus!@Cff40004!@C000000",  {3,0,0,0,0,3,0,1,0,0,0,0}, 0.4f},
+	{L"!@C8000ffsus!@Cff40002!@C000000",  {3,0,3,0,0,0,0,1,0,0,0,0}, 0.4f},
 
 	// ディミニッシュ・オーギュメント
-	{L"dim",   {3,0,0,2,0,0,2,0,0,0,0,0}, 0.3f},
-	{L"aug",   {3,0,0,0,2,0,0,0,2,0,0,0}, 0.3f},
+	{L"!@Cffbf00dim!@C000000",   {3,0,0,2,0,0,2,0,0,0,0,0}, 0.3f},
+	{L"!@Cffbf00aug!@C000000",   {3,0,0,0,2,0,0,0,2,0,0,0}, 0.3f},
 
 	// 4和音
-	{L"7",     {3,0,0,0,2,0,0,1,0,0,2,0}, 0.3f},
-	{L"M7",    {3,0,0,0,2,0,0,1,0,0,0,2}, 0.3f},
-	{L"m7",    {3,0,0,2,0,0,0,1,0,0,2,0}, 0.3f},
-	{L"6",     {3,0,0,0,2,0,0,1,0,2,0,0}, 0.2f},
-	{L"m6",    {3,0,0,2,0,0,0,1,0,2,0,0}, 0.2f},
-	{L"add9",  {3,0,2,0,2,0,0,1,0,0,0,0}, 0.2f},
-	{L"7sus4", {3,0,0,0,0,2,0,1,0,0,2,0}, 0.2f},
-	{L"m7b5",  {3,0,0,2,0,0,2,0,0,0,2,0}, 0.2f},
-	{L"dim7",  {3,0,0,2,0,0,2,0,0,2,0,0}, 0.2f},
+	{L"7!@C000000",     {3,0,0,0,2,0,0,1,0,0,2,0}, 0.3f},
+	{L"!@C80ff00M!@Cff40007!@C000000",    {3,0,0,0,2,0,0,1,0,0,0,2}, 0.3f},
+	{L"!@C00ff80m!@Cff40007!@C000000",    {3,0,0,2,0,0,0,1,0,0,2,0}, 0.3f},
+	{L"!@Cff40006!@C000000",     {3,0,0,0,2,0,0,1,0,2,0,0}, 0.2f},
+	{L"!@C00ff80m!@Cff40006!@C000000",    {3,0,0,2,0,0,0,1,0,2,0,0}, 0.2f},
+	{L"!@Cffbf00add!@Cff40009!@C000000",  {3,0,2,0,2,0,0,1,0,0,0,0}, 0.2f},
+	{L"!@Cff40007!@C8000ffsus!@Cff40004!@C000000", {3,0,0,0,0,2,0,1,0,0,2,0}, 0.2f},
+	{L"!@C00ff80m!@Cff40007!@C000000b!@Cff40005!@C000000",  {3,0,0,2,0,0,2,0,0,0,2,0}, 0.2f},
+	{L"!@Cffbf00dim!@Cff40007!@C000000",  {3,0,0,2,0,0,2,0,0,2,0,0}, 0.2f},
 
 	// ★9th系は大幅にペナルティ（ボーナスをマイナスに）
-	{L"9",     {3,0,2,0,2,0,0,1,0,0,2,0}, -0.5f},
-	{L"M9",    {3,0,2,0,2,0,0,1,0,0,0,2}, -0.5f},
-	{L"m9",    {3,0,2,2,0,0,0,1,0,0,2,0}, -0.5f},
+	{L"!@Cff40009!@C000000",     {3,0,2,0,2,0,0,1,0,0,2,0}, -0.5f},
+	{L"!@C80ff00M!@Cff40009!@C000000",    {3,0,2,0,2,0,0,1,0,0,0,2}, -0.5f},
+	{L"!@C00ff80m!@Cff40009!@C000000",    {3,0,2,2,0,0,0,1,0,0,2,0}, -0.5f},
 };
 
 struct ChordCandidate {
@@ -4872,7 +4876,7 @@ static CString EstimateChordRaw(float* noteClass, float threshold) {
 	float third = max(normalized[(bestRoot + 3) % 12], normalized[(bestRoot + 4) % 12]);
 	float fifth = normalized[(bestRoot + 7) % 12];
 	if (fifth > 0.3f && third < 0.15f && activeNotes <= 3) {
-		return rootName + L"[Power]";
+		return rootName + L"!@B[!@Cff0000Power!@Cffffff]!@B";
 	}
 
 	std::vector<ChordCandidate> candidates;
@@ -5059,7 +5063,7 @@ static CString EstimateChordRawWithHistory(float* noteClass, float threshold, co
 	float normalized[12];
 	for (int i = 0; i < 12; i++) {
 		normalized[i] = noteClass[i] / maxVal;
-		if (normalized[i] < 0.08f) normalized[i] = 0.0f;
+		if (normalized[i] < 0.10f) normalized[i] = 0.0f;  // 0.08→0.10に厳格化
 	}
 
 	int bestRoot = 0;
@@ -5070,7 +5074,7 @@ static CString EstimateChordRawWithHistory(float* noteClass, float threshold, co
 
 	int activeNotes = 0;
 	for (int i = 0; i < 12; i++)
-		if (normalized[i] > 0.12f) activeNotes++;
+		if (normalized[i] > 0.15f) activeNotes++;  // 0.12→0.15に厳格化
 
 	if (activeNotes <= 1) {
 		CString rootName = NOTE_NAMES[bestRoot];
@@ -5085,7 +5089,7 @@ static CString EstimateChordRawWithHistory(float* noteClass, float threshold, co
 	float third = max(normalized[(bestRoot + 3) % 12], normalized[(bestRoot + 4) % 12]);
 	float fifth = normalized[(bestRoot + 7) % 12];
 	if (fifth > 0.3f && third < 0.15f && activeNotes <= 3) {
-		return rootName + L"[Power]";
+		return rootName + L"!@B!@I[Power]!@B!@I";
 	}
 
 	std::vector<ChordCandidate> candidates;
@@ -5107,42 +5111,42 @@ static CString EstimateChordRawWithHistory(float* noteClass, float threshold, co
 
 			if (weight > 0) {
 				score += normalized[note] * weight * 2.0f;
-				if (normalized[note] > 0.12f) matched++;
+				if (normalized[note] > 0.15f) matched++;  // 0.12→0.15に厳格化
 			}
 			else {
 				if (normalized[note] > 0.25f) {
-					score -= normalized[note] * 1.5f;
+					score -= normalized[note] * 2.0f;  // 1.5→2.0に強化
 				}
 			}
 		}
 
 		if (is9thChord) {
 			float matchRatio = (required > 0) ? (float)matched / required : 0.0f;
-			if (matchRatio < 0.8f) score -= 10.0f;
+			if (matchRatio < 0.85f) score -= 12.0f;  // 0.8→0.85、10.0→12.0に厳格化
 			float ninth = normalized[(bestRoot + 2) % 12];
-			if (ninth < 0.2f) score -= 5.0f;
+			if (ninth < 0.25f) score -= 6.0f;  // 0.2→0.25、5.0→6.0に厳格化
 		}
 		else {
 			float matchRatio = (required > 0) ? (float)matched / required : 0.0f;
-			if (matchRatio < 0.4f) score -= 3.0f;
+			if (matchRatio < 0.5f) score -= 4.0f;  // 0.4→0.5、3.0→4.0に厳格化
 		}
 
 		int extraNotes = activeNotes - matched;
-		if (extraNotes > 0) score -= extraNotes * 1.0f;
+		if (extraNotes > 0) score -= extraNotes * 1.5f;  // 1.0→1.5に強化
 
 		score += CHORD_PATTERNS[c].bonus;
 
 		if (required == 3) score += 1.2f;
 		if (required == 4) score += 0.5f;
-		if (required >= 5) score -= 1.0f;
+		if (required >= 5) score -= 1.5f;  // -1.0→-1.5に厳格化
 
-		// ★ヒステリシスボーナス: 前回と同じコードなら優遇
+		// ヒステリシスボーナス
 		CString currentChord = rootName + CHORD_PATTERNS[c].name;
 		if (!prevChord.IsEmpty() && currentChord == prevChord) {
-			score += 1.5f;  // 前回と同じなら大幅ボーナス
+			score += 1.5f;
 		}
 
-		float minScore = is9thChord ? 3.5f : 0.8f;
+		float minScore = is9thChord ? 4.0f : 1.0f;  // 3.5→4.0、0.8→1.0に厳格化
 
 		if (score > minScore) {
 			ChordCandidate cand;
@@ -5163,24 +5167,34 @@ static CString EstimateChordRawWithHistory(float* noteClass, float threshold, co
 			return a.score > b.score;
 		});
 
-	// ★前回のコードがトップ3に入っていれば、それを優先
+	// 前回のコードがトップ3に入っていれば、それを優先
 	if (!prevChord.IsEmpty()) {
 		for (size_t i = 0; i < min((size_t)3, candidates.size()); i++) {
 			if (candidates[i].name == prevChord) {
-				return prevChord;  // 前回のコードを維持
+				return prevChord;
 			}
 		}
 	}
 
+	// ★基本は2つ、まれに3つ
 	CString result = candidates[0].name;
 	int count = 1;
 
 	for (size_t i = 1; i < candidates.size() && count < 3; i++) {
-		if (candidates[0].score - candidates[i].score > 2.5f) break;
+		// ★2つ目は比較的緩く追加
+		if (count == 1) {
+			if (candidates[0].score - candidates[i].score > 2.0f) break;  // 2.5→2.0に緩和
+		}
+		// ★3つ目は非常に厳しく（スコア差がほぼ同点の場合のみ）
+		else if (count == 2) {
+			if (candidates[0].score - candidates[i].score > 0.5f) break;  // 非常に厳しく
+		}
+
 		if (candidates[i].name == result) continue;
 
+		// 9th系は2番目以降には入れにくく
 		if (candidates[i].name.Find(L"9") >= 0 && i > 0) {
-			if (candidates[0].score - candidates[i].score > 1.0f) continue;
+			if (candidates[0].score - candidates[i].score > 0.8f) continue;
 		}
 
 		result += L", " + candidates[i].name;
@@ -5217,7 +5231,7 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 		if (chordStr.GetLength() > 1 && (chordStr[1] == L'#' || chordStr[1] == L'b')) rootName = chordStr.Left(2);
 		else rootName = chordStr.Left(1);
 		if (rootName.GetLength() == 1) rootName += L" ";
-		CString ret; ret.Format(L"%s, <%s>", rootName, chordStr);
+		CString ret; ret.Format(L"%s, !@C002525<!@C000000%s!@C002525>!@C000000", rootName, chordStr);
 		return ret;
 		};
 
@@ -5398,7 +5412,7 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 	}
 
 	if (rawMelody == L"[   ]" && rawHighChord.IsEmpty()) {
-		KeyCodeHigh = L"  , <  >";
+		KeyCodeHigh = L"  , !@C002525<!@C000000  !@C002525>!@C000000";
 	}
 	else {
 		CString highChordPart = FormatChord(rawHighChord);

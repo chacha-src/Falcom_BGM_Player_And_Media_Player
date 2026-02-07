@@ -1031,9 +1031,10 @@ void CCustomEdit::OnKillFocus(CWnd* pNewWnd)
 	SetWindowPos(NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
 }
 
-// ============================================================================
-// CCustomStatic - カスタムスタティックテキスト
-// ============================================================================
+
+// ------------------------------
+// CCustomStatic
+// ------------------------------
 IMPLEMENT_DYNAMIC(CCustomStatic, CStatic)
 
 BEGIN_MESSAGE_MAP(CCustomStatic, CStatic)
@@ -1192,6 +1193,12 @@ void CCustomStatic::OnPaint()
 	{
 		CString strText = m_strText;
 
+		// テキストを書式解析
+		std::vector<TextSegment> segments = ParseFormattedText(strText);
+
+		// 書式があるかチェック(!@が含まれているか)
+		BOOL bHasFormatting = (strText.Find(_T("!@")) >= 0);
+
 		// マージン1ピクセル
 		CRect rectWithMargin = rect;
 		rectWithMargin.DeflateRect(1, 1);
@@ -1216,87 +1223,154 @@ void CCustomStatic::OnPaint()
 
 		if (bNeedRecalc)
 		{
-			auto MeasureText = [&](int height, int width) -> CSize
+			if (bHasFormatting)
+			{
+				// 書式付きテキストのサイズ測定
+				auto MeasureText = [&](int height, int width) -> CSize
+					{
+						return MeasureSegmentedText(&memDC, segments, lfBase, height, width);
+					};
+
+				// 1. まず横幅に収まる最小の高さを見つける
+				int fitHeight = kMinHeight;
+				int baseWidth = 0;
+				CSize szFit;
+
+				for (int h = baseHeight; h >= kMinHeight; h--)
+				{
+					// 通常フォントでTEXTMETRICを取得
+					LOGFONT lfTry = lfBase;
+					lfTry.lfHeight = -h;
+					lfTry.lfWidth = 0;
+					CFont fontTry;
+					fontTry.CreateFontIndirect(&lfTry);
+					CFont* pOld = memDC.SelectObject(&fontTry);
+					TEXTMETRIC tm;
+					memDC.GetTextMetrics(&tm);
+					memDC.SelectObject(pOld);
+					fontTry.DeleteObject();
+
+					CSize size = MeasureText(h, 0);
+
+					if (size.cx <= rectWithMargin.Width())
+					{
+						fitHeight = h;
+						szFit = size;
+						baseWidth = tm.tmAveCharWidth;
+						break;
+					}
+				}
+
+				// 2. PreferWideMode に応じて縦長化 or 縦横両方引き延ばし
+				finalHeight = fitHeight;
+				finalWidth = 0;
+				szFinal = szFit;
+
+				if (szFit.cy < rectWithMargin.Height())
+				{
+					finalHeight = rectWithMargin.Height();
+					double scale = (double)finalHeight / fitHeight;
+					finalWidth = max(1, (int)(baseWidth / scale));
+					szFinal = MeasureText(finalHeight, finalWidth);
+				}
+
+				// 3. PreferWideModeがTRUEの場合は、さらに横方向にも引き延ばす
+				if (m_bPreferWideMode && szFinal.cx < rectWithMargin.Width())
+				{
+					int startWidth = (finalWidth > 0) ? finalWidth : baseWidth;
+					int maxWidth = startWidth * 3;
+
+					for (int w = startWidth; w <= maxWidth; w++)
+					{
+						CSize sizeTry = MeasureText(finalHeight, w);
+						if (sizeTry.cx <= rectWithMargin.Width() && sizeTry.cy <= rectWithMargin.Height())
+						{
+							finalWidth = w;
+							szFinal = sizeTry;
+						}
+						else
+						{
+							break;
+						}
+					}
+				}
+			}
+			else
+			{
+				// 通常テキスト(書式なし)のサイズ測定
+				auto MeasureText = [&](int height, int width) -> CSize
+					{
+						LOGFONT lfTry = lfBase;
+						lfTry.lfHeight = -height;
+						lfTry.lfWidth = width;
+						CFont fontTry;
+						fontTry.CreateFontIndirect(&lfTry);
+						CFont* pOld = memDC.SelectObject(&fontTry);
+						CSize size = memDC.GetTextExtent(strText);
+						memDC.SelectObject(pOld);
+						fontTry.DeleteObject();
+						return size;
+					};
+
+				// 1. まず横幅に収まる最小の高さを見つける
+				int fitHeight = kMinHeight;
+				int baseWidth = 0;
+				CSize szFit;
+
+				for (int h = baseHeight; h >= kMinHeight; h--)
 				{
 					LOGFONT lfTry = lfBase;
-					lfTry.lfHeight = -height;
-					lfTry.lfWidth = width;
+					lfTry.lfHeight = -h;
+					lfTry.lfWidth = 0;
 					CFont fontTry;
 					fontTry.CreateFontIndirect(&lfTry);
 					CFont* pOld = memDC.SelectObject(&fontTry);
 					CSize size = memDC.GetTextExtent(strText);
+					TEXTMETRIC tm;
+					memDC.GetTextMetrics(&tm);
 					memDC.SelectObject(pOld);
 					fontTry.DeleteObject();
-					return size;
-				};
 
-			// 1. まず横幅に収まる最小の高さを見つける
-			int fitHeight = kMinHeight;
-			int baseWidth = 0;
-			CSize szFit;
-
-			for (int h = baseHeight; h >= kMinHeight; h--)
-			{
-				LOGFONT lfTry = lfBase;
-				lfTry.lfHeight = -h;
-				lfTry.lfWidth = 0;
-				CFont fontTry;
-				fontTry.CreateFontIndirect(&lfTry);
-				CFont* pOld = memDC.SelectObject(&fontTry);
-				CSize size = memDC.GetTextExtent(strText);
-				TEXTMETRIC tm;
-				memDC.GetTextMetrics(&tm);
-				memDC.SelectObject(pOld);
-				fontTry.DeleteObject();
-
-				if (size.cx <= rectWithMargin.Width())
-				{
-					fitHeight = h;
-					szFit = size;
-					baseWidth = tm.tmAveCharWidth;
-					break;
-				}
-			}
-
-			// 2. PreferWideMode に応じて縦長化 or 縦横両方引き延ばし
-			finalHeight = fitHeight;
-			finalWidth = 0;
-			szFinal = szFit;
-
-			if (szFit.cy < rectWithMargin.Height())
-			{
-				// まず縦方向に引き延ばす(縦長文字化)
-				finalHeight = rectWithMargin.Height();
-
-				// 横幅を維持するために、lfWidthを調整
-				// スケール比を計算
-				double scale = (double)finalHeight / fitHeight;
-
-				// widthをscaleで割って縦長にする
-				finalWidth = max(1, (int)(baseWidth / scale));
-
-				// 実際のサイズを確認
-				szFinal = MeasureText(finalHeight, finalWidth);
-			}
-
-			// 3. PreferWideModeがTRUEの場合は、さらに横方向にも引き延ばす
-			if (m_bPreferWideMode && szFinal.cx < rectWithMargin.Width())
-			{
-				// 横方向にギリギリまで伸ばす
-				int startWidth = (finalWidth > 0) ? finalWidth : baseWidth;
-				int maxWidth = startWidth * 3; // 上限を設定(3倍まで)
-
-				for (int w = startWidth; w <= maxWidth; w++)
-				{
-					CSize sizeTry = MeasureText(finalHeight, w);
-					if (sizeTry.cx <= rectWithMargin.Width() && sizeTry.cy <= rectWithMargin.Height())
+					if (size.cx <= rectWithMargin.Width())
 					{
-						finalWidth = w;
-						szFinal = sizeTry;
-					}
-					else
-					{
+						fitHeight = h;
+						szFit = size;
+						baseWidth = tm.tmAveCharWidth;
 						break;
+					}
+				}
+
+				// 2. PreferWideMode に応じて縦長化 or 縦横両方引き延ばし
+				finalHeight = fitHeight;
+				finalWidth = 0;
+				szFinal = szFit;
+
+				if (szFit.cy < rectWithMargin.Height())
+				{
+					finalHeight = rectWithMargin.Height();
+					double scale = (double)finalHeight / fitHeight;
+					finalWidth = max(1, (int)(baseWidth / scale));
+					szFinal = MeasureText(finalHeight, finalWidth);
+				}
+
+				// 3. PreferWideModeがTRUEの場合は、さらに横方向にも引き延ばす
+				if (m_bPreferWideMode && szFinal.cx < rectWithMargin.Width())
+				{
+					int startWidth = (finalWidth > 0) ? finalWidth : baseWidth;
+					int maxWidth = startWidth * 3;
+
+					for (int w = startWidth; w <= maxWidth; w++)
+					{
+						CSize sizeTry = MeasureText(finalHeight, w);
+						if (sizeTry.cx <= rectWithMargin.Width() && sizeTry.cy <= rectWithMargin.Height())
+						{
+							finalWidth = w;
+							szFinal = sizeTry;
+						}
+						else
+						{
+							break;
+						}
 					}
 				}
 			}
@@ -1314,17 +1388,6 @@ void CCustomStatic::OnPaint()
 			finalWidth = m_nCachedWidth;
 		}
 
-		// 4. 最終的なフォントを作成
-		CFont fontFinal;
-		LOGFONT lfFinal = lfBase;
-		lfFinal.lfHeight = -finalHeight;
-		lfFinal.lfWidth = finalWidth;
-		fontFinal.CreateFontIndirect(&lfFinal);
-		memDC.SelectObject(&fontFinal);
-
-		// szFinalを再計算（キャッシュから来た場合のため）
-		szFinal = memDC.GetTextExtent(strText);
-
 		// フォーマット決定
 		DWORD dwStyle = GetStyle();
 		UINT nFormat = DT_VCENTER | DT_SINGLELINE;
@@ -1333,21 +1396,40 @@ void CCustomStatic::OnPaint()
 		else nFormat |= DT_LEFT;
 
 		// 描画実行
-		if (m_bGradEnable)
+		if (bHasFormatting)
 		{
-			DrawTextWithGradient(&memDC, rect, strText, nFormat,
-				m_clrGradStart, m_clrGradEnd, m_nGradDirection,
-				m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-				m_bShadowEnable, COLOR_DIALOG_BG, szFinal.cx);
+			// 書式付きテキストを描画
+			DrawSegmentedText(&memDC, rect, segments, lfBase, finalHeight, finalWidth, nFormat);
 		}
 		else
 		{
-			DrawTextWithShadow(&memDC, rect, strText, nFormat, RGB(0, 0, 0),
-				m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-				m_bShadowEnable, COLOR_DIALOG_BG);
+			// 通常テキストを描画(元の処理)
+			CFont fontFinal;
+			LOGFONT lfFinal = lfBase;
+			lfFinal.lfHeight = -finalHeight;
+			lfFinal.lfWidth = finalWidth;
+			fontFinal.CreateFontIndirect(&lfFinal);
+			memDC.SelectObject(&fontFinal);
+
+			szFinal = memDC.GetTextExtent(strText);
+
+			if (m_bGradEnable)
+			{
+				DrawTextWithGradient(&memDC, rect, strText, nFormat,
+					m_clrGradStart, m_clrGradEnd, m_nGradDirection,
+					m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+					m_bShadowEnable, COLOR_DIALOG_BG, szFinal.cx);
+			}
+			else
+			{
+				DrawTextWithShadow(&memDC, rect, strText, nFormat, RGB(0, 0, 0),
+					m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+					m_bShadowEnable, COLOR_DIALOG_BG);
+			}
+
+			fontFinal.DeleteObject();
 		}
 
-		fontFinal.DeleteObject();
 		memDC.SelectObject(pOldFont);
 	}
 
@@ -1414,6 +1496,261 @@ LRESULT CCustomStatic::OnGetTextLength(WPARAM wParam, LPARAM lParam)
 {
 	return m_strText.GetLength();
 }
+
+// ============================================================================
+// ヘルパー関数: 書式付きテキストの解析
+// ============================================================================
+std::vector<TextSegment> CCustomStatic::ParseFormattedText(const CString& str)
+{
+	std::vector<TextSegment> segments;
+	BOOL bBold = FALSE;
+	BOOL bItalic = FALSE;
+	BOOL bHasColor = FALSE;
+	COLORREF currentColor = RGB(0, 0, 0);
+	int nFontSizeOffset = 0;  // 累積フォントサイズオフセット
+	CString current;
+
+	for (int i = 0; i < str.GetLength(); i++)
+	{
+		// !@プリフィックスをチェック
+		if (i + 1 < str.GetLength() && str[i] == _T('!') && str[i + 1] == _T('@'))
+		{
+			// コマンドの種類を確認
+			if (i + 2 < str.GetLength())
+			{
+				TCHAR cmd = str[i + 2];
+
+				if (cmd == _T('B'))  // !@B - 太字トグル
+				{
+					if (!current.IsEmpty())
+					{
+						TextSegment seg;
+						seg.text = current;
+						seg.bBold = bBold;
+						seg.bItalic = bItalic;
+						seg.bHasColor = bHasColor;
+						seg.clrText = currentColor;
+						seg.nFontSizeOffset = nFontSizeOffset;
+						segments.push_back(seg);
+						current.Empty();
+					}
+					bBold = !bBold;
+					i += 2;  // !@B の3文字分をスキップ
+					continue;
+				}
+				else if (cmd == _T('I'))  // !@I - イタリックトグル
+				{
+					if (!current.IsEmpty())
+					{
+						TextSegment seg;
+						seg.text = current;
+						seg.bBold = bBold;
+						seg.bItalic = bItalic;
+						seg.bHasColor = bHasColor;
+						seg.clrText = currentColor;
+						seg.nFontSizeOffset = nFontSizeOffset;
+						segments.push_back(seg);
+						current.Empty();
+					}
+					bItalic = !bItalic;
+					i += 2;  // !@I の3文字分をスキップ
+					continue;
+				}
+				else if (cmd == _T('C'))  // !@Cxxxxxx - 色指定
+				{
+					// 後続の6文字をRGB値として読み取る
+					if (i + 8 < str.GetLength())
+					{
+						CString hexColor = str.Mid(i + 3, 6);
+
+						// 16進数をパース
+						int r = 0, g = 0, b = 0;
+						if (_stscanf_s(hexColor, _T("%02x%02x%02x"), &r, &g, &b) == 3)
+						{
+							if (!current.IsEmpty())
+							{
+								TextSegment seg;
+								seg.text = current;
+								seg.bBold = bBold;
+								seg.bItalic = bItalic;
+								seg.bHasColor = bHasColor;
+								seg.clrText = currentColor;
+								seg.nFontSizeOffset = nFontSizeOffset;
+								segments.push_back(seg);
+								current.Empty();
+							}
+							bHasColor = TRUE;
+							currentColor = RGB(r, g, b);
+							i += 8;  // !@Cxxxxxx の9文字分をスキップ
+							continue;
+						}
+					}
+				}
+				else if (cmd == _T('F'))  // !@F+XX または !@F-XX - フォントサイズ調整
+				{
+					// !@F+01 や !@F-02 のような形式
+					if (i + 5 < str.GetLength())
+					{
+						TCHAR sign = str[i + 3];  // + または -
+						CString numStr = str.Mid(i + 4, 2);  // 2桁の数値
+
+						if ((sign == _T('+') || sign == _T('-')) &&
+							numStr.GetLength() == 2 &&
+							_istdigit(numStr[0]) && _istdigit(numStr[1]))
+						{
+							int offset = _ttoi(numStr);
+							if (sign == _T('-'))
+								offset = -offset;
+
+							if (!current.IsEmpty())
+							{
+								TextSegment seg;
+								seg.text = current;
+								seg.bBold = bBold;
+								seg.bItalic = bItalic;
+								seg.bHasColor = bHasColor;
+								seg.clrText = currentColor;
+								seg.nFontSizeOffset = nFontSizeOffset;
+								segments.push_back(seg);
+								current.Empty();
+							}
+
+							nFontSizeOffset += offset;
+							i += 5;  // !@F+XX の6文字分をスキップ
+							continue;
+						}
+					}
+				}
+			}
+		}
+
+		current += str[i];
+	}
+
+	// 残りのテキストを追加
+	if (!current.IsEmpty())
+	{
+		TextSegment seg;
+		seg.text = current;
+		seg.bBold = bBold;
+		seg.bItalic = bItalic;
+		seg.bHasColor = bHasColor;
+		seg.clrText = currentColor;
+		seg.nFontSizeOffset = nFontSizeOffset;
+		segments.push_back(seg);
+	}
+
+	return segments;
+}
+
+// ============================================================================
+// ヘルパー関数: セグメント化されたテキストのサイズ測定
+// ============================================================================
+CSize CCustomStatic::MeasureSegmentedText(CDC* pDC, const std::vector<TextSegment>& segments,
+	const LOGFONT& lfBase, int height, int width)
+{
+	CSize totalSize(0, 0);
+
+	for (size_t i = 0; i < segments.size(); i++)
+	{
+		LOGFONT lf = lfBase;
+		// 基本のheightにオフセットを適用
+		int adjustedHeight = max(6, height + segments[i].nFontSizeOffset);
+		lf.lfHeight = -adjustedHeight;
+		lf.lfWidth = width;
+		if (segments[i].bBold) lf.lfWeight = FW_BOLD;
+		if (segments[i].bItalic) lf.lfItalic = TRUE;
+
+		CFont font;
+		font.CreateFontIndirect(&lf);
+		CFont* pOldFont = pDC->SelectObject(&font);
+
+		CSize sz = pDC->GetTextExtent(segments[i].text);
+		totalSize.cx += sz.cx;
+		if (sz.cy > totalSize.cy) totalSize.cy = sz.cy;
+
+		pDC->SelectObject(pOldFont);
+		font.DeleteObject();
+	}
+
+	return totalSize;
+}
+
+// ============================================================================
+// ヘルパー関数: セグメント化されたテキストの描画
+// ============================================================================
+void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect,
+	const std::vector<TextSegment>& segments,
+	const LOGFONT& lfBase, int height, int width, UINT nFormat)
+{
+	// 全体のサイズを測定
+	CSize totalSize = MeasureSegmentedText(pDC, segments, lfBase, height, width);
+
+	// 描画開始位置を計算
+	int xPos = rect.left;
+
+	// 水平位置調整
+	if (nFormat & DT_CENTER)
+	{
+		xPos = rect.left + (rect.Width() - totalSize.cx) / 2;
+	}
+	else if (nFormat & DT_RIGHT)
+	{
+		xPos = rect.right - totalSize.cx;
+	}
+
+	// 各セグメントを描画
+	for (size_t i = 0; i < segments.size(); i++)
+	{
+		// セグメント用のフォントを作成(サイズオフセット適用)
+		LOGFONT lf = lfBase;
+		int adjustedHeight = max(6, height + segments[i].nFontSizeOffset);
+		lf.lfHeight = -adjustedHeight;
+		lf.lfWidth = width;
+		if (segments[i].bBold) lf.lfWeight = FW_BOLD;
+		if (segments[i].bItalic) lf.lfItalic = TRUE;
+
+		CFont font;
+		font.CreateFontIndirect(&lf);
+		CFont* pOldFont = pDC->SelectObject(&font);
+
+		// このセグメントのサイズを測定
+		CSize sz = pDC->GetTextExtent(segments[i].text);
+
+		// このセグメント用の矩形を作成
+		CRect segmentRect;
+		segmentRect.left = xPos;
+		segmentRect.right = xPos + sz.cx;
+		segmentRect.top = rect.top;
+		segmentRect.bottom = rect.bottom;
+
+		// 色を決定(セグメント指定色 or デフォルト黒)
+		COLORREF textColor = segments[i].bHasColor ? segments[i].clrText : RGB(0, 0, 0);
+
+		// 元の描画関数を呼び出す(選択されているフォントが使われる)
+		if (m_bGradEnable)
+		{
+			// グラデーションの場合は、セグメント色を無視してグラデーション優先
+			DrawTextWithGradient(pDC, segmentRect, segments[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT,
+				m_clrGradStart, m_clrGradEnd, m_nGradDirection,
+				m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+				m_bShadowEnable, COLOR_DIALOG_BG, sz.cx);
+		}
+		else
+		{
+			// 通常描画時はセグメントの色を適用
+			DrawTextWithShadow(pDC, segmentRect, segments[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, textColor,
+				m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+				m_bShadowEnable, COLOR_DIALOG_BG);
+		}
+
+		xPos += sz.cx;
+
+		pDC->SelectObject(pOldFont);
+		font.DeleteObject();
+	}
+}
+
 
 // ============================================================================
 // CCustomListBox - カスタムリストボックス(お姫様仕様)
