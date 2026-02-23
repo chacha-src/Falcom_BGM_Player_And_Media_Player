@@ -4808,33 +4808,35 @@ typedef struct { const WCHAR* name; int pattern[12]; float bonus; } ChordPattern
 static const ChordPattern CHORD_PATTERNS[] = {
 	// 基本3和音（最優先）
 	{L"",      {3,0,0,0,2,0,0,1,0,0,0,0}, 0.5f},
-	{L"!@C00ff80m!@C000000",     {3,0,0,2,0,0,0,1,0,0,0,0}, 0.5f},
-	{L"!@Cff40005!@C000000",     {3,0,0,0,0,0,0,2,0,0,0,0}, 0.4f},
+	{L"!@C0066bbm!@C000000",     {3,0,0,2,0,0,0,1,0,0,0,0}, 0.5f},
+	{L"!@Cff55005!@C000000",     {3,0,0,0,0,0,0,2,0,0,0,0}, 0.4f},
 
 	// サスペンド系
-	{L"!@C8000ffsus!@Cff40004!@C000000",  {3,0,0,0,0,3,0,1,0,0,0,0}, 0.4f},
-	{L"!@C8000ffsus!@Cff40002!@C000000",  {3,0,3,0,0,0,0,1,0,0,0,0}, 0.4f},
-
+	{L"!@C8844ccsus!@Cff55004!@C000000",  {3,0,0,0,0,3,0,1,0,0,0,0}, 0.4f},
+	{L"!@C8844ccsus!@Cff55002!@C000000",  {3,0,3,0,0,0,0,1,0,0,0,0}, 0.4f},
+	
 	// ディミニッシュ・オーギュメント
-	{L"!@Cffbf00dim!@C000000",   {3,0,0,2,0,0,2,0,0,0,0,0}, 0.3f},
-	{L"!@Cffbf00aug!@C000000",   {3,0,0,0,2,0,0,0,2,0,0,0}, 0.3f},
-
+	{L"!@Caa7744dim!@C000000",   {3,0,0,2,0,0,2,0,0,0,0,0}, 0.3f},
+	{L"!@Ccc4400aug!@C000000",   {3,0,0,0,2,0,0,0,2,0,0,0}, 0.3f},
+	
 	// 4和音
-	{L"7!@C000000",     {3,0,0,0,2,0,0,1,0,0,2,0}, 0.3f},
-	{L"!@C80ff00M!@Cff40007!@C000000",    {3,0,0,0,2,0,0,1,0,0,0,2}, 0.3f},
-	{L"!@C00ff80m!@Cff40007!@C000000",    {3,0,0,2,0,0,0,1,0,0,2,0}, 0.3f},
-	{L"!@Cff40006!@C000000",     {3,0,0,0,2,0,0,1,0,2,0,0}, 0.2f},
-	{L"!@C00ff80m!@Cff40006!@C000000",    {3,0,0,2,0,0,0,1,0,2,0,0}, 0.2f},
-	{L"!@Cffbf00add!@Cff40009!@C000000",  {3,0,2,0,2,0,0,1,0,0,0,0}, 0.2f},
-	{L"!@Cff40007!@C8000ffsus!@Cff40004!@C000000", {3,0,0,0,0,2,0,1,0,0,2,0}, 0.2f},
-	{L"!@C00ff80m!@Cff40007!@C000000b!@Cff40005!@C000000",  {3,0,0,2,0,0,2,0,0,0,2,0}, 0.2f},
-	{L"!@Cffbf00dim!@Cff40007!@C000000",  {3,0,0,2,0,0,2,0,0,2,0,0}, 0.2f},
-
+	{L"!@Cff55007!@C000000",     {3,0,0,0,2,0,0,1,0,0,2,0}, 0.3f},
+	{L"!@C00aa77M!@Cff55007!@C000000",    {3,0,0,0,2,0,0,1,0,0,0,2}, 0.3f},
+	{L"!@C0066bbm!@Cff55007!@C000000",    {3,0,0,2,0,0,0,1,0,0,2,0}, 0.3f},
+	{L"!@Cff55006!@C000000",     {3,0,0,0,2,0,0,1,0,2,0,0}, 0.2f},
+	{L"!@C0066bbm!@Cff55006!@C000000",    {3,0,0,2,0,0,0,1,0,2,0,0}, 0.2f},
+	{L"!@Cbb7733add!@Cff55009!@C000000",  {3,0,2,0,2,0,0,1,0,0,0,0}, 0.2f},
+	{L"!@Cff55007!@C8844ccsus!@Cff55004!@C000000", {3,0,0,0,0,2,0,1,0,0,2,0}, 0.2f},
+	{L"!@C0066bbm!@Cff55007!@Cdd2222b!@Cff55005!@C000000",  {3,0,0,2,0,0,2,0,0,0,2,0}, 0.2f},
+	{L"!@Caa7744dim!@Cff55007!@C000000",  {3,0,0,2,0,0,2,0,0,2,0,0}, 0.2f},
+	
 	// ★9th系は大幅にペナルティ（ボーナスをマイナスに）
-	{L"!@Cff40009!@C000000",     {3,0,2,0,2,0,0,1,0,0,2,0}, -0.5f},
-	{L"!@C80ff00M!@Cff40009!@C000000",    {3,0,2,0,2,0,0,1,0,0,0,2}, -0.5f},
-	{L"!@C00ff80m!@Cff40009!@C000000",    {3,0,2,2,0,0,0,1,0,0,2,0}, -0.5f},
+	{L"!@Cff55009!@C000000",     {3,0,2,0,2,0,0,1,0,0,2,0}, -0.5f},
+	{L"!@C00aa77M!@Cff55009!@C000000",    {3,0,2,0,2,0,0,1,0,0,0,2}, -0.5f},
+	{L"!@C0066bbm!@Cff55009!@C000000",    {3,0,2,2,0,0,0,1,0,0,2,0}, -0.5f}
 };
+
+
 
 struct ChordCandidate {
 	CString name;
@@ -5226,12 +5228,12 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 	bool stereo = (bufferR.size() == totalSamples);
 
 	auto FormatChord = [](CString chordStr) -> CString {
-		if (chordStr.IsEmpty()) return L"  , <  >";
+		if (chordStr.IsEmpty()) return L"!@B  , <  >!@B";
 		CString rootName = chordStr;
 		if (chordStr.GetLength() > 1 && (chordStr[1] == L'#' || chordStr[1] == L'b')) rootName = chordStr.Left(2);
 		else rootName = chordStr.Left(1);
 		if (rootName.GetLength() == 1) rootName += L" ";
-		CString ret; ret.Format(L"%s, !@C002525<!@C000000%s!@C002525>!@C000000", rootName, chordStr);
+		CString ret; ret.Format(L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", rootName, chordStr);
 		return ret;
 		};
 
@@ -5301,12 +5303,12 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 	// ★無音時は即座に空文字列表示（履歴はクリアしない）
 	if (isSilent) {
 		auto FormatChord = [](CString chordStr) -> CString {
-			if (chordStr.IsEmpty()) return L"  , <  >";
+			if (chordStr.IsEmpty()) return L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
 			CString rootName = chordStr;
 			if (chordStr.GetLength() > 1 && (chordStr[1] == L'#' || chordStr[1] == L'b')) rootName = chordStr.Left(2);
 			else rootName = chordStr.Left(1);
 			if (rootName.GetLength() == 1) rootName += L" ";
-			CString ret; ret.Format(L"%s, <%s>", rootName, chordStr);
+			CString ret; ret.Format(L"!@B%s, <!@F-05%s!@F+05>!@B", rootName, chordStr);
 			return ret;
 			};
 
@@ -5412,7 +5414,7 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 	}
 
 	if (rawMelody == L"[   ]" && rawHighChord.IsEmpty()) {
-		KeyCodeHigh = L"  , !@C002525<!@C000000  !@C002525>!@C000000";
+		KeyCodeHigh = L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
 	}
 	else {
 		CString highChordPart = FormatChord(rawHighChord);
