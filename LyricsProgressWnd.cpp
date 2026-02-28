@@ -1,4 +1,4 @@
-// LyricsProgressWnd.cpp
+ï»¿// LyricsProgressWnd.cpp
 #include "StdAfx.h"
 #include "LyricsProgressWnd.h"
 
@@ -9,7 +9,7 @@ END_MESSAGE_MAP()
 
 CLyricsProgressWnd::CLyricsProgressWnd()
 {
-	m_strText = _T("‰ÌŒæ“¾’†...\n’·‚¢10•b‚­‚ç‚¢‚©‚©‚è‚Ü‚·\n\næ“¾‚Å‚«‚È‚¢‚Í‰ÌŒ‚Í‚Å‚Ü‚¹‚ñB");
+	m_strText = _T("æ­Œè©å–å¾—ä¸­...\né•·ã„æ™‚10ç§’ãã‚‰ã„ã‹ã‹ã‚Šã¾ã™\n\nå–å¾—ã§ããªã„æ™‚ã¯æ­Œè©ã¯ã§ã¾ã›ã‚“ã€‚");
 }
 
 CLyricsProgressWnd::~CLyricsProgressWnd()
@@ -33,17 +33,17 @@ UINT GetDpiForWindowCompat(HWND hWnd)
 
 BOOL CLyricsProgressWnd::Create(CWnd* pParent)
 {
-	// ƒEƒBƒ“ƒhƒEƒNƒ‰ƒX“o˜^
+	// ã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ã‚¯ãƒ©ã‚¹ç™»éŒ²
 	CString strWndClass = AfxRegisterWndClass(
 		CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
-		::LoadCursor(NULL, IDC_WAIT), // »ŒvƒJ[ƒ\ƒ‹
+		::LoadCursor(NULL, IDC_WAIT), // ç ‚æ™‚è¨ˆã‚«ãƒ¼ã‚½ãƒ«
 		(HBRUSH)(COLOR_WINDOW + 1),
 		NULL
 	);
 
 	UINT dpi = GetDpiForWindowCompat(m_hWnd);
 
-	// eƒEƒBƒ“ƒhƒE‚Ì’†‰›‚É”z’u
+	// è¦ªã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ã®ä¸­å¤®ã«é…ç½®
 	CRect rect(0, 0, ScaleByDPI(300,dpi), ScaleByDPI(100,dpi));
 	if (pParent != NULL && pParent->GetSafeHwnd() != NULL) {
 		CRect parentRect;
@@ -55,7 +55,7 @@ BOOL CLyricsProgressWnd::Create(CWnd* pParent)
 		rect.OffsetRect(x, y);
 	}
 	else {
-		// e‚ª‚È‚¢ê‡‚Í‰æ–Ê’†‰›
+		// è¦ªãŒãªã„å ´åˆã¯ç”»é¢ä¸­å¤®
 		int screenWidth = GetSystemMetrics(SM_CXSCREEN);
 		int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 
@@ -65,7 +65,7 @@ BOOL CLyricsProgressWnd::Create(CWnd* pParent)
 		rect.OffsetRect(x, y);
 	}
 
-	// ƒEƒBƒ“ƒhƒEì¬iƒ|ƒbƒvƒAƒbƒvA˜g•t‚«Aí‚ÉÅ‘O–Êj
+	// ã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ä½œæˆï¼ˆãƒãƒƒãƒ—ã‚¢ãƒƒãƒ—ã€æ ä»˜ãã€å¸¸ã«æœ€å‰é¢ï¼‰
 	BOOL result = CreateEx(
 		WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
 		strWndClass,
@@ -77,10 +77,10 @@ BOOL CLyricsProgressWnd::Create(CWnd* pParent)
 	);
 
 	if (result) {
-		// ƒtƒHƒ“ƒgì¬
+		// ãƒ•ã‚©ãƒ³ãƒˆä½œæˆ
 		m_font.CreatePointFont(120, _T("MS UI Gothic"));
 
-		// ƒEƒBƒ“ƒhƒE‚ğÅ‘O–Ê‚É
+		// ã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ã‚’æœ€å‰é¢ã«
 		SetWindowPos(&wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	}
 
@@ -98,21 +98,21 @@ void CLyricsProgressWnd::SetText(const CString& text)
 		CClientDC dc(this);
 		CFont* pOldFont = dc.SelectObject(&m_font);
 
-		// ƒeƒLƒXƒgƒTƒCƒYi˜_—À•Wj
+		// ãƒ†ã‚­ã‚¹ãƒˆã‚µã‚¤ã‚ºï¼ˆè«–ç†åº§æ¨™ï¼‰
 		CRect calcRect(0, 0, 0, 0);
 		dc.DrawText(m_strText, &calcRect, DT_CALCRECT | DT_WORDBREAK);
 
 		dc.SelectObject(pOldFont);
 
-		// Œ»İ DPI ‚ğæ“¾
+		// ç¾åœ¨ DPI ã‚’å–å¾—
 		UINT dpi = GetDpiForWindowCompat(m_hWnd);
 
-		// DPI ƒXƒP[ƒ‹
+		// DPI ã‚¹ã‚±ãƒ¼ãƒ«
 		int padding = ScaleByDPI(40, dpi);
 		int width = ScaleByDPI(calcRect.Width(), dpi) + padding;
 		int height = ScaleByDPI(calcRect.Height(), dpi) + padding;
 
-		// ƒEƒBƒ“ƒhƒEˆÊ’u‚Í‚»‚Ì‚Ü‚ÜAƒTƒCƒY‚¾‚¯•ÏX
+		// ã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ä½ç½®ã¯ãã®ã¾ã¾ã€ã‚µã‚¤ã‚ºã ã‘å¤‰æ›´
 		SetWindowPos(NULL, 0, 0, width, height,
 			SWP_NOMOVE | SWP_NOZORDER);
 
@@ -129,7 +129,7 @@ void CLyricsProgressWnd::Show()
 		ShowWindow(SW_SHOW);
 		UpdateWindow();
 
-		// ƒƒbƒZ[ƒWƒ|ƒ“ƒv‚ğ‰ñ‚µ‚Ä‘¦À‚É•\¦
+		// ãƒ¡ãƒƒã‚»ãƒ¼ã‚¸ãƒãƒ³ãƒ—ã‚’å›ã—ã¦å³åº§ã«è¡¨ç¤º
 		MSG msg;
 		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 			TranslateMessage(&msg);
@@ -152,33 +152,33 @@ void CLyricsProgressWnd::OnPaint()
 	CRect clientRect;
 	GetClientRect(&clientRect);
 
-	// ”wŒi“h‚è‚Â‚Ô‚µ
+	// èƒŒæ™¯å¡—ã‚Šã¤ã¶ã—
 	dc.FillSolidRect(&clientRect, RGB(230, 240, 255));
 
-	// ˜gü
+	// æ ç·š
 	CPen pen(PS_SOLID, 2, RGB(100, 150, 200));
 	CPen* pOldPen = dc.SelectObject(&pen);
 	dc.Rectangle(&clientRect);
 	dc.SelectObject(pOldPen);
 
-	// ƒtƒHƒ“ƒgİ’è
+	// ãƒ•ã‚©ãƒ³ãƒˆè¨­å®š
 	CFont* pOldFont = dc.SelectObject(&m_font);
 	dc.SetBkMode(TRANSPARENT);
 	dc.SetTextColor(RGB(50, 50, 150));
 
-	// --- ‡@ ƒeƒLƒXƒgƒTƒCƒYŒv‘ª ---
+	// --- â‘  ãƒ†ã‚­ã‚¹ãƒˆã‚µã‚¤ã‚ºè¨ˆæ¸¬ ---
 	CRect textRect(0, 0, clientRect.Width(), 0);
 	dc.DrawText(m_strText, &textRect, DT_WORDBREAK | DT_CALCRECT);
 
-	// --- ‡A ’†‰›‚É”z’u‚·‚é‚½‚ß‚ÌƒIƒtƒZƒbƒgŒvZ ---
+	// --- â‘¡ ä¸­å¤®ã«é…ç½®ã™ã‚‹ãŸã‚ã®ã‚ªãƒ•ã‚»ãƒƒãƒˆè¨ˆç®— ---
 	int x = (clientRect.Width() - textRect.Width()) / 2;
 	int y = (clientRect.Height() - textRect.Height()) / 2;
 
-	// •`‰æ—p‚Ì‹éŒ`‚ğì¬
+	// æç”»ç”¨ã®çŸ©å½¢ã‚’ä½œæˆ
 	CRect drawRect = textRect;
 	drawRect.OffsetRect(x, y);
 
-	// --- ‡B •`‰æ ---
+	// --- â‘¢ æç”» ---
 	dc.DrawText(m_strText, &drawRect, DT_WORDBREAK);
 
 	dc.SelectObject(pOldFont);
@@ -187,6 +187,6 @@ void CLyricsProgressWnd::OnPaint()
 
 BOOL CLyricsProgressWnd::OnEraseBkgnd(CDC* pDC)
 {
-	// ‚¿‚ç‚Â‚«–h~‚Ì‚½‚ßAOnPaint‚Å‘S‚Ä•`‰æ
+	// ã¡ã‚‰ã¤ãé˜²æ­¢ã®ãŸã‚ã€OnPaintã§å…¨ã¦æç”»
 	return TRUE;
 }

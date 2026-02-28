@@ -233,7 +233,7 @@ extern void DoEvent();
 class CAboutDlg : public CCustomDialog
 {
 public:
-	CAboutDlg();
+	CAboutDlg(CWnd* pParent = NULL);
 
 	// ダイアログ データ
 	//{{AFX_DATA(CAboutDlg)
@@ -259,7 +259,7 @@ public:
 	CCustomStandardButton m_okdummy;
 };
 
-CAboutDlg::CAboutDlg() : CCustomDialog(CAboutDlg::IDD)
+CAboutDlg::CAboutDlg(CWnd* pParent) : CCustomDialog(CAboutDlg::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(CAboutDlg)
 	//}}AFX_DATA_INIT
@@ -577,7 +577,7 @@ void COggDlg::OnSysCommand(UINT nID, LPARAM lParam)
 {
 	if ((nID & 0xFFF0) == IDM_ABOUTBOX)
 	{
-		CAboutDlg dlgAbout;
+		CAboutDlg dlgAbout(this);
 		dlgAbout.DoModal();
 	}
 	else
@@ -2585,7 +2585,7 @@ CString KatakanaToEnglishWords(const CString& katakana)
 	CString text = katakana;
 	text.Replace(L"・", L" ");
 	text.Replace(L"　", L" ");
-	text.Replace(L"･", L" ");
+	text.Replace(L"・", L" ");
 	text.Replace(L"＆", L" ");
 	text.Replace(L"&", L" ");
 

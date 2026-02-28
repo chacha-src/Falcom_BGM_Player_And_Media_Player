@@ -769,7 +769,7 @@ BEGIN_MESSAGE_MAP(CCustomEdit, CEdit)
     ON_WM_KILLFOCUS()
 END_MESSAGE_MAP()
 
-CCustomEdit::CCustomEdit() : m_bHasFocus(FALSE)
+CCustomEdit::CCustomEdit() : m_bHasFocus(FALSE), m_bAutoDelete(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_EDIT_BG);
 }
@@ -870,7 +870,8 @@ BEGIN_MESSAGE_MAP(CCustomStatic, CStatic)
 END_MESSAGE_MAP()
 
 CCustomStatic::CCustomStatic()
-    : m_clrGradStart(RGB(255, 255, 255)), m_clrGradEnd(RGB(255, 255, 255))
+    : m_bAutoDelete(FALSE)
+    , m_clrGradStart(RGB(255, 255, 255)), m_clrGradEnd(RGB(255, 255, 255))
     , m_nGradDirection(0), m_bGradEnable(FALSE)
     , m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135)
     , m_nShadowDistance(2), m_nShadowBlur(3), m_bShadowEnable(FALSE)
@@ -1395,7 +1396,7 @@ BEGIN_MESSAGE_MAP(CCustomListBox, CListBox)
     ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
 
-CCustomListBox::CCustomListBox()
+CCustomListBox::CCustomListBox() : m_bAutoDelete(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
 }
@@ -1483,7 +1484,7 @@ BEGIN_MESSAGE_MAP(CCustomComboBox, CComboBox)
 END_MESSAGE_MAP()
 
 CCustomComboBox::CCustomComboBox()
-    : m_clrLabelText(RGB(240, 240, 255))
+    : m_bAutoDelete(FALSE), m_clrLabelText(RGB(240, 240, 255))
     , m_clrLabelBg(RGB(80, 60, 120))
 {
     m_brBackground.CreateSolidBrush(COLOR_COMBO_BG);
@@ -1807,7 +1808,7 @@ BEGIN_MESSAGE_MAP(CCustomListCtrl, CListCtrl)
     ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
 
-CCustomListCtrl::CCustomListCtrl() : m_nHotItem(-1)
+CCustomListCtrl::CCustomListCtrl() : m_bAutoDelete(FALSE), m_nHotItem(-1)
 {
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
 }
@@ -2009,7 +2010,7 @@ BEGIN_MESSAGE_MAP(CCustomStandardButton, CButton)
 END_MESSAGE_MAP()
 
 CCustomStandardButton::CCustomStandardButton()
-    : m_bMouseOver(FALSE)
+    : m_bAutoDelete(FALSE), m_bMouseOver(FALSE)
     , m_clrGradStart(RGB(255, 255, 255)), m_clrGradEnd(RGB(255, 255, 255))
     , m_nGradDirection(0), m_bGradEnable(FALSE)
     , m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135)
@@ -2184,7 +2185,7 @@ BEGIN_MESSAGE_MAP(CCustomSliderCtrl, CSliderCtrl)
     ON_MESSAGE(WM_LBUTTONUP, OnLButtonUpMsg)
 END_MESSAGE_MAP()
 
-CCustomSliderCtrl::CCustomSliderCtrl() : m_nMode(0) {}
+CCustomSliderCtrl::CCustomSliderCtrl() : m_bAutoDelete(FALSE), m_nMode(0) {}
 CCustomSliderCtrl::~CCustomSliderCtrl() {}
 
 // [FIX❺]
@@ -2489,7 +2490,7 @@ BEGIN_MESSAGE_MAP(CCustomRangeSliderCtrl, CSliderCtrl)
 END_MESSAGE_MAP()
 
 CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
-    : m_nMin(0), m_nMax(100), m_nSelMin(0), m_nSelMax(100)
+    : m_bAutoDelete(FALSE), m_nMin(0), m_nMax(100), m_nSelMin(0), m_nSelMax(100)
     , m_nDragTarget(0), m_bDragging(FALSE), m_nVisualPos(0), m_nLogicalPos(0)
 {
 }
@@ -2689,7 +2690,7 @@ BEGIN_MESSAGE_MAP(CCustomCheckBox, CButton)
 END_MESSAGE_MAP()
 
 CCustomCheckBox::CCustomCheckBox()
-    : m_bIsFlatStyle(FALSE), m_bIsPressed(FALSE), m_bIsHot(FALSE), m_bTracking(FALSE), m_nCheck(0)
+    : m_bAutoDelete(FALSE), m_bIsFlatStyle(FALSE), m_bIsPressed(FALSE), m_bIsHot(FALSE), m_bTracking(FALSE), m_nCheck(0)
 {
 }
 CCustomCheckBox::~CCustomCheckBox() {}
@@ -2805,7 +2806,7 @@ BEGIN_MESSAGE_MAP(CCustomGroupBox, CButton)
     ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
 
-CCustomGroupBox::CCustomGroupBox() {}
+CCustomGroupBox::CCustomGroupBox() : m_bAutoDelete(FALSE) {}
 CCustomGroupBox::~CCustomGroupBox() {}
 
 // [FIX❺]

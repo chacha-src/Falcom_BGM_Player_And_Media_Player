@@ -1,8 +1,8 @@
-// LyricsProgressWnd.h
+ï»¿// LyricsProgressWnd.h
 #pragma once
 
 // =========================================================
-// ƒŠƒ\[ƒX•s—v‚ÌƒVƒ“ƒvƒ‹i’»•\¦ƒEƒBƒ“ƒhƒE
+// ãƒªã‚½ãƒ¼ã‚¹ä¸è¦ã®ã‚·ãƒ³ãƒ—ãƒ«é€²æ—è¡¨ç¤ºã‚¦ã‚£ãƒ³ãƒ‰ã‚¦
 // =========================================================
 class CLyricsProgressWnd : public CWnd
 {
@@ -10,13 +10,13 @@ public:
 	CLyricsProgressWnd();
 	virtual ~CLyricsProgressWnd();
 
-	// ƒEƒBƒ“ƒhƒEì¬
+	// ã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ä½œæˆ
 	BOOL Create(CWnd* pParent = NULL);
 
-	// •\¦ƒeƒLƒXƒgİ’è
+	// è¡¨ç¤ºãƒ†ã‚­ã‚¹ãƒˆè¨­å®š
 	void SetText(const CString& text);
 
-	// •\¦/”ñ•\¦
+	// è¡¨ç¤º/éè¡¨ç¤º
 	void Show();
 	void Hide();
 
