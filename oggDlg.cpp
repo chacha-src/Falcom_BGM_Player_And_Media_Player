@@ -286,7 +286,8 @@ BOOL CAboutDlg::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
 
-	// TODO:  ここに初期化を追加してください
+	SetWindowText(LL2(L"oggのバージョン情報", L"ogg Version Info"));
+	SetDlgItemText(IDOK, LL2(L"OK", L"OK"));
 	COSVersion os;
 	CString s;
 	s.Format(_T("%s"), os.GetVersionString());
@@ -1195,6 +1196,73 @@ BOOL COggDlg::OnInitDialog()
 	// ウィンドウがダイアログでない時は自動的に設定しません。
 	SetIcon(m_hIcon, TRUE);			// 大きいアイコンを設定
 	SetIcon(m_hIcon, FALSE);		// 小さいアイコンを設定
+	SetWindowText(LL2(L"mp3/m4a簡易プレイヤ Ver 0.8g", L"mp3/m4a Simple Player Ver 0.8g"));
+	SetDlgItemText(IDC_BUTTON8, LL2(L"Ys6 ナピシュテム", L"Ys6 Napishtim"));
+	SetDlgItemText(IDC_BUTTON7, LL2(L"Ys フェルガナ", L"Ys Felghana"));
+	SetDlgItemText(IDC_BUTTON15, LL2(L"Ys オリジン", L"Ys Origin"));
+	SetDlgItemText(IDC_BUTTON6, LL2(L"空の軌跡FC", L"Sora no Kiseki FC"));
+	SetDlgItemText(IDC_BUTTON2, LL2(L"空の軌跡SC", L"Sora no Kiseki SC"));
+	SetDlgItemText(IDC_BUTTON17, LL2(L"空の軌跡The3rd", L"Sora no Kiseki The 3rd"));
+	SetDlgItemText(IDC_BUTTON19, L"ZWEI II");
+	SetDlgItemText(IDC_BUTTON23, L"Ys I&&II Chronicles 1");
+	SetDlgItemText(IDC_BUTTON24, L"Ys I&&II Chronicles 2");
+	SetDlgItemText(IDC_BUTTON25, L"XANADU NEXT");
+	SetDlgItemText(IDC_BUTTON27, LL2(L"Ys 完全版 Ys1", L"Ys Complete Ys1"));
+	SetDlgItemText(IDC_BUTTON28, LL2(L"Ys 完全版 Ys2", L"Ys Complete Ys2"));
+	SetDlgItemText(IDC_BUTTON31, L"Sorcerian Original");
+	SetDlgItemText(IDC_BUTTON33, L"Zwei!!");
+	SetDlgItemText(IDC_BUTTON35, LL2(L"ぐるみん", L"Gurumin"));
+	SetDlgItemText(IDC_BUTTON37, LL2(L"ダイナソア", L"Dinosaur"));
+	SetDlgItemText(IDC_BUTTON4, LL2(L"再演奏", L"Replay"));
+	SetDlgItemText(IDC_BUTTON3, LL2(L"一時停止", L"Pause"));
+	SetDlgItemText(IDC_BUTTON1, LL2(L"停止", L"Stop"));
+	SetDlgItemText(IDC_CHECK1, LL2(L"スペアナ", L"Spectrum"));
+	SetDlgItemText(IDC_BUTTON5, LL2(L"フェードアウト", L"Fade out"));
+	SetDlgItemText(IDC_BUTTON21, LL2(L"設定", L"Settings"));
+	SetDlgItemText(IDC_BUTTON9, LL2(L"フォルダ設定", L"Folder settings"));
+	SetDlgItemText(IDOK, LL2(L"終了", L"Exit"));
+	SetDlgItemText(IDC_CHECK5, LL2(L"ランダム再生", L"Random play"));
+	SetDlgItemText(IDC_CHECK6, LL2(L"順次再生", L"Sequential play"));
+	SetDlgItemText(IDC_BUTTON14, LL2(L"演奏開始", L"Play"));
+	SetDlgItemText(IDC_CHECK7, LL2(L"YS6 ナピシュテムの匣", L"Ys6 Napishtim no Hako"));
+	SetDlgItemText(IDC_CHECK8, LL2(L"YS フェルガナの誓い", L"Ys Felghana no Chikai"));
+	SetDlgItemText(IDC_CHECK9, LL2(L"英雄伝説6空の軌跡FC", L"Legend of Heroes 6 Sora no Kiseki FC"));
+	SetDlgItemText(IDC_CHECK10, LL2(L"英雄伝説6空の軌跡SC", L"Legend of Heroes 6 Sora no Kiseki SC"));
+	SetDlgItemText(IDC_CHECK11, LL2(L"YS オリジン", L"Ys Origin"));
+	SetDlgItemText(IDC_CHECK12, LL2(L"英雄伝説6空の軌跡TC", L"Legend of Heroes 6 Sora no Kiseki TC"));
+	SetDlgItemText(IDC_CHECK13, L"ZWEI II");
+	SetDlgItemText(IDC_CHECK14, L"Ys Chronicles Ys 1");
+	SetDlgItemText(IDC_CHECK15, L"Ys Chronicles Ys 2");
+	SetDlgItemText(IDC_CHECK16, L"XANADU NEXT");
+	SetDlgItemText(IDC_CHECK17, LL2(L"Ys 完全版 Ys 1", L"Ys Complete Ys 1"));
+	SetDlgItemText(IDC_CHECK18, LL2(L"Ys 完全版 Ys 2", L"Ys Complete Ys 2"));
+	SetDlgItemText(IDC_CHECK19, L"Sorcerian Original");
+	SetDlgItemText(IDC_CHECK20, L"Zwei!!");
+	SetDlgItemText(IDC_CHECK21, LL2(L"ぐるみん", L"Gurumin"));
+	SetDlgItemText(IDC_CHECK22, LL2(L"ダイナソア リザレクション", L"Dinosaur Resurrection"));
+	SetDlgItemText(IDC_STATICaaad, LL2(L"ループ回数", L"Loop count"));
+	SetDlgItemText(IDC_CHECK2, LL2(L"WAVファイルへ保存", L"Save to WAV file"));
+	SetDlgItemText(IDC_CHECK3, LL2(L"動画も表示する", L"Show video"));
+	SetDlgItemText(IDC_STATICaaab, LL2(L"主音量", L"Master volume"));
+	SetDlgItemText(IDC_STATICaaa, LL2(L"DirectSound音量", L"DirectSound volume"));
+	SetDlgItemText(IDC_STATICaaac, LL2(L"拡張音量", L"Extended volume"));
+	SetDlgItemText(IDC_STATIC_t, LL2(L"テンポ", L"Tempo"));
+	SetDlgItemText(IDC_STATIC_p, LL2(L"ピッチ", L"Pitch"));
+	SetDlgItemText(IDC_BUTTON39, L"Brandish4");
+	SetDlgItemText(IDC_CHECK23, LL2(L"ブランディッシュ４", L"Brandish4"));
+	SetDlgItemText(IDC_BUTTON44, LL2(L"白き魔女", L"White Witch"));
+	SetDlgItemText(IDC_BUTTON45, LL2(L"朱紅い雫", L"Tear of Vermillion"));
+	SetDlgItemText(IDC_BUTTON46, LL2(L"海の檻歌", L"Cagesong of the Ocean"));
+	SetDlgItemText(IDC_CHECK24, LL2(L"英雄伝説III 白き魔女", L"Legend of Heroes III White Witch"));
+	SetDlgItemText(IDC_CHECK25, LL2(L"英雄伝説IV 朱紅い雫", L"Legend of Heroes IV Tear of Vermillion"));
+	SetDlgItemText(IDC_CHECK26, LL2(L"英雄伝説V 海の檻歌", L"Legend of Heroes V Cagesong of the Ocean"));
+	SetDlgItemText(IDC_BUTTON47, LL2(L"月影", L"TSUKI"));
+	SetDlgItemText(IDC_BUTTON48, LL2(L"西風", L"Nishi"));
+	SetDlgItemText(IDC_BUTTON51, LL2(L"アーク", L"Arc"));
+	SetDlgItemText(IDC_BUTTON53, LL2(L"三国志1", L"San1"));
+	SetDlgItemText(IDC_BUTTON54, LL2(L"三国志2", L"San2"));
+	SetDlgItemText(IDC_BUTTON57, LL2(L"プレイリスト", L"Playlist"));
+	SetDlgItemText(IDC_BUTTON58, LL2(L"ジャケ", L"Cover"));
 
 	// TODO: 特別な初期化を行う時はこの場所に追加してください。
 	//フォント設定
@@ -1252,87 +1320,87 @@ BOOL COggDlg::OnInitDialog()
 
 		// TODO: コントロールを追加するために以下のフォームの 1 つを使用してください:
 		// m_tooltip.AddTool(GetDlgItem(IDC_<name>), <string-table-id>);
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON1), _T("演奏中のogg/wav/mp3/avi/kpiファイルを停止します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON2), _T("曲一覧表からoggを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON6), _T("曲一覧表からoggを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON7), _T("曲一覧表からoggを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON8), _T("曲一覧表からoggを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON15), _T("曲一覧表からoggを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON17), _T("曲一覧表からoggを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON19), _T("曲一覧表からoggを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON25), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON23), _T("曲一覧表からoggを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON24), _T("曲一覧表からoggを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON27), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON28), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON31), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON35), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON33), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON37), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON39), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON44), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON45), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON46), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON47), _T("曲一覧表からmp3を選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON48), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON51), _T("曲一覧表からwav(adp)を選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON53), _T("曲一覧表からwavを選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON54), _T("曲一覧表からmp3を選択し再生します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON57), _T("プレイリストを表示／非表示します。\n表示されている時に演奏を開始またはドロップで演奏するとリストに追加されます。\n非表示の時はリストには追加されません。\n本体へのドロップは1つだけでしたがプレイリストへのドロップは複数出来ます。"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON59), _T("イコライザーを設定します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON3), _T("演奏中のogg/wav/mp3/avi/kpiファイルを一時停止/再開します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON4), _T("演奏中だった曲を頭から再演奏します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON5), _T("フェードアウトして停止します。(内蔵デコーダのみ)"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON9), _T("各ゲームのフォルダ位置を指定します"));
-		m_tooltip.AddTool(GetDlgItem(IDOK), _T("簡易プレイヤを終了します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER1), _T("音量を変更します\nWindows全体の音量が関係してきます。"));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER3), _T("DirectSound音量を変更します\nこの簡易プレイヤのみの変更でとどまります。\nWindowsの音量は変化しません。"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK1), _T("スペクトルアナライザー(波形)を表示/非表示します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK2), _T("演奏中の曲をwavで保存します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK3), _T("動画(OPやイベント)のoggの時に動画画面も表示します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK4), _T("スペクトルアナライザー(波形)をモノラル表示、ステレオ表示切り替えを行います"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON1), LL2(L"演奏中のogg/wav/mp3/avi/kpiファイルを停止します", L"Stop playing ogg/wav/mp3/avi/kpi file"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON2), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON6), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON7), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON8), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON15), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON17), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON19), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON25), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON23), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON24), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON27), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON28), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON31), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON35), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON33), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON37), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON39), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON44), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON45), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON46), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON47), LL2(L"曲一覧表からmp3を選択し再生します", L"Select and play mp3 from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON48), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON51), LL2(L"曲一覧表からwav(adp)を選択し再生します", L"Select and play wav(adp) from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON53), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON54), LL2(L"曲一覧表からmp3を選択し再生します", L"Select and play mp3 from track list"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON57), LL2(L"プレイリストを表示／非表示します。\n表示されている時に演奏を開始またはドロップで演奏するとリストに追加されます。\n非表示の時はリストには追加されません。\n本体へのドロップは1つだけでしたがプレイリストへのドロップは複数出来ます。", L"Show/hide playlist.\nWhen visible, playback or drop adds to list.\nWhen hidden, items are not added.\nMain window accepts single drop; playlist accepts multiple."));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON59), LL2(L"イコライザーを設定します", L"Open equalizer settings"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON3), LL2(L"演奏中のogg/wav/mp3/avi/kpiファイルを一時停止/再開します", L"Pause/resume playing ogg/wav/mp3/avi/kpi file"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON4), LL2(L"演奏中だった曲を頭から再演奏します", L"Restart current track from beginning"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON5), LL2(L"フェードアウトして停止します。(内蔵デコーダのみ)", L"Fade out and stop (built-in decoder only)"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON9), LL2(L"各ゲームのフォルダ位置を指定します", L"Specify folder location for each game"));
+		m_tooltip.AddTool(GetDlgItem(IDOK), LL2(L"簡易プレイヤを終了します", L"Exit simple player"));
+		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER1), LL2(L"音量を変更します\nWindows全体の音量が関係してきます。", L"Change volume\nAffects overall Windows volume."));
+		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER3), LL2(L"DirectSound音量を変更します\nこの簡易プレイヤのみの変更でとどまります。\nWindowsの音量は変化しません。", L"Change DirectSound volume\nOnly affects this player.\nWindows volume unchanged."));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK1), LL2(L"スペクトルアナライザー(波形)を表示/非表示します", L"Show/hide spectrum analyzer (waveform)"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK2), LL2(L"演奏中の曲をwavで保存します", L"Save playing track as wav"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK3), LL2(L"動画(OPやイベント)のoggの時に動画画面も表示します", L"Show video window for video ogg (OP, events)"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK4), LL2(L"スペクトルアナライザー(波形)をモノラル表示、ステレオ表示切り替えを行います", L"Switch spectrum analyzer between mono and stereo"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON12), _T("拡張パネルを開く/閉じる"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON12), LL2(L"拡張パネルを開く/閉じる", L"Open/close extended panel"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON21), _T("各種設定を行います。"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON21), LL2(L"各種設定を行います。", L"Open settings."));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK5), _T("「再生するゲーム」で選択されているゲームをランダムに演奏します"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK6), _T("「再生するゲーム」で選択されているゲームを順番に演奏します"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK5), LL2(L"「再生するゲーム」で選択されているゲームをランダムに演奏します", L"Random play from selected games"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK6), LL2(L"「再生するゲーム」で選択されているゲームを順番に演奏します", L"Sequential play from selected games"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK7), _T("イース6 ナピシュテムの匣"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK8), _T("イース フェルガナの誓い"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK9), _T("空の軌跡 First Chapter"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK10), _T("空の軌跡 Second Chapter"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK11), _T("イース オリジン"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK12), _T("空の軌跡 The 3rd"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK13), _T("Zweii II"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK14), _T("YS I&&II Chronicles Ys 1"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK15), _T("YS I&&II Chronicles Ys 2"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK16), _T("XANADU NEXT"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK17), _T("Ys 完全版 Ys 1"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK18), _T("Ys 完全版 Ys 2"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK19), _T("Sorcerian Original"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK20), _T("Zwei!!"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK21), _T("ぐるみん"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK22), _T("ダイナソア リザレクション"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK23), _T("Brandish4 - ブランディッシュ4 眠れる神の塔"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK24), _T("英雄伝説III 白き魔女"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK25), _T("英雄伝説IV 朱紅い雫"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK26), _T("英雄伝説V 海の檻歌"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON58), _T("mp3/m4a/ogg/flacに埋め込まれているジャケットを表示します。"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK7), LL2(L"イース6 ナピシュテムの匣", L"Ys6 Napishtim no Hako"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK8), LL2(L"イース フェルガナの誓い", L"Ys Felghana no Chikai"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK9), LL2(L"空の軌跡 First Chapter", L"Sora no Kiseki First Chapter"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK10), LL2(L"空の軌跡 Second Chapter", L"Sora no Kiseki Second Chapter"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK11), LL2(L"イース オリジン", L"Ys Origin"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK12), LL2(L"空の軌跡 The 3rd", L"Sora no Kiseki The 3rd"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK13), LL2(L"Zweii II", L"Zweii II"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK14), LL2(L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK15), LL2(L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK16), LL2(L"XANADU NEXT", L"XANADU NEXT"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK17), LL2(L"Ys 完全版 Ys 1", L"Ys Complete Ys 1"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK18), LL2(L"Ys 完全版 Ys 2", L"Ys Complete Ys 2"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK19), LL2(L"Sorcerian Original", L"Sorcerian Original"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK20), LL2(L"Zwei!!", L"Zwei!!"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK21), LL2(L"ぐるみん", L"Gurumin"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK22), LL2(L"ダイナソア リザレクション", L"Dinosaur Resurrection"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK23), LL2(L"Brandish4 - ブランディッシュ4 眠れる神の塔", L"Brandish4 - Tower of the Sleeping God"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK24), LL2(L"英雄伝説III 白き魔女", L"Legend of Heroes III - White Witch"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK25), LL2(L"英雄伝説IV 朱紅い雫", L"Legend of Heroes IV - A Tear of Vermillion"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK26), LL2(L"英雄伝説V 海の檻歌", L"Legend of Heroes V - Cagesong of the Ocean"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON58), LL2(L"mp3/m4a/ogg/flacに埋め込まれているジャケットを表示します。", L"Show embedded album art from mp3/m4a/ogg/flac"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_EDIT1), _T("次の曲へいくためのループ回数を設定します"));
+		m_tooltip.AddTool(GetDlgItem(IDC_EDIT1), LL2(L"次の曲へいくためのループ回数を設定します", L"Set loop count before next track"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER4), _T("100%以上の音量を設定できます"));
-		m_tooltip.AddTool(GetDlgItem(IDC_STATICds2), _T("100%以上の音量を設定できます"));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER7), _T("mp3,ogg,flac,m4a,opus,adpcm,dsd,kpiのテンポを変えます。wav,動画は変わりません。"));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER8), _T("mp3,ogg,flac,m4a,opus,adpcm,dsd,kpiのピッチを変えます。wav,動画は変わりません。"));
+		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER4), LL2(L"100%以上の音量を設定できます", L"Volume can exceed 100%"));
+		m_tooltip.AddTool(GetDlgItem(IDC_STATICds2), LL2(L"100%以上の音量を設定できます", L"Volume can exceed 100%"));
+		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER7), LL2(L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpiのテンポを変えます。wav,動画は変わりません。", L"Change tempo for mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,video unchanged."));
+		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER8), LL2(L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpiのピッチを変えます。wav,動画は変わりません。", L"Change pitch for mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,video unchanged."));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_t), _T("テンポを100に戻します。"));
-		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_p), _T("ピッチを100に戻します。"));
+		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_t), LL2(L"テンポを100に戻します。", L"Reset tempo to 100."));
+		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_p), LL2(L"ピッチを100に戻します。", L"Reset pitch to 100."));
 
 		CString s;
-		s.Format(_T("%s\n↑の情報が間違っている時は↓の内容を作者へ\n詳細：Ver %d.%d(%d) Build %d\n\n%s"), os.GetVersionString(), in.dwMajorVersion, in.dwMinorVersion, edition, in.dwBuildNumber, cpus);
+		s.Format(LL2(L"%s\n↑の情報が間違っている時は↓の内容を作者へ\n詳細：Ver %d.%d(%d) Build %d\n\n%s", L"%s\nIf the info above is wrong, send the content below to the author\nDetails: Ver %d.%d(%d) Build %d\n\n%s"), os.GetVersionString(), in.dwMajorVersion, in.dwMinorVersion, edition, in.dwBuildNumber, cpus);
 		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_OS), s);
 		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_OS2), s);
 	}
@@ -1528,35 +1596,35 @@ BOOL COggDlg::OnInitDialog()
 	m_OS.SetWindowText(s);
 	__cpuid(CPUInfo, 0x00000001);
 	CString avx2;
-	avx2 = "SSE2未対応";
+	avx2 = savedata.lang == 0 ? L"SSE2未対応" : L"SSE2 not supported";
 	if (CPUInfo[0] >= 2) {
 		__cpuid(CPUInfo, 0x00000001);
-		if (CPUInfo[1] & (1 << 26))  avx2 = "SSE2対応";
-		if (CPUInfo[2] & (1))  avx2 = "SSE3対応";
-		if (CPUInfo[2] & (1 << 9))  avx2 = "SSSE3対応";
-		if (CPUInfo[2] & (1 << 12))  avx2 = "FMA3対応";
-		if (CPUInfo[2] & (1 << 19))  avx2 = "SSE4.1対応";
-		if (CPUInfo[2] & (1 << 20))  avx2 = "SSE4.2対応";
+		if (CPUInfo[1] & (1 << 26))  avx2 = savedata.lang == 0 ? L"SSE2対応" : L"SSE2 supported";
+		if (CPUInfo[2] & (1))  avx2 = savedata.lang == 0 ? L"SSE3対応" : L"SSE3 supported";
+		if (CPUInfo[2] & (1 << 9))  avx2 = savedata.lang == 0 ? L"SSSE3対応" : L"SSSE3 supported";
+		if (CPUInfo[2] & (1 << 12))  avx2 = savedata.lang == 0 ? L"FMA3対応" : L"FMA3 supported";
+		if (CPUInfo[2] & (1 << 19))  avx2 = savedata.lang == 0 ? L"SSE4.1対応" : L"SSE4.1 supported";
+		if (CPUInfo[2] & (1 << 20))  avx2 = savedata.lang == 0 ? L"SSE4.2対応" : L"SSE4.2 supported";
 	}
 	if (CPUInfo[0] >= 2) {
 		__cpuid(CPUInfo, 0x80000001);
-		if (CPUInfo[2] & (1 << 6))  avx2 = "SSE4a対応";
+		if (CPUInfo[2] & (1 << 6))  avx2 = savedata.lang == 0 ? L"SSE4a対応" : L"SSE4a supported";
 	}
 	__cpuid(CPUInfo, 0x00000001);
 	if (CPUInfo[0] >= 2) {
-		if (CPUInfo[2] & (1 << 28))  avx2 = "AVX対応";
+		if (CPUInfo[2] & (1 << 28))  avx2 = savedata.lang == 0 ? L"AVX対応" : L"AVX supported";
 	}
 	if (CPUInfo[0] >= 7) {
 		__cpuid(CPUInfo, 0x00000007);
-		if (CPUInfo[1] & (1 << 5))  avx2 = "AVX2対応";
-		if (CPUInfo[1] & (1 << 16))  avx2 = "AVX512対応";
+		if (CPUInfo[1] & (1 << 5))  avx2 = savedata.lang == 0 ? L"AVX2対応" : L"AVX2 supported";
+		if (CPUInfo[1] & (1 << 16))  avx2 = savedata.lang == 0 ? L"AVX512対応" : L"AVX512 supported";
 	}
 	s.Format(_T("%s / %s"), cpus, avx2);
 	s.Trim();
 	m_cpu.SetWindowText(s);
 
 	// CPU 拡張命令一覧
-	avx2 = L"使用可能命令：";
+	avx2 = LL2(L"使用可能命令：", L"Available instructions: ");
 	__cpuid(CPUInfo, 0x00000001);
 	if (CPUInfo[0] >= 2) {
 		if (CPUInfo[3] & (1 << 23))  avx2 += "MMX ";
@@ -1621,7 +1689,7 @@ BOOL COggDlg::OnInitDialog()
 	SetTimer(15011, 200, NULL);
 
 	m_lrc.SetWindowText(L"");
-	m_lrc2.SetWindowText(L"歌詞(.lrc)が表示されます");
+	m_lrc2.SetWindowText(LL2(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here"));
 	m_lrc3.SetWindowText(L"");
 	lrc_backup = L"";
 
@@ -5085,7 +5153,7 @@ void COggDlg::play()
 
 
 	if (ret != 0) {
-		fnn = "ファイル又はフォルダがありません"; filen = "";
+		fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); filen = "";
 		m_saisai.EnableWindow(TRUE); endflg = 0; return;
 	}
 	wl = 0;
@@ -5097,7 +5165,7 @@ void COggDlg::play()
 		ss = filen.Left(filen.Find(L":", 6));
 	}
 	if (!aaa_1.Open(ss, CFile::modeRead && CFile::shareDenyNone) && !(mode > 0 && mode <= 21 || mode == -6 || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15 || mode == 30)) {
-		MessageBox(L"ファイルが開けませんでした。\n削除されたか移動した可能性があります。");
+		MessageBox(LL2(L"ファイルが開けませんでした。\n削除されたか移動した可能性があります。", L"Could not open file.\nIt may have been deleted or moved."));
 		stop1();
 		return;
 	}
@@ -5151,7 +5219,7 @@ void COggDlg::play()
 			oggsize = LoadOggVorbis(filen, 2, &ogg, m_time);
 			if (oggsize < 0) {
 				m_saisai.EnableWindow(TRUE);
-				fnn = "ファイル又はフォルダがありません";
+				fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder");
 				endflg = 0;
 				return;
 			}
@@ -5350,22 +5418,22 @@ void COggDlg::play()
 	if (ss == "yc_b001.ogg") {
 		loop1 = 123438;
 		loop2 = 4742104;
-		stitle = "バトル#58";
+		stitle = LL2(L"バトル#58", L"Battle #58");
 	}
 	if (ss == "yc_b002.ogg") {
 		loop1 = 504378;
 		loop2 = 5153813;
-		stitle = "灼熱の炎の中で";
+		stitle = LL2(L"灼熱の炎の中で", L"Within the Blazing Flames");
 	}
 	if (ss == "yc_b003.ogg") {
 		loop1 = 32845;
 		loop2 = 6955200;
-		stitle = "最終決戦";
+		stitle = LL2(L"最終決戦", L"Final Battle");
 	}
 	if (ss == "yc_b004.ogg") {
 		loop1 = 53237;
 		loop2 = 9737128;
-		stitle = "黒き翼";
+		stitle = LL2(L"黒き翼", L"Black Wings");
 	}
 	if (ss == "yc_b005.ogg") {
 		loop1 = 1123422;
@@ -5375,32 +5443,32 @@ void COggDlg::play()
 	if (ss == "yc_d101.ogg") {
 		loop1 = 303237;
 		loop2 = 2582426;
-		stitle = "ダンジョン";
+		stitle = LL2(L"ダンジョン", L"Dungeon");
 	}
 	if (ss == "yc_d201.ogg") {
 		loop1 = 447792;
 		loop2 = 3479666;
-		stitle = "道化師の誘い";
+		stitle = LL2(L"道化師の誘い", L"Clown's Invitation");
 	}
 	if (ss == "yc_d301.ogg") {
 		loop1 = 351836;
 		loop2 = 3969072;
-		stitle = "地下遺跡";
+		stitle = LL2(L"地下遺跡", L"Underground Ruins");
 	}
 	if (ss == "yc_d401.ogg") {
 		loop1 = 93865;
 		loop2 = 4349569;
-		stitle = "導きの塔～エルディールにくちづけを";
+		stitle = LL2(L"導きの塔～エルディールにくちづけを", L"Tower of Guidance -Kiss for Eldeel-");
 	}
 	if (ss == "yc_d501.ogg") {
 		loop1 = 832720;
 		loop2 = 7219417;
-		stitle = "失われし仮面を求めて";
+		stitle = LL2(L"失われし仮面を求めて", L"Seeking the Lost Mask");
 	}
 	if (ss == "yc_d701.ogg") {
 		loop1 = 809264;
 		loop2 = 6545498;
-		stitle = "イリス";
+		stitle = LL2(L"イリス", L"Iris");
 	}
 	if (ss == "yc_d702.ogg") {
 		loop1 = 34816;
@@ -5410,37 +5478,37 @@ void COggDlg::play()
 	if (ss == "yc_d703.ogg") {
 		loop1 = 719876;
 		loop2 = 2557197;
-		stitle = "聖域";
+		stitle = LL2(L"聖域", L"Sanctuary");
 	}
 	if (ss == "yc_e001.ogg") {
 		loop1 = 300048;
 		loop2 = 3389821;
-		stitle = "賢者";
+		stitle = LL2(L"賢者", L"Sage");
 	}
 	if (ss == "yc_e002.ogg") {
 		loop1 = 326209;
 		loop2 = 3604271;
-		stitle = "復活の儀式";
+		stitle = LL2(L"復活の儀式", L"Resurrection Ceremony");
 	}
 	if (ss == "yc_e003.ogg") {
 		loop1 = 806906;
 		loop2 = 4275899;
-		stitle = "レファンス";
+		stitle = LL2(L"レファンス", L"Refance");
 	}
 	if (ss == "yc_e004.ogg") {
 		loop1 = 326209;
 		loop2 = 4945888;
-		stitle = "涙の少年剣士";
+		stitle = LL2(L"涙の少年剣士", L"Young Swordsman in Tears");
 	}
 	if (ss == "yc_e005.ogg") {
 		loop1 = 24000;
 		loop2 = 3605888;
-		stitle = "エルディール";
+		stitle = LL2(L"エルディール", L"Eldeel");
 	}
 	if (ss == "yc_e006.ogg") {
 		loop1 = 69040;
 		loop2 = 1209633;
-		stitle = "ロムン帝国 -嗚呼レオ団長-";
+		stitle = LL2(L"ロムン帝国 -嗚呼レオ団長-", L"Romun Empire -Alas Captain Leo-");
 	}
 	if (ss == "yc_e008.ogg") {
 		loop1 = 275476;
@@ -5450,22 +5518,22 @@ void COggDlg::play()
 	if (ss == "yc_e010.ogg") {
 		loop1 = 807040;
 		loop2 = 5159922;
-		stitle = "冒険家、誕生";
+		stitle = LL2(L"冒険家、誕生", L"Birth of an Adventurer");
 	}
 	if (ss == "yc_f101.ogg") {
 		loop1 = 568926;
 		loop2 = 5668207;
-		stitle = "燃ゆる剣";
+		stitle = LL2(L"燃ゆる剣", L"Burning Sword");
 	}
 	if (ss == "yc_f201.ogg") {
 		loop1 = 588624;
 		loop2 = 6209316;
-		stitle = "セルセタの樹海";
+		stitle = LL2(L"セルセタの樹海", L"Forest of Celceta");
 	}
 	if (ss == "yc_f301.ogg") {
 		loop1 = 1145404;
 		loop2 = 5960203;
-		stitle = "クレーター";
+		stitle = LL2(L"クレーター", L"Crater");
 	}
 	if (ss == "yc_f401.ogg") {
 		loop1 = 408974;
@@ -5475,47 +5543,47 @@ void COggDlg::play()
 	if (ss == "yc_f501.ogg") {
 		loop1 = 2604464;
 		loop2 = 4559688;
-		stitle = "暁の森";
+		stitle = LL2(L"暁の森", L"Forest of Dawn");
 	}
 	if (ss == "yc_f601.ogg") {
 		loop1 = 581264;
 		loop2 = 3661828;
-		stitle = "一陣の風";
+		stitle = LL2(L"一陣の風", L"Gust of Wind");
 	}
 	if (ss == "yc_f701.ogg") {
 		loop1 = 324287;
 		loop2 = 9010870;
-		stitle = "神代の地";
+		stitle = LL2(L"神代の地", L"Land of the Gods");
 	}
 	if (ss == "yc_f801.ogg") {
 		loop1 = 315435;
 		loop2 = 4546653;
-		stitle = "真実への序曲";
+		stitle = LL2(L"真実への序曲", L"Overture to Truth");
 	}
 	if (ss == "yc_f901.ogg") {
 		loop1 = 178544;
 		loop2 = 4786555;
-		stitle = "雨上がりの朝に";
+		stitle = LL2(L"雨上がりの朝に", L"Morning After the Rain");
 	}
 	if (ss == "yc_over.ogg") {
 		loop1 = 19200;
 		loop2 = 4924407;
-		stitle = "ゲームオーバー";
+		stitle = LL2(L"ゲームオーバー", L"Game Over");
 	}
 	if (ss == "yc_t101.ogg") {
 		loop1 = 865353;
 		loop2 = 4409988;
-		stitle = "辺境都市《キャスナン》";
+		stitle = LL2(L"辺境都市《キャスナン》", L"Frontier City Casnan");
 	}
 	if (ss == "yc_t201.ogg") {
 		loop1 = 58906;
 		loop2 = 6120526;
-		stitle = "優しくなりたい";
+		stitle = LL2(L"優しくなりたい", L"I Want to Be Kind");
 	}
 	if (ss == "yc_t301.ogg") {
 		loop1 = 425910;
 		loop2 = 9606150;
-		stitle = "古代の伝承";
+		stitle = LL2(L"古代の伝承", L"Ancient Legend");
 	}
 	if (ss == "yc_t501.ogg") {
 		loop1 = 782252;
@@ -5531,7 +5599,7 @@ void COggDlg::play()
 		stitle = "The Foliage Ocean in CELCETA -Opening size-";
 	}
 	if (ss == "yc_end.ogg") {
-		stitle = "新たな時代のステージへ";
+		stitle = LL2(L"新たな時代のステージへ", L"To the Stage of a New Era");
 	}
 
 	//零の軌跡用
@@ -5562,7 +5630,7 @@ void COggDlg::play()
 		fclose(fp);
 		sss = savedata.zero;
 		if (fg == 0 && sss == L"") {
-			int ret = MessageBox(L"おそらく碧の軌跡のbgmデータで、碧の軌跡のbgmテーブルに情報がありません。\n零の軌跡のbgmテーブルを参照しますか？\n(碧の軌跡には零の軌跡のbgmデータも入ってるため、ループ情報は零の軌跡側にあります)", L"bgmテーブルに情報がありません。", MB_YESNO);
+			int ret = MessageBox(LL2(L"おそらく碧の軌跡のbgmデータで、碧の軌跡のbgmテーブルに情報がありません。\n零の軌跡のbgmテーブルを参照しますか？\n(碧の軌跡には零の軌跡のbgmデータも入ってるため、ループ情報は零の軌跡側にあります)", L"Likely Ao no Kiseki BGM data, but no info in Ao BGM table.\nUse Zero no Kiseki BGM table?\n(Ao includes Zero BGM data; loop info is in Zero.)"), LL2(L"bgmテーブルに情報がありません。", L"No info in BGM table."), MB_YESNO);
 			if (ret == IDYES) {
 				CZeroFol d;
 				if (d.DoModal() == IDOK) {
@@ -5626,7 +5694,7 @@ void COggDlg::play()
 		_tchdir(s);
 		CFile ff;
 		if (ff.Open(ss, CFile::modeRead | CFile::shareDenyNone, NULL) == FALSE) {
-			MessageBox(_T("ファイルが存在しません。\n削除されたかフォルダまたはファイル名が変更された可能性があります。"), _T("ファイルが存在しません。"));
+			MessageBox(LL2(L"ファイルが存在しません。\n削除されたかフォルダまたはファイル名が変更された可能性があります。", L"File does not exist.\nIt may have been deleted or the folder/filename may have changed."), LL2(L"ファイルが存在しません。", L"File does not exist."));
 			m_saisai.EnableWindow(TRUE); endflg = 0; return;
 		}ff.Close();
 
@@ -6324,8 +6392,8 @@ void COggDlg::play()
 		if (kvver == 2) {
 			mod = pFunck();
 			if (mod == NULL) {
-				MessageBox(_T("なんらかの要因でkpiが開けませんでした。"), _T("ファイルが存在しません。"));
-				fnn = "kpi構造体を獲得できませんでした。";
+				MessageBox(LL2(L"なんらかの要因でkpiが開けませんでした。", L"Could not open kpi for some reason."), LL2(L"ファイルが存在しません。", L"File does not exist."));
+				fnn = LL2(L"kpi構造体を獲得できませんでした。", L"Could not acquire kpi structure.");
 				FreeLibrary(hDLLk);
 				m_saisai.EnableWindow(TRUE); endflg = 0; return;
 			}
@@ -6661,55 +6729,55 @@ void COggDlg::play()
 			CString a;
 			switch (_ttoi(ss.Mid(2, 4))) {
 			case 7001:
-				a = L"零の軌跡";
+				a = LL2(L"零の軌跡", L"Trails from Zero");
 				break;
 			case 7002:
 				a = L"way of live -Opening Version-";
 				break;
 			case 7003:
-				a = L"新しき日々～予兆";
+				a = LL2(L"新しき日々～予兆", L"New Days -Omen-");
 				break;
 			case 7005:
-				a = L"想い破れて・・・";
+				a = LL2(L"想い破れて・・・", L"Broken Heart...");
 				break;
 			case 7052:
-				a = L"碧い軌跡 -Opening size-";
+				a = LL2(L"碧い軌跡 -Opening size-", L"Azure Arbitrator -Opening size-");
 				break;
 			case 7053:
-				a = L"それでも僕らは。";
+				a = LL2(L"それでも僕らは。", L"Yet We're Still Here.");
 				break;
 			case 7100:
-				a = L"街角の風景";
+				a = LL2(L"街角の風景", L"Street Corner Scenery");
 				break;
 			case 7101:
-				a = L"明日は明日の風が吹く";
+				a = LL2(L"明日は明日の風が吹く", L"Tomorrow the Wind Will Blow");
 				break;
 			case 7102:
-				a = L"クロスベルの午後";
+				a = LL2(L"クロスベルの午後", L"Afternoon in Crossbell");
 				break;
 			case 7103:
 				a = L"During Mission Accomplishment";
 				break;
 			case 7104:
-				a = L"創立記念祭";
+				a = LL2(L"創立記念祭", L"Founding Festival");
 				break;
 			case 7105:
-				a = L"降水確率10%";
+				a = LL2(L"降水確率10%", L"10% Chance of Rain");
 				break;
 			case 7106:
-				a = L"風船と紙吹雪";
+				a = LL2(L"風船と紙吹雪", L"Balloons and Confetti");
 				break;
 			case 7110:
-				a = L"特務支援課";
+				a = LL2(L"特務支援課", L"Special Support Section");
 				break;
 			case 7111:
-				a = L"C.S.P.D. -クロスベル警察";
+				a = LL2(L"C.S.P.D. -クロスベル警察", L"C.S.P.D. -Crossbell Police");
 				break;
 			case 7113:
 				a = L"Arc-en-ciel";
 				break;
 			case 7114:
-				a = L"黒月貿易公司";
+				a = LL2(L"黒月貿易公司", L"Heiyue Trading Company");
 				break;
 			case 7116:
 				a = L"IGNIS";
@@ -6718,100 +6786,100 @@ void COggDlg::play()
 				a = L"TRINITY";
 				break;
 			case 7120:
-				a = L"アルモリカ村";
+				a = LL2(L"アルモリカ村", L"Armorica Village");
 				break;
 			case 7121:
-				a = L"鉱山町マインツ";
+				a = LL2(L"鉱山町マインツ", L"Mines Town Mainz");
 				break;
 			case 7122:
 				a = L"Killing Bear";
 				break;
 			case 7123:
-				a = L"聖ウルスラ医科大学";
+				a = LL2(L"聖ウルスラ医科大学", L"St. Ursula Medical College");
 				break;
 			case 7124:
-				a = L"クロスベル大聖堂";
+				a = LL2(L"クロスベル大聖堂", L"Crossbell Cathedral");
 				break;
 			case 7125:
-				a = L"黒の競売会";
+				a = LL2(L"黒の競売会", L"Black Auction");
 				break;
 			case 7126:
-				a = L"大国にはさまれて";
+				a = LL2(L"大国にはさまれて", L"Caught Between Nations");
 				break;
 			case 7150:
-				a = L"新たなる日常";
+				a = LL2(L"新たなる日常", L"New Daily Life");
 				break;
 			case 7151:
-				a = L"動き始めた事態";
+				a = LL2(L"動き始めた事態", L"Events in Motion");
 				break;
 			case 7160:
-				a = L"ミシュラムワンダーランド";
+				a = LL2(L"ミシュラムワンダーランド", L"Mishyram Wonderland");
 				break;
 			case 7161:
-				a = L"束の間の休息";
+				a = LL2(L"束の間の休息", L"Brief Respite");
 				break;
 			case 7162:
-				a = L"ささやかな晩餐";
+				a = LL2(L"ささやかな晩餐", L"Simple Dinner");
 				break;
 			case 7200:
-				a = L"水と草木と青い空";
+				a = LL2(L"水と草木と青い空", L"Water, Trees and Blue Sky");
 				break;
 			case 7201:
-				a = L"片手にはレモネード";
+				a = LL2(L"片手にはレモネード", L"Lemonade in One Hand");
 				break;
 			case 7202:
-				a = L"木霊の道";
+				a = LL2(L"木霊の道", L"Path of Echoes");
 				break;
 			case 7203:
-				a = L"古の鼓動";
+				a = LL2(L"古の鼓動", L"Ancient Pulse");
 				break;
 			case 7204:
 				a = L"On The Green Road";
 				break;
 			case 7205:
-				a = L"鉄橋を越えて";
+				a = LL2(L"鉄橋を越えて", L"Crossing the Iron Bridge");
 				break;
 			case 7250:
-				a = L"木洩れ日の中の静寂";
+				a = LL2(L"木洩れ日の中の静寂", L"Tranquility in the Dappled Light");
 				break;
 			case 7251:
-				a = L"偽りの楽土を越えて";
+				a = LL2(L"偽りの楽土を越えて", L"Beyond the False Paradise");
 				break;
 			case 7300:
-				a = L"ジオフロント";
+				a = LL2(L"ジオフロント", L"Geofront");
 				break;
 			case 7301:
-				a = L"七耀の煌き";
+				a = LL2(L"七耀の煌き", L"Septium Radiance");
 				break;
 			case 7302:
-				a = L"ルバーチェ商会";
+				a = LL2(L"ルバーチェ商会", L"Revache Trading Company");
 				break;
 			case 7303:
-				a = L"鳴るはずのない鐘";
+				a = LL2(L"鳴るはずのない鐘", L"The Bell That Shouldn't Ring");
 				break;
 			case 7304:
-				a = L"忘れられし幻夢の狭間";
+				a = LL2(L"忘れられし幻夢の狭間", L"Forgotten Phantasmal Gap");
 				break;
 			case 7305:
 				a = L"A Light Illuminating The Depths";
 				break;
 			case 7350:
-				a = L"Dの残影";
+				a = LL2(L"Dの残影", L"D's Shadow");
 				break;
 			case 7351:
-				a = L"異変の兆し";
+				a = LL2(L"異変の兆し", L"Omen of Change");
 				break;
 			case 7352:
 				a = L"Mystic Core";
 				break;
 			case 7353:
-				a = L"最果ての樹";
+				a = LL2(L"最果ての樹", L"Tree at World's End");
 				break;
 			case 7354:
-				a = L"暴魔の呼び声";
+				a = LL2(L"暴魔の呼び声", L"Call of the Beast");
 				break;
 			case 7356:
-				a = L"不明";
+				a = LL2(L"不明", L"Unknown");
 				break;
 			case 7400:
 				a = L"Get Over The Barrier!";
@@ -6835,7 +6903,7 @@ void COggDlg::play()
 				a = L"Arrival Existence";
 				break;
 			case 7408:
-				a = L"これが俺たちの力だ!";
+				a = LL2(L"これが俺たちの力だ!", L"This Is Our Power!");
 				break;
 			case 7450:
 				a = L"Seize The Truth!";
@@ -6862,67 +6930,67 @@ void COggDlg::play()
 				a = L"The Azure Arbitrator";
 				break;
 			case 7460:
-				a = L"効果音";
+				a = LL2(L"効果音", L"Sound Effect");
 				break;
 			case 7500:
-				a = L"金の太陽、銀の月　-陽の熱情";
+				a = LL2(L"金の太陽、銀の月　-陽の熱情", L"Golden Sun, Silver Moon -Solar Passion-");
 				break;
 			case 7501:
-				a = L"金の太陽、銀の月　-月の慕情";
+				a = LL2(L"金の太陽、銀の月　-月の慕情", L"Golden Sun, Silver Moon -Lunar Affection-");
 				break;
 			case 7502:
-				a = L"金の太陽、銀の月　-童心";
+				a = LL2(L"金の太陽、銀の月　-童心", L"Golden Sun, Silver Moon -Innocence-");
 				break;
 			case 7503:
-				a = L"金の太陽、銀の月　-運命の刻";
+				a = LL2(L"金の太陽、銀の月　-運命の刻", L"Golden Sun, Silver Moon -Hour of Fate-");
 				break;
 			case 7504:
-				a = L"金の太陽、銀の月　-譲れぬ想い";
+				a = LL2(L"金の太陽、銀の月　-譲れぬ想い", L"Golden Sun, Silver Moon -Unyielding Feelings-");
 				break;
 			case 7505:
-				a = L"金の太陽、銀の月　-幾千の夜を越えて";
+				a = LL2(L"金の太陽、銀の月　-幾千の夜を越えて", L"Golden Sun, Silver Moon -Beyond Countless Nights-");
 				break;
 			case 7506:
-				a = L"金の太陽、銀の月　-夜明け～大団円";
+				a = LL2(L"金の太陽、銀の月　-夜明け～大団円", L"Golden Sun, Silver Moon -Dawn to Grand Finale-");
 				break;
 			case 7507:
 				a = L"Intense Chase";
 				break;
 			case 7509:
-				a = L"守りぬく意志";
+				a = LL2(L"守りぬく意志", L"Unyielding Will");
 				break;
 			case 7510:
-				a = L"叡智への誘い";
+				a = LL2(L"叡智への誘い", L"Invitation to Wisdom");
 				break;
 			case 7511:
-				a = L"危地";
+				a = LL2(L"危地", L"Perilous Ground");
 				break;
 			case 7512:
-				a = L"揺るぎない強さ";
+				a = LL2(L"揺るぎない強さ", L"Unshakable Strength");
 				break;
 			case 7513:
-				a = L"夜景に霞む星空";
+				a = LL2(L"夜景に霞む星空", L"Starry Sky in the Night");
 				break;
 			case 7514:
-				a = L"いつかきっと";
+				a = LL2(L"いつかきっと", L"Someday");
 				break;
 			case 7515:
-				a = L"柔らかな心";
+				a = LL2(L"柔らかな心", L"Tender Heart");
 				break;
 			case 7516:
-				a = L"点と線";
+				a = LL2(L"点と線", L"Dots and Lines");
 				break;
 			case 7517:
-				a = L"一触即発";
+				a = LL2(L"一触即発", L"Imminent Crisis");
 				break;
 			case 7518:
 				a = L"Foolish Gig";
 				break;
 			case 7519:
-				a = L"リベールからの風";
+				a = LL2(L"リベールからの風", L"Wind from Liberl");
 				break;
 			case 7520:
-				a = L"とどいた想い";
+				a = LL2(L"とどいた想い", L"Feelings Delivered");
 				break;
 			case 7521:
 				a = L"Underground Kids";
@@ -6931,13 +6999,13 @@ void COggDlg::play()
 				a = L"Terminal Room";
 				break;
 			case 7523:
-				a = L"響きあう心";
+				a = LL2(L"響きあう心", L"Resonating Hearts");
 				break;
 			case 7524:
 				a = L"Limit Break";
 				break;
 			case 7525:
-				a = L"パラダイスミ☆";
+				a = LL2(L"パラダイスミ☆", L"Paradigm☆");
 				break;
 			case 7526:
 				a = L"Gnosis";
@@ -6946,73 +7014,73 @@ void COggDlg::play()
 				a = L"Get Over The Barrier! -Roaring Version-";
 				break;
 			case 7528:
-				a = L"それぞれの明日";
+				a = LL2(L"それぞれの明日", L"Our Tomorrows");
 				break;
 			case 7529:
-				a = L"効果音楽1";
+				a = LL2(L"効果音楽1", L"Sound Effect Music 1");
 				break;
 			case 7530:
-				a = L"効果音楽2";
+				a = LL2(L"効果音楽2", L"Sound Effect Music 2");
 				break;
 			case 7531:
-				a = L"効果音楽3";
+				a = LL2(L"効果音楽3", L"Sound Effect Music 3");
 				break;
 			case 7532:
-				a = L"効果音楽4";
+				a = LL2(L"効果音楽4", L"Sound Effect Music 4");
 				break;
 			case 7533:
-				a = L"踏み出す勇気";
+				a = LL2(L"踏み出す勇気", L"Courage to Step Forward");
 				break;
 			case 7534:
-				a = L"その背中を見つめて";
+				a = LL2(L"その背中を見つめて", L"Watching Your Back");
 				break;
 			case 7540:
-				a = L"不明";
+				a = LL2(L"不明", L"Unknown");
 				break;
 			case 7541:
-				a = L"不明";
+				a = LL2(L"不明", L"Unknown");
 				break;
 			case 7542:
-				a = L"不明";
+				a = LL2(L"不明", L"Unknown");
 				break;
 			case 7543:
-				a = L"不明";
+				a = LL2(L"不明", L"Unknown");
 				break;
 			case 7544:
-				a = L"不明";
+				a = LL2(L"不明", L"Unknown");
 				break;
 			case 7550:
-				a = L"オルキスタワー";
+				a = LL2(L"オルキスタワー", L"Orchis Tower");
 				break;
 			case 7551:
 				a = L"Catastrophe";
 				break;
 			case 7552:
-				a = L"碧き雫";
+				a = LL2(L"碧き雫", L"Azure Arbitrator");
 				break;
 			case 7553:
-				a = L"神機降臨";
+				a = LL2(L"神機降臨", L"Divine Mechanoid Descent");
 				break;
 			case 7554:
-				a = L"ふるわれる奇蹟";
+				a = LL2(L"ふるわれる奇蹟", L"Shaking Miracle");
 				break;
 			case 7555:
-				a = L"予定外の奇蹟";
+				a = LL2(L"予定外の奇蹟", L"Unexpected Miracle");
 				break;
 			case 7556:
-				a = L"鋼鉄の咆哮 -脅威-";
+				a = LL2(L"鋼鉄の咆哮 -脅威-", L"Roar of Steel -Threat-");
 				break;
 			case 7560:
-				a = L"雨の日の真実";
+				a = LL2(L"雨の日の真実", L"Truth on a Rainy Day");
 				break;
 			case 7561:
-				a = L"不穏";
+				a = LL2(L"不穏", L"Troubled");
 				break;
 			case 7562:
-				a = L"効果音";
+				a = LL2(L"効果音", L"Sound Effect");
 				break;
 			case 7563:
-				a = L"犠牲の先の希望";
+				a = LL2(L"犠牲の先の希望", L"Hope Beyond Sacrifice");
 				break;
 			case 7564:
 				a = L"Strange Feel";
@@ -7021,82 +7089,82 @@ void COggDlg::play()
 				a = L"Exhilarating Ride";
 				break;
 			case 7566:
-				a = L"それぞれの正義";
+				a = LL2(L"それぞれの正義", L"Each One's Justice");
 				break;
 			case 7567:
-				a = L"乗り越えるべき壁";
+				a = LL2(L"乗り越えるべき壁", L"Wall to Overcome");
 				break;
 			case 7568:
-				a = L"月下の想い";
+				a = LL2(L"月下の想い", L"Feelings Under the Moon");
 				break;
 			case 7569:
 				a = L"Miss You";
 				break;
 			case 7570:
-				a = L"天の車";
+				a = LL2(L"天の車", L"Chariot of Heaven");
 				break;
 			case 7571:
-				a = L"突きつけられた現実";
+				a = LL2(L"突きつけられた現実", L"Reality Thrust Upon Us");
 				break;
 			case 7572:
-				a = L"効果音";
+				a = LL2(L"効果音", L"Sound Effect");
 				break;
 			case 7573:
-				a = L"全てを識るもの";
+				a = LL2(L"全てを識るもの", L"The Omniscient");
 				break;
 			case 7574:
-				a = L"想い、辿り着く場所";
+				a = LL2(L"想い、辿り着く場所", L"Where Feelings Lead");
 				break;
 			case 7575:
-				a = L"揺れ動く心";
+				a = LL2(L"揺れ動く心", L"Wavering Heart");
 				break;
 			case 7576:
-				a = L"星降る夜に";
+				a = LL2(L"星降る夜に", L"On a Starry Night");
 				break;
 			case 7577:
-				a = L"効果音";
+				a = LL2(L"効果音", L"Sound Effect");
 				break;
 			case 7578:
-				a = L"効果音";
+				a = LL2(L"効果音", L"Sound Effect");
 				break;
 			case 7579:
-				a = L"効果音";
+				a = LL2(L"効果音", L"Sound Effect");
 				break;
 			case 7580:
-				a = L"効果音";
+				a = LL2(L"効果音", L"Sound Effect");
 				break;
 			case 7581:
-				a = L"本当の絆";
+				a = LL2(L"本当の絆", L"True Bonds");
 				break;
 			case 7582:
-				a = L"猛き獣たち";
+				a = LL2(L"猛き獣たち", L"Fierce Beasts");
 				break;
 			case 7583:
-				a = L"西ゼムリア通商会議";
+				a = LL2(L"西ゼムリア通商会議", L"West Zemuria Trade Conference");
 				break;
 			case 7584:
-				a = L"効果音";
+				a = LL2(L"効果音", L"Sound Effect");
 				break;
 			case 7585:
-				a = L"千年の妄執";
+				a = LL2(L"千年の妄執", L"Obsession of Millennia");
 				break;
 			case 7586:
-				a = L"鋼鉄の咆哮 -死線-";
+				a = LL2(L"鋼鉄の咆哮 -死線-", L"Roar of Steel -Death Line-");
 				break;
 			case 7587:
-				a = L"ポムっと! -お花見団子の逆襲-";
+				a = LL2(L"ポムっと! -お花見団子の逆襲-", L"Pom! -Cherry Blossom Dango Counterattack-");
 				break;
 			case 7588:
-				a = L"Fateful Confrontation -ポムっと! Ver.-";
+				a = LL2(L"Fateful Confrontation -ポムっと! Ver.-", L"Fateful Confrontation -Pom! Ver.-");
 				break;
 			case 7589:
-				a = L"ポムりますか";
+				a = LL2(L"ポムりますか", L"Shall We Pom?");
 				break;
 			case 7590:
-				a = L"エリィ絶叫コースター";
+				a = LL2(L"エリィ絶叫コースター", L"Elie Scream Coaster");
 				break;
 			case 7591:
-				a = L"小さな英雄 -オルゴール-";
+				a = LL2(L"小さな英雄 -オルゴール-", L"Little Hero -Music Box-");
 				break;
 			case 7592:
 				a = L"TOWER OF THE SHADOW OF DEATH -Jukebox-";
@@ -7280,12 +7348,12 @@ void COggDlg::play()
 		if (m_dsb1 == NULL || m_p == NULL) {
 			if (flg0 == 0) {
 				CString s; s.Format(L"%d", savedata.samples);
-				MessageBox(s + L"Hzのサンプリングレートにサウンドカードが対応していません\n低いサンプリングレートを試みます。\n少々時間が掛かる場合があります。", _T("ogg/wav簡易プレイヤ"));
+				MessageBox(s + LL2(L"Hzのサンプリングレートにサウンドカードが対応していません\n低いサンプリングレートを試みます。\n少々時間が掛かる場合があります。", L"Hz sampling rate not supported by sound card.\nTrying lower rate.\nThis may take a while."), LL2(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player"));
 				flg0 = 1;
 			}
 			wavbit -= 1000;
 			if (wavbit <= 0) {
-				MessageBox(L"0Hzまで試みましたが、対応するサンプリングレートが存在しませんでした。\nサウンドボード(カード)が存在していない可能性があります。", _T("ogg/wav簡易プレイヤ"));
+				MessageBox(LL2(L"0Hzまで試みましたが、対応するサンプリングレートが存在しませんでした。\nサウンドボード(カード)が存在していない可能性があります。", L"Tried down to 0Hz but no supported sampling rate found.\nSound card may not be present."), LL2(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player"));
 				tagfile = fnn;
 				m_saisai.EnableWindow(TRUE);
 				endflg = 0;
@@ -7306,30 +7374,30 @@ void COggDlg::play()
 			else break;
 		}
 		if (m_dsb == NULL) {
-			AfxMessageBox(_T("DirectSoundが開けませんでした。"));
+			AfxMessageBox(LL2(L"DirectSoundが開けませんでした。", L"Could not open DirectSound."));
 			if (r == DSERR_ALLOCATED) {
-				AfxMessageBox(_T("優先レベルなどのリソースが他の呼び出しによって既に使用中であるため、要求は失敗した。"));
+				AfxMessageBox(LL2(L"優先レベルなどのリソースが他の呼び出しによって既に使用中であるため、要求は失敗した。", L"Request failed because resources such as priority level are already in use by another call."));
 			}
 			else if (r == DSERR_CONTROLUNAVAIL) {
-				AfxMessageBox(_T("呼び出し元が要求するバッファ コントロール (ボリューム、パンなど) は利用できない。"));
+				AfxMessageBox(LL2(L"呼び出し元が要求するバッファ コントロール (ボリューム、パンなど) は利用できない。", L"Buffer control (volume, pan, etc.) requested by caller is not available."));
 			}
 			else if (r == DSERR_BADFORMAT) {
-				AfxMessageBox(_T("指定したウェーブ フォーマットはサポートされていない。"));
+				AfxMessageBox(LL2(L"指定したウェーブ フォーマットはサポートされていない。", L"Specified wave format is not supported."));
 			}
 			else if (r == DSERR_INVALIDPARAM) {
-				AfxMessageBox(_T("無効なパラメータが関数に渡された。"));
+				AfxMessageBox(LL2(L"無効なパラメータが関数に渡された。", L"Invalid parameter passed to function."));
 			}
 			else if (r == DSERR_NOAGGREGATION) {
-				AfxMessageBox(_T("このオブジェクトは COM 集合化をサポートしない。"));
+				AfxMessageBox(LL2(L"このオブジェクトは COM 集合化をサポートしない。", L"This object does not support COM aggregation."));
 			}
 			else if (r == DSERR_OUTOFMEMORY) {
-				AfxMessageBox(_T("DirectSound サブシステムは、呼び出し元の要求を完了するための十分なメモリを割り当てられなかった。"));
+				AfxMessageBox(LL2(L"DirectSound サブシステムは、呼び出し元の要求を完了するための十分なメモリを割り当てられなかった。", L"DirectSound subsystem could not allocate enough memory to complete the request."));
 			}
 			else if (r == DSERR_UNINITIALIZED) {
-				AfxMessageBox(_T("他のメソッドを呼び出す前に IDirectSound::Initialize メソッドを呼び出さなかったか、呼び出しが成功しなかった。"));
+				AfxMessageBox(LL2(L"他のメソッドを呼び出す前に IDirectSound::Initialize メソッドを呼び出さなかったか、呼び出しが成功しなかった。", L"IDirectSound::Initialize was not called before other methods, or the call failed."));
 			}
 			else if (r == DSERR_UNSUPPORTED) {
-				AfxMessageBox(_T("呼び出した関数はこの時点ではサポートされていない。"));
+				AfxMessageBox(LL2(L"呼び出した関数はこの時点ではサポートされていない。", L"The called function is not supported at this point."));
 			}
 			else {}
 
@@ -7341,7 +7409,7 @@ void COggDlg::play()
 		if (m_dsb) {
 			if (flg0 == 1) {
 				CString s; s.Format(L"%d", wavbit);
-				MessageBox(s + L"Hzのサンプリングレートでヒットしましたため、該当サンプリングレートで演奏します。", _T("ogg/wav簡易プレイヤ"));
+				MessageBox(s + LL2(L"Hzのサンプリングレートでヒットしましたため、該当サンプリングレートで演奏します。", L"Hz sampling rate matched; playing at that rate."), LL2(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player"));
 				savedata.samples = wavbit;
 				SetTimer(9100, 100, NULL);
 				return;
@@ -7411,7 +7479,7 @@ void COggDlg::play()
 		if (mode != -1) {
 			if (f123.Open(filen + _T(".save"), CFile::modeRead, NULL) == TRUE) {
 				f123.Close();
-				if (IDYES == MessageBox(_T("途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生"), _T("再生確認"), MB_YESNO)) {
+				if (IDYES == MessageBox(LL2(L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start"), LL2(L"再生確認", L"Playback confirmation"), MB_YESNO)) {
 					flggg = 1;
 				}
 				else {
@@ -7511,7 +7579,7 @@ void COggDlg::play()
 	}
 	m_saisai.EnableWindow(TRUE); playy = 1;
 	ps = 0;
-	m_ps.SetWindowText(_T("一時停止"));
+	m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
 	SetTimer(1250, 100, NULL);
 	fade1 = 0;
 	if (maini) maini->SetActiveWindow();
@@ -7544,142 +7612,142 @@ void CWread::wavread()
 		CString a = filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1);
 		switch (_ttoi(a.Mid(2, 4))) {
 		case 8001:
-			a = L"特科クラス《VII組》";
+			a = LL2(L"特科クラス《VII組》", L"Class VII");
 			break;
 		case 8002:
-			a = L"ただひたすらに、前へ";
+			a = LL2(L"ただひたすらに、前へ", L"Ever Forward");
 			break;
 		case 8100:
-			a = L"近郊都市トリスタ";
+			a = LL2(L"近郊都市トリスタ", L"Suburban City Trista");
 			break;
 		case 8101:
-			a = L"交易町ケルディック";
+			a = LL2(L"交易町ケルディック", L"Trading Town Celdic");
 			break;
 		case 8102:
-			a = L"翡翠の公都バリアハート";
+			a = LL2(L"翡翠の公都バリアハート", L"Jade Capital Bareahard");
 			break;
 		case 8103:
-			a = L"湖畔の街レグラム";
+			a = LL2(L"湖畔の街レグラム", L"Lakeside Town Legram");
 			break;
 		case 8104:
-			a = L"黒銀の鋼都ルーレ";
+			a = LL2(L"黒銀の鋼都ルーレ", L"Iron City Roer");
 			break;
 		case 8106:
-			a = L"遊牧民の集落";
+			a = LL2(L"遊牧民の集落", L"Nomad Settlement");
 			break;
 		case 8107:
-			a = L"緋の帝都ヘイムダル";
+			a = LL2(L"緋の帝都ヘイムダル", L"Crimson Capital Heimdallr");
 			break;
 		case 8108:
-			a = L"癒しの我が家";
+			a = LL2(L"癒しの我が家", L"Healing Home");
 			break;
 		case 8109:
-			a = L"ダイニングバー《F》";
+			a = LL2(L"ダイニングバー《F》", L"Dining Bar F");
 			break;
 		case 8110:
-			a = L"常在戦場の気概";
+			a = LL2(L"常在戦場の気概", L"Ever-Present War Spirit");
 			break;
 		case 8111:
-			a = L"ガレリアの巨壁";
+			a = LL2(L"ガレリアの巨壁", L"Garelia Fortress");
 			break;
 		case 8120:
-			a = L"足湯の温もり";
+			a = LL2(L"足湯の温もり", L"Foot Bath Warmth");
 			break;
 		case 8121:
-			a = L"静寂の郷";
+			a = LL2(L"静寂の郷", L"Silent Village");
 			break;
 		case 8122:
-			a = L"明日への休息";
+			a = LL2(L"明日への休息", L"Rest for Tomorrow");
 			break;
 		case 8123:
-			a = L"春の陽射し";
+			a = LL2(L"春の陽射し", L"Spring Sunshine");
 			break;
 		case 8125:
-			a = L"カレイジャス発進！";
+			a = LL2(L"カレイジャス発進！", L"Courageous Launch!");
 			break;
 		case 8126:
-			a = L"目覚める意志";
+			a = LL2(L"目覚める意志", L"Awakening Will");
 			break;
 		case 8127:
-			a = L"白銀の巨船";
+			a = LL2(L"白銀の巨船", L"Silver Ship");
 			break;
 		case 8150:
-			a = L"放課後の時間";
+			a = LL2(L"放課後の時間", L"After School");
 			break;
 		case 8152:
-			a = L"さわやかな朝";
+			a = LL2(L"さわやかな朝", L"Refreshing Morning");
 			break;
 		case 8153:
-			a = L"雨音の学院";
+			a = LL2(L"雨音の学院", L"Rain-sound Academy");
 			break;
 		case 8154:
-			a = L"爽やかな陽射し";
+			a = LL2(L"爽やかな陽射し", L"Clear Sunshine");
 			break;
 		case 8156:
-			a = L"トールズ士官学院祭";
+			a = LL2(L"トールズ士官学院祭", L"Thors Academy Festival");
 			break;
 		case 8158:
-			a = L"青空の開放感";
+			a = LL2(L"青空の開放感", L"Open Sky");
 			break;
 		case 8159:
-			a = L"自由行動日";
+			a = LL2(L"自由行動日", L"Free Day");
 			break;
 		case 8200:
-			a = L"異郷の空";
+			a = LL2(L"異郷の空", L"Foreign Sky");
 			break;
 		case 8201:
-			a = L"峡谷道を往く";
+			a = LL2(L"峡谷道を往く", L"Through the Canyon");
 			break;
 		case 8202:
-			a = L"精霊の小道";
+			a = LL2(L"精霊の小道", L"Spirit Path");
 			break;
 		case 8203:
-			a = L"蒼穹の大地";
+			a = LL2(L"蒼穹の大地", L"Azure Skies Land");
 			break;
 		case 8210:
-			a = L"戦火を越えて";
+			a = LL2(L"戦火を越えて", L"Beyond the Flames of War");
 			break;
 		case 8212:
 			a = L"Trudge Along";
 			break;
 		case 8213:
-			a = L"冬の訪れ";
+			a = LL2(L"冬の訪れ", L"Arrival of Winter");
 			break;
 		case 8300:
-			a = L"旧校舎の謎";
+			a = LL2(L"旧校舎の謎", L"Old Schoolhouse Mystery");
 			break;
 		case 8301:
-			a = L"探索";
+			a = LL2(L"探索", L"Exploration");
 			break;
 		case 8302:
-			a = L"深淵へ向かう";
+			a = LL2(L"深淵へ向かう", L"Toward the Abyss");
 			break;
 		case 8303:
-			a = L"聖女の城";
+			a = LL2(L"聖女の城", L"Saint's Castle");
 			break;
 		case 8304:
-			a = L"明日を掴むために";
+			a = LL2(L"明日を掴むために", L"To Seize Tomorrow");
 			break;
 		case 8305:
-			a = L"地下に眠る遺構";
+			a = LL2(L"地下に眠る遺構", L"Ruins Beneath");
 			break;
 		case 8308:
-			a = L"世の礎たるために";
+			a = LL2(L"世の礎たるために", L"To Be the World's Foundation");
 			break;
 		case 8310:
-			a = L"精霊窟";
+			a = LL2(L"精霊窟", L"Spirit Cave");
 			break;
 		case 8311:
-			a = L"不明";
+			a = LL2(L"不明", L"Unknown");
 			break;
 		case 8312:
 			a = L"Phantasmal Blaze";
 			break;
 		case 8313:
-			a = L"夢幻回廊";
+			a = LL2(L"夢幻回廊", L"Phantasmagoria Corridor");
 			break;
 		case 8315:
-			a = L"幻煌";
+			a = LL2(L"幻煌", L"Phantom Radiance");
 			break;
 		case 8400:
 			a = L"The Glint of Cold Steel";
@@ -7706,28 +7774,28 @@ void CWread::wavread()
 			a = L"Machinery Attack";
 			break;
 		case 8408:
-			a = L"巨イナルチカラ";
+			a = LL2(L"巨イナルチカラ", L"Colossal Power");
 			break;
 		case 8409:
 			a = L"The Decisive Collision";
 			break;
 		case 8410:
-			a = L"この手で道を切り拓く!";
+			a = LL2(L"この手で道を切り拓く!", L"Carve Our Path with These Hands!");
 			break;
 		case 8411:
-			a = L"赤点です...";
+			a = LL2(L"赤点です...", L"Failed...");
 			break;
 		case 8412:
 			a = L"Unknown Threat";
 			break;
 		case 8413:
-			a = L"不明";
+			a = LL2(L"不明", L"Unknown");
 			break;
 		case 8420:
 			a = L"Heated Mind";
 			break;
 		case 8421:
-			a = L"不明";
+			a = LL2(L"不明", L"Unknown");
 			break;
 		case 8423:
 			a = L"Impatient";
@@ -7745,157 +7813,157 @@ void CWread::wavread()
 			a = L"Heteromorphy";
 			break;
 		case 8431:
-			a = L"輝ける明日へ";
+			a = LL2(L"輝ける明日へ", L"Toward a Shining Tomorrow");
 			break;
 		case 8435:
-			a = L"迫る巨影";
+			a = LL2(L"迫る巨影", L"Approaching Giant Shadow");
 			break;
 		case 8441:
 			a = L"E.O.V";
 			break;
 		case 8442:
-			a = L"不明";
+			a = LL2(L"不明", L"Unknown");
 			break;
 		case 8500:
 			a = L"Strain";
 			break;
 		case 8501:
-			a = L"夜のひととき";
+			a = LL2(L"夜のひととき", L"Nighttime");
 			break;
 		case 8502:
-			a = L"トラブル発生";
+			a = LL2(L"トラブル発生", L"Trouble");
 			break;
 		case 8503:
-			a = L"鉄路遥々";
+			a = LL2(L"鉄路遥々", L"Distant Iron Road");
 			break;
 		case 8504:
-			a = L"旅愁";
+			a = LL2(L"旅愁", L"Travel Melancholy");
 			break;
 		case 8505:
-			a = L"皇城にて";
+			a = LL2(L"皇城にて", L"At the Imperial Castle");
 			break;
 		case 8506:
 			a = L"Let's Study";
 			break;
 		case 8507:
-			a = L"知恵を絞って";
+			a = LL2(L"知恵を絞って", L"Rack Your Brains");
 			break;
 		case 8508:
-			a = L"実技教練";
+			a = LL2(L"実技教練", L"Combat Training");
 			break;
 		case 8509:
-			a = L"寮に帰ろう";
+			a = LL2(L"寮に帰ろう", L"Back to the Dorm");
 			break;
 		case 8510:
-			a = L"アーベントタイム";
+			a = LL2(L"アーベントタイム", L"Evening Time");
 			break;
 		case 8512:
-			a = L"鉄の統率";
+			a = LL2(L"鉄の統率", L"Iron Command");
 			break;
 		case 8513:
-			a = L"暗躍";
+			a = LL2(L"暗躍", L"Moving in the Shadows");
 			break;
 		case 8514:
-			a = L"想いの行き先";
+			a = LL2(L"想いの行き先", L"Where Feelings Lead");
 			break;
 		case 8515:
-			a = L"傷心";
+			a = LL2(L"傷心", L"Heartbreak");
 			break;
 		case 8516:
-			a = L"揺らめく炎を見つめて";
+			a = LL2(L"揺らめく炎を見つめて", L"Watching the Flickering Flames");
 			break;
 		case 8517:
-			a = L"一途な気持ち";
+			a = LL2(L"一途な気持ち", L"Single-minded Feelings");
 			break;
 		case 8520:
-			a = L"臨戦態勢";
+			a = LL2(L"臨戦態勢", L"Combat Ready");
 			break;
 		case 8521:
 			a = L"Seriousness";
 			break;
 		case 8522:
-			a = L"静かなる昂揚";
+			a = LL2(L"静かなる昂揚", L"Quiet Exhilaration");
 			break;
 		case 8523:
-			a = L"暖かな夕餉";
+			a = LL2(L"暖かな夕餉", L"Warm Dinner");
 			break;
 		case 8524:
 			a = L"Atrocious Raid";
 			break;
 		case 8525:
-			a = L"全てを賭して今、ここに立つ";
+			a = LL2(L"全てを賭して今、ここに立つ", L"Standing Here, Betting Everything");
 			break;
 		case 8527:
-			a = L"新しい仲間たち";
+			a = LL2(L"新しい仲間たち", L"New Comrades");
 			break;
 		case 8528:
-			a = L"不透明な事態";
+			a = LL2(L"不透明な事態", L"Opaque Situation");
 			break;
 		case 8529:
-			a = L"鉄血へのレクイエム";
+			a = LL2(L"鉄血へのレクイエム", L"Requiem for Iron and Blood");
 			break;
 		case 8530:
-			a = L"幻想の唄 -PHANTASMAGORIA-";
+			a = LL2(L"幻想の唄 -PHANTASMAGORIA-", L"Phantom Song -PHANTASMAGORIA-");
 			break;
 		case 8531:
-			a = L"刻ハ至レリ";
+			a = LL2(L"刻ハ至レリ", L"The Hour Has Come");
 			break;
 		case 8532:
-			a = L"目覚めし伝承";
+			a = LL2(L"目覚めし伝承", L"Awakening Legend");
 			break;
 		case 8533:
-			a = L"唯一の希望";
+			a = LL2(L"唯一の希望", L"Only Hope");
 			break;
 		case 8535:
-			a = L"不明";
+			a = LL2(L"不明", L"Unknown");
 			break;
 		case 8537:
-			a = L"不明";
+			a = LL2(L"不明", L"Unknown");
 			break;
 		case 8538:
-			a = L"今はまだ...";
+			a = LL2(L"今はまだ...", L"Not Yet...");
 			break;
 		case 8539:
-			a = L"あの日に見た夜空";
+			a = LL2(L"あの日に見た夜空", L"The Night Sky I Saw That Day");
 			break;
 		case 8540:
-			a = L"偽りの時間";
+			a = LL2(L"偽りの時間", L"False Time");
 			break;
 		case 8541:
-			a = L"紅き翼 -新たなる風-";
+			a = LL2(L"紅き翼 -新たなる風-", L"Crimson Wings -New Wind-");
 			break;
 		case 8550:
-			a = L"再会";
+			a = LL2(L"再会", L"Reunion");
 			break;
 		case 8551:
-			a = L"かけがえのない人へ";
+			a = LL2(L"かけがえのない人へ", L"To Someone Irreplaceable");
 			break;
 		case 8552:
-			a = L"惜しむように、愛おしむように";
+			a = LL2(L"惜しむように、愛おしむように", L"Cherishing, Treasuring");
 			break;
 		case 8553:
-			a = L"ライノの花が咲く頃";
+			a = LL2(L"ライノの花が咲く頃", L"When the Rhino Flower Blooms");
 			break;
 		case 8555:
-			a = L"戦場の掟";
+			a = LL2(L"戦場の掟", L"Rules of Battlefield");
 			break;
 		case 8556:
 			a = L"Remaining Glow";
 			break;
 		case 8557:
-			a = L"深淵の魔女";
+			a = LL2(L"深淵の魔女", L"Witch of the Abyss");
 			break;
 		case 8558:
 			a = L"ALTINA";
 			break;
 		case 8559:
-			a = L"威風";
+			a = LL2(L"威風", L"Dignity");
 			break;
 		case 8560:
-			a = L"一撃に賭ける";
+			a = LL2(L"一撃に賭ける", L"Bet on One Strike");
 			break;
 		case 8561:
-			a = L"ユミル渓谷道";
+			a = LL2(L"ユミル渓谷道", L"Ymir Valley Road");
 			break;
 		case 8562:
 			a = L"Awakening";
@@ -7904,97 +7972,97 @@ void CWread::wavread()
 			a = L"Blitzkrieg";
 			break;
 		case 8564:
-			a = L"魔王の凱歌";
+			a = LL2(L"魔王の凱歌", L"Demon Lord's Triumph");
 			break;
 		case 8566:
-			a = L"内なる黄昏";
+			a = LL2(L"内なる黄昏", L"Inner Twilight");
 			break;
 		case 8567:
-			a = L"蘇る記憶";
+			a = LL2(L"蘇る記憶", L"Awakened Memories");
 			break;
 		case 8570:
-			a = L"静かな決意";
+			a = LL2(L"静かな決意", L"Quiet Resolution");
 			break;
 		case 8571:
-			a = L"乾坤一擲";
+			a = LL2(L"乾坤一擲", L"All or Nothing");
 			break;
 		case 8572:
-			a = L"交戦";
+			a = LL2(L"交戦", L"Combat");
 			break;
 		case 8573:
-			a = L"効果音";
+			a = LL2(L"効果音", L"Sound Effect");
 			break;
 		case 8600:
-			a = L"大市の賑わい";
+			a = LL2(L"大市の賑わい", L"Bustling Market");
 			break;
 		case 8601:
-			a = L"剣の遊戯";
+			a = LL2(L"剣の遊戯", L"Sword Play");
 			break;
 		case 8602:
-			a = L"紙一重の攻防";
+			a = LL2(L"紙一重の攻防", L"Close Fight");
 			break;
 		case 8603:
-			a = L"走れマッハ号!";
+			a = LL2(L"走れマッハ号!", L"Run Mach Train!");
 			break;
 		case 8605:
-			a = L"効果音";
+			a = LL2(L"効果音", L"Sound Effect");
 			break;
 		case 8606:
-			a = L"効果音";
+			a = LL2(L"効果音", L"Sound Effect");
 			break;
 		case 8607:
-			a = L"星屑のカンタータ";
+			a = LL2(L"星屑のカンタータ", L"Cantata of Stardust");
 			break;
 		case 8608:
-			a = L"効果音";
+			a = LL2(L"効果音", L"Sound Effect");
 			break;
 		case 8609:
 			a = L"Sonata No.45";
 			break;
 		case 8610:
-			a = L"効果音";
+			a = LL2(L"効果音", L"Sound Effect");
 			break;
 		case 8620:
-			a = L"雪ウサギを追いかけて";
+			a = LL2(L"雪ウサギを追いかけて", L"Chasing the Snow Rabbit");
 			break;
 		case 8621:
 			a = L"Take The Windward!";
 			break;
 		case 8622:
-			a = L"効果音";
+			a = LL2(L"効果音", L"Sound Effect");
 			break;
 		case 8623:
-			a = L"効果音";
+			a = LL2(L"効果音", L"Sound Effect");
 			break;
 		case 8624:
-			a = L"効果音";
+			a = LL2(L"効果音", L"Sound Effect");
 			break;
 		case 8625:
-			a = L"効果音";
+			a = LL2(L"効果音", L"Sound Effect");
 			break;
 		case 8627:
-			a = L"効果音";
+			a = LL2(L"効果音", L"Sound Effect");
 			break;
 		case 8628:
-			a = L"不明";
+			a = LL2(L"不明", L"Unknown");
 			break;
 		case 8629:
-			a = L"効果音";
+			a = LL2(L"効果音", L"Sound Effect");
 			break;
 		case 8700:
-			a = L"音楽";
+			a = LL2(L"音楽", L"Music");
 			break;
 		case 8703:
-			a = L"音楽";
+			a = LL2(L"音楽", L"Music");
 			break;
 		case 8704:
-			a = L"音楽";
+			a = LL2(L"音楽", L"Music");
 			break;
 		case 8710:
-			a = L"音楽";
+			a = LL2(L"音楽", L"Music");
 			break;
 		case 8711:
-			a = L"音楽";
+			a = LL2(L"音楽", L"Music");
 			break;
 		}
 		stitle = a;
@@ -8053,431 +8121,431 @@ void CWread::wavread()
 		int fff = 0;
 		//Ys X
 		if (a == L"y_act_e002.opus") {
-			a = L"Operation SANDRAS";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_act_e002_s1.opus") {
-			a = L"Operation SANDRAS(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b100.opus") {
-			a = L"Overblaze";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b100_s1.opus") {
-			a = L"Overblaze(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b200.opus") {
-			a = L"Through the North Wind";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b200_s1.opus") {
-			a = L"Through the North Wind(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b210.opus") {
-			a = L"高鳴る鼓動";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b210_s1.opus") {
-			a = L"高鳴る鼓動(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b300.opus") {
-			a = L"石火の如く";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b300_s1.opus") {
-			a = L"石火の如く(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b400.opus") {
-			a = L"Can You Do It";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b400_s1.opus") {
-			a = L"Can You Do It(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b500.opus") {
-			a = L"BERSERK -戦斧の咆哮-";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b500_s1.opus") {
-			a = L"BERSERK -戦斧の咆哮-(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b510.opus") {
-			a = L"悪意の洗礼";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b510_s1.opus") {
-			a = L"悪意の洗礼(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b520.opus") {
-			a = L"The Ultimate Pleasure in My Hands";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b520_s1.opus") {
-			a = L"The Ultimate Pleasure in My Hands(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b610.opus") {
-			a = L"辿り着いた極光の下で";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b610_s1.opus") {
-			a = L"辿り着いた極光の下で(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b620.opus") {
-			a = L"Nordics Saga -The Endless Bloody Sea-";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b620_s1.opus") {
-			a = L"Nordics Saga -The Endless Bloody Sea-(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b700.opus") {
-			a = L"Ready to Fire!";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b700_s1.opus") {
-			a = L"Ready to Fire!(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b710.opus") {
-			a = L"Hello, Those Who Can't Die";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b710_s1.opus") {
-			a = L"Hello, Those Who Can't Die(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b720.opus") {
-			a = L"Landing Warfare";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_b720_s1.opus") {
-			a = L"Landing Warfare(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_bgm_none.opus") {
-			a = L"無音";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d100.opus") {
-			a = L"光届かぬその奥に";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d100_s1.opus") {
-			a = L"光届かぬその奥に(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d200.opus") {
-			a = L"Eerie Stillness";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d200_s1.opus") {
-			a = L"Eerie Stillness(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d400.opus") {
-			a = L"飽くなき渇望";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d400_s1.opus") {
-			a = L"飽くなき渇望(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d410.opus") {
-			a = L"The Inner Darkness";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d410_s1.opus") {
-			a = L"The Inner Darkness(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d500.opus") {
-			a = L"Hardhearted Rock Line";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d500_s1.opus") {
-			a = L"Hardhearted Rock Line(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d600.opus") {
-			a = L"夢の痕跡";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d600_s1.opus") {
-			a = L"夢の痕跡(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d710.opus") {
-			a = L"甲鉄戦艦ナグルファ";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d710_s1.opus") {
-			a = L"甲鉄戦艦ナグルファ(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d800.opus") {
-			a = L"LILA -Innocent Wish-";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d800_s1.opus") {
-			a = L"LILA -Innocent Wish-(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d900.opus") {
-			a = L"エギル海底神殿";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d900_s1.opus") {
-			a = L"エギル海底神殿(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d1010.opus") {
-			a = L"The Paradise Lost of Norman";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_d1010_s1.opus") {
-			a = L"The Paradise Lost of Norman(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e001.opus") {
-			a = L"Yesterday's Journey, Tomorrow's Dream";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e002.opus") {
-			a = L"Surging Pressure";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e003.opus") {
-			a = L"Turn of the Tide";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e004.opus") {
-			a = L"あの時からずっと…";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e005.opus") {
-			a = L"Waver as the Wave";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e006.opus") {
-			a = L"切っても切れない絆";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e007.opus") {
-			a = L"灰色の深層";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e007_s1.opus") {
-			a = L"灰色の深層(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e008.opus") {
-			a = L"Premonition of Turmoil";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e009.opus") {
-			a = L"歪な願望";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e010.opus") {
-			a = L"The Road so Far, the Future Ahead";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e011.opus") {
-			a = L"Violent Warriors";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e011_s1.opus") {
-			a = L"Violent Warriors(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e012.opus") {
-			a = L"手筈通りに";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e013.opus") {
-			a = L"不明";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e014.opus") {
-			a = L"ROLLO -Because of Its Purity-";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e015.opus") {
-			a = L"Deep Unconscious";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_e015_s1.opus") {
-			a = L"Deep Unconscious(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f100.opus") {
-			a = L"TO BE FREE";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f100_s1.opus") {
-			a = L"TO BE FREE(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f110.opus") {
-			a = L"Brother's Footsteps on the Island";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f110_s1.opus") {
-			a = L"Brother's Footsteps on the Island(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f120.opus") {
-			a = L"Burn with You";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f120_s1.opus") {
-			a = L"Burn with You(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f130.opus") {
-			a = L"Destined to Keep Running";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f130_s1.opus") {
-			a = L"Destined to Keep Running(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f140.opus") {
-			a = L"Ride on Mana!";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f140_s1.opus") {
-			a = L"Ride on Mana!(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f150.opus") {
-			a = L"Heat Hazard";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f150_s1.opus") {
-			a = L"Heat Hazard(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f160.opus") {
-			a = L"瞳の中の少年剣士";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f160_s1.opus") {
-			a = L"瞳の中の少年剣士(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f200.opus") {
-			a = L"錨を揚げろ！";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f200_s1.opus") {
-			a = L"錨を揚げろ！(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f210.opus") {
-			a = L"悠き海に生きる者";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f210_s1.opus") {
-			a = L"悠き海に生きる者(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f220.opus") {
-			a = L"コンパスは踊る";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f220_s1.opus") {
-			a = L"コンパスは踊る(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f230.opus") {
-			a = L"開闢の海";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f230_s1.opus") {
-			a = L"開闢の海(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f310.opus") {
-			a = L"If I Could Go Back to Those Days";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_f310_s1.opus") {
-			a = L"If I Could Go Back to Those Days(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_gameover.opus") {
-			a = L"SO MUCH FOR TODAY (Ys X Ver.)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_op.opus") {
-			a = L"Facing the Distant Horizon";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_op_lp.opus") {
-			a = L"Facing the Distant Horizon(lp)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t100.opus") {
-			a = L"Our Hometown";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t100_s1.opus") {
-			a = L"Our Hometown(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t200.opus") {
-			a = L"根ざすべき場所";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t200_s1.opus") {
-			a = L"根ざすべき場所(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t300.opus") {
-			a = L"Sometime Siesta";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t300_s1.opus") {
-			a = L"Sometime Siesta(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t301.opus") {
-			a = L"Innermost Feelings";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t301_s1.opus") {
-			a = L"Innermost Feelings(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t500.opus") {
-			a = L"情景に揺蕩う";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t500_s1.opus") {
-			a = L"情景に揺蕩う(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t600.opus") {
-			a = L"盾の兄弟";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_t600_s1.opus") {
-			a = L"盾の兄弟(重低音)";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 		if (a == L"y_title.opus") {
-			a = L"その優しさは誰のため";
+			a = LL2(L"音楽", L"Music");
 			fff = 1;
 		}
 
@@ -8492,12 +8560,12 @@ void CWread::wavread()
 				if (a.Mid(4, 4) = "b007") { a = "KNOCK ON NOX"; }
 				if (a.Mid(4, 4) = "b008") { a = "ANIMA ERGASTULUM"; }
 				if (a.Mid(4, 5) = "b010b") { a = "URBAN TERROR"; }
-				if (a.Mid(4, 4) = "b010") { a = "URBAN TERROR(イントロあり)"; }
+				if (a.Mid(4, 4) = "b010") { a = LL2(L"URBAN TERROR(イントロあり)", L"URBAN TERROR (With Intro)"); }
 				if (a.Mid(4, 5) = "b011b") { a = "DREAMING IN THE GRIMWALD"; }
-				if (a.Mid(4, 4) = "b011") { a = "DREAMING IN THE GRIMWALD(イントロあり)"; }
+				if (a.Mid(4, 4) = "b011") { a = LL2(L"DREAMING IN THE GRIMWALD(イントロあり)", L"DREAMING IN THE GRIMWALD(with intro)"); }
 				if (a.Mid(4, 4) = "b012") { a = "WILD CARD"; }
 				if (a.Mid(4, 5) = "b014b") { a = "FULL MOON CEREMONY"; }
-				if (a.Mid(4, 4) = "b014") { a = "FULL MOON CEREMONY(イントロあり)"; }
+				if (a.Mid(4, 4) = "b014") { a = LL2(L"FULL MOON CEREMONY(イントロあり)", L"FULL MOON CEREMONY (With Intro)"); }
 				if (a.Mid(4, 4) = "d101") { a = "HEART BEAT SHAKER"; }
 				if (a.Mid(4, 4) = "d201") { a = "CLOACA MAXIMA"; }
 				if (a.Mid(4, 4) = "d301") { a = "RUIN OF DRY MOAT"; }
@@ -8535,7 +8603,7 @@ void CWread::wavread()
 				if (a.Mid(4, 4) = "f201") { a = "TRANQUIL SILENCE"; }
 				if (a.Mid(4, 4) = "f301") { a = "GLESSING WAY!"; }
 				if (a.Mid(4, 4) = "f501") { a = "DESERT AFTER TEARS"; }
-				if (a.Mid(4, 4) = "muon") { a = "無音"; }
+				if (a.Mid(4, 4) = "muon") { a = LL2(L"無音", L"Silence"); }
 				if (a.Mid(4, 4) = "t101") { a = "PRISONCITY"; }
 				if (a.Mid(4, 4) = "t102") { a = "IN PROFILE, ON BELFRY"; }
 				if (a.Mid(4, 4) = "t103") { a = "NEW LIFE"; }
@@ -8551,22 +8619,22 @@ void CWread::wavread()
 			else {
 				switch (_ttoi(a.Mid(2, 5))) {
 				case 81004:
-					a = "罪と罰と偽りと";
+					a = LL2(L"罪と罰と偽りと", L"Crime, Punishment and Lies");
 					break;
 				case 81005:
-					a = "昏き鐘の残響";
+					a = LL2(L"昏き鐘の残響", L"Echo of the Dark Bell");
 					break;
 				case 81006:
 					a = "Right on the Mark";
 					break;
 				case 81007:
-					a = "悪夢ふたたび";
+					a = LL2(L"悪夢ふたたび", L"Nightmare Again");
 					break;
 				case 81008:
 					a = "Crossbell Nostalgia";
 					break;
 				case 81009:
-					a = "創まりの円庭";
+					a = LL2(L"創まりの円庭", L"Circle Garden of Genesis");
 					break;
 				case 81010:
 					a = "Mysterious Element";
@@ -8578,16 +8646,16 @@ void CWread::wavread()
 					a = "Purgatory Scream";
 					break;
 				case 81015:
-					a = "さざめきの途路";
+					a = LL2(L"さざめきの途路", L"Path of Bustling");
 					break;
 				case 81016:
-					a = "蒼の大地に生きる者";
+					a = LL2(L"蒼の大地に生きる者", L"Those Who Live on the Azure Land");
 					break;
 				case 81017:
-					a = "黎明の鐘";
+					a = LL2(L"黎明の鐘", L"Bell of Dawn");
 					break;
 				case 81018:
-					a = "レメディファンタジア -仲間とともに-";
+					a = LL2(L"レメディファンタジア -仲間とともに-", L"Remedy Fantasia -With Companions-");
 					break;
 				case 81019:
 					a = "Slight Suspicion";
@@ -8596,27 +8664,27 @@ void CWread::wavread()
 					a = "Maliciousness in the Mirror";
 					break;
 				case 81021:
-					a = "暗澹たる世界";
+					a = LL2(L"暗澹たる世界", L"Gloomy World");
 					break;
 				case 81022:
-					a = "ひとときの温もり";
+					a = LL2(L"ひとときの温もり", L"Moment of Warmth");
 					break;
 				case 81023:
-					a = "今、創まりのとき";
+					a = LL2(L"今、創まりのとき", L"Now, the Moment of Genesis");
 					break;
 				case 81024:
 					a = "KERAUNOS -Fear and Hatred-";
 					break;
 				case 81025:
-					a = "亡失われた魂";
+					a = LL2(L"亡失われた魂", L"Lost Souls");
 					break;
 				case 81026:
-					a = "穏やかな時間";
+					a = LL2(L"穏やかな時間", L"Peaceful Time");
 					break;
 				case 81027:
 					break;
 				case 81028:
-					a = "運命という名の歯車";
+					a = LL2(L"運命という名の歯車", L"The Gear Named Fate");
 					break;
 				case 81200:
 					a = "Crossing Causal Lines";
@@ -8631,25 +8699,25 @@ void CWread::wavread()
 					a = "Hide and Seek by Myself";
 					break;
 				case 81315:
-					a = "鉱山町マインツ -創Ver.-";
+					a = LL2(L"鉱山町マインツ -創Ver.-", L"Mines Town Mainz -Reverie Ver.-");
 					break;
 				case 81316:
-					a = "木霊の道 -創Ver.-";
+					a = LL2(L"木霊の道 -創Ver.-", L"Path of Echoes -Reverie Ver.-");
 					break;
 				case 81317:
 					a = "Raindrops with the Wind";
 					break;
 				case 81319:
-					a = "陽溜まりにただいまを";
+					a = LL2(L"陽溜まりにただいまを", L"Sunlight and Welcome Home");
 					break;
 				case 81320:
 					a = "Wind-Up Yesterday!";
 					break;
 				case 81321:
-					a = "零の邂逅";
+					a = LL2(L"零の邂逅", L"Zero Encounter");
 					break;
 				case 81322:
-					a = "影の見えざる手";
+					a = LL2(L"影の見えざる手", L"Invisible Hand in the Shadow");
 					break;
 				case 81950:
 					break;
@@ -8688,7 +8756,7 @@ void CWread::wavread()
 				case 81969:
 					break;
 				case 82065:
-					a = "鋼鉄牙城";
+					a = LL2(L"鋼鉄牙城", L"Steel Fortress");
 					break;
 				case 82113:
 					a = "Zero Break Battle";
@@ -8702,7 +8770,7 @@ void CWread::wavread()
 					a = "POM's Paradise";
 					break;
 				case 82125:
-					a = "波間に弾む心";
+					a = LL2(L"波間に弾む心", L"Heart Bouncing on the Waves");
 					break;
 				case 82129:
 					a = "Reverse Babel";
@@ -8717,7 +8785,7 @@ void CWread::wavread()
 					a = "Magical Revolt";
 					break;
 				case 82136:
-					a = "流麗闘冴";
+					a = LL2(L"流麗闘冴", L"Elegant Battle Brilliance");
 					break;
 				case 82137:
 					a = "The Road to All-Out War";
@@ -8729,10 +8797,10 @@ void CWread::wavread()
 					a = "Invisible Hilly Country";
 					break;
 				case 82141:
-					a = "ひとかけらの光明";
+					a = LL2(L"ひとかけらの光明", L"A Fragment of Light");
 					break;
 				case 82143:
-					a = "反攻の烽火";
+					a = LL2(L"反攻の烽火", L"Beacon of Counterattack");
 					break;
 				case 82147:
 					a = "Rapid Wind";
@@ -8756,22 +8824,22 @@ void CWread::wavread()
 					a = "Sword of Swords";
 					break;
 				case 82158:
-					a = "今宵は宴と参りましょう";
+					a = LL2(L"今宵は宴と参りましょう", L"Tonight We Feast");
 					break;
 				case 82159:
 					a = "Flash Your Fighting Spirit";
 					break;
 				case 82161:
-					a = "鈍色に這う";
+					a = LL2(L"鈍色に這う", L"Creeping in Drab");
 					break;
 				case 82163:
 					a = "Pyro Labyrinth";
 					break;
 				case 82164:
-					a = "優しさを未来に託して";
+					a = LL2(L"優しさを未来に託して", L"Entrust Kindness to the Future");
 					break;
 				case 82166:
-					a = "高らかに、誇らしく";
+					a = LL2(L"高らかに、誇らしく", L"Proudly, With Pride");
 					break;
 				case 82170:
 					a = "Infinity Rage";
@@ -8801,205 +8869,205 @@ void CWread::wavread()
 					a = "Challenger Invigorated";
 					break;
 				case 82184:
-					a = "このあと美味しくいただきました";
+					a = LL2(L"このあと美味しくいただきました", L"After This, We Ate Deliciously");
 					break;
 				case 82186:
 					a = "Emergency Order";
 					break;
 				case 82188:
-					a = "激烈! 撃滅! ミシュナイダー!!";
+					a = LL2(L"激烈! 撃滅! ミシュナイダー!!", L"Fierce! Annihilation! Mishneider!!");
 					break;
 				case 82189:
 					a = "Life Goes On";
 					break;
 				default:
 					if (a == L"ed8_inf_ex.opus") {
-						a = "夢幻の彼方へ";
+						a = LL2(L"夢幻の彼方へ", L"Beyond the Phantasmal");
 					}
 				}
 				switch (_ttoi(a.Mid(2, 4))) {
 				case 8001:
-					a = "特科クラス《VII組》";
+					a = LL2(L"特科クラス《VII組》", L"Class VII");
 					break;
 				case 8002:
-					a = "スタートライン";
+					a = LL2(L"スタートライン", L"Start Line");
 					break;
 				case 8003:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8004:
 					a = "Youthful Victory";
 					break;
 				case 8006:
-					a = "ただひたすらに、前へ";
+					a = LL2(L"ただひたすらに、前へ", L"Ever Forward");
 					break;
 				case 8007:
-					a = "縁 -つなぐもの-";
+					a = LL2(L"縁 -つなぐもの-", L"Connection -What Binds-");
 					break;
 				case 8102:
-					a = "翡翠の公都バリアハート";;
+					a = LL2(L"翡翠の公都バリアハート", L"Jade Capital Valdrand");
 					break;
 				case 8104:
-					a = "黒銀の鋼都ルーレ";
+					a = LL2(L"黒銀の鋼都ルーレ", L"Black-Silver Steel City Roer");
 					break;
 				case 8150:
-					a = "下校途中にパンケーキ";
+					a = LL2(L"下校途中にパンケーキ", L"Pancakes on the Way Home");
 					break;
 				case 8151:
-					a = "可能性は無限大";
+					a = LL2(L"可能性は無限大", L"Possibilities Are Infinite");
 					break;
 				case 8152:
-					a = "夜のしじまに";
+					a = LL2(L"夜のしじまに", L"In the Silence of Night");
 					break;
 				case 8153:
-					a = "夕景";
+					a = LL2(L"夕景", L"Evening View");
 					break;
 				case 8154:
-					a = "新しい朝";
+					a = LL2(L"新しい朝", L"New Morning");
 					break;
 				case 8155:
-					a = "束の間の里帰り";
+					a = LL2(L"束の間の里帰り", L"Brief Return Home");
 					break;
 				case 8156:
-					a = "白亜の旧都セントアーク";
+					a = LL2(L"白亜の旧都セントアーク", L"White Old Capital St. Ark");
 					break;
 				case 8157:
-					a = "紡績町パルム";
+					a = LL2(L"紡績町パルム", L"Textile Town Parm");
 					break;
 				case 8158:
-					a = "籠の中のクロスベル";
+					a = LL2(L"籠の中のクロスベル", L"Crossbell in the Cage");
 					break;
 				case 8159:
-					a = "今、成すべきこと";
+					a = LL2(L"今、成すべきこと", L"What Must Be Done Now");
 					break;
 				case 8160:
-					a = "歓楽都市ラクウェル";
+					a = LL2(L"歓楽都市ラクウェル", L"Pleasure City Raquel");
 					break;
 				case 8161:
-					a = "静かなる駆け引き";
+					a = LL2(L"静かなる駆け引き", L"Quiet Bargaining");
 					break;
 				case 8162:
-					a = "赫奕たるヘイムダル";
+					a = LL2(L"赫奕たるヘイムダル", L"Radiant Heimdallr");
 					break;
 				case 8163:
-					a = "紺碧の海都オルディス";
+					a = LL2(L"紺碧の海都オルディス", L"Azure Sea City Ordis");
 					break;
 				case 8164:
-					a = "最前線都市";
+					a = LL2(L"最前線都市", L"Frontline City");
 					break;
 				case 8165:
 					a = "Base Camp";
 					break;
 				case 8166:
-					a = "精強なる兵たち";
+					a = LL2(L"精強なる兵たち", L"Elite Soldiers");
 					break;
 				case 8168:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8170:
-					a = "隠れ里エリン";
+					a = LL2(L"隠れ里エリン", L"Hidden Village Eryn");
 					break;
 				case 8171:
-					a = "潜入調査";
+					a = LL2(L"潜入調査", L"Undercover Investigation");
 					break;
 				case 8172:
-					a = "昏冥の中で";
+					a = LL2(L"昏冥の中で", L"In the Darkness");
 					break;
 				case 8173:
-					a = "紅き閃影 -光まとう翼-";
+					a = LL2(L"紅き閃影 -光まとう翼-", L"Crimson Flash -Wings of Light-");
 					break;
 				case 8174:
-					a = "聖ウルスラ医科大学 -閃Ver.-";
+					a = LL2(L"聖ウルスラ医科大学 -閃Ver.-", L"St. Ursula Medical College -CS Ver.-");
 					break;
 				case 8175:
-					a = "一抹の不安、一縷の望み";
+					a = LL2(L"一抹の不安、一縷の望み", L"Hint of Unease, Ray of Hope");
 					break;
 				case 8176:
 					a = "Lyrical Amber";
 					break;
 				case 8177:
-					a = "水面を渡る風";
+					a = LL2(L"水面を渡る風", L"Wind Over the Water");
 					break;
 				case 8250:
-					a = "流れる雲の彼方に";
+					a = LL2(L"流れる雲の彼方に", L"Beyond the Drifting Clouds");
 					break;
 				case 8251:
-					a = "静寂の小路";
+					a = LL2(L"静寂の小路", L"Path of Silence");
 					break;
 				case 8252:
-					a = "崖谷の狭間";
+					a = LL2(L"崖谷の狭間", L"Gap of the Cliff");
 					break;
 				case 8253:
 					a = "Weathering Road";
 					break;
 				case 8260:
-					a = "彼の地へ向かって";
+					a = LL2(L"彼の地へ向かって", L"Toward That Land");
 					break;
 				case 8261:
-					a = "終焉の途へ";
+					a = LL2(L"終焉の途へ", L"Toward the End");
 					break;
 				case 8262:
-					a = "全てを識るもの -閃Ver.-";
+					a = LL2(L"全てを識るもの -閃Ver.-", L"Omniscient -CS Ver.-");
 					break;
 				case 8263:
-					a = "たそがれ緑道";
+					a = LL2(L"たそがれ緑道", L"Twilight Green Path");
 					break;
 				case 8311:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8350:
-					a = "アインヘル小要塞";
+					a = LL2(L"アインヘル小要塞", L"Einhel Fortress");
 					break;
 				case 8351:
-					a = "伝承の裏で";
+					a = LL2(L"伝承の裏で", L"Behind the Legend");
 					break;
 				case 8352:
 					a = "Unplanned Residue";
 					break;
 				case 8353:
-					a = "忘れられし幻夢の狭間 -閃Ver.-";
+					a = LL2(L"忘れられし幻夢の狭間 -閃Ver.-", L"Forgotten Phantasmal Gap -CS Ver.-");
 					break;
 				case 8354:
-					a = "幽世の気配";
+					a = LL2(L"幽世の気配", L"Atmosphere of the Netherworld");
 					break;
 				case 8355:
 					a = "solid as the Rock of JUNO";
 					break;
 				case 8356:
-					a = "地下に巣喰う";
+					a = LL2(L"地下に巣喰う", L"Nesting Underground");
 					break;
 				case 8359:
 					a = "Spiral of Erebos";
 					break;
 				case 8360:
-					a = "鋼の障壁";
+					a = LL2(L"鋼の障壁", L"Steel Barrier");
 					break;
 				case 8363:
 					a = "Break In";
 					break;
 				case 8365:
-					a = "サングラール迷宮";
+					a = LL2(L"サングラール迷宮", L"Sanglar Maze");
 					break;
 				case 8366:
-					a = "静けき森の魔女";
+					a = LL2(L"静けき森の魔女", L"Witch of the Silent Forest");
 					break;
 				case 8367:
-					a = "Mystic Core -閃Ver.-";
+					a = LL2(L"Mystic Core -閃Ver.-", L"Mystic Core -CS Ver.-");
 					break;
 				case 8368:
-					a = "斉いし舞台";
+					a = LL2(L"斉いし舞台", L"Unified Stage");
 					break;
 				case 8369:
-					a = "シンクロニシティ #23";
+					a = LL2(L"シンクロニシティ #23", L"Synchronicity #23");
 					break;
 				case 8371:
-					a = "世界の命運を賭けて";
+					a = LL2(L"世界の命運を賭けて", L"Betting on the World's Fate");
 					break;
 				case 8372:
 					a = "The End of -SAGA-";
 					break;
 				case 8429:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8450:
 					a = "Brave Steel";
@@ -9008,25 +9076,25 @@ void CWread::wavread()
 					a = "Toughness!!";
 					break;
 				case 8452:
-					a = "剣戟怒涛";
+					a = LL2(L"剣戟怒涛", L"Sword and Lance Storm");
 					break;
 				case 8453:
 					a = "Proud Grudge";
 					break;
 				case 8454:
-					a = "チープ・トラップ";
+					a = LL2(L"チープ・トラップ", L"Cheap Trap");
 					break;
 				case 8455:
 					a = "STEP AHEAD";
 					break;
 				case 8456:
-					a = "劣勢を挽回せよ！";
+					a = LL2(L"劣勢を挽回せよ！", L"Turn the Tide!");
 					break;
 				case 8457:
 					a = "Abrupt Visitor";
 					break;
 				case 8458:
-					a = "行き着く先 -Opening Size-";
+					a = LL2(L"行き着く先 -Opening Size-", L"Destination -Opening Size-");
 					break;
 				case 8460:
 					a = "Lift-off!";
@@ -9038,7 +9106,7 @@ void CWread::wavread()
 					a = "One-Way to the Netherworld";
 					break;
 				case 8465:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8466:
 					a = "Erosion of Madness";
@@ -9047,7 +9115,7 @@ void CWread::wavread()
 					a = "DOOMSDAY TRANCE";
 					break;
 				case 8468:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8472:
 					a = "Malicious Fiend";
@@ -9059,10 +9127,10 @@ void CWread::wavread()
 					a = "Robust One";
 					break;
 				case 8475:
-					a = "古の盟約";
+					a = LL2(L"古の盟約", L"Ancient Covenant");
 					break;
 				case 8476:
-					a = "七の相克 -EXCELLION KRIEG-";
+					a = LL2(L"七の相克 -EXCELLION KRIEG-", L"Seven Antagonisms -EXCELLION KRIEG-");
 					break;
 				case 8477:
 					a = "Burning Throb";
@@ -9077,7 +9145,7 @@ void CWread::wavread()
 					a = "With Our Own Hands!!";
 					break;
 				case 8500:
-					a = "授業は合同で";
+					a = LL2(L"授業は合同で", L"Joint Class");
 					break;
 				case 8501:
 					a = "Power or Technique";
@@ -9086,235 +9154,235 @@ void CWread::wavread()
 					a = "Briefing Time";
 					break;
 				case 8503:
-					a = "第II分校の日常";
+					a = LL2(L"第II分校の日常", L"Daily Life at Branch II");
 					break;
 				case 8504:
-					a = "充実したひととき";
+					a = LL2(L"充実したひととき", L"Satisfying Moment");
 					break;
 				case 8505:
-					a = "異端の研究者";
+					a = LL2(L"異端の研究者", L"Heretic Researcher");
 					break;
 				case 8506:
-					a = "君に伝えたいこと";
+					a = LL2(L"君に伝えたいこと", L"What I Want to Tell You");
 					break;
 				case 8507:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8508:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8509:
-					a = "張り詰めた思惑";
+					a = LL2(L"張り詰めた思惑", L"Tense Speculation");
 					break;
 				case 8510:
-					a = "混迷の対立";
+					a = LL2(L"混迷の対立", L"Chaotic Conflict");
 					break;
 				case 8511:
-					a = "急転直下";
+					a = LL2(L"急転直下", L"Sudden Turn");
 					break;
 				case 8512:
-					a = "蠢く陰謀";
+					a = LL2(L"蠢く陰謀", L"Writhing Conspiracy");
 					break;
 				case 8513:
-					a = "託されたもの";
+					a = LL2(L"託されたもの", L"Entrusted One");
 					break;
 				case 8514:
-					a = "羅刹の薫陶";
+					a = LL2(L"羅刹の薫陶", L"Rasetsu's Guidance");
 					break;
 				case 8515:
-					a = "ハーメル -遺されたもの-";
+					a = LL2(L"ハーメル -遺されたもの-", L"Hamel -What Was Left Behind-");
 					break;
 				case 8516:
-					a = "Welcome Back! アーベントタイム(ラジオ)";
+					a = LL2(L"Welcome Back! アーベントタイム(ラジオ)", L"Welcome Back! Evening Time(radio)");
 					break;
 				case 8517:
-					a = "夏至祭";
+					a = LL2(L"夏至祭", L"Summer Solstice Festival");
 					break;
 				case 8519:
-					a = "夏至祭";
+					a = LL2(L"夏至祭", L"Summer Solstice Festival");
 					break;
 				case 8520:
-					a = "翡翠庭園";
+					a = LL2(L"翡翠庭園", L"Jade Garden");
 					break;
 				case 8521:
-					a = "初めての円舞曲";
+					a = LL2(L"初めての円舞曲", L"First Waltz");
 					break;
 				case 8522:
-					a = "真打ち登場！";
+					a = LL2(L"真打ち登場！", L"Headliner's Entrance!");
 					break;
 				case 8524:
 					a = "Tragedy";
 					break;
 				case 8528:
-					a = "僅かな希望の先に";
+					a = LL2(L"僅かな希望の先に", L"Beyond Slight Hope");
 					break;
 				case 8530:
-					a = "帰路へ";
+					a = LL2(L"帰路へ", L"On the Road Home");
 					break;
 				case 8532:
 					a = "Roots of Scar";
 					break;
 				case 8534:
-					a = "想い千里を走り";
+					a = LL2(L"想い千里を走り", L"Feelings Run a Thousand Miles");
 					break;
 				case 8536:
-					a = "光射す空の下で";
+					a = LL2(L"光射す空の下で", L"Under the Shining Sky");
 					break;
 				case 8539:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8541:
 					if (b == L"b")
-						a = "空を見上げて -Eliot Ver.-";
+						a = LL2(L"空を見上げて -Eliot Ver.-", L"Look Up at the Sky -Eliot Ver.-");
 					else
-						a = "空を見上げて -Eliot Ver.-";
+						a = LL2(L"空を見上げて -Eliot Ver.-", L"Look Up at the Sky -Eliot Ver.-");
 					break;
 				case 8542:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8543:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8544:
 					a = "Little Rain";
 					break;
 				case 8545:
-					a = "暗雲";
+					a = LL2(L"暗雲", L"Dark Clouds");
 					break;
 				case 8546:
-					a = "鐘、鳴り響く時";
+					a = LL2(L"鐘、鳴り響く時", L"When the Bell Tolls");
 					break;
 				case 8547:
-					a = "巨イナル黄昏";
+					a = LL2(L"巨イナル黄昏", L"Giant Twilight");
 					break;
 				case 8548:
-					a = "あの日の約束";
+					a = LL2(L"あの日の約束", L"That Day's Promise");
 					break;
 				case 8551:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8553:
 					a = "Sensitive Talk";
 					break;
 				case 8554:
-					a = "哀花";
+					a = LL2(L"哀花", L"Mournful Flower");
 					break;
 				case 8555:
 					a = "Feel at Home";
 					break;
 				case 8556:
-					a = "幾千万の夜を越えて";
+					a = LL2(L"幾千万の夜を越えて", L"Beyond Countless Nights");
 					break;
 				case 8557:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8558:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8559:
-					a = "優しき微睡み";
+					a = LL2(L"優しき微睡み", L"Gentle Slumber");
 					break;
 				case 8560:
-					a = "最悪の最善手";
+					a = LL2(L"最悪の最善手", L"Best Move in the Worst Situation");
 					break;
 				case 8562:
-					a = "黒の真実";
+					a = LL2(L"黒の真実", L"Black Truth");
 					break;
 				case 8563:
-					a = "いつでもそばに";
+					a = LL2(L"いつでもそばに", L"Always by Your Side");
 					break;
 				case 8564:
-					a = "その温もりは小さいけれど。";
+					a = LL2(L"その温もりは小さいけれど。", L"That warmth is small, but.");
 					break;
 				case 8566:
-					a = "それでも前へ";
+					a = LL2(L"それでも前へ", L"Still Forward");
 					break;
 				case 8570:
-					a = "想いひとつに";
+					a = LL2(L"想いひとつに", L"Hearts as One");
 					break;
 				case 8571:
-					a = "千年要塞";
+					a = LL2(L"千年要塞", L"Millennium Fortress");
 					break;
 				case 8572:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8573:
-					a = "せめてこの夜に誓って";
+					a = LL2(L"せめてこの夜に誓って", L"At Least Swear Tonight");
 					break;
 				case 8574:
 					a = "Constraint";
 					break;
 				case 8575:
-					a = "過ぎ去りし日々";
+					a = LL2(L"過ぎ去りし日々", L"Days Gone By");
 					break;
 				case 8576:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8577:
-					a = "それぞれの覚悟";
+					a = LL2(L"それぞれの覚悟", L"Each One's Resolve");
 					break;
 				case 8578:
-					a = "無明の闇の中で";
+					a = LL2(L"無明の闇の中で", L"In the Darkness");
 					break;
 				case 8579:
-					a = "変わる世界 -闇の底から-";
+					a = LL2(L"変わる世界 -闇の底から-", L"Changing World -From the Depths of Darkness-");
 					break;
 				case 8600:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8601:
-					a = "ゲートイン";
+					a = LL2(L"ゲートイン", L"Gate In");
 					break;
 				case 8602:
-					a = "不明(空の軌跡)";
+					a = savedata.lang == 0 ? "不明(空の軌跡)" : "Unknown(Sora no Kiseki)";
 					break;
 				case 8603:
-					a = "女神はいつも見ています";
+					a = LL2(L"女神はいつも見ています", L"The Goddess is Always Watching");
 					break;
 				case 8604:
-					a = "不明(空の軌跡)";
+					a = savedata.lang == 0 ? "不明(空の軌跡)" : "Unknown(Sora no Kiseki)";
 					break;
 				case 8605:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8606:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8608:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8610:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8611:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8612:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8613:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8614:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8616:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8617:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8618:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8619:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8620:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8621:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8702:
 					a = "Master's Vertex";
@@ -9338,28 +9406,28 @@ void CWread::wavread()
 					a = "Pleasure Smile";
 					break;
 				case 8714:
-					a = "巨竜目覚める";
+					a = LL2(L"巨竜目覚める", L"The Great Dragon Awakens");
 					break;
 				case 8715:
-					a = "未来へ。";
+					a = LL2(L"未来へ。", L"To the Future.");
 					break;
 				case 8716:
-					a = "明日への軌跡 -Instrumental Ver.-";
+					a = LL2(L"明日への軌跡 -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-");
 					break;
 				case 8717:
 					a = "Deep Carnival";
 					break;
 				case 8718:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8719:
 					a = "Chain Chain Chain!";
 					break;
 				case 8720:
-					a = "明日への軌跡";
+					a = LL2(L"明日への軌跡", L"Trails to Tomorrow");
 					break;
 				case 8721:
-					a = "愛の詩(歌)";
+					a = LL2(L"愛の詩(歌)", L"Poem of Love(vocal)");
 					break;
 				case 8722:
 					a = "Celestial Coalescence";
@@ -9371,49 +9439,49 @@ void CWread::wavread()
 					a = "Concept H.M.I.";
 					break;
 				case 8802:
-					a = "風よりも駿く";
+					a = LL2(L"風よりも駿く", L"Swifter Than the Wind");
 					break;
 				case 8803:
 					a = "Brilliant Escape";
 					break;
 				case 8810:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8811:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8812:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8910:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8911:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8912:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8913:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8916:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8917:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8918:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8919:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8920:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				case 8921:
-					a = "不明";
+					a = LL2(L"不明", L"Unknown");
 					break;
 				}
 			}
@@ -10135,13 +10203,13 @@ void CWread::wavread()
 		data_size=oggsize=loop2*4;
 		loop3=loop2;loop2=0;
 		adbuf2=(char*)malloc(data_size+44100*10);
-		if(adbuf2==0){wavwait=1;thend=1; fnn="メモリの確保に失敗しました。";return;}
+		if(adbuf2==0){wavwait=1;thend=1; fnn=LL2(L"メモリの確保に失敗しました。", L"Memory allocation failed.");return;}
 		og->m_time.SetRange(0,(data_size)/4,TRUE);
 		lenl= 0;
 		if(wav)free(wav);
 		wav_start();
 		Render();
-		}else{wavwait=1;thend=1; fnn="ファイルが開けませんでした。";return;}
+		}else{wavwait=1;thend=1; fnn=LL2(L"ファイルが開けませんでした。", L"Could not open file.");return;}
 		*/
 	}
 	else if (mode == -11 || (mode == -14 && filen.Right(3) == "mp3") || mode == -15) {
@@ -10168,7 +10236,7 @@ void CWread::wavread()
 		loop3 = loop2;
 		if (san2)data_size = oggsize = loop2 * 4 + 44100 * 7;
 		if (mode == -14 && filen == "42music.mp3")	loop2 = 0;
-		if (adbuf2 == 0) { wavwait = 1; thend = 1; fnn = "メモリの確保に失敗しました。"; return; }
+		if (adbuf2 == 0) { wavwait = 1; thend = 1; fnn = LL2(L"メモリの確保に失敗しました。", L"Memory allocation failed."); return; }
 		og->m_time.SetRange(0, (data_size) / 4, TRUE);
 		lenl = 0;
 		if (wav)free(wav);
@@ -12277,7 +12345,7 @@ void COggDlg::dp(CString a)
 		int flggg = 0;
 		if (f123.Open(filen + _T(".save"), CFile::modeRead, NULL) == TRUE) {
 			f123.Close();
-			if (IDYES == MessageBox(_T("途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生"), _T("再生確認"), MB_YESNO)) {
+			if (IDYES == MessageBox(LL2(L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start"), LL2(L"再生確認", L"Playback confirmation"), MB_YESNO)) {
 				flggg = 1;
 			}
 			else {
@@ -12318,7 +12386,7 @@ void COggDlg::dp(CString a)
 		int a = 0; aa2 = 0;
 		REFTIME aa = 0;
 		aa2 = 0;
-		ps = 0; m_ps.SetWindowText(_T("一時停止"));
+		ps = 0; m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
 		if (pMediaPosition)pMediaPosition->get_StopTime(&aa);
 		aa1 = oggsize2 = aa;
 		m_time.SetRange(0, (int)((REFTIME)aa * 100.0), TRUE);
@@ -12355,7 +12423,7 @@ void COggDlg::OnDropFiles(HDROP hDropInfo)
 	UINT cnt = DragQueryFile(hDropInfo, (UINT)-1, filen_c, sizeof(filen_c));
 	if (cnt != 1)
 	{
-		MessageBox(_T("ファイルは1つだけドロップしてください。\nプレイリストが開いている時は複数でもokです。"), _T("ogg/wav簡易プレイヤ"), MB_ICONEXCLAMATION);
+		MessageBox(LL2(L"ファイルは1つだけドロップしてください。\nプレイリストが開いている時は複数でもokです。", L"Drop only one file.\nMultiple files ok when playlist is open."), LL2(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player"), MB_ICONEXCLAMATION);
 		CCustomDialog::OnDropFiles(hDropInfo);
 		return;
 	}
@@ -12366,7 +12434,7 @@ void COggDlg::OnDropFiles(HDROP hDropInfo)
 	CFile f;
 	if (f.Open(filen, CFile::modeRead | CFile::shareDenyNone, NULL) == FALSE) {
 		filen = ff;
-		MessageBox(_T("ほかのプログラムで開かれているためファイルが開けません"), _T("ogg/wav簡易プレイヤ"), MB_ICONEXCLAMATION);
+		MessageBox(LL2(L"ほかのプログラムで開かれているためファイルが開けません", L"Cannot open file because another program has it open."), LL2(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player"), MB_ICONEXCLAMATION);
 		CCustomDialog::OnDropFiles(hDropInfo);
 		return;
 	}
@@ -12457,7 +12525,7 @@ void COggDlg::stop()
 		if (ps == 1) {
 			OnPause();
 		}
-		m_ps.SetWindowText(_T("一時停止"));
+		m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
 		ps = 0;
 		if (m_dsb)m_dsb->Stop();
 		if (pAudioClient) pAudioClient->Stop();
@@ -12523,7 +12591,7 @@ void COggDlg::stop()
 	stflg = FALSE;
 	SetTimer(4923, 30, NULL);
 	m_lrc.SetWindowText(L"");
-	m_lrc2.SetWindowText(L"歌詞(.lrc)が表示されます");
+	m_lrc2.SetWindowText(LL2(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here"));
 	m_lrc3.SetWindowText(L"");
 
 	eqflg = TRUE;
@@ -12609,7 +12677,7 @@ void COggDlg::stop1()
 	playf = 0;
 	mode = modesub;
 	m_lrc.SetWindowText(L"");
-	m_lrc2.SetWindowText(L"歌詞(.lrc)が表示されます");
+	m_lrc2.SetWindowText(LL2(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here"));
 	m_lrc3.SetWindowText(L"");
 	eqflg = TRUE;
 }
@@ -13070,7 +13138,7 @@ void COggDlg::timerp()
 		s.Format(_T("file:%s"), filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1));
 	else			s.Format(_T("file:%s"), filen);
 	//		if(fnn.Right(4)=="動画"||fnn.Right(5).Left(4)=="動画")		s.Format("file:動画");
-	if (filen.Left(2) == L"★")		s.Format(_T("file:動画"));
+	if (filen.Left(2) == L"★")		s.Format(LL2(L"file:動画", L"file:Video"));
 	if (mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6) {
 		CString g; g = L""; g = filen; g.MakeLower();
 		if (g.Right(4) == L".mp3") g = L"(mp3)";
@@ -13085,14 +13153,14 @@ void COggDlg::timerp()
 		if (g.Right(4) == L".dsf") g = L"(DSD(dsf))";
 		if (g.Right(4) == L".dff") g = L"(DSD(dff))";
 		if (g.Right(4) == L".wsd") g = L"(DSD(wsd))";
-		s.Format(_T("file:音声ファイル%s"), g);
+		s.Format(LL2(L"file:音声ファイル%s", L"file:Audio %s"), g);
 	}
 	if (mode == -2 || mode == -3) sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
-	if (mode == -3) s.Format(_T("file:kpiファイル(%s)"), sss);
-	if (mode == -1) s.Format(_T("file:oggファイル"), sss);
-	if (mode == -2 && rate == 0.0) s.Format(_T("file:音声ファイル(%s)"), sss);
-	if (mode == -2 && rate != 0.0) s.Format(_T("file:動画ファイル(%s)"), sss);
-	if (mode == 30)s = "file:空の軌跡 The 1st";
+	if (mode == -3) s.Format(LL2(L"file:kpiファイル(%s)", L"file:kpi (%s)"), sss);
+	if (mode == -1) s.Format(LL2(L"file:oggファイル", L"file:ogg"));
+	if (mode == -2 && rate == 0.0) s.Format(LL2(L"file:音声ファイル(%s)", L"file:Audio (%s)"), sss);
+	if (mode == -2 && rate != 0.0) s.Format(LL2(L"file:動画ファイル(%s)", L"file:Video (%s)"), sss);
+	if (mode == 30)s = savedata.lang == 0 ? L"file:空の軌跡 The 1st" : L"file:Sora no Kiseki The 1st";
 	moji(s, 1, 16, 0xffffff);
 	if (tc1 < 50)
 		s.Format(_T("time:%2d:%02d.%02d/%2d:%02d.%02d"), ta1, tb1, tc1, ta, tb, tc);
@@ -13140,7 +13208,7 @@ void COggDlg::timerp()
 	else if ((mode == -2 || videoonly) && rcm.right > 1) {
 		s.Format(_T("size:%d x %d"), rcm.right, rcm.bottom);
 		moji(s, 1, 48, 0x7fffff);
-		s.Format(_T("rate:算出中……"));
+		s.Format(LL2(L"rate:算出中……", L"rate:Calculating..."));
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -2 && wavbit != 0) {
@@ -13156,9 +13224,9 @@ void COggDlg::timerp()
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -2 && wavbit == 0) {
-		s.Format(_T("sample:不明"), wavbit);
+		s.Format(LL2(L"sample:不明", L"sample:Unknown"));
 		moji(s, 1, 48, 0x7fffff);
-		s.Format(_T("channel:不明"), wavch);
+		s.Format(LL2(L"channel:不明", L"channel:Unknown"));
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -3) {
@@ -13302,9 +13370,9 @@ void COggDlg::timerp()
 	}
 	else {
 		if (tcg < 50)
-			s.Format(_T("Loop数:%3d G:%3d:%02d.%02d"), loopcnt, tag, tbg, tcg);
+			s.Format(LL2(L"Loop数:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d"), loopcnt, tag, tbg, tcg);
 		else
-			s.Format(_T("Loop数:%3d G:%3d:%02d %02d"), loopcnt, tag, tbg, tcg);
+			s.Format(LL2(L"Loop数:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d"), loopcnt, tag, tbg, tcg);
 		moji(s, 1, 80, 0xefefef);
 	}
 	if (ss != s)
@@ -14492,7 +14560,7 @@ void COggDlg::OnButton2()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ed6sc);
 	ret += _chdir("bgm");
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	itiran* a = new itiran(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = pl_no;
 	a->ret2 = ret2;
@@ -14521,7 +14589,7 @@ void COggDlg::OnButton6_FC()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ed6fc);
 	ret += _chdir("bgm");
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	Citiran_FC* a = new Citiran_FC(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = pl_no;
 	a->ret2 = ret2;
@@ -14550,7 +14618,7 @@ void COggDlg::OnButton7_YSF()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ysf);
 	ret += _chdir("RELEASE\\MUSIC");
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	Citiran_YSF* a = new Citiran_YSF(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = ret2;
 	CWnd::PostMessage(0x118);
@@ -14583,7 +14651,7 @@ void COggDlg::OnButton8_YS6()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ys6);
 	ret += _chdir("RELEASE\\MUSIC");
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	Citiran_YS6* a = new Citiran_YS6(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = ret2;
 	CWnd::PostMessage(0x118);
@@ -14612,7 +14680,7 @@ void COggDlg::OnYso()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.yso);
 	ret += _chdir("RELEASE\\MUSIC");
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	Citiran_YSO* a = new Citiran_YSO(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = ret2;
 	CWnd::PostMessage(0x118);
@@ -14674,7 +14742,7 @@ void COggDlg::OnZWEIII()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.zweiii);
 	ret += _chdir("bgm");
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CZWEIII* a = new CZWEIII(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = ret2;
 	CWnd::PostMessage(0x118);
@@ -14704,7 +14772,7 @@ void COggDlg::OnYsC1()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ysc);
 	ret += _chdir("bgm\\ys1");
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CYsC1* a = new CYsC1(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -14734,7 +14802,7 @@ void COggDlg::OnYsC2()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ysc);
 	ret += _chdir("bgm\\ys2");
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CYsC2* a = new CYsC2(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -14764,7 +14832,7 @@ void COggDlg::OnBnClickedButton25()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.xa);
 	ret += _chdir("data\\bgm");
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CXA* a = new CXA(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = ret2;
 	CWnd::PostMessage(0x118);
@@ -14797,11 +14865,11 @@ void COggDlg::OnBnClickedButton27()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ys12);
 	if (_chdir("wave\\wave_44") == -1) {
-		if (_chdir("wave\\wave_22") == -1) { fnn = "ファイル又はフォルダがありません"; return; }
+		if (_chdir("wave\\wave_22") == -1) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 		ex = "_22";
 	}
 	else ex = "_44";
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CYs12_1* a = new CYs12_1(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -14852,11 +14920,11 @@ void COggDlg::OnBnClickedButton28()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ys122);
 	if (_chdir("wave\\wave_44") == -1) {
-		if (_chdir("wave\\wave_22") == -1) { fnn = "ファイル又はフォルダがありません"; return; }
+		if (_chdir("wave\\wave_22") == -1) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 		ex = "_22";
 	}
 	else ex = "_44";
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CYs12_2* a = new CYs12_2(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -14907,11 +14975,11 @@ void COggDlg::OnBnClickedButton31()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.sor);
 	if (_chdir("WAVE\\WAVE44") == -1) {
-		if (_chdir("WAVE\\WAVE22") == -1) { fnn = "ファイル又はフォルダがありません"; return; }
+		if (_chdir("WAVE\\WAVE22") == -1) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 		ex = "_22";
 	}
 	else ex = "_44";
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CSor* a = new CSor(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -14975,7 +15043,7 @@ void COggDlg::OnBnClickedButton33()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.zwei);
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CZwei* a = new CZwei(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15004,7 +15072,7 @@ void COggDlg::OnBnClickedButton35()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.gurumin);
 	ret += _chdir("bgm");
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CGurumin* a = new CGurumin(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15035,7 +15103,7 @@ void COggDlg::OnBnClickedButton37()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.dino);
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CDino* a = new CDino(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15065,7 +15133,7 @@ void COggDlg::OnBnClickedButton39()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.br4);
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CBr4* a = new CBr4(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15093,7 +15161,7 @@ void COggDlg::OnBnClickedButton44()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ed3);
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CED3* a = new CED3(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15121,7 +15189,7 @@ void COggDlg::OnBnClickedButton45()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ed4);
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CED4* a = new CED4(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15149,7 +15217,7 @@ void COggDlg::OnBnClickedButton46()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ed5);
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CED5* a = new CED5(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15177,7 +15245,7 @@ void COggDlg::OnBnClickedButton47()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.tuki);
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CTUKI* a = new CTUKI(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15205,7 +15273,7 @@ void COggDlg::OnBnClickedButton48()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.nishi);
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CNishi* a = new CNishi(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15233,7 +15301,7 @@ void COggDlg::OnBnClickedButton51()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.arc);
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CArc* a = new CArc(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15262,7 +15330,7 @@ void COggDlg::OnBnClickedButton53()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.san1);
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CSan1* a = new CSan1(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15280,7 +15348,7 @@ void COggDlg::OnBnClickedButton53()
 			CFile f;
 			if (f.Open(filen, CFile::modeRead, NULL) == 0) {
 				filen.Format(_T("%smusic.mp3"), a->ret);
-				if (f.Open(filen, CFile::modeRead, NULL) == 0) { fnn = "ファイル又はフォルダがありません"; return; }
+				if (f.Open(filen, CFile::modeRead, NULL) == 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 				else f.Close();
 			}
 			else f.Close();
@@ -15301,7 +15369,7 @@ void COggDlg::OnBnClickedButton54()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.san2);
-	if (ret != 0) { fnn = "ファイル又はフォルダがありません"; return; }
+	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
 	CSan2* a = new CSan2(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15339,7 +15407,7 @@ void COggDlg::OnPause()
 				m_dsb->Stop();
 			}
 		//			waveOutPause(hwo);
-		m_ps.SetWindowText(_T("再開"));
+		m_ps.SetWindowText(LL2(L"再開", L"Resume"));
 		ps = 1;
 	}
 	else {
@@ -15361,7 +15429,7 @@ void COggDlg::OnPause()
 			if (m_dsb && thn == FALSE)m_dsb->SetCurrentPosition(PlayCursora);
 		}
 		//			waveOutRestart(hwo);
-		m_ps.SetWindowText(_T("一時停止"));
+		m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
 		if (pMainFrame1 != NULL && (mode == -2 || (mode > 0 && videoonly == TRUE)))
 		{
 			pMainFrame1->pause(1);
@@ -15449,7 +15517,7 @@ void COggDlg::OnRestart()
 			int flggg = 0;
 			if (f123.Open(filen + _T(".save"), CFile::modeRead, NULL) == TRUE) {
 				f123.Close();
-				if (IDYES == MessageBox(_T("途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生"), _T("再生確認"), MB_YESNO)) {
+				if (IDYES == MessageBox(LL2(L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start"), LL2(L"再生確認", L"Playback confirmation"), MB_YESNO)) {
 					flggg = 1;
 				}
 				else {
@@ -15505,7 +15573,7 @@ void COggDlg::OnRestart()
 			int a = 0; aa2 = 0;
 			REFTIME aa = 0;
 			aa2 = 0;
-			ps = 0; m_ps.SetWindowText(_T("一時停止"));
+			ps = 0; m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
 			if (pMediaPosition)pMediaPosition->get_StopTime(&aa);
 			aa1 = oggsize2 = aa;
 			m_time.SetRange(0, (int)((REFTIME)aa * 100.0), TRUE);
@@ -17523,7 +17591,7 @@ void COggDlg::OnBnmp3jake()
 	if (savedata.aero == 1) {
 		jake = new CImageBase;
 		if (jake->Create(og) == FALSE) {
-			AfxMessageBox(L"Baseの起動に失敗しました");
+			AfxMessageBox(LL2(L"Baseの起動に失敗しました", L"Failed to start Base"));
 		}
 		jake->ShowWindow(SW_HIDE);
 		jake->oya = mi;

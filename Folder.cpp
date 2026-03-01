@@ -128,8 +128,8 @@ CImageBase* folderbase = NULL;
 BOOL CFolder::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
-	
-	// TODO: この位置に初期化の補足処理を追加してください
+
+	SetWindowText(LL2(L"フォルダ設定", L"Folder Settings"));
 	m_1s.SetWindowText(savedata.ys6);
 	m_2s.SetWindowText(savedata.ysf);
 	m_3s.SetWindowText(savedata.ed6fc);
@@ -209,7 +209,7 @@ UINT CFolder::GetOpenFolderName(HWND hWnd, LPCTSTR lpszDefaultFolder, LPTSTR lps
     //デフォルトで選択させておくフォルダを設定
     bi.lParam = (LPARAM)lpszDefaultFolder;
     //タイトルの設定
-    bi.lpszTitle = _T("各ゲームのフォルダを指定してください。");
+    bi.lpszTitle = LL2(L"各ゲームのフォルダを指定してください。", L"Select folder for each game.");
 	bi.ulFlags =0x0040;//BIF_NEWDIALOGSTYLE;
     //フォルダダイヤログの起動
     pidl = SHBrowseForFolder(&bi);

@@ -82,6 +82,7 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDOK, m_okdummy);
 	DDX_Control(pDX, IDCANCEL5, m_kanren);
 	DDX_Control(pDX, IDCANCEL, m_canceldummy);
+	DDX_Control(pDX, IDC_COMBO_LANG, m_comboLang);
 }
 
 
@@ -139,14 +140,49 @@ BOOL CRender::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
 
-	// TODO: この位置に初期化の補足処理を追加してください
+	SetWindowText(LL2(L"レンダリング選択", L"Rendering Options"));
+	SetDlgItemText(IDOK, LL2(L"OK", L"OK"));
+	SetDlgItemText(IDCANCEL, LL2(L"キャンセル", L"Cancel"));
+	SetDlgItemText(IDCANCEL2, LL2(L"DirectShowフィルタ一覧", L"DirectShow Filter List"));
+	SetDlgItemText(IDCANCEL3, LL2(L"kpi一覧", L"kpi List"));
+	SetDlgItemText(IDCANCEL5, LL2(L"関連付け", L"File Association"));
+	SetDlgItemText(IDC_CHECK1, LL2(L"デフォルトでEVR使用(Vista以降)", L"Default EVR use (Vista+)"));
+	SetDlgItemText(IDC_CHECK2, LL2(L"デスクトップコンポジションを使用する", L"Use desktop composition"));
+	SetDlgItemText(IDC_CHECK3, LL2(L"AeroやGrassを使用する", L"Use Aero and Grass"));
+	SetDlgItemText(IDC_CHECK27, LL2(L"ffdshow使用", L"Use ffdshow"));
+	SetDlgItemText(IDC_CHECK30, LL2(L"vobやdatはHaaliスキップ対応とする", L"vob/dat skip Haali by default"));
+	SetDlgItemText(IDC_CHECK31, LL2(L"Haaliを使用しない", L"Do not use Haali"));
+	SetDlgItemText(IDC_CHECK47, LL2(L"mp3 オリジナルデコーダを使う", L"Use original mp3 decoder"));
+	SetDlgItemText(IDC_CHECK48, LL2(L"複数音声の動画の時は音声選択画面を出す", L"Show audio selection for multi-audio video"));
+	SetDlgItemText(IDC_CHECK49, LL2(L"24bit使用", L"Use 24bit"));
+	SetDlgItemText(IDC_CHECK50, LL2(L"m4aを内蔵エンジンで演奏する", L"Play m4a with built-in engine"));
+	SetDlgItemText(IDC_CHECK51, LL2(L"32bit使用", L"Use 32bit"));
+	SetDlgItemText(IDC_CHECK52, LL2(L"スペアナのモード切り替える", L"Switch spectrum analyzer mode"));
+	SetDlgItemText(IDC_CHECK_lrc, LL2(L"lrcをネットから取得する(LRCLib/NetEase等による)", L"Fetch lrc from network (LRCLib/NetEase etc.)"));
+	SetDlgItemText(IDC_BUTTON1, LL2(L"碧の軌跡用t_bgm._dt", L"t_bgm._dt for Ao no Kiseki"));
+	SetDlgItemText(IDC_FONT, LL2(L"メイン用フォント", L"Main font"));
+	SetDlgItemText(IDC_FONT2, LL2(L"リスト用フォント", L"List font"));
+	SetDlgItemText(IDC_STATIC_LANG, LL2(L"言語", L"Language"));
+	SetDlgItemText(IDC_STATIC_R_BUF, LL2(L"割込間隔", L"Buffer interval"));
+	SetDlgItemText(IDC_STATIC_R_MP3, LL2(L"mp3音量", L"mp3 volume"));
+	SetDlgItemText(IDC_STATIC_R_KPI, LL2(L"その他のkpi", L"Other kpi"));
+	SetDlgItemText(IDC_STATIC_R_DISP, LL2(L"表示間隔", L"Display interval"));
+	SetDlgItemText(IDC_STATIC_R_DEV, LL2(L"再生デバイス", L"Playback device"));
+	SetDlgItemText(IDC_STATIC_R_SAMP, LL2(L"MAXサンプルレート：", L"MAX sample rate:"));
+	SetDlgItemText(IDC_STATIC_R_SPEANA, LL2(L"スペアナ倍率", L"Spectrum scale"));
+	SetDlgItemText(IDC_STATIC_R_SPC, LL2(L".SPC,.HES音量(kpi)", L".SPC,.HES volume(kpi)"));
+	SetDlgItemText(IDC_STATIC_R_BIT, LL2(L"演奏bit深度：", L"Playback bits:"));
+	SetDlgItemText(IDC_STATIC12, LL2(L"倍", L"x"));
+	m_comboLang.AddString(LL2(L"日本語", L"Japanese"));
+	m_comboLang.AddString(L"English");
+	m_comboLang.SetCurSel(savedata.lang);
 	OSVERSIONINFO in; ZeroMemory(&in, sizeof(in)); in.dwOSVersionInfoSize = sizeof(OSVERSIONINFO); GetVersionEx(&in);
 	if (in.dwMajorVersion <= 5)
-		m_1.AddString(_T("デフォルト"));
+		m_1.AddString(LL2(L"デフォルト", L"Default"));
 	else
-		m_1.AddString(_T("デフォルト(普通/EVR)"));
-	m_1.AddString(_T("VMR7"));
-	m_1.AddString(_T("VMR9"));
+		m_1.AddString(LL2(L"デフォルト(普通/EVR)", L"Default (normal/EVR)"));
+	m_1.AddString(L"VMR7");
+	m_1.AddString(L"VMR9");
 	m_1.SetCurSel(savedata.render);
 	switch (savedata.spc) {
 	case 1:m_spc1x.SetCheck(TRUE); break;
@@ -182,46 +218,47 @@ BOOL CRender::OnInitDialog()
 
 	m_tooltip.Create(this);
 	m_tooltip.Activate(TRUE);
-	m_tooltip.AddTool(GetDlgItem(IDOK), _T("保存して閉じます"));
-	m_tooltip.AddTool(GetDlgItem(IDCANCEL), _T("保存せずに閉じます"));
-	m_tooltip.AddTool(GetDlgItem(IDCANCEL2), _T("再生中の使用DirectShowフィルタを表示します。"));
-	m_tooltip.AddTool(GetDlgItem(IDCANCEL3), _T("kpi一覧を表示します。"));
-	m_tooltip.AddTool(GetDlgItem(IDCANCEL4), _T("各種ファイルを簡易プレイヤに関連づけします。\nうまくいかない場合もあります。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK1), _T("Windows Vista/7以降で有効です。\nIndeoを用いた動画の場合OFFにしてください。\nそれ以外はONでいいです。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK2), _T("Windows Vista/7以降で有効です。\nデスクトップコンポジション(Aero)を使用するかどうかを選択します。\n使用しないにするとEVRじゃなくても動画画面はきれいになります。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK3), _T("Windows 10以降で有効です。\nAero Grassを使用するかどうか決めます。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK27), _T("動画にffdshowを使うかどうか選択します。\nWindows7の場合、デフォルトでDivxなどを再生できるのでそちらを使いたい人はOFFにしてください。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK30), _T("vobとdatファイルはHaaliを通さないように作られていますが、\nvobに複数音声があるときにはチェックを入れて下さい。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK31), _T("動画にHaaliを使いません。\n動画が重いと思った時や複数音声が無い時はチェックを入れると軽くなります。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK32), _T("kpi SPC/NEZplug++等のSPCの音量を2倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK33), _T("kpi SPC/NEZplug++等のSPCの音量を3倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK34), _T("kpi SPC/NEZplug++等のSPCの音量を4倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK35), _T("kpi SPC/NEZplug++等のSPCの音量を等倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK36), _T("kpi SPC/NEZplug++等のSPCの音量を5倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK40), _T("mp3の音量を等倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK37), _T("mp3の音量を1.5倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK38), _T("mp3の音量を2倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK39), _T("mp3の音量を2.5倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK41), _T("mp3の音量を3倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK45), _T("kpiの音量を等倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK42), _T("kpiの音量を2倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK43), _T("kpiの音量を3倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK44), _T("kpiの音量を4倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK46), _T("kpiの音量を5倍にします。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK47), _T("mp3のデコーダをオリジナルのデコーダを使わずに、独自で使ったデコーダを使う。\nエラーなどで演奏できないときにチェック入れて下さい。\nまた独自で正常にならない時ははずして下さい。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK48), _T("複数音声のある動画を再生する時に、再生前に\n音声ストリームの選択画面を表示します。\n通常ストリーム1がメインとして使われ、ストリーム2以降はコメンタリや英語音声などに使われています。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK49), _T("対応しているkpiを24bit(ハイレゾ)で再生します。\n通常は16bitですが、まれに対応しているものがあります。\n音割れについては考慮されていないため、spcなど倍率を上げないといけないものは気をつけて下さい。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK51), _T("対応しているkpiを32bit(ハイレゾ)で再生します。\n通常は16bitですが、まれに対応しているものがあります。\n音割れについては考慮されていないため、spcなど倍率を上げないといけないものは気をつけて下さい。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK50), _T("m4aを内蔵エンジンで演奏します。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK52), _T("スペアナの表示モードを切り替えます"));
-	m_tooltip.AddTool(GetDlgItem(IDC_COMBO3), _T("再生するサンプルレートを設定します。\nサウンドカードが対応していない場合自動的に再生時対応上限まで下げます。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_COMBO4), _T("スペアナで表示する表示方法を選択します。\n使う時は横のチェックボックスにチェックを入れてください\n音階：88鍵盤として表示します\n周波数帯：周波数として表示します\n標準：既定の見やすい形のスペアナで表示します"));
-	m_tooltip.AddTool(GetDlgItem(IDC_BUTTON1), _T("碧の軌跡用のt_bgm._dtを設定します。"));
-	m_tooltip.AddTool(GetDlgItem(IDCANCEL5), _T("win7くらいまで対応。関連付けに追加します。\nwin10以降でも追加はされるとは思いますがされないときもあります。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_lrc),_T("歌詞情報をネットから参照するようにします。\n数パターン試すため少し再生までに時間かかります。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER3), _T("演奏のバッファ処理での割り込み時間を設定します。\n少なすぎると音飛びする可能性があります。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER5), _T("描画の間隔時間を設定します。\nCPU使用が高いときに上げます。"));
-	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER6), _T("スペアナの表示倍率を設定します。"));
+	m_tooltip.AddTool(GetDlgItem(IDOK), LL2(L"保存して閉じます", L"Save and close"));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL2(L"保存せずに閉じます", L"Close without saving"));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL2), LL2(L"再生中の使用DirectShowフィルタを表示します。", L"Show DirectShow filters in use during playback."));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL3), LL2(L"kpi一覧を表示します。", L"Show kpi list."));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL4), LL2(L"各種ファイルを簡易プレイヤに関連づけします。\nうまくいかない場合もあります。", L"Associate files with simple player.\nMay not always work."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK1), LL2(L"Windows Vista/7以降で有効です。\nIndeoを用いた動画の場合OFFにしてください。\nそれ以外はONでいいです。", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK2), LL2(L"Windows Vista/7以降で有効です。\nデスクトップコンポジション(Aero)を使用するかどうかを選択します。\n使用しないにするとEVRじゃなくても動画画面はきれいになります。", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK3), LL2(L"Windows 10以降で有効です。\nAero Grassを使用するかどうか決めます。", L"Effective on Windows 10+.\nEnable Aero Grass."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK27), LL2(L"動画にffdshowを使うかどうか選択します。\nWindows7の場合、デフォルトでDivxなどを再生できるのでそちらを使いたい人はOFFにしてください。", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK30), LL2(L"vobとdatファイルはHaaliを通さないように作られていますが、\nvobに複数音声があるときにはチェックを入れて下さい。", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK31), LL2(L"動画にHaaliを使いません。\n動画が重いと思った時や複数音声が無い時はチェックを入れると軽くなります。", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK32), LL2(L"kpi SPC/NEZplug++等のSPCの音量を2倍にします。", L"2x volume for kpi SPC/NEZplug++ SPC."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK33), LL2(L"kpi SPC/NEZplug++等のSPCの音量を3倍にします。", L"3x volume for kpi SPC/NEZplug++ SPC."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK34), LL2(L"kpi SPC/NEZplug++等のSPCの音量を4倍にします。", L"4x volume for kpi SPC/NEZplug++ SPC."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK35), LL2(L"kpi SPC/NEZplug++等のSPCの音量を等倍にします。", L"1x volume for kpi SPC/NEZplug++ SPC."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK36), LL2(L"kpi SPC/NEZplug++等のSPCの音量を5倍にします。", L"5x volume for kpi SPC/NEZplug++ SPC."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK40), LL2(L"mp3の音量を等倍にします。", L"1x mp3 volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK37), LL2(L"mp3の音量を1.5倍にします。", L"1.5x mp3 volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK38), LL2(L"mp3の音量を2倍にします。", L"2x mp3 volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK39), LL2(L"mp3の音量を2.5倍にします。", L"2.5x mp3 volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK41), LL2(L"mp3の音量を3倍にします。", L"3x mp3 volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK45), LL2(L"kpiの音量を等倍にします。", L"1x kpi volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK42), LL2(L"kpiの音量を2倍にします。", L"2x kpi volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK43), LL2(L"kpiの音量を3倍にします。", L"3x kpi volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK44), LL2(L"kpiの音量を4倍にします。", L"4x kpi volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK46), LL2(L"kpiの音量を5倍にします。", L"5x kpi volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK47), LL2(L"mp3のデコーダをオリジナルのデコーダを使わずに、独自で使ったデコーダを使う。\nエラーなどで演奏できないときにチェック入れて下さい。\nまた独自で正常にならない時ははずして下さい。", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK48), LL2(L"複数音声のある動画を再生する時に、再生前に\n音声ストリームの選択画面を表示します。\n通常ストリーム1がメインとして使われ、ストリーム2以降はコメンタリや英語音声などに使われています。", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK49), LL2(L"対応しているkpiを24bit(ハイレゾ)で再生します。\n通常は16bitですが、まれに対応しているものがあります。\n音割れについては考慮されていないため、spcなど倍率を上げないといけないものは気をつけて下さい。", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK51), LL2(L"対応しているkpiを32bit(ハイレゾ)で再生します。\n通常は16bitですが、まれに対応しているものがあります。\n音割れについては考慮されていないため、spcなど倍率を上げないといけないものは気をつけて下さい。", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK50), LL2(L"m4aを内蔵エンジンで演奏します。", L"Play m4a with built-in engine."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK52), LL2(L"スペアナの表示モードを切り替えます", L"Switch spectrum analyzer display mode"));
+	m_tooltip.AddTool(GetDlgItem(IDC_COMBO3), LL2(L"再生するサンプルレートを設定します。\nサウンドカードが対応していない場合自動的に再生時対応上限まで下げます。", L"Set playback sample rate.\nAuto-lowers if sound card unsupported."));
+	m_tooltip.AddTool(GetDlgItem(IDC_COMBO4), LL2(L"スペアナで表示する表示方法を選択します。\n使う時は横のチェックボックスにチェックを入れてください\n音階：88鍵盤として表示します\n周波数帯：周波数として表示します\n標準：既定の見やすい形のスペアナで表示します", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum"));
+	m_tooltip.AddTool(GetDlgItem(IDC_BUTTON1), LL2(L"碧の軌跡用のt_bgm._dtを設定します。", L"Set t_bgm._dt for Ao no Kiseki."));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL5), LL2(L"win7くらいまで対応。関連付けに追加します。\nwin10以降でも追加はされるとは思いますがされないときもあります。", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_lrc), LL2(L"歌詞情報をネットから参照するようにします。\n数パターン試すため少し再生までに時間かかります。", L"Fetch lyrics from network.\nMay take longer to start playback."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER3), LL2(L"演奏のバッファ処理での割り込み時間を設定します。\n少なすぎると音飛びする可能性があります。", L"Set buffer interrupt time.\nToo low may cause audio glitches."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER5), LL2(L"描画の間隔時間を設定します。\nCPU使用が高いときに上げます。", L"Set render interval.\nIncrease when CPU usage is high."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER6), LL2(L"スペアナの表示倍率を設定します。", L"Set spectrum display scale."));
+	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_LANG), LL2(L"UI表示言語を切り替えます。\n設定を保存して再起動後に反映されます。", L"Switch UI language.\nTakes effect after saving and restarting."));
 	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 
@@ -281,17 +318,17 @@ BOOL CRender::OnInitDialog()
 		m_ao.ShowWindow(FALSE);
 	}
 	// { 11025, 12000, 22050, 24000, 44100, 48000, 96000, 192000, 384000, 768000, 1536000, 3072000 };
-	m_Hz.AddString(L"--低周波数帯- イコライザーでアップスケール対応し処理される",TRUE);
+	m_Hz.AddString(LL2(L"--低周波数帯- イコライザーでアップスケール対応し処理される", L"--Low freq- EQ upscale processed"),TRUE);
 	m_Hz.AddString(L"11025");
 	m_Hz.AddString(L"12000");
 	m_Hz.AddString(L"22050");
 	m_Hz.AddString(L"24000");
-	m_Hz.AddString(L"--通常波数帯- イコライザー通常処理される", TRUE);
+	m_Hz.AddString(LL2(L"--通常波数帯- イコライザー通常処理される", L"--Normal freq- EQ normal processed"), TRUE);
 	m_Hz.AddString(L"44100");
 	m_Hz.AddString(L"48000");
 	m_Hz.AddString(L"96000");
 	m_Hz.AddString(L"192000");
-	m_Hz.AddString(L"--高周波数帯- イコライザー処理されない場合がある", TRUE);
+	m_Hz.AddString(LL2(L"--高周波数帯- イコライザー処理されない場合がある", L"--High freq- EQ may not process"), TRUE);
 	m_Hz.AddString(L"384000");
 	m_Hz.AddString(L"768000");
 	m_Hz.AddString(L"1536000");
@@ -303,11 +340,11 @@ BOOL CRender::OnInitDialog()
 		}
 	}
 
-	m_speana_num.AddString(L"音階");
-	m_speana_num.AddString(L"低周波帯特化");
-	m_speana_num.AddString(L"標準");
-	m_speana_num.AddString(L"高周波帯");
-	m_speana_num.AddString(L"音声特化");
+	m_speana_num.AddString(LL2(L"音階", L"Scale"));
+	m_speana_num.AddString(LL2(L"低周波帯特化", L"Low freq focus"));
+	m_speana_num.AddString(LL2(L"標準", L"Standard"));
+	m_speana_num.AddString(LL2(L"高周波帯", L"High freq"));
+	m_speana_num.AddString(LL2(L"音声特化", L"Voice focus"));
 	m_speana_num.SetCurSel(savedata.speananum);
 
 
@@ -362,6 +399,7 @@ void CRender::OnOK()
 	savedata.samples = samp[m_Hz.GetCurSel()];
 	savedata.speanamode = m_speana.GetCheck();
 	savedata.speananum = m_speana_num.GetCurSel();
+	savedata.lang = m_comboLang.GetCurSel();
 
 	//	savedata.mp3orig=m_mp3orig.GetCheck();
 	if (savedata.aero)
@@ -629,6 +667,7 @@ void CRender::OnBnClickedOk()
 	savedata.ms = m_ms.GetPos();
 	savedata.speanamode = m_speana.GetCheck();
 	savedata.speananum = m_speana_num.GetCurSel();
+	savedata.lang = m_comboLang.GetCurSel();
 	extern int gameon;
 	if(savedata.aero)
 	delete renderbase;
@@ -695,21 +734,21 @@ void CRender::OnBnClickedCancel4()
 	s += "oggYSEDbgm_uni.exe\" \"%1\"";
 	ss = karento2;
 	ss += "oggYSEDbgm_uni.exe";
-	MySetFileType(_T(".mp3"), _T("oggYSEDbgm_uni.exe.mp3"), _T("簡易プレイヤで開く"), s, ss);
-	MySetFileType(_T(".mp2"), _T("oggYSEDbgm_uni.exe.mp2"), _T("簡易プレイヤで開く"), s, ss);
-	MySetFileType(_T(".mp1"), _T("oggYSEDbgm_uni.exe.mp1"), _T("簡易プレイヤで開く"), s, ss);
-	MySetFileType(_T(".rmp"), _T("oggYSEDbgm_uni.exe.rmp"), _T("簡易プレイヤで開く"), s, ss);
-	MySetFileType(_T(".flac"), _T("oggYSEDbgm_uni.exe.flac"), _T("簡易プレイヤで開く"), s, ss);
-	MySetFileType(_T(".m4a"), _T("oggYSEDbgm_uni.exe.m4a"), _T("簡易プレイヤで開く"), s, ss);
-	MySetFileType(_T(".aac"), _T("oggYSEDbgm_uni.exe.aac"), _T("簡易プレイヤで開く"), s, ss);
-	MySetFileType(_T(".avi"), _T("oggYSEDbgm_uni.exe.avi"), _T("簡易プレイヤで開く"), s, ss);
-	MySetFileType(_T(".mp4"), _T("oggYSEDbgm_uni.exe.mp4"), _T("簡易プレイヤで開く"), s, ss);
-	MySetFileType(_T(".mkv"), _T("oggYSEDbgm_uni.exe.mkv"), _T("簡易プレイヤで開く"), s, ss);
-	MySetFileType(_T(".wmv"), _T("oggYSEDbgm_uni.exe.wmv"), _T("簡易プレイヤで開く"), s, ss);
-	MySetFileType(_T(".mpg"), _T("oggYSEDbgm_uni.exe.mpg"), _T("簡易プレイヤで開く"), s, ss);
+	MySetFileType(_T(".mp3"), _T("oggYSEDbgm_uni.exe.mp3"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
+	MySetFileType(_T(".mp2"), _T("oggYSEDbgm_uni.exe.mp2"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
+	MySetFileType(_T(".mp1"), _T("oggYSEDbgm_uni.exe.mp1"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
+	MySetFileType(_T(".rmp"), _T("oggYSEDbgm_uni.exe.rmp"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
+	MySetFileType(_T(".flac"), _T("oggYSEDbgm_uni.exe.flac"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
+	MySetFileType(_T(".m4a"), _T("oggYSEDbgm_uni.exe.m4a"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
+	MySetFileType(_T(".aac"), _T("oggYSEDbgm_uni.exe.aac"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
+	MySetFileType(_T(".avi"), _T("oggYSEDbgm_uni.exe.avi"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
+	MySetFileType(_T(".mp4"), _T("oggYSEDbgm_uni.exe.mp4"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
+	MySetFileType(_T(".mkv"), _T("oggYSEDbgm_uni.exe.mkv"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
+	MySetFileType(_T(".wmv"), _T("oggYSEDbgm_uni.exe.wmv"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
+	MySetFileType(_T(".mpg"), _T("oggYSEDbgm_uni.exe.mpg"), LL2(L"簡易プレイヤで開く", L"Open with Simple Player"), s, ss);
 	// 関連付けが変更された事をシステムに通知
 	::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
-	MessageBox(_T("一応関連づけを走らせてみました。\nmp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpgに関連をつけました。"));
+	MessageBox(LL2(L"一応関連づけを走らせてみました。\nmp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpgに関連をつけました。", L"File association attempted.\nAssociated mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg."));
 	// 関連付けが変更された事をシステムに通知
 	::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
 }
@@ -732,7 +771,7 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 	s.Format(L"%dms", savedata.ms2*16);
 	m_hyouji3.SetWindowText(s);
 	savedata.wup = w_wups.GetPos()/ 100.0;
-	s.Format(L"%1.2lf倍",savedata.wup);
+	s.Format(savedata.lang ? L"%1.2lfx" : L"%1.2lf倍", savedata.wup);
 	m_wup.SetWindowText(s);
 	if (nIDEvent == 90) {
 		KillTimer(90);
@@ -881,7 +920,7 @@ void CRender::OnCbnSelchangeCombo2()
 	r = m_ds->CreateSoundBuffer(&dsbd, &m_dsb1, NULL);
 	if (m_dsb1 == NULL) {
 		CString s; s.Format(L"%d", savedata.samples);
-		MessageBox(s + L"Hzのサンプリングレートにサウンドカードが対応していません", _T("ogg/wav簡易プレイヤ"));
+		MessageBox(s + LL2(L"Hzのサンプリングレートにサウンドカードが対応していません", L"Hz sampling rate not supported by sound card"), LL2(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player"));
 		return;
 	}
 	for (i = 0; i < 10; i++) {
@@ -891,30 +930,30 @@ void CRender::OnCbnSelchangeCombo2()
 		else break;
 	}
 	if (m_dsb == NULL) {
-		AfxMessageBox(_T("DirectSoundが開けませんでした。"));
+		AfxMessageBox(LL2(L"DirectSoundが開けませんでした。", L"Could not open DirectSound."));
 		if (r == DSERR_ALLOCATED) {
-			AfxMessageBox(_T("優先レベルなどのリソースが他の呼び出しによって既に使用中であるため、要求は失敗した。"));
+			AfxMessageBox(LL2(L"優先レベルなどのリソースが他の呼び出しによって既に使用中であるため、要求は失敗した。", L"Request failed: resources in use."));
 		}
 		else if (r == DSERR_CONTROLUNAVAIL) {
-			AfxMessageBox(_T("呼び出し元が要求するバッファ コントロール (ボリューム、パンなど) は利用できない。"));
+			AfxMessageBox(LL2(L"呼び出し元が要求するバッファ コントロール (ボリューム、パンなど) は利用できない。", L"Buffer control requested is not available."));
 		}
 		else if (r == DSERR_BADFORMAT) {
-			AfxMessageBox(_T("指定したウェーブ フォーマットはサポートされていない。"));
+			AfxMessageBox(LL2(L"指定したウェーブ フォーマットはサポートされていない。", L"Specified wave format not supported."));
 		}
 		else if (r == DSERR_INVALIDPARAM) {
-			AfxMessageBox(_T("無効なパラメータが関数に渡された。"));
+			AfxMessageBox(LL2(L"無効なパラメータが関数に渡された。", L"Invalid parameter passed."));
 		}
 		else if (r == DSERR_NOAGGREGATION) {
-			AfxMessageBox(_T("このオブジェクトは COM 集合化をサポートしない。"));
+			AfxMessageBox(LL2(L"このオブジェクトは COM 集合化をサポートしない。", L"Object does not support COM aggregation."));
 		}
 		else if (r == DSERR_OUTOFMEMORY) {
-			AfxMessageBox(_T("DirectSound サブシステムは、呼び出し元の要求を完了するための十分なメモリを割り当てられなかった。"));
+			AfxMessageBox(LL2(L"DirectSound サブシステムは、呼び出し元の要求を完了するための十分なメモリを割り当てられなかった。", L"DirectSound could not allocate enough memory."));
 		}
 		else if (r == DSERR_UNINITIALIZED) {
-			AfxMessageBox(_T("他のメソッドを呼び出す前に IDirectSound::Initialize メソッドを呼び出さなかったか、呼び出しが成功しなかった。"));
+			AfxMessageBox(LL2(L"他のメソッドを呼び出す前に IDirectSound::Initialize メソッドを呼び出さなかったか、呼び出しが成功しなかった。", L"IDirectSound::Initialize not called or failed."));
 		}
 		else if (r == DSERR_UNSUPPORTED) {
-			AfxMessageBox(_T("呼び出した関数はこの時点ではサポートされていない。"));
+			AfxMessageBox(LL2(L"呼び出した関数はこの時点ではサポートされていない。", L"Function not supported at this point."));
 		}
 		else {}
 
@@ -1160,5 +1199,5 @@ void CRender::OnBnClickedCancel5()
 	// 8. 変更をシステムに通知
 	SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
 
-	AfxMessageBox(_T("ファイルの関連付け登録が完了しました。"), MB_ICONINFORMATION);
+	AfxMessageBox(LL2(L"ファイルの関連付け登録が完了しました。", L"File association registration completed."), MB_ICONINFORMATION);
 }

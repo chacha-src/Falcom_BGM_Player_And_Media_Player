@@ -96,12 +96,23 @@ BOOL CEqualizer::OnInitDialog()
 {
 	CCustomDialogEx::OnInitDialog();
 
-
+	SetWindowText(LL2(L"イコライザー", L"Equalizer"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
+	SetDlgItemText(IDOK3, LL2(L"イコライザーリセット", L"Equalizer reset"));
+	SetDlgItemText(IDOK4, LL2(L"グローバルリセット", L"Global reset"));
+	SetDlgItemText(IDC_STATIC_EQ_DRY, LL2(L"乾", L"Dry"));
+	SetDlgItemText(IDC_STATIC_EQ_WET, LL2(L"ウェット", L"Wet"));
+	SetDlgItemText(IDC_STATIC_EQ_ACOUSTIC, LL2(L"音響空間の音響モデル", L"Acoustic space model"));
+	SetDlgItemText(IDC_STATIC_EQ_SPECTRUM, LL2(L"スペクトル", L"Spectrum"));
+	SetDlgItemText(IDC_STATIC_EQ_FREQ, LL2(L"周波数", L"Frequency"));
+	SetDlgItemText(IDC_STATIC_EQ_BAND, LL2(L"帯", L"Band"));
+	SetDlgItemText(IDC_STATIC_EQ_LOUDNESS, LL2(L"響度", L"Loudness"));
+	SetDlgItemText(IDC_STATIC_EQ_WARMTH, LL2(L"温かさ", L"Warmth"));
 	m_tooltip.Create(this);
 	m_tooltip.Activate(TRUE);
-	m_tooltip.AddTool(GetDlgItem(IDOK), _T("閉じます"));
-	m_tooltip.AddTool(GetDlgItem(IDOK3), _T("イコライザーの値をリセットします"));
-	m_tooltip.AddTool(GetDlgItem(IDOK4), _T("グローバルの値をリセットします"));
+	m_tooltip.AddTool(GetDlgItem(IDOK), LL2(L"閉じます", L"Close"));
+	m_tooltip.AddTool(GetDlgItem(IDOK3), LL2(L"イコライザーの値をリセットします", L"Reset equalizer values"));
+	m_tooltip.AddTool(GetDlgItem(IDOK4), LL2(L"グローバルの値をリセットします", L"Reset global values"));
 	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 
@@ -261,133 +272,133 @@ BOOL CEqualizer::OnInitDialog()
 	// 環境音響プリセット101種
 	
 //0
-	m_env.AddString(L"なし");
+	m_env.AddString(LL2(L"なし", L"None"));
 	//1
-	m_env.AddString(L"--[[基本空間 1-10]]--", TRUE);
+	m_env.AddString(LL2(L"--[[基本空間 1-10]]--", L"--[[Basic space 1-10]]--"), TRUE);
 	//2
-	m_env.AddString(L"風呂場 (超短く超明るい、ピーキーな金属反射)");
-	m_env.AddString(L"ホール (中程度だがはっきり響く、バランス良好)");
-	m_env.AddString(L"教会 (超長く超重厚、圧倒的な残響)");
-	m_env.AddString(L"洞窟 (長く暗く湿った、こもった響き)");
-	m_env.AddString(L"スタジオ (極めてドライ、ほぼ無響)");
-	m_env.AddString(L"ライブハウス (パンチがあって賑やか、エネルギッシュ)");
-	m_env.AddString(L"森 (拡散的で柔らかい、包み込む自然)");
-	m_env.AddString(L"山 (超長いエコー、遠くまではっきり響く)");
-	m_env.AddString(L"広場 (開放的、空気を感じる広がり)");
-	m_env.AddString(L"カテドラル (超巨大空間、圧倒的な残響と重厚感)");
+	m_env.AddString(LL2(L"風呂場 (超短く超明るい、ピーキーな金属反射)", L"Bathroom (very short, bright, peaky metal reflection)"));
+	m_env.AddString(LL2(L"ホール (中程度だがはっきり響く、バランス良好)", L"Hall (moderate but clear, balanced)"));
+	m_env.AddString(LL2(L"教会 (超長く超重厚、圧倒的な残響)", L"Church (very long, massive reverb)"));
+	m_env.AddString(LL2(L"洞窟 (長く暗く湿った、こもった響き)", L"Cave (long, dark, wet, muffled)"));
+	m_env.AddString(LL2(L"スタジオ (極めてドライ、ほぼ無響)", L"Studio (very dry, nearly anechoic)"));
+	m_env.AddString(LL2(L"ライブハウス (パンチがあって賑やか、エネルギッシュ)", L"Live house (punchy, lively, energetic)"));
+	m_env.AddString(LL2(L"森 (拡散的で柔らかい、包み込む自然)", L"Forest (diffuse, soft, enveloping)"));
+	m_env.AddString(LL2(L"山 (超長いエコー、遠くまではっきり響く)", L"Mountain (long echo, clear far)"));
+	m_env.AddString(LL2(L"広場 (開放的、空気を感じる広がり)", L"Plaza (open, airy)"));
+	m_env.AddString(LL2(L"カテドラル (超巨大空間、圧倒的な残響と重厚感)", L"Cathedral (huge space, massive reverb)"));
 	//12
-	m_env.AddString(L"--[[公共施設 11-20]]--", TRUE);
+	m_env.AddString(LL2(L"--[[公共施設 11-20]]--", L"--[[Public 11-20]]--"), TRUE);
 	//13
-	m_env.AddString(L"体育館 (硬く金属的、バスケコート的な響き)");
-	m_env.AddString(L"峡谷 (複数の明確なエコー、両側から反響)");
-	m_env.AddString(L"地下室 (狭く圧迫感、密度の高い反射)");
-	m_env.AddString(L"劇場 (音響設計された空間、明瞭でバランス良好)");
-	m_env.AddString(L"水中 (特殊な密度、こもった独特の響き)");
-	m_env.AddString(L"トンネル/地下道 (フラッターエコー、平行壁面の連続反射)");
-	m_env.AddString(L"アリーナ/ドーム (超巨大スポーツ施設、観客席の吸音と長残響)");
-	m_env.AddString(L"小部屋/クローゼット (超小空間デッド、ほぼ無反射)");
-	m_env.AddString(L"階段室 (縦方向の特殊反射、螺旋的な響き)");
-	m_env.AddString(L"地下鉄ホーム (都市的コンクリート、硬質な反射)");
+	m_env.AddString(LL2(L"体育館 (硬く金属的、バスケコート的な響き)", L"Gymnasium (hard, metallic, basketball-court style reflection)"));
+	m_env.AddString(LL2(L"峡谷 (複数の明確なエコー、両側から反響)", L"Canyon (multiple distinct echoes, reflections from both sides)"));
+	m_env.AddString(LL2(L"地下室 (狭く圧迫感、密度の高い反射)", L"Basement (cramped, dense reflections)"));
+	m_env.AddString(LL2(L"劇場 (音響設計された空間、明瞭でバランス良好)", L"Theater (acoustically designed space, clear and balanced)"));
+	m_env.AddString(LL2(L"水中 (特殊な密度、こもった独特の響き)", L"Underwater (unique density, muffled distinctive sound)"));
+	m_env.AddString(LL2(L"トンネル/地下道 (フラッターエコー、平行壁面の連続反射)", L"Tunnel/Underground (flutter echo, parallel wall reflections)"));
+	m_env.AddString(LL2(L"アリーナ/ドーム (超巨大スポーツ施設、観客席の吸音と長残響)", L"Arena/Dome (huge sports facility, audience absorption and long reverb)"));
+	m_env.AddString(LL2(L"小部屋/クローゼット (超小空間デッド、ほぼ無反射)", L"Small room/Closet (very dead space, nearly no reflection)"));
+	m_env.AddString(LL2(L"階段室 (縦方向の特殊反射、螺旋的な響き)", L"Stairwell (vertical reflections, spiral-like reverb)"));
+	m_env.AddString(LL2(L"地下鉄ホーム (都市的コンクリート、硬質な反射)", L"Subway platform (urban concrete, hard reflections)"));
 
-	m_env.AddString(L"--[[産業・商業 21-30]]--", TRUE);
+	m_env.AddString(LL2(L"--[[産業・商業 21-30]]--", L"--[[Industrial 21-30]]--"), TRUE);
 
-	m_env.AddString(L"倉庫 (大きく空っぽ、高天井で硬い床)");
-	m_env.AddString(L"廊下 (長く狭い直線的、方向性のある反響)");
-	m_env.AddString(L"工場 (金属的産業的、複雑な反響)");
-	m_env.AddString(L"寺社仏閣 (木造の温かみ、柔らかい反射)");
-	m_env.AddString(L"宇宙空間 (SF特殊空間、無重力感と極端な残響)");
-	m_env.AddString(L"野球場/サッカー場 (屋外超大型、遠距離反射と開放感)");
-	m_env.AddString(L"図書館 (静寂で吸音的、控えめな反射)");
-	m_env.AddString(L"プール(室内) (タイル水面反射、独特の明るい響き)");
-	m_env.AddString(L"エレベーター (超小金属空間、密閉された短い反射)");
-	m_env.AddString(L"駐車場 (広い低天井コンクリート、硬質な反響)");
+	m_env.AddString(LL2(L"倉庫 (大きく空っぽ、高天井で硬い床)", L"Warehouse (large and empty, high ceiling, hard floor)"));
+	m_env.AddString(LL2(L"廊下 (長く狭い直線的、方向性のある反響)", L"Corridor (long narrow linear, directional reflections)"));
+	m_env.AddString(LL2(L"工場 (金属的産業的、複雑な反響)", L"Factory (metallic industrial, complex reflections)"));
+	m_env.AddString(LL2(L"寺社仏閣 (木造の温かみ、柔らかい反射)", L"Temple/Shrine (wooden warmth, soft reflections)"));
+	m_env.AddString(LL2(L"宇宙空間 (SF特殊空間、無重力感と極端な残響)", L"Outer space (SF special space, zero-g feel and extreme reverb)"));
+	m_env.AddString(LL2(L"野球場/サッカー場 (屋外超大型、遠距離反射と開放感)", L"Baseball/Soccer field (outdoor large scale, distant reflections and openness)"));
+	m_env.AddString(LL2(L"図書館 (静寂で吸音的、控えめな反射)", L"Library (quiet and absorbent, subtle reflections)"));
+	m_env.AddString(LL2(L"プール(室内) (タイル水面反射、独特の明るい響き)", L"Pool (indoor) (tile and water reflections, unique bright sound)"));
+	m_env.AddString(LL2(L"エレベーター (超小金属空間、密閉された短い反射)", L"Elevator (tiny metal space, confined short reflections)"));
+	m_env.AddString(LL2(L"駐車場 (広い低天井コンクリート、硬質な反響)", L"Parking lot (wide low-ceiling concrete, hard reflections)"));
 
-	m_env.AddString(L"--[[文化施設 31-40]]--", TRUE);
+	m_env.AddString(LL2(L"--[[文化施設 31-40]]--", L"--[[Cultural 31-40]]--"), TRUE);
 
-	m_env.AddString(L"コンサートホール (クラシック用最高峰、精密な音響設計)");
-	m_env.AddString(L"ジャズクラブ (親密で温かい、程よい残響)");
-	m_env.AddString(L"カラオケボックス (小密室エンタメ、明るく賑やか)");
-	m_env.AddString(L"映画館 (THX規格的、臨場感のある音響)");
-	m_env.AddString(L"地下鉄車内 (揺れる密室、硬質で圧迫感)");
-	m_env.AddString(L"空港ターミナル (巨大公共空間、高天井と複雑な反射)");
-	m_env.AddString(L"ショッピングモール (賑やか商業施設、適度な吸音)");
-	m_env.AddString(L"病院 (静かで清潔、吸音材による落ち着いた空間)");
-	m_env.AddString(L"レコーディングブース (プロ用極ドライ、完全無響に近い)");
-	m_env.AddString(L"オペラハウス (劇場の最高峰、豊かで美しい残響)");
+	m_env.AddString(LL2(L"コンサートホール (クラシック用最高峰、精密な音響設計)", L"Concert hall (classical pinnacle, precise acoustic design)"));
+	m_env.AddString(LL2(L"ジャズクラブ (親密で温かい、程よい残響)", L"Jazz club (intimate and warm, moderate reverb)"));
+	m_env.AddString(LL2(L"カラオケボックス (小密室エンタメ、明るく賑やか)", L"Karaoke box (small enclosed entertainment, bright and lively)"));
+	m_env.AddString(LL2(L"映画館 (THX規格的、臨場感のある音響)", L"Movie theater (THX standard, immersive sound)"));
+	m_env.AddString(LL2(L"地下鉄車内 (揺れる密室、硬質で圧迫感)", L"Subway car (shaking enclosed space, hard and oppressive)"));
+	m_env.AddString(LL2(L"空港ターミナル (巨大公共空間、高天井と複雑な反射)", L"Airport terminal (vast public space, high ceiling and complex reflections)"));
+	m_env.AddString(LL2(L"ショッピングモール (賑やか商業施設、適度な吸音)", L"Shopping mall (lively commercial facility, moderate absorption)"));
+	m_env.AddString(LL2(L"病院 (静かで清潔、吸音材による落ち着いた空間)", L"Hospital (quiet and clean, calm space with absorption)"));
+	m_env.AddString(LL2(L"レコーディングブース (プロ用極ドライ、完全無響に近い)", L"Recording booth (pro ultra-dry, nearly anechoic)"));
+	m_env.AddString(LL2(L"オペラハウス (劇場の最高峰、豊かで美しい残響)", L"Opera house (theater pinnacle, rich and beautiful reverb)"));
 
-	m_env.AddString(L"--[[生活空間 41-50]]--", TRUE);
+	m_env.AddString(LL2(L"--[[生活空間 41-50]]--", L"--[[Living 41-50]]--"), TRUE);
 
-	m_env.AddString(L"喫茶店/カフェ (適度な賑わいと吸音、リラックスした空間)");
-	m_env.AddString(L"バー/ラウンジ (暗く落ち着いた雰囲気、中域重視)");
-	m_env.AddString(L"居酒屋 (賑やか木材吸音、温かみのある響き)");
-	m_env.AddString(L"美術館/博物館 (静かで広い高天井、上品な残響)");
-	m_env.AddString(L"講堂/大学教室 (教育施設の反射、明瞭な音響)");
-	m_env.AddString(L"竹林 (和風自然音響、独特の拡散と風の音)");
-	m_env.AddString(L"渓谷/滝 (水の反射と濡れた岩肌、躍動感ある響き)");
-	m_env.AddString(L"砂漠 (超開放的反射極小、乾いた空気感)");
-	m_env.AddString(L"ガレージ (車庫硬質空間、コンクリートと金属)");
-	m_env.AddString(L"展望台 (高所開放感、風と遠距離エコー)");
+	m_env.AddString(LL2(L"喫茶店/カフェ (適度な賑わいと吸音、リラックスした空間)", L"Café/Coffee shop (moderate liveliness and absorption, relaxed space)"));
+	m_env.AddString(LL2(L"バー/ラウンジ (暗く落ち着いた雰囲気、中域重視)", L"Bar/Lounge (dark calm atmosphere, mid-focused)"));
+	m_env.AddString(LL2(L"居酒屋 (賑やか木材吸音、温かみのある響き)", L"Izakaya (lively wood absorption, warm sound)"));
+	m_env.AddString(LL2(L"美術館/博物館 (静かで広い高天井、上品な残響)", L"Museum/Art gallery (quiet spacious high ceiling, elegant reverb)"));
+	m_env.AddString(LL2(L"講堂/大学教室 (教育施設の反射、明瞭な音響)", L"Auditorium/University classroom (educational facility reflections, clear sound)"));
+	m_env.AddString(LL2(L"竹林 (和風自然音響、独特の拡散と風の音)", L"Bamboo forest (Japanese-style natural acoustics, unique diffusion and wind)"));
+	m_env.AddString(LL2(L"渓谷/滝 (水の反射と濡れた岩肌、躍動感ある響き)", L"Gorge/Waterfall (water reflections and wet rock, dynamic sound)"));
+	m_env.AddString(LL2(L"砂漠 (超開放的反射極小、乾いた空気感)", L"Desert (wide open, minimal reflections, dry air)"));
+	m_env.AddString(LL2(L"ガレージ (車庫硬質空間、コンクリートと金属)", L"Garage (hard space, concrete and metal)"));
+	m_env.AddString(LL2(L"展望台 (高所開放感、風と遠距離エコー)", L"Observation deck (elevated openness, wind and distant echo)"));
 
-	m_env.AddString(L"--[[拡張空間 51-60]]--", TRUE);
+	m_env.AddString(LL2(L"--[[拡張空間 51-60]]--", L"--[[Extended 51-60]]--"), TRUE);
 
-	m_env.AddString(L"小さな礼拝堂 (教会より親密で温かい)");
-	m_env.AddString(L"大型ショッピングセンター (モールより巨大)");
-	m_env.AddString(L"地下洞窟(深層) (より深く神秘的)");
-	m_env.AddString(L"古城の大広間 (石造り中世的)");
-	m_env.AddString(L"野外音楽堂 (半開放的ステージ)");
-	m_env.AddString(L"鍾乳洞 (複雑な水滴反射)");
-	m_env.AddString(L"廃墟工場 (荒廃した金属空間)");
-	m_env.AddString(L"和室(畳) (日本的柔らかい吸音)");
-	m_env.AddString(L"温泉施設 (湿度高めタイル反射)");
-	m_env.AddString(L"屋根裏部屋 (斜め天井の特殊空間)");
+	m_env.AddString(LL2(L"小さな礼拝堂 (教会より親密で温かい)", L"Small chapel (more intimate and warm than church)"));
+	m_env.AddString(LL2(L"大型ショッピングセンター (モールより巨大)", L"Large shopping center (bigger than mall)"));
+	m_env.AddString(LL2(L"地下洞窟(深層) (より深く神秘的)", L"Underground cave (deep) (deeper and more mystical)"));
+	m_env.AddString(LL2(L"古城の大広間 (石造り中世的)", L"Castle great hall (stone medieval)"));
+	m_env.AddString(LL2(L"野外音楽堂 (半開放的ステージ)", L"Outdoor amphitheater (semi-open stage)"));
+	m_env.AddString(LL2(L"鍾乳洞 (複雑な水滴反射)", L"Limestone cave (complex water droplet reflections)"));
+	m_env.AddString(LL2(L"廃墟工場 (荒廃した金属空間)", L"Abandoned factory (decayed metal space)"));
+	m_env.AddString(LL2(L"和室(畳) (日本的柔らかい吸音)", L"Japanese room (tatami) (Japanese soft absorption)"));
+	m_env.AddString(LL2(L"温泉施設 (湿度高めタイル反射)", L"Hot spring facility (humid tile reflections)"));
+	m_env.AddString(LL2(L"屋根裏部屋 (斜め天井の特殊空間)", L"Attic (angled ceiling special space)"));
 
-	m_env.AddString(L"--[[特殊空間 61-70]]--", TRUE);
+	m_env.AddString(LL2(L"--[[特殊空間 61-70]]--", L"--[[Special 61-70]]--"), TRUE);
 
-	m_env.AddString(L"地下駐車場(多層) (階層的複雑反射)");
-	m_env.AddString(L"古い劇場(木造) (温かみある音響設計)");
-	m_env.AddString(L"大型倉庫(空) (極端な空虚感)");
-	m_env.AddString(L"小さな教会 (カテドラルより親密)");
-	m_env.AddString(L"ガラス温室 (硬質ガラス反射)");
-	m_env.AddString(L"石造りトンネル (硬く長い残響)");
-	m_env.AddString(L"コンクリート階段 (硬質縦方向反射)");
-	m_env.AddString(L"大浴場 (広いタイル反射)");
-	m_env.AddString(L"洗面所 (極小タイル空間)");
-	m_env.AddString(L"廊下(カーペット) (吸音的柔らかい)");
+	m_env.AddString(LL2(L"地下駐車場(多層) (階層的複雑反射)", L"Underground parking (multi-level) (layered complex reflections)"));
+	m_env.AddString(LL2(L"古い劇場(木造) (温かみある音響設計)", L"Old theater (wooden) (warm acoustic design)"));
+	m_env.AddString(LL2(L"大型倉庫(空) (極端な空虚感)", L"Large warehouse (empty) (extreme emptiness)"));
+	m_env.AddString(LL2(L"小さな教会 (カテドラルより親密)", L"Small church (more intimate than cathedral)"));
+	m_env.AddString(LL2(L"ガラス温室 (硬質ガラス反射)", L"Glass greenhouse (hard glass reflections)"));
+	m_env.AddString(LL2(L"石造りトンネル (硬く長い残響)", L"Stone tunnel (hard long reverb)"));
+	m_env.AddString(LL2(L"コンクリート階段 (硬質縦方向反射)", L"Concrete stairs (hard vertical reflections)"));
+	m_env.AddString(LL2(L"大浴場 (広いタイル反射)", L"Public bath (wide tile reflections)"));
+	m_env.AddString(LL2(L"洗面所 (極小タイル空間)", L"Bathroom (tiny tile space)"));
+	m_env.AddString(LL2(L"廊下(カーペット) (吸音的柔らかい)", L"Corridor (carpeted) (absorptive and soft)"));
 
-	m_env.AddString(L"--[[専門空間 71-80]]--", TRUE);
+	m_env.AddString(LL2(L"--[[専門空間 71-80]]--", L"--[[Professional 71-80]]--"), TRUE);
 
-	m_env.AddString(L"会議室(大) (ビジネス空間)");
-	m_env.AddString(L"会議室(小) (より密閉的)");
-	m_env.AddString(L"防音室 (極端なデッド空間)");
-	m_env.AddString(L"エントランスホール (高天井開放的)");
-	m_env.AddString(L"書斎 (本による吸音)");
-	m_env.AddString(L"キッチン (硬質多反射)");
-	m_env.AddString(L"屋外駐車場 (開放的反射少)");
-	m_env.AddString(L"地下道(狭) (圧迫的狭小空間)");
-	m_env.AddString(L"展示室 (美術館より吸音的)");
-	m_env.AddString(L"アトリエ (創作空間の独特さ)");
+	m_env.AddString(LL2(L"会議室(大) (ビジネス空間)", L"Meeting room (large) (business space)"));
+	m_env.AddString(LL2(L"会議室(小) (より密閉的)", L"Meeting room (small) (more enclosed)"));
+	m_env.AddString(LL2(L"防音室 (極端なデッド空間)", L"Soundproof room (extreme dead space)"));
+	m_env.AddString(LL2(L"エントランスホール (高天井開放的)", L"Entrance hall (high ceiling, open)"));
+	m_env.AddString(LL2(L"書斎 (本による吸音)", L"Study (absorption from books)"));
+	m_env.AddString(LL2(L"キッチン (硬質多反射)", L"Kitchen (hard multi-reflections)"));
+	m_env.AddString(LL2(L"屋外駐車場 (開放的反射少)", L"Outdoor parking lot (open, fewer reflections)"));
+	m_env.AddString(LL2(L"地下道(狭) (圧迫的狭小空間)", L"Underground passage (narrow) (oppressive confined space)"));
+	m_env.AddString(LL2(L"展示室 (美術館より吸音的)", L"Exhibition room (more absorbent than gallery)"));
+	m_env.AddString(LL2(L"アトリエ (創作空間の独特さ)", L"Atelier (unique creative space)"));
 
-	m_env.AddString(L"--[[SFX/未来 81-100]]--", TRUE);
-	m_env.AddString(L"サイバーパンク路地 (金属反射＋狭い空間、ネオン感)");
-	m_env.AddString(L"宇宙船ブリッジ (クリーンで硬質、短い反射)");
-	m_env.AddString(L"ワープトンネル (揺らぎと長い残響、引き伸ばし)");
-	m_env.AddString(L"量子ホール (不安定拡散、浮遊感)");
-	m_env.AddString(L"無限回廊 (規則的エコー、長く続く反射)");
-	m_env.AddString(L"逆再生空間 (早い反射と遅い尾、異常な広がり)");
-	m_env.AddString(L"タイムストップ室 (ほぼ無響＋硬い反射)");
-	m_env.AddString(L"データセンター (低域振動、機械的反射)");
-	m_env.AddString(L"巨大機械内部 (金属共鳴、重い反射)");
-	m_env.AddString(L"AIホログラム室 (透明感、明るい反射)");
-	m_env.AddString(L"重力ゼロ船庫 (低密度で長残響)");
-	m_env.AddString(L"惑星ドーム都市 (超巨大＋ガラス反射)");
-	m_env.AddString(L"VRシミュレーター (過剰ステレオ＋揺れ)");
-	m_env.AddString(L"レーザー通路 (鋭いフラッター、硬質)");
-	m_env.AddString(L"異次元裂け目 (不規則ディレイ、崩れる残響)");
-	m_env.AddString(L"夢の中 (柔らかく滲む、低コントラスト)");
-	m_env.AddString(L"水晶洞 (高域きらめき、長い余韻)");
-	m_env.AddString(L"廃宇宙ステーション (冷たく乾いた残響)");
-	m_env.AddString(L"ブラックホール縁 (超長残響＋低域膨張)");
-	m_env.AddString(L"サイバー聖堂 (金属×巨大空間、光沢残響)");
+	m_env.AddString(LL2(L"--[[SFX/未来 81-100]]--", L"--[[SFX/Future 81-100]]--"), TRUE);
+	m_env.AddString(LL2(L"サイバーパンク路地 (金属反射＋狭い空間、ネオン感)", L"Cyberpunk alley (metal reflection + narrow space, neon feel)"));
+	m_env.AddString(LL2(L"宇宙船ブリッジ (クリーンで硬質、短い反射)", L"Spaceship bridge (clean and hard, short reflections)"));
+	m_env.AddString(LL2(L"ワープトンネル (揺らぎと長い残響、引き伸ばし)", L"Warp tunnel (fluctuation and long reverb, stretching)"));
+	m_env.AddString(LL2(L"量子ホール (不安定拡散、浮遊感)", L"Quantum hall (unstable diffusion, floating feel)"));
+	m_env.AddString(LL2(L"無限回廊 (規則的エコー、長く続く反射)", L"Infinite corridor (regular echo, long-lasting reflections)"));
+	m_env.AddString(LL2(L"逆再生空間 (早い反射と遅い尾、異常な広がり)", L"Reverse playback space (fast reflection, slow tail, abnormal spread)"));
+	m_env.AddString(LL2(L"タイムストップ室 (ほぼ無響＋硬い反射)", L"Time-stop room (nearly anechoic + hard reflection)"));
+	m_env.AddString(LL2(L"データセンター (低域振動、機械的反射)", L"Data center (low-frequency vibration, mechanical reflection)"));
+	m_env.AddString(LL2(L"巨大機械内部 (金属共鳴、重い反射)", L"Inside giant machine (metal resonance, heavy reflection)"));
+	m_env.AddString(LL2(L"AIホログラム室 (透明感、明るい反射)", L"AI hologram room (transparency, bright reflection)"));
+	m_env.AddString(LL2(L"重力ゼロ船庫 (低密度で長残響)", L"Zero-gravity hangar (low density, long reverb)"));
+	m_env.AddString(LL2(L"惑星ドーム都市 (超巨大＋ガラス反射)", L"Planet dome city (vast + glass reflection)"));
+	m_env.AddString(LL2(L"VRシミュレーター (過剰ステレオ＋揺れ)", L"VR simulator (excessive stereo + sway)"));
+	m_env.AddString(LL2(L"レーザー通路 (鋭いフラッター、硬質)", L"Laser corridor (sharp flutter, hard)"));
+	m_env.AddString(LL2(L"異次元裂け目 (不規則ディレイ、崩れる残響)", L"Dimensional rift (irregular delay, crumbling reverb)"));
+	m_env.AddString(LL2(L"夢の中 (柔らかく滲む、低コントラスト)", L"Dream space (soft bleeding, low contrast)"));
+	m_env.AddString(LL2(L"水晶洞 (高域きらめき、長い余韻)", L"Crystal cave (high-frequency shimmer, long decay)"));
+	m_env.AddString(LL2(L"廃宇宙ステーション (冷たく乾いた残響)", L"Abandoned space station (cold dry reverb)"));
+	m_env.AddString(LL2(L"ブラックホール縁 (超長残響＋低域膨張)", L"Black hole edge (ultra-long reverb + bass expansion)"));
+	m_env.AddString(LL2(L"サイバー聖堂 (金属×巨大空間、光沢残響)", L"Cyber cathedral (metal × vast space, glossy reverb)"));
 
 	{
 		/*const int l[81] =
@@ -405,57 +416,57 @@ BOOL CEqualizer::OnInitDialog()
 		*/
 		m_env.SetCurSel(savedata.eqsoundenv);
 	}
-	m_pre.AddString(L"デフォルト");
-	m_pre.AddString(L"低音ブースト");
-	m_pre.AddString(L"高音ブースト");
-	m_pre.AddString(L"ボーカル強調");
-	m_pre.AddString(L"低音カット");
-	m_pre.AddString(L"高音カット");
-	m_pre.AddString(L"ラウドネス");
-	m_pre.AddString(L"クラシック");
-	m_pre.AddString(L"ロック");
-	m_pre.AddString(L"カスタム");
-	m_pre.AddString(L"ジャズ");
-	m_pre.AddString(L"ポップ");
-	m_pre.AddString(L"EDM");
-	m_pre.AddString(L"メタル");
-	m_pre.AddString(L"ヒップホップ");
-	m_pre.AddString(L"アコースティック");
-	m_pre.AddString(L"V字型(ドンシャリ)");
-	m_pre.AddString(L"逆V字型");
-	m_pre.AddString(L"スマイルカーブ");
-	m_pre.AddString(L"ラジオ/Podcast");
-	m_pre.AddString(L"映画/ドラマ");
-	m_pre.AddString(L"ゲーミング");
-	m_pre.AddString(L"ライブ録音");
-	m_pre.AddString(L"トレブルブースト");
-	m_pre.AddString(L"ベースブースト");
-	m_pre.AddString(L"小音量用");
-	m_pre.AddString(L"ヘッドホン用");
-	m_pre.AddString(L"ボーカル除去");
-	m_pre.AddString(L"重低音強化");
-	m_pre.AddString(L"ラジオAM");
-	m_pre.AddString(L"ラジオFM");
-	m_pre.AddString(L"テレビ音声");
-	m_pre.AddString(L"電話音声");
-	m_pre.AddString(L"ビンテージ");
-	m_pre.AddString(L"モダン");
-	m_pre.AddString(L"ウォーム");
-	m_pre.AddString(L"ブライト");
-	m_pre.AddString(L"フラット+");
-	m_pre.AddString(L"スーパーベース");
-	m_pre.AddString(L"クリスタル");
-	m_pre.AddString(L"パーフェクト");
-	m_pre.AddString(L"ダンス/クラブ");
-	m_pre.AddString(L"R&&B/ソウル");
-	m_pre.AddString(L"レゲエ");
-	m_pre.AddString(L"ブルース");
-	m_pre.AddString(L"カントリー");
-	m_pre.AddString(L"ファンク");
-	m_pre.AddString(L"エレクトロニカ");
-	m_pre.AddString(L"アンビエント");
-	m_pre.AddString(L"インストゥルメンタル");
-	m_pre.AddString(L"ナレーション/オーディオブック");
+	m_pre.AddString(LL2(L"デフォルト", L"Default"));
+	m_pre.AddString(LL2(L"低音ブースト", L"Bass Boost"));
+	m_pre.AddString(LL2(L"高音ブースト", L"Treble Boost"));
+	m_pre.AddString(LL2(L"ボーカル強調", L"Vocal Enhance"));
+	m_pre.AddString(LL2(L"低音カット", L"Bass Cut"));
+	m_pre.AddString(LL2(L"高音カット", L"Treble Cut"));
+	m_pre.AddString(LL2(L"ラウドネス", L"Loudness"));
+	m_pre.AddString(LL2(L"クラシック", L"Classical"));
+	m_pre.AddString(LL2(L"ロック", L"Rock"));
+	m_pre.AddString(LL2(L"カスタム", L"Custom"));
+	m_pre.AddString(LL2(L"ジャズ", L"Jazz"));
+	m_pre.AddString(LL2(L"ポップ", L"Pop"));
+	m_pre.AddString(LL2(L"EDM", L"EDM"));
+	m_pre.AddString(LL2(L"メタル", L"Metal"));
+	m_pre.AddString(LL2(L"ヒップホップ", L"Hip Hop"));
+	m_pre.AddString(LL2(L"アコースティック", L"Acoustic"));
+	m_pre.AddString(LL2(L"V字型(ドンシャリ)", L"V-shape"));
+	m_pre.AddString(LL2(L"逆V字型", L"Inverse V"));
+	m_pre.AddString(LL2(L"スマイルカーブ", L"Smile curve"));
+	m_pre.AddString(LL2(L"ラジオ/Podcast", L"Radio/Podcast"));
+	m_pre.AddString(LL2(L"映画/ドラマ", L"Movie/Drama"));
+	m_pre.AddString(LL2(L"ゲーミング", L"Gaming"));
+	m_pre.AddString(LL2(L"ライブ録音", L"Live recording"));
+	m_pre.AddString(LL2(L"トレブルブースト", L"Treble Boost"));
+	m_pre.AddString(LL2(L"ベースブースト", L"Bass Boost"));
+	m_pre.AddString(LL2(L"小音量用", L"For low volume"));
+	m_pre.AddString(LL2(L"ヘッドホン用", L"For headphones"));
+	m_pre.AddString(LL2(L"ボーカル除去", L"Vocal remove"));
+	m_pre.AddString(LL2(L"重低音強化", L"Subwoofer boost"));
+	m_pre.AddString(LL2(L"ラジオAM", L"Radio AM"));
+	m_pre.AddString(LL2(L"ラジオFM", L"Radio FM"));
+	m_pre.AddString(LL2(L"テレビ音声", L"TV audio"));
+	m_pre.AddString(LL2(L"電話音声", L"Phone voice"));
+	m_pre.AddString(LL2(L"ビンテージ", L"Vintage"));
+	m_pre.AddString(LL2(L"モダン", L"Modern"));
+	m_pre.AddString(LL2(L"ウォーム", L"Warm"));
+	m_pre.AddString(LL2(L"ブライト", L"Bright"));
+	m_pre.AddString(LL2(L"フラット+", L"Flat+"));
+	m_pre.AddString(LL2(L"スーパーベース", L"Super bass"));
+	m_pre.AddString(LL2(L"クリスタル", L"Crystal"));
+	m_pre.AddString(LL2(L"パーフェクト", L"Perfect"));
+	m_pre.AddString(LL2(L"ダンス/クラブ", L"Dance/Club"));
+	m_pre.AddString(LL2(L"R&&B/ソウル", L"R&B/Soul"));
+	m_pre.AddString(LL2(L"レゲエ", L"Reggae"));
+	m_pre.AddString(LL2(L"ブルース", L"Blues"));
+	m_pre.AddString(LL2(L"カントリー", L"Country"));
+	m_pre.AddString(LL2(L"ファンク", L"Funk"));
+	m_pre.AddString(LL2(L"エレクトロニカ", L"Electronica"));
+	m_pre.AddString(LL2(L"アンビエント", L"Ambient"));
+	m_pre.AddString(LL2(L"インストゥルメンタル", L"Instrumental"));
+	m_pre.AddString(LL2(L"ナレーション/オーディオブック", L"Narration/Audiobook"));
 	m_pre.SetCurSel(savedata.eqsoundeq);
 
 	if(savedata.eqx != -1)
@@ -654,19 +665,19 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	static CString bufLow = L"-", bufMid = L"-", bufHigh = L"-", bufAll = L"-";
 
 	if (bufLow != KeyCodeLow) {
-		m_keyLow.SetWindowText(L"低音域：" + KeyCodeLow);
+		m_keyLow.SetWindowText(CString(LL2(L"低音域：", L"Low: ")) + KeyCodeLow);
 		bufLow = KeyCodeLow;
 	}
 	if (bufMid != KeyCodeMid) {
-		m_keyMid.SetWindowText(L"中音域：" + KeyCodeMid);
+		m_keyMid.SetWindowText(CString(LL2(L"中音域：", L"Mid: ")) + KeyCodeMid);
 		bufMid = KeyCodeMid;
 	}
 	if (bufHigh != KeyCodeHigh) {
-		m_keyHigh.SetWindowText(L"高音域：" + KeyCodeHigh);
+		m_keyHigh.SetWindowText(CString(LL2(L"高音域：", L"High: ")) + KeyCodeHigh);
 		bufHigh = KeyCodeHigh;
 	}
 	if (bufAll != KeyCodeAll) {
-		m_keyAll.SetWindowText(L"全音域：" + KeyCodeAll);//
+		m_keyAll.SetWindowText(CString(LL2(L"全音域：", L"All: ")) + KeyCodeAll);
 		bufAll = KeyCodeAll;
 	}
 

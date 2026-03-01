@@ -384,10 +384,10 @@ BOOL CDouga::Create(HWND h)
     LoadIcon(AfxGetInstanceHandle(),
     MAKEINTRESOURCE(IDR_DOUGA)));
 
-    int ret=CreateEx(WS_EX_OVERLAPPEDWINDOW|WS_EX_ACCEPTFILES,sClassName, _T("mp3/m4a簡易プレイヤ(動画画面)"),
+    int ret=CreateEx(WS_EX_OVERLAPPEDWINDOW|WS_EX_ACCEPTFILES,sClassName, LL2(L"mp3/m4a簡易プレイヤ(動画画面)", L"mp3/m4a Simple Player (video)"),
 	  ((WS_OVERLAPPEDWINDOW)& ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_SYSMENU),
 	0,0,640,360,NULL,NULL,NULL);
-	if(ret==0) MessageBox(_T("作成"));
+	if(ret==0) MessageBox(LL2(L"作成", L"Create"));
 	ev=FALSE;
  
     ::GetWindowRect(this->GetSafeHwnd(), &rc);
@@ -3270,10 +3270,10 @@ void CDouga::pause(int a)
 	if(a==0)
 	{
 		pMediaControl->Pause();
-		ps=1;og->m_ps.SetWindowText(_T("再開"));
+		ps=1;og->m_ps.SetWindowText(LL2(L"再開", L"Resume"));
 	}else{
 		pMediaControl->Run();
-		ps=0;og->m_ps.SetWindowText(_T("一時停止"));
+		ps=0;og->m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
 	}
 }
 

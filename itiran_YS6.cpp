@@ -78,10 +78,45 @@ char tiys6[][128]={
 "30.ゲームオーバー"
 };
 
+char tiys6_en[][128]={
+"01.Title/Load",
+"02.Opening(with video)",
+"03.Fin",
+"04.Ledah's village",
+"05.Shop",
+"06.Quatera Forest",
+"07.Mid-boss general",
+"08.Undersea approach",
+"09.Limoges port town",
+"10.Canaan Plains",
+"11.Granvalis",
+"12.Ruins of Oblivion",
+"13.Sacred Ground of Zemeth",
+"14.Stalactite cave/Underground lake",
+"15.Assault",
+"16.Occupied",
+"17.Romun warship(normal)",
+"18.Romun warship(escape)",
+"19.Alma's tomb",
+"20.Battle with Galbalan",
+"21.Battle with Ernst",
+"22.Napishtim's Ark, Spiral Corridor",
+"23.Nap core battle<Phase 1>(Last boss)",
+"24.Nap core battle<Phase 2>(Last boss)",
+"25.Staff roll",
+"26.Movie 1(vortex gone~Romun attack)(with video)",
+"27.Movie 2(Nap revival)(with video)",
+"28.Movie 3(Nap collapse)(with video)",
+"29.Movie 4(Ending 1)(with video)",
+"30.Game over",
+"30.Game over"
+};
+
 void Citiran_YS6::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s,ss;	s=tiys6[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s,ss;	s=savedata.lang ? tiys6_en[idx] : tiys6[idx];
 	ss=s.Left(2);ret=_tstoi(ss)-1;
 	fnn=s.Mid(3);
 	EndDialog(1567);
@@ -89,7 +124,7 @@ void Citiran_YS6::OnDblclkList1()
 
 void Citiran_YS6::Gett(int a){
 	CString s,ss;
-	s=tiys6[a];
+	s=savedata.lang ? tiys6_en[a] : tiys6[a];
 	ss=s.Left(6);ss.TrimRight();
 	fnn=s.Mid(3);
 }
@@ -97,13 +132,15 @@ void Citiran_YS6::Gett(int a){
 BOOL Citiran_YS6::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"イースⅥ -ナピシュテムの匣-", L"Ys VI -Napishtim no Hako-"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(30);i++)
 	{
 		CString s;
-		s=tiys6[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tiys6[i];}
+		s=savedata.lang ? tiys6_en[i] : tiys6[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

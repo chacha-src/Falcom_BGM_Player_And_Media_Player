@@ -46,7 +46,7 @@ BOOL CFilename::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
 
-	// TODO:  ここに初期化を追加してください
+	SetWindowText(LL2(L"ファイル名変更", L"Rename File"));
 	m_name.SetWindowText(pc.name);
 	m_art.SetWindowText(pc.art);
 	m_alb.SetWindowText(pc.alb);

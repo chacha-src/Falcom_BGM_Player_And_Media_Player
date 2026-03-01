@@ -41,7 +41,8 @@ BOOL CPVI::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
 
-	// TODO:  ここに初期化を追加してください
+	SetWindowText(LL2(L"fmpmd.kpi PVIパス設定", L"fmpmd.kpi PVI Path Settings"));
+	SetDlgItemText(IDC_STATIC, LL2(L"PVIパス \\で必ず終わること　複数指定は ; で指定", L"PVI path must end with \\. Use ; for multiple paths."));
 	CString str = regload(_T(""));
 	m_pvi.SetWindowText(str);
 	RECT r;

@@ -46,7 +46,7 @@ BOOL CListCtrlA::OnToolTipText( UINT id, NMHDR * pNMHDR, LRESULT * pResult ){
 	k = GetItemText( row, 4 );
 	l = GetItemText( row, 2 );
 	m = GetItemText( row, 1 );
-	strTipText.Format(_T("名前：%s\nアーティスト：%s\nアルバム：%s\n時間：%s\n種類：%s"),i,j,k,l,m);
+	strTipText.Format(LL2(L"名前：%s\nアーティスト：%s\nアルバム：%s\n時間：%s\n種類：%s", L"Name: %s\nArtist: %s\nAlbum: %s\nTime: %s\nType: %s"),i,j,k,l,m);
 
 //#ifndef _UNICODE
 //	if (pNMHDR->code == TTN_NEEDTEXTA)

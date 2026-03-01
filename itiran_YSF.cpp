@@ -81,10 +81,48 @@ char tiys3[][128]={
 "34.愛しのエレナ(ガルバラン島崩壊(動画))"
 };
 
+char tiys3_en[][128]={
+"01.Dancing on the road(unknown)",
+"02.Omen =Styx=(Menu)",
+"03.Trade town Redmont(Redmont town)",
+"04.Quiet moment(Elder's house)",
+"05.Welcome!!(Shop)",
+"06.Prelude to adventure(Map)",
+"07.The Boy with Wings(Field map)",
+"08.Be careful(Tigray Quarry)",
+"09.The Black Beast(Boss battle)",
+"10.Ruins of Ilburnz(Ilburnz ruins)",
+"11.Blazing death battle(Lava area)",
+"12.Darkness trap(Deep Tigray Quarry)",
+"13.Reaper's lightning(Boss battle)",
+"14.Momentary dream(Game over)",
+"15.Strict fighting spirit(Eldarm Mountains)",
+"16.Melancholy Twilight(Redmont after crisis)",
+"17.Barestayn Castle(Barestayn Castle)",
+"18.Prayer of mercy(Barestayn Cathedral)",
+"19.Key of light(After ending)",
+"20.Seal of time(Barestayn Clock Tower)",
+"21.Pulse of destruction(Genos Island)",
+"22.Tower of fate(Deep Genos Island)",
+"23.Behold!!(Nicholas battle)",
+"24.Strongest enemy(Galbalan battle)",
+"25.Morning of departure(Redmont after clear)",
+"26.Wanderers from Ys(Ending(video))",
+"27.Dear My Brother(Elena, Chester event)",
+"28.Beloved Elena(Elena theme)",
+"29.Introduction!!(Redmont event)",
+"30.The Theme of Chester(Chester theme)",
+"31.Chop!!(Boss battle)",
+"32.Believe in my heart(Redmont just before clear)",
+"33.Omen =Styx=(Opening(video))",
+"34.Beloved Elena(Galbalan island collapse(video))"
+};
+
 void Citiran_YSF::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s,ss;	s=tiys3[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s,ss;	s=savedata.lang ? tiys3_en[idx] : tiys3[idx];
 	ss=s.Left(2);ret=_tstoi(ss)-1;
 	fnn=s.Mid(3);
 	EndDialog(1567);
@@ -92,7 +130,7 @@ void Citiran_YSF::OnDblclkList1()
 
 void Citiran_YSF::Gett(int a){
 	CString s,ss;
-	s=tiys3[a];
+	s=savedata.lang ? tiys3_en[a] : tiys3[a];
 	ss=s.Left(6);ss.TrimRight();
 	fnn=s.Mid(3);
 }
@@ -100,13 +138,15 @@ void Citiran_YSF::Gett(int a){
 BOOL Citiran_YSF::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"イース -フェルガナの誓い-", L"Ys -Felghana no Chikai-"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(34);i++)
 	{
 		CString s;
-		s=tiys3[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tiys3[i];}
+		s=savedata.lang ? tiys3_en[i] : tiys3[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

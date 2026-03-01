@@ -188,9 +188,9 @@ BOOL COggApp::InitInstance()
 
 #if _UNICODE
 	if(GetKeyState(VK_CONTROL) < 0){
-		if(AfxMessageBox(L"ANSI版からのコンバートを行いますか？",MB_YESNO)==IDYES){
+		if(AfxMessageBox(LL2(L"ANSI版からのコンバートを行いますか？", L"Convert from ANSI version?"),MB_YESNO)==IDYES){
 			convert();
-			AfxMessageBox(L"コンバートが完了しました。");
+			AfxMessageBox(LL2(L"コンバートが完了しました。", L"Conversion completed."));
 			ReleaseMutex(Mutex);
 			exit(0);
 		}
@@ -198,9 +198,9 @@ BOOL COggApp::InitInstance()
 	CFile ab,ac;
 	if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeRead,NULL)!=TRUE && ac.Open(L"oggYSEDbgm.dat",CFile::modeRead,NULL)==TRUE){
 		ac.Close();
-		AfxMessageBox(L"ANSI版からのコンバートを行います。");
+		AfxMessageBox(LL2(L"ANSI版からのコンバートを行います。", L"Converting from ANSI version."));
 		convert();
-		AfxMessageBox(L"コンバートが完了しました。");
+		AfxMessageBox(LL2(L"コンバートが完了しました。", L"Conversion completed."));
 		ReleaseMutex(Mutex);
 		exit(0);
 #else
@@ -213,6 +213,12 @@ BOOL COggApp::InitInstance()
 			ab.Close();
 		}
 	}
+	if (savedata.langselect == 0) {
+		LANGID langId = GetUserDefaultUILanguage();
+		if (PRIMARYLANGID(langId) != LANG_JAPANESE) {
+			savedata.lang = 1;
+		}
+	}
 #if _UNICODE
 	if (ac.m_hFile != CFile::hFileNull)
 		ac.Close();
@@ -220,7 +226,7 @@ BOOL COggApp::InitInstance()
 	if (savedata.ms < 30) savedata.ms = 30;
 	if (savedata.ms > 80) savedata.ms = 80;
 	if (savedata.aerocheck == 99) {
-		int abc = AfxMessageBox(L"エアロ(透過処理)がメイン画面等に実装されました。是非試してみて貰えれば。\n有効にしますか？(少し不安定な部分あります)\n(このメッセージは一回しか表示されません)\nWindows11以降では、有効にしないで下さい。", MB_YESNO);
+		int abc = AfxMessageBox(LL2(L"エアロ(透過処理)がメイン画面等に実装されました。是非試してみて貰えれば。\n有効にしますか？(少し不安定な部分あります)\n(このメッセージは一回しか表示されません)\nWindows11以降では、有効にしないで下さい。", L"Aero (transparency) has been implemented on the main window, etc. Please try it.\nEnable it? (Some instability may occur)\n(This message will only be shown once)\nDo not enable on Windows 11 or later."), MB_YESNO);
 		if (abc == IDYES) {
 			savedata.aero = 1;
 			savedata.aerocheck = 1;

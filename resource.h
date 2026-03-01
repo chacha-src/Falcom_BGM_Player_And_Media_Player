@@ -300,6 +300,25 @@
 #define IDC_STATIC_key2                 1114
 #define IDC_STATIC_key3                 1115
 #define IDC_STATIC_key4                 1116
+#define IDC_STATIC_LANG                 1117
+#define IDC_COMBO_LANG                  1118
+#define IDC_STATIC_EQ_DRY               1119
+#define IDC_STATIC_EQ_WET               1120
+#define IDC_STATIC_EQ_ACOUSTIC          1121
+#define IDC_STATIC_EQ_SPECTRUM          1122
+#define IDC_STATIC_EQ_FREQ              1123
+#define IDC_STATIC_EQ_BAND              1124
+#define IDC_STATIC_EQ_LOUDNESS          1125
+#define IDC_STATIC_EQ_WARMTH            1126
+#define IDC_STATIC_R_BUF                1200
+#define IDC_STATIC_R_MP3                1201
+#define IDC_STATIC_R_KPI                1202
+#define IDC_STATIC_R_DISP               1203
+#define IDC_STATIC_R_DEV                1204
+#define IDC_STATIC_R_SAMP               1205
+#define IDC_STATIC_R_SPEANA             1206
+#define IDC_STATIC_R_SPC                1207
+#define IDC_STATIC_R_BIT                1208
 #define ID_MENUITEM32771                32771
 #define ID_MENUITEM32772                32772
 #define ID_MENUITEM32773                32773
@@ -482,7 +501,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        196
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         1114
+#define _APS_NEXT_CONTROL_VALUE         1127
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

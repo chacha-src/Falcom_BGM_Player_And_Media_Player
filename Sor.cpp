@@ -115,9 +115,88 @@ char tisor[][128]={
 "SSO082 フォーエバー シナリオ１～５クリア"
 };
 
+char tisor_en[][128]={
+"SSO001 Opening",
+"SSO002 Castle (We'll Meet Here)",
+"SSO003 Town 1",
+"SSO004 Town 2",
+"SSO008 Travelers' Inn",
+"SSO059 Scenario Clear",
+"SSO005 Lost King's Staff Dungeon",
+"SSO006 Lost King's Staff Hydra",
+"SSO007 Lost King's Staff Survival",
+"SSO009 Lost Talisman Forest",
+"SSO010 Lost Talisman Underground Dungeon",
+"SSO011 Lost Talisman Priest Terhichi",
+"SSO012 Lost Talisman Sand Marlborough",
+"SSO013 Lucifer's Watergate Underground Dungeon",
+"SSO014 Lucifer's Watergate Kraken",
+"SSO015 Lucifer's Watergate Bloody River",
+"SSO016 Cursed Oasis Desert",
+"SSO017 Cursed Oasis Sand Castle",
+"SSO018 Cursed Oasis Ruan and Gold Dragon",
+"SSO019 Tower of Thieves Tower",
+"SSO020 Tower of Thieves Underground",
+"SSO021 Tower of Thieves Rooftop",
+"SSO022 Tower of Thieves Major Demon",
+"SSO023 Tower of Thieves Shadow Dragon",
+"SSO024 Tower of Thieves Seal",
+"SSO025 Wizard of Dark Marsh Dark Marsh",
+"SSO026 Wizard of Dark Marsh Red Dragon",
+"SSO027 Romancia Romancia Kingdom",
+"SSO028 Romancia Romancia Castle",
+"SSO029 Romancia Azolba Kingdom",
+"SSO030 Romancia Vaides",
+"SSO060 Romancia Exclusive Clear",
+"SSO031 Mystery of the Ruby Forest",
+"SSO032 Mystery of the Ruby Moss Giant",
+"SSO033 Mystery of the Ruby Peaceful Forest",
+"SSO034 Dark Mage Dungeon",
+"SSO035 Dark Mage Gedis",
+"SSO064 Dark Mage Gedis II",
+"SSO036 Dark Mage Blue Dragon",
+"SSO037 Cursed Queen Mary Ship Interior",
+"SSO038 Cursed Queen Mary After Landing",
+"SSO039 Cursed Queen Mary Arc Demon",
+"SSO040 Gods of Heaven Village",
+"SSO041 Gods of Heaven Combat Scene",
+"SSO042 Gods of Heaven Heavenly Realm",
+"SSO043 Gods of Heaven Harp",
+"SSO044 Gods of Heaven Evil Shaman",
+"SSO045 Ice Cave Cave",
+"SSO046 Ice Cave Cave II",
+"SSO047 Ice Cave Ekim",
+"SSO048 Medusa's Head Forest",
+"SSO049 Medusa's Head Village",
+"SSO050 Medusa's Head Medusa",
+"SSO051 Imprisoned Mage Underground Fortress",
+"SSO052 Imprisoned Mage Fire Elemental",
+"SSO053 Water of Eternal Youth Living Cave",
+"SSO054 Water of Eternal Youth Beating Heart",
+"SSO055 Water of Eternal Youth Double Devils",
+"SSO056 King Dragon",
+"SSO057 Ending I",
+"SSO058 Ending II",
+"SSO066 New Opening",
+"SSO080 A Wizard's Failure Mine Underground Lake",
+"SSO081 A Wizard's Failure Earth Elemental",
+"SSO083 Midnight Bell Rings Randle Village",
+"SSO084 Midnight Bell Rings Church",
+"SSO085 Midnight Bell Rings Zaquria",
+"SSO086 Midnight Bell Rings Mage Geran",
+"SSO087 Dwarf's Legacy Dwarf Maze",
+"SSO088 Dwarf's Legacy Labyrinth Dragon",
+"SSO089 Save the Fairy Tree Fairy Village",
+"SSO090 Save the Fairy Tree Giant Tree Interior",
+"SSO091 Save the Fairy Tree Centipede",
+"SSO092 Unwelcome Visitors Suspicious Island",
+"SSO093 Unwelcome Visitors Arc Demon",
+"SSO082 Forever Scenario 1~5 Clear"
+};
+
 CString CSor::Gett(int a){
 	CString s,ss;
-	s=tisor[a];
+	s=savedata.lang ? tisor_en[a] : tisor[a];
 	ss=s.Left(6);ss.TrimRight();
 	fnn=s.Mid(7);
 	return ss;
@@ -128,7 +207,8 @@ CString CSor::Gett(int a){
 void CSor::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tisor[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tisor_en[idx] : tisor[idx];
 	ret=s.Left(6); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 	if(s.Left(2)=="★"){
@@ -142,13 +222,15 @@ void CSor::OnDblclkList1()
 BOOL CSor::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"ソーサリアン オリジナル", L"Sorcerian Original"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(76);i++)
 	{
 		CString s;
-		s=tisor[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tisor[i];}
+		s=savedata.lang ? tisor_en[i] : tisor[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

@@ -81,10 +81,55 @@ char tinishi[][128]={
 "z050 The wind of Memory（フレーズ）(ピアノ弾き)"
 };
 
+char tinishi_en[][128]={
+"z001 Briefing(Zephyr Falcon War Council)",
+"z002 COOL FIELD(Field mountain area)",
+"z003 Diablo(Diablo second phase)",
+"z004 Gayl City(Town)",
+"z005 Pulse of the Destroyer(Diablo first phase)",
+"z006 Inferno(Inferno Prison(liberation))",
+"z007 Ioleen(Antaria Genesis heroine theme)",
+"z008 Waltz de...(Recollection~Bernstein residence)",
+"z009 Town Part1(Village theme)",
+"z010 Farewell event scene(Mercedes)",
+"z011 Town Part2(Town theme)",
+"z012 Sacrifice(Sad event)",
+"z013 ...Drake?(Pirate attack)",
+"z014 Battle(Normal battle)",
+"z015 Zephyr Falcon(Liberation Army Zephyr Falcon)",
+"z016 The wind of Memory(Silvano and Mercedes piano piece)",
+"z017 Desert(Desert)",
+"z018 Aquamarine(Final dungeon~underwater ruins)",
+"z019 Demon Sword Asura(Battle with Asura)",
+"z020 Decisive Battle(Boss battle)",
+"z021 Conspiracy(Event scene(villain))",
+"z022 Force Field(Liberation war field)",
+"z023 FUZZY(Staff roll)",
+"z024 It's time to BATTLE!(Boss battle 2)",
+"z025 PEACE(Village)",
+"z026 Precious Memories(Silvano's memory)",
+"z027 Sorrowful...(Event(usually after someone dies))",
+"z028 Subway Crisis(Dungeon)",
+"z029 Military city(Urgent town theme)",
+"z030 Awakening(Just before final battle)",
+"z031 b-e natural(Dungeon)",
+"z032 Cesare -part1-(Cesare theme(organ))",
+"z033 Cesare -part2-(Last battle)",
+"z034 Fireroad(Contract)",
+"z035 Forth step towards plain(Field, forest, etc)",
+"z036 THE GREAT REPEAT(Game title screen)",
+"z037 Darkness(Inferno underground)",
+"z038 Jungle 2 Jungle(Birth island)",
+"z039 Not natural but natural(Infinite loop dungeon)",
+"z041 The wind of Memory(Orchestra mix)(Ending theme)",
+"z042 Hesitation(Duke residence)",
+"z050 The wind of Memory(Phrase)(Piano)"
+};
+
 
 CString CNishi::Gett(int a){
 	CString s,ss;
-	s=tinishi[a];
+	s=savedata.lang ? tinishi_en[a] : tinishi[a];
 	ss=s.Left(4);ss.TrimRight();
 	fnn=s.Mid(5);
 	return ss;
@@ -95,7 +140,8 @@ CString CNishi::Gett(int a){
 void CNishi::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tinishi[m_list.GetItemData(m_list.GetCurSel())];
+	int i=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tinishi_en[i] : tinishi[i];
 	ret=s.Left(4); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 	if(s.Left(2)=="★"){
@@ -109,13 +155,15 @@ void CNishi::OnDblclkList1()
 BOOL CNishi::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"西風の狂詩曲(ラプソディー)", L"Rhapsody of the West Wind"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(42);i++)
 	{
 		CString s;
-		s=tinishi[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tinishi[i];}
+		s=savedata.lang ? tinishi_en[i] : tinishi[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

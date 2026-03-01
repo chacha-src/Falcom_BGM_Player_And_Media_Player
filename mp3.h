@@ -737,7 +737,7 @@ protected:
 		dither &left_dither = m_left_dither;
 		dither &right_dither = m_right_dither;
 		unsigned char const *start;
-		register signed long sample0, sample1;
+		signed long sample0, sample1;
 		int effective, bytes;
 		BOOL bEnableDither = m_bEnableDither;
 		start = data;
@@ -1746,7 +1746,7 @@ public:
 		dither &left_dither = m_left_dither;
 		dither &right_dither = m_right_dither;
 		unsigned char const *start;
-		register signed long sample0, sample1;
+		signed long sample0, sample1;
 		int effective, bytes;
 		BOOL bEnableDither = m_bEnableDither;
 		start = data;

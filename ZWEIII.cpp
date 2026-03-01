@@ -112,9 +112,79 @@ char tiz2[][128]={
 "★エンディング"
 };
 
+char tiz2_en[][128]={
+"000 New Frontier of Endless Adventure",
+"001 Legend of Granvalen",
+"002 Our Future Opening Version",
+"003 ZWEI II End Credit",
+"004 Even When Exhausted...",
+"006 Magic War Again...",
+"007 Help Alwen Rushing in Version",
+"008 End of Fate",
+"100 Floating Island Ilbard",
+"101 Artte Town",
+"102 Artte Airfield",
+"103 Brande Hill",
+"104 Roalta Village",
+"105 Starfall Village",
+"106 Crystal Valley",
+"108 Witch Lalaile",
+"109 Masked Superman Galland",
+"200 Secondum Abandoned Mine",
+"201 Ordium Temple",
+"202 Forest of Gold and Darkness",
+"203 Aulon Great Iron Tower",
+"205 Dance in the Dark Night",
+"206 Moonbria Castle",
+"207 Prison of Ecstasy",
+"208 Prayer to Espina",
+"209 Star Peak",
+"210 Make Up Your Mind",
+"211 Lunar World Luna=Mundus",
+"212 Spiral Fortress Mercedec",
+"300 Leave It to Ragna",
+"301 Roar! Anchor Gear!!",
+"304 Power of the Ancestor",
+"305 Bow Before Me",
+"306 For My Lord",
+"307 Bet Everything on This Moment",
+"308 Break Through the Obstacles",
+"400 Dog Fight!!",
+"401 Ominous Air",
+"402 Mont Blanc's Theme",
+"403 Let's Exercise!!",
+"404 Driven by Passion",
+"405 Zahhar's Ambition",
+"406 Worst Case",
+"407 Warm Feelings",
+"408 Hearts in Tune",
+"409 Dining at Panda Tower",
+"410 Girl of Machinery",
+"411 Girl of Fate",
+"412 Help Alwen",
+"413 Ragna in Despair",
+"414 Mission Assigned",
+"415 Irreplaceable Daily Life",
+"416 Pledge to Meet Again",
+"417 Standing in the Night Sky",
+"500 Music Ys Felghana(Boy with Wings)",
+"501 Music Ys Felghana(Barestayn Castle)",
+"502 Music Ys Origin(BEYOND THE BEGINNING)",
+"503 Music Ys Origin(WATER PRISON)",
+"504 Music Zwei!!(Song of Flowers and Wind -arrange-)",
+"505 Music Zwei!!(Phantom Land Serpentina)",
+"506 Music Sora no Kiseki FC(Vacant Land of Light)",
+"507 Music Sora no Kiseki SC(The Fate of The Fairies)",
+"508 Music Sora no Kiseki The3rd(Overdosing Heavenly Bliss)",
+"509 Music Gurumin(Incredible Ghost Egg)",
+"510 Music Gurumin(TO MAKE THE END OF DIGING)",
+"★Opening",
+"★Ending"
+};
+
 CString CZWEIII::Gett(int a){
 	CString s,ss;
-	s=tiz2[a];
+	s=savedata.lang ? tiz2_en[a] : tiz2[a];
 	ss=s.Left(3);
 	fnn=s.Mid(4);
 	return ss;
@@ -125,7 +195,8 @@ CString CZWEIII::Gett(int a){
 void CZWEIII::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tiz2[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tiz2_en[idx] : tiz2[idx];
 	ret=_tstoi(s.Left(4));
 	ret2=m_list.GetCurSel();
 	if(ret2>65)
@@ -146,13 +217,16 @@ void CZWEIII::OnDblclkList1()
 BOOL CZWEIII::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(L"ZWEI II");
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<67;i++)
 	{
 		CString s;
-		s=tiz2[i];if(s.Left(2)=="★"){}else{s="ZW2_";s+=tiz2[i];}
+		s=savedata.lang ? tiz2_en[i] : tiz2[i];
+		if(s.Left(2)!=_T("★")){ CString t=_T("ZW2_"); t+=s; s=t; }
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

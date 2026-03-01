@@ -63,16 +63,17 @@ BOOL CAudioSelect::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
 
-	// TODO:  ここに初期化を追加してください
+	SetWindowText(LL2(L"再生ストリーム選択", L"Select Playback Stream"));
+	SetDlgItemText(IDC_STATIC, LL2(L"複数の音声チャンネルがある時に\nこの画面が表示されます。\n再生したい音声チャンネルを\n選択して下さい。\n\n再生ウィンドウでの右クリック\nメニューからも選択できます。", L"When there are multiple audio channels,\nthis screen will be displayed.\nPlease select the audio channel\nyou want to play.\n\nYou can also select from the\nright-click menu on the playback window."));
 	m_tooltip.Create(this);
 	m_tooltip.Activate(TRUE);
-	m_tooltip.AddTool(GetDlgItem(IDOK),_T("音声ストリームを決定します"));
+	m_tooltip.AddTool(GetDlgItem(IDOK), LL2(L"音声ストリームを決定します", L"Determine audio stream"));
 	m_tooltip.SetDelayTime( TTDT_AUTOPOP, 10000 );
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 
 	for(int i=0;i<no;i++){
 		CString str;
-		str.Format(_T("音声%d:%s"),i+1, streamname[i]);
+		str.Format(LL2(L"音声%d:%s", L"Audio %d:%s"), i+1, streamname[i]);
 		m_lb.AddString(str);
 	}
 

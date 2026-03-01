@@ -65,9 +65,38 @@ char tiy121[][128]={
 "★オープニング"
 };
 
+char tiy121_en[][128]={
+"YS1&2OP",
+"ys100 Ys -Opening-",
+"ys101 FEENA",
+"ys102 FOUNTAIN OF LOVE",
+"ys103 THE SYONIN",
+"ys104 TEARS OF SYLPH",
+"ys105 FIRST STEP TOWARDS WARS",
+"ys106 PALACE",
+"ys107 HOLDERS OF POWER",
+"ys108 PALACE OF DESTRUCTION",
+"ys109 BEAT OF THE TERROR",
+"ys110 TOWER OF THE SHADOW OF DEATH",
+"ys111 THE LAST MOMENT OF THE DARK",
+"ys112 FINAL BATTLE",
+"ys113 REST IN PEACE",
+"ys114 THE MORNING GROW",
+"ys115 SEE YOU AGAIN",
+"ys134 DEVIL'S WIND",
+"ys135 SO MUCH FOR TODAY",
+"ys137 RODA",
+"ys138 DEPARTURE",
+"ys139 OPEN YOUR HEART",
+"ys140 DREAMING",
+"ys141 TENSION",
+"ys142 CHASE OF SHADOW",
+"★Opening"
+};
+
 CString CYs12_1::Gett(int a){
 	CString s,ss;
-	s=tiy121[a];
+	s=savedata.lang ? tiy121_en[a] : tiy121[a];
 	if(a!=0){
 		ss=s.Left(5);ss.TrimRight();
 	}else ss=s;
@@ -80,7 +109,8 @@ CString CYs12_1::Gett(int a){
 void CYs12_1::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tiy121[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tiy121_en[idx] : tiy121[idx];
 	if(m_list.GetItemData(m_list.GetCurSel())==0)
 		ret=s;
 	else{
@@ -106,13 +136,15 @@ void CYs12_1::OnDblclkList1()
 BOOL CYs12_1::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"Ys 12 完全版 Ys1", L"Ys 12 Complete Ys1"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(26);i++)
 	{
 		CString s;
-		s=tiy121[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tiy121[i];}
+		s=savedata.lang ? tiy121_en[i] : tiy121[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

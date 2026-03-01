@@ -194,11 +194,161 @@ char ti_3[][50]={
 "★動画2",
 "★動画3"
 };
+
+char ti_3_en[][50]={
+"001 Dancing with the Wind SC Ver",
+"020 Faint Glittering Light",
+"021 Cry for me, cry for you Opening version",
+"022 Look Up at the Sky Ending version",
+"024 Majestic Presence on the Wasteland",
+"100 Provincial City Rolent",
+"101 Commercial City Bose",
+"102 Port City Ruan",
+"103 Workshop City Zeiss",
+"104 Royal Capital Grancel",
+"105 Cat Relaxing in the Sun",
+"106 Border Patrol Isn't Easy",
+"107 Royal Castle",
+"108 Grand Arena",
+"110 Welcome to Le Locle",
+"111 Town Where the Lights Went Out",
+"112 Heartless Surprise Attack",
+"113 Flying Battleship Glorious",
+"120 Hermit's Garden",
+"121 Shione's House",
+"122 As Your Heart Desires",
+"123 The Final Choice",
+"200 Walking in Liberl",
+"201 Secret Green Passage",
+"202 Rock on the Road",
+"210 Look Up at the Sky",
+"300 Wandering in the Darkness",
+"301 Steel Floor Blocking the Path",
+"302 Peace in the Darkness",
+"303 Tetracyclic Towers",
+"304 Leiston Fortress",
+"305 Hollow Land of Light",
+"310 Hidden True Form",
+"311 Infiltration",
+"312 Floating City Liber Ark",
+"313 Aiming Beyond",
+"314 Central Tower Axis Pillar",
+"315 ★Sound Effects★",
+"316 To Our Comrades",
+"320 Jade Corridor",
+"321 Otherworld",
+"322 Golden Road, Silver Road",
+"323 Labyrinth of Light and Shadow",
+"324 Abyss",
+"325 Phantom Castle Phantasmagoria",
+"330 Twilight Royal Castle",
+"331 Unmoving World",
+"332 Enter the Tiger's Lair",
+"333 Phantom Blue Flower",
+"334 Black Ark",
+"400 Sophisticated Fight",
+"402 To be Suggestive",
+"403 Silver Will",
+"404 Challenger Invited",
+"405 Ancient Makes",
+"406 Guardian of the Treasure",
+"407 Crush!!",
+"408 Disappearing Star",
+"410 Pinch!!",
+"420 Strepitoso Fight",
+"421 The Fate Of The Fairies",
+"422 Obstructive Existence",
+"423 Fight with Assailant",
+"424 Great Dread",
+"425A Maybe It Was Fated Instrumental Ver.",
+"426 Outskirts of Evolution",
+"427 The Merciless Savior",
+"428 Grave Marker Pierced by Lightning",
+"429 Feeling Danger Nearby",
+"430 Determination of Fight",
+"431 Fighting Right On",
+"432 Close to the Brink",
+"433 Overdosing Heavenly Bliss",
+"434 Genuine Devil",
+"435 Dream and Bustle Holy Land",
+"436 Banquet of frenzy",
+"437 Masquerade of Lies",
+"438 This Is My Real Power!",
+"439 Goddess, Have Mercy...",
+"440 Dream and Bustle Holy Land (Retry)",
+"500 Where the Stars Are Harmonica short Ver.",
+"501 Amber Love Hum Ver.",
+"502 Amber Love Piano Ver.",
+"503 Amber Love Lute Ver.",
+"504 Where the Stars Are Harmonica long Ver.",
+"505 Let's Go Lively",
+"510 Determination to Leave",
+"511 Those Who Move in the Shadows",
+"512 Don't Let Him Escape!",
+"513 In My Heart",
+"514 Under the Moonlight",
+"516 Creeping Crisis",
+"517 We're the Capua Family!",
+"518 Path of Departure",
+"519 Recapture",
+"520 Liberation from the Curse, and...",
+"521 Confession",
+"522 Black Ouroboros",
+"523 Pride of Liberl",
+"530 (Drama) Princess's Worry",
+"531 (Drama) Knights' Lament",
+"532 (Drama) Each One's Scheme",
+"533 (Drama) Castle",
+"534 (Drama) Colosseum",
+"535 (Drama) Duel",
+"536 (Drama) Princess's Death",
+"537 (Drama) Grand Finale",
+"540 Conspiracy",
+"541 Enforcer",
+"542 Gospel Plan",
+"543 Approaching Threat",
+"544 Hamel",
+"546 Crushed",
+"547 Shadow Lurking in the Wasteland",
+"548 Continuation of the Dream",
+"549 Where Bonds Are",
+"550 Silver Will Super Arrange Ver",
+"551 Where the Stars Are Instrumental ver",
+"552 Etude of the Ruin",
+"554 Truth of the Tragedy",
+"556 Phantasm",
+"560 Flying Liner Lusitania",
+"561 Assault",
+"562 Unwelcome One",
+"563 Precious Thing",
+"564 Recollection",
+"565 Stairway to Purgatory",
+"566 Shadow King",
+"567 Cry for your Eternity",
+"568 Cradle Where Feelings Sleep",
+"569 So We May Meet Again",
+"570 I Forgot You",
+"571 The Crimson Stigma",
+"572 Star Door 14",
+"573 Land of Beginning",
+"574 Rex's Ark",
+"581 Goddess's Mood Depends on Fortune",
+"582 Fishing King Forever",
+"583 Mystery of the Sky Solved!",
+"584 Lynx Counteroffensive",
+"586 Till the Night of Glory",
+"★FALCOM logo video",
+"★Opening video",
+"★Ending video",
+"★Video 1",
+"★Video 2",
+"★Video 3"
+};
 /**/
 
 CString CED63rd::Gett(int a){
 	CString s;
-	s=ti_3[a];
+	s=savedata.lang ? ti_3_en[a] : ti_3[a];
 	fnn=s.Mid(5);
 	return s;
 }
@@ -206,7 +356,8 @@ CString CED63rd::Gett(int a){
 void CED63rd::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=ti_3[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? ti_3_en[idx] : ti_3[idx];
 	ret=_tstoi(s.Left(3));
 	ret2=m_list.GetCurSel();
 	if(ret2>141)
@@ -228,16 +379,18 @@ void CED63rd::OnDblclkList1()
 BOOL CED63rd::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"空の軌跡 The 3rd -Advanced Chapter-", L"Sora no Kiseki The 3rd -Advanced Chapter-"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<141+6;i++)
 	{
 		CString s;
-		s=ti_3[i];
-		if(s.Left(2)=="★"){}else
-		{	s="ED6";
-		s+=ti_3[i]; }
+		s=savedata.lang ? ti_3_en[i] : ti_3[i];
+		if(s.Left(2)!="★"){
+			CString t=L"ED6"; t+=s; s=t;
+		}
 //		s+="";
 /*		switch(ti[i][0])
 		{

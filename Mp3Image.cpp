@@ -542,7 +542,7 @@ void CMp3Image::Load(CString s)
 
 	cdc0 = GetDC();
 	if (img.Load(stream) == E_FAIL) {
-		MessageBox(_T("画像データが開けません。"));
+		MessageBox(LL2(L"画像データが開けません。", L"Could not open image data."));
 		GlobalFree(hG);
 		DestroyWindow();
 		return;
@@ -809,7 +809,7 @@ void CMp3Image::OnRButtonDown(UINT nFlags, CPoint point)
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
 	CMenu menu;
 	menu.CreatePopupMenu();
-	menu.AppendMenu(MF_STRING | MF_ENABLED, IDOK, _T("閉じる)"));
+	menu.AppendMenu(MF_STRING | MF_ENABLED, IDOK, LL2(L"閉じる", L"Close"));
 
 	ClientToScreen(&point);
 	menu.TrackPopupMenu(

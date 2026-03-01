@@ -54,8 +54,8 @@ static inline int32_t ALWAYS_INLINE sign_of_int( int32_t i )
 
 void unpc_block( int32_t * pc1, int32_t * out, int32_t num, int16_t * coefs, int32_t numactive, uint32_t chanbits, uint32_t denshift )
 {
-	register int16_t	a0, a1, a2, a3;
-	register int32_t	b0, b1, b2, b3;
+	int16_t	a0, a1, a2, a3;
+	int32_t	b0, b1, b2, b3;
 	int32_t					j, k, lim;
 	int32_t				sum1, sg, sgn, top, dd;
 	int32_t *			pout;
@@ -105,8 +105,8 @@ void unpc_block( int32_t * pc1, int32_t * out, int32_t num, int16_t * coefs, int
 	if ( numactive == 4 )
 	{
 		// optimization for numactive == 4
-		register int16_t	a0, a1, a2, a3;
-		register int32_t	b0, b1, b2, b3;
+		int16_t	a0, a1, a2, a3;
+		int32_t	b0, b1, b2, b3;
 
 		a0 = coefs[0];
 		a1 = coefs[1];
@@ -188,8 +188,8 @@ void unpc_block( int32_t * pc1, int32_t * out, int32_t num, int16_t * coefs, int
 	}
 	else if ( numactive == 8 )
 	{
-		register int16_t	a4, a5, a6, a7;
-		register int32_t	b4, b5, b6, b7;
+		int16_t	a4, a5, a6, a7;
+		int32_t	b4, b5, b6, b7;
 
 		// optimization for numactive == 8
 		a0 = coefs[0];

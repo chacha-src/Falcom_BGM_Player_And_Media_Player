@@ -72,9 +72,45 @@ char tiy122[][128]={
 "★オープニング2"
 };
 
+char tiy122_en[][128]={
+"01ys248 TO MAKE THE END OF BATTLE",
+"02ys236 LILIA",
+"03ys205 TOO FULL WITH LOVE",
+"04ys225 APATHETIC STORY",
+"05ys226 MAY I HELP YOU",
+"06ys228 FEEL BLUE",
+"07ys201 RUINS OF MOONDORIA",
+"08ys220 NOBLE DISTRICT OF TOAL",
+"09ys249 REST IN PEACE",
+"10ys241 CAVERN OF RASTEENIE",
+"11ys244 PROTECTERS",
+"12ys242 ICE RIDGE OF NOLTIA",
+"13ys203 INSIDE OF THE ICE WALL",
+"14ys243 MOAT OF BURNEBLESS",
+"15ys232 TENDER PEOPLE",
+"16ys240 PALACE OF SALMON",
+"17ys233 SUBTERRANEAN CANAL",
+"18ys245 COMPANILE OF LANE",
+"19ys223 PRESSURE ROAD",
+"20ys235 DON'T GO SO SMOOTHLY!",
+"21ys234 FEENA",
+"22ys246 TERMINATION",
+"23ys221 A STILL TIME",
+"24ys207 STAY WITH ME FOREVER",
+"25ys218 SO MUCH FOR TODAY",
+"26ysn001COLONY OF LAVA",
+"27ysi001OPEN YOUR HEART",
+"28yss003FEENA",
+"29ys124 BATTLE GROUND",
+"30ys121 OVER DRIVE",
+"31ys116 FAIR WIND",
+"★Opening 1",
+"★Opening 2"
+};
+
 CString CYs12_2::Gett(int a){
 	CString s,ss;
-	s=tiy122[a];
+	s=savedata.lang ? tiy122_en[a] : tiy122[a];
 	ss=s.Left(8);ss.TrimRight();
 	fnn=s.Mid(8);fnn.TrimRight();
 	return ss;
@@ -85,7 +121,8 @@ CString CYs12_2::Gett(int a){
 void CYs12_2::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tiy122[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tiy122_en[idx] : tiy122[idx];
 	ret=s.Left(8); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 #if UNICODE
@@ -104,13 +141,15 @@ void CYs12_2::OnDblclkList1()
 BOOL CYs12_2::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"Ys 12 完全版 Ys2", L"Ys 12 Complete Ys2"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(33);i++)
 	{
 		CString s;
-		s=tiy122[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tiy122[i];}
+		s=savedata.lang ? tiy122_en[i] : tiy122[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

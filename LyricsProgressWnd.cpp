@@ -9,7 +9,7 @@ END_MESSAGE_MAP()
 
 CLyricsProgressWnd::CLyricsProgressWnd()
 {
-	m_strText = _T("歌詞取得中...\n長い時10秒くらいかかります\n\n取得できない時は歌詞はでません。");
+	m_strText = LL2(L"歌詞取得中...\n長い時10秒くらいかかります\n\n取得できない時は歌詞はでません。", L"Fetching lyrics...\nMay take up to 10 seconds.\n\nLyrics will not appear if unavailable.");
 }
 
 CLyricsProgressWnd::~CLyricsProgressWnd()

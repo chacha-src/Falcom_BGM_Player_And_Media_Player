@@ -56,8 +56,8 @@ static DWORD WINAPI MixerMuteCheckThread(LPVOID)
 			BOOL muted = FALSE;
 			if (SUCCEEDED(simple->GetMute(&muted)) && muted) {
 				int result = MessageBoxW(NULL,
-					L"音声ミキサーでミュートになっています。\nこのままでは音が出ません。解除しますか？",
-					L"確認",
+					LL2(L"音声ミキサーでミュートになっています。\nこのままでは音が出ません。解除しますか？", L"Muted in volume mixer.\nNo sound will play. Unmute?"),
+					LL2(L"確認", L"Confirm"),
 					MB_OKCANCEL | MB_ICONWARNING | MB_SYSTEMMODAL | MB_TOPMOST);
 				if (result == IDOK) {
 					simple->SetMute(FALSE, NULL);
@@ -85,8 +85,8 @@ void CheckCurrentAppMixerMuteModal()
 			BOOL muted = FALSE;
 			if (SUCCEEDED(simple->GetMute(&muted)) && muted) {
 				int result = MessageBoxW(NULL,
-					L"音声ミキサーでミュートになっています。\nこのままでは音が出ません。解除しますか？",
-					L"確認",
+					LL2(L"音声ミキサーでミュートになっています。\nこのままでは音が出ません。解除しますか？", L"Muted in volume mixer.\nNo sound will play. Unmute?"),
+					LL2(L"確認", L"Confirm"),
 					MB_OKCANCEL | MB_ICONWARNING | MB_SYSTEMMODAL | MB_TOPMOST);
 				if (result == IDOK) {
 					simple->SetMute(FALSE, NULL);
@@ -133,9 +133,9 @@ bool CheckMixerMuteOnPlayModal()
 
 	BOOL masterMuted = FALSE;
 	if (GetMasterMuteState(&masterMuted) && masterMuted) {
-		int result = MessageBoxW(NULL,
-			L"全体がミュート設定になっています。解除しますか？",
-			L"確認",
+			int result = MessageBoxW(NULL,
+				LL2(L"全体がミュート設定になっています。解除しますか？", L"Master volume is muted. Unmute?"),
+				LL2(L"確認", L"Confirm"),
 			MB_OKCANCEL | MB_ICONWARNING | MB_SYSTEMMODAL | MB_TOPMOST);
 		if (result == IDOK) {
 			IMMDeviceEnumerator* enumerator = NULL;
@@ -161,8 +161,8 @@ bool CheckMixerMuteOnPlayModal()
 			BOOL muted = FALSE;
 			if (SUCCEEDED(simple->GetMute(&muted)) && muted) {
 				int result = MessageBoxW(NULL,
-					L"音声ミキサーで当アプリがミュートになっています。\n解除しますか？",
-					L"確認",
+					LL2(L"音声ミキサーで当アプリがミュートになっています。\n解除しますか？", L"This app is muted in volume mixer.\nUnmute?"),
+					LL2(L"確認", L"Confirm"),
 					MB_OKCANCEL | MB_ICONWARNING | MB_SYSTEMMODAL | MB_TOPMOST);
 				if (result == IDOK) {
 					simple->SetMute(FALSE, NULL);

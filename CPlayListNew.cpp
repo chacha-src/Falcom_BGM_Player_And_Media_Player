@@ -43,7 +43,7 @@ void CPlayListNew::OnBnClickedOk()
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	m_name.GetWindowText(name);
 	if (name.GetLength() > 200) {
-		MessageBox(L"文字数が長すぎます", L"ogg簡易プレイヤ");
+		MessageBox(LL2(L"文字数が長すぎます", L"Text is too long"), LL2(L"ogg簡易プレイヤ", L"ogg Simple Player"));
 		return;
 	}
 	CCustomBlurDialogExBase::OnOK();
@@ -54,7 +54,8 @@ BOOL CPlayListNew::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
 
-	// TODO: ここに初期化を追加してください
+	SetWindowText(LL2(L"新しいプレイリスト", L"New Playlist"));
+	SetDlgItemText(IDC_STATIC, LL2(L"新しいプレイリスト名", L"New playlist name"));
 	m_name.SetWindowText(name);
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。

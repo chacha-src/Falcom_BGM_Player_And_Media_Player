@@ -105,9 +105,78 @@ char tied4[][128]={
 "E4N35 朱紅い雫　-エンドクレジット-"
 };
 
+char tied4_en[][128]={
+"E4S00 Tear of Vermillion -memoria-",
+"★OP1 Tear of Vermillion -Legend- (Opening movie)",
+"★OP2 Bond -With Burning Heart- (Opening movie)",
+"E4B01 Embraced by Warmth...",
+"E4N28 Heretic Assault -Shadow of Octum-",
+"E4A00 Days of Tranquility",
+"E4S02 Village Once Visited",
+"E4S04 Light Steps",
+"E4N00 That Won't Do SHOW",
+"E4S05 Path to Hope",
+"E4S13 Never Give Up!",
+"E4A01 Royal Capital Fildin",
+"E4A02 Fildin Castle",
+"E4N01 Merry Companions",
+"E4S17 Run Avin!!",
+"E4C01 Terrified People",
+"E4N17 To the Path We Must Take",
+"E4S06 Those Who Nest in Darkness",
+"E4S14 Labyrinth Dance",
+"E4S28 Shamshir Corps",
+"E4S18 Spirited Shannon",
+"E4S07 Into the Forest",
+"E4N24 Tear of Vermillion -Chosen Maiden-",
+"E4S01 Bustling Street Corner",
+"E4C00 Steel Town ~Gear~",
+"E4S15 Don't Interfere!",
+"E4S24 There's Tomorrow",
+"E4C03 At a Loss -Gear Blues-",
+"E4S03 Rhythm of the Sea Breeze",
+"E4S11 Riding the Ocean Wind",
+"E4S25 Tear of Vermillion -Beloved Aimer-",
+"E4N14 Tear of Vermillion -Happy Time-",
+"E4N20 Burn Avin!!",
+"E4N25 I've Come to Help!",
+"E4N19 Tear of Vermillion -Wait for Me Aimer-",
+"E4N99 Easy Win!",
+"E4N22 Departure",
+"E4N12 Heretic Bishop Bellius -Assault-",
+"E4E00 Holy Capital",
+"E4E01 Chapel -Fate and Destiny-",
+"E4N10 Bond -Beyond Sorrow-",
+"E4N11 Blue -Journey to Reclaim-",
+"E4N29 Line to Defend",
+"E4D00 In Search of Truth",
+"E4N80 I Am Baldus -Truth-",
+"E4N15 Baldus' Sleeping Shrine",
+"E4N33 Death Battle -Defiled Spirit-",
+"E4N23 Amid Gathering Dark Clouds",
+"E4S10 Ancient Legacy",
+"E4S08 Peat Bog",
+"E4N13 Sacrifice of the Gods",
+"E4N27 Heretic Assault -Borgade-",
+"E4S19 Bond -Frozen-",
+"E4N81 I Am Baldus -Assembly-",
+"E4G06 I Am Baldus -Assembly-",
+"E4N32 Unavoidable Battle",
+"E4G00 Land of Seals",
+"E4G02 Space-Time Labyrinth",
+"E4G03 Heretic Bishop Bellius -Conviction-",
+"E4G04 For My Conviction!",
+"E4G05 Octum's Wish",
+"E4N30 So Strong a Wish -Price-",
+"E4N34 So Strong a Wish -Underworld-",
+"E4N31 Rutis' Heart",
+"E4N26 Bond -To Our Own Places-",
+"E4N35 Tear of Vermillion -End Credits-"
+};
+
 CString CED4::Gett(int a){
 	CString s,ss;
-	s=tied4[a];
+	s=savedata.lang ? tied4_en[a] : tied4[a];
 	ss=s.Left(5);ss.TrimRight();
 	fnn=s.Mid(6);
 	return ss;
@@ -118,7 +187,8 @@ CString CED4::Gett(int a){
 void CED4::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tied4[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tied4_en[idx] : tied4[idx];
 	ret=s.Left(5); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 #if UNICODE
@@ -137,13 +207,15 @@ void CED4::OnDblclkList1()
 BOOL CED4::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"英雄伝説IV 朱紅い雫", L"Legend of Heroes IV Tear of Vermillion"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(66);i++)
 	{
 		CString s;
-		s=tied4[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tied4[i];}
+		s=savedata.lang ? tied4_en[i] : tied4[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

@@ -73,6 +73,43 @@ char tidi[][128]={
 "★オープニング"
 };
 
+char tidi_en[][128]={
+"dinow_01 Those Lost",
+"dinow_02 Mark My Words",
+"dinow_03 Hymn of the Spirits",
+"dinow_04 FRONT LINE",
+"dinow_05 Break Through!",
+"dinow_06 A TEMPLE",
+"dinow_07 GOD!",
+"dinow_08 Clay Flute",
+"dinow_09 EXCITING SHOP",
+"dinow_10 INTO THE CASTLE",
+"dinow_11 Meeting Tarsis",
+"dinow_12 Battle at the End of Sorrow",
+"dinow_13 Moment of Encounter",
+"dinow_14 BURNING!",
+"dinow_15 Requiem",
+"dinow_16 Divine Revelation",
+"dinow_17 Tower of Trial",
+"dinow_18 When the Dragon Departs",
+"dinow_19 Tower of Wind",
+"dinow_20 Underground Shrine",
+"dinow_21 Dimensional Labyrinth",
+"dinow_22 Tower of Darius",
+"dinow_23 I Love You",
+"dinow_24 Harp",
+"dinow_25 Time of Innocence",
+"dinow_26 THE MASCLE MAN",
+"dinow_27 Forna",
+"dinow_28 Tower of Spirits",
+"dinow_29 War God",
+"dinow_30 DINOSAUR",
+"dinow_31 Weaving Dreams",
+"dinow_32 Emblem of Wind",
+"dinow_33 Music Box",
+"★Opening"
+};
+
 double di[34][2]={
 	{22.0138095238095,181.765351473923},
 	{9.08820861678005,86.2321315192744},
@@ -112,7 +149,7 @@ double di[34][2]={
 
 CString CDino::Gett(int a){
 	CString s,ss,sss;int aa;
-	s=tidi[a];
+	s=savedata.lang ? tidi_en[a] : tidi[a];
 	ss=s.Left(8);ss.TrimRight();
 	sss=ss.Right(2);aa=_tstoi(sss)-1;
 	loop1=(int)(di[aa][0]*44100.0);
@@ -126,7 +163,8 @@ CString CDino::Gett(int a){
 void CDino::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s,ss,sss;int aa;	s=tidi[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s,ss,sss;int aa;	s=savedata.lang ? tidi_en[idx] : tidi[idx];
 	ret=s.Left(8); ret.TrimRight();
 	ret2=m_list.GetCurSel();ss=ret;
 	sss=ss.Right(2);aa=_tstoi(sss)-1;
@@ -151,13 +189,15 @@ void CDino::OnDblclkList1()
 BOOL CDino::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"ダイナソア リザレクション", L"Dinosaur Resurrection"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(34);i++)
 	{
 		CString s;
-		s=tidi[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tidi[i];}
+		s=savedata.lang ? tidi_en[i] : tidi[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

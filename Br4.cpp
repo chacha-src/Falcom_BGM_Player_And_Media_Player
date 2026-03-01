@@ -80,9 +80,54 @@ char tibr4[][128]={
 "VT49DA ジングル：詩人7"
 };
 
+char tibr4_en[][128]={
+"VT01DA Brandish4 -OP-",
+"VT03DA Ancient Prayer-meditation-",
+"VT05DA Ruins-the prop-",
+"VT13DA Shop-relation-",
+"VT32DA Labyrinth-roar-",
+"VT04DA District-division-",
+"VT14DA Casino-eighth wonder-",
+"VT19DA Game-hammer slime-",
+"VT15DA Arena-black field-",
+"VT16DA Tower Mystery-mysterious-",
+"VT27DA Ruins 2-debris-",
+"VT18DA Death Battle-trigger-",
+"VT28DA Ruins 3-deep haze-",
+"VT06DA Waters-the abyss-",
+"VT07DA Garden-bramble-",
+"VT33DA Summon-hostile-",
+"VT08DA Fortress-solid steel-",
+"VT09DA Cathedral-judgement-",
+"VT17DA Tower Revival-retribution-",
+"VT10DA Womb-forbidden power-",
+"VT30DA Duel-fatal riders-",
+"VT11DA Temple-heritage-",
+"VT12DA Labyrinth of Oblivion-another door-",
+"VT34DA Altar-altar-",
+"VT20DA Gilas-victim-",
+"VT39DA Epilogue I-daybreak-",
+"VT40DA Epilogue II-twilight-",
+"VT41DA Epilogue IV-broken chain-",
+"VT21DA VT21(Ending)",
+"VT22DA VT22(Ending)",
+"VT35DA ENDING",
+"VT02DA Staff",
+"VT36DA Rest-slumber-",
+"VT31DA GAME OVER",
+"VT38DA Introduction",
+"VT43DA Jingle: Poet 1",
+"VT44DA Jingle: Poet 2",
+"VT45DA Jingle: Poet 3",
+"VT46DA Jingle: Poet 4",
+"VT47DA Jingle: Poet 5",
+"VT48DA Jingle: Poet 6",
+"VT49DA Jingle: Poet 7"
+};
+
 CString CBr4::Gett(int a){
 	CString s,ss;
-	s=tibr4[a];
+	s=savedata.lang ? tibr4_en[a] : tibr4[a];
 	ss=s.Left(6);ss.TrimRight();
 	fnn=s.Mid(7);
 	return ss;
@@ -107,13 +152,15 @@ void CBr4::OnDblclkList1()
 BOOL CBr4::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"ブランディッシュ４ 眠れる神の塔", L"Brandish4 Tower of the Sleeping God"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(42);i++)
 	{
 		CString s;
-		s=tibr4[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tibr4[i];}
+		s=savedata.lang ? tibr4_en[i] : tibr4[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

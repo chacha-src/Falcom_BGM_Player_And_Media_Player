@@ -71,14 +71,52 @@ char tiz1[][128]={
 "bgm34 ムービー5 -崩壊-",
 "bgm77 Zwei!!シューティング -遊んでピピロ-",
 "bgm75 Theme of Adol 2001",
-"bgm76 モナモ～ナ",
+"bgm76 Mona Mona",
 "boss  "
 };
 
+char tiz1_en[][128]={
+"bgm44 Floating Continent Arges -Introduction-",
+"bgm35 Eternal Dream, Sky Memory -Zwei!! Adventure for Two-",
+"bgm03 Puck Village",
+"bgm01 Floating Continent Arges -Main Theme-",
+"bgm13 Pavel Garden",
+"bgm12 Kayapa Forest",
+"bgm06 Crop Cave",
+"bgm07 Kenopy Volcano",
+"bgm70 Floating Continent Arges -Dreaming Treasure-",
+"bgm72 Corvette's Theme -Cat Says Meow!-",
+"bgm27 Fight!! -Destroy Puckle-",
+"bgm60 A Moment of Rest",
+"bgm16 Daphne Desert",
+"bgm18 Hypolita Hill",
+"bgm19 Tripoka Lake",
+"bgm21 Psyche Mansion",
+"bgm50 Good Night",
+"bgm10 Village of Fairies",
+"bgm26 Spirit Ancient Labyrinth",
+"bgm71 Path of the Sleeping Dragon",
+"bgm14 Apries Temple",
+"bgm15 Espina Dark Temple",
+"bgm08 Phantom Land Serpentina",
+"bgm22 Demon Lord's Arms -HAND-",
+"bgm09 Final Battle -Demon Lord Vesper",
+"bgm74 Melody of Relief",
+"bgm36 Song of Flowers and Wind",
+"bgm30 Movie 1 -Invitation to Light-",
+"bgm31 Movie 2 -Invitation to Darkness-",
+"bgm32 Movie 3 -Advent-",
+"bgm33 Movie 4 -Great Tree-",
+"bgm34 Movie 5 -Collapse-",
+"bgm77 Zwei!! Shooting -Play Pipiro-",
+"bgm75 Theme of Adol 2001",
+"bgm76 Mona Mona",
+"boss  "
+};
 
 CString CZwei::Gett(int a){
 	CString s,ss;
-	s=tiz1[a];
+	s=savedata.lang ? tiz1_en[a] : tiz1[a];
 	ss=s.Left(5);ss.TrimRight();
 	fnn=s.Mid(6);
 	return ss;
@@ -89,7 +127,8 @@ CString CZwei::Gett(int a){
 void CZwei::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tiz1[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tiz1_en[idx] : tiz1[idx];
 	ret=s.Left(5); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 	if(s.Left(2)=="★"){
@@ -103,13 +142,15 @@ void CZwei::OnDblclkList1()
 BOOL CZwei::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(L"Zwei!!");
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(36);i++)
 	{
 		CString s;
-		s=tiz1[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tiz1[i];}
+		s=savedata.lang ? tiz1_en[i] : tiz1[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

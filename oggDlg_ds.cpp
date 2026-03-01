@@ -105,10 +105,10 @@ CString COggDlg::init(HWND hwnd, int sm)
 			savedata.soundcur = 0;
 		}
 	}
-	if (m_ds == NULL) return _T("DirectSoundを生成できません。\nDirectX7が正常にインストールされているか確認してください。");
+	if (m_ds == NULL) return LL2(L"DirectSoundを生成できません。\nDirectX7が正常にインストールされているか確認してください。", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.");
 	if (m_ds->SetCooperativeLevel(hwnd, DSSCL_PRIORITY) != DS_OK) {
-		MessageBox(L"SetCooperativeLevelに失敗しました");
-		return _T("DirectSoundの強調レベルを設定できません。\nDirectX7が正常にインストールされているか確認してください。");
+		MessageBox(LL2(L"SetCooperativeLevelに失敗しました", L"SetCooperativeLevel failed"));
+		return LL2(L"DirectSoundの強調レベルを設定できません。\nDirectX7が正常にインストールされているか確認してください。", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.");
 	}
 	hw = 0;
 	//	ZeroMemory(&d,sizeof(d));d.dwSize=sizeof(d);HRESULT r =m_ds->GetCaps(&d);
@@ -127,7 +127,7 @@ CString COggDlg::init(HWND hwnd, int sm)
 	dss.lpwfxFormat = NULL;
 	dss.dwBufferBytes = 0;
 	if (m_ds->CreateSoundBuffer(&dss, &m_p, NULL) != DS_OK) {
-		return _T("DirectSoundのプライマリバッファを生成できません。\nDirectX7が正常にインストールされているか確認してください。");
+		return LL2(L"DirectSoundのプライマリバッファを生成できません。\nDirectX7が正常にインストールされているか確認してください。", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.");
 	}
 
 	if (m_p != NULL) {
@@ -867,7 +867,7 @@ void COggDlg::WASAPIChange(WAVEFORMATEX* pwf)
 	REFERENCE_TIME buffer_duration = buffer_period * 4;
 	int ret = pAudioClient->IsFormatSupported(AUDCLNT_SHAREMODE_EXCLUSIVE, (WAVEFORMATEX*)pwf, &alt_format);
 	if (FAILED(ret)) {
-		MessageBox(L"未サポートのフォーマット¥n");
+		MessageBox(LL2(L"未サポートのフォーマット", L"Unsupported format"));
 		return;
 	}
 	ret = pAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_NOPERSIST, buffer_duration, buffer_period, pwf, NULL);
@@ -3911,7 +3911,7 @@ void equaliser(void* data, int len, BOOL reset) {
 				CalcPeakingEQ(&g_channels[ch].eqFilters[b],
 					EQ_FREQS[b],           // 低音から順に
 					qVal,                   // 高域はQを下げる
-					savedata.eq[b],         // 直接値を渡す
+					(float)savedata.eq[b],         // 直接値を渡す
 					wavbitbackup);
 			}
 

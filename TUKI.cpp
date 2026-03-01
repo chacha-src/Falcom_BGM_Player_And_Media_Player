@@ -78,9 +78,51 @@ char tituki[][128]={
 "★動画５"
 };
 
+char tituki_en[][128]={
+"Mc000 Ruins of Love",
+"Mc001 Serenity",
+"Mc003 Joyful Tide",
+"Mc011 Free Roaming",
+"Mc002 Phantom Shadow",
+"Mc013 Moon Spring",
+"Mc014 Storm Approaching",
+"Mc004 Silk Road(Drum Bell)",
+"Mc015 Spring Walk",
+"Mc005 Allegro/Comic Tune",
+"Mc016 Nightmare",
+"Mc006 Remembrance",
+"Mc017 Evening Return",
+"Mc007 Parting",
+"Mc018 Empty Mountain",
+"Mc008 Autumn Night",
+"Mc019 Dust of Thought",
+"Mc020 Secret Assassin",
+"Mc021 Ambush",
+"Mc022 Decisive Battle",
+"Mc012 Play",
+"Mc023 Forget Sorrow",
+"Mc024 Heavenly Chant",
+"Mc025 Fierce Kill",
+"Mc026 Rage Kill",
+"Mc027 Blood Battle",
+"Mc028 Blade Enemy",
+"Mc075 (Unknown)",
+"★FALCOM logo",
+"★Opening",
+"★Staff roll",
+"★Ending 1",
+"★Ending 2",
+"★Ending 3",
+"★Video 1",
+"★Video 2",
+"★Video 3",
+"★Video 4",
+"★Video 5"
+};
+
 CString CTUKI::Gett(int a){
 	CString s,ss;
-	s=tituki[a];
+	s=savedata.lang ? tituki_en[a] : tituki[a];
 	ss=s.Left(5);ss.TrimRight();
 	fnn=s.Mid(6);
 	return ss;
@@ -91,7 +133,8 @@ CString CTUKI::Gett(int a){
 void CTUKI::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tituki[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tituki_en[idx] : tituki[idx];
 	ret=s.Left(5); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 #if UNICODE
@@ -110,13 +153,15 @@ void CTUKI::OnDblclkList1()
 BOOL CTUKI::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"月影のデスティニー", L"TSUKI no Destiny"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(39);i++)
 	{
 		CString s;
-		s=tituki[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tituki[i];}
+		s=savedata.lang ? tituki_en[i] : tituki[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

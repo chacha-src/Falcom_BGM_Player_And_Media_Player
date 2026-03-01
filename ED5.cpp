@@ -137,9 +137,110 @@ char tied5[][128]={
 "ED5WV109 ともに踊らん(マクベイン一座)"
 };
 
+char tied5_en[][128]={
+"ED5WV002 Leone Fredrik Richter \"Cagesong of the Ocean\"",
+"ED5WV065 Sleepyhead Tadd(Fort)",
+"ED5WV020 Time of Tranquility",
+"ED5WV030 On the Sunlit Hill",
+"ED5WV006 Song of Spring(McBain)",
+"ED5WV068 Serenade of the Wind(Altos)",
+"ED5WV036 Song of the Breeze",
+"ED5WV041 Silence in the Darkness",
+"ED5WV012 Monster Attack, Big Trouble!",
+"ED5WV011 Easy Win!...Right?",
+"ED5WV024 Lured by the Sea Breeze",
+"ED5WV081 Messenger from the Dark",
+"ED5WV015 What's With This Guy!",
+"ED5WV033 Embraced by the Sea Breeze",
+"ED5WV052 Xiao and Rachel",
+"ED5WV053 Don't Interfere SHOW",
+"ED5WV031 Path to the Blue Sky",
+"ED5WV034 Deep Forest",
+"ED5WV023 Season of Love",
+"ED5WV061 Leone's Etude(Schubert)",
+"ED5WV107 Leone's Etude(McBain Troupe)",
+"ED5WV084 Treasure Get!",
+"ED5WV013 Can't Back Down",
+"ED5WV089 Beyond Sorrow",
+"ED5WV025 Lupcha Corps March",
+"ED5WV022 Harvest",
+"ED5WV055 Emperor's Holiday(Balthazar)",
+"ED5WV056 Strawberry Picking(Wendy)",
+"ED5WV079 Desert Dance(Argus & Kachua)",
+"ED5WV067 Clown's March(Xiao & Rachel)",
+"ED5WV108 Forest and Sea Memory(McBain Troupe)",
+"ED5WV058 Leave It to Roulette",
+"ED5WV050 Tears With That Day's Feelings",
+"ED5WV057 Dire Straits!",
+"ED5WV016 To the Limit",
+"ED5WV010 Farewell..",
+"ED5WV037 Impatience",
+"ED5WV059 Lullaby of the Depths(Aria)",
+"ED5WV080 Dark Empire",
+"ED5WV086 For What We Must Protect",
+"ED5WV076 Song of Invitation(Aria)",
+"ED5WV077 Song of Invitation(Fort)",
+"ED5WV021 Town of the Eternal People",
+"ED5WV083 Leone's Traces",
+"ED5WV035 Hot and Cool",
+"ED5WV045 Ripples",
+"ED5WV044 Burning with Mission",
+"ED5WV038 Shadow of Numeros",
+"ED5WV090 Dark Sun \"Resurrection\"",
+"ED5WV093 Price of Madness",
+"ED5WV042 Jet Black Sky",
+"ED5WV073 Melody of the Depths \"Hermit\"(Una)",
+"ED5WV088 Melody of the Depths \"To the Other World\"",
+"ED5WV048 To Live for Tomorrow",
+"ED5WV085 I've Come to Help!",
+"ED5WV032 Beyond That Darkness",
+"ED5WV019 No Mercy for Those Who Interfere",
+"ED5WV026 Leone Fredrik Richter \"Another World\"",
+"ED5WV071 Melody of the Depths \"Birth\"(Una)",
+"ED5WV008 Melody of the Depths \"Surface\"(McBain Troupe & Aria)",
+"ED5WV070 Blue Funeral(Devor)",
+"ED5WV047 Dark Sun \"Ruins\"",
+"ED5WV017 One Who Blocks the Path",
+"ED5WV018 To Our Respective Futures",
+"ED5WV007 Lullaby of the Depths(Fort)",
+"ED5WV110 Cagesong of the Ocean Suite Prologue \"Seal Release\"",
+"ED5WV111 Cagesong of the Ocean Suite Segue \"Melody of the Depths\"",
+"ED5WV112 Cagesong of the Ocean Suite Aria \"Lullaby of the Depths\"",
+"ED5WV113 Cagesong of the Ocean Suite Finale \"Leone Fredrik Richter\"",
+"ED5WV116 I Want to Feel Love \"End\"",
+"ED5WV069 Melody of the Depths \"Birth\"(Fort)",
+"ED5WV118 To Our Tomorrows~Leone Fredrik Richter \"End Credits\"",
+"ED5WV119 I Want to Feel Love \"And Then..\"",
+"ED5WV001 Leone Fredrik Richter \"Theme\"",
+"ED5WV100 Behold My Vigor(Fort)",
+"ED5WV101 Poem of Sunlight(McBain)",
+"ED5WV102 Merry Little Bird(Una)",
+"ED5WV103 Travelers' Prelude(McBain Troupe)",
+"ED5WV104 Merry Traveler(McBain Troupe)",
+"ED5WV105 Let's Dance Together(McBain Troupe)",
+"ED5WV106 Open Your Heart(McBain Troupe)",
+"ED5WV062 Cantata of Stardust(+Violin)",
+"ED5WV074 Melody of the Depths \"Mind's Eye\"(Fort)",
+"ED5WV096 Melody of the Depths \"Love\"(Fort)",
+"ED5WV095 Melody of the Depths \"Life\"(McBain)",
+"ED5WV066 Clown's March Amateur Ver.(Xiao & Rachel)",
+"ED5WV097 Dungeon 3",
+"ED5WV078 Leone's Whistle",
+"ED5WV003 FALCOM Logo",
+"ED5WV060 Cantata of Stardust(Last)",
+"ED5WV063 Cantata of Stardust (Outdoor VER)",
+"ED5WV064 Cantata of Stardust(Violin 1)",
+"ED5WV087 Cantata of Stardust(Violin 2)",
+"ED5WV092 Behold My Vigor Street Performance Ver.(Fort)",
+"ED5WV094 Blue Funeral(Devor)",
+"ED5WV098 Let's Dance Together(McBain Troupe)",
+"ED5WV099 Open Your Heart(McBain Troupe & Xiao & Rachel)",
+"ED5WV109 Let's Dance Together(McBain Troupe)"
+};
+
 CString CED5::Gett(int a){
 	CString s,ss;
-	s=tied5[a];
+	s=savedata.lang ? tied5_en[a] : tied5[a];
 	ss=s.Left(8);ss.TrimRight();
 	fnn=s.Mid(9);
 	return ss;
@@ -150,7 +251,8 @@ CString CED5::Gett(int a){
 void CED5::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tied5[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tied5_en[idx] : tied5[idx];
 	ret=s.Left(8); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 	if(s.Left(2)=="★"){
@@ -164,13 +266,15 @@ void CED5::OnDblclkList1()
 BOOL CED5::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"英雄伝説V 海の檻歌", L"Legend of Heroes V Cagesong of the Ocean"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(98);i++)
 	{
 		CString s;
-		s=tied5[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tied5[i];}
+		s=savedata.lang ? tied5_en[i] : tied5[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

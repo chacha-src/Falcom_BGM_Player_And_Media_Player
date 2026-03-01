@@ -40,6 +40,8 @@ BOOL CGraph::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
 
+	SetWindowText(LL2(L"グラフフィルタ一覧", L"Graph Filter List"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	if(pGraphBuilder){
 //		IFilterGraph *fg;
 //		pGraphBuilder->QueryInterface(IID_IFilterGraph,(void**)&fg);
@@ -48,7 +50,7 @@ BOOL CGraph::OnInitDialog()
 
 		if (iam) {
 			m_l.AddString(L"");
-			m_l.AddString(L"IAMStreamSelectの内容");
+			m_l.AddString(LL2(L"IAMStreamSelectの内容", L"IAMStreamSelect contents"));
 			m_l.AddString(L"");
 
 			CntPin2(iam);

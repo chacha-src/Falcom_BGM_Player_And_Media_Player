@@ -154,11 +154,122 @@ char ti[][50]={
 "★動画6",
 "★動画7"
 };
+
+char ti_en[][150]={
+"001 --/SC Dancing with the Wind SC Ver",
+"010 --/SC Shine of Eidos ~Trails in the Sky~",
+"011 --/SC OP Silver Will Golden Wings/Yamawaki Hiroko",
+"012 --/SC ED I swear.../Kodera Kanako",
+"015 --/SC Unleashed Treasure",
+"016 --/SC To the Goddess",
+"017 --/SC Broken Wings",
+"018 --/SC Where Hope Goes",
+"100 FC/SC Provincial City Rolent",
+"101 FC/SC Commercial City Bose",
+"102 FC/SC Port City Ruan",
+"103 FC/SC Workshop City Zeiss",
+"104 FC/SC Royal Capital Grancel",
+"105 FC/SC Cat Relaxing in the Sun",
+"106 FC/SC Border Patrol Isn't Easy",
+"107 FC/SC Royal Castle",
+"108 FC/SC Grand Arena",
+"110 --/SC Welcome to Le Locle",
+"111 --/SC Town Where the Lights Went Out",
+"112 --/SC Heartless Surprise Attack",
+"113 --/SC Flying Battleship Glorious",
+"200 FC/-- Walking in Liberl",
+"201 FC/SC Secret Green Passage",
+"202 FC/SC Rock on the Road",
+"210 --/SC Look Up at the Sky",
+"300 FC/SC Wandering in the Darkness",
+"301 FC/SC Steel Floor Blocking the Path",
+"302 FC/SC Peace in the Darkness",
+"303 FC/SC Tetracyclic Towers",
+"304 FC/SC Leiston Fortress",
+"305 FC/-- Hollow Land of Light",
+"310 --/SC Hidden True Form",
+"311 --/SC Infiltration",
+"312 --/SC Floating City Liber Ark",
+"313 --/SC Aiming Beyond",
+"314 --/SC Central Tower Axis Pillar",
+"315 --/SC ★Sound Effects★",
+"316 --/SC To Our Comrades",
+"400 FC/-- Sophisticated Fight",
+"402 FC/SC To be Suggestive",
+"403 FC/SC Silver Will",
+"404 FC/SC Challenger Invited",
+"405 FC/-- Ancient Makes",
+"406 FC/-- Guardian of the Treasure",
+"407 FC/SC Crush!!",
+"408 FC/SC Disappearing Star",
+"410 FC/SC Pinch!!",
+"420 --/SC Strepitoso Fight",
+"421 --/SC The Fate Of The Fairies",
+"422 --/SC Obstructive Existence",
+"423 --/SC Fight with Assailant",
+"424 --/SC Great Dread",
+"425 --/SC Fateful confrontation",
+"426 --/SC Outskirts of Evolution",
+"427 --/SC The Merciless Savior",
+"428 --/SC Grave Marker Pierced by Lightning",
+"429 --/SC Feeling Danger Nearby",
+"500 FC/SC Where the Stars Are Harmonica short Ver.",
+"501 FC/-- Amber Love Hum Ver.",
+"502 FC/-- Amber Love Piano Ver.",
+"503 FC/-- Amber Love Lute Ver.",
+"504 FC/-- Where the Stars Are Harmonica long Ver.",
+"505 FC/SC Let's Go Lively",
+"510 FC/SC Determination to Leave",
+"511 FC/SC Those Who Move in the Shadows",
+"512 FC/-- Don't Let Him Escape!",
+"513 FC/SC In My Heart",
+"514 FC/SC Under the Moonlight",
+"516 FC/SC Creeping Crisis",
+"517 FC/-- We're the Capua Family!",
+"518 FC/-- Path of Departure",
+"519 FC/SC Recapture",
+"520 FC/-- Liberation from the Curse, and...",
+"521 FC/SC Confession",
+"522 FC/SC Black Ouroboros",
+"523 FC/SC Pride of Liberl",
+"530 FC/-- (Drama) Princess's Worry",
+"531 FC/-- (Drama) Knights' Lament",
+"532 FC/-- (Drama) Each One's Scheme",
+"533 FC/-- (Drama) Castle",
+"534 FC/-- (Drama) Colosseum",
+"535 FC/-- (Drama) Duel",
+"536 FC/-- (Drama) Princess's Death",
+"537 FC/-- (Drama) Grand Finale",
+"540 --/SC Conspiracy",
+"541 --/SC Enforcer",
+"542 --/SC Gospel Plan",
+"543 --/SC Approaching Threat",
+"544 --/SC Hamel",
+"546 --/SC Crushed",
+"547 --/SC Shadow Lurking in the Wasteland",
+"548 --/SC Continuation of the Dream",
+"549 --/SC Where Bonds Are",
+"550 --/SC Silver Will Super Arrange Ver",
+"551 --/SC Where the Stars Are Instrumental ver",
+"552 --/SC Etude of the Ruin",
+"554 --/SC Truth of the Tragedy",
+"556 --/SC Phantasm",
+"★FALCOM logo video",
+"★Opening video",
+"★Ending video",
+"★Video 1",
+"★Video 2",
+"★Video 3",
+"★Video 4",
+"★Video 5",
+"★Video 6",
+"★Video 7"
+};
 /**/
 
 CString itiran::Gett(int a){
 	CString s;
-	s=ti[a];
+	s=savedata.lang ? ti_en[a] : ti[a];
 	fnn=s.Mid(10);
 	return s;
 }
@@ -166,7 +277,8 @@ CString itiran::Gett(int a){
 void itiran::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=ti[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? ti_en[idx] : ti[idx];
 	ret=_tstoi(s.Left(3));
 	ret2=m_list.GetCurSel();
 	if(ret2>97)
@@ -188,6 +300,8 @@ void itiran::OnDblclkList1()
 BOOL itiran::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"空の軌跡 Second Chapter", L"Sora no Kiseki Second Chapter"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
@@ -195,7 +309,7 @@ BOOL itiran::OnInitDialog()
 	{
 		CString s;
 		s="ED6";
-		s+=ti[i];
+		s+=savedata.lang ? ti_en[i] : ti[i];
 //		s+="";
 /*		switch(ti[i][0])
 		{
@@ -221,25 +335,25 @@ BOOL itiran::OnInitDialog()
 */		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}
-		dx= m_list.AddString(_T("★FALCOMロゴ動画"));
+		dx= m_list.AddString(LL2(L"★FALCOMロゴ動画", L"★FALCOM logo video"));
 		m_list.SetItemData(dx,98);	
-		dx= m_list.AddString(_T("★オープニング動画"));
+		dx= m_list.AddString(LL2(L"★オープニング動画", L"★Opening video"));
 		m_list.SetItemData(dx,99);	
-		dx= m_list.AddString(_T("★エンディング動画"));
+		dx= m_list.AddString(LL2(L"★エンディング動画", L"★Ending video"));
 		m_list.SetItemData(dx,100);	
-		dx= m_list.AddString(_T("★動画1"));
+		dx= m_list.AddString(LL2(L"★動画1", L"★Video 1"));
 		m_list.SetItemData(dx,101);	
-		dx= m_list.AddString(_T("★動画2"));
+		dx= m_list.AddString(LL2(L"★動画2", L"★Video 2"));
 		m_list.SetItemData(dx,102);	
-		dx= m_list.AddString(_T("★動画3"));
+		dx= m_list.AddString(LL2(L"★動画3", L"★Video 3"));
 		m_list.SetItemData(dx,103);	
-		dx= m_list.AddString(_T("★動画4"));
+		dx= m_list.AddString(LL2(L"★動画4", L"★Video 4"));
 		m_list.SetItemData(dx,104);	
-		dx= m_list.AddString(_T("★動画5"));
+		dx= m_list.AddString(LL2(L"★動画5", L"★Video 5"));
 		m_list.SetItemData(dx,105);	
-		dx= m_list.AddString(_T("★動画6"));
+		dx= m_list.AddString(LL2(L"★動画6", L"★Video 6"));
 		m_list.SetItemData(dx,106);	
-		dx= m_list.AddString(_T("★動画7"));
+		dx= m_list.AddString(LL2(L"★動画7", L"★Video 7"));
 		m_list.SetItemData(dx,107);	
 
 		m_list.SetCurSel(0);

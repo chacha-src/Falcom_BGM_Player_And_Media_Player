@@ -132,10 +132,96 @@ char tiarc[][128]={
 "84 幻夢"
 };
 
+char tiarc_en[][128]={
+"★OPEN YOUR EYES",
+"02 Hymn of the Children of Sin",
+"03 Continental Vista",
+"04 Victory!",
+"05 Unexpected Conclusion",
+"06 Brief Rest",
+"07 Sleepless Night",
+"08 ENCOUNTER BATTLE",
+"09 Battle #2",
+"10 Sanctuary",
+"11 Field #1",
+"12 Ball",
+"13 Tranquility",
+"14 Tension",
+"15 Lagni Village",
+"16 Day of Departure",
+"17 To the Open Sea",
+"18 Port Town Tiny",
+"19 Evil Scheme",
+"20 Time for Training!",
+"21 Footsteps in the Dark-Omen-",
+"22 Border City Martuni",
+"23 Republic Capital Dome",
+"24 Impending Crisis",
+"25 Hurry!",
+"26 The Two of Us...",
+"27 Field #2",
+"28 Usual Morning",
+"29 Port Town Ansverth",
+"30 Gulf of Sardis",
+"31 Holy City Baal",
+"32 Elizabeth Engine",
+"33 Nostalgic Scenery",
+"34 Dungeon #1",
+"35 Ocarina",
+"36 EVERLASTING NIGHTMARE",
+"37 Lagni Village another version",
+"38 BURST INTO THE BATTLE",
+"39 Field #3",
+"40 Shadow of Devastation",
+"41 Fork in the Road",
+"42 Parting with God",
+"43 Showdown",
+"44 Field #4",
+"45 Priscillona's Theme",
+"46 DESTRUCTION",
+"47 Estenu Chodar",
+"48 Ominous",
+"49 Seteban Research District",
+"50 DESERTED TOWN",
+"51 Prayer",
+"52 Changing World",
+"53 Lacrimosa Valley",
+"54 ESPIONAGE",
+"55 Erheiv Fortress",
+"56 Descent",
+"57 Battle #4",
+"58 Field #5",
+"59 Gelna Plateau",
+"60 Phantasm",
+"61 BREAKTHROUGH",
+"62 Ephesus",
+"63 A Magi's Memory",
+"64 Hour of Judgment",
+"65 MBRACE",
+"66 Battle #5",
+"67 FINAL ASSAULT",
+"68 Field #5",
+"69 Frozen Past",
+"70 FALL OF THE EMPIRE",
+"71 Constellarium",
+"72 N.O.A.H.",
+"73 EDEN",
+"74 Memories of the Journey",
+"75 Requiem",
+"76 Approaching Threat",
+"77 CASTLE WALKENSWAARD",
+"78 Chapel~Akhenaten~",
+"79 Dungeon #2",
+"80 Dungeon #3",
+"81 Epilogue",
+"82 Truth In Me",
+"84 Phantasm"
+};
+
 
 CString CArc::Gett(int a){
 	CString s,ss;
-	s=tiarc[a];
+	s=savedata.lang ? tiarc_en[a] : tiarc[a];
 	ss=s.Left(2);ss.TrimRight();
 	fnn=s.Mid(3);
 	return ss;
@@ -146,7 +232,8 @@ CString CArc::Gett(int a){
 void CArc::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tiarc[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tiarc_en[idx] : tiarc[idx];
 	ret=s.Left(2); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 #if UNICODE
@@ -165,13 +252,15 @@ void CArc::OnDblclkList1()
 BOOL CArc::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"アークトゥルス -Arcturus-", L"Arcturus -Arcturus-"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(83);i++)
 	{
 		CString s;
-		s=tiarc[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tiarc[i];}
+		s=savedata.lang ? tiarc_en[i] : tiarc[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

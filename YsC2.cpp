@@ -150,9 +150,15 @@ char tiyc2[][128]={
 "★エンディング1b[Chronicles]"
 };
 
+static const char* tiyc2_en_star[]={
+"★Opening[PC88]","★Opening[Eternal]","★Opening[Chronicles]",
+"★Ending 1a[PC88]","★Ending 1a[Eternal]","★Ending 1a[Chronicles]",
+"★Ending 1b[PC88]","★Ending 1b[Eternal]","★Ending 1b[Chronicles]"
+};
+
 CString CYsC2::Gett(int a){
 	CString s,ss;
-	s=tiyc2[a];
+	s=(savedata.lang && a>=93) ? tiyc2_en_star[a-93] : tiyc2[a];
 	ss=s.Left(8);ss.TrimRight();
 	fnn=s.Mid(8);fnn.TrimRight();
 	return ss;
@@ -163,7 +169,8 @@ CString CYsC2::Gett(int a){
 void CYsC2::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tiyc2[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=(savedata.lang && idx>=93) ? tiyc2_en_star[idx-93] : tiyc2[idx];
 	ret=s.Left(8); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 #if UNICODE
@@ -182,13 +189,16 @@ void CYsC2::OnDblclkList1()
 BOOL CYsC2::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(L"Ys I&II Chronicles Ys 2");
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(102);i++)
 	{
 		CString s;
-		s=tiyc2[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tiyc2[i];}
+		s=(savedata.lang && i>=93) ? tiyc2_en_star[i-93] : tiyc2[i];
+		if(s.Left(2)!=_T("★")){ CString t=_T("ZW2_"); t+=s; s=t; }
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

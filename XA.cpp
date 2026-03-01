@@ -63,9 +63,38 @@ char tixa[][128]={
 "★オープニング"
 };
 
+char tixa_en[][128]={
+"003 Two love",
+"000 LA VALSE POUR XANADU～XANADU NEXT OPENING",
+"004 Harlech",
+"010 LA VALSE POUR XANADU～XANADU NEXT FIELD",
+"030 The Eternal Maze",
+"020 Clover Ruins",
+"100 LA VALSE POUR XANADU～XANADU NEXT BATTLE",
+"040 Egret Mountains",
+"050 The Treacherous Woods",
+"330 LA VALSE POUR XANADU～XANADU NEXT INTERMISSION",
+"070 Xanadu Labyrinth",
+"340 The One",
+"080 Time Crevice",
+"110 Bump in the road",
+"090 The Castle of Strange Rock",
+"320 Beginning of the Rock",
+"200 Devil adent",
+"210 evildoer",
+"310 True Intent",
+"001 Two love～Eternity",
+"002 White Lie in Black",
+"350 Two live～Requiem",
+"300 LA VALSE POUR XANADU～XANADU NEXT EVENT",
+"060 The Eternal Maze",
+"★FALCOM logo",
+"★Opening"
+};
+
 CString CXA::Gett(int a){
 	CString s,ss;
-	s=tixa[a];ss=s.Left(3);
+	s=savedata.lang ? tixa_en[a] : tixa[a];ss=s.Left(3);
 	switch(_tstoi(ss)){
 		case 0: loop1=0; loop2=0; break;
 		case 1: loop1=0; loop2=0; break;
@@ -102,7 +131,8 @@ CString CXA::Gett(int a){
 void CXA::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tixa[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tixa_en[idx] : tixa[idx];
 	ret=_tstoi(s.Left(3));
 	ret2=m_list.GetCurSel();
 	switch(ret){
@@ -150,13 +180,16 @@ void CXA::OnDblclkList1()
 BOOL CXA::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(L"XANADU NEXT");
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<26;i++)
 	{
 		CString s;
-		s=tixa[i];if(s.Left(2)=="★"){}else{s="XANA";s+=tixa[i];}
+		s=savedata.lang ? tixa_en[i] : tixa[i];
+		if(s.Left(2)!=_T("★")){ CString t=_T("XANA"); t+=s; s=t; }
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

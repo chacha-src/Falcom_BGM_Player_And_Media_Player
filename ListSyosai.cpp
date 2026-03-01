@@ -68,6 +68,9 @@ int CALLBACK EditWordBreakProc(LPTSTR lpch, int ichCurrent, int cch, int code);
 BOOL CListSyosai::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"リスト詳細情報", L"Track Details"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
+	SetDlgItemText(IDOK999, LL2(L"フォルダを開く", L"Open folder"));
 	TCHAR dy[256];
 	// TODO:  ここに初期化を追加してください
 	{

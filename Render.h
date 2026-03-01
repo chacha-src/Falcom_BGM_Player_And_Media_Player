@@ -127,6 +127,7 @@ public:
 	CCustomStandardButton m_okdummy;
 	CCustomStandardButton m_kanren;
 	CCustomStandardButton m_canceldummy;
+	CComboBox m_comboLang;
 	afx_msg void OnCbnEditchangeCombo4();
 	afx_msg void OnCbnSelchangeCombo4();
 	afx_msg void OnBnClickedCancel5();

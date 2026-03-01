@@ -504,7 +504,7 @@ static void DrawHanamaru(CDC* pDC, CRect rc, COLORREF colorCenter, COLORREF colo
         double angle = angleStep * i;
         int px = cx + (int)(radius * 0.65 * cos(angle));
         int py = cy + (int)(radius * 0.65 * sin(angle));
-        int petalSize = radius / 2.5;
+        int petalSize = (int)(radius / 2.5);
         CRect rcPetal(px - petalSize, py - petalSize, px + petalSize, py + petalSize);
         pDC->Ellipse(&rcPetal);
     }

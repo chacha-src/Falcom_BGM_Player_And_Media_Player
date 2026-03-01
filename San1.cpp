@@ -87,10 +87,61 @@ char tisan1[][128]={
 "★ファルコムロゴ"
 };
 
+char tisan1_en[][128]={
+"42 Eternal Melody",
+"01 Ancient Pine Residence",
+"27 Tension",
+"12 Wind Blown",
+"48 Broken Army",
+"49 Battle 49",
+"39 Sorrowful Parting",
+"38 Dark Thoughts",
+"47 Valley Mist",
+"05 Rural Paradise",
+"51 Battle 51",
+"08 Spider Cave",
+"03 Riverside Rain",
+"02 City Prosperity",
+"35 Smile",
+"36 High Spirits",
+"29 Journey",
+"50 Battle 50",
+"07 Path of Glory",
+"22 Ghost Realm Battle",
+"45 Fierce Battle",
+"13 Last Stand",
+"53 Sacrificial Banner",
+"14 Drink of Resentment",
+"15 Autumn Tears",
+"46 Dreams of the Ends of Earth",
+"11 Realm in the Clouds",
+"19 Battlefield",
+"10 Roaming the Rivers",
+"04 Spring Feast at Red Pavilion",
+"31 Charge the Formation",
+"30 Flames of War",
+"21 Every Step a Fortress",
+"41 True Feelings",
+"37 Looking Back",
+"54 Mystery",
+"09 Mist and Frost",
+"20 Cold Abyss",
+"06 Beauty in the Flames",
+"16 Pale Moon",
+"32 Ascend to Heaven",
+"23 Night Song",
+"34 Decisive Battle",
+"★End",
+"40 Distant Memories",
+"★Opening",
+"★Video",
+"★FALCOM Logo"
+};
+
 
 CString CSan1::Gett(int a){
 	CString s,ss;
-	s=tisan1[a];
+	s=savedata.lang ? tisan1_en[a] : tisan1[a];
 	ss=s.Left(2);ss.TrimRight();
 	fnn=s.Mid(3);
 	return ss;
@@ -101,7 +152,8 @@ CString CSan1::Gett(int a){
 void CSan1::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tisan1[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tisan1_en[idx] : tisan1[idx];
 	ret=s.Left(2); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 #if UNICODE
@@ -120,13 +172,16 @@ void CSan1::OnDblclkList1()
 BOOL CSan1::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"幻想三国志１", L"Fantasy Sanguo 1"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
+	SetDlgItemText(IDC_STATIC, LL2(L"動画(★印)を再生するにはBinkの環境が必要です\nreadme.txtを読んで導入してください。", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup."));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(41+3+4);i++)
 	{
 		CString s;
-		s=tisan1[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tisan1[i];}
+		s=savedata.lang ? tisan1_en[i] : tisan1[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

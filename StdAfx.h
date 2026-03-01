@@ -209,6 +209,8 @@ struct save{
 	int lang;
 	int langselect;
 };
+extern save savedata;
+#define LL2(ja, en) (savedata.lang == 0 ? (ja) : (en))
 extern int loop1;
 extern int loop1_2;
 char *b64_decode(char *s, int size,int &len);

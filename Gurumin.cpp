@@ -80,10 +80,54 @@ char tigu[][128]={
 "★オープニング"
 };
 
+char tigu_en[][128]={
+"bgm01 Guruguru Tonight",
+"bgm08 Ghostly Days",
+"bgm03 Who Are You?",
+"bgm05 Laid-back Ghosts",
+"bgm06 Deuce Shopping District Theme",
+"bgm04 Banquet Hall",
+"bgm09 Uh Oh Trouble",
+"bgm11 EURO BEAT POCO",
+"bgm15 Legendary Drill",
+"bgm07 Ghost World",
+"bgm36 Stage Clear",
+"bgm12 Mist of Darkness",
+"bgm14 Something's Wrong!?",
+"bgm10 Animal Minimal",
+"bgm17 Guruguru Demon Pan",
+"bgm18 Turn Back the Way You Came",
+"bgm43 Invincible Armor Never Breaks!",
+"bgm21 Negative Ion Silence",
+"bgm27 Secret Jungle Survival",
+"bgm22 dance in the forest",
+"bgm23 Rainbow Ghost Can't Swim",
+"bgm24 sight of silence",
+"bgm25 SAMURAI DRILL!",
+"bgm20 JunJun - Jungle gym",
+"bgm26 under the sky",
+"bgm28 bomber girl",
+"bgm39 Memories",
+"bgm29 Incredible Ghost Egg",
+"bgm30 Blest of Wind",
+"bgm45 Rocky Nebula",
+"bgm31 Hymn of Revenge",
+"bgm46 Cursed Calamity Fang",
+"bgm32 Soaring the Sad Azure",
+"bgm38 No Choice But To Do It!",
+"bgm35 Battle Over, Sunset",
+"bgm40 Tomorrow We'll All Be Friends",
+"bgm42 To the Usual Place",
+"bgm02 Friends",
+"bgm33 TO MAKE THE END OF DIGING",
+"bgm44 Deuce Shopping District Song",
+"★Opening"
+};
+
 
 CString CGurumin::Gett(int a){
 	CString s,ss,sss;int aa;
-	s=tigu[a];
+	s=savedata.lang ? tigu_en[a] : tigu[a];
 	ss=s.Left(5);ss.TrimRight();
 	sss=ss.Right(2); aa=_tstoi(sss);
 	switch(aa){
@@ -138,7 +182,8 @@ CString CGurumin::Gett(int a){
 void CGurumin::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s,ss,sss;int aa;	s=tigu[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s,ss,sss;int aa;	s=savedata.lang ? tigu_en[idx] : tigu[idx];
 	ret=s.Left(5); ret.TrimRight(); ss=ret;
 	ret2=m_list.GetCurSel();
 	sss=ss.Right(2); aa=_tstoi(sss);
@@ -201,13 +246,15 @@ void CGurumin::OnDblclkList1()
 BOOL CGurumin::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"ぐるみん", L"Gurumin"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(41);i++)
 	{
 		CString s;
-		s=tigu[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tigu[i];}
+		s=savedata.lang ? tigu_en[i] : tigu[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

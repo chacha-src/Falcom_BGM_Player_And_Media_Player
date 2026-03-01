@@ -1,5 +1,7 @@
 // Microsoft Visual C++ generated resource script.
 //
+#pragma code_page(65001)
+
 #include "resource.h"
 
 #define APSTUDIO_READONLY_SYMBOLS
@@ -13,11 +15,10 @@
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
-// “ú–{Œê (“ú–{) resources
+// æ—¥æœ¬èªž (æ—¥æœ¬) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_JPN)
 LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
-#pragma code_page(932)
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
@@ -48,8 +49,8 @@ BEGIN
     "LANGUAGE 17, 1\r\n"
     "#pragma code_page(932)\r\n"
     "#endif //_WIN32\r\n"
-    "#include ""res\\ogg.rc2""  // Microsoft Visual C++ ˆÈŠO‚Ìƒc[ƒ‹‚Å•ÒW‚³‚ê‚½ƒŠƒ\[ƒX\r\n"
-    "#include ""l.jpn\\afxres.rc""          // •W€‚ÌƒRƒ“ƒ|[ƒlƒ“ƒg\r\n"
+    "#include ""res\\ogg.rc2""  // Microsoft Visual C++ èŽ‰ï½¥èžŸæ‚¶ãƒ»ç¹ãƒ»ãƒ»ç¹ï½«ç¸ºï½§é‚±ï½¨é«®ãƒ»ï¼†ç¹§å¾Œâ—†ç¹ï½ªç¹§ï½½ç¹ï½¼ç¹§ï½¹\\?[?X\r\n"
+    "#include ""l.jpn\\afxres.rc""          // è®“å‘Žï½ºæ‚¶ãƒ»ç¹§ï½³ç¹ï½³ç¹æ˜´ãƒ»ç¹é˜ªÎ¦ç¹ãƒ»\n"
     "#endif\r\n"
     "\0"
 END
@@ -100,112 +101,112 @@ IDI_T4                  ICON                    "res\\ico00004.ico"
 
 IDD_ABOUTBOX DIALOGEX 0, 0, 235, 69
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ogg‚ÌÊÞ°¼Þ®Ýî•ñ"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN", 0, 0, 0x0
+CAPTION "oggã®ï¾Šï¾žï½°ï½¼ï¾žï½®ï¾æƒ…å ±"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯", 0, 0, 0x0
 BEGIN
     ICON            IDR_MAINFRAME,IDC_STATIC,11,17,20,20
     LTEXT           "ogg Version Ver 0.8x Release series",IDC_STATIC,40,10,119,8,SS_NOPREFIX
-    LTEXT           "Copyright (C) ‚¿‚á‚¿‚á/‚¿‚á[",IDC_STATIC,40,20,87,8
+    LTEXT           "Copyright (C) ã¡ã‚ƒã¡ã‚ƒ/ã¡ã‚ƒãƒ¼",IDC_STATIC,40,20,87,8
     DEFPUSHBUTTON   "OK",IDOK,178,7,50,14,WS_GROUP
-    LTEXT           "ƒXƒ^ƒeƒBƒbƒN",IDC_STATICin,40,30,188,8
+    LTEXT           "ã‚¹ã‚¿ãƒ†ã‚£ãƒƒã‚¯",IDC_STATICin,40,30,188,8
     LTEXT           "http://ppp.oohara.jp/",IDC_Link,40,56,172,8,SS_NOTIFY
-    LTEXT           "ƒXƒ^ƒeƒBƒbƒN",IDC_STATICin2,40,42,188,8
+    LTEXT           "ã‚¹ã‚¿ãƒ†ã‚£ãƒƒã‚¯",IDC_STATICin2,40,42,188,8
 END
 
 IDD_OGG_DIALOG DIALOGEX 0, 0, 416, 329
 STYLE DS_SETFONT | DS_MODALFRAME | DS_3DLOOK | WS_MINIMIZEBOX | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_ACCEPTFILES | WS_EX_APPWINDOW
-CAPTION "mp3/m4aŠÈˆÕƒvƒŒƒCƒ„ Ver 0.8g"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN", 0, 0, 0x1
+CAPTION "mp3/m4aç°¡æ˜“ãƒ—ãƒ¬ã‚¤ãƒ¤ Ver 0.8g"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯", 400, 0, 0x0
 BEGIN
-    PUSHBUTTON      "Ys6 ƒiƒsƒVƒ…ƒeƒ€",IDC_BUTTON8,7,106,64,14
-    PUSHBUTTON      "Ys ƒtƒFƒ‹ƒKƒi",IDC_BUTTON7,72,106,64,14
-    PUSHBUTTON      "Ys ƒIƒŠƒWƒ“",IDC_BUTTON15,137,106,66,14
-    PUSHBUTTON      "‹ó‚Ì‹OÕFC",IDC_BUTTON6,7,120,64,14
-    PUSHBUTTON      "‹ó‚Ì‹OÕSC",IDC_BUTTON2,72,120,64,14
-    PUSHBUTTON      "‹ó‚Ì‹OÕThe3rd",IDC_BUTTON17,137,120,66,14
+    PUSHBUTTON      "Ys6 ãƒŠãƒ”ã‚·ãƒ¥ãƒ†ãƒ ",IDC_BUTTON8,7,106,64,14
+    PUSHBUTTON      "Ys ãƒ•ã‚§ãƒ«ã‚¬ãƒŠ",IDC_BUTTON7,72,106,64,14
+    PUSHBUTTON      "Ys ã‚ªãƒªã‚¸ãƒ³",IDC_BUTTON15,137,106,66,14
+    PUSHBUTTON      "ç©ºã®è»Œè·¡FC",IDC_BUTTON6,7,120,64,14
+    PUSHBUTTON      "ç©ºã®è»Œè·¡SC",IDC_BUTTON2,72,120,64,14
+    PUSHBUTTON      "ç©ºã®è»Œè·¡The3rd",IDC_BUTTON17,137,120,66,14
     PUSHBUTTON      "ZWEI II",IDC_BUTTON19,7,134,64,14
     PUSHBUTTON      "Ys I&&II Chronicles 1",IDC_BUTTON23,72,134,64,14
     PUSHBUTTON      "Ys I&&II Chronicles 2",IDC_BUTTON24,137,134,66,14
     PUSHBUTTON      "XANADU NEXT",IDC_BUTTON25,7,148,64,14
-    PUSHBUTTON      "Ys Š®‘S”Å Ys1",IDC_BUTTON27,72,148,64,14
-    PUSHBUTTON      "Ys Š®‘S”Å Ys2",IDC_BUTTON28,137,148,66,14
+    PUSHBUTTON      "Ys å®Œå…¨ç‰ˆ Ys1",IDC_BUTTON27,72,148,64,14
+    PUSHBUTTON      "Ys å®Œå…¨ç‰ˆ Ys2",IDC_BUTTON28,137,148,66,14
     PUSHBUTTON      "Sorcerian Original",IDC_BUTTON31,7,162,64,14
     PUSHBUTTON      "Zwei!!",IDC_BUTTON33,72,162,64,14
-    PUSHBUTTON      "‚®‚é‚Ý‚ñ",IDC_BUTTON35,137,162,66,14
-    PUSHBUTTON      "ƒ_ƒCƒiƒ\ƒA",IDC_BUTTON37,7,176,64,14
-    PUSHBUTTON      "Ä‰‰‘t",IDC_BUTTON4,7,206,36,14
-    PUSHBUTTON      "ˆêŽž’âŽ~",IDC_BUTTON3,43,206,32,14
-    PUSHBUTTON      "’âŽ~",IDC_BUTTON1,75,206,32,14
-    CONTROL         "ƒXƒyƒAƒi",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | BS_PUSHLIKE | WS_TABSTOP,107,206,31,14
+    PUSHBUTTON      "ãã‚‹ã¿ã‚“",IDC_BUTTON35,137,162,66,14
+    PUSHBUTTON      "ãƒ€ã‚¤ãƒŠã‚½ã‚¢",IDC_BUTTON37,7,176,64,14
+    PUSHBUTTON      "å†æ¼”å¥",IDC_BUTTON4,7,206,36,14
+    PUSHBUTTON      "ä¸€æ™‚åœæ­¢",IDC_BUTTON3,43,206,32,14
+    PUSHBUTTON      "åœæ­¢",IDC_BUTTON1,75,206,32,14
+    CONTROL         "ã‚¹ãƒšã‚¢ãƒŠ",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | BS_PUSHLIKE | WS_TABSTOP,107,206,31,14
     CONTROL         "ST",IDC_CHECK4,"Button",BS_AUTOCHECKBOX | BS_PUSHLIKE | WS_TABSTOP,138,206,24,14
-    PUSHBUTTON      "ƒtƒF[ƒhƒAƒEƒg",IDC_BUTTON5,162,206,41,14
-    PUSHBUTTON      "Ý’è",IDC_BUTTON21,48,222,28,14
-    PUSHBUTTON      "ƒtƒHƒ‹ƒ_Ý’è",IDC_BUTTON9,130,222,42,14
-    DEFPUSHBUTTON   "I—¹",IDOK,172,222,31,14
-    CONTROL         "ƒ‰ƒ“ƒ_ƒ€Ä¶",IDC_CHECK5,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,214,22,87,12
-    CONTROL         "‡ŽŸÄ¶",IDC_CHECK6,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,214,35,43,10
+    PUSHBUTTON      "ãƒ•ã‚§ãƒ¼ãƒ‰ã‚¢ã‚¦ãƒˆ",IDC_BUTTON5,162,206,41,14
+    PUSHBUTTON      "è¨­å®š",IDC_BUTTON21,48,222,28,14
+    PUSHBUTTON      "ãƒ•ã‚©ãƒ«ãƒ€è¨­å®š",IDC_BUTTON9,130,222,42,14
+    DEFPUSHBUTTON   "çµ‚äº†",IDOK,172,222,31,14
+    CONTROL         "ãƒ©ãƒ³ãƒ€ãƒ å†ç”Ÿ",IDC_CHECK5,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,214,22,87,12
+    CONTROL         "é †æ¬¡å†ç”Ÿ",IDC_CHECK6,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,214,35,43,10
     EDITTEXT        IDC_EDIT1,252,46,25,12,ES_AUTOHSCROLL
-    PUSHBUTTON      "‰‰‘tŠJŽn",IDC_BUTTON14,217,72,50,14
-    CONTROL         "YS6 ƒiƒsƒVƒ…ƒeƒ€‚Ì™¸",IDC_CHECK7,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,26,81,8
-    CONTROL         "YS ƒtƒFƒ‹ƒKƒi‚Ì¾‚¢",IDC_CHECK8,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,36,75,8
-    CONTROL         "‰p—Y“`à6‹ó‚Ì‹OÕFC",IDC_CHECK9,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,46,81,8
-    CONTROL         "‰p—Y“`à6‹ó‚Ì‹OÕSC",IDC_CHECK10,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,56,81,8
-    CONTROL         "YS ƒIƒŠƒWƒ“",IDC_CHECK11,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,66,75,8
-    CONTROL         "‰p—Y“`à6‹ó‚Ì‹OÕTC",IDC_CHECK12,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,75,81,8
+    PUSHBUTTON      "æ¼”å¥é–‹å§‹",IDC_BUTTON14,217,72,50,14
+    CONTROL         "YS6 ãƒŠãƒ”ã‚·ãƒ¥ãƒ†ãƒ ã®åŒ£",IDC_CHECK7,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,26,81,8
+    CONTROL         "YS ãƒ•ã‚§ãƒ«ã‚¬ãƒŠã®èª“ã„",IDC_CHECK8,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,36,75,8
+    CONTROL         "è‹±é›„ä¼èª¬6ç©ºã®è»Œè·¡FC",IDC_CHECK9,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,46,81,8
+    CONTROL         "è‹±é›„ä¼èª¬6ç©ºã®è»Œè·¡SC",IDC_CHECK10,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,56,81,8
+    CONTROL         "YS ã‚ªãƒªã‚¸ãƒ³",IDC_CHECK11,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,66,75,8
+    CONTROL         "è‹±é›„ä¼èª¬6ç©ºã®è»Œè·¡TC",IDC_CHECK12,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,75,81,8
     CONTROL         "ZWEI II",IDC_CHECK13,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,84,81,10
     CONTROL         "Ys Chronicles Ys 1",IDC_CHECK14,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,94,81,10
     CONTROL         "Ys Chronicles Ys 2",IDC_CHECK15,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,104,81,10
     CONTROL         "XANADU NEXT",IDC_CHECK16,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,114,81,10
-    CONTROL         "Ys Š®‘S”Å Ys 1",IDC_CHECK17,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,124,81,10
-    CONTROL         "Ys Š®‘S”Å Ys 2",IDC_CHECK18,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,134,81,10
+    CONTROL         "Ys å®Œå…¨ç‰ˆ Ys 1",IDC_CHECK17,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,124,81,10
+    CONTROL         "Ys å®Œå…¨ç‰ˆ Ys 2",IDC_CHECK18,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,134,81,10
     CONTROL         "Sorcerian Original",IDC_CHECK19,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,144,81,10
     CONTROL         "Zwei!!",IDC_CHECK20,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,154,81,10
-    CONTROL         "‚®‚é‚Ý‚ñ",IDC_CHECK21,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,164,81,10
-    CONTROL         "ƒ_ƒCƒiƒ\ƒA ƒŠƒUƒŒƒNƒVƒ‡ƒ“",IDC_CHECK22,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,174,81,10
-    PUSHBUTTON      "¥",IDC_BUTTON12,203,317,9,10
-    LTEXT           "ƒ‹[ƒv‰ñ”",IDC_STATICaaad,217,48,35,8
+    CONTROL         "ãã‚‹ã¿ã‚“",IDC_CHECK21,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,164,81,10
+    CONTROL         "ãƒ€ã‚¤ãƒŠã‚½ã‚¢ ãƒªã‚¶ãƒ¬ã‚¯ã‚·ãƒ§ãƒ³",IDC_CHECK22,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,174,81,10
+    PUSHBUTTON      "â–¼",IDC_BUTTON12,203,317,9,10
+    LTEXT           "ãƒ«ãƒ¼ãƒ—å›žæ•°",IDC_STATICaaad,217,48,35,8
     CONTROL         "Slider1",IDC_SLIDER1,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,31,79,55,12
     CONTROL         "Slider3",IDC_SLIDER3,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,133,68,58,12
-    CONTROL         "WAVƒtƒ@ƒCƒ‹‚Ö•Û‘¶",IDC_CHECK2,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,68,71,10
+    CONTROL         "WAVãƒ•ã‚¡ã‚¤ãƒ«ã¸ä¿å­˜",IDC_CHECK2,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,68,71,10
     CONTROL         "Slider2",IDC_SLIDER2,"msctls_trackbar32",TBS_AUTOTICKS | TBS_NOTICKS | TBS_ENABLESELRANGE,0,236,207,15
-    PUSHBUTTON      "¥",IDC_BUTTON13,400,317,9,10,NOT WS_VISIBLE
+    PUSHBUTTON      "â–¼",IDC_BUTTON13,400,317,9,10,NOT WS_VISIBLE
     LTEXT           "Static",IDC_STATIC11,16,7,81,44,NOT WS_VISIBLE
-    CONTROL         "“®‰æ‚à•\Ž¦‚·‚é",IDC_CHECK3,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,15,58,62,10
-    LTEXT           "Žå‰¹—Ê",IDC_STATICaaab,8,80,25,8
+    CONTROL         "å‹•ç”»ã‚‚è¡¨ç¤ºã™ã‚‹",IDC_CHECK3,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,15,58,62,10
+    LTEXT           "ä¸»éŸ³é‡",IDC_STATICaaab,8,80,25,8
     RTEXT           "100",IDC_STATIC2,86,81,15,8
-    GROUPBOX        "•¡”‰‰‘tƒIƒvƒVƒ‡ƒ“",IDC_STATIC,214,8,195,230
-    GROUPBOX        "Ä¶‚·‚éƒQ[ƒ€",IDC_STATIC,312,14,88,216
-    RTEXT           "DirectSound‰¹—Ê",IDC_STATICaaa,80,69,50,8
+    GROUPBOX        "è¤‡æ•°æ¼”å¥ã‚ªãƒ—ã‚·ãƒ§ãƒ³",IDC_STATIC,214,8,195,230
+    GROUPBOX        "å†ç”Ÿã™ã‚‹ã‚²ãƒ¼ãƒ ",IDC_STATIC,312,14,88,216
+    RTEXT           "DirectSoundéŸ³é‡",IDC_STATICaaa,80,69,50,8
     RTEXT           "100",IDC_STATICds,194,70,13,8
     PUSHBUTTON      "Brandish4",IDC_BUTTON39,72,176,64,14
-    CONTROL         "ƒuƒ‰ƒ“ƒfƒBƒbƒVƒ…‚S",IDC_CHECK23,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,184,81,10
-    PUSHBUTTON      "”’‚«–‚—",IDC_BUTTON44,7,190,43,14
-    PUSHBUTTON      "Žég‚¢Ž´",IDC_BUTTON45,51,190,40,14
-    PUSHBUTTON      "ŠC‚ÌŸB‰Ì",IDC_BUTTON46,92,190,44,14
-    CONTROL         "‰p—Y“`àIII ”’‚«–‚—",IDC_CHECK24,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,194,81,10
-    CONTROL         "‰p—Y“`àIV Žég‚¢Ž´",IDC_CHECK25,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,204,81,10
-    CONTROL         "‰p—Y“`àV ŠC‚ÌŸB‰Ì",IDC_CHECK26,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,214,81,10
-    PUSHBUTTON      "ŒŽ‰e",IDC_BUTTON47,137,176,22,14
-    PUSHBUTTON      "¼•—",IDC_BUTTON48,159,176,19,14
-    PUSHBUTTON      "ƒA[ƒN",IDC_BUTTON51,178,176,25,14
-    PUSHBUTTON      "ŽO‘Žu1",IDC_BUTTON53,137,190,32,14
-    PUSHBUTTON      "ŽO‘Žu2",IDC_BUTTON54,170,190,33,14
-    PUSHBUTTON      "ƒvƒŒƒCƒŠƒXƒg",IDC_BUTTON57,7,222,41,14
-    PUSHBUTTON      "ƒWƒƒƒP",IDC_BUTTON58,99,222,31,14,WS_DISABLED
-    LTEXT           "ƒXƒ^ƒeƒBƒbƒN",IDC_STATIC_OS,7,250,203,8,SS_NOTIFY
-    RTEXT           "Šg’£‰¹—Ê",IDC_STATICaaac,102,81,28,8
+    CONTROL         "ãƒ–ãƒ©ãƒ³ãƒ‡ã‚£ãƒƒã‚·ãƒ¥ï¼”",IDC_CHECK23,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,184,81,10
+    PUSHBUTTON      "ç™½ãé­”å¥³",IDC_BUTTON44,7,190,43,14
+    PUSHBUTTON      "æœ±ç´…ã„é›«",IDC_BUTTON45,51,190,40,14
+    PUSHBUTTON      "æµ·ã®æª»æ­Œ",IDC_BUTTON46,92,190,44,14
+    CONTROL         "è‹±é›„ä¼èª¬III ç™½ãé­”å¥³",IDC_CHECK24,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,194,81,10
+    CONTROL         "è‹±é›„ä¼èª¬IV æœ±ç´…ã„é›«",IDC_CHECK25,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,204,81,10
+    CONTROL         "è‹±é›„ä¼èª¬V æµ·ã®æª»æ­Œ",IDC_CHECK26,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,214,81,10
+    PUSHBUTTON      "æœˆå½±",IDC_BUTTON47,137,176,22,14
+    PUSHBUTTON      "è¥¿é¢¨",IDC_BUTTON48,159,176,19,14
+    PUSHBUTTON      "ã‚¢ãƒ¼ã‚¯",IDC_BUTTON51,178,176,25,14
+    PUSHBUTTON      "ä¸‰å›½å¿—1",IDC_BUTTON53,137,190,32,14
+    PUSHBUTTON      "ä¸‰å›½å¿—2",IDC_BUTTON54,170,190,33,14
+    PUSHBUTTON      "ãƒ—ãƒ¬ã‚¤ãƒªã‚¹ãƒˆ",IDC_BUTTON57,7,222,41,14
+    PUSHBUTTON      "ã‚¸ãƒ£ã‚±",IDC_BUTTON58,99,222,31,14,WS_DISABLED
+    LTEXT           "ã‚¹ã‚¿ãƒ†ã‚£ãƒƒã‚¯",IDC_STATIC_OS,7,250,203,8,SS_NOTIFY
+    RTEXT           "æ‹¡å¼µéŸ³é‡",IDC_STATICaaac,102,81,28,8
     CONTROL         "",IDC_SLIDER4,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,133,81,58,12
     RTEXT           "100",IDC_STATICds2,193,82,14,8
-    LTEXT           "ƒXƒ^ƒeƒBƒbƒN",IDC_STATIC_OS2,7,259,203,8,SS_NOTIFY
-    LTEXT           "ƒXƒ^ƒeƒBƒbƒN",IDC_STATIC_OS3,7,268,203,8,SS_NOTIFY
-    LTEXT           "ƒXƒ^ƒeƒBƒbƒN",IDC_STATIC_LRC,7,283,203,8,SS_NOTIFY
-    RTEXT           "ƒeƒ“ƒ|",IDC_STATIC_t,102,94,28,8
+    LTEXT           "ã‚¹ã‚¿ãƒ†ã‚£ãƒƒã‚¯",IDC_STATIC_OS2,7,259,203,8,SS_NOTIFY
+    LTEXT           "ã‚¹ã‚¿ãƒ†ã‚£ãƒƒã‚¯",IDC_STATIC_OS3,7,268,203,8,SS_NOTIFY
+    LTEXT           "ã‚¹ã‚¿ãƒ†ã‚£ãƒƒã‚¯",IDC_STATIC_LRC,7,283,203,8,SS_NOTIFY
+    RTEXT           "ãƒ†ãƒ³ãƒ",IDC_STATIC_t,102,94,28,8
     CONTROL         "",IDC_SLIDER7,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,133,94,58,12
     RTEXT           "100",IDC_STATICds3,193,95,14,8
-    LTEXT           "ƒXƒ^ƒeƒBƒbƒN",IDC_STATIC_LRC2,7,291,203,8,SS_NOTIFY
-    LTEXT           "ƒXƒ^ƒeƒBƒbƒN",IDC_STATIC_LRC3,7,300,203,8,SS_NOTIFY
-    RTEXT           "ƒsƒbƒ`",IDC_STATIC_p,0,94,28,8
+    LTEXT           "ã‚¹ã‚¿ãƒ†ã‚£ãƒƒã‚¯",IDC_STATIC_LRC2,7,291,203,8,SS_NOTIFY
+    LTEXT           "ã‚¹ã‚¿ãƒ†ã‚£ãƒƒã‚¯",IDC_STATIC_LRC3,7,300,203,8,SS_NOTIFY
+    RTEXT           "ãƒ”ãƒƒãƒ",IDC_STATIC_p,0,94,28,8
     CONTROL         "",IDC_SLIDER8,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,31,94,56,12
     RTEXT           "100",IDC_STATICds4,86,95,15,8
     PUSHBUTTON      "EQ",IDC_BUTTON59,76,222,24,14
@@ -213,24 +214,24 @@ END
 
 IDD_SENTAKU DIALOGEX 0, 0, 183, 273
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "‹ó‚Ì‹OÕ Second Chapter"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN", 0, 0, 0x0
+CAPTION "ç©ºã®è»Œè·¡ Second Chapter"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯", 0, 0, 0x0
 BEGIN
-    PUSHBUTTON      "•Â‚¶‚é",IDOK,67,252,50,14
+    PUSHBUTTON      "é–‰ã˜ã‚‹",IDOK,67,252,50,14
     LISTBOX         IDC_LIST1,7,7,169,242,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_DIALOG1 DIALOGEX 0, 0, 383, 243
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒtƒHƒ‹ƒ_Ý’è"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN", 0, 0, 0x0
+CAPTION "ãƒ•ã‚©ãƒ«ãƒ€è¨­å®š"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯", 0, 0, 0x0
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,167,222,50,14
-    PUSHBUTTON      "·¬Ý¾Ù",IDCANCEL,322,222,50,14,NOT WS_VISIBLE
+    PUSHBUTTON      "Ã—",IDCANCEL,322,222,50,14,NOT WS_VISIBLE
     LTEXT           "YS6",IDC_STATIC,7,26,12,8
     EDITTEXT        IDC_EDIT1,27,23,134,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON1,161,22,13,14
-    LTEXT           "ŠeƒQ[ƒ€‚ÌƒCƒ“ƒXƒg[ƒ‹ƒtƒHƒ‹ƒ_‚ðŽw’è‚µ‚Ä‚­‚¾‚³‚¢B",IDC_STATIC,7,7,275,8
+    LTEXT           "å„ã‚²ãƒ¼ãƒ ã®ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ãƒ•ã‚©ãƒ«ãƒ€ã‚’æŒ‡å®šã—ã¦ãã ã•ã„ã€‚",IDC_STATIC,7,7,275,8
     LTEXT           "YSF",IDC_STATIC,7,40,13,8
     EDITTEXT        IDC_EDIT2,27,37,134,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON5,161,36,13,14
@@ -267,7 +268,7 @@ BEGIN
     LTEXT           "Zwei!!",IDC_STATIC,6,192,18,8
     EDITTEXT        IDC_EDIT13,27,190,134,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON34,161,190,13,14
-    LTEXT           "‚®‚é‚Ý‚ñ",IDC_STATIC,1,206,26,8
+    LTEXT           "ãã‚‹ã¿ã‚“",IDC_STATIC,1,206,26,8
     EDITTEXT        IDC_EDIT14,27,204,134,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON36,161,204,13,14
     LTEXT           "Dinosaur",IDC_STATIC,181,23,27,8
@@ -276,103 +277,103 @@ BEGIN
     LTEXT           "Brandish4",IDC_STATIC,179,37,30,8
     EDITTEXT        IDC_EDIT16,208,35,150,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON40,359,35,13,14
-    LTEXT           "”’‚«–‚—",IDC_STATIC,180,51,27,8
+    LTEXT           "ç™½ãé­”å¥³",IDC_STATIC,180,51,27,8
     EDITTEXT        IDC_EDIT17,208,49,150,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON41,359,49,13,14
-    LTEXT           "Žég‚¢Ž´",IDC_STATIC,180,65,28,8
+    LTEXT           "æœ±ç´…ã„é›«",IDC_STATIC,180,65,28,8
     EDITTEXT        IDC_EDIT18,208,63,150,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON42,359,63,13,14
-    LTEXT           "ŠC‚ÌŸB‰Ì",IDC_STATIC,180,79,28,8
+    LTEXT           "æµ·ã®æª»æ­Œ",IDC_STATIC,180,79,28,8
     EDITTEXT        IDC_EDIT19,208,77,150,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON43,359,77,13,14
-    LTEXT           "ŒŽ‰e",IDC_STATIC,187,93,15,8
+    LTEXT           "æœˆå½±",IDC_STATIC,187,93,15,8
     EDITTEXT        IDC_EDIT20,208,91,150,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON49,359,91,13,14
-    LTEXT           "¼•—",IDC_STATIC,187,107,15,8
+    LTEXT           "è¥¿é¢¨",IDC_STATIC,187,107,15,8
     EDITTEXT        IDC_EDIT21,208,105,150,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON50,359,105,13,14
-    LTEXT           "ƒA[ƒN",IDC_STATIC,185,121,20,8
+    LTEXT           "ã‚¢ãƒ¼ã‚¯",IDC_STATIC,185,121,20,8
     EDITTEXT        IDC_EDIT22,208,119,150,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON52,359,119,13,14
-    LTEXT           "ŽO‘Žu1",IDC_STATIC,182,135,25,8
+    LTEXT           "ä¸‰å›½å¿—1",IDC_STATIC,182,135,25,8
     EDITTEXT        IDC_EDIT23,208,133,150,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON55,359,133,13,14
-    LTEXT           "ŽO‘Žu2",IDC_STATIC,182,149,25,8
+    LTEXT           "ä¸‰å›½å¿—2",IDC_STATIC,182,149,25,8
     EDITTEXT        IDC_EDIT24,208,147,150,12,ES_AUTOHSCROLL | ES_READONLY
     PUSHBUTTON      "...",IDC_BUTTON56,359,147,13,14
-    PUSHBUTTON      "PVIƒpƒXÝ’è",IDC_BUTTON25,7,222,50,14
+    PUSHBUTTON      "PVIãƒ‘ã‚¹è¨­å®š",IDC_BUTTON25,7,222,50,14
 END
 
 IDD_SENTAKU1 DIALOGEX 0, 0, 183, 273
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "‹ó‚Ì‹OÕ First Chapter"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN", 0, 0, 0x0
+CAPTION "ç©ºã®è»Œè·¡ First Chapter"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯", 0, 0, 0x0
 BEGIN
-    PUSHBUTTON      "•Â‚¶‚é",IDOK,67,252,50,14
+    PUSHBUTTON      "é–‰ã˜ã‚‹",IDOK,67,252,50,14
     LISTBOX         IDC_LIST1,7,7,169,242,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_SENTAKU2 DIALOGEX 0, 0, 195, 259
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒC[ƒX -ƒtƒFƒ‹ƒKƒi‚Ì¾‚¢-"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN", 0, 0, 0x0
+CAPTION "ã‚¤ãƒ¼ã‚¹ -ãƒ•ã‚§ãƒ«ã‚¬ãƒŠã®èª“ã„-"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯", 0, 0, 0x0
 BEGIN
-    PUSHBUTTON      "•Â‚¶‚é",IDOK,72,238,50,14
+    PUSHBUTTON      "é–‰ã˜ã‚‹",IDOK,72,238,50,14
     LISTBOX         IDC_LIST1,7,7,181,229,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_SENTAKU3 DIALOGEX 0, 0, 159, 259
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒC[ƒX‡Y -ƒiƒsƒVƒ…ƒeƒ€‚Ì™¸-"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN", 0, 0, 0x0
+CAPTION "ã‚¤ãƒ¼ã‚¹â…¥ -ãƒŠãƒ”ã‚·ãƒ¥ãƒ†ãƒ ã®åŒ£-"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯", 0, 0, 0x0
 BEGIN
-    PUSHBUTTON      "•Â‚¶‚é",IDOK,54,238,50,14
+    PUSHBUTTON      "é–‰ã˜ã‚‹",IDOK,54,238,50,14
     LISTBOX         IDC_LIST1,7,7,145,227,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_SENTAKU4 DIALOGEX 0, 0, 338, 213
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒC[ƒXEƒIƒŠƒWƒ“"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN", 0, 0, 0x0
+CAPTION "ã‚¤ãƒ¼ã‚¹ãƒ»ã‚ªãƒªã‚¸ãƒ³"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯", 0, 0, 0x0
 BEGIN
-    PUSHBUTTON      "•Â‚¶‚é",IDOK,143,192,50,14
+    PUSHBUTTON      "é–‰ã˜ã‚‹",IDOK,143,192,50,14
     LISTBOX         IDC_LIST1,7,6,324,179,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP
 END
 
 IDD_SENTAKU5 DIALOGEX 0, 0, 183, 273
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "‹ó‚Ì‹OÕ The 3rd -Advanced Chapter-"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN", 0, 0, 0x0
+CAPTION "ç©ºã®è»Œè·¡ The 3rd -Advanced Chapter-"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯", 0, 0, 0x0
 BEGIN
-    PUSHBUTTON      "•Â‚¶‚é",IDOK,67,252,50,14
+    PUSHBUTTON      "é–‰ã˜ã‚‹",IDOK,67,252,50,14
     LISTBOX         IDC_LIST1,7,7,169,241,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_SENTAKU6 DIALOGEX 0, 0, 207, 273
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "ZWEI II"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN", 0, 0, 0x0
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯", 0, 0, 0x0
 BEGIN
-    PUSHBUTTON      "•Â‚¶‚é",IDOK,81,252,50,14
+    PUSHBUTTON      "é–‰ã˜ã‚‹",IDOK,81,252,50,14
     LISTBOX         IDC_LIST1,7,7,193,241,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_Render DIALOGEX 0, 0, 190, 285
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒŒƒ“ƒ_ƒŠƒ“ƒO‘I‘ð"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN", 0, 0, 0x0
+CAPTION "ãƒ¬ãƒ³ãƒ€ãƒªãƒ³ã‚°é¸æŠž"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯", 0, 0, 0x0
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,7,264,36,14
-    PUSHBUTTON      "·¬Ý¾Ù",IDCANCEL,43,264,34,14
+    PUSHBUTTON      "Ã—",IDCANCEL,43,264,34,14
     COMBOBOX        IDC_COMBO1,167,7,16,92,CBS_DROPDOWNLIST | NOT WS_VISIBLE | WS_DISABLED | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Š„žŠÔŠu",IDC_STATIC,7,7,47,8
-    CONTROL         "ƒfƒtƒHƒ‹ƒg‚ÅEVR‚ðŽg‚¤(VistaˆÈ~)",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,61,112,10
-    CONTROL         "ƒfƒXƒNƒgƒbƒvƒRƒ“ƒ|ƒWƒVƒ‡ƒ“‚ðŽg—p‚·‚é",IDC_CHECK2,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,72,118,10
-    CONTROL         "Aero‚ÅGrassŒø‰Ê‚ðŽg—p‚·‚é",IDC_CHECK3,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,82,118,10
-    CONTROL         "ffdshow‚ðŽg‚¤",IDC_CHECK27,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,173,7,10,10
-    PUSHBUTTON      "DirectShowƒtƒBƒ‹ƒ^ˆê——",IDCANCEL2,77,264,73,14
-    CONTROL         "vob‚à•¡”ƒXƒgƒŠ[ƒ€‘Î‰ž‚Æ‚·‚é",IDC_CHECK30,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,172,7,11,10
-    CONTROL         "Haali‚ðŽg‚í‚È‚¢",IDC_CHECK31,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,175,7,8,10
+    LTEXT           "å‰²è¾¼é–“éš”",IDC_STATIC_R_BUF,7,7,47,8
+    CONTROL         "ãƒ‡ãƒ•ã‚©ãƒ«ãƒˆã§EVRã‚’ä½¿ã†(Vistaä»¥é™)",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,61,112,10
+    CONTROL         "ãƒ‡ã‚¹ã‚¯ãƒˆãƒƒãƒ—ã‚³ãƒ³ãƒã‚¸ã‚·ãƒ§ãƒ³ã‚’ä½¿ç”¨ã™ã‚‹",IDC_CHECK2,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,72,118,10
+    CONTROL         "Aeroã§GrassåŠ¹æžœã‚’ä½¿ç”¨ã™ã‚‹",IDC_CHECK3,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,82,118,10
+    CONTROL         "ffdshowã‚’ä½¿ã†",IDC_CHECK27,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,173,7,10,10
+    PUSHBUTTON      "DirectShowãƒ•ã‚£ãƒ«ã‚¿ä¸€è¦§",IDCANCEL2,77,264,73,14
+    CONTROL         "vobã‚‚è¤‡æ•°ã‚¹ãƒˆãƒªãƒ¼ãƒ å¯¾å¿œã¨ã™ã‚‹",IDC_CHECK30,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,172,7,11,10
+    CONTROL         "Haaliã‚’ä½¿ã‚ãªã„",IDC_CHECK31,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,175,7,8,10
     CONTROL         "x2.0",IDC_CHECK32,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,31,191,23,10
     CONTROL         "x3.0",IDC_CHECK33,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,54,191,22,10
     CONTROL         "x4.0",IDC_CHECK34,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,77,191,22,10
@@ -382,59 +383,61 @@ BEGIN
     CONTROL         "x2.0",IDC_CHECK38,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,54,210,22,10
     CONTROL         "x2.5",IDC_CHECK39,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,77,210,22,10
     CONTROL         "x1.0",IDC_CHECK40,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,210,24,10
-    LTEXT           "mp3‰¹—Ê",IDC_STATIC,7,202,27,8
+    LTEXT           "mp3éŸ³é‡",IDC_STATIC_R_MP3,7,202,27,8
     CONTROL         "x3.0",IDC_CHECK41,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,101,210,22,10
     CONTROL         "x2.0",IDC_CHECK42,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,31,229,23,10
     CONTROL         "x3.0",IDC_CHECK43,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,54,229,22,10
     CONTROL         "x4.0",IDC_CHECK44,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,77,229,22,10
     CONTROL         "x1.0",IDC_CHECK45,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,229,24,10
-    LTEXT           "‚»‚Ì‘¼‚Ìkpi",IDC_STATIC,7,221,36,8
+    LTEXT           "ãã®ä»–ã®kpi",IDC_STATIC_R_KPI,7,221,36,8
     CONTROL         "x5.0",IDC_CHECK46,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,101,229,22,10
-    PUSHBUTTON      "kpiˆê——",IDCANCEL3,153,264,30,14
-    PUSHBUTTON      "ƒƒCƒ“‰æ–ÊƒtƒHƒ“ƒg",IDC_FONT,133,192,16,14,NOT WS_VISIBLE
-    PUSHBUTTON      "ƒŠƒXƒg‰æ–ÊƒtƒHƒ“ƒg",IDC_FONT2,133,208,16,14,NOT WS_VISIBLE
-    CONTROL         "mp3 ƒfƒR[ƒ_‚ð“ÆŽ©‚Ì‚ðŽg‚¤",IDC_CHECK47,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,159,60,24,10
-    CONTROL         "“®‰æÄ¶Žž•¡”‰¹º‚ÌŽž‰¹º‘I‘ð‰æ–Ê‚ðo‚·",IDC_CHECK48,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,135,150,10
-    CONTROL         "24bit‚ðŽg‚¤",IDC_CHECK49,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,77,157,48,10
-    CONTROL         "m4a‚ð“à‘ ‚Ìˆ—‚Å‰‰‘t‚·‚é",IDC_CHECK50,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,145,103,10
-    PUSHBUTTON      "•É‚Ì‹OÕ—pt_bgm._dt",IDC_BUTTON1,77,249,73,14
-    LTEXT           ".SPC,.HES‰¹—Ê(kpi)",IDC_STATIC,7,182,56,8
-    LTEXT           "‰‰‘tbit[“xF",IDC_STATIC,7,157,62,8
-    CONTROL         "32bit‚ðŽg‚¤",IDC_CHECK51,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,125,157,48,10
+    PUSHBUTTON      "kpiä¸€è¦§",IDCANCEL3,153,264,30,14
+    PUSHBUTTON      "ãƒ¡ã‚¤ãƒ³ç”»é¢ãƒ•ã‚©ãƒ³ãƒˆ",IDC_FONT,133,192,16,14,NOT WS_VISIBLE
+    PUSHBUTTON      "ãƒªã‚¹ãƒˆç”»é¢ãƒ•ã‚©ãƒ³ãƒˆ",IDC_FONT2,133,208,16,14,NOT WS_VISIBLE
+    CONTROL         "mp3 ãƒ‡ã‚³ãƒ¼ãƒ€ã‚’ç‹¬è‡ªã®ã‚’ä½¿ã†",IDC_CHECK47,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,159,60,24,10
+    CONTROL         "å‹•ç”»å†ç”Ÿæ™‚è¤‡æ•°éŸ³å£°ã®æ™‚éŸ³å£°é¸æŠžç”»é¢ã‚’å‡ºã™",IDC_CHECK48,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,135,150,10
+    CONTROL         "24bitã‚’ä½¿ã†",IDC_CHECK49,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,77,157,48,10
+    CONTROL         "m4aã‚’å†…è”µã®å‡¦ç†ã§æ¼”å¥ã™ã‚‹",IDC_CHECK50,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,145,103,10
+    PUSHBUTTON      "ç¢§ã®è»Œè·¡ç”¨t_bgm._dt",IDC_BUTTON1,77,249,73,14
+    LTEXT           ".SPC,.HESéŸ³é‡(kpi)",IDC_STATIC_R_SPC,7,182,56,8
+    LTEXT           "æ¼”å¥bitéœ‡åº¦ï¼š",IDC_STATIC_R_BIT,7,157,62,8
+    CONTROL         "32bitã‚’ä½¿ã†",IDC_CHECK51,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,125,157,48,10
     CONTROL         "",IDC_SLIDER3,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,56,7,78,10
     LTEXT           "ms",IDC_STATIC9,137,7,22,8
-    LTEXT           "•\Ž¦ŠÔŠu",IDC_STATIC,7,18,47,8
+    LTEXT           "è¡¨ç¤ºé–“éš”",IDC_STATIC_R_DISP,7,18,47,8
     CONTROL         "",IDC_SLIDER5,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,56,18,78,10
     LTEXT           "ms",IDC_STATIC10,137,18,22,8
-    LTEXT           "Ä¶ƒfƒoƒCƒX",IDC_STATIC,7,30,47,8
+    LTEXT           "å†ç”Ÿãƒ‡ãƒã‚¤ã‚¹",IDC_STATIC_R_DEV,7,30,47,8
     COMBOBOX        IDC_COMBO2,58,29,123,258,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "ŠÖ˜A‚Ã‚¯",IDCANCEL5,153,249,34,14
-    LTEXT           "MAXƒTƒ“ƒvƒ‹ƒŒ[ƒgF",IDC_STATIC,7,169,69,8
+    PUSHBUTTON      "é–¢é€£ã¥ã‘",IDCANCEL5,153,249,34,14
+    LTEXT           "MAXã‚µãƒ³ãƒ—ãƒ«ãƒ¬ãƒ¼ãƒˆï¼š",IDC_STATIC_R_SAMP,7,169,69,8
     COMBOBOX        IDC_COMBO3,81,168,57,173,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Hz",IDC_STATIC,140,170,15,8
-    LTEXT           "ƒXƒyƒAƒi”{—¦",IDC_STATIC,7,44,47,8
+    LTEXT           "ã‚¹ãƒšã‚¢ãƒŠå€çŽ‡",IDC_STATIC_R_SPEANA,7,44,47,8
     CONTROL         "",IDC_SLIDER6,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,56,44,78,10
-    LTEXT           "”{",IDC_STATIC12,137,44,22,8
-    CONTROL         "ƒXƒyƒAƒi‚Ìƒ‚[ƒh‚ðØ‚è‘Ö‚¦‚é",IDC_CHECK52,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,95,111,10
+    LTEXT           "å€",IDC_STATIC12,137,44,22,8
+    CONTROL         "ã‚¹ãƒšã‚¢ãƒŠã®ãƒ¢ãƒ¼ãƒ‰ã‚’åˆ‡ã‚Šæ›¿ãˆã‚‹",IDC_CHECK52,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,95,111,10
     COMBOBOX        IDC_COMBO4,122,93,61,185,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "lrc‚ðƒlƒbƒg‚©‚çŽæ“¾‚·‚é(LRCLib/NetEase‚É‚ ‚ê‚Î)",IDC_CHECK_lrc,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,107,175,10
+    CONTROL         "lrcæ­Œè©žãƒãƒƒãƒˆå–å¾—å¯¾å¿œ(LRCLib/NetEaseç­‰)",IDC_CHECK_lrc,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,107,175,10
+    LTEXT           "è¨€èªž",IDC_STATIC_LANG,8,120,20,8
+    COMBOBOX        IDC_COMBO_LANG,35,118,90,60,CBS_DROPDOWNLIST | WS_TABSTOP
 END
 
 IDD_SENTAKU7 DIALOG 0, 0, 210, 325
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Ys I&II Chronicles Ys 1"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯"
 BEGIN
-    DEFPUSHBUTTON   "•Â‚¶‚é",IDOK,80,304,50,14
+    DEFPUSHBUTTON   "é–‰ã˜ã‚‹",IDOK,80,304,50,14
     LISTBOX         IDC_LIST1,7,7,196,293,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_SENTAKU8 DIALOG 0, 0, 203, 321
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Ys I&II Chronicles Ys 2"
-FONT 9, "‚l‚r ‚oƒSƒVƒbƒN"
+FONT 9, "ï¼­ï¼³ ï¼°ã‚´ã‚·ãƒƒã‚¯"
 BEGIN
-    DEFPUSHBUTTON   "•Â‚¶‚é",IDOK,74,300,50,14
+    DEFPUSHBUTTON   "é–‰ã˜ã‚‹",IDOK,74,300,50,14
     LISTBOX         IDC_LIST1,7,7,189,288,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
 END
 
@@ -449,7 +452,7 @@ END
 
 IDD_SENTAKU10 DIALOGEX 0, 0, 244, 257
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Ys 12 Š®‘S”Å Ys1"
+CAPTION "Ys 12 å®Œå…¨ç‰ˆ Ys1"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,97,236,50,14
@@ -458,7 +461,7 @@ END
 
 IDD_SENTAKU11 DIALOGEX 0, 0, 244, 299
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Ys 12 Š®‘S”Å Ys2"
+CAPTION "Ys 12 å®Œå…¨ç‰ˆ Ys2"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,97,278,50,14
@@ -476,7 +479,7 @@ END
 
 IDD_SENTAKU13 DIALOGEX 0, 0, 210, 299
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒ\[ƒTƒŠƒAƒ“ ƒIƒŠƒWƒiƒ‹"
+CAPTION "ã‚½ãƒ¼ã‚µãƒªã‚¢ãƒ³ ã‚ªãƒªã‚¸ãƒŠãƒ«"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,80,278,50,14
@@ -485,7 +488,7 @@ END
 
 IDD_SENTAKU14 DIALOGEX 0, 0, 210, 221
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "‚®‚é‚Ý‚ñ"
+CAPTION "ãã‚‹ã¿ã‚“"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,80,200,50,14
@@ -494,7 +497,7 @@ END
 
 IDD_SENTAKU15 DIALOGEX 0, 0, 210, 257
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒ_ƒCƒiƒ\ƒA ƒŠƒUƒŒƒNƒVƒ‡ƒ“"
+CAPTION "ãƒ€ã‚¤ãƒŠã‚½ã‚¢ ãƒªã‚¶ãƒ¬ã‚¯ã‚·ãƒ§ãƒ³"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,80,236,50,14
@@ -503,7 +506,7 @@ END
 
 IDD_SENTAKU16 DIALOGEX 0, 0, 210, 257
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒuƒ‰ƒ“ƒfƒBƒbƒVƒ…‚S –°‚ê‚é_‚Ì“ƒ"
+CAPTION "ãƒ–ãƒ©ãƒ³ãƒ‡ã‚£ãƒƒã‚·ãƒ¥ï¼” çœ ã‚Œã‚‹ç¥žã®å¡”"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,80,236,50,14
@@ -512,7 +515,7 @@ END
 
 IDD_SENTAKU17 DIALOGEX 0, 0, 225, 257
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "‰p—Y“`àIII VE”’‚«–‚—"
+CAPTION "è‹±é›„ä¼èª¬III æ–°ãƒ»ç™½ãé­”å¥³"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,86,236,50,14
@@ -521,7 +524,7 @@ END
 
 IDD_SENTAKU18 DIALOGEX 0, 0, 225, 257
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "‰p—Y“`àIV Žég‚¢Ž´"
+CAPTION "è‹±é›„ä¼èª¬IV æœ±ç´…ã„é›«"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,86,236,50,14
@@ -530,7 +533,7 @@ END
 
 IDD_SENTAKU19 DIALOGEX 0, 0, 225, 257
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "‰p—Y“`àV ŠC‚ÌŸB‰Ì"
+CAPTION "è‹±é›„ä¼èª¬V æµ·ã®æª»æ­Œ"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,86,236,50,14
@@ -539,7 +542,7 @@ END
 
 IDD_SENTAKU20 DIALOGEX 0, 0, 225, 257
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ŒŽ‰e‚ÌƒfƒXƒeƒBƒj["
+CAPTION "æœˆå½±ã®ãƒ‡ã‚¹ãƒ†ã‚£ãƒ‹ãƒ¼"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,86,236,50,14
@@ -548,7 +551,7 @@ END
 
 IDD_SENTAKU21 DIALOGEX 0, 0, 295, 257
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "¼•—‚Ì‹¶Ž‹È(ƒ‰ƒvƒ\ƒfƒB[)"
+CAPTION "è¥¿é¢¨ã®ç‹‚è©©æ›²(ãƒ©ãƒ—ã‚½ãƒ‡ã‚£ãƒ¼)"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,123,236,50,14
@@ -557,7 +560,7 @@ END
 
 IDD_SENTAKU22 DIALOGEX 0, 0, 225, 257
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒA[ƒNƒgƒDƒ‹ƒX -Arcturus-"
+CAPTION "ã‚¢ãƒ¼ã‚¯ãƒˆã‚¥ãƒ«ã‚¹ -Arcturus-"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,86,236,50,14
@@ -566,150 +569,150 @@ END
 
 IDD_SENTAKU23 DIALOGEX 0, 0, 225, 257
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Œ¶‘zŽO‘Žu‚P"
+CAPTION "å¹»æƒ³ä¸‰å›½å¿—ï¼‘"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,86,236,50,14
     LISTBOX         IDC_LIST1,7,27,211,207,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "“®‰æ(šˆó)‚ðÄ¶‚·‚é‚É‚ÍBink‚ÌŠÂ‹«‚ª•K—v‚Å‚·\nreadme.txt‚ð“Ç‚ñ‚Å“±“ü‚µ‚Ä‚­‚¾‚³‚¢B",IDC_STATIC,7,7,181,19
+    LTEXT           "å‹•ç”»(â˜…å°)ã‚’å†ç”Ÿã™ã‚‹ã«ã¯Binkã®ç’°å¢ƒãŒå¿…è¦ã§ã™\nreadme.txt????????????????????B",IDC_STATIC,7,7,181,19
 END
 
 IDD_SENTAKU24 DIALOGEX 0, 0, 225, 257
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Œ¶‘zŽO‘Žu‚Q"
+CAPTION "å¹»æƒ³ä¸‰å›½å¿—ï¼’"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,86,236,50,14
     LISTBOX         IDC_LIST1,7,27,211,207,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "“®‰æ(šˆó)‚ðÄ¶‚·‚é‚É‚ÍBink‚ÌŠÂ‹«‚ª•K—v‚Å‚·\nreadme.txt‚ð“Ç‚ñ‚Å“±“ü‚µ‚Ä‚­‚¾‚³‚¢B",IDC_STATIC,7,7,181,19
+    LTEXT           "å‹•ç”»(â˜…å°)ã‚’å†ç”Ÿã™ã‚‹ã«ã¯Binkã®ç’°å¢ƒãŒå¿…è¦ã§ã™\nreadme.txt????????????????????B",IDC_STATIC,7,7,181,19
 END
 
 IDD_PLAYLIST DIALOGEX 0, 0, 450, 133
 STYLE DS_SETFONT | WS_MINIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 EXSTYLE WS_EX_ACCEPTFILES
-CAPTION "ƒvƒŒƒCƒŠƒXƒg"
-FONT 9, "ƒƒCƒŠƒI", 400, 0, 0x80
+CAPTION "ãƒ—ãƒ¬ã‚¤ãƒªã‚¹ãƒˆ"
+FONT 9, "ãƒ¡ã‚¤ãƒªã‚ª", 400, 0, 0x80
 BEGIN
-    PUSHBUTTON      "•Â‚¶‚é",IDOK,434,7,9,14,NOT WS_VISIBLE
+    PUSHBUTTON      "é–‰ã˜ã‚‹",IDOK,434,7,9,14,NOT WS_VISIBLE
     PUSHBUTTON      "",IDC_BUTTON1,124,9,18,13,BS_ICON | BS_FLAT
     PUSHBUTTON      "",IDC_BUTTON5,142,9,17,13,BS_ICON | BS_FLAT
     PUSHBUTTON      "",IDC_BUTTON10,163,9,17,13,BS_ICON | BS_FLAT
     PUSHBUTTON      "",IDC_BUTTON11,181,9,17,13,BS_ICON | BS_FLAT
     CONTROL         "",IDC_LIST1,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | LVS_ALIGNLEFT | LVS_OWNERDATA | WS_BORDER | WS_TABSTOP,7,34,436,92
     EDITTEXT        IDC_EDIT1,437,7,6,14,ES_AUTOHSCROLL | NOT WS_VISIBLE
-    CONTROL         "˜A‘±Ä¶",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,5,48,8
-    CONTROL         "ƒ‹[ƒvÄ¶",IDC_CHECK4,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,12,47,8
-    CONTROL         "ƒc[ƒ‹ƒ`ƒbƒv•\Ž¦",IDC_CHECK28,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,55,5,67,8
-    CONTROL         "Å¬‰»A•œ‹A",IDC_CHECK29,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,55,12,61,8
+    CONTROL         "é€£ç¶šå†ç”Ÿ",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,5,48,8
+    CONTROL         "ãƒ«ãƒ¼ãƒ—å†ç”Ÿ",IDC_CHECK4,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,12,47,8
+    CONTROL         "ãƒ„ãƒ¼ãƒ«ãƒãƒƒãƒ—è¡¨ç¤º",IDC_CHECK28,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,55,5,67,8
+    CONTROL         "æœ€å°åŒ–ã€å¾©å¸°",IDC_CHECK29,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,55,12,61,8
     EDITTEXT        IDC_EDIT2,205,9,67,12,ES_AUTOHSCROLL
     PUSHBUTTON      "",IDC_BUTTON16,290,9,17,13,BS_ICON | BS_FLAT
     PUSHBUTTON      "",IDC_BUTTON20,273,9,17,13,BS_ICON | BS_FLAT
-    CONTROL         "Ä¶ˆÊ’u\n‚ð•Û‘¶",IDC_CHECK5,"Button",BS_AUTOCHECKBOX | BS_PUSHLIKE | BS_MULTILINE | WS_TABSTOP,310,2,39,20
-    GROUPBOX        "ƒtƒ@ƒCƒ‹ˆÚ“®",IDC_STATICido,122,0,80,23,BS_CENTER | BS_FLAT
-    GROUPBOX        "‚ ‚¢‚Ü‚¢ŒŸõ",IDC_STATICken,203,0,106,23,BS_CENTER
+    CONTROL         "?????u\n????",IDC_CHECK5,"Button",BS_AUTOCHECKBOX | BS_PUSHLIKE | BS_MULTILINE | WS_TABSTOP,310,2,39,20
+    GROUPBOX        "ãƒ•ã‚¡ã‚¤ãƒ«ç§»å‹•",IDC_STATICido,122,0,80,23,BS_CENTER | BS_FLAT
+    GROUPBOX        "ã‚ã„ã¾ã„æ¤œç´¢",IDC_STATICken,203,0,106,23,BS_CENTER
     CONTROL         "mp3",IDC_CHECK6,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,352,2,31,10
     CONTROL         "DShow",IDC_CHECK7,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,352,11,39,10
     COMBOBOX        IDC_COMBO1,7,23,81,182,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "–¼‘O•ÏX",IDC_BUTTON3,89,23,50,11
-    PUSHBUTTON      "ƒŠƒXƒgíœ",IDC_PLAYDELETE,140,23,50,11
+    PUSHBUTTON      "åå‰å¤‰æ›´",IDC_BUTTON3,89,23,50,11
+    PUSHBUTTON      "ãƒªã‚¹ãƒˆå‰Šé™¤",IDC_PLAYDELETE,140,23,50,11
 END
 
 IDD_GRAPH DIALOGEX 0, 0, 253, 135
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒOƒ‰ƒtƒtƒBƒ‹ƒ^ˆê——"
+CAPTION "ã‚°ãƒ©ãƒ•ãƒ•ã‚£ãƒ«ã‚¿ä¸€è¦§"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    DEFPUSHBUTTON   "•Â‚¶‚é",IDOK,101,114,50,14
+    DEFPUSHBUTTON   "é–‰ã˜ã‚‹",IDOK,101,114,50,14
     LISTBOX         IDC_LIST1,7,7,239,104,LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP,WS_EX_CLIENTEDGE
 END
 
 IDD_SYOSAI DIALOGEX 0, 0, 259, 190
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒŠƒXƒgÚ×î•ñ"
+CAPTION "ãƒªã‚¹ãƒˆè©³ç´°æƒ…å ±"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    DEFPUSHBUTTON   "•Â‚¶‚é",IDOK,72,169,51,14
+    DEFPUSHBUTTON   "é–‰ã˜ã‚‹",IDOK,72,169,51,14
     EDITTEXT        IDC_EDIT1,42,7,210,24,ES_MULTILINE | ES_READONLY | WS_VSCROLL
-    LTEXT           "–¼‘O",IDC_STATIC,7,10,17,8
+    LTEXT           "åå‰",IDC_STATIC,7,10,17,8
     EDITTEXT        IDC_EDIT2,42,32,32,12,ES_AUTOHSCROLL | ES_READONLY
-    LTEXT           "“à•”ID",IDC_STATIC,7,34,24,8
+    LTEXT           "å†…éƒ¨ID",IDC_STATIC,7,34,24,8
     EDITTEXT        IDC_EDIT3,154,31,98,12,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Game",IDC_STATIC,119,33,19,8
     EDITTEXT        IDC_EDIT4,42,57,210,21,ES_MULTILINE | ES_READONLY | WS_VSCROLL
-    LTEXT           "ƒA[ƒeƒBƒXƒg",IDC_STATIC,7,60,36,8
+    LTEXT           "ã‚¢ãƒ¼ãƒ†ã‚£ã‚¹ãƒˆ",IDC_STATIC,7,60,36,8
     EDITTEXT        IDC_EDIT5,42,78,210,22,ES_MULTILINE | ES_READONLY | WS_VSCROLL
-    LTEXT           "ƒAƒ‹ƒoƒ€",IDC_STATIC,7,81,27,8
+    LTEXT           "ã‚¢ãƒ«ãƒãƒ ",IDC_STATIC,7,81,27,8
     EDITTEXT        IDC_EDIT6,42,123,210,44,ES_MULTILINE | ES_READONLY | ES_WANTRETURN | WS_VSCROLL
-    LTEXT           "ƒtƒ@ƒCƒ‹–¼",IDC_STATIC,7,125,32,8
-    PUSHBUTTON      "ƒtƒHƒ‹ƒ_‚ðŠJ‚­",IDOK999,143,169,51,14
-    LTEXT           "”N",IDC_STATIC,17,47,9,8
+    LTEXT           "ãƒ•ã‚¡ã‚¤ãƒ«å",IDC_STATIC,7,125,32,8
+    PUSHBUTTON      "ãƒ•ã‚©ãƒ«ãƒ€ã‚’é–‹ã",IDOK999,143,169,51,14
+    LTEXT           "å¹´",IDC_STATIC,17,47,9,8
     EDITTEXT        IDC_EDIT7,42,44,48,12,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "Track",IDC_STATIC,94,46,18,8
     EDITTEXT        IDC_EDIT9,115,44,32,12,ES_AUTOHSCROLL | ES_READONLY
-    LTEXT           "ƒWƒƒƒ“ƒ‹",IDC_STATIC,154,47,26,8
+    LTEXT           "ã‚¸ãƒ£ãƒ³ãƒ«",IDC_STATIC,154,47,26,8
     EDITTEXT        IDC_EDIT10,182,44,70,12,ES_AUTOHSCROLL | ES_READONLY
     EDITTEXT        IDC_EDIT11,42,101,210,22,ES_MULTILINE | ES_READONLY | WS_VSCROLL
-    LTEXT           "ƒRƒƒ“ƒg",IDC_STATIC,7,104,23,8
+    LTEXT           "ã‚³ãƒ¡ãƒ³ãƒˆ",IDC_STATIC,7,104,23,8
 END
 
 IDD_FILENAME DIALOGEX 0, 0, 232, 140
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒtƒ@ƒCƒ‹–¼•ÏX"
+CAPTION "ãƒ•ã‚¡ã‚¤ãƒ«åå¤‰æ›´"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     PUSHBUTTON      "OK",ID_OK,61,119,50,14
-    PUSHBUTTON      "ƒLƒƒƒ“ƒZƒ‹",IDCANCEL,121,119,50,14
+    PUSHBUTTON      "Ã—",IDCANCEL,121,119,50,14
     EDITTEXT        IDC_EDIT1,7,18,218,14,ES_AUTOHSCROLL
-    LTEXT           "ƒtƒ@ƒCƒ‹–¼",IDC_STATIC,8,7,32,8
+    LTEXT           "ãƒ•ã‚¡ã‚¤ãƒ«å",IDC_STATIC,8,7,32,8
     EDITTEXT        IDC_EDIT2,7,44,218,14,ES_AUTOHSCROLL
-    LTEXT           "ƒA[ƒeƒBƒXƒg–¼",IDC_STATIC,8,33,44,8
+    LTEXT           "ã‚¢ãƒ¼ãƒ†ã‚£ã‚¹ãƒˆå",IDC_STATIC,8,33,44,8
     EDITTEXT        IDC_EDIT3,7,70,218,14,ES_AUTOHSCROLL
-    LTEXT           "ƒAƒ‹ƒoƒ€–¼",IDC_STATIC,8,60,35,8
+    LTEXT           "ã‚¢ãƒ«ãƒãƒ å",IDC_STATIC,8,60,35,8
     EDITTEXT        IDC_EDIT4,7,96,218,14,ES_AUTOHSCROLL
-    LTEXT           "ƒtƒ@ƒCƒ‹–¼",IDC_STATIC,7,86,32,8
+    LTEXT           "?t?@?C????",IDC_STATIC,7,86,32,8
 END
 
 IDD_KPI DIALOGEX 0, 0, 365, 154
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "kpiˆê——"
+CAPTION "kpiä¸€è¦§"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,159,133,50,14
     CONTROL         "",IDC_LIST1,"SysListView32",LVS_REPORT | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,7,25,351,104
-    LTEXT           "kpiˆê——(ã‚©‚ç‡‚É“K—pAVer5‚Íˆê•”–¢‘Î‰ž)",IDC_STATIC,7,11,351,8
+    LTEXT           "kpiä¸€è¦§(ä¸Šã‹ã‚‰é †ã«é©ç”¨ã€Ver5ã¯ä¸€éƒ¨æœªå¯¾å¿œ)",IDC_STATIC,7,11,351,8
 END
 
 IDD_AUDIOSELECT DIALOGEX 0, 0, 261, 188
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION
-CAPTION "Ä¶ƒXƒgƒŠ[ƒ€‘I‘ð"
+CAPTION "å†ç”Ÿã‚¹ãƒˆãƒªãƒ¼ãƒ é¸æŠž"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,105,167,50,14
-    PUSHBUTTON      "ƒLƒƒƒ“ƒZƒ‹",IDCANCEL,204,24,50,14,NOT WS_VISIBLE
-    CTEXT           "•¡”‚Ì‰¹ºƒ`ƒƒƒ“ƒlƒ‹‚ª‚ ‚éŽž‚É\n‚±‚Ì‰æ–Ê‚ª•\Ž¦‚³‚ê‚Ü‚·B\nÄ¶‚µ‚½‚¢‰¹ºƒ`ƒƒƒ“ƒlƒ‹‚ð\n‘I‘ð‚µ‚Ä‰º‚³‚¢B\n\nÄ¶ƒEƒBƒ“ƒhƒE‚Å‚Ì‰EƒNƒŠƒbƒN\nƒƒjƒ…[‚©‚ç‚à‘I‘ð‚Å‚«‚Ü‚·B",IDC_STATIC,7,7,247,69
+    PUSHBUTTON      "Ã—",IDCANCEL,204,24,50,14,NOT WS_VISIBLE
+    CTEXT           "è¤‡æ•°ã®éŸ³å£°ãƒãƒ£ãƒ³ãƒãƒ«ãŒã‚ã‚‹æ™‚ã«\nã“ã®ç”»é¢ãŒè¡¨ç¤ºã•ã‚Œã¾ã™ã€‚\nå†ç”Ÿã—ãŸã„éŸ³å£°ãƒãƒ£ãƒ³ãƒãƒ«ã‚’\né¸æŠžã—ã¦ä¸‹ã•ã„ã€‚\n\nå†ç”Ÿã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ã§ã®å³ã‚¯ãƒªãƒƒã‚¯\nãƒ¡ãƒ‹ãƒ¥ãƒ¼ã‹ã‚‰ã‚‚é¸æŠžã§ãã¾ã™ã€‚",IDC_STATIC,7,7,247,69
     LISTBOX         IDC_LIST1,7,75,247,85,LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_PVI DIALOGEX 0, 0, 258, 86
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "fmpmd.kpi PVIƒpƒXÝ’è"
+CAPTION "fmpmd.kpi PVIãƒ‘ã‚¹è¨­å®š"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    DEFPUSHBUTTON   "•Û‘¶",IDOK,201,7,50,14
-    PUSHBUTTON      "ƒLƒƒƒ“ƒZƒ‹",IDCANCEL,201,24,50,14
+    DEFPUSHBUTTON   "ä¹¾",IDOK,201,7,50,14
+    PUSHBUTTON      "Ã—",IDCANCEL,201,24,50,14
     EDITTEXT        IDC_EDIT1,7,32,192,47,ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL
-    LTEXT           "PVIƒpƒX \\‚Å•K‚¸I‚í‚é‚±‚Æ@•¡”Žw’è‚Í ; ‚ÅŽw’è",IDC_STATIC,7,7,160,8
-    LTEXT           "c:\\xxx\\xxx\\ ‚â c:\\xxx\\xxx\\;x:\\yyy\\yyy\\ ‚Ì‚æ‚¤‚É‹Lq",IDC_STATIC,7,18,192,8
+    LTEXT           "PVI?p?X \\??K???I?????@?????w??? ; ??w??",IDC_STATIC,7,7,160,8
+    LTEXT           "c:",IDC_STATIC,7,18,192,8
 END
 
 IDD_ZEROFOL DIALOGEX 0, 0, 279, 57
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "•É‚Ì‹OÕ t_bgm._dt"
+CAPTION "ç¢§ã®è»Œè·¡ t_bgm._dt"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,121,36,50,14
     EDITTEXT        IDC_EDIT2,7,19,208,13,ES_AUTOHSCROLL
-    LTEXT           "•É‚Ì‹OÕ‚É‚Íƒ‹[ƒvƒf[ƒ^‘¶Ý‚µ‚È‚¢‚½‚ßA—ë‚Ì‹OÕ‚Ìut_bgm..dtv‚ð‘I‘ð‚µ‚Ä‚­‚¾‚³‚¢",IDC_STATIC,7,7,248,8
+    LTEXT           "ç¢§ã®è»Œè·¡ã«ã¯ãƒ«ãƒ¼ãƒ—ãƒ‡ãƒ¼ã‚¿å­˜åœ¨ã—ãªã„ãŸã‚ã€é›¶ã®è»Œè·¡ã®ã€Œt_bgm..dtã€ã‚’é¸æŠžã—ã¦ãã ã•ã„",IDC_STATIC,7,7,248,8
     PUSHBUTTON      "...",IDC_FOL,216,18,50,14
 END
 
@@ -726,8 +729,8 @@ CAPTION "Dialog"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,143,43,50,14
-    PUSHBUTTON      "ƒLƒƒƒ“ƒZƒ‹",IDCANCEL,199,43,50,14
-    LTEXT           "V‚µ‚¢ƒvƒŒƒCƒŠƒXƒg–¼",IDC_STATIC,16,27,57,8
+    PUSHBUTTON      "Ã—",IDCANCEL,199,43,50,14
+    LTEXT           "æ–°ã—ã„ãƒ—ãƒ¬ã‚¤ãƒªã‚¹ãƒˆå",IDC_STATIC,16,27,57,8
     EDITTEXT        IDC_EDIT1,88,25,103,14,ES_AUTOHSCROLL
 END
 
@@ -735,18 +738,18 @@ IDD_IMAGE DIALOGEX 0, 0, 310, 176
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_SYSMENU | WS_THICKFRAME
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    DEFPUSHBUTTON   "•Â‚¶‚é",IDOK,253,42,50,14
-    LTEXT           "ƒXƒ^ƒeƒBƒbƒN",IDC_STATIC1,252,66,29,8,NOT WS_VISIBLE
-    LTEXT           "ƒXƒ^ƒeƒBƒbƒN",IDC_STATIC2,252,83,29,8,NOT WS_VISIBLE
+    DEFPUSHBUTTON   "é–‰ã˜ã‚‹",IDOK,253,42,50,14
+    LTEXT           "?X?^?e?B?b?N",IDC_STATIC1,252,66,29,8,NOT WS_VISIBLE
+    LTEXT           "?X?^?e?B?b?N",IDC_STATIC2,252,83,29,8,NOT WS_VISIBLE
 END
 
 IDD_EQUALIZER DIALOGEX 0, 0, 497, 216
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "ƒCƒRƒ‰ƒCƒU["
-FONT 9, "‚l‚r ƒSƒVƒbƒN", 400, 0, 0x80
+CAPTION "ã‚¤ã‚³ãƒ©ã‚¤ã‚¶ãƒ¼"
+FONT 9, "ï¼­ï¼³ ã‚´ã‚·ãƒƒã‚¯", 400, 0, 0x80
 BEGIN
-    DEFPUSHBUTTON   "•Â‚¶‚é",IDOK,440,195,50,14
-    PUSHBUTTON      "ƒLƒƒƒ“ƒZƒ‹",IDCANCEL,475,7,15,14,NOT WS_VISIBLE
+    DEFPUSHBUTTON   "é–‰ã˜ã‚‹",IDOK,440,195,50,14
+    PUSHBUTTON      "Ã—",IDCANCEL,475,7,15,14,NOT WS_VISIBLE
     CONTROL         "",IDC_SLIDER7,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,11,43,16,106
     CONTROL         "",IDC_SLIDER9,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,35,43,16,106
     CONTROL         "",IDC_SLIDER8,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,59,43,16,106
@@ -778,11 +781,11 @@ BEGIN
     LTEXT           "100",IDC_STATIC_e7,182,151,13,8
     LTEXT           "100",IDC_STATIC_e8,206,151,13,8
     LTEXT           "100",IDC_STATIC_e9,230,151,13,8
-    RTEXT           "ŠÂ‹«",IDC_STATIC,7,183,22,8
+    RTEXT           "ä¹¾",IDC_STATIC_EQ_DRY,7,183,22,8
     COMBOBOX        IDC_COMBO1,32,181,212,273,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    RTEXT           "ƒvƒŠƒZƒbƒg",IDC_STATIC,252,182,48,8
+    RTEXT           "ã‚¦ã‚§ãƒƒãƒˆ",IDC_STATIC_EQ_WET,252,182,48,8
     COMBOBOX        IDC_COMBO5,306,180,80,224,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    DEFPUSHBUTTON   "ƒCƒRƒ‰ƒCƒU[ƒŠƒZƒbƒg",IDOK3,394,179,96,14
+    DEFPUSHBUTTON   "ã‚¤ã‚³ãƒ©ã‚¤ã‚¶ãƒ¼ãƒªã‚»ãƒƒãƒˆ",IDOK3,394,179,96,14
     CONTROL         "",IDC_SLIDER17,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,251,43,16,106
     CONTROL         "",IDC_SLIDER18,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,275,43,16,106
     CONTROL         "",IDC_SLIDER19,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,299,43,16,106
@@ -798,11 +801,11 @@ BEGIN
     LTEXT           "100",IDC_STATIC_e12,302,151,13,8
     LTEXT           "100",IDC_STATIC_e13,327,151,13,8
     LTEXT           "100",IDC_STATIC_e14,350,151,13,8
-    LTEXT           "ŠÂ‹«Œø‰Ê‚Ì‚©‚©‚è‹ï‡",IDC_STATIC,9,198,93,8
+    LTEXT           "éŸ³éŸ¿ç©ºé–“ã®éŸ³éŸ¿ãƒ¢ãƒ‡ãƒ«",IDC_STATIC_EQ_ACOUSTIC,9,198,93,8
     CONTROL         "",IDC_SLIDER22,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,105,197,267,12
     LTEXT           "100",IDC_STATIC_eff,375,198,18,8
     LTEXT           "Hyper DSP Equaliser 100 x 15 band",IDC_STATICf,3,2,210,25
-    LTEXT           "“",IDC_STATIC,368,151,8,8
+    LTEXT           "å¸¯",IDC_STATIC,368,151,8,8
     CONTROL         "",IDC_SLIDER23,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,378,43,16,106
     LTEXT           "100",IDC_STATIC_e15,381,151,13,8
     CONTROL         "",IDC_SLIDER24,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,404,43,16,106
@@ -813,12 +816,12 @@ BEGIN
     LTEXT           "100",IDC_STATIC_e18,452,151,13,8
     CONTROL         "",IDC_SLIDER27,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,473,43,16,106
     LTEXT           "100",IDC_STATIC_e19,475,151,13,8
-    LTEXT           "ƒ}ƒXƒ^[",IDC_STATIC,379,35,22,8
-    LTEXT           "‘N–¾",IDC_STATIC,405,35,15,8
-    LTEXT           "’á‚",IDC_STATIC,428,35,15,8
-    LTEXT           "–§“x",IDC_STATIC,451,35,15,8
-    LTEXT           "—§‘ÌŠ´",IDC_STATIC,470,35,22,8
-    DEFPUSHBUTTON   "ƒOƒ[ƒoƒ‹ƒŠƒZƒbƒg",IDOK4,394,164,96,14
+    LTEXT           "ã‚¹ãƒšã‚¯ãƒˆãƒ«",IDC_STATIC_EQ_SPECTRUM,379,35,22,8
+    LTEXT           "å‘¨æ³¢æ•°",IDC_STATIC_EQ_FREQ,405,35,15,8
+    LTEXT           "å¸¯",IDC_STATIC_EQ_BAND,428,35,15,8
+    LTEXT           "éŸ¿åº¦",IDC_STATIC_EQ_LOUDNESS,451,35,15,8
+    LTEXT           "é–‰ã˜ã‚‹",IDC_STATIC_EQ_WARMTH,470,35,22,8
+    DEFPUSHBUTTON   "ã‚°ãƒ­ãƒ¼ãƒãƒ«ãƒªã‚»ãƒƒãƒˆ",IDOK4,394,164,96,14
     LTEXT           "",IDC_STATIC_key,230,5,130,8
     LTEXT           "",IDC_STATIC_key2,363,5,130,8
     LTEXT           "",IDC_STATIC_key3,230,20,130,8
@@ -848,15 +851,15 @@ BEGIN
     BEGIN
         BLOCK "041104b0"
         BEGIN
-            VALUE "Comments", "ƒtƒ@ƒ‹ƒRƒ€BGMŠÈˆÕƒvƒŒƒCƒ„+‚‹@”\ƒƒfƒBƒAƒvƒŒƒCƒ„+kpiƒvƒŒƒCƒ„"
+            VALUE "Comments", "ç¹è¼”ãƒç¹ï½«ç¹§ï½³ç¹ï£°BGMé‚ï½¡è­è–™ãƒ»ç¹ï½¬ç¹§ï½¤ç¹ï½¤+é¬®ä¿¶ï½©æº¯ãƒ»ç¹ï½¡ç¹ãƒ»ã…ç¹§ï½¢ç¹åŠ±Îžç¹§ï½¤ç¹ï½¤"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "ƒtƒ@ƒ‹ƒRƒ€BGMŠÈˆÕƒvƒŒƒCƒ„+‚‹@”\ƒƒfƒBƒAƒvƒŒƒCƒ„ Ver 0.8g Rel.2026.02.08"
+            VALUE "FileDescription", "ç¹è¼”ãƒç¹ï½«ç¹§ï½³ç¹ï£°BGMé‚ï½¡è­è–™ãƒ»ç¹ï½¬ç¹§ï½¤ç¹ï½¤+é¬®ä¿¶ï½©æº¯ãƒ»ç¹ï½¡ç¹ãƒ»ã…ç¹§ï½¢ç¹åŠ±Îžç¹§ï½¤ç¹ï½¤ Ver 0.8g Rel.2026.03.01"
             VALUE "FileVersion", "0.8.7.110"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.02.08 ‚¿‚á‚¿‚á/‘åŒ´—²½"
+            VALUE "LegalCopyright", "Copyright (C) 2026.03.01 "
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
-            VALUE "ProductName", "ƒtƒ@ƒ‹ƒRƒ€BGMŠÈˆÕƒvƒŒƒCƒ„+‚‹@”\ƒƒfƒBƒAƒvƒŒƒCƒ„+kpiƒvƒŒƒCƒ„"
+            VALUE "ProductName", "ç¹è¼”ãƒç¹ï½«ç¹§ï½³ç¹ï£°BGMé‚ï½¡è­è–™ãƒ»ç¹ï½¬ç¹§ï½¤ç¹ï½¤+é¬®ä¿¶ï½©æº¯ãƒ»ç¹ï½¡ç¹ãƒ»ã…ç¹§ï½¢ç¹åŠ±Îžç¹§ï½¤ç¹ï½¤"
             VALUE "ProductVersion", "1, 0, 0, 1"
         END
     END
@@ -1210,15 +1213,15 @@ END
 
 CG_IDR_POPUP_DOUGA MENU
 BEGIN
-    POPUP "_Îß¯Ìß±¯Ìß_"
+    POPUP "_ãƒãƒƒãƒ—ã‚¢ãƒƒãƒ—_"
     BEGIN
         MENUITEM SEPARATOR
         MENUITEM SEPARATOR
         MENUITEM SEPARATOR
         MENUITEM SEPARATOR
-        MENUITEM "ˆêŽž’âŽ~/ÄŠJ (&C)",                32775
+        MENUITEM "ä¸€æ™‚åœæ­¢/å†é–‹ (&C)",                32775
         MENUITEM SEPARATOR
-        POPUP "‰f‘œƒXƒgƒŠ[ƒ€"
+        POPUP "æ˜ åƒã‚¹ãƒˆãƒªãƒ¼ãƒ "
         BEGIN
             MENUITEM "1",                           ID_MV1
             MENUITEM "1",                           ID_MV2
@@ -1231,18 +1234,18 @@ BEGIN
             MENUITEM "1",                           ID_MV9
             MENUITEM "1",                           ID_MV10
         END
-        POPUP "‰¹ºƒXƒgƒŠ[ƒ€"
+        POPUP "éŸ³å£°ã‚¹ãƒˆãƒªãƒ¼ãƒ "
         BEGIN
-            MENUITEM "ƒXƒgƒŠ[ƒ€1",                      ID_ST1
-            MENUITEM "ƒXƒgƒŠ[ƒ€2",                      ID_ST2, GRAYED
-            MENUITEM "ƒXƒgƒŠ[ƒ€3",                      ID_ST3
-            MENUITEM "ƒXƒgƒŠ[ƒ€4",                      ID_ST4
-            MENUITEM "ƒXƒgƒŠ[ƒ€5",                      ID_ST5
-            MENUITEM "ƒXƒgƒŠ[ƒ€6",                      ID_ST6
-            MENUITEM "ƒXƒgƒŠ[ƒ€7",                      ID_ST7
-            MENUITEM "ƒXƒgƒŠ[ƒ€8",                      ID_ST8
-            MENUITEM "ƒXƒgƒŠ[ƒ€9",                      ID_ST9
-            MENUITEM "ƒXƒgƒŠ[ƒ€10",                     ID_ST10
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 1",                      ID_ST1
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 2",                      ID_ST2, GRAYED
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 3",                      ID_ST3
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 4",                      ID_ST4
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 5",                      ID_ST5
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 6",                      ID_ST6
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 7",                      ID_ST7
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 8",                      ID_ST8
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 9",                      ID_ST9
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 10",                     ID_ST10
             MENUITEM "11",                          ID_ST11
             MENUITEM "12",                          ID_ST12
             MENUITEM "13",                          ID_ST13
@@ -1274,18 +1277,18 @@ BEGIN
             MENUITEM "39",                          ID_ST39
             MENUITEM "40",                          ID_ST40
         END
-        POPUP "Žš–‹ƒXƒgƒŠ[ƒ€"
+        POPUP "éŸ³å£°ã‚¹ãƒˆãƒªãƒ¼ãƒ "
         BEGIN
-            MENUITEM "‚ ",                           ID_ETC1
-            MENUITEM "‚ ",                           ID_ETC2
-            MENUITEM "‚ ",                           ID_ETC3
-            MENUITEM "‚ ",                           ID_ETC4
-            MENUITEM "‚ ",                           ID_ETC5
-            MENUITEM "‚ ",                           ID_ETC6
-            MENUITEM "‚ ",                           ID_ETC7
-            MENUITEM "‚ ",                           ID_ETC8
-            MENUITEM "‚ ",                           ID_ETC9
-            MENUITEM "‚ ",                           ID_ETC10
+            MENUITEM "å¸¯",                           ID_ETC1
+            MENUITEM "å¸¯",                           ID_ETC2
+            MENUITEM "å¸¯",                           ID_ETC3
+            MENUITEM "å¸¯",                           ID_ETC4
+            MENUITEM "å¸¯",                           ID_ETC5
+            MENUITEM "å¸¯",                           ID_ETC6
+            MENUITEM "å¸¯",                           ID_ETC7
+            MENUITEM "å¸¯",                           ID_ETC8
+            MENUITEM "å¸¯",                           ID_ETC9
+            MENUITEM "å¸¯",                           ID_ETC10
             MENUITEM "11",                          ID_ETC11
             MENUITEM "12",                          ID_ETC12
             MENUITEM "13",                          ID_ETC13
@@ -1318,8 +1321,8 @@ BEGIN
             MENUITEM "40",                          ID_ETC40
         END
         MENUITEM SEPARATOR
-        MENUITEM "ã‰º¶‰EƒL[‰¹—Ê‚ÆƒV[ƒN‚ªo—ˆ‚Ü‚·B",          ID__32783
-        MENUITEM "ƒ_ƒuƒ‹ƒNƒŠƒbƒN‚Åƒtƒ‹ƒXƒNƒŠ[ƒ“‚Å‚·B",          ID__32784
+        MENUITEM "ä¸Šä¸‹å·¦å³ã‚­ãƒ¼éŸ³é‡ã¨ã‚·ãƒ¼ã‚¯ãŒå‡ºæ¥ã¾ã™ã€‚",          ID__32783
+        MENUITEM "ãƒ€ãƒ–ãƒ«ã‚¯ãƒªãƒƒã‚¯ã§ãƒ•ãƒ«ã‚¹ã‚¯ãƒªãƒ¼ãƒ³ã§ã™ã€‚",          ID__32784
     END
 END
 
@@ -1327,24 +1330,24 @@ CG_IDR_POPUP_LIST MENU
 BEGIN
     POPUP "pop"
     BEGIN
-        MENUITEM "ƒtƒ@ƒCƒ‹–¼•ÏX",                     ID_POP_32787
-        MENUITEM "ƒtƒ@ƒCƒ‹Ú×",                      ID_POP_32776
+        MENUITEM "ãƒ•ã‚¡ã‚¤ãƒ«åå¤‰æ›´",                     ID_POP_32787
+        MENUITEM "ãƒ•ã‚¡ã‚¤ãƒ«è©³ç´°",                      ID_POP_32776
         MENUITEM SEPARATOR
-        MENUITEM "íœ",                          ID_POP_32777
+        MENUITEM "å¸¯",                           ID_POP_32777
     END
 END
 
 CG_IDR_POPUP_DOUGA1 MENU
 BEGIN
-    POPUP "_Îß¯Ìß±¯Ìß_"
+    POPUP "_ãƒãƒƒãƒ—ã‚¢ãƒƒãƒ—_"
     BEGIN
-        MENUITEM "’Êí(1x1)",                     ID_MENUITEM32771
-        MENUITEM "’†ŠÔ(1.5x1.5)",                 ID_MENUITEM32773
-        MENUITEM "”{(2x2)",                      ID_MENUITEM32772
+        MENUITEM "é€šå¸¸(1x1)",                     ID_MENUITEM32771
+        MENUITEM "ä¸­é–“(1.5x1.5)",                 ID_MENUITEM32773
+        MENUITEM "å€(2x2)",                      ID_MENUITEM32772
         MENUITEM SEPARATOR
-        MENUITEM "ˆêŽž’âŽ~/ÄŠJ (&C)",                32775
+        MENUITEM "ä¸€æ™‚åœæ­¢/å†é–‹ (&C)",                32775
         MENUITEM SEPARATOR
-        POPUP "‰f‘œƒXƒgƒŠ[ƒ€"
+        POPUP "æ˜ åƒã‚¹ãƒˆãƒªãƒ¼ãƒ "
         BEGIN
             MENUITEM "1",                           ID_MV1
             MENUITEM "1",                           ID_MV2
@@ -1357,18 +1360,18 @@ BEGIN
             MENUITEM "1",                           ID_MV9
             MENUITEM "1",                           ID_MV10
         END
-        POPUP "‰¹ºƒXƒgƒŠ[ƒ€"
+        POPUP "éŸ³å£°ã‚¹ãƒˆãƒªãƒ¼ãƒ "
         BEGIN
-            MENUITEM "ƒXƒgƒŠ[ƒ€1",                      ID_ST1
-            MENUITEM "ƒXƒgƒŠ[ƒ€2",                      ID_ST2
-            MENUITEM "ƒXƒgƒŠ[ƒ€3",                      ID_ST3
-            MENUITEM "ƒXƒgƒŠ[ƒ€4",                      ID_ST4
-            MENUITEM "ƒXƒgƒŠ[ƒ€5",                      ID_ST5
-            MENUITEM "ƒXƒgƒŠ[ƒ€6",                      ID_ST6
-            MENUITEM "ƒXƒgƒŠ[ƒ€7",                      ID_ST7
-            MENUITEM "ƒXƒgƒŠ[ƒ€8",                      ID_ST8
-            MENUITEM "ƒXƒgƒŠ[ƒ€9",                      ID_ST9
-            MENUITEM "ƒXƒgƒŠ[ƒ€10",                     ID_ST10
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 1",                      ID_ST1
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 2",                      ID_ST2
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 3",                      ID_ST3
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 4",                      ID_ST4
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 5",                      ID_ST5
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 6",                      ID_ST6
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 7",                      ID_ST7
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 8",                      ID_ST8
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 9",                      ID_ST9
+            MENUITEM "ã‚¹ãƒˆãƒªãƒ¼ãƒ 10",                     ID_ST10
             MENUITEM "11",                          ID_ST11
             MENUITEM "12",                          ID_ST12
             MENUITEM "13",                          ID_ST13
@@ -1400,18 +1403,18 @@ BEGIN
             MENUITEM "39",                          ID_ST39
             MENUITEM "40",                          ID_ST40
         END
-        POPUP "Žš–‹ƒXƒgƒŠ[ƒ€"
+        POPUP "éŸ³å£°ã‚¹ãƒˆãƒªãƒ¼ãƒ "
         BEGIN
-            MENUITEM "‚ ",                           ID_ETC1
-            MENUITEM "‚ ",                           ID_ETC2
-            MENUITEM "‚ ",                           ID_ETC3
-            MENUITEM "‚ ",                           ID_ETC4
-            MENUITEM "‚ ",                           ID_ETC5
-            MENUITEM "‚ ",                           ID_ETC6
-            MENUITEM "‚ ",                           ID_ETC7
-            MENUITEM "‚ ",                           ID_ETC8
-            MENUITEM "‚ ",                           ID_ETC9
-            MENUITEM "‚ ",                           ID_ETC10
+            MENUITEM "å¸¯",                           ID_ETC1
+            MENUITEM "å¸¯",                           ID_ETC2
+            MENUITEM "å¸¯",                           ID_ETC3
+            MENUITEM "å¸¯",                           ID_ETC4
+            MENUITEM "å¸¯",                           ID_ETC5
+            MENUITEM "å¸¯",                           ID_ETC6
+            MENUITEM "å¸¯",                           ID_ETC7
+            MENUITEM "å¸¯",                           ID_ETC8
+            MENUITEM "å¸¯",                           ID_ETC9
+            MENUITEM "å¸¯",                           ID_ETC10
             MENUITEM "11",                          ID_ETC11
             MENUITEM "12",                          ID_ETC12
             MENUITEM "13",                          ID_ETC13
@@ -1444,8 +1447,8 @@ BEGIN
             MENUITEM "40",                          ID_ETC40
         END
         MENUITEM SEPARATOR
-        MENUITEM "ã‰º¶‰EƒL[‰¹—Ê‚ÆƒV[ƒN‚ªo—ˆ‚Ü‚·B",          ID__32783
-        MENUITEM "ƒ_ƒuƒ‹ƒNƒŠƒbƒN‚Åƒtƒ‹ƒXƒNƒŠ[ƒ“‚Å‚·B",          ID__32784
+        MENUITEM "ä¸Šä¸‹å·¦å³ã‚­ãƒ¼éŸ³é‡ã¨ã‚·ãƒ¼ã‚¯ãŒå‡ºæ¥ã¾ã™ã€‚",          ID__32783
+        MENUITEM "ãƒ€ãƒ–ãƒ«ã‚¯ãƒªãƒƒã‚¯ã§ãƒ•ãƒ«ã‚¹ã‚¯ãƒªãƒ¼ãƒ³ã§ã™ã€‚",          ID__32784
     END
 END
 
@@ -1528,10 +1531,10 @@ END
 
 STRINGTABLE
 BEGIN
-    IDS_ABOUTBOX            "ogg/wavŠÈˆÕƒvƒŒƒCƒ„{ƒƒfƒBƒAƒvƒŒƒCƒ„ ‚ÌÊÞ°¼Þ®Ýî•ñ(&A)..."
+    IDS_ABOUTBOX            "ogg/wavç°¡æ˜“ãƒ—ãƒ¬ã‚¤ãƒ¤ï¼‹ãƒ¡ãƒ‡ã‚£ã‚¢ãƒ—ãƒ¬ã‚¤ãƒ¤ ã®ï¾Šï¾žï½°ï½¼ï¾žï½®ï¾æƒ…å ±(&A)..."
 END
 
-#endif    // “ú–{Œê (“ú–{) resources
+#endif    // æ—¥æœ¬èªž (æ—¥æœ¬) resources
 /////////////////////////////////////////////////////////////////////////////
 
 
@@ -1551,8 +1554,8 @@ END
 LANGUAGE 17, 1
 #pragma code_page(932)
 #endif //_WIN32
-#include "res\ogg.rc2"  // Microsoft Visual C++ ˆÈŠO‚Ìƒc[ƒ‹‚Å•ÒW‚³‚ê‚½ƒŠƒ\[ƒX
-#include "l.jpn\afxres.rc"          // •W€‚ÌƒRƒ“ƒ|[ƒlƒ“ƒg
+#include "res\ogg.rc2"  // Microsoft Visual C++ ??O??c?[?????W???????\?[?X
+#include "l.jpn\afxres.rc"          // è®“å‘Žï½ºæ‚¶ãƒ»ç¹§ï½³ç¹ï½³ç¹æ˜´ãƒ»ç¹é˜ªÎ¦ç¹ãƒ»
 #endif
 
 /////////////////////////////////////////////////////////////////////////////

@@ -105,9 +105,65 @@ _T("★オープニング"),
 _T("35 (不明)")
 };
 
+TCHAR tisan2_en[][128]={
+_T("41 Theme: Borderline (Japanese Ver)"),
+_T("41 Theme: Borderline (Chinese Ver)"),
+_T("45 Hanging Garden: Jade Palace"),
+_T("44 World Map: Vast Horizon"),
+_T("16 White Horse Cold Pool: Blue Waters"),
+_T("12 Boundless: Light Clouds"),
+_T("01 Zhaode Village: Dawn Wind"),
+_T("11 Ancient Palace Path: Cold Ice Night"),
+_T("19 Feihuang Palace: Flying Phoenix"),
+_T("48 General Appearance: Invincible"),
+_T("36 Normal Battle 2: Sword Talk"),
+_T("18 Ghost Realm: Dream of the Underworld"),
+_T("34 Romance: Moonlit Feelings"),
+_T("08 Sandstorm Wasteland"),
+_T("09 Tong Pass Waterway: Mountain Rain"),
+_T("25 Puyang Lei Marsh: Night Thunder"),
+_T("22 Xiaoguan: Hidden Shadow"),
+_T("20 Sheri Slope: Waves"),
+_T("21 Shouchun: One Against All"),
+_T("39 Field Boss Battle: Contest"),
+_T("30 Tension 2 (Major): Danger Everywhere"),
+_T("32 Sorrow: Parting Grief"),
+_T("13 Floating Moon Forest: Quiet Moon Woods"),
+_T("33 Melancholy: Endless Longing"),
+_T("47 Hundred Flowers Tower"),
+_T("15 Cloud Rest: Half Day"),
+_T("03 Luoyang: Autumn Frost"),
+_T("23 Xiahou: Hero's End"),
+_T("07 Zhenjiang: Beauty's Smile"),
+_T("27 Light and Playful"),
+_T("28 Comedy"),
+_T("29 Minor Tension"),
+_T("10 Kongxian Mountain: Storm Dance"),
+_T("14 Luoyang Western Road: Roar"),
+_T("06 Xudu: Marching Song"),
+_T("02 Chang'an: Royal Progress"),
+_T("38 Field Battle: Decisive"),
+_T("24 Guandu: Dangerous Pass"),
+_T("37 Normal Boss Battle: Confrontation"),
+_T("26 Tianruo Palace: Heavenly Melody"),
+_T("04 Xiaopei: Spring Colors"),
+_T("17 Youyan Island: Rainbow Dress"),
+_T("46 Imperial Palace: Imperial Dream"),
+_T("05 Xuzhou: Military Array"),
+_T("31 Major Blow: Broken Dreams"),
+_T("40 Final Boss Battle: Reach the Clouds"),
+_T("42 Interlude: True Feelings"),
+_T("56 Dark Thoughts (Fantasy Sanguo 1)"),
+_T("60 Smile (Fantasy Sanguo 1)"),
+_T("★FALCOM Logo"),
+_T("★UserJoy Logo"),
+_T("★Opening"),
+_T("35 (Unknown)")
+};
+
 CString CSan2::Gett(int a){
 	CString s,ss;
-	s=tisan2[a];
+	s=savedata.lang ? tisan2_en[a] : tisan2[a];
 	ss=s.Left(2);ss.TrimRight();
 	fnn=s.Mid(3);
 	return ss;
@@ -118,7 +174,8 @@ CString CSan2::Gett(int a){
 void CSan2::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	CString s;	s=tisan2[m_list.GetItemData(m_list.GetCurSel())];
+	int idx=m_list.GetItemData(m_list.GetCurSel());
+	CString s;	s=savedata.lang ? tisan2_en[idx] : tisan2[idx];
 	ret=s.Left(2); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 #if UNICODE
@@ -137,13 +194,16 @@ void CSan2::OnDblclkList1()
 BOOL CSan2::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
+	SetWindowText(LL2(L"幻想三国志２", L"Fantasy Sanguo 2"));
+	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
+	SetDlgItemText(IDC_STATIC, LL2(L"動画(★印)を再生するにはBinkの環境が必要です\nreadme.txtを読んで導入してください。", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup."));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(50+3);i++)
 	{
 		CString s;
-		s=tisan2[i];if(s.Left(2)=="★"){}else{s="ZW2_";s=tisan2[i];}
+		s=savedata.lang ? tisan2_en[i] : tisan2[i];
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}
