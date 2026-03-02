@@ -286,8 +286,8 @@ BOOL CAboutDlg::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
 
-	SetWindowText(LL2(L"oggのバージョン情報", L"ogg Version Info"));
-	SetDlgItemText(IDOK, LL2(L"OK", L"OK"));
+	SetWindowText(LL14(L"oggのバージョン情報", L"ogg Version Info", L"Info version ogg", L"Info versione ogg", L"Info versión ogg", L"ogg 버전 정보", L"ogg版本信息", L"معلومات إصدار ogg", L"Информация о версии ogg", L"ogg Versionsinfo", L"Info versão ogg", L"ogg versie-info", L"Informacje o wersji ogg", L"ogg sürüm bilgisi"));
+	SetDlgItemText(IDOK, LL14(L"OK", L"OK", L"OK", L"OK", L"OK", L"확인", L"确定", L"موافق", L"OK", L"OK", L"OK", L"OK", L"OK", L"Tamam"));
 	COSVersion os;
 	CString s;
 	s.Format(_T("%s"), os.GetVersionString());
@@ -1196,73 +1196,73 @@ BOOL COggDlg::OnInitDialog()
 	// ウィンドウがダイアログでない時は自動的に設定しません。
 	SetIcon(m_hIcon, TRUE);			// 大きいアイコンを設定
 	SetIcon(m_hIcon, FALSE);		// 小さいアイコンを設定
-	SetWindowText(LL2(L"mp3/m4a簡易プレイヤ Ver 0.8g", L"mp3/m4a Simple Player Ver 0.8g"));
-	SetDlgItemText(IDC_BUTTON8, LL2(L"Ys6 ナピシュテム", L"Ys6 Napishtim"));
-	SetDlgItemText(IDC_BUTTON7, LL2(L"Ys フェルガナ", L"Ys Felghana"));
-	SetDlgItemText(IDC_BUTTON15, LL2(L"Ys オリジン", L"Ys Origin"));
-	SetDlgItemText(IDC_BUTTON6, LL2(L"空の軌跡FC", L"Sora no Kiseki FC"));
-	SetDlgItemText(IDC_BUTTON2, LL2(L"空の軌跡SC", L"Sora no Kiseki SC"));
-	SetDlgItemText(IDC_BUTTON17, LL2(L"空の軌跡The3rd", L"Sora no Kiseki The 3rd"));
+	SetWindowText(LL14(L"mp3/m4a簡易プレイヤ Ver 0.8g", L"mp3/m4a Simple Player Ver 0.8g", L"mp3/m4a Lecteur simple Ver 0.8g", L"mp3/m4a Lettore semplice Ver 0.8g", L"mp3/m4a Reproductor simple Ver 0.8g", L"mp3/m4a 간이 플레이어 Ver 0.8g", L"mp3/m4a 简易播放器 Ver 0.8g", L"mp3/m4a مشغل بسيط Ver 0.8g", L"mp3/m4a Простой плеер Ver 0.8g", L"mp3/m4a Einfacher Player Ver 0.8g", L"mp3/m4a Player simples Ver 0.8g", L"mp3/m4a Eenvoudige speler Ver 0.8g", L"mp3/m4a Prosty odtwarzacz Ver 0.8g", L"mp3/m4a Basit oynatıcı Ver 0.8g"));
+	SetDlgItemText(IDC_BUTTON8, LL14(L"Ys6 ナピシュテム", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"이스6 나피시팀", L"伊苏6", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim"));
+	SetDlgItemText(IDC_BUTTON7, LL14(L"Ys フェルガナ", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"이스 펠가나", L"伊苏菲尔盖纳", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana"));
+	SetDlgItemText(IDC_BUTTON15, LL14(L"Ys オリジン", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"이스 오리진", L"伊苏起源", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin"));
+	SetDlgItemText(IDC_BUTTON6, LL14(L"空の軌跡FC", L"Trails in the Sky FC", L"Les Sentiers du Ciel FC", L"Trails in the Sky FC", L"Trails in the Sky FC", L"하늘의 궤적 FC", L"空之轨迹FC", L"Trails in the Sky FC", L"Тропы в Небе FC", L"Himmelsleitern FC", L"Trails in the Sky FC", L"Trails in the Sky FC", L"Trails in the Sky FC", L"Trails in the Sky FC"));
+	SetDlgItemText(IDC_BUTTON2, LL14(L"空の軌跡SC", L"Trails in the Sky SC", L"Les Sentiers du Ciel SC", L"Trails in the Sky SC", L"Trails in the Sky SC", L"하늘의 궤적 SC", L"空之轨迹SC", L"Trails in the Sky SC", L"Тропы в Небе SC", L"Himmelsleitern SC", L"Trails in the Sky SC", L"Trails in the Sky SC", L"Trails in the Sky SC", L"Trails in the Sky SC"));
+	SetDlgItemText(IDC_BUTTON17, LL14(L"空の軌跡The3rd", L"Trails in the Sky The 3rd", L"Les Sentiers du Ciel The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"하늘의 궤적 The 3rd", L"空之轨迹The3rd", L"Trails in the Sky The 3rd", L"Тропы в Небе The 3rd", L"Himmelsleitern The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd"));
 	SetDlgItemText(IDC_BUTTON19, L"ZWEI II");
 	SetDlgItemText(IDC_BUTTON23, L"Ys I&&II Chronicles 1");
 	SetDlgItemText(IDC_BUTTON24, L"Ys I&&II Chronicles 2");
 	SetDlgItemText(IDC_BUTTON25, L"XANADU NEXT");
-	SetDlgItemText(IDC_BUTTON27, LL2(L"Ys 完全版 Ys1", L"Ys Complete Ys1"));
-	SetDlgItemText(IDC_BUTTON28, LL2(L"Ys 完全版 Ys2", L"Ys Complete Ys2"));
+	SetDlgItemText(IDC_BUTTON27, LL14(L"Ys 完全版 Ys1", L"Ys Complete Ys1", L"Ys Intégral Ys1", L"Ys Complete Ys1", L"Ys Completo Ys1", L"이스 완전판 Ys1", L"伊苏完全版 Ys1", L"Ys الكامل Ys1", L"Ys Complete Ys1", L"Ys Complete Ys1", L"Ys Completo Ys1", L"Ys Complete Ys1", L"Ys Complete Ys1", L"Ys Complete Ys1"));
+	SetDlgItemText(IDC_BUTTON28, LL14(L"Ys 完全版 Ys2", L"Ys Complete Ys2", L"Ys Intégral Ys2", L"Ys Complete Ys2", L"Ys Completo Ys2", L"이스 완전판 Ys2", L"伊苏完全版 Ys2", L"Ys الكامل Ys2", L"Ys Complete Ys2", L"Ys Complete Ys2", L"Ys Completo Ys2", L"Ys Complete Ys2", L"Ys Complete Ys2", L"Ys Complete Ys2"));
 	SetDlgItemText(IDC_BUTTON31, L"Sorcerian Original");
 	SetDlgItemText(IDC_BUTTON33, L"Zwei!!");
-	SetDlgItemText(IDC_BUTTON35, LL2(L"ぐるみん", L"Gurumin"));
-	SetDlgItemText(IDC_BUTTON37, LL2(L"ダイナソア", L"Dinosaur"));
-	SetDlgItemText(IDC_BUTTON4, LL2(L"再演奏", L"Replay"));
-	SetDlgItemText(IDC_BUTTON3, LL2(L"一時停止", L"Pause"));
-	SetDlgItemText(IDC_BUTTON1, LL2(L"停止", L"Stop"));
-	SetDlgItemText(IDC_CHECK1, LL2(L"スペアナ", L"Spectrum"));
-	SetDlgItemText(IDC_BUTTON5, LL2(L"フェードアウト", L"Fade out"));
-	SetDlgItemText(IDC_BUTTON21, LL2(L"設定", L"Settings"));
-	SetDlgItemText(IDC_BUTTON9, LL2(L"フォルダ設定", L"Folder settings"));
-	SetDlgItemText(IDOK, LL2(L"終了", L"Exit"));
-	SetDlgItemText(IDC_CHECK5, LL2(L"ランダム再生", L"Random play"));
-	SetDlgItemText(IDC_CHECK6, LL2(L"順次再生", L"Sequential play"));
-	SetDlgItemText(IDC_BUTTON14, LL2(L"演奏開始", L"Play"));
-	SetDlgItemText(IDC_CHECK7, LL2(L"YS6 ナピシュテムの匣", L"Ys6 Napishtim no Hako"));
-	SetDlgItemText(IDC_CHECK8, LL2(L"YS フェルガナの誓い", L"Ys Felghana no Chikai"));
-	SetDlgItemText(IDC_CHECK9, LL2(L"英雄伝説6空の軌跡FC", L"Legend of Heroes 6 Sora no Kiseki FC"));
-	SetDlgItemText(IDC_CHECK10, LL2(L"英雄伝説6空の軌跡SC", L"Legend of Heroes 6 Sora no Kiseki SC"));
-	SetDlgItemText(IDC_CHECK11, LL2(L"YS オリジン", L"Ys Origin"));
-	SetDlgItemText(IDC_CHECK12, LL2(L"英雄伝説6空の軌跡TC", L"Legend of Heroes 6 Sora no Kiseki TC"));
+	SetDlgItemText(IDC_BUTTON35, LL14(L"ぐるみん", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"구루민", L"咕噜小天使", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin"));
+	SetDlgItemText(IDC_BUTTON37, LL14(L"ダイナソア", L"Dinosaur", L"Dinosaure", L"Dinosauro", L"Dinosaurio", L"공룡", L"恐龙", L"ديناصور", L"Динозавр", L"Dinosaurier", L"Dinossauro", L"Dinosaurus", L"Dinozaur", L"Dinozor"));
+	SetDlgItemText(IDC_BUTTON4, LL14(L"再演奏", L"Replay", L"Relecture", L"Ripeti", L"Repetir", L"다시 재생", L"重新播放", L"إعادة التشغيل", L"Повтор", L"Erneut abspielen", L"Repetir", L"Opnieuw afspelen", L"Odtwórz ponownie", L"Tekrar çal"));
+	SetDlgItemText(IDC_BUTTON3, LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
+	SetDlgItemText(IDC_BUTTON1, LL14(L"停止", L"Stop", L"Arrêt", L"Stop", L"Detener", L"정지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
+	SetDlgItemText(IDC_CHECK1, LL14(L"スペアナ", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"));
+	SetDlgItemText(IDC_BUTTON5, LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Fade out", L"Zanikanie", L"Soluklaştır"));
+	SetDlgItemText(IDC_BUTTON21, LL14(L"設定", L"Settings", L"Paramètres", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"الإعدادات", L"Настройки", L"Einstellungen", L"Configurações", L"Instellingen", L"Ustawienia", L"Ayarlar"));
+	SetDlgItemText(IDC_BUTTON9, LL14(L"フォルダ設定", L"Folder settings", L"Paramètres dossier", L"Impostazioni cartella", L"Configuración carpeta", L"폴더 설정", L"文件夹设置", L"إعدادات المجلد", L"Настройки папки", L"Ordnereinstellungen", L"Config. pasta", L"Mapinstellingen", L"Ustawienia folderu", L"Klasör ayarları"));
+	SetDlgItemText(IDOK, LL14(L"終了", L"Exit", L"Quitter", L"Esci", L"Salir", L"종료", L"退出", L"خروج", L"Выход", L"Beenden", L"Sair", L"Afsluiten", L"Zakończ", L"Çıkış"));
+	SetDlgItemText(IDC_CHECK5, LL14(L"ランダム再生", L"Random play", L"Lecture aléatoire", L"Riproduzione casuale", L"Reproducción aleatoria", L"무작위 재생", L"随机播放", L"تشغيل عشوائي", L"Случайное воспроизведение", L"Zufallswiedergabe", L"Reprodução aleatória", L"Willekeurig afspelen", L"Losowe odtwarzanie", L"Rastgele çalma"));
+	SetDlgItemText(IDC_CHECK6, LL14(L"順次再生", L"Sequential play", L"Lecture séquentielle", L"Riproduzione sequenziale", L"Reproducción secuencial", L"순차 재생", L"顺序播放", L"تشغيل متسلسل", L"Последовательное воспроизведение", L"Sequentielle Wiedergabe", L"Reprodução sequencial", L"Sequentieel afspelen", L"Kolejne odtwarzanie", L"Sıralı çalma"));
+	SetDlgItemText(IDC_BUTTON14, LL14(L"演奏開始", L"Play", L"Lecture", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Воспроизведение", L"Abspielen", L"Reproduzir", L"Afspelen", L"Odtwórz", L"Çal"));
+	SetDlgItemText(IDC_CHECK7, LL14(L"YS6 ナピシュテムの匣", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako"));
+	SetDlgItemText(IDC_CHECK8, LL14(L"YS フェルガナの誓い", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai"));
+	SetDlgItemText(IDC_CHECK9, LL14(L"英雄伝説6空の軌跡FC", L"Legend of Heroes VI Trails in the Sky FC", L"Légende des Héros VI Les Sentiers du Ciel FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"영웅전설6 하늘의 궤적 FC", L"英雄传说6 空之轨迹FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC"));
+	SetDlgItemText(IDC_CHECK10, LL14(L"英雄伝説6空の軌跡SC", L"Legend of Heroes VI Trails in the Sky SC", L"Légende des Héros VI Les Sentiers du Ciel SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"영웅전설6 하늘의 궤적 SC", L"英雄传说6 空之轨迹SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC"));
+	SetDlgItemText(IDC_CHECK11, LL14(L"YS オリジン", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin"));
+	SetDlgItemText(IDC_CHECK12, LL14(L"英雄伝説6空の軌跡TC", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Légende des Héros VI Les Sentiers du Ciel The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"영웅전설6 하늘의 궤적 The 3rd", L"英雄传说6 空之轨迹The3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd"));
 	SetDlgItemText(IDC_CHECK13, L"ZWEI II");
 	SetDlgItemText(IDC_CHECK14, L"Ys Chronicles Ys 1");
 	SetDlgItemText(IDC_CHECK15, L"Ys Chronicles Ys 2");
 	SetDlgItemText(IDC_CHECK16, L"XANADU NEXT");
-	SetDlgItemText(IDC_CHECK17, LL2(L"Ys 完全版 Ys 1", L"Ys Complete Ys 1"));
-	SetDlgItemText(IDC_CHECK18, LL2(L"Ys 完全版 Ys 2", L"Ys Complete Ys 2"));
+	SetDlgItemText(IDC_CHECK17, LL14(L"Ys 完全版 Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1"));
+	SetDlgItemText(IDC_CHECK18, LL14(L"Ys 完全版 Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2"));
 	SetDlgItemText(IDC_CHECK19, L"Sorcerian Original");
 	SetDlgItemText(IDC_CHECK20, L"Zwei!!");
-	SetDlgItemText(IDC_CHECK21, LL2(L"ぐるみん", L"Gurumin"));
-	SetDlgItemText(IDC_CHECK22, LL2(L"ダイナソア リザレクション", L"Dinosaur Resurrection"));
-	SetDlgItemText(IDC_STATICaaad, LL2(L"ループ回数", L"Loop count"));
-	SetDlgItemText(IDC_CHECK2, LL2(L"WAVファイルへ保存", L"Save to WAV file"));
-	SetDlgItemText(IDC_CHECK3, LL2(L"動画も表示する", L"Show video"));
-	SetDlgItemText(IDC_STATICaaab, LL2(L"主音量", L"Master volume"));
-	SetDlgItemText(IDC_STATICaaa, LL2(L"DirectSound音量", L"DirectSound volume"));
-	SetDlgItemText(IDC_STATICaaac, LL2(L"拡張音量", L"Extended volume"));
-	SetDlgItemText(IDC_STATIC_t, LL2(L"テンポ", L"Tempo"));
-	SetDlgItemText(IDC_STATIC_p, LL2(L"ピッチ", L"Pitch"));
+	SetDlgItemText(IDC_CHECK21, LL14(L"ぐるみん", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin"));
+	SetDlgItemText(IDC_CHECK22, LL14(L"ダイナソア リザレクション", L"Dinosaur Resurrection", L"Résurrection Dinosaure", L"Resurrezione Dinosauro", L"Resurrección Dinosaurio", L"공룡 부활", L"恐龙复活", L"ديناصور القيامة", L"Динозавр: Воскрешение", L"Dinosaurier Auferstehung", L"Ressurreição Dinossauro", L"Dinosaurus Herrijzenis", L"Dinozaur Zmartwychwstanie", L"Dinozor Diriliş"));
+	SetDlgItemText(IDC_STATICaaad, LL14(L"ループ回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop", L"Cuenta de bucle", L"루프 횟수", L"循环次数", L"عدد التكرارات", L"Количество повторов", L"Schleifenzähler", L"Contagem de loop", L"Loopaantal", L"Liczba pętli", L"Döngü sayısı"));
+	SetDlgItemText(IDC_CHECK2, LL14(L"WAVファイルへ保存", L"Save to WAV file", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV 파일로 저장", L"保存为WAV文件", L"حفظ كـ WAV", L"Сохранить в WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
+	SetDlgItemText(IDC_CHECK3, LL14(L"動画も表示する", L"Show video", L"Afficher vidéo", L"Mostra video", L"Mostrar vídeo", L"동영상 표시", L"显示视频", L"إظهار الفيديو", L"Показывать видео", L"Video anzeigen", L"Mostrar vídeo", L"Video tonen", L"Pokaż wideo", L"Videoyu göster"));
+	SetDlgItemText(IDC_STATICaaab, LL14(L"主音量", L"Master volume", L"Volume principal", L"Volume master", L"Volumen maestro", L"마스터 볼륨", L"主音量", L"الصوت الرئيسي", L"Общая громкость", L"Hauptlautstärke", L"Volume mestre", L"Hoofdvolume", L"Głośność główna", L"Ana ses"));
+	SetDlgItemText(IDC_STATICaaa, LL14(L"DirectSound音量", L"DirectSound volume", L"Volume DirectSound", L"Volume DirectSound", L"Volumen DirectSound", L"DirectSound 볼륨", L"DirectSound音量", L"صوت DirectSound", L"Громкость DirectSound", L"DirectSound-Lautstärke", L"Volume DirectSound", L"DirectSound-volume", L"Głośność DirectSound", L"DirectSound sesi"));
+	SetDlgItemText(IDC_STATICaaac, LL14(L"拡張音量", L"Extended volume", L"Volume étendu", L"Volume esteso", L"Volumen extendido", L"확장 볼륨", L"扩展音量", L"الصوت الموسع", L"Доп. громкость", L"Erweiterte Lautstärke", L"Volume estendido", L"Uitgebreid volume", L"Głośność rozszerzona", L"Genişletilmiş ses"));
+	SetDlgItemText(IDC_STATIC_t, LL14(L"テンポ", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"템포", L"速度", L"السرعة", L"Темп", L"Tempo", L"Andamento", L"Tempo", L"Tempo", L"Tempo"));
+	SetDlgItemText(IDC_STATIC_p, LL14(L"ピッチ", L"Pitch", L"Hauteur", L"Tono", L"Tono", L"피치", L"音高", L"النبرة", L"Высота тона", L"Tonhöhe", L"Tom", L"Toonhoogte", L"Wysokość", L"Perde"));
 	SetDlgItemText(IDC_BUTTON39, L"Brandish4");
-	SetDlgItemText(IDC_CHECK23, LL2(L"ブランディッシュ４", L"Brandish4"));
-	SetDlgItemText(IDC_BUTTON44, LL2(L"白き魔女", L"White Witch"));
-	SetDlgItemText(IDC_BUTTON45, LL2(L"朱紅い雫", L"Tear of Vermillion"));
-	SetDlgItemText(IDC_BUTTON46, LL2(L"海の檻歌", L"Cagesong of the Ocean"));
-	SetDlgItemText(IDC_CHECK24, LL2(L"英雄伝説III 白き魔女", L"Legend of Heroes III White Witch"));
-	SetDlgItemText(IDC_CHECK25, LL2(L"英雄伝説IV 朱紅い雫", L"Legend of Heroes IV Tear of Vermillion"));
-	SetDlgItemText(IDC_CHECK26, LL2(L"英雄伝説V 海の檻歌", L"Legend of Heroes V Cagesong of the Ocean"));
-	SetDlgItemText(IDC_BUTTON47, LL2(L"月影", L"TSUKI"));
-	SetDlgItemText(IDC_BUTTON48, LL2(L"西風", L"Nishi"));
-	SetDlgItemText(IDC_BUTTON51, LL2(L"アーク", L"Arc"));
-	SetDlgItemText(IDC_BUTTON53, LL2(L"三国志1", L"San1"));
-	SetDlgItemText(IDC_BUTTON54, LL2(L"三国志2", L"San2"));
-	SetDlgItemText(IDC_BUTTON57, LL2(L"プレイリスト", L"Playlist"));
-	SetDlgItemText(IDC_BUTTON58, LL2(L"ジャケ", L"Cover"));
+	SetDlgItemText(IDC_CHECK23, LL14(L"ブランディッシュ４", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4"));
+	SetDlgItemText(IDC_BUTTON44, LL14(L"白き魔女", L"White Witch", L"Sorcière Blanche", L"Strega Bianca", L"Bruja Blanca", L"백색 마녀", L"白之魔女", L"الساحرة البيضاء", L"Белая Ведьма", L"Weiße Hexe", L"Bruxa Branca", L"Witte Heks", L"Biała Czarownica", L"Beyaz Cadı"));
+	SetDlgItemText(IDC_BUTTON45, LL14(L"朱紅い雫", L"Tear of Vermillion", L"Larme de Vermillon", L"Lacrima di Vermiglio", L"Lágrima de Bermellón", L"주홍의 물방울", L"朱红之泪", L"دمعة القرمزي", L"Слеза Вермиллиона", L"Träne der Purpur", L"Lágrima de Vermelho", L"Traan van Vermiljoen", L"Łza Vermillion", L"Vermilyon Gözyaşı"));
+	SetDlgItemText(IDC_BUTTON46, LL14(L"海の檻歌", L"Cagesong of the Ocean", L"Chant des Profondeurs", L"Canto dell'Oceano", L"Cantico del Océano", L"바다의 감옥곡", L"海之槛歌", L"أنشودة المحيط", L"Песнь Океана", L"Käfiglied des Ozeans", L"Cântico do Oceano", L"Kooi van de Oceaan", L"Pieśń Oceanu", L"Okyanus Kafes Şarkısı"));
+	SetDlgItemText(IDC_CHECK24, LL14(L"英雄伝説III 白き魔女", L"Legend of Heroes III White Witch", L"Légende des Héros III Sorcière Blanche", L"Legend of Heroes III Strega Bianca", L"Legend of Heroes III Bruja Blanca", L"영웅전설III 백색 마녀", L"英雄传说III 白之魔女", L"Legend of Heroes III White Witch", L"Legend of Heroes III White Witch", L"Legend of Heroes III Weiße Hexe", L"Legend of Heroes III Bruxa Branca", L"Legend of Heroes III White Witch", L"Legend of Heroes III Biała Czarownica", L"Legend of Heroes III White Witch"));
+	SetDlgItemText(IDC_CHECK25, LL14(L"英雄伝説IV 朱紅い雫", L"Legend of Heroes IV Tear of Vermillion", L"Légende des Héros IV Larme de Vermillon", L"Legend of Heroes IV Lacrima di Vermiglio", L"Legend of Heroes IV Lágrima de Bermellón", L"영웅전설IV 주홍의 물방울", L"英雄传说IV 朱红之泪", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Träne der Purpur", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion"));
+	SetDlgItemText(IDC_CHECK26, LL14(L"英雄伝説V 海の檻歌", L"Legend of Heroes V Cagesong of the Ocean", L"Légende des Héros V Chant des Profondeurs", L"Legend of Heroes V Canto dell'Oceano", L"Legend of Heroes V Cantico del Océano", L"영웅전설V 바다의 감옥곡", L"英雄传说V 海之槛歌", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Käfiglied des Ozeans", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean"));
+	SetDlgItemText(IDC_BUTTON47, LL14(L"月影", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI"));
+	SetDlgItemText(IDC_BUTTON48, LL14(L"西風", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi"));
+	SetDlgItemText(IDC_BUTTON51, LL14(L"アーク", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc"));
+	SetDlgItemText(IDC_BUTTON53, LL14(L"三国志1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1"));
+	SetDlgItemText(IDC_BUTTON54, LL14(L"三国志2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2"));
+	SetDlgItemText(IDC_BUTTON57, LL14(L"プレイリスト", L"Playlist", L"Liste de lecture", L"Playlist", L"Lista de reproducción", L"재생 목록", L"播放列表", L"قائمة التشغيل", L"Плейлист", L"Wiedergabeliste", L"Lista de reprodução", L"Afspeellijst", L"Lista odtwarzania", L"Çalma listesi"));
+	SetDlgItemText(IDC_BUTTON58, LL14(L"ジャケ", L"Cover", L"Pochette", L"Copertina", L"Carátula", L"커버", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Okładka", L"Kapak"));
 
 	// TODO: 特別な初期化を行う時はこの場所に追加してください。
 	//フォント設定
@@ -1320,88 +1320,816 @@ BOOL COggDlg::OnInitDialog()
 
 		// TODO: コントロールを追加するために以下のフォームの 1 つを使用してください:
 		// m_tooltip.AddTool(GetDlgItem(IDC_<name>), <string-table-id>);
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON1), LL2(L"演奏中のogg/wav/mp3/avi/kpiファイルを停止します", L"Stop playing ogg/wav/mp3/avi/kpi file"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON2), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON6), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON7), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON8), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON15), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON17), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON19), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON25), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON23), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON24), LL2(L"曲一覧表からoggを選択し再生します", L"Select and play ogg from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON27), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON28), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON31), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON35), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON33), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON37), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON39), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON44), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON45), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON46), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON47), LL2(L"曲一覧表からmp3を選択し再生します", L"Select and play mp3 from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON48), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON51), LL2(L"曲一覧表からwav(adp)を選択し再生します", L"Select and play wav(adp) from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON53), LL2(L"曲一覧表からwavを選択し再生します", L"Select and play wav from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON54), LL2(L"曲一覧表からmp3を選択し再生します", L"Select and play mp3 from track list"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON57), LL2(L"プレイリストを表示／非表示します。\n表示されている時に演奏を開始またはドロップで演奏するとリストに追加されます。\n非表示の時はリストには追加されません。\n本体へのドロップは1つだけでしたがプレイリストへのドロップは複数出来ます。", L"Show/hide playlist.\nWhen visible, playback or drop adds to list.\nWhen hidden, items are not added.\nMain window accepts single drop; playlist accepts multiple."));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON59), LL2(L"イコライザーを設定します", L"Open equalizer settings"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON3), LL2(L"演奏中のogg/wav/mp3/avi/kpiファイルを一時停止/再開します", L"Pause/resume playing ogg/wav/mp3/avi/kpi file"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON4), LL2(L"演奏中だった曲を頭から再演奏します", L"Restart current track from beginning"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON5), LL2(L"フェードアウトして停止します。(内蔵デコーダのみ)", L"Fade out and stop (built-in decoder only)"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON9), LL2(L"各ゲームのフォルダ位置を指定します", L"Specify folder location for each game"));
-		m_tooltip.AddTool(GetDlgItem(IDOK), LL2(L"簡易プレイヤを終了します", L"Exit simple player"));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER1), LL2(L"音量を変更します\nWindows全体の音量が関係してきます。", L"Change volume\nAffects overall Windows volume."));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER3), LL2(L"DirectSound音量を変更します\nこの簡易プレイヤのみの変更でとどまります。\nWindowsの音量は変化しません。", L"Change DirectSound volume\nOnly affects this player.\nWindows volume unchanged."));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK1), LL2(L"スペクトルアナライザー(波形)を表示/非表示します", L"Show/hide spectrum analyzer (waveform)"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK2), LL2(L"演奏中の曲をwavで保存します", L"Save playing track as wav"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK3), LL2(L"動画(OPやイベント)のoggの時に動画画面も表示します", L"Show video window for video ogg (OP, events)"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK4), LL2(L"スペクトルアナライザー(波形)をモノラル表示、ステレオ表示切り替えを行います", L"Switch spectrum analyzer between mono and stereo"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON1), LL14(
+			L"演奏中のogg/wav/mp3/avi/kpiファイルを停止します",
+			L"Stop playing ogg/wav/mp3/avi/kpi file",
+			L"Arrêter la lecture du fichier ogg/wav/mp3/avi/kpi",
+			L"Interrompi la riproduzione del file ogg/wav/mp3/avi/kpi",
+			L"Detener la reproducción del archivo ogg/wav/mp3/avi/kpi",
+			L"ogg/wav/mp3/avi/kpi 파일 재생을 중지합니다",
+			L"停止播放ogg/wav/mp3/avi/kpi文件",
+			L"إيقاف تشغيل ملف ogg/wav/mp3/avi/kpi",
+			L"Остановить воспроизведение файла ogg/wav/mp3/avi/kpi",
+			L"Wiedergabe der ogg/wav/mp3/avi/kpi-Datei stoppen",
+			L"Parar a reprodução do arquivo ogg/wav/mp3/avi/kpi",
+			L"Afspelen van ogg/wav/mp3/avi/kpi-bestand stoppen",
+			L"Zatrzymaj odtwarzanie pliku ogg/wav/mp3/avi/kpi",
+			L"ogg/wav/mp3/avi/kpi dosyasının oynatılmasını durdur"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON2), LL14(
+			L"曲一覧表からoggを選択し再生します",
+			L"Select and play ogg from track list",
+			L"Sélectionner et lire un ogg depuis la liste",
+			L"Seleziona e riproduci ogg dalla lista",
+			L"Seleccionar y reproducir ogg de la lista",
+			L"목록에서 ogg를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放ogg",
+			L"تحديد وتشغيل ogg من قائمة المسارات",
+			L"Выбрать и воспроизвести ogg из списка",
+			L"ogg aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir ogg da lista de faixas",
+			L"ogg selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz ogg z listy utworów",
+			L"Parça listesinden ogg seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON6), LL14(
+			L"曲一覧表からoggを選択し再生します",
+			L"Select and play ogg from track list",
+			L"Sélectionner et lire un ogg depuis la liste",
+			L"Seleziona e riproduci ogg dalla lista",
+			L"Seleccionar y reproducir ogg de la lista",
+			L"목록에서 ogg를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放ogg",
+			L"تحديد وتشغيل ogg من قائمة المسارات",
+			L"Выбрать и воспроизвести ogg из списка",
+			L"ogg aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir ogg da lista de faixas",
+			L"ogg selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz ogg z listy utworów",
+			L"Parça listesinden ogg seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON7), LL14(
+			L"曲一覧表からoggを選択し再生します",
+			L"Select and play ogg from track list",
+			L"Sélectionner et lire un ogg depuis la liste",
+			L"Seleziona e riproduci ogg dalla lista",
+			L"Seleccionar y reproducir ogg de la lista",
+			L"목록에서 ogg를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放ogg",
+			L"تحديد وتشغيل ogg من قائمة المسارات",
+			L"Выбрать и воспроизвести ogg из списка",
+			L"ogg aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir ogg da lista de faixas",
+			L"ogg selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz ogg z listy utworów",
+			L"Parça listesinden ogg seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON8), LL14(
+			L"曲一覧表からoggを選択し再生します",
+			L"Select and play ogg from track list",
+			L"Sélectionner et lire un ogg depuis la liste",
+			L"Seleziona e riproduci ogg dalla lista",
+			L"Seleccionar y reproducir ogg de la lista",
+			L"목록에서 ogg를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放ogg",
+			L"تحديد وتشغيل ogg من قائمة المسارات",
+			L"Выбрать и воспроизвести ogg из списка",
+			L"ogg aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir ogg da lista de faixas",
+			L"ogg selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz ogg z listy utworów",
+			L"Parça listesinden ogg seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON15), LL14(
+			L"曲一覧表からoggを選択し再生します",
+			L"Select and play ogg from track list",
+			L"Sélectionner et lire un ogg depuis la liste",
+			L"Seleziona e riproduci ogg dalla lista",
+			L"Seleccionar y reproducir ogg de la lista",
+			L"목록에서 ogg를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放ogg",
+			L"تحديد وتشغيل ogg من قائمة المسارات",
+			L"Выбрать и воспроизвести ogg из списка",
+			L"ogg aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir ogg da lista de faixas",
+			L"ogg selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz ogg z listy utworów",
+			L"Parça listesinden ogg seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON17), LL14(
+			L"曲一覧表からoggを選択し再生します",
+			L"Select and play ogg from track list",
+			L"Sélectionner et lire un ogg depuis la liste",
+			L"Seleziona e riproduci ogg dalla lista",
+			L"Seleccionar y reproducir ogg de la lista",
+			L"목록에서 ogg를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放ogg",
+			L"تحديد وتشغيل ogg من قائمة المسارات",
+			L"Выбрать и воспроизвести ogg из списка",
+			L"ogg aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir ogg da lista de faixas",
+			L"ogg selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz ogg z listy utworów",
+			L"Parça listesinden ogg seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON19), LL14(
+			L"曲一覧表からoggを選択し再生します",
+			L"Select and play ogg from track list",
+			L"Sélectionner et lire un ogg depuis la liste",
+			L"Seleziona e riproduci ogg dalla lista",
+			L"Seleccionar y reproducir ogg de la lista",
+			L"목록에서 ogg를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放ogg",
+			L"تحديد وتشغيل ogg من قائمة المسارات",
+			L"Выбрать и воспроизвести ogg из списка",
+			L"ogg aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir ogg da lista de faixas",
+			L"ogg selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz ogg z listy utworów",
+			L"Parça listesinden ogg seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON25), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON23), LL14(
+			L"曲一覧表からoggを選択し再生します",
+			L"Select and play ogg from track list",
+			L"Sélectionner et lire un ogg depuis la liste",
+			L"Seleziona e riproduci ogg dalla lista",
+			L"Seleccionar y reproducir ogg de la lista",
+			L"목록에서 ogg를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放ogg",
+			L"تحديد وتشغيل ogg من قائمة المسارات",
+			L"Выбрать и воспроизвести ogg из списка",
+			L"ogg aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir ogg da lista de faixas",
+			L"ogg selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz ogg z listy utworów",
+			L"Parça listesinden ogg seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON24), LL14(
+			L"曲一覧表からoggを選択し再生します",
+			L"Select and play ogg from track list",
+			L"Sélectionner et lire un ogg depuis la liste",
+			L"Seleziona e riproduci ogg dalla lista",
+			L"Seleccionar y reproducir ogg de la lista",
+			L"목록에서 ogg를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放ogg",
+			L"تحديد وتشغيل ogg من قائمة المسارات",
+			L"Выбрать и воспроизвести ogg из списка",
+			L"ogg aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir ogg da lista de faixas",
+			L"ogg selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz ogg z listy utworów",
+			L"Parça listesinden ogg seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON27), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON28), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON31), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON35), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON33), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON37), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON39), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON44), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON45), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON46), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON47), LL14(
+			L"曲一覧表からmp3を選択し再生します",
+			L"Select and play mp3 from track list",
+			L"Sélectionner et lire un mp3 depuis la liste",
+			L"Seleziona e riproduci mp3 dalla lista",
+			L"Seleccionar y reproducir mp3 de la lista",
+			L"목록에서 mp3를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放mp3",
+			L"تحديد وتشغيل mp3 من قائمة المسارات",
+			L"Выбрать и воспроизвести mp3 из списка",
+			L"mp3 aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir mp3 da lista de faixas",
+			L"mp3 selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz mp3 z listy utworów",
+			L"Parça listesinden mp3 seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON48), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON51), LL14(
+			L"曲一覧表からwav(adp)を選択し再生します",
+			L"Select and play wav(adp) from track list",
+			L"Sélectionner et lire un wav(adp) depuis la liste",
+			L"Seleziona e riproduci wav(adp) dalla lista",
+			L"Seleccionar y reproducir wav(adp) de la lista",
+			L"목록에서 wav(adp)를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav(adp)",
+			L"تحديد وتشغيل wav(adp) من قائمة المسارات",
+			L"Выбрать и воспроизвести wav(adp) из списка",
+			L"wav(adp) aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav(adp) da lista de faixas",
+			L"wav(adp) selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav(adp) z listy utworów",
+			L"Parça listesinden wav(adp) seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON53), LL14(
+			L"曲一覧表からwavを選択し再生します",
+			L"Select and play wav from track list",
+			L"Sélectionner et lire un wav depuis la liste",
+			L"Seleziona e riproduci wav dalla lista",
+			L"Seleccionar y reproducir wav de la lista",
+			L"목록에서 wav를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放wav",
+			L"تحديد وتشغيل wav من قائمة المسارات",
+			L"Выбрать и воспроизвести wav из списка",
+			L"wav aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir wav da lista de faixas",
+			L"wav selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz wav z listy utworów",
+			L"Parça listesinden wav seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON54), LL14(
+			L"曲一覧表からmp3を選択し再生します",
+			L"Select and play mp3 from track list",
+			L"Sélectionner et lire un mp3 depuis la liste",
+			L"Seleziona e riproduci mp3 dalla lista",
+			L"Seleccionar y reproducir mp3 de la lista",
+			L"목록에서 mp3를 선택하여 재생합니다",
+			L"从曲目列表中选择并播放mp3",
+			L"تحديد وتشغيل mp3 من قائمة المسارات",
+			L"Выбрать и воспроизвести mp3 из списка",
+			L"mp3 aus der Trackliste auswählen und abspielen",
+			L"Selecionar e reproduzir mp3 da lista de faixas",
+			L"mp3 selecteren en afspelen uit de tracklist",
+			L"Wybierz i odtwórz mp3 z listy utworów",
+			L"Parça listesinden mp3 seç ve oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON57), LL14(
+			L"プレイリストを表示／非表示します。\n表示されている時に演奏を開始またはドロップで演奏するとリストに追加されます。\n非表示の時はリストには追加されません。\n本体へのドロップは1つだけでしたがプレイリストへのドロップは複数出来ます。",
+			L"Show/hide playlist.\nWhen visible, playback or drop adds to list.\nWhen hidden, items are not added.\nMain window accepts single drop; playlist accepts multiple.",
+			L"Afficher/masquer la liste de lecture.\nVisible : la lecture ou le dépôt ajoute à la liste.\nMasqué : les éléments ne sont pas ajoutés.\nFenêtre principale : un seul dépôt ; liste : plusieurs.",
+			L"Mostra/nascondi playlist.\nVisibile: riproduzione o trascinamento aggiunge alla lista.\nNascosto: gli elementi non vengono aggiunti.\nFinestra principale: un file; playlist: più file.",
+			L"Mostrar/ocultar lista de reproducción.\nVisible: reproducir o soltar añade a la lista.\nOculto: los elementos no se añaden.\nVentana principal: un archivo; lista: varios.",
+			L"재생목록을 표시/숨깁니다.\n표시 중일 때 재생 시작 또는 드롭으로 목록에 추가됩니다.\n숨겨져 있을 때는 목록에 추가되지 않습니다.\n본체에는 하나만, 재생목록에는 여러 개 드롭 가능합니다.",
+			L"显示/隐藏播放列表。\n显示时，开始播放或拖放将添加到列表中。\n隐藏时，不会添加到列表。\n主窗口只接受单个拖放，播放列表可接受多个。",
+			L"إظهار/إخفاء قائمة التشغيل.\nعند الظهور، يضاف التشغيل أو الإسقاط إلى القائمة.\nعند الإخفاء، لا تُضاف العناصر.\nالنافذة الرئيسية: ملف واحد؛ القائمة: عدة ملفات.",
+			L"Показать/скрыть плейлист.\nПри отображении воспроизведение или перетаскивание добавляет в список.\nПри скрытии элементы не добавляются.\nГлавное окно: один файл; плейлист: несколько.",
+			L"Wiedergabeliste anzeigen/ausblenden.\nBei Anzeige: Wiedergabe oder Drop fügt zur Liste hinzu.\nBei Ausblenden: Elemente nicht hinzugefügt.\nHauptfenster: ein Drop; Playlist: mehrere.",
+			L"Mostrar/ocultar lista de reprodução.\nQuando visível, reproduzir ou soltar adiciona à lista.\nQuando oculto, itens não são adicionados.\nJanela principal: um arquivo; lista: vários.",
+			L"Afspeellijst tonen/verbergen.\nZichtbaar: afspelen of neerzetten voegt toe aan lijst.\nVerborgen: items worden niet toegevoegd.\nHoofdvenster: één bestand; afspeellijst: meerdere.",
+			L"Pokaż/ukryj listę odtwarzania.\nGdy widoczna: odtwarzanie lub upuszczenie dodaje do listy.\nGdy ukryta: elementy nie są dodawane.\nGłówne okno: jeden plik; lista: wiele.",
+			L"Çalma listesini göster/gizle.\nGörünürken, oynatma veya bırakma listeye ekler.\nGizliyken, öğeler eklenmez.\nAna pencere: tek dosya; çalma listesi: birden fazla."));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON59), LL14(
+			L"イコライザーを設定します",
+			L"Open equalizer settings",
+			L"Ouvrir les paramètres de l'égaliseur",
+			L"Apri le impostazioni dell'equalizzatore",
+			L"Abrir configuración del ecualizador",
+			L"이퀄라이저를 설정합니다",
+			L"打开均衡器设置",
+			L"فتح إعدادات المعادل الصوتي",
+			L"Открыть настройки эквалайзера",
+			L"Equalizer-Einstellungen öffnen",
+			L"Abrir configurações do equalizador",
+			L"Equalizerinstellingen openen",
+			L"Otwórz ustawienia korektora",
+			L"Ekolayzer ayarlarını aç"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON3), LL14(
+			L"演奏中のogg/wav/mp3/avi/kpiファイルを一時停止/再開します",
+			L"Pause/resume playing ogg/wav/mp3/avi/kpi file",
+			L"Suspendre/reprendre la lecture du fichier ogg/wav/mp3/avi/kpi",
+			L"Metti in pausa/riprendi la riproduzione del file ogg/wav/mp3/avi/kpi",
+			L"Pausar/reanudar la reproducción del archivo ogg/wav/mp3/avi/kpi",
+			L"ogg/wav/mp3/avi/kpi 파일 재생을 일시정지/재개합니다",
+			L"暂停/恢复播放ogg/wav/mp3/avi/kpi文件",
+			L"إيقاف مؤقت/استئناف تشغيل ملف ogg/wav/mp3/avi/kpi",
+			L"Приостановить/возобновить воспроизведение файла ogg/wav/mp3/avi/kpi",
+			L"Wiedergabe der ogg/wav/mp3/avi/kpi-Datei pausieren/fortsetzen",
+			L"Pausar/retomar a reprodução do arquivo ogg/wav/mp3/avi/kpi",
+			L"Afspelen van ogg/wav/mp3/avi/kpi-bestand pauzeren/hervatten",
+			L"Wstrzymaj/wznów odtwarzanie pliku ogg/wav/mp3/avi/kpi",
+			L"ogg/wav/mp3/avi/kpi dosyasının oynatılmasını duraklat/devam ettir"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON4), LL14(
+			L"演奏中だった曲を頭から再演奏します",
+			L"Restart current track from beginning",
+			L"Redémarrer la piste depuis le début",
+			L"Riavvia la traccia corrente dall'inizio",
+			L"Reiniciar la pista actual desde el principio",
+			L"현재 곡을 처음부터 다시 재생합니다",
+			L"从头重新播放当前曲目",
+			L"إعادة تشغيل المسار الحالي من البداية",
+			L"Перезапустить текущий трек с начала",
+			L"Aktuellen Titel von Anfang an neu starten",
+			L"Reiniciar a faixa atual do início",
+			L"Huidig nummer vanaf het begin opnieuw starten",
+			L"Uruchom ponownie bieżący utwór od początku",
+			L"Geçerli parçayı baştan yeniden başlat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON5), LL14(
+			L"フェードアウトして停止します。(内蔵デコーダのみ)",
+			L"Fade out and stop (built-in decoder only)",
+			L"Fondu et arrêt (décodeur intégré uniquement)",
+			L"Dissolvenza e stop (solo decodificatore integrato)",
+			L"Fundido y detener (solo decodificador integrado)",
+			L"페이드아웃하여 정지합니다. (내장 디코더만)",
+			L"淡出并停止（仅内置解码器）",
+			L"تلاشي وإيقاف (المفكك المدمج فقط)",
+			L"Плавное затухание и остановка (только встроенный декодер)",
+			L"Ausblenden und stoppen (nur integrierter Decoder)",
+			L"Fade out e parar (somente decodificador integrado)",
+			L"Uitfaden en stoppen (alleen ingebouwde decoder)",
+			L"Wycisz i zatrzymaj (tylko wbudowany dekoder)",
+			L"Soluklaştır ve durdur (yalnızca dahili kod çözücü)"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON9), LL14(
+			L"各ゲームのフォルダ位置を指定します",
+			L"Specify folder location for each game",
+			L"Spécifier l'emplacement du dossier pour chaque jeu",
+			L"Specificare la posizione della cartella per ogni gioco",
+			L"Especificar la ubicación de la carpeta para cada juego",
+			L"각 게임의 폴더 위치를 지정합니다",
+			L"指定每个游戏的文件夹位置",
+			L"تحديد موقع المجلد لكل لعبة",
+			L"Указать расположение папки для каждой игры",
+			L"Ordnerpfad für jedes Spiel festlegen",
+			L"Especificar a localização da pasta para cada jogo",
+			L"Maplocatie voor elk spel opgeven",
+			L"Określ lokalizację folderu dla każdej gry",
+			L"Her oyun için klasör konumunu belirt"));
+		m_tooltip.AddTool(GetDlgItem(IDOK), LL14(
+			L"簡易プレイヤを終了します",
+			L"Exit simple player",
+			L"Quitter le lecteur simple",
+			L"Esci dal lettore semplice",
+			L"Salir del reproductor simple",
+			L"간이 플레이어를 종료합니다",
+			L"退出简易播放器",
+			L"إنهاء المشغل البسيط",
+			L"Выйти из простого плеера",
+			L"Einfachen Player beenden",
+			L"Sair do player simples",
+			L"Eenvoudige speler afsluiten",
+			L"Zamknij prosty odtwarzacz",
+			L"Basit oynatıcıdan çık"));
+		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER1), LL14(
+			L"音量を変更します\nWindows全体の音量が関係してきます。",
+			L"Change volume\nAffects overall Windows volume.",
+			L"Modifier le volume\nAffecte le volume global de Windows.",
+			L"Cambia volume\nInfluisce sul volume generale di Windows.",
+			L"Cambiar volumen\nAfecta el volumen general de Windows.",
+			L"음량을 변경합니다\nWindows 전체의 음량에 영향을 미칩니다.",
+			L"更改音量\n影响Windows整体音量。",
+			L"تغيير مستوى الصوت\nيؤثر على مستوى صوت Windows العام.",
+			L"Изменить громкость\nВлияет на общую громкость Windows.",
+			L"Lautstärke ändern\nBeeinflusst die globale Windows-Lautstärke.",
+			L"Alterar volume\nAfeta o volume geral do Windows.",
+			L"Volume aanpassen\nBeïnvloedt het algehele Windows-volume.",
+			L"Zmień głośność\nWpływa na ogólną głośność systemu Windows.",
+			L"Sesi değiştir\nWindows genel ses seviyesini etkiler."));
+		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER3), LL14(
+			L"DirectSound音量を変更します\nこの簡易プレイヤのみの変更でとどまります。\nWindowsの音量は変化しません。",
+			L"Change DirectSound volume\nOnly affects this player.\nWindows volume unchanged.",
+			L"Modifier le volume DirectSound\nAffecte uniquement ce lecteur.\nLe volume Windows reste inchangé.",
+			L"Cambia volume DirectSound\nInfluisce solo su questo lettore.\nIl volume di Windows rimane invariato.",
+			L"Cambiar volumen DirectSound\nSolo afecta este reproductor.\nEl volumen de Windows no cambia.",
+			L"DirectSound 음량을 변경합니다\n이 간이 플레이어만 변경됩니다.\nWindows 음량은 변하지 않습니다.",
+			L"更改DirectSound音量\n仅影响此播放器。\nWindows音量不变。",
+			L"تغيير مستوى صوت DirectSound\nيؤثر على هذا المشغل فقط.\nمستوى صوت Windows لا يتغير.",
+			L"Изменить громкость DirectSound\nВлияет только на этот плеер.\nГромкость Windows не изменяется.",
+			L"DirectSound-Lautstärke ändern\nBetrifft nur diesen Player.\nWindows-Lautstärke bleibt unverändert.",
+			L"Alterar volume DirectSound\nAfeta apenas este player.\nVolume do Windows inalterado.",
+			L"DirectSound-volume aanpassen\nBeïnvloedt alleen deze speler.\nWindows-volume blijft ongewijzigd.",
+			L"Zmień głośność DirectSound\nWpływa tylko na ten odtwarzacz.\nGłośność Windows pozostaje bez zmian.",
+			L"DirectSound sesini değiştir\nYalnızca bu oynatıcıyı etkiler.\nWindows ses seviyesi değişmez."));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK1), LL14(
+			L"スペクトルアナライザー(波形)を表示/非表示します",
+			L"Show/hide spectrum analyzer (waveform)",
+			L"Afficher/masquer l'analyseur de spectre (forme d'onde)",
+			L"Mostra/nascondi analizzatore di spettro (forma d'onda)",
+			L"Mostrar/ocultar analizador de espectro (forma de onda)",
+			L"스펙트럼 분석기(파형)를 표시/숨깁니다",
+			L"显示/隐藏频谱分析仪（波形）",
+			L"إظهار/إخفاء محلل الطيف (شكل الموجة)",
+			L"Показать/скрыть анализатор спектра (осциллограмма)",
+			L"Spektrumanalysator (Wellenform) anzeigen/ausblenden",
+			L"Mostrar/ocultar analisador de espectro (forma de onda)",
+			L"Spectrumanalyzer (golfvorm) tonen/verbergen",
+			L"Pokaż/ukryj analizator widma (kształt fali)",
+			L"Spektrum analizörünü (dalga formu) göster/gizle"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK2), LL14(
+			L"演奏中の曲をwavで保存します",
+			L"Save playing track as wav",
+			L"Enregistrer la piste en cours de lecture en wav",
+			L"Salva la traccia in riproduzione come wav",
+			L"Guardar la pista en reproducción como wav",
+			L"재생 중인 곡을 wav로 저장합니다",
+			L"将正在播放的曲目保存为wav",
+			L"حفظ المسار الجاري تشغيله بتنسيق wav",
+			L"Сохранить воспроизводимый трек как wav",
+			L"Wiedergegebenen Titel als wav speichern",
+			L"Salvar faixa em reprodução como wav",
+			L"Afspelend nummer opslaan als wav",
+			L"Zapisz odtwarzany utwór jako wav",
+			L"Oynatılan parçayı wav olarak kaydet"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK3), LL14(
+			L"動画(OPやイベント)のoggの時に動画画面も表示します",
+			L"Show video window for video ogg (OP, events)",
+			L"Afficher la fenêtre vidéo pour les ogg vidéo (OP, événements)",
+			L"Mostra la finestra video per ogg video (OP, eventi)",
+			L"Mostrar ventana de video para ogg de video (OP, eventos)",
+			L"동영상(OP이벤트)의 ogg 재생 시 동영상 화면도 표시합니다",
+			L"播放视频ogg（OP、事件）时同时显示视频画面",
+			L"إظهار نافذة الفيديو لملفات ogg المرئية (OP، الأحداث)",
+			L"Показывать окно видео для видео-ogg (OP, события)",
+			L"Videofenster für Video-ogg anzeigen (OP, Ereignisse)",
+			L"Mostrar janela de vídeo para ogg de vídeo (OP, eventos)",
+			L"Videovenster tonen voor video-ogg (OP, events)",
+			L"Pokaż okno wideo dla ogg wideo (OP, zdarzenia)",
+			L"Video ogg (OP, olaylar) için video penceresini göster"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK4), LL14(
+			L"スペクトルアナライザー(波形)をモノラル表示、ステレオ表示切り替えを行います",
+			L"Switch spectrum analyzer between mono and stereo",
+			L"Basculer l'analyseur de spectre entre mono et stéréo",
+			L"Passa l'analizzatore di spettro tra mono e stereo",
+			L"Cambiar el analizador de espectro entre mono y estéreo",
+			L"스펙트럼 분석기(파형)를 모노/스테레오로 전환합니다",
+			L"切换频谱分析仪的单声道/立体声显示",
+			L"تبديل محلل الطيف بين الأحادي والستيريو",
+			L"Переключить анализатор спектра между моно и стерео",
+			L"Spektrumanalysator zwischen Mono und Stereo umschalten",
+			L"Alternar analisador de espectro entre mono e estéreo",
+			L"Spectrumanalyzer wisselen tussen mono en stereo",
+			L"Przełącz analizator widma między mono a stereo",
+			L"Spektrum analizörünü mono ve stereo arasında değiştir"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON12), LL2(L"拡張パネルを開く/閉じる", L"Open/close extended panel"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON12), LL14(
+			L"拡張パネルを開く/閉じる",
+			L"Open/close extended panel",
+			L"Ouvrir/fermer le panneau étendu",
+			L"Apri/chiudi pannello esteso",
+			L"Abrir/cerrar panel extendido",
+			L"확장 패널을 열기/닫기",
+			L"打开/关闭扩展面板",
+			L"فتح/إغلاق اللوحة الموسعة",
+			L"Открыть/закрыть расширенную панель",
+			L"Erweitertes Panel öffnen/schließen",
+			L"Abrir/fechar painel estendido",
+			L"Uitgebreid paneel openen/sluiten",
+			L"Otwórz/zamknij rozszerzony panel",
+			L"Genişletilmiş paneli aç/kapat"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON21), LL2(L"各種設定を行います。", L"Open settings."));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON21), LL14(
+			L"各種設定を行います。",
+			L"Open settings.",
+			L"Ouvrir les paramètres.",
+			L"Apri le impostazioni.",
+			L"Abrir configuración.",
+			L"각종 설정을 합니다.",
+			L"打开设置。",
+			L"فتح الإعدادات.",
+			L"Открыть настройки.",
+			L"Einstellungen öffnen.",
+			L"Abrir configurações.",
+			L"Instellingen openen.",
+			L"Otwórz ustawienia.",
+			L"Ayarları aç."));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK5), LL2(L"「再生するゲーム」で選択されているゲームをランダムに演奏します", L"Random play from selected games"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK6), LL2(L"「再生するゲーム」で選択されているゲームを順番に演奏します", L"Sequential play from selected games"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK5), LL14(
+			L"「再生するゲーム」で選択されているゲームをランダムに演奏します",
+			L"Random play from selected games",
+			L"Lecture aléatoire depuis les jeux sélectionnés",
+			L"Riproduzione casuale dai giochi selezionati",
+			L"Reproducción aleatoria de los juegos seleccionados",
+			L"「재생할 게임」에서 선택된 게임을 무작위로 재생합니다",
+			L"从所选游戏中随机播放",
+			L"تشغيل عشوائي من الألعاب المحددة",
+			L"Случайное воспроизведение из выбранных игр",
+			L"Zufällige Wiedergabe aus ausgewählten Spielen",
+			L"Reprodução aleatória dos jogos selecionados",
+			L"Willekeurig afspelen van geselecteerde spellen",
+			L"Losowe odtwarzanie z wybranych gier",
+			L"Seçilen oyunlardan rastgele oynat"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK6), LL14(
+			L"「再生するゲーム」で選択されているゲームを順番に演奏します",
+			L"Sequential play from selected games",
+			L"Lecture séquentielle depuis les jeux sélectionnés",
+			L"Riproduzione sequenziale dai giochi selezionati",
+			L"Reproducción secuencial de los juegos seleccionados",
+			L"「재생할 게임」에서 선택된 게임을 순서대로 재생합니다",
+			L"从所选游戏中顺序播放",
+			L"تشغيل تسلسلي من الألعاب المحددة",
+			L"Последовательное воспроизведение из выбранных игр",
+			L"Sequentielle Wiedergabe aus ausgewählten Spielen",
+			L"Reprodução sequencial dos jogos selecionados",
+			L"Opeenvolgend afspelen van geselecteerde spellen",
+			L"Sekwencyjne odtwarzanie z wybranych gier",
+			L"Seçilen oyunlardan sıralı oynat"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK7), LL2(L"イース6 ナピシュテムの匣", L"Ys6 Napishtim no Hako"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK8), LL2(L"イース フェルガナの誓い", L"Ys Felghana no Chikai"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK9), LL2(L"空の軌跡 First Chapter", L"Sora no Kiseki First Chapter"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK10), LL2(L"空の軌跡 Second Chapter", L"Sora no Kiseki Second Chapter"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK11), LL2(L"イース オリジン", L"Ys Origin"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK12), LL2(L"空の軌跡 The 3rd", L"Sora no Kiseki The 3rd"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK13), LL2(L"Zweii II", L"Zweii II"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK14), LL2(L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK15), LL2(L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK16), LL2(L"XANADU NEXT", L"XANADU NEXT"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK17), LL2(L"Ys 完全版 Ys 1", L"Ys Complete Ys 1"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK18), LL2(L"Ys 完全版 Ys 2", L"Ys Complete Ys 2"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK19), LL2(L"Sorcerian Original", L"Sorcerian Original"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK20), LL2(L"Zwei!!", L"Zwei!!"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK21), LL2(L"ぐるみん", L"Gurumin"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK22), LL2(L"ダイナソア リザレクション", L"Dinosaur Resurrection"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK23), LL2(L"Brandish4 - ブランディッシュ4 眠れる神の塔", L"Brandish4 - Tower of the Sleeping God"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK24), LL2(L"英雄伝説III 白き魔女", L"Legend of Heroes III - White Witch"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK25), LL2(L"英雄伝説IV 朱紅い雫", L"Legend of Heroes IV - A Tear of Vermillion"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK26), LL2(L"英雄伝説V 海の檻歌", L"Legend of Heroes V - Cagesong of the Ocean"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON58), LL2(L"mp3/m4a/ogg/flacに埋め込まれているジャケットを表示します。", L"Show embedded album art from mp3/m4a/ogg/flac"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK7), LL14(L"イース6 ナピシュテムの匣", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK8), LL14(L"イース フェルガナの誓い", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK9), LL14(L"空の軌跡 First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK10), LL14(L"空の軌跡 Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK11), LL14(L"イース オリジン", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK12), LL14(L"空の軌跡 The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK13), LL14(L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK14), LL14(L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK15), LL14(L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK16), LL14(L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK17), LL14(L"Ys 完全版 Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK18), LL14(L"Ys 完全版 Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK19), LL14(L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK20), LL14(L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK21), LL14(L"ぐるみん", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK22), LL14(L"ダイナソア リザレクション", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK23), LL14(L"Brandish4 - ブランディッシュ4 眠れる神の塔", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK24), LL14(L"英雄伝説III 白き魔女", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK25), LL14(L"英雄伝説IV 朱紅い雫", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK26), LL14(L"英雄伝説V 海の檻歌", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean"));
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON58), LL14(
+			L"mp3/m4a/ogg/flacに埋め込まれているジャケットを表示します。",
+			L"Show embedded album art from mp3/m4a/ogg/flac",
+			L"Afficher la pochette intégrée dans mp3/m4a/ogg/flac",
+			L"Mostra la copertina incorporata da mp3/m4a/ogg/flac",
+			L"Mostrar portada incrustada de mp3/m4a/ogg/flac",
+			L"mp3/m4a/ogg/flac에 내장된 앨범 아트를 표시합니다.",
+			L"显示mp3/m4a/ogg/flac中嵌入的专辑封面",
+			L"عرض صورة الألبوم المضمنة في mp3/m4a/ogg/flac",
+			L"Показать встроенную обложку альбома из mp3/m4a/ogg/flac",
+			L"Eingebettetes Albumcover aus mp3/m4a/ogg/flac anzeigen",
+			L"Mostrar capa do álbum incorporada em mp3/m4a/ogg/flac",
+			L"Ingebedde albumhoes uit mp3/m4a/ogg/flac tonen",
+			L"Pokaż okładkę albumu osadzoną w mp3/m4a/ogg/flac",
+			L"mp3/m4a/ogg/flac içindeki gömülü albüm kapağını göster"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_EDIT1), LL2(L"次の曲へいくためのループ回数を設定します", L"Set loop count before next track"));
+		m_tooltip.AddTool(GetDlgItem(IDC_EDIT1), LL14(
+			L"次の曲へいくためのループ回数を設定します",
+			L"Set loop count before next track",
+			L"Définir le nombre de boucles avant la piste suivante",
+			L"Imposta il numero di loop prima del brano successivo",
+			L"Establecer el número de bucles antes de la siguiente pista",
+			L"다음 곡으로 넘어가기 위한 루프 횟수를 설정합니다",
+			L"设置进入下一曲目前的循环次数",
+			L"تعيين عدد التكرارات قبل المسار التالي",
+			L"Установить количество повторов перед следующим треком",
+			L"Anzahl der Wiederholungen vor dem nächsten Titel festlegen",
+			L"Definir número de loops antes da próxima faixa",
+			L"Aantal herhalingen instellen voor volgend nummer",
+			L"Ustaw liczbę pętli przed następnym utworem",
+			L"Sonraki parçaya geçmeden önce döngü sayısını ayarla"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER4), LL2(L"100%以上の音量を設定できます", L"Volume can exceed 100%"));
-		m_tooltip.AddTool(GetDlgItem(IDC_STATICds2), LL2(L"100%以上の音量を設定できます", L"Volume can exceed 100%"));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER7), LL2(L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpiのテンポを変えます。wav,動画は変わりません。", L"Change tempo for mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,video unchanged."));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER8), LL2(L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpiのピッチを変えます。wav,動画は変わりません。", L"Change pitch for mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,video unchanged."));
+		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER4), LL14(
+			L"100%以上の音量を設定できます",
+			L"Volume can exceed 100%",
+			L"Le volume peut dépasser 100%",
+			L"Il volume può superare il 100%",
+			L"El volumen puede superar el 100%",
+			L"100% 이상의 음량을 설정할 수 있습니다",
+			L"音量可设置为100%以上",
+			L"يمكن أن يتجاوز مستوى الصوت 100%",
+			L"Громкость может превышать 100%",
+			L"Lautstärke kann 100% überschreiten",
+			L"Volume pode exceder 100%",
+			L"Volume kan meer dan 100% zijn",
+			L"Głośność może przekraczać 100%",
+			L"Ses seviyesi %100'ü aşabilir"));
+		m_tooltip.AddTool(GetDlgItem(IDC_STATICds2), LL14(
+			L"100%以上の音量を設定できます",
+			L"Volume can exceed 100%",
+			L"Le volume peut dépasser 100%",
+			L"Il volume può superare il 100%",
+			L"El volumen puede superar el 100%",
+			L"100% 이상의 음량을 설정할 수 있습니다",
+			L"音量可设置为100%以上",
+			L"يمكن أن يتجاوز مستوى الصوت 100%",
+			L"Громкость может превышать 100%",
+			L"Lautstärke kann 100% überschreiten",
+			L"Volume pode exceder 100%",
+			L"Volume kan meer dan 100% zijn",
+			L"Głośność może przekraczać 100%",
+			L"Ses seviyesi %100'ü aşabilir"));
+		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER7), LL14(
+			L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpiのテンポを変えます。wav,動画は変わりません。",
+			L"Change tempo for mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,video unchanged.",
+			L"Modifier le tempo pour mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,vidéo inchangés.",
+			L"Cambia il tempo per mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,video invariati.",
+			L"Cambiar el tempo para mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,vídeo sin cambios.",
+			L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi의 템포를 변경합니다. wav,동영상은 변경되지 않습니다.",
+			L"更改mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi的速度。wav,视频不变。",
+			L"تغيير الإيقاع لـ mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav والفيديو لا يتغيران.",
+			L"Изменить темп для mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,видео без изменений.",
+			L"Tempo für mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi ändern. wav,Video unverändert.",
+			L"Alterar o tempo para mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,vídeo inalterados.",
+			L"Tempo wijzigen voor mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,video ongewijzigd.",
+			L"Zmień tempo dla mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,wideo bez zmian.",
+			L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi için tempoyu değiştir. wav,video değişmez."));
+		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER8), LL14(
+			L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpiのピッチを変えます。wav,動画は変わりません。",
+			L"Change pitch for mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,video unchanged.",
+			L"Modifier la hauteur pour mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,vidéo inchangés.",
+			L"Cambia il tono per mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,video invariati.",
+			L"Cambiar el tono para mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,vídeo sin cambios.",
+			L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi의 피치를 변경합니다. wav,동영상은 변경되지 않습니다.",
+			L"更改mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi的音调。wav,视频不变。",
+			L"تغيير درجة الصوت لـ mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav والفيديو لا يتغيران.",
+			L"Изменить высоту тона для mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,видео без изменений.",
+			L"Tonhöhe für mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi ändern. wav,Video unverändert.",
+			L"Alterar o pitch para mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,vídeo inalterados.",
+			L"Toonhoogte wijzigen voor mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,video ongewijzigd.",
+			L"Zmień wysokość tonu dla mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi. wav,wideo bez zmian.",
+			L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpi için perdeyi değiştir. wav,video değişmez."));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_t), LL2(L"テンポを100に戻します。", L"Reset tempo to 100."));
-		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_p), LL2(L"ピッチを100に戻します。", L"Reset pitch to 100."));
+		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_t), LL14(
+			L"テンポを100に戻します。",
+			L"Reset tempo to 100.",
+			L"Réinitialiser le tempo à 100.",
+			L"Reimposta il tempo a 100.",
+			L"Restablecer el tempo a 100.",
+			L"템포를 100으로 되돌립니다.",
+			L"将速度重置为100。",
+			L"إعادة ضبط الإيقاع إلى 100.",
+			L"Сбросить темп до 100.",
+			L"Tempo auf 100 zurücksetzen.",
+			L"Redefinir o tempo para 100.",
+			L"Tempo terugzetten naar 100.",
+			L"Zresetuj tempo do 100.",
+			L"Tempoyu 100'e sıfırla."));
+		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_p), LL14(
+			L"ピッチを100に戻します。",
+			L"Reset pitch to 100.",
+			L"Réinitialiser la hauteur à 100.",
+			L"Reimposta il tono a 100.",
+			L"Restablecer el tono a 100.",
+			L"피치를 100으로 되돌립니다.",
+			L"将音调重置为100。",
+			L"إعادة ضبط درجة الصوت إلى 100.",
+			L"Сбросить высоту тона до 100.",
+			L"Tonhöhe auf 100 zurücksetzen.",
+			L"Redefinir o pitch para 100.",
+			L"Toonhoogte terugzetten naar 100.",
+			L"Zresetuj wysokość tonu do 100.",
+			L"Perdeyi 100'e sıfırla."));
 
 		CString s;
-		s.Format(LL2(L"%s\n↑の情報が間違っている時は↓の内容を作者へ\n詳細：Ver %d.%d(%d) Build %d\n\n%s", L"%s\nIf the info above is wrong, send the content below to the author\nDetails: Ver %d.%d(%d) Build %d\n\n%s"), os.GetVersionString(), in.dwMajorVersion, in.dwMinorVersion, edition, in.dwBuildNumber, cpus);
-		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_OS), s);
+		s.Format(LL14(
+			L"%s\n↑の情報が間違っている時は↓の内容を作者へ\n詳細：Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\nIf the info above is wrong, send the content below to the author\nDetails: Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\nSi les informations ci-dessus sont incorrectes, envoyez le contenu ci-dessous à l'auteur\nDétails : Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\nSe le informazioni sopra sono errate, invia il contenuto sottostante all'autore\nDettagli: Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\nSi la información anterior es incorrecta, envía el contenido a continuación al autor\nDetalles: Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\n위 정보가 잘못된 경우 아래 내용을 작성자에게 보내주세요\n상세: Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\n如果上方信息有误，请将以下内容发送给作者\n详细：Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\nإذا كانت المعلومات أعلاه خاطئة، أرسل المحتوى أدناه إلى المؤلف\nالتفاصيل: Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\nЕсли информация выше неверна, отправьте содержимое ниже автору\nПодробности: Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\nWenn die obigen Informationen falsch sind, senden Sie den folgenden Inhalt an den Autor\nDetails: Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\nSe as informações acima estiverem erradas, envie o conteúdo abaixo ao autor\nDetalhes: Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\nAls de bovenstaande informatie onjuist is, stuur de onderstaande inhoud naar de auteur\nDetails: Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\nJeśli powyższe informacje są błędne, wyślij poniższą treść do autora\nSzczegóły: Ver %d.%d(%d) Build %d\n\n%s",
+			L"%s\nYukarıdaki bilgiler yanlışsa, aşağıdaki içeriği yazara gönderin\nAyrıntılar: Ver %d.%d(%d) Build %d\n\n%s"),
+			os.GetVersionString(), in.dwMajorVersion, in.dwMinorVersion, edition, in.dwBuildNumber, cpus);		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_OS), s);
 		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_OS2), s);
 	}
 	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
@@ -1596,35 +2324,35 @@ BOOL COggDlg::OnInitDialog()
 	m_OS.SetWindowText(s);
 	__cpuid(CPUInfo, 0x00000001);
 	CString avx2;
-	avx2 = savedata.lang == 0 ? L"SSE2未対応" : L"SSE2 not supported";
+	avx2 = LL14(L"SSE2未対応", L"SSE2 not supported", L"SSE2 non pris en charge", L"SSE2 non supportato", L"SSE2 no compatible", L"SSE2 미지원", L"SSE2 不支持", L"SSE2 غير مدعوم", L"SSE2 не поддерживается", L"SSE2 nicht unterstützt", L"SSE2 não suportado", L"SSE2 niet ondersteund", L"SSE2 nieobsługiwane", L"SSE2 desteklenmiyor");
 	if (CPUInfo[0] >= 2) {
 		__cpuid(CPUInfo, 0x00000001);
-		if (CPUInfo[1] & (1 << 26))  avx2 = savedata.lang == 0 ? L"SSE2対応" : L"SSE2 supported";
-		if (CPUInfo[2] & (1))  avx2 = savedata.lang == 0 ? L"SSE3対応" : L"SSE3 supported";
-		if (CPUInfo[2] & (1 << 9))  avx2 = savedata.lang == 0 ? L"SSSE3対応" : L"SSSE3 supported";
-		if (CPUInfo[2] & (1 << 12))  avx2 = savedata.lang == 0 ? L"FMA3対応" : L"FMA3 supported";
-		if (CPUInfo[2] & (1 << 19))  avx2 = savedata.lang == 0 ? L"SSE4.1対応" : L"SSE4.1 supported";
-		if (CPUInfo[2] & (1 << 20))  avx2 = savedata.lang == 0 ? L"SSE4.2対応" : L"SSE4.2 supported";
+		if (CPUInfo[1] & (1 << 26))  avx2 = LL14(L"SSE2対応", L"SSE2 supported", L"SSE2 pris en charge", L"SSE2 supportato", L"SSE2 compatible", L"SSE2 지원", L"SSE2 支持", L"SSE2 مدعوم", L"SSE2 поддерживается", L"SSE2 unterstützt", L"SSE2 suportado", L"SSE2 ondersteund", L"SSE2 obsługiwane", L"SSE2 destekleniyor");
+		if (CPUInfo[2] & (1))  avx2 = LL14(L"SSE3対応", L"SSE3 supported", L"SSE3 pris en charge", L"SSE3 supportato", L"SSE3 compatible", L"SSE3 지원", L"SSE3 支持", L"SSE3 مدعوم", L"SSE3 поддерживается", L"SSE3 unterstützt", L"SSE3 suportado", L"SSE3 ondersteund", L"SSE3 obsługiwane", L"SSE3 destekleniyor");
+		if (CPUInfo[2] & (1 << 9))  avx2 = LL14(L"SSSE3対応", L"SSSE3 supported", L"SSSE3 pris en charge", L"SSSE3 supportato", L"SSSE3 compatible", L"SSSE3 지원", L"SSSE3 支持", L"SSSE3 مدعوم", L"SSSE3 поддерживается", L"SSSE3 unterstützt", L"SSSE3 suportado", L"SSSE3 ondersteund", L"SSSE3 obsługiwane", L"SSSE3 destekleniyor");
+		if (CPUInfo[2] & (1 << 12))  avx2 = LL14(L"FMA3対応", L"FMA3 supported", L"FMA3 pris en charge", L"FMA3 supportato", L"FMA3 compatible", L"FMA3 지원", L"FMA3 支持", L"FMA3 مدعوم", L"FMA3 поддерживается", L"FMA3 unterstützt", L"FMA3 suportado", L"FMA3 ondersteund", L"FMA3 obsługiwane", L"FMA3 destekleniyor");
+		if (CPUInfo[2] & (1 << 19))  avx2 = LL14(L"SSE4.1対応", L"SSE4.1 supported", L"SSE4.1 pris en charge", L"SSE4.1 supportato", L"SSE4.1 compatible", L"SSE4.1 지원", L"SSE4.1 支持", L"SSE4.1 مدعوم", L"SSE4.1 поддерживается", L"SSE4.1 unterstützt", L"SSE4.1 suportado", L"SSE4.1 ondersteund", L"SSE4.1 obsługiwane", L"SSE4.1 destekleniyor");
+		if (CPUInfo[2] & (1 << 20))  avx2 = LL14(L"SSE4.2対応", L"SSE4.2 supported", L"SSE4.2 pris en charge", L"SSE4.2 supportato", L"SSE4.2 compatible", L"SSE4.2 지원", L"SSE4.2 支持", L"SSE4.2 مدعوم", L"SSE4.2 поддерживается", L"SSE4.2 unterstützt", L"SSE4.2 suportado", L"SSE4.2 ondersteund", L"SSE4.2 obsługiwane", L"SSE4.2 destekleniyor");
 	}
 	if (CPUInfo[0] >= 2) {
 		__cpuid(CPUInfo, 0x80000001);
-		if (CPUInfo[2] & (1 << 6))  avx2 = savedata.lang == 0 ? L"SSE4a対応" : L"SSE4a supported";
+		if (CPUInfo[2] & (1 << 6))  avx2 = LL14(L"SSE4a対応", L"SSE4a supported", L"SSE4a pris en charge", L"SSE4a supportato", L"SSE4a compatible", L"SSE4a 지원", L"SSE4a 支持", L"SSE4a مدعوم", L"SSE4a поддерживается", L"SSE4a unterstützt", L"SSE4a suportado", L"SSE4a ondersteund", L"SSE4a obsługiwane", L"SSE4a destekleniyor");
 	}
 	__cpuid(CPUInfo, 0x00000001);
 	if (CPUInfo[0] >= 2) {
-		if (CPUInfo[2] & (1 << 28))  avx2 = savedata.lang == 0 ? L"AVX対応" : L"AVX supported";
+		if (CPUInfo[2] & (1 << 28))  avx2 = LL14(L"AVX対応", L"AVX supported", L"AVX pris en charge", L"AVX supportato", L"AVX compatible", L"AVX 지원", L"AVX 支持", L"AVX مدعوم", L"AVX поддерживается", L"AVX unterstützt", L"AVX suportado", L"AVX ondersteund", L"AVX obsługiwane", L"AVX destekleniyor");
 	}
 	if (CPUInfo[0] >= 7) {
 		__cpuid(CPUInfo, 0x00000007);
-		if (CPUInfo[1] & (1 << 5))  avx2 = savedata.lang == 0 ? L"AVX2対応" : L"AVX2 supported";
-		if (CPUInfo[1] & (1 << 16))  avx2 = savedata.lang == 0 ? L"AVX512対応" : L"AVX512 supported";
+		if (CPUInfo[1] & (1 << 5))  avx2 = LL14(L"AVX2対応", L"AVX2 supported", L"AVX2 pris en charge", L"AVX2 supportato", L"AVX2 compatible", L"AVX2 지원", L"AVX2 支持", L"AVX2 مدعوم", L"AVX2 поддерживается", L"AVX2 unterstützt", L"AVX2 suportado", L"AVX2 ondersteund", L"AVX2 obsługiwane", L"AVX2 destekleniyor");
+		if (CPUInfo[1] & (1 << 16))  avx2 = LL14(L"AVX512対応", L"AVX512 supported", L"AVX512 pris en charge", L"AVX512 supportato", L"AVX512 compatible", L"AVX512 지원", L"AVX512 支持", L"AVX512 مدعوم", L"AVX512 поддерживается", L"AVX512 unterstützt", L"AVX512 suportado", L"AVX512 ondersteund", L"AVX512 obsługiwane", L"AVX512 destekleniyor");
 	}
 	s.Format(_T("%s / %s"), cpus, avx2);
 	s.Trim();
 	m_cpu.SetWindowText(s);
 
 	// CPU 拡張命令一覧
-	avx2 = LL2(L"使用可能命令：", L"Available instructions: ");
+	avx2 = LL14(L"使用可能命令：", L"Available instructions: ", L"Instructions disponibles : ", L"Istruzioni disponibili: ", L"Instrucciones disponibles: ", L"사용 가능한 명령: ", L"可用指令：", L"التعليمات المتاحة: ", L"Доступные инструкции: ", L"Verfügbare Befehle: ", L"Instruções disponíveis: ", L"Beschikbare instructies: ", L"Dostępne instrukcje: ", L"Kullanılabilir talimatlar: ");
 	__cpuid(CPUInfo, 0x00000001);
 	if (CPUInfo[0] >= 2) {
 		if (CPUInfo[3] & (1 << 23))  avx2 += "MMX ";
@@ -1689,7 +2417,7 @@ BOOL COggDlg::OnInitDialog()
 	SetTimer(15011, 200, NULL);
 
 	m_lrc.SetWindowText(L"");
-	m_lrc2.SetWindowText(LL2(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here"));
+	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichées ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aquí", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) تظهر هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wyświetlone tutaj", L"Söz (.lrc) burada görüntülenir"));
 	m_lrc3.SetWindowText(L"");
 	lrc_backup = L"";
 
@@ -5153,8 +5881,22 @@ void COggDlg::play()
 
 
 	if (ret != 0) {
-		fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); filen = "";
-		m_saisai.EnableWindow(TRUE); endflg = 0; return;
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Aucun fichier ou dossier",
+			L"Nessun file o cartella",
+			L"No hay archivo o carpeta",
+			L"파일 또는 폴더가 없습니다",
+			L"没有文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Keine Datei oder Ordner",
+			L"Nenhum arquivo ou pasta",
+			L"Geen bestand of map",
+			L"Brak pliku lub folderu",
+			L"Dosya veya klasör yok");
+		filen = "";		m_saisai.EnableWindow(TRUE); endflg = 0; return;
 	}
 	wl = 0;
 
@@ -5165,8 +5907,21 @@ void COggDlg::play()
 		ss = filen.Left(filen.Find(L":", 6));
 	}
 	if (!aaa_1.Open(ss, CFile::modeRead && CFile::shareDenyNone) && !(mode > 0 && mode <= 21 || mode == -6 || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15 || mode == 30)) {
-		MessageBox(LL2(L"ファイルが開けませんでした。\n削除されたか移動した可能性があります。", L"Could not open file.\nIt may have been deleted or moved."));
-		stop1();
+		MessageBox(LL14(
+			L"ファイルが開けませんでした。\n削除されたか移動した可能性があります。",
+			L"Could not open file.\nIt may have been deleted or moved.",
+			L"Impossible d'ouvrir le fichier.\nIl a peut-être été supprimé ou déplacé.",
+			L"Impossibile aprire il file.\nPotrebbe essere stato eliminato o spostato.",
+			L"No se pudo abrir el archivo.\nPuede haber sido eliminado o movido.",
+			L"파일을 열 수 없습니다.\n삭제되었거나 이동되었을 가능성이 있습니다.",
+			L"无法打开文件。\n该文件可能已被删除或移动。",
+			L"تعذر فتح الملف.\nربما تم حذفه أو نقله.",
+			L"Не удалось открыть файл.\nВозможно, он был удалён или перемещён.",
+			L"Datei konnte nicht geöffnet werden.\nSie wurde möglicherweise gelöscht oder verschoben.",
+			L"Não foi possível abrir o arquivo.\nEle pode ter sido excluído ou movido.",
+			L"Kan het bestand niet openen.\nHet is mogelijk verwijderd of verplaatst.",
+			L"Nie można otworzyć pliku.\nMógł zostać usunięty lub przeniesiony.",
+			L"Dosya açılamadı.\nSilinmiş veya taşınmış olabilir."));		stop1();
 		return;
 	}
 	aaa_1.Close();
@@ -5219,8 +5974,21 @@ void COggDlg::play()
 			oggsize = LoadOggVorbis(filen, 2, &ogg, m_time);
 			if (oggsize < 0) {
 				m_saisai.EnableWindow(TRUE);
-				fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder");
-				endflg = 0;
+				fnn = LL14(
+					L"ファイル又はフォルダがありません",
+					L"No file or folder",
+					L"Aucun fichier ou dossier",
+					L"Nessun file o cartella",
+					L"No hay archivo o carpeta",
+					L"파일 또는 폴더가 없습니다",
+					L"没有文件或文件夹",
+					L"لا يوجد ملف أو مجلد",
+					L"Файл или папка не найдены",
+					L"Keine Datei oder Ordner",
+					L"Nenhum arquivo ou pasta",
+					L"Geen bestand of map",
+					L"Brak pliku lub folderu",
+					L"Dosya veya klasör yok"); endflg = 0;
 				return;
 			}
 			loop1 = loop2 = 0; stitle = "";
@@ -5418,22 +6186,22 @@ void COggDlg::play()
 	if (ss == "yc_b001.ogg") {
 		loop1 = 123438;
 		loop2 = 4742104;
-		stitle = LL2(L"バトル#58", L"Battle #58");
+		stitle = LL14(L"バトル#58", L"Battle #58", L"Bataille #58", L"Battaglia #58", L"Batalla #58", L"배틀 #58", L"战斗 #58", L"معركة #58", L"Битва #58", L"Kampf #58", L"Batalha #58", L"Gevecht #58", L"Bitwa #58", L"Savaş #58");
 	}
 	if (ss == "yc_b002.ogg") {
 		loop1 = 504378;
 		loop2 = 5153813;
-		stitle = LL2(L"灼熱の炎の中で", L"Within the Blazing Flames");
+		stitle = LL14(L"灼熱の炎の中で", L"Within the Blazing Flames", L"Dans les flammes ardentes", L"Tra le fiamme ardenti", L"Entre las llamas ardientes", L"타오르는 불꽃 속에서", L"在灼热的火焰中", L"في وسط اللهب المتقد", L"В пылающем пламени", L"Im lodernden Feuer", L"Entre as chamas ardentes", L"In de laaiende vlammen", L"W płonących płomieniach", L"Alevlerin İçinde");
 	}
 	if (ss == "yc_b003.ogg") {
 		loop1 = 32845;
 		loop2 = 6955200;
-		stitle = LL2(L"最終決戦", L"Final Battle");
+		stitle = LL14(L"最終決戦", L"Final Battle", L"Bataille finale", L"Battaglia finale", L"Batalla final", L"최종 결전", L"最终决战", L"المعركة الأخيرة", L"Финальная битва", L"Endkampf", L"Batalha final", L"Eindstrijd", L"Ostateczna bitwa", L"Son Savaş");
 	}
 	if (ss == "yc_b004.ogg") {
 		loop1 = 53237;
 		loop2 = 9737128;
-		stitle = LL2(L"黒き翼", L"Black Wings");
+		stitle = LL14(L"黒き翼", L"Black Wings", L"Ailes noires", L"Ali nere", L"Alas negras", L"검은 날개", L"黑色之翼", L"الأجنحة السوداء", L"Чёрные крылья", L"Schwarze Flügel", L"Asas negras", L"Zwarte vleugels", L"Czarne skrzydła", L"Siyah Kanatlar");
 	}
 	if (ss == "yc_b005.ogg") {
 		loop1 = 1123422;
@@ -5443,32 +6211,32 @@ void COggDlg::play()
 	if (ss == "yc_d101.ogg") {
 		loop1 = 303237;
 		loop2 = 2582426;
-		stitle = LL2(L"ダンジョン", L"Dungeon");
+		stitle = LL14(L"ダンジョン", L"Dungeon", L"Donjon", L"Dungeon", L"Mazmorra", L"던전", L"地牢", L"زنزانة", L"Подземелье", L"Verlies", L"Masmorra", L"Kerker", L"Loch", L"Zindan");
 	}
 	if (ss == "yc_d201.ogg") {
 		loop1 = 447792;
 		loop2 = 3479666;
-		stitle = LL2(L"道化師の誘い", L"Clown's Invitation");
+		stitle = LL14(L"道化師の誘い", L"Clown's Invitation", L"L'invitation du bouffon", L"L'invito del giullare", L"La invitación del bufón", L"광대의 유혹", L"小丑的邀请", L"دعوة المهرج", L"Приглашение шута", L"Einladung des Clowns", L"Convite do palhaço", L"Uitnodiging van de clown", L"Zaproszenie klauna", L"Palyaçonun Daveti");
 	}
 	if (ss == "yc_d301.ogg") {
 		loop1 = 351836;
 		loop2 = 3969072;
-		stitle = LL2(L"地下遺跡", L"Underground Ruins");
+		stitle = LL14(L"地下遺跡", L"Underground Ruins", L"Ruines souterraines", L"Rovine sotterranee", L"Ruinas subterráneas", L"지하 유적", L"地下遗迹", L"أطلال تحت الأرض", L"Подземные руины", L"Unterirdische Ruinen", L"Ruínas subterrâneas", L"Ondergrondse ruïnes", L"Podziemne ruiny", L"Yeraltı Harabeleri");
 	}
 	if (ss == "yc_d401.ogg") {
 		loop1 = 93865;
 		loop2 = 4349569;
-		stitle = LL2(L"導きの塔～エルディールにくちづけを", L"Tower of Guidance -Kiss for Eldeel-");
+		stitle = LL14(L"導きの塔～エルディールにくちづけを", L"Tower of Guidance -Kiss for Eldeel-", L"Tour de la Guidance -Un baiser pour Eldeel-", L"Torre della Guida -Un bacio per Eldeel-", L"Torre de la Guía -Un beso para Eldeel-", L"인도의 탑 ~엘디르에게 입맞춤을~", L"引导之塔～献给埃尔迪尔的吻", L"برج الإرشاد -قبلة لإلديل-", L"Башня Наставления -Поцелуй для Элдила-", L"Turm der Führung -Kuss für Eldeel-", L"Torre da Orientação -Um beijo para Eldeel-", L"Toren van Geleiding -Kus voor Eldeel-", L"Wieża Przewodnictwa -Pocałunek dla Eldeel-", L"Rehberlik Kulesi -Eldeel için Öpücük-");
 	}
 	if (ss == "yc_d501.ogg") {
 		loop1 = 832720;
 		loop2 = 7219417;
-		stitle = LL2(L"失われし仮面を求めて", L"Seeking the Lost Mask");
+		stitle = LL14(L"失われし仮面を求めて", L"Seeking the Lost Mask", L"À la recherche du masque perdu", L"Alla ricerca della maschera perduta", L"En busca de la máscara perdida", L"잃어버린 가면을 찾아서", L"寻找失落的面具", L"بحثاً عن القناع المفقود", L"В поисках утерянной маски", L"Auf der Suche nach der verlorenen Maske", L"Em busca da máscara perdida", L"Op zoek naar het verloren masker", L"W poszukiwaniu zaginionej maski", L"Kayıp Maskeyi Ararken");
 	}
 	if (ss == "yc_d701.ogg") {
 		loop1 = 809264;
 		loop2 = 6545498;
-		stitle = LL2(L"イリス", L"Iris");
+		stitle = LL14(L"イリス", L"Iris", L"Iris", L"Iris", L"Iris", L"이리스", L"伊莉丝", L"إيريس", L"Ирис", L"Iris", L"Iris", L"Iris", L"Iris", L"Iris");
 	}
 	if (ss == "yc_d702.ogg") {
 		loop1 = 34816;
@@ -5478,37 +6246,37 @@ void COggDlg::play()
 	if (ss == "yc_d703.ogg") {
 		loop1 = 719876;
 		loop2 = 2557197;
-		stitle = LL2(L"聖域", L"Sanctuary");
+		stitle = LL14(L"聖域", L"Sanctuary", L"Sanctuaire", L"Santuario", L"Santuario", L"성역", L"圣域", L"الملاذ المقدس", L"Святилище", L"Heiligtum", L"Santuário", L"Heiligdom", L"Sanktuarium", L"Kutsal Alan");
 	}
 	if (ss == "yc_e001.ogg") {
 		loop1 = 300048;
 		loop2 = 3389821;
-		stitle = LL2(L"賢者", L"Sage");
+		stitle = LL14(L"賢者", L"Sage", L"Sage", L"Saggio", L"Sabio", L"현자", L"贤者", L"الحكيم", L"Мудрец", L"Weiser", L"Sábio", L"Wijze", L"Mędrzec", L"Bilge");
 	}
 	if (ss == "yc_e002.ogg") {
 		loop1 = 326209;
 		loop2 = 3604271;
-		stitle = LL2(L"復活の儀式", L"Resurrection Ceremony");
+		stitle = LL14(L"復活の儀式", L"Resurrection Ceremony", L"Cérémonie de résurrection", L"Cerimonia della resurrezione", L"Ceremonia de resurrección", L"부활의 의식", L"复活仪式", L"طقوس البعث", L"Церемония воскрешения", L"Auferstehungszeremonie", L"Cerimônia de ressurreição", L"Opstandingsceremonie", L"Ceremonia zmartwychwstania", L"Diriliş Töreni");
 	}
 	if (ss == "yc_e003.ogg") {
 		loop1 = 806906;
 		loop2 = 4275899;
-		stitle = LL2(L"レファンス", L"Refance");
+		stitle = LL14(L"レファンス", L"Refance", L"Refance", L"Refance", L"Refance", L"레판스", L"雷凡斯", L"ريفانس", L"Рефанс", L"Refance", L"Refance", L"Refance", L"Refance", L"Refance");
 	}
 	if (ss == "yc_e004.ogg") {
 		loop1 = 326209;
 		loop2 = 4945888;
-		stitle = LL2(L"涙の少年剣士", L"Young Swordsman in Tears");
+		stitle = LL14(L"涙の少年剣士", L"Young Swordsman in Tears", L"Le jeune épéiste en larmes", L"Il giovane spadaccino in lacrime", L"El joven espadachín en lágrimas", L"눈물의 소년 검사", L"含泪的少年剑士", L"الفارس الشاب بالدموع", L"Юный фехтовальщик в слезах", L"Der junge Schwertkämpfer in Tränen", L"O jovem espadachim em lágrimas", L"De jonge zwaardvechter in tranen", L"Młody szermierz we łzach", L"Gözyaşlarındaki Genç Kılıç Savaşçısı");
 	}
 	if (ss == "yc_e005.ogg") {
 		loop1 = 24000;
 		loop2 = 3605888;
-		stitle = LL2(L"エルディール", L"Eldeel");
+		stitle = LL14(L"エルディール", L"Eldeel", L"Eldeel", L"Eldeel", L"Eldeel", L"엘디르", L"埃尔迪尔", L"إلديل", L"Элдил", L"Eldeel", L"Eldeel", L"Eldeel", L"Eldeel", L"Eldeel");
 	}
 	if (ss == "yc_e006.ogg") {
 		loop1 = 69040;
 		loop2 = 1209633;
-		stitle = LL2(L"ロムン帝国 -嗚呼レオ団長-", L"Romun Empire -Alas Captain Leo-");
+		stitle = LL14(L"ロムン帝国 -嗚呼レオ団長-", L"Romun Empire -Alas Captain Leo-", L"Empire Romun -Hélas Capitaine Leo-", L"Impero Romun -Ahimè Capitano Leo-", L"Imperio Romun -¡Ay, Capitán Leo!-", L"로문 제국 -아아 레오 단장-", L"罗曼帝国 -啊，雷欧队长-", L"إمبراطورية رومن -آه أيها الكابتن ليو-", L"Империя Ромун -Увы, капитан Лео-", L"Romun-Reich -Ach, Hauptmann Leo-", L"Império Romun -Ai, Capitão Leo-", L"Romun Keizerrijk -Helaas Kapitein Leo-", L"Imperium Romun -Niestety Kapitanie Leo-", L"Romun İmparatorluğu -Ah Kaptan Leo-");
 	}
 	if (ss == "yc_e008.ogg") {
 		loop1 = 275476;
@@ -5518,22 +6286,22 @@ void COggDlg::play()
 	if (ss == "yc_e010.ogg") {
 		loop1 = 807040;
 		loop2 = 5159922;
-		stitle = LL2(L"冒険家、誕生", L"Birth of an Adventurer");
+		stitle = LL14(L"冒険家、誕生", L"Birth of an Adventurer", L"Naissance d'un aventurier", L"Nascita di un avventuriero", L"Nacimiento de un aventurero", L"모험가, 탄생", L"冒险家的诞生", L"ولادة مغامر", L"Рождение авантюриста", L"Geburt eines Abenteurers", L"Nascimento de um aventureiro", L"Geboorte van een avonturier", L"Narodziny poszukiwacza przygód", L"Bir Maceracının Doğuşu");
 	}
 	if (ss == "yc_f101.ogg") {
 		loop1 = 568926;
 		loop2 = 5668207;
-		stitle = LL2(L"燃ゆる剣", L"Burning Sword");
+		stitle = LL14(L"燃ゆる剣", L"Burning Sword", L"L'épée ardente", L"La spada ardente", L"La espada ardiente", L"불타는 검", L"燃烧之剑", L"السيف المتقد", L"Пылающий меч", L"Das brennende Schwert", L"A espada ardente", L"Het brandende zwaard", L"Płonący miecz", L"Yanan Kılıç");
 	}
 	if (ss == "yc_f201.ogg") {
 		loop1 = 588624;
 		loop2 = 6209316;
-		stitle = LL2(L"セルセタの樹海", L"Forest of Celceta");
+		stitle = LL14(L"セルセタの樹海", L"Forest of Celceta", L"Forêt de Celceta", L"Foresta di Celceta", L"Bosque de Celceta", L"셀세타의 수해", L"塞尔塞塔的树海", L"غابة سيلسيتا", L"Лес Селсеты", L"Wald von Celceta", L"Floresta de Celceta", L"Woud van Celceta", L"Las Celcety", L"Celceta Ormanı");
 	}
 	if (ss == "yc_f301.ogg") {
 		loop1 = 1145404;
 		loop2 = 5960203;
-		stitle = LL2(L"クレーター", L"Crater");
+		stitle = LL14(L"クレーター", L"Crater", L"Cratère", L"Cratere", L"Cráter", L"크레이터", L"陨石坑", L"الحفرة البركانية", L"Кратер", L"Krater", L"Cratera", L"Krater", L"Krater", L"Krater");
 	}
 	if (ss == "yc_f401.ogg") {
 		loop1 = 408974;
@@ -5543,47 +6311,47 @@ void COggDlg::play()
 	if (ss == "yc_f501.ogg") {
 		loop1 = 2604464;
 		loop2 = 4559688;
-		stitle = LL2(L"暁の森", L"Forest of Dawn");
+		stitle = LL14(L"暁の森", L"Forest of Dawn", L"Forêt de l'aube", L"Foresta dell'alba", L"Bosque del amanecer", L"새벽의 숲", L"黎明之森", L"غابة الفجر", L"Лес рассвета", L"Wald der Morgenröte", L"Floresta do amanhecer", L"Woud van de dageraad", L"Las Świtu", L"Şafak Ormanı");
 	}
 	if (ss == "yc_f601.ogg") {
 		loop1 = 581264;
 		loop2 = 3661828;
-		stitle = LL2(L"一陣の風", L"Gust of Wind");
+		stitle = LL14(L"一陣の風", L"Gust of Wind", L"Rafale de vent", L"Folata di vento", L"Ráfaga de viento", L"한 줄기 바람", L"一阵风", L"هبة ريح", L"Порыв ветра", L"Windböe", L"Rajada de vento", L"Windvlaag", L"Podmuch wiatru", L"Rüzgar Esintisi");
 	}
 	if (ss == "yc_f701.ogg") {
 		loop1 = 324287;
 		loop2 = 9010870;
-		stitle = LL2(L"神代の地", L"Land of the Gods");
+		stitle = LL14(L"神代の地", L"Land of the Gods", L"Terre des dieux", L"Terra degli dei", L"Tierra de los dioses", L"신대의 땅", L"神代之地", L"أرض الآلهة", L"Земля богов", L"Land der Götter", L"Terra dos deuses", L"Land der goden", L"Kraina bogów", L"Tanrıların Toprağı");
 	}
 	if (ss == "yc_f801.ogg") {
 		loop1 = 315435;
 		loop2 = 4546653;
-		stitle = LL2(L"真実への序曲", L"Overture to Truth");
+		stitle = LL14(L"真実への序曲", L"Overture to Truth", L"Ouverture vers la vérité", L"Ouverture alla verità", L"Obertura hacia la verdad", L"진실로의 서곡", L"通往真实的序曲", L"مقدمة إلى الحقيقة", L"Увертюра к истине", L"Ouvertüre zur Wahrheit", L"Abertura para a verdade", L"Ouverture naar de waarheid", L"Uwertura do prawdy", L"Gerçeğe Uvertür");
 	}
 	if (ss == "yc_f901.ogg") {
 		loop1 = 178544;
 		loop2 = 4786555;
-		stitle = LL2(L"雨上がりの朝に", L"Morning After the Rain");
+		stitle = LL14(L"雨上がりの朝に", L"Morning After the Rain", L"Matin après la pluie", L"Mattino dopo la pioggia", L"Mañana después de la lluvia", L"비갠 아침에", L"雨后的早晨", L"صباح ما بعد المطر", L"Утро после дождя", L"Morgen nach dem Regen", L"Manhã após a chuva", L"Ochtend na de regen", L"Poranek po deszczu", L"Yağmur Sonrası Sabah");
 	}
 	if (ss == "yc_over.ogg") {
 		loop1 = 19200;
 		loop2 = 4924407;
-		stitle = LL2(L"ゲームオーバー", L"Game Over");
+		stitle = LL14(L"ゲームオーバー", L"Game Over", L"Partie terminée", L"Game Over", L"Fin del juego", L"게임 오버", L"游戏结束", L"انتهت اللعبة", L"Конец игры", L"Spiel vorbei", L"Fim de jogo", L"Spel voorbij", L"Koniec gry", L"Oyun Bitti");
 	}
 	if (ss == "yc_t101.ogg") {
 		loop1 = 865353;
 		loop2 = 4409988;
-		stitle = LL2(L"辺境都市《キャスナン》", L"Frontier City Casnan");
+		stitle = LL14(L"辺境都市《キャスナン》", L"Frontier City Casnan", L"Ville frontalière Casnan", L"Città di frontiera Casnan", L"Ciudad fronteriza Casnan", L"변경 도시 《캐스난》", L"边境都市《卡斯南》", L"مدينة الحدود كاسنان", L"Пограничный город Каснан", L"Grenzstadt Casnan", L"Cidade de fronteira Casnan", L"Grensstad Casnan", L"Miasto graniczne Casnan", L"Sınır Kenti Casnan");
 	}
 	if (ss == "yc_t201.ogg") {
 		loop1 = 58906;
 		loop2 = 6120526;
-		stitle = LL2(L"優しくなりたい", L"I Want to Be Kind");
+		stitle = LL14(L"優しくなりたい", L"I Want to Be Kind", L"Je veux être gentil(le)", L"Voglio essere gentile", L"Quiero ser amable", L"친절해지고 싶어", L"想要变得温柔", L"أريد أن أكون لطيفاً", L"Я хочу быть добрым", L"Ich möchte freundlich sein", L"Quero ser gentil", L"Ik wil aardig zijn", L"Chcę być uprzejmy", L"İyi Biri Olmak İstiyorum");
 	}
 	if (ss == "yc_t301.ogg") {
 		loop1 = 425910;
 		loop2 = 9606150;
-		stitle = LL2(L"古代の伝承", L"Ancient Legend");
+		stitle = LL14(L"古代の伝承", L"Ancient Legend", L"Légende ancienne", L"Leggenda antica", L"Leyenda antigua", L"고대의 전승", L"古代传说", L"الأسطورة القديمة", L"Древняя легенда", L"Alte Legende", L"Lenda antiga", L"Oude legende", L"Starożytna legenda", L"Kadim Efsane");
 	}
 	if (ss == "yc_t501.ogg") {
 		loop1 = 782252;
@@ -5599,7 +6367,7 @@ void COggDlg::play()
 		stitle = "The Foliage Ocean in CELCETA -Opening size-";
 	}
 	if (ss == "yc_end.ogg") {
-		stitle = LL2(L"新たな時代のステージへ", L"To the Stage of a New Era");
+		stitle = LL14(L"新たな時代のステージへ", L"To the Stage of a New Era", L"Vers la scène d'une nouvelle ère", L"Verso il palcoscenico di una nuova era", L"Al escenario de una nueva era", L"새로운 시대의 무대로", L"走向新时代的舞台", L"إلى مسرح عصر جديد", L"На сцену новой эпохи", L"Auf die Bühne einer neuen Ära", L"Para o palco de uma nova era", L"Naar het podium van een nieuw tijdperk", L"Na scenę nowej ery", L"Yeni Bir Çağın Sahnesine");
 	}
 
 	//零の軌跡用
@@ -5630,8 +6398,37 @@ void COggDlg::play()
 		fclose(fp);
 		sss = savedata.zero;
 		if (fg == 0 && sss == L"") {
-			int ret = MessageBox(LL2(L"おそらく碧の軌跡のbgmデータで、碧の軌跡のbgmテーブルに情報がありません。\n零の軌跡のbgmテーブルを参照しますか？\n(碧の軌跡には零の軌跡のbgmデータも入ってるため、ループ情報は零の軌跡側にあります)", L"Likely Ao no Kiseki BGM data, but no info in Ao BGM table.\nUse Zero no Kiseki BGM table?\n(Ao includes Zero BGM data; loop info is in Zero.)"), LL2(L"bgmテーブルに情報がありません。", L"No info in BGM table."), MB_YESNO);
-			if (ret == IDYES) {
+			int ret = MessageBox(LL14(
+				L"おそらく碧の軌跡のbgmデータで、碧の軌跡のbgmテーブルに情報がありません。\n零の軌跡のbgmテーブルを参照しますか？\n(碧の軌跡には零の軌跡のbgmデータも入ってるため、ループ情報は零の軌跡側にあります)",
+				L"Likely Ao no Kiseki BGM data, but no info in Ao BGM table.\nUse Zero no Kiseki BGM table?\n(Ao includes Zero BGM data; loop info is in Zero.)",
+				L"Probablement des données BGM d'Ao no Kiseki, mais aucune info dans la table BGM d'Ao.\nUtiliser la table BGM de Zero no Kiseki?\n(Ao contient les données BGM de Zero ; les infos de boucle sont dans Zero.)",
+				L"Probabilmente dati BGM di Ao no Kiseki, ma nessuna info nella tabella BGM di Ao.\nUsare la tabella BGM di Zero no Kiseki?\n(Ao include i dati BGM di Zero; le info loop sono in Zero.)",
+				L"Probablemente datos BGM de Ao no Kiseki, pero sin info en la tabla BGM de Ao.\n¿Usar la tabla BGM de Zero no Kiseki?\n(Ao incluye datos BGM de Zero; la info de bucle está en Zero.)",
+				L"아마도 벽의 궤적 BGM 데이터이지만, 벽의 궤적 BGM 테이블에 정보가 없습니다.\n영의 궤적 BGM 테이블을 참조할까요?\n(벽의 궤적에는 영의 궤적 BGM 데이터도 포함되어 있어, 루프 정보는 영의 궤적 쪽에 있습니다)",
+				L"可能是碧之轨迹的BGM数据，但碧之轨迹BGM表中没有相关信息。\n是否参照零之轨迹的BGM表？\n(碧之轨迹中也包含零之轨迹的BGM数据，因此循环信息在零之轨迹一侧)",
+				L"يبدو أنه بيانات BGM من Ao no Kiseki، لكن لا توجد معلومات في جدول BGM الخاص به.\nهل تريد استخدام جدول BGM من Zero no Kiseki?\n(يتضمن Ao بيانات BGM من Zero؛ معلومات الحلقة موجودة في Zero.)",
+				L"Вероятно, данные BGM из Ao no Kiseki, но в таблице BGM Ao нет информации.\nИспользовать таблицу BGM Zero no Kiseki?\n(Ao включает данные BGM из Zero; информация о петле находится в Zero.)",
+				L"Wahrscheinlich Ao no Kiseki BGM-Daten, aber keine Info in der Ao BGM-Tabelle.\nZero no Kiseki BGM-Tabelle verwenden?\n(Ao enthält Zero BGM-Daten; Loop-Info befindet sich in Zero.)",
+				L"Provavelmente dados BGM de Ao no Kiseki, mas sem informação na tabela BGM de Ao.\nUsar a tabela BGM de Zero no Kiseki?\n(Ao inclui dados BGM de Zero; informações de loop estão em Zero.)",
+				L"Waarschijnlijk Ao no Kiseki BGM-data, maar geen info in de Ao BGM-tabel.\nZero no Kiseki BGM-tabel gebruiken?\n(Ao bevat Zero BGM-data; loop-info staat in Zero.)",
+				L"Prawdopodobnie dane BGM z Ao no Kiseki, ale brak informacji w tabeli BGM Ao.\nUżyć tabeli BGM Zero no Kiseki?\n(Ao zawiera dane BGM z Zero; informacje o pętli są w Zero.)",
+				L"Muhtemelen Ao no Kiseki BGM verisi, ancak Ao BGM tablosunda bilgi yok.\nZero no Kiseki BGM tablosu kullanılsın mı?\n(Ao, Zero BGM verilerini de içerir; döngü bilgisi Zero tarafındadır.)"),
+				LL14(
+					L"bgmテーブルに情報がありません。",
+					L"No info in BGM table.",
+					L"Aucune info dans la table BGM.",
+					L"Nessuna info nella tabella BGM.",
+					L"Sin información en la tabla BGM.",
+					L"BGM 테이블에 정보가 없습니다.",
+					L"BGM表中没有信息。",
+					L"لا توجد معلومات في جدول BGM.",
+					L"Нет информации в таблице BGM.",
+					L"Keine Info in der BGM-Tabelle.",
+					L"Sem informação na tabela BGM.",
+					L"Geen info in de BGM-tabel.",
+					L"Brak informacji w tabeli BGM.",
+					L"BGM tablosunda bilgi yok."),
+				MB_YESNO); if (ret == IDYES) {
 				CZeroFol d;
 				if (d.DoModal() == IDOK) {
 					FILE* fp = _wfsopen(savedata.zero, L"rb", 0x40);
@@ -5694,8 +6491,36 @@ void COggDlg::play()
 		_tchdir(s);
 		CFile ff;
 		if (ff.Open(ss, CFile::modeRead | CFile::shareDenyNone, NULL) == FALSE) {
-			MessageBox(LL2(L"ファイルが存在しません。\n削除されたかフォルダまたはファイル名が変更された可能性があります。", L"File does not exist.\nIt may have been deleted or the folder/filename may have changed."), LL2(L"ファイルが存在しません。", L"File does not exist."));
-			m_saisai.EnableWindow(TRUE); endflg = 0; return;
+			MessageBox(LL14(
+				L"ファイルが存在しません。\n削除されたかフォルダまたはファイル名が変更された可能性があります。",
+				L"File does not exist.\nIt may have been deleted or the folder/filename may have changed.",
+				L"Le fichier n'existe pas.\nIl a peut-être été supprimé ou le dossier/nom de fichier a été modifié.",
+				L"Il file non esiste.\nPotrebbe essere stato eliminato o la cartella/nome file potrebbe essere cambiato.",
+				L"El archivo no existe.\nPuede haber sido eliminado o la carpeta/nombre de archivo puede haber cambiado.",
+				L"파일이 존재하지 않습니다.\n삭제되었거나 폴더 또는 파일명이 변경되었을 가능성이 있습니다.",
+				L"文件不存在。\n该文件可能已被删除，或文件夹/文件名已更改。",
+				L"الملف غير موجود.\nربما تم حذفه أو تغيير اسم المجلد أو الملف.",
+				L"Файл не существует.\nВозможно, он был удалён или изменено имя папки/файла.",
+				L"Datei existiert nicht.\nSie wurde möglicherweise gelöscht oder der Ordner/Dateiname wurde geändert.",
+				L"O arquivo não existe.\nEle pode ter sido excluído ou a pasta/nome do arquivo pode ter mudado.",
+				L"Het bestand bestaat niet.\nHet is mogelijk verwijderd of de map/bestandsnaam is gewijzigd.",
+				L"Plik nie istnieje.\nMógł zostać usunięty lub zmieniono nazwę folderu/pliku.",
+				L"Dosya mevcut değil.\nSilinmiş veya klasör/dosya adı değiştirilmiş olabilir."),
+				LL14(
+					L"ファイルが存在しません。",
+					L"File does not exist.",
+					L"Le fichier n'existe pas.",
+					L"Il file non esiste.",
+					L"El archivo no existe.",
+					L"파일이 존재하지 않습니다.",
+					L"文件不存在。",
+					L"الملف غير موجود.",
+					L"Файл не существует.",
+					L"Datei existiert nicht.",
+					L"O arquivo não existe.",
+					L"Het bestand bestaat niet.",
+					L"Plik nie istnieje.",
+					L"Dosya mevcut değil.")); m_saisai.EnableWindow(TRUE); endflg = 0; return;
 		}ff.Close();
 
 		BYTE buf[2005];
@@ -6392,9 +7217,51 @@ void COggDlg::play()
 		if (kvver == 2) {
 			mod = pFunck();
 			if (mod == NULL) {
-				MessageBox(LL2(L"なんらかの要因でkpiが開けませんでした。", L"Could not open kpi for some reason."), LL2(L"ファイルが存在しません。", L"File does not exist."));
-				fnn = LL2(L"kpi構造体を獲得できませんでした。", L"Could not acquire kpi structure.");
-				FreeLibrary(hDLLk);
+				MessageBox(LL14(
+					L"なんらかの要因でkpiが開けませんでした。",
+					L"Could not open kpi for some reason.",
+					L"Impossible d'ouvrir kpi pour une raison quelconque.",
+					L"Impossibile aprire kpi per qualche motivo.",
+					L"No se pudo abrir kpi por alguna razón.",
+					L"어떠한 원인으로 kpi를 열 수 없었습니다.",
+					L"由于某种原因无法打开kpi。",
+					L"تعذر فتح kpi لسبب ما.",
+					L"Не удалось открыть kpi по какой-то причине.",
+					L"kpi konnte aus einem unbekannten Grund nicht geöffnet werden.",
+					L"Não foi possível abrir o kpi por algum motivo.",
+					L"Kan kpi om een of andere reden niet openen.",
+					L"Nie można otworzyć kpi z jakiegoś powodu.",
+					L"Kpi bir nedenle açılamadı."),
+					LL14(
+						L"ファイルが存在しません。",
+						L"File does not exist.",
+						L"Le fichier n'existe pas.",
+						L"Il file non esiste.",
+						L"El archivo no existe.",
+						L"파일이 존재하지 않습니다.",
+						L"文件不存在。",
+						L"الملف غير موجود.",
+						L"Файл не существует.",
+						L"Datei existiert nicht.",
+						L"O arquivo não existe.",
+						L"Het bestand bestaat niet.",
+						L"Plik nie istnieje.",
+						L"Dosya mevcut değil."));
+				fnn = LL14(
+					L"kpi構造体を獲得できませんでした。",
+					L"Could not acquire kpi structure.",
+					L"Impossible d'obtenir la structure kpi.",
+					L"Impossibile acquisire la struttura kpi.",
+					L"No se pudo adquirir la estructura kpi.",
+					L"kpi 구조체를 획득할 수 없었습니다.",
+					L"无法获取kpi结构体。",
+					L"تعذر الحصول على بنية kpi.",
+					L"Не удалось получить структуру kpi.",
+					L"kpi-Struktur konnte nicht abgerufen werden.",
+					L"Não foi possível obter a estrutura kpi.",
+					L"Kan kpi-structuur niet verkrijgen.",
+					L"Nie można uzyskać struktury kpi.",
+					L"Kpi yapısı edinilemedi."); FreeLibrary(hDLLk);
 				m_saisai.EnableWindow(TRUE); endflg = 0; return;
 			}
 			CString ss;
@@ -6729,55 +7596,55 @@ void COggDlg::play()
 			CString a;
 			switch (_ttoi(ss.Mid(2, 4))) {
 			case 7001:
-				a = LL2(L"零の軌跡", L"Trails from Zero");
+				a = LL14(L"零の軌跡", L"Trails from Zero", L"Trails from Zero", L"Trails from Zero", L"Trails from Zero", L"영의 궤적", L"零之轨迹", L"مسارات من الصفر", L"Тропы от Нуля", L"Trails from Zero", L"Trilhas do Zero", L"Trails from Zero", L"Trails from Zero", L"Sıfırdan İzler");
 				break;
 			case 7002:
 				a = L"way of live -Opening Version-";
 				break;
 			case 7003:
-				a = LL2(L"新しき日々～予兆", L"New Days -Omen-");
+				a = LL14(L"新しき日々～予兆", L"New Days -Omen-", L"Nouveaux Jours -Présage-", L"Nuovi Giorni -Presagio-", L"Nuevos Días -Presagio-", L"새로운 나날~예兆", L"崭新之日~预兆", L"أيام جديدة -نذير-", L"Новые Дни -Предзнаменование-", L"Neue Tage -Omen-", L"Novos Dias -Presságio-", L"Nieuwe Dagen -Voorteken-", L"Nowe Dni -Omen-", L"Yeni Günler -İşaret-");
 				break;
 			case 7005:
-				a = LL2(L"想い破れて・・・", L"Broken Heart...");
+				a = LL14(L"想い破れて・・・", L"Broken Heart...", L"Cœur Brisé...", L"Cuore Spezzato...", L"Corazón Roto...", L"마음이 깨져서...", L"心意破碎...", L"قلب مكسور...", L"Разбитое Сердце...", L"Gebrochenes Herz...", L"Coração Partido...", L"Gebroken Hart...", L"Złamane Serce...", L"Kırık Kalp...");
 				break;
 			case 7052:
-				a = LL2(L"碧い軌跡 -Opening size-", L"Azure Arbitrator -Opening size-");
+				a = LL14(L"碧い軌跡 -Opening size-", L"Azure Arbitrator -Opening size-", L"Arbitre Azure -taille ouverture-", L"Arbitro Azzurro -dimensione apertura-", L"Árbitro Azur -tamaño apertura-", L"벽의 궤적 -Opening size-", L"碧之轨迹 -片头版-", L"الحَكَم الأزرق -حجم الافتتاحية-", L"Лазурный Арбитр -размер открытия-", L"Azur-Schiedsrichter -Eröffnungsgröße-", L"Árbitro Azul -tamanho abertura-", L"Azure Scheidsrechter -openingsgrootte-", L"Lazurowy Arbitr -rozmiar otwierający-", L"Gök Mavisi Hakem -açılış boyutu-");
 				break;
 			case 7053:
-				a = LL2(L"それでも僕らは。", L"Yet We're Still Here.");
+				a = LL14(L"それでも僕らは。", L"Yet We're Still Here.", L"Pourtant Nous Sommes Là.", L"Eppure Siamo Ancora Qui.", L"Pero Seguimos Aquí.", L"그래도 우리는.", L"即便如此我们仍在。", L"لكننا ما زلنا هنا.", L"Но Мы Всё Ещё Здесь.", L"Dennoch Sind Wir Noch Hier.", L"Mas Ainda Estamos Aqui.", L"Toch Zijn We Er Nog.", L"A Jednak Nadal Tu Jesteśmy.", L"Yine de Buradayız.");
 				break;
 			case 7100:
-				a = LL2(L"街角の風景", L"Street Corner Scenery");
+				a = LL14(L"街角の風景", L"Street Corner Scenery", L"Scène de Rue", L"Scena Angolo Strada", L"Paisaje de Esquina", L"거리 모퉁이 풍경", L"街角风景", L"مشهد زاوية الشارع", L"Вид Угола Улицы", L"Straßenecken-Szenerie", L"Cenário da Esquina", L"Straathoekscène", L"Scena Ulicznego Rogu", L"Sokak Köşesi Manzarası");
 				break;
 			case 7101:
-				a = LL2(L"明日は明日の風が吹く", L"Tomorrow the Wind Will Blow");
+				a = LL14(L"明日は明日の風が吹く", L"Tomorrow the Wind Will Blow", L"Demain le Vent Soufflera", L"Domani Soffierà il Vento", L"Mañana Soplará el Viento", L"내일은 내일의 바람이 분다", L"明日自有明日风", L"غداً ستهب الرياح", L"Завтра Подует Ветер", L"Morgen Wird der Wind Wehen", L"Amanhã o Vento Soprará", L"Morgen Zal de Wind Waaien", L"Jutro Zawieje Wiatr", L"Yarın Rüzgar Esecek");
 				break;
 			case 7102:
-				a = LL2(L"クロスベルの午後", L"Afternoon in Crossbell");
+				a = LL14(L"クロスベルの午後", L"Afternoon in Crossbell", L"Après-midi à Crossbell", L"Pomeriggio a Crossbell", L"Tarde en Crossbell", L"크로스벨의 오후", L"克洛斯贝尔的午后", L"بعد الظهر في كروسبل", L"Послеполуденное время в Кроссбелле", L"Nachmittag in Crossbell", L"Tarde em Crossbell", L"Middag in Crossbell", L"Popołudnie w Crossbell", L"Crossbell'de Öğleden Sonra");
 				break;
 			case 7103:
 				a = L"During Mission Accomplishment";
 				break;
 			case 7104:
-				a = LL2(L"創立記念祭", L"Founding Festival");
+				a = LL14(L"創立記念祭", L"Founding Festival", L"Fête de Fondation", L"Festival della Fondazione", L"Festival Fundacional", L"창립 기념제", L"创立纪念祭", L"مهرجان التأسيس", L"Праздник Основания", L"Gründungsfest", L"Festival da Fundação", L"Stichtingsfeest", L"Święto Założenia", L"Kuruluş Festivali");
 				break;
 			case 7105:
-				a = LL2(L"降水確率10%", L"10% Chance of Rain");
+				a = LL14(L"降水確率10%", L"10% Chance of Rain", L"10% de chances de pluie", L"10% di probabilità di pioggia", L"10% de probabilidad de lluvia", L"강수확률 10%", L"降水概率10%", L"10% فرصة أمطار", L"10% Вероятность Дождя", L"10% Regenwahrscheinlichkeit", L"10% de chance de chuva", L"10% kans op regen", L"10% szans na deszcz", L"%10 yağmur ihtimali");
 				break;
 			case 7106:
-				a = LL2(L"風船と紙吹雪", L"Balloons and Confetti");
+				a = LL14(L"風船と紙吹雪", L"Balloons and Confetti", L"Ballons et Confettis", L"Palloncini e Coriandoli", L"Globos y Confeti", L"풍선과 종이 조각", L"气球与纸屑", L"بالونات وقصاصات ورقية", L"Воздушные Шары и Конфетти", L"Luftballons und Konfetti", L"Balões e Confete", L"Ballonnen en Confetti", L"Balony i Konfetti", L"Balonlar ve Konfeti");
 				break;
 			case 7110:
-				a = LL2(L"特務支援課", L"Special Support Section");
+				a = LL14(L"特務支援課", L"Special Support Section", L"Section Soutien Spécial", L"Sezione Supporto Speciale", L"Sección de Apoyo Especial", L"특무지원과", L"特务支援科", L"قسم الدعم الخاص", L"Специальная Поддержка", L"Sondereinsatztruppe", L"Seção de Suporte Especial", L"Speciale Ondersteuningssectie", L"Specjalna Sekcja Wsparcia", L"Özel Destek Bölümü");
 				break;
 			case 7111:
-				a = LL2(L"C.S.P.D. -クロスベル警察", L"C.S.P.D. -Crossbell Police");
+				a = LL14(L"C.S.P.D. -クロスベル警察", L"C.S.P.D. -Crossbell Police", L"C.S.P.D. -Police de Crossbell", L"C.S.P.D. -Polizia Crossbell", L"C.S.P.D. -Policía Crossbell", L"C.S.P.D. -크로스벨 경찰", L"C.S.P.D. -克洛斯贝尔警察", L"C.S.P.D. -شرطة كروسبل", L"C.S.P.D. -Полиция Кроссбелла", L"C.S.P.D. -Crossbell Polizei", L"C.S.P.D. -Polícia Crossbell", L"C.S.P.D. -Crossbell Politie", L"C.S.P.D. -Policja Crossbell", L"C.S.P.D. -Crossbell Polisi");
 				break;
 			case 7113:
 				a = L"Arc-en-ciel";
 				break;
 			case 7114:
-				a = LL2(L"黒月貿易公司", L"Heiyue Trading Company");
+				a = LL14(L"黒月貿易公司", L"Heiyue Trading Company", L"Compagnie Heiyue", L"Heiyue Trading Company", L"Heiyue Trading Company", L"헤이유에 무역회사", L"黑月贸易公司", L"شركة هيوي التجارية", L"Торговая Компания Хэйюэ", L"Heiyue Handelsgesellschaft", L"Heiyue Trading Company", L"Heiyue Trading Company", L"Heiyue Trading Company", L"Heiyue Trading Company");
 				break;
 			case 7116:
 				a = L"IGNIS";
@@ -6786,100 +7653,100 @@ void COggDlg::play()
 				a = L"TRINITY";
 				break;
 			case 7120:
-				a = LL2(L"アルモリカ村", L"Armorica Village");
+				a = LL14(L"アルモリカ村", L"Armorica Village", L"Village d'Armorica", L"Villaggio Armorica", L"Aldea Armorica", L"아르모리카 마을", L"阿莫利卡村", L"قرية أرموريكا", L"Деревня Арморика", L"Armorica-Dorf", L"Vila Armorica", L"Armorica-dorp", L"Wieś Armorica", L"Armorica Köyü");
 				break;
 			case 7121:
-				a = LL2(L"鉱山町マインツ", L"Mines Town Mainz");
+				a = LL14(L"鉱山町マインツ", L"Mines Town Mainz", L"Ville minière Mainz", L"Città mineraria Mainz", L"Ciudad minera Mainz", L"광산도시 마인츠", L"矿山镇迈因茨", L"بلدة المناجم ماينتس", L"Город Шахт Майнц", L"Bergarbeiterstadt Mainz", L"Cidade das Minas Mainz", L"Mijnstad Mainz", L"Miasto Kopalni Mainz", L"Mainz Maden Kasabası");
 				break;
 			case 7122:
 				a = L"Killing Bear";
 				break;
 			case 7123:
-				a = LL2(L"聖ウルスラ医科大学", L"St. Ursula Medical College");
+				a = LL14(L"聖ウルスラ医科大学", L"St. Ursula Medical College", L"Faculté St-Ursule", L"Collegio medico St. Ursula", L"Universidad Médica St. Ursula", L"성 우르슐라 의과대학", L"圣乌尔苏拉医科大学", L"كلية سانت أورسولا الطبية", L"Медколледж св. Урсулы", L"St. Ursula Medizinhochschule", L"Faculdade St. Ursula", L"St. Ursula Medische Hogeschool", L"Szpital św. Urszuli", L"Aziz Ursula Tıp Koleji");
 				break;
 			case 7124:
-				a = LL2(L"クロスベル大聖堂", L"Crossbell Cathedral");
+				a = LL14(L"クロスベル大聖堂", L"Crossbell Cathedral", L"Cathédrale de Crossbell", L"Cattedrale di Crossbell", L"Catedral de Crossbell", L"크로스벨 대성당", L"克洛斯贝尔大教堂", L"كاتدرائية كروسبل", L"Собор Кроссбелла", L"Crossbell-Kathedrale", L"Catedral de Crossbell", L"Crossbell Kathedraal", L"Katedra Crossbell", L"Crossbell Katedrali");
 				break;
 			case 7125:
-				a = LL2(L"黒の競売会", L"Black Auction");
+				a = LL14(L"黒の競売会", L"Black Auction", L"Vente aux enchères noire", L"Asta nera", L"Subasta negra", L"검은 경매회", L"黑色拍卖会", L"المزاد الأسود", L"Чёрный Аукцион", L"Schwarze Auktion", L"Leilão negro", L"Zwarte Veiling", L"Czarna Aukcja", L"Kara Müzayede");
 				break;
 			case 7126:
-				a = LL2(L"大国にはさまれて", L"Caught Between Nations");
+				a = LL14(L"大国にはさまれて", L"Caught Between Nations", L"Pris entre les Nations", L"Intrappolati tra le Nazioni", L"Atrapados entre Naciones", L"대국들 사이에서", L"夹在大国之间", L"محاصرون بين الأمم", L"Зажатые Между Державами", L"Zwischen den Nationen gefangen", L"Preso entre Nações", L"Gevangen tussen Naties", L"Uwięziony między Mocarstwami", L"Uluslar Arasında Sıkışmış");
 				break;
 			case 7150:
-				a = LL2(L"新たなる日常", L"New Daily Life");
+				a = LL14(L"新たなる日常", L"New Daily Life", L"Nouvelle Vie Quotidienne", L"Nuova Vita Quotidiana", L"Nueva Vida Cotidiana", L"새로운 일상", L"崭新的日常", L"حياة يومية جديدة", L"Новые Будни", L"Neuer Alltag", L"Nova Vida Cotidiana", L"Nieuw Dagelijks Leven", L"Nowe Codzienne Życie", L"Yeni Günlük Yaşam");
 				break;
 			case 7151:
-				a = LL2(L"動き始めた事態", L"Events in Motion");
+				a = LL14(L"動き始めた事態", L"Events in Motion", L"Événements en Mouvement", L"Eventi in Movimento", L"Eventos en Movimiento", L"움직이기 시작한 사태", L"开始变动的局势", L"أحداث في حركة", L"События Приходят в Движение", L"Ereignisse in Bewegung", L"Eventos em Movimento", L"Gebeurtenissen in Beweging", L"Zdarzenia w Ruchu", L"Harekete Geçen Olaylar");
 				break;
 			case 7160:
-				a = LL2(L"ミシュラムワンダーランド", L"Mishyram Wonderland");
+				a = LL14(L"ミシュラムワンダーランド", L"Mishyram Wonderland", L"Mishyram Wonderland", L"Mishyram Wonderland", L"Mishyram Wonderland", L"미슈람 원더랜드", L"米修拉姆乐园", L"ميشيرام ووندرلاند", L"Мишрам Уандерленд", L"Mishyram Wunderland", L"Mishyram Wonderland", L"Mishyram Wonderland", L"Mishyram Wonderland", L"Mishyram Harikalar Diyarı");
 				break;
 			case 7161:
-				a = LL2(L"束の間の休息", L"Brief Respite");
+				a = LL14(L"束の間の休息", L"Brief Respite", L"Bref Répit", L"Breve Respiro", L"Breve Respiro", L"잠깐의 휴식", L"短暂的休息", L"استراحة قصيرة", L"Краткая Передышка", L"Kurze Verschnaufpause", L"Breve Descanso", L"Kort Respijt", L"Krótki Odpoczynek", L"Kısa Mola");
 				break;
 			case 7162:
-				a = LL2(L"ささやかな晩餐", L"Simple Dinner");
+				a = LL14(L"ささやかな晩餐", L"Simple Dinner", L"Dîner Simple", L"Cena Semplice", L"Cena Sencilla", L"소박한 만찬", L"简单的晚餐", L"عشاء بسيط", L"Скромный Ужин", L"Einfaches Abendessen", L"Jantar Simples", L"Eenvoudig Diner", L"Prosty Obiad", L"Sade Akşam Yemeği");
 				break;
 			case 7200:
-				a = LL2(L"水と草木と青い空", L"Water, Trees and Blue Sky");
+				a = LL14(L"水と草木と青い空", L"Water, Trees and Blue Sky", L"Eau, Arbres et Ciel Bleu", L"Acqua, Alberi e Cielo Azzurro", L"Agua, Árboles y Cielo Azul", L"물과 초목과 푸른 하늘", L"水与草木和蓝天", L"الماء والأشجار والسماء الزرقاء", L"Вода, Деревья и Голубое Небо", L"Wasser, Bäume und blauer Himmel", L"Água, Árvores e Céu Azul", L"Water, Bomen en Blauwe Lucht", L"Woda, Drzewa i Błękitne Niebo", L"Su, Ağaçlar ve Mavi Gökyüzü");
 				break;
 			case 7201:
-				a = LL2(L"片手にはレモネード", L"Lemonade in One Hand");
+				a = LL14(L"片手にはレモネード", L"Lemonade in One Hand", L"Limonade dans une Main", L"Limonata in una Mano", L"Limonada en una Mano", L"한 손에는 레모네이드", L"一手拿着柠檬水", L"ليموناضة في يد واحدة", L"Лимонад в Одной Руке", L"Limonade in einer Hand", L"Limonada em uma Mão", L"Limonade in één Hand", L"Lemoniada w Jednej Ręce", L"Bir Elde Limonata");
 				break;
 			case 7202:
-				a = LL2(L"木霊の道", L"Path of Echoes");
+				a = LL14(L"木霊の道", L"Path of Echoes", L"Chemin des Échos", L"Sentiero degli Echi", L"Senda de los Ecos", L"메아리의 길", L"回声之道", L"درب الأصداء", L"Тропа Эхо", L"Pfad der Echos", L"Caminho dos Ecos", L"Pad van Echo's", L"Ścieżka Ech", L"Yankılar Yolu");
 				break;
 			case 7203:
-				a = LL2(L"古の鼓動", L"Ancient Pulse");
+				a = LL14(L"古の鼓動", L"Ancient Pulse", L"Pulsation Ancienne", L"Pulsazione Antica", L"Pulso Antiguo", L"고대의 고동", L"古老的脉动", L"النبض القديم", L"Древний Пульс", L"Alter Puls", L"Pulso Antigo", L"Oude Puls", L"Starożytne Tętno", L"Kadim Nabız");
 				break;
 			case 7204:
 				a = L"On The Green Road";
 				break;
 			case 7205:
-				a = LL2(L"鉄橋を越えて", L"Crossing the Iron Bridge");
+				a = LL14(L"鉄橋を越えて", L"Crossing the Iron Bridge", L"Traverser le Pont de Fer", L"Attraversare il Ponte di Ferro", L"Cruzando el Puente de Hierro", L"철교를 건너서", L"越过铁桥", L"عبور الجسر الحديدي", L"Пересекая Железный Мост", L"Die Eisenbrücke überqueren", L"Cruzando a Ponte de Ferro", L"De IJzeren Brug Oversteken", L"Przekraczając Żelazny Most", L"Demir Köprüyü Geçerken");
 				break;
 			case 7250:
-				a = LL2(L"木洩れ日の中の静寂", L"Tranquility in the Dappled Light");
+				a = LL14(L"木洩れ日の中の静寂", L"Tranquility in the Dappled Light", L"Tranquillité dans la Lumière Tachetée", L"Tranquillità nella Luce Screziata", L"Tranquilidad en la Luz Moteada", L"나뭇잎 사이로 비치는 빛 속의 고요", L"斑驳光影中的静谧", L"السكون في الضوء المتدرج", L"Тишина в Пятнистом Свете", L"Stille im gefilterten Licht", L"Tranquilidade na Luz Filtrada", L"Rust in het Gefiltreerde Licht", L"Spokój w Migotliwym Świetle", L"Işık Süzülürken Huzur");
 				break;
 			case 7251:
-				a = LL2(L"偽りの楽土を越えて", L"Beyond the False Paradise");
+				a = LL14(L"偽りの楽土を越えて", L"Beyond the False Paradise", L"Au-Delà du Faux Paradis", L"Oltre il Falso Paradiso", L"Más Allá del Falso Paraíso", L"거짓 낙원을 넘어서", L"超越虚假的乐土", L"ما وراء الجنة الزائفة", L"За пределами Ложного Рая", L"Jenseits des falschen Paradieses", L"Além do Falso Paraíso", L"Voorbij het Valse Paradijs", L"Poza Fałszywym Rajem", L"Sahte Cennetin Ötesinde");
 				break;
 			case 7300:
-				a = LL2(L"ジオフロント", L"Geofront");
+				a = LL14(L"ジオフロント", L"Geofront", L"Geofront", L"Geofront", L"Geofront", L"지오프론트", L"地底都市", L"جيوفرونت", L"Геофронт", L"Geofront", L"Geofront", L"Geofront", L"Geofront", L"Geofront");
 				break;
 			case 7301:
-				a = LL2(L"七耀の煌き", L"Septium Radiance");
+				a = LL14(L"七耀の煌き", L"Septium Radiance", L"Éclat du Septium", L"Splendore del Septium", L"Resplandor del Septium", L"칠요의 빛남", L"七曜之闪耀", L"بريق السبتيوم", L"Сияние Септиума", L"Septium-Glanz", L"Resplendor do Septium", L"Septium Glinstering", L"Blask Septium", L"Septium Işıltısı");
 				break;
 			case 7302:
-				a = LL2(L"ルバーチェ商会", L"Revache Trading Company");
+				a = LL14(L"ルバーチェ商会", L"Revache Trading Company", L"Compagnie Revache", L"Revache Trading Company", L"Revache Trading Company", L"레바슈 상회", L"卢巴切商会", L"شركة ريفاش التجارية", L"Торговая Компания Реваш", L"Revache Handelsgesellschaft", L"Revache Trading Company", L"Revache Trading Company", L"Revache Trading Company", L"Revache Ticaret Şirketi");
 				break;
 			case 7303:
-				a = LL2(L"鳴るはずのない鐘", L"The Bell That Shouldn't Ring");
+				a = LL14(L"鳴るはずのない鐘", L"The Bell That Shouldn't Ring", L"La Cloche Qui Ne Devrait Pas Sonner", L"La Campana Che Non Dovrebbe Suonare", L"La Campana Que No Debería Sonar", L"울려서는 안 될 종", L"不该响起的钟声", L"الجرس الذي لا ينبغي أن يرن", L"Колокол, Который Не Должен Звонить", L"Die Glocke, die nicht läuten sollte", L"O Sino Que Não Deveria Tocar", L"De Klok Die Niet Zou Moeten Luiden", L"Dzwon, Który Nie Powinien Bić", L"Çalmaması Gereken Çan");
 				break;
 			case 7304:
-				a = LL2(L"忘れられし幻夢の狭間", L"Forgotten Phantasmal Gap");
+				a = LL14(L"忘れられし幻夢の狭間", L"Forgotten Phantasmal Gap", L"Interstice Fantomatique Oublié", L"Varco Fantasmatico Dimenticato", L"Brecha Fantasmal Olvidada", L"잊혀진 환몽의 틈새", L"被遗忘的幻梦之间", L"فجوة الوهم المنسي", L"Забытый Призрачный Разрыв", L"Vergessene Phantomale Lücke", L"Lacuna Fantasmal Esquecida", L"Vergeten Spookachtige Kloof", L"Zapomniana Fantomalna Szczelina", L"Unutulmuş Hayali Boşluk");
 				break;
 			case 7305:
 				a = L"A Light Illuminating The Depths";
 				break;
 			case 7350:
-				a = LL2(L"Dの残影", L"D's Shadow");
+				a = LL14(L"Dの残影", L"D's Shadow", L"L'Ombre de D", L"L'Ombra di D", L"La Sombra de D", L"D의 잔영", L"D的残影", L"ظل D", L"Тень D", L"Ds Schatten", L"A Sombra de D", L"D's Schaduw", L"Cień D", L"D'nin Gölgesi");
 				break;
 			case 7351:
-				a = LL2(L"異変の兆し", L"Omen of Change");
+				a = LL14(L"異変の兆し", L"Omen of Change", L"Présage de Changement", L"Presagio di Cambiamento", L"Presagio de Cambio", L"이변의 조짐", L"异变的征兆", L"نذير التغيير", L"Предзнаменование Перемен", L"Vorbote des Wandels", L"Presságio de Mudança", L"Voorteken van Verandering", L"Zwiastun Zmiany", L"Değişimin İşareti");
 				break;
 			case 7352:
 				a = L"Mystic Core";
 				break;
 			case 7353:
-				a = LL2(L"最果ての樹", L"Tree at World's End");
+				a = LL14(L"最果ての樹", L"Tree at World's End", L"L'Arbre au Bout du Monde", L"L'Albero alla Fine del Mondo", L"El Árbol al Fin del Mundo", L"세상 끝의 나무", L"天涯之树", L"الشجرة عند نهاية العالم", L"Дерево на Краю Света", L"Baum am Ende der Welt", L"A Árvore no Fim do Mundo", L"De Boom aan het Einde van de Wereld", L"Drzewo na Końcu Świata", L"Dünyanın Sonundaki Ağaç");
 				break;
 			case 7354:
-				a = LL2(L"暴魔の呼び声", L"Call of the Beast");
+				a = LL14(L"暴魔の呼び声", L"Call of the Beast", L"L'Appel de la Bête", L"Il Richiamo della Bestia", L"El Llamado de la Bestia", L"폭마의 부름", L"暴魔的呼唤", L"نداء الوحش", L"Зов Зверя", L"Ruf des Ungeheuers", L"O Chamado da Besta", L"De Roep van het Beest", L"Wołanie Bestii", L"Canavarın Çağrısı");
 				break;
 			case 7356:
-				a = LL2(L"不明", L"Unknown");
+				a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 				break;
 			case 7400:
 				a = L"Get Over The Barrier!";
@@ -6903,7 +7770,7 @@ void COggDlg::play()
 				a = L"Arrival Existence";
 				break;
 			case 7408:
-				a = LL2(L"これが俺たちの力だ!", L"This Is Our Power!");
+				a = LL14(L"これが俺たちの力だ!", L"This Is Our Power!", L"C'est Notre Pouvoir!", L"Questo È il Nostro Potere!", L"¡Este Es Nuestro Poder!", L"이것이 우리들의 힘이다!", L"这就是我们的力量!", L"هذه هي قوتنا!", L"Это Наша Сила!", L"Das Ist Unsere Kraft!", L"Este É o Nosso Poder!", L"Dit Is Onze Kracht!", L"To Jest Nasza Siła!", L"Bu Bizim Gücümüz!");
 				break;
 			case 7450:
 				a = L"Seize The Truth!";
@@ -6930,67 +7797,67 @@ void COggDlg::play()
 				a = L"The Azure Arbitrator";
 				break;
 			case 7460:
-				a = LL2(L"効果音", L"Sound Effect");
+				a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 				break;
 			case 7500:
-				a = LL2(L"金の太陽、銀の月　-陽の熱情", L"Golden Sun, Silver Moon -Solar Passion-");
+				a = LL14(L"金の太陽、銀の月　-陽の熱情", L"Golden Sun, Silver Moon -Solar Passion-", L"Soleil d'Or, Lune d'Argent -Passion Solaire-", L"Sole d'Oro, Luna d'Argento -Passione Solare-", L"Sol Dorado, Luna de Plata -Pasión Solar-", L"황금의 태양, 은빛의 달 -태양의 열정-", L"黄金之阳，白银之月 -太阳的热情-", L"الشمس الذهبية، القمر الفضي -شغف شمسي-", L"Золотое Солнце, Серебряная Луна -Солнечная Страсть-", L"Goldene Sonne, Silberner Mond -Sonnenleidenschaft-", L"Sol Dourado, Lua de Prata -Paixão Solar-", L"Gouden Zon, Zilveren Maan -Zonnige Passie-", L"Złote Słońce, Srebrny Księżyc -Słoneczna Namiętność-", L"Altın Güneş, Gümüş Ay -Güneş Tutkusu-");
 				break;
 			case 7501:
-				a = LL2(L"金の太陽、銀の月　-月の慕情", L"Golden Sun, Silver Moon -Lunar Affection-");
+				a = LL14(L"金の太陽、銀の月　-月の慕情", L"Golden Sun, Silver Moon -Lunar Affection-", L"Soleil d'Or, Lune d'Argent -Affection Lunaire-", L"Sole d'Oro, Luna d'Argento -Affetto Lunare-", L"Sol Dorado, Luna de Plata -Afecto Lunar-", L"황금의 태양, 은빛의 달 -달의 연모-", L"黄金之阳，白银之月 -月亮的思慕-", L"الشمس الذهبية، القمر الفضي -محبة قمرية-", L"Золотое Солнце, Серебряная Луна -Лунная Нежность-", L"Goldene Sonne, Silberner Mond -Mondneigung-", L"Sol Dourado, Lua de Prata -Afeição Lunar-", L"Gouden Zon, Zilveren Maan -Maanachtige Genegenheid-", L"Złote Słońce, Srebrny Księżyc -Księżycowe Uczucie-", L"Altın Güneş, Gümüş Ay -Ay Sevgisi-");
 				break;
 			case 7502:
-				a = LL2(L"金の太陽、銀の月　-童心", L"Golden Sun, Silver Moon -Innocence-");
+				a = LL14(L"金の太陽、銀の月　-童心", L"Golden Sun, Silver Moon -Innocence-", L"Soleil d'Or, Lune d'Argent -Innocence-", L"Sole d'Oro, Luna d'Argento -Innocenza-", L"Sol Dorado, Luna de Plata -Inocencia-", L"황금의 태양, 은빛의 달 -동심-", L"黄金之阳，白银之月 -童心-", L"الشمس الذهبية، القمر الفضي -البراءة-", L"Золотое Солнце, Серебряная Луна -Невинность-", L"Goldene Sonne, Silberner Mond -Unschuld-", L"Sol Dourado, Lua de Prata -Inocência-", L"Gouden Zon, Zilveren Maan -Onschuld-", L"Złote Słońce, Srebrny Księżyc -Niewinność-", L"Altın Güneş, Gümüş Ay -Masumiyet-");
 				break;
 			case 7503:
-				a = LL2(L"金の太陽、銀の月　-運命の刻", L"Golden Sun, Silver Moon -Hour of Fate-");
+				a = LL14(L"金の太陽、銀の月　-運命の刻", L"Golden Sun, Silver Moon -Hour of Fate-", L"Soleil d'Or, Lune d'Argent -L'Heure du Destin-", L"Sole d'Oro, Luna d'Argento -L'Ora del Destino-", L"Sol Dorado, Luna de Plata -La Hora del Destino-", L"황금의 태양, 은빛의 달 -운명의 시각-", L"黄金之阳，白银之月 -命运的时刻-", L"الشمس الذهبية، القمر الفضي -ساعة القدر-", L"Золотое Солнце, Серебряная Луна -Час Судьбы-", L"Goldene Sonne, Silberner Mond -Stunde des Schicksals-", L"Sol Dourado, Lua de Prata -A Hora do Destino-", L"Gouden Zon, Zilveren Maan -Het Uur van het Lot-", L"Złote Słońce, Srebrny Księżyc -Godzina Przeznaczenia-", L"Altın Güneş, Gümüş Ay -Kaderin Saati-");
 				break;
 			case 7504:
-				a = LL2(L"金の太陽、銀の月　-譲れぬ想い", L"Golden Sun, Silver Moon -Unyielding Feelings-");
+				a = LL14(L"金の太陽、銀の月　-譲れぬ想い", L"Golden Sun, Silver Moon -Unyielding Feelings-", L"Soleil d'Or, Lune d'Argent -Sentiments Inébranlables-", L"Sole d'Oro, Luna d'Argento -Sentimenti Irremovibili-", L"Sol Dorado, Luna de Plata -Sentimientos Inquebrantables-", L"황금의 태양, 은빛의 달 -양보할 수 없는 마음-", L"黄金之阳，白银之月 -不可退让的心意-", L"الشمس الذهبية، القمر الفضي -مشاعر لا تلين-", L"Золотое Солнце, Серебряная Луна -Непреклонные Чувства-", L"Goldene Sonne, Silberner Mond -Unnachgiebige Gefühle-", L"Sol Dourado, Lua de Prata -Sentimentos Inabaláveis-", L"Gouden Zon, Zilveren Maan -Onwrikbare Gevoelens-", L"Złote Słońce, Srebrny Księżyc -Nieustępliwe Uczucia-", L"Altın Güneş, Gümüş Ay -Vazgeçilmez Duygular-");
 				break;
 			case 7505:
-				a = LL2(L"金の太陽、銀の月　-幾千の夜を越えて", L"Golden Sun, Silver Moon -Beyond Countless Nights-");
+				a = LL14(L"金の太陽、銀の月　-幾千の夜を越えて", L"Golden Sun, Silver Moon -Beyond Countless Nights-", L"Soleil d'Or, Lune d'Argent -Au-Delà de Nuits Sans Nombre-", L"Sole d'Oro, Luna d'Argento -Oltre Innumerevoli Notti-", L"Sol Dorado, Luna de Plata -Más Allá de Incontables Noches-", L"황금의 태양, 은빛의 달 -수천의 밤을 넘어서-", L"黄金之阳，白银之月 -跨越无数夜晚-", L"الشمس الذهبية، القمر الفضي -عبر ليالٍ لا تُحصى-", L"Золотое Солнце, Серебряная Луна -Сквозь Бесчисленные Ночи-", L"Goldene Sonne, Silberner Mond -Jenseits Unzähliger Nächte-", L"Sol Dourado, Lua de Prata -Além de Incontáveis Noites-", L"Gouden Zon, Zilveren Maan -Voorbij Ontelbare Nachten-", L"Złote Słońce, Srebrny Księżyc -Poza Niezliczonymi Nocami-", L"Altın Güneş, Gümüş Ay -Sayısız Gecelerin Ötesinde-");
 				break;
 			case 7506:
-				a = LL2(L"金の太陽、銀の月　-夜明け～大団円", L"Golden Sun, Silver Moon -Dawn to Grand Finale-");
+				a = LL14(L"金の太陽、銀の月　-夜明け～大団円", L"Golden Sun, Silver Moon -Dawn to Grand Finale-", L"Soleil d'Or, Lune d'Argent -Aube vers le Grand Finale-", L"Sole d'Oro, Luna d'Argento -Alba verso il Gran Finale-", L"Sol Dorado, Luna de Plata -Amanecer hasta el Gran Final-", L"황금의 태양, 은빛의 달 -새벽~대단원-", L"黄金之阳，白银之月 -黎明~大团圆-", L"الشمس الذهبية، القمر الفضي -الفجر إلى الختام الكبير-", L"Золотое Солнце, Серебряная Луна -Рассвет до Грандиозного Финала-", L"Goldene Sonne, Silberner Mond -Morgengrauen bis zum großen Finale-", L"Sol Dourado, Lua de Prata -Amanhecer até o Grande Final-", L"Gouden Zon, Zilveren Maan -Dageraad tot het Grote Finale-", L"Złote Słońce, Srebrny Księżyc -Świt do Wielkiego Finału-", L"Altın Güneş, Gümüş Ay -Şafaktan Büyük Finale-");
 				break;
 			case 7507:
 				a = L"Intense Chase";
 				break;
 			case 7509:
-				a = LL2(L"守りぬく意志", L"Unyielding Will");
+				a = LL14(L"守りぬく意志", L"Unyielding Will", L"Volonté Inébranlable", L"Volontà Irremovibile", L"Voluntad Inquebrantable", L"지켜나가는 의지", L"坚守的意志", L"إرادة لا تلين", L"Непреклонная Воля", L"Unnachgiebiger Wille", L"Vontade Inabalável", L"Onwrikbare Wil", L"Nieustępliwa Wola", L"Vazgeçmeyen İrade");
 				break;
 			case 7510:
-				a = LL2(L"叡智への誘い", L"Invitation to Wisdom");
+				a = LL14(L"叡智への誘い", L"Invitation to Wisdom", L"Invitation à la Sagesse", L"Invito alla Saggezza", L"Invitación a la Sabiduría", L"지혜로의 유혹", L"通往智慧的邀请", L"دعوة إلى الحكمة", L"Приглашение к Мудрости", L"Einladung zur Weisheit", L"Convite à Sabedoria", L"Uitnodiging tot Wijsheid", L"Zaproszenie do Mądrości", L"Bilgeliğe Davet");
 				break;
 			case 7511:
-				a = LL2(L"危地", L"Perilous Ground");
+				a = LL14(L"危地", L"Perilous Ground", L"Terrain Périlleux", L"Terreno Pericoloso", L"Terreno Peligroso", L"위험 지대", L"危险之地", L"أرض خطرة", L"Опасная Территория", L"Gefährliches Terrain", L"Terreno Perigoso", L"Gevaarlijk Terrein", L"Niebezpieczny Teren", L"Tehlikeli Bölge");
 				break;
 			case 7512:
-				a = LL2(L"揺るぎない強さ", L"Unshakable Strength");
+				a = LL14(L"揺るぎない強さ", L"Unshakable Strength", L"Force Inébranlable", L"Forza Incrollabile", L"Fuerza Inquebrantable", L"흔들리지 않는 강함", L"不可动摇的力量", L"قوة لا تتزعزع", L"Непоколебимая Сила", L"Unerschütterliche Stärke", L"Força Inabalável", L"Onwankelbare Kracht", L"Niezachwiana Siła", L"Sarsılmaz Güç");
 				break;
 			case 7513:
-				a = LL2(L"夜景に霞む星空", L"Starry Sky in the Night");
+				a = LL14(L"夜景に霞む星空", L"Starry Sky in the Night", L"Ciel Étoilé dans la Nuit", L"Cielo Stellato nella Notte", L"Cielo Estrellado en la Noche", L"야경에 아른거리는 별하늘", L"夜色中朦胧的星空", L"سماء مرصعة بالنجوم في الليل", L"Звёздное Небо Ночью", L"Sternenhimmel in der Nacht", L"Céu Estrelado na Noite", L"Sterrenhemel in de Nacht", L"Rozgwieżdżone Niebo w Nocy", L"Gece Yıldızlı Gökyüzü");
 				break;
 			case 7514:
-				a = LL2(L"いつかきっと", L"Someday");
+				a = LL14(L"いつかきっと", L"Someday", L"Un Jour, Sûrement", L"Un Giorno, Di Certo", L"Algún Día, Seguro", L"언젠가 반드시", L"总有一天", L"يوماً ما بالتأكيد", L"Когда-нибудь Обязательно", L"Irgendwann Bestimmt", L"Um Dia, Com Certeza", L"Ooit Zeker", L"Kiedyś Na Pewno", L"Bir Gün Mutlaka");
 				break;
 			case 7515:
-				a = LL2(L"柔らかな心", L"Tender Heart");
+				a = LL14(L"柔らかな心", L"Tender Heart", L"Cœur Tendre", L"Cuore Tenero", L"Corazón Tierno", L"부드러운 마음", L"温柔的心", L"قلب رقيق", L"Нежное Сердце", L"Zartes Herz", L"Coração Terno", L"Teder Hart", L"Czułe Serce", L"Nazik Kalp");
 				break;
 			case 7516:
-				a = LL2(L"点と線", L"Dots and Lines");
+				a = LL14(L"点と線", L"Dots and Lines", L"Points et Lignes", L"Punti e Linee", L"Puntos y Líneas", L"점과 선", L"点与线", L"نقاط وخطوط", L"Точки и Линии", L"Punkte und Linien", L"Pontos e Linhas", L"Punten en Lijnen", L"Punkty i Linie", L"Noktalar ve Çizgiler");
 				break;
 			case 7517:
-				a = LL2(L"一触即発", L"Imminent Crisis");
+				a = LL14(L"一触即発", L"Imminent Crisis", L"Crise Imminente", L"Crisi Imminente", L"Crisis Inminente", L"일촉즉발", L"一触即发", L"أزمة وشيكة", L"Надвигающийся Кризис", L"Unmittelbar Bevorstehende Krise", L"Crise Iminente", L"Dreigende Crisis", L"Bezpośredni Kryzys", L"Yaklaşan Kriz");
 				break;
 			case 7518:
 				a = L"Foolish Gig";
 				break;
 			case 7519:
-				a = LL2(L"リベールからの風", L"Wind from Liberl");
+				a = LL14(L"リベールからの風", L"Wind from Liberl", L"Vent de Liberl", L"Vento da Liberl", L"Viento de Liberl", L"리베르에서 온 바람", L"来自利贝尔的风", L"ريح من ليبيرل", L"Ветер из Либерла", L"Wind aus Liberl", L"Vento de Liberl", L"Wind uit Liberl", L"Wiatr z Liberl", L"Liberl'den Rüzgar");
 				break;
 			case 7520:
-				a = LL2(L"とどいた想い", L"Feelings Delivered");
+				a = LL14(L"とどいた想い", L"Feelings Delivered", L"Sentiments Transmis", L"Sentimenti Consegnati", L"Sentimientos Entregados", L"전해진 마음", L"传达到的心意", L"مشاعر وصلت", L"Переданные Чувства", L"Übermittelte Gefühle", L"Sentimentos Entregues", L"Bezorgde Gevoelens", L"Dostarczone Uczucia", L"İletilen Duygular");
 				break;
 			case 7521:
 				a = L"Underground Kids";
@@ -6999,13 +7866,13 @@ void COggDlg::play()
 				a = L"Terminal Room";
 				break;
 			case 7523:
-				a = LL2(L"響きあう心", L"Resonating Hearts");
+				a = LL14(L"響きあう心", L"Resonating Hearts", L"Cœurs en Résonance", L"Cuori in Risonanza", L"Corazones en Resonancia", L"서로 울리는 마음", L"共鸣的心", L"قلوب تتردد صداها", L"Резонирующие Сердца", L"Resonierender Herzen", L"Corações em Ressonância", L"Resonerende Harten", L"Rezonujące Serca", L"Rezonans Eden Kalpler");
 				break;
 			case 7524:
 				a = L"Limit Break";
 				break;
 			case 7525:
-				a = LL2(L"パラダイスミ☆", L"Paradigm☆");
+				a = LL14(L"パラダイスミ☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆");
 				break;
 			case 7526:
 				a = L"Gnosis";
@@ -7014,73 +7881,73 @@ void COggDlg::play()
 				a = L"Get Over The Barrier! -Roaring Version-";
 				break;
 			case 7528:
-				a = LL2(L"それぞれの明日", L"Our Tomorrows");
+				a = LL14(L"それぞれの明日", L"Our Tomorrows", L"Nos Lendemains", L"I Nostri Domani", L"Nuestros Mañanas", L"각자의 내일", L"各自的明天", L"غدٌ لكل منا", L"Наши Завтрашние Дни", L"Unsere Morgigen Tage", L"Nossos Amanhãs", L"Onze Morgens", L"Nasze Jutrzejsze Dni", L"Hepimizin Yarınları");
 				break;
 			case 7529:
-				a = LL2(L"効果音楽1", L"Sound Effect Music 1");
+				a = LL14(L"効果音楽1", L"Sound Effect Music 1", L"Musique d'Effet Sonore 1", L"Musica Effetto Sonoro 1", L"Música de Efecto de Sonido 1", L"효과 음악 1", L"音效音乐1", L"موسيقى تأثير صوتي 1", L"Звуковая Музыка 1", L"Soundeffekt-Musik 1", L"Música de Efeito Sonoro 1", L"Geluidseffect Muziek 1", L"Muzyka Efektów Dźwiękowych 1", L"Ses Efekti Müziği 1");
 				break;
 			case 7530:
-				a = LL2(L"効果音楽2", L"Sound Effect Music 2");
+				a = LL14(L"効果音楽2", L"Sound Effect Music 2", L"Musique d'Effet Sonore 2", L"Musica Effetto Sonoro 2", L"Música de Efecto de Sonido 2", L"효과 음악 2", L"音效音乐2", L"موسيقى تأثير صوتي 2", L"Звуковая Музыка 2", L"Soundeffekt-Musik 2", L"Música de Efeito Sonoro 2", L"Geluidseffect Muziek 2", L"Muzyka Efektów Dźwiękowych 2", L"Ses Efekti Müziği 2");
 				break;
 			case 7531:
-				a = LL2(L"効果音楽3", L"Sound Effect Music 3");
+				a = LL14(L"効果音楽3", L"Sound Effect Music 3", L"Musique d'Effet Sonore 3", L"Musica Effetto Sonoro 3", L"Música de Efecto de Sonido 3", L"효과 음악 3", L"音效音乐3", L"موسيقى تأثير صوتي 3", L"Звуковая Музыка 3", L"Soundeffekt-Musik 3", L"Música de Efeito Sonoro 3", L"Geluidseffect Muziek 3", L"Muzyka Efektów Dźwiękowych 3", L"Ses Efekti Müziği 3");
 				break;
 			case 7532:
-				a = LL2(L"効果音楽4", L"Sound Effect Music 4");
+				a = LL14(L"効果音楽4", L"Sound Effect Music 4", L"Musique d'Effet Sonore 4", L"Musica Effetto Sonoro 4", L"Música de Efecto de Sonido 4", L"효과 음악 4", L"音效音乐4", L"موسيقى تأثير صوتي 4", L"Звуковая Музыка 4", L"Soundeffekt-Musik 4", L"Música de Efeito Sonoro 4", L"Geluidseffect Muziek 4", L"Muzyka Efektów Dźwiękowych 4", L"Ses Efekti Müziği 4");
 				break;
 			case 7533:
-				a = LL2(L"踏み出す勇気", L"Courage to Step Forward");
+				a = LL14(L"踏み出す勇気", L"Courage to Step Forward", L"Courage d'Avancer", L"Coraggio di Andare Avanti", L"Valentía para Avanzar", L"내딛는 용기", L"踏出的勇气", L"الشجاعة للمضي قدماً", L"Смелость Шагнуть Вперёд", L"Mut Voranzugehen", L"Coragem de Dar um Passo", L"Moed om Vooruit te Stappen", L"Odwaga by Ruszyć Naprzód", L"İlerleme Cesareti");
 				break;
 			case 7534:
-				a = LL2(L"その背中を見つめて", L"Watching Your Back");
+				a = LL14(L"その背中を見つめて", L"Watching Your Back", L"Regarder ton Dos", L"Guardare le Tue Spalle", L"Mirando tu Espalda", L"그 등을 바라보며", L"凝视着那背影", L"أنظر إلى ظهرك", L"Глядя в Твою Спину", L"Deinen Rücken Beobachten", L"Olhando suas Costas", L"Naar Je Rug Kijken", L"Patrząc na Twoje Plecy", L"Sırtına Bakarak");
 				break;
 			case 7540:
-				a = LL2(L"不明", L"Unknown");
+				a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 				break;
 			case 7541:
-				a = LL2(L"不明", L"Unknown");
+				a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 				break;
 			case 7542:
-				a = LL2(L"不明", L"Unknown");
+				a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 				break;
 			case 7543:
-				a = LL2(L"不明", L"Unknown");
+				a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 				break;
 			case 7544:
-				a = LL2(L"不明", L"Unknown");
+				a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 				break;
 			case 7550:
-				a = LL2(L"オルキスタワー", L"Orchis Tower");
+				a = LL14(L"オルキスタワー", L"Orchis Tower", L"Orchis Tower", L"Orchis Tower", L"Orchis Tower", L"Orchis Tower", L"Orchis Tower", L"Orchis Tower", L"Orchis Tower", L"Orchis Tower", L"Orchis Tower", L"Orchis Tower", L"Orchis Tower", L"Orchis Tower");
 				break;
 			case 7551:
 				a = L"Catastrophe";
 				break;
 			case 7552:
-				a = LL2(L"碧き雫", L"Azure Arbitrator");
+				a = LL14(L"碧き雫", L"Azure Arbitrator", L"Azure Arbitrator", L"Azure Arbitrator", L"Azure Arbitrator", L"Azure Arbitrator", L"Azure Arbitrator", L"Azure Arbitrator", L"Azure Arbitrator", L"Azure Arbitrator", L"Azure Arbitrator", L"Azure Arbitrator", L"Azure Arbitrator", L"Azure Arbitrator");
 				break;
 			case 7553:
-				a = LL2(L"神機降臨", L"Divine Mechanoid Descent");
+				a = LL14(L"神機降臨", L"Divine Mechanoid Descent", L"Descente du Mécanisme Divin", L"Discesa del Meccanismo Divino", L"Descenso del Mecanismo Divino", L"신기 강림", L"神机降临", L"نزول الآلة الإلهية", L"Нисхождение Божественного Механизма", L"Abstieg des Göttlichen Mechanoids", L"Descida do Mecanismo Divino", L"Afdaling van het Goddelijke Mechanisme", L"Zstąpienie Boskiego Mechanizmu", L"İlahi Mekanizmanın İnişi");
 				break;
 			case 7554:
-				a = LL2(L"ふるわれる奇蹟", L"Shaking Miracle");
+				a = LL14(L"ふるわれる奇蹟", L"Shaking Miracle", L"Miracle Tremblant", L"Miracolo Tremante", L"Milagro Tembloroso", L"울려 퍼지는 기적", L"震撼的奇迹", L"معجزة مرتجفة", L"Дрожащее Чудо", L"Erschütterndes Wunder", L"Milagre Tremendo", L"Trillend Wonder", L"Drżący Cud", L"Sarsılan Mucize");
 				break;
 			case 7555:
-				a = LL2(L"予定外の奇蹟", L"Unexpected Miracle");
+				a = LL14(L"予定外の奇蹟", L"Unexpected Miracle", L"Miracle Inattendu", L"Miracolo Inaspettato", L"Milagro Inesperado", L"예정 외의 기적", L"意料之外的奇迹", L"معجزة غير متوقعة", L"Неожиданное Чудо", L"Unerwartetes Wunder", L"Milagre Inesperado", L"Onverwacht Wonder", L"Nieoczekiwany Cud", L"Beklenmedik Mucize");
 				break;
 			case 7556:
-				a = LL2(L"鋼鉄の咆哮 -脅威-", L"Roar of Steel -Threat-");
+				a = LL14(L"鋼鉄の咆哮 -脅威-", L"Roar of Steel -Threat-", L"Rugissement d'Acier -Menace-", L"Ruggito d'Acciaio -Minaccia-", L"Rugido de Acero -Amenaza-", L"강철의 포효 -위협-", L"钢铁的咆哮 -威胁-", L"زئير الفولاذ -تهديد-", L"Рёв Стали -Угроза-", L"Stahlgebrüll -Bedrohung-", L"Rugido de Aço -Ameaça-", L"Staalgebulder -Bedreiging-", L"Ryk Stali -Zagrożenie-", L"Çeliğin Kükremesi -Tehdit-");
 				break;
 			case 7560:
-				a = LL2(L"雨の日の真実", L"Truth on a Rainy Day");
+				a = LL14(L"雨の日の真実", L"Truth on a Rainy Day", L"Vérité un Jour de Pluie", L"Verità in un Giorno di Pioggia", L"Verdad en un Día Lluvioso", L"비 오는 날의 진실", L"雨天的真相", L"الحقيقة في يوم ممطر", L"Правда в Дождливый День", L"Wahrheit an einem Regentag", L"Verdade em um Dia Chuvoso", L"Waarheid op een Regenachtige Dag", L"Prawda w Deszczowy Dzień", L"Yağmurlu Bir Günde Gerçek");
 				break;
 			case 7561:
-				a = LL2(L"不穏", L"Troubled");
+				a = LL14(L"不穏", L"Troubled", L"Trouble", L"Turbato", L"Perturbado", L"불온", L"不安宁", L"قلق", L"Тревожный", L"Unruhig", L"Perturbado", L"Onrustig", L"Niepokój", L"Huzursuz");
 				break;
 			case 7562:
-				a = LL2(L"効果音", L"Sound Effect");
+				a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 				break;
 			case 7563:
-				a = LL2(L"犠牲の先の希望", L"Hope Beyond Sacrifice");
+				a = LL14(L"犠牲の先の希望", L"Hope Beyond Sacrifice", L"Espoir au-Delà du Sacrifice", L"Speranza Oltre il Sacrificio", L"Esperanza Más Allá del Sacrificio", L"희생 너머의 희망", L"牺牲之后的希望", L"أمل يتجاوز التضحية", L"Надежда за Жертвой", L"Hoffnung Jenseits des Opfers", L"Esperança Além do Sacrifício", L"Hoop Voorbij Opoffering", L"Nadzieja Poza Poświęceniem", L"Fedakarlığın Ötesinde Umut");
 				break;
 			case 7564:
 				a = L"Strange Feel";
@@ -7089,82 +7956,82 @@ void COggDlg::play()
 				a = L"Exhilarating Ride";
 				break;
 			case 7566:
-				a = LL2(L"それぞれの正義", L"Each One's Justice");
+				a = LL14(L"それぞれの正義", L"Each One's Justice", L"La Justice de Chacun", L"La Giustizia di Ognuno", L"La Justicia de Cada Uno", L"각자의 정의", L"各自的正义", L"عدالة كل منا", L"Справедливость Каждого", L"Gerechtigkeit Jedes Einzelnen", L"A Justiça de Cada Um", L"Ieders Gerechtigheid", L"Sprawiedliwość Każdego", L"Herkesin Adaleti");
 				break;
 			case 7567:
-				a = LL2(L"乗り越えるべき壁", L"Wall to Overcome");
+				a = LL14(L"乗り越えるべき壁", L"Wall to Overcome", L"Mur à Surmonter", L"Muro da Superare", L"Muro a Superar", L"넘어야 할 벽", L"需要翻越的墙", L"جدار يجب تجاوزه", L"Стена, Которую Нужно Преодолеть", L"Zu Überwindende Wand", L"Muro a Superar", L"Muur om te Overwinnen", L"Mur do Pokonania", L"Aşılması Gereken Duvar");
 				break;
 			case 7568:
-				a = LL2(L"月下の想い", L"Feelings Under the Moon");
+				a = LL14(L"月下の想い", L"Feelings Under the Moon", L"Sentiments sous la Lune", L"Sentimenti sotto la Luna", L"Sentimientos bajo la Luna", L"달빛 아래의 마음", L"月下的心意", L"مشاعر تحت القمر", L"Чувства под Луной", L"Gefühle unter dem Mond", L"Sentimentos sob a Lua", L"Gevoelens onder de Maan", L"Uczucia pod Księżycem", L"Ay Işığında Duygular");
 				break;
 			case 7569:
 				a = L"Miss You";
 				break;
 			case 7570:
-				a = LL2(L"天の車", L"Chariot of Heaven");
+				a = LL14(L"天の車", L"Chariot of Heaven", L"Char Céleste", L"Carro del Cielo", L"Carro Celestial", L"하늘의 전차", L"天之战车", L"عربة السماء", L"Небесная Колесница", L"Himmelswagen", L"Carruagem do Céu", L"Hemelse Strijdwagen", L"Niebieski Rydwan", L"Gök Arabası");
 				break;
 			case 7571:
-				a = LL2(L"突きつけられた現実", L"Reality Thrust Upon Us");
+				a = LL14(L"突きつけられた現実", L"Reality Thrust Upon Us", L"Réalité Imposée", L"Realtà Imposta", L"Realidad Impuesta", L"들이밀어진 현실", L"被强加的现实", L"الواقع المفروض علينا", L"Реальность, Навязанная Нам", L"Uns Aufgezwungene Realität", L"Realidade Imposta", L"Opgelegde Realiteit", L"Narzucona Rzeczywistość", L"Üstümüze Dayatılan Gerçek");
 				break;
 			case 7572:
-				a = LL2(L"効果音", L"Sound Effect");
+				a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 				break;
 			case 7573:
-				a = LL2(L"全てを識るもの", L"The Omniscient");
+				a = LL14(L"全てを識るもの", L"The Omniscient", L"L'Omniscient", L"L'Onnisciente", L"El Omnisciente", L"모든 것을 아는 자", L"无所不知者", L"العليم بكل شيء", L"Всезнающий", L"Der Allwissende", L"O Onisciente", L"De Alwetende", L"Wszechwiedzący", L"Her Şeyi Bilen");
 				break;
 			case 7574:
-				a = LL2(L"想い、辿り着く場所", L"Where Feelings Lead");
+				a = LL14(L"想い、辿り着く場所", L"Where Feelings Lead", L"Là où Mènent les Sentiments", L"Dove Portano i Sentimenti", L"Adonde Llevan los Sentimientos", L"마음이 닿는 곳", L"心意所至之处", L"حيث تقود المشاعر", L"Куда Ведут Чувства", L"Wohin Gefühle Führen", L"Para Onde os Sentimentos Levam", L"Waar Gevoelens Naartoe Leiden", L"Dokąd Prowadzą Uczucia", L"Duyguların Götürdüğü Yer");
 				break;
 			case 7575:
-				a = LL2(L"揺れ動く心", L"Wavering Heart");
+				a = LL14(L"揺れ動く心", L"Wavering Heart", L"Cœur Vacillant", L"Cuore Vacillante", L"Corazón Vacilante", L"흔들리는 마음", L"摇曳的心", L"قلب متذبذب", L"Колеблющееся Сердце", L"Schwankendes Herz", L"Coração Vacilante", L"Weifelend Hart", L"Chwiejące się Serce", L"Kararsız Kalp");
 				break;
 			case 7576:
-				a = LL2(L"星降る夜に", L"On a Starry Night");
+				a = LL14(L"星降る夜に", L"On a Starry Night", L"Par une Nuit Étoilée", L"In una Notte Stellata", L"En una Noche Estrellada", L"별이 내리는 밤에", L"星降之夜", L"في ليلة مرصعة بالنجوم", L"В Звёздную Ночь", L"In einer Sternennacht", L"Em uma Noite Estrelada", L"Op een Sterrenachtige Nacht", L"W Gwiaździstą Noc", L"Yıldızlı Bir Gecede");
 				break;
 			case 7577:
-				a = LL2(L"効果音", L"Sound Effect");
+				a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 				break;
 			case 7578:
-				a = LL2(L"効果音", L"Sound Effect");
+				a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 				break;
 			case 7579:
-				a = LL2(L"効果音", L"Sound Effect");
+				a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音効", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 				break;
 			case 7580:
-				a = LL2(L"効果音", L"Sound Effect");
+				a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 				break;
 			case 7581:
-				a = LL2(L"本当の絆", L"True Bonds");
+				a = LL14(L"本当の絆", L"True Bonds", L"Vrais Liens", L"Veri Legami", L"Lazos Verdaderos", L"진정한 유대", L"真正的羁绊", L"روابط حقيقية", L"Настоящие Узы", L"Wahre Bande", L"Laços Verdadeiros", L"Ware Banden", L"Prawdziwe Więzi", L"Gerçek Bağlar");
 				break;
 			case 7582:
-				a = LL2(L"猛き獣たち", L"Fierce Beasts");
+				a = LL14(L"猛き獣たち", L"Fierce Beasts", L"Bêtes Féroces", L"Bestie Feroci", L"Bestias Feroces", L"사나운 짐승들", L"凶猛的野兽们", L"وحوش شرسة", L"Свирепые Звери", L"Wilde Bestien", L"Bestas Ferozes", L"Woeste Beesten", L"Dzikie Bestie", L"Vahşi Canavarlar");
 				break;
 			case 7583:
-				a = LL2(L"西ゼムリア通商会議", L"West Zemuria Trade Conference");
+				a = LL14(L"西ゼムリア通商会議", L"West Zemuria Trade Conference", L"Conférence Commerciale de Zemuria Occidentale", L"Conferenza Commerciale della Zemuria Occidentale", L"Conferencia Comercial de Zemuria Occidental", L"서부 제무리아 통상 회의", L"西泽姆利亚通商会议", L"مؤتمر تجارة غرب زيموريا", L"Западно-Земурийская Торговая Конференция", L"Westzemuranische Handelskonferenz", L"Conferência Comercial da Zemúria Ocidental", L"West-Zemuria Handelsconferentie", L"Zachodnia Konferencja Handlowa Zemurii", L"Batı Zemuria Ticaret Konferansı");
 				break;
 			case 7584:
-				a = LL2(L"効果音", L"Sound Effect");
+				a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 				break;
 			case 7585:
-				a = LL2(L"千年の妄執", L"Obsession of Millennia");
+				a = LL14(L"千年の妄執", L"Obsession of Millennia", L"Obsession des Millénaires", L"Ossessione dei Millenni", L"Obsesión de los Milenios", L"천년의 망집", L"千年的妄执", L"هوس الألفيات", L"Одержимость Тысячелетий", L"Obsession der Jahrtausende", L"Obsessão dos Milênios", L"Obsessie van Millennia", L"Obsesja Tysiącleci", L"Bin Yılın Takıntısı");
 				break;
 			case 7586:
-				a = LL2(L"鋼鉄の咆哮 -死線-", L"Roar of Steel -Death Line-");
+				a = LL14(L"鋼鉄の咆哮 -死線-", L"Roar of Steel -Death Line-", L"Rugissement d'Acier -Ligne de Mort-", L"Ruggito d'Acciaio -Linea della Morte-", L"Rugido de Acero -Línea de Muerte-", L"강철의 포효 -사선-", L"钢铁的咆哮 -死线-", L"زئير الفولاذ -خط الموت-", L"Рёв Стали -Линия Смерти-", L"Stahlgebrüll -Todeslinie-", L"Rugido de Aço -Linha da Morte-", L"Staalgebulder -Doodslijn-", L"Ryk Stali -Linia Śmierci-", L"Çeliğin Kükremesi -Ölüm Hattı-");
 				break;
 			case 7587:
-				a = LL2(L"ポムっと! -お花見団子の逆襲-", L"Pom! -Cherry Blossom Dango Counterattack-");
+				a = LL14(L"ポムっと! -お花見団子の逆襲-", L"Pom! -Cherry Blossom Dango Counterattack-", L"Pom! -Contre-attaque des Dango de Fleurs de Cerisier-", L"Pom! -Contrattacco dei Dango di Fiori di Ciliegio-", L"Pom! -Contraataque de los Dango de Flores de Cerezo-", L"폼! -꽃구경 당고의 역습-", L"砰! -赏花团子的反攻-", L"!Pom -هجوم معاكس دانغو أزهار الكرز-", L"Пом! -Контратака Данго из Цветков Сакуры-", L"Pom! -Gegenangriff der Kirschblüten-Dango-", L"Pom! -Contra-ataque dos Dango de Flor de Cerejeira-", L"Pom! -Tegenaanval van Kersenbloesem Dango-", L"Pom! -Kontratak Dango z Kwiatami Wiśni-", L"Pom! -Kiraz Çiçeği Dango'nun Karşı Saldırısı-");
 				break;
 			case 7588:
-				a = LL2(L"Fateful Confrontation -ポムっと! Ver.-", L"Fateful Confrontation -Pom! Ver.-");
+				a = LL14(L"Fateful Confrontation -ポムっと! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-", L"Fateful Confrontation -Pom! Ver.-");
 				break;
 			case 7589:
-				a = LL2(L"ポムりますか", L"Shall We Pom?");
+				a = LL14(L"ポムりますか", L"Shall We Pom?", L"On Pomme?", L"Facciamo Pom?", L"¿Hacemos Pom?", L"폼 하시겠어요?", L"来一局砰？", L"هل نلعب بوم؟", L"Сыграем в Пом?", L"Sollen Wir Pom Spielen?", L"Vamos Pom?", L"Zullen We Pomme?", L"Czy Zagramy w Pom?", L"Pom Oynayalım mı?");
 				break;
 			case 7590:
-				a = LL2(L"エリィ絶叫コースター", L"Elie Scream Coaster");
+				a = LL14(L"エリィ絶叫コースター", L"Elie Scream Coaster", L"Montagnes Russes des Cris d'Elie", L"Montagne Russe delle Urla di Elie", L"Montaña Rusa de los Gritos de Elie", L"에리 절규 코스터", L"艾莉尖叫过山车", L"ملاهي صراخ إيلي", L"Американские Горки Воплей Эли", L"Elie-Schrei-Achterbahn", L"Montanha-russa dos Gritos de Elie", L"Elie Schreeuw Achtbaan", L"Kolejka Krzyków Elie", L"Elie Çığlık Roller Coaster");
 				break;
 			case 7591:
-				a = LL2(L"小さな英雄 -オルゴール-", L"Little Hero -Music Box-");
+				a = LL14(L"小さな英雄 -オルゴール-", L"Little Hero -Music Box-", L"Petit Héros -Boîte à Musique-", L"Piccolo Eroe -Carillon-", L"Pequeño Héroe -Caja de Música-", L"작은 영웅 -오르골-", L"小小英雄 -音乐盒-", L"البطل الصغير -صندوق الموسيقى-", L"Маленький Герой -Музыкальная Шкатулка-", L"Kleiner Held -Spieluhr-", L"Pequeno Herói -Caixa de Música-", L"Kleine Held -Muziekdoos-", L"Mały Bohater -Pozytywka-", L"Küçük Kahraman -Müzik Kutusu-");
 				break;
 			case 7592:
 				a = L"TOWER OF THE SHADOW OF DEATH -Jukebox-";
@@ -7348,13 +8215,69 @@ void COggDlg::play()
 		if (m_dsb1 == NULL || m_p == NULL) {
 			if (flg0 == 0) {
 				CString s; s.Format(L"%d", savedata.samples);
-				MessageBox(s + LL2(L"Hzのサンプリングレートにサウンドカードが対応していません\n低いサンプリングレートを試みます。\n少々時間が掛かる場合があります。", L"Hz sampling rate not supported by sound card.\nTrying lower rate.\nThis may take a while."), LL2(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player"));
-				flg0 = 1;
+				MessageBox(s + LL14(
+					L"Hzのサンプリングレートにサウンドカードが対応していません\n低いサンプリングレートを試みます。\n少々時間が掛かる場合があります。",
+					L"Hz sampling rate not supported by sound card.\nTrying lower rate.\nThis may take a while.",
+					L"Taux d'échantillonnage Hz non pris en charge par la carte son.\nEssai d'un taux inférieur.\nCela peut prendre un moment.",
+					L"Frequenza di campionamento Hz non supportata dalla scheda audio.\nTentativo con frequenza inferiore.\nPotrebbe richiedere del tempo.",
+					L"Tasa de muestreo Hz no compatible con la tarjeta de sonido.\nIntentando una tasa inferior.\nEsto puede tardar un momento.",
+					L"Hz 샘플링 레이트를 사운드 카드가 지원하지 않습니다\n낮은 샘플링 레이트를 시도합니다.\n잠시 시간이 걸릴 수 있습니다.",
+					L"声卡不支持该Hz采样率\n正在尝试较低的采样率。\n可能需要一些时间。",
+					L"بطاقة الصوت لا تدعم معدل أخذ العينات Hz\nجارٍ تجربة معدل أقل.\nقد يستغرق ذلك بعض الوقت.",
+					L"Звуковая карта не поддерживает частоту дискретизации Hz\nПробуем более низкую частоту.\nЭто может занять некоторое время.",
+					L"Hz-Abtastrate wird von der Soundkarte nicht unterstützt.\nVersuche niedrigere Rate.\nDies kann einen Moment dauern.",
+					L"Taxa de amostragem Hz não suportada pela placa de som.\nTentando uma taxa inferior.\nIsso pode demorar um momento.",
+					L"Hz-samplerate wordt niet ondersteund door de geluidskaart.\nLagere samplerate wordt geprobeerd.\nDit kan even duren.",
+					L"Karta dźwiękowa nie obsługuje częstotliwości próbkowania Hz.\nPróba niższej częstotliwości.\nMoże to chwilę potrwać.",
+					L"Ses kartı Hz örnekleme hızını desteklemiyor.\nDaha düşük hız deneniyor.\nBu biraz zaman alabilir."),
+					LL14(
+						L"ogg/wav簡易プレイヤ",
+						L"ogg/wav Simple Player",
+						L"Lecteur Simple ogg/wav",
+						L"Lettore Semplice ogg/wav",
+						L"Reproductor Simple ogg/wav",
+						L"ogg/wav 간이 플레이어",
+						L"ogg/wav简易播放器",
+						L"مشغل ogg/wav البسيط",
+						L"Простой Плеер ogg/wav",
+						L"ogg/wav Einfacher Player",
+						L"Player Simples ogg/wav",
+						L"Eenvoudige ogg/wav Speler",
+						L"Prosty Odtwarzacz ogg/wav",
+						L"ogg/wav Basit Oynatıcı")); flg0 = 1;
 			}
 			wavbit -= 1000;
 			if (wavbit <= 0) {
-				MessageBox(LL2(L"0Hzまで試みましたが、対応するサンプリングレートが存在しませんでした。\nサウンドボード(カード)が存在していない可能性があります。", L"Tried down to 0Hz but no supported sampling rate found.\nSound card may not be present."), LL2(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player"));
-				tagfile = fnn;
+				MessageBox(LL14(
+					L"0Hzまで試みましたが、対応するサンプリングレートが存在しませんでした。\nサウンドボード(カード)が存在していない可能性があります。",
+					L"Tried down to 0Hz but no supported sampling rate found.\nSound card may not be present.",
+					L"Essayé jusqu'à 0Hz mais aucun taux d'échantillonnage compatible trouvé.\nLa carte son est peut-être absente.",
+					L"Tentato fino a 0Hz ma nessuna frequenza di campionamento supportata trovata.\nLa scheda audio potrebbe essere assente.",
+					L"Intentado hasta 0Hz pero no se encontró tasa de muestreo compatible.\nEs posible que no haya tarjeta de sonido.",
+					L"0Hz까지 시도했지만 지원되는 샘플링 레이트가 존재하지 않았습니다.\n사운드 보드(카드)가 존재하지 않을 가능성이 있습니다.",
+					L"已尝试至0Hz，但未找到支持的采样率。\n可能不存在声卡。",
+					L"تمت المحاولة حتى 0Hz لكن لم يُعثر على معدل أخذ عينات مدعوم.\nقد تكون بطاقة الصوت غير موجودة.",
+					L"Попытка до 0Hz, но поддерживаемая частота дискретизации не найдена.\nВозможно, звуковая карта отсутствует.",
+					L"Bis 0Hz versucht, aber keine unterstützte Abtastrate gefunden.\nDie Soundkarte ist möglicherweise nicht vorhanden.",
+					L"Tentado até 0Hz mas nenhuma taxa de amostragem suportada foi encontrada.\nA placa de som pode estar ausente.",
+					L"Tot 0Hz geprobeerd maar geen ondersteunde samplerate gevonden.\nGeluidskaart is mogelijk niet aanwezig.",
+					L"Próbowano do 0Hz, ale nie znaleziono obsługiwanej częstotliwości próbkowania.\nKarta dźwiękowa może być nieobecna.",
+					L"0Hz'e kadar denendi ancak desteklenen örnekleme hızı bulunamadı.\nSes kartı mevcut olmayabilir."),
+					LL14(
+						L"ogg/wav簡易プレイヤ",
+						L"ogg/wav Simple Player",
+						L"Lecteur Simple ogg/wav",
+						L"Lettore Semplice ogg/wav",
+						L"Reproductor Simple ogg/wav",
+						L"ogg/wav 간이 플레이어",
+						L"ogg/wav简易播放器",
+						L"مشغل ogg/wav البسيط",
+						L"Простой Плеер ogg/wav",
+						L"ogg/wav Einfacher Player",
+						L"Player Simples ogg/wav",
+						L"Eenvoudige ogg/wav Speler",
+						L"Prosty Odtwarzacz ogg/wav",
+						L"ogg/wav Basit Oynatıcı")); tagfile = fnn;
 				m_saisai.EnableWindow(TRUE);
 				endflg = 0;
 				return;
@@ -7374,30 +8297,156 @@ void COggDlg::play()
 			else break;
 		}
 		if (m_dsb == NULL) {
-			AfxMessageBox(LL2(L"DirectSoundが開けませんでした。", L"Could not open DirectSound."));
+			AfxMessageBox(LL14(
+				L"DirectSoundが開けませんでした。",
+				L"Could not open DirectSound.",
+				L"Impossible d'ouvrir DirectSound.",
+				L"Impossibile aprire DirectSound.",
+				L"No se pudo abrir DirectSound.",
+				L"DirectSound를 열 수 없었습니다.",
+				L"无法打开DirectSound。",
+				L"تعذر فتح DirectSound.",
+				L"Не удалось открыть DirectSound.",
+				L"DirectSound konnte nicht geöffnet werden.",
+				L"Não foi possível abrir o DirectSound.",
+				L"Kan DirectSound niet openen.",
+				L"Nie można otworzyć DirectSound.",
+				L"DirectSound açılamadı."));
 			if (r == DSERR_ALLOCATED) {
-				AfxMessageBox(LL2(L"優先レベルなどのリソースが他の呼び出しによって既に使用中であるため、要求は失敗した。", L"Request failed because resources such as priority level are already in use by another call."));
+				AfxMessageBox(LL14(
+					L"優先レベルなどのリソースが他の呼び出しによって既に使用中であるため、要求は失敗した。",
+					L"Request failed because resources such as priority level are already in use by another call.",
+					L"La demande a échoué car des ressources telles que le niveau de priorité sont déjà utilisées par un autre appel.",
+					L"La richiesta è fallita perché risorse come il livello di priorità sono già in uso da un'altra chiamata.",
+					L"La solicitud falló porque recursos como el nivel de prioridad ya están en uso por otra llamada.",
+					L"우선 레벨 등의 리소스가 다른 호출에 의해 이미 사용 중이므로 요청이 실패했습니다.",
+					L"请求失败，因为优先级等资源已被其他调用占用。",
+					L"فشل الطلب لأن موارد مثل مستوى الأولوية مستخدمة بالفعل من قِبل استدعاء آخر.",
+					L"Запрос не выполнен, так как ресурсы, такие как уровень приоритета, уже используются другим вызовом.",
+					L"Anfrage fehlgeschlagen, da Ressourcen wie die Prioritätsstufe bereits von einem anderen Aufruf verwendet werden.",
+					L"A solicitação falhou porque recursos como o nível de prioridade já estão em uso por outra chamada.",
+					L"Verzoek mislukt omdat resources zoals prioriteitsniveau al in gebruik zijn door een andere aanroep.",
+					L"Żądanie nie powiodło się, ponieważ zasoby takie jak poziom priorytetu są już używane przez inne wywołanie.",
+					L"İstek, öncelik düzeyi gibi kaynaklar başka bir çağrı tarafından kullanıldığından başarısız oldu."));
 			}
 			else if (r == DSERR_CONTROLUNAVAIL) {
-				AfxMessageBox(LL2(L"呼び出し元が要求するバッファ コントロール (ボリューム、パンなど) は利用できない。", L"Buffer control (volume, pan, etc.) requested by caller is not available."));
+				AfxMessageBox(LL14(
+					L"呼び出し元が要求するバッファ コントロール (ボリューム、パンなど) は利用できない。",
+					L"Buffer control (volume, pan, etc.) requested by caller is not available.",
+					L"Le contrôle de tampon (volume, panoramique, etc.) demandé par l'appelant n'est pas disponible.",
+					L"Il controllo del buffer (volume, pan, ecc.) richiesto dal chiamante non è disponibile.",
+					L"El control de búfer (volumen, paneo, etc.) solicitado por el llamador no está disponible.",
+					L"호출자가 요청한 버퍼 컨트롤(볼륨, 팬 등)을 사용할 수 없습니다.",
+					L"调用方请求的缓冲区控件（音量、声像等）不可用。",
+					L"عنصر التحكم في المخزن المؤقت (الصوت، التوازن، إلخ) الذي طلبه المتصل غير متاح.",
+					L"Управление буфером (громкость, панорама и т.д.), запрошенное вызывающей стороной, недоступно.",
+					L"Die vom Aufrufer angeforderte Puffersteuerung (Lautstärke, Balance usw.) ist nicht verfügbar.",
+					L"O controle de buffer (volume, pan, etc.) solicitado pelo chamador não está disponível.",
+					L"Bufferbesturing (volume, pan, etc.) gevraagd door de aanroeper is niet beschikbaar.",
+					L"Kontrola bufora (głośność, panorama itp.) żądana przez wywołującego jest niedostępna.",
+					L"Arayan tarafından istenen arabellek kontrolü (ses, pan vb.) kullanılamıyor."));
 			}
 			else if (r == DSERR_BADFORMAT) {
-				AfxMessageBox(LL2(L"指定したウェーブ フォーマットはサポートされていない。", L"Specified wave format is not supported."));
+				AfxMessageBox(LL14(
+					L"指定したウェーブ フォーマットはサポートされていない。",
+					L"Specified wave format is not supported.",
+					L"Le format d'onde spécifié n'est pas pris en charge.",
+					L"Il formato wave specificato non è supportato.",
+					L"El formato de onda especificado no es compatible.",
+					L"지정한 웨이브 포맷은 지원되지 않습니다.",
+					L"指定的波形格式不受支持。",
+					L"تنسيق الموجة المحدد غير مدعوم.",
+					L"Указанный формат звуковой волны не поддерживается.",
+					L"Das angegebene Wellenformat wird nicht unterstützt.",
+					L"O formato de onda especificado não é suportado.",
+					L"Het opgegeven golfformaat wordt niet ondersteund.",
+					L"Określony format fali nie jest obsługiwany.",
+					L"Belirtilen dalga biçimi desteklenmiyor."));
 			}
 			else if (r == DSERR_INVALIDPARAM) {
-				AfxMessageBox(LL2(L"無効なパラメータが関数に渡された。", L"Invalid parameter passed to function."));
+				AfxMessageBox(LL14(
+					L"無効なパラメータが関数に渡された。",
+					L"Invalid parameter passed to function.",
+					L"Un paramètre invalide a été passé à la fonction.",
+					L"Un parametro non valido è stato passato alla funzione.",
+					L"Se pasó un parámetro no válido a la función.",
+					L"함수에 잘못된 파라미터가 전달되었습니다.",
+					L"向函数传递了无效参数。",
+					L"تم تمرير معامل غير صالح إلى الدالة.",
+					L"В функцию передан недопустимый параметр.",
+					L"Ein ungültiger Parameter wurde an die Funktion übergeben.",
+					L"Um parâmetro inválido foi passado para a função.",
+					L"Ongeldige parameter doorgegeven aan functie.",
+					L"Do funkcji przekazano nieprawidłowy parametr.",
+					L"Fonksiyona geçersiz parametre iletildi."));
 			}
 			else if (r == DSERR_NOAGGREGATION) {
-				AfxMessageBox(LL2(L"このオブジェクトは COM 集合化をサポートしない。", L"This object does not support COM aggregation."));
+				AfxMessageBox(LL14(
+					L"このオブジェクトは COM 集合化をサポートしない。",
+					L"This object does not support COM aggregation.",
+					L"Cet objet ne prend pas en charge l'agrégation COM.",
+					L"Questo oggetto non supporta l'aggregazione COM.",
+					L"Este objeto no admite la agregación COM.",
+					L"이 개체는 COM 집합화를 지원하지 않습니다.",
+					L"此对象不支持COM聚合。",
+					L"هذا الكائن لا يدعم تجميع COM.",
+					L"Этот объект не поддерживает агрегирование COM.",
+					L"Dieses Objekt unterstützt keine COM-Aggregation.",
+					L"Este objeto não suporta agregação COM.",
+					L"Dit object ondersteunt geen COM-aggregatie.",
+					L"Ten obiekt nie obsługuje agregacji COM.",
+					L"Bu nesne COM birleştirmesini desteklemiyor."));
 			}
 			else if (r == DSERR_OUTOFMEMORY) {
-				AfxMessageBox(LL2(L"DirectSound サブシステムは、呼び出し元の要求を完了するための十分なメモリを割り当てられなかった。", L"DirectSound subsystem could not allocate enough memory to complete the request."));
+				AfxMessageBox(LL14(
+					L"DirectSound サブシステムは、呼び出し元の要求を完了するための十分なメモリを割り当てられなかった。",
+					L"DirectSound subsystem could not allocate enough memory to complete the request.",
+					L"Le sous-système DirectSound n'a pas pu allouer suffisamment de mémoire pour terminer la demande.",
+					L"Il sottosistema DirectSound non è riuscito ad allocare memoria sufficiente per completare la richiesta.",
+					L"El subsistema DirectSound no pudo asignar suficiente memoria para completar la solicitud.",
+					L"DirectSound 서브시스템이 요청을 완료하기 위한 충분한 메모리를 할당할 수 없었습니다.",
+					L"DirectSound子系统无法分配足够的内存来完成请求。",
+					L"لم يتمكن النظام الفرعي DirectSound من تخصيص ذاكرة كافية لإتمام الطلب.",
+					L"Подсистема DirectSound не смогла выделить достаточно памяти для выполнения запроса.",
+					L"Das DirectSound-Subsystem konnte nicht genug Speicher zuweisen, um die Anfrage abzuschließen.",
+					L"O subsistema DirectSound não pôde alocar memória suficiente para concluir a solicitação.",
+					L"DirectSound-subsysteem kon niet genoeg geheugen toewijzen om het verzoek te voltooien.",
+					L"Podsystem DirectSound nie mógł przydzielić wystarczającej ilości pamięci do realizacji żądania.",
+					L"DirectSound alt sistemi isteği tamamlamak için yeterli bellek tahsis edemedi."));
 			}
 			else if (r == DSERR_UNINITIALIZED) {
-				AfxMessageBox(LL2(L"他のメソッドを呼び出す前に IDirectSound::Initialize メソッドを呼び出さなかったか、呼び出しが成功しなかった。", L"IDirectSound::Initialize was not called before other methods, or the call failed."));
+				AfxMessageBox(LL14(
+					L"他のメソッドを呼び出す前に IDirectSound::Initialize メソッドを呼び出さなかったか、呼び出しが成功しなかった。",
+					L"IDirectSound::Initialize was not called before other methods, or the call failed.",
+					L"IDirectSound::Initialize n'a pas été appelé avant les autres méthodes, ou l'appel a échoué.",
+					L"IDirectSound::Initialize non è stato chiamato prima degli altri metodi, oppure la chiamata è fallita.",
+					L"IDirectSound::Initialize no fue llamado antes que otros métodos, o la llamada falló.",
+					L"다른 메서드를 호출하기 전에 IDirectSound::Initialize 메서드를 호출하지 않았거나 호출이 실패했습니다.",
+					L"在调用其他方法之前未调用IDirectSound::Initialize，或调用失败。",
+					L"لم يتم استدعاء IDirectSound::Initialize قبل الطرق الأخرى، أو فشل الاستدعاء.",
+					L"IDirectSound::Initialize не был вызван перед другими методами, или вызов завершился неудачно.",
+					L"IDirectSound::Initialize wurde nicht vor anderen Methoden aufgerufen, oder der Aufruf ist fehlgeschlagen.",
+					L"IDirectSound::Initialize não foi chamado antes de outros métodos, ou a chamada falhou.",
+					L"IDirectSound::Initialize werd niet aangeroepen vóór andere methoden, of de aanroep is mislukt.",
+					L"IDirectSound::Initialize nie zostało wywołane przed innymi metodami lub wywołanie nie powiodło się.",
+					L"IDirectSound::Initialize diğer yöntemlerden önce çağrılmadı veya çağrı başarısız oldu."));
 			}
 			else if (r == DSERR_UNSUPPORTED) {
-				AfxMessageBox(LL2(L"呼び出した関数はこの時点ではサポートされていない。", L"The called function is not supported at this point."));
+				AfxMessageBox(LL14(
+					L"呼び出した関数はこの時点ではサポートされていない。",
+					L"The called function is not supported at this point.",
+					L"La fonction appelée n'est pas prise en charge à ce stade.",
+					L"La funzione chiamata non è supportata in questo momento.",
+					L"La función llamada no es compatible en este momento.",
+					L"호출한 함수는 이 시점에서는 지원되지 않습니다.",
+					L"调用的函数在此时不受支持。",
+					L"الدالة المستدعاة غير مدعومة في هذه المرحلة.",
+					L"Вызванная функция не поддерживается в данный момент.",
+					L"Die aufgerufene Funktion wird zu diesem Zeitpunkt nicht unterstützt.",
+					L"A função chamada não é suportada neste momento.",
+					L"De aangeroepen functie wordt op dit punt niet ondersteund.",
+					L"Wywołana funkcja nie jest obsługiwana w tym miejscu.",
+					L"Çağrılan fonksiyon bu noktada desteklenmiyor."));
 			}
 			else {}
 
@@ -7409,8 +8458,36 @@ void COggDlg::play()
 		if (m_dsb) {
 			if (flg0 == 1) {
 				CString s; s.Format(L"%d", wavbit);
-				MessageBox(s + LL2(L"Hzのサンプリングレートでヒットしましたため、該当サンプリングレートで演奏します。", L"Hz sampling rate matched; playing at that rate."), LL2(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player"));
-				savedata.samples = wavbit;
+				MessageBox(s + LL14(
+					L"Hzのサンプリングレートでヒットしましたため、該当サンプリングレートで演奏します。",
+					L"Hz sampling rate matched; playing at that rate.",
+					L"Taux d'échantillonnage Hz trouvé ; lecture à ce taux.",
+					L"Frequenza di campionamento Hz trovata; riproduzione a quella frequenza.",
+					L"Tasa de muestreo Hz encontrada; reproduciendo a esa tasa.",
+					L"Hz 샘플링 레이트에서 일치했으므로 해당 샘플링 레이트로 재생합니다.",
+					L"已匹配到Hz采样率，将以该采样率进行播放。",
+					L"تم العثور على معدل أخذ العينات Hz؛ سيتم التشغيل بهذا المعدل.",
+					L"Частота дискретизации Hz найдена; воспроизведение на этой частоте.",
+					L"Hz-Abtastrate gefunden; Wiedergabe mit dieser Rate.",
+					L"Taxa de amostragem Hz encontrada; reproduzindo nessa taxa.",
+					L"Hz-samplerate gevonden; afspelen op die rate.",
+					L"Znaleziono częstotliwość próbkowania Hz; odtwarzanie z tą częstotliwością.",
+					L"Hz örnekleme hızı eşleşti; o hızda oynatılıyor."),
+					LL14(
+						L"ogg/wav簡易プレイヤ",
+						L"ogg/wav Simple Player",
+						L"Lecteur Simple ogg/wav",
+						L"Lettore Semplice ogg/wav",
+						L"Reproductor Simple ogg/wav",
+						L"ogg/wav 간이 플레이어",
+						L"ogg/wav简易播放器",
+						L"مشغل ogg/wav البسيط",
+						L"Простой Плеер ogg/wav",
+						L"ogg/wav Einfacher Player",
+						L"Player Simples ogg/wav",
+						L"Eenvoudige ogg/wav Speler",
+						L"Prosty Odtwarzacz ogg/wav",
+						L"ogg/wav Basit Oynatıcı")); savedata.samples = wavbit;
 				SetTimer(9100, 100, NULL);
 				return;
 			}
@@ -7479,7 +8556,37 @@ void COggDlg::play()
 		if (mode != -1) {
 			if (f123.Open(filen + _T(".save"), CFile::modeRead, NULL) == TRUE) {
 				f123.Close();
-				if (IDYES == MessageBox(LL2(L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start"), LL2(L"再生確認", L"Playback confirmation"), MB_YESNO)) {
+				if (IDYES == MessageBox(LL14(
+					L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生",
+					L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start",
+					L"Des données de reprise existent.\nReprendre là où vous vous êtes arrêté?\nOui = Reprendre\nNon = Jouer depuis le début",
+					L"Esistono dati di ripresa.\nRiprendere da dove ci si è fermati?\nSì = Riprendi\nNo = Riproduci dall'inizio",
+					L"Existen datos de reanudación.\n¿Reanudar desde donde lo dejó?\nSí = Reanudar\nNo = Reproducir desde el inicio",
+					L"도중 재생 데이터가 존재합니다.\n이전에 중단한 부분부터 재생할까요?\n예 = 도중부터 재생\n아니요 = 처음부터 재생",
+					L"存在中途播放数据。\n是否从上次中断处继续播放？\n是 = 从中途播放\n否 = 从头播放",
+					L"توجد بيانات استئناف.\nهل تريد الاستئناف من حيث توقفت؟\nنعم = استئناف\nلا = تشغيل من البداية",
+					L"Данные возобновления существуют.\nПродолжить с места остановки?\nДа = Продолжить\nНет = Играть с начала",
+					L"Fortsetzungsdaten vorhanden.\nVon der Unterbrechungsstelle fortfahren?\nJa = Fortsetzen\nNein = Von Anfang abspielen",
+					L"Dados de retomada existem.\nRetomar de onde parou?\nSim = Retomar\nNão = Reproduzir do início",
+					L"Hervatgegevens aanwezig.\nHervatten waar u gebleven was?\nJa = Hervatten\nNee = Afspelen vanaf het begin",
+					L"Istnieją dane wznowienia.\nWznowić od miejsca przerwania?\nTak = Wznów\nNie = Odtwórz od początku",
+					L"Devam verisi mevcut.\nKaldığınız yerden devam edilsin mi?\nEvet = Devam et\nHayır = Baştan oynat"),
+					LL14(
+						L"再生確認",
+						L"Playback confirmation",
+						L"Confirmation de lecture",
+						L"Conferma riproduzione",
+						L"Confirmación de reproducción",
+						L"재생 확인",
+						L"播放确认",
+						L"تأكيد التشغيل",
+						L"Подтверждение воспроизведения",
+						L"Wiedergabebestätigung",
+						L"Confirmação de reprodução",
+						L"Afspeelbevestiging",
+						L"Potwierdzenie odtwarzania",
+						L"Oynatma onayı"),
+					MB_YESNO)) {
 					flggg = 1;
 				}
 				else {
@@ -7579,7 +8686,7 @@ void COggDlg::play()
 	}
 	m_saisai.EnableWindow(TRUE); playy = 1;
 	ps = 0;
-	m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
+	m_ps.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
 	SetTimer(1250, 100, NULL);
 	fade1 = 0;
 	if (maini) maini->SetActiveWindow();
@@ -7612,142 +8719,142 @@ void CWread::wavread()
 		CString a = filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1);
 		switch (_ttoi(a.Mid(2, 4))) {
 		case 8001:
-			a = LL2(L"特科クラス《VII組》", L"Class VII");
+			a = LL14(L"特科クラス《VII組》", L"Class VII", L"Classe VII", L"Classe VII", L"Clase VII", L"특과 클래스 《VII반》", L"特科班《VII组》", L"الفصل السابع", L"Класс VII", L"Klasse VII", L"Classe VII", L"Klasse VII", L"Klasa VII", L"Sınıf VII");
 			break;
 		case 8002:
-			a = LL2(L"ただひたすらに、前へ", L"Ever Forward");
+			a = LL14(L"ただひたすらに、前へ", L"Ever Forward", L"Toujours de l'Avant", L"Sempre Avanti", L"Siempre Adelante", L"오로지, 앞으로", L"唯有向前", L"دائماً إلى الأمام", L"Всегда Вперёд", L"Immer Vorwärts", L"Sempre em Frente", L"Altijd Vooruit", L"Zawsze Naprzód", L"Hep İleri");
 			break;
 		case 8100:
-			a = LL2(L"近郊都市トリスタ", L"Suburban City Trista");
+			a = LL14(L"近郊都市トリスタ", L"Suburban City Trista", L"Ville de Banlieue Trista", L"Città Suburbana Trista", L"Ciudad Suburbana Trista", L"근교 도시 트리스타", L"近郊城市特里斯塔", L"مدينة تريستا الضاحية", L"Пригородный Город Триста", L"Vorortstadt Trista", L"Cidade Suburbana Trista", L"Buitenstad Trista", L"Miasto Podmiejskie Trista", L"Banliyö Şehri Trista");
 			break;
 		case 8101:
-			a = LL2(L"交易町ケルディック", L"Trading Town Celdic");
+			a = LL14(L"交易町ケルディック", L"Trading Town Celdic", L"Ville Marchande Celdic", L"Città Commerciale Celdic", L"Ciudad Comercial Celdic", L"교역 마을 켈딕", L"贸易小镇塞尔迪克", L"مدينة سيلديك التجارية", L"Торговый Город Селдик", L"Handelsstadt Celdic", L"Cidade Comercial Celdic", L"Handelsstad Celdic", L"Miasto Handlowe Celdic", L"Ticaret Kasabası Celdic");
 			break;
 		case 8102:
-			a = LL2(L"翡翠の公都バリアハート", L"Jade Capital Bareahard");
+			a = LL14(L"翡翠の公都バリアハート", L"Jade Capital Bareahard", L"Capitale de Jade Bareahard", L"Capitale di Giada Bareahard", L"Capital de Jade Bareahard", L"비취의 공도 바리아하트", L"翡翠公都巴里亚哈特", L"عاصمة اليشم بارياهارد", L"Нефритовая Столица Бэрихард", L"Jade-Hauptstadt Bareahard", L"Capital de Jade Bareahard", L"Jade-Hoofdstad Bareahard", L"Jadeitowa Stolica Bareahard", L"Yeşim Başkenti Bareahard");
 			break;
 		case 8103:
-			a = LL2(L"湖畔の街レグラム", L"Lakeside Town Legram");
+			a = LL14(L"湖畔の街レグラム", L"Lakeside Town Legram", L"Ville au Bord du Lac Legram", L"Città Lacustre Legram", L"Ciudad Junto al Lago Legram", L"호숫가 마을 레그람", L"湖畔小镇勒格拉姆", L"مدينة ليغرام على ضفة البحيرة", L"Город у Озера Леграм", L"Seestadt Legram", L"Cidade à Beira do Lago Legram", L"Meerstad Legram", L"Miasto nad Jeziorem Legram", L"Göl Kenarı Kasabası Legram");
 			break;
 		case 8104:
-			a = LL2(L"黒銀の鋼都ルーレ", L"Iron City Roer");
+			a = LL14(L"黒銀の鋼都ルーレ", L"Iron City Roer", L"Cité d'Acier Roer", L"Città d'Acciaio Roer", L"Ciudad de Acero Roer", L"흑은의 강도 루레", L"黑银钢都鲁尔", L"مدينة الصلب رور", L"Стальной Город Рур", L"Stahlstadt Roer", L"Cidade de Aço Roer", L"Staalstad Roer", L"Stalowe Miasto Roer", L"Çelik Şehri Roer");
 			break;
 		case 8106:
-			a = LL2(L"遊牧民の集落", L"Nomad Settlement");
+			a = LL14(L"遊牧民の集落", L"Nomad Settlement", L"Campement Nomade", L"Accampamento Nomade", L"Asentamiento Nómada", L"유목민의 마을", L"游牧民聚落", L"مستوطنة الرحل", L"Поселение Кочевников", L"Nomadensiedlung", L"Assentamento Nômade", L"Nomadennederzetting", L"Osada Koczowników", L"Göçebe Yerleşimi");
 			break;
 		case 8107:
-			a = LL2(L"緋の帝都ヘイムダル", L"Crimson Capital Heimdallr");
+			a = LL14(L"緋の帝都ヘイムダル", L"Crimson Capital Heimdallr", L"Capitale Cramoisie Heimdallr", L"Capitale Cremisi Heimdallr", L"Capital Carmesí Heimdallr", L"붉은 제도 헤임달", L"绯红帝都海姆达尔", L"العاصمة القرمزية هيمدالر", L"Малиновая Столица Хеймдалл", L"Purpurrote Hauptstadt Heimdallr", L"Capital Carmesim Heimdallr", L"Karmozijnrode Hoofdstad Heimdallr", L"Karmazynowa Stolica Heimdallr", L"Kırmızı Başkent Heimdallr");
 			break;
 		case 8108:
-			a = LL2(L"癒しの我が家", L"Healing Home");
+			a = LL14(L"癒しの我が家", L"Healing Home", L"Foyer Apaisant", L"Casa Guaritrice", L"Hogar Sanador", L"치유의 우리 집", L"治愈的家", L"البيت الشافي", L"Исцеляющий Дом", L"Heilendes Zuhause", L"Lar Curador", L"Helend Thuis", L"Uzdrawiający Dom", L"İyileştirici Ev");
 			break;
 		case 8109:
-			a = LL2(L"ダイニングバー《F》", L"Dining Bar F");
+			a = LL14(L"ダイニングバー《F》", L"Dining Bar F", L"Bar-Restaurant F", L"Dining Bar F", L"Bar Comedor F", L"다이닝 바 《F》", L"餐饮酒吧《F》", L"بار المطعم F", L"Обеденный Бар F", L"Dining Bar F", L"Bar Restaurante F", L"Dining Bar F", L"Bar Restauracyjny F", L"Yemek Barı F");
 			break;
 		case 8110:
-			a = LL2(L"常在戦場の気概", L"Ever-Present War Spirit");
+			a = LL14(L"常在戦場の気概", L"Ever-Present War Spirit", L"Esprit de Guerre Omniprésent", L"Spirito di Guerra Onnipresente", L"Espíritu de Guerra Omnipresente", L"항상 전장의 기개", L"常驻战场的气概", L"روح الحرب الدائمة", L"Вечный Боевой Дух", L"Allgegenwärtiger Kriegsgeist", L"Espírito de Guerra Onipresente", L"Altijd Aanwezige Oorlogsgeest", L"Wszechobecny Duch Wojenny", L"Her Zaman Savaş Ruhu");
 			break;
 		case 8111:
-			a = LL2(L"ガレリアの巨壁", L"Garelia Fortress");
+			a = LL14(L"ガレリアの巨壁", L"Garelia Fortress", L"Forteresse de Garelia", L"Fortezza di Garelia", L"Fortaleza de Garelia", L"가레리아의 거벽", L"加勒利亚巨壁", L"حصن غاريليا", L"Крепость Гарелия", L"Festung Garelia", L"Fortaleza de Garelia", L"Vesting Garelia", L"Twierdza Garelia", L"Garelia Kalesi");
 			break;
 		case 8120:
-			a = LL2(L"足湯の温もり", L"Foot Bath Warmth");
+			a = LL14(L"足湯の温もり", L"Foot Bath Warmth", L"Chaleur du Bain de Pieds", L"Calore del Pediluvio", L"Calidez del Baño de Pies", L"족욕의 온기", L"足浴的温暖", L"دفء حمام القدم", L"Тепло Ножной Ванны", L"Wärme des Fußbades", L"Calor do Banho de Pés", L"Warmte van het Voetbad", L"Ciepło Kąpieli Stóp", L"Ayak Banyosunun Sıcaklığı");
 			break;
 		case 8121:
-			a = LL2(L"静寂の郷", L"Silent Village");
+			a = LL14(L"静寂の郷", L"Silent Village", L"Village Silencieux", L"Villaggio Silenzioso", L"Pueblo Silencioso", L"정적의 마을", L"静寂之乡", L"القرية الصامتة", L"Тихая Деревня", L"Stilles Dorf", L"Vila Silenciosa", L"Stil Dorp", L"Ciche Miasteczko", L"Sessiz Köy");
 			break;
 		case 8122:
-			a = LL2(L"明日への休息", L"Rest for Tomorrow");
+			a = LL14(L"明日への休息", L"Rest for Tomorrow", L"Repos pour Demain", L"Riposo per Domani", L"Descanso para Mañana", L"내일을 위한 휴식", L"为明日而休息", L"راحة لأجل الغد", L"Отдых ради Завтра", L"Ruhe für Morgen", L"Descanso para Amanhã", L"Rust voor Morgen", L"Odpoczynek na Jutro", L"Yarın İçin Dinlenme");
 			break;
 		case 8123:
-			a = LL2(L"春の陽射し", L"Spring Sunshine");
+			a = LL14(L"春の陽射し", L"Spring Sunshine", L"Soleil de Printemps", L"Sole Primaverile", L"Sol de Primavera", L"봄 햇살", L"春日阳光", L"شمس الربيع", L"Весеннее Солнце", L"Frühlingssonne", L"Sol de Primavera", L"Lentezonnestralen", L"Wiosenne Słońce", L"İlkbahar Güneşi");
 			break;
 		case 8125:
-			a = LL2(L"カレイジャス発進！", L"Courageous Launch!");
+			a = LL14(L"カレイジャス発進！", L"Courageous Launch!", L"Décollage du Courageux!", L"Lancio del Courageous!", L"¡Lanzamiento del Courageous!", L"카레이저스 발진!", L"无畏号出击！", L"انطلاق كوريجيس!", L"Старт Отважного!", L"Courageous startet!", L"Lançamento do Courageous!", L"Courageous lanceert!", L"Start Courageous!", L"Courageous Fırlatıldı!");
 			break;
 		case 8126:
-			a = LL2(L"目覚める意志", L"Awakening Will");
+			a = LL14(L"目覚める意志", L"Awakening Will", L"Volonté qui s'Éveille", L"Volontà che si Risveglia", L"Voluntad que Despierta", L"눈뜨는 의지", L"觉醒的意志", L"إرادة تستيقظ", L"Пробуждающаяся Воля", L"Erwachender Wille", L"Vontade que Desperta", L"Ontwakende Wil", L"Przebudzająca się Wola", L"Uyanış İradesi");
 			break;
 		case 8127:
-			a = LL2(L"白銀の巨船", L"Silver Ship");
+			a = LL14(L"白銀の巨船", L"Silver Ship", L"Vaisseau d'Argent", L"Nave d'Argento", L"Nave de Plata", L"백은의 거선", L"白银巨舰", L"السفينة الفضية", L"Серебряный Корабль", L"Silbernes Schiff", L"Navio de Prata", L"Zilveren Schip", L"Srebrny Okręt", L"Gümüş Gemi");
 			break;
 		case 8150:
-			a = LL2(L"放課後の時間", L"After School");
+			a = LL14(L"放課後の時間", L"After School", L"Après l'École", L"Dopo Scuola", L"Después de la Escuela", L"방과 후의 시간", L"放学后的时光", L"بعد المدرسة", L"После Уроков", L"Nach der Schule", L"Depois da Escola", L"Na School", L"Po Szkole", L"Okul Sonrası");
 			break;
 		case 8152:
-			a = LL2(L"さわやかな朝", L"Refreshing Morning");
+			a = LL14(L"さわやかな朝", L"Refreshing Morning", L"Matin Rafraîchissant", L"Mattino Rinfrescante", L"Mañana Refrescante", L"상쾌한 아침", L"清爽的早晨", L"صباح منعش", L"Бодрящее Утро", L"Erfrischender Morgen", L"Manhã Refrescante", L"Verfrissende Ochtend", L"Orzeźwiający Poranek", L"Ferah Sabah");
 			break;
 		case 8153:
-			a = LL2(L"雨音の学院", L"Rain-sound Academy");
+			a = LL14(L"雨音の学院", L"Rain-sound Academy", L"Académie sous la Pluie", L"Accademia della Pioggia", L"Academia Bajo la Lluvia", L"빗소리의 학원", L"雨声学院", L"أكاديمية صوت المطر", L"Академия Дождя", L"Regen-Akademie", L"Academia da Chuva", L"Regen-Academie", L"Akademia Deszczu", L"Yağmur Sesi Akademisi");
 			break;
 		case 8154:
-			a = LL2(L"爽やかな陽射し", L"Clear Sunshine");
+			a = LL14(L"爽やかな陽射し", L"Clear Sunshine", L"Soleil Clair", L"Sole Limpido", L"Sol Despejado", L"상쾌한 햇살", L"清爽的阳光", L"شمس صافية", L"Ясное Солнце", L"Klarer Sonnenschein", L"Sol Claro", L"Helder Zonlicht", L"Jasne Słońce", L"Berrak Güneş Işığı");
 			break;
 		case 8156:
-			a = LL2(L"トールズ士官学院祭", L"Thors Academy Festival");
+			a = LL14(L"トールズ士官学院祭", L"Thors Academy Festival", L"Festival de l'Académie Thors", L"Festival dell'Accademia Thors", L"Festival de la Academia Thors", L"토르스 사관학원제", L"托尔斯士官学院祭", L"مهرجان أكاديمية ثورس", L"Праздник Академии Торс", L"Thors-Akademie-Festival", L"Festival da Academia Thors", L"Thors Academie Festival", L"Festiwal Akademii Thors", L"Thors Akademisi Festivali");
 			break;
 		case 8158:
-			a = LL2(L"青空の開放感", L"Open Sky");
+			a = LL14(L"青空の開放感", L"Open Sky", L"Ciel Ouvert", L"Cielo Aperto", L"Cielo Abierto", L"푸른 하늘의 해방감", L"蓝天的开阔感", L"سماء مفتوحة", L"Открытое Небо", L"Offener Himmel", L"Céu Aberto", L"Open Lucht", L"Otwarte Niebo", L"Açık Gökyüzü");
 			break;
 		case 8159:
-			a = LL2(L"自由行動日", L"Free Day");
+			a = LL14(L"自由行動日", L"Free Day", L"Journée Libre", L"Giorno Libero", L"Día Libre", L"자유 행동일", L"自由行动日", L"يوم حر", L"Свободный День", L"Freier Tag", L"Dia Livre", L"Vrije Dag", L"Wolny Dzień", L"Serbest Gün");
 			break;
 		case 8200:
-			a = LL2(L"異郷の空", L"Foreign Sky");
+			a = LL14(L"異郷の空", L"Foreign Sky", L"Ciel Étranger", L"Cielo Straniero", L"Cielo Extranjero", L"이향의 하늘", L"异乡的天空", L"سماء بلاد أجنبية", L"Чужое Небо", L"Fremder Himmel", L"Céu Estrangeiro", L"Vreemde Hemel", L"Obce Niebo", L"Yabancı Gökyüzü");
 			break;
 		case 8201:
-			a = LL2(L"峡谷道を往く", L"Through the Canyon");
+			a = LL14(L"峡谷道を往く", L"Through the Canyon", L"À Travers le Canyon", L"Attraverso il Canyon", L"A Través del Cañón", L"협곡도를 가다", L"穿越峡谷之道", L"عبر الوادي", L"Сквозь Каньон", L"Durch die Schlucht", L"Através do Cânyon", L"Door de Kloof", L"Przez Kanion", L"Kanyondan Geçerek");
 			break;
 		case 8202:
-			a = LL2(L"精霊の小道", L"Spirit Path");
+			a = LL14(L"精霊の小道", L"Spirit Path", L"Chemin des Esprits", L"Sentiero degli Spiriti", L"Senda de los Espíritus", L"정령의 오솔길", L"精灵小道", L"طريق الأرواح", L"Тропа Духов", L"Geisterpfad", L"Caminho dos Espíritos", L"Geestenpad", L"Ścieżka Duchów", L"Ruh Yolu");
 			break;
 		case 8203:
-			a = LL2(L"蒼穹の大地", L"Azure Skies Land");
+			a = LL14(L"蒼穹の大地", L"Azure Skies Land", L"Terre du Ciel Azuré", L"Terra del Cielo Azzurro", L"Tierra del Cielo Azul", L"창공의 대지", L"苍穹大地", L"أرض السماء الزرقاء", L"Земля Лазурного Неба", L"Land des Azurhimmels", L"Terra do Céu Azul", L"Land van de Azuurblauwe Lucht", L"Kraina Lazurowego Nieba", L"Gök Mavisi Topraklar");
 			break;
 		case 8210:
-			a = LL2(L"戦火を越えて", L"Beyond the Flames of War");
+			a = LL14(L"戦火を越えて", L"Beyond the Flames of War", L"Au-Delà des Flammes de la Guerre", L"Oltre le Fiamme della Guerra", L"Más Allá de las Llamas de la Guerra", L"전화를 넘어서", L"超越战火", L"ما وراء نيران الحرب", L"За Пламенем Войны", L"Jenseits der Kriegsflammen", L"Além das Chamas da Guerra", L"Voorbij de Vlammen van de Oorlog", L"Poza Płomieniami Wojny", L"Savaşın Alevlerinin Ötesinde");
 			break;
 		case 8212:
 			a = L"Trudge Along";
 			break;
 		case 8213:
-			a = LL2(L"冬の訪れ", L"Arrival of Winter");
+			a = LL14(L"冬の訪れ", L"Arrival of Winter", L"Arrivée de l'Hiver", L"Arrivo dell'Inverno", L"Llegada del Invierno", L"겨울의 방문", L"冬日来临", L"قدوم الشتاء", L"Приход Зимы", L"Ankunft des Winters", L"Chegada do Inverno", L"Komst van de Winter", L"Nadejście Zimy", L"Kışın Gelişi");
 			break;
 		case 8300:
-			a = LL2(L"旧校舎の謎", L"Old Schoolhouse Mystery");
+			a = LL14(L"旧校舎の謎", L"Old Schoolhouse Mystery", L"Mystère de l'Ancienne École", L"Mistero della Vecchia Scuola", L"Misterio del Antiguo Edificio Escolar", L"구교사의 수수께끼", L"旧校舍之谜", L"لغز المبنى المدرسي القديم", L"Загадка Старого Корпуса", L"Geheimnis des alten Schulgebäudes", L"Mistério do Antigo Prédio Escolar", L"Mysterie van het Oude Schoolgebouw", L"Tajemnica Starego Budynku Szkolnego", L"Eski Okul Binasının Gizemi");
 			break;
 		case 8301:
-			a = LL2(L"探索", L"Exploration");
+			a = LL14(L"探索", L"Exploration", L"Exploration", L"Esplorazione", L"Exploración", L"탐색", L"探索", L"استكشاف", L"Исследование", L"Erkundung", L"Exploração", L"Verkenning", L"Eksploracja", L"Keşif");
 			break;
 		case 8302:
-			a = LL2(L"深淵へ向かう", L"Toward the Abyss");
+			a = LL14(L"深淵へ向かう", L"Toward the Abyss", L"Vers l'Abîme", L"Verso l'Abisso", L"Hacia el Abismo", L"심연을 향하여", L"走向深渊", L"نحو الهاوية", L"К Бездне", L"In den Abgrund", L"Rumo ao Abismo", L"Naar de Afgrond", L"Ku Otchłani", L"Uçuruma Doğru");
 			break;
 		case 8303:
-			a = LL2(L"聖女の城", L"Saint's Castle");
+			a = LL14(L"聖女の城", L"Saint's Castle", L"Château de la Sainte", L"Castello della Santa", L"Castillo de la Santa", L"성녀의 성", L"圣女之城", L"قلعة القديسة", L"Замок Святой", L"Schloss der Heiligen", L"Castelo da Santa", L"Kasteel van de Heilige", L"Zamek Świętej", L"Aziz Kale");
 			break;
 		case 8304:
-			a = LL2(L"明日を掴むために", L"To Seize Tomorrow");
+			a = LL14(L"明日を掴むために", L"To Seize Tomorrow", L"Pour Saisir Demain", L"Per Afferrare il Domani", L"Para Aferrar el Mañana", L"내일을 잡기 위해", L"为了抓住明日", L"لأجل انتزاع الغد", L"Чтобы Схватить Завтра", L"Um Morgen zu Greifen", L"Para Agarrar o Amanhã", L"Om Morgen te Grijpen", L"By Pochwycić Jutro", L"Yarını Yakalamak İçin");
 			break;
 		case 8305:
-			a = LL2(L"地下に眠る遺構", L"Ruins Beneath");
+			a = LL14(L"地下に眠る遺構", L"Ruins Beneath", L"Ruines Souterraines", L"Rovine Sotterranee", L"Ruinas Subterráneas", L"지하에 잠든 유구", L"沉眠地下的遗构", L"الأطلال الدفينة", L"Подземные Руины", L"Unterirdische Ruinen", L"Ruínas Subterrâneas", L"Ondergrondse Ruïnes", L"Podziemne Ruiny", L"Yeraltındaki Harabeler");
 			break;
 		case 8308:
-			a = LL2(L"世の礎たるために", L"To Be the World's Foundation");
+			a = LL14(L"世の礎たるために", L"To Be the World's Foundation", L"Pour Être le Fondement du Monde", L"Per Essere il Fondamento del Mondo", L"Para Ser el Fundamento del Mundo", L"세상의 礎가 되기 위해", L"为成为世界的基石", L"لأجل أن تكون أساس العالم", L"Чтобы Стать Основой Мира", L"Um das Fundament der Welt zu Sein", L"Para Ser o Fundamento do Mundo", L"Om het Fundament van de Wereld te Zijn", L"By Być Fundamentem Świata", L"Dünyanın Temeli Olmak İçin");
 			break;
 		case 8310:
-			a = LL2(L"精霊窟", L"Spirit Cave");
+			a = LL14(L"精霊窟", L"Spirit Cave", L"Grotte des Esprits", L"Grotta degli Spiriti", L"Cueva de los Espíritus", L"정령굴", L"精灵窟", L"كهف الأرواح", L"Пещера Духов", L"Geisterhöhle", L"Caverna dos Espíritos", L"Geestesgrot", L"Jaskinia Duchów", L"Ruh Mağarası");
 			break;
 		case 8311:
-			a = LL2(L"不明", L"Unknown");
+			a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 			break;
 		case 8312:
 			a = L"Phantasmal Blaze";
 			break;
 		case 8313:
-			a = LL2(L"夢幻回廊", L"Phantasmagoria Corridor");
+			a = LL14(L"夢幻回廊", L"Phantasmagoria Corridor", L"Couloir Fantasmagorique", L"Corridoio Fantasmagorico", L"Corredor Fantasmagórico", L"몽환 회랑", L"梦幻回廊", L"ممر الخيال", L"Фантасмагорический Коридор", L"Phantasmagorischer Korridor", L"Corredor Fantasmagórico", L"Fantasmagorische Gang", L"Fantasmagoryczny Korytarz", L"Fantazmagori Koridoru");
 			break;
 		case 8315:
-			a = LL2(L"幻煌", L"Phantom Radiance");
+			a = LL14(L"幻煌", L"Phantom Radiance", L"Éclat Fantôme", L"Splendore Fantasma", L"Resplandor Fantasma", L"환황", L"幻煌", L"بريق الخيال", L"Призрачное Сияние", L"Phantomglanz", L"Resplendor Fantasma", L"Fantoomglinstering", L"Blask Widma", L"Hayalet Işıltı");
 			break;
 		case 8400:
 			a = L"The Glint of Cold Steel";
@@ -7774,28 +8881,28 @@ void CWread::wavread()
 			a = L"Machinery Attack";
 			break;
 		case 8408:
-			a = LL2(L"巨イナルチカラ", L"Colossal Power");
+			a = LL14(L"巨イナルチカラ", L"Colossal Power", L"Puissance Colossale", L"Potere Colossale", L"Poder Colosal", L"거대한 힘", L"巨大的力量", L"قوة هائلة", L"Колоссальная Сила", L"Kolossale Kraft", L"Poder Colossal", L"Kolossale Kracht", L"Kolosalna Siła", L"Devasa Güç");
 			break;
 		case 8409:
 			a = L"The Decisive Collision";
 			break;
 		case 8410:
-			a = LL2(L"この手で道を切り拓く!", L"Carve Our Path with These Hands!");
+			a = LL14(L"この手で道を切り拓く!", L"Carve Our Path with These Hands!", L"Traçons Notre Chemin de Ces Mains!", L"Tracciamo il Nostro Cammino con Queste Mani!", L"¡Abramos Nuestro Camino con Estas Manos!", L"이 손으로 길을 개척한다!", L"用这双手开辟道路!", L"دعونا نشق طريقنا بهاتين اليدين!", L"Проложим Путь Этими Руками!", L"Mit diesen Händen unseren Weg bahnen!", L"Abrir Nosso Caminho com Estas Mãos!", L"Ons Pad Banen met Deze Handen!", L"Torujemy Drogę Tymi Rękami!", L"Bu Ellerle Yolumuzu Açalım!");
 			break;
 		case 8411:
-			a = LL2(L"赤点です...", L"Failed...");
+			a = LL14(L"赤点です...", L"Failed...", L"Échec...", L"Fallito...", L"Reprobado...", L"낙제점입니다...", L"挂科了...", L"راسب...", L"Провалено...", L"Durchgefallen...", L"Reprovado...", L"Gezakt...", L"Oblany...", L"Başarısız...");
 			break;
 		case 8412:
 			a = L"Unknown Threat";
 			break;
 		case 8413:
-			a = LL2(L"不明", L"Unknown");
+			a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 			break;
 		case 8420:
 			a = L"Heated Mind";
 			break;
 		case 8421:
-			a = LL2(L"不明", L"Unknown");
+			a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 			break;
 		case 8423:
 			a = L"Impatient";
@@ -7813,157 +8920,157 @@ void CWread::wavread()
 			a = L"Heteromorphy";
 			break;
 		case 8431:
-			a = LL2(L"輝ける明日へ", L"Toward a Shining Tomorrow");
+			a = LL14(L"輝ける明日へ", L"Toward a Shining Tomorrow", L"Vers un Lendemain Radieux", L"Verso un Domani Splendente", L"Hacia un Mañana Brillante", L"빛나는 내일로", L"走向光辉的明天", L"نحو غدٍ مشرق", L"К Сияющему Завтра", L"Einem Strahlenden Morgen Entgegen", L"Rumo a um Amanhã Brilhante", L"Naar een Stralende Toekomst", L"Ku Jaśniejącemu Jutru", L"Parlayan Bir Yarına Doğru");
 			break;
 		case 8435:
-			a = LL2(L"迫る巨影", L"Approaching Giant Shadow");
+			a = LL14(L"迫る巨影", L"Approaching Giant Shadow", L"Ombre Géante qui Approche", L"Ombra Gigante che si Avvicina", L"Sombra Gigante que se Acerca", L"다가오는 거대한 그림자", L"逼近的巨影", L"الظل العملاق المقترب", L"Приближающаяся Гигантская Тень", L"Nahende Riesenschatten", L"Sombra Gigante se Aproximando", L"Naderende Reusachtige Schaduw", L"Zbliżający się Ogromny Cień", L"Yaklaşan Dev Gölge");
 			break;
 		case 8441:
 			a = L"E.O.V";
 			break;
 		case 8442:
-			a = LL2(L"不明", L"Unknown");
+			a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 			break;
 		case 8500:
 			a = L"Strain";
 			break;
 		case 8501:
-			a = LL2(L"夜のひととき", L"Nighttime");
+			a = LL14(L"夜のひととき", L"Nighttime", L"Un Moment Nocturne", L"Momento Notturno", L"Un Momento Nocturno", L"밤의 한때", L"夜晚的片刻", L"لحظة ليلية", L"Ночное Время", L"Nachtzeit", L"Um Momento Noturno", L"Nachtelijk Moment", L"Nocna Chwila", L"Gece Vakti");
 			break;
 		case 8502:
-			a = LL2(L"トラブル発生", L"Trouble");
+			a = LL14(L"トラブル発生", L"Trouble", L"Problème Survenu", L"Problema Sorto", L"Problema Surgido", L"트러블 발생", L"麻烦发生", L"وقوع مشكلة", L"Возникли Неприятности", L"Ärger", L"Problema Surgido", L"Probleem Opgetreden", L"Kłopoty", L"Sorun Çıktı");
 			break;
 		case 8503:
-			a = LL2(L"鉄路遥々", L"Distant Iron Road");
+			a = LL14(L"鉄路遥々", L"Distant Iron Road", L"Longue Route de Fer", L"Lunga Strada di Ferro", L"Larga Ruta de Hierro", L"아득한 철로", L"遥远的铁路", L"طريق الحديد البعيد", L"Далёкий Железный Путь", L"Weite Eisenstraße", L"Longa Estrada de Ferro", L"Verre IJzeren Weg", L"Daleka Żelazna Droga", L"Uzak Demir Yolu");
 			break;
 		case 8504:
-			a = LL2(L"旅愁", L"Travel Melancholy");
+			a = LL14(L"旅愁", L"Travel Melancholy", L"Mélancolie du Voyage", L"Malinconia del Viaggio", L"Melancolía del Viaje", L"여수", L"旅途忧愁", L"حزن السفر", L"Дорожная Меланхолия", L"Reisemelancholie", L"Melancolia da Viagem", L"Reismelancholie", L"Melancholia Podróży", L"Yolculuk Hüznü");
 			break;
 		case 8505:
-			a = LL2(L"皇城にて", L"At the Imperial Castle");
+			a = LL14(L"皇城にて", L"At the Imperial Castle", L"Au Château Impérial", L"Al Castello Imperiale", L"En el Castillo Imperial", L"황성에서", L"在皇城", L"في القلعة الإمبراطورية", L"В Императорском Замке", L"Im Kaiserlichen Schloss", L"No Castelo Imperial", L"In het Keizerlijke Kasteel", L"W Cesarskim Zamku", L"İmparatorluk Kalesinde");
 			break;
 		case 8506:
 			a = L"Let's Study";
 			break;
 		case 8507:
-			a = LL2(L"知恵を絞って", L"Rack Your Brains");
+			a = LL14(L"知恵を絞って", L"Rack Your Brains", L"Se Creuser la Tête", L"Sforzarsi di Pensare", L"Exprimirse el Cerebro", L"지혜를 짜내어", L"绞尽脑汁", L"اجهد تفكيرك", L"Напрячь Мозги", L"Den Kopf Zerbrechen", L"Quebrar a Cabeça", L"Hersens Pijnigen", L"Wytężyć Umysł", L"Beyin Fırtınası");
 			break;
 		case 8508:
-			a = LL2(L"実技教練", L"Combat Training");
+			a = LL14(L"実技教練", L"Combat Training", L"Entraînement au Combat", L"Addestramento al Combattimento", L"Entrenamiento de Combate", L"실기 교련", L"实战训练", L"تدريب قتالي", L"Боевая Тренировка", L"Kampftraining", L"Treinamento de Combate", L"Gevechtsdraining", L"Trening Bojowy", L"Muharebe Eğitimi");
 			break;
 		case 8509:
-			a = LL2(L"寮に帰ろう", L"Back to the Dorm");
+			a = LL14(L"寮に帰ろう", L"Back to the Dorm", L"Retour au Dortoir", L"Ritorno al Dormitorio", L"De Vuelta al Dormitorio", L"기숙사로 돌아가자", L"回宿舍去吧", L"العودة إلى السكن", L"Обратно в Общежитие", L"Zurück zum Wohnheim", L"De Volta ao Dormitório", L"Terug naar het Dorm", L"Z Powrotem do Akademika", L"Yurda Dönelim");
 			break;
 		case 8510:
-			a = LL2(L"アーベントタイム", L"Evening Time");
+			a = LL14(L"アーベントタイム", L"Evening Time", L"Soirée", L"Ora della Sera", L"Hora de la Tarde", L"저녁 시간", L"黄昏时光", L"وقت المساء", L"Вечернее Время", L"Abendzeit", L"Hora da Tarde", L"Avondtijd", L"Czas Wieczoru", L"Akşam Vakti");
 			break;
 		case 8512:
-			a = LL2(L"鉄の統率", L"Iron Command");
+			a = LL14(L"鉄の統率", L"Iron Command", L"Commandement de Fer", L"Comando di Ferro", L"Mando de Hierro", L"철의 통솔", L"铁的统率", L"القيادة الحديدية", L"Железное Командование", L"Eiserner Befehl", L"Comando de Ferro", L"IJzeren Bevel", L"Żelazne Dowodzenie", L"Demir Komuta");
 			break;
 		case 8513:
-			a = LL2(L"暗躍", L"Moving in the Shadows");
+			a = LL14(L"暗躍", L"Moving in the Shadows", L"Agissant dans l'Ombre", L"Agendo nell'Ombra", L"Actuando en las Sombras", L"암약", L"暗中活动", L"التحرك في الظلام", L"Действия в Тени", L"Im Verborgenen Agieren", L"Movendo-se nas Sombras", L"In het Donker Bewegen", L"Działanie w Cieniu", L"Gölgede Hareket");
 			break;
 		case 8514:
-			a = LL2(L"想いの行き先", L"Where Feelings Lead");
+			a = LL14(L"想いの行き先", L"Where Feelings Lead", L"Là où Mènent les Sentiments", L"Dove Portano i Sentimenti", L"Adonde Llevan los Sentimientos", L"마음이 닿는 곳", L"心意所去之处", L"حيث تقود المشاعر", L"Куда Ведут Чувства", L"Wohin Gefühle Führen", L"Para Onde os Sentimentos Levam", L"Waar Gevoelens Naartoe Leiden", L"Dokąd Prowadzą Uczucia", L"Duyguların Götürdüğü Yer");
 			break;
 		case 8515:
-			a = LL2(L"傷心", L"Heartbreak");
+			a = LL14(L"傷心", L"Heartbreak", L"Cœur Brisé", L"Cuore Spezzato", L"Corazón Roto", L"상심", L"伤心", L"قلب مكسور", L"Разбитое Сердце", L"Herzschmerz", L"Coração Partido", L"Hartenpijn", L"Złamane Serce", L"Kırık Kalp");
 			break;
 		case 8516:
-			a = LL2(L"揺らめく炎を見つめて", L"Watching the Flickering Flames");
+			a = LL14(L"揺らめく炎を見つめて", L"Watching the Flickering Flames", L"Regarder les Flammes Vacillantes", L"Guardare le Fiamme Tremolanti", L"Mirando las Llamas Parpadeantes", L"일렁이는 불꽃을 바라보며", L"凝视着摇曳的火焰", L"أحدق في اللهب المتراقص", L"Глядя на Мерцающее Пламя", L"Die Flackernden Flammen Beobachten", L"Observando as Chamas Oscilantes", L"De Flakkerende Vlammen Bekijken", L"Wpatrując się w Migoczące Płomienie", L"Titreyen Alevlere Bakarken");
 			break;
 		case 8517:
-			a = LL2(L"一途な気持ち", L"Single-minded Feelings");
+			a = LL14(L"一途な気持ち", L"Single-minded Feelings", L"Sentiments Sincères", L"Sentimenti Sinceri", L"Sentimientos Sinceros", L"한결같은 마음", L"一心一意的心情", L"مشاعر صادقة", L"Искренние Чувства", L"Aufrichtige Gefühle", L"Sentimentos Sinceros", L"Oprechte Gevoelens", L"Szczere Uczucia", L"Tek Yönlü Duygular");
 			break;
 		case 8520:
-			a = LL2(L"臨戦態勢", L"Combat Ready");
+			a = LL14(L"臨戦態勢", L"Combat Ready", L"Prêt au Combat", L"Pronto al Combattimento", L"Listo para el Combate", L"임전 태세", L"临战状态", L"الاستعداد للمعركة", L"Боевая Готовность", L"Kampfbereit", L"Pronto para o Combate", L"Gevechtsklaaar", L"Gotowość Bojowa", L"Muharebe Hazırlığı");
 			break;
 		case 8521:
 			a = L"Seriousness";
 			break;
 		case 8522:
-			a = LL2(L"静かなる昂揚", L"Quiet Exhilaration");
+			a = LL14(L"静かなる昂揚", L"Quiet Exhilaration", L"Exaltation Silencieuse", L"Esaltazione Silenziosa", L"Exaltación Silenciosa", L"조용한 昂揚", L"静静的昂扬", L"انتشاء هادئ", L"Тихое Воодушевление", L"Stille Begeisterung", L"Exaltação Silenciosa", L"Stille Opwinding", L"Cicha Ekscytacja", L"Sessiz Coşku");
 			break;
 		case 8523:
-			a = LL2(L"暖かな夕餉", L"Warm Dinner");
+			a = LL14(L"暖かな夕餉", L"Warm Dinner", L"Dîner Chaleureux", L"Cena Calda", L"Cena Cálida", L"따뜻한 저녁 식사", L"温暖的晚餐", L"عشاء دافئ", L"Тёплый Ужин", L"Warmes Abendessen", L"Jantar Caloroso", L"Warm Avondeten", L"Ciepła Kolacja", L"Sıcak Akşam Yemeği");
 			break;
 		case 8524:
 			a = L"Atrocious Raid";
 			break;
 		case 8525:
-			a = LL2(L"全てを賭して今、ここに立つ", L"Standing Here, Betting Everything");
+			a = LL14(L"全てを賭して今、ここに立つ", L"Standing Here, Betting Everything", L"Debout Ici, Tout Misant", L"In Piedi Qui, Scommettendo Tutto", L"De Pie Aquí, Apostándolo Todo", L"모든 것을 걸고 지금, 여기에 선다", L"押上一切，此刻站在这里", L"واقفاً هنا مراهناً بكل شيء", L"Стоя Здесь, Ставя Всё на Кон", L"Hier Stehend, Alles Einsetzend", L"Aqui de Pé, Apostando Tudo", L"Hier Staand, Alles Inzettend", L"Stojąc tu, Stawiając Wszystko na Szali", L"Burada Durarak Her Şeyi Bahse Girerek");
 			break;
 		case 8527:
-			a = LL2(L"新しい仲間たち", L"New Comrades");
+			a = LL14(L"新しい仲間たち", L"New Comrades", L"Nouveaux Camarades", L"Nuovi Compagni", L"Nuevos Compañeros", L"새로운 동료들", L"新的伙伴们", L"رفاق جدد", L"Новые Товарищи", L"Neue Kameraden", L"Novos Camaradas", L"Nieuwe Kameraden", L"Nowi Towarzysze", L"Yeni Yoldaşlar");
 			break;
 		case 8528:
-			a = LL2(L"不透明な事態", L"Opaque Situation");
+			a = LL14(L"不透明な事態", L"Opaque Situation", L"Situation Opaque", L"Situazione Opaca", L"Situación Opaca", L"불투명한 사태", L"不透明的局势", L"وضع غامض", L"Непрозрачная Ситуация", L"Undurchsichtige Lage", L"Situação Opaca", L"Ondoorzichtige Situatie", L"Niejasna Sytuacja", L"Belirsiz Durum");
 			break;
 		case 8529:
-			a = LL2(L"鉄血へのレクイエム", L"Requiem for Iron and Blood");
+			a = LL14(L"鉄血へのレクイエム", L"Requiem for Iron and Blood", L"Requiem pour le Fer et le Sang", L"Requiem per il Ferro e il Sangue", L"Réquiem por el Hierro y la Sangre", L"철혈에 대한 레퀴엠", L"献给铁血的安魂曲", L"ريكويم للحديد والدم", L"Реквием по Железу и Крови", L"Requiem für Eisen und Blut", L"Réquiem pelo Ferro e pelo Sangue", L"Requiem voor IJzer en Bloed", L"Requiem dla Żelaza i Krwi", L"Demir ve Kan İçin Requiem");
 			break;
 		case 8530:
-			a = LL2(L"幻想の唄 -PHANTASMAGORIA-", L"Phantom Song -PHANTASMAGORIA-");
+			a = LL14(L"幻想の唄 -PHANTASMAGORIA-", L"Phantom Song -PHANTASMAGORIA-", L"Chant Fantôme -PHANTASMAGORIA-", L"Canto Fantasma -PHANTASMAGORIA-", L"Canción Fantasma -PHANTASMAGORIA-", L"환상의 노래 -PHANTASMAGORIA-", L"幻想之歌 -PHANTASMAGORIA-", L"أغنية الخيال -PHANTASMAGORIA-", L"Призрачная Песня -PHANTASMAGORIA-", L"Phantomgesang -PHANTASMAGORIA-", L"Canção Fantasma -PHANTASMAGORIA-", L"Spooklied -PHANTASMAGORIA-", L"Pieśń Widmo -PHANTASMAGORIA-", L"Hayalet Şarkı -PHANTASMAGORIA-");
 			break;
 		case 8531:
-			a = LL2(L"刻ハ至レリ", L"The Hour Has Come");
+			a = LL14(L"刻ハ至レリ", L"The Hour Has Come", L"L'Heure est Venue", L"L'Ora è Giunta", L"La Hora Ha Llegado", L"때는 이르렀도다", L"时刻已至", L"لقد حانت الساعة", L"Час Настал", L"Die Stunde ist Gekommen", L"A Hora Chegou", L"Het Uur is Gekomen", L"Godzina Nadeszła", L"Saat Geldi");
 			break;
 		case 8532:
-			a = LL2(L"目覚めし伝承", L"Awakening Legend");
+			a = LL14(L"目覚めし伝承", L"Awakening Legend", L"Légende Éveillée", L"Leggenda Risvegliata", L"Leyenda Despertada", L"눈뜬 전승", L"觉醒的传承", L"الأسطورة المستيقظة", L"Пробуждённая Легенда", L"Erwachende Legende", L"Lenda Despertada", L"Ontwakende Legende", L"Przebudzona Legenda", L"Uyanan Efsane");
 			break;
 		case 8533:
-			a = LL2(L"唯一の希望", L"Only Hope");
+			a = LL14(L"唯一の希望", L"Only Hope", L"Seul Espoir", L"Unica Speranza", L"Única Esperanza", L"유일한 희망", L"唯一的希望", L"الأمل الوحيد", L"Единственная Надежда", L"Einzige Hoffnung", L"Única Esperança", L"Enige Hoop", L"Jedyna Nadzieja", L"Tek Umut");
 			break;
 		case 8535:
-			a = LL2(L"不明", L"Unknown");
+			a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 			break;
 		case 8537:
-			a = LL2(L"不明", L"Unknown");
+			a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 			break;
 		case 8538:
-			a = LL2(L"今はまだ...", L"Not Yet...");
+			a = LL14(L"今はまだ...", L"Not Yet...", L"Pas Encore...", L"Non Ancora...", L"Todavía No...", L"지금은 아직...", L"现在还不行...", L"ليس بعد...", L"Ещё Нет...", L"Noch Nicht...", L"Ainda Não...", L"Nog Niet...", L"Jeszcze Nie...", L"Henüz Değil...");
 			break;
 		case 8539:
-			a = LL2(L"あの日に見た夜空", L"The Night Sky I Saw That Day");
+			a = LL14(L"あの日に見た夜空", L"The Night Sky I Saw That Day", L"Le Ciel Nocturne que j'ai Vu Ce Jour-là", L"Il Cielo Notturno che Vidi Quel Giorno", L"El Cielo Nocturno que Vi Ese Día", L"그날 본 밤하늘", L"那天看见的夜空", L"سماء الليل التي رأيتها ذلك اليوم", L"Ночное Небо, Которое Я Видел В Тот День", L"Der Nachthimmel, den Ich Damals Sah", L"O Céu Noturno que Vi Naquele Dia", L"De Nachtelijke Hemel die ik Die Dag Zag", L"Nocne Niebo, które Widziałem Tamtego Dnia", L"O Gün Gördüğüm Gece Gökyüzü");
 			break;
 		case 8540:
-			a = LL2(L"偽りの時間", L"False Time");
+			a = LL14(L"偽りの時間", L"False Time", L"Temps Fictif", L"Tempo Falso", L"Tiempo Falso", L"거짓의 시간", L"虚假的时间", L"الوقت الزائف", L"Ложное Время", L"Falsche Zeit", L"Tempo Falso", L"Valse Tijd", L"Fałszywy Czas", L"Sahte Zaman");
 			break;
 		case 8541:
-			a = LL2(L"紅き翼 -新たなる風-", L"Crimson Wings -New Wind-");
+			a = LL14(L"紅き翼 -新たなる風-", L"Crimson Wings -New Wind-", L"Ailes Cramoisies -Nouveau Vent-", L"Ali Cremisi -Nuovo Vento-", L"Alas Carmesí -Nuevo Viento-", L"붉은 날개 -새로운 바람-", L"绯红之翼 -新风-", L"الأجنحة القرمزية -ريح جديدة-", L"Багровые Крылья -Новый Ветер-", L"Karmesinrote Flügel -Neuer Wind-", L"Asas Carmesim -Novo Vento-", L"Karmozijnrode Vleugels -Nieuwe Wind-", L"Karmazynowe Skrzydła -Nowy Wiatr-", L"Kırmızı Kanatlar -Yeni Rüzgar-");
 			break;
 		case 8550:
-			a = LL2(L"再会", L"Reunion");
+			a = LL14(L"再会", L"Reunion", L"Retrouvailles", L"Riunione", L"Reencuentro", L"재회", L"重逢", L"لقاء ثانٍ", L"Воссоединение", L"Wiedersehen", L"Reencontro", L"Hereniging", L"Ponowne Spotkanie", L"Yeniden Buluşma");
 			break;
 		case 8551:
-			a = LL2(L"かけがえのない人へ", L"To Someone Irreplaceable");
+			a = LL14(L"かけがえのない人へ", L"To Someone Irreplaceable", L"À Quelqu'un d'Irremplaçable", L"A Qualcuno di Insostituibile", L"A Alguien Insustituible", L"소중한 사람에게", L"致无可替代之人", L"إلى شخص لا يُعوَّض", L"Незаменимому Человеку", L"An Jemanden Unersetzlichen", L"A Alguém Insubstituível", L"Aan Iemand Onvervangbaar", L"Do Kogoś Niezastąpionego", L"Vazgeçilmez Birine");
 			break;
 		case 8552:
-			a = LL2(L"惜しむように、愛おしむように", L"Cherishing, Treasuring");
+			a = LL14(L"惜しむように、愛おしむように", L"Cherishing, Treasuring", L"Chérissant, Précieux", L"Custodendo, Tesaurizzando", L"Atesorando, Valorando", L"아쉬워하듯, 소중히 여기듯", L"如同珍惜，如同爱护", L"باعتزاز وتقدير", L"Дорожа, Храня", L"Kosten, Schätzen", L"Prezando, Valorizando", L"Koesterend, Waarderend", L"Ceniąc, Pielęgnując", L"Değer Vererek, Sevgiyle");
 			break;
 		case 8553:
-			a = LL2(L"ライノの花が咲く頃", L"When the Rhino Flower Blooms");
+			a = LL14(L"ライノの花が咲く頃", L"When the Rhino Flower Blooms", L"Quand la Fleur de Rhino s'Épanouit", L"Quando il Fiore di Rhino Sboccia", L"Cuando Florece la Flor de Rhino", L"라이노 꽃이 필 무렵", L"莱诺花盛开之时", L"حين تتفتح زهرة رينو", L"Когда Цветёт Цветок Райно", L"Wenn die Rhino-Blume Blüht", L"Quando a Flor de Rhino Desabrocha", L"Als de Rhino Bloem Bloeit", L"Gdy Kwitnie Kwiat Rhino", L"Rhino Çiçeği Açtığında");
 			break;
 		case 8555:
-			a = LL2(L"戦場の掟", L"Rules of Battlefield");
+			a = LL14(L"戦場の掟", L"Rules of Battlefield", L"Règles du Champ de Bataille", L"Regole del Campo di Battaglia", L"Reglas del Campo de Batalla", L"전장의 법칙", L"战场的规则", L"قواعد ساحة المعركة", L"Правила Поля Боя", L"Regeln des Schlachtfeldes", L"Regras do Campo de Batalha", L"Regels van het Slagveld", L"Zasady Pola Bitwy", L"Savaş Alanının Kuralları");
 			break;
 		case 8556:
 			a = L"Remaining Glow";
 			break;
 		case 8557:
-			a = LL2(L"深淵の魔女", L"Witch of the Abyss");
+			a = LL14(L"深淵の魔女", L"Witch of the Abyss", L"Sorcière de l'Abîme", L"Strega dell'Abisso", L"Bruja del Abismo", L"심연의 마녀", L"深渊的魔女", L"ساحرة الهاوية", L"Ведьма Бездны", L"Hexe des Abgrunds", L"Bruxa do Abismo", L"Heks van de Afgrond", L"Wiedźma Otchłani", L"Uçurumun Cadısı");
 			break;
 		case 8558:
 			a = L"ALTINA";
 			break;
 		case 8559:
-			a = LL2(L"威風", L"Dignity");
+			a = LL14(L"威風", L"Dignity", L"Dignité", L"Dignità", L"Dignidad", L"위풍", L"威风", L"هيبة", L"Достоинство", L"Würde", L"Dignidade", L"Waardigheid", L"Godność", L"Haysiyet");
 			break;
 		case 8560:
-			a = LL2(L"一撃に賭ける", L"Bet on One Strike");
+			a = LL14(L"一撃に賭ける", L"Bet on One Strike", L"Miser sur un Seul Coup", L"Scommettere su un Solo Colpo", L"Apostar por un Solo Golpe", L"일격에 건다", L"赌在一击", L"المراهنة على ضربة واحدة", L"Ставить на Один Удар", L"Auf einen Schlag Setzen", L"Apostar em um Único Golpe", L"Alles op Één Slag Zetten", L"Postawić na Jeden Cios", L"Tek Darbeye Bahse Girmek");
 			break;
 		case 8561:
-			a = LL2(L"ユミル渓谷道", L"Ymir Valley Road");
+			a = LL14(L"ユミル渓谷道", L"Ymir Valley Road", L"Route de la Vallée de Ymir", L"Strada della Valle di Ymir", L"Camino del Valle de Ymir", L"유미르 계곡도", L"尤弥尔谷道", L"طريق وادي يمير", L"Дорога Долины Имир", L"Ymir-Talstraße", L"Estrada do Vale de Ymir", L"Ymir Valleiroute", L"Droga Doliny Ymir", L"Ymir Vadi Yolu");
 			break;
 		case 8562:
 			a = L"Awakening";
@@ -7972,97 +9079,97 @@ void CWread::wavread()
 			a = L"Blitzkrieg";
 			break;
 		case 8564:
-			a = LL2(L"魔王の凱歌", L"Demon Lord's Triumph");
+			a = LL14(L"魔王の凱歌", L"Demon Lord's Triumph", L"Triomphe du Seigneur Démon", L"Trionfo del Signore dei Demoni", L"Triunfo del Señor Demonio", L"마왕의 개가", L"魔王的凯歌", L"نشيد انتصار ملك الشياطين", L"Триумф Повелителя Демонов", L"Triumph des Dämonenkönigs", L"Triunfo do Senhor dos Demônios", L"Triomf van de Demonenkoning", L"Triumf Władcy Demonów", L"Şeytan Lordu'nun Zaferi");
 			break;
 		case 8566:
-			a = LL2(L"内なる黄昏", L"Inner Twilight");
+			a = LL14(L"内なる黄昏", L"Inner Twilight", L"Crépuscule Intérieur", L"Crepuscolo Interiore", L"Crepúsculo Interior", L"내면의 황혼", L"内心的黄昏", L"الغسق الداخلي", L"Внутренние Сумерки", L"Innere Dämmerung", L"Crepúsculo Interior", L"Innerlijke Schemering", L"Wewnętrzny Zmierzch", L"İç Alacakaranlık");
 			break;
 		case 8567:
-			a = LL2(L"蘇る記憶", L"Awakened Memories");
+			a = LL14(L"蘇る記憶", L"Awakened Memories", L"Souvenirs Ressuscités", L"Ricordi Risvegliati", L"Recuerdos Resucitados", L"되살아나는 기억", L"苏醒的记忆", L"ذكريات تستيقظ", L"Пробуждённые Воспоминания", L"Erwachte Erinnerungen", L"Memórias Despертadas", L"Ontwakende Herinneringen", L"Przebudzone Wspomnienia", L"Uyanan Anılar");
 			break;
 		case 8570:
-			a = LL2(L"静かな決意", L"Quiet Resolution");
+			a = LL14(L"静かな決意", L"Quiet Resolution", L"Résolution Silencieuse", L"Risoluzione Silenziosa", L"Resolución Silenciosa", L"조용한 결의", L"静静的决意", L"عزم هادئ", L"Тихая Решимость", L"Stille Entschlossenheit", L"Resolução Silenciosa", L"Stille Vastberadenheid", L"Cicha Determinacja", L"Sessiz Kararlılık");
 			break;
 		case 8571:
-			a = LL2(L"乾坤一擲", L"All or Nothing");
+			a = LL14(L"乾坤一擲", L"All or Nothing", L"Tout ou Rien", L"Tutto o Niente", L"Todo o Nada", L"건곤일척", L"孤注一掷", L"كل شيء أو لا شيء", L"Всё или Ничего", L"Alles oder Nichts", L"Tudo ou Nada", L"Alles of Niets", L"Wszystko albo Nic", L"Ya Hep Ya Hiç");
 			break;
 		case 8572:
-			a = LL2(L"交戦", L"Combat");
+			a = LL14(L"交戦", L"Combat", L"Combat", L"Combattimento", L"Combate", L"교전", L"交战", L"اشتباك", L"Бой", L"Kampf", L"Combate", L"Gevecht", L"Walka", L"Muharebe");
 			break;
 		case 8573:
-			a = LL2(L"効果音", L"Sound Effect");
+			a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 			break;
 		case 8600:
-			a = LL2(L"大市の賑わい", L"Bustling Market");
+			a = LL14(L"大市の賑わい", L"Bustling Market", L"Marché Animé", L"Mercato Vivace", L"Mercado Animado", L"큰 시장의 활기", L"大市场的热闹", L"سوق صاخبة", L"Оживлённый Рынок", L"Belebter Markt", L"Mercado Movimentado", L"Drukke Markt", L"Tętniący Życiem Rynek", L"Kalabalık Pazar");
 			break;
 		case 8601:
-			a = LL2(L"剣の遊戯", L"Sword Play");
+			a = LL14(L"剣の遊戯", L"Sword Play", L"Jeu d'Épée", L"Gioco di Spada", L"Juego de Espada", L"검의 유희", L"剑的游戏", L"لعبة السيف", L"Игра на Мечах", L"Schwertkampfspiel", L"Jogo de Espada", L"Zwaardspel", L"Gra na Miecze", L"Kılıç Oyunu");
 			break;
 		case 8602:
-			a = LL2(L"紙一重の攻防", L"Close Fight");
+			a = LL14(L"紙一重の攻防", L"Close Fight", L"Combat Serré", L"Combattimento Serrato", L"Combate Reñido", L"종이 한 장 차이의 공방", L"纸之一线的攻防", L"قتال متقارب", L"Напряжённый Бой", L"Knappes Gefecht", L"Luta Apertada", L"Nipt Gevecht", L"Zacięta Walka", L"Çekişmeli Dövüş");
 			break;
 		case 8603:
-			a = LL2(L"走れマッハ号!", L"Run Mach Train!");
+			a = LL14(L"走れマッハ号!", L"Run Mach Train!", L"En Avant Mach Train!", L"Corri Treno Mach!", L"¡Corre Tren Mach!", L"달려라 마하호!", L"快跑马赫号！", L"أيها القطار الصاروخي، اركض!", L"Беги, Поезд Мах!", L"Lauf, Mach-Zug!", L"Corra Trem Mach!", L"Ren Mach Trein!", L"Biegnij Pociągu Mach!", L"Koş Mach Treni!");
 			break;
 		case 8605:
-			a = LL2(L"効果音", L"Sound Effect");
+			a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 			break;
 		case 8606:
-			a = LL2(L"効果音", L"Sound Effect");
+			a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 			break;
 		case 8607:
-			a = LL2(L"星屑のカンタータ", L"Cantata of Stardust");
+			a = LL14(L"星屑のカンタータ", L"Cantata of Stardust", L"Cantate de Poussière d'Étoiles", L"Cantata di Polvere di Stelle", L"Cantata de Polvo de Estrellas", L"별가루의 칸타타", L"星尘康塔塔", L"كانتاتا غبار النجوم", L"Кантата Звёздной Пыли", L"Kantate des Sternenstaubs", L"Cantata de Poeira Estelar", L"Cantate van Sterrenstof", L"Kantata Gwiazdowego Pyłu", L"Yıldız Tozu Kantası");
 			break;
 		case 8608:
-			a = LL2(L"効果音", L"Sound Effect");
+			a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 			break;
 		case 8609:
 			a = L"Sonata No.45";
 			break;
 		case 8610:
-			a = LL2(L"効果音", L"Sound Effect");
+			a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 			break;
 		case 8620:
-			a = LL2(L"雪ウサギを追いかけて", L"Chasing the Snow Rabbit");
+			a = LL14(L"雪ウサギを追いかけて", L"Chasing the Snow Rabbit", L"Chasser le Lapin des Neiges", L"Inseguire il Coniglio della Neve", L"Persiguiendo al Conejo de Nieve", L"눈토끼를 쫓아서", L"追逐雪兔", L"ملاحقة أرنب الثلج", L"Погоня за Снежным Кроликом", L"Das Schneekaninchen Jagen", L"Perseguindo o Coelho da Neve", L"Het Sneeuwkonijn Najagen", L"Goniąc Śnieżnego Królika", L"Kar Tavşanını Kovalayarak");
 			break;
 		case 8621:
 			a = L"Take The Windward!";
 			break;
 		case 8622:
-			a = LL2(L"効果音", L"Sound Effect");
+			a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 			break;
 		case 8623:
-			a = LL2(L"効果音", L"Sound Effect");
+			a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 			break;
 		case 8624:
-			a = LL2(L"効果音", L"Sound Effect");
+			a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 			break;
 		case 8625:
-			a = LL2(L"効果音", L"Sound Effect");
+			a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音效", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 			break;
 		case 8627:
-			a = LL2(L"効果音", L"Sound Effect");
+			a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音効", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 			break;
 		case 8628:
-			a = LL2(L"不明", L"Unknown");
+			a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
 			break;
 		case 8629:
-			a = LL2(L"効果音", L"Sound Effect");
+			a = LL14(L"効果音", L"Sound Effect", L"Effet sonore", L"Effetto sonoro", L"Efecto de sonido", L"효과음", L"音効", L"تأثير صوتي", L"Звуковой эффект", L"Soundeffekt", L"Efeito sonoro", L"Geluidseffect", L"Efekt dźwiękowy", L"Ses efekti");
 			break;
 		case 8700:
-			a = LL2(L"音楽", L"Music");
+			a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			break;
 		case 8703:
-			a = LL2(L"音楽", L"Music");
+			a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			break;
 		case 8704:
-			a = LL2(L"音楽", L"Music");
+			a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			break;
 		case 8710:
-			a = LL2(L"音楽", L"Music");
+			a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			break;
 		case 8711:
-			a = LL2(L"音楽", L"Music");
+			a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			break;
 		}
 		stitle = a;
@@ -8121,520 +9228,953 @@ void CWread::wavread()
 		int fff = 0;
 		//Ys X
 		if (a == L"y_act_e002.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_act_e002_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b100.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b100_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b200.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b200_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b210.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b210_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b300.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b300_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b400.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b400_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b500.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b500_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b510.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b510_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b520.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b520_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b610.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b610_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b620.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b620_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b700.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b700_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b710.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b710_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b720.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_b720_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_bgm_none.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d100.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d100_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d200.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d200_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d400.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d400_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d410.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d410_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d500.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d500_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d600.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d600_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d710.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d710_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d800.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d800_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d900.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d900_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d1010.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_d1010_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e001.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e002.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e003.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e004.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e005.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e006.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e007.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e007_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e008.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e009.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e010.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e011.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e011_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e012.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e013.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e014.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e015.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_e015_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f100.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f100_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f110.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f110_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f120.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f120_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f130.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f130_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f140.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f140_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f150.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f150_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f160.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f160_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f200.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f200_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f210.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f210_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f220.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f220_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f230.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f230_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f310.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_f310_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_gameover.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_op.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_op_lp.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t100.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t100_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t200.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t200_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t300.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t300_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t301.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t301_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t500.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t500_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t600.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_t600_s1.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 		if (a == L"y_title.opus") {
-			a = LL2(L"音楽", L"Music");
+						a = LL14(L"音楽", L"Music", L"Musique", L"Musica", L"Música", L"음악", L"音乐", L"موسيقى", L"Музыка", L"Musik", L"Música", L"Muziek", L"Muzyka", L"Müzik");
 			fff = 1;
 		}
 
+		CString ft = filen.Right(filen.GetLength() - filen.ReverseFind(L'\\') - 1);
+		//Ys X
+		if (ft == L"y_act_e002.opus") {
+			a = L"Operation SANDRAS";
+			fff = 1;
+		}
+		if (ft == L"y_act_e002_s1.opus") {
+			a = LL14(L"Operation SANDRAS(重低音)", L"Operation SANDRAS (Bass Boost)", L"Operation SANDRAS (Renfort graves)", L"Operation SANDRAS (Rinforzo bassi)", L"Operation SANDRAS (Refuerzo graves)", L"Operation SANDRAS (저음 강화)", L"Operation SANDRAS (重低音)", L"Operation SANDRAS (تعزيز الجهير)", L"Operation SANDRAS (Усиление низких)", L"Operation SANDRAS (Bassverstärkung)", L"Operation SANDRAS (Reforço graves)", L"Operation SANDRAS (Basversterking)", L"Operation SANDRAS (Wzmocnienie basów)", L"Operation SANDRAS (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b100.opus") {
+			a = L"Overblaze";
+			fff = 1;
+		}
+		if (ft == L"y_b100_s1.opus") {
+			a = LL14(L"Overblaze(重低音)", L"Overblaze (Bass Boost)", L"Overblaze (Renfort graves)", L"Overblaze (Rinforzo bassi)", L"Overblaze (Refuerzo graves)", L"Overblaze (저음 강화)", L"Overblaze (重低音)", L"Overblaze (تعزيز الجهير)", L"Overblaze (Усиление низких)", L"Overblaze (Bassverstärkung)", L"Overblaze (Reforço graves)", L"Overblaze (Basversterking)", L"Overblaze (Wzmocnienie basów)", L"Overblaze (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b200.opus") {
+			a = L"Through the North Wind";
+			fff = 1;
+		}
+		if (ft == L"y_b200_s1.opus") {
+			a = LL14(L"Through the North Wind(重低音)", L"Through the North Wind (Bass Boost)", L"Through the North Wind (Renfort graves)", L"Through the North Wind (Rinforzo bassi)", L"Through the North Wind (Refuerzo graves)", L"Through the North Wind (저음 강화)", L"Through the North Wind (重低音)", L"Through the North Wind (تعزيز الجهير)", L"Through the North Wind (Усиление низких)", L"Through the North Wind (Bassverstärkung)", L"Through the North Wind (Reforço graves)", L"Through the North Wind (Basversterking)", L"Through the North Wind (Wzmocnienie basów)", L"Through the North Wind (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b210.opus") {
+			a = LL14(L"高鳴る鼓動", L"Pounding Heartbeat", L"Battement de cœur saccadé", L"Battito accelerato", L"Latido palpitante", L"고동치는 심장", L"劇烈的心跳", L"نبضات القلب المتسارعة", L"Учащенное сердцебиение", L"Pochendes Herzklopfen", L"Batida forte do coração", L"Bonzend hart", L"Łomoczące serce", L"Küt Küt Atan Kalp");
+			fff = 1;
+		}
+		if (ft == L"y_b210_s1.opus") {
+			a = LL14(L"高鳴る鼓動(重低音)", L"Pounding Heartbeat (Bass Boost)", L"Pounding Heartbeat (Renfort graves)", L"Pounding Heartbeat (Rinforzo bassi)", L"Pounding Heartbeat (Refuerzo graves)", L"Pounding Heartbeat (저음 강화)", L"Pounding Heartbeat (重低音)", L"Pounding Heartbeat (تعزيز الجهير)", L"Pounding Heartbeat (Усиление низких)", L"Pounding Heartbeat (Bassverstärkung)", L"Pounding Heartbeat (Reforço graves)", L"Pounding Heartbeat (Basversterking)", L"Pounding Heartbeat (Wzmocnienie basów)", L"Pounding Heartbeat (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b300.opus") {
+			a = LL14(L"石火の如く", L"Like Flint", L"Comme le silex", L"Come la selce", L"Como el sílex", L"부싯돌처럼", L"如同火石", L"مثل الصوان", L"Словно кремень", L"Wie Feuerstein", L"Como pederneira", L"Als vuursteen", L"Jak krzemień", L"Çakmak Taşı Gibi");
+			fff = 1;
+		}
+		if (ft == L"y_b300_s1.opus") {
+			a = LL14(L"石火の如く(重低音)", L"Like Flint (Bass Boost)", L"Like Flint (Renfort graves)", L"Like Flint (Rinforzo bassi)", L"Like Flint (Refuerzo graves)", L"Like Flint (저음 강화)", L"Like Flint (重低音)", L"Like Flint (تعزيز الجهير)", L"Like Flint (Усиление низких)", L"Like Flint (Bassverstärkung)", L"Like Flint (Reforço graves)", L"Like Flint (Basversterking)", L"Like Flint (Wzmocnienie basów)", L"Like Flint (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b400.opus") {
+			a = L"Can You Do It";
+			fff = 1;
+		}
+		if (ft == L"y_b400_s1.opus") {
+			a = LL14(L"Can You Do It(重低音)", L"Can You Do It (Bass Boost)", L"Can You Do It (Renfort graves)", L"Can You Do It (Rinforzo bassi)", L"Can You Do It (Refuerzo graves)", L"Can You Do It (저음 강화)", L"Can You Do It (重低音)", L"Can You Do It (تعزيز الجهير)", L"Can You Do It (Усиление низких)", L"Can You Do It (Bassverstärkung)", L"Can You Do It (Reforço graves)", L"Can You Do It (Basversterking)", L"Can You Do It (Wzmocnienie basów)", L"Can You Do It (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b500.opus") {
+			a = LL14(L"BERSERK -戦斧の咆哮-", L"BERSERK -Roar of the Battle Axe-", L"BERSERK -Rugissement de la hache de guerre-", L"BERSERK -Ruggito dell'ascia da battaglia-", L"BERSERK -Rugido del hacha de batalla-", L"BERSERK -전부의 포효-", L"BERSERK -戰斧的咆哮-", L"BERSERK - زئير فأس المعركة", L"BERSERK -Рев боевого топора-", L"BERSERK -Brüllen der Streitaxt-", L"BERSERK -Rugido do machado de batalha-", L"BERSERK -Geknal van de strijdbijl-", L"BERSERK -Ryk topora wojennego-", L"BERSERK -Savaş Baltasının Kükreyişi-");
+			fff = 1;
+		}
+		if (ft == L"y_b500_s1.opus") {
+			a = LL14(L"BERSERK -戦斧の咆哮-(重低音)", L"BERSERK -Roar of the Battle Axe- (Bass Boost)", L"BERSERK -Roar of the Battle Axe- (Renfort graves)", L"BERSERK -Roar of the Battle Axe- (Rinforzo bassi)", L"BERSERK -Roar of the Battle Axe- (Refuerzo graves)", L"BERSERK -Roar of the Battle Axe- (저음 강화)", L"BERSERK -Roar of the Battle Axe- (重低音)", L"BERSERK -Roar of the Battle Axe- (تعزيز الجهير)", L"BERSERK -Roar of the Battle Axe- (Усиление низких)", L"BERSERK -Roar of the Battle Axe- (Bassverstärkung)", L"BERSERK -Roar of the Battle Axe- (Reforço graves)", L"BERSERK -Roar of the Battle Axe- (Basversterking)", L"BERSERK -Roar of the Battle Axe- (Wzmocnienie basów)", L"BERSERK -Roar of the Battle Axe- (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b510.opus") {
+			a = LL14(L"悪意の洗礼", L"Baptism of Malice", L"Baptême de malice", L"Battesimo di malizia", L"Bautismo de malicia", L"악의의 세례", L"惡意的洗禮", L"معمودية الخبث", L"Крещение злобой", L"Taufe der Bosheit", L"Batismo de malícia", L"Doop van kwaadaardigheid", L"Chrzest złośliwości", L"Garez Vaftizi");
+			fff = 1;
+		}
+		if (ft == L"y_b510_s1.opus") {
+			a = LL14(L"悪意の洗礼(重低音)", L"Baptism of Malice (Bass Boost)", L"Baptism of Malice (Renfort graves)", L"Baptism of Malice (Rinforzo bassi)", L"Baptism of Malice (Refuerzo graves)", L"Baptism of Malice (저음 강화)", L"Baptism of Malice (重低音)", L"Baptism of Malice (تعزيز الجهير)", L"Baptism of Malice (Усиление низких)", L"Baptism of Malice (Bassverstärkung)", L"Baptism of Malice (Reforço graves)", L"Baptism of Malice (Basversterking)", L"Baptism of Malice (Wzmocnienie basów)", L"Baptism of Malice (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b520.opus") {
+			a = L"The Ultimate Pleasure in My Hands";
+			fff = 1;
+		}
+		if (ft == L"y_b520_s1.opus") {
+			a = LL14(L"The Ultimate Pleasure in My Hands(重低音)", L"The Ultimate Pleasure in My Hands (Bass Boost)", L"The Ultimate Pleasure in My Hands (Renfort graves)", L"The Ultimate Pleasure in My Hands (Rinforzo bassi)", L"The Ultimate Pleasure in My Hands (Refuerzo graves)", L"The Ultimate Pleasure in My Hands (저음 강화)", L"The Ultimate Pleasure in My Hands (重低音)", L"The Ultimate Pleasure in My Hands (تعزيز الجهير)", L"The Ultimate Pleasure in My Hands (Усиление низких)", L"The Ultimate Pleasure in My Hands (Bassverstärkung)", L"The Ultimate Pleasure in My Hands (Reforço graves)", L"The Ultimate Pleasure in My Hands (Basversterking)", L"The Ultimate Pleasure in My Hands (Wzmocnienie basów)", L"The Ultimate Pleasure in My Hands (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b610.opus") {
+			a = LL14(L"辿り着いた極光の下で", L"Under the Northern Lights", L"Sous les aurores boréales", L"Sotto l'aurora boreale", L"Bajo la aurora boreal", L"다다른 극광 아래에서", L"抵達極光之下", L"تحت أضواء الشمال", L"Под северным сиянием", L"Unter dem Nordlicht", L"Sob a aurora boreal", L"Onder het noorderlicht", L"Pod zorzą polarną", L"Kuzey Işıkları Altında");
+			fff = 1;
+		}
+		if (ft == L"y_b610_s1.opus") {
+			a = LL14(L"辿り着いた極光の下で(重低音)", L"Under the Northern Lights (Bass Boost)", L"Under the Northern Lights (Renfort graves)", L"Under the Northern Lights (Rinforzo bassi)", L"Under the Northern Lights (Refuerzo graves)", L"Under the Northern Lights (저음 강화)", L"Under the Northern Lights (重低音)", L"Under the Northern Lights (تعزيز الجهير)", L"Under the Northern Lights (Усиление низких)", L"Under the Northern Lights (Bassverstärkung)", L"Under the Northern Lights (Reforço graves)", L"Under the Northern Lights (Basversterking)", L"Under the Northern Lights (Wzmocnienie basów)", L"Under the Northern Lights (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b620.opus") {
+			a = L"Nordics Saga -The Endless Bloody Sea-";
+			fff = 1;
+		}
+		if (ft == L"y_b620_s1.opus") {
+			a = LL14(L"Nordics Saga -The Endless Bloody Sea-(重低音)", L"Nordics Saga -The Endless Bloody Sea- (Bass Boost)", L"Nordics Saga -The Endless Bloody Sea- (Renfort graves)", L"Nordics Saga -The Endless Bloody Sea- (Rinforzo bassi)", L"Nordics Saga -The Endless Bloody Sea- (Refuerzo graves)", L"Nordics Saga -The Endless Bloody Sea- (저음 강화)", L"Nordics Saga -The Endless Bloody Sea- (重低音)", L"Nordics Saga -The Endless Bloody Sea- (تعزيز الجهير)", L"Nordics Saga -The Endless Bloody Sea- (Усиление низких)", L"Nordics Saga -The Endless Bloody Sea- (Bassverstärkung)", L"Nordics Saga -The Endless Bloody Sea- (Reforço graves)", L"Nordics Saga -The Endless Bloody Sea- (Basversterking)", L"Nordics Saga -The Endless Bloody Sea- (Wzmocnienie basów)", L"Nordics Saga -The Endless Bloody Sea- (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b700.opus") {
+			a = L"Ready to Fire!";
+			fff = 1;
+		}
+		if (ft == L"y_b700_s1.opus") {
+			a = LL14(L"Ready to Fire!(重低音)", L"Ready to Fire! (Bass Boost)", L"Ready to Fire! (Renfort graves)", L"Ready to Fire! (Rinforzo bassi)", L"Ready to Fire! (Refuerzo graves)", L"Ready to Fire! (저음 강화)", L"Ready to Fire! (重低音)", L"Ready to Fire! (تعزيز الجهير)", L"Ready to Fire! (Усиление низких)", L"Ready to Fire! (Bassverstärkung)", L"Ready to Fire! (Reforço graves)", L"Ready to Fire! (Basversterking)", L"Ready to Fire! (Wzmocnienie basów)", L"Ready to Fire! (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b710.opus") {
+			a = L"Hello, Those Who Can't Die";
+			fff = 1;
+		}
+		if (ft == L"y_b710_s1.opus") {
+			a = LL14(L"Hello, Those Who Can't Die(重低音)", L"Hello, Those Who Can't Die (Bass Boost)", L"Hello, Those Who Can't Die (Renfort graves)", L"Hello, Those Who Can't Die (Rinforzo bassi)", L"Hello, Those Who Can't Die (Refuerzo graves)", L"Hello, Those Who Can't Die (저음 강화)", L"Hello, Those Who Can't Die (重低音)", L"Hello, Those Who Can't Die (تعزيز الجهير)", L"Hello, Those Who Can't Die (Усиление низких)", L"Hello, Those Who Can't Die (Bassverstärkung)", L"Hello, Those Who Can't Die (Reforço graves)", L"Hello, Those Who Can't Die (Basversterking)", L"Hello, Those Who Can't Die (Wzmocnienie basów)", L"Hello, Those Who Can't Die (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_b720.opus") {
+			a = L"Landing Warfare";
+			fff = 1;
+		}
+		if (ft == L"y_b720_s1.opus") {
+			a = LL14(L"Landing Warfare(重低音)", L"Landing Warfare (Bass Boost)", L"Landing Warfare (Renfort graves)", L"Landing Warfare (Rinforzo bassi)", L"Landing Warfare (Refuerzo graves)", L"Landing Warfare (저음 강화)", L"Landing Warfare (重低音)", L"Landing Warfare (تعزيز الجهير)", L"Landing Warfare (Усиление низких)", L"Landing Warfare (Bassverstärkung)", L"Landing Warfare (Reforço graves)", L"Landing Warfare (Basversterking)", L"Landing Warfare (Wzmocnienie basów)", L"Landing Warfare (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_bgm_none.opus") {
+			a = LL14(L"無音", L"Silence", L"Silence", L"Silenzio", L"Silencio", L"무음", L"無音", L"صمت", L"Тишина", L"Stille", L"Silêncio", L"Stilte", L"Cisza", L"Sessizlik");
+			fff = 1;
+		}
+		if (ft == L"y_d100.opus") {
+			a = LL14(L"光届かぬその奥に", L"In the Depths Where Light Doesn't Reach", L"Dans les profondeurs hors de portée de la lumière", L"Nelle profondità dove non arriva la luce", L"En las profundidades donde no llega la luz", L"빛이 닿지 않는 그 깊은 곳에", L"光線無法到達の深處", L"في الأعماق حيث لا يصل الضوء", L"В глубинах, куда не доходит свет", L"In den Tiefen, die kein Licht erreicht", L"Nas profundezas onde a luz não chega", L"In de diepten waar geen licht komt", L"W głębinach, gdzie nie sięga światło", L"Işığın Ulaşamadığı Derinliklerde");
+			fff = 1;
+		}
+		if (ft == L"y_d100_s1.opus") {
+			a = LL14(L"光届かぬその奥に(重低音)", L"In the Depths Where Light Doesn't Reach (Bass Boost)", L"In the Depths Where Light Doesn't Reach (Renfort graves)", L"In the Depths Where Light Doesn't Reach (Rinforzo bassi)", L"In the Depths Where Light Doesn't Reach (Refuerzo graves)", L"In the Depths Where Light Doesn't Reach (저음 강화)", L"In the Depths Where Light Doesn't Reach (重低音)", L"In the Depths Where Light Doesn't Reach (تعزيز الجهير)", L"In the Depths Where Light Doesn't Reach (Усиление низких)", L"In the Depths Where Light Doesn't Reach (Bassverstärkung)", L"In the Depths Where Light Doesn't Reach (Reforço graves)", L"In the Depths Where Light Doesn't Reach (Basversterking)", L"In the Depths Where Light Doesn't Reach (Wzmocnienie basów)", L"In the Depths Where Light Doesn't Reach (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_d200.opus") {
+			a = L"Eerie Stillness";
+			fff = 1;
+		}
+		if (ft == L"y_d200_s1.opus") {
+			a = LL14(L"Eerie Stillness(重低音)", L"Eerie Stillness (Bass Boost)", L"Eerie Stillness (Renfort graves)", L"Eerie Stillness (Rinforzo bassi)", L"Eerie Stillness (Refuerzo graves)", L"Eerie Stillness (저음 강화)", L"Eerie Stillness (重低音)", L"Eerie Stillness (تعزيز الجهير)", L"Eerie Stillness (Усиление низких)", L"Eerie Stillness (Bassverstärkung)", L"Eerie Stillness (Reforço graves)", L"Eerie Stillness (Basversterking)", L"Eerie Stillness (Wzmocnienie basów)", L"Eerie Stillness (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_d400.opus") {
+			a = LL14(L"飽くなき渇望", L"Insatiable Thirst", L"Soif insatiable", L"Sete insaziabile", L"Sed insaciable", L"끝없는 갈망", L"永無止境的渴望", L"عطش لا يرتوي", L"Ненасытная жажда", L"Unstillbares Verlangen", L"Sede insaciável", L"Onverzadigbare dorst", L"Nienasycone pragnienie", L"Doymak Bilmez Susuzluk");
+			fff = 1;
+		}
+		if (ft == L"y_d400_s1.opus") {
+			a = LL14(L"飽くなき渇望(重低音)", L"Insatiable Thirst (Bass Boost)", L"Insatiable Thirst (Renfort graves)", L"Insatiable Thirst (Rinforzo bassi)", L"Insatiable Thirst (Refuerzo graves)", L"Insatiable Thirst (저음 강화)", L"Insatiable Thirst (重低音)", L"Insatiable Thirst (تعزيز الجهير)", L"Insatiable Thirst (Усиление низких)", L"Insatiable Thirst (Bassverstärkung)", L"Insatiable Thirst (Reforço graves)", L"Insatiable Thirst (Basversterking)", L"Insatiable Thirst (Wzmocnienie basów)", L"Insatiable Thirst (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_d410.opus") {
+			a = L"The Inner Darkness";
+			fff = 1;
+		}
+		if (ft == L"y_d410_s1.opus") {
+			a = LL14(L"The Inner Darkness(重低音)", L"The Inner Darkness (Bass Boost)", L"The Inner Darkness (Renfort graves)", L"The Inner Darkness (Rinforzo bassi)", L"The Inner Darkness (Refuerzo graves)", L"The Inner Darkness (저음 강화)", L"The Inner Darkness (重低音)", L"The Inner Darkness (تعزيز الجهير)", L"The Inner Darkness (Усиление низких)", L"The Inner Darkness (Bassverstärkung)", L"The Inner Darkness (Reforço graves)", L"The Inner Darkness (Basversterking)", L"The Inner Darkness (Wzmocnienie basów)", L"The Inner Darkness (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_d500.opus") {
+			a = L"Hardhearted Rock Line";
+			fff = 1;
+		}
+		if (ft == L"y_d500_s1.opus") {
+			a = LL14(L"Hardhearted Rock Line(重低音)", L"Hardhearted Rock Line (Bass Boost)", L"Hardhearted Rock Line (Renfort graves)", L"Hardhearted Rock Line (Rinforzo bassi)", L"Hardhearted Rock Line (Refuerzo graves)", L"Hardhearted Rock Line (저음 강화)", L"Hardhearted Rock Line (重低音)", L"Hardhearted Rock Line (تعزيز الجهير)", L"Hardhearted Rock Line (Усиление низких)", L"Hardhearted Rock Line (Bassverstärkung)", L"Hardhearted Rock Line (Reforço graves)", L"Hardhearted Rock Line (Basversterking)", L"Hardhearted Rock Line (Wzmocnienie basów)", L"Hardhearted Rock Line (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_d600.opus") {
+			a = LL14(L"夢の痕跡", L"Dream Traces", L"Traces de rêves", L"Tracce di sogni", L"Rastros de sueños", L"꿈의 흔적", L"夢的痕跡", L"آثار الأحلام", L"Следы снов", L"Traumspuren", L"Rastros de sonhos", L"Droomsporen", L"Ślady snów", L"Rüya İzleri");
+			fff = 1;
+		}
+		if (ft == L"y_d600_s1.opus") {
+			a = LL14(L"夢の痕跡(重低音)", L"Dream Traces (Bass Boost)", L"Dream Traces (Renfort graves)", L"Dream Traces (Rinforzo bassi)", L"Dream Traces (Refuerzo graves)", L"Dream Traces (저음 강화)", L"Dream Traces (重低音)", L"Dream Traces (تعزيز الجهير)", L"Dream Traces (Усиление низких)", L"Dream Traces (Bassverstärkung)", L"Dream Traces (Reforço graves)", L"Dream Traces (Basversterking)", L"Dream Traces (Wzmocnienie basów)", L"Dream Traces (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_d710.opus") {
+			a = LL14(L"甲鉄戦艦ナグルファ", L"Ironclad Battleship Naglfar", L"Cuirassé Naglfar", L"Corazzata Naglfar", L"Acorazado Naglfar", L"갑철전함 나글파", L"甲鐵戰艦 Naglfar", L"البارعة المدرعة Naglfar", L"Броненосец Нагльфар", L"Panzerschiff Naglfar", L"Encouraçado Naglfar", L"Slagschip Naglfar", L"Pancernik Naglfar", L"Zırhlı Savaş Gemisi Naglfar");
+			fff = 1;
+		}
+		if (ft == L"y_d710_s1.opus") {
+			a = LL14(L"甲鉄戦艦ナグルファ(重低音)", L"Ironclad Battleship Naglfar (Bass Boost)", L"Ironclad Battleship Naglfar (Renfort graves)", L"Ironclad Battleship Naglfar (Rinforzo bassi)", L"Ironclad Battleship Naglfar (Refuerzo graves)", L"Ironclad Battleship Naglfar (저음 강화)", L"Ironclad Battleship Naglfar (重低音)", L"Ironclad Battleship Naglfar (تعزيز الجهير)", L"Ironclad Battleship Naglfar (Усиление низких)", L"Ironclad Battleship Naglfar (Bassverstärkung)", L"Ironclad Battleship Naglfar (Reforço graves)", L"Ironclad Battleship Naglfar (Basversterking)", L"Ironclad Battleship Naglfar (Wzmocnienie basów)", L"Ironclad Battleship Naglfar (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_d800.opus") {
+			a = L"LILA -Innocent Wish-";
+			fff = 1;
+		}
+		if (ft == L"y_d800_s1.opus") {
+			a = LL14(L"LILA -Innocent Wish-(重低音)", L"LILA -Innocent Wish- (Bass Boost)", L"LILA -Innocent Wish- (Renfort graves)", L"LILA -Innocent Wish- (Rinforzo bassi)", L"LILA -Innocent Wish- (Refuerzo graves)", L"LILA -Innocent Wish- (저음 강화)", L"LILA -Innocent Wish- (重低音)", L"LILA -Innocent Wish- (تعزيز الجهير)", L"LILA -Innocent Wish- (Усиление низких)", L"LILA -Innocent Wish- (Bassverstärkung)", L"LILA -Innocent Wish- (Reforço graves)", L"LILA -Innocent Wish- (Basversterking)", L"LILA -Innocent Wish- (Wzmocnienie basów)", L"LILA -Innocent Wish- (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_d900.opus") {
+			a = LL14(L"エギル海底神殿", L"Egil Undersea Temple", L"Temple sous-marin d'Egil", L"Tempio sottomarino di Egil", L"Templo submarino de Egil", L"에길 해저신전", L"Egil 海底神殿", L"معبد Egil تحت البحر", L"Подводный храм Эгиля", L"Egil-Unterseetempel", L"Templo submarino de Egil", L"Egil onderzeese tempel", L"Podmorska świątynia Egila", L"Egil Denizaltı Tapınağı");
+			fff = 1;
+		}
+		if (ft == L"y_d900_s1.opus") {
+			a = LL14(L"エギル海底神殿(重低音)", L"Egil Undersea Temple (Bass Boost)", L"Egil Undersea Temple (Renfort graves)", L"Egil Undersea Temple (Rinforzo bassi)", L"Egil Undersea Temple (Refuerzo graves)", L"Egil Undersea Temple (저음 강화)", L"Egil Undersea Temple (重低音)", L"Egil Undersea Temple (تعزيز الجهير)", L"Egil Undersea Temple (Усиление низких)", L"Egil Undersea Temple (Bassverstärkung)", L"Egil Undersea Temple (Reforço graves)", L"Egil Undersea Temple (Basversterking)", L"Egil Undersea Temple (Wzmocnienie basów)", L"Egil Undersea Temple (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_d1010.opus") {
+			a = L"The Paradise Lost of Norman";
+			fff = 1;
+		}
+		if (ft == L"y_d1010_s1.opus") {
+			a = LL14(L"The Paradise Lost of Norman(重低音)", L"The Paradise Lost of Norman (Bass Boost)", L"The Paradise Lost of Norman (Renfort graves)", L"The Paradise Lost of Norman (Rinforzo bassi)", L"The Paradise Lost of Norman (Refuerzo graves)", L"The Paradise Lost of Norman (저음 강화)", L"The Paradise Lost of Norman (重低音)", L"The Paradise Lost of Norman (تعزيز الجهير)", L"The Paradise Lost of Norman (Усиление низких)", L"The Paradise Lost of Norman (Bassverstärkung)", L"The Paradise Lost of Norman (Reforço graves)", L"The Paradise Lost of Norman (Basversterking)", L"The Paradise Lost of Norman (Wzmocnienie basów)", L"The Paradise Lost of Norman (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_e001.opus") {
+			a = L"Yesterday's Journey, Tomorrow's Dream";
+			fff = 1;
+		}
+		if (ft == L"y_e002.opus") {
+			a = L"Surging Pressure";
+			fff = 1;
+		}
+		if (ft == L"y_e003.opus") {
+			a = L"Turn of the Tide";
+			fff = 1;
+		}
+		if (ft == L"y_e004.opus") {
+			a = LL14(L"あの時からずっと…", L"Ever Since That Day...", L"Depuis ce jour-là...", L"Da quel giorno...", L"Desde aquel día...", L"그때부터 줄곧...", L"從那時起一直...", L"منذ ذلك اليوم...", L"С того самого дня...", L"Seit jenem Tag...", L"Desde aquele dia...", L"Sinds die dag...", L"Od tamtego dnia...", L"O Günden Beri...");
+			fff = 1;
+		}
+		if (ft == L"y_e005.opus") {
+			a = L"Waver as the Wave";
+			fff = 1;
+		}
+		if (ft == L"y_e006.opus") {
+			a = LL14(L"切っても切れない絆", L"Unbreakable Bonds", L"Liens indéfectibles", L"Legami indissolubili", L"Vínculos inquebrantables", L"뗄래야 뗄 수 없는 인연", L"無法割捨的羈絆", L"روابط لا تنفصم", L"Неразрывные узы", L"Unzerbrechliche Bande", L"Laços inquebráveis", L"Onbreekbare banden", L"Nierozerwalne więzi", L"Yıkılmaz Bağlar");
+			fff = 1;
+		}
+		if (ft == L"y_e007.opus") {
+			a = LL14(L"灰色の深層", L"Gray Depths", L"Profondeurs grises", L"Profondità grigie", L"Profundidades grises", L"회색의 심층", L"灰色的深層", L"أعماق رمادية", L"Серые глубины", L"Graue Tiefen", L"Profundezas cinzentas", L"Grijze diepten", L"Szare głębiny", L"Gri Derinlikler");
+			fff = 1;
+		}
+		if (ft == L"y_e007_s1.opus") {
+			a = LL14(L"灰色の深層(重低音)", L"Gray Depths (Bass Boost)", L"Gray Depths (Renfort graves)", L"Gray Depths (Rinforzo bassi)", L"Gray Depths (Refuerzo graves)", L"Gray Depths (저음 강화)", L"Gray Depths (重低音)", L"Gray Depths (تعزيز الجهير)", L"Gray Depths (Усиление низких)", L"Gray Depths (Bassverstärkung)", L"Gray Depths (Reforço graves)", L"Gray Depths (Basversterking)", L"Gray Depths (Wzmocnienie basów)", L"Gray Depths (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_e008.opus") {
+			a = L"Premonition of Turmoil";
+			fff = 1;
+		}
+		if (ft == L"y_e009.opus") {
+			a = LL14(L"歪な願望", L"Twisted Desire", L"Désir tordu", L"Desiderio distorto", L"Deseo retorcido", L"비뚤어진 열망", L"扭曲的願望", L"رغبة ملتوية", L"Искаженное желание", L"Verdrehtes Verlangen", L"Desejo distorcido", L"Verdraaid verlangen", L"Skręcone pragnienie", L"Çarpık Arzu");
+			fff = 1;
+		}
+		if (ft == L"y_e010.opus") {
+			a = L"The Road so Far, the Future Ahead";
+			fff = 1;
+		}
+		if (ft == L"y_e011.opus") {
+			a = L"Violent Warriors";
+			fff = 1;
+		}
+		if (ft == L"y_e011_s1.opus") {
+			a = LL14(L"Violent Warriors(重低音)", L"Violent Warriors (Bass Boost)", L"Violent Warriors (Renfort graves)", L"Violent Warriors (Rinforzo bassi)", L"Violent Warriors (Refuerzo graves)", L"Violent Warriors (저음 강화)", L"Violent Warriors (重低音)", L"Violent Warriors (تعزيز الجهير)", L"Violent Warriors (Усиление низких)", L"Violent Warriors (Bassverstärkung)", L"Violent Warriors (Reforço graves)", L"Violent Warriors (Basversterking)", L"Violent Warriors (Wzmocnienie basów)", L"Violent Warriors (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_e012.opus") {
+			a = LL14(L"手筈通りに", L"As Planned", L"Comme prévu", L"Come pianificato", L"Como se planeó", L"계획대로", L"按照計畫", L"كما هو مخطط", L"Как и планировалось", L"Wie geplant", L"Como planejado", L"Zoals gepland", L"Zgodnie z planem", L"Planlandığı Gibi");
+			fff = 1;
+		}
+		if (ft == L"y_e013.opus") {
+			a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
+			fff = 1;
+		}
+		if (ft == L"y_e014.opus") {
+			a = L"ROLLO -Because of Its Purity-";
+			fff = 1;
+		}
+		if (ft == L"y_e015.opus") {
+			a = L"Deep Unconscious";
+			fff = 1;
+		}
+		if (ft == L"y_e015_s1.opus") {
+			a = LL14(L"Deep Unconscious(重低音)", L"Deep Unconscious (Bass Boost)", L"Deep Unconscious (Renfort graves)", L"Deep Unconscious (Rinforzo bassi)", L"Deep Unconscious (Refuerzo graves)", L"Deep Unconscious (저음 강화)", L"Deep Unconscious (重低音)", L"Deep Unconscious (تعزيز الجهير)", L"Deep Unconscious (Усиление низких)", L"Deep Unconscious (Bassverstärkung)", L"Deep Unconscious (Reforço graves)", L"Deep Unconscious (Basversterking)", L"Deep Unconscious (Wzmocnienie basów)", L"Deep Unconscious (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f100.opus") {
+			a = L"TO BE FREE";
+			fff = 1;
+		}
+		if (ft == L"y_f100_s1.opus") {
+			a = LL14(L"TO BE FREE(重低音)", L"TO BE FREE (Bass Boost)", L"TO BE FREE (Renfort graves)", L"TO BE FREE (Rinforzo bassi)", L"TO BE FREE (Refuerzo graves)", L"TO BE FREE (저음 강화)", L"TO BE FREE (重低音)", L"TO BE FREE (تعزيز الجهير)", L"TO BE FREE (Усиление низких)", L"TO BE FREE (Bassverstärkung)", L"TO BE FREE (Reforço graves)", L"TO BE FREE (Basversterking)", L"TO BE FREE (Wzmocnienie basów)", L"TO BE FREE (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f110.opus") {
+			a = L"Brother's Footsteps on the Island";
+			fff = 1;
+		}
+		if (ft == L"y_f110_s1.opus") {
+			a = LL14(L"Brother's Footsteps on the Island(重低音)", L"Brother's Footsteps on the Island (Bass Boost)", L"Brother's Footsteps on the Island (Renfort graves)", L"Brother's Footsteps on the Island (Rinforzo bassi)", L"Brother's Footsteps on the Island (Refuerzo graves)", L"Brother's Footsteps on the Island (저음 강화)", L"Brother's Footsteps on the Island (重低音)", L"Brother's Footsteps on the Island (تعزيز الجهير)", L"Brother's Footsteps on the Island (Усиление низких)", L"Brother's Footsteps on the Island (Bassverstärkung)", L"Brother's Footsteps on the Island (Reforço graves)", L"Brother's Footsteps on the Island (Basversterking)", L"Brother's Footsteps on the Island (Wzmocnienie basów)", L"Brother's Footsteps on the Island (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f120.opus") {
+			a = L"Burn with You";
+			fff = 1;
+		}
+		if (ft == L"y_f120_s1.opus") {
+			a = LL14(L"Burn with You(重低音)", L"Burn with You (Bass Boost)", L"Burn with You (Renfort graves)", L"Burn with You (Rinforzo bassi)", L"Burn with You (Refuerzo graves)", L"Burn with You (저음 강화)", L"Burn with You (重低音)", L"Burn with You (تعزيز الجهير)", L"Burn with You (Усиление низких)", L"Burn with You (Bassverstärkung)", L"Burn with You (Reforço graves)", L"Burn with You (Basversterking)", L"Burn with You (Wzmocnienie basów)", L"Burn with You (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f130.opus") {
+			a = L"Destined to Keep Running";
+			fff = 1;
+		}
+		if (ft == L"y_f130_s1.opus") {
+			a = LL14(L"Destined to Keep Running(重低音)", L"Destined to Keep Running (Bass Boost)", L"Destined to Keep Running (Renfort graves)", L"Destined to Keep Running (Rinforzo bassi)", L"Destined to Keep Running (Refuerzo graves)", L"Destined to Keep Running (저음 강화)", L"Destined to Keep Running (重低音)", L"Destined to Keep Running (تعزيز الجهير)", L"Destined to Keep Running (Усиление низких)", L"Destined to Keep Running (Bassverstärkung)", L"Destined to Keep Running (Reforço graves)", L"Destined to Keep Running (Basversterking)", L"Destined to Keep Running (Wzmocnienie basów)", L"Destined to Keep Running (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f140.opus") {
+			a = L"Ride on Mana!";
+			fff = 1;
+		}
+		if (ft == L"y_f140_s1.opus") {
+			a = LL14(L"Ride on Mana!(重低音)", L"Ride on Mana! (Bass Boost)", L"Ride on Mana! (Renfort graves)", L"Ride on Mana! (Rinforzo bassi)", L"Ride on Mana! (Refuerzo graves)", L"Ride on Mana! (저음 강화)", L"Ride on Mana! (重低音)", L"Ride on Mana! (تعزيز الجهير)", L"Ride on Mana! (Усиление низких)", L"Ride on Mana! (Bassverstärkung)", L"Ride on Mana! (Reforço graves)", L"Ride on Mana! (Basversterking)", L"Ride on Mana! (Wzmocnienie basów)", L"Ride on Mana! (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f150.opus") {
+			a = L"Heat Hazard";
+			fff = 1;
+		}
+		if (ft == L"y_f150_s1.opus") {
+			a = LL14(L"Heat Hazard(重低音)", L"Heat Hazard (Bass Boost)", L"Heat Hazard (Renfort graves)", L"Heat Hazard (Rinforzo bassi)", L"Heat Hazard (Refuerzo graves)", L"Heat Hazard (저음 강화)", L"Heat Hazard (重低音)", L"Heat Hazard (تعزيز الجهير)", L"Heat Hazard (Усиление низких)", L"Heat Hazard (Bassverstärkung)", L"Heat Hazard (Reforço graves)", L"Heat Hazard (Basversterking)", L"Heat Hazard (Wzmocnienie basów)", L"Heat Hazard (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f160.opus") {
+			a = LL14(L"瞳の中の少年剣士", L"Young Swordsman in My Eyes", L"Le jeune épéiste dans mes yeux", L"Il giovane spadaccino nei miei occhi", L"El joven espadachín en mis ojos", L"눈동자 속의 소년 검사", L"瞳孔中的少年劍士", L"سياف شاب في عيني", L"Юный мечник в моих глазах", L"Junger Schwertkämpfer in meinen Augen", L"Jovem espadachim nos meus olhos", L"Jonge zwaardvechter in mijn ogen", L"Młody szermierz w moich oczach", L"Gözlerimdeki Genç Kılıç Ustası");
+			fff = 1;
+		}
+		if (ft == L"y_f160_s1.opus") {
+			a = LL14(L"瞳の中の少年剣士(重低音)", L"Young Swordsman in My Eyes (Bass Boost)", L"Young Swordsman in My Eyes (Renfort graves)", L"Young Swordsman in My Eyes (Rinforzo bassi)", L"Young Swordsman in My Eyes (Refuerzo graves)", L"Young Swordsman in My Eyes (저음 강화)", L"Young Swordsman in My Eyes (重低音)", L"Young Swordsman in My Eyes (تعزيز الجهير)", L"Young Swordsman in My Eyes (Усиление низких)", L"Young Swordsman in My Eyes (Bassverstärkung)", L"Young Swordsman in My Eyes (Reforço graves)", L"Young Swordsman in My Eyes (Basversterking)", L"Young Swordsman in My Eyes (Wzmocnienie basów)", L"Young Swordsman in My Eyes (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f200.opus") {
+			a = LL14(L"錨を揚げろ！", L"Weigh Anchor!", L"Levez l'ancre !", L"Leva l'ancora!", L"¡Leven anclas!", L"닻을 올려라!", L"起錨！", L"ارفع المرساة!", L"Поднять якорь!", L"Anker lichten!", L"Levantar âncora!", L"Licht het anker!", L"Podnieść kotwicę!", L"Demir Al!");
+			fff = 1;
+		}
+		if (ft == L"y_f200_s1.opus") {
+			a = LL14(L"錨を揚げろ！(重低音)", L"Weigh Anchor! (Bass Boost)", L"Weigh Anchor! (Renfort graves)", L"Weigh Anchor! (Rinforzo bassi)", L"Weigh Anchor! (Refuerzo graves)", L"Weigh Anchor! (저음 강화)", L"Weigh Anchor! (重低音)", L"Weigh Anchor! (تعزيز الجهير)", L"Weigh Anchor! (Усиление низких)", L"Weigh Anchor! (Bassverstärkung)", L"Weigh Anchor! (Reforço graves)", L"Weigh Anchor! (Basversterking)", L"Weigh Anchor! (Wzmocnienie basów)", L"Weigh Anchor! (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f210.opus") {
+			a = LL14(L"悠き海に生きる者", L"Those Who Live in the Vast Sea", L"Ceux qui vivent dans la mer vaste", L"Coloro che vivono nel vasto mare", L"Aquellos que viven en el mar vasto", L"유구한 바다에 사는 자", L"生活在悠久大海的人", L"أولئك الذين يعيشون في البحر الشاسع", L"Те, кто живет в бескрайнем море", L"Die im weiten Meer leben", L"Aqueles que vivem no mar vasto", L"Zij die in de onmetelijke zee leven", L"Ci, którzy żyją w rozległym morzu", L"Engin Denizlerde Yaşayanlar");
+			fff = 1;
+		}
+		if (ft == L"y_f210_s1.opus") {
+			a = LL14(L"悠き海に生きる者(重低音)", L"Those Who Live in the Vast Sea (Bass Boost)", L"Those Who Live in the Vast Sea (Renfort graves)", L"Those Who Live in the Vast Sea (Rinforzo bassi)", L"Those Who Live in the Vast Sea (Refuerzo graves)", L"Those Who Live in the Vast Sea (저음 강화)", L"Those Who Live in the Vast Sea (重低音)", L"Those Who Live in the Vast Sea (تعزيز الجهير)", L"Those Who Live in the Vast Sea (Усиление низких)", L"Those Who Live in the Vast Sea (Bassverstärkung)", L"Those Who Live in the Vast Sea (Reforço graves)", L"Those Who Live in the Vast Sea (Basversterking)", L"Those Who Live in the Vast Sea (Wzmocnienie basów)", L"Those Who Live in the Vast Sea (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f220.opus") {
+			a = LL14(L"コンパスは踊る", L"The Compass Dances", L"La boussole danse", L"La bussola danza", L"La brújula danza", L"나침반은 춤춘다", L"羅盤在跳舞", L"البوصلة ترقص", L"Компас танцует", L"Der Kompass tanzt", L"A bússola dança", L"Het kompas danst", L"Kompas tańczy", L"Pusula Dans Ediyor");
+			fff = 1;
+		}
+		if (ft == L"y_f220_s1.opus") {
+			a = LL14(L"コンパスは踊る(重低音)", L"The Compass Dances (Bass Boost)", L"The Compass Dances (Renfort graves)", L"The Compass Dances (Rinforzo bassi)", L"The Compass Dances (Refuerzo graves)", L"The Compass Dances (저음 강화)", L"The Compass Dances (重低音)", L"The Compass Dances (تعزيز الجهير)", L"The Compass Dances (Усиление низких)", L"The Compass Dances (Bassverstärkung)", L"The Compass Dances (Reforço graves)", L"The Compass Dances (Basversterking)", L"The Compass Dances (Wzmocnienie basów)", L"The Compass Dances (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f230.opus") {
+			a = LL14(L"開闢の海", L"Sea of Genesis", L"Mer de la genèse", L"Mare della genesi", L"Mar de la génesis", L"개벽의 바다", L"開闢之海", L"بحر التكوين", L"Море сотворения", L"Meer der Schöpfung", L"Mar da gênese", L"Zee van de genesis", L"Morze genezy", L"Yaratılış Denizi");
+			fff = 1;
+		}
+		if (ft == L"y_f230_s1.opus") {
+			a = LL14(L"開闢の海(重低音)", L"Sea of Genesis (Bass Boost)", L"Sea of Genesis (Renfort graves)", L"Sea of Genesis (Rinforzo bassi)", L"Sea of Genesis (Refuerzo graves)", L"Sea of Genesis (저음 강화)", L"Sea of Genesis (重低音)", L"Sea of Genesis (تعزيز الجهير)", L"Sea of Genesis (Усиление низких)", L"Sea of Genesis (Bassverstärkung)", L"Sea of Genesis (Reforço graves)", L"Sea of Genesis (Basversterking)", L"Sea of Genesis (Wzmocnienie basów)", L"Sea of Genesis (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_f310.opus") {
+			a = L"If I Could Go Back to Those Days";
+			fff = 1;
+		}
+		if (ft == L"y_f310_s1.opus") {
+			a = LL14(L"If I Could Go Back to Those Days(重低音)", L"If I Could Go Back to Those Days (Bass Boost)", L"If I Could Go Back to Those Days (Renfort graves)", L"If I Could Go Back to Those Days (Rinforzo bassi)", L"If I Could Go Back to Those Days (Refuerzo graves)", L"If I Could Go Back to Those Days (저음 강화)", L"If I Could Go Back to Those Days (重低音)", L"If I Could Go Back to Those Days (تعزيز الجهير)", L"If I Could Go Back to Those Days (Усиление низких)", L"If I Could Go Back to Those Days (Bassverstärkung)", L"If I Could Go Back to Those Days (Reforço graves)", L"If I Could Go Back to Those Days (Basversterking)", L"If I Could Go Back to Those Days (Wzmocnienie basów)", L"If I Could Go Back to Those Days (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_gameover.opus") {
+			a = L"SO MUCH FOR TODAY (Ys X Ver.)";
+			fff = 1;
+		}
+		if (ft == L"y_op.opus") {
+			a = L"Facing the Distant Horizon";
+			fff = 1;
+		}
+		if (ft == L"y_op_lp.opus") {
+			a = L"Facing the Distant Horizon (lp)";
+			fff = 1;
+		}
+		if (ft == L"y_t100.opus") {
+			a = L"Our Hometown";
+			fff = 1;
+		}
+		if (ft == L"y_t100_s1.opus") {
+			a = LL14(L"Our Hometown(重低音)", L"Our Hometown (Bass Boost)", L"Our Hometown (Renfort graves)", L"Our Hometown (Rinforzo bassi)", L"Our Hometown (Refuerzo graves)", L"Our Hometown (저음 강화)", L"Our Hometown (重低音)", L"Our Hometown (تعزيز الجهير)", L"Our Hometown (Усиление низких)", L"Our Hometown (Bassverstärkung)", L"Our Hometown (Reforço graves)", L"Our Hometown (Basversterking)", L"Our Hometown (Wzmocnienie basów)", L"Our Hometown (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_t200.opus") {
+			a = LL14(L"根ざすべき場所", L"Where We Belong", L"Là où nous appartenons", L"Il posto a cui apparteniamo", L"El lugar al que pertenecemos", L"뿌리 내려야 할 곳", L"落地生根之處", L"حيث ننتمي", L"Там, где наш дом", L"Wo wir hingehören", L"Onde pertencemos", L"Waar we thuishoren", L"Miejsce, do którego należymy", L"Ait Olduğumuz Yer");
+			fff = 1;
+		}
+		if (ft == L"y_t200_s1.opus") {
+			a = LL14(L"根ざすべき場所(重低音)", L"Where We Belong (Bass Boost)", L"Where We Belong (Renfort graves)", L"Where We Belong (Rinforzo bassi)", L"Where We Belong (Refuerzo graves)", L"Where We Belong (저음 강화)", L"Where We Belong (重低音)", L"Where We Belong (تعزيز الجهير)", L"Where We Belong (Усиление низких)", L"Where We Belong (Bassverstärkung)", L"Where We Belong (Reforço graves)", L"Where We Belong (Basversterking)", L"Where We Belong (Wzmocnienie basów)", L"Where We Belong (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_t300.opus") {
+			a = L"Sometime Siesta";
+			fff = 1;
+		}
+		if (ft == L"y_t300_s1.opus") {
+			a = LL14(L"Sometime Siesta(重低音)", L"Sometime Siesta (Bass Boost)", L"Sometime Siesta (Renfort graves)", L"Sometime Siesta (Rinforzo bassi)", L"Sometime Siesta (Refuerzo graves)", L"Sometime Siesta (저음 강화)", L"Sometime Siesta (重低音)", L"Sometime Siesta (تعزيز الجهير)", L"Sometime Siesta (Усиление низких)", L"Sometime Siesta (Bassverstärkung)", L"Sometime Siesta (Reforço graves)", L"Sometime Siesta (Basversterking)", L"Sometime Siesta (Wzmocnienie basów)", L"Sometime Siesta (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_t301.opus") {
+			a = L"Innermost Feelings";
+			fff = 1;
+		}
+		if (ft == L"y_t301_s1.opus") {
+			a = LL14(L"Innermost Feelings(重低音)", L"Innermost Feelings (Bass Boost)", L"Innermost Feelings (Renfort graves)", L"Innermost Feelings (Rinforzo bassi)", L"Innermost Feelings (Refuerzo graves)", L"Innermost Feelings (저음 강화)", L"Innermost Feelings (重低音)", L"Innermost Feelings (تعزيز الجهير)", L"Innermost Feelings (Усиление низких)", L"Innermost Feelings (Bassverstärkung)", L"Innermost Feelings (Reforço graves)", L"Innermost Feelings (Basversterking)", L"Innermost Feelings (Wzmocnienie basów)", L"Innermost Feelings (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_t500.opus") {
+			a = LL14(L"情景に揺蕩う", L"Drifting in the Scene", L"Dérivant dans la scène", L"Oscillando nella scena", L"Derivando en la escena", L"정경에 요동치다", L"沉浸於情景中", L"الانجراف في المشهد", L"Дрейфуя в пейзаже", L"In der Szenerie treiben", L"Derivando na cena", L"Drijvend in de scène", L"Dryfując w scenerii", L"Manzarada Süzülmek");
+			fff = 1;
+		}
+		if (ft == L"y_t500_s1.opus") {
+			a = LL14(L"情景に揺蕩う(重低音)", L"Drifting in the Scene (Bass Boost)", L"Drifting in the Scene (Renfort graves)", L"Drifting in the Scene (Rinforzo bassi)", L"Drifting in the Scene (Refuerzo graves)", L"Drifting in the Scene (저음 강화)", L"Drifting in the Scene (重低音)", L"Drifting in the Scene (تعزيز الجهير)", L"Drifting in the Scene (Усиление низких)", L"Drifting in the Scene (Bassverstärkung)", L"Drifting in the Scene (Reforço graves)", L"Drifting in the Scene (Basversterking)", L"Drifting in the Scene (Wzmocnienie basów)", L"Drifting in the Scene (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_t600.opus") {
+			a = LL14(L"盾の兄弟", L"Shield Brothers", L"Frères de bouclier", L"Fratelli di scudo", L"Hermanos de escudo", L"방패의 형제", L"盾之兄弟", L"إخوة الدرع", L"Братья по щиту", L"Schildbrüder", L"Irmãos de escudo", L"Schildbroeders", L"Bracia tarczy", L"Kalkan Kardeşliği");
+			fff = 1;
+		}
+		if (ft == L"y_t600_s1.opus") {
+			a = LL14(L"盾の兄弟(重低音)", L"Shield Brothers (Bass Boost)", L"Shield Brothers (Renfort graves)", L"Shield Brothers (Rinforzo bassi)", L"Shield Brothers (Refuerzo graves)", L"Shield Brothers (저음 강화)", L"Shield Brothers (重低音)", L"Shield Brothers (تعزيز الجهير)", L"Shield Brothers (Усиление низких)", L"Shield Brothers (Bassverstärkung)", L"Shield Brothers (Reforço graves)", L"Shield Brothers (Basversterking)", L"Shield Brothers (Wzmocnienie basów)", L"Shield Brothers (Bas güçlendirme)");
+			fff = 1;
+		}
+		if (ft == L"y_title.opus") {
+			a = LL14(L"その優しさは誰のため", L"For Whom Is That Kindness", L"Pour qui est cette gentillesse", L"Per chi è quella gentilezza", L"Para quién es esa amabilidad", L"그 다정함은 누구を 위한 것인가", L"那份溫柔是為了誰", L"لمن هذا اللطف", L"Для кого эта доброта", L"Wem gilt diese Güte", L"Para quem é essa bondade", L"Voor wie is die vriendelijkheid", L"Dla kogo ta dobroć", L"Bu Nezaket Kimin İçin");
+			fff = 1;
+		}
+
+
+
 		if (fff == 0)
 			if (a.Left(2) == "y9") {
-				if (a.Mid(4, 4) = "b001") { a = "FEEL FORCE"; }
-				if (a.Mid(4, 4) = "b002") { a = "TROUBLEMAKER"; }
-				if (a.Mid(4, 4) = "b003") { a = "MONSTRUM SPECTRUM"; }
-				if (a.Mid(4, 4) = "b004") { a = "LACRIMA CRISIS"; }
-				if (a.Mid(4, 4) = "b005") { a = "WELCOME TO CHAOS"; }
-				if (a.Mid(4, 4) = "b006") { a = "JUDGEMENT TIME"; }
-				if (a.Mid(4, 4) = "b007") { a = "KNOCK ON NOX"; }
-				if (a.Mid(4, 4) = "b008") { a = "ANIMA ERGASTULUM"; }
-				if (a.Mid(4, 5) = "b010b") { a = "URBAN TERROR"; }
-				if (a.Mid(4, 4) = "b010") { a = LL2(L"URBAN TERROR(イントロあり)", L"URBAN TERROR (With Intro)"); }
-				if (a.Mid(4, 5) = "b011b") { a = "DREAMING IN THE GRIMWALD"; }
-				if (a.Mid(4, 4) = "b011") { a = LL2(L"DREAMING IN THE GRIMWALD(イントロあり)", L"DREAMING IN THE GRIMWALD(with intro)"); }
-				if (a.Mid(4, 4) = "b012") { a = "WILD CARD"; }
-				if (a.Mid(4, 5) = "b014b") { a = "FULL MOON CEREMONY"; }
-				if (a.Mid(4, 4) = "b014") { a = LL2(L"FULL MOON CEREMONY(イントロあり)", L"FULL MOON CEREMONY (With Intro)"); }
-				if (a.Mid(4, 4) = "d101") { a = "HEART BEAT SHAKER"; }
-				if (a.Mid(4, 4) = "d201") { a = "CLOACA MAXIMA"; }
-				if (a.Mid(4, 4) = "d301") { a = "RUIN OF DRY MOAT"; }
-				if (a.Mid(4, 4) = "d401") { a = "MARIONETTE, MARIONETTE"; }
-				if (a.Mid(4, 4) = "d501") { a = "THE CAVE OF GROAN"; }
-				if (a.Mid(4, 4) = "d601") { a = "EVAN MACHA"; }
-				if (a.Mid(4, 4) = "d701") { a = "A QUARRY RUIN"; }
-				if (a.Mid(4, 4) = "d702") { a = "CROSSING A/A"; }
-				if (a.Mid(4, 4) = "d801") { a = "CATCH ME IF YOU CAN"; }
-				if (a.Mid(4, 4) = "d901") { a = "ALCHEMY LAB"; }
-				if (a.Mid(4, 4) = "d911") { a = "STRATEGIC ZONE"; }
-				if (a.Mid(4, 5) = "d1001") { a = "FORTRESS UNDERGROUND"; }
-				if (a.Mid(4, 5) = "d2001") { a = "DANCE WITH TRAPS"; }
-				if (a.Mid(4, 4) = "e001") { a = "APRILIS"; }
-				if (a.Mid(4, 4) = "e002") { a = "TAKE IT EASY!"; }
-				if (a.Mid(4, 4) = "e003") { a = "PETITE FLEUR"; }
-				if (a.Mid(4, 4) = "e004") { a = "EYES ON..."; }
-				if (a.Mid(4, 4) = "e005") { a = "FORGOTTEN DAYS"; }
-				if (a.Mid(4, 4) = "e006") { a = "PRISON OF BALDUQ -LIVE THE FUTURE-"; }
-				if (a.Mid(4, 4) = "e007") { a = "PRISON OF BALDUQ -YEARNING-"; }
-				if (a.Mid(4, 4) = "e008") { a = L"IL ETAIT UNE FOIS"; }
-				if (a.Mid(4, 4) = "e009") { a = "WHO KNOWS THE TRUTH?"; }
-				if (a.Mid(4, 4) = "e010") { a = "DECISION"; }
-				if (a.Mid(4, 4) = "e011") { a = "STAGNANT POOL"; }
-				if (a.Mid(4, 4) = "e013") { a = "INQUISITION"; }
-				if (a.Mid(4, 4) = "e014") { a = "SILLY MEETING"; }
-				if (a.Mid(4, 4) = "e016") { a = "MONSTRUM NOX"; }
-				if (a.Mid(4, 4) = "e017") { a = "CHALLENGER'S ROAD"; }
-				if (a.Mid(4, 4) = "e018") { a = "RED MULETA"; }
-				if (a.Mid(4, 4) = "e019") { a = "NAB THE TAIL"; }
-				if (a.Mid(4, 4) = "e020") { a = "THUS SPOKE AN ALCHEMIST"; }
-				if (a.Mid(4, 4) = "e023") { a = "DENOUEMENT"; }
-				if (a.Mid(4, 4) = "e024") { a = "INVITATION TO THE CRIMSON NIGHT"; }
-				if (a.Mid(4, 4) = "f101") { a = "NORSE WIND"; }
-				if (a.Mid(4, 4) = "f201") { a = "TRANQUIL SILENCE"; }
-				if (a.Mid(4, 4) = "f301") { a = "GLESSING WAY!"; }
-				if (a.Mid(4, 4) = "f501") { a = "DESERT AFTER TEARS"; }
-				if (a.Mid(4, 4) = "muon") { a = LL2(L"無音", L"Silence"); }
-				if (a.Mid(4, 4) = "t101") { a = "PRISONCITY"; }
-				if (a.Mid(4, 4) = "t102") { a = "IN PROFILE, ON BELFRY"; }
-				if (a.Mid(4, 4) = "t103") { a = "NEW LIFE"; }
-				if (a.Mid(4, 4) = "t104") { a = "GRIA RECOLLECTION"; }
-				if (a.Mid(4, 4) = "t201") { a = "BAR \"DANDELION\""; }
-				if (a.Mid(4, 4) = "t301") { a = "AMBIGUOUS TERRITORY"; }
-				if (a.Mid(4, 4) = "t402") { a = "WALTZ FOR GRACE"; }
-				if (a.Mid(4, 4) = "t501") { a = "HEAT AND SPLENDOR"; }
-				if (a.Mid(4, 4) = "t901") { a = "ONLY THE CORPSE GOES OUT"; }
-				if (a.Mid(4, 4) = "t902") { a = "A GOLDEN KEY CAN OPEN ANY DOOR"; }
-				if (a.Mid(4, 4) = "tbox") { a = "TREASURE BOX -Ys IX-"; }
+				if (a.Mid(4, 4) == "b001") { a = "FEEL FORCE"; }
+				if (a.Mid(4, 4) == "b002") { a = "TROUBLEMAKER"; }
+				if (a.Mid(4, 4) == "b003") { a = "MONSTRUM SPECTRUM"; }
+				if (a.Mid(4, 4) == "b004") { a = "LACRIMA CRISIS"; }
+				if (a.Mid(4, 4) == "b005") { a = "WELCOME TO CHAOS"; }
+				if (a.Mid(4, 4) == "b006") { a = "JUDGEMENT TIME"; }
+				if (a.Mid(4, 4) == "b007") { a = "KNOCK ON NOX"; }
+				if (a.Mid(4, 4) == "b008") { a = "ANIMA ERGASTULUM"; }
+				if (a.Mid(4, 5) == "b010b") { a = "URBAN TERROR"; }
+				if (a.Mid(4, 4) == "b010") { a = LL14(L"URBAN TERROR(イントロあり)", L"URBAN TERROR (With Intro)", L"URBAN TERROR (Avec Intro)", L"URBAN TERROR (Con Intro)", L"URBAN TERROR (Con Intro)", L"URBAN TERROR (인트로 있음)", L"URBAN TERROR (含前奏)", L"URBAN TERROR (مع مقدمة)", L"URBAN TERROR (С интро)", L"URBAN TERROR (Mit Intro)", L"URBAN TERROR (Com Intro)", L"URBAN TERROR (Met Intro)", L"URBAN TERROR (Z intro)", L"URBAN TERROR (Girişli)"); }
+				if (a.Mid(4, 5) == "b011b") { a = "DREAMING IN THE GRIMWALD"; }
+				if (a.Mid(4, 4) == "b011") { a = LL14(L"DREAMING IN THE GRIMWALD(イントロあり)", L"DREAMING IN THE GRIMWALD (With Intro)", L"DREAMING IN THE GRIMWALD (Avec Intro)", L"DREAMING IN THE GRIMWALD (Con Intro)", L"DREAMING IN THE GRIMWALD (Con Intro)", L"DREAMING IN THE GRIMWALD (인트로 있음)", L"DREAMING IN THE GRIMWALD (含前奏)", L"DREAMING IN THE GRIMWALD (مع مقدمة)", L"DREAMING IN THE GRIMWALD (С интро)", L"DREAMING IN THE GRIMWALD (Mit Intro)", L"DREAMING IN THE GRIMWALD (Com Intro)", L"DREAMING IN THE GRIMWALD (Met Intro)", L"DREAMING IN THE GRIMWALD (Z intro)", L"DREAMING IN THE GRIMWALD (Girişli)"); }
+				if (a.Mid(4, 4) == "b012") { a = "WILD CARD"; }
+				if (a.Mid(4, 5) == "b014b") { a = "FULL MOON CEREMONY"; }
+				if (a.Mid(4, 4) == "b014") { a = LL14(L"FULL MOON CEREMONY(イントロあり)", L"FULL MOON CEREMONY (With Intro)", L"FULL MOON CEREMONY (Avec Intro)", L"FULL MOON CEREMONY (Con Intro)", L"FULL MOON CEREMONY (Con Intro)", L"FULL MOON CEREMONY (인트로 있음)", L"FULL MOON CEREMONY (含前奏)", L"FULL MOON CEREMONY (مع مقدمة)", L"FULL MOON CEREMONY (С инトロ)", L"FULL MOON CEREMONY (Mit Intro)", L"FULL MOON CEREMONY (Com Intro)", L"FULL MOON CEREMONY (Met Intro)", L"FULL MOON CEREMONY (Z intro)", L"FULL MOON CEREMONY (Girişli)"); }
+				if (a.Mid(4, 4) == "d101") { a = "HEART BEAT SHAKER"; }
+				if (a.Mid(4, 4) == "d201") { a = "CLOACA MAXIMA"; }
+				if (a.Mid(4, 4) == "d301") { a = "RUIN OF DRY MOAT"; }
+				if (a.Mid(4, 4) == "d401") { a = "MARIONETTE, MARIONETTE"; }
+				if (a.Mid(4, 4) == "d501") { a = "THE CAVE OF GROAN"; }
+				if (a.Mid(4, 4) == "d601") { a = "EVAN MACHA"; }
+				if (a.Mid(4, 4) == "d701") { a = "A QUARRY RUIN"; }
+				if (a.Mid(4, 4) == "d702") { a = "CROSSING A/A"; }
+				if (a.Mid(4, 4) == "d801") { a = "CATCH ME IF YOU CAN"; }
+				if (a.Mid(4, 4) == "d901") { a = "ALCHEMY LAB"; }
+				if (a.Mid(4, 4) == "d911") { a = "STRATEGIC ZONE"; }
+				if (a.Mid(4, 5) == "d1001") { a = "FORTRESS UNDERGROUND"; }
+				if (a.Mid(4, 5) == "d2001") { a = "DANCE WITH TRAPS"; }
+				if (a.Mid(4, 4) == "e001") { a = "APRILIS"; }
+				if (a.Mid(4, 4) == "e002") { a = "TAKE IT EASY!"; }
+				if (a.Mid(4, 4) == "e003") { a = "PETITE FLEUR"; }
+				if (a.Mid(4, 4) == "e004") { a = "EYES ON..."; }
+				if (a.Mid(4, 4) == "e005") { a = "FORGOTTEN DAYS"; }
+				if (a.Mid(4, 4) == "e006") { a = "PRISON OF BALDUQ -LIVE THE FUTURE-"; }
+				if (a.Mid(4, 4) == "e007") { a = "PRISON OF BALDUQ -YEARNING-"; }
+				if (a.Mid(4, 4) == "e008") { a = L"IL ÉTAIT UNE FOIS"; }
+				if (a.Mid(4, 4) == "e009") { a = "WHO KNOWS THE TRUTH?"; }
+				if (a.Mid(4, 4) == "e010") { a = "DECISION"; }
+				if (a.Mid(4, 4) == "e011") { a = "STAGNANT POOL"; }
+				if (a.Mid(4, 4) == "e013") { a = "INQUISITION"; }
+				if (a.Mid(4, 4) == "e014") { a = "SILLY MEETING"; }
+				if (a.Mid(4, 4) == "e016") { a = "MONSTRUM NOX"; }
+				if (a.Mid(4, 4) == "e017") { a = "CHALLENGER'S ROAD"; }
+				if (a.Mid(4, 4) == "e018") { a = "RED MULETA"; }
+				if (a.Mid(4, 4) == "e019") { a = "NAB THE TAIL"; }
+				if (a.Mid(4, 4) == "e020") { a = "THUS SPOKE AN ALCHEMIST"; }
+				if (a.Mid(4, 4) == "e023") { a = "DENOUEMENT"; }
+				if (a.Mid(4, 4) == "e024") { a = "INVITATION TO THE CRIMSON NIGHT"; }
+				if (a.Mid(4, 4) == "f101") { a = "NORSE WIND"; }
+				if (a.Mid(4, 4) == "f201") { a = "TRANQUIL SILENCE"; }
+				if (a.Mid(4, 4) == "f301") { a = "GLESSING WAY!"; }
+				if (a.Mid(4, 4) == "f501") { a = "DESERT AFTER TEARS"; }
+				if (a.Mid(4, 4) == "muon") { a = LL14(L"無音", L"Silence", L"Silence", L"Silenzio", L"Silencio", L"무음", L"無音", L"صمت", L"Тишина", L"Stille", L"Silêncio", L"Stilte", L"Cisza", L"Sessizlik"); }
+				if (a.Mid(4, 4) == "t101") { a = "PRISONCITY"; }
+				if (a.Mid(4, 4) == "t102") { a = "IN PROFILE, ON BELFRY"; }
+				if (a.Mid(4, 4) == "t103") { a = "NEW LIFE"; }
+				if (a.Mid(4, 4) == "t104") { a = "GRIA RECOLLECTION"; }
+				if (a.Mid(4, 4) == "t201") { a = "BAR \"DANDELION\""; }
+				if (a.Mid(4, 4) == "t301") { a = "AMBIGUOUS TERRITORY"; }
+				if (a.Mid(4, 4) == "t402") { a = "WALTZ FOR GRACE"; }
+				if (a.Mid(4, 4) == "t501") { a = "HEAT AND SPLENDOR"; }
+				if (a.Mid(4, 4) == "t901") { a = "ONLY THE CORPSE GOES OUT"; }
+				if (a.Mid(4, 4) == "t902") { a = "A GOLDEN KEY CAN OPEN ANY DOOR"; }
+				if (a.Mid(4, 4) == "tbox") { a = "TREASURE BOX -Ys IX-"; }
 			}
 			else {
 				switch (_ttoi(a.Mid(2, 5))) {
 				case 81004:
-					a = LL2(L"罪と罰と偽りと", L"Crime, Punishment and Lies");
+					a = LL14(L"罪と罰と偽りと", L"Sin, Punishment and Falsehood", L"Péché, punition et mensonge", L"Peccato, punizione e falsità", L"Pecado, castigo y falsedad", L"죄와 벌과 거짓과", L"罪、罰與虛偽", L"الخطيئة والعقاب والزيف", L"Грех, наказание и ложь", L"Sünde, Strafe und Falschheit", L"Pecado, castigo e falsidade", L"Zonde, straf en valsheid", L"Grzech, kara i fałsz", L"Günah, Ceza ve Sahtelik");
 					break;
 				case 81005:
-					a = LL2(L"昏き鐘の残響", L"Echo of the Dark Bell");
+					a = LL14(L"昏き鐘の残響", L"Resonance of the Dark Bell", L"Résonance de la cloche sombre", L"Risonanza della campana oscura", L"Resonancia de la campana oscura", L"어두운 종의 잔향", L"昏暗之鐘的殘響", L"صدى الجرس المظلم", L"Резонанс темного колокола", L"Resonanz der dunklen Glocke", L"Ressonância do sino sombrio", L"Resonantie van de duistere klok", L"Rezonans mrocznego dzwonu", L"Karanlık Çanın Yankısı");
 					break;
 				case 81006:
 					a = "Right on the Mark";
 					break;
 				case 81007:
-					a = LL2(L"悪夢ふたたび", L"Nightmare Again");
+					a = LL14(L"悪夢ふたたび", L"Nightmare Again", L"Le cauchemar recommence", L"Incubo di nuovo", L"Pesadilla de nuevo", L"악몽 다시 한번", L"噩夢重現", L"الكابوس مرة أخرى", L"Кошмар снова", L"Albtraum erneut", L"Pesadelo novamente", L"Nachtmerrie opnieuw", L"Koszmar ponownie", L"Kabus Yeniden");
 					break;
 				case 81008:
 					a = "Crossbell Nostalgia";
 					break;
 				case 81009:
-					a = LL2(L"創まりの円庭", L"Circle Garden of Genesis");
+					a = LL14(L"創まりの円庭", L"Garden of Beginnings", L"Jardin des commencements", L"Giardino degli inizi", L"Jardín de los inicios", L"시작의 원정", L"創始之圓庭", L"حديقة البدايات", L"Сад начал", L"Garten der Anfänge", L"Jardim dos começos", L"Tuin van het begin", L"Ogród początków", L"Başlangıç Bahçesi");
 					break;
 				case 81010:
 					a = "Mysterious Element";
@@ -8646,16 +10186,16 @@ void CWread::wavread()
 					a = "Purgatory Scream";
 					break;
 				case 81015:
-					a = LL2(L"さざめきの途路", L"Path of Bustling");
+					a = LL14(L"さざめきの途路", L"Path of Tumult", L"Chemin du tumulte", L"Sentiero del tumulto", L"Senda del tumulto", L"웅성거리는 길", L"嘈雜的途徑", L"مسار الاضطراب", L"Путь суматохи", L"Pfad des Tumults", L"Caminho do tumulto", L"Pad van rumoer", L"Ścieżka zgiełku", L"Gürültülü Yol");
 					break;
 				case 81016:
-					a = LL2(L"蒼の大地に生きる者", L"Those Who Live on the Azure Land");
+					a = LL14(L"蒼の大地に生きる者", L"Those Who Live on the Azure Land", L"Ceux qui vivent sur la terre d'azur", L"Coloro che vivono sulla terra azzurra", L"Aquellos que viven en la tierra azul", L"푸른 대지에 사는 자", L"生活在蒼之大地的人", L"أولئك الذين يعيشون على الأرض الزرقاء", L"Те, кто живет на лазурной земле", L"Die auf dem azurblauen Land leben", L"Aqueles que vivem na terra azul", L"Zij die op het azuurblauwe land leven", L"Ci, którzy żyją na błękitnej ziemi", L"Mavi Topraklarda Yaşayanlar");
 					break;
 				case 81017:
-					a = LL2(L"黎明の鐘", L"Bell of Dawn");
+					a = LL14(L"黎明の鐘", L"Bell of Dawn", L"Cloche de l'aube", L"Campana dell'alba", L"Campana del alba", L"여명의 종", L"黎明之鐘", L"جرس الفجر", L"Колокол рассвета", L"Glocke der Dämmerung", L"Sino da aurora", L"Klok van de dageraad", L"Dzwon świtu", L"Şafak Çanı");
 					break;
 				case 81018:
-					a = LL2(L"レメディファンタジア -仲間とともに-", L"Remedy Fantasia -With Companions-");
+					a = LL14(L"レメディファンタジア -仲間とともに-", L"Remedi Fantasia -With Comrades-", L"Remedi Fantasia -Avec des camarades-", L"Remedi Fantasia -Con i compagni-", L"Remedi Fantasia -Con camaradas-", L"레메디 판타지아 ~동료와 함께~", L"Remedi Fantasia -與夥伴一起-", L"Remedi Fantasia - مع الرفاق", L"Remedi Fantasia -С товарищами-", L"Remedi Fantasia -Mit Kameraden-", L"Remedi Fantasia -Com camaradas-", L"Remedi Fantasia -Met kameraden-", L"Remedi Fantasia -Z towarzyszami-", L"Remedi Fantasia -Yoldaşlarla-");
 					break;
 				case 81019:
 					a = "Slight Suspicion";
@@ -8664,27 +10204,27 @@ void CWread::wavread()
 					a = "Maliciousness in the Mirror";
 					break;
 				case 81021:
-					a = LL2(L"暗澹たる世界", L"Gloomy World");
+					a = LL14(L"暗澹たる世界", L"Dark World", L"Monde sombre", L"Mondo oscuro", L"Mundo oscuro", L"암담한 세계", L"暗淡的世界", L"عالم مظلم", L"Мрачный мир", L"Dunkle Welt", L"Mundo sombrio", L"Duistere wereld", L"Mroczny świat", L"Karanlık Dünya");
 					break;
 				case 81022:
-					a = LL2(L"ひとときの温もり", L"Moment of Warmth");
+					a = LL14(L"ひとときの温もり", L"Brief Warmth", L"Bref répit de chaleur", L"Breve calore", L"Breve calor", L"잠시 동안의 온기", L"片刻的溫暖", L"دفء عابر", L"Краткое тепло", L"Kurze Wärme", L"Breve calor", L"Korte warmte", L"Krótkie ciepło", L"Kısa Süreli Sıcaklık");
 					break;
 				case 81023:
-					a = LL2(L"今、創まりのとき", L"Now, the Moment of Genesis");
+					a = LL14(L"今、創まりのとき", L"Now, the Moment of Creation", L"Maintenant, le moment de la création", L"Ora, il momento della creazione", L"Ahora, el momento de la creación", L"지금, 시작의 시간", L"現在，創始之時", L"الآن، لحظة التكوين", L"Теперь момент сотворения", L"Nun, der Moment der Schöpfung", L"Agora, o momento da criação", L"Nu, het moment van creatie", L"Teraz moment stworzenia", L"Şimdi, Yaratılış Anı");
 					break;
 				case 81024:
 					a = "KERAUNOS -Fear and Hatred-";
 					break;
 				case 81025:
-					a = LL2(L"亡失われた魂", L"Lost Souls");
+					a = LL14(L"亡失われた魂", L"Lost Souls", L"Âmes perdues", L"Anime perse", L"Almas perdidas", L"잃어버린 영혼들", L"迷失的靈魂", L"أرواح مفقودة", L"Потерянные души", L"Verlorene Seelen", L"Almas perdidas", L"Verloren zielen", L"Zagubione dusze", L"Kayıp Ruhlar");
 					break;
 				case 81026:
-					a = LL2(L"穏やかな時間", L"Peaceful Time");
+					a = LL14(L"穏やかな時間", L"Peaceful Time", L"Temps paisible", L"Tempo pacifico", L"Tiempo pacífico", L"평온한 시간", L"平靜的時光", L"وقت هادئ", L"Мирное время", L"Friedliche Zeit", L"Tempo pacífico", L"Vredige tijd", L"Spokojny czas", L"Huzurlu Vakit");
 					break;
 				case 81027:
 					break;
 				case 81028:
-					a = LL2(L"運命という名の歯車", L"The Gear Named Fate");
+					a = LL14(L"運命という名の歯車", L"Gears of Fate", L"Engrenages du destin", L"Ingranaggi del destino", L"Engranajes del destino", L"운명이라는 이름의 톱니바퀴", L"名為命運的齒輪", L"تروس القدر", L"Шестеренки судьбы", L"Zahnräder des Schicksals", L"Engrenagens do destino", L"Raderen van het lot", L"Koła zębate losu", L"Kader Çarkları");
 					break;
 				case 81200:
 					a = "Crossing Causal Lines";
@@ -8699,64 +10239,33 @@ void CWread::wavread()
 					a = "Hide and Seek by Myself";
 					break;
 				case 81315:
-					a = LL2(L"鉱山町マインツ -創Ver.-", L"Mines Town Mainz -Reverie Ver.-");
+					a = LL14(L"鉱山町マインツ -創Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-", L"Mines Town Mainz -Reverie Ver.-");
 					break;
 				case 81316:
-					a = LL2(L"木霊の道 -創Ver.-", L"Path of Echoes -Reverie Ver.-");
+					a = LL14(L"木霊の道 -創Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-", L"Path of Echoes -Reverie Ver.-");
 					break;
 				case 81317:
 					a = "Raindrops with the Wind";
 					break;
 				case 81319:
-					a = LL2(L"陽溜まりにただいまを", L"Sunlight and Welcome Home");
+					a = LL14(L"陽溜まりにただいまを", L"Home in the Sunshine", L"Retour au soleil", L"A casa sotto il sole", L"Hogar bajo el sol", L"햇살 속에 다녀왔습니다를", L"在陽光下說我回來了", L"العودة للمنزل في ضوء الشمس", L"Домой под лучами солнца", L"Zuhause im Sonnenschein", L"Lar sob o sol", L"Thuis in de zon", L"Dom w słońcu", L"Güneş Işığında Eve Dönüş");
 					break;
 				case 81320:
 					a = "Wind-Up Yesterday!";
 					break;
 				case 81321:
-					a = LL2(L"零の邂逅", L"Zero Encounter");
+					a = LL14(L"零の邂逅", L"Zero Encounter", L"Rencontre de zéro", L"Incontro zero", L"Encuentro cero", L"제로의 해후", L"零之邂逅", L"لقاء الصفر", L"Встреча Зеро", L"Zero-Begegnung", L"Encontro zero", L"Zero ontmoeting", L"Spotkanie zero", L"Sıfır Karşılaşması");
 					break;
 				case 81322:
-					a = LL2(L"影の見えざる手", L"Invisible Hand in the Shadow");
+					a = LL14(L"影の見えざる手", L"Invisible Hand in the Shadows", L"Main invisible dans l'ombre", L"Mano invisibile nelle ombre", L"Mano invisible en las sombras", L"그림자의 보이지 않는 손", L"影子那看不見的手", L"يد خفية في الظلال", L"Невидимая рука в тени", L"Unsichtbare Hand im Schatten", L"Mão invisível nas sombras", L"Onzichtbare hand in de schaduw", L"Niewidzialna ręka w cieniu", L"Gölgedeki Görünmez El");
 					break;
-				case 81950:
-					break;
-				case 81951:
-					break;
-				case 81952:
-					break;
-				case 81953:
-					break;
-				case 81954:
-					break;
-				case 81955:
-					break;
-				case 81956:
-					break;
-				case 81957:
-					break;
-				case 81958:
-					break;
-				case 81961:
-					break;
-				case 81962:
-					break;
-				case 81963:
-					break;
-				case 81964:
-					break;
-				case 81965:
-					break;
-				case 81966:
-					break;
-				case 81967:
-					break;
-				case 81968:
-					break;
-				case 81969:
+				case 81950: case 81951: case 81952: case 81953: case 81954:
+				case 81955: case 81956: case 81957: case 81958: case 81961:
+				case 81962: case 81963: case 81964: case 81965: case 81966:
+				case 81967: case 81968: case 81969:
 					break;
 				case 82065:
-					a = LL2(L"鋼鉄牙城", L"Steel Fortress");
+					a = LL14(L"鋼鉄牙城", L"Iron Fortress", L"Forteresse d'acier", L"Fortezza d'acciaio", L"Fortaleza de acero", L"강철아성", L"鋼鐵牙城", L"حصن فولاذي", L"Железная крепость", L"Eiserne Festung", L"Fortaleza de aço", L"IJzeren vesting", L"Stalowa twierdza", L"Demir Kale");
 					break;
 				case 82113:
 					a = "Zero Break Battle";
@@ -8770,7 +10279,7 @@ void CWread::wavread()
 					a = "POM's Paradise";
 					break;
 				case 82125:
-					a = LL2(L"波間に弾む心", L"Heart Bouncing on the Waves");
+					a = LL14(L"波間に弾む心", L"Heart Bouncing on the Waves", L"Cœur bondissant sur les vagues", L"Cuore che rimbalza sulle onde", L"Corazón saltando en las olas", L"물결 사이에 들뜨는 마음", L"在波浪間雀躍的心", L"قلب يقفز على الأمواج", L"Сердце, прыгающее на волнах", L"Herz, das auf den Wellen hüpft", L"Coração saltitando nas ondas", L"Hart dat stuitert op de golven", L"Serce skaczące na falach", L"Dalgalarda Hoplayan Kalp");
 					break;
 				case 82129:
 					a = "Reverse Babel";
@@ -8785,7 +10294,7 @@ void CWread::wavread()
 					a = "Magical Revolt";
 					break;
 				case 82136:
-					a = LL2(L"流麗闘冴", L"Elegant Battle Brilliance");
+					a = LL14(L"流麗闘冴", L"Elegant Battle", L"Combat élégant", L"Battaglia elegante", L"Batalla elegante", L"유려투채", L"流麗鬥冴", L"معركة أنيقة", L"Элегантная битва", L"Eleganter Kampf", L"Batalha elegante", L"Elegant gevecht", L"Elegancka bitwa", L"Zarif Savaş");
 					break;
 				case 82137:
 					a = "The Road to All-Out War";
@@ -8797,10 +10306,10 @@ void CWread::wavread()
 					a = "Invisible Hilly Country";
 					break;
 				case 82141:
-					a = LL2(L"ひとかけらの光明", L"A Fragment of Light");
+					a = LL14(L"ひとかけらの光明", L"Sliver of Light", L"Lueur d'espoir", L"Barlume di luce", L"Rayo de luz", L"한 조각의 광명", L"一絲光明", L"خيط من الضوء", L"Лучик света", L"Ein Schimmer Licht", L"Raio de luz", L"Lichtstraaltje", L"Promyk światła", L"Bir Işık Hüzmesi");
 					break;
 				case 82143:
-					a = LL2(L"反攻の烽火", L"Beacon of Counterattack");
+					a = LL14(L"反攻の烽火", L"Beacon of Counterattack", L"Signal de contre-attaque", L"Segnale di contrattacco", L"Señal de contraataque", L"반격의 봉화", L"反攻的烽火", L"منارة الهجوم المضاد", L"Маяк контратаки", L"Leuchtfeuer des Gegenangriffs", L"Sinal de contra-ataque", L"Baken van de tegenaanval", L"Sygnał kontrataku", L"Karşı Atak İşareti");
 					break;
 				case 82147:
 					a = "Rapid Wind";
@@ -8824,22 +10333,22 @@ void CWread::wavread()
 					a = "Sword of Swords";
 					break;
 				case 82158:
-					a = LL2(L"今宵は宴と参りましょう", L"Tonight We Feast");
+					a = LL14(L"今宵は宴と参りましょう", L"Tonight We Feast", L"Ce soir, nous festoyons", L"Stasera banchettiamo", L"Esta noche festejamos", L"오늘 밤은 연회를 엽시다", L"今晚讓我們舉行宴會吧", L"الليلة سنقيم وليمة", L"Сегодня мы пируем", L"Heute Abend wird gefeiert", L"Esta noite vamos festejar", L"Vanavond vieren we feest", L"Dziś wieczorem ucztujemy", L"Bu Gece Ziyafet Çekelim");
 					break;
 				case 82159:
 					a = "Flash Your Fighting Spirit";
 					break;
 				case 82161:
-					a = LL2(L"鈍色に這う", L"Creeping in Drab");
+					a = LL14(L"鈍色に這う", L"Crawling in Gray", L"Ramper dans le gris", L"Strisciando nel grigio", L"Gateando en el gris", L"잿빛으로 기어가다", L"在灰色中爬行", L"الزحف في الرمادي", L"Ползти в сером", L"Kriechen im Grau", L"Rastejando no cinza", L"Kruipen in het grijs", L"Pełzanie w szarości", L"Gri İçinde Sürünmek");
 					break;
 				case 82163:
 					a = "Pyro Labyrinth";
 					break;
 				case 82164:
-					a = LL2(L"優しさを未来に託して", L"Entrust Kindness to the Future");
+					a = LL14(L"優しさを未来に託して", L"Entrust Kindness to the Future", L"Confier la gentillesse au futur", L"Affidare la gentilezza al futuro", L"Confiar la amabilidad al futuro", L"다정함을 미래에 맡기고", L"將溫柔託付給未來", L"استئمان اللطف للمستقبل", L"Вверить доброту будущему", L"Güte der Zukunft anvertrauen", L"Confiar a bondade ao futuro", L"Vriendelijkheid aan de toekomst toevertrouwen", L"Powierzyć dobroć przyszłości", L"Nezaketi Geleceğe Emanet Etmek");
 					break;
 				case 82166:
-					a = LL2(L"高らかに、誇らしく", L"Proudly, With Pride");
+					a = LL14(L"高らかに、誇らしく", L"Loud and Proud", L"Fort et fier", L"Forte e fiero", L"Fuerte y orgulloso", L"드높게, 자랑스럽게", L"高聲地，自豪地", L"بصوت عالٍ وبفخر", L"Громко и гордо", L"Laut und stolz", L"Alto e orgulhoso", L"Luid en trots", L"Głośno i dumnie", L"Yüksek Sesle ve Gururla");
 					break;
 				case 82170:
 					a = "Infinity Rage";
@@ -8869,205 +10378,205 @@ void CWread::wavread()
 					a = "Challenger Invigorated";
 					break;
 				case 82184:
-					a = LL2(L"このあと美味しくいただきました", L"After This, We Ate Deliciously");
+					a = LL14(L"このあと美味しくいただきました", L"Then We Ate Deliciously", L"Ensuite, nous avons mangé délicieusement", L"Poi abbiamo mangiato deliziosamente", L"Luego comimos deliciosamente", L"이후 맛있게 먹었습니다", L"在那之後我們美味地享用了", L"ثم أكلنا بلذة", L"Затем мы вкусно поели", L"Dann haben wir köstlich gegessen", L"Depois comemos deliciosamente", L"Daarna hebben we heerlijk gegeten", L"Potem zjedliśmy wybornie", L"Sonra Afiyetle Yedik");
 					break;
 				case 82186:
 					a = "Emergency Order";
 					break;
 				case 82188:
-					a = LL2(L"激烈! 撃滅! ミシュナイダー!!", L"Fierce! Annihilation! Mishneider!!");
+					a = LL14(L"激烈! 撃滅! ミシュナイダー!!", L"Fierce! Crush! Mishnayder!!", L"Féroce ! Écraser ! Mishnayder !!", L"Feroce! Schiaccia! Mishnayder!!", L"¡Feroz! ¡Aplasta! ¡Mishnayder!", L"격렬! 격멸! 미슈나이더!!", L"激烈！擊滅！Mishnayder！！", L"شرس! سحق! Mishnayder!!", L"Яростно! Разгромить! Mishnayder!!", L"Heftig! Zerschmettern! Mishnayder!!", L"Feroz! Esmagar! Mishnayder!!", L"Heftig! Verpletter! Mishnayder!!", L"Gwałtownie! Zmiażdżyć! Mishnayder!!", L"Sert! Ez Geç! Mishnayder!!");
 					break;
 				case 82189:
 					a = "Life Goes On";
 					break;
 				default:
 					if (a == L"ed8_inf_ex.opus") {
-						a = LL2(L"夢幻の彼方へ", L"Beyond the Phantasmal");
+						a = LL14(L"夢幻の彼方へ", L"To the Realm of Dreams", L"Vers le royaume des rêves", L"Verso il regno dei sogni", L"Hacia el reino de los sueños", L"몽환의 저편으로", L"往夢幻的彼方", L"إلى عالم الأحلام", L"В царство снов", L"In das Reich der Träume", L"Para o reino dos sonhos", L"Naar het rijk der dromen", L"Do krainy snów", L"Rüyalar Alemine");
 					}
 				}
 				switch (_ttoi(a.Mid(2, 4))) {
 				case 8001:
-					a = LL2(L"特科クラス《VII組》", L"Class VII");
+					a = LL14(L"特科クラス《VII組》", L"Class VII", L"Classe VII", L"Classe VII", L"Clase VII", L"특과 클래스 《VII組》", L"特科班《VII組》", L"الفصل السابع", L"Класс VII", L"Klasse VII", L"Classe VII", L"Klas VII", L"Klasa VII", L"Sınıf VII");
 					break;
 				case 8002:
-					a = LL2(L"スタートライン", L"Start Line");
+					a = LL14(L"スタートライン", L"Start Line", L"Ligne de départ", L"Linea di partenza", L"Línea de salida", L"스타트 라인", L"起跑線", L"خط البداية", L"Стартовая линия", L"Startlinie", L"Linha de partida", L"Startlijn", L"Linia startu", L"Başlangıç Çizgisi");
 					break;
 				case 8003:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8004:
 					a = "Youthful Victory";
 					break;
 				case 8006:
-					a = LL2(L"ただひたすらに、前へ", L"Ever Forward");
+					a = LL14(L"ただひたすらに、前へ", L"Ever Forward", L"Toujours vers l'avant", L"Sempre avanti", L"Siempre adelante", L"오로지 앞으로", L"一心一意，向前邁進", L"إلى الأمام دائماً", L"Только вперед", L"Immer vorwärts", L"Sempre em frente", L"Altijd vooruit", L"Zawsze do przodu", L"Daima İleri");
 					break;
 				case 8007:
-					a = LL2(L"縁 -つなぐもの-", L"Connection -What Binds-");
+					a = LL14(L"縁 -つなぐもの-", L"Fate -Connecting-", L"Destin -Connexion-", L"Destino -Connessione-", L"Destino -Conexión-", L"인연 ~이어주는 것~", L"緣 -連繫者-", L"القدر - الترابط", L"Судьба -Связующее звено-", L"Schicksal -Verbindend-", L"Destino -Conectando-", L"Lot -Verbindend-", L"Los -Łączący-", L"Kader -Bağlayıcı-");
 					break;
 				case 8102:
-					a = LL2(L"翡翠の公都バリアハート", L"Jade Capital Valdrand");
+					a = LL14(L"翡翠の公都バリアハート", L"Jade Capital Bareahard", L"Capitale de jade Bareahard", L"Capitale di giada Bareahard", L"Capital de jade Bareahard", L"비취의 공도 Bareahard", L"翡翠公都 Bareahard", L"عاصمة اليشم Bareahard", L"Нефритовая столица Bareahard", L"Jade-Hauptstadt Bareahard", L"Capital de jade Bareahard", L"Jade-hoofdstad Bareahard", L"Jadeitowa stolica Bareahard", L"Yeşim Başkenti Bareahard");
 					break;
 				case 8104:
-					a = LL2(L"黒銀の鋼都ルーレ", L"Black-Silver Steel City Roer");
+					a = LL14(L"黒銀の鋼都ルーレ", L"Iron City Roer", L"Ville de fer Roer", L"Città del ferro Roer", L"Ciudad del hierro Roer", L"흑은의 강철 도시 Roer", L"黑銀鋼都 Roer", L"مدينة Roer الحديدية", L"Железный город Roer", L"Eisenstadt Roer", L"Cidade do ferro Roer", L"IJzerstad Roer", L"Żelazne miasto Roer", L"Demir Şehir Roer");
 					break;
 				case 8150:
-					a = LL2(L"下校途中にパンケーキ", L"Pancakes on the Way Home");
+					a = LL14(L"下校途中にパンケーキ", L"Pancakes on the Way Home", L"Des pancakes sur le chemin du retour", L"Pancake sulla via di casa", L"Tortitas de camino a casa", L"하교 길에 팬케이크", L"下學路上的煎餅", L"بانكيك في طريق العودة", L"Блинчики по дороге домой", L"Pfannkuchen auf dem Heimweg", L"Panquecas no caminho para casa", L"Pannenkoeken op weg naar huis", L"Naleśniki w drodze do domu", L"Eve Giderken Krep");
 					break;
 				case 8151:
-					a = LL2(L"可能性は無限大", L"Possibilities Are Infinite");
+					a = LL14(L"可能性は無限大", L"Infinite Possibilities", L"Possibilités infinies", L"Possibilità infinite", L"Posibilidades infinitas", L"가능성은 무한대", L"可能性是無限的", L"احتمالات لا نهائية", L"Бесконечные возможности", L"Unbegrenzte Möglichkeiten", L"Possibilidades infinitas", L"Oneindige mogelijkheden", L"Nieskończone możliwości", L"Sonsuz Olasılıklar");
 					break;
 				case 8152:
-					a = LL2(L"夜のしじまに", L"In the Silence of Night");
+					a = LL14(L"夜のしじまに", L"In the Night Silence", L"Dans le silence nocturne", L"Nel silenzio della notte", L"En el silencio de la noche", L"밤의 정적 속에", L"在深夜的靜謐中", L"في صمت الليل", L"В ночной тишине", L"In der nächtlichen Stille", L"No silêncio da noite", L"In de nachtelijke stilte", L"W nocnej ciszy", L"Gece Sessizliğinde");
 					break;
 				case 8153:
-					a = LL2(L"夕景", L"Evening View");
+					a = LL14(L"夕景", L"Evening Scene", L"Scène de soirée", L"Scena serale", L"Escena vespertina", L"저녁 풍경", L"夕陽美景", L"مشهد المساء", L"Вечерний пейзаж", L"Abendszene", L"Cena noturna", L"Avondtafereel", L"Wieczorna scena", L"Akşam Manzarası");
 					break;
 				case 8154:
-					a = LL2(L"新しい朝", L"New Morning");
+					a = LL14(L"新しい朝", L"New Morning", L"Nouveau matin", L"Nuovo mattino", L"Nueva mañana", L"새로운 아침", L"新的早晨", L"صباح جديد", L"Новое утро", L"Neuer Morgen", L"Nova manhã", L"Nieuwe ochtend", L"Nowy poranek", L"Yeni Sabah");
 					break;
 				case 8155:
-					a = LL2(L"束の間の里帰り", L"Brief Return Home");
+					a = LL14(L"束の間の里帰り", L"Brief Homecoming", L"Bref retour au pays", L"Breve ritorno a casa", L"Breve regreso al hogar", L"잠시 동안의 귀향", L"短暫的返郷", L"عودة قصيرة للوطن", L"Краткое возвращение домой", L"Kurze Heimkehr", L"Breve retorno ao lar", L"Korte thuiskomst", L"Krótki powrót do domu", L"Kısa Bir Memleket Dönüşü");
 					break;
 				case 8156:
-					a = LL2(L"白亜の旧都セントアーク", L"White Old Capital St. Ark");
+					a = LL14(L"白亜の旧都セントアーク", L"White City St. Ark", L"Vieille capitale blanche St. Ark", L"Antica capitale bianca St. Ark", L"Vieja capital blanca St. Ark", L"백아의 구도セントアーク", L"白亞舊都 St. Ark", L"العاصمة القديمة البيضاء St. Ark", L"Белая старая столица Сент-Арк", L"Weiße alte Hauptstadt St. Ark", L"Antiga capital branca St. Ark", L"Witte oude hoofdstad St. Ark", L"Biała stara stolica St. Ark", L"Beyaz Eski Başkent St. Ark");
 					break;
 				case 8157:
-					a = LL2(L"紡績町パルム", L"Textile Town Parm");
+					a = LL14(L"紡績町パルム", L"Spinning Town Parm", L"Ville textile Parm", L"Città tessile Parm", L"Pueblo textil Parm", L"방적 마을 Parm", L"紡織鎮 Parm", L"بلدة الغزل Parm", L"Ткацкий городок Парм", L"Spinnereistadt Parm", L"Vila têxtil Parm", L"Spinnerijstad Parm", L"Tkackie miasto Parm", L"Dokuma Kasabası Parm");
 					break;
 				case 8158:
-					a = LL2(L"籠の中のクロスベル", L"Crossbell in the Cage");
+					a = LL14(L"籠の中のクロスベル", L"Crossbell in a Cage", L"Crossbell en cage", L"Crossbell in gabbia", L"Crossbell en una jaula", L"장벽 속의 Crossbell", L"籠中 Crossbell", L"Crossbell في قفص", L"Кроссбелл в клетке", L"Crossbell im Käfig", L"Crossbell em uma gaiola", L"Crossbell in een kooi", L"Crossbell w klatce", L"Kafesteki Crossbell");
 					break;
 				case 8159:
-					a = LL2(L"今、成すべきこと", L"What Must Be Done Now");
+					a = LL14(L"今、成すべきこと", L"What Must Be Done Now", L"Ce qui doit être fait maintenant", L"Ciò che deve essere fatto ora", L"Lo que debe hacerse ahora", L"지금, 해야 할 일", L"現在，應做之事", L"ما يجب فعله الآن", L"Что должно быть сделано сейчас", L"Was jetzt getan werden muss", L"O que deve ser feito agora", L"Wat nu moet worden gedaan", L"Co należy teraz zrobić", L"Şimdi Yapılması Gereken");
 					break;
 				case 8160:
-					a = LL2(L"歓楽都市ラクウェル", L"Pleasure City Raquel");
+					a = LL14(L"歓楽都市ラクウェル", L"Pleasure City Raquel", L"Ville de plaisir Raquel", L"Città del piacere Raquel", L"Ciudad del placer Raquel", L"환락 도시 Raquel", L"歡樂都市 Raquel", L"مدينة المتعة Raquel", L"Город развлечений Ракель", L"Vergnügungsstadt Raquel", L"Cidade do prazer Raquel", L"Plezierstad Raquel", L"Miasto rozrywki Raquel", L"Eğlence Şehri Raquel");
 					break;
 				case 8161:
-					a = LL2(L"静かなる駆け引き", L"Quiet Bargaining");
+					a = LL14(L"静かなる駆け引き", L"Quiet Maneuvering", L"Manoeuvres silencieuses", L"Manovre silenziose", L"Maniobras silenciosas", L"고요한 밀당", L"靜默的周旋", L"مناورة هادئة", L"Тихое маневрирование", L"Stilles Manövrieren", L"Manobras silenciosas", L"Stil manoeuvreren", L"Ciche manewry", L"Sessiz Manevralar");
 					break;
 				case 8162:
-					a = LL2(L"赫奕たるヘイムダル", L"Radiant Heimdallr");
+					a = LL14(L"赫奕たるヘイムダル", L"Splendid Heimdallr", L"Heimdallr splendide", L"Splendida Heimdallr", L"Espléndida Heimdallr", L"혁혁한 Heimdallr", L"赫赫有名的 Heimdallr", L"Heimdallr الرائعة", L"Великолепный Хеймдалль", L"Prächtiges Heimdallr", L"Esplêndida Heimdallr", L"Prachtig Heimdallr", L"Wspaniały Heimdallr", L"Görkemli Heimdallr");
 					break;
 				case 8163:
-					a = LL2(L"紺碧の海都オルディス", L"Azure Sea City Ordis");
+					a = LL14(L"紺碧の海都オルディス", L"Azure Port City Ordys", L"Ville portuaire d'azur Ordys", L"Città portuale azzurra Ordys", L"Ciudad portuaria azul Ordys", L"쪽빛의 해도 Ordys", L"紺碧海都 Ordys", L"مدينة Ordys المرفئية الزرقاء", L"Лазурный портовый город Ордис", L"Azurblaue Hafenstadt Ordys", L"Cidade portuária azul Ordys", L"Azuurblauwe havenstad Ordys", L"Błękitne miasto portowe Ordys", L"Gök Mavisi Liman Şehri Ordys");
 					break;
 				case 8164:
-					a = LL2(L"最前線都市", L"Frontline City");
+					a = LL14(L"最前線都市", L"Front-line City", L"Ville de première ligne", L"Città di prima linea", L"Ciudad de primera línea", L"최전선 도시", L"最前線都市", L"مدينة الخطوط الأمامية", L"Прифронтовой город", L"Frontstadt", L"Cidade de linha de frente", L"Frontstad", L"Miasto na linii frontu", L"Cephe Şehri");
 					break;
 				case 8165:
 					a = "Base Camp";
 					break;
 				case 8166:
-					a = LL2(L"精強なる兵たち", L"Elite Soldiers");
+					a = LL14(L"精強なる兵たち", L"Elite Soldiers", L"Soldats d'élite", L"Soldati d'élite", L"Soldados de élite", L"정강한 병사들", L"精銳的士兵們", L"جنود النخبة", L"Элитные солдаты", L"Elitesoldaten", L"Soldados de elite", L"Elitesoldaten", L"Elitarni żołnierze", L"Seçkin Askerler");
 					break;
 				case 8168:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8170:
-					a = LL2(L"隠れ里エリン", L"Hidden Village Eryn");
+					a = LL14(L"隠れ里エリン", L"Hidden Village Erin", L"Village caché d'Erin", L"Villaggio nascosto di Erin", L"Aldea oculta de Erin", L"숨겨진 마을 에린", L"隠之里 Erin", L"قرية Erin المخفية", L"Скрытая деревня Эрин", L"Verborgenes Dorf Erin", L"Vila oculta de Erin", L"Verborgen dorp Erin", L"Ukryta wioska Erin", L"Gizli Köy Erin");
 					break;
 				case 8171:
-					a = LL2(L"潜入調査", L"Undercover Investigation");
+					a = LL14(L"潜入調査", L"Infiltration", L"Infiltration", L"Infiltrazione", L"Infiltración", L"잠입 조사", L"潛入調查", L"تسلل", L"Инфильтрация", L"Infiltration", L"Infiltração", L"Infiltratie", L"Infiltracja", L"Sızma Harekatı");
 					break;
 				case 8172:
-					a = LL2(L"昏冥の中で", L"In the Darkness");
+					a = LL14(L"昏冥の中で", L"In the Darkness", L"Dans les ténèbres", L"Nell'oscurità", L"En la oscuridad", L"혼명 속에서", L"在昏暗之中", L"في الظلام", L"Во тьме", L"In der Dunkelheit", L"Na escuridão", L"In de duisternis", L"W ciemności", L"Karanlıkta");
 					break;
 				case 8173:
-					a = LL2(L"紅き閃影 -光まとう翼-", L"Crimson Flash -Wings of Light-");
+					a = LL14(L"紅き閃影 -光まとう翼-", L"Crimson Flash -Wings of Light-", L"Éclat carmin -Ailes de lumière-", L"Lampo cremisi -Ali di luce-", L"Destello carmesí -Alas de luz-", L"붉은 섬영 ~빛을 두른 날개~", L"紅之閃影 -披光之翼-", L"وميض قرمزية - أجنحة الضوء", L"Алая вспышка -Крылья света-", L"Purpurroter Blitz -Flügel des Lichts-", L"Lampejo carmesim -Asas de luz-", L"Karmozijnrode flits -Vleugels van licht-", L"Szkarłatny błysk -Skrzydła światła-", L"Kızıl Parıltı -Işık Kanatları-");
 					break;
 				case 8174:
-					a = LL2(L"聖ウルスラ医科大学 -閃Ver.-", L"St. Ursula Medical College -CS Ver.-");
+					a = LL14(L"聖ウルスラ医科大学 -閃Ver.-", L"St. Ursula Medical College -CS Ver.-", L"St. Ursula Medical College -CS Ver.-", L"St. Ursula Medical College -CS Ver.-", L"St. Ursula Medical College -CS Ver.-", L"성 우르술라 의과대학 -閃Ver.-", L"聖烏爾蘇拉醫科大學 -閃Ver.-", L"كلية سانت أورسولا الطبية -CS Ver.-", L"Медицинский колледж Св. Урсулы -CS Ver.-", L"Medizinische Hochschule St. Ursula -CS Ver.-", L"Faculdade de Medicina Sta. Úrsula -CS Ver.-", L"Medisch College St. Ursula -CS Ver.-", L"Kolegium Medyczne św. Urszuli -CS Ver.-", L"Aziz Ursula Tıp Koleji -CS Ver.-");
 					break;
 				case 8175:
-					a = LL2(L"一抹の不安、一縷の望み", L"Hint of Unease, Ray of Hope");
+					a = LL14(L"一抹の不安、一縷の望み", L"Hint of Unease, Ray of Hope", L"Une pointe d'inquiétude, un rayon d'espoir", L"Un briciolo di ansia, un raggio di speranza", L"Un rastro de inquietud, un rayo de esperanza", L"일말의 불안, 한 줄기 희망", L"一抹不安，一縷希望", L"تلميح من القلق، شعاع من الأمل", L"Тень беспокойства, луч надежды", L"Ein Hauch von Unbehagen, ein Hoffnungsschimmer", L"Um toque de inquietação, um raio de esperança", L"Een spoortje van onrust, een straal van hoop", L"Cień niepokoju, promień nadziei", L"Bir Parça Huzursuzluk, Bir Umut Işığı");
 					break;
 				case 8176:
 					a = "Lyrical Amber";
 					break;
 				case 8177:
-					a = LL2(L"水面を渡る風", L"Wind Over the Water");
+					a = LL14(L"水面を渡る風", L"Wind Over the Water", L"Vent sur l'eau", L"Vento sull'acqua", L"Viento sobre el agua", L"수면을 가르는 바람", L"拂過水面的風", L"رياح فوق الماء", L"Ветер над водой", L"Wind über dem Wasser", L"Vento sobre a água", L"Wind over het water", L"Wiatr nad wodą", L"Su Üstündeki Rüzgar");
 					break;
 				case 8250:
-					a = LL2(L"流れる雲の彼方に", L"Beyond the Drifting Clouds");
+					a = LL14(L"流れる雲の彼方に", L"Beyond the Drifting Clouds", L"Au-delà des nuages dérivants", L"Oltre le nuvole erranti", L"Más allá de las nubes errantes", L"흐르는 구름 저편으로", L"流雲的彼方", L"ما وراء السحب العابرة", L"За плывущими облаками", L"Jenseits der ziehenden Wolken", L"Além das nuvens flutuantes", L"Voorbij de drijvende wolken", L"Poza płynące chmury", L"Süzülen Bulutların Ötesinde");
 					break;
 				case 8251:
-					a = LL2(L"静寂の小路", L"Path of Silence");
+					a = LL14(L"静寂の小路", L"Path of Silence", L"Chemin du silence", L"Sentiero del silenzio", L"Senda del silencio", L"정적의 소로", L"安靜的小徑", L"مسار الصمت", L"Путь тишины", L"Pfad der Stille", L"Caminho do silêncio", L"Pad van stilte", L"Ścieżka ciszy", L"Sessizlik Yolu");
 					break;
 				case 8252:
-					a = LL2(L"崖谷の狭間", L"Gap of the Cliff");
+					a = LL14(L"崖谷の狭間", L"Gap of the Cliff", L"Le fossé de la falaise", L"Divario della scogliera", L"Brecha del acantilado", L"절벽 사이의 틈", L"崖谷狹間", L"فجوة الجرف", L"Разрыв утеса", L"Spalt der Klippe", L"Fenda do penhasco", L"Kloof van de klif", L"Szczelina klifu", L"Uçurum Boşluğu");
 					break;
 				case 8253:
 					a = "Weathering Road";
 					break;
 				case 8260:
-					a = LL2(L"彼の地へ向かって", L"Toward That Land");
+					a = LL14(L"彼の地へ向かって", L"Toward That Land", L"Vers cette terre", L"Verso quella terra", L"Hacia esa tierra", L"그 땅을 향하여", L"邁向那片土地", L"نحو تلك الأرض", L"К той земле", L"Jenem Land entgegen", L"Em direção àquela terra", L"Naar dat land", L"Ku tamtej krainie", L"O Diyara Doğru");
 					break;
 				case 8261:
-					a = LL2(L"終焉の途へ", L"Toward the End");
+					a = LL14(L"終焉の途へ", L"Toward the End", L"Vers la fin", L"Verso la fine", L"Hacia el final", L"종언의 길로", L"邁向終結", L"نحو النهاية", L"К концу", L"Dem Ende entgegen", L"Em direção ao fim", L"Naar het einde", L"Ku końcowi", L"Sona Doğru");
 					break;
 				case 8262:
-					a = LL2(L"全てを識るもの -閃Ver.-", L"Omniscient -CS Ver.-");
+					a = LL14(L"全てを識るもの -閃Ver.-", L"Omniscient -CS Ver.-", L"L'omniscient -CS Ver.-", L"L'onniscente -CS Ver.-", L"El omnisciente -CS Ver.-", L"모든 것을 아는 자 -閃Ver.-", L"全知者 -閃Ver.-", L"العليم -CS Ver.-", L"Всеведущий -CS Ver.-", L"Der Allwissende -CS Ver.-", L"O onisciente -CS Ver.-", L"De alwetende -CS Ver.-", L"Wszechwiedzący -CS Ver.-", L"Her Şeyi Bilen -CS Ver.-");
 					break;
 				case 8263:
-					a = LL2(L"たそがれ緑道", L"Twilight Green Path");
+					a = LL14(L"たそがれ緑道", L"Twilight Green Path", L"Chemin vert du crépuscule", L"Sentiero verde del crepuscolo", L"Senda verde del crepúsculo", L"황혼의 녹도", L"黄昏綠道", L"مسار الغسق الأخضر", L"Сумеречная зеленая тропа", L"Zwielichtiger grüner Pfad", L"Caminho verde do crepúsculo", L"Groene schemerpad", L"Zielona ścieżka zmierzchu", L"Alacakaranlık Yeşil Yolu");
 					break;
 				case 8311:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8350:
-					a = LL2(L"アインヘル小要塞", L"Einhel Fortress");
+					a = LL14(L"アインヘル小要塞", L"Einhel Fortress", L"Forteresse d'Einhel", L"Fortezza di Einhel", L"Fortaleza de Einhel", L"Einhel 소요새", L"Einhel 小要塞", L"حصن Einhel", L"Крепость Эйнхель", L"Einhel-Festung", L"Fortaleza de Einhel", L"Vesting Einhel", L"Twierdza Einhel", L"Einhel Kalesi");
 					break;
 				case 8351:
-					a = LL2(L"伝承の裏で", L"Behind the Legend");
+					a = LL14(L"伝承の裏で", L"Behind the Legend", L"Derrière la légende", L"Dietro la leggenda", L"Detrás de la leyenda", L"전승의 이면에서", L"傳承的背後", L"خلف الأسطورة", L"За легендой", L"Hinter der Legende", L"Atrás da lenda", L"Achter de legende", L"Za legendą", L"Efsanenin Arkasında");
 					break;
 				case 8352:
 					a = "Unplanned Residue";
 					break;
 				case 8353:
-					a = LL2(L"忘れられし幻夢の狭間 -閃Ver.-", L"Forgotten Phantasmal Gap -CS Ver.-");
+					a = LL14(L"忘れられし幻夢の狭間 -閃Ver.-", L"Forgotten Phantasmal Gap -CS Ver.-", L"Écart phantasmatique oublié -CS Ver.-", L"Divario fantasmatico dimenticato -CS Ver.-", L"Brecha fantasmal olvidada -CS Ver.-", L"잊혀진 환몽의 틈새 -閃Ver.-", L"被遺忘的幻夢狹間 -閃Ver.-", L"الفجوة الخيالية المنسية -CS Ver.-", L"Забытый призрачный разрыв -CS Ver.-", L"Vergessener phantasmagorischer Spalt -CS Ver.-", L"Fenda fantasmal esquecida -CS Ver.-", L"Vergeten fantoomkloof -CS Ver.-", L"Zapomniana fantastyczna szczelina -CS Ver.-", L"Unutulmuş Hayali Boşluk -CS Ver.-");
 					break;
 				case 8354:
-					a = LL2(L"幽世の気配", L"Atmosphere of the Netherworld");
+					a = LL14(L"幽世の気配", L"Atmosphere of the Netherworld", L"Atmosphère de l'au-delà", L"Atmosfera dell'oltretomba", L"Atmósfera del inframundo", L"저승의 기운", L"幽世之氣息", L"أجواء العالم السفلي", L"Атмосфера преисподней", L"Atmosphäre der Unterwelt", L"Atmosfera do submundo", L"Sfeer van de onderwereld", L"Atmosfera zaświatów", L"Öbür Dünyanın Havası");
 					break;
 				case 8355:
 					a = "solid as the Rock of JUNO";
 					break;
 				case 8356:
-					a = LL2(L"地下に巣喰う", L"Nesting Underground");
+					a = LL14(L"地下に巣喰う", L"Nesting Underground", L"Nicher sous terre", L"Nidificare sottoterra", L"Anidando bajo tierra", L"지하에 둥지를 틀다", L"盤據地下", L"التعشيش تحت الأرض", L"Гнездование под землей", L"Unterirdisches Nisten", L"Aninhando-se no subsolo", L"Ondergronds nestelen", L"Gnieżdżenie się pod ziemią", L"Yeraltındaki Yuva");
 					break;
 				case 8359:
 					a = "Spiral of Erebos";
 					break;
 				case 8360:
-					a = LL2(L"鋼の障壁", L"Steel Barrier");
+					a = LL14(L"鋼の障壁", L"Steel Barrier", L"Barrière d'acier", L"Barriera d'acciaio", L"Barrera de acero", L"강철의 장벽", L"鋼鐵障壁", L"حاجز فولاذي", L"Стальной барьер", L"Stahlbarriere", L"Barreira de aço", L"Stalen barrière", L"Stalowa bariera", L"Çelik Bariyer");
 					break;
 				case 8363:
 					a = "Break In";
 					break;
 				case 8365:
-					a = LL2(L"サングラール迷宮", L"Sanglar Maze");
+					a = LL14(L"サングラール迷宮", L"Sanglar Maze", L"Labyrinthe de Sanglar", L"Labirinto di Sanglar", L"Laberinto de Sanglar", L"Sanglar 미궁", L"Sanglar 迷宮", L"متاهة Sanglar", L"Лабиринт Санглар", L"Sanglar-Labyrinth", L"Labirinto de Sanglar", L"Sanglar doolhof", L"Labirynt Sanglar", L"Sanglar Labirenti");
 					break;
 				case 8366:
-					a = LL2(L"静けき森の魔女", L"Witch of the Silent Forest");
+					a = LL14(L"静けき森の魔女", L"Witch of the Silent Forest", L"Sorcière de la forêt silencieuse", L"Strega della foresta silenziosa", L"Bruja del bosque silencioso", L"고요한 숲의 마녀", L"靜謐森林的魔女", L"ساحرة الغابة الصامتة", L"Ведьма тихого леса", L"Hexe des stillen Waldes", L"Bruxa da floresta silenciosa", L"Heks van het stille woud", L"Wiedźma z cichego lasu", L"Sessiz Ormanın Cadısı");
 					break;
 				case 8367:
-					a = LL2(L"Mystic Core -閃Ver.-", L"Mystic Core -CS Ver.-");
+					a = LL14(L"Mystic Core -閃Ver.-", L"Mystic Core -CS Ver.-", L"Mystic Core -CS Ver.-", L"Mystic Core -CS Ver.-", L"Mystic Core -CS Ver.-", L"Mystic Core -閃Ver.-", L"Mystic Core -閃Ver.-", L"Mystic Core -CS Ver.-", L"Mystic Core -CS Ver.-", L"Mystic Core -CS Ver.-", L"Mystic Core -CS Ver.-", L"Mystic Core -CS Ver.-", L"Mystic Core -CS Ver.-", L"Mystic Core -CS Ver.-");
 					break;
 				case 8368:
-					a = LL2(L"斉いし舞台", L"Unified Stage");
+					a = LL14(L"斉いし舞台", L"Unified Stage", L"Scène unifiée", L"Palcoscenico unificato", L"Escenario unificado", L"가지런한 무대", L"齊整的舞台", L"المسرح الموحد", L"Единая сцена", L"Vereinte Bühne", L"Palco unificado", L"Verenigd podium", L"Zunifikowana scena", L"Birleşmiş Sahne");
 					break;
 				case 8369:
-					a = LL2(L"シンクロニシティ #23", L"Synchronicity #23");
+					a = LL14(L"シンクロニシティ #23", L"Synchronicity #23", L"Synchronicité #23", L"Sincronicità #23", L"Sincronicidad #23", L"싱크로니시티 #23", L"共時性 #23", L"التزامن #23", L"Синхронность #23", L"Synchronizität #23", L"Sincronicidade #23", L"Synchroniciteit #23", L"Synchroniczność #23", L"Eşzamanlılık #23");
 					break;
 				case 8371:
-					a = LL2(L"世界の命運を賭けて", L"Betting on the World's Fate");
+					a = LL14(L"世界の命運を賭けて", L"Betting on the World's Fate", L"Parier sur le destin du monde", L"Scommettendo sul destino del mondo", L"Apostando por el destino del mundo", L"세상의 운명을 걸고", L"賭上世界的命運", L"الرهان على مصير العالم", L"Ставя на кон судьбу мира", L"Auf das Schicksal der Welt setzen", L"Apostando no destino do mundo", L"Inzetten op het lot van de wereld", L"Stawiając na losy świata", L"Dünyanın Kaderi Üzerine Bahis");
 					break;
 				case 8372:
 					a = "The End of -SAGA-";
 					break;
 				case 8429:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8450:
 					a = "Brave Steel";
@@ -9076,25 +10585,25 @@ void CWread::wavread()
 					a = "Toughness!!";
 					break;
 				case 8452:
-					a = LL2(L"剣戟怒涛", L"Sword and Lance Storm");
+					a = LL14(L"剣戟怒涛", L"Sword and Lance Storm", L"Tempête d'épées et de lances", L"Tempesta di spade e lance", L"Tormenta de espadas y lanzas", L"검격노도", L"劍戟怒濤", L"عاصفة السيف والرمح", L"Шторм мечей и копий", L"Schwert- und Lanzensturm", L"Tempestade de espadas e lanças", L"Zwaard- en lansstorm", L"Burza mieczy i włóczni", L"Kılıç ve Mızrak Fırtınası");
 					break;
 				case 8453:
 					a = "Proud Grudge";
 					break;
 				case 8454:
-					a = LL2(L"チープ・トラップ", L"Cheap Trap");
+					a = LL14(L"チープ・トラップ", L"Cheap Trap", L"Piège bon marché", L"Trappola a buon mercato", L"Trampa barata", L"치프 트랩", L"便宜的陷阱", L"فخ رخيص", L"Дешевая ловушка", L"Billige Falle", L"Armadilha barata", L"Goedkope val", L"Tania pułapka", L"Ucuz Tuzak");
 					break;
 				case 8455:
 					a = "STEP AHEAD";
 					break;
 				case 8456:
-					a = LL2(L"劣勢を挽回せよ！", L"Turn the Tide!");
+					a = LL14(L"劣勢を挽回せよ！", L"Turn the Tide!", L"Inversez la tendance !", L"Inverti la rotta!", L"¡Cambia la marea!", L"열세를 만회하라!", L"挽回劣勢！", L"اقلب الموازين!", L"Переломи ход событий!", L"Das Blatt wenden!", L"Vire o jogo!", L"Keer het tij!", L"Odwróć losy!", L"Gidişatı Değiştir!");
 					break;
 				case 8457:
 					a = "Abrupt Visitor";
 					break;
 				case 8458:
-					a = LL2(L"行き着く先 -Opening Size-", L"Destination -Opening Size-");
+					a = LL14(L"行き着く先 -Opening Size-", L"Destination -Opening Size-", L"Destination -Opening Size-", L"Destinazione -Opening Size-", L"Destino -Opening Size-", L"다다르는 곳 -Opening Size-", L"抵達之處 -Opening Size-", L"الوجهة - Opening Size", L"Место назначения -Opening Size-", L"Zielort -Opening Size-", L"Destino -Opening Size-", L"Bestemming -Opening Size-", L"Miejsce docelowe -Opening Size-", L"Varış Noktası -Opening Size-");
 					break;
 				case 8460:
 					a = "Lift-off!";
@@ -9106,7 +10615,7 @@ void CWread::wavread()
 					a = "One-Way to the Netherworld";
 					break;
 				case 8465:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8466:
 					a = "Erosion of Madness";
@@ -9115,7 +10624,7 @@ void CWread::wavread()
 					a = "DOOMSDAY TRANCE";
 					break;
 				case 8468:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8472:
 					a = "Malicious Fiend";
@@ -9127,10 +10636,10 @@ void CWread::wavread()
 					a = "Robust One";
 					break;
 				case 8475:
-					a = LL2(L"古の盟約", L"Ancient Covenant");
+					a = LL14(L"古の盟約", L"Ancient Covenant", L"Ancienne alliance", L"Antico patto", L"Antiguo pacto", L"고대의 맹약", L"古代盟約", L"العهد القديم", L"Древний завет", L"Alter Bund", L"Antigo pacto", L"Oud verbond", L"Starożytne przymierze", L"Kadim Sözleşme");
 					break;
 				case 8476:
-					a = LL2(L"七の相克 -EXCELLION KRIEG-", L"Seven Antagonisms -EXCELLION KRIEG-");
+					a = LL14(L"七の相克 -EXCELLION KRIEG-", L"Seven Antagonisms -EXCELLION KRIEG-", L"Sept antagonismes -EXCELLION KRIEG-", L"Sette antagonismi -EXCELLION KRIEG-", L"Siete antagonismos -EXCELLION KRIEG-", L"칠의 상극 -EXCELLION KRIEG-", L"七之相克 -EXCELLION KRIEG-", L"الخصومات السبعة - EXCELLION KRIEG", L"Семь противостояний -EXCELLION KRIEG-", L"Sieben Antagonismen -EXCELLION KRIEG-", L"Sete antagonismos -EXCELLION KRIEG-", L"Zeven tegenstellingen -EXCELLION KRIEG-", L"Siedem antagonizmów -EXCELLION KRIEG-", L"Yedi Karşıtlık -EXCELLION KRIEG-");
 					break;
 				case 8477:
 					a = "Burning Throb";
@@ -9145,7 +10654,7 @@ void CWread::wavread()
 					a = "With Our Own Hands!!";
 					break;
 				case 8500:
-					a = LL2(L"授業は合同で", L"Joint Class");
+					a = LL14(L"授業は合同で", L"Joint Class", L"Cours commun", L"Classe congiunta", L"Clase conjunta", L"수업은 합동으로", L"聯合授課", L"فصل مشترك", L"Совместное занятие", L"Gemeinsamer Unterricht", L"Aula conjunta", L"Gezamenlijke les", L"Wspólna lekcja", L"Ortak Ders");
 					break;
 				case 8501:
 					a = "Power or Technique";
@@ -9154,235 +10663,183 @@ void CWread::wavread()
 					a = "Briefing Time";
 					break;
 				case 8503:
-					a = LL2(L"第II分校の日常", L"Daily Life at Branch II");
+					a = LL14(L"第II分校の日常", L"Daily Life at Branch II", L"Vie quotidienne à la Branche II", L"Vita quotidiana alla Branca II", L"Vida cotidiana en la Rama II", L"제II분교의 일상", L"第II分校的日常", L"الحياة اليومية في الفرع الثاني", L"Будни во втором филиале", L"Alltag in Zweigstelle II", L"Vida cotidiana na Filial II", L"Dagelijks leven in Afdeling II", L"Życie codzienne w Filii II", L"2. Şubede Günlük Yaşam");
 					break;
 				case 8504:
-					a = LL2(L"充実したひととき", L"Satisfying Moment");
+					a = LL14(L"充実したひととき", L"Satisfying Moment", L"Moment satisfaisant", L"Momento soddisfacente", L"Momento satisfactorio", L"충실한 한때", L"充實的時光", L"لحظة مرضية", L"Насыщенный момент", L"Erfüllter Moment", L"Momento gratificante", L"Bevredigend moment", L"Satysfakcjonująca chwila", L"Tatmin Edici Bir An");
 					break;
 				case 8505:
-					a = LL2(L"異端の研究者", L"Heretic Researcher");
+					a = LL14(L"異端の研究者", L"Heretic Researcher", L"Chercheur hérétique", L"Ricercatore eretico", L"Investigador herético", L"이단의 연구자", L"異端研究者", L"باحث هرطوقي", L"Исследователь-еретик", L"Häretischer Forscher", L"Pesquisador herético", L"Ketters onderzoeker", L"Badacz heretycki", L"Sapkın Araştırmacı");
 					break;
 				case 8506:
-					a = LL2(L"君に伝えたいこと", L"What I Want to Tell You");
+					a = LL14(L"君に伝えたいこと", L"What I Want to Tell You", L"Ce que je veux te dire", L"Ciò che voglio dirti", L"Lo que quiero decirte", L"너에게 전하고 싶은 것", L"想傳達給你的事", L"ما أريد أن أقوله لك", L"То, что я хочу тебе сказать", L"Was ich dir sagen möchte", L"O que eu quero te dizer", L"Wat ik je wil vertellen", L"To, co chcę ci powiedzieć", L"Sana Söylemek İstediğim Şey");
 					break;
-				case 8507:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8508:
-					a = LL2(L"不明", L"Unknown");
+				case 8507: case 8508:
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8509:
-					a = LL2(L"張り詰めた思惑", L"Tense Speculation");
+					a = LL14(L"張り詰めた思惑", L"Tense Speculation", L"Spéculation tendue", L"Tesa speculazione", L"Especulación tensa", L"긴박한 의도", L"緊繃的意図", L"تكهنات متوترة", L"Напряженное ожидание", L"Gespannte Spekulation", L"Especulação tensa", L"Gespannen speculatie", L"Napięte spekulacje", L"Gergin Bekleyiş");
 					break;
 				case 8510:
-					a = LL2(L"混迷の対立", L"Chaotic Conflict");
+					a = LL14(L"混迷の対立", L"Chaotic Conflict", L"Conflit chaotique", L"Conflitto caotico", L"Conflicto caótico", L"혼미한 대립", L"迷惘的對立", L"صراع فوضوي", L"Хаотичный конфликт", L"Chaotischer Konflikt", L"Conflito caótico", L"Chaotisch conflict", L"Chaotyczny konflikt", L"Kaotik Çatışma");
 					break;
 				case 8511:
-					a = LL2(L"急転直下", L"Sudden Turn");
+					a = LL14(L"急転直下", L"Sudden Turn", L"Tournant soudain", L"Svolta improvvisa", L"Giro repentino", L"급전직하", L"急轉直下", L"تحول مفاجئ", L"Внезапный поворот", L"Plötzliche Wendung", L"Reviravolta súbita", L"Plotselinge wending", L"Nagły zwrot", L"Ani Dönüş");
 					break;
 				case 8512:
-					a = LL2(L"蠢く陰謀", L"Writhing Conspiracy");
+					a = LL14(L"蠢く陰謀", L"Writhing Conspiracy", L"Complot rampant", L"Cospirazione strisciante", L"Conspiración reptante", L"꿈틀대는 음모", L"蠢動的陰謀", L"مؤامرة ملتوية", L"Ползучий заговор", L"Sich windende Verschwörung", L"Conspiração rastejante", L"Kronkelende samenzwering", L"Wijąc się spisek", L"Kaynayan Komplo");
 					break;
 				case 8513:
-					a = LL2(L"託されたもの", L"Entrusted One");
+					a = LL14(L"託されたもの", L"Entrusted One", L"Celui à qui on a confié", L"Colui a cui è stato affidato", L"A quien se le confió", L"수탁된 것", L"被託付之物", L"المستأمن", L"Вверенный", L"Der Anvertraute", L"O confiado", L"De toevertrouwde", L"Powierzony", L"Emanet Edilen");
 					break;
 				case 8514:
-					a = LL2(L"羅刹の薫陶", L"Rasetsu's Guidance");
+					a = LL14(L"羅刹の薫陶", L"Rasetsu's Guidance", L"L'influence de Rasetsu", L"La guida di Rasetsu", L"La guía de Rasetsu", L"라세츠의 훈도", L"羅刹的教化", L"توجيه Rasetsu", L"Наставление Расецу", L"Rasetsus Führung", L"Orientação de Rasetsu", L"Rasetsu's begeleiding", L"Wskazówki Rasetsu", L"Rasetsu'nun Rehberliği");
 					break;
 				case 8515:
-					a = LL2(L"ハーメル -遺されたもの-", L"Hamel -What Was Left Behind-");
+					a = LL14(L"ハーメル -遺されたもの-", L"Hamel -What Was Left Behind-", L"Hamel -Ce qui a été laissé-", L"Hamel -Ciò che è rimasto-", L"Hamel -Lo que quedó atrás-", L"하멜 ~남겨진 것~", L"哈梅爾 -遺留之物-", L"Hamel - ما تبقى", L"Хамель -Что осталось позади-", L"Hamel -Was zurückblieb-", L"Hamel -O que foi deixado para trás-", L"Hamel -Wat achterbleef-", L"Hamel -Co pozostało-", L"Hamel -Geride Kalanlar-");
 					break;
 				case 8516:
-					a = LL2(L"Welcome Back! アーベントタイム(ラジオ)", L"Welcome Back! Evening Time(radio)");
+					a = LL14(L"Welcome Back! アーベントタイム(ラジオ)", L"Welcome Back! Evening Time (radio)", L"Welcome Back! Evening Time (radio)", L"Welcome Back! Evening Time (radio)", L"Welcome Back! Evening Time (radio)", L"Welcome Back! Evening Time (라디오)", L"Welcome Back! Evening Time (廣播)", L"Welcome Back! Evening Time (راديو)", L"Welcome Back! Evening Time (радио)", L"Welcome Back! Evening Time (Radio)", L"Welcome Back! Evening Time (rádio)", L"Welcome Back! Evening Time (radio)", L"Welcome Back! Evening Time (radio)", L"Welcome Back! Evening Time (Radyo)");
 					break;
-				case 8517:
-					a = LL2(L"夏至祭", L"Summer Solstice Festival");
-					break;
-				case 8519:
-					a = LL2(L"夏至祭", L"Summer Solstice Festival");
+				case 8517: case 8519:
+					a = LL14(L"夏至祭", L"Summer Solstice Festival", L"Festival du solstice d'été", L"Festival del solstizio d'estate", L"Festival del solsticio de verano", L"하지제", L"夏至祭", L"مهرجان الانقلاب الصيفي", L"Фестиваль летнего солнцестояния", L"Sommersonnenwendfest", L"Festival do solstício de verão", L"Midzomerfestival", L"Festiwal przesilenia letniego", L"Yaz Gündönümü Festivali");
 					break;
 				case 8520:
-					a = LL2(L"翡翠庭園", L"Jade Garden");
+					a = LL14(L"翡翠庭園", L"Jade Garden", L"Jardin de jade", L"Giardino di giada", L"Jardín de jade", L"비취 정원", L"翡翠庭園", L"حديقة اليشم", L"Нефритовый сад", L"Jade-Garten", L"Jardim de jade", L"Jade tuin", L"Jadeitowy ogród", L"Yeşim Bahçesi");
 					break;
 				case 8521:
-					a = LL2(L"初めての円舞曲", L"First Waltz");
+					a = LL14(L"初めての円舞曲", L"First Waltz", L"Première valse", L"Primo valzer", L"Primer vals", L"첫 원무곡", L"第一首圓舞曲", L"الفالس الأول", L"Первый вальс", L"Erster Walzer", L"Primeira valsa", L"Eerste wals", L"Pierwszy walc", L"İlk Vals");
 					break;
 				case 8522:
-					a = LL2(L"真打ち登場！", L"Headliner's Entrance!");
+					a = LL14(L"真打ち登場！", L"Headliner's Entrance!", L"Entrée de la vedette !", L"Entrata del protagonista!", L"¡Entrada del protagonista!", L"신우치 등장!", L"壓軸登場！", L"دخول النجم!", L"Выход главной звезды!", L"Auftritt des Hauptactes!", L"Entrada da atração principal!", L"Entree van de hoofdact!", L"Wejście gwiazdy wieczoru!", L"Asıl Sanatçının Girişi!");
 					break;
 				case 8524:
 					a = "Tragedy";
 					break;
 				case 8528:
-					a = LL2(L"僅かな希望の先に", L"Beyond Slight Hope");
+					a = LL14(L"僅かな希望の先に", L"Beyond Slight Hope", L"Au-delà d'un mince espoir", L"Oltre una sottile speranza", L"Más allá de una pequeña esperanza", L"희미한 희망 너머에", L"在微小的希望之後", L"ما وراء أمل ضئيل", L"За хрупкой надеждой", L"Jenseits einer leisen Hoffnung", L"Além de uma pequena esperança", L"Voorbij een sprankje hoop", L"Poza nikłą nadzieję", L"Küçük Bir Umudun Ötesinde");
 					break;
 				case 8530:
-					a = LL2(L"帰路へ", L"On the Road Home");
+					a = LL14(L"帰路へ", L"On the Road Home", L"Sur le chemin du retour", L"Sulla via di casa", L"En el camino a casa", L"귀로에", L"歸途", L"في طريق العودة", L"На пути домой", L"Auf dem Heimweg", L"No caminho para casa", L"Op weg naar huis", L"W drodze do domu", L"Eve Dönüş Yolunda");
 					break;
 				case 8532:
 					a = "Roots of Scar";
 					break;
 				case 8534:
-					a = LL2(L"想い千里を走り", L"Feelings Run a Thousand Miles");
+					a = LL14(L"想い千里を走り", L"Feelings Run a Thousand Miles", L"Les sentiments parcourent mille lieues", L"I sentimenti corrono per mille miglia", L"Los sentimientos corren mil millas", L"그리움 천리를 달려", L"思念奔馳千里", L"المشاعر تجري ألف ميل", L"Чувства бегут за тысячи миль", L"Gefühle eilen tausend Meilen", L"Sentimentos correm mil milhas", L"Gevoelens leggen duizend mijlen af", L"Uczucia biegną tysiąc mil", L"Duygular Bin Mil Koşar");
 					break;
 				case 8536:
-					a = LL2(L"光射す空の下で", L"Under the Shining Sky");
+					a = LL14(L"光射す空の下で", L"Under the Shining Sky", L"Sous le ciel radieux", L"Sotto il cielo splendente", L"Bajo el cielo resplandeciente", L"빛 비치는 하늘 아래에서", L"在光芒照射的天空下", L"تحت السماء المشرقة", L"Под сияющим небом", L"Unter dem strahlenden Himmel", L"Sob o céu brilhante", L"Onder de stralende hemel", L"Pod lśniącym niebem", L"Işıldayan Gökyüzü Altında");
 					break;
 				case 8539:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8541:
-					if (b == L"b")
-						a = LL2(L"空を見上げて -Eliot Ver.-", L"Look Up at the Sky -Eliot Ver.-");
-					else
-						a = LL2(L"空を見上げて -Eliot Ver.-", L"Look Up at the Sky -Eliot Ver.-");
+					a = LL14(L"空を見上げて -Eliot Ver.-", L"Look Up at the Sky -Eliot Ver.-", L"Regarder le ciel -Eliot Ver.-", L"Guarda il cielo -Eliot Ver.-", L"Mira al cielo -Eliot Ver.-", L"하늘을 올려다보며 -Eliot Ver.-", L"仰望天空 -Eliot Ver.-", L"انظر إلى السماء -Eliot Ver.-", L"Посмотри на небо -Eliot Ver.-", L"Blick in den Himmel -Eliot Ver.-", L"Olhe para o céu -Eliot Ver.-", L"Kijk naar de lucht -Eliot Ver.-", L"Spójrz w niebo -Eliot Ver.-", L"Gökyüzüne Bak -Eliot Ver.-");
 					break;
-				case 8542:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8543:
-					a = LL2(L"不明", L"Unknown");
+				case 8542: case 8543:
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8544:
 					a = "Little Rain";
 					break;
 				case 8545:
-					a = LL2(L"暗雲", L"Dark Clouds");
+					a = LL14(L"暗雲", L"Dark Clouds", L"Nuages sombres", L"Nubi oscure", L"Nubes oscuras", L"먹구름", L"暗雲", L"سحب مظلمة", L"Темные тучи", L"Dunkle Wolken", L"Nuvens escuras", L"Donkere wolken", L"Ciemne chmury", L"Kara Bulutlar");
 					break;
 				case 8546:
-					a = LL2(L"鐘、鳴り響く時", L"When the Bell Tolls");
+					a = LL14(L"鐘、鳴り響く時", L"When the Bell Tolls", L"Quand la cloche sonne", L"Quando suona la campana", L"Cuando dobla la campana", L"종이 울려 퍼질 때", L"鐘聲響徹之時", L"عندما يدق الجرس", L"Когда бьет колокол", L"Wenn die Glocke läutet", L"Quando o sino toca", L"Wanneer de klok luidt", L"Kiedy bije dzwon", L"Çanlar Çaldığında");
 					break;
 				case 8547:
-					a = LL2(L"巨イナル黄昏", L"Giant Twilight");
+					a = LL14(L"巨イナル黄昏", L"Giant Twilight", L"Crépuscule géant", L"Crepuscolo gigante", L"Crepúsculo gigante", L"거대한 황혼", L"巨大的黄昏", L"الغسق العملاق", L"Великие сумерки", L"Riesige Dämmerung", L"Crepúsculo gigante", L"Gigantische schemering", L"Wielki zmierzch", L"Muazzam Alacakaranlık");
 					break;
 				case 8548:
-					a = LL2(L"あの日の約束", L"That Day's Promise");
+					a = LL14(L"あの日の約束", L"That Day's Promise", L"La promesse de ce jour-là", L"La promessa di quel giorno", L"La promesa de aquel día", L"그날의 약속", L"那天的約定", L"وعد ذلك اليوم", L"Обещание того дня", L"Das Versprechen von jenem Tag", L"A promessa daquele dia", L"De belofte van die dag", L"Obietnica tamtego dnia", L"O Günkü Söz");
 					break;
 				case 8551:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8553:
 					a = "Sensitive Talk";
 					break;
 				case 8554:
-					a = LL2(L"哀花", L"Mournful Flower");
+					a = LL14(L"哀花", L"Mournful Flower", L"Fleur de deuil", L"Fiore di lutto", L"Flor de luto", L"애화", L"哀花", L"زهرة حزينة", L"Траурный цветок", L"Trauerblume", L"Flor de luto", L"Rouwbloem", L"Żałobny kwiat", L"Yas Çiçeği");
 					break;
 				case 8555:
 					a = "Feel at Home";
 					break;
 				case 8556:
-					a = LL2(L"幾千万の夜を越えて", L"Beyond Countless Nights");
+					a = LL14(L"幾千万の夜を越えて", L"Beyond Countless Nights", L"Au-delà d'innombrables nuits", L"Oltre innumerevoli notti", L"Más allá de incontables noches", L"수천만 밤を 넘어서", L"跨越數千萬個夜晚", L"عبر ملايين الليالي", L"Сквозь миллионы ночей", L"Jenseits von Millionen Nächten", L"Além de milhões de noites", L"Voorbij miljoenen nachten", L"Poza miliony nocy", L"Milyonlarca Gecenin Ötesinde");
 					break;
-				case 8557:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8558:
-					a = LL2(L"不明", L"Unknown");
+				case 8557: case 8558:
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8559:
-					a = LL2(L"優しき微睡み", L"Gentle Slumber");
+					a = LL14(L"優しき微睡み", L"Gentle Slumber", L"Sommeil paisible", L"Dolce sonno", L"Dulce sueño", L"포근한 잠", L"溫柔的微睡", L"سبات لطيف", L"Нежная дремота", L"Sanfter Schlummer", L"Sono suave", L"Zachte sluimer", L"Łagodny sen", L"Nazik Uyku");
 					break;
 				case 8560:
-					a = LL2(L"最悪の最善手", L"Best Move in the Worst Situation");
+					a = LL14(L"最悪の最善手", L"Best Move in the Worst Situation", L"Meilleur coup dans la pire situation", L"Mossa migliore nella peggiore situazione", L"Mejor jugada en la peor situación", L"최악 중의 최선", L"最壞情況中的最佳對策", L"أفضل خطوة في أسوأ وضع", L"Лучший ход в худшей ситуации", L"Bester Zug in der schlimmsten Lage", L"Melhor jogada na pior situação", L"Beste zet in de slechtste situatie", L"Najlepszy ruch w najgorszej sytuacji", L"En Kötü Durumdaki En İyi Hamle");
 					break;
 				case 8562:
-					a = LL2(L"黒の真実", L"Black Truth");
+					a = LL14(L"黒の真実", L"Black Truth", L"Vérité noire", L"Verità nera", L"Verdad negra", L"검은 진실", L"黑之真實", L"حقيقة سوداء", L"Черная правда", L"Schwarze Wahrheit", L"Verdade negra", L"Zwarte waarheid", L"Czarna prawda", L"Siyah Gerçek");
 					break;
 				case 8563:
-					a = LL2(L"いつでもそばに", L"Always by Your Side");
+					a = LL14(L"いつでもそばに", L"Always by Your Side", L"Toujours à tes côtés", L"Sempre al tuo fianco", L"Siempre a tu lado", L"언제나 곁에", L"永遠在身邊", L"دائماً بجانبك", L"Всегда рядом", L"Immer an deiner Seite", L"Sempre ao seu lado", L"Altijd aan je zijde", L"Zawsze przy tobie", L"Daima Yanında");
 					break;
 				case 8564:
-					a = LL2(L"その温もりは小さいけれど。", L"That warmth is small, but.");
+					a = LL14(L"その温もりは小さいけれど。", L"That warmth is small, but.", L"Cette chaleur est petite, mais.", L"Quel calore è piccolo, ma.", L"Ese calor es pequeño, pero.", L"그 온기는 작지만.", L"那份溫暖雖小。", L"ذلك الدفء صغير، لكن.", L"Это тепло мало, но.", L"Diese Wärme ist klein, aber.", L"Aquele calor é pequeno, mas.", L"Die warmte is klein, maar.", L"To ciepło jest małe, ale.", L"Bu sıcaklık küçük, ama.");
 					break;
 				case 8566:
-					a = LL2(L"それでも前へ", L"Still Forward");
+					a = LL14(L"それでも前へ", L"Still Forward", L"Tout de même vers l'avant", L"Ancora avanti", L"Aun así, adelante", L"그래도 앞으로", L"即便如此依然向前", L"ومع ذلك، إلى الأمام", L"Все равно вперед", L"Trotzdem vorwärts", L"Ainda assim, em frente", L"Toch vooruit", L"Mimo to do przodu", L"Yine de İleri");
 					break;
 				case 8570:
-					a = LL2(L"想いひとつに", L"Hearts as One");
+					a = LL14(L"想いひとつに", L"Hearts as One", L"Cœurs unis", L"Cuori come uno", L"Corazones como uno", L"마음 하나로", L"心意合一", L"قلوب متحدة", L"Сердца как одно", L"Herzen eins", L"Corações como um", L"Harten als één", L"Serca jako jedno", L"Kalpler Bir");
 					break;
 				case 8571:
-					a = LL2(L"千年要塞", L"Millennium Fortress");
+					a = LL14(L"千年要塞", L"Millennium Fortress", L"Forteresse millénaire", L"Fortezza millenaria", L"Fortaleza milenaria", L"천년 요새", L"千年要塞", L"حصن الألفية", L"Тысячелетняя крепость", L"Jahrtausendfestung", L"Fortaleza milenar", L"Millenniumvesting", L"Tysiącletnia twierdza", L"Bin Yıllık Kale");
 					break;
 				case 8572:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8573:
-					a = LL2(L"せめてこの夜に誓って", L"At Least Swear Tonight");
+					a = LL14(L"せめてこの夜に誓って", L"At Least Swear Tonight", L"Au moins, jure ce soir", L"Almeno giura stasera", L"Al menos jura esta noche", L"적어도 이 밤에 맹세하며", L"至少在今夜發誓", L"على الأقل أقسم الليلة", L"По крайней мере, поклянись сегодня", L"Schwöre zumindest heute Nacht", L"Pelo menos jure esta noite", L"Zweer tenminste vanavond", L"Przynajmniej przysięgnij dziś", L"En Azından Bu Gece Yemin Et");
 					break;
 				case 8574:
 					a = "Constraint";
 					break;
 				case 8575:
-					a = LL2(L"過ぎ去りし日々", L"Days Gone By");
+					a = LL14(L"過ぎ去りし日々", L"Days Gone By", L"Jours passés", L"Giorni passati", L"Días pasados", L"지나간 나날", L"逝去的日子", L"أيام مضت", L"Минувшие дни", L"Vergangene Tage", L"Dias passados", L"Voorbijgegane dagen", L"Minione dni", L"Geçip Giden Günler");
 					break;
 				case 8576:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8577:
-					a = LL2(L"それぞれの覚悟", L"Each One's Resolve");
+					a = LL14(L"それぞれの覚悟", L"Each One's Resolve", L"La résolution de chacun", L"La risoluzione di ognuno", L"La resolución de cada uno", L"각자의 각오", L"各自的覺悟", L"عزيمة كل واحد", L"Решимость каждого", L"Die Entschlossenheit jedes Einzelnen", L"A determinação de cada um", L"Ieders eigen vastberadenheid", L"Determinacja każdego z nas", L"Her Birimizin Kararlılığı");
 					break;
 				case 8578:
-					a = LL2(L"無明の闇の中で", L"In the Darkness");
+					a = LL14(L"無明の闇の中で", L"In the Darkness", L"Dans les ténèbres sans fin", L"Nell'oscurità eterna", L"En la oscuridad eterna", L"무명의 어둠 속에서", L"在無明之暗中", L"في الظلام الدامس", L"В вечной тьме", L"In ewiger Finsternis", L"Na escuridão eterna", L"In de eeuwige duisternis", L"W wiecznej ciemności", L"Sonsuz Karanlıkta");
 					break;
 				case 8579:
-					a = LL2(L"変わる世界 -闇の底から-", L"Changing World -From the Depths of Darkness-");
+					a = LL14(L"変わる世界 -闇の底から-", L"Changing World -From the Depths of Darkness-", L"Monde changeant -Du fond des ténèbres-", L"Mondo che cambia -Dal profondo delle tenebre-", L"Mundo cambiante -Desde el fondo de la oscuridad-", L"변하는 세계 ~어둠의 바닥에서~", L"變化的世界 -從黑暗深處-", L"عالم متغير - من أعماق الظلام", L"Меняющийся мир -Из глубин тьмы-", L"Sich wandelnde Welt -Aus den Tiefen der Finsternis-", L"Mundo em mudança -Do fundo da escuridão-", L"Veranderende wereld -Uit de diepten van de duisternis-", L"Zmieniający się świat -Z głębi ciemności-", L"Değişen Dünya -Karanlığın Derinliklerinden-");
 					break;
 				case 8600:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8601:
-					a = LL2(L"ゲートイン", L"Gate In");
+					a = LL14(L"ゲートイン", L"Gate In", L"Entrée en piste", L"Ingresso ai cancelli", L"Entrada a gateras", L"게이트 인", L"進入閘門", L"دخول البوابة", L"Вход в ворота", L"Einzug", L"Entrada no portão", L"Binnenkomst", L"Wjazd na bramkę", L"Giriş");
 					break;
 				case 8602:
-					a = savedata.lang == 0 ? "不明(空の軌跡)" : "Unknown(Sora no Kiseki)";
+					a = LL14(L"不明(空の軌跡)", L"Unknown(Sky)", L"Inconnu(Sky)", L"Sconosciuto(Sky)", L"Desconocido(Sky)", L"불명(하늘)", L"不明(空之軌跡)", L"غير معروف(Sky)", L"Неизвестно(Sky)", L"Unbekannt(Sky)", L"Desconhecido(Sky)", L"Onbekend(Sky)", L"Nieznany(Sky)", L"Bilinmeyen(Sky)");
 					break;
 				case 8603:
-					a = LL2(L"女神はいつも見ています", L"The Goddess is Always Watching");
+					a = LL14(L"女神はいつも見ています", L"The Goddess is Always Watching", L"La déesse regarde toujours", L"La dea guarda sempre", L"La diosa siempre observa", L"여신은 언제나 보고 있습니다", L"女神一直在注視著", L"الآلهة تراقب دائماً", L"Богиня всегда наблюдает", L"Die Göttin wacht immer", L"A deusa está sempre olhando", L"De godin kijkt altijd toe", L"Bogini zawsze patrzy", L"Tanrıça Daima İzliyor");
 					break;
 				case 8604:
-					a = savedata.lang == 0 ? "不明(空の軌跡)" : "Unknown(Sora no Kiseki)";
+					a = LL14(L"不明(空の軌跡)", L"Unknown(Sky)", L"Inconnu(Sky)", L"Sconosciuto(Sky)", L"Desconocido(Sky)", L"불명(하늘)", L"不明(空之軌跡)", L"غير معروف(Sky)", L"Неизвестно(Sky)", L"Unbekannt(Sky)", L"Desconhecido(Sky)", L"Onbekend(Sky)", L"Nieznany(Sky)", L"Bilinmeyen(Sky)");
 					break;
-				case 8605:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8606:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8608:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8610:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8611:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8612:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8613:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8614:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8616:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8617:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8618:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8619:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8620:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8621:
-					a = LL2(L"不明", L"Unknown");
+				case 8605: case 8606: case 8608: case 8610: case 8611: case 8612:
+				case 8613: case 8614: case 8616: case 8617: case 8618: case 8619:
+				case 8620: case 8621:
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8702:
 					a = "Master's Vertex";
@@ -9406,28 +10863,28 @@ void CWread::wavread()
 					a = "Pleasure Smile";
 					break;
 				case 8714:
-					a = LL2(L"巨竜目覚める", L"The Great Dragon Awakens");
+					a = LL14(L"巨竜目覚める", L"The Great Dragon Awakens", L"Le grand dragon s'éveille", L"Il grande drago si risveglia", L"El gran dragón despierta", L"거룡 깨어나다", L"巨龍覺醒", L"التنين العظيم يستيقظ", L"Великий дракон пробуждается", L"Der große Drache erwacht", L"O grande dragão desperta", L"De grote draak ontwaakt", L"Wielki smok się budzi", L"Büyük Ejderha Uyanıyor");
 					break;
 				case 8715:
-					a = LL2(L"未来へ。", L"To the Future.");
+					a = LL14(L"未来へ。", L"To the Future.", L"Vers le futur.", L"Verso il futuro.", L"Hacia el futuro.", L"미래로.", L"往未來。", L"إلى المستقبل.", L"В будущее.", L"In die Zukunft.", L"Para o futuro.", L"Naar de toekomst.", L"W przyszłość.", L"Geleceğe.");
 					break;
 				case 8716:
-					a = LL2(L"明日への軌跡 -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-");
+					a = LL14(L"明日への軌跡 -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-", L"내일로의 궤적 -Instrumental Ver.-", L"通向明天的軌跡 -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-", L"Trails to Tomorrow -Instrumental Ver.-");
 					break;
 				case 8717:
 					a = "Deep Carnival";
 					break;
 				case 8718:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				case 8719:
 					a = "Chain Chain Chain!";
 					break;
 				case 8720:
-					a = LL2(L"明日への軌跡", L"Trails to Tomorrow");
+					a = LL14(L"明日への軌跡", L"Trails to Tomorrow", L"Sillage vers demain", L"Tracce verso il domani", L"Estela hacia el mañana", L"내일로의 궤적", L"通向明天的軌跡", L"مسارات نحو الغد", L"Пути в завтрашний день", L"Pfade nach morgen", L"Rastros para o amanhã", L"Sporen naar morgen", L"Ścieżki do jutra", L"Yarına Giden İzler");
 					break;
 				case 8721:
-					a = LL2(L"愛の詩(歌)", L"Poem of Love(vocal)");
+					a = LL14(L"愛の詩(歌)", L"Poem of Love (vocal)", L"Poème d'amour (vocal)", L"Poema d'amore (vocal)", L"Poema de amor (vocal)", L"사랑의 시(노래)", L"愛之詩(歌)", L"قصيدة حب (صوتية)", L"Поэма о любви (вокал)", L"Liebesgedicht (Gesang)", L"Poema de amor (vocal)", L"Liefdesgedicht (vocaal)", L"Poemat miłości (wokal)", L"Aşk Şiiri (vokal)");
 					break;
 				case 8722:
 					a = "Celestial Coalescence";
@@ -9439,49 +10896,15 @@ void CWread::wavread()
 					a = "Concept H.M.I.";
 					break;
 				case 8802:
-					a = LL2(L"風よりも駿く", L"Swifter Than the Wind");
+					a = LL14(L"風よりも駿く", L"Swifter Than the Wind", L"Plus rapide que le vent", L"Più veloce del vento", L"Más rápido que el viento", L"바람보다 빠르게", L"比風更迅捷", L"أسرع من الرياح", L"Быстрее ветра", L"Schneller als der Wind", L"Mais rápido que o vento", L"Sneller dan de wind", L"Szybszy niż wiatr", L"Rüzgardan Daha Hızlı");
 					break;
 				case 8803:
 					a = "Brilliant Escape";
 					break;
-				case 8810:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8811:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8812:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8910:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8911:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8912:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8913:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8916:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8917:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8918:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8919:
-					a = LL2(L"不明", L"Unknown");
-					break;
-				case 8920:
-					a = LL2(L"不明", L"Unknown");
-					break;
+				case 8810: case 8811: case 8812: case 8910: case 8911: case 8912:
+				case 8913: case 8916: case 8917: case 8918: case 8919: case 8920:
 				case 8921:
-					a = LL2(L"不明", L"Unknown");
+					a = LL14(L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido", L"불명", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt", L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmeyen");
 					break;
 				}
 			}
@@ -10203,20 +11626,48 @@ void CWread::wavread()
 		data_size=oggsize=loop2*4;
 		loop3=loop2;loop2=0;
 		adbuf2=(char*)malloc(data_size+44100*10);
-		if(adbuf2==0){wavwait=1;thend=1; fnn=LL2(L"メモリの確保に失敗しました。", L"Memory allocation failed.");return;}
+		if(adbuf2==0){wavwait=1;thend=1; fnn=LL14(L"メモリの確保に失敗しました。", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.");return;}
 		og->m_time.SetRange(0,(data_size)/4,TRUE);
 		lenl= 0;
 		if(wav)free(wav);
 		wav_start();
 		Render();
-		}else{wavwait=1;thend=1; fnn=LL2(L"ファイルが開けませんでした。", L"Could not open file.");return;}
+		}else{wavwait=1;thend=1; fnn=LL14(L"ファイルが開けませんでした。", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.");return;}
 		*/
 	}
 	else if (mode == -11 || (mode == -14 && filen.Right(3) == "mp3") || mode == -15) {
 		if (mode == -14 && (filen == "49music.mp3" || filen == "50music.mp3" || filen == "51music.mp3")) _chdir("..\\Cmusic");
 		int san2 = 0;
-		if (filen == "041music.mp3" && fnn.Find(_T("日本語")) > 0) san2 = 1;
-		if (filen == "041music.mp3" && fnn.Find(_T("中国")) > 0) san2 = 2;
+		if (filen == "041music.mp3" && fnn.Find(LL14(
+			_T("日本語"),
+			_T("Japanese"),
+			_T("Japonais"),
+			_T("Giapponese"),
+			_T("Japonés"),
+			_T("일본어"),
+			_T("日語"),
+			_T("اليابانية"),
+			_T("Японская"),
+			_T("Japan."),
+			_T("Japonês"),
+			_T("Japanse"),
+			_T("Jap."),
+			_T("Japonca"))) > 0) san2 = 1;
+		if (filen == "041music.mp3" && fnn.Find(LL14(
+			_T("中国"),
+			_T("Chinese"),
+			_T("Chinois"),
+			_T("Cinese"),
+			_T("Chino"),
+			_T("중국어"),
+			_T("中文"),
+			_T("الصينية"),
+			_T("Китайская"),
+			_T("Chin."),
+			_T("Chinês"),
+			_T("Chinese"),
+			_T("Chiń."),
+			_T("Çince"))) > 0) san2 = 2;
 		SOUNDINFO si;
 		si.dwSamplesPerSec = 44100;
 		si.dwChannels = 2;
@@ -10236,7 +11687,23 @@ void CWread::wavread()
 		loop3 = loop2;
 		if (san2)data_size = oggsize = loop2 * 4 + 44100 * 7;
 		if (mode == -14 && filen == "42music.mp3")	loop2 = 0;
-		if (adbuf2 == 0) { wavwait = 1; thend = 1; fnn = LL2(L"メモリの確保に失敗しました。", L"Memory allocation failed."); return; }
+		if (adbuf2 == 0) {
+			wavwait = 1; thend = 1; fnn = LL14(
+				L"メモリの確保に失敗しました。",
+				L"Memory allocation failed.",
+				L"Échec de l'allocation mémoire.",
+				L"Allocazione della memoria fallita.",
+				L"Error al asignar memoria.",
+				L"메모리 확보에 실패했습니다.",
+				L"内存分配失败。",
+				L"فشل تخصيص الذاكرة.",
+				L"Ошибка выделения памяти.",
+				L"Speicherzuweisung fehlgeschlagen.",
+				L"Falha na alocação de memória.",
+				L"Geheugentoewijzing mislukt.",
+				L"Błąd przydzielania pamięci.",
+				L"Bellek tahsisi başarısız."); return;
+		}
 		og->m_time.SetRange(0, (data_size) / 4, TRUE);
 		lenl = 0;
 		if (wav)free(wav);
@@ -12345,7 +13812,37 @@ void COggDlg::dp(CString a)
 		int flggg = 0;
 		if (f123.Open(filen + _T(".save"), CFile::modeRead, NULL) == TRUE) {
 			f123.Close();
-			if (IDYES == MessageBox(LL2(L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start"), LL2(L"再生確認", L"Playback confirmation"), MB_YESNO)) {
+			if (IDYES == MessageBox(LL14(
+				L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生",
+				L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start",
+				L"Des données de reprise existent.\nReprendre là où vous vous êtes arrêté?\nOui = Reprendre\nNon = Jouer depuis le début",
+				L"Esistono dati di ripresa.\nRiprendere da dove ci si è fermati?\nSì = Riprendi\nNo = Riproduci dall'inizio",
+				L"Existen datos de reanudación.\n¿Reanudar desde donde lo dejó?\nSí = Reanudar\nNo = Reproducir desde el inicio",
+				L"도중 재생 데이터가 존재합니다.\n이전에 중단한 부분부터 재생할까요?\n예 = 도중부터 재생\n아니요 = 처음부터 재생",
+				L"存在中途播放数据。\n是否从上次中断处继续播放？\n是 = 从中途播放\n否 = 从头播放",
+				L"توجد بيانات استئناف.\nهل تريد الاستئناف من حيث توقفت؟\nنعم = استئناف\nلا = تشغيل من البداية",
+				L"Данные возобновления существуют.\nПродолжить с места остановки?\nДа = Продолжить\nНет = Играть с начала",
+				L"Fortsetzungsdaten vorhanden.\nVon der Unterbrechungsstelle fortfahren?\nJa = Fortsetzen\nNein = Von Anfang abspielen",
+				L"Dados de retomada existem.\nRetomar de onde parou?\nSim = Retomar\nNão = Reproduzir do início",
+				L"Hervatgegevens aanwezig.\nHervatten waar u gebleven was?\nJa = Hervatten\nNee = Afspelen vanaf het begin",
+				L"Istnieją dane wznowienia.\nWznowić od miejsca przerwania?\nTak = Wznów\nNie = Odtwórz od początku",
+				L"Devam verisi mevcut.\nKaldığınız yerden devam edilsin mi?\nEvet = Devam et\nHayır = Baştan oynat"),
+				LL14(
+					L"再生確認",
+					L"Playback confirmation",
+					L"Confirmation de lecture",
+					L"Conferma riproduzione",
+					L"Confirmación de reproducción",
+					L"재생 확인",
+					L"播放确认",
+					L"تأكيد التشغيل",
+					L"Подтверждение воспроизведения",
+					L"Wiedergabebestätigung",
+					L"Confirmação de reprodução",
+					L"Afspeelbevestiging",
+					L"Potwierdzenie odtwarzania",
+					L"Oynatma onayı"),
+				MB_YESNO)) {
 				flggg = 1;
 			}
 			else {
@@ -12386,7 +13883,7 @@ void COggDlg::dp(CString a)
 		int a = 0; aa2 = 0;
 		REFTIME aa = 0;
 		aa2 = 0;
-		ps = 0; m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
+		ps = 0; m_ps.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
 		if (pMediaPosition)pMediaPosition->get_StopTime(&aa);
 		aa1 = oggsize2 = aa;
 		m_time.SetRange(0, (int)((REFTIME)aa * 100.0), TRUE);
@@ -12423,8 +13920,37 @@ void COggDlg::OnDropFiles(HDROP hDropInfo)
 	UINT cnt = DragQueryFile(hDropInfo, (UINT)-1, filen_c, sizeof(filen_c));
 	if (cnt != 1)
 	{
-		MessageBox(LL2(L"ファイルは1つだけドロップしてください。\nプレイリストが開いている時は複数でもokです。", L"Drop only one file.\nMultiple files ok when playlist is open."), LL2(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player"), MB_ICONEXCLAMATION);
-		CCustomDialog::OnDropFiles(hDropInfo);
+		MessageBox(LL14(
+			L"ファイルは1つだけドロップしてください。\nプレイリストが開いている時は複数でもokです。",
+			L"Drop only one file.\nMultiple files ok when playlist is open.",
+			L"Déposez un seul fichier.\nPlusieurs fichiers acceptés si la liste de lecture est ouverte.",
+			L"Rilascia un solo file.\nPiù file accettati quando la playlist è aperta.",
+			L"Suelte solo un archivo.\nSe aceptan varios archivos cuando la lista está abierta.",
+			L"파일은 하나만 드롭하세요.\n플레이리스트가 열려 있을 때는 여러 개도 ok입니다.",
+			L"请只拖放一个文件。\n播放列表打开时可以拖放多个文件。",
+			L"أسقط ملفاً واحداً فقط.\nيُسمح بملفات متعددة عند فتح قائمة التشغيل.",
+			L"Перетащите только один файл.\nНесколько файлов допустимо, когда плейлист открыт.",
+			L"Nur eine Datei ablegen.\nMehrere Dateien erlaubt, wenn die Wiedergabeliste geöffnet ist.",
+			L"Solte apenas um arquivo.\nVários arquivos aceitos quando a lista de reprodução está aberta.",
+			L"Zet slechts één bestand neer.\nMeerdere bestanden toegestaan als de afspeellijst open is.",
+			L"Upuść tylko jeden plik.\nWiele plików dozwolone gdy lista odtwarzania jest otwarta.",
+			L"Yalnızca bir dosya bırakın.\nOynatma listesi açıkken birden fazla dosya kabul edilir."),
+			LL14(
+				L"ogg/wav簡易プレイヤ",
+				L"ogg/wav Simple Player",
+				L"Lecteur Simple ogg/wav",
+				L"Lettore Semplice ogg/wav",
+				L"Reproductor Simple ogg/wav",
+				L"ogg/wav 간이 플레이어",
+				L"ogg/wav简易播放器",
+				L"مشغل ogg/wav البسيط",
+				L"Простой Плеер ogg/wav",
+				L"ogg/wav Einfacher Player",
+				L"Player Simples ogg/wav",
+				L"Eenvoudige ogg/wav Speler",
+				L"Prosty Odtwarzacz ogg/wav",
+				L"ogg/wav Basit Oynatıcı"),
+			MB_ICONEXCLAMATION);		CCustomDialog::OnDropFiles(hDropInfo);
 		return;
 	}
 	DragQueryFile(hDropInfo, (UINT)0, filen_c, sizeof(filen_c));
@@ -12434,7 +13960,37 @@ void COggDlg::OnDropFiles(HDROP hDropInfo)
 	CFile f;
 	if (f.Open(filen, CFile::modeRead | CFile::shareDenyNone, NULL) == FALSE) {
 		filen = ff;
-		MessageBox(LL2(L"ほかのプログラムで開かれているためファイルが開けません", L"Cannot open file because another program has it open."), LL2(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player"), MB_ICONEXCLAMATION);
+		MessageBox(LL14(
+			L"ほかのプログラムで開かれているためファイルが開けません",
+			L"Cannot open file because another program has it open.",
+			L"Impossible d'ouvrir le fichier car il est utilisé par un autre programme.",
+			L"Impossibile aprire il file perché è aperto da un altro programma.",
+			L"No se puede abrir el archivo porque otro programa lo tiene abierto.",
+			L"다른 프로그램에서 열려 있어 파일을 열 수 없습니다.",
+			L"文件无法打开，因为其他程序正在使用它。",
+			L"لا يمكن فتح الملف لأن برنامجاً آخر يستخدمه.",
+			L"Невозможно открыть файл, так как он используется другой программой.",
+			L"Datei kann nicht geöffnet werden, da sie von einem anderen Programm geöffnet ist.",
+			L"Não é possível abrir o arquivo pois outro programa o está usando.",
+			L"Kan bestand niet openen omdat een ander programma het in gebruik heeft.",
+			L"Nie można otworzyć pliku, ponieważ jest używany przez inny program.",
+			L"Dosya başka bir program tarafından açık olduğundan açılamıyor."),
+			LL14(
+				L"ogg/wav簡易プレイヤ",
+				L"ogg/wav Simple Player",
+				L"Lecteur Simple ogg/wav",
+				L"Lettore Semplice ogg/wav",
+				L"Reproductor Simple ogg/wav",
+				L"ogg/wav 간이 플레이어",
+				L"ogg/wav简易播放器",
+				L"مشغل ogg/wav البسيط",
+				L"Простой Плеер ogg/wav",
+				L"ogg/wav Einfacher Player",
+				L"Player Simples ogg/wav",
+				L"Eenvoudige ogg/wav Speler",
+				L"Prosty Odtwarzacz ogg/wav",
+				L"ogg/wav Basit Oynatıcı"),
+			MB_ICONEXCLAMATION); 
 		CCustomDialog::OnDropFiles(hDropInfo);
 		return;
 	}
@@ -12525,7 +14081,7 @@ void COggDlg::stop()
 		if (ps == 1) {
 			OnPause();
 		}
-		m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
+		m_ps.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
 		ps = 0;
 		if (m_dsb)m_dsb->Stop();
 		if (pAudioClient) pAudioClient->Stop();
@@ -12591,7 +14147,7 @@ void COggDlg::stop()
 	stflg = FALSE;
 	SetTimer(4923, 30, NULL);
 	m_lrc.SetWindowText(L"");
-	m_lrc2.SetWindowText(LL2(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here"));
+	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichées ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aquí", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) تظهر هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wyświetlone tutaj", L"Söz (.lrc) burada görüntülenir"));
 	m_lrc3.SetWindowText(L"");
 
 	eqflg = TRUE;
@@ -12677,7 +14233,7 @@ void COggDlg::stop1()
 	playf = 0;
 	mode = modesub;
 	m_lrc.SetWindowText(L"");
-	m_lrc2.SetWindowText(LL2(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here"));
+	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichées ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aquí", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) تظهر هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wyświetlone tutaj", L"Söz (.lrc) burada görüntülenir"));
 	m_lrc3.SetWindowText(L"");
 	eqflg = TRUE;
 }
@@ -13138,7 +14694,21 @@ void COggDlg::timerp()
 		s.Format(_T("file:%s"), filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1));
 	else			s.Format(_T("file:%s"), filen);
 	//		if(fnn.Right(4)=="動画"||fnn.Right(5).Left(4)=="動画")		s.Format("file:動画");
-	if (filen.Left(2) == L"★")		s.Format(LL2(L"file:動画", L"file:Video"));
+	if (filen.Left(2) == L"★")		s.Format(LL14(
+		L"file:動画",
+		L"file:Video",
+		L"file:Vidéo",
+		L"file:Video",
+		L"file:Vídeo",
+		L"file:동영상",
+		L"file:视频",
+		L"file:فيديو",
+		L"file:Видео",
+		L"file:Video",
+		L"file:Vídeo",
+		L"file:Video",
+		L"file:Wideo",
+		L"file:Video"));
 	if (mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6) {
 		CString g; g = L""; g = filen; g.MakeLower();
 		if (g.Right(4) == L".mp3") g = L"(mp3)";
@@ -13153,14 +14723,84 @@ void COggDlg::timerp()
 		if (g.Right(4) == L".dsf") g = L"(DSD(dsf))";
 		if (g.Right(4) == L".dff") g = L"(DSD(dff))";
 		if (g.Right(4) == L".wsd") g = L"(DSD(wsd))";
-		s.Format(LL2(L"file:音声ファイル%s", L"file:Audio %s"), g);
+		s.Format(LL14(L"file:音声ファイル%s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s"), g);
 	}
 	if (mode == -2 || mode == -3) sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
-	if (mode == -3) s.Format(LL2(L"file:kpiファイル(%s)", L"file:kpi (%s)"), sss);
-	if (mode == -1) s.Format(LL2(L"file:oggファイル", L"file:ogg"));
-	if (mode == -2 && rate == 0.0) s.Format(LL2(L"file:音声ファイル(%s)", L"file:Audio (%s)"), sss);
-	if (mode == -2 && rate != 0.0) s.Format(LL2(L"file:動画ファイル(%s)", L"file:Video (%s)"), sss);
-	if (mode == 30)s = savedata.lang == 0 ? L"file:空の軌跡 The 1st" : L"file:Sora no Kiseki The 1st";
+	if (mode == -3) s.Format(LL14(
+		L"file:kpiファイル(%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)",
+		L"file:kpi (%s)"), sss);
+	if (mode == -1) s.Format(LL14(
+		L"file:oggファイル",
+		L"file:ogg",
+		L"file:ogg",
+		L"file:ogg",
+		L"file:ogg",
+		L"file:ogg",
+		L"file:ogg",
+		L"file:ogg",
+		L"file:ogg",
+		L"file:ogg",
+		L"file:ogg",
+		L"file:ogg",
+		L"file:ogg",
+		L"file:ogg"));
+	if (mode == -2 && rate == 0.0) s.Format(LL14(
+		L"file:音声ファイル(%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)",
+		L"file:Audio (%s)"), sss);
+	if (mode == -2 && rate != 0.0) s.Format(LL14(
+		L"file:動画ファイル(%s)",
+		L"file:Video (%s)",
+		L"file:Vidéo (%s)",
+		L"file:Video (%s)",
+		L"file:Vídeo (%s)",
+		L"file:동영상 (%s)",
+		L"file:视频 (%s)",
+		L"file:فيديو (%s)",
+		L"file:Видео (%s)",
+		L"file:Video (%s)",
+		L"file:Vídeo (%s)",
+		L"file:Video (%s)",
+		L"file:Wideo (%s)",
+		L"file:Video (%s)"), sss);
+	if (mode == 30) s = LL14(
+		L"file:空の軌跡 The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st",
+		L"file:Sora no Kiseki The 1st");
 	moji(s, 1, 16, 0xffffff);
 	if (tc1 < 50)
 		s.Format(_T("time:%2d:%02d.%02d/%2d:%02d.%02d"), ta1, tb1, tc1, ta, tb, tc);
@@ -13208,7 +14848,7 @@ void COggDlg::timerp()
 	else if ((mode == -2 || videoonly) && rcm.right > 1) {
 		s.Format(_T("size:%d x %d"), rcm.right, rcm.bottom);
 		moji(s, 1, 48, 0x7fffff);
-		s.Format(LL2(L"rate:算出中……", L"rate:Calculating..."));
+		s.Format(LL14(L"rate:算出中……", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating..."));
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -2 && wavbit != 0) {
@@ -13224,9 +14864,37 @@ void COggDlg::timerp()
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -2 && wavbit == 0) {
-		s.Format(LL2(L"sample:不明", L"sample:Unknown"));
+		s.Format(LL14(
+			L"sample:不明",
+			L"sample:Unknown",
+			L"sample:Inconnu",
+			L"sample:Sconosciuto",
+			L"sample:Desconocido",
+			L"sample:불명",
+			L"sample:不明",
+			L"sample:غير معروف",
+			L"sample:Неизвестно",
+			L"sample:Unbekannt",
+			L"sample:Desconhecido",
+			L"sample:Onbekend",
+			L"sample:Nieznany",
+			L"sample:Bilinmiyor")); 
 		moji(s, 1, 48, 0x7fffff);
-		s.Format(LL2(L"channel:不明", L"channel:Unknown"));
+		s.Format(LL14(
+			L"sample:不明",
+			L"sample:Unknown",
+			L"sample:Inconnu",
+			L"sample:Sconosciuto",
+			L"sample:Desconocido",
+			L"sample:불명",
+			L"sample:不明",
+			L"sample:غير معروف",
+			L"sample:Неизвестно",
+			L"sample:Unbekannt",
+			L"sample:Desconhecido",
+			L"sample:Onbekend",
+			L"sample:Nieznany",
+			L"sample:Bilinmiyor")); 
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -3) {
@@ -13370,9 +15038,9 @@ void COggDlg::timerp()
 	}
 	else {
 		if (tcg < 50)
-			s.Format(LL2(L"Loop数:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d"), loopcnt, tag, tbg, tcg);
+			s.Format(LL14(L"Loop数:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d"), loopcnt, tag, tbg, tcg);
 		else
-			s.Format(LL2(L"Loop数:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d"), loopcnt, tag, tbg, tcg);
+			s.Format(LL14(L"Loop数:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d"), loopcnt, tag, tbg, tcg);
 		moji(s, 1, 80, 0xefefef);
 	}
 	if (ss != s)
@@ -14560,7 +16228,23 @@ void COggDlg::OnButton2()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ed6sc);
 	ret += _chdir("bgm");
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return;
+	}
 	itiran* a = new itiran(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = pl_no;
 	a->ret2 = ret2;
@@ -14589,7 +16273,26 @@ void COggDlg::OnButton6_FC()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ed6fc);
 	ret += _chdir("bgm");
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		if (ret != 0) {
+			fnn = LL14(
+				L"ファイル又はフォルダがありません",
+				L"No file or folder",
+				L"Fichier ou dossier introuvable",
+				L"File o cartella non trovati",
+				L"Archivo o carpeta no encontrados",
+				L"파일 또는 폴더가 없습니다",
+				L"找不到文件或文件夹",
+				L"لا يوجد ملف أو مجلد",
+				L"Файл или папка не найдены",
+				L"Datei oder Ordner nicht gefunden",
+				L"Arquivo ou pasta não encontrados",
+				L"Bestand of map niet gevonden",
+				L"Nie znaleziono pliku ani folderu",
+				L"Dosya veya klasör bulunamadı");
+		}
+		return; 
+	}
 	Citiran_FC* a = new Citiran_FC(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = pl_no;
 	a->ret2 = ret2;
@@ -14618,7 +16321,22 @@ void COggDlg::OnButton7_YSF()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ysf);
 	ret += _chdir("RELEASE\\MUSIC");
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	Citiran_YSF* a = new Citiran_YSF(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = ret2;
 	CWnd::PostMessage(0x118);
@@ -14651,7 +16369,22 @@ void COggDlg::OnButton8_YS6()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ys6);
 	ret += _chdir("RELEASE\\MUSIC");
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	Citiran_YS6* a = new Citiran_YS6(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = ret2;
 	CWnd::PostMessage(0x118);
@@ -14680,7 +16413,22 @@ void COggDlg::OnYso()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.yso);
 	ret += _chdir("RELEASE\\MUSIC");
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	Citiran_YSO* a = new Citiran_YSO(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = ret2;
 	CWnd::PostMessage(0x118);
@@ -14742,7 +16490,21 @@ void COggDlg::OnZWEIII()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.zweiii);
 	ret += _chdir("bgm");
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) { fnn = LL14(
+		L"ファイル又はフォルダがありません",
+		L"No file or folder",
+		L"Fichier ou dossier introuvable",
+		L"File o cartella non trovati",
+		L"Archivo o carpeta no encontrados",
+		L"파일 또는 폴더가 없습니다",
+		L"找不到文件或文件夹",
+		L"لا يوجد ملف أو مجلد",
+		L"Файл или папка не найдены",
+		L"Datei oder Ordner nicht gefunden",
+		L"Arquivo ou pasta não encontrados",
+		L"Bestand of map niet gevonden",
+		L"Nie znaleziono pliku ani folderu",
+		L"Dosya veya klasör bulunamadı"); return; }
 	CZWEIII* a = new CZWEIII(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = ret2;
 	CWnd::PostMessage(0x118);
@@ -14772,7 +16534,22 @@ void COggDlg::OnYsC1()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ysc);
 	ret += _chdir("bgm\\ys1");
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CYsC1* a = new CYsC1(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -14802,7 +16579,22 @@ void COggDlg::OnYsC2()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ysc);
 	ret += _chdir("bgm\\ys2");
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CYsC2* a = new CYsC2(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -14832,7 +16624,22 @@ void COggDlg::OnBnClickedButton25()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.xa);
 	ret += _chdir("data\\bgm");
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CXA* a = new CXA(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret = ret2;
 	CWnd::PostMessage(0x118);
@@ -14865,11 +16672,41 @@ void COggDlg::OnBnClickedButton27()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ys12);
 	if (_chdir("wave\\wave_44") == -1) {
-		if (_chdir("wave\\wave_22") == -1) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+		if (_chdir("wave\\wave_22") == -1) {
+			fnn = LL14(
+				L"ファイル又はフォルダがありません",
+				L"No file or folder",
+				L"Fichier ou dossier introuvable",
+				L"File o cartella non trovati",
+				L"Archivo o carpeta no encontrados",
+				L"파일 또는 폴더가 없습니다",
+				L"找不到文件或文件夹",
+				L"لا يوجد ملف أو مجلد",
+				L"Файл или папка не найдены",
+				L"Datei oder Ordner nicht gefunden",
+				L"Arquivo ou pasta não encontrados",
+				L"Bestand of map niet gevonden",
+				L"Nie znaleziono pliku ani folderu",
+				L"Dosya veya klasör bulunamadı"); return; }
 		ex = "_22";
 	}
 	else ex = "_44";
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CYs12_1* a = new CYs12_1(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -14920,11 +16757,41 @@ void COggDlg::OnBnClickedButton28()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ys122);
 	if (_chdir("wave\\wave_44") == -1) {
-		if (_chdir("wave\\wave_22") == -1) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+		if (_chdir("wave\\wave_22") == -1) {
+			fnn = LL14(
+				L"ファイル又はフォルダがありません",
+				L"No file or folder",
+				L"Fichier ou dossier introuvable",
+				L"File o cartella non trovati",
+				L"Archivo o carpeta no encontrados",
+				L"파일 또는 폴더가 없습니다",
+				L"找不到文件或文件夹",
+				L"لا يوجد ملف أو مجلد",
+				L"Файл или папка не найдены",
+				L"Datei oder Ordner nicht gefunden",
+				L"Arquivo ou pasta não encontrados",
+				L"Bestand of map niet gevonden",
+				L"Nie znaleziono pliku ani folderu",
+				L"Dosya veya klasör bulunamadı"); return; }
 		ex = "_22";
 	}
 	else ex = "_44";
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CYs12_2* a = new CYs12_2(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -14975,11 +16842,41 @@ void COggDlg::OnBnClickedButton31()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.sor);
 	if (_chdir("WAVE\\WAVE44") == -1) {
-		if (_chdir("WAVE\\WAVE22") == -1) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+		if (_chdir("WAVE\\WAVE22") == -1) {
+			fnn = LL14(
+				L"ファイル又はフォルダがありません",
+				L"No file or folder",
+				L"Fichier ou dossier introuvable",
+				L"File o cartella non trovati",
+				L"Archivo o carpeta no encontrados",
+				L"파일 또는 폴더가 없습니다",
+				L"找不到文件或文件夹",
+				L"لا يوجد ملف أو مجلد",
+				L"Файл или папка не найдены",
+				L"Datei oder Ordner nicht gefunden",
+				L"Arquivo ou pasta não encontrados",
+				L"Bestand of map niet gevonden",
+				L"Nie znaleziono pliku ani folderu",
+				L"Dosya veya klasör bulunamadı"); return; }
 		ex = "_22";
 	}
 	else ex = "_44";
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CSor* a = new CSor(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15043,7 +16940,22 @@ void COggDlg::OnBnClickedButton33()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.zwei);
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CZwei* a = new CZwei(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15072,7 +16984,22 @@ void COggDlg::OnBnClickedButton35()
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.gurumin);
 	ret += _chdir("bgm");
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CGurumin* a = new CGurumin(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15103,7 +17030,22 @@ void COggDlg::OnBnClickedButton37()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.dino);
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CDino* a = new CDino(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15133,7 +17075,22 @@ void COggDlg::OnBnClickedButton39()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.br4);
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CBr4* a = new CBr4(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15161,7 +17118,22 @@ void COggDlg::OnBnClickedButton44()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ed3);
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CED3* a = new CED3(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15189,7 +17161,22 @@ void COggDlg::OnBnClickedButton45()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ed4);
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CED4* a = new CED4(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15217,7 +17204,22 @@ void COggDlg::OnBnClickedButton46()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.ed5);
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CED5* a = new CED5(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15245,7 +17247,22 @@ void COggDlg::OnBnClickedButton47()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.tuki);
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CTUKI* a = new CTUKI(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15273,7 +17290,22 @@ void COggDlg::OnBnClickedButton48()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.nishi);
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CNishi* a = new CNishi(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15301,7 +17333,22 @@ void COggDlg::OnBnClickedButton51()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.arc);
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CArc* a = new CArc(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15330,7 +17377,22 @@ void COggDlg::OnBnClickedButton53()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.san1);
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CSan1* a = new CSan1(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15348,7 +17410,22 @@ void COggDlg::OnBnClickedButton53()
 			CFile f;
 			if (f.Open(filen, CFile::modeRead, NULL) == 0) {
 				filen.Format(_T("%smusic.mp3"), a->ret);
-				if (f.Open(filen, CFile::modeRead, NULL) == 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+				if (f.Open(filen, CFile::modeRead, NULL) == 0) {
+					fnn = LL14(
+						L"ファイル又はフォルダがありません",
+						L"No file or folder",
+						L"Fichier ou dossier introuvable",
+						L"File o cartella non trovati",
+						L"Archivo o carpeta no encontrados",
+						L"파일 또는 폴더가 없습니다",
+						L"找不到文件或文件夹",
+						L"لا يوجد ملف أو مجلد",
+						L"Файл или папка не найдены",
+						L"Datei oder Ordner nicht gefunden",
+						L"Arquivo ou pasta não encontrados",
+						L"Bestand of map niet gevonden",
+						L"Nie znaleziono pliku ani folderu",
+						L"Dosya veya klasör bulunamadı"); return; }
 				else f.Close();
 			}
 			else f.Close();
@@ -15369,7 +17446,22 @@ void COggDlg::OnBnClickedButton54()
 	char buffer[_MAX_DIR];
 	_getcwd(buffer, _MAX_DIR);
 	ret = _tchdir(savedata.san2);
-	if (ret != 0) { fnn = LL2(L"ファイル又はフォルダがありません", L"No file or folder"); return; }
+	if (ret != 0) {
+		fnn = LL14(
+			L"ファイル又はフォルダがありません",
+			L"No file or folder",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"لا يوجد ملف أو مجلد",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı"); return; }
 	CSan2* a = new CSan2(CWnd::FromHandle(GetSafeHwnd()));
 	a->ret2 = ret2;
 	CWnd::PostMessage(0x118);
@@ -15407,7 +17499,7 @@ void COggDlg::OnPause()
 				m_dsb->Stop();
 			}
 		//			waveOutPause(hwo);
-		m_ps.SetWindowText(LL2(L"再開", L"Resume"));
+		m_ps.SetWindowText(LL14(L"再開", L"Resume", L"Reprendre", L"Riprendi", L"Reanudar", L"재개", L"恢复", L"استئناف", L"Продолжить", L"Fortsetzen", L"Retomar", L"Hervatten", L"Wznów", L"Sürdür"));
 		ps = 1;
 	}
 	else {
@@ -15429,7 +17521,7 @@ void COggDlg::OnPause()
 			if (m_dsb && thn == FALSE)m_dsb->SetCurrentPosition(PlayCursora);
 		}
 		//			waveOutRestart(hwo);
-		m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
+		m_ps.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
 		if (pMainFrame1 != NULL && (mode == -2 || (mode > 0 && videoonly == TRUE)))
 		{
 			pMainFrame1->pause(1);
@@ -15517,7 +17609,37 @@ void COggDlg::OnRestart()
 			int flggg = 0;
 			if (f123.Open(filen + _T(".save"), CFile::modeRead, NULL) == TRUE) {
 				f123.Close();
-				if (IDYES == MessageBox(LL2(L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start"), LL2(L"再生確認", L"Playback confirmation"), MB_YESNO)) {
+				if (IDYES == MessageBox(LL14(
+					L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生",
+					L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start",
+					L"Des données de reprise existent.\nReprendre là où vous vous êtes arrêté?\nOui = Reprendre\nNon = Jouer depuis le début",
+					L"Esistono dati di ripresa.\nRiprendere da dove ci si è fermati?\nSì = Riprendi\nNo = Riproduci dall'inizio",
+					L"Existen datos de reanudación.\n¿Reanudar desde donde lo dejó?\nSí = Reanudar\nNo = Reproducir desde el inicio",
+					L"도중 재생 데이터가 존재합니다.\n이전에 중단한 부분부터 재생할까요?\n예 = 도중부터 재생\n아니요 = 처음부터 재생",
+					L"存在中途播放数据。\n是否从上次中断处继续播放？\n是 = 从中途播放\n否 = 从头播放",
+					L"توجد بيانات استئناف.\nهل تريد الاستئناف من حيث توقفت؟\nنعم = استئناف\nلا = تشغيل من البداية",
+					L"Данные возобновления существуют.\nПродолжить с места остановки?\nДа = Продолжить\nНет = Играть с начала",
+					L"Fortsetzungsdaten vorhanden.\nVon der Unterbrechungsstelle fortfahren?\nJa = Fortsetzen\nNein = Von Anfang abspielen",
+					L"Dados de retomada existem.\nRetomar de onde parou?\nSim = Retomar\nNão = Reproduzir do início",
+					L"Hervatgegevens aanwezig.\nHervatten waar u gebleven was?\nJa = Hervatten\nNee = Afspelen vanaf het begin",
+					L"Istnieją dane wznowienia.\nWznowić od miejsca przerwania?\nTak = Wznów\nNie = Odtwórz od początku",
+					L"Devam verisi mevcut.\nKaldığınız yerden devam edilsin mi?\nEvet = Devam et\nHayır = Baştan oynat"),
+					LL14(
+						L"再生確認",
+						L"Playback confirmation",
+						L"Confirmation de lecture",
+						L"Conferma riproduzione",
+						L"Confirmación de reproducción",
+						L"재생 확인",
+						L"播放确认",
+						L"تأكيد التشغيل",
+						L"Подтверждение воспроизведения",
+						L"Wiedergabebestätigung",
+						L"Confirmação de reprodução",
+						L"Afspeelbevestiging",
+						L"Potwierdzenie odtwarzania",
+						L"Oynatma onayı"),
+					MB_YESNO)) {
 					flggg = 1;
 				}
 				else {
@@ -15573,7 +17695,7 @@ void COggDlg::OnRestart()
 			int a = 0; aa2 = 0;
 			REFTIME aa = 0;
 			aa2 = 0;
-			ps = 0; m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
+			ps = 0; m_ps.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
 			if (pMediaPosition)pMediaPosition->get_StopTime(&aa);
 			aa1 = oggsize2 = aa;
 			m_time.SetRange(0, (int)((REFTIME)aa * 100.0), TRUE);
@@ -17591,7 +19713,21 @@ void COggDlg::OnBnmp3jake()
 	if (savedata.aero == 1) {
 		jake = new CImageBase;
 		if (jake->Create(og) == FALSE) {
-			AfxMessageBox(LL2(L"Baseの起動に失敗しました", L"Failed to start Base"));
+			AfxMessageBox(LL14(
+				L"Baseの起動に失敗しました",
+				L"Failed to start Base",
+				L"Échec du démarrage de Base",
+				L"Avvio di Base fallito",
+				L"Error al iniciar Base",
+				L"Base 시작에 실패했습니다",
+				L"Base 启动失败",
+				L"فشل تشغيل Base",
+				L"Не удалось запустить Base",
+				L"Base konnte nicht gestartet werden",
+				L"Falha ao iniciar o Base",
+				L"Kan Base niet starten",
+				L"Nie udało się uruchomić Base",
+				L"Base başlatılamadı"));
 		}
 		jake->ShowWindow(SW_HIDE);
 		jake->oya = mi;
@@ -17679,8 +19815,16 @@ void COggDlg::OnActivateApp(BOOL bActive, DWORD dwThreadID)
 {
 	CCustomDialog::OnActivateApp(bActive, dwThreadID);
 
-	// TODO: ここにメッセージ ハンドラー コードを追加します。
-	if (bActive) {
+	// アプリ非アクティブ時は必ずホットキーを解除する。
+	// WM_ACTIVATEはフォーカスを失ったウィンドウにのみ送られるため、
+	// mainiやpMainFrame1など他ウィンドウにフォーカスがある場合に
+	// ホットキーが解除されないことがある。WM_ACTIVATEAPPは全トップレベル
+	// ウィンドウに送られるため、アプリ全体の非アクティブを確実に検知できる。
+	if (!bActive && ::IsWindow(GetSafeHwnd())) {
+		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY0);
+		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY1);
+		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY2);
+		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY3);
 	}
 }
 

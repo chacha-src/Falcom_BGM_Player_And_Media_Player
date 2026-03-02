@@ -108,9 +108,30 @@ char tiy122_en[][128]={
 "★Opening 2"
 };
 
+#define YS122_ARR(SUF) static const char tiy122_##SUF[][128]
+#define YS122_ARR_END ;
+#define YS122_INIT "01ys248 TO MAKE THE END OF BATTLE","02ys236 LILIA","03ys205 TOO FULL WITH LOVE","04ys225 APATHETIC STORY","05ys226 MAY I HELP YOU","06ys228 FEEL BLUE","07ys201 RUINS OF MOONDORIA","08ys220 NOBLE DISTRICT OF TOAL","09ys249 REST IN PEACE","10ys241 CAVERN OF RASTEENIE","11ys244 PROTECTERS","12ys242 ICE RIDGE OF NOLTIA","13ys203 INSIDE OF THE ICE WALL","14ys243 MOAT OF BURNEBLESS","15ys232 TENDER PEOPLE","16ys240 PALACE OF SALMON","17ys233 SUBTERRANEAN CANAL","18ys245 COMPANILE OF LANE","19ys223 PRESSURE ROAD","20ys235 DON'T GO SO SMOOTHLY!","21ys234 FEENA","22ys246 TERMINATION","23ys221 A STILL TIME","24ys207 STAY WITH ME FOREVER","25ys218 SO MUCH FOR TODAY","26ysn001COLONY OF LAVA","27ysi001OPEN YOUR HEART","28yss003FEENA","29ys124 BATTLE GROUND","30ys121 OVER DRIVE","31ys116 FAIR WIND","★Opening 1","★Opening 2"
+YS122_ARR(fr)={YS122_INIT} YS122_ARR_END
+YS122_ARR(it)={YS122_INIT} YS122_ARR_END
+YS122_ARR(es)={YS122_INIT} YS122_ARR_END
+YS122_ARR(ko)={YS122_INIT} YS122_ARR_END
+YS122_ARR(zh)={YS122_INIT} YS122_ARR_END
+YS122_ARR(ar)={YS122_INIT} YS122_ARR_END
+YS122_ARR(ru)={YS122_INIT} YS122_ARR_END
+YS122_ARR(de)={YS122_INIT} YS122_ARR_END
+YS122_ARR(pt)={YS122_INIT} YS122_ARR_END
+YS122_ARR(nl)={YS122_INIT} YS122_ARR_END
+YS122_ARR(pl)={YS122_INIT} YS122_ARR_END
+YS122_ARR(tr)={YS122_INIT} YS122_ARR_END
+#undef YS122_INIT
+#undef YS122_ARR
+#undef YS122_ARR_END
+
+static inline CString Ys122Track(int i){ switch(savedata.lang){ case 0: return CString(CStringA(tiy122[i])); case 1: return CString(CStringA(tiy122_en[i])); case 2: return CString(CStringA(tiy122_fr[i])); case 3: return CString(CStringA(tiy122_it[i])); case 4: return CString(CStringA(tiy122_es[i])); case 5: return CString(CStringA(tiy122_ko[i])); case 6: return CString(CStringA(tiy122_zh[i])); case 7: return CString(CStringA(tiy122_ar[i])); case 8: return CString(CStringA(tiy122_ru[i])); case 9: return CString(CStringA(tiy122_de[i])); case 10: return CString(CStringA(tiy122_pt[i])); case 11: return CString(CStringA(tiy122_nl[i])); case 12: return CString(CStringA(tiy122_pl[i])); case 13: return CString(CStringA(tiy122_tr[i])); default: return CString(CStringA(tiy122_en[i])); }}
+
 CString CYs12_2::Gett(int a){
 	CString s,ss;
-	s=savedata.lang ? tiy122_en[a] : tiy122[a];
+	s=Ys122Track(a);
 	ss=s.Left(8);ss.TrimRight();
 	fnn=s.Mid(8);fnn.TrimRight();
 	return ss;
@@ -122,7 +143,7 @@ void CYs12_2::OnDblclkList1()
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	int idx=m_list.GetItemData(m_list.GetCurSel());
-	CString s;	s=savedata.lang ? tiy122_en[idx] : tiy122[idx];
+	CString s;	s=Ys122Track(idx);
 	ret=s.Left(8); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 #if UNICODE
@@ -141,15 +162,15 @@ void CYs12_2::OnDblclkList1()
 BOOL CYs12_2::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
-	SetWindowText(LL2(L"Ys 12 完全版 Ys2", L"Ys 12 Complete Ys2"));
-	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
+	SetWindowText(LL14(L"Ys 12 完全版 Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(33);i++)
 	{
 		CString s;
-		s=savedata.lang ? tiy122_en[i] : tiy122[i];
+		s=Ys122Track(i);
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

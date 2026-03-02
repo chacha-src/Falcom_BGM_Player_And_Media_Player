@@ -114,9 +114,17 @@ char tiz1_en[][128]={
 "boss  "
 };
 
+static inline CString ZweiTrack(int i) {
+	switch (savedata.lang) {
+		case 0: return CString(CStringA(tiz1[i]));
+		case 1: return CString(CStringA(tiz1_en[i]));
+		default: return CString(CStringA(tiz1_en[i]));
+	}
+}
+
 CString CZwei::Gett(int a){
 	CString s,ss;
-	s=savedata.lang ? tiz1_en[a] : tiz1[a];
+	s = ZweiTrack(a);
 	ss=s.Left(5);ss.TrimRight();
 	fnn=s.Mid(6);
 	return ss;
@@ -128,7 +136,7 @@ void CZwei::OnDblclkList1()
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	int idx=m_list.GetItemData(m_list.GetCurSel());
-	CString s;	s=savedata.lang ? tiz1_en[idx] : tiz1[idx];
+	CString s;	s = ZweiTrack(idx);
 	ret=s.Left(5); ret.TrimRight();
 	ret2=m_list.GetCurSel();
 	if(s.Left(2)=="★"){
@@ -143,14 +151,13 @@ BOOL CZwei::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
 	SetWindowText(L"Zwei!!");
-	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(36);i++)
 	{
-		CString s;
-		s=savedata.lang ? tiz1_en[i] : tiz1[i];
+		CString s = ZweiTrack(i);
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

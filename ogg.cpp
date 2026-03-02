@@ -183,14 +183,14 @@ BOOL COggApp::InitInstance()
 	savedata.eqy = -1;
 	savedata.eqsoundeffect = 50;
 	savedata.eqwindow = 0;
-	savedata.lang = 0; //まだ未実装 0:日本語 1:英語
-	savedata.langselect = 0; //まだ未実装 0:選択前 1:選択後のフラグ
+	savedata.lang = 0; // 0:日本語 1:英語 2:仏 3:伊 4:西 5:韓 6:中 7:阿 8:露 9:独 10:葡 11:蘭 12:波 13:土
+	savedata.langselect = 0; // 0:選択前 1:選択後のフラグ
 
 #if _UNICODE
 	if(GetKeyState(VK_CONTROL) < 0){
-		if(AfxMessageBox(LL2(L"ANSI版からのコンバートを行いますか？", L"Convert from ANSI version?"),MB_YESNO)==IDYES){
+		if(AfxMessageBox(LL14(L"ANSI版からのコンバートを行いますか？", L"Convert from ANSI version?", L"Convertir depuis la version ANSI ?", L"Convertire dalla versione ANSI?", L"¿Convertir desde versión ANSI?", L"ANSI 버전에서 변환하시겠습니까?", L"从ANSI版本转换？", L"التحويل من إصدار ANSI؟", L"Конвертировать из версии ANSI?", L"Von ANSI-Version konvertieren?", L"Converter da versão ANSI?", L"Converteren van ANSI-versie?", L"Konwertować z wersji ANSI?", L"ANSI sürümünden dönüştürülsün mü?"),MB_YESNO)==IDYES){
 			convert();
-			AfxMessageBox(LL2(L"コンバートが完了しました。", L"Conversion completed."));
+			AfxMessageBox(LL14(L"コンバートが完了しました。", L"Conversion completed.", L"Conversion terminée.", L"Conversione completata.", L"Conversión completada.", L"변환이 완료되었습니다.", L"转换完成。", L"اكتمل التحويل.", L"Конвертация завершена.", L"Konvertierung abgeschlossen.", L"Conversão concluída.", L"Conversie voltooid.", L"Konwersja zakończona.", L"Dönüşüm tamamlandı."));
 			ReleaseMutex(Mutex);
 			exit(0);
 		}
@@ -198,9 +198,9 @@ BOOL COggApp::InitInstance()
 	CFile ab,ac;
 	if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeRead,NULL)!=TRUE && ac.Open(L"oggYSEDbgm.dat",CFile::modeRead,NULL)==TRUE){
 		ac.Close();
-		AfxMessageBox(LL2(L"ANSI版からのコンバートを行います。", L"Converting from ANSI version."));
+		AfxMessageBox(LL14(L"ANSI版からのコンバートを行います。", L"Converting from ANSI version.", L"Conversion depuis la version ANSI en cours.", L"Conversione dalla versione ANSI in corso.", L"Convirtiendo desde versión ANSI.", L"ANSI 버전에서 변환 중입니다.", L"正在从ANSI版本转换。", L"جاري التحويل من إصدار ANSI.", L"Конвертация из версии ANSI.", L"Konvertierung von ANSI-Version.", L"Convertendo da versão ANSI.", L"Converteren van ANSI-versie.", L"Konwertowanie z wersji ANSI.", L"ANSI sürümünden dönüştürülüyor."));
 		convert();
-		AfxMessageBox(LL2(L"コンバートが完了しました。", L"Conversion completed."));
+		AfxMessageBox(LL14(L"コンバートが完了しました。", L"Conversion completed.", L"Conversion terminée.", L"Conversione completata.", L"Conversión completada.", L"변환이 완료되었습니다.", L"转换完成。", L"اكتمل التحويل.", L"Конвертация завершена.", L"Konvertierung abgeschlossen.", L"Conversão concluída.", L"Conversie voltooid.", L"Konwersja zakończona.", L"Dönüşüm tamamlandı."));
 		ReleaseMutex(Mutex);
 		exit(0);
 #else
@@ -215,9 +215,26 @@ BOOL COggApp::InitInstance()
 	}
 	if (savedata.langselect == 0) {
 		LANGID langId = GetUserDefaultUILanguage();
-		if (PRIMARYLANGID(langId) != LANG_JAPANESE) {
-			savedata.lang = 1;
+		WORD prim = PRIMARYLANGID(langId);
+		// 0=ja, 1=en, 2=fr, 3=it, 4=es, 5=ko, 6=zh, 7=ar, 8=ru, 9=de, 10=pt, 11=nl, 12=pl, 13=tr
+		switch (prim) {
+		case LANG_JAPANESE:  savedata.lang = 0; break;
+		case LANG_ENGLISH:   savedata.lang = 1; break;
+		case LANG_FRENCH:    savedata.lang = 2; break;
+		case LANG_ITALIAN:   savedata.lang = 3; break;
+		case LANG_SPANISH:   savedata.lang = 4; break;
+		case LANG_KOREAN:    savedata.lang = 5; break;
+		case LANG_CHINESE:   savedata.lang = 6; break;
+		case LANG_ARABIC:    savedata.lang = 7; break;
+		case LANG_RUSSIAN:   savedata.lang = 8; break;
+		case LANG_GERMAN:    savedata.lang = 9; break;
+		case LANG_PORTUGUESE:savedata.lang = 10; break;
+		case LANG_DUTCH:     savedata.lang = 11; break;
+		case LANG_POLISH:    savedata.lang = 12; break;
+		case LANG_TURKISH:   savedata.lang = 13; break;
+		default:             savedata.lang = 1; break;  // fallback English
 		}
+		savedata.langselect = 1;
 	}
 #if _UNICODE
 	if (ac.m_hFile != CFile::hFileNull)
@@ -226,7 +243,7 @@ BOOL COggApp::InitInstance()
 	if (savedata.ms < 30) savedata.ms = 30;
 	if (savedata.ms > 80) savedata.ms = 80;
 	if (savedata.aerocheck == 99) {
-		int abc = AfxMessageBox(LL2(L"エアロ(透過処理)がメイン画面等に実装されました。是非試してみて貰えれば。\n有効にしますか？(少し不安定な部分あります)\n(このメッセージは一回しか表示されません)\nWindows11以降では、有効にしないで下さい。", L"Aero (transparency) has been implemented on the main window, etc. Please try it.\nEnable it? (Some instability may occur)\n(This message will only be shown once)\nDo not enable on Windows 11 or later."), MB_YESNO);
+		int abc = AfxMessageBox(LL14(L"エアロ(透過処理)がメイン画面等に実装されました。是非試してみて貰えれば。\n有効にしますか？(少し不安定な部分あります)\n(このメッセージは一回しか表示されません)\nWindows11以降では、有効にしないで下さい。", L"Aero (transparency) has been implemented on the main window, etc. Please try it.\nEnable it? (Some instability may occur)\n(This message will only be shown once)\nDo not enable on Windows 11 or later.", L"Aero (transparence) a été implémenté. Souhaitez-vous l'activer ?", L"Aero (trasparenza) implementato. Abilitare?", L"Aero (transparencia) implementado. ¿Activar?", L"Aero(투명)가 구현되었습니다. 활성화하시겠습니까?", L"已实现Aero(透明)功能。是否启用？", L"تم تنفيذ Aero. هل تفعّل؟", L"Aero реализован. Включить?", L"Aero implementiert. Aktivieren?", L"Aero implementado. Ativar?", L"Aero geïmplementeerd. Inschakelen?", L"Aero zaimplementowano. Włączyć?", L"Aero uygulandı. Etkinleştirilsin mi?"), MB_YESNO);
 		if (abc == IDYES) {
 			savedata.aero = 1;
 			savedata.aerocheck = 1;

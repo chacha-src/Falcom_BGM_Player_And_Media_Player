@@ -46,7 +46,7 @@ BOOL CListCtrlA::OnToolTipText( UINT id, NMHDR * pNMHDR, LRESULT * pResult ){
 	k = GetItemText( row, 4 );
 	l = GetItemText( row, 2 );
 	m = GetItemText( row, 1 );
-	strTipText.Format(LL2(L"名前：%s\nアーティスト：%s\nアルバム：%s\n時間：%s\n種類：%s", L"Name: %s\nArtist: %s\nAlbum: %s\nTime: %s\nType: %s"),i,j,k,l,m);
+	strTipText.Format(LL14(L"名前：%s\nアーティスト：%s\nアルバム：%s\n時間：%s\n種類：%s", L"Name: %s\nArtist: %s\nAlbum: %s\nTime: %s\nType: %s", L"Nom : %s\nArtiste : %s\nAlbum : %s\nDurée : %s\nType : %s", L"Nome: %s\nArtista: %s\nAlbum: %s\nTempo: %s\nTipo: %s", L"Nombre: %s\nArtista: %s\nÁlbum: %s\nTiempo: %s\nTipo: %s", L"이름: %s\n아티스트: %s\n앨범: %s\n시간: %s\n유형: %s", L"名称：%s\n艺术家：%s\n专辑：%s\n时间：%s\n类型：%s", L"الاسم: %s\nالفنان: %s\nالألبوم: %s\nالوقت: %s\nالنوع: %s", L"Название: %s\nИсполнитель: %s\nАльбом: %s\nВремя: %s\nТип: %s", L"Name: %s\nInterpret: %s\nAlbum: %s\nZeit: %s\nTyp: %s", L"Nome: %s\nArtista: %s\nÁlbum: %s\nTempo: %s\nTipo: %s", L"Naam: %s\nArtiest: %s\nAlbum: %s\nTijd: %s\nType: %s", L"Nazwa: %s\nWykonawca: %s\nAlbum: %s\nCzas: %s\nTyp: %s", L"Ad: %s\nSanatçı: %s\nAlbüm: %s\nSüre: %s\nTür: %s"),i,j,k,l,m);
 
 //#ifndef _UNICODE
 //	if (pNMHDR->code == TTN_NEEDTEXTA)
@@ -81,12 +81,7 @@ BOOL CListCtrlA::OnToolTipText( UINT id, NMHDR * pNMHDR, LRESULT * pResult ){
 	return TRUE;    // message was handled
 }
 
-#if WIN64
-	INT_PTR 
-#else
-	int 
-#endif
-CListCtrlA::OnToolHitTest( CPoint point, TOOLINFO* pTI) const{
+INT_PTR CListCtrlA::OnToolHitTest( CPoint point, TOOLINFO* pTI) const{
 	int row, col;
 	RECT cellrect;
 	row = CellRectFromPoint(point, &cellrect, &col );

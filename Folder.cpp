@@ -129,7 +129,7 @@ BOOL CFolder::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
 
-	SetWindowText(LL2(L"フォルダ設定", L"Folder Settings"));
+	SetWindowText(LL14(L"フォルダ設定", L"Folder Settings", L"Paramètres dossier", L"Impostazioni cartella", L"Configuración de carpeta", L"폴더 설정", L"文件夹设置", L"إعدادات المجلد", L"Настройки папки", L"Ordnereinstellungen", L"Configurações de pasta", L"Mapinstellingen", L"Ustawienia folderu", L"Klasör ayarları"));
 	m_1s.SetWindowText(savedata.ys6);
 	m_2s.SetWindowText(savedata.ysf);
 	m_3s.SetWindowText(savedata.ed6fc);
@@ -209,7 +209,7 @@ UINT CFolder::GetOpenFolderName(HWND hWnd, LPCTSTR lpszDefaultFolder, LPTSTR lps
     //デフォルトで選択させておくフォルダを設定
     bi.lParam = (LPARAM)lpszDefaultFolder;
     //タイトルの設定
-    bi.lpszTitle = LL2(L"各ゲームのフォルダを指定してください。", L"Select folder for each game.");
+    bi.lpszTitle = LL14(L"各ゲームのフォルダを指定してください。", L"Select folder for each game.", L"Veuillez sélectionner le dossier pour chaque jeu.", L"Seleziona la cartella per ogni gioco.", L"Seleccione la carpeta para cada juego.", L"각 게임의 폴더를 선택하세요.", L"请为每个游戏选择文件夹。", L"الرجاء تحديد المجلد لكل لعبة.", L"Выберите папку для каждой игры.", L"Ordner für jedes Spiel auswählen.", L"Selecione a pasta para cada jogo.", L"Selecteer map voor elk spel.", L"Wybierz folder dla każdej gry.", L"Her oyun için klasör seçin.");
 	bi.ulFlags =0x0040;//BIF_NEWDIALOGSTYLE;
     //フォルダダイヤログの起動
     pidl = SHBrowseForFolder(&bi);

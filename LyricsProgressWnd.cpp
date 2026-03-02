@@ -9,7 +9,7 @@ END_MESSAGE_MAP()
 
 CLyricsProgressWnd::CLyricsProgressWnd()
 {
-	m_strText = LL2(L"歌詞取得中...\n長い時10秒くらいかかります\n\n取得できない時は歌詞はでません。", L"Fetching lyrics...\nMay take up to 10 seconds.\n\nLyrics will not appear if unavailable.");
+	m_strText = LL14(L"歌詞取得中...\n長い時10秒くらいかかります\n\n取得できない時は歌詞はでません。", L"Fetching lyrics...\nMay take up to 10 seconds.\n\nLyrics will not appear if unavailable.", L"Récupération des paroles...\nPeut prendre jusqu'à 10 s.\n\nLes paroles n'apparaîtront pas si indisponibles.", L"Recupero dei testi...\nPuò richiedere fino a 10 s.\n\nI testi non appariranno se indisponibili.", L"Obteniendo letras...\nPuede tardar hasta 10 s.\n\nLas letras no aparecerán si no hay.", L"가사 가져오는 중...\n최대 10초 걸릴 수 있습니다.\n\n가져올 수 없으면 가사가 표시되지 않습니다.", L"正在获取歌词...\n可能需要约10秒。\n\n无法获取时不会显示歌词。", L"جلب كلمات الأغنية...\nقد يستغرق 10 ثوانٍ.\n\nلن تظهر الكلمات إذا غير متوفرة.", L"Загрузка текста...\nМожет занять до 10 с.\n\nТекст не появится, если недоступен.", L"Texte werden geladen...\nKann bis zu 10 s dauern.\n\nText erscheint nicht, wenn nicht verfügbar.", L"Obtendo letras...\nPode levar até 10 s.\n\nLetras não aparecem se indisponíveis.", L"Teksten ophalen...\nKan tot 10 s duren.\n\nTekst verschijnt niet als niet beschikbaar.", L"Pobieranie tekstu...\nMoże potrwać do 10 s.\n\nTekst nie pojawi się, jeśli niedostępny.", L"Şarkı sözleri alınıyor...\n10 saniye sürebilir.\n\nMevcut değilse sözler görünmez.");
 }
 
 CLyricsProgressWnd::~CLyricsProgressWnd()

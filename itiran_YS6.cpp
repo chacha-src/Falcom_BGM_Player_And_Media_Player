@@ -78,7 +78,7 @@ char tiys6[][128]={
 "30.ゲームオーバー"
 };
 
-char tiys6_en[][128]={
+char tiys6_en[][198]={
 "01.Title/Load",
 "02.Opening(with video)",
 "03.Fin",
@@ -112,11 +112,30 @@ char tiys6_en[][128]={
 "30.Game over"
 };
 
+#define YS6_ARR(SUF) static const char tiys6_##SUF[][128]
+#define YS6_ARR_END ;
+YS6_ARR(fr)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+YS6_ARR(it)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+YS6_ARR(es)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+YS6_ARR(ko)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+YS6_ARR(zh)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+YS6_ARR(ar)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+YS6_ARR(ru)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+YS6_ARR(de)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+YS6_ARR(pt)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+YS6_ARR(nl)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+YS6_ARR(pl)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+YS6_ARR(tr)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's village","05.Shop","06.Quatera Forest","07.Mid-boss general","08.Undersea approach","09.Limoges port town","10.Canaan Plains","11.Granvalis","12.Ruins of Oblivion","13.Sacred Ground of Zemeth","14.Stalactite cave/Underground lake","15.Assault","16.Occupied","17.Romun warship(normal)","18.Romun warship(escape)","19.Alma's tomb","20.Battle with Galbalan","21.Battle with Ernst","22.Napishtim's Ark, Spiral Corridor","23.Nap core battle<Phase 1>(Last boss)","24.Nap core battle<Phase 2>(Last boss)","25.Staff roll","26.Movie 1(vortex gone~Romun attack)(with video)","27.Movie 2(Nap revival)(with video)","28.Movie 3(Nap collapse)(with video)","29.Movie 4(Ending 1)(with video)","30.Game over","30.Game over"} YS6_ARR_END
+#undef YS6_ARR
+#undef YS6_ARR_END
+
+static inline CString YS6_TRACK(int i){ switch(savedata.lang){ case 0: return CString(CStringA(tiys6[i])); case 1: return CString(CStringA(tiys6_en[i])); case 2: return CString(CStringA(tiys6_fr[i])); case 3: return CString(CStringA(tiys6_it[i])); case 4: return CString(CStringA(tiys6_es[i])); case 5: return CString(CStringA(tiys6_ko[i])); case 6: return CString(CStringA(tiys6_zh[i])); case 7: return CString(CStringA(tiys6_ar[i])); case 8: return CString(CStringA(tiys6_ru[i])); case 9: return CString(CStringA(tiys6_de[i])); case 10: return CString(CStringA(tiys6_pt[i])); case 11: return CString(CStringA(tiys6_nl[i])); case 12: return CString(CStringA(tiys6_pl[i])); case 13: return CString(CStringA(tiys6_tr[i])); default: return CString(CStringA(tiys6_en[i])); }}
+
 void Citiran_YS6::OnDblclkList1() 
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	int idx=m_list.GetItemData(m_list.GetCurSel());
-	CString s,ss;	s=savedata.lang ? tiys6_en[idx] : tiys6[idx];
+	CString s,ss;	s=YS6_TRACK(idx);
 	ss=s.Left(2);ret=_tstoi(ss)-1;
 	fnn=s.Mid(3);
 	EndDialog(1567);
@@ -124,7 +143,7 @@ void Citiran_YS6::OnDblclkList1()
 
 void Citiran_YS6::Gett(int a){
 	CString s,ss;
-	s=savedata.lang ? tiys6_en[a] : tiys6[a];
+	s=YS6_TRACK(a);
 	ss=s.Left(6);ss.TrimRight();
 	fnn=s.Mid(3);
 }
@@ -132,15 +151,15 @@ void Citiran_YS6::Gett(int a){
 BOOL Citiran_YS6::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
-	SetWindowText(LL2(L"イースⅥ -ナピシュテムの匣-", L"Ys VI -Napishtim no Hako-"));
-	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
+	SetWindowText(LL14(L"イースⅥ -ナピシュテムの匣-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<(30);i++)
 	{
 		CString s;
-		s=savedata.lang ? tiys6_en[i] : tiys6[i];
+		s=YS6_TRACK(i);
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	
 	}

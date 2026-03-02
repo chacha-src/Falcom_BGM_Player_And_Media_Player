@@ -40,8 +40,8 @@ BOOL CGraph::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
 
-	SetWindowText(LL2(L"グラフフィルタ一覧", L"Graph Filter List"));
-	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
+	SetWindowText(LL14(L"グラフフィルタ一覧", L"Graph Filter List", L"Liste filtres graphiques", L"Elenco filtri grafici", L"Lista filtros gráficos", L"그래프 필터 목록", L"图形过滤器列表", L"قائمة مرشحات الرسم", L"Список фильтров графика", L"Grafikfilterliste", L"Lista filtros gráficos", L"Grafiekfilterlijst", L"Lista filtrów graficznych", L"Grafik filtre listesi"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	if(pGraphBuilder){
 //		IFilterGraph *fg;
 //		pGraphBuilder->QueryInterface(IID_IFilterGraph,(void**)&fg);
@@ -50,7 +50,7 @@ BOOL CGraph::OnInitDialog()
 
 		if (iam) {
 			m_l.AddString(L"");
-			m_l.AddString(LL2(L"IAMStreamSelectの内容", L"IAMStreamSelect contents"));
+			m_l.AddString(LL14(L"IAMStreamSelectの内容", L"IAMStreamSelect contents", L"Contenu IAMStreamSelect", L"Contenuto IAMStreamSelect", L"Contenido IAMStreamSelect", L"IAMStreamSelect 내용", L"IAMStreamSelect内容", L"محتوى IAMStreamSelect", L"Содержимое IAMStreamSelect", L"IAMStreamSelect-Inhalt", L"Conteúdo IAMStreamSelect", L"IAMStreamSelect-inhoud", L"Zawartość IAMStreamSelect", L"IAMStreamSelect içeriği"));
 			m_l.AddString(L"");
 
 			CntPin2(iam);

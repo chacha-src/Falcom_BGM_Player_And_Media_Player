@@ -46,7 +46,7 @@ BOOL CFilename::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
 
-	SetWindowText(LL2(L"ファイル名変更", L"Rename File"));
+	SetWindowText(LL14(L"ファイル名変更", L"Rename File", L"Renommer le fichier", L"Rinomina file", L"Cambiar nombre de archivo", L"파일 이름 바꾸기", L"重命名文件", L"إعادة تسمية الملف", L"Переименовать файл", L"Datei umbenennen", L"Renomear arquivo", L"Bestand hernoemen", L"Zmień nazwę pliku", L"Dosyayı yeniden adlandır"));
 	m_name.SetWindowText(pc.name);
 	m_art.SetWindowText(pc.art);
 	m_alb.SetWindowText(pc.alb);

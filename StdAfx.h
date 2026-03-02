@@ -210,10 +210,19 @@ struct save{
 	int langselect;
 };
 extern save savedata;
-#define LL2(ja, en) (savedata.lang == 0 ? (ja) : (en))
+// 0=日本語, 1=英語, 2=フランス語, 3=イタリア語, 4=スペイン語, 5=韓国語, 6=中国語
+// 7=アラビア語, 8=ロシア語, 9=ドイツ語, 10=ポルトガル語, 11=オランダ語, 12=ポーランド語, 13=トルコ語
+#define LL14(ja,en,fr,it,es,ko,zh,ar,ru,de,pt,nl,pl,tr) (\
+	(savedata.lang)==0?(ja):(savedata.lang)==1?(en):(savedata.lang)==2?(fr):(savedata.lang)==3?(it):\
+	(savedata.lang)==4?(es):(savedata.lang)==5?(ko):(savedata.lang)==6?(zh):(savedata.lang)==7?(ar):\
+	(savedata.lang)==8?(ru):(savedata.lang)==9?(de):(savedata.lang)==10?(pt):(savedata.lang)==11?(nl):\
+	(savedata.lang)==12?(pl):(savedata.lang)==13?(tr):(en))
+#define LL2(ja, en) LL14(ja, en, en, en, en, en, en, en, en, en, en, en, en, en)
 extern int loop1;
 extern int loop1_2;
 char *b64_decode(char *s, int size,int &len);
+
+#define LL L
 
 int b64_ctoi(char c);
 

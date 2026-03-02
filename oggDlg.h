@@ -20,8 +20,16 @@
 #include <cstddef>
 #include "CCustomControl.h"
 #include "CEqualizer.h"
+class CDouga;
+class CPlayList;
+class CRender;
+class COggApp;
 class COggDlg : public CCustomDialog
 {
+	friend class CDouga;
+	friend class CPlayList;
+	friend class CRender;
+	friend class COggApp;
 // 構築
 public:
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
@@ -29,7 +37,7 @@ public:
 	float hD;
 	void gamen(int uu);
 	void gamenkill();
-	void dougaplay(int uu,CString str = L"");
+	void dougaplay(int uu, CString str = L"");
 	DWORD GetVol();
 	void Speana();
 	void moji(CString s,int x,int y,COLORREF rgb);

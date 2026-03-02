@@ -105,10 +105,10 @@ CString COggDlg::init(HWND hwnd, int sm)
 			savedata.soundcur = 0;
 		}
 	}
-	if (m_ds == NULL) return LL2(L"DirectSoundを生成できません。\nDirectX7が正常にインストールされているか確認してください。", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.");
+	if (m_ds == NULL) return LL14(L"DirectSoundを生成できません。\nDirectX7が正常にインストールされているか確認してください。", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound.\nPlease verify DirectX7 is properly installed.");
 	if (m_ds->SetCooperativeLevel(hwnd, DSSCL_PRIORITY) != DS_OK) {
-		MessageBox(LL2(L"SetCooperativeLevelに失敗しました", L"SetCooperativeLevel failed"));
-		return LL2(L"DirectSoundの強調レベルを設定できません。\nDirectX7が正常にインストールされているか確認してください。", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.");
+		MessageBox(LL14(L"SetCooperativeLevelに失敗しました", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed", L"SetCooperativeLevel failed"));
+		return LL14(L"DirectSoundの強調レベルを設定できません。\nDirectX7が正常にインストールされているか確認してください。", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.", L"Could not set DirectSound cooperative level.\nPlease verify DirectX7 is properly installed.");
 	}
 	hw = 0;
 	//	ZeroMemory(&d,sizeof(d));d.dwSize=sizeof(d);HRESULT r =m_ds->GetCaps(&d);
@@ -127,7 +127,7 @@ CString COggDlg::init(HWND hwnd, int sm)
 	dss.lpwfxFormat = NULL;
 	dss.dwBufferBytes = 0;
 	if (m_ds->CreateSoundBuffer(&dss, &m_p, NULL) != DS_OK) {
-		return LL2(L"DirectSoundのプライマリバッファを生成できません。\nDirectX7が正常にインストールされているか確認してください。", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.");
+		return LL14(L"DirectSoundのプライマリバッファを生成できません。\nDirectX7が正常にインストールされているか確認してください。", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.", L"Could not create DirectSound primary buffer.\nPlease verify DirectX7 is properly installed.");
 	}
 
 	if (m_p != NULL) {
@@ -867,7 +867,7 @@ void COggDlg::WASAPIChange(WAVEFORMATEX* pwf)
 	REFERENCE_TIME buffer_duration = buffer_period * 4;
 	int ret = pAudioClient->IsFormatSupported(AUDCLNT_SHAREMODE_EXCLUSIVE, (WAVEFORMATEX*)pwf, &alt_format);
 	if (FAILED(ret)) {
-		MessageBox(LL2(L"未サポートのフォーマット", L"Unsupported format"));
+		MessageBox(LL14(L"未サポートのフォーマット", L"Unsupported format", L"Unsupported format", L"Unsupported format", L"Unsupported format", L"Unsupported format", L"Unsupported format", L"Unsupported format", L"Unsupported format", L"Unsupported format", L"Unsupported format", L"Unsupported format", L"Unsupported format", L"Unsupported format"));
 		return;
 	}
 	ret = pAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_NOPERSIST, buffer_duration, buffer_period, pwf, NULL);

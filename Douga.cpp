@@ -384,10 +384,10 @@ BOOL CDouga::Create(HWND h)
     LoadIcon(AfxGetInstanceHandle(),
     MAKEINTRESOURCE(IDR_DOUGA)));
 
-    int ret=CreateEx(WS_EX_OVERLAPPEDWINDOW|WS_EX_ACCEPTFILES,sClassName, LL2(L"mp3/m4a簡易プレイヤ(動画画面)", L"mp3/m4a Simple Player (video)"),
+    int ret=CreateEx(WS_EX_OVERLAPPEDWINDOW|WS_EX_ACCEPTFILES,sClassName, LL14(L"mp3/m4a簡易プレイヤ(動画画面)", L"mp3/m4a Simple Player (video)", L"mp3/m4a Lecteur simple (vidéo)", L"mp3/m4a Player semplice (video)", L"mp3/m4a Reproductor simple (video)", L"mp3/m4a 간단 플레이어(동영상)", L"mp3/m4a简易播放器(视频)", L"mp3/m4a مشغل بسيط (فيديو)", L"mp3/m4a Простой плеер (видео)", L"mp3/m4a Einfacher Player (Video)", L"mp3/m4a Player simples (vídeo)", L"mp3/m4a Eenvoudige speler (video)", L"mp3/m4a Prosty odtwarzacz (wideo)", L"mp3/m4a Basit oynatıcı (video)"),
 	  ((WS_OVERLAPPEDWINDOW)& ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_SYSMENU),
 	0,0,640,360,NULL,NULL,NULL);
-	if(ret==0) MessageBox(LL2(L"作成", L"Create"));
+	if(ret==0) MessageBox(LL14(L"作成", L"Create", L"Créer", L"Crea", L"Crear", L"생성", L"创建", L"إنشاء", L"Создать", L"Erstellen", L"Criar", L"Maken", L"Utwórz", L"Oluştur"));
 	ev=FALSE;
  
     ::GetWindowRect(this->GetSafeHwnd(), &rc);
@@ -3270,10 +3270,10 @@ void CDouga::pause(int a)
 	if(a==0)
 	{
 		pMediaControl->Pause();
-		ps=1;og->m_ps.SetWindowText(LL2(L"再開", L"Resume"));
+		ps=1;og->m_ps.SetWindowText(LL14(L"再開", L"Resume", L"Reprendre", L"Riprendi", L"Reanudar", L"재개", L"恢复", L"استئناف", L"Продолжить", L"Fortsetzen", L"Retomar", L"Hervatten", L"Wznów", L"Sürdür"));
 	}else{
 		pMediaControl->Run();
-		ps=0;og->m_ps.SetWindowText(LL2(L"一時停止", L"Pause"));
+		ps=0;og->m_ps.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
 	}
 }
 

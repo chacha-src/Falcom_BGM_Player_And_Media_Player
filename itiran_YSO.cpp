@@ -144,9 +144,30 @@ char tiyso_en[][128]={
 "★Ending video 2"
 };
 
+#define YSO_ARR(SUF) static const char tiyso_##SUF[][128]
+#define YSO_ARR_END ;
+#define YSO_INIT "001 Title<THE GUIDANCE OF A WHITE TOWER>","002 Event 0<BONDS WITH COMPANION>","003 Darm Tower 24-25F<BEYOND THE BEGINNING>","004 Darm Tower 01-05F<TOWER OF THE SHADOW OF DEATH>","005 Darm Tower 06-09F<WATER PRISON>","006 Darm Tower 10-13F<SCARLET TEMPEST>","007 Darm Tower 14-17F<SILENT DESERT>","008 Darm Tower 18-21F<SAMSARA AND PARAMNESIA>","009 Darm Tower 22-24F<PRELUDE TO THE OMEN>","010 Darm Tower top floor<THE LAST MOMENT OF THE DARK>(Toal only)","011 Boss battle 1<TENSION>(Genocrates)","012 Rado Tower/Mirror Room<DREAMING>","013 Path of demons<DEVIL'S WIND>","014 Boss battle 2<SCARS OF THE DIVINE WING>(Belgarnder/Nigtilgar/Gerard/Pictimos/Consklard)","015 Boss battle 3<OBORO>(Vajurion/other demon clan)","016 Boss battle 4<MY LORD, OUR BRAVE>(Zava/Yogrex&Omurg)","017 Dalles battle<OVER DRIVE>","018 Demon King Darm battle<TERMINATION>(Toal only)","019 Intro(video)<PROLOGUE -Ys ORIGIN->","020 Logo(video)","021 Tree of Roda<RODA>","022 Demon clan theme<THE ROOT OF DARKNESS>","023 Event 1<CONFRONTATION>","024 Event 2<THE PAIN OF SEPARATION>","025 Event 3<MEMORY OF SALMON>","026 Event 4<FEENA>","027 Silver Harmonica 1","028 Silver Harmonica 2","029 Silver Harmonica 2 Lute Ver","030 Event 5<FAIR SKIES>","031 Event 6<DETERMINATION>","032 Opening(video)<GENESIS BEYOND THE BEGINNING OPENING VERSION>","033 Ending 1(video)<TO THE NEXT GENERATION> Yunika/Hugo","034 Ending 2(video)<A NEW LEGENDARY OPENING> Toal","035 Event 7<BELIEVING>","036 Game over<SO MUCH FOR TODAY>","037 Instruction 1<MAGNIFICENCE>","038 Instruction 2<MOVEMENT OF WICKED ENERGY>","039 Instruction 3<DISAPPEARANCE OF THREAT>","040 Darm Tower top floor event<-Bonus track- GENESIS BEYOND THE BEGINNING>(Toal only)","★FALCOM logo video","★Prologue video","★Opening video","★Instruction 1","★Instruction 2","★Instruction 3","★Ending video 1","★Ending video 2"
+YSO_ARR(fr)={YSO_INIT} YSO_ARR_END
+YSO_ARR(it)={YSO_INIT} YSO_ARR_END
+YSO_ARR(es)={YSO_INIT} YSO_ARR_END
+YSO_ARR(ko)={YSO_INIT} YSO_ARR_END
+YSO_ARR(zh)={YSO_INIT} YSO_ARR_END
+YSO_ARR(ar)={YSO_INIT} YSO_ARR_END
+YSO_ARR(ru)={YSO_INIT} YSO_ARR_END
+YSO_ARR(de)={YSO_INIT} YSO_ARR_END
+YSO_ARR(pt)={YSO_INIT} YSO_ARR_END
+YSO_ARR(nl)={YSO_INIT} YSO_ARR_END
+YSO_ARR(pl)={YSO_INIT} YSO_ARR_END
+YSO_ARR(tr)={YSO_INIT} YSO_ARR_END
+#undef YSO_INIT
+#undef YSO_ARR
+#undef YSO_ARR_END
+
+static inline CString YSO_TRACK(int i){ switch(savedata.lang){ case 0: return CString(CStringA(tiyso[i])); case 1: return CString(CStringA(tiyso_en[i])); case 2: return CString(CStringA(tiyso_fr[i])); case 3: return CString(CStringA(tiyso_it[i])); case 4: return CString(CStringA(tiyso_es[i])); case 5: return CString(CStringA(tiyso_ko[i])); case 6: return CString(CStringA(tiyso_zh[i])); case 7: return CString(CStringA(tiyso_ar[i])); case 8: return CString(CStringA(tiyso_ru[i])); case 9: return CString(CStringA(tiyso_de[i])); case 10: return CString(CStringA(tiyso_pt[i])); case 11: return CString(CStringA(tiyso_nl[i])); case 12: return CString(CStringA(tiyso_pl[i])); case 13: return CString(CStringA(tiyso_tr[i])); default: return CString(CStringA(tiyso_en[i])); }}
+
 CString Citiran_YSO::Gett(int a){
 	CString s,ss;
-	s=savedata.lang ? tiyso_en[a] : tiyso[a];
+	s=YSO_TRACK(a);
 	ss=s.Left(3);
 	fnn=s.Mid(4);
 	return ss;
@@ -158,7 +179,7 @@ void Citiran_YSO::OnDblclkList1()
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	int idx=m_list.GetItemData(m_list.GetCurSel());
-	CString s;	s=savedata.lang ? tiyso_en[idx] : tiyso[idx];
+	CString s;	s=YSO_TRACK(idx);
 	ret=_tstoi(s.Left(3));
 	ret2=m_list.GetCurSel();
 	if(ret2>39)
@@ -179,15 +200,15 @@ void Citiran_YSO::OnDblclkList1()
 BOOL Citiran_YSO::OnInitDialog() 
 {
 	CCustomDialog::OnInitDialog();
-	SetWindowText(LL2(L"イース・オリジン", L"Ys Origin"));
-	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
+	SetWindowText(LL14(L"イース・オリジン", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
 	for(int i=0;i<48;i++)
 	{
 		CString s;
-		s=savedata.lang ? tiyso_en[i] : tiyso[i];
+		s=YSO_TRACK(i);
 		if(s.Left(2)!=_T("★")){ CString t=_T("YSO_"); t+=s; s=t; }
 		dx= m_list.AddString(s);
 		m_list.SetItemData(dx,i);	

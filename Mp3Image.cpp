@@ -542,7 +542,7 @@ void CMp3Image::Load(CString s)
 
 	cdc0 = GetDC();
 	if (img.Load(stream) == E_FAIL) {
-		MessageBox(LL2(L"画像データが開けません。", L"Could not open image data."));
+		MessageBox(LL14(L"画像データが開けません。", L"Could not open image data.", L"Impossible d'ouvrir les données image.", L"Impossibile aprire i dati immagine.", L"No se puede abrir la imagen.", L"이미지 데이터를 열 수 없습니다.", L"无法打开图像数据。", L"تعذر فتح بيانات الصورة.", L"Не удалось открыть данные изображения.", L"Bilddaten konnten nicht geöffnet werden.", L"Não foi possível abrir os dados da imagem.", L"Kan afbeeldingsgegevens niet openen.", L"Nie można otworzyć danych obrazu.", L"Görüntü verileri açılamadı."));
 		GlobalFree(hG);
 		DestroyWindow();
 		return;
@@ -809,7 +809,7 @@ void CMp3Image::OnRButtonDown(UINT nFlags, CPoint point)
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
 	CMenu menu;
 	menu.CreatePopupMenu();
-	menu.AppendMenu(MF_STRING | MF_ENABLED, IDOK, LL2(L"閉じる", L"Close"));
+	menu.AppendMenu(MF_STRING | MF_ENABLED, IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 
 	ClientToScreen(&point);
 	menu.TrackPopupMenu(

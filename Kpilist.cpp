@@ -45,10 +45,10 @@ BOOL CKpilist::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
 
-	SetWindowText(LL2(L"kpi一覧", L"kpi list"));
+	SetWindowText(LL14(L"kpi一覧", L"kpi list", L"Liste kpi", L"Elenco kpi", L"Lista kpi", L"kpi 목록", L"kpi列表", L"قائمة kpi", L"Список kpi", L"kpi-Liste", L"Lista kpi", L"kpi-lijst", L"Lista kpi", L"kpi listesi"));
 	m_tooltip.Create(this);
 	m_tooltip.Activate(TRUE);
-	m_tooltip.AddTool(GetDlgItem(IDOK), LL2(L"閉じます", L"Close"));
+	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"閉じます", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	m_tooltip.SetDelayTime( TTDT_AUTOPOP, 10000 );
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 
@@ -67,9 +67,9 @@ void CKpilist::Init()
 	dwExStyle |= LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_INFOTIP | LVS_EX_CHECKBOXES;
 	m_lc.SetExtendedStyle(dwExStyle);
 	m_lc.ModifyStyle(0, LVS_REPORT);
-	m_lc.InsertColumn(0, LL2(L"kpi", L"kpi"), LVCFMT_LEFT, 100, 0);
+	m_lc.InsertColumn(0, LL14(L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi"), LVCFMT_LEFT, 100, 0);
 	m_lc.InsertColumn(1, L"Ver", LVCFMT_CENTER, 50, 0);
-	m_lc.InsertColumn(2, LL2(L"拡張子", L"Extensions"), LVCFMT_LEFT, 400, 0);
+	m_lc.InsertColumn(2, LL14(L"拡張子", L"Extensions", L"Extensions", L"Estensioni", L"Extensiones", L"확장자", L"扩展名", L"الامتدادات", L"Расширения", L"Erweiterungen", L"Extensões", L"Extensies", L"Rozszerzenia", L"Uzantılar"), LVCFMT_LEFT, 400, 0);
 
 	//ファイル読み込み kpilist
 	CString ss, sss;

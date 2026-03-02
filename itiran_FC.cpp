@@ -43,212 +43,962 @@ BEGIN_MESSAGE_MAP(Citiran_FC, CCustomDialog)
 
 /////////////////////////////////////////////////////////////////////////////
 // Citiran_FC メッセージ ハンドラ
-char ti1[][47]={
-"001 風を共に舞う気持ち",
-"100 地方都市ロレント",
-"101 商業都市ボース",
-"102 海港都市ルーアン",
-"103 工房都市ツァイス",        
-"104 王都グランセル",        
-"105 陽だまりにて和む猫",        
-"106 国境警備も楽じゃない",        
-"107 王城",        
-"108 グランアリーナ",        
-"200 リベールの歩き方",        
-"201 Secret Green Passage",        
-"202 Rock on the Road",        
-"300 闇を彷徨う",        
-"301 行く手をはばむ鋼の床",        
-"302 暗がりがくれた安らぎ",        
-"303 四輪の塔",        
-"304 レイストン要塞",        
-"305 虚ろなる光の封土",        
-"400 Sophisticated Fight",        
-"402 To be Suggestive",        
-"403 銀の意志",        
-"404 Challenger Invited",        
-"405 Ancient Makes",        
-"406 至宝を守護せしモノ",        
-"407 撃破！！",        
-"408 消え行く星",        
-"410 ピンチ！！",        
-"500 星の在り処 Harmonica short Ver.",        
-"501 琥珀の愛 Hum Ver.",        
-"502 琥珀の愛 Piano Ver.",        
-"503 琥珀の愛 Lute Ver.",        
-"504 星の在り処 Harmonica long Ver.",        
-"505 賑やかに行こう",        
-"510 去り行く決意",        
-"511 暗躍する者たち",        
-"512 奴を逃がすな！",        
-"513 胸の中に",        
-"514 月明りの下で",        
-"516 忍び寄る危機",        
-"517 俺達カプア一家！",        
-"518 旅立ちの小径",        
-"519 奪還",        
-"520 呪縛からの解放、そして・・・",        
-"521 告白",        
-"522 黒のオーブメント",        
-"523 リベールの誇り",        
-"530 (劇)姫の悩み",        
-"531 (劇)騎士達の嘆き",        
-"532 (劇)それぞれの思惑",        
-"533 (劇)城",        
-"534 (劇)コロシアム",        
-"535 (劇)決闘",        
-"536 (劇)姫の死",        
-"537 (劇)大団円",
-"★FALCOMロゴ動画",
-"★オープニング動画",
-"★エンディング動画",
-"★次作予告動画"
+TCHAR ti1[][80] = {
+L"001 風を共に舞う気持ち",
+L"100 地方都市ロレント",
+L"101 商業都市ボース",
+L"102 海港都市ルーアン",
+L"103 工房都市ツァイス",
+L"104 王都グランセル",
+L"105 陽だまりにて和む猫",
+L"106 国境警備も楽じゃない",
+L"107 王城",
+L"108 グランアリーナ",
+L"200 リベールの歩き方",
+L"201 Secret Green Passage",
+L"202 Rock on the Road",
+L"300 闇を彷徨う",
+L"301 行く手をはばむ鋼の床",
+L"302 暗がりがくれた安らぎ",
+L"303 四輪の塔",
+L"304 レイストン要塞",
+L"305 虚ろなる光の封土",
+L"400 Sophisticated Fight",
+L"402 To be Suggestive",
+L"403 銀の意志",
+L"404 Challenger Invited",
+L"405 Ancient Makes",
+L"406 至宝を守護せしモノ",
+L"407 撃破！！",
+L"408 消え行く星",
+L"410 ピンチ！！",
+L"500 星の在り処 Harmonica short Ver.",
+L"501 琥珀の愛 Hum Ver.",
+L"502 琥珀の愛 Piano Ver.",
+L"503 琥珀の愛 Lute Ver.",
+L"504 星の在り処 Harmonica long Ver.",
+L"505 賑やかに行こう",
+L"510 去り行く決意",
+L"511 暗躍する者たち",
+L"512 奴を逃がすな！",
+L"513 胸の中に",
+L"514 月明りの下で",
+L"516 忍び寄る危機",
+L"517 俺達カプア一家！",
+L"518 旅立ちの小径",
+L"519 奪還",
+L"520 呪縛からの解放、そして・・・",
+L"521 告白",
+L"522 黒のオーブメント",
+L"523 リベールの誇り",
+L"530 (劇)姫の悩み",
+L"531 (劇)騎士達の嘆き",
+L"532 (劇)それぞれの思惑",
+L"533 (劇)城",
+L"534 (劇)コロシアム",
+L"535 (劇)決闘",
+L"536 (劇)姫の死",
+L"537 (劇)大団円",
+L"★FALCOMロゴ動画",
+L"★オープニング動画",
+L"★エンディング動画",
+L"★次作予告動画"
 };
 
-char ti1_en[][47]={
-"001 Feelings Dancing with the Wind",
-"100 Rolent - Provincial City",
-"101 Bose - Commercial City",
-"102 Ruan - Harbor City",
-"103 Zeiss - Engineering City",
-"104 Grancel - Royal Capital",
-"105 Cat Relaxing in the Sun",
-"106 Border Patrol Isn't Easy",
-"107 Royal Castle",
-"108 Grand Arena",
-"200 How to Walk Around Liberl",
-"201 Secret Green Passage",
-"202 Rock on the Road",
-"300 Wandering in the Darkness",
-"301 Steel Floor Blocking the Path",
-"302 Peace from the Darkness",
-"303 Tetracyclic Towers",
-"304 Leiston Fortress",
-"305 Vacant Land of Light",
-"400 Sophisticated Fight",
-"402 To be Suggestive",
-"403 Silver Will",
-"404 Challenger Invited",
-"405 Ancient Makes",
-"406 Guardian of the Treasure",
-"407 Crush!!",
-"408 Fading Star",
-"410 Pinch!!",
-"500 Where the Stars Are Harmonica short Ver.",
-"501 Amber Love Hum Ver.",
-"502 Amber Love Piano Ver.",
-"503 Amber Love Lute Ver.",
-"504 Where the Stars Are Harmonica long Ver.",
-"505 Let's Go Cheerfully",
-"510 Determination to Leave",
-"511 Those Who Move in the Shadows",
-"512 Don't Let Him Escape!",
-"513 In My Heart",
-"514 Under the Moonlight",
-"516 Creeping Crisis",
-"517 We're the Capua Family!",
-"518 Path of Departure",
-"519 Recapture",
-"520 Liberation from the Curse, and...",
-"521 Confession",
-"522 Black Orbment",
-"523 Pride of Liberl",
-"530 (Drama) Princess's Worry",
-"531 (Drama) Knights' Lament",
-"532 (Drama) Each One's Intentions",
-"533 (Drama) Castle",
-"534 (Drama) Colosseum",
-"535 (Drama) Duel",
-"536 (Drama) Princess's Death",
-"537 (Drama) Grand Finale",
-"★FALCOM logo video",
-"★Opening video",
-"★Ending video",
-"★Next game preview"
+TCHAR ti1_en[][80] = {
+L"001 Feelings Dancing with the Wind",
+L"100 Rolent - Provincial City",
+L"101 Bose - Commercial City",
+L"102 Ruan - Harbor City",
+L"103 Zeiss - Engineering City",
+L"104 Grancel - Royal Capital",
+L"105 Cat Relaxing in the Sun",
+L"106 Border Patrol Isn't Easy",
+L"107 Royal Castle",
+L"108 Grand Arena",
+L"200 How to Walk Around Liberl",
+L"201 Secret Green Passage",
+L"202 Rock on the Road",
+L"300 Wandering in the Darkness",
+L"301 Steel Floor Blocking the Path",
+L"302 Peace from the Darkness",
+L"303 Tetracyclic Towers",
+L"304 Leiston Fortress",
+L"305 Vacant Land of Light",
+L"400 Sophisticated Fight",
+L"402 To be Suggestive",
+L"403 Silver Will",
+L"404 Challenger Invited",
+L"405 Ancient Makes",
+L"406 Guardian of the Treasure",
+L"407 Crush!!",
+L"408 Fading Star",
+L"410 Pinch!!",
+L"500 Where the Stars Are Harmonica short Ver.",
+L"501 Amber Love Hum Ver.",
+L"502 Amber Love Piano Ver.",
+L"503 Amber Love Lute Ver.",
+L"504 Where the Stars Are Harmonica long Ver.",
+L"505 Let's Go Cheerfully",
+L"510 Determination to Leave",
+L"511 Those Who Move in the Shadows",
+L"512 Don't Let Him Escape!",
+L"513 In My Heart",
+L"514 Under the Moonlight",
+L"516 Creeping Crisis",
+L"517 We're the Capua Family!",
+L"518 Path of Departure",
+L"519 Recapture",
+L"520 Liberation from the Curse, and...",
+L"521 Confession",
+L"522 Black Orbment",
+L"523 Pride of Liberl",
+L"530 (Drama) Princess's Worry",
+L"531 (Drama) Knights' Lament",
+L"532 (Drama) Each One's Intentions",
+L"533 (Drama) Castle",
+L"534 (Drama) Colosseum",
+L"535 (Drama) Duel",
+L"536 (Drama) Princess's Death",
+L"537 (Drama) Grand Finale",
+L"★FALCOM logo video",
+L"★Opening video",
+L"★Ending video",
+L"★Next game preview"
 };
-/**/
 
-CString Citiran_FC::Gett(int a){
-	CString s;
-	s=savedata.lang ? ti1_en[a] : ti1[a];
-	fnn=s.Mid(4);
-	return s;
-}
+#define FC_LANG_ARRAY(NAME) static const TCHAR NAME[][80]=
 
-void Citiran_FC::OnDblclkList1() 
-{
-	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
-	int idx=m_list.GetItemData(m_list.GetCurSel());
-	CString s;	s=savedata.lang ? ti1_en[idx] : ti1[idx];
-	ret=_tstoi(s.Left(3));
-	ret2=m_list.GetCurSel();
-	if(ret2>54)
-		ret=ret2;
+FC_LANG_ARRAY(ti1_fr) {
+	L"001 Sentiments dansant avec le vent",
+		L"100 Rolent - Ville provinciale",
+		L"101 Bose - Ville commerciale",
+		L"102 Ruan - Ville portuaire",
+		L"103 Zeiss - Ville atelier",
+		L"104 Grancel - Capitale royale",
+		L"105 Chat se prélassant au soleil",
+		L"106 La patrouille frontière n'est pas facile",
+		L"107 Château royal",
+		L"108 Grand Arena",
+		L"200 Comment se déplacer à Liberl",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 Errance dans les ténèbres",
+		L"301 Plancher d'acier bloquant le chemin",
+		L"302 Paix des ténèbres",
+		L"303 Tours tétracycliques",
+		L"304 Forteresse de Leiston",
+		L"305 Terre vacante de lumière",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 Volonté d'argent",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 Gardien du trésor",
+		L"407 Écrasement !!",
+		L"408 Étoile défaillante",
+		L"410 Pinch!!",
+		L"500 Où sont les étoiles Harmonica court",
+		L"501 Amour d'ambre Hum Ver.",
+		L"502 Amour d'ambre Piano Ver.",
+		L"503 Amour d'ambre Luth Ver.",
+		L"504 Où sont les étoiles Harmonica long",
+		L"505 Allons gaiement",
+		L"510 Décision de partir",
+		L"511 Ceux qui agissent dans l'ombre",
+		L"512 Ne le laissez pas s'échapper !",
+		L"513 Dans mon cœur",
+		L"514 Sous le clair de lune",
+		L"516 Crise rampante",
+		L"517 Nous sommes la famille Capua !",
+		L"518 Sentier du départ",
+		L"519 Reprise",
+		L"520 Libération de la malédiction, et...",
+		L"521 Aveu",
+		L"522 Orbement noir",
+		L"523 Fierté de Liberl",
+		L"530 (Drame) Souci de la princesse",
+		L"531 (Drame) Lamentation des chevaliers",
+		L"532 (Drame) Intentions de chacun",
+		L"533 (Drame) Château",
+		L"534 (Drame) Colisée",
+		L"535 (Drame) Duel",
+		L"536 (Drame) Mort de la princesse",
+		L"537 (Drame) Grand final",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+FC_LANG_ARRAY(ti1_it) {
+	L"001 Sentimenti danzanti con il vento",
+		L"100 Rolent - Città provinciale",
+		L"101 Bose - Città commerciale",
+		L"102 Ruan - Città portuale",
+		L"103 Zeiss - Città delle officine",
+		L"104 Grancel - Capitale reale",
+		L"105 Gatto che si rilassa al sole",
+		L"106 La pattuglia di confine non è facile",
+		L"107 Castello reale",
+		L"108 Grand Arena",
+		L"200 Come girare per Liberl",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 Vagando nell'oscurità",
+		L"301 Pavimento d'acciaio che blocca",
+		L"302 Pace dall'oscurità",
+		L"303 Torri tetracyclic",
+		L"304 Fortezza di Leiston",
+		L"305 Terra vacua di luce",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 Volontà d'argento",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 Guardiano del tesoro",
+		L"407 Schiaccia !!",
+		L"408 Stella che svanisce",
+		L"410 Pinch!!",
+		L"500 Dove sono le stelle Harmonica short",
+		L"501 Amore ambra Hum Ver.",
+		L"502 Amore ambra Piano Ver.",
+		L"503 Amore ambra Liuto Ver.",
+		L"504 Dove sono le stelle Harmonica long",
+		L"505 Andiamo allegramente",
+		L"510 Determinazione a partire",
+		L"511 Chi si muove nell'ombra",
+		L"512 Non lasciarlo scappare!",
+		L"513 Nel mio cuore",
+		L"514 Sotto il chiaro di luna",
+		L"516 Crisi strisciante",
+		L"517 Siamo la famiglia Capua!",
+		L"518 Sentiero della partenza",
+		L"519 Riconquista",
+		L"520 Liberazione dalla maledizione, e...",
+		L"521 Confessione",
+		L"522 Orbment nero",
+		L"523 Orgoglio di Liberl",
+		L"530 (Drama) Preoccupazione della principessa",
+		L"531 (Drama) Lamento dei cavalieri",
+		L"532 (Drama) Intenzioni di ognuno",
+		L"533 (Drama) Castello",
+		L"534 (Drama) Colosseo",
+		L"535 (Drama) Duello",
+		L"536 (Drama) Morte della principessa",
+		L"537 (Drama) Gran finale",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+FC_LANG_ARRAY(ti1_es) {
+	L"001 Sentimientos bailando con el viento",
+		L"100 Rolent - Ciudad provincial",
+		L"101 Bose - Ciudad comercial",
+		L"102 Ruan - Ciudad portuaria",
+		L"103 Zeiss - Ciudad taller",
+		L"104 Grancel - Capital real",
+		L"105 Gato relajándose al sol",
+		L"106 La patrulla fronteriza no es fácil",
+		L"107 Castillo real",
+		L"108 Grand Arena",
+		L"200 Cómo caminar por Liberl",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 Vagando en la oscuridad",
+		L"301 Suelo de acero bloqueando el camino",
+		L"302 Paz de la oscuridad",
+		L"303 Torres tetra cíclicas",
+		L"304 Fortaleza Leiston",
+		L"305 Tierra vacía de luz",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 Voluntad de plata",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 Guardián del tesoro",
+		L"407 ¡¡Aplastar!!",
+		L"408 Estrella que se desvanece",
+		L"410 Pinch!!",
+		L"500 Dónde están las estrellas Harmónica cort",
+		L"501 Amor ámbar Hum Ver.",
+		L"502 Amor ámbar Piano Ver.",
+		L"503 Amor ámbar Laúd Ver.",
+		L"504 Dónde están las estrellas Harmónica larg",
+		L"505 Vamos alegremente",
+		L"510 Determinación de partir",
+		L"511 Los que se mueven en las sombras",
+		L"512 ¡No lo dejes escapar!",
+		L"513 En mi corazón",
+		L"514 Bajo la luz de la luna",
+		L"516 Crisis creciente",
+		L"517 ¡Somos la familia Capua!",
+		L"518 Sendero de partida",
+		L"519 Recaptura",
+		L"520 Liberación de la maldición, y...",
+		L"521 Confesión",
+		L"522 Orbment negro",
+		L"523 Orgullo de Liberl",
+		L"530 (Drama) Preocupación de la princesa",
+		L"531 (Drama) Lamento de los caballeros",
+		L"532 (Drama) Intenciones de cada uno",
+		L"533 (Drama) Castillo",
+		L"534 (Drama) Coliseo",
+		L"535 (Drama) Duelo",
+		L"536 (Drama) Muerte de la princesa",
+		L"537 (Drama) Gran final",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+FC_LANG_ARRAY(ti1_ko) {
+	L"001 바람과 함께 춤추는 마음",
+		L"100 로렌트 - 지방 도시",
+		L"101 보스 - 상업 도시",
+		L"102 루안 - 항구 도시",
+		L"103 자이스 - 공방 도시",
+		L"104 그란셀 - 왕도",
+		L"105 햇살에 웅크린 고양이",
+		L"106 국경 경비도 쉽지 않다",
+		L"107 왕성",
+		L"108 그랜드 아레나",
+		L"200 리벨을 걷는 법",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 어둠을 헤매며",
+		L"301 길을 막는 강철의 바닥",
+		L"302 어둠이 준 평화",
+		L"303 사륜의 탑",
+		L"304 레이스톤 요새",
+		L"305 허공의 빛의 땅",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 은의지",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 지보를 수호하는 자",
+		L"407 격파!!",
+		L"408 사라지는 별",
+		L"410 Pinch!!",
+		L"500 별이 있는 곳 하모니카 short Ver.",
+		L"501 호박의 사랑 Hum Ver.",
+		L"502 호박의 사랑 Piano Ver.",
+		L"503 호박의 사랑 류트 Ver.",
+		L"504 별이 있는 곳 하모니카 long Ver.",
+		L"505 활기차게 가자",
+		L"510 떠나려는 결심",
+		L"511 그림자 속에서 움직이는 자들",
+		L"512 놓치지 마!",
+		L"513 가슴 속에",
+		L"514 달빛 아래에서",
+		L"516 다가오는 위기",
+		L"517 우리는 카푸아 가문!",
+		L"518 여행의 오솔길",
+		L"519 탈환",
+		L"520 저주에서 해방, 그리고・・・",
+		L"521 고백",
+		L"522 검은 오브먼트",
+		L"523 리벨의 자긍심",
+		L"530 (극) 공주의 고민",
+		L"531 (극) 기사들의 한탄",
+		L"532 (극) 각자의 생각",
+		L"533 (극) 성",
+		L"534 (극) 콜로세움",
+		L"535 (극) 결투",
+		L"536 (극) 공주의 죽음",
+		L"537 (극) 대단원",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+FC_LANG_ARRAY(ti1_zh) {
+	L"001 与风共舞的心情",
+		L"100 洛连特-地方都市",
+		L"101 柏斯-商业都市",
+		L"102 卢安-港口都市",
+		L"103 蔡斯-工房都市",
+		L"104 格兰赛尔-王都",
+		L"105 阳光下小憩的猫",
+		L"106 国境警备也不轻松",
+		L"107 王城",
+		L"108 大竞技场",
+		L"200 利贝尔的步道",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 彷徨于黑暗中",
+		L"301 阻挡去路的钢铁地板",
+		L"302 黑暗带来的安宁",
+		L"303 四轮之塔",
+		L"304 雷斯塔要塞",
+		L"305 虚空光之封土",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 银之意志",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 至宝的守护者",
+		L"407 击破！！",
+		L"408 消逝之星",
+		L"410 Pinch!!",
+		L"500 星之所在 口琴 short Ver.",
+		L"501 琥珀之爱 Hum Ver.",
+		L"502 琥珀之爱 Piano Ver.",
+		L"503 琥珀之爱 鲁特琴 Ver.",
+		L"504 星之所在 口琴 long Ver.",
+		L"505 热闹地出发吧",
+		L"510 离去的决心",
+		L"511 暗中活动者们",
+		L"512 别让他逃了！",
+		L"513 心中",
+		L"514 月光下",
+		L"516 悄然逼近的危机",
+		L"517 我们是卡普亚一家！",
+		L"518 启程小径",
+		L"519 夺还",
+		L"520 从诅咒中解放，然后・・・",
+		L"521 告白",
+		L"522 黑色导力器",
+		L"523 利贝尔的骄傲",
+		L"530 (剧)公主的烦恼",
+		L"531 (剧)骑士们的叹息",
+		L"532 (剧)各自的打算",
+		L"533 (剧)城堡",
+		L"534 (剧)竞技场",
+		L"535 (剧)决斗",
+		L"536 (剧)公主之死",
+		L"537 (剧)大团圆",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+FC_LANG_ARRAY(ti1_ar) {
+	L"001 مشاعر ترقص مع الريح",
+		L"100 رولنت - مدينة إقليمية",
+		L"101 بوس - مدينة تجارية",
+		L"102 روان - مدينة ميناء",
+		L"103 زيس - مدينة ورش",
+		L"104 غرانسل - العاصمة",
+		L"105 قط يستريح تحت الشمس",
+		L"106 دورية الحدود ليست سهلة",
+		L"107 القلعة الملكية",
+		L"108 الساحة الكبرى",
+		L"200 التجول في ليبرل",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 التيه في الظلام",
+		L"301 أرضية فولاذية تعترض الطريق",
+		L"302 سلام من الظلام",
+		L"303 أبراج tetracyclic",
+		L"304 حصن ليستون",
+		L"305 أرض الضوء الفارغة",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 الإرادة الفضية",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 حارس الكنز",
+		L"407 سحق!!",
+		L"408 نجم يتلاشى",
+		L"410 Pinch!!",
+		L"500 حيث النجوم هارمونيكا قصير",
+		L"501 حب العنبر Hum Ver.",
+		L"502 حب العنبر Piano Ver.",
+		L"503 حب العنبر Lute Ver.",
+		L"504 حيث النجوم هارمونيكا طويل",
+		L"505 لنذهب بمرح",
+		L"510 العزم على المغادرة",
+		L"511 من يتحركون في الظل",
+		L"512 لا تدعه يهرب!",
+		L"513 في قلبي",
+		L"514 تحت ضوء القمر",
+		L"516 أزمة زاحفة",
+		L"517 نحن عائلة كابوا!",
+		L"518 درب المغادرة",
+		L"519 استعادة",
+		L"520 التحرر من اللعنة، و...",
+		L"521 اعتراف",
+		L"522 الأوربمنت الأسود",
+		L"523 فخر ليبرل",
+		L"530 (دراما) قلق الأميرة",
+		L"531 (دراما) رثاء الفرسان",
+		L"532 (دراما) نوايا كل واحد",
+		L"533 (دراما) القلعة",
+		L"534 (دراما) المدرج",
+		L"535 (دراما) مبارزة",
+		L"536 (دراما) موت الأميرة",
+		L"537 (دراما) الخاتمة الكبرى",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+FC_LANG_ARRAY(ti1_ru) {
+	L"001 Чувства, танцующие с ветром",
+		L"100 Ролент - Провинциальный город",
+		L"101 Бозе - Торговый город",
+		L"102 Руан - Порт",
+		L"103 Цейсс - Город мастерских",
+		L"104 Грансель - Столица",
+		L"105 Кот на солнышке",
+		L"106 Граничный патруль - не лёгкое дело",
+		L"107 Королевский замок",
+		L"108 Большая арена",
+		L"200 Как ходить по Либерлу",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 Блуждание во тьме",
+		L"301 Стальной пол на пути",
+		L"302 Покой от тьмы",
+		L"303 Тетрациклические башни",
+		L"304 Крепость Лейстон",
+		L"305 Пустая земля света",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 Серебряная воля",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 Страж сокровища",
+		L"407 Разгром!!",
+		L"408 Угасающая звезда",
+		L"410 Pinch!!",
+		L"500 Где звёзды Гармоника коротк. Вер.",
+		L"501 Янтарная любовь Hum Ver.",
+		L"502 Янтарная любовь Piano Ver.",
+		L"503 Янтарная любовь Lute Ver.",
+		L"504 Где звёзды Гармоника длин. Вер.",
+		L"505 Пойдём весело",
+		L"510 Решение уйти",
+		L"511 Те, кто в тени",
+		L"512 Не дайте ему уйти!",
+		L"513 В моём сердце",
+		L"514 Под лунным светом",
+		L"516 Надвигающийся кризис",
+		L"517 Мы семья Капуа!",
+		L"518 Тропа отправления",
+		L"519 Возвращение",
+		L"520 Освобождение от проклятия, и...",
+		L"521 Признание",
+		L"522 Чёрный орбмент",
+		L"523 Гордость Либерла",
+		L"530 (Драма) Забота принцессы",
+		L"531 (Драма) Плач рыцарей",
+		L"532 (Драма) Замыслы каждого",
+		L"533 (Драма) Замок",
+		L"534 (Драма) Колизей",
+		L"535 (Драма) Дуэль",
+		L"536 (Драма) Смерть принцессы",
+		L"537 (Драма) Великая развязка",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+FC_LANG_ARRAY(ti1_de) {
+	L"001 Gefühle, die mit dem Wind tanzen",
+		L"100 Rolent - Provinzstadt",
+		L"101 Bose - Handelsstadt",
+		L"102 Ruan - Hafenstadt",
+		L"103 Zeiss - Werkstattstadt",
+		L"104 Grancel - Königshauptstadt",
+		L"105 Katze in der Sonne",
+		L"106 Grenzpatrouille ist nicht leicht",
+		L"107 Königsschloss",
+		L"108 Grand Arena",
+		L"200 Liberl zu Fuß",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 Wandern in der Dunkelheit",
+		L"301 Stahlboden versperrt den Weg",
+		L"302 Frieden aus der Dunkelheit",
+		L"303 Tetrazyklische Türme",
+		L"304 Leiston-Festung",
+		L"305 Leeres Lichtland",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 Silberner Wille",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 Wächter des Schatzes",
+		L"407 Zerschmettern!!",
+		L"408 Verblassender Stern",
+		L"410 Pinch!!",
+		L"500 Wo die Sterne sind Harmonika kurz",
+		L"501 Amberliebe Hum Ver.",
+		L"502 Amberliebe Klavier Ver.",
+		L"503 Amberliebe Laute Ver.",
+		L"504 Wo die Sterne sind Harmonika lang",
+		L"505 Gehen wir fröhlich",
+		L"510 Entschluss zu gehen",
+		L"511 Die im Schatten handeln",
+		L"512 Lasst ihn nicht entkommen!",
+		L"513 In meinem Herzen",
+		L"514 Im Mondschein",
+		L"516 Schleichende Krise",
+		L"517 Wir sind die Familie Capua!",
+		L"518 Pfad des Aufbruchs",
+		L"519 Rückeroberung",
+		L"520 Befreiung vom Fluch, und...",
+		L"521 Geständnis",
+		L"522 Schwarzes Orbment",
+		L"523 Stolz von Liberl",
+		L"530 (Drama) Sorge der Prinzessin",
+		L"531 (Drama) Klage der Ritter",
+		L"532 (Drama) Jeder Plan",
+		L"533 (Drama) Schloss",
+		L"534 (Drama) Kolosseum",
+		L"535 (Drama) Duell",
+		L"536 (Drama) Tod der Prinzessin",
+		L"537 (Drama) Großer Schluss",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+FC_LANG_ARRAY(ti1_pt) {
+	L"001 Sentimentos dançando com o vento",
+		L"100 Rolent - Cidade provincial",
+		L"101 Bose - Cidade comercial",
+		L"102 Ruan - Cidade portuária",
+		L"103 Zeiss - Cidade oficina",
+		L"104 Grancel - Capital real",
+		L"105 Gato relaxando ao sol",
+		L"106 Patrulha de fronteira não é fácil",
+		L"107 Castelo real",
+		L"108 Grand Arena",
+		L"200 Como andar por Liberl",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 Vagando na escuridão",
+		L"301 Chão de aço bloqueando o caminho",
+		L"302 Paz da escuridão",
+		L"303 Torres tetra cíclicas",
+		L"304 Fortaleza Leiston",
+		L"305 Terra vazia de luz",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 Vontade de prata",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 Guardião do tesouro",
+		L"407 Esmagar!!",
+		L"408 Estrela que se desvanece",
+		L"410 Pinch!!",
+		L"500 Onde as estrelas estão Harmônica curta",
+		L"501 Amor âmbar Hum Ver.",
+		L"502 Amor âmbar Piano Ver.",
+		L"503 Amor âmbar Alaúde Ver.",
+		L"504 Onde as estrelas estão Harmônica longa",
+		L"505 Vamos alegremente",
+		L"510 Determinação de partir",
+		L"511 Os que agem nas sombras",
+		L"512 Não o deixe escapar!",
+		L"513 No meu coração",
+		L"514 Sob o luar",
+		L"516 Crise iminente",
+		L"517 Somos a família Capua!",
+		L"518 Caminho da partida",
+		L"519 Recaptura",
+		L"520 Libertação da maldição, e...",
+		L"521 Confissão",
+		L"522 Orbment negro",
+		L"523 Orgulho de Liberl",
+		L"530 (Drama) Preocupação da princesa",
+		L"531 (Drama) Lamento dos cavaleiros",
+		L"532 (Drama) Intenções de cada um",
+		L"533 (Drama) Castelo",
+		L"534 (Drama) Coliseu",
+		L"535 (Drama) Duelo",
+		L"536 (Drama) Morte da princesa",
+		L"537 (Drama) Grande final",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+FC_LANG_ARRAY(ti1_nl) {
+	L"001 Gevoelens dansend met de wind",
+		L"100 Rolent - Provinciestad",
+		L"101 Bose - Handelsstad",
+		L"102 Ruan - Havenstad",
+		L"103 Zeiss - Werkplaatsstad",
+		L"104 Grancel - Koninklijke hoofdstad",
+		L"105 Kat ontspant in de zon",
+		L"106 Grenspatrouille is niet makkelijk",
+		L"107 Koninklijk kasteel",
+		L"108 Grand Arena",
+		L"200 Rondlopen in Liberl",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 Dwalen in de duisternis",
+		L"301 Stalen vloer blokkeert het pad",
+		L"302 Vrede uit de duisternis",
+		L"303 Tetracyclische torens",
+		L"304 Leiston-vesting",
+		L"305 Leeg land van licht",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 Zilveren wil",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 Bewaker van de schat",
+		L"407 Vernietig!!",
+		L"408 Verdwijnende ster",
+		L"410 Pinch!!",
+		L"500 Waar de sterren zijn Harmonica kort",
+		L"501 Amberliefde Hum Ver.",
+		L"502 Amberliefde Piano Ver.",
+		L"503 Amberliefde Luit Ver.",
+		L"504 Waar de sterren zijn Harmonica lang",
+		L"505 Laten we vrolijk gaan",
+		L"510 Vastberadenheid om te vertrekken",
+		L"511 Zij die in de schaduw handelen",
+		L"512 Laat hem niet ontsnappen!",
+		L"513 In mijn hart",
+		L"514 Onder het maanlicht",
+		L"516 Sluipende crisis",
+		L"517 Wij zijn de familie Capua!",
+		L"518 Pad van vertrek",
+		L"519 Herovering",
+		L"520 Bevrijding van de vloek, en...",
+		L"521 Biecht",
+		L"522 Zwart orbment",
+		L"523 Trots van Liberl",
+		L"530 (Drama) Zorg van de prinses",
+		L"531 (Drama) Klaagzang der ridders",
+		L"532 (Drama) Ieders bedoelingen",
+		L"533 (Drama) Kasteel",
+		L"534 (Drama) Colosseum",
+		L"535 (Drama) Duel",
+		L"536 (Drama) Dood van de prinses",
+		L"537 (Drama) Groot slot",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+FC_LANG_ARRAY(ti1_pl) {
+	L"001 Uczucia tańczące z wiatrem",
+		L"100 Rolent - Miasto prowincjonalne",
+		L"101 Bose - Miasto handlowe",
+		L"102 Ruan - Miasto portowe",
+		L"103 Zeiss - Miasto warsztatów",
+		L"104 Grancel - Stolica królewska",
+		L"105 Kot w słońcu",
+		L"106 Patrol graniczny nie jest łatwy",
+		L"107 Zamek królewski",
+		L"108 Grand Arena",
+		L"200 Jak chodzić po Liberl",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 Błądzenie w ciemności",
+		L"301 Stalowa podłoga blokuje drogę",
+		L"302 Spokój z ciemności",
+		L"303 Wieże tetracyclic",
+		L"304 Twierdza Leiston",
+		L"305 Pusta ziemia światła",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 Srebrna wola",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 Strażnik skarbu",
+		L"407 Zgnieć!!",
+		L"408 Gasnąca gwiazda",
+		L"410 Pinch!!",
+		L"500 Gdzie są gwiazdy Harmonijka krótka",
+		L"501 Bursztynowa miłość Hum Ver.",
+		L"502 Bursztynowa miłość Piano Ver.",
+		L"503 Bursztynowa miłość Lutnia Ver.",
+		L"504 Gdzie są gwiazdy Harmonijka długa",
+		L"505 Idźmy wesoło",
+		L"510 Determinacja odejścia",
+		L"511 Ci w cieniu",
+		L"512 Nie daj mu uciec!",
+		L"513 W moim sercu",
+		L"514 W świetle księżyca",
+		L"516 Pełzający kryzys",
+		L"517 My, rodzina Capua!",
+		L"518 Ścieżka odejścia",
+		L"519 Odzyskanie",
+		L"520 Wyzwolenie z klątwy, i...",
+		L"521 Wyznanie",
+		L"522 Czarny orbment",
+		L"523 Duma Liberl",
+		L"530 (Drama) Troska księżniczki",
+		L"531 (Drama) Lament rycerzy",
+		L"532 (Drama) Zamiary każdego",
+		L"533 (Drama) Zamek",
+		L"534 (Drama) Koloseum",
+		L"535 (Drama) Pojedynek",
+		L"536 (Drama) Śmierć księżniczki",
+		L"537 (Drama) Wielkie zakończenie",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+FC_LANG_ARRAY(ti1_tr) {
+	L"001 Rüzgarla dans eden duygular",
+		L"100 Rolent - Taşra kenti",
+		L"101 Bose - Ticaret kenti",
+		L"102 Ruan - Liman kenti",
+		L"103 Zeiss - Atölye kenti",
+		L"104 Grancel - Kraliyet başkenti",
+		L"105 Güneşte dinlenen kedi",
+		L"106 Sınır devriyesi kolay değil",
+		L"107 Kraliyet kalesi",
+		L"108 Grand Arena",
+		L"200 Liberl'de dolaşmak",
+		L"201 Secret Green Passage",
+		L"202 Rock on the Road",
+		L"300 Karanlıkta dolaşmak",
+		L"301 Yolu kapatan çelik zemin",
+		L"302 Karanlıktan gelen huzur",
+		L"303 Dört döngülü kuleler",
+		L"304 Leiston Kalesi",
+		L"305 Işığın boş toprağı",
+		L"400 Sophisticated Fight",
+		L"402 To be Suggestive",
+		L"403 Gümüş irade",
+		L"404 Challenger Invited",
+		L"405 Ancient Makes",
+		L"406 Hazinenin koruyucusu",
+		L"407 Ezip geç!!",
+		L"408 Sönen yıldız",
+		L"410 Pinch!!",
+		L"500 Yıldızların olduğu yer Mızıka kısa",
+		L"501 Kehribar sevgisi Hum Ver.",
+		L"502 Kehribar sevgisi Piyano Ver.",
+		L"503 Kehribar sevgisi Lüt Ver.",
+		L"504 Yıldızların olduğu yer Mızıka uzun",
+		L"505 Neşeyle gidelim",
+		L"510 Ayrılma kararı",
+		L"511 Gölgelerde hareket edenler",
+		L"512 Kaçmasına izin verme!",
+		L"513 Kalbimde",
+		L"514 Ay ışığında",
+		L"516 Sinsice kriz",
+		L"517 Biz Capua ailesiyiz!",
+		L"518 Ayrılış yolu",
+		L"519 Geri alma",
+		L"520 Lanetten kurtulma, ve...",
+		L"521 İtiraf",
+		L"522 Kara orbment",
+		L"523 Liberl'in gururu",
+		L"530 (Drama) Prensesin endişesi",
+		L"531 (Drama) Şövalyelerin ağıtı",
+		L"532 (Drama) Herkesin niyetleri",
+		L"533 (Drama) Kale",
+		L"534 (Drama) Kolezyum",
+		L"535 (Drama) Düello",
+		L"536 (Drama) Prensesin ölümü",
+		L"537 (Drama) Büyük final",
+		L"★FALCOM logo video",
+		L"★Opening video",
+		L"★Ending video",
+		L"★Next game preview"
+};
+
+#undef FC_LANG_ARRAY
+
+static inline CString FC_TRACK(int i) { switch (savedata.lang) { case 0: return CString(CStringA(ti1[i])); case 1: return CString(CStringA(ti1_en[i])); case 2: return CString(CStringA(ti1_fr[i])); case 3: return CString(CStringA(ti1_it[i])); case 4: return CString(CStringA(ti1_es[i])); case 5: return CString(CStringA(ti1_ko[i])); case 6: return CString(CStringA(ti1_zh[i])); case 7: return CString(CStringA(ti1_ar[i])); case 8: return CString(CStringA(ti1_ru[i])); case 9: return CString(CStringA(ti1_de[i])); case 10: return CString(CStringA(ti1_pt[i])); case 11: return CString(CStringA(ti1_nl[i])); case 12: return CString(CStringA(ti1_pl[i])); case 13: return CString(CStringA(ti1_tr[i])); default: return CString(CStringA(ti1_en[i])); } }
+
+																	   CString Citiran_FC::Gett(int a) {
+																		   CString s;
+																		   s = FC_TRACK(a);
+																		   fnn = s.Mid(4);
+																		   return s;
+																	   }
+
+																	   void Citiran_FC::OnDblclkList1()
+																	   {
+																		   // TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
+																		   int idx = m_list.GetItemData(m_list.GetCurSel());
+																		   CString s;	s = FC_TRACK(idx);
+																		   ret = _tstoi(s.Left(3));
+																		   ret2 = m_list.GetCurSel();
+																		   if (ret2 > 54)
+																			   ret = ret2;
 #if UNICODE
-	if(s.Left(1)=="★"){
-		fnn=s.Mid(1);
+																		   if (s.Left(1) == "★") {
+																			   fnn = s.Mid(1);
 #else
-	if(s.Left(2)=="★"){
-		fnn=s.Mid(2);
+																		   if (s.Left(2) == "★") {
+																			   fnn = s.Mid(2);
 #endif
-	}else{
-		fnn=s.Mid(4);
-	}
-	EndDialog(1567);
-}
+																		   }
+																		   else {
+																			   fnn = s.Mid(4);
+																		   }
+																		   EndDialog(1567);
+																		   }
 
-BOOL Citiran_FC::OnInitDialog() 
-{
-	CCustomDialog::OnInitDialog();
+																	   BOOL Citiran_FC::OnInitDialog()
+																	   {
+																		   CCustomDialog::OnInitDialog();
 
-	SetWindowText(LL2(L"空の軌跡 First Chapter", L"Sora no Kiseki First Chapter"));
-	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
-	
-	// TODO: この位置に初期化の補足処理を追加してください
-	int dx;
-	for(int i=0;i<55;i++)
-	{
-		CString s;
-		s="ED6";
-		s+=savedata.lang ? ti1_en[i] : ti1[i];
-//		s+="";
-/*		switch(i)
-		{
-		case 0:
-			s+="▼(タイトル)";
-			break;
-		case 1:
-			s+="▼(町↓)";
-			break;
-		case 10:
-			s+="▼(フィールド↓)";
-			break;
-		case 13:
-			s+="▼(ダンジョン↓)";
-			break;
-		case 19:
-			s+="▼(戦闘↓)";
-			break;
-		case 28:
-			s+="▼(イベント↓)";
-			break;
-		}
-*/		dx= m_list.AddString(s);
-		m_list.SetItemData(dx,i);	
-	}
-		dx= m_list.AddString(LL2(L"★FALCOMロゴ動画", L"★FALCOM logo video"));
-		m_list.SetItemData(dx,55);	
-		dx= m_list.AddString(LL2(L"★オープニング動画", L"★Opening video"));
-		m_list.SetItemData(dx,56);	
-		dx= m_list.AddString(LL2(L"★エンディング動画", L"★Ending video"));
-		m_list.SetItemData(dx,57);	
-		dx= m_list.AddString(LL2(L"★次作予告動画", L"★Next game preview"));
-		m_list.SetItemData(dx,58);	
+																		   SetWindowText(LL14(L"空の軌跡 First Chapter", L"Trails in the Sky First Chapter", L"Les Sentiers du Ciel Premier Chapitre", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"하늘의 궤적 First Chapter", L"空之轨迹 First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter"));
+																		   SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 
-		m_list.SetCurSel(0);
-	if(ret2!=0) m_list.SetCurSel(ret2);
+																		   // TODO: この位置に初期化の補足処理を追加してください
+																		   int dx;
+																		   for (int i = 0; i < 55; i++)
+																		   {
+																			   CString s;
+																			   s = "ED6";
+																			   s += FC_TRACK(i);
+																			   //		s+="";
+																			   /*		switch(i)
+																					   {
+																					   case 0:
+																						   s+="▼(タイトル)";
+																						   break;
+																					   case 1:
+																						   s+="▼(町↓)";
+																						   break;
+																					   case 10:
+																						   s+="▼(フィールド↓)";
+																						   break;
+																					   case 13:
+																						   s+="▼(ダンジョン↓)";
+																						   break;
+																					   case 19:
+																						   s+="▼(戦闘↓)";
+																						   break;
+																					   case 28:
+																						   s+="▼(イベント↓)";
+																						   break;
+																					   }
+																			   */		dx = m_list.AddString(s);
+																			   m_list.SetItemData(dx, i);
+																		   }
+																		   dx = m_list.AddString(LL14(L"★FALCOMロゴ動画", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video"));
+																		   m_list.SetItemData(dx, 55);
+																		   dx = m_list.AddString(LL14(L"★オープニング動画", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video"));
+																		   m_list.SetItemData(dx, 56);
+																		   dx = m_list.AddString(LL14(L"★エンディング動画", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video"));
+																		   m_list.SetItemData(dx, 57);
+																		   dx = m_list.AddString(LL14(L"★次作予告動画", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview"));
+																		   m_list.SetItemData(dx, 58);
 
-	m_list.SetFocus();
-	return FALSE;  // コントロールにフォーカスを設定しないとき、戻り値は TRUE となります
-	              // 例外: OCX プロパティ ページの戻り値は FALSE となります
-}
+																		   m_list.SetCurSel(0);
+																		   if (ret2 != 0) m_list.SetCurSel(ret2);
+
+																		   m_list.SetFocus();
+																		   return FALSE;  // コントロールにフォーカスを設定しないとき、戻り値は TRUE となります
+																		   // 例外: OCX プロパティ ページの戻り値は FALSE となります
+																	   }

@@ -68,9 +68,9 @@ int CALLBACK EditWordBreakProc(LPTSTR lpch, int ichCurrent, int cch, int code);
 BOOL CListSyosai::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
-	SetWindowText(LL2(L"リスト詳細情報", L"Track Details"));
-	SetDlgItemText(IDOK, LL2(L"閉じる", L"Close"));
-	SetDlgItemText(IDOK999, LL2(L"フォルダを開く", L"Open folder"));
+	SetWindowText(LL14(L"リスト詳細情報", L"Track Details", L"Détails de la piste", L"Dettagli traccia", L"Detalles de pista", L"트랙 상세 정보", L"曲目详情", L"تفاصيل المسار", L"Подробности трека", L"Track-Details", L"Detalhes da faixa", L"Trackdetails", L"Szczegóły utworu", L"Parça Detayları"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	SetDlgItemText(IDOK999, LL14(L"フォルダを開く", L"Open folder", L"Ouvrir le dossier", L"Apri cartella", L"Abrir carpeta", L"폴더 열기", L"打开文件夹", L"فتح المجلد", L"Открыть папку", L"Ordner öffnen", L"Abrir pasta", L"Map openen", L"Otwórz folder", L"Klasörü aç"));
 	TCHAR dy[256];
 	// TODO:  ここに初期化を追加してください
 	{
