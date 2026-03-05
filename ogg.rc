@@ -49,8 +49,8 @@ BEGIN
     "LANGUAGE 17, 1\r\n"
     "#pragma code_page(932)\r\n"
     "#endif //_WIN32\r\n"
-    "#include ""res\\ogg.rc2""  // Microsoft Visual C++ 莉･螟悶・繝・・繝ｫ縺ｧ邱ｨ髮・＆繧後◆繝ｪ繧ｽ繝ｼ繧ｹ\\?[?X\r\n"
-    "#include ""l.jpn\\afxres.rc""          // 讓呎ｺ悶・繧ｳ繝ｳ繝昴・繝阪Φ繝・\n"
+    "#include ""res\\ogg.rc2""  // Microsoft Visual C++ 闔会ｽ･陞滓じ繝ｻ郢昴・繝ｻ郢晢ｽｫ邵ｺ・ｧ驍ｱ・ｨ鬮ｮ繝ｻ・・ｹｧ蠕娯螺郢晢ｽｪ郢ｧ・ｽ郢晢ｽｼ郢ｧ・ｹ\\?[?X\r\n"
+    "#include ""l.jpn\\afxres.rc""          // 隶灘綜・ｺ謔ｶ繝ｻ郢ｧ・ｳ郢晢ｽｳ郢晄亢繝ｻ郢晞亂ﾎｦ郢昴・\n"
     "#endif\r\n"
     "\0"
 END
@@ -420,7 +420,7 @@ BEGIN
     COMBOBOX        IDC_COMBO4,122,93,61,185,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     CONTROL         "lrc歌詞ネット取得対応(LRCLib/NetEase等)",IDC_CHECK_lrc,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,107,175,10
     LTEXT           "言語",IDC_STATIC_LANG,8,120,20,8
-    COMBOBOX        IDC_COMBO_LANG,35,118,90,60,CBS_DROPDOWNLIST | WS_TABSTOP
+    COMBOBOX        IDC_COMBO_LANG,35,118,90,466,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_TABSTOP
 END
 
 IDD_SENTAKU7 DIALOG 0, 0, 210, 325
@@ -1224,28 +1224,28 @@ BEGIN
         POPUP "映像ストリーム"
         BEGIN
             MENUITEM "1",                           ID_MV1
-            MENUITEM "1",                           ID_MV2
-            MENUITEM "1",                           ID_MV3
-            MENUITEM "1",                           ID_MV4
-            MENUITEM "1",                           ID_MV5
-            MENUITEM "1",                           ID_MV6
-            MENUITEM "1",                           ID_MV7
-            MENUITEM "1",                           ID_MV8
-            MENUITEM "1",                           ID_MV9
-            MENUITEM "1",                           ID_MV10
+            MENUITEM "2",                           ID_MV2
+            MENUITEM "3",                           ID_MV3
+            MENUITEM "4",                           ID_MV4
+            MENUITEM "5",                           ID_MV5
+            MENUITEM "6",                           ID_MV6
+            MENUITEM "7",                           ID_MV7
+            MENUITEM "8",                           ID_MV8
+            MENUITEM "9",                           ID_MV9
+            MENUITEM "A",                           ID_MV10
         END
         POPUP "音声ストリーム"
         BEGIN
-            MENUITEM "ストリーム1",                      ID_ST1
-            MENUITEM "ストリーム2",                      ID_ST2, GRAYED
-            MENUITEM "ストリーム3",                      ID_ST3
-            MENUITEM "ストリーム4",                      ID_ST4
-            MENUITEM "ストリーム5",                      ID_ST5
-            MENUITEM "ストリーム6",                      ID_ST6
-            MENUITEM "ストリーム7",                      ID_ST7
-            MENUITEM "ストリーム8",                      ID_ST8
-            MENUITEM "ストリーム9",                      ID_ST9
-            MENUITEM "ストリーム10",                     ID_ST10
+            MENUITEM "01",                          ID_ST1
+            MENUITEM "02",                          ID_ST2, GRAYED
+            MENUITEM "03",                          ID_ST3
+            MENUITEM "04",                          ID_ST4
+            MENUITEM "05",                          ID_ST5
+            MENUITEM "06",                          ID_ST6
+            MENUITEM "07",                          ID_ST7
+            MENUITEM "08",                          ID_ST8
+            MENUITEM "09",                          ID_ST9
+            MENUITEM "10",                          ID_ST10
             MENUITEM "11",                          ID_ST11
             MENUITEM "12",                          ID_ST12
             MENUITEM "13",                          ID_ST13
@@ -1277,18 +1277,18 @@ BEGIN
             MENUITEM "39",                          ID_ST39
             MENUITEM "40",                          ID_ST40
         END
-        POPUP "音声ストリーム"
+        POPUP "字幕ストリーム"
         BEGIN
-            MENUITEM "帯",                           ID_ETC1
-            MENUITEM "帯",                           ID_ETC2
-            MENUITEM "帯",                           ID_ETC3
-            MENUITEM "帯",                           ID_ETC4
-            MENUITEM "帯",                           ID_ETC5
-            MENUITEM "帯",                           ID_ETC6
-            MENUITEM "帯",                           ID_ETC7
-            MENUITEM "帯",                           ID_ETC8
-            MENUITEM "帯",                           ID_ETC9
-            MENUITEM "帯",                           ID_ETC10
+            MENUITEM "01",                          ID_ETC1
+            MENUITEM "02",                          ID_ETC2
+            MENUITEM "03",                          ID_ETC3
+            MENUITEM "04",                          ID_ETC4
+            MENUITEM "05",                          ID_ETC5
+            MENUITEM "06",                          ID_ETC6
+            MENUITEM "07",                          ID_ETC7
+            MENUITEM "08",                          ID_ETC8
+            MENUITEM "09",                          ID_ETC9
+            MENUITEM "10",                          ID_ETC10
             MENUITEM "11",                          ID_ETC11
             MENUITEM "12",                          ID_ETC12
             MENUITEM "13",                          ID_ETC13
@@ -1333,7 +1333,7 @@ BEGIN
         MENUITEM "ファイル名変更",                     ID_POP_32787
         MENUITEM "ファイル詳細",                      ID_POP_32776
         MENUITEM SEPARATOR
-        MENUITEM "帯",                           ID_POP_32777
+        MENUITEM "削除",                          ID_POP_32777
     END
 END
 
@@ -1554,8 +1554,8 @@ END
 LANGUAGE 17, 1
 #pragma code_page(932)
 #endif //_WIN32
-#include "res\ogg.rc2"  // Microsoft Visual C++ ??O??c?[?????W???????\?[?X
-#include "l.jpn\afxres.rc"          // 讓呎ｺ悶・繧ｳ繝ｳ繝昴・繝阪Φ繝・
+#include "res\ogg.rc2"  // Microsoft Visual C++ 闔会ｽ･陞滓じ繝ｻ郢昴・繝ｻ郢晢ｽｫ邵ｺ・ｧ驍ｱ・ｨ鬮ｮ繝ｻ・・ｹｧ蠕娯螺郢晢ｽｪ郢ｧ・ｽ郢晢ｽｼ郢ｧ・ｹ\?[?X
+#include "l.jpn\afxres.rc"          // 隶灘綜・ｺ謔ｶ繝ｻ郢ｧ・ｳ郢晢ｽｳ郢晄亢繝ｻ郢晞亂ﾎｦ郢昴・
 #endif
 
 /////////////////////////////////////////////////////////////////////////////

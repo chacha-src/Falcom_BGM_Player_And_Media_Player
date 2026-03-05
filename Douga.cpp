@@ -3802,12 +3802,20 @@ void CDouga::OnNcRButtonDown(UINT nHitTest, CPoint point)
 
 		// ========== 映像ストリーム (インデックス6) ==========
 		sub2 = sub1->GetSubMenu(6);
-		UpdateStreamMenu(sub2, streamname1, 10, L"映像");
+		UpdateStreamMenu(sub2, streamname1, 10,
+			LL14(L"映像", L"Video", L"Vidéo", L"Video",
+				L"Vídeo", L"비디오", L"视频", L"فيديو",
+				L"Видео", L"Video", L"Vídeo", L"Video",
+				L"Wideo", L"Video"));
 		DeleteEmptyMenuItems(menu, streamname1, 10, ID_MV1);
 
 		// ========== 音声ストリーム (インデックス7) ==========
 		sub2 = sub1->GetSubMenu(7);
-		UpdateStreamMenu(sub2, streamname, 40, L"音声");
+		UpdateStreamMenu(sub2, streamname, 40,
+			LL14(L"音声", L"Audio", L"Audio", L"Audio",
+				L"Audio", L"오디오", L"音频", L"صوت",
+				L"Аудио", L"Audio", L"Áudio", L"Audio",
+				L"Audio", L"Ses"));
 		DeleteAudioMenuItems(menu);
 
 		// ========== 字幕/その他ストリーム (インデックス8) ==========
@@ -3818,6 +3826,10 @@ void CDouga::OnNcRButtonDown(UINT nHitTest, CPoint point)
 		// メニュー表示
 		CMenu* pPopup = menu.GetSubMenu(0);
 		ASSERT(pPopup != NULL);
+		if (savedata.fs)
+			LocalizeDougaMenu(pPopup);
+		else
+			LocalizeDougaMenu1(pPopup);
 		CWnd* pWndPopupOwner = this;
 
 		while (pWndPopupOwner->GetStyle() & WS_CHILD)
@@ -3876,6 +3888,89 @@ void CDouga::DeleteAudioMenuItems(CMenu& menu)
 	}
 }
 
+// CG_IDR_POPUP_DOUGA メニューの固定テキスト項目を多言語化する
+void CDouga::LocalizeDougaMenu(CMenu* pPopup)
+{
+	// 一時停止/再開
+	pPopup->ModifyMenu(32775, MF_BYCOMMAND | MF_STRING, 32775,
+		LL14(L"一時停止/再開 (&C)", L"Pause/Resume (&C)", L"Pause/Reprendre (&C)", L"Pausa/Riprendi (&C)",
+			L"Pausa/Reanudar (&C)", L"일시정지/재개 (&C)", L"暂停/继续 (&C)", L"إيقاف مؤقت/استئناف (&C)",
+			L"Пауза/Возобновить (&C)", L"Pause/Fortsetzen (&C)", L"Pausar/Retomar (&C)", L"Pauzeren/Hervatten (&C)",
+			L"Pauza/Wznów (&C)", L"Duraklat/Devam Et (&C)"));
+
+	// 映像ストリーム サブメニュータイトル (位置インデックス 6)
+	if (CMenu* pSub = pPopup->GetSubMenu(6))
+		pPopup->ModifyMenu(6, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
+			LL14(L"映像ストリーム", L"Video Stream", L"Flux vidéo", L"Flusso video",
+				L"Flujo de vídeo", L"비디오 스트림", L"视频流", L"تدفق الفيديو",
+				L"Видеопоток", L"Videostream", L"Fluxo de vídeo", L"Videostream",
+				L"Strumień wideo", L"Video Akışı"));
+
+	// 音声ストリーム サブメニュータイトル (位置インデックス 7)
+	if (CMenu* pSub = pPopup->GetSubMenu(7))
+		pPopup->ModifyMenu(7, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
+			LL14(L"音声ストリーム", L"Audio Stream", L"Flux audio", L"Flusso audio",
+				L"Flujo de audio", L"오디오 스트림", L"音频流", L"تدفق الصوت",
+				L"Аудиопоток", L"Audiostream", L"Fluxo de áudio", L"Audiostream",
+				L"Strumień audio", L"Ses Akışı"));
+
+	// 字幕ストリーム サブメニュータイトル (位置インデックス 8)
+	if (CMenu* pSub = pPopup->GetSubMenu(8))
+		pPopup->ModifyMenu(8, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
+			LL14(L"字幕ストリーム", L"Subtitle Stream", L"Flux de sous-titres", L"Flusso sottotitoli",
+				L"Flujo de subtítulos", L"자막 스트림", L"字幕流", L"تدفق الترجمة",
+				L"Поток субтитров", L"Untertitelstream", L"Fluxo de legendas", L"Ondertitelstream",
+				L"Strumień napisów", L"Altyazı Akışı"));
+
+	// 操作ヒント: 上下左右キー
+	pPopup->ModifyMenu(ID__32783, MF_BYCOMMAND | MF_STRING, ID__32783,
+		LL14(L"上下左右キー音量とシークが出来ます。", L"Arrow keys: volume & seek.",
+			L"Touches fléchées : volume et défilement.", L"Frecce: volume e avanzamento.",
+			L"Teclas de flecha: volumen y posición.", L"방향키: 음량 및 탐색.",
+			L"方向键: 音量和搜索。", L"مفاتيح الأسهم: الصوت والتقديم.",
+			L"Стрелки: громкость и перемотка.", L"Pfeiltasten: Lautstärke & Suche.",
+			L"Teclas de seta: volume e busca.", L"Pijltoetsen: volume & zoeken.",
+			L"Klawisze strzałek: głośność i wyszukiwanie.", L"Ok tuşları: ses ve arama."));
+
+	// 操作ヒント: ダブルクリック
+	pPopup->ModifyMenu(ID__32784, MF_BYCOMMAND | MF_STRING, ID__32784,
+		LL14(L"ダブルクリックでフルスクリーンです。", L"Double-click for fullscreen.",
+			L"Double-clic pour plein écran.", L"Doppio clic per schermo intero.",
+			L"Doble clic para pantalla completa.", L"더블클릭: 전체화면.",
+			L"双击进入全屏。", L"انقر نقراً مزدوجاً للشاشة الكاملة.",
+			L"Двойной щелчок — полный экран.", L"Doppelklick für Vollbild.",
+			L"Clique duplo para tela cheia.", L"Dubbelklik voor volledig scherm.",
+			L"Dwuklik dla pełnego ekranu.", L"Tam ekran için çift tıklayın."));
+}
+
+// CG_IDR_POPUP_DOUGA1 メニュー（ウィンドウモード専用項目＋共通項目）を多言語化する
+void CDouga::LocalizeDougaMenu1(CMenu* pPopup)
+{
+	// 通常(1x1)
+	pPopup->ModifyMenu(ID_MENUITEM32771, MF_BYCOMMAND | MF_STRING, ID_MENUITEM32771,
+		LL14(L"通常(1x1)", L"Normal (1x1)", L"Normal (1x1)", L"Normale (1x1)",
+			L"Normal (1x1)", L"표준 (1x1)", L"标准 (1x1)", L"عادي (1×1)",
+			L"Обычный (1x1)", L"Normal (1x1)", L"Normal (1x1)", L"Normaal (1x1)",
+			L"Normalny (1x1)", L"Normal (1x1)"));
+
+	// 中間(1.5x1.5)
+	pPopup->ModifyMenu(ID_MENUITEM32773, MF_BYCOMMAND | MF_STRING, ID_MENUITEM32773,
+		LL14(L"中間(1.5x1.5)", L"Medium (1.5x1.5)", L"Moyen (1,5x1,5)", L"Medio (1.5x1.5)",
+			L"Mediano (1.5x1.5)", L"중간 (1.5x1.5)", L"中等 (1.5x1.5)", L"متوسط (1.5×1.5)",
+			L"Средний (1.5x1.5)", L"Mittel (1,5x1,5)", L"Médio (1.5x1.5)", L"Middel (1.5x1.5)",
+			L"Średni (1.5x1.5)", L"Orta (1.5x1.5)"));
+
+	// 倍(2x2)
+	pPopup->ModifyMenu(ID_MENUITEM32772, MF_BYCOMMAND | MF_STRING, ID_MENUITEM32772,
+		LL14(L"倍(2x2)", L"Large (2x2)", L"Grand (2x2)", L"Grande (2x2)",
+			L"Grande (2x2)", L"2배 (2x2)", L"双倍 (2x2)", L"كبير (2×2)",
+			L"Двойной (2x2)", L"Groß (2x2)", L"Grande (2x2)", L"Groot (2x2)",
+			L"Duży (2x2)", L"Büyük (2x2)"));
+
+	// DOUGA と共通の項目を翻訳
+	LocalizeDougaMenu(pPopup);
+}
+
 //void CDouga::OnNcLButtonDown(UINT nHitTest, CPoint point)
 //{
 //	// TODO: ここにメッセージ ハンドラ コードを追加するか、既定の処理を呼び出します。
@@ -3920,6 +4015,7 @@ void CDouga::OnContextMenu(CWnd*, CPoint point)
 			menu.DeleteMenu(ID_ST2,MF_BYCOMMAND);
 		CMenu* pPopup = menu.GetSubMenu(0);
 		ASSERT(pPopup != NULL);
+		LocalizeDougaMenu(pPopup);
 		CWnd* pWndPopupOwner = this;
 
 		while (pWndPopupOwner->GetStyle() & WS_CHILD)

@@ -4957,26 +4957,36 @@ void CPlayList::OnLvnGetdispinfoList1(NMHDR* pNMHDR, LRESULT* pResult)
 }
 void CPlayList::OnNMRclickList1(NMHDR *pNMHDR, LRESULT *pResult)
 {
-	// TODO: ここにコントロール通知ハンドラ コードを追加します。
 	*pResult = 0;
 
 	CPoint point;
-	CRect rect;
 	GetCursorPos(&point);
 
 	CMenu menu;
-	VERIFY(menu.LoadMenu(CG_IDR_POPUP_LIST));
+	menu.CreatePopupMenu();
+	menu.AppendMenu(MF_STRING | MF_ENABLED, ID_POP_32787,
+		LL14(L"ファイル名変更", L"Rename File", L"Renommer le fichier", L"Rinomina file",
+			L"Renombrar archivo", L"파일 이름 바꾸기", L"重命名文件", L"إعادة تسمية الملف",
+			L"Переименовать файл", L"Datei umbenennen", L"Renomear arquivo", L"Bestand hernoemen",
+			L"Zmień nazwę pliku", L"Dosyayı yeniden adlandır"));
+	menu.AppendMenu(MF_STRING | MF_ENABLED, ID_POP_32776,
+		LL14(L"ファイル詳細", L"File Details", L"Détails du fichier", L"Dettagli file",
+			L"Detalles del archivo", L"파일 세부 정보", L"文件详细信息", L"تفاصيل الملف",
+			L"Сведения о файле", L"Dateidetails", L"Detalhes do arquivo", L"Bestandsdetails",
+			L"Szczegóły pliku", L"Dosya ayrıntıları"));
+	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING | MF_ENABLED, ID_POP_32777,
+		LL14(L"削除", L"Delete", L"Supprimer", L"Elimina",
+			L"Eliminar", L"삭제", L"删除", L"حذف",
+			L"Удалить", L"Löschen", L"Excluir", L"Verwijderen",
+			L"Usuń", L"Sil"));
 
-	CMenu* pPopup = menu.GetSubMenu(0);
-	ASSERT(pPopup != NULL);
 	CWnd* pWndPopupOwner = this;
-
 	while (pWndPopupOwner->GetStyle() & WS_CHILD)
 		pWndPopupOwner = pWndPopupOwner->GetParent();
 
-	pPopup->TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y,
+	menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y,
 		pWndPopupOwner);
-
 }
 
 void CPlayList::OnList()
