@@ -10,6 +10,9 @@
 また、DirectShowを使用した動画再生や、ハイレゾ音源（DSD/FLAC）の再生にも対応しています。
 
 少し画面がグラフィカルになりました。
+多言語化しました。
+日本語"Japanese"、英語"English"、フランス語"Français"、イタリア語"Italiano"、スペイン語"Español"、韓国語"한국어"、中国語"中文"、アラビア語"العربية"、ロシア語"Русский"、ドイツ語"Deutsch"、ポルトガル語"Português"、オランダ語"Nederlands"、ポーランド語"Polski"、トルコ語"Türkçe"
+
 
 ### 環境モデル・イコライザー機能
 イコライザー機能が追加され100種類の環境モデルや15バンドのイコライザーも実装されました。
@@ -95,3 +98,103 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 ## ライセンス / 作者
 Copyright (C) PrePrayerPower Soft
 [https://ppp.oohara.jp/](https://ppp.oohara.jp/)
+
+
+
+# oggYSEDbgm
+Nihon Falcom BGM Player / High-Performance Media Player
+
+**Compatible OS:** Windows 11 or later
+
+## Overview
+This software is a specialized media player designed to play background music (Ogg, WAV, mp3, etc.) from **Nihon Falcom** titles—such as the *Ys* and *Trails* series—with the **exact loop points used in-game**.
+Additionally, it supports high-resolution audio (DSD/FLAC) and video playback via DirectShow.
+
+The interface is now more graphical and supports multiple languages.
+**Supported Languages:**
+Japanese, English, Français, Italiano, Español, 한국어, 中文, العربية, Русский, Deutsch, Português, Nederlands, Polski, Türkçe
+
+### Environmental Modeling & Equalizer
+An Equalizer function has been added, featuring **100 environmental models** and a **15-band EQ**.
+50 EQ Presets are also included.
+To prevent audio clipping when using environmental models, a **Dynamic Compressor** is implemented to automatically process tracks with high volume levels.
+
+Global parameters such as **Sharpness**, **Low/High Balance**, **Sound Density**, and **Stereo Depth** are also available.
+These operate independently of the environmental models.
+
+Additionally, the intensity of the environmental effects can be adjusted, offering a high degree of acoustic freedom.
+
+![Player Screen](https://ppp.oohara.jp/img/ysedplay2_git5.PNG)
+
+## Supported Game Titles
+The player supports seamless BGM looping for the following titles:
+
+### Ys Series
+- Ys VI: The Ark of Napishtim
+- Ys: The Oath in Felghana
+- Ys Origin
+- Ys I & II Chronicles / Complete
+- Ys: Memories of Celceta (Steam)
+- Ys VIII: Lacrimosa of DANA (Steam)
+- Ys IX: Monstrum Nox (Steam)
+- Ys X: Nordics (Steam)
+
+### Trails Series
+- The Legend of Heroes: Trails in the Sky FC / SC / the 3rd (Including Steam 1st)
+- The Legend of Heroes: Trails from Zero
+- The Legend of Heroes: Trails of Cold Steel I / II / III / IV (Steam)
+- The Legend of Heroes: Trails into Reverie (Steam)
+
+### Other Falcom & Third-Party Works
+- Zwei!! (ADPCM for CD version / PCM for DVD version)
+- Zwei: The Ilvard Resurrection
+- Xanadu Next
+- Gurumin (ADPCM support via RIFF header search)
+- Sorcerian Original
+- Dinosaur Resurrection
+- Brandish 4: The Tower of Sleeping God
+- **Gagharv Trilogy:**
+  - White Witch
+  - A Tear of Vermillion
+  - Cagesong of the Ocean
+- The Rhapsody of Zephyr
+- Destiny of the Light and Shadow (mp3)
+- Genso Sangokushi 1 / 2 (mp3)
+
+## Key Features
+
+### 1. Game BGM Playback & Conversion
+- **Seamless Looping:** Replicates the natural in-game music transitions.
+- **Format Conversion:** Convert Ogg or mp3 game files to WAV. (Fade-out support added in Ver 0.4b).
+- **Directory Mapping:** Scan your installed game folders (defaults to standard installation paths).
+
+### 2. General Audio Playback
+Supports the following formats:
+- mp3, m4a, aac, alac, flac
+- DSD (dsf, dff)
+- OggOpus (48k)
+- Legacy and modern **kpi plugins** (Kb Media Player) are supported (Win32 version only; place in the `Plugins` folder).
+
+### 3. Video Playback (DirectShow)
+Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and later, it utilizes **EVR (Enhanced Video Renderer)** for high-quality output.
+*Note: Playback of certain formats may require codec packs (e.g., K-Lite Codec Pack).*
+[Instructional Site: ppp.oohara.jp/k-lite.html](http://ppp.oohara.jp/k-lite.html)
+
+#### Video Controls & Shortcuts
+
+| Action | Function |
+| :--- | :--- |
+| **Right-Click** | Change Window Size (1x / 1.5x / 2x) |
+| **Double-Click** | Toggle Fullscreen |
+| **Wheel / Drag** | Resize Window |
+| **C Key** | Pause / Resume |
+| **Up / Down Arrow** | Volume Control |
+| **Left / Right Arrow** | Seek (Rewind / Fast Forward) |
+
+## Important Notes
+- **For Brandish 4 and the Gagharv Trilogy:** WAV files must be copied to your HDD (Folder names like `WAVE`, `WAVEDV`, or `WAVEDVD` vary by game).
+- Standard WAV files (not from game data) are handled via DirectShow; therefore, loop and fade-out functions are not available for these files.
+
+## License / Author
+Copyright (C) PrePrayerPower Soft
+[https://ppp.oohara.jp/] (https://ppp.oohara.jp/)
