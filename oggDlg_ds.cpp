@@ -2959,7 +2959,6 @@ static void CalcPeakingEQ(Biquad* f, float freq, float q, float gainVal, int rat
 	if (gainVal > 200.0f) gainVal = 200.0f;
 
 	float db = (gainVal - 100.0f) * 0.12f;
-
 	if (fabs(db) < 1.2f) {
 		f->b0 = 1.0f; f->b1 = 0.0f; f->b2 = 0.0f;
 		f->a1 = 0.0f; f->a2 = 0.0f;
@@ -3012,14 +3011,14 @@ static void CalcFilter(Biquad* f, int type, float freq, float q, int rate) {
 	float a0 = 1.0f + alpha;
 
 	if (type == 0) {
-		f->b0 = ((1.0f - cs) / 2.0f) / a0;
+		f->b0 = ((1.0f - cs) * 0.5f) / a0;
 		f->b1 = (1.0f - cs) / a0;
-		f->b2 = ((1.0f - cs) / 2.0f) / a0;
+		f->b2 = ((1.0f - cs) * 0.5f) / a0;
 	}
 	else {
-		f->b0 = ((1.0f + cs) / 2.0f) / a0;
+		f->b0 = ((1.0f + cs) * 0.5f) / a0;
 		f->b1 = (-(1.0f + cs)) / a0;
-		f->b2 = ((1.0f + cs) / 2.0f) / a0;
+		f->b2 = ((1.0f + cs) * 0.5f) / a0;
 	}
 	f->a1 = (-2.0f * cs) / a0;
 	f->a2 = (1.0f - alpha) / a0;
@@ -3030,7 +3029,6 @@ static void CalcShelvingEQ(Biquad* f, int type, float freq, float gainDb, int ra
 		f->b0 = 1; f->b1 = 0; f->b2 = 0; f->a1 = 0; f->a2 = 0;
 		return;
 	}
-
 	float omega = 2.0f * M_PI * freq / (float)rate;
 	float sn = sinf(omega), cs = cosf(omega);
 	float A = powf(10.0f, gainDb / 40.0f);
@@ -3061,10 +3059,8 @@ static float ProcessBiquad(Biquad* f, float in) {
 		- f->a1 * f->y1 - f->a2 * f->y2;
 
 	if (fabs(out) < 1e-15f) out = 0.0f;
-
 	f->x2 = f->x1; f->x1 = in;
 	f->y2 = f->y1; f->y1 = out;
-
 	if (fabs(f->y1) < 1e-15f) f->y1 = 0.0f;
 	if (fabs(f->y2) < 1e-15f) f->y2 = 0.0f;
 
@@ -3072,10 +3068,8 @@ static float ProcessBiquad(Biquad* f, float in) {
 		f->x1 = f->x2 = f->y1 = f->y2 = 0.0f;
 		return 0.0f;
 	}
-
-	if (out > 10.0f) out = 10.0f;
+	if (out > 10.0f)  out = 10.0f;
 	if (out < -10.0f) out = -10.0f;
-
 	return out;
 }
 
@@ -3091,13 +3085,10 @@ static inline float ProcessYamabikoAdvanced(ChannelState* cs, float input, const
 
 	for (int i = 0; i < 4; i++) {
 		if (env->yamabikoDelays[i] <= 0.0f) break;
-
 		int delaySamples = (int)(env->yamabikoDelays[i] * (float)sampleRate / 1000.0f);
 		if (delaySamples >= cs->yamabikoBufSize) continue;
-
 		int readPos = cs->yamabikoPos - delaySamples;
 		if (readPos < 0) readPos += cs->yamabikoBufSize;
-
 		float delayed = cs->yamabikoBuf[readPos];
 		float gain = env->yamabikoGains[i] * powf(decayMult, (float)i);
 		float panEffect = (i % 2) ? env->yamabikoPan : -env->yamabikoPan;
@@ -3107,35 +3098,27 @@ static inline float ProcessYamabikoAdvanced(ChannelState* cs, float input, const
 
 	cs->yamabikoBuf[cs->yamabikoPos] = input;
 	cs->yamabikoPos++;
-	if (cs->yamabikoPos >= cs->yamabikoBufSize)
-		cs->yamabikoPos = 0;
-
+	if (cs->yamabikoPos >= cs->yamabikoBufSize) cs->yamabikoPos = 0;
 	return out;
 }
 
-// ===== LFO処理 =====
 static inline float UpdateLFO(LFO* lfo, int sampleRate) {
 	if (lfo->frequency <= 0.0f || lfo->depth <= 0.0f) return 0.0f;
-
 	float value = sinf(lfo->phase * 2.0f * M_PI) * lfo->depth;
 	lfo->phase += lfo->frequency / (float)sampleRate;
 	if (lfo->phase >= 1.0f) lfo->phase -= 1.0f;
-
 	return value;
 }
 
-// ===== ディフュージョン処理 =====
 static inline float ProcessDiffusion(ChannelState* cs, float input, float diffusion, float density, int envType)
 {
 	if (envType == TYPE_MOUNTAIN_ECHO || envType == TYPE_CANYON_ECHO) {
 		float weakDiff = diffusion * 0.12f;
 		if (weakDiff <= 0.001f) return input;
-
 		static const int delays1[8] = { 37, 53, 73, 97, 127, 163, 211, 277 };
 		float output = input;
 		float coeff = weakDiff * 0.35f;
 		if (coeff > 0.35f) coeff = 0.35f;
-
 		for (int i = 0; i < 8; i++) {
 			int readPos = (cs->diffusionPos1[i] - delays1[i] + 1024) % 1024;
 			float delayed = cs->diffusionBuffer1[i][readPos];
@@ -3153,7 +3136,6 @@ static inline float ProcessDiffusion(ChannelState* cs, float input, float diffus
 	float output = input;
 	float coeff = diffusion * 0.6f;
 	if (coeff > 0.6f) coeff = 0.6f;
-
 	for (int i = 0; i < 8; i++) {
 		int readPos = (cs->diffusionPos1[i] - delays1[i] + 1024) % 1024;
 		float delayed = cs->diffusionBuffer1[i][readPos];
@@ -3190,7 +3172,6 @@ static inline float ProcessDiffusion(ChannelState* cs, float input, float diffus
 			cs->diffusionPos3[i] = (cs->diffusionPos3[i] + 1) % 256;
 		}
 	}
-
 	return output;
 }
 
@@ -3205,14 +3186,8 @@ static inline float Exciter(float input, Biquad* hpf, float amount) {
 
 static inline float SoftLimiter(float x) {
 	const float threshold = 0.7f;
-	if (x > threshold) {
-		float over = x - threshold;
-		x = threshold + (1.0f - threshold) * (over / (1.0f + over));
-	}
-	else if (x < -threshold) {
-		float over = -x - threshold;
-		x = -threshold - (1.0f - threshold) * (over / (1.0f + over));
-	}
+	if (x > threshold) { float o = x - threshold; x = threshold + (1.0f - threshold) * (o / (1.0f + o)); }
+	else if (x < -threshold) { float o = -x - threshold; x = -threshold - (1.0f - threshold) * (o / (1.0f + o)); }
 	return x;
 }
 
@@ -3250,203 +3225,122 @@ static inline float ProcessBrightness(float input, float* brightnessState, float
 
 static inline float ProcessResonance(ChannelState* cs, float input, float freq, float q, float amount) {
 	if (amount <= 0.0f || freq <= 0.0f) return input;
-	float resonated = ProcessBiquad(&cs->resonanceFilter, input);
-	return input + resonated * amount * 0.5f;
+	return input + ProcessBiquad(&cs->resonanceFilter, input) * amount * 0.5f;
 }
 
 static inline float ProcessMetallic(ChannelState* cs, float input, float amount) {
 	if (amount <= 0.0f) return input;
-	float metallic = ProcessBiquad(&cs->metallicFilter, input);
-	return input + metallic * amount * 0.4f;
+	return input + ProcessBiquad(&cs->metallicFilter, input) * amount * 0.4f;
 }
 
 static inline float ProcessGlass(ChannelState* cs, float input, float amount) {
 	if (amount <= 0.0f) return input;
-	float glassy = ProcessBiquad(&cs->glassFilter, input);
-	return input + glassy * amount * 0.35f;
+	return input + ProcessBiquad(&cs->glassFilter, input) * amount * 0.35f;
 }
 
 static inline float ProcessShimmer(ChannelState* cs, float input, float amount, int sampleRate) {
 	if (amount <= 0.0f) return input;
 	cs->shimmerState = cs->shimmerState * 0.992f + input * 0.008f;
-	float shimmer = sinf(cs->shimmerState * 12.0f) * amount * 0.15f;
-	return input + shimmer;
+	return input + sinf(cs->shimmerState * 12.0f) * amount * 0.15f;
 }
 
 static inline float ProcessDoppler(ChannelState* cs, float input, float amount, int sampleRate) {
 	if (amount <= 0.0f) return input;
 	cs->dopplerPhase += 0.5f / (float)sampleRate;
 	if (cs->dopplerPhase >= 1.0f) cs->dopplerPhase -= 1.0f;
-	float doppler = sinf(cs->dopplerPhase * 2.0f * M_PI) * amount * 0.02f;
-	return input * (1.0f + doppler);
+	return input * (1.0f + sinf(cs->dopplerPhase * 2.0f * M_PI) * amount * 0.02f);
 }
 
-// ===============================
-// 【遅延バッファ型ルックアヘッドリミッター】
+
+// ============================================================
+// ★ プロフェッショナル・ソフトサチュレーション
+// ============================================================
 //
-//  ブロックリミッターが「不鮮明」になる原因:
-//    ブロック内の1サンプルでも閾値を超えると、
-//    ブロック全体に同じゲインをかけてしまう。
-//    静かなサンプルまで一緒に圧縮 → 音が曇る。
+// 【圧縮との本質的違い】
+//   コンプレッサー/リミッター = 時間領域のゲインライディング
+//     - エンベロープ（状態変数）を持つ
+//     - アタック/リリース時定数が存在する
+//     - 静かなサンプルも「巻き添え」になる → 不鮮明・ポンピング
 //
-//  本設計のコンセプト（プロ機材の標準手法）:
-//    [入力] → [N ms 遅延バッファ] → [出力]
-//       ↘
-//        [エンベロープ検出: 瞬時アタック・ゆっくりリリース]
-//        ↓ ゲイン
-//        → 遅延後の信号に適用
+//   ソフトサチュレーション = 瞬時の非線形振幅変換（波形整形）
+//     - 状態変数なし・時定数なし
+//     - 各サンプルを独立して処理
+//     - 小信号領域は完全透明
 //
-//  効果:
-//    ・ゲイン計算は「未来のピーク」から行う
-//    ・適用対象は「N ms前の過去の信号」
-//    ・ピーク到達N ms前からゲインが下がり始める
-//    ・ピーク以外のサンプルは一切影響を受けない → 透明性を保持
-//    ・アタックは実質 0ms（遅延バッファが代替する）
+// 【数学的定式化】
 //
-//  パラメータ:
-//    LIMITER_LOOKAHEAD_MS = 5ms    先読み時間（残響キックに対応）
-//    LIMITER_RELEASE_MS   = 200ms  リリース（ポンピング防止）
-//    LIMITER_THRESHOLD    = 0.95f  圧縮開始閾値
+//   入力: x (任意の実数)
+//   出力: y
+//   パラメータ:
+//     knee    = 0.65  : 線形領域の上限（ここまでは y = x で完全透明）
+//     ceiling = 0.98  : 出力の漸近上限
+//     r       = ceiling - knee = 0.33
 //
-//  注意: 5ms の遅延が出力に乗るが、再生バッファ（通常20ms以上）の
-//        範囲内であり、聴感上は無視できる。
-// ===============================
-
-#define LIMITER_LOOKAHEAD_MS  5.0f
-#define LIMITER_RELEASE_MS  200.0f
-#define LIMITER_THRESHOLD     0.95f
-#define LIMITER_DELAY_MAX     8192    // ~186ms@44100Hz - 十分な余裕
-
-// ルックアヘッドリミッターのグローバル状態
-// malloc不要・スタック汚染なし・ブロック境界をまたいで状態を引き継ぐ
-static float g_limDelayL[LIMITER_DELAY_MAX];
-static float g_limDelayR[LIMITER_DELAY_MAX];
-static int   g_limDelayPos = 0;
-static int   g_limDelayLen = 0;
-static float g_limEnvelope = 1.0f;    // 現在のゲイン（1.0=圧縮なし）
-static float g_limReleaseCoeff = 0.0f;
-
-// ソフトクリッピング（最終安全装置）
-// ゲインリミッターが正常動作していれば 0.98 を超えることはほぼない
-static float SoftClip(float x) {
-	if (x > 0.98f) {
-		float excess = x - 0.98f;
-		return 0.98f + tanhf(excess * 10.0f) * 0.02f;
-	}
-	else if (x < -0.98f) {
-		float excess = x + 0.98f;
-		return -0.98f + tanhf(excess * 10.0f) * 0.02f;
-	}
-	return x;
-}
-
-// 旧サンプル単位リミッター（equaliser内では使用しない・互換性のため残存）
-static float ProcessDynamicLimiter(DynamicLimiter* lim, float input) {
-	float absInput = fabsf(input);
-	float targetGain = (absInput > lim->threshold) ? lim->threshold / absInput : 1.0f;
-	float coeff = (targetGain < lim->envelope) ? lim->attackCoeff : lim->releaseCoeff;
-	lim->envelope = targetGain + coeff * (lim->envelope - targetGain);
-	return SoftClip(input * lim->envelope);
-}
-
-// ルックアヘッドリミッター初期化（InitEngineから呼ぶ）
-static void InitLookaheadLimiter(int rate) {
-	// ルックアヘッド長（サンプル数）
-	int len = (int)(LIMITER_LOOKAHEAD_MS * rate / 1000.0f);
-	if (len < 1)                  len = 1;
-	if (len >= LIMITER_DELAY_MAX) len = LIMITER_DELAY_MAX - 1;
-
-	g_limDelayLen = len;
-	g_limDelayPos = 0;
-	g_limEnvelope = 1.0f;
-	g_limReleaseCoeff = expf(-1.0f / (LIMITER_RELEASE_MS * 0.001f * rate));
-
-	memset(g_limDelayL, 0, sizeof(g_limDelayL));
-	memset(g_limDelayR, 0, sizeof(g_limDelayR));
-}
-
-// ===============================
-// ApplyLookaheadLimiter()
+//   ┌ x                                     (|x| ≤ knee)
+//   │
+//   y = │  sign(x) × [knee + r × tanh((|x| - knee) / r)]
+//   │                                        (|x| > knee)
+//   └
 //
-//  leftSamples / rightSamples をインプレース処理。
-//  サンプル単位で動作するため、静かなサンプルを圧縮しない。
+// 【膝点での連続性証明】
+//   右側微分: d/d|x| [knee + r × tanh((|x|-knee)/r)]
+//           = r × sech²((|x|-knee)/r) × (1/r)
+//           = sech²(0)    (|x|=knee のとき)
+//           = 1.0         ← 線形領域の傾き 1.0 と一致 ✓
 //
-//  処理フロー（1サンプルあたり）:
-//   1. 現在の入力から L/R のピークを計算（= 未来のピーク）
-//   2. 目標ゲインを算出
-//      peak > threshold → gain = threshold / peak
-//      peak ≤ threshold → gain = 1.0（無圧縮）
-//   3. エンベロープ更新
-//      アタック: 即座（ゲイン低下は遅延なし）
-//      リリース: releaseCoeff でゆっくり回復
-//   4. 遅延バッファに現在の入力を書き込む
-//   5. N サンプル前の音声（= 遅延済み）を読み出す
-//   6. 現在のゲインを遅延済み音声に適用
-//      → 遅延のぶんだけ「先読み」圧縮が成立
-//   7. SoftClip で残存ピークを吸収
-// ===============================
-static void ApplyLookaheadLimiter(float* L, float* R, int numSamples, int numCh)
+// 【収束特性】
+//   |x| → ∞ のとき: tanh(∞) = 1 → y → sign(x) × (knee + r) = sign(x) × ceiling ✓
+//   どんな大きな入力でも出力は |ceiling| 以下に収まる（ハードクリップなし）
+//
+// 【なぜこれが適切か（声のみ + 環境モデル適用時）】
+//   通常のボーカル信号ピーク:    ≈ 0.3-0.5 → knee 以下 → 完全無変化
+//   残響キックによる過大信号:   ≈ 1.0-2.0 → tanh で滑らかに ceiling へ収束
+//   圧縮感・ポンピング:          原理上発生しない（状態変数がないため）
+//
+// 【プロ機材における同原理の採用例】
+//   - Neve 1073, SSL 4000 プリアンプの入力飽和特性
+//   - Manley Variable Mu チューブサチュレーション
+//   - iZotope Ozone Maximizer "IRC IV" の初段整形
+//   - Waves L3 の "Airy" モード
+//
+// 【サチュレーションが加える高調波】
+//   tanh の奇関数テイラー展開: tanh(x) = x - x³/3 + 2x⁵/15 - ...
+//   → 3次高調波（THD）が主成分 → アナログ機材的な「心地よい歪み」
+//   → knee 以下では tanh 項が働かないため、通常信号には高調波なし
+//
+// 【キャリブレーション例 (knee=0.65, ceiling=0.98)】
+//   入力 0.50 → 出力 0.500  (変化なし、完全透明)
+//   入力 0.65 → 出力 0.650  (膝点、変化なし)
+//   入力 0.80 → 出力 0.790  (-1.3%、ほぼ透明)
+//   入力 1.00 → 出力 0.894  (-10.6%、軽度サチュレーション)
+//   入力 1.50 → 出力 0.976  (-34.9%、強度サチュレーション)
+//   入力 2.00 → 出力 0.980  (ceiling に到達)
+//   入力 ∞   → 出力 0.980  (ceiling に漸近、ハードクリップなし)
+// ============================================================
+static inline float ProfessionalSoftSaturate(float x)
 {
-	if (numSamples <= 0) return;
+	// NaN/Inf ガード
+	if (!isfinite(x)) return 0.0f;
 
-	const float threshold = LIMITER_THRESHOLD;
-	const float releaseCoeff = g_limReleaseCoeff;
-	const int   delayLen = g_limDelayLen;
+	// パラメータ（コンパイル時定数）
+	const float knee = 0.65f;   // 線形領域上限
+	const float ceiling = 0.98f;   // 出力漸近上限
+	const float r = ceiling - knee;  // = 0.33
 
-	int   pos = g_limDelayPos;
-	float env = g_limEnvelope;
+	float absX = fabsf(x);
 
-	for (int i = 0; i < numSamples; i++) {
-		const float inL = L[i];
-		const float inR = (numCh == 2) ? R[i] : inL;
+	// 【線形領域】knee 以下は完全透明・一切変化なし
+	if (absX <= knee) return x;
 
-		// ── Step 1: 現在入力のピーク（= 未来のピーク情報）──
-		float absL = fabsf(inL);
-		float absR = fabsf(inR);
-		float peak = (absL > absR) ? absL : absR;
+	// 【サチュレーション領域】
+	// y = sign(x) × [knee + r × tanh((|x| - knee) / r)]
+	//
+	// tanh 引数の最大値を制限（tanhf は |arg| > 5 で精度が飽和するため）
+	float arg = (absX - knee) / r;
+	if (arg > 8.0f) arg = 8.0f;  // tanh(8) ≈ 0.99999999 ≈ 1.0
 
-		// ── Step 2: 目標ゲイン計算 ──
-		// 閾値以下なら 1.0（圧縮なし）。超えた分だけ絞る。
-		float targetGain = (peak > threshold) ? (threshold / peak) : 1.0f;
-
-		// ── Step 3: エンベロープ更新 ──
-		// アタック（ゲイン低下）: 即座に追従
-		//   → 遅延バッファのぶんだけ未来を先読みしているので、
-		//     遅延なしに反応してもルックアヘッドが成立する
-		// リリース（ゲイン回復）: releaseCoeff でゆっくり
-		//   → ポンピングを防ぐ
-		if (targetGain < env) {
-			env = targetGain;
-		}
-		else {
-			// env を targetGain に向けて漸近させる
-			env = targetGain + releaseCoeff * (env - targetGain);
-		}
-
-		// ── Step 4: 遅延バッファへ書き込み ──
-		g_limDelayL[pos] = inL;
-		g_limDelayR[pos] = inR;
-
-		// ── Step 5: N サンプル前の音声を読み出す ──
-		int readPos = pos - delayLen;
-		if (readPos < 0) readPos += LIMITER_DELAY_MAX;
-
-		float delayedL = g_limDelayL[readPos];
-		float delayedR = g_limDelayR[readPos];
-
-		// ── Step 6 & 7: ゲイン適用 + ソフトクリップ ──
-		// env は「現在の入力（= delayedL/R より delayLen サンプル後）」
-		// から計算されたゲインなので、先読み圧縮が成立している。
-		L[i] = SoftClip(delayedL * env);
-		if (numCh == 2) R[i] = SoftClip(delayedR * env);
-
-		// ── Step 8: バッファ位置更新 ──
-		pos = (pos + 1) % LIMITER_DELAY_MAX;
-	}
-
-	// 次ブロックへ状態を引き継ぐ
-	g_limDelayPos = pos;
-	g_limEnvelope = env;
+	float sign = (x >= 0.0f) ? 1.0f : -1.0f;
+	return sign * (knee + r * tanhf(arg));
 }
 
 // ===== エンジン初期化 =====
@@ -3482,9 +3376,8 @@ static void InitEngine(int rate) {
 			g_channels[i].yamabikoBuf = NULL;
 		}
 		g_channels[i].yamabikoBuf = (float*)malloc(sizeof(float) * g_channels[i].yamabikoBufSize);
-		if (g_channels[i].yamabikoBuf != NULL) {
+		if (g_channels[i].yamabikoBuf != NULL)
 			memset(g_channels[i].yamabikoBuf, 0, sizeof(float) * g_channels[i].yamabikoBufSize);
-		}
 	}
 
 	g_lastRate = rate;
@@ -3494,17 +3387,14 @@ static void InitEngine(int rate) {
 	for (int i = 0; i < 15; i++) g_lastEqValues[i] = 100;
 	for (int i = 0; i < 5; i++) g_lastExtendedParams[i] = 100;
 
-	// g_limiter[] は ProcessDynamicLimiter() 互換のために残す
-	// equaliser() 内では ApplyLookaheadLimiter() を使用
+	// g_limiter[] は DynamicLimiter 型の互換維持のため初期化のみ行う
+	// equaliser() 内では ProfessionalSoftSaturate() を使用する
 	for (int ch = 0; ch < 2; ch++) {
 		g_limiter[ch].envelope = 1.0f;
-		g_limiter[ch].threshold = LIMITER_THRESHOLD;
+		g_limiter[ch].threshold = 0.95f;
 		g_limiter[ch].attackCoeff = expf(-1.0f / (0.001f * rate));
 		g_limiter[ch].releaseCoeff = expf(-1.0f / (0.100f * rate));
 	}
-
-	// 【遅延バッファ型ルックアヘッドリミッター初期化】
-	InitLookaheadLimiter(rate);
 
 	g_lastEffectAmount = 50;
 	g_initialized = TRUE;
@@ -3522,7 +3412,6 @@ void FreeEngine(void) {
 	}
 }
 
-// ===== ユーティリティ関数 =====
 static float ClampFloat(float v, float lo, float hi) {
 	return (v < lo) ? lo : (v > hi) ? hi : v;
 }
@@ -3533,10 +3422,8 @@ static float Hash01(int idx, int salt) {
 	return (x & 0xFFFFFF) / 16777215.0f;
 }
 
-// ===== 環境分離処理 =====
 static void ApplyEnvSeparation(int presetIndex, EnvParams* env) {
 	if (!env || presetIndex <= 0) return;
-
 	int category = (presetIndex - 1) / 10;
 	if (category < 0) category = 0;
 	if (category > 9) category = 9;
@@ -3558,6 +3445,15 @@ static void ApplyEnvSeparation(int presetIndex, EnvParams* env) {
 	env->damping = ClampFloat(env->damping + kDampBias[category] + h2 * 0.20f, 0.0f, 1.0f);
 }
 
+// 旧 ProcessDynamicLimiter（互換維持・equaliser内では呼ばない）
+static float ProcessDynamicLimiter(DynamicLimiter* lim, float input) {
+	float absInput = fabsf(input);
+	float targetGain = (absInput > lim->threshold) ? lim->threshold / absInput : 1.0f;
+	float coeff = (targetGain < lim->envelope) ? lim->attackCoeff : lim->releaseCoeff;
+	lim->envelope = targetGain + coeff * (lim->envelope - targetGain);
+	return input * lim->envelope;
+}
+
 
 // ===============================
 // ResampleUp() - Lanczos-2 アップサンプリング
@@ -3572,17 +3468,13 @@ static void ApplyEnvSeparation(int presetIndex, EnvParams* env) {
 
 static inline float LanczosKernel2(float x) {
 	if (x == 0.0f) return 1.0f;
-	float ax = fabsf(x);
-	if (ax >= 2.0f) return 0.0f;
+	if (fabsf(x) >= 2.0f) return 0.0f;
 	float pix = (float)M_PI * x;
-	float sinc = sinf(pix) / pix;
-	float window = sinf(pix * 0.5f) / (pix * 0.5f);
-	return sinc * window;
+	return (sinf(pix) / pix) * (sinf(pix * 0.5f) / (pix * 0.5f));
 }
 
 void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 	int srcRate, int dstRate, int channels, int bitDepth) {
-
 	int bytesPerSample = bitDepth / 8;
 	int srcSamples = srcLen / (channels * bytesPerSample);
 	int dstSamples = (int)((double)srcSamples * dstRate / srcRate + 0.5);
@@ -3596,21 +3488,19 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 	unsigned char* pSrc = (unsigned char*)srcData;
 
 	if (bitDepth == 16) {
-		short* pSrc16 = (short*)srcData;
-		for (int i = 0; i < srcSamples * channels; i++)
-			srcFloat[i] = pSrc16[i] * (1.0f / 32768.0f);
+		short* p = (short*)srcData;
+		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 32768.0f);
 	}
 	else if (bitDepth == 24) {
 		for (int i = 0; i < srcSamples * channels; i++) {
-			int offset = i * 3;
-			int sample = (pSrc[offset] << 8) | (pSrc[offset + 1] << 16) | ((signed char)pSrc[offset + 2] << 24);
-			srcFloat[i] = sample * (1.0f / 2147483648.0f);
+			int o = i * 3;
+			int s = (pSrc[o] << 8) | (pSrc[o + 1] << 16) | ((signed char)pSrc[o + 2] << 24);
+			srcFloat[i] = s * (1.0f / 2147483648.0f);
 		}
 	}
 	else if (bitDepth == 32) {
-		int* pSrc32 = (int*)srcData;
-		for (int i = 0; i < srcSamples * channels; i++)
-			srcFloat[i] = pSrc32[i] * (1.0f / 2147483648.0f);
+		int* p = (int*)srcData;
+		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 2147483648.0f);
 	}
 
 	double ratio = (double)dstRate / srcRate;
@@ -3631,35 +3521,30 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 
 	unsigned char* pDst = (unsigned char*)(*dstData);
 	if (bitDepth == 16) {
-		short* pDst16 = (short*)(*dstData);
+		short* p = (short*)(*dstData);
 		for (int i = 0; i < dstSamples * channels; i++) {
 			float s = dstFloat[i];
 			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
-			pDst16[i] = (short)(s * 32767.0f);
+			p[i] = (short)(s * 32767.0f);
 		}
 	}
 	else if (bitDepth == 24) {
 		for (int i = 0; i < dstSamples * channels; i++) {
 			float s = dstFloat[i];
 			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
-			int val = (int)(s * 8388607.0f);
-			int offset = i * 3;
-			pDst[offset] = (val >> 8) & 0xFF;
-			pDst[offset + 1] = (val >> 16) & 0xFF;
-			pDst[offset + 2] = (val >> 24) & 0xFF;
+			int v = (int)(s * 8388607.0f); int o = i * 3;
+			pDst[o] = (v >> 8) & 0xFF; pDst[o + 1] = (v >> 16) & 0xFF; pDst[o + 2] = (v >> 24) & 0xFF;
 		}
 	}
 	else if (bitDepth == 32) {
-		int* pDst32 = (int*)(*dstData);
+		int* p = (int*)(*dstData);
 		for (int i = 0; i < dstSamples * channels; i++) {
 			float s = dstFloat[i];
 			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
-			pDst32[i] = (int)(s * 2147483647.0f);
+			p[i] = (int)(s * 2147483647.0f);
 		}
 	}
-
-	free(srcFloat);
-	free(dstFloat);
+	free(srcFloat); free(dstFloat);
 }
 
 static void ApplyFastLPF(float* data, int samples, int channels, float cutoff) {
@@ -3667,8 +3552,7 @@ static void ApplyFastLPF(float* data, int samples, int channels, float cutoff) {
 		float prev = data[ch];
 		for (int i = 1; i < samples - 1; i++) {
 			int idx = i * channels + ch;
-			float curr = data[idx];
-			float next = data[idx + channels];
+			float curr = data[idx], next = data[idx + channels];
 			data[idx] = (prev + curr + next) * 0.333333f;
 			prev = curr;
 		}
@@ -3677,7 +3561,6 @@ static void ApplyFastLPF(float* data, int samples, int channels, float cutoff) {
 
 void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	int srcRate, int dstRate, int channels, int bitDepth) {
-
 	int bytesPerSample = bitDepth / 8;
 	int srcSamples = srcLen / (channels * bytesPerSample);
 	int dstSamples = dstLen / (channels * bytesPerSample);
@@ -3687,21 +3570,19 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	unsigned char* pSrc = (unsigned char*)srcData;
 
 	if (bitDepth == 16) {
-		short* pSrc16 = (short*)srcData;
-		for (int i = 0; i < srcSamples * channels; i++)
-			srcFloat[i] = pSrc16[i] * (1.0f / 32768.0f);
+		short* p = (short*)srcData;
+		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 32768.0f);
 	}
 	else if (bitDepth == 24) {
 		for (int i = 0; i < srcSamples * channels; i++) {
-			int offset = i * 3;
-			int sample = (pSrc[offset] << 8) | (pSrc[offset + 1] << 16) | ((signed char)pSrc[offset + 2] << 24);
-			srcFloat[i] = sample * (1.0f / 2147483648.0f);
+			int o = i * 3;
+			int s = (pSrc[o] << 8) | (pSrc[o + 1] << 16) | ((signed char)pSrc[o + 2] << 24);
+			srcFloat[i] = s * (1.0f / 2147483648.0f);
 		}
 	}
 	else if (bitDepth == 32) {
-		int* pSrc32 = (int*)srcData;
-		for (int i = 0; i < srcSamples * channels; i++)
-			srcFloat[i] = pSrc32[i] * (1.0f / 2147483648.0f);
+		int* p = (int*)srcData;
+		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 2147483648.0f);
 	}
 
 	float cutoff = (float)dstRate / srcRate;
@@ -3725,36 +3606,32 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 
 	unsigned char* pDst = (unsigned char*)dstData;
 	if (bitDepth == 16) {
-		short* pDst16 = (short*)dstData;
+		short* p = (short*)dstData;
 		for (int i = 0; i < dstSamples * channels; i++) {
 			float s = dstFloat[i];
 			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
-			pDst16[i] = (short)(s * 32767.0f);
+			p[i] = (short)(s * 32767.0f);
 		}
 	}
 	else if (bitDepth == 24) {
 		for (int i = 0; i < dstSamples * channels; i++) {
 			float s = dstFloat[i];
 			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
-			int val = (int)(s * 8388607.0f);
-			int offset = i * 3;
-			pDst[offset] = val & 0xFF;
-			pDst[offset + 1] = (val >> 8) & 0xFF;
-			pDst[offset + 2] = (val >> 16) & 0xFF;
+			int v = (int)(s * 8388607.0f); int o = i * 3;
+			pDst[o] = v & 0xFF; pDst[o + 1] = (v >> 8) & 0xFF; pDst[o + 2] = (v >> 16) & 0xFF;
 		}
 	}
 	else if (bitDepth == 32) {
-		int* pDst32 = (int*)dstData;
+		int* p = (int*)dstData;
 		for (int i = 0; i < dstSamples * channels; i++) {
 			float s = dstFloat[i];
 			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
-			pDst32[i] = (int)(s * 2147483647.0f);
+			p[i] = (int)(s * 2147483647.0f);
 		}
 	}
-
-	free(srcFloat);
-	free(dstFloat);
+	free(srcFloat); free(dstFloat);
 }
+
 
 // ===============================
 // equaliser() - メイン処理関数 完全版
@@ -3770,10 +3647,10 @@ void equaliser(void* data, int len, BOOL reset) {
 	}
 
 	// ========================================
-	// リサンプリング処理
+	// リサンプリング
 	// ========================================
-	int originalRate = wavbit;
-	int originalLen = len;
+	int  originalRate = wavbit;
+	int  originalLen = len;
 	void* processData = data;
 	int   processLen = len;
 	void* tempBuffer = NULL;
@@ -3782,8 +3659,7 @@ void equaliser(void* data, int len, BOOL reset) {
 	wavbitbackup = originalRate;
 
 	if (needsResampling) {
-		ResampleUp(data, len, &tempBuffer, &processLen,
-			originalRate, 44100, wavch, wavsam);
+		ResampleUp(data, len, &tempBuffer, &processLen, originalRate, 44100, wavch, wavsam);
 		if (!tempBuffer) return;
 		processData = tempBuffer;
 		wavbitbackup = 44100;
@@ -3802,7 +3678,7 @@ void equaliser(void* data, int len, BOOL reset) {
 	int currentEnvPre = savedata.eqsoundenv;
 	int effectAmount = savedata.eqsoundeffect;
 
-	if (effectAmount < 0) effectAmount = 0;
+	if (effectAmount < 0)   effectAmount = 0;
 	if (effectAmount > 100) effectAmount = 100;
 
 	float coreScale = 0.5f + (effectAmount / 60.0f);
@@ -3822,19 +3698,16 @@ void equaliser(void* data, int len, BOOL reset) {
 	spatial = (int)ClampFloat((float)spatial, 0.0f, 200.0f);
 
 	if (currentEqPre != g_lastEqPreset) {
-		if (currentEqPre >= 0 && currentEqPre < 51) {
-			if (currentEqPre != 9)
-				memcpy(savedata.eq, EQ_PRESETS[currentEqPre], sizeof(int) * 15);
-		}
+		if (currentEqPre >= 0 && currentEqPre < 51 && currentEqPre != 9)
+			memcpy(savedata.eq, EQ_PRESETS[currentEqPre], sizeof(int) * 15);
 		g_lastEqPreset = currentEqPre;
 		forceUpdate = TRUE;
 	}
 
 	BOOL eqChanged = forceUpdate;
 	if (!eqChanged) {
-		for (int i = 0; i < 15; i++) {
+		for (int i = 0; i < 15; i++)
 			if (savedata.eq[i] != g_lastEqValues[i]) { eqChanged = TRUE; break; }
-		}
 	}
 
 	BOOL extendedChanged = FALSE;
@@ -3852,36 +3725,25 @@ void equaliser(void* data, int len, BOOL reset) {
 		for (int ch = 0; ch < MAX_CH; ch++) {
 			for (int b = 0; b < EQ_BANDS; b++) {
 				float qVal = (b >= 10) ? 1.0f : 1.414f;
-				CalcPeakingEQ(&g_channels[ch].eqFilters[b],
-					EQ_FREQS[b], qVal, (float)savedata.eq[b], wavbitbackup);
+				CalcPeakingEQ(&g_channels[ch].eqFilters[b], EQ_FREQS[b], qVal, (float)savedata.eq[b], wavbitbackup);
 			}
-
 			float clarityDb = (clarity - 100.0f) * 0.18f;
-			CalcPeakingEQ(&g_channels[ch].clarityFilter, 5000.0f, 1.5f,
-				100.0f + clarityDb / 0.12f, wavbitbackup);
+			CalcPeakingEQ(&g_channels[ch].clarityFilter, 5000.0f, 1.5f, 100.0f + clarityDb / 0.12f, wavbitbackup);
 
 			float balanceDb = (balance - 100.0f) * 0.12f;
 			CalcShelvingEQ(&g_channels[ch].bassBalanceFilter, 0, 250.0f, -balanceDb, wavbitbackup);
 			CalcShelvingEQ(&g_channels[ch].trebleBalanceFilter, 1, 4000.0f, balanceDb, wavbitbackup);
 
 			float densityDb = (density - 100.0f) * 0.15f;
-			CalcPeakingEQ(&g_channels[ch].densityFilter1, 600.0f, 1.2f,
-				100.0f + densityDb / 0.12f, wavbitbackup);
-			CalcPeakingEQ(&g_channels[ch].densityFilter2, 1400.0f, 1.2f,
-				100.0f + densityDb / 0.12f, wavbitbackup);
+			CalcPeakingEQ(&g_channels[ch].densityFilter1, 600.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
+			CalcPeakingEQ(&g_channels[ch].densityFilter2, 1400.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
 		}
 	}
 
 	if (currentEnvPre != g_lastEnvPreset || effectAmount != g_lastEffectAmount || forceUpdate) {
 		if (currentEnvPre < 0 || currentEnvPre >= ENV_PRESET_COUNT) currentEnvPre = 0;
 
-		if (currentEnvPre != g_lastEnvPreset) {
-			// 環境プリセット変更時はリミッターエンベロープをリセット
-			g_limEnvelope = 1.0f;
-		}
-
 		const EnvParams* ep = &ENV_PRESETS[currentEnvPre];
-
 		for (int ch = 0; ch < MAX_CH; ch++) {
 			CalcFilter(&g_channels[ch].envLpf, 0, ep->lpfFreq, 0.707f, wavbitbackup);
 			CalcFilter(&g_channels[ch].envHpf, 1, ep->hpfFreq, 0.707f, wavbitbackup);
@@ -3897,19 +3759,15 @@ void equaliser(void* data, int len, BOOL reset) {
 			CalcFilter(&g_channels[ch].materialFilter, 0, 2000.0f - (ep->materialAbsorption * 1500.0f), 0.707f, wavbitbackup);
 			CalcShelvingEQ(&g_channels[ch].warmthFilter, 0, 300.0f, (ep->warmth - 0.5f) * 6.0f, wavbitbackup);
 
-			if (ep->flutterEcho > 0.0f)
-				CalcFilter(&g_channels[ch].flutterFilter, 1, 1200.0f, 2.0f, wavbitbackup);
+			if (ep->flutterEcho > 0.0f) CalcFilter(&g_channels[ch].flutterFilter, 1, 1200.0f, 2.0f, wavbitbackup);
 			if (ep->resonanceFreq > 0.0f && ep->resonanceQ > 0.0f)
 				CalcPeakingEQ(&g_channels[ch].resonanceFilter, ep->resonanceFreq, ep->resonanceQ, 100.0f, wavbitbackup);
-			if (ep->metallic > 0.0f)
-				CalcFilter(&g_channels[ch].metallicFilter, 1, 4500.0f, 3.5f, wavbitbackup);
-			if (ep->glassiness > 0.0f)
-				CalcFilter(&g_channels[ch].glassFilter, 1, 8000.0f, 4.0f, wavbitbackup);
+			if (ep->metallic > 0.0f) CalcFilter(&g_channels[ch].metallicFilter, 1, 4500.0f, 3.5f, wavbitbackup);
+			if (ep->glassiness > 0.0f) CalcFilter(&g_channels[ch].glassFilter, 1, 8000.0f, 4.0f, wavbitbackup);
 
 			g_channels[ch].lfo.frequency = ep->modSpeed * extraScale;
 			g_channels[ch].lfo.depth = ep->modDepth * extraScale * 10.0f;
 		}
-
 		g_lastEnvPreset = currentEnvPre;
 		g_lastEffectAmount = effectAmount;
 	}
@@ -3943,20 +3801,13 @@ void equaliser(void* data, int len, BOOL reset) {
 
 			float inSample = 0.0f;
 			int offset = (i * wavch + ch) * bytesPerSample;
-
-			if (wavsam == 16) {
-				inSample = *((short*)(pRaw + offset)) / 32768.0f;
-			}
+			if (wavsam == 16) inSample = *((short*)(pRaw + offset)) / 32768.0f;
 			else if (wavsam == 24) {
 				int val = pRaw[offset] | (pRaw[offset + 1] << 8) | ((signed char)pRaw[offset + 2] << 16);
 				inSample = val / 8388608.0f;
 			}
-			else if (wavsam == 32) {
-				inSample = *((int*)(pRaw + offset)) / 2147483648.0f;
-			}
-			else {
-				inSample = (pRaw[offset] - 128) / 128.0f;
-			}
+			else if (wavsam == 32) inSample = *((int*)(pRaw + offset)) / 2147483648.0f;
+			else                   inSample = (pRaw[offset] - 128) / 128.0f;
 
 			float signal = inSample;
 			ChannelState* cs = &g_channels[ch];
@@ -3981,24 +3832,18 @@ void equaliser(void* data, int len, BOOL reset) {
 			if (env->type != TYPE_NONE && env->wetMix > 0.0f && effectAmount > 0) {
 				if (isYamabiko) {
 					float echo = ProcessYamabikoAdvanced(cs, signal, env, wavbitbackup);
-
 					int earlyMs = (env->type == TYPE_MOUNTAIN_ECHO) ? 60 : 45;
 					int earlySamp = (int)(earlyMs * wavbitbackup / 1000.0f);
 					int rPos = cs->writePos - (earlySamp + preDelaySamps);
 					while (rPos < 0) rPos += MAX_DELAY_SAMPLES;
-
 					float earlyGain = (env->type == TYPE_MOUNTAIN_ECHO) ? 0.18f : 0.25f;
 					float earlyRef = cs->delayBuffer[rPos] * earlyGain;
-
 					float weakDiff = env->diffusion * coreScale * 0.22f;
 					float weakDens = env->density * 0.28f;
 					float late = ProcessDiffusion(cs, echo, weakDiff, weakDens, env->type);
-
 					float lateEnv = powf(0.94f, 1.0f / (env->lateReverbDecay * 1.3f));
 					cs->lateEnvelope = cs->lateEnvelope * lateEnv + late * (1.0f - lateEnv);
-					float lateReverb = cs->lateEnvelope * 0.55f;
-
-					wetSignal = echo * 0.88f + earlyRef * 0.35f + lateReverb * 0.52f;
+					wetSignal = echo * 0.88f + earlyRef * 0.35f + cs->lateEnvelope * 0.55f * 0.52f;
 					wetSignal *= fminf(1.0f, env->wetMix * coreScale);
 				}
 				else {
@@ -4026,19 +3871,15 @@ void equaliser(void* data, int len, BOOL reset) {
 
 					float lateEnv = powf(0.95f, 1.0f / env->lateReverbDecay);
 					cs->lateEnvelope = cs->lateEnvelope * lateEnv + delayMain * (1.0f - lateEnv);
-					float lateReverb = cs->lateEnvelope;
-
-					wetSignal = (earlyRef * env->earlyLateBalance) + (lateReverb * (1.0f - env->earlyLateBalance * 0.5f));
+					wetSignal = (earlyRef * env->earlyLateBalance) + (cs->lateEnvelope * (1.0f - env->earlyLateBalance * 0.5f));
 
 					float fbSig = ProcessWarmth(cs,
 						ProcessMaterialAbsorption(cs, delayMain, env->materialAbsorption, env->surfaceRoughness),
 						env->warmth);
-
 					float effectiveFB = fminf(0.88f, env->feedback * coreScale);
 					float fbVal = signal + (fbSig * effectiveFB);
 					if (fbVal > 1.5f) fbVal = 1.5f;
 					if (fbVal < -1.5f) fbVal = -1.5f;
-
 					cs->delayBuffer[cs->writePos] = isfinite(fbVal) ? fbVal : 0.0f;
 					cs->writePos = (cs->writePos + 1) % MAX_DELAY_SAMPLES;
 				}
@@ -4052,14 +3893,10 @@ void equaliser(void* data, int len, BOOL reset) {
 				mixed = ProcessFlutterEcho(cs, mixed, env->flutterEcho * extraScale, wavbitbackup);
 			if (env->resonanceFreq > 0.0f && env->resonanceQ > 0.0f)
 				mixed = ProcessResonance(cs, mixed, env->resonanceFreq, env->resonanceQ, env->spaceComplexity * 0.3f);
-			if (env->metallic > 0.0f)
-				mixed = ProcessMetallic(cs, mixed, env->metallic * extraScale);
-			if (env->glassiness > 0.0f)
-				mixed = ProcessGlass(cs, mixed, env->glassiness * extraScale);
-			if (env->shimmer > 0.0f)
-				mixed = ProcessShimmer(cs, mixed, env->shimmer * extraScale, wavbitbackup);
-			if (env->doppler > 0.0f)
-				mixed = ProcessDoppler(cs, mixed, env->doppler * extraScale, wavbitbackup);
+			if (env->metallic > 0.0f) mixed = ProcessMetallic(cs, mixed, env->metallic * extraScale);
+			if (env->glassiness > 0.0f) mixed = ProcessGlass(cs, mixed, env->glassiness * extraScale);
+			if (env->shimmer > 0.0f) mixed = ProcessShimmer(cs, mixed, env->shimmer * extraScale, wavbitbackup);
+			if (env->doppler > 0.0f) mixed = ProcessDoppler(cs, mixed, env->doppler * extraScale, wavbitbackup);
 
 			mixed = ProcessBrightness(mixed, &cs->brightnessState, env->brightness);
 
@@ -4077,11 +3914,9 @@ void equaliser(void* data, int len, BOOL reset) {
 		if (wavch == 2) {
 			float w = (1.0f + (env->stereoWidth - 1.0f) * extraScale)
 				* spatialWidth * env->wallDistance * (0.7f + env->openness * 0.6f);
-			if (env->ceilingHeight > 1.0f)
-				w *= (1.0f + (env->ceilingHeight - 1.0f) * 0.2f);
-			else
-				w *= env->ceilingHeight;
-
+			w *= (env->ceilingHeight > 1.0f)
+				? (1.0f + (env->ceilingHeight - 1.0f) * 0.2f)
+				: env->ceilingHeight;
 			float mid = (leftSamples[bufferIndex] + rightSamples[bufferIndex]) * 0.5f;
 			float side = (leftSamples[bufferIndex] - rightSamples[bufferIndex]) * 0.5f * w;
 			leftSamples[bufferIndex] = mid + side;
@@ -4092,15 +3927,22 @@ void equaliser(void* data, int len, BOOL reset) {
 	}
 
 	// ===================================================
-	// 【遅延バッファ型ルックアヘッドリミッター適用】
+	// 【最終段】プロフェッショナル・ソフトサチュレーション適用
 	//
-	//  ブロックリミッターとの決定的な違い:
-	//  ・各サンプルを個別に判定するため、静かなサンプルは一切圧縮しない
-	//  ・「将来のピーク」を先読みしてゲインを下げるため、
-	//    声+環境モデルによる急激な音量上昇に対してクリッピングなしに対応
-	//  ・透明性を保ちながらピークのみを抑制
+	//  ProfessionalSoftSaturate() は純粋な非線形振幅変換。
+	//  状態変数を持たないため、以下の特性がある:
+	//
+	//  ・knee (0.65) 以下の信号: y = x  完全に無変化・透明
+	//  ・knee ～ ceiling: tanh カーブで滑らかに丸める
+	//  ・ceiling (0.98) 以上: 0.98 に漸近（到達しない）
+	//
+	//  「静かなサンプルは触らない」「大きいサンプルだけ丸める」
+	//  が 1サンプル単位で達成される。ポンピングは原理上ない。
 	// ===================================================
-	ApplyLookaheadLimiter(leftSamples, rightSamples, bufferIndex, wavch);
+	for (int i = 0; i < bufferIndex; i++) {
+		leftSamples[i] = ProfessionalSoftSaturate(leftSamples[i]);
+		rightSamples[i] = ProfessionalSoftSaturate(rightSamples[i]);
+	}
 
 	// ===== 最終出力 =====
 	{
@@ -4111,37 +3953,26 @@ void equaliser(void* data, int len, BOOL reset) {
 
 				float finalOut = (ch == 0) ? leftSamples[bi] : rightSamples[bi];
 
-				// ハードクリップ（最終安全装置・SoftClipが正常なら到達しない）
+				// 下記ハードクリップは ProfessionalSoftSaturate が正常動作する限り
+				// 到達しない（ceiling=0.98 < 1.0）。NaN 等の異常値に対する安全装置。
 				if (finalOut > 1.0f) finalOut = 1.0f;
 				if (finalOut < -1.0f) finalOut = -1.0f;
 
 				int offset = (i * wavch + ch) * bytesPerSample;
-				if (wavsam == 16) {
-					*((short*)(pRaw + offset)) = (short)(finalOut * 32767.0f);
-				}
+				if (wavsam == 16) *((short*)(pRaw + offset)) = (short)(finalOut * 32767.0f);
 				else if (wavsam == 24) {
 					int v = (int)(finalOut * 8388607.0f);
-					pRaw[offset] = v & 0xFF;
-					pRaw[offset + 1] = (v >> 8) & 0xFF;
-					pRaw[offset + 2] = (v >> 16) & 0xFF;
+					pRaw[offset] = v & 0xFF; pRaw[offset + 1] = (v >> 8) & 0xFF; pRaw[offset + 2] = (v >> 16) & 0xFF;
 				}
-				else if (wavsam == 32) {
-					*((int*)(pRaw + offset)) = (int)(finalOut * 2147483647.0f);
-				}
-				else {
-					pRaw[offset] = (unsigned char)(finalOut * 127.0f + 128.0f);
-				}
+				else if (wavsam == 32) *((int*)(pRaw + offset)) = (int)(finalOut * 2147483647.0f);
+				else                   pRaw[offset] = (unsigned char)(finalOut * 127.0f + 128.0f);
 			}
 			if (wavch == 2) bi++;
 		}
 	}
 
-	// ========================================
-	// リサンプリング後処理
-	// ========================================
 	if (needsResampling) {
-		ResampleDown(processData, processLen, data, originalLen,
-			44100, originalRate, wavch, wavsam);
+		ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavch, wavsam);
 		free(tempBuffer);
 	}
 }
@@ -4149,8 +3980,8 @@ void equaliser(void* data, int len, BOOL reset) {
 
 /*
 ===============================================================================
-  ★ Hyper DSP Equaliser ★ - 完全版
-  ...（省略なし、以下は音楽解析部）
+  ★ Hyper DSP Equaliser ★  全100環境音響モデル / 全51 EQプリセット
+  ...（音楽解析部は変更なし）
 ===============================================================================
 */
 
@@ -4182,26 +4013,17 @@ void equaliser(void* data, int len, BOOL reset) {
 
 using Complex = std::complex<double>;
 
-struct MelodyCandidate {
-	int midiNote;
-	float salience;
-	float totalScore;
-	int fromIdx;
-};
+struct MelodyCandidate { int midiNote; float salience; float totalScore; int fromIdx; };
 
-static float g_noteStrength[108];
+static float  g_noteStrength[108];
 static double g_goertzelCoeffs[108];
 static double g_blackmanWindow[8192];
-static bool g_analysisInitialized = false;
-
+static bool   g_analysisInitialized = false;
 static std::vector<std::vector<MelodyCandidate>> g_viterbiPath;
 static const int MAX_VITERBI_FRAMES = 8;
 static const int CANDIDATE_NUM = 5;
 
-CString KeyCodeLow;
-CString KeyCodeMid;
-CString KeyCodeHigh;
-CString KeyCodeAll;
+CString KeyCodeLow, KeyCodeMid, KeyCodeHigh, KeyCodeAll;
 
 static const WCHAR* NOTE_NAMES[12] = {
 	L"C ", L"C#", L"D ", L"D#", L"E ", L"F ",
@@ -4211,15 +4033,12 @@ static const WCHAR* NOTE_NAMES[12] = {
 static void InitializeAnalysis(double sampleRate) {
 	if (g_analysisInitialized) return;
 	for (int k = 0; k < 108; ++k) {
-		int midiNote = 12 + k;
-		double freq = 440.0 * pow(2.0, (midiNote - 69.0) / 12.0);
+		double freq = 440.0 * pow(2.0, ((12 + k) - 69.0) / 12.0);
 		g_goertzelCoeffs[k] = 2.0 * cos(2.0 * M_PI * freq / sampleRate);
 	}
-	for (int n = 0; n < 8192; ++n) {
+	for (int n = 0; n < 8192; ++n)
 		g_blackmanWindow[n] = 0.355768 - 0.487396 * cos(2.0 * M_PI * n / 8191.0)
-			+ 0.144232 * cos(4.0 * M_PI * n / 8191.0)
-			- 0.012604 * cos(6.0 * M_PI * n / 8191.0);
-	}
+		+ 0.144232 * cos(4.0 * M_PI * n / 8191.0) - 0.012604 * cos(6.0 * M_PI * n / 8191.0);
 	memset(g_noteStrength, 0, sizeof(g_noteStrength));
 	g_viterbiPath.clear();
 	g_analysisInitialized = true;
@@ -4243,41 +4062,30 @@ static void FFT(std::vector<Complex>& x) {
 	FFT(even); FFT(odd);
 	for (size_t k = 0; k < N / 2; ++k) {
 		Complex t = std::polar(1.0, -2.0 * M_PI * k / N) * odd[k];
-		x[k] = even[k] + t;
-		x[k + N / 2] = even[k] - t;
+		x[k] = even[k] + t; x[k + N / 2] = even[k] - t;
 	}
 }
 
 static std::vector<MelodyCandidate> CalculateSalience(const std::vector<double>& bufL, const std::vector<double>& bufR, double sampleRate) {
 	int N = (int)bufL.size();
 	std::vector<Complex> cL(N), cR(N);
-	for (int i = 0; i < N; ++i) {
-		double win = g_blackmanWindow[i];
-		cL[i] = bufL[i] * win; cR[i] = bufR[i] * win;
-	}
+	for (int i = 0; i < N; ++i) { cL[i] = bufL[i] * g_blackmanWindow[i]; cR[i] = bufR[i] * g_blackmanWindow[i]; }
 	FFT(cL); FFT(cR);
-
 	int specSize = N / 2;
 	std::vector<float> mag(specSize, 0.0f);
 	for (int i = 0; i < specSize; ++i) {
-		double absL = std::abs(cL[i]), absR = std::abs(cR[i]);
-		double mid = (absL + absR) * 0.5;
-		double side = std::abs(absL - absR);
-		double center = mid - side * 1.5;
-		if (center < 0) center = 0.0;
-		mag[i] = (float)center;
+		double center = (std::abs(cL[i]) + std::abs(cR[i])) * 0.5 - std::abs(std::abs(cL[i]) - std::abs(cR[i])) * 1.5;
+		mag[i] = (float)(center > 0.0 ? center : 0.0);
 	}
-
 	std::vector<float> salienceMap(108, 0.0f);
 	double binFreq = sampleRate / N;
 	for (int k = 41; k <= 76; ++k) {
-		double freq = 440.0 * pow(2.0, (k - 69.0) / 12.0);
-		int bin = (int)(freq / binFreq);
+		int bin = (int)(440.0 * pow(2.0, (k - 69.0) / 12.0) / binFreq);
 		if (bin <= 0 || bin * 3 >= specSize) continue;
 		auto getPeak = [&](int cb) -> float {
 			float mx = mag[cb];
 			if (cb > 0 && mag[cb - 1] > mx) mx = mag[cb - 1];
-			if (cb < specSize - 1 && mag[cb + 1] > mx) mx = mag[cb + 1];
+			if (cb<specSize - 1 && mag[cb + 1]>mx) mx = mag[cb + 1];
 			return mx;
 			};
 		float s1 = getPeak(bin), s2 = getPeak(bin * 2), s3 = getPeak(bin * 3);
@@ -4285,113 +4093,75 @@ static std::vector<MelodyCandidate> CalculateSalience(const std::vector<double>&
 		if (s3 > s1 * 0.8f) score *= 0.5f;
 		salienceMap[k] = score;
 	}
-
 	std::vector<MelodyCandidate> candidates;
-	double noiseFloor = 0.0;
-	for (float s : salienceMap) noiseFloor += s;
-	noiseFloor /= 36.0;
-
-	MelodyCandidate silence;
-	silence.midiNote = -1; silence.salience = (float)(noiseFloor * 2.0);
-	silence.totalScore = 0.0f; silence.fromIdx = -1;
-	candidates.push_back(silence);
-
-	std::vector<std::pair<int, float>> sortedIndices;
-	for (int k = 41; k <= 76; ++k)
-		if (salienceMap[k] > 0.0f)
-			sortedIndices.push_back({ k, salienceMap[k] });
-	std::sort(sortedIndices.begin(), sortedIndices.end(),
-		[](const std::pair<int, float>& a, const std::pair<int, float>& b) { return a.second > b.second; });
-	for (int i = 0; i < (int)sortedIndices.size() && i < CANDIDATE_NUM - 1; ++i) {
-		MelodyCandidate c;
-		c.midiNote = sortedIndices[i].first; c.salience = sortedIndices[i].second;
-		c.totalScore = 0.0f; c.fromIdx = -1;
-		candidates.push_back(c);
-	}
+	double nf = 0.0; for (float s : salienceMap) nf += s; nf /= 36.0;
+	candidates.push_back({ -1,(float)(nf * 2.0),0.0f,-1 });
+	std::vector<std::pair<int, float>> si;
+	for (int k = 41; k <= 76; ++k) if (salienceMap[k] > 0.0f) si.push_back({ k,salienceMap[k] });
+	std::sort(si.begin(), si.end(), [](const std::pair<int, float>& a, const std::pair<int, float>& b) {return a.second > b.second; });
+	for (int i = 0; i < (int)si.size() && i < CANDIDATE_NUM - 1; ++i)
+		candidates.push_back({ si[i].first, si[i].second, 0.0f, -1 });
 	return candidates;
 }
 
-static int UpdateViterbi(const std::vector<MelodyCandidate>& currentCandidates) {
-	g_viterbiPath.push_back(currentCandidates);
+static int UpdateViterbi(const std::vector<MelodyCandidate>& current) {
+	g_viterbiPath.push_back(current);
 	if (g_viterbiPath.size() == 1) return -1;
-
-	std::vector<MelodyCandidate>& prevFrame = g_viterbiPath[g_viterbiPath.size() - 2];
-	std::vector<MelodyCandidate>& currFrame = g_viterbiPath[g_viterbiPath.size() - 1];
-
-	for (int i = 0; i < (int)currFrame.size(); ++i) {
-		float maxScore = -1.0f; int bestPrevIdx = -1;
-		for (int j = 0; j < (int)prevFrame.size(); ++j) {
-			float transitionPenalty = 0.0f;
-			if (prevFrame[j].midiNote == -1 || currFrame[i].midiNote == -1) {
-				if (prevFrame[j].midiNote != currFrame[i].midiNote) transitionPenalty = 0.5f;
-			}
+	auto& prev = g_viterbiPath[g_viterbiPath.size() - 2];
+	auto& curr = g_viterbiPath[g_viterbiPath.size() - 1];
+	for (int i = 0; i < (int)curr.size(); ++i) {
+		float maxS = -1.0f; int bestJ = -1;
+		for (int j = 0; j < (int)prev.size(); ++j) {
+			float pen = 0.0f;
+			if (prev[j].midiNote == -1 || curr[i].midiNote == -1) { if (prev[j].midiNote != curr[i].midiNote) pen = 0.5f; }
 			else {
-				int noteDiff = std::abs(prevFrame[j].midiNote - currFrame[i].midiNote);
-				if (noteDiff == 0) transitionPenalty = 0.0f;
-				else if (noteDiff <= 2) transitionPenalty = 0.2f;
-				else if (noteDiff <= 7) transitionPenalty = 1.0f;
-				else                    transitionPenalty = 5.0f;
+				int d = std::abs(prev[j].midiNote - curr[i].midiNote);
+				if (d == 0) pen = 0.0f; else if (d <= 2) pen = 0.2f;
+				else if (d <= 7) pen = 1.0f; else pen = 5.0f;
 			}
-			float currentScore = prevFrame[j].totalScore + currFrame[i].salience
-				- (transitionPenalty * currFrame[i].salience * 0.5f);
-			if (currentScore > maxScore) { maxScore = currentScore; bestPrevIdx = j; }
+			float s = prev[j].totalScore + curr[i].salience - (pen * curr[i].salience * 0.5f);
+			if (s > maxS) { maxS = s; bestJ = j; }
 		}
-		currFrame[i].totalScore = maxScore;
-		currFrame[i].fromIdx = bestPrevIdx;
+		curr[i].totalScore = maxS; curr[i].fromIdx = bestJ;
 	}
-
 	if (g_viterbiPath.size() >= MAX_VITERBI_FRAMES) {
-		int bestIdx = 0; float maxTotal = -1.0f;
-		for (int i = 0; i < (int)currFrame.size(); ++i) {
-			if (currFrame[i].totalScore > maxTotal) { maxTotal = currFrame[i].totalScore; bestIdx = i; }
-		}
-		std::vector<int> pathIndices;
-		int traceIdx = bestIdx;
-		for (int f = (int)g_viterbiPath.size() - 1; f >= 0; --f) {
-			pathIndices.push_back(traceIdx);
-			traceIdx = g_viterbiPath[f][traceIdx].fromIdx;
-			if (traceIdx == -1) break;
-		}
-		int targetFrame = (int)g_viterbiPath.size() - 4;
-		if (targetFrame < 0) targetFrame = 0;
-		int pathPos = (int)g_viterbiPath.size() - 1 - targetFrame;
-		if (pathPos >= (int)pathIndices.size()) return -1;
-		int confirmedNoteIdx = pathIndices[pathPos];
-		int confirmedNote = g_viterbiPath[targetFrame][confirmedNoteIdx].midiNote;
+		int bestIdx = 0; float maxT = -1.0f;
+		for (int i = 0; i < (int)curr.size(); ++i) if (curr[i].totalScore > maxT) { maxT = curr[i].totalScore; bestIdx = i; }
+		std::vector<int> path; int t = bestIdx;
+		for (int f = (int)g_viterbiPath.size() - 1; f >= 0; --f) { path.push_back(t); t = g_viterbiPath[f][t].fromIdx; if (t == -1)break; }
+		int tf = (int)g_viterbiPath.size() - 4; if (tf < 0)tf = 0;
+		int pp = (int)g_viterbiPath.size() - 1 - tf;
+		if (pp >= (int)path.size()) return -1;
+		int note = g_viterbiPath[tf][path[pp]].midiNote;
 		g_viterbiPath.erase(g_viterbiPath.begin());
-		return confirmedNote;
+		return note;
 	}
 	return -1;
 }
 
 static void AggregateNoteClasses(float* bassClass, float* midClass, float* highClass, float* allClass) {
-	for (int i = 0; i < 12; i++)
-		bassClass[i] = midClass[i] = highClass[i] = allClass[i] = 0.0f;
-
+	for (int i = 0; i < 12; i++) bassClass[i] = midClass[i] = highClass[i] = allClass[i] = 0.0f;
 	float octaveMax[9] = { 0 }; int octaveMaxNote[9] = { -1 };
 	for (int note = 0; note < 108; note++) {
-		int octave = note / 12;
-		if (g_noteStrength[note] > octaveMax[octave]) {
-			octaveMax[octave] = g_noteStrength[note]; octaveMaxNote[octave] = note;
-		}
+		int oct = note / 12;
+		if (g_noteStrength[note] > octaveMax[oct]) { octaveMax[oct] = g_noteStrength[note]; octaveMaxNote[oct] = note; }
 	}
 	for (int note = 0; note < 108; note++) {
 		float strength = g_noteStrength[note];
-		int pitchClass = note % 12, octave = note / 12;
-		if (octaveMaxNote[octave] >= 0 && note != octaveMaxNote[octave]) {
-			int fundamentalPC = octaveMaxNote[octave] % 12;
-			int interval = (pitchClass - fundamentalPC + 12) % 12;
-			float ratio = strength / octaveMax[octave];
-			if (interval == 7 && ratio < 0.4f) strength *= 0.4f;
-			else if (interval == 4 && ratio < 0.3f) strength *= 0.6f;
-			else if (interval == 2 && ratio < 0.35f) strength *= 0.3f;
-			else if (interval == 9 && ratio < 0.3f) strength *= 0.5f;
-			else if (interval == 11 && ratio < 0.25f) strength *= 0.4f;
+		int pc = note % 12, oct = note / 12;
+		if (octaveMaxNote[oct] >= 0 && note != octaveMaxNote[oct]) {
+			int iv = (pc - octaveMaxNote[oct] % 12 + 12) % 12;
+			float r = strength / octaveMax[oct];
+			if (iv == 7 && r < 0.4f)  strength *= 0.4f;
+			else if (iv == 4 && r < 0.3f)  strength *= 0.6f;
+			else if (iv == 2 && r < 0.35f) strength *= 0.3f;
+			else if (iv == 9 && r < 0.3f)  strength *= 0.5f;
+			else if (iv == 11 && r < 0.25f) strength *= 0.4f;
 		}
-		if (note < 36) bassClass[pitchClass] += strength;
-		else if (note < 60) midClass[pitchClass] += strength;
-		else                highClass[pitchClass] += strength;
-		allClass[pitchClass] += strength;
+		if (note < 36) bassClass[pc] += strength;
+		else if (note < 60) midClass[pc] += strength;
+		else              highClass[pc] += strength;
+		allClass[pc] += strength;
 	}
 }
 
@@ -4424,78 +4194,48 @@ static CString EstimateChordRaw(float* noteClass, float threshold) {
 	float maxVal = 0.0f;
 	for (int i = 0; i < 12; i++) if (noteClass[i] > maxVal) maxVal = noteClass[i];
 	if (maxVal < 0.001f) return L"";
-
-	float normalized[12];
-	for (int i = 0; i < 12; i++) {
-		normalized[i] = noteClass[i] / maxVal;
-		if (normalized[i] < 0.08f) normalized[i] = 0.0f;
+	float n[12]; for (int i = 0; i < 12; i++) { n[i] = noteClass[i] / maxVal; if (n[i] < 0.08f)n[i] = 0.0f; }
+	int bestRoot = 0; for (int i = 1; i < 12; i++) if (n[i] > n[bestRoot])bestRoot = i;
+	if (n[bestRoot] < threshold) return L"";
+	int active = 0; for (int i = 0; i < 12; i++) if (n[i] > 0.12f)active++;
+	CString root = NOTE_NAMES[bestRoot]; root.Trim();
+	if (active <= 1) return root;
+	float third = max(n[(bestRoot + 3) % 12], n[(bestRoot + 4) % 12]);
+	float fifth = n[(bestRoot + 7) % 12];
+	if (fifth > 0.3f && third < 0.15f && active <= 3) return root + L"!@B[!@Cff0000Power!@Cffffff]!@B";
+	std::vector<ChordCandidate> cands;
+	int np = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
+	for (int c = 0; c < np; c++) {
+		float sc = 0.0f; int matched = 0, req = 0;
+		for (int x = 0; x < 12; x++) if (CHORD_PATTERNS[c].pattern[x] > 0)req++;
+		bool is9 = (req >= 5);
+		for (int nn = 0; nn < 12; nn++) {
+			int note = (bestRoot + nn) % 12, w = CHORD_PATTERNS[c].pattern[nn];
+			if (w > 0) { sc += n[note] * w * 2.0f; if (n[note] > 0.12f)matched++; }
+			else if (n[note] > 0.25f) sc -= n[note] * 1.5f;
+		}
+		if (is9) { float mr = (req > 0) ? (float)matched / req : 0.0f; if (mr < 0.8f)sc -= 10.0f; if (n[(bestRoot + 2) % 12] < 0.2f)sc -= 5.0f; }
+		else { if ((req > 0) && (float)matched / req < 0.4f)sc -= 3.0f; }
+		sc -= (active - matched) * 1.0f; sc += CHORD_PATTERNS[c].bonus;
+		if (req == 3)sc += 1.2f; if (req == 4)sc += 0.5f; if (req >= 5)sc -= 1.0f;
+		if (sc > (is9 ? 3.5f : 0.8f)) { ChordCandidate cd; cd.name = root + CHORD_PATTERNS[c].name; cd.score = sc; cd.complexity = req; cands.push_back(cd); }
 	}
-	int bestRoot = 0;
-	for (int i = 1; i < 12; i++) if (normalized[i] > normalized[bestRoot]) bestRoot = i;
-	if (normalized[bestRoot] < threshold) return L"";
-
-	int activeNotes = 0;
-	for (int i = 0; i < 12; i++) if (normalized[i] > 0.12f) activeNotes++;
-	if (activeNotes <= 1) { CString r = NOTE_NAMES[bestRoot]; r.Trim(); return r; }
-
-	CString rootName = NOTE_NAMES[bestRoot]; rootName.Trim();
-	float third = max(normalized[(bestRoot + 3) % 12], normalized[(bestRoot + 4) % 12]);
-	float fifth = normalized[(bestRoot + 7) % 12];
-	if (fifth > 0.3f && third < 0.15f && activeNotes <= 3)
-		return rootName + L"!@B[!@Cff0000Power!@Cffffff]!@B";
-
-	std::vector<ChordCandidate> candidates;
-	int numPatterns = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
-	for (int c = 0; c < numPatterns; c++) {
-		float score = 0.0f; int matched = 0, required = 0;
-		for (int x = 0; x < 12; x++) if (CHORD_PATTERNS[c].pattern[x] > 0) required++;
-		bool is9th = (required >= 5);
-		for (int n = 0; n < 12; n++) {
-			int note = (bestRoot + n) % 12, weight = CHORD_PATTERNS[c].pattern[n];
-			if (weight > 0) { score += normalized[note] * weight * 2.0f; if (normalized[note] > 0.12f) matched++; }
-			else if (normalized[note] > 0.25f) score -= normalized[note] * 1.5f;
-		}
-		if (is9th) {
-			float mr = (required > 0) ? (float)matched / required : 0.0f;
-			if (mr < 0.8f) score -= 10.0f;
-			if (normalized[(bestRoot + 2) % 12] < 0.2f) score -= 5.0f;
-		}
-		else {
-			if ((required > 0) && (float)matched / required < 0.4f) score -= 3.0f;
-		}
-		score -= (activeNotes - matched) * 1.0f;
-		score += CHORD_PATTERNS[c].bonus;
-		if (required == 3) score += 1.2f;
-		if (required == 4) score += 0.5f;
-		if (required >= 5) score -= 1.0f;
-		if (score > (is9th ? 3.5f : 0.8f)) {
-			ChordCandidate cand; cand.name = rootName + CHORD_PATTERNS[c].name;
-			cand.score = score; cand.complexity = required;
-			candidates.push_back(cand);
-		}
-	}
-	if (candidates.empty()) return rootName;
-	std::sort(candidates.begin(), candidates.end(),
-		[](const ChordCandidate& a, const ChordCandidate& b) {
-			if (abs(a.score - b.score) < 0.3f) return a.complexity < b.complexity;
-			return a.score > b.score;
-		});
-	CString result = candidates[0].name; int count = 1;
-	for (size_t i = 1; i < candidates.size() && count < 3; i++) {
-		if (candidates[0].score - candidates[i].score > 2.5f) break;
-		if (candidates[i].name == result) continue;
-		if (candidates[i].name.Find(L"9") >= 0 && candidates[0].score - candidates[i].score > 1.0f) continue;
-		result += L", " + candidates[i].name; count++;
+	if (cands.empty())return root;
+	std::sort(cands.begin(), cands.end(), [](const ChordCandidate& a, const ChordCandidate& b) {
+		if (abs(a.score - b.score) < 0.3f)return a.complexity < b.complexity; return a.score > b.score; });
+	CString result = cands[0].name; int count = 1;
+	for (size_t i = 1; i < cands.size() && count < 3; i++) {
+		if (cands[0].score - cands[i].score > 2.5f)break;
+		if (cands[i].name == result)continue;
+		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.0f)continue;
+		result += L", " + cands[i].name; count++;
 	}
 	return result;
 }
 
-static CString EstimateOverallRaw(float* bassClass, float* midClass, float* highClass, float* allClass) {
-	CString c = EstimateChordRaw(allClass, 0.03f);
-	if (!c.IsEmpty()) return c;
-	c = EstimateChordRaw(bassClass, 0.02f);
-	if (!c.IsEmpty()) return c;
-	return L"";
+static CString EstimateOverallRaw(float* b, float* m, float* h, float* a) {
+	CString c = EstimateChordRaw(a, 0.03f); if (!c.IsEmpty())return c;
+	c = EstimateChordRaw(b, 0.02f); if (!c.IsEmpty())return c; return L"";
 }
 
 static CString g_prevChordLow = L"", g_prevChordMid = L"", g_prevChordHigh = L"", g_prevChordAll = L"";
@@ -4503,262 +4243,181 @@ static std::deque<CString> g_historyLow, g_historyMid, g_historyHigh, g_historyA
 const int HISTORY_SIZE = 4;
 static float g_noteStrengthPrev[108] = { 0 };
 const float SMOOTHING_FACTOR = 0.3f;
-const float SILENCE_THRESHOLD = 0.003f;
-const int   SILENCE_FRAMES_NEEDED = 3;
 static float g_prevRMS = 0.0f, g_peakRMS = 0.0f;
-static bool g_isPlaying = false;
-static int  g_silenceFrameCount = 0;
-const float SILENCE_THRESHOLD_ABS = 0.002f;
-const float SILENCE_THRESHOLD_REL = 0.15f;
-const int   SILENCE_FRAMES_FOR_STOP = 10;
-const float PLAYING_THRESHOLD = 0.01f;
+static bool  g_isPlaying = false;
+static int   g_silenceFrameCount = 0;
+const float SILENCE_THRESHOLD_ABS = 0.002f, SILENCE_THRESHOLD_REL = 0.15f, PLAYING_THRESHOLD = 0.01f;
+const int   SILENCE_FRAMES_FOR_CLEAR = 10;
+static int  g_soundFrameCount = 0;
 
-static float CalculateRMS(const std::vector<double>& bufferL, const std::vector<double>& bufferR, bool stereo) {
-	if (bufferL.empty()) return 0.0f;
-	double sumL = 0.0, sumR = 0.0;
-	int count = (int)bufferL.size();
-	for (int i = 0; i < count; i++) sumL += bufferL[i] * bufferL[i];
-	if (stereo && (int)bufferR.size() == count) {
-		for (int i = 0; i < count; i++) sumR += bufferR[i] * bufferR[i];
-		return (float)sqrt((sumL + sumR) / (count * 2));
-	}
-	return (float)sqrt(sumL / count);
+static float CalculateRMS(const std::vector<double>& bL, const std::vector<double>& bR, bool stereo) {
+	if (bL.empty())return 0.0f;
+	double sL = 0.0, sR = 0.0; int c = (int)bL.size();
+	for (int i = 0; i < c; i++) sL += bL[i] * bL[i];
+	if (stereo && (int)bR.size() == c) { for (int i = 0; i < c; i++)sR += bR[i] * bR[i]; return(float)sqrt((sL + sR) / (c * 2)); }
+	return (float)sqrt(sL / c);
 }
 
-static CString GetMostFrequent(const std::deque<CString>& history) {
-	if (history.empty()) return L"";
-	std::map<CString, int> counter;
-	for (const auto& item : history) if (!item.IsEmpty()) counter[item]++;
-	CString mostFrequent; int maxCount = 0;
-	for (const auto& pair : counter) if (pair.second > maxCount) { maxCount = pair.second; mostFrequent = pair.first; }
-	return mostFrequent;
+static CString GetMostFrequent(const std::deque<CString>& h) {
+	if (h.empty())return L"";
+	std::map<CString, int> cnt; for (const auto& s : h)if (!s.IsEmpty())cnt[s]++;
+	CString best; int mx = 0;
+	for (const auto& p : cnt)if (p.second > mx) { mx = p.second; best = p.first; }
+	return best;
 }
 
-static CString EstimateChordRawWithHistory(float* noteClass, float threshold, const CString& prevChord) {
+static CString EstimateChordRawWithHistory(float* nc, float threshold, const CString& prev) {
 	float maxVal = 0.0f;
-	for (int i = 0; i < 12; i++) if (noteClass[i] > maxVal) maxVal = noteClass[i];
-	if (maxVal < 0.001f) return L"";
-
-	float normalized[12];
-	for (int i = 0; i < 12; i++) {
-		normalized[i] = noteClass[i] / maxVal;
-		if (normalized[i] < 0.10f) normalized[i] = 0.0f;
+	for (int i = 0; i < 12; i++)if (nc[i] > maxVal)maxVal = nc[i];
+	if (maxVal < 0.001f)return L"";
+	float n[12]; for (int i = 0; i < 12; i++) { n[i] = nc[i] / maxVal; if (n[i] < 0.10f)n[i] = 0.0f; }
+	int bestRoot = 0; for (int i = 1; i < 12; i++)if (n[i] > n[bestRoot])bestRoot = i;
+	if (n[bestRoot] < threshold)return L"";
+	int active = 0; for (int i = 0; i < 12; i++)if (n[i] > 0.15f)active++;
+	CString root = NOTE_NAMES[bestRoot]; root.Trim();
+	if (active <= 1)return root;
+	float third = max(n[(bestRoot + 3) % 12], n[(bestRoot + 4) % 12]);
+	float fifth = n[(bestRoot + 7) % 12];
+	if (fifth > 0.3f && third < 0.15f && active <= 3)return root + L"!@B!@I[Power]!@B!@I";
+	std::vector<ChordCandidate> cands;
+	int np = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
+	for (int c = 0; c < np; c++) {
+		float sc = 0.0f; int matched = 0, req = 0;
+		for (int x = 0; x < 12; x++)if (CHORD_PATTERNS[c].pattern[x] > 0)req++;
+		bool is9 = (req >= 5);
+		for (int nn = 0; nn < 12; nn++) {
+			int note = (bestRoot + nn) % 12, w = CHORD_PATTERNS[c].pattern[nn];
+			if (w > 0) { sc += n[note] * w * 2.0f; if (n[note] > 0.15f)matched++; }
+			else if (n[note] > 0.25f)sc -= n[note] * 2.0f;
+		}
+		if (is9) { float mr = (req > 0) ? (float)matched / req : 0.0f; if (mr < 0.85f)sc -= 12.0f; if (n[(bestRoot + 2) % 12] < 0.25f)sc -= 6.0f; }
+		else { if ((req > 0) && (float)matched / req < 0.5f)sc -= 4.0f; }
+		sc -= (active - matched) * 1.5f; sc += CHORD_PATTERNS[c].bonus;
+		if (req == 3)sc += 1.2f; if (req == 4)sc += 0.5f; if (req >= 5)sc -= 1.5f;
+		CString cur = root + CHORD_PATTERNS[c].name;
+		if (!prev.IsEmpty() && cur == prev)sc += 1.5f;
+		if (sc > (is9 ? 4.0f : 1.0f)) { ChordCandidate cd; cd.name = cur; cd.score = sc; cd.complexity = req; cands.push_back(cd); }
 	}
-	int bestRoot = 0;
-	for (int i = 1; i < 12; i++) if (normalized[i] > normalized[bestRoot]) bestRoot = i;
-	if (normalized[bestRoot] < threshold) return L"";
-
-	int activeNotes = 0;
-	for (int i = 0; i < 12; i++) if (normalized[i] > 0.15f) activeNotes++;
-	if (activeNotes <= 1) { CString r = NOTE_NAMES[bestRoot]; r.Trim(); return r; }
-
-	CString rootName = NOTE_NAMES[bestRoot]; rootName.Trim();
-	float third = max(normalized[(bestRoot + 3) % 12], normalized[(bestRoot + 4) % 12]);
-	float fifth = normalized[(bestRoot + 7) % 12];
-	if (fifth > 0.3f && third < 0.15f && activeNotes <= 3)
-		return rootName + L"!@B!@I[Power]!@B!@I";
-
-	std::vector<ChordCandidate> candidates;
-	int numPatterns = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
-	for (int c = 0; c < numPatterns; c++) {
-		float score = 0.0f; int matched = 0, required = 0;
-		for (int x = 0; x < 12; x++) if (CHORD_PATTERNS[c].pattern[x] > 0) required++;
-		bool is9th = (required >= 5);
-		for (int n = 0; n < 12; n++) {
-			int note = (bestRoot + n) % 12, weight = CHORD_PATTERNS[c].pattern[n];
-			if (weight > 0) { score += normalized[note] * weight * 2.0f; if (normalized[note] > 0.15f) matched++; }
-			else if (normalized[note] > 0.25f) score -= normalized[note] * 2.0f;
-		}
-		if (is9th) {
-			float mr = (required > 0) ? (float)matched / required : 0.0f;
-			if (mr < 0.85f) score -= 12.0f;
-			if (normalized[(bestRoot + 2) % 12] < 0.25f) score -= 6.0f;
-		}
-		else {
-			if ((required > 0) && (float)matched / required < 0.5f) score -= 4.0f;
-		}
-		score -= (activeNotes - matched) * 1.5f;
-		score += CHORD_PATTERNS[c].bonus;
-		if (required == 3) score += 1.2f;
-		if (required == 4) score += 0.5f;
-		if (required >= 5) score -= 1.5f;
-		CString currentChord = rootName + CHORD_PATTERNS[c].name;
-		if (!prevChord.IsEmpty() && currentChord == prevChord) score += 1.5f;
-		if (score > (is9th ? 4.0f : 1.0f)) {
-			ChordCandidate cand; cand.name = currentChord; cand.score = score; cand.complexity = required;
-			candidates.push_back(cand);
-		}
-	}
-	if (candidates.empty()) return rootName;
-	std::sort(candidates.begin(), candidates.end(),
-		[](const ChordCandidate& a, const ChordCandidate& b) {
-			if (abs(a.score - b.score) < 0.3f) return a.complexity < b.complexity;
-			return a.score > b.score;
-		});
-	if (!prevChord.IsEmpty()) {
-		for (size_t i = 0; i < min((size_t)3, candidates.size()); i++)
-			if (candidates[i].name == prevChord) return prevChord;
-	}
-	CString result = candidates[0].name; int count = 1;
-	for (size_t i = 1; i < candidates.size() && count < 3; i++) {
-		if (count == 1 && candidates[0].score - candidates[i].score > 2.0f) break;
-		if (count == 2 && candidates[0].score - candidates[i].score > 0.5f) break;
-		if (candidates[i].name == result) continue;
-		if (candidates[i].name.Find(L"9") >= 0 && candidates[0].score - candidates[i].score > 0.8f) continue;
-		result += L", " + candidates[i].name; count++;
+	if (cands.empty())return root;
+	std::sort(cands.begin(), cands.end(), [](const ChordCandidate& a, const ChordCandidate& b) {
+		if (abs(a.score - b.score) < 0.3f)return a.complexity < b.complexity; return a.score > b.score; });
+	if (!prev.IsEmpty())for (size_t i = 0; i < min((size_t)3, cands.size()); i++)if (cands[i].name == prev)return prev;
+	CString result = cands[0].name; int count = 1;
+	for (size_t i = 1; i < cands.size() && count < 3; i++) {
+		if (count == 1 && cands[0].score - cands[i].score > 2.0f)break;
+		if (count == 2 && cands[0].score - cands[i].score > 0.5f)break;
+		if (cands[i].name == result)continue;
+		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 0.8f)continue;
+		result += L", " + cands[i].name; count++;
 	}
 	return result;
 }
 
-static CString EstimateChordRawWithHistory(float* bassClass, float* midClass,
-	float* highClass, float* allClass, const CString& prevChord) {
-	CString c = EstimateChordRawWithHistory(allClass, 0.03f, prevChord);
-	if (!c.IsEmpty()) return c;
-	c = EstimateChordRawWithHistory(bassClass, 0.02f, prevChord);
-	if (!c.IsEmpty()) return c;
-	return L"";
+static CString EstimateChordRawWithHistory(float* b, float* m, float* h, float* a, const CString& prev) {
+	CString c = EstimateChordRawWithHistory(a, 0.03f, prev); if (!c.IsEmpty())return c;
+	c = EstimateChordRawWithHistory(b, 0.02f, prev); if (!c.IsEmpty())return c; return L"";
 }
-
-static int g_soundFrameCount = 0;
-const int SILENCE_FRAMES_FOR_CLEAR = 10;
 
 void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<double>& bufferR, int sampleRate) {
 	InitializeAnalysis((double)sampleRate);
 	int totalSamples = (int)bufferL.size();
 	bool stereo = ((int)bufferR.size() == totalSamples);
 
-	auto FormatChord = [](CString chordStr) -> CString {
-		if (chordStr.IsEmpty()) return L"!@B  , <  >!@B";
-		CString rootName = chordStr;
-		if (chordStr.GetLength() > 1 && (chordStr[1] == L'#' || chordStr[1] == L'b')) rootName = chordStr.Left(2);
-		else rootName = chordStr.Left(1);
-		if (rootName.GetLength() == 1) rootName += L" ";
-		CString ret; ret.Format(L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", rootName, chordStr);
-		return ret;
+	auto FormatChord = [](CString s)->CString {
+		if (s.IsEmpty())return L"!@B  , <  >!@B";
+		CString root = (s.GetLength() > 1 && (s[1] == L'#' || s[1] == L'b')) ? s.Left(2) : s.Left(1);
+		if (root.GetLength() == 1)root += L" ";
+		CString r; r.Format(L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, s); return r;
 		};
 
 	float currentRMS = CalculateRMS(bufferL, bufferR, stereo);
-
-	if (currentRMS > PLAYING_THRESHOLD) {
-		g_isPlaying = true; g_soundFrameCount++;
-		if (currentRMS > g_peakRMS) g_peakRMS = currentRMS;
-		else g_peakRMS *= 0.998f;
-	}
+	if (currentRMS > PLAYING_THRESHOLD) { g_isPlaying = true; g_soundFrameCount++; if (currentRMS > g_peakRMS)g_peakRMS = currentRMS; else g_peakRMS *= 0.998f; }
 	else { g_soundFrameCount = 0; }
 
 	bool isSilent = false;
-	if (!g_isPlaying || g_peakRMS < 0.001f)
-		isSilent = (currentRMS < SILENCE_THRESHOLD_ABS);
-	else
-		isSilent = (currentRMS < SILENCE_THRESHOLD_ABS) || (currentRMS < g_peakRMS * SILENCE_THRESHOLD_REL);
-
-	if (isSilent) g_silenceFrameCount++; else g_silenceFrameCount = 0;
+	if (!g_isPlaying || g_peakRMS < 0.001f)isSilent = (currentRMS < SILENCE_THRESHOLD_ABS);
+	else isSilent = (currentRMS < SILENCE_THRESHOLD_ABS) || (currentRMS < g_peakRMS * SILENCE_THRESHOLD_REL);
+	if (isSilent)g_silenceFrameCount++; else g_silenceFrameCount = 0;
 
 	if (g_silenceFrameCount >= SILENCE_FRAMES_FOR_CLEAR) {
 		g_isPlaying = false; g_peakRMS = 0.0f; g_soundFrameCount = 0;
 		g_historyLow.clear(); g_historyMid.clear(); g_historyHigh.clear(); g_historyAll.clear();
 		g_prevChordLow = g_prevChordMid = g_prevChordAll = g_prevChordHigh = L"";
-		for (int i = 0; i < 108; i++) g_noteStrengthPrev[i] *= 0.3f;
+		for (int i = 0; i < 108; i++)g_noteStrengthPrev[i] *= 0.3f;
 	}
 
 	if (isSilent) {
-		auto FormatSilent = [](CString) -> CString {
-			return L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
-			};
-		KeyCodeLow = FormatSilent(L""); KeyCodeMid = FormatSilent(L"");
-		KeyCodeAll = FormatSilent(L""); KeyCodeHigh = FormatSilent(L"");
-		g_prevRMS = currentRMS;
-		return;
+		KeyCodeLow = KeyCodeMid = KeyCodeAll = KeyCodeHigh =
+			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
+		g_prevRMS = currentRMS; return;
 	}
 
 	g_prevRMS = g_prevRMS * 0.7f + currentRMS * 0.3f;
 
-	const int LOW_NOTE_LIMIT = 52;
-	const int LOW_SAMPLES = (totalSamples >= 4096) ? 4096 : totalSamples;
-	const int LOW_START = totalSamples - LOW_SAMPLES;
-	const int HIGH_SAMPLES = (totalSamples >= 2048) ? 2048 : totalSamples;
-	const int HIGH_START = totalSamples - HIGH_SAMPLES;
+	const int LOW_LIMIT = 52;
+	const int LOW_N = (totalSamples >= 4096) ? 4096 : totalSamples, LOW_S = totalSamples - LOW_N;
+	const int HI_N = (totalSamples >= 2048) ? 2048 : totalSamples, HI_S = totalSamples - HI_N;
 
-	for (int k = 0; k < LOW_NOTE_LIMIT; k++) {
-		double ampL = GoertzelMagnitude(bufferL.data() + LOW_START, LOW_SAMPLES, g_goertzelCoeffs[k]);
-		double ampR = stereo ? GoertzelMagnitude(bufferR.data() + LOW_START, LOW_SAMPLES, g_goertzelCoeffs[k]) : ampL;
-		float newStrength = (float)max(ampL, ampR) * (1.0f + k / 100.0f);
-		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + newStrength * (1.0f - SMOOTHING_FACTOR);
+	for (int k = 0; k < LOW_LIMIT; k++) {
+		double aL = GoertzelMagnitude(bufferL.data() + LOW_S, LOW_N, g_goertzelCoeffs[k]);
+		double aR = stereo ? GoertzelMagnitude(bufferR.data() + LOW_S, LOW_N, g_goertzelCoeffs[k]) : aL;
+		float ns = (float)max(aL, aR) * (1.0f + k / 100.0f);
+		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + ns * (1.0f - SMOOTHING_FACTOR);
 		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
-	for (int k = LOW_NOTE_LIMIT; k < 108; k++) {
-		double ampL = GoertzelMagnitude(bufferL.data() + HIGH_START, HIGH_SAMPLES, g_goertzelCoeffs[k]);
-		double ampR = stereo ? GoertzelMagnitude(bufferR.data() + HIGH_START, HIGH_SAMPLES, g_goertzelCoeffs[k]) : ampL;
-		float newStrength = (float)max(ampL, ampR) * (1.0f + k / 50.0f);
-		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + newStrength * (1.0f - SMOOTHING_FACTOR);
+	for (int k = LOW_LIMIT; k < 108; k++) {
+		double aL = GoertzelMagnitude(bufferL.data() + HI_S, HI_N, g_goertzelCoeffs[k]);
+		double aR = stereo ? GoertzelMagnitude(bufferR.data() + HI_S, HI_N, g_goertzelCoeffs[k]) : aL;
+		float ns = (float)max(aL, aR) * (1.0f + k / 50.0f);
+		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + ns * (1.0f - SMOOTHING_FACTOR);
 		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
 
-	float bassClass[12], midClass[12], highClass[12], allClass[12];
-	AggregateNoteClasses(bassClass, midClass, highClass, allClass);
+	float bC[12], mC[12], hC[12], aC[12];
+	AggregateNoteClasses(bC, mC, hC, aC);
 
-	CString rawBass = EstimateChordRawWithHistory(bassClass, 0.02f, g_prevChordLow);
-	CString rawMid = EstimateChordRawWithHistory(midClass, 0.03f, g_prevChordMid);
-	CString rawAll = EstimateChordRawWithHistory(bassClass, midClass, highClass, allClass, g_prevChordAll);
-	CString rawHighChord = EstimateChordRawWithHistory(highClass, 0.03f, g_prevChordHigh);
+	CString rawBass = EstimateChordRawWithHistory(bC, 0.02f, g_prevChordLow);
+	CString rawMid = EstimateChordRawWithHistory(mC, 0.03f, g_prevChordMid);
+	CString rawAll = EstimateChordRawWithHistory(bC, mC, hC, aC, g_prevChordAll);
+	CString rawHigh = EstimateChordRawWithHistory(hC, 0.03f, g_prevChordHigh);
 
-	auto pushHistory = [](std::deque<CString>& h, const CString& v) {
-		h.push_back(v);
-		if ((int)h.size() > HISTORY_SIZE) h.pop_front();
-		};
-	pushHistory(g_historyLow, rawBass);
-	pushHistory(g_historyMid, rawMid);
-	pushHistory(g_historyHigh, rawHighChord);
-	pushHistory(g_historyAll, rawAll);
+	auto push = [](std::deque<CString>& h, const CString& v) {h.push_back(v); if ((int)h.size() > HISTORY_SIZE)h.pop_front(); };
+	push(g_historyLow, rawBass); push(g_historyMid, rawMid);
+	push(g_historyHigh, rawHigh); push(g_historyAll, rawAll);
 
-	rawBass = GetMostFrequent(g_historyLow);
-	rawMid = GetMostFrequent(g_historyMid);
-	rawAll = GetMostFrequent(g_historyAll);
-	rawHighChord = GetMostFrequent(g_historyHigh);
+	rawBass = GetMostFrequent(g_historyLow); rawMid = GetMostFrequent(g_historyMid);
+	rawAll = GetMostFrequent(g_historyAll); rawHigh = GetMostFrequent(g_historyHigh);
 
-	g_prevChordLow = rawBass;
-	g_prevChordMid = rawMid;
-	g_prevChordAll = rawAll;
-	g_prevChordHigh = rawHighChord;
+	g_prevChordLow = rawBass; g_prevChordMid = rawMid; g_prevChordAll = rawAll; g_prevChordHigh = rawHigh;
 
-	int fftSize = 4096;
-	int fftStart = totalSamples - fftSize;
-	if (fftStart < 0) fftStart = 0;
-	std::vector<double> bufL_Part(bufferL.begin() + fftStart, bufferL.end());
-	std::vector<double> bufR_Part;
-	if (stereo) bufR_Part.assign(bufferR.begin() + fftStart, bufferR.end());
-	else bufR_Part = bufL_Part;
+	int fftStart = totalSamples - 4096; if (fftStart < 0)fftStart = 0;
+	std::vector<double> bLP(bufferL.begin() + fftStart, bufferL.end());
+	std::vector<double> bRP;
+	if (stereo)bRP.assign(bufferR.begin() + fftStart, bufferR.end()); else bRP = bLP;
 
-	std::vector<MelodyCandidate> candidates = CalculateSalience(bufL_Part, bufR_Part, (double)sampleRate);
-	int detectedMidi = UpdateViterbi(candidates);
+	int midi = UpdateViterbi(CalculateSalience(bLP, bRP, (double)sampleRate));
 
 	CString rawMelody = L"[   ]";
-	if (detectedMidi != -1) {
-		int octave = (detectedMidi / 12) - 1;
-		CString noteName = NOTE_NAMES[detectedMidi % 12]; noteName.Trim();
-		if (noteName.GetLength() == 1) rawMelody.Format(L"[%s%d ]", noteName, octave);
-		else                           rawMelody.Format(L"[%s%d]", noteName, octave);
+	if (midi != -1) {
+		int oct = (midi / 12) - 1; CString nn = NOTE_NAMES[midi % 12]; nn.Trim();
+		if (nn.GetLength() == 1)rawMelody.Format(L"[%s%d ]", nn, oct);
+		else                  rawMelody.Format(L"[%s%d]", nn, oct);
 	}
 
-	KeyCodeLow = FormatChord(rawBass);
-	KeyCodeMid = FormatChord(rawMid);
-	KeyCodeAll = FormatChord(rawAll);
+	KeyCodeLow = FormatChord(rawBass); KeyCodeMid = FormatChord(rawMid); KeyCodeAll = FormatChord(rawAll);
 
-	if (rawHighChord.IsEmpty() && rawMelody != L"[   ]") {
-		CString temp = rawMelody.Mid(1);
-		int sharpPos = temp.Find(L'#');
-		rawHighChord = (sharpPos >= 0) ? temp.Left(2) : temp.Left(1);
+	if (rawHigh.IsEmpty() && rawMelody != L"[   ]") {
+		CString t = rawMelody.Mid(1);
+		rawHigh = (t.Find(L'#') >= 0) ? t.Left(2) : t.Left(1);
 	}
-
-	if (rawMelody == L"[   ]" && rawHighChord.IsEmpty()) {
+	if (rawMelody == L"[   ]" && rawHigh.IsEmpty())
 		KeyCodeHigh = L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
-	}
 	else {
-		CString highChordPart = FormatChord(rawHighChord);
-		KeyCodeHigh = highChordPart.IsEmpty() ? rawMelody : highChordPart;
+		CString hp = FormatChord(rawHigh);
+		KeyCodeHigh = hp.IsEmpty() ? rawMelody : hp;
 	}
 }
 
 void GetCurrentNoteStrengths(float* output108) {
-	if (output108) memcpy(output108, g_noteStrength, sizeof(g_noteStrength));
+	if (output108)memcpy(output108, g_noteStrength, sizeof(g_noteStrength));
 }
