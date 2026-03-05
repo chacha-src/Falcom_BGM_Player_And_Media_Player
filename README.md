@@ -124,7 +124,7 @@ These operate independently of the environmental models.
 
 Additionally, the intensity of the environmental effects can be adjusted, offering a high degree of acoustic freedom.
 
-![Player Screen](https://ppp.oohara.jp/img/ysedplay2_git5.PNG)
+![Player Screen](https://ppp.oohara.jp/img/ysedplay2_20260305e.PNG)
 
 ## Supported Game Titles
 The player supports seamless BGM looping for the following titles:
