@@ -15858,6 +15858,7 @@ void timerog1(UINT nIDEvent)
 				if (pl->m_renzoku.GetCheck() == TRUE) {
 					plcnt++;
 					if (plcnt >= pl->m_lc.GetItemCount()) plcnt = 0;
+					endflg = 0;
 					if (plcnt < pl->m_lc.GetItemCount()) {
 						pl->Get(plcnt);
 						pl->SIcon(plcnt);
@@ -15876,6 +15877,7 @@ void timerog1(UINT nIDEvent)
 			if (pl->m_renzoku.GetCheck() == TRUE) {
 				plcnt++;
 				if (plcnt >= pl->m_lc.GetItemCount()) plcnt = 0;
+				endflg = 0;
 				if (plcnt < pl->m_lc.GetItemCount()) {
 					og->KillTimer(1250);
 					pl->Get(plcnt);
