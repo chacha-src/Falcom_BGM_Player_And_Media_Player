@@ -3253,95 +3253,106 @@ static inline float ProcessDoppler(ChannelState* cs, float input, float amount, 
 
 
 // ============================================================
-// ★ プロフェッショナル・ソフトサチュレーション
+// ★ プロフェッショナル・ソフトサチュレーション [FIX-2]
 // ============================================================
 //
-// 【圧縮との本質的違い】
-//   コンプレッサー/リミッター = 時間領域のゲインライディング
-//     - エンベロープ（状態変数）を持つ
-//     - アタック/リリース時定数が存在する
-//     - 静かなサンプルも「巻き添え」になる → 不鮮明・ポンピング
-//
-//   ソフトサチュレーション = 瞬時の非線形振幅変換（波形整形）
-//     - 状態変数なし・時定数なし
-//     - 各サンプルを独立して処理
-//     - 小信号領域は完全透明
-//
-// 【数学的定式化】
-//
-//   入力: x (任意の実数)
-//   出力: y
-//   パラメータ:
-//     knee    = 0.65  : 線形領域の上限（ここまでは y = x で完全透明）
-//     ceiling = 0.98  : 出力の漸近上限
-//     r       = ceiling - knee = 0.33
-//
-//   ┌ x                                     (|x| ≤ knee)
-//   │
-//   y = │  sign(x) × [knee + r × tanh((|x| - knee) / r)]
-//   │                                        (|x| > knee)
-//   └
-//
-// 【膝点での連続性証明】
-//   右側微分: d/d|x| [knee + r × tanh((|x|-knee)/r)]
-//           = r × sech²((|x|-knee)/r) × (1/r)
-//           = sech²(0)    (|x|=knee のとき)
-//           = 1.0         ← 線形領域の傾き 1.0 と一致 ✓
+// 【knee改訂理由: 0.65 → 0.78】
+//   旧 knee=0.65 ではマスタード楽曲の典型ピーク (0.70-0.90) が
+//   常にサチュレーション領域に入り、3次高調波が全ピークに付加された。
+//   これが「音割れ感」「張り付き感」として聴取される原因だった。
+//   新 knee=0.78 では正常処理後の信号(≤0.70想定)は完全透明。
 //
 // 【収束特性】
-//   |x| → ∞ のとき: tanh(∞) = 1 → y → sign(x) × (knee + r) = sign(x) × ceiling ✓
-//   どんな大きな入力でも出力は |ceiling| 以下に収まる（ハードクリップなし）
-//
-// 【なぜこれが適切か（声のみ + 環境モデル適用時）】
-//   通常のボーカル信号ピーク:    ≈ 0.3-0.5 → knee 以下 → 完全無変化
-//   残響キックによる過大信号:   ≈ 1.0-2.0 → tanh で滑らかに ceiling へ収束
-//   圧縮感・ポンピング:          原理上発生しない（状態変数がないため）
-//
-// 【プロ機材における同原理の採用例】
-//   - Neve 1073, SSL 4000 プリアンプの入力飽和特性
-//   - Manley Variable Mu チューブサチュレーション
-//   - iZotope Ozone Maximizer "IRC IV" の初段整形
-//   - Waves L3 の "Airy" モード
-//
-// 【サチュレーションが加える高調波】
-//   tanh の奇関数テイラー展開: tanh(x) = x - x³/3 + 2x⁵/15 - ...
-//   → 3次高調波（THD）が主成分 → アナログ機材的な「心地よい歪み」
-//   → knee 以下では tanh 項が働かないため、通常信号には高調波なし
-//
-// 【キャリブレーション例 (knee=0.65, ceiling=0.98)】
-//   入力 0.50 → 出力 0.500  (変化なし、完全透明)
-//   入力 0.65 → 出力 0.650  (膝点、変化なし)
-//   入力 0.80 → 出力 0.790  (-1.3%、ほぼ透明)
-//   入力 1.00 → 出力 0.894  (-10.6%、軽度サチュレーション)
-//   入力 1.50 → 出力 0.976  (-34.9%、強度サチュレーション)
-//   入力 2.00 → 出力 0.980  (ceiling に到達)
-//   入力 ∞   → 出力 0.980  (ceiling に漸近、ハードクリップなし)
+//   入力 0.50 → 出力 0.500  (無変化)
+//   入力 0.78 → 出力 0.780  (ニー点、無変化)
+//   入力 0.85 → 出力 0.844  (-0.7%、ほぼ透明)
+//   入力 1.00 → 出力 0.929  (-7.1%、軽微サチュレーション)
+//   入力 1.30 → 出力 0.968  (ceiling近傍)
+//   入力 ∞   → 出力 0.970  (漸近上限、ハードクリップなし)
 // ============================================================
 static inline float ProfessionalSoftSaturate(float x)
 {
-	// NaN/Inf ガード
 	if (!isfinite(x)) return 0.0f;
 
-	// パラメータ（コンパイル時定数）
-	const float knee = 0.65f;   // 線形領域上限
-	const float ceiling = 0.98f;   // 出力漸近上限
-	const float r = ceiling - knee;  // = 0.33
+	const float knee = 0.78f;   // [FIX-2] 旧 0.65
+	const float ceiling = 0.97f;   // [FIX-2] 旧 0.98
+	const float r = ceiling - knee;  // = 0.19
 
 	float absX = fabsf(x);
-
-	// 【線形領域】knee 以下は完全透明・一切変化なし
 	if (absX <= knee) return x;
 
-	// 【サチュレーション領域】
-	// y = sign(x) × [knee + r × tanh((|x| - knee) / r)]
-	//
-	// tanh 引数の最大値を制限（tanhf は |arg| > 5 で精度が飽和するため）
 	float arg = (absX - knee) / r;
-	if (arg > 8.0f) arg = 8.0f;  // tanh(8) ≈ 0.99999999 ≈ 1.0
+	if (arg > 8.0f) arg = 8.0f;
 
 	float sign = (x >= 0.0f) ? 1.0f : -1.0f;
 	return sign * (knee + r * tanhf(arg));
 }
+
+
+// ============================================================
+// [FIX-3] BlockAnalysis — ブロック解析・透明ゲインステージング
+// ============================================================
+//
+// 【クレストファクターによるコンテンツ判定】
+//   矩形波    : CF ≈ 1.0  → isChiptune=TRUE
+//   のこぎり波 : CF ≈ 1.73 → isChiptune=TRUE
+//   FM合成音  : CF ≈ 2.5  → isChiptune=TRUE
+//   通常音楽  : CF ≈ 4-8  → 標準処理
+//   音声のみ  : CF > 9    → isVoice=TRUE
+// ============================================================
+typedef struct {
+	float peak;
+	float rms;
+	float crestFactor;
+	BOOL  isChiptune;
+	BOOL  isVoice;
+	float stagingGain;
+} BlockAnalysis;
+
+static BlockAnalysis AnalyzeBlock(
+	const unsigned char* pRaw,
+	int numSamples, int wavch, int wavsam, int bytesPerSample,
+	float masterGain)
+{
+	BlockAnalysis ba = { 0.0f, 0.001f, 1.0f, FALSE, FALSE, 1.0f };
+	double sumSq = 0.0;
+	int    count = 0;
+
+	for (int i = 0; i < numSamples; i++) {
+		for (int ch = 0; ch < wavch && ch < MAX_CH; ch++) {
+			float s = 0.0f;
+			int offset = (i * wavch + ch) * bytesPerSample;
+			if (wavsam == 16) s = *((short*)(pRaw + offset)) / 32768.0f;
+			else if (wavsam == 24) {
+				int val = pRaw[offset] | (pRaw[offset + 1] << 8) | ((signed char)pRaw[offset + 2] << 16);
+				s = val / 8388608.0f;
+			}
+			else if (wavsam == 32) s = *((int*)(pRaw + offset)) / 2147483648.0f;
+			else                   s = (pRaw[offset] - 128) / 128.0f;
+
+			float absS = fabsf(s);
+			if (absS > ba.peak) ba.peak = absS;
+			sumSq += (double)s * s;
+			count++;
+		}
+	}
+
+	if (count > 0 && sumSq > 0.0)
+		ba.rms = (float)sqrt(sumSq / count);
+
+	ba.crestFactor = (ba.rms > 0.0002f) ? (ba.peak / ba.rms) : 1.0f;
+
+	ba.isChiptune = (ba.crestFactor < 3.5f && ba.peak > 0.04f);
+	ba.isVoice = (ba.crestFactor > 9.0f && ba.peak > 0.02f);
+
+	const float stageTarget = ba.isChiptune ? 0.65f : 0.60f;
+	float postGainPeak = ba.peak * masterGain;
+	if (postGainPeak > stageTarget && postGainPeak > 0.001f)
+		ba.stagingGain = stageTarget / postGainPeak;
+
+	return ba;
+}
+
 
 // ===== エンジン初期化 =====
 static void InitEngine(int rate) {
@@ -3387,8 +3398,6 @@ static void InitEngine(int rate) {
 	for (int i = 0; i < 15; i++) g_lastEqValues[i] = 100;
 	for (int i = 0; i < 5; i++) g_lastExtendedParams[i] = 100;
 
-	// g_limiter[] は DynamicLimiter 型の互換維持のため初期化のみ行う
-	// equaliser() 内では ProfessionalSoftSaturate() を使用する
 	for (int ch = 0; ch < 2; ch++) {
 		g_limiter[ch].envelope = 1.0f;
 		g_limiter[ch].threshold = 0.95f;
@@ -3532,8 +3541,12 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 		for (int i = 0; i < dstSamples * channels; i++) {
 			float s = dstFloat[i];
 			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
-			int v = (int)(s * 8388607.0f); int o = i * 3;
-			pDst[o] = (v >> 8) & 0xFF; pDst[o + 1] = (v >> 16) & 0xFF; pDst[o + 2] = (v >> 24) & 0xFF;
+			int v = (int)(s * 8388607.0f);
+			int o = i * 3;
+			// [FIX-5] リトルエンディアン 24bit PCM 正規バイト順
+			pDst[o] = v & 0xFF;
+			pDst[o + 1] = (v >> 8) & 0xFF;
+			pDst[o + 2] = (v >> 16) & 0xFF;
 		}
 	}
 	else if (bitDepth == 32) {
@@ -3681,9 +3694,14 @@ void equaliser(void* data, int len, BOOL reset) {
 	if (effectAmount < 0)   effectAmount = 0;
 	if (effectAmount > 100) effectAmount = 100;
 
-	float coreScale = 0.5f + (effectAmount / 60.0f);
-	float extraScale = effectAmount / 40.0f;
-	float reflectionScale = 0.8f + (effectAmount / 250.0f);
+	// ============================================================
+	// [FIX-1] スケールファクター修正
+	// 旧: coreScale最大2.17 / extraScale最大2.50 → 音割れ・籠もりの主因
+	// 新: 正規化範囲 [0,1] で体感的エフェクト強度を維持
+	// ============================================================
+	float coreScale = 0.25f + (effectAmount / 100.0f) * 0.75f;  // [0.25, 1.00]
+	float extraScale = effectAmount / 100.0f;                      // [0.00, 1.00]
+	float reflectionScale = 0.50f + (effectAmount / 100.0f) * 0.50f;  // [0.50, 1.00]
 
 	int masterVolume = savedata.eq[15];
 	int clarity = savedata.eq[16];
@@ -3787,10 +3805,23 @@ void equaliser(void* data, int len, BOOL reset) {
 	unsigned char* pRaw = (unsigned char*)processData;
 	int stereoOffset = (wavbitbackup * 20) / 1000;
 
+	// ============================================================
+	// [FIX-3][FIX-4] ブロック解析: 透明ゲインステージング + コンテンツ検出
+	// ============================================================
+	float masterGain = masterVolume / 100.0f;
+
+	BlockAnalysis ba = AnalyzeBlock(pRaw, numSamples, wavch, wavsam, bytesPerSample, masterGain);
+
+	float effectiveMasterGain = masterGain * ba.stagingGain;
+
+	// チップチューン/FM音源判定時: ディフュージョン・ウェット・ハーモニックを大幅削減
+	float wetScale = ba.isChiptune ? 0.22f : 1.0f;
+	float harmonicScale = ba.isChiptune ? 0.00f : 1.0f;
+	float diffusionScale = ba.isChiptune ? 0.12f : 1.0f;
+
 	static float leftSamples[8192 * 40], rightSamples[8192 * 40];
 	int bufferIndex = 0;
 
-	float masterGain = masterVolume / 100.0f;
 	float harmonicAmount = (density - 100.0f) / 200.0f;
 	float spatialWidth = 0.5f + (spatial / 100.0f);
 
@@ -3812,7 +3843,8 @@ void equaliser(void* data, int len, BOOL reset) {
 			float signal = inSample;
 			ChannelState* cs = &g_channels[ch];
 
-			signal *= masterGain;
+			// [FIX-3] effectiveMasterGain = masterGain * stagingGain
+			signal *= effectiveMasterGain;
 
 			for (int b = 0; b < EQ_BANDS; b++) signal = ProcessBiquad(&cs->eqFilters[b], signal);
 			signal = ProcessBiquad(&cs->clarityFilter, signal);
@@ -3821,8 +3853,9 @@ void equaliser(void* data, int len, BOOL reset) {
 			signal = ProcessBiquad(&cs->densityFilter1, signal);
 			signal = ProcessBiquad(&cs->densityFilter2, signal);
 
-			if (fabs(harmonicAmount) > 0.01f) {
-				float harmonic = signal * signal * signal * harmonicAmount * 0.15f;
+			// [FIX-4] チップチューン(harmonicScale=0)では完全無効
+			if (harmonicScale > 0.0f && fabs(harmonicAmount) > 0.01f) {
+				float harmonic = signal * signal * signal * harmonicAmount * 0.15f * harmonicScale;
 				cs->harmonicState = cs->harmonicState * 0.95f + harmonic * 0.05f;
 				signal += cs->harmonicState;
 			}
@@ -3838,13 +3871,13 @@ void equaliser(void* data, int len, BOOL reset) {
 					while (rPos < 0) rPos += MAX_DELAY_SAMPLES;
 					float earlyGain = (env->type == TYPE_MOUNTAIN_ECHO) ? 0.18f : 0.25f;
 					float earlyRef = cs->delayBuffer[rPos] * earlyGain;
-					float weakDiff = env->diffusion * coreScale * 0.22f;
-					float weakDens = env->density * 0.28f;
+					float weakDiff = env->diffusion * coreScale * 0.22f * diffusionScale;
+					float weakDens = env->density * 0.28f * diffusionScale;
 					float late = ProcessDiffusion(cs, echo, weakDiff, weakDens, env->type);
 					float lateEnv = powf(0.94f, 1.0f / (env->lateReverbDecay * 1.3f));
 					cs->lateEnvelope = cs->lateEnvelope * lateEnv + late * (1.0f - lateEnv);
 					wetSignal = echo * 0.88f + earlyRef * 0.35f + cs->lateEnvelope * 0.55f * 0.52f;
-					wetSignal *= fminf(1.0f, env->wetMix * coreScale);
+					wetSignal *= fminf(0.90f, env->wetMix * coreScale) * wetScale;
 				}
 				else {
 					int chOffset = (ch % 2) * stereoOffset;
@@ -3859,7 +3892,11 @@ void equaliser(void* data, int len, BOOL reset) {
 					delayMain = ProcessBiquad(&cs->dampingFilter, delayMain);
 					delayMain = ProcessBiquad(&cs->envLpf, delayMain);
 					delayMain = ProcessBiquad(&cs->envHpf, delayMain);
-					delayMain = ProcessDiffusion(cs, delayMain, env->diffusion * coreScale, env->density, env->type);
+
+					// [FIX-4] diffusionScale適用
+					delayMain = ProcessDiffusion(cs, delayMain,
+						env->diffusion * coreScale * diffusionScale,
+						env->density * diffusionScale, env->type);
 
 					float earlyRef = 0.0f;
 					for (int r = 0; r < 8; r++) {
@@ -3873,6 +3910,9 @@ void equaliser(void* data, int len, BOOL reset) {
 					cs->lateEnvelope = cs->lateEnvelope * lateEnv + delayMain * (1.0f - lateEnv);
 					wetSignal = (earlyRef * env->earlyLateBalance) + (cs->lateEnvelope * (1.0f - env->earlyLateBalance * 0.5f));
 
+					// [FIX-4] チップチューンではウェット信号を大幅削減
+					wetSignal *= wetScale;
+
 					float fbSig = ProcessWarmth(cs,
 						ProcessMaterialAbsorption(cs, delayMain, env->materialAbsorption, env->surfaceRoughness),
 						env->warmth);
@@ -3885,7 +3925,9 @@ void equaliser(void* data, int len, BOOL reset) {
 				}
 			}
 
-			float mixed = signal + (wetSignal * fminf(1.0f, env->wetMix * coreScale));
+			// [FIX-1] effectiveWetMixを厳密に [0, 0.90] でクランプ
+			float effectiveWetMix = fminf(0.90f, env->wetMix * coreScale);
+			float mixed = signal + wetSignal * effectiveWetMix;
 
 			if (env->exciterAmount > 0.0f && effectAmount > 0)
 				mixed = Exciter(mixed, &cs->exciterFilter, env->exciterAmount * extraScale);
@@ -3928,16 +3970,7 @@ void equaliser(void* data, int len, BOOL reset) {
 
 	// ===================================================
 	// 【最終段】プロフェッショナル・ソフトサチュレーション適用
-	//
-	//  ProfessionalSoftSaturate() は純粋な非線形振幅変換。
-	//  状態変数を持たないため、以下の特性がある:
-	//
-	//  ・knee (0.65) 以下の信号: y = x  完全に無変化・透明
-	//  ・knee ～ ceiling: tanh カーブで滑らかに丸める
-	//  ・ceiling (0.98) 以上: 0.98 に漸近（到達しない）
-	//
-	//  「静かなサンプルは触らない」「大きいサンプルだけ丸める」
-	//  が 1サンプル単位で達成される。ポンピングは原理上ない。
+	// [FIX-2] knee=0.78 により正常信号は完全透明通過
 	// ===================================================
 	for (int i = 0; i < bufferIndex; i++) {
 		leftSamples[i] = ProfessionalSoftSaturate(leftSamples[i]);
@@ -3953,8 +3986,7 @@ void equaliser(void* data, int len, BOOL reset) {
 
 				float finalOut = (ch == 0) ? leftSamples[bi] : rightSamples[bi];
 
-				// 下記ハードクリップは ProfessionalSoftSaturate が正常動作する限り
-				// 到達しない（ceiling=0.98 < 1.0）。NaN 等の異常値に対する安全装置。
+				// ハードクリップ安全装置: ProfessionalSoftSaturate正常動作時は到達しない
 				if (finalOut > 1.0f) finalOut = 1.0f;
 				if (finalOut < -1.0f) finalOut = -1.0f;
 
@@ -3981,7 +4013,6 @@ void equaliser(void* data, int len, BOOL reset) {
 /*
 ===============================================================================
   ★ Hyper DSP Equaliser ★  全100環境音響モデル / 全51 EQプリセット
-  ...（音楽解析部は変更なし）
 ===============================================================================
 */
 
