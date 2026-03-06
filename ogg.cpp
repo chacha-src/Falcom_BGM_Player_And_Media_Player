@@ -188,23 +188,23 @@ BOOL COggApp::InitInstance()
 
 #if _UNICODE
 	if(GetKeyState(VK_CONTROL) < 0){
-		if(AfxMessageBox(LL14(L"ANSI版からのコンバートを行いますか？", L"Convert from ANSI version?", L"Convertir depuis la version ANSI ?", L"Convertire dalla versione ANSI?", L"¿Convertir desde versión ANSI?", L"ANSI 버전에서 변환하시겠습니까?", L"从ANSI版本转换？", L"التحويل من إصدار ANSI؟", L"Конвертировать из версии ANSI?", L"Von ANSI-Version konvertieren?", L"Converter da versão ANSI?", L"Converteren van ANSI-versie?", L"Konwertować z wersji ANSI?", L"ANSI sürümünden dönüştürülsün mü?"),MB_YESNO)==IDYES){
+		if(AfxMessageBox(LL14(L"ANSI版からのコンバートを行いますか？", L"Convert from ANSI version?", L"Convertir depuis la version ANSI ?", L"Convertire dalla versione ANSI?", L"?Convertir desde version ANSI?", L"ANSI ???? ?????????", L"从ANSI版本??？", L"??????? ?? ????? ANSI?", L"Конвертировать из версии ANSI?", L"Von ANSI-Version konvertieren?", L"Converter da versao ANSI?", L"Converteren van ANSI-versie?", L"Konwertowa? z wersji ANSI?", L"ANSI surumunden donu?turulsun mu?"),MB_YESNO)==IDYES){
 			convert();
-			AfxMessageBox(LL14(L"コンバートが完了しました。", L"Conversion completed.", L"Conversion terminée.", L"Conversione completata.", L"Conversión completada.", L"변환이 완료되었습니다.", L"转换完成。", L"اكتمل التحويل.", L"Конвертация завершена.", L"Konvertierung abgeschlossen.", L"Conversão concluída.", L"Conversie voltooid.", L"Konwersja zakończona.", L"Dönüşüm tamamlandı."));
+			AfxMessageBox(LL14(L"コンバートが完了しました。", L"Conversion completed.", L"Conversion terminee.", L"Conversione completata.", L"Conversion completada.", L"??? ???????.", L"??完成。", L"????? ???????.", L"Конвертация завершена.", L"Konvertierung abgeschlossen.", L"Conversao concluida.", L"Conversie voltooid.", L"Konwersja zako?czona.", L"Donu?um tamamland?."));
 			ReleaseMutex(Mutex);
 			exit(0);
 		}
 	}
 	CFile ab,ac;
-	if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeRead,NULL)!=TRUE && ac.Open(L"oggYSEDbgm.dat",CFile::modeRead,NULL)==TRUE){
+	if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeRead | CFile::shareDenyWrite,NULL)!=TRUE && ac.Open(L"oggYSEDbgm.dat",CFile::modeRead | CFile::shareDenyWrite,NULL)==TRUE){
 		ac.Close();
-		AfxMessageBox(LL14(L"ANSI版からのコンバートを行います。", L"Converting from ANSI version.", L"Conversion depuis la version ANSI en cours.", L"Conversione dalla versione ANSI in corso.", L"Convirtiendo desde versión ANSI.", L"ANSI 버전에서 변환 중입니다.", L"正在从ANSI版本转换。", L"جاري التحويل من إصدار ANSI.", L"Конвертация из версии ANSI.", L"Konvertierung von ANSI-Version.", L"Convertendo da versão ANSI.", L"Converteren van ANSI-versie.", L"Konwertowanie z wersji ANSI.", L"ANSI sürümünden dönüştürülüyor."));
+		AfxMessageBox(LL14(L"ANSI版からのコンバートを行います。", L"Converting from ANSI version.", L"Conversion depuis la version ANSI en cours.", L"Conversione dalla versione ANSI in corso.", L"Convirtiendo desde version ANSI.", L"ANSI ???? ?? ????.", L"正在从ANSI版本??。", L"???? ??????? ?? ????? ANSI.", L"Конвертация из версии ANSI.", L"Konvertierung von ANSI-Version.", L"Convertendo da versao ANSI.", L"Converteren van ANSI-versie.", L"Konwertowanie z wersji ANSI.", L"ANSI surumunden donu?turuluyor."));
 		convert();
-		AfxMessageBox(LL14(L"コンバートが完了しました。", L"Conversion completed.", L"Conversion terminée.", L"Conversione completata.", L"Conversión completada.", L"변환이 완료되었습니다.", L"转换完成。", L"اكتمل التحويل.", L"Конвертация завершена.", L"Konvertierung abgeschlossen.", L"Conversão concluída.", L"Conversie voltooid.", L"Konwersja zakończona.", L"Dönüşüm tamamlandı."));
+		AfxMessageBox(LL14(L"コンバートが完了しました。", L"Conversion completed.", L"Conversion terminee.", L"Conversione completata.", L"Conversion completada.", L"??? ???????.", L"??完成。", L"????? ???????.", L"Конвертация завершена.", L"Konvertierung abgeschlossen.", L"Conversao concluida.", L"Conversie voltooid.", L"Konwersja zako?czona.", L"Donu?um tamamland?."));
 		ReleaseMutex(Mutex);
 		exit(0);
 #else
-	CFile ab;	if(ab.Open("oggYSEDbgm.dat",CFile::modeRead,NULL)!=TRUE){
+	CFile ab;	if(ab.Open("oggYSEDbgm.dat",CFile::modeRead | CFile::shareDenyWrite,NULL)!=TRUE){
 #endif
 	}else{
 		if(ab.m_hFile != CFile::hFileNull){
@@ -243,7 +243,7 @@ BOOL COggApp::InitInstance()
 	if (savedata.ms < 30) savedata.ms = 30;
 	if (savedata.ms > 80) savedata.ms = 80;
 	if (savedata.aerocheck == 99) {
-		int abc = AfxMessageBox(LL14(L"エアロ(透過処理)がメイン画面等に実装されました。是非試してみて貰えれば。\n有効にしますか？(少し不安定な部分あります)\n(このメッセージは一回しか表示されません)\nWindows11以降では、有効にしないで下さい。", L"Aero (transparency) has been implemented on the main window, etc. Please try it.\nEnable it? (Some instability may occur)\n(This message will only be shown once)\nDo not enable on Windows 11 or later.", L"Aero (transparence) a été implémenté. Souhaitez-vous l'activer ?", L"Aero (trasparenza) implementato. Abilitare?", L"Aero (transparencia) implementado. ¿Activar?", L"Aero(투명)가 구현되었습니다. 활성화하시겠습니까?", L"已实现Aero(透明)功能。是否启用？", L"تم تنفيذ Aero. هل تفعّل؟", L"Aero реализован. Включить?", L"Aero implementiert. Aktivieren?", L"Aero implementado. Ativar?", L"Aero geïmplementeerd. Inschakelen?", L"Aero zaimplementowano. Włączyć?", L"Aero uygulandı. Etkinleştirilsin mi?"), MB_YESNO);
+		int abc = AfxMessageBox(LL14(L"エアロ(透過処理)がメイン画面等に実装されました。是非試してみて貰えれば。\n有効にしますか？(少し不安定な部分あります)\n(このメッセージは一回しか表示されません)\nWindows11以降では、有効にしないで下さい。", L"Aero (transparency) has been implemented on the main window, etc. Please try it.\nEnable it? (Some instability may occur)\n(This message will only be shown once)\nDo not enable on Windows 11 or later.", L"Aero (transparence) a ete implemente. Souhaitez-vous l'activer ?", L"Aero (trasparenza) implementato. Abilitare?", L"Aero (transparencia) implementado. ?Activar?", L"Aero(??)? ???????. ??????????", L"已??Aero(透明)功能。是否?用？", L"?? ????? Aero. ?? ??????", L"Aero реализован. Включить?", L"Aero implementiert. Aktivieren?", L"Aero implementado. Ativar?", L"Aero geimplementeerd. Inschakelen?", L"Aero zaimplementowano. W??czy??", L"Aero uyguland?. Etkinle?tirilsin mi?"), MB_YESNO);
 		if (abc == IDYES) {
 			savedata.aero = 1;
 			savedata.aerocheck = 1;
@@ -255,9 +255,9 @@ BOOL COggApp::InitInstance()
 	}
 	_tchdir(karento2);
 #if _UNICODE
-	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite, NULL) == TRUE) {
+	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 #else
-	if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite, NULL) == TRUE) {
+	if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 #endif
 		ab.Write(&savedata, sizeof(save));
 		ab.Close();
@@ -268,9 +268,9 @@ BOOL COggApp::InitInstance()
 	int nResponse = dlg.DoModal();
 	_tchdir(karento2);
 #if _UNICODE
-		if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeCreate | CFile::modeWrite,NULL)==TRUE){
+		if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive,NULL)==TRUE){
 #else
-		if(ab.Open("oggYSEDbgm.dat",CFile::modeCreate | CFile::modeWrite,NULL)==TRUE){
+		if(ab.Open("oggYSEDbgm.dat",CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive,NULL)==TRUE){
 #endif
 		ab.Write(&savedata,sizeof(save));
 		ab.Close();
@@ -403,7 +403,7 @@ void COggApp::convert()
 	save1 saveold;
 	_tchdir(karento2);
 	CFile ab;
-	if(ab.Open(_T("oggYSEDbgm.dat"),CFile::modeRead,NULL)!=TRUE){
+	if(ab.Open(_T("oggYSEDbgm.dat"),CFile::modeRead | CFile::shareDenyWrite,NULL)!=TRUE){
 		return;
 	}else{
 		ab.Read(&saveold,sizeof(save1));
@@ -500,15 +500,15 @@ void COggApp::convert()
 	s3=saveold.zweiii; ss1=savedata.zweiii;
 	MultiByteToWideChar(CP_ACP,0,s3,-1,ss1,1024);
 
-	if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeCreate | CFile::modeWrite,NULL)==TRUE){
+	if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive,NULL)==TRUE){
 		ab.Write(&savedata,sizeof(save));
 		ab.Close();
 	}
 
 	//プレイリスト移植
 	int cnt,x1,y1,cx,cy,x=-10000,y,c[4],c1[5];;
-	CFile f;if(f.Open(_T("playlist.dat"),CFile::modeRead,NULL)==TRUE){
-		CFile g;g.Open(_T("playlistu.dat"),CFile::modeCreate|CFile::modeWrite,NULL);
+	CFile f;if(f.Open(_T("playlist.dat"),CFile::modeRead | CFile::shareDenyWrite,NULL)==TRUE){
+		CFile g;g.Open(_T("playlistu.dat"),CFile::modeCreate|CFile::modeWrite | CFile::shareExclusive,NULL);
 		f.Read(&cnt,4);
 		f.Read(&x1,4);
 		f.Read(&y1,4);

@@ -83,7 +83,7 @@ void CKpilist::Init()
 	int cnt = kpicnt;
 	ss = karento2;
 	ss += "kpilist.dat";
-	if (ff.Open(ss, CFile::modeRead, NULL) == TRUE) {
+	if (ff.Open(ss, CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 		ff.Read(&cnt, sizeof(cnt));
 		for (int i = 0; i < cnt; i++) {
 			ff.Read(&kpichk[i], sizeof(BOOL));
@@ -183,7 +183,7 @@ void CKpilist::Save()
 	CString ss;
 	ss = karento2;
 	ss += "kpilist.dat";
-	if (ff.Open(ss, CFile::modeCreate | CFile::modeWrite, NULL) == TRUE) {
+	if (ff.Open(ss, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 		ff.Write(&kpicnt, sizeof(int));
 		for (int i = 0; i < kpicnt; i++) {
 			if (status == 1) {

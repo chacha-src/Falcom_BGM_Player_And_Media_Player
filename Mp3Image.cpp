@@ -283,7 +283,7 @@ void CMp3Image::Load(CString s)
 	IStream* stream;
 
 	CFile ff;
-	if (ff.Open(s, CFile::modeRead | CFile::shareDenyNone, NULL) == FALSE) {
+	if (ff.Open(s, CFile::modeRead | CFile::shareDenyWrite, NULL) == FALSE) {
 		DestroyWindow();
 		return;
 	}
@@ -414,7 +414,7 @@ void CMp3Image::Load(CString s)
 				hG = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, len);
 				memcpy(hG, decode + 16 + 16 + 9, len);
 				CreateStreamOnHGlobal(hG, TRUE, &stream);
-				//CFile fff; if (fff.Open(s1, CFile::modeCreate | CFile::modeWrite, NULL) == TRUE) {
+				//CFile fff; if (fff.Open(s1, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 				//	fff.Write(decode + 16 + 16 + 9, len-16-16-10);
 				//	fff.Close();
 				//}
@@ -467,7 +467,7 @@ void CMp3Image::Load(CString s)
 	}
 	else if (s.Right(3) == "dsf" || s.Right(3) == "dff") {
 		CString tagfile, tagname, tagalbum;
-		CFile f; f.Open(s, CFile::modeRead | CFile::shareDenyNone);
+		CFile f; f.Open(s, CFile::modeRead | CFile::shareDenyWrite);
 		f.Seek((ULONGLONG)po, CFile::begin);
 		int read = f.Read(bufimage, sizeof(bufimage));
 		f.Close();
@@ -508,7 +508,7 @@ void CMp3Image::Load(CString s)
 	if (!(s.Right(3) == "ogg" || s.Right(6) == ".qull3")) {
 		//int ijk = i;
 		//CFile fff;
-		//if (fff.Open(s1, CFile::modeCreate | CFile::modeWrite, NULL) == FALSE){
+		//if (fff.Open(s1, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == FALSE){
 		//	int a = 0;
 		//}
 		//i = ijk;
@@ -542,7 +542,7 @@ void CMp3Image::Load(CString s)
 
 	cdc0 = GetDC();
 	if (img.Load(stream) == E_FAIL) {
-		MessageBox(LL14(L"画像データが開けません。", L"Could not open image data.", L"Impossible d'ouvrir les données image.", L"Impossibile aprire i dati immagine.", L"No se puede abrir la imagen.", L"이미지 데이터를 열 수 없습니다.", L"无法打开图像数据。", L"تعذر فتح بيانات الصورة.", L"Не удалось открыть данные изображения.", L"Bilddaten konnten nicht geöffnet werden.", L"Não foi possível abrir os dados da imagem.", L"Kan afbeeldingsgegevens niet openen.", L"Nie można otworzyć danych obrazu.", L"Görüntü verileri açılamadı."));
+		MessageBox(LL14(L"画像データが開けません。", L"Could not open image data.", L"Impossible d'ouvrir les donnees image.", L"Impossibile aprire i dati immagine.", L"No se puede abrir la imagen.", L"??? ???? ? ? ????.", L"无法打??像数据。", L"???? ??? ?????? ??????.", L"Не удалось открыть данные изображения.", L"Bilddaten konnten nicht geoffnet werden.", L"Nao foi possivel abrir os dados da imagem.", L"Kan afbeeldingsgegevens niet openen.", L"Nie mo?na otworzy? danych obrazu.", L"Goruntu verileri ac?lamad?."));
 		GlobalFree(hG);
 		DestroyWindow();
 		return;
@@ -809,7 +809,7 @@ void CMp3Image::OnRButtonDown(UINT nFlags, CPoint point)
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
 	CMenu menu;
 	menu.CreatePopupMenu();
-	menu.AppendMenu(MF_STRING | MF_ENABLED, IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	menu.AppendMenu(MF_STRING | MF_ENABLED, IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"??", L"??", L"?????", L"Закрыть", L"Schliesen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 
 	ClientToScreen(&point);
 	menu.TrackPopupMenu(
