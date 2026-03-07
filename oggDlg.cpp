@@ -15728,6 +15728,7 @@ void timerog1(UINT nIDEvent)
 		if (savedata.saverenzoku == 1 && endflg == 1) {
 			plcnt++;
 			if (pl && plcnt >= pl->m_lc.GetItemCount()) plcnt = 0;
+			endflg = 0;
 			if (pl && plcnt < pl->m_lc.GetItemCount()) {
 				pl->Get(plcnt);
 				pl->SIcon(plcnt);
