@@ -2953,18 +2953,43 @@ static const EnvParams ENV_PRESETS[ENV_PRESET_COUNT] = {
 };
 
 
+// ============================================================
+//  equaliser_dsp_full.c
+//  Hyper DSP Equaliser & Acoustic Environment Engine
+//
+//  [修正履歴]
+//  FIX-1 : coreScale/extraScale を正規化範囲 [0,1] に修正
+//           旧: 最大2.17/2.50 → 音割れ・籠もりの主因
+//  FIX-2 : ProfessionalSoftSaturate の knee を 0.65→0.78 に変更
+//           旧: 通常音楽ピーク(0.70-0.90)が常にサチュレーション領域
+//  FIX-3 : BlockAnalysis による透明ゲインステージング
+//  FIX-4 : チップチューン/FM音源検出時のウェット・ハーモニック削減
+//  FIX-5 : 24bit PCM リトルエンディアン バイト順修正
+//  FIX-BYPASS : EQ全帯域フラット + 環境0 → 完全スルーパス
+//  FIX-COMP   : stagingGain 閾値緩和(0.60→0.90) + ブロック間平滑化
+//               急激な大音量時の過圧縮・籠もり感を解消
+// ============================================================
+
 // ===== フィルタ計算関数群 =====
+
+// ピーキングEQ (bell型) バイクワッドフィルタ係数を計算する
+// gainVal: 0-200 (100=フラット, 0=最大カット, 200=最大ブースト)
+// db変換: (gainVal - 100) * 0.12 → ±12dB 範囲
+// |db| < 1.2dB のときは恒等フィルタを設定してバイパス
 static void CalcPeakingEQ(Biquad* f, float freq, float q, float gainVal, int rate) {
 	if (gainVal < 0.0f) gainVal = 0.0f;
 	if (gainVal > 200.0f) gainVal = 200.0f;
 
 	float db = (gainVal - 100.0f) * 0.12f;
+
+	// 微小ゲイン時はフィルタを恒等変換(スルー)に設定
 	if (fabs(db) < 1.2f) {
 		f->b0 = 1.0f; f->b1 = 0.0f; f->b2 = 0.0f;
 		f->a1 = 0.0f; f->a2 = 0.0f;
 		return;
 	}
 
+	// ナイキスト周波数を超えないようにクランプ
 	float maxFreq = (float)rate * 0.45f;
 	if (freq > maxFreq) freq = maxFreq;
 	if (freq < 10.0f) freq = 10.0f;
@@ -2974,8 +2999,11 @@ static void CalcPeakingEQ(Biquad* f, float freq, float q, float gainVal, int rat
 	float omega = 2.0f * M_PI * freq / (float)rate;
 	float sn = sinf(omega), cs = cosf(omega);
 	float alpha = sn / (2.0f * q);
+
+	// A = 10^(db/40) : 振幅比 (電圧ゲイン換算)
 	float A = powf(10.0f, db / 40.0f);
 
+	// 数値異常ガード
 	if (!isfinite(A) || A < 0.01f || A > 100.0f) {
 		f->b0 = 1.0f; f->b1 = 0.0f; f->b2 = 0.0f;
 		f->a1 = 0.0f; f->a2 = 0.0f;
@@ -2983,18 +3011,22 @@ static void CalcPeakingEQ(Biquad* f, float freq, float q, float gainVal, int rat
 	}
 
 	float a0 = 1.0f + alpha / A;
+
+	// a0≒0は除算不能 → スルーに退避
 	if (fabs(a0) < 1e-10f) {
 		f->b0 = 1.0f; f->b1 = 0.0f; f->b2 = 0.0f;
 		f->a1 = 0.0f; f->a2 = 0.0f;
 		return;
 	}
 
+	// 標準ピーキングEQ係数 (Audio EQ Cookbook 準拠)
 	f->b0 = (1.0f + alpha * A) / a0;
 	f->b1 = (-2.0f * cs) / a0;
 	f->b2 = (1.0f - alpha * A) / a0;
 	f->a1 = (-2.0f * cs) / a0;
 	f->a2 = (1.0f - alpha / A) / a0;
 
+	// 最終数値検証 → 異常なら恒等変換
 	if (!isfinite(f->b0) || !isfinite(f->b1) || !isfinite(f->b2) ||
 		!isfinite(f->a1) || !isfinite(f->a2)) {
 		f->b0 = 1.0f; f->b1 = 0.0f; f->b2 = 0.0f;
@@ -3002,6 +3034,9 @@ static void CalcPeakingEQ(Biquad* f, float freq, float q, float gainVal, int rat
 	}
 }
 
+// 汎用 2次フィルタ係数計算
+// type==0: ローパスフィルタ (Butterworth 2次)
+// type==1: ハイパスフィルタ (Butterworth 2次)
 static void CalcFilter(Biquad* f, int type, float freq, float q, int rate) {
 	if (freq <= 0.0f) freq = 20.0f;
 	if (freq >= rate / 2.0f) freq = rate / 2.0f - 1.0f;
@@ -3011,11 +3046,13 @@ static void CalcFilter(Biquad* f, int type, float freq, float q, int rate) {
 	float a0 = 1.0f + alpha;
 
 	if (type == 0) {
+		// ローパス
 		f->b0 = ((1.0f - cs) * 0.5f) / a0;
 		f->b1 = (1.0f - cs) / a0;
 		f->b2 = ((1.0f - cs) * 0.5f) / a0;
 	}
 	else {
+		// ハイパス
 		f->b0 = ((1.0f + cs) * 0.5f) / a0;
 		f->b1 = (-(1.0f + cs)) / a0;
 		f->b2 = ((1.0f + cs) * 0.5f) / a0;
@@ -3024,6 +3061,10 @@ static void CalcFilter(Biquad* f, int type, float freq, float q, int rate) {
 	f->a2 = (1.0f - alpha) / a0;
 }
 
+// シェルビングEQ係数計算
+// type==0: ローシェルフ (低域ブースト/カット)
+// type==1: ハイシェルフ (高域ブースト/カット)
+// gainDb: dB単位。|gainDb| < 0.01 のときは恒等変換
 static void CalcShelvingEQ(Biquad* f, int type, float freq, float gainDb, int rate) {
 	if (fabs(gainDb) < 0.01f) {
 		f->b0 = 1; f->b1 = 0; f->b2 = 0; f->a1 = 0; f->a2 = 0;
@@ -3032,9 +3073,10 @@ static void CalcShelvingEQ(Biquad* f, int type, float freq, float gainDb, int ra
 	float omega = 2.0f * M_PI * freq / (float)rate;
 	float sn = sinf(omega), cs = cosf(omega);
 	float A = powf(10.0f, gainDb / 40.0f);
-	float beta = sqrtf(A) / 0.707f;
+	float beta = sqrtf(A) / 0.707f;   // Q=0.707 (Butterworth 最平坦)
 
 	if (type == 0) {
+		// ローシェルフ
 		float a0 = (A + 1.0f) + (A - 1.0f) * cs + beta * sn;
 		f->b0 = (A * ((A + 1.0f) - (A - 1.0f) * cs + beta * sn)) / a0;
 		f->b1 = (2.0f * A * ((A - 1.0f) - (A + 1.0f) * cs)) / a0;
@@ -3043,6 +3085,7 @@ static void CalcShelvingEQ(Biquad* f, int type, float freq, float gainDb, int ra
 		f->a2 = ((A + 1.0f) + (A - 1.0f) * cs - beta * sn) / a0;
 	}
 	else {
+		// ハイシェルフ
 		float a0 = (A + 1.0f) - (A - 1.0f) * cs + beta * sn;
 		f->b0 = (A * ((A + 1.0f) + (A - 1.0f) * cs + beta * sn)) / a0;
 		f->b1 = (-2.0f * A * ((A - 1.0f) + (A + 1.0f) * cs)) / a0;
@@ -3052,35 +3095,45 @@ static void CalcShelvingEQ(Biquad* f, int type, float freq, float gainDb, int ra
 	}
 }
 
+// バイクワッドフィルタ 1サンプル処理 (Direct Form II Transposed)
+// デノーマル対策: 1e-15未満をゼロクリア
+// オーバーフロー対策: ±10.0でハードリミット (通常動作では到達しない)
 static float ProcessBiquad(Biquad* f, float in) {
 	if (!isfinite(in)) return 0.0f;
 
 	float out = f->b0 * in + f->b1 * f->x1 + f->b2 * f->x2
 		- f->a1 * f->y1 - f->a2 * f->y2;
 
+	// デノーマル対策 (FTZ未設定環境向け)
 	if (fabs(out) < 1e-15f) out = 0.0f;
 	f->x2 = f->x1; f->x1 = in;
 	f->y2 = f->y1; f->y1 = out;
 	if (fabs(f->y1) < 1e-15f) f->y1 = 0.0f;
 	if (fabs(f->y2) < 1e-15f) f->y2 = 0.0f;
 
+	// NaN/Inf 発生時はバッファリセットして 0 を返す
 	if (!isfinite(out)) {
 		f->x1 = f->x2 = f->y1 = f->y2 = 0.0f;
 		return 0.0f;
 	}
+	// 過大振幅クランプ (ガード用: 通常到達しない)
 	if (out > 10.0f)  out = 10.0f;
 	if (out < -10.0f) out = -10.0f;
 	return out;
 }
 
-// ===============================
-// 拡張版山彦処理
-// ===============================
+// ============================================================
+// 拡張版山彦(やまびこ)処理
+// 山岳・渓谷エコー用: 最大4タップのマルチタップディレイ
+// yamabikoPan: 奇数タップに左右パンを付与し自然な広がりを再現
+// decayMult  : タップ番号が増えるごとに指数的に減衰
+// ============================================================
 static inline float ProcessYamabikoAdvanced(ChannelState* cs, float input, const EnvParams* env, int sampleRate)
 {
 	if (!env || env->yamabikoDelays[0] <= 0.0f) return input;
 
 	float out = input;
+	// 各タップの減衰係数: 1フレーム当たりの減衰率
 	float decayMult = powf(0.95f, 1.0f / env->yamabikoDecay);
 
 	for (int i = 0; i < 4; i++) {
@@ -3091,17 +3144,21 @@ static inline float ProcessYamabikoAdvanced(ChannelState* cs, float input, const
 		if (readPos < 0) readPos += cs->yamabikoBufSize;
 		float delayed = cs->yamabikoBuf[readPos];
 		float gain = env->yamabikoGains[i] * powf(decayMult, (float)i);
+		// 奇数タップにパン効果を付与 (左右交互)
 		float panEffect = (i % 2) ? env->yamabikoPan : -env->yamabikoPan;
 		delayed *= (1.0f + panEffect * 0.3f);
 		out += delayed * gain;
 	}
 
+	// 入力信号を循環バッファに書き込む
 	cs->yamabikoBuf[cs->yamabikoPos] = input;
 	cs->yamabikoPos++;
 	if (cs->yamabikoPos >= cs->yamabikoBufSize) cs->yamabikoPos = 0;
 	return out;
 }
 
+// LFO (低周波発振器) 出力計算
+// サイン波 × depth を返し、位相を sampleRate で正規化して進める
 static inline float UpdateLFO(LFO* lfo, int sampleRate) {
 	if (lfo->frequency <= 0.0f || lfo->depth <= 0.0f) return 0.0f;
 	float value = sinf(lfo->phase * 2.0f * M_PI) * lfo->depth;
@@ -3110,8 +3167,16 @@ static inline float UpdateLFO(LFO* lfo, int sampleRate) {
 	return value;
 }
 
+// ============================================================
+// ディフュージョン処理 (拡散反射シミュレーション)
+// 最大3段のオールパスフィルタカスケードで密度を制御
+// 山岳・渓谷エコー時は弱いディフュージョンのみ適用 (clear感を維持)
+// density > 0.3: 第2段追加
+// density > 0.6: 第3段追加
+// ============================================================
 static inline float ProcessDiffusion(ChannelState* cs, float input, float diffusion, float density, int envType)
 {
+	// 山岳・渓谷エコー: ディフュージョンを最小限に抑えてエコーの輪郭を保つ
 	if (envType == TYPE_MOUNTAIN_ECHO || envType == TYPE_CANYON_ECHO) {
 		float weakDiff = diffusion * 0.12f;
 		if (weakDiff <= 0.001f) return input;
@@ -3132,6 +3197,7 @@ static inline float ProcessDiffusion(ChannelState* cs, float input, float diffus
 
 	if (diffusion <= 0.0f) return input;
 
+	// 第1段: 主ディフュージョン (素数遅延を使用してコムフィルタを回避)
 	static const int delays1[8] = { 37, 53, 73, 97, 127, 163, 211, 277 };
 	float output = input;
 	float coeff = diffusion * 0.6f;
@@ -3145,6 +3211,7 @@ static inline float ProcessDiffusion(ChannelState* cs, float input, float diffus
 		cs->diffusionPos1[i] = (cs->diffusionPos1[i] + 1) % 1024;
 	}
 
+	// 第2段: density > 0.3 で追加 (より密な反射)
 	if (density > 0.3f) {
 		static const int delays2[8] = { 23, 31, 41, 59, 71, 89, 107, 131 };
 		float coeff2 = density * 0.5f;
@@ -3159,6 +3226,7 @@ static inline float ProcessDiffusion(ChannelState* cs, float input, float diffus
 		}
 	}
 
+	// 第3段: density > 0.6 でさらに追加 (超高密度反射)
 	if (density > 0.6f) {
 		static const int delays3[8] = { 13, 17, 19, 29, 37, 43, 53, 67 };
 		float coeff3 = (density - 0.6f) * 0.6f;
@@ -3175,15 +3243,20 @@ static inline float ProcessDiffusion(ChannelState* cs, float input, float diffus
 	return output;
 }
 
+// エキサイター: 高域を高調波歪みで倍音付加
+// HPFで抽出した高域成分を非線形処理し元信号に加算
 static inline float Exciter(float input, Biquad* hpf, float amount) {
 	if (amount <= 0.0f) return input;
 	float highFreq = ProcessBiquad(hpf, input);
 	float enhanced = highFreq * 2.5f;
+	// ソフトクリップ (折り返し型)
 	if (enhanced > 1.0f) enhanced = 1.0f - (enhanced - 1.0f) * 0.3f;
 	if (enhanced < -1.0f) enhanced = -1.0f + (enhanced + 1.0f) * 0.3f;
 	return input + (enhanced - highFreq) * amount * 1.3f;
 }
 
+// ソフトリミッター: threshold=0.7 のスムーズな膝特性
+// knee領域: x/(1+|x-th|) 型の双曲線で自然に圧縮
 static inline float SoftLimiter(float x) {
 	const float threshold = 0.7f;
 	if (x > threshold) { float o = x - threshold; x = threshold + (1.0f - threshold) * (o / (1.0f + o)); }
@@ -3191,6 +3264,8 @@ static inline float SoftLimiter(float x) {
 	return x;
 }
 
+// フラッターエコー: テープヘッド揺れを模したビブラート的エコー
+// flutterPhase で変調周波数を制御し filtered 成分を加算
 static inline float ProcessFlutterEcho(ChannelState* cs, float input, float amount, int sampleRate) {
 	if (amount <= 0.0f) return input;
 	float flutterFreq = 8.0f + amount * 4.0f;
@@ -3201,6 +3276,8 @@ static inline float ProcessFlutterEcho(ChannelState* cs, float input, float amou
 	return input + filtered * modulation;
 }
 
+// 材質吸収シミュレーション: LPFで材料固有の高域吸収を再現
+// roughness が高いほど全体レベルも低下 (拡散損失)
 static inline float ProcessMaterialAbsorption(ChannelState* cs, float input, float absorption, float roughness) {
 	if (absorption <= 0.0f && roughness <= 0.0f) return input;
 	float absorbed = ProcessBiquad(&cs->materialFilter, input);
@@ -3208,6 +3285,8 @@ static inline float ProcessMaterialAbsorption(ChannelState* cs, float input, flo
 	return input * (1.0f - absorption) + absorbed * absorption;
 }
 
+// ウォームス(温もり)処理: 低域シェルフ + スムージングで音の温もりを付与
+// warmthState: 指数平滑フィルタ (係数0.98/0.02)
 static inline float ProcessWarmth(ChannelState* cs, float input, float warmth) {
 	if (warmth <= 0.0f) return input;
 	float warmed = ProcessBiquad(&cs->warmthFilter, input);
@@ -3215,35 +3294,45 @@ static inline float ProcessWarmth(ChannelState* cs, float input, float warmth) {
 	return input * (1.0f - warmth * 0.3f) + cs->warmthState * warmth * 0.3f;
 }
 
+// ブライトネス: 奇数高調波 (3次) を加算して輝きを調整
+// brightness = 0.5 のとき完全スルー (±デッドバンド 0.01)
+// brightnessState: 指数平滑 (係数0.96/0.04) でポップ防止
 static inline float ProcessBrightness(float input, float* brightnessState, float brightness) {
 	if (fabs(brightness - 0.5f) < 0.01f) return input;
-	float harmonic = input * input * input;
+	float harmonic = input * input * input;   // 3次歪み成分
 	float brightnessFactor = (brightness - 0.5f) * 2.0f;
 	*brightnessState = *brightnessState * 0.96f + harmonic * brightnessFactor * 0.04f;
 	return input + *brightnessState * 0.1f;
 }
 
+// 共鳴処理: 特定周波数のピーキングEQで空間共鳴を模倣
 static inline float ProcessResonance(ChannelState* cs, float input, float freq, float q, float amount) {
 	if (amount <= 0.0f || freq <= 0.0f) return input;
 	return input + ProcessBiquad(&cs->resonanceFilter, input) * amount * 0.5f;
 }
 
+// 金属質感: 高Qハイパスで金属的な倍音を付加
 static inline float ProcessMetallic(ChannelState* cs, float input, float amount) {
 	if (amount <= 0.0f) return input;
 	return input + ProcessBiquad(&cs->metallicFilter, input) * amount * 0.4f;
 }
 
+// ガラス質感: より高域のハイパスで透明感・鋭さを付加
 static inline float ProcessGlass(ChannelState* cs, float input, float amount) {
 	if (amount <= 0.0f) return input;
 	return input + ProcessBiquad(&cs->glassFilter, input) * amount * 0.35f;
 }
 
+// シマー: 高調波ゆらぎで空間的な輝きを付加
+// shimmerState: 指数平滑値を高速サイン波で変調
 static inline float ProcessShimmer(ChannelState* cs, float input, float amount, int sampleRate) {
 	if (amount <= 0.0f) return input;
 	cs->shimmerState = cs->shimmerState * 0.992f + input * 0.008f;
 	return input + sinf(cs->shimmerState * 12.0f) * amount * 0.15f;
 }
 
+// ドップラー効果: 低速正弦波変調でピッチ感覚的な変化を模倣
+// dopplerPhase: 0.5Hz 固定 (0.5/sampleRate per sample)
 static inline float ProcessDoppler(ChannelState* cs, float input, float amount, int sampleRate) {
 	if (amount <= 0.0f) return input;
 	cs->dopplerPhase += 0.5f / (float)sampleRate;
@@ -3274,13 +3363,14 @@ static inline float ProfessionalSoftSaturate(float x)
 {
 	if (!isfinite(x)) return 0.0f;
 
-	const float knee = 0.78f;   // [FIX-2] 旧 0.65
-	const float ceiling = 0.97f;   // [FIX-2] 旧 0.98
-	const float r = ceiling - knee;  // = 0.19
+	const float knee = 0.78f;          // [FIX-2] 旧 0.65
+	const float ceiling = 0.97f;          // 漸近上限
+	const float r = ceiling - knee; // = 0.19
 
 	float absX = fabsf(x);
-	if (absX <= knee) return x;
+	if (absX <= knee) return x;           // knee以下は完全透明
 
+	// tanh で滑らかに上限へ収束 (arg上限8: 精度で十分)
 	float arg = (absX - knee) / r;
 	if (arg > 8.0f) arg = 8.0f;
 
@@ -3299,6 +3389,13 @@ static inline float ProfessionalSoftSaturate(float x)
 //   FM合成音  : CF ≈ 2.5  → isChiptune=TRUE
 //   通常音楽  : CF ≈ 4-8  → 標準処理
 //   音声のみ  : CF > 9    → isVoice=TRUE
+//
+// 【FIX-COMP: stageTarget 変更】
+//   旧: isChiptune=0.65 / 通常=0.60
+//   新: isChiptune=0.82 / 通常=0.90
+//   理由: 旧値では通常音楽(ピーク0.7-0.9)が常に圧縮対象となり
+//         籠もり感の原因だった。最終保護は ProfessionalSoftSaturate
+//         (knee=0.78) に完全委譲するため、staging閾値を大幅緩和。
 // ============================================================
 typedef struct {
 	float peak;
@@ -3306,7 +3403,7 @@ typedef struct {
 	float crestFactor;
 	BOOL  isChiptune;
 	BOOL  isVoice;
-	float stagingGain;
+	float stagingGain;   // masterGain適用後にstageTargetを超えた分の補正ゲイン
 } BlockAnalysis;
 
 static BlockAnalysis AnalyzeBlock(
@@ -3318,6 +3415,7 @@ static BlockAnalysis AnalyzeBlock(
 	double sumSq = 0.0;
 	int    count = 0;
 
+	// ピーク・RMS を一括計算
 	for (int i = 0; i < numSamples; i++) {
 		for (int ch = 0; ch < wavch && ch < MAX_CH; ch++) {
 			float s = 0.0f;
@@ -3340,12 +3438,17 @@ static BlockAnalysis AnalyzeBlock(
 	if (count > 0 && sumSq > 0.0)
 		ba.rms = (float)sqrt(sumSq / count);
 
+	// クレストファクター = ピーク / RMS
 	ba.crestFactor = (ba.rms > 0.0002f) ? (ba.peak / ba.rms) : 1.0f;
 
+	// コンテンツ分類
 	ba.isChiptune = (ba.crestFactor < 3.5f && ba.peak > 0.04f);
 	ba.isVoice = (ba.crestFactor > 9.0f && ba.peak > 0.02f);
 
-	const float stageTarget = ba.isChiptune ? 0.65f : 0.60f;
+	// [FIX-COMP] stageTarget 緩和: 通常音楽はほぼ無処理
+	// ProfessionalSoftSaturate(knee=0.78) が最終保護を担う
+	const float stageTarget = ba.isChiptune ? 0.82f : 0.90f;
+
 	float postGainPeak = ba.peak * masterGain;
 	if (postGainPeak > stageTarget && postGainPeak > 0.001f)
 		ba.stagingGain = stageTarget / postGainPeak;
@@ -3354,7 +3457,19 @@ static BlockAnalysis AnalyzeBlock(
 }
 
 
+// ============================================================
+// グローバル状態: ブロック間ゲイン平滑値 [FIX-COMP]
+// ============================================================
+// InitEngine でリセット。attack/release 非対称で自然な圧縮感を実現。
+// attack =0.08: 1ブロックで最大8%圧縮 → 急激な大音量でも緩やかに追従
+// release=0.30: 3〜4ブロックで元のゲインに復帰 → 不自然な揺り戻しなし
+static float g_stagingGainSmooth = 1.0f;
+
+
 // ===== エンジン初期化 =====
+// サンプルレート変更または reset==1 時に呼ばれる
+// 全チャンネル状態のクリア、ディレイバッファのゼロ埋め、
+// リミッター係数の再計算を行う
 static void InitEngine(int rate) {
 	memset(g_channels, 0, sizeof(g_channels));
 	memset(g_delayMemory, 0, sizeof(g_delayMemory));
@@ -3379,6 +3494,7 @@ static void InitEngine(int rate) {
 		g_channels[i].brightnessState = 0.0f;
 		g_channels[i].shimmerState = 0.0f;
 
+		// 山彦バッファ: rate×2秒分 (最大遅延 2秒)
 		g_channels[i].yamabikoBufSize = rate * 2;
 		g_channels[i].yamabikoPos = 0;
 
@@ -3398,6 +3514,7 @@ static void InitEngine(int rate) {
 	for (int i = 0; i < 15; i++) g_lastEqValues[i] = 100;
 	for (int i = 0; i < 5; i++) g_lastExtendedParams[i] = 100;
 
+	// リミッター係数: attack=1ms, release=100ms
 	for (int ch = 0; ch < 2; ch++) {
 		g_limiter[ch].envelope = 1.0f;
 		g_limiter[ch].threshold = 0.95f;
@@ -3407,9 +3524,13 @@ static void InitEngine(int rate) {
 
 	g_lastEffectAmount = 50;
 	g_initialized = TRUE;
+
+	// [FIX-COMP] ブロック間平滑ゲインをリセット
+	g_stagingGainSmooth = 1.0f;
 }
 
 // ===== 山彦バッファ解放 =====
+// アプリ終了時またはエンジン破棄時に呼ぶ
 void FreeEngine(void) {
 	for (int i = 0; i < MAX_CH; i++) {
 		if (g_channels[i].yamabikoBuf != NULL) {
@@ -3421,16 +3542,23 @@ void FreeEngine(void) {
 	}
 }
 
+// 汎用クランプ
 static float ClampFloat(float v, float lo, float hi) {
 	return (v < lo) ? lo : (v > hi) ? hi : v;
 }
 
+// 擬似乱数 (ハッシュベース, 範囲[0,1])
+// ApplyEnvSeparation でプリセット毎の個性付けに使用
 static float Hash01(int idx, int salt) {
 	unsigned int x = (unsigned int)(idx * 1664525u + 1013904223u + (unsigned int)salt * 2654435761u);
 	x ^= (x >> 16); x *= 2246822519u; x ^= (x >> 13);
 	return (x & 0xFFFFFF) / 16777215.0f;
 }
 
+// 環境プリセット間の分離調整
+// 同カテゴリ内の各プリセットに微妙な差異を付与して聴き分けを容易にする
+// presetIndex: 1-100 (0は無処理)
+// 各パラメータにカテゴリバイアス + ハッシュオフセットを加算
 static void ApplyEnvSeparation(int presetIndex, EnvParams* env) {
 	if (!env || presetIndex <= 0) return;
 	int category = (presetIndex - 1) / 10;
@@ -3443,6 +3571,7 @@ static void ApplyEnvSeparation(int presetIndex, EnvParams* env) {
 	float h2 = Hash01(presetIndex, 23) - 0.5f;
 	float h3 = Hash01(presetIndex, 37) - 0.5f;
 
+	// カテゴリ別バイアステーブル (roomSize/damping/stereoWidth)
 	static const float kRoomBias[10] = { 0.0f, 0.25f,-0.10f, 0.20f,-0.20f, 0.35f, 0.10f,-0.15f, 0.45f, 0.30f };
 	static const float kDampBias[10] = { 0.0f,-0.05f, 0.15f,-0.05f, 0.20f,-0.10f, 0.05f, 0.10f,-0.20f,-0.15f };
 	static const float kWidthBias[10] = { 0.0f, 0.10f,-0.05f, 0.05f,-0.10f, 0.20f, 0.15f, 0.00f, 0.40f, 0.30f };
@@ -3454,7 +3583,7 @@ static void ApplyEnvSeparation(int presetIndex, EnvParams* env) {
 	env->damping = ClampFloat(env->damping + kDampBias[category] + h2 * 0.20f, 0.0f, 1.0f);
 }
 
-// 旧 ProcessDynamicLimiter（互換維持・equaliser内では呼ばない）
+// 旧ダイナミックリミッター (equaliser内では未使用・互換維持のみ)
 static float ProcessDynamicLimiter(DynamicLimiter* lim, float input) {
 	float absInput = fabsf(input);
 	float targetGain = (absInput > lim->threshold) ? lim->threshold / absInput : 1.0f;
@@ -3464,9 +3593,13 @@ static float ProcessDynamicLimiter(DynamicLimiter* lim, float input) {
 }
 
 
-// ===============================
+// ============================================================
 // ResampleUp() - Lanczos-2 アップサンプリング
-// ===============================
+// ============================================================
+// srcRate < 44100 の音源を 44100Hz に変換して内部処理する
+// Lanczos カーネル (a=2): sinc(x) * sinc(x/a) の積
+// タップ数: ±2 (計5点) — 品質とCPU負荷のバランス点
+// ============================================================
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -3496,6 +3629,7 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 	float* dstFloat = (float*)malloc(dstSamples * channels * sizeof(float));
 	unsigned char* pSrc = (unsigned char*)srcData;
 
+	// 整数 PCM → 浮動小数点 [-1.0, 1.0] に変換
 	if (bitDepth == 16) {
 		short* p = (short*)srcData;
 		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 32768.0f);
@@ -3503,6 +3637,7 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 	else if (bitDepth == 24) {
 		for (int i = 0; i < srcSamples * channels; i++) {
 			int o = i * 3;
+			// [FIX-5] リトルエンディアン 24bit 正規バイト順
 			int s = (pSrc[o] << 8) | (pSrc[o + 1] << 16) | ((signed char)pSrc[o + 2] << 24);
 			srcFloat[i] = s * (1.0f / 2147483648.0f);
 		}
@@ -3512,11 +3647,12 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 2147483648.0f);
 	}
 
+	// Lanczos-2 補間
 	double ratio = (double)dstRate / srcRate;
 	for (int i = 0; i < dstSamples; i++) {
 		double srcPos = i / ratio;
-		int srcInt = (int)srcPos;
-		float frac = (float)(srcPos - srcInt);
+		int    srcInt = (int)srcPos;
+		float  frac = (float)(srcPos - srcInt);
 		for (int ch = 0; ch < channels; ch++) {
 			float sum = 0.0f;
 			for (int j = -2; j <= 2; j++) {
@@ -3528,6 +3664,7 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 		}
 	}
 
+	// 浮動小数点 → 整数 PCM に変換
 	unsigned char* pDst = (unsigned char*)(*dstData);
 	if (bitDepth == 16) {
 		short* p = (short*)(*dstData);
@@ -3560,11 +3697,13 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 	free(srcFloat); free(dstFloat);
 }
 
+// 簡易ローパスフィルタ (3点移動平均)
+// ResampleDown 前のエイリアシング抑制プレフィルタとして使用
 static void ApplyFastLPF(float* data, int samples, int channels, float cutoff) {
 	for (int ch = 0; ch < channels; ch++) {
 		float prev = data[ch];
 		for (int i = 1; i < samples - 1; i++) {
-			int idx = i * channels + ch;
+			int   idx = i * channels + ch;
 			float curr = data[idx], next = data[idx + channels];
 			data[idx] = (prev + curr + next) * 0.333333f;
 			prev = curr;
@@ -3572,6 +3711,9 @@ static void ApplyFastLPF(float* data, int samples, int channels, float cutoff) {
 	}
 }
 
+// ResampleDown() - Lanczos-2 ダウンサンプリング
+// 44100Hz 内部処理後に元のサンプルレートへ戻す
+// cutoff < 0.9 の場合は3点LPFでエイリアシングを抑制
 void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	int srcRate, int dstRate, int channels, int bitDepth) {
 	int bytesPerSample = bitDepth / 8;
@@ -3598,14 +3740,15 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 2147483648.0f);
 	}
 
+	// エイリアシング防止: ダウンサンプル比が大きいときのみ適用
 	float cutoff = (float)dstRate / srcRate;
 	if (cutoff < 0.9f) ApplyFastLPF(srcFloat, srcSamples, channels, cutoff);
 
 	double ratio = (double)dstRate / srcRate;
 	for (int i = 0; i < dstSamples; i++) {
 		double srcPos = i / ratio;
-		int srcInt = (int)srcPos;
-		float frac = (float)(srcPos - srcInt);
+		int    srcInt = (int)srcPos;
+		float  frac = (float)(srcPos - srcInt);
 		for (int ch = 0; ch < channels; ch++) {
 			float sum = 0.0f;
 			for (int j = -2; j <= 2; j++) {
@@ -3621,15 +3764,13 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	if (bitDepth == 16) {
 		short* p = (short*)dstData;
 		for (int i = 0; i < dstSamples * channels; i++) {
-			float s = dstFloat[i];
-			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+			float s = dstFloat[i]; if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
 			p[i] = (short)(s * 32767.0f);
 		}
 	}
 	else if (bitDepth == 24) {
 		for (int i = 0; i < dstSamples * channels; i++) {
-			float s = dstFloat[i];
-			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+			float s = dstFloat[i]; if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
 			int v = (int)(s * 8388607.0f); int o = i * 3;
 			pDst[o] = v & 0xFF; pDst[o + 1] = (v >> 8) & 0xFF; pDst[o + 2] = (v >> 16) & 0xFF;
 		}
@@ -3637,8 +3778,7 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	else if (bitDepth == 32) {
 		int* p = (int*)dstData;
 		for (int i = 0; i < dstSamples * channels; i++) {
-			float s = dstFloat[i];
-			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+			float s = dstFloat[i]; if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
 			p[i] = (int)(s * 2147483647.0f);
 		}
 	}
@@ -3646,10 +3786,17 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 }
 
 
-// ===============================
+// ============================================================
 // equaliser() - メイン処理関数 完全版
-// ===============================
+//
+// 呼び出し規約:
+//   data  : 処理対象 PCM バッファ (インプレース処理)
+//   len   : バッファバイト長
+//   reset : 0=通常, 1=強制初期化, 2=EQプリセット再読み込みのみ
+// ============================================================
 void equaliser(void* data, int len, BOOL reset) {
+
+	// reset==2: EQプリセット値を savedata.eq に再ロードして即返す
 	if (reset == 2) {
 		int currentEqPre = savedata.eqsoundeq;
 		if (currentEqPre >= 0 && currentEqPre < 51 && currentEqPre != 9) {
@@ -3660,7 +3807,8 @@ void equaliser(void* data, int len, BOOL reset) {
 	}
 
 	// ========================================
-	// リサンプリング
+	// リサンプリング: 44100Hz未満を一時的に44100Hzへ変換
+	// 内部処理は常に44100Hz以上で行い、終端でダウンサンプル
 	// ========================================
 	int  originalRate = wavbit;
 	int  originalLen = len;
@@ -3694,15 +3842,6 @@ void equaliser(void* data, int len, BOOL reset) {
 	if (effectAmount < 0)   effectAmount = 0;
 	if (effectAmount > 100) effectAmount = 100;
 
-	// ============================================================
-	// [FIX-1] スケールファクター修正
-	// 旧: coreScale最大2.17 / extraScale最大2.50 → 音割れ・籠もりの主因
-	// 新: 正規化範囲 [0,1] で体感的エフェクト強度を維持
-	// ============================================================
-	float coreScale = 0.25f + (effectAmount / 100.0f) * 0.75f;  // [0.25, 1.00]
-	float extraScale = effectAmount / 100.0f;                      // [0.00, 1.00]
-	float reflectionScale = 0.50f + (effectAmount / 100.0f) * 0.50f;  // [0.50, 1.00]
-
 	int masterVolume = savedata.eq[15];
 	int clarity = savedata.eq[16];
 	int balance = savedata.eq[17];
@@ -3715,6 +3854,41 @@ void equaliser(void* data, int len, BOOL reset) {
 	density = (int)ClampFloat((float)density, 0.0f, 200.0f);
 	spatial = (int)ClampFloat((float)spatial, 0.0f, 200.0f);
 
+	// ============================================================
+	// [FIX-BYPASS] 完全バイパス判定
+	// 条件:
+	//   ・環境プリセット == 0 (無処理環境)
+	//   ・masterVolume/clarity/balance/density/spatial がすべて100
+	//   ・EQ帯域 eq[0-14] がすべて100 (フラット)
+	// 上記すべて満たす場合は一切の処理をせず即返す。
+	// リサンプリングが不要な場合(≥44100Hz)はそのまま、
+	// リサンプリングが走っていた場合は tempBuffer を解放して返す。
+	// ============================================================
+	if (currentEnvPre == 0 &&
+		masterVolume == 100 && clarity == 100 &&
+		balance == 100 && density == 100 && spatial == 100)
+	{
+		bool allFlat = true;
+		for (int i = 0; i < 15; i++) {
+			if (savedata.eq[i] != 100) { allFlat = false; break; }
+		}
+		if (allFlat) {
+			// テンポラリバッファが確保されていれば解放
+			if (needsResampling && tempBuffer) free(tempBuffer);
+			return;   // 完全スルー: data の内容を一切変更しない
+		}
+	}
+
+	// ============================================================
+	// [FIX-1] スケールファクター修正
+	// 旧: coreScale最大2.17 / extraScale最大2.50 → 音割れ・籠もりの主因
+	// 新: 正規化範囲 [0,1] で体感的エフェクト強度を維持
+	// ============================================================
+	float coreScale = 0.25f + (effectAmount / 100.0f) * 0.75f;  // [0.25, 1.00]
+	float extraScale = effectAmount / 100.0f;                      // [0.00, 1.00]
+	float reflectionScale = 0.50f + (effectAmount / 100.0f) * 0.50f;  // [0.50, 1.00]
+
+	// EQプリセット切り替え検出
 	if (currentEqPre != g_lastEqPreset) {
 		if (currentEqPre >= 0 && currentEqPre < 51 && currentEqPre != 9)
 			memcpy(savedata.eq, EQ_PRESETS[currentEqPre], sizeof(int) * 15);
@@ -3722,12 +3896,14 @@ void equaliser(void* data, int len, BOOL reset) {
 		forceUpdate = TRUE;
 	}
 
+	// EQ値変化検出
 	BOOL eqChanged = forceUpdate;
 	if (!eqChanged) {
 		for (int i = 0; i < 15; i++)
 			if (savedata.eq[i] != g_lastEqValues[i]) { eqChanged = TRUE; break; }
 	}
 
+	// 拡張パラメータ変化検出
 	BOOL extendedChanged = FALSE;
 	if (masterVolume != g_lastExtendedParams[0] || clarity != g_lastExtendedParams[1] ||
 		balance != g_lastExtendedParams[2] || density != g_lastExtendedParams[3] ||
@@ -3738,26 +3914,32 @@ void equaliser(void* data, int len, BOOL reset) {
 		g_lastExtendedParams[4] = spatial;
 	}
 
+	// EQ/拡張パラメータが変化したときのみフィルタ係数を再計算 (CPU節約)
 	if (eqChanged || extendedChanged) {
 		memcpy(g_lastEqValues, savedata.eq, sizeof(int) * 15);
 		for (int ch = 0; ch < MAX_CH; ch++) {
+			// 15バンドEQ: 帯域10以降はQ=1.0に変更 (高域帯域をやや広めに)
 			for (int b = 0; b < EQ_BANDS; b++) {
 				float qVal = (b >= 10) ? 1.0f : 1.414f;
 				CalcPeakingEQ(&g_channels[ch].eqFilters[b], EQ_FREQS[b], qVal, (float)savedata.eq[b], wavbitbackup);
 			}
+			// クラリティ: 5kHz 前後のプレゼンス調整
 			float clarityDb = (clarity - 100.0f) * 0.18f;
 			CalcPeakingEQ(&g_channels[ch].clarityFilter, 5000.0f, 1.5f, 100.0f + clarityDb / 0.12f, wavbitbackup);
 
+			// バランス: 低域/高域のシェルフで輪郭/温もりのバランスを調整
 			float balanceDb = (balance - 100.0f) * 0.12f;
 			CalcShelvingEQ(&g_channels[ch].bassBalanceFilter, 0, 250.0f, -balanceDb, wavbitbackup);
 			CalcShelvingEQ(&g_channels[ch].trebleBalanceFilter, 1, 4000.0f, balanceDb, wavbitbackup);
 
+			// デンシティ: 600Hz/1400Hz 近傍の中域密度を調整
 			float densityDb = (density - 100.0f) * 0.15f;
 			CalcPeakingEQ(&g_channels[ch].densityFilter1, 600.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
 			CalcPeakingEQ(&g_channels[ch].densityFilter2, 1400.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
 		}
 	}
 
+	// 環境プリセット/エフェクト量が変化したときのみフィルタ係数を再計算
 	if (currentEnvPre != g_lastEnvPreset || effectAmount != g_lastEffectAmount || forceUpdate) {
 		if (currentEnvPre < 0 || currentEnvPre >= ENV_PRESET_COUNT) currentEnvPre = 0;
 
@@ -3767,22 +3949,29 @@ void equaliser(void* data, int len, BOOL reset) {
 			CalcFilter(&g_channels[ch].envHpf, 1, ep->hpfFreq, 0.707f, wavbitbackup);
 			CalcFilter(&g_channels[ch].exciterFilter, 1, 6000.0f, 0.707f, wavbitbackup);
 
+			// ダンピングフィルタ: damping値に応じてカットオフ周波数を変化
 			float dampFreq = 4000.0f + (ep->damping * extraScale * 8000.0f);
 			CalcFilter(&g_channels[ch].dampingFilter, 0, dampFreq, 0.5f, wavbitbackup);
 
+			// 帯域別リバーブ特性フィルタ
 			CalcFilter(&g_channels[ch].bassReverbFilter, 0, fminf(500.0f, 250.0f * ep->bassReverbTime), 0.707f, wavbitbackup);
 			CalcPeakingEQ(&g_channels[ch].midReverbFilter, fminf(3000.0f, 1500.0f * ep->midReverbTime), 1.0f, 100.0f, wavbitbackup);
 			CalcFilter(&g_channels[ch].trebleReverbFilter, 1, fminf(12000.0f, 6000.0f * ep->trebleReverbTime), 0.707f, wavbitbackup);
 
+			// 材質・ウォームス関連フィルタ
 			CalcFilter(&g_channels[ch].materialFilter, 0, 2000.0f - (ep->materialAbsorption * 1500.0f), 0.707f, wavbitbackup);
 			CalcShelvingEQ(&g_channels[ch].warmthFilter, 0, 300.0f, (ep->warmth - 0.5f) * 6.0f, wavbitbackup);
 
-			if (ep->flutterEcho > 0.0f) CalcFilter(&g_channels[ch].flutterFilter, 1, 1200.0f, 2.0f, wavbitbackup);
+			if (ep->flutterEcho > 0.0f)
+				CalcFilter(&g_channels[ch].flutterFilter, 1, 1200.0f, 2.0f, wavbitbackup);
 			if (ep->resonanceFreq > 0.0f && ep->resonanceQ > 0.0f)
 				CalcPeakingEQ(&g_channels[ch].resonanceFilter, ep->resonanceFreq, ep->resonanceQ, 100.0f, wavbitbackup);
-			if (ep->metallic > 0.0f) CalcFilter(&g_channels[ch].metallicFilter, 1, 4500.0f, 3.5f, wavbitbackup);
-			if (ep->glassiness > 0.0f) CalcFilter(&g_channels[ch].glassFilter, 1, 8000.0f, 4.0f, wavbitbackup);
+			if (ep->metallic > 0.0f)
+				CalcFilter(&g_channels[ch].metallicFilter, 1, 4500.0f, 3.5f, wavbitbackup);
+			if (ep->glassiness > 0.0f)
+				CalcFilter(&g_channels[ch].glassFilter, 1, 8000.0f, 4.0f, wavbitbackup);
 
+			// LFO設定
 			g_channels[ch].lfo.frequency = ep->modSpeed * extraScale;
 			g_channels[ch].lfo.depth = ep->modDepth * extraScale * 10.0f;
 		}
@@ -3793,6 +3982,7 @@ void equaliser(void* data, int len, BOOL reset) {
 	const EnvParams* env = &ENV_PRESETS[g_lastEnvPreset];
 	BOOL isYamabiko = (env->type == TYPE_MOUNTAIN_ECHO || env->type == TYPE_CANYON_ECHO);
 
+	// プリディレイ・メインディレイ サンプル数計算
 	int preDelaySamps = (int)(env->preDelayMs * coreScale * wavbitbackup / 1000.0f);
 	int mainDelaySamps = (int)(env->delayTimeMs * env->roomSize * wavbitbackup / 1000.0f);
 
@@ -3803,22 +3993,54 @@ void equaliser(void* data, int len, BOOL reset) {
 	int bytesPerSample = wavsam / 8;
 	int numSamples = processLen / (bytesPerSample * wavch);
 	unsigned char* pRaw = (unsigned char*)processData;
-	int stereoOffset = (wavbitbackup * 20) / 1000;
+	int stereoOffset = (wavbitbackup * 20) / 1000;  // L/R間の微小ずれ (約20ms)
 
 	// ============================================================
-	// [FIX-3][FIX-4] ブロック解析: 透明ゲインステージング + コンテンツ検出
+	// [FIX-3][FIX-4] ブロック解析
+	// ブロック単位でコンテンツ検出 + ゲインステージング
 	// ============================================================
 	float masterGain = masterVolume / 100.0f;
 
 	BlockAnalysis ba = AnalyzeBlock(pRaw, numSamples, wavch, wavsam, bytesPerSample, masterGain);
 
-	float effectiveMasterGain = masterGain * ba.stagingGain;
+	// ============================================================
+	// [FIX-COMP] ブロック間ゲイン平滑化
+	//
+	// attack=0.08 : 急激な大音量に対しては「ゆっくり」追従
+	//               → 圧縮が一気にかかって音が籠もるのを防ぐ
+	// release=0.30: ゲインが戻るときは「素早く」追従
+	//               → 静音部への戻りが遅れず自然
+	//
+	// 旧: ブロック単位で瞬時にgain変化 → 切れ目が不連続で籠もり感
+	// 新: 指数平滑でフレーム間をなめらかにつなぐ
+	// ============================================================
+	{
+		const float kAttack = 0.08f;   // 1ブロック最大8%圧縮
+		const float kRelease = 0.30f;   // 3〜4ブロックで復帰
 
-	// チップチューン/FM音源判定時: ディフュージョン・ウェット・ハーモニックを大幅削減
+		if (ba.stagingGain < g_stagingGainSmooth)
+			// 大音量側: 緩やかに追従 (attack)
+			g_stagingGainSmooth += (ba.stagingGain - g_stagingGainSmooth) * kAttack;
+		else
+			// 静音側: 素早く復帰 (release)
+			g_stagingGainSmooth += (ba.stagingGain - g_stagingGainSmooth) * kRelease;
+
+		g_stagingGainSmooth = ClampFloat(g_stagingGainSmooth, 0.10f, 1.0f);
+	}
+
+	// 実効マスターゲイン = ユーザー設定 × 平滑化済みstagingGain
+	float effectiveMasterGain = masterGain * g_stagingGainSmooth;
+
+	// [FIX-4] チップチューン/FM音源検出時のスケーリング係数
+	// isChiptune=TRUE のとき:
+	//   wetScale=0.22       : リバーブ感を大幅削減 (エコーが前に出すぎないように)
+	//   harmonicScale=0.00  : 高調波歪み完全無効 (元々歪みの少ない信号に追加しない)
+	//   diffusionScale=0.12 : 拡散を最小限に (チップ音の輪郭を保つ)
 	float wetScale = ba.isChiptune ? 0.22f : 1.0f;
 	float harmonicScale = ba.isChiptune ? 0.00f : 1.0f;
 	float diffusionScale = ba.isChiptune ? 0.12f : 1.0f;
 
+	// 出力用サンプルバッファ (最大約40ブロック分)
 	static float leftSamples[8192 * 40], rightSamples[8192 * 40];
 	int bufferIndex = 0;
 
@@ -3830,22 +4052,27 @@ void equaliser(void* data, int len, BOOL reset) {
 		for (int ch = 0; ch < wavch; ch++) {
 			if (ch >= MAX_CH) continue;
 
+			// PCM → float 変換
 			float inSample = 0.0f;
 			int offset = (i * wavch + ch) * bytesPerSample;
-			if (wavsam == 16) inSample = *((short*)(pRaw + offset)) / 32768.0f;
+			if (wavsam == 16)
+				inSample = *((short*)(pRaw + offset)) / 32768.0f;
 			else if (wavsam == 24) {
 				int val = pRaw[offset] | (pRaw[offset + 1] << 8) | ((signed char)pRaw[offset + 2] << 16);
 				inSample = val / 8388608.0f;
 			}
-			else if (wavsam == 32) inSample = *((int*)(pRaw + offset)) / 2147483648.0f;
-			else                   inSample = (pRaw[offset] - 128) / 128.0f;
+			else if (wavsam == 32)
+				inSample = *((int*)(pRaw + offset)) / 2147483648.0f;
+			else
+				inSample = (pRaw[offset] - 128) / 128.0f;
 
 			float signal = inSample;
 			ChannelState* cs = &g_channels[ch];
 
-			// [FIX-3] effectiveMasterGain = masterGain * stagingGain
+			// [FIX-3] 平滑化済みゲインを適用
 			signal *= effectiveMasterGain;
 
+			// 15バンドEQ + 拡張フィルタ群を順次通過
 			for (int b = 0; b < EQ_BANDS; b++) signal = ProcessBiquad(&cs->eqFilters[b], signal);
 			signal = ProcessBiquad(&cs->clarityFilter, signal);
 			signal = ProcessBiquad(&cs->bassBalanceFilter, signal);
@@ -3853,7 +4080,8 @@ void equaliser(void* data, int len, BOOL reset) {
 			signal = ProcessBiquad(&cs->densityFilter1, signal);
 			signal = ProcessBiquad(&cs->densityFilter2, signal);
 
-			// [FIX-4] チップチューン(harmonicScale=0)では完全無効
+			// 3次高調波付加 (harmonicScale=0 のとき完全無効)
+			// [FIX-4] チップチューン時は 0.00 で呼び出し自体をスキップ
 			if (harmonicScale > 0.0f && fabs(harmonicAmount) > 0.01f) {
 				float harmonic = signal * signal * signal * harmonicAmount * 0.15f * harmonicScale;
 				cs->harmonicState = cs->harmonicState * 0.95f + harmonic * 0.05f;
@@ -3862,62 +4090,80 @@ void equaliser(void* data, int len, BOOL reset) {
 
 			float wetSignal = 0.0f;
 
+			// ===== 環境エフェクト処理 =====
 			if (env->type != TYPE_NONE && env->wetMix > 0.0f && effectAmount > 0) {
+
 				if (isYamabiko) {
+					// --- 山彦エコー処理 ---
 					float echo = ProcessYamabikoAdvanced(cs, signal, env, wavbitbackup);
+					// 早期反射音 (マルチタップの最初の反射)
 					int earlyMs = (env->type == TYPE_MOUNTAIN_ECHO) ? 60 : 45;
 					int earlySamp = (int)(earlyMs * wavbitbackup / 1000.0f);
 					int rPos = cs->writePos - (earlySamp + preDelaySamps);
 					while (rPos < 0) rPos += MAX_DELAY_SAMPLES;
 					float earlyGain = (env->type == TYPE_MOUNTAIN_ECHO) ? 0.18f : 0.25f;
 					float earlyRef = cs->delayBuffer[rPos] * earlyGain;
+					// 弱いディフュージョン (山彦の輪郭を保ちつつ自然な拡散を付加)
 					float weakDiff = env->diffusion * coreScale * 0.22f * diffusionScale;
 					float weakDens = env->density * 0.28f * diffusionScale;
 					float late = ProcessDiffusion(cs, echo, weakDiff, weakDens, env->type);
+					// 後期残響エンベロープ
 					float lateEnv = powf(0.94f, 1.0f / (env->lateReverbDecay * 1.3f));
 					cs->lateEnvelope = cs->lateEnvelope * lateEnv + late * (1.0f - lateEnv);
+					// ウェット信号合成: 直接エコー + 早期反射 + 後期残響
 					wetSignal = echo * 0.88f + earlyRef * 0.35f + cs->lateEnvelope * 0.55f * 0.52f;
 					wetSignal *= fminf(0.90f, env->wetMix * coreScale) * wetScale;
 				}
 				else {
+					// --- 通常リバーブ処理 ---
+					// LFO変調 + ステレオオフセット込みの読み出しポジション
 					int chOffset = (ch % 2) * stereoOffset;
-					int readMain = cs->writePos - (mainDelaySamps + preDelaySamps + chOffset + (int)UpdateLFO(&cs->lfo, wavbitbackup));
+					int readMain = cs->writePos - (mainDelaySamps + preDelaySamps + chOffset
+						+ (int)UpdateLFO(&cs->lfo, wavbitbackup));
 					while (readMain < 0) readMain += MAX_DELAY_SAMPLES;
 					float delayMain = cs->delayBuffer[readMain];
 
+					// 帯域別減衰特性をブレンド (低域・中域・高域で異なる減衰時定数)
 					delayMain = (ProcessBiquad(&cs->bassReverbFilter, delayMain) * env->bassReverbTime +
 						ProcessBiquad(&cs->midReverbFilter, delayMain) * env->midReverbTime +
 						ProcessBiquad(&cs->trebleReverbFilter, delayMain) * env->trebleReverbTime) / 3.0f;
 
+					// ダンピング・LPF/HPF による空間特性付与
 					delayMain = ProcessBiquad(&cs->dampingFilter, delayMain);
 					delayMain = ProcessBiquad(&cs->envLpf, delayMain);
 					delayMain = ProcessBiquad(&cs->envHpf, delayMain);
 
-					// [FIX-4] diffusionScale適用
+					// ディフュージョン (チップチューン時は大幅削減)
 					delayMain = ProcessDiffusion(cs, delayMain,
 						env->diffusion * coreScale * diffusionScale,
 						env->density * diffusionScale, env->type);
 
+					// 早期反射: 8タップ、時間経過とともに指数減衰
 					float earlyRef = 0.0f;
 					for (int r = 0; r < 8; r++) {
 						int rPos = cs->writePos - (refSamps[r] + preDelaySamps + chOffset);
 						while (rPos < 0) rPos += MAX_DELAY_SAMPLES;
 						float envelope = powf(1.0f - (float)(r + 1) / 8.0f, 2.0f / env->earlyReverbDecay);
-						earlyRef += cs->delayBuffer[rPos] * env->earlyRef[r * 2 + 1] * reflectionScale * 1.4f * envelope;
+						earlyRef += cs->delayBuffer[rPos] * env->earlyRef[r * 2 + 1]
+							* reflectionScale * 1.4f * envelope;
 					}
 
+					// 後期残響エンベロープ (exponential decay)
 					float lateEnv = powf(0.95f, 1.0f / env->lateReverbDecay);
 					cs->lateEnvelope = cs->lateEnvelope * lateEnv + delayMain * (1.0f - lateEnv);
-					wetSignal = (earlyRef * env->earlyLateBalance) + (cs->lateEnvelope * (1.0f - env->earlyLateBalance * 0.5f));
 
-					// [FIX-4] チップチューンではウェット信号を大幅削減
-					wetSignal *= wetScale;
+					// 早期反射 + 後期残響 合成
+					wetSignal = (earlyRef * env->earlyLateBalance)
+						+ (cs->lateEnvelope * (1.0f - env->earlyLateBalance * 0.5f));
+					wetSignal *= wetScale;  // [FIX-4]
 
+					// フィードバック: ウォームス + 材質吸収を適用した後にバッファ書き込み
 					float fbSig = ProcessWarmth(cs,
 						ProcessMaterialAbsorption(cs, delayMain, env->materialAbsorption, env->surfaceRoughness),
 						env->warmth);
 					float effectiveFB = fminf(0.88f, env->feedback * coreScale);
 					float fbVal = signal + (fbSig * effectiveFB);
+					// フィードバック発散防止クランプ
 					if (fbVal > 1.5f) fbVal = 1.5f;
 					if (fbVal < -1.5f) fbVal = -1.5f;
 					cs->delayBuffer[cs->writePos] = isfinite(fbVal) ? fbVal : 0.0f;
@@ -3925,23 +4171,25 @@ void equaliser(void* data, int len, BOOL reset) {
 				}
 			}
 
-			// [FIX-1] effectiveWetMixを厳密に [0, 0.90] でクランプ
+			// [FIX-1] ウェットミックス量を [0, 0.90] で厳格にクランプ
 			float effectiveWetMix = fminf(0.90f, env->wetMix * coreScale);
 			float mixed = signal + wetSignal * effectiveWetMix;
 
+			// エフェクト追加処理 (各パラメータが有効な場合のみ)
 			if (env->exciterAmount > 0.0f && effectAmount > 0)
 				mixed = Exciter(mixed, &cs->exciterFilter, env->exciterAmount * extraScale);
 			if (env->flutterEcho > 0.0f)
 				mixed = ProcessFlutterEcho(cs, mixed, env->flutterEcho * extraScale, wavbitbackup);
 			if (env->resonanceFreq > 0.0f && env->resonanceQ > 0.0f)
 				mixed = ProcessResonance(cs, mixed, env->resonanceFreq, env->resonanceQ, env->spaceComplexity * 0.3f);
-			if (env->metallic > 0.0f) mixed = ProcessMetallic(cs, mixed, env->metallic * extraScale);
-			if (env->glassiness > 0.0f) mixed = ProcessGlass(cs, mixed, env->glassiness * extraScale);
-			if (env->shimmer > 0.0f) mixed = ProcessShimmer(cs, mixed, env->shimmer * extraScale, wavbitbackup);
-			if (env->doppler > 0.0f) mixed = ProcessDoppler(cs, mixed, env->doppler * extraScale, wavbitbackup);
+			if (env->metallic > 0.0f)    mixed = ProcessMetallic(cs, mixed, env->metallic * extraScale);
+			if (env->glassiness > 0.0f)  mixed = ProcessGlass(cs, mixed, env->glassiness * extraScale);
+			if (env->shimmer > 0.0f)     mixed = ProcessShimmer(cs, mixed, env->shimmer * extraScale, wavbitbackup);
+			if (env->doppler > 0.0f)     mixed = ProcessDoppler(cs, mixed, env->doppler * extraScale, wavbitbackup);
 
 			mixed = ProcessBrightness(mixed, &cs->brightnessState, env->brightness);
 
+			// L/R バッファへ格納 (モノラル時は両方に同値)
 			if (wavch == 2) {
 				if (ch == 0) leftSamples[bufferIndex] = mixed;
 				else         rightSamples[bufferIndex] = mixed;
@@ -3952,7 +4200,9 @@ void equaliser(void* data, int len, BOOL reset) {
 			}
 		}
 
-		// ステレオ幅処理
+		// ===== ステレオ幅処理 =====
+		// Mid/Side 変換で stereoWidth を変更し元の L/R に戻す
+		// wallDistance/openness/ceilingHeight で環境空間の広がりを調節
 		if (wavch == 2) {
 			float w = (1.0f + (env->stereoWidth - 1.0f) * extraScale)
 				* spatialWidth * env->wallDistance * (0.7f + env->openness * 0.6f);
@@ -3969,15 +4219,15 @@ void equaliser(void* data, int len, BOOL reset) {
 	}
 
 	// ===================================================
-	// 【最終段】プロフェッショナル・ソフトサチュレーション適用
-	// [FIX-2] knee=0.78 により正常信号は完全透明通過
+	// 【最終段】プロフェッショナル・ソフトサチュレーション
+	// [FIX-2] knee=0.78 により正常信号(≤0.70)は完全透明通過
 	// ===================================================
 	for (int i = 0; i < bufferIndex; i++) {
 		leftSamples[i] = ProfessionalSoftSaturate(leftSamples[i]);
 		rightSamples[i] = ProfessionalSoftSaturate(rightSamples[i]);
 	}
 
-	// ===== 最終出力 =====
+	// ===== 最終出力: float → 整数PCM 書き戻し =====
 	{
 		int bi = 0;
 		for (int i = 0; i < numSamples; i++) {
@@ -3986,23 +4236,29 @@ void equaliser(void* data, int len, BOOL reset) {
 
 				float finalOut = (ch == 0) ? leftSamples[bi] : rightSamples[bi];
 
-				// ハードクリップ安全装置: ProfessionalSoftSaturate正常動作時は到達しない
-				if (finalOut > 1.0f) finalOut = 1.0f;
+				// ハードクリップ安全装置: ProfessionalSoftSaturate 正常動作時は到達しない
+				if (finalOut > 1.0f)  finalOut = 1.0f;
 				if (finalOut < -1.0f) finalOut = -1.0f;
 
 				int offset = (i * wavch + ch) * bytesPerSample;
-				if (wavsam == 16) *((short*)(pRaw + offset)) = (short)(finalOut * 32767.0f);
+				if (wavsam == 16)
+					*((short*)(pRaw + offset)) = (short)(finalOut * 32767.0f);
 				else if (wavsam == 24) {
 					int v = (int)(finalOut * 8388607.0f);
-					pRaw[offset] = v & 0xFF; pRaw[offset + 1] = (v >> 8) & 0xFF; pRaw[offset + 2] = (v >> 16) & 0xFF;
+					pRaw[offset] = v & 0xFF;
+					pRaw[offset + 1] = (v >> 8) & 0xFF;
+					pRaw[offset + 2] = (v >> 16) & 0xFF;
 				}
-				else if (wavsam == 32) *((int*)(pRaw + offset)) = (int)(finalOut * 2147483647.0f);
-				else                   pRaw[offset] = (unsigned char)(finalOut * 127.0f + 128.0f);
+				else if (wavsam == 32)
+					*((int*)(pRaw + offset)) = (int)(finalOut * 2147483647.0f);
+				else
+					pRaw[offset] = (unsigned char)(finalOut * 127.0f + 128.0f);
 			}
 			if (wavch == 2) bi++;
 		}
 	}
 
+	// リサンプリングしていた場合は元のサンプルレートに戻して tempBuffer を解放
 	if (needsResampling) {
 		ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavch, wavsam);
 		free(tempBuffer);
@@ -4010,11 +4266,10 @@ void equaliser(void* data, int len, BOOL reset) {
 }
 
 
-/*
-===============================================================================
-  ★ Hyper DSP Equaliser ★  全100環境音響モデル / 全51 EQプリセット
-===============================================================================
-*/
+// ============================================================
+//  ★ Hyper DSP Equaliser ★  全100環境音響モデル / 全51 EQプリセット
+//  音楽解析エンジン (コード検出 / Viterbiメロディ追跡 / キー推定)
+// ============================================================
 
 #include <algorithm>
 #define _USE_MATH_DEFINES
@@ -4044,37 +4299,47 @@ void equaliser(void* data, int len, BOOL reset) {
 
 using Complex = std::complex<double>;
 
+// ノート毎の強度・Goertzel係数・Blackman窓
 struct MelodyCandidate { int midiNote; float salience; float totalScore; int fromIdx; };
 
-static float  g_noteStrength[108];
-static double g_goertzelCoeffs[108];
-static double g_blackmanWindow[8192];
+static float  g_noteStrength[108];        // MIDI 0-107 の強度
+static double g_goertzelCoeffs[108];      // Goertzel 係数 (各ノート周波数)
+static double g_blackmanWindow[8192];     // 8192点 Blackman窓係数
 static bool   g_analysisInitialized = false;
 static std::vector<std::vector<MelodyCandidate>> g_viterbiPath;
-static const int MAX_VITERBI_FRAMES = 8;
-static const int CANDIDATE_NUM = 5;
+static const int MAX_VITERBI_FRAMES = 8;  // Viterbi追跡フレーム数
+static const int CANDIDATE_NUM = 5;       // フレームあたり候補数
 
 CString KeyCodeLow, KeyCodeMid, KeyCodeHigh, KeyCodeAll;
 
+// 12音名 (C〜B)
 static const WCHAR* NOTE_NAMES[12] = {
 	L"C ", L"C#", L"D ", L"D#", L"E ", L"F ",
 	L"F#", L"G ", L"G#", L"A ", L"A#", L"B "
 };
 
+// Goertzel係数・Blackman窓・ノート強度の初期化
+// 初回のみ実行 (g_analysisInitialized で管理)
 static void InitializeAnalysis(double sampleRate) {
 	if (g_analysisInitialized) return;
+	// MIDI 0-107: 440Hz を基準にした等温律周波数
 	for (int k = 0; k < 108; ++k) {
 		double freq = 440.0 * pow(2.0, ((12 + k) - 69.0) / 12.0);
 		g_goertzelCoeffs[k] = 2.0 * cos(2.0 * M_PI * freq / sampleRate);
 	}
+	// Blackman窓 (サイドローブ抑圧 -58dB 以上)
 	for (int n = 0; n < 8192; ++n)
 		g_blackmanWindow[n] = 0.355768 - 0.487396 * cos(2.0 * M_PI * n / 8191.0)
-		+ 0.144232 * cos(4.0 * M_PI * n / 8191.0) - 0.012604 * cos(6.0 * M_PI * n / 8191.0);
+		+ 0.144232 * cos(4.0 * M_PI * n / 8191.0)
+		- 0.012604 * cos(6.0 * M_PI * n / 8191.0);
 	memset(g_noteStrength, 0, sizeof(g_noteStrength));
 	g_viterbiPath.clear();
 	g_analysisInitialized = true;
 }
 
+// Goertzel アルゴリズム: 指定周波数のスペクトル強度を計算
+// FFT全体を計算せず単一周波数だけ効率よく求める
+// 戻り値: 正規化振幅 (×2.5/N)
 static double GoertzelMagnitude(const double* samples, int numSamples, double coefficient) {
 	double s_prev = 0.0, s_prev2 = 0.0;
 	for (int n = 0; n < numSamples; ++n) {
@@ -4085,6 +4350,8 @@ static double GoertzelMagnitude(const double* samples, int numSamples, double co
 	return sqrt(power > 0.0 ? power : 0.0) * 2.5 / numSamples;
 }
 
+// 再帰 Cooley-Tukey FFT (Radix-2 Decimation In Time)
+// 入力サイズは2のべき乗を想定
 static void FFT(std::vector<Complex>& x) {
 	const size_t N = x.size();
 	if (N <= 1) return;
@@ -4097,70 +4364,113 @@ static void FFT(std::vector<Complex>& x) {
 	}
 }
 
-static std::vector<MelodyCandidate> CalculateSalience(const std::vector<double>& bufL, const std::vector<double>& bufR, double sampleRate) {
+// メロディ顕著性 (Salience) 計算
+// L/RバッファをBlackman窓FFTでスペクトル分析し、
+// 基音+第2倍音+第3倍音の積で各MIDIノートのスコアを算出
+// ハーモニック積スペクトル法 (HPS) の2倍音バリアント
+static std::vector<MelodyCandidate> CalculateSalience(
+	const std::vector<double>& bufL, const std::vector<double>& bufR, double sampleRate)
+{
 	int N = (int)bufL.size();
 	std::vector<Complex> cL(N), cR(N);
-	for (int i = 0; i < N; ++i) { cL[i] = bufL[i] * g_blackmanWindow[i]; cR[i] = bufR[i] * g_blackmanWindow[i]; }
+	for (int i = 0; i < N; ++i) {
+		cL[i] = bufL[i] * g_blackmanWindow[i];
+		cR[i] = bufR[i] * g_blackmanWindow[i];
+	}
 	FFT(cL); FFT(cR);
 	int specSize = N / 2;
+	// センターチャンネル強調: 左右平均 - 差分 (センター抽出的な処理)
 	std::vector<float> mag(specSize, 0.0f);
 	for (int i = 0; i < specSize; ++i) {
-		double center = (std::abs(cL[i]) + std::abs(cR[i])) * 0.5 - std::abs(std::abs(cL[i]) - std::abs(cR[i])) * 1.5;
+		double center = (std::abs(cL[i]) + std::abs(cR[i])) * 0.5
+			- std::abs(std::abs(cL[i]) - std::abs(cR[i])) * 1.5;
 		mag[i] = (float)(center > 0.0 ? center : 0.0);
 	}
+	// MIDI 41(F2)〜76(E5) の範囲でサリエンス計算
 	std::vector<float> salienceMap(108, 0.0f);
 	double binFreq = sampleRate / N;
 	for (int k = 41; k <= 76; ++k) {
 		int bin = (int)(440.0 * pow(2.0, (k - 69.0) / 12.0) / binFreq);
 		if (bin <= 0 || bin * 3 >= specSize) continue;
+		// ピーク検出 (隣接ビン含む)
 		auto getPeak = [&](int cb) -> float {
 			float mx = mag[cb];
 			if (cb > 0 && mag[cb - 1] > mx) mx = mag[cb - 1];
-			if (cb<specSize - 1 && mag[cb + 1]>mx) mx = mag[cb + 1];
+			if (cb < specSize - 1 && mag[cb + 1] > mx) mx = mag[cb + 1];
 			return mx;
 			};
 		float s1 = getPeak(bin), s2 = getPeak(bin * 2), s3 = getPeak(bin * 3);
 		float score = s1 * s2;
+		// 第3倍音が基音の80%超 → 打楽器等の可能性でスコア半減
 		if (s3 > s1 * 0.8f) score *= 0.5f;
 		salienceMap[k] = score;
 	}
+	// 候補リスト生成
 	std::vector<MelodyCandidate> candidates;
-	double nf = 0.0; for (float s : salienceMap) nf += s; nf /= 36.0;
-	candidates.push_back({ -1,(float)(nf * 2.0),0.0f,-1 });
+	// 非メロディ候補 (ノイズフロア相当)
+	double nf = 0.0;
+	for (float s : salienceMap) nf += s;
+	nf /= 36.0;
+	candidates.push_back({ -1, (float)(nf * 2.0), 0.0f, -1 });
+	// スコア上位 CANDIDATE_NUM-1 件を候補に追加
 	std::vector<std::pair<int, float>> si;
-	for (int k = 41; k <= 76; ++k) if (salienceMap[k] > 0.0f) si.push_back({ k,salienceMap[k] });
-	std::sort(si.begin(), si.end(), [](const std::pair<int, float>& a, const std::pair<int, float>& b) {return a.second > b.second; });
+	for (int k = 41; k <= 76; ++k)
+		if (salienceMap[k] > 0.0f) si.push_back({ k, salienceMap[k] });
+	std::sort(si.begin(), si.end(),
+		[](const std::pair<int, float>& a, const std::pair<int, float>& b) { return a.second > b.second; });
 	for (int i = 0; i < (int)si.size() && i < CANDIDATE_NUM - 1; ++i)
 		candidates.push_back({ si[i].first, si[i].second, 0.0f, -1 });
 	return candidates;
 }
 
+// Viterbi アルゴリズムによるメロディ追跡
+// フレーム間遷移コスト (音程変化ペナルティ) を考慮して
+// 最も自然なメロディラインを推定する
+// 戻り値: 確定したMIDIノート番号 (-1: 未確定または無音)
 static int UpdateViterbi(const std::vector<MelodyCandidate>& current) {
 	g_viterbiPath.push_back(current);
 	if (g_viterbiPath.size() == 1) return -1;
+
 	auto& prev = g_viterbiPath[g_viterbiPath.size() - 2];
 	auto& curr = g_viterbiPath[g_viterbiPath.size() - 1];
+
+	// DP: 各候補の最大スコアパスを計算
 	for (int i = 0; i < (int)curr.size(); ++i) {
 		float maxS = -1.0f; int bestJ = -1;
 		for (int j = 0; j < (int)prev.size(); ++j) {
 			float pen = 0.0f;
-			if (prev[j].midiNote == -1 || curr[i].midiNote == -1) { if (prev[j].midiNote != curr[i].midiNote) pen = 0.5f; }
+			if (prev[j].midiNote == -1 || curr[i].midiNote == -1) {
+				// 非メロディ候補間の遷移はペナルティ小
+				if (prev[j].midiNote != curr[i].midiNote) pen = 0.5f;
+			}
 			else {
+				// 音程変化量に応じたペナルティ
 				int d = std::abs(prev[j].midiNote - curr[i].midiNote);
-				if (d == 0) pen = 0.0f; else if (d <= 2) pen = 0.2f;
-				else if (d <= 7) pen = 1.0f; else pen = 5.0f;
+				if (d == 0)       pen = 0.0f;  // 同音: ペナルティなし
+				else if (d <= 2)  pen = 0.2f;  // 半音〜全音: 小ペナルティ
+				else if (d <= 7)  pen = 1.0f;  // 3度〜5度: 中ペナルティ
+				else              pen = 5.0f;  // 6度以上: 大ペナルティ (大跳躍を抑制)
 			}
 			float s = prev[j].totalScore + curr[i].salience - (pen * curr[i].salience * 0.5f);
 			if (s > maxS) { maxS = s; bestJ = j; }
 		}
 		curr[i].totalScore = maxS; curr[i].fromIdx = bestJ;
 	}
+
+	// MAX_VITERBI_FRAMES フレーム蓄積後にバックトラック
 	if (g_viterbiPath.size() >= MAX_VITERBI_FRAMES) {
 		int bestIdx = 0; float maxT = -1.0f;
-		for (int i = 0; i < (int)curr.size(); ++i) if (curr[i].totalScore > maxT) { maxT = curr[i].totalScore; bestIdx = i; }
+		for (int i = 0; i < (int)curr.size(); ++i)
+			if (curr[i].totalScore > maxT) { maxT = curr[i].totalScore; bestIdx = i; }
+
 		std::vector<int> path; int t = bestIdx;
-		for (int f = (int)g_viterbiPath.size() - 1; f >= 0; --f) { path.push_back(t); t = g_viterbiPath[f][t].fromIdx; if (t == -1)break; }
-		int tf = (int)g_viterbiPath.size() - 4; if (tf < 0)tf = 0;
+		for (int f = (int)g_viterbiPath.size() - 1; f >= 0; --f) {
+			path.push_back(t);
+			t = g_viterbiPath[f][t].fromIdx;
+			if (t == -1) break;
+		}
+		// 4フレーム前のノートを確定出力 (因果性遅延)
+		int tf = (int)g_viterbiPath.size() - 4; if (tf < 0) tf = 0;
 		int pp = (int)g_viterbiPath.size() - 1 - tf;
 		if (pp >= (int)path.size()) return -1;
 		int note = g_viterbiPath[tf][path[pp]].midiNote;
@@ -4170,213 +4480,309 @@ static int UpdateViterbi(const std::vector<MelodyCandidate>& current) {
 	return -1;
 }
 
+// ノート強度を低域/中域/高域/全体のピッチクラスに集約
+// オクターブ内での最大ノートを基準に協和音程の弱化を行い
+// 支配的なルート音の誤検出を抑制する
 static void AggregateNoteClasses(float* bassClass, float* midClass, float* highClass, float* allClass) {
 	for (int i = 0; i < 12; i++) bassClass[i] = midClass[i] = highClass[i] = allClass[i] = 0.0f;
 	float octaveMax[9] = { 0 }; int octaveMaxNote[9] = { -1 };
+	// 各オクターブの最大強度ノートを特定
 	for (int note = 0; note < 108; note++) {
 		int oct = note / 12;
-		if (g_noteStrength[note] > octaveMax[oct]) { octaveMax[oct] = g_noteStrength[note]; octaveMaxNote[oct] = note; }
+		if (g_noteStrength[note] > octaveMax[oct]) {
+			octaveMax[oct] = g_noteStrength[note]; octaveMaxNote[oct] = note;
+		}
 	}
+	// 協和音程バイアス補正 & 帯域別集計
 	for (int note = 0; note < 108; note++) {
 		float strength = g_noteStrength[note];
 		int pc = note % 12, oct = note / 12;
 		if (octaveMaxNote[oct] >= 0 && note != octaveMaxNote[oct]) {
 			int iv = (pc - octaveMaxNote[oct] % 12 + 12) % 12;
 			float r = strength / octaveMax[oct];
+			// 完全5度・長3度等の弱い協和音程をさらに弱める
 			if (iv == 7 && r < 0.4f)  strength *= 0.4f;
 			else if (iv == 4 && r < 0.3f)  strength *= 0.6f;
 			else if (iv == 2 && r < 0.35f) strength *= 0.3f;
 			else if (iv == 9 && r < 0.3f)  strength *= 0.5f;
 			else if (iv == 11 && r < 0.25f) strength *= 0.4f;
 		}
-		if (note < 36) bassClass[pc] += strength;
-		else if (note < 60) midClass[pc] += strength;
-		else              highClass[pc] += strength;
+		if (note < 36)       bassClass[pc] += strength;
+		else if (note < 60)  midClass[pc] += strength;
+		else                 highClass[pc] += strength;
 		allClass[pc] += strength;
 	}
 }
 
+// コードパターン定義
+// pattern[12]: 各音程ウェイト (3=ルート, 2=5度, 1=3度, 0=不使用)
+// bonus: パターンマッチ時の追加スコア (複雑なコードは負値)
 typedef struct { const WCHAR* name; int pattern[12]; float bonus; } ChordPattern;
 static const ChordPattern CHORD_PATTERNS[] = {
-	{L"",      {3,0,0,0,2,0,0,1,0,0,0,0}, 0.5f},
-	{L"!@C0066bbm!@C000000",     {3,0,0,2,0,0,0,1,0,0,0,0}, 0.5f},
-	{L"!@Cff55005!@C000000",     {3,0,0,0,0,0,0,2,0,0,0,0}, 0.4f},
-	{L"!@C8844ccsus!@Cff55004!@C000000",  {3,0,0,0,0,3,0,1,0,0,0,0}, 0.4f},
-	{L"!@C8844ccsus!@Cff55002!@C000000",  {3,0,3,0,0,0,0,1,0,0,0,0}, 0.4f},
-	{L"!@Caa7744dim!@C000000",   {3,0,0,2,0,0,2,0,0,0,0,0}, 0.3f},
-	{L"!@Ccc4400aug!@C000000",   {3,0,0,0,2,0,0,0,2,0,0,0}, 0.3f},
-	{L"!@Cff55007!@C000000",     {3,0,0,0,2,0,0,1,0,0,2,0}, 0.3f},
-	{L"!@C00aa77M!@Cff55007!@C000000",    {3,0,0,0,2,0,0,1,0,0,0,2}, 0.3f},
-	{L"!@C0066bbm!@Cff55007!@C000000",    {3,0,0,2,0,0,0,1,0,0,2,0}, 0.3f},
-	{L"!@Cff55006!@C000000",     {3,0,0,0,2,0,0,1,0,2,0,0}, 0.2f},
-	{L"!@C0066bbm!@Cff55006!@C000000",    {3,0,0,2,0,0,0,1,0,2,0,0}, 0.2f},
-	{L"!@Cbb7733add!@Cff55009!@C000000",  {3,0,2,0,2,0,0,1,0,0,0,0}, 0.2f},
-	{L"!@Cff55007!@C8844ccsus!@Cff55004!@C000000", {3,0,0,0,0,2,0,1,0,0,2,0}, 0.2f},
-	{L"!@C0066bbm!@Cff55007!@Cdd2222b!@Cff55005!@C000000",  {3,0,0,2,0,0,2,0,0,0,2,0}, 0.2f},
-	{L"!@Caa7744dim!@Cff55007!@C000000",  {3,0,0,2,0,0,2,0,0,2,0,0}, 0.2f},
-	{L"!@Cff55009!@C000000",     {3,0,2,0,2,0,0,1,0,0,2,0}, -0.5f},
-	{L"!@C00aa77M!@Cff55009!@C000000",    {3,0,2,0,2,0,0,1,0,0,0,2}, -0.5f},
-	{L"!@C0066bbm!@Cff55009!@C000000",    {3,0,2,2,0,0,0,1,0,0,2,0}, -0.5f}
+	{L"",                                    {3,0,0,0,2,0,0,1,0,0,0,0}, 0.5f},   // メジャー
+	{L"!@C0066bbm!@C000000",                 {3,0,0,2,0,0,0,1,0,0,0,0}, 0.5f},   // マイナー
+	{L"!@Cff55005!@C000000",                 {3,0,0,0,0,0,0,2,0,0,0,0}, 0.4f},   // 5度 (Power)
+	{L"!@C8844ccsus!@Cff55004!@C000000",     {3,0,0,0,0,3,0,1,0,0,0,0}, 0.4f},   // sus4
+	{L"!@C8844ccsus!@Cff55002!@C000000",     {3,0,3,0,0,0,0,1,0,0,0,0}, 0.4f},   // sus2
+	{L"!@Caa7744dim!@C000000",               {3,0,0,2,0,0,2,0,0,0,0,0}, 0.3f},   // ディミニッシュ
+	{L"!@Ccc4400aug!@C000000",               {3,0,0,0,2,0,0,0,2,0,0,0}, 0.3f},   // オーギュメント
+	{L"!@Cff55007!@C000000",                 {3,0,0,0,2,0,0,1,0,0,2,0}, 0.3f},   // 7th
+	{L"!@C00aa77M!@Cff55007!@C000000",       {3,0,0,0,2,0,0,1,0,0,0,2}, 0.3f},   // メジャー7th
+	{L"!@C0066bbm!@Cff55007!@C000000",       {3,0,0,2,0,0,0,1,0,0,2,0}, 0.3f},   // マイナー7th
+	{L"!@Cff55006!@C000000",                 {3,0,0,0,2,0,0,1,0,2,0,0}, 0.2f},   // 6th
+	{L"!@C0066bbm!@Cff55006!@C000000",       {3,0,0,2,0,0,0,1,0,2,0,0}, 0.2f},   // マイナー6th
+	{L"!@Cbb7733add!@Cff55009!@C000000",     {3,0,2,0,2,0,0,1,0,0,0,0}, 0.2f},   // add9
+	{L"!@Cff55007!@C8844ccsus!@Cff55004!@C000000", {3,0,0,0,0,2,0,1,0,0,2,0}, 0.2f},  // 7sus4
+	{L"!@C0066bbm!@Cff55007!@Cdd2222b!@Cff55005!@C000000", {3,0,0,2,0,0,2,0,0,0,2,0}, 0.2f}, // m7b5
+	{L"!@Caa7744dim!@Cff55007!@C000000",     {3,0,0,2,0,0,2,0,0,2,0,0}, 0.2f},   // ディミニッシュ7th
+	{L"!@Cff55009!@C000000",                 {3,0,2,0,2,0,0,1,0,0,2,0}, -0.5f},  // 9th (複雑)
+	{L"!@C00aa77M!@Cff55009!@C000000",       {3,0,2,0,2,0,0,1,0,0,0,2}, -0.5f},  // メジャー9th
+	{L"!@C0066bbm!@Cff55009!@C000000",       {3,0,2,2,0,0,0,1,0,0,2,0}, -0.5f}   // マイナー9th
 };
 
 struct ChordCandidate { CString name; float score; int complexity; };
 
+// コード推定 (ヒストリーなし版)
+// 各コードパターンとピッチクラス強度のマッチングスコアで最適コードを選ぶ
 static CString EstimateChordRaw(float* noteClass, float threshold) {
 	float maxVal = 0.0f;
 	for (int i = 0; i < 12; i++) if (noteClass[i] > maxVal) maxVal = noteClass[i];
 	if (maxVal < 0.001f) return L"";
-	float n[12]; for (int i = 0; i < 12; i++) { n[i] = noteClass[i] / maxVal; if (n[i] < 0.08f)n[i] = 0.0f; }
-	int bestRoot = 0; for (int i = 1; i < 12; i++) if (n[i] > n[bestRoot])bestRoot = i;
+	float n[12];
+	for (int i = 0; i < 12; i++) { n[i] = noteClass[i] / maxVal; if (n[i] < 0.08f) n[i] = 0.0f; }
+	int bestRoot = 0;
+	for (int i = 1; i < 12; i++) if (n[i] > n[bestRoot]) bestRoot = i;
 	if (n[bestRoot] < threshold) return L"";
-	int active = 0; for (int i = 0; i < 12; i++) if (n[i] > 0.12f)active++;
+
+	int active = 0;
+	for (int i = 0; i < 12; i++) if (n[i] > 0.12f) active++;
 	CString root = NOTE_NAMES[bestRoot]; root.Trim();
 	if (active <= 1) return root;
+
 	float third = max(n[(bestRoot + 3) % 12], n[(bestRoot + 4) % 12]);
 	float fifth = n[(bestRoot + 7) % 12];
-	if (fifth > 0.3f && third < 0.15f && active <= 3) return root + L"!@B[!@Cff0000Power!@Cffffff]!@B";
+	// パワーコード判定 (5度音のみ、3度なし)
+	if (fifth > 0.3f && third < 0.15f && active <= 3)
+		return root + L"!@B[!@Cff0000Power!@Cffffff]!@B";
+
 	std::vector<ChordCandidate> cands;
 	int np = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
 	for (int c = 0; c < np; c++) {
 		float sc = 0.0f; int matched = 0, req = 0;
-		for (int x = 0; x < 12; x++) if (CHORD_PATTERNS[c].pattern[x] > 0)req++;
+		for (int x = 0; x < 12; x++) if (CHORD_PATTERNS[c].pattern[x] > 0) req++;
 		bool is9 = (req >= 5);
 		for (int nn = 0; nn < 12; nn++) {
 			int note = (bestRoot + nn) % 12, w = CHORD_PATTERNS[c].pattern[nn];
-			if (w > 0) { sc += n[note] * w * 2.0f; if (n[note] > 0.12f)matched++; }
+			if (w > 0) { sc += n[note] * w * 2.0f; if (n[note] > 0.12f) matched++; }
 			else if (n[note] > 0.25f) sc -= n[note] * 1.5f;
 		}
-		if (is9) { float mr = (req > 0) ? (float)matched / req : 0.0f; if (mr < 0.8f)sc -= 10.0f; if (n[(bestRoot + 2) % 12] < 0.2f)sc -= 5.0f; }
-		else { if ((req > 0) && (float)matched / req < 0.4f)sc -= 3.0f; }
-		sc -= (active - matched) * 1.0f; sc += CHORD_PATTERNS[c].bonus;
-		if (req == 3)sc += 1.2f; if (req == 4)sc += 0.5f; if (req >= 5)sc -= 1.0f;
-		if (sc > (is9 ? 3.5f : 0.8f)) { ChordCandidate cd; cd.name = root + CHORD_PATTERNS[c].name; cd.score = sc; cd.complexity = req; cands.push_back(cd); }
+		if (is9) {
+			float mr = (req > 0) ? (float)matched / req : 0.0f;
+			if (mr < 0.8f) sc -= 10.0f;
+			if (n[(bestRoot + 2) % 12] < 0.2f) sc -= 5.0f;
+		}
+		else { if ((req > 0) && (float)matched / req < 0.4f) sc -= 3.0f; }
+		sc -= (active - matched) * 1.0f;
+		sc += CHORD_PATTERNS[c].bonus;
+		if (req == 3) sc += 1.2f; if (req == 4) sc += 0.5f; if (req >= 5) sc -= 1.0f;
+		if (sc > (is9 ? 3.5f : 0.8f)) {
+			ChordCandidate cd; cd.name = root + CHORD_PATTERNS[c].name;
+			cd.score = sc; cd.complexity = req; cands.push_back(cd);
+		}
 	}
-	if (cands.empty())return root;
+	if (cands.empty()) return root;
 	std::sort(cands.begin(), cands.end(), [](const ChordCandidate& a, const ChordCandidate& b) {
-		if (abs(a.score - b.score) < 0.3f)return a.complexity < b.complexity; return a.score > b.score; });
+		if (abs(a.score - b.score) < 0.3f) return a.complexity < b.complexity;
+		return a.score > b.score; });
+	// 上位3候補を ", " で連結して返す
 	CString result = cands[0].name; int count = 1;
 	for (size_t i = 1; i < cands.size() && count < 3; i++) {
-		if (cands[0].score - cands[i].score > 2.5f)break;
-		if (cands[i].name == result)continue;
-		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.0f)continue;
+		if (cands[0].score - cands[i].score > 2.5f) break;
+		if (cands[i].name == result) continue;
+		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.0f) continue;
 		result += L", " + cands[i].name; count++;
 	}
 	return result;
 }
 
 static CString EstimateOverallRaw(float* b, float* m, float* h, float* a) {
-	CString c = EstimateChordRaw(a, 0.03f); if (!c.IsEmpty())return c;
-	c = EstimateChordRaw(b, 0.02f); if (!c.IsEmpty())return c; return L"";
+	CString c = EstimateChordRaw(a, 0.03f); if (!c.IsEmpty()) return c;
+	c = EstimateChordRaw(b, 0.02f);         if (!c.IsEmpty()) return c;
+	return L"";
 }
 
+// ヒストリー付きコード推定: 前フレームのコードをスコアに加味して安定性を向上
 static CString g_prevChordLow = L"", g_prevChordMid = L"", g_prevChordHigh = L"", g_prevChordAll = L"";
 static std::deque<CString> g_historyLow, g_historyMid, g_historyHigh, g_historyAll;
-const int HISTORY_SIZE = 4;
+const int HISTORY_SIZE = 4;  // 直近4フレームで多数決
 static float g_noteStrengthPrev[108] = { 0 };
-const float SMOOTHING_FACTOR = 0.3f;
+const float SMOOTHING_FACTOR = 0.3f;  // ノート強度の指数平滑係数
 static float g_prevRMS = 0.0f, g_peakRMS = 0.0f;
 static bool  g_isPlaying = false;
 static int   g_silenceFrameCount = 0;
-const float SILENCE_THRESHOLD_ABS = 0.002f, SILENCE_THRESHOLD_REL = 0.15f, PLAYING_THRESHOLD = 0.01f;
-const int   SILENCE_FRAMES_FOR_CLEAR = 10;
+
+// 無音判定閾値
+const float SILENCE_THRESHOLD_ABS = 0.002f;    // 絶対値閾値
+const float SILENCE_THRESHOLD_REL = 0.15f;     // ピークRMSに対する相対閾値
+const float PLAYING_THRESHOLD = 0.01f;     // 再生中判定閾値
+const int   SILENCE_FRAMES_FOR_CLEAR = 10;     // このフレーム数無音でヒストリーをクリア
 static int  g_soundFrameCount = 0;
 
+// RMS計算 (モノラル・ステレオ兼用)
 static float CalculateRMS(const std::vector<double>& bL, const std::vector<double>& bR, bool stereo) {
-	if (bL.empty())return 0.0f;
+	if (bL.empty()) return 0.0f;
 	double sL = 0.0, sR = 0.0; int c = (int)bL.size();
 	for (int i = 0; i < c; i++) sL += bL[i] * bL[i];
-	if (stereo && (int)bR.size() == c) { for (int i = 0; i < c; i++)sR += bR[i] * bR[i]; return(float)sqrt((sL + sR) / (c * 2)); }
+	if (stereo && (int)bR.size() == c) {
+		for (int i = 0; i < c; i++) sR += bR[i] * bR[i];
+		return (float)sqrt((sL + sR) / (c * 2));
+	}
 	return (float)sqrt(sL / c);
 }
 
+// ヒストリー内で最頻出のコード名を返す (多数決安定化)
 static CString GetMostFrequent(const std::deque<CString>& h) {
-	if (h.empty())return L"";
-	std::map<CString, int> cnt; for (const auto& s : h)if (!s.IsEmpty())cnt[s]++;
+	if (h.empty()) return L"";
+	std::map<CString, int> cnt;
+	for (const auto& s : h) if (!s.IsEmpty()) cnt[s]++;
 	CString best; int mx = 0;
-	for (const auto& p : cnt)if (p.second > mx) { mx = p.second; best = p.first; }
+	for (const auto& p : cnt) if (p.second > mx) { mx = p.second; best = p.first; }
 	return best;
 }
 
+// ヒストリー付きコード推定 (単一帯域版)
+// prev と一致するコードにボーナスを与え、フレーム間の揺れを抑制
 static CString EstimateChordRawWithHistory(float* nc, float threshold, const CString& prev) {
 	float maxVal = 0.0f;
-	for (int i = 0; i < 12; i++)if (nc[i] > maxVal)maxVal = nc[i];
-	if (maxVal < 0.001f)return L"";
-	float n[12]; for (int i = 0; i < 12; i++) { n[i] = nc[i] / maxVal; if (n[i] < 0.10f)n[i] = 0.0f; }
-	int bestRoot = 0; for (int i = 1; i < 12; i++)if (n[i] > n[bestRoot])bestRoot = i;
-	if (n[bestRoot] < threshold)return L"";
-	int active = 0; for (int i = 0; i < 12; i++)if (n[i] > 0.15f)active++;
+	for (int i = 0; i < 12; i++) if (nc[i] > maxVal) maxVal = nc[i];
+	if (maxVal < 0.001f) return L"";
+	float n[12];
+	for (int i = 0; i < 12; i++) { n[i] = nc[i] / maxVal; if (n[i] < 0.10f) n[i] = 0.0f; }
+	int bestRoot = 0;
+	for (int i = 1; i < 12; i++) if (n[i] > n[bestRoot]) bestRoot = i;
+	if (n[bestRoot] < threshold) return L"";
+
+	int active = 0;
+	for (int i = 0; i < 12; i++) if (n[i] > 0.15f) active++;
 	CString root = NOTE_NAMES[bestRoot]; root.Trim();
-	if (active <= 1)return root;
+	if (active <= 1) return root;
+
 	float third = max(n[(bestRoot + 3) % 12], n[(bestRoot + 4) % 12]);
 	float fifth = n[(bestRoot + 7) % 12];
-	if (fifth > 0.3f && third < 0.15f && active <= 3)return root + L"!@B!@I[Power]!@B!@I";
+	if (fifth > 0.3f && third < 0.15f && active <= 3)
+		return root + L"!@B!@I[Power]!@B!@I";
+
 	std::vector<ChordCandidate> cands;
 	int np = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
 	for (int c = 0; c < np; c++) {
 		float sc = 0.0f; int matched = 0, req = 0;
-		for (int x = 0; x < 12; x++)if (CHORD_PATTERNS[c].pattern[x] > 0)req++;
+		for (int x = 0; x < 12; x++) if (CHORD_PATTERNS[c].pattern[x] > 0) req++;
 		bool is9 = (req >= 5);
 		for (int nn = 0; nn < 12; nn++) {
 			int note = (bestRoot + nn) % 12, w = CHORD_PATTERNS[c].pattern[nn];
-			if (w > 0) { sc += n[note] * w * 2.0f; if (n[note] > 0.15f)matched++; }
-			else if (n[note] > 0.25f)sc -= n[note] * 2.0f;
+			if (w > 0) { sc += n[note] * w * 2.0f; if (n[note] > 0.15f) matched++; }
+			else if (n[note] > 0.25f) sc -= n[note] * 2.0f;
 		}
-		if (is9) { float mr = (req > 0) ? (float)matched / req : 0.0f; if (mr < 0.85f)sc -= 12.0f; if (n[(bestRoot + 2) % 12] < 0.25f)sc -= 6.0f; }
-		else { if ((req > 0) && (float)matched / req < 0.5f)sc -= 4.0f; }
-		sc -= (active - matched) * 1.5f; sc += CHORD_PATTERNS[c].bonus;
-		if (req == 3)sc += 1.2f; if (req == 4)sc += 0.5f; if (req >= 5)sc -= 1.5f;
+		if (is9) {
+			float mr = (req > 0) ? (float)matched / req : 0.0f;
+			if (mr < 0.85f) sc -= 12.0f;
+			if (n[(bestRoot + 2) % 12] < 0.25f) sc -= 6.0f;
+		}
+		else { if ((req > 0) && (float)matched / req < 0.5f) sc -= 4.0f; }
+		sc -= (active - matched) * 1.5f;
+		sc += CHORD_PATTERNS[c].bonus;
+		if (req == 3) sc += 1.2f; if (req == 4) sc += 0.5f; if (req >= 5) sc -= 1.5f;
 		CString cur = root + CHORD_PATTERNS[c].name;
-		if (!prev.IsEmpty() && cur == prev)sc += 1.5f;
-		if (sc > (is9 ? 4.0f : 1.0f)) { ChordCandidate cd; cd.name = cur; cd.score = sc; cd.complexity = req; cands.push_back(cd); }
+		// 前フレームと同じコードにボーナス (時間的連続性)
+		if (!prev.IsEmpty() && cur == prev) sc += 1.5f;
+		if (sc > (is9 ? 4.0f : 1.0f)) {
+			ChordCandidate cd; cd.name = cur; cd.score = sc; cd.complexity = req; cands.push_back(cd);
+		}
 	}
-	if (cands.empty())return root;
+	if (cands.empty()) return root;
 	std::sort(cands.begin(), cands.end(), [](const ChordCandidate& a, const ChordCandidate& b) {
-		if (abs(a.score - b.score) < 0.3f)return a.complexity < b.complexity; return a.score > b.score; });
-	if (!prev.IsEmpty())for (size_t i = 0; i < min((size_t)3, cands.size()); i++)if (cands[i].name == prev)return prev;
+		if (abs(a.score - b.score) < 0.3f) return a.complexity < b.complexity;
+		return a.score > b.score; });
+	// 前フレームコードが上位3候補内にあれば安定化のためそれを返す
+	if (!prev.IsEmpty())
+		for (size_t i = 0; i < min((size_t)3, cands.size()); i++)
+			if (cands[i].name == prev) return prev;
 	CString result = cands[0].name; int count = 1;
 	for (size_t i = 1; i < cands.size() && count < 3; i++) {
-		if (count == 1 && cands[0].score - cands[i].score > 2.0f)break;
-		if (count == 2 && cands[0].score - cands[i].score > 0.5f)break;
-		if (cands[i].name == result)continue;
-		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 0.8f)continue;
+		if (count == 1 && cands[0].score - cands[i].score > 2.0f) break;
+		if (count == 2 && cands[0].score - cands[i].score > 0.5f) break;
+		if (cands[i].name == result) continue;
+		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 0.8f) continue;
 		result += L", " + cands[i].name; count++;
 	}
 	return result;
 }
 
+// ヒストリー付きコード推定 (全帯域統合版)
+// 全帯域 → 低域 の順でフォールバック
 static CString EstimateChordRawWithHistory(float* b, float* m, float* h, float* a, const CString& prev) {
-	CString c = EstimateChordRawWithHistory(a, 0.03f, prev); if (!c.IsEmpty())return c;
-	c = EstimateChordRawWithHistory(b, 0.02f, prev); if (!c.IsEmpty())return c; return L"";
+	CString c = EstimateChordRawWithHistory(a, 0.03f, prev); if (!c.IsEmpty()) return c;
+	c = EstimateChordRawWithHistory(b, 0.02f, prev);         if (!c.IsEmpty()) return c;
+	return L"";
 }
 
+// ============================================================
+// AnalyzeMusicKey() - 音楽キー・コード・メロディ解析 メイン
+//
+// 処理フロー:
+//   1. RMS計算 → 無音検出 → ヒストリークリア
+//   2. Goertzel で各MIDI音の強度を計算 (低域:4096点, 高域:2048点)
+//   3. 帯域別ピッチクラスに集約
+//   4. コード推定 (低域/中域/高域/全体, ヒストリー付き)
+//   5. FFT + Viterbi でメロディ音を推定
+//   6. KeyCodeLow/Mid/High/All に結果を格納
+// ============================================================
 void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<double>& bufferR, int sampleRate) {
 	InitializeAnalysis((double)sampleRate);
 	int totalSamples = (int)bufferL.size();
 	bool stereo = ((int)bufferR.size() == totalSamples);
 
-	auto FormatChord = [](CString s)->CString {
-		if (s.IsEmpty())return L"!@B  , <  >!@B";
+	// 表示用フォーマット: "ルート, <コード名>" の形式
+	auto FormatChord = [](CString s) -> CString {
+		if (s.IsEmpty()) return L"!@B  , <  >!@B";
 		CString root = (s.GetLength() > 1 && (s[1] == L'#' || s[1] == L'b')) ? s.Left(2) : s.Left(1);
-		if (root.GetLength() == 1)root += L" ";
-		CString r; r.Format(L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, s); return r;
+		if (root.GetLength() == 1) root += L" ";
+		CString r;
+		r.Format(L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, s);
+		return r;
 		};
 
 	float currentRMS = CalculateRMS(bufferL, bufferR, stereo);
-	if (currentRMS > PLAYING_THRESHOLD) { g_isPlaying = true; g_soundFrameCount++; if (currentRMS > g_peakRMS)g_peakRMS = currentRMS; else g_peakRMS *= 0.998f; }
+
+	// 再生検出 & ピークRMS追跡
+	if (currentRMS > PLAYING_THRESHOLD) {
+		g_isPlaying = true; g_soundFrameCount++;
+		if (currentRMS > g_peakRMS) g_peakRMS = currentRMS;
+		else g_peakRMS *= 0.998f;  // ピークは緩やかに減衰
+	}
 	else { g_soundFrameCount = 0; }
 
+	// 無音判定: 絶対閾値 + ピーク相対閾値の両方で評価
 	bool isSilent = false;
-	if (!g_isPlaying || g_peakRMS < 0.001f)isSilent = (currentRMS < SILENCE_THRESHOLD_ABS);
-	else isSilent = (currentRMS < SILENCE_THRESHOLD_ABS) || (currentRMS < g_peakRMS * SILENCE_THRESHOLD_REL);
-	if (isSilent)g_silenceFrameCount++; else g_silenceFrameCount = 0;
+	if (!g_isPlaying || g_peakRMS < 0.001f)
+		isSilent = (currentRMS < SILENCE_THRESHOLD_ABS);
+	else
+		isSilent = (currentRMS < SILENCE_THRESHOLD_ABS)
+		|| (currentRMS < g_peakRMS * SILENCE_THRESHOLD_REL);
 
+	if (isSilent) g_silenceFrameCount++;
+	else          g_silenceFrameCount = 0;
+
+	// 無音が続いた場合はヒストリーをリセット
 	if (g_silenceFrameCount >= SILENCE_FRAMES_FOR_CLEAR) {
 		g_isPlaying = false; g_peakRMS = 0.0f; g_soundFrameCount = 0;
-		g_historyLow.clear(); g_historyMid.clear(); g_historyHigh.clear(); g_historyAll.clear();
+		g_historyLow.clear(); g_historyMid.clear();
+		g_historyHigh.clear(); g_historyAll.clear();
 		g_prevChordLow = g_prevChordMid = g_prevChordAll = g_prevChordHigh = L"";
-		for (int i = 0; i < 108; i++)g_noteStrengthPrev[i] *= 0.3f;
+		for (int i = 0; i < 108; i++) g_noteStrengthPrev[i] *= 0.3f;
 	}
 
+	// 無音時は空白表示して終了
 	if (isSilent) {
 		KeyCodeLow = KeyCodeMid = KeyCodeAll = KeyCodeHigh =
 			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
@@ -4385,58 +4791,81 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 
 	g_prevRMS = g_prevRMS * 0.7f + currentRMS * 0.3f;
 
+	// ===== Goertzel によるノート強度計算 =====
+	// 低域(MIDI 0-51): 4096点 (精度優先、低周波数分解能確保)
+	// 高域(MIDI 52-107): 2048点 (速度優先、高周波は短窓でOK)
 	const int LOW_LIMIT = 52;
-	const int LOW_N = (totalSamples >= 4096) ? 4096 : totalSamples, LOW_S = totalSamples - LOW_N;
-	const int HI_N = (totalSamples >= 2048) ? 2048 : totalSamples, HI_S = totalSamples - HI_N;
+	const int LOW_N = (totalSamples >= 4096) ? 4096 : totalSamples;
+	const int LOW_S = totalSamples - LOW_N;
+	const int HI_N = (totalSamples >= 2048) ? 2048 : totalSamples;
+	const int HI_S = totalSamples - HI_N;
 
 	for (int k = 0; k < LOW_LIMIT; k++) {
 		double aL = GoertzelMagnitude(bufferL.data() + LOW_S, LOW_N, g_goertzelCoeffs[k]);
 		double aR = stereo ? GoertzelMagnitude(bufferR.data() + LOW_S, LOW_N, g_goertzelCoeffs[k]) : aL;
-		float ns = (float)max(aL, aR) * (1.0f + k / 100.0f);
+		float ns = (float)max(aL, aR) * (1.0f + k / 100.0f);  // 低域補正
+		// 指数平滑: prev*0.3 + current*0.7
 		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + ns * (1.0f - SMOOTHING_FACTOR);
 		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
 	for (int k = LOW_LIMIT; k < 108; k++) {
 		double aL = GoertzelMagnitude(bufferL.data() + HI_S, HI_N, g_goertzelCoeffs[k]);
 		double aR = stereo ? GoertzelMagnitude(bufferR.data() + HI_S, HI_N, g_goertzelCoeffs[k]) : aL;
-		float ns = (float)max(aL, aR) * (1.0f + k / 50.0f);
+		float ns = (float)max(aL, aR) * (1.0f + k / 50.0f);   // 高域補正
 		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + ns * (1.0f - SMOOTHING_FACTOR);
 		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
 
+	// 帯域別ピッチクラス集約
 	float bC[12], mC[12], hC[12], aC[12];
 	AggregateNoteClasses(bC, mC, hC, aC);
 
+	// ヒストリー付きコード推定
 	CString rawBass = EstimateChordRawWithHistory(bC, 0.02f, g_prevChordLow);
 	CString rawMid = EstimateChordRawWithHistory(mC, 0.03f, g_prevChordMid);
 	CString rawAll = EstimateChordRawWithHistory(bC, mC, hC, aC, g_prevChordAll);
 	CString rawHigh = EstimateChordRawWithHistory(hC, 0.03f, g_prevChordHigh);
 
-	auto push = [](std::deque<CString>& h, const CString& v) {h.push_back(v); if ((int)h.size() > HISTORY_SIZE)h.pop_front(); };
+	// ヒストリーキュー更新 (HISTORY_SIZE 超過分は pop_front)
+	auto push = [](std::deque<CString>& h, const CString& v) {
+		h.push_back(v);
+		if ((int)h.size() > HISTORY_SIZE) h.pop_front();
+		};
 	push(g_historyLow, rawBass); push(g_historyMid, rawMid);
 	push(g_historyHigh, rawHigh); push(g_historyAll, rawAll);
 
+	// 多数決安定化
 	rawBass = GetMostFrequent(g_historyLow); rawMid = GetMostFrequent(g_historyMid);
 	rawAll = GetMostFrequent(g_historyAll); rawHigh = GetMostFrequent(g_historyHigh);
 
-	g_prevChordLow = rawBass; g_prevChordMid = rawMid; g_prevChordAll = rawAll; g_prevChordHigh = rawHigh;
+	g_prevChordLow = rawBass; g_prevChordMid = rawMid;
+	g_prevChordAll = rawAll;  g_prevChordHigh = rawHigh;
 
-	int fftStart = totalSamples - 4096; if (fftStart < 0)fftStart = 0;
+	// ===== Viterbi メロディ追跡 =====
+	// 直近4096点でFFTサリエンス計算 → Viterbi に渡す
+	int fftStart = totalSamples - 4096; if (fftStart < 0) fftStart = 0;
 	std::vector<double> bLP(bufferL.begin() + fftStart, bufferL.end());
 	std::vector<double> bRP;
-	if (stereo)bRP.assign(bufferR.begin() + fftStart, bufferR.end()); else bRP = bLP;
+	if (stereo) bRP.assign(bufferR.begin() + fftStart, bufferR.end());
+	else        bRP = bLP;
 
 	int midi = UpdateViterbi(CalculateSalience(bLP, bRP, (double)sampleRate));
 
+	// メロディ音名フォーマット: "[C4 ]" "[C#4]" 等
 	CString rawMelody = L"[   ]";
 	if (midi != -1) {
-		int oct = (midi / 12) - 1; CString nn = NOTE_NAMES[midi % 12]; nn.Trim();
-		if (nn.GetLength() == 1)rawMelody.Format(L"[%s%d ]", nn, oct);
-		else                  rawMelody.Format(L"[%s%d]", nn, oct);
+		int oct = (midi / 12) - 1;
+		CString nn = NOTE_NAMES[midi % 12]; nn.Trim();
+		if (nn.GetLength() == 1) rawMelody.Format(L"[%s%d ]", nn, oct);
+		else                     rawMelody.Format(L"[%s%d]", nn, oct);
 	}
 
-	KeyCodeLow = FormatChord(rawBass); KeyCodeMid = FormatChord(rawMid); KeyCodeAll = FormatChord(rawAll);
+	// 出力コード文字列生成
+	KeyCodeLow = FormatChord(rawBass);
+	KeyCodeMid = FormatChord(rawMid);
+	KeyCodeAll = FormatChord(rawAll);
 
+	// 高域コードが空のときはメロディ音名で補完
 	if (rawHigh.IsEmpty() && rawMelody != L"[   ]") {
 		CString t = rawMelody.Mid(1);
 		rawHigh = (t.Find(L'#') >= 0) ? t.Left(2) : t.Left(1);
@@ -4449,6 +4878,7 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 	}
 }
 
+// 外部から現在のノート強度配列を取得する (ピアノロール表示等に使用)
 void GetCurrentNoteStrengths(float* output108) {
-	if (output108)memcpy(output108, g_noteStrength, sizeof(g_noteStrength));
+	if (output108) memcpy(output108, g_noteStrength, sizeof(g_noteStrength));
 }
