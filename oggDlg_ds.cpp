@@ -63,6 +63,7 @@ extern void playwavds(BYTE* bw);
 extern void playwavds2(BYTE* bw, int len);
 extern BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2);
 extern int mode;
+extern int wav999_use_adbuf;
 extern save savedata;
 LPDIRECTSOUND3DLISTENER m_listener = NULL;
 extern RubberBand::RubberBandStretcher* g_rubberBandStretcher;
@@ -314,6 +315,7 @@ BOOL COggDlg::ReleaseDXSound(void)
 extern void playwavds2(BYTE* bw, int old, int l1, int l2);
 extern int playwavkpi(BYTE* bw, int old, int l1, int l2);
 extern int playwavmp3(BYTE* bw, int old, int l1, int l2);
+extern int playwavwav(BYTE* bw, int old, int l1, int l2);
 extern int playwavflac(BYTE* bw, int old, int l1, int l2);
 extern int playwavdsd(BYTE* bw, int old, int l1, int l2);
 extern int playwavm4a(BYTE* bw, int old, int l1, int l2);
@@ -380,7 +382,7 @@ UINT HandleNotifications(LPVOID)
 	ULONG PlayCursor, WriteCursor = 0, oldw2;
 	oldw = 0;
 	m_dsb->SetCurrentPosition(0);
-	if (mode == -10) {
+	if (mode == -10 || mode == 999) {
 		oldw = OUTPUT_BUFFER_SIZE * 2;
 		og->timer.SetEvent();
 	}
@@ -445,10 +447,12 @@ UINT HandleNotifications(LPVOID)
 
 
 		sflg = TRUE;
-		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30)
+		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
 			playwavadpcm(bufwav3, oldw, len1, len2);//データ獲得
 		else if (mode == -10)
 			len4 = playwavmp3(bufwav3, oldw, len1, len2);//データ獲得
+		else if (mode == 999)
+			len4 = playwavwav(bufwav3, oldw, len1, len2);//データ獲得
 		else if (mode == -3)
 			len4 = playwavkpi(bufwav3, oldw, len1, len2);//データ獲得
 		else if (mode == -7)
@@ -506,7 +510,7 @@ UINT HandleNotifications(LPVOID)
 			thn = FALSE;
 			int wavv = wavbit;
 			//			if (wavbit < 44100) wavv = 44100;
-			if (!(mode == -7 || mode == -8 || mode == -9 || mode == -10))
+			if (!(mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999))
 				Sleep(800);
 
 			m_dsb->SetVolume(DSBVOLUME_MIN);
@@ -592,8 +596,9 @@ bool ProcessAudioWithRubberBand(float tempoRate)
 		g_rubberBandStretcher->setTimeRatio(tempoRate);
 		g_rubberBandStretcher->setPitchScale(static_cast<float>(semitones));;
 
-		// 生バイトデータをfloatデータに変換
-		ConvertRawBytesToFloat(m_bufwav3_1, wavsam, wavch, inputFloatData);
+		// 生バイトデータをfloatデータに変換 (wavsamはビット深度、負の場合はfloat形式)
+		uint16_t bps = (uint16_t)((wavsam <= 0 || wavsam > 32) ? 16 : abs(wavsam));
+		ConvertRawBytesToFloat(m_bufwav3_1, bps, wavch, inputFloatData);
 
 		// 入力データの検証
 		if (inputFloatData.empty()) {
@@ -677,7 +682,7 @@ void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
 	}
 
 	size_t bytes_per_sample = bits_per_sample / 8;
-	if (bytes_per_sample == 0) { // 0で割るのを防ぐ
+	if (bytes_per_sample == 0) {
 		out_float_data.clear();
 		return;
 	}
@@ -687,29 +692,25 @@ void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
 
 	for (size_t i = 0; i < total_samples_count; ++i) {
 		size_t current_byte_pos = i * bytes_per_sample;
-		// バッファの末尾を超えないようにチェック
 		if (current_byte_pos + bytes_per_sample > raw_data.size()) {
-			out_float_data[i] = 0.0f; // またはエラー処理
+			out_float_data[i] = 0.0f;
 			continue;
 		}
 
-		if (bits_per_sample == 8) { // 8-bit unsigned PCM
+		if (bits_per_sample == 8) {
 			out_float_data[i] = ((float)raw_data[current_byte_pos] - 128.0f) / 128.0f;
 		}
-		else if (bits_per_sample == 16) { // 16-bit signed PCM (リトルエンディアン)
+		else if (bits_per_sample == 16) {
 			int16_t s_val = (int16_t)(raw_data[current_byte_pos] | (raw_data[current_byte_pos + 1] << 8));
-			out_float_data[i] = (float)s_val / 32768.0f; // 2^15
+			out_float_data[i] = (float)s_val / 32768.0f;
 		}
-		else if (bits_per_sample == 24) { // 24-bit signed PCM (packed into 3 bytes, リトルエンディアン)
-			// 24bitデータは3バイト。int32_tに読み込んでから正規化
-			int32_t i_val = (int32_t)(raw_data[current_byte_pos] |
-				(raw_data[current_byte_pos + 1] << 8) |
-				(raw_data[current_byte_pos + 2] << 16));
-			// 24ビットデータは符号拡張が必要 (MSBが1なら負の数として扱う)
-			if (i_val & 0x00800000) { // もし23ビット目（0から数えて）が1なら負の数
-				i_val |= 0xFF000000; // 32ビットに符号拡張
-			}
-			out_float_data[i] = (float)i_val / 8388608.0f; // 2^23
+		else if (bits_per_sample == 24) {
+			// 24bit LE: 3バイトを読み、符号拡張して -1.0～1.0 に正規化
+			uint32_t u = (uint32_t)raw_data[current_byte_pos] |
+				((uint32_t)raw_data[current_byte_pos + 1] << 8) |
+				((uint32_t)raw_data[current_byte_pos + 2] << 16);
+			int32_t i_val = (u & 0x800000u) ? (int32_t)(u | 0xFF000000u) : (int32_t)u;
+			out_float_data[i] = (float)i_val / 8388608.0f;
 		}
 		else if (bits_per_sample == 32) {
 			int32_t i_val = (int32_t)(raw_data[current_byte_pos] |
@@ -755,12 +756,20 @@ void ConvertFloatToRawBytes(const std::vector<float>& float_data,
 			out_raw_data[current_byte_pos] = (uint8_t)(sample_float * 127.0f + 128.0f);
 		}
 		else if (target_bits_per_sample == 16) { // 16-bit signed PCM (リトルエンディアン)
-			int16_t s_val = (int16_t)(sample_float * 32767.0f); // 2^15 - 1
+			// 入力側の /32768.0f と対称になるよう 32768.0f でスケール、丸めてクリップ
+			int32_t v = (int32_t)roundf(sample_float * 32768.0f);
+			if (v > 32767) v = 32767;
+			if (v < -32768) v = -32768;
+			int16_t s_val = (int16_t)v;
 			out_raw_data[current_byte_pos] = (uint8_t)(s_val & 0xFF);
 			out_raw_data[current_byte_pos + 1] = (uint8_t)((s_val >> 8) & 0xFF);
 		}
 		else if (target_bits_per_sample == 24) { // 24-bit signed PCM (リトルエンディアン)
-			int32_t i_val = (int32_t)(sample_float * 8388607.0f); // 2^23 - 1
+			// 入力側の /8388608.0f と対称になるよう 8388608.0f でスケール、丸めてクリップ
+			float vf = roundf(sample_float * 8388608.0f);
+			if (vf > 8388607.0f) vf = 8388607.0f;
+			if (vf < -8388608.0f) vf = -8388608.0f;
+			int32_t i_val = (int32_t)vf;
 			out_raw_data[current_byte_pos] = (uint8_t)(i_val & 0xFF);
 			out_raw_data[current_byte_pos + 1] = (uint8_t)((i_val >> 8) & 0xFF);
 			out_raw_data[current_byte_pos + 2] = (uint8_t)((i_val >> 16) & 0xFF);
@@ -3630,16 +3639,21 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 	unsigned char* pSrc = (unsigned char*)srcData;
 
 	// 整数 PCM → 浮動小数点 [-1.0, 1.0] に変換
-	if (bitDepth == 16) {
+	if (bitDepth == 8) {
+		for (int i = 0; i < srcSamples * channels; i++)
+			srcFloat[i] = ((float)pSrc[i] - 128.0f) / 128.0f;
+	}
+	else if (bitDepth == 16) {
 		short* p = (short*)srcData;
 		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 32768.0f);
 	}
 	else if (bitDepth == 24) {
 		for (int i = 0; i < srcSamples * channels; i++) {
 			int o = i * 3;
-			// [FIX-5] リトルエンディアン 24bit 正規バイト順
-			int s = (pSrc[o] << 8) | (pSrc[o + 1] << 16) | ((signed char)pSrc[o + 2] << 24);
-			srcFloat[i] = s * (1.0f / 2147483648.0f);
+			// 24bit LE: byte0|(byte1<<8)|(byte2<<16)、符号拡張して 2^23 で正規化
+			uint32_t u = (uint32_t)pSrc[o] | ((uint32_t)pSrc[o + 1] << 8) | ((uint32_t)pSrc[o + 2] << 16);
+			int32_t s = (u & 0x800000u) ? (int32_t)(u | 0xFF000000u) : (int32_t)u;
+			srcFloat[i] = (float)s * (1.0f / 8388608.0f);
 		}
 	}
 	else if (bitDepth == 32) {
@@ -3666,19 +3680,29 @@ void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 
 	// 浮動小数点 → 整数 PCM に変換
 	unsigned char* pDst = (unsigned char*)(*dstData);
-	if (bitDepth == 16) {
+	if (bitDepth == 8) {
+		for (int i = 0; i < dstSamples * channels; i++) {
+			float s = dstFloat[i];
+			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+			pDst[i] = (unsigned char)(s * 127.0f + 128.0f);
+		}
+	}
+	else if (bitDepth == 16) {
 		short* p = (short*)(*dstData);
 		for (int i = 0; i < dstSamples * channels; i++) {
 			float s = dstFloat[i];
 			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
-			p[i] = (short)(s * 32767.0f);
+			int32_t v = (int32_t)roundf(s * 32768.0f);
+			if (v > 32767) v = 32767; if (v < -32768) v = -32768;
+			p[i] = (short)v;
 		}
 	}
 	else if (bitDepth == 24) {
 		for (int i = 0; i < dstSamples * channels; i++) {
 			float s = dstFloat[i];
 			if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
-			int v = (int)(s * 8388607.0f);
+			int32_t v = (int32_t)roundf(s * 8388608.0f);
+			if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
 			int o = i * 3;
 			// [FIX-5] リトルエンディアン 24bit PCM 正規バイト順
 			pDst[o] = v & 0xFF;
@@ -3724,15 +3748,20 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	float* dstFloat = (float*)malloc(dstSamples * channels * sizeof(float));
 	unsigned char* pSrc = (unsigned char*)srcData;
 
-	if (bitDepth == 16) {
+	if (bitDepth == 8) {
+		for (int i = 0; i < srcSamples * channels; i++)
+			srcFloat[i] = ((float)pSrc[i] - 128.0f) / 128.0f;
+	}
+	else if (bitDepth == 16) {
 		short* p = (short*)srcData;
 		for (int i = 0; i < srcSamples * channels; i++) srcFloat[i] = p[i] * (1.0f / 32768.0f);
 	}
 	else if (bitDepth == 24) {
 		for (int i = 0; i < srcSamples * channels; i++) {
 			int o = i * 3;
-			int s = (pSrc[o] << 8) | (pSrc[o + 1] << 16) | ((signed char)pSrc[o + 2] << 24);
-			srcFloat[i] = s * (1.0f / 2147483648.0f);
+			uint32_t u = (uint32_t)pSrc[o] | ((uint32_t)pSrc[o + 1] << 8) | ((uint32_t)pSrc[o + 2] << 16);
+			int32_t s = (u & 0x800000u) ? (int32_t)(u | 0xFF000000u) : (int32_t)u;
+			srcFloat[i] = (float)s * (1.0f / 8388608.0f);
 		}
 	}
 	else if (bitDepth == 32) {
@@ -3761,17 +3790,27 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	}
 
 	unsigned char* pDst = (unsigned char*)dstData;
-	if (bitDepth == 16) {
+	if (bitDepth == 8) {
+		for (int i = 0; i < dstSamples * channels; i++) {
+			float s = dstFloat[i]; if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
+			pDst[i] = (unsigned char)(s * 127.0f + 128.0f);
+		}
+	}
+	else if (bitDepth == 16) {
 		short* p = (short*)dstData;
 		for (int i = 0; i < dstSamples * channels; i++) {
 			float s = dstFloat[i]; if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
-			p[i] = (short)(s * 32767.0f);
+			int32_t v = (int32_t)roundf(s * 32768.0f);
+			if (v > 32767) v = 32767; if (v < -32768) v = -32768;
+			p[i] = (short)v;
 		}
 	}
 	else if (bitDepth == 24) {
 		for (int i = 0; i < dstSamples * channels; i++) {
 			float s = dstFloat[i]; if (s > 1.0f) s = 1.0f; else if (s < -1.0f) s = -1.0f;
-			int v = (int)(s * 8388607.0f); int o = i * 3;
+			int32_t v = (int32_t)roundf(s * 8388608.0f);
+			if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
+			int o = i * 3;
 			pDst[o] = v & 0xFF; pDst[o + 1] = (v >> 8) & 0xFF; pDst[o + 2] = (v >> 16) & 0xFF;
 		}
 	}
@@ -4241,10 +4280,14 @@ void equaliser(void* data, int len, BOOL reset) {
 				if (finalOut < -1.0f) finalOut = -1.0f;
 
 				int offset = (i * wavch + ch) * bytesPerSample;
-				if (wavsam == 16)
-					*((short*)(pRaw + offset)) = (short)(finalOut * 32767.0f);
+				if (wavsam == 16) {
+					int32_t v = (int32_t)roundf(finalOut * 32768.0f);
+					if (v > 32767) v = 32767; if (v < -32768) v = -32768;
+					*((short*)(pRaw + offset)) = (short)v;
+				}
 				else if (wavsam == 24) {
-					int v = (int)(finalOut * 8388607.0f);
+					int32_t v = (int32_t)roundf(finalOut * 8388608.0f);
+					if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
 					pRaw[offset] = v & 0xFF;
 					pRaw[offset + 1] = (v >> 8) & 0xFF;
 					pRaw[offset + 2] = (v >> 16) & 0xFF;

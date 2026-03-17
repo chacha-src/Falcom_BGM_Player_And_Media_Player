@@ -35,6 +35,7 @@ public:
 	void OnList();
 	int nnn;
 	int pnt,pnt1;
+	int playcnt;
 
 	void SIcon(int i);
 	void SIconTimer(int i);

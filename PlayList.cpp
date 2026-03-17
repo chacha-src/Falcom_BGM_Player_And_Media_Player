@@ -35,6 +35,7 @@ CPlayList::CPlayList(CWnd* pParent /*=NULL*/)
 	m_hIcon = AfxGetApp()->LoadIcon(IDI_PL);
 	pc=NULL;
 	plw=0;
+	playcnt=0;
 //	pc = new playlistdata0[60000];
 }
 
@@ -131,7 +132,6 @@ void trans_func1( unsigned int u, EXCEPTION_POINTERS* pExp )
 }
 
 
-int playcnt=0;
 float hD2;
 int syo;
 int syomode;
@@ -359,7 +359,7 @@ int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 	CString s,s1;
 	for(int j=0;j<i;j++){
 		c=0;
-		if ((pc[j].sub == -10) || (pc[j].sub == -2) || (pc[j].sub == -3 || pc[j].sub == 30)) {
+		if ((pc[j].sub == -10) || (pc[j].sub == -2) || (pc[j].sub == -3 || pc[j].sub == 30) || (pc[j].sub == 999)) {
 			if (_tcscmp(pc[j].fol, fol) == 0 && pc[j].sub == sub && _tcscmp(pc[j].name, name) == 0)
 				return j;
 		}else{
@@ -447,6 +447,8 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 			s = fol; s.MakeLower();
 			if (s.Right(3) == "m4a") { s = LL14(_T("m4aファイル"), _T("m4a File"), _T("m4a fichier"), _T("m4a file"), _T("m4a archivo"), _T("m4a ??"), _T("m4a文件"), _T("m4a ???"), _T("m4a файл"), _T("m4a Datei"), _T("m4a arquivo"), _T("m4a bestand"), _T("m4a plik"), _T("m4a dosya")); break; }
 			if (s.Right(3) == "aac") { s = LL14(_T("aacファイル"), _T("aac File"), _T("aac fichier"), _T("aac file"), _T("aac archivo"), _T("aac ??"), _T("aac文件"), _T("aac ???"), _T("aac файл"), _T("aac Datei"), _T("aac arquivo"), _T("aac bestand"), _T("aac plik"), _T("aac dosya")); break; }
+		case 999:
+			s = LL14(_T("wavファイル"), _T("wav File"), _T("wav fichier"), _T("wav file"), _T("wav archivo"), _T("wav ??"), _T("wav文件"), _T("wav ???"), _T("wav файл"), _T("wav Datei"), _T("wav arquivo"), _T("wav bestand"), _T("wav plik"), _T("wav dosya")); break;
 		case -10:
 			s=fol;s.MakeLower();
 			if(s.Right(3)=="mp3"){ s=LL14(L"mp3ファイル", L"mp3 File", L"mp3 fichier", L"mp3 file", L"mp3 archivo", L"mp3 ??", L"mp3文件", L"mp3 ???", L"mp3 файл", L"mp3 Datei", L"mp3 arquivo", L"mp3 bestand", L"mp3 plik", L"mp3 dosya");break;}
@@ -3915,6 +3917,105 @@ void CPlayList::Fol(CString fname)
 						}
 					}
 				}
+				else if (ft.Right(4).MakeLower() == ".wav" || ft.Right(4) == ".WAV") {
+					CFile ff;
+					if (ff.Open(fname, CFile::modeRead | CFile::shareDenyWrite, NULL)) {
+						int read = ff.Read(bufimage, 44);
+						ff.Close();
+						if (read >= 12 && bufimage[0] == 'R' && bufimage[1] == 'I' && bufimage[2] == 'F' && bufimage[3] == 'F' && bufimage[8] == 'W' && bufimage[9] == 'A' && bufimage[10] == 'V' && bufimage[11] == 'E') {
+							p.sub = 999;
+							ft = ft2;
+							_tcscpy(p.name, ft2);
+							_tcscpy(p.fol, fname);
+							p.alb[0] = p.art[0] = NULL;
+							p.loop1 = p.loop2 = 0;
+							int totalRead = 0;
+							{
+								CFile ff2;
+								if (ff2.Open(fname, CFile::modeRead | CFile::shareDenyWrite, NULL)) {
+									totalRead = ff2.Read(bufimage, sizeof(bufimage));
+									ff2.Close();
+									for (int j = 12; j + 12 < totalRead; ) {
+										DWORD ckid = *(DWORD*)&bufimage[j];
+										DWORD cksize = *(DWORD*)&bufimage[j + 4];
+										if (ckid == 0x5453494C && cksize >= 4 && *(DWORD*)&bufimage[j + 8] == 0x4F464E49) {
+											int listEnd = j + 8 + cksize;
+											if (listEnd > totalRead) break;
+											for (int k = j + 12; k + 8 < listEnd; ) {
+												DWORD subid = *(DWORD*)&bufimage[k];
+												DWORD subsize = *(DWORD*)&bufimage[k + 4];
+												if (subsize > 0 && k + 8 + (int)subsize <= listEnd) {
+													char val[256];
+													int copylen = (subsize < 255) ? subsize : 255;
+													memcpy(val, &bufimage[k + 8], copylen);
+													val[copylen] = 0;
+													if (subid == 0x54524149) {
+														TCHAR t[256];
+														MultiByteToWideChar(CP_UTF8, 0, val, -1, t, 256);
+														_tcscpy(p.art, t);
+													}
+													else if (subid == 0x4D414E49) {
+														TCHAR t[256];
+														MultiByteToWideChar(CP_UTF8, 0, val, -1, t, 256);
+														_tcscpy(p.name, t);
+													}
+													else if (subid == 0x44525049) {
+														TCHAR t[256];
+														MultiByteToWideChar(CP_UTF8, 0, val, -1, t, 256);
+														_tcscpy(p.alb, t);
+													}
+												}
+												k += 8 + (int)((subsize + 1) & ~1);
+											}
+											break;
+										}
+										j += 8 + (int)((cksize + 1) & ~1);
+									}
+								}
+							}
+							int wavTime = 0;
+							if (totalRead >= 44) {
+								DWORD sr = *(DWORD*)&bufimage[24];
+								WORD ch = *(WORD*)&bufimage[22];
+								WORD bps = *(WORD*)&bufimage[34];
+								if (sr > 0 && ch > 0 && bps > 0) {
+									for (int j = 12; j + 8 < totalRead; ) {
+										DWORD ckid = *(DWORD*)&bufimage[j];
+										DWORD cksize = *(DWORD*)&bufimage[j + 4];
+										if (ckid == 0x61746164) {
+											if (cksize > 0 && sr > 0) {
+												DWORD bytesPerSample = (bps + 7) / 8 * ch;
+												if (bytesPerSample > 0)
+													wavTime = (int)(cksize / bytesPerSample / sr);
+											}
+											break;
+										}
+										j += 8 + (int)((cksize + 1) & ~1);
+										if (j + 8 >= totalRead) break;
+									}
+								}
+							}
+							Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, wavTime);
+							return;
+						}
+						else {
+							p.sub = -2;
+							_tcscpy(p.name, s);
+							_tcscpy(p.fol, fname1);
+							p.alb[0] = p.art[0] = NULL; p.loop1 = p.loop2 = 0;
+							TCHAR kpi[512]; kpi[0] = 0;
+							plugs(fname, &p, kpi, kvver);
+						}
+					}
+					else {
+						p.sub = -2;
+						_tcscpy(p.name, s);
+						_tcscpy(p.fol, fname1);
+						p.alb[0] = p.art[0] = NULL; p.loop1 = p.loop2 = 0;
+						TCHAR kpi[512]; kpi[0] = 0;
+						plugs(fname, &p, kpi, kvver);
+					}
+				}
 				else {
 					p.sub = -2;
 					_tcscpy(p.name, s);
@@ -4607,7 +4708,7 @@ void timerpl1(UINT nIDEvent,CPlayList* pl)
 				int Lindex=-1;
 				Lindex=pl->m_lc.GetNextItem(Lindex,LVNI_ALL |LVNI_SELECTED);
 				i=Lindex;
-				if(Lindex>=playcnt) return;
+				if(Lindex>=pl->playcnt) return;
 				if(Lindex==-1) return;
 //				pl->SIcon(i);
 				fnn=pl->pc[Lindex].name;
