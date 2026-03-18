@@ -15110,7 +15110,7 @@ void COggDlg::timerp()
 		L"file:Video",
 		L"file:Wideo",
 		L"file:Video"));
-	if (mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6) {
+	if (mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == 999) {
 		CString g; g = L""; g = filen; g.MakeLower();
 		if (g.Right(4) == L".mp3") g = L"(mp3)";
 		if (g.Right(4) == L".rmp") g = L"(rmp)";
@@ -15124,6 +15124,7 @@ void COggDlg::timerp()
 		if (g.Right(4) == L".dsf") g = L"(DSD(dsf))";
 		if (g.Right(4) == L".dff") g = L"(DSD(dff))";
 		if (g.Right(4) == L".wsd") g = L"(DSD(wsd))";
+		if (g.Right(4) == L".wav") g = L"(wav)";
 		s.Format(LL14(L"file:音声ファイル%s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s"), g);
 	}
 	if (mode == -2 || mode == -3) sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
@@ -15311,7 +15312,7 @@ void COggDlg::timerp()
 		s.Format(_T("kpi :%s"), sss.Right(sss.GetLength() - sss.ReverseFind('\\') - 1));
 		moji(s, 1, 64, 0x7fffff);
 	}
-	else if (mode == -8 || mode == -7) {
+	else if (mode == -8 || mode == -7 || mode == 999) {
 		s.Format(_T("data:%sHz %s %dbit"), wavbit1, (wavch == 1) ? _T("mono") : _T("stereo"), wavsam);
 		if (wavch == 3)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("3ch"), wavsam);
 		if (wavch == 4)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("4ch"), wavsam);
@@ -15407,7 +15408,7 @@ void COggDlg::timerp()
 			s.Format(_T("    :%7d-%9d"), loop1, loop2);
 		moji(s, 1, 64, 0x7fefef);
 	}
-	if (mode == -10 || mode == -9 || mode == -8 || mode == -7) {
+	if (mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == 999) {
 		s = "Albu:";
 		moji(s, 1, 80, 0x7fffff);
 		//			dcsub.FillSolidRect(0,0,3000,30,RGB(1,1,1));
