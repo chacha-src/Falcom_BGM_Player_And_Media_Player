@@ -11209,8 +11209,13 @@ void CWread::wavread()
 		}
 		adbuf2 = (char*)calloc((size_t)totalSamples * 6 * 2, 1);
 
-		loop1 = l1;
-		loop2 = (l2 - l1);
+		// loops=メタデータは44.1kHz基準のことが多い。Opus出力は48kHzなので変換
+		{
+			DWORD metaRate = (og->sikpi.dwSamplesPerSec != 0) ? og->sikpi.dwSamplesPerSec : 44100;
+			float rate = 48000.0f / (float)metaRate;  // 出力48kHz / メタデータのサンプルレート
+			loop1 = (int)(l1 * rate);
+			loop2 = (int)((l2 - l1) * rate);
+		}
 		a = filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1);
 		if (a.Left(3).MakeLower() == L"ed7") {
 			short b = (short)_ttoi(a.Mid(3, 3));
@@ -11386,12 +11391,9 @@ void CWread::wavread()
 			loop2 = cnt / 4;
 		}
 		else {
-			int loop1_src = (int)(BYTE)bbuf[st + 0x30] + (int)(BYTE)bbuf[st + 0x31] * 256 + (int)(BYTE)bbuf[st + 0x32] * 65536 + (int)(BYTE)bbuf[st + 0x33] * 256 * 65536;
-			int loop2_src = (int)(BYTE)bbuf[st + 0x34] + (int)(BYTE)bbuf[st + 0x35] * 256 + (int)(BYTE)bbuf[st + 0x36] * 65536 + (int)(BYTE)bbuf[st + 0x37] * 256 * 65536; loop2_src -= loop1_src;
-			// smplは44.1kHz基準。出力wavbit(48k等)に合わせて動的変換
-			float rate = 48000.0f / 44100.0f;  // mode 30は常に48kHz出力
-			loop1 = (int)(loop1_src * rate);
-			loop2 = (int)(loop2_src * rate);
+			loop1 = (int)(BYTE)bbuf[st + 0x30] + (int)(BYTE)bbuf[st + 0x31] * 256 + (int)(BYTE)bbuf[st + 0x32] * 65536 + (int)(BYTE)bbuf[st + 0x33] * 256 * 65536;
+			int loop2_end = (int)(BYTE)bbuf[st + 0x34] + (int)(BYTE)bbuf[st + 0x35] * 256 + (int)(BYTE)bbuf[st + 0x36] * 65536 + (int)(BYTE)bbuf[st + 0x37] * 256 * 65536;
+			loop2 = loop2_end - loop1;  // smplのstart/endはバッファのサンプル索引と同一。変換不要
 		}
 
 		data_size = oggsize = cnt;
