@@ -200,6 +200,7 @@ LPDIRECTSOUNDNOTIFY dsnf1;
 LPDIRECTSOUNDNOTIFY dsnf2;
 UINT HandleNotifications(LPVOID lpvoid);
 UINT WASAPIHandleNotifications(LPVOID lpvoid);
+void HandleNotifications_export();  // WAV出力専用（DirectSoundなし、ファイル書き込みのみ）
 ULONG WAVDALen;
 UINT WAVDAStartLen;
 
@@ -1088,6 +1089,11 @@ int poss = 0, poss2 = 0, poss3 = 0, poss4 = 0, poss5 = 0, poss6 = 0, loopcnt, pl
 int current_section;
 long whsize;
 int ret2;
+
+// WAV出力（再生なし）用
+CString wavExportPath;
+int wavExportLoopCount = 0;
+BOOL wavExportMute = FALSE;
 
 //#define OUTPUT_BUFFER_NUM  10
 //#define BUFSZ			(4096*6)
@@ -6039,8 +6045,8 @@ void COggDlg::play()
 
 		}
 	}
-	//ファイル保存用
-	cc1 = 0;
+	//ファイル保存用（wavExport時はcc1を後で設定するためここではリセットしない）
+	if (wavExportPath.GetLength() == 0) cc1 = 0;
 	playb = 0;
 	m_time.SetPos((int)playb);
 	if (ogg) ov_pcm_seek(&vf, (ogg_int64_t)0);
@@ -8123,10 +8129,13 @@ void COggDlg::play()
 			stitle = a;
 		}
 	}
-	if (m_c2.GetCheck() == 1)
+	// wavExportPath時はエクスポートパス内でcc.Openするためここではスキップ
+	if (m_c2.GetCheck() == 1 && wavExportPath.GetLength() == 0)
 	{
 		cc1 = 1;
-		if (cc.Open(filen + _T(".wav"), CFile::modeCreate | CFile::modeReadWrite | CFile::typeBinary | CFile::shareExclusive, NULL) != TRUE) {
+		CString outPath = filen + _T(".wav");
+		if (outPath.Right(4).MakeLower() != _T(".wav")) outPath += _T(".wav");
+		if (cc.Open(outPath, CFile::modeCreate | CFile::modeReadWrite | CFile::typeBinary | CFile::shareExclusive, NULL) != TRUE) {
 			m_saisai.EnableWindow(TRUE);
 			endflg = 0;
 			return;
@@ -8278,6 +8287,53 @@ void COggDlg::play()
 
 	fade1 = 0;
 	//-------------------------------------------------------------------
+	// WAV出力専用: DirectSoundをスキップしHandleNotifications_exportへ
+	if (wavExportPath.GetLength() > 0) {
+		// 2回目以降のため前回のccを確実に閉じる
+		if (cc1 == 1) { cc.Close(); cc1 = 0; }
+		// エクスポート用にcc.Openとヘッダ書き込みをここで実行（8131に依存しない）
+		cc1 = 1;
+		wl = 0;
+		poss = poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+		playb = 0;
+		lenl = 0;
+		fade = 1.0f; fadeadd = 0.0f; fade1 = 0;
+		reset = TRUE;
+		CString outPath = wavExportPath;
+		if (outPath.Right(4).MakeLower() != _T(".wav")) outPath += _T(".wav");
+		if (cc.Open(outPath, CFile::modeCreate | CFile::modeReadWrite | CFile::typeBinary | CFile::shareExclusive, NULL) != TRUE) {
+			cc1 = 0;
+			m_saisai.EnableWindow(TRUE);
+			endflg = 0;
+			return;
+		}
+		if (ogg) cc.Write(ogg, whsize);
+		if (wav) cc.Write(wav, whsize);
+		endflg = 0;
+		SetTimer(9000, 10, NULL);
+		endf = 0;
+		if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
+		if (loop2 == 0) endf = 1;
+		if (mode == -3 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
+		loopcnt = 0;
+		HandleNotifications_export();
+		// WAV出力時はm_douに関係なくccを閉じる（2回目以降のエクスポートでcc.Openが成功するため）
+		if (cc1 == 1) {
+			cc.SeekToBegin();
+			WAVEFILEHEADER wh1;
+			cc.Read(&wh1, sizeof(wh1));
+			wh1.ckSizeRIFF = wl + 44 - 8;
+			wh1.ckSizeData = wl;
+			cc.SeekToBegin();
+			cc.Write(&wh1, sizeof(wh1));
+			cc.Close();
+			cc1 = 0;
+		}
+		stop1();
+		m_saisai.EnableWindow(TRUE);
+		endflg = 0;
+		return;
+	}
 	//if (pAudioClient == NULL) {
 	DSBUFFERDESC dsbd;
 	flg0 = 0;
@@ -8805,6 +8861,38 @@ void COggDlg::SetAdd(CString fnn, int mode, int loop1, int loop2, CString filen,
 			pl->SIcon(plc);
 		}
 	}
+}
+
+BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount)
+{
+	if (!pc || outputPath.IsEmpty() || loopCount < 1) return FALSE;
+	// 2回目以降：初回と同じ状態へリセット（前回のエクスポートで変更されたグローバルを戻す）
+	if (cc1 == 1) { cc.Close(); cc1 = 0; }
+	wl = 0;
+	poss = poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+	playb = 0;
+	lenl = 0;
+	fade = 1.0f; fadeadd = 0.0f; fade1 = 0;
+	reset = TRUE;
+	// グローバル変数を設定
+	filen = pc->fol;
+	fnn = pc->name;
+	mode = modesub = pc->sub;
+	loop1 = pc->loop1;
+	loop2 = pc->loop2;
+	ret2 = pc->ret2;
+	wavExportPath = outputPath;
+	wavExportLoopCount = loopCount;
+	wavExportMute = TRUE;
+	int saveloop_bak = savedata.saveloop;
+	savedata.saveloop = 1;  // ループを有効にしてwavExportLoopCountで制御
+	if (wavExportMute) m_sl.SetPos(0);
+	play();
+	wavExportPath.Empty();
+	wavExportLoopCount = 0;
+	wavExportMute = FALSE;
+	savedata.saveloop = saveloop_bak;
+	return TRUE;
 }
 
 HANDLE hp;
@@ -15475,7 +15563,10 @@ void COggDlg::timerp()
 		}
 	}
 
-	if (pl && plw) {
+	if (wavExportLoopCount > 0) {
+		if (loopcnt >= wavExportLoopCount) OnButton5();
+	}
+	else if (pl && plw) {
 		if (pl->m_renzoku.GetCheck() == TRUE) {
 			CString s; m_kaisuu.GetWindowText(s);
 			if (loopcnt >= _tstoi(s)) OnButton5();
@@ -16034,8 +16125,13 @@ void COggDlg::timerp()
 			}
 		}
 		else {
-			CString s; m_kaisuu.GetWindowText(s);
-			if (loopcnt >= _tstoi(s)) OnButton5();
+			if (wavExportLoopCount > 0) {
+				if (loopcnt >= wavExportLoopCount) OnButton5();
+			}
+			else {
+				CString s; m_kaisuu.GetWindowText(s);
+				if (loopcnt >= _tstoi(s)) OnButton5();
+			}
 		}
 	}
 

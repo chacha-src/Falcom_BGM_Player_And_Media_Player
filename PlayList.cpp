@@ -10,6 +10,7 @@
 #include "PlayList.h"
 #include "ListSyosai.h"
 #include "Filename.h"
+#include "WavExport.h"
 #include "Douga.h"
 #include "mp3image.h"
 #include "CImageBase.h"
@@ -97,6 +98,7 @@ BEGIN_MESSAGE_MAP(CPlayList, CCustomDialog)
 	ON_NOTIFY(NM_RCLICK, IDC_LIST1, &CPlayList::OnNMRclickList1)
 	ON_COMMAND(ID_POP_32776, OnList)
 	ON_COMMAND(ID_POP_32777,Del)
+	ON_COMMAND(ID_POP_WAVEXPORT, &CPlayList::OnPopWavExport)
 	ON_WM_ACTIVATE()
 	ON_COMMAND(ID_POP_32787, &CPlayList::OnPop32787)
 	ON_BN_CLICKED(IDC_BUTTON16, &CPlayList::OnFindUp)
@@ -5075,6 +5077,11 @@ void CPlayList::OnNMRclickList1(NMHDR *pNMHDR, LRESULT *pResult)
 			L"Detalles del archivo", L"?? ?? ??", L"文件??信息", L"?????? ?????",
 			L"Сведения о файле", L"Dateidetails", L"Detalhes do arquivo", L"Bestandsdetails",
 			L"Szczego?y pliku", L"Dosya ayr?nt?lar?"));
+	menu.AppendMenu(MF_STRING | MF_ENABLED, ID_POP_WAVEXPORT,
+		LL14(L"WAVへ出力", L"Export to WAV", L"Exporter en WAV", L"Esporta in WAV",
+			L"Exportar a WAV", L"WAV로 내보내기", L"导出到WAV", L"تصدير إلى WAV",
+			L"Экспорт в WAV", L"Als WAV exportieren", L"Exportar para WAV", L"Exporteren naar WAV",
+			L"Eksportuj do WAV", L"WAV'e aktar"));
 	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING | MF_ENABLED, ID_POP_32777,
 		LL14(L"削除", L"Delete", L"Supprimer", L"Elimina",
@@ -5155,6 +5162,20 @@ void CPlayList::OnPop32787()//ファイル名変更
 		m_lc.RedrawWindow(&r);
 	}
 	w_flg=TRUE;
+	delete a;
+}
+
+void CPlayList::OnPopWavExport()
+{
+	int Lindex = -1;
+	Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED);
+	if (Lindex < 0 || Lindex >= playcnt) return;
+	CWavExport* a = new CWavExport(CWnd::FromHandle(GetSafeHwnd()));
+	w_flg = FALSE;
+	memcpy(&a->pc, &pc[Lindex], sizeof(playlistdata0));
+	CWnd::PostMessage(0x118);
+	a->DoModal();
+	w_flg = TRUE;
 	delete a;
 }
 

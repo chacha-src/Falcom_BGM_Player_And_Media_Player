@@ -52,6 +52,7 @@ public:
 	LRESULT dp1(WPARAM, LPARAM);
 	LRESULT dp2(WPARAM, LPARAM);
 	void SetAdd(CString fnn,int mode,int loop1,int loop2,CString filen,int ret2,REFTIME time);
+	BOOL ExportToWav(playlistdata0* pc, CString outputPath, int loopCount);
 	double goertzel(const float* data, int N, double target_freq, double sample_rate);
 	double hanWindow(int value, int index, int offset, int size);
 	CString mp3file;

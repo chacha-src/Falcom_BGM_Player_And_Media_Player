@@ -360,6 +360,13 @@ BYTE bufkpim[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3];
 extern IGraphBuilder* pGraphBuilder;
 extern IMediaControl* pMediaControl;
 
+extern CString wavExportPath;
+extern int wavExportLoopCount;
+extern CFile cc;
+extern int cc1;
+extern int loopcnt;
+extern ULONG WAVDALen;
+#define OUTPUT_BUFFER_NUM_DS 5
 
 void equaliser(void* data, int len, BOOL reset = FALSE);
 
@@ -530,6 +537,60 @@ UINT HandleNotifications(LPVOID)
 	}
 
 } //handlenotifications()
+
+// WAV出力専用：DirectSoundを使わずデコード→ファイル書き込みのみ。m_c2チェックに関係なくcc1で出力。
+void HandleNotifications_export()
+{
+	if (wavExportPath.GetLength() == 0 || cc1 != 1) return;
+	thn1 = FALSE;  // 2回目以降：前回stop1()でTRUEになったままなのでリセット必須
+	oldw = 0;
+	fade1 = 0;
+	const ULONG bufSize = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM_DS;
+	const int chunkSize = (int)(WAVDALen / 10);
+	if (chunkSize <= 0) return;
+	for (;;) {
+		DoEvent();
+		if (syukai == 2) break;
+		if (thn1) break;
+		if (fade1) break;
+		if (wavExportLoopCount > 0 && loopcnt >= wavExportLoopCount) break;
+		int len1 = chunkSize;
+		int len2 = 0;
+		if (len1 > (int)(bufSize - oldw)) {
+			len1 = (int)(bufSize - oldw);
+			len2 = chunkSize - len1;
+			if (len2 > (int)oldw) len2 = (int)oldw;
+		}
+		if (len1 <= 0 && len2 <= 0) {
+			len1 = chunkSize;
+			len2 = 0;
+			oldw = 0;
+		}
+		sflg = TRUE;
+		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
+			playwavadpcm(bufwav3, oldw, len1, len2);
+		else if (mode == -10)
+			playwavmp3(bufwav3, oldw, len1, len2);
+		else if (mode == 999)
+			playwavwav(bufwav3, oldw, len1, len2);
+		else if (mode == -3)
+			playwavkpi(bufwav3, oldw, len1, len2);
+		else if (mode == -7)
+			playwavdsd(bufwav3, oldw, len1, len2);
+		else if (mode == -8)
+			playwavflac(bufwav3, oldw, len1, len2);
+		else if (mode == -9)
+			playwavm4a(bufwav3, oldw, len1, len2);
+		else
+			playwavds2(bufwav3, oldw, len1, len2);
+		oldw = (oldw + len1 + len2) % bufSize;
+		sflg = FALSE;
+		if (fade1) break;
+		if (wavExportLoopCount > 0 && loopcnt >= wavExportLoopCount) break;
+		Sleep(0);
+	}
+}
+
 extern std::vector<float> inputFloatData;
 extern std::vector<uint8_t> m_bufwav3_1;
 extern int pitch;

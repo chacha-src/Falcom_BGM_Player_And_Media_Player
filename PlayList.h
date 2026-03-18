@@ -112,6 +112,7 @@ public:
 	CCustomCheckBox m_saisyo;
 	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
 	afx_msg void OnPop32787();
+	afx_msg void OnPopWavExport();
 	CCustomEdit m_find;
 	afx_msg void OnFindUp();
 	afx_msg void OnFindDown();

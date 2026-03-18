@@ -72,6 +72,7 @@
 #define IDD_PLAYLIST_NEW                189
 #define IDD_IMAGE                       191
 #define IDD_EQUALIZER                   194
+#define IDD_WAVEXPORT                   195
 #define IDC_STATIC11                    1000
 #define IDC_BUTTON1                     1001
 #define IDC_BUTTON5                     1002
@@ -319,6 +320,14 @@
 #define IDC_STATIC_R_SPEANA             1206
 #define IDC_STATIC_R_SPC                1207
 #define IDC_STATIC_R_BIT                1208
+#define IDC_WAVEXPORT_LOOP              3300
+#define IDC_WAVEXPORT_PATH              3301
+#define IDC_WAVEXPORT_BROWSE            3302
+#define IDC_WAVEXPORT_EXEC              3303
+#define IDC_WAVEXPORT_STATUS            3304
+#define IDC_WAVEXPORT_LOOP_LABEL        3305
+#define IDC_WAVEXPORT_PATH_LABEL        3306
+#define IDC_WAVEXPORT_CLOSE             3307
 #define ID_MENUITEM32771                32771
 #define ID_MENUITEM32772                32772
 #define ID_MENUITEM32773                32773
@@ -332,6 +341,7 @@
 #define ID__32784                       32784
 #define ID_32785                        32785
 #define ID_POP_32787                    32787
+#define ID_POP_WAVEXPORT                32950
 #define ID_32788                        32788
 #define ID_32790                        32790
 #define ID_32792                        32792
@@ -499,9 +509,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        196
+#define _APS_NEXT_RESOURCE_VALUE        197
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         1127
+#define _APS_NEXT_CONTROL_VALUE         3307
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif
