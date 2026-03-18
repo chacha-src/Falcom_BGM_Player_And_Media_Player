@@ -88,11 +88,17 @@ BOOL __fastcall OggOpusDecoder::Open( TCHAR *cszFileName, SOUNDINFO *pInfo)
 	OpusTags *ot = NULL;
 	
 	m_pOpusFile = op_open_file(cszFileName, &err);
-	
+	if (!m_pOpusFile) return FALSE;
+
+	// Opusヘッダのinput_sample_rateで44.1kHz/48kHz等を判定
+	// libopusfileは常に48kHzでデコード出力するため、再生用は48kHzを報告
+	const OpusHead* head = op_head(m_pOpusFile, -1);
+	if (head && head->input_sample_rate != 0) {
+		// 元サンプルレートは head->input_sample_rate で参照可能（表示・リサンプル用）
+	}
+	pInfo->dwSamplesPerSec = 48000;  // デコード出力は常に48kHz
 
 	ogg_int64_t totalSamples = op_pcm_total(m_pOpusFile, -1);
-
-	pInfo->dwSamplesPerSec = 48000;
 	pInfo->dwChannels = 2;
 	pInfo->dwBitsPerSample = 16;
 	pInfo->dwSeekable = 1;

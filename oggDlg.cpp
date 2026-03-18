@@ -11159,24 +11159,7 @@ void CWread::wavread()
 				}
 			}
 		}
-		for (int l = 0; l < 240; l++) {
-			if (by[l] == 'u' && by[l + 1] == 's' && by[l + 2] == 'H' && by[l + 3] == 'e' && by[l + 4] == 'a' && by[l + 5] == 'd') {
-				struct abc
-				{
-					union {
-						int a;
-						char b[4];
-					};
-				};
-
-				abc abc_;
-				abc_.b[0] = abc_.b[1] = abc_.b[2] = abc_.b[3] = 0;
-				abc_.b[0] = by[l + 10];
-				abc_.b[1] = by[l + 11];
-				wavbit = abc_.a;
-
-			}
-		}
+		// usHead(OpusHead)のサンプルレートは op_open_file 後の op_head() で取得するため削除
 		for (int l = 0; l < 240; l++) {
 			if (by[l] == 'l' && by[l + 1] == 'o' && by[l + 2] == 'o' && by[l + 3] == 'p' && by[l + 4] == 's' && by[l + 5] == 't') {
 				strcpy(by2, by + l + 10);
@@ -11207,6 +11190,17 @@ void CWread::wavread()
 		void* bbbb = filen.GetBuffer();
 		m_pOpusFile = op_open_file((WCHAR*)bbbb, &err);
 		filen.ReleaseBuffer();
+
+		// Opusヘッダのinput_sample_rateで44.1kHz/48kHz等を判定
+		// libopusfileは常に48kHzでデコード出力するため、再生用wavbitは48kHzに固定
+		{
+			const OpusHead* head = op_head(m_pOpusFile, -1);
+			if (head && head->input_sample_rate != 0) {
+				// ヘッダの元サンプルレートをsikpiに格納（表示・将来のリサンプル用）
+				og->sikpi.dwSamplesPerSec = head->input_sample_rate;
+			}
+			wavbit = 48000;  // デコード出力は常に48kHz
+		}
 
 		ogg_int64_t totalSamples = op_pcm_total(m_pOpusFile, -1);
 		op_raw_seek(m_pOpusFile, 1);
@@ -11243,8 +11237,10 @@ void CWread::wavread()
 					if (b == zerobuf.track) break;
 				}
 				if (zerobuf.track != 0) {
-					loop1 = (int)(zerobuf.start * 1.08843537414966); //44.1kHz -> 48kHz
-					loop2 = (int)(zerobuf.end * 1.08843537414966); //44.1kHz -> 48kHz
+					// t_bgm._dtは44.1kHz基準。出力wavbitに合わせて動的変換（opus=48k,他=44.1k等）
+					float rate = (float)wavbit / 44100.0f;
+					loop1 = (int)(zerobuf.start * rate);
+					loop2 = (int)(zerobuf.end * rate);
 				}
 			}
 		}
@@ -11390,8 +11386,12 @@ void CWread::wavread()
 			loop2 = cnt / 4;
 		}
 		else {
-			loop1 = (int)(BYTE)bbuf[st + 0x30] + (int)(BYTE)bbuf[st + 0x31] * 256 + (int)(BYTE)bbuf[st + 0x32] * 65536 + (int)(BYTE)bbuf[st + 0x33] * 256 * 65536; //loop1 = (int)(loop1 * (48.0f / 44.1f)); //ループ開始ポイント
-			loop2 = (int)(BYTE)bbuf[st + 0x34] + (int)(BYTE)bbuf[st + 0x35] * 256 + (int)(BYTE)bbuf[st + 0x36] * 65536 + (int)(BYTE)bbuf[st + 0x37] * 256 * 65536; loop2 -= loop1;//ループ長
+			int loop1_src = (int)(BYTE)bbuf[st + 0x30] + (int)(BYTE)bbuf[st + 0x31] * 256 + (int)(BYTE)bbuf[st + 0x32] * 65536 + (int)(BYTE)bbuf[st + 0x33] * 256 * 65536;
+			int loop2_src = (int)(BYTE)bbuf[st + 0x34] + (int)(BYTE)bbuf[st + 0x35] * 256 + (int)(BYTE)bbuf[st + 0x36] * 65536 + (int)(BYTE)bbuf[st + 0x37] * 256 * 65536; loop2_src -= loop1_src;
+			// smplは44.1kHz基準。出力wavbit(48k等)に合わせて動的変換
+			float rate = 48000.0f / 44100.0f;  // mode 30は常に48kHz出力
+			loop1 = (int)(loop1_src * rate);
+			loop2 = (int)(loop2_src * rate);
 		}
 
 		data_size = oggsize = cnt;
