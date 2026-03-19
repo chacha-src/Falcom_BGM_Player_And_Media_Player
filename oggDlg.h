@@ -240,6 +240,7 @@ public:
 	afx_msg void OnBnClickedButton48();
 	CCustomStandardButton d_arc;
 	afx_msg void OnBnClickedButton51();
+	afx_msg LRESULT OnUpdateAvailable(WPARAM wParam, LPARAM lParam);
 	CCustomStandardButton d_san1;
 	afx_msg void OnBnClickedButton53();
 	CCustomStandardButton d_san2;

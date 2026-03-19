@@ -185,6 +185,7 @@ BOOL COggApp::InitInstance()
 	savedata.eqwindow = 0;
 	savedata.lang = 0; // 0:日本語 1:英語 2:仏 3:伊 4:西 5:韓 6:中 7:阿 8:露 9:独 10:葡 11:蘭 12:波 13:土
 	savedata.langselect = 0; // 0:選択前 1:選択後のフラグ
+	savedata.lastUpdateCheck = 0;
 
 #if _UNICODE
 	if(GetKeyState(VK_CONTROL) < 0){

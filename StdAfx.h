@@ -208,10 +208,11 @@ struct save{
 	int eqwindow;
 	int lang;
 	int langselect;
+
+	__int64 lastUpdateCheck;  // update check: 0=not checked, else=last check time
 };
 extern save savedata;
-// 0=日本語, 1=英語, 2=フランス語, 3=イタリア語, 4=スペイン語, 5=韓国語, 6=中国語
-// 7=アラビア語, 8=ロシア語, 9=ドイツ語, 10=ポルトガル語, 11=オランダ語, 12=ポーランド語, 13=トルコ語
+/* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */
 #define LL14(ja,en,fr,it,es,ko,zh,ar,ru,de,pt,nl,pl,tr) (\
 	(savedata.lang)==0?(ja):(savedata.lang)==1?(en):(savedata.lang)==2?(fr):(savedata.lang)==3?(it):\
 	(savedata.lang)==4?(es):(savedata.lang)==5?(ko):(savedata.lang)==6?(zh):(savedata.lang)==7?(ar):\

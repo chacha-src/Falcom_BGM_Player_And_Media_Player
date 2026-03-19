@@ -72,6 +72,7 @@ int wavsam = 16;
 #include "Id3tagv2.h"
 #include "mp3.h"
 #include "OSVersion.h"
+#include "UpdateCheck.h"
 #include "codec/neaacdec.h"
 #include "m4a.h"
 #include "flac.h"
@@ -474,6 +475,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomDialog)
 
 	ON_MESSAGE(WM_APP + 1, dp1)
 	ON_MESSAGE(WM_APP + 2, dp2)
+	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
 	ON_WM_COPYDATA()
 	ON_WM_KEYDOWN()
 	ON_WM_SYSKEYDOWN()
@@ -1237,6 +1239,8 @@ BOOL COggDlg::OnInitDialog()
 	SetDlgItemText(IDC_CHECK5, LL14(L"ランダム再生", L"Random play", L"Lecture aleatoire", L"Riproduzione casuale", L"Reproduccion aleatoria", L"??? ??", L"随机播放", L"????? ??????", L"Случайное воспроизведение", L"Zufallswiedergabe", L"Reproducao aleatoria", L"Willekeurig afspelen", L"Losowe odtwarzanie", L"Rastgele calma"));
 	SetDlgItemText(IDC_CHECK6, LL14(L"順次再生", L"Sequential play", L"Lecture sequentielle", L"Riproduzione sequenziale", L"Reproduccion secuencial", L"?? ??", L"?序播放", L"????? ??????", L"Последовательное воспроизведение", L"Sequentielle Wiedergabe", L"Reproducao sequencial", L"Sequentieel afspelen", L"Kolejne odtwarzanie", L"S?ral? calma"));
 	SetDlgItemText(IDC_BUTTON14, LL14(L"演奏開始", L"Play", L"Lecture", L"Riproduci", L"Reproducir", L"??", L"播放", L"?????", L"Воспроизведение", L"Abspielen", L"Reproduzir", L"Afspelen", L"Odtworz", L"Cal"));
+
+	StartUpdateCheckThread(m_hWnd);
 	SetDlgItemText(IDC_CHECK7, LL14(L"YS6 ナピシュテムの匣", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako"));
 	SetDlgItemText(IDC_CHECK8, LL14(L"YS フェルガナの誓い", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai"));
 	SetDlgItemText(IDC_CHECK9, LL14(L"英雄伝説6空の軌跡FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legende des Heros VI Les Sentiers du Ciel FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"????6 ??? ?? FC", L"英雄??6 空之?迹FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC"));
@@ -11989,6 +11993,7 @@ BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2)
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
 			}
+			reset = TRUE;
 			readadpcm2((char*)bw + old + rrr, (int)l1 - rrr);
 		}
 	}
@@ -12011,6 +12016,7 @@ BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2)
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
 				}
+				reset = TRUE;
 				readadpcm2((char*)bw + rrr, (int)l2 - rrr);
 			}
 		}
@@ -12647,6 +12653,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
 			}
+			reset = TRUE;
 			readkpi(bw + old + rrr, l1 - rrr);
 		}
 	}
@@ -12673,6 +12680,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
 				}
+				reset = TRUE;
 				readkpi(bw + rrr, (int)l2 - rrr);
 			}
 		}
@@ -12920,6 +12928,7 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
 			}
+			reset = TRUE;
 			readm4a(bw + old + rrr, l1 - rrr);
 		}
 	}
@@ -12942,6 +12951,7 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
 				}
+				reset = TRUE;
 				readm4a(bw + rrr, (int)l2 - rrr);
 			}
 		}
@@ -13170,6 +13180,7 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
 			}
+			reset = TRUE;
 			readflac(bw + old + rrr, l1 - rrr);
 		}
 	}
@@ -13194,6 +13205,7 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
 				}
+				reset = TRUE;
 				readflac(bw + rrr, (int)l2 - rrr);
 			}
 		}
@@ -13354,7 +13366,13 @@ int playwavopus(BYTE* bw, int old, int l1, int l2)
 		else {
 			loopcnt++;
 			playb = loop1;
-			opus_.SetPosition(og->kmp, 0);
+			opus_.SetPosition(og->kmp, (DWORD)loop1);
+			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+			if (g_rubberBandStretcher) {
+				delete g_rubberBandStretcher;
+				g_rubberBandStretcher = NULL;
+			}
+			reset = TRUE;
 			readopus(bw + old + rrr, l1 - rrr);
 		}
 	}
@@ -13371,7 +13389,13 @@ int playwavopus(BYTE* bw, int old, int l1, int l2)
 			else {
 				loopcnt++;
 				playb = loop1;
-				opus_.SetPosition(og->kmp, 0);
+				opus_.SetPosition(og->kmp, (DWORD)loop1);
+				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+				if (g_rubberBandStretcher) {
+					delete g_rubberBandStretcher;
+					g_rubberBandStretcher = NULL;
+				}
+				reset = TRUE;
 				readopus(bw + rrr, (int)l2 - rrr);
 			}
 		}
@@ -13552,6 +13576,7 @@ int playwavdsd(BYTE* bw, int old, int l1, int l2)
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
 			}
+			reset = TRUE;
 			readdsd(bw + old + rrr, l1 - rrr);
 		}
 		else {
@@ -13577,6 +13602,7 @@ int playwavdsd(BYTE* bw, int old, int l1, int l2)
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
 				}
+				reset = TRUE;
 				readdsd(bw + rrr, (int)l2 - rrr);
 			}
 			else {
@@ -13730,6 +13756,7 @@ int playwavwav(BYTE* bw, int old, int l1, int l2)
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
 			}
+			reset = TRUE;
 			readwav(bw + old + rrr, l1 - rrr);
 		}
 	}
@@ -13750,6 +13777,7 @@ int playwavwav(BYTE* bw, int old, int l1, int l2)
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
 				}
+				reset = TRUE;
 				readwav(bw + rrr, (int)l2 - rrr);
 			}
 		}
@@ -14085,10 +14113,13 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 			playb = loop1;
 			ov_pcm_seek(&vf, (ogg_int64_t)loop1); poss = 0; poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 			poss5 = loop1;
+			ZeroMemory(bufkpi3, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
+			ZeroMemory(bufwav, sizeof(bufwav));
 			if (g_rubberBandStretcher) {
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
 			}
+			reset = TRUE;
 			mcopy((char*)bw + old + rrr, (int)l1 - rrr);
 		}
 	}
@@ -14103,10 +14134,13 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 				playb = loop1;
 				ov_pcm_seek(&vf, (ogg_int64_t)loop1); poss = 0; poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 				poss5 = loop1;
+				ZeroMemory(bufkpi3, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
+				ZeroMemory(bufwav, sizeof(bufwav));
 				if (g_rubberBandStretcher) {
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
 				}
+				reset = TRUE;
 				mcopy((char*)bw + rrr, (int)l2 - rrr);
 			}
 		}
@@ -16427,6 +16461,16 @@ void COggDlg::OnTimer(UINT nIDEvent)
 LRESULT COggDlg::dp2(WPARAM, LPARAM)
 {
 	OnRestart();
+	return 0;
+}
+
+LRESULT COggDlg::OnUpdateAvailable(WPARAM, LPARAM)
+{
+	int ret = AfxMessageBox(LL14(L"アップデートファイルがあります。\n今すぐ更新しますか？", L"Update file available.\nUpdate now?", L"Fichier de mise a jour disponible.\nMettre a jour maintenant?", L"File di aggiornamento disponibile.\nAggiornare ora?", L"Archivo de actualizacion disponible.\n?Actualizar ahora?", L"??? ??? ????. ??? ????", L"有更新文件。\n是否立即更新？", L"????? ????? ???????. ????? ??????", L"Доступен файл обновления.\nОбновить сейчас?", L"Aktualisierungsdatei verfugbar.\nJetzt aktualisieren?", L"Arquivo de atualizacao disponivel.\nAtualizar agora?", L"Updatebestand beschikbaar.\nNu bijwerken?", L"Dostepny plik aktualizacji.\nZaktualizowac teraz?", L"Guncelleme dosyasi mevcut.\nSimdi guncelle?"), MB_YESNO);
+	if (ret == IDYES && DoUpdateAndRestart())
+	{
+		OnOK();  // ダイアログを閉じてアプリ終了
+	}
 	return 0;
 }
 
