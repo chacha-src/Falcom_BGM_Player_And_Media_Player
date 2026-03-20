@@ -14,6 +14,7 @@
 #endif
 
 static const TCHAR* UPDATE_URL = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.zip");
+static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 
 // __DATE__ "Mar 18 2025", __TIME__ "12:34:56" をパースして time_t 取得
 // __DATE__/__TIME__ はコンパイラのローカル時刻。mktime で time_t(UTC) に変換
@@ -47,11 +48,38 @@ static time_t HttpGetLastModified(const CString& url)
 	InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
 
-	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE;
+	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE;
 	if (url.Find(_T("https://")) == 0) flags |= INTERNET_FLAG_SECURE;
 
-	HINTERNET hConnect = InternetOpenUrl(hInternet, url, NULL, 0, flags, 0);
+	// キャッシュを確実に回避するため、URLの末尾に現在時刻を付けますわ
+	CString noCacheUrl;
+	noCacheUrl.Format(_T("%s?t=%lld"), (LPCTSTR)url, (long long)time(NULL));
+
+	HINTERNET hConnect = InternetOpenUrl(hInternet, noCacheUrl, NULL, 0, flags, 0);
 	if (!hConnect) { InternetCloseHandle(hInternet); return 0; }
+
+	// ファイルが存在するか（HTTPステータスが 200 OK か）を確認します
+	DWORD statusCode = 0;
+	DWORD statusCodeLen = sizeof(statusCode);
+	if (HttpQueryInfo(hConnect, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &statusCode, &statusCodeLen, NULL))
+	{
+		if (statusCode != 200)
+		{
+			// 404 Not Found など、ファイルがない場合は 0 を返しますわ
+			InternetCloseHandle(hConnect);
+			InternetCloseHandle(hInternet);
+			return 0;
+		}
+	}
+
+	char rawDate[256] = { 0 };
+	DWORD rawLen = sizeof(rawDate);
+	if (HttpQueryInfoA(hConnect, HTTP_QUERY_LAST_MODIFIED, rawDate, &rawLen, NULL))
+	{
+		CString dbgRaw;
+		dbgRaw.Format(_T("[UpdateCheck] サーバーからの生の応答日時: %S\n"), rawDate);
+		OutputDebugString(dbgRaw);
+	}
 
 	SYSTEMTIME st = { 0 };
 	DWORD bufLen = sizeof(st);
@@ -84,10 +112,14 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 	InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
 
-	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE;
+	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE;
 	if (url.Find(_T("https://")) == 0) flags |= INTERNET_FLAG_SECURE;
 
-	HINTERNET hConnect = InternetOpenUrl(hInternet, url, NULL, 0, flags, 0);
+	// キャッシュ回避
+	CString noCacheUrl;
+	noCacheUrl.Format(_T("%s?t=%lld"), (LPCTSTR)url, (long long)time(NULL));
+
+	HINTERNET hConnect = InternetOpenUrl(hInternet, noCacheUrl, NULL, 0, flags, 0);
 	if (!hConnect) { InternetCloseHandle(hInternet); return false; }
 
 	CFile f;
@@ -109,8 +141,8 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 	return true;
 }
 
-// ZIP を destDir に展開
-static bool ExtractZipToDir(const CString& zipPath, const CString& destDir)
+// ZIP から特定のファイル（targetFileName）だけを抽出し、destDir直下に展開する
+static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, const CString& targetFileName)
 {
 	zlib_filefunc64_def ffunc;
 #ifdef USEWIN32IOAPI
@@ -127,6 +159,8 @@ static bool ExtractZipToDir(const CString& zipPath, const CString& destDir)
 	unz_global_info64 gi;
 	if (unzGetGlobalInfo64(uf, &gi) != UNZ_OK) { unzClose(uf); return false; }
 
+	bool bFound = false;
+
 	for (ZPOS64_T i = 0; i < gi.number_entry; i++)
 	{
 		char filename_inzip[1024];
@@ -134,33 +168,28 @@ static bool ExtractZipToDir(const CString& zipPath, const CString& destDir)
 		if (unzGetCurrentFileInfo64(uf, &fi, filename_inzip, sizeof(filename_inzip), NULL, 0, NULL, 0) != UNZ_OK) break;
 
 		const char* name = filename_inzip;
-		while (*name == '/' || *name == '\\') name++;
-		if (!*name) { unzGoToNextFile(uf); continue; }
 
-		CString outPath = destDir + _T("\\") + CA2T(name, CP_UTF8);
-		for (int k = 0; k < outPath.GetLength(); k++)
-			if (outPath[k] == '/') outPath.SetAt(k, '\\');
-
-		if (name[strlen(name) - 1] == '/' || name[strlen(name) - 1] == '\\')
-		{
-			CreateDirectory(outPath, NULL);
-		}
-		else
-		{
-			int lastSlash = outPath.ReverseFind('\\');
-			if (lastSlash >= 0) {
-				CString parentDir = outPath.Left(lastSlash);
-				for (int i = 1; i < parentDir.GetLength(); i++) {
-					if (parentDir[i] == '\\') {
-						CString sub = parentDir.Left(i);
-						CreateDirectory(sub, NULL);
-					}
-				}
-				CreateDirectory(parentDir, NULL);
+		// フォルダ階層が含まれている場合、ファイル名だけを切り出す
+		const char* p = name;
+		const char* fileNameOnly = name;
+		while (*p) {
+			if (*p == '/' || *p == '\\') {
+				fileNameOnly = p + 1;
 			}
+			p++;
+		}
 
+		if (*fileNameOnly == '\0') { unzGoToNextFile(uf); continue; } // ディレクトリはスキップ
+
+		CString currentFileName = CA2T(fileNameOnly, CP_UTF8);
+
+		// 目的のファイルかどうか確認
+		if (currentFileName.CompareNoCase(targetFileName) == 0)
+		{
 			if (unzOpenCurrentFile(uf) != UNZ_OK) { unzGoToNextFile(uf); continue; }
 
+			// 目的のファイルを destDir の直下に展開
+			CString outPath = destDir + _T("\\") + currentFileName;
 			CFile outFile;
 			if (outFile.Open(outPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
 			{
@@ -169,15 +198,17 @@ static bool ExtractZipToDir(const CString& zipPath, const CString& destDir)
 				while ((n = unzReadCurrentFile(uf, buf, sizeof(buf))) > 0)
 					outFile.Write(buf, n);
 				outFile.Close();
+				bFound = true;
 			}
 			unzCloseCurrentFile(uf);
+			break; // 見つかったら他のファイルは展開せずにループを抜ける
 		}
 
 		if ((ZPOS64_T)(i + 1) < gi.number_entry)
 			unzGoToNextFile(uf);
 	}
 	unzClose(uf);
-	return true;
+	return bFound;
 }
 
 static const DWORD CHECK_INTERVAL_SEC = 600;  // 10分
@@ -192,6 +223,11 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 
 	// ビルド時刻 + 1時間
 	time_t threshold = buildTime + 3600;
+
+	// 女神様が確認しやすいように、ビルド時間と基準時間をデバッグ出力いたしますわ
+	CString dbgMsg;
+	dbgMsg.Format(_T("[UpdateCheck] BuildTime: %lld, Threshold: %lld\n"), (long long)buildTime, (long long)threshold);
+	OutputDebugString(dbgMsg);
 
 	for (;;)
 	{
@@ -210,8 +246,16 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 		}
 
 		time_t serverModified = HttpGetLastModified(UPDATE_URL);
+
+		// サーバー側の更新時間をデバッグ出力いたしますわ
+		dbgMsg.Format(_T("[UpdateCheck] ServerModified: %lld\n"), (long long)serverModified);
+		OutputDebugString(dbgMsg);
+
 		if (serverModified != 0 && serverModified > threshold)
+		{
+			OutputDebugString(_T("[UpdateCheck] 更新を検知いたしました！メッセージを送信しますわ。\n"));
 			PostMessage(hWnd, WM_APP_UPDATE_AVAILABLE, 0, 0);
+		}
 
 		// 10分待機（1秒ずつ分割してウィンドウ破棄を検知）
 		for (DWORD i = 0; i < CHECK_INTERVAL_SEC; i++)
@@ -236,9 +280,6 @@ bool DoUpdateAndRestart()
 
 	TCHAR exePath[MAX_PATH] = { 0 };
 	GetModuleFileName(NULL, exePath, MAX_PATH);
-	CString exeDir = exePath;
-	int lastSlash = exeDir.ReverseFind('\\');
-	if (lastSlash >= 0) exeDir = exeDir.Left(lastSlash + 1);
 
 	TCHAR tempPath[MAX_PATH], zipPath[MAX_PATH], extractDir[MAX_PATH], batPath[MAX_PATH];
 	GetTempPath(MAX_PATH, tempPath);
@@ -254,23 +295,27 @@ bool DoUpdateAndRestart()
 		return false;
 	}
 
-	if (!ExtractZipToDir(zipPath, extractDir))
+	// ZIPから oggYSEDbgm_uni_avx2.exe だけを取り出して extractDir に展開します
+	if (!ExtractZipToDir(zipPath, extractDir, TARGET_EXE_NAME))
+	{
 		return false;
+	}
 
-	// バッチ作成: 待機→xcopyで全ファイルコピー→起動→自己削除
+	// バッチ作成: 待機→現在動いている実行ファイルを確実に上書き→起動→自己削除
 	CStdioFile bat;
 	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::typeText))
 		return false;
 
 	CString batContent;
+	// コピー先をフォルダ名から結合するのではなく、実行中の exePath そのものにするよう変更いたしましたわ
 	batContent.Format(_T("@echo off\r\n")
 		_T(":wait\r\n")
-		_T("ping -n 1 127.0.0.1 >nul\r\n")
-		_T("xcopy /s /e /y \"%s\\*\" \"%s\" >nul 2>&1\r\n")
+		_T("ping -n 2 127.0.0.1 >nul\r\n")
+		_T("copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n")
 		_T("if errorlevel 1 goto wait\r\n")
 		_T("start \"\" \"%s\"\r\n")
 		_T("del \"%%~f0\"\r\n"),
-		extractDir, exeDir, exePath);
+		extractDir, TARGET_EXE_NAME, exePath, exePath);
 	bat.WriteString(batContent);
 	bat.Close();
 
@@ -295,6 +340,9 @@ bool DoUpdateAndRestart()
 
 	// バッチ実行（非同期）
 	ShellExecute(NULL, _T("open"), batPath, NULL, tempPath, SW_HIDE);
+
+	// バッチが上書きできるように現在のアプリケーションを終了させますわ
+	exit(0);
 
 	return true;
 }
