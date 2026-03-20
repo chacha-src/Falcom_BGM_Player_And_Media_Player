@@ -14098,8 +14098,6 @@ BOOL oggyomikomi = FALSE;
 
 void playwavds2(BYTE* bw, int old, int l1, int l2)
 {
-	//	return;
-	//	playb+=(l1+l2)/4;
 	//データ読み込み
 	if (l1 == 0)return;
 	oggyomikomi = TRUE;
@@ -14113,13 +14111,10 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 			playb = loop1;
 			ov_pcm_seek(&vf, (ogg_int64_t)loop1); poss = 0; poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 			poss5 = loop1;
-			ZeroMemory(bufkpi3, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-			ZeroMemory(bufwav, sizeof(bufwav));
 			if (g_rubberBandStretcher) {
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
 			}
-			reset = TRUE;
 			mcopy((char*)bw + old + rrr, (int)l1 - rrr);
 		}
 	}
@@ -14134,13 +14129,10 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 				playb = loop1;
 				ov_pcm_seek(&vf, (ogg_int64_t)loop1); poss = 0; poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 				poss5 = loop1;
-				ZeroMemory(bufkpi3, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-				ZeroMemory(bufwav, sizeof(bufwav));
 				if (g_rubberBandStretcher) {
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
 				}
-				reset = TRUE;
 				mcopy((char*)bw + rrr, (int)l2 - rrr);
 			}
 		}
@@ -14883,7 +14875,20 @@ int mcopy(char* a, int len)
 				if (lenl <= poss)	break;
 			}
 
-			int len2 = readtempo(bufwav, lenl * 4);
+			// ループ終端を超えてbufkpi3に追加しない（読込過ぎが間延びの原因）
+			int to_process = lenl;
+			if (loop1 + loop2 < (int)playb + lenl && endf == 0) {
+				to_process = (loop1 + loop2) - (int)playb;
+				if (to_process <= 0) {
+					playb += lenl;
+					if (lenl <= poss) {
+						poss -= lenl;
+						if (poss != 0) memcpy(bufwav, bufwav + lenl * 4, poss * 4);
+					}
+					continue;
+				}
+			}
+			int len2 = readtempo(bufwav, to_process * 4);
 			playb += len2 / 4;
 
 			if (len2 > 0) {
@@ -14902,10 +14907,11 @@ int mcopy(char* a, int len)
 			}
 			if (lenl <= poss) {
 				poss -= lenl;
-				if (poss != 0)	memcpy(bufwav, bufwav + lenl * 4, poss * 4);
+				if (poss != 0) memcpy(bufwav, bufwav + lenl * 4, poss * 4);
 			}
 			if (len4 != 0) break;
 			if (poss4 > len) break;
+			if (loop1 + loop2 <= (int)playb && endf == 0) break;  // ループ終端到達で打ち切り
 		}
 	}
 

@@ -492,9 +492,7 @@ UINT HandleNotifications(LPVOID)
 			m_dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, (DWORD*)&len3, (LPVOID*)&pdsb2, (DWORD*)&len4, 0);
 			thn = FALSE;
 			memcpy(pdsb1, bufwav3 + oldw, len3);
-			if (len4 != 0) {
-				memcpy(pdsb2, bufwav3, len4);
-			}
+			if (len4 != 0) memcpy(pdsb2, bufwav3, len4);
 			if (m_dsb)m_dsb->Unlock(pdsb1, len3, pdsb2, len4);
 			oldw2 = oldw + len3;
 			if (len4 != 0)oldw2 = len4;
