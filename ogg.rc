@@ -49,8 +49,8 @@ BEGIN
     "LANGUAGE 17, 1\r\n"
     "#pragma code_page(932)\r\n"
     "#endif //_WIN32\r\n"
-    "#include ""res\\ogg.rc2""  // Microsoft Visual C++ 闔会ｽ･陞滓じ繝ｻ郢昴・繝ｻ郢晢ｽｫ邵ｺ・ｧ驍ｱ・ｨ鬮ｮ繝ｻ・・ｹｧ蠕娯螺郢晢ｽｪ郢ｧ・ｽ郢晢ｽｼ郢ｧ・ｹ\\?[?X\r\n"
-    "#include ""l.jpn\\afxres.rc""          // 隶灘綜・ｺ謔ｶ繝ｻ郢ｧ・ｳ郢晢ｽｳ郢晄亢繝ｻ郢晞亂ﾎｦ郢昴・\n"
+    "#include ""res\\ogg.rc2""  // Microsoft Visual C++ 髣比ｼ夲ｽｽ・･髯樊ｻ薙§郢晢ｽｻ驛｢譏ｴ繝ｻ郢晢ｽｻ驛｢譎｢・ｽ・ｫ驍ｵ・ｺ繝ｻ・ｧ鬩搾ｽｱ繝ｻ・ｨ鬯ｮ・ｮ郢晢ｽｻ繝ｻ繝ｻ・ｹ・ｧ陟募ｨｯ陞ｺ驛｢譎｢・ｽ・ｪ驛｢・ｧ繝ｻ・ｽ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｹ\\?[?X\r\n"
+    "#include ""l.jpn\\afxres.rc""          // 髫ｶ轣倡ｶ懊・・ｺ隰費ｽｶ郢晢ｽｻ驛｢・ｧ繝ｻ・ｳ驛｢譎｢・ｽ・ｳ驛｢譎・ｺ｢郢晢ｽｻ驛｢譎樔ｺゑｾ趣ｽｦ驛｢譏ｴ繝ｻ\n"
     "#endif\r\n"
     "\0"
 END
@@ -866,15 +866,15 @@ BEGIN
     BEGIN
         BLOCK "041104b0"
         BEGIN
-            VALUE "Comments", "繝輔ぃ繝ｫ繧ｳ繝BGM邁｡譏薙・繝ｬ繧､繝､+鬮俶ｩ溯・繝｡繝・ぅ繧｢繝励Ξ繧､繝､"
+            VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "繝輔ぃ繝ｫ繧ｳ繝BGM邁｡譏薙・繝ｬ繧､繝､+鬮俶ｩ溯・繝｡繝・ぅ繧｢繝励Ξ繧､繝､ Ver 0.8g Rel.2026.03.01"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.03.01"
             VALUE "FileVersion", "0.8.7.110"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.03.01 "
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
-            VALUE "ProductName", "繝輔ぃ繝ｫ繧ｳ繝BGM邁｡譏薙・繝ｬ繧､繝､+鬮俶ｩ溯・繝｡繝・ぅ繧｢繝励Ξ繧､繝､"
+            VALUE "ProductName", "Falcom BGM Player & Media Player"
             VALUE "ProductVersion", "1, 0, 0, 1"
         END
     END
@@ -1577,8 +1577,8 @@ END
 LANGUAGE 17, 1
 #pragma code_page(932)
 #endif //_WIN32
-#include "res\ogg.rc2"  // Microsoft Visual C++ 闔会ｽ･陞滓じ繝ｻ郢昴・繝ｻ郢晢ｽｫ邵ｺ・ｧ驍ｱ・ｨ鬮ｮ繝ｻ・・ｹｧ蠕娯螺郢晢ｽｪ郢ｧ・ｽ郢晢ｽｼ郢ｧ・ｹ\?[?X
-#include "l.jpn\afxres.rc"          // 隶灘綜・ｺ謔ｶ繝ｻ郢ｧ・ｳ郢晢ｽｳ郢晄亢繝ｻ郢晞亂ﾎｦ郢昴・
+#include "res\ogg.rc2"  // Microsoft Visual C++ 髣比ｼ夲ｽｽ・･髯樊ｻ薙§郢晢ｽｻ驛｢譏ｴ繝ｻ郢晢ｽｻ驛｢譎｢・ｽ・ｫ驍ｵ・ｺ繝ｻ・ｧ鬩搾ｽｱ繝ｻ・ｨ鬯ｮ・ｮ郢晢ｽｻ繝ｻ繝ｻ・ｹ・ｧ陟募ｨｯ陞ｺ驛｢譎｢・ｽ・ｪ驛｢・ｧ繝ｻ・ｽ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｹ\?[?X
+#include "l.jpn\afxres.rc"          // 髫ｶ轣倡ｶ懊・・ｺ隰費ｽｶ郢晢ｽｻ驛｢・ｧ繝ｻ・ｳ驛｢譎｢・ｽ・ｳ驛｢譎・ｺ｢郢晢ｽｻ驛｢譎樔ｺゑｾ趣ｽｦ驛｢譏ｴ繝ｻ
 #endif
 
 /////////////////////////////////////////////////////////////////////////////

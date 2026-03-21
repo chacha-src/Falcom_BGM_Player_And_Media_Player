@@ -5,6 +5,7 @@
 #include <wininet.h>
 #include <thread>
 #include <ctime>
+#include <sys/stat.h> // ファイル情報を取得するために追加いたしましたわ
 
 #pragma comment(lib, "wininet.lib")
 
@@ -16,8 +17,7 @@
 static const TCHAR* UPDATE_URL = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.zip");
 static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 
-// __DATE__ "Mar 18 2025", __TIME__ "12:34:56" をパースして time_t 取得
-// __DATE__/__TIME__ はコンパイラのローカル時刻。mktime で time_t(UTC) に変換
+// ビルド時間で確認するようにしておりますわ
 static time_t GetBuildTimeUtc()
 {
 	static const char* months[] = { "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" };
@@ -65,7 +65,7 @@ static time_t HttpGetLastModified(const CString& url)
 	{
 		if (statusCode != 200)
 		{
-			// 404 Not Found など、ファイルがない場合は 0 を返しますわ
+			// ファイルがない場合は 0 を返しますわ
 			InternetCloseHandle(hConnect);
 			InternetCloseHandle(hInternet);
 			return 0;
@@ -85,7 +85,7 @@ static time_t HttpGetLastModified(const CString& url)
 	DWORD bufLen = sizeof(st);
 	if (HttpQueryInfo(hConnect, HTTP_QUERY_LAST_MODIFIED | HTTP_QUERY_FLAG_SYSTEMTIME, &st, &bufLen, NULL))
 	{
-		// Last-Modified は GMT。SYSTEMTIME は UTC。ローカルに変換して mktime で time_t(UTC) 取得
+		// ローカルに変換して time_t 取得
 		SystemTimeToTzSpecificLocalTime(NULL, &st, &st);
 		struct tm t = { 0 };
 		t.tm_year = st.wYear - 1900;
@@ -218,13 +218,13 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 	HWND hWnd = (HWND)param;
 	if (!hWnd || !IsWindow(hWnd)) return 0;
 
+	// プログラムのビルド時間を見ますわ
 	time_t buildTime = GetBuildTimeUtc();
 	if (buildTime == (time_t)-1) return 0;
 
 	// ビルド時刻 + 1時間
 	time_t threshold = buildTime + 3600;
 
-	// 女神様が確認しやすいように、ビルド時間と基準時間をデバッグ出力いたしますわ
 	CString dbgMsg;
 	dbgMsg.Format(_T("[UpdateCheck] BuildTime: %lld, Threshold: %lld\n"), (long long)buildTime, (long long)threshold);
 	OutputDebugString(dbgMsg);
@@ -247,7 +247,6 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 
 		time_t serverModified = HttpGetLastModified(UPDATE_URL);
 
-		// サーバー側の更新時間をデバッグ出力いたしますわ
 		dbgMsg.Format(_T("[UpdateCheck] ServerModified: %lld\n"), (long long)serverModified);
 		OutputDebugString(dbgMsg);
 
@@ -278,8 +277,24 @@ bool DoUpdateAndRestart()
 	extern TCHAR karento2[1024];
 	extern save savedata;
 
+	// 現在実行しているファイルの名前を取得いたしますわ
 	TCHAR exePath[MAX_PATH] = { 0 };
 	GetModuleFileName(NULL, exePath, MAX_PATH);
+
+	// コピー先のファイル名を必ず「oggYSEDbgm_uni_avx2.exe」にするための処理ですわ
+	TCHAR targetExePath[MAX_PATH] = { 0 };
+	_tcscpy_s(targetExePath, MAX_PATH, exePath);
+	TCHAR* pSlash = _tcsrchr(targetExePath, _T('\\'));
+	if (pSlash != NULL)
+	{
+		// フォルダの場所を残して、最後の円マークの後ろに正しいファイル名を連結いたします
+		*(pSlash + 1) = _T('\0');
+		_tcscat_s(targetExePath, MAX_PATH, TARGET_EXE_NAME);
+	}
+	else
+	{
+		_tcscpy_s(targetExePath, MAX_PATH, TARGET_EXE_NAME);
+	}
 
 	TCHAR tempPath[MAX_PATH], zipPath[MAX_PATH], extractDir[MAX_PATH], batPath[MAX_PATH];
 	GetTempPath(MAX_PATH, tempPath);
@@ -295,32 +310,98 @@ bool DoUpdateAndRestart()
 		return false;
 	}
 
-	// ZIPから oggYSEDbgm_uni_avx2.exe だけを取り出して extractDir に展開します
+	// ZIPから oggYSEDbgm_uni_avx2.exe だけを取り出して extractDir に展開しますわ
 	if (!ExtractZipToDir(zipPath, extractDir, TARGET_EXE_NAME))
 	{
 		return false;
 	}
 
-	// バッチ作成: 待機→現在動いている実行ファイルを確実に上書き→起動→自己削除
-	CStdioFile bat;
-	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::typeText))
+	CString extractedPath;
+	extractedPath.Format(_T("%s\\%s"), extractDir, TARGET_EXE_NAME);
+
+	// ----------------------------------------------------------------------------------
+	// サーバー上のファイルの更新時間を取得し、それに1秒足した時間を展開したファイルに設定いたします
+	// ----------------------------------------------------------------------------------
+	time_t serverTime = HttpGetLastModified(UPDATE_URL);
+	if (serverTime > 0)
+	{
+		time_t newTime = serverTime + 1;
+
+		// コンピューターの内部時間を変換いたします
+		ULARGE_INTEGER ull;
+		ull.QuadPart = ((ULONGLONG)newTime * 10000000ULL) + 116444736000000000ULL;
+		FILETIME ft;
+		ft.dwLowDateTime = ull.LowPart;
+		ft.dwHighDateTime = ull.HighPart;
+
+		// 時間を書き換えますわ
+		HANDLE hFile = CreateFile(extractedPath, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+		if (hFile != INVALID_HANDLE_VALUE)
+		{
+			// 女神様のご要望にお応えし、作成日時、アクセス日時、更新日時の3つすべてを揃えますわ
+			SetFileTime(hFile, &ft, &ft, &ft);
+			CloseHandle(hFile);
+		}
+	}
+	// ----------------------------------------------------------------------------------
+
+	// ----------------------------------------------------------------------------------
+	// 実際に更新したファイルを見て、その更新日付で lastUpdateCheck を更新いたしますわ
+	// ----------------------------------------------------------------------------------
+	struct __stat64 fileStat;
+	if (_tstat64(extractedPath, &fileStat) == 0)
+	{
+		savedata.lastUpdateCheck = (__int64)fileStat.st_mtime;
+	}
+	else
+	{
+		savedata.lastUpdateCheck = (__int64)time(NULL);
+	}
+	// ----------------------------------------------------------------------------------
+
+	// 命令書（バッチファイル）の作成
+	CFile bat;
+	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
 		return false;
 
-	CString batContent;
-	// コピー先をフォルダ名から結合するのではなく、実行中の exePath そのものにするよう変更いたしましたわ
-	batContent.Format(_T("@echo off\r\n")
-		_T(":wait\r\n")
-		_T("ping -n 2 127.0.0.1 >nul\r\n")
-		_T("copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n")
-		_T("if errorlevel 1 goto wait\r\n")
-		_T("start \"\" \"%s\"\r\n")
-		_T("del \"%%~f0\"\r\n"),
-		extractDir, TARGET_EXE_NAME, exePath, exePath);
-	bat.WriteString(batContent);
-	bat.Close();
+	// 文字化けを起こさないよう変換いたします
+	CStringA extractDirA(extractDir);
+	CStringA targetExeA(TARGET_EXE_NAME);
+	CStringA exePathA(exePath);              // 現在動いているファイル
+	CStringA targetExePathA(targetExePath);  // 新しく作る正しい名前のファイル
+	CStringA tempPathA(tempPath);
 
-	// savedata 更新（lastUpdateCheck = 現在時刻）
-	savedata.lastUpdateCheck = (__int64)time(NULL);
+	CStringA batContentA;
+	// コピー先を targetExePathA にしておりますわ
+	batContentA.Format(
+		"@echo off\r\n"
+		"set LOG=\"%sogg_update_log.txt\"\r\n"
+		"echo 更新処理を開始いたします > %%LOG%%\r\n"
+		"set RETRY=0\r\n"
+		":wait\r\n"
+		"ping -n 4 127.0.0.1 >nul\r\n"
+		"copy /y \"%s\\%s\" \"%s\" >> %%LOG%% 2>&1\r\n"
+		"if not errorlevel 1 goto success\r\n"
+		"set /a RETRY+=1\r\n"
+		"if %%RETRY%% geq 15 goto fail\r\n"
+		"goto wait\r\n"
+		":success\r\n"
+		"echo 上書きに成功いたしました！ >> %%LOG%%\r\n"
+		"start \"\" \"%s\"\r\n"
+		"goto end\r\n"
+		":fail\r\n"
+		"echo 上書きに失敗いたしました... >> %%LOG%%\r\n"
+		"start \"\" \"%s\"\r\n"
+		":end\r\n"
+		"del \"%%~f0\"\r\n",
+		(LPCSTR)tempPathA,
+		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA,
+		(LPCSTR)targetExePathA, // 成功時は新しい方を起動します
+		(LPCSTR)exePathA        // 失敗時は元のファイルを起動します
+	);
+
+	bat.Write(batContentA, batContentA.GetLength());
+	bat.Close();
 
 #if _UNICODE
 	CFile ab;
@@ -338,10 +419,10 @@ bool DoUpdateAndRestart()
 	}
 #endif
 
-	// バッチ実行（非同期）
+	// 命令書（バッチファイル）の実行
 	ShellExecute(NULL, _T("open"), batPath, NULL, tempPath, SW_HIDE);
 
-	// バッチが上書きできるように現在のアプリケーションを終了させますわ
+	// アプリケーションを終了させますわ
 	exit(0);
 
 	return true;
