@@ -50,7 +50,7 @@ private:
 	OggOpusFile   *m_pOpusFile;
 	BYTE           m_DecodedBuffer[OUTPUT_BUFFER_SIZE*OUTPUT_BUFFER_NUM * 4];
 	DWORD m_dwRemain, m_dwPointer;
-
+	int m_discard_samples = 0;
 public:
 	BOOL __fastcall Open(TCHAR *cszFileName, SOUNDINFO *pInfo);
 	void __fastcall Close(void);

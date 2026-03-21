@@ -592,10 +592,9 @@ void HandleNotifications_export()
 extern std::vector<float> inputFloatData;
 extern std::vector<uint8_t> m_bufwav3_1;
 extern int pitch;
-
-
-// RubberBandストレッチャーの初期化関数
 float tempoRate2;
+
+// 初期化関数（これは最初の一度、または設定変更時のみ呼び出す）
 bool InitializeRubberBandStretcher()
 {
 	if (g_rubberBandStretcher) {
@@ -605,22 +604,17 @@ bool InitializeRubberBandStretcher()
 
 	try {
 		double pitchRatio = pitch / 100.0;
-		// RubberBandストレッチャーを初期化
-		// リアルタイムモードで初期化（テンポ変更のみ）
 		g_rubberBandStretcher = new RubberBand::RubberBandStretcher(
-			wavbit,  // サンプリングレート
-			wavch,   // チャンネル数
+			wavbit,
+			wavch,
 			RubberBand::RubberBandStretcher::OptionProcessRealTime |
 			RubberBand::RubberBandStretcher::OptionEngineFaster |
 			RubberBand::RubberBandStretcher::OptionTransientsCrisp |
 			RubberBand::RubberBandStretcher::OptionPhaseLaminar,
-			tempoRate2,  // 初期時間比率（テンポ変更）
-			pitchRatio   // 初期ピッチスケール（ピッチは変更しない）
+			tempoRate2,
+			pitchRatio
 		);
-
-		// デバッグレベルを設定（必要に応じて）
 		g_rubberBandStretcher->setDebugLevel(0);
-
 		return true;
 	}
 	catch (...) {
@@ -628,21 +622,19 @@ bool InitializeRubberBandStretcher()
 	}
 }
 
-// RubberBandを使用してオーディオデータをテンポ変更する関数
+// ストリーミング用：データを投入し、現在取り出せる全データを回収する
 bool ProcessAudioWithRubberBand(float tempoRate)
 {
 	try {
-		// 入力データの検証
-		if (m_bufwav3_1.empty()) {
-			return false;
-		}
-		tempoRate2 = tempoRate;
-		// RubberBandストレッチャーが初期化されていない場合は初期化
+		if (m_bufwav3_1.empty()) return false;
+
+		// 1. ストレッチャーの準備（存在しない場合のみ作成）
 		if (!g_rubberBandStretcher) {
-			if (!InitializeRubberBandStretcher()) {
-				return false;
-			}
+			tempoRate2 = tempoRate;
+			if (!InitializeRubberBandStretcher()) return false;
 		}
+
+		// 2. パラメータの更新（動的な変更に対応）
 		float semitones = (float)pitch;
 		if (semitones >= 200.0f) {
 			semitones -= 100.0f;
@@ -651,81 +643,62 @@ bool ProcessAudioWithRubberBand(float tempoRate)
 			semitones = semitones / 3.0f + 33.3f;
 		}
 		semitones /= 100.0f;
-		// テンポ比率を設定
-		g_rubberBandStretcher->setTimeRatio(tempoRate);
-		g_rubberBandStretcher->setPitchScale(static_cast<float>(semitones));;
 
-		// 生バイトデータをfloatデータに変換 (wavsamはビット深度、負の場合はfloat形式)
+		g_rubberBandStretcher->setTimeRatio(tempoRate);
+		g_rubberBandStretcher->setPitchScale(static_cast<float>(semitones));
+
+		// 3. データ変換（Raw -> Float -> Planar）
 		uint16_t bps = (uint16_t)((wavsam <= 0 || wavsam > 32) ? 16 : abs(wavsam));
 		ConvertRawBytesToFloat(m_bufwav3_1, bps, wavch, inputFloatData);
+		if (inputFloatData.empty()) return false;
 
-		// 入力データの検証
-		if (inputFloatData.empty()) {
-			return false;
-		}
-
-		// チャンネルごとのデータに分離
-		std::vector<std::vector<float>> channelData(wavch);
-		for (int ch = 0; ch < wavch; ++ch) {
-			channelData[ch].resize(inputFloatData.size() / wavch);
-			for (size_t i = 0; i < channelData[ch].size(); ++i) {
+		size_t samplesIn = inputFloatData.size() / wavch;
+		std::vector<std::vector<float>> channelData(wavch, std::vector<float>(samplesIn));
+		for (size_t i = 0; i < samplesIn; ++i) {
+			for (int ch = 0; ch < wavch; ++ch) {
 				channelData[ch][i] = inputFloatData[i * wavch + ch];
 			}
 		}
 
-		// チャンネルポインタの配列を作成
 		std::vector<float*> channelPointers(wavch);
 		for (int ch = 0; ch < wavch; ++ch) {
 			channelPointers[ch] = channelData[ch].data();
 		}
 
-		// RubberBandにデータを送信
-		g_rubberBandStretcher->process(channelPointers.data(), channelData[0].size(), false);
+		// 4. データの投入（ストリーミング継続のため isFinal は false）
+		g_rubberBandStretcher->process(channelPointers.data(), samplesIn, false);
 
-		// 出力バッファをクリア
+		// 5. 現在のバッファから取り出せる分をすべて回収
 		m_convertedPcmFloatData.clear();
 
-		// 出力データの推定サイズを計算してリザーブ
-		size_t estimatedOutputSize = static_cast<size_t>(inputFloatData.size() * tempoRate * 1.2); // 余裕を持たせる
-		m_convertedPcmFloatData.reserve(estimatedOutputSize);
-
-		// 出力データを取得
-		const size_t chunkSize = 4096;
-		std::vector<std::vector<float>> outputChannelData(wavch);
+		// 余裕を持った一時バッファ
+		const size_t pullSize = 4096;
+		std::vector<std::vector<float>> outputChannelData(wavch, std::vector<float>(pullSize));
+		std::vector<float*> outputPointers(wavch);
 		for (int ch = 0; ch < wavch; ++ch) {
-			outputChannelData[ch].resize(chunkSize);
+			outputPointers[ch] = outputChannelData[ch].data();
 		}
 
-		std::vector<float*> outputChannelPointers(wavch);
-		for (int ch = 0; ch < wavch; ++ch) {
-			outputChannelPointers[ch] = outputChannelData[ch].data();
-		}
-		//Sleep(1);
-		while (true) {
-			int available = g_rubberBandStretcher->available();
-			if (available <= 0) break;
+		// available() が 0 になるまで、今出せる分をすべて吸い上げる
+		while (g_rubberBandStretcher->available() > 0) {
+			size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
+			size_t retrieved = g_rubberBandStretcher->retrieve(outputPointers.data(), toGet);
+			if (retrieved == 0) break;
 
-			size_t samplesToRetrieve = (std::min)(static_cast<size_t>(available), chunkSize);
-			size_t samplesRetrieved = g_rubberBandStretcher->retrieve(outputChannelPointers.data(), samplesToRetrieve);
-
-			if (samplesRetrieved == 0) {
-				break;
-			}
-			// チャンネルデータをインターリーブして出力バッファに追加
-			for (size_t i = 0; i < samplesRetrieved; ++i) {
+			for (size_t i = 0; i < retrieved; ++i) {
 				for (int ch = 0; ch < wavch; ++ch) {
 					m_convertedPcmFloatData.push_back(outputChannelData[ch][i]);
 				}
 			}
 		}
+
 		return true;
 	}
-	catch (...) {}
-	return true;
+	catch (...) {
+		return false;
+	}
 }
 
-// ... existing code ...
-#include <atomic>
 #include <cmath>
 // rawバイトデータからfloatデータへの変換
 // 8bit, 16bit, 24bit, 32bit PCM (int/float) に対応

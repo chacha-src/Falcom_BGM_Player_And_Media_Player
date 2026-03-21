@@ -14189,7 +14189,23 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 		else {
 			loopcnt++;
 			playb = loop1;
-			ov_pcm_seek(&vf, (ogg_int64_t)loop1); poss = 0; poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+
+			ov_pcm_seek_lap(&vf, (ogg_int64_t)loop1);
+
+			// --- プリロール分を捨てる ---
+			int discard = 32;  // 捨てたいサンプル数
+			while (discard > 0) {
+				float** pcm;
+				int bitstream;
+				long got = ov_read_float(&vf, &pcm, discard, &bitstream);
+				if (got <= 0) break;  // EOF or error
+				discard -= got;
+			}
+			// -----------------------------
+
+			// ここから通常処理
+			poss = 0;
+			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 			poss5 = loop1;
 			if (g_rubberBandStretcher) {
 				delete g_rubberBandStretcher;
@@ -14207,7 +14223,24 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 			else {
 				loopcnt++;
 				playb = loop1;
-				ov_pcm_seek(&vf, (ogg_int64_t)loop1); poss = 0; poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+
+				// まず通常通り seek
+				ov_pcm_seek_lap(&vf, (ogg_int64_t)loop1);
+
+				// --- プリロール分を捨てる ---
+				int discard = 32;  // 捨てたいサンプル数
+				while (discard > 0) {
+					float** pcm;
+					int bitstream;
+					long got = ov_read_float(&vf, &pcm, discard, &bitstream);
+					if (got <= 0) break;  // EOF or error
+					discard -= got;
+				}
+				// -----------------------------
+
+				// ここから通常処理
+				poss = 0;
+				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 				poss5 = loop1;
 				if (g_rubberBandStretcher) {
 					delete g_rubberBandStretcher;
@@ -14924,11 +14957,10 @@ int mcopy(char* a, int len)
 	//poss = 0;
 	int ret = 0, lenl = len / (wavch * 2), cnt2;
 	//ret=ov_pcm_seek(&vf,playb+poss);
-
 	int len3 = 0, len4 = 0;
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= len) {
-		for (int k = 0; k < 5; k++) {
+		for (int k = 0; k < 8; k++) {
 			ret = 0;
 			if ((int)playb > (data_size + 20000) / (wavch * 2) && endf == 1) {
 				playb += lenl;
@@ -14955,19 +14987,7 @@ int mcopy(char* a, int len)
 				if (lenl <= poss)	break;
 			}
 
-			// ループ終端を超えてbufkpi3に追加しない（読込過ぎが間延びの原因）
 			int to_process = lenl;
-			if (loop1 + loop2 < (int)playb + lenl && endf == 0) {
-				to_process = (loop1 + loop2) - (int)playb;
-				if (to_process <= 0) {
-					playb += lenl;
-					if (lenl <= poss) {
-						poss -= lenl;
-						if (poss != 0) memcpy(bufwav, bufwav + lenl * 4, poss * 4);
-					}
-					continue;
-				}
-			}
 			int len2 = readtempo(bufwav, to_process * 4);
 			playb += len2 / 4;
 
@@ -14991,7 +15011,6 @@ int mcopy(char* a, int len)
 			}
 			if (len4 != 0) break;
 			if (poss4 > len) break;
-			if (loop1 + loop2 <= (int)playb && endf == 0) break;  // ループ終端到達で打ち切り
 		}
 	}
 

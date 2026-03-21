@@ -215,6 +215,7 @@ static const DWORD CHECK_INTERVAL_SEC = 600;  // 10分
 
 static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 {
+	extern save savedata; // 保存データを参照できるように追加いたしましたわ
 	HWND hWnd = (HWND)param;
 	if (!hWnd || !IsWindow(hWnd)) return 0;
 
@@ -247,10 +248,15 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 
 		time_t serverModified = HttpGetLastModified(UPDATE_URL);
 
-		dbgMsg.Format(_T("[UpdateCheck] ServerModified: %lld\n"), (long long)serverModified);
+		dbgMsg.Format(_T("[UpdateCheck] ServerModified: %lld, LastUpdateCheck: %lld\n"), (long long)serverModified, (long long)savedata.lastUpdateCheck);
 		OutputDebugString(dbgMsg);
 
-		if (serverModified != 0 && serverModified > threshold)
+		// ----------------------------------------------------------------------------------
+		// ここが無限ループを防ぐ重要な変更点ですわ！
+		// サーバーの時間が「プログラム作成時間＋1時間」より新しく、かつ、
+		// 「保存データに記録された前回の更新時間」よりも新しい場合のみ更新通知を出しますわ
+		// ----------------------------------------------------------------------------------
+		if (serverModified != 0 && serverModified > threshold && (__int64)serverModified > savedata.lastUpdateCheck)
 		{
 			OutputDebugString(_T("[UpdateCheck] 更新を検知いたしました！メッセージを送信しますわ。\n"));
 			PostMessage(hWnd, WM_APP_UPDATE_AVAILABLE, 0, 0);
@@ -319,9 +325,6 @@ bool DoUpdateAndRestart()
 	CString extractedPath;
 	extractedPath.Format(_T("%s\\%s"), extractDir, TARGET_EXE_NAME);
 
-	// ----------------------------------------------------------------------------------
-	// サーバー上のファイルの更新時間を取得し、それに1秒足した時間を展開したファイルに設定いたします
-	// ----------------------------------------------------------------------------------
 	time_t serverTime = HttpGetLastModified(UPDATE_URL);
 	if (serverTime > 0)
 	{
@@ -338,16 +341,13 @@ bool DoUpdateAndRestart()
 		HANDLE hFile = CreateFile(extractedPath, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
 		if (hFile != INVALID_HANDLE_VALUE)
 		{
-			// 女神様のご要望にお応えし、作成日時、アクセス日時、更新日時の3つすべてを揃えますわ
+			// 作成日時、アクセス日時、更新日時の3つすべてを揃えますわ
 			SetFileTime(hFile, &ft, &ft, &ft);
 			CloseHandle(hFile);
 		}
 	}
-	// ----------------------------------------------------------------------------------
 
-	// ----------------------------------------------------------------------------------
 	// 実際に更新したファイルを見て、その更新日付で lastUpdateCheck を更新いたしますわ
-	// ----------------------------------------------------------------------------------
 	struct __stat64 fileStat;
 	if (_tstat64(extractedPath, &fileStat) == 0)
 	{
@@ -357,7 +357,6 @@ bool DoUpdateAndRestart()
 	{
 		savedata.lastUpdateCheck = (__int64)time(NULL);
 	}
-	// ----------------------------------------------------------------------------------
 
 	// 命令書（バッチファイル）の作成
 	CFile bat;
@@ -372,7 +371,6 @@ bool DoUpdateAndRestart()
 	CStringA tempPathA(tempPath);
 
 	CStringA batContentA;
-	// コピー先を targetExePathA にしておりますわ
 	batContentA.Format(
 		"@echo off\r\n"
 		"set LOG=\"%sogg_update_log.txt\"\r\n"
