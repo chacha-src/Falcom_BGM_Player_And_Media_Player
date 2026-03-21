@@ -12711,8 +12711,32 @@ int readkpi(BYTE* bw, int cnt)
 						r = kpidec->Render((BYTE*)bufkpi + (int)((float)cnt3 / (2.0 * wavch * (wavsam / 16.0))), (int)(cnt / (2.0 * wavch * (wavsam / 16.0))));
 						r = (DWORD)(r * (2.0 * wavch * (wavsam / 16.0)));
 					}
-					if (r == 0) break;
-					//		mod->Render(kmp,(BYTE*)bw,cnt);
+
+					// 無音データを補填する処理を追加いたしました
+					if (r <= 0) {
+						if (muon != 0) {
+							if (savedata.saverenzoku == 0) {
+								int fill_size = cnt1;
+								if (cnt3 + fill_size > cnt) fill_size = cnt - cnt3;
+								if (fill_size > 0) {
+									ZeroMemory((BYTE*)bufkpi + cnt3, fill_size);
+									r = fill_size;
+									muon--;
+								}
+								else {
+									break;
+								}
+							}
+							else {
+								endflg = 1;
+								break;
+							}
+						}
+						else {
+							break;
+						}
+					}
+
 					cnt3 += r;
 				}
 				int len2 = readtempo(bufkpi, cnt);
@@ -12760,30 +12784,39 @@ int readkpi(BYTE* bw, int cnt)
 		equaliser(bw, cnt, reset);
 		reset = FALSE;
 
+		// 無音チェックの不具合修正と、32bitの対応を追加いたしました
 		cnt4 = cnt3;
 		if (r == 0) cnt = 0;
-		__int64 bfc, bc2;
-		bfc = 0;
-		if (wavsam == 24) {
-			Int24* bf1; bf1 = (Int24*)bw;
-			bc2 = (int)(Int24)bf1[0] / 256;
-			for (int i = 0; i < cnt / 2; i++) {
-				bfc += (__int64)(int)(Int24)bf1[i] / 256;
+		__int64 bfc = 0, bc2 = 0;
+
+		if (wavsam == 32) {
+			int* bf1 = (int*)bw;
+			bc2 = bf1[0] / 65536;
+			for (int i = 0; i < cnt / 4; i++) {
+				bfc += (__int64)(bf1[i] / 65536);
 			}
-			if (cnt)
-				bfc /= (cnt / 2);
-			if ((short)bc2 >= (short)bfc - 10 && (short)bc2 <= (short)bfc + 10) bufzero++; else bufzero = 0;
+			if (cnt) bfc /= (cnt / 4);
+			if ((int)bc2 >= (int)bfc - 10 && (int)bc2 <= (int)bfc + 10) bufzero++; else bufzero = 0;
+		}
+		else if (wavsam == 24) {
+			Int24* bf1 = (Int24*)bw;
+			bc2 = (int)(Int24)bf1[0] / 256;
+			for (int i = 0; i < cnt / 3; i++) {
+				bfc += (__int64)((int)(Int24)bf1[i] / 256);
+			}
+			if (cnt) bfc /= (cnt / 3);
+			if ((int)bc2 >= (int)bfc - 10 && (int)bc2 <= (int)bfc + 10) bufzero++; else bufzero = 0;
 		}
 		else {
-			unsigned short* bf1; bf1 = (unsigned short*)bw;
+			short* bf1 = (short*)bw;
 			bc2 = (short)bf1[0];
 			for (int i = 0; i < cnt / 2; i++) {
 				bfc += (__int64)(short)bf1[i];
 			}
-			if (cnt)
-				bfc /= (cnt / 2);
+			if (cnt) bfc /= (cnt / 2);
 			if ((short)bc2 >= (short)bfc - 10 && (short)bc2 <= (short)bfc + 10) bufzero++; else bufzero = 0;
 		}
+
 		int looping = loop2 / 100000;
 		if (looping < 20) looping = 20;
 		if (looping > 80) looping = 80;
@@ -12792,11 +12825,22 @@ int readkpi(BYTE* bw, int cnt)
 		b = (short*)bw;
 		Int24* b24c;
 		b24c = (Int24*)bw;
-		//	CString sss=og->kpi;
+		int* b32c;
+		b32c = (int*)bw;
+
 		CString sss;
 		sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
 		sss.MakeLower();
-		if (wavsam == 24) {
+
+		// 音量やフェードに関する処理にも32bit対応を追加いたしました
+		if (wavsam == 32) {
+			for (int i = 0; i < cnt / 4; i++) {
+				int c4 = b32c[i];
+				c4 = (int)((float)c4 * ((float)savedata.kakuVal / 100.0f));
+				b32c[i] = c4;
+			}
+		}
+		else if (wavsam == 24) {
 			for (int i = 0; i < cnt / 3; i++) {
 				int c4 = b24c[i];
 				c4 = (int)((float)c4 * ((float)savedata.kakuVal / 100.0f));
@@ -12810,9 +12854,22 @@ int readkpi(BYTE* bw, int cnt)
 				b[i] = (short)c;
 			}
 		}
+
 		if (sss == "spc" || sss.Left(3) == "hes") {
-			if (savedata.spc != 1)
-				if (wavsam == 24) {
+			if (savedata.spc != 1) {
+				if (wavsam == 32) {
+					for (int i = 0; i < cnt / 4; i++) {
+						__int64 c4 = b32c[i];
+						if (savedata.spc == 2)	c4 = (__int64)((float)c4 * 2.0f);
+						else if (savedata.spc == 4) c4 = (__int64)((float)c4 * 3.0f);
+						else if (savedata.spc == 8) c4 = (__int64)((float)c4 * 4.0f);
+						else if (savedata.spc == 16) c4 = (__int64)((float)c4 * 5.0f);
+						if (c4 > 2147483647) c4 = 2147483647;
+						if (c4 < -2147483648LL) c4 = -2147483648LL;
+						b32c[i] = (int)c4;
+					}
+				}
+				else if (wavsam == 24) {
 					for (int i = 0; i < cnt / 3; i++) {
 						int c4 = b24c[i];
 						if (savedata.spc == 2)	c4 = (int)((float)c4 * 2.0f);
@@ -12836,9 +12893,23 @@ int readkpi(BYTE* bw, int cnt)
 						b[i] = (short)c;
 					}
 				}
+			}
 		}
+
 		if (savedata.kpivol != 1) {
-			if (wavsam == 24) {
+			if (wavsam == 32) {
+				for (int i = 0; i < cnt / 4; i++) {
+					__int64 c4 = b32c[i];
+					if (savedata.kpivol == 2)	c4 = (__int64)((float)c4 * 2.0f);
+					else if (savedata.kpivol == 4) c4 = (__int64)((float)c4 * 3.0f);
+					else if (savedata.kpivol == 8) c4 = (__int64)((float)c4 * 4.0f);
+					else if (savedata.kpivol == 16) c4 = (__int64)((float)c4 * 5.0f);
+					if (c4 > 2147483647) c4 = 2147483647;
+					if (c4 < -2147483648LL) c4 = -2147483648LL;
+					b32c[i] = (int)c4;
+				}
+			}
+			else if (wavsam == 24) {
 				for (int i = 0; i < cnt / 3; i++) {
 					int c4 = b24c[i];
 					if (savedata.kpivol == 2)	c4 = (int)((float)c4 * 2.0f);
@@ -12864,8 +12935,17 @@ int readkpi(BYTE* bw, int cnt)
 			}
 		}
 		fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
-		//fadeを三乗して計算密度を変更
-		if (wavsam == 24) {
+		// fadeを三乗して計算密度を変更
+		if (wavsam == 32) {
+			float c4;
+			int c5;
+			for (int i = 0; i < cnt / 4; i++) {
+				c5 = b32c[i]; c4 = (float)c5;
+				c4 = c4 * fade * fade; c5 = (int)c4;
+				b32c[i] = c5;
+			}
+		}
+		else if (wavsam == 24) {
 			float c4;
 			int c5;
 			for (int i = 0; i < cnt / 3; i++) {
@@ -12877,12 +12957,12 @@ int readkpi(BYTE* bw, int cnt)
 		else {
 			for (int i = 0; i < cnt / 2; i++) { c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c; }
 		}
+
 		if ((UINT)wl < (UINT)0x7fff0000) {
 			if (cc1 == 1)	cc.Write(bw, cnt);
 			wl += cnt;
 		}
 		lenl += cnt;
-		//	playb+=cnt/4;
 	}
 	catch (SE_Exception e) {
 	}
