@@ -79,23 +79,22 @@ static time_t HttpGetLastModified(const CString& url)
 		CString dbgRaw;
 		dbgRaw.Format(_T("[UpdateCheck] サーバーからの生の応答日時: %S\n"), rawDate);
 		OutputDebugString(dbgRaw);
-	}
 
-	SYSTEMTIME st = { 0 };
-	DWORD bufLen = sizeof(st);
-	if (HttpQueryInfo(hConnect, HTTP_QUERY_LAST_MODIFIED | HTTP_QUERY_FLAG_SYSTEMTIME, &st, &bufLen, NULL))
-	{
-		// ローカルに変換して time_t 取得
-		SystemTimeToTzSpecificLocalTime(NULL, &st, &st);
-		struct tm t = { 0 };
-		t.tm_year = st.wYear - 1900;
-		t.tm_mon = st.wMonth - 1;
-		t.tm_mday = st.wDay;
-		t.tm_hour = st.wHour;
-		t.tm_min = st.wMinute;
-		t.tm_sec = st.wSecond;
-		t.tm_isdst = -1;
-		result = mktime(&t);
+		SYSTEMTIME st = { 0 };
+		// ----------------------------------------------------------------------------------
+		// ここが時差のバグを修正した部分ですわ！
+		// 生の文字列を解釈して、確実に世界標準時(UTC)のまま時間を取得いたします
+		// ----------------------------------------------------------------------------------
+		if (InternetTimeToSystemTimeA(rawDate, &st, 0))
+		{
+			FILETIME ft;
+			SystemTimeToFileTime(&st, &ft);
+			ULARGE_INTEGER ull;
+			ull.LowPart = ft.dwLowDateTime;
+			ull.HighPart = ft.dwHighDateTime;
+			// 1601年からの時間を表す形式から、基準時間を引いて time_t(UTC) に変換いたしますわ
+			result = (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+		}
 	}
 	InternetCloseHandle(hConnect);
 	InternetCloseHandle(hInternet);
@@ -224,7 +223,7 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 	if (buildTime == (time_t)-1) return 0;
 
 	// ビルド時刻 + 1時間
-	time_t threshold = buildTime + 3600;
+	time_t threshold = buildTime + 60*2;
 
 	CString dbgMsg;
 	dbgMsg.Format(_T("[UpdateCheck] BuildTime: %lld, Threshold: %lld\n"), (long long)buildTime, (long long)threshold);
@@ -251,11 +250,8 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 		dbgMsg.Format(_T("[UpdateCheck] ServerModified: %lld, LastUpdateCheck: %lld\n"), (long long)serverModified, (long long)savedata.lastUpdateCheck);
 		OutputDebugString(dbgMsg);
 
-		// ----------------------------------------------------------------------------------
-		// ここが無限ループを防ぐ重要な変更点ですわ！
 		// サーバーの時間が「プログラム作成時間＋1時間」より新しく、かつ、
 		// 「保存データに記録された前回の更新時間」よりも新しい場合のみ更新通知を出しますわ
-		// ----------------------------------------------------------------------------------
 		if (serverModified != 0 && serverModified > threshold && (__int64)serverModified > savedata.lastUpdateCheck)
 		{
 			OutputDebugString(_T("[UpdateCheck] 更新を検知いたしました！メッセージを送信しますわ。\n"));
