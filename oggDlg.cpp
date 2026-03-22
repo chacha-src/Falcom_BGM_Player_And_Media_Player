@@ -14193,7 +14193,7 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 			ov_pcm_seek_lap(&vf, (ogg_int64_t)loop1);
 
 			// --- プリロール分を捨てる ---
-			int discard = 32;  // 捨てたいサンプル数
+			int discard = 64;  // 捨てたいサンプル数
 			while (discard > 0) {
 				float** pcm;
 				int bitstream;
@@ -14228,7 +14228,7 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 				ov_pcm_seek_lap(&vf, (ogg_int64_t)loop1);
 
 				// --- プリロール分を捨てる ---
-				int discard = 32;  // 捨てたいサンプル数
+				int discard = 64;  // 捨てたいサンプル数
 				while (discard > 0) {
 					float** pcm;
 					int bitstream;

@@ -81,10 +81,7 @@ static time_t HttpGetLastModified(const CString& url)
 		OutputDebugString(dbgRaw);
 
 		SYSTEMTIME st = { 0 };
-		// ----------------------------------------------------------------------------------
-		// ここが時差のバグを修正した部分ですわ！
 		// 生の文字列を解釈して、確実に世界標準時(UTC)のまま時間を取得いたします
-		// ----------------------------------------------------------------------------------
 		if (InternetTimeToSystemTimeA(rawDate, &st, 0))
 		{
 			FILETIME ft;
@@ -222,8 +219,8 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 	time_t buildTime = GetBuildTimeUtc();
 	if (buildTime == (time_t)-1) return 0;
 
-	// ビルド時刻 + 1時間
-	time_t threshold = buildTime + 60*2;
+	// 女神様のご指定通り、ビルド時刻 + 2分（120秒）に変更いたしましたわ
+	time_t threshold = buildTime + 120;
 
 	CString dbgMsg;
 	dbgMsg.Format(_T("[UpdateCheck] BuildTime: %lld, Threshold: %lld\n"), (long long)buildTime, (long long)threshold);
@@ -250,7 +247,7 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 		dbgMsg.Format(_T("[UpdateCheck] ServerModified: %lld, LastUpdateCheck: %lld\n"), (long long)serverModified, (long long)savedata.lastUpdateCheck);
 		OutputDebugString(dbgMsg);
 
-		// サーバーの時間が「プログラム作成時間＋1時間」より新しく、かつ、
+		// サーバーの時間が「プログラム作成時間＋指定時間」より新しく、かつ、
 		// 「保存データに記録された前回の更新時間」よりも新しい場合のみ更新通知を出しますわ
 		if (serverModified != 0 && serverModified > threshold && (__int64)serverModified > savedata.lastUpdateCheck)
 		{
@@ -354,6 +351,47 @@ bool DoUpdateAndRestart()
 		savedata.lastUpdateCheck = (__int64)time(NULL);
 	}
 
+	// ----------------------------------------------------------------------------------
+	// 作業フォルダが迷子にならないよう、保存するファイルの住所（フルパス）を確実に作りますわ
+	// ----------------------------------------------------------------------------------
+	TCHAR datPath[MAX_PATH] = { 0 };
+	_tcscpy_s(datPath, MAX_PATH, targetExePath);
+	TCHAR* pSlashDat = _tcsrchr(datPath, _T('\\'));
+	if (pSlashDat != NULL)
+	{
+		*(pSlashDat + 1) = _T('\0');
+#if _UNICODE
+		_tcscat_s(datPath, MAX_PATH, _T("oggYSEDbgmu.dat"));
+#else
+		_tcscat_s(datPath, MAX_PATH, _T("oggYSEDbgm.dat"));
+#endif
+	}
+	else
+	{
+#if _UNICODE
+		_tcscpy_s(datPath, MAX_PATH, _T("oggYSEDbgmu.dat"));
+#else
+		_tcscpy_s(datPath, MAX_PATH, _T("oggYSEDbgm.dat"));
+#endif
+	}
+
+#if _UNICODE
+	CFile ab;
+	if (ab.Open(datPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL))
+	{
+		ab.Write(&savedata, sizeof(save));
+		ab.Close();
+	}
+#else
+	CFile ab;
+	if (ab.Open(datPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL))
+	{
+		ab.Write(&savedata, sizeof(save));
+		ab.Close();
+	}
+#endif
+	// ----------------------------------------------------------------------------------
+
 	// 命令書（バッチファイル）の作成
 	CFile bat;
 	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
@@ -366,7 +404,16 @@ bool DoUpdateAndRestart()
 	CStringA targetExePathA(targetExePath);  // 新しく作る正しい名前のファイル
 	CStringA tempPathA(tempPath);
 
+	// 実行ファイルがある正しいフォルダのパスを抜き出しますわ
+	CStringA exeDirA = targetExePathA;
+	int slashPos = exeDirA.ReverseFind('\\');
+	if (slashPos != -1)
+	{
+		exeDirA = exeDirA.Left(slashPos);
+	}
+
 	CStringA batContentA;
+	// 命令書の中で「プログラムを起動する前に、必ず本来のフォルダに移動しなさい(cd /d)」と指定いたしますわ
 	batContentA.Format(
 		"@echo off\r\n"
 		"set LOG=\"%sogg_update_log.txt\"\r\n"
@@ -381,37 +428,23 @@ bool DoUpdateAndRestart()
 		"goto wait\r\n"
 		":success\r\n"
 		"echo 上書きに成功いたしました！ >> %%LOG%%\r\n"
+		"cd /d \"%s\"\r\n"
 		"start \"\" \"%s\"\r\n"
 		"goto end\r\n"
 		":fail\r\n"
 		"echo 上書きに失敗いたしました... >> %%LOG%%\r\n"
+		"cd /d \"%s\"\r\n"
 		"start \"\" \"%s\"\r\n"
 		":end\r\n"
 		"del \"%%~f0\"\r\n",
 		(LPCSTR)tempPathA,
 		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA,
-		(LPCSTR)targetExePathA, // 成功時は新しい方を起動します
-		(LPCSTR)exePathA        // 失敗時は元のファイルを起動します
+		(LPCSTR)exeDirA, (LPCSTR)targetExePathA, // 成功時は元のフォルダに移動して起動
+		(LPCSTR)exeDirA, (LPCSTR)exePathA        // 失敗時も元のフォルダに移動して起動
 	);
 
 	bat.Write(batContentA, batContentA.GetLength());
 	bat.Close();
-
-#if _UNICODE
-	CFile ab;
-	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL))
-	{
-		ab.Write(&savedata, sizeof(save));
-		ab.Close();
-	}
-#else
-	CFile ab;
-	if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL))
-	{
-		ab.Write(&savedata, sizeof(save));
-		ab.Close();
-	}
-#endif
 
 	// 命令書（バッチファイル）の実行
 	ShellExecute(NULL, _T("open"), batPath, NULL, tempPath, SW_HIDE);

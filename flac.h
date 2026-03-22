@@ -177,13 +177,13 @@ DWORD __fastcall KbFlacDecoder::SetPosition(LONGLONG dwPos)
 	LONGLONG dwPosSample = (dwPos * (LONGLONG)m_stream_info.sample_rate) / (LONGLONG)1000;
 	if (flacmode == 1) {
 		if (FLAC__stream_decoder_seek_absolute(m_decoder, dwPos)) {
-			m_discard_samples = 32;   // 16〜64 あたりで調整
+			m_discard_samples = 64;   // 16〜64 あたりで調整
 			return dwPos;
 		}
 	}
 	else {
 		if (FLAC__stream_decoder_seek_absolute(m_decoder, dwPosSample)) {
-			m_discard_samples = 32;
+			m_discard_samples = 64;
 			return dwPos;
 		}
 	}
