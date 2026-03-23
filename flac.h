@@ -170,23 +170,41 @@ void __fastcall KbFlacDecoder::Close(void)
 /////////////////////////////////////////////////////////////////////////////
 DWORD __fastcall KbFlacDecoder::SetPosition(LONGLONG dwPos)
 {
-	m_direct_buf = NULL;
-	m_direct_buf_size = m_direct_buf_copied = 0;
-	m_temp_buf_size = m_temp_buf_remain = 0;
+	m_direct_buf_copied = 0;
+	m_direct_buf_size = 0;
+	m_temp_buf_size = 0;
+	m_temp_buf_remain = 0;
+	m_discard_samples = 0;
 
-	LONGLONG dwPosSample = (dwPos * (LONGLONG)m_stream_info.sample_rate) / (LONGLONG)1000;
+	LONGLONG dwPosSample = 0;
 	if (flacmode == 1) {
-		if (FLAC__stream_decoder_seek_absolute(m_decoder, dwPos)) {
-			m_discard_samples = 64;   // 16〜64 あたりで調整
-			return dwPos;
-		}
+		dwPosSample = dwPos;
 	}
 	else {
-		if (FLAC__stream_decoder_seek_absolute(m_decoder, dwPosSample)) {
-			m_discard_samples = 64;
-			return dwPos;
+		if (m_stream_info.sample_rate > 0) {
+			dwPosSample = (dwPos * (LONGLONG)m_stream_info.sample_rate) / 1000LL;
 		}
 	}
+
+	// ★ EOF/エラー状態をflushでクリアしてからseekする
+	// FLAC__stream_decoder_seek_absoluteはEOF状態で呼ぶとハングするため必須
+	FLAC__StreamDecoderState state = FLAC__stream_decoder_get_state(m_decoder);
+	if (state == FLAC__STREAM_DECODER_END_OF_STREAM ||
+		state == FLAC__STREAM_DECODER_ABORTED) {
+		FLAC__stream_decoder_flush(m_decoder);
+	}
+
+	if (FLAC__stream_decoder_seek_absolute(m_decoder, dwPosSample)) {
+		return dwPos;
+	}
+
+	// seekが失敗した場合はflushで再試行
+	// （flush後に再度seekすることでほぼ確実に復帰できます）
+	FLAC__stream_decoder_flush(m_decoder);
+	if (FLAC__stream_decoder_seek_absolute(m_decoder, dwPosSample)) {
+		return dwPos;
+	}
+
 	return 0;
 }
 /////////////////////////////////////////////////////////////////////////////
@@ -253,15 +271,16 @@ FLAC__StreamDecoderWriteStatus KbFlacDecoder::write_callback(
 	const FLAC__int32* const buffer[])
 {
 	int channels = m_stream_info.channels;
-	int wide_samples = frame->header.blocksize;
+	int blocksize = frame->header.blocksize;
 
-	// --- ここでプリロール分をスキップ ---
+	// --- プリロール分をスキップ ---
 	int skip = 0;
 	if (m_discard_samples > 0) {
-		skip = (m_discard_samples < wide_samples) ? m_discard_samples : wide_samples;
+		skip = (m_discard_samples < blocksize) ? m_discard_samples : blocksize;
 		m_discard_samples -= skip;
 	}
-	int effective_samples = wide_samples - skip;
+
+	int effective_samples = blocksize - skip;
 	if (effective_samples <= 0) {
 		// このフレームは全部捨てる
 		m_direct_buf_copied = 0;
@@ -270,79 +289,90 @@ FLAC__StreamDecoderWriteStatus KbFlacDecoder::write_callback(
 	}
 	// --------------------------------------
 
-	int direct_copy_samples = m_direct_buf_size / m_block_align;
-	if (direct_copy_samples > effective_samples) {
-		direct_copy_samples = effective_samples;
+	// 安全対策：m_direct_buf が存在しない場合や、サイズが不正な場合は強制的に0にします
+	int direct_copy_samples = 0;
+	if (m_direct_buf != NULL && m_block_align > 0) {
+		direct_copy_samples = m_direct_buf_size / m_block_align;
+		if (direct_copy_samples > effective_samples) {
+			direct_copy_samples = effective_samples;
+		}
 	}
 
-	int wide_sample, sample, channel;
+	int temp_copy_samples = effective_samples - direct_copy_samples;
+	int wide_sample = skip;
 
+	// 16bit処理
 	if (m_stream_info.bits_per_sample == 16) {
-		// まず direct_buf へ
-		for (sample = 0, wide_sample = skip;
-			wide_sample < skip + direct_copy_samples;
-			wide_sample++) {
-			for (channel = 0; channel < channels; channel++, sample++) {
-				((FLAC__int16*)m_direct_buf)[sample] =
-					(FLAC__int16)buffer[channel][wide_sample];
+		// direct_buf へ
+		if (m_direct_buf != NULL && direct_copy_samples > 0) {
+			int sample = 0;
+			for (int i = 0; i < direct_copy_samples; i++, wide_sample++) {
+				for (int channel = 0; channel < channels; channel++, sample++) {
+					((FLAC__int16*)m_direct_buf)[sample] = (FLAC__int16)buffer[channel][wide_sample];
+				}
 			}
 		}
-		// 残りは temp_buf へ
-		for (sample = 0;
-			wide_sample < skip + effective_samples;
-			wide_sample++) {
-			for (channel = 0; channel < channels; channel++, sample++) {
-				((FLAC__int16*)m_temp_buf)[sample] =
-					(FLAC__int16)buffer[channel][wide_sample];
+		// temp_buf へ
+		if (m_temp_buf != NULL && temp_copy_samples > 0) {
+			int sample = 0;
+			for (int i = 0; i < temp_copy_samples; i++, wide_sample++) {
+				for (int channel = 0; channel < channels; channel++, sample++) {
+					((FLAC__int16*)m_temp_buf)[sample] = (FLAC__int16)buffer[channel][wide_sample];
+				}
 			}
 		}
 	}
+	// 24bit処理
 	else if (m_stream_info.bits_per_sample == 24) {
-		for (sample = 0, wide_sample = skip;
-			wide_sample < skip + direct_copy_samples;
-			wide_sample++) {
-			for (channel = 0; channel < channels; channel++, sample++) {
-				BYTE* dst = &m_direct_buf[sample * 3];
-				const BYTE* src = (const BYTE*)&buffer[channel][wide_sample];
-				dst[0] = src[0];
-				dst[1] = src[1];
-				dst[2] = src[2];
+		// ★ クラッシュ原因その2を修正いたしました ★
+		// 危険なポインタ参照をやめ、安全なビットシフト演算を用いてデータを正確に抽出します
+		if (m_direct_buf != NULL && direct_copy_samples > 0) {
+			int sample = 0;
+			for (int i = 0; i < direct_copy_samples; i++, wide_sample++) {
+				for (int channel = 0; channel < channels; channel++, sample++) {
+					BYTE* dst = &m_direct_buf[sample * 3];
+					FLAC__int32 val = buffer[channel][wide_sample];
+					dst[0] = (BYTE)(val & 0xFF);
+					dst[1] = (BYTE)((val >> 8) & 0xFF);
+					dst[2] = (BYTE)((val >> 16) & 0xFF);
+				}
 			}
 		}
-		for (sample = 0;
-			wide_sample < skip + effective_samples;
-			wide_sample++) {
-			for (channel = 0; channel < channels; channel++, sample++) {
-				BYTE* dst = &m_temp_buf[sample * 3];
-				const BYTE* src = (const BYTE*)&buffer[channel][wide_sample];
-				dst[0] = src[0];
-				dst[1] = src[1];
-				dst[2] = src[2];
+		if (m_temp_buf != NULL && temp_copy_samples > 0) {
+			int sample = 0;
+			for (int i = 0; i < temp_copy_samples; i++, wide_sample++) {
+				for (int channel = 0; channel < channels; channel++, sample++) {
+					BYTE* dst = &m_temp_buf[sample * 3];
+					FLAC__int32 val = buffer[channel][wide_sample];
+					dst[0] = (BYTE)(val & 0xFF);
+					dst[1] = (BYTE)((val >> 8) & 0xFF);
+					dst[2] = (BYTE)((val >> 16) & 0xFF);
+				}
 			}
 		}
 	}
+	// 8bit処理
 	else if (m_stream_info.bits_per_sample == 8) {
-		for (sample = 0, wide_sample = skip;
-			wide_sample < skip + direct_copy_samples;
-			wide_sample++) {
-			for (channel = 0; channel < channels; channel++, sample++) {
-				m_direct_buf[sample] =
-					(FLAC__int8)buffer[channel][wide_sample] + 128;
+		if (m_direct_buf != NULL && direct_copy_samples > 0) {
+			int sample = 0;
+			for (int i = 0; i < direct_copy_samples; i++, wide_sample++) {
+				for (int channel = 0; channel < channels; channel++, sample++) {
+					m_direct_buf[sample] = (FLAC__int8)buffer[channel][wide_sample] + 128;
+				}
 			}
 		}
-		for (sample = 0;
-			wide_sample < skip + effective_samples;
-			wide_sample++) {
-			for (channel = 0; channel < channels; channel++, sample++) {
-				m_temp_buf[sample] =
-					(FLAC__int8)buffer[channel][wide_sample] + 128;
+		if (m_temp_buf != NULL && temp_copy_samples > 0) {
+			int sample = 0;
+			for (int i = 0; i < temp_copy_samples; i++, wide_sample++) {
+				for (int channel = 0; channel < channels; channel++, sample++) {
+					m_temp_buf[sample] = (FLAC__int8)buffer[channel][wide_sample] + 128;
+				}
 			}
 		}
 	}
 
 	m_direct_buf_copied = direct_copy_samples * m_block_align;
-	m_temp_buf_remain = m_temp_buf_size =
-		sample * m_block_align / channels;
+	m_temp_buf_remain = m_temp_buf_size = temp_copy_samples * m_block_align;
 
 	return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
 }

@@ -230,6 +230,9 @@ int playwavwav(BYTE* bw, int old, int l1, int l2);
 int readwav(BYTE* bw, int cnt);
 void playwavds2(BYTE* bw, int old, int l1, int l2);
 BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2);
+int g_warmupOutputBytes = 0;
+int  g_warmupRBOutputBytes = 0;
+bool g_inWarmup = false;
 //スレッド
 UINT wavread(LPVOID);
 extern BYTE bufimage[0x30000f];
@@ -2596,8 +2599,15 @@ long LoadOggVorbis(const TCHAR* file_name, int word, char** ogg, CSliderCtrl& m_
 		sizeof(wh.ckidData) + sizeof(wh.ckSizeData);
 
 	/* デコード後のデータサイズを求め、メモリ確保 */
-	data_size = (long)ceil(vi->channels * vi->rate * ov_time_total(&vf, -1) * word);
-	og->m_time.SetRange(0, (data_size) / 4, TRUE);
+	// ★修正点1：時間から計算するのではなく、正確な総データ数を直接取得します
+	ogg_int64_t totalFrames = ov_pcm_total(&vf, -1);
+
+	// ★修正点2：正確な総データ数をもとに、データサイズ（バイト数）を算出します
+	data_size = (long)(totalFrames * vi->channels * word);
+
+	// ★修正点3：4で決め打ちするのではなく、正確な総データ数をそのままスライダーの範囲に設定します
+	og->m_time.SetRange(0, (int)totalFrames, TRUE);
+
 	dd = vi->channels * vi->rate * word;
 	*ogg = (char*)malloc(whsize);
 	if (ogg == NULL) {
@@ -5989,7 +5999,7 @@ void COggDlg::play()
 
 	}
 	else {
-		if (mode != -6) {
+		if (mode != -6) { // ogg
 			oggsize = LoadOggVorbis(filen, 2, &ogg, m_time);
 			if (oggsize < 0) {
 				m_saisai.EnableWindow(TRUE);
@@ -8670,6 +8680,7 @@ void COggDlg::play()
 	int len1, len2, len3;
 	if (true) {
 		ULONG PlayCursor, WriteCursor = 0;
+		playb = 0;
 		if (m_dsb)m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);//再生位置取得
 		len1 = (int)WriteCursor;//書き込み範囲取得
 		len2 = 0;
@@ -13238,6 +13249,7 @@ int readm4a(BYTE* bw, int cnt)
 	return cnt;
 }
 
+
 int playwavflac(BYTE* bw, int old, int l1, int l2)
 {
 	//データ読み込み
@@ -14179,70 +14191,156 @@ int readmp3(BYTE* bw, int cnt)
 }
 BOOL oggyomikomi = FALSE;
 
+
+extern std::vector<float> inputFloatData;
+extern std::vector<uint8_t> m_bufwav3_1;
+extern std::vector<float> m_convertedPcmFloatData;
+extern int pitch;
+extern int tempo; // tempo変数を参照します
+float tempoRate2;
+
+// ─────────────────────────────────────────────────────────────────────
+// スライダーでのシーク時や、ループ時にRubberBandを温めながらジャンプする万能関数
+// ─────────────────────────────────────────────────────────────────────
+bool InitializeRubberBandStretcher();
+void SeekAndWarmupRubberBand(int targetPos)
+{
+	if (!g_rubberBandStretcher) {
+		float te = (float)tempo;
+		if (te >= 200.0f) te -= 100.0f;
+		else te = te / 3.0f + 33.3f;
+		tempoRate2 = te / 100.0f;
+
+		if (!InitializeRubberBandStretcher()) return;
+	}
+	else {
+		g_rubberBandStretcher->reset();
+	}
+
+	// ★ 修正点：1秒は長すぎて処理落ち（引き延ばし音）の原因になるため、
+	// 必須な遅延分＋αの「8192サンプル（約0.18秒）」に短縮します。
+	int preRollInputSamples = 8192;
+	int startPos = targetPos - preRollInputSamples;
+	if (startPos < 0) {
+		preRollInputSamples = targetPos;
+		startPos = 0;
+	}
+
+	ov_pcm_seek(&vf, (ogg_int64_t)startPos);
+
+	float te = (float)tempo;
+	if (te >= 200.0f) te -= 100.0f;
+	else te = te / 3.0f + 33.3f;
+	float ratio = te / 100.0f;
+
+	int targetDiscardOutput = (int)(preRollInputSamples / ratio);
+	int discardedSoFar = 0;
+
+	std::vector<uint8_t> tempRawBuf(4096);
+	m_convertedPcmFloatData.clear();
+
+	// 出力が targetDiscardOutput を越えるまで回し続けます
+	while (discardedSoFar < targetDiscardOutput) {
+		int current_section;
+		long bytesRead = ov_read(&vf, (char*)tempRawBuf.data(), 4096, 0, 2, 1, &current_section);
+		if (bytesRead <= 0) break;
+
+		int samplesRead = bytesRead / (wavch * 2);
+
+		std::vector<float> inFloat;
+		uint16_t bps = (uint16_t)((wavsam <= 0 || wavsam > 32) ? 16 : abs(wavsam));
+		ConvertRawBytesToFloat(std::vector<uint8_t>(tempRawBuf.begin(), tempRawBuf.begin() + bytesRead), bps, wavch, inFloat);
+
+		std::vector<std::vector<float>> chData(wavch, std::vector<float>(samplesRead));
+		for (int i = 0; i < samplesRead; ++i) {
+			for (int ch = 0; ch < wavch; ++ch) chData[ch][i] = inFloat[i * wavch + ch];
+		}
+		std::vector<float*> chPtrs(wavch);
+		for (int ch = 0; ch < wavch; ++ch) chPtrs[ch] = chData[ch].data();
+
+		g_rubberBandStretcher->process(chPtrs.data(), samplesRead, false);
+
+		const size_t pullSize = 4096;
+		std::vector<std::vector<float>> outBuf(wavch, std::vector<float>(pullSize));
+		std::vector<float*> outPtrs(wavch);
+		for (int ch = 0; ch < wavch; ++ch) outPtrs[ch] = outBuf[ch].data();
+
+		while (g_rubberBandStretcher->available() > 0) {
+			size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
+			size_t retrieved = g_rubberBandStretcher->retrieve(outPtrs.data(), toGet);
+			if (retrieved == 0) break;
+
+			if (discardedSoFar + retrieved <= targetDiscardOutput) {
+				discardedSoFar += retrieved;
+			}
+			else {
+				// 超えた分を正式なデータとして配列に入れます
+				int discardAmount = targetDiscardOutput - discardedSoFar;
+				for (int i = discardAmount; i < retrieved; ++i) {
+					for (int ch = 0; ch < wavch; ++ch) {
+						m_convertedPcmFloatData.push_back(outBuf[ch][i]);
+					}
+				}
+				discardedSoFar += retrieved;
+			}
+		}
+	}
+
+	poss = 0;
+	poss2 = 0; poss3 = 0; poss4 = 0; poss6 = 0;
+
+	int keptSamples = m_convertedPcmFloatData.size() / wavch;
+	if (keptSamples > 0) {
+		outputRawBytesData.clear();
+		outputRawBytesData.resize(keptSamples * wavch * 2);
+		int16_t* rawOut = (int16_t*)outputRawBytesData.data();
+		for (size_t i = 0; i < m_convertedPcmFloatData.size(); ++i) {
+			float val = m_convertedPcmFloatData[i];
+			if (val > 1.0f) val = 1.0f;
+			if (val < -1.0f) val = -1.0f;
+			rawOut[i] = (int16_t)(val * 32767.0f);
+		}
+
+		int byteLen = keptSamples * wavch * 2;
+
+		// ★ 安全対策: 抽出したデータが万が一バッファ上限を超えた場合のメモリ破壊を防ぎます
+		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
+		if (byteLen > max_buffer_size) byteLen = max_buffer_size;
+
+		memcpy(bufkpi3, outputRawBytesData.data(), byteLen);
+		poss2 = byteLen;
+		poss4 = byteLen;
+
+		poss5 = targetPos + (int)(keptSamples * ratio);
+		playb = targetPos + (int)(keptSamples * ratio);
+	}
+	else {
+		poss5 = targetPos;
+		playb = targetPos;
+	}
+
+	reset = TRUE;
+}
+
 void playwavds2(BYTE* bw, int old, int l1, int l2)
 {
 	//データ読み込み
 	if (l1 == 0)return;
 	oggyomikomi = TRUE;
 	int rrr = mcopy((char*)bw + old, l1);
+
 	if (l1 != rrr) {
 		if (savedata.saveloop == 0 && endf == 1) {
 			l1 = rrr; fade1 = 1;
 		}
 		else {
 			loopcnt++;
-			playb = loop1;
 
-			// こちらもlap無しのseekに変更します
-			ov_pcm_seek(&vf, (ogg_int64_t)loop1);
-			ogg_int64_t a = ov_pcm_tell(&vf);
-			int discard = abs(loop1 - a);  // 捨てたいサンプル数
-			while (discard > 0) {
-				float** pcm;
-				int bitstream;
-				long got = ov_read_float(&vf, &pcm, discard, &bitstream);
-				if (got <= 0) break;  // EOF or error
-				discard -= got;
-			}
-			// -----------------------------
+			// ★ 女神様考案のウォームアップ処理を実行 ★
+			SeekAndWarmupRubberBand(loop1);
 
-			// ここから通常処理
-			poss = 0;
-			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-			poss5 = loop1;
-
-			// 同じく残骸を抽出してリセットします
-			if (g_rubberBandStretcher) {
-				std::vector<std::vector<float>> dummyData(wavch, std::vector<float>(1, 0.0f));
-				std::vector<float*> dummyPointers(wavch);
-				for (int ch = 0; ch < wavch; ++ch) dummyPointers[ch] = dummyData[ch].data();
-
-				g_rubberBandStretcher->process(dummyPointers.data(), 0, true);
-
-				g_loopTailBuffer.clear();
-				g_loopTailPos = 0;
-
-				const size_t pullSize = 4096;
-				std::vector<std::vector<float>> outputChannelData(wavch, std::vector<float>(pullSize));
-				std::vector<float*> outputPointers(wavch);
-				for (int ch = 0; ch < wavch; ++ch) {
-					outputPointers[ch] = outputChannelData[ch].data();
-				}
-
-				while (g_rubberBandStretcher->available() > 0) {
-					size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
-					size_t retrieved = g_rubberBandStretcher->retrieve(outputPointers.data(), toGet);
-					if (retrieved == 0) break;
-
-					for (size_t i = 0; i < retrieved; ++i) {
-						for (int ch = 0; ch < wavch; ++ch) {
-							g_loopTailBuffer.push_back(outputChannelData[ch][i]);
-						}
-					}
-				}
-
-				g_rubberBandStretcher->reset();
-			}
+			// ウォームアップが済んでいるので、あとは通常通り mcopy に任せるだけです！
+			// mcopy 側はごちゃごちゃしたフラグや差分計算を一切気にする必要はありません。
 			mcopy((char*)bw + old + rrr, (int)l1 - rrr);
 		}
 	}
@@ -14254,58 +14352,10 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 			}
 			else {
 				loopcnt++;
-				playb = loop1;
 
-				// こちらもlap無しのseekに変更します
-				ov_pcm_seek(&vf, (ogg_int64_t)loop1);
-				ogg_int64_t a = ov_pcm_tell(&vf);
-				int discard = abs(loop1 - a);  // 捨てたいサンプル数
-				while (discard > 0) {
-					float** pcm;
-					int bitstream;
-					long got = ov_read_float(&vf, &pcm, discard, &bitstream);
-					if (got <= 0) break;  // EOF or error
-					discard -= got;
-				}
-				// -----------------------------
+				// ★ こちらも同様にウォームアップ処理を実行 ★
+				SeekAndWarmupRubberBand(loop1);
 
-				// ここから通常処理
-				poss = 0;
-				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-				poss5 = loop1;
-
-				// 同じく残骸を抽出してリセットします
-				if (g_rubberBandStretcher) {
-					std::vector<std::vector<float>> dummyData(wavch, std::vector<float>(1, 0.0f));
-					std::vector<float*> dummyPointers(wavch);
-					for (int ch = 0; ch < wavch; ++ch) dummyPointers[ch] = dummyData[ch].data();
-
-					g_rubberBandStretcher->process(dummyPointers.data(), 0, true);
-
-					g_loopTailBuffer.clear();
-					g_loopTailPos = 0;
-
-					const size_t pullSize = 4096;
-					std::vector<std::vector<float>> outputChannelData(wavch, std::vector<float>(pullSize));
-					std::vector<float*> outputPointers(wavch);
-					for (int ch = 0; ch < wavch; ++ch) {
-						outputPointers[ch] = outputChannelData[ch].data();
-					}
-
-					while (g_rubberBandStretcher->available() > 0) {
-						size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
-						size_t retrieved = g_rubberBandStretcher->retrieve(outputPointers.data(), toGet);
-						if (retrieved == 0) break;
-
-						for (size_t i = 0; i < retrieved; ++i) {
-							for (int ch = 0; ch < wavch; ++ch) {
-								g_loopTailBuffer.push_back(outputChannelData[ch][i]);
-							}
-						}
-					}
-
-					g_rubberBandStretcher->reset();
-				}
 				mcopy((char*)bw + rrr, (int)l2 - rrr);
 			}
 		}
@@ -15014,37 +15064,27 @@ int mcopy(char* a, int len)
 {
 	if (len == 0) return 0;
 	int ch = (wavch == 2 ? 1 : 2);
-	//poss = 0;
 	int ret = 0, lenl = len / (wavch * 2), cnt2;
-	//ret=ov_pcm_seek(&vf,playb+poss);
 	int len3 = 0, len4 = 0;
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
+
 	if (poss4 <= len) {
 		for (int k = 0; k < 5; k++) {
 			ret = 0;
 			if ((int)playb > (data_size + 20000) / (wavch * 2) && endf == 1) {
 				playb += lenl;
-				if (muon != 0) {
-					muon--;
-					ZeroMemory(a, len);
-				}
-				if (muon == MUON) {
-					ZeroMemory(a, len);
-					muon--;
-					rrr = 0;
-				}
+				if (muon != 0) { muon--; ZeroMemory(a, len); }
+				if (muon == MUON) { ZeroMemory(a, len); muon--; rrr = 0; }
 				if (muon == 0) return 0;
 				return len;
 			}
 
-			int read = len / 4096;
-			int read2 = len % 4096;
 			int i = 0;
 			for (;;) {
 				ret = ov_read(&vf, (char*)(bufwav + poss * 4), 4096, 0, 2, 1, &current_section) / 4;
 				poss += ret;
 				if (ret == 0) break;
-				if (lenl <= poss)	break;
+				if (lenl <= poss) break;
 			}
 
 			int to_process = lenl;
@@ -15052,7 +15092,6 @@ int mcopy(char* a, int len)
 			playb += len2 / 4;
 
 			if (len2 > 0) {
-				// 書き込み
 				if (poss2 + len2 > max_buffer_size) {
 					int first = max_buffer_size - poss2;
 					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
@@ -15064,6 +15103,10 @@ int mcopy(char* a, int len)
 					poss2 += len2;
 				}
 				poss4 += len2;
+
+				// ★ warmup中はRubberBand出力バイトを別途カウント
+				if (g_inWarmup)
+					g_warmupRBOutputBytes += len2;
 			}
 			if (lenl <= poss) {
 				poss -= lenl;
@@ -15075,23 +15118,16 @@ int mcopy(char* a, int len)
 	}
 
 	int cnt0 = len / 4;
-	if (loop1 + loop2 < poss5 + cnt0 && endf == 0) {
+	if (loop1 + loop2 < poss5 + cnt0 && endf == 0)
 		cnt0 = (loop1 + loop2) - poss5;
-	}
 
 	{
 		float te = (float)tempo;
-		if (te >= 200.0f) {
-			te -= 100.0f;
-		}
-		else {
-			te = te / 3.0f + 33.3f;
-		}
+		if (te >= 200.0f) te -= 100.0f;
+		else              te = te / 3.0f + 33.3f;
 		poss5 += (int)(cnt0 * (te / 100.0f));
 	}
 	cnt0 *= 4;
-
-
 	cnt2 = cnt0;
 	int to_read = cnt0;
 
@@ -15109,23 +15145,30 @@ int mcopy(char* a, int len)
 		poss4 -= to_read;
 	}
 
-	equaliser(a, cnt2, reset);
-	reset = FALSE;
+	// ★ warmup中はEQをスキップ（loop1以前の音声にEQをかけると
+	//    フィルター状態がloop1以降の本処理に引き継がれて音色が壊れる）
+	if (!g_inWarmup) {
+		equaliser(a, cnt2, reset);
+		reset = FALSE;
+	}
 
-	//fade計算
+	// fade計算
 	short* b, c;
 	b = (short*)a;
 	CString sss;
 	sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
 	sss.MakeLower();
-	fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
-	//fadeを三乗して計算密度を変更
-	for (int i = 0; i < (cnt0 * wavch) / 4; i++) { c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c; }
+	fade += fadeadd;
+	if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
+	for (int i = 0; i < (cnt0 * wavch) / 4; i++) {
+		c = b[i];
+		c = (short)(((float)c) * fade * fade);
+		b[i] = c;
+	}
 
 	if ((UINT)wl < (UINT)0x7fff0000) {
-		//				if (cc1 == 1)	cc.Write(bw, cnt);
-		if (cc1 == 1)	cc.Write(a, cnt0);
-		//				if (cc1 == 1)	cc.Write(bufkpi, r);
+		// ★ warmup中はファイル書き込みもスキップ
+		if (cc1 == 1 && !g_inWarmup) cc.Write(a, cnt0);
 		wl += cnt0;
 	}
 
@@ -19204,6 +19247,8 @@ void COggDlg::OnButton14()
 BOOL sek = FALSE;
 extern int sek4;
 extern int syukai, syukai2;
+extern BOOL	syoriflg;
+
 void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar * pScrollBar)
 {
 	{
@@ -19261,6 +19306,10 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar * pScrollBar)
 			}
 			else {
 				if ((loop1 + loop2) < curpos && endf == 0) curpos = (loop1 + loop2);
+				for (; syoriflg == FALSE;) {
+					DoEvent();
+					Sleep(1);
+				}
 				r->SetPos((int)curpos);
 				if (pMainFrame1) {
 					pMainFrame1->seek((LONGLONG)(((float)((float)curpos) * 10000000.0f) / (float)wavbit));
@@ -19424,14 +19473,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar * pScrollBar)
 					}
 				}
 				else {
-					for (; oggyomikomi;) {
-						DoEvent();
-						Sleep(1);
-					}
 					playb = curpos;
-					ov_pcm_seek(&vf, (ogg_int64_t)playb);
-					poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
-					poss5 = curpos;
+					SeekAndWarmupRubberBand((ogg_int64_t)playb);
 					ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 					ZeroMemory(bufkpi_, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 					ZeroMemory(bufkpi2, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
@@ -19478,6 +19521,11 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar * pScrollBar)
 			}
 			else {
 				if ((loop1 + loop2) < curpos && endf == 0) curpos = (loop1 + loop2);
+				for (; syoriflg == FALSE;) {
+					DoEvent();
+					Sleep(1);
+				}
+
 				r->SetPos((int)curpos);
 				if (pMainFrame1) {
 					pMainFrame1->seek((LONGLONG)(((float)((float)curpos) * 10000000.0f) / (float)wavbit));
@@ -19613,19 +19661,13 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar * pScrollBar)
 					}
 				}
 				else {
-					for (; oggyomikomi;) {
-						DoEvent();
-						Sleep(1);
-					}
 					playb = curpos;
-					ov_pcm_seek(&vf, (ogg_int64_t)playb);
-					poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
+					SeekAndWarmupRubberBand((ogg_int64_t)playb);
 					ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 					ZeroMemory(bufkpi_, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 					ZeroMemory(bufkpi2, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 					ZeroMemory(bufkpi3, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 					ZeroMemory(bufkpi4, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-					poss5 = curpos;
 					sek = TRUE;
 					cnt3 = 0;
 					timer.SetEvent();
@@ -19664,6 +19706,11 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar * pScrollBar)
 			}
 			else {
 				if ((loop1 + loop2) < playb && endf == 0) playb = (loop1 + loop2);
+				for (; syoriflg == FALSE;) {
+					DoEvent();
+					Sleep(1);
+				}
+
 				r->SetPos((int)playb);
 				if (pMainFrame1) {
 					pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit));
@@ -19802,18 +19849,13 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar * pScrollBar)
 					}
 				}
 				else {
-					for (; oggyomikomi;) {
-						DoEvent();
-						Sleep(1);
-					}
-					ov_pcm_seek(&vf, (ogg_int64_t)playb);
-					poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
+					SeekAndWarmupRubberBand((ogg_int64_t)playb);
+
 					ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 					ZeroMemory(bufkpi_, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 					ZeroMemory(bufkpi2, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 					ZeroMemory(bufkpi3, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 					ZeroMemory(bufkpi4, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-					poss5 = playb;
 					sek = TRUE;
 					cnt3 = 0;
 					timer.SetEvent();

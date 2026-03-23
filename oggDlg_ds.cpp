@@ -370,9 +370,10 @@ extern ULONG WAVDALen;
 
 void equaliser(void* data, int len, BOOL reset = FALSE);
 
-
+BOOL syoriflg;
 UINT HandleNotifications(LPVOID)
 {
+	syoriflg = FALSE;
 	DWORD hr = DS_OK;
 	DWORD hRet = 0;
 	thn = FALSE;
@@ -403,6 +404,7 @@ UINT HandleNotifications(LPVOID)
 		//		for(ik=0;ik<60;ik++){
 		//		if(syukai)
 		::WaitForMultipleObjects(1, ev, FALSE, savedata.ms);
+		syoriflg = TRUE;
 		for (;;) {
 			if (sek4 == FALSE) break;;
 			::WaitForMultipleObjects(1, ev, FALSE, savedata.ms);
@@ -450,7 +452,6 @@ UINT HandleNotifications(LPVOID)
 				dougainit = 1;
 			}
 		}
-
 
 
 		sflg = TRUE;
@@ -507,6 +508,7 @@ UINT HandleNotifications(LPVOID)
 			oldw2 = oldw + len3;
 			if (len4 != 0)oldw2 = len4;
 		}
+		syoriflg = FALSE;
 		oldw = WriteCursor;
 		if (flg3 != 0)
 			flg3--;
@@ -592,7 +594,7 @@ void HandleNotifications_export()
 extern std::vector<float> inputFloatData;
 extern std::vector<uint8_t> m_bufwav3_1;
 extern int pitch;
-float tempoRate2;
+extern float tempoRate2;
 std::vector<float> g_loopTailBuffer;
 size_t g_loopTailPos = 0;
 
@@ -692,18 +694,18 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t = false)
 			}
 		}
 
-		// 6. ループ終端の残骸データを滑らかに加算する処理
+		// ループ終端の残骸データを滑らかに加算する処理（既存コードの改善版）
 		if (g_loopTailPos < g_loopTailBuffer.size()) {
+			// フェードアウトをリニアではなくイーズアウト（二乗）にして自然に消す
+			size_t tailTotal = g_loopTailBuffer.size();
 			for (size_t i = 0; i < m_convertedPcmFloatData.size(); ++i) {
-				if (g_loopTailPos < g_loopTailBuffer.size()) {
-					// 音が重なって大きくなるのを防ぐため、残骸の音量を徐々に0にしながら足します
-					float fade = 1.0f - ((float)g_loopTailPos / g_loopTailBuffer.size());
-					m_convertedPcmFloatData[i] += g_loopTailBuffer[g_loopTailPos] * fade;
-					g_loopTailPos++;
-				}
+				if (g_loopTailPos >= tailTotal) break;
+				float ratio = 1.0f - ((float)g_loopTailPos / (float)tailTotal);
+				float fadeFactor = ratio * ratio; // イーズアウト
+				m_convertedPcmFloatData[i] += g_loopTailBuffer[g_loopTailPos] * fadeFactor;
+				g_loopTailPos++;
 			}
-			// すべて足し終わったら綺麗にお掃除します
-			if (g_loopTailPos >= g_loopTailBuffer.size()) {
+			if (g_loopTailPos >= tailTotal) {
 				g_loopTailBuffer.clear();
 				g_loopTailPos = 0;
 			}

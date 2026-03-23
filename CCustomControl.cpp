@@ -2492,8 +2492,7 @@ END_MESSAGE_MAP()
 CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
     : m_bAutoDelete(FALSE), m_nMin(0), m_nMax(100), m_nSelMin(0), m_nSelMax(100)
     , m_nDragTarget(0), m_bDragging(FALSE), m_nVisualPos(0), m_nLogicalPos(0)
-{
-}
+{}
 
 CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl() {}
 
@@ -2522,12 +2521,13 @@ void CCustomRangeSliderCtrl::PreSubclassWindow()
 
 void CCustomRangeSliderCtrl::SetPos(int p)
 {
+    if (m_bDragging) return;
+
     p = max(m_nMin, min(m_nMax, p));
     m_nLogicalPos = m_nVisualPos = p;
     CSliderCtrl::SetPos(p);
     if (::IsWindow(m_hWnd)) RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 }
-
 int CCustomRangeSliderCtrl::GetPos() const { return m_nLogicalPos; }
 
 void CCustomRangeSliderCtrl::SetRange(int mn, int mx, BOOL b)
@@ -2640,7 +2640,7 @@ void CCustomRangeSliderCtrl::OnLButtonDown(UINT nF, CPoint p)
         m_nVisualPos = PixelToValue(p.x);
         m_nDragTarget = 3;
         CSliderCtrl::SetPos(m_nVisualPos);
-        GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, m_nVisualPos), (LPARAM)m_hWnd);
+        // ★修正点: クリックした瞬間に送ると二重実行の原因になるため削除しました
     }
     m_bDragging = TRUE; SetCapture();
     RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
@@ -2655,7 +2655,7 @@ void CCustomRangeSliderCtrl::OnLButtonUp(UINT nF, CPoint p)
         {
             m_nLogicalPos = m_nVisualPos;
             CSliderCtrl::SetPos(m_nLogicalPos);
-            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, m_nLogicalPos), (LPARAM)m_hWnd);
+            // ★修正点: 確定した時に「TB_ENDTRACK」の1つだけを綺麗に送るようにしました
             GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, m_nLogicalPos), (LPARAM)m_hWnd);
         }
         RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
@@ -2667,7 +2667,12 @@ void CCustomRangeSliderCtrl::OnMouseMove(UINT nF, CPoint p)
     if (m_bDragging)
     {
         int v = PixelToValue(p.x);
-        if (m_nDragTarget == 3) { m_nVisualPos = max(m_nMin, min(m_nMax, v)); CSliderCtrl::SetPos(m_nVisualPos); GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, m_nVisualPos), (LPARAM)m_hWnd); }
+        if (m_nDragTarget == 3) {
+            m_nVisualPos = max(m_nMin, min(m_nMax, v));
+            CSliderCtrl::SetPos(m_nVisualPos);
+            // 元通り、表示更新用のメッセージを送ります
+            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, m_nVisualPos), (LPARAM)m_hWnd);
+        }
         else if (m_nDragTarget == 1) m_nSelMin = min(v, m_nSelMax);
         else if (m_nDragTarget == 2) m_nSelMax = max(v, m_nSelMin);
         RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
