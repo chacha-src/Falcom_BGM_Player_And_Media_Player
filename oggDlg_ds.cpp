@@ -593,6 +593,8 @@ extern std::vector<float> inputFloatData;
 extern std::vector<uint8_t> m_bufwav3_1;
 extern int pitch;
 float tempoRate2;
+std::vector<float> g_loopTailBuffer;
+size_t g_loopTailPos = 0;
 
 // 初期化関数（これは最初の一度、または設定変更時のみ呼び出す）
 bool InitializeRubberBandStretcher()
@@ -623,18 +625,18 @@ bool InitializeRubberBandStretcher()
 }
 
 // ストリーミング用：データを投入し、現在取り出せる全データを回収する
-bool ProcessAudioWithRubberBand(float tempoRate)
+bool ProcessAudioWithRubberBand(float tempoRate, bool t = false)
 {
 	try {
 		if (m_bufwav3_1.empty()) return false;
 
-		// 1. ストレッチャーの準備（存在しない場合のみ作成）
+		// 1. ストレッチャーの準備
 		if (!g_rubberBandStretcher) {
 			tempoRate2 = tempoRate;
 			if (!InitializeRubberBandStretcher()) return false;
 		}
 
-		// 2. パラメータの更新（動的な変更に対応）
+		// 2. パラメータの更新
 		float semitones = (float)pitch;
 		if (semitones >= 200.0f) {
 			semitones -= 100.0f;
@@ -647,7 +649,7 @@ bool ProcessAudioWithRubberBand(float tempoRate)
 		g_rubberBandStretcher->setTimeRatio(tempoRate);
 		g_rubberBandStretcher->setPitchScale(static_cast<float>(semitones));
 
-		// 3. データ変換（Raw -> Float -> Planar）
+		// 3. データ変換
 		uint16_t bps = (uint16_t)((wavsam <= 0 || wavsam > 32) ? 16 : abs(wavsam));
 		ConvertRawBytesToFloat(m_bufwav3_1, bps, wavch, inputFloatData);
 		if (inputFloatData.empty()) return false;
@@ -665,13 +667,12 @@ bool ProcessAudioWithRubberBand(float tempoRate)
 			channelPointers[ch] = channelData[ch].data();
 		}
 
-		// 4. データの投入（ストリーミング継続のため isFinal は false）
+		// 4. データの投入
 		g_rubberBandStretcher->process(channelPointers.data(), samplesIn, false);
 
 		// 5. 現在のバッファから取り出せる分をすべて回収
 		m_convertedPcmFloatData.clear();
 
-		// 余裕を持った一時バッファ
 		const size_t pullSize = 4096;
 		std::vector<std::vector<float>> outputChannelData(wavch, std::vector<float>(pullSize));
 		std::vector<float*> outputPointers(wavch);
@@ -679,7 +680,6 @@ bool ProcessAudioWithRubberBand(float tempoRate)
 			outputPointers[ch] = outputChannelData[ch].data();
 		}
 
-		// available() が 0 になるまで、今出せる分をすべて吸い上げる
 		while (g_rubberBandStretcher->available() > 0) {
 			size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
 			size_t retrieved = g_rubberBandStretcher->retrieve(outputPointers.data(), toGet);
@@ -689,6 +689,23 @@ bool ProcessAudioWithRubberBand(float tempoRate)
 				for (int ch = 0; ch < wavch; ++ch) {
 					m_convertedPcmFloatData.push_back(outputChannelData[ch][i]);
 				}
+			}
+		}
+
+		// 6. ループ終端の残骸データを滑らかに加算する処理
+		if (g_loopTailPos < g_loopTailBuffer.size()) {
+			for (size_t i = 0; i < m_convertedPcmFloatData.size(); ++i) {
+				if (g_loopTailPos < g_loopTailBuffer.size()) {
+					// 音が重なって大きくなるのを防ぐため、残骸の音量を徐々に0にしながら足します
+					float fade = 1.0f - ((float)g_loopTailPos / g_loopTailBuffer.size());
+					m_convertedPcmFloatData[i] += g_loopTailBuffer[g_loopTailPos] * fade;
+					g_loopTailPos++;
+				}
+			}
+			// すべて足し終わったら綺麗にお掃除します
+			if (g_loopTailPos >= g_loopTailBuffer.size()) {
+				g_loopTailBuffer.clear();
+				g_loopTailPos = 0;
 			}
 		}
 

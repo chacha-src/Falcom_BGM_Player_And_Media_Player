@@ -85,7 +85,7 @@ int wavsam = 16;
 #include <algorithm>
 #include "LyricsProgressWnd.h"
 
-bool ProcessAudioWithRubberBand(float tempoRate);
+bool ProcessAudioWithRubberBand(float tempoRate, bool t);
 void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
 	uint16_t bits_per_sample, uint16_t channels,
 	std::vector<float>& out_float_data);
@@ -97,6 +97,8 @@ extern std::vector<float> inputFloatData;
 extern std::vector<uint8_t> m_bufwav3_1;
 std::vector<uint8_t> m_bufwav3_2;
 
+extern std::vector<float> g_loopTailBuffer;
+extern size_t g_loopTailPos;
 
 CImageBase* Games;
 
@@ -12025,7 +12027,7 @@ BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2)
 }
 
 std::vector<uint8_t> outputRawBytesData;
-int readtempo(BYTE* data, int len)
+int readtempo(BYTE* data, int len,bool t = false)
 {
 	m_bufwav3_1.clear();
 	m_bufwav3_1.resize(len);
@@ -12038,7 +12040,8 @@ int readtempo(BYTE* data, int len)
 		te = te / 3.0f + 33.3f;
 	}
 	te = 100.0f / te;
-	ProcessAudioWithRubberBand(te);
+	ProcessAudioWithRubberBand(te,t);
+//	ProcessAudioWithSoundTouch(te,t);
 	uint16_t outBps = (uint16_t)((wavsam <= 0 || wavsam > 32) ? 16 : abs(wavsam));
 	ConvertFloatToRawBytes(m_convertedPcmFloatData, outBps, wavch, outputRawBytesData);
 	return outputRawBytesData.size();
@@ -14190,10 +14193,10 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 			loopcnt++;
 			playb = loop1;
 
-			ov_pcm_seek_lap(&vf, (ogg_int64_t)loop1);
-
-			// --- プリロール分を捨てる ---
-			int discard = 64;  // 捨てたいサンプル数
+			// こちらもlap無しのseekに変更します
+			ov_pcm_seek(&vf, (ogg_int64_t)loop1);
+			ogg_int64_t a = ov_pcm_tell(&vf);
+			int discard = abs(loop1 - a);  // 捨てたいサンプル数
 			while (discard > 0) {
 				float** pcm;
 				int bitstream;
@@ -14207,9 +14210,38 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 			poss = 0;
 			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 			poss5 = loop1;
+
+			// 同じく残骸を抽出してリセットします
 			if (g_rubberBandStretcher) {
-				delete g_rubberBandStretcher;
-				g_rubberBandStretcher = NULL;
+				std::vector<std::vector<float>> dummyData(wavch, std::vector<float>(1, 0.0f));
+				std::vector<float*> dummyPointers(wavch);
+				for (int ch = 0; ch < wavch; ++ch) dummyPointers[ch] = dummyData[ch].data();
+
+				g_rubberBandStretcher->process(dummyPointers.data(), 0, true);
+
+				g_loopTailBuffer.clear();
+				g_loopTailPos = 0;
+
+				const size_t pullSize = 4096;
+				std::vector<std::vector<float>> outputChannelData(wavch, std::vector<float>(pullSize));
+				std::vector<float*> outputPointers(wavch);
+				for (int ch = 0; ch < wavch; ++ch) {
+					outputPointers[ch] = outputChannelData[ch].data();
+				}
+
+				while (g_rubberBandStretcher->available() > 0) {
+					size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
+					size_t retrieved = g_rubberBandStretcher->retrieve(outputPointers.data(), toGet);
+					if (retrieved == 0) break;
+
+					for (size_t i = 0; i < retrieved; ++i) {
+						for (int ch = 0; ch < wavch; ++ch) {
+							g_loopTailBuffer.push_back(outputChannelData[ch][i]);
+						}
+					}
+				}
+
+				g_rubberBandStretcher->reset();
 			}
 			mcopy((char*)bw + old + rrr, (int)l1 - rrr);
 		}
@@ -14224,11 +14256,10 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 				loopcnt++;
 				playb = loop1;
 
-				// まず通常通り seek
-				ov_pcm_seek_lap(&vf, (ogg_int64_t)loop1);
-
-				// --- プリロール分を捨てる ---
-				int discard = 64;  // 捨てたいサンプル数
+				// こちらもlap無しのseekに変更します
+				ov_pcm_seek(&vf, (ogg_int64_t)loop1);
+				ogg_int64_t a = ov_pcm_tell(&vf);
+				int discard = abs(loop1 - a);  // 捨てたいサンプル数
 				while (discard > 0) {
 					float** pcm;
 					int bitstream;
@@ -14242,9 +14273,38 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 				poss = 0;
 				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 				poss5 = loop1;
+
+				// 同じく残骸を抽出してリセットします
 				if (g_rubberBandStretcher) {
-					delete g_rubberBandStretcher;
-					g_rubberBandStretcher = NULL;
+					std::vector<std::vector<float>> dummyData(wavch, std::vector<float>(1, 0.0f));
+					std::vector<float*> dummyPointers(wavch);
+					for (int ch = 0; ch < wavch; ++ch) dummyPointers[ch] = dummyData[ch].data();
+
+					g_rubberBandStretcher->process(dummyPointers.data(), 0, true);
+
+					g_loopTailBuffer.clear();
+					g_loopTailPos = 0;
+
+					const size_t pullSize = 4096;
+					std::vector<std::vector<float>> outputChannelData(wavch, std::vector<float>(pullSize));
+					std::vector<float*> outputPointers(wavch);
+					for (int ch = 0; ch < wavch; ++ch) {
+						outputPointers[ch] = outputChannelData[ch].data();
+					}
+
+					while (g_rubberBandStretcher->available() > 0) {
+						size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
+						size_t retrieved = g_rubberBandStretcher->retrieve(outputPointers.data(), toGet);
+						if (retrieved == 0) break;
+
+						for (size_t i = 0; i < retrieved; ++i) {
+							for (int ch = 0; ch < wavch; ++ch) {
+								g_loopTailBuffer.push_back(outputChannelData[ch][i]);
+							}
+						}
+					}
+
+					g_rubberBandStretcher->reset();
 				}
 				mcopy((char*)bw + rrr, (int)l2 - rrr);
 			}
@@ -14960,7 +15020,7 @@ int mcopy(char* a, int len)
 	int len3 = 0, len4 = 0;
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= len) {
-		for (int k = 0; k < 8; k++) {
+		for (int k = 0; k < 5; k++) {
 			ret = 0;
 			if ((int)playb > (data_size + 20000) / (wavch * 2) && endf == 1) {
 				playb += lenl;
