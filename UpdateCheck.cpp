@@ -17,24 +17,27 @@
 static const TCHAR* UPDATE_URL = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.zip");
 static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 
-// ビルド時間で確認するようにしておりますわ
-static time_t GetBuildTimeUtc()
+// コンパイル時間ではなく、現在動いている実行ファイルの実際の更新日時を取得するように変更いたしましたわ
+// これにより、ファイルの一部だけをビルドした際の「時間が過去のままになる落とし穴」を完全に回避いたします
+static time_t GetExecutableModificationTimeUtc()
 {
-	static const char* months[] = { "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" };
-	struct tm t = { 0 };
-	int m, d, y, hh, mm, ss;
-	char month[4] = { 0 };
-	sscanf_s(__DATE__, "%3s %d %d", month, (unsigned)sizeof(month), &d, &y);
-	sscanf_s(__TIME__, "%d:%d:%d", &hh, &mm, &ss);
-	for (m = 0; m < 12; m++) if (strcmp(months[m], month) == 0) break;
-	t.tm_year = y - 1900;
-	t.tm_mon = m;
-	t.tm_mday = d;
-	t.tm_hour = hh;
-	t.tm_min = mm;
-	t.tm_sec = ss;
-	t.tm_isdst = -1;  // 夏時間は自動判定
-	return mktime(&t);  // ローカル→time_t(UTC)
+	TCHAR exePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, exePath, MAX_PATH);
+
+	HANDLE hFile = CreateFile(exePath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) return 0;
+
+	FILETIME ftWrite;
+	bool bSuccess = GetFileTime(hFile, NULL, NULL, &ftWrite);
+	CloseHandle(hFile);
+
+	if (!bSuccess) return 0;
+
+	// Windowsの時間をUTCのtime_tに変換いたします
+	ULARGE_INTEGER ull;
+	ull.LowPart = ftWrite.dwLowDateTime;
+	ull.HighPart = ftWrite.dwHighDateTime;
+	return (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
 }
 
 // HTTP HEAD で Last-Modified を取得、失敗時は 0
@@ -215,15 +218,15 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 	HWND hWnd = (HWND)param;
 	if (!hWnd || !IsWindow(hWnd)) return 0;
 
-	// プログラムのビルド時間を見ますわ
-	time_t buildTime = GetBuildTimeUtc();
-	if (buildTime == (time_t)-1) return 0;
+	// コンパイル時間ではなく、現在動いているプログラムの実際の更新時間を見ますわ
+	time_t exeTime = GetExecutableModificationTimeUtc();
+	if (exeTime == 0) return 0;
 
-	// 女神様のご指定通り、ビルド時刻 + 2分（120秒）に変更いたしましたわ
-	time_t threshold = buildTime + 120;
+	// プログラムの更新時刻 + 2分（120秒）に変更いたしましたわ
+	time_t threshold = exeTime + 120;
 
 	CString dbgMsg;
-	dbgMsg.Format(_T("[UpdateCheck] BuildTime: %lld, Threshold: %lld\n"), (long long)buildTime, (long long)threshold);
+	dbgMsg.Format(_T("[UpdateCheck] ExeTime: %lld, Threshold: %lld\n"), (long long)exeTime, (long long)threshold);
 	OutputDebugString(dbgMsg);
 
 	for (;;)
@@ -247,7 +250,7 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 		dbgMsg.Format(_T("[UpdateCheck] ServerModified: %lld, LastUpdateCheck: %lld\n"), (long long)serverModified, (long long)savedata.lastUpdateCheck);
 		OutputDebugString(dbgMsg);
 
-		// サーバーの時間が「プログラム作成時間＋指定時間」より新しく、かつ、
+		// サーバーの時間が「プログラム更新時間＋指定時間」より新しく、かつ、
 		// 「保存データに記録された前回の更新時間」よりも新しい場合のみ更新通知を出しますわ
 		if (serverModified != 0 && serverModified > threshold && (__int64)serverModified > savedata.lastUpdateCheck)
 		{
@@ -338,16 +341,14 @@ bool DoUpdateAndRestart()
 			SetFileTime(hFile, &ft, &ft, &ft);
 			CloseHandle(hFile);
 		}
-	}
 
-	// 実際に更新したファイルを見て、その更新日付で lastUpdateCheck を更新いたしますわ
-	struct __stat64 fileStat;
-	if (_tstat64(extractedPath, &fileStat) == 0)
-	{
-		savedata.lastUpdateCheck = (__int64)fileStat.st_mtime;
+		// ファイルシステムの読み取り誤差を完全に防ぐため、
+		// 計算した時間をそのまま直接保存データに記録いたしますわ
+		savedata.lastUpdateCheck = (__int64)newTime;
 	}
 	else
 	{
+		// サーバーの時間が取れなかった時の保険ですわ
 		savedata.lastUpdateCheck = (__int64)time(NULL);
 	}
 
