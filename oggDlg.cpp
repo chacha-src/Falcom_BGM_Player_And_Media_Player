@@ -19245,20 +19245,18 @@ void COggDlg::OnButton14()
 }
 
 BOOL sek = FALSE;
+#include <mutex>
 extern int sek4;
 extern int syukai, syukai2;
 extern BOOL	syoriflg;
-
+extern std::mutex cl2;
 void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar * pScrollBar)
 {
+	std::lock_guard<std::mutex> lock(cl2);
+
 	{
 		CSliderCtrl* r = (CSliderCtrl*)pScrollBar;
 		if (r->GetDlgCtrlID() != IDC_SLIDER2) return;
-	}
-
-	for (;;) {
-		if (sflg == FALSE) break;
-		DoEvent();
 	}
 
 	int minpos;
@@ -19306,10 +19304,6 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar * pScrollBar)
 			}
 			else {
 				if ((loop1 + loop2) < curpos && endf == 0) curpos = (loop1 + loop2);
-				for (; syoriflg == FALSE;) {
-					DoEvent();
-					Sleep(1);
-				}
 				r->SetPos((int)curpos);
 				if (pMainFrame1) {
 					pMainFrame1->seek((LONGLONG)(((float)((float)curpos) * 10000000.0f) / (float)wavbit));
@@ -19521,10 +19515,6 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar * pScrollBar)
 			}
 			else {
 				if ((loop1 + loop2) < curpos && endf == 0) curpos = (loop1 + loop2);
-				for (; syoriflg == FALSE;) {
-					DoEvent();
-					Sleep(1);
-				}
 
 				r->SetPos((int)curpos);
 				if (pMainFrame1) {
@@ -19706,10 +19696,6 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar * pScrollBar)
 			}
 			else {
 				if ((loop1 + loop2) < playb && endf == 0) playb = (loop1 + loop2);
-				for (; syoriflg == FALSE;) {
-					DoEvent();
-					Sleep(1);
-				}
 
 				r->SetPos((int)playb);
 				if (pMainFrame1) {

@@ -369,7 +369,8 @@ extern ULONG WAVDALen;
 #define OUTPUT_BUFFER_NUM_DS 5
 
 void equaliser(void* data, int len, BOOL reset = FALSE);
-
+#include <mutex>
+std::mutex cl2;
 BOOL syoriflg;
 UINT HandleNotifications(LPVOID)
 {
@@ -404,111 +405,113 @@ UINT HandleNotifications(LPVOID)
 		//		for(ik=0;ik<60;ik++){
 		//		if(syukai)
 		::WaitForMultipleObjects(1, ev, FALSE, savedata.ms);
-		syoriflg = TRUE;
 		for (;;) {
 			if (sek4 == FALSE) break;;
 			::WaitForMultipleObjects(1, ev, FALSE, savedata.ms);
 		}
-		timeee += savedata.ms;
-		if (muon != MUON) {
-			muon -= (savedata.ms / 10 - 1);
-		}
-		if (muon < 1)
-			muon = 0;
+		{
+			std::lock_guard<std::mutex> lock(cl2);
+			timeee += savedata.ms;
+			if (muon != MUON) {
+				muon -= (savedata.ms / 10 - 1);
+			}
+			if (muon < 1)
+				muon = 0;
 
-		if (sek == 1) {
-			sflg = TRUE;
-			flg3 = 3;
-			sek = FALSE;
-			sflg = FALSE;
-			//break;
-		}
-		if (thn1) { thn = TRUE; AfxEndThread(0); }
-		//		}
-		if (ps == 1) continue;
-		if (m_dsb)m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);//再生位置取得
-		int len1 = 0, len2 = 0, len3, len4;
-		//		oldw = ((oldw / (wavch * 2)) * (wavch * 2));
-		len1 = (int)WriteCursor - (int)oldw;//書き込み範囲取得10
-		len2 = 0;
-		if (len1 == 0 && len2 == 0) continue;
-		if (len1 < 0) {
-			len1 = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM - oldw; len2 = WriteCursor;
-		}
-		if (len2 < 0)
+			if (sek == 1) {
+				sflg = TRUE;
+				flg3 = 3;
+				sek = FALSE;
+				sflg = FALSE;
+				//break;
+			}
+			if (thn1) { thn = TRUE; AfxEndThread(0); }
+			//		}
+			if (ps == 1) continue;
+			if (m_dsb)m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);//再生位置取得
+			int len1 = 0, len2 = 0, len3, len4;
+			//		oldw = ((oldw / (wavch * 2)) * (wavch * 2));
+			len1 = (int)WriteCursor - (int)oldw;//書き込み範囲取得10
 			len2 = 0;
-		//len1 = (len1 / (wavsam / 8)) * (wavsam / 8);
-		//len2 = (len2 / (wavsam / 8)) * (wavsam / 8);
-		len4 = len1 + len2;
-		for (;;) {
-			if (sflg == FALSE) break;
-			DoEvent();
-		}
-
-		//動画とoggのリンク　再生が始まってから動画再生開始 0.9秒ずれが起きるため0.9秒後に動画再生開始 2026/01/26
-		if (og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
-			if (timeee > 900 && dougainit == 0) {
-				pMediaControl->Run();
-				dougainit = 1;
+			if (len1 == 0 && len2 == 0) continue;
+			if (len1 < 0) {
+				len1 = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM - oldw; len2 = WriteCursor;
 			}
-		}
+			if (len2 < 0)
+				len2 = 0;
+			//len1 = (len1 / (wavsam / 8)) * (wavsam / 8);
+			//len2 = (len2 / (wavsam / 8)) * (wavsam / 8);
+			len4 = len1 + len2;
+			for (;;) {
+				if (sflg == FALSE) break;
+				DoEvent();
+			}
 
-
-		sflg = TRUE;
-		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
-			playwavadpcm(bufwav3, oldw, len1, len2);//データ獲得
-		else if (mode == -10)
-			len4 = playwavmp3(bufwav3, oldw, len1, len2);//データ獲得
-		else if (mode == 999)
-			len4 = playwavwav(bufwav3, oldw, len1, len2);//データ獲得
-		else if (mode == -3)
-			len4 = playwavkpi(bufwav3, oldw, len1, len2);//データ獲得
-		else if (mode == -7)
-			playwavdsd(bufwav3, oldw, len1, len2);//データ獲得
-		else if (mode == -8)
-			playwavflac(bufwav3, oldw, len1, len2);//データ獲得
-		else if (mode == -9)
-			playwavm4a(bufwav3, oldw, len1, len2);//データ獲得
-		else
-			playwavds2(bufwav3, oldw, len1, len2);//データ獲得
-		oldw2 = oldw;
-		if (fade1) {
-			for (int jj = 0; jj < PlayCursor / wavch; jj++) {
-				if (wavch == 1) {
-					bufwav3[jj] = 0x80;
-				}
-				if (wavch == 2) {
-					bufwav3[jj] = 0x00;
-					bufwav3[jj + 1] = 0x80;
-				}
-				if (wavch == 3) {
-					bufwav3[jj] = 0x00;
-					bufwav3[jj + 1] = 0x00;
-					bufwav3[jj + 2] = 0x80;
+			//動画とoggのリンク　再生が始まってから動画再生開始 0.9秒ずれが起きるため0.9秒後に動画再生開始 2026/01/26
+			if (og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
+				if (timeee > 900 && dougainit == 0) {
+					pMediaControl->Run();
+					dougainit = 1;
 				}
 			}
-		}
 
-		if (m_dsb && flg3 == 0) {
-			m_dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, (DWORD*)&len3, (LPVOID*)&pdsb2, (DWORD*)&len4, 0);
-			thn = FALSE;
-			memcpy(pdsb1, bufwav3 + oldw, len3);
-			if (len4 != 0) memcpy(pdsb2, bufwav3, len4);
-			if (m_dsb)m_dsb->Unlock(pdsb1, len3, pdsb2, len4);
-			oldw2 = oldw + len3;
-			if (len4 != 0)oldw2 = len4;
+
+			sflg = TRUE;
+			if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
+				playwavadpcm(bufwav3, oldw, len1, len2);//データ獲得
+			else if (mode == -10)
+				len4 = playwavmp3(bufwav3, oldw, len1, len2);//データ獲得
+			else if (mode == 999)
+				len4 = playwavwav(bufwav3, oldw, len1, len2);//データ獲得
+			else if (mode == -3)
+				len4 = playwavkpi(bufwav3, oldw, len1, len2);//データ獲得
+			else if (mode == -7)
+				playwavdsd(bufwav3, oldw, len1, len2);//データ獲得
+			else if (mode == -8)
+				playwavflac(bufwav3, oldw, len1, len2);//データ獲得
+			else if (mode == -9)
+				playwavm4a(bufwav3, oldw, len1, len2);//データ獲得
+			else
+				playwavds2(bufwav3, oldw, len1, len2);//データ獲得
+			oldw2 = oldw;
+			if (fade1) {
+				for (int jj = 0; jj < PlayCursor / wavch; jj++) {
+					if (wavch == 1) {
+						bufwav3[jj] = 0x80;
+					}
+					if (wavch == 2) {
+						bufwav3[jj] = 0x00;
+						bufwav3[jj + 1] = 0x80;
+					}
+					if (wavch == 3) {
+						bufwav3[jj] = 0x00;
+						bufwav3[jj + 1] = 0x00;
+						bufwav3[jj + 2] = 0x80;
+					}
+				}
+			}
+
+			if (m_dsb && flg3 == 0) {
+				m_dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, (DWORD*)&len3, (LPVOID*)&pdsb2, (DWORD*)&len4, 0);
+				thn = FALSE;
+				memcpy(pdsb1, bufwav3 + oldw, len3);
+				if (len4 != 0) memcpy(pdsb2, bufwav3, len4);
+				if (m_dsb)m_dsb->Unlock(pdsb1, len3, pdsb2, len4);
+				oldw2 = oldw + len3;
+				if (len4 != 0)oldw2 = len4;
+			}
+			else if (m_dsb) {
+				m_dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, (DWORD*)&len3, (LPVOID*)&pdsb2, (DWORD*)&len4, 0);
+				thn = FALSE;
+				//Sleep(40);
+				ZeroMemory(pdsb1, len3);
+				if (len4 != 0)ZeroMemory(pdsb2, len4);
+				if (m_dsb)m_dsb->Unlock(pdsb1, len3, pdsb2, len4);
+				oldw2 = oldw + len3;
+				if (len4 != 0)oldw2 = len4;
+			}
+			syoriflg = FALSE;
 		}
-		else if (m_dsb) {
-			m_dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, (DWORD*)&len3, (LPVOID*)&pdsb2, (DWORD*)&len4, 0);
-			thn = FALSE;
-			//Sleep(40);
-			ZeroMemory(pdsb1, len3);
-			if (len4 != 0)ZeroMemory(pdsb2, len4);
-			if (m_dsb)m_dsb->Unlock(pdsb1, len3, pdsb2, len4);
-			oldw2 = oldw + len3;
-			if (len4 != 0)oldw2 = len4;
-		}
-		syoriflg = FALSE;
 		oldw = WriteCursor;
 		if (flg3 != 0)
 			flg3--;
