@@ -393,13 +393,8 @@ UINT HandleNotifications(LPVOID)
 	fade1 = 0;
 	sek4 = FALSE;
 
-	// ★ポイント：ロック管理用のオブジェクト（最初はアンロック状態）
-	std::unique_lock<std::mutex> ulock(cl2, std::defer_lock);
-
 	for (;;) {
-		// 1. ロックを解除した状態で待機（ここでGUIスレッドが cl2 を取れるようになる）
-		// defer_lock のため owns_lock() は常に false → 即抜け。DoEvent でメッセージ処理。
-		while (ulock.owns_lock()) { DoEvent(); Sleep(0); }
+		// Wait 中は cl2 を取らない（OnHScroll 等がシークできる）
 
 		if (syukai == 2) { thn = TRUE; AfxEndThread(0); return 0; }
 		if (syukai == 1) { syukai2 = 1; Sleep(1); continue; }
@@ -431,6 +426,9 @@ UINT HandleNotifications(LPVOID)
 			len2 = (int)WriteCursor;
 		}
 
+		{
+			std::lock_guard<std::mutex> guard(cl2);
+
 		// 3. 各種デコード処理（ロック内で実行）
 		if (og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
 			if (timeee > 900 && dougainit == 0) {
@@ -460,10 +458,24 @@ UINT HandleNotifications(LPVOID)
 
 		// フェードアウト処理
 		if (fade1) {
-			// バッファを無音化（省略せず処理）
-			for (int jj = 0; jj < (int)PlayCursor; jj++) {
-				if (wavch == 1) bufwav3[jj] = 0x80;
-				else if (wavch == 2) { bufwav3[jj * 2] = 0x00; bufwav3[jj * 2 + 1] = 0x80; }
+			// PlayCursor は DS バッファ上のバイト位置。stereo では 1 ステップで 2 バイト触るため、
+			// ループ回数は (cap/2) を上限にし、インデックスは size_t で 2*jj+1 < cap を保証する。
+			const size_t cap = (size_t)OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 6;
+			if (wavch == 1) {
+				size_t n = (size_t)PlayCursor;
+				if (n > cap) n = cap;
+				for (size_t jj = 0; jj < n; jj++)
+					bufwav3[jj] = 0x80;
+			}
+			else if (wavch == 2) {
+				const size_t maxPairs = cap / 2; // 2*jj+1 < cap となる最大 jj は maxPairs-1
+				size_t n = (size_t)PlayCursor;
+				if (n > maxPairs) n = maxPairs;
+				for (size_t jj = 0; jj < n; jj++) {
+					const size_t b = jj * 2;
+					bufwav3[b] = 0x00;
+					bufwav3[b + 1] = 0x80;
+				}
 			}
 		}
 
@@ -482,13 +494,16 @@ UINT HandleNotifications(LPVOID)
 		if (flg3 != 0) flg3--;
 		sflg = FALSE;
 
+		} // guard(cl2) — 終了処理はロック外（OnPause と競合しない）
+
 		// 終了・エラー判定（ロックを外して終了処理へ）
 		if (fade1) {
-			ulock.unlock(); // 終了前にロックを離す
 			playf = 1; thn = FALSE;
 			if (!(mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999)) Sleep(800);
-			m_dsb->SetVolume(DSBVOLUME_MIN);
-			m_dsb->Stop();
+			if (m_dsb) {
+				m_dsb->SetVolume(DSBVOLUME_MIN);
+				m_dsb->Stop();
+			}
 			og->OnPause();
 			og->m_ps.EnableWindow(FALSE);
 			playf = 0; thn = TRUE; reset = TRUE;
@@ -496,8 +511,6 @@ UINT HandleNotifications(LPVOID)
 			AfxEndThread(0);
 			return 0;
 		}
-
-		// ループの最後でロック状態のまま戻り、先頭の unlock で開放される
 	}
 	return 0;
 } //handlenotifications()

@@ -54,6 +54,7 @@ public:
 	void  __fastcall Close(void);
 	DWORD __fastcall SetPosition(LONGLONG dwPos);
 	DWORD __fastcall Render(BYTE* Buffer, DWORD dwSize);
+	BOOL  __fastcall IsEndOfStream(void);
 	KbFlacDecoder(void);
 	~KbFlacDecoder(void);
 };
@@ -222,6 +223,12 @@ DWORD __fastcall KbFlacDecoder::Render(BYTE* Buffer, DWORD dwSize)
 		}
 	}
 	return dwRet;
+}
+/////////////////////////////////////////////////////////////////////////////
+BOOL __fastcall KbFlacDecoder::IsEndOfStream(void)
+{
+	if (!m_decoder) return FALSE;
+	return FLAC__stream_decoder_get_state(m_decoder) == FLAC__STREAM_DECODER_END_OF_STREAM;
 }
 /////////////////////////////////////////////////////////////////////////////
 FLAC__StreamDecoderWriteStatus KbFlacDecoder::write_callback(const FLAC__StreamDecoder* decoder, const FLAC__Frame* frame, const FLAC__int32* const buffer[], void* client_data)
@@ -453,5 +460,12 @@ public:
 		if (!hKMP)return 0;
 		KbFlacDecoder* flac = (KbFlacDecoder*)hKMP;
 		return flac->SetPosition(dwPos);
+	}
+	/////////////////////////////////////////////////////////////////////////////
+	BOOL WINAPI IsEndOfStream(HKMP hKMP)
+	{
+		if (!hKMP)return FALSE;
+		KbFlacDecoder* flac = (KbFlacDecoder*)hKMP;
+		return flac->IsEndOfStream();
 	}
 };

@@ -12157,10 +12157,11 @@ int readm4a(BYTE* bw, int cnt)
 
 int playwavflac(BYTE* bw, int old, int l1, int l2)
 {
-	//データ読み込み
+	// HandleNotifications は len1/len2 を値渡しのため、部分読み後も Lock 長は元のまま。
+	// 未書き領域をゼロ埋めしないと memcpy で未定義データが DS に渡りクラッシュの原因になる。
+	const int l1req = l1;
+	const int l2req = l2;
 	int rrr = readflac(bw + old, l1);
-	if (flacmode == 0)
-		playb += (l1 + l2) / (wavsam / 4);
 	if (l1 != rrr) {
 		if (savedata.saveloop == 0 && endf == 1 && flacmode == 0) {
 			l1 = rrr;
@@ -12172,23 +12173,26 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 		else {
 			loopcnt++;
 			playb = loop1;
-			//rrr /= 6;
-			//rrr *= 6;
 			flac_.SetPosition(og->kmp, loop1);
+			::rrr = 1;  // シーク後は Render を再開（グローバル）
 			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 			if (g_rubberBandStretcher) {
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
 			}
 			reset = TRUE;
-			readflac(bw + old + rrr, l1 - rrr);
+			readflac(bw + old + rrr, l1req - rrr);
+			l1 = l1req;
 		}
 	}
-	if (l2) {
-		rrr = readflac(bw, l2);
-		if (l2 != rrr) {
+	if (l1 < l1req)
+		ZeroMemory(bw + old + l1, (SIZE_T)(l1req - l1));
+	int l2out = l2req;
+	if (l2req) {
+		rrr = readflac(bw, l2req);
+		if (l2req != rrr) {
 			if (savedata.saveloop == 0 && endf == 1 && flacmode == 0) {
-				l2 = rrr;
+				l2out = rrr;
 				if (savedata.saverenzoku == 0)
 					fade1 = 1;
 				else
@@ -12197,20 +12201,24 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 			else {
 				loopcnt++;
 				playb = loop1;
-				//rrr /= 6;
-				//rrr *= 6;
 				flac_.SetPosition(og->kmp, loop1);
+				::rrr = 1;  // シーク後は Render を再開（グローバル）
 				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 				if (g_rubberBandStretcher) {
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
 				}
 				reset = TRUE;
-				readflac(bw + rrr, (int)l2 - rrr);
+				readflac(bw + rrr, (int)l2req - rrr);
+				l2out = l2req;
 			}
 		}
+		if (l2out < l2req)
+			ZeroMemory(bw + l2out, (SIZE_T)(l2req - l2out));
 	}
-	return l1 + l2;
+	if (flacmode == 0)
+		playb += (l1 + l2out) / (wavsam / 4);
+	return l1 + l2out;
 }
 
 int readflac(BYTE* bw, int cnt)
@@ -12231,12 +12239,13 @@ int readflac(BYTE* bw, int cnt)
 					r = flac_.Render(og->kmp, (BYTE*)bufkpi, lenl);
 				if (r != lenl && savedata.saveloop == 0)
 					rrr = 0;
-				if (rrr == 0 && muon != 0) {
+				// EOF の場合は muon を使わず部分読みを返す（曲終了検出のため）。通常のドロップアウト時のみ muon でゼロ埋め
+				if (rrr == 0 && muon != 0 && !flac_.IsEndOfStream(og->kmp)) {
 					r = lenl;
 					ZeroMemory(bufkpi, r);
 					muon--;
 				}
-				if (rrr == 0 && muon == MUON) {
+				if (rrr == 0 && muon == MUON && !flac_.IsEndOfStream(og->kmp)) {
 					ZeroMemory(bufkpi + r, lenl - r);
 					r = lenl;
 					muon--;
@@ -18422,6 +18431,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				sek4 = TRUE;
 				if (flacmode == 1) flac_.SetPosition(kmp, playb);
 				else               flac_.SetPosition(kmp, (LONGLONG)((double)playb / (((double)wavbit * (double)wavch) / aa)));
+				::rrr = 1;  // シーク後は Render を再開
 				sek4 = FALSE;
 			}
 			else if (mode == -9) { // M4A
