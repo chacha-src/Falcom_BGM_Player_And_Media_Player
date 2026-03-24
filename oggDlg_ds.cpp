@@ -374,6 +374,7 @@ std::mutex cl2;  // OnHScroll(シーク)とHandleNotifications(再生)の排他�
 BOOL syoriflg;
 UINT HandleNotifications(LPVOID)
 {
+	int mu = 100;
 	syoriflg = FALSE;
 	DWORD hr = DS_OK;
 	thn = FALSE; thn1 = FALSE;
@@ -455,29 +456,7 @@ UINT HandleNotifications(LPVOID)
 			playwavm4a(bufwav3, oldw, len1, len2);
 		else
 			playwavds2(bufwav3, oldw, len1, len2);
-
-		// フェードアウト処理
-		if (fade1) {
-			// PlayCursor は DS バッファ上のバイト位置。stereo では 1 ステップで 2 バイト触るため、
-			// ループ回数は (cap/2) を上限にし、インデックスは size_t で 2*jj+1 < cap を保証する。
-			const size_t cap = (size_t)OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 6;
-			if (wavch == 1) {
-				size_t n = (size_t)PlayCursor;
-				if (n > cap) n = cap;
-				for (size_t jj = 0; jj < n; jj++)
-					bufwav3[jj] = 0x80;
-			}
-			else if (wavch == 2) {
-				const size_t maxPairs = cap / 2; // 2*jj+1 < cap となる最大 jj は maxPairs-1
-				size_t n = (size_t)PlayCursor;
-				if (n > maxPairs) n = maxPairs;
-				for (size_t jj = 0; jj < n; jj++) {
-					const size_t b = jj * 2;
-					bufwav3[b] = 0x00;
-					bufwav3[b + 1] = 0x80;
-				}
-			}
-		}
+		// 曲最後まで行ったとき
 
 		// DirectSoundバッファへの転送
 		if (m_dsb) {
@@ -497,7 +476,7 @@ UINT HandleNotifications(LPVOID)
 		} // guard(cl2) — 終了処理はロック外（OnPause と競合しない）
 
 		// 終了・エラー判定（ロックを外して終了処理へ）
-		if (fade1) {
+		if (fade1 && muon == 0) {
 			playf = 1; thn = FALSE;
 			if (!(mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999)) Sleep(800);
 			if (m_dsb) {

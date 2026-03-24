@@ -49,8 +49,8 @@ BEGIN
     "LANGUAGE 17, 1\r\n"
     "#pragma code_page(932)\r\n"
     "#endif //_WIN32\r\n"
-    "#include ""res\\ogg.rc2""  // Microsoft Visual C++ 髣比ｼ夲ｽｽ・･髯樊ｻ薙§郢晢ｽｻ驛｢譏ｴ繝ｻ郢晢ｽｻ驛｢譎｢・ｽ・ｫ驍ｵ・ｺ繝ｻ・ｧ鬩搾ｽｱ繝ｻ・ｨ鬯ｮ・ｮ郢晢ｽｻ繝ｻ繝ｻ・ｹ・ｧ陟募ｨｯ陞ｺ驛｢譎｢・ｽ・ｪ驛｢・ｧ繝ｻ・ｽ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｹ\\?[?X\r\n"
-    "#include ""l.jpn\\afxres.rc""          // 髫ｶ轣倡ｶ懊・・ｺ隰費ｽｶ郢晢ｽｻ驛｢・ｧ繝ｻ・ｳ驛｢譎｢・ｽ・ｳ驛｢譎・ｺ｢郢晢ｽｻ驛｢譎樔ｺゑｾ趣ｽｦ驛｢譏ｴ繝ｻ\n"
+    "#include ""res\\ogg.rc2""  // Microsoft Visual C++ 鬮｣豈費ｽｼ螟ｲ・ｽ・ｽ繝ｻ・･鬮ｯ讓奇ｽｻ阮卍ｧ驛｢譎｢・ｽ・ｻ鬩幢ｽ｢隴擾ｽｴ郢晢ｽｻ驛｢譎｢・ｽ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｫ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｧ鬯ｩ謳ｾ・ｽ・ｱ郢晢ｽｻ繝ｻ・ｨ鬯ｯ・ｮ繝ｻ・ｮ驛｢譎｢・ｽ・ｻ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｹ繝ｻ・ｧ髯溷供・ｨ・ｯ髯橸ｽｺ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｪ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｹ\\?[?X\r\n"
+    "#include ""l.jpn\\afxres.rc""          // 鬮ｫ・ｶ霓｣蛟｡・ｶ諛翫・繝ｻ・ｺ髫ｰ雋ｻ・ｽ・ｶ驛｢譎｢・ｽ・ｻ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｳ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｳ鬩幢ｽ｢隴弱・・ｺ・｢驛｢譎｢・ｽ・ｻ鬩幢ｽ｢隴取ｨ費ｽｺ繧托ｽｾ雜｣・ｽ・ｦ鬩幢ｽ｢隴擾ｽｴ郢晢ｽｻ\n"
     "#endif\r\n"
     "\0"
 END
@@ -850,7 +850,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,110
+ FILEVERSION 0,8,7,340
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -868,10 +868,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.03.01"
-            VALUE "FileVersion", "0.8.7.110"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.03.24"
+            VALUE "FileVersion", "0.8.7.340"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.03.01 "
+            VALUE "LegalCopyright", "Copyright (C) 2026.03.24"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -1577,8 +1577,8 @@ END
 LANGUAGE 17, 1
 #pragma code_page(932)
 #endif //_WIN32
-#include "res\ogg.rc2"  // Microsoft Visual C++ 髣比ｼ夲ｽｽ・･髯樊ｻ薙§郢晢ｽｻ驛｢譏ｴ繝ｻ郢晢ｽｻ驛｢譎｢・ｽ・ｫ驍ｵ・ｺ繝ｻ・ｧ鬩搾ｽｱ繝ｻ・ｨ鬯ｮ・ｮ郢晢ｽｻ繝ｻ繝ｻ・ｹ・ｧ陟募ｨｯ陞ｺ驛｢譎｢・ｽ・ｪ驛｢・ｧ繝ｻ・ｽ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｹ\?[?X
-#include "l.jpn\afxres.rc"          // 髫ｶ轣倡ｶ懊・・ｺ隰費ｽｶ郢晢ｽｻ驛｢・ｧ繝ｻ・ｳ驛｢譎｢・ｽ・ｳ驛｢譎・ｺ｢郢晢ｽｻ驛｢譎樔ｺゑｾ趣ｽｦ驛｢譏ｴ繝ｻ
+#include "res\ogg.rc2"  // Microsoft Visual C++ 鬮｣豈費ｽｼ螟ｲ・ｽ・ｽ繝ｻ・･鬮ｯ讓奇ｽｻ阮卍ｧ驛｢譎｢・ｽ・ｻ鬩幢ｽ｢隴擾ｽｴ郢晢ｽｻ驛｢譎｢・ｽ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｫ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｧ鬯ｩ謳ｾ・ｽ・ｱ郢晢ｽｻ繝ｻ・ｨ鬯ｯ・ｮ繝ｻ・ｮ驛｢譎｢・ｽ・ｻ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｹ繝ｻ・ｧ髯溷供・ｨ・ｯ髯橸ｽｺ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｪ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｹ\?[?X
+#include "l.jpn\afxres.rc"          // 鬮ｫ・ｶ霓｣蛟｡・ｶ諛翫・繝ｻ・ｺ髫ｰ雋ｻ・ｽ・ｶ驛｢譎｢・ｽ・ｻ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｳ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｳ鬩幢ｽ｢隴弱・・ｺ・｢驛｢譎｢・ｽ・ｻ鬩幢ｽ｢隴取ｨ費ｽｺ繧托ｽｾ雜｣・ｽ・ｦ鬩幢ｽ｢隴擾ｽｴ郢晢ｽｻ
 #endif
 
 /////////////////////////////////////////////////////////////////////////////

@@ -10975,7 +10975,7 @@ int readadpcm2(char* bw, int cnt)
 		while (true) {
 			int f = 0;
 			if (adbuf2 == NULL) return 0;
-			if (rrr == 1)
+			if (fade == 0)
 				memcpy((void*)bufkpi, (void*)(adbuf2 + lenl), cnt);
 			else
 			{
@@ -11632,7 +11632,7 @@ int readkpi(BYTE* bw, int cnt)
 					}
 
 					// 無音データを補填する処理を追加いたしました
-					if (r <= 0) {
+					if (fade1 == 1) {
 						if (muon != 0) {
 							if (savedata.saverenzoku == 0) {
 								int fill_size = cnt1;
@@ -11976,12 +11976,12 @@ int readm4a(BYTE* bw, int cnt)
 						cnt3 += r;
 						if (r == 0) break;
 					}
-					if (rrr == 0 && muon != 0) {
+					if (fade1 == 1 && muon != 0) {
 						r = cnt;
 						ZeroMemory(bufkpi, r);
 						muon--;
 					}
-					if (rrr == 0 && muon == MUON) {
+					if (fade1 == 1 && muon == MUON) {
 						ZeroMemory(bufkpi + r, cnt - r);
 						r = cnt;
 						muon--;
@@ -12240,12 +12240,12 @@ int readflac(BYTE* bw, int cnt)
 				if (r != lenl && savedata.saveloop == 0)
 					rrr = 0;
 				// EOF の場合は muon を使わず部分読みを返す（曲終了検出のため）。通常のドロップアウト時のみ muon でゼロ埋め
-				if (rrr == 0 && muon != 0 && !flac_.IsEndOfStream(og->kmp)) {
+				if (fade1 == 1 && muon != 0) {
 					r = lenl;
 					ZeroMemory(bufkpi, r);
 					muon--;
 				}
-				if (rrr == 0 && muon == MUON && !flac_.IsEndOfStream(og->kmp)) {
+				if (fade1 == 1 && muon == MUON) {
 					ZeroMemory(bufkpi + r, lenl - r);
 					r = lenl;
 					muon--;
@@ -12427,12 +12427,12 @@ int readopus(BYTE* bw, int cnt)
 					r = opus_.Render(og->kmp, (BYTE*)bufkpi, cnt);
 					if (r != cnt && savedata.saveloop == 0)
 						rrr = 0;
-					if (rrr == 0 && muon != 0) {
+					if (fade1 == 1 && muon != 0) {
 						r = cnt;
 						ZeroMemory(bufkpi, r);
 						muon--;
 					}
-					if (rrr == 0 && muon == MUON) {
+					if (fade1 == 1 && muon == MUON) {
 						ZeroMemory(bufkpi + r, cnt - r);
 						r = cnt;
 						muon--;
@@ -12633,7 +12633,21 @@ int readdsd(BYTE* bw, int cnt)
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
 		while (true) {
-			cnt3 = dsd_.kpiRender(og->kmp, (BYTE*)bufkpi, cnt / (wavch * wavsam / 8)) * (wavch * wavsam / 8);
+			if(fade1 == 0)
+				cnt3 = dsd_.kpiRender(og->kmp, (BYTE*)bufkpi, cnt / (wavch * wavsam / 8)) * (wavch * wavsam / 8);
+
+			if (fade1 == 1 && muon != 0) {
+				r = cnt;
+				ZeroMemory(bufkpi, r);
+				muon--;
+			}
+			if (fade1 == 1 && muon == MUON) {
+				ZeroMemory(bufkpi + r, cnt - r);
+				r = cnt;
+				muon--;
+			}
+
+
 			int len2 = readtempo(bufkpi, cnt);
 			if (sek == 0) {
 				if (cnt2 <= cnt3) {
@@ -12810,7 +12824,7 @@ int readwav(BYTE* bw, int cnt)
 				toRead = (toRead / bytesPerSample) * bytesPerSample;
 			}
 			r = wav_.Render(bufkpi, toRead);
-			if (r <= 0) {
+			if (fade1 == 1) {
 				if (muon != 0) {
 					if (savedata.saverenzoku == 0) { ZeroMemory(bufkpi, rr); muon--; }
 					else endflg = 1;
@@ -12996,7 +13010,7 @@ int readmp3(BYTE* bw, int cnt)
 			else
 				r = mp3_.Render(bufkpi, rr);
 
-			if (r <= 0) {
+			if (fade1 == 1) {
 				if (muon != 0) {
 					if (savedata.saverenzoku == 0) {
 						ZeroMemory(bufkpi, rr);
@@ -18358,7 +18372,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		// 位置の補正
 		if ((loop1 + loop2) < curpos && endf == 0) curpos = (loop1 + loop2);
 		r->SetPos(curpos);
-		playb = (double)curpos;
+		playb = (__int64)curpos;
 
 		// 1. 動画・メディアポジションのシーク
 		if (pMediaPosition && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
@@ -18374,7 +18388,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			if ((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999) {
 				if (mode == -10) {
 					hsc = 2;
-					playb = (double)curpos * 400;
+					playb = (__int64)curpos * 400;
 					if (playb < 0) playb = 0;
 
 					if (ps == 0) {
@@ -18382,8 +18396,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 						OnPause();
 						ZeroMemory(bufwav3, sizeof(bufwav3));
 						syukai = 1; syukai2 = 0;
-						if (savedata.mp3orig) mp3_.seek2((__int64)(playb / ((wavch == 2 ? 4 : 1) * (wavsam / 16.0f))), (DWORD)wavch);
-						else                  mp3_.seek((__int64)(playb / ((wavch == 2 ? 4 : 1) * (wavsam / 16.0f))), (DWORD)wavch);
+						if (savedata.mp3orig) mp3_.seek2((__int64)((playb / ((wavch == 2 ? 4 : 1) * (wavsam / 16.0f))) / (wavbit / 44100.0f)), (DWORD)wavch);
+						else                  mp3_.seek((__int64)((playb / ((wavch == 2 ? 4 : 1) * (wavsam / 16.0f))) / (wavbit / 44100.0f)), (DWORD)wavch);
 						poss = 0; sek = TRUE; cnt3 = 0;
 						timer.SetEvent();
 						syukai = 0;
