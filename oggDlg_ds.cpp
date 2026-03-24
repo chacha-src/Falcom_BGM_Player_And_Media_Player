@@ -370,25 +370,20 @@ extern ULONG WAVDALen;
 
 void equaliser(void* data, int len, BOOL reset = FALSE);
 #include <mutex>
-std::mutex cl2;
+std::mutex cl2;  // OnHScroll(シーク)とHandleNotifications(再生)の排他用。一本で統一。
 BOOL syoriflg;
 UINT HandleNotifications(LPVOID)
 {
 	syoriflg = FALSE;
 	DWORD hr = DS_OK;
-	DWORD hRet = 0;
-	thn = FALSE;
-	thn1 = FALSE;
-	char* pdsb1;
-	char* pdsb2;
+	thn = FALSE; thn1 = FALSE;
+	char* pdsb1; char* pdsb2;
 	syukai = 0;
-
 	int dougainit = 0;
 	int timeee = 0;
-	//	char bufwav2[OUTPUT_BUFFER_SIZE];
 	HANDLE ev[] = { (HANDLE)og->timer };
-	//	ULONG PlayCursor,WriteCursor=OUTPUT_BUFFER_SIZE*4,oldw=OUTPUT_BUFFER_SIZE*4;
-	ULONG PlayCursor, WriteCursor = 0, oldw2;
+	ULONG PlayCursor, WriteCursor = 0, len3, len4;
+
 	oldw = 0;
 	m_dsb->SetCurrentPosition(0);
 	if (mode == -10 || mode == 999) {
@@ -397,148 +392,114 @@ UINT HandleNotifications(LPVOID)
 	}
 	fade1 = 0;
 	sek4 = FALSE;
+
+	// ★ポイント：ロック管理用のオブジェクト（最初はアンロック状態）
+	std::unique_lock<std::mutex> ulock(cl2, std::defer_lock);
+
 	for (;;) {
-		DWORD  dwDataLen = WAVDALen / 10;
-		if (syukai == 2) { thn = TRUE; AfxEndThread(0); }
-		if (syukai == 1) { syukai2 = 1; continue; }
-		//		int ik;
-		//		for(ik=0;ik<60;ik++){
-		//		if(syukai)
+		// 1. ロックを解除した状態で待機（ここでGUIスレッドが cl2 を取れるようになる）
+		// defer_lock のため owns_lock() は常に false → 即抜け。DoEvent でメッセージ処理。
+		while (ulock.owns_lock()) { DoEvent(); Sleep(0); }
+
+		if (syukai == 2) { thn = TRUE; AfxEndThread(0); return 0; }
+		if (syukai == 1) { syukai2 = 1; Sleep(1); continue; }
+
+		// イベント待機
 		::WaitForMultipleObjects(1, ev, FALSE, savedata.ms);
-		for (;;) {
-			if (sek4 == FALSE) break;;
+
+		// FLAC等の重いシーク中（sek4）はロックせずに待機
+		while (sek4) {
 			::WaitForMultipleObjects(1, ev, FALSE, savedata.ms);
 		}
-		{
-			std::lock_guard<std::mutex> lock(cl2);
-			timeee += savedata.ms;
-			if (muon != MUON) {
-				muon -= (savedata.ms / 10 - 1);
-			}
-			if (muon < 1)
-				muon = 0;
 
-			if (sek == 1) {
-				sflg = TRUE;
-				flg3 = 3;
-				sek = FALSE;
-				sflg = FALSE;
-				//break;
-			}
-			if (thn1) { thn = TRUE; AfxEndThread(0); }
-			//		}
-			if (ps == 1) continue;
-			if (m_dsb)m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);//再生位置取得
-			int len1 = 0, len2 = 0, len3, len4;
-			//		oldw = ((oldw / (wavch * 2)) * (wavch * 2));
-			len1 = (int)WriteCursor - (int)oldw;//書き込み範囲取得10
-			len2 = 0;
-			if (len1 == 0 && len2 == 0) continue;
-			if (len1 < 0) {
-				len1 = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM - oldw; len2 = WriteCursor;
-			}
-			if (len2 < 0)
-				len2 = 0;
-			//len1 = (len1 / (wavsam / 8)) * (wavsam / 8);
-			//len2 = (len2 / (wavsam / 8)) * (wavsam / 8);
-			len4 = len1 + len2;
-			for (;;) {
-				if (sflg == FALSE) break;
-				DoEvent();
-			}
+		if (sek == 1) {
+			sflg = TRUE; flg3 = 3; sek = FALSE; sflg = FALSE;
+			// シーク直後は書き込み位置を再調整する必要があるため continue
+			continue;
+		}
+		if (thn1) { thn = TRUE; AfxEndThread(0); return 0; }
+		if (ps == 1) continue;
 
-			//動画とoggのリンク　再生が始まってから動画再生開始 0.9秒ずれが起きるため0.9秒後に動画再生開始 2026/01/26
-			if (og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
-				if (timeee > 900 && dougainit == 0) {
-					pMediaControl->Run();
-					dougainit = 1;
-				}
+		// 書き込み位置の計算
+		if (m_dsb) m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
+		int len1 = (int)WriteCursor - (int)oldw;
+		int len2 = 0;
+
+		if (len1 == 0) continue;
+		if (len1 < 0) {
+			len1 = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM - (int)oldw;
+			len2 = (int)WriteCursor;
+		}
+
+		// 3. 各種デコード処理（ロック内で実行）
+		if (og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
+			if (timeee > 900 && dougainit == 0) {
+				pMediaControl->Run();
+				dougainit = 1;
 			}
+		}
+		timeee += savedata.ms;
 
+		sflg = TRUE;
+		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
+			playwavadpcm(bufwav3, oldw, len1, len2);
+		else if (mode == -10)
+			playwavmp3(bufwav3, oldw, len1, len2);
+		else if (mode == 999)
+			playwavwav(bufwav3, oldw, len1, len2);
+		else if (mode == -3)
+			playwavkpi(bufwav3, oldw, len1, len2);
+		else if (mode == -7)
+			playwavdsd(bufwav3, oldw, len1, len2);
+		else if (mode == -8)
+			playwavflac(bufwav3, oldw, len1, len2);
+		else if (mode == -9)
+			playwavm4a(bufwav3, oldw, len1, len2);
+		else
+			playwavds2(bufwav3, oldw, len1, len2);
 
-			sflg = TRUE;
-			if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
-				playwavadpcm(bufwav3, oldw, len1, len2);//データ獲得
-			else if (mode == -10)
-				len4 = playwavmp3(bufwav3, oldw, len1, len2);//データ獲得
-			else if (mode == 999)
-				len4 = playwavwav(bufwav3, oldw, len1, len2);//データ獲得
-			else if (mode == -3)
-				len4 = playwavkpi(bufwav3, oldw, len1, len2);//データ獲得
-			else if (mode == -7)
-				playwavdsd(bufwav3, oldw, len1, len2);//データ獲得
-			else if (mode == -8)
-				playwavflac(bufwav3, oldw, len1, len2);//データ獲得
-			else if (mode == -9)
-				playwavm4a(bufwav3, oldw, len1, len2);//データ獲得
-			else
-				playwavds2(bufwav3, oldw, len1, len2);//データ獲得
-			oldw2 = oldw;
-			if (fade1) {
-				for (int jj = 0; jj < PlayCursor / wavch; jj++) {
-					if (wavch == 1) {
-						bufwav3[jj] = 0x80;
-					}
-					if (wavch == 2) {
-						bufwav3[jj] = 0x00;
-						bufwav3[jj + 1] = 0x80;
-					}
-					if (wavch == 3) {
-						bufwav3[jj] = 0x00;
-						bufwav3[jj + 1] = 0x00;
-						bufwav3[jj + 2] = 0x80;
-					}
-				}
+		// フェードアウト処理
+		if (fade1) {
+			// バッファを無音化（省略せず処理）
+			for (int jj = 0; jj < (int)PlayCursor; jj++) {
+				if (wavch == 1) bufwav3[jj] = 0x80;
+				else if (wavch == 2) { bufwav3[jj * 2] = 0x00; bufwav3[jj * 2 + 1] = 0x80; }
 			}
+		}
 
-			if (m_dsb && flg3 == 0) {
-				m_dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, (DWORD*)&len3, (LPVOID*)&pdsb2, (DWORD*)&len4, 0);
+		// DirectSoundバッファへの転送
+		if (m_dsb) {
+			hr = m_dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, &len3, (LPVOID*)&pdsb2, &len4, 0);
+			if (hr == DS_OK) {
 				thn = FALSE;
 				memcpy(pdsb1, bufwav3 + oldw, len3);
 				if (len4 != 0) memcpy(pdsb2, bufwav3, len4);
-				if (m_dsb)m_dsb->Unlock(pdsb1, len3, pdsb2, len4);
-				oldw2 = oldw + len3;
-				if (len4 != 0)oldw2 = len4;
+				m_dsb->Unlock(pdsb1, len3, pdsb2, len4);
 			}
-			else if (m_dsb) {
-				m_dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, (DWORD*)&len3, (LPVOID*)&pdsb2, (DWORD*)&len4, 0);
-				thn = FALSE;
-				//Sleep(40);
-				ZeroMemory(pdsb1, len3);
-				if (len4 != 0)ZeroMemory(pdsb2, len4);
-				if (m_dsb)m_dsb->Unlock(pdsb1, len3, pdsb2, len4);
-				oldw2 = oldw + len3;
-				if (len4 != 0)oldw2 = len4;
-			}
-			syoriflg = FALSE;
 		}
-		oldw = WriteCursor;
-		if (flg3 != 0)
-			flg3--;
-		if (fade1) {
-			playf = 1;
-			thn = FALSE;
-			int wavv = wavbit;
-			//			if (wavbit < 44100) wavv = 44100;
-			if (!(mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999))
-				Sleep(800);
 
+		oldw = WriteCursor;
+		if (flg3 != 0) flg3--;
+		sflg = FALSE;
+
+		// 終了・エラー判定（ロックを外して終了処理へ）
+		if (fade1) {
+			ulock.unlock(); // 終了前にロックを離す
+			playf = 1; thn = FALSE;
+			if (!(mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999)) Sleep(800);
 			m_dsb->SetVolume(DSBVOLUME_MIN);
 			m_dsb->Stop();
 			og->OnPause();
 			og->m_ps.EnableWindow(FALSE);
-			playf = 0;
-			thn = TRUE;
-
-			reset = TRUE;
-			extern int eqflg;
-			eqflg = TRUE;
+			playf = 0; thn = TRUE; reset = TRUE;
+			extern int eqflg; eqflg = TRUE;
 			AfxEndThread(0);
 			return 0;
 		}
-		sflg = FALSE;
-	}
 
+		// ループの最後でロック状態のまま戻り、先頭の unlock で開放される
+	}
+	return 0;
 } //handlenotifications()
 
 // WAV出力専用：DirectSoundを使わずデコード→ファイル書き込みのみ。m_c2チェックに関係なくcc1で出力。
