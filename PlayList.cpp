@@ -30,6 +30,101 @@ extern BOOL plw;
 extern BYTE kvar[150][300];
 extern BYTE kvver;
 
+namespace {
+
+static void WavListInfoBytesToTchar(const char* val, TCHAR* out, int outCount)
+{
+	if (!val || !out || outCount <= 0)
+		return;
+	out[0] = 0;
+	// MB_ERR_INVALID_CHARS = 8: try UTF-8 first, then system ANSI (RIFF INFO is often CP932 on JP Windows)
+	if (MultiByteToWideChar(CP_UTF8, 8, val, -1, out, outCount) > 0)
+		return;
+	MultiByteToWideChar(CP_ACP, 0, val, -1, out, outCount);
+}
+
+static void WavReadRiffListInfoTags(const CString& fname, TCHAR* nameOut, TCHAR* artOut, TCHAR* albOut)
+{
+	CFile f;
+	if (!f.Open(fname, CFile::modeRead | CFile::shareDenyWrite, NULL))
+		return;
+	ULONGLONG fileLen = f.GetLength();
+	BYTE riff[12];
+	if (f.Read(riff, 12) != 12) {
+		f.Close();
+		return;
+	}
+	if (riff[0] != 'R' || riff[1] != 'I' || riff[2] != 'F' || riff[3] != 'F' ||
+	    riff[8] != 'W' || riff[9] != 'A' || riff[10] != 'V' || riff[11] != 'E') {
+		f.Close();
+		return;
+	}
+	ULONGLONG pos = 12ULL;
+	while (pos + 8ULL <= fileLen) {
+		f.Seek((LONGLONG)pos, CFile::begin);
+		DWORD chunkId = 0, chunkSize = 0;
+		if (f.Read(&chunkId, 4) != 4)
+			break;
+		if (f.Read(&chunkSize, 4) != 4)
+			break;
+		DWORD pad = (chunkSize + 1) & ~1u;
+		ULONGLONG nextPos = pos + 8ULL + (ULONGLONG)pad;
+		if (nextPos > fileLen)
+			break;
+
+		if (chunkId == 0x5453494C) { // 'LIST'
+			if (chunkSize < 4) {
+				pos = nextPos;
+				continue;
+			}
+			DWORD listType = 0;
+			if (f.Read(&listType, 4) != 4)
+				break;
+			if (listType != 0x4F464E49) { // 'INFO'
+				pos = nextPos;
+				continue;
+			}
+			ULONGLONG innerEnd = pos + 8ULL + (ULONGLONG)chunkSize;
+			ULONGLONG k = (ULONGLONG)f.GetPosition();
+			while (k + 8ULL <= innerEnd && k <= fileLen) {
+				f.Seek((LONGLONG)k, CFile::begin);
+				DWORD subid = 0, subsize = 0;
+				if (f.Read(&subid, 4) != 4)
+					break;
+				if (f.Read(&subsize, 4) != 4)
+					break;
+				if (subsize > 0x100000u)
+					break;
+				char val[1024];
+				UINT toRead = subsize < (sizeof(val) - 1) ? subsize : (UINT)(sizeof(val) - 1);
+				if (toRead > 0) {
+					if (f.Read(val, toRead) != toRead)
+						break;
+					if (subsize > toRead) {
+						f.Seek((LONGLONG)(subsize - toRead), CFile::current);
+					}
+					val[toRead] = 0;
+					TCHAR t[1024];
+					WavListInfoBytesToTchar(val, t, 1024);
+					if (t[0] != 0) {
+						if (subid == 0x4D414E49) // INAM
+							_tcscpy(nameOut, t);
+						else if (subid == 0x54524149) // IART
+							_tcscpy(artOut, t);
+						else if (subid == 0x44525049 || subid == 0x424C4149) // IPRD or IALB
+							_tcscpy(albOut, t);
+					}
+				}
+				k += 8ULL + (ULONGLONG)((subsize + 1u) & ~1u);
+			}
+		}
+		pos = nextPos;
+	}
+	f.Close();
+}
+
+} // namespace
+
 CPlayList::CPlayList(CWnd* pParent /*=NULL*/)
 	: CCustomDialog(CPlayList::IDD, pParent)
 {
@@ -3433,48 +3528,13 @@ void CPlayList::Fol(CString fname)
 							_tcscpy(p.fol, fname);
 							p.alb[0] = p.art[0] = NULL;
 							p.loop1 = p.loop2 = 0;
+							WavReadRiffListInfoTags(fname, p.name, p.art, p.alb);
 							int totalRead = 0;
 							{
 								CFile ff2;
 								if (ff2.Open(fname, CFile::modeRead | CFile::shareDenyWrite, NULL)) {
 									totalRead = ff2.Read(bufimage, sizeof(bufimage));
 									ff2.Close();
-									for (int j = 12; j + 12 < totalRead; ) {
-										DWORD ckid = *(DWORD*)&bufimage[j];
-										DWORD cksize = *(DWORD*)&bufimage[j + 4];
-										if (ckid == 0x5453494C && cksize >= 4 && *(DWORD*)&bufimage[j + 8] == 0x4F464E49) {
-											int listEnd = j + 8 + cksize;
-											if (listEnd > totalRead) break;
-											for (int k = j + 12; k + 8 < listEnd; ) {
-												DWORD subid = *(DWORD*)&bufimage[k];
-												DWORD subsize = *(DWORD*)&bufimage[k + 4];
-												if (subsize > 0 && k + 8 + (int)subsize <= listEnd) {
-													char val[256];
-													int copylen = (subsize < 255) ? subsize : 255;
-													memcpy(val, &bufimage[k + 8], copylen);
-													val[copylen] = 0;
-													if (subid == 0x54524149) {
-														TCHAR t[256];
-														MultiByteToWideChar(CP_UTF8, 0, val, -1, t, 256);
-														_tcscpy(p.art, t);
-													}
-													else if (subid == 0x4D414E49) {
-														TCHAR t[256];
-														MultiByteToWideChar(CP_UTF8, 0, val, -1, t, 256);
-														_tcscpy(p.name, t);
-													}
-													else if (subid == 0x44525049) {
-														TCHAR t[256];
-														MultiByteToWideChar(CP_UTF8, 0, val, -1, t, 256);
-														_tcscpy(p.alb, t);
-													}
-												}
-												k += 8 + (int)((subsize + 1) & ~1);
-											}
-											break;
-										}
-										j += 8 + (int)((cksize + 1) & ~1);
-									}
 								}
 							}
 							int wavTime = 0;
@@ -3499,8 +3559,7 @@ void CPlayList::Fol(CString fname)
 									}
 								}
 							}
-							Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, wavTime);
-							return;
+							
 						}
 						else {
 							p.sub = -2;

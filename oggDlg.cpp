@@ -2994,7 +2994,7 @@ void COggDlg::Modec() {
 	else { og->d_san2.EnableWindow(TRUE); }
 }
 int rrr;
-#define MUON 180
+#define MUON 80
 int flg0 = 0;
 int gameon = 1;
 extern CImageBase* playbase;
@@ -11613,16 +11613,17 @@ int readkpi(BYTE* bw, int cnt)
 {
 	if (cnt == 0) return 0;
 	_set_se_translator(trans_func);
-	DWORD cnt1 = (kvver == 2) ? og->sikpi.dwUnitRender * 2 : 4096, cnt2 = (DWORD)cnt, cnt4 = 0; if (cnt1 == 0) cnt1 = 1024;
+	DWORD cnt1 = (kvver == 2) ? og->sikpi.dwUnitRender * 2 : 4096, cnt2 = (DWORD)cnt, cnt4 = 0; if (cnt1 == 0) cnt1 = 4096;
 	DWORD r = cnt;
 	try {
 		int len3 = 0, len4 = 0;
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 <= cnt) {
 			r = 0;
-			while (true) {
+			for (int kl = 0; kl < 5; kl++) {
 				for (;;) {
-					if (cnt2 <= cnt3) { r = 1; break; }
+					if (cnt2 <= cnt3) { r = 1;
+					break; }
 					if (kvver == 2)
 						if (IsBadCodePtr((FARPROC)og->mod->Render) == 0)
 							r = og->mod->Render(og->kmp1, (BYTE*)bufkpi + cnt3, cnt1);
@@ -11630,9 +11631,9 @@ int readkpi(BYTE* bw, int cnt)
 						r = kpidec->Render((BYTE*)bufkpi + (int)((float)cnt3 / (2.0 * wavch * (wavsam / 16.0))), (int)(cnt / (2.0 * wavch * (wavsam / 16.0))));
 						r = (DWORD)(r * (2.0 * wavch * (wavsam / 16.0)));
 					}
-
+					if (r == 0) fade1 = 1;
 					// 無音データを補填する処理を追加いたしました
-					if (fade1 == 1) {
+					if (fade1 == 1 || bufzero > 20) {
 						if (muon != 0) {
 							if (savedata.saverenzoku == 0) {
 								int fill_size = cnt1;
@@ -11673,7 +11674,8 @@ int readkpi(BYTE* bw, int cnt)
 						poss2 += len2;
 					}
 					poss4 += len2;
-					if (cnt3 < cnt) return cnt4;
+					if (cnt3 < cnt)
+						return cnt4;
 					if (cnt2 <= cnt3) {
 						cnt3 -= cnt2;
 						if (cnt3 != 0)	memcpy(bufkpi, bufkpi + cnt2, cnt3);
@@ -12708,7 +12710,7 @@ int readdsd(BYTE* bw, int cnt)
 	return cnt;
 }
 
-
+int readme = 0;
 int playwavmp3(BYTE* bw, int old, int l1, int l2)
 {
 	playb += (l1 + l2);
@@ -12717,8 +12719,8 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 	rrr = readmp3(bw + old, l1);
 	if (l1 != rrr) {
 		if (savedata.saveloop == 0 && endf == 1) {
-			l1 = rrr;
 			if (savedata.saverenzoku == 0) {
+				if(fade1 == 0) readme = rrr;
 				fade1 = 1;
 			}
 			else	endflg = 1;
@@ -12739,8 +12741,8 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 		rrr2 = readmp3(bw, l2);
 		if (l2 != rrr2) {
 			if (savedata.saveloop == 0 && endf == 1) {
-				l2 = rrr2;
 				if (savedata.saverenzoku == 0) {
+					if (fade1 == 0)readme = rrr + rrr2;
 					fade1 = 1;
 				}
 				else endflg = 1;
@@ -12932,6 +12934,7 @@ int readwav(BYTE* bw, int cnt)
 					poss2 += len2;
 				}
 				poss4 += len2;
+				if (rr > r) return r;
 				if (poss4 > cnt) break;
 			}
 		}
@@ -12999,8 +13002,9 @@ int readwav(BYTE* bw, int cnt)
 int readmp3(BYTE* bw, int cnt)
 {
 	int r = cnt, rr = cnt;
+	if (cnt == 0) return 0;
+
 	int cnt2;
-	if (rr == 0)return 0;
 	int len3 = 0, len4 = 0;
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
@@ -13013,13 +13017,13 @@ int readmp3(BYTE* bw, int cnt)
 			if (fade1 == 1) {
 				if (muon != 0) {
 					if (savedata.saverenzoku == 0) {
-						ZeroMemory(bufkpi, rr);
+						ZeroMemory(bufkpi, max_buffer_size);
 						muon--;
 					}
 					else {
 						endflg = 1;
+						break;
 					}
-					break;
 				}
 			}
 			int len2 = readtempo(bufkpi, r);
@@ -13037,7 +13041,7 @@ int readmp3(BYTE* bw, int cnt)
 					poss2 += len2;
 				}
 				poss4 += len2;
-				if (rr > r) return 1;
+				if (rr > r) return r;
 				if (poss4 > cnt) break;
 			}
 		}
@@ -18438,7 +18442,6 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				}
 			}
 			else if (mode == -7) { // DSD
-				if (m_dsb) m_dsb->Stop();
 				dsd_.kpiSetPosition(kmp, (DWORD)((double)playb / (((double)wavbit * (double)wavch) / 2000.0)));
 			}
 			else if (mode == -8) { // FLAC

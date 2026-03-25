@@ -372,9 +372,11 @@ void equaliser(void* data, int len, BOOL reset = FALSE);
 #include <mutex>
 std::mutex cl2;  // OnHScroll(シーク)とHandleNotifications(再生)の排他用。一本で統一。
 BOOL syoriflg;
+extern int readme;
 UINT HandleNotifications(LPVOID)
 {
-	int mu = 100;
+	readme = 0;
+	int fade2 = 0;
 	syoriflg = FALSE;
 	DWORD hr = DS_OK;
 	thn = FALSE; thn1 = FALSE;
@@ -394,10 +396,24 @@ UINT HandleNotifications(LPVOID)
 	fade1 = 0;
 	sek4 = FALSE;
 
+	auto stopPlaybackAndExit = [&]() -> UINT {
+		playf = 1;
+		thn = FALSE;
+		if (m_dsb) {
+			m_dsb->SetVolume(DSBVOLUME_MIN);
+			m_dsb->Stop();
+		}
+		playf = 0;
+		thn = TRUE;
+		reset = TRUE;
+		AfxEndThread(0);
+		return 0;
+	};
+
 	for (;;) {
 		// Wait 中は cl2 を取らない（OnHScroll 等がシークできる）
 
-		if (syukai == 2) { thn = TRUE; AfxEndThread(0); return 0; }
+		if (syukai == 2) return stopPlaybackAndExit();
 		if (syukai == 1) { syukai2 = 1; Sleep(1); continue; }
 
 		// イベント待機
@@ -413,7 +429,7 @@ UINT HandleNotifications(LPVOID)
 			// シーク直後は書き込み位置を再調整する必要があるため continue
 			continue;
 		}
-		if (thn1) { thn = TRUE; AfxEndThread(0); return 0; }
+		if (thn1) return stopPlaybackAndExit();
 		if (ps == 1) continue;
 
 		// 書き込み位置の計算
@@ -457,18 +473,26 @@ UINT HandleNotifications(LPVOID)
 		else
 			playwavds2(bufwav3, oldw, len1, len2);
 		// 曲最後まで行ったとき
-
+		if (readme) {
+			if (len1 > readme)
+				ZeroMemory(bufwav3 + readme, len2);
+			else
+				ZeroMemory(bufwav3 + oldw + readme, len1 - readme);
+		}
 		// DirectSoundバッファへの転送
 		if (m_dsb) {
-			hr = m_dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, &len3, (LPVOID*)&pdsb2, &len4, 0);
+				hr = m_dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, &len3, (LPVOID*)&pdsb2, &len4, 0);
 			if (hr == DS_OK) {
 				thn = FALSE;
 				memcpy(pdsb1, bufwav3 + oldw, len3);
+				if (fade2) ZeroMemory(pdsb1, len3);
 				if (len4 != 0) memcpy(pdsb2, bufwav3, len4);
+				if (len4 != 0 && fade2) ZeroMemory(pdsb2, len4);
 				m_dsb->Unlock(pdsb1, len3, pdsb2, len4);
 			}
 		}
-
+		readme = 0;
+		fade2 = fade1;
 		oldw = WriteCursor;
 		if (flg3 != 0) flg3--;
 		sflg = FALSE;

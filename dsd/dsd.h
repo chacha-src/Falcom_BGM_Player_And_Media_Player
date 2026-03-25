@@ -1,4 +1,4 @@
-﻿#include "..\stdafx.h"
+#include "..\stdafx.h"
 #include <vector>
 
 #ifndef dsf_types_h
@@ -2245,6 +2245,11 @@ DWORD CDSFDecoderKpi::SetPosition(DWORD dwPos)
 	if (file.File() == INVALID_HANDLE_VALUE)
 		return 0;
 
+	const uint64_t dataBeginPos = file.DataOffset();
+	const uint64_t dataEndPos = file.DataOffset() + file.DataHeader()->size - 12;
+	if (dataEndPos <= dataBeginPos)
+		return 0;
+
 	uint64_t bytePos = dwPos;
 	bytePos *= file.FmtHeader()->sampling_frequency;
 	bytePos /= 1000;
@@ -2255,8 +2260,16 @@ DWORD CDSFDecoderKpi::SetPosition(DWORD dwPos)
 	BYTE marker = last_marker;
 
 	Reset();
-	file.Seek(blockPos * file.FmtHeader()->block_size_per_channel * file.FmtHeader()->channel_num, NULL, FILE_CURRENT);
-	samplesRendered = file.FmtHeader()->block_size_per_channel * 8 * blockPos;
+	const uint64_t bytesPerBlockAllCh = (uint64_t)file.FmtHeader()->block_size_per_channel * (uint64_t)file.FmtHeader()->channel_num;
+	const uint64_t totalBytes = dataEndPos - dataBeginPos;
+	const uint64_t totalBlocks = (bytesPerBlockAllCh != 0) ? (totalBytes / bytesPerBlockAllCh) : 0;
+	if (totalBlocks == 0)
+		return 0;
+	if (blockPos >= totalBlocks)
+		blockPos = totalBlocks - 1;
+
+	file.Seek(dataBeginPos + blockPos * bytesPerBlockAllCh, NULL, FILE_BEGIN);
+	samplesRendered = (uint64_t)file.FmtHeader()->block_size_per_channel * 8ULL * blockPos;
 
 	uint64_t newPos = blockPos;
 	newPos *= file.FmtHeader()->block_size_per_channel;
@@ -2293,6 +2306,10 @@ DWORD CDSFDecoderKpi::Render(BYTE* buffer, DWORD dwSizeSample)
 			if (dwBytesRead < dwBytesPerBlockChannel * soundinfo.dwChannels) {
 				dsd2pcm.RenderLast();
 			}
+			if (dwBytesRead > 0 && soundinfo.dwChannels > 0) {
+				const uint64_t perChBytes = (uint64_t)dwBytesRead / (uint64_t)soundinfo.dwChannels;
+				samplesRendered += perChBytes * 8ULL;
+			}
 		}
     	samplesWritten = dsd2pcm.Render(srcBuffer, dwBytesRead, dwBytesPerBlockChannel, bps == DSF_BPS_LSB ? 1 : 0, d, dwSamplesToRender);
 		d += samplesWritten * soundinfo.dwChannels * (soundinfo.dwBitsPerSample / 8);
@@ -2300,7 +2317,8 @@ DWORD CDSFDecoderKpi::Render(BYTE* buffer, DWORD dwSizeSample)
 		if (dsd2pcm.isInFlush() && samplesWritten < dwSamplesToRender)
 			break;
 		dwSamplesToRender -= samplesWritten;
-		//samplesRendered += samplesWritten * 16;
+		// `samplesRendered` is advanced by input bytes consumed (per-channel),
+		// not by rendered PCM samples.
 
 		//if (!dsd2pcm.isInFlush() && dwSamplesToRender * 16 > sampleCount - samplesRendered) {
 		//	dsd2pcm.RenderLast();
@@ -2423,7 +2441,16 @@ DWORD CDFFDecoderKpi::SetPosition(DWORD dwPos)
 	BYTE marker = last_marker;
 
 	Reset();
-	file.Seek(bytePos, NULL, FILE_CURRENT);
+	{
+		const uint64_t dataBeginPos = file.FRM8().dsd.OffsetToData();
+		const uint64_t dataEndPos = dataBeginPos + file.FRM8().dsd.DataSize();
+		if (dataEndPos <= dataBeginPos)
+			return 0;
+		const uint64_t totalBytes = dataEndPos - dataBeginPos;
+		if (bytePos >= totalBytes)
+			bytePos = totalBytes - 1;
+		file.Seek(dataBeginPos + bytePos, NULL, FILE_BEGIN);
+	}
 
 	last_marker = marker;
 
@@ -2578,7 +2605,16 @@ DWORD CWSDDecoderKpi::SetPosition(DWORD dwPos)
 	BYTE marker = last_marker;
 
 	Reset();
-	file.Seek(bytePos, NULL, FILE_CURRENT);
+	{
+		const uint64_t dataBeginPos = file.Header()->dataOffset;
+		const uint64_t dataEndPos = file.FileSize();
+		if (dataEndPos <= dataBeginPos)
+			return 0;
+		const uint64_t totalBytes = dataEndPos - dataBeginPos;
+		if (bytePos >= totalBytes)
+			bytePos = totalBytes - 1;
+		file.Seek(dataBeginPos + bytePos, NULL, FILE_BEGIN);
+	}
 
 	last_marker = marker;
 
