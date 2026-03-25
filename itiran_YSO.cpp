@@ -42,7 +42,7 @@ BEGIN_MESSAGE_MAP(Citiran_YSO, CCustomDialog)
 	cmn(Citiran_YSO);
 
 
-char tiyso[][128]={
+char tiyso[][228]={
 "001 タイトル<THE GUIDANCE OF A WHITE TOWER>",
 "002 イベント0<BONDS WITH COMPANION>",
 "003 ダームの塔24-25F<BEYOND THE BEGINNING>",

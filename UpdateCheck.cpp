@@ -1,4 +1,4 @@
-﻿// UpdateCheck.cpp - 起動時更新チェック・ダウンロード・展開
+// UpdateCheck.cpp - 起動時更新チェック・ダウンロード・展開
 #include "stdafx.h"
 #include "UpdateCheck.h"
 #include "oggDlg.h"
@@ -16,6 +16,7 @@
 
 static const TCHAR* UPDATE_URL = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.zip");
 static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
+static const TCHAR* TARGET_HOST_EXE_NAME = _T("KpiHost64.exe");
 
 // コンパイル時間ではなく、現在動いている実行ファイルの実際の更新日時を取得するように変更いたしましたわ
 // これにより、ファイルの一部だけをビルドした際の「時間が過去のままになる落とし穴」を完全に回避いたします
@@ -298,6 +299,20 @@ bool DoUpdateAndRestart()
 		_tcscpy_s(targetExePath, MAX_PATH, TARGET_EXE_NAME);
 	}
 
+	// KpiHost64.exe も同じフォルダに配置する前提で上書き対象に含めますわ
+	TCHAR targetHostExePath[MAX_PATH] = { 0 };
+	_tcscpy_s(targetHostExePath, MAX_PATH, targetExePath);
+	TCHAR* pSlashHost = _tcsrchr(targetHostExePath, _T('\\'));
+	if (pSlashHost != NULL)
+	{
+		*(pSlashHost + 1) = _T('\0');
+		_tcscat_s(targetHostExePath, MAX_PATH, TARGET_HOST_EXE_NAME);
+	}
+	else
+	{
+		_tcscpy_s(targetHostExePath, MAX_PATH, TARGET_HOST_EXE_NAME);
+	}
+
 	TCHAR tempPath[MAX_PATH], zipPath[MAX_PATH], extractDir[MAX_PATH], batPath[MAX_PATH];
 	GetTempPath(MAX_PATH, tempPath);
 	_stprintf_s(zipPath, _T("%sogg_update.zip"), tempPath);
@@ -312,14 +327,20 @@ bool DoUpdateAndRestart()
 		return false;
 	}
 
-	// ZIPから oggYSEDbgm_uni_avx2.exe だけを取り出して extractDir に展開しますわ
+	// ZIPから oggYSEDbgm_uni_avx2.exe と KpiHost64.exe を取り出して extractDir に展開しますわ
 	if (!ExtractZipToDir(zipPath, extractDir, TARGET_EXE_NAME))
+	{
+		return false;
+	}
+	if (!ExtractZipToDir(zipPath, extractDir, TARGET_HOST_EXE_NAME))
 	{
 		return false;
 	}
 
 	CString extractedPath;
 	extractedPath.Format(_T("%s\\%s"), extractDir, TARGET_EXE_NAME);
+	CString extractedHostPath;
+	extractedHostPath.Format(_T("%s\\%s"), extractDir, TARGET_HOST_EXE_NAME);
 
 	time_t serverTime = HttpGetLastModified(UPDATE_URL);
 	if (serverTime > 0)
@@ -333,13 +354,19 @@ bool DoUpdateAndRestart()
 		ft.dwLowDateTime = ull.LowPart;
 		ft.dwHighDateTime = ull.HighPart;
 
-		// 時間を書き換えますわ
+		// 時間を書き換えますわ（exe / host どちらも）
 		HANDLE hFile = CreateFile(extractedPath, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
 		if (hFile != INVALID_HANDLE_VALUE)
 		{
 			// 作成日時、アクセス日時、更新日時の3つすべてを揃えますわ
 			SetFileTime(hFile, &ft, &ft, &ft);
 			CloseHandle(hFile);
+		}
+		HANDLE hFile2 = CreateFile(extractedHostPath, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+		if (hFile2 != INVALID_HANDLE_VALUE)
+		{
+			SetFileTime(hFile2, &ft, &ft, &ft);
+			CloseHandle(hFile2);
 		}
 
 		// ファイルシステムの読み取り誤差を完全に防ぐため、
@@ -401,8 +428,10 @@ bool DoUpdateAndRestart()
 	// 文字化けを起こさないよう変換いたします
 	CStringA extractDirA(extractDir);
 	CStringA targetExeA(TARGET_EXE_NAME);
+	CStringA targetHostExeA(TARGET_HOST_EXE_NAME);
 	CStringA exePathA(exePath);              // 現在動いているファイル
 	CStringA targetExePathA(targetExePath);  // 新しく作る正しい名前のファイル
+	CStringA targetHostExePathA(targetHostExePath); // 新しいホストexe
 	CStringA tempPathA(tempPath);
 
 	// 実行ファイルがある正しいフォルダのパスを抜き出しますわ
@@ -423,7 +452,10 @@ bool DoUpdateAndRestart()
 		":wait\r\n"
 		"ping -n 4 127.0.0.1 >nul\r\n"
 		"copy /y \"%s\\%s\" \"%s\" >> %%LOG%% 2>&1\r\n"
+		"if errorlevel 1 goto retry\r\n"
+		"copy /y \"%s\\%s\" \"%s\" >> %%LOG%% 2>&1\r\n"
 		"if not errorlevel 1 goto success\r\n"
+		":retry\r\n"
 		"set /a RETRY+=1\r\n"
 		"if %%RETRY%% geq 15 goto fail\r\n"
 		"goto wait\r\n"
@@ -439,6 +471,7 @@ bool DoUpdateAndRestart()
 		":end\r\n"
 		"del \"%%~f0\"\r\n",
 		(LPCSTR)tempPathA,
+		(LPCSTR)extractDirA, (LPCSTR)targetHostExeA, (LPCSTR)targetHostExePathA,
 		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA,
 		(LPCSTR)exeDirA, (LPCSTR)targetExePathA, // 成功時は元のフォルダに移動して起動
 		(LPCSTR)exeDirA, (LPCSTR)exePathA        // 失敗時も元のフォルダに移動して起動

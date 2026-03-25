@@ -1,0 +1,330 @@
+#include "stdafx.h"
+
+#include "KpiHostClient.h"
+
+static void AppendLogLine(const wchar_t* line)
+{
+	if (!line) return;
+	wchar_t tempDir[MAX_PATH]{};
+	if (!GetTempPathW(MAX_PATH, tempDir)) return;
+	std::wstring path = tempDir;
+	path += L"ogg_kpi64_client.log";
+	HANDLE h = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	DWORD bytes = (DWORD)(wcslen(line) * sizeof(wchar_t));
+	DWORD written = 0;
+	WriteFile(h, line, bytes, &written, NULL);
+	const wchar_t crlf[] = L"\r\n";
+	WriteFile(h, crlf, (DWORD)(2 * sizeof(wchar_t)), &written, NULL);
+	CloseHandle(h);
+}
+
+static void AppendU32(std::vector<uint8_t>& b, uint32_t v)
+{
+	b.push_back((uint8_t)(v & 0xFF));
+	b.push_back((uint8_t)((v >> 8) & 0xFF));
+	b.push_back((uint8_t)((v >> 16) & 0xFF));
+	b.push_back((uint8_t)((v >> 24) & 0xFF));
+}
+
+static void AppendWString(std::vector<uint8_t>& b, const std::wstring& s)
+{
+	AppendU32(b, (uint32_t)s.size());
+	if (!s.empty()) {
+		const uint8_t* p = (const uint8_t*)s.data();
+		b.insert(b.end(), p, p + (s.size() * sizeof(wchar_t)));
+	}
+}
+
+KpiHost64Client::KpiHost64Client() {}
+KpiHost64Client::~KpiHost64Client() { Disconnect(); }
+
+static std::wstring JoinPath(const std::wstring& a, const std::wstring& b)
+{
+	if (a.empty()) return b;
+	wchar_t last = a.back();
+	if (last == L'\\' || last == L'/') return a + b;
+	return a + L"\\" + b;
+}
+
+static bool FileExists(const std::wstring& p)
+{
+	DWORD a = GetFileAttributesW(p.c_str());
+	return (a != INVALID_FILE_ATTRIBUTES) && ((a & FILE_ATTRIBUTE_DIRECTORY) == 0);
+}
+
+static bool FindHostExeRecursive(const std::wstring& baseDir, std::wstring& outPath, int maxDepth = 6)
+{
+	outPath.clear();
+	if (maxDepth < 0) return false;
+
+	// quick check: baseDir\KpiHost64.exe
+	{
+		std::wstring direct = JoinPath(baseDir, L"KpiHost64.exe");
+		if (FileExists(direct)) { outPath = direct; return true; }
+	}
+
+	std::wstring pattern = JoinPath(baseDir, L"*");
+	WIN32_FIND_DATAW fd{};
+	HANDLE h = FindFirstFileW(pattern.c_str(), &fd);
+	if (h == INVALID_HANDLE_VALUE) return false;
+
+	do {
+		if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+		if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) continue;
+
+		// skip reparse points (junctions) to avoid loops
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+
+		std::wstring subDir = JoinPath(baseDir, fd.cFileName);
+		std::wstring candidate = JoinPath(subDir, L"KpiHost64.exe");
+		if (FileExists(candidate)) {
+			outPath = candidate;
+			FindClose(h);
+			return true;
+		}
+		if (FindHostExeRecursive(subDir, outPath, maxDepth - 1)) {
+			FindClose(h);
+			return true;
+		}
+	} while (FindNextFileW(h, &fd));
+
+	FindClose(h);
+	return false;
+}
+
+void KpiHost64Client::Disconnect()
+{
+	if (m_hPipe != INVALID_HANDLE_VALUE) {
+		CloseHandle(m_hPipe);
+		m_hPipe = INVALID_HANDLE_VALUE;
+	}
+}
+
+bool KpiHost64Client::StartHostProcess()
+{
+	wchar_t exePath[MAX_PATH]{};
+	GetModuleFileNameW(NULL, exePath, MAX_PATH);
+	std::wstring dir = exePath;
+	size_t pos = dir.find_last_of(L"\\/");
+	if (pos != std::wstring::npos) dir = dir.substr(0, pos + 1);
+
+	std::wstring hostExe;
+	if (!FindHostExeRecursive(dir, hostExe)) {
+		// last resort (dev/build output)
+		hostExe = L"C:\\projects\\APPLICATION3\\ogg_binary\\KpiHost64.exe";
+	}
+	if (!FileExists(hostExe)) return false;
+	AppendLogLine((L"[StartHostProcess] hostExe=" + hostExe).c_str());
+
+	std::wstring hostDir = hostExe;
+	size_t hpos = hostDir.find_last_of(L"\\/");
+	if (hpos != std::wstring::npos) hostDir = hostDir.substr(0, hpos + 1);
+
+	STARTUPINFOW si{};
+	si.cb = sizeof(si);
+	PROCESS_INFORMATION pi{};
+	std::wstring cmd = L"\"" + hostExe + L"\" --pipe";
+	std::vector<wchar_t> cmdline(cmd.begin(), cmd.end());
+	cmdline.push_back(L'\0');
+	BOOL ok = CreateProcessW(NULL, cmdline.data(), NULL, NULL, FALSE,
+		CREATE_NO_WINDOW, NULL, hostDir.c_str(), &si, &pi);
+	if (!ok) {
+		DWORD e = GetLastError();
+		AppendLogLine((L"[StartHostProcess] CreateProcessW failed err=" + std::to_wstring(e)).c_str());
+		return false;
+	}
+	CloseHandle(pi.hThread);
+	CloseHandle(pi.hProcess);
+	return true;
+}
+
+bool KpiHost64Client::ConnectPipe()
+{
+	for (int i = 0; i < 30; i++) {
+		HANDLE h = CreateFileW(KPIHOST64_PIPE_NAME, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+		if (h != INVALID_HANDLE_VALUE) {
+			DWORD mode = PIPE_READMODE_BYTE;
+			SetNamedPipeHandleState(h, &mode, NULL, NULL);
+			m_hPipe = h;
+			AppendLogLine(L"[ConnectPipe] connected");
+			return true;
+		}
+
+		DWORD err = GetLastError();
+		if (err == ERROR_PIPE_BUSY) {
+			if (!WaitNamedPipeW(KPIHOST64_PIPE_NAME, 200)) Sleep(50);
+			continue;
+		}
+		AppendLogLine((L"[ConnectPipe] CreateFile failed err=" + std::to_wstring(err)).c_str());
+		Sleep(50);
+	}
+	return false;
+}
+
+bool KpiHost64Client::EnsureConnected()
+{
+	if (m_hPipe != INVALID_HANDLE_VALUE) return true;
+	if (ConnectPipe()) return true;
+	StartHostProcess();
+	return ConnectPipe();
+}
+
+bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t payloadBytes, std::vector<uint8_t>& outReplyPayload, uint32_t& outStatus)
+{
+	outReplyPayload.clear();
+	outStatus = KPIHOST64_STATUS_FAIL;
+	if (!EnsureConnected()) return false;
+
+	KPIHOST64_MsgHeader h{};
+	h.cmd = cmd;
+	h.requestId = m_reqId++;
+	h.payloadBytes = payloadBytes;
+
+	DWORD written = 0;
+	if (!WriteFile(m_hPipe, &h, sizeof(h), &written, NULL) || written != sizeof(h)) {
+		AppendLogLine(L"[SendRequest] write header failed");
+		Disconnect();
+		return false;
+	}
+	if (payloadBytes) {
+		if (!WriteFile(m_hPipe, payload, payloadBytes, &written, NULL) || written != payloadBytes) {
+			AppendLogLine(L"[SendRequest] write payload failed");
+			Disconnect();
+			return false;
+		}
+	}
+
+	KPIHOST64_ReplyHeader rh{};
+	DWORD read = 0;
+	if (!ReadFile(m_hPipe, &rh, sizeof(rh), &read, NULL) || read != sizeof(rh)) {
+		AppendLogLine(L"[SendRequest] read reply header failed");
+		Disconnect();
+		return false;
+	}
+	if (rh.requestId != h.requestId || rh.cmd != cmd) {
+		AppendLogLine(L"[SendRequest] reply mismatch");
+		Disconnect();
+		return false;
+	}
+
+	outStatus = rh.status;
+	if (rh.payloadBytes) {
+		outReplyPayload.resize(rh.payloadBytes);
+		uint8_t* p = outReplyPayload.data();
+		uint32_t remaining = rh.payloadBytes;
+		while (remaining) {
+			DWORD chunk = 0;
+			if (!ReadFile(m_hPipe, p, remaining, &chunk, NULL) || chunk == 0) {
+				Disconnect();
+				return false;
+			}
+			p += chunk;
+			remaining -= chunk;
+		}
+	}
+	return true;
+}
+
+bool KpiHost64Client::Ping()
+{
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	if (!SendRequest(KPIHOST64_CMD_PING, NULL, 0, reply, st)) return false;
+	return st == KPIHOST64_STATUS_OK;
+}
+
+bool KpiHost64Client::ListExts(const std::wstring& kpiPath, uint32_t& outKpiVer, std::wstring& outSupportExts)
+{
+	outKpiVer = 0;
+	outSupportExts.clear();
+	std::vector<uint8_t> req;
+	AppendWString(req, kpiPath);
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	if (!SendRequest(KPIHOST64_CMD_LIST_EXTS, req.data(), (uint32_t)req.size(), reply, st)) return false;
+	if (st != KPIHOST64_STATUS_OK) return false;
+	if (reply.size() < sizeof(KPIHOST64_ListExtsReply) + sizeof(uint32_t)) return false;
+	const uint8_t* p = reply.data();
+	const KPIHOST64_ListExtsReply* lr = (const KPIHOST64_ListExtsReply*)p;
+	outKpiVer = lr->kpiVer;
+	p += sizeof(KPIHOST64_ListExtsReply);
+	uint32_t chars = *(const uint32_t*)p;
+	p += sizeof(uint32_t);
+	size_t bytes = (size_t)chars * sizeof(wchar_t);
+	if (reply.size() < sizeof(KPIHOST64_ListExtsReply) + sizeof(uint32_t) + bytes) return false;
+	outSupportExts.assign((const wchar_t*)p, (const wchar_t*)p + chars);
+	return true;
+}
+
+bool KpiHost64Client::Open(const std::wstring& kpiPath, const std::wstring& mediaPath, const KPI_MEDIAINFO& request, uint32_t songNo, KpiHost64Session& outSession)
+{
+	outSession = {};
+	std::vector<uint8_t> req;
+	AppendU32(req, songNo);
+	AppendWString(req, kpiPath);
+	AppendWString(req, mediaPath);
+	const uint8_t* pr = (const uint8_t*)&request;
+	req.insert(req.end(), pr, pr + sizeof(KPI_MEDIAINFO));
+
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	if (!SendRequest(KPIHOST64_CMD_OPEN, req.data(), (uint32_t)req.size(), reply, st)) return false;
+	if (st != KPIHOST64_STATUS_OK) return false;
+	if (reply.size() < sizeof(KPIHOST64_OpenReply) + sizeof(KPI_MEDIAINFO)) return false;
+
+	const KPIHOST64_OpenReply* orp = (const KPIHOST64_OpenReply*)reply.data();
+	outSession.sessionId = orp->sessionId;
+	outSession.openedSongCount = orp->openedSongCount;
+	memcpy(&outSession.mediaInfo, reply.data() + sizeof(KPIHOST64_OpenReply), sizeof(KPI_MEDIAINFO));
+	return true;
+}
+
+bool KpiHost64Client::RenderBytes(uint32_t sessionId, uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof)
+{
+	outPcm.clear();
+	outEof = false;
+	KPIHOST64_RenderReq rr{};
+	rr.sessionId = sessionId;
+	rr.bytesWanted = bytesWanted;
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	if (!SendRequest(KPIHOST64_CMD_RENDER, &rr, sizeof(rr), reply, st)) return false;
+	if (st != KPIHOST64_STATUS_OK) return false;
+	if (reply.size() < sizeof(KPIHOST64_RenderReply)) return false;
+	const KPIHOST64_RenderReply* rep = (const KPIHOST64_RenderReply*)reply.data();
+	if (rep->sessionId != sessionId) return false;
+	outEof = rep->eof ? true : false;
+	if (reply.size() < sizeof(KPIHOST64_RenderReply) + rep->bytesReturned) return false;
+	outPcm.assign(reply.begin() + sizeof(KPIHOST64_RenderReply), reply.begin() + sizeof(KPIHOST64_RenderReply) + rep->bytesReturned);
+	return true;
+}
+
+bool KpiHost64Client::Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, uint64_t& outNewPosSample)
+{
+	outNewPosSample = 0;
+	KPIHOST64_SeekReq sr{};
+	sr.sessionId = sessionId;
+	sr.posSample = posSample;
+	sr.flag = flag;
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	if (!SendRequest(KPIHOST64_CMD_SEEK, &sr, sizeof(sr), reply, st)) return false;
+	if (st != KPIHOST64_STATUS_OK) return false;
+	if (reply.size() < sizeof(KPIHOST64_SeekReply)) return false;
+	const KPIHOST64_SeekReply* rep = (const KPIHOST64_SeekReply*)reply.data();
+	if (rep->sessionId != sessionId) return false;
+	outNewPosSample = rep->newPosSample;
+	return true;
+}
+
+bool KpiHost64Client::Close(uint32_t sessionId)
+{
+	KPIHOST64_U32 u{};
+	u.v = sessionId;
+	std::vector<uint8_t> reply;
+	uint32_t st = 0;
+	if (!SendRequest(KPIHOST64_CMD_CLOSE, &u, sizeof(u), reply, st)) return false;
+	return st == KPIHOST64_STATUS_OK;
+}
+

@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -554,11 +554,15 @@ int spc;
 int killw1 = 0, ttt_;
 CString ext[150][300];
 BYTE kvar[150][300];
+BYTE kpiarch[150];
 IKpiDecoderModule* v5mo;
 CString kpif[400];
 TCHAR kpifs[200][64];
 BOOL kpichk[200];
 int kpicnt;
+
+// forward declarations
+static WORD GetPeMachine(const CString& path);
 
 /////////////////////////////////////////////////////////////////////////////
 // COggDlg メッセージ ハンドラ
@@ -621,7 +625,7 @@ void COggDlg::Resize()
 {
 	CString s;
 	m_ue.GetWindowText(s);
-	if (s == "▼") {
+	if (s == L"▼") {
 		m_ue.SetWindowText(_T("▲"));
 		CRect rect_1, rect_2;
 		GetWindowRect(&rect_1);
@@ -662,12 +666,46 @@ void COggDlg::Resize()
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 #include <unknwn.h>
+#include "KpiHostClient.h"
 BYTE kvver;
 IKpiDecoderModule* ob5 = NULL;
 const KPI_DECODER_MODULEINFO* m_ModuleInfo5;
 const KPI_MEDIAINFO* pMediaInfo = NULL;
 KPI_MEDIAINFO me5;
 IKpiDecoder* kpidec = NULL;
+static bool g_kpiRemote = false;
+static KpiHost64Client g_kpiHost;
+static KpiHost64Session g_kpiSession;
+static std::vector<uint8_t> g_kpiRemoteCache;
+static size_t g_kpiRemoteCachePos = 0;
+static bool g_kpiRemoteEof = false;
+
+static void ResetKpiRemoteCache()
+{
+	g_kpiRemoteCache.clear();
+	g_kpiRemoteCachePos = 0;
+	g_kpiRemoteEof = false;
+}
+
+static bool SplitKpiSubsongPath(const CString& in, CString& outPath, uint32_t& outSel)
+{
+	outPath = in;
+	outSel = 1;
+
+	const int len = in.GetLength();
+	if (len < 5) return false;
+	if (in.GetAt(len - 5) != L':') return false;
+
+	const CString tail = in.Right(4);
+	for (int i = 0; i < 4; i++) {
+		if (tail[i] < L'0' || tail[i] > L'9') return false;
+	}
+
+	outPath = in.Left(len - 5);
+	outSel = (uint32_t)_tstoi(tail);
+	if (outSel == 0) outSel = 1;
+	return true;
+}
 
 /**
  * @brief ホスト側が実装する、実ファイル操作のための IKpiFile クラス
@@ -7303,160 +7341,206 @@ void COggDlg::play()
 	}
 	else if (mode == -3) { // kpi
 		ret2 = 0;
-		hDLLk = LoadLibrary(kpi);
-		typedef HRESULT(WINAPI* kpi_CreateInstance)(REFIID riid, void** ppvObject, IKpiUnknown* pUnknown);
-		kpi_CreateInstance cr = (kpi_CreateInstance)GetProcAddress(hDLLk, "kpi_CreateInstance");
-		pFunck = (pfnGetKMPModule)::GetProcAddress(hDLLk, SZ_KMP_GETMODULE);
-		if (kvver == 2) {
-			mod = pFunck();
-			if (mod == NULL) {
-				MessageBox(LL14(
-					L"なんらかの要因でkpiが開けませんでした。", /* 日本語 */
-					L"Could not open kpi for some reason.", /* 英語 */
-					L"Impossible d'ouvrir kpi pour une raison quelconque.", /* フランス語 */
-					L"Impossibile aprire kpi per qualche motivo.", /* イタリア語 */
-					L"No se pudo abrir kpi por alguna razón.", /* スペイン語 */
-					L"어떠한 이유로 kpi를 열 수 없었습니다.", /* 韓国語 */
-					L"由于某种原因无法打开kpi。", /* 中国語 */
-					L"تعذر فتح kpi لسبب ما.", /* アラビア語 */
-					L"Не удалось открыть kpi по какой-то причине.", /* ロシア語 */
-					L"kpi konnte aus einem unbekannten Grund nicht geöffnet werden.", /* ドイツ語 */
-					L"Não foi possível abrir o kpi por algum motivo.", /* ポルトガル語 */
-					L"Kan kpi om een of andere reden niet openen.", /* オランダ語 */
-					L"Nie można otworzyć kpi z jakiegoś powodu.", /* ポーランド語 */
-					L"Kpi bir nedenle açılamadı."), /* トルコ語 */
-					LL14(
-						L"ファイルが存在しません。", /* キャプション */
-						L"File does not exist.",
-						L"Le fichier n'existe pas.",
-						L"Il file non esiste.",
-						L"El archivo no existe.",
-						L"파일이 존재하지 않습니다.",
-						L"文件不存在。",
-						L"الملف غير موجود.",
-						L"Файл не существует.",
-						L"Datei existiert nicht.",
-						L"O arquivo não existe.",
-						L"Het bestand bestaat niet.",
-						L"Plik nie istnieje.",
-						L"Dosya mevcut değil."));
+		g_kpiRemote = false;
+		ZeroMemory(&g_kpiSession, sizeof(g_kpiSession));
+		const WORD km = GetPeMachine(kpi);
+		if (km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64) {
+			// x64 KPI は別プロセス(x64ホスト)で開く
+			KPI_MEDIAINFO req;
+			kpi_InitMediaInfo(&req);
+			req.dwSampleRate = savedata.samples;
+			// x86側のver5実装に合わせ、要求ビット数は固定(プラグインが最大精度で返す想定)
+			req.nBitsPerSample = 16;
+			req.dwChannels = 0;
+			req.dwFormatType = KPI_MEDIAINFO::FORMAT_PCM;
+			// 要求ビット数を24/32にするとOpen失敗するプラグインがあるため、ここでは要求しない
 
-				fnn = LL14(
-					L"kpi構造体を獲得できませんでした。", /* 日本語 */
-					L"Could not acquire kpi structure.", /* 英語 */
-					L"Impossible d'obtenir la structure kpi.", /* フランス語 */
-					L"Impossibile acquisire la struttura kpi.", /* イタリア語 */
-					L"No se pudo adquirir la estructura kpi.", /* スペイン語 */
-					L"kpi 구조체를 획득할 수 없었습니다.", /* 韓国語 */
-					L"无法获取kpi结构体。", /* 中国語 */
-					L"تعذر الحصول على هيكل kpi.", /* アラビア語 */
-					L"Не удалось получить структуру kpi.", /* ロシア語 */
-					L"kpi-Struktur konnte nicht abgerufen werden.", /* ドイツ語 */
-					L"Não foi possível obter a estrutura kpi.", /* ポルトガル語 */
-					L"Kan kpi-structuur niet verkrijgen.", /* オランダ語 */
-					L"Nie można uzyskać struktury kpi.", /* ポーランド語 */
-					L"Kpi yapısı edinilemedi."); /* トルコ語 */
-				FreeLibrary(hDLLk);
+			CString ssMedia;
+			uint32_t sel = 1;
+			SplitKpiSubsongPath(filen, ssMedia, sel);
+
+			if (!g_kpiHost.Open((const wchar_t*)kpi, (const wchar_t*)ssMedia, req, sel, g_kpiSession)) {
 				m_saisai.EnableWindow(TRUE); endflg = 0; return;
 			}
-			CString ss;
-			ss = filen.Left(filen.ReverseFind(':') - 1);
-			ZeroMemory(&sikpi, sizeof(sikpi));
-			sikpi.dwSamplesPerSec = savedata.samples; sikpi.dwChannels = 8; sikpi.dwSeekable = 1; sikpi.dwLength = -1; sikpi.dwBitsPerSample = 16;
-			if (savedata.bit24 == 1)sikpi.dwBitsPerSample = 24;
-			if (savedata.bit32 == 1)sikpi.dwBitsPerSample = 32;
-			if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit;
-			if (mod) {
-				if (ss == L"") {
-					if (mod->Init) mod->Init();
-#if UNICODE
-					TCHAR* f = filen.GetBuffer();
-					char ff[2048];
-					WideCharToMultiByte(CP_ACP, 0, f, -1, ff, filen.GetLength() * 2 + 2, 0, 0);
-					if (mod->Open) kmp1 = mod->Open(ff, &sikpi);
-#else
-					if (mod->Open) kmp1 = mod->Open(filen, &sikpi);
-#endif
-					if (kmp1 == NULL) { m_saisai.EnableWindow(TRUE); endflg = 0; return; }
-				}
-				else {
-					if (mod->Init) mod->Init();
-#if UNICODE
-					TCHAR* f = ss.GetBuffer();
-					char ff[2048];
-					WideCharToMultiByte(CP_ACP, 0, f, -1, ff, filen.GetLength() * 2 + 2, 0, 0);
-					if (mod->Open) kmp1 = mod->Open(ff, &sikpi);
-#else
-					if (mod->Open) kmp1 = mod->Open(ss, &sikpi);
-#endif
-					if (kmp1 == NULL) { m_saisai.EnableWindow(TRUE); endflg = 0; return; }
-					if (mod->SetPosition) mod->SetPosition(kmp1, _tstoi(filen.Right(4)) * 1000);
-				}
-			}
-			wavbit = sikpi.dwSamplesPerSec;	wavch = sikpi.dwChannels;	loop1 = 0; loop2 = (int)((double)sikpi.dwLength * (double)sikpi.dwSamplesPerSec / 1000.0);
-			wavsam = sikpi.dwBitsPerSample;
+
+			g_kpiRemote = true;
+			ResetKpiRemoteCache();
+			wavbit = g_kpiSession.mediaInfo.dwSampleRate;
+			wavch = g_kpiSession.mediaInfo.dwChannels;
+			wavsam = g_kpiSession.mediaInfo.nBitsPerSample;
+			if (wavsam < 0) wavsam = -wavsam;
+			loop1 = 0;
+			loop2 = (int)kpi_100nsToSample(g_kpiSession.mediaInfo.qwLength, g_kpiSession.mediaInfo.dwSampleRate);
+			if (g_kpiSession.mediaInfo.qwLength == (UINT64)-1) loop2 = 0;
+			data_size = oggsize = loop2 * (wavsam / 4);
+			m_time.SetRange(0, (data_size) / (wavsam / 4), TRUE);
+			uint64_t np = 0;
+			g_kpiHost.Seek(g_kpiSession.sessionId, 0, 0, np);
+			wav_start();
+			// 以降の共通処理(UI更新/画像抽出など)も実行させる
 		}
-		else if (kvver == 5) {
-			IUnknown* pMyObject = new CMyHost();
-			IKpiDecoderModule* ob = NULL;
-			HRESULT hr = cr(IID_IKpiDecoderModule, (void**)&ob, pMyObject);
-			if (hr == S_OK) {
-				ob5 = (IKpiDecoderModule*)ob;
-				kpi_InitMediaInfo(&me5);
-				//				me5.cb = sizeof(KPI_MEDIAINFO);
-				me5.dwSampleRate = savedata.samples;
-				me5.nBitsPerSample = 16;
+		else {
+			hDLLk = LoadLibrary(kpi);
+			typedef HRESULT(WINAPI* kpi_CreateInstance)(REFIID riid, void** ppvObject, IKpiUnknown* pUnknown);
+			kpi_CreateInstance cr = (kpi_CreateInstance)GetProcAddress(hDLLk, "kpi_CreateInstance");
+			pFunck = (pfnGetKMPModule)::GetProcAddress(hDLLk, SZ_KMP_GETMODULE);
+			if (kvver == 2) {
+				mod = pFunck();
+				if (mod == NULL) {
+					MessageBox(LL14(
+						L"なんらかの要因でkpiが開けませんでした。", /* 日本語 */
+						L"Could not open kpi for some reason.", /* 英語 */
+						L"Impossible d'ouvrir kpi pour une raison quelconque.", /* フランス語 */
+						L"Impossibile aprire kpi per qualche motivo.", /* イタリア語 */
+						L"No se pudo abrir kpi por alguna razón.", /* スペイン語 */
+						L"어떠한 이유로 kpi를 열 수 없었습니다.", /* 韓国語 */
+						L"由于某种原因无法打开kpi。", /* 中国語 */
+						L"تعذر فتح kpi لسبب ما.", /* アラビア語 */
+						L"Не удалось открыть kpi по какой-то причине.", /* ロシア語 */
+						L"kpi konnte aus einem unbekannten Grund nicht geöffnet werden.", /* ドイツ語 */
+						L"Não foi possível abrir o kpi por algum motivo.", /* ポルトガル語 */
+						L"Kan kpi om een of andere reden niet openen.", /* オランダ語 */
+						L"Nie można otworzyć kpi z jakiegoś powodu.", /* ポーランド語 */
+						L"Kpi bir nedenle açılamadı."), /* トルコ語 */
+						LL14(
+							L"ファイルが存在しません。", /* キャプション */
+							L"File does not exist.",
+							L"Le fichier n'existe pas.",
+							L"Il file non esiste.",
+							L"El archivo no existe.",
+							L"파일이 존재하지 않습니다.",
+							L"文件不存在。",
+							L"الملف غير موجود.",
+							L"Файл не существует.",
+							L"Datei existiert nicht.",
+							L"O arquivo não existe.",
+							L"Het bestand bestaat niet.",
+							L"Plik nie istnieje.",
+							L"Dosya mevcut değil."));
+
+					fnn = LL14(
+						L"kpi構造体を獲得できませんでした。", /* 日本語 */
+						L"Could not acquire kpi structure.", /* 英語 */
+						L"Impossible d'obtenir la structure kpi.", /* フランス語 */
+						L"Impossibile acquisire la struttura kpi.", /* イタリア語 */
+						L"No se pudo adquirir la estructura kpi.", /* スペイン語 */
+						L"kpi 구조체를 획득할 수 없었습니다.", /* 韓国語 */
+						L"无法获取kpi结构体。", /* 中国語 */
+						L"تعذر الحصول على هيكل kpi.", /* アラビア語 */
+						L"Не удалось получить структуру kpi.", /* ロシア語 */
+						L"kpi-Struktur konnte nicht abgerufen werden.", /* ドイツ語 */
+						L"Não foi possível obter a estrutura kpi.", /* ポルトガル語 */
+						L"Kan kpi-structuur niet verkrijgen.", /* オランダ語 */
+						L"Nie można uzyskać struktury kpi.", /* ポーランド語 */
+						L"Kpi yapısı edinilemedi."); /* トルコ語 */
+					FreeLibrary(hDLLk);
+					m_saisai.EnableWindow(TRUE); endflg = 0; return;
+				}
+				CString ss;
+				{
+					uint32_t sel = 1;
+					SplitKpiSubsongPath(filen, ss, sel);
+				}
+				ZeroMemory(&sikpi, sizeof(sikpi));
+				sikpi.dwSamplesPerSec = savedata.samples; sikpi.dwChannels = 8; sikpi.dwSeekable = 1; sikpi.dwLength = -1; sikpi.dwBitsPerSample = 16;
 				if (savedata.bit24 == 1)sikpi.dwBitsPerSample = 24;
 				if (savedata.bit32 == 1)sikpi.dwBitsPerSample = 32;
 				if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit;
-				IKpiFile* ik;
-				IKpiFolder* ik2 = new CMyDummyFolder();
-				CMyHostFile* pHostFile = new CMyHostFile();
-				ss = filen.Left(filen.ReverseFind(':') - 1);
-				if (ss == L"") {
-					if (!pHostFile->Open(filen)) {
-						// ファイルが開けない
-						pHostFile->Release();
-						return;
+				if (mod) {
+					if (ss == L"") {
+						if (mod->Init) mod->Init();
+#if UNICODE
+						TCHAR* f = filen.GetBuffer();
+						char ff[2048];
+						WideCharToMultiByte(CP_ACP, 0, f, -1, ff, filen.GetLength() * 2 + 2, 0, 0);
+						if (mod->Open) kmp1 = mod->Open(ff, &sikpi);
+#else
+						if (mod->Open) kmp1 = mod->Open(filen, &sikpi);
+#endif
+						if (kmp1 == NULL) { m_saisai.EnableWindow(TRUE); endflg = 0; return; }
+					}
+					else {
+						if (mod->Init) mod->Init();
+#if UNICODE
+						TCHAR* f = ss.GetBuffer();
+						char ff[2048];
+						WideCharToMultiByte(CP_ACP, 0, f, -1, ff, filen.GetLength() * 2 + 2, 0, 0);
+						if (mod->Open) kmp1 = mod->Open(ff, &sikpi);
+#else
+						if (mod->Open) kmp1 = mod->Open(ss, &sikpi);
+#endif
+						if (kmp1 == NULL) { m_saisai.EnableWindow(TRUE); endflg = 0; return; }
+						if (mod->SetPosition) mod->SetPosition(kmp1, _tstoi(filen.Right(4)) * 1000);
 					}
 				}
-				else {
-					if (!pHostFile->Open(ss)) {
-						// ファイルが開けない
-						pHostFile->Release();
-						return;
-					}
-				}
-				ik = pHostFile;
-				ob5->Open(&me5, ik, ik2, &kpidec);
-				if (kpidec == NULL) return;
-				int sel = 1;
-				if (ss != L"")sel = (_tstoi(filen.Right(4)));
-				if (sel <= 0) sel = 1;
-				DWORD dwSelectedSong = kpidec->Select(
-					sel,              // [in] 曲番号 (1ベース)
-					&pMediaInfo,    // [out] 曲情報
-					NULL,           // [in] IKpiTagInfo (NULL)
-					0               // [in] dwTagGetFlags (KPI_TAGGET_FLAG_NONE)
-				);
-				if (ik2) {
-					ik2->Release();
-				}
-				if (ik) { // ik (pHostFile) も解放
-					ik->Release();
-				}
-				if (pMediaInfo == NULL) return;
-				wavbit = pMediaInfo->dwSampleRate;	wavch = pMediaInfo->dwChannels;	loop1 = 0; loop2 = kpi_100nsToSample(pMediaInfo->qwLength, pMediaInfo->dwSampleRate);;
-				wavsam = pMediaInfo->nBitsPerSample;
+				wavbit = sikpi.dwSamplesPerSec;	wavch = sikpi.dwChannels;	loop1 = 0; loop2 = (int)((double)sikpi.dwLength * (double)sikpi.dwSamplesPerSec / 1000.0);
+				wavsam = sikpi.dwBitsPerSample;
 			}
-		}
+			else if (kvver == 5) {
+				IUnknown* pMyObject = new CMyHost();
+				IKpiDecoderModule* ob = NULL;
+				HRESULT hr = cr(IID_IKpiDecoderModule, (void**)&ob, pMyObject);
+				if (hr == S_OK) {
+					ob5 = (IKpiDecoderModule*)ob;
+					kpi_InitMediaInfo(&me5);
+					//				me5.cb = sizeof(KPI_MEDIAINFO);
+					me5.dwSampleRate = savedata.samples;
+					me5.nBitsPerSample = 16;
+					if (savedata.bit24 == 1)sikpi.dwBitsPerSample = 24;
+					if (savedata.bit32 == 1)sikpi.dwBitsPerSample = 32;
+					if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit;
+					IKpiFile* ik;
+					IKpiFolder* ik2 = new CMyDummyFolder();
+					CMyHostFile* pHostFile = new CMyHostFile();
+					{
+						uint32_t sel = 1;
+						SplitKpiSubsongPath(filen, ss, sel);
+					}
+					if (ss == L"") {
+						if (!pHostFile->Open(filen)) {
+							// ファイルが開けない
+							pHostFile->Release();
+							return;
+						}
+					}
+					else {
+						if (!pHostFile->Open(ss)) {
+							// ファイルが開けない
+							pHostFile->Release();
+							return;
+						}
+					}
+					ik = pHostFile;
+					ob5->Open(&me5, ik, ik2, &kpidec);
+					if (kpidec == NULL) return;
+					int sel = 1;
+					if (ss != L"")sel = (_tstoi(filen.Right(4)));
+					if (sel <= 0) sel = 1;
+					DWORD dwSelectedSong = kpidec->Select(
+						sel,              // [in] 曲番号 (1ベース)
+						&pMediaInfo,    // [out] 曲情報
+						NULL,           // [in] IKpiTagInfo (NULL)
+						0               // [in] dwTagGetFlags (KPI_TAGGET_FLAG_NONE)
+					);
+					if (ik2) {
+						ik2->Release();
+					}
+					if (ik) { // ik (pHostFile) も解放
+						ik->Release();
+					}
+					if (pMediaInfo == NULL) return;
+					wavbit = pMediaInfo->dwSampleRate;	wavch = pMediaInfo->dwChannels;	loop1 = 0; loop2 = kpi_100nsToSample(pMediaInfo->qwLength, pMediaInfo->dwSampleRate);;
+					wavsam = pMediaInfo->nBitsPerSample;
+				}
+			}
 
-		if (sikpi.dwLength == (DWORD)-1) loop2 = 0;
-		data_size = oggsize = loop2 * (wavsam / 4);
-		m_time.SetRange(0, (data_size) / (wavsam / 4), TRUE);
-		if (kvver == 2 && mod->SetPosition) mod->SetPosition(kmp1, 0);
-		if (kvver == 5) kpidec->Seek(0, 0);
-		wav_start();
+			if (sikpi.dwLength == (DWORD)-1) loop2 = 0;
+			data_size = oggsize = loop2 * (wavsam / 4);
+			m_time.SetRange(0, (data_size) / (wavsam / 4), TRUE);
+			if (kvver == 2 && mod->SetPosition) mod->SetPosition(kmp1, 0);
+			if (kvver == 5) kpidec->Seek(0, 0);
+			wav_start();
+		}
 		CFile ff;
 		CString ss11 = filen; ss11.MakeLower();
 		if (ss11.Right(3) == "m4a") {
@@ -11547,7 +11631,8 @@ int readadpcmarc(CFile& adpcmf, char* bw, int len)
 
 int playwavkpi(BYTE* bw, int old, int l1, int l2)
 {
-	if (og->mod == NULL && kpidec == NULL) return 0;
+	// x64 KPI は別プロセス経由でデコードするため、この時点で kpidec==NULL になり得る
+	if (!g_kpiRemote && og->mod == NULL && kpidec == NULL) return 0;
 	playb += (l1 + l2) / (wavsam / 4);
 	//データ読み込み
 	int rrr = readkpi(bw + old, l1);
@@ -11565,8 +11650,15 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			playb = loop1;
 			if (kvver == 2)
 				og->mod->SetPosition(og->kmp1, 0);
-			else
-				kpidec->Seek(0, 1);
+			else {
+				if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+					uint64_t np = 0;
+					g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
+				}
+				else {
+					kpidec->Seek(0, 1);
+				}
+			}
 			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 			if (g_rubberBandStretcher) {
 				delete g_rubberBandStretcher;
@@ -11592,8 +11684,15 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				playb = loop1;
 				if (kvver == 2)
 					og->mod->SetPosition(og->kmp1, 0);
-				else
-					kpidec->Seek(0, 1);
+				else {
+					if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+						uint64_t np = 0;
+						g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
+					}
+					else {
+						kpidec->Seek(0, 1);
+					}
+				}
 				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 				if (g_rubberBandStretcher) {
 					delete g_rubberBandStretcher;
@@ -11628,8 +11727,49 @@ int readkpi(BYTE* bw, int cnt)
 						if (IsBadCodePtr((FARPROC)og->mod->Render) == 0)
 							r = og->mod->Render(og->kmp1, (BYTE*)bufkpi + cnt3, cnt1);
 					if (kvver == 5) {
+						bool rIsBytes = false;
+						if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+							// IPC往復回数が多いと音飛びするので、まとめて先読みしてキャッシュから供給する
+							const size_t need = (size_t)cnt1;
+							const size_t remain = (g_kpiRemoteCache.size() > g_kpiRemoteCachePos) ? (g_kpiRemoteCache.size() - g_kpiRemoteCachePos) : 0;
+							if (remain < need && !g_kpiRemoteEof) {
+								// 先読みサイズ: 最低 256KB
+								const uint32_t want = (uint32_t)max((DWORD)need, (DWORD)(256 * 1024));
+								std::vector<uint8_t> pcm;
+								bool eof = false;
+								if (!g_kpiHost.RenderBytes(g_kpiSession.sessionId, want, pcm, eof)) {
+									r = 0;
+								}
+								else {
+									// 使い切った分は先頭を捨ててメモリ増大を抑える
+									if (g_kpiRemoteCachePos > 0) {
+										g_kpiRemoteCache.erase(g_kpiRemoteCache.begin(), g_kpiRemoteCache.begin() + (ptrdiff_t)g_kpiRemoteCachePos);
+										g_kpiRemoteCachePos = 0;
+									}
+									g_kpiRemoteCache.insert(g_kpiRemoteCache.end(), pcm.begin(), pcm.end());
+									if (eof) g_kpiRemoteEof = true;
+								}
+							}
+
+							const size_t avail = (g_kpiRemoteCache.size() > g_kpiRemoteCachePos) ? (g_kpiRemoteCache.size() - g_kpiRemoteCachePos) : 0;
+							const DWORD copyBytes = (DWORD)min((size_t)cnt1, avail);
+							if (copyBytes) {
+								memcpy((BYTE*)bufkpi + cnt3, g_kpiRemoteCache.data() + g_kpiRemoteCachePos, copyBytes);
+								g_kpiRemoteCachePos += copyBytes;
+								r = copyBytes;
+								rIsBytes = true;
+							}
+							else {
+								r = 0;
+								rIsBytes = true;
+							}
+							if (g_kpiRemoteEof && copyBytes < cnt1) fade1 = 1;
+						}
+						else
 						r = kpidec->Render((BYTE*)bufkpi + (int)((float)cnt3 / (2.0 * wavch * (wavsam / 16.0))), (int)(cnt / (2.0 * wavch * (wavsam / 16.0))));
-						r = (DWORD)(r * (2.0 * wavch * (wavsam / 16.0)));
+						if (!rIsBytes) {
+							r = (DWORD)(r * (2.0 * wavch * (wavsam / 16.0)));
+						}
 					}
 					if (r == 0) fade1 = 1;
 					// 無音データを補填する処理を追加いたしました
@@ -13460,13 +13600,17 @@ void COggDlg::dp(CString a)
 			p.sub = 0;
 			CString ss, s;
 			s = filen;
-			ss = s.Left(s.ReverseFind(':') - 1);
+			{
+				uint32_t sel = 1;
+				SplitKpiSubsongPath(s, ss, sel);
+			}
 			if (ss != "") s = ss;
 			kpi[0] = 0;
 			pl->plugs(s, &p, kpi, kvver);
 			if (p.sub == -3) {//kb medua player
 				//				hDLLk = LoadLibrary(kpi);
 				//				pFunck = (pfnGetKMPModule)::GetProcAddress(hDLLk, "kmp_GetTestModule");
+				mode = -3;
 				modesub = -3;
 				play();
 				return;
@@ -13834,6 +13978,12 @@ void COggDlg::stop()
 			kpidec->Release();
 		if (ob5)
 			ob5->Release();
+		if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+			g_kpiHost.Close(g_kpiSession.sessionId);
+			ZeroMemory(&g_kpiSession, sizeof(g_kpiSession));
+			g_kpiRemote = false;
+			ResetKpiRemoteCache();
+		}
 		DoEvent();
 		thend = 1;
 		fadeadd = 0; fade = 1.0;
@@ -14425,21 +14575,32 @@ void COggDlg::timerp()
 		s.Format(LL14(L"file:音声ファイル%s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s"), g);
 	}
 	if (mode == -2 || mode == -3) sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
-	if (mode == -3) s.Format(LL14(
-		L"file:kpiファイル(%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)",
-		L"file:kpi (%s)"), sss);
+	if (mode == -3) {
+		CString arch = L"?";
+		if (g_kpiRemote) {
+			arch = L"x64";
+		}
+		else {
+			const WORD km = GetPeMachine(kpi);
+			if (km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64) arch = L"x64";
+			else if (km == IMAGE_FILE_MACHINE_I386) arch = L"x86";
+		}
+		s.Format(LL14(
+			L"file:kpiプラグイン(%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)",
+			L"file:kpi plugin (%s %s)"), sss, arch);
+	}
 	if (mode == -1) s.Format(LL14(
 		L"file:oggファイル",
 		L"file:ogg",
@@ -17405,7 +17566,10 @@ void COggDlg::OnRestart()
 				p.sub = 0;
 				CString ss, s;
 				s = filen;
-				ss = s.Left(s.ReverseFind(':') - 1);
+				{
+					uint32_t sel = 1;
+					SplitKpiSubsongPath(s, ss, sel);
+				}
 				if (ss != "") s = ss;
 				pl->plugs(s, &p, kpi, kvver);
 				if (p.sub == -3) {//kb medua player
@@ -17414,6 +17578,7 @@ void COggDlg::OnRestart()
 					_tchdir(ss);
 					//					hDLLk = LoadLibrary(kpi);
 					//					pFunck = (pfnGetKMPModule)::GetProcAddress(hDLLk, "kmp_GetTestModule");
+					mode = -3;
 					modesub = -3;
 					play();
 					return;
@@ -18437,7 +18602,13 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				}
 			}
 			else if (mode == -3) { // KPI
-				if (mod && mod->SetPosition && sikpi.dwSeekable) {
+				if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+					// playb は「サンプル位置」扱いなのでそのまま渡す
+					uint64_t np = 0;
+					g_kpiHost.Seek(g_kpiSession.sessionId, (uint64_t)playb, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
+					ResetKpiRemoteCache();
+				}
+				else if (mod && mod->SetPosition && sikpi.dwSeekable) {
 					mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit * (double)wavch) / 2000.0)));
 				}
 			}
@@ -18582,7 +18753,14 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 				}
 			}
 			else if (mode == -3) {
-				if (mod) {
+				if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+					uint64_t np = 0;
+					g_kpiHost.Seek(g_kpiSession.sessionId, (uint64_t)playb, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
+					ResetKpiRemoteCache();
+					sek = TRUE;
+					timer.SetEvent();
+				}
+				else if (mod) {
 					if (mod->SetPosition && sikpi.dwSeekable) mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit * (double)wavch) / 2000.0)));
 					sek = TRUE;
 					timer.SetEvent();
@@ -18655,7 +18833,14 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 				}
 			}
 			else if (mode == -3) {
-				if (mod) {
+				if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+					uint64_t np = 0;
+					g_kpiHost.Seek(g_kpiSession.sessionId, (uint64_t)playb, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
+					ResetKpiRemoteCache();
+					sek = TRUE;
+					timer.SetEvent();
+				}
+				else if (mod) {
 					if (mod->SetPosition && sikpi.dwSeekable) mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit * (double)wavch) / 2000.0)));
 					sek = TRUE;
 					timer.SetEvent();
@@ -18980,9 +19165,56 @@ void SplitString(const CString & input, const CString & delimiters, CStringArray
 	}
 }
 
+static WORD GetPeMachine(const CString& path)
+{
+	CFile f;
+	if (!f.Open(path, CFile::modeRead | CFile::shareDenyWrite, NULL)) return 0;
+
+	IMAGE_DOS_HEADER dos{};
+	if (f.Read(&dos, sizeof(dos)) != sizeof(dos)) return 0;
+	if (dos.e_magic != IMAGE_DOS_SIGNATURE) return 0;
+	if (dos.e_lfanew <= 0) return 0;
+
+	f.Seek(dos.e_lfanew, CFile::begin);
+	DWORD peSig = 0;
+	if (f.Read(&peSig, sizeof(peSig)) != sizeof(peSig)) return 0;
+	if (peSig != IMAGE_NT_SIGNATURE) return 0;
+
+	IMAGE_FILE_HEADER fileHdr{};
+	if (f.Read(&fileHdr, sizeof(fileHdr)) != sizeof(fileHdr)) return 0;
+	return fileHdr.Machine;
+}
+
 void plus2(int& c)
 {
 	CString ss = sswk;
+	const WORD machine = GetPeMachine(ss);
+	if (machine == IMAGE_FILE_MACHINE_AMD64 || machine == IMAGE_FILE_MACHINE_ARM64) {
+		// x86プロセスではLoadLibraryできないため、一覧だけ作る（実処理は別プロセスに委譲する想定）
+		kpiarch[kpicnt] = 64;
+		kpif[kpicnt] = ss;
+		std::wstring exts;
+		uint32_t ver = 0;
+		if (g_kpiHost.ListExts(ss.GetString(), ver, exts) && !exts.empty()) {
+			CString cs(exts.c_str());
+			CStringArray parts;
+			SplitString(cs, L"/", parts);
+			for (INT_PTR i = 0; i < parts.GetCount() && i < 299; ++i) {
+				ext[kpicnt][i] = parts.GetAt(i);
+				ext[kpicnt][i].MakeLower();
+				kvar[kpicnt][i] = (BYTE)(ver ? ver : 5);
+			}
+			if (parts.GetCount() < 299) ext[kpicnt][(int)parts.GetCount()] = L"";
+		}
+		else {
+			ext[kpicnt][0] = L"";
+		}
+		ext[kpicnt][299] = L"";
+		kvar[kpicnt][0] = (BYTE)(ver ? ver : 5);
+		kpicnt++;
+		return;
+	}
+
 	hDLLk1[kpicnt] = LoadLibrary(ss);
 	if (hDLLk1[kpicnt]) {
 		pFunck[kpicnt] = (pfnGetKMPModule)GetProcAddress(hDLLk1[kpicnt], SZ_KMP_GETMODULE);
@@ -18990,6 +19222,7 @@ void plus2(int& c)
 		kpi_CreateInstance cr = (kpi_CreateInstance)GetProcAddress(hDLLk1[kpicnt], "kpi_CreateInstance");
 		if (pFunck[kpicnt] || cr) {
 			if (cr) { // kpi 5
+				kpiarch[kpicnt] = 32;
 				IKpiDecoderModule* ob = NULL;
 				IUnknown* pMyObject = new CMyHost();
 				HRESULT hr = cr(IID_IKpiDecoderModule, (void**)&ob, pMyObject);
@@ -19001,13 +19234,16 @@ void plus2(int& c)
 
 						CStringArray parts;
 						SplitString(m_ModuleInfo->cszSupportExts, L"/", parts);
-						for (INT_PTR i = 0; i < parts.GetCount(); ++i)
+						for (INT_PTR i = 0; i < parts.GetCount() && i < 299; ++i)
 						{
 							ext[kpicnt][i] = parts.GetAt(i);
 							ext[kpicnt][i].MakeLower();
 							kvar[kpicnt][i] = 5;
 						}
-
+						if (parts.GetCount() < 299) {
+							ext[kpicnt][(int)parts.GetCount()] = L"";
+						}
+						ext[kpicnt][299] = L"";
 
 					}
 
@@ -19019,6 +19255,7 @@ void plus2(int& c)
 			}
 			else { // kpi 2
 				{
+					kpiarch[kpicnt] = 32;
 					mod1[kpicnt] = pFunck[kpicnt]();
 					kpif[kpicnt] = ss;
 					for (int i = 0; i < 299; i++) {
@@ -19026,13 +19263,13 @@ void plus2(int& c)
 						if (mod1[kpicnt]->ppszSupportExts) {
 							if (mod1[kpicnt]->ppszSupportExts[i] == NULL ||
 								mod1[kpicnt]->ppszSupportExts[i][0] == NULL) {
-								ext[kpicnt][i] == L""; break;
+								ext[kpicnt][i] = L""; break;
 							}
 							ext[kpicnt][i] = mod1[kpicnt]->ppszSupportExts[i];
 							ext[kpicnt][i].MakeLower();
 							kvar[kpicnt][i] = 2;
 						}
-						else { ext[kpicnt][i] == ""; break; }
+						else { ext[kpicnt][i] = L""; break; }
 					}
 					ext[kpicnt][299] = "";
 					if (mod1[kpicnt]) {

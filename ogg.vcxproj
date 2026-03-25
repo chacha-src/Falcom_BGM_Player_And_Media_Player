@@ -2000,6 +2000,7 @@
       <IntelJCCErratum>false</IntelJCCErratum>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -2950,6 +2951,7 @@
     </Bscmake>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="KpiHostClient.cpp" />
     <ClCompile Include="Arc.cpp" />
     <ClCompile Include="AudioSelect.cpp" />
     <ClCompile Include="Br4.cpp" />
@@ -3027,6 +3029,8 @@
     <ClCompile Include="CPlayListNew.cpp" />
     <ClCompile Include="Dino.cpp" />
     <ClCompile Include="Douga.cpp" />
+    <ClInclude Include="KpiHostClient.h" />
+    <ClInclude Include="kpi_host_ipc.h" />
     <ClInclude Include="ALACAudioTypes.h" />
     <ClInclude Include="CAFFileALAC.h" />
     <ClInclude Include="CBlurDialogBase.h" />
