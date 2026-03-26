@@ -1,4 +1,4 @@
-﻿// Douga.cpp : インプリメンテーション ファイル
+// Douga.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
@@ -4580,38 +4580,37 @@ extern BOOL videoonly;
 void CDouga::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
 	// TODO: ここにメッセージ ハンドラ コードを追加するか、既定の処理を呼び出します。
-	if(pMediaSeeking && (mode==-2 || (mode>0 && videoonly==TRUE))){
-		LONGLONG a;
-		pMediaSeeking->GetCurrentPosition(&a);
-		if(nChar==VK_RIGHT){
-			a+=10*10000000;
-			pMediaSeeking->SetPositions(&a,AM_SEEKING_AbsolutePositioning,NULL,AM_SEEKING_NoPositioning);
+	const BOOL videoMode = (mode == -2 || (mode > 0 && videoonly == TRUE));
+	// 動画の左右はメイン窓のホットキー(8002/8003)と同一（スライダー＋pMainFrame1->seek）
+	if (videoMode && og && (nChar == VK_RIGHT || nChar == VK_LEFT)) {
+		const WPARAM hotId = (nChar == VK_RIGHT) ? (WPARAM)8002 : (WPARAM)8003;
+		og->SendMessage(WM_HOTKEY, hotId, 0);
+		CFrameWnd::OnKeyDown(nChar, nRepCnt, nFlags);
+		return;
+	}
+	if (pMediaSeeking && videoMode) {
+		if (nChar == VK_UP) {
+			og->m_dsval.SetPos(og->m_dsval.GetPos() + 5);
 		}
-		if(nChar==VK_LEFT){
-			a-=10*10000000;
-			pMediaSeeking->SetPositions(&a,AM_SEEKING_AbsolutePositioning,NULL,AM_SEEKING_NoPositioning);
+		if (nChar == VK_DOWN) {
+			og->m_dsval.SetPos(og->m_dsval.GetPos() - 5);
 		}
-		if(nChar==VK_UP){
-			og->m_dsval.SetPos(og->m_dsval.GetPos()+5);
-		}
-		if(nChar==VK_DOWN){
-			og->m_dsval.SetPos(og->m_dsval.GetPos()-5);
-		}
-		if(nChar=='C'){
+		if (nChar == 'C') {
 			On32775();
 		}
-	}else{
-		if(nChar==VK_RIGHT){
+	}
+	else {
+		if (nChar == VK_RIGHT) {
 			og->rl(1);
 		}
-		if(nChar==VK_LEFT){
+		if (nChar == VK_LEFT) {
 			og->rl(-1);
 		}
-		if(nChar==VK_UP){
-			og->m_dsval.SetPos(og->m_dsval.GetPos()+5);
+		if (nChar == VK_UP) {
+			og->m_dsval.SetPos(og->m_dsval.GetPos() + 5);
 		}
-		if(nChar==VK_DOWN){
-			og->m_dsval.SetPos(og->m_dsval.GetPos()-5);
+		if (nChar == VK_DOWN) {
+			og->m_dsval.SetPos(og->m_dsval.GetPos() - 5);
 		}
 	}
 	CFrameWnd::OnKeyDown(nChar, nRepCnt, nFlags);

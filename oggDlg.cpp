@@ -701,7 +701,7 @@ static bool SplitKpiSubsongPath(const CString& in, CString& outPath, uint32_t& o
 		if (tail[i] < L'0' || tail[i] > L'9') return false;
 	}
 
-	outPath = in.Left(len - 5);
+	outPath = in.Left(len - 6);
 	outSel = (uint32_t)_tstoi(tail);
 	if (outSel == 0) outSel = 1;
 	return true;
@@ -18512,7 +18512,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	}
 
 	// 実際のシーク処理（移動を伴うもの）
-	if (nSBCode == SB_PAGELEFT || nSBCode == SB_PAGERIGHT || nSBCode == SB_ENDSCROLL) {
+	// SB_THUMBPOSITION: つまみを離した直後（環境によっては SB_ENDSCROLL が来ない）
+	if (nSBCode == SB_PAGELEFT || nSBCode == SB_PAGERIGHT || nSBCode == SB_ENDSCROLL || nSBCode == SB_THUMBPOSITION) {
 
 		// ★排他制御開始：再生スレッドとの競合を防ぐ
 		std::unique_lock<std::mutex> hscroll_lock(cl2);
@@ -18530,7 +18531,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			if (curpos < maxpos) curpos = min(maxpos, curpos + info);
 			else { hsc = 2; sflg = FALSE; return; }
 		}
-		// SB_ENDSCROLL の場合は現在の r->GetPos() をそのまま使用
+		// SB_ENDSCROLL / SB_THUMBPOSITION の場合はこの時点の GetPos() が最終位置
 
 		// ゴムバンドの破棄（シーク時は作り直し）
 		if (g_rubberBandStretcher) {
@@ -18538,8 +18539,14 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			g_rubberBandStretcher = NULL;
 		}
 
-		// 位置の補正
-		if ((loop1 + loop2) < curpos && endf == 0) curpos = (loop1 + loop2);
+		// 位置の補正（mode==-2 では timerp が loop1=loop2=0 にするため、音声用クランプを掛けると常に先頭へ落ちる）
+		if (pMediaPosition && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
+			if (curpos < minpos) curpos = minpos;
+			if (curpos > maxpos) curpos = maxpos;
+		}
+		else {
+			if ((loop1 + loop2) < curpos && endf == 0) curpos = (loop1 + loop2);
+		}
 		r->SetPos(curpos);
 		playb = (__int64)curpos;
 
@@ -18547,6 +18554,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		if (pMediaPosition && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
 			if (aa2 == 0) pMainFrame1->seek((LONGLONG)((float)curpos * 100000.0f));
 			else         pMainFrame1->seek((LONGLONG)((float)curpos * 100000.0f));
+			hsc = 0;
+			poss = 0;
 		}
 		else {
 			// 2. 音声エンジンのシーク
@@ -18674,8 +18683,31 @@ void COggDlg::OnButton21()
 
 void COggDlg::OnNMReleasedcaptureSlider2(NMHDR * pNMHDR, LRESULT * pResult)
 {
-	// TODO: ここにコントロール通知ハンドラ コードを追加します。
 	*pResult = 0;
+	if (!pNMHDR) return;
+	HWND hwndFrom = (HWND)(UINT_PTR)pNMHDR->idFrom;
+	if (hwndFrom != m_time.GetSafeHwnd()) return;
+	if (!pMediaPosition || !pMainFrame1) return;
+	if (!(mode == -2 || (mode > 0 && videoonly == TRUE))) return;
+	// ドラッグ中のみ THUMBTRACK で hsc=1。SB_ENDSCROLL が来ない環境用の保険
+	if (hsc != 1) return;
+
+	std::unique_lock<std::mutex> hscroll_lock(cl2);
+	CSliderCtrl* r = (CSliderCtrl*)GetDlgItem(IDC_SLIDER2);
+	if (!r) return;
+
+	int minpos, maxpos;
+	r->GetRange(minpos, maxpos);
+	int curpos = r->GetPos();
+	if (curpos < minpos) curpos = minpos;
+	if (curpos > maxpos) curpos = maxpos;
+	r->SetPos(curpos);
+	playb = (__int64)curpos;
+
+	if (aa2 == 0) pMainFrame1->seek((LONGLONG)((float)curpos * 100000.0f));
+	else         pMainFrame1->seek((LONGLONG)((float)curpos * 100000.0f));
+	hsc = 0;
+	poss = 0;
 }
 
 
@@ -18860,6 +18892,21 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 
 void COggDlg::rl(int a)
 {
+	if (pMediaPosition && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
+		int minp = 0, maxp = 0;
+		m_time.GetRange(minp, maxp);
+		playb = (__int64)m_time.GetPos();
+		playb += (__int64)(10 * 100 * a);
+		if (playb < minp) playb = minp;
+		if (playb > maxp) playb = maxp;
+		m_time.SetPos((int)playb);
+		if (pMainFrame1) {
+			if (aa2 == 0) pMainFrame1->seek((LONGLONG)((float)playb * 100000.0f));
+			else         pMainFrame1->seek((LONGLONG)((float)playb * 100000.0f));
+		}
+		poss = 0;
+		return;
+	}
 	playb += wavbit * 10 * a;
 	if ((loop1 + loop2) < (int)playb && endf == 0) playb = (loop1 + loop2);
 	m_time.SetPos((int)playb);

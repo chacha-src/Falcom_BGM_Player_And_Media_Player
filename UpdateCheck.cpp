@@ -449,8 +449,10 @@ bool DoUpdateAndRestart()
 		"set LOG=\"%sogg_update_log.txt\"\r\n"
 		"echo 更新処理を開始いたします > %%LOG%%\r\n"
 		"set RETRY=0\r\n"
+		"taskkill /IM %s /F >> %%LOG%% 2>&1\r\n"
 		":wait\r\n"
 		"ping -n 4 127.0.0.1 >nul\r\n"
+		"taskkill /IM %s /F >> %%LOG%% 2>&1\r\n"
 		"copy /y \"%s\\%s\" \"%s\" >> %%LOG%% 2>&1\r\n"
 		"if errorlevel 1 goto retry\r\n"
 		"copy /y \"%s\\%s\" \"%s\" >> %%LOG%% 2>&1\r\n"
@@ -471,6 +473,8 @@ bool DoUpdateAndRestart()
 		":end\r\n"
 		"del \"%%~f0\"\r\n",
 		(LPCSTR)tempPathA,
+		(LPCSTR)targetHostExeA,
+		(LPCSTR)targetHostExeA,
 		(LPCSTR)extractDirA, (LPCSTR)targetHostExeA, (LPCSTR)targetHostExePathA,
 		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA,
 		(LPCSTR)exeDirA, (LPCSTR)targetExePathA, // 成功時は元のフォルダに移動して起動
