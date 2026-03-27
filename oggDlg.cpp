@@ -11660,6 +11660,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				}
 			}
 			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+			cnt3 = 0;
 			if (g_rubberBandStretcher) {
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
@@ -11694,6 +11695,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 					}
 				}
 				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+				cnt3 = 0;
 				if (g_rubberBandStretcher) {
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
@@ -11712,7 +11714,7 @@ int readkpi(BYTE* bw, int cnt)
 {
 	if (cnt == 0) return 0;
 	_set_se_translator(trans_func);
-	DWORD cnt1 = (kvver == 2) ? og->sikpi.dwUnitRender * 2 : 4096, cnt2 = (DWORD)cnt, cnt4 = 0; if (cnt1 == 0) cnt1 = 4096;
+	DWORD cnt1 = (kvver == 2) ? og->sikpi.dwUnitRender : 4096, cnt2 = (DWORD)cnt, cnt4 = 0; if (cnt1 == 0) cnt1 = 4096;
 	DWORD r = cnt;
 	try {
 		int len3 = 0, len4 = 0;
@@ -11721,11 +11723,21 @@ int readkpi(BYTE* bw, int cnt)
 			r = 0;
 			for (int kl = 0; kl < 5; kl++) {
 				for (;;) {
-					if (cnt2 <= cnt3) { r = 1;
-					break; }
-					if (kvver == 2)
+					DWORD requestBytes = cnt1;
+					if (cnt2 <= cnt3) {
+						r = 1;
+						break;
+					}
+					if (kvver == 2) {
+						const int bitsPerSample = abs(wavsam);
+						const DWORD bytesPerFrame = (DWORD)max(1, wavch * (bitsPerSample / 8));
+						const DWORD remainBytes = (cnt > (int)cnt3) ? (DWORD)(cnt - (int)cnt3) : 0;
+						requestBytes = min(cnt1, remainBytes);
+						if (bytesPerFrame > 1) requestBytes -= (requestBytes % bytesPerFrame);
+						if (requestBytes == 0) break;
 						if (IsBadCodePtr((FARPROC)og->mod->Render) == 0)
-							r = og->mod->Render(og->kmp1, (BYTE*)bufkpi + cnt3, cnt1);
+							r = og->mod->Render(og->kmp1, (BYTE*)bufkpi + cnt3, requestBytes);
+					}
 					if (kvver == 5) {
 						bool rIsBytes = false;
 						if (g_kpiRemote && g_kpiSession.sessionId != 0) {
@@ -11766,9 +11778,17 @@ int readkpi(BYTE* bw, int cnt)
 							if (g_kpiRemoteEof && copyBytes < cnt1) fade1 = 1;
 						}
 						else
-						r = kpidec->Render((BYTE*)bufkpi + (int)((float)cnt3 / (2.0 * wavch * (wavsam / 16.0))), (int)(cnt / (2.0 * wavch * (wavsam / 16.0))));
+						{
+							const int bitsPerSample = abs(wavsam);
+							const int bytesPerFrame = max(1, wavch * (bitsPerSample / 8));
+							const int remainBytes = max(0, (int)cnt - (int)cnt3);
+							const DWORD requestSamples = (DWORD)(remainBytes / bytesPerFrame);
+							r = kpidec->Render((BYTE*)bufkpi + cnt3, requestSamples);
+						}
 						if (!rIsBytes) {
-							r = (DWORD)(r * (2.0 * wavch * (wavsam / 16.0)));
+							const int bitsPerSample = abs(wavsam);
+							const int bytesPerFrame = max(1, wavch * (bitsPerSample / 8));
+							r = (DWORD)(r * bytesPerFrame);
 						}
 					}
 					if (r == 0) fade1 = 1;
@@ -11776,7 +11796,7 @@ int readkpi(BYTE* bw, int cnt)
 					if (fade1 == 1 || bufzero > 20) {
 						if (muon != 0) {
 							if (savedata.saverenzoku == 0) {
-								int fill_size = cnt1;
+								int fill_size = (int)requestBytes;
 								if (cnt3 + fill_size > cnt) fill_size = cnt - cnt3;
 								if (fill_size > 0) {
 									ZeroMemory((BYTE*)bufkpi + cnt3, fill_size);
@@ -11893,130 +11913,142 @@ int readkpi(BYTE* bw, int cnt)
 		sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
 		sss.MakeLower();
 
-		// 音量やフェードに関する処理にも32bit対応を追加いたしました
+		// kakuVal の音量調整（double計算と厳密なクリッピングを追加いたしました）
 		if (wavsam == 32) {
 			for (int i = 0; i < cnt / 4; i++) {
-				int c4 = b32c[i];
-				c4 = (int)((float)c4 * ((float)savedata.kakuVal / 100.0f));
-				b32c[i] = c4;
+				double c4 = (double)b32c[i] * ((double)savedata.kakuVal / 100.0);
+				if (c4 > 2147483647.0) c4 = 2147483647.0;
+				if (c4 < -2147483648.0) c4 = -2147483648.0;
+				b32c[i] = (int)c4;
 			}
 		}
 		else if (wavsam == 24) {
 			for (int i = 0; i < cnt / 3; i++) {
-				int c4 = b24c[i];
-				c4 = (int)((float)c4 * ((float)savedata.kakuVal / 100.0f));
-				b24c[i] = c4;
+				double c4 = (double)b24c[i] * ((double)savedata.kakuVal / 100.0);
+				if (c4 > 8388607.0) c4 = 8388607.0;
+				if (c4 < -8388608.0) c4 = -8388608.0;
+				b24c[i] = (int)c4;
 			}
 		}
 		else {
 			for (int i = 0; i < cnt / 2; i++) {
-				int c = (int)b[i];
-				c = (int)((float)c * ((float)savedata.kakuVal / 100.0f));
-				b[i] = (short)c;
+				double cv = (double)b[i] * ((double)savedata.kakuVal / 100.0);
+				if (cv > 32767.0) cv = 32767.0;
+				if (cv < -32768.0) cv = -32768.0;
+				b[i] = (short)cv;
 			}
 		}
 
+		// SPCの音量調整（double計算と厳密なクリッピングを追加いたしました）
 		if (sss == "spc" || sss.Left(3) == "hes") {
 			if (savedata.spc != 1) {
 				if (wavsam == 32) {
 					for (int i = 0; i < cnt / 4; i++) {
-						__int64 c4 = b32c[i];
-						if (savedata.spc == 2)	c4 = (__int64)((float)c4 * 2.0f);
-						else if (savedata.spc == 4) c4 = (__int64)((float)c4 * 3.0f);
-						else if (savedata.spc == 8) c4 = (__int64)((float)c4 * 4.0f);
-						else if (savedata.spc == 16) c4 = (__int64)((float)c4 * 5.0f);
-						if (c4 > 2147483647) c4 = 2147483647;
-						if (c4 < -2147483648LL) c4 = -2147483648LL;
+						double c4 = (double)b32c[i];
+						if (savedata.spc == 2) c4 *= 2.0;
+						else if (savedata.spc == 4) c4 *= 3.0;
+						else if (savedata.spc == 8) c4 *= 4.0;
+						else if (savedata.spc == 16) c4 *= 5.0;
+						if (c4 > 2147483647.0) c4 = 2147483647.0;
+						if (c4 < -2147483648.0) c4 = -2147483648.0;
 						b32c[i] = (int)c4;
 					}
 				}
 				else if (wavsam == 24) {
 					for (int i = 0; i < cnt / 3; i++) {
-						int c4 = b24c[i];
-						if (savedata.spc == 2)	c4 = (int)((float)c4 * 2.0f);
-						else if (savedata.spc == 4) c4 = (int)((float)c4 * 3.0f);
-						else if (savedata.spc == 8) c4 = (int)((float)c4 * 4.0f);
-						else if (savedata.spc == 16) c4 = (int)((float)c4 * 5.0f);
-						if (c4 > 8388607)c4 = 8388607;
-						if (c4 < -8388608)c4 = -8388608;
-						b24c[i] = c4;
+						double c4 = (double)b24c[i];
+						if (savedata.spc == 2) c4 *= 2.0;
+						else if (savedata.spc == 4) c4 *= 3.0;
+						else if (savedata.spc == 8) c4 *= 4.0;
+						else if (savedata.spc == 16) c4 *= 5.0;
+						if (c4 > 8388607.0) c4 = 8388607.0;
+						if (c4 < -8388608.0) c4 = -8388608.0;
+						b24c[i] = (int)c4;
 					}
 				}
 				else {
 					for (int i = 0; i < cnt / 2; i++) {
-						int c = (int)b[i];
-						if (savedata.spc == 2)	c = (int)((float)b[i] * 2.0f);
-						else if (savedata.spc == 4) c = (int)((float)b[i] * 3.0f);
-						else if (savedata.spc == 8) c = (int)((float)b[i] * 4.0f);
-						else if (savedata.spc == 16) c = (int)((float)b[i] * 5.0f);
-						if (c >= 32768)c = 32767;
-						if (c < -32768)c = -32768;
-						b[i] = (short)c;
+						double cv = (double)b[i];
+						if (savedata.spc == 2) cv *= 2.0;
+						else if (savedata.spc == 4) cv *= 3.0;
+						else if (savedata.spc == 8) cv *= 4.0;
+						else if (savedata.spc == 16) cv *= 5.0;
+						if (cv > 32767.0) cv = 32767.0;
+						if (cv < -32768.0) cv = -32768.0;
+						b[i] = (short)cv;
 					}
 				}
 			}
 		}
 
+		// kpivolの音量調整（double計算と厳密なクリッピングを追加いたしました）
 		if (savedata.kpivol != 1) {
 			if (wavsam == 32) {
 				for (int i = 0; i < cnt / 4; i++) {
-					__int64 c4 = b32c[i];
-					if (savedata.kpivol == 2)	c4 = (__int64)((float)c4 * 2.0f);
-					else if (savedata.kpivol == 4) c4 = (__int64)((float)c4 * 3.0f);
-					else if (savedata.kpivol == 8) c4 = (__int64)((float)c4 * 4.0f);
-					else if (savedata.kpivol == 16) c4 = (__int64)((float)c4 * 5.0f);
-					if (c4 > 2147483647) c4 = 2147483647;
-					if (c4 < -2147483648LL) c4 = -2147483648LL;
+					double c4 = (double)b32c[i];
+					if (savedata.kpivol == 2) c4 *= 2.0;
+					else if (savedata.kpivol == 4) c4 *= 3.0;
+					else if (savedata.kpivol == 8) c4 *= 4.0;
+					else if (savedata.kpivol == 16) c4 *= 5.0;
+					if (c4 > 2147483647.0) c4 = 2147483647.0;
+					if (c4 < -2147483648.0) c4 = -2147483648.0;
 					b32c[i] = (int)c4;
 				}
 			}
 			else if (wavsam == 24) {
 				for (int i = 0; i < cnt / 3; i++) {
-					int c4 = b24c[i];
-					if (savedata.kpivol == 2)	c4 = (int)((float)c4 * 2.0f);
-					else if (savedata.kpivol == 4) c4 = (int)((float)c4 * 3.0f);
-					else if (savedata.kpivol == 8) c4 = (int)((float)c4 * 4.0f);
-					else if (savedata.kpivol == 16) c4 = (int)((float)c4 * 5.0f);
-					if (c4 > 8388607)c4 = 8388607;
-					if (c4 < -8388608)c4 = -8388608;
-					b24c[i] = c4;
+					double c4 = (double)b24c[i];
+					if (savedata.kpivol == 2) c4 *= 2.0;
+					else if (savedata.kpivol == 4) c4 *= 3.0;
+					else if (savedata.kpivol == 8) c4 *= 4.0;
+					else if (savedata.kpivol == 16) c4 *= 5.0;
+					if (c4 > 8388607.0) c4 = 8388607.0;
+					if (c4 < -8388608.0) c4 = -8388608.0;
+					b24c[i] = (int)c4;
 				}
 			}
 			else {
 				for (int i = 0; i < cnt / 2; i++) {
-					int c = (int)b[i];
-					if (savedata.kpivol == 2)	c = (int)((float)b[i] * 2.0f);
-					else if (savedata.kpivol == 3) c = (int)((float)b[i] * 3.0f);
-					else if (savedata.kpivol == 4) c = (int)((float)b[i] * 4.0f);
-					else if (savedata.kpivol == 5) c = (int)((float)b[i] * 5.0f);
-					if (c >= 32768.0f)c = 32767;
-					if (c < -32768.0f)c = -32768;
-					b[i] = (short)c;
+					double cv = (double)b[i];
+					if (savedata.kpivol == 2) cv *= 2.0;
+					else if (savedata.kpivol == 3) cv *= 3.0;
+					else if (savedata.kpivol == 4) cv *= 4.0;
+					else if (savedata.kpivol == 5) cv *= 5.0;
+					if (cv > 32767.0) cv = 32767.0;
+					if (cv < -32768.0) cv = -32768.0;
+					b[i] = (short)cv;
 				}
 			}
 		}
+
 		fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
-		// fadeを三乗して計算密度を変更
+		// fadeの音量調整（double計算と厳密なクリッピングを追加いたしました）
 		if (wavsam == 32) {
-			float c4;
-			int c5;
 			for (int i = 0; i < cnt / 4; i++) {
-				c5 = b32c[i]; c4 = (float)c5;
-				c4 = c4 * fade * fade; c5 = (int)c4;
-				b32c[i] = c5;
+				double c4 = (double)b32c[i];
+				c4 = c4 * (double)fade * (double)fade;
+				if (c4 > 2147483647.0) c4 = 2147483647.0;
+				if (c4 < -2147483648.0) c4 = -2147483648.0;
+				b32c[i] = (int)c4;
 			}
 		}
 		else if (wavsam == 24) {
-			float c4;
-			int c5;
 			for (int i = 0; i < cnt / 3; i++) {
-				c5 = b24c[i]; c4 = (float)c5;
-				c4 = c4 * fade * fade; c5 = (int)c4;
-				b24c[i] = c5;
+				double c4 = (double)b24c[i];
+				c4 = c4 * (double)fade * (double)fade;
+				if (c4 > 8388607.0) c4 = 8388607.0;
+				if (c4 < -8388608.0) c4 = -8388608.0;
+				b24c[i] = (int)c4;
 			}
 		}
 		else {
-			for (int i = 0; i < cnt / 2; i++) { c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c; }
+			for (int i = 0; i < cnt / 2; i++) {
+				double cv = (double)b[i];
+				cv = cv * (double)fade * (double)fade;
+				if (cv > 32767.0) cv = 32767.0;
+				if (cv < -32768.0) cv = -32768.0;
+				b[i] = (short)cv;
+			}
 		}
 
 		if ((UINT)wl < (UINT)0x7fff0000) {
