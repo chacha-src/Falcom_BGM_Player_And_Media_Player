@@ -1,4 +1,4 @@
-// UpdateCheck.cpp - 起動時更新チェック・ダウンロード・展開
+﻿// UpdateCheck.cpp - 起動時更新チェック・ダウンロード・展開
 #include "stdafx.h"
 #include "UpdateCheck.h"
 #include "oggDlg.h"

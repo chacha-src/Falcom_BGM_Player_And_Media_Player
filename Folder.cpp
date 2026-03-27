@@ -1,10 +1,11 @@
-﻿// Folder.cpp : インプリメンテーション ファイル
+// Folder.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
 #include "ogg.h"
 #include "Folder.h"
 #include "PVI.h"
+#include "KpiV5ConfigDlg.h"
 #include <direct.h>
 
 #ifdef _DEBUG
@@ -81,6 +82,7 @@ void CFolder::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_BUTTON52, m24);
 	DDX_Control(pDX, IDC_BUTTON55, m25);
 	DDX_Control(pDX, IDC_BUTTON56, m27);
+	DDX_Control(pDX, IDC_BUTTON57, m_fsafa);
 }
 
 
@@ -112,6 +114,7 @@ BEGIN_MESSAGE_MAP(CFolder, CCustomDialog)
 	ON_BN_CLICKED(IDC_BUTTON55, &CFolder::OnBnClickedButton55)
 	ON_BN_CLICKED(IDC_BUTTON56, &CFolder::OnBnClickedButton56)
 	ON_BN_CLICKED(IDC_BUTTON25, &CFolder::OnBnClickedButton25)
+	ON_BN_CLICKED(IDC_BUTTON57, &CFolder::OnBnClickedButton57)
 	ON_WM_CTLCOLOR()
 	ON_WM_MOVING()
 	ON_WM_CREATE()
@@ -130,6 +133,21 @@ BOOL CFolder::OnInitDialog()
 	CCustomDialog::OnInitDialog();
 
 	SetWindowText(LL14(L"フォルダ設定", L"Folder Settings", L"Paramètres dossier", L"Impostazioni cartella", L"Configuración de carpeta", L"폴더 설정", L"文件夹设置", L"إعدادات المجلد", L"Настройки папки", L"Ordnereinstellungen", L"Configurações de pasta", L"Mapinstellingen", L"Ustawienia folderu", L"Klasör ayarları"));
+	SetDlgItemText(IDC_BUTTON57, LL14(
+		L"KPI ver5設定",
+		L"KPI ver5 Settings",
+		L"Parametres KPI ver5",
+		L"Impostazioni KPI ver5",
+		L"Configuracion KPI ver5",
+		L"KPI ver5 설정",
+		L"KPI ver5 设置",
+		L"إعدادات KPI ver5",
+		L"Настройки KPI ver5",
+		L"KPI ver5 Einstellungen",
+		L"Configuracoes KPI ver5",
+		L"KPI ver5 instellingen",
+		L"Ustawienia KPI ver5",
+		L"KPI ver5 ayarlari"));
 	m_1s.SetWindowText(savedata.ys6);
 	m_2s.SetWindowText(savedata.ysf);
 	m_3s.SetWindowText(savedata.ed6fc);
@@ -610,6 +628,13 @@ void CFolder::OnBnClickedButton25()
 {
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
 	CPVI *p = new CPVI(CWnd::FromHandle(GetSafeHwnd()));
+	p->DoModal();
+	delete p;
+}
+
+void CFolder::OnBnClickedButton57()
+{
+	CKpiV5ConfigDlg* p = new CKpiV5ConfigDlg(CWnd::FromHandle(GetSafeHwnd()));
 	p->DoModal();
 	delete p;
 }

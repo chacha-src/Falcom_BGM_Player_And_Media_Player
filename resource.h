@@ -1,4 +1,4 @@
-﻿//{{NO_DEPENDENCIES}}
+//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ で生成されたインクルード ファイル。
 // ogg.rc で使用
 //
@@ -73,6 +73,7 @@
 #define IDD_IMAGE                       191
 #define IDD_EQUALIZER                   194
 #define IDD_WAVEXPORT                   195
+#define IDD_KPI5CFG                     196
 #define IDC_STATIC11                    1000
 #define IDC_BUTTON1                     1001
 #define IDC_BUTTON5                     1002
@@ -328,6 +329,8 @@
 #define IDC_WAVEXPORT_LOOP_LABEL        3305
 #define IDC_WAVEXPORT_PATH_LABEL        3306
 #define IDC_WAVEXPORT_CLOSE             3307
+#define IDC_EDIT_KPI5CFG                3308
+#define IDC_STATIC_KPI5CFG              3309
 #define ID_MENUITEM32771                32771
 #define ID_MENUITEM32772                32772
 #define ID_MENUITEM32773                32773
@@ -341,7 +344,6 @@
 #define ID__32784                       32784
 #define ID_32785                        32785
 #define ID_POP_32787                    32787
-#define ID_POP_WAVEXPORT                32950
 #define ID_32788                        32788
 #define ID_32790                        32790
 #define ID_32792                        32792
@@ -414,6 +416,7 @@
 #define ID_32915                        32915
 #define ID_32916                        32916
 #define ID_32917                        32917
+#define ID_POP_WAVEXPORT                32950
 #define ID_MV1                          40000
 #define ID_MV2                          40001
 #define ID_MV3                          40002
@@ -509,7 +512,7 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        197
+#define _APS_NEXT_RESOURCE_VALUE        198
 #define _APS_NEXT_COMMAND_VALUE         32948
 #define _APS_NEXT_CONTROL_VALUE         3307
 #define _APS_NEXT_SYMED_VALUE           104

@@ -3110,6 +3110,10 @@
     <ClCompile Include="itiran_YSF.cpp" />
     <ClCompile Include="itiran_YSO.cpp" />
     <ClCompile Include="kpi.cpp" />
+    <ClCompile Include="KpiV5ConfigDlg.cpp" />
+    <ClCompile Include="KpiV5ConfigStore.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="Kpilist.cpp" />
     <ClCompile Include="kpi_decoder.cpp" />
     <ClCompile Include="kpi_device.cpp" />
@@ -3396,6 +3400,8 @@
     <ClInclude Include="itiran_YSF.h" />
     <ClInclude Include="itiran_YSO.h" />
     <ClInclude Include="kpi.h" />
+    <ClInclude Include="KpiV5ConfigDlg.h" />
+    <ClInclude Include="KpiV5ConfigStore.h" />
     <ClInclude Include="Kpilist.h" />
     <ClInclude Include="kpi_decoder.h" />
     <ClInclude Include="kpi_device.h" />

@@ -4,10 +4,12 @@
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
+#include <cstdlib>
 
 #include "..\kpi_decoder.h"
 #include "..\kmp_pi.h"
 #include "..\kpi_host_ipc.h"
+#include "..\KpiV5ConfigStore.h"
 
 static std::wstring DirNameOf(const std::wstring& path)
 {
@@ -15,6 +17,70 @@ static std::wstring DirNameOf(const std::wstring& path)
 	if (p == std::wstring::npos) return L"";
 	return path.substr(0, p + 1);
 }
+
+static std::wstring ParentDirOf(const std::wstring& path)
+{
+	if (path.empty()) return L"";
+	size_t end = path.size();
+	while (end > 0 && (path[end - 1] == L'\\' || path[end - 1] == L'/')) --end;
+	if (end == 0) return L"";
+	size_t p = path.find_last_of(L"\\/", end - 1);
+	if (p == std::wstring::npos) return L"";
+	return path.substr(0, p + 1);
+}
+
+static void CollectSubDirsRecursive(const std::wstring& baseDir, int depth, std::vector<std::wstring>& out)
+{
+	if (depth <= 0 || baseDir.empty()) return;
+	std::wstring pat = baseDir;
+	if (!pat.empty() && pat.back() != L'\\' && pat.back() != L'/') pat += L'\\';
+	pat += L"*";
+	WIN32_FIND_DATAW fd{};
+	HANDLE h = FindFirstFileW(pat.c_str(), &fd);
+	if (h == INVALID_HANDLE_VALUE) return;
+	do {
+		if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+		if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+		std::wstring sub = baseDir;
+		if (!sub.empty() && sub.back() != L'\\' && sub.back() != L'/') sub += L'\\';
+		sub += fd.cFileName;
+		if (!sub.empty() && sub.back() != L'\\' && sub.back() != L'/') sub += L'\\';
+		out.push_back(sub);
+		CollectSubDirsRecursive(sub, depth - 1, out);
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
+}
+
+static std::vector<std::wstring> GetExeRelatedDllDirs()
+{
+	std::vector<std::wstring> dirs;
+	wchar_t exePath[MAX_PATH]{};
+	if (!GetModuleFileNameW(NULL, exePath, _countof(exePath))) return dirs;
+	std::wstring exeDir = DirNameOf(exePath);
+	if (exeDir.empty()) return dirs;
+	dirs.push_back(exeDir);
+	CollectSubDirsRecursive(exeDir, 3, dirs);
+	return dirs;
+}
+
+struct ScopedDllDirectories
+{
+	std::vector<DLL_DIRECTORY_COOKIE> cookies;
+	ScopedDllDirectories(const std::vector<std::wstring>& dirs)
+	{
+		cookies.reserve(dirs.size());
+		for (size_t i = 0; i < dirs.size(); ++i) {
+			if (dirs[i].empty()) continue;
+			DLL_DIRECTORY_COOKIE c = AddDllDirectory(dirs[i].c_str());
+			if (c) cookies.push_back(c);
+		}
+	}
+	~ScopedDllDirectories()
+	{
+		for (size_t i = cookies.size(); i > 0; --i) RemoveDllDirectory(cookies[i - 1]);
+	}
+};
 
 struct ScopedDllDirectory
 {
@@ -46,13 +112,12 @@ static void AppendHostLogLine(const wchar_t* line)
 	CloseHandle(h);
 }
 
-// Minimal IKpiConfig + IKpiUnkProvider implementation so v5 plugins that call
-// kpi_CreateConfig(pUnknown, ...) can work (at least enough to construct module
-// and expose SupportExts).
 class DummyConfig : public IKpiConfig
 {
 	long m_ref = 1;
+	std::wstring m_pluginName;
 public:
+	DummyConfig(const wchar_t* pluginName) : m_pluginName(pluginName ? pluginName : L"") {}
 	ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
 	ULONG STDMETHODCALLTYPE Release() override {
 		ULONG r = InterlockedDecrement(&m_ref);
@@ -65,35 +130,58 @@ public:
 		*ppv = NULL;
 		return E_NOINTERFACE;
 	}
-	void WINAPI SetInt(const wchar_t*, const wchar_t*, INT64) override {}
-	INT64 WINAPI GetInt(const wchar_t*, const wchar_t*, INT64 nDefault) override { return nDefault; }
-	void WINAPI SetFloat(const wchar_t*, const wchar_t*, double) override {}
-	double WINAPI GetFloat(const wchar_t*, const wchar_t*, double dDefault) override { return dDefault; }
-	void WINAPI SetStr(const wchar_t*, const wchar_t*, const wchar_t*) override {}
-	DWORD WINAPI GetStr(const wchar_t*, const wchar_t*, wchar_t* pszValue, DWORD dwSize, const wchar_t* cszDefault) override {
-		if (!pszValue || dwSize < 2) return 0;
-		if (!cszDefault) cszDefault = L"";
-		const size_t len = wcslen(cszDefault);
-		const DWORD need = (DWORD)((len + 1) * sizeof(wchar_t));
-		if (dwSize >= need) {
-			wcscpy_s(pszValue, dwSize / sizeof(wchar_t), cszDefault);
+	void WINAPI SetInt(const wchar_t* sec, const wchar_t* key, INT64 v) override {
+		KpiV5SetInt(m_pluginName, sec ? sec : L"", key ? key : L"", v);
+	}
+	INT64 WINAPI GetInt(const wchar_t* sec, const wchar_t* key, INT64 nDefault) override {
+		INT64 def = nDefault;
+		if (_wcsicmp(m_pluginName.c_str(), L"kbpsf2") == 0 &&
+			sec && key &&
+			_wcsicmp(sec, L"General") == 0 &&
+			_wcsicmp(key, L"IgnoreVolumeTag") == 0) {
+			def = 1;
 		}
-		else {
-			pszValue[0] = 0;
+		return KpiV5GetInt(m_pluginName, sec ? sec : L"", key ? key : L"", def);
+	}
+	void WINAPI SetFloat(const wchar_t* sec, const wchar_t* key, double v) override {
+		KpiV5SetFloat(m_pluginName, sec ? sec : L"", key ? key : L"", v);
+	}
+	double WINAPI GetFloat(const wchar_t* sec, const wchar_t* key, double dDefault) override {
+		// 音量は本体側のゲインで統一する。プラグインには常にフルスケール（dVolume=1.0 相当）だけ渡す。
+		if (key && sec && _wcsicmp(key, L"Volume") == 0 && _wcsicmp(sec, L"General") == 0) {
+			const wchar_t* pn = m_pluginName.c_str();
+			if (_wcsicmp(pn, L"kbvgm") == 0 || _wcsicmp(pn, L"kbfmoplmidi") == 0)
+				return 1.0;
+			return 100.0;
+		}
+		return KpiV5GetFloat(m_pluginName, sec ? sec : L"", key ? key : L"", dDefault);
+	}
+	void WINAPI SetStr(const wchar_t* sec, const wchar_t* key, const wchar_t* value) override {
+		KpiV5SetStr(m_pluginName, sec ? sec : L"", key ? key : L"", value ? value : L"");
+	}
+	DWORD WINAPI GetStr(const wchar_t* sec, const wchar_t* key, wchar_t* pszValue, DWORD dwSize, const wchar_t* cszDefault) override {
+		const std::wstring value = KpiV5GetStr(m_pluginName, sec ? sec : L"", key ? key : L"", cszDefault ? cszDefault : L"");
+		const DWORD need = (DWORD)((value.size() + 1) * sizeof(wchar_t));
+		if (pszValue && dwSize >= sizeof(wchar_t)) {
+			if (dwSize >= need) wcscpy_s(pszValue, dwSize / sizeof(wchar_t), value.c_str());
+			else pszValue[0] = 0;
 		}
 		return need;
 	}
-	void WINAPI SetBin(const wchar_t*, const wchar_t*, const BYTE*, DWORD) override {}
-	DWORD WINAPI GetBin(const wchar_t*, const wchar_t*, BYTE* pBuffer, DWORD dwSize) override {
-		if (pBuffer && dwSize) ZeroMemory(pBuffer, dwSize);
-		return 0;
+	void WINAPI SetBin(const wchar_t* sec, const wchar_t* key, const BYTE* pBuffer, DWORD dwSize) override {
+		KpiV5SetBin(m_pluginName, sec ? sec : L"", key ? key : L"", pBuffer, dwSize);
+	}
+	DWORD WINAPI GetBin(const wchar_t* sec, const wchar_t* key, BYTE* pBuffer, DWORD dwSize) override {
+		return KpiV5GetBin(m_pluginName, sec ? sec : L"", key ? key : L"", pBuffer, dwSize);
 	}
 };
 
 class HostProvider : public IKpiUnkProvider
 {
 	long m_ref = 1;
+	std::wstring m_pluginName;
 public:
+	HostProvider(const wchar_t* kpiPath) : m_pluginName(KpiV5PluginNameFromPath(kpiPath ? kpiPath : L"")) {}
 	ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
 	ULONG STDMETHODCALLTYPE Release() override {
 		ULONG r = InterlockedDecrement(&m_ref);
@@ -110,9 +198,8 @@ public:
 		if (!ppvObj) return 0;
 		*ppvObj = NULL;
 		if (riid == IID_IKpiConfig) {
-			// x86側(CMyHost)と同じ扱いにする: 0 = 本体が直接呼び出し
 			if (pvParam2) *(DWORD*)pvParam2 = 0;
-			*ppvObj = (IKpiConfig*)new DummyConfig();
+			*ppvObj = (IKpiConfig*)new DummyConfig(m_pluginName.c_str());
 			return 1;
 		}
 		(void)pvParam1;
@@ -132,11 +219,100 @@ static HRESULT SafeKpiCreateInstance(pfn_kpiCreateInstance cr, REFIID riid, void
 	return hr;
 }
 
-// Minimal IKpiFolder (dummy)
-class DummyFolder : public IKpiFolder
+static DWORD SafeModuleOpen(IKpiDecoderModule* mod, const KPI_MEDIAINFO* req, IKpiFile* file, IKpiFolder* folder, IKpiDecoder** ppDec)
+{
+	DWORD count = 0;
+	__try {
+		count = mod->Open(req, file, folder, ppDec);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		count = 0;
+	}
+	return count;
+}
+
+static DWORD SafeDecoderSelect(IKpiDecoder* dec, uint32_t songNo, const KPI_MEDIAINFO** ppSel)
+{
+	DWORD selected = 0;
+	class NullTagInfo : public IKpiTagInfo
+	{
+		long m_ref = 1;
+	public:
+		ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
+		ULONG STDMETHODCALLTYPE Release() override {
+			ULONG r = InterlockedDecrement(&m_ref);
+			if (r == 0) delete this;
+			return r;
+		}
+		HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+			if (!ppv) return E_POINTER;
+			if (riid == IID_IUnknown || riid == IID_IKpiTagInfo) { *ppv = static_cast<IKpiTagInfo*>(this); AddRef(); return S_OK; }
+			*ppv = NULL;
+			return E_NOINTERFACE;
+		}
+		DWORD WINAPI GetTagInfo(IKpiFile*, IKpiFolder*, DWORD, DWORD) override { return 1; }
+		DWORD WINAPI GetValue(const wchar_t*, wchar_t* pszValue, int nSize) override {
+			if (pszValue && nSize > 0) pszValue[0] = 0;
+			return 0;
+		}
+		void WINAPI SetOverwrite(BOOL) override {}
+		void WINAPI SetPicture(DWORD, const wchar_t*, const wchar_t*, const wchar_t*, DWORD, DWORD, const BYTE*, DWORD) override {}
+		void WINAPI aSetValueA(const char*, int, const char*, int) override {}
+		void WINAPI aSetValueW(const char*, int, const wchar_t*, int) override {}
+		void WINAPI aSetValueU8(const char*, int, const char*, int) override {}
+		void WINAPI wSetValueA(const wchar_t*, int, const char*, int) override {}
+		void WINAPI wSetValueW(const wchar_t*, int, const wchar_t*, int) override {}
+		void WINAPI wSetValueU8(const wchar_t*, int, const char*, int) override {}
+		void WINAPI u8SetValueA(const char*, int, const char*, int) override {}
+		void WINAPI u8SetValueW(const char*, int, const wchar_t*, int) override {}
+		void WINAPI u8SetValueU8(const char*, int, const char*, int) override {}
+	};
+	NullTagInfo tagInfo;
+	__try {
+		selected = dec->Select(songNo, ppSel, &tagInfo, KPI_TAGGET_FLAG_NONE);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		selected = 0;
+	}
+	return selected;
+}
+
+static DWORD SafeDecoderRender(IKpiDecoder* dec, BYTE* pBuffer, DWORD samples, bool* pHadException)
+{
+	DWORD got = 0;
+	if (pHadException) *pHadException = false;
+	__try {
+		got = dec->Render(pBuffer, samples);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		got = 0;
+		if (pHadException) *pHadException = true;
+	}
+	return got;
+}
+
+static UINT64 SafeDecoderSeek(IKpiDecoder* dec, UINT64 posSample, DWORD flag, bool* pHadException)
+{
+	if (pHadException) *pHadException = false;
+	UINT64 ret = 0;
+	__try {
+		ret = dec->Seek(posSample, flag);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		ret = 0;
+		if (pHadException) *pHadException = true;
+	}
+	return ret;
+}
+
+class HostFile;
+
+class HostFolder : public IKpiFolder
 {
 	long m_ref = 1;
+	std::wstring m_baseDir;
 public:
+	HostFolder(const std::wstring& baseDir) : m_baseDir(baseDir) {}
 	ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
 	ULONG STDMETHODCALLTYPE Release() override {
 		ULONG r = InterlockedDecrement(&m_ref);
@@ -150,19 +326,21 @@ public:
 		return E_NOINTERFACE;
 	}
 	DWORD WINAPI GetFolderName(wchar_t* pszName, DWORD dwSize) override {
-		if (!pszName || dwSize < 2) return 0;
-		pszName[0] = 0;
-		return 0;
+		const DWORD need = (DWORD)((m_baseDir.size() + 1) * sizeof(wchar_t));
+		if (pszName && dwSize >= sizeof(wchar_t)) {
+			if (dwSize >= need) wcscpy_s(pszName, dwSize / sizeof(wchar_t), m_baseDir.c_str());
+			else pszName[0] = 0;
+		}
+		return need;
 	}
 	DWORD WINAPI EnumFiles(DWORD, wchar_t* pszName, DWORD dwSize, DWORD) override {
 		if (pszName && dwSize >= 2) pszName[0] = 0;
 		return 0;
 	}
-	BOOL WINAPI OpenFile(const wchar_t*, IKpiFile**) override { return FALSE; }
-	BOOL WINAPI OpenFolder(const wchar_t*, IKpiFolder**) override { return FALSE; }
+	BOOL WINAPI OpenFile(const wchar_t* cszName, IKpiFile** ppFile) override;
+	BOOL WINAPI OpenFolder(const wchar_t* cszName, IKpiFolder** ppFolder) override;
 };
 
-// Minimal IKpiFile for local file path
 class HostFile : public IKpiFile
 {
 	long m_ref = 1;
@@ -191,7 +369,12 @@ public:
 			m_bufSize = 0;
 		}
 		m_h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-		return m_h != INVALID_HANDLE_VALUE;
+		if (m_h == INVALID_HANDLE_VALUE) return false;
+		LARGE_INTEGER sz{};
+		if (GetFileSizeEx(m_h, &sz)) {
+			AppendHostLogLine((L"[HostFile] opened bytes=" + std::to_wstring(sz.QuadPart) + L" path=" + path).c_str());
+		}
+		return true;
 	}
 
 	ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
@@ -209,9 +392,17 @@ public:
 
 	DWORD WINAPI Read(void* pBuffer, DWORD dwSize) override {
 		if (m_h == INVALID_HANDLE_VALUE) return 0;
-		DWORD rd = 0;
-		ReadFile(m_h, pBuffer, dwSize, &rd, NULL);
-		return rd;
+		DWORD total = 0;
+		BYTE* ptr = (BYTE*)pBuffer;
+		// 巨大なpsf2libファイルなどを最後まで確実に読み切るためのループですわ！
+		while (dwSize > 0) {
+			DWORD rd = 0;
+			if (!ReadFile(m_h, ptr, dwSize, &rd, NULL) || rd == 0) break;
+			ptr += rd;
+			total += rd;
+			dwSize -= rd;
+		}
+		return total;
 	}
 	UINT64 WINAPI Seek(INT64 i64Pos, DWORD dwOrigin) override {
 		if (m_h == INVALID_HANDLE_VALUE) return KPI_FILE_EOF;
@@ -289,18 +480,130 @@ public:
 	BOOL WINAPI Abort(void) override { return TRUE; }
 };
 
+static bool IsAbsoluteLikePath(const std::wstring& path)
+{
+	if (path.size() >= 2 && path[1] == L':') return true;
+	if (path.size() >= 2 && path[0] == L'\\' && path[1] == L'\\') return true;
+	if (!path.empty() && (path[0] == L'\\' || path[0] == L'/')) return true;
+	return false;
+}
+
+static std::wstring JoinPathSimple(const std::wstring& baseDir, const std::wstring& name)
+{
+	if (name.empty()) return baseDir;
+	if (IsAbsoluteLikePath(name)) return name;
+	if (baseDir.empty()) return name;
+	if (baseDir.back() == L'\\' || baseDir.back() == L'/') return baseDir + name;
+	return baseDir + L"\\" + name;
+}
+
+static std::wstring TrimString(const std::wstring& str) {
+	size_t first = str.find_first_not_of(L" \t\r\n");
+	if (first == std::wstring::npos) return L"";
+	size_t last = str.find_last_not_of(L" \t\r\n");
+	return str.substr(first, (last - first + 1));
+}
+
+static std::wstring UrlDecode(const std::wstring& str) {
+	// Decode %XX as UTF-8 bytes first (for non-ASCII file names),
+	// then fallback to direct wide-char mapping if conversion fails.
+	std::string bytes;
+	bytes.reserve(str.size());
+	for (size_t i = 0; i < str.length(); ++i) {
+		if (str[i] == L'%' && i + 2 < str.length()) {
+			wchar_t hex[3] = { str[i + 1], str[i + 2], 0 };
+			wchar_t* end = NULL;
+			long c = wcstol(hex, &end, 16);
+			if (end == hex + 2 && c >= 0 && c <= 255) {
+				bytes.push_back((char)c);
+				i += 2;
+				continue;
+			}
+		}
+		if (str[i] <= 0x7F) {
+			bytes.push_back((char)str[i]);
+		}
+		else {
+			// Keep non-ASCII wide chars via best-effort ANSI fallback.
+			// (Most KPI lib names are ASCII; this path is for robustness.)
+			bytes.push_back('?');
+		}
+	}
+	if (bytes.empty()) return L"";
+	int wlen = MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.size(), NULL, 0);
+	if (wlen > 0) {
+		std::wstring out;
+		out.resize((size_t)wlen);
+		MultiByteToWideChar(CP_UTF8, 0, bytes.c_str(), (int)bytes.size(), &out[0], wlen);
+		return out;
+	}
+	// Fallback: byte-by-byte widening.
+	std::wstring out;
+	out.reserve(bytes.size());
+	for (size_t i = 0; i < bytes.size(); ++i) out.push_back((unsigned char)bytes[i]);
+	return out;
+}
+
+BOOL WINAPI HostFolder::OpenFile(const wchar_t* cszName, IKpiFile** ppFile)
+{
+	if (!ppFile) return FALSE;
+	*ppFile = NULL;
+	if (!cszName || !cszName[0]) return FALSE;
+
+	std::wstring nameStr = TrimString(cszName);
+	if (!nameStr.empty() && nameStr.front() == L'"' && nameStr.back() == L'"') {
+		nameStr = nameStr.substr(1, nameStr.size() - 2);
+	}
+	std::wstring decodedName = UrlDecode(nameStr);
+	std::wstring fullPath = JoinPathSimple(m_baseDir, decodedName);
+	AppendHostLogLine((L"[OpenFile] req=" + nameStr + L" decoded=" + decodedName + L" base=" + m_baseDir).c_str());
+
+	auto* f = new HostFile();
+	if (!f->Open(fullPath)) {
+		f->Release();
+
+		fullPath = JoinPathSimple(m_baseDir, nameStr);
+		f = new HostFile();
+		if (!f->Open(fullPath)) {
+			f->Release();
+			AppendHostLogLine((L"[OpenFile] FAILED req=" + nameStr + L" path=" + fullPath).c_str());
+			return FALSE;
+		}
+	}
+	AppendHostLogLine((L"[OpenFile] SUCCESS req=" + nameStr + L" path=" + fullPath).c_str());
+	*ppFile = f;
+	return TRUE;
+}
+
+BOOL WINAPI HostFolder::OpenFolder(const wchar_t* cszName, IKpiFolder** ppFolder)
+{
+	if (!ppFolder) return FALSE;
+	*ppFolder = NULL;
+	std::wstring folderPath = m_baseDir;
+	if (cszName && cszName[0]) {
+		std::wstring nameStr = TrimString(cszName);
+		std::wstring decodedName = UrlDecode(nameStr);
+		folderPath = JoinPathSimple(m_baseDir, decodedName);
+	}
+	auto* folder = new HostFolder(folderPath);
+	*ppFolder = folder;
+	return TRUE;
+}
+
 struct Session
 {
 	HMODULE hDll = NULL;
 	IKpiDecoderModule* mod = NULL;
 	IKpiDecoder* dec = NULL;
 	HostFile* file = NULL;
-	DummyFolder* folder = NULL;
+	HostFolder* folder = NULL;
 	KPI_MEDIAINFO request{};
 	KPI_MEDIAINFO selected{};
+	int sourceBitsPerSample = 16;
 	DWORD openedSongCount = 0;
 	DWORD channels = 2;
 	DWORD bps = 16;
+	uint32_t zeroRenderStreak = 0;
 };
 
 static uint32_t g_nextSessionId = 1;
@@ -357,8 +660,10 @@ static void SendReply(HANDLE pipe, uint32_t cmd, uint32_t reqId, uint32_t status
 static uint32_t Cmd_ListExts(const std::wstring& kpiPath, std::vector<uint8_t>& out)
 {
 	out.clear();
-	// Ensure dependent DLLs are resolved from KPI's directory too.
-	ScopedDllDirectory addDir(DirNameOf(kpiPath));
+	const std::wstring kpiDir = DirNameOf(kpiPath);
+	ScopedDllDirectory addDir(kpiDir);
+	ScopedDllDirectory addParentDir(ParentDirOf(kpiDir));
+	ScopedDllDirectories addExeSubDirs(GetExeRelatedDllDirs());
 	HMODULE h = LoadLibraryExW(
 		kpiPath.c_str(),
 		NULL,
@@ -371,10 +676,9 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, std::vector<uint8_t>& 
 	std::wstring exts;
 	uint32_t ver = 0;
 
-	// Try KPI v5 first (kpi_CreateInstance)
 	if (auto cr = (pfn_kpiCreateInstance)GetProcAddress(h, "kpi_CreateInstance")) {
 		IKpiDecoderModule* mod = NULL;
-		HostProvider* prov = new HostProvider();
+		HostProvider* prov = new HostProvider(kpiPath.c_str());
 		HRESULT hr = SafeKpiCreateInstance(cr, IID_IKpiDecoderModule, (void**)&mod, (IKpiUnknown*)prov);
 		if (hr == S_OK && mod) {
 			const KPI_DECODER_MODULEINFO* info = NULL;
@@ -386,7 +690,6 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, std::vector<uint8_t>& 
 		prov->Release();
 	}
 
-	// Fallback: KPI v2 (KMPMODULE)
 	if (exts.empty()) {
 		if (auto fn = (pfnGetKMPModule)GetProcAddress(h, SZ_KMP_GETMODULE)) {
 			KMPMODULE* m = fn();
@@ -395,13 +698,11 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, std::vector<uint8_t>& 
 					if (i != 0) exts += L"/";
 					const char* e = m->ppszSupportExts[i];
 					if (!e) continue;
-					// ANSI -> UTF16
 					int wlen = MultiByteToWideChar(CP_ACP, 0, e, -1, NULL, 0);
 					if (wlen > 1) {
 						std::wstring ws;
 						ws.resize((size_t)wlen - 1);
 						MultiByteToWideChar(CP_ACP, 0, e, -1, ws.data(), wlen);
-						// normalize: ensure it starts with '.'
 						if (!ws.empty() && ws[0] != L'.') ws = L"." + ws;
 						exts += ws;
 					}
@@ -426,7 +727,11 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, std::vector<uint8_t>& 
 static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaPath, const KPI_MEDIAINFO& request, uint32_t songNo, std::vector<uint8_t>& out)
 {
 	out.clear();
-	ScopedDllDirectory addDir(DirNameOf(kpiPath));
+	AppendHostLogLine((L"[OPEN] begin kpi=" + kpiPath + L" media=" + mediaPath + L" songNo=" + std::to_wstring(songNo)).c_str());
+	const std::wstring kpiDir = DirNameOf(kpiPath);
+	ScopedDllDirectory addDir(kpiDir);
+	ScopedDllDirectory addParentDir(ParentDirOf(kpiDir));
+	ScopedDllDirectories addExeSubDirs(GetExeRelatedDllDirs());
 	HMODULE h = LoadLibraryExW(
 		kpiPath.c_str(),
 		NULL,
@@ -436,22 +741,26 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 		AppendHostLogLine((L"[OPEN] LoadLibraryExW failed err=" + std::to_wstring(GetLastError()) + L" kpi=" + kpiPath).c_str());
 		return KPIHOST64_STATUS_FAIL;
 	}
+	AppendHostLogLine(L"[OPEN] LoadLibraryExW ok");
 	auto cr = (pfn_kpiCreateInstance)GetProcAddress(h, "kpi_CreateInstance");
 	if (!cr) { FreeLibrary(h); return KPIHOST64_STATUS_NOT_SUPPORTED; }
 
 	IKpiDecoderModule* mod = NULL;
-	HostProvider* prov = new HostProvider();
+	HostProvider* prov = new HostProvider(kpiPath.c_str());
 	HRESULT hr = SafeKpiCreateInstance(cr, IID_IKpiDecoderModule, (void**)&mod, (IKpiUnknown*)prov);
 	prov->Release();
 	if (hr != S_OK || !mod) { FreeLibrary(h); return KPIHOST64_STATUS_FAIL; }
+	AppendHostLogLine(L"[OPEN] kpi_CreateInstance ok");
 
 	auto* f = new HostFile();
 	if (!f->Open(mediaPath)) { f->Release(); mod->Release(); FreeLibrary(h); return KPIHOST64_STATUS_NOT_FOUND; }
-	auto* folder = new DummyFolder();
+	auto* folder = new HostFolder(DirNameOf(mediaPath));
+	AppendHostLogLine((L"[OPEN] media folder=" + DirNameOf(mediaPath)).c_str());
 
 	IKpiDecoder* dec = NULL;
-	DWORD count = mod->Open(&request, f, folder, &dec);
+	DWORD count = SafeModuleOpen(mod, &request, f, folder, &dec);
 	if (!dec || count == 0) {
+		AppendHostLogLine((L"[OPEN] mod->Open failed count=" + std::to_wstring(count) + L" kpi=" + kpiPath + L" media=" + mediaPath).c_str());
 		if (dec) dec->Release();
 		f->Release();
 		folder->Release();
@@ -459,11 +768,13 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 		FreeLibrary(h);
 		return KPIHOST64_STATUS_FAIL;
 	}
+	AppendHostLogLine((L"[OPEN] mod->Open ok count=" + std::to_wstring(count)).c_str());
 
 	const KPI_MEDIAINFO* sel = NULL;
 	uint32_t selNo = (songNo == 0) ? 1 : songNo;
-	DWORD selected = dec->Select(selNo, &sel, NULL, 0);
+	DWORD selected = SafeDecoderSelect(dec, selNo, &sel);
 	if (selected == 0 || !sel) {
+		AppendHostLogLine((L"[OPEN] dec->Select failed selected=" + std::to_wstring(selected)).c_str());
 		dec->Release();
 		f->Release();
 		folder->Release();
@@ -471,6 +782,11 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 		FreeLibrary(h);
 		return KPIHOST64_STATUS_FAIL;
 	}
+	AppendHostLogLine(L"[OPEN] dec->Select ok");
+	AppendHostLogLine((L"[OPEN] mediaInfo rate=" + std::to_wstring(sel->dwSampleRate) +
+		L" ch=" + std::to_wstring(sel->dwChannels) +
+		L" bps=" + std::to_wstring(sel->nBitsPerSample) +
+		L" length100ns=" + std::to_wstring((unsigned long long)sel->qwLength)).c_str());
 
 	Session s{};
 	s.hDll = h;
@@ -480,6 +796,8 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 	s.folder = folder;
 	s.request = request;
 	s.selected = *sel;
+	s.sourceBitsPerSample = s.selected.nBitsPerSample;
+
 	s.openedSongCount = count;
 	s.channels = s.selected.dwChannels ? s.selected.dwChannels : 2;
 	s.bps = (DWORD)(s.selected.nBitsPerSample ? (s.selected.nBitsPerSample < 0 ? -s.selected.nBitsPerSample : s.selected.nBitsPerSample) : 16);
@@ -495,6 +813,7 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 	out.resize(sizeof(rep) + sizeof(KPI_MEDIAINFO));
 	memcpy(out.data(), &rep, sizeof(rep));
 	memcpy(out.data() + sizeof(rep), &s.selected, sizeof(KPI_MEDIAINFO));
+	AppendHostLogLine((L"[OPEN] success sessionId=" + std::to_wstring(id)).c_str());
 	return KPIHOST64_STATUS_OK;
 }
 
@@ -508,19 +827,43 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 
 	const uint32_t bytesPerFrame = s.channels * (s.bps / 8);
 	if (bytesPerFrame == 0) return KPIHOST64_STATUS_BAD_REQUEST;
-	const uint32_t samplesWanted = bytesWanted / bytesPerFrame;
+	uint32_t samplesWanted = bytesWanted / bytesPerFrame;
 	if (samplesWanted == 0) return KPIHOST64_STATUS_BAD_REQUEST;
+	if (samplesWanted > 65536) samplesWanted = 65536;
 
 	std::vector<uint8_t> pcm;
-	pcm.resize((size_t)samplesWanted * bytesPerFrame);
-	DWORD gotSamples = s.dec->Render(pcm.data(), samplesWanted);
-	uint32_t gotBytes = gotSamples * bytesPerFrame;
-	if (gotBytes > pcm.size()) gotBytes = (uint32_t)pcm.size();
+	uint32_t gotBytes = 0;
+	DWORD gotSamples = 0;
+	bool hadRenderException = false;
+	pcm.reserve((size_t)samplesWanted * bytesPerFrame);
+	DWORD remain = samplesWanted;
+	const DWORD kChunkSamples = 576;
+
+	while (remain > 0) {
+		const DWORD ask = (remain > kChunkSamples) ? kChunkSamples : remain;
+		std::vector<uint8_t> part;
+		part.resize((size_t)ask * bytesPerFrame);
+		DWORD got = SafeDecoderRender(s.dec, part.data(), ask, &hadRenderException);
+		if (got == 0 && hadRenderException && s.selected.qwLoop == (UINT64)-1) {
+			bool seekEx = false;
+			SafeDecoderSeek(s.dec, 0, 0, &seekEx);
+			got = SafeDecoderRender(s.dec, part.data(), ask, &hadRenderException);
+		}
+		if (got == 0) break;
+		uint32_t partBytes = got * bytesPerFrame;
+		if (partBytes > part.size()) partBytes = (uint32_t)part.size();
+		pcm.insert(pcm.end(), part.begin(), part.begin() + partBytes);
+		gotSamples += got;
+		gotBytes += partBytes;
+		remain -= got;
+	}
 
 	KPIHOST64_RenderReply rep{};
 	rep.sessionId = sessionId;
 	rep.bytesReturned = gotBytes;
-	rep.eof = (gotSamples < samplesWanted) ? 1 : 0;
+	if (gotSamples == 0) s.zeroRenderStreak++; else s.zeroRenderStreak = 0;
+	if (s.selected.qwLoop == (UINT64)-1) rep.eof = 0;
+	else rep.eof = (s.zeroRenderStreak >= 3) ? 1 : 0;
 
 	out.resize(sizeof(rep) + gotBytes);
 	memcpy(out.data(), &rep, sizeof(rep));
@@ -634,7 +977,6 @@ int wmain(int argc, wchar_t** argv)
 {
 	(void)argc; (void)argv;
 
-	// Opt-in to safe DLL search paths and enable AddDllDirectory.
 	SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_USER_DIRS);
 
 	HANDLE pipe = CreateNamedPipeW(
@@ -649,7 +991,7 @@ int wmain(int argc, wchar_t** argv)
 	);
 	if (pipe == INVALID_HANDLE_VALUE) return 2;
 
-	const DWORD idleMs = 30000; // 30s idle => exit
+	const DWORD idleMs = 30000;
 	for (;;) {
 		OVERLAPPED ov{};
 		ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
@@ -672,7 +1014,7 @@ int wmain(int argc, wchar_t** argv)
 			CancelIoEx(pipe, &ov);
 			CloseHandle(ov.hEvent);
 			if (g_sessions.empty()) {
-				break; // idle and no active sessions
+				break;
 			}
 			continue;
 		}
@@ -682,7 +1024,6 @@ int wmain(int argc, wchar_t** argv)
 		DisconnectNamedPipe(pipe);
 	}
 
-	// cleanup any leaked sessions
 	for (auto& kv : g_sessions) {
 		(void)Cmd_Close(kv.first);
 	}
@@ -690,4 +1031,3 @@ int wmain(int argc, wchar_t** argv)
 	CloseHandle(pipe);
 	return 0;
 }
-

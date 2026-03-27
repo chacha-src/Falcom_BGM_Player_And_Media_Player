@@ -1,4 +1,4 @@
-#include "..\stdafx.h"
+﻿#include "..\stdafx.h"
 #include <vector>
 
 #ifndef dsf_types_h

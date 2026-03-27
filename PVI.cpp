@@ -1,4 +1,4 @@
-﻿// PVI.cpp : 実装ファイル
+// PVI.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -43,6 +43,36 @@ BOOL CPVI::OnInitDialog()
 
 	SetWindowText(LL14(L"fmpmd.kpi PVIパス設定", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings"));
 	SetDlgItemText(IDC_STATIC, LL14(L"PVIパス \\で必ず終わること　複数指定は ; で指定", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths."));
+	SetDlgItemText(IDOK, LL14(
+		L"適用",
+		L"Apply",
+		L"Appliquer",
+		L"Applica",
+		L"Aplicar",
+		L"적용",
+		L"应用",
+		L"تطبيق",
+		L"Применить",
+		L"Anwenden",
+		L"Aplicar",
+		L"Toepassen",
+		L"Zastosuj",
+		L"Uygula"));
+	SetDlgItemText(IDCANCEL, LL14(
+		L"閉じる",
+		L"Close",
+		L"Fermer",
+		L"Chiudi",
+		L"Cerrar",
+		L"닫기",
+		L"关闭",
+		L"إغلاق",
+		L"Закрыть",
+		L"Schliessen",
+		L"Fechar",
+		L"Sluiten",
+		L"Zamknij",
+		L"Kapat"));
 	CString str = regload(_T(""));
 	m_pvi.SetWindowText(str);
 	RECT r;

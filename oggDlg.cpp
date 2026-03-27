@@ -68,6 +68,8 @@ int flacmode = 0;
 #include "ZeroFol.h"
 int wavbit;
 int wavsam = 16;
+int wavsam_src = 16; // original decoder bit depth (can be -32/-64)
+int g_kpiSourceBitsPerSample = 16;
 #include "Id3tagv1.h"
 #include "Id3tagv2.h"
 #include "mp3.h"
@@ -218,6 +220,164 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2);
 int readkpi(BYTE* bw, int cnt);
 int playwavflac(BYTE* bw, int old, int l1, int l2);
 int readflac(BYTE* bw, int cnt);
+static double GetFloatToInt16Scale(double maxAbs, double meanAbs)
+{
+	// Base conversion for normalized float PCM.
+	double scale = 32767.0;
+
+	// If level is too small (common with some PSF2 paths), apply upward-only gain.
+	// We never attenuate here: clipping is safer than silence in this decoder path.
+	double ref = maxAbs;
+	if (ref <= 0.0 || !_finite(ref)) ref = meanAbs;
+	if (ref > 0.0 && _finite(ref) && ref < 0.20) {
+		double boost = 0.80 / ref;
+		if (boost < 1.0) boost = 1.0;
+		if (boost > 65536.0) boost = 65536.0; // guard overflow / extreme amplification
+		scale *= boost;
+	}
+	return scale;
+}
+
+static short FloatSampleToInt16(double v, double scale)
+{
+	if (!_finite(v)) return 0;
+	double s = v * scale;
+	if (s > 32767.0) s = 32767.0;
+	else if (s < -32768.0) s = -32768.0;
+	return (short)s;
+}
+
+// kbpsf2 (kpi_sources kbpsf2_decoder.cpp): when nBits=-64, Render does
+//   double = int16 * (m_volume / 32768)
+// Inverse when m_volume==1 (IgnoreVolumeTag=1 + Volume 100%): int16 = round(double * 32768)
+static short Kbpsf2ScaledDoubleToInt16(double d)
+{
+	if (!_finite(d)) return 0;
+	double s = d * 32768.0;
+	if (s > 32767.0) s = 32767.0;
+	else if (s < -32768.0) s = -32768.0;
+	return (short)(s >= 0.0 ? (s + 0.5) : (s - 0.5));
+}
+
+static int ConvertFloatPcmBufferToInt16InPlace(BYTE* buffer, int inBytes, int bitsPerSample, int channels)
+{
+	if (!buffer || inBytes <= 0 || channels <= 0) return 0;
+	if (!(bitsPerSample == -32 || bitsPerSample == -64)) return inBytes;
+	const int srcBytesPerSample = (-bitsPerSample) / 8;
+	if (srcBytesPerSample <= 0) return 0;
+	const int frames = inBytes / (srcBytesPerSample * channels);
+	if (frames <= 0) return 0;
+	short* dst = (short*)buffer;
+	double maxAbs = 0.0;
+	double sumAbs = 0.0;
+	int validCount = 0;
+	if (bitsPerSample == -32) {
+		const float* src = (const float*)buffer;
+		const int samples = frames * channels;
+		for (int i = 0; i < samples; ++i) {
+			double v = (double)src[i];
+			if (!_finite(v)) continue;
+			double a = fabs(v);
+			if (a > maxAbs) maxAbs = a;
+			sumAbs += a;
+			++validCount;
+		}
+		const double meanAbs = (validCount > 0) ? (sumAbs / (double)validCount) : 0.0;
+		const double scale = GetFloatToInt16Scale(maxAbs, meanAbs);
+		for (int i = 0; i < samples; ++i) {
+			dst[i] = FloatSampleToInt16((double)src[i], scale);
+		}
+	}
+	else {
+		const double* src = (const double*)buffer;
+		const int samples = frames * channels;
+		for (int i = 0; i < samples; ++i) {
+			dst[i] = Kbpsf2ScaledDoubleToInt16(src[i]);
+		}
+	}
+	return frames * channels * (int)sizeof(short);
+}
+
+static DWORD ConvertFloatTypedToInt16Buffer(const void* src, DWORD samples, int bitsPerSample, int channels, BYTE* dst, DWORD dstBytes)
+{
+	if (!src || !dst || samples == 0 || channels <= 0 || dstBytes == 0) return 0;
+	if (!(bitsPerSample == -32 || bitsPerSample == -64)) return 0;
+	const DWORD totalSamples = samples * (DWORD)channels;
+	const DWORD needBytes = totalSamples * (DWORD)sizeof(short);
+	if (needBytes > dstBytes) return 0;
+	short* out = (short*)dst;
+	double maxAbs = 0.0;
+	double sumAbs = 0.0;
+	DWORD validCount = 0;
+	if (bitsPerSample == -32) {
+		const float* p = (const float*)src;
+		for (DWORD i = 0; i < totalSamples; ++i) {
+			double v = (double)p[i];
+			if (!_finite(v)) continue;
+			double a = fabs(v);
+			if (a > maxAbs) maxAbs = a;
+			sumAbs += a;
+			++validCount;
+		}
+		const double meanAbs = (validCount > 0) ? (sumAbs / (double)validCount) : 0.0;
+		const double scale = GetFloatToInt16Scale(maxAbs, meanAbs);
+		for (DWORD i = 0; i < totalSamples; ++i) {
+			out[i] = FloatSampleToInt16((double)p[i], scale);
+		}
+	}
+	else {
+		const double* p = (const double*)src;
+		for (DWORD i = 0; i < totalSamples; ++i) {
+			out[i] = Kbpsf2ScaledDoubleToInt16(p[i]);
+		}
+	}
+	return needBytes;
+}
+
+static DWORD ConvertFloatRawBytesToInt16Buffer(const BYTE* src, DWORD srcBytes, int bitsPerSample, int channels, BYTE* dst, DWORD dstBytes)
+{
+	if (!src || !dst || srcBytes == 0 || channels <= 0) return 0;
+	if (!(bitsPerSample == -32 || bitsPerSample == -64)) return 0;
+	const DWORD srcBytesPerSample = (DWORD)((-bitsPerSample) / 8);
+	const DWORD srcBytesPerFrame = srcBytesPerSample * (DWORD)channels;
+	if (srcBytesPerFrame == 0) return 0;
+	const DWORD frames = srcBytes / srcBytesPerFrame;
+	const DWORD outNeed = frames * (DWORD)channels * (DWORD)sizeof(short);
+	if (outNeed > dstBytes) return 0;
+	short* out = (short*)dst;
+	DWORD o = 0;
+	double maxAbs = 0.0;
+	double sumAbs = 0.0;
+	DWORD validCount = 0;
+
+	if (bitsPerSample == -32) {
+		for (DWORD i = 0; i < frames * (DWORD)channels; ++i) {
+			float v = 0.0f;
+			memcpy(&v, src + i * sizeof(float), sizeof(float));
+			if (!_finite((double)v)) continue;
+			double a = fabs((double)v);
+			if (a > maxAbs) maxAbs = a;
+			sumAbs += a;
+			++validCount;
+		}
+		const double meanAbs = (validCount > 0) ? (sumAbs / (double)validCount) : 0.0;
+		const double scale = GetFloatToInt16Scale(maxAbs, meanAbs);
+		for (DWORD i = 0; i < frames * (DWORD)channels; ++i) {
+			float v = 0.0f;
+			memcpy(&v, src + i * sizeof(float), sizeof(float));
+			out[o++] = FloatSampleToInt16((double)v, scale);
+		}
+	}
+	else {
+		// kbpsf2: double is scaled int16, not generic IEEE float PCM (see kbpsf2_decoder.cpp Render).
+		for (DWORD i = 0; i < frames * (DWORD)channels; ++i) {
+			double v = 0.0;
+			memcpy(&v, src + i * sizeof(double), sizeof(double));
+			out[o++] = Kbpsf2ScaledDoubleToInt16(v);
+		}
+	}
+	return outNeed;
+}
 int playwavdsd(BYTE* bw, int old, int l1, int l2);
 int readdsd(BYTE* bw, int cnt);
 int playwavm4a(BYTE* bw, int old, int l1, int l2);
@@ -667,6 +827,7 @@ void COggDlg::Resize()
 ////////////////////////////////////////////////////////////////////////////////
 #include <unknwn.h>
 #include "KpiHostClient.h"
+#include "KpiV5ConfigStore.h"
 BYTE kvver;
 IKpiDecoderModule* ob5 = NULL;
 const KPI_DECODER_MODULEINFO* m_ModuleInfo5;
@@ -705,6 +866,163 @@ static bool SplitKpiSubsongPath(const CString& in, CString& outPath, uint32_t& o
 	outSel = (uint32_t)_tstoi(tail);
 	if (outSel == 0) outSel = 1;
 	return true;
+}
+
+static std::wstring KpiDirOf(const wchar_t* path)
+{
+	if (!path) return L"";
+	std::wstring p(path);
+	size_t pos = p.find_last_of(L"\\/");
+	if (pos == std::wstring::npos) return L"";
+	return p.substr(0, pos + 1);
+}
+
+static std::wstring ParentDirOf(const std::wstring& path)
+{
+	if (path.empty()) return L"";
+	size_t end = path.size();
+	while (end > 0 && (path[end - 1] == L'\\' || path[end - 1] == L'/')) --end;
+	if (end == 0) return L"";
+	size_t pos = path.find_last_of(L"\\/", end - 1);
+	if (pos == std::wstring::npos) return L"";
+	return path.substr(0, pos + 1);
+}
+
+static void CollectSubDirsRecursive(const std::wstring& baseDir, int depth, std::vector<std::wstring>& out)
+{
+	if (depth <= 0 || baseDir.empty()) return;
+	std::wstring pat = baseDir;
+	if (!pat.empty() && pat.back() != L'\\' && pat.back() != L'/') pat += L'\\';
+	pat += L"*";
+	WIN32_FIND_DATAW fd{};
+	HANDLE h = FindFirstFileW(pat.c_str(), &fd);
+	if (h == INVALID_HANDLE_VALUE) return;
+	do {
+		if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+		if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+		std::wstring sub = baseDir;
+		if (!sub.empty() && sub.back() != L'\\' && sub.back() != L'/') sub += L'\\';
+		sub += fd.cFileName;
+		if (!sub.empty() && sub.back() != L'\\' && sub.back() != L'/') sub += L'\\';
+		out.push_back(sub);
+		CollectSubDirsRecursive(sub, depth - 1, out);
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
+}
+
+static std::vector<std::wstring> GetExeRelatedDllDirs()
+{
+	std::vector<std::wstring> dirs;
+	wchar_t exePath[MAX_PATH]{};
+	if (!GetModuleFileNameW(NULL, exePath, _countof(exePath))) return dirs;
+	std::wstring exeDir = KpiDirOf(exePath);
+	if (exeDir.empty()) return dirs;
+	dirs.push_back(exeDir);
+	CollectSubDirsRecursive(exeDir, 3, dirs);
+	return dirs;
+}
+
+static HMODULE LoadKpiLibraryWithDependencies(const wchar_t* path)
+{
+	if (!path || !path[0]) return NULL;
+	const std::wstring dir = KpiDirOf(path);
+	const std::wstring parentDir = ParentDirOf(dir);
+	const std::vector<std::wstring> exeDirs = GetExeRelatedDllDirs();
+	DLL_DIRECTORY_COOKIE cookie = 0;
+	DLL_DIRECTORY_COOKIE cookieParent = 0;
+	std::vector<DLL_DIRECTORY_COOKIE> exeCookies;
+	if (!dir.empty()) cookie = AddDllDirectory(dir.c_str());
+	if (!parentDir.empty()) cookieParent = AddDllDirectory(parentDir.c_str());
+	for (size_t i = 0; i < exeDirs.size(); ++i) {
+		if (exeDirs[i].empty()) continue;
+		DLL_DIRECTORY_COOKIE c = AddDllDirectory(exeDirs[i].c_str());
+		if (c) exeCookies.push_back(c);
+	}
+	HMODULE h = LoadLibraryExW(
+		path,
+		NULL,
+		LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_USER_DIRS | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
+	);
+	if (!h) {
+		h = LoadLibraryW(path);
+	}
+	for (size_t i = exeCookies.size(); i > 0; --i) RemoveDllDirectory(exeCookies[i - 1]);
+	if (cookieParent) RemoveDllDirectory(cookieParent);
+	if (cookie) RemoveDllDirectory(cookie);
+	return h;
+}
+
+static HRESULT SafeCreateDecoderModuleInstance(HRESULT(WINAPI* createFn)(REFIID, void**, IKpiUnknown*), void** ppvObject, IKpiUnknown* pUnknown)
+{
+	HRESULT hr = E_FAIL;
+	__try {
+		hr = createFn(IID_IKpiDecoderModule, ppvObject, pUnknown);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		hr = E_FAIL;
+	}
+	return hr;
+}
+
+class CMyNullTagInfo : public IKpiTagInfo
+{
+private:
+	long m_cRef;
+public:
+	CMyNullTagInfo() : m_cRef(1) {}
+	virtual ~CMyNullTagInfo() {}
+
+	STDMETHODIMP_(ULONG) AddRef() override { return InterlockedIncrement(&m_cRef); }
+	STDMETHODIMP_(ULONG) Release() override {
+		ULONG ulRef = InterlockedDecrement(&m_cRef);
+		if (ulRef == 0) { delete this; }
+		return ulRef;
+	}
+	STDMETHODIMP QueryInterface(REFIID riid, void** ppvObject) override {
+		if (!ppvObject) return E_POINTER;
+		if (riid == IID_IUnknown || riid == IID_IKpiTagInfo) {
+			*ppvObject = static_cast<IKpiTagInfo*>(this);
+			AddRef();
+			return S_OK;
+		}
+		*ppvObject = NULL;
+		return E_NOINTERFACE;
+	}
+	DWORD WINAPI GetTagInfo(IKpiFile*, IKpiFolder*, DWORD, DWORD) override { return 1; }
+	DWORD WINAPI GetValue(const wchar_t*, wchar_t* pszValue, int nSize) override {
+		if (pszValue && nSize > 0) pszValue[0] = 0;
+		return 0;
+	}
+	void WINAPI SetOverwrite(BOOL) override {}
+	void WINAPI SetPicture(DWORD, const wchar_t*, const wchar_t*, const wchar_t*, DWORD, DWORD, const BYTE*, DWORD) override {}
+	void WINAPI aSetValueA(const char*, int, const char*, int) override {}
+	void WINAPI aSetValueW(const char*, int, const wchar_t*, int) override {}
+	void WINAPI aSetValueU8(const char*, int, const char*, int) override {}
+	void WINAPI wSetValueA(const wchar_t*, int, const char*, int) override {}
+	void WINAPI wSetValueW(const wchar_t*, int, const wchar_t*, int) override {}
+	void WINAPI wSetValueU8(const wchar_t*, int, const char*, int) override {}
+	void WINAPI u8SetValueA(const char*, int, const char*, int) override {}
+	void WINAPI u8SetValueW(const char*, int, const wchar_t*, int) override {}
+	void WINAPI u8SetValueU8(const char*, int, const char*, int) override {}
+};
+
+static DWORD SafeKpiDecoderSelectInner(IKpiDecoder* dec, DWORD songNo, const KPI_MEDIAINFO** ppMediaInfo, IKpiTagInfo* pTagInfo)
+{
+	DWORD selected = 0;
+	__try {
+		selected = dec->Select(songNo, ppMediaInfo, pTagInfo, KPI_TAGGET_FLAG_NONE);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		selected = 0;
+	}
+	return selected;
+}
+
+static DWORD SafeKpiDecoderSelect(IKpiDecoder* dec, DWORD songNo, const KPI_MEDIAINFO** ppMediaInfo)
+{
+	CMyNullTagInfo tagInfo;
+	return SafeKpiDecoderSelectInner(dec, songNo, ppMediaInfo, &tagInfo);
 }
 
 /**
@@ -982,8 +1300,9 @@ public:
 class CMyDummyConfig : public IKpiConfig
 {
 	long m_cRef;
+	std::wstring m_pluginName;
 public:
-	CMyDummyConfig() : m_cRef(1) {}
+	CMyDummyConfig(const wchar_t* pluginName) : m_cRef(1), m_pluginName(pluginName ? pluginName : L"") {}
 	virtual ~CMyDummyConfig() {}
 
 	// --- IUnknown (IKpiUnknown) の実装 ---
@@ -1006,18 +1325,54 @@ public:
 
 	// --- IKpiConfig のダミーメソッド ---
 	// (呼ばれるかもしれないので、ダミーでも実装しておく)
-	virtual void   WINAPI SetInt(const wchar_t*, const wchar_t*, INT64) {}
-	virtual INT64  WINAPI GetInt(const wchar_t*, const wchar_t*, INT64 nDefault) { return nDefault; }
-	virtual void   WINAPI SetFloat(const wchar_t*, const wchar_t*, double) {}
-	virtual double WINAPI GetFloat(const wchar_t*, const wchar_t*, double dDefault) { return dDefault; }
-	virtual void   WINAPI SetStr(const wchar_t*, const wchar_t*, const wchar_t*) {}
-	virtual DWORD  WINAPI GetStr(const wchar_t*, const wchar_t*, wchar_t* pszValue, DWORD dwSize, const wchar_t* cszDefault) {
-		if (cszDefault) wcsncpy_s(pszValue, dwSize / sizeof(wchar_t), cszDefault, _TRUNCATE);
-		else *pszValue = L'\0';
-		return (DWORD)(wcslen(pszValue) + 1) * sizeof(wchar_t);
+	virtual void WINAPI SetInt(const wchar_t* sec, const wchar_t* key, INT64 v) {
+		KpiV5SetInt(m_pluginName, sec ? sec : L"", key ? key : L"", v);
 	}
-	virtual void   WINAPI SetBin(const wchar_t*, const wchar_t*, const BYTE*, DWORD) {}
-	virtual DWORD  WINAPI GetBin(const wchar_t*, const wchar_t*, BYTE*, DWORD dwSize) { return 0; }
+	virtual INT64 WINAPI GetInt(const wchar_t* sec, const wchar_t* key, INT64 nDefault) {
+		// kbpsf2: 既定で volume タグを無視 → m_volume==1 → nBits=16 (minipsf2 と .psf2 で同じ Gen 経路)
+		INT64 def = nDefault;
+		if (_wcsicmp(m_pluginName.c_str(), L"kbpsf2") == 0 &&
+			sec && key &&
+			_wcsicmp(sec, L"General") == 0 &&
+			_wcsicmp(key, L"IgnoreVolumeTag") == 0) {
+			def = 1;
+		}
+		return KpiV5GetInt(m_pluginName, sec ? sec : L"", key ? key : L"", def);
+	}
+	virtual void WINAPI SetFloat(const wchar_t* sec, const wchar_t* key, double v) {
+		KpiV5SetFloat(m_pluginName, sec ? sec : L"", key ? key : L"", v);
+	}
+	virtual double WINAPI GetFloat(const wchar_t* sec, const wchar_t* key, double dDefault) {
+		if (key && sec && _wcsicmp(key, L"Volume") == 0 && _wcsicmp(sec, L"General") == 0) {
+			const wchar_t* pn = m_pluginName.c_str();
+			if (_wcsicmp(pn, L"kbvgm") == 0 || _wcsicmp(pn, L"kbfmoplmidi") == 0)
+				return 1.0;
+			return 100.0;
+		}
+		return KpiV5GetFloat(m_pluginName, sec ? sec : L"", key ? key : L"", dDefault);
+	}
+	virtual void WINAPI SetStr(const wchar_t* sec, const wchar_t* key, const wchar_t* value) {
+		KpiV5SetStr(m_pluginName, sec ? sec : L"", key ? key : L"", value ? value : L"");
+	}
+	virtual DWORD WINAPI GetStr(const wchar_t* sec, const wchar_t* key, wchar_t* pszValue, DWORD dwSize, const wchar_t* cszDefault) {
+		const std::wstring value = KpiV5GetStr(m_pluginName, sec ? sec : L"", key ? key : L"", cszDefault ? cszDefault : L"");
+		const DWORD need = (DWORD)((value.size() + 1) * sizeof(wchar_t));
+		if (pszValue && dwSize >= sizeof(wchar_t)) {
+			if (dwSize >= need) {
+				wcscpy_s(pszValue, dwSize / sizeof(wchar_t), value.c_str());
+			}
+			else {
+				pszValue[0] = L'\0';
+			}
+		}
+		return need;
+	}
+	virtual void WINAPI SetBin(const wchar_t* sec, const wchar_t* key, const BYTE* p, DWORD size) {
+		KpiV5SetBin(m_pluginName, sec ? sec : L"", key ? key : L"", p, size);
+	}
+	virtual DWORD WINAPI GetBin(const wchar_t* sec, const wchar_t* key, BYTE* p, DWORD dwSize) {
+		return KpiV5GetBin(m_pluginName, sec ? sec : L"", key ? key : L"", p, dwSize);
+	}
 };
 
 // --- 2. ホストクラスの実装 (IKpiUnkProvider を実装) ---
@@ -1026,9 +1381,10 @@ class CMyHost : public IKpiUnkProvider
 {
 private:
 	long m_cRef;
+	std::wstring m_pluginName;
 
 public:
-	CMyHost() : m_cRef(1) {}
+	CMyHost(const wchar_t* kpiPath) : m_cRef(1), m_pluginName(KpiV5PluginNameFromPath(kpiPath ? kpiPath : L"")) {}
 	virtual ~CMyHost() {}
 
 	// --- IUnknown (IKpiUnknown) の実装 ---
@@ -1077,7 +1433,7 @@ public:
 		if (riid == IID_IKpiConfig)
 		{
 			// ダミーの設定オブジェクトを生成して返す
-			*ppvObj = new CMyDummyConfig();
+			*ppvObj = new CMyDummyConfig(m_pluginName.c_str());
 
 			if (pvParam2) // pdwPlatform
 			{
@@ -2697,6 +3053,23 @@ long LoadOggVorbis(const TCHAR* file_name, int word, char** ogg, CSliderCtrl& m_
 }
 
 void wav_start();
+static void NormalizePlaybackWaveFormat()
+{
+	// Guard invalid values from some decoders/plugins.
+	if (wavch <= 0 || wavch > 8) wavch = 2;
+	if (wavbit < 8000 || wavbit > 384000) wavbit = 44100;
+	if (wavsam == 0) wavsam = 16;
+	if (wavsam < 0) {
+		// This player path does not support float PCM playback.
+		// Force to integer PCM to keep the output pipeline consistent.
+		wavsam = 16;
+	}
+	else {
+		if (!(wavsam == 8 || wavsam == 16 || wavsam == 24 || wavsam == 32)) {
+			wavsam = 16;
+		}
+	}
+}
 void wav_start()
 {
 	whsize = sizeof(wh.ckidRIFF) + sizeof(wh.ckSizeRIFF) + sizeof(wh.fccType) +
@@ -7349,8 +7722,9 @@ void COggDlg::play()
 			KPI_MEDIAINFO req;
 			kpi_InitMediaInfo(&req);
 			req.dwSampleRate = savedata.samples;
-			// x86側のver5実装に合わせ、要求ビット数は固定(プラグインが最大精度で返す想定)
-			req.nBitsPerSample = 16;
+			// ビット深度はプラグイン選択に任せる(0=制約なし)。
+			// 返却された mediaInfo.nBitsPerSample をそのまま wavsam_src に保持する。
+			req.nBitsPerSample = 0;
 			req.dwChannels = 0;
 			req.dwFormatType = KPI_MEDIAINFO::FORMAT_PCM;
 			// 要求ビット数を24/32にするとOpen失敗するプラグインがあるため、ここでは要求しない
@@ -7360,6 +7734,39 @@ void COggDlg::play()
 			SplitKpiSubsongPath(filen, ssMedia, sel);
 
 			if (!g_kpiHost.Open((const wchar_t*)kpi, (const wchar_t*)ssMedia, req, sel, g_kpiSession)) {
+				CString depMsg;
+				depMsg.Format(LL14(
+					L"KPIを開けませんでした。\r\n依存DLLが見つからない可能性があります。\r\n\r\nKPI: %s\r\nログ: %%TEMP%%\\ogg_kpi64_host.log", /* 日本語 */
+					L"Could not open KPI.\r\nA required dependent DLL may be missing.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* 英語 */
+					L"Impossible d'ouvrir le KPI.\r\nUne DLL dépendante requise est peut-être manquante.\r\n\r\nKPI : %s\r\nJournal : %%TEMP%%\\ogg_kpi64_host.log", /* フランス語 */
+					L"Impossibile aprire il KPI.\r\nPotrebbe mancare una DLL dipendente richiesta.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* イタリア語 */
+					L"No se pudo abrir el KPI.\r\nPuede faltar una DLL dependiente requerida.\r\n\r\nKPI: %s\r\nRegistro: %%TEMP%%\\ogg_kpi64_host.log", /* スペイン語 */
+					L"KPI를 열 수 없습니다.\r\n필요한 종속 DLL이 없을 수 있습니다.\r\n\r\nKPI: %s\r\n로그: %%TEMP%%\\ogg_kpi64_host.log", /* 韓国語 */
+					L"无法打开KPI。\r\n可能缺少必需的依赖DLL。\r\n\r\nKPI: %s\r\n日志: %%TEMP%%\\ogg_kpi64_host.log", /* 中国語 */
+					L"تعذر فتح KPI.\r\nقد يكون هناك DLL تابع مطلوب مفقود.\r\n\r\nKPI: %s\r\nالسجل: %%TEMP%%\\ogg_kpi64_host.log", /* アラビア語 */
+					L"Не удалось открыть KPI.\r\nВозможно, отсутствует требуемая зависимая DLL.\r\n\r\nKPI: %s\r\nЛог: %%TEMP%%\\ogg_kpi64_host.log", /* ロシア語 */
+					L"KPI konnte nicht geöffnet werden.\r\nMöglicherweise fehlt eine erforderliche abhängige DLL.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* ドイツ語 */
+					L"Não foi possível abrir o KPI.\r\nPode faltar uma DLL dependente necessária.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* ポルトガル語 */
+					L"Kan KPI niet openen.\r\nMogelijk ontbreekt een vereiste afhankelijke DLL.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* オランダ語 */
+					L"Nie można otworzyć KPI.\r\nMoże brakować wymaganej zależnej biblioteki DLL.\r\n\r\nKPI: %s\r\nDziennik: %%TEMP%%\\ogg_kpi64_host.log", /* ポーランド語 */
+					L"KPI açılamadı.\r\nGerekli bir bağımlı DLL eksik olabilir.\r\n\r\nKPI: %s\r\nGünlük: %%TEMP%%\\ogg_kpi64_host.log"), /* トルコ語 */
+					(const wchar_t*)kpi);
+				MessageBox(depMsg, LL14(
+					L"KPI読み込みエラー",
+					L"KPI Load Error",
+					L"Erreur de chargement KPI",
+					L"Errore caricamento KPI",
+					L"Error al cargar KPI",
+					L"KPI 로드 오류",
+					L"KPI加载错误",
+					L"خطأ تحميل KPI",
+					L"Ошибка загрузки KPI",
+					L"KPI-Ladefehler",
+					L"Erro de carregamento do KPI",
+					L"KPI-laadfout",
+					L"Błąd ładowania KPI",
+					L"KPI Yükleme Hatası"),
+					MB_ICONERROR | MB_OK);
 				m_saisai.EnableWindow(TRUE); endflg = 0; return;
 			}
 
@@ -7367,8 +7774,11 @@ void COggDlg::play()
 			ResetKpiRemoteCache();
 			wavbit = g_kpiSession.mediaInfo.dwSampleRate;
 			wavch = g_kpiSession.mediaInfo.dwChannels;
-			wavsam = g_kpiSession.mediaInfo.nBitsPerSample;
-			if (wavsam < 0) wavsam = -wavsam;
+			wavsam_src = g_kpiSession.mediaInfo.nBitsPerSample;
+			g_kpiSourceBitsPerSample = wavsam_src;
+			// DS生成/再生系は整数PCM前提。元フォーマットは wavsam_src 側で保持する。
+			wavsam = (wavsam_src < 0) ? 16 : wavsam_src;
+			NormalizePlaybackWaveFormat();
 			loop1 = 0;
 			loop2 = (int)kpi_100nsToSample(g_kpiSession.mediaInfo.qwLength, g_kpiSession.mediaInfo.dwSampleRate);
 			if (g_kpiSession.mediaInfo.qwLength == (UINT64)-1) loop2 = 0;
@@ -7380,7 +7790,7 @@ void COggDlg::play()
 			// 以降の共通処理(UI更新/画像抽出など)も実行させる
 		}
 		else {
-			hDLLk = LoadLibrary(kpi);
+			hDLLk = LoadKpiLibraryWithDependencies((const wchar_t*)kpi);
 			typedef HRESULT(WINAPI* kpi_CreateInstance)(REFIID riid, void** ppvObject, IKpiUnknown* pUnknown);
 			kpi_CreateInstance cr = (kpi_CreateInstance)GetProcAddress(hDLLk, "kpi_CreateInstance");
 			pFunck = (pfnGetKMPModule)::GetProcAddress(hDLLk, SZ_KMP_GETMODULE);
@@ -7477,9 +7887,9 @@ void COggDlg::play()
 				wavsam = sikpi.dwBitsPerSample;
 			}
 			else if (kvver == 5) {
-				IUnknown* pMyObject = new CMyHost();
+				IUnknown* pMyObject = new CMyHost((const wchar_t*)kpi);
 				IKpiDecoderModule* ob = NULL;
-				HRESULT hr = cr(IID_IKpiDecoderModule, (void**)&ob, pMyObject);
+				HRESULT hr = SafeCreateDecoderModuleInstance(cr, (void**)&ob, pMyObject);
 				if (hr == S_OK) {
 					ob5 = (IKpiDecoderModule*)ob;
 					kpi_InitMediaInfo(&me5);
@@ -7512,15 +7922,49 @@ void COggDlg::play()
 					}
 					ik = pHostFile;
 					ob5->Open(&me5, ik, ik2, &kpidec);
-					if (kpidec == NULL) return;
+					if (kpidec == NULL) {
+						CString depMsg;
+						depMsg.Format(LL14(
+							L"KPIのOpenに失敗しました。\r\n依存DLLまたは関連ファイル(例: .bin)が不足している可能性があります。\r\n\r\nKPI: %s",
+							L"KPI Open failed.\r\nA dependent DLL or related file (e.g. .bin) may be missing.\r\n\r\nKPI: %s",
+							L"Échec de l'ouverture du KPI.\r\nUne DLL dépendante ou un fichier associé (ex. .bin) peut être manquant.\r\n\r\nKPI : %s",
+							L"Apertura KPI non riuscita.\r\nPotrebbe mancare una DLL dipendente o un file correlato (es. .bin).\r\n\r\nKPI: %s",
+							L"Error al abrir KPI.\r\nPuede faltar una DLL dependiente o un archivo relacionado (p. ej. .bin).\r\n\r\nKPI: %s",
+							L"KPI Open에 실패했습니다.\r\n종속 DLL 또는 관련 파일(예: .bin)이 없을 수 있습니다.\r\n\r\nKPI: %s",
+							L"KPI打开失败。\r\n可能缺少依赖DLL或相关文件（例如 .bin）。\r\n\r\nKPI: %s",
+							L"فشل فتح KPI.\r\nقد يكون ملف DLL تابع أو ملف مرتبط (مثل .bin) مفقودًا.\r\n\r\nKPI: %s",
+							L"Не удалось выполнить Open KPI.\r\nВозможно, отсутствует зависимая DLL или связанный файл (например, .bin).\r\n\r\nKPI: %s",
+							L"KPI-Open fehlgeschlagen.\r\nMöglicherweise fehlt eine abhängige DLL oder eine zugehörige Datei (z. B. .bin).\r\n\r\nKPI: %s",
+							L"Falha ao abrir o KPI.\r\nPode faltar uma DLL dependente ou arquivo relacionado (ex.: .bin).\r\n\r\nKPI: %s",
+							L"Open van KPI is mislukt.\r\nMogelijk ontbreekt een afhankelijke DLL of gerelateerd bestand (bijv. .bin).\r\n\r\nKPI: %s",
+							L"Otwarcie KPI nie powiodło się.\r\nMoże brakować zależnej biblioteki DLL lub powiązanego pliku (np. .bin).\r\n\r\nKPI: %s",
+							L"KPI Open başarısız.\r\nBağımlı DLL veya ilgili bir dosya (.bin gibi) eksik olabilir.\r\n\r\nKPI: %s"),
+							(const wchar_t*)kpi);
+						MessageBox(depMsg, LL14(
+							L"KPI読み込みエラー",
+							L"KPI Load Error",
+							L"Erreur de chargement KPI",
+							L"Errore caricamento KPI",
+							L"Error al cargar KPI",
+							L"KPI 로드 오류",
+							L"KPI加载错误",
+							L"خطأ تحميل KPI",
+							L"Ошибка загрузки KPI",
+							L"KPI-Ladefehler",
+							L"Erro de carregamento do KPI",
+							L"KPI-laadfout",
+							L"Błąd ładowania KPI",
+							L"KPI Yükleme Hatası"),
+							MB_ICONERROR | MB_OK);
+						return;
+					}
 					int sel = 1;
 					if (ss != L"")sel = (_tstoi(filen.Right(4)));
 					if (sel <= 0) sel = 1;
-					DWORD dwSelectedSong = kpidec->Select(
-						sel,              // [in] 曲番号 (1ベース)
-						&pMediaInfo,    // [out] 曲情報
-						NULL,           // [in] IKpiTagInfo (NULL)
-						0               // [in] dwTagGetFlags (KPI_TAGGET_FLAG_NONE)
+					DWORD dwSelectedSong = SafeKpiDecoderSelect(
+						kpidec,
+						sel,
+						&pMediaInfo
 					);
 					if (ik2) {
 						ik2->Release();
@@ -7530,7 +7974,11 @@ void COggDlg::play()
 					}
 					if (pMediaInfo == NULL) return;
 					wavbit = pMediaInfo->dwSampleRate;	wavch = pMediaInfo->dwChannels;	loop1 = 0; loop2 = kpi_100nsToSample(pMediaInfo->qwLength, pMediaInfo->dwSampleRate);;
-					wavsam = pMediaInfo->nBitsPerSample;
+					wavsam_src = pMediaInfo->nBitsPerSample;
+					g_kpiSourceBitsPerSample = wavsam_src;
+					// DS生成/再生系は整数PCM前提。元フォーマットは wavsam_src 側で保持する。
+					wavsam = (wavsam_src < 0) ? 16 : wavsam_src;
+					NormalizePlaybackWaveFormat();
 				}
 			}
 
@@ -8234,6 +8682,7 @@ void COggDlg::play()
 		if (wav) cc.Write(wav, whsize);
 	}
 	if (mode == 30) { wavbit = 48000; wavsam = 16; wavch = 2; }
+	NormalizePlaybackWaveFormat();
 
 
 	WAVEFORMATEX wfx1;
@@ -11710,12 +12159,97 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 
 
 
+// 16bit, 24bit, 32bit 全ての出力に対応し、巨大なfloat値にも自動対応する万能変換関数ですわ！
+// 最もシンプルで確実な形に戻した万能変換関数ですわ
+static DWORD ConvertFloatTypedToIntBuffer(const void* src, DWORD samples, int srcBits, int channels, BYTE* dst, DWORD dstBytes, int dstBits)
+{
+	if (!src || !dst || samples == 0 || channels <= 0 || dstBytes == 0) return 0;
+	if (srcBits != -32 && srcBits != -64) return 0;
+	const DWORD totalSamples = samples * (DWORD)channels;
+	const DWORD dstBytesPerSample = (DWORD)abs(dstBits) / 8;
+	if (dstBytesPerSample == 0) return 0;
+	const DWORD needBytes = totalSamples * dstBytesPerSample;
+	if (needBytes > dstBytes) return 0;
+
+	if (dstBits == 16) {
+		short* out = (short*)dst;
+		if (srcBits == -32) {
+			const float* p = (const float*)src;
+			for (DWORD i = 0; i < totalSamples; ++i) {
+				float v = p[i];
+				if (v > 1.0f) v = 1.0f; else if (v < -1.0f) v = -1.0f;
+				out[i] = (short)(v * 32767.0f);
+			}
+		}
+		else {
+			const double* p = (const double*)src;
+			for (DWORD i = 0; i < totalSamples; ++i) {
+				out[i] = Kbpsf2ScaledDoubleToInt16(p[i]);
+			}
+		}
+	}
+	else if (dstBits == 32) {
+		int* out = (int*)dst;
+		if (srcBits == -32) {
+			const float* p = (const float*)src;
+			for (DWORD i = 0; i < totalSamples; ++i) {
+				float v = p[i];
+				if (v > 1.0f) v = 1.0f; else if (v < -1.0f) v = -1.0f;
+				out[i] = (int)(v * 2147483647.0f);
+			}
+		}
+		else {
+			const double* p = (const double*)src;
+			for (DWORD i = 0; i < totalSamples; ++i) {
+				double v = p[i];
+				if (v > 1.0) v = 1.0; else if (v < -1.0) v = -1.0;
+				out[i] = (int)(v * 2147483647.0);
+			}
+		}
+	}
+	else if (dstBits == 24) {
+		BYTE* out = dst;
+		if (srcBits == -32) {
+			const float* p = (const float*)src;
+			for (DWORD i = 0; i < totalSamples; ++i) {
+				float v = p[i];
+				if (v > 1.0f) v = 1.0f; else if (v < -1.0f) v = -1.0f;
+				int val = (int)(v * 8388607.0f);
+				out[i * 3] = (BYTE)(val & 0xFF);
+				out[i * 3 + 1] = (BYTE)((val >> 8) & 0xFF);
+				out[i * 3 + 2] = (BYTE)((val >> 16) & 0xFF);
+			}
+		}
+		else {
+			const double* p = (const double*)src;
+			for (DWORD i = 0; i < totalSamples; ++i) {
+				double v = p[i];
+				if (v > 1.0) v = 1.0; else if (v < -1.0) v = -1.0;
+				int val = (int)(v * 8388607.0);
+				out[i * 3] = (BYTE)(val & 0xFF);
+				out[i * 3 + 1] = (BYTE)((val >> 8) & 0xFF);
+				out[i * 3 + 2] = (BYTE)((val >> 16) & 0xFF);
+			}
+		}
+	}
+	else {
+		return 0;
+	}
+	return needBytes;
+}
+
 int readkpi(BYTE* bw, int cnt)
 {
 	if (cnt == 0) return 0;
 	_set_se_translator(trans_func);
 	DWORD cnt1 = (kvver == 2) ? og->sikpi.dwUnitRender : 4096, cnt2 = (DWORD)cnt, cnt4 = 0; if (cnt1 == 0) cnt1 = 4096;
 	DWORD r = cnt;
+
+	// 無音判定用に、ここで先に拡張子を取得しておきますわ
+	CString sss;
+	sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
+	sss.MakeLower();
+
 	try {
 		int len3 = 0, len4 = 0;
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
@@ -11739,13 +12273,23 @@ int readkpi(BYTE* bw, int cnt)
 							r = og->mod->Render(og->kmp1, (BYTE*)bufkpi + cnt3, requestBytes);
 					}
 					if (kvver == 5) {
+						const int dstBitsPerSample = abs(wavsam);
+						const int dstBytesPerFrame = max(1, wavch * (dstBitsPerSample / 8));
 						bool rIsBytes = false;
+
 						if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-							// IPC往復回数が多いと音飛びするので、まとめて先読みしてキャッシュから供給する
-							const size_t need = (size_t)cnt1;
+							const DWORD remainBytes = (cnt > (int)cnt3) ? (DWORD)(cnt - (int)cnt3) : 0;
+							const bool srcFloat = (wavsam_src == -32 || wavsam_src == -64);
+							const DWORD srcBytesPerFrame = srcFloat ? (DWORD)max(1, wavch * (abs(wavsam_src) / 8)) : (DWORD)dstBytesPerFrame;
+
+							const DWORD dstFrames = (dstBytesPerFrame > 0) ? (remainBytes / (DWORD)dstBytesPerFrame) : 0;
+							DWORD requestBytesLocal = srcFloat ? (dstFrames * srcBytesPerFrame) : remainBytes;
+							if (srcBytesPerFrame > 1) requestBytesLocal -= (requestBytesLocal % srcBytesPerFrame);
+
+							const size_t need = (size_t)requestBytesLocal;
 							const size_t remain = (g_kpiRemoteCache.size() > g_kpiRemoteCachePos) ? (g_kpiRemoteCache.size() - g_kpiRemoteCachePos) : 0;
+
 							if (remain < need && !g_kpiRemoteEof) {
-								// 先読みサイズ: 最低 256KB
 								const uint32_t want = (uint32_t)max((DWORD)need, (DWORD)(256 * 1024));
 								std::vector<uint8_t> pcm;
 								bool eof = false;
@@ -11753,7 +12297,6 @@ int readkpi(BYTE* bw, int cnt)
 									r = 0;
 								}
 								else {
-									// 使い切った分は先頭を捨ててメモリ増大を抑える
 									if (g_kpiRemoteCachePos > 0) {
 										g_kpiRemoteCache.erase(g_kpiRemoteCache.begin(), g_kpiRemoteCache.begin() + (ptrdiff_t)g_kpiRemoteCachePos);
 										g_kpiRemoteCachePos = 0;
@@ -11764,36 +12307,81 @@ int readkpi(BYTE* bw, int cnt)
 							}
 
 							const size_t avail = (g_kpiRemoteCache.size() > g_kpiRemoteCachePos) ? (g_kpiRemoteCache.size() - g_kpiRemoteCachePos) : 0;
-							const DWORD copyBytes = (DWORD)min((size_t)cnt1, avail);
-							if (copyBytes) {
-								memcpy((BYTE*)bufkpi + cnt3, g_kpiRemoteCache.data() + g_kpiRemoteCachePos, copyBytes);
-								g_kpiRemoteCachePos += copyBytes;
-								r = copyBytes;
+							DWORD copyBytes = (DWORD)min((size_t)requestBytesLocal, avail);
+							if (srcBytesPerFrame > 1) copyBytes -= (copyBytes % srcBytesPerFrame);
+
+							if (copyBytes > 0) {
+								if (srcFloat) {
+									DWORD gotSamples = copyBytes / srcBytesPerFrame;
+									const DWORD outBytes = ConvertFloatTypedToIntBuffer(
+										g_kpiRemoteCache.data() + g_kpiRemoteCachePos,
+										gotSamples,
+										wavsam_src,
+										wavch,
+										(BYTE*)bufkpi + cnt3,
+										remainBytes,
+										dstBitsPerSample);
+									g_kpiRemoteCachePos += copyBytes;
+									r = outBytes;
+									requestBytes = outBytes;
+								}
+								else {
+									memcpy((BYTE*)bufkpi + cnt3, g_kpiRemoteCache.data() + g_kpiRemoteCachePos, copyBytes);
+									g_kpiRemoteCachePos += copyBytes;
+									r = copyBytes;
+									requestBytes = copyBytes;
+								}
 								rIsBytes = true;
 							}
 							else {
 								r = 0;
 								rIsBytes = true;
+								requestBytes = remainBytes;
 							}
-							if (g_kpiRemoteEof && copyBytes < cnt1) fade1 = 1;
+							if (g_kpiRemoteEof && copyBytes < requestBytesLocal) fade1 = 1;
 						}
 						else
 						{
-							const int bitsPerSample = abs(wavsam);
-							const int bytesPerFrame = max(1, wavch * (bitsPerSample / 8));
 							const int remainBytes = max(0, (int)cnt - (int)cnt3);
-							const DWORD requestSamples = (DWORD)(remainBytes / bytesPerFrame);
-							r = kpidec->Render((BYTE*)bufkpi + cnt3, requestSamples);
+							const DWORD requestSamples = (DWORD)(remainBytes / dstBytesPerFrame);
+
+							if (wavsam_src == -32 || wavsam_src == -64) {
+								DWORD gotSamples = 0;
+								if (requestSamples > 0) {
+									if (wavsam_src == -64) {
+										std::vector<double> srcD;
+										srcD.resize((size_t)requestSamples * wavch);
+										gotSamples = kpidec->Render((BYTE*)srcD.data(), requestSamples);
+										r = ConvertFloatTypedToIntBuffer(srcD.data(), gotSamples, -64, wavch, (BYTE*)bufkpi + cnt3, (DWORD)remainBytes, dstBitsPerSample);
+									}
+									else {
+										std::vector<float> srcF;
+										srcF.resize((size_t)requestSamples * wavch);
+										gotSamples = kpidec->Render((BYTE*)srcF.data(), requestSamples);
+										r = ConvertFloatTypedToIntBuffer(srcF.data(), gotSamples, -32, wavch, (BYTE*)bufkpi + cnt3, (DWORD)remainBytes, dstBitsPerSample);
+									}
+								}
+								else {
+									r = 0;
+								}
+								rIsBytes = true;
+							}
+							else {
+								if (requestSamples > 0) {
+									r = kpidec->Render((BYTE*)bufkpi + cnt3, requestSamples);
+								}
+								else {
+									r = 0;
+								}
+							}
 						}
 						if (!rIsBytes) {
-							const int bitsPerSample = abs(wavsam);
-							const int bytesPerFrame = max(1, wavch * (bitsPerSample / 8));
-							r = (DWORD)(r * bytesPerFrame);
+							r = (DWORD)(r * dstBytesPerFrame);
 						}
 					}
 					if (r == 0) fade1 = 1;
-					// 無音データを補填する処理を追加いたしました
-					if (fade1 == 1 || bufzero > 20) {
+
+					if (fade1 == 1) {
 						if (muon != 0) {
 							if (savedata.saverenzoku == 0) {
 								int fill_size = (int)requestBytes;
@@ -11822,7 +12410,6 @@ int readkpi(BYTE* bw, int cnt)
 				int len2 = readtempo(bufkpi, cnt);
 
 				if (len2 > 0) {
-					// 書き込み
 					if (poss2 + len2 > max_buffer_size) {
 						int first = max_buffer_size - poss2;
 						memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
@@ -11865,7 +12452,6 @@ int readkpi(BYTE* bw, int cnt)
 		equaliser(bw, cnt, reset);
 		reset = FALSE;
 
-		// 無音チェックの不具合修正と、32bitの対応を追加いたしました
 		cnt4 = cnt3;
 		if (r == 0) cnt = 0;
 		__int64 bfc = 0, bc2 = 0;
@@ -11909,11 +12495,6 @@ int readkpi(BYTE* bw, int cnt)
 		int* b32c;
 		b32c = (int*)bw;
 
-		CString sss;
-		sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
-		sss.MakeLower();
-
-		// kakuVal の音量調整（double計算と厳密なクリッピングを追加いたしました）
 		if (wavsam == 32) {
 			for (int i = 0; i < cnt / 4; i++) {
 				double c4 = (double)b32c[i] * ((double)savedata.kakuVal / 100.0);
@@ -11939,7 +12520,6 @@ int readkpi(BYTE* bw, int cnt)
 			}
 		}
 
-		// SPCの音量調整（double計算と厳密なクリッピングを追加いたしました）
 		if (sss == "spc" || sss.Left(3) == "hes") {
 			if (savedata.spc != 1) {
 				if (wavsam == 32) {
@@ -11981,7 +12561,6 @@ int readkpi(BYTE* bw, int cnt)
 			}
 		}
 
-		// kpivolの音量調整（double計算と厳密なクリッピングを追加いたしました）
 		if (savedata.kpivol != 1) {
 			if (wavsam == 32) {
 				for (int i = 0; i < cnt / 4; i++) {
@@ -12022,7 +12601,6 @@ int readkpi(BYTE* bw, int cnt)
 		}
 
 		fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
-		// fadeの音量調整（double計算と厳密なクリッピングを追加いたしました）
 		if (wavsam == 32) {
 			for (int i = 0; i < cnt / 4; i++) {
 				double c4 = (double)b32c[i];
@@ -12411,6 +12989,15 @@ int readflac(BYTE* bw, int cnt)
 
 				if (rrr == 1)
 					r = flac_.Render(og->kmp, (BYTE*)bufkpi, lenl);
+				const int flacSrcBits = wavsam;
+				if (r > 0 && (flacSrcBits == -32 || flacSrcBits == -64)) {
+					r = ConvertFloatPcmBufferToInt16InPlace((BYTE*)bufkpi, (int)r, flacSrcBits, wavch);
+					if (r > 0) {
+						// After conversion, downstream path should treat this block as 16-bit PCM.
+						wavsam = 16;
+						lenl = r;
+					}
+				}
 				if (r != lenl && savedata.saveloop == 0)
 					rrr = 0;
 				// EOF の場合は muon を使わず部分読みを返す（曲終了検出のため）。通常のドロップアウト時のみ muon でゼロ埋め
@@ -19294,7 +19881,7 @@ void plus2(int& c)
 		return;
 	}
 
-	hDLLk1[kpicnt] = LoadLibrary(ss);
+	hDLLk1[kpicnt] = LoadKpiLibraryWithDependencies((const wchar_t*)ss);
 	if (hDLLk1[kpicnt]) {
 		pFunck[kpicnt] = (pfnGetKMPModule)GetProcAddress(hDLLk1[kpicnt], SZ_KMP_GETMODULE);
 		typedef HRESULT(WINAPI* kpi_CreateInstance)(REFIID riid, void** ppvObject, IKpiUnknown* pUnknown);
@@ -19303,7 +19890,7 @@ void plus2(int& c)
 			if (cr) { // kpi 5
 				kpiarch[kpicnt] = 32;
 				IKpiDecoderModule* ob = NULL;
-				IUnknown* pMyObject = new CMyHost();
+				IUnknown* pMyObject = new CMyHost((const wchar_t*)ss);
 				HRESULT hr = cr(IID_IKpiDecoderModule, (void**)&ob, pMyObject);
 				if (hr == S_OK) {
 					const KPI_DECODER_MODULEINFO* m_ModuleInfo;

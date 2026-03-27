@@ -1,4 +1,4 @@
-// Douga.cpp : インプリメンテーション ファイル
+﻿// Douga.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"

@@ -108,6 +108,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="KpiHost64.cpp" />
+    <ClCompile Include="..\KpiV5ConfigStore.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

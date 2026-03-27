@@ -1,4 +1,4 @@
-﻿#include "afxwin.h"
+#include "afxwin.h"
 #if !defined(AFX_FOLDER_H__08EFA55A_7FC1_4B30_8B0F_7987E91B5FB7__INCLUDED_)
 #define AFX_FOLDER_H__08EFA55A_7FC1_4B30_8B0F_7987E91B5FB7__INCLUDED_
 
@@ -103,6 +103,7 @@ public:
 	CCustomEdit m_24s;
 	afx_msg void OnBnClickedButton56();
 	afx_msg void OnBnClickedButton25();
+	afx_msg void OnBnClickedButton57();
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	afx_msg void OnMoving(UINT fwSide, LPRECT pRect);
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
@@ -128,6 +129,7 @@ public:
 	CCustomStandardButton m24;
 	CCustomStandardButton m25;
 	CCustomStandardButton m27;
+	CCustomStandardButton m_fsafa;
 };
 
 //{{AFX_INSERT_LOCATION}}
