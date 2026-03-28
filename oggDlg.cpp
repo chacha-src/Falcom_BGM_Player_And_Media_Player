@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -13892,10 +13892,13 @@ float tempoRate2;
 
 // ─────────────────────────────────────────────────────────────────────
 // スライダーでのシーク時や、ループ時にRubberBandを温めながらジャンプする万能関数
+// 修正版：引数の不整合を解消し、再生位置の同期を最適化しました
 // ─────────────────────────────────────────────────────────────────────
 bool InitializeRubberBandStretcher();
+
 void SeekAndWarmupRubberBand(int targetPos)
 {
+	// ゴムバンドの初期化またはリセット
 	if (!g_rubberBandStretcher) {
 		float te = (float)tempo;
 		if (te >= 200.0f) te -= 100.0f;
@@ -13908,8 +13911,7 @@ void SeekAndWarmupRubberBand(int targetPos)
 		g_rubberBandStretcher->reset();
 	}
 
-	// ★ 修正点：1秒は長すぎて処理落ち（引き延ばし音）の原因になるため、
-	// 必須な遅延分＋αの「8192サンプル（約0.18秒）」に短縮します。
+	// 助走（プリロール）の計算
 	int preRollInputSamples = 8192;
 	int startPos = targetPos - preRollInputSamples;
 	if (startPos < 0) {
@@ -13917,20 +13919,22 @@ void SeekAndWarmupRubberBand(int targetPos)
 		startPos = 0;
 	}
 
-	ov_pcm_seek_lap(&vf, (ogg_int64_t)startPos);
+	// シーク実行（lapなしの通常シークでダブリを防止）
+	ov_pcm_seek(&vf, (ogg_int64_t)startPos);
 
 	float te = (float)tempo;
 	if (te >= 200.0f) te -= 100.0f;
 	else te = te / 3.0f + 33.3f;
 	float ratio = te / 100.0f;
 
+	// 捨てるべき出力サンプル数
 	int targetDiscardOutput = (int)(preRollInputSamples / ratio);
 	int discardedSoFar = 0;
 
 	std::vector<uint8_t> tempRawBuf(4096);
 	m_convertedPcmFloatData.clear();
 
-	// 出力が targetDiscardOutput を越えるまで回し続けます
+	// 助走区間のデコードと処理
 	while (discardedSoFar < targetDiscardOutput) {
 		int current_section;
 		long bytesRead = ov_read(&vf, (char*)tempRawBuf.data(), 4096, 0, 2, 1, &current_section);
@@ -13938,9 +13942,13 @@ void SeekAndWarmupRubberBand(int targetPos)
 
 		int samplesRead = bytesRead / (wavch * 2);
 
+		// ★ 引数を整理しました（元データ、ビット数、チャンネル数）
 		std::vector<float> inFloat;
 		uint16_t bps = (uint16_t)((wavsam <= 0 || wavsam > 32) ? 16 : abs(wavsam));
-		ConvertRawBytesToFloat(std::vector<uint8_t>(tempRawBuf.begin(), tempRawBuf.begin() + bytesRead), bps, wavch, inFloat);
+
+		// 読み込んだサイズ分だけのテンポラリバッファを作成して渡します
+		std::vector<uint8_t> actualReadData(tempRawBuf.begin(), tempRawBuf.begin() + bytesRead);
+		ConvertRawBytesToFloat(actualReadData, bps, wavch, inFloat);
 
 		std::vector<std::vector<float>> chData(wavch, std::vector<float>(samplesRead));
 		for (int i = 0; i < samplesRead; ++i) {
@@ -13961,26 +13969,29 @@ void SeekAndWarmupRubberBand(int targetPos)
 			size_t retrieved = g_rubberBandStretcher->retrieve(outPtrs.data(), toGet);
 			if (retrieved == 0) break;
 
-			if (discardedSoFar + retrieved <= targetDiscardOutput) {
-				discardedSoFar += retrieved;
+			if (discardedSoFar + retrieved <= (size_t)targetDiscardOutput) {
+				discardedSoFar += (int)retrieved;
 			}
 			else {
-				// 超えた分を正式なデータとして配列に入れます
-				int discardAmount = targetDiscardOutput - discardedSoFar;
-				for (int i = discardAmount; i < retrieved; ++i) {
+				// ターゲット位置を越えた分を保存
+				int discardAmountForThisChunk = targetDiscardOutput - discardedSoFar;
+				if (discardAmountForThisChunk < 0) discardAmountForThisChunk = 0;
+
+				for (int i = discardAmountForThisChunk; i < (int)retrieved; ++i) {
 					for (int ch = 0; ch < wavch; ++ch) {
 						m_convertedPcmFloatData.push_back(outBuf[ch][i]);
 					}
 				}
-				discardedSoFar += retrieved;
+				discardedSoFar += (int)retrieved;
 			}
 		}
 	}
 
+	// バッファ管理変数の初期化
 	poss = 0;
 	poss2 = 0; poss3 = 0; poss4 = 0; poss6 = 0;
 
-	int keptSamples = m_convertedPcmFloatData.size() / wavch;
+	int keptSamples = (int)(m_convertedPcmFloatData.size() / wavch);
 	if (keptSamples > 0) {
 		outputRawBytesData.clear();
 		outputRawBytesData.resize(keptSamples * wavch * 2);
@@ -13988,26 +13999,27 @@ void SeekAndWarmupRubberBand(int targetPos)
 		for (size_t i = 0; i < m_convertedPcmFloatData.size(); ++i) {
 			float val = m_convertedPcmFloatData[i];
 			if (val > 1.0f) val = 1.0f;
-			if (val < -1.0f) val = -1.0f;
+			else if (val < -1.0f) val = -1.0f;
 			rawOut[i] = (int16_t)(val * 32767.0f);
 		}
 
 		int byteLen = keptSamples * wavch * 2;
-
-		// ★ 安全対策: 抽出したデータが万が一バッファ上限を超えた場合のメモリ破壊を防ぎます
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (byteLen > max_buffer_size) byteLen = max_buffer_size;
 
 		memcpy(bufkpi3, outputRawBytesData.data(), byteLen);
+
 		poss2 = byteLen;
 		poss4 = byteLen;
 
-		poss5 = targetPos + (int)(keptSamples * ratio);
-		playb = targetPos + (int)(keptSamples * ratio);
+		// 重要：playb を「実際に読み進めたファイル上の位置」まで進めます
+		int inputSamplesUsed = (int)(keptSamples * ratio);
+		playb = targetPos + inputSamplesUsed;
+		poss5 = playb;
 	}
 	else {
-		poss5 = targetPos;
 		playb = targetPos;
+		poss5 = targetPos;
 	}
 
 	reset = TRUE;
@@ -19181,6 +19193,13 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			if (pMainFrame1) {
 				pMainFrame1->seek((LONGLONG)(((float)curpos * 10000000.0f) / (float)wavbit));
 			}
+			// 共通のバッファ・フラグ更新
+			ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
+			ZeroMemory(bufkpi_, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
+			ZeroMemory(bufkpi2, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
+			ZeroMemory(bufkpi3, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
+			ZeroMemory(bufkpi4, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
+			poss = 0;
 
 			if ((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999) {
 				if (mode == -10) {
@@ -19257,19 +19276,13 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				m4a_.SetPosition(kmp, pla);
 			}
 			else { // OGG / Others
-				SeekAndWarmupRubberBand((ogg_int64_t)playb);
+				SeekAndWarmupRubberBand((ogg_int64_t)playb); playb += 4096 + 128; poss5 += 4096 + 128;
+				r->SetPos(playb);
 			}
 
-			// 共通のバッファ・フラグ更新
-			ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-			ZeroMemory(bufkpi_, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-			ZeroMemory(bufkpi2, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-			ZeroMemory(bufkpi3, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-			ZeroMemory(bufkpi4, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 			sek = TRUE;
 			cnt3 = 0;
 			timer.SetEvent();
-			poss = 0;
 			hsc = 0;
 		}
 		// ★ここで hscroll_lock がスコープを抜け、自動的に解除される
