@@ -102,9 +102,6 @@
     <ClCompile Include="oggDlg_ds.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ogg_flac_loop_cache.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="PlayList.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

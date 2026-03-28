@@ -86,7 +86,6 @@ int g_kpiSourceBitsPerSample = 16;
 #include <vector>
 #include <algorithm>
 #include "LyricsProgressWnd.h"
-#include "ogg_flac_loop_cache.h"
 
 bool ProcessAudioWithRubberBand(float tempoRate, bool t);
 void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
@@ -6486,8 +6485,7 @@ void COggDlg::play()
 	if (wavExportPath.GetLength() == 0) cc1 = 0;
 	playb = 0;
 	m_time.SetPos((int)playb);
-	OggFlacLoopCache_Free();
-	if (ogg) ov_pcm_seek(&vf, (ogg_int64_t)0);
+	if (ogg) ov_pcm_seek_lap(&vf, (ogg_int64_t)0);
 	poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
 	ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 	ZeroMemory(bufkpi_, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
@@ -12909,24 +12907,12 @@ int readm4a(BYTE* bw, int cnt)
 }
 
 
-static int OggFlacLoopFrameBytesFlac()
-{
-	if (flacmode == 1)
-		return 6;
-	const int bps = abs(wavsam);
-	if (bps <= 0)
-		return max(1, wavch * 2);
-	return max(1, wavch * (bps / 8));
-}
-
 int playwavflac(BYTE* bw, int old, int l1, int l2)
 {
 	// HandleNotifications は len1/len2 を値渡しのため、部分読み後も Lock 長は元のまま。
 	// 未書き領域をゼロ埋めしないと memcpy で未定義データが DS に渡りクラッシュの原因になる。
 	const int l1req = l1;
 	const int l2req = l2;
-	const int bpf_fc = OggFlacLoopFrameBytesFlac();
-	int frame_pos = playb;
 	int rrr = readflac(bw + old, l1);
 	if (l1 != rrr) {
 		if (savedata.saveloop == 0 && endf == 1 && flacmode == 0) {
@@ -12947,14 +12933,9 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 				g_rubberBandStretcher = NULL;
 			}
 			reset = TRUE;
-			frame_pos = playb;
-			const int rr_fill = readflac(bw + old + rrr, l1req - rrr);
+			readflac(bw + old + rrr, l1req - rrr);
 			l1 = l1req;
-			frame_pos = loop1 + (bpf_fc > 0 ? l1req / bpf_fc : 0);
 		}
-	}
-	else {
-		frame_pos += (bpf_fc > 0 ? rrr / bpf_fc : 0);
 	}
 	if (l1 < l1req)
 		ZeroMemory(bw + old + l1, (SIZE_T)(l1req - l1));
@@ -12980,8 +12961,7 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 					g_rubberBandStretcher = NULL;
 				}
 				reset = TRUE;
-				frame_pos = loop1 + (bpf_fc > 0 ? l1req / bpf_fc : 0);
-				const int rr_l2 = readflac(bw + rrr, (int)l2req - rrr);
+				readflac(bw + rrr, (int)l2req - rrr);
 				l2out = l2req;
 			}
 		}
@@ -12991,45 +12971,6 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 	if (flacmode == 0)
 		playb += (l1 + l2out) / (wavsam / 4);
 	return l1 + l2out;
-}
-
-// 整数PCMのFLACのみ: 1 ブロックがループ終端をまたぐときキャッシュと Render を合成（float はフル Render）
-static DWORD ReadflacHybridFillFromLoopCache(int dec_frame0, int lenl_bytes, int bpf, int loop1_, int loop2_)
-{
-	if (bpf <= 0 || lenl_bytes % bpf != 0)
-		return 0;
-	const int nfr = lenl_bytes / bpf;
-	ZeroMemory(bufkpi, (SIZE_T)lenl_bytes);
-	OggFlacLoopCache_CopyCachedFramesInRange(dec_frame0, nfr, loop1_, loop2_, bpf, (BYTE*)bufkpi);
-	int i = 0;
-	while (i < nfr) {
-		if (OggFlacLoopCache_FrameFullyFilled(dec_frame0 + i, loop1_, loop2_, bpf)) {
-			++i;
-			continue;
-		}
-		int j = i;
-		while (j < nfr && !OggFlacLoopCache_FrameFullyFilled(dec_frame0 + j, loop1_, loop2_, bpf))
-			++j;
-		const int k = j - i;
-		double aa = 2000.0;
-		if (wavsam == 32 || wavsam == 24 || wavsam == 16 || wavsam == 8) aa = 2000.0;
-		flac_.SetPosition(og->kmp, (LONGLONG)((double)(dec_frame0 + i) / (((double)wavbit * (double)wavch) / aa)));
-		DWORD rr = flac_.Render(og->kmp, (BYTE*)bufkpi + i * bpf, k * bpf);
-		if (OggFlacLoopCache_ShouldUse(savedata.saveloop, loop2_) && rr > 0) {
-			const int abs0 = dec_frame0 + i;
-			const int L0 = loop1_, L1 = loop1_ + loop2_;
-			const int a = (abs0 > L0) ? abs0 : L0;
-			const int b = (abs0 + k < L1) ? (abs0 + k) : L1;
-			if (a < b)
-				OggFlacLoopCache_Commit(a, (BYTE*)bufkpi + (a - dec_frame0) * bpf, (b - a) * bpf, loop1_, loop2_, bpf, savedata.saveloop);
-		}
-		if (rr == 0)
-			return 0;
-		if (rr != (DWORD)(k * bpf))
-			return (DWORD)(i * bpf + (int)rr);
-		i = j;
-	}
-	return (DWORD)lenl_bytes;
 }
 
 int readflac(BYTE* bw, int cnt)
@@ -13043,38 +12984,13 @@ int readflac(BYTE* bw, int cnt)
 	try {
 		int len3 = 0, len4 = 0;
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
-		int dec_frame = playb;
-		bool flac_pcm_cache_used = false;
 		if (poss4 < lenl) {
 			while (true) {
 
-				bool chunk_from_pcm_cache = false;
-				bool chunk_hybrid_pcm = false;
-				if (rrr == 1) {
-					r = 0;
-					if (flacmode == 0 && OggFlacLoopCache_ShouldUse(savedata.saveloop, loop2) && lenl > 0) {
-						const int bpf_raw = OggFlacLoopFrameBytesFlac();
-						if (lenl % bpf_raw == 0 && OggFlacLoopCache_TryReadRawBytes(dec_frame, loop1, loop2, bpf_raw, (BYTE*)bufkpi, lenl) > 0) {
-							r = (DWORD)lenl;
-							chunk_from_pcm_cache = true;
-							flac_pcm_cache_used = true;
-						}
-						else if (wavsam > 0 && lenl % bpf_raw == 0) {
-							const DWORD rh = ReadflacHybridFillFromLoopCache(dec_frame, (int)lenl, bpf_raw, loop1, loop2);
-							if (rh > 0) {
-								r = rh;
-								chunk_hybrid_pcm = true;
-								flac_pcm_cache_used = true;
-								if (r != lenl)
-									lenl = r;
-							}
-						}
-					}
-					if (r == 0)
-						r = flac_.Render(og->kmp, (BYTE*)bufkpi, lenl);
-				}
+				if (rrr == 1)
+					r = flac_.Render(og->kmp, (BYTE*)bufkpi, lenl);
 				const int flacSrcBits = wavsam;
-				if (r > 0 && !chunk_from_pcm_cache && (flacSrcBits == -32 || flacSrcBits == -64)) {
+				if (r > 0 && (flacSrcBits == -32 || flacSrcBits == -64)) {
 					r = ConvertFloatPcmBufferToInt16InPlace((BYTE*)bufkpi, (int)r, flacSrcBits, wavch);
 					if (r > 0) {
 						// After conversion, downstream path should treat this block as 16-bit PCM.
@@ -13100,18 +13016,7 @@ int readflac(BYTE* bw, int cnt)
 				if (r == 0) lenl = 0;
 				if (r == 0) break;
 
-				if (flacmode == 0 && OggFlacLoopCache_ShouldUse(savedata.saveloop, loop2) && !chunk_from_pcm_cache && !chunk_hybrid_pcm && r > 0) {
-					const int bpf_c = OggFlacLoopFrameBytesFlac();
-					if (lenl % bpf_c == 0)
-						OggFlacLoopCache_Commit(dec_frame, (BYTE*)bufkpi, lenl, loop1, loop2, bpf_c, savedata.saveloop);
-				}
-
 				int len2 = readtempo(bufkpi, lenl);
-				{
-					const int bpf_d = OggFlacLoopFrameBytesFlac();
-					if (bpf_d > 0 && lenl % bpf_d == 0)
-						dec_frame += lenl / bpf_d;
-				}
 				if (len2 > 0) {
 					// 書き込み
 					if (poss2 + len2 > max_buffer_size) {
@@ -13129,13 +13034,6 @@ int readflac(BYTE* bw, int cnt)
 					if (poss4 > lenl) break;
 				}
 			}
-		}
-
-		if (flac_pcm_cache_used && flacmode == 0) {
-			double aa = 2000.0;
-			if (wavsam == 32 || wavsam == 24 || wavsam == 16 || wavsam == 8) aa = 2000.0;
-			flac_.SetPosition(og->kmp, (LONGLONG)((double)dec_frame / (((double)wavbit * (double)wavch) / aa)));
-			::rrr = 1;
 		}
 
 		cnt2 = lenl;
@@ -13998,7 +13896,6 @@ float tempoRate2;
 bool InitializeRubberBandStretcher();
 void SeekAndWarmupRubberBand(int targetPos)
 {
-	OggFlacLoopCache_InvalidateUnlessLoopRewind(savedata.saveloop, loop1, loop2, targetPos);
 	if (!g_rubberBandStretcher) {
 		float te = (float)tempo;
 		if (te >= 200.0f) te -= 100.0f;
@@ -14020,7 +13917,7 @@ void SeekAndWarmupRubberBand(int targetPos)
 		startPos = 0;
 	}
 
-	ov_pcm_seek(&vf, (ogg_int64_t)startPos);
+	ov_pcm_seek_lap(&vf, (ogg_int64_t)startPos);
 
 	float te = (float)tempo;
 	if (te >= 200.0f) te -= 100.0f;
@@ -14129,16 +14026,12 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 		}
 		else {
 			loopcnt++;
-			playb = loop1;
-			ov_pcm_seek(&vf, (ogg_int64_t)loop1);
-			poss = 0;
-			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-			cnt3 = 0;
-			if (g_rubberBandStretcher) {
-				delete g_rubberBandStretcher;
-				g_rubberBandStretcher = NULL;
-			}
-			reset = TRUE;
+
+			// ★ 女神様考案のウォームアップ処理を実行 ★
+			SeekAndWarmupRubberBand(loop1);
+
+			// ウォームアップが済んでいるので、あとは通常通り mcopy に任せるだけです！
+			// mcopy 側はごちゃごちゃしたフラグや差分計算を一切気にする必要はありません。
 			mcopy((char*)bw + old + rrr, (int)l1 - rrr);
 		}
 	}
@@ -14150,16 +14043,10 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 			}
 			else {
 				loopcnt++;
-				playb = loop1;
-				ov_pcm_seek(&vf, (ogg_int64_t)loop1);
-				poss = 0;
-				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-				cnt3 = 0;
-				if (g_rubberBandStretcher) {
-					delete g_rubberBandStretcher;
-					g_rubberBandStretcher = NULL;
-				}
-				reset = TRUE;
+
+				// ★ こちらも同様にウォームアップ処理を実行 ★
+				SeekAndWarmupRubberBand(loop1);
+
 				mcopy((char*)bw + rrr, (int)l2 - rrr);
 			}
 		}
@@ -14190,7 +14077,7 @@ void playwavds(BYTE* bw)
 		else {
 			loopcnt++;
 			playb = loop1;
-			ov_pcm_seek(&vf, (ogg_int64_t)loop1); poss = 0;
+			ov_pcm_seek_lap(&vf, (ogg_int64_t)loop1); poss = 0;
 			mcopy((char*)buf[lo] + rrr, (int)dwDataLen - rrr);
 		}
 	}
@@ -14214,7 +14101,7 @@ void playwav()
 		else {
 			loopcnt++;
 			playb = loop1;
-			ov_pcm_seek(&vf, (ogg_int64_t)loop1); poss = 0;
+			ov_pcm_seek_lap(&vf, (ogg_int64_t)loop1); poss = 0;
 			mcopy((char*)buf[lo] + rrr, (int)dwDataLen - rrr);
 		}
 	}
@@ -14688,7 +14575,6 @@ void COggDlg::stop()
 		plf = 0;
 
 		if (ogg)ReleaseOggVorbis(&ogg);
-		OggFlacLoopCache_Free();
 
 		ogg = NULL;
 
@@ -14907,49 +14793,6 @@ BOOL COggDlg::DestroyWindow()
 	dcsub.DeleteDC();
 	return CCustomDialog::DestroyWindow();
 }
-
-// 1 リードがループ終端をまたぐとき、キャッシュ済みフレームはキャッシュから・不足分は ov_read で合成
-static void McopyHybridFillOgg(int pb_block, int lenl, int bpf, BYTE* bufwav_buf)
-{
-	if (lenl <= 0 || bpf <= 0)
-		return;
-	ZeroMemory(bufwav_buf, (SIZE_T)lenl * (SIZE_T)bpf);
-	OggFlacLoopCache_CopyCachedFramesInRange(pb_block, lenl, loop1, loop2, bpf, bufwav_buf);
-	int i = 0;
-	while (i < lenl) {
-		const int ff = pb_block + i;
-		if (OggFlacLoopCache_FrameFullyFilled(ff, loop1, loop2, bpf)) {
-			++i;
-			continue;
-		}
-		int j = i;
-		while (j < lenl && !OggFlacLoopCache_FrameFullyFilled(pb_block + j, loop1, loop2, bpf))
-			++j;
-		const int k = j - i;
-		ov_pcm_seek(&vf, (ogg_int64_t)(pb_block + i));
-		const int need = k * bpf;
-		int got = 0;
-		while (got < need) {
-			const int chunk = min(4096, need - got);
-			const long br = ov_read(&vf, (char*)(bufwav_buf + i * bpf + got), chunk, 0, 2, 1, &current_section);
-			if (br <= 0)
-				break;
-			got += (int)br;
-		}
-		if (OggFlacLoopCache_ShouldUse(savedata.saveloop, loop2)) {
-			const int abs0 = pb_block + i;
-			const int L0 = loop1, L1 = loop1 + loop2;
-			const int a = (abs0 > L0) ? abs0 : L0;
-			const int b = (abs0 + k < L1) ? (abs0 + k) : L1;
-			if (a < b) {
-				const int off = (a - pb_block) * bpf;
-				OggFlacLoopCache_Commit(a, bufwav_buf + off, (b - a) * bpf, loop1, loop2, bpf, savedata.saveloop);
-			}
-		}
-		i = j;
-	}
-}
-
 //oggから実際にデータを獲得する
 int mcopy(char* a, int len)
 {
@@ -14970,46 +14813,17 @@ int mcopy(char* a, int len)
 				return len;
 			}
 
-			int pb_block = playb;
-			bool used_loop_pcm_path = false;
-			{
-				const int bpf_raw = max(1, wavch * 2);
-				const int raw_bytes = lenl * bpf_raw;
-				// poss!=0 のときは先頭に未処理PCMが残るため、先頭から lenl フレーム塊としての TryRead/合成は使わない
-				if (poss == 0 && OggFlacLoopCache_ShouldUse(savedata.saveloop, loop2) && raw_bytes > 0 && (raw_bytes % bpf_raw) == 0) {
-					if (OggFlacLoopCache_TryReadRawBytes(pb_block, loop1, loop2, bpf_raw, (BYTE*)bufwav, raw_bytes) > 0) {
-						used_loop_pcm_path = true;
-						poss = lenl;
-					}
-					else {
-						McopyHybridFillOgg(pb_block, lenl, bpf_raw, bufwav);
-						used_loop_pcm_path = true;
-						poss = lenl;
-					}
-				}
-			}
-			if (!used_loop_pcm_path) {
-				for (;;) {
-					ret = ov_read(&vf, (char*)(bufwav + poss * 4), 4096, 0, 2, 1, &current_section) / 4;
-					poss += ret;
-					if (ret == 0) break;
-					if (lenl <= poss) break;
-				}
+			int i = 0;
+			for (;;) {
+				ret = ov_read(&vf, (char*)(bufwav + poss * 4), 4096, 0, 2, 1, &current_section) / 4;
+				poss += ret;
+				if (ret == 0) break;
+				if (lenl <= poss) break;
 			}
 
 			int to_process = lenl;
-			if (!used_loop_pcm_path && OggFlacLoopCache_ShouldUse(savedata.saveloop, loop2) && to_process > 0) {
-				const int bpf_o = max(1, wavch * 2);
-				const int raw_bytes = to_process * bpf_o;
-				if (raw_bytes % bpf_o == 0)
-					OggFlacLoopCache_Commit(pb_block, (BYTE*)bufwav, raw_bytes, loop1, loop2, bpf_o, savedata.saveloop);
-			}
 			int len2 = readtempo(bufwav, to_process * 4);
 			playb += len2 / 4;
-			if (used_loop_pcm_path) {
-				ov_pcm_seek(&vf, (ogg_int64_t)playb);
-				poss = 0;
-			}
 
 			if (len2 > 0) {
 				if (poss2 + len2 > max_buffer_size) {
@@ -19430,7 +19244,6 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				dsd_.kpiSetPosition(kmp, (DWORD)((double)playb / (((double)wavbit * (double)wavch) / 2000.0)));
 			}
 			else if (mode == -8) { // FLAC
-				OggFlacLoopCache_InvalidateUnlessLoopRewind(savedata.saveloop, loop1, loop2, (int)playb);
 				sek4 = TRUE;
 				if (flacmode == 1) flac_.SetPosition(kmp, playb);
 				else               flac_.SetPosition(kmp, (LONGLONG)((double)playb / (((double)wavbit * (double)wavch) / aa)));
@@ -19605,8 +19418,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 				}
 			}
 			else {
-				OggFlacLoopCache_InvalidateUnlessLoopRewind(savedata.saveloop, loop1, loop2, (int)playb);
-				ov_pcm_seek(&vf, (ogg_int64_t)playb);
+				ov_pcm_seek_lap(&vf, (ogg_int64_t)playb);
 				sek = TRUE;
 				timer.SetEvent();
 			}
@@ -19686,8 +19498,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 				}
 			}
 			else {
-				OggFlacLoopCache_InvalidateUnlessLoopRewind(savedata.saveloop, loop1, loop2, (int)playb);
-				ov_pcm_seek(&vf, (ogg_int64_t)playb);
+				ov_pcm_seek_lap(&vf, (ogg_int64_t)playb);
 				sek = TRUE;
 				timer.SetEvent();
 			}
@@ -19727,8 +19538,7 @@ void COggDlg::rl(int a)
 		timer.SetEvent();
 	}
 	else {
-		OggFlacLoopCache_InvalidateUnlessLoopRewind(savedata.saveloop, loop1, loop2, (int)playb);
-		ov_pcm_seek(&vf, (ogg_int64_t)playb);
+		ov_pcm_seek_lap(&vf, (ogg_int64_t)playb);
 		sek = TRUE;
 		timer.SetEvent();
 	}
