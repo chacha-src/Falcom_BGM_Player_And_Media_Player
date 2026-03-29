@@ -2953,6 +2953,7 @@
   <ItemGroup>
     <ClCompile Include="KpiHostClient.cpp" />
     <ClCompile Include="Arc.cpp" />
+    <ClCompile Include="AudioUpscaler.cpp" />
     <ClCompile Include="AudioSelect.cpp" />
     <ClCompile Include="Br4.cpp" />
     <ClCompile Include="CBlurDialogBase.cpp" />
@@ -3032,6 +3033,7 @@
     <ClInclude Include="KpiHostClient.h" />
     <ClInclude Include="kpi_host_ipc.h" />
     <ClInclude Include="ALACAudioTypes.h" />
+    <ClInclude Include="AudioUpscaler.h" />
     <ClInclude Include="CAFFileALAC.h" />
     <ClInclude Include="CBlurDialogBase.h" />
     <ClInclude Include="CBlurDialogExBase.h" />

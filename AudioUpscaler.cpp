@@ -1,0 +1,463 @@
+﻿#include "stdafx.h"
+#include "AudioUpscaler.h"
+#include <algorithm>
+#include <cmath>
+
+AudioUpscaler g_audioUpscaler;
+int g_ds_pcm_ch = 2;
+int g_ds_pcm_rate = 44100;
+int g_ds_pcm_bits = 16;
+int g_pcm_upscale_active = 0;
+// (10240*6/2)*5 と mp3.h の BUFSZ*OUTPUT_BUFFER_NUM を一致させる
+static const ULONG kDsBaseRingBytes = (ULONG)((10240 * 6 / 2) * 5);
+ULONG g_ds_buffer_bytes = kDsBaseRingBytes;
+
+static void RefreshDsBufferBytesFromFormat()
+{
+	const int outBps = (g_ds_pcm_bits >= 8) ? (g_ds_pcm_bits / 8) : 2;
+	const int outAlign = g_ds_pcm_ch * outBps;
+	const int refAlign = 2 * 2; // レガシー基準: ステレオ 16bit フレーム
+	if (outAlign <= 0 || refAlign <= 0) {
+		g_ds_buffer_bytes = kDsBaseRingBytes;
+		return;
+	}
+	ULONG frames = kDsBaseRingBytes / (ULONG)refAlign;
+	ULONG bytes = frames * (ULONG)outAlign;
+	// bufwav3[ kBase * 8 ] 上限（8ch×32bit まで想定）
+	const ULONG cap = kDsBaseRingBytes * 8;
+	if (bytes > cap)
+		bytes = (cap / (ULONG)outAlign) * (ULONG)outAlign;
+	g_ds_buffer_bytes = bytes ? bytes : kDsBaseRingBytes;
+}
+
+void ResetAudioUpscalerPipeline()
+{
+	g_audioUpscaler.Reset();
+}
+
+int SpeakerLayoutToOutChannels(int layout)
+{
+	switch (layout) {
+	case 1: return 3;  // 2.1
+	case 2: return 4;  // 4.0
+	case 3: return 6;  // 5.1
+	case 4: return 8;  // 7.1
+	case 5: return 2;  // 未使用（ConfigurePlaybackOutputAndUpscaler でソースchを使う）
+	default: return 2; // 2.0
+	}
+}
+
+std::uint32_t DirectSoundChannelMaskForOutput(int outCh, int speaker_layout)
+{
+	if (outCh <= 0)
+		outCh = 2;
+	if (outCh > 8)
+		outCh = 8;
+	switch (outCh) {
+	case 1:
+		return SPEAKER_FRONT_CENTER;
+	case 2:
+		return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
+	case 3:
+		if (speaker_layout == 1)
+			return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_LOW_FREQUENCY;
+		return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER;
+	case 4:
+		// 4 出力は常にクアッド4マスク（従来の else 枝は5ビットになり nChannels と g_ds_pcm_ch が食い違って落ちる）
+		return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT;
+	case 5:
+		return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER
+			| SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT;
+	case 6:
+		return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER
+			| SPEAKER_LOW_FREQUENCY | SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT;
+	case 7:
+		return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER
+			| SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT | SPEAKER_SIDE_LEFT | SPEAKER_LOW_FREQUENCY;
+	default:
+		return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER
+			| SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT | SPEAKER_SIDE_LEFT | SPEAKER_SIDE_RIGHT | SPEAKER_LOW_FREQUENCY;
+	}
+}
+
+AudioUpscaler::AudioUpscaler()
+{
+	m_scratchFrame.resize(16);
+}
+
+void AudioUpscaler::Configure(int srcRate, int srcCh, int srcBits,
+	int dstRate, int dstCh, int dstBits)
+{
+	if (srcRate < 1) srcRate = 44100;
+	if (dstRate < 1) dstRate = 44100;
+	if (srcCh < 1) srcCh = 2;
+	if (dstCh < 1) dstCh = 2;
+	srcBits = abs(srcBits);
+	dstBits = abs(dstBits);
+	if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32)) srcBits = 16;
+	if (!(dstBits == 16 || dstBits == 24 || dstBits == 32)) dstBits = 16;
+
+	m_srcRate = srcRate;
+	m_srcCh = srcCh;
+	m_srcBits = srcBits;
+	m_dstRate = dstRate;
+	m_dstCh = dstCh;
+	m_dstBits = dstBits;
+
+	m_active = (srcRate != dstRate || srcCh != dstCh || srcBits != dstBits);
+	if (!m_active) {
+		m_fifo.clear();
+		m_readPos = 0.0;
+	}
+	else {
+		Reset();
+	}
+	RefreshDsBufferBytesFromFormat();
+}
+
+void AudioUpscaler::Reset()
+{
+	m_fifo.clear();
+	m_readPos = 0.0;
+}
+
+void AudioUpscaler::EnsureConfigured() const
+{
+}
+
+void AudioUpscaler::PcmToFloat(const uint8_t* p, int nFrames, int ch, int bits, std::vector<float>& out)
+{
+	const int n = nFrames * ch;
+	out.resize((size_t)n);
+	if (bits == 8) {
+		for (int i = 0; i < n; ++i) {
+			float v = (float)((int)p[i] - 128) / 128.0f;
+			out[(size_t)i] = (std::max)(-1.0f, (std::min)(1.0f, v));
+		}
+	}
+	else if (bits == 16) {
+		const int16_t* s = (const int16_t*)p;
+		for (int i = 0; i < n; ++i)
+			out[(size_t)i] = (float)s[i] / 32768.0f;
+	}
+	else if (bits == 24) {
+		for (int i = 0; i < n; ++i) {
+			const uint8_t* b = p + i * 3;
+			int32_t v = (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16));
+			if (v & 0x800000) v |= ~0xFFFFFF;
+			out[(size_t)i] = (float)v / 8388608.0f;
+		}
+	}
+	else { // 32
+		const int32_t* s = (const int32_t*)p;
+		for (int i = 0; i < n; ++i)
+			out[(size_t)i] = (float)((double)s[i] / 2147483648.0);
+	}
+}
+
+int AudioUpscaler::FloatToPcm(const float* interleaved, int nFrames, int ch, int bits, uint8_t* dst)
+{
+	const int n = nFrames * ch;
+	if (bits == 16) {
+		int16_t* o = (int16_t*)dst;
+		for (int i = 0; i < n; ++i) {
+			float x = interleaved[i];
+			if (x > 1.0f) x = 1.0f;
+			else if (x < -1.0f) x = -1.0f;
+			int v = (int)floor((double)x * 32767.0 + 0.5);
+			if (v > 32767) v = 32767;
+			if (v < -32768) v = -32768;
+			o[i] = (int16_t)v;
+		}
+		return n * 2;
+	}
+	if (bits == 24) {
+		int o = 0;
+		for (int i = 0; i < n; ++i) {
+			float x = interleaved[i];
+			if (x > 1.0f) x = 1.0f;
+			else if (x < -1.0f) x = -1.0f;
+			int v = (int)floor((double)x * 8388607.0 + 0.5);
+			if (v > 8388607) v = 8388607;
+			if (v < -8388608) v = -8388608;
+			dst[o++] = (uint8_t)(v & 0xFF);
+			dst[o++] = (uint8_t)((v >> 8) & 0xFF);
+			dst[o++] = (uint8_t)((v >> 16) & 0xFF);
+		}
+		return n * 3;
+	}
+	// 32
+	int32_t* o = (int32_t*)dst;
+	for (int i = 0; i < n; ++i) {
+		float x = interleaved[i];
+		if (x > 1.0f) x = 1.0f;
+		else if (x < -1.0f) x = -1.0f;
+		double sc = (double)x * 2147483647.0;
+		int64_t v = (int64_t)floor(sc + 0.5);
+		if (v > 2147483647LL) v = 2147483647LL;
+		if (v < -2147483648LL) v = -2147483648LL;
+		o[i] = (int32_t)v;
+	}
+	return n * 4;
+}
+
+float AudioUpscaler::SampleInput(int ch, double posFrames) const
+{
+	const int64_t totalFrames = (int64_t)(m_fifo.size() / (size_t)m_srcCh);
+	if (totalFrames <= 0) return 0.0f;
+	double x = posFrames;
+	if (x < 0.0) x = 0.0;
+	if (x > (double)totalFrames - 1.0) x = (double)totalFrames - 1.0;
+	int i0 = (int)floor(x);
+	int i1 = i0 + 1;
+	int i_1 = i0 - 1;
+	int i2 = i0 + 2;
+	auto getS = [&](int frameIdx, int c) -> float {
+		if (frameIdx < 0) frameIdx = 0;
+		if (frameIdx >= (int)totalFrames) frameIdx = (int)totalFrames - 1;
+		return m_fifo[(size_t)frameIdx * (size_t)m_srcCh + (size_t)c];
+	};
+	float p0 = getS(i_1, ch);
+	float p1 = getS(i0, ch);
+	float p2 = getS(i1, ch);
+	float p3 = getS(i2, ch);
+	double t = x - floor(x);
+	// Catmull-Rom (uniform)
+	double t2 = t * t;
+	double t3 = t2 * t;
+	double c0 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+	double c1 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+	double c2 = -0.5 * p0 + 0.5 * p2;
+	double c3 = p1;
+	float y = (float)(c0 * t3 + c1 * t2 + c2 * t + c3);
+	if (y > 1.0f) y = 1.0f;
+	else if (y < -1.0f) y = -1.0f;
+	return y;
+}
+
+void AudioUpscaler::BuildOutputFrame(double posInSrcFrames, float* dstCh) const
+{
+	// ソースは FLAC/WAV 系の並び想定: FL,FR,FC,LFE,BL,BR[,SL,SR]
+	std::vector<float> srcSamp((size_t)m_srcCh);
+	for (int c = 0; c < m_srcCh; ++c)
+		srcSamp[(size_t)c] = SampleInput(c, posInSrcFrames);
+
+	for (int d = 0; d < m_dstCh; ++d)
+		dstCh[d] = 0.0f;
+
+	const float s2 = 0.70710678f;
+	auto clip1 = [](float x) -> float {
+		if (x > 1.0f) return 1.0f;
+		if (x < -1.0f) return -1.0f;
+		return x;
+	};
+
+	if (m_srcCh == m_dstCh) {
+		for (int d = 0; d < m_dstCh; ++d)
+			dstCh[d] = clip1(srcSamp[(size_t)d]);
+		return;
+	}
+
+	if (m_srcCh == 1) {
+		float m = srcSamp[0];
+		if (m_dstCh >= 1) dstCh[0] = m;
+		if (m_dstCh >= 2) dstCh[1] = m;
+		if (m_dstCh >= 3) dstCh[2] = m * 0.5f;
+		for (int d = 3; d < m_dstCh; ++d) dstCh[d] = m;
+		return;
+	}
+
+	if (m_srcCh == 2) {
+		float L = srcSamp[0], R = srcSamp[1];
+		float C = (L + R) * 0.5f;
+		float lfe = (L + R) * 0.25f;
+		if (m_dstCh == 2) { dstCh[0] = L; dstCh[1] = R; }
+		else if (m_dstCh == 3) { dstCh[0] = L; dstCh[1] = R; dstCh[2] = lfe; }
+		else if (m_dstCh == 4) { dstCh[0] = L; dstCh[1] = R; dstCh[2] = L; dstCh[3] = R; }
+		else {
+			dstCh[0] = L; dstCh[1] = R; dstCh[2] = C; dstCh[3] = lfe;
+			dstCh[4] = L; dstCh[5] = R;
+			for (int d = 6; d < m_dstCh; ++d) dstCh[d] = C;
+		}
+		return;
+	}
+
+	// 5.1 -> stereo
+	if (m_srcCh == 6 && m_dstCh == 2) {
+		float fl = srcSamp[0], fr = srcSamp[1], fc = srcSamp[2], lfe = srcSamp[3];
+		float bl = srcSamp[4], br = srcSamp[5];
+		float L = fl + s2 * fc + s2 * bl + 0.5f * lfe;
+		float R = fr + s2 * fc + s2 * br + 0.5f * lfe;
+		const float g = 0.35f;
+		dstCh[0] = clip1(L * g);
+		dstCh[1] = clip1(R * g);
+		return;
+	}
+
+	// 7.1 -> stereo
+	if (m_srcCh == 8 && m_dstCh == 2) {
+		float fl = srcSamp[0], fr = srcSamp[1], fc = srcSamp[2], lfe = srcSamp[3];
+		float bl = srcSamp[4], br = srcSamp[5], sl = srcSamp[6], sr = srcSamp[7];
+		float L = fl + s2 * fc + bl + sl + 0.5f * lfe;
+		float R = fr + s2 * fc + br + sr + 0.5f * lfe;
+		const float g = 0.28f;
+		dstCh[0] = clip1(L * g);
+		dstCh[1] = clip1(R * g);
+		return;
+	}
+
+	// 7.1 -> 5.1（サイドをバックへマッピング）
+	if (m_srcCh == 8 && m_dstCh == 6) {
+		for (int i = 0; i < 4; ++i)
+			dstCh[i] = clip1(srcSamp[(size_t)i]);
+		dstCh[4] = clip1(s2 * (srcSamp[4] + srcSamp[6]));
+		dstCh[5] = clip1(s2 * (srcSamp[5] + srcSamp[7]));
+		return;
+	}
+
+	// 5.1 -> 7.1（サイドにバックを割当）
+	if (m_srcCh == 6 && m_dstCh == 8) {
+		for (int i = 0; i < 6; ++i)
+			dstCh[i] = clip1(srcSamp[(size_t)i]);
+		dstCh[6] = srcSamp[4];
+		dstCh[7] = srcSamp[5];
+		return;
+	}
+
+	// 4ch クアッド FL,FR,BL,BR -> stereo
+	if (m_srcCh == 4 && m_dstCh == 2) {
+		const float g = 0.5f;
+		dstCh[0] = clip1((srcSamp[0] + srcSamp[2]) * g);
+		dstCh[1] = clip1((srcSamp[1] + srcSamp[3]) * g);
+		return;
+	}
+
+	// 6 -> 4（前面＋背面）
+	if (m_srcCh == 6 && m_dstCh == 4) {
+		dstCh[0] = clip1(srcSamp[0]); dstCh[1] = clip1(srcSamp[1]);
+		dstCh[2] = clip1(srcSamp[4]); dstCh[3] = clip1(srcSamp[5]);
+		return;
+	}
+
+	// 8 -> 4
+	if (m_srcCh == 8 && m_dstCh == 4) {
+		dstCh[0] = clip1(srcSamp[0]); dstCh[1] = clip1(srcSamp[1]);
+		dstCh[2] = clip1(s2 * (srcSamp[4] + srcSamp[6]));
+		dstCh[3] = clip1(s2 * (srcSamp[5] + srcSamp[7]));
+		return;
+	}
+
+	// 4 -> 5.1（簡易）
+	if (m_srcCh == 4 && m_dstCh == 6) {
+		float fl = srcSamp[0], fr = srcSamp[1], bl = srcSamp[2], br = srcSamp[3];
+		dstCh[0] = fl; dstCh[1] = fr;
+		dstCh[2] = (fl + fr) * 0.5f;
+		dstCh[3] = (fl + fr) * 0.25f;
+		dstCh[4] = bl; dstCh[5] = br;
+		return;
+	}
+
+	// 5.1 / 7.1 -> 2.1
+	if (m_srcCh == 6 && m_dstCh == 3) {
+		float fl = srcSamp[0], fr = srcSamp[1], fc = srcSamp[2], lfe = srcSamp[3];
+		float bl = srcSamp[4], br = srcSamp[5];
+		float L = (fl + s2 * fc + s2 * bl + 0.5f * lfe) * 0.35f;
+		float R = (fr + s2 * fc + s2 * br + 0.5f * lfe) * 0.35f;
+		dstCh[0] = clip1(L); dstCh[1] = clip1(R);
+		dstCh[2] = clip1(lfe * 0.5f + (fl + fr) * 0.125f);
+		return;
+	}
+	if (m_srcCh == 8 && m_dstCh == 3) {
+		float fl = srcSamp[0], fr = srcSamp[1], fc = srcSamp[2], lfe = srcSamp[3];
+		float bl = srcSamp[4], br = srcSamp[5], sl = srcSamp[6], sr = srcSamp[7];
+		float L = (fl + s2 * fc + bl + sl + 0.5f * lfe) * 0.28f;
+		float R = (fr + s2 * fc + br + sr + 0.5f * lfe) * 0.28f;
+		dstCh[0] = clip1(L); dstCh[1] = clip1(R);
+		dstCh[2] = clip1(lfe * 0.5f + (fl + fr) * 0.125f);
+		return;
+	}
+
+	if (m_srcCh == 3 && m_dstCh == 2) {
+		dstCh[0] = clip1(srcSamp[0]);
+		dstCh[1] = clip1(srcSamp[1]);
+		return;
+	}
+
+	if (m_dstCh < m_srcCh) {
+		for (int d = 0; d < m_dstCh; ++d)
+			dstCh[d] = clip1(srcSamp[(size_t)d]);
+		return;
+	}
+
+	for (int d = 0; d < m_srcCh; ++d)
+		dstCh[d] = clip1(srcSamp[(size_t)d]);
+	for (int d = m_srcCh; d < m_dstCh; ++d)
+		dstCh[d] = clip1(srcSamp[(size_t)m_srcCh - 1]);
+}
+
+void AudioUpscaler::PushInterleaved(const uint8_t* pcm, int byteCount)
+{
+	if (!m_active || byteCount <= 0 || !pcm) return;
+	const int bps = m_srcBits / 8;
+	const int frameBytes = m_srcCh * bps;
+	if (frameBytes <= 0) return;
+	int nFrames = byteCount / frameBytes;
+	if (nFrames <= 0) return;
+	std::vector<float> block;
+	PcmToFloat(pcm, nFrames, m_srcCh, m_srcBits, block);
+	const size_t old = m_fifo.size();
+	m_fifo.resize(old + block.size());
+	memcpy(m_fifo.data() + old, block.data(), block.size() * sizeof(float));
+}
+
+bool AudioUpscaler::NeedsMoreInput() const
+{
+	if (!m_active) return false;
+	const int64_t nIn = (int64_t)(m_fifo.size() / (size_t)m_srcCh);
+	double need = m_readPos + 4.0 + (double)m_dstRate / (double)m_srcRate * 2.0;
+	return (double)nIn < need;
+}
+
+int AudioUpscaler::SuggestInputBytes(int dstBytesRemaining) const
+{
+	if (!m_active) return 0;
+	const int outFrame = m_dstCh * (m_dstBits / 8);
+	const int inFrame = m_srcCh * (m_srcBits / 8);
+	if (outFrame <= 0 || inFrame <= 0) return 4096;
+	int outFrames = dstBytesRemaining / outFrame + 4;
+	double inFrames = ceil((double)outFrames * (double)m_srcRate / (double)m_dstRate) + 8.0;
+	int bytes = (int)(inFrames * (double)inFrame);
+	bytes += inFrame * 8;
+	return (std::max)(bytes, inFrame * 64);
+}
+
+int AudioUpscaler::PullInterleaved(uint8_t* dst, int dstCapacity)
+{
+	if (!m_active || !dst || dstCapacity <= 0) return 0;
+	const int outFrameBytes = m_dstCh * (m_dstBits / 8);
+	int outFramesCap = dstCapacity / outFrameBytes;
+	if (outFramesCap <= 0) return 0;
+
+	std::vector<float> inter((size_t)m_dstCh * (size_t)outFramesCap);
+	int produced = 0;
+	const double step = (double)m_srcRate / (double)m_dstRate;
+	while (produced < outFramesCap) {
+		const int64_t nIn = (int64_t)(m_fifo.size() / (size_t)m_srcCh);
+		if ((double)nIn < m_readPos + step + 5.0)
+			break;
+		BuildOutputFrame(m_readPos, m_scratchFrame.data());
+		for (int c = 0; c < m_dstCh; ++c)
+			inter[(size_t)produced * (size_t)m_dstCh + (size_t)c] = m_scratchFrame[(size_t)c];
+		m_readPos += step;
+		produced++;
+	}
+
+	// 消費済み入力を FIFO から捨てる（readPos が 1 フレーム分以上進んだら）
+	while (m_readPos >= 1.0 && m_fifo.size() >= (size_t)m_srcCh) {
+		m_fifo.erase(m_fifo.begin(), m_fifo.begin() + m_srcCh);
+		m_readPos -= 1.0;
+	}
+
+	if (produced == 0) return 0;
+	return FloatToPcm(inter.data(), produced, m_dstCh, m_dstBits, dst);
+}

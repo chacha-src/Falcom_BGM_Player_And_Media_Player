@@ -185,6 +185,8 @@ BOOL COggApp::InitInstance()
 	savedata.eqwindow = 0;
 	savedata.lang = 0; // 0:日本語 1:英語 2:仏 3:伊 4:西 5:韓 6:中 7:阿 8:露 9:独 10:葡 11:蘭 12:波 13:土
 	savedata.langselect = 0; // 0:選択前 1:選択後のフラグ
+	savedata.upscale_enable = 1;
+	savedata.speaker_layout = 0;
 	savedata.lastUpdateCheck = 0;
 
 #if _UNICODE
@@ -214,6 +216,8 @@ BOOL COggApp::InitInstance()
 			ab.Close();
 		}
 	}
+	if (savedata.speaker_layout < 0 || savedata.speaker_layout > 5)
+		savedata.speaker_layout = 0;
 	if (savedata.langselect == 0) {
 		LANGID langId = GetUserDefaultUILanguage();
 		WORD prim = PRIMARYLANGID(langId);

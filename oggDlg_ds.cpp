@@ -25,6 +25,7 @@
 #include <FunctionDiscoveryKeys_devpkey.h>
 
 #include "rubberband/RubberBandStretcher.h"
+#include "AudioUpscaler.h"
 #if _MSC_VER >= 1950
 #pragma comment(lib,"rubberband-library_2026")
 #else
@@ -135,98 +136,26 @@ CString COggDlg::init(HWND hwnd, int sm)
 		//		//PCMWAVEFORMAT p;
 		WAVEFORMATEX p;
 		ZeroMemory(&p, sizeof(p));
-		if (wavsam < 0)
-			p.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
-		else
-			p.wFormatTag = WAVE_FORMAT_PCM;
-		p.nChannels = wavch;
-		p.nSamplesPerSec = wavbit;
-		p.wBitsPerSample = abs(wavsam);
+		p.wFormatTag = WAVE_FORMAT_PCM;
+		p.nChannels = g_ds_pcm_ch;
+		p.nSamplesPerSec = g_ds_pcm_rate;
+		p.wBitsPerSample = (WORD)g_ds_pcm_bits;
 		p.nBlockAlign = p.nChannels * p.wBitsPerSample / 8;
 		p.nAvgBytesPerSec = p.nSamplesPerSec * p.nBlockAlign;
 		p.cbSize = 0;
 		static const GUID GUID_SUBTYPE_PCM = { 0x00000001, 0x0000, 0x0010,{ 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 } };
 
-		DWORD targetSpeakers = 0;
-		switch (wavch) {
-		case 1:
-			targetSpeakers |= SPEAKER_FRONT_CENTER;
-			break;
-		case 2:
-			targetSpeakers |=
-				SPEAKER_FRONT_LEFT
-				| SPEAKER_FRONT_RIGHT;
-			break;
-		case 3:
-			targetSpeakers |=
-				SPEAKER_FRONT_LEFT
-				| SPEAKER_FRONT_RIGHT
-				| SPEAKER_FRONT_CENTER
-				;
-			break;
-		case 4:
-			targetSpeakers |=
-				SPEAKER_FRONT_LEFT
-				| SPEAKER_FRONT_RIGHT
-				| SPEAKER_FRONT_CENTER
-				| SPEAKER_BACK_LEFT
-				| SPEAKER_BACK_RIGHT
-				;
-			break;
-		case 5:
-			targetSpeakers |=
-				SPEAKER_FRONT_LEFT
-				| SPEAKER_FRONT_RIGHT
-				| SPEAKER_FRONT_CENTER
-				| SPEAKER_BACK_LEFT
-				| SPEAKER_BACK_RIGHT
-				;
-			break;
-		case 6:
-			targetSpeakers |=
-				SPEAKER_FRONT_LEFT
-				| SPEAKER_FRONT_RIGHT
-				| SPEAKER_FRONT_CENTER
-				| SPEAKER_BACK_LEFT
-				| SPEAKER_BACK_RIGHT | SPEAKER_LOW_FREQUENCY
-				;
-			break;
-		case 7:
-			targetSpeakers |=
-				SPEAKER_FRONT_LEFT
-				| SPEAKER_FRONT_RIGHT
-				| SPEAKER_FRONT_CENTER
-				| SPEAKER_BACK_LEFT
-				| SPEAKER_BACK_RIGHT
-				| SPEAKER_SIDE_LEFT | SPEAKER_LOW_FREQUENCY
-				;
-			break;
-		case 8:
-			targetSpeakers |=
-				SPEAKER_FRONT_LEFT
-				| SPEAKER_FRONT_RIGHT
-				| SPEAKER_FRONT_CENTER
-				| SPEAKER_BACK_LEFT
-				| SPEAKER_BACK_RIGHT
-				| SPEAKER_SIDE_LEFT
-				| SPEAKER_SIDE_RIGHT | SPEAKER_LOW_FREQUENCY
-				;
-			break;
-		}
-		int nChannels = __popcnt(targetSpeakers);
+		DWORD targetSpeakers = (DWORD)DirectSoundChannelMaskForOutput(g_ds_pcm_ch, savedata.speaker_layout);
 		WAVEFORMATEXTENSIBLE wfx = {};
 		wfx.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
-		wfx.Format.nChannels = nChannels;
-		wfx.Format.nSamplesPerSec = wavbit;
-		wfx.Format.wBitsPerSample = abs(wavsam);
+		wfx.Format.nChannels = (WORD)g_ds_pcm_ch;
+		wfx.Format.nSamplesPerSec = g_ds_pcm_rate;
+		wfx.Format.wBitsPerSample = (WORD)g_ds_pcm_bits;
 		wfx.Format.nBlockAlign = (WORD)(wfx.Format.wBitsPerSample / 8 * wfx.Format.nChannels);
 		wfx.Format.nAvgBytesPerSec = (DWORD)(wfx.Format.nSamplesPerSec * wfx.Format.nBlockAlign);
 		wfx.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
 		wfx.dwChannelMask = targetSpeakers;
-		if (wavsam < 0)
-			wfx.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
-		else
-			wfx.SubFormat = GUID_SUBTYPE_PCM;
+		wfx.SubFormat = GUID_SUBTYPE_PCM;
 		if (m_p->SetFormat(&p) != DS_OK) {
 			if (m_p->SetFormat((LPWAVEFORMATEX)&wfx) != DS_OK)
 				if (m_p != NULL) { m_p->Release(); m_p = NULL; }
@@ -313,6 +242,7 @@ BOOL COggDlg::ReleaseDXSound(void)
 }
 
 extern void playwavds2(BYTE* bw, int old, int l1, int l2);
+extern void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2);
 extern int playwavkpi(BYTE* bw, int old, int l1, int l2);
 extern int playwavmp3(BYTE* bw, int old, int l1, int l2);
 extern int playwavwav(BYTE* bw, int old, int l1, int l2);
@@ -320,7 +250,7 @@ extern int playwavflac(BYTE* bw, int old, int l1, int l2);
 extern int playwavdsd(BYTE* bw, int old, int l1, int l2);
 extern int playwavm4a(BYTE* bw, int old, int l1, int l2);
 extern int playwavopus(BYTE* bw, int old, int l1, int l2);
-extern BYTE bufwav3[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 6];
+extern BYTE bufwav3[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 8];
 extern int ps;
 extern COggDlg* og;
 extern BOOL thn;
@@ -388,7 +318,8 @@ UINT HandleNotifications(LPVOID)
 	ULONG PlayCursor, WriteCursor = 0, len3, len4;
 
 	oldw = 0;
-	m_dsb->SetCurrentPosition(0);
+	if (m_dsb)
+		m_dsb->SetCurrentPosition(0);
 	if (mode == -10 || mode == 999) {
 		oldw = OUTPUT_BUFFER_SIZE * 2;
 		og->timer.SetEvent();
@@ -439,7 +370,8 @@ UINT HandleNotifications(LPVOID)
 
 		if (len1 == 0) continue;
 		if (len1 < 0) {
-			len1 = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM - (int)oldw;
+			const ULONG ringBytes = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
+			len1 = (int)ringBytes - (int)oldw;
 			len2 = (int)WriteCursor;
 		}
 
@@ -456,22 +388,7 @@ UINT HandleNotifications(LPVOID)
 		timeee += savedata.ms;
 
 		sflg = TRUE;
-		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
-			playwavadpcm(bufwav3, oldw, len1, len2);
-		else if (mode == -10)
-			playwavmp3(bufwav3, oldw, len1, len2);
-		else if (mode == 999)
-			playwavwav(bufwav3, oldw, len1, len2);
-		else if (mode == -3)
-			playwavkpi(bufwav3, oldw, len1, len2);
-		else if (mode == -7)
-			playwavdsd(bufwav3, oldw, len1, len2);
-		else if (mode == -8)
-			playwavflac(bufwav3, oldw, len1, len2);
-		else if (mode == -9)
-			playwavm4a(bufwav3, oldw, len1, len2);
-		else
-			playwavds2(bufwav3, oldw, len1, len2);
+		DispatchPlaywavFill(bufwav3, oldw, len1, len2);
 		// 曲最後まで行ったとき
 		if (readme) {
 			if (len1 > readme)
@@ -547,22 +464,7 @@ void HandleNotifications_export()
 			oldw = 0;
 		}
 		sflg = TRUE;
-		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
-			playwavadpcm(bufwav3, oldw, len1, len2);
-		else if (mode == -10)
-			playwavmp3(bufwav3, oldw, len1, len2);
-		else if (mode == 999)
-			playwavwav(bufwav3, oldw, len1, len2);
-		else if (mode == -3)
-			playwavkpi(bufwav3, oldw, len1, len2);
-		else if (mode == -7)
-			playwavdsd(bufwav3, oldw, len1, len2);
-		else if (mode == -8)
-			playwavflac(bufwav3, oldw, len1, len2);
-		else if (mode == -9)
-			playwavm4a(bufwav3, oldw, len1, len2);
-		else
-			playwavds2(bufwav3, oldw, len1, len2);
+		DispatchPlaywavFill(bufwav3, oldw, len1, len2);
 		oldw = (oldw + len1 + len2) % bufSize;
 		sflg = FALSE;
 		if (fade1) break;

@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -85,7 +85,10 @@ int g_kpiSourceBitsPerSample = 16;
 
 #include <vector>
 #include <algorithm>
+#include <mutex>
+#include <process.h>
 #include "LyricsProgressWnd.h"
+#include "AudioUpscaler.h"
 
 bool ProcessAudioWithRubberBand(float tempoRate, bool t);
 void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
@@ -101,6 +104,8 @@ std::vector<uint8_t> m_bufwav3_2;
 
 extern std::vector<float> g_loopTailBuffer;
 extern size_t g_loopTailPos;
+
+extern std::mutex cl2;
 
 CImageBase* Games;
 
@@ -488,6 +493,8 @@ BOOL CAboutDlg::OnInitDialog()
 
 COggDlg::COggDlg(CWnd* pParent /*=NULL*/)
 	: CCustomDialog(COggDlg::IDD, pParent)
+	, m_hTimerpVsyncThread(NULL)
+	, m_hTimerpVsyncStopEvent(NULL)
 {
 	//{{AFX_DATA_INIT(COggDlg)
 	//}}AFX_DATA_INIT
@@ -640,6 +647,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomDialog)
 
 	ON_MESSAGE(WM_APP + 1, dp1)
 	ON_MESSAGE(WM_APP + 2, dp2)
+	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
 	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
 	ON_WM_COPYDATA()
 	ON_WM_KEYDOWN()
@@ -700,6 +708,198 @@ int			logtbl[100 + 1];
 HFONT	hFont;
 int mode, modesub;
 int wav999_use_adbuf = 0;
+
+std::vector<uint8_t> g_srcScratchUpscale;
+
+// readtempo → ConvertFloatToRawBytes と同じ前提の「デコード後インターリーブ1フレームのバイト数」
+static int PcmOutBytesPerFrame()
+{
+	int bits;
+	if (wavsam <= 0 || wavsam > 32)
+		bits = 16;
+	else
+		bits = abs(wavsam);
+	if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32))
+		bits = 16;
+	int ch = wavch;
+	if (ch <= 0)
+		ch = 2;
+	const int bpf = ch * (bits / 8);
+	return (bpf > 0) ? bpf : 4;
+}
+
+// インターリーブPCM（readtempo 出力と同じビット/チャンネル）にフェード（二乗ゲイン）を適用
+static void ApplyFadeCubedToInterleavedPcm(void* data, int byteLen)
+{
+	if (!data || byteLen <= 0) return;
+	const int bpf = PcmOutBytesPerFrame();
+	if (bpf <= 0) return;
+	byteLen -= (byteLen % bpf);
+	if (byteLen <= 0) return;
+
+	int bits;
+	if (wavsam <= 0 || wavsam > 32)
+		bits = 16;
+	else
+		bits = abs(wavsam);
+	if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32))
+		bits = 16;
+
+	const float g = fade * fade;
+
+	unsigned char* p = (unsigned char*)data;
+
+	if (bits == 8) {
+		for (int o = 0; o < byteLen; o++) {
+			float v = ((float)p[o] - 128.f) * g + 128.f;
+			int u = (int)floorf(v + 0.5f);
+			if (u < 0) u = 0; else if (u > 255) u = 255;
+			p[o] = (unsigned char)u;
+		}
+	}
+	else if (bits == 16) {
+		short* s = (short*)data;
+		const int n = byteLen / 2;
+		for (int i = 0; i < n; i++) {
+			float v = (float)s[i] * g;
+			int x = (int)floorf(v + 0.5f);
+			if (x > 32767) x = 32767;
+			else if (x < -32768) x = -32768;
+			s[i] = (short)x;
+		}
+	}
+	else if (bits == 24) {
+		for (int o = 0; o + 2 < byteLen; o += 3) {
+			const int val = p[o] | (p[o + 1] << 8) | ((int)(signed char)p[o + 2] << 16);
+			float fv = (float)val * g;
+			int vi = (int)floorf(fv + 0.5f);
+			if (vi > 8388607) vi = 8388607;
+			else if (vi < -8388608) vi = -8388608;
+			p[o] = (unsigned char)(vi & 0xFF);
+			p[o + 1] = (unsigned char)((vi >> 8) & 0xFF);
+			p[o + 2] = (unsigned char)((vi >> 16) & 0xFF);
+		}
+	}
+	else {
+		int* s = (int*)data;
+		const int n = byteLen / 4;
+		for (int i = 0; i < n; i++) {
+			const double v = (double)s[i] * (double)g;
+			__int64 x = (__int64)floor(v + 0.5);
+			if (x > 2147483647LL) x = 2147483647LL;
+			else if (x < -2147483648LL) x = -2147483648LL;
+			s[i] = (int)x;
+		}
+	}
+}
+
+static void DecodeSourceIntoScratch(uint8_t* scratch, int sb)
+{
+	if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
+		playwavadpcm(scratch, 0, sb, 0);
+	else if (mode == -10)
+		playwavmp3(scratch, 0, sb, 0);
+	else if (mode == 999)
+		playwavwav(scratch, 0, sb, 0);
+	else if (mode == -3)
+		playwavkpi(scratch, 0, sb, 0);
+	else if (mode == -7)
+		playwavdsd(scratch, 0, sb, 0);
+	else if (mode == -8)
+		playwavflac(scratch, 0, sb, 0);
+	else if (mode == -9)
+		playwavm4a(scratch, 0, sb, 0);
+	else
+		playwavds2(scratch, 0, sb, 0);
+}
+
+void ConfigurePlaybackOutputAndUpscaler()
+{
+	int srcBits = abs(wavsam);
+	// フロート系 FLAC は Render 後に int16 に落とすため、Upscaler 入力は 16bit 幅
+	if (wavsam < 0)
+		srcBits = 16;
+	if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
+		srcBits = 16;
+	if (!savedata.upscale_enable) {
+		g_ds_pcm_ch = wavch;
+		g_ds_pcm_rate = wavbit;
+		g_ds_pcm_bits = srcBits;
+	}
+	else {
+		if (savedata.speaker_layout == 5) {
+			int ch = wavch;
+			if (ch < 1) ch = 2;
+			if (ch > 8) ch = 8;
+			g_ds_pcm_ch = ch;
+		}
+		else {
+			g_ds_pcm_ch = SpeakerLayoutToOutChannels(savedata.speaker_layout);
+		}
+		g_ds_pcm_rate = (int)savedata.samples;
+		if (g_ds_pcm_rate < 8000 || g_ds_pcm_rate > 384000)
+			g_ds_pcm_rate = 44100;
+		g_ds_pcm_bits = savedata.bit32 ? 32 : (savedata.bit24 ? 24 : 16);
+	}
+	g_audioUpscaler.Configure(wavbit, wavch, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
+	g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
+}
+
+void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
+{
+	if (!g_pcm_upscale_active || len1 + len2 <= 0) {
+		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
+			playwavadpcm(bufwav3, oldw, len1, len2);
+		else if (mode == -10)
+			playwavmp3(bufwav3, oldw, len1, len2);
+		else if (mode == 999)
+			playwavwav(bufwav3, oldw, len1, len2);
+		else if (mode == -3)
+			playwavkpi(bufwav3, oldw, len1, len2);
+		else if (mode == -7)
+			playwavdsd(bufwav3, oldw, len1, len2);
+		else if (mode == -8)
+			playwavflac(bufwav3, oldw, len1, len2);
+		else if (mode == -9)
+			playwavm4a(bufwav3, oldw, len1, len2);
+		else
+			playwavds2(bufwav3, oldw, len1, len2);
+		return;
+	}
+	const int outBps = g_ds_pcm_bits / 8;
+	const int outFrame = g_ds_pcm_ch * outBps;
+	if (outFrame <= 0)
+		return;
+	const int total = len1 + len2;
+	std::vector<uint8_t> linear((size_t)total);
+	int wp = 0;
+	int guard = 0;
+	while (wp < total && guard < 512) {
+		++guard;
+		int chunk = total - wp;
+		int got = g_audioUpscaler.PullInterleaved(linear.data() + wp, chunk);
+		if (got > 0) {
+			wp += got;
+			continue;
+		}
+		int sb = g_audioUpscaler.SuggestInputBytes(chunk);
+		if (sb < 2048)
+			sb = 8192;
+		if (sb > (int)g_srcScratchUpscale.capacity())
+			g_srcScratchUpscale.reserve((size_t)sb * 2);
+		g_srcScratchUpscale.resize((size_t)sb);
+		ZeroMemory(g_srcScratchUpscale.data(), sb);
+		DecodeSourceIntoScratch(g_srcScratchUpscale.data(), sb);
+		g_audioUpscaler.PushInterleaved(g_srcScratchUpscale.data(), sb);
+	}
+	if (wp < total)
+		ZeroMemory(linear.data() + wp, (size_t)(total - wp));
+	if (len1 > 0)
+		memcpy(bufwav3 + oldw, linear.data(), (size_t)len1);
+	if (len2 > 0)
+		memcpy(bufwav3, linear.data() + len1, (size_t)len2);
+}
+
 int voldsf;
 int timingf, timerf1;
 int uTimerId;
@@ -1512,7 +1712,7 @@ int tt = 0;
 int killw;
 ULONG PlayCursora, WriteCursora;
 double oggsize2 = 0;
-BYTE bufwav3[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 6];
+BYTE bufwav3[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 8];
 
 
 char abuf[28];
@@ -1570,6 +1770,7 @@ BOOL COggDlg::OnInitDialog()
 	pi.dwProcessId = -1;
 	randomf = 0; hsc = 0; spc = 0;
 	wavbit = 44100; wavbit2 = 44100; wavch = 2;
+	g_ds_pcm_ch = 2; g_ds_pcm_rate = 44100; g_ds_pcm_bits = 16;
 	fade1 = 0;
 	thend1 = TRUE;
 	videoonly = FALSE;
@@ -1707,7 +1908,7 @@ BOOL COggDlg::OnInitDialog()
 	timeBeginPeriod(1);
 	SetTimer(5656, 2000, NULL);
 	SetTimer(5657, 50, NULL);
-	SetTimer(1233, 17, NULL);
+	StartTimerpVsyncThread();
 	SetTimer(6555, 1200, NULL);
 	SetTimer(9000, 10, NULL);
 	timingf = timerf1 = 0;
@@ -3034,6 +3235,7 @@ long LoadOggVorbis(const TCHAR* file_name, int word, char** ogg, CSliderCtrl& m_
 	wh.WaveFmt.wf.nAvgBytesPerSec = vi->rate * vi->channels * word;
 	wh.WaveFmt.wf.nBlockAlign = vi->channels * word;
 	wh.WaveFmt.wBitsPerSample = word * 8;
+	wavsam = word * 8; // mcopy のループ境界・バイト計算で前曲の wavsam が残らないようにする
 
 	memcpy(wh.ckidData, "data", 4);
 	wh.ckSizeData = size;
@@ -3189,18 +3391,29 @@ void COggDlg::dsdload(CString& filen, CString& tagfile, CString& tagname, CStrin
 		else {
 		}
 	}
-	wavbit = sikpi.dwSamplesPerSec;	wavch = sikpi.dwChannels;	loop1 = 0; oggsize = loop2 = (int)((double)sikpi.dwLength * (double)sikpi.dwSamplesPerSec / 1000.0 / (wavsam / 16.0));
+	wavbit = sikpi.dwSamplesPerSec;
+	wavch = sikpi.dwChannels;
 	wavsam = sikpi.dwBitsPerSample;
+	NormalizePlaybackWaveFormat();
+	loop1 = 0;
+	if (sikpi.dwLength == (DWORD)-1 || wavbit <= 0)
+		loop2 = 0;
+	else
+		loop2 = (int)((double)(DWORD)sikpi.dwLength * (double)wavbit / 1000.0 + 0.5);
+	{
+		const int bps = (wavsam >= 8) ? (wavsam / 8) : 2;
+		const __int64 bytesTotal = (__int64)loop2 * (__int64)wavch * (__int64)bps;
+		if (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff)
+			data_size = oggsize = (int)bytesTotal;
+		else
+			data_size = oggsize = (loop2 > 0 && wavch > 0) ? (loop2 * wavch * (bps > 0 ? bps : 2)) : 0;
+	}
 	CString s; s.Format(L"%d", oggsize);
 	//AfxMessageBox(s);
 	si1.dwSamplesPerSec = wavbit;
 	si1.dwChannels = wavch;
 	si1.dwBitsPerSample = wavsam;
-	if (sikpi.dwLength == (DWORD)-1) loop2 = 0;
-	data_size = oggsize = loop2 * (wavsam / 4);
-	if (wavch == 1) oggsize /= 2;
-	if (wavch == 1) data_size /= 2;
-	m_time.SetRange(0, (data_size) / (wavsam / 4), TRUE);
+	m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 	dsd_.kpiSetPosition(kmp, 0);
 	kbps = 0;
 	wav_start();
@@ -7042,13 +7255,18 @@ void COggDlg::play()
 			wavbit = wi.nSamplesPerSec;
 			wavsam = 16;
 			loop1 = 0;
-			loop2 = data_size / 4;
+			{
+				int chAd = wavch;
+				if (chAd <= 0) chAd = 1;
+				const int pcmBpfDec = chAd * 2;
+				loop2 = (pcmBpfDec > 0) ? (data_size / pcmBpfDec) : 0;
+			}
 			lenl = 0;
 			poss = poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 			wav999_use_adbuf = 1;
 			if (wav) free(wav);
 			wav_start();
-			m_time.SetRange(0, data_size / 4, TRUE);
+			m_time.SetRange(0, loop2, TRUE);
 			if (pl && plw && plcnt >= 0 && plcnt < pl->playcnt) {
 				tagfile = pl->pc[plcnt].name;
 				tagname = pl->pc[plcnt].art;
@@ -7119,18 +7337,27 @@ void COggDlg::play()
 		}
 		wavbit = sikpi.dwSamplesPerSec;
 		wavch = sikpi.dwChannels;
-		loop1 = 0; oggsize = loop2 = (int)((double)sikpi.dwLength * (double)sikpi.dwSamplesPerSec / 1000.0 / (wavsam / 16.0));
 		wavsam = sikpi.dwBitsPerSample;
+		NormalizePlaybackWaveFormat();
+		loop1 = 0;
+		if (sikpi.dwLength == (DWORD)-1 || wavbit <= 0)
+			loop2 = 0;
+		else
+			loop2 = (int)((double)(DWORD)sikpi.dwLength * (double)wavbit / 1000.0 + 0.5);
+		{
+			const int bps = (wavsam >= 8) ? (wavsam / 8) : 2;
+			const __int64 bytesTotal = (__int64)loop2 * (__int64)wavch * (__int64)bps;
+			if (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff)
+				data_size = oggsize = (int)bytesTotal;
+			else
+				data_size = oggsize = (loop2 > 0 && wavch > 0) ? (loop2 * wavch * (bps > 0 ? bps : 2)) : 0;
+		}
 		CString s; s.Format(L"%d", oggsize);
 		//AfxMessageBox(s);
 		si1.dwSamplesPerSec = wavbit;
 		si1.dwChannels = wavch;
 		si1.dwBitsPerSample = wavsam;
-		if (sikpi.dwLength == (DWORD)-1) loop2 = 0;
-		data_size = oggsize = loop2 * (wavsam / 4);
-		if (wavch == 1) oggsize /= 2;
-		if (wavch == 1) data_size /= 2;
-		m_time.SetRange(0, (data_size) / (wavsam / 4), TRUE);
+		m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 		flac_.SetPosition(kmp, 0);
 		kbps = 0;
 		CFile ff;
@@ -7489,228 +7716,6 @@ void COggDlg::play()
 
 		wav_start();
 
-	}
-	else if (mode == -8) { // flac
-		CString ss;
-		char buf[1024];
-		ss = "";
-		ZeroMemory(&sikpi, sizeof(sikpi));
-		sikpi.dwSamplesPerSec = savedata.samples; sikpi.dwChannels = 8; sikpi.dwSeekable = 1; sikpi.dwLength = -1; sikpi.dwBitsPerSample = ((savedata.bit24 == 1) ? 24 : 16);
-		if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit;
-
-
-		if (1) {
-			if (ss == "") {
-#if UNICODE
-				TCHAR* f = filen.GetBuffer();
-				kmp = flac_.Open(f, &sikpi);
-				filen.ReleaseBuffer();
-#else
-				kmp = flac_.Open(filen, &sikpi);
-#endif
-				if (kmp == NULL) { m_saisai.EnableWindow(TRUE); endflg = 0; return; }
-			}
-			else {
-			}
-		}
-		wavbit = sikpi.dwSamplesPerSec;
-		wavch = sikpi.dwChannels;
-		loop1 = 0; oggsize = loop2 = (int)((double)sikpi.dwLength * (double)sikpi.dwSamplesPerSec / 1000.0 / (wavsam / 16.0));
-		wavsam = sikpi.dwBitsPerSample;
-		CString s; s.Format(L"%d", oggsize);
-		//AfxMessageBox(s);
-		si1.dwSamplesPerSec = wavbit;
-		si1.dwChannels = wavch;
-		si1.dwBitsPerSample = wavsam;
-		if (sikpi.dwLength == (DWORD)-1) loop2 = 0;
-		data_size = oggsize = loop2 * (wavsam / 4);
-		if (wavch == 1) oggsize /= 2;
-		if (wavch == 1) data_size /= 2;
-		m_time.SetRange(0, (data_size) / (wavsam / 4), TRUE);
-		flac_.SetPosition(kmp, 0);
-		kbps = 0;
-		CFile ff;
-		ff.Open(filen, CFile::modeRead | CFile::shareDenyWrite, NULL);
-		int flg, read = ff.Read(bufimage, sizeof(bufimage));
-		ff.Close();
-		tagfile = filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1);
-		flg = 0;
-		int i = 0, j;
-		for (j = i; j < read - 6; j++) {
-			if (bufimage[j] == 'A' && bufimage[j + 1] == 'L' && bufimage[j + 2] == 'B' && bufimage[j + 3] == 'U' && bufimage[j + 4] == 'M' && bufimage[j + 5] == '=') {
-				j += 6;
-				for (int k = j; k < read - 4; k++) {
-					if (bufimage[k] == 0) {
-						flg = 1;
-						buf[k - j] = 0;
-						buf[k - j + 1] = 0;
-						buf[k - j + 2] = 0;
-						break;
-					}
-					buf[k - j] = bufimage[k];
-				}
-			}
-			if (flg == 1) {
-				const int wlen = ::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf), NULL, 0) - 1;
-				TCHAR* buff = new TCHAR[wlen + 1];
-				if (::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf) - 1, buff, wlen))
-				{
-					buff[wlen] = 0;
-				}
-				tagalbum = buff;
-				delete[] buff;
-				flg = 0;
-				break;
-			}
-		}
-		for (j = i; j < read - 6; j++) {
-			if ((bufimage[j] == 'A' || bufimage[j] == 'a') && bufimage[j + 1] == 'l' && bufimage[j + 2] == 'b' && bufimage[j + 3] == 'u' && bufimage[j + 4] == 'm' && bufimage[j + 5] == '=') {
-				j += 6;
-				for (int k = j; k < read - 4; k++) {
-					if (bufimage[k] == 0) {
-						flg = 1;
-						buf[k - j] = 0;
-						buf[k - j + 1] = 0;
-						buf[k - j + 2] = 0;
-						break;
-					}
-					buf[k - j] = bufimage[k];
-				}
-			}
-			if (flg == 1) {
-				const int wlen = ::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf), NULL, 0) - 1;
-				TCHAR* buff = new TCHAR[wlen + 1];
-				if (::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf) - 1, buff, wlen))
-				{
-					buff[wlen] = 0;
-				}
-				tagalbum = buff;
-				delete[] buff;
-				flg = 0;
-				break;
-			}
-		}
-		for (j = i; j < read - 6; j++) {
-			if (bufimage[j] == 'A' && bufimage[j + 1] == 'R' && bufimage[j + 2] == 'T' && bufimage[j + 3] == 'I' && bufimage[j + 4] == 'S' && bufimage[j + 5] == 'T' && bufimage[j + 6] == '=') {
-				j += 7;
-				for (int k = j; k < read - 4; k++) {
-					if (bufimage[k] == 0) {
-						flg = 1;
-						buf[k - j] = 0;
-						buf[k - j + 1] = 0;
-						buf[k - j + 2] = 0;
-						break;
-					}
-					buf[k - j] = bufimage[k];
-				}
-			}
-			if (flg == 1) {
-				const int wlen = ::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf), NULL, 0) - 1;
-				TCHAR* buff = new TCHAR[wlen + 1];
-				if (::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf) - 1, buff, wlen))
-				{
-					buff[wlen] = _T('\0');
-				}
-				tagname = buff;
-				delete[] buff;
-				flg = 0;
-				break;
-			}
-		}
-		for (j = i; j < read - 6; j++) {
-			if ((bufimage[j] == 'A' || bufimage[j] == 'a') && bufimage[j + 1] == 'r' && bufimage[j + 2] == 't' && bufimage[j + 3] == 'i' && bufimage[j + 4] == 's' && bufimage[j + 5] == 't' && bufimage[j + 6] == '=') {
-				j += 7;
-				for (int k = j; k < read - 4; k++) {
-					if (bufimage[k] == 0) {
-						flg = 1;
-						buf[k - j] = 0;
-						buf[k - j + 1] = 0;
-						buf[k - j + 2] = 0;
-						break;
-					}
-					buf[k - j] = bufimage[k];
-				}
-			}
-			if (flg == 1) {
-				const int wlen = ::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf), NULL, 0) - 1;
-				TCHAR* buff = new TCHAR[wlen + 1];
-				if (::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf) - 1, buff, wlen))
-				{
-					buff[wlen] = _T('\0');
-				}
-				tagname = buff;
-				delete[] buff;
-				flg = 0;
-				break;
-			}
-		}
-		for (j = i; j < read - 4; j++) {
-			if (bufimage[j] == 'T' && bufimage[j + 1] == 'I' && bufimage[j + 2] == 'T' && bufimage[j + 3] == 'L' && bufimage[j + 4] == 'E' && bufimage[j + 5] == '=') {
-				j += 6;
-				for (int k = j; k < read - 4; k++) {
-					if (bufimage[k] == 0) {
-						flg = 1;
-						buf[k - j] = 0;
-						buf[k - j + 1] = 0;
-						buf[k - j + 2] = 0;
-						break;
-					}
-					buf[k - j] = bufimage[k];
-				}
-			}
-			if (flg == 1) {
-				const int wlen = ::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf), NULL, 0) - 1;
-				TCHAR* buff = new TCHAR[wlen + 1];
-				if (::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf) - 1, buff, wlen))
-				{
-					buff[wlen] = _T('\0');
-				}
-				tagfile = buff;
-				delete[] buff;
-				flg = 0;
-				break;
-			}
-		}
-		for (j = i; j < read - 4; j++) {
-			if ((bufimage[j] == 'T' || bufimage[j] == 't') && bufimage[j + 1] == 'i' && bufimage[j + 2] == 't' && bufimage[j + 3] == 'l' && bufimage[j + 4] == 'e' && bufimage[j + 5] == '=') {
-				j += 6;
-				for (int k = j; k < read - 4; k++) {
-					if (bufimage[k] == 0) {
-						flg = 1;
-						buf[k - j] = 0;
-						buf[k - j + 1] = 0;
-						buf[k - j + 2] = 0;
-						break;
-					}
-					buf[k - j] = bufimage[k];
-				}
-			}
-			if (flg == 1) {
-				const int wlen = ::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf), NULL, 0) - 1;
-				TCHAR* buff = new TCHAR[wlen + 1];
-				if (::MultiByteToWideChar(CP_UTF8, 0, buf, strlen(buf) - 1, buff, wlen))
-				{
-					buff[wlen] = _T('\0');
-				}
-				tagfile = buff;
-				delete[] buff;
-				flg = 0;
-				break;
-			}
-		}
-
-		for (i = 0; i < 0x300000; i++) {// 00 06 5D 6A 64 61 74 61
-			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'j' && bufimage[i + 7] == 'p' && bufimage[i + 8] == 'e' && bufimage[i + 9] == 'g') {
-				break;
-			}
-			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'p' && bufimage[i + 7] == 'n' && bufimage[i + 8] == 'g') {
-				break;
-			}
-		}
-		if (i != 0x300000) {
-			m_mp3jake.EnableWindow(TRUE);
-		}
-		wav_start();
 	}
 	else if (mode == -3) { // kpi
 		ret2 = 0;
@@ -8684,105 +8689,33 @@ void COggDlg::play()
 	if (mode == 30) { wavbit = 48000; wavsam = 16; wavch = 2; }
 	NormalizePlaybackWaveFormat();
 
+	ConfigurePlaybackOutputAndUpscaler();
+	g_audioUpscaler.Reset();
 
-	WAVEFORMATEX wfx1;
-	if (wavsam < 0)
-		wfx1.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
-	else
-		wfx1.wFormatTag = WAVE_FORMAT_PCM;
-	wfx1.nChannels = wavch;
-	wfx1.nSamplesPerSec = wavbit;
-	wfx1.wBitsPerSample = abs(wavsam);
-	wfx1.nBlockAlign = wfx1.nChannels * wfx1.wBitsPerSample / 8;
-	wfx1.nAvgBytesPerSec = wfx1.nSamplesPerSec * wfx1.nBlockAlign;
-	wfx1.cbSize = 0;
-
+	int dsTryRate = g_ds_pcm_rate;
 	static const GUID GUID_SUBTYPE_PCM = { 0x00000001, 0x0000, 0x0010,{ 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 } };
 
-	DWORD targetSpeakers = 0;
-	switch (wavch) {
-	case 1:
-		targetSpeakers |= SPEAKER_FRONT_CENTER;
-		break;
-	case 2:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT;
-		break;
-	case 3:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT
-			| SPEAKER_FRONT_CENTER
-			;
-		break;
-	case 4:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT
-			| SPEAKER_FRONT_CENTER
-			| SPEAKER_BACK_LEFT
-			| SPEAKER_BACK_RIGHT
-			;
-		break;
-	case 5:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT
-			| SPEAKER_FRONT_CENTER
-			| SPEAKER_BACK_LEFT
-			| SPEAKER_BACK_RIGHT
-			;
-		break;
-	case 6:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT
-			| SPEAKER_FRONT_CENTER
-			| SPEAKER_BACK_LEFT
-			| SPEAKER_BACK_RIGHT | SPEAKER_LOW_FREQUENCY
-			;
-		break;
-	case 7:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT
-			| SPEAKER_FRONT_CENTER
-			| SPEAKER_BACK_LEFT
-			| SPEAKER_BACK_RIGHT
-			| SPEAKER_SIDE_LEFT | SPEAKER_LOW_FREQUENCY
-			;
-		break;
-	case 8:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT
-			| SPEAKER_FRONT_CENTER
-			| SPEAKER_BACK_LEFT
-			| SPEAKER_BACK_RIGHT
-			| SPEAKER_SIDE_LEFT
-			| SPEAKER_SIDE_RIGHT | SPEAKER_LOW_FREQUENCY
-			;
-		break;
-	}
-	int nChannels = __popcnt(targetSpeakers);
+	WAVEFORMATEX wfx1;
+	wfx1.wFormatTag = WAVE_FORMAT_PCM;
+	wfx1.nChannels = (WORD)((g_ds_pcm_ch <= 2) ? g_ds_pcm_ch : 2);
+	wfx1.nSamplesPerSec = dsTryRate;
+	wfx1.wBitsPerSample = (WORD)g_ds_pcm_bits;
+	wfx1.nBlockAlign = (WORD)(wfx1.nChannels * wfx1.wBitsPerSample / 8);
+	wfx1.nAvgBytesPerSec = (DWORD)((DWORD)wfx1.nSamplesPerSec * (DWORD)wfx1.nBlockAlign);
+	wfx1.cbSize = 0;
+
+	DWORD targetSpeakers = (DWORD)DirectSoundChannelMaskForOutput(g_ds_pcm_ch, savedata.speaker_layout);
 	WAVEFORMATEXTENSIBLE wfx = {};
 	wfx.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
-	wfx.Format.nChannels = nChannels;
-	wfx.Format.nSamplesPerSec = wavbit;
-	wfx.Format.wBitsPerSample = abs(wavsam);
+	wfx.Format.nChannels = (WORD)g_ds_pcm_ch;
+	wfx.Format.nSamplesPerSec = dsTryRate;
+	wfx.Format.wBitsPerSample = (WORD)g_ds_pcm_bits;
 	wfx.Format.nBlockAlign = (WORD)(wfx.Format.wBitsPerSample / 8 * wfx.Format.nChannels);
 	wfx.Format.nAvgBytesPerSec = (DWORD)(wfx.Format.nSamplesPerSec * wfx.Format.nBlockAlign);
 	wfx.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
 	wfx.dwChannelMask = targetSpeakers;
-	if (wavsam < 0)
-		wfx.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
-	else
-		wfx.SubFormat = GUID_SUBTYPE_PCM;
-	//if (wavbit2 != wavbit || wavsam == 24 || si1.dwBitsPerSample || sikpi.dwBitsPerSample) {
-	ReleaseDXSound();
-	if (WASAPIInit() == 0) init(m_hWnd, wavbit);
-	//}
+	wfx.SubFormat = GUID_SUBTYPE_PCM;
+
 	wavsam = abs(wavsam);
 	wavbit2 = wavbit;
 	int i, iii = 0;
@@ -8880,19 +8813,23 @@ void COggDlg::play()
 		ZeroMemory(&dsbd, sizeof(DSBUFFERDESC));
 		dsbd.dwSize = sizeof(DSBUFFERDESC);
 		dsbd.dwFlags = DSBCAPS_CTRLPOSITIONNOTIFY | DSBCAPS_LOCSOFTWARE | DSBCAPS_GLOBALFOCUS | DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_CTRLVOLUME;// | DSBCAPS_CTRL3D;
-		dsbd.dwBufferBytes = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM;
-		if (wavch > 2)
+		dsbd.dwBufferBytes = g_ds_buffer_bytes;
+		wfx1.nSamplesPerSec = dsTryRate;
+		wfx1.nAvgBytesPerSec = (DWORD)wfx1.nSamplesPerSec * (DWORD)wfx1.nBlockAlign;
+		wfx.Format.nSamplesPerSec = dsTryRate;
+		wfx.Format.nAvgBytesPerSec = (DWORD)(wfx.Format.nSamplesPerSec * wfx.Format.nBlockAlign);
+		if (g_ds_pcm_ch > 2)
 			dsbd.lpwfxFormat = (LPWAVEFORMATEX)&wfx;
 		else
 			dsbd.lpwfxFormat = &wfx1;
 		//dsbd.guid3DAlgorithm = DS3DALG_HRTF_LIGHT;
 		HRESULT r;
 		ReleaseDXSound();
-		if (WASAPIInit() == 0) init(m_hWnd, wavbit);
+		if (WASAPIInit() == 0) init(m_hWnd, dsTryRate);
 		r = m_ds->CreateSoundBuffer(&dsbd, &m_dsb1, NULL);
 		if (m_dsb1 == NULL || m_p == NULL) {
 			if (flg0 == 0) {
-				CString s; s.Format(L"%d", savedata.samples);
+				CString s; s.Format(L"%d", dsTryRate);
 				MessageBox(s + LL14(
 					L"Hzのサンプリングレートにサウンドカードが対応していません\n低いサンプリングレートを試みます。\n少々時間が掛かる場合があります。", /* 日本語 */
 					L"Hz sampling rate not supported by sound card.\nTrying lower rate.\nThis may take a while.", /* 英語 */
@@ -8925,7 +8862,7 @@ void COggDlg::play()
 						L"ogg/wav Basit Oynatıcı")); flg0 = 1;
 			}
 
-			wavbit -= 1000; if (wavbit <= 0) {
+			dsTryRate -= 1000; if (dsTryRate <= 0) {
 				MessageBox(LL14(
 					L"0Hzまで試みましたが、対応するサンプリングレートが存在しませんでした。\nサウンドボード(カード)が存在していない可能性があります。", /* 日本語 */
 					L"Tried down to 0Hz but no supported sampling rate found.\nSound card may not be present.", /* 英語 */
@@ -8960,9 +8897,9 @@ void COggDlg::play()
 				endflg = 0;
 				return;
 			}
-			wfx.Format.nSamplesPerSec = wavbit;
+			wfx.Format.nSamplesPerSec = dsTryRate;
 			wfx.Format.nAvgBytesPerSec = (DWORD)(wfx.Format.nSamplesPerSec * wfx.Format.nBlockAlign);
-			wfx1.nSamplesPerSec = wavbit;
+			wfx1.nSamplesPerSec = dsTryRate;
 			wfx1.nAvgBytesPerSec = wfx1.nSamplesPerSec * wfx1.nBlockAlign;
 			continue;
 			endflg = 0;
@@ -9136,8 +9073,17 @@ void COggDlg::play()
 		}
 
 		if (m_dsb) {
+			g_ds_pcm_rate = dsTryRate;
+			{
+				int srcBits = abs(wavsam);
+				if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
+					srcBits = 16;
+				g_audioUpscaler.Configure(wavbit, wavch, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
+				g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
+			}
+			g_audioUpscaler.Reset();
 			if (flg0 == 1) {
-				CString s; s.Format(L"%d", wavbit);
+				CString s; s.Format(L"%d", g_ds_pcm_rate);
 				MessageBox(s + LL14(
 					L"Hzのサンプリングレートでヒットしましたため、該当サンプリングレートで演奏します。",
 					L"Hz sampling rate matched; playing at that rate.",
@@ -9168,7 +9114,6 @@ void COggDlg::play()
 						L"Eenvoudige ogg/wav Speler",
 						L"Prosty Odtwarzacz ogg/wav",
 						L"ogg/wav Basit Oynatıcı"));
-				savedata.samples = wavbit;
 				SetTimer(9100, 100, NULL);
 				return;
 			}
@@ -9195,7 +9140,11 @@ void COggDlg::play()
 	lo = 0; loc = 0;
 
 	if (loop1 == 0 && loop2 == 0) {
-		m_time.SetSelection(0, data_size / 4);
+		{
+			const int bpfT = PcmOutBytesPerFrame();
+			const int fullLen = (bpfT > 0) ? (data_size / bpfT) : 0;
+			m_time.SetSelection(0, fullLen);
+		}
 		m_time.Invalidate();
 	}
 	else {
@@ -9211,26 +9160,13 @@ void COggDlg::play()
 		len1 = (int)WriteCursor;//書き込み範囲取得
 		len2 = 0;
 		if (len1 < 0) {
-			len1 = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM / 24; len2 = WriteCursor;
+			const int bpf = (g_ds_pcm_ch > 0 && g_ds_pcm_bits >= 8) ? (g_ds_pcm_ch * (g_ds_pcm_bits / 8)) : 4;
+			len1 = (int)(g_ds_buffer_bytes / (ULONG)((bpf > 0) ? bpf : 4));
+			len2 = WriteCursor;
 		}
 		if (len2 < 0)
 			len2 = 0;
-		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
-			playwavadpcm(bufwav3, 0, len1, len2);//データ獲得
-		else if (mode == -10)
-			playwavmp3(bufwav3, 0, len1, len2);//データ獲得
-		else if (mode == 999)
-			playwavwav(bufwav3, 0, len1, len2);//データ獲得
-		else if (mode == -3)
-			playwavkpi(bufwav3, 0, len1, len2);//データ獲得
-		else if (mode == -7)
-			playwavdsd(bufwav3, 0, len1, len2);//データ獲得
-		else if (mode == -8)
-			playwavflac(bufwav3, 0, len1, len2);//データ獲得
-		else if (mode == -9)
-			playwavm4a(bufwav3, 0, len1, len2);//データ獲得
-		else
-			playwavds2(bufwav3, 0, len1, len2);//データ獲得
+		DispatchPlaywavFill(bufwav3, 0, len1, len2);
 		m_dsb->Lock(0, len1 + len2, (LPVOID*)&pdsb, (DWORD*)&len3, NULL, 0, 0);
 		memcpy(pdsb, bufwav3, len3);
 		m_dsb->Unlock(pdsb, len3, NULL, 0);
@@ -9442,8 +9378,34 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount)
 	wavExportMute = TRUE;
 	int saveloop_bak = savedata.saveloop;
 	savedata.saveloop = 1;  // ループを有効にしてwavExportLoopCountで制御
+	const int volPosBak = m_sl.GetPos();
 	if (wavExportMute) m_sl.SetPos(0);
 	play();
+	m_sl.SetPos(volPosBak);
+	// エクスポート中に timerp が主音量を 0 に落とす。play 後は playy==0 で timerp が音量を戻さないためここで復帰
+	{
+		float vol = (float)m_sl.GetPos();
+		vol /= 1000.0f;
+		if (deve == NULL) {
+			if (hwo) {
+				WORD leftv = (WORD)(0xFFFF * vol);
+				WORD rightv = (WORD)(0xFFFF * vol);
+				waveOutSetVolume(hwo, MAKELONG(leftv, rightv));
+			}
+		}
+		else if (audio) {
+			audio->SetMasterVolumeLevelScalar(vol / 100.0f, &GUID_NULL);
+		}
+		CString sv;
+		if (deve)
+			sv.Format(_T("%3d%%"), (int)vol);
+		else
+			sv.Format(_T("%3d%%"), (int)(vol * 100));
+		CString curv;
+		m_vol.GetWindowText(curv);
+		if (sv != curv)
+			m_vol.SetWindowText(sv);
+	}
 	wavExportPath.Empty();
 	wavExportLoopCount = 0;
 	wavExportMute = FALSE;
@@ -11438,7 +11400,7 @@ BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2)
 		else {
 			loopcnt++;
 			playb = loop1;
-			poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = loop1 * 4; poss6 = 0;
+			poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = loop1 * PcmOutBytesPerFrame(); poss6 = 0;
 			seekadpcm(loop1);
 			if (g_rubberBandStretcher) {
 				delete g_rubberBandStretcher;
@@ -11461,7 +11423,7 @@ BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2)
 			else {
 				loopcnt++;
 				playb = loop1;
-				poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = loop1 * 4; poss6 = 0;
+				poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = loop1 * PcmOutBytesPerFrame(); poss6 = 0;
 				seekadpcm(loop1);
 				if (g_rubberBandStretcher) {
 					delete g_rubberBandStretcher;
@@ -11516,7 +11478,7 @@ int readadpcm2(char* bw, int cnt)
 				muon--;
 			}
 
-			if (playb > (data_size + 100000) / 4 && muon != 0) {
+			if (playb > (data_size + 100000) / PcmOutBytesPerFrame() && muon != 0) {
 				rrr = 0;
 			}
 			if (muon <= 0) {
@@ -11541,14 +11503,21 @@ int readadpcm2(char* bw, int cnt)
 				}
 				poss4 += len2;
 			}
-			playb += (len2 / 4);
+			{
+				const int bpf = PcmOutBytesPerFrame();
+				playb += (bpf > 0) ? (len2 / bpf) : (len2 / 4);
+			}
 			if (poss4 > cnt) break;
 		}
 	}
 
 	int cnt0 = cnt;
-	if (loop1 * 4 + loop2 * 4 < poss5 + cnt0 && endf == 0) {
-		cnt0 = (loop1 * 4 + loop2 * 4) - poss5;
+	{
+		const int bpfLoop = PcmOutBytesPerFrame();
+		const int loopEndBytes = (loop1 + loop2) * bpfLoop;
+		if (loopEndBytes < poss5 + cnt0 && endf == 0) {
+			cnt0 = loopEndBytes - poss5;
+		}
 	}
 	cnt2 = cnt0;
 
@@ -11569,11 +11538,9 @@ int readadpcm2(char* bw, int cnt)
 	equaliser(bw, cnt2, reset);
 	reset = FALSE;
 
-	short* b, c;
-	b = (short*)bw;
-	fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
-	//fadeを三乗して計算密度を変更
-	for (int i = 0; i < cnt0 / 2; i++) { c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c; }
+	fade += fadeadd;
+	if (fade < 0.0001f) { fade = 0.0f; fadeadd = 0.0f; }
+	ApplyFadeCubedToInterleavedPcm(bw, cnt2);
 
 	if ((UINT)wl < (UINT)0x7fff0000) {
 		//				if (cc1 == 1)	cc.Write(bw, cnt);
@@ -11598,7 +11565,9 @@ int readadpcm2(char* bw, int cnt)
 
 int seekadpcm(int pos)
 {
-	lenl = pos * 4;
+	ResetAudioUpscalerPipeline();
+	const int bpf = PcmOutBytesPerFrame();
+	lenl = pos * bpf;
 	playb = pos;
 	poss5 = lenl;
 	return 0;
@@ -12082,7 +12051,10 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 {
 	// x64 KPI は別プロセス経由でデコードするため、この時点で kpidec==NULL になり得る
 	if (!g_kpiRemote && og->mod == NULL && kpidec == NULL) return 0;
-	playb += (l1 + l2) / (wavsam / 4);
+	{
+		const int bpf = PcmOutBytesPerFrame();
+		playb += (l1 + l2) / bpf;
+	}
 	//データ読み込み
 	int rrr = readkpi(bw + old, l1);
 	if (l1 != rrr) {
@@ -12648,7 +12620,10 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 {
 	//データ読み込み
 	int rrr = readm4a(bw + old, l1);
-	playb += (int)((float)(l1 + l2) / ((wavch == 1 || wavch == 2) ? (float)4 : (float)(wavch * 2)) / ((float)wavsam / (float)16));
+	{
+		const int bpf = PcmOutBytesPerFrame();
+		playb += (l1 + l2) / bpf;
+	}
 	//	if (oggsize / ((wavch == 1) ? 1 : 1) - 44100 <= playb * 4) {
 	//	if (savedata.saveloop == FALSE) {
 	//	l1 = rrr;  fade1 = 1;
@@ -12925,7 +12900,10 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 		else {
 			loopcnt++;
 			playb = loop1;
-			flac_.SetPosition(og->kmp, loop1);
+			if (flacmode == 0)
+				flac_.SetPosition(og->kmp, (LONGLONG)((double)loop1 / (((double)wavbit * (double)wavch) / 2000.0)));
+			else
+				flac_.SetPosition(og->kmp, loop1);
 			::rrr = 1;  // シーク後は Render を再開（グローバル）
 			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 			if (g_rubberBandStretcher) {
@@ -12953,7 +12931,10 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 			else {
 				loopcnt++;
 				playb = loop1;
-				flac_.SetPosition(og->kmp, loop1);
+				if (flacmode == 0)
+					flac_.SetPosition(og->kmp, (LONGLONG)((double)loop1 / (((double)wavbit * (double)wavch) / 2000.0)));
+				else
+					flac_.SetPosition(og->kmp, loop1);
 				::rrr = 1;  // シーク後は Render を再開（グローバル）
 				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 				if (g_rubberBandStretcher) {
@@ -12968,8 +12949,10 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 		if (l2out < l2req)
 			ZeroMemory(bw + l2out, (SIZE_T)(l2req - l2out));
 	}
-	if (flacmode == 0)
-		playb += (l1 + l2out) / (wavsam / 4);
+	if (flacmode == 0) {
+		const int bpf = PcmOutBytesPerFrame();
+		playb += (l1 + l2out) / bpf;
+	}
 	return l1 + l2out;
 }
 
@@ -13124,7 +13107,10 @@ int playwavopus(BYTE* bw, int old, int l1, int l2)
 {
 	//データ読み込み
 	int rrr = readopus(bw + old, l1);
-	playb += (l1 + l2) / (wavsam / 4);
+	{
+		const int bpf = PcmOutBytesPerFrame();
+		playb += (l1 + l2) / bpf;
+	}
 	if (l1 != rrr) {
 		if (savedata.saveloop == 0 && endf == 1) {
 			l1 = rrr;
@@ -13317,7 +13303,10 @@ int playwavdsd(BYTE* bw, int old, int l1, int l2)
 	//データ読み込み
 	if (l1 == 0) return 0;
 	int rrr = readdsd(bw + old, l1);
-	playb += (l1 + l2) / (wavsam / 4);
+	{
+		const int bpf = PcmOutBytesPerFrame();
+		playb += (l1 + l2) / bpf;
+	}
 	if (oggsize / ((wavch == 1) ? 2 : 1) - 192 * 20 <= (int)(playb * wavch * 2 * (wavsam / 16.0))) {
 		if (savedata.saveloop == FALSE) {
 			l1 = rrr;
@@ -13472,7 +13461,10 @@ int readdsd(BYTE* bw, int cnt)
 int readme = 0;
 int playwavmp3(BYTE* bw, int old, int l1, int l2)
 {
-	playb += (l1 + l2);
+	{
+		const int bpf = PcmOutBytesPerFrame();
+		playb += (l1 + l2) / bpf;
+	}
 	//データ読み込み
 	int rrr = 0, rrr2 = 0;
 	rrr = readmp3(bw + old, l1);
@@ -13523,7 +13515,7 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 
 int playwavwav(BYTE* bw, int old, int l1, int l2)
 {
-	playb += (l1 + l2) / (wavch * (wavsam / 8));
+	playb += (l1 + l2) / PcmOutBytesPerFrame();
 	int rrr = readwav(bw + old, l1);
 	if (l1 != rrr) {
 		if (savedata.saveloop == 0 && endf == 1) {
@@ -13898,6 +13890,8 @@ bool InitializeRubberBandStretcher();
 
 void SeekAndWarmupRubberBand(int targetPos)
 {
+	ResetAudioUpscalerPipeline();
+
 	// ゴムバンドの初期化またはリセット
 	if (!g_rubberBandStretcher) {
 		float te = (float)tempo;
@@ -14758,6 +14752,7 @@ BOOL COggDlg::DestroyWindow()
 	if (pcdl) pcdl->Release();
 	CoUninitialize();
 	//	timeKillEvent(uTimerId);
+	StopTimerpVsyncThread();
 	KillTimer(5656);
 	KillTimer(5657);
 	KillTimer(1233);
@@ -14809,15 +14804,16 @@ BOOL COggDlg::DestroyWindow()
 int mcopy(char* a, int len)
 {
 	if (len == 0) return 0;
-	int ch = (wavch == 2 ? 1 : 2);
-	int ret = 0, lenl = len / (wavch * 2), cnt2;
+	const int bpf = (wavch > 0) ? (wavch * 2) : 4;
+	if (bpf <= 0) return 0;
+	int ret = 0, lenl = len / bpf, cnt2;
 	int len3 = 0, len4 = 0;
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 
 	if (poss4 <= len) {
 		for (int k = 0; k < 5; k++) {
 			ret = 0;
-			if ((int)playb > (data_size + 20000) / (wavch * 2) && endf == 1) {
+			if ((int)playb > (data_size + 20000) / bpf && endf == 1) {
 				playb += lenl;
 				if (muon != 0) { muon--; ZeroMemory(a, len); }
 				if (muon == MUON) { ZeroMemory(a, len); muon--; rrr = 0; }
@@ -14827,15 +14823,15 @@ int mcopy(char* a, int len)
 
 			int i = 0;
 			for (;;) {
-				ret = ov_read(&vf, (char*)(bufwav + poss * 4), 4096, 0, 2, 1, &current_section) / 4;
+				ret = ov_read(&vf, (char*)(bufwav + poss * bpf), 4096, 0, 2, 1, &current_section) / bpf;
 				poss += ret;
 				if (ret == 0) break;
 				if (lenl <= poss) break;
 			}
 
 			int to_process = lenl;
-			int len2 = readtempo(bufwav, to_process * 4);
-			playb += len2 / 4;
+			int len2 = readtempo(bufwav, to_process * bpf);
+			playb += len2 / bpf;
 
 			if (len2 > 0) {
 				if (poss2 + len2 > max_buffer_size) {
@@ -14856,14 +14852,14 @@ int mcopy(char* a, int len)
 			}
 			if (lenl <= poss) {
 				poss -= lenl;
-				if (poss != 0) memcpy(bufwav, bufwav + lenl * 4, poss * 4);
+				if (poss != 0) memcpy(bufwav, bufwav + lenl * bpf, poss * bpf);
 			}
 			if (len4 != 0) break;
 			if (poss4 > len) break;
 		}
 	}
 
-	int cnt0 = len / 4;
+	int cnt0 = len / bpf;
 	if (loop1 + loop2 < poss5 + cnt0 && endf == 0)
 		cnt0 = (loop1 + loop2) - poss5;
 
@@ -14873,7 +14869,7 @@ int mcopy(char* a, int len)
 		else              te = te / 3.0f + 33.3f;
 		poss5 += (int)(cnt0 * (te / 100.0f));
 	}
-	cnt0 *= 4;
+	cnt0 *= bpf;
 	cnt2 = cnt0;
 	int to_read = cnt0;
 
@@ -14906,7 +14902,7 @@ int mcopy(char* a, int len)
 	sss.MakeLower();
 	fade += fadeadd;
 	if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
-	for (int i = 0; i < (cnt0 * wavch) / 4; i++) {
+	for (int i = 0; i < cnt0 / 2; i++) {
 		c = b[i];
 		c = (short)(((float)c) * fade * fade);
 		b[i] = c;
@@ -14987,6 +14983,20 @@ void COggDlg::timerp()
 	}
 
 	if (mode == -2) loop1 = loop2 = loopcnt = wl = 0;
+
+	__int64 snap_playb;
+	int snap_oggsize, snap_wl, snap_loop1, snap_loop2;
+	double snap_oggsize2;
+	{
+		std::lock_guard<std::mutex> lk(cl2);
+		snap_playb = playb;
+		snap_oggsize = oggsize;
+		snap_wl = wl;
+		snap_oggsize2 = oggsize2;
+		snap_loop1 = loop1;
+		snap_loop2 = loop2;
+	}
+
 	//時間
 	int t1, ta, tb, tc, ta1, tb1, tc1, tag = 0, tbg = 0, tcg = 0, ttt;
 	tt++;
@@ -14995,7 +15005,7 @@ void COggDlg::timerp()
 	//		tt=0;
 	double t3;
 	if ((mode == -2 || (mode != -2 && videoonly == TRUE))) {
-		t3 = (double)oggsize2;
+		t3 = (double)snap_oggsize2;
 		tt = (int)(t3 * 100.0);
 		t1 = tt / 100;
 		ta = t1 / 60;
@@ -15005,7 +15015,7 @@ void COggDlg::timerp()
 			REFTIME aa;
 			aa = 0;
 			if (pMediaPosition)pMediaPosition->get_CurrentPosition(&aa);
-			if (pMediaPosition && (oggsize2 < aa) && plf == 1) {
+			if (pMediaPosition && (snap_oggsize2 < aa) && plf == 1) {
 				aa = 0; plf = 0;
 				if (pMainFrame1 != NULL && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
 					pMainFrame1->pause(0);
@@ -15025,7 +15035,7 @@ void COggDlg::timerp()
 	else {
 		double wavv[] = { 0,1.0,2.0,3.0 / 0.75,4.0 / 0.75,5.0 / 0.75,6.0 / 0.75 };//(double)(wavbit2/wavv[wavch])
 		double wavv2[] = { 0,2.0,1.0,2.0 / 3.0,2.0 / 4.0,2.0 / 5.0,2.0 / 6.0 };//(double)(wavbit2/wavv[wavch])
-		t3 = (double)oggsize / (double)(wavbit * 2.0 * wavv[wavch]) / (double)(wavsam / 16.0f);
+		t3 = (double)snap_oggsize / (double)(wavbit * 2.0 * wavv[wavch]) / (double)(wavsam / 16.0f);
 		if (mode == -10) t3 *= (wavsam / 16.0f) * 4.0;
 		if ((mode == -9) && wavch > 2) t3 *= wavch / 2.0;
 		tt = (int)(t3 * 100.0);
@@ -15034,7 +15044,7 @@ void COggDlg::timerp()
 		ta = t1 / 60;
 		tb = t1 % 60;
 		tc = tt % 100;
-		t3 = (double)playb / (double)(wavbit / wavv2[wavch]);// / (double)(wavsam / 16.0f);
+		t3 = (double)snap_playb / (double)(wavbit / wavv2[wavch]);// / (double)(wavsam / 16.0f);
 		//先読み分を除去
 
 		if (mode == -10) t3 /= (wavsam / 16.0f) * 4.0;
@@ -15051,7 +15061,7 @@ void COggDlg::timerp()
 		tb1 = t1 % 60;
 		tc1 = tt % 100;
 		ttt = tt;
-		t3 = (double)wl / (double)(wavbit * 2 * wavv[wavch]) / (double)(wavsam / 16.0f);
+		t3 = (double)snap_wl / (double)(wavbit * 2 * wavv[wavch]) / (double)(wavsam / 16.0f);
 		tt = (int)(t3 * 100.0);
 		t1 = tt / 100;
 		tag = t1 / 60;
@@ -15060,13 +15070,13 @@ void COggDlg::timerp()
 	}
 	videocnt++;
 
-	t3 = (double)loop1 / (double)(wavbit);
+	t3 = (double)snap_loop1 / (double)(wavbit);
 	tt = (int)(t3 * 100.0);
 	t1 = tt / 100;
 	int tal1 = t1 / 60;
 	int tbl1 = t1 % 60;
 	int tcl1 = tt % 100;
-	t3 = (double)(loop2 + loop1) / (double)(wavbit);
+	t3 = (double)(snap_loop2 + snap_loop1) / (double)(wavbit);
 	tt = (int)(t3 * 100.0);
 	t1 = tt / 100;
 	int tal2 = t1 / 60;
@@ -15329,6 +15339,10 @@ void COggDlg::timerp()
 
 
 	CString wavbit1 = wavb(wavbit);
+	const int dispRate = (g_pcm_upscale_active) ? g_ds_pcm_rate : wavbit;
+	const int dispCh = (g_pcm_upscale_active) ? g_ds_pcm_ch : wavch;
+	const int dispSam = (g_pcm_upscale_active) ? g_ds_pcm_bits : wavsam;
+	const CString wavbit1_disp = wavb(dispRate);
 
 	if ((mode == -2 || videoonly) && rate != 0.0 && height != 0) {
 		s.Format(_T("size:%d x %d"), rcm.right, rcm.bottom);
@@ -15343,15 +15357,15 @@ void COggDlg::timerp()
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -2 && wavbit != 0) {
-		s.Format(_T("sample:%sHz"), wavbit1);
+		s.Format(_T("sample:%sHz"), wavbit1_disp);
 		moji(s, 1, 48, 0x7fffff);
-		s.Format(_T("channel:%dch"), wavch);
-		if (wavch == 3)s.Format(_T("channel:%s"), _T("2.1ch"));
-		if (wavch == 4)s.Format(_T("channel:%s"), _T("3.1ch"));
-		if (wavch == 5)s.Format(_T("channel:%s"), _T("4.1ch"));
-		if (wavch == 6)s.Format(_T("channel:%s"), _T("5.1ch"));
-		if (wavch == 7)s.Format(_T("channel:%s"), _T("6.1ch"));
-		if (wavch == 8)s.Format(_T("channel:%s"), _T("7.1ch"));
+		s.Format(_T("channel:%dch"), dispCh);
+		if (dispCh == 3)s.Format(_T("channel:%s"), _T("2.1ch"));
+		if (dispCh == 4)s.Format(_T("channel:%s"), _T("3.1ch"));
+		if (dispCh == 5)s.Format(_T("channel:%s"), _T("4.1ch"));
+		if (dispCh == 6)s.Format(_T("channel:%s"), _T("5.1ch"));
+		if (dispCh == 7)s.Format(_T("channel:%s"), _T("6.1ch"));
+		if (dispCh == 8)s.Format(_T("channel:%s"), _T("7.1ch"));
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -2 && wavbit == 0) {
@@ -15389,26 +15403,26 @@ void COggDlg::timerp()
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -3) {
-		s.Format(_T("data:%sHz %s %dbit"), wavbit1, (wavch == 1) ? _T("mono") : _T("stereo"), wavsam);
-		if (wavch == 3)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("3ch"), wavsam);
-		if (wavch == 4)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("4ch"), wavsam);
-		if (wavch == 5)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("4.1ch"), wavsam);
-		if (wavch == 6)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("5.1ch"), wavsam);
-		if (wavch == 7)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("6.1ch"), wavsam);
-		if (wavch == 8)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("7.1ch"), wavsam);
+		s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, (dispCh == 1) ? _T("mono") : _T("stereo"), dispSam);
+		if (dispCh == 3)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("3ch"), dispSam);
+		if (dispCh == 4)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("4ch"), dispSam);
+		if (dispCh == 5)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("4.1ch"), dispSam);
+		if (dispCh == 6)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("5.1ch"), dispSam);
+		if (dispCh == 7)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("6.1ch"), dispSam);
+		if (dispCh == 8)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("7.1ch"), dispSam);
 		moji(s, 1, 48, 0x7fffff);
 		sss = kpi;
 		s.Format(_T("kpi :%s"), sss.Right(sss.GetLength() - sss.ReverseFind('\\') - 1));
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -8 || mode == -7 || mode == 999) {
-		s.Format(_T("data:%sHz %s %dbit"), wavbit1, (wavch == 1) ? _T("mono") : _T("stereo"), wavsam);
-		if (wavch == 3)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("3ch"), wavsam);
-		if (wavch == 4)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("4ch"), wavsam);
-		if (wavch == 5)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("4.1ch"), wavsam);
-		if (wavch == 6)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("5.1ch"), wavsam);
-		if (wavch == 7)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("6.1ch"), wavsam);
-		if (wavch == 8)s.Format(_T("data:%sHz %s %dbit"), wavbit1, _T("7.1ch"), wavsam);
+		s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, (dispCh == 1) ? _T("mono") : _T("stereo"), dispSam);
+		if (dispCh == 3)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("3ch"), dispSam);
+		if (dispCh == 4)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("4ch"), dispSam);
+		if (dispCh == 5)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("4.1ch"), dispSam);
+		if (dispCh == 6)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("5.1ch"), dispSam);
+		if (dispCh == 7)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("6.1ch"), dispSam);
+		if (dispCh == 8)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("7.1ch"), dispSam);
 		moji(s, 1, 48, 0x7fffff);
 		s = "Arti:";
 		moji(s, 1, 64, 0x7fffff);
@@ -15440,19 +15454,20 @@ void COggDlg::timerp()
 		}
 	}
 	else if (mode == -10 || mode == -9) {
+		const CString hzPlay = g_pcm_upscale_active ? wavbit1_disp : wavb(si1.dwSamplesPerSec);
 		if (Vbr & mode == -10)
-			s.Format(_T("data:%3dk(VBR) %sHz %dbit"), (kbps == 0) ? mkps : kbps, wavb(si1.dwSamplesPerSec), wavsam);
+			s.Format(_T("data:%3dk(VBR) %sHz %dbit"), (kbps == 0) ? mkps : kbps, hzPlay, dispSam);
 		else
 			if (mode == -9)
 				if (((kbps == 0) ? mkps : kbps) == 0)
-					s.Format(_T("data:%sHz %dch %dbit (ALAC)"), wavb(si1.dwSamplesPerSec), wavch, wavsam);
+					s.Format(_T("data:%sHz %dch %dbit (ALAC)"), hzPlay, dispCh, dispSam);
 				else
 					if (Vbr)
-						s.Format(_T("data:%3dk(VBR) %sHz %dch %dbit (AAC)"), mkps, wavb(si1.dwSamplesPerSec), wavch, wavsam);
+						s.Format(_T("data:%3dk(VBR) %sHz %dch %dbit (AAC)"), mkps, hzPlay, dispCh, dispSam);
 					else
-						s.Format(_T("data:%3dk(CBR) %sHz %dch %dbit (AAC)"), mkps, wavb(si1.dwSamplesPerSec), wavch, wavsam);
+						s.Format(_T("data:%3dk(CBR) %sHz %dch %dbit (AAC)"), mkps, hzPlay, dispCh, dispSam);
 			else
-				s.Format(_T("data:%3dk %sHz %dbit"), (kbps == 0) ? mkps : kbps, wavb(si1.dwSamplesPerSec), wavsam);
+				s.Format(_T("data:%3dk %sHz %dbit"), (kbps == 0) ? mkps : kbps, hzPlay, dispSam);
 		moji(s, 1, 48, 0x7fffff);
 		s = "Arti:";
 		moji(s, 1, 64, 0x7fffff);
@@ -15487,14 +15502,14 @@ void COggDlg::timerp()
 	else {
 		s.Format(_T("Loop:%2d:%02d.%02d %2d:%02d.%02d"), tal1, tbl1, tcl1, tal2, tbl2, tcl2);
 		moji(s, 1, 48, 0x7fffff);
-		if (loop1 < 10000000000)
-			s.Format(_T("    :%10d-%6d"), loop1, loop2);
-		if (loop1 < 1000000000)
-			s.Format(_T("    :%9d-%7d"), loop1, loop2);
-		if (loop1 < 100000000)
-			s.Format(_T("    :%8d-%8d"), loop1, loop2);
-		if (loop1 < 10000000)
-			s.Format(_T("    :%7d-%9d"), loop1, loop2);
+		if (snap_loop1 < 10000000000)
+			s.Format(_T("    :%10d-%6d"), snap_loop1, snap_loop2);
+		if (snap_loop1 < 1000000000)
+			s.Format(_T("    :%9d-%7d"), snap_loop1, snap_loop2);
+		if (snap_loop1 < 100000000)
+			s.Format(_T("    :%8d-%8d"), snap_loop1, snap_loop2);
+		if (snap_loop1 < 10000000)
+			s.Format(_T("    :%7d-%9d"), snap_loop1, snap_loop2);
 		moji(s, 1, 64, 0x7fefef);
 	}
 	if (mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == 999) {
@@ -15614,18 +15629,25 @@ void COggDlg::timerp()
 		}
 	}
 	else if (plf && hsc == 0) {
+		__int64 pb;
+		int ogs;
+		{
+			std::lock_guard<std::mutex> lk(cl2);
+			pb = playb;
+			ogs = oggsize;
+		}
 		if (mode == -10) {
-			m_time.SetPos((int)playb / 400);
+			m_time.SetPos((int)pb / 400);
 			if (ptl) {
 				ptl->SetProgressState(m_hWnd, TBPF_NORMAL);
-				ptl->SetProgressValue(m_hWnd, (LONGLONG)playb / 4, (LONGLONG)oggsize);
+				ptl->SetProgressValue(m_hWnd, (LONGLONG)pb / 4, (LONGLONG)ogs);
 			}
 		}
 		else {
-			m_time.SetPos((int)playb);
+			m_time.SetPos((int)pb);
 			if (ptl) {
 				ptl->SetProgressState(m_hWnd, TBPF_NORMAL);
-				ptl->SetProgressValue(m_hWnd, (LONGLONG)playb, (LONGLONG)oggsize / (wavsam / 4));
+				ptl->SetProgressValue(m_hWnd, (LONGLONG)pb, (LONGLONG)ogs / (wavsam / 4));
 			}
 		}
 	}
@@ -16159,6 +16181,107 @@ void COggDlg::timerp()
 
 int timerr = 0;
 int tim = 0;
+
+static unsigned __stdcall COgg_TimerpVsyncThreadProc(void* pParam)
+{
+	COggDlg* pDlg = (COggDlg*)pParam;
+	if (!pDlg || !pDlg->m_hTimerpVsyncStopEvent)
+		return 0;
+
+	HMODULE hDwm = LoadLibraryW(L"dwmapi.dll");
+	typedef HRESULT(WINAPI* PFN_DwmFlush)(void);
+	typedef HRESULT(WINAPI* PFN_DwmIsCompositionEnabled)(BOOL*);
+	PFN_DwmFlush pfnDwmFlush = (hDwm) ? (PFN_DwmFlush)GetProcAddress(hDwm, "DwmFlush") : nullptr;
+	PFN_DwmIsCompositionEnabled pfnDwmIsCompositionEnabled =
+		(hDwm) ? (PFN_DwmIsCompositionEnabled)GetProcAddress(hDwm, "DwmIsCompositionEnabled") : nullptr;
+
+	LARGE_INTEGER freq;
+	QueryPerformanceFrequency(&freq);
+	LARGE_INTEGER lastEmit;
+	QueryPerformanceCounter(&lastEmit);
+	const double kPeriod = 1.0 / 60.0;
+
+	for (;;) {
+		if (WaitForSingleObject(pDlg->m_hTimerpVsyncStopEvent, 0) == WAIT_OBJECT_0)
+			break;
+
+		BOOL comp = FALSE;
+		const BOOL haveDwm = (pfnDwmIsCompositionEnabled != nullptr && pfnDwmFlush != nullptr
+			&& SUCCEEDED(pfnDwmIsCompositionEnabled(&comp)) && comp);
+
+		if (haveDwm)
+			pfnDwmFlush();
+		else {
+			LARGE_INTEGER nowSpin;
+			QueryPerformanceCounter(&nowSpin);
+			const double dtSpin = (double)(nowSpin.QuadPart - lastEmit.QuadPart) / (double)freq.QuadPart;
+			if (dtSpin < kPeriod) {
+				DWORD ms = (DWORD)((kPeriod - dtSpin) * 1000.0 + 0.999);
+				if (ms < 1) ms = 1;
+				Sleep(ms);
+			}
+		}
+
+		LARGE_INTEGER now2;
+		QueryPerformanceCounter(&now2);
+		const double elapsed = (double)(now2.QuadPart - lastEmit.QuadPart) / (double)freq.QuadPart;
+		if (elapsed < kPeriod * 0.95)
+			continue;
+
+		lastEmit = now2;
+
+		HWND h = pDlg->GetSafeHwnd();
+		if (h && ::IsWindow(h))
+			::PostMessage(h, WM_TIMERP_VSYNC_TICK, 0, 0);
+	}
+
+	if (hDwm)
+		FreeLibrary(hDwm);
+	return 0;
+}
+
+void COggDlg::StartTimerpVsyncThread()
+{
+	if (m_hTimerpVsyncThread)
+		return;
+	m_hTimerpVsyncStopEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+	if (!m_hTimerpVsyncStopEvent)
+		return;
+	unsigned tid = 0;
+	m_hTimerpVsyncThread = (HANDLE)_beginthreadex(NULL, 0, COgg_TimerpVsyncThreadProc, this, 0, &tid);
+	if (!m_hTimerpVsyncThread) {
+		CloseHandle(m_hTimerpVsyncStopEvent);
+		m_hTimerpVsyncStopEvent = NULL;
+	}
+}
+
+void COggDlg::StopTimerpVsyncThread()
+{
+	if (m_hTimerpVsyncStopEvent)
+		SetEvent(m_hTimerpVsyncStopEvent);
+	if (m_hTimerpVsyncThread) {
+		WaitForSingleObject(m_hTimerpVsyncThread, 20000);
+		CloseHandle(m_hTimerpVsyncThread);
+		m_hTimerpVsyncThread = NULL;
+	}
+	if (m_hTimerpVsyncStopEvent) {
+		CloseHandle(m_hTimerpVsyncStopEvent);
+		m_hTimerpVsyncStopEvent = NULL;
+	}
+}
+
+LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
+{
+	if (!IsWindow(GetSafeHwnd()))
+		return 0;
+	if (tim != 0)
+		return 0;
+	tim = 1;
+	timerp();
+	tim = 0;
+	return 0;
+}
+
 int SC1 = 0;
 int ip = 0;
 int aaaa = 0, aaaa1 = 0;
@@ -16309,14 +16432,6 @@ void timerog1(UINT nIDEvent)
 		for (i = 0; i < 300; i++)
 			if (spetm[i] == 1) spelv[i]--;
 		if (spelv[i] < 0) spelv[i] = 0;
-	}
-
-	if (nIDEvent == 1233) {
-		if (tim == 0) {
-			tim = 1;
-			og->timerp();
-			tim = 0;
-		}
 	}
 
 	if (nIDEvent == 11251) {
@@ -18444,15 +18559,24 @@ void COggDlg::Speana()
 	bool mode2_Std = (!mode0_Note && !mode1_Low && !mode3_High && !mode4_Vox);
 
 	// ---------------------------------------------------------
-	// パラメータ設定
+	// パラメータ設定（アップスケール時は bufwav3 = DS 出力 g_ds_pcm_*）
 	// ---------------------------------------------------------
-	double sampleRate = (double)wavbit;
+	double sampleRate;
+	int channels;
+	int bitDepth;
+	if (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) {
+		sampleRate = (double)g_ds_pcm_rate;
+		channels = g_ds_pcm_ch;
+		bitDepth = g_ds_pcm_bits;
+	}
+	else {
+		sampleRate = (double)wavbit;
+		channels = wavch;
+		bitDepth = wavsam;
+	}
 	if (sampleRate < 8000.0) sampleRate = 44100.0;
-
-	int channels = wavch;
 	if (channels < 1) channels = 2;
 
-	int bitDepth = wavsam;
 	int bytesPerSample = bitDepth / 8;
 	if (bytesPerSample < 1) bytesPerSample = 2;
 
@@ -18468,8 +18592,11 @@ void COggDlg::Speana()
 	// 4096なら -800ms、8192なら -1600ms を基準とします。
 	int latencySetting = (analysisSize == 8192) ? -1600 : -800;
 
-	if (wavbit < 44100) {
-		latencySetting = (int)((float)latencySetting * (44100.0f / (float)wavbit));
+	{
+		const int rateForLatency = (int)(sampleRate + 0.5);
+		if (rateForLatency > 0 && rateForLatency < 44100) {
+			latencySetting = (int)((float)latencySetting * (44100.0f / (float)rateForLatency));
+		}
 	}
 
 	// 遅延バイト数（負の値）
@@ -18478,7 +18605,7 @@ void COggDlg::Speana()
 	int framesToRead = analysisSize;
 	int fftSize = analysisSize;
 	int bytesTotalToRead = framesToRead * bytesPerFrame;
-	const int TOTAL_BUF_BYTES = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM;
+	const int TOTAL_BUF_BYTES = (int)((g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM));
 
 	// バッファ長超過ガード (Safety Clamp)
 	// レイテンシがバッファ全長を超えて周回(未来読み)しないよう制限
@@ -18566,8 +18693,34 @@ void COggDlg::Speana()
 				smpL = GetSampleValue(i, 0);
 				smpR = (channels > 1) ? GetSampleValue(i, 1) : smpL;
 			}
+			else if (g_pcm_upscale_active && savedata.speaker_layout == 5 && channels > 2) {
+				smpL = GetSampleValue(i, 0);
+				smpR = (channels > 1) ? GetSampleValue(i, 1) : smpL;
+			}
+			else if (g_pcm_upscale_active && channels == 3 && savedata.speaker_layout == 1) {
+				// 2.1: L,R,LFE（センターではない）
+				double fl = GetSampleValue(i, 0), fr = GetSampleValue(i, 1), lfe = GetSampleValue(i, 2);
+				smpL = fl + lfe * 0.5;
+				smpR = fr + lfe * 0.5;
+			}
+			else if (g_pcm_upscale_active && channels == 4 && savedata.speaker_layout == 2) {
+				// 4.0 アップミックス: L,R,L,R（前後で同系統）
+				double fl = GetSampleValue(i, 0), fr = GetSampleValue(i, 1);
+				double rl = GetSampleValue(i, 2), rr = GetSampleValue(i, 3);
+				smpL = (fl + rl * 0.8) * 0.7;
+				smpR = (fr + rr * 0.8) * 0.7;
+			}
+			else if (g_pcm_upscale_active && channels >= 8) {
+				// 7.1: FL,FR,FC,LFE,BL,BR,SL,SR
+				double fl = GetSampleValue(i, 0), fr = GetSampleValue(i, 1);
+				double c = GetSampleValue(i, 2), lfe = GetSampleValue(i, 3);
+				double bl = GetSampleValue(i, 4), br = GetSampleValue(i, 5);
+				double sl = GetSampleValue(i, 6), sr = GetSampleValue(i, 7);
+				smpL = (fl + c * 0.7 + bl * 0.75 + sl * 0.75 + lfe * 0.5) * 0.55;
+				smpR = (fr + c * 0.7 + br * 0.75 + sr * 0.75 + lfe * 0.5) * 0.55;
+			}
 			else {
-				// ダウンミックス
+				// 5.1 等: FL,FR,C,LFE,BL,BR
 				double fl = GetSampleValue(i, 0), fr = GetSampleValue(i, 1);
 				double center = (channels > 2) ? GetSampleValue(i, 2) : 0.0;
 				double lfe = (channels > 3) ? GetSampleValue(i, 3) : 0.0;
@@ -18660,7 +18813,7 @@ void COggDlg::Speana()
 			bufKeyR[i] = (channels > 1) ? GetSampleValue(dstRawKey, i, 1) : bufKeyL[i];
 		}
 		else {
-			auto GetSampleValue = [&](const char* buf, int sampleIndex, int chIndex) -> double {
+			auto GetSampleValueKey = [&](const char* buf, int sampleIndex, int chIndex) -> double {
 				int offset = sampleIndex * bytesPerFrame + chIndex * bytesPerSample;
 
 				if (bitDepth == 16) {
@@ -18681,16 +18834,48 @@ void COggDlg::Speana()
 				return 0.0;
 				};
 
-			// ダウンミックス
-			double fl = GetSampleValue(dstRawKey, i, 0);
-			double fr = GetSampleValue(dstRawKey, i, 1);
-			double c = (channels > 2) ? GetSampleValue(dstRawKey, i, 2) : 0.0;
-			double lfe = (channels > 3) ? GetSampleValue(dstRawKey, i, 3) : 0.0;
-			double rl = (channels > 4) ? GetSampleValue(dstRawKey, i, 4) : 0.0;
-			double rr = (channels > 5) ? GetSampleValue(dstRawKey, i, 5) : 0.0;
+			if (g_pcm_upscale_active && savedata.speaker_layout == 5 && channels > 2) {
+				bufKeyL[i] = GetSampleValueKey(dstRawKey, i, 0);
+				bufKeyR[i] = (channels > 1) ? GetSampleValueKey(dstRawKey, i, 1) : bufKeyL[i];
+			}
+			else if (g_pcm_upscale_active && channels == 3 && savedata.speaker_layout == 1) {
+				double fl = GetSampleValueKey(dstRawKey, i, 0);
+				double fr = GetSampleValueKey(dstRawKey, i, 1);
+				double lfe = GetSampleValueKey(dstRawKey, i, 2);
+				bufKeyL[i] = fl + lfe * 0.5;
+				bufKeyR[i] = fr + lfe * 0.5;
+			}
+			else if (g_pcm_upscale_active && channels == 4 && savedata.speaker_layout == 2) {
+				double fl = GetSampleValueKey(dstRawKey, i, 0);
+				double fr = GetSampleValueKey(dstRawKey, i, 1);
+				double rl = GetSampleValueKey(dstRawKey, i, 2);
+				double rr = GetSampleValueKey(dstRawKey, i, 3);
+				bufKeyL[i] = (fl + rl * 0.8) * 0.7;
+				bufKeyR[i] = (fr + rr * 0.8) * 0.7;
+			}
+			else if (g_pcm_upscale_active && channels >= 8) {
+				double fl = GetSampleValueKey(dstRawKey, i, 0);
+				double fr = GetSampleValueKey(dstRawKey, i, 1);
+				double c = GetSampleValueKey(dstRawKey, i, 2);
+				double lfe = GetSampleValueKey(dstRawKey, i, 3);
+				double bl = GetSampleValueKey(dstRawKey, i, 4);
+				double br = GetSampleValueKey(dstRawKey, i, 5);
+				double sl = GetSampleValueKey(dstRawKey, i, 6);
+				double sr = GetSampleValueKey(dstRawKey, i, 7);
+				bufKeyL[i] = (fl + c * 0.7 + bl * 0.75 + sl * 0.75 + lfe * 0.5) * 0.55;
+				bufKeyR[i] = (fr + c * 0.7 + br * 0.75 + sr * 0.75 + lfe * 0.5) * 0.55;
+			}
+			else {
+				double fl = GetSampleValueKey(dstRawKey, i, 0);
+				double fr = GetSampleValueKey(dstRawKey, i, 1);
+				double c = (channels > 2) ? GetSampleValueKey(dstRawKey, i, 2) : 0.0;
+				double lfe = (channels > 3) ? GetSampleValueKey(dstRawKey, i, 3) : 0.0;
+				double rl = (channels > 4) ? GetSampleValueKey(dstRawKey, i, 4) : 0.0;
+				double rr = (channels > 5) ? GetSampleValueKey(dstRawKey, i, 5) : 0.0;
 
-			bufKeyL[i] = (fl + c * 0.7 + rl * 0.8 + lfe * 0.5) * 0.7;
-			bufKeyR[i] = (fr + c * 0.7 + rr * 0.8 + lfe * 0.5) * 0.7;
+				bufKeyL[i] = (fl + c * 0.7 + rl * 0.8 + lfe * 0.5) * 0.7;
+				bufKeyR[i] = (fr + c * 0.7 + rr * 0.8 + lfe * 0.5) * 0.7;
+			}
 		}
 	}
 	// ===== 音楽キー分析 =====
@@ -19115,11 +19300,9 @@ void COggDlg::OnButton14()
 }
 
 BOOL sek = FALSE;
-#include <mutex>
 extern int sek4;
 extern int syukai, syukai2;
 extern BOOL	syoriflg;
-extern std::mutex cl2;
 
 void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
@@ -19148,6 +19331,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 
 		// ★排他制御開始：再生スレッドとの競合を防ぐ
 		std::unique_lock<std::mutex> hscroll_lock(cl2);
+
+		ResetAudioUpscalerPipeline();
 
 		r->GetRange(minpos, maxpos);
 		curpos = r->GetPos();

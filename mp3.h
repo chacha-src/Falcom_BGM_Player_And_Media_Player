@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "stdafx.h"
 #include <math.h>
 #include <string.h> 
@@ -66,7 +66,7 @@ struct dither {
 #define BUFSZ			((UINT)10240*6/2)
 #define OUTPUT_BUFFER_SIZE  BUFSZ
 #define OUTPUT_BUFFER_NUM   5
-extern BYTE bufwav3[OUTPUT_BUFFER_SIZE*OUTPUT_BUFFER_NUM * 6];
+extern BYTE bufwav3[OUTPUT_BUFFER_SIZE*OUTPUT_BUFFER_NUM * 8];
 extern BOOL wavwait, thend;
 extern char *adbuf, *adbuf2;
 extern ULONG WAVDALen;

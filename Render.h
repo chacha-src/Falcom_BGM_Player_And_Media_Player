@@ -131,6 +131,18 @@ public:
 	afx_msg void OnCbnEditchangeCombo4();
 	afx_msg void OnCbnSelchangeCombo4();
 	afx_msg void OnBnClickedCancel5();
+	CCustomCheckBox m_upscale;
+	CCustomComboBox m_speaker;
+	afx_msg void OnCbnSelchangeSpeaker();
+	afx_msg void OnBnClickedCheckUpscale();
+	afx_msg void OnBnClicked32bit();
+	GUID m_bakSoundGuid;
+	int m_bakSoundCur;
+	DWORD m_bakSamples;
+	int m_bakUpscale;
+	int m_bakSpeaker;
+	int m_bakBit24;
+	int m_bakBit32;
 };
 
 //{{AFX_INSERT_LOCATION}}

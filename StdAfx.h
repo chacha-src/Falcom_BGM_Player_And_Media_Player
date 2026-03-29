@@ -209,6 +209,9 @@ struct save{
 	int lang;
 	int langselect;
 
+	int upscale_enable;   // 1=設定優先のアップスケール有効（デフォルトON想定）
+	int speaker_layout;   // 0=2ch 1=2.1ch 2=4ch 3=5.1ch 4=7.1ch 5=マッピングなし（ソースchのままレート/ビットのみ）
+
 	__int64 lastUpdateCheck;  // update check: 0=not checked, else=last check time
 };
 extern save savedata;

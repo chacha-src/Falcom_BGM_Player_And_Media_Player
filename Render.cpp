@@ -3,14 +3,19 @@
 
 #include "stdafx.h"
 #include "ogg.h"
+#include "OSVersion.h"
 #include "Render.h"
 #include "Graph.h"
 #include "dsound.h"
 #include "ZeroFol.h"
 #include "oggDlg.h"
 #include "CImageBase.h"
+#include "AudioUpscaler.h"
+#include <mutex>
 
 extern IGraphBuilder *pGraphBuilder;
+extern std::mutex cl2;
+extern ULONG oldw;
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -20,6 +25,111 @@ static char THIS_FILE[] = __FILE__;
 
 extern save savedata;
 CImageBase* renderbase;
+
+extern int sek;
+extern void DoEvent();
+extern int fade1;
+extern int wavbit, wavch, wavsam;
+extern LPDIRECTSOUND8 m_ds;
+extern LPDIRECTSOUNDBUFFER m_dsb1;
+extern LPDIRECTSOUNDBUFFER8 m_dsb;
+extern LPDIRECTSOUNDBUFFER m_p;
+
+// mp3.h と同一（Render.cpp から mp3.h を include しない: CWread 内が ExtractI4 等に依存）
+#define RENDER_DS_BUFSZ ((UINT)10240 * 6 / 2)
+#define RENDER_DS_BUFNUM 5
+
+static void RenderRecreateSecondarySound(COggDlg* og)
+{
+	if (!og || !og->m_hWnd || !m_ds)
+		return;
+	std::lock_guard<std::mutex> guard(cl2);
+	ConfigurePlaybackOutputAndUpscaler();
+	ResetAudioUpscalerPipeline();
+	sek = 1;
+	int dsTryRate = g_ds_pcm_rate;
+	static const GUID GUID_SUBTYPE_PCM = { 0x00000001, 0x0000, 0x0010,{ 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 } };
+
+	WAVEFORMATEX wfx1;
+	wfx1.wFormatTag = WAVE_FORMAT_PCM;
+	wfx1.nChannels = (WORD)((g_ds_pcm_ch <= 2) ? g_ds_pcm_ch : 2);
+	wfx1.nSamplesPerSec = dsTryRate;
+	wfx1.wBitsPerSample = (WORD)g_ds_pcm_bits;
+	wfx1.nBlockAlign = (WORD)(wfx1.nChannels * wfx1.wBitsPerSample / 8);
+	wfx1.nAvgBytesPerSec = (DWORD)((DWORD)wfx1.nSamplesPerSec * (DWORD)wfx1.nBlockAlign);
+	wfx1.cbSize = 0;
+
+	DWORD targetSpeakers = (DWORD)DirectSoundChannelMaskForOutput(g_ds_pcm_ch, savedata.speaker_layout);
+	WAVEFORMATEXTENSIBLE wfx = {};
+	wfx.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+	wfx.Format.nChannels = (WORD)g_ds_pcm_ch;
+	wfx.Format.nSamplesPerSec = dsTryRate;
+	wfx.Format.wBitsPerSample = (WORD)g_ds_pcm_bits;
+	wfx.Format.nBlockAlign = (WORD)(wfx.Format.wBitsPerSample / 8 * wfx.Format.nChannels);
+	wfx.Format.nAvgBytesPerSec = (DWORD)(wfx.Format.nSamplesPerSec * wfx.Format.nBlockAlign);
+	wfx.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+	wfx.dwChannelMask = targetSpeakers;
+	wfx.SubFormat = GUID_SUBTYPE_PCM;
+
+	fade1 = 0;
+	for (;;) {
+		DSBUFFERDESC dsbd;
+		ZeroMemory(&dsbd, sizeof(DSBUFFERDESC));
+		dsbd.dwSize = sizeof(DSBUFFERDESC);
+		dsbd.dwFlags = DSBCAPS_CTRLPOSITIONNOTIFY | DSBCAPS_LOCSOFTWARE | DSBCAPS_GLOBALFOCUS | DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_CTRLVOLUME;
+		dsbd.dwBufferBytes = g_ds_buffer_bytes;
+		wfx1.nSamplesPerSec = dsTryRate;
+		wfx1.nAvgBytesPerSec = (DWORD)wfx1.nSamplesPerSec * (DWORD)wfx1.nBlockAlign;
+		wfx.Format.nSamplesPerSec = dsTryRate;
+		wfx.Format.nAvgBytesPerSec = (DWORD)(wfx.Format.nSamplesPerSec * wfx.Format.nBlockAlign);
+		if (g_ds_pcm_ch > 2)
+			dsbd.lpwfxFormat = (LPWAVEFORMATEX)&wfx;
+		else
+			dsbd.lpwfxFormat = &wfx1;
+
+		og->ReleaseDXSound();
+		if (og->WASAPIInit() == 0)
+			og->init(og->m_hWnd, dsTryRate);
+		HRESULT r = m_ds->CreateSoundBuffer(&dsbd, &m_dsb1, NULL);
+		if (m_dsb1 == NULL || m_p == NULL) {
+			dsTryRate -= 1000;
+			if (dsTryRate <= 0) {
+				og->ReleaseDXSound();
+				if (og->WASAPIInit() == 0)
+					og->init(og->m_hWnd, 44100);
+				return;
+			}
+			wfx.Format.nSamplesPerSec = dsTryRate;
+			wfx.Format.nAvgBytesPerSec = (DWORD)(wfx.Format.nSamplesPerSec * wfx.Format.nBlockAlign);
+			wfx1.nSamplesPerSec = dsTryRate;
+			wfx1.nAvgBytesPerSec = wfx1.nSamplesPerSec * wfx1.nBlockAlign;
+			continue;
+		}
+		int i;
+		for (i = 0; i < 10; i++) {
+			r = m_dsb1->QueryInterface(IID_IDirectSoundBuffer8, (void**)&m_dsb);
+			if (m_dsb == NULL) { DoEvent(); Sleep(100); continue; }
+			break;
+		}
+		if (m_dsb == NULL)
+			return;
+		g_ds_pcm_rate = dsTryRate;
+		{
+			int srcBits = abs(wavsam);
+			if (wavsam < 0)
+				srcBits = 16;
+			if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
+				srcBits = 16;
+			g_audioUpscaler.Configure(wavbit, wavch, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
+			g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
+		}
+		g_audioUpscaler.Reset();
+		oldw = 0;
+		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+		return;
+	}
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // CRender ダイアログ
 
@@ -83,6 +193,8 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDCANCEL5, m_kanren);
 	DDX_Control(pDX, IDCANCEL, m_canceldummy);
 	DDX_Control(pDX, IDC_COMBO_LANG, m_comboLang);
+	DDX_Control(pDX, IDC_CHECK_UPSCALE, m_upscale);
+	DDX_Control(pDX, IDC_COMBO_SPEAKER, m_speaker);
 }
 
 
@@ -116,6 +228,9 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_COMBO2, &CRender::OnCbnSelchangeCombo2)
 	ON_BN_CLICKED(IDC_BUTTON1, &CRender::OnBnClickedButton1)
 	ON_CBN_SELCHANGE(IDC_COMBO3, &CRender::OnCbnSelchangeCombo3)
+	ON_CBN_SELCHANGE(IDC_COMBO_SPEAKER, &CRender::OnCbnSelchangeSpeaker)
+	ON_BN_CLICKED(IDC_CHECK_UPSCALE, &CRender::OnBnClickedCheckUpscale)
+	ON_BN_CLICKED(IDC_CHECK51, &CRender::OnBnClicked32bit)
 	ON_WM_CTLCOLOR()
 	ON_WM_CREATE()
 	ON_WM_MOVING()
@@ -134,11 +249,18 @@ int slgc;
 CString sls[200];
 DWORD samp[] = { 11025, 12000, 22050, 24000, 44100, 48000, 96000, 192000, 384000, 768000, 1536000, 3072000 };
 extern COggDlg* og;
-#include "OSVersion.h"
 
 BOOL CRender::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
+
+	m_bakSoundGuid = savedata.soundguid;
+	m_bakSoundCur = savedata.soundcur;
+	m_bakSamples = savedata.samples;
+	m_bakUpscale = savedata.upscale_enable;
+	m_bakSpeaker = savedata.speaker_layout;
+	m_bakBit24 = savedata.bit24;
+	m_bakBit32 = savedata.bit32;
 
 	SetWindowText(LL14(L"レンダリング選択", L"Rendering Options", L"Options de rendu", L"Opzioni di rendering", L"Opciones de renderizado", L"렌더링 옵션", L"渲染选项", L"خيارات العرض", L"Параметры рендеринга", L"Rendering-Optionen", L"Opções de renderização", L"Renderopties", L"Opcje renderowania", L"Render seçenekleri"));
 	SetDlgItemText(IDOK, LL14(L"OK", L"OK", L"OK", L"OK", L"OK", L"확인", L"确定", L"موافق", L"OK", L"OK", L"OK", L"OK", L"OK", L"Tamam"));
@@ -172,6 +294,8 @@ BOOL CRender::OnInitDialog()
 	SetDlgItemText(IDC_STATIC_R_SPEANA, LL14(L"スペアナ倍率", L"Spectrum scale", L"Échelle spectre", L"Scala spettro", L"Escala espectro", L"스펙트럼 배율", L"频谱倍率", L"مقياس الطيف", L"Масштаб спектра", L"Spektrumskala", L"Escala espectro", L"Spectrumschaal", L"Skala widma", L"Spektrum ölçeği"));
 	SetDlgItemText(IDC_STATIC_R_SPC, LL14(L".SPC,.HES音量(kpi)", L".SPC,.HES volume(kpi)", L"Volume .SPC,.HES (kpi)", L"Volume .SPC,.HES (kpi)", L"Volumen .SPC,.HES (kpi)", L".SPC,.HES 볼륨(kpi)", L".SPC,.HES 音量(kpi)", L"حجم .SPC,.HES (kpi)", L"Громкость .SPC,.HES (kpi)", L".SPC,.HES-Lautstärke (kpi)", L"Volume .SPC,.HES (kpi)", L".SPC,.HES-volume (kpi)", L"Głośność .SPC,.HES (kpi)", L".SPC,.HES sesi (kpi)"));
 	SetDlgItemText(IDC_STATIC_R_BIT, LL14(L"演奏bit深度：", L"Playback bits:", L"Bits lecture:", L"Bit riproduzione:", L"Bits reproducción:", L"재생 비트:", L"播放位深：", L"بت التشغيل:", L"Битность воспроизведения:", L"Wiedergabe-Bits:", L"Bits reprodução:", L"Afspeelbits:", L"Bity odtwarzania:", L"Oynatma bitleri:"));
+	SetDlgItemText(IDC_STATIC_R_SPEAKER, LL14(L"出力チャンネル", L"Output channels", L"Canaux de sortie", L"Canali di uscita", L"Canales de salida", L"출력 채널", L"输出声道", L"قنوات الإخراج", L"Выходные каналы", L"Ausgabekanäle", L"Canais de saída", L"Uitgangskanalen", L"Kanały wyjściowe", L"Çıkış kanalları"));
+	SetDlgItemText(IDC_CHECK_UPSCALE, LL14(L"アップスケール出力", L"Upscale output", L"Sortie upscalée", L"Upscaling in uscita", L"Salida con upscaling", L"업스케일 출력", L"升频输出", L"تحسين الدقة للإخراج", L"Апскейл вывода", L"Upscale-Ausgabe", L"Saída com upscaling", L"Upscale uitvoer", L"Wyjście upscaling", L"Yükseltmeli çıkış"));
 	SetDlgItemText(IDC_STATIC12, LL14(L"倍", L"x", L"x", L"x", L"x", L"x", L"倍", L"x", L"x", L"x", L"x", L"x", L"x", L"x"));
 	// SPC volume checkboxes (x1, x2, x4, x8, x16)
 	SetDlgItemText(IDC_CHECK35, LL14(L"等倍", L"1x", L"1x", L"1x", L"1x", L"1x", L"1倍", L"1x", L"1x", L"1x", L"1x", L"1x", L"1x", L"1x"));
@@ -245,6 +369,19 @@ BOOL CRender::OnInitDialog()
 	m_24.SetCheck(savedata.bit24);
 	m_32bit.SetCheck(savedata.bit32);
 	m_m4a.SetCheck(savedata.m4a);
+	m_upscale.SetCheck(savedata.upscale_enable ? BST_CHECKED : BST_UNCHECKED);
+	m_speaker.ResetContent();
+	m_speaker.AddString(LL14(L"ステレオ (2ch)", L"Stereo (2ch)", L"Stéréo (2ch)", L"Stereo (2ch)", L"Estéreo (2ch)", L"스테레오 (2ch)", L"立体声 (2ch)", L"ستيريو (2ch)", L"Стерео (2ch)", L"Stereo (2ch)", L"Estéreo (2ch)", L"Stereo (2ch)", L"Stereo (2ch)", L"Stereo (2ch)"));
+	m_speaker.AddString(LL14(L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2,1ch (G+D+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (左+右+低音)", L"2.1ش (يسار+يمين+باس)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)", L"2.1ch (L+R+LFE)"));
+	m_speaker.AddString(LL14(L"4ch (クアッド)", L"4ch (quad)", L"4 canaux (quad)", L"4ch (quad)", L"4 canales (cuad.)", L"4채널 (쿼드)", L"四声道（环绕）", L"4 قنوات", L"4 канала (квад)", L"4 Kanäle (Quad)", L"4 canais (quad)", L"4 kanalen (quad)", L"4 kanały (quad)", L"4 kanal (quad)"));
+	m_speaker.AddString(LL14(L"5.1ch サラウンド", L"5.1 surround", L"Surround 5.1", L"Surround 5.1", L"Sonido envolvente 5.1", L"5.1 서라운드", L"5.1 环绕声", L"صوت محيطي 5.1", L"Объёмный 5.1", L"5.1 Surround", L"Surround 5.1", L"5.1 surround", L"Dźwięk przestrzenny 5.1", L"5.1 surround"));
+	m_speaker.AddString(LL14(L"7.1ch サラウンド", L"7.1 surround", L"Surround 7.1", L"Surround 7.1", L"Sonido envolvente 7.1", L"7.1 서라운드", L"7.1 环绕声", L"صوت محيطي 7.1", L"Объёмный 7.1", L"7.1 Surround", L"Surround 7.1", L"7.1 surround", L"Dźwięk przestrzenny 7.1", L"7.1 surround"));
+	m_speaker.AddString(LL14(L"オリジナル（マッピングなし）", L"Original (no channel mapping)", L"Original (sans mappage)", L"Originale (nessun mapping)", L"Original (sin mapeo)", L"원본(채널 매핑 없음)", L"原始（不映射声道）", L"أصلي (بدون تعيين قنوات)", L"Исходный канал без микширования", L"Original (kein Kanal-Mapping)", L"Original (sem mapeamento)", L"Origineel (geen kanaal-mapping)", L"Oryginał (bez mapowania kanałów)", L"Orijinal (kanal eşlemesi yok)"));
+	{
+		int sp = savedata.speaker_layout;
+		if (sp < 0 || sp > 5) sp = 0;
+		m_speaker.SetCurSel(sp);
+	}
 
 	m_tooltip.Create(this);
 	m_tooltip.Activate(TRUE);
@@ -281,6 +418,8 @@ BOOL CRender::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK50), LL14(L"m4aを内蔵エンジンで演奏します。", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine."));
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK52), LL14(L"スペアナの表示モードを切り替えます", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO3), LL14(L"再生するサンプルレートを設定します。\nサウンドカードが対応していない場合自動的に再生時対応上限まで下げます。", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_UPSCALE), LL14(L"設定したサンプルレート・ビット深度・チャンネルでDirectSoundに出力します。\nオフにするとソース形式のまま出力します。", L"Output to DirectSound at configured rate, bit depth, and channels.\nOff keeps the source format.", L"Sortie DirectSound au débit / bits / canaux configurés.\nDésactivé = format source.", L"Uscita DirectSound con frequenza, bit e canali impostati.\nSpento = formato sorgente.", L"Salida DirectSound con frecuencia, bits y canales configurados.\nApagado = formato de origen.", L"설정한 샘플레이트·비트·채널로 DirectSound 출력.\n끄면 소스 형식 유지.", L"按设置的采样率、位深和声道输出到 DirectSound。\n关闭则保持源格式。", L"إخراج DirectSound بالمعدل والبت والقنوات المضبوطة.\nإيقاف = تنسيق المصدر.", L"Вывод в DirectSound с заданной частотой, битностью и каналами.\nВыкл. — формат источника.", L"Ausgabe an DirectSound mit eingestellter Rate, Bittiefe und Kanälen.\nAus = Quellformat.", L"Saída DirectSound com taxa, bits e canais configurados.\nDesligado = formato da fonte.", L"DirectSound-uitvoer met ingestelde rate, bits en kanalen.\nUit = bronformaat.", L"Wyjście DirectSound z ustawioną częstotliwością, bitami i kanałami.\nWył. = format źródła.", L"Ayarlanan hız, bit ve kanallarla DirectSound çıkışı.\nKapalı = kaynak biçimi."));
+	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_SPEAKER), LL14(L"アップスケール時の出力チャンネル配置（2ch / 2.1 / 4ch / 5.1 / 7.1 / マッピングなし）を選びます。マッピングなしはソースのチャンネル数のまま、レート・ビット深度のみ変換します。", L"Speaker layout when upscaling (2ch / 2.1 / 4ch / 5.1 / 7.1 / no mapping). No mapping keeps source channel count; only rate and bit depth change.", L"Disposition haut-parleurs en upscaling (2ch / 2.1 / 4ch / 5.1 / 7.1 / sans mappage). Sans mappage : même nombre de canaux, seuls débit et bits changent.", L"Layout altoparlanti (2ch / 2.1 / 4ch / 5.1 / 7.1 / nessun mapping). Nessun mapping: stessi canali, solo frequenza e bit.", L"Disposición de altavoces (2ch / 2.1 / 4ch / 5.1 / 7.1 / sin mapeo). Sin mapeo: mismos canales; solo tasa y bits.", L"업스케일 시 스피커(2ch/2.1/4ch/5.1/7.1/매핑 없음). 매핑 없음은 소스 채널 수 유지, 레이트·비트만 변환.", L"升频时的扬声器布局（含不映射声道）。不映射则保持源声道数，仅转换采样率与位深。", L"تخطيط السماعات مع خيار بدون تعيين. بدون تعيين: نفس عدد القنوات؛ تغيير المعدل والبت فقط.", L"Раскладка каналов при апскейле; «без маппинга» сохраняет число каналов источника, меняются только частота и битность.", L"Lautsprecher-Layout; „kein Mapping“ behält Kanalzahl, nur Rate/Bits.", L"Layout de altifalante; sem mapeamento mantém canais da fonte, só taxa e bits.", L"Luidsprekerindeling; geen mapping behoudt bronkanalen, alleen rate en bits.", L"Układ kanałów; bez mapowania = ta sama liczba kanałów, zmiana tylko częstotliwości i bitów.", L"Hoparlör düzeni; eşleme yok kaynak kanal sayısını korur, yalnızca hız ve bit derinliği değişir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO4), LL14(L"スペアナで表示する表示方法を選択します。\n使う時は横のチェックボックスにチェックを入れてください\n音階：88鍵盤として表示します\n周波数帯：周波数として表示します\n標準：既定の見やすい形のスペアナで表示します", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum"));
 	m_tooltip.AddTool(GetDlgItem(IDC_BUTTON1), LL14(L"碧の軌跡用のt_bgm._dtを設定します。", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki."));
 	m_tooltip.AddTool(GetDlgItem(IDCANCEL5), LL14(L"win7くらいまで対応。関連付けに追加します。\nwin10以降でも追加はされるとは思いますがされないときもあります。", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always."));
@@ -633,8 +772,14 @@ void CRender::Onkpi30()
 
 void CRender::OnBnClicked24bit()
 {
-	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	savedata.bit24 = m_24.GetCheck();
+	if (og) RenderRecreateSecondarySound(og);
+}
+
+void CRender::OnBnClicked32bit()
+{
+	savedata.bit32 = m_32bit.GetCheck();
+	if (og) RenderRecreateSecondarySound(og);
 }
 
 void CRender::OnBnClickedCheck50()
@@ -701,6 +846,21 @@ void CRender::OnBnClickedOk()
 	savedata.speanamode = m_speana.GetCheck();
 	savedata.speananum = m_speana_num.GetCurSel();
 	savedata.lang = m_comboLang.GetCurSel();
+	int ihz = m_Hz.GetCurSel();
+	if (ihz >= 0 && ihz < 12)
+		savedata.samples = samp[ihz];
+	savedata.upscale_enable = m_upscale.GetCheck() ? 1 : 0;
+	int sp = m_speaker.GetCurSel();
+	savedata.speaker_layout = (sp >= 0 && sp <= 5) ? sp : 0;
+	int dev = m_soundlist.GetCurSel();
+	if (dev >= 0) {
+		memcpy(&savedata.soundguid, &slg[dev], sizeof(GUID));
+		if (dev == 0)
+			savedata.soundguid = { 0,0,0,0 };
+		savedata.soundcur = dev;
+	}
+	if (og)
+		RenderRecreateSecondarySound(og);
 	extern int gameon;
 	if(savedata.aero)
 	delete renderbase;
@@ -824,187 +984,32 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
 
-extern int wavbit, wavch, wavsam, wavbit2, fade1;
-#include <MMSystem.h>
-#include "dsound.h"
-#include <mmdeviceapi.h>
-#include <audiopolicy.h>
-#include "libmad\decoder.h"
-#include "mp3info.h"
-#include "mp3.h"
-extern void DoEvent();
-extern int sek;
-extern int			logtbl[100 + 1];
-extern LPDIRECTSOUND8 m_ds;
-extern LPDIRECTSOUNDBUFFER m_dsb1;
-extern LPDIRECTSOUNDBUFFER8 m_dsb;
-extern CString tagfile,fnn;
 void CRender::OnCbnSelchangeCombo2()
 {
-	// TODO: ここにコントロール通知ハンドラー コードを追加します。
-	memcpy(&savedata.soundguid, &slg[m_soundlist.GetCurSel()], sizeof(GUID));
-	if (m_soundlist.GetCurSel() == 0) {
+	int dev = m_soundlist.GetCurSel();
+	if (dev < 0) return;
+	memcpy(&savedata.soundguid, &slg[dev], sizeof(GUID));
+	if (dev == 0)
 		savedata.soundguid = { 0,0,0,0 };
-	}
-	savedata.soundcur= m_soundlist.GetCurSel();
-	og->ReleaseDXSound();
-	og->init(og->m_hWnd, wavbit);
-	sek = 1;
-	WAVEFORMATEX wfx1;
-	if (wavsam<0)
-		wfx1.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
-	else
-		wfx1.wFormatTag = WAVE_FORMAT_PCM;
-	wfx1.nChannels = wavch;
-	wfx1.nSamplesPerSec = wavbit;
-	wfx1.wBitsPerSample = abs(wavsam);
-	wfx1.nBlockAlign = wfx1.nChannels * wfx1.wBitsPerSample / 8;
-	wfx1.nAvgBytesPerSec = wfx1.nSamplesPerSec * wfx1.nBlockAlign;
-	wfx1.cbSize = 0;
+	savedata.soundcur = dev;
+	if (og)
+		RenderRecreateSecondarySound(og);
+}
 
-	static const GUID GUID_SUBTYPE_PCM = { 0x00000001, 0x0000, 0x0010,{ 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 } };
+void CRender::OnCbnSelchangeSpeaker()
+{
+	int s = m_speaker.GetCurSel();
+	if (s >= 0 && s <= 5)
+		savedata.speaker_layout = s;
+	if (og)
+		RenderRecreateSecondarySound(og);
+}
 
-	DWORD targetSpeakers = 0;
-	switch (wavch) {
-	case 1:
-		targetSpeakers |= SPEAKER_FRONT_CENTER;
-		break;
-	case 2:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT;
-		break;
-	case 3:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT
-			| SPEAKER_FRONT_CENTER
-			;
-	case 4:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT
-			| SPEAKER_FRONT_CENTER
-			| SPEAKER_BACK_CENTER
-			;
-	case 5:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT
-			| SPEAKER_FRONT_CENTER
-			| SPEAKER_BACK_LEFT
-			| SPEAKER_BACK_RIGHT
-			;
-	case 6:
-		targetSpeakers |=
-			SPEAKER_FRONT_LEFT
-			| SPEAKER_FRONT_RIGHT
-			| SPEAKER_FRONT_CENTER
-			| SPEAKER_LOW_FREQUENCY
-			| SPEAKER_BACK_LEFT
-			| SPEAKER_BACK_RIGHT
-			;
-	}
-	int nChannels = __popcnt(targetSpeakers);
-	WAVEFORMATEXTENSIBLE wfx = {};
-	wfx.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
-	wfx.Format.nChannels = nChannels;
-	wfx.Format.nSamplesPerSec = wavbit;
-	wfx.Format.wBitsPerSample = abs(wavsam);
-	wfx.Format.nBlockAlign = (WORD)(wfx.Format.wBitsPerSample / 8 * wfx.Format.nChannels);
-	wfx.Format.nAvgBytesPerSec = (DWORD)(wfx.Format.nSamplesPerSec * wfx.Format.nBlockAlign);
-	wfx.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
-	wfx.dwChannelMask = targetSpeakers;
-	if (wavsam < 0)
-		wfx.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
-	else
-		wfx.SubFormat = GUID_SUBTYPE_PCM;
-	wavsam = abs(wavsam);
-	wavbit2 = wavbit;
-	int i, iii = 0;
-	double ik = 32.0;
-	double il = 45.71712838;
-	for (i = 0; i <= 88; i++, iii++) { // 低音域用
-		logtbl[i] = (int)(il * pow(2.0, (double)(iii) / ik));// *(double)BUFSZH1 / (double)192000 / 4.0 + 1.0);
-		if (i < 20) {
-			ik -= 0.12 / ((double)wavbit / 44100.0);
-		}
-		else {
-			ik -= 0.14 / ((double)wavbit / 44100.0);
-		}
-		if (i != 0) {
-			if (iii>240) {
-				break;
-			}
-			if (logtbl[i] <= logtbl[i - 1]) {
-				i--; continue;
-			}
-		}
-		//if( logtbl[i] > BUFSZH1 -1 ) logtbl[i] = BUFSZH1 -1;
-	}
-
-
-	//    mmRes = waveOutOpen(&hwo,WAVE_MAPPER,&wfx1,(DWORD)(LPVOID)0,(DWORD)NULL,CALLBACK_NULL);
-
-	fade1 = 0;
-	//-------------------------------------------------------------------
-	//if (pAudioClient == NULL) {
-	DSBUFFERDESC dsbd;
-	ZeroMemory(&dsbd, sizeof(DSBUFFERDESC));
-	dsbd.dwSize = sizeof(DSBUFFERDESC);
-	dsbd.dwFlags = DSBCAPS_CTRLPOSITIONNOTIFY | DSBCAPS_LOCSOFTWARE | DSBCAPS_GLOBALFOCUS | DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_CTRLVOLUME;// | DSBCAPS_CTRL3D;
-	dsbd.dwBufferBytes = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM;
-	if (wavch > 2)
-		dsbd.lpwfxFormat = (LPWAVEFORMATEX)&wfx;
-	else
-		dsbd.lpwfxFormat = &wfx1;
-	//dsbd.guid3DAlgorithm = DS3DALG_HRTF_LIGHT;
-	HRESULT r;
-	r = m_ds->CreateSoundBuffer(&dsbd, &m_dsb1, NULL);
-	if (m_dsb1 == NULL) {
-		CString s; s.Format(L"%d", savedata.samples);
-		MessageBox(s + LL14(L"Hzのサンプリングレートにサウンドカードが対応していません", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card", L"Hz sampling rate not supported by sound card"), LL14(L"ogg/wav簡易プレイヤ", L"ogg/wav Simple Player", L"ogg/wav Simple Player", L"ogg/wav Simple Player", L"ogg/wav Simple Player", L"ogg/wav Simple Player", L"ogg/wav Simple Player", L"ogg/wav Simple Player", L"ogg/wav Simple Player", L"ogg/wav Simple Player", L"ogg/wav Simple Player", L"ogg/wav Simple Player", L"ogg/wav Simple Player", L"ogg/wav Simple Player"));
-		return;
-	}
-	for (i = 0; i < 10; i++) {
-		r = m_dsb1->QueryInterface(IID_IDirectSoundBuffer8, (void**)&m_dsb);
-
-		if (m_dsb == NULL) { DoEvent(); Sleep(100); continue; }
-		else break;
-	}
-	if (m_dsb == NULL) {
-		AfxMessageBox(LL14(L"DirectSoundが開けませんでした。", L"Could not open DirectSound.", L"Could not open DirectSound.", L"Could not open DirectSound.", L"Could not open DirectSound.", L"Could not open DirectSound.", L"Could not open DirectSound.", L"Could not open DirectSound.", L"Could not open DirectSound.", L"Could not open DirectSound.", L"Could not open DirectSound.", L"Could not open DirectSound.", L"Could not open DirectSound.", L"Could not open DirectSound."));
-		if (r == DSERR_ALLOCATED) {
-			AfxMessageBox(LL14(L"優先レベルなどのリソースが他の呼び出しによって既に使用中であるため、要求は失敗した。", L"Request failed: resources in use.", L"Request failed: resources in use.", L"Request failed: resources in use.", L"Request failed: resources in use.", L"Request failed: resources in use.", L"Request failed: resources in use.", L"Request failed: resources in use.", L"Request failed: resources in use.", L"Request failed: resources in use.", L"Request failed: resources in use.", L"Request failed: resources in use.", L"Request failed: resources in use.", L"Request failed: resources in use."));
-		}
-		else if (r == DSERR_CONTROLUNAVAIL) {
-			AfxMessageBox(LL14(L"呼び出し元が要求するバッファ コントロール (ボリューム、パンなど) は利用できない。", L"Buffer control requested is not available.", L"Buffer control requested is not available.", L"Buffer control requested is not available.", L"Buffer control requested is not available.", L"Buffer control requested is not available.", L"Buffer control requested is not available.", L"Buffer control requested is not available.", L"Buffer control requested is not available.", L"Buffer control requested is not available.", L"Buffer control requested is not available.", L"Buffer control requested is not available.", L"Buffer control requested is not available.", L"Buffer control requested is not available."));
-		}
-		else if (r == DSERR_BADFORMAT) {
-			AfxMessageBox(LL14(L"指定したウェーブ フォーマットはサポートされていない。", L"Specified wave format not supported.", L"Specified wave format not supported.", L"Specified wave format not supported.", L"Specified wave format not supported.", L"Specified wave format not supported.", L"Specified wave format not supported.", L"Specified wave format not supported.", L"Specified wave format not supported.", L"Specified wave format not supported.", L"Specified wave format not supported.", L"Specified wave format not supported.", L"Specified wave format not supported.", L"Specified wave format not supported."));
-		}
-		else if (r == DSERR_INVALIDPARAM) {
-			AfxMessageBox(LL14(L"無効なパラメータが関数に渡された。", L"Invalid parameter passed.", L"Invalid parameter passed.", L"Invalid parameter passed.", L"Invalid parameter passed.", L"Invalid parameter passed.", L"Invalid parameter passed.", L"Invalid parameter passed.", L"Invalid parameter passed.", L"Invalid parameter passed.", L"Invalid parameter passed.", L"Invalid parameter passed.", L"Invalid parameter passed.", L"Invalid parameter passed."));
-		}
-		else if (r == DSERR_NOAGGREGATION) {
-			AfxMessageBox(LL14(L"このオブジェクトは COM 集合化をサポートしない。", L"Object does not support COM aggregation.", L"Object does not support COM aggregation.", L"Object does not support COM aggregation.", L"Object does not support COM aggregation.", L"Object does not support COM aggregation.", L"Object does not support COM aggregation.", L"Object does not support COM aggregation.", L"Object does not support COM aggregation.", L"Object does not support COM aggregation.", L"Object does not support COM aggregation.", L"Object does not support COM aggregation.", L"Object does not support COM aggregation.", L"Object does not support COM aggregation."));
-		}
-		else if (r == DSERR_OUTOFMEMORY) {
-			AfxMessageBox(LL14(L"DirectSound サブシステムは、呼び出し元の要求を完了するための十分なメモリを割り当てられなかった。", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory.", L"DirectSound could not allocate enough memory."));
-		}
-		else if (r == DSERR_UNINITIALIZED) {
-			AfxMessageBox(LL14(L"他のメソッドを呼び出す前に IDirectSound::Initialize メソッドを呼び出さなかったか、呼び出しが成功しなかった。", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed.", L"IDirectSound::Initialize not called or failed."));
-		}
-		else if (r == DSERR_UNSUPPORTED) {
-			AfxMessageBox(LL14(L"呼び出した関数はこの時点ではサポートされていない。", L"Function not supported at this point.", L"Function not supported at this point.", L"Function not supported at this point.", L"Function not supported at this point.", L"Function not supported at this point.", L"Function not supported at this point.", L"Function not supported at this point.", L"Function not supported at this point.", L"Function not supported at this point.", L"Function not supported at this point.", L"Function not supported at this point.", L"Function not supported at this point.", L"Function not supported at this point."));
-		}
-		else {}
-
-		tagfile = fnn;
-		og->m_saisai.EnableWindow(TRUE);
-		return;
-	}
-	m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+void CRender::OnBnClickedCheckUpscale()
+{
+	savedata.upscale_enable = m_upscale.GetCheck() ? 1 : 0;
+	if (og)
+		RenderRecreateSecondarySound(og);
 }
 
 
@@ -1018,8 +1023,11 @@ void CRender::OnBnClickedButton1()
 
 void CRender::OnCbnSelchangeCombo3()
 {
-	// TODO: ここにコントロール通知ハンドラー コードを追加します。
-	savedata.samples = samp[m_Hz.GetCurSel()];
+	int ihz = m_Hz.GetCurSel();
+	if (ihz >= 0 && ihz < 12)
+		savedata.samples = samp[ihz];
+	if (og)
+		RenderRecreateSecondarySound(og);
 }
 
 
@@ -1092,7 +1100,31 @@ int CRender::Create(CWnd* pWnd)
 
 void CRender::OnBnClickedCancel()
 {
-	// TODO: ここにコントロール通知ハンドラー コードを追加します。
+	savedata.soundguid = m_bakSoundGuid;
+	savedata.soundcur = m_bakSoundCur;
+	savedata.samples = m_bakSamples;
+	savedata.upscale_enable = m_bakUpscale;
+	savedata.speaker_layout = m_bakSpeaker;
+	savedata.bit24 = m_bakBit24;
+	savedata.bit32 = m_bakBit32;
+	m_24.SetCheck(savedata.bit24);
+	m_32bit.SetCheck(savedata.bit32);
+	m_upscale.SetCheck(savedata.upscale_enable ? BST_CHECKED : BST_UNCHECKED);
+	{
+		int sp = savedata.speaker_layout;
+		if (sp < 0 || sp > 5) sp = 0;
+		m_speaker.SetCurSel(sp);
+	}
+	if (m_soundlist.GetCount() > 0 && savedata.soundcur >= 0 && savedata.soundcur < m_soundlist.GetCount())
+		m_soundlist.SetCurSel(savedata.soundcur);
+	for (int l = 0; l < 12; l++) {
+		if (savedata.samples == samp[l]) {
+			m_Hz.SetCurSel(l);
+			break;
+		}
+	}
+	if (og)
+		RenderRecreateSecondarySound(og);
 	if (savedata.aero)
 
 	delete renderbase;

@@ -1,9 +1,13 @@
-﻿// oggDlg.h : ヘッダー ファイル
+// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
 #if !defined(AFX_OGGDLG_H__6E748E56_5CF6_4ADE_8B4F_7FE83E42DCFA__INCLUDED_)
 #define AFX_OGGDLG_H__6E748E56_5CF6_4ADE_8B4F_7FE83E42DCFA__INCLUDED_
+
+#ifndef WM_TIMERP_VSYNC_TICK
+#define WM_TIMERP_VSYNC_TICK (WM_APP + 70)
+#endif
 
 #if _MSC_VER > 1000
 #pragma once
@@ -298,6 +302,12 @@ public:
 	CCustomStandardButton m_fadedummy;
 	afx_msg void OnBnClickedButton59();
 	CCustomStandardButton m_eqq;
+
+	void StartTimerpVsyncThread();
+	void StopTimerpVsyncThread();
+	afx_msg LRESULT OnTimerpVsyncTick(WPARAM wParam, LPARAM lParam);
+	HANDLE m_hTimerpVsyncThread;
+	HANDLE m_hTimerpVsyncStopEvent;
 };
 
 //{{AFX_INSERT_LOCATION}}
