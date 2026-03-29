@@ -29,7 +29,7 @@ CImageBase* renderbase;
 extern int sek;
 extern void DoEvent();
 extern int fade1;
-extern int wavbit, wavch, wavsam;
+extern int wavbit_sample_Hz, wavchannel, wavsam_depth;
 extern LPDIRECTSOUND8 m_ds;
 extern LPDIRECTSOUNDBUFFER m_dsb1;
 extern LPDIRECTSOUNDBUFFER8 m_dsb;
@@ -115,12 +115,12 @@ static void RenderRecreateSecondarySound(COggDlg* og)
 			return;
 		g_ds_pcm_rate = dsTryRate;
 		{
-			int srcBits = abs(wavsam);
-			if (wavsam < 0)
+			int srcBits = abs(wavsam_depth);
+			if (wavsam_depth < 0)
 				srcBits = 16;
 			if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
 				srcBits = 16;
-			g_audioUpscaler.Configure(wavbit, wavch, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
+			g_audioUpscaler.Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
 			g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
 		}
 		g_audioUpscaler.Reset();

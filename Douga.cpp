@@ -696,7 +696,7 @@ int bit=0;
 double rate;
 int rateflg = 0;
 extern DWORD videocnt3;
-extern int wavch,wavbit;
+extern int wavchannel,wavbit_sample_Hz;
 CString s2;
 #if WIN64
 #else

@@ -50,7 +50,7 @@ extern UINT HandleNotifications(LPVOID lpvoid);
 extern UINT WASAPIHandleNotifications(LPVOID lpvoid);
 extern ULONG WAVDALen;
 extern UINT ttt;
-extern int wavch, wavbit, wavsam;
+extern int wavchannel, wavbit_sample_Hz, wavsam_depth;
 int wavbitbackup;
 #define BUFSZ			((UINT)10240*6/2)
 #define HIGHDIV			4
@@ -62,7 +62,7 @@ int wavbitbackup;
 #define OUTPUT_BUFFER_NUM   5
 extern void playwavds(BYTE* bw);
 extern void playwavds2(BYTE* bw, int len);
-extern BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2);
+extern BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2);
 extern int mode;
 extern int wav999_use_adbuf;
 extern save savedata;
@@ -259,7 +259,7 @@ extern int endf;
 extern int lenl;
 extern int fade1;
 extern BOOL sek;
-extern int wavch, wavbit;
+extern int wavchannel, wavbit_sample_Hz;
 //スレッド
 int syukai = 0, syukai2 = 0;
 extern BOOL sflg;
@@ -491,8 +491,8 @@ bool InitializeRubberBandStretcher()
 	try {
 		double pitchRatio = pitch / 100.0;
 		g_rubberBandStretcher = new RubberBand::RubberBandStretcher(
-			wavbit,
-			wavch,
+			wavbit_sample_Hz,
+			wavchannel,
 			RubberBand::RubberBandStretcher::OptionProcessRealTime |
 			RubberBand::RubberBandStretcher::OptionEngineFaster |
 			RubberBand::RubberBandStretcher::OptionTransientsCrisp |
@@ -534,20 +534,20 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t = false)
 		g_rubberBandStretcher->setPitchScale(static_cast<float>(semitones));
 
 		// 3. データ変換
-		uint16_t bps = (uint16_t)((wavsam <= 0 || wavsam > 32) ? 16 : abs(wavsam));
-		ConvertRawBytesToFloat(m_bufwav3_1, bps, wavch, inputFloatData);
+		uint16_t bps = (uint16_t)((wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth));
+		ConvertRawBytesToFloat(m_bufwav3_1, bps, wavchannel, inputFloatData);
 		if (inputFloatData.empty()) return false;
 
-		size_t samplesIn = inputFloatData.size() / wavch;
-		std::vector<std::vector<float>> channelData(wavch, std::vector<float>(samplesIn));
+		size_t samplesIn = inputFloatData.size() / wavchannel;
+		std::vector<std::vector<float>> channelData(wavchannel, std::vector<float>(samplesIn));
 		for (size_t i = 0; i < samplesIn; ++i) {
-			for (int ch = 0; ch < wavch; ++ch) {
-				channelData[ch][i] = inputFloatData[i * wavch + ch];
+			for (int ch = 0; ch < wavchannel; ++ch) {
+				channelData[ch][i] = inputFloatData[i * wavchannel + ch];
 			}
 		}
 
-		std::vector<float*> channelPointers(wavch);
-		for (int ch = 0; ch < wavch; ++ch) {
+		std::vector<float*> channelPointers(wavchannel);
+		for (int ch = 0; ch < wavchannel; ++ch) {
 			channelPointers[ch] = channelData[ch].data();
 		}
 
@@ -558,9 +558,9 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t = false)
 		m_convertedPcmFloatData.clear();
 
 		const size_t pullSize = 4096;
-		std::vector<std::vector<float>> outputChannelData(wavch, std::vector<float>(pullSize));
-		std::vector<float*> outputPointers(wavch);
-		for (int ch = 0; ch < wavch; ++ch) {
+		std::vector<std::vector<float>> outputChannelData(wavchannel, std::vector<float>(pullSize));
+		std::vector<float*> outputPointers(wavchannel);
+		for (int ch = 0; ch < wavchannel; ++ch) {
 			outputPointers[ch] = outputChannelData[ch].data();
 		}
 
@@ -570,7 +570,7 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t = false)
 			if (retrieved == 0) break;
 
 			for (size_t i = 0; i < retrieved; ++i) {
-				for (int ch = 0; ch < wavch; ++ch) {
+				for (int ch = 0; ch < wavchannel; ++ch) {
 					m_convertedPcmFloatData.push_back(outputChannelData[ch][i]);
 				}
 			}
@@ -1253,7 +1253,7 @@ static const float EQ_FREQS[EQ_BANDS] = {
 };
 
 // External references (assumed to exist in main program)
-extern int wavbit, wavch, wavsam;
+extern int wavbit_sample_Hz, wavchannel, wavsam_depth;
 
 // ===== 拡張環境パラメータ構造体（65パラメータ） =====
 typedef struct {
@@ -3782,7 +3782,7 @@ void equaliser(void* data, int len, BOOL reset) {
 	// リサンプリング: 44100Hz未満を一時的に44100Hzへ変換
 	// 内部処理は常に44100Hz以上で行い、終端でダウンサンプル
 	// ========================================
-	int  originalRate = wavbit;
+	int  originalRate = wavbit_sample_Hz;
 	int  originalLen = len;
 	void* processData = data;
 	int   processLen = len;
@@ -3792,7 +3792,7 @@ void equaliser(void* data, int len, BOOL reset) {
 	wavbitbackup = originalRate;
 
 	if (needsResampling) {
-		ResampleUp(data, len, &tempBuffer, &processLen, originalRate, 44100, wavch, wavsam);
+		ResampleUp(data, len, &tempBuffer, &processLen, originalRate, 44100, wavchannel, wavsam_depth);
 		if (!tempBuffer) return;
 		processData = tempBuffer;
 		wavbitbackup = 44100;
@@ -3962,8 +3962,8 @@ void equaliser(void* data, int len, BOOL reset) {
 	for (int i = 0; i < 8; i++)
 		refSamps[i] = (int)(env->earlyRef[i * 2] * env->roomSize * wavbitbackup / 1000.0f);
 
-	int bytesPerSample = wavsam / 8;
-	int numSamples = processLen / (bytesPerSample * wavch);
+	int bytesPerSample = wavsam_depth / 8;
+	int numSamples = processLen / (bytesPerSample * wavchannel);
 	unsigned char* pRaw = (unsigned char*)processData;
 	int stereoOffset = (wavbitbackup * 20) / 1000;  // L/R間の微小ずれ (約20ms)
 
@@ -3973,7 +3973,7 @@ void equaliser(void* data, int len, BOOL reset) {
 	// ============================================================
 	float masterGain = masterVolume / 100.0f;
 
-	BlockAnalysis ba = AnalyzeBlock(pRaw, numSamples, wavch, wavsam, bytesPerSample, masterGain);
+	BlockAnalysis ba = AnalyzeBlock(pRaw, numSamples, wavchannel, wavsam_depth, bytesPerSample, masterGain);
 
 	// ============================================================
 	// [FIX-COMP] ブロック間ゲイン平滑化
@@ -4021,19 +4021,19 @@ void equaliser(void* data, int len, BOOL reset) {
 
 	// ===== 信号処理メインループ =====
 	for (int i = 0; i < numSamples; i++) {
-		for (int ch = 0; ch < wavch; ch++) {
+		for (int ch = 0; ch < wavchannel; ch++) {
 			if (ch >= MAX_CH) continue;
 
 			// PCM → float 変換
 			float inSample = 0.0f;
-			int offset = (i * wavch + ch) * bytesPerSample;
-			if (wavsam == 16)
+			int offset = (i * wavchannel + ch) * bytesPerSample;
+			if (wavsam_depth == 16)
 				inSample = *((short*)(pRaw + offset)) / 32768.0f;
-			else if (wavsam == 24) {
+			else if (wavsam_depth == 24) {
 				int val = pRaw[offset] | (pRaw[offset + 1] << 8) | ((signed char)pRaw[offset + 2] << 16);
 				inSample = val / 8388608.0f;
 			}
-			else if (wavsam == 32)
+			else if (wavsam_depth == 32)
 				inSample = *((int*)(pRaw + offset)) / 2147483648.0f;
 			else
 				inSample = (pRaw[offset] - 128) / 128.0f;
@@ -4162,7 +4162,7 @@ void equaliser(void* data, int len, BOOL reset) {
 			mixed = ProcessBrightness(mixed, &cs->brightnessState, env->brightness);
 
 			// L/R バッファへ格納 (モノラル時は両方に同値)
-			if (wavch == 2) {
+			if (wavchannel == 2) {
 				if (ch == 0) leftSamples[bufferIndex] = mixed;
 				else         rightSamples[bufferIndex] = mixed;
 			}
@@ -4175,7 +4175,7 @@ void equaliser(void* data, int len, BOOL reset) {
 		// ===== ステレオ幅処理 =====
 		// Mid/Side 変換で stereoWidth を変更し元の L/R に戻す
 		// wallDistance/openness/ceilingHeight で環境空間の広がりを調節
-		if (wavch == 2) {
+		if (wavchannel == 2) {
 			float w = (1.0f + (env->stereoWidth - 1.0f) * extraScale)
 				* spatialWidth * env->wallDistance * (0.7f + env->openness * 0.6f);
 			w *= (env->ceilingHeight > 1.0f)
@@ -4203,7 +4203,7 @@ void equaliser(void* data, int len, BOOL reset) {
 	{
 		int bi = 0;
 		for (int i = 0; i < numSamples; i++) {
-			for (int ch = 0; ch < wavch; ch++) {
+			for (int ch = 0; ch < wavchannel; ch++) {
 				if (ch >= MAX_CH) continue;
 
 				float finalOut = (ch == 0) ? leftSamples[bi] : rightSamples[bi];
@@ -4212,31 +4212,31 @@ void equaliser(void* data, int len, BOOL reset) {
 				if (finalOut > 1.0f)  finalOut = 1.0f;
 				if (finalOut < -1.0f) finalOut = -1.0f;
 
-				int offset = (i * wavch + ch) * bytesPerSample;
-				if (wavsam == 16) {
+				int offset = (i * wavchannel + ch) * bytesPerSample;
+				if (wavsam_depth == 16) {
 					int32_t v = (int32_t)roundf(finalOut * 32768.0f);
 					if (v > 32767) v = 32767; if (v < -32768) v = -32768;
 					*((short*)(pRaw + offset)) = (short)v;
 				}
-				else if (wavsam == 24) {
+				else if (wavsam_depth == 24) {
 					int32_t v = (int32_t)roundf(finalOut * 8388608.0f);
 					if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
 					pRaw[offset] = v & 0xFF;
 					pRaw[offset + 1] = (v >> 8) & 0xFF;
 					pRaw[offset + 2] = (v >> 16) & 0xFF;
 				}
-				else if (wavsam == 32)
+				else if (wavsam_depth == 32)
 					*((int*)(pRaw + offset)) = (int)(finalOut * 2147483647.0f);
 				else
 					pRaw[offset] = (unsigned char)(finalOut * 127.0f + 128.0f);
 			}
-			if (wavch == 2) bi++;
+			if (wavchannel == 2) bi++;
 		}
 	}
 
 	// リサンプリングしていた場合は元のサンプルレートに戻して tempBuffer を解放
 	if (needsResampling) {
-		ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavch, wavsam);
+		ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavchannel, wavsam_depth);
 		free(tempBuffer);
 	}
 }

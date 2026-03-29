@@ -66,8 +66,8 @@ int flacmode = 0;
 #include "Kpilist.h"
 #include "CInt24.h"
 #include "ZeroFol.h"
-int wavbit;
-int wavsam = 16;
+int wavbit_sample_Hz;
+int wavsam_depth = 16;
 int wavsam_src = 16; // original decoder bit depth (can be -32/-64)
 int g_kpiSourceBitsPerSample = 16;
 #include "Id3tagv1.h"
@@ -131,7 +131,7 @@ int readadpcmarc(CFile& adpcmf, char* bw, int len);
 int seekadpcm(int pos);
 static BOOL decode_msadpcm_wav(CFile& f, const wavinfo& wi, char** outBuf, int* outSize);
 BOOL wavwait, thend;
-int wavch = 2;
+int wavchannel = 2;
 int muon;
 IMPLEMENT_DYNCREATE(CWread, CWinThread)
 CWread::CWread() {}
@@ -394,7 +394,7 @@ int readmp3(BYTE* bw, int cnt);
 int playwavwav(BYTE* bw, int old, int l1, int l2);
 int readwav(BYTE* bw, int cnt);
 void playwavds2(BYTE* bw, int old, int l1, int l2);
-BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2);
+BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2);
 int g_warmupOutputBytes = 0;
 int  g_warmupRBOutputBytes = 0;
 bool g_inWarmup = false;
@@ -715,13 +715,13 @@ std::vector<uint8_t> g_srcScratchUpscale;
 static int PcmOutBytesPerFrame()
 {
 	int bits;
-	if (wavsam <= 0 || wavsam > 32)
+	if (wavsam_depth <= 0 || wavsam_depth > 32)
 		bits = 16;
 	else
-		bits = abs(wavsam);
+		bits = abs(wavsam_depth);
 	if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32))
 		bits = 16;
-	int ch = wavch;
+	int ch = wavchannel;
 	if (ch <= 0)
 		ch = 2;
 	const int bpf = ch * (bits / 8);
@@ -738,10 +738,10 @@ static void ApplyFadeCubedToInterleavedPcm(void* data, int byteLen)
 	if (byteLen <= 0) return;
 
 	int bits;
-	if (wavsam <= 0 || wavsam > 32)
+	if (wavsam_depth <= 0 || wavsam_depth > 32)
 		bits = 16;
 	else
-		bits = abs(wavsam);
+		bits = abs(wavsam_depth);
 	if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32))
 		bits = 16;
 
@@ -796,7 +796,7 @@ static void ApplyFadeCubedToInterleavedPcm(void* data, int byteLen)
 static void DecodeSourceIntoScratch(uint8_t* scratch, int sb)
 {
 	if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
-		playwavadpcm(scratch, 0, sb, 0);
+		playwavBuffwav(scratch, 0, sb, 0);
 	else if (mode == -10)
 		playwavmp3(scratch, 0, sb, 0);
 	else if (mode == 999)
@@ -815,20 +815,20 @@ static void DecodeSourceIntoScratch(uint8_t* scratch, int sb)
 
 void ConfigurePlaybackOutputAndUpscaler()
 {
-	int srcBits = abs(wavsam);
+	int srcBits = abs(wavsam_depth);
 	// フロート系 FLAC は Render 後に int16 に落とすため、Upscaler 入力は 16bit 幅
-	if (wavsam < 0)
+	if (wavsam_depth < 0)
 		srcBits = 16;
 	if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
 		srcBits = 16;
 	if (!savedata.upscale_enable) {
-		g_ds_pcm_ch = wavch;
-		g_ds_pcm_rate = wavbit;
+		g_ds_pcm_ch = wavchannel;
+		g_ds_pcm_rate = wavbit_sample_Hz;
 		g_ds_pcm_bits = srcBits;
 	}
 	else {
 		if (savedata.speaker_layout == 5) {
-			int ch = wavch;
+			int ch = wavchannel;
 			if (ch < 1) ch = 2;
 			if (ch > 8) ch = 8;
 			g_ds_pcm_ch = ch;
@@ -841,7 +841,7 @@ void ConfigurePlaybackOutputAndUpscaler()
 			g_ds_pcm_rate = 44100;
 		g_ds_pcm_bits = savedata.bit32 ? 32 : (savedata.bit24 ? 24 : 16);
 	}
-	g_audioUpscaler.Configure(wavbit, wavch, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
+	g_audioUpscaler.Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
 	g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
 }
 
@@ -849,7 +849,7 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 {
 	if (!g_pcm_upscale_active || len1 + len2 <= 0) {
 		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
-			playwavadpcm(bufwav3, oldw, len1, len2);
+			playwavBuffwav(bufwav3, oldw, len1, len2);
 		else if (mode == -10)
 			playwavmp3(bufwav3, oldw, len1, len2);
 		else if (mode == 999)
@@ -1769,7 +1769,7 @@ BOOL COggDlg::OnInitDialog()
 	plw = 0;
 	pi.dwProcessId = -1;
 	randomf = 0; hsc = 0; spc = 0;
-	wavbit = 44100; wavbit2 = 44100; wavch = 2;
+	wavbit_sample_Hz = 44100; wavbit2 = 44100; wavchannel = 2;
 	g_ds_pcm_ch = 2; g_ds_pcm_rate = 44100; g_ds_pcm_bits = 16;
 	fade1 = 0;
 	thend1 = TRUE;
@@ -3229,13 +3229,13 @@ long LoadOggVorbis(const TCHAR* file_name, int word, char** ogg, CSliderCtrl& m_
 	//	wh.WaveFmt.cbSize          = sizeof(WAVEFORMATEX);
 	wh.WaveFmt.wf.wFormatTag = WAVE_FORMAT_PCM;
 	wh.WaveFmt.wf.nChannels = vi->channels;
-	wavch = vi->channels;
-	wavbit = vi->rate;
+	wavchannel = vi->channels;
+	wavbit_sample_Hz = vi->rate;
 	wh.WaveFmt.wf.nSamplesPerSec = vi->rate;
 	wh.WaveFmt.wf.nAvgBytesPerSec = vi->rate * vi->channels * word;
 	wh.WaveFmt.wf.nBlockAlign = vi->channels * word;
 	wh.WaveFmt.wBitsPerSample = word * 8;
-	wavsam = word * 8; // mcopy のループ境界・バイト計算で前曲の wavsam が残らないようにする
+	wavsam_depth = word * 8; // mcopy のループ境界・バイト計算で前曲の wavsam が残らないようにする
 
 	memcpy(wh.ckidData, "data", 4);
 	wh.ckSizeData = size;
@@ -3258,17 +3258,17 @@ void wav_start();
 static void NormalizePlaybackWaveFormat()
 {
 	// Guard invalid values from some decoders/plugins.
-	if (wavch <= 0 || wavch > 8) wavch = 2;
-	if (wavbit < 8000 || wavbit > 384000) wavbit = 44100;
-	if (wavsam == 0) wavsam = 16;
-	if (wavsam < 0) {
+	if (wavchannel <= 0 || wavchannel > 8) wavchannel = 2;
+	if (wavbit_sample_Hz < 8000 || wavbit_sample_Hz > 384000) wavbit_sample_Hz = 44100;
+	if (wavsam_depth == 0) wavsam_depth = 16;
+	if (wavsam_depth < 0) {
 		// This player path does not support float PCM playback.
 		// Force to integer PCM to keep the output pipeline consistent.
-		wavsam = 16;
+		wavsam_depth = 16;
 	}
 	else {
-		if (!(wavsam == 8 || wavsam == 16 || wavsam == 24 || wavsam == 32)) {
-			wavsam = 16;
+		if (!(wavsam_depth == 8 || wavsam_depth == 16 || wavsam_depth == 24 || wavsam_depth == 32)) {
+			wavsam_depth = 16;
 		}
 	}
 }
@@ -3288,9 +3288,9 @@ void wav_start()
 
 	//	wh.WaveFmt.cbSize          = sizeof(WAVEFORMATEX);
 	wh.WaveFmt.wf.wFormatTag = WAVE_FORMAT_PCM;
-	wh.WaveFmt.wf.nChannels = wavch;
-	wh.WaveFmt.wf.nSamplesPerSec = wavbit;
-	wh.WaveFmt.wBitsPerSample = wavsam;
+	wh.WaveFmt.wf.nChannels = wavchannel;
+	wh.WaveFmt.wf.nSamplesPerSec = wavbit_sample_Hz;
+	wh.WaveFmt.wBitsPerSample = wavsam_depth;
 	wh.WaveFmt.wf.nBlockAlign = wh.WaveFmt.wf.nChannels * wh.WaveFmt.wBitsPerSample / 8;
 	wh.WaveFmt.wf.nAvgBytesPerSec = wh.WaveFmt.wf.nSamplesPerSec * wh.WaveFmt.wf.nBlockAlign;
 	wh.ckSizeFmt = 16;
@@ -3391,28 +3391,28 @@ void COggDlg::dsdload(CString& filen, CString& tagfile, CString& tagname, CStrin
 		else {
 		}
 	}
-	wavbit = sikpi.dwSamplesPerSec;
-	wavch = sikpi.dwChannels;
-	wavsam = sikpi.dwBitsPerSample;
+	wavbit_sample_Hz = sikpi.dwSamplesPerSec;
+	wavchannel = sikpi.dwChannels;
+	wavsam_depth = sikpi.dwBitsPerSample;
 	NormalizePlaybackWaveFormat();
 	loop1 = 0;
-	if (sikpi.dwLength == (DWORD)-1 || wavbit <= 0)
+	if (sikpi.dwLength == (DWORD)-1 || wavbit_sample_Hz <= 0)
 		loop2 = 0;
 	else
-		loop2 = (int)((double)(DWORD)sikpi.dwLength * (double)wavbit / 1000.0 + 0.5);
+		loop2 = (int)((double)(DWORD)sikpi.dwLength * (double)wavbit_sample_Hz / 1000.0 + 0.5);
 	{
-		const int bps = (wavsam >= 8) ? (wavsam / 8) : 2;
-		const __int64 bytesTotal = (__int64)loop2 * (__int64)wavch * (__int64)bps;
+		const int bps = (wavsam_depth >= 8) ? (wavsam_depth / 8) : 2;
+		const __int64 bytesTotal = (__int64)loop2 * (__int64)wavchannel * (__int64)bps;
 		if (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff)
 			data_size = oggsize = (int)bytesTotal;
 		else
-			data_size = oggsize = (loop2 > 0 && wavch > 0) ? (loop2 * wavch * (bps > 0 ? bps : 2)) : 0;
+			data_size = oggsize = (loop2 > 0 && wavchannel > 0) ? (loop2 * wavchannel * (bps > 0 ? bps : 2)) : 0;
 	}
 	CString s; s.Format(L"%d", oggsize);
 	//AfxMessageBox(s);
-	si1.dwSamplesPerSec = wavbit;
-	si1.dwChannels = wavch;
-	si1.dwBitsPerSample = wavsam;
+	si1.dwSamplesPerSec = wavbit_sample_Hz;
+	si1.dwChannels = wavchannel;
+	si1.dwBitsPerSample = wavsam_depth;
 	m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 	dsd_.kpiSetPosition(kmp, 0);
 	kbps = 0;
@@ -6042,7 +6042,7 @@ void COggDlg::play()
 	playf = 1;
 	loopcnt = 0;
 	CString fl;
-	wavbit = 44100;
+	wavbit_sample_Hz = 44100;
 	loop3 = 0; fade1 = 0;
 	playy = 0;
 	cnt3 = 0;
@@ -6136,27 +6136,27 @@ void COggDlg::play()
 		ret = _tchdir(savedata.ys12);
 		if (_chdir("wave\\wave_44") == -1) {
 			if (_chdir("wave\\wave_22") == -1) { ret = -1; break; }
-			wavbit = 22050;
+			wavbit_sample_Hz = 22050;
 		}
-		else wavbit = 44100;
+		else wavbit_sample_Hz = 44100;
 		{ CFile f; if (f.Open(filen, CFile::modeRead | CFile::shareDenyWrite, NULL) != TRUE) ret = -1; else f.Close(); }
 		break;
 	case 12:
 		ret = _tchdir(savedata.ys122);
 		if (_chdir("wave\\wave_44") == -1) {
 			if (_chdir("wave\\wave_22") == -1) { ret = -1; break; }
-			wavbit = 22050;
+			wavbit_sample_Hz = 22050;
 		}
-		else wavbit = 44100;
+		else wavbit_sample_Hz = 44100;
 		{ CFile f; if (f.Open(filen, CFile::modeRead | CFile::shareDenyWrite, NULL) != TRUE) ret = -1; else f.Close(); }
 		break;
 	case 13:
 		ret = _tchdir(savedata.sor);
 		if (_chdir("WAVE\\WAVE44") == -1) {
 			if (_chdir("WAVE\\WAVE22") == -1) { ret = -1; break; }
-			wavbit = 22050;
+			wavbit_sample_Hz = 22050;
 		}
-		else wavbit = 44100;
+		else wavbit_sample_Hz = 44100;
 		{ CFile f; if (f.Open(filen, CFile::modeRead | CFile::shareDenyWrite, NULL) != TRUE) ret = -1; else f.Close(); }
 		break;
 	case 14:
@@ -6173,7 +6173,7 @@ void COggDlg::play()
 		break;
 	case 17:
 		ret = _tchdir(savedata.br4);
-		wavbit = 22050;
+		wavbit_sample_Hz = 22050;
 		ret += _chdir("wave");
 		break;
 	case 18:
@@ -6607,13 +6607,13 @@ void COggDlg::play()
 	//	if(f.Open(filen,CFile::modeRead | CFile::shareDenyWrite,NULL)!=TRUE)
 	//		return;
 	//	f.Close();
-	wavch = 2;
-	wavsam = 16;
+	wavchannel = 2;
+	wavsam_depth = 16;
 	ZeroMemory(bufwav3, sizeof(bufwav3));
 	if (((mode >= 10 && mode <= 21) || mode <= -10) && mode != -10 || mode == -6 || mode == 30) {
 		thend1 = FALSE;
 		wavwait = 0;
-		if (mode == 30) wavbit = 48000;
+		if (mode == 30) wavbit_sample_Hz = 48000;
 		thend = 0;
 		wav_start();
 		//		m_thread1 = ::AfxBeginThread((AFX_THREADPROC)wavread, (LPVOID)NULL,THREAD_PRIORITY_ABOVE_NORMAL,0,0,0);
@@ -7122,9 +7122,9 @@ void COggDlg::play()
 		for (; wavwait == 0;) { CWaitCursor rrr2; DoEvent(); }
 		if (adbuf2 == NULL) { endflg = 0; return; }
 		//		if(mode!=-10)
-		//			playwavadpcm(bufwav3,0,dwDataLen*4,0);
+		//			playwavBuffwav(bufwav3,0,dwDataLen*4,0);
 		//		else
-		//			playwavadpcm(bufdmy,0,dwDataLen*4,0);
+		//			playwavBuffwav(bufdmy,0,dwDataLen*4,0);
 	}
 	else if (mode == -10) { //mp123
 		CString s, ss;
@@ -7188,22 +7188,22 @@ void COggDlg::play()
 		CMp3Info mp3__;
 		mp3__.Load(ss);
 
-		wavch = si1.dwChannels;
-		wavbit = si1.dwSamplesPerSec;
-		wavsam = si1.dwBitsPerSample;
+		wavchannel = si1.dwChannels;
+		wavbit_sample_Hz = si1.dwSamplesPerSec;
+		wavsam_depth = si1.dwBitsPerSample;
 		loop1 = 0; stitle = "";
-		//		loop2=(int)(((float)(((float)si1.dwLength)*44.1f))/(44100.0f/((float)((wavch==2)?wavbit:(wavbit/2)))));
-		//		loop2=(int)((float)(mp3_.m_mp3info.total_samples)/(wavch==2?1.0f:2.0f));
-		loop2 = (int)(((double)mp3__.GetMSec()) / 1000.0 * (double)mp3_.m_mp3info.freq);//*(44100.0/((double)((wavch==2)?(double)wavbit:((double)wavbit/2.0)))));
+		//		loop2=(int)(((float)(((float)si1.dwLength)*44.1f))/(44100.0f/((float)((wavchannel==2)?wavbit_sample_Hz:(wavbit_sample_Hz/2)))));
+		//		loop2=(int)((float)(mp3_.m_mp3info.total_samples)/(wavchannel==2?1.0f:2.0f));
+		loop2 = (int)(((double)mp3__.GetMSec()) / 1000.0 * (double)mp3_.m_mp3info.freq);//*(44100.0/((double)((wavchannel==2)?(double)wavbit_sample_Hz:((double)wavbit_sample_Hz/2.0)))));
 		//		if(loop2==0){
 		if (mp3_.m_mp3info.hasVbrtag) {
 			//			loop2 *= 2.29;
 		}
-		//			loop2=(int)(((float)(((float)si1.dwLength)*44.1f))/(44100.0f/((float)((wavch==2)?wavbit:(wavbit/2)))));
+		//			loop2=(int)(((float)(((float)si1.dwLength)*44.1f))/(44100.0f/((float)((wavchannel==2)?wavbit_sample_Hz:(wavbit_sample_Hz/2)))));
 		//		}
 		data_size = oggsize = loop2;
 		loop3 = loop2; loop2 = 0;
-		m_time.SetRange(0, (int)(((data_size / 2.0) * (wavsam / 8.0)) / (100)), TRUE);
+		m_time.SetRange(0, (int)(((data_size / 2.0) * (wavsam_depth / 8.0)) / (100)), TRUE);
 		lenl = 0;
 		if (mp3_.m_mp3info.hasVbrtag == 0)
 			kbps = mp3_.m_mp3info.bitrate / 1000;
@@ -7251,12 +7251,12 @@ void COggDlg::play()
 			if (adbuf2) free(adbuf2);
 			adbuf2 = decBuf;
 			data_size = oggsize = decSize;
-			wavch = wi.nChannels;
-			wavbit = wi.nSamplesPerSec;
-			wavsam = 16;
+			wavchannel = wi.nChannels;
+			wavbit_sample_Hz = wi.nSamplesPerSec;
+			wavsam_depth = 16;
 			loop1 = 0;
 			{
-				int chAd = wavch;
+				int chAd = wavchannel;
 				if (chAd <= 0) chAd = 1;
 				const int pcmBpfDec = chAd * 2;
 				loop2 = (pcmBpfDec > 0) ? (data_size / pcmBpfDec) : 0;
@@ -7283,13 +7283,13 @@ void COggDlg::play()
 			m_saisai.EnableWindow(TRUE); endflg = 0; return;
 		}
 		else {
-			wavch = wi.nChannels;
-			wavbit = wi.nSamplesPerSec;
+			wavchannel = wi.nChannels;
+			wavbit_sample_Hz = wi.nSamplesPerSec;
 			// ファイルの実際のビット深度を優先（wavsam > bit24）。解釈は実データに合わせる
-			wavsam = (wi.wBitsPerSample <= 16) ? 16 : 24;
+			wavsam_depth = (wi.wBitsPerSample <= 16) ? 16 : 24;
 			loop1 = 0;
 			loop2 = (int)wi.totalSamples;
-			data_size = oggsize = (int)(loop2 * (wavsam / 8) * wavch);
+			data_size = oggsize = (int)(loop2 * (wavsam_depth / 8) * wavchannel);
 			m_time.SetRange(0, (int)loop2, TRUE);
 			if (pl && plw && plcnt >= 0 && plcnt < pl->playcnt) {
 				tagfile = pl->pc[plcnt].name;
@@ -7314,7 +7314,7 @@ void COggDlg::play()
 		ss = "";
 		ZeroMemory(&sikpi, sizeof(sikpi));
 		sikpi.dwSamplesPerSec = savedata.samples; sikpi.dwChannels = 8; sikpi.dwSeekable = 1; sikpi.dwLength = -1; sikpi.dwBitsPerSample = ((savedata.bit24 == 1) ? 24 : 16);
-		if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit;
+		if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit_sample_Hz;
 
 
 		if (1) {
@@ -7335,28 +7335,28 @@ void COggDlg::play()
 			else {
 			}
 		}
-		wavbit = sikpi.dwSamplesPerSec;
-		wavch = sikpi.dwChannels;
-		wavsam = sikpi.dwBitsPerSample;
+		wavbit_sample_Hz = sikpi.dwSamplesPerSec;
+		wavchannel = sikpi.dwChannels;
+		wavsam_depth = sikpi.dwBitsPerSample;
 		NormalizePlaybackWaveFormat();
 		loop1 = 0;
-		if (sikpi.dwLength == (DWORD)-1 || wavbit <= 0)
+		if (sikpi.dwLength == (DWORD)-1 || wavbit_sample_Hz <= 0)
 			loop2 = 0;
 		else
-			loop2 = (int)((double)(DWORD)sikpi.dwLength * (double)wavbit / 1000.0 + 0.5);
+			loop2 = (int)((double)(DWORD)sikpi.dwLength * (double)wavbit_sample_Hz / 1000.0 + 0.5);
 		{
-			const int bps = (wavsam >= 8) ? (wavsam / 8) : 2;
-			const __int64 bytesTotal = (__int64)loop2 * (__int64)wavch * (__int64)bps;
+			const int bps = (wavsam_depth >= 8) ? (wavsam_depth / 8) : 2;
+			const __int64 bytesTotal = (__int64)loop2 * (__int64)wavchannel * (__int64)bps;
 			if (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff)
 				data_size = oggsize = (int)bytesTotal;
 			else
-				data_size = oggsize = (loop2 > 0 && wavch > 0) ? (loop2 * wavch * (bps > 0 ? bps : 2)) : 0;
+				data_size = oggsize = (loop2 > 0 && wavchannel > 0) ? (loop2 * wavchannel * (bps > 0 ? bps : 2)) : 0;
 		}
 		CString s; s.Format(L"%d", oggsize);
 		//AfxMessageBox(s);
-		si1.dwSamplesPerSec = wavbit;
-		si1.dwChannels = wavch;
-		si1.dwBitsPerSample = wavsam;
+		si1.dwSamplesPerSec = wavbit_sample_Hz;
+		si1.dwChannels = wavchannel;
+		si1.dwBitsPerSample = wavsam_depth;
 		m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 		flac_.SetPosition(kmp, 0);
 		kbps = 0;
@@ -7575,7 +7575,7 @@ void COggDlg::play()
 		ZeroMemory(&sikpi, sizeof(sikpi));
 		sikpi.dwSamplesPerSec = savedata.samples; sikpi.dwChannels = 2; sikpi.dwSeekable = 1; sikpi.dwLength = -1; sikpi.dwBitsPerSample = ((savedata.bit24 == 1) ? 24 : 16);
 		if (savedata.bit32 == 1)sikpi.dwBitsPerSample = 16;
-		if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit;
+		if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit_sample_Hz;
 
 		if (1) {
 			if (ss == "") {
@@ -7591,16 +7591,16 @@ void COggDlg::play()
 			else {
 			}
 		}
-		wavsam = sikpi.dwBitsPerSample;
-		wavbit = sikpi.dwSamplesPerSec;	wavch = sikpi.dwChannels;	loop1 = 0; oggsize = loop2 = (int)((float)sikpi.dwLength / (wavsam / 4) /*/ (float)1000.0f* (float)sikpi.dwSamplesPerSec*/);
-		CString s_; s_.Format(L"%d", wavbit);
+		wavsam_depth = sikpi.dwBitsPerSample;
+		wavbit_sample_Hz = sikpi.dwSamplesPerSec;	wavchannel = sikpi.dwChannels;	loop1 = 0; oggsize = loop2 = (int)((float)sikpi.dwLength / (wavsam_depth / 4) /*/ (float)1000.0f* (float)sikpi.dwSamplesPerSec*/);
+		CString s_; s_.Format(L"%d", wavbit_sample_Hz);
 		si1.dwSamplesPerSec = sikpi.dwSamplesPerSec;
-		si1.dwChannels = wavch;
-		si1.dwBitsPerSample = wavsam;
+		si1.dwChannels = wavchannel;
+		si1.dwBitsPerSample = wavsam_depth;
 		Vbr = 1;
 		if (sikpi.dwLength == (DWORD)-1) loop2 = 0;
-		data_size = oggsize = loop2 * (wavsam / 4);
-		m_time.SetRange(0, (data_size) / (wavsam / 4), TRUE);
+		data_size = oggsize = loop2 * (wavsam_depth / 4);
+		m_time.SetRange(0, (data_size) / (wavsam_depth / 4), TRUE);
 		m4a_.SetPosition(kmp, 0);
 		kbps = 0;
 		CFile ff;
@@ -7777,18 +7777,18 @@ void COggDlg::play()
 
 			g_kpiRemote = true;
 			ResetKpiRemoteCache();
-			wavbit = g_kpiSession.mediaInfo.dwSampleRate;
-			wavch = g_kpiSession.mediaInfo.dwChannels;
+			wavbit_sample_Hz = g_kpiSession.mediaInfo.dwSampleRate;
+			wavchannel = g_kpiSession.mediaInfo.dwChannels;
 			wavsam_src = g_kpiSession.mediaInfo.nBitsPerSample;
 			g_kpiSourceBitsPerSample = wavsam_src;
 			// DS生成/再生系は整数PCM前提。元フォーマットは wavsam_src 側で保持する。
-			wavsam = (wavsam_src < 0) ? 16 : wavsam_src;
+			wavsam_depth = (wavsam_src < 0) ? 16 : wavsam_src;
 			NormalizePlaybackWaveFormat();
 			loop1 = 0;
 			loop2 = (int)kpi_100nsToSample(g_kpiSession.mediaInfo.qwLength, g_kpiSession.mediaInfo.dwSampleRate);
 			if (g_kpiSession.mediaInfo.qwLength == (UINT64)-1) loop2 = 0;
-			data_size = oggsize = loop2 * (wavsam / 4);
-			m_time.SetRange(0, (data_size) / (wavsam / 4), TRUE);
+			data_size = oggsize = loop2 * (wavsam_depth / 4);
+			m_time.SetRange(0, (data_size) / (wavsam_depth / 4), TRUE);
 			uint64_t np = 0;
 			g_kpiHost.Seek(g_kpiSession.sessionId, 0, 0, np);
 			wav_start();
@@ -7860,7 +7860,7 @@ void COggDlg::play()
 				sikpi.dwSamplesPerSec = savedata.samples; sikpi.dwChannels = 8; sikpi.dwSeekable = 1; sikpi.dwLength = -1; sikpi.dwBitsPerSample = 16;
 				if (savedata.bit24 == 1)sikpi.dwBitsPerSample = 24;
 				if (savedata.bit32 == 1)sikpi.dwBitsPerSample = 32;
-				if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit;
+				if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit_sample_Hz;
 				if (mod) {
 					if (ss == L"") {
 						if (mod->Init) mod->Init();
@@ -7888,8 +7888,8 @@ void COggDlg::play()
 						if (mod->SetPosition) mod->SetPosition(kmp1, _tstoi(filen.Right(4)) * 1000);
 					}
 				}
-				wavbit = sikpi.dwSamplesPerSec;	wavch = sikpi.dwChannels;	loop1 = 0; loop2 = (int)((double)sikpi.dwLength * (double)sikpi.dwSamplesPerSec / 1000.0);
-				wavsam = sikpi.dwBitsPerSample;
+				wavbit_sample_Hz = sikpi.dwSamplesPerSec;	wavchannel = sikpi.dwChannels;	loop1 = 0; loop2 = (int)((double)sikpi.dwLength * (double)sikpi.dwSamplesPerSec / 1000.0);
+				wavsam_depth = sikpi.dwBitsPerSample;
 			}
 			else if (kvver == 5) {
 				IUnknown* pMyObject = new CMyHost((const wchar_t*)kpi);
@@ -7903,7 +7903,7 @@ void COggDlg::play()
 					me5.nBitsPerSample = 16;
 					if (savedata.bit24 == 1)sikpi.dwBitsPerSample = 24;
 					if (savedata.bit32 == 1)sikpi.dwBitsPerSample = 32;
-					if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit;
+					if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit_sample_Hz;
 					IKpiFile* ik;
 					IKpiFolder* ik2 = new CMyDummyFolder();
 					CMyHostFile* pHostFile = new CMyHostFile();
@@ -7978,18 +7978,18 @@ void COggDlg::play()
 						ik->Release();
 					}
 					if (pMediaInfo == NULL) return;
-					wavbit = pMediaInfo->dwSampleRate;	wavch = pMediaInfo->dwChannels;	loop1 = 0; loop2 = kpi_100nsToSample(pMediaInfo->qwLength, pMediaInfo->dwSampleRate);;
+					wavbit_sample_Hz = pMediaInfo->dwSampleRate;	wavchannel = pMediaInfo->dwChannels;	loop1 = 0; loop2 = kpi_100nsToSample(pMediaInfo->qwLength, pMediaInfo->dwSampleRate);;
 					wavsam_src = pMediaInfo->nBitsPerSample;
 					g_kpiSourceBitsPerSample = wavsam_src;
 					// DS生成/再生系は整数PCM前提。元フォーマットは wavsam_src 側で保持する。
-					wavsam = (wavsam_src < 0) ? 16 : wavsam_src;
+					wavsam_depth = (wavsam_src < 0) ? 16 : wavsam_src;
 					NormalizePlaybackWaveFormat();
 				}
 			}
 
 			if (sikpi.dwLength == (DWORD)-1) loop2 = 0;
-			data_size = oggsize = loop2 * (wavsam / 4);
-			m_time.SetRange(0, (data_size) / (wavsam / 4), TRUE);
+			data_size = oggsize = loop2 * (wavsam_depth / 4);
+			m_time.SetRange(0, (data_size) / (wavsam_depth / 4), TRUE);
 			if (kvver == 2 && mod->SetPosition) mod->SetPosition(kmp1, 0);
 			if (kvver == 5) kpidec->Seek(0, 0);
 			wav_start();
@@ -8136,11 +8136,11 @@ void COggDlg::play()
 		if (savedata.lrc_net && (filen.Right(4).MakeLower() == L".mp3" || filen.Right(4).MakeLower() == L".mp2" || filen.Right(4).MakeLower() == L".mp1" || filen.Right(4).MakeLower() == L".rmp"
 			|| filen.Right(4).MakeLower() == L".m4a" || filen.Right(4).MakeLower() == L".aac" || filen.Right(5).MakeLower() == L".flac" || filen.Right(4).MakeLower() == L".tta" || filen.Right(4).MakeLower() == L".ape"
 			|| filen.Right(4).MakeLower() == L".dsf" || filen.Right(4).MakeLower() == L".dff" || filen.Right(4).MakeLower() == L".wav" || filen.Right(4).MakeLower() == L".ogg" || filen.Right(5).MakeLower() == L".opus")) {
-			double wavv[] = { 0,1.0,2.0,3.0 / 0.75,4.0 / 0.75,5.0 / 0.75,6.0 / 0.75 };//(double)(wavbit2/wavv[wavch])
-			double wavv2[] = { 0,2.0,1.0,2.0 / 3.0,2.0 / 4.0,2.0 / 5.0,2.0 / 6.0 };//(double)(wavbit2/wavv[wavch])
-			double t3 = (double)oggsize / (double)(wavbit * 2.0 * wavv[wavch]) / (double)(wavsam / 16.0f);
-			if (mode == -10) t3 *= (wavsam / 16.0f) * 4.0;
-			if ((mode == -9) && wavch > 2) t3 *= wavch / 2.0;
+			double wavv[] = { 0,1.0,2.0,3.0 / 0.75,4.0 / 0.75,5.0 / 0.75,6.0 / 0.75 };//(double)(wavbit2/wavv[wavchannel])
+			double wavv2[] = { 0,2.0,1.0,2.0 / 3.0,2.0 / 4.0,2.0 / 5.0,2.0 / 6.0 };//(double)(wavbit2/wavv[wavchannel])
+			double t3 = (double)oggsize / (double)(wavbit_sample_Hz * 2.0 * wavv[wavchannel]) / (double)(wavsam_depth / 16.0f);
+			if (mode == -10) t3 *= (wavsam_depth / 16.0f) * 4.0;
+			if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
 			t3 *= 1000.0; int tt = (int)t3;
 			CLyricsProgressWnd* pProgressWnd = new CLyricsProgressWnd();
 			pProgressWnd->Create(AfxGetMainWnd()); // 親ウィンドウを指定
@@ -8215,7 +8215,7 @@ void COggDlg::play()
 		}
 
 	if (mode == 21 || mode == 30) {
-		wavbit = 48000;
+		wavbit_sample_Hz = 48000;
 	}
 	if (mode == -1) {
 		// 零の軌跡用
@@ -8686,7 +8686,7 @@ void COggDlg::play()
 		if (ogg)	cc.Write(ogg, whsize);
 		if (wav) cc.Write(wav, whsize);
 	}
-	if (mode == 30) { wavbit = 48000; wavsam = 16; wavch = 2; }
+	if (mode == 30) { wavbit_sample_Hz = 48000; wavsam_depth = 16; wavchannel = 2; }
 	NormalizePlaybackWaveFormat();
 
 	ConfigurePlaybackOutputAndUpscaler();
@@ -8716,8 +8716,8 @@ void COggDlg::play()
 	wfx.dwChannelMask = targetSpeakers;
 	wfx.SubFormat = GUID_SUBTYPE_PCM;
 
-	wavsam = abs(wavsam);
-	wavbit2 = wavbit;
+	wavsam_depth = abs(wavsam_depth);
+	wavbit2 = wavbit_sample_Hz;
 	int i, iii = 0;
 	double ik = 32.0;
 	double d2 = 0;
@@ -8725,21 +8725,21 @@ void COggDlg::play()
 	d2 = 0;
 
 	for (i = 0; i <= 88; i++, iii++) { // 低音域用
-		logtbl[i] = (int)(il * pow(2.0, (double)(iii) / ik));// / ((wavbit / 44100.0)*16.0);// *(double)BUFSZH1 / (double)192000 / 4.0 + 1.0);
-		//		double tl = wavbit / 44100.0;
-//		logtbl[i] = (int)((double)syuha[i]) / ((((87/tl) - (i/tl)) / (11.0) + 1.0)) / (tl);//(44100.0/ (double)wavbit) * ((double)wavsam / 8.0) *
+		logtbl[i] = (int)(il * pow(2.0, (double)(iii) / ik));// / ((wavbit_sample_Hz / 44100.0)*16.0);// *(double)BUFSZH1 / (double)192000 / 4.0 + 1.0);
+		//		double tl = wavbit_sample_Hz / 44100.0;
+//		logtbl[i] = (int)((double)syuha[i]) / ((((87/tl) - (i/tl)) / (11.0) + 1.0)) / (tl);//(44100.0/ (double)wavbit_sample_Hz) * ((double)wavsam_depth / 8.0) *
 
 		if (i < 20) {
-			if (wavbit > 90000)
-				ik -= (0.15 + d2);// -(((double)wavbit / 44100.0) / 50.0 - 0.02));
+			if (wavbit_sample_Hz > 90000)
+				ik -= (0.15 + d2);// -(((double)wavbit_sample_Hz / 44100.0) / 50.0 - 0.02));
 			else
-				ik -= (0.20 + d2);// -(((double)wavbit / 44100.0) / 50.0 - 0.02));
+				ik -= (0.20 + d2);// -(((double)wavbit_sample_Hz / 44100.0) / 50.0 - 0.02));
 		}
 		else {
-			if (wavbit > 90000)
-				ik -= (0.14 + d2);// -(((double)wavbit / 44100.0) / 50.0 - 0.02));
+			if (wavbit_sample_Hz > 90000)
+				ik -= (0.14 + d2);// -(((double)wavbit_sample_Hz / 44100.0) / 50.0 - 0.02));
 			else
-				ik -= (0.18 + d2);// -(((double)wavbit / 44100.0) / 50.0 - 0.02));
+				ik -= (0.18 + d2);// -(((double)wavbit_sample_Hz / 44100.0) / 50.0 - 0.02));
 		}
 
 		if (i != 0) {
@@ -9075,10 +9075,10 @@ void COggDlg::play()
 		if (m_dsb) {
 			g_ds_pcm_rate = dsTryRate;
 			{
-				int srcBits = abs(wavsam);
+				int srcBits = abs(wavsam_depth);
 				if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
 					srcBits = 16;
-				g_audioUpscaler.Configure(wavbit, wavch, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
+				g_audioUpscaler.Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
 				g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
 			}
 			g_audioUpscaler.Reset();
@@ -9122,7 +9122,7 @@ void COggDlg::play()
 	}
 	//}
 	//else {
-	//		if (wavch > 2)
+	//		if (wavchannel > 2)
 	//		WASAPIChange((LPWAVEFORMATEX)&wfx);
 	//		else
 	//			WASAPIChange(&wfx1);
@@ -9221,10 +9221,10 @@ void COggDlg::play()
 					if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 						f123.Read(&playb, sizeof(__int64));
 						if (savedata.mp3orig) {
-							mp3_.seek2(playb / (wavch == 2 ? 4 : 1), wavch);
+							mp3_.seek2(playb / (wavchannel == 2 ? 4 : 1), wavchannel);
 						}
 						else {
-							mp3_.seek(playb / (wavch == 2 ? 4 : 1), wavch);
+							mp3_.seek(playb / (wavchannel == 2 ? 4 : 1), wavchannel);
 						}
 						f123.Close();
 					}
@@ -9235,7 +9235,7 @@ void COggDlg::play()
 						if (wav999_use_adbuf)
 							seekadpcm((int)playb);
 						else
-							wav_.Seek(playb / (wavch * (wavsam / 8)));
+							wav_.Seek(playb / (wavchannel * (wavsam_depth / 8)));
 						f123.Close();
 					}
 				}
@@ -9280,13 +9280,13 @@ void COggDlg::play()
 	if (pl && plw) {
 		int plc = 1;
 		if (mode == -10)
-			plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, (oggsize / (2 * wavch * wavbit / 4) / ((mode == -9) ? 4 : 1)), 1);
+			plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, (oggsize / (2 * wavchannel * wavbit_sample_Hz / 4) / ((mode == -9) ? 4 : 1)), 1);
 		else if (mode == 999)
-			plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, (wavbit > 0) ? (int)(loop2 / wavbit) : 0, 1);
+			plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, (wavbit_sample_Hz > 0) ? (int)(loop2 / wavbit_sample_Hz) : 0, 1);
 		else if (mode == -9 || mode == -8 || mode == -7) {
-			double wavv[] = { 0,1.0,2.0,2.0,2.0,2.0,2.0 };//(double)(wavbit2/wavv[wavch])
+			double wavv[] = { 0,1.0,2.0,2.0,2.0,2.0,2.0 };//(double)(wavbit2/wavv[wavchannel])
 			plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, (int)(
-				(double)oggsize / (double)(wavbit * 2 * wavv[wavch]) / (double)(wavsam / 16.0f)
+				(double)oggsize / (double)(wavbit_sample_Hz * 2 * wavv[wavchannel]) / (double)(wavsam_depth / 16.0f)
 				), 1);
 		}
 		else if (mode == -3) {
@@ -9297,12 +9297,12 @@ void COggDlg::play()
 					plc = pl->chk(fnn, mode, tagname, filen, 0);
 			else
 				if (mode == -3 && fnn.Find(L".hes") == -1)
-					plc = pl->Add(fnn, mode, loop1, loop2, tagname, tagalbum, filen, 0, oggsize / (2 * wavch * wavbit), 1);
+					plc = pl->Add(fnn, mode, loop1, loop2, tagname, tagalbum, filen, 0, oggsize / (2 * wavchannel * wavbit_sample_Hz), 1);
 				else
 					plc = pl->chk(fnn, mode, tagname, filen, 0);
 		}
 		else if (!((pMainFrame1 && mode == -1) || mode == -3))
-			plc = pl->Add(fnn, mode, loop1, loop2, stitle, tagalbum, filen, ret2, oggsize / (2 * wavch * wavbit));
+			plc = pl->Add(fnn, mode, loop1, loop2, stitle, tagalbum, filen, ret2, oggsize / (2 * wavchannel * wavbit_sample_Hz));
 		else
 			plc = pl->chk(fnn, mode, tagname, filen, 0);
 
@@ -10615,7 +10615,7 @@ void CWread::wavread()
 				// ヘッダの元サンプルレートをsikpiに格納（表示・将来のリサンプル用）
 				og->sikpi.dwSamplesPerSec = head->input_sample_rate;
 			}
-			wavbit = 48000;  // デコード出力は常に48kHz
+			wavbit_sample_Hz = 48000;  // デコード出力は常に48kHz
 		}
 
 		ogg_int64_t totalSamples = op_pcm_total(m_pOpusFile, -1);
@@ -10659,7 +10659,7 @@ void CWread::wavread()
 				}
 				if (zerobuf.track != 0) {
 					// t_bgm._dtは44.1kHz基準。出力wavbitに合わせて動的変換（opus=48k,他=44.1k等）
-					float rate = (float)wavbit / 44100.0f;
+					float rate = (float)wavbit_sample_Hz / 44100.0f;
 					loop1 = (int)(zerobuf.start * rate);
 					loop2 = (int)(zerobuf.end * rate);
 				}
@@ -10817,18 +10817,30 @@ void CWread::wavread()
 		og->m_time.SetRange(0, (data_size) / 4, TRUE);
 		og->m_time.SetSelection(loop1, loop2 + loop1);
 		lenl = 0;
-		adbuf2 = (char*)calloc(cnt * 2 * 2, 1);
-		adpcmf.Read(adbuf2, dl * 2);
-		dwDataLen += dl;
-		cnt -= dwDataLen * 2;
-		wavbit = 48000;
+		adbuf2 = (char*)calloc((size_t)cnt, 1);
+		if (!adbuf2) {
+			thend = 1;
+			free(bbuf);
+			adpcmf.Close();
+			return;
+		}
+		wavbit_sample_Hz = 48000;
 		free(bbuf);
 		wavwait = 1;
-		for (; cnt > 0;) {
-			adpcmf.Read(adbuf2 + (int)dwDataLen, dl);
-			dwDataLen += dl; cnt -= dl;
-			if (thend1 == TRUE) { thend = 1;  return; }
-			og->m_time.SetSelection(loop1, loop2 + loop1);
+		// wavread 先頭の dwDataLen=dl 初期値をそのまま使うと cnt の減算と実読み込み量が一致せず欠落するため、逐次オフセットで読む
+		{
+			int remain = cnt;
+			int off = 0;
+			while (remain > 0) {
+				const UINT chunk = (UINT)min((DWORD)remain, dl * 2);
+				const UINT n = adpcmf.Read(adbuf2 + off, chunk);
+				if (n == 0)
+					break;
+				off += (int)n;
+				remain -= (int)n;
+				if (thend1 == TRUE) { thend = 1; adpcmf.Close(); return; }
+				og->m_time.SetSelection(loop1, loop2 + loop1);
+			}
 		}
 		adpcmf.Close();
 	}
@@ -10906,7 +10918,7 @@ void CWread::wavread()
 		}
 		adpcmf.Open(filen, CFile::modeRead | CFile::typeBinary | CFile::shareDenyWrite, NULL);
 		adpcmf.Read(bbuf, 0x80);
-		wavbit = (UINT)(int)bbuf[0x18] + (int)(BYTE)bbuf[0x19] * 256;
+		wavbit_sample_Hz = (UINT)(int)bbuf[0x18] + (int)(BYTE)bbuf[0x19] * 256;
 		if (wav)free(wav);
 		wav_start();
 		int si, jk;
@@ -10952,7 +10964,7 @@ void CWread::wavread()
 		adpcmf.Read(b, 4); tep = b;
 		adpcmf.SeekToBegin();
 		adpcmf.Read(bbuf, 0x80);
-		wavbit = (UINT)(int)bbuf[0x18] + (int)(BYTE)bbuf[0x19] * 256;
+		wavbit_sample_Hz = (UINT)(int)bbuf[0x18] + (int)(BYTE)bbuf[0x19] * 256;
 		if (wav)free(wav);
 		wav_start();
 		int si, jk;
@@ -10967,12 +10979,12 @@ void CWread::wavread()
 		if (loop1 < 0 || loop2 < 0) { loop1 = 0; loop2 = si / 4; }
 		if (filen.Left(8) == "ED3940DA" && fnn.Left(2) == "白") {
 			si = 14332500 * 2 * 2;
-			if (wavbit == 22050) { si /= 2; }
+			if (wavbit_sample_Hz == 22050) { si /= 2; }
 		}
 		if (filen.Left(8) == "ED3940DA" && fnn.Left(2) == "も") {
 			jk = 14376600 * 2 * 2;
 			si = 19668600 * 2 * 2;
-			if (wavbit == 22050) { jk /= 2; si /= 2; }
+			if (wavbit_sample_Hz == 22050) { jk /= 2; si /= 2; }
 		}
 		adpcmf.SeekToBegin();
 		adpcmf.Seek(jk + 4, CFile::begin);
@@ -10998,7 +11010,7 @@ void CWread::wavread()
 		adpcmf.Open(filen, CFile::modeRead | CFile::typeBinary | CFile::shareDenyWrite, NULL);
 		adpcmf.Read(bbuf, 0x80);
 		int si, jk;
-		wavbit = (UINT)(int)bbuf[0x18] + (int)(BYTE)bbuf[0x19] * 256;
+		wavbit_sample_Hz = (UINT)(int)bbuf[0x18] + (int)(BYTE)bbuf[0x19] * 256;
 		if (wav)free(wav);
 		wav_start();
 		for (jk = 0; jk < 0x7c; jk++) {
@@ -11223,9 +11235,9 @@ void CWread::wavread()
 		if(Open(ss,&si1)==true){
 		loop1=0;stitle="";
 		loop2=(int)(((float)si1.dwLength)/1000.0f*44100.0f);
-		wavch=si1.dwChannels;
-		wavbit=si1.dwSamplesPerSec;
-		loop2=(int)(((float)loop2)/(44100.0f/((float)((wavch==2)?wavbit:(wavbit/2)))));
+		wavchannel=si1.dwChannels;
+		wavbit_sample_Hz=si1.dwSamplesPerSec;
+		loop2=(int)(((float)loop2)/(44100.0f/((float)((wavchannel==2)?wavbit_sample_Hz:(wavbit_sample_Hz/2)))));
 		data_size=oggsize=loop2*4;
 		loop3=loop2;loop2=0;
 		adbuf2=(char*)malloc(data_size+44100*10);
@@ -11281,8 +11293,8 @@ void CWread::wavread()
 		Open(ss, &si);
 		loop1 = 0; stitle = "";
 		loop2 = (int)(((float)si.dwLength) / 1000.0f * 44100.0f);
-		wavbit = si.dwSamplesPerSec;
-		loop2 = loop2 / (44100 / wavbit);
+		wavbit_sample_Hz = si.dwSamplesPerSec;
+		loop2 = loop2 / (44100 / wavbit_sample_Hz);
 		data_size = oggsize = loop2 * 4;
 		adbuf2 = (char*)calloc(data_size * 2 + 44100 * 30, 1);
 		if (san2 == 1) loop2 = 225 * 44100;
@@ -11338,7 +11350,7 @@ void CWread::wavread()
 		}
 
 		adpcmf.Seek(st + 5, CFile::begin);
-		adpcmf.Read(&wavbit, 2);
+		adpcmf.Read(&wavbit_sample_Hz, 2);
 		data_size = oggsize = (ex) * 4;
 		og->m_time.SetRange(0, (data_size) / 4, TRUE);
 		adbuf = (char*)malloc(size * 10);
@@ -11382,13 +11394,13 @@ int                 sample1R, sample2R;
 ADPCMCOEFSET        coeffL, coeffR;
 int                 nsamp;
 
-int readadpcm2(char* bw, int cnt);
+int readBuffwav(char* bw, int cnt);
 int seekadpcm(int pos);
 
-BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2)
+BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2)
 {
 	//	playb+=(l1+l2)/4;
-	int rrr = readadpcm2((char*)bw + old, l1);
+	int rrr = readBuffwav((char*)bw + old, l1);
 	if (l1 != rrr) {
 		if (endf == 1) {
 			l1 = rrr;
@@ -11407,11 +11419,11 @@ BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2)
 				g_rubberBandStretcher = NULL;
 			}
 			reset = TRUE;
-			readadpcm2((char*)bw + old + rrr, (int)l1 - rrr);
+			readBuffwav((char*)bw + old + rrr, (int)l1 - rrr);
 		}
 	}
 	if (l2) {
-		rrr = readadpcm2((char*)bw, l2);
+		rrr = readBuffwav((char*)bw, l2);
 		if (l2 != rrr) {
 			if (endf == 1) {
 				l2 = rrr;
@@ -11430,7 +11442,7 @@ BOOL playwavadpcm(BYTE* bw, int old, int l1, int l2)
 					g_rubberBandStretcher = NULL;
 				}
 				reset = TRUE;
-				readadpcm2((char*)bw + rrr, (int)l2 - rrr);
+				readBuffwav((char*)bw + rrr, (int)l2 - rrr);
 			}
 		}
 	}
@@ -11453,13 +11465,13 @@ int readtempo(BYTE* data, int len,bool t = false)
 	te = 100.0f / te;
 	ProcessAudioWithRubberBand(te,t);
 //	ProcessAudioWithSoundTouch(te,t);
-	uint16_t outBps = (uint16_t)((wavsam <= 0 || wavsam > 32) ? 16 : abs(wavsam));
-	ConvertFloatToRawBytes(m_convertedPcmFloatData, outBps, wavch, outputRawBytesData);
+	uint16_t outBps = (uint16_t)((wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth));
+	ConvertFloatToRawBytes(m_convertedPcmFloatData, outBps, wavchannel, outputRawBytesData);
 	return outputRawBytesData.size();
 }
 using namespace std;
 void equaliser(void* data, int len, BOOL reset = FALSE);
-int readadpcm2(char* bw, int cnt)
+int readBuffwav(char* bw, int cnt)
 {
 	int r = cnt, rr = cnt;
 	int cnt2;
@@ -11470,7 +11482,9 @@ int readadpcm2(char* bw, int cnt)
 		while (true) {
 			int f = 0;
 			if (adbuf2 == NULL) return 0;
-			if (fade == 0)
+			// fade は ApplyFadeCubed で音量(例: 1.0=フル)。ここでは「無音に近い」ときだけゼロ埋め+muon。
+			// fade==0 判定だと play() 開始時の fade=1.0 で常に else になり、無音のまま lenl だけ進んで即終了する。
+			if (fade > 0.0001f)
 				memcpy((void*)bufkpi, (void*)(adbuf2 + lenl), cnt);
 			else
 			{
@@ -11514,9 +11528,18 @@ int readadpcm2(char* bw, int cnt)
 	int cnt0 = cnt;
 	{
 		const int bpfLoop = PcmOutBytesPerFrame();
-		const int loopEndBytes = (loop1 + loop2) * bpfLoop;
-		if (loopEndBytes < poss5 + cnt0 && endf == 0) {
+		// play() 側と同じ: loop1==0 && loop2==0 は「ループ情報なし」で全長再生(data_size バイトまで)
+		int loopEndBytes;
+		if (loop1 == 0 && loop2 == 0) {
+			loopEndBytes = (bpfLoop > 0) ? (int)data_size : 0;
+		}
+		else {
+			loopEndBytes = (loop1 + loop2) * bpfLoop;
+		}
+		if (loopEndBytes > 0 && loopEndBytes < poss5 + cnt0 && endf == 0) {
 			cnt0 = loopEndBytes - poss5;
+			if (cnt0 < 0)
+				cnt0 = 0;
 		}
 	}
 	cnt2 = cnt0;
@@ -12235,8 +12258,8 @@ int readkpi(BYTE* bw, int cnt)
 						break;
 					}
 					if (kvver == 2) {
-						const int bitsPerSample = abs(wavsam);
-						const DWORD bytesPerFrame = (DWORD)max(1, wavch * (bitsPerSample / 8));
+						const int bitsPerSample = abs(wavsam_depth);
+						const DWORD bytesPerFrame = (DWORD)max(1, wavchannel * (bitsPerSample / 8));
 						const DWORD remainBytes = (cnt > (int)cnt3) ? (DWORD)(cnt - (int)cnt3) : 0;
 						requestBytes = min(cnt1, remainBytes);
 						if (bytesPerFrame > 1) requestBytes -= (requestBytes % bytesPerFrame);
@@ -12245,14 +12268,14 @@ int readkpi(BYTE* bw, int cnt)
 							r = og->mod->Render(og->kmp1, (BYTE*)bufkpi + cnt3, requestBytes);
 					}
 					if (kvver == 5) {
-						const int dstBitsPerSample = abs(wavsam);
-						const int dstBytesPerFrame = max(1, wavch * (dstBitsPerSample / 8));
+						const int dstBitsPerSample = abs(wavsam_depth);
+						const int dstBytesPerFrame = max(1, wavchannel * (dstBitsPerSample / 8));
 						bool rIsBytes = false;
 
 						if (g_kpiRemote && g_kpiSession.sessionId != 0) {
 							const DWORD remainBytes = (cnt > (int)cnt3) ? (DWORD)(cnt - (int)cnt3) : 0;
 							const bool srcFloat = (wavsam_src == -32 || wavsam_src == -64);
-							const DWORD srcBytesPerFrame = srcFloat ? (DWORD)max(1, wavch * (abs(wavsam_src) / 8)) : (DWORD)dstBytesPerFrame;
+							const DWORD srcBytesPerFrame = srcFloat ? (DWORD)max(1, wavchannel * (abs(wavsam_src) / 8)) : (DWORD)dstBytesPerFrame;
 
 							const DWORD dstFrames = (dstBytesPerFrame > 0) ? (remainBytes / (DWORD)dstBytesPerFrame) : 0;
 							DWORD requestBytesLocal = srcFloat ? (dstFrames * srcBytesPerFrame) : remainBytes;
@@ -12289,7 +12312,7 @@ int readkpi(BYTE* bw, int cnt)
 										g_kpiRemoteCache.data() + g_kpiRemoteCachePos,
 										gotSamples,
 										wavsam_src,
-										wavch,
+										wavchannel,
 										(BYTE*)bufkpi + cnt3,
 										remainBytes,
 										dstBitsPerSample);
@@ -12322,15 +12345,15 @@ int readkpi(BYTE* bw, int cnt)
 								if (requestSamples > 0) {
 									if (wavsam_src == -64) {
 										std::vector<double> srcD;
-										srcD.resize((size_t)requestSamples * wavch);
+										srcD.resize((size_t)requestSamples * wavchannel);
 										gotSamples = kpidec->Render((BYTE*)srcD.data(), requestSamples);
-										r = ConvertFloatTypedToIntBuffer(srcD.data(), gotSamples, -64, wavch, (BYTE*)bufkpi + cnt3, (DWORD)remainBytes, dstBitsPerSample);
+										r = ConvertFloatTypedToIntBuffer(srcD.data(), gotSamples, -64, wavchannel, (BYTE*)bufkpi + cnt3, (DWORD)remainBytes, dstBitsPerSample);
 									}
 									else {
 										std::vector<float> srcF;
-										srcF.resize((size_t)requestSamples * wavch);
+										srcF.resize((size_t)requestSamples * wavchannel);
 										gotSamples = kpidec->Render((BYTE*)srcF.data(), requestSamples);
-										r = ConvertFloatTypedToIntBuffer(srcF.data(), gotSamples, -32, wavch, (BYTE*)bufkpi + cnt3, (DWORD)remainBytes, dstBitsPerSample);
+										r = ConvertFloatTypedToIntBuffer(srcF.data(), gotSamples, -32, wavchannel, (BYTE*)bufkpi + cnt3, (DWORD)remainBytes, dstBitsPerSample);
 									}
 								}
 								else {
@@ -12428,7 +12451,7 @@ int readkpi(BYTE* bw, int cnt)
 		if (r == 0) cnt = 0;
 		__int64 bfc = 0, bc2 = 0;
 
-		if (wavsam == 32) {
+		if (wavsam_depth == 32) {
 			int* bf1 = (int*)bw;
 			bc2 = bf1[0] / 65536;
 			for (int i = 0; i < cnt / 4; i++) {
@@ -12437,7 +12460,7 @@ int readkpi(BYTE* bw, int cnt)
 			if (cnt) bfc /= (cnt / 4);
 			if ((int)bc2 >= (int)bfc - 10 && (int)bc2 <= (int)bfc + 10) bufzero++; else bufzero = 0;
 		}
-		else if (wavsam == 24) {
+		else if (wavsam_depth == 24) {
 			Int24* bf1 = (Int24*)bw;
 			bc2 = (int)(Int24)bf1[0] / 256;
 			for (int i = 0; i < cnt / 3; i++) {
@@ -12467,7 +12490,7 @@ int readkpi(BYTE* bw, int cnt)
 		int* b32c;
 		b32c = (int*)bw;
 
-		if (wavsam == 32) {
+		if (wavsam_depth == 32) {
 			for (int i = 0; i < cnt / 4; i++) {
 				double c4 = (double)b32c[i] * ((double)savedata.kakuVal / 100.0);
 				if (c4 > 2147483647.0) c4 = 2147483647.0;
@@ -12475,7 +12498,7 @@ int readkpi(BYTE* bw, int cnt)
 				b32c[i] = (int)c4;
 			}
 		}
-		else if (wavsam == 24) {
+		else if (wavsam_depth == 24) {
 			for (int i = 0; i < cnt / 3; i++) {
 				double c4 = (double)b24c[i] * ((double)savedata.kakuVal / 100.0);
 				if (c4 > 8388607.0) c4 = 8388607.0;
@@ -12494,7 +12517,7 @@ int readkpi(BYTE* bw, int cnt)
 
 		if (sss == "spc" || sss.Left(3) == "hes") {
 			if (savedata.spc != 1) {
-				if (wavsam == 32) {
+				if (wavsam_depth == 32) {
 					for (int i = 0; i < cnt / 4; i++) {
 						double c4 = (double)b32c[i];
 						if (savedata.spc == 2) c4 *= 2.0;
@@ -12506,7 +12529,7 @@ int readkpi(BYTE* bw, int cnt)
 						b32c[i] = (int)c4;
 					}
 				}
-				else if (wavsam == 24) {
+				else if (wavsam_depth == 24) {
 					for (int i = 0; i < cnt / 3; i++) {
 						double c4 = (double)b24c[i];
 						if (savedata.spc == 2) c4 *= 2.0;
@@ -12534,7 +12557,7 @@ int readkpi(BYTE* bw, int cnt)
 		}
 
 		if (savedata.kpivol != 1) {
-			if (wavsam == 32) {
+			if (wavsam_depth == 32) {
 				for (int i = 0; i < cnt / 4; i++) {
 					double c4 = (double)b32c[i];
 					if (savedata.kpivol == 2) c4 *= 2.0;
@@ -12546,7 +12569,7 @@ int readkpi(BYTE* bw, int cnt)
 					b32c[i] = (int)c4;
 				}
 			}
-			else if (wavsam == 24) {
+			else if (wavsam_depth == 24) {
 				for (int i = 0; i < cnt / 3; i++) {
 					double c4 = (double)b24c[i];
 					if (savedata.kpivol == 2) c4 *= 2.0;
@@ -12573,7 +12596,7 @@ int readkpi(BYTE* bw, int cnt)
 		}
 
 		fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
-		if (wavsam == 32) {
+		if (wavsam_depth == 32) {
 			for (int i = 0; i < cnt / 4; i++) {
 				double c4 = (double)b32c[i];
 				c4 = c4 * (double)fade * (double)fade;
@@ -12582,7 +12605,7 @@ int readkpi(BYTE* bw, int cnt)
 				b32c[i] = (int)c4;
 			}
 		}
-		else if (wavsam == 24) {
+		else if (wavsam_depth == 24) {
 			for (int i = 0; i < cnt / 3; i++) {
 				double c4 = (double)b24c[i];
 				c4 = c4 * (double)fade * (double)fade;
@@ -12624,13 +12647,13 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 		const int bpf = PcmOutBytesPerFrame();
 		playb += (l1 + l2) / bpf;
 	}
-	//	if (oggsize / ((wavch == 1) ? 1 : 1) - 44100 <= playb * 4) {
+	//	if (oggsize / ((wavchannel == 1) ? 1 : 1) - 44100 <= playb * 4) {
 	//	if (savedata.saveloop == FALSE) {
 	//	l1 = rrr;  fade1 = 1;
 	//			return l1;
 	//	}
 	//}
-/*	if (oggsize / ((wavch == 1) ? 2 : 1)- 50000 <= (int)(playb * wavch * 2 * (wavsam / 16.0))) {
+/*	if (oggsize / ((wavchannel == 1) ? 2 : 1)- 50000 <= (int)(playb * wavchannel * 2 * (wavsam_depth / 16.0))) {
 		if (savedata.saveloop == FALSE) {
 			l1 = rrr; fade1 = 1;
 			return l1;
@@ -12766,53 +12789,53 @@ int readm4a(BYTE* bw, int cnt)
 		memcpy(bufkpi2, bw, cnt);
 		unsigned short* bf1, * bf2; bf1 = (unsigned short*)bw; bf2 = (unsigned short*)bufkpi2;
 		int cnt1 = cnt / 2;
-		switch (wavch)
+		switch (wavchannel)
 		{
 		case 1:
 		case 2:
 			break;
 		case 3: // 2.1   
-			for (int sample = 0; sample < cnt1; sample += wavch)
+			for (int sample = 0; sample < cnt1; sample += wavchannel)
 			{
 				int ChannelMap[3] = { 2,3,1 };
-				for (int ch = 0; ch < wavch; ch++)
+				for (int ch = 0; ch < wavchannel; ch++)
 				{
 					*bf1++ = bf2[ChannelMap[ch] - 1];
 				}
-				bf2 += wavch;
+				bf2 += wavchannel;
 			}
 			break;
 		case 4: // Quad   
-			for (int sample = 0; sample < cnt1; sample += wavch)
+			for (int sample = 0; sample < cnt1; sample += wavchannel)
 			{
 				int ChannelMap[4] = { 2,3,1,4 };
-				for (int ch = 0; ch < wavch; ch++)
+				for (int ch = 0; ch < wavchannel; ch++)
 				{
 					*bf1++ = bf2[ChannelMap[ch] - 1];
 				}
-				bf2 += wavch;
+				bf2 += wavchannel;
 			}
 			break;
 		case 5: // Surround   
-			for (int sample = 0; sample < cnt1; sample += wavch)
+			for (int sample = 0; sample < cnt1; sample += wavchannel)
 			{
 				int ChannelMap[5] = { 2,3,1,4,5 };
-				for (int ch = 0; ch < wavch; ch++)
+				for (int ch = 0; ch < wavchannel; ch++)
 				{
 					*bf1++ = bf2[ChannelMap[ch] - 1];
 				}
-				bf2 += wavch;
+				bf2 += wavchannel;
 			}
 			break;
 		case 6: // 5.1   
-			for (int sample = 0; sample < cnt1; sample += wavch)
+			for (int sample = 0; sample < cnt1; sample += wavchannel)
 			{
 				int ChannelMap[6] = { 2,3,1,6,4,5 };
-				for (int ch = 0; ch < wavch; ch++)
+				for (int ch = 0; ch < wavchannel; ch++)
 				{
 					*bf1++ = bf2[ChannelMap[ch] - 1];
 				}
-				bf2 += wavch;
+				bf2 += wavchannel;
 			}
 			break;
 		}
@@ -12820,7 +12843,7 @@ int readm4a(BYTE* bw, int cnt)
 		b24c = (Int24*)bw;
 		short* b, c;
 		b = (short*)bw;
-		if (wavsam == 24) {
+		if (wavsam_depth == 24) {
 			for (int i = 0; i < cnt / 3; i++) {
 				int c4 = b24c[i];
 				c4 = (int)((float)c4 * ((float)savedata.kakuVal / 100.0f));
@@ -12834,7 +12857,7 @@ int readm4a(BYTE* bw, int cnt)
 				b[i] = (short)c;
 			}
 		}
-		if (wavsam == 24) {
+		if (wavsam_depth == 24) {
 			for (int i = 0; i < cnt / 3; i++) {
 				int c4 = b24c[i];
 				if (savedata.mp3 == 2)	c4 = (int)((float)c4 * 2.0f);
@@ -12860,7 +12883,7 @@ int readm4a(BYTE* bw, int cnt)
 		}
 		fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
 		//fadeを三乗して計算密度を変更
-		if (wavsam == 24) {
+		if (wavsam_depth == 24) {
 			float c4;
 			int c5;
 			for (int i = 0; i < cnt / 3; i++) {
@@ -12901,7 +12924,7 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 			loopcnt++;
 			playb = loop1;
 			if (flacmode == 0)
-				flac_.SetPosition(og->kmp, (LONGLONG)((double)loop1 / (((double)wavbit * (double)wavch) / 2000.0)));
+				flac_.SetPosition(og->kmp, (LONGLONG)((double)loop1 / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
 			else
 				flac_.SetPosition(og->kmp, loop1);
 			::rrr = 1;  // シーク後は Render を再開（グローバル）
@@ -12932,7 +12955,7 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 				loopcnt++;
 				playb = loop1;
 				if (flacmode == 0)
-					flac_.SetPosition(og->kmp, (LONGLONG)((double)loop1 / (((double)wavbit * (double)wavch) / 2000.0)));
+					flac_.SetPosition(og->kmp, (LONGLONG)((double)loop1 / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
 				else
 					flac_.SetPosition(og->kmp, loop1);
 				::rrr = 1;  // シーク後は Render を再開（グローバル）
@@ -12972,12 +12995,12 @@ int readflac(BYTE* bw, int cnt)
 
 				if (rrr == 1)
 					r = flac_.Render(og->kmp, (BYTE*)bufkpi, lenl);
-				const int flacSrcBits = wavsam;
+				const int flacSrcBits = wavsam_depth;
 				if (r > 0 && (flacSrcBits == -32 || flacSrcBits == -64)) {
-					r = ConvertFloatPcmBufferToInt16InPlace((BYTE*)bufkpi, (int)r, flacSrcBits, wavch);
+					r = ConvertFloatPcmBufferToInt16InPlace((BYTE*)bufkpi, (int)r, flacSrcBits, wavchannel);
 					if (r > 0) {
 						// After conversion, downstream path should treat this block as 16-bit PCM.
-						wavsam = 16;
+						wavsam_depth = 16;
 						lenl = r;
 					}
 				}
@@ -13041,14 +13064,14 @@ int readflac(BYTE* bw, int cnt)
 
 		cnt4 = lenl;
 		unsigned short* bf1, * bf2; bf1 = (unsigned short*)bw; bf2 = (unsigned short*)bufkpi2;
-		//		int fw = playb % (wavch);
+		//		int fw = playb % (wavchannel);
 		//		bf2 += fw;
 		int lenl1 = lenl / 2;
 		Int24* b24c;
 		b24c = (Int24*)bw;
 		short* b, c;
 		b = (short*)bw;
-		if (wavsam == 24) {
+		if (wavsam_depth == 24) {
 			for (int i = 0; i < lenl / 3; i++) {
 				int c4 = b24c[i];
 				if (savedata.mp3 == 2)	c4 = (int)((float)c4 * 2.0f);
@@ -13074,7 +13097,7 @@ int readflac(BYTE* bw, int cnt)
 		}
 		fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
 		//fadeを三乗して計算密度を変更
-		if (wavsam == 24) {
+		if (wavsam_depth == 24) {
 			float c4;
 			int c5;
 			for (int i = 0; i < lenl / 3; i++) {
@@ -13237,14 +13260,14 @@ int readopus(BYTE* bw, int cnt)
 		cnt4 = r;
 		if (r == 0) cnt = 0;
 		unsigned short* bf1, * bf2; bf1 = (unsigned short*)bw; bf2 = (unsigned short*)bufkpi2;
-		//		int fw = playb % (wavch);
+		//		int fw = playb % (wavchannel);
 		//		bf2 += fw;
 		int cnt1 = cnt / 2;
 		Int24* b24c;
 		b24c = (Int24*)bw;
 		short* b, c;
 		b = (short*)bw;
-		if (wavsam == 24) {
+		if (wavsam_depth == 24) {
 			for (int i = 0; i < cnt / 3; i++) {
 				int c4 = b24c[i];
 				if (savedata.mp3 == 2)	c4 = (int)((float)c4 * 2.0f);
@@ -13270,7 +13293,7 @@ int readopus(BYTE* bw, int cnt)
 		}
 		fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
 		//fadeを三乗して計算密度を変更
-		if (wavsam == 24) {
+		if (wavsam_depth == 24) {
 			float c4;
 			int c5;
 			for (int i = 0; i < cnt / 3; i++) {
@@ -13307,7 +13330,7 @@ int playwavdsd(BYTE* bw, int old, int l1, int l2)
 		const int bpf = PcmOutBytesPerFrame();
 		playb += (l1 + l2) / bpf;
 	}
-	if (oggsize / ((wavch == 1) ? 2 : 1) - 192 * 20 <= (int)(playb * wavch * 2 * (wavsam / 16.0))) {
+	if (oggsize / ((wavchannel == 1) ? 2 : 1) - 192 * 20 <= (int)(playb * wavchannel * 2 * (wavsam_depth / 16.0))) {
 		if (savedata.saveloop == FALSE) {
 			l1 = rrr;
 			if (savedata.saverenzoku == 0)
@@ -13384,7 +13407,7 @@ int readdsd(BYTE* bw, int cnt)
 	if (poss4 <= cnt) {
 		while (true) {
 			if(fade1 == 0)
-				cnt3 = dsd_.kpiRender(og->kmp, (BYTE*)bufkpi, cnt / (wavch * wavsam / 8)) * (wavch * wavsam / 8);
+				cnt3 = dsd_.kpiRender(og->kmp, (BYTE*)bufkpi, cnt / (wavchannel * wavsam_depth / 8)) * (wavchannel * wavsam_depth / 8);
 
 			if (fade1 == 1 && muon != 0) {
 				r = cnt;
@@ -13480,7 +13503,7 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 		else {
 			loopcnt++;
 			playb = loop1;
-			mp3_.seek(10, wavch); poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+			mp3_.seek(10, wavchannel); poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 			if (g_rubberBandStretcher) {
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
@@ -13501,7 +13524,7 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 			else {
 				loopcnt++;
 				playb = loop1;
-				mp3_.seek(10, wavch); poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+				mp3_.seek(10, wavchannel); poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 				if (g_rubberBandStretcher) {
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
@@ -13568,7 +13591,7 @@ int readwav(BYTE* bw, int cnt)
 	if (rr == 0) return 0;
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	int bytesPerSample = (wav_.m_info.wBitsPerSample + 7) / 8 * wav_.m_info.nChannels;
-	int outBytesPerSample = (wavsam / 8) * wavch;
+	int outBytesPerSample = (wavsam_depth / 8) * wavchannel;
 	if (poss4 <= cnt) {
 		while (true) {
 			int toRead = rr;
@@ -13595,7 +13618,7 @@ int readwav(BYTE* bw, int cnt)
 				int bpc = (wav_.m_info.wBitsPerSample + 7) / 8;
 				int samples = r / inBps;
 				for (int i = 0; i < samples; i++) {
-					for (int ch = 0; ch < (int)wavch; ch++) {
+					for (int ch = 0; ch < (int)wavchannel; ch++) {
 						int val = 0;
 						int off = i * inBps + ch * bpc;
 						if (wav_.IsFloat()) {
@@ -13656,7 +13679,7 @@ int readwav(BYTE* bw, int cnt)
 						else if (wav_.m_info.wBitsPerSample == 32) {
 							val = *(int*)&bufkpi[off] >> 8;
 						}
-						if (wavsam == 16) {
+						if (wavsam_depth == 16) {
 							if (val > 32767) val = 32767;
 							if (val < -32768) val = -32768;
 							*(short*)&convBuf[convLen] = (short)val;
@@ -13710,7 +13733,7 @@ int readwav(BYTE* bw, int cnt)
 	Int24* b24c = (Int24*)bw;
 	short* b = (short*)bw;
 	fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
-	if (wavsam == 24) {
+	if (wavsam_depth == 24) {
 		for (int i = 0; i < cnt2 / 3; i++) {
 			int c4 = b24c[i];
 			c4 = (int)((float)c4 * ((float)savedata.kakuVal / 100.0f));
@@ -13824,7 +13847,7 @@ int readmp3(BYTE* bw, int cnt)
 	short* b, c;
 	b = (short*)bw;
 	fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
-	if (wavsam == 24) {
+	if (wavsam_depth == 24) {
 		for (int i = 0; i < cnt / 3; i++) {
 			int c4 = b24c[i];
 			c4 = (int)((float)c4 * ((float)savedata.kakuVal / 100.0f));
@@ -13934,29 +13957,29 @@ void SeekAndWarmupRubberBand(int targetPos)
 		long bytesRead = ov_read(&vf, (char*)tempRawBuf.data(), 4096, 0, 2, 1, &current_section);
 		if (bytesRead <= 0) break;
 
-		int samplesRead = bytesRead / (wavch * 2);
+		int samplesRead = bytesRead / (wavchannel * 2);
 
 		// ★ 引数を整理しました（元データ、ビット数、チャンネル数）
 		std::vector<float> inFloat;
-		uint16_t bps = (uint16_t)((wavsam <= 0 || wavsam > 32) ? 16 : abs(wavsam));
+		uint16_t bps = (uint16_t)((wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth));
 
 		// 読み込んだサイズ分だけのテンポラリバッファを作成して渡します
 		std::vector<uint8_t> actualReadData(tempRawBuf.begin(), tempRawBuf.begin() + bytesRead);
-		ConvertRawBytesToFloat(actualReadData, bps, wavch, inFloat);
+		ConvertRawBytesToFloat(actualReadData, bps, wavchannel, inFloat);
 
-		std::vector<std::vector<float>> chData(wavch, std::vector<float>(samplesRead));
+		std::vector<std::vector<float>> chData(wavchannel, std::vector<float>(samplesRead));
 		for (int i = 0; i < samplesRead; ++i) {
-			for (int ch = 0; ch < wavch; ++ch) chData[ch][i] = inFloat[i * wavch + ch];
+			for (int ch = 0; ch < wavchannel; ++ch) chData[ch][i] = inFloat[i * wavchannel + ch];
 		}
-		std::vector<float*> chPtrs(wavch);
-		for (int ch = 0; ch < wavch; ++ch) chPtrs[ch] = chData[ch].data();
+		std::vector<float*> chPtrs(wavchannel);
+		for (int ch = 0; ch < wavchannel; ++ch) chPtrs[ch] = chData[ch].data();
 
 		g_rubberBandStretcher->process(chPtrs.data(), samplesRead, false);
 
 		const size_t pullSize = 4096;
-		std::vector<std::vector<float>> outBuf(wavch, std::vector<float>(pullSize));
-		std::vector<float*> outPtrs(wavch);
-		for (int ch = 0; ch < wavch; ++ch) outPtrs[ch] = outBuf[ch].data();
+		std::vector<std::vector<float>> outBuf(wavchannel, std::vector<float>(pullSize));
+		std::vector<float*> outPtrs(wavchannel);
+		for (int ch = 0; ch < wavchannel; ++ch) outPtrs[ch] = outBuf[ch].data();
 
 		while (g_rubberBandStretcher->available() > 0) {
 			size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
@@ -13972,7 +13995,7 @@ void SeekAndWarmupRubberBand(int targetPos)
 				if (discardAmountForThisChunk < 0) discardAmountForThisChunk = 0;
 
 				for (int i = discardAmountForThisChunk; i < (int)retrieved; ++i) {
-					for (int ch = 0; ch < wavch; ++ch) {
+					for (int ch = 0; ch < wavchannel; ++ch) {
 						m_convertedPcmFloatData.push_back(outBuf[ch][i]);
 					}
 				}
@@ -13985,10 +14008,10 @@ void SeekAndWarmupRubberBand(int targetPos)
 	poss = 0;
 	poss2 = 0; poss3 = 0; poss4 = 0; poss6 = 0;
 
-	int keptSamples = (int)(m_convertedPcmFloatData.size() / wavch);
+	int keptSamples = (int)(m_convertedPcmFloatData.size() / wavchannel);
 	if (keptSamples > 0) {
 		outputRawBytesData.clear();
-		outputRawBytesData.resize(keptSamples * wavch * 2);
+		outputRawBytesData.resize(keptSamples * wavchannel * 2);
 		int16_t* rawOut = (int16_t*)outputRawBytesData.data();
 		for (size_t i = 0; i < m_convertedPcmFloatData.size(); ++i) {
 			float val = m_convertedPcmFloatData[i];
@@ -13997,7 +14020,7 @@ void SeekAndWarmupRubberBand(int targetPos)
 			rawOut[i] = (int16_t)(val * 32767.0f);
 		}
 
-		int byteLen = keptSamples * wavch * 2;
+		int byteLen = keptSamples * wavchannel * 2;
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (byteLen > max_buffer_size) byteLen = max_buffer_size;
 
@@ -14296,10 +14319,10 @@ void COggDlg::dp(CString a)
 				if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 					f123.Read(&playb, sizeof(__int64));
 					if (savedata.mp3orig) {
-						mp3_.seek2(playb / (wavch == 2 ? 4 : 1), wavch);
+						mp3_.seek2(playb / (wavchannel == 2 ? 4 : 1), wavchannel);
 					}
 					else {
-						mp3_.seek(playb / (wavch == 2 ? 4 : 1), wavch);
+						mp3_.seek(playb / (wavchannel == 2 ? 4 : 1), wavchannel);
 					}
 					f123.Close();
 				}
@@ -14804,7 +14827,7 @@ BOOL COggDlg::DestroyWindow()
 int mcopy(char* a, int len)
 {
 	if (len == 0) return 0;
-	const int bpf = (wavch > 0) ? (wavch * 2) : 4;
+	const int bpf = (wavchannel > 0) ? (wavchannel * 2) : 4;
 	if (bpf <= 0) return 0;
 	int ret = 0, lenl = len / bpf, cnt2;
 	int len3 = 0, len4 = 0;
@@ -15033,22 +15056,22 @@ void COggDlg::timerp()
 		ttt = tt;
 	}
 	else {
-		double wavv[] = { 0,1.0,2.0,3.0 / 0.75,4.0 / 0.75,5.0 / 0.75,6.0 / 0.75 };//(double)(wavbit2/wavv[wavch])
-		double wavv2[] = { 0,2.0,1.0,2.0 / 3.0,2.0 / 4.0,2.0 / 5.0,2.0 / 6.0 };//(double)(wavbit2/wavv[wavch])
-		t3 = (double)snap_oggsize / (double)(wavbit * 2.0 * wavv[wavch]) / (double)(wavsam / 16.0f);
-		if (mode == -10) t3 *= (wavsam / 16.0f) * 4.0;
-		if ((mode == -9) && wavch > 2) t3 *= wavch / 2.0;
+		double wavv[] = { 0,1.0,2.0,3.0 / 0.75,4.0 / 0.75,5.0 / 0.75,6.0 / 0.75 };//(double)(wavbit2/wavv[wavchannel])
+		double wavv2[] = { 0,2.0,1.0,2.0 / 3.0,2.0 / 4.0,2.0 / 5.0,2.0 / 6.0 };//(double)(wavbit2/wavv[wavchannel])
+		t3 = (double)snap_oggsize / (double)(wavbit_sample_Hz * 2.0 * wavv[wavchannel]) / (double)(wavsam_depth / 16.0f);
+		if (mode == -10) t3 *= (wavsam_depth / 16.0f) * 4.0;
+		if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
 		tt = (int)(t3 * 100.0);
 		if (tt < 0) tt = 0;
 		t1 = tt / 100;
 		ta = t1 / 60;
 		tb = t1 % 60;
 		tc = tt % 100;
-		t3 = (double)snap_playb / (double)(wavbit / wavv2[wavch]);// / (double)(wavsam / 16.0f);
+		t3 = (double)snap_playb / (double)(wavbit_sample_Hz / wavv2[wavchannel]);// / (double)(wavsam_depth / 16.0f);
 		//先読み分を除去
 
-		if (mode == -10) t3 /= (wavsam / 16.0f) * 4.0;
-		if ((mode == -9) && wavch > 2) t3 *= wavch / 2.0;
+		if (mode == -10) t3 /= (wavsam_depth / 16.0f) * 4.0;
+		if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
 		if (m_dsb && !(mode == -8 || mode >= 1)) {
 			//t3 -= 1.0;
 		}
@@ -15061,7 +15084,7 @@ void COggDlg::timerp()
 		tb1 = t1 % 60;
 		tc1 = tt % 100;
 		ttt = tt;
-		t3 = (double)snap_wl / (double)(wavbit * 2 * wavv[wavch]) / (double)(wavsam / 16.0f);
+		t3 = (double)snap_wl / (double)(wavbit_sample_Hz * 2 * wavv[wavchannel]) / (double)(wavsam_depth / 16.0f);
 		tt = (int)(t3 * 100.0);
 		t1 = tt / 100;
 		tag = t1 / 60;
@@ -15070,13 +15093,13 @@ void COggDlg::timerp()
 	}
 	videocnt++;
 
-	t3 = (double)snap_loop1 / (double)(wavbit);
+	t3 = (double)snap_loop1 / (double)(wavbit_sample_Hz);
 	tt = (int)(t3 * 100.0);
 	t1 = tt / 100;
 	int tal1 = t1 / 60;
 	int tbl1 = t1 % 60;
 	int tcl1 = tt % 100;
-	t3 = (double)(snap_loop2 + snap_loop1) / (double)(wavbit);
+	t3 = (double)(snap_loop2 + snap_loop1) / (double)(wavbit_sample_Hz);
 	tt = (int)(t3 * 100.0);
 	t1 = tt / 100;
 	int tal2 = t1 / 60;
@@ -15338,10 +15361,10 @@ void COggDlg::timerp()
 	videocnt3++;
 
 
-	CString wavbit1 = wavb(wavbit);
-	const int dispRate = (g_pcm_upscale_active) ? g_ds_pcm_rate : wavbit;
-	const int dispCh = (g_pcm_upscale_active) ? g_ds_pcm_ch : wavch;
-	const int dispSam = (g_pcm_upscale_active) ? g_ds_pcm_bits : wavsam;
+	CString wavbit1 = wavb(wavbit_sample_Hz);
+	const int dispRate = (g_pcm_upscale_active) ? g_ds_pcm_rate : wavbit_sample_Hz;
+	const int dispCh = (g_pcm_upscale_active) ? g_ds_pcm_ch : wavchannel;
+	const int dispSam = (g_pcm_upscale_active) ? g_ds_pcm_bits : wavsam_depth;
 	const CString wavbit1_disp = wavb(dispRate);
 
 	if ((mode == -2 || videoonly) && rate != 0.0 && height != 0) {
@@ -15356,7 +15379,7 @@ void COggDlg::timerp()
 		s.Format(LL14(L"rate:算出中……", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating..."));
 		moji(s, 1, 64, 0x7fffff);
 	}
-	else if (mode == -2 && wavbit != 0) {
+	else if (mode == -2 && wavbit_sample_Hz != 0) {
 		s.Format(_T("sample:%sHz"), wavbit1_disp);
 		moji(s, 1, 48, 0x7fffff);
 		s.Format(_T("channel:%dch"), dispCh);
@@ -15368,7 +15391,7 @@ void COggDlg::timerp()
 		if (dispCh == 8)s.Format(_T("channel:%s"), _T("7.1ch"));
 		moji(s, 1, 64, 0x7fffff);
 	}
-	else if (mode == -2 && wavbit == 0) {
+	else if (mode == -2 && wavbit_sample_Hz == 0) {
 		s.Format(LL14(
 			L"sample:不明",                   /* 日本語: 厳格に維持 */
 			L"sample:Vanished in Clouds",    /* 英語: 雲の中に消えた */
@@ -15647,7 +15670,7 @@ void COggDlg::timerp()
 			m_time.SetPos((int)pb);
 			if (ptl) {
 				ptl->SetProgressState(m_hWnd, TBPF_NORMAL);
-				ptl->SetProgressValue(m_hWnd, (LONGLONG)pb, (LONGLONG)ogs / (wavsam / 4));
+				ptl->SetProgressValue(m_hWnd, (LONGLONG)pb, (LONGLONG)ogs / (wavsam_depth / 4));
 			}
 		}
 	}
@@ -16374,24 +16397,24 @@ void timerog1(UINT nIDEvent)
 			if (!plw) {
 				for (;;) { if (plw) break; }
 			}
-			if (pl && plw && filen != "" && !(wavbit == 0 || wavch == 0 || wavsam == 0)) {
+			if (pl && plw && filen != "" && !(wavbit_sample_Hz == 0 || wavchannel == 0 || wavsam_depth == 0)) {
 				int plc;
 				if (mode == -10)
-					plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, oggsize / (2 * wavch * wavbit / 4), 1);
+					plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, oggsize / (2 * wavchannel * wavbit_sample_Hz / 4), 1);
 				else if (mode == -9 || mode == -8) {
-					double wavv[] = { 0,1.0,2.0,2.0,2.0,2.0,2.0 };//(double)(wavbit2/wavv[wavch])
+					double wavv[] = { 0,1.0,2.0,2.0,2.0,2.0,2.0 };//(double)(wavbit2/wavv[wavchannel])
 					plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, (int)(
-						(double)oggsize / (double)(wavbit * 2 * wavv[wavch]) / (double)(wavsam / 16.0f)
+						(double)oggsize / (double)(wavbit_sample_Hz * 2 * wavv[wavchannel]) / (double)(wavsam_depth / 16.0f)
 						), 1);
 				}
 				else if (mode == -3) {
 					if (oggsize == 0)
 						plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, -1, 1);
 					else
-						plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, oggsize / (2 * wavch * wavbit), 1);
+						plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, oggsize / (2 * wavchannel * wavbit_sample_Hz), 1);
 				}
 				else
-					plc = pl->Add(fnn, mode, loop1, loop2, tagname, tagalbum, filen, ret2, oggsize / (2 * wavch * wavbit));
+					plc = pl->Add(fnn, mode, loop1, loop2, tagname, tagalbum, filen, ret2, oggsize / (2 * wavchannel * wavbit_sample_Hz));
 				if (plc == -1) {
 					int i = pl->m_lc.GetItemCount() - 1;
 					plcnt = i;
@@ -18394,10 +18417,10 @@ void COggDlg::OnRestart()
 					if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 						f123.Read(&playb, sizeof(__int64));
 						if (savedata.mp3orig) {
-							mp3_.seek2(playb / (wavch == 2 ? 4 : 1), wavch);
+							mp3_.seek2(playb / (wavchannel == 2 ? 4 : 1), wavchannel);
 						}
 						else {
-							mp3_.seek(playb / (wavch == 2 ? 4 : 1), wavch);
+							mp3_.seek(playb / (wavchannel == 2 ? 4 : 1), wavchannel);
 						}
 						f123.Close();
 					}
@@ -18570,9 +18593,9 @@ void COggDlg::Speana()
 		bitDepth = g_ds_pcm_bits;
 	}
 	else {
-		sampleRate = (double)wavbit;
-		channels = wavch;
-		bitDepth = wavsam;
+		sampleRate = (double)wavbit_sample_Hz;
+		channels = wavchannel;
+		bitDepth = wavsam_depth;
 	}
 	if (sampleRate < 8000.0) sampleRate = 44100.0;
 	if (channels < 1) channels = 2;
@@ -19316,7 +19339,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	double aa = 2000.0; // デフォルト値
 
 	// サンプリングレートによる係数設定
-	if (wavsam == 32 || wavsam == 24 || wavsam == 16 || wavsam == 8) aa = 2000.0;
+	if (wavsam_depth == 32 || wavsam_depth == 24 || wavsam_depth == 16 || wavsam_depth == 8) aa = 2000.0;
 
 	// トラック中のフラグ処理
 	if (nSBCode == SB_THUMBTRACK) {
@@ -19376,7 +19399,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		else {
 			// 2. 音声エンジンのシーク
 			if (pMainFrame1) {
-				pMainFrame1->seek((LONGLONG)(((float)curpos * 10000000.0f) / (float)wavbit));
+				pMainFrame1->seek((LONGLONG)(((float)curpos * 10000000.0f) / (float)wavbit_sample_Hz));
 			}
 			// 共通のバッファ・フラグ更新
 			ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
@@ -19397,8 +19420,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 						OnPause();
 						ZeroMemory(bufwav3, sizeof(bufwav3));
 						syukai = 1; syukai2 = 0;
-						if (savedata.mp3orig) mp3_.seek2((__int64)((playb / ((wavch == 2 ? 4 : 1) * (wavsam / 16.0f))) / (wavbit / 44100.0f)), (DWORD)wavch);
-						else                  mp3_.seek((__int64)((playb / ((wavch == 2 ? 4 : 1) * (wavsam / 16.0f))) / (wavbit / 44100.0f)), (DWORD)wavch);
+						if (savedata.mp3orig) mp3_.seek2((__int64)((playb / ((wavchannel == 2 ? 4 : 1) * (wavsam_depth / 16.0f))) / (wavbit_sample_Hz / 44100.0f)), (DWORD)wavchannel);
+						else                  mp3_.seek((__int64)((playb / ((wavchannel == 2 ? 4 : 1) * (wavsam_depth / 16.0f))) / (wavbit_sample_Hz / 44100.0f)), (DWORD)wavchannel);
 						poss = 0; sek = TRUE; cnt3 = 0;
 						timer.SetEvent();
 						syukai = 0;
@@ -19408,8 +19431,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 						// 再生中のバッファクリアとシーク
 						poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
 						ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-						if (savedata.mp3orig) mp3_.seek2(playb / (wavch == 2 ? 4 : 1), wavch);
-						else                  mp3_.seek(playb / (wavch == 2 ? 4 : 1), wavch);
+						if (savedata.mp3orig) mp3_.seek2(playb / (wavchannel == 2 ? 4 : 1), wavchannel);
+						else                  mp3_.seek(playb / (wavchannel == 2 ? 4 : 1), wavchannel);
 					}
 				}
 				else if (mode == 999) {
@@ -19441,23 +19464,23 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 					ResetKpiRemoteCache();
 				}
 				else if (mod && mod->SetPosition && sikpi.dwSeekable) {
-					mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit * (double)wavch) / 2000.0)));
+					mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
 				}
 			}
 			else if (mode == -7) { // DSD
-				dsd_.kpiSetPosition(kmp, (DWORD)((double)playb / (((double)wavbit * (double)wavch) / 2000.0)));
+				dsd_.kpiSetPosition(kmp, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
 			}
 			else if (mode == -8) { // FLAC
 				sek4 = TRUE;
 				if (flacmode == 1) flac_.SetPosition(kmp, playb);
-				else               flac_.SetPosition(kmp, (LONGLONG)((double)playb / (((double)wavbit * (double)wavch) / aa)));
+				else               flac_.SetPosition(kmp, (LONGLONG)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / aa)));
 				::rrr = 1;  // シーク後は Render を再開
 				sek4 = FALSE;
 			}
 			else if (mode == -9) { // M4A
 				double wavv2[] = { 0, 2.0, 1.0, 1.0 / 2.0, 1.0 / 2.0, 1.0 / 2.0, 1.0 / 2.0 };
-				DWORD pla = (DWORD)((double)playb / (((double)(wavbit2 / wavv2[wavch])) / ((wavch > 2) ? (1069.1 * wavch) : 1000.0)));
-				pla = (pla / (wavch * 2) * (wavch * 2));
+				DWORD pla = (DWORD)((double)playb / (((double)(wavbit2 / wavv2[wavchannel])) / ((wavchannel > 2) ? (1069.1 * wavchannel) : 1000.0)));
+				pla = (pla / (wavchannel * 2) * (wavchannel * 2));
 				m4a_.SetPosition(kmp, pla);
 			}
 			else { // OGG / Others
@@ -19559,27 +19582,27 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 			hsc = 0;
 		}
 		else {
-			playb += wavbit * (wavch == 2 ? 10 : 5);
+			playb += wavbit_sample_Hz * (wavchannel == 2 ? 10 : 5);
 			if ((loop1 + loop2) < (int)playb && endf == 0) playb = (loop1 + loop2);
 			if (mode != -10)m_time.SetPos((int)playb);
 			if (pMainFrame1) {
-				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit));
+				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
 			}
 			if ((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999) {
 				if (mode == -10) {
-					playb -= wavbit * (wavch == 2 ? 10 : 5);
+					playb -= wavbit_sample_Hz * (wavchannel == 2 ? 10 : 5);
 					playb *= 400;
-					playb += wavbit * (wavch == 2 ? 40 : 20);
+					playb += wavbit_sample_Hz * (wavchannel == 2 ? 40 : 20);
 					if (ps == 0) {
 						OnPause();
 						ZeroMemory(bufwav3, sizeof(bufwav3));
 						syukai = 1; syukai2 = 0;
 						if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1)break; DoEvent(); } hscroll_lock.lock(); }
 						if (savedata.mp3orig) {
-							if (mp3_.seek2(playb / (wavch == 2 ? 4 : 1), wavch) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
+							if (mp3_.seek2(playb / (wavchannel == 2 ? 4 : 1), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 						}
 						else {
-							if (mp3_.seek(playb / (wavch == 2 ? 4 : 1), wavch) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
+							if (mp3_.seek(playb / (wavchannel == 2 ? 4 : 1), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 						}
 						poss = 0; sek = TRUE;
 						timer.SetEvent();
@@ -19588,10 +19611,10 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					}
 					else
 						if (savedata.mp3orig) {
-							if (mp3_.seek2(playb / (wavch == 2 ? 4 : 1), wavch) == FALSE) { return 0; }
+							if (mp3_.seek2(playb / (wavchannel == 2 ? 4 : 1), wavchannel) == FALSE) { return 0; }
 						}
 						else {
-							if (mp3_.seek(playb / (wavch == 2 ? 4 : 1), wavch) == FALSE) { return 0; }
+							if (mp3_.seek(playb / (wavchannel == 2 ? 4 : 1), wavchannel) == FALSE) { return 0; }
 						}
 					//						m_time.SetPos((int)playb/400);
 				}
@@ -19610,7 +19633,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					timer.SetEvent();
 				}
 				else if (mod) {
-					if (mod->SetPosition && sikpi.dwSeekable) mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit * (double)wavch) / 2000.0)));
+					if (mod->SetPosition && sikpi.dwSeekable) mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
 					sek = TRUE;
 					timer.SetEvent();
 				}
@@ -19638,17 +19661,17 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 			hsc = 0;
 		}
 		else {
-			playb -= wavbit * (wavch == 2 ? 10 : 5);
+			playb -= wavbit_sample_Hz * (wavchannel == 2 ? 10 : 5);
 			if ((loop1 + loop2) < (int)playb && endf == 0) playb = (loop1 + loop2);
 			if (mode != -10)m_time.SetPos((int)playb);
 			if (pMainFrame1) {
-				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit));
+				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
 			}
 			if ((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999) {
 				if (mode == -10) {
-					playb += wavbit * (wavch == 2 ? 10 : 5);
+					playb += wavbit_sample_Hz * (wavchannel == 2 ? 10 : 5);
 					playb *= 400;
-					playb -= wavbit * (wavch == 2 ? 40 : 20);
+					playb -= wavbit_sample_Hz * (wavchannel == 2 ? 40 : 20);
 					if (playb < 0)playb = 0;
 					if (ps == 0) {
 						OnPause();
@@ -19656,10 +19679,10 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 						syukai = 1; syukai2 = 0;
 						if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1)break; DoEvent(); } hscroll_lock.lock(); }
 						if (savedata.mp3orig) {
-							if (mp3_.seek2(playb / (wavch == 2 ? 4 : 1), wavch) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
+							if (mp3_.seek2(playb / (wavchannel == 2 ? 4 : 1), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 						}
 						else {
-							if (mp3_.seek(playb / (wavch == 2 ? 4 : 1), wavch) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
+							if (mp3_.seek(playb / (wavchannel == 2 ? 4 : 1), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 						}
 						poss = 0; sek = TRUE;
 						timer.SetEvent();
@@ -19668,10 +19691,10 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					}
 					else
 						if (savedata.mp3orig) {
-							if (mp3_.seek2(playb / (wavch == 2 ? 4 : 1), wavch) == FALSE) { return 0; }
+							if (mp3_.seek2(playb / (wavchannel == 2 ? 4 : 1), wavchannel) == FALSE) { return 0; }
 						}
 						else {
-							if (mp3_.seek(playb / (wavch == 2 ? 4 : 1), wavch) == FALSE) { return 0; }
+							if (mp3_.seek(playb / (wavchannel == 2 ? 4 : 1), wavchannel) == FALSE) { return 0; }
 						}
 					//						m_time.SetPos((int)playb/400);
 				}
@@ -19690,7 +19713,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					timer.SetEvent();
 				}
 				else if (mod) {
-					if (mod->SetPosition && sikpi.dwSeekable) mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit * (double)wavch) / 2000.0)));
+					if (mod->SetPosition && sikpi.dwSeekable) mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
 					sek = TRUE;
 					timer.SetEvent();
 				}
@@ -19724,11 +19747,11 @@ void COggDlg::rl(int a)
 		poss = 0;
 		return;
 	}
-	playb += wavbit * 10 * a;
+	playb += wavbit_sample_Hz * 10 * a;
 	if ((loop1 + loop2) < (int)playb && endf == 0) playb = (loop1 + loop2);
 	m_time.SetPos((int)playb);
 	if (pMainFrame1) {
-		pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit));
+		pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
 	}
 	if ((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999) {
 		seekadpcm((int)playb);

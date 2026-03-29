@@ -1622,7 +1622,7 @@ public:
 					ch2 = NULL;
 				int pcm_length = m_synth2.pcm.length;
 				BYTE *tmp = NULL;
-				int w = pcm_length * wavsam / 8 * nch;
+				int w = pcm_length * wavsam_depth / 8 * nch;
 				m_ringbuf.LockBuffer(&tmp, w);
 				if (!tmp) {
 					tmp = m_tmp;
