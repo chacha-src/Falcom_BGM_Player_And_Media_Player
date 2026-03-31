@@ -1351,6 +1351,9 @@ public:
 		CloseHandle(m_hFile);
 	}
 
+	// pack_pcm / リングは m_dwBitsPerSample 基準。グローバル wavsam_depth と混在させると 16/24 でフレーム数が 1.5 倍ずれる。
+	DWORD GetBitsPerSample() const { return m_dwBitsPerSample; }
+
 	BYTE *buf2=NULL;
 
 	struct mad_stream    m_stream2;
@@ -1622,7 +1625,7 @@ public:
 					ch2 = NULL;
 				int pcm_length = m_synth2.pcm.length;
 				BYTE *tmp = NULL;
-				int w = pcm_length * wavsam_depth / 8 * nch;
+				int w = pcm_length * (int)m_dwBitsPerSample / 8 * nch;
 				m_ringbuf.LockBuffer(&tmp, w);
 				if (!tmp) {
 					tmp = m_tmp;

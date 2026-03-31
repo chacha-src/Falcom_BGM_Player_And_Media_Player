@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
 //#include <math.h>
@@ -64,6 +64,7 @@ extern void playwavds(BYTE* bw);
 extern void playwavds2(BYTE* bw, int len);
 extern BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2);
 extern int mode;
+extern int Mp3GetDecoderBitsForRubberBand(void);
 extern int wav999_use_adbuf;
 extern save savedata;
 LPDIRECTSOUND3DLISTENER m_listener = NULL;
@@ -533,8 +534,15 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t = false)
 		g_rubberBandStretcher->setTimeRatio(tempoRate);
 		g_rubberBandStretcher->setPitchScale(static_cast<float>(semitones));
 
-		// 3. データ変換
-		uint16_t bps = (uint16_t)((wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth));
+		// 3. データ変換（MP3 は MAD 出力＝m_dwBitsPerSample。g_mp3_decoder_bps だけだと 24bit 時に 16 のまま残り 1.5 倍ずれる）
+		uint16_t bps;
+		if (mode == -10) {
+			int bits = Mp3GetDecoderBitsForRubberBand();
+			bps = (uint16_t)bits;
+		}
+		else {
+			bps = (uint16_t)((wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth));
+		}
 		ConvertRawBytesToFloat(m_bufwav3_1, bps, wavchannel, inputFloatData);
 		if (inputFloatData.empty()) return false;
 
