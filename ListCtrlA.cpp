@@ -23,6 +23,7 @@ int CListCtrlA::OnCreate(LPCREATESTRUCT lpCreateStruct)
 {
 	if (CListCtrl::OnCreate(lpCreateStruct) == -1)
 		return -1;
+	SetExtendedStyle(GetExtendedStyle() | LVS_EX_DOUBLEBUFFER);
 	return 0;
 }
 
@@ -154,6 +155,7 @@ void CListCtrlA::PreSubclassWindow()
 {
 	// TODO: この位置に固有の処理を追加するか、または基本クラスを呼び出してください
 //    EnableToolTips(TRUE);
+	SetExtendedStyle(GetExtendedStyle() | LVS_EX_DOUBLEBUFFER);
 
 	CListCtrl::PreSubclassWindow();
 }
