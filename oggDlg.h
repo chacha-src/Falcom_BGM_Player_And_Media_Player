@@ -8,6 +8,9 @@
 #ifndef WM_TIMERP_VSYNC_TICK
 #define WM_TIMERP_VSYNC_TICK (WM_APP + 70)
 #endif
+#ifndef WM_OGG_DEFERRED_HEAVY_INIT
+#define WM_OGG_DEFERRED_HEAVY_INIT (WM_APP + 100)
+#endif
 
 #if _MSC_VER > 1000
 #pragma once
@@ -162,6 +165,8 @@ protected:
 	// 生成されたメッセージ マップ関数
 	//{{AFX_MSG(COggDlg)
 	virtual BOOL OnInitDialog();
+	afx_msg LRESULT OnDeferredHeavyStartup(WPARAM wParam, LPARAM lParam);
+	void DeferredHeavyStartupImpl();
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	afx_msg void OnPaint();
 	afx_msg HCURSOR OnQueryDragIcon();

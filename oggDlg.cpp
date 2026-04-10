@@ -652,6 +652,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomDialog)
 	ON_MESSAGE(WM_APP + 2, dp2)
 	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
 	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
+	ON_MESSAGE(WM_OGG_DEFERRED_HEAVY_INIT, OnDeferredHeavyStartup)
 	ON_WM_COPYDATA()
 	ON_WM_KEYDOWN()
 	ON_WM_SYSKEYDOWN()
@@ -2211,10 +2212,6 @@ BOOL COggDlg::OnInitDialog()
 	s.Format(_T("%3d"), savedata.kakuVal);
 	m_kakuVolval.SetWindowText(s);
 	m_kakuVol.SetPos(savedata.kakuVol);
-	m_kakuVol.SetRange(100, 900);
-	s.Format(_T("%3d"), savedata.kakuVal);
-	m_kakuVolval.SetWindowText(s);
-	m_kakuVol.SetPos(savedata.kakuVol);
 	CKpilist kp;
 	kp.status = 1;
 	kp.Init();
@@ -2251,6 +2248,9 @@ BOOL COggDlg::OnInitDialog()
 	stflg = TRUE;
 
 	SetTimer(59877, 500, NULL); // eq
+
+	// ツールチップ・更新チェック・スペアナ窓関数テーブルなど、初回表示後でよい重い処理
+	PostMessage(WM_OGG_DEFERRED_HEAVY_INIT, 0, 0);
 
 	return TRUE;  // TRUE を返すとコントロールに設定したフォーカスは失われません。
 }
@@ -17610,12 +17610,9 @@ void COggDlg::OnPause()
 
 BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 {
-	// CG: 以下のブロックはツールヒント コンポーネントによって追加されました
-	{
-		// ツールヒントにこのメッセージを処理させます
+	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
-	}
-	return CCustomDialog::PreTranslateMessage(pMsg);	// CG: 以下のブロックはツールヒント コンポーネントによって追加されました
+	return CCustomDialog::PreTranslateMessage(pMsg);
 }
 
 void COggDlg::OnOK()
@@ -19832,3 +19829,15 @@ void COggDlg::OnBnClickedButton59()
 	m_EqualizerDlg.SetFocus();
 }
 
+void COggDlg::DeferredHeavyStartupImpl()
+{
+#include "oggDlg_DeferredHeavy.inc"
+}
+
+LRESULT COggDlg::OnDeferredHeavyStartup(WPARAM, LPARAM)
+{
+	if (!GetSafeHwnd()) return 0;
+	StartUpdateCheckThread(m_hWnd);
+	DeferredHeavyStartupImpl();
+	return 0;
+}
