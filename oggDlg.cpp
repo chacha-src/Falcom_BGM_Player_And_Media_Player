@@ -400,6 +400,7 @@ BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2);
 int g_warmupOutputBytes = 0;
 int  g_warmupRBOutputBytes = 0;
 bool g_inWarmup = false;
+bool g_isWavExportRendering = false;
 //スレッド
 UINT wavread(LPVOID);
 extern BYTE bufimage[0x30000f];
@@ -11502,8 +11503,10 @@ std::vector<uint8_t> outputRawBytesData;
 int readtempo(BYTE* data, int len,bool t = false)
 {
 	m_bufwav3_1.clear();
-	m_bufwav3_1.resize(len);
-	memcpy(m_bufwav3_1.data(), (data), len);
+	if (len > 0) {
+		m_bufwav3_1.resize(len);
+		memcpy(m_bufwav3_1.data(), (data), len);
+	}
 	float te = (float)tempo;
 	if (te >= 200.0f) {
 		te -= 100.0f;
@@ -11512,7 +11515,17 @@ int readtempo(BYTE* data, int len,bool t = false)
 		te = te / 3.0f + 33.3f;
 	}
 	te = 100.0f / te;
-	ProcessAudioWithRubberBand(te,t);
+	// len<=0 のときは常に final 相当で吐き出す（fade1 中も同様）。
+	// fade1 中だけ flush しないと RB 内部にサンプルが残り、無音フェードとぶつかって「ボコ」と消える。
+	// g_rubberBandFinalFlushed で2回目以降は空返しなので無限ループにならない。
+	bool doFinalFlush = t || (len <= 0);
+	if (!ProcessAudioWithRubberBand(te, doFinalFlush)) {
+		// 空入力で process されなかったとき、前回の m_converted を再エンコードすると
+		// 同じフレームがもう一度出力され末尾が「たぶる」（二重になる）
+		m_convertedPcmFloatData.clear();
+		outputRawBytesData.clear();
+		return 0;
+	}
 //	ProcessAudioWithSoundTouch(te,t);
 	int bits;
 	if (mode == -10) {
@@ -12795,7 +12808,8 @@ int readm4a(BYTE* bw, int cnt)
 						r = cnt;
 						muon--;
 					}
-					if (muon == 0) r = 0;
+					// muon 潰しは fade1 停止時のみ（連続再生 endflg 経路では fade1==0 のままなのでここは通さない）
+					if (fade1 == 1 && muon == 0) r = 0;
 
 					int len2 = readtempo(bufkpi, cnt);
 
@@ -12818,6 +12832,9 @@ int readm4a(BYTE* bw, int cnt)
 							if (cnt3 != 0)	memcpy(bufkpi, bufkpi + cnt2, cnt3);
 						}
 					}
+					// readtempo が 0 でデコード不足のとき無限ループしないよう抜ける
+					if (len2 <= 0 && cnt3 < cnt)
+						break;
 					if (poss4 > cnt) break;
 				}
 			}
@@ -13076,10 +13093,28 @@ int readflac(BYTE* bw, int cnt)
 					r = lenl;
 					muon--;
 				}
-				if (muon == 0) r = 0;
+				// fade1 停止フェードで muon を使い切ったら入力を切る（fade1==0 の曲末では muon だけで r を潰さない）
+				if (fade1 == 1 && muon == 0) r = 0;
 				cnt4 = r;
 				if (r == 0) lenl = 0;
-				if (r == 0) break;
+				if (r == 0) {
+					// デコード EOF: readtempo(0) が RB 尻尾を常に吐く（fade1 含む）
+					int tailLen = readtempo(bufkpi, 0);
+					if (tailLen > 0) {
+						if (poss2 + tailLen > max_buffer_size) {
+							int first = max_buffer_size - poss2;
+							memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
+							memcpy(bufkpi3, outputRawBytesData.data() + first, tailLen - first);
+							poss2 = (poss2 + tailLen) % max_buffer_size;
+						}
+						else {
+							memcpy(bufkpi3 + poss2, outputRawBytesData.data(), tailLen);
+							poss2 += tailLen;
+						}
+						poss4 += tailLen;
+					}
+					break;
+				}
 
 				int len2 = readtempo(bufkpi, lenl);
 				if (len2 > 0) {
@@ -13098,6 +13133,8 @@ int readflac(BYTE* bw, int cnt)
 					if (cnt4 != lenl) return cnt4;
 					if (poss4 > lenl) break;
 				}
+				// len2==0 でもデコードが部分読みなら上位へ返さないとループし得る
+				if (cnt4 != lenl) return cnt4;
 			}
 		}
 
@@ -13266,9 +13303,10 @@ int readopus(BYTE* bw, int cnt)
 						r = cnt;
 						muon--;
 					}
-					if (muon == 0) r = 0;
+					if (fade1 == 1 && muon == 0) r = 0;
 
 					int len2 = readtempo(bufkpi, r);
+					cnt4 = r;
 					if ((UINT)wl < (UINT)0x7fff0000) {
 						//				if (cc1 == 1)	cc.Write(bw, cnt);
 						if (cc1 == 1)	cc.Write(outputRawBytesData.data(), len2);
@@ -13292,6 +13330,8 @@ int readopus(BYTE* bw, int cnt)
 						if (r < cnt) return cnt4;
 
 					}
+					else if (r < cnt)
+						return cnt4;
 				}
 			}
 
@@ -13540,13 +13580,28 @@ int readdsd(BYTE* bw, int cnt)
 	return cnt;
 }
 
+// readmp3 はテンポ伸縮で 1 回あたり要求バイトに満たないことがある。それを「EOF」と誤判定すると早めに fade1 になりポコ＋0.5〜1秒手前で止まる
+static int ReadMp3Accumulate(BYTE* dst, int wantBytes)
+{
+	int got = 0;
+	int guard = 0;
+	const int maxIters = 8192;
+	while (got < wantBytes && guard++ < maxIters) {
+		int n = readmp3(dst + got, wantBytes - got);
+		if (n <= 0)
+			break;
+		got += n;
+	}
+	return got;
+}
+
 int readme = 0;
 int playwavmp3(BYTE* bw, int old, int l1, int l2)
 {
 	// playb は readmp3 内で readtempo 出力バイト数(len2)から加算（readBuffwav と同じ）。先に l1/l2 で足すと伸縮と不一致になる。
 	//データ読み込み
 	int rrr = 0, rrr2 = 0;
-	rrr = readmp3(bw + old, l1);
+	rrr = ReadMp3Accumulate(bw + old, l1);
 	if (l1 != rrr) {
 		if (savedata.saveloop == 0 && endf == 1) {
 			if (savedata.saverenzoku == 0) {
@@ -13564,11 +13619,11 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 				delete g_rubberBandStretcher;
 				g_rubberBandStretcher = NULL;
 			}
-			readmp3(bw + old + rrr, l1 - rrr);
+			ReadMp3Accumulate(bw + old + rrr, l1 - rrr);
 		}
 	}
 	if (l2) {
-		rrr2 = readmp3(bw, l2);
+		rrr2 = ReadMp3Accumulate(bw, l2);
 		if (l2 != rrr2) {
 			if (savedata.saveloop == 0 && endf == 1) {
 				if (savedata.saverenzoku == 0) {
@@ -13585,7 +13640,7 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 					delete g_rubberBandStretcher;
 					g_rubberBandStretcher = NULL;
 				}
-				readmp3(bw + rrr2, (int)l2 - rrr2);
+				ReadMp3Accumulate(bw + rrr2, (int)l2 - rrr2);
 			}
 		}
 	}
@@ -13656,13 +13711,7 @@ int readwav(BYTE* bw, int cnt)
 				toRead = (toRead / bytesPerSample) * bytesPerSample;
 			}
 			r = wav_.Render(bufkpi, toRead);
-			if (fade1 == 1) {
-				if (muon != 0) {
-					if (savedata.saverenzoku == 0) { ZeroMemory(bufkpi, rr); muon--; }
-					else endflg = 1;
-				}
-				break;
-			}
+			// fade1 で break する前に readtempo しないと、曲末の実データがストレッチャを通らず欠ける
 			int len2 = 0;
 			if (bytesPerSample == outBytesPerSample) {
 				len2 = readtempo(bufkpi, r);
@@ -13767,6 +13816,14 @@ int readwav(BYTE* bw, int cnt)
 				if (rr > r) return r;
 				if (poss4 > cnt) break;
 			}
+			if (rr > r) return r;
+			if (fade1 == 1) {
+				if (muon != 0) {
+					if (savedata.saverenzoku == 0) { ZeroMemory(bufkpi, rr); muon--; }
+					else endflg = 1;
+				}
+				break;
+			}
 		}
 	}
 	cnt2 = (poss4 < cnt) ? poss4 : cnt;
@@ -13838,11 +13895,17 @@ int readmp3(BYTE* bw, int cnt)
 	int len3 = 0, len4 = 0;
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
+		// シーク直後など RB 初期レイテンシで「入力はあるが len2==0」が続く。break すると return 0 になり再生停止するので continue で足す
+		int mp3RbStallIters = 0;
+		const int kMp3RbStallMax = 512;
 		while (true) {
 			if (savedata.mp3orig)
 				r = mp3_.Render2(bufkpi, rr, kbps);
 			else
 				r = mp3_.Render(bufkpi, rr);
+
+			// 先にテンポ処理。fade1 で ZeroMemory してからだと最終デコードPCMを捨てる
+			int len2 = readtempo(bufkpi, r);
 
 			if (fade1 == 1) {
 				if (muon != 0) {
@@ -13856,9 +13919,9 @@ int readmp3(BYTE* bw, int cnt)
 					}
 				}
 			}
-			int len2 = readtempo(bufkpi, r);
 
 			if (len2 > 0) {
+				mp3RbStallIters = 0;
 				// 書き込み
 				if (poss2 + len2 > max_buffer_size) {
 					int first = max_buffer_size - poss2;
@@ -13872,32 +13935,48 @@ int readmp3(BYTE* bw, int cnt)
 				}
 				poss4 += len2;
 				// playb はここでは進めない。len2 を積むと「今回 bw に渡す cnt バイト」より多く数えてしまい（例: ~1.5 倍）、表示時間が実長より長くなる。
-				if (rr > r) return r;
+				// ここで return r すると bw へ未コピーのまま戻り、r はデコードバイトで伸縮後バイトと単位が違う → playwavmp3 が早 EOF・fade1 誤発火・ポコ音
+				if (rr > r) break;
 				if (poss4 > cnt) break;
+			}
+			// readtempo が 0 のときは上の if (len2>0) に入らず、ここに来る。
+			// r<rr（デコード欠け／EOF）で抜けないと while(true) が無限ループする
+			if (rr > r) break;
+			// フルブロック decode 済みだが RB がまだ出さない → 追加デコードで埋める（シーク直後のレイテンシ対策）
+			if (len2 <= 0 && r > 0 && rr == r) {
+				if (++mp3RbStallIters >= kMp3RbStallMax)
+					break;
+				continue;
 			}
 		}
 	}
 
-	cnt2 = cnt;
+	// リングに溜めた伸縮後データを bw へ。部分デコード時は poss4 < cnt になり得る
+	int to_read = cnt;
+	if (poss4 < cnt)
+		to_read = poss4;
+	cnt2 = to_read;
 
 	if (cnt2 > 0) {
-		int to_read = cnt;
-		if (poss3 + to_read > max_buffer_size) {
+		if (poss3 + cnt2 > max_buffer_size) {
 			int first = max_buffer_size - poss3;
 			memcpy(bw, bufkpi3 + poss3, first);
-			memcpy(bw + first, bufkpi3, to_read - first);
-			poss3 = (poss3 + to_read) % max_buffer_size;
+			memcpy(bw + first, bufkpi3, cnt2 - first);
+			poss3 = (poss3 + cnt2) % max_buffer_size;
 		}
 		else {
-			memcpy(bw, bufkpi3 + poss3, to_read);
-			poss3 += to_read;
+			memcpy(bw, bufkpi3 + poss3, cnt2);
+			poss3 += cnt2;
 		}
-		poss4 -= to_read;
+		poss4 -= cnt2;
 		{
 			const int bpf = PcmOutBytesPerFrame();
-			if (bpf > 0 && to_read > 0)
-				playb += to_read / bpf;
+			if (bpf > 0 && cnt2 > 0)
+				playb += cnt2 / bpf;
 		}
+	}
+	else {
+		return 0;
 	}
 
 	equaliser(bw, cnt2, reset);
@@ -13910,7 +13989,7 @@ int readmp3(BYTE* bw, int cnt)
 	b = (short*)bw;
 	fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
 	if (wavsam_depth == 24) {
-		for (int i = 0; i < cnt / 3; i++) {
+		for (int i = 0; i < cnt2 / 3; i++) {
 			int c4 = b24c[i];
 			c4 = (int)((float)c4 * ((float)savedata.kakuVal / 100.0f));
 			b24c[i] = c4;
@@ -13932,7 +14011,7 @@ int readmp3(BYTE* bw, int cnt)
 		}
 	}
 	else {
-		for (int i = 0; i < cnt / 2; i++) {
+		for (int i = 0; i < cnt2 / 2; i++) {
 			int c = (int)b[i];
 			c = (int)((float)c * ((float)savedata.kakuVal / 100.0f));
 			b[i] = (short)c;
@@ -13953,9 +14032,9 @@ int readmp3(BYTE* bw, int cnt)
 		wl += cnt2;
 	}
 
-	lenl += cnt;
+	lenl += cnt2;
 	//	playb+=cnt;
-	return cnt;
+	return cnt2;
 }
 BOOL oggyomikomi = FALSE;
 
@@ -13976,6 +14055,9 @@ bool InitializeRubberBandStretcher();
 void SeekAndWarmupRubberBand(int targetPos)
 {
 	ResetAudioUpscalerPipeline();
+	// ループ境界で前周回の残骸が混ざらないよう、尻尾バッファは都度破棄
+	g_loopTailBuffer.clear();
+	g_loopTailPos = 0;
 
 	// ゴムバンドの初期化またはリセット
 	if (!g_rubberBandStretcher) {
@@ -14071,7 +14153,7 @@ void SeekAndWarmupRubberBand(int targetPos)
 	poss2 = 0; poss3 = 0; poss4 = 0; poss6 = 0;
 
 	int keptSamples = (int)(m_convertedPcmFloatData.size() / wavchannel);
-	if (keptSamples > 0) {
+	if (keptSamples > 0 && !g_isWavExportRendering) {
 		outputRawBytesData.clear();
 		outputRawBytesData.resize(keptSamples * wavchannel * 2);
 		int16_t* rawOut = (int16_t*)outputRawBytesData.data();
@@ -14097,8 +14179,19 @@ void SeekAndWarmupRubberBand(int targetPos)
 		poss5 = playb;
 	}
 	else {
-		playb = targetPos;
-		poss5 = targetPos;
+		// WAVエクスポート時はウォームアップ出力の先行注入を行わず、
+		// 次の mcopy/readtempo のみで連続波形を作ることで重複を防ぐ
+		poss2 = 0;
+		poss4 = 0;
+		if (keptSamples > 0) {
+			int inputSamplesUsed = (int)(keptSamples * ratio);
+			playb = targetPos + inputSamplesUsed;
+			poss5 = playb;
+		}
+		else {
+			playb = targetPos;
+			poss5 = targetPos;
+		}
 	}
 
 	reset = TRUE;
@@ -16437,7 +16530,17 @@ void timerog1(UINT nIDEvent)
 		}
 	}
 	if (nIDEvent == 9000) {
+		// 連続再生: endflg 直後に即 OnRestart すると DS バッファの未再生分が切れる。数ティック待つ。
+		// 曲末の RubberBand 尻尾は各 read* が readtempo(len==0) で吐き切る（g_rubberBandFinalFlushed で二重 final は抑止）。
+		static int s_contPlayEofWaitTicks = 0;
 		if (savedata.saverenzoku == 1 && endflg == 1) {
+			const int kContPlayEofWaitTicks = 50; // タイマ 10ms 想定 ≒500ms（必要なら調整）
+			if (s_contPlayEofWaitTicks <= 0)
+				s_contPlayEofWaitTicks = kContPlayEofWaitTicks;
+			s_contPlayEofWaitTicks--;
+			if (s_contPlayEofWaitTicks > 0)
+				return;
+			s_contPlayEofWaitTicks = 0;
 			plcnt++;
 			if (pl && plcnt >= pl->m_lc.GetItemCount()) plcnt = 0;
 			endflg = 0;
@@ -16450,6 +16553,8 @@ void timerog1(UINT nIDEvent)
 				og->OnRestart();
 			}
 		}
+		else
+			s_contPlayEofWaitTicks = 0;
 	}
 	if (nIDEvent == 6555) {
 		if (pl)
@@ -19491,8 +19596,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 						ZeroMemory(bufwav3, sizeof(bufwav3));
 						syukai = 1; syukai2 = 0;
 						// 旧 playb はフレーム×4 相当だったので、mp3orig 式の先頭に ×4 を入れて互換
-						if (savedata.mp3orig) mp3_.seek2((__int64)((((__int64)playb * 4) / ((wavchannel == 2 ? 4 : 1) * (wavsam_depth / 16.0f))) / (wavbit_sample_Hz / 44100.0f)), (DWORD)wavchannel);
-						else                  mp3_.seek((__int64)((((__int64)playb * 4) / ((wavchannel == 2 ? 4 : 1) * (wavsam_depth / 16.0f))) / (wavbit_sample_Hz / 44100.0f)), (DWORD)wavchannel);
+						if (savedata.mp3orig) mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
+						else                  mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
 						poss = 0; sek = TRUE; cnt3 = 0;
 						timer.SetEvent();
 						syukai = 0;
@@ -19675,10 +19780,10 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					syukai = 1; syukai2 = 0;
 					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1)break; DoEvent(); } hscroll_lock.lock(); }
 					if (savedata.mp3orig) {
-						if (mp3_.seek2((__int64)((((__int64)playb * 4) / ((wavchannel == 2 ? 4 : 1) * (wavsam_depth / 16.0f))) / (wavbit_sample_Hz / 44100.0f)), (DWORD)wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
+						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
 					else {
-						if (mp3_.seek((__int64)((((__int64)playb * 4) / ((wavchannel == 2 ? 4 : 1) * (wavsam_depth / 16.0f))) / (wavbit_sample_Hz / 44100.0f)), (DWORD)wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
+						if (mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
 					poss = 0; sek = TRUE;
 					timer.SetEvent();
@@ -19765,10 +19870,10 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					syukai = 1; syukai2 = 0;
 					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1)break; DoEvent(); } hscroll_lock.lock(); }
 					if (savedata.mp3orig) {
-						if (mp3_.seek2((__int64)((((__int64)playb * 4) / ((wavchannel == 2 ? 4 : 1) * (wavsam_depth / 16.0f))) / (wavbit_sample_Hz / 44100.0f)), (DWORD)wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
+						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
 					else {
-						if (mp3_.seek((__int64)((((__int64)playb * 4) / ((wavchannel == 2 ? 4 : 1) * (wavsam_depth / 16.0f))) / (wavbit_sample_Hz / 44100.0f)), (DWORD)wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
+						if (mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
 					poss = 0; sek = TRUE;
 					timer.SetEvent();

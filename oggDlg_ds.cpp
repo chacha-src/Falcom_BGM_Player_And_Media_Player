@@ -67,6 +67,7 @@ extern int mode;
 extern int Mp3GetDecoderBitsForRubberBand(void);
 extern int wav999_use_adbuf;
 extern save savedata;
+extern bool g_isWavExportRendering;
 LPDIRECTSOUND3DLISTENER m_listener = NULL;
 extern RubberBand::RubberBandStretcher* g_rubberBandStretcher;
 BOOL reset = TRUE;
@@ -276,7 +277,7 @@ extern std::vector<float> m_convertedPcmFloatData;
 extern std::vector<uint8_t> outputRawBytesData;
 
 //bool ProcessAudioWithSoundTouch(float tempoRate);
-bool ProcessAudioWithRubberBand(float tempoRate);
+bool ProcessAudioWithRubberBand(float tempoRate, bool t = false);
 void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
 	uint16_t bits_per_sample, uint16_t channels,
 	std::vector<float>& out_float_data);
@@ -440,12 +441,20 @@ UINT HandleNotifications(LPVOID)
 void HandleNotifications_export()
 {
 	if (wavExportPath.GetLength() == 0 || cc1 != 1) return;
+	g_isWavExportRendering = true;
+	struct ExportModeGuard {
+		~ExportModeGuard() { g_isWavExportRendering = false; }
+	} exportModeGuard;
 	thn1 = FALSE;  // 2回目以降：前回stop1()でTRUEになったままなのでリセット必須
 	oldw = 0;
 	fade1 = 0;
 	const ULONG bufSize = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM_DS;
 	const int chunkSize = (int)(WAVDALen / 10);
 	if (chunkSize <= 0) return;
+	if (g_rubberBandStretcher) {
+		delete g_rubberBandStretcher;
+		g_rubberBandStretcher = NULL;
+	}
 	for (;;) {
 		DoEvent();
 		if (syukai == 2) break;
@@ -480,6 +489,7 @@ extern int pitch;
 extern float tempoRate2;
 std::vector<float> g_loopTailBuffer;
 size_t g_loopTailPos = 0;
+static bool g_rubberBandFinalFlushed = false;
 
 // 初期化関数（これは最初の一度、または設定変更時のみ呼び出す）
 bool InitializeRubberBandStretcher()
@@ -488,6 +498,7 @@ bool InitializeRubberBandStretcher()
 		delete g_rubberBandStretcher;
 		g_rubberBandStretcher = NULL;
 	}
+	g_rubberBandFinalFlushed = false;
 
 	try {
 		double pitchRatio = pitch / 100.0;
@@ -510,15 +521,20 @@ bool InitializeRubberBandStretcher()
 }
 
 // ストリーミング用：データを投入し、現在取り出せる全データを回収する
-bool ProcessAudioWithRubberBand(float tempoRate, bool t = false)
+bool ProcessAudioWithRubberBand(float tempoRate, bool t)
 {
 	try {
-		if (m_bufwav3_1.empty()) return false;
+		if (m_bufwav3_1.empty() && !t) return false;
 
 		// 1. ストレッチャーの準備
 		if (!g_rubberBandStretcher) {
+			if (t) return false;
 			tempoRate2 = tempoRate;
 			if (!InitializeRubberBandStretcher()) return false;
+		}
+		else if (t && g_rubberBandFinalFlushed) {
+			m_convertedPcmFloatData.clear();
+			return true;
 		}
 
 		// 2. パラメータの更新
@@ -534,33 +550,49 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t = false)
 		g_rubberBandStretcher->setTimeRatio(tempoRate);
 		g_rubberBandStretcher->setPitchScale(static_cast<float>(semitones));
 
-		// 3. データ変換（MP3 は MAD 出力＝m_dwBitsPerSample。g_mp3_decoder_bps だけだと 24bit 時に 16 のまま残り 1.5 倍ずれる）
-		uint16_t bps;
-		if (mode == -10) {
-			int bits = Mp3GetDecoderBitsForRubberBand();
-			bps = (uint16_t)bits;
+		std::vector<float*> channelPointers;
+		size_t samplesIn = 0;
+		if (!t) {
+			// 3. データ変換（MP3 は MAD 出力＝m_dwBitsPerSample。g_mp3_decoder_bps だけだと 24bit 時に 16 のまま残り 1.5 倍ずれる）
+			uint16_t bps;
+			if (mode == -10) {
+				int bits = Mp3GetDecoderBitsForRubberBand();
+				bps = (uint16_t)bits;
+			}
+			else {
+				bps = (uint16_t)((wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth));
+			}
+			ConvertRawBytesToFloat(m_bufwav3_1, bps, wavchannel, inputFloatData);
+			if (inputFloatData.empty()) return false;
+
+			samplesIn = inputFloatData.size() / wavchannel;
+			std::vector<std::vector<float>> channelData(wavchannel, std::vector<float>(samplesIn));
+			for (size_t i = 0; i < samplesIn; ++i) {
+				for (int ch = 0; ch < wavchannel; ++ch) {
+					channelData[ch][i] = inputFloatData[i * wavchannel + ch];
+				}
+			}
+			channelPointers.resize(wavchannel);
+			for (int ch = 0; ch < wavchannel; ++ch) {
+				channelPointers[ch] = channelData[ch].data();
+			}
+
+			// 4. データの投入
+			g_rubberBandStretcher->process(channelPointers.data(), samplesIn, false);
+			g_rubberBandFinalFlushed = false;
 		}
 		else {
-			bps = (uint16_t)((wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth));
-		}
-		ConvertRawBytesToFloat(m_bufwav3_1, bps, wavchannel, inputFloatData);
-		if (inputFloatData.empty()) return false;
-
-		size_t samplesIn = inputFloatData.size() / wavchannel;
-		std::vector<std::vector<float>> channelData(wavchannel, std::vector<float>(samplesIn));
-		for (size_t i = 0; i < samplesIn; ++i) {
+			// EOF 時は入力なしで final=true を1回だけ送って内部キューを吐き切る
+			// 実装によっては samples==0 でも input ポインタ配列の NULL を嫌うため、
+			// ダミーの無音1サンプルを各chに用意して安全に呼ぶ。
+			std::vector<std::vector<float>> dummyData(wavchannel, std::vector<float>(1, 0.0f));
+			std::vector<float*> dummyPointers(wavchannel);
 			for (int ch = 0; ch < wavchannel; ++ch) {
-				channelData[ch][i] = inputFloatData[i * wavchannel + ch];
+				dummyPointers[ch] = dummyData[ch].data();
 			}
+			g_rubberBandStretcher->process(dummyPointers.data(), 0, true);
+			g_rubberBandFinalFlushed = true;
 		}
-
-		std::vector<float*> channelPointers(wavchannel);
-		for (int ch = 0; ch < wavchannel; ++ch) {
-			channelPointers[ch] = channelData[ch].data();
-		}
-
-		// 4. データの投入
-		g_rubberBandStretcher->process(channelPointers.data(), samplesIn, false);
 
 		// 5. 現在のバッファから取り出せる分をすべて回収
 		m_convertedPcmFloatData.clear();
