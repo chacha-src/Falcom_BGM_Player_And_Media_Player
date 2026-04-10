@@ -262,6 +262,11 @@ private:
 	int m_nCachedHeight;
 	int m_nCachedWidth;
 	CRect m_rectCached;
+
+	// WM_PAINT ごとの互換ビットマップ再生成を避ける（サイズ変更時のみ再作成）
+	CBitmap m_memBackstore;
+	int m_backstoreW;
+	int m_backstoreH;
 };
 
 // カスタムリストボックス

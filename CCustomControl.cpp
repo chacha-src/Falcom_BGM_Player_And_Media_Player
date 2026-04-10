@@ -878,12 +878,14 @@ CCustomStatic::CCustomStatic()
     , m_bPreferWideMode(FALSE)
     , m_nCachedHeight(0), m_nCachedWidth(0)
     , m_strCachedText(_T("")), m_strText(_T(""))
+    , m_backstoreW(0), m_backstoreH(0)
 {
 }
 
 CCustomStatic::~CCustomStatic()
 {
     if (m_font.GetSafeHandle()) m_font.DeleteObject();
+    if (m_memBackstore.GetSafeHandle()) m_memBackstore.DeleteObject();
 }
 
 // [FIX❺]
@@ -970,22 +972,35 @@ void CCustomStatic::OnPaint()
     CPaintDC dc(this);
     CRect rect;
     GetClientRect(&rect);
+    const int rw = rect.Width();
+    const int rh = rect.Height();
+    if (rw <= 0 || rh <= 0) return;
+
+    if (m_strText.IsEmpty()) CWnd::GetWindowText(m_strText);
+    if (m_strText.IsEmpty())
+    {
+        dc.FillSolidRect(&rect, COLOR_DIALOG_BG);
+        return;
+    }
 
     CDC memDC;
     memDC.CreateCompatibleDC(&dc);
-    CBitmap memBitmap;
-    memBitmap.CreateCompatibleBitmap(&dc, rect.Width(), rect.Height());
-    CBitmap* pOldBitmap = memDC.SelectObject(&memBitmap);
+    if (rw != m_backstoreW || rh != m_backstoreH || !m_memBackstore.GetSafeHandle())
+    {
+        if (m_memBackstore.GetSafeHandle()) m_memBackstore.DeleteObject();
+        m_memBackstore.CreateCompatibleBitmap(&dc, rw, rh);
+        m_backstoreW = rw;
+        m_backstoreH = rh;
+    }
+    CBitmap* pOldBitmap = memDC.SelectObject(&m_memBackstore);
 
     memDC.FillSolidRect(&rect, COLOR_DIALOG_BG);
 
-    if (m_strText.IsEmpty()) CWnd::GetWindowText(m_strText);
-
-    if (!m_strText.IsEmpty())
     {
         CString strText = m_strText;
-        std::vector<TextSegment> segments = ParseFormattedText(strText);
-        BOOL bHasFormatting = (strText.Find(_T("!@")) >= 0);
+        const BOOL bHasFormatting = (strText.Find(_T("!@")) >= 0);
+        std::vector<TextSegment> segments;
+        if (bHasFormatting) segments = ParseFormattedText(strText);
 
         CRect rectWithMargin = rect;
         rectWithMargin.DeflateRect(1, 1);
@@ -1195,9 +1210,8 @@ void CCustomStatic::OnPaint()
         memDC.SelectObject(pOldFont);
     }
 
-    dc.BitBlt(0, 0, rect.Width(), rect.Height(), &memDC, 0, 0, SRCCOPY);
+    dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
     memDC.SelectObject(pOldBitmap);
-    memBitmap.DeleteObject();
     memDC.DeleteDC();
 }
 
@@ -1862,7 +1876,7 @@ void CCustomListCtrl::UpdateHotItem(int nItem)
     m_nHotItem = nItem;
     if (nOldHot >= 0) RedrawItems(nOldHot, nOldHot);
     if (m_nHotItem >= 0) RedrawItems(m_nHotItem, m_nHotItem);
-    UpdateWindow();
+    // UpdateWindow による同期全面描画は重い。LVS_EX_DOUBLEBUFFER と RedrawItems で十分。
 }
 
 void CCustomListCtrl::UpdateHotItemFromCursor()
@@ -2888,7 +2902,9 @@ CCustomDialog::~CCustomDialog() { if (m_brDialog.GetSafeHandle())m_brDialog.Dele
 BOOL CCustomDialog::OnInitDialog()
 {
     BOOL bResult = CDialog::OnInitDialog();
-    PostMessage(WM_USER + 1000, 0, 0);
+    // 同期サブクラス化: PostMessage 1 往復分を削減し、OnInitDialog 内の SetDlgItemText が
+    // カスタムコントロールに届いた状態で実行される（見た目・挙動は同等）。
+    SubclassChildControls();
     return bResult;
 }
 
@@ -3015,7 +3031,12 @@ CCustomDialogEx::CCustomDialogEx(UINT nIDTemplate, CWnd* pParentWnd)
 }
 CCustomDialogEx::~CCustomDialogEx() { if (m_brDialog.GetSafeHandle())m_brDialog.DeleteObject(); }
 
-BOOL CCustomDialogEx::OnInitDialog() { BOOL b = CDialogEx::OnInitDialog(); PostMessage(WM_USER + 1000, 0, 0); return b; }
+BOOL CCustomDialogEx::OnInitDialog()
+{
+    BOOL b = CDialogEx::OnInitDialog();
+    SubclassChildControls();
+    return b;
+}
 LRESULT CCustomDialogEx::OnSubclassControls(WPARAM, LPARAM) { SubclassChildControls(); return 0; }
 
 void CCustomDialogEx::SubclassChildControls()
