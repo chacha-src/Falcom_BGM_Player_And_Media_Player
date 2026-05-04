@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "CCustomControl.h"
+#include <algorithm>
 #include <cmath>
 
 #ifdef SubclassWindow
@@ -695,6 +696,74 @@ static void DrawSmartText(CDC* pDC, CRect rect, CString strText, BOOL bDisabled,
 
     pDC->SelectObject(pOldFont);
     fontSmall.DeleteObject();
+}
+
+// ListCtrl/ListBox 共通: GetTextExtent + WorldTransform + 論理 DrawText（ジャストフィット寄りの小さな余裕のみ）
+static void DrawListSubitemCellText(CDC* pDC, const CString& str, const CRect& rcInner)
+{
+    if (!pDC || str.IsEmpty() || rcInner.Width() <= 0 || rcInner.Height() <= 0)
+        return;
+
+    TEXTMETRIC tm;
+    pDC->GetTextMetrics(&tm);
+    const int nFontH = tm.tmHeight;
+    const int nMaxW = (std::max)(1, rcInner.Width());
+    const int nBudget = (std::max)(1, nMaxW - 3);
+
+    int yTop = rcInner.top;
+    if (rcInner.Height() >= nFontH)
+        yTop = rcInner.top + (rcInner.Height() - nFontH) / 2;
+    const int drawH = (std::min)(nFontH, (std::max)(1, rcInner.Height()));
+
+    SIZE sz = { 0, 0 };
+    if (!::GetTextExtentPoint32(pDC->GetSafeHdc(), str, str.GetLength(), &sz))
+        return;
+    if (sz.cx <= 0)
+        sz.cx = 1;
+
+    const UINT uDT = DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX;
+
+    if (sz.cx <= nMaxW)
+    {
+        CRect rcDraw(rcInner.left, yTop, rcInner.right, yTop + drawH);
+        pDC->DrawText(str, &rcDraw, uDT);
+        return;
+    }
+
+    if (!pDC->SaveDC())
+    {
+        CRect rcDraw(rcInner.left, yTop, rcInner.right, yTop + drawH);
+        pDC->DrawText(str, &rcDraw, uDT | DT_END_ELLIPSIS);
+        return;
+    }
+
+    pDC->SetGraphicsMode(GM_ADVANCED);
+
+    float scale = 1.0f;
+    for (int iter = 0; iter < 64; ++iter)
+    {
+        float wDevice = (float)sz.cx * scale;
+        if (wDevice <= (float)nBudget)
+            break;
+        scale *= (float)nBudget / wDevice;
+        if (scale < 0.12f)
+        {
+            scale = 0.12f;
+            break;
+        }
+    }
+    scale *= 0.95f;
+    if (scale < 0.12f)
+        scale = 0.12f;
+
+    XFORM xf = { scale, 0.0f, 0.0f, 1.0f, (float)rcInner.left, (float)yTop };
+    pDC->SetWorldTransform(&xf);
+    const int maxChW = (tm.tmMaxCharWidth > 0) ? (int)tm.tmMaxCharWidth : (int)tm.tmAveCharWidth;
+    const int rcW = sz.cx + (std::max)(16, maxChW + 4);
+    CRect rcLogical(0, 0, rcW, drawH + 6);
+    pDC->DrawText(str, &rcLogical, uDT);
+
+    pDC->RestoreDC(-1);
 }
 
 static void DrawSmartText2(CDC* pDC, CRect rect, CString strText, UINT nFormat, BOOL bDisabled, BOOL bPushed)
@@ -1476,8 +1545,13 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     GetText(lp->itemID, strText);
     CRect rcText = rect;
     rcText.left += 20;
-    pDC->SetBkMode(TRANSPARENT);
-    DrawSmartText(pDC, rcText, strText, FALSE, FALSE);
+    rcText.DeflateRect(1, 1);
+    pDC->SetTextColor(COLOR_EDIT_TEXT);
+    pDC->SetBkColor(clrBg);
+    pDC->SetBkMode(OPAQUE);
+    CFont* pOldFont = pDC->SelectObject(GetFont());
+    DrawListSubitemCellText(pDC, strText, rcText);
+    pDC->SelectObject(pOldFont);
 
     if (lp->itemID < (UINT)(GetCount() - 1))
         DrawLaceLine(pDC, rect.left + 15, rect.bottom - 1, rect.right - 15, rect.bottom - 1, RGB(200, 180, 220));
@@ -1808,9 +1882,9 @@ void CCustomComboBox::UpdateDropDownWidth()
 // ============================================================================
 // CCustomListCtrl
 // ============================================================================
-IMPLEMENT_DYNAMIC(CCustomListCtrl, CListCtrl)
+IMPLEMENT_DYNAMIC(CCustomListCtrl, CListCtrlA)
 
-BEGIN_MESSAGE_MAP(CCustomListCtrl, CListCtrl)
+BEGIN_MESSAGE_MAP(CCustomListCtrl, CListCtrlA)
     ON_WM_CTLCOLOR_REFLECT()
     ON_NOTIFY_REFLECT(NM_CUSTOMDRAW, OnCustomDraw)
     ON_WM_MOUSEMOVE()
@@ -1842,6 +1916,7 @@ void CCustomListCtrl::PostNcDestroy()
 void CCustomListCtrl::PreSubclassWindow()
 {
     CListCtrlA::PreSubclassWindow();
+    ModifyStyle(0, WS_CLIPCHILDREN);
     SetBkColor(COLOR_LIST_BG);
     SetTextBkColor(COLOR_LIST_BG);
     SetTextColor(RGB(0, 0, 0));
@@ -1946,6 +2021,17 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
         CRect rect;
         GetSubItemRect(nItem, nSubItem, LVIR_BOUNDS, rect);
+        if (nSubItem == 0)
+        {
+            const int cx0 = GetColumnWidth(0);
+            if (cx0 > 0)
+                rect.right = (std::min)((int)rect.right, (int)rect.left + cx0);
+        }
+        int nLastCol = GetHeaderCtrl()->GetItemCount() - 1;
+        CRect rcClient;
+        GetClientRect(&rcClient);
+        if (nSubItem >= nLastCol - 1 && rect.right < rcClient.right)
+            rect.right = (int)rcClient.right;
 
         BOOL bSel = (GetItemState(nItem, LVIS_SELECTED) & LVIS_SELECTED);
         BOOL bHot = (nItem == m_nHotItem);
@@ -1983,14 +2069,32 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         pDC->SetBkMode(OPAQUE);
 
         CRect rcText = rect;
-        rcText.left += (nSubItem == 0) ? 36 : 6;
-        rcText.DeflateRect(2, 2);
+        if (nSubItem == 0)
+        {
+            int nTextLeft = rect.left + 36;
+            CRect rcIconBounds;
+            if (GetItemRect(nItem, &rcIconBounds, LVIR_ICON))
+            {
+                LVITEM lviProbe = { 0 };
+                lviProbe.mask = LVIF_IMAGE;
+                lviProbe.iItem = nItem;
+                GetItem(&lviProbe);
+                CImageList* pImgListProbe = GetImageList(LVSIL_SMALL);
+                if (pImgListProbe && lviProbe.iImage >= 0 && rcIconBounds.Width() > 0)
+                    nTextLeft = (std::max)(nTextLeft, (int)rcIconBounds.right + 4);
+            }
+            nTextLeft = (std::min)(nTextLeft, (int)rect.right - 4);
+            rcText.left = (std::max)(nTextLeft, (int)rect.left + 4);
+        }
+        else
+            rcText.left += 6;
+        rcText.DeflateRect(2, 0);
 
         CFont* pOldFont = pDC->SelectObject(GetFont());
-        pDC->DrawText(strText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawListSubitemCellText(pDC, strText, rcText);
         pDC->SelectObject(pOldFont);
 
-        if (nSubItem == GetHeaderCtrl()->GetItemCount() - 1)
+        if (nSubItem == nLastCol)
             DrawLaceLine(pDC, rect.left + 10, rect.bottom - 1, rect.right - 10, rect.bottom - 1, RGB(200, 180, 220));
 
         if (GetExtendedStyle() & LVS_EX_GRIDLINES)

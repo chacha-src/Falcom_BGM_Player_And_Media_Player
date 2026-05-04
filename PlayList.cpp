@@ -339,6 +339,20 @@ BOOL CPlayList::OnInitDialog()
 	if(pc==NULL){
 		pc = (playlistdata0*)malloc(sizeof(playlistdata0));
 	}
+	// m_lc はダイアログ再作成のたびに新しい HWND になるが、グローバル tlg は残るため
+	// タイマー側の tl!=tlg だけだと EnableToolTips が一度も呼ばれず行ツールチップが出ない。
+	{
+		const int on = m_tool.GetCheck();
+		m_lc.EnableToolTips(on ? TRUE : FALSE);
+		DWORD ex = m_lc.GetExtendedStyle();
+		if (on)
+			ex &= ~LVS_EX_INFOTIP;
+		else
+			ex |= LVS_EX_INFOTIP;
+		m_lc.SetExtendedStyle(ex);
+		extern int tlg;
+		tlg = on;
+	}
 	SetTimer(20,20,NULL);
 	SetTimer(3000,1200,NULL);
 	SetTimer(40,500,NULL);
@@ -441,7 +455,12 @@ void CPlayList::OnBnClickedOk()
 
 BOOL CPlayList::PreTranslateMessage(MSG* pMsg)
 {
-	// TODO: ここに特定なコードを追加するか、もしくは基本クラスを呼び出してください。
+	if (m_lc.GetSafeHwnd() && m_tool.GetCheck())
+	{
+		if (m_lc.PreTranslateMessage(pMsg))
+			return TRUE;
+	}
+	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 
 	return CCustomDialog::PreTranslateMessage(pMsg);

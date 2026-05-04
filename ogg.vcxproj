@@ -3459,6 +3459,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="cpp.hint" />
+    <None Include="oggDlg_DeferredHeavy.inc" />
     <None Include="res\ico00001.ico" />
     <None Include="res\ico00002.ico" />
     <None Include="res\ico00003.ico" />

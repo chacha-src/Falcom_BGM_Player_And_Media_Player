@@ -3,6 +3,17 @@
 #include "ListCtrlA.h"
 #include "CCustomControl.h"
 
+// KPI 一覧用リストビュー（行ツールチップ：パス／Ver／CPU／拡張子）
+class CKpiListCtrl : public CCustomListCtrl
+{
+	DECLARE_DYNAMIC(CKpiListCtrl)
+public:
+	CKpiListCtrl() = default;
+protected:
+	void BuildToolTipText(int row, int col, CString& out) override;
+	DECLARE_MESSAGE_MAP()
+};
+
 // CKpilist ダイアログ
 
 class CKpilist : public CCustomDialog
@@ -26,7 +37,7 @@ protected:
 public:
 	virtual BOOL OnInitDialog();
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
-	CCustomListCtrl m_lc;
+	CKpiListCtrl m_lc;
 	afx_msg void OnLvnItemchangedList1(NMHDR *pNMHDR, LRESULT *pResult);
 	afx_msg void OnBnClickedOk();
 	CCustomStandardButton m_okdummy;

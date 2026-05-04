@@ -40,7 +40,56 @@ extern CString kpif[400];
 extern TCHAR kpifs[200][64];
 extern BOOL kpichk[200];
 extern BYTE kpiarch[150];
+extern BYTE kvar[150][300];
 extern TCHAR karento2[1024];
+
+IMPLEMENT_DYNAMIC(CKpiListCtrl, CCustomListCtrl)
+
+BEGIN_MESSAGE_MAP(CKpiListCtrl, CCustomListCtrl)
+END_MESSAGE_MAP()
+
+void CKpiListCtrl::BuildToolTipText(int row, int col, CString& out)
+{
+	UNREFERENCED_PARAMETER(col);
+	out.Empty();
+	if (row < 0 || row >= GetItemCount() || row >= kpicnt)
+		return;
+
+	CString exts;
+	for (int i = 0; ; ++i)
+	{
+		if (ext[row][i].IsEmpty())
+			break;
+		if (!exts.IsEmpty())
+			exts += L'/';
+		exts += ext[row][i];
+	}
+
+	CString ver;
+	ver.Format(L"%u", (unsigned)kvar[row][0]);
+	CString arch = L"?";
+	if (kpiarch[row] == 32)
+		arch = L"x86";
+	else if (kpiarch[row] == 64)
+		arch = L"x64";
+
+	out.Format(LL14(
+		L"パス：%s\nバージョン：%s\nCPU：%s\n拡張子：%s",
+		L"Path: %s\nVersion: %s\nCPU: %s\nExtensions: %s",
+		L"Chemin : %s\nVersion : %s\nCPU : %s\nExtensions : %s",
+		L"Percorso: %s\nVersione: %s\nCPU: %s\nEstensioni: %s",
+		L"Ruta: %s\nVersión: %s\nCPU: %s\nExtensiones: %s",
+		L"경로: %s\n버전: %s\nCPU: %s\n확장자: %s",
+		L"路径：%s\n版本：%s\nCPU：%s\n扩展名：%s",
+		L"المسار: %s\nالإصدار: %s\nالمعالج: %s\nالامتدادات: %s",
+		L"Путь: %s\nВерсия: %s\nЦП: %s\nРасширения: %s",
+		L"Pfad: %s\nVersion: %s\nCPU: %s\nErweiterungen: %s",
+		L"Caminho: %s\nVersão: %s\nCPU: %s\nExtensões: %s",
+		L"Pad: %s\nVersie: %s\nCPU: %s\nExtensies: %s",
+		L"Ścieżka: %s\nWersja: %s\nCPU: %s\nRozszerzenia: %s",
+		L"Yol: %s\nSürüm: %s\nCPU: %s\nUzantılar: %s"),
+		(LPCTSTR)kpif[row], (LPCTSTR)ver, (LPCTSTR)arch, (LPCTSTR)exts);
+}
 
 BOOL CKpilist::OnInitDialog()
 {
@@ -53,14 +102,19 @@ BOOL CKpilist::OnInitDialog()
 	m_tooltip.SetDelayTime( TTDT_AUTOPOP, 10000 );
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 
-
 	Init();
+	if (m_lc.GetSafeHwnd())
+	{
+		m_lc.EnableToolTips(TRUE);
+		DWORD ex = m_lc.GetExtendedStyle();
+		ex |= LVS_EX_INFOTIP;
+		m_lc.SetExtendedStyle(ex);
+	}
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
 }
 
 BOOL kpichks[300];
-extern BYTE kvar[150][300];
 
 void CKpilist::Init()
 {
@@ -217,9 +271,10 @@ void CKpilist::OnLvnItemchangedList1(NMHDR *pNMHDR, LRESULT *pResult)
 
 BOOL CKpilist::PreTranslateMessage(MSG* pMsg)
 {
-	// TODO: ここに特定なコードを追加するか、もしくは基本クラスを呼び出してください。
+	if (m_lc.GetSafeHwnd() && m_lc.PreTranslateMessage(pMsg))
+		return TRUE;
+	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
-
 	return CCustomDialog::PreTranslateMessage(pMsg);
 }
 

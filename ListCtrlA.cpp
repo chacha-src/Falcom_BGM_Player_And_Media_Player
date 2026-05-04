@@ -1,6 +1,8 @@
 ﻿#include "stdafx.h"
 #include "ListCtrlA.h"
 
+IMPLEMENT_DYNAMIC(CListCtrlA, CListCtrl)
+
 CListCtrlA::CListCtrlA(void)
 {
 }
@@ -27,27 +29,33 @@ int CListCtrlA::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	return 0;
 }
 
+void CListCtrlA::BuildToolTipText(int row, int col, CString& out)
+{
+	UNREFERENCED_PARAMETER(col);
+	CString i, j, k, l, m;
+	i = GetItemText(row, 0);
+	j = GetItemText(row, 3);
+	k = GetItemText(row, 4);
+	l = GetItemText(row, 2);
+	m = GetItemText(row, 1);
+	out.Format(LL14(L"名前：%s\nアーティスト：%s\nアルバム：%s\n時間：%s\n種類：%s", L"Name: %s\nArtist: %s\nAlbum: %s\nTime: %s\nType: %s", L"Nom : %s\nArtiste : %s\nAlbum : %s\nDurée : %s\nType : %s", L"Nome: %s\nArtista: %s\nAlbum: %s\nTempo: %s\nTipo: %s", L"Nombre: %s\nArtista: %s\nÁlbum: %s\nTiempo: %s\nTipo: %s", L"이름: %s\n아티스트: %s\n앨범: %s\n시간: %s\n유형: %s", L"名称：%s\n艺术家：%s\n专辑：%s\n时间：%s\n类型：%s", L"الاسم: %s\nالفنان: %s\nالألبوم: %s\nالوقت: %s\nالنوع: %s", L"Название: %s\nИсполнитель: %s\nАльбом: %s\nВремя: %s\nТип: %s", L"Name: %s\nInterpret: %s\nAlbum: %s\nZeit: %s\nTyp: %s", L"Nome: %s\nArtista: %s\nÁlbum: %s\nTempo: %s\nTipo: %s", L"Naam: %s\nArtiest: %s\nAlbum: %s\nTijd: %s\nType: %s", L"Nazwa: %s\nWykonawca: %s\nAlbum: %s\nCzas: %s\nTyp: %s", L"Ad: %s\nSanatçı: %s\nAlbüm: %s\nSüre: %s\nTür: %s"), i, j, k, l, m);
+}
+
 BOOL CListCtrlA::OnToolTipText( UINT id, NMHDR * pNMHDR, LRESULT * pResult ){
 	TOOLTIPTEXTA* pTTTA = (TOOLTIPTEXTA*)pNMHDR;
 	TOOLTIPTEXTW* pTTTW = (TOOLTIPTEXTW*)pNMHDR;
 
-	CString i,j,k,l,m;
 	UINT nID = pNMHDR->idFrom;
 	AFX_MODULE_THREAD_STATE* pThreadState = AfxGetModuleThreadState();
 	CToolTipCtrl *pToolTip = pThreadState->m_pToolTip;
 	if(pToolTip==NULL) return FALSE;
-	pToolTip->SetMaxTipWidth(500);
+	pToolTip->SetMaxTipWidth(900);
 	if( nID == 0 )	  	// Notification in NT from automatically
 		return FALSE;   	// created tooltip
 
 	int row = ((nID-1) >> 10) & 0x3fffff ;
 	int col = (nID-1) & 0x3ff;
-	i = GetItemText( row, 0 );
-	j = GetItemText( row, 3 );
-	k = GetItemText( row, 4 );
-	l = GetItemText( row, 2 );
-	m = GetItemText( row, 1 );
-	strTipText.Format(LL14(L"名前：%s\nアーティスト：%s\nアルバム：%s\n時間：%s\n種類：%s", L"Name: %s\nArtist: %s\nAlbum: %s\nTime: %s\nType: %s", L"Nom : %s\nArtiste : %s\nAlbum : %s\nDurée : %s\nType : %s", L"Nome: %s\nArtista: %s\nAlbum: %s\nTempo: %s\nTipo: %s", L"Nombre: %s\nArtista: %s\nÁlbum: %s\nTiempo: %s\nTipo: %s", L"이름: %s\n아티스트: %s\n앨범: %s\n시간: %s\n유형: %s", L"名称：%s\n艺术家：%s\n专辑：%s\n时间：%s\n类型：%s", L"الاسم: %s\nالفنان: %s\nالألبوم: %s\nالوقت: %s\nالنوع: %s", L"Название: %s\nИсполнитель: %s\nАльбом: %s\nВремя: %s\nТип: %s", L"Name: %s\nInterpret: %s\nAlbum: %s\nZeit: %s\nTyp: %s", L"Nome: %s\nArtista: %s\nÁlbum: %s\nTempo: %s\nTipo: %s", L"Naam: %s\nArtiest: %s\nAlbum: %s\nTijd: %s\nType: %s", L"Nazwa: %s\nWykonawca: %s\nAlbum: %s\nCzas: %s\nTyp: %s", L"Ad: %s\nSanatçı: %s\nAlbüm: %s\nSüre: %s\nTür: %s"),i,j,k,l,m);
+	BuildToolTipText(row, col, strTipText);
 
 //#ifndef _UNICODE
 //	if (pNMHDR->code == TTN_NEEDTEXTA)
@@ -62,20 +70,29 @@ BOOL CListCtrlA::OnToolTipText( UINT id, NMHDR * pNMHDR, LRESULT * pResult ){
 //#endif
 #ifndef _UNICODE
 	if (pNMHDR->code == TTN_NEEDTEXTA){
-		lstrcpyn(ff1,strTipText,1024);
+		lstrcpyn(ff1,strTipText,(int)_countof(ff1));
 		pTTTA->lpszText= ff1;
 		pTTTA->szText[0]=NULL;
 	}
 	else{
-		int rr=MultiByteToWideChar(CP_ACP,0,strTipText,-1,ff2,1024);
+		int rr=MultiByteToWideChar(CP_ACP,0,strTipText,-1,ff2,(int)_countof(ff2));
 		pTTTW->lpszText= ff2;
 		pTTTW->szText[0]=NULL;
 	}
 #else
 	if (pNMHDR->code == TTN_NEEDTEXTA)
-		pTTTA->lpszText = (LPSTR)(LPWSTR)(LPCWSTR)strTipText;
+	{
+		ff1[0] = 0;
+		WideCharToMultiByte(CP_ACP, 0, strTipText, -1, ff1, (int)sizeof(ff1) - 1, NULL, NULL);
+		pTTTA->lpszText = ff1;
+		pTTTA->szText[0] = 0;
+	}
 	else
-	    pTTTW->lpszText = (LPWSTR)(LPCWSTR)strTipText;
+	{
+		wcsncpy_s(ff2, _countof(ff2), strTipText, _TRUNCATE);
+		pTTTW->lpszText = ff2;
+		pTTTW->szText[0] = 0;
+	}
 #endif
 	*pResult = 0;
 
