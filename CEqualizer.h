@@ -11,6 +11,7 @@ class CEqualizer : public CCustomDialogEx
 public:
 	CEqualizer(CWnd* pParent = nullptr);   // 標準コンストラクター
 	virtual ~CEqualizer();
+	void ReapplyDecorativeTitleFont();
 
 // ダイアログ データ
 #ifdef AFX_DESIGN_TIME
@@ -85,4 +86,10 @@ public:
 	CCustomStatic m_keyMid;
 	CCustomStatic m_keyHigh;
 	CCustomStatic m_keyAll;
+
+	// OnTimer の差分抑制用（ダイアログ再作成時は HWND が空でも CString が残らないようメンバで保持）
+	CString m_cachedKeyLow;
+	CString m_cachedKeyMid;
+	CString m_cachedKeyHigh;
+	CString m_cachedKeyAll;
 };

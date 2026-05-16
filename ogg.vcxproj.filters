@@ -417,6 +417,12 @@
     <ClCompile Include="WavExport.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="KpiHostClient.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="AudioUpscaler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ogg.rc">
@@ -889,6 +895,15 @@
     <ClInclude Include="WavExport.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="KpiHostClient.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kpi_host_ipc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioUpscaler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="res\ico00001.ico">
@@ -938,6 +953,7 @@
     </None>
     <None Include="ReadMe.txt" />
     <None Include="cpp.hint" />
+    <None Include="oggDlg_DeferredHeavy.inc" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">

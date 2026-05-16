@@ -49,8 +49,8 @@ BEGIN
     "LANGUAGE 17, 1\r\n"
     "#pragma code_page(932)\r\n"
     "#endif //_WIN32\r\n"
-    "#include ""res\\ogg.rc2"""
-    "#include ""l.jpn\\afxres.rc"""
+    "#include ""res\\ogg.rc2""\r\n"
+    "#include ""l.jpn\\afxres.rc""\r\n"
     "#endif\r\n"
     "\0"
 END
@@ -359,20 +359,20 @@ BEGIN
     LISTBOX         IDC_LIST1,7,7,193,241,LBS_USETABSTOPS | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
 END
 
-IDD_Render DIALOGEX 0, 0, 190, 323
+IDD_Render DIALOGEX 0, 0, 190, 346
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "レンダリング選択"
 FONT 9, "ＭＳ Ｐゴシック", 0, 0, 0x0
 BEGIN
-    DEFPUSHBUTTON   "OK",IDOK,7,304,36,14
-    PUSHBUTTON      "閉じる",IDCANCEL,43,304,34,14
+    DEFPUSHBUTTON   "OK",IDOK,7,327,36,14
+    PUSHBUTTON      "閉じる",IDCANCEL,43,327,34,14
     COMBOBOX        IDC_COMBO1,167,7,16,92,CBS_DROPDOWNLIST | NOT WS_VISIBLE | WS_DISABLED | WS_VSCROLL | WS_TABSTOP
     LTEXT           "割込間隔",IDC_STATIC_R_BUF,7,7,47,8
     CONTROL         "デフォルトでEVRを使う(Vista以降)",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,61,112,10
     CONTROL         "デスクトップコンポジションを使用する",IDC_CHECK2,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,72,118,10
     CONTROL         "AeroでGrass効果を使用する",IDC_CHECK3,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,82,118,10
     CONTROL         "ffdshowを使う",IDC_CHECK27,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,173,7,10,10
-    PUSHBUTTON      "DirectShowフィルタ一覧",IDCANCEL2,77,304,73,14
+    PUSHBUTTON      "DirectShowフィルタ一覧",IDCANCEL2,77,327,73,14
     CONTROL         "vobも複数ストリーム対応とする",IDC_CHECK30,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,172,7,11,10
     CONTROL         "Haaliを使わない",IDC_CHECK31,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,175,7,8,10
     CONTROL         "x2.0",IDC_CHECK32,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,31,191,23,10
@@ -392,14 +392,14 @@ BEGIN
     CONTROL         "x1.0",IDC_CHECK45,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,229,24,10
     LTEXT           "その他のkpi",IDC_STATIC_R_KPI,7,221,36,8
     CONTROL         "x5.0",IDC_CHECK46,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,101,229,22,10
-    PUSHBUTTON      "kpi一覧",IDCANCEL3,153,304,30,14
-    PUSHBUTTON      "メイン画面フォント",IDC_FONT,133,192,16,14,NOT WS_VISIBLE
-    PUSHBUTTON      "リスト画面フォント",IDC_FONT2,133,208,16,14,NOT WS_VISIBLE
+    PUSHBUTTON      "kpi一覧",IDCANCEL3,153,327,30,14
+    PUSHBUTTON      "メイン画面フォント",IDC_FONT,7,283,176,14
+    PUSHBUTTON      "リスト画面フォント",IDC_FONT2,7,298,176,14
     CONTROL         "mp3 デコーダを独自のを使う",IDC_CHECK47,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,159,60,24,10
     CONTROL         "動画再生時複数音声の時音声選択画面を出す",IDC_CHECK48,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,135,150,10
     CONTROL         "24bitを使う",IDC_CHECK49,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,77,157,48,10
     CONTROL         "m4aを内蔵の処理で演奏する",IDC_CHECK50,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,145,103,10
-    PUSHBUTTON      "碧の軌跡用t_bgm._dt",IDC_BUTTON1,77,289,73,14
+    PUSHBUTTON      "碧の軌跡用t_bgm._dt",IDC_BUTTON1,77,312,73,14
     LTEXT           ".SPC,.HES音量(kpi)",IDC_STATIC_R_SPC,7,182,56,8
     LTEXT           "演奏bit震度：",IDC_STATIC_R_BIT,7,157,62,8
     CONTROL         "32bitを使う",IDC_CHECK51,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,125,157,48,10
@@ -410,7 +410,7 @@ BEGIN
     LTEXT           "ms",IDC_STATIC10,137,18,22,8
     LTEXT           "再生デバイス",IDC_STATIC_R_DEV,7,30,47,8
     COMBOBOX        IDC_COMBO2,58,29,123,258,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "関連づけ",IDCANCEL5,153,289,34,14
+    PUSHBUTTON      "関連づけ",IDCANCEL5,153,312,34,14
     LTEXT           "MAXサンプルレート：",IDC_STATIC_R_SAMP,7,169,69,8
     COMBOBOX        IDC_COMBO3,81,168,57,173,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Hz",IDC_STATIC,140,170,15,8
@@ -834,7 +834,7 @@ BEGIN
     LTEXT           "環境のかかり具合",IDC_STATIC_EQ_ACOUSTIC,9,198,93,8
     CONTROL         "",IDC_SLIDER22,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,105,197,267,12
     LTEXT           "100",IDC_STATIC_eff,375,198,18,8
-    LTEXT           "Hyper DSP Equaliser 100 x 15 band",IDC_STATICf,3,2,210,25
+    LTEXT           "Hyper DSP Equaliser 100 x 15 band",IDC_STATICf,3,2,255,25
     LTEXT           "％",IDC_STATIC,368,151,8,8
     CONTROL         "",IDC_SLIDER23,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,378,43,16,106
     LTEXT           "100",IDC_STATIC_e15,381,151,13,8
@@ -865,7 +865,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,370
+ FILEVERSION 0,8,7,380
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -883,8 +883,8 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.04.11"
-            VALUE "FileVersion", "0.8.7.370"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.05.16"
+            VALUE "FileVersion", "0.8.7.380"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.04.11"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"

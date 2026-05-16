@@ -213,6 +213,7 @@ struct save{
 	int speaker_layout;   // 0=2ch 1=2.1ch 2=4ch 3=5.1ch 4=7.1ch 5=マッピングなし（ソースchのままレート/ビットのみ）
 
 	__int64 lastUpdateCheck;  // update check: 0=not checked, else=last check time
+
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */

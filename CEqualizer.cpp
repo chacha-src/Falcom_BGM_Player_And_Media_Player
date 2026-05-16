@@ -171,37 +171,8 @@ BOOL CEqualizer::OnInitDialog()
 	m_skoutei.SetMode(2);
 	m_smitsudo.SetMode(2);
 	m_srittai.SetMode(2);
-	
-	CFont* pFont = m_t.GetFont();
-	LOGFONT lf;
-	CFont m_newFont;
 
-	if (pFont != NULL)
-	{
-		// 現在のフォント設定をLOGFONT構造体にコピーします
-		pFont->GetLogFont(&lf);
-	}
-	else
-	{
-		// フォントが取得できない場合のデフォルト設定（MS UI Gothicなど）
-		memset(&lf, 0, sizeof(LOGFONT));
-		lf.lfHeight = -12; // 標準的なサイズ
-		_tcscpy_s(lf.lfFaceName, _T("MS UI Gothic"));
-	}
-
-	// 2. サイズを4倍に変更します
-	// lfHeightは通常負の値（デバイス単位）で指定されているため、単純に4倍します
-	lf.lfHeight *= 4;
-	lf.lfItalic = TRUE;
-	// 3. 以前に作成したフォントがあれば削除してから再作成します
-	if (m_newFont.GetSafeHandle())
-	{
-		m_newFont.DeleteObject();
-	}
-	m_newFont.CreateFontIndirect(&lf);
-
-	// 4. コントロールにフォントを適用します
-	m_t.SetFont(&m_newFont);
+	ReapplyDecorativeTitleFont();
 	
 	m_t.SetPreferWideMode(TRUE);
 	m_t.SetGradation(COLOR_GRAD_DARK_GREEN, COLOR_RANGE_SELECTION, 135, TRUE); // 135 左上から右下
@@ -472,9 +443,30 @@ BOOL CEqualizer::OnInitDialog()
 	if(savedata.eqx != -1)
 		SetWindowPos(&CWnd::wndTop, savedata.eqx, savedata.eqy, 0, 0, SWP_NOSIZE| SWP_NOZORDER| SWP_NOOWNERZORDER);
 
+	m_cachedKeyLow.Empty();
+	m_cachedKeyMid.Empty();
+	m_cachedKeyHigh.Empty();
+	m_cachedKeyAll.Empty();
+
 	SetTimer(1, 50, NULL);
 	return TRUE;
 }
+
+void CEqualizer::ReapplyDecorativeTitleFont()
+{
+	if (!m_t.GetSafeHwnd())
+		return;
+	LOGFONT lf;
+	memset(&lf, 0, sizeof(lf));
+	lf.lfHeight = -12;
+	const int li = (savedata.lang < 0) ? 0 : (savedata.lang > 13 ? 13 : savedata.lang);
+	lf.lfHeight *= 4;
+	lf.lfItalic = TRUE;
+	CFont fn;
+	if (fn.CreateFontIndirect(&lf))
+		m_t.SetFont(&fn);
+}
+
 extern BOOL reset;
 void CEqualizer::OnCbnSelchangeCombo1()
 {
@@ -662,23 +654,21 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 		KeyCodeAll  = L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
 	}
 
-	static CString bufLow = L"-", bufMid = L"-", bufHigh = L"-", bufAll = L"-";
-
-	if (bufLow != KeyCodeLow) {
+	if (m_cachedKeyLow != KeyCodeLow) {
 		m_keyLow.SetWindowText(CString(LL14(L"低音域：", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ")) + KeyCodeLow);
-		bufLow = KeyCodeLow;
+		m_cachedKeyLow = KeyCodeLow;
 	}
-	if (bufMid != KeyCodeMid) {
+	if (m_cachedKeyMid != KeyCodeMid) {
 		m_keyMid.SetWindowText(CString(LL14(L"中音域：", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ")) + KeyCodeMid);
-		bufMid = KeyCodeMid;
+		m_cachedKeyMid = KeyCodeMid;
 	}
-	if (bufHigh != KeyCodeHigh) {
+	if (m_cachedKeyHigh != KeyCodeHigh) {
 		m_keyHigh.SetWindowText(CString(LL14(L"高音域：", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ")) + KeyCodeHigh);
-		bufHigh = KeyCodeHigh;
+		m_cachedKeyHigh = KeyCodeHigh;
 	}
-	if (bufAll != KeyCodeAll) {
+	if (m_cachedKeyAll != KeyCodeAll) {
 		m_keyAll.SetWindowText(CString(LL14(L"全音域：", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ")) + KeyCodeAll);
-		bufAll = KeyCodeAll;
+		m_cachedKeyAll = KeyCodeAll;
 	}
 
 

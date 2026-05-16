@@ -94,7 +94,7 @@ static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& strTe
 static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& strText, UINT nFormat,
     COLORREF clrStart, COLORREF clrEnd, int nDirection,
     COLORREF clrShadow, int nShadowDirection, int nShadowDistance, int nShadowBlur, BOOL bShadowEnable, COLORREF clrBackground,
-    int nActualTextWidth = -1)
+    int nActualTextWidth = -1, BOOL bGradientFullBleed = FALSE)
 {
     if (strText.IsEmpty()) return;
 
@@ -129,11 +129,14 @@ static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str
     int italicMargin = lf.lfItalic ? (abs(lf.lfHeight) / 2) : 0;
 
     CRect rcGradArea = rect;
-    if (nFormat & DT_CENTER)
-        rcGradArea.left = rect.left + (rect.Width() - nWidth) / 2;
-    else if (nFormat & DT_RIGHT)
-        rcGradArea.left = rect.right - nWidth;
-    rcGradArea.right = rcGradArea.left + nWidth + italicMargin;
+    if (!bGradientFullBleed)
+    {
+        if (nFormat & DT_CENTER)
+            rcGradArea.left = rect.left + (rect.Width() - nWidth) / 2;
+        else if (nFormat & DT_RIGHT)
+            rcGradArea.left = rect.right - nWidth;
+        rcGradArea.right = rcGradArea.left + nWidth + italicMargin;
+    }
 
     int normalizedDir = nDirection % 360;
     if (normalizedDir < 0) normalizedDir += 360;
@@ -1263,7 +1266,7 @@ void CCustomStatic::OnPaint()
                 DrawTextWithGradient(&memDC, rect, strText, nFormat,
                     m_clrGradStart, m_clrGradEnd, m_nGradDirection,
                     m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-                    m_bShadowEnable, COLOR_DIALOG_BG, szFinal.cx);
+                    m_bShadowEnable, COLOR_DIALOG_BG, szFinal.cx, m_bPreferWideMode);
             }
             else
             {
