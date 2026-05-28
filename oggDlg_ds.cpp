@@ -990,7 +990,7 @@ void COggDlg::WASAPIChange(WAVEFORMATEX* pwf)
 99.ブラックホール縁 - 超長残響＋低域膨張
 100.サイバー聖堂 - 金属×巨大空間、光沢残響
 
-EQプリセット51種:
+EQプリセット101種:
 00.デフォルト, 01.低音ブースト, 02.高音ブースト, 03.ボーカル強調, 04.低音カット,
 05.高音カット, 06.ラウドネス, 07.クラシック, 08.ロック, 09.カスタム,
 10.ジャズ, 11.ポップ, 12.EDM, 13.メタル, 14.ヒップホップ,
@@ -1021,7 +1021,9 @@ resetパラメータ:
 #define MAX_DELAY_SAMPLES 3072000*2
 #define MAX_EARLY_REFLECTIONS 16
 
-static const int EQ_PRESETS[51][15] = {
+#define EQ_PRESET_COUNT 101
+
+static const int EQ_PRESETS[EQ_PRESET_COUNT][15] = {
 	// 0: デフォルト
 	{100,100,100,100,100,100,100,100,100,100,100,100,100,100,100},
 
@@ -1173,7 +1175,108 @@ static const int EQ_PRESETS[51][15] = {
 	{112,110,108,105,105,108,115,125,135,140,135,128,120,115,110},
 
 	// 50: ナレーション/オーディオブック
-	{ 88, 88, 88, 92, 98,115,135,155,165,160,145,125,105, 95, 88}
+	{ 88, 88, 88, 92, 98,115,135,155,165,160,145,125,105, 95, 88},
+
+	// 51: Deep Bass Safe
+	{170,165,155,140,125,110,100, 95, 92, 90, 90, 90, 90, 90, 90},
+	// 52: Vocal Clear 2
+	{ 90, 90, 92, 95,100,115,130,145,155,150,135,120,108,100, 95},
+	// 53: Airy Treble
+	{ 92, 92, 94, 96, 98,102,108,118,132,145,158,170,178,185,190},
+	// 54: Mid Punch
+	{100, 98, 98,100,105,115,125,132,135,130,120,110,102, 98, 95},
+	// 55: EDM Safe
+	{165,160,152,142,130,115,100, 92, 92,100,115,130,145,158,170},
+	// 56: Rock Wide
+	{135,132,128,122,115,102, 92, 92, 98,108,118,126,132,138,142},
+	// 57: Metal Tight
+	{145,142,138,132,122,105, 92, 88, 92,100,115,128,140,150,160},
+	// 58: HipHop Club
+	{172,168,158,145,132,115,105,108,120,128,122,112,105,105,110},
+	// 59: Acoustic Warm 2
+	{118,115,112,110,108,108,105,102,100,102,108,112,118,120,118},
+	// 60: Flat Monitor
+	{100,100,100,100,100,100,100,100,100,100,100,100,100,100,100},
+	// 61: Bright Vocal
+	{ 95, 95, 95, 98,102,110,120,132,145,152,145,132,120,108,100},
+	// 62: Bass&Air
+	{150,145,138,128,115,102, 95, 92, 95,102,115,130,145,155,162},
+	// 63: Podcast Soft
+	{ 88, 90, 92, 96,102,118,132,142,145,140,130,118,105, 95, 90},
+	// 64: Retro Radio 2
+	{ 82, 85, 90, 98,108,120,128,132,132,126,116,104, 94, 86, 82},
+	// 65: TV Dialog+ 
+	{ 92, 92, 94,100,108,120,132,142,148,142,132,120,108,100, 95},
+	// 66: Phone Narrow+
+	{ 78, 80, 82, 86, 92,108,122,136,145,138,126,112, 98, 88, 82},
+	// 67: Loudness Safe
+	{145,138,128,115,102, 95, 92, 92, 92, 96,105,118,130,140,148},
+	// 68: Small Speaker
+	{ 88, 90, 94,100,108,118,125,130,132,128,120,110,100, 92, 88},
+	// 69: Car Audio
+	{145,140,132,122,112,100, 95, 95,100,110,120,128,135,140,145},
+	// 70: Night Listening
+	{132,126,118,108,100, 95, 92, 92, 92, 95,102,112,122,130,136},
+	// 71: Studio Neutral+
+	{102,102,102,102,102,102,102,102,102,102,102,102,102,102,102},
+	// 72: Cymbal Sparkle
+	{ 94, 94, 95, 96, 98,102,110,120,132,145,160,172,180,188,194},
+	// 73: Drum Attack
+	{150,145,135,122,110,102,100,102,108,115,120,122,120,115,110},
+	// 74: Piano Presence
+	{105,105,106,108,110,114,120,126,130,132,128,122,115,110,106},
+	// 75: Strings Smooth
+	{102,102,102,104,106,110,116,124,130,132,126,120,114,108,104},
+	// 76: Brass Focus
+	{108,106,104,106,110,118,128,136,140,136,126,116,108,102,100},
+	// 77: Choir Wide
+	{105,104,104,106,110,118,126,132,136,132,124,116,110,106,104},
+	// 78: Cinema Impact
+	{155,148,138,125,112,102, 96, 98,105,115,125,132,138,142,146},
+	// 79: FPS Footstep
+	{ 95, 95, 96,100,106,118,132,145,152,145,132,120,110,102, 98},
+	// 80: RPG Atmosphere
+	{112,110,108,106,104,106,112,120,128,132,128,120,114,110,106},
+	// 81: Open World
+	{120,116,112,108,104,102,104,110,118,125,128,126,122,118,114},
+	// 82: Racing V
+	{160,154,145,132,118,102, 90, 82, 80, 86,100,118,135,150,162},
+	// 83: Fighting Punch
+	{150,145,138,128,118,108,102,102,106,112,118,120,118,114,110},
+	// 84: LoFi Mild
+	{108,106,104,102,100, 98, 98,100,102,104,106,108,108,106,104},
+	// 85: Chill Soft
+	{108,106,104,102,100,100,102,106,112,116,116,112,108,104,102},
+	// 86: K-Pop Shine
+	{130,124,118,110,104,102,106,114,124,134,142,148,152,154,156},
+	// 87: J-Pop Air
+	{124,120,114,108,102,100,104,112,122,132,140,146,150,152,154},
+	// 88: Anime Song
+	{128,122,116,108,102,100,106,116,128,138,145,150,152,152,150},
+	// 89: Orchestra Hall
+	{118,114,110,106,102,100,102,108,116,124,130,132,130,126,122},
+	// 90: Live Stage 2
+	{130,126,122,116,110,102, 98,100,106,114,122,128,132,136,140},
+	// 91: Mastering Light
+	{ 98, 98, 99,100,101,102,103,104,104,104,103,102,101,100,100},
+	// 92: Sub Tight
+	{165,158,148,134,120,108,100, 96, 94, 92, 92, 92, 92, 92, 92},
+	// 93: Deep House
+	{160,154,145,132,118,105, 98, 96,100,110,122,132,140,146,150},
+	// 94: Trance Lift
+	{145,138,130,118,108,100, 98,102,112,124,136,146,154,160,165},
+	// 95: Techno Edge
+	{152,146,138,126,114,104,100,102,110,120,132,142,150,156,160},
+	// 96: Drum&Bass
+	{170,165,155,140,125,110,102,100,105,115,128,138,146,152,156},
+	// 97: Soft Classical
+	{112,110,108,106,104,102,102,104,108,114,120,124,126,126,124},
+	// 98: Speech Intelligibility
+	{ 90, 90, 92, 96,102,118,136,150,158,152,138,120,104, 96, 90},
+	// 99: AM Safe Narrow
+	{ 84, 86, 90, 96,104,116,124,128,128,122,114,102, 92, 86, 82},
+	// 100: FM Hi-Fi Safe
+	{ 96, 98,100,104,110,118,126,132,136,134,128,122,116,110,106}
 };
 
 typedef struct {
@@ -3811,7 +3914,7 @@ void equaliser(void* data, int len, BOOL reset) {
 	// reset==2: EQプリセット値を savedata.eq に再ロードして即返す
 	if (reset == 2) {
 		int currentEqPre = savedata.eqsoundeq;
-		if (currentEqPre >= 0 && currentEqPre < 51 && currentEqPre != 9) {
+		if (currentEqPre >= 0 && currentEqPre < EQ_PRESET_COUNT && currentEqPre != 9) {
 			memcpy(savedata.eq, EQ_PRESETS[currentEqPre], sizeof(int) * 15);
 			g_lastEqPreset = currentEqPre;
 		}
@@ -3902,7 +4005,7 @@ void equaliser(void* data, int len, BOOL reset) {
 
 	// EQプリセット切り替え検出
 	if (currentEqPre != g_lastEqPreset) {
-		if (currentEqPre >= 0 && currentEqPre < 51 && currentEqPre != 9)
+		if (currentEqPre >= 0 && currentEqPre < EQ_PRESET_COUNT && currentEqPre != 9)
 			memcpy(savedata.eq, EQ_PRESETS[currentEqPre], sizeof(int) * 15);
 		g_lastEqPreset = currentEqPre;
 		forceUpdate = TRUE;
@@ -4013,6 +4116,25 @@ void equaliser(void* data, int len, BOOL reset) {
 	// ============================================================
 	float masterGain = masterVolume / 100.0f;
 
+	// 0dB(100)を超えるブースト量に応じて内部ヘッドルームを自動確保する。
+	// 体感音量はなるべく維持しつつ、EQ強ブースト時のハードクリップを抑える。
+	float maxBandBoostDb = 0.0f;
+	for (int b = 0; b < EQ_BANDS; b++) {
+		float bandBoostDb = (savedata.eq[b] - 100.0f) * 0.12f;
+		if (bandBoostDb > maxBandBoostDb) maxBandBoostDb = bandBoostDb;
+	}
+	float maxExtendedBoostDb = 0.0f;
+	{
+		const float clarityDb = (clarity - 100.0f) * 0.18f;
+		const float balanceDb = fabsf((balance - 100.0f) * 0.12f);
+		const float densityDb = fabsf((density - 100.0f) * 0.15f);
+		maxExtendedBoostDb = fmaxf(clarityDb, fmaxf(balanceDb, densityDb));
+	}
+	const float totalBoostDb = maxBandBoostDb + maxExtendedBoostDb;
+	const float headroomDb = ClampFloat(totalBoostDb - 6.0f, 0.0f, 18.0f);
+	const float eqHeadroomGain = powf(10.0f, -headroomDb / 20.0f);
+	const float eqMakeupGain = 1.0f + (1.0f - eqHeadroomGain) * 0.55f;
+
 	BlockAnalysis ba = AnalyzeBlock(pRaw, numSamples, wavchannel, wavsam_depth, bytesPerSample, masterGain);
 
 	// ============================================================
@@ -4082,7 +4204,7 @@ void equaliser(void* data, int len, BOOL reset) {
 			ChannelState* cs = &g_channels[ch];
 
 			// [FIX-3] 平滑化済みゲインを適用
-			signal *= effectiveMasterGain;
+			signal *= (effectiveMasterGain * eqHeadroomGain);
 
 			// 15バンドEQ + 拡張フィルタ群を順次通過
 			for (int b = 0; b < EQ_BANDS; b++) signal = ProcessBiquad(&cs->eqFilters[b], signal);
@@ -4247,6 +4369,7 @@ void equaliser(void* data, int len, BOOL reset) {
 				if (ch >= MAX_CH) continue;
 
 				float finalOut = (ch == 0) ? leftSamples[bi] : rightSamples[bi];
+				finalOut *= eqMakeupGain;
 
 				// ハードクリップ安全装置: ProfessionalSoftSaturate 正常動作時は到達しない
 				if (finalOut > 1.0f)  finalOut = 1.0f;

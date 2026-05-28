@@ -812,7 +812,9 @@ void CPlayList::OnDropFiles(HDROP hDropInfo)
 		if (syomode == 30) {
 			filen = syos;
 		}
-		og->dp(filen);
+		if (og && ::IsWindow(og->GetSafeHwnd())) {
+			og->PostMessage(WM_APP + 1, 0, 0);
+		}
 	}
 	if(syo==1 && pMediaPosition){
 		if(mode==-2 || videoonly==TRUE){
@@ -824,7 +826,9 @@ void CPlayList::OnDropFiles(HDROP hDropInfo)
 					filen = syos;
 				else
 					filen = syos + L"\\" + fnn;
-				og->dp(filen);
+				if (og && ::IsWindow(og->GetSafeHwnd())) {
+					og->PostMessage(WM_APP + 1, 0, 0);
+				}
 			}
 		}
 	}
@@ -833,7 +837,9 @@ void CPlayList::OnDropFiles(HDROP hDropInfo)
 			filen = syos;
 		else
 			filen = syos + L"\\" + fnn;
-		og->dp(filen);
+		if (og && ::IsWindow(og->GetSafeHwnd())) {
+			og->PostMessage(WM_APP + 1, 0, 0);
+		}
 	}
 	Save();
 	CCustomDialog::OnDropFiles(hDropInfo);
@@ -4144,10 +4150,16 @@ void CPlayList::SIconTimer(int i){
 	m_lc.GetItemRect(pnt,&r,LVIR_ICON);
 	m_lc.RedrawWindow(&r);
 }
-int pln=0;
 extern int ps;
 extern void DoEvent();
 extern int gameon;
+static void RequestPlaylistRestartAsync()
+{
+	// 再生停止/開始をメッセージキューに逃がして、UI操作中の同期競合を避ける
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		og->PostMessage(WM_APP + 2, 0, 0);
+	}
+}
 void CPlayList::OnNMDblclkList1(NMHDR *pNMHDR, LRESULT *pResult)
 {
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
@@ -4166,15 +4178,7 @@ void CPlayList::OnNMDblclkList1(NMHDR *pNMHDR, LRESULT *pResult)
 	ret2=pc[Lindex].ret2;
 	plcnt=i;
 	gameon = 0;
-	if(pln==0){
-		pln=1;
-		og->OnRestart();
-//		for(;ps==1;){
-//			DoEvent();
-//			og->OnRestart();
-//		}
-		pln=0;
-	}
+	RequestPlaylistRestartAsync();
 }
 extern CDouga *pMainFrame1;
 extern long height, width;
@@ -4300,7 +4304,7 @@ void timerpl1(UINT nIDEvent,CPlayList* pl)
 				loop2=pl->pc[Lindex].loop2;
 				ret2=pl->pc[Lindex].ret2;
 				plcnt=i;
-				og->OnRestart();
+				RequestPlaylistRestartAsync();
 			}
 			if((GetKeyState(VK_CONTROL)&0x8000) && (GetKeyState('A')&0x8000)){
 				int i=pl->m_lc.GetItemCount();
