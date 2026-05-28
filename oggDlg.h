@@ -307,6 +307,7 @@ public:
 	CCustomStandardButton m_fadedummy;
 	afx_msg void OnBnClickedButton59();
 	CCustomStandardButton m_eqq;
+	BOOL drawth = FALSE;
 
 	void StartTimerpVsyncThread();
 	void StopTimerpVsyncThread();

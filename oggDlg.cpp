@@ -1788,11 +1788,33 @@ int pitch;
 
 int stflg = TRUE;
 int eqflg = TRUE;
+
+
+UINT TheadLoop(LPVOID l);
+BOOL drawth = FALSE;
+LARGE_INTEGER freq;
 //////////////////////////////////////////////////////////////////////////////
+DWORD g_oggUiThreadId = 0;
+static volatile LONG g_timerpPosted = 0;
+
+static void COgg_RequestTimerp(COggDlg* dlg)
+{
+	if (!dlg)
+		return;
+	HWND h = dlg->GetSafeHwnd();
+	if (!h || !::IsWindow(h))
+		return;
+	if (InterlockedCompareExchange(&g_timerpPosted, 1, 0) != 0)
+		return;
+	::PostMessage(h, WM_TIMERP_VSYNC_TICK, 0, 0);
+}
+
 BOOL COggDlg::OnInitDialog()
 {
 	CCustomDialog::OnInitDialog();
+	g_oggUiThreadId = GetCurrentThreadId();
 	ms2 = 0;
+	QueryPerformanceFrequency(&freq);
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	// Get desktop dc
 	sflg = FALSE;
@@ -2252,6 +2274,7 @@ BOOL COggDlg::OnInitDialog()
 	// ツールチップ・更新チェック・スペアナ窓関数テーブルなど、初回表示後でよい重い処理
 	PostMessage(WM_OGG_DEFERRED_HEAVY_INIT, 0, 0);
 
+	AfxBeginThread((AFX_THREADPROC)TheadLoop, NULL, THREAD_PRIORITY_TIME_CRITICAL);
 	return TRUE;  // TRUE を返すとコントロールに設定したフォーカスは失われません。
 }
 //////////////////////////////////////////////////////////////////////////////
@@ -14133,6 +14156,7 @@ BOOL COggDlg::DestroyWindow()
 	savedata.gameflg17 = m_ed5.GetCheck();
 	savedata.supe = m_supe.GetCheck();
 	savedata.supe2 = m_st.GetCheck();
+	drawth = TRUE;
 	RECT r;
 	ShowWindow(SW_SHOWNORMAL);
 	GetWindowRect(&r);
@@ -14318,6 +14342,10 @@ int pox, poy;
 
 void COggDlg::timerp()
 {
+	if (g_oggUiThreadId != 0 && GetCurrentThreadId() != g_oggUiThreadId) {
+		COgg_RequestTimerp(this);
+		return;
+	}
 	if (playy == 0)return;
 	ms2++;
 	CString s, ss, sss;
@@ -14491,7 +14519,7 @@ void COggDlg::timerp()
 	}
 
 
-	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) Speana();
+	if (savedata.supe == TRUE && plf == 1 && (wav || ogg)) Speana();
 	s = L""; ss = L"";
 	s = "name:";
 	moji(s, 1, 0, 0xffffff);
@@ -15512,12 +15540,14 @@ void COggDlg::timerp()
 	m_dsvols.GetWindowText(ss);
 	if (s != ss)
 		m_dsvols.SetWindowText(s);
+	if (drawth == TRUE) return;
 	if (m_dsb && thn1 == FALSE) {
 		if (savedata.dsvol == -498)
 			m_dsb->SetVolume(DSBVOLUME_MIN);
 		else
 			m_dsb->SetVolume((savedata.dsvol - 1) * 7);
 	}
+	if (drawth == TRUE) return;
 	if (pBasicAudio) {
 		if (savedata.dsvol == -498)
 			pBasicAudio->put_Volume(-10000);
@@ -15528,7 +15558,6 @@ void COggDlg::timerp()
 }
 
 int timerr = 0;
-int tim = 0;
 
 static unsigned __stdcall COgg_TimerpVsyncThreadProc(void* pParam)
 {
@@ -15577,10 +15606,6 @@ static unsigned __stdcall COgg_TimerpVsyncThreadProc(void* pParam)
 			continue;
 
 		lastEmit = now2;
-
-		HWND h = pDlg->GetSafeHwnd();
-		if (h && ::IsWindow(h))
-			::PostMessage(h, WM_TIMERP_VSYNC_TICK, 0, 0);
 	}
 
 	if (hDwm)
@@ -15620,14 +15645,117 @@ void COggDlg::StopTimerpVsyncThread()
 
 LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 {
+	InterlockedExchange(&g_timerpPosted, 0);
 	if (!IsWindow(GetSafeHwnd()))
 		return 0;
-	if (tim != 0)
-		return 0;
-	tim = 1;
 	timerp();
-	tim = 0;
 	return 0;
+}
+
+DWORD t1 = 0, t2 = 0, t3 = 0, t4 = 0, t5 = 0, dt = 0;
+DWORD fpstiming = 0;
+int timec = 0;
+
+// タイミング処理
+DWORD GetTiming(DWORD f)
+{
+	DWORD frate_ = 1;
+	if (f < 10000 / 60 + 1) frate_ = 10;
+	if (f < 9000 / 60 + 1) frate_ = 9;
+	if (f < 8000 / 60 + 1) frate_ = 8;
+	if (f < 7000 / 60 + 1) frate_ = 7;
+	if (f < 6000 / 60 + 1) frate_ = 6;
+	if (f < 5000 / 60 + 1) frate_ = 5;
+	if (f < 67) frate_ = 4;
+	if (f < 51) frate_ = 3;
+	if (f < 34) frate_ = 2;
+	if (f <= 17) frate_ = 1;
+	return frate_;
+
+}
+
+
+DWORD timing(BOOL t)
+{
+	//60fpsならこんな感じ（1/60秒=50/3ミリ秒）
+	if (t) { t2 = timeGetTime(); return 0; }
+	t4 = timeGetTime();
+	t5 = t4 - t2;
+	for (;;) {
+		t1 = timeGetTime();
+		dt = (t1 - t2) * 3 + t3;
+		if (dt >= 249) {//12
+			t3 = dt % 250;
+			return 5;
+		}
+		if (dt >= 199) {//15
+			t3 = dt % 200;
+			return 4;
+		}
+		if (dt >= 99) {//30
+			t3 = dt % 100;
+			return 2;
+		}
+		if (dt >= 49) {//60
+			t3 = dt % 50;
+			return 1;
+		}
+	}
+}
+DWORD Timing64(DWORD& Frate, BOOL bl)
+{
+	LARGE_INTEGER time_before;
+	DWORD ss, FrateL = Frate;
+	QueryPerformanceCounter(&time_before);
+	Frate = (DWORD)(time_before.QuadPart * 1000 / freq.QuadPart);
+	ss = (DWORD)((int)Frate - (int)FrateL); return ss;
+	return 0;
+}
+DWORD Timing(DWORD& Frate, BOOL bl)
+{
+	DWORD ss, FrateL = Frate;
+	Frate = timeGetTime();
+	ss = Frate - FrateL;
+	return ss;
+}
+
+DWORD timetb[3] = { 16,16,17 };
+
+void timing1(WORD a, BOOL b, BOOL c)
+{
+		DWORD fr2 = 0;
+		if (b) {
+			Timing(fpstiming, FALSE);
+		}
+		DWORD j = 0;
+		for (WORD ii = 0; ii < a; ii++) {
+			j += timetb[timec]; timec++; if (timec > 2)timec = 0;
+		}
+		Timing64(fr2, FALSE);
+		if ((int)(fpstiming + j) - fr2 > 10) {
+			Sleep(5);
+		}
+		for (;;) {
+			Timing64(fr2, FALSE);
+			if ((int)fr2 >= (int)(fpstiming + j)) break;
+		}
+}
+
+DWORD f1 = 0, f2 = 0, timen;
+
+UINT TheadLoop(LPVOID)
+{
+	for (;;) {
+		if (drawth == TRUE) return TRUE;
+		f1 = Timing64(f2, FALSE);
+		timen = GetTiming(f1);
+		COgg_RequestTimerp(og);
+		timen = (DWORD)(savedata.ms2 * (double)timen);
+		timing1((WORD)timen, FALSE, FALSE);
+		Timing64(f2, FALSE);
+		Timing64(fpstiming, FALSE);
+		DoEvent();
+	}
 }
 
 int SC1 = 0;
@@ -17890,6 +18018,85 @@ void AnalyzeMusicKey(
 	const std::vector<double>& bufChordL, const std::vector<double>& bufChordR,
 	int sampleRate)
 	;
+
+namespace {
+constexpr int kSpeanaDispKeys = 88;
+
+const double* SpeanaHannTable(int N)
+{
+	static double h4096[4096];
+	static double h8192[8192];
+	static bool ready = false;
+	if (!ready) {
+		for (int n = 0; n < 4096; n++)
+			h4096[n] = 0.5 - 0.5 * cos(2.0 * M_PI * (double)n / 4095.0);
+		for (int n = 0; n < 8192; n++)
+			h8192[n] = 0.5 - 0.5 * cos(2.0 * M_PI * (double)n / 8191.0);
+		ready = true;
+	}
+	return (N == 8192) ? h8192 : h4096;
+}
+
+void SpeanaApplyHann(const double* src, double* dst, int N)
+{
+	const double* h = SpeanaHannTable(N);
+	for (int n = 0; n < N; n++)
+		dst[n] = src[n] * h[n];
+}
+
+void SpeanaEnsureBandCache(int cacheKey, bool mode1_Low, bool mode3_High, int fftSize,
+	double* band_edges, int* band_bins)
+{
+	static int s_key = -1;
+	static double s_edges[kSpeanaDispKeys + 1];
+	static int s_bins[kSpeanaDispKeys + 1];
+	if (cacheKey == s_key) {
+		memcpy(band_edges, s_edges, sizeof(s_edges));
+		memcpy(band_bins, s_bins, sizeof(s_bins));
+		return;
+	}
+	s_key = cacheKey;
+	const double fs = 44100.0;
+	const int splitIndex = kSpeanaDispKeys / 2;
+	if (mode1_Low) {
+		const double lowStart = 20.0, highEnd = 800.0;
+		for (int k = 0; k <= kSpeanaDispKeys; ++k)
+			s_edges[k] = lowStart * pow(highEnd / lowStart, (double)k / kSpeanaDispKeys);
+	}
+	else if (mode3_High) {
+		const double lowStart = 40.0, splitFreq = 3000.0, highEnd = 22000.0;
+		for (int k = 0; k <= kSpeanaDispKeys; ++k) {
+			if (k <= splitIndex)
+				s_edges[k] = lowStart * pow(splitFreq / lowStart, (double)k / splitIndex);
+			else
+				s_edges[k] = splitFreq * pow(highEnd / splitFreq, (double)(k - splitIndex) / (kSpeanaDispKeys - splitIndex));
+		}
+	}
+	else {
+		const double minFreq = 30.0, maxFreq = 22000.0;
+		for (int k = 0; k <= kSpeanaDispKeys; ++k)
+			s_edges[k] = minFreq * pow(maxFreq / minFreq, (double)k / kSpeanaDispKeys);
+	}
+	for (int k = 0; k <= kSpeanaDispKeys; ++k) {
+		s_bins[k] = (int)(s_edges[k] * fftSize / fs);
+		if (s_bins[k] < 0) s_bins[k] = 0;
+		if (s_bins[k] >= fftSize / 2) s_bins[k] = fftSize / 2 - 1;
+	}
+	memcpy(band_edges, s_edges, sizeof(s_edges));
+	memcpy(band_bins, s_bins, sizeof(s_bins));
+}
+
+inline void SpeanaDrawBar(CDC& dc, int x, int bar_w, int idx, int d)
+{
+	if (spelv[idx] < d) { spelv[idx] = d; spetm[idx] = 0; }
+	if (spelv[idx] > 0 || d > 0) {
+		dc.FillSolidRect(x, (96 - spelv[idx]) * 4, bar_w, (spelv[idx] + 1) * 4, RGB(0, 128, 0));
+		dc.FillSolidRect(x, (96 - d) * 4, bar_w, (d + 1) * 4, RGB(0, 255, 0));
+		dc.FillSolidRect(x, (96 - spelv[idx]) * 4, bar_w, 4, RGB(255, 255, 0));
+	}
+}
+} // namespace
+
 void COggDlg::Speana()
 {
 	int i, j, d;
@@ -17905,8 +18112,7 @@ void COggDlg::Speana()
 
 	static int dtbl[88];
 	static int dtatbl[88];
-	memset(dtbl, 0, sizeof(dtbl));
-	memset(dtatbl, 0, sizeof(dtatbl));
+	const bool stereoSpeana = (savedata.supe2 != FALSE);
 
 	// ---------------------------------------------------------
 	// モード判定
@@ -17988,12 +18194,6 @@ void COggDlg::Speana()
 	if (rawBuf.size() < (size_t)bytesTotalToRead) {
 		rawBuf.resize(bytesTotalToRead);
 	}
-
-	std::fill(bufL.begin(), bufL.end(), 0.0);
-	std::fill(bufR.begin(), bufR.end(), 0.0);
-	std::fill(bufM.begin(), bufM.end(), 0.0);
-	std::fill(bufResampled.begin(), bufResampled.end(), 0.0);
-	std::fill(bufResampledR.begin(), bufResampledR.end(), 0.0);
 
 	// ---------------------------------------------------------
 	// データ読み込み (完全過去データ取得)
@@ -18091,154 +18291,19 @@ void COggDlg::Speana()
 			bufL[i] = smpL; bufR[i] = smpR;
 		}
 	}
+	else {
+		std::fill(bufL.begin(), bufL.end(), 0.0);
+		std::fill(bufR.begin(), bufR.end(), 0.0);
+	}
 
 	ResampleDouble(bufL.data(), framesToRead, bufResampled.data(), fftSize);
 	ResampleDouble(bufR.data(), framesToRead, bufResampledR.data(), fftSize);
 	for (int k = 0; k < fftSize; k++) bufM[k] = (bufResampled[k] + bufResampledR[k]) * 0.5;
 
-	// =========================================================
-	// ② 解析用データの読み込み (分離した専用バッファ)
-	// =========================================================
-
-	int keySize = 8192; // 常に高解像度
-	int keyLatencyMs = -800 * 2; // 最適なオフセット
-	long keyLatencyBytes = (long)(sampleRate * bytesPerFrame * keyLatencyMs / 1000.0);
-	int keyBytesToRead = keySize * bytesPerFrame;
-
-	// 解析専用バッファ
-	static std::vector<double> bufKeyL, bufKeyR;
-	static std::vector<char> rawBufKey;
-
-	if (bufKeyL.size() < (size_t)keySize) {
-		bufKeyL.resize(keySize); bufKeyR.resize(keySize);
-	}
-	if (rawBufKey.size() < (size_t)keyBytesToRead) {
-		rawBufKey.resize(keyBytesToRead);
-	}
-
-	// 解析用の読み出し位置計算
-	long readPosKey = (long)PlayCursor - keyBytesToRead + keyLatencyBytes;
-
-	// 安全ガード
-	long maxSafeKey = -(long)(TOTAL_BUF_BYTES * 0.9) + keyBytesToRead;
-	if (keyLatencyBytes < maxSafeKey) {
-		// 安全圏外なら読み出し位置を補正 (バッファの整合性優先)
-		readPosKey = (long)PlayCursor - keyBytesToRead + maxSafeKey;
-	}
-
-	while (readPosKey < 0) readPosKey += TOTAL_BUF_BYTES;
-	while (readPosKey >= TOTAL_BUF_BYTES) readPosKey -= TOTAL_BUF_BYTES;
-	readPosKey -= (readPosKey % bytesPerFrame);
-
-	// 解析用データコピー
-	char* dstRawKey = rawBufKey.data();
-	if (readPosKey + keyBytesToRead <= TOTAL_BUF_BYTES) {
-		memcpy(dstRawKey, srcBufBase + readPosKey, keyBytesToRead);
-	}
-	else {
-		int firstPart = TOTAL_BUF_BYTES - readPosKey;
-		int secondPart = keyBytesToRead - firstPart;
-		if (firstPart >= 0 && secondPart >= 0) {
-			memcpy(dstRawKey, srcBufBase + readPosKey, firstPart);
-			memcpy(dstRawKey + firstPart, srcBufBase, secondPart);
-		}
-	}
-
-	// 解析用サンプル抽出 (bufKeyL, bufKeyRへ)
-	for (i = 0; i < keySize; i++) {
-		auto GetSampleValue = [&](const char* buf, int sampleIndex, int chIndex) -> double {
-			int offset = sampleIndex * bytesPerFrame + chIndex * bytesPerSample;
-
-			if (bitDepth == 16) {
-				return (double)(*(short*)(buf + offset)) / 32768.0;
-			}
-			if (bitDepth == 24) {
-				unsigned char* p = (unsigned char*)(buf + offset);
-				int val = (p[0]) | (p[1] << 8) | (p[2] << 16);
-				if (val & 0x800000) val |= 0xFF000000; // 24bit符号拡張
-				return (double)val / 8388608.0;
-			}
-			if (bitDepth == 32) {
-				return (double)(*(int*)(buf + offset)) / 2147483648.0;
-			}
-			if (bitDepth == 8) {
-				return ((double)(*(unsigned char*)(buf + offset)) - 128.0) / 128.0;
-			}
-			return 0.0;
-			};
-
-		if (channels <= 2) {
-			bufKeyL[i] = GetSampleValue(dstRawKey, i, 0);
-			bufKeyR[i] = (channels > 1) ? GetSampleValue(dstRawKey, i, 1) : bufKeyL[i];
-		}
-		else {
-			auto GetSampleValueKey = [&](const char* buf, int sampleIndex, int chIndex) -> double {
-				int offset = sampleIndex * bytesPerFrame + chIndex * bytesPerSample;
-
-				if (bitDepth == 16) {
-					return (double)(*(short*)(buf + offset)) / 32768.0;
-				}
-				if (bitDepth == 24) {
-					unsigned char* p = (unsigned char*)(buf + offset);
-					int val = (p[0]) | (p[1] << 8) | (p[2] << 16);
-					if (val & 0x800000) val |= 0xFF000000; // 24bit符号拡張
-					return (double)val / 8388608.0;
-				}
-				if (bitDepth == 32) {
-					return (double)(*(int*)(buf + offset)) / 2147483648.0;
-				}
-				if (bitDepth == 8) {
-					return ((double)(*(unsigned char*)(buf + offset)) - 128.0) / 128.0;
-				}
-				return 0.0;
-				};
-
-			if (g_pcm_upscale_active && savedata.speaker_layout == 5 && channels > 2) {
-				bufKeyL[i] = GetSampleValueKey(dstRawKey, i, 0);
-				bufKeyR[i] = (channels > 1) ? GetSampleValueKey(dstRawKey, i, 1) : bufKeyL[i];
-			}
-			else if (g_pcm_upscale_active && channels == 3 && savedata.speaker_layout == 1) {
-				double fl = GetSampleValueKey(dstRawKey, i, 0);
-				double fr = GetSampleValueKey(dstRawKey, i, 1);
-				double lfe = GetSampleValueKey(dstRawKey, i, 2);
-				bufKeyL[i] = fl + lfe * 0.5;
-				bufKeyR[i] = fr + lfe * 0.5;
-			}
-			else if (g_pcm_upscale_active && channels == 4 && savedata.speaker_layout == 2) {
-				double fl = GetSampleValueKey(dstRawKey, i, 0);
-				double fr = GetSampleValueKey(dstRawKey, i, 1);
-				double rl = GetSampleValueKey(dstRawKey, i, 2);
-				double rr = GetSampleValueKey(dstRawKey, i, 3);
-				bufKeyL[i] = (fl + rl * 0.8) * 0.7;
-				bufKeyR[i] = (fr + rr * 0.8) * 0.7;
-			}
-			else if (g_pcm_upscale_active && channels >= 8) {
-				double fl = GetSampleValueKey(dstRawKey, i, 0);
-				double fr = GetSampleValueKey(dstRawKey, i, 1);
-				double c = GetSampleValueKey(dstRawKey, i, 2);
-				double lfe = GetSampleValueKey(dstRawKey, i, 3);
-				double bl = GetSampleValueKey(dstRawKey, i, 4);
-				double br = GetSampleValueKey(dstRawKey, i, 5);
-				double sl = GetSampleValueKey(dstRawKey, i, 6);
-				double sr = GetSampleValueKey(dstRawKey, i, 7);
-				bufKeyL[i] = (fl + c * 0.7 + bl * 0.75 + sl * 0.75 + lfe * 0.5) * 0.55;
-				bufKeyR[i] = (fr + c * 0.7 + br * 0.75 + sr * 0.75 + lfe * 0.5) * 0.55;
-			}
-			else {
-				double fl = GetSampleValueKey(dstRawKey, i, 0);
-				double fr = GetSampleValueKey(dstRawKey, i, 1);
-				double c = (channels > 2) ? GetSampleValueKey(dstRawKey, i, 2) : 0.0;
-				double lfe = (channels > 3) ? GetSampleValueKey(dstRawKey, i, 3) : 0.0;
-				double rl = (channels > 4) ? GetSampleValueKey(dstRawKey, i, 4) : 0.0;
-				double rr = (channels > 5) ? GetSampleValueKey(dstRawKey, i, 5) : 0.0;
-
-				bufKeyL[i] = (fl + c * 0.7 + rl * 0.8 + lfe * 0.5) * 0.7;
-				bufKeyR[i] = (fr + c * 0.7 + rr * 0.8 + lfe * 0.5) * 0.7;
-			}
-		}
-	}
-	// ===== 音楽キー分析 =====
-	AnalyzeMusicKey(bufL, bufR, (int)sampleRate);
+	// ===== 音楽キー分析 (スペアナ描画とは独立。隔フレームで十分) =====
+	static UINT s_keyAnalyzeTick = 0;
+	if ((++s_keyAnalyzeTick & 1u) == 0u)
+		AnalyzeMusicKey(bufL, bufR, (int)sampleRate);
 
 	auto ValToBarHeight = [&](double amplitude) -> int {
 		if (amplitude < 0.0001) return 0;
@@ -18251,59 +18316,24 @@ void COggDlg::Speana()
 	bool useFFT = (!mode0_Note);
 
 	if (useFFT) {
-		int N = fftSize;
-		auto ApplyWindow = [&](const std::vector<double>& src, double* dst) {
-			for (int n = 0; n < N; n++) {
-				double w = 0.5 - 0.5 * cos(2.0 * M_PI * (double)n / (double)(N - 1));
-				dst[n] = src[n] * w;
-			}
-			};
-
-		if (m_st.GetCheck() == FALSE) {
-			ApplyWindow(bufM, aFFT2); ipTab2[0] = 0; ddst(N, -1, aFFT2, ipTab2, wTab2);
+		const int N = fftSize;
+		if (!stereoSpeana) {
+			SpeanaApplyHann(bufM.data(), aFFT2, N);
+			ipTab2[0] = 0; ddst(N, -1, aFFT2, ipTab2, wTab2);
 		}
 		else {
-			ApplyWindow(bufResampled, aFFT2); ipTab2[0] = 0; ddst(N, -1, aFFT2, ipTab2, wTab2);
-			ApplyWindow(bufResampledR, aFFT2a); ipTab2[0] = 0; ddst(N, -1, aFFT2a, ipTab2, wTab2);
+			SpeanaApplyHann(bufResampled.data(), aFFT2, N);
+			ipTab2[0] = 0; ddst(N, -1, aFFT2, ipTab2, wTab2);
+			SpeanaApplyHann(bufResampledR.data(), aFFT2a, N);
+			ipTab2[0] = 0; ddst(N, -1, aFFT2a, ipTab2, wTab2);
 		}
 		aFFT2[0] = 0; aFFT2a[0] = 0; // DCカット
 
-		double fs = 44100.0;
 		double band_edges[DISP_KEYS + 1];
 		int band_bins[DISP_KEYS + 1];
-		double normFactor = 4.0 / fftSize;
-		int splitIndex = DISP_KEYS / 2;
-
-		// ========================================
-		// モード1: 低周波部分特化
-		// ========================================
-		if (mode1_Low) {
-			double lowStart = 20.0; double highEnd = 800.0;
-			for (int k = 0; k <= DISP_KEYS; ++k) band_edges[k] = lowStart * pow(highEnd / lowStart, (double)k / DISP_KEYS);
-		}
-		// ========================================
-		// モード3: 高周波数
-		// ========================================
-		else if (mode3_High) {
-			double lowStart = 40.0; double splitFreq = 3000.0; double highEnd = 22000.0;
-			for (int k = 0; k <= DISP_KEYS; ++k) {
-				if (k <= splitIndex) band_edges[k] = lowStart * pow(splitFreq / lowStart, (double)k / splitIndex);
-				else band_edges[k] = splitFreq * pow(highEnd / splitFreq, (double)(k - splitIndex) / (DISP_KEYS - splitIndex));
-			}
-		}
-		// ========================================
-		// モード2: 全音域カバー(標準) & モード4: 音声特化
-		// ========================================
-		else {
-			double minFreq = 30.0; double maxFreq = 22000.0;
-			for (int k = 0; k <= DISP_KEYS; ++k) band_edges[k] = minFreq * pow(maxFreq / minFreq, (double)k / DISP_KEYS);
-		}
-
-		for (int k = 0; k <= DISP_KEYS; ++k) {
-			band_bins[k] = (int)(band_edges[k] * fftSize / fs);
-			if (band_bins[k] < 0) band_bins[k] = 0;
-			if (band_bins[k] >= fftSize / 2) band_bins[k] = fftSize / 2 - 1;
-		}
+		const double normFactor = 4.0 / fftSize;
+		const int bandCacheKey = (mode1_Low ? 1 : 0) | (mode3_High ? 2 : 0) | (mode4_Vox ? 4 : 0) | (fftSize << 4);
+		SpeanaEnsureBandCache(bandCacheKey, mode1_Low, mode3_High, fftSize, band_edges, band_bins);
 
 		for (i = 0; i < DISP_KEYS; i++) {
 			int bin_start = band_bins[i];
@@ -18313,13 +18343,18 @@ void COggDlg::Speana()
 			if (bin_end > fftSize / 2) bin_end = fftSize / 2;
 
 			dt = 0; dta = 0;
-			if (m_st.GetCheck() == FALSE) {
-				for (j = bin_start; j < bin_end; j++) if (dt < fabs(aFFT2[j])) dt = fabs(aFFT2[j]);
+			if (!stereoSpeana) {
+				for (j = bin_start; j < bin_end; j++) {
+					const double v = fabs(aFFT2[j]);
+					if (dt < v) dt = v;
+				}
 			}
 			else {
 				for (j = bin_start; j < bin_end; j++) {
-					if (dt < fabs(aFFT2[j])) dt = fabs(aFFT2[j]);
-					if (dta < fabs(aFFT2a[j])) dta = fabs(aFFT2a[j]);
+					const double vl = fabs(aFFT2[j]);
+					const double vr = fabs(aFFT2a[j]);
+					if (dt < vl) dt = vl;
+					if (dta < vr) dta = vr;
 				}
 			}
 
@@ -18349,37 +18384,16 @@ void COggDlg::Speana()
 		}
 
 		// 描画ループ (FFT)
-		for (i = 0; i < DISP_KEYS; i++) {
-			d = dtbl[i];
-			if (spelv[i] < d) { spelv[i] = d; spetm[i] = 0; }
-			int x_pos, bar_w;
-			if (m_st.GetCheck() == FALSE) {
-				x_pos = (21 * 8 + i * 2) * 4; bar_w = 8;
-				if (spelv[i] > 0 || d > 0) {
-					dc.FillSolidRect(x_pos, (96 - spelv[i]) * 4, bar_w, (spelv[i] + 1) * 4, RGB(0, 128, 0));
-					dc.FillSolidRect(x_pos, (96 - d) * 4, bar_w, (d + 1) * 4, RGB(0, 255, 0));
-					dc.FillSolidRect(x_pos, (96 - spelv[i]) * 4, bar_w, 4, RGB(255, 255, 0));
-				}
+		if (!stereoSpeana) {
+			for (i = 0; i < DISP_KEYS; i++)
+				SpeanaDrawBar(dc, (21 * 8 + i * 2) * 4, 8, i, dtbl[i]);
+		}
+		else {
+			for (i = 0; i < DISP_KEYS; i++) {
+				SpeanaDrawBar(dc, (21 * 8 + i) * 4, 4, 100 + i, dtbl[i]);
+				SpeanaDrawBar(dc, (21 * 8 + 89 + i) * 4, 4, 200 + i, dtatbl[i]);
 			}
-			else {
-				d = dtbl[i];
-				if (spelv[100 + i] < d) { spelv[100 + i] = d; spetm[100 + i] = 0; }
-				x_pos = (21 * 8 + i) * 4; bar_w = 4;
-				if (spelv[100 + i] > 0 || d > 0) {
-					dc.FillSolidRect(x_pos, (96 - spelv[100 + i]) * 4, bar_w, (spelv[100 + i] + 1) * 4, RGB(0, 128, 0));
-					dc.FillSolidRect(x_pos, (96 - d) * 4, bar_w, (d + 1) * 4, RGB(0, 255, 0));
-					dc.FillSolidRect(x_pos, (96 - spelv[100 + i]) * 4, bar_w, 4, RGB(255, 255, 0));
-				}
-				d = dtatbl[i];
-				if (spelv[200 + i] < d) { spelv[200 + i] = d; spetm[200 + i] = 0; }
-				x_pos = (21 * 8 + 89 + i) * 4; bar_w = 4;
-				if (spelv[200 + i] > 0 || d > 0) {
-					dc.FillSolidRect(x_pos, (96 - spelv[200 + i]) * 4, bar_w, (spelv[200 + i] + 1) * 4, RGB(0, 128, 0));
-					dc.FillSolidRect(x_pos, (96 - d) * 4, bar_w, (d + 1) * 4, RGB(0, 255, 0));
-					dc.FillSolidRect(x_pos, (96 - spelv[200 + i]) * 4, bar_w, 4, RGB(255, 255, 0));
-				}
-				dc.FillSolidRect((21 * 8 + 88) * 4, 20, 4, 368, RGB(0, 255, 255));
-			}
+			dc.FillSolidRect((21 * 8 + 88) * 4, 20, 4, 368, RGB(0, 255, 255));
 		}
 	}
 
@@ -18419,12 +18433,12 @@ void COggDlg::Speana()
 			int useLenLow = (maxLen < LEN_LOW) ? maxLen : LEN_LOW;
 			int startLow = maxLen - useLenLow;
 
+			const double* hannLow = SpeanaHannTable(8192);
 			for (int k = 0; k < LOW_KEY_LIMIT; k++) {
 				double coeff = goertzelCoeffs[k];
 				double s_prev = 0.0, s_prev2 = 0.0;
 				for (int n = 0; n < useLenLow; ++n) {
-					double w = 0.5 - 0.5 * cos(2.0 * M_PI * n / (useLenLow - 1));
-					double val = input[startLow + n] * w;
+					double val = input[startLow + n] * hannLow[n];
 					double s = val + coeff * s_prev - s_prev2;
 					s_prev2 = s_prev;
 					s_prev = s;
@@ -18482,26 +18496,17 @@ void COggDlg::Speana()
 			}
 
 			for (int i = 0; i < DISP_KEYS; i++) {
-				int h = ValToBarHeight(displayAmp[i] * savedata.wup);
-
-				int idx = offset_idx + i;
-				if (spelv[idx] < h) { spelv[idx] = h; spetm[idx] = 0; }
-				d = h;
-
+				const int h = ValToBarHeight(displayAmp[i] * savedata.wup);
+				const int idx = offset_idx + i;
 				int x, w;
-				if (!isRight && m_st.GetCheck() == FALSE) { x = (21 * 8 + i * 2) * 4; w = 8; }
+				if (!isRight && !stereoSpeana) { x = (21 * 8 + i * 2) * 4; w = 8; }
 				else if (!isRight) { x = (21 * 8 + i) * 4; w = 4; }
 				else { x = (21 * 8 + 89 + i) * 4; w = 4; }
-
-				if (d > 0 || spelv[idx] > 0) {
-					dc.FillSolidRect(x, (96 - spelv[idx]) * 4, w, (spelv[idx] + 1) * 4, RGB(0, 128, 0));
-					dc.FillSolidRect(x, (96 - d) * 4, w, (d + 1) * 4, RGB(0, 255, 0));
-					dc.FillSolidRect(x, (96 - spelv[idx]) * 4, w, 4, RGB(255, 255, 0));
-				}
+				SpeanaDrawBar(dc, x, w, idx, h);
 			}
 			};
 
-		if (m_st.GetCheck() == FALSE) {
+		if (!stereoSpeana) {
 			std::vector<double> monoInput(framesToRead);
 			for (int k = 0; k < framesToRead; k++) monoInput[k] = (bufL[k] + bufR[k]) * 0.5;
 			ProcessGoertzel(monoInput, 0, false);
