@@ -143,6 +143,8 @@ public:
 	int m_bakSpeaker;
 	int m_bakBit24;
 	int m_bakBit32;
+	TCHAR m_bakFont1[1024];
+	TCHAR m_bakFont2[1024];
 };
 
 //{{AFX_INSERT_LOCATION}}

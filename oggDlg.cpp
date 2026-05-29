@@ -135,6 +135,46 @@ int wavchannel = 2;
 // MP3 デコード出力のビット深度（mp3_.m_dwBitsPerSample と一致させる。wavsam_depth との不一致で playb が 16/24=1.5 倍ずれるのを防ぐ）
 int g_mp3_decoder_bps = 16;
 int muon;
+int kpi_silence_bytes = 0;
+
+static bool DeserializeLogFont(const TCHAR* str, LOGFONT* lf)
+{
+	if (!str || !lf || _tcslen(str) == 0) return false;
+	if (_tcschr(str, '|') == NULL) {
+		memset(lf, 0, sizeof(LOGFONT));
+		_tcsncpy(lf->lfFaceName, str, LF_FACESIZE - 1);
+		lf->lfFaceName[LF_FACESIZE - 1] = 0;
+		return false;
+	}
+	memset(lf, 0, sizeof(LOGFONT));
+	TCHAR faceName[LF_FACESIZE] = { 0 };
+	int height = 0, width = 0, escapement = 0, orientation = 0, weight = 0;
+	int italic = 0, underline = 0, strikeOut = 0, charSet = 0, outPrecision = 0, clipPrecision = 0, quality = 0, pitchAndFamily = 0;
+	int parsed = _stscanf(str, _T("%[^|]|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d"),
+		faceName, &height, &width, &escapement, &orientation, &weight,
+		&italic, &underline, &strikeOut, &charSet, &outPrecision, &clipPrecision, &quality, &pitchAndFamily);
+	if (parsed >= 1) {
+		_tcsncpy(lf->lfFaceName, faceName, LF_FACESIZE - 1);
+		lf->lfFaceName[LF_FACESIZE - 1] = 0;
+	}
+	if (parsed >= 14) {
+		lf->lfHeight = height;
+		lf->lfWidth = width;
+		lf->lfEscapement = escapement;
+		lf->lfOrientation = orientation;
+		lf->lfWeight = weight;
+		lf->lfItalic = (BYTE)italic;
+		lf->lfUnderline = (BYTE)underline;
+		lf->lfStrikeOut = (BYTE)strikeOut;
+		lf->lfCharSet = (BYTE)charSet;
+		lf->lfOutPrecision = (BYTE)outPrecision;
+		lf->lfClipPrecision = (BYTE)clipPrecision;
+		lf->lfQuality = (BYTE)quality;
+		lf->lfPitchAndFamily = (BYTE)pitchAndFamily;
+		return true;
+	}
+	return false;
+}
 IMPLEMENT_DYNCREATE(CWread, CWinThread)
 CWread::CWread() {}
 CWread::~CWread() {}
@@ -2206,11 +2246,24 @@ BOOL COggDlg::OnInitDialog()
 	LOGFONT LogFont;
 	CClientDC dc1(this);
 	dc1.GetCurrentFont()->GetLogFont(&LogFont);
-	_tcscpy(LogFont.lfFaceName, _T("ＭＳ ゴシック"));
-	LogFont.lfHeight = 16 * 4;
-	LogFont.lfWidth = 8 * 4;
-	LogFont.lfQuality = DRAFT_QUALITY;
-	LogFont.lfWeight = FW_ULTRABOLD;
+	bool has_font1 = false;
+	if (_tcslen(savedata.font1) > 0) {
+		has_font1 = DeserializeLogFont(savedata.font1, &LogFont);
+	}
+	if (has_font1) {
+		LogFont.lfHeight *= 4;
+		LogFont.lfWidth *= 4;
+	} else {
+		if (_tcslen(savedata.font1) > 0) {
+			_tcscpy(LogFont.lfFaceName, savedata.font1);
+		} else {
+			_tcscpy(LogFont.lfFaceName, _T("ＭＳ ゴシック"));
+		}
+		LogFont.lfHeight = 16 * 4;
+		LogFont.lfWidth = 8 * 4;
+		LogFont.lfQuality = DRAFT_QUALITY;
+		LogFont.lfWeight = FW_ULTRABOLD;
+	}
 	hFont = CreateFontIndirect(&LogFont);
 	/*	hFont = CreateFont(16,8,0,0,500,FALSE,FALSE,FALSE,
 	SHIFTJIS_CHARSET,OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,
@@ -5518,6 +5571,7 @@ void COggDlg::play()
 #endif
 	//	}
 	muon = MUON;
+	kpi_silence_bytes = 0;
 	rrr = 1;
 	m_ps.EnableWindow(TRUE);
 	CWaitCursor rrr;
@@ -11761,6 +11815,35 @@ static DWORD ConvertFloatTypedToIntBuffer(const void* src, DWORD samples, int sr
 	return needBytes;
 }
 
+static bool IsBlockSilent(const BYTE* buffer, int bytes, int bitDepth)
+{
+	if (bytes <= 0) return true;
+	if (bitDepth == 16) {
+		const short* s = (const short*)buffer;
+		int count = bytes / 2;
+		for (int i = 0; i < count; i++) {
+			if (abs((int)s[i]) > 32) return false;
+		}
+	} else if (bitDepth == 24) {
+		int count = bytes / 3;
+		for (int i = 0; i < count; i++) {
+			int val = (int)buffer[i * 3] | ((int)buffer[i * 3 + 1] << 8) | ((int)(signed char)buffer[i * 3 + 2] << 16);
+			if (abs(val) > 8192) return false;
+		}
+	} else if (bitDepth == 32) {
+		const int* s = (const int*)buffer;
+		int count = bytes / 4;
+		for (int i = 0; i < count; i++) {
+			if (abs(s[i]) > 2097152) return false;
+		}
+	} else {
+		for (int i = 0; i < bytes; i++) {
+			if (buffer[i] != 0 && buffer[i] != 0x80) return false;
+		}
+	}
+	return true;
+}
+
 int readkpi(BYTE* bw, int cnt)
 {
 	if (cnt == 0) return 0;
@@ -11900,6 +11983,17 @@ int readkpi(BYTE* bw, int cnt)
 						}
 						if (!rIsBytes) {
 							r = (DWORD)(r * dstBytesPerFrame);
+						}
+					}
+					if (r > 0 && fade1 != 1) {
+						if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
+							kpi_silence_bytes += r;
+						} else {
+							kpi_silence_bytes = 0;
+						}
+						int maxSilentBytes = (int)((double)wavbit_sample_Hz * (double)wavchannel * (double)(abs(wavsam_depth) / 8) * 4.0);
+						if (maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes) {
+							fade1 = 1;
 						}
 					}
 					if (r == 0) fade1 = 1;

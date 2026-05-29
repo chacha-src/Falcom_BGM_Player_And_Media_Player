@@ -13,6 +13,65 @@
 #include "AudioUpscaler.h"
 #include <mutex>
 
+static void SerializeLogFont(const LOGFONT* lf, TCHAR* str, int maxLen)
+{
+	if (!lf || !str) return;
+	_sntprintf(str, maxLen, _T("%s|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d"),
+		lf->lfFaceName,
+		lf->lfHeight,
+		lf->lfWidth,
+		lf->lfEscapement,
+		lf->lfOrientation,
+		lf->lfWeight,
+		lf->lfItalic,
+		lf->lfUnderline,
+		lf->lfStrikeOut,
+		lf->lfCharSet,
+		lf->lfOutPrecision,
+		lf->lfClipPrecision,
+		lf->lfQuality,
+		lf->lfPitchAndFamily);
+}
+
+static bool DeserializeLogFont(const TCHAR* str, LOGFONT* lf)
+{
+	if (!str || !lf || _tcslen(str) == 0) return false;
+	if (_tcschr(str, '|') == NULL) {
+		memset(lf, 0, sizeof(LOGFONT));
+		_tcsncpy(lf->lfFaceName, str, LF_FACESIZE - 1);
+		lf->lfFaceName[LF_FACESIZE - 1] = 0;
+		return false;
+	}
+	memset(lf, 0, sizeof(LOGFONT));
+	TCHAR faceName[LF_FACESIZE] = { 0 };
+	int height = 0, width = 0, escapement = 0, orientation = 0, weight = 0;
+	int italic = 0, underline = 0, strikeOut = 0, charSet = 0, outPrecision = 0, clipPrecision = 0, quality = 0, pitchAndFamily = 0;
+	int parsed = _stscanf(str, _T("%[^|]|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d"),
+		faceName, &height, &width, &escapement, &orientation, &weight,
+		&italic, &underline, &strikeOut, &charSet, &outPrecision, &clipPrecision, &quality, &pitchAndFamily);
+	if (parsed >= 1) {
+		_tcsncpy(lf->lfFaceName, faceName, LF_FACESIZE - 1);
+		lf->lfFaceName[LF_FACESIZE - 1] = 0;
+	}
+	if (parsed >= 14) {
+		lf->lfHeight = height;
+		lf->lfWidth = width;
+		lf->lfEscapement = escapement;
+		lf->lfOrientation = orientation;
+		lf->lfWeight = weight;
+		lf->lfItalic = (BYTE)italic;
+		lf->lfUnderline = (BYTE)underline;
+		lf->lfStrikeOut = (BYTE)strikeOut;
+		lf->lfCharSet = (BYTE)charSet;
+		lf->lfOutPrecision = (BYTE)outPrecision;
+		lf->lfClipPrecision = (BYTE)clipPrecision;
+		lf->lfQuality = (BYTE)quality;
+		lf->lfPitchAndFamily = (BYTE)pitchAndFamily;
+		return true;
+	}
+	return false;
+}
+
 extern IGraphBuilder *pGraphBuilder;
 extern std::mutex cl2;
 extern ULONG oldw;
@@ -261,6 +320,8 @@ BOOL CRender::OnInitDialog()
 	m_bakSpeaker = savedata.speaker_layout;
 	m_bakBit24 = savedata.bit24;
 	m_bakBit32 = savedata.bit32;
+	_tcscpy(m_bakFont1, savedata.font1);
+	_tcscpy(m_bakFont2, savedata.font2);
 
 	SetWindowText(LL14(L"レンダリング選択", L"Rendering Options", L"Options de rendu", L"Opzioni di rendering", L"Opciones de renderizado", L"렌더링 옵션", L"渲染选项", L"خيارات العرض", L"Параметры рендеринга", L"Rendering-Optionen", L"Opções de renderização", L"Renderopties", L"Opcje renderowania", L"Render seçenekleri"));
 	SetDlgItemText(IDOK, LL14(L"OK", L"OK", L"OK", L"OK", L"OK", L"확인", L"确定", L"موافق", L"OK", L"OK", L"OK", L"OK", L"OK", L"Tamam"));
@@ -801,28 +862,84 @@ extern HFONT	hFont;
 #include "afxdlgs.h"
 void CRender::OnFontMain()
 {
-	// TODO: ここにコントロール通知ハンドラ コードを追加します。
-	LOGFONT      logFont;
-	CFont* f=CFont::FromHandle(hFont);
-	f->GetLogFont(&logFont);
-	CFontDialog fontDlg(&logFont);
-	if (fontDlg.DoModal() == IDOK){
-		DeleteObject(hFont);
-		hFont=CreateFontIndirect(fontDlg.m_cf.lpLogFont);
+	LOGFONT dlgLogFont;
+	memset(&dlgLogFont, 0, sizeof(LOGFONT));
+	
+	if (_tcslen(savedata.font1) > 0 && DeserializeLogFont(savedata.font1, &dlgLogFont)) {
+		// Loaded saved font attributes successfully
+	} else {
+		LOGFONT      logFont;
+		CFont* f = CFont::FromHandle(hFont);
+		if (f) {
+			f->GetLogFont(&logFont);
+		} else {
+			memset(&logFont, 0, sizeof(LOGFONT));
+			_tcscpy(logFont.lfFaceName, _T("ＭＳ ゴシック"));
+		}
+		dlgLogFont = logFont;
+		dlgLogFont.lfHeight = -16; // Standard size for editing
+		dlgLogFont.lfWidth = 0;
+		if (_tcslen(savedata.font1) > 0) {
+			_tcscpy(dlgLogFont.lfFaceName, savedata.font1);
+		}
 	}
 
+	CFontDialog fontDlg(&dlgLogFont);
+	if (fontDlg.DoModal() == IDOK){
+		SerializeLogFont(fontDlg.m_cf.lpLogFont, savedata.font1, 1024);
+		
+		DeleteObject(hFont);
+		LOGFONT logFont = *(fontDlg.m_cf.lpLogFont);
+		logFont.lfHeight *= 4;
+		logFont.lfWidth *= 4;
+		hFont = CreateFontIndirect(&logFont);
+		
+		if (og) {
+			og->Invalidate();
+			og->RedrawWindow();
+		}
+	}
 }
+
 #include "PlayList.h"
 extern CPlayList *pl;
 void CRender::OnFontList()
 {
-	// TODO: ここにコントロール通知ハンドラ コードを追加します。
-	LOGFONT      logFont;
-	CFont* f=pl->m_lc.GetFont();
-	f->GetLogFont(&logFont);
-	CFontDialog fontDlg(&logFont,CF_SCREENFONTS);
-	if (fontDlg.DoModal() == IDOK && pl){
-		pl->m_lc.SetFont(fontDlg.GetFont());
+	if (!pl) return;
+	LOGFONT dlgLogFont;
+	memset(&dlgLogFont, 0, sizeof(LOGFONT));
+
+	if (_tcslen(savedata.font2) > 0 && DeserializeLogFont(savedata.font2, &dlgLogFont)) {
+		// Loaded saved list font successfully
+	} else {
+		LOGFONT      logFont;
+		CFont* f = pl->m_lc.GetFont();
+		if (f) {
+			f->GetLogFont(&logFont);
+		} else {
+			memset(&logFont, 0, sizeof(LOGFONT));
+			_tcscpy(logFont.lfFaceName, _T("メイリオ"));
+			logFont.lfHeight = -15;
+			logFont.lfCharSet = SHIFTJIS_CHARSET;
+		}
+		dlgLogFont = logFont;
+		if (_tcslen(savedata.font2) > 0) {
+			_tcscpy(dlgLogFont.lfFaceName, savedata.font2);
+		}
+	}
+
+	CFontDialog fontDlg(&dlgLogFont, CF_SCREENFONTS);
+	if (fontDlg.DoModal() == IDOK){
+		if (pl->m_fontList.GetSafeHandle()) {
+			pl->m_fontList.DeleteObject();
+		}
+		if (pl->m_fontList.CreateFontIndirect(fontDlg.m_cf.lpLogFont)) {
+			pl->m_lc.SetFont(&pl->m_fontList, TRUE);
+			pl->m_find.SetFont(&pl->m_fontList, TRUE);
+			SerializeLogFont(fontDlg.m_cf.lpLogFont, savedata.font2, 1024);
+			pl->m_lc.Invalidate();
+			pl->m_find.Invalidate();
+		}
 	}
 }
 
@@ -859,8 +976,6 @@ void CRender::OnBnClickedOk()
 			savedata.soundguid = { 0,0,0,0 };
 		savedata.soundcur = dev;
 	}
-	if (og)
-		RenderRecreateSecondarySound(og);
 	extern int gameon;
 	if(savedata.aero)
 	delete renderbase;
@@ -1100,6 +1215,17 @@ int CRender::Create(CWnd* pWnd)
 
 void CRender::OnBnClickedCancel()
 {
+	bool bSoundChanged = (memcmp(&savedata.soundguid, &m_bakSoundGuid, sizeof(GUID)) != 0 ||
+	                      savedata.soundcur != m_bakSoundCur ||
+	                      savedata.samples != m_bakSamples ||
+	                      savedata.upscale_enable != m_bakUpscale ||
+	                      savedata.speaker_layout != m_bakSpeaker ||
+	                      savedata.bit24 != m_bakBit24 ||
+	                      savedata.bit32 != m_bakBit32);
+
+	bool bFont1Changed = (_tcscmp(savedata.font1, m_bakFont1) != 0);
+	bool bFont2Changed = (_tcscmp(savedata.font2, m_bakFont2) != 0);
+
 	savedata.soundguid = m_bakSoundGuid;
 	savedata.soundcur = m_bakSoundCur;
 	savedata.samples = m_bakSamples;
@@ -1107,6 +1233,9 @@ void CRender::OnBnClickedCancel()
 	savedata.speaker_layout = m_bakSpeaker;
 	savedata.bit24 = m_bakBit24;
 	savedata.bit32 = m_bakBit32;
+	_tcscpy(savedata.font1, m_bakFont1);
+	_tcscpy(savedata.font2, m_bakFont2);
+
 	m_24.SetCheck(savedata.bit24);
 	m_32bit.SetCheck(savedata.bit32);
 	m_upscale.SetCheck(savedata.upscale_enable ? BST_CHECKED : BST_UNCHECKED);
@@ -1123,8 +1252,61 @@ void CRender::OnBnClickedCancel()
 			break;
 		}
 	}
-	if (og)
+
+	if (bSoundChanged && og)
 		RenderRecreateSecondarySound(og);
+
+	if (bFont1Changed) {
+		DeleteObject(hFont);
+		LOGFONT logFont;
+		bool has_font1 = false;
+		if (_tcslen(savedata.font1) > 0) {
+			has_font1 = DeserializeLogFont(savedata.font1, &logFont);
+		}
+		if (has_font1) {
+			logFont.lfHeight *= 4;
+			logFont.lfWidth *= 4;
+		} else {
+			memset(&logFont, 0, sizeof(LOGFONT));
+			logFont.lfHeight = 16 * 4;
+			logFont.lfWidth = 8 * 4;
+			logFont.lfWeight = FW_ULTRABOLD;
+			logFont.lfQuality = DRAFT_QUALITY;
+			if (_tcslen(savedata.font1) > 0) {
+				_tcscpy(logFont.lfFaceName, savedata.font1);
+			} else {
+				_tcscpy(logFont.lfFaceName, _T("ＭＳ ゴシック"));
+			}
+		}
+		hFont = CreateFontIndirect(&logFont);
+		if (og) {
+			og->Invalidate();
+			og->RedrawWindow();
+		}
+	}
+
+	if (bFont2Changed && pl) {
+		if (pl->m_fontList.GetSafeHandle()) {
+			pl->m_fontList.DeleteObject();
+		}
+		BOOL retfont = FALSE;
+		LOGFONT logFont;
+		if (_tcslen(savedata.font2) > 0 && DeserializeLogFont(savedata.font2, &logFont)) {
+			retfont = pl->m_fontList.CreateFontIndirect(&logFont);
+		} else if (_tcslen(savedata.font2) > 0) {
+			retfont = pl->m_fontList.CreateFont(-15, 0, 0, 0, FW_NORMAL, 0, 0, 0, SHIFTJIS_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, DRAFT_QUALITY, DEFAULT_PITCH | FF_SWISS, savedata.font2);
+		}
+		if (!retfont) {
+			retfont = pl->m_fontList.CreateFont(-15, 0, 0, 0, FW_NORMAL, 0, 0, 0, SHIFTJIS_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, DRAFT_QUALITY, DEFAULT_PITCH | FF_SWISS, _T("メイリオ"));
+		}
+		if (retfont) {
+			pl->m_lc.SetFont(&pl->m_fontList, TRUE);
+			pl->m_find.SetFont(&pl->m_fontList, TRUE);
+			pl->m_lc.Invalidate();
+			pl->m_find.Invalidate();
+		}
+	}
+
 	if (savedata.aero)
 
 	delete renderbase;

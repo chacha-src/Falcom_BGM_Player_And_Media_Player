@@ -13,6 +13,45 @@
 #include "WavExport.h"
 #include "Douga.h"
 #include "mp3image.h"
+
+static bool DeserializeLogFont(const TCHAR* str, LOGFONT* lf)
+{
+	if (!str || !lf || _tcslen(str) == 0) return false;
+	if (_tcschr(str, '|') == NULL) {
+		memset(lf, 0, sizeof(LOGFONT));
+		_tcsncpy(lf->lfFaceName, str, LF_FACESIZE - 1);
+		lf->lfFaceName[LF_FACESIZE - 1] = 0;
+		return false;
+	}
+	memset(lf, 0, sizeof(LOGFONT));
+	TCHAR faceName[LF_FACESIZE] = { 0 };
+	int height = 0, width = 0, escapement = 0, orientation = 0, weight = 0;
+	int italic = 0, underline = 0, strikeOut = 0, charSet = 0, outPrecision = 0, clipPrecision = 0, quality = 0, pitchAndFamily = 0;
+	int parsed = _stscanf(str, _T("%[^|]|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d"),
+		faceName, &height, &width, &escapement, &orientation, &weight,
+		&italic, &underline, &strikeOut, &charSet, &outPrecision, &clipPrecision, &quality, &pitchAndFamily);
+	if (parsed >= 1) {
+		_tcsncpy(lf->lfFaceName, faceName, LF_FACESIZE - 1);
+		lf->lfFaceName[LF_FACESIZE - 1] = 0;
+	}
+	if (parsed >= 14) {
+		lf->lfHeight = height;
+		lf->lfWidth = width;
+		lf->lfEscapement = escapement;
+		lf->lfOrientation = orientation;
+		lf->lfWeight = weight;
+		lf->lfItalic = (BYTE)italic;
+		lf->lfUnderline = (BYTE)underline;
+		lf->lfStrikeOut = (BYTE)strikeOut;
+		lf->lfCharSet = (BYTE)charSet;
+		lf->lfOutPrecision = (BYTE)outPrecision;
+		lf->lfClipPrecision = (BYTE)clipPrecision;
+		lf->lfQuality = (BYTE)quality;
+		lf->lfPitchAndFamily = (BYTE)pitchAndFamily;
+		return true;
+	}
+	return false;
+}
 #include "CImageBase.h"
 #include "CPlayListNew.h"
 
@@ -361,21 +400,23 @@ BOOL CPlayList::OnInitDialog()
 
 	CCustomControlUtility::SetControlBackgroundColor(&m_listchange, COLOR_COMBO_BG);
 
-//	CFont pFont;
-//	BOOL retfont=pFont.CreateFont(-15,0,0,0,400,0,0,0,128,3,2,1,50,savedata.font2);
-//	if(retfont){
-//		m_lc.SetFont(&pFont,TRUE);
-//		m_find.SetFont(&pFont,TRUE);
-//	}
-//	pFont.DeleteObject();
-//	if(retfont==0)
-//		retfont=pFont.CreateFont(0,0,0,0,FW_NORMAL,FALSE,FALSE,0,ANSI_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,DEFAULT_QUALITY,DEFAULT_PITCH | FF_SWISS,_T("MS UI Gothic"));
-//	if(retfont==0)
-//		retfont=pFont.CreateFont(0,0,0,0,FW_NORMAL,FALSE,FALSE,0,ANSI_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,DEFAULT_QUALITY,DEFAULT_PITCH | FF_SWISS,_T("ＭＳ Ｐゴシック"));
-//	if(retfont){
-//		m_lc.SetFont(&pFont,TRUE);
-//		m_find.SetFont(&pFont,TRUE);
-//	}
+	if (m_fontList.GetSafeHandle()) {
+		m_fontList.DeleteObject();
+	}
+	BOOL retfont = FALSE;
+	LOGFONT logFont;
+	if (_tcslen(savedata.font2) > 0 && DeserializeLogFont(savedata.font2, &logFont)) {
+		retfont = m_fontList.CreateFontIndirect(&logFont);
+	} else if (_tcslen(savedata.font2) > 0) {
+		retfont = m_fontList.CreateFont(-15, 0, 0, 0, FW_NORMAL, 0, 0, 0, SHIFTJIS_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, DRAFT_QUALITY, DEFAULT_PITCH | FF_SWISS, savedata.font2);
+	}
+	if (!retfont) {
+		retfont = m_fontList.CreateFont(-15, 0, 0, 0, FW_NORMAL, 0, 0, 0, SHIFTJIS_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, DRAFT_QUALITY, DEFAULT_PITCH | FF_SWISS, _T("メイリオ"));
+	}
+	if (retfont) {
+		m_lc.SetFont(&m_fontList, TRUE);
+		m_find.SetFont(&m_fontList, TRUE);
+	}
 	Invalidate();
 	playbase = NULL;
 	if (savedata.aero) {

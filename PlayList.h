@@ -135,4 +135,5 @@ public:
 	afx_msg void OnBnClickedPlaydelete();
 	CCustomStandardButton m_namechage;
 	CCustomStandardButton m_listdelete;
+	CFont m_fontList;
 };
