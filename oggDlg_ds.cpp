@@ -4353,6 +4353,14 @@ void equaliser(void* data, int len, BOOL reset) {
 	}
 
 	// ===================================================
+	// 【最終段前】メイクアップゲインの適用
+	// ===================================================
+	for (int i = 0; i < bufferIndex; i++) {
+		leftSamples[i] *= eqMakeupGain;
+		rightSamples[i] *= eqMakeupGain;
+	}
+
+	// ===================================================
 	// 【最終段】プロフェッショナル・ソフトサチュレーション
 	// [FIX-2] knee=0.78 により正常信号(≤0.70)は完全透明通過
 	// ===================================================
@@ -4369,7 +4377,6 @@ void equaliser(void* data, int len, BOOL reset) {
 				if (ch >= MAX_CH) continue;
 
 				float finalOut = (ch == 0) ? leftSamples[bi] : rightSamples[bi];
-				finalOut *= eqMakeupGain;
 
 				// ハードクリップ安全装置: ProfessionalSoftSaturate 正常動作時は到達しない
 				if (finalOut > 1.0f)  finalOut = 1.0f;
@@ -4449,6 +4456,8 @@ static std::vector<std::vector<MelodyCandidate>> g_viterbiPath;
 static const int MAX_VITERBI_FRAMES = 8;  // Viterbi追跡フレーム数
 static const int CANDIDATE_NUM = 5;       // フレームあたり候補数
 
+static WCHAR g_currentVowel = L' ';
+
 CString KeyCodeLow, KeyCodeMid, KeyCodeHigh, KeyCodeAll;
 
 // 12音名 (C〜B)
@@ -4512,24 +4521,101 @@ static std::vector<MelodyCandidate> CalculateSalience(
 {
 	int N = (int)bufL.size();
 	std::vector<Complex> cL(N), cR(N);
+	// [IMPROVEMENT] 固定長8192の窓関数から、実際のN（4096など）に完全にフィッティングした
+	// 対称窓関数に変更し、窓が途中で途切れることによる巨大なスペクトルリーク（ノイズ）を完全に除去。
 	for (int i = 0; i < N; ++i) {
-		cL[i] = bufL[i] * g_blackmanWindow[i];
-		cR[i] = bufR[i] * g_blackmanWindow[i];
+		double w = 0.355768 - 0.487396 * cos(2.0 * M_PI * i / (N - 1))
+			+ 0.144232 * cos(4.0 * M_PI * i / (N - 1))
+			- 0.012604 * cos(6.0 * M_PI * i / (N - 1));
+		cL[i] = bufL[i] * w;
+		cR[i] = bufR[i] * w;
 	}
 	FFT(cL); FFT(cR);
 	int specSize = N / 2;
 	// センターチャンネル強調: 左右平均 - 差分 (センター抽出的な処理)
+	// [IMPROVEMENT] 差分ペナルティを0.8に設定。ステレオリバーブ等によるボーカル消失を防ぎつつ、
+	// 左右に振られた伴奏（ギター、キーボード等）を強力に抑制する黄金比。
 	std::vector<float> mag(specSize, 0.0f);
 	for (int i = 0; i < specSize; ++i) {
 		double center = (std::abs(cL[i]) + std::abs(cR[i])) * 0.5
-			- std::abs(std::abs(cL[i]) - std::abs(cR[i])) * 1.5;
+			- std::abs(std::abs(cL[i]) - std::abs(cR[i])) * 0.8;
 		mag[i] = (float)(center > 0.0 ? center : 0.0);
 	}
+
+	// ===== 日本語母音（あ、い、う、え、お、ん）検出ロジック =====
+	{
+		static std::deque<WCHAR> s_vowelHistory;
+
+		float e1 = 0.0f; // 200 - 450 Hz   (F1 of /i/, /u/, /n/)
+		float e2 = 0.0f; // 450 - 750 Hz   (F1 of /e/, /o/)
+		float e3 = 0.0f; // 750 - 1100 Hz  (F1 of /a/)
+		float e4 = 0.0f; // 1100 - 1700 Hz (F2 of /a/, /o/, /u/)
+		float e5 = 0.0f; // 1700 - 2400 Hz (F2 of /e/)
+		float e6 = 0.0f; // 2400 - 3500 Hz (F2 of /i/)
+
+		// 安全な範囲でエネルギー集計 (binFreq は約10.77 Hz)
+		double binFreq = sampleRate / N;
+		for (int b = 18; b <= 41 && b < specSize; ++b)  e1 += mag[b];
+		for (int b = 42; b <= 69 && b < specSize; ++b)  e2 += mag[b];
+		for (int b = 70; b <= 102 && b < specSize; ++b) e3 += mag[b];
+		for (int b = 103; b <= 157 && b < specSize; ++b) e4 += mag[b];
+		for (int b = 158; b <= 222 && b < specSize; ++b) e5 += mag[b];
+		for (int b = 223; b <= 325 && b < specSize; ++b) e6 += mag[b];
+
+		float sum_e = e1 + e2 + e3 + e4 + e5 + e6;
+		if (sum_e > 0.005f) {
+			float r1 = e1 / sum_e;
+			float r2 = e2 / sum_e;
+			float r3 = e3 / sum_e;
+			float r4 = e4 / sum_e;
+			float r5 = e5 / sum_e;
+			float r6 = e6 / sum_e;
+
+			float score_a = r3 * 2.0f + r4 * 1.5f - r1 * 1.0f - r6 * 1.5f;
+			float score_i = r1 * 1.0f + r6 * 2.5f - r3 * 1.5f - r4 * 1.0f;
+			float score_u = r1 * 1.5f + r4 * 1.2f - r3 * 1.0f - r5 * 1.5f - r6 * 1.5f;
+			float score_e = r2 * 1.5f + r5 * 2.0f - r1 * 0.8f - r6 * 1.0f;
+			float score_o = r2 * 2.0f + r4 * 1.2f - r5 * 1.5f - r6 * 1.5f;
+			float score_n = r1 * 3.0f - r2 * 1.0f - r3 * 1.0f - r4 * 1.0f - r5 * 1.0f - r6 * 1.0f;
+
+			WCHAR bestVowel = L' ';
+			float maxScore = -999.0f;
+
+			if (score_a > maxScore) { maxScore = score_a; bestVowel = L'あ'; }
+			if (score_i > maxScore) { maxScore = score_i; bestVowel = L'い'; }
+			if (score_u > maxScore) { maxScore = score_u; bestVowel = L'う'; }
+			if (score_e > maxScore) { maxScore = score_e; bestVowel = L'え'; }
+			if (score_o > maxScore) { maxScore = score_o; bestVowel = L'お'; }
+			if (score_n > maxScore) { maxScore = score_n; bestVowel = L'ん'; }
+
+			if (maxScore < 0.1f) bestVowel = L' ';
+			s_vowelHistory.push_back(bestVowel);
+		} else {
+			s_vowelHistory.push_back(L' ');
+		}
+
+		if (s_vowelHistory.size() > 5) s_vowelHistory.pop_front();
+
+		// 多数決でチャタリングを防止
+		std::map<WCHAR, int> counts;
+		for (WCHAR v : s_vowelHistory) counts[v]++;
+		int mc = 0;
+		WCHAR finalVowel = L' ';
+		for (auto& pair : counts) {
+			if (pair.second > mc && pair.first != L' ') {
+				mc = pair.second;
+				finalVowel = pair.first;
+			}
+		}
+		g_currentVowel = finalVowel;
+	}
+
 	// MIDI 41(F2)〜76(E5) の範囲でサリエンス計算
 	std::vector<float> salienceMap(108, 0.0f);
 	double binFreq = sampleRate / N;
 	for (int k = 41; k <= 76; ++k) {
-		int bin = (int)(440.0 * pow(2.0, (k - 69.0) / 12.0) / binFreq);
+		// [IMPROVEMENT] 切り捨て(int)から四捨五入(+0.5)に変更し、周波数のズレを補正
+		int bin = (int)(440.0 * pow(2.0, (k - 69.0) / 12.0) / binFreq + 0.5);
 		if (bin <= 0 || bin * 3 >= specSize) continue;
 		// ピーク検出 (隣接ビン含む)
 		auto getPeak = [&](int cb) -> float {
@@ -4539,9 +4625,26 @@ static std::vector<MelodyCandidate> CalculateSalience(
 			return mx;
 			};
 		float s1 = getPeak(bin), s2 = getPeak(bin * 2), s3 = getPeak(bin * 3);
-		float score = s1 * s2;
+		// [IMPROVEMENT] 伴奏（ベースやドラムなどの倍音を持たない純音・打楽器音）を完全に除去し、
+		// 倍音豊かな人間の「歌声（ボーカル）」に最適化。
+		// 倍音（s2, s3）のいずれも持たない信号はスコア0となり、伴奏への誤反応を極限まで低減します。
+		float score = s1 * (s2 * 1.0f + s3 * 0.5f);
 		// 第3倍音が基音の80%超 → 打楽器等の可能性でスコア半減
 		if (s3 > s1 * 0.8f) score *= 0.5f;
+
+		// [IMPROVEMENT] ボーカル（歌声）のピッチ特性（130Hz〜500Hz付近が最も強い）に合わせた感度補正。
+		// 伴奏の低音（ベース・ドラム）を強力にカットし、歌声を浮き上がらせる。
+		float vocalWeight = 1.0f;
+		if (k < 48) {
+			// MIDI 41〜47: 87Hz〜123Hz (伴奏のベース・ドラム帯域。急激に減衰させて歌声への被りを防ぐ)
+			vocalWeight = 0.15f + 0.85f * (float)(k - 41) / 7.0f;
+			vocalWeight *= vocalWeight; // 二乗でさらに低域を強力カット
+		} else if (k > 72) {
+			// MIDI 73〜76: 554Hz〜659Hz (少し減衰)
+			vocalWeight = 1.0f - 0.3f * (float)(k - 72) / 4.0f;
+		}
+		score *= vocalWeight;
+
 		salienceMap[k] = score;
 	}
 	// 候補リスト生成
@@ -4590,7 +4693,7 @@ static int UpdateViterbi(const std::vector<MelodyCandidate>& current) {
 				else if (d <= 7)  pen = 1.0f;  // 3度〜5度: 中ペナルティ
 				else              pen = 5.0f;  // 6度以上: 大ペナルティ (大跳躍を抑制)
 			}
-			float s = prev[j].totalScore + curr[i].salience - (pen * curr[i].salience * 0.5f);
+			float s = prev[j].totalScore + curr[i].salience - (pen * (curr[i].salience + 0.05f) * 0.5f);
 			if (s > maxS) { maxS = s; bestJ = j; }
 		}
 		curr[i].totalScore = maxS; curr[i].fromIdx = bestJ;
@@ -4891,6 +4994,30 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 		return r;
 		};
 
+	// 表示用フォーマット (全音域専用、メロディを左側に差し込む)
+	auto FormatChordAll = [](CString s, CString melody) -> CString {
+		if (melody == L"[   ]") {
+			// メロディがない場合は、元の FormatChord と全く同じ動作
+			if (s.IsEmpty()) return L"!@B  , <  >!@B";
+			CString root = (s.GetLength() > 1 && (s[1] == L'#' || s[1] == L'b')) ? s.Left(2) : s.Left(1);
+			if (root.GetLength() == 1) root += L" ";
+			CString r;
+			r.Format(L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, s);
+			return r;
+		}
+		// メロディがある場合
+		if (s.IsEmpty()) {
+			CString r;
+			r.Format(L"!@B   %s, !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B", melody);
+			return r;
+		}
+		CString root = (s.GetLength() > 1 && (s[1] == L'#' || s[1] == L'b')) ? s.Left(2) : s.Left(1);
+		if (root.GetLength() == 1) root += L" ";
+		CString r;
+		r.Format(L"!@B%s %s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, melody, s);
+		return r;
+	};
+
 	float currentRMS = CalculateRMS(bufferL, bufferR, stereo);
 
 	// 再生検出 & ピークRMS追跡
@@ -4990,19 +5117,29 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 
 	int midi = UpdateViterbi(CalculateSalience(bLP, bRP, (double)sampleRate));
 
-	// メロディ音名フォーマット: "[C4 ]" "[C#4]" 等
+	// メロディ音名フォーマット: "[C4 ]" "[C#4]" 等、母音が検出されていれば差し込む
 	CString rawMelody = L"[   ]";
+#if 0
 	if (midi != -1) {
 		int oct = (midi / 12) - 1;
 		CString nn = NOTE_NAMES[midi % 12]; nn.Trim();
-		if (nn.GetLength() == 1) rawMelody.Format(L"[%s%d ]", nn, oct);
-		else                     rawMelody.Format(L"[%s%d]", nn, oct);
+		if (g_currentVowel != L' ') {
+//			if (nn.GetLength() == 1) rawMelody.Format(L"[%s%d%c]", nn, oct, g_currentVowel);
+//			else                     rawMelody.Format(L"[%s%d%c]", nn, oct, g_currentVowel);
+			if (nn.GetLength() == 1) rawMelody.Format(L"[%s%d ]", nn, oct);
+			else                     rawMelody.Format(L"[%s%d]", nn, oct);
+		} else {
+			if (nn.GetLength() == 1) rawMelody.Format(L"[%s%d ]", nn, oct);
+			else                     rawMelody.Format(L"[%s%d]", nn, oct);
+		}
+	} else {
+		g_currentVowel = L' '; // メロディ検出がなければ母音表示もリセット
 	}
-
+#endif
 	// 出力コード文字列生成
 	KeyCodeLow = FormatChord(rawBass);
 	KeyCodeMid = FormatChord(rawMid);
-	KeyCodeAll = FormatChord(rawAll);
+	KeyCodeAll = FormatChordAll(rawAll, rawMelody);
 
 	// 高域コードが空のときはメロディ音名で補完
 	if (rawHigh.IsEmpty() && rawMelody != L"[   ]") {

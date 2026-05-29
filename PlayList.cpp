@@ -834,10 +834,14 @@ void CPlayList::OnDropFiles(HDROP hDropInfo)
 	UINT cnt = DragQueryFile(hDropInfo,(UINT)-1,filen_c,sizeof(filen_c));
 	TCHAR tmp[1024];
 	_tgetcwd(tmp,1000);
+	m_lc.SetRedraw(FALSE);
 		for(UINT i=0;i<cnt;i++){
 			DragQueryFile(hDropInfo,(UINT)i,filen_c,sizeof(filen_c));
 			Fol(filen_c);
 		}
+	m_lc.SetRedraw(TRUE);
+	m_lc.Invalidate();
+	m_lc.UpdateWindow();
 	_tchdir(tmp);
 	if(syo==1 && (fade1==1 || playf==0) && !pMediaPosition){
 		plcnt=ii;
@@ -955,12 +959,18 @@ void CPlayList::Fol(CString fname)
 				ft = s;
 				ft2 = s;
 				ft.MakeLower();
-				CFile ff2;
-				
-				ff2.Open(s, CFile::modeRead | CFile::shareDenyWrite, NULL);
-				ff2.Read(bufimage, 2);
-				ff2.Close();
-				if (ft.Right(4).MakeLower() == ".ogg" || ft.Right(4) == ".OGG" || ft.Right(6).MakeLower() == ".qull3") {
+				BOOL has_aac_syncword = FALSE;
+				if (ft.Right(4) == ".aac") {
+					CFile ff2;
+					if (ff2.Open(s, CFile::modeRead | CFile::shareDenyWrite, NULL)) {
+						ff2.Read(bufimage, 2);
+						ff2.Close();
+						if (bufimage[0] == 0xff && (bufimage[1] & 0xf0) == 0xf0) {
+							has_aac_syncword = TRUE;
+						}
+					}
+				}
+				if (ft.Right(4) == ".ogg" || ft.Right(6) == ".qull3") {
 					p.sub = -1;
 					mode = -1;
 					FILE *fp;
@@ -3266,7 +3276,7 @@ void CPlayList::Fol(CString fname)
 					ss = ta2p.GetTitle(); if (b == -1) ss = ta1p.GetTitle(); if (ss == "")ss = ft; _tcscpy(p.name, ss);
 					ss = ta2p.GetAlbum(); if (b == -1) ss = ta1p.GetAlbum(); _tcscpy(p.alb, ss);
 				}
-				else if ((bufimage[0] == 0xff && (bufimage[1] & 0xf0 == 0xf0)) && (ft.Right(4) == ".aac" || ft.Right(4) == ".AAC")) {
+				else if (has_aac_syncword) {
 					p.sub = -9;
 					ft = ft2;
 					_tcscpy(p.name, ft2);
@@ -3754,82 +3764,69 @@ void CPlayList::Fol(CString fname)
 								return;
 							}
 						}
-						if (ss == ".hes") {
+						if (ss == ".hes" || ss == ".nes") {
 							ft = fname1.Right(fname1.GetLength() - fname1.ReverseFind(L'\\') - 1);
 							_tcscpy(p.name, ft);
 							_tcscpy(p.fol, fname1);
 							_tchdir(fname);
 							CString ftt0 = ft;
 							p.alb[0] = p.art[0] = NULL; p.loop1 = p.loop2 = 0;
-							TCHAR kpi[512]; kpi[0] = 0;
-							plugs(fname, &p, kpi,kvver);
-							if (kpi[0]) {
-								ft = fname.Left(fname.ReverseFind('.')); ft += ".m3u";
-								char ftt[1024];
-								WideCharToMultiByte(CP_ACP, 0, ft, -1, ftt, 2000, " ", FALSE);
-								ft = fname1.Right(fname1.GetLength() - fname1.ReverseFind(L'\\') - 1);
-								ss = fname.Right(4); ss.MakeLower();
-								if (ss == L".hes") {
-									FILE *f; if (f = fopen(ftt, "r")) {
-										char buf[256];  int st, ed;
-										for (;;) {
-											if (fgets(buf, sizeof(buf), f) == NULL) break;
-											if (buf[0] == _T('#') || buf[0] == _T('\r') || buf[0] == _T('\n')) continue;
-											ss = buf;
-											int z = 0;
-											ss.Replace(L"\n", L"");
-											ss.Replace(L"\r", L"");
+							FILE *f; if (f = fopen(ftt, "r")) {
+								char buf[256];  int st, ed;
+								for (;;) {
+									if (fgets(buf, sizeof(buf), f) == NULL) break;
+									if (buf[0] == _T('#') || buf[0] == _T('\r') || buf[0] == _T('\n')) continue;
+									ss = buf;
+									int z = 0;
+									ss.Replace(L"\n", L"");
+									ss.Replace(L"\r", L"");
 
-											if ((z = ss.Find(',', 0)) != -1) {
-												s = ss.Mid(z + 1);
-												if (s.Left(1) == _T("$")) {
-													int num = 0;
-													CString s3 = s.Mid(1, 1);
-													if (_T("0") <= s3 && _T("9") >= s3) num = s3.GetAt(0) - _T('0');
-													if (_T("a") <= s3 && _T("f") >= s3) num = s3.GetAt(0) - _T('a') + 10;
-													if (_T("A") <= s3 && _T("F") >= s3) num = s3.GetAt(0) - _T('A') + 10;
-													s3 = s.Mid(2, 1); num *= 16;
-													if (_T("0") <= s3 && _T("9") >= s3) num += s3.GetAt(0) - _T('0');
-													if (_T("a") <= s3 && _T("f") >= s3) num += s3.GetAt(0) - _T('a') + 10;
-													if (_T("A") <= s3 && _T("F") >= s3) num += s3.GetAt(0) - _T('A') + 10;
-													ftt0.Format(_T("%s::%04d"), fname, num + 1);
-												}
-												else
-													ftt0.Format(_T("%s::%04d"), fname, _tstoi(s) + 1);
-												_tcscpy(p.fol, ftt0);
-												st = ss.Find(L',', z + 1); ed = ss.Find(L',', st + 1); s = ss.Mid(st + 1, (ed - 1) - st);
-												_tcscpy(p.name, s);
-												p.sub = -3;
-												if (syo == 0) { syo = 1; syos = p.fol; modesub = p.sub;	fnn = p.name; }
-												Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, 0);
-											}
-											else {
-												s = fname1.Left(fname1.ReverseFind(L'\\')+1);
-												ftt0.Format(_T("%s%s"), s,ss);
-												_tcscpy(p.fol, ftt0);
-												ftt0.Format(_T("%s"), ss);
-												_tcscpy(p.name, ftt0);
-												p.sub = -10;
-												if (syo == 0) { syo = 1; syos = p.fol; modesub = p.sub;	fnn = p.name; }
-												Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, 0);
-											}
+									if ((z = ss.Find(',', 0)) != -1) {
+										s = ss.Mid(z + 1);
+										if (s.Left(1) == _T("$")) {
+											int num = 0;
+											CString s3 = s.Mid(1, 1);
+											if (_T("0") <= s3 && _T("9") >= s3) num = s3.GetAt(0) - _T('0');
+											if (_T("a") <= s3 && _T("f") >= s3) num = s3.GetAt(0) - _T('a') + 10;
+											if (_T("A") <= s3 && _T("F") >= s3) num = s3.GetAt(0) - _T('A') + 10;
+											s3 = s.Mid(2, 1); num *= 16;
+											if (_T("0") <= s3 && _T("9") >= s3) num += s3.GetAt(0) - _T('0');
+											if (_T("a") <= s3 && _T("f") >= s3) num += s3.GetAt(0) - _T('a') + 10;
+											if (_T("A") <= s3 && _T("F") >= s3) num += s3.GetAt(0) - _T('A') + 10;
+											ftt0.Format(_T("%s::%04d"), fname, num + 1);
 										}
-										fclose(f);
+										else
+											ftt0.Format(_T("%s::%04d"), fname, _tstoi(s) + 1);
+										_tcscpy(p.fol, ftt0);
+										st = ss.Find(L',', z + 1); ed = ss.Find(L',', st + 1); s = ss.Mid(st + 1, (ed - 1) - st);
+										_tcscpy(p.name, s);
+										p.sub = -3;
+										if (syo == 0) { syo = 1; syos = p.fol; modesub = p.sub;	fnn = p.name; }
+										Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, 0);
 									}
 									else {
-										ft = ftt0;
-										for (int i = 1; i < 255; i++) {
-											ftt0.Format(_T("%s::%04d"), fname, i + 1);
-											_tcscpy(p.fol, ftt0);
-											ftt0.Format(_T("%s::%04d"), ft, i + 1);
-											_tcscpy(p.name, ftt0);
-											if (syo == 0) { syo = 1; syos = p.fol; modesub = p.sub;	fnn = p.name; }
-											Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, 0);
-										}
+										s = fname1.Left(fname1.ReverseFind(L'\\')+1);
+										ftt0.Format(_T("%s%s"), s,ss);
+										_tcscpy(p.fol, ftt0);
+										ftt0.Format(_T("%s"), ss);
+										_tcscpy(p.name, ftt0);
+										p.sub = -10;
+										if (syo == 0) { syo = 1; syos = p.fol; modesub = p.sub;	fnn = p.name; }
+										Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, 0);
 									}
-									return;
 								}
-								return;
+								fclose(f);
+							}
+							else {
+								ft = ftt0;
+								for (int i = 1; i < 255; i++) {
+									ftt0.Format(_T("%s::%04d"), fname, i + 1);
+									_tcscpy(p.fol, ftt0);
+									ftt0.Format(_T("%s::%04d"), ft, i + 1);
+									_tcscpy(p.name, ftt0);
+									if (syo == 0) { syo = 1; syos = p.fol; modesub = p.sub;	fnn = p.name; }
+									Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, 0);
+								}
 							}
 							return;
 						}
@@ -4100,6 +4097,21 @@ void CPlayList::Save()
 		f.Write(&pnt,4);
 		f.Close();
 
+		savedata.saveloop = m_loop.GetCheck();
+		savedata.saverenzoku = m_renzoku.GetCheck();
+		savedata.savecheck = m_savecheck.GetCheck();
+		savedata.savecheck_mp3 = m_save_mp3.GetCheck();
+		savedata.savecheck_dshow = m_save_kpi.GetCheck();
+
+		CFile ab;
+#if _UNICODE
+		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#else
+		if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#endif
+			ab.Write(&savedata, sizeof(save));
+			ab.Close();
+		}
 	}
 	_tchdir(tmp);
 }

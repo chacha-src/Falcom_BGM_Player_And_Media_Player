@@ -5587,6 +5587,24 @@ void COggDlg::play()
 	//LOOPLENGTH=
 	CString s, b;
 	playf = 1;
+	if (pl && plw) {
+		pl->Save();
+	}
+	{
+		TCHAR tmp_savedir[1024];
+		_tgetcwd(tmp_savedir, 1000);
+		_tchdir(karento2);
+		CFile ab;
+#if _UNICODE
+		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#else
+		if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#endif
+			ab.Write(&savedata, sizeof(save));
+			ab.Close();
+		}
+		_tchdir(tmp_savedir);
+	}
 	loopcnt = 0;
 	CString fl;
 	wavbit_sample_Hz = 44100;
@@ -14083,7 +14101,22 @@ void COggDlg::dp(CString a)
 				plcnt = plc;
 				pl->SIcon(plc);
 			}
+			pl->Save();
 		}
+
+		TCHAR tmp_savedir[1024];
+		_tgetcwd(tmp_savedir, 1000);
+		_tchdir(karento2);
+		CFile ab;
+#if _UNICODE
+		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#else
+		if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#endif
+			ab.Write(&savedata, sizeof(save));
+			ab.Close();
+		}
+		_tchdir(tmp_savedir);
 
 		plf = 1;
 	}
@@ -14529,6 +14562,23 @@ BOOL COggDlg::DestroyWindow()
 	dc.DeleteDC();
 	bmpsub.DeleteObject();
 	dcsub.DeleteDC();
+
+	{
+		TCHAR tmp_savedir[1024];
+		_tgetcwd(tmp_savedir, 1000);
+		_tchdir(karento2);
+		CFile ab;
+#if _UNICODE
+		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#else
+		if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#endif
+			ab.Write(&savedata, sizeof(save));
+			ab.Close();
+		}
+		_tchdir(tmp_savedir);
+	}
+
 	return CCustomDialog::DestroyWindow();
 }
 //oggから実際にデータを獲得する
@@ -19005,6 +19055,21 @@ void COggDlg::OnCheck5()
 	m_junji.SetCheck(0);
 	m_random.SetCheck(1);
 	savedata.random = 0;
+	{
+		TCHAR tmp_savedir[1024];
+		_tgetcwd(tmp_savedir, 1000);
+		_tchdir(karento2);
+		CFile ab;
+#if _UNICODE
+		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#else
+		if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#endif
+			ab.Write(&savedata, sizeof(save));
+			ab.Close();
+		}
+		_tchdir(tmp_savedir);
+	}
 }
 
 void COggDlg::OnCheck6()
@@ -19013,6 +19078,21 @@ void COggDlg::OnCheck6()
 	m_junji.SetCheck(1);
 	m_random.SetCheck(0);
 	savedata.random = 1;
+	{
+		TCHAR tmp_savedir[1024];
+		_tgetcwd(tmp_savedir, 1000);
+		_tchdir(karento2);
+		CFile ab;
+#if _UNICODE
+		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#else
+		if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#endif
+			ab.Write(&savedata, sizeof(save));
+			ab.Close();
+		}
+		_tchdir(tmp_savedir);
+	}
 }
 
 void COggDlg::OnButton14()
