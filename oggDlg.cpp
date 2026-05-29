@@ -462,6 +462,267 @@ BEGIN_MESSAGE_MAP(CAboutDlg, CCustomDialog)
 	// メッセージ ハンドラがありません。
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
+
+class CKpiLoadingWnd;
+static CKpiLoadingWnd* g_pActiveLoadingWnd = NULL;
+static int g_nCurrentKpiIndex = 0;
+
+static int CountKpiFiles(CString ff)
+{
+	int count = 0;
+	TCHAR szPrevDir[MAX_PATH];
+	::GetCurrentDirectory(MAX_PATH, szPrevDir);
+
+	_tchdir(ff);
+	CFileFind f;
+	if (f.FindFile(_T("*.kpi"))) {
+		int b, c = 1;
+		do {
+			if (c)
+				b = f.FindNextFile();
+			c = 1;
+			if (f.IsDirectory() == 0) {
+				CString s = f.GetFileName();
+				if (!(s == "." || s == "..") && s.Right(4) == ".kpi") {
+					count++;
+				}
+			}
+		} while (b);
+	}
+	f.Close();
+
+	CFileFind cf1;
+	if (cf1.FindFile(_T("*.*")) != 0) {
+		int h = 1;
+		for (; h;) {
+			h = cf1.FindNextFile();
+			CString ss = cf1.GetFileName();
+			if (!(ss == "." || ss == "..")) {
+				if (cf1.IsDirectory() != 0) {
+					if (ff.Right(1) == "\\")
+						count += CountKpiFiles(ff + cf1.GetFileName());
+					else
+						count += CountKpiFiles(ff + _T("\\") + cf1.GetFileName());
+					_tchdir(ff);
+				}
+			}
+		}
+	}
+	cf1.Close();
+
+	_tchdir(szPrevDir);
+	return count;
+}
+
+class CKpiLoadingWnd : public CWnd
+{
+public:
+	CProgressCtrl m_progress;
+
+	CKpiLoadingWnd()
+	{
+		m_strText = LL14(
+			L"KPI読み込み中...\n（しばらく時間がかかる場合があります）",
+			L"Reading KPI list...\n(This may take some time)",
+			L"Lecture de la liste KPI...\n(Cela peut prendre du temps)",
+			L"Lettura della lista KPI...\n(Questo potrebbe richiedere del tempo)",
+			L"Leyendo la lista KPI...\n(Esto puede tardar un poco)",
+			L"KPI 목록을 읽는 중...\n(시간이 다소 걸릴 수 있습니다)",
+			L"正在读取KPI列表...\n（可能需要一些时间）",
+			L"جاري قراءة قائمة KPI...\n(قد يستغرق هذا بعض الوقت)",
+			L"Чтение списка KPI...\n(Это может занять некоторое время)",
+			L"KPI-Liste wird gelesen...\n(Dies kann einige Zeit dauern)",
+			L"Lendo a lista KPI...\n(Isso pode levar algum tempo)",
+			L"KPI-lijst lezen...\n(Dit kan even duren)",
+			L"Odczytywanie listy KPI...\n(Może to zająć trochę czasu)",
+			L"KPI listesi okunuyor...\n(Bu biraz zaman alabilir)"
+		);
+	}
+
+	virtual ~CKpiLoadingWnd()
+	{
+		if (m_hWnd != NULL) {
+			DestroyWindow();
+		}
+	}
+
+	BOOL Create(CWnd* pParent = NULL)
+	{
+		// Register window class
+		CString strWndClass = AfxRegisterWndClass(
+			CS_HREDRAW | CS_VREDRAW,
+			::LoadCursor(NULL, IDC_WAIT), // hourglass cursor
+			(HBRUSH)(COLOR_WINDOW + 1),
+			NULL
+		);
+
+		UINT dpi = GetDpi(m_hWnd);
+
+		// Size & position
+		int width = Scale(320, dpi);
+		int height = Scale(120, dpi);
+
+		CRect rect(0, 0, width, height);
+		if (pParent != NULL && pParent->GetSafeHwnd() != NULL) {
+			CRect parentRect;
+			pParent->GetWindowRect(&parentRect);
+			int x = parentRect.left + (parentRect.Width() - rect.Width()) / 2;
+			int y = parentRect.top + (parentRect.Height() - rect.Height()) / 2;
+			rect.OffsetRect(x, y);
+		}
+		else {
+			int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+			int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+			int x = (screenWidth - rect.Width()) / 2;
+			int y = (screenHeight - rect.Height()) / 2;
+			rect.OffsetRect(x, y);
+		}
+
+		// Create popup window with border and topmost
+		BOOL result = CreateEx(
+			WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+			strWndClass,
+			_T(""),
+			WS_POPUP | WS_BORDER,
+			rect.left, rect.top, rect.Width(), rect.Height(),
+			pParent ? pParent->GetSafeHwnd() : NULL,
+			NULL
+		);
+
+		if (result) {
+			m_font.CreatePointFont(110, _T("MS UI Gothic"));
+
+			// Position progress bar near the bottom
+			CRect progressRect(Scale(20, dpi), Scale(85, dpi), rect.Width() - Scale(20, dpi), Scale(102, dpi));
+			m_progress.Create(WS_CHILD | WS_VISIBLE | PBS_SMOOTH, progressRect, this, 1);
+			m_progress.SetRange(0, 100);
+			m_progress.SetPos(0);
+
+			SetWindowPos(&wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		}
+
+		return result;
+	}
+
+	void SetRange(int nMin, int nMax)
+	{
+		if (m_progress.GetSafeHwnd()) {
+			m_progress.SetRange32(nMin, nMax);
+		}
+	}
+
+	void SetPos(int nPos)
+	{
+		if (m_progress.GetSafeHwnd()) {
+			m_progress.SetPos(nPos);
+			m_progress.UpdateWindow();
+			UpdateWindow();
+
+			// Pump messages to keep it responsive
+			MSG msg;
+			while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+				if (msg.message == WM_QUIT) {
+					::PostQuitMessage((int)msg.wParam);
+					break;
+				}
+				::TranslateMessage(&msg);
+				::DispatchMessage(&msg);
+			}
+		}
+	}
+
+	void Show()
+	{
+		if (m_hWnd != NULL) {
+			ShowWindow(SW_SHOW);
+			UpdateWindow();
+
+			// Pump messages once
+			MSG msg;
+			while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+				if (msg.message == WM_QUIT) {
+					::PostQuitMessage((int)msg.wParam);
+					break;
+				}
+				::TranslateMessage(&msg);
+				::DispatchMessage(&msg);
+			}
+		}
+	}
+
+	void Hide()
+	{
+		if (m_hWnd != NULL) {
+			ShowWindow(SW_HIDE);
+		}
+	}
+
+protected:
+	CString m_strText;
+	CFont m_font;
+
+	static int Scale(int value, UINT dpi)
+	{
+		return (int)(((float)value) * ((float)dpi) / 96.0f);
+	}
+
+	static UINT GetDpi(HWND hWnd)
+	{
+		HDC hdc = ::GetDC(hWnd);
+		UINT dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+		::ReleaseDC(hWnd, hdc);
+		return dpi;
+	}
+
+	afx_msg void OnPaint()
+	{
+		CPaintDC dc(this);
+
+		CRect clientRect;
+		GetClientRect(&clientRect);
+
+		// Background: soft blue/grey theme matching LyricsProgressWnd
+		dc.FillSolidRect(&clientRect, RGB(230, 240, 255));
+
+		// Border
+		CPen pen(PS_SOLID, 2, RGB(100, 150, 200));
+		CPen* pOldPen = dc.SelectObject(&pen);
+		dc.Rectangle(&clientRect);
+		dc.SelectObject(pOldPen);
+
+		// Font
+		CFont* pOldFont = dc.SelectObject(&m_font);
+		dc.SetBkMode(TRANSPARENT);
+		dc.SetTextColor(RGB(50, 50, 150));
+
+		// Center the text in the top 80 pixels
+		UINT dpi = GetDpi(m_hWnd);
+		CRect textRect(0, 0, clientRect.Width() - Scale(40, dpi), 0);
+		dc.DrawText(m_strText, &textRect, DT_WORDBREAK | DT_CALCRECT);
+
+		int x = (clientRect.Width() - textRect.Width()) / 2;
+		int y = (Scale(80, dpi) - textRect.Height()) / 2;
+		if (y < 5) y = 5;
+
+		CRect drawRect(x, y, x + textRect.Width(), y + textRect.Height());
+		dc.DrawText(m_strText, &drawRect, DT_WORDBREAK);
+
+		dc.SelectObject(pOldFont);
+	}
+
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC)
+	{
+		return TRUE; // anti-flicker
+	}
+
+	DECLARE_MESSAGE_MAP()
+};
+
+BEGIN_MESSAGE_MAP(CKpiLoadingWnd, CWnd)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+END_MESSAGE_MAP()
+
 double aa1_ = 0;
 BOOL CAboutDlg::OnInitDialog()
 {
@@ -2151,7 +2412,14 @@ BOOL COggDlg::OnInitDialog()
 	//	uTimerId = timeSetEvent(1, 0, TimeCallback, NULL, TIME_PERIODIC);
 #if WIN64
 #else
+	CKpiLoadingWnd loadingWnd;
+	loadingWnd.Create(NULL);
+	loadingWnd.Show();
+	g_pActiveLoadingWnd = &loadingWnd;
+	g_nCurrentKpiIndex = 0;
 	plug(karento2, NULL);
+	g_pActiveLoadingWnd = NULL;
+	loadingWnd.DestroyWindow();
 #endif	
 	WAVEFORMATEX wfx1;
 	wfx1.wFormatTag = WAVE_FORMAT_PCM;
@@ -19544,6 +19812,12 @@ void COggDlg::plug(CString ff, KMPMODULE * mod)
 	kpicnt = 0;
 	for (int i = 0; i < 500; i++)
 		hDLLk1[i] = NULL;
+
+	if (g_pActiveLoadingWnd != NULL) {
+		int totalKpis = CountKpiFiles(ff);
+		g_pActiveLoadingWnd->SetRange(0, totalKpis);
+	}
+
 	plugloop(ff);
 	for (int i = kpicnt - 1; i >= 0; i--)
 		FreeLibrary(hDLLk1[i]);
@@ -19565,6 +19839,22 @@ void COggDlg::plugloop(CString ff)
 					ss = f.GetFilePath();
 					sswk = ss;
 					plus1(c);
+
+					if (g_pActiveLoadingWnd != NULL) {
+						g_nCurrentKpiIndex++;
+						g_pActiveLoadingWnd->SetPos(g_nCurrentKpiIndex);
+					}
+
+					// Pump messages to keep loading window responsive!
+					MSG msg;
+					while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+						if (msg.message == WM_QUIT) {
+							::PostQuitMessage((int)msg.wParam);
+							break;
+						}
+						::TranslateMessage(&msg);
+						::DispatchMessage(&msg);
+					}
 				}
 			}
 		} while (b);
