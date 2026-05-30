@@ -11163,6 +11163,7 @@ int readBuffwav(char* bw, int cnt)
 	}
 
 	equaliser(bw, cnt2, reset);
+	og->FeedPianoRoll(bw, cnt2);
 	reset = FALSE;
 
 	fade += fadeadd;
@@ -12089,6 +12090,7 @@ int readkpi(BYTE* bw, int cnt)
 		}
 
 		equaliser(bw, cnt, reset);
+		og->FeedPianoRoll(bw, cnt);
 		reset = FALSE;
 
 		cnt4 = cnt3;
@@ -12430,6 +12432,7 @@ int readm4a(BYTE* bw, int cnt)
 		}
 
 		equaliser(bw, cnt, reset);
+		og->FeedPianoRoll(bw, cnt);
 		reset = FALSE;
 
 		cnt4 = cnt3;
@@ -12728,6 +12731,7 @@ int readflac(BYTE* bw, int cnt)
 		}
 
 		equaliser(bw, cnt2, reset);
+		og->FeedPianoRoll(bw, cnt2);
 		reset = FALSE;
 
 		cnt4 = lenl;
@@ -12926,6 +12930,7 @@ int readopus(BYTE* bw, int cnt)
 		}
 
 		equaliser(bw, cnt2, reset);
+		og->FeedPianoRoll(bw, cnt2);
 		reset = FALSE;
 
 		cnt4 = r;
@@ -13141,6 +13146,7 @@ int readdsd(BYTE* bw, int cnt)
 	}
 
 	equaliser(bw, cnt2, reset);
+	og->FeedPianoRoll(bw, cnt2);
 	reset = FALSE;
 
 	if ((UINT)wl < (UINT)0x7fff0000) {
@@ -13414,6 +13420,7 @@ int readwav(BYTE* bw, int cnt)
 		poss4 -= to_read;
 	}
 	equaliser(bw, cnt2, reset);
+	og->FeedPianoRoll(bw, cnt2);
 	reset = FALSE;
 	Int24* b24c = (Int24*)bw;
 	short* b = (short*)bw;
@@ -13552,6 +13559,7 @@ int readmp3(BYTE* bw, int cnt)
 	}
 
 	equaliser(bw, cnt2, reset);
+	og->FeedPianoRoll(bw, cnt2);
 	reset = FALSE;
 
 
@@ -14522,6 +14530,9 @@ BOOL COggDlg::DestroyWindow()
 			DoEvent();
 		mi = NULL;
 	}
+	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd())) {
+		m_PianoRollDlg.DestroyWindow();
+	}
 	if (m_pDlgColor)delete m_pDlgColor;
 	if (ptl) ptl->Release();
 	if (pcdl) pcdl->Release();
@@ -14684,6 +14695,7 @@ int mcopy(char* a, int len)
 	//    フィルター状態がloop1以降の本処理に引き継がれて音色が壊れる）
 	if (!g_inWarmup) {
 		equaliser(a, cnt2, reset);
+		og->FeedPianoRoll(a, cnt2);
 		reset = FALSE;
 	}
 
@@ -16212,6 +16224,14 @@ void timerog1(UINT nIDEvent)
 			}
 
 			og->m_EqualizerDlg.ShowWindow(SW_SHOW);
+		}
+		if (savedata.pianorollwindow == 1) {
+			if (!::IsWindow(og->m_PianoRollDlg.GetSafeHwnd()))
+			{
+				//og->m_PianoRollDlg.Create(IDD_PIANOROLL, og);
+			}
+
+			//og->m_PianoRollDlg.ShowWindow(SW_SHOW);
 		}
 
 	}
@@ -20602,6 +20622,40 @@ void COggDlg::OnBnClickedButton59()
 
 	m_EqualizerDlg.ShowWindow(SW_SHOW);
 	m_EqualizerDlg.SetFocus();
+}
+
+void COggDlg::TogglePianoRoll()
+{
+	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+	{
+		m_PianoRollDlg.Create(IDD_PIANOROLL, this);
+		savedata.pianorollwindow = 1;
+	}
+	else {
+		m_PianoRollDlg.DestroyWindow();
+		savedata.pianorollwindow = 0;
+	}
+
+	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd())) {
+		m_PianoRollDlg.ShowWindow(SW_SHOW);
+		m_PianoRollDlg.SetFocus();
+	}
+}
+
+void COggDlg::FeedPianoRoll(const void* pData, int bytes)
+{
+	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd())) {
+		int feed_rate = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_rate : wavbit_sample_Hz;
+		int feed_ch = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_ch : wavchannel;
+		int feed_bits = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : wavsam_depth;
+		if (feed_rate <= 0) feed_rate = 44100;
+		if (feed_ch <= 0) feed_ch = 2;
+		if (feed_bits <= 0) feed_bits = 16;
+		int bpf = PcmOutBytesPerFrame();
+		if (bpf > 0 && bytes > 0) {
+			m_PianoRollDlg.FeedPCM(pData, bytes / bpf, feed_rate, feed_bits, feed_ch);
+		}
+	}
 }
 
 void COggDlg::DeferredHeavyStartupImpl()

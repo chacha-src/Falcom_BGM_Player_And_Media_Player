@@ -214,6 +214,11 @@ struct save{
 
 	__int64 lastUpdateCheck;  // update check: 0=not checked, else=last check time
 
+	int pianorollwindow; // 1 = show, 0 = hide
+	int pianorollx;
+	int pianorolly;
+	int pianorollw;
+	int pianorollh;
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */

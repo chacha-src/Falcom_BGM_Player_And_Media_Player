@@ -188,6 +188,11 @@ BOOL COggApp::InitInstance()
 	savedata.upscale_enable = 1;
 	savedata.speaker_layout = 0;
 	savedata.lastUpdateCheck = 0;
+	savedata.pianorollwindow = 0;
+	savedata.pianorollx = -1;
+	savedata.pianorolly = -1;
+	savedata.pianorollw = 800;
+	savedata.pianorollh = 450;
 
 #if _UNICODE
 	if(GetKeyState(VK_CONTROL) < 0){

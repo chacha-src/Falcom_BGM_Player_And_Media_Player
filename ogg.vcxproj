@@ -2962,6 +2962,7 @@
     <ClCompile Include="CCustomControl.cpp" />
     <ClCompile Include="CDailog1.cpp" />
     <ClCompile Include="CEqualizer.cpp" />
+    <ClCompile Include="CPianoRoll.cpp" />
     <ClCompile Include="CImageBase.cpp" />
     <ClCompile Include="codec\ag_dec.c" />
     <ClCompile Include="codec\ag_enc.c" />
@@ -3041,6 +3042,7 @@
     <ClInclude Include="CCustomControl.h" />
     <ClInclude Include="CDailog1.h" />
     <ClInclude Include="CEqualizer.h" />
+    <ClInclude Include="CPianoRoll.h" />
     <ClInclude Include="CImageBase.h" />
     <ClInclude Include="codec\ALACEncoder.h" />
     <ClInclude Include="codec\analysis.h" />

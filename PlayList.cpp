@@ -205,6 +205,7 @@ void CPlayList::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_COMBO1, m_listchange);
 	DDX_Control(pDX, IDC_BUTTON3, m_namechage);
 	DDX_Control(pDX, IDC_PLAYDELETE, m_listdelete);
+	DDX_Control(pDX, IDC_PIANOROLL, m_pianorollBtn);
 }
 
 
@@ -248,6 +249,7 @@ BEGIN_MESSAGE_MAP(CPlayList, CCustomDialog)
 	ON_CBN_SELCHANGE(IDC_COMBO1, &CPlayList::OnCbnSelchangeCombo1)
 	ON_BN_CLICKED(IDC_BUTTON3, &CPlayList::OnBnClickedButton3)
 	ON_BN_CLICKED(IDC_PLAYDELETE, &CPlayList::OnBnClickedPlaydelete)
+	ON_BN_CLICKED(IDC_PIANOROLL, &CPlayList::OnBnClickedPianoroll)
 END_MESSAGE_MAP()
 
 #include <eh.h>
@@ -307,6 +309,7 @@ BOOL CPlayList::OnInitDialog()
 	SetDlgItemText(IDC_STATICken, LL14(L"あいまい検索", L"Fuzzy search", L"Recherche floue", L"Ricerca fuzzy", L"Busqueda difusa", L"퍼지 검색", L"模糊搜索", L"بحث غامض", L"Нечеткий поиск", L"Fuzzy-Suche", L"Pesquisa fuzzy", L"Fuzzy zoeken", L"Wyszukiwanie rozmyte", L"Bulan?k arama"));
 	SetDlgItemText(IDC_BUTTON3, LL14(L"名前変更", L"Rename", L"Renommer", L"Rinomina", L"Cambiar nombre", L"이름 바꾸기", L"重命名", L"إعادة التسمية", L"Переименовать", L"Umbenennen", L"Renomear", L"Hernoemen", L"Zmie? nazw?", L"Yeniden adland?r"));
 	SetDlgItemText(IDC_PLAYDELETE, LL14(L"リスト削除", L"Delete list", L"Supprimer la liste", L"Elimina lista", L"Eliminar lista", L"목록 삭제", L"删除列表", L"حذف القائمة", L"Удалить список", L"Liste loschen", L"Excluir lista", L"Lijst verwijderen", L"Usu? list?", L"Listeyi sil"));
+	SetDlgItemText(IDC_PIANOROLL, LL14(L"ピアノロール", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll"));
 	m_lsup.SetIcon(IDR_SUP);
 	m_lsup.SetFlat(TRUE);
 	m_lup.SetIcon(IDR_UP);
@@ -5257,6 +5260,13 @@ void CPlayList::OnBnClickedPlaydelete()
 		Save();
 		changeflg = FALSE;
 		return;
+	}
+}
+
+void CPlayList::OnBnClickedPianoroll()
+{
+	if (og) {
+		og->TogglePianoRoll();
 	}
 }
 

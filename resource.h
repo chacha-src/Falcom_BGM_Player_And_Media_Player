@@ -511,14 +511,16 @@
 #define IDC_CHECK_UPSCALE               3310
 #define IDC_STATIC_R_SPEAKER            3311
 #define IDC_COMBO_SPEAKER               3312
+#define IDD_PIANOROLL                   198
+#define IDC_PIANOROLL                   3313
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        198
+#define _APS_NEXT_RESOURCE_VALUE        199
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3313
+#define _APS_NEXT_CONTROL_VALUE         3314
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

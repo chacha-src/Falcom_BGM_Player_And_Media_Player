@@ -27,6 +27,7 @@
 #include <cstddef>
 #include "CCustomControl.h"
 #include "CEqualizer.h"
+#include "CPianoRoll.h"
 class CDouga;
 class CPlayList;
 class CRender;
@@ -47,6 +48,8 @@ public:
 	void dougaplay(int uu, CString str = L"");
 	DWORD GetVol();
 	void Speana();
+	void TogglePianoRoll();
+	void FeedPianoRoll(const void* pData, int bytes);
 	void moji(CString s,int x,int y,COLORREF rgb);
 	int  mojisub(CString s,int x,int y,COLORREF rgb);
 	CString UTF8toSJIS(const char* a);
@@ -86,6 +89,7 @@ public:
 	CBrush *m_pDlgColor;
 
 	CEqualizer m_EqualizerDlg;
+	CPianoRoll m_PianoRollDlg;
 
 	CString lrc[300];
 	DWORD lrctm[300];

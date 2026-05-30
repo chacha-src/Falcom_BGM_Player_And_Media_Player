@@ -4797,7 +4797,7 @@ static CString EstimateChordRaw(float* noteClass, float threshold) {
 	if (n[bestRoot] < threshold) return L"";
 
 	int active = 0;
-	for (int i = 0; i < 12; i++) if (n[i] > 0.10f) active++;
+	for (int i = 0; i < 12; i++) if (n[i] > 0.08f) active++;
 	CString root = NOTE_NAMES[bestRoot]; root.Trim();
 	if (active <= 1) return root;
 
@@ -4980,7 +4980,7 @@ static CString EstimateChordRawWithHistory(float* nc, float threshold, const CSt
 	if (n[bestRoot] < threshold) return L"";
 
 	int active = 0;
-	for (int i = 0; i < 12; i++) if (n[i] > 0.10f) active++;
+	for (int i = 0; i < 12; i++) if (n[i] > 0.08f) active++;
 	CString root = NOTE_NAMES[bestRoot]; root.Trim();
 	if (active <= 1) return root;
 

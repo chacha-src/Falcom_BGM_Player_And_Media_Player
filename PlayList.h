@@ -133,7 +133,9 @@ public:
 	afx_msg void OnCbnSelchangeCombo1();
 	afx_msg void OnBnClickedButton3();
 	afx_msg void OnBnClickedPlaydelete();
+	afx_msg void OnBnClickedPianoroll();
 	CCustomStandardButton m_namechage;
 	CCustomStandardButton m_listdelete;
+	CCustomStandardButton m_pianorollBtn;
 	CFont m_fontList;
 };
