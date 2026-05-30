@@ -4797,7 +4797,7 @@ static CString EstimateChordRaw(float* noteClass, float threshold) {
 	if (n[bestRoot] < threshold) return L"";
 
 	int active = 0;
-	for (int i = 0; i < 12; i++) if (n[i] > 0.12f) active++;
+	for (int i = 0; i < 12; i++) if (n[i] > 0.10f) active++;
 	CString root = NOTE_NAMES[bestRoot]; root.Trim();
 	if (active <= 1) return root;
 
@@ -4823,7 +4823,25 @@ static CString EstimateChordRaw(float* noteClass, float threshold) {
 			if (mr < 0.8f) sc -= 10.0f;
 			if (n[(bestRoot + 2) % 12] < 0.2f) sc -= 5.0f;
 		}
-		else { if ((req > 0) && (float)matched / req < 0.4f) sc -= 3.0f; }
+		else {
+			if ((req > 0) && (float)matched / req < 0.4f) sc -= 3.0f;
+			if (req == 4) {
+				int tensionNote = -1;
+				for (int x = 11; x >= 1; x--) {
+					if (x != 3 && x != 4 && x != 7 && x != 5) {
+						if (CHORD_PATTERNS[c].pattern[x] > 0) {
+							tensionNote = x;
+							break;
+						}
+					}
+				}
+				if (tensionNote != -1) {
+					float tVal = n[(bestRoot + tensionNote) % 12];
+					if (tVal < 0.15f) sc -= 4.0f;
+					else if (tVal < 0.22f) sc -= 1.5f;
+				}
+			}
+		}
 		sc -= (active - matched) * 1.0f;
 		sc += CHORD_PATTERNS[c].bonus;
 		if (req == 3) sc += 1.2f; if (req == 4) sc += 0.5f; if (req >= 5) sc -= 1.0f;
@@ -4839,9 +4857,9 @@ static CString EstimateChordRaw(float* noteClass, float threshold) {
 	// 上位3候補を ", " で連結して返す
 	CString result = cands[0].name; int count = 1;
 	for (size_t i = 1; i < cands.size() && count < 3; i++) {
-		if (cands[0].score - cands[i].score > 2.5f) break;
+		if (cands[0].score - cands[i].score > 3.8f) break;
 		if (cands[i].name == result) continue;
-		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.0f) continue;
+		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.5f) continue;
 		result += L", " + cands[i].name; count++;
 	}
 	return result;
@@ -4886,10 +4904,67 @@ static float CalculateRMS(const std::vector<double>& bL, const std::vector<doubl
 static CString GetMostFrequent(const std::deque<CString>& h) {
 	if (h.empty()) return L"";
 	std::map<CString, int> cnt;
-	for (const auto& s : h) if (!s.IsEmpty()) cnt[s]++;
-	CString best; int mx = 0;
-	for (const auto& p : cnt) if (p.second > mx) { mx = p.second; best = p.first; }
-	return best;
+	for (const auto& s : h) {
+		if (s.IsEmpty()) continue;
+		int start = 0;
+		while (start < s.GetLength()) {
+			int end = s.Find(L", ", start);
+			if (end == -1) {
+				end = s.GetLength();
+			}
+			CString item = s.Mid(start, end - start);
+			item.Trim();
+			if (!item.IsEmpty()) {
+				cnt[item]++;
+			}
+			start = end + 2;
+		}
+	}
+	if (cnt.empty()) return L"";
+
+	struct ChordVote { CString name; int votes; };
+	std::vector<ChordVote> votesList;
+	for (const auto& p : cnt) {
+		ChordVote cv;
+		cv.name = p.first;
+		cv.votes = p.second;
+		votesList.push_back(cv);
+	}
+	std::sort(votesList.begin(), votesList.end(), [](const ChordVote& a, const ChordVote& b) {
+		return a.votes > b.votes;
+	});
+
+	CString result = votesList[0].name;
+	int count = 1;
+	CString bestRoot = (result.GetLength() > 1 && (result[1] == L'#' || result[1] == L'b')) ? result.Left(2) : result.Left(1);
+
+	for (size_t i = 1; i < votesList.size() && count < 3; i++) {
+		if (votesList[i].votes >= 1) {
+			CString root = (votesList[i].name.GetLength() > 1 && (votesList[i].name[1] == L'#' || votesList[i].name[1] == L'b')) ? votesList[i].name.Left(2) : votesList[i].name.Left(1);
+			if (root == bestRoot) {
+				result += L", " + votesList[i].name;
+				count++;
+			}
+		}
+	}
+	return result;
+}
+
+static bool IsChordInList(const CString& chord, const CString& list) {
+	if (list.IsEmpty() || chord.IsEmpty()) return false;
+	int start = 0;
+	while (start < list.GetLength()) {
+		int end = list.Find(L", ", start);
+		if (end == -1) {
+			end = list.GetLength();
+		}
+		CString item = list.Mid(start, end - start);
+		if (item == chord) {
+			return true;
+		}
+		start = end + 2; // skip L", "
+	}
+	return false;
 }
 
 // ヒストリー付きコード推定 (単一帯域版)
@@ -4899,13 +4974,13 @@ static CString EstimateChordRawWithHistory(float* nc, float threshold, const CSt
 	for (int i = 0; i < 12; i++) if (nc[i] > maxVal) maxVal = nc[i];
 	if (maxVal < 0.001f) return L"";
 	float n[12];
-	for (int i = 0; i < 12; i++) { n[i] = nc[i] / maxVal; if (n[i] < 0.10f) n[i] = 0.0f; }
+	for (int i = 0; i < 12; i++) { n[i] = nc[i] / maxVal; if (n[i] < 0.08f) n[i] = 0.0f; }
 	int bestRoot = 0;
 	for (int i = 1; i < 12; i++) if (n[i] > n[bestRoot]) bestRoot = i;
 	if (n[bestRoot] < threshold) return L"";
 
 	int active = 0;
-	for (int i = 0; i < 12; i++) if (n[i] > 0.15f) active++;
+	for (int i = 0; i < 12; i++) if (n[i] > 0.10f) active++;
 	CString root = NOTE_NAMES[bestRoot]; root.Trim();
 	if (active <= 1) return root;
 
@@ -4922,22 +4997,40 @@ static CString EstimateChordRawWithHistory(float* nc, float threshold, const CSt
 		bool is9 = (req >= 5);
 		for (int nn = 0; nn < 12; nn++) {
 			int note = (bestRoot + nn) % 12, w = CHORD_PATTERNS[c].pattern[nn];
-			if (w > 0) { sc += n[note] * w * 2.0f; if (n[note] > 0.15f) matched++; }
-			else if (n[note] > 0.25f) sc -= n[note] * 2.0f;
+			if (w > 0) { sc += n[note] * w * 2.0f; if (n[note] > 0.12f) matched++; }
+			else if (n[note] > 0.25f) sc -= n[note] * 1.5f;
 		}
 		if (is9) {
 			float mr = (req > 0) ? (float)matched / req : 0.0f;
-			if (mr < 0.85f) sc -= 12.0f;
-			if (n[(bestRoot + 2) % 12] < 0.25f) sc -= 6.0f;
+			if (mr < 0.8f) sc -= 10.0f;
+			if (n[(bestRoot + 2) % 12] < 0.2f) sc -= 5.0f;
 		}
-		else { if ((req > 0) && (float)matched / req < 0.5f) sc -= 4.0f; }
-		sc -= (active - matched) * 1.5f;
+		else {
+			if ((req > 0) && (float)matched / req < 0.4f) sc -= 3.0f;
+			if (req == 4) {
+				int tensionNote = -1;
+				for (int x = 11; x >= 1; x--) {
+					if (x != 3 && x != 4 && x != 7 && x != 5) {
+						if (CHORD_PATTERNS[c].pattern[x] > 0) {
+							tensionNote = x;
+							break;
+						}
+					}
+				}
+				if (tensionNote != -1) {
+					float tVal = n[(bestRoot + tensionNote) % 12];
+					if (tVal < 0.15f) sc -= 4.0f;
+					else if (tVal < 0.22f) sc -= 1.5f;
+				}
+			}
+		}
+		sc -= (active - matched) * 1.0f;
 		sc += CHORD_PATTERNS[c].bonus;
-		if (req == 3) sc += 1.2f; if (req == 4) sc += 0.5f; if (req >= 5) sc -= 1.5f;
+		if (req == 3) sc += 1.2f; if (req == 4) sc += 0.5f; if (req >= 5) sc -= 1.0f;
 		CString cur = root + CHORD_PATTERNS[c].name;
 		// 前フレームと同じコードにボーナス (時間的連続性)
-		if (!prev.IsEmpty() && cur == prev) sc += 1.5f;
-		if (sc > (is9 ? 4.0f : 1.0f)) {
+		if (!prev.IsEmpty() && IsChordInList(cur, prev)) sc += 1.5f;
+		if (sc > (is9 ? 3.5f : 0.8f)) {
 			ChordCandidate cd; cd.name = cur; cd.score = sc; cd.complexity = req; cands.push_back(cd);
 		}
 	}
@@ -4945,16 +5038,12 @@ static CString EstimateChordRawWithHistory(float* nc, float threshold, const CSt
 	std::sort(cands.begin(), cands.end(), [](const ChordCandidate& a, const ChordCandidate& b) {
 		if (abs(a.score - b.score) < 0.3f) return a.complexity < b.complexity;
 		return a.score > b.score; });
-	// 前フレームコードが上位3候補内にあれば安定化のためそれを返す
-	if (!prev.IsEmpty())
-		for (size_t i = 0; i < min((size_t)3, cands.size()); i++)
-			if (cands[i].name == prev) return prev;
+
 	CString result = cands[0].name; int count = 1;
 	for (size_t i = 1; i < cands.size() && count < 3; i++) {
-		if (count == 1 && cands[0].score - cands[i].score > 2.0f) break;
-		if (count == 2 && cands[0].score - cands[i].score > 0.5f) break;
+		if (cands[0].score - cands[i].score > 3.8f) break;
 		if (cands[i].name == result) continue;
-		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 0.8f) continue;
+		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.5f) continue;
 		result += L", " + cands[i].name; count++;
 	}
 	return result;

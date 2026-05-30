@@ -804,7 +804,8 @@ COggDlg::COggDlg(CWnd* pParent /*=NULL*/)
 	//}}AFX_DATA_INIT
 	// メモ: LoadIcon は Win32 の DestroyIcon のサブシーケンスを要求しません。
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
-
+	m_jacketFocus = 0.0;
+	m_lastTick = 0;
 }
 
 void COggDlg::DoDataExchange(CDataExchange* pDX)
@@ -8914,6 +8915,9 @@ void COggDlg::play()
 	fade1 = 0;
 	if (maini) maini->SetActiveWindow();
 	SetActiveWindow();
+	m_jacketFocus = 0.0;
+	m_lastTick = 0;
+	LoadJacket(mp3file);
 }
 
 void COggDlg::SetAdd(CString fnn, int mode, int loop1, int loop2, CString filen, int ret2, REFTIME time)
@@ -14232,6 +14236,10 @@ BOOL CALLBACK pp(HWND hwnd, LPARAM p)
 CString filenback;
 void COggDlg::stop()
 {
+	if (!img.IsNull()) {
+		img.Destroy();
+	}
+	jx = -1;
 	lrc_backup = L"";
 	loop1_2 = -1;
 	stflg = TRUE;
@@ -14391,6 +14399,10 @@ void COggDlg::stop()
 
 void COggDlg::stop1()
 {
+	if (!img.IsNull()) {
+		img.Destroy();
+	}
+	jx = -1;
 	lrc_backup = L"";
 	loop1_2 = -1;
 
@@ -14759,6 +14771,40 @@ void COggDlg::timerp()
 		return;
 	}
 	if (playy == 0)return;
+
+	// Update focus transition (about 2 seconds for a full transition)
+	{
+		DWORD current_tick = GetTickCount();
+		if (m_lastTick == 0) {
+			m_lastTick = current_tick;
+		}
+		double dt = (current_tick - m_lastTick) / 1000.0;
+		m_lastTick = current_tick;
+
+		if (dt < 0.0) dt = 0.0;
+		if (dt > 0.1) dt = 0.1;
+
+		bool is_hovered = false;
+		HWND hWndActive = ::GetActiveWindow();
+		HWND hWndForeground = ::GetForegroundWindow();
+		if (hWndActive == GetSafeHwnd() || hWndForeground == GetSafeHwnd()) {
+			CPoint pt;
+			::GetCursorPos(&pt);
+			ScreenToClient(&pt);
+			CRect drawing_rect(0, 0, (int)(MDCP * hD), (int)((81 + 16) * hD * 4));
+			if (drawing_rect.PtInRect(pt)) {
+				is_hovered = true;
+			}
+		}
+
+		if (is_hovered) {
+			m_jacketFocus += dt / 2.0;
+			if (m_jacketFocus > 1.0) m_jacketFocus = 1.0;
+		} else {
+			m_jacketFocus -= dt / 2.0;
+			if (m_jacketFocus < 0.0) m_jacketFocus = 0.0;
+		}
+	}
 	ms2++;
 	CString s, ss, sss;
 	if (voldsf) {
@@ -14874,48 +14920,16 @@ void COggDlg::timerp()
 	dc.FillSolidRect(0, 0, 3000, 2000, RGB(0, 0, 0));
 	//		dcsub.FillSolidRect(0,0,3000,30,RGB(1,1,1));
 
-	if (jx != -1) {
-		ULONG_PTR gdiplusToken;
-		Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+	bool draw_jacket_early = (m_jacketFocus < 0.5);
+	if (draw_jacket_early && jx != -1 && !img.IsNull()) {
+		int h_dest = 388;
+		int w_dest = (int)(388.0 * jxy);
+		if (w_dest <= 0) w_dest = 388;
+		int x_dest = 0;
+		int y_dest = 0;
 
-		// Initialize GDI+.
-		Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
-
-		Gdiplus::Bitmap clImage(img, NULL);
-		Gdiplus::Bitmap* pImage = NULL;
-		pImage = Gdiplus::Bitmap::FromHBITMAP(img, NULL);
-
-		// GDI+による描画
-		Gdiplus::Graphics graphics(dc);
-		graphics.DrawImage(&clImage, 10000, 10000);
-
-		// HBITMAPによるBitBlt描画
-		Gdiplus::Color bkcolor(0x0, 0x0, 0xff);
-		HBITMAP hBmp;
-		HBITMAP hOld;
-		HDC hMem;
-
-		clImage.GetHBITMAP(bkcolor, &hBmp);
-		hMem = CreateCompatibleDC(dc);
-		hOld = (HBITMAP)SelectObject(hMem, hBmp);
-		CRect r;
-		GetClientRect(&r);
-		//			r.right = r.bottom * xy;
-		SetStretchBltMode(dc.m_hDC, HALFTONE); //高画質モード
-		SetBrushOrgEx(dc.m_hDC, 0, 0, NULL); //ブラシのずれを防止
-		if ((r.right - 100) * (jxy) > jx) {
-			//			StretchBlt(dc, MDC - 60, 0, (60), 60 / (jxy), hMem, 0, 0, jx, jy, SRCPAINT); //伸縮
-		}
-		else {
-			//			StretchBlt(dc, MDC - 60, 0, (60) * (jxy), 60, hMem, 0, 0, jx, jy, SRCPAINT); //伸縮
-		}
-		//	BitBlt(dcc, 0, 0, clImage.GetWidth(), clImage.GetHeight(), hMem, 0, 0, SRCCOPY);
-		SelectObject(hMem, hOld);
-
-		DeleteDC(hMem);
-
-		// Finalize GDI+
-		Gdiplus::GdiplusShutdown(gdiplusToken);
+		int alpha = 130 + (int)((220 - 130) * m_jacketFocus);
+		img.AlphaBlend(dc.m_hDC, x_dest, y_dest, w_dest, h_dest, 0, 0, jx, jy, alpha);
 	}
 
 	for (int lp = 0; lp < lrcnum - 1; lp++) {
@@ -15341,6 +15355,17 @@ void COggDlg::timerp()
 	{
 		ss = s;
 		//			m_11.SetWindowText(s);
+	}
+
+	if (!draw_jacket_early && jx != -1 && !img.IsNull()) {
+		int h_dest = 388;
+		int w_dest = (int)(388.0 * jxy);
+		if (w_dest <= 0) w_dest = 388;
+		int x_dest = 0;
+		int y_dest = 0;
+
+		int alpha = 130 + (int)((220 - 130) * m_jacketFocus);
+		img.AlphaBlend(dc.m_hDC, x_dest, y_dest, w_dest, h_dest, 0, 0, jx, jy, alpha);
 	}
 
 	//	}
@@ -18985,6 +19010,13 @@ void COggDlg::moji(CString s, int x, int y, COLORREF rgb)
 	HFONT fo;
 	SIZE szinfo;
 	fo = (HFONT)SelectObject(dc, hFont);
+
+	BYTE r = GetRValue(rgb);
+	BYTE g = GetGValue(rgb);
+	BYTE b = GetBValue(rgb);
+	double factor = 1.0 - (0.7 * m_jacketFocus);
+	rgb = RGB((BYTE)(r * factor), (BYTE)(g * factor), (BYTE)(b * factor));
+
 	SetTextColor(dc, rgb);
 	SetBkColor(dc, RGB(0, 0, 0));
 	dc.SetBkMode(TRANSPARENT);
@@ -19001,6 +19033,13 @@ int COggDlg::mojisub(CString s, int x, int y, COLORREF rgb)
 	HFONT fo;
 	CSize szinfo;
 	fo = (HFONT)SelectObject(dcsub, hFont);
+
+	BYTE r = GetRValue(rgb);
+	BYTE g = GetGValue(rgb);
+	BYTE b = GetBValue(rgb);
+	double factor = 1.0 - (0.7 * m_jacketFocus);
+	rgb = RGB((BYTE)(r * factor), (BYTE)(g * factor), (BYTE)(b * factor));
+
 	SetTextColor(dcsub, rgb);
 	SetBkColor(dcsub, RGB(0, 0, 0));
 	SetBkMode(dcsub, TRANSPARENT);
@@ -20089,6 +20128,273 @@ void COggDlg::OnBnmp3jake()
 	}
 	mi->Load(mp3file);
 
+}
+
+
+void COggDlg::LoadJacket(CString s)
+{
+	if (!img.IsNull()) {
+		img.Destroy();
+	}
+	jx = -1;
+
+	if (s.IsEmpty()) {
+		return;
+	}
+
+	CString s1, s2;
+	TCHAR env[256];
+	GetEnvironmentVariable(_T("temp"), env, sizeof(env));
+	s1 = env; s1 += "\\";
+	s2 = s1;
+
+	std::vector<BYTE> bufimage_vec(0x300010, 0);
+	BYTE* bufimage = bufimage_vec.data();
+	HGLOBAL hG = NULL;
+	IStream* stream = NULL;
+
+	CFile ff;
+	if (ff.Open(s, CFile::modeRead | CFile::shareDenyWrite, NULL) == FALSE) {
+		return;
+	}
+	UINT size = 0;
+	ULONGLONG i = 0, enc = 0;
+	s.MakeLower();
+	if (s.Right(3) == "mp3") {
+		ZeroMemory(bufimage, 2005);
+		ff.Read(bufimage, 2005);
+		if (bufimage[0x14] == 0 || bufimage[0x14] == 3) enc = 0; else enc = 1;
+		for (i = 0; i < 2000; i++) {
+			if (bufimage[i] == 0x41 && bufimage[i + 1] == 0x50 && bufimage[i + 2] == 0x49 && bufimage[i + 3] == 0x43) {
+				break;
+			}
+		}
+		if (i == 2000) {
+			return;
+		}
+		size = (UINT)bufimage[i + 4];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 5];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 6];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 7];
+		enc = bufimage[i + 10];
+		i += (4 + 4 + 3 + 6);
+		int flg = 0;
+		if (bufimage[i] == 'p') { s1 += _T("111.png"); }
+		else { s1 += _T("111.jpg"); }
+		s2 += _T("111.bmp");
+		for (; i < 2000; i++) {
+			if (bufimage[i] == 0)
+				break;
+		}
+		i += 2;
+
+		if ((bufimage[i] == 0xff || bufimage[i] == 0xfe)) {
+			for (; i < 2000; i++) {
+				if (enc == 1) {
+					if (bufimage[i] == 0 && bufimage[i + 1] == 0) {
+						if (bufimage[i + 1] == 0 && bufimage[i + 2] == 0)
+							flg = 1;
+						break;
+					}
+				}
+				else {
+					if (bufimage[i] == 0)
+						flg = 1;
+					break;
+				}
+			}
+			if (i == 2000) {
+				return;
+			}
+			i += flg;
+			if (enc == 1)
+				i += 2;
+		}
+		else i++;
+	}
+	else if (s.Right(3) == "m4a") {
+		ZeroMemory(bufimage, 0x300000);
+		ff.Read(bufimage, 0x300000);
+		if (bufimage[0x14] == 0 || bufimage[0x14] == 3) enc = 0; else enc = 1;
+		for (i = 0; i < 0x300000; i++) {// 00 06 5D 6A 64 61 74 61
+			if (bufimage[i] == 0x63 && bufimage[i + 1] == 0x6f && bufimage[i + 2] == 0x76 && bufimage[i + 3] == 0x72 && bufimage[i + 8] == 0x64 && bufimage[i + 9] == 0x61 && bufimage[i + 10] == 0x74 && bufimage[i + 11] == 0x61) {
+				break;
+			}
+		}
+		if (i == 0x300000) {
+			return;
+		}
+		i += 4;
+		size = (UINT)bufimage[i];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 1];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 2];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 3];
+		size -= 16;
+
+		i += 16;
+		if (bufimage[i + 1] == 0x50 && bufimage[i + 2] == 0x4e && bufimage[i + 3] == 0x47) {
+			s1 += _T("111.png");
+		}
+		else {
+			s1 += _T("111.jpg");
+		}
+		s2 += _T("111.bmp");
+	}
+	else if (s.Right(3) == "ogg" || s.Right(6) == ".qull3") {
+		CString cc;
+		int vfiii = FALSE;
+		for (int iii = 0; iii < vf.vc->comments; iii++) {
+#if _UNICODE
+			WCHAR* f; f = new WCHAR[0x300000];
+			MultiByteToWideChar(CP_UTF8, 0, vf.vc->user_comments[iii], -1, f, 0x300000);
+			cc = f;
+			delete[] f;
+#else
+			cc = vf.vc->user_comments[iii];
+#endif
+			if (cc.Left(23) == "METADATA_BLOCK_PICTURE=") {
+				vfiii = TRUE;
+				char* buf = vf.vc->user_comments[iii];
+				buf += 23;//Base64
+				int len;
+				char* decode = b64_decode(buf, (int)strlen(buf), len);
+				if (decode[16 + 16 + 10] == 0x50 && decode[1 + 16 + 16 + 10] == 0x4e && decode[2 + 16 + 16 + 10] == 0x47) {
+					s1 += _T("111.png");
+				}
+				else {
+					s1 += _T("111.jpg");
+					decode += 1;
+				}
+				s2 += _T("111.bmp");
+				for (int j = 0; j < len; j++) {
+					if (*(decode + len - j - 1) != 0) {
+						len -= j;
+						break;
+					}
+				}
+				hG = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, len);
+				memcpy(hG, decode + 16 + 16 + 9, len);
+				CreateStreamOnHGlobal(hG, TRUE, &stream);
+				free(decode);
+				break;
+			}
+		}
+		if (vfiii == FALSE) {
+			return;
+		}
+	}
+	else if (s.Right(4).MakeLower() == "flac" || s.Right(6).MakeLower() == "qull3h") {
+		ZeroMemory(bufimage, 0x300000);
+		ff.Read(bufimage, 0x300000);
+		if (bufimage[0] == 0xBF) {
+			BYTE offenc[7] = { 0xd9,0x3F,0x86,0x7B,0xC7,0x61,0xaa };
+			int off = 0;
+			for (int ll = 0; ll < 0x300000; ll++) {
+				bufimage[ll] ^= offenc[off];
+				off++; off %= 7;
+			}
+		}
+		for (i = 0; i < 0x300000; i++) {// 00 06 5D 6A 64 61 74 61
+			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'j' && bufimage[i + 7] == 'p' && bufimage[i + 8] == 'e' && bufimage[i + 9] == 'g') {
+				s1 += _T("111.jpg");
+				i++;
+				break;
+			}
+			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'p' && bufimage[i + 7] == 'n' && bufimage[i + 8] == 'g') {
+				s1 += _T("111.png");
+				break;
+			}
+		}
+		if (i == 0x300000) {
+			return;
+		}
+		i += 29;
+		size = (UINT)bufimage[i];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 1];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 2];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 3];
+
+		i += 4;
+		s2 += _T("111.bmp");
+	}
+	else if (s.Right(3) == "dsf" || s.Right(3) == "dff") {
+		CFile f;
+		if (f.Open(s, CFile::modeRead | CFile::shareDenyWrite) == FALSE) {
+			return;
+		}
+		f.Seek((ULONGLONG)po, CFile::begin);
+		int read = f.Read(bufimage, 0x300000);
+		f.Close();
+		for (i = 0; i < (ULONGLONG)read; i++) {// 00 06 5D 6A 64 61 74 61
+			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'j' && bufimage[i + 7] == 'p' && bufimage[i + 8] == 'e' && bufimage[i + 9] == 'g') {
+				s1 += _T("111.jpg");
+				i++;
+				break;
+			}
+			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'p' && bufimage[i + 7] == 'n' && bufimage[i + 8] == 'g') {
+				s1 += _T("111.png");
+				break;
+			}
+		}
+		if (i == (ULONGLONG)read) {
+			return;
+		}
+		for (i = 0; i < (ULONGLONG)read; i++) {
+			if (bufimage[i] == 'A' && bufimage[i + 1] == 'P' && bufimage[i + 2] == 'I' && bufimage[i + 3] == 'C') {
+				break;
+			}
+		}
+		i += 4;
+		size = (UINT)bufimage[i];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 1];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 2];
+		size <<= 8;
+		size |= (UINT)bufimage[i + 3];
+
+		i += 4 + po + 16;
+		s2 += _T("111.bmp");
+	}
+
+	if (!(s.Right(3) == "ogg" || s.Right(6) == ".qull3")) {
+		hG = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, size);
+		if (hG == NULL) return;
+		ff.SeekToBegin();
+		ff.Seek(i, CFile::begin);
+		char* cBit = new char[size];
+		ff.Read(cBit, size);
+		ff.Close();
+		if (s.Right(6).MakeLower() == L"qull3h" && flacmode == 1) {
+			BYTE offenc[7] = { 0xd9,0x3F,0x86,0x7B,0xC7,0x61,0xaa };
+			int off = i % 7;
+			for (int ll = 0; ll < (int)size; ll++) {
+				cBit[ll] ^= offenc[off];
+				off++; off %= 7;
+			}
+		}
+		memcpy(hG, cBit, size);
+		delete[] cBit;
+		CreateStreamOnHGlobal(hG, TRUE, &stream);
+	}
+
+	if (stream != NULL) {
+		if (img.Load(stream) != E_FAIL) {
+			jx = img.GetWidth();
+			jy = img.GetHeight();
+			jxy = (double)jx / (double)jy;
+		}
+		stream->Release();
+	}
 }
 
 

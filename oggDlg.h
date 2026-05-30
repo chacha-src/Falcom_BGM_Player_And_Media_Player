@@ -62,6 +62,7 @@ public:
 	BOOL ExportToWav(playlistdata0* pc, CString outputPath, int loopCount);
 	double goertzel(const float* data, int N, double target_freq, double sample_rate);
 	double hanWindow(int value, int index, int offset, int size);
+	void LoadJacket(CString s);
 	CString mp3file;
 	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
 
@@ -97,9 +98,12 @@ public:
 	pfnGetKMPModule pFunck;
 	SOUNDINFO sikpi;
 	TCHAR kpi[512];
-	int jx = -1, jy, jxy;
+	int jx = -1, jy;
+	double jxy;
 	CBitmap bmp, bmp1;
 	CImage img;
+	double m_jacketFocus;
+	DWORD m_lastTick;
 	CBrush m_brDlg;
 
 	CFont* m_newFont;
