@@ -309,7 +309,7 @@ BOOL CPlayList::OnInitDialog()
 	SetDlgItemText(IDC_STATICken, LL14(L"あいまい検索", L"Fuzzy search", L"Recherche floue", L"Ricerca fuzzy", L"Busqueda difusa", L"퍼지 검색", L"模糊搜索", L"بحث غامض", L"Нечеткий поиск", L"Fuzzy-Suche", L"Pesquisa fuzzy", L"Fuzzy zoeken", L"Wyszukiwanie rozmyte", L"Bulan?k arama"));
 	SetDlgItemText(IDC_BUTTON3, LL14(L"名前変更", L"Rename", L"Renommer", L"Rinomina", L"Cambiar nombre", L"이름 바꾸기", L"重命名", L"إعادة التسمية", L"Переименовать", L"Umbenennen", L"Renomear", L"Hernoemen", L"Zmie? nazw?", L"Yeniden adland?r"));
 	SetDlgItemText(IDC_PLAYDELETE, LL14(L"リスト削除", L"Delete list", L"Supprimer la liste", L"Elimina lista", L"Eliminar lista", L"목록 삭제", L"删除列表", L"حذف القائمة", L"Удалить список", L"Liste loschen", L"Excluir lista", L"Lijst verwijderen", L"Usu? list?", L"Listeyi sil"));
-	SetDlgItemText(IDC_PIANOROLL, LL14(L"ピアノロール", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll", L"Piano Roll"));
+	SetDlgItemText(IDC_PIANOROLL, LL14(L"ピアノロール", L"Piano Roll", L"Rouleau piano", L"Rotolo pianoforte", L"Rollo de piano", L"피아노 롤", L"钢琴卷帘", L"لوحة البيانو", L"Пианоролл", L"Klavierrolle", L"Rolo de piano", L"Pianorol", L"Rolka pianina", L"Piyano rulosu"));
 	m_lsup.SetIcon(IDR_SUP);
 	m_lsup.SetFlat(TRUE);
 	m_lup.SetIcon(IDR_UP);
