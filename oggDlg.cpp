@@ -24,6 +24,7 @@ int flacmode = 0;
 #include "mp3info.h"
 #include "ogg.h"
 #include "oggDlg.h"
+#include "NoteFundamentalPick.h"
 #include <math.h>
 #include <vorbis/codec.h>
 #include <vorbis/vorbisfile.h>
@@ -240,6 +241,8 @@ static char THIS_FILE[] = __FILE__;
 #endif
 
 int fade1, playf;
+BOOL thn = TRUE;
+BOOL thn1 = FALSE;
 LPDIRECTSOUND8 m_ds;
 LPDIRECTSOUNDBUFFER m_dsb1 = NULL;
 LPDIRECTSOUNDBUFFER8 m_dsb = NULL;
@@ -8709,6 +8712,8 @@ void COggDlg::play()
 	ttt = WAVDAStartLen;
 
 	stf = 0;
+	thn1 = FALSE;
+	thn = TRUE;
 	plf = 1; fade1 = 0; fade = 1.0f; fadeadd = 0.0f;
 	poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
 	mcnt = mcnt1 = mcnt2 = mcnt3 = mcnt4 = mcnt5 = mcnt6 = 0;
@@ -8743,10 +8748,12 @@ void COggDlg::play()
 		if (len2 < 0)
 			len2 = 0;
 		DispatchPlaywavFill(bufwav3, 0, len1, len2);
-		m_dsb->Lock(0, len1 + len2, (LPVOID*)&pdsb, (DWORD*)&len3, NULL, 0, 0);
-		memcpy(pdsb, bufwav3, len3);
-		m_dsb->Unlock(pdsb, len3, NULL, 0);
-		m_dsb->SetVolume((savedata.dsvol - 1) * 10);
+		if (m_dsb) {
+			m_dsb->Lock(0, len1 + len2, (LPVOID*)&pdsb, (DWORD*)&len3, NULL, 0, 0);
+			memcpy(pdsb, bufwav3, len3);
+			m_dsb->Unlock(pdsb, len3, NULL, 0);
+			m_dsb->SetVolume((savedata.dsvol - 1) * 10);
+		}
 		CFile f123;
 		int flggg = 0;
 		if (mode != -1) {
@@ -8838,7 +8845,9 @@ void COggDlg::play()
 			if (pMainFrame1) { pMainFrame1->seek(0); }
 		}
 		syukai = 0;
-		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+		if (m_dsb) {
+			m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+		}
 		fade1 = 0;
 		sflg = FALSE;
 		DoEvent();
@@ -14226,9 +14235,6 @@ void COggDlg::OnDropFiles(HDROP hDropInfo)
 	CCustomDialog::OnDropFiles(hDropInfo);
 }
 
-BOOL thn = TRUE;
-BOOL thn1 = FALSE;
-
 BOOL CALLBACK pp(HWND hwnd, LPARAM p);
 BOOL CALLBACK pp(HWND hwnd, LPARAM p)
 {
@@ -14303,6 +14309,8 @@ void COggDlg::stop()
 	}
 	filenback = filen;
 	playb = 0;
+	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+		m_PianoRollDlg.ResetPlaybackState();
 	if (ptl)ptl->SetProgressValue(m_hWnd, (LONGLONG)0, (LONGLONG)1);
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
 	if ((ogg || adbuf2 || mod || wav || mode == 999 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6) && mode != -2)
@@ -14347,10 +14355,10 @@ void COggDlg::stop()
 		_ccl.Leave();
 		timer.SetEvent();
 		if (thn == FALSE) {
-			for (int i = 0; i < 100; i++) {
+			for (;;) {
 				if (thn == TRUE) break;
 				DoEvent();
-				Sleep(10);
+				Sleep(1);
 			}
 		}
 
@@ -14464,6 +14472,8 @@ void COggDlg::stop1()
 		}
 		Sleep(50);
 		playb = 0;
+		if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+			m_PianoRollDlg.ResetPlaybackState();
 		// 実際に再生していた形式のデコーダのみClose（OnRestartでstop後、mode=新形式のままstop1が呼ばる場合を考慮）
 		int mode_for_decoder = -999;
 		if (adbuf2 != NULL) mode_for_decoder = mode;
@@ -16228,10 +16238,10 @@ void timerog1(UINT nIDEvent)
 		if (savedata.pianorollwindow == 1) {
 			if (!::IsWindow(og->m_PianoRollDlg.GetSafeHwnd()))
 			{
-				//og->m_PianoRollDlg.Create(IDD_PIANOROLL, og);
+				og->m_PianoRollDlg.Create(IDD_PIANOROLL, og);
 			}
 
-			//og->m_PianoRollDlg.ShowWindow(SW_SHOW);
+			og->m_PianoRollDlg.ShowWindow(SW_SHOW);
 		}
 
 	}
@@ -18475,6 +18485,7 @@ void AnalyzeMusicKey(
 	const std::vector<double>& bufChordL, const std::vector<double>& bufChordR,
 	int sampleRate)
 	;
+void GetCurrentNoteStrengths(float* output108);
 
 namespace {
 constexpr int kSpeanaDispKeys = 88;
@@ -18609,9 +18620,7 @@ void COggDlg::Speana()
 	int analysisSize = 4096;
 	if (mode0_Note || mode1_Low) analysisSize = 8192;
 
-	// タイミング調整 (Latency)
-	// 未来のデータを読まないよう、十分に過去へ戻します。
-	// 4096なら -800ms、8192なら -1600ms を基準とします。
+	// タイミング調整 (Latency) — ユーザー調整値。8192→-1600ms / 4096→-800ms
 	int latencySetting = (analysisSize == 8192) ? -1600 : -800;
 
 	{
@@ -18861,9 +18870,10 @@ void COggDlg::Speana()
 		static std::vector<double> noteFreqsExpanded;
 		static std::vector<double> goertzelCoeffs;
 		static std::vector<double> blackmanWindow;
-		static bool coeffsInit = false;
+		static double noteModeSampleRate = 0.0;
 
-		if (!coeffsInit) {
+		if (noteFreqsExpanded.empty() || fabs(sampleRate - noteModeSampleRate) > 0.5) {
+			noteModeSampleRate = sampleRate;
 			noteFreqsExpanded.resize(DETECT_KEYS);
 			goertzelCoeffs.resize(DETECT_KEYS);
 			blackmanWindow.resize(4096);
@@ -18877,7 +18887,6 @@ void COggDlg::Speana()
 			for (int n = 0; n < 4096; ++n) {
 				blackmanWindow[n] = 0.42 - 0.5 * cos(2.0 * M_PI * (double)n / 4095.0) + 0.08 * cos(4.0 * M_PI * (double)n / 4095.0);
 			}
-			coeffsInit = true;
 		}
 
 		auto ProcessGoertzel = [&](const std::vector<double>& input, int offset_idx, bool isRight) {
@@ -18925,32 +18934,20 @@ void COggDlg::Speana()
 			std::vector<double> displayAmp(DISP_KEYS, 0.0);
 
 			for (int k = 0; k < DETECT_KEYS; k++) {
-				double amp = rawResults[k];
-
-				// スロープ補正
-				double slope = 1.0 + ((double)k / DETECT_KEYS) * 3.0;
-				amp *= slope;
-
-				// コントラスト (2乗)
-				if (amp > 0.0001) {
-					double boost = amp * 50.0;
-					amp = boost * boost * 0.002;
-					if (amp > 10.0) amp = 10.0;
-				}
-				else {
-					amp = 0.0;
-				}
+				const float scaled = ScaleGoertzelAmp((float)rawResults[k], k, DETECT_KEYS);
 
 				if (k < KEY_OFFSET) {
-					if (amp > displayAmp[0]) displayAmp[0] = amp;
+					if (scaled > displayAmp[0]) displayAmp[0] = scaled;
 				}
 				else if (k >= KEY_OFFSET + DISP_KEYS) {
-					if (amp > displayAmp[DISP_KEYS - 1]) displayAmp[DISP_KEYS - 1] = amp;
+					if (scaled > displayAmp[DISP_KEYS - 1]) displayAmp[DISP_KEYS - 1] = scaled;
 				}
 				else {
-					displayAmp[k - KEY_OFFSET] = amp;
+					displayAmp[k - KEY_OFFSET] = scaled;
 				}
 			}
+
+			NormalizeDisplayPeakD(displayAmp.data(), DISP_KEYS, 5.0);
 
 			for (int i = 0; i < DISP_KEYS; i++) {
 				const int h = ValToBarHeight(displayAmp[i] * savedata.wup);
@@ -20644,18 +20641,33 @@ void COggDlg::TogglePianoRoll()
 
 void COggDlg::FeedPianoRoll(const void* pData, int bytes)
 {
-	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd())) {
-		int feed_rate = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_rate : wavbit_sample_Hz;
-		int feed_ch = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_ch : wavchannel;
-		int feed_bits = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : wavsam_depth;
-		if (feed_rate <= 0) feed_rate = 44100;
-		if (feed_ch <= 0) feed_ch = 2;
-		if (feed_bits <= 0) feed_bits = 16;
-		int bpf = PcmOutBytesPerFrame();
-		if (bpf > 0 && bytes > 0) {
-			m_PianoRollDlg.FeedPCM(pData, bytes / bpf, feed_rate, feed_bits, feed_ch);
+	if (!pData || bytes <= 0 || playf == 0 || thn1)
+		return;
+	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+		return;
+
+	int feed_rate = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_rate : wavbit_sample_Hz;
+	int feed_ch = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_ch : wavchannel;
+	int feed_bits = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : wavsam_depth;
+	if (feed_rate <= 0) feed_rate = 44100;
+	if (feed_ch <= 0) feed_ch = 2;
+	if (feed_bits <= 0) feed_bits = 16;
+	int bpf = PcmOutBytesPerFrame();
+	if (bpf <= 0) return;
+
+	int delaySamples = 0;
+	LPDIRECTSOUNDBUFFER8 dsb = m_dsb;
+	if (dsb) {
+		ULONG playCursor = 0, writeCursor = 0;
+		if (dsb->GetCurrentPosition(&playCursor, &writeCursor) == DS_OK) {
+			const ULONG ringBytes = (g_ds_buffer_bytes > 0)
+				? g_ds_buffer_bytes
+				: (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
+			const ULONG aheadBytes = (writeCursor + ringBytes - playCursor) % ringBytes;
+			delaySamples = (int)(aheadBytes / (ULONG)bpf);
 		}
 	}
+	m_PianoRollDlg.FeedPCM(pData, bytes / bpf, feed_rate, feed_bits, feed_ch, delaySamples);
 }
 
 void COggDlg::DeferredHeavyStartupImpl()

@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "NoteFundamentalPick.h"
 #include "ogg.h"
 #include "oggDlg.h"
 //#include <math.h>
@@ -4449,9 +4450,12 @@ using Complex = std::complex<double>;
 struct MelodyCandidate { int midiNote; float salience; float totalScore; int fromIdx; };
 
 static float  g_noteStrength[108];        // MIDI 0-107 の強度
+static float  g_noteStrengthPrev[108];    // 指数平滑用
 static double g_goertzelCoeffs[108];      // Goertzel 係数 (各ノート周波数)
-static double g_blackmanWindow[8192];     // 8192点 Blackman窓係数
+static double g_hannWindow4096[4096];   // 低域 Goertzel 用 Hann 窓
+static double g_blackmanWindow2048[2048]; // 高域 Goertzel 用 Blackman 窓
 static bool   g_analysisInitialized = false;
+static double g_analysisSampleRate = 0.0; // 係数計算に使ったサンプルレート
 static std::vector<std::vector<MelodyCandidate>> g_viterbiPath;
 static const int MAX_VITERBI_FRAMES = 8;  // Viterbi追跡フレーム数
 static const int CANDIDATE_NUM = 5;       // フレームあたり候補数
@@ -4466,32 +4470,47 @@ static const WCHAR* NOTE_NAMES[12] = {
 	L"F#", L"G ", L"G#", L"A ", L"A#", L"B "
 };
 
-// Goertzel係数・Blackman窓・ノート強度の初期化
-// 初回のみ実行 (g_analysisInitialized で管理)
+// Goertzel係数・窓関数・ノート強度の初期化
+// サンプルレートが変わったら係数を再計算する
 static void InitializeAnalysis(double sampleRate) {
-	if (g_analysisInitialized) return;
+	if (sampleRate < 8000.0) sampleRate = 44100.0;
+	const bool firstInit = !g_analysisInitialized;
+	const bool rateChanged = g_analysisInitialized
+		&& fabs(sampleRate - g_analysisSampleRate) > 0.5;
+	if (!firstInit && !rateChanged) return;
+
+	g_analysisSampleRate = sampleRate;
 	// MIDI 0-107: 440Hz を基準にした等温律周波数
 	for (int k = 0; k < 108; ++k) {
 		double freq = 440.0 * pow(2.0, ((12 + k) - 69.0) / 12.0);
 		g_goertzelCoeffs[k] = 2.0 * cos(2.0 * M_PI * freq / sampleRate);
 	}
-	// Blackman窓 (サイドローブ抑圧 -58dB 以上)
-	for (int n = 0; n < 8192; ++n)
-		g_blackmanWindow[n] = 0.355768 - 0.487396 * cos(2.0 * M_PI * n / 8191.0)
-		+ 0.144232 * cos(4.0 * M_PI * n / 8191.0)
-		- 0.012604 * cos(6.0 * M_PI * n / 8191.0);
-	memset(g_noteStrength, 0, sizeof(g_noteStrength));
-	g_viterbiPath.clear();
+	// 低域: Hann、高域: Blackman（mode0_Note と同系統）
+	for (int n = 0; n < 4096; ++n)
+		g_hannWindow4096[n] = 0.5 - 0.5 * cos(2.0 * M_PI * n / 4095.0);
+	for (int n = 0; n < 2048; ++n)
+		g_blackmanWindow2048[n] = 0.355768 - 0.487396 * cos(2.0 * M_PI * n / 2047.0)
+		+ 0.144232 * cos(4.0 * M_PI * n / 2047.0)
+		- 0.012604 * cos(6.0 * M_PI * n / 2047.0);
+
+	if (firstInit || rateChanged) {
+		memset(g_noteStrength, 0, sizeof(g_noteStrength));
+		memset(g_noteStrengthPrev, 0, sizeof(g_noteStrengthPrev));
+		g_viterbiPath.clear();
+	}
 	g_analysisInitialized = true;
 }
 
 // Goertzel アルゴリズム: 指定周波数のスペクトル強度を計算
 // FFT全体を計算せず単一周波数だけ効率よく求める
 // 戻り値: 正規化振幅 (×2.5/N)
-static double GoertzelMagnitude(const double* samples, int numSamples, double coefficient) {
+static double GoertzelMagnitude(const double* samples, int numSamples, double coefficient,
+	const double* window)
+{
 	double s_prev = 0.0, s_prev2 = 0.0;
 	for (int n = 0; n < numSamples; ++n) {
-		double s = samples[n] + coefficient * s_prev - s_prev2;
+		const double x = window ? (samples[n] * window[n]) : samples[n];
+		double s = x + coefficient * s_prev - s_prev2;
 		s_prev2 = s_prev; s_prev = s;
 	}
 	double power = s_prev2 * s_prev2 + s_prev * s_prev - coefficient * s_prev * s_prev2;
@@ -4857,9 +4876,10 @@ static CString EstimateChordRaw(float* noteClass, float threshold) {
 	// 上位3候補を ", " で連結して返す
 	CString result = cands[0].name; int count = 1;
 	for (size_t i = 1; i < cands.size() && count < 3; i++) {
-		if (cands[0].score - cands[i].score > 3.8f) break;
+		if (cands[0].score - cands[i].score > 2.0f) break;
+		if (cands[i].score < cands[0].score * 0.55f) continue;
 		if (cands[i].name == result) continue;
-		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.5f) continue;
+		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.2f) continue;
 		result += L", " + cands[i].name; count++;
 	}
 	return result;
@@ -4875,7 +4895,6 @@ static CString EstimateOverallRaw(float* b, float* m, float* h, float* a) {
 static CString g_prevChordLow = L"", g_prevChordMid = L"", g_prevChordHigh = L"", g_prevChordAll = L"";
 static std::deque<CString> g_historyLow, g_historyMid, g_historyHigh, g_historyAll;
 const int HISTORY_SIZE = 4;  // 直近4フレームで多数決
-static float g_noteStrengthPrev[108] = { 0 };
 const float SMOOTHING_FACTOR = 0.3f;  // ノート強度の指数平滑係数
 static float g_prevRMS = 0.0f, g_peakRMS = 0.0f;
 static bool  g_isPlaying = false;
@@ -4936,15 +4955,16 @@ static CString GetMostFrequent(const std::deque<CString>& h) {
 
 	CString result = votesList[0].name;
 	int count = 1;
+	const int topVotes = votesList[0].votes;
 	CString bestRoot = (result.GetLength() > 1 && (result[1] == L'#' || result[1] == L'b')) ? result.Left(2) : result.Left(1);
 
 	for (size_t i = 1; i < votesList.size() && count < 3; i++) {
-		if (votesList[i].votes >= 1) {
-			CString root = (votesList[i].name.GetLength() > 1 && (votesList[i].name[1] == L'#' || votesList[i].name[1] == L'b')) ? votesList[i].name.Left(2) : votesList[i].name.Left(1);
-			if (root == bestRoot) {
-				result += L", " + votesList[i].name;
-				count++;
-			}
+		if (votesList[i].votes < 2) continue;
+		if (topVotes > 0 && votesList[i].votes < (topVotes + 1) / 2) continue;
+		CString root = (votesList[i].name.GetLength() > 1 && (votesList[i].name[1] == L'#' || votesList[i].name[1] == L'b')) ? votesList[i].name.Left(2) : votesList[i].name.Left(1);
+		if (root == bestRoot) {
+			result += L", " + votesList[i].name;
+			count++;
 		}
 	}
 	return result;
@@ -5041,9 +5061,10 @@ static CString EstimateChordRawWithHistory(float* nc, float threshold, const CSt
 
 	CString result = cands[0].name; int count = 1;
 	for (size_t i = 1; i < cands.size() && count < 3; i++) {
-		if (cands[0].score - cands[i].score > 3.8f) break;
+		if (cands[0].score - cands[i].score > 2.0f) break;
+		if (cands[i].score < cands[0].score * 0.55f) continue;
 		if (cands[i].name == result) continue;
-		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.5f) continue;
+		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.2f) continue;
 		result += L", " + cands[i].name; count++;
 	}
 	return result;
@@ -5134,13 +5155,18 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 		g_historyLow.clear(); g_historyMid.clear();
 		g_historyHigh.clear(); g_historyAll.clear();
 		g_prevChordLow = g_prevChordMid = g_prevChordAll = g_prevChordHigh = L"";
-		for (int i = 0; i < 108; i++) g_noteStrengthPrev[i] *= 0.3f;
+		memset(g_noteStrength, 0, sizeof(g_noteStrength));
+		memset(g_noteStrengthPrev, 0, sizeof(g_noteStrengthPrev));
 	}
 
-	// 無音時は空白表示して終了
+	// 無音時は空白表示して減衰（ゴーストノート防止）
 	if (isSilent) {
 		KeyCodeLow = KeyCodeMid = KeyCodeAll = KeyCodeHigh =
 			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
+		for (int i = 0; i < 108; i++) {
+			g_noteStrength[i] *= 0.4f;
+			g_noteStrengthPrev[i] *= 0.4f;
+		}
 		g_prevRMS = currentRMS; return;
 	}
 
@@ -5156,26 +5182,27 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 	const int HI_S = totalSamples - HI_N;
 
 	for (int k = 0; k < LOW_LIMIT; k++) {
-		double aL = GoertzelMagnitude(bufferL.data() + LOW_S, LOW_N, g_goertzelCoeffs[k]);
-		double aR = stereo ? GoertzelMagnitude(bufferR.data() + LOW_S, LOW_N, g_goertzelCoeffs[k]) : aL;
+		const double* win = (LOW_N == 4096) ? g_hannWindow4096 : nullptr;
+		double aL = GoertzelMagnitude(bufferL.data() + LOW_S, LOW_N, g_goertzelCoeffs[k], win);
+		double aR = stereo ? GoertzelMagnitude(bufferR.data() + LOW_S, LOW_N, g_goertzelCoeffs[k], win) : aL;
 		float ns = (float)max(aL, aR) * (1.0f + k / 100.0f);  // 低域補正
 		// 指数平滑: prev*0.3 + current*0.7
 		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + ns * (1.0f - SMOOTHING_FACTOR);
 		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
 	for (int k = LOW_LIMIT; k < 108; k++) {
-		double aL = GoertzelMagnitude(bufferL.data() + HI_S, HI_N, g_goertzelCoeffs[k]);
-		double aR = stereo ? GoertzelMagnitude(bufferR.data() + HI_S, HI_N, g_goertzelCoeffs[k]) : aL;
+		const double* win = (HI_N == 2048) ? g_blackmanWindow2048 : nullptr;
+		double aL = GoertzelMagnitude(bufferL.data() + HI_S, HI_N, g_goertzelCoeffs[k], win);
+		double aR = stereo ? GoertzelMagnitude(bufferR.data() + HI_S, HI_N, g_goertzelCoeffs[k], win) : aL;
 		float ns = (float)max(aL, aR) * (1.0f + k / 50.0f);   // 高域補正
 		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + ns * (1.0f - SMOOTHING_FACTOR);
 		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
 
-	// 帯域別ピッチクラス集約
+	// 帯域別ピッチクラス集約 → コード推定（生 Goertzel 強度を使用）
 	float bC[12], mC[12], hC[12], aC[12];
 	AggregateNoteClasses(bC, mC, hC, aC);
 
-	// ヒストリー付きコード推定
 	CString rawBass = EstimateChordRawWithHistory(bC, 0.02f, g_prevChordLow);
 	CString rawMid = EstimateChordRawWithHistory(mC, 0.03f, g_prevChordMid);
 	CString rawAll = EstimateChordRawWithHistory(bC, mC, hC, aC, g_prevChordAll);

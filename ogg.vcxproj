@@ -2952,6 +2952,7 @@
     </Bscmake>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="CPianoRoll.cpp" />
     <ClCompile Include="KpiHostClient.cpp" />
     <ClCompile Include="Arc.cpp" />
     <ClCompile Include="AudioUpscaler.cpp" />
@@ -2962,7 +2963,6 @@
     <ClCompile Include="CCustomControl.cpp" />
     <ClCompile Include="CDailog1.cpp" />
     <ClCompile Include="CEqualizer.cpp" />
-    <ClCompile Include="CPianoRoll.cpp" />
     <ClCompile Include="CImageBase.cpp" />
     <ClCompile Include="codec\ag_dec.c" />
     <ClCompile Include="codec\ag_enc.c" />
@@ -3032,6 +3032,8 @@
     <ClCompile Include="CPlayListNew.cpp" />
     <ClCompile Include="Dino.cpp" />
     <ClCompile Include="Douga.cpp" />
+    <ClInclude Include="NoteFundamentalPick.h" />
+    <ClInclude Include="CPianoRoll.h" />
     <ClInclude Include="KpiHostClient.h" />
     <ClInclude Include="kpi_host_ipc.h" />
     <ClInclude Include="ALACAudioTypes.h" />
@@ -3042,7 +3044,6 @@
     <ClInclude Include="CCustomControl.h" />
     <ClInclude Include="CDailog1.h" />
     <ClInclude Include="CEqualizer.h" />
-    <ClInclude Include="CPianoRoll.h" />
     <ClInclude Include="CImageBase.h" />
     <ClInclude Include="codec\ALACEncoder.h" />
     <ClInclude Include="codec\analysis.h" />

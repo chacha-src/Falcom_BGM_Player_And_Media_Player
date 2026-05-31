@@ -619,7 +619,7 @@ BEGIN
     COMBOBOX        IDC_COMBO1,7,23,81,182,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     PUSHBUTTON      "名前変更",IDC_BUTTON3,89,23,50,11
     PUSHBUTTON      "リスト削除",IDC_PLAYDELETE,140,23,50,11
-    PUSHBUTTON      "ピアノロール",IDC_PIANOROLL,195,23,50,11,NOT WS_VISIBLE
+    PUSHBUTTON      "ピアノロール",IDC_PIANOROLL,195,23,50,11
 END
 
 IDD_GRAPH DIALOGEX 0, 0, 253, 135
@@ -875,7 +875,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,390
+ FILEVERSION 0,8,7,395
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -893,10 +893,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.05.28"
-            VALUE "FileVersion", "0.8.7.390"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.05.31"
+            VALUE "FileVersion", "0.8.7.395"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.05.28"
+            VALUE "LegalCopyright", "Copyright (C) 2026.05.31"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
