@@ -910,6 +910,9 @@
     <ClInclude Include="CPianoRoll.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="NoteFundamentalPick.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="res\ico00001.ico">

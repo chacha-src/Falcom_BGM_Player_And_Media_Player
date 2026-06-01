@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -90,6 +90,7 @@ int g_kpiSourceBitsPerSample = 16;
 #include <process.h>
 #include "LyricsProgressWnd.h"
 #include "AudioUpscaler.h"
+#include "Bufwav3Sync.h"
 
 bool ProcessAudioWithRubberBand(float tempoRate, bool t);
 void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
@@ -565,20 +566,20 @@ public:
 	CKpiLoadingWnd()
 	{
 		m_strText = LL14(
-			L"KPI読み込み中...\n（しばらく時間がかかる場合があります）",
-			L"Reading KPI list...\n(This may take some time)",
-			L"Lecture de la liste KPI...\n(Cela peut prendre du temps)",
-			L"Lettura della lista KPI...\n(Questo potrebbe richiedere del tempo)",
-			L"Leyendo la lista KPI...\n(Esto puede tardar un poco)",
-			L"KPI 목록을 읽는 중...\n(시간이 다소 걸릴 수 있습니다)",
-			L"正在读取KPI列表...\n（可能需要一些时间）",
-			L"جاري قراءة قائمة KPI...\n(قد يستغرق هذا بعض الوقت)",
-			L"Чтение списка KPI...\n(Это может занять некоторое время)",
-			L"KPI-Liste wird gelesen...\n(Dies kann einige Zeit dauern)",
-			L"Lendo a lista KPI...\n(Isso pode levar algum tempo)",
-			L"KPI-lijst lezen...\n(Dit kan even duren)",
-			L"Odczytywanie listy KPI...\n(Może to zająć trochę czasu)",
-			L"KPI listesi okunuyor...\n(Bu biraz zaman alabilir)"
+			L"KPI読み込み中…\n（しばらく時間がかかる場合があります）",
+			L"Reading KPI list…\n(This may take some time)",
+			L"Lecture de la liste KPI…\n(Cela peut prendre du temps)",
+			L"Lettura della lista KPI…\n(Questo potrebbe richiedere del tempo)",
+			L"Leyendo la lista KPI…\n(Esto puede tardar un poco)",
+			L"KPI 목록을 읽는 중…\n(시간이 다소 걸릴 수 있습니다)",
+			L"正在读取KPI列表…\n（可能需要一些时间）",
+			L"جاري قراءة قائمة KPI…\n(قد يستغرق هذا بعض الوقت)",
+			L"Чтение списка KPI…\n(Это может занять некоторое время)",
+			L"KPI-Liste wird gelesen…\n(Dies kann einige Zeit dauern)",
+			L"Lendo a lista KPI…\n(Isso pode levar algum tempo)",
+			L"KPI-lijst lezen…\n(Dit kan even duren)",
+			L"Odczytywanie listy KPI…\n(Może to zająć trochę czasu)",
+			L"KPI listesi okunuyor…\n(Bu biraz zaman alabilir)"
 		);
 	}
 
@@ -733,22 +734,47 @@ protected:
 		dc.Rectangle(&clientRect);
 		dc.SelectObject(pOldPen);
 
-		// Font
 		CFont* pOldFont = dc.SelectObject(&m_font);
 		dc.SetBkMode(TRANSPARENT);
 		dc.SetTextColor(RGB(50, 50, 150));
 
-		// Center the text in the top 80 pixels
 		UINT dpi = GetDpi(m_hWnd);
-		CRect textRect(0, 0, clientRect.Width() - Scale(40, dpi), 0);
-		dc.DrawText(m_strText, &textRect, DT_WORDBREAK | DT_CALCRECT);
+		const int hPad = Scale(16, dpi);
+		const int textAreaBottom = Scale(78, dpi);
 
-		int x = (clientRect.Width() - textRect.Width()) / 2;
-		int y = (Scale(80, dpi) - textRect.Height()) / 2;
-		if (y < 5) y = 5;
+		CString title = m_strText;
+		CString subtitle;
+		const int nl = m_strText.Find(L'\n');
+		if (nl >= 0) {
+			title = m_strText.Left(nl);
+			subtitle = m_strText.Mid(nl + 1);
+		}
 
-		CRect drawRect(x, y, x + textRect.Width(), y + textRect.Height());
-		dc.DrawText(m_strText, &drawRect, DT_WORDBREAK);
+		// Title: draw as a single line via TextOut (DrawText+DT_WORDBREAK can break
+		// between CJK characters and, when the rect is too short, center each fragment
+		// on the same baseline — producing the wide gaps seen in the screenshot).
+		CSize titleSize = dc.GetTextExtent(title);
+		const int titleX = (clientRect.Width() - titleSize.cx) / 2;
+		const int titleY = Scale(10, dpi);
+		dc.TextOut(titleX, titleY, title);
+
+		if (!subtitle.IsEmpty()) {
+			const int wrapWidth = clientRect.Width() - hPad * 2;
+
+			// Measure at a fixed wrap width, then draw with the same width.
+			CRect calcRect(0, 0, wrapWidth, 0);
+			dc.DrawText(subtitle, &calcRect, DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
+
+			CRect subRect(
+				hPad,
+				titleY + titleSize.cy + Scale(4, dpi),
+				clientRect.right - hPad,
+				titleY + titleSize.cy + Scale(4, dpi) + calcRect.Height());
+			if (subRect.bottom > textAreaBottom)
+				subRect.bottom = textAreaBottom;
+
+			dc.DrawText(subtitle, &subRect, DT_WORDBREAK | DT_CENTER | DT_NOPREFIX);
+		}
 
 		dc.SelectObject(pOldFont);
 	}
@@ -14902,13 +14928,18 @@ void COggDlg::timerp()
 		tb = t1 % 60;
 		tc = tt % 100;
 		t3 = (double)snap_playb / (double)(wavbit_sample_Hz / wavv2[wavchannel]);// / (double)(wavsam_depth / 16.0f);
-		//先読み分を除去
+		//先読み分を除去: playb はデコード先頭、実際に聴こえる位置は DS キュー分だけ過去
 		// playb は PcmOutBytesPerFrame 基準のフレーム数。MP3 はシークも含めフレーム単位に統一（旧×4は廃止）。
 		if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
 		if (m_dsb && !(mode == -8 || mode >= 1)) {
-			//t3 -= 1.0;
+			ULONG heardPc = 0, heardWc = 0;
+			if (m_dsb->GetCurrentPosition(&heardPc, &heardWc) == DS_OK) {
+				const int bpfHeard = PcmOutBytesPerFrame();
+				const long qSamples = DsQueuedSamples(heardPc, heardWc, bpfHeard);
+				if (qSamples > 0 && snap_playb > qSamples)
+					t3 = (double)(snap_playb - qSamples) / (double)(wavbit_sample_Hz / wavv2[wavchannel]);
+			}
 		}
-		//t3 -= 1500;
 		if (t3 < 0.0) t3 = 0.0;
 		tt = (int)(t3 * 100.0);
 		if (tt < 0) tt = 0;
@@ -14967,6 +14998,8 @@ void COggDlg::timerp()
 	}
 
 
+	if (plf == 1 && (wav || ogg) && ::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+		SyncPianoRollFromPlayCursor();
 	if (savedata.supe == TRUE && plf == 1 && (wav || ogg)) Speana();
 	s = L""; ss = L"";
 	s = "name:";
@@ -18564,6 +18597,120 @@ inline void SpeanaDrawBar(CDC& dc, int x, int bar_w, int idx, int d)
 	}
 }
 } // namespace
+
+void COggDlg::SyncPianoRollFromPlayCursor()
+{
+	if (playf == 0 || thn1) return;
+	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd())) return;
+	if (!bufwav3) return;
+
+	double sampleRate;
+	int channels;
+	int bitDepth;
+	if (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) {
+		sampleRate = (double)g_ds_pcm_rate;
+		channels = g_ds_pcm_ch;
+		bitDepth = g_ds_pcm_bits;
+	}
+	else {
+		sampleRate = (double)wavbit_sample_Hz;
+		channels = wavchannel;
+		bitDepth = wavsam_depth;
+	}
+	if (sampleRate < 8000.0) sampleRate = 44100.0;
+	if (channels < 1) channels = 2;
+
+	const int bytesPerSample = (bitDepth / 8) < 1 ? 2 : (bitDepth / 8);
+	const int bytesPerFrame = bytesPerSample * channels;
+	const int prFrames = CPianoRoll::PIANO_BASS_FRAMES;
+	const int prBytes = prFrames * bytesPerFrame;
+	const int TOTAL_BUF_BYTES = (int)((g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM));
+	if (prBytes <= 0 || TOTAL_BUF_BYTES <= prBytes) return;
+
+	ULONG playCur = PlayCursor2;
+	HRESULT rett = E_FAIL;
+	if (m_dsb) rett = m_dsb->GetCurrentPosition(&playCur, &WriteCursor);
+	if (rett == DS_OK) PlayCursor2 = playCur;
+	else playCur = PlayCursor2;
+
+	const ULONG ringBytes = Bufwav3RingBytes();
+	long prPos = SpeanaAnalysisReadPos(playCur, prBytes, bytesPerFrame, (int)ringBytes, sampleRate);
+
+	static std::vector<char> prRaw;
+	static std::vector<double> prMono;
+	if (prRaw.size() < (size_t)prBytes) prRaw.resize(prBytes);
+	if (prMono.size() < (size_t)prFrames) prMono.resize(prFrames);
+
+	const char* srcBufBase = (const char*)bufwav3;
+	char* prDst = prRaw.data();
+	if (prPos + prBytes <= TOTAL_BUF_BYTES) {
+		memcpy(prDst, srcBufBase + prPos, prBytes);
+	}
+	else {
+		const int firstPart = TOTAL_BUF_BYTES - prPos;
+		const int secondPart = prBytes - firstPart;
+		if (firstPart < 0 || secondPart < 0) return;
+		memcpy(prDst, srcBufBase + prPos, firstPart);
+		memcpy(prDst + firstPart, srcBufBase, secondPart);
+	}
+
+	auto GetSampleValue = [&](int sampleIndex, int chIndex) -> double {
+		const int offset = sampleIndex * bytesPerFrame + chIndex * bytesPerSample;
+		if (bitDepth == 16) return (double)(*(short*)(prDst + offset)) / 32768.0;
+		if (bitDepth == 24) {
+			unsigned char* p = (unsigned char*)(prDst + offset);
+			int val = (p[0]) | (p[1] << 8) | (p[2] << 16);
+			if (val & 0x800000) val |= 0xFF000000;
+			return (double)val / 8388608.0;
+		}
+		if (bitDepth == 32) return (double)(*(int*)(prDst + offset)) / 2147483648.0;
+		if (bitDepth == 8) return ((double)(*(unsigned char*)(prDst + offset)) - 128.0) / 128.0;
+		return 0.0;
+		};
+
+	for (int i = 0; i < prFrames; ++i) {
+		double smpL = 0.0, smpR = 0.0;
+		if (channels <= 2) {
+			smpL = GetSampleValue(i, 0);
+			smpR = (channels > 1) ? GetSampleValue(i, 1) : smpL;
+		}
+		else if (g_pcm_upscale_active && savedata.speaker_layout == 5 && channels > 2) {
+			smpL = GetSampleValue(i, 0);
+			smpR = (channels > 1) ? GetSampleValue(i, 1) : smpL;
+		}
+		else if (g_pcm_upscale_active && channels == 3 && savedata.speaker_layout == 1) {
+			const double fl = GetSampleValue(i, 0), fr = GetSampleValue(i, 1), lfe = GetSampleValue(i, 2);
+			smpL = fl + lfe * 0.5;
+			smpR = fr + lfe * 0.5;
+		}
+		else if (g_pcm_upscale_active && channels == 4 && savedata.speaker_layout == 2) {
+			const double fl = GetSampleValue(i, 0), fr = GetSampleValue(i, 1);
+			const double rl = GetSampleValue(i, 2), rr = GetSampleValue(i, 3);
+			smpL = (fl + rl * 0.8) * 0.7;
+			smpR = (fr + rr * 0.8) * 0.7;
+		}
+		else if (g_pcm_upscale_active && channels >= 8) {
+			const double fl = GetSampleValue(i, 0), fr = GetSampleValue(i, 1);
+			const double c = GetSampleValue(i, 2), lfe = GetSampleValue(i, 3);
+			const double bl = GetSampleValue(i, 4), br = GetSampleValue(i, 5);
+			const double sl = GetSampleValue(i, 6), sr = GetSampleValue(i, 7);
+			smpL = (fl + c * 0.7 + bl * 0.75 + sl * 0.75 + lfe * 0.5) * 0.55;
+			smpR = (fr + c * 0.7 + br * 0.75 + sr * 0.75 + lfe * 0.5) * 0.55;
+		}
+		else {
+			const double fl = GetSampleValue(i, 0), fr = GetSampleValue(i, 1);
+			const double center = (channels > 2) ? GetSampleValue(i, 2) : 0.0;
+			const double lfe = (channels > 3) ? GetSampleValue(i, 3) : 0.0;
+			const double rl = (channels > 4) ? GetSampleValue(i, 4) : 0.0;
+			const double rr = (channels > 5) ? GetSampleValue(i, 5) : 0.0;
+			smpL = (fl + center * 0.7 + rl * 0.8 + lfe * 0.5) * 0.7;
+			smpR = (fr + center * 0.7 + rr * 0.8 + lfe * 0.5) * 0.7;
+		}
+		prMono[i] = (smpL + smpR) * 0.5;
+	}
+
+	m_PianoRollDlg.AnalyzePlayCursorMono(prMono.data(), prFrames, (int)(sampleRate + 0.5));
+}
 
 void COggDlg::Speana()
 {

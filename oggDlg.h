@@ -1,4 +1,4 @@
-// oggDlg.h : ヘッダー ファイル
+﻿// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -48,6 +48,7 @@ public:
 	void dougaplay(int uu, CString str = L"");
 	DWORD GetVol();
 	void Speana();
+	void SyncPianoRollFromPlayCursor();
 	void TogglePianoRoll();
 	void FeedPianoRoll(const void* pData, int bytes);
 	void moji(CString s,int x,int y,COLORREF rgb);
