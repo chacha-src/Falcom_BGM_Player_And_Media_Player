@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -875,7 +875,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,395
+ FILEVERSION 0,8,7,396
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -893,10 +893,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.05.31"
-            VALUE "FileVersion", "0.8.7.395"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.06.01"
+            VALUE "FileVersion", "0.8.7.396"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.05.31"
+            VALUE "LegalCopyright", "Copyright (C) 2026.06.01"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -1257,6 +1257,10 @@ BEGIN
         RIGHTMARGIN, 490
         TOPMARGIN, 7
         BOTTOMMARGIN, 209
+    END
+
+    IDD_PIANOROLL, DIALOG
+    BEGIN
     END
 END
 #endif    // APSTUDIO_INVOKED

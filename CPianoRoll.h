@@ -19,7 +19,10 @@ public:
     void FeedPCM(const void* pData, int frames, int sampleRate, int bits, int channels,
         int playbackDelaySamples = 0);
     void AnalyzePlayCursorMono(const double* mono, int frameCount, int sampleRate);
+    void SetChannelMeterDb(const float* dbPerChannel, int channelCount);
     void ResetPlaybackState();
+
+    static constexpr int PIANO_METER_CH_MAX = 8;
 
     static constexpr int PIANO_BASS_FRAMES = 16384;
     static constexpr int PIANO_LOW_FRAMES  = 8192;
@@ -90,6 +93,11 @@ private:
     bool m_feedEnabled = true;
     bool m_historyDirty = true;
     DWORD m_lastAnalyzeTick = 0;
+    float m_bufwav3LevelDb = -60.0f;
+    float m_chMeterDb[PIANO_METER_CH_MAX];
+    float m_chMeterFill[PIANO_METER_CH_MAX];
+    float m_chMeterAutoPeak[PIANO_METER_CH_MAX];
+    int   m_chMeterCount = 0;
     static constexpr DWORD ANALYZE_MIN_MS = 24;
 
     void EnsureAnalysisTables(int sampleRate);
@@ -109,4 +117,5 @@ private:
     int  GetWhiteKeyIndex(int midiNote) const;
     void GetChromaticKeyRect(int keyIndex, int width, int& xL, int& xR) const;
     void GetWhiteKeyRect52(int midi, int width, int& xL, int& xR) const;
+    void DrawChannelDbBars(CDC& dc, const CRect& rc, const float* chFill, int chCount) const;
 };

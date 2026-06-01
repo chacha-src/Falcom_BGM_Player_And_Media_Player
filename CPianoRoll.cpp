@@ -41,6 +41,98 @@ namespace Cfg
     static constexpr float DISPLAY_PEAK_CAP     = 5.0f;
     static constexpr int   ANALYZE_INTERVAL     = 1024;
 
+    // 動的 dB（bufwav3 のみ）:
+    //   1) 処理済み PCM を analysisBuf へコピー
+    //   2) コピーした窓でピーク [dBFS] を計測
+    //   3) 窓が小さいほど底上げ（最大レベル帯だけゲイン 0）
+    //   4) そのバッファで Goertzel → 以降は piano roll3 と同じ
+    static constexpr float BUFWAV3_TARGET_PEAK_DB = -11.0f;
+    static constexpr float BUFWAV3_GAIN_DB_MAX    = 32.0f;
+    static constexpr float BUFWAV3_GAIN_ZERO_DB   = -9.0f;
+    static constexpr float BUFWAV3_PEAK_FLOOR_DB  = -60.0f;
+
+    static float PeakDbFs(const double* samples, int n)
+    {
+        if (!samples || n <= 0) return BUFWAV3_PEAK_FLOOR_DB;
+        double peak = 0.0;
+        double sumSq = 0.0;
+        for (int i = 0; i < n; ++i) {
+            const double a = fabs(samples[i]);
+            if (a > peak) peak = a;
+            sumSq += a * a;
+        }
+        const double rms = sqrt(sumSq / (double)n);
+        double level = peak;
+        if (rms * 4.0 > level) level = rms * 4.0;
+        if (level < 1e-9) return BUFWAV3_PEAK_FLOOR_DB;
+        return (float)(20.0 * log10(level));
+    }
+
+    static float PeakDbFsWindows(const double* winLow, int nLow,
+        const double* winBass, int nBass)
+    {
+        float db = PeakDbFs(winLow, nLow);
+        if (winBass && nBass > 0) {
+            const float dbB = PeakDbFs(winBass, nBass);
+            if (dbB > db) db = dbB;
+        }
+        return db;
+    }
+
+    static float QuieterHalfPeakDbFs(const double* samples, int n)
+    {
+        if (!samples || n < 512) return PeakDbFs(samples, n);
+        const int half = n / 2;
+        const float db0 = PeakDbFs(samples, half);
+        const float db1 = PeakDbFs(samples + half, n - half);
+        return (db0 < db1) ? db0 : db1;
+    }
+
+    static float Bufwav3LevelDbForDynamics(const double* winLow, int nLow,
+        const double* winBass, int nBass)
+    {
+        const float peakFull = PeakDbFsWindows(winLow, nLow, winBass, nBass);
+        float peakQuiet = QuieterHalfPeakDbFs(winLow, nLow);
+        if (winBass && nBass > 0) {
+            const float dbB = QuieterHalfPeakDbFs(winBass, nBass);
+            if (dbB < peakQuiet) peakQuiet = dbB;
+        }
+        return (peakQuiet < peakFull) ? peakQuiet : peakFull;
+    }
+
+    static float MakeupGainDbForBufwav3(float peakDbFs)
+    {
+        if (peakDbFs >= BUFWAV3_GAIN_ZERO_DB) return 0.0f;
+        float g = BUFWAV3_TARGET_PEAK_DB - peakDbFs;
+        if (g > BUFWAV3_GAIN_DB_MAX) g = BUFWAV3_GAIN_DB_MAX;
+        if (g < 0.0f) g = 0.0f;
+        return g;
+    }
+
+    // NormalizeDisplayPeak のあとでも効く（相対ピック閾値のみ変更）
+    static float PickThreshScaleFromLevelDb(float levelDb)
+    {
+        if (levelDb < -32.0f) return 0.58f;
+        if (levelDb < -26.0f) return 0.68f;
+        if (levelDb < -22.0f) return 0.79f;
+        if (levelDb < -18.0f) return 0.89f;
+        if (levelDb < -14.0f) return 0.97f;
+        if (levelDb < -11.0f) return 1.03f;
+        return 1.05f;
+    }
+
+    static void ApplyGainDbInPlace(double* samples, int n, float gainDb)
+    {
+        if (!samples || n <= 0 || gainDb <= 0.001f) return;
+        const double g = pow(10.0, (double)gainDb / 20.0);
+        for (int i = 0; i < n; ++i) {
+            double v = samples[i] * g;
+            if (v > 1.0) v = 1.0;
+            else if (v < -1.0) v = -1.0;
+            samples[i] = v;
+        }
+    }
+
     static double ScaleGoertzelAmpD(double rawAmp, int keyIndex)
     {
         if (rawAmp <= 0.00005) return 0.0;
@@ -80,6 +172,57 @@ namespace Cfg
         return f;
     }
 
+    // 基音優先（リバーブ混じりでも基音を残す）: 明確な倍音だけ落とす
+    static void RefineHarmonicPicksInBand(const float* st, bool* active,
+        int bandStart, int bandEnd)
+    {
+        if (!st || !active || bandStart >= bandEnd) return;
+
+        float bandMax = 0.0f;
+        for (int i = bandStart; i < bandEnd; ++i)
+            if (st[i] > bandMax) bandMax = st[i];
+        if (bandMax < 1e-6f) return;
+
+        const float minLo = bandMax * 0.10f;
+        static const int kUp[] = { 12, 19, 24 };
+
+        for (int lo = bandStart; lo < bandEnd; ++lo) {
+            if (!active[lo]) continue;
+            const float sLo = st[lo];
+            if (sLo < minLo) continue;
+            for (int d : kUp) {
+                const int hi = lo + d;
+                if (hi >= bandEnd || !active[hi]) continue;
+                if (st[hi] <= sLo * 1.28f)
+                    active[hi] = false;
+            }
+        }
+
+        for (int i = bandEnd - 1; i >= bandStart; --i) {
+            if (!active[i]) continue;
+            for (int d : kUp) {
+                const int lo = i - d;
+                if (lo < bandStart || !active[lo]) continue;
+                if (st[lo] < minLo) continue;
+                if (st[i] <= st[lo] * 1.15f)
+                    active[i] = false;
+            }
+        }
+
+        for (int lo = bandStart; lo < bandEnd; ++lo) {
+            const float sLo = st[lo];
+            if (sLo < minLo) continue;
+            for (int d : kUp) {
+                const int hi = lo + d;
+                if (hi >= bandEnd || !active[hi] || active[lo]) continue;
+                if (sLo >= st[hi] * 0.52f) {
+                    active[hi] = false;
+                    active[lo] = true;
+                }
+            }
+        }
+    }
+
     static void ApplyBandFundamentalPick(const float* st, bool* picked,
         int bandStart, int bandEnd, float relThresh, int maxNotes)
     {
@@ -89,7 +232,7 @@ namespace Cfg
         memset(bandPick, 0, sizeof(bandPick));
         PickFundamentalNotesToBand(st, bandPick, 88,
             bandStart, bandEnd, maxNotes, relThresh);
-        SuppressSubharmonicPicksInBand(st, bandPick, 88, bandStart, bandEnd);
+        RefineHarmonicPicksInBand(st, bandPick, bandStart, bandEnd);
         RefineToLocalPeaksInBand(st, bandPick, 88, bandStart, bandEnd, 1);
         PruneBandPicks(st, bandPick, bandStart, bandEnd,
             maxNotes, PRUNE_BAND_RATIO, PRUNE_TOP_RATIO);
@@ -122,7 +265,11 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     memset(m_strengthDipFrames, 0, sizeof(m_strengthDipFrames));
     memset(m_bandMask, 0, sizeof(m_bandMask));
     memset(m_laneStrength, 0, sizeof(m_laneStrength));
-
+    for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
+        m_chMeterDb[i] = -60.0f;
+        m_chMeterFill[i] = 0.0f;
+        m_chMeterAutoPeak[i] = 0.02f;
+    }
     m_history.resize(MAX_HISTORY);
     for (auto& f : m_history) {
         memset(f.active, 0, sizeof(f.active));
@@ -147,6 +294,13 @@ void CPianoRoll::ResetPlaybackState()
     m_samplesSinceAnalyze = 0;
     m_playbackDelaySamples = 0;
     m_lastAnalyzeTick = 0;
+    m_bufwav3LevelDb = -60.0f;
+    m_chMeterCount = 0;
+    for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
+        m_chMeterDb[i] = -60.0f;
+        m_chMeterFill[i] = 0.0f;
+        m_chMeterAutoPeak[i] = 0.02f;
+    }
     m_historyDirty = true;
     memset(m_activeKeys, 0, sizeof(m_activeKeys));
     memset(m_noteStrength, 0, sizeof(m_noteStrength));
@@ -196,6 +350,9 @@ BOOL CPianoRoll::OnInitDialog()
         L"Rolka pianina", L"Piyano rulosu"));
 
     ModifyStyle(WS_MINIMIZEBOX | WS_MAXIMIZEBOX, 0);
+    SetIcon(nullptr, TRUE);
+    SetIcon(nullptr, FALSE);
+    ModifyStyleEx(0, WS_EX_DLGMODALFRAME);
 
     if (savedata.pianorollx != -1)
         SetWindowPos(&CWnd::wndTop,
@@ -354,7 +511,7 @@ void CPianoRoll::FeedPCM(const void* pData, int frames,
 
 void CPianoRoll::AnalyzePlayCursorMono(const double* mono, int frameCount, int sampleRate)
 {
-    if (!m_feedEnabled || !mono || frameCount < WIN_LOW || sampleRate < 8000) return;
+    if (!mono || frameCount < WIN_LOW || sampleRate < 8000) return;
 
     const DWORD now = GetTickCount();
     if (m_lastAnalyzeTick != 0 && (now - m_lastAnalyzeTick) < ANALYZE_MIN_MS)
@@ -372,6 +529,49 @@ void CPianoRoll::AnalyzePlayCursorMono(const double* mono, int frameCount, int s
     LeaveCriticalSection(&m_cs);
 }
 
+void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
+{
+    static constexpr float kPeakDecay = 0.994f;
+    static constexpr float kFillAttack = 0.55f;
+    static constexpr float kFillRelease = 0.18f;
+
+    EnterCriticalSection(&m_cs);
+    m_chMeterCount = channelCount;
+    if (m_chMeterCount < 0) m_chMeterCount = 0;
+    if (m_chMeterCount > PIANO_METER_CH_MAX) m_chMeterCount = PIANO_METER_CH_MAX;
+    for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
+        if (i < m_chMeterCount && dbPerChannel) {
+            const float in = dbPerChannel[i];
+            m_chMeterDb[i] = in;
+            float lin = (in <= -59.0f) ? 0.0f : powf(10.0f, in / 20.0f);
+
+            float& peak = m_chMeterAutoPeak[i];
+            if (lin > peak)
+                peak = lin;
+            else
+                peak = peak * kPeakDecay + lin * (1.0f - kPeakDecay);
+            if (peak < 0.002f) peak = 0.002f;
+
+            float norm = lin / peak;
+            if (norm < 0.0f) norm = 0.0f;
+            if (norm > 1.0f) norm = 1.0f;
+
+            float& fill = m_chMeterFill[i];
+            const float rate = (norm >= fill) ? kFillAttack : kFillRelease;
+            fill += (norm - fill) * rate;
+        }
+        else {
+            m_chMeterDb[i] = -60.0f;
+            m_chMeterFill[i] *= 0.85f;
+            m_chMeterAutoPeak[i] = 0.02f;
+        }
+    }
+    LeaveCriticalSection(&m_cs);
+    m_historyDirty = true;
+    if (GetSafeHwnd())
+        Invalidate(FALSE);
+}
+
 void CPianoRoll::RunGoertzelFromBuffer(const double* winLow8192,
     const double* winBass, int bassWinLen)
 {
@@ -380,15 +580,26 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow8192,
     for (int i = 0; i < WIN_LOW; ++i)
         m_analysisBuf[i] = winLow8192[i];
 
-    if (winBass && bassWinLen >= WIN_BASS) {
+    const bool hasBass = (winBass && bassWinLen >= WIN_BASS);
+    if (hasBass) {
         for (int i = 0; i < WIN_BASS; ++i)
             m_bassAnalysisBuf[i] = winBass[i];
     }
 
+    const float levelDb = Cfg::Bufwav3LevelDbForDynamics(
+        m_analysisBuf.data(), WIN_LOW,
+        hasBass ? m_bassAnalysisBuf.data() : nullptr,
+        hasBass ? WIN_BASS : 0);
+    m_bufwav3LevelDb = levelDb;
+    const float gainDb = Cfg::MakeupGainDbForBufwav3(levelDb);
+    Cfg::ApplyGainDbInPlace(m_analysisBuf.data(), WIN_LOW, gainDb);
+    if (hasBass)
+        Cfg::ApplyGainDbInPlace(m_bassAnalysisBuf.data(), WIN_BASS, gainDb);
+
     for (int i = 0; i < KEY_COUNT; ++i)
     {
         double raw = 0.0;
-        if (i < Cfg::BAND_BASS_END && winBass && bassWinLen >= WIN_BASS) {
+        if (i < Cfg::BAND_BASS_END && hasBass) {
             raw = GoertzelMagnitude(
                 m_bassAnalysisBuf.data(), WIN_BASS, m_goertzelCoeffs[i], m_hannBass.data());
         }
@@ -430,6 +641,12 @@ void CPianoRoll::UpdateNoteStates()
     NormalizeDisplayPeak(pickStrength, KEY_COUNT, DISPLAY_PEAK_CAP);
     NormalizeDisplayPeak(trackStrength, KEY_COUNT, DISPLAY_PEAK_CAP);
 
+    const float pickScale = PickThreshScaleFromLevelDb(m_bufwav3LevelDb);
+    const float bassSil = BAND_SILENCE_BASS * pickScale;
+    const float midSil = BAND_SILENCE_MID * pickScale;
+    const float treSil = BAND_SILENCE_TRE * pickScale;
+    const float absSil = SILENCE_ABS * pickScale;
+
     float maxS = 0.0f;
     for (int i = 0; i < KEY_COUNT; ++i)
         if (pickStrength[i] > maxS) maxS = pickStrength[i];
@@ -438,11 +655,11 @@ void CPianoRoll::UpdateNoteStates()
     const float midMax = BandMaxStrength(pickStrength, BAND_BASS_END, BAND_MID_END);
     const float treMax = BandMaxStrength(pickStrength, BAND_MID_END, KEY_COUNT);
     const bool anyBandLive =
-        bassMax >= BAND_SILENCE_BASS ||
-        midMax >= BAND_SILENCE_MID ||
-        treMax >= BAND_SILENCE_TRE;
+        bassMax >= bassSil ||
+        midMax >= midSil ||
+        treMax >= treSil;
 
-    if (!anyBandLive || maxS < SILENCE_ABS) {
+    if (!anyBandLive || maxS < absSil) {
         for (int i = 0; i < KEY_COUNT; ++i) {
             m_activeKeys[i] = false;
             m_noteStrength[i] = 0.0f;
@@ -468,11 +685,11 @@ void CPianoRoll::UpdateNoteStates()
     memset(picked, 0, sizeof(picked));
 
     ApplyBandFundamentalPick(pickStrength, picked, 0, BAND_BASS_END,
-        BASS_PICK_THRESH, BASS_PICK_POOL);
+        BASS_PICK_THRESH * pickScale, BASS_PICK_POOL);
     ApplyBandFundamentalPick(pickStrength, picked, BAND_BASS_END, BAND_MID_END,
-        MID_PICK_THRESH, PICK_POOL_MAX);
+        MID_PICK_THRESH * pickScale, PICK_POOL_MAX);
     ApplyBandFundamentalPick(pickStrength, picked, BAND_MID_END, KEY_COUNT,
-        TRE_PICK_THRESH, PICK_POOL_MAX);
+        TRE_PICK_THRESH * pickScale, PICK_POOL_MAX);
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         bassPick[i] = midPick[i] = treblePick[i] = false;
@@ -771,6 +988,67 @@ namespace
     }
 }
 
+void CPianoRoll::DrawChannelDbBars(CDC& dc, const CRect& rc, const float* chFill, int chCount) const
+{
+    if (!chFill || chCount <= 0 || rc.Width() < 4 || rc.Height() < 2)
+        return;
+
+    const int n = (chCount > PIANO_METER_CH_MAX) ? PIANO_METER_CH_MAX : chCount;
+    const int padX = 2;
+    const int padY = 1;
+    CRect inner(rc.left + padX, rc.top + padY, rc.right - padX, rc.bottom - padY);
+    if (inner.Width() < 4 || inner.Height() < 2) return;
+
+    dc.FillSolidRect(inner, RGB(100, 100, 106));
+
+    const int labelW = (n <= 2) ? min(14, inner.Width() / 4) : 0;
+    const int barLeft = inner.left + labelW;
+    const int barWMax = inner.right - barLeft;
+    if (barWMax < 2) return;
+
+    for (int c = 0; c < n; ++c) {
+        CRect row(inner.left, inner.top, inner.right, inner.bottom);
+        row.top = inner.top + (inner.Height() * c) / n;
+        row.bottom = inner.top + (inner.Height() * (c + 1)) / n;
+        if (c > 0) row.top += 1;
+        if (c + 1 < n) row.bottom -= 1;
+        if (row.bottom <= row.top)
+            row.bottom = row.top + 1;
+
+        CRect track(barLeft, row.top, inner.right, row.bottom);
+        dc.FillSolidRect(track, RGB(62, 62, 68));
+
+        float fill = chFill[c];
+        if (fill < 0.0f) fill = 0.0f;
+        if (fill > 1.0f) fill = 1.0f;
+        int barW = (int)(barWMax * fill + 0.5f);
+        if (fill > 0.02f && barW < 2)
+            barW = 2;
+        if (barW > 0) {
+            COLORREF col = RGB(70, 175, 95);
+            if (n == 2 && c == 1) col = RGB(175, 120, 70);
+            else if (n > 2) col = RGB(90 + c * 12, 140, 180 - c * 8);
+            CRect bar(track.left, track.top, track.left + barW, track.bottom);
+            dc.FillSolidRect(bar, col);
+        }
+
+        if (labelW > 0 && row.Height() >= 4) {
+            CFont lblFont;
+            lblFont.CreateFont(
+                -max(7, min(11, row.Height() - 1)), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+            CFont* pOld = dc.SelectObject(&lblFont);
+            dc.SetBkMode(TRANSPARENT);
+            dc.SetTextColor(RGB(230, 230, 235));
+            CRect lr(row.left, row.top, barLeft, row.bottom);
+            const wchar_t* tag = (n == 1) ? L"M" : ((c == 0) ? L"L" : L"R");
+            dc.DrawText(tag, -1, lr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            dc.SelectObject(pOld);
+        }
+    }
+}
+
 void CPianoRoll::OnPaint()
 {
     CPaintDC dc(this);
@@ -795,12 +1073,16 @@ void CPianoRoll::OnPaint()
     bool activesCopy[KEY_COUNT];
     uint8_t bandMaskCopy[KEY_COUNT];
     float laneStrengthCopy[KEY_COUNT][3];
+    float chFillCopy[PIANO_METER_CH_MAX];
+    int chCountCopy = 0;
     {
         EnterCriticalSection(&m_cs);
         histCopy = m_history;
         memcpy(activesCopy, m_activeKeys, sizeof(m_activeKeys));
         memcpy(bandMaskCopy, m_bandMask, sizeof(m_bandMask));
         memcpy(laneStrengthCopy, m_laneStrength, sizeof(m_laneStrength));
+        chCountCopy = m_chMeterCount;
+        memcpy(chFillCopy, m_chMeterFill, sizeof(chFillCopy));
         LeaveCriticalSection(&m_cs);
     }
 
@@ -911,6 +1193,12 @@ void CPianoRoll::OnPaint()
         memDC.MoveTo(0, rollH);
         memDC.LineTo(rect.Width(), rollH);
         memDC.SelectObject(pOldPen);
+    }
+
+    // グレー帯（オクターブ番号行）の背面に ch 別 dB バー（1本の帯・全幅）
+    if (chCountCopy > 0 && labelH >= 4) {
+        CRect meterStrip(2, rollH + 1, rect.Width() - 2, rollH + labelH + 1);
+        DrawChannelDbBars(memDC, meterStrip, chFillCopy, chCountCopy);
     }
 
     // 音名 (C～B) とオクターブ番号

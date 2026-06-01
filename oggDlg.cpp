@@ -257,6 +257,9 @@ LPDIRECTSOUNDNOTIFY dsnf2;
 UINT HandleNotifications(LPVOID lpvoid);
 UINT WASAPIHandleNotifications(LPVOID lpvoid);
 void HandleNotifications_export();  // WAV出力専用（DirectSoundなし、ファイル書き込みのみ）
+void SignalPlaybackNotifyThreadStop();
+void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs = 15000);
+void BeginPlaybackNotifyThread();
 ULONG WAVDALen;
 UINT WAVDAStartLen;
 
@@ -8881,7 +8884,7 @@ void COggDlg::play()
 			if (sflg == FALSE) break;
 			DoEvent();
 		}
-		AfxBeginThread((AFX_THREADPROC)HandleNotifications, NULL, THREAD_PRIORITY_TIME_CRITICAL);
+		BeginPlaybackNotifyThread();
 	}
 	endflg = 0;
 	SetTimer(9000, 10, NULL);
@@ -14341,7 +14344,7 @@ void COggDlg::stop()
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
 	if ((ogg || adbuf2 || mod || wav || mode == 999 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6) && mode != -2)
 	{
-		thn1 = TRUE;
+		SignalPlaybackNotifyThreadStop();
 		if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
 		if (ps == 1) {
 			OnPause();
@@ -14379,15 +14382,7 @@ void COggDlg::stop()
 		CCriticalLock _ccl(&cs);
 		stf = 1;
 		_ccl.Leave();
-		timer.SetEvent();
-		if (thn == FALSE) {
-			for (;;) {
-				if (thn == TRUE) break;
-				DoEvent();
-				Sleep(1);
-			}
-		}
-
+		WaitForPlaybackNotifyThreadExit();
 
 		Closeds();
 		//		FreeOutputBuffer();
@@ -14455,8 +14450,7 @@ void COggDlg::stop1()
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
 	if (ogg != NULL || adbuf2 != NULL || wav || mode == 999 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == -3)
 	{
-		thn1 = TRUE;
-		timer.SetEvent();
+		SignalPlaybackNotifyThreadStop();
 		if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
 		if (ps == 1) {
 			OnPause();
@@ -14476,12 +14470,7 @@ void COggDlg::stop1()
 		CCriticalLock _ccl(&cs);
 		stf = 1;
 		_ccl.Leave();
-		if (thn == FALSE)
-			for (;;) {
-				if (thn == TRUE) break;
-				DoEvent();
-				Sleep(1);  // ポンプ専用ループを避け、再生スレッドへCPUを譲る
-			}
+		WaitForPlaybackNotifyThreadExit();
 		Closeds();
 		//		FreeOutputBuffer();
 		plf = 0;
@@ -18250,8 +18239,24 @@ void COggDlg::OnOK()
 	CCustomDialog::OnOK();
 }
 extern IMediaEvent* pMediaEvent;
+static volatile LONG s_onRestartBusy = 0;
+static volatile LONG s_onRestartPending = 0;
+
 void COggDlg::OnRestart()
 {
+	if (InterlockedCompareExchange(&s_onRestartBusy, 1, 0) != 0) {
+		InterlockedExchange(&s_onRestartPending, 1);
+		return;
+	}
+	struct RestartBusyGuard {
+		COggDlg* dlg;
+		~RestartBusyGuard() {
+			InterlockedExchange(&s_onRestartBusy, 0);
+			if (InterlockedExchange(&s_onRestartPending, 0) != 0 && dlg && ::IsWindow(dlg->GetSafeHwnd()))
+				dlg->PostMessage(WM_APP + 2, 0, 0);
+		}
+	} restartBusyGuard{ this };
+
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	CString ti;
 	stop();
@@ -18628,13 +18633,20 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	if (prBytes <= 0 || TOTAL_BUF_BYTES <= prBytes) return;
 
 	ULONG playCur = PlayCursor2;
+	ULONG writeCur = WriteCursor;
 	HRESULT rett = E_FAIL;
-	if (m_dsb) rett = m_dsb->GetCurrentPosition(&playCur, &WriteCursor);
-	if (rett == DS_OK) PlayCursor2 = playCur;
-	else playCur = PlayCursor2;
+	if (m_dsb) rett = m_dsb->GetCurrentPosition(&playCur, &writeCur);
+	if (rett == DS_OK) {
+		PlayCursor2 = playCur;
+		WriteCursor = writeCur;
+	}
+	else {
+		playCur = PlayCursor2;
+		writeCur = WriteCursor;
+	}
 
 	const ULONG ringBytes = Bufwav3RingBytes();
-	long prPos = SpeanaAnalysisReadPos(playCur, prBytes, bytesPerFrame, (int)ringBytes, sampleRate);
+	long prPos = PianoAnalysisReadPos(playCur, writeCur, prBytes, bytesPerFrame, (int)ringBytes, sampleRate, 45);
 
 	static std::vector<char> prRaw;
 	static std::vector<double> prMono;
@@ -18668,7 +18680,23 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 		return 0.0;
 		};
 
+	const int meterCh = (channels < 1) ? 1 : ((channels > CPianoRoll::PIANO_METER_CH_MAX) ? CPianoRoll::PIANO_METER_CH_MAX : channels);
+	// メーターは直近のみ（16384 全体だと常にピーク張り付きで動かない）
+	static const int kMeterFrames = 2048;
+	const int meterStart = (prFrames > kMeterFrames) ? (prFrames - kMeterFrames) : 0;
+	const int meterN = prFrames - meterStart;
+	std::vector<double> chPeak((size_t)meterCh, 0.0);
+	std::vector<double> chSumSq((size_t)meterCh, 0.0);
+
 	for (int i = 0; i < prFrames; ++i) {
+		if (i >= meterStart) {
+			for (int ch = 0; ch < meterCh; ++ch) {
+				const double a = fabs(GetSampleValue(i, ch));
+				if (a > chPeak[ch]) chPeak[ch] = a;
+				chSumSq[ch] += a * a;
+			}
+		}
+
 		double smpL = 0.0, smpR = 0.0;
 		if (channels <= 2) {
 			smpL = GetSampleValue(i, 0);
@@ -18709,6 +18737,17 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 		prMono[i] = (smpL + smpR) * 0.5;
 	}
 
+	float chDb[CPianoRoll::PIANO_METER_CH_MAX];
+	for (int ch = 0; ch < meterCh; ++ch) {
+		double level = chPeak[ch];
+		if (meterN > 0) {
+			const double rms = sqrt(chSumSq[ch] / (double)meterN);
+			if (rms * 4.0 > level) level = rms * 4.0;
+		}
+		if (level < 1e-9) chDb[ch] = -60.0f;
+		else chDb[ch] = (float)(20.0 * log10(level));
+	}
+	m_PianoRollDlg.SetChannelMeterDb(chDb, meterCh);
 	m_PianoRollDlg.AnalyzePlayCursorMono(prMono.data(), prFrames, (int)(sampleRate + 0.5));
 }
 

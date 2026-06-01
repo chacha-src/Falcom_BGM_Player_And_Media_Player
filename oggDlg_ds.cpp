@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "NoteFundamentalPick.h"
 #include "ogg.h"
 #include "oggDlg.h"
@@ -306,6 +306,82 @@ void equaliser(void* data, int len, BOOL reset = FALSE);
 std::mutex cl2;  // OnHScroll(シーク)とHandleNotifications(再生)の排他用。一本で統一。
 BOOL syoriflg;
 extern int readme;
+
+// 再生通知スレッド: thn==TRUE は「ループが終了シグナルを出した」だけでスレッド本体はまだ動くことがある。
+// stop/stop1 から Closeds() やデコーダ解放の前に必ず Join する。
+static CWinThread* s_playNotifyThread = nullptr;
+static CCriticalSection s_playNotifyThreadCs;
+
+void SignalPlaybackNotifyThreadStop()
+{
+	thn1 = TRUE;
+	syukai = 2;
+	// OnHScroll が syukai2==1 を待っているとき stop で syukai=2 にすると
+	// 再生スレッドは syukai2 を立てずに終了するため、ここで必ず解放する。
+	syukai2 = 1;
+	if (og)
+		og->timer.SetEvent();
+}
+
+void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
+{
+	HANDLE hThread = NULL;
+	{
+		CSingleLock lk(&s_playNotifyThreadCs, TRUE);
+		if (s_playNotifyThread && s_playNotifyThread->m_hThread)
+			hThread = s_playNotifyThread->m_hThread;
+	}
+	// スレッド未起動なら thn 待ちで 15 秒ブロックしない（固まりの主因の一つ）
+	if (!hThread) {
+		thn = TRUE;
+		thn1 = FALSE;
+		syukai = 0;
+		syukai2 = 1;
+		return;
+	}
+
+	DWORD elapsed = 0;
+	const DWORD pollMs = 10;
+	for (;;) {
+		const DWORD w = WaitForSingleObject(hThread, pollMs);
+		if (w == WAIT_OBJECT_0)
+			break;
+		if (og)
+			og->timer.SetEvent();
+		DoEvent();
+		elapsed += pollMs;
+		if (thn == TRUE && elapsed >= 50)
+			break;
+		if (elapsed >= timeoutMs)
+			break;
+	}
+	// thn が立っていてもスレッドハンドルが生きていれば最後まで Join
+	for (int i = 0; i < 200; ++i) {
+		if (WaitForSingleObject(hThread, 0) == WAIT_OBJECT_0)
+			break;
+		if (og)
+			og->timer.SetEvent();
+		DoEvent();
+		Sleep(1);
+	}
+	{
+		CSingleLock lk(&s_playNotifyThreadCs, TRUE);
+		s_playNotifyThread = nullptr;
+	}
+	thn = TRUE;
+	thn1 = FALSE;
+	syukai = 0;
+	syukai2 = 1;
+}
+
+void BeginPlaybackNotifyThread()
+{
+	WaitForPlaybackNotifyThreadExit(15000);
+	CWinThread* t = AfxBeginThread((AFX_THREADPROC)HandleNotifications, NULL, THREAD_PRIORITY_TIME_CRITICAL);
+	CSingleLock lk(&s_playNotifyThreadCs, TRUE);
+	s_playNotifyThread = t;
+}
+
 UINT HandleNotifications(LPVOID)
 {
 	readme = 0;
@@ -333,9 +409,10 @@ UINT HandleNotifications(LPVOID)
 	auto stopPlaybackAndExit = [&]() -> UINT {
 		playf = 1;
 		thn = FALSE;
-		if (m_dsb) {
-			m_dsb->SetVolume(DSBVOLUME_MIN);
-			m_dsb->Stop();
+		LPDIRECTSOUNDBUFFER8 dsbStop = m_dsb;
+		if (dsbStop) {
+			dsbStop->SetVolume(DSBVOLUME_MIN);
+			dsbStop->Stop();
 		}
 		playf = 0;
 		thn = TRUE;
@@ -347,15 +424,17 @@ UINT HandleNotifications(LPVOID)
 	for (;;) {
 		// Wait 中は cl2 を取らない（OnHScroll 等がシークできる）
 
-		if (syukai == 2) return stopPlaybackAndExit();
+		if (syukai == 2 || thn1) return stopPlaybackAndExit();
 		if (syukai == 1) { syukai2 = 1; Sleep(1); continue; }
 
-		// イベント待機
-		::WaitForMultipleObjects(1, ev, FALSE, savedata.ms);
+		// イベント待機（停止要求が来たら長く寝ない）
+		const DWORD waitMs = thn1 ? 10u : (DWORD)savedata.ms;
+		::WaitForMultipleObjects(1, ev, FALSE, waitMs);
 
 		// FLAC等の重いシーク中（sek4）はロックせずに待機
 		while (sek4) {
-			::WaitForMultipleObjects(1, ev, FALSE, savedata.ms);
+			if (syukai == 2 || thn1) return stopPlaybackAndExit();
+			::WaitForMultipleObjects(1, ev, FALSE, thn1 ? 10u : (DWORD)savedata.ms);
 		}
 
 		if (sek == 1) {
@@ -366,8 +445,12 @@ UINT HandleNotifications(LPVOID)
 		if (thn1) return stopPlaybackAndExit();
 		if (ps == 1) continue;
 
+		LPDIRECTSOUNDBUFFER8 dsb = m_dsb;
+		if (!dsb)
+			continue;
+
 		// 書き込み位置の計算
-		if (m_dsb) m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
+		dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
 		int len1 = (int)WriteCursor - (int)oldw;
 		int len2 = 0;
 
@@ -399,16 +482,19 @@ UINT HandleNotifications(LPVOID)
 			else
 				ZeroMemory(bufwav3 + oldw + readme, len1 - readme);
 		}
-		// DirectSoundバッファへの転送
-		if (m_dsb) {
-				hr = m_dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, &len3, (LPVOID*)&pdsb2, &len4, 0);
+		// DirectSoundバッファへの転送（UI 側 Closeds で m_dsb が NULL になるのを避けるためローカル参照）
+		if (thn1)
+			return stopPlaybackAndExit();
+		dsb = m_dsb;
+		if (dsb) {
+			hr = dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, &len3, (LPVOID*)&pdsb2, &len4, 0);
 			if (hr == DS_OK) {
 				thn = FALSE;
 				memcpy(pdsb1, bufwav3 + oldw, len3);
 				if (fade2) ZeroMemory(pdsb1, len3);
 				if (len4 != 0) memcpy(pdsb2, bufwav3, len4);
 				if (len4 != 0 && fade2) ZeroMemory(pdsb2, len4);
-				m_dsb->Unlock(pdsb1, len3, pdsb2, len4);
+				dsb->Unlock(pdsb1, len3, pdsb2, len4);
 			}
 		}
 		readme = 0;
@@ -423,9 +509,10 @@ UINT HandleNotifications(LPVOID)
 		if (fade1 && muon == 0) {
 			playf = 1; thn = FALSE;
 			if (!(mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999)) Sleep(800);
-			if (m_dsb) {
-				m_dsb->SetVolume(DSBVOLUME_MIN);
-				m_dsb->Stop();
+			LPDIRECTSOUNDBUFFER8 dsbFade = m_dsb;
+			if (dsbFade) {
+				dsbFade->SetVolume(DSBVOLUME_MIN);
+				dsbFade->Stop();
 			}
 			og->OnPause();
 			og->m_ps.EnableWindow(FALSE);
