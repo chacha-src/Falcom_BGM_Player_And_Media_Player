@@ -12,8 +12,6 @@
 #include <algorithm>
 
 extern save savedata;
-void COggDlg_SyncPianoRollFast();
-
 IMPLEMENT_DYNAMIC(CPianoRoll, CCustomDialogEx)
 
 namespace Cfg
@@ -347,7 +345,6 @@ BOOL CPianoRoll::OnInitDialog()
 
     EnsureAnalysisTables(m_inputSampleRate);
     SetTimer(1, 50, nullptr);
-    SetTimer(2, 6, nullptr);
     m_historyDirty = true;
     return TRUE;
 }
@@ -1124,8 +1121,6 @@ void CPianoRoll::OnPaint()
 
 void CPianoRoll::OnTimer(UINT_PTR nIDEvent)
 {
-    if (nIDEvent == 2)
-        COggDlg_SyncPianoRollFast();
     if (nIDEvent == 1) {
         if (m_historyDirty) Invalidate(FALSE);
         CRect rc; GetWindowRect(&rc);
@@ -1148,7 +1143,6 @@ void CPianoRoll::OnMove(int x, int y) { CCustomDialogEx::OnMove(x, y); }
 void CPianoRoll::OnClose()
 {
     m_feedEnabled = false;
-    KillTimer(2);
     savedata.pianorollwindow = 0;
     DestroyWindow();
 }

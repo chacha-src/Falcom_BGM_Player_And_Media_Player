@@ -18659,7 +18659,14 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	}
 
 	const ULONG ringBytes = Bufwav3RingBytes();
-	long prPos = PianoAnalysisReadPos(playCur, writeCur, prBytes, bytesPerFrame, (int)ringBytes, sampleRate, 45);
+	(void)writeCur;
+	// レイテンシクランプは windowBytes に依存する。16384 窓だと Speana(8192) より
+	// 手前を読んで表示が早くなるため、Speana と同じ窓長で readPos を決める。
+	int speanaFrames = 4096;
+	if (savedata.speanamode == 1 && (savedata.speananum == 0 || savedata.speananum == 1))
+		speanaFrames = 8192;
+	const int speanaBytes = speanaFrames * bytesPerFrame;
+	long prPos = PianoRollWideReadPos(playCur, prBytes, speanaBytes, bytesPerFrame, (int)ringBytes, sampleRate, 0);
 
 	static std::vector<char> prRaw;
 	static std::vector<double> prMono;

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "mp3.h"
 #include "AudioUpscaler.h"
 
@@ -53,13 +53,22 @@ inline long SpeanaAnalysisReadPos(ULONG playCursor, int windowBytes, int bytesPe
 	return readPos;
 }
 
-// ピアノロール: DS キュー（未再生）分を引いてから解析（先読みで表示が早くなるのを防ぐ）
-inline long PianoAnalysisReadPos(ULONG playCursor, ULONG writeCursor, int windowBytes, int bytesPerFrame, int ringBytes, double sampleRate, int extraLatencyMs = 45)
+// ピアノロール: スペアナと同じ readPos（writeCursor / queued 補正は未使用）
+inline long PianoAnalysisReadPos(ULONG playCursor, ULONG /*writeCursor*/, int windowBytes, int bytesPerFrame, int ringBytes, double sampleRate, int extraLatencyMs = 0)
 {
-	if (ringBytes <= 0 || bytesPerFrame <= 0) return 0;
-	const long queued = (long)DsQueuedBytes(playCursor, writeCursor, (ULONG)ringBytes);
-	long heardCur = (long)playCursor - queued;
-	while (heardCur < 0) heardCur += ringBytes;
-	while (heardCur >= ringBytes) heardCur -= ringBytes;
-	return SpeanaAnalysisReadPos((ULONG)heardCur, windowBytes, bytesPerFrame, ringBytes, sampleRate, extraLatencyMs);
+	return SpeanaAnalysisReadPos(playCursor, windowBytes, bytesPerFrame, ringBytes, sampleRate, extraLatencyMs);
+}
+
+// 解析窓がスペアナより長いとき、末尾（再生同期点）を Speana と揃えて開始位置を返す
+inline long PianoRollWideReadPos(ULONG playCursor, int pianoWindowBytes, int speanaWindowBytes, int bytesPerFrame, int ringBytes, double sampleRate, int extraLatencyMs = 0)
+{
+	if (pianoWindowBytes <= speanaWindowBytes)
+		return SpeanaAnalysisReadPos(playCursor, pianoWindowBytes, bytesPerFrame, ringBytes, sampleRate, extraLatencyMs);
+	const long speanaStart = SpeanaAnalysisReadPos(playCursor, speanaWindowBytes, bytesPerFrame, ringBytes, sampleRate, extraLatencyMs);
+	long pianoStart = speanaStart - (pianoWindowBytes - speanaWindowBytes);
+	while (pianoStart < 0) pianoStart += ringBytes;
+	while (pianoStart >= ringBytes) pianoStart -= ringBytes;
+	if (bytesPerFrame > 0)
+		pianoStart -= (pianoStart % bytesPerFrame);
+	return pianoStart;
 }
