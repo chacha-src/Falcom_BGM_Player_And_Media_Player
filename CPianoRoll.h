@@ -56,6 +56,7 @@ private:
     static constexpr int   WIN_LOW        = 8192; // mode0_Note 低域窓長
     static constexpr int   WIN_BASS       = 16384; // 低音帯 Goertzel 窓
     static constexpr int   WIN_HIGH       = 4096; // mode0_Note 高域窓長
+    static constexpr int   WIN_ONSET      = 1024; // 短い音符用（64分@180≈21ms）
     static constexpr int   LOW_KEY_SPLIT  = 50;   // bin<50 → 8192点 (スペアナ mode0 同様)
     static constexpr int   DETECT_KEYS    = 108;  // スペアナ mode0 同系
     static constexpr int   KEY_OFFSET       = 9;    // display[i] <- detect[i+9] (A0=MIDI21)
@@ -84,8 +85,13 @@ private:
 
     std::vector<double> m_goertzelCoeffs;
     std::vector<double> m_hannLow;
+    std::vector<double> m_hannOnset;
     std::vector<double> m_hannBass;
     std::vector<double> m_blackmanHigh;
+    float m_prevRawStrengths[KEY_COUNT];
+    float m_onsetStrengths[KEY_COUNT];
+    float m_prevOnsetStrengths[KEY_COUNT];
+    bool  m_analysisHasBass = false;
     std::vector<double> m_analysisBuf;
     std::vector<double> m_bassAnalysisBuf;
 
@@ -98,7 +104,7 @@ private:
     float m_chMeterFill[PIANO_METER_CH_MAX];
     float m_chMeterAutoPeak[PIANO_METER_CH_MAX];
     int   m_chMeterCount = 0;
-    static constexpr DWORD ANALYZE_MIN_MS = 24;
+    static constexpr DWORD ANALYZE_MIN_MS = 4;
 
     void EnsureAnalysisTables(int sampleRate);
     void RunGoertzelFromBuffer(const double* winLow8192, const double* winBass, int bassWinLen);

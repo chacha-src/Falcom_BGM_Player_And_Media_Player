@@ -49,6 +49,7 @@ public:
 	DWORD GetVol();
 	void Speana();
 	void SyncPianoRollFromPlayCursor();
+	void SyncPianoRollFast();
 	void TogglePianoRoll();
 	void FeedPianoRoll(const void* pData, int bytes);
 	void moji(CString s,int x,int y,COLORREF rgb);

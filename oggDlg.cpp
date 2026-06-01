@@ -18603,6 +18603,19 @@ inline void SpeanaDrawBar(CDC& dc, int x, int bar_w, int idx, int d)
 }
 } // namespace
 
+void COggDlg_SyncPianoRollFast()
+{
+	if (!og) return;
+	og->SyncPianoRollFast();
+}
+
+void COggDlg::SyncPianoRollFast()
+{
+	if (plf != 1 || !(wav || ogg)) return;
+	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd())) return;
+	SyncPianoRollFromPlayCursor();
+}
+
 void COggDlg::SyncPianoRollFromPlayCursor()
 {
 	if (playf == 0 || thn1) return;
