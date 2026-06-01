@@ -24,6 +24,9 @@
 
 また環境モデルのかかり方の度合いの変更できるため、かなり自由度が高くなっています。
 
+### ピアノロール機能
+簡易ピアノロールが実装されました。
+
 ![プレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git5.PNG)
 
 ## 対応ゲームタイトル
@@ -123,6 +126,9 @@ Global parameters such as **Sharpness**, **Low/High Balance**, **Sound Density**
 These operate independently of the environmental models.
 
 Additionally, the intensity of the environmental effects can be adjusted, offering a high degree of acoustic freedom.
+
+### Piano Roll Feature
+A simplified piano roll has been implemented.
 
 ![Player Screen](https://ppp.oohara.jp/img/ysedplay2_20260305e.PNG)
 
