@@ -1051,6 +1051,7 @@ protected:
 
     // savedata.aero==1 のとき DWM ぼかしを適用
     virtual void ApplyDwmBlur();
+    afx_msg void OnPaint();
     afx_msg void OnSize(UINT nType, int cx, int cy);
     afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
     afx_msg void OnCompositionChanged();
@@ -1120,6 +1121,7 @@ protected:
 
     // savedata.aero==1 のとき DWM ぼかしを適用
     virtual void ApplyDwmBlur();
+    afx_msg void OnPaint();
     afx_msg void OnSize(UINT nType, int cx, int cy);
     afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
     afx_msg void OnCompositionChanged();

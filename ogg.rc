@@ -835,7 +835,7 @@ BEGIN
     LTEXT           "環境のかかり具合",IDC_STATIC_EQ_ACOUSTIC,9,198,93,8
     CONTROL         "",IDC_SLIDER22,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,105,197,267,12
     LTEXT           "100",IDC_STATIC_eff,375,198,18,8
-    LTEXT           "Hyper DSP Equaliser 100 x 15 band",IDC_STATICf,3,2,216,40
+    LTEXT           "Hyper DSP Equaliser 100 x 15 band",IDC_STATICf,3,2,216,28
     LTEXT           "％",IDC_STATIC,368,151,8,8
     CONTROL         "",IDC_SLIDER23,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,378,43,16,106
     LTEXT           "100",IDC_STATIC_e15,381,151,13,8

@@ -360,6 +360,16 @@ void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int 
 {
     CCC_BlitChromaNoFlicker(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
 }
+
+static void CCC_BlitTransparentChroma(HDC hdcDest, int x, int y, int w, int h,
+    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
+{
+    if (w <= 0 || h <= 0) return;
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+        CCC_BlitChromaNoFlicker(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
+    else
+        CCC_TransparentBltClearDest(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
+}
 #endif
 // ============================================================================
 // アイコンを透明色を抜いて描画する関数
@@ -1850,7 +1860,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     if (m_strText.IsEmpty())
     {
         if (bTrans)
-            CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+            CCC_BlitTransparentChroma(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
         else
             dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
         memDC.SelectObject(ob);
@@ -1909,7 +1919,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     }
 
     if (bTrans)
-        CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+        CCC_BlitTransparentChroma(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     else
         dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
 
@@ -2554,7 +2564,7 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
     {
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
         DrawSlider(&mDC);
-        CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+        CCC_BlitTransparentChroma(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     }
     else
     {
@@ -3892,7 +3902,7 @@ static void CCC_CompositeTransparent(HWND hWnd, BOOL bAeroMode, CDC& destDC, con
     CBitmap* pOld = memDC.SelectObject(&bmp);
     memDC.FillSolidRect(0, 0, rect.Width(), rect.Height(), CCC_AERO_CHROMA_KEY);
     drawFn(memDC);
-    CCC_TransparentBltClearDest(destDC.GetSafeHdc(), rect.left, rect.top, rect.Width(), rect.Height(),
+    CCC_BlitTransparentChroma(destDC.GetSafeHdc(), rect.left, rect.top, rect.Width(), rect.Height(),
         memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     memDC.SelectObject(pOld);
 }
@@ -4486,6 +4496,7 @@ static void CCC_ReapplyOpaqueFixers(CWnd* pDlg, CTypedPtrList<CPtrList, CCustomO
 IMPLEMENT_DYNAMIC(CCustomBlurDialogBase, CCustomDialog)
 
 BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
+    ON_WM_PAINT()
     ON_WM_SIZE()
     ON_WM_WINDOWPOSCHANGED()
     ON_WM_DWMCOMPOSITIONCHANGED()
@@ -4554,6 +4565,19 @@ void CCustomBlurDialogBase::ApplyDwmBlur()
 #else
     m_bBlurApplied = FALSE;
 #endif
+}
+
+void CCustomBlurDialogBase::OnPaint()
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (m_bAeroEnabled && CCC_IsWin11())
+    {
+        CPaintDC dc(this);
+        CCC_PaintDialogAeroGaps(dc, this, nullptr);
+        return;
+    }
+#endif
+    CCustomDialog::OnPaint();
 }
 
 void CCustomBlurDialogBase::OnDestroy()
@@ -4681,6 +4705,7 @@ void CCustomDialogEx::OnPaint()
 IMPLEMENT_DYNAMIC(CCustomBlurDialogExBase, CCustomDialogEx)
 
 BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
+    ON_WM_PAINT()
     ON_WM_SIZE()
     ON_WM_WINDOWPOSCHANGED()
     ON_WM_DWMCOMPOSITIONCHANGED()
@@ -4737,6 +4762,19 @@ void CCustomBlurDialogExBase::ApplyDwmBlur()
 #else
     m_bBlurApplied = FALSE;
 #endif
+}
+
+void CCustomBlurDialogExBase::OnPaint()
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (m_bAeroEnabled && CCC_IsWin11())
+    {
+        CPaintDC dc(this);
+        CCC_PaintDialogAeroGaps(dc, this, nullptr);
+        return;
+    }
+#endif
+    CCustomDialogEx::OnPaint();
 }
 
 void CCustomBlurDialogExBase::OnDestroy()

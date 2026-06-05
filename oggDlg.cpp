@@ -15039,7 +15039,7 @@ void COggDlg::timerp()
 
 	if (plf == 1 && (wav || ogg) && ::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		SyncPianoRollFromPlayCursor();
-	if (savedata.supe == TRUE && plf == 1 && (wav || ogg)) Speana();
+	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) Speana();
 	s = L""; ss = L"";
 	s = "name:";
 	moji(s, 1, 0, 0xffffff);
@@ -16455,10 +16455,19 @@ void timerog1(UINT nIDEvent)
 	}
 
 	if (nIDEvent == 5657) {
-		int i;
-		for (i = 0; i < 300; i++)
-			if (spetm[i] == 1) spelv[i]--;
-		if (spelv[i] < 0) spelv[i] = 0;
+		BOOL bDecay = FALSE;
+		for (int i = 0; i < 300; i++) {
+			if (spetm[i] == 1) {
+				spelv[i]--;
+				if (spelv[i] < 0) spelv[i] = 0;
+				if (spelv[i] > 0)
+					bDecay = TRUE;
+			}
+		}
+		if (bDecay && og && og->m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) {
+			RECT rect = { 0, 0, (LONG)((180 + 88 * 2 + 50) * og->hD * 4), (LONG)((101) * og->hD * 4) };
+			og->InvalidateRect(&rect, FALSE);
+		}
 	}
 
 	if (nIDEvent == 11251) {
@@ -18836,7 +18845,7 @@ void COggDlg::Speana()
 
 	static int dtbl[88];
 	static int dtatbl[88];
-	const bool stereoSpeana = (savedata.supe2 != FALSE);
+	const bool stereoSpeana = (m_st.GetCheck() != FALSE);
 
 	// ---------------------------------------------------------
 	// モード判定
