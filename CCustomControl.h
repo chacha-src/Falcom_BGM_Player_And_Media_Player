@@ -1,663 +1,1134 @@
 ﻿#pragma once
+
 #include "stdafx.h"
 #include "afxdialogex.h"
 #include "BtnST.h"
 #include "ListCtrlA.h"
-#include "DwmBlurHelper.h"
 #include "OSVersion.h"
 #include <map>
+#include <dwmapi.h>
+#include "DwmBlurHelper.h"
 
+#pragma comment(lib, "dwmapi.lib")
+
+// ============================================================================
+// VS2026 アクリルぼかし機能 (_MSC_VER >= 1950 のときのみ有効)
+// savedata.aero == 1 かつ VS2026ビルド時のみ背景ぼかしが適用されます。
+//
+// 【Win11 ぼかしの正しい構成】
+//   親: DWMWA_SYSTEMBACKDROP_TYPE + ExtendFrame(-1)（余白のアクリル源）
+//   親 OnPaint: WS_CLIPCHILDREN で隙間のみ薄グレー（任意）
+//   子: CCustomOpaqueFixer が BufferedPaint でアルファ255の不透明面を作り、
+//       その上に WM_PRINTCLIENT → OnPrintClient で描画する。
+//   ※CControlFixer（白を透過）は CCustom* には使わない。
+//
+// 【Win10のぼかし (SetWindowCompositionAttributeを使用)】
+//   非公開APIである SetWindowCompositionAttribute を使用して
+//   背景にアクリルぼかし効果（ACCENT_ENABLE_BLURBEHIND 等）を適用します。
+// ============================================================================
+#if _MSC_VER >= 1950
+#define CCUSTOM_AERO_SUPPORT 1
+#else
+#define CCUSTOM_AERO_SUPPORT 0
+#endif
+
+#if CCUSTOM_AERO_SUPPORT
+#define CCC_MSG_REAPPLY_OPAQUE_FIXERS (WM_APP + 311)
+#define CCC_WM_POST_OPAQUE_PAINT      (WM_APP + 312)
+// 透過合成のクロマキー（黒文字 RGB(0,0,0) と区別するため 1,1,1 を使用）
+#define CCC_AERO_CHROMA_KEY RGB(1, 1, 1)
+void CCC_SelectClipExcludeChildren(CDC& dc, CWnd* pWnd);
+void CCC_BlitStretchOpaque(HDC hdcDest, int x, int y, int destW, int destH,
+    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH);
+void CCC_BlitStretchChroma(HDC hdcDest, int x, int y, int destW, int destH,
+    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey);
+void CCC_BlitStretchChromaNoFlicker(HDC hdcDest, int x, int y, int destW, int destH,
+    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey);
+void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
+void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
+void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
+void CCC_InvalidateBlurParent(HWND hWnd, BOOL bAeroMode);
+void CCC_RefreshDialogDwmBlur(HWND hWnd);
+void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr);
+void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey);
+#endif
+
+// ============================================================================
 // 色定義
-#define COLOR_DIALOG_BG RGB(255, 225, 235)      // 薄いピンク
-#define COLOR_EDIT_BG RGB(255, 222, 210)        // 薄いオレンジ
-#define COLOR_EDIT_TEXT RGB(0, 0, 0)            // 濃い太い黒
-#define COLOR_LIST_BG RGB(173, 216, 230)        // 薄い青（ライトブルー）
-#define COLOR_COMBO_BG RGB(255, 222, 210)       // 薄いオレンジ
-#define COLOR_BUTTON_BG RGB(200, 232, 190)      // 薄い緑
-#define COLOR_BUTTON_PUSHED RGB(60, 160, 60)
-#define COLOR_BUTTON_HOVER RGB(100, 200, 100)   // マウスオーバー時の緑
-#define COLOR_SLIDER_THUMB RGB(128, 0, 128)     // 紫
-#define COLOR_RANGE_SLIDER_THUMB RGB(255, 255, 255) // 白
-#define COLOR_RANGE_SELECTION RGB(221, 160, 221) // うすい紫
-#define COLOR_HANAMARU RGB(255, 0, 0)
-#define COLOR_FLOWER_DECO        RGB(255, 240, 245) // 装飾用の淡い色
-#define COLOR_VINE_DECO          RGB(80, 140, 80)   // 蔓の色
-#define COLOR_HEART         RGB(255, 105, 180) // 華やかなピンク
-#define COLOR_SEL_BG        RGB(221, 160, 221) // 薄い紫
+// ============================================================================
+#define COLOR_DIALOG_BG         RGB(255, 225, 235) // ダイアログの基本背景色
+#define COLOR_EDIT_BG           RGB(255, 222, 210) // エディットボックスの背景色
+#define COLOR_EDIT_TEXT         RGB(0,   0,   0)   // エディットボックスの文字色
+#define COLOR_LIST_BG           RGB(173, 216, 230) // リストボックスの背景色
+#define COLOR_COMBO_BG          RGB(255, 222, 210) // コンボボックスの背景色
+#define COLOR_BUTTON_BG         RGB(200, 232, 190) // ボタンの通常時背景色
+#define COLOR_BUTTON_PUSHED     RGB( 60, 160,  60) // ボタンの押下時背景色
+#define COLOR_BUTTON_HOVER      RGB(100, 200, 100) // ボタンのホバー時背景色
+#define COLOR_SLIDER_THUMB      RGB(128,   0, 128) // スライダーのつまみの色
+#define COLOR_RANGE_SLIDER_THUMB RGB(255, 255, 255) // 範囲スライダーのつまみ色
+#define COLOR_RANGE_SELECTION   RGB(221, 160, 221) // 範囲スライダーの選択範囲色
+#define COLOR_HANAMARU          RGB(255,   0,   0) // はなまるの色
+#define COLOR_FLOWER_DECO       RGB(255, 240, 245) // お花の装飾色
+#define COLOR_VINE_DECO         RGB( 80, 140,  80) // 蔓（つる）の装飾色
+#define COLOR_HEART             RGB(255, 105, 180) // ハートの装飾色
+#define COLOR_SEL_BG            RGB(221, 160, 221) // リストなどの選択時背景色
+#define COLOR_GRAD_DARK_GREEN   RGB(  0, 100,   0) // グラデーション用の濃い緑
+#define COLOR_GRAD_DARK_PURPLE  RGB( 75,   0, 130) // グラデーション用の濃い紫
 
-// グラデーション用色定義
-#define COLOR_GRAD_DARK_GREEN  RGB(0, 100, 0)    // 濃い緑
-#define COLOR_GRAD_DARK_PURPLE RGB(75, 0, 130)   // 濃い紫
+// アクリル半透明オーバーレイ用アルファ値
+#define AERO_ALPHA_SEMI 160
 
-// ダイアログから色を変更するためのユーティリティクラス
+// ============================================================================
+// DWM / SetWindowCompositionAttribute 定数と構造体
+// ============================================================================
+#ifndef DWMWA_SYSTEMBACKDROP_TYPE
+#define DWMWA_SYSTEMBACKDROP_TYPE 38
+#endif
+// Windows 10/11 で背景ぼかしを行うための非公開API用構造体
+enum WINDOWCOMPOSITIONATTRIB
+{
+    WCA_ACCENT_POLICY = 19
+};
+
+enum ACCENT_STATE
+{
+    ACCENT_DISABLED = 0,
+    ACCENT_ENABLE_GRADIENT = 1,
+    ACCENT_ENABLE_TRANSPARENTGRADIENT = 2,
+    ACCENT_ENABLE_BLURBEHIND = 3,          // 標準的なぼかし
+    ACCENT_ENABLE_ACRYLICBLURBEHIND = 4,   // アクリルぼかし (Win10 1803以降)
+    ACCENT_INVALID_STATE = 5
+};
+
+struct ACCENT_POLICY
+{
+    int AccentState;
+    int AccentFlags;
+    int GradientColor;
+    int AnimationId;
+};
+
+struct WINCOMPATTRDATA
+{
+    WINDOWCOMPOSITIONATTRIB Attrib;
+    PVOID pvData;
+    SIZE_T cbData;
+};
+
+// ============================================================================
+// アクリルぼかしユーティリティ (CCustomControl内完結)
+// ============================================================================
+#if CCUSTOM_AERO_SUPPORT
+#include <afxtempl.h>
+
+class CCustomOpaqueFixer;
+
+BOOL CCC_IsBlurDialogChild(HWND hWnd);
+
+// OSビルド番号取得 (ntdll RtlGetVersion経由)
+static inline DWORD CCC_GetWindowsBuildNumber()
+{
+    typedef LONG(WINAPI* PFN_RtlGetVersion)(PRTL_OSVERSIONINFOW);
+    static DWORD s_build = 0;
+    static bool  s_done = false;
+
+    // 既に取得済みならキャッシュを返す
+    if (s_done) return s_build;
+
+    HMODULE h = ::GetModuleHandleW(L"ntdll.dll");
+    if (h)
+    {
+        PFN_RtlGetVersion fn = reinterpret_cast<PFN_RtlGetVersion>(::GetProcAddress(h, "RtlGetVersion"));
+        if (fn)
+        {
+            RTL_OSVERSIONINFOW oi = { sizeof(oi) };
+            if (fn(&oi) == 0)
+            {
+                s_build = oi.dwBuildNumber;
+            }
+        }
+    }
+    s_done = true;
+    return s_build;
+}
+
+// Windows 11 かどうかの判定 (ビルド番号 22000 以上)
+static inline BOOL CCC_IsWin11()
+{
+    return CCC_GetWindowsBuildNumber() >= 22000;
+}
+
+// savedata.aero==1 のときのみぼかしを有効化
+static inline BOOL CCC_IsAeroEnabled()
+{
+    extern save savedata;
+    return savedata.aero == 1;
+}
+
+static inline BOOL CCC_SetWindowCompositionAccent(HWND hWnd, const ACCENT_POLICY& policy)
+{
+    HMODULE hUser = ::GetModuleHandleW(L"user32.dll");
+    if (!hUser) return FALSE;
+    typedef BOOL(WINAPI* pSetWindowCompositionAttribute)(HWND, WINCOMPATTRDATA*);
+    pSetWindowCompositionAttribute pfn =
+        (pSetWindowCompositionAttribute)::GetProcAddress(hUser, "SetWindowCompositionAttribute");
+    if (!pfn) return FALSE;
+    WINCOMPATTRDATA data = { WCA_ACCENT_POLICY, const_cast<ACCENT_POLICY*>(&policy), sizeof(policy) };
+    return pfn(hWnd, &data);
+}
+
+// 子ウィンドウの WS_EX_TRANSPARENT を設定または解除
+static inline void CCC_SetChildTransparent(HWND hWnd, BOOL bOn)
+{
+    if (!hWnd || !::IsWindow(hWnd)) return;
+    LONG ex = ::GetWindowLong(hWnd, GWL_EXSTYLE);
+    if (bOn)
+        ex |= WS_EX_TRANSPARENT;
+    else
+        ex &= ~WS_EX_TRANSPARENT;
+    ::SetWindowLong(hWnd, GWL_EXSTYLE, ex);
+}
+
+// 子 HWND のアクリル/Mica を無効化（親だけガラス、コントロールは不透明）
+static inline void CCC_ClearChildDwmBackdrop(HWND hParent)
+{
+    if (!hParent || !::IsWindow(hParent)) return;
+    for (HWND hChild = ::GetWindow(hParent, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
+    {
+        if (!::IsWindow(hChild)) continue;
+        int backdropNone = 1;
+        ::DwmSetWindowAttribute(hChild, DWMWA_SYSTEMBACKDROP_TYPE, &backdropNone, sizeof(backdropNone));
+        CCC_ClearChildDwmBackdrop(hChild);
+    }
+}
+
+// スライダー等に付いた WS_EX_TRANSPARENT を全て解除
+static inline void CCC_ClearChildTransparentFlags(HWND hParent)
+{
+    if (!hParent || !::IsWindow(hParent)) return;
+    for (HWND hChild = ::GetWindow(hParent, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
+    {
+        CCC_SetChildTransparent(hChild, FALSE);
+        CCC_ClearChildTransparentFlags(hChild);
+    }
+}
+
+// CBlurDialogBase::ApplyDwmBlur と同等（Win11=SYSTEMBACKDROP、Win10=Layered+BlurBehind）
+static inline BOOL CCC_ApplyAero(HWND hWnd, BOOL bAero)
+{
+    if (!hWnd || !::IsWindow(hWnd)) return FALSE;
+
+    const DWORD build = CCC_GetWindowsBuildNumber();
+
+    int backdropNone = 1;
+    ::DwmSetWindowAttribute(hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropNone, sizeof(backdropNone));
+    MARGINS marginsZero = { 0, 0, 0, 0 };
+    ::DwmExtendFrameIntoClientArea(hWnd, &marginsZero);
+    ACCENT_POLICY policyOff = { ACCENT_DISABLED, 0, 0, 0 };
+    CCC_SetWindowCompositionAccent(hWnd, policyOff);
+    DWM_BLURBEHIND bbOff = {};
+    bbOff.dwFlags = DWM_BB_ENABLE;
+    bbOff.fEnable = FALSE;
+    ::DwmEnableBlurBehindWindow(hWnd, &bbOff);
+
+    LONG exStyle = ::GetWindowLong(hWnd, GWL_EXSTYLE);
+    if (exStyle & WS_EX_LAYERED)
+        ::SetWindowLong(hWnd, GWL_EXSTYLE, exStyle & ~WS_EX_LAYERED);
+
+    if (!bAero)
+    {
+        CCC_ClearChildDwmBackdrop(hWnd);
+        CCC_ClearChildTransparentFlags(hWnd);
+        ::SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        return FALSE;
+    }
+
+    BOOL bApplied = FALSE;
+
+    if (build >= 22000)
+    {
+        BOOL compositionEnabled = FALSE;
+        ::DwmIsCompositionEnabled(&compositionEnabled);
+        if (compositionEnabled)
+        {
+            int backdropType = 3;
+            if (SUCCEEDED(::DwmSetWindowAttribute(hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType))))
+            {
+                ::EnableRoundedCorners(hWnd);
+                MARGINS margins = { -1, -1, -1, -1 };
+                ::DwmExtendFrameIntoClientArea(hWnd, &margins);
+                bApplied = TRUE;
+            }
+        }
+    }
+    else if (build >= 10240)
+    {
+        exStyle = ::GetWindowLong(hWnd, GWL_EXSTYLE);
+        ::SetWindowLong(hWnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
+        ::SetLayeredWindowAttributes(hWnd, 0, 245, LWA_ALPHA);
+
+        DWM_BLURBEHIND bb = {};
+        bb.dwFlags = DWM_BB_ENABLE;
+        bb.fEnable = TRUE;
+        ::DwmEnableBlurBehindWindow(hWnd, &bb);
+        bApplied = TRUE;
+    }
+
+    CCC_ClearChildDwmBackdrop(hWnd);
+    CCC_ClearChildTransparentFlags(hWnd);
+    ::SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    return bApplied;
+}
+
+// ダイアログをアクリル用に整える（WS_CLIPCHILDREN 等）
+static inline void CCC_PrepareDialogSurface(HWND hWnd, BOOL bAero)
+{
+    if (!hWnd || !::IsWindow(hWnd)) return;
+    CWnd* pWnd = CWnd::FromHandlePermanent(hWnd);
+    if (!pWnd) return;
+    if (bAero)
+    {
+        pWnd->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+        ::SetClassLongPtr(hWnd, GCLP_HBRBACKGROUND, 0);
+    }
+}
+
+#endif // CCUSTOM_AERO_SUPPORT
+
+// ============================================================================
+// コントロールの色管理用ユーティリティクラス
+// CCustomControlUtility
+// ============================================================================
 class CCustomControlUtility
 {
 public:
-	// OnCtlColorで呼び出すヘルパー関数
-	// 使用例: return CCustomControlUtility::SetControlColor(pDC, pWnd, nCtlColor, RGB(255,0,0), RGB(0,0,0));
-	static HBRUSH SetControlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor, COLORREF clrBackground, COLORREF clrText = RGB(0, 0, 0))
-	{
-		pDC->SetBkColor(clrBackground);
-		pDC->SetTextColor(clrText);
+    // デバイスコンテキストに背景色と文字色を設定し、背景描画用のブラシを返します
+    static HBRUSH SetControlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor, COLORREF clrBg, COLORREF clrText = RGB(0, 0, 0))
+    {
+        pDC->SetBkColor(clrBg);
+        pDC->SetTextColor(clrText);
 
-		static CBrush brushes[16];
-		static COLORREF colors[16];
-		static int nBrushCount = 0;
+        auto& m = GetBrushMap();
+        auto it = m.find(clrBg);
 
-		// 既存のブラシを検索
-		for (int i = 0; i < nBrushCount; i++)
-		{
-			if (colors[i] == clrBackground && brushes[i].GetSafeHandle())
-			{
-				return (HBRUSH)brushes[i].GetSafeHandle();
-			}
-		}
+        // 既に同じ色のブラシが作成されていればそれを再利用します
+        if (it != m.end() && it->second.GetSafeHandle())
+        {
+            return (HBRUSH)it->second.GetSafeHandle();
+        }
 
-		// 新しいブラシを作成
-		if (nBrushCount < 16)
-		{
-			if (brushes[nBrushCount].GetSafeHandle())
-				brushes[nBrushCount].DeleteObject();
-			brushes[nBrushCount].CreateSolidBrush(clrBackground);
-			colors[nBrushCount] = clrBackground;
-			nBrushCount++;
-			return (HBRUSH)brushes[nBrushCount - 1].GetSafeHandle();
-		}
+        // 新しいブラシを作成してマップに保存します
+        m[clrBg].CreateSolidBrush(clrBg);
+        return (HBRUSH)m[clrBg].GetSafeHandle();
+    }
 
-		// 最後のブラシを上書き
-		if (brushes[15].GetSafeHandle())
-			brushes[15].DeleteObject();
-		brushes[15].CreateSolidBrush(clrBackground);
-		colors[15] = clrBackground;
-		return (HBRUSH)brushes[15].GetSafeHandle();
-	}
+    // 特定のウィンドウに対して背景色と文字色を割り当て、再描画を促します
+    static void SetControlBackgroundColor(CWnd* p, COLORREF bg, COLORREF text = RGB(0, 0, 0))
+    {
+        if (!p || !p->GetSafeHwnd()) return;
 
-	// コントロールの背景色を設定（コントロール変数と色を渡すだけ）
-	// 使用例: CCustomControlUtility::SetControlBackgroundColor(&m_editCtrl, RGB(255, 255, 0));
-	// 注意: 親ダイアログのOnCtlColorでApplyControlColors()を呼び出す必要があります
-	static void SetControlBackgroundColor(CWnd* pControl, COLORREF clrBackground, COLORREF clrText = RGB(0, 0, 0))
-	{
-		if (pControl && pControl->GetSafeHwnd())
-		{
-			HWND hWnd = pControl->GetSafeHwnd();
+        GetCCMap()[p->GetSafeHwnd()] = { bg, text };
+        p->Invalidate();
+        p->UpdateWindow();
+    }
 
-			// マップに色を保存
-			GetControlColorMap()[hWnd].clrBackground = clrBackground;
-			GetControlColorMap()[hWnd].clrText = clrText;
+    // 特定のウィンドウの色指定を解除し、再描画を促します
+    static void ClearControlBackgroundColor(CWnd* p)
+    {
+        if (!p || !p->GetSafeHwnd()) return;
 
-			// 再描画
-			pControl->Invalidate();
-			pControl->UpdateWindow();
-		}
-	}
+        GetCCMap().erase(p->GetSafeHwnd());
+        p->Invalidate();
+        p->UpdateWindow();
+    }
 
-	// コントロールの背景色をクリア
-	static void ClearControlBackgroundColor(CWnd* pControl)
-	{
-		if (pControl && pControl->GetSafeHwnd())
-		{
-			HWND hWnd = pControl->GetSafeHwnd();
-			GetControlColorMap().erase(hWnd);
+    // マップに登録されている色情報をもとに、デバイスコンテキストに色を適用します
+    static HBRUSH ApplyControlColors(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+    {
+        if (!pWnd || !pWnd->GetSafeHwnd()) return NULL;
 
-			// 再描画
-			pControl->Invalidate();
-			pControl->UpdateWindow();
-		}
-	}
+        auto it = GetCCMap().find(pWnd->GetSafeHwnd());
+        if (it == GetCCMap().end()) return NULL;
 
-	// 親ダイアログのOnCtlColorで呼び出す関数
-	// 使用例:
-	// HBRUSH CYourDialog::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
-	// {
-	//     HBRUSH hbr = CCustomControlUtility::ApplyControlColors(pDC, pWnd, nCtlColor);
-	//     if (hbr) return hbr;
-	//     return CCustomDialog::OnCtlColor(pDC, pWnd, nCtlColor);
-	// }
-	static HBRUSH ApplyControlColors(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
-	{
-		if (pWnd && pWnd->GetSafeHwnd())
-		{
-			HWND hWnd = pWnd->GetSafeHwnd();
-
-			// マップから色を取得
-			auto it = GetControlColorMap().find(hWnd);
-			if (it != GetControlColorMap().end())
-			{
-				return SetControlColor(pDC, pWnd, nCtlColor, it->second.clrBackground, it->second.clrText);
-			}
-		}
-
-		return NULL;
-	}
+        return SetControlColor(pDC, pWnd, nCtlColor, it->second.bg, it->second.text);
+    }
 
 private:
-	struct ControlColors
-	{
-		COLORREF clrBackground;
-		COLORREF clrText;
-	};
+    // 色情報を保持する構造体
+    struct CC { COLORREF bg, text; };
 
-	// 色マップのシングルトン
-	static std::map<HWND, ControlColors>& GetControlColorMap()
-	{
-		static std::map<HWND, ControlColors> s_colorMap;
-		return s_colorMap;
-	}
+    // ウィンドウハンドルと色情報の対応マップ（シングルトン）
+    static std::map<HWND, CC>& GetCCMap()
+    {
+        static std::map<HWND, CC> s;
+        return s;
+    }
+
+    // 背景色とブラシの対応マップ（シングルトン）
+    static std::map<COLORREF, CBrush>& GetBrushMap()
+    {
+        static std::map<COLORREF, CBrush> s;
+        return s;
+    }
 };
 
-// カスタムコントロールクラス定義
-
-// カスタムエディットボックス
+// ============================================================================
+// カスタムエディットコントロール
+// CCustomEdit
+// ============================================================================
 class CCustomEdit : public CEdit
 {
-	DECLARE_DYNAMIC(CCustomEdit)
-
+    DECLARE_DYNAMIC(CCustomEdit)
 public:
-	CCustomEdit();
-	virtual ~CCustomEdit();
-	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
-	BOOL m_bAutoDelete;
+    CCustomEdit();
+    virtual ~CCustomEdit();
+
+    // コントロール破棄時に自動的に delete するかどうかを設定します
+    void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+    BOOL m_bAutoDelete;
 
 protected:
-	virtual void PreSubclassWindow();
-	virtual void PostNcDestroy();
-	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
-	afx_msg void OnPaint();
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	afx_msg void OnNcPaint();
-	afx_msg void OnSetFocus(CWnd* pOldWnd);
-	afx_msg void OnKillFocus(CWnd* pNewWnd);
+    virtual void PreSubclassWindow();
+    virtual void PostNcDestroy();
 
-	DECLARE_MESSAGE_MAP()
+    // メッセージハンドラ群
+    afx_msg HBRUSH CtlColor(CDC* pDC, UINT);
+    afx_msg void OnPaint();
+    afx_msg BOOL OnEraseBkgnd(CDC*);
+    afx_msg void OnNcPaint();
+    afx_msg void OnSetFocus(CWnd*);
+    afx_msg void OnKillFocus(CWnd*);
+    afx_msg void OnEnUpdate();
+    afx_msg void OnTimer(UINT_PTR nIDEvent);
+    afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+    afx_msg LRESULT OnPostOpaquePaint(WPARAM, LPARAM);
+
+    DECLARE_MESSAGE_MAP()
 
 private:
-	CBrush m_brBackground;
-	CFont m_fontBold;
-	BOOL m_bHasFocus;
+    CBrush m_brBackground; // 背景塗りつぶし用ブラシ
+    CFont m_fontBold;      // 太字フォント
+    BOOL m_bHasFocus;      // 現在フォーカスを持っているかどうか
+    void PaintOpaqueClient(CDC& dc);
+    void ScheduleOpaqueRepaint();
 };
 
-// テキストセグメント情報
+// ============================================================================
+// テキストセグメント構造体 / カスタムスタティックコントロール
+// CCustomStatic
+// ============================================================================
+
+// 装飾付きテキスト（色、太字、斜体など）を分割して保持するための構造体
 struct TextSegment
 {
-	CString text;
-	BOOL bBold;
-	BOOL bItalic;
-	BOOL bHasColor;
-	COLORREF clrText;
-	int nFontSizeOffset;  // フォントサイズのオフセット(+1, -2など)
+    CString text;            // 表示する文字列
+    BOOL bBold;              // 太字かどうか
+    BOOL bItalic;            // 斜体かどうか
+    BOOL bHasColor;          // 固有の色指定があるかどうか
+    COLORREF clrText;        // 文字色
+    int nFontSizeOffset;     // 基本フォントサイズからの相対サイズ（オフセット）
 
-	TextSegment() : bBold(FALSE), bItalic(FALSE), bHasColor(FALSE), clrText(RGB(0, 0, 0)), nFontSizeOffset(0) {}
+    // コンストラクタで初期化
+    TextSegment()
+        : bBold(FALSE), bItalic(FALSE), bHasColor(FALSE),
+        clrText(RGB(0, 0, 0)), nFontSizeOffset(0)
+    {}
 };
 
-// CCustomStatic クラス
 class CCustomStatic : public CStatic
 {
-	DECLARE_DYNAMIC(CCustomStatic)
-
+    DECLARE_DYNAMIC(CCustomStatic)
 public:
-	CCustomStatic();
-	virtual ~CCustomStatic();
+    CCustomStatic();
+    virtual ~CCustomStatic();
 
-	// グラデーション設定
-	void SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDirection, BOOL bEnable);
-	void GetGradation(COLORREF* pColorStart, COLORREF* pColorEnd, int* pDirection, BOOL* pbEnable) const;
+    // グラデーションの設定
+    void SetGradation(COLORREF s, COLORREF e, int d, BOOL en);
+    void GetGradation(COLORREF* ps, COLORREF* pe, int* pd, BOOL* pbe) const;
 
-	// ドロップシャドウ設定
-	void SetDropShadow(COLORREF color, int nDirection, int nDistance, int nBlur, BOOL bEnable);
-	void GetDropShadow(COLORREF* pColor, int* pDirection, int* pDistance, int* pBlur, BOOL* pbEnable) const;
+    // ドロップシャドウ（影）の設定
+    void SetDropShadow(COLORREF c, int d, int dist, int blur, BOOL en);
+    void GetDropShadow(COLORREF* pc, int* pd, int* pdist, int* pblur, BOOL* pbe) const;
 
-	// PreferWideMode設定
-	void SetPreferWideMode(BOOL bPreferWide);
-	BOOL GetPreferWideMode() const;
+    // ワイドモード（文字間隔を広げるなど）の設定と取得
+    void SetPreferWideMode(BOOL b);
+    BOOL GetPreferWideMode() const;
 
-	// フォント設定
-	void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
+    // 表示フォントの設定
+    void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
 
-	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
-	BOOL m_bAutoDelete;
+    // コントロール破棄時に自動的に delete を行うかどうかのフラグ
+    void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+    BOOL m_bAutoDelete;
+
+    // アクリルモードの設定
+    // TRUE のとき、背景を塗りつぶさずに文字のみを描画します。
+    // これにより、ダイアログのアクリルぼかし背景が文字の背景として透けて見えます。
+    void SetAeroMode(BOOL b)
+    {
+        m_bAeroMode = b;
+        if (GetSafeHwnd()) Invalidate();
+    }
 
 protected:
-	virtual void PreSubclassWindow();
-	virtual void PostNcDestroy();
+    virtual void PreSubclassWindow();
+    virtual void PostNcDestroy();
 
-	afx_msg void OnPaint();
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	afx_msg LRESULT OnSetText(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnGetText(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnGetTextLength(WPARAM wParam, LPARAM lParam);
+    // メッセージハンドラ
+    afx_msg void OnPaint();
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+    afx_msg BOOL OnEraseBkgnd(CDC*);
+    afx_msg LRESULT OnSetText(WPARAM, LPARAM);
+    afx_msg LRESULT OnGetText(WPARAM, LPARAM);
+    afx_msg LRESULT OnGetTextLength(WPARAM, LPARAM);
 
-	DECLARE_MESSAGE_MAP()
+    DECLARE_MESSAGE_MAP()
+
+    void DrawClient(CDC& dc);
 
 private:
-	// ヘルパー関数
-	std::vector<TextSegment> ParseFormattedText(const CString& str);
-	CSize MeasureSegmentedText(CDC* pDC, const std::vector<TextSegment>& segments, const LOGFONT& lfBase, int height, int width);
-	void DrawSegmentedText(CDC* pDC, const CRect& rect, const std::vector<TextSegment>& segments,
-		const LOGFONT& lfBase, int height, int width, UINT nFormat);
+    // 装飾タグを含むテキストを解析してセグメントに分割します
+    std::vector<TextSegment> ParseFormattedText(const CString& str);
 
-	// グラデーション関連
-	COLORREF m_clrGradStart;
-	COLORREF m_clrGradEnd;
-	int m_nGradDirection;
-	BOOL m_bGradEnable;
+    // 分割されたテキストセグメントの描画サイズを計算します
+    CSize MeasureSegmentedText(CDC* pDC, const std::vector<TextSegment>& segs, const LOGFONT& lf, int h, int w);
 
-	// ドロップシャドウ関連
-	COLORREF m_clrShadow;
-	int m_nShadowDirection;
-	int m_nShadowDistance;
-	int m_nShadowBlur;
-	BOOL m_bShadowEnable;
+    // 分割されたテキストセグメントを実際に描画します
+    void DrawSegmentedText(CDC* pDC, const CRect& rect, const std::vector<TextSegment>& segs, const LOGFONT& lf, int h, int w, UINT fmt);
 
-	// フォント
-	CFont m_font;
+    // プロパティ保持用メンバ変数
+    COLORREF m_clrGradStart, m_clrGradEnd; // グラデーションの開始色と終了色
+    int m_nGradDirection;                  // グラデーションの方向（角度）
+    BOOL m_bGradEnable;                    // グラデーションが有効かどうか
 
-	// PreferWideMode
-	BOOL m_bPreferWideMode;
+    COLORREF m_clrShadow;                  // シャドウの色
+    int m_nShadowDirection;                // シャドウの方向
+    int m_nShadowDistance;                 // シャドウの距離
+    int m_nShadowBlur;                     // シャドウのぼかし度合い
+    BOOL m_bShadowEnable;                  // シャドウが有効かどうか
 
-	// テキスト保存
-	CString m_strText;
+    CFont m_font;                          // 描画用フォント
+    BOOL m_bPreferWideMode;                // ワイドモードが有効かどうか
 
-	// フォントサイズキャッシュ
-	CString m_strCachedText;
-	int m_nCachedHeight;
-	int m_nCachedWidth;
-	CRect m_rectCached;
+    CString m_strText;                     // コントロールが保持しているテキスト
+    CString m_strCachedText;               // キャッシュされたテキスト（再計算防止用）
+    int m_nCachedHeight, m_nCachedWidth;   // キャッシュされたサイズ情報
+    CRect m_rectCached;                    // キャッシュされた描画領域
 
-	// WM_PAINT ごとの互換ビットマップ再生成を避ける（サイズ変更時のみ再作成）
-	CBitmap m_memBackstore;
-	int m_backstoreW;
-	int m_backstoreH;
+    CBitmap m_memBackstore;                // ちらつき防止のダブルバッファリング用バックバッファ
+    int m_backstoreW, m_backstoreH;        // バックバッファの寸法
+
+    BOOL m_bAeroMode;                      // アクリルモードが有効かどうか
 };
 
-// カスタムリストボックス
+// ============================================================================
+// カスタムリストボックスコントロール
+// CCustomListBox
+// ============================================================================
 class CCustomListBox : public CListBox
 {
-	DECLARE_DYNAMIC(CCustomListBox)
-
+    DECLARE_DYNAMIC(CCustomListBox)
 public:
-	CCustomListBox();
-	virtual ~CCustomListBox();
-	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
-	BOOL m_bAutoDelete;
+    CCustomListBox();
+    virtual ~CCustomListBox();
+
+    // コントロール破棄時に自動的に delete を行うかどうかのフラグ
+    void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+    BOOL m_bAutoDelete;
+
+    // アクリルモードの設定（半透明描画などを有効にします）
+    void SetAeroMode(BOOL b)
+    {
+        m_bAeroMode = b;
+        if (GetSafeHwnd()) Invalidate();
+    }
 
 protected:
-	virtual void PreSubclassWindow();
-	virtual void PostNcDestroy();
-	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
-	afx_msg void OnPaint();
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	virtual void DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);
-	virtual void MeasureItem(LPMEASUREITEMSTRUCT lpMeasureItemStruct);
+    virtual void PreSubclassWindow();
+    virtual void PostNcDestroy();
 
-	DECLARE_MESSAGE_MAP()
+    // オーナードロー関連
+    virtual void DrawItem(LPDRAWITEMSTRUCT lp);
+    virtual void MeasureItem(LPMEASUREITEMSTRUCT lp);
+
+    // メッセージハンドラ
+    afx_msg HBRUSH CtlColor(CDC*, UINT);
+    afx_msg void OnPaint();
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+    afx_msg BOOL OnEraseBkgnd(CDC*);
+
+    DECLARE_MESSAGE_MAP()
 
 private:
-	CBrush m_brBackground;
+    CBrush m_brBackground; // 背景塗りつぶし用ブラシ
+    BOOL m_bAeroMode;      // アクリルモードが有効かどうか
 };
 
-// カスタムコンボボックス
+// ============================================================================
+// カスタムコンボボックスコントロール
+// CCustomComboBox
+// ============================================================================
 class CCustomComboBox : public CComboBox
 {
-	DECLARE_DYNAMIC(CCustomComboBox)
-
+    DECLARE_DYNAMIC(CCustomComboBox)
 public:
-	CCustomComboBox();
-	virtual ~CCustomComboBox();
-	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
-	BOOL m_bAutoDelete;
+    CCustomComboBox();
+    virtual ~CCustomComboBox();
 
-	// 拡張AddString - 第2引数でラベル項目（選択不可）を指定可能
-	int AddString(LPCTSTR lpszString, BOOL bDisabled = FALSE);
+    // コントロール破棄時に自動的に delete を行うかどうかのフラグ
+    void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+    BOOL m_bAutoDelete;
 
-	// GetCurSel/SetCurSel - 選択可能な項目のみカウント（0, 1, 2...）
-	int GetCurSel() const;
-	int SetCurSel(int nLogicalIndex);
+    // 文字列を追加します。bDisabled = TRUE の場合は無効化されたアイテムとして扱われます
+    int AddString(LPCTSTR lp, BOOL bDisabled = FALSE);
 
-	// 実際の項目番号でGet/Set（デバッグ用）
-	int GetCurSelPhysical() const { return CComboBox::GetCurSel(); }
-	int SetCurSelPhysical(int nPhysicalIndex) { return CComboBox::SetCurSel(nPhysicalIndex); }
+    // 選択項目の取得と設定（無効化されたアイテムをスキップした「論理的な」インデックスを使用）
+    int GetCurSel() const;
+    int SetCurSel(int nLogical);
 
-	// ラベル項目の色設定
-	void SetLabelColor(COLORREF clrText, COLORREF clrBackground);
-	void GetLabelColor(COLORREF* pClrText, COLORREF* pClrBackground) const;
+    // 物理インデックス（ComboBox本来の全アイテムに対するインデックス）の取得と設定
+    int GetCurSelPhysical() const { return CComboBox::GetCurSel(); }
+    int SetCurSelPhysical(int n) { return CComboBox::SetCurSel(n); }
+
+    // 無効化アイテム用のラベル色設定と取得
+    void SetLabelColor(COLORREF ct, COLORREF cb);
+    void GetLabelColor(COLORREF* pct, COLORREF* pcb) const;
+
+    // アクリルモードの設定
+    void SetAeroMode(BOOL b)
+    {
+        m_bAeroMode = b;
+        if (GetSafeHwnd()) Invalidate();
+    }
 
 protected:
-	CBrush m_brBackground;
-	void UpdateDropDownWidth();
+    CBrush m_brBackground;                  // 背景塗りつぶし用ブラシ
+    std::vector<BOOL> m_vDisabledItems;     // 各アイテムが無効化されているかどうかのフラグリスト
+    std::vector<int> m_vSelectableIndices;  // 選択可能なアイテムの物理インデックスリスト
 
-	// 選択不可項目を管理
-	std::vector<BOOL> m_vDisabledItems; // TRUE = 選択不可（ラベル）
-	std::vector<int> m_vSelectableIndices; // 選択可能な項目の実際のインデックス
-	COLORREF m_clrLabelText;
-	COLORREF m_clrLabelBg;
+    COLORREF m_clrLabelText, m_clrLabelBg;  // ラベル（無効化アイテム）の文字色と背景色
+    BOOL m_bAeroMode;                       // アクリルモードが有効かどうか
 
-	// 実際のインデックス ⇔ 選択可能項目のインデックス変換
-	int LogicalToPhysical(int nLogical) const; // 選択可能な番号 → 実際の項目番号
-	int PhysicalToLogical(int nPhysical) const; // 実際の項目番号 → 選択可能な番号
+    // 論理インデックスと物理インデックスの相互変換
+    int LogicalToPhysical(int n) const;
+    int PhysicalToLogical(int n) const;
 
-	virtual void PreSubclassWindow();
-	virtual void PostNcDestroy();
-	virtual void DrawItem(LPDRAWITEMSTRUCT lpDrawItemStruct);
-	virtual void MeasureItem(LPMEASUREITEMSTRUCT lpMeasureItemStruct);
-	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
+    // ドロップダウンリストの幅を、保持している文字列の長さに合わせて自動調整します
+    void UpdateDropDownWidth();
 
-	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
-	afx_msg void OnPaint();
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	afx_msg void OnDropdown(); // 展開時に幅を調整
+    virtual void PreSubclassWindow();
+    virtual void PostNcDestroy();
 
-	DECLARE_MESSAGE_MAP()
+    // オーナードロー関連
+    virtual void DrawItem(LPDRAWITEMSTRUCT lp);
+    virtual void MeasureItem(LPMEASUREITEMSTRUCT lp);
+    virtual BOOL OnCommand(WPARAM, LPARAM);
+
+    // メッセージハンドラ
+    afx_msg HBRUSH CtlColor(CDC*, UINT);
+    afx_msg void OnPaint();
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+    afx_msg BOOL OnEraseBkgnd(CDC*);
+    afx_msg void OnDropdown();
+
+    DECLARE_MESSAGE_MAP()
+
+    void PaintClient(CDC& dc);
 };
 
-// カスタムリストビュー
+// ============================================================================
+// カスタムリストコントロール
+// CCustomListCtrl
+// ============================================================================
 class CCustomListCtrl : public CListCtrlA
 {
-	DECLARE_DYNAMIC(CCustomListCtrl)
-
+    DECLARE_DYNAMIC(CCustomListCtrl)
 public:
-	CCustomListCtrl();
-	virtual ~CCustomListCtrl();
-	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+    CCustomListCtrl();
+    virtual ~CCustomListCtrl();
+
+    // コントロール破棄時に自動的に delete を行うかどうかのフラグ
+    void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+
+    // アクリルモードの設定
+    void SetAeroMode(BOOL b)
+    {
+        m_bAeroMode = b;
+        if (GetSafeHwnd()) Invalidate();
+    }
+
+    // CCustomOpaqueFixer 用: 外側の BufferedPaint バッファへ直接描画
+    void PaintOpaqueIntoBuffer(HDC hdcBuf);
 
 protected:
-	BOOL m_bAutoDelete;
-	virtual void PreSubclassWindow();
-	virtual void PostNcDestroy();
-	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
-	afx_msg void OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult);
-	afx_msg void OnMouseMove(UINT nFlags, CPoint point);  // マウス移動処理
-	afx_msg void OnMouseLeave();                          // マウス離脱処理
-	afx_msg void OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
-	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
-	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);                  // 背景消去処理
-	afx_msg void OnPaint();                                // 描画処理
+    BOOL m_bAutoDelete;
+    BOOL m_bAeroMode;
 
-	DECLARE_MESSAGE_MAP()
+    virtual void PreSubclassWindow();
+    virtual void PostNcDestroy();
+
+    // メッセージハンドラ群
+    afx_msg HBRUSH CtlColor(CDC*, UINT);
+    afx_msg void OnCustomDraw(NMHDR*, LRESULT*);
+    afx_msg void OnMouseMove(UINT, CPoint);
+    afx_msg void OnMouseLeave();
+    afx_msg void OnVScroll(UINT, UINT, CScrollBar*);
+    afx_msg void OnHScroll(UINT, UINT, CScrollBar*);
+    afx_msg BOOL OnMouseWheel(UINT, short, CPoint);
+    afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
+    afx_msg void OnTimer(UINT_PTR nIDEvent);
+    afx_msg BOOL OnEraseBkgnd(CDC*);
+    afx_msg void OnPaint();
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+    afx_msg LRESULT OnPostOpaquePaint(WPARAM, LPARAM);
+
+    DECLARE_MESSAGE_MAP()
 
 private:
-	CBrush m_brBackground;
-	int m_nHotItem;  // ホバー中のアイテム番号
-	void UpdateHotItem(int nItem);
-	void UpdateHotItemFromCursor();
-	void RedrawVisibleItems();
+    CBrush m_brBackground; // 背景塗りつぶし用ブラシ
+    int m_nHotItem;        // 現在マウスカーソルが乗っているアイテムのインデックス（ホバー処理用）
+
+    // ホバー状態のアイテムを更新し、必要に応じて再描画します
+    void UpdateHotItem(int n);
+    void UpdateHotItemFromCursor();
+
+    // 表示されているアイテム領域を再描画します
+    void RedrawVisibleItems();
+    void PaintOpaqueClient(CDC& dc);
+    void ScheduleOpaqueRepaint();
 };
 
-// 通常ボタン用
+// ============================================================================
+// カスタム標準ボタンコントロール
+// CCustomStandardButton (常に不透明で描画されます)
+// ============================================================================
 class CCustomStandardButton : public CButton
 {
-	DECLARE_DYNAMIC(CCustomStandardButton)
-
+    DECLARE_DYNAMIC(CCustomStandardButton)
 public:
-	CCustomStandardButton();
-	virtual ~CCustomStandardButton();
-	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
-	BOOL m_bAutoDelete;
+    CCustomStandardButton();
+    virtual ~CCustomStandardButton();
 
-	// グラデーション機能
-	void SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDirection, BOOL bEnable);
-	void GetGradation(COLORREF* pColorStart, COLORREF* pColorEnd, int* pDirection, BOOL* pbEnable) const;
+    // コントロール破棄時に自動的に delete を行うかどうかのフラグ
+    void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+    BOOL m_bAutoDelete;
 
-	// ドロップシャドウ機能
-	void SetDropShadow(COLORREF color, int nDirection, int nDistance, int nBlur, BOOL bEnable);
-	void GetDropShadow(COLORREF* pColor, int* pDirection, int* pDistance, int* pBlur, BOOL* pbEnable) const;
+    // 背景のグラデーション設定
+    void SetGradation(COLORREF s, COLORREF e, int d, BOOL en);
+    void GetGradation(COLORREF* ps, COLORREF* pe, int* pd, BOOL* pbe) const;
+
+    // テキストのドロップシャドウ（影）設定
+    void SetDropShadow(COLORREF c, int d, int dist, int blur, BOOL en);
+    void GetDropShadow(COLORREF* pc, int* pd, int* pdist, int* pblur, BOOL* pbe) const;
+
+    void PaintClient(CDC& dc, const CRect& r);
 
 protected:
-	virtual void PreSubclassWindow();
-	virtual void PostNcDestroy();
-	afx_msg HBRUSH CtlColor(CDC* pDC, UINT nCtlColor);
-	afx_msg void OnPaint();
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
-	afx_msg LRESULT OnMouseLeave(WPARAM wParam, LPARAM lParam);
-	afx_msg void OnSetFocus(CWnd* pOldWnd);
-	afx_msg void OnKillFocus(CWnd* pNewWnd);
-	afx_msg void OnEnable(BOOL bEnable);
+    virtual void PreSubclassWindow();
+    virtual void PostNcDestroy();
 
-	DECLARE_MESSAGE_MAP()
+    // メッセージハンドラ
+    afx_msg HBRUSH CtlColor(CDC*, UINT);
+    afx_msg void OnPaint();
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+    afx_msg BOOL OnEraseBkgnd(CDC*);
+    afx_msg void OnMouseMove(UINT, CPoint);
+    afx_msg LRESULT OnMouseLeave(WPARAM, LPARAM);
+    afx_msg void OnSetFocus(CWnd*);
+    afx_msg void OnKillFocus(CWnd*);
+    afx_msg void OnEnable(BOOL);
+
+    DECLARE_MESSAGE_MAP()
 
 private:
-	CBrush m_brBackground;
-	BOOL m_bMouseOver;
+    CBrush m_brBackground; // 背景塗りつぶし用ブラシ
+    BOOL m_bMouseOver;     // マウスカーソルがボタンに乗っているかどうか
 
-	// グラデーション設定
-	COLORREF m_clrGradStart;
-	COLORREF m_clrGradEnd;
-	int m_nGradDirection;
-	BOOL m_bGradEnable;
+    // プロパティ保持用メンバ変数
+    COLORREF m_clrGradStart, m_clrGradEnd;
+    int m_nGradDirection;
+    BOOL m_bGradEnable;
 
-	// ドロップシャドウ設定
-	COLORREF m_clrShadow;
-	int m_nShadowDirection;
-	int m_nShadowDistance;
-	int m_nShadowBlur;
-	BOOL m_bShadowEnable;
+    COLORREF m_clrShadow;
+    int m_nShadowDirection, m_nShadowDistance, m_nShadowBlur;
+    BOOL m_bShadowEnable;
 };
 
+// ============================================================================
+// カスタムスライダーコントロール
+// CCustomSliderCtrl
+// aeroMode=TRUE : WS_EX_TRANSPARENT を適用し、ダイアログのアクリル背景が透けて見えます
+//                 （描画物のみ上乗せされます）
+// aeroMode=FALSE: 通常通り COLOR_DIALOG_BG で背景を塗りつぶします
+// ============================================================================
 class CCustomSliderCtrl : public CSliderCtrl
 {
-	DECLARE_DYNAMIC(CCustomSliderCtrl)
-
+    DECLARE_DYNAMIC(CCustomSliderCtrl)
 public:
-	CCustomSliderCtrl();
-	virtual ~CCustomSliderCtrl();
-	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
-	BOOL m_bAutoDelete;
+    CCustomSliderCtrl();
+    virtual ~CCustomSliderCtrl();
 
-	// モード設定 (0: オーディオ風, 1: 目盛り付き(紫), 2: 目盛り付き(緑))
-	void SetMode(int nMode);
-	int GetMode() const { return m_nMode; }
-	void SetPos(int nPos, BOOL bRedraw = TRUE);
+    // コントロール破棄時に自動的に delete を行うかどうかのフラグ
+    void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+    BOOL m_bAutoDelete;
+
+    // 描画モードの設定・取得（0, 1, 2 などでデザインを切り替えます）
+    void SetMode(int m);
+    int GetMode() const { return m_nMode; }
+
+    // スライダーの位置設定
+    void SetPos(int nPos, BOOL bRedraw = TRUE);
+
+    // アクリルモードの設定
+    void SetAeroMode(BOOL b);
 
 protected:
-	int m_nMode; // 現在の描画モード
+    int m_nMode;      // 現在の描画モード
+    BOOL m_bAeroMode; // アクリルモードが有効かどうか
 
-	virtual void PreSubclassWindow();
-	virtual void PostNcDestroy();
-	afx_msg void OnPaint();
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	afx_msg LRESULT OnMouseMoveMsg(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnLButtonDownMsg(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnLButtonUpMsg(WPARAM wParam, LPARAM lParam);
+    virtual void PreSubclassWindow();
+    virtual void PostNcDestroy();
 
-	DECLARE_MESSAGE_MAP()
+    // メッセージハンドラ
+    afx_msg void OnPaint();
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+    afx_msg BOOL OnEraseBkgnd(CDC*);
+    afx_msg LRESULT OnMouseMoveMsg(WPARAM, LPARAM);
+    afx_msg LRESULT OnLButtonDownMsg(WPARAM, LPARAM);
+    afx_msg LRESULT OnLButtonUpMsg(WPARAM, LPARAM);
+
+    DECLARE_MESSAGE_MAP()
+
+    void PaintClient(CDC& dc);
 
 private:
-	// 描画処理
-	void DrawSlider(CDC* pDC);
-	void DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos); // オーディオモード
-	void DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos); // 目盛りモード(紫)
-	void DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos); // 目盛りモード(緑)
+    // 描画モードごとの実際の描画処理
+    void DrawSlider(CDC* pDC);
+    void DrawMode0(CDC* pDC, const CRect& r, int mn, int mx, int pos);
+    void DrawMode1(CDC* pDC, const CRect& r, int mn, int mx, int pos);
+    void DrawMode2(CDC* pDC, const CRect& r, int mn, int mx, int pos);
 };
 
-// カスタム範囲指定スライダー
+// ============================================================================
+// カスタム範囲スライダーコントロール
+// CCustomRangeSliderCtrl
+// 2つのつまみを持ち、最小値・最大値の範囲を選択できるスライダーです。
+// （アクリルモードの挙動は CCustomSliderCtrl と同様です）
+// ============================================================================
 class CCustomRangeSliderCtrl : public CSliderCtrl
 {
-	DECLARE_DYNAMIC(CCustomRangeSliderCtrl)
-
+    DECLARE_DYNAMIC(CCustomRangeSliderCtrl)
 public:
-	CCustomRangeSliderCtrl();
-	virtual ~CCustomRangeSliderCtrl();
-	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
-	BOOL m_bAutoDelete;
+    CCustomRangeSliderCtrl();
+    virtual ~CCustomRangeSliderCtrl();
 
-	void SetRange(int nMin, int nMax, BOOL bRedraw = TRUE);
-	void SetSelection(int nMin, int nMax);
-	void GetSelection(int& nMin, int& nMax) const;
+    // コントロール破棄時に自動的に delete を行うかどうかのフラグ
+    void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+    BOOL m_bAutoDelete;
 
-	void SetPos(int nPos);
-	int GetPos() const;
+    // 全体の範囲設定
+    void SetRange(int mn, int mx, BOOL bRedraw = TRUE);
+
+    // 選択された範囲（つまみの位置）の設定・取得
+    void SetSelection(int mn, int mx);
+    void GetSelection(int& mn, int& mx) const;
+
+    // 現在の位置（ドラッグ中の仮想位置ではなく確定位置）の設定・取得
+    void SetPos(int nPos);
+    int GetPos() const;
+
+    // アクリルモードの設定
+    void SetAeroMode(BOOL b);
 
 protected:
-	virtual void PreSubclassWindow();
-	virtual void PostNcDestroy();
-	afx_msg void OnPaint();
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
-	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
-	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+    BOOL m_bAeroMode; // アクリルモードが有効かどうか
 
-	DECLARE_MESSAGE_MAP()
+    virtual void PreSubclassWindow();
+    virtual void PostNcDestroy();
+
+    // メッセージハンドラ
+    afx_msg void OnPaint();
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+    afx_msg BOOL OnEraseBkgnd(CDC*);
+    afx_msg void OnLButtonDown(UINT, CPoint);
+    afx_msg void OnLButtonUp(UINT, CPoint);
+    afx_msg void OnMouseMove(UINT, CPoint);
+
+    DECLARE_MESSAGE_MAP()
+
+    void PaintClient(CDC& dc);
 
 private:
-	void DrawRangeSlider(CDC* pDC);
-	int ValueToPixel(int nValue) const;
-	int PixelToValue(int nPixel) const;
-	int HitTest(CPoint point) const;
+    void DrawRangeSlider(CDC* pDC);
 
-	int m_nMin, m_nMax;
-	int m_nSelMin, m_nSelMax;
-	int m_nDragTarget;
-	int m_nLogicalPos;
-	BOOL m_bDragging;
-	int m_nVisualPos;
+    // 値とピクセル座標の相互変換、マウスクリック時のヒットテスト
+    int ValueToPixel(int v) const;
+    int PixelToValue(int x) const;
+    int HitTest(CPoint p) const; // 戻り値: 1=最小つまみ, 2=最大つまみ, 3=全体, 0=なし
+
+    // 状態保持用メンバ変数
+    int m_nMin, m_nMax;         // 全体の最小値・最大値
+    int m_nSelMin, m_nSelMax;   // 選択されている最小値・最大値
+    int m_nDragTarget;          // 現在ドラッグしている対象（HitTestの戻り値に対応）
+    int m_nLogicalPos;          // 確定された論理位置
+    BOOL m_bDragging;           // ドラッグ中かどうか
+    int m_nVisualPos;           // ドラッグ中の見た目上の位置
 };
 
-// カスタムチェックボックス
+// ============================================================================
+// カスタムチェックボックスコントロール
+// CCustomCheckBox
+// ============================================================================
 class CCustomCheckBox : public CButton
 {
-	DECLARE_DYNAMIC(CCustomCheckBox)
-
+    DECLARE_DYNAMIC(CCustomCheckBox)
 public:
-	CCustomCheckBox();
-	virtual ~CCustomCheckBox();
-	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
-	BOOL m_bAutoDelete;
+    CCustomCheckBox();
+    virtual ~CCustomCheckBox();
 
-	void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
-	int GetCheck();
-	void SetCheck(int nCheck);
+    // コントロール破棄時に自動的に delete を行うかどうかのフラグ
+    void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+    BOOL m_bAutoDelete;
+
+    // フォントとチェック状態の設定・取得
+    void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
+    int GetCheck();
+    void SetCheck(int n);
+
+    // アクリルモードの設定
+    void SetAeroMode(BOOL b)
+    {
+        m_bAeroMode = b;
+        if (GetSafeHwnd()) Invalidate();
+    }
 
 protected:
-	virtual void PreSubclassWindow();
-	virtual void PostNcDestroy();
-	afx_msg void OnPaint();
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
-	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
-	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
-	afx_msg void OnMouseLeave();
-	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
+    virtual void PreSubclassWindow();
+    virtual void PostNcDestroy();
 
-	DECLARE_MESSAGE_MAP()
+    // メッセージハンドラ
+    afx_msg void OnPaint();
+    afx_msg BOOL OnEraseBkgnd(CDC*);
+    afx_msg void OnLButtonDown(UINT, CPoint);
+    afx_msg void OnLButtonUp(UINT, CPoint);
+    afx_msg void OnMouseMove(UINT, CPoint);
+    afx_msg void OnMouseLeave();
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+
+    DECLARE_MESSAGE_MAP()
 
 private:
-	void OnDrawLayer(CDC* pDC, CRect rect);
+    void OnDrawLayer(CDC* pDC, CRect rect); // 実際の描画処理
 
-	BOOL m_bIsFlatStyle;
-	BOOL m_bIsPressed;
-	BOOL m_bIsHot;
-	BOOL m_bTracking;
-	int m_nCheck;
+    // 状態保持用メンバ変数
+    BOOL m_bIsFlatStyle; // フラットスタイルかどうか
+    BOOL m_bIsPressed;   // 押下状態かどうか
+    BOOL m_bIsHot;       // ホバー状態かどうか
+    BOOL m_bTracking;    // マウストラッキング中かどうか
+    int m_nCheck;        // チェック状態 (BST_CHECKED / BST_UNCHECKED)
+    BOOL m_bAeroMode;    // アクリルモードが有効かどうか
 };
 
-// カスタムグループボックス
+// ============================================================================
+// カスタムグループボックスコントロール
+// CCustomGroupBox
+// ============================================================================
 class CCustomGroupBox : public CButton
 {
-	DECLARE_DYNAMIC(CCustomGroupBox)
-
+    DECLARE_DYNAMIC(CCustomGroupBox)
 public:
-	CCustomGroupBox();
-	virtual ~CCustomGroupBox();
-	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
-	BOOL m_bAutoDelete;
+    CCustomGroupBox();
+    virtual ~CCustomGroupBox();
+
+    // コントロール破棄時に自動的に delete を行うかどうかのフラグ
+    void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+    BOOL m_bAutoDelete;
+
+    // アクリルモードの設定
+    void SetAeroMode(BOOL b)
+    {
+        m_bAeroMode = b;
+        if (GetSafeHwnd()) Invalidate();
+    }
 
 protected:
-	virtual void PreSubclassWindow();
-	virtual void PostNcDestroy();
-	afx_msg void OnPaint();
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+    virtual void PreSubclassWindow();
+    virtual void PostNcDestroy();
 
-	DECLARE_MESSAGE_MAP()
+    // メッセージハンドラ
+    afx_msg void OnPaint();
+    afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+    afx_msg BOOL OnEraseBkgnd(CDC*);
+
+    DECLARE_MESSAGE_MAP()
 
 private:
-	void DrawGroupBox(CDC* pDC, CRect& rect);
+    void DrawGroupBox(CDC* pDC, CRect& rect); // グループボックスの枠線とテキスト描画
+    BOOL m_bAeroMode;                         // アクリルモードが有効かどうか
 };
 
-// カスタムダイアログ
+// ============================================================================
+// アクリル設定を子コントロールへ伝播させるマクロ
+// PROPAGATE_AERO_TO_CHILDREN
+// ============================================================================
+// ラベル・スライダー・グループ枠は透過、リスト・ボタン類は不透明
+#define PROPAGATE_AERO_TO_CHILDREN(hWndParent, bAero)                                  \
+do {                                                                                   \
+    const BOOL _bA = (bAero);                                                          \
+    HWND _hc = ::GetWindow((hWndParent), GW_CHILD);                                    \
+    while (_hc) {                                                                      \
+        CWnd* _pw = CWnd::FromHandlePermanent(_hc);                                    \
+        if (_pw) {                                                                     \
+            if      (auto* p = dynamic_cast<CCustomStatic*>(_pw))          p->SetAeroMode(_bA); \
+            else if (auto* p = dynamic_cast<CCustomGroupBox*>(_pw))        p->SetAeroMode(_bA); \
+            else if (auto* p = dynamic_cast<CCustomSliderCtrl*>(_pw))      p->SetAeroMode(_bA); \
+            else if (auto* p = dynamic_cast<CCustomRangeSliderCtrl*>(_pw)) p->SetAeroMode(_bA); \
+            else if (auto* p = dynamic_cast<CCustomListBox*>(_pw))         p->SetAeroMode(FALSE); \
+            else if (auto* p = dynamic_cast<CCustomComboBox*>(_pw))        p->SetAeroMode(FALSE); \
+            else if (auto* p = dynamic_cast<CCustomListCtrl*>(_pw))        p->SetAeroMode(FALSE); \
+            else if (auto* p = dynamic_cast<CCustomCheckBox*>(_pw))        p->SetAeroMode(_bA); \
+            CCC_SetChildTransparent(_hc, FALSE);                                       \
+            _pw->Invalidate();                                                         \
+        }                                                                              \
+        _hc = ::GetWindow(_hc, GW_HWNDNEXT);                                           \
+    }                                                                                  \
+} while(0)
+
+// ============================================================================
+// カスタムダイアログクラス (CDialog派生)
+// CCustomDialog
+// ============================================================================
 class CCustomDialog : public CDialog
 {
-	DECLARE_DYNAMIC(CCustomDialog)
-
+    DECLARE_DYNAMIC(CCustomDialog)
 public:
-	CCustomDialog();
-	CCustomDialog(UINT nIDTemplate, CWnd* pParentWnd = NULL);
-	virtual ~CCustomDialog();
+    CCustomDialog();
+    CCustomDialog(UINT nIDTemplate, CWnd* pParentWnd = NULL);
+    virtual ~CCustomDialog();
+
+    // アクリルぼかし機能の有効・無効を切り替えます
+    void EnableAero(BOOL bEnable);
+    BOOL IsAeroEnabled() const { return m_bAeroEnabled; }
 
 protected:
-	virtual BOOL OnInitDialog();
-	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	afx_msg void OnPaint();
-	afx_msg LRESULT OnSubclassControls(WPARAM wParam, LPARAM lParam);
+    virtual BOOL OnInitDialog();
 
-	DECLARE_MESSAGE_MAP()
+    // メッセージハンドラ
+    afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
+    afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+    afx_msg void OnPaint();
+    afx_msg LRESULT OnSubclassControls(WPARAM, LPARAM);
+
+    DECLARE_MESSAGE_MAP()
+
+    CBrush m_brDialog;   // ダイアログの背景塗りつぶし用ブラシ
+    BOOL m_bAeroEnabled; // アクリルぼかしが有効かどうか
+
+    // Windows 11 のアクリル背景時に使用する透明ブラシ (NULL_BRUSH 相当)
+    CBrush m_brNull;
 
 private:
-	CBrush m_brDialog;
-	void SubclassChildControls();
+    // ダイアログ上の標準コントロールをカスタムコントロールに自動置換(サブクラス化)します
+    void SubclassChildControls();
 };
 
-// カスタムBlurDialogBase
+// ============================================================================
+// ぼかし適用済みカスタムダイアログの基底クラス (CDialog派生)
+// CCustomBlurDialogBase
+// ============================================================================
 class CCustomBlurDialogBase : public CCustomDialog
 {
-	DECLARE_DYNAMIC(CCustomBlurDialogBase)
-
+    DECLARE_DYNAMIC(CCustomBlurDialogBase)
 public:
-	CCustomBlurDialogBase();
-	CCustomBlurDialogBase(UINT nIDTemplate, CWnd* pParent = NULL);
-	virtual ~CCustomBlurDialogBase();
+    CCustomBlurDialogBase();
+    CCustomBlurDialogBase(UINT nIDTemplate, CWnd* pParent = NULL);
+    virtual ~CCustomBlurDialogBase();
 
 protected:
-	virtual BOOL OnInitDialog();
-	virtual int OnCreate(LPCREATESTRUCT lpCreateStruct);
-	virtual void ApplyDwmBlur();
+    virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
+    virtual BOOL OnInitDialog();
+
+    // savedata.aero==1 のとき DWM ぼかしを適用
+    virtual void ApplyDwmBlur();
+    afx_msg void OnSize(UINT nType, int cx, int cy);
+    afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
+    afx_msg void OnCompositionChanged();
+    afx_msg void OnDestroy();
+    afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
+
+    DECLARE_MESSAGE_MAP()
 
 private:
-	CBrush m_brDialog;
-	BOOL m_bBlurApplied;
+    BOOL m_bBlurApplied;
+    CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers;
 };
 
-// カスタムDialogEx
+// ============================================================================
+// カスタムダイアログクラス (CDialogEx派生)
+// CCustomDialogEx
+// ============================================================================
 class CCustomDialogEx : public CDialogEx
 {
-	DECLARE_DYNAMIC(CCustomDialogEx)
-
+    DECLARE_DYNAMIC(CCustomDialogEx)
 public:
-	CCustomDialogEx();
-	CCustomDialogEx(UINT nIDTemplate, CWnd* pParentWnd = NULL);
-	virtual ~CCustomDialogEx();
+    CCustomDialogEx();
+    CCustomDialogEx(UINT nIDTemplate, CWnd* pParentWnd = NULL);
+    virtual ~CCustomDialogEx();
+
+    // アクリルぼかし機能の有効・無効を切り替えます
+    void EnableAero(BOOL bEnable);
+    BOOL IsAeroEnabled() const { return m_bAeroEnabled; }
 
 protected:
-	virtual BOOL OnInitDialog();
-	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
-	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
-	afx_msg void OnPaint();
-	afx_msg LRESULT OnSubclassControls(WPARAM wParam, LPARAM lParam);
+    virtual BOOL OnInitDialog();
 
-	DECLARE_MESSAGE_MAP()
+    // メッセージハンドラ
+    afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
+    afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+    afx_msg void OnPaint();
+    afx_msg LRESULT OnSubclassControls(WPARAM, LPARAM);
+
+    DECLARE_MESSAGE_MAP()
+
+    CBrush m_brDialog;   // ダイアログの背景塗りつぶし用ブラシ
+    BOOL m_bAeroEnabled; // アクリルぼかしが有効かどうか
+
+    // Windows 11 のアクリル背景時に使用する透明ブラシ (NULL_BRUSH 相当)
+    CBrush m_brNull;
 
 private:
-	CBrush m_brDialog;
-	void SubclassChildControls();
+    // ダイアログ上の標準コントロールをカスタムコントロールに自動置換(サブクラス化)します
+    void SubclassChildControls();
 };
 
-// カスタムBlurDialogExBase
+// ============================================================================
+// ぼかし適用済みカスタムダイアログの基底クラス (CDialogEx派生)
+// CCustomBlurDialogExBase
+// ============================================================================
 class CCustomBlurDialogExBase : public CCustomDialogEx
 {
-	DECLARE_DYNAMIC(CCustomBlurDialogExBase)
-
+    DECLARE_DYNAMIC(CCustomBlurDialogExBase)
 public:
-	CCustomBlurDialogExBase();
-	CCustomBlurDialogExBase(UINT nIDTemplate, CWnd* pParent = nullptr);
-	virtual ~CCustomBlurDialogExBase();
+    CCustomBlurDialogExBase();
+    CCustomBlurDialogExBase(UINT nIDTemplate, CWnd* pParent = nullptr);
+    virtual ~CCustomBlurDialogExBase();
 
 protected:
-	virtual BOOL OnInitDialog();
-	virtual int OnCreate(LPCREATESTRUCT lpCreateStruct);
-	virtual void ApplyDwmBlur();
+    virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
+    virtual BOOL OnInitDialog();
+
+    // savedata.aero==1 のとき DWM ぼかしを適用
+    virtual void ApplyDwmBlur();
+    afx_msg void OnSize(UINT nType, int cx, int cy);
+    afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
+    afx_msg void OnCompositionChanged();
+    afx_msg void OnDestroy();
+    afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
+
+    DECLARE_MESSAGE_MAP()
 
 private:
-	CBrush m_brDialog;
-	BOOL m_bBlurApplied;
+    BOOL m_bBlurApplied;
+    CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers;
 };

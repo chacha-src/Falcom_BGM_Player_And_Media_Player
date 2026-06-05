@@ -458,7 +458,7 @@ int ogpl0 = 0;
 // アプリケーションのバージョン情報で使われている CAboutDlg ダイアログ
 extern void DoEvent();
 #include "CCustomControl.h"
-class CAboutDlg : public CCustomDialog
+class CAboutDlg : public CCustomBlurDialogBase
 {
 public:
 	CAboutDlg(CWnd* pParent = NULL);
@@ -487,7 +487,7 @@ public:
 	CCustomStandardButton m_okdummy;
 };
 
-CAboutDlg::CAboutDlg(CWnd* pParent) : CCustomDialog(CAboutDlg::IDD, pParent)
+CAboutDlg::CAboutDlg(CWnd* pParent) : CCustomBlurDialogBase(CAboutDlg::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(CAboutDlg)
 	//}}AFX_DATA_INIT
@@ -495,7 +495,7 @@ CAboutDlg::CAboutDlg(CWnd* pParent) : CCustomDialog(CAboutDlg::IDD, pParent)
 
 void CAboutDlg::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(CAboutDlg)
 	//}}AFX_DATA_MAP
 	DDX_Control(pDX, IDC_STATICin, m_in);
@@ -504,7 +504,7 @@ void CAboutDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
-BEGIN_MESSAGE_MAP(CAboutDlg, CCustomDialog)
+BEGIN_MESSAGE_MAP(CAboutDlg, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(CAboutDlg)
 	// メッセージ ハンドラがありません。
 	//}}AFX_MSG_MAP
@@ -798,7 +798,7 @@ END_MESSAGE_MAP()
 double aa1_ = 0;
 BOOL CAboutDlg::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(L"oggのバージョン情報", L"ogg Version Info", L"Info version ogg", L"Info versione ogg", L"Info version ogg", L"ogg 버전 정보", L"ogg版本信息", L"معلومات إصدار ogg", L"Информация о версии ogg", L"ogg Versionsinfo", L"Info versao ogg", L"ogg versie-info", L"Informacje o wersji ogg", L"ogg surum bilgisi"));
 	SetDlgItemText(IDOK, LL14(L"OK", L"OK", L"OK", L"OK", L"OK", L"확인", L"确定", L"موافق", L"OK", L"OK", L"OK", L"OK", L"OK", L"Tamam"));
@@ -828,7 +828,7 @@ BOOL CAboutDlg::OnInitDialog()
 // COggDlg ダイアログ
 
 COggDlg::COggDlg(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(COggDlg::IDD, pParent)
+	: CCustomBlurDialogBase(COggDlg::IDD, pParent)
 	, m_hTimerpVsyncThread(NULL)
 	, m_hTimerpVsyncStopEvent(NULL)
 {
@@ -842,7 +842,7 @@ COggDlg::COggDlg(CWnd* pParent /*=NULL*/)
 
 void COggDlg::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(COggDlg)
 	DDX_Control(pDX, IDC_CHECK15, m_ysc2);
 	DDX_Control(pDX, IDC_CHECK14, m_ysc1);
@@ -936,7 +936,7 @@ void COggDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_BUTTON59, m_eqq);
 }
 
-BEGIN_MESSAGE_MAP(COggDlg, CCustomDialog)
+BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(COggDlg)
 	ON_WM_SYSCOMMAND()
 	ON_WM_PAINT()
@@ -994,6 +994,8 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomDialog)
 	ON_MESSAGE(WM_HOTKEY, OnHotKey)
 	ON_WM_KILLFOCUS()
 	ON_WM_SIZE()
+	ON_WM_SHOWWINDOW()
+	ON_WM_ERASEBKGND()
 	ON_WM_CTLCOLOR()
 	ON_BN_CLICKED(IDC_BUTTON57, &COggDlg::OnPlayList)
 	ON_BN_CLICKED(IDC_BUTTON58, &COggDlg::OnBnmp3jake)
@@ -1322,7 +1324,7 @@ BOOL COggDlg::OnCommand(WPARAM wParam, LPARAM lParam)
 		else if (3 == CommandID)
 			OnPlayList();
 	}
-	return CCustomDialog::OnCommand(wParam, lParam);
+	return CCustomBlurDialogBase::OnCommand(wParam, lParam);
 }
 
 void COggDlg::OnSysCommand(UINT nID, LPARAM lParam)
@@ -1334,7 +1336,7 @@ void COggDlg::OnSysCommand(UINT nID, LPARAM lParam)
 	}
 	else
 	{
-		CCustomDialog::OnSysCommand(nID, lParam);
+		CCustomBlurDialogBase::OnSysCommand(nID, lParam);
 	}
 }
 
@@ -2145,7 +2147,7 @@ static void COgg_RequestTimerp(COggDlg* dlg)
 
 BOOL COggDlg::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	g_oggUiThreadId = GetCurrentThreadId();
 	ms2 = 0;
 	QueryPerformanceFrequency(&freq);
@@ -2628,6 +2630,15 @@ BOOL COggDlg::OnInitDialog()
 	// ツールチップ・更新チェック・スペアナ窓関数テーブルなど、初回表示後でよい重い処理
 	PostMessage(WM_OGG_DEFERRED_HEAVY_INIT, 0, 0);
 
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled())
+	{
+		ApplyDwmBlur();
+		Invalidate(FALSE);
+		UpdateWindow();
+	}
+#endif
+
 	AfxBeginThread((AFX_THREADPROC)TheadLoop, NULL, THREAD_PRIORITY_TIME_CRITICAL);
 	return TRUE;  // TRUE を返すとコントロールに設定したフォーカスは失われません。
 }
@@ -2653,15 +2664,54 @@ void COggDlg::OnPaint()
 	}
 	else
 	{
-
-
+		const int destW = (int)((MDCP) * hD);
+		const int destH = (int)((81 + 16) * hD * 4);
+		const int srcW = MDCP + 5;
+		const int srcH = (81 + 16) * 4;
+		CRect clip;
+		dcc.GetClipBox(&clip);
+		CRect gdiRect(0, 0, destW, destH);
+		CRect gdiClip;
+		const BOOL bGdiIntersect = gdiClip.IntersectRect(&clip, &gdiRect);
+#if CCUSTOM_AERO_SUPPORT
+		if (CCC_IsAeroEnabled() && CCC_IsWin11())
+		{
+			const BOOL bSpectrumOnly = (savedata.ms2 <= ms2
+				&& clip.bottom <= destH + 8
+				&& clip.Height() <= destH + 8);
+			if (savedata.aero == 1 && dc.m_hDC != NULL
+				&& (savedata.ms2 <= ms2 || bGdiIntersect))
+			{
+				dcc.SelectClipRgn(NULL);
+				CCC_BlitStretchChromaNoFlicker(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
+				if (savedata.ms2 <= ms2)
+					ms2 = 0;
+			}
+			if (!bSpectrumOnly)
+			{
+				dcc.SelectClipRgn(NULL);
+				const RECT gdiPreserve = { 0, 0, destW, destH };
+				CCC_PaintDialogAeroGaps(dcc, this, &gdiPreserve);
+			}
+		}
+		else
+#endif
 		if (savedata.ms2 <= ms2) {
-			SetStretchBltMode(dcc.m_hDC, COLORONCOLOR); //高画質モード
-			SetBrushOrgEx(dcc.m_hDC, 0, 0, NULL); //ブラシのずれを防止
-			dcc.StretchBlt(0, 0, (int)((MDCP)*hD), (int)((81 + 16) * hD * 4), &dc, 0, 0, MDCP + 5, (81 + 16) * 4, SRCCOPY);
+#if CCUSTOM_AERO_SUPPORT
+			if (savedata.aero == 1 && CCC_IsWin11())
+			{
+				CCC_SelectClipExcludeChildren(dcc, this);
+				CCC_BlitStretchChroma(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
+			}
+			else
+#endif
+			{
+				SetStretchBltMode(dcc.m_hDC, COLORONCOLOR);
+				SetBrushOrgEx(dcc.m_hDC, 0, 0, NULL);
+				dcc.StretchBlt(0, 0, destW, destH, &dc, 0, 0, srcW, srcH, SRCCOPY);
+			}
 			ms2 = 0;
 		}
-		///CCustomDialog::OnPaint();
 	}
 }
 BYTE offenc[7] = { 0xd9,0x3F,0x86,0x7B,0xC7,0x61,0xaa };
@@ -13931,7 +13981,7 @@ BOOL COggDlg::OnCopyData(CWnd* pWnd, COPYDATASTRUCT* pCopyDataStruct)
 	else if (filen_ == "*5") OnButton21();
 	else if (filen_ == "*6") OnButton9_Folder();
 	else filen = filen_;
-	return CCustomDialog::OnCopyData(pWnd, pCopyDataStruct);
+	return CCustomBlurDialogBase::OnCopyData(pWnd, pCopyDataStruct);
 }
 
 void COggDlg::dp(CString a)
@@ -14215,7 +14265,7 @@ void COggDlg::OnDropFiles(HDROP hDropInfo)
 				L"Eenvoudige ogg/wav Speler",
 				L"Prosty Odtwarzacz ogg/wav",
 				L"ogg/wav Basit Oynatıcı"), /* トルコ語タイトル */
-			MB_ICONEXCLAMATION); CCustomDialog::OnDropFiles(hDropInfo);
+			MB_ICONEXCLAMATION); CCustomBlurDialogBase::OnDropFiles(hDropInfo);
 		return;
 	}
 	DragQueryFile(hDropInfo, (UINT)0, filen_c, sizeof(filen_c));
@@ -14256,12 +14306,12 @@ void COggDlg::OnDropFiles(HDROP hDropInfo)
 				L"Prosty Odtwarzacz ogg/wav",
 				L"ogg/wav Basit Oynatıcı"), /* トルコ語タイトル */
 			MB_ICONEXCLAMATION);
-		CCustomDialog::OnDropFiles(hDropInfo);
+		CCustomBlurDialogBase::OnDropFiles(hDropInfo);
 		return;
 	}
 	f.Close();
 	dp(filen);
-	CCustomDialog::OnDropFiles(hDropInfo);
+	CCustomBlurDialogBase::OnDropFiles(hDropInfo);
 }
 
 BOOL CALLBACK pp(HWND hwnd, LPARAM p);
@@ -14627,7 +14677,7 @@ BOOL COggDlg::DestroyWindow()
 		_tchdir(tmp_savedir);
 	}
 
-	return CCustomDialog::DestroyWindow();
+	return CCustomBlurDialogBase::DestroyWindow();
 }
 //oggから実際にデータを獲得する
 int mcopy(char* a, int len)
@@ -16426,7 +16476,7 @@ void timerog1(UINT nIDEvent)
 			maini = NULL;
 		}
 
-		if (savedata.aero) {
+		if (savedata.aero == 2) {
 			maini = new CImageBase;
 			maini->Create(og);
 			maini->oya = og;
@@ -16513,7 +16563,7 @@ void COggDlg::OnTimer(UINT nIDEvent)
 {
 	// TODO: この位置にメッセージ ハンドラ用のコードを追加するかまたはデフォルトの処理を呼び出してください
 	timerog(nIDEvent);
-	CCustomDialog::OnTimer(nIDEvent);
+	CCustomBlurDialogBase::OnTimer(nIDEvent);
 }
 LRESULT COggDlg::dp2(WPARAM, LPARAM)
 {
@@ -18229,14 +18279,14 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
-	return CCustomDialog::PreTranslateMessage(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
 void COggDlg::OnOK()
 {
 	// TODO: この位置にその他の検証用のコードを追加してください
 	stop();
-	CCustomDialog::OnOK();
+	CCustomBlurDialogBase::OnOK();
 }
 extern IMediaEvent* pMediaEvent;
 static volatile LONG s_onRestartBusy = 0;
@@ -19282,7 +19332,7 @@ void COggDlg::OnButton9_Folder()
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	CFolder* a = new CFolder(CWnd::FromHandle(GetSafeHwnd()));
-	if (savedata.aero) {
+	if (savedata.aero == 2) {
 		::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		if (maini)::SetWindowPos(maini->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	}
@@ -19601,7 +19651,7 @@ void COggDlg::OnNMReleasedcaptureSlider2(NMHDR * pNMHDR, LRESULT * pResult)
 
 void COggDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
-	CCustomDialog::OnKeyDown(nChar, nRepCnt, nFlags);
+	CCustomBlurDialogBase::OnKeyDown(nChar, nRepCnt, nFlags);
 }
 
 LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
@@ -19842,7 +19892,7 @@ void COggDlg::rl(int a)
 void COggDlg::OnActivate(UINT nState, CWnd * pWndOther, BOOL bMinimized)
 {
 
-	CCustomDialog::OnActivate(nState, pWndOther, bMinimized);
+	CCustomBlurDialogBase::OnActivate(nState, pWndOther, bMinimized);
 	int l = 5;
 	if (plw) {
 		if ((nState == WA_ACTIVE || nState == WA_CLICKACTIVE) && bMinimized == 0 && pl->m_saisyo.GetCheck()) {
@@ -19870,13 +19920,13 @@ void COggDlg::OnActivate(UINT nState, CWnd * pWndOther, BOOL bMinimized)
 
 void COggDlg::OnSysKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
-	CCustomDialog::OnSysKeyDown(nChar, nRepCnt, nFlags);
+	CCustomBlurDialogBase::OnSysKeyDown(nChar, nRepCnt, nFlags);
 }
 
 void COggDlg::OnKillFocus(CWnd * pNewWnd)
 {
 
-	CCustomDialog::OnKillFocus(pNewWnd);
+	CCustomBlurDialogBase::OnKillFocus(pNewWnd);
 	UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY0);
 	UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY1);
 	UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY2);
@@ -19890,10 +19940,39 @@ void COggDlg::OnKillFocus(CWnd * pNewWnd)
 	//	::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 }
 
+void COggDlg::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
+#if CCUSTOM_AERO_SUPPORT
+	if (bShow && CCC_IsAeroEnabled())
+	{
+		ApplyDwmBlur();
+		CCC_RefreshDialogDwmBlur(m_hWnd);
+		Invalidate(FALSE);
+	}
+#endif
+}
+
+BOOL COggDlg::OnEraseBkgnd(CDC* pDC)
+{
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+		return TRUE;
+#endif
+	return CCustomBlurDialogBase::OnEraseBkgnd(pDC);
+}
+
 void COggDlg::OnSize(UINT nType, int cx, int cy)
 {
 	extern CImageBase* playbase;
-	CCustomDialog::OnSize(nType, cx, cy);
+	CCustomBlurDialogBase::OnSize(nType, cx, cy);
+#if CCUSTOM_AERO_SUPPORT
+	if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
+	{
+		ApplyDwmBlur();
+		Invalidate(FALSE);
+	}
+#endif
 	if (nType == SIZE_MINIMIZED) {
 		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY0);
 		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY1);
@@ -20010,10 +20089,10 @@ void COggDlg::_CreateShellLink(LPSTR pszArguments, LPSTR pszTitle, IShellLink * 
 
 HBRUSH COggDlg::OnCtlColor(CDC * pDC, CWnd * pWnd, UINT nCtlColor)
 {
-	HBRUSH hbr = CCustomDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
 
 	// TODO:  ここで DC の属性を変更してください。
-	if (savedata.aero == 1) {
+	if (savedata.aero == 2) {
 		if (nCtlColor == CTLCOLOR_DLG)
 		{
 			return m_brDlg;
@@ -20319,12 +20398,22 @@ void COggDlg::OnBnmp3jake()
 {
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
 	if (mi) {
-		delete mi;
-		delete jake;
+		if (::IsWindow(mi->m_hWnd))
+			mi->DestroyWindow();
+		else
+			delete mi;
+		mi = NULL;
+	}
+	if (jake) {
+		if (::IsWindow(jake->m_hWnd))
+			jake->DestroyWindow();
+		else
+			delete jake;
+		jake = NULL;
 	}
 	mi = new CMp3Image;
 	mi->Create(og);
-	if (savedata.aero == 1) {
+	if (savedata.aero == 2) {
 		jake = new CImageBase;
 		if (jake->Create(og) == FALSE) {
 			AfxMessageBox(LL14(
@@ -20623,7 +20712,7 @@ void COggDlg::LoadJacket(CString s)
 
 void COggDlg::OnDestroy()
 {
-	CCustomDialog::OnDestroy();
+	CCustomBlurDialogBase::OnDestroy();
 
 	// TODO: ここにメッセージ ハンドラー コードを追加します。
 	m_newFont->DeleteObject();
@@ -20637,17 +20726,17 @@ void COggDlg::OnDestroy()
 BOOL COggDlg::Create(LPCTSTR lpszTemplateName, CWnd * pParentWnd)
 {
 	// TODO: ここに特定なコードを追加するか、もしくは基底クラスを呼び出してください。
-	return CCustomDialog::Create(lpszTemplateName, pParentWnd);
+	return CCustomBlurDialogBase::Create(lpszTemplateName, pParentWnd);
 }
 
 
 int COggDlg::OnCreate(LPCREATESTRUCT lpCreateStruct)
 {
-	if (CCustomDialog::OnCreate(lpCreateStruct) == -1)
+	if (CCustomBlurDialogBase::OnCreate(lpCreateStruct) == -1)
 		return -1;
 
 	// TODO: ここに特定な作成コードを追加してください。
-	if (savedata.aero == 1) {
+	if (savedata.aero == 2) {
 		ModifyStyleEx(0, WS_EX_LAYERED);
 
 		// レイヤードウィンドウの不透明度と透明のカラーキー
@@ -20664,7 +20753,11 @@ int COggDlg::OnCreate(LPCREATESTRUCT lpCreateStruct)
 
 void COggDlg::OnMoving(UINT fwSide, LPRECT pRect)
 {
-	CCustomDialog::OnMoving(fwSide, pRect);
+	CCustomBlurDialogBase::OnMoving(fwSide, pRect);
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled())
+		CCC_RefreshDialogDwmBlur(m_hWnd);
+#endif
 	CRect r;
 	GetWindowRect(&r);
 	if (maini)
@@ -20678,7 +20771,7 @@ void COggDlg::OnMoving(UINT fwSide, LPRECT pRect)
 
 void COggDlg::OnSetFocus(CWnd * pOldWnd)
 {
-	CCustomDialog::OnSetFocus(pOldWnd);
+	CCustomBlurDialogBase::OnSetFocus(pOldWnd);
 
 	// TODO: ここにメッセージ ハンドラー コードを追加します。
 }
@@ -20688,13 +20781,13 @@ int COggDlg::OnMouseActivate(CWnd * pDesktopWnd, UINT nHitTest, UINT message)
 {
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
 
-	return CCustomDialog::OnMouseActivate(pDesktopWnd, nHitTest, message);
+	return CCustomBlurDialogBase::OnMouseActivate(pDesktopWnd, nHitTest, message);
 }
 
 int npap = 0;
 void COggDlg::OnActivateApp(BOOL bActive, DWORD dwThreadID)
 {
-	CCustomDialog::OnActivateApp(bActive, dwThreadID);
+	CCustomBlurDialogBase::OnActivateApp(bActive, dwThreadID);
 
 	// アプリ非アクティブ時は必ずホットキーを解除する。
 	// WM_ACTIVATEはフォーカスを失ったウィンドウにのみ送られるため、
@@ -20724,7 +20817,7 @@ BOOL COggDlg::OnNcActivate(BOOL bActive)
 	else {
 		SetTimer(4924, 10, NULL);
 	}
-	return CCustomDialog::OnNcActivate(bActive);
+	return CCustomBlurDialogBase::OnNcActivate(bActive);
 }
 
 void COggDlg::OnTempoStatic()
@@ -20767,7 +20860,7 @@ void COggDlg::OnMouseMove(UINT nFlags, CPoint point)
 		}
 	}
 
-	CCustomDialog::OnMouseMove(nFlags, point);
+	CCustomBlurDialogBase::OnMouseMove(nFlags, point);
 }
 
 void COggDlg::OnLButtonDown(UINT nFlags, CPoint point)
@@ -20792,7 +20885,7 @@ void COggDlg::OnLButtonDown(UINT nFlags, CPoint point)
 		m_tempo_sl.SetPos(200);
 		tempo = 200;
 	}
-	CCustomDialog::OnLButtonDown(nFlags, point);
+	CCustomBlurDialogBase::OnLButtonDown(nFlags, point);
 }
 
 void COggDlg::OnStnClickedStatic2()

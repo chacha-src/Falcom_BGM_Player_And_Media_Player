@@ -11,7 +11,7 @@
 // Citiran_FC ダイアログ
 #include "CCustomControl.h"
 
-class Citiran_FC : public CCustomDialog
+class Citiran_FC : public CCustomBlurDialogBase
 {
 // コンストラクション
 public:

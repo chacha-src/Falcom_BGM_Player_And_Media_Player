@@ -3,7 +3,7 @@
 
 // CDino ダイアログ
 
-class CDino : public CCustomDialog
+class CDino : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CDino)
 

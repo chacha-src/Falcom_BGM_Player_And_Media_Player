@@ -1,7 +1,7 @@
 ﻿#include "stdafx.h"
 #include "CBlurDialogExBase.h"
 
-IMPLEMENT_DYNAMIC(CBlurDialogExBase, CCustomDialogEx)
+IMPLEMENT_DYNAMIC(CBlurDialogExBase, CCustomBlurDialogExBase)
 
 BEGIN_MESSAGE_MAP(CBlurDialogExBase, CDialogEx)
 	ON_WM_CREATE()

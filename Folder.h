@@ -12,7 +12,7 @@
 // CFolder ダイアログ
 #include "CCustomControl.h"
 
-class CFolder : public CCustomDialog
+class CFolder : public CCustomBlurDialogBase
 {
 // コンストラクション
 public:

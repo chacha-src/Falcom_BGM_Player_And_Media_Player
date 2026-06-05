@@ -7,7 +7,7 @@
 // CMp3Image ダイアログ
 
 
-class CMp3Image : public CCustomDialog
+class CMp3Image : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CMp3Image)
 

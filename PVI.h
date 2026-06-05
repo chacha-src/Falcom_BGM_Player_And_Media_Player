@@ -4,7 +4,7 @@
 
 // CPVI ダイアログ
 
-class CPVI : public CCustomDialog
+class CPVI : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CPVI)
 

@@ -13,10 +13,10 @@
 
 
 
-IMPLEMENT_DYNAMIC(CArc, CCustomDialog)
+IMPLEMENT_DYNAMIC(CArc, CCustomBlurDialogBase)
 
 CArc::CArc(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CArc::IDD, pParent)
+	: CCustomBlurDialogBase(CArc::IDD, pParent)
 {
 
 }
@@ -27,13 +27,13 @@ CArc::~CArc()
 
 void CArc::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CArc, CCustomDialog)
+BEGIN_MESSAGE_MAP(CArc, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	ON_WM_PAINT()
 	ON_BN_CLICKED(IDOK, &CArc::OnBnClickedOk)
@@ -1303,7 +1303,7 @@ void CArc::OnDblclkList1()
 
 BOOL CArc::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"アークトゥルス -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-", L"Arcturus -Arcturus-"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	
@@ -1331,12 +1331,12 @@ void CArc::OnPaint()
 {
 	CPaintDC dc(this); // device context for painting
 					   // TODO: ここにメッセージ ハンドラー コードを追加します。
-					   // 描画メッセージで CCustomDialog::OnPaint() を呼び出さないでください。
+					   // 描画メッセージで CCustomBlurDialogBase::OnPaint() を呼び出さないでください。
 }
 
 void CArc::OnBnClickedOk()
 {
-	CCustomDialog::OnOK();
+	CCustomBlurDialogBase::OnOK();
 }
 
 

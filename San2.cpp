@@ -8,10 +8,10 @@
 
 // CSan2 ダイアログ
 
-IMPLEMENT_DYNAMIC(CSan2, CCustomDialog)
+IMPLEMENT_DYNAMIC(CSan2, CCustomBlurDialogBase)
 
 CSan2::CSan2(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CSan2::IDD, pParent)
+	: CCustomBlurDialogBase(CSan2::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CSan2::~CSan2()
 
 void CSan2::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CSan2, CCustomDialog)
+BEGIN_MESSAGE_MAP(CSan2, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CSan2);
 
@@ -885,7 +885,7 @@ void CSan2::OnDblclkList1()
 
 BOOL CSan2::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"幻想三国志２", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"환상삼국지 2", L"幻想三国志2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	SetDlgItemText(IDC_STATIC, LL14(L"動画(★印)を再生するにはBinkの環境が必要です\nreadme.txtを読んで導入してください。", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup."));

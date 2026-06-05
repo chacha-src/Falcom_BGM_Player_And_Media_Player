@@ -1,9 +1,9 @@
-﻿#pragma once
+#pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include <vector>
 
-class CPianoRoll : public CCustomDialogEx
+class CPianoRoll : public CCustomBlurDialogExBase
 {
     DECLARE_DYNAMIC(CPianoRoll)
 
@@ -36,6 +36,7 @@ protected:
     afx_msg void OnTimer(UINT_PTR nIDEvent);
     afx_msg void OnSize(UINT nType, int cx, int cy);
     afx_msg void OnMove(int x, int y);
+    afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg void OnClose();
     virtual BOOL PreTranslateMessage(MSG* pMsg);
 

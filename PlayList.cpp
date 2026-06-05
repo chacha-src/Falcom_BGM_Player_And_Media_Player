@@ -57,7 +57,7 @@ static bool DeserializeLogFont(const TCHAR* str, LOGFONT* lf)
 
 // CPlayList ダイアログ
 
-IMPLEMENT_DYNAMIC(CPlayList, CCustomDialog)
+IMPLEMENT_DYNAMIC(CPlayList, CCustomBlurDialogBase)
 
 extern 	CString ext[150][300];
 extern 	CString kpif[400];
@@ -165,7 +165,7 @@ static void WavReadRiffListInfoTags(const CString& fname, TCHAR* nameOut, TCHAR*
 } // namespace
 
 CPlayList::CPlayList(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CPlayList::IDD, pParent)
+	: CCustomBlurDialogBase(CPlayList::IDD, pParent)
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDI_PL);
 	pc=NULL;
@@ -185,7 +185,7 @@ CPlayList::~CPlayList()
 
 void CPlayList::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_BUTTON1, m_lsup);
 	DDX_Control(pDX, IDC_BUTTON5, m_lup);
 	DDX_Control(pDX, IDC_BUTTON10, m_lsdown);
@@ -209,7 +209,7 @@ void CPlayList::DoDataExchange(CDataExchange* pDX)
 }
 
 
-BEGIN_MESSAGE_MAP(CPlayList, CCustomDialog)
+BEGIN_MESSAGE_MAP(CPlayList, CCustomBlurDialogBase)
 	ON_WM_NCDESTROY()
 	ON_WM_CREATE()
 	ON_WM_CLOSE()
@@ -286,7 +286,7 @@ int ogpl = 0;
 
 BOOL CPlayList::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 
 	CDC *desktopDc = GetDC();
 	// Get native resolution
@@ -310,20 +310,6 @@ BOOL CPlayList::OnInitDialog()
 	SetDlgItemText(IDC_BUTTON3, LL14(L"名前変更", L"Rename", L"Renommer", L"Rinomina", L"Cambiar nombre", L"이름 바꾸기", L"重命名", L"إعادة التسمية", L"Переименовать", L"Umbenennen", L"Renomear", L"Hernoemen", L"Zmie? nazw?", L"Yeniden adland?r"));
 	SetDlgItemText(IDC_PLAYDELETE, LL14(L"リスト削除", L"Delete list", L"Supprimer la liste", L"Elimina lista", L"Eliminar lista", L"목록 삭제", L"删除列表", L"حذف القائمة", L"Удалить список", L"Liste loschen", L"Excluir lista", L"Lijst verwijderen", L"Usu? list?", L"Listeyi sil"));
 	SetDlgItemText(IDC_PIANOROLL, LL14(L"ピアノロール", L"Piano Roll", L"Rouleau piano", L"Rotolo pianoforte", L"Rollo de piano", L"피아노 롤", L"钢琴卷帘", L"لوحة البيانو", L"Пианоролл", L"Klavierrolle", L"Rolo de piano", L"Pianorol", L"Rolka pianina", L"Piyano rulosu"));
-	m_lsup.SetIcon(IDR_SUP);
-	m_lsup.SetFlat(TRUE);
-	m_lup.SetIcon(IDR_UP);
-	m_lup.SetFlat(TRUE);
-	m_lsdown.SetIcon(IDR_SDOWN);
-	m_lsdown.SetFlat(TRUE);
-	m_ldown.SetIcon(IDR_DOWN);
-	m_ldown.SetFlat(TRUE);
-
-	m_findup.SetIcon(IDR_DOWN);
-	m_findup.SetFlat(TRUE);
-	m_finddown.SetIcon(IDR_UP);
-	m_finddown.SetFlat(TRUE);
-
 	m_tooltip.Create(this,TTS_ALWAYSTIP | TTS_BALLOON);
 	m_tooltip.Activate(TRUE);
 	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"プレイリストを閉じます。", L"Close the playlist.", L"Fermer la liste de lecture.", L"Chiudi la playlist.", L"Cerrar la lista de reproduccion.", L"재생 목록을 닫습니다.", L"关闭播放列表。", L"إغلاق قائمة التشغيل.", L"Закрыть плейлист.", L"Wiedergabeliste schliesen.", L"Fechar lista de reproducao.", L"Afspeellijst sluiten.", L"Zamknij list? odtwarzania.", L"Calma listesini kapat."));
@@ -422,7 +408,7 @@ BOOL CPlayList::OnInitDialog()
 	}
 	Invalidate();
 	playbase = NULL;
-	if (savedata.aero) {
+	if (savedata.aero == 2) {
 		playbase = new CImageBase;
 		playbase->Create(pl);
 		playbase->oya = pl;
@@ -433,6 +419,33 @@ BOOL CPlayList::OnInitDialog()
 		playbase->MoveWindow(&r);
 
 	plw = 1;
+
+	m_lsup.SetIcon(IDR_SUP);
+	m_lsup.SetFlat(TRUE);
+	m_lup.SetIcon(IDR_UP);
+	m_lup.SetFlat(TRUE);
+	m_lsdown.SetIcon(IDR_SDOWN);
+	m_lsdown.SetFlat(TRUE);
+	m_ldown.SetIcon(IDR_DOWN);
+	m_ldown.SetFlat(TRUE);
+	m_findup.SetIcon(IDR_DOWN);
+	m_findup.SetFlat(TRUE);
+	m_finddown.SetIcon(IDR_UP);
+	m_finddown.SetFlat(TRUE);
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+	{
+		const HWND btns[] = {
+			m_lsup.m_hWnd, m_lup.m_hWnd, m_lsdown.m_hWnd, m_ldown.m_hWnd,
+			m_findup.m_hWnd, m_finddown.m_hWnd
+		};
+		for (HWND h : btns)
+			if (h) ::PostMessage(h, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+		if (m_find.GetSafeHwnd()) m_find.PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+		if (m_e.GetSafeHwnd()) m_e.PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+	}
+#endif
+
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
 }
@@ -440,7 +453,7 @@ extern int killw1;
 
 void CPlayList::OnNcDestroy()
 {
-	CCustomDialog::OnNcDestroy();
+	CCustomBlurDialogBase::OnNcDestroy();
 
 	// TODO: ここにメッセージ ハンドラ コードを追加します。
 	killw1=1;
@@ -454,7 +467,7 @@ BOOL CPlayList::DestroyWindow()
 //	pc=NULL;
 //	KillTimer(20);
 //	KillTimer(30);
-	BOOL rr=CCustomDialog::DestroyWindow();
+	BOOL rr=CCustomBlurDialogBase::DestroyWindow();
 	pl=NULL;
 //	if(nnn)
 //		delete this;
@@ -467,8 +480,8 @@ BOOL CPlayList::DestroyWindow()
 int CPlayList::Create(CWnd *pWnd)
 {
 	 m_pParent = NULL;
-	BOOL bret = CCustomDialog::Create( CPlayList::IDD, this);
-	if (savedata.aero == 1) {
+	BOOL bret = CCustomBlurDialogBase::Create( CPlayList::IDD, this);
+	if (savedata.aero == 2) {
 		ModifyStyleEx(0, WS_EX_LAYERED);
 
 		// レイヤードウィンドウの不透明度と透明のカラーキー
@@ -488,7 +501,7 @@ void CPlayList::OnClose()
 	nnn=0;
 	DestroyWindow();
 
-	CCustomDialog::OnClose();
+	CCustomBlurDialogBase::OnClose();
 }
 
 void CPlayList::OnBnClickedOk()
@@ -507,7 +520,7 @@ BOOL CPlayList::PreTranslateMessage(MSG* pMsg)
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 
-	return CCustomDialog::PreTranslateMessage(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
 int pnt1=-1;
@@ -890,7 +903,7 @@ void CPlayList::OnDropFiles(HDROP hDropInfo)
 		}
 	}
 	Save();
-	CCustomDialog::OnDropFiles(hDropInfo);
+	CCustomBlurDialogBase::OnDropFiles(hDropInfo);
 }
 
 #include "Id3tagv1.h"
@@ -4241,7 +4254,7 @@ extern long height, width;
 int ip1 = 0;
 void CPlayList::OnSize(UINT nType, int cx, int cy)
 {
-	CCustomDialog::OnSize(nType, cx, cy);
+	CCustomBlurDialogBase::OnSize(nType, cx, cy);
 
 	// TODO: ここにメッセージ ハンドラ コードを追加します。
 	RECT r;
@@ -4415,13 +4428,13 @@ void CPlayList::OnTimer(UINT nIDEvent)
 	CPlayList* pl = (CPlayList*)this;
 	if(stflg == FALSE)
 		timerpl(nIDEvent,pl);
-	CCustomDialog::OnTimer(nIDEvent);
+	CCustomBlurDialogBase::OnTimer(nIDEvent);
 }
 
 void CPlayList::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
 	// TODO: ここにメッセージ ハンドラ コードを追加するか、既定の処理を呼び出します。
-	CCustomDialog::OnKeyDown(nChar, nRepCnt, nFlags);
+	CCustomBlurDialogBase::OnKeyDown(nChar, nRepCnt, nFlags);
 }
 
 void CPlayList::OnBnClickedCheck4()
@@ -4514,7 +4527,7 @@ void CPlayList::OnMouseMove(UINT nFlags, CPoint point)
 	if(GetCapture()==this){
 		OnDrag(point.x,point.y);
 	}
-	CCustomDialog::OnMouseMove(nFlags, point);
+	CCustomBlurDialogBase::OnMouseMove(nFlags, point);
 }
 
 void CPlayList::OnLButtonUp(UINT nFlags, CPoint point)
@@ -4617,7 +4630,7 @@ void CPlayList::OnLButtonUp(UINT nFlags, CPoint point)
 		 }
 	}
 
-	CCustomDialog::OnLButtonUp(nFlags, point);
+	CCustomBlurDialogBase::OnLButtonUp(nFlags, point);
 }
 
 void CPlayList::OnLvnGetdispinfoList1(NMHDR* pNMHDR, LRESULT* pResult)
@@ -4759,7 +4772,7 @@ void CPlayList::OnList()
 #define ID_HOTKEY3 8003
 void CPlayList::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 {
-	CCustomDialog::OnActivate(nState, pWndOther, bMinimized);
+	CCustomBlurDialogBase::OnActivate(nState, pWndOther, bMinimized);
 	int l = 5;
 	if(plw){
 		if ((nState == WA_ACTIVE || nState == WA_CLICKACTIVE) && bMinimized == 0 && pl->m_saisyo.GetCheck()) {
@@ -4930,10 +4943,10 @@ HBRUSH CPlayList::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 	if (hbr)
 		return hbr;
 
-	hbr = CCustomDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+	hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
 
 	// TODO: ここで DC の属性を変更してください。
-	if (savedata.aero == 1) {
+	if (savedata.aero == 2) {
 		if (nCtlColor == CTLCOLOR_DLG)
 		{
 			return m_brDlg;
@@ -4951,7 +4964,7 @@ HBRUSH CPlayList::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 
 void CPlayList::OnShowWindow(BOOL bShow, UINT nStatus)
 {
-	CCustomDialog::OnShowWindow(bShow, nStatus);
+	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
 	Invalidate();
 
 	// TODO: ここにメッセージ ハンドラー コードを追加します。
@@ -4960,7 +4973,7 @@ void CPlayList::OnShowWindow(BOOL bShow, UINT nStatus)
 
 void CPlayList::OnMoving(UINT fwSide, LPRECT pRect)
 {
-	CCustomDialog::OnMoving(fwSide, pRect);
+	CCustomBlurDialogBase::OnMoving(fwSide, pRect);
 	CRect r;
 	GetWindowRect(&r);
 	if (playbase)
@@ -4974,7 +4987,7 @@ void CPlayList::OnMoving(UINT fwSide, LPRECT pRect)
 
 void CPlayList::OnSizing(UINT fwSide, LPRECT pRect)
 {
-	CCustomDialog::OnSizing(fwSide, pRect);
+	CCustomBlurDialogBase::OnSizing(fwSide, pRect);
 	CRect r;
 	GetWindowRect(&r);
 	if(playbase)
@@ -4985,7 +4998,7 @@ void CPlayList::OnSizing(UINT fwSide, LPRECT pRect)
 
 void CPlayList::OnSetFocus(CWnd* pOldWnd)
 {
-	CCustomDialog::OnSetFocus(pOldWnd);
+	CCustomBlurDialogBase::OnSetFocus(pOldWnd);
 
 	// TODO: ここにメッセージ ハンドラー コードを追加します。
 
@@ -5015,7 +5028,7 @@ BOOL CPlayList::OnNcActivate(BOOL bActive)
 		//if(!bActive)
 		//	SetTimer(4924, 10, NULL);
 	}
-	return CCustomDialog::OnNcActivate(bActive);
+	return CCustomBlurDialogBase::OnNcActivate(bActive);
 }
 
 BOOL changeflg = FALSE;

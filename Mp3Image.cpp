@@ -20,17 +20,17 @@ extern ULONGLONG po;
 extern CImageBase* jake;
 void CMp3Image::OnNcDestroy()
 {
-	CCustomDialog::OnNcDestroy();
+	CCustomBlurDialogBase::OnNcDestroy();
 
 	// TODO: ここにメッセージ ハンドラ コードを追加します。
 	killw1=1;
 }
 // CMp3Image ダイアログ
 
-IMPLEMENT_DYNAMIC(CMp3Image, CCustomDialog)
+IMPLEMENT_DYNAMIC(CMp3Image, CCustomBlurDialogBase)
 
 CMp3Image::CMp3Image(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CMp3Image::IDD, pParent)
+	: CCustomBlurDialogBase(CMp3Image::IDD, pParent)
 {
 m_hIcon = AfxGetApp()->LoadIcon(IDI_PL);
 }
@@ -41,14 +41,14 @@ CMp3Image::~CMp3Image()
 
 void CMp3Image::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_STATIC1, m_x);
 	DDX_Control(pDX, IDC_STATIC2, m_y);
 	DDX_Control(pDX, IDOK, m_close);
 }
 
 
-BEGIN_MESSAGE_MAP(CMp3Image, CCustomDialog)
+BEGIN_MESSAGE_MAP(CMp3Image, CCustomBlurDialogBase)
 	ON_WM_SYSCOMMAND()
 	ON_WM_PAINT()
 	ON_WM_QUERYDRAGICON()
@@ -81,7 +81,7 @@ extern save savedata;
 
 BOOL CMp3Image::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	fff = 1;
 
 	// TODO:  ここに初期化を追加してください
@@ -161,10 +161,6 @@ extern int oggf;
 //extern TCHAR karento2[1024];
 void CMp3Image::OnPaint()
 {
-	if (savedata.aero) {
-		if (fff == 1) return;
-		fff = 1;
-	}
 	CPaintDC dcc(this); // 描画用のデバイス コンテキスト
 /*	if (IsIconic())
 	{
@@ -187,22 +183,42 @@ void CMp3Image::OnPaint()
 */		//if(plf!=0) 
 	CRect rect;
 	GetClientRect(&rect);
-	if (savedata.aero) {
-		CBrush brush(RGB(255, 0, 0));
-		dcc.FillRect(&rect, &brush);
-	}
-	else {
-		CBrush brush(RGB(0, 0, 0));
-		dcc.FillRect(&rect, &brush);
-	}
 
 	RECT r;
 	GetClientRect(&r);
 #if 1
-	//			r.right = r.bottom * xy;
-	SetStretchBltMode(dcc.m_hDC, HALFTONE); //高画質モード
-	SetBrushOrgEx(dcc.m_hDC, 0, 0, NULL); //ブラシのずれを防止
-	dcc.StretchBlt(0, 0, (int)((r.right - 100) * (xy)), r.bottom, &dc, 0, 0, x, y, SRCCOPY); //伸縮
+	const int imgW = (int)((r.right - 100) * (xy));
+	const int imgH = r.bottom;
+#if CCUSTOM_AERO_SUPPORT
+	if (savedata.aero == 1 && CCC_IsWin11()) {
+		CDC memDC;
+		memDC.CreateCompatibleDC(&dcc);
+		CBitmap memBmp;
+		memBmp.CreateCompatibleBitmap(&dcc, rect.Width(), rect.Height());
+		CBitmap* pOldMem = memDC.SelectObject(&memBmp);
+		memDC.FillSolidRect(0, 0, rect.Width(), rect.Height(), RGB(0, 0, 0));
+		SetStretchBltMode(memDC.m_hDC, HALFTONE);
+		SetBrushOrgEx(memDC.m_hDC, 0, 0, NULL);
+		memDC.StretchBlt(0, 0, imgW, imgH, &dc, 0, 0, x, y, SRCCOPY);
+		CCC_BlitChromaNoFlicker(dcc.m_hDC, 0, 0, rect.Width(), rect.Height(),
+			memDC.GetSafeHdc(), 0, 0, RGB(0, 0, 0));
+		memDC.SelectObject(pOldMem);
+	}
+	else
+#endif
+	{
+		if (savedata.aero == 2) {
+			CBrush brush(RGB(255, 0, 0));
+			dcc.FillRect(&rect, &brush);
+		}
+		else {
+			CBrush brush(RGB(0, 0, 0));
+			dcc.FillRect(&rect, &brush);
+		}
+		SetStretchBltMode(dcc.m_hDC, HALFTONE);
+		SetBrushOrgEx(dcc.m_hDC, 0, 0, NULL);
+		dcc.StretchBlt(0, 0, imgW, imgH, &dc, 0, 0, x, y, SRCCOPY);
+	}
 #endif
 	//	m_x.MoveWindow((int)(rect.right - 50 * hD1), (int)(110 * hD1), (int)(50 * hD1), (int)(50 * hD1));
 	//m_y.MoveWindow((int)(rect.right - 50 * hD1), (int)(140 * hD1), (int)(50 * hD1), (int)(50 * hD1));
@@ -211,9 +227,11 @@ void CMp3Image::OnPaint()
 	if (savedata.aero == 0) {
 		SetTextColor(dcc, RGB(255, 255, 255));
 		SetBkColor(dcc, RGB(0, 0, 0));
-	} else {
+	} else if (savedata.aero == 2) {
 		SetTextColor(dcc, RGB(0, 0, 0));
 		SetBkColor(dcc, RGB(255, 0, 0));
+	} else {
+		SetTextColor(dcc, RGB(0, 0, 0));
 	}
 	SetBkMode(dcc, TRANSPARENT);
 	str.Format(L"X: %5d", x);
@@ -263,9 +281,6 @@ void CMp3Image::OnPaint()
 	Gdiplus::GdiplusShutdown(gdiplusToken);
 #endif
 
-	CCustomDialog::OnPaint();
-//	Sleep(100);
-	fff = 0;
 	//	}
 }
 int ip2 = 0;
@@ -604,13 +619,18 @@ void CMp3Image::Load(CString s)
 
 	RECT r;
 	GetWindowRect(&r);
-	if (savedata.aero == 1) {
+	if (savedata.aero == 2 && jake) {
 		jake->MoveWindow(&r);
 		jake->ShowWindow(SW_SHOW);
 		SetWindowPos(jake, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
 		::SetWindowPos(jake->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		SetTimer(4923, 10, NULL);
 	}
+#if CCUSTOM_AERO_SUPPORT
+	else if (savedata.aero == 1) {
+		ApplyDwmBlur();
+	}
+#endif
 
 	::SetWindowPos(this->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 
@@ -627,16 +647,11 @@ extern save savedata;
 int CMp3Image::Create(CWnd* pWnd)
 {
 	m_pParent = NULL;
-	const BOOL bret = CCustomDialog::Create(CMp3Image::IDD, this);
+	const BOOL bret = CCustomBlurDialogBase::Create(CMp3Image::IDD, this);
 
-	if (savedata.aero == 1) {
-		// ウィンドウの拡張スタイルを変更
+	if (savedata.aero == 2) {
 		ModifyStyleEx(0, WS_EX_LAYERED);
-
-		// レイヤードウィンドウの不透明度と透明のカラーキー
 		SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
-
-		// 赤色のブラシを作成する．
 		m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
 	}
     if( bret == TRUE)
@@ -650,17 +665,19 @@ void CMp3Image::OnClose()
 	nnn=0;
 	DestroyWindow();
 
-	CCustomDialog::OnClose();
+	CCustomBlurDialogBase::OnClose();
 }
 
 BOOL CMp3Image::DestroyWindow()
 {
 	// TODO: ここに特定なコードを追加するか、もしくは基本クラスを呼び出してください。
 	img.Destroy();
-	BOOL rr=CCustomDialog::DestroyWindow();
-	if(savedata.aero == 1)
+	BOOL rr=CCustomBlurDialogBase::DestroyWindow();
+	if (savedata.aero == 2 && jake) {
 		jake->DestroyWindow();
-	mi=NULL;
+		jake = NULL;
+	}
+	mi = NULL;
 	if(nnn)
 		delete this;
 	miw=0;
@@ -675,7 +692,7 @@ void CMp3Image::OnBnClickedOk()
 
 void CMp3Image::OnSize(UINT nType, int cx, int cy)
 {
-	CCustomDialog::OnSize(nType, cx, cy);
+	CCustomBlurDialogBase::OnSize(nType, cx, cy);
 
 	// TODO: ここにメッセージ ハンドラ コードを追加します。
 	Invalidate(FALSE);
@@ -683,7 +700,7 @@ void CMp3Image::OnSize(UINT nType, int cx, int cy)
 
 void CMp3Image::OnSizing(UINT fwSide, LPRECT pRect)
 {
-	CCustomDialog::OnSizing(fwSide, pRect);
+	CCustomBlurDialogBase::OnSizing(fwSide, pRect);
 	RECT r,rr;
 	// TODO: この位置にメッセージ ハンドラ用のコードを追加してください
 	 //左右比を保つ
@@ -741,10 +758,8 @@ void CMp3Image::OnSizing(UINT fwSide, LPRECT pRect)
 	m_y.MoveWindow((int)(rrr.right - 50.0f * hD1), (int)(140.0f * hD1), (int)(50.0f * hD1), (int)(50.0f * hD1));
 	//SetWindowPos(NULL, 0,0,pRect->right, pRect->bottom,   SWP_NOMOVE|SWP_NOOWNERZORDER);
 	GetWindowRect(&rrr);
-	if (savedata.aero == 1) {
-		if (jake)
-			jake->MoveWindow(&rrr);
-
+	if (savedata.aero == 2 && jake) {
+		jake->MoveWindow(&rrr);
 		::SetWindowPos(jake->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		::SetWindowPos(jake->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	}
@@ -765,7 +780,7 @@ void CMp3Image::OnLButtonDown(UINT nFlags, CPoint point)
 	SetCapture();
 	m_pointOld1 = point;
 
-	CCustomDialog::OnLButtonDown(nFlags, point);
+	CCustomBlurDialogBase::OnLButtonDown(nFlags, point);
 }
 
 
@@ -779,7 +794,7 @@ void CMp3Image::OnLButtonUp(UINT nFlags, CPoint point)
 		::ReleaseCapture();
 	}
 
-	CCustomDialog::OnLButtonUp(nFlags, point);
+	CCustomBlurDialogBase::OnLButtonUp(nFlags, point);
 }
 
 
@@ -796,11 +811,11 @@ void CMp3Image::OnMouseMove(UINT nFlags, CPoint point)
 		SetWindowPos(NULL, rect.left, rect.top,
 			rect.right - rect.left, rect.bottom - rect.top,
 			SWP_NOOWNERZORDER);
-		if(savedata.aero == 1)
+		if (savedata.aero == 2 && jake)
 			jake->MoveWindow(&rect);
 
 	}
-	CCustomDialog::OnMouseMove(nFlags, point);
+	CCustomBlurDialogBase::OnMouseMove(nFlags, point);
 }
 
 
@@ -819,14 +834,14 @@ void CMp3Image::OnRButtonDown(UINT nFlags, CPoint point)
 		this            	//このメニューを所有するウィンドウ
 		);
 	menu.DestroyMenu();
-	if (savedata.aero == 1) {
+	if (savedata.aero == 2 && jake) {
 		::SetWindowPos(jake->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		::SetWindowPos(jake->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	}
 	::SetWindowPos(this->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	::SetWindowPos(this->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 
-	//CCustomDialog::OnRButtonDown(nFlags, point);
+	//CCustomBlurDialogBase::OnRButtonDown(nFlags, point);
 }
 
 
@@ -836,18 +851,13 @@ HBRUSH CMp3Image::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 //	pDC->SetBkMode(TRANSPARENT);
 //	return (HBRUSH)::GetStockObject(BLACK_BRUSH);
  
-	HBRUSH hbr = CCustomDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
 
-		if (nCtlColor == CTLCOLOR_DLG)
+		if (nCtlColor == CTLCOLOR_DLG || nCtlColor == CTLCOLOR_STATIC)
 		{
-			if (savedata.aero == 1) {
-				return m_brDlg;
-			}
-		}
-		if (nCtlColor == CTLCOLOR_STATIC)
-		{
-			if (savedata.aero == 1) {
-				SetBkMode(pDC->m_hDC, TRANSPARENT);
+			if (savedata.aero == 2) {
+				if (nCtlColor == CTLCOLOR_STATIC)
+					SetBkMode(pDC->m_hDC, TRANSPARENT);
 				return m_brDlg;
 			}
 		}
@@ -878,7 +888,7 @@ BOOL CMp3Image::OnEraseBkgnd(CDC* pDC)
 	rect.bottom = oldBottom;
 	FillRect((HDC)pDC->m_hDC, &rect, hBrush);
 	*/
-	return CCustomDialog::OnEraseBkgnd(pDC);
+	return CCustomBlurDialogBase::OnEraseBkgnd(pDC);
 }
 
 
@@ -893,7 +903,7 @@ void CMp3Image::OnCompositionChanged()
 //	if (fDwmEnabled)
 //		DwmExtendFrameIntoClientArea(m_hWnd, &margins);
 
-	CCustomDialog::OnCompositionChanged();
+	CCustomBlurDialogBase::OnCompositionChanged();
 }
 
 extern CImageBase* jake;
@@ -903,7 +913,7 @@ void CMp3Image::OnTimer(UINT_PTR nIDEvent)
 	if (nIDEvent == 4923) {
 		KillTimer(4923);
 		if (ip2 != 0) return;
-		if (savedata.aero == 1)
+		if (savedata.aero == 2 && jake)
 			::SetWindowPos(jake->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		::SetWindowPos(m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		SetTimer(4930, 10, NULL);
@@ -912,7 +922,7 @@ void CMp3Image::OnTimer(UINT_PTR nIDEvent)
 	if (nIDEvent == 4924) {
 		KillTimer(4924);
 		if (ip2 != 0) return;
-		if (savedata.aero == 1)
+		if (savedata.aero == 2 && jake)
 			::SetWindowPos(jake->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		SetTimer(4930, 10, NULL);
@@ -926,5 +936,5 @@ void CMp3Image::OnTimer(UINT_PTR nIDEvent)
 	}
 
 
-	CCustomDialog::OnTimer(nIDEvent);
+	CCustomBlurDialogBase::OnTimer(nIDEvent);
 }

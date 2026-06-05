@@ -8,10 +8,10 @@
 
 // CBr4 ダイアログ
 
-IMPLEMENT_DYNAMIC(CBr4, CCustomDialog)
+IMPLEMENT_DYNAMIC(CBr4, CCustomBlurDialogBase)
 
 CBr4::CBr4(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CBr4::IDD, pParent)
+	: CCustomBlurDialogBase(CBr4::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CBr4::~CBr4()
 
 void CBr4::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CBr4, CCustomDialog)
+BEGIN_MESSAGE_MAP(CBr4, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 cmn(CBr4);
 
@@ -712,7 +712,7 @@ void CBr4::OnDblclkList1()
 
 BOOL CBr4::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"ブランディッシュ４ 眠れる神の塔", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tour du Dieu Dormant", L"Brandish4 Torre del Dio Dormiente", L"Brandish4 Torre del Dios Durmiente", L"브랜디시4 잠든 신의 탑", L"撼天神塔4", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Башня Спящего Бога", L"Brandish4 Turm des Schlafenden Gottes", L"Brandish4 Torre do Deus Adormecido", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Wieża Śpiącego Boga", L"Brandish4 Tower of the Sleeping God"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	

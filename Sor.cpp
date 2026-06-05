@@ -8,10 +8,10 @@
 
 // CSor ダイアログ
 
-IMPLEMENT_DYNAMIC(CSor, CCustomDialog)
+IMPLEMENT_DYNAMIC(CSor, CCustomBlurDialogBase)
 
 CSor::CSor(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CSor::IDD, pParent)
+	: CCustomBlurDialogBase(CSor::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CSor::~CSor()
 
 void CSor::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CSor, CCustomDialog)
+BEGIN_MESSAGE_MAP(CSor, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CSor);
 
@@ -1190,7 +1190,7 @@ void CSor::OnDblclkList1()
 
 BOOL CSor::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"ソーサリアン オリジナル", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 

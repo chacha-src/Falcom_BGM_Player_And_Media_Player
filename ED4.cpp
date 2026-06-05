@@ -8,10 +8,10 @@
 
 // CED4 ダイアログ
 
-IMPLEMENT_DYNAMIC(CED4, CCustomDialog)
+IMPLEMENT_DYNAMIC(CED4, CCustomBlurDialogBase)
 
 CED4::CED4(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CED4::IDD, pParent)
+	: CCustomBlurDialogBase(CED4::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CED4::~CED4()
 
 void CED4::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CED4, CCustomDialog)
+BEGIN_MESSAGE_MAP(CED4, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CED4);
 
@@ -1055,7 +1055,7 @@ void CED4::OnDblclkList1()
 
 BOOL CED4::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"英雄伝説IV 朱紅い雫", L"Legend of Heroes IV Tear of Vermillion", L"Légende des Héros IV Larme de Vermillon", L"Legend of Heroes IV Lacrima di Vermiglio", L"Legend of Heroes IV Lágrima de Bermellón", L"영웅전설IV 주홍의 물방울", L"英雄传说IV 朱红之泪", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Träne der Purpur", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 

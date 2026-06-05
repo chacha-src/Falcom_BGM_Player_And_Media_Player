@@ -10,10 +10,10 @@
 extern COggDlg* og;
 extern void DoEvent();
 
-IMPLEMENT_DYNAMIC(CWavExport, CCustomDialog)
+IMPLEMENT_DYNAMIC(CWavExport, CCustomBlurDialogBase)
 
 CWavExport::CWavExport(CWnd* pParent)
-	: CCustomDialog(CWavExport::IDD, pParent)
+	: CCustomBlurDialogBase(CWavExport::IDD, pParent)
 {
 }
 
@@ -23,13 +23,13 @@ CWavExport::~CWavExport()
 
 void CWavExport::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_WAVEXPORT_LOOP, m_loop);
 	DDX_Control(pDX, IDC_WAVEXPORT_PATH, m_path);
 	DDX_Control(pDX, IDC_WAVEXPORT_STATUS, m_status);
 }
 
-BEGIN_MESSAGE_MAP(CWavExport, CCustomDialog)
+BEGIN_MESSAGE_MAP(CWavExport, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_WAVEXPORT_EXEC, &CWavExport::OnBnClickedWavExportExec)
 	ON_BN_CLICKED(IDC_WAVEXPORT_BROWSE, &CWavExport::OnBnClickedWavExportBrowse)
 	ON_BN_CLICKED(IDC_WAVEXPORT_CLOSE, &CWavExport::OnBnClickedWavExportClose)
@@ -37,7 +37,7 @@ END_MESSAGE_MAP()
 
 BOOL CWavExport::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"WAVへ出力", L"Export to WAV", L"Exporter en WAV", L"Esporta in WAV",
 		L"Exportar a WAV", L"WAV로 내보내기", L"导出到WAV", L"تصدير إلى WAV",
 		L"Экспорт в WAV", L"Als WAV exportieren", L"Exportar para WAV", L"Exporteren naar WAV",

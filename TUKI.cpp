@@ -8,10 +8,10 @@
 
 // CTUKI ダイアログ
 
-IMPLEMENT_DYNAMIC(CTUKI, CCustomDialog)
+IMPLEMENT_DYNAMIC(CTUKI, CCustomBlurDialogBase)
 
 CTUKI::CTUKI(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CTUKI::IDD, pParent)
+	: CCustomBlurDialogBase(CTUKI::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CTUKI::~CTUKI()
 
 void CTUKI::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CTUKI, CCustomDialog)
+BEGIN_MESSAGE_MAP(CTUKI, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CTUKI);
 
@@ -677,7 +677,7 @@ void CTUKI::OnDblclkList1()
 
 BOOL CTUKI::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"月影のデスティニー", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 

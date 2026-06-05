@@ -17,7 +17,7 @@ static char THIS_FILE[] = __FILE__;
 extern CString fnn;
 
 Citiran_FC::Citiran_FC(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(Citiran_FC::IDD, pParent)
+	: CCustomBlurDialogBase(Citiran_FC::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(Citiran_FC)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -27,7 +27,7 @@ Citiran_FC::Citiran_FC(CWnd* pParent /*=NULL*/)
 
 void Citiran_FC::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(Citiran_FC)
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	//}}AFX_DATA_MAP
@@ -35,7 +35,7 @@ void Citiran_FC::DoDataExchange(CDataExchange* pDX)
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(Citiran_FC, CCustomDialog)
+BEGIN_MESSAGE_MAP(Citiran_FC, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(Citiran_FC)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	//}}AFX_MSG_MAP
@@ -915,7 +915,7 @@ FC_LANG_ARRAY(ti1_tr) {
 
 #undef FC_LANG_ARRAY
 
-static inline CString FC_TRACK(int i) { switch (savedata.lang) { case 0: return CString(CStringA(ti1[i])); case 1: return CString(CStringA(ti1_en[i])); case 2: return CString(CStringA(ti1_fr[i])); case 3: return CString(CStringA(ti1_it[i])); case 4: return CString(CStringA(ti1_es[i])); case 5: return CString(CStringA(ti1_ko[i])); case 6: return CString(CStringA(ti1_zh[i])); case 7: return CString(CStringA(ti1_ar[i])); case 8: return CString(CStringA(ti1_ru[i])); case 9: return CString(CStringA(ti1_de[i])); case 10: return CString(CStringA(ti1_pt[i])); case 11: return CString(CStringA(ti1_nl[i])); case 12: return CString(CStringA(ti1_pl[i])); case 13: return CString(CStringA(ti1_tr[i])); default: return CString(CStringA(ti1_en[i])); } }
+static inline CString FC_TRACK(int i) { switch (savedata.lang) { case 0: return GameTrackTitle(ti1[i]); case 1: return GameTrackTitle(ti1_en[i]); case 2: return GameTrackTitle(ti1_fr[i]); case 3: return GameTrackTitle(ti1_it[i]); case 4: return GameTrackTitle(ti1_es[i]); case 5: return GameTrackTitle(ti1_ko[i]); case 6: return GameTrackTitle(ti1_zh[i]); case 7: return GameTrackTitle(ti1_ar[i]); case 8: return GameTrackTitle(ti1_ru[i]); case 9: return GameTrackTitle(ti1_de[i]); case 10: return GameTrackTitle(ti1_pt[i]); case 11: return GameTrackTitle(ti1_nl[i]); case 12: return GameTrackTitle(ti1_pl[i]); case 13: return GameTrackTitle(ti1_tr[i]); default: return GameTrackTitle(ti1_en[i]); } }
 
 																	   CString Citiran_FC::Gett(int a) {
 																		   CString s;
@@ -949,7 +949,7 @@ static inline CString FC_TRACK(int i) { switch (savedata.lang) { case 0: return 
 
 																	   BOOL Citiran_FC::OnInitDialog()
 																	   {
-																		   CCustomDialog::OnInitDialog();
+																		   CCustomBlurDialogBase::OnInitDialog();
 
 																		   SetWindowText(LL14(L"空の軌跡 First Chapter", L"Trails in the Sky First Chapter", L"Les Sentiers du Ciel Premier Chapitre", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"하늘의 궤적 First Chapter", L"空之轨迹 First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter"));
 																		   SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));

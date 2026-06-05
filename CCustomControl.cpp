@@ -2,396 +2,709 @@
 #include "CCustomControl.h"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 #ifdef SubclassWindow
 #undef SubclassWindow
 #endif
 
-// ============================================================================
-// 共通ヘルパー関数
-// ============================================================================
-
-/**
- * @brief グラデーション背景を描画する（GradientFill APIを使用・最適化版）
- * @param pDC デバイスコンテキスト
- * @param rect 描画領域
- * @param colorStart 開始色
- * @param colorEnd 終了色
- * @param nDirection 方向（0-359度、0=下から上、90=左から右）
- */
-static void DrawGradientBackground(CDC* pDC, const CRect& rect, COLORREF colorStart, COLORREF colorEnd, int nDirection)
+#if CCUSTOM_AERO_SUPPORT
+BOOL CCC_IsBlurDialogChild(HWND hWnd)
 {
-    // [FIX❸] GradientFill APIを使用して、毎フレーム256回のCPen生成を排除
-    int normalizedDir = nDirection % 360;
-    if (normalizedDir < 0) normalizedDir += 360;
+    for (HWND h = hWnd; h; h = ::GetParent(h))
+    {
+        CWnd* pw = CWnd::FromHandlePermanent(h);
+        if (!pw) continue;
+        if (auto* p = dynamic_cast<CCustomDialog*>(pw)) return p->IsAeroEnabled();
+        if (auto* p = dynamic_cast<CCustomDialogEx*>(pw)) return p->IsAeroEnabled();
+    }
+    return FALSE;
+}
 
-    // 水平(90-180度)または垂直(それ以外)のどちらかに正規化
-    BOOL bHorizontal = (normalizedDir >= 45 && normalizedDir < 135) ||
-        (normalizedDir >= 225 && normalizedDir < 315);
-    BOOL bReverse = (normalizedDir >= 135 && normalizedDir < 315);
+// ぼかしダイアログ上ではラベル・スライダー等は透過、ボタン・リスト等は不透明
+static BOOL CCC_UseTransparentPaint(HWND hWnd, BOOL bAeroMode)
+{
+    if (CCC_IsBlurDialogChild(hWnd) && CCC_IsAeroEnabled()) return TRUE;
+    return bAeroMode && !CCC_IsBlurDialogChild(hWnd);
+}
 
-    COLORREF clrA = bReverse ? colorEnd : colorStart;
-    COLORREF clrB = bReverse ? colorStart : colorEnd;
+void CCC_InvalidateBlurParent(HWND hWnd, BOOL bAeroMode)
+{
+    if (!CCC_UseTransparentPaint(hWnd, bAeroMode)) return;
+    HWND hParent = ::GetParent(hWnd);
+    if (!hParent || !::IsWindow(hParent)) return;
+    RECT rc = {};
+    ::GetWindowRect(hWnd, &rc);
+    ::MapWindowPoints(NULL, hParent, (LPPOINT)&rc, 2);
+    ::InflateRect(&rc, 6, 6);
+    ::InvalidateRect(hParent, &rc, FALSE);
+}
 
-    TRIVERTEX vtx[2];
-    vtx[0].x = rect.left;
-    vtx[0].y = rect.top;
-    vtx[0].Red = (COLOR16)(GetRValue(clrA) << 8);
-    vtx[0].Green = (COLOR16)(GetGValue(clrA) << 8);
-    vtx[0].Blue = (COLOR16)(GetBValue(clrA) << 8);
-    vtx[0].Alpha = 0;
+void CCC_RefreshDialogDwmBlur(HWND hWnd)
+{
+    if (!hWnd || !::IsWindow(hWnd) || !CCC_IsAeroEnabled() || !CCC_IsWin11()) return;
+    BOOL compositionEnabled = FALSE;
+    if (!::DwmIsCompositionEnabled(&compositionEnabled) || !compositionEnabled) return;
+    const int backdropType = 3;
+    ::DwmSetWindowAttribute(hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
+    const MARGINS margins = { -1, -1, -1, -1 };
+    ::DwmExtendFrameIntoClientArea(hWnd, &margins);
+}
 
-    vtx[1].x = rect.right;
-    vtx[1].y = rect.bottom;
-    vtx[1].Red = (COLOR16)(GetRValue(clrB) << 8);
-    vtx[1].Green = (COLOR16)(GetGValue(clrB) << 8);
-    vtx[1].Blue = (COLOR16)(GetBValue(clrB) << 8);
-    vtx[1].Alpha = 0;
+static void CCC_TransparentBltClearDest(HDC hdcDest, int x, int y, int w, int h,
+    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
+{
+    if (w <= 0 || h <= 0) return;
+    RECT rc = { x, y, x + w, y + h };
+    CBrush br(clrKey);
+    ::FillRect(hdcDest, &rc, (HBRUSH)br.GetSafeHandle());
+    ::TransparentBlt(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, w, h, clrKey);
+}
+
+#endif
+
+// ============================================================================
+// 共通の描画処理
+// ============================================================================
+
+static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWnd)
+{
+    UNREFERENCED_PARAMETER(hWnd);
+#if CCUSTOM_AERO_SUPPORT
+    if (bAeroEnabled && CCC_IsWin11())
+        return TRUE;
+    if (bAeroEnabled)
+    {
+        CRect r;
+        ::GetClientRect(hWnd, &r);
+        pDC->FillSolidRect(&r, RGB(248, 248, 248));
+        return TRUE;
+    }
+#else
+    UNREFERENCED_PARAMETER(bAeroEnabled);
+#endif
+    CRect r;
+    ::GetClientRect(hWnd, &r);
+    pDC->FillRect(&r, &brDlg);
+    return TRUE;
+}
+
+static void DlgOnPaintAero(CWnd* pWnd, BOOL bAeroEnabled)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (bAeroEnabled && CCC_IsWin11())
+    {
+        CPaintDC dc(pWnd);
+        CRect rect;
+        pWnd->GetClientRect(&rect);
+        dc.FillSolidRect(&rect, RGB(250, 250, 250));
+        return;
+    }
+#else
+    UNREFERENCED_PARAMETER(bAeroEnabled);
+#endif
+    CPaintDC dc(pWnd);
+}
+
+#if CCUSTOM_AERO_SUPPORT
+#include <uxtheme.h>
+#pragma comment(lib, "msimg32.lib")
+#pragma comment(lib, "uxtheme.lib")
+
+static void CCC_InitBufferedPaintTransparent(HPAINTBUFFER hBP, int w, int h)
+{
+    RGBQUAD* pPixels = nullptr;
+    int rowLength = 0;
+    if (FAILED(::GetBufferedPaintBits(hBP, &pPixels, &rowLength)) || !pPixels || w <= 0 || h <= 0)
+        return;
+    for (int y = 0; y < h; ++y)
+    {
+        RGBQUAD* pRow = reinterpret_cast<RGBQUAD*>(
+            reinterpret_cast<BYTE*>(pPixels) + y * rowLength * static_cast<int>(sizeof(RGBQUAD)));
+        ::ZeroMemory(pRow, w * sizeof(RGBQUAD));
+    }
+}
+
+static UINT32 CCC_RgbMask(COLORREF clr)
+{
+    return (UINT32)(GetRValue(clr) << 16) | (UINT32)(GetGValue(clr) << 8) | GetBValue(clr);
+}
+
+static void CCC_SetDibAlphaFromChroma(void* pBits, int w, int h, COLORREF clrKey)
+{
+    if (!pBits || w <= 0 || h <= 0) return;
+    const UINT32 key = CCC_RgbMask(clrKey);
+    UINT32* px = (UINT32*)pBits;
+    const int n = w * h;
+    for (int i = 0; i < n; ++i)
+    {
+        const UINT32 rgb = px[i] & 0x00FFFFFFu;
+        px[i] = (rgb == key) ? 0u : (rgb | 0xFF000000u);
+    }
+}
+
+static HBITMAP CCC_CreateAlphaDib32(HDC hdcRef, int w, int h, void** ppBits)
+{
+    if (ppBits) *ppBits = nullptr;
+    if (!hdcRef || w <= 0 || h <= 0) return NULL;
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = w;
+    bmi.bmiHeader.biHeight = -h;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP hBmp = ::CreateDIBSection(hdcRef, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (ppBits) *ppBits = bits;
+    if (!hBmp || !bits)
+    {
+        if (hBmp) ::DeleteObject(hBmp);
+        if (ppBits) *ppBits = nullptr;
+        return NULL;
+    }
+    return hBmp;
+}
+
+// 画面 FillRect なし。バッファを毎回クロマキーで全面初期化してからアルファ合成（残像防止）
+static BOOL CCC_BlitToRectChromaNoFlicker(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
+    int destW, int destH, int srcW, int srcH, COLORREF clrKey, BOOL bStretch)
+{
+    if (destW <= 0 || destH <= 0) return FALSE;
+
+    void* pBits = nullptr;
+    HBITMAP hDib = CCC_CreateAlphaDib32(hdcDest, destW, destH, &pBits);
+    if (!hDib || !pBits) return FALSE;
+
+    CDC dcDib, dcSrc;
+    dcDib.CreateCompatibleDC(CDC::FromHandle(hdcDest));
+    dcSrc.Attach(hdcSrc);
+    HGDIOBJ hOld = ::SelectObject(dcDib.GetSafeHdc(), hDib);
+    dcDib.FillSolidRect(0, 0, destW, destH, clrKey);
+    dcDib.SetStretchBltMode(COLORONCOLOR);
+    if (bStretch)
+        dcDib.StretchBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
+    else
+        dcDib.BitBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, SRCCOPY);
+    CCC_SetDibAlphaFromChroma(pBits, destW, destH, clrKey);
+
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (!hdcBuf || !hBP)
+    {
+        ::SelectObject(dcDib.GetSafeHdc(), hOld);
+        ::DeleteObject(hDib);
+        dcSrc.Detach();
+        return FALSE;
+    }
+
+    CCC_InitBufferedPaintTransparent(hBP, destW, destH);
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    ::GdiAlphaBlend(hdcBuf, 0, 0, destW, destH, dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
+    ::EndBufferedPaint(hBP, TRUE);
+
+    ::SelectObject(dcDib.GetSafeHdc(), hOld);
+    ::DeleteObject(hDib);
+    dcSrc.Detach();
+    return TRUE;
+}
+
+void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey)
+{
+    const int w = rect.right - rect.left;
+    const int h = rect.bottom - rect.top;
+    if (w <= 0 || h <= 0) return;
+
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (hdcBuf && hBP)
+    {
+        CCC_InitBufferedPaintTransparent(hBP, w, h);
+        ::EndBufferedPaint(hBP, TRUE);
+    }
+}
+
+void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect)
+{
+    if (!pWnd || !pWnd->GetSafeHwnd()) return;
+    CRect clip;
+    if (dc.GetClipBox(&clip) == ERROR || clip.IsRectEmpty()) return;
+    CCC_SelectClipExcludeChildren(dc, pWnd);
+    if (pPreserveRect)
+    {
+        CRect preserve(pPreserveRect);
+        if (preserve.PtInRect(clip.TopLeft()) && preserve.PtInRect(clip.BottomRight()))
+            return;
+        CRgn rgnClip, rgnPreserve;
+        rgnClip.CreateRectRgnIndirect(&clip);
+        rgnPreserve.CreateRectRgnIndirect(pPreserveRect);
+        rgnClip.CombineRgn(&rgnClip, &rgnPreserve, RGN_DIFF);
+        dc.SelectClipRgn(&rgnClip, RGN_AND);
+        if (dc.GetClipBox(&clip) == NULLREGION || clip.IsRectEmpty()) return;
+    }
+    RECT rcClip = clip;
+    CCC_ClearRectChroma(dc.GetSafeHdc(), rcClip, CCC_AERO_CHROMA_KEY);
+}
+
+void CCC_SelectClipExcludeChildren(CDC& dc, CWnd* pWnd)
+{
+    if (!pWnd || !pWnd->GetSafeHwnd()) return;
+    CRect cr;
+    pWnd->GetClientRect(&cr);
+    CRgn rgn;
+    rgn.CreateRectRgnIndirect(&cr);
+    for (HWND h = ::GetWindow(pWnd->m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT))
+    {
+        if (!::IsWindowVisible(h)) continue;
+        CRect r;
+        ::GetWindowRect(h, &r);
+        pWnd->ScreenToClient(&r);
+        CRgn rc;
+        rc.CreateRectRgnIndirect(&r);
+        rgn.CombineRgn(&rgn, &rc, RGN_DIFF);
+    }
+    dc.SelectClipRgn(&rgn, RGN_AND);
+}
+
+static void CCC_BlitToRectOpaque(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
+    int destW, int destH, int srcW, int srcH, BOOL bStretch)
+{
+    if (destW <= 0 || destH <= 0) return;
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    params.dwFlags = BPPF_ERASE;
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (hdcBuf && hBP)
+    {
+        RECT rcBuf = { 0, 0, destW, destH };
+        ::FillRect(hdcBuf, &rcBuf, (HBRUSH)::GetStockObject(BLACK_BRUSH));
+        ::SetStretchBltMode(hdcBuf, COLORONCOLOR);
+        if (bStretch)
+            ::StretchBlt(hdcBuf, 0, 0, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
+        else
+            ::BitBlt(hdcBuf, 0, 0, destW, destH, hdcSrc, srcX, srcY, SRCCOPY);
+        ::BufferedPaintMakeOpaque(hBP, &rect);
+        ::EndBufferedPaint(hBP, TRUE);
+        return;
+    }
+    ::SetStretchBltMode(hdcDest, COLORONCOLOR);
+    if (bStretch)
+        ::StretchBlt(hdcDest, rect.left, rect.top, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
+    else
+        ::BitBlt(hdcDest, rect.left, rect.top, destW, destH, hdcSrc, srcX, srcY, SRCCOPY);
+}
+
+void CCC_BlitStretchOpaque(HDC hdcDest, int x, int y, int destW, int destH,
+    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH)
+{
+    RECT rect = { x, y, x + destW, y + destH };
+    CCC_BlitToRectOpaque(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, TRUE);
+}
+
+static void CCC_BlitToRectChroma(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
+    int destW, int destH, int srcW, int srcH, COLORREF clrKey, BOOL bStretch)
+{
+    if (destW <= 0 || destH <= 0) return;
+    CDC dcDest, dcSrc;
+    dcDest.Attach(hdcDest);
+    dcSrc.Attach(hdcSrc);
+    CDC memDC;
+    memDC.CreateCompatibleDC(&dcDest);
+    CBitmap bmp;
+    bmp.CreateCompatibleBitmap(&dcDest, destW, destH);
+    CBitmap* pOld = memDC.SelectObject(&bmp);
+    memDC.FillSolidRect(0, 0, destW, destH, clrKey);
+    memDC.SetStretchBltMode(COLORONCOLOR);
+    if (bStretch)
+        memDC.StretchBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
+    else
+        memDC.BitBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, SRCCOPY);
+    CCC_TransparentBltClearDest(hdcDest, rect.left, rect.top, destW, destH,
+        memDC.GetSafeHdc(), 0, 0, clrKey);
+    memDC.SelectObject(pOld);
+    dcDest.Detach();
+    dcSrc.Detach();
+}
+
+void CCC_BlitStretchChroma(HDC hdcDest, int x, int y, int destW, int destH,
+    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey)
+{
+    RECT rect = { x, y, x + destW, y + destH };
+    CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE);
+}
+
+void CCC_BlitStretchChromaNoFlicker(HDC hdcDest, int x, int y, int destW, int destH,
+    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey)
+{
+    RECT rect = { x, y, x + destW, y + destH };
+    if (!CCC_BlitToRectChromaNoFlicker(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE))
+        CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE);
+}
+
+void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
+{
+    RECT rect = { x, y, x + w, y + h };
+    CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE);
+}
+
+void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
+{
+    RECT rect = { x, y, x + w, y + h };
+    if (!CCC_BlitToRectChromaNoFlicker(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE))
+        CCC_BlitChroma(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
+}
+
+void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
+{
+    CCC_BlitChromaNoFlicker(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
+}
+#endif
+// ============================================================================
+// アイコンを透明色を抜いて描画する関数
+// ============================================================================
+static void DrawTransparentIcon(CDC * pDC, CImageList * pIL, int idx, CRect rc, COLORREF mask)
+{
+    if (!pIL || idx < 0) return;
+
+    IMAGEINFO ii;
+    if (!pIL->GetImageInfo(idx, &ii)) return;
+
+    int w = CRect(ii.rcImage).Width();
+    int h = CRect(ii.rcImage).Height();
+
+    CDC mDC;
+    mDC.CreateCompatibleDC(pDC);
+    CBitmap b;
+    b.CreateCompatibleBitmap(pDC, w, h);
+    CBitmap* ob = mDC.SelectObject(&b);
+
+    mDC.FillSolidRect(0, 0, w, h, mask);
+    pIL->Draw(&mDC, idx, CPoint(0, 0), ILD_NORMAL);
+
+    ::TransparentBlt(pDC->GetSafeHdc(), rc.left + (rc.Width() - w) / 2, rc.top + (rc.Height() - h) / 2, w, h,
+        mDC.GetSafeHdc(), 0, 0, w, h, mask);
+
+    mDC.SelectObject(ob);
+    b.DeleteObject();
+    mDC.DeleteDC();
+}
+
+static void DrawGradientBackground(CDC* pDC, const CRect& rect, COLORREF cS, COLORREF cE, int nDir)
+{
+    int d = nDir % 360;
+    if (d < 0) d += 360;
+
+    BOOL bH = (d >= 45 && d < 135) || (d >= 225 && d < 315);
+    BOOL bR = (d >= 135 && d < 315);
+
+    COLORREF cA = bR ? cE : cS;
+    COLORREF cB = bR ? cS : cE;
+
+    TRIVERTEX v[2];
+    v[0].x = rect.left;
+    v[0].y = rect.top;
+    v[0].Red = (COLOR16)(GetRValue(cA) << 8);
+    v[0].Green = (COLOR16)(GetGValue(cA) << 8);
+    v[0].Blue = (COLOR16)(GetBValue(cA) << 8);
+    v[0].Alpha = 0;
+
+    v[1].x = rect.right;
+    v[1].y = rect.bottom;
+    v[1].Red = (COLOR16)(GetRValue(cB) << 8);
+    v[1].Green = (COLOR16)(GetGValue(cB) << 8);
+    v[1].Blue = (COLOR16)(GetBValue(cB) << 8);
+    v[1].Alpha = 0;
 
     GRADIENT_RECT gr = { 0, 1 };
-    ::GradientFill(pDC->GetSafeHdc(), vtx, 2, &gr, 1,
-        bHorizontal ? GRADIENT_FILL_RECT_H : GRADIENT_FILL_RECT_V);
+    ::GradientFill(pDC->GetSafeHdc(), v, 2, &gr, 1, bH ? GRADIENT_FILL_RECT_H : GRADIENT_FILL_RECT_V);
 }
 
-/**
- * @brief ドロップシャドウ付きテキストを描画する（グローバル関数）
- */
-static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& strText, UINT nFormat,
-    COLORREF clrText, COLORREF clrShadow, int nShadowDirection, int nShadowDistance,
-    int nShadowBlur, BOOL bShadowEnable, COLORREF clrBackground)
+#if CCUSTOM_AERO_SUPPORT
+static BOOL CCC_IsChromaBg(COLORREF clrBg)
 {
-    if (bShadowEnable && nShadowDistance > 0)
+    return clrBg == CCC_AERO_CHROMA_KEY;
+}
+#else
+static BOOL CCC_IsChromaBg(COLORREF) { return FALSE; }
+#endif
+
+static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& str, UINT fmt, COLORREF clrT, COLORREF clrS, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg)
+{
+    if (bSE && nDist > 0 && !CCC_IsChromaBg(clrBg))
     {
-        double rad = nShadowDirection * 3.14159265358979323846 / 180.0;
-        int offsetX = (int)(nShadowDistance * cos(rad));
-        int offsetY = (int)(nShadowDistance * sin(rad));
+        double rad = nSD * 3.14159265358979323846 / 180.0;
+        int ox = (int)(nDist * cos(rad));
+        int oy = (int)(nDist * sin(rad));
 
-        for (int blur = nShadowBlur; blur > 0; blur--)
+        for (int b = nBlur; b > 0; b--)
         {
-            int alpha = 255 / (nShadowBlur + 1) * (nShadowBlur - blur + 1) / nShadowBlur;
-            int r = (GetRValue(clrShadow) * alpha + GetRValue(clrBackground) * (255 - alpha)) / 255;
-            int g = (GetGValue(clrShadow) * alpha + GetGValue(clrBackground) * (255 - alpha)) / 255;
-            int b = (GetBValue(clrShadow) * alpha + GetBValue(clrBackground) * (255 - alpha)) / 255;
+            int a = 255 / (nBlur + 1) * (nBlur - b + 1) / nBlur;
+            int r = (GetRValue(clrS) * a + GetRValue(clrBg) * (255 - a)) / 255;
+            int g = (GetGValue(clrS) * a + GetGValue(clrBg) * (255 - a)) / 255;
+            int bl = (GetBValue(clrS) * a + GetBValue(clrBg) * (255 - a)) / 255;
 
-            pDC->SetTextColor(RGB(r, g, b));
-            int blurOffset = blur - nShadowBlur / 2;
-            CRect rcShadow = rect;
-            rcShadow.OffsetRect(offsetX + blurOffset, offsetY + blurOffset);
-            pDC->DrawText(strText, rcShadow, nFormat);
+            pDC->SetTextColor(RGB(r, g, bl));
+            CRect rs = rect;
+            rs.OffsetRect(ox + (b - nBlur / 2), oy + (b - nBlur / 2));
+            pDC->DrawText(str, rs, fmt);
+        }
+    }
+    pDC->SetTextColor(clrT);
+    CRect rt = rect;
+    pDC->DrawText(str, rt, fmt);
+}
+
+static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str, UINT fmt, COLORREF cS, COLORREF cE, int nDir, COLORREF clrSh, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, int nActW = -1, BOOL bFB = FALSE)
+{
+    if (str.IsEmpty()) return;
+
+    if (bSE && nDist > 0 && !CCC_IsChromaBg(clrBg))
+    {
+        double rad = nSD * 3.14159265358979323846 / 180.0;
+        int ox = (int)(nDist * cos(rad));
+        int oy = (int)(nDist * sin(rad));
+
+        for (int b = nBlur; b > 0; b--)
+        {
+            int a = 255 / (nBlur + 1) * (nBlur - b + 1) / nBlur;
+            int r = (GetRValue(clrSh) * a + GetRValue(clrBg) * (255 - a)) / 255;
+            int g = (GetGValue(clrSh) * a + GetGValue(clrBg) * (255 - a)) / 255;
+            int bl = (GetBValue(clrSh) * a + GetBValue(clrBg) * (255 - a)) / 255;
+
+            pDC->SetTextColor(RGB(r, g, bl));
+            CRect rs = rect;
+            rs.OffsetRect(ox + (b - nBlur / 2), oy + (b - nBlur / 2));
+            pDC->DrawText(str, rs, fmt);
         }
     }
 
-    pDC->SetTextColor(clrText);
-    CRect rcText = rect;
-    pDC->DrawText(strText, rcText, nFormat);
-}
-
-/**
- * @brief グラデーション付きテキストを描画する（最適化版）
- * [FIX❷] 1ピクセルごとのDrawTextループをバンド幅4pxにまとめてDrawText呼び出し回数を大幅削減。
- *        さらに水平グラデーションは中間ビットマップで1回のDrawTextで済む手法を採用。
- */
-static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& strText, UINT nFormat,
-    COLORREF clrStart, COLORREF clrEnd, int nDirection,
-    COLORREF clrShadow, int nShadowDirection, int nShadowDistance, int nShadowBlur, BOOL bShadowEnable, COLORREF clrBackground,
-    int nActualTextWidth = -1, BOOL bGradientFullBleed = FALSE)
-{
-    if (strText.IsEmpty()) return;
-
-    // 1. ドロップシャドウ描画
-    if (bShadowEnable && nShadowDistance > 0)
-    {
-        double rad = nShadowDirection * 3.14159265358979323846 / 180.0;
-        int offsetX = (int)(nShadowDistance * cos(rad));
-        int offsetY = (int)(nShadowDistance * sin(rad));
-
-        for (int blur = nShadowBlur; blur > 0; blur--)
-        {
-            int alpha = 255 / (nShadowBlur + 1) * (nShadowBlur - blur + 1) / nShadowBlur;
-            int r = (GetRValue(clrShadow) * alpha + GetRValue(clrBackground) * (255 - alpha)) / 255;
-            int g = (GetGValue(clrShadow) * alpha + GetGValue(clrBackground) * (255 - alpha)) / 255;
-            int b = (GetBValue(clrShadow) * alpha + GetBValue(clrBackground) * (255 - alpha)) / 255;
-
-            pDC->SetTextColor(RGB(r, g, b));
-            CRect rcShadow = rect;
-            rcShadow.OffsetRect(offsetX + (blur - nShadowBlur / 2), offsetY + (blur - nShadowBlur / 2));
-            pDC->DrawText(strText, rcShadow, nFormat);
-        }
-    }
-
-    // 2. テキストサイズ測定
-    CSize szText = pDC->GetTextExtent(strText);
-    int nWidth = (nActualTextWidth > 0) ? nActualTextWidth : szText.cx;
-    int nHeight = szText.cy;
+    CSize sz = pDC->GetTextExtent(str);
+    int nW = (nActW > 0) ? nActW : sz.cx;
+    int nH = sz.cy;
 
     LOGFONT lf;
     pDC->GetCurrentFont()->GetLogFont(&lf);
-    int italicMargin = lf.lfItalic ? (abs(lf.lfHeight) / 2) : 0;
+    int im = lf.lfItalic ? (abs(lf.lfHeight) / 2) : 0;
 
-    CRect rcGradArea = rect;
-    if (!bGradientFullBleed)
+    CRect ga = rect;
+    if (!bFB)
     {
-        if (nFormat & DT_CENTER)
-            rcGradArea.left = rect.left + (rect.Width() - nWidth) / 2;
-        else if (nFormat & DT_RIGHT)
-            rcGradArea.left = rect.right - nWidth;
-        rcGradArea.right = rcGradArea.left + nWidth + italicMargin;
+        if (fmt & DT_CENTER) ga.left = rect.left + (rect.Width() - nW) / 2;
+        else if (fmt & DT_RIGHT) ga.left = rect.right - nW;
+        ga.right = ga.left + nW + im;
     }
 
-    int normalizedDir = nDirection % 360;
-    if (normalizedDir < 0) normalizedDir += 360;
+    int nd = nDir % 360;
+    if (nd < 0) nd += 360;
 
     pDC->SetBkMode(TRANSPARENT);
+    const int kB = 4;
 
-    // [FIX❷] バンド幅定数（1→4でDrawText呼び出し回数を約1/4に削減）
-    const int kBandWidth = 4;
-
-    // 対角線グラデーション（45, 135, 225, 315度）
-    if (normalizedDir == 45 || normalizedDir == 135 || normalizedDir == 225 || normalizedDir == 315)
+    auto doSlice = [&](CRect sl)
     {
-        int diagonal = (int)sqrt((double)(rcGradArea.Width() * rcGradArea.Width() + nHeight * nHeight));
-        if (diagonal <= 0) diagonal = 1;
+        CRgn rgn;
+        rgn.CreateRectRgnIndirect(&sl);
+        pDC->SelectClipRgn(&rgn);
+        CRect dr = rect;
+        dr.right += im;
+        pDC->DrawText(str, dr, fmt);
+        pDC->SelectClipRgn(NULL);
+    };
 
-        for (int i = 0; i < diagonal; i += kBandWidth)
+    auto setClr = [&](double ratio)
+    {
+        int r = GetRValue(cS) + (int)((GetRValue(cE) - GetRValue(cS)) * ratio);
+        int g = GetGValue(cS) + (int)((GetGValue(cE) - GetGValue(cS)) * ratio);
+        int b = GetBValue(cS) + (int)((GetBValue(cE) - GetBValue(cS)) * ratio);
+        pDC->SetTextColor(RGB(r, g, b));
+    };
+
+    if (nd == 45 || nd == 135 || nd == 225 || nd == 315)
+    {
+        int diag = (int)sqrt((double)(ga.Width() * ga.Width() + nH * nH));
+        if (diag <= 0) diag = 1;
+
+        for (int i = 0; i < diag; i += kB)
         {
-            double ratio = (double)i / diagonal;
-            int r = GetRValue(clrStart) + (int)((GetRValue(clrEnd) - GetRValue(clrStart)) * ratio);
-            int g = GetGValue(clrStart) + (int)((GetGValue(clrEnd) - GetGValue(clrStart)) * ratio);
-            int b = GetBValue(clrStart) + (int)((GetBValue(clrEnd) - GetBValue(clrStart)) * ratio);
-            pDC->SetTextColor(RGB(r, g, b));
-
-            double diagRatio = (double)i / (double)(diagonal - 1);
-            int x = rcGradArea.left + (int)(rcGradArea.Width() * diagRatio);
-
-            CRect rcSlice = rect;
-            rcSlice.left = x;
-            rcSlice.right = min(x + kBandWidth, rect.right);
-
-            CRgn rgn;
-            rgn.CreateRectRgnIndirect(&rcSlice);
-            pDC->SelectClipRgn(&rgn);
-
-            CRect rcDraw = rect;
-            rcDraw.right += italicMargin;
-            pDC->DrawText(strText, rcDraw, nFormat);
-
-            pDC->SelectClipRgn(NULL);
+            setClr((double)i / diag);
+            int x = ga.left + (int)(ga.Width() * (double)i / max(1, diag - 1));
+            CRect sl = rect;
+            sl.left = x;
+            sl.right = min(x + kB, rect.right);
+            doSlice(sl);
         }
     }
-    // 水平グラデーション
-    else if ((normalizedDir >= 90 && normalizedDir < 180) || (normalizedDir >= 270 && normalizedDir < 360))
+    else if ((nd >= 90 && nd < 180) || (nd >= 270 && nd < 360))
     {
-        int totalSteps = rcGradArea.Width();
-        if (totalSteps <= 0) totalSteps = 1;
-        BOOL bLeftToRight = (normalizedDir >= 90 && normalizedDir < 180);
+        int tot = ga.Width();
+        if (tot <= 0) tot = 1;
+        BOOL ltr = (nd >= 90 && nd < 180);
 
-        for (int i = 0; i < totalSteps; i += kBandWidth)
+        for (int i = 0; i < tot; i += kB)
         {
-            double ratio = bLeftToRight ? ((double)i / totalSteps) : (1.0 - (double)i / totalSteps);
-            int r = GetRValue(clrStart) + (int)((GetRValue(clrEnd) - GetRValue(clrStart)) * ratio);
-            int g = GetGValue(clrStart) + (int)((GetGValue(clrEnd) - GetGValue(clrStart)) * ratio);
-            int b = GetBValue(clrStart) + (int)((GetBValue(clrEnd) - GetBValue(clrStart)) * ratio);
-            pDC->SetTextColor(RGB(r, g, b));
-
-            CRect rcSlice = rect;
-            rcSlice.left = rcGradArea.left + i;
-            rcSlice.right = min(rcSlice.left + kBandWidth, rcGradArea.right);
-
-            CRgn rgn;
-            rgn.CreateRectRgnIndirect(&rcSlice);
-            pDC->SelectClipRgn(&rgn);
-
-            CRect rcDraw = rect;
-            rcDraw.right += italicMargin;
-            pDC->DrawText(strText, rcDraw, nFormat);
-
-            pDC->SelectClipRgn(NULL);
+            setClr(ltr ? (double)i / tot : 1.0 - (double)i / tot);
+            CRect sl = rect;
+            sl.left = ga.left + i;
+            sl.right = min(sl.left + kB, ga.right);
+            doSlice(sl);
         }
     }
-    // 垂直グラデーション
     else
     {
-        int totalSteps = nHeight;
-        if (totalSteps <= 0) totalSteps = 1;
-        BOOL bBottomToTop = (normalizedDir >= 0 && normalizedDir < 90);
+        int tot = nH;
+        if (tot <= 0) tot = 1;
+        BOOL b2t = (nd >= 0 && nd < 90);
 
-        for (int i = 0; i < totalSteps; i += kBandWidth)
+        for (int i = 0; i < tot; i += kB)
         {
-            double ratio = bBottomToTop ? ((double)i / totalSteps) : (1.0 - (double)i / totalSteps);
-            int r = GetRValue(clrStart) + (int)((GetRValue(clrEnd) - GetRValue(clrStart)) * ratio);
-            int g = GetGValue(clrStart) + (int)((GetGValue(clrEnd) - GetGValue(clrStart)) * ratio);
-            int b = GetBValue(clrStart) + (int)((GetBValue(clrEnd) - GetBValue(clrStart)) * ratio);
-            pDC->SetTextColor(RGB(r, g, b));
-
-            CRect rcSlice = rect;
-            rcSlice.top = bBottomToTop ? (rect.bottom - i - kBandWidth) : (rect.top + i);
-            rcSlice.bottom = rcSlice.top + kBandWidth;
-
-            CRgn rgn;
-            rgn.CreateRectRgnIndirect(&rcSlice);
-            pDC->SelectClipRgn(&rgn);
-
-            CRect rcDraw = rect;
-            rcDraw.right += italicMargin;
-            pDC->DrawText(strText, rcDraw, nFormat);
-
-            pDC->SelectClipRgn(NULL);
+            setClr(b2t ? (double)i / tot : 1.0 - (double)i / tot);
+            CRect sl = rect;
+            sl.top = b2t ? (rect.bottom - i - kB) : (rect.top + i);
+            sl.bottom = sl.top + kB;
+            doSlice(sl);
         }
     }
 }
 
-// -------- 以下の描画ヘルパーは変更なし --------
-
-static void DrawHeart(CDC* pDC, CRect rc, COLORREF color)
+static void DrawHeart(CDC* pDC, CRect rc, COLORREF c)
 {
-    CBrush br(color);
-    CPen pen(PS_SOLID, 1, color);
-    CBrush* pOldBr = pDC->SelectObject(&br);
-    CPen* pOldPen = pDC->SelectObject(&pen);
+    CBrush br(c);
+    CPen p(PS_SOLID, 1, c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&p);
 
     int cx = rc.CenterPoint().x;
     int cy = rc.CenterPoint().y;
     int w = rc.Width() / 2;
     if (w < 2) w = 2;
 
-    POINT pts[8];
-    pts[0] = { cx,     cy + w };
-    pts[1] = { cx - w, cy - w / 3 };
-    pts[2] = { cx - w, cy - w };
-    pts[3] = { cx,     cy - w / 2 };
-    pts[4] = { cx,     cy - w / 2 };
-    pts[5] = { cx + w, cy - w };
-    pts[6] = { cx + w, cy - w / 3 };
-    pts[7] = { cx,     cy + w };
+    POINT pts[8] = {
+        {cx, cy + w}, {cx - w, cy - w / 3}, {cx - w, cy - w}, {cx, cy - w / 2},
+        {cx, cy - w / 2}, {cx + w, cy - w}, {cx + w, cy - w / 3}, {cx, cy + w}
+    };
     pDC->Polygon(pts, 8);
 
-    pDC->SelectObject(pOldBr);
-    pDC->SelectObject(pOldPen);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
 }
 
-static void DrawStar(CDC* pDC, int cx, int cy, int size, COLORREF color)
+static void DrawStar(CDC* pDC, int cx, int cy, int sz, COLORREF c)
 {
-    CPen pen(PS_SOLID, 2, color);
-    CPen* pOldPen = pDC->SelectObject(&pen);
+    CPen p(PS_SOLID, 2, c);
+    CPen* op = pDC->SelectObject(&p);
 
-    pDC->MoveTo(cx, cy - size);        pDC->LineTo(cx, cy + size);
-    pDC->MoveTo(cx - size, cy);        pDC->LineTo(cx + size, cy);
-    pDC->MoveTo(cx - size * 7 / 10, cy - size * 7 / 10); pDC->LineTo(cx + size * 7 / 10, cy + size * 7 / 10);
-    pDC->MoveTo(cx + size * 7 / 10, cy - size * 7 / 10); pDC->LineTo(cx - size * 7 / 10, cy + size * 7 / 10);
+    pDC->MoveTo(cx, cy - sz);
+    pDC->LineTo(cx, cy + sz);
+    pDC->MoveTo(cx - sz, cy);
+    pDC->LineTo(cx + sz, cy);
+    pDC->MoveTo(cx - sz * 7 / 10, cy - sz * 7 / 10);
+    pDC->LineTo(cx + sz * 7 / 10, cy + sz * 7 / 10);
+    pDC->MoveTo(cx + sz * 7 / 10, cy - sz * 7 / 10);
+    pDC->LineTo(cx - sz * 7 / 10, cy + sz * 7 / 10);
 
-    pDC->SelectObject(pOldPen);
+    pDC->SelectObject(op);
 }
 
-static void DrawMusicNote(CDC* pDC, CRect rc, COLORREF color)
+static void DrawMusicNote(CDC* pDC, CRect rc, COLORREF c)
 {
-    CBrush br(color);
-    CPen pen(PS_SOLID, 2, color);
-    CBrush* pOldBr = pDC->SelectObject(&br);
-    CPen* pOldPen = pDC->SelectObject(&pen);
+    CBrush br(c);
+    CPen p(PS_SOLID, 2, c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&p);
 
     int cx = rc.CenterPoint().x;
     int cy = rc.CenterPoint().y;
     int h = rc.Height() * 6 / 10;
     int w = rc.Width() / 3;
 
-    CRect rcNote(cx - w / 2, cy + h / 4, cx + w / 2, cy + h / 4 + w);
-    pDC->Ellipse(&rcNote);
+    CRect rn(cx - w / 2, cy + h / 4, cx + w / 2, cy + h / 4 + w);
+    pDC->Ellipse(&rn);
     pDC->MoveTo(cx + w / 2, cy + h / 4 + w / 2);
     pDC->LineTo(cx + w / 2, cy - h / 2);
 
-    CPoint pts[4];
-    pts[0] = CPoint(cx + w / 2, cy - h / 2);
-    pts[1] = CPoint(cx + w / 2 + w, cy - h / 4);
-    pts[2] = CPoint(cx + w / 2 + w, cy);
-    pts[3] = CPoint(cx + w / 2, cy + h / 8);
+    CPoint pts[4] = {
+        {cx + w / 2, cy - h / 2}, {cx + w / 2 + w, cy - h / 4},
+        {cx + w / 2 + w, cy}, {cx + w / 2, cy + h / 8}
+    };
     pDC->SelectObject(GetStockObject(NULL_PEN));
     pDC->Polygon(pts, 4);
 
-    pDC->SelectObject(pOldBr);
-    pDC->SelectObject(pOldPen);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
 }
 
-static void DrawDiamond(CDC* pDC, CRect rc, COLORREF color)
+static void DrawDiamond(CDC* pDC, CRect rc, COLORREF c)
 {
     int cx = rc.CenterPoint().x;
     int cy = rc.CenterPoint().y;
     int w = rc.Width() / 2;
     int h = rc.Height() / 2;
 
-    CPoint pts[4];
-    pts[0] = CPoint(cx, cy - h);
-    pts[1] = CPoint(cx + w, cy);
-    pts[2] = CPoint(cx, cy + h);
-    pts[3] = CPoint(cx - w, cy);
-
-    CBrush brOuter(RGB(200, 200, 255));
-    CPen   penOuter(PS_SOLID, 1, RGB(150, 150, 255));
-    CBrush* pOldBr = pDC->SelectObject(&brOuter);
-    CPen* pOldPen = pDC->SelectObject(&penOuter);
+    CPoint pts[4] = { {cx, cy - h}, {cx + w, cy}, {cx, cy + h}, {cx - w, cy} };
+    CBrush bO(RGB(200, 200, 255));
+    CPen pO(PS_SOLID, 1, RGB(150, 150, 255));
+    CBrush* ob = pDC->SelectObject(&bO);
+    CPen* op = pDC->SelectObject(&pO);
     pDC->Polygon(pts, 4);
 
-    CPoint ptsInner[4];
-    ptsInner[0] = CPoint(cx, cy - h * 6 / 10);
-    ptsInner[1] = CPoint(cx + w * 6 / 10, cy);
-    ptsInner[2] = CPoint(cx, cy + h * 6 / 10);
-    ptsInner[3] = CPoint(cx - w * 6 / 10, cy);
+    CPoint pi[4] = {
+        {cx, cy - h * 6 / 10}, {cx + w * 6 / 10, cy},
+        {cx, cy + h * 6 / 10}, {cx - w * 6 / 10, cy}
+    };
+    CBrush bI(c);
+    pDC->SelectObject(&bI);
+    pDC->Polygon(pi, 4);
 
-    CBrush brInner(color);
-    pDC->SelectObject(&brInner);
-    pDC->Polygon(ptsInner, 4);
+    CBrush bH(RGB(255, 255, 255));
+    pDC->SelectObject(&bH);
+    pDC->Ellipse(cx - 2, cy - 3, cx + 2, cy + 1);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
 
-    CBrush brHighlight(RGB(255, 255, 255));
-    pDC->SelectObject(&brHighlight);
-    CRect rcHL(cx - 2, cy - 3, cx + 2, cy + 1);
-    pDC->Ellipse(&rcHL);
-
-    pDC->SelectObject(pOldBr);
-    pDC->SelectObject(pOldPen);
-
-    CPen penLight(PS_SOLID, 1, RGB(255, 255, 200));
-    pDC->SelectObject(&penLight);
-    pDC->MoveTo(cx, cy - h - 3); pDC->LineTo(cx, cy - h - 6);
-    pDC->MoveTo(cx, cy + h + 3); pDC->LineTo(cx, cy + h + 6);
-    pDC->MoveTo(cx - w - 3, cy); pDC->LineTo(cx - w - 6, cy);
-    pDC->MoveTo(cx + w + 3, cy); pDC->LineTo(cx + w + 6, cy);
-    pDC->SelectObject(pOldPen);
+    CPen pL(PS_SOLID, 1, RGB(255, 255, 200));
+    pDC->SelectObject(&pL);
+    pDC->MoveTo(cx, cy - h - 3);
+    pDC->LineTo(cx, cy - h - 6);
+    pDC->MoveTo(cx, cy + h + 3);
+    pDC->LineTo(cx, cy + h + 6);
+    pDC->MoveTo(cx - w - 3, cy);
+    pDC->LineTo(cx - w - 6, cy);
+    pDC->MoveTo(cx + w + 3, cy);
+    pDC->LineTo(cx + w + 6, cy);
+    pDC->SelectObject(op);
 }
 
-static void DrawCrown(CDC* pDC, int cx, int cy, int size, COLORREF color)
+static void DrawCrown(CDC* pDC, int cx, int cy, int sz, COLORREF c)
 {
-    CBrush br(color);
+    CBrush br(c);
     CPen pen(PS_SOLID, 1, RGB(255, 215, 0));
-    CBrush* pOldBr = pDC->SelectObject(&br);
-    CPen* pOldPen = pDC->SelectObject(&pen);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
 
-    CPoint pts[8];
-    pts[0] = CPoint(cx - size, cy + size / 2);
-    pts[1] = CPoint(cx - size * 2 / 3, cy - size / 2);
-    pts[2] = CPoint(cx - size / 3, cy);
-    pts[3] = CPoint(cx, cy - size);
-    pts[4] = CPoint(cx + size / 3, cy);
-    pts[5] = CPoint(cx + size * 2 / 3, cy - size / 2);
-    pts[6] = CPoint(cx + size, cy + size / 2);
-    pts[7] = CPoint(cx - size, cy + size / 2);
+    CPoint pts[8] = {
+        {cx - sz, cy + sz / 2}, {cx - sz * 2 / 3, cy - sz / 2}, {cx - sz / 3, cy},
+        {cx, cy - sz}, {cx + sz / 3, cy}, {cx + sz * 2 / 3, cy - sz / 2},
+        {cx + sz, cy + sz / 2}, {cx - sz, cy + sz / 2}
+    };
     pDC->Polygon(pts, 7);
 
-    CBrush brJewel(RGB(255, 100, 100));
-    pDC->SelectObject(&brJewel);
-    pDC->Ellipse(cx - 2, cy - size - 2, cx + 2, cy - size + 2);
-    pDC->Ellipse(cx - size * 2 / 3 - 2, cy - size / 2 - 2, cx - size * 2 / 3 + 2, cy - size / 2 + 2);
-    pDC->Ellipse(cx + size * 2 / 3 - 2, cy - size / 2 - 2, cx + size * 2 / 3 + 2, cy - size / 2 + 2);
+    CBrush bJ(RGB(255, 100, 100));
+    pDC->SelectObject(&bJ);
+    pDC->Ellipse(cx - 2, cy - sz - 2, cx + 2, cy - sz + 2);
+    pDC->Ellipse(cx - sz * 2 / 3 - 2, cy - sz / 2 - 2, cx - sz * 2 / 3 + 2, cy - sz / 2 + 2);
+    pDC->Ellipse(cx + sz * 2 / 3 - 2, cy - sz / 2 - 2, cx + sz * 2 / 3 + 2, cy - sz / 2 + 2);
 
-    pDC->SelectObject(pOldBr);
-    pDC->SelectObject(pOldPen);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
 }
 
-static void DrawLaceLine(CDC* pDC, int x1, int y1, int x2, int y2, COLORREF color)
+static void DrawLaceLine(CDC* pDC, int x1, int y1, int x2, int y2, COLORREF c)
 {
-    CPen pen(PS_SOLID, 1, color);
-    CPen* pOldPen = pDC->SelectObject(&pen);
-
-    int dx = x2 - x1;
-    int dy = y2 - y1;
+    CPen p(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&p);
+    int dx = x2 - x1, dy = y2 - y1;
     int steps = max(abs(dx), abs(dy)) / 8;
     if (steps < 2) steps = 2;
 
@@ -399,154 +712,117 @@ static void DrawLaceLine(CDC* pDC, int x1, int y1, int x2, int y2, COLORREF colo
     {
         int x = x1 + dx * i / steps;
         int y = y1 + dy * i / steps;
-        int wave = (i % 2 == 0) ? 2 : -2;
-
-        if (abs(dx) > abs(dy))
-            pDC->Ellipse(x - 2, y + wave - 2, x + 2, y + wave + 2);
-        else
-            pDC->Ellipse(x + wave - 2, y - 2, x + wave + 2, y + 2);
+        int wv = (i % 2 == 0) ? 2 : -2;
+        if (abs(dx) > abs(dy)) pDC->Ellipse(x - 2, y + wv - 2, x + 2, y + wv + 2);
+        else pDC->Ellipse(x + wv - 2, y - 2, x + wv + 2, y + 2);
     }
-
-    pDC->SelectObject(pOldPen);
+    pDC->SelectObject(op);
 }
 
-static void DrawRibbon(CDC* pDC, CRect rc, COLORREF color)
+static void DrawRibbon(CDC* pDC, CRect rc, COLORREF c)
 {
-    CBrush br(color);
+    CBrush br(c);
     CPen pen(PS_SOLID, 1, RGB(200, 100, 150));
-    CBrush* pOldBr = pDC->SelectObject(&br);
-    CPen* pOldPen = pDC->SelectObject(&pen);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
 
     int cx = rc.CenterPoint().x;
     int cy = rc.CenterPoint().y;
     int w = rc.Width() / 2;
     int h = rc.Height() / 2;
 
-    CRect rcCenter(cx - w, cy - h / 3, cx + w, cy + h / 3);
-    pDC->RoundRect(&rcCenter, CPoint(h / 2, h / 2));
-    CRect rcLeft(cx - w / 3, cy - h, cx, cy + h);
-    pDC->Ellipse(&rcLeft);
-    CRect rcRight(cx, cy - h, cx + w / 3, cy + h);
-    pDC->Ellipse(&rcRight);
+    CRect rC(cx - w, cy - h / 3, cx + w, cy + h / 3);
+    pDC->RoundRect(&rC, CPoint(h / 2, h / 2));
+    CRect rL(cx - w / 3, cy - h, cx, cy + h);
+    pDC->Ellipse(&rL);
+    CRect rR(cx, cy - h, cx + w / 3, cy + h);
+    pDC->Ellipse(&rR);
 
-    pDC->SelectObject(pOldBr);
-    pDC->SelectObject(pOldPen);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
 }
 
-static void DrawBigRibbon(CDC* pDC, int cx, int cy, int size, COLORREF color)
+static void DrawFlower(CDC* pDC, int cx, int cy, int sz, COLORREF c)
 {
-    CBrush br(color);
-    CPen pen(PS_SOLID, 2, RGB(255, 140, 180));
-    CBrush* pOldBr = pDC->SelectObject(&br);
-    CPen* pOldPen = pDC->SelectObject(&pen);
-
-    CRect rcCenter(cx - size / 2, cy - size / 3, cx + size / 2, cy + size / 3);
-    pDC->RoundRect(&rcCenter, CPoint(size / 4, size / 4));
-
-    CPoint ptsLeft[4];
-    ptsLeft[0] = CPoint(cx - size / 2, cy);
-    ptsLeft[1] = CPoint(cx - size, cy - size / 2);
-    ptsLeft[2] = CPoint(cx - size * 9 / 10, cy);
-    ptsLeft[3] = CPoint(cx - size, cy + size / 2);
-    pDC->Polygon(ptsLeft, 4);
-
-    CPoint ptsRight[4];
-    ptsRight[0] = CPoint(cx + size / 2, cy);
-    ptsRight[1] = CPoint(cx + size, cy - size / 2);
-    ptsRight[2] = CPoint(cx + size * 9 / 10, cy);
-    ptsRight[3] = CPoint(cx + size, cy + size / 2);
-    pDC->Polygon(ptsRight, 4);
-
-    CBrush brGold(RGB(255, 215, 0));
-    pDC->SelectObject(&brGold);
-    pDC->Ellipse(cx - 3, cy - 3, cx + 3, cy + 3);
-
-    pDC->SelectObject(pOldBr);
-    pDC->SelectObject(pOldPen);
-}
-
-static void DrawFlower(CDC* pDC, int cx, int cy, int size, COLORREF color)
-{
-    CBrush br(color);
-    CPen pen(PS_SOLID, 1, color);
-    CBrush* pOldBr = pDC->SelectObject(&br);
-    CPen* pOldPen = pDC->SelectObject(&pen);
+    CBrush br(c);
+    CPen pen(PS_SOLID, 1, c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
 
     for (int i = 0; i < 5; i++)
     {
-        double angle = i * 2.0 * 3.14159 / 5.0;
-        int px = cx + (int)(size * 0.6 * cos(angle));
-        int py = cy + (int)(size * 0.6 * sin(angle));
-        pDC->Ellipse(px - size / 3, py - size / 3, px + size / 3, py + size / 3);
+        double a = i * 2.0 * 3.14159 / 5.0;
+        int px = cx + (int)(sz * 0.6 * cos(a));
+        int py = cy + (int)(sz * 0.6 * sin(a));
+        pDC->Ellipse(px - sz / 3, py - sz / 3, px + sz / 3, py + sz / 3);
     }
+    CBrush bC(RGB(255, 255, 100));
+    pDC->SelectObject(&bC);
+    pDC->Ellipse(cx - sz / 4, cy - sz / 4, cx + sz / 4, cy + sz / 4);
 
-    CBrush brCenter(RGB(255, 255, 100));
-    pDC->SelectObject(&brCenter);
-    pDC->Ellipse(cx - size / 4, cy - size / 4, cx + size / 4, cy + size / 4);
-
-    pDC->SelectObject(pOldBr);
-    pDC->SelectObject(pOldPen);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
 }
 
-static void DrawHanamaru(CDC* pDC, CRect rc, COLORREF colorCenter, COLORREF colorPetal)
+static void DrawHanamaru(CDC* pDC, CRect rc, COLORREF cC, COLORREF cP)
 {
     int cx = rc.CenterPoint().x;
     int cy = rc.CenterPoint().y;
     int radius = min(rc.Width(), rc.Height()) / 2 - 2;
     if (radius < 3) return;
 
-    CBrush brPetal(colorPetal);
-    CPen penPetal(PS_SOLID, 1, RGB(255, 140, 180));
-    CBrush* pOldBr = pDC->SelectObject(&brPetal);
-    CPen* pOldPen = pDC->SelectObject(&penPetal);
+    CBrush bP(cP);
+    CPen pP(PS_SOLID, 1, RGB(255, 140, 180));
+    CBrush* ob = pDC->SelectObject(&bP);
+    CPen* op = pDC->SelectObject(&pP);
 
-    const int numPetals = 8;
-    const double angleStep = 2.0 * 3.14159265358979323846 / numPetals;
+    const int nP = 8;
+    const double as = 2.0 * 3.14159265358979323846 / nP;
 
-    for (int i = 0; i < numPetals; i++)
+    for (int i = 0; i < nP; i++)
     {
-        double angle = angleStep * i;
-        int px = cx + (int)(radius * 0.65 * cos(angle));
-        int py = cy + (int)(radius * 0.65 * sin(angle));
-        int petalSize = (int)(radius / 2.5);
-        CRect rcPetal(px - petalSize, py - petalSize, px + petalSize, py + petalSize);
-        pDC->Ellipse(&rcPetal);
+        double a = as * i;
+        int px = cx + (int)(radius * 0.65 * cos(a));
+        int py = cy + (int)(radius * 0.65 * sin(a));
+        int ps = (int)(radius / 2.5);
+        CRect rp(px - ps, py - ps, px + ps, py + ps);
+        pDC->Ellipse(&rp);
     }
 
-    CBrush brMidPetal(RGB(255, 150, 180));
-    pDC->SelectObject(&brMidPetal);
-    for (int i = 0; i < numPetals; i++)
+    CBrush bM(RGB(255, 150, 180));
+    pDC->SelectObject(&bM);
+    for (int i = 0; i < nP; i++)
     {
-        double angle = angleStep * i + angleStep / 2.0;
-        int px = cx + (int)(radius * 0.45 * cos(angle));
-        int py = cy + (int)(radius * 0.45 * sin(angle));
-        int petalSize = radius / 4;
-        CRect rcPetal(px - petalSize, py - petalSize, px + petalSize, py + petalSize);
-        pDC->Ellipse(&rcPetal);
+        double a = as * i + as / 2.0;
+        int px = cx + (int)(radius * 0.45 * cos(a));
+        int py = cy + (int)(radius * 0.45 * sin(a));
+        int ps = radius / 4;
+        CRect rp(px - ps, py - ps, px + ps, py + ps);
+        pDC->Ellipse(&rp);
     }
 
-    CBrush brCenterOuter(RGB(255, 120, 160));
-    pDC->SelectObject(&brCenterOuter);
-    int outerRadius = radius / 2;
-    CRect rcOuter(cx - outerRadius, cy - outerRadius, cx + outerRadius, cy + outerRadius);
-    pDC->Ellipse(&rcOuter);
+    CBrush bCO(RGB(255, 120, 160));
+    pDC->SelectObject(&bCO);
+    int or2 = radius / 2;
+    CRect rO(cx - or2, cy - or2, cx + or2, cy + or2);
+    pDC->Ellipse(&rO);
 
-    CBrush brCenterInner(colorCenter);
-    pDC->SelectObject(&brCenterInner);
-    int innerRadius = radius / 3;
-    CRect rcInner(cx - innerRadius, cy - innerRadius, cx + innerRadius, cy + innerRadius);
-    pDC->Ellipse(&rcInner);
+    CBrush bCI(cC);
+    pDC->SelectObject(&bCI);
+    int ir = radius / 3;
+    CRect rI(cx - ir, cy - ir, cx + ir, cy + ir);
+    pDC->Ellipse(&rI);
 
-    CBrush brOrange(RGB(255, 140, 80));
-    CPen penOrange(PS_SOLID, 1, RGB(255, 100, 50));
-    pDC->SelectObject(&brOrange);
-    pDC->SelectObject(&penOrange);
-    int smallRadius = radius / 6;
-    CRect rcSmall(cx - smallRadius, cy - smallRadius, cx + smallRadius, cy + smallRadius);
-    pDC->Ellipse(&rcSmall);
+    CBrush bOr(RGB(255, 140, 80));
+    CPen pOr(PS_SOLID, 1, RGB(255, 100, 50));
+    pDC->SelectObject(&bOr);
+    pDC->SelectObject(&pOr);
+    int sr = radius / 6;
+    CRect rS(cx - sr, cy - sr, cx + sr, cy + sr);
+    pDC->Ellipse(&rS);
 
-    pDC->SelectObject(pOldBr);
-    pDC->SelectObject(pOldPen);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
 
     DrawStar(pDC, cx - radius * 8 / 10, cy - radius * 8 / 10, 2, RGB(255, 140, 180));
     DrawStar(pDC, cx + radius * 8 / 10, cy - radius * 8 / 10, 2, RGB(255, 140, 180));
@@ -558,278 +834,528 @@ static void DrawHanamaru(CDC* pDC, CRect rc, COLORREF colorCenter, COLORREF colo
     DrawStar(pDC, cx + radius * 9 / 10, cy, 1, RGB(255, 180, 200));
 }
 
-static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPatternA, BOOL bPushed)
+static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPA, BOOL bPushed)
 {
-    CPen penVine(PS_SOLID, 1, COLOR_VINE_DECO);
-    CBrush brFlower(COLOR_HEART);
-    CBrush brCenter(RGB(255, 255, 0));
+    CPen pV(PS_SOLID, 1, COLOR_VINE_DECO);
+    CBrush bF(COLOR_HEART);
+    CBrush bC(RGB(255, 255, 0));
+    CPen* op = pDC->SelectObject(&pV);
+    CBrush* ob = pDC->SelectObject(&bF);
 
-    CPen* pOldPen = pDC->SelectObject(&penVine);
-    CBrush* pOldBrush = pDC->SelectObject(&brFlower);
-
-    int offset = bPushed ? 1 : 0;
+    int ofs = bPushed ? 1 : 0;
     rect.DeflateRect(2, 2);
 
-    struct Corner { int x; int y; int dx; int dy; };
-    std::vector<Corner> corners;
+    struct C { int x, y, dx, dy; };
+    std::vector<C> corners;
 
-    if (bPatternA)
+    if (bPA)
     {
-        corners.push_back({ rect.left + offset, rect.top + offset,  1,  1 });
-        corners.push_back({ rect.right - 1 + offset, rect.bottom - 1 + offset, -1, -1 });
+        corners.push_back({ rect.left + ofs, rect.top + ofs, 1, 1 });
+        corners.push_back({ rect.right - 1 + ofs, rect.bottom - 1 + ofs, -1, -1 });
     }
     else
     {
-        corners.push_back({ rect.right - 1 + offset, rect.top + offset, -1,  1 });
-        corners.push_back({ rect.left + offset,  rect.bottom - 1 + offset,  1, -1 });
+        corners.push_back({ rect.right - 1 + ofs, rect.top + ofs, -1, 1 });
+        corners.push_back({ rect.left + ofs, rect.bottom - 1 + ofs, 1, -1 });
     }
 
-    for (const auto& c : corners)
+    for (auto& c : corners)
     {
-        CPoint pts[4];
-        pts[0] = CPoint(c.x, c.y + 12 * c.dy);
-        pts[1] = CPoint(c.x + 4 * c.dx, c.y + 4 * c.dy);
-        pts[2] = CPoint(c.x + 4 * c.dx, c.y + 4 * c.dy);
-        pts[3] = CPoint(c.x + 12 * c.dx, c.y);
+        CPoint pts[4] = {
+            {c.x, c.y + 12 * c.dy},
+            {c.x + 4 * c.dx, c.y + 4 * c.dy},
+            {c.x + 4 * c.dx, c.y + 4 * c.dy},
+            {c.x + 12 * c.dx, c.y}
+        };
         pDC->PolyBezier(pts, 4);
 
         int r = 2;
         int fx = c.x + 4 * c.dx;
         int fy = c.y + 4 * c.dy;
 
-        pDC->SelectObject(&brFlower);
+        pDC->SelectObject(&bF);
         pDC->SelectObject(GetStockObject(NULL_PEN));
         pDC->Ellipse(fx - r, fy - r * 2, fx + r, fy);
         pDC->Ellipse(fx - r, fy, fx + r, fy + r * 2);
         pDC->Ellipse(fx - r * 2, fy - r, fx, fy + r);
         pDC->Ellipse(fx, fy - r, fx + r * 2, fy + r);
 
-        pDC->SelectObject(&brCenter);
+        pDC->SelectObject(&bC);
         pDC->Ellipse(fx - 1, fy - 1, fx + 1, fy + 1);
-        pDC->SelectObject(&penVine);
+        pDC->SelectObject(&pV);
     }
-
-    pDC->SelectObject(pOldPen);
-    pDC->SelectObject(pOldBrush);
+    pDC->SelectObject(op);
+    pDC->SelectObject(ob);
 }
 
-static void DrawSmartText(CDC* pDC, CRect rect, CString strText, BOOL bDisabled, BOOL bPushed)
+static void DrawSmartText(CDC* pDC, CRect rect, CString str, BOOL bDis, BOOL bPushed)
 {
-    if (strText.IsEmpty()) return;
+    if (str.IsEmpty()) return;
 
     pDC->SetBkMode(TRANSPARENT);
-    pDC->SetTextColor(bDisabled ? RGB(128, 128, 128) : COLOR_EDIT_TEXT);
+    pDC->SetTextColor(bDis ? RGB(128, 128, 128) : COLOR_EDIT_TEXT);
 
-    CRect rcText = rect;
-    rcText.DeflateRect(1, 1);
-    if (bPushed) rcText.OffsetRect(1, 1);
+    CRect rt = rect;
+    rt.DeflateRect(1, 1);
+    if (bPushed) rt.OffsetRect(1, 1);
 
-    CFont* pCurrentFont = pDC->GetCurrentFont();
+    CFont* pCF = pDC->GetCurrentFont();
     LOGFONT lf;
-    pCurrentFont->GetLogFont(&lf);
+    pCF->GetLogFont(&lf);
+    long tH = max(8L, abs(lf.lfHeight) - 2);
+    lf.lfHeight = -tH;
 
-    long targetHeight = abs(lf.lfHeight);
-    targetHeight = max(8L, targetHeight - 2);
-    lf.lfHeight = -targetHeight;
+    CFont fs;
+    fs.CreateFontIndirect(&lf);
+    CFont* po = pDC->SelectObject(&fs);
+    CSize sz = pDC->GetTextExtent(str);
 
-    CFont fontSmall;
-    fontSmall.CreateFontIndirect(&lf);
-    CFont* pOldFont = pDC->SelectObject(&fontSmall);
-
-    CSize szText = pDC->GetTextExtent(strText);
-    if (szText.cx <= rcText.Width())
+    if (sz.cx <= rt.Width())
     {
-        pDC->DrawText(strText, &rcText, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        pDC->DrawText(str, &rt, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
     else
     {
-        CRect rcCalc = rcText;
-        int nHeight = pDC->DrawText(strText, &rcCalc, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
-        if (nHeight <= rcText.Height())
+        CRect rc = rt;
+        int nH = pDC->DrawText(str, &rc, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
+        if (nH <= rt.Height())
         {
-            CRect rcDraw = rcText;
-            rcDraw.top += (rcText.Height() - nHeight) / 2;
-            pDC->DrawText(strText, &rcDraw, DT_CENTER | DT_WORDBREAK);
+            CRect rd = rt;
+            rd.top += (rt.Height() - nH) / 2;
+            pDC->DrawText(str, &rd, DT_CENTER | DT_WORDBREAK);
         }
         else
         {
-            pDC->SelectObject(pOldFont);
-            fontSmall.DeleteObject();
+            pDC->SelectObject(po);
+            fs.DeleteObject();
+            BOOL bP = FALSE;
 
-            int nTryHeight = targetHeight;
-            BOOL bPrinted = FALSE;
-
-            while (nTryHeight > 6)
+            while (tH > 6)
             {
-                nTryHeight--;
-                lf.lfHeight = -nTryHeight;
-                CFont fontTry;
-                fontTry.CreateFontIndirect(&lf);
-                pDC->SelectObject(&fontTry);
+                tH--;
+                lf.lfHeight = -tH;
+                CFont ft;
+                ft.CreateFontIndirect(&lf);
+                pDC->SelectObject(&ft);
 
-                CRect rcTry = rcText;
-                int nH = pDC->DrawText(strText, &rcTry, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
-                if (nH <= rcText.Height() && rcTry.Width() <= rcText.Width())
+                CRect ry = rt;
+                int nh = pDC->DrawText(str, &ry, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
+                if (nh <= rt.Height() && ry.Width() <= rt.Width())
                 {
-                    CRect rcDraw = rcText;
-                    rcDraw.top += (rcText.Height() - nH) / 2;
-                    pDC->DrawText(strText, &rcDraw, DT_CENTER | DT_WORDBREAK);
-                    pDC->SelectObject(pOldFont);
-                    fontTry.DeleteObject();
-                    bPrinted = TRUE;
+                    CRect rd = rt;
+                    rd.top += (rt.Height() - nh) / 2;
+                    pDC->DrawText(str, &rd, DT_CENTER | DT_WORDBREAK);
+                    pDC->SelectObject(po);
+                    ft.DeleteObject();
+                    bP = TRUE;
                     break;
                 }
-                pDC->SelectObject(pOldFont);
-                fontTry.DeleteObject();
+                pDC->SelectObject(po);
+                ft.DeleteObject();
             }
 
-            if (!bPrinted)
+            if (!bP)
             {
                 lf.lfHeight = -6;
-                CFont fontMin;
-                fontMin.CreateFontIndirect(&lf);
-                pDC->SelectObject(&fontMin);
-                pDC->DrawText(strText, &rcText, DT_CENTER | DT_WORDBREAK | DT_VCENTER);
-                pDC->SelectObject(pOldFont);
-                fontMin.DeleteObject();
+                CFont fm;
+                fm.CreateFontIndirect(&lf);
+                pDC->SelectObject(&fm);
+                pDC->DrawText(str, &rt, DT_CENTER | DT_WORDBREAK | DT_VCENTER);
+                pDC->SelectObject(po);
+                fm.DeleteObject();
             }
             return;
         }
     }
-
-    pDC->SelectObject(pOldFont);
-    fontSmall.DeleteObject();
+    pDC->SelectObject(po);
+    fs.DeleteObject();
 }
 
-// ListCtrl/ListBox 共通: GetTextExtent + WorldTransform + 論理 DrawText（ジャストフィット寄りの小さな余裕のみ）
+static void DrawFittedSingleLineDecorativeText(CDC& dc, const CRect& rect, const CString& str, UINT fmt,
+    BOOL bGrad, COLORREF cGS, COLORREF cGE, int nDir,
+    COLORREF clrSh, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bPreferWide)
+{
+    if (str.IsEmpty() || rect.Width() <= 0 || rect.Height() <= 0) return;
+    dc.SetBkMode(TRANSPARENT);
+    CSize sz = dc.GetTextExtent(str);
+    if (sz.cx <= 0) sz.cx = 1;
+    const int nBudget = (std::max)(1, rect.Width() - 3);
+
+    if (bPreferWide || sz.cx <= nBudget)
+    {
+        if (bGrad) DrawTextWithGradient(&dc, rect, str, fmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, bSE, clrBg, sz.cx, bPreferWide);
+        else DrawTextWithShadow(&dc, rect, str, fmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, bSE, clrBg);
+        return;
+    }
+
+    if (!dc.SaveDC())
+    {
+        CRect rd = rect;
+        UINT ellFmt = fmt | DT_END_ELLIPSIS;
+        if (bGrad) DrawTextWithGradient(&dc, rd, str, ellFmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, bSE, clrBg, sz.cx, FALSE);
+        else DrawTextWithShadow(&dc, rd, str, ellFmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, bSE, clrBg);
+        return;
+    }
+
+    TEXTMETRIC tm;
+    dc.GetTextMetrics(&tm);
+    int yTop = rect.top;
+    if (rect.Height() >= tm.tmHeight) yTop = rect.top + (rect.Height() - tm.tmHeight) / 2;
+
+    float scale = 1.0f;
+    for (int i = 0; i < 64; ++i)
+    {
+        float wd = (float)sz.cx * scale;
+        if (wd <= (float)nBudget) break;
+        scale *= (float)nBudget / wd;
+        if (scale < 0.12f) { scale = 0.12f; break; }
+    }
+    scale *= 0.95f;
+    if (scale < 0.12f) scale = 0.12f;
+
+    dc.SetGraphicsMode(GM_ADVANCED);
+    XFORM xf = { scale, 0.0f, 0.0f, 1.0f, (float)rect.left, (float)yTop };
+    dc.SetWorldTransform(&xf);
+
+    int mCW = (tm.tmMaxCharWidth > 0) ? (int)tm.tmMaxCharWidth : (int)tm.tmAveCharWidth;
+    CRect rl(0, 0, sz.cx + (std::max)(16, mCW + 4), rect.Height());
+    const UINT fitFmt = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
+    if (bGrad) DrawTextWithGradient(&dc, rl, str, fitFmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, bSE, clrBg, sz.cx, FALSE);
+    else DrawTextWithShadow(&dc, rl, str, fitFmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, bSE, clrBg);
+    dc.RestoreDC(-1);
+}
+
 static void DrawListSubitemCellText(CDC* pDC, const CString& str, const CRect& rcInner)
 {
-    if (!pDC || str.IsEmpty() || rcInner.Width() <= 0 || rcInner.Height() <= 0)
-        return;
+    if (!pDC || str.IsEmpty() || rcInner.Width() <= 0 || rcInner.Height() <= 0) return;
 
     TEXTMETRIC tm;
     pDC->GetTextMetrics(&tm);
-    const int nFontH = tm.tmHeight;
-    const int nMaxW = (std::max)(1, rcInner.Width());
-    const int nBudget = (std::max)(1, nMaxW - 3);
+    int nFH = tm.tmHeight;
+    int nMW = (std::max)(1, rcInner.Width());
+    int nBudget = (std::max)(1, nMW - 3);
 
     int yTop = rcInner.top;
-    if (rcInner.Height() >= nFontH)
-        yTop = rcInner.top + (rcInner.Height() - nFontH) / 2;
-    const int drawH = (std::min)(nFontH, (std::max)(1, rcInner.Height()));
+    if (rcInner.Height() >= nFH) yTop = rcInner.top + (rcInner.Height() - nFH) / 2;
+    int drawH = (std::min)(nFH, (std::max)(1, rcInner.Height()));
 
     SIZE sz = { 0, 0 };
-    if (!::GetTextExtentPoint32(pDC->GetSafeHdc(), str, str.GetLength(), &sz))
-        return;
-    if (sz.cx <= 0)
-        sz.cx = 1;
+    if (!::GetTextExtentPoint32(pDC->GetSafeHdc(), str, str.GetLength(), &sz)) return;
+    if (sz.cx <= 0) sz.cx = 1;
 
     const UINT uDT = DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX;
 
-    if (sz.cx <= nMaxW)
+    if (sz.cx <= nMW)
     {
-        CRect rcDraw(rcInner.left, yTop, rcInner.right, yTop + drawH);
-        pDC->DrawText(str, &rcDraw, uDT);
+        CRect rd(rcInner.left, yTop, rcInner.right, yTop + drawH);
+        pDC->DrawText(str, &rd, uDT);
         return;
     }
 
     if (!pDC->SaveDC())
     {
-        CRect rcDraw(rcInner.left, yTop, rcInner.right, yTop + drawH);
-        pDC->DrawText(str, &rcDraw, uDT | DT_END_ELLIPSIS);
+        CRect rd(rcInner.left, yTop, rcInner.right, yTop + drawH);
+        pDC->DrawText(str, &rd, uDT | DT_END_ELLIPSIS);
         return;
     }
 
     pDC->SetGraphicsMode(GM_ADVANCED);
-
     float scale = 1.0f;
-    for (int iter = 0; iter < 64; ++iter)
+    for (int i = 0; i < 64; ++i)
     {
-        float wDevice = (float)sz.cx * scale;
-        if (wDevice <= (float)nBudget)
-            break;
-        scale *= (float)nBudget / wDevice;
-        if (scale < 0.12f)
-        {
-            scale = 0.12f;
-            break;
-        }
+        float wd = (float)sz.cx * scale;
+        if (wd <= (float)nBudget) break;
+        scale *= (float)nBudget / wd;
+        if (scale < 0.12f) { scale = 0.12f; break; }
     }
     scale *= 0.95f;
-    if (scale < 0.12f)
-        scale = 0.12f;
+    if (scale < 0.12f) scale = 0.12f;
 
     XFORM xf = { scale, 0.0f, 0.0f, 1.0f, (float)rcInner.left, (float)yTop };
     pDC->SetWorldTransform(&xf);
-    const int maxChW = (tm.tmMaxCharWidth > 0) ? (int)tm.tmMaxCharWidth : (int)tm.tmAveCharWidth;
-    const int rcW = sz.cx + (std::max)(16, maxChW + 4);
-    CRect rcLogical(0, 0, rcW, drawH + 6);
-    pDC->DrawText(str, &rcLogical, uDT);
 
+    int mCW = (tm.tmMaxCharWidth > 0) ? (int)tm.tmMaxCharWidth : (int)tm.tmAveCharWidth;
+    CRect rl(0, 0, sz.cx + (std::max)(16, mCW + 4), drawH + 6);
+    pDC->DrawText(str, &rl, uDT);
     pDC->RestoreDC(-1);
 }
 
-static void DrawSmartText2(CDC* pDC, CRect rect, CString strText, UINT nFormat, BOOL bDisabled, BOOL bPushed)
+static void DrawSmartText2(CDC* pDC, CRect rect, CString str, UINT fmt, BOOL bDis, BOOL bPushed)
 {
-    if (strText.IsEmpty()) return;
+    if (str.IsEmpty()) return;
 
     pDC->SetBkMode(TRANSPARENT);
-    pDC->SetTextColor(bDisabled ? RGB(128, 128, 128) : COLOR_EDIT_TEXT);
+    pDC->SetTextColor(bDis ? RGB(128, 128, 128) : COLOR_EDIT_TEXT);
 
-    CRect rcLimit = rect;
-    rcLimit.DeflateRect(2, 0);
-    if (bPushed) rcLimit.OffsetRect(1, 1);
+    CRect rl = rect;
+    rl.DeflateRect(2, 0);
+    if (bPushed) rl.OffsetRect(1, 1);
 
-    CFont* pCurrentFont = pDC->GetCurrentFont();
+    CFont* pCF = pDC->GetCurrentFont();
     LOGFONT lf;
-    pCurrentFont->GetLogFont(&lf);
-    long targetHeight = abs(lf.lfHeight);
-    const long MIN_HEIGHT = 6;
+    pCF->GetLogFont(&lf);
+    long tH = abs(lf.lfHeight);
+    const long MH = 6;
+    CFont ff;
 
-    CFont fontFinal;
-    while (targetHeight >= MIN_HEIGHT)
+    while (tH >= MH)
     {
-        lf.lfHeight = -targetHeight;
-        CFont fontTry;
-        fontTry.CreateFontIndirect(&lf);
-        CFont* pOldFont = pDC->SelectObject(&fontTry);
+        lf.lfHeight = -tH;
+        CFont ft;
+        ft.CreateFontIndirect(&lf);
+        CFont* po = pDC->SelectObject(&ft);
+        CRect rc = rl;
+        pDC->DrawText(str, &rc, fmt | DT_CALCRECT);
+        pDC->SelectObject(po);
 
-        CRect rcCalc = rcLimit;
-        pDC->DrawText(strText, &rcCalc, nFormat | DT_CALCRECT);
-        pDC->SelectObject(pOldFont);
-
-        if (rcCalc.Width() <= rcLimit.Width() && rcCalc.Height() <= rcLimit.Height())
+        if (rc.Width() <= rl.Width() && rc.Height() <= rl.Height())
         {
-            fontFinal.CreateFontIndirect(&lf);
-            fontTry.DeleteObject();
+            ff.CreateFontIndirect(&lf);
+            ft.DeleteObject();
             break;
         }
-        fontTry.DeleteObject();
-        targetHeight--;
+        ft.DeleteObject();
+        tH--;
     }
 
-    if (!fontFinal.GetSafeHandle())
+    if (!ff.GetSafeHandle())
     {
-        lf.lfHeight = -MIN_HEIGHT;
-        fontFinal.CreateFontIndirect(&lf);
+        lf.lfHeight = -MH;
+        ff.CreateFontIndirect(&lf);
     }
 
-    CFont* pOldFont = pDC->SelectObject(&fontFinal);
-    pDC->DrawText(strText, &rcLimit, nFormat);
-    pDC->SelectObject(pOldFont);   // [FIX❶] 先にDCから外す
-    fontFinal.DeleteObject();
+    CFont* po = pDC->SelectObject(&ff);
+    pDC->DrawText(str, &rl, fmt);
+    pDC->SelectObject(po);
+    ff.DeleteObject();
+}
+
+static void FillRectAlpha(CDC* pDC, const CRect& rc, COLORREF clr, BYTE alpha)
+{
+    if (rc.Width() <= 0 || rc.Height() <= 0) return;
+    CDC mDC;
+    CBitmap mB;
+    mDC.CreateCompatibleDC(pDC);
+    mB.CreateCompatibleBitmap(pDC, rc.Width(), rc.Height());
+    CBitmap* ob = mDC.SelectObject(&mB);
+
+    mDC.FillSolidRect(0, 0, rc.Width(), rc.Height(), clr);
+    BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, 0 };
+    ::AlphaBlend(pDC->GetSafeHdc(), rc.left, rc.top, rc.Width(), rc.Height(), mDC.GetSafeHdc(), 0, 0, rc.Width(), rc.Height(), bf);
+
+    mDC.SelectObject(ob);
+    mB.DeleteObject();
+    mDC.DeleteDC();
 }
 
 // ============================================================================
-// [FIX❺] CCustomControlUtility - ブラシキャッシュをmapで管理
+// 子コントロールを一括でサブクラス化する処理
 // ============================================================================
-/* SetControlColor の static brushes 配列を map 方式に変更した実装を
-   CCustomControl.h 内の inline 実装としてではなく .cpp 側で提供します。
-   ヘッダ側の既存 inline 実装は以下のように置き換えてください。          */
+template<typename DlgBase>
+static void DoSubclassChildControls(DlgBase* pDlg)
+{
+    HWND hc = ::GetWindow(pDlg->m_hWnd, GW_CHILD);
+    while (hc)
+    {
+        if (!::IsWindow(hc)) break;
+        if (!(::GetWindowLong(hc, GWL_STYLE) & WS_VISIBLE))
+        {
+            hc = ::GetWindow(hc, GW_HWNDNEXT);
+            continue;
+        }
 
-   // ============================================================================
-   // CCustomEdit
-   // ============================================================================
+        CWnd* pw = CWnd::FromHandlePermanent(hc);
+        if (pw && pw != pDlg)
+        {
+            hc = ::GetWindow(hc, GW_HWNDNEXT);
+            continue;
+        }
+
+        TCHAR cls[256];
+        ::GetClassName(hc, cls, 256);
+
+        // クラス名に応じてカスタムコントロールへ置換
+        if (_tcsicmp(cls, _T("Edit")) == 0)
+        {
+            CCustomEdit* p = new CCustomEdit();
+            p->EnableAutoDelete();
+            p->SubclassWindow(hc);
+        }
+        else if (_tcsicmp(cls, _T("Static")) == 0)
+        {
+            CCustomStatic* p = new CCustomStatic();
+            p->EnableAutoDelete();
+            p->SetAeroMode(FALSE);
+            p->SubclassWindow(hc);
+        }
+        else if (_tcsicmp(cls, _T("ListBox")) == 0)
+        {
+            CCustomListBox* p = new CCustomListBox();
+            p->EnableAutoDelete();
+            p->SetAeroMode(FALSE);
+            p->SubclassWindow(hc);
+        }
+        else if (_tcsicmp(cls, _T("ComboBox")) == 0)
+        {
+            CCustomComboBox* p = new CCustomComboBox();
+            p->EnableAutoDelete();
+            p->SetAeroMode(FALSE);
+            p->SubclassWindow(hc);
+        }
+        else if (_tcsicmp(cls, WC_LISTVIEW) == 0)
+        {
+            CCustomListCtrl* p = new CCustomListCtrl();
+            p->EnableAutoDelete();
+            p->SetAeroMode(FALSE);
+            p->SubclassWindow(hc);
+        }
+        else if (_tcsicmp(cls, _T("Button")) == 0)
+        {
+            LONG ls = ::GetWindowLong(hc, GWL_STYLE);
+            UINT nt = ls & BS_TYPEMASK;
+            if (nt == BS_GROUPBOX)
+            {
+                CCustomGroupBox* p = new CCustomGroupBox();
+                p->EnableAutoDelete();
+                p->SetAeroMode(FALSE);
+                p->SubclassWindow(hc);
+            }
+            else if (nt == BS_PUSHBUTTON || nt == BS_DEFPUSHBUTTON || (ls & BS_PUSHLIKE))
+            {
+                CCustomStandardButton* p = new CCustomStandardButton();
+                p->EnableAutoDelete();
+                p->SubclassWindow(hc);
+            }
+            else
+            {
+                CCustomCheckBox* p = new CCustomCheckBox();
+                p->EnableAutoDelete();
+                p->SetAeroMode(FALSE);
+                p->SubclassWindow(hc);
+            }
+        }
+        else if (_tcsicmp(cls, TRACKBAR_CLASS) == 0)
+        {
+            LONG ls = ::GetWindowLong(hc, GWL_STYLE);
+            if (ls & TBS_ENABLESELRANGE)
+            {
+                CCustomRangeSliderCtrl* p = new CCustomRangeSliderCtrl();
+                p->EnableAutoDelete();
+                p->SetAeroMode(FALSE);
+                p->SubclassWindow(hc);
+            }
+            else
+            {
+                CCustomSliderCtrl* p = new CCustomSliderCtrl();
+                p->EnableAutoDelete();
+                p->SetAeroMode(FALSE);
+                p->SubclassWindow(hc);
+            }
+        }
+        hc = ::GetWindow(hc, GW_HWNDNEXT);
+    }
+}
+
+// ============================================================================
+// ダイアログ共通処理
+// ============================================================================
+
+static HBRUSH DlgOnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC, CBrush& brDlg, BOOL bAeroEnabled)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (bAeroEnabled && CCC_IsWin11())
+    {
+        static CBrush brushEdit(COLOR_EDIT_BG);
+        static CBrush brushList(COLOR_LIST_BG);
+        if (nC == CTLCOLOR_DLG)
+        {
+            pDC->SetBkMode(TRANSPARENT);
+            return (HBRUSH)GetStockObject(NULL_BRUSH);
+        }
+        if (nC == CTLCOLOR_EDIT)
+        {
+            pDC->SetBkMode(OPAQUE);
+            pDC->SetBkColor(COLOR_EDIT_BG);
+            pDC->SetTextColor(COLOR_EDIT_TEXT);
+            return (HBRUSH)brushEdit.GetSafeHandle();
+        }
+        if (nC == CTLCOLOR_LISTBOX)
+        {
+            pDC->SetBkMode(OPAQUE);
+            pDC->SetBkColor(COLOR_LIST_BG);
+            pDC->SetTextColor(COLOR_EDIT_TEXT);
+            return (HBRUSH)brushList.GetSafeHandle();
+        }
+        if (nC == CTLCOLOR_STATIC || nC == CTLCOLOR_BTN)
+        {
+            pDC->SetBkMode(TRANSPARENT);
+            pDC->SetTextColor(RGB(0, 0, 0));
+            return (HBRUSH)GetStockObject(NULL_BRUSH);
+        }
+    }
+    else if (bAeroEnabled)
+    {
+        static CBrush brushBg(RGB(248, 248, 248));
+        if (nC == CTLCOLOR_DLG || nC == CTLCOLOR_STATIC || nC == CTLCOLOR_BTN)
+        {
+            pDC->SetBkMode(TRANSPARENT);
+            pDC->SetTextColor(RGB(0, 0, 0));
+            return (HBRUSH)brushBg.GetSafeHandle();
+        }
+        if (nC == CTLCOLOR_LISTBOX || nC == CTLCOLOR_EDIT)
+        {
+            pDC->SetBkMode(OPAQUE);
+            pDC->SetTextColor(RGB(0, 0, 0));
+            pDC->SetBkColor(RGB(255, 255, 255));
+            return (HBRUSH)GetStockObject(WHITE_BRUSH);
+        }
+    }
+#endif
+    if (nC == CTLCOLOR_DLG) return (HBRUSH)brDlg.GetSafeHandle();
+
+    if (nC == CTLCOLOR_EDIT)
+    {
+        CWnd* pP = pWnd->GetParent();
+        if (pP)
+        {
+            TCHAR sz[256];
+            ::GetClassName(pP->m_hWnd, sz, 256);
+            if (_tcsicmp(sz, _T("ComboBox")) == 0)
+            {
+                pDC->SetBkColor(COLOR_COMBO_BG);
+                pDC->SetTextColor(RGB(0, 0, 0));
+                static CBrush bC(COLOR_COMBO_BG);
+                return (HBRUSH)bC.GetSafeHandle();
+            }
+        }
+        pDC->SetBkColor(COLOR_EDIT_BG);
+        pDC->SetTextColor(RGB(0, 0, 0));
+        static CBrush bE(COLOR_EDIT_BG);
+        return (HBRUSH)bE.GetSafeHandle();
+    }
+
+    if (nC == CTLCOLOR_LISTBOX)
+    {
+        pDC->SetBkColor(COLOR_COMBO_BG);
+        pDC->SetTextColor(RGB(0, 0, 0));
+        static CBrush bL(COLOR_COMBO_BG);
+        return (HBRUSH)bL.GetSafeHandle();
+    }
+
+    if (nC == CTLCOLOR_STATIC || nC == CTLCOLOR_BTN)
+    {
+        pDC->SetBkColor(COLOR_DIALOG_BG);
+        pDC->SetTextColor(RGB(0, 0, 0));
+        pDC->SetBkMode(TRANSPARENT);
+        return (HBRUSH)brDlg.GetSafeHandle();
+    }
+    return NULL;
+}
+
+// ============================================================================
+// カスタムエディットコントロール
+// CCustomEdit
+// ============================================================================
 IMPLEMENT_DYNAMIC(CCustomEdit, CEdit)
 
 BEGIN_MESSAGE_MAP(CCustomEdit, CEdit)
@@ -839,7 +1365,14 @@ BEGIN_MESSAGE_MAP(CCustomEdit, CEdit)
     ON_WM_NCPAINT()
     ON_WM_SETFOCUS()
     ON_WM_KILLFOCUS()
+    ON_WM_TIMER()
+    ON_WM_SHOWWINDOW()
+    ON_CONTROL_REFLECT(EN_UPDATE, OnEnUpdate)
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+    ON_MESSAGE(CCC_WM_POST_OPAQUE_PAINT, OnPostOpaquePaint)
 END_MESSAGE_MAP()
+
+static const UINT_PTR kEditOpaqueTimerId = 4107;
 
 CCustomEdit::CCustomEdit() : m_bHasFocus(FALSE), m_bAutoDelete(FALSE)
 {
@@ -848,93 +1381,206 @@ CCustomEdit::CCustomEdit() : m_bHasFocus(FALSE), m_bAutoDelete(FALSE)
 
 CCustomEdit::~CCustomEdit()
 {
-    if (m_fontBold.GetSafeHandle())     m_fontBold.DeleteObject();
+    if (m_fontBold.GetSafeHandle()) m_fontBold.DeleteObject();
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
-// [FIX❺] EnableAutoDelete に対応した PostNcDestroy
 void CCustomEdit::PostNcDestroy()
 {
     CEdit::PostNcDestroy();
-    if (m_bAutoDelete) delete this;  // ← 追加
+    if (m_bAutoDelete) delete this;
 }
 
 void CCustomEdit::PreSubclassWindow()
 {
     CEdit::PreSubclassWindow();
-    CWnd* pParent = GetParent();
-    if (pParent)
-    {
-        CFont* pParentFont = pParent->GetFont();
-        if (pParentFont)
-        {
-            LOGFONT lf;
-            pParentFont->GetLogFont(&lf);
-            lf.lfWeight = FW_BOLD;
+    CWnd* pP = GetParent();
+    if (!pP) return;
+
+    CFont* pF = pP->GetFont();
+    if (!pF) return;
+
+    LOGFONT lf;
+    pF->GetLogFont(&lf);
+    lf.lfWeight = FW_BOLD;
+
             if (m_fontBold.GetSafeHandle()) m_fontBold.DeleteObject();
-            m_fontBold.CreateFontIndirect(&lf);
-            CEdit::SetFont(&m_fontBold);
-        }
-    }
+    m_fontBold.CreateFontIndirect(&lf);
+    CEdit::SetFont(&m_fontBold);
 }
 
-HBRUSH CCustomEdit::CtlColor(CDC* pDC, UINT nCtlColor)
+HBRUSH CCustomEdit::CtlColor(CDC* pDC, UINT)
 {
     pDC->SetBkColor(COLOR_EDIT_BG);
     pDC->SetTextColor(COLOR_EDIT_TEXT);
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
-void CCustomEdit::OnPaint() { Default(); }
-BOOL CCustomEdit::OnEraseBkgnd(CDC* pDC) { return FALSE; }
+void CCustomEdit::PaintOpaqueClient(CDC& dc)
+{
+    CRect r;
+    GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0) return;
+
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    params.dwFlags = BPPF_ERASE;
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (!hdcBuf || !hBP)
+    {
+        dc.FillSolidRect(&r, COLOR_EDIT_BG);
+        DefWindowProc(WM_PRINTCLIENT, (WPARAM)dc.GetSafeHdc(), PRF_CLIENT | PRF_ERASEBKGND);
+        return;
+    }
+    RECT rcBuf = { 0, 0, r.right, r.bottom };
+    ::FillRect(hdcBuf, &rcBuf, (HBRUSH)m_brBackground.GetSafeHandle());
+    ::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+    ::BufferedPaintMakeOpaque(hBP, &r);
+    ::EndBufferedPaint(hBP, TRUE);
+}
+
+void CCustomEdit::ScheduleOpaqueRepaint()
+{
+    if (GetSafeHwnd())
+        PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+}
+
+LRESULT CCustomEdit::OnPostOpaquePaint(WPARAM, LPARAM)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    {
+        CClientDC dc(this);
+        PaintOpaqueClient(dc);
+    }
+#endif
+    return 0;
+}
+
+void CCustomEdit::OnPaint()
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    {
+        CPaintDC dc(this);
+        PaintOpaqueClient(dc);
+        return;
+    }
+#endif
+    Default();
+}
+
+BOOL CCustomEdit::OnEraseBkgnd(CDC* pDC)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11() && pDC)
+    {
+        CRect r;
+        GetClientRect(&r);
+        pDC->FillSolidRect(&r, COLOR_EDIT_BG);
+        return TRUE;
+    }
+#endif
+    UNREFERENCED_PARAMETER(pDC);
+    return FALSE;
+}
 
 void CCustomEdit::OnNcPaint()
 {
     CWindowDC dc(this);
-    CRect rect;
-    GetWindowRect(&rect);
-    rect.OffsetRect(-rect.left, -rect.top);
+    CRect r;
+    GetWindowRect(&r);
+    r.OffsetRect(-r.left, -r.top);
 
-    CPen pen(PS_SOLID, 2, m_bHasFocus ? RGB(255, 140, 180) : RGB(255, 182, 193));
-    CPen* pOldPen = dc.SelectObject(&pen);
+    CPen p(PS_SOLID, 2, m_bHasFocus ? RGB(255, 140, 180) : RGB(255, 182, 193));
+    CPen* op = dc.SelectObject(&p);
     dc.SelectStockObject(NULL_BRUSH);
-    dc.RoundRect(&rect, CPoint(6, 6));
-    dc.SelectObject(pOldPen);
+    dc.RoundRect(&r, CPoint(6, 6));
+    dc.SelectObject(op);
 
     if (m_bHasFocus)
     {
-        DrawStar(&dc, rect.right - 8, rect.top + 8, 3, RGB(255, 215, 0));
-        DrawStar(&dc, rect.left + 8, rect.top + 8, 2, RGB(255, 240, 150));
-        DrawStar(&dc, rect.right - 8, rect.bottom - 8, 2, RGB(255, 240, 150));
+        DrawStar(&dc, r.right - 8, r.top + 8, 3, RGB(255, 215, 0));
+        DrawStar(&dc, r.left + 8, r.top + 8, 2, RGB(255, 240, 150));
+        DrawStar(&dc, r.right - 8, r.bottom - 8, 2, RGB(255, 240, 150));
     }
 
-    CRect rcRibbonL(rect.left + 2, rect.CenterPoint().y - 3, rect.left + 8, rect.CenterPoint().y + 3);
-    CRect rcRibbonR(rect.right - 8, rect.CenterPoint().y - 3, rect.right - 2, rect.CenterPoint().y + 3);
-    DrawRibbon(&dc, rcRibbonL, RGB(255, 200, 220));
-    DrawRibbon(&dc, rcRibbonR, RGB(255, 200, 220));
+    CRect rL(r.left + 2, r.CenterPoint().y - 3, r.left + 8, r.CenterPoint().y + 3);
+    CRect rR(r.right - 8, r.CenterPoint().y - 3, r.right - 2, r.CenterPoint().y + 3);
+    DrawRibbon(&dc, rL, RGB(255, 200, 220));
+    DrawRibbon(&dc, rR, RGB(255, 200, 220));
 }
 
-void CCustomEdit::OnSetFocus(CWnd* pOldWnd)
+LRESULT CCustomEdit::OnPrintClient(WPARAM wParam, LPARAM lParam)
 {
-    CEdit::OnSetFocus(pOldWnd);
+    if (HDC hDC = (HDC)wParam)
+    {
+        CRect r;
+        GetClientRect(&r);
+        CDC* pDC = CDC::FromHandle(hDC);
+        pDC->FillSolidRect(&r, COLOR_EDIT_BG);
+        return DefWindowProc(WM_PRINTCLIENT, (WPARAM)wParam, lParam);
+    }
+    return 0;
+}
+
+void CCustomEdit::OnEnUpdate()
+{
+    ScheduleOpaqueRepaint();
+}
+
+void CCustomEdit::OnTimer(UINT_PTR nIDEvent)
+{
+    if (nIDEvent == kEditOpaqueTimerId)
+    {
+        ScheduleOpaqueRepaint();
+        return;
+    }
+    CEdit::OnTimer(nIDEvent);
+}
+
+void CCustomEdit::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+    CEdit::OnShowWindow(bShow, nStatus);
+#if CCUSTOM_AERO_SUPPORT
+    if (bShow && CCC_IsAeroEnabled() && CCC_IsWin11())
+        ScheduleOpaqueRepaint();
+#endif
+    UNREFERENCED_PARAMETER(nStatus);
+}
+
+void CCustomEdit::OnSetFocus(CWnd* p)
+{
+    CEdit::OnSetFocus(p);
     m_bHasFocus = TRUE;
     SetWindowPos(NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+    Invalidate(FALSE);
+    ScheduleOpaqueRepaint();
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+        SetTimer(kEditOpaqueTimerId, 50, NULL);
+#endif
 }
 
-void CCustomEdit::OnKillFocus(CWnd* pNewWnd)
+void CCustomEdit::OnKillFocus(CWnd* p)
 {
-    CEdit::OnKillFocus(pNewWnd);
+    CEdit::OnKillFocus(p);
     m_bHasFocus = FALSE;
+    KillTimer(kEditOpaqueTimerId);
     SetWindowPos(NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+    Invalidate(FALSE);
+    ScheduleOpaqueRepaint();
 }
 
 // ============================================================================
+// カスタムスタティックコントロール
 // CCustomStatic
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomStatic, CStatic)
 
 BEGIN_MESSAGE_MAP(CCustomStatic, CStatic)
     ON_WM_PAINT()
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_ERASEBKGND()
     ON_MESSAGE(WM_SETTEXT, OnSetText)
     ON_MESSAGE(WM_GETTEXT, OnGetText)
@@ -942,17 +1588,15 @@ BEGIN_MESSAGE_MAP(CCustomStatic, CStatic)
 END_MESSAGE_MAP()
 
 CCustomStatic::CCustomStatic()
-    : m_bAutoDelete(FALSE)
-    , m_clrGradStart(RGB(255, 255, 255)), m_clrGradEnd(RGB(255, 255, 255))
-    , m_nGradDirection(0), m_bGradEnable(FALSE)
-    , m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135)
-    , m_nShadowDistance(2), m_nShadowBlur(3), m_bShadowEnable(FALSE)
-    , m_bPreferWideMode(FALSE)
-    , m_nCachedHeight(0), m_nCachedWidth(0)
-    , m_strCachedText(_T("")), m_strText(_T(""))
-    , m_backstoreW(0), m_backstoreH(0)
-{
-}
+    : m_bAutoDelete(FALSE),
+    m_clrGradStart(RGB(255, 255, 255)), m_clrGradEnd(RGB(255, 255, 255)),
+    m_nGradDirection(0), m_bGradEnable(FALSE),
+    m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135),
+    m_nShadowDistance(2), m_nShadowBlur(3), m_bShadowEnable(FALSE),
+    m_bPreferWideMode(FALSE), m_nCachedHeight(0), m_nCachedWidth(0),
+    m_strCachedText(_T("")), m_strText(_T("")),
+    m_backstoreW(0), m_backstoreH(0), m_bAeroMode(FALSE)
+{}
 
 CCustomStatic::~CCustomStatic()
 {
@@ -960,70 +1604,196 @@ CCustomStatic::~CCustomStatic()
     if (m_memBackstore.GetSafeHandle()) m_memBackstore.DeleteObject();
 }
 
-// [FIX❺]
 void CCustomStatic::PostNcDestroy()
 {
     CStatic::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
-void CCustomStatic::SetGradation(COLORREF colorStart, COLORREF colorEnd, int nDirection, BOOL bEnable)
+std::vector<TextSegment> CCustomStatic::ParseFormattedText(const CString& str)
 {
-    m_clrGradStart = colorStart;
-    m_clrGradEnd = colorEnd;
-    m_nGradDirection = nDirection % 360;
+    std::vector<TextSegment> segs;
+    BOOL bB = FALSE, bI = FALSE, bHC = FALSE;
+    COLORREF cc = RGB(0, 0, 0);
+    int nFO = 0;
+    CString cur;
+
+    for (int i = 0; i < str.GetLength(); i++)
+    {
+        if (i + 1 < str.GetLength() && str[i] == _T('!') && str[i + 1] == _T('@') && i + 2 < str.GetLength())
+        {
+            TCHAR cmd = str[i + 2];
+            // 現在のセグメントを確定してプッシュ
+            auto Flush = [&]()
+            {
+                if (!cur.IsEmpty())
+                {
+                    TextSegment s;
+                    s.text = cur;
+                    s.bBold = bB;
+                    s.bItalic = bI;
+                    s.bHasColor = bHC;
+                    s.clrText = cc;
+                    s.nFontSizeOffset = nFO;
+                    segs.push_back(s);
+                    cur.Empty();
+                }
+            };
+
+            // !@B / !@I / !@Cxxxxxx / !@F+NN 形式の装飾タグ
+            if (cmd == _T('B'))
+            {
+                Flush();
+                bB = !bB;
+                i += 2;
+                continue;
+            }
+            else if (cmd == _T('I'))
+            {
+                Flush();
+                bI = !bI;
+                i += 2;
+                continue;
+            }
+            else if (cmd == _T('C') && i + 8 < str.GetLength())
+            {
+                CString hx = str.Mid(i + 3, 6);
+                int r, g, b;
+                if (_stscanf_s(hx, _T("%2x%2x%2x"), &r, &g, &b) == 3)
+                {
+                    Flush();
+                    bHC = TRUE;
+                    cc = RGB(r, g, b);
+                    i += 8;
+                    continue;
+                }
+            }
+            else if (cmd == _T('F') && i + 5 < str.GetLength())
+            {
+                TCHAR sg = str[i + 3];
+                CString nm = str.Mid(i + 4, 2);
+                if ((sg == _T('+') || sg == _T('-')) && nm.GetLength() == 2
+                    && _istdigit(nm[0]) && _istdigit(nm[1]))
+                {
+                    int off = _ttoi(nm);
+                    if (sg == _T('-')) off = -off;
+                    Flush();
+                    nFO += off;
+                    i += 5;
+                    continue;
+                }
+            }
+        }
+        cur += str[i];
+    }
+
+    if (!cur.IsEmpty())
+    {
+        TextSegment s;
+        s.text = cur;
+        s.bBold = bB;
+        s.bItalic = bI;
+        s.bHasColor = bHC;
+        s.clrText = cc;
+        s.nFontSizeOffset = nFO;
+        segs.push_back(s);
+    }
+    return segs;
+}
+
+void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const std::vector<TextSegment>& segs, const LOGFONT& lf, int h, int w, UINT fmt)
+{
+    CSize tot = MeasureSegmentedText(pDC, segs, lf, h, w);
+    int xP = rect.left;
+    if (fmt & DT_CENTER) xP = rect.left + (rect.Width() - tot.cx) / 2;
+    else if (fmt & DT_RIGHT) xP = rect.right - tot.cx;
+
+    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    COLORREF clrBg = bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG;
+    COLORREF safeShadowColor = m_clrShadow;
+    if (bTrans && safeShadowColor == RGB(0, 0, 0)) safeShadowColor = RGB(2, 2, 2);
+
+    for (size_t i = 0; i < segs.size(); i++)
+    {
+        LOGFONT lt = lf;
+        lt.lfHeight = -max(6, h + segs[i].nFontSizeOffset);
+        lt.lfWidth = w;
+        if (segs[i].bBold) lt.lfWeight = FW_BOLD;
+        if (segs[i].bItalic) lt.lfItalic = TRUE;
+        CFont ft; ft.CreateFontIndirect(&lt);
+        CFont* po = pDC->SelectObject(&ft);
+        CSize sz = pDC->GetTextExtent(segs[i].text);
+        CRect sr = { xP, rect.top, xP + sz.cx, rect.bottom };
+        COLORREF tc = segs[i].bHasColor ? segs[i].clrText : RGB(0, 0, 0);
+        if (bTrans && tc == RGB(0, 0, 0)) tc = RGB(2, 2, 2);
+
+        if (m_bGradEnable) DrawTextWithGradient(pDC, sr, segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, m_clrGradStart, m_clrGradEnd, m_nGradDirection, safeShadowColor, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg, sz.cx);
+        else DrawTextWithShadow(pDC, sr, segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, tc, safeShadowColor, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg);
+
+        xP += sz.cx;
+        pDC->SelectObject(po); ft.DeleteObject();
+    }
+}
+
+void CCustomStatic::SetGradation(COLORREF s, COLORREF e, int d, BOOL en)
+{
+    m_clrGradStart = s; m_clrGradEnd = e;
+    m_nGradDirection = d % 360;
     if (m_nGradDirection < 0) m_nGradDirection += 360;
-    m_bGradEnable = bEnable;
+    m_bGradEnable = en;
     m_strCachedText.Empty();
     if (GetSafeHwnd()) Invalidate();
 }
 
-void CCustomStatic::GetGradation(COLORREF* pColorStart, COLORREF* pColorEnd, int* pDirection, BOOL* pbEnable) const
+void CCustomStatic::GetGradation(COLORREF* ps, COLORREF* pe, int* pd, BOOL* pbe) const
 {
-    if (pColorStart) *pColorStart = m_clrGradStart;
-    if (pColorEnd)   *pColorEnd = m_clrGradEnd;
-    if (pDirection)  *pDirection = m_nGradDirection;
-    if (pbEnable)    *pbEnable = m_bGradEnable;
+    if (ps) *ps = m_clrGradStart;
+    if (pe) *pe = m_clrGradEnd;
+    if (pd) *pd = m_nGradDirection;
+    if (pbe) *pbe = m_bGradEnable;
 }
 
-void CCustomStatic::SetDropShadow(COLORREF color, int nDirection, int nDistance, int nBlur, BOOL bEnable)
+void CCustomStatic::SetDropShadow(COLORREF c, int d, int dist, int blur, BOOL en)
 {
-    m_clrShadow = color;
-    m_nShadowDirection = nDirection % 360;
+    m_clrShadow = c;
+    m_nShadowDirection = d % 360;
     if (m_nShadowDirection < 0) m_nShadowDirection += 360;
-    m_nShadowDistance = max(0, nDistance);
-    m_nShadowBlur = max(0, min(20, nBlur));
-    m_bShadowEnable = bEnable;
+    m_nShadowDistance = max(0, dist);
+    m_nShadowBlur = max(0, min(20, blur));
+    m_bShadowEnable = en;
     if (GetSafeHwnd()) Invalidate();
 }
 
-void CCustomStatic::GetDropShadow(COLORREF* pColor, int* pDirection, int* pDistance, int* pBlur, BOOL* pbEnable) const
+void CCustomStatic::GetDropShadow(COLORREF* pc, int* pd, int* pdist, int* pblur, BOOL* pbe) const
 {
-    if (pColor)     *pColor = m_clrShadow;
-    if (pDirection) *pDirection = m_nShadowDirection;
-    if (pDistance)  *pDistance = m_nShadowDistance;
-    if (pBlur)      *pBlur = m_nShadowBlur;
-    if (pbEnable)   *pbEnable = m_bShadowEnable;
+    if (pc) *pc = m_clrShadow;
+    if (pd) *pd = m_nShadowDirection;
+    if (pdist) *pdist = m_nShadowDistance;
+    if (pblur) *pblur = m_nShadowBlur;
+    if (pbe) *pbe = m_bShadowEnable;
 }
 
-void CCustomStatic::SetPreferWideMode(BOOL bPreferWide)
+void CCustomStatic::SetPreferWideMode(BOOL b)
 {
-    m_bPreferWideMode = bPreferWide;
+    m_bPreferWideMode = b;
     m_strCachedText.Empty();
     if (GetSafeHwnd()) Invalidate();
 }
 
-BOOL CCustomStatic::GetPreferWideMode() const { return m_bPreferWideMode; }
-
-void CCustomStatic::SetFont(CFont* pFont, BOOL bRedraw)
+BOOL CCustomStatic::GetPreferWideMode() const
 {
-    if (pFont)
+    return m_bPreferWideMode;
+}
+
+void CCustomStatic::SetFont(CFont* pF, BOOL bR)
+{
+    if (pF)
     {
         LOGFONT lf;
-        pFont->GetLogFont(&lf);
+        pF->GetLogFont(&lf);
         if (m_font.GetSafeHandle()) m_font.DeleteObject();
         m_font.CreateFontIndirect(&lf);
-        CStatic::SetFont(&m_font, bRedraw);
+        CStatic::SetFont(&m_font, bR);
     }
 }
 
@@ -1031,29 +1801,36 @@ void CCustomStatic::PreSubclassWindow()
 {
     CStatic::PreSubclassWindow();
     CWnd::GetWindowText(m_strText);
-    CWnd* pParent = GetParent();
-    if (pParent)
+    CWnd* pP = GetParent();
+    if (pP)
     {
-        CFont* pParentFont = pParent->GetFont();
-        if (pParentFont) SetFont(pParentFont, FALSE);
+        CFont* pF = pP->GetFont();
+        if (pF) SetFont(pF, FALSE);
     }
 }
 
-void CCustomStatic::OnPaint()
+BOOL CCustomStatic::OnEraseBkgnd(CDC* pDC)
 {
-    CPaintDC dc(this);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_UseTransparentPaint(m_hWnd, m_bAeroMode)) return TRUE;
+#endif
+    if (pDC)
+    {
+        CRect r;
+        GetClientRect(&r);
+        pDC->FillSolidRect(&r, COLOR_DIALOG_BG);
+    }
+    return TRUE;
+}
+
+void CCustomStatic::DrawClient(CDC& dc)
+{
     CRect rect;
     GetClientRect(&rect);
     const int rw = rect.Width();
     const int rh = rect.Height();
     if (rw <= 0 || rh <= 0) return;
-
     if (m_strText.IsEmpty()) CWnd::GetWindowText(m_strText);
-    if (m_strText.IsEmpty())
-    {
-        dc.FillSolidRect(&rect, COLOR_DIALOG_BG);
-        return;
-    }
 
     CDC memDC;
     memDC.CreateCompatibleDC(&dc);
@@ -1064,251 +1841,126 @@ void CCustomStatic::OnPaint()
         m_backstoreW = rw;
         m_backstoreH = rh;
     }
-    CBitmap* pOldBitmap = memDC.SelectObject(&m_memBackstore);
+    CBitmap* ob = memDC.SelectObject(&m_memBackstore);
 
-    memDC.FillSolidRect(&rect, COLOR_DIALOG_BG);
+    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    if (bTrans) memDC.FillSolidRect(&rect, CCC_AERO_CHROMA_KEY);
+    else memDC.FillSolidRect(&rect, COLOR_DIALOG_BG);
 
+    if (m_strText.IsEmpty())
     {
-        CString strText = m_strText;
-        const BOOL bHasFormatting = (strText.Find(_T("!@")) >= 0);
-        std::vector<TextSegment> segments;
-        if (bHasFormatting) segments = ParseFormattedText(strText);
-
-        CRect rectWithMargin = rect;
-        rectWithMargin.DeflateRect(1, 1);
-
-        CFont* pBaseFont = GetFont();
-        CFont* pOldFont = memDC.SelectObject(pBaseFont);
-        memDC.SetBkMode(TRANSPARENT);
-
-        LOGFONT lfBase;
-        pBaseFont->GetLogFont(&lfBase);
-        const int kMinHeight = 6;
-        const int baseHeight = abs(lfBase.lfHeight);
-
-        int finalHeight = 0;
-        int finalWidth = 0;
-        CSize szFinal;
-
-        BOOL bNeedRecalc = (strText != m_strCachedText) ||
-            (m_nCachedHeight == 0) ||
-            (m_rectCached != rect);
-
-        if (bNeedRecalc)
-        {
-            if (bHasFormatting)
-            {
-                auto MeasureText = [&](int height, int width) -> CSize {
-                    return MeasureSegmentedText(&memDC, segments, lfBase, height, width);
-                    };
-
-                int fitHeight = kMinHeight;
-                int baseWidth = 0;
-                CSize szFit;
-
-                for (int h = baseHeight; h >= kMinHeight; h--)
-                {
-                    LOGFONT lfTry = lfBase;
-                    lfTry.lfHeight = -h;
-                    lfTry.lfWidth = 0;
-                    CFont fontTry;
-                    fontTry.CreateFontIndirect(&lfTry);
-                    CFont* pOld = memDC.SelectObject(&fontTry);
-                    TEXTMETRIC tm;
-                    memDC.GetTextMetrics(&tm);
-                    memDC.SelectObject(pOld);
-                    fontTry.DeleteObject();
-
-                    CSize size = MeasureText(h, 0);
-                    if (size.cx <= rectWithMargin.Width())
-                    {
-                        fitHeight = h;
-                        szFit = size;
-                        baseWidth = tm.tmAveCharWidth;
-                        break;
-                    }
-                }
-
-                finalHeight = fitHeight;
-                finalWidth = 0;
-                szFinal = szFit;
-
-                if (szFit.cy < rectWithMargin.Height())
-                {
-                    finalHeight = rectWithMargin.Height();
-                    double scale = (double)finalHeight / fitHeight;
-                    finalWidth = max(1, (int)(baseWidth / scale));
-                    szFinal = MeasureText(finalHeight, finalWidth);
-                }
-
-                if (m_bPreferWideMode && szFinal.cx < rectWithMargin.Width())
-                {
-                    int startWidth = (finalWidth > 0) ? finalWidth : baseWidth;
-                    int maxWidth = startWidth * 3;
-                    for (int w = startWidth; w <= maxWidth; w++)
-                    {
-                        CSize sizeTry = MeasureText(finalHeight, w);
-                        if (sizeTry.cx <= rectWithMargin.Width() && sizeTry.cy <= rectWithMargin.Height())
-                        {
-                            finalWidth = w;
-                            szFinal = sizeTry;
-                        }
-                        else break;
-                    }
-                }
-            }
-            else
-            {
-                auto MeasureText = [&](int height, int width) -> CSize {
-                    LOGFONT lfTry = lfBase;
-                    lfTry.lfHeight = -height;
-                    lfTry.lfWidth = width;
-                    CFont fontTry;
-                    fontTry.CreateFontIndirect(&lfTry);
-                    CFont* pOld = memDC.SelectObject(&fontTry);
-                    CSize size = memDC.GetTextExtent(strText);
-                    memDC.SelectObject(pOld);
-                    fontTry.DeleteObject();
-                    return size;
-                    };
-
-                int fitHeight = kMinHeight;
-                int baseWidth = 0;
-                CSize szFit;
-
-                for (int h = baseHeight; h >= kMinHeight; h--)
-                {
-                    LOGFONT lfTry = lfBase;
-                    lfTry.lfHeight = -h;
-                    lfTry.lfWidth = 0;
-                    CFont fontTry;
-                    fontTry.CreateFontIndirect(&lfTry);
-                    CFont* pOld = memDC.SelectObject(&fontTry);
-                    CSize size = memDC.GetTextExtent(strText);
-                    TEXTMETRIC tm;
-                    memDC.GetTextMetrics(&tm);
-                    memDC.SelectObject(pOld);
-                    fontTry.DeleteObject();
-
-                    if (size.cx <= rectWithMargin.Width())
-                    {
-                        fitHeight = h;
-                        szFit = size;
-                        baseWidth = tm.tmAveCharWidth;
-                        break;
-                    }
-                }
-
-                finalHeight = fitHeight;
-                finalWidth = 0;
-                szFinal = szFit;
-
-                if (szFit.cy < rectWithMargin.Height())
-                {
-                    finalHeight = rectWithMargin.Height();
-                    double scale = (double)finalHeight / fitHeight;
-                    finalWidth = max(1, (int)(baseWidth / scale));
-                    szFinal = MeasureText(finalHeight, finalWidth);
-                }
-
-                if (m_bPreferWideMode && szFinal.cx < rectWithMargin.Width())
-                {
-                    int startWidth = (finalWidth > 0) ? finalWidth : baseWidth;
-                    int maxWidth = startWidth * 3;
-                    for (int w = startWidth; w <= maxWidth; w++)
-                    {
-                        CSize sizeTry = MeasureText(finalHeight, w);
-                        if (sizeTry.cx <= rectWithMargin.Width() && sizeTry.cy <= rectWithMargin.Height())
-                        {
-                            finalWidth = w;
-                            szFinal = sizeTry;
-                        }
-                        else break;
-                    }
-                }
-            }
-
-            m_strCachedText = strText;
-            m_nCachedHeight = finalHeight;
-            m_nCachedWidth = finalWidth;
-            m_rectCached = rect;
-        }
+        if (bTrans)
+            CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
         else
-        {
-            finalHeight = m_nCachedHeight;
-            finalWidth = m_nCachedWidth;
-        }
-
-        DWORD dwStyle = GetStyle();
-        UINT nFormat = DT_VCENTER | DT_SINGLELINE;
-        if (dwStyle & SS_CENTER) nFormat |= DT_CENTER;
-        else if (dwStyle & SS_RIGHT)  nFormat |= DT_RIGHT;
-        else                          nFormat |= DT_LEFT;
-
-        if (bHasFormatting)
-        {
-            DrawSegmentedText(&memDC, rect, segments, lfBase, finalHeight, finalWidth, nFormat);
-        }
-        else
-        {
-            // [FIX❶] fontFinal の SelectObject → 描画 → SelectObject(pOldFont) → DeleteObject の順を厳守
-            CFont fontFinal;
-            LOGFONT lfFinal = lfBase;
-            lfFinal.lfHeight = -finalHeight;
-            lfFinal.lfWidth = finalWidth;
-            fontFinal.CreateFontIndirect(&lfFinal);
-            CFont* pOldFontInner = memDC.SelectObject(&fontFinal);  // ← DC に選択
-
-            szFinal = memDC.GetTextExtent(strText);
-
-            if (m_bGradEnable)
-            {
-                DrawTextWithGradient(&memDC, rect, strText, nFormat,
-                    m_clrGradStart, m_clrGradEnd, m_nGradDirection,
-                    m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-                    m_bShadowEnable, COLOR_DIALOG_BG, szFinal.cx, m_bPreferWideMode);
-            }
-            else
-            {
-                DrawTextWithShadow(&memDC, rect, strText, nFormat, RGB(0, 0, 0),
-                    m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-                    m_bShadowEnable, COLOR_DIALOG_BG);
-            }
-
-            memDC.SelectObject(pOldFontInner);  // [FIX❶] ← 先に DC から外す
-            fontFinal.DeleteObject();            // [FIX❶] ← それから解放
-        }
-
-        memDC.SelectObject(pOldFont);
+            dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
+        memDC.SelectObject(ob);
+        memDC.DeleteDC();
+        return;
     }
 
-    dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
-    memDC.SelectObject(pOldBitmap);
+    CString strText = m_strText;
+    const BOOL bHasFmt = (strText.Find(_T("!@")) >= 0);
+    std::vector<TextSegment> segs;
+    if (bHasFmt) segs = ParseFormattedText(strText);
+
+    CRect rwm = rect;
+    rwm.DeflateRect(1, 1);
+    CFont* pBF = GetFont();
+    CFont* pOF = memDC.SelectObject(pBF);
+    memDC.SetBkMode(TRANSPARENT);
+
+    LOGFONT lfB;
+    if (pBF)
+        pBF->GetLogFont(&lfB);
+    else
+    {
+        CFont* d = CFont::FromHandle((HFONT)GetStockObject(DEFAULT_GUI_FONT));
+        d->GetLogFont(&lfB);
+    }
+
+    int fH = m_nCachedHeight > 0 ? m_nCachedHeight : abs(lfB.lfHeight);
+    int fW = m_nCachedWidth;
+
+    DWORD ds = GetStyle();
+    UINT fmt = DT_VCENTER | DT_SINGLELINE;
+    if (ds & SS_CENTER) fmt |= DT_CENTER;
+    else if (ds & SS_RIGHT) fmt |= DT_RIGHT;
+    else fmt |= DT_LEFT;
+
+    COLORREF clrBg = bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG;
+    COLORREF safeShadowColor = m_clrShadow;
+    if (bTrans && safeShadowColor == RGB(0, 0, 0)) safeShadowColor = RGB(2, 2, 2);
+
+    if (bHasFmt) DrawSegmentedText(&memDC, rect, segs, lfB, fH, fW, fmt);
+    else
+    {
+        LOGFONT lff = lfB;
+        lff.lfHeight = -fH;
+        lff.lfWidth = fW;
+        CFont ff;
+        ff.CreateFontIndirect(&lff);
+        CFont* pOI = memDC.SelectObject(&ff);
+        DrawFittedSingleLineDecorativeText(memDC, rect, strText, fmt,
+            m_bGradEnable, m_clrGradStart, m_clrGradEnd, m_nGradDirection,
+            safeShadowColor, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+            m_bShadowEnable, clrBg, m_bPreferWideMode);
+        memDC.SelectObject(pOI);
+        ff.DeleteObject();
+    }
+
+    if (bTrans)
+        CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+    else
+        dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
+
+    memDC.SelectObject(pOF);
+    memDC.SelectObject(ob);
     memDC.DeleteDC();
 }
 
-BOOL CCustomStatic::OnEraseBkgnd(CDC* pDC) { return TRUE; }
-
-LRESULT CCustomStatic::OnSetText(WPARAM wParam, LPARAM lParam)
+void CCustomStatic::OnPaint()
 {
-    LPCTSTR lpszText = (LPCTSTR)lParam;
-    m_strText = lpszText ? lpszText : _T("");
+    CPaintDC dc(this);
+    DrawClient(dc);
+}
+
+LRESULT CCustomStatic::OnPrintClient(WPARAM wParam, LPARAM)
+{
+    if (HDC hDC = (HDC)wParam)
+    {
+        CDC dc;
+        dc.Attach(hDC);
+        DrawClient(dc);
+        dc.Detach();
+    }
+    return 0;
+}
+
+LRESULT CCustomStatic::OnSetText(WPARAM, LPARAM lp)
+{
+    LPCTSTR t = (LPCTSTR)lp;
+    m_strText = t ? t : _T("");
     m_strCachedText.Empty();
-    if (GetSafeHwnd()) Invalidate();
+    if (GetSafeHwnd())
+    {
+#if CCUSTOM_AERO_SUPPORT
+        CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+#endif
+        Invalidate(FALSE);
+    }
     return TRUE;
 }
 
-LRESULT CCustomStatic::OnGetText(WPARAM wParam, LPARAM lParam)
+LRESULT CCustomStatic::OnGetText(WPARAM w, LPARAM l)
 {
-    int nMaxCount = (int)wParam;
-    LPTSTR lpszText = (LPTSTR)lParam;
-    if (!lpszText || nMaxCount <= 0) return 0;
-
-    int nLen = m_strText.GetLength();
-    int nCopyLen = min(nLen, nMaxCount - 1);
-    if (nCopyLen > 0) _tcsncpy_s(lpszText, nMaxCount, (LPCTSTR)m_strText, nCopyLen);
-    lpszText[nCopyLen] = _T('\0');
-    return nCopyLen;
+    int n = (int)w;
+    LPTSTR t = (LPTSTR)l;
+    if (!t || n <= 0) return 0;
+    int ln = m_strText.GetLength();
+    int cp = min(ln, n - 1);
+    if (cp > 0) _tcsncpy_s(t, n, (LPCTSTR)m_strText, cp);
+    t[cp] = _T('\0');
+    return cp;
 }
 
 LRESULT CCustomStatic::OnGetTextLength(WPARAM, LPARAM)
@@ -1316,162 +1968,39 @@ LRESULT CCustomStatic::OnGetTextLength(WPARAM, LPARAM)
     return m_strText.GetLength();
 }
 
-// ----------- ParseFormattedText -----------
-std::vector<TextSegment> CCustomStatic::ParseFormattedText(const CString& str)
+// ============================================================================
+// CCustomStatic クラスの描画計算と解析処理（全実装）
+// ============================================================================
+
+// セグメント化されたテキストの表示サイズを正確に測定する関数
+CSize CCustomStatic::MeasureSegmentedText(CDC* pDC, const std::vector<TextSegment>& segs, const LOGFONT& lf, int h, int w)
 {
-    std::vector<TextSegment> segments;
-    BOOL bBold = FALSE;
-    BOOL bItalic = FALSE;
-    BOOL bHasColor = FALSE;
-    COLORREF currentColor = RGB(0, 0, 0);
-    int nFontSizeOffset = 0;
-    CString current;
-
-    for (int i = 0; i < str.GetLength(); i++)
+    CSize tot(0, 0);
+    for (size_t i = 0; i < segs.size(); i++)
     {
-        if (i + 1 < str.GetLength() && str[i] == _T('!') && str[i + 1] == _T('@'))
-        {
-            if (i + 2 < str.GetLength())
-            {
-                TCHAR cmd = str[i + 2];
+        LOGFONT lt = lf;
+        lt.lfHeight = -max(6, h + segs[i].nFontSizeOffset);
+        lt.lfWidth = w;
+        if (segs[i].bBold) lt.lfWeight = FW_BOLD;
+        if (segs[i].bItalic) lt.lfItalic = TRUE;
 
-                auto FlushSegment = [&]() {
-                    if (!current.IsEmpty())
-                    {
-                        TextSegment seg;
-                        seg.text = current;
-                        seg.bBold = bBold;
-                        seg.bItalic = bItalic;
-                        seg.bHasColor = bHasColor;
-                        seg.clrText = currentColor;
-                        seg.nFontSizeOffset = nFontSizeOffset;
-                        segments.push_back(seg);
-                        current.Empty();
-                    }
-                    };
+        CFont ft;
+        ft.CreateFontIndirect(&lt);
+        CFont* po = pDC->SelectObject(&ft);
 
-                if (cmd == _T('B')) { FlushSegment(); bBold = !bBold;   i += 2; continue; }
-                else if (cmd == _T('I')) { FlushSegment(); bItalic = !bItalic; i += 2; continue; }
-                else if (cmd == _T('C') && i + 8 < str.GetLength())
-                {
-                    CString hexColor = str.Mid(i + 3, 6);
-                    int r = 0, g = 0, b = 0;
-                    if (_stscanf_s(hexColor, _T("%2x%2x%2x"), &r, &g, &b) == 3)
-                    {
-                        FlushSegment();
-                        bHasColor = TRUE;
-                        currentColor = RGB(r, g, b);
-                        i += 8; continue;
-                    }
-                }
-                else if (cmd == _T('F') && i + 5 < str.GetLength())
-                {
-                    TCHAR sign = str[i + 3];
-                    CString num = str.Mid(i + 4, 2);
-                    if ((sign == _T('+') || sign == _T('-')) && num.GetLength() == 2 && _istdigit(num[0]) && _istdigit(num[1]))
-                    {
-                        int offset = _ttoi(num);
-                        if (sign == _T('-')) offset = -offset;
-                        FlushSegment();
-                        nFontSizeOffset += offset;
-                        i += 5; continue;
-                    }
-                }
-            }
-        }
-        current += str[i];
+        CSize sz = pDC->GetTextExtent(segs[i].text);
+        tot.cx += sz.cx;
+        if (sz.cy > tot.cy) tot.cy = sz.cy;
+
+        pDC->SelectObject(po);
+        ft.DeleteObject();
     }
-
-    if (!current.IsEmpty())
-    {
-        TextSegment seg;
-        seg.text = current;
-        seg.bBold = bBold;
-        seg.bItalic = bItalic;
-        seg.bHasColor = bHasColor;
-        seg.clrText = currentColor;
-        seg.nFontSizeOffset = nFontSizeOffset;
-        segments.push_back(seg);
-    }
-    return segments;
+    return tot;
 }
 
-CSize CCustomStatic::MeasureSegmentedText(CDC* pDC, const std::vector<TextSegment>& segments,
-    const LOGFONT& lfBase, int height, int width)
-{
-    CSize totalSize(0, 0);
-    for (size_t i = 0; i < segments.size(); i++)
-    {
-        LOGFONT lf = lfBase;
-        lf.lfHeight = -max(6, height + segments[i].nFontSizeOffset);
-        lf.lfWidth = width;
-        if (segments[i].bBold)   lf.lfWeight = FW_BOLD;
-        if (segments[i].bItalic) lf.lfItalic = TRUE;
-
-        CFont font;
-        font.CreateFontIndirect(&lf);
-        CFont* pOldFont = pDC->SelectObject(&font);
-        CSize sz = pDC->GetTextExtent(segments[i].text);
-        totalSize.cx += sz.cx;
-        if (sz.cy > totalSize.cy) totalSize.cy = sz.cy;
-        pDC->SelectObject(pOldFont);
-        font.DeleteObject();
-    }
-    return totalSize;
-}
-
-void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect,
-    const std::vector<TextSegment>& segments,
-    const LOGFONT& lfBase, int height, int width, UINT nFormat)
-{
-    CSize totalSize = MeasureSegmentedText(pDC, segments, lfBase, height, width);
-    int xPos = rect.left;
-
-    if (nFormat & DT_CENTER) xPos = rect.left + (rect.Width() - totalSize.cx) / 2;
-    else if (nFormat & DT_RIGHT)  xPos = rect.right - totalSize.cx;
-
-    for (size_t i = 0; i < segments.size(); i++)
-    {
-        LOGFONT lf = lfBase;
-        lf.lfHeight = -max(6, height + segments[i].nFontSizeOffset);
-        lf.lfWidth = width;
-        if (segments[i].bBold)   lf.lfWeight = FW_BOLD;
-        if (segments[i].bItalic) lf.lfItalic = TRUE;
-
-        CFont font;
-        font.CreateFontIndirect(&lf);
-        CFont* pOldFont = pDC->SelectObject(&font);
-
-        CSize sz = pDC->GetTextExtent(segments[i].text);
-        CRect segmentRect;
-        segmentRect.left = xPos;
-        segmentRect.right = xPos + sz.cx;
-        segmentRect.top = rect.top;
-        segmentRect.bottom = rect.bottom;
-
-        COLORREF textColor = segments[i].bHasColor ? segments[i].clrText : RGB(0, 0, 0);
-
-        if (m_bGradEnable)
-        {
-            DrawTextWithGradient(pDC, segmentRect, segments[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT,
-                m_clrGradStart, m_clrGradEnd, m_nGradDirection,
-                m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-                m_bShadowEnable, COLOR_DIALOG_BG, sz.cx);
-        }
-        else
-        {
-            DrawTextWithShadow(pDC, segmentRect, segments[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, textColor,
-                m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-                m_bShadowEnable, COLOR_DIALOG_BG);
-        }
-
-        xPos += sz.cx;
-        pDC->SelectObject(pOldFont);  // [FIX❶] DC から外してから
-        font.DeleteObject();
-    }
-}
 
 // ============================================================================
+// カスタムリストボックスコントロール
 // CCustomListBox
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomListBox, CListBox)
@@ -1479,10 +2008,11 @@ IMPLEMENT_DYNAMIC(CCustomListBox, CListBox)
 BEGIN_MESSAGE_MAP(CCustomListBox, CListBox)
     ON_WM_CTLCOLOR_REFLECT()
     ON_WM_PAINT()
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
 
-CCustomListBox::CCustomListBox() : m_bAutoDelete(FALSE)
+CCustomListBox::CCustomListBox() : m_bAutoDelete(FALSE), m_bAeroMode(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
 }
@@ -1492,7 +2022,6 @@ CCustomListBox::~CCustomListBox()
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
-// [FIX❺]
 void CCustomListBox::PostNcDestroy()
 {
     CListBox::PostNcDestroy();
@@ -1512,57 +2041,100 @@ HBRUSH CCustomListBox::CtlColor(CDC* pDC, UINT)
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
-void CCustomListBox::OnPaint() { Default(); }
-BOOL CCustomListBox::OnEraseBkgnd(CDC*) { return FALSE; }
+void CCustomListBox::OnPaint()
+{
+    Default();
+}
+
+LRESULT CCustomListBox::OnPrintClient(WPARAM wParam, LPARAM)
+{
+    CDC* pDC = CDC::FromHandle((HDC)wParam);
+    if (!pDC) return 0;
+    CRect rc;
+    GetClientRect(&rc);
+    pDC->FillSolidRect(&rc, COLOR_LIST_BG);
+    const int n = GetCount();
+    for (int i = 0; i < n; ++i)
+    {
+        CRect itemRc;
+        if (!GetItemRect(i, &itemRc)) continue;
+        DRAWITEMSTRUCT dis = {};
+        dis.CtlType = ODT_LISTBOX;
+        dis.CtlID = (UINT)GetDlgCtrlID();
+        dis.itemID = (UINT)i;
+        dis.itemAction = ODA_DRAWENTIRE;
+        dis.hwndItem = m_hWnd;
+        dis.hDC = (HDC)wParam;
+        dis.rcItem = itemRc;
+        dis.itemState = (GetSel(i) > 0) ? ODS_SELECTED : 0;
+        if (!IsWindowEnabled()) dis.itemState |= ODS_DISABLED;
+        DrawItem(&dis);
+    }
+    return 0;
+}
+
+BOOL CCustomListBox::OnEraseBkgnd(CDC* pDC)
+{
+    if (pDC)
+    {
+        CRect r;
+        GetClientRect(&r);
+        pDC->FillSolidRect(&r, COLOR_LIST_BG);
+    }
+    return TRUE;
+}
 
 void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
 {
     if (lp->itemID == (UINT)-1) return;
     CDC* pDC = CDC::FromHandle(lp->hDC);
-    CRect rect = lp->rcItem;
+    CRect r = lp->rcItem;
+    COLORREF bg = (lp->itemState & ODS_SELECTED) ? COLOR_SEL_BG : (lp->itemID % 2 == 0 ? COLOR_LIST_BG : RGB(183, 221, 238));
 
-    COLORREF clrBg;
-    if (lp->itemState & ODS_SELECTED) clrBg = COLOR_SEL_BG;
-    else if (lp->itemID % 2 == 0)          clrBg = COLOR_LIST_BG;
-    else                                    clrBg = RGB(183, 221, 238);
+    if (m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd))
+        FillRectAlpha(pDC, r, bg, (lp->itemState & ODS_SELECTED) ? 180 : AERO_ALPHA_SEMI);
+    else
+        pDC->FillSolidRect(&r, bg);
 
-    pDC->FillSolidRect(&rect, clrBg);  // [FIX❹] CBrush生成をやめFillSolidRectへ
+    int it = lp->itemID % 4;
+    int is = 8;
+    int ix = r.left + 5;
+    int iy = r.top + (r.Height() - is) / 2;
 
-    int iconType = lp->itemID % 4;
-    int iconSize = 8;
-    int iconX = rect.left + 5;
-    int iconY = rect.top + (rect.Height() - iconSize) / 2;
-
-    switch (iconType)
+    switch (it)
     {
-    case 0: DrawFlower(pDC, iconX + iconSize / 2, iconY + iconSize / 2, iconSize / 2, RGB(255, 200, 220)); break;
-    case 1: DrawStar(pDC, iconX + iconSize / 2, iconY + iconSize / 2, iconSize / 3, RGB(255, 215, 0)); break;
-    case 2: { CRect rcH(iconX, iconY, iconX + iconSize, iconY + iconSize); DrawHeart(pDC, rcH, COLOR_HEART); break; }
-    case 3: { CRect rcR(iconX, iconY, iconX + iconSize, iconY + iconSize); DrawRibbon(pDC, rcR, RGB(255, 182, 193)); break; }
+    case 0: DrawFlower(pDC, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
+    case 1: DrawStar(pDC, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
+    case 2: DrawHeart(pDC, CRect(ix, iy, ix + is, iy + is), COLOR_HEART); break;
+    case 3: DrawRibbon(pDC, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
     }
 
-    if (lp->itemState & ODS_SELECTED)
-        DrawStar(pDC, rect.right - 12, rect.top + rect.Height() / 2, 3, RGB(255, 215, 0));
+    if (lp->itemState & ODS_SELECTED) DrawStar(pDC, r.right - 12, r.top + r.Height() / 2, 3, RGB(255, 215, 0));
 
-    CString strText;
-    GetText(lp->itemID, strText);
-    CRect rcText = rect;
-    rcText.left += 20;
-    rcText.DeflateRect(1, 1);
-    pDC->SetTextColor(COLOR_EDIT_TEXT);
-    pDC->SetBkColor(clrBg);
-    pDC->SetBkMode(OPAQUE);
-    CFont* pOldFont = pDC->SelectObject(GetFont());
-    DrawListSubitemCellText(pDC, strText, rcText);
-    pDC->SelectObject(pOldFont);
+    CString st;
+    GetText(lp->itemID, st);
+    CRect rt = r;
+    rt.left += 20;
+    rt.DeflateRect(1, 1);
 
-    if (lp->itemID < (UINT)(GetCount() - 1))
-        DrawLaceLine(pDC, rect.left + 15, rect.bottom - 1, rect.right - 15, rect.bottom - 1, RGB(200, 180, 220));
+    COLORREF tc = m_bAeroMode ? RGB(1, 1, 1) : COLOR_EDIT_TEXT;
+    pDC->SetTextColor(tc);
+    pDC->SetBkMode(TRANSPARENT);
+
+    CFont* po = pDC->SelectObject(GetFont());
+    DrawListSubitemCellText(pDC, st, rt);
+    pDC->SelectObject(po);
+
+    if (lp->itemID < (UINT)(GetCount() - 1)) DrawLaceLine(pDC, r.left + 15, r.bottom - 1, r.right - 15, r.bottom - 1, RGB(200, 180, 220));
 }
 
-void CCustomListBox::MeasureItem(LPMEASUREITEMSTRUCT lp) { lp->itemHeight = 24; }
+void CCustomListBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
+{
+    lp->itemHeight = 24;
+}
 
 // ============================================================================
+// カスタムコンボボックスコントロール
 // CCustomComboBox
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomComboBox, CComboBox)
@@ -1570,13 +2142,14 @@ IMPLEMENT_DYNAMIC(CCustomComboBox, CComboBox)
 BEGIN_MESSAGE_MAP(CCustomComboBox, CComboBox)
     ON_WM_CTLCOLOR_REFLECT()
     ON_WM_PAINT()
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_ERASEBKGND()
     ON_CONTROL_REFLECT(CBN_DROPDOWN, &CCustomComboBox::OnDropdown)
 END_MESSAGE_MAP()
 
 CCustomComboBox::CCustomComboBox()
-    : m_bAutoDelete(FALSE), m_clrLabelText(RGB(240, 240, 255))
-    , m_clrLabelBg(RGB(80, 60, 120))
+    : m_bAutoDelete(FALSE), m_clrLabelText(RGB(240, 240, 255)),
+    m_clrLabelBg(RGB(80, 60, 120)), m_bAeroMode(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_COMBO_BG);
 }
@@ -1586,74 +2159,83 @@ CCustomComboBox::~CCustomComboBox()
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
-// [FIX❺]
 void CCustomComboBox::PostNcDestroy()
 {
     CComboBox::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
-int CCustomComboBox::AddString(LPCTSTR lpszString, BOOL bDisabled)
+int CCustomComboBox::AddString(LPCTSTR lp, BOOL bD)
 {
-    int nIndex = CComboBox::AddString(lpszString);
-    if (nIndex >= 0)
+    int n = CComboBox::AddString(lp);
+    if (n >= 0)
     {
-        if (nIndex >= (int)m_vDisabledItems.size()) m_vDisabledItems.resize(nIndex + 1, FALSE);
-        m_vDisabledItems[nIndex] = bDisabled;
-        if (!bDisabled) m_vSelectableIndices.push_back(nIndex);
+        if (n >= (int)m_vDisabledItems.size()) m_vDisabledItems.resize(n + 1, FALSE);
+        m_vDisabledItems[n] = bD;
+        if (!bD) m_vSelectableIndices.push_back(n);
     }
-    return nIndex;
+    return n;
 }
 
 int CCustomComboBox::GetCurSel() const
 {
-    int nPhysical = CComboBox::GetCurSel();
-    if (nPhysical < 0) return -1;
+    int np = CComboBox::GetCurSel();
+    if (np < 0) return -1;
     for (int i = 0; i < (int)m_vSelectableIndices.size(); i++)
-        if (m_vSelectableIndices[i] == nPhysical) return i;
+        if (m_vSelectableIndices[i] == np) return i;
     return -1;
 }
 
-int CCustomComboBox::SetCurSel(int nLogicalIndex)
+int CCustomComboBox::SetCurSel(int n)
 {
-    if (nLogicalIndex < 0) return CComboBox::SetCurSel(-1);
-    if (nLogicalIndex >= (int)m_vSelectableIndices.size())
+    if (n < 0) return CComboBox::SetCurSel(-1);
+    if (n >= (int)m_vSelectableIndices.size())
     {
         if (m_vSelectableIndices.empty()) return CB_ERR;
-        nLogicalIndex = (int)m_vSelectableIndices.size() - 1;
+        n = (int)m_vSelectableIndices.size() - 1;
     }
-    return CComboBox::SetCurSel(m_vSelectableIndices[nLogicalIndex]);
+    return CComboBox::SetCurSel(m_vSelectableIndices[n]);
 }
 
-void CCustomComboBox::SetLabelColor(COLORREF clrText, COLORREF clrBackground) { m_clrLabelText = clrText; m_clrLabelBg = clrBackground; if (GetSafeHwnd())Invalidate(); }
-void CCustomComboBox::GetLabelColor(COLORREF* pClrText, COLORREF* pClrBackground) const { if (pClrText)*pClrText = m_clrLabelText; if (pClrBackground)*pClrBackground = m_clrLabelBg; }
-
-int CCustomComboBox::LogicalToPhysical(int nLogical) const
+void CCustomComboBox::SetLabelColor(COLORREF ct, COLORREF cb)
 {
-    if (nLogical < 0 || nLogical >= (int)m_vSelectableIndices.size()) return -1;
-    return m_vSelectableIndices[nLogical];
+    m_clrLabelText = ct;
+    m_clrLabelBg = cb;
+    if (GetSafeHwnd()) Invalidate();
 }
 
-int CCustomComboBox::PhysicalToLogical(int nPhysical) const
+void CCustomComboBox::GetLabelColor(COLORREF* pct, COLORREF* pcb) const
+{
+    if (pct) *pct = m_clrLabelText;
+    if (pcb) *pcb = m_clrLabelBg;
+}
+
+int CCustomComboBox::LogicalToPhysical(int n) const
+{
+    if (n < 0 || n >= (int)m_vSelectableIndices.size()) return -1;
+    return m_vSelectableIndices[n];
+}
+
+int CCustomComboBox::PhysicalToLogical(int n) const
 {
     for (int i = 0; i < (int)m_vSelectableIndices.size(); i++)
-        if (m_vSelectableIndices[i] == nPhysical) return i;
+        if (m_vSelectableIndices[i] == n) return i;
     return -1;
 }
 
 void CCustomComboBox::PreSubclassWindow()
 {
     CComboBox::PreSubclassWindow();
-    DWORD dwStyle = GetStyle();
-    dwStyle &= ~CBS_OWNERDRAWVARIABLE;
-    dwStyle |= CBS_OWNERDRAWFIXED | CBS_HASSTRINGS;
+    DWORD dw = GetStyle();
+    dw &= ~CBS_OWNERDRAWVARIABLE;
+    dw |= CBS_OWNERDRAWFIXED | CBS_HASSTRINGS;
     ModifyStyle(0, CBS_OWNERDRAWFIXED | CBS_HASSTRINGS);
-    SetWindowLong(GetSafeHwnd(), GWL_STYLE, dwStyle);
+    SetWindowLong(GetSafeHwnd(), GWL_STYLE, dw);
 }
 
-HBRUSH CCustomComboBox::CtlColor(CDC* pDC, UINT nCtlColor)
+HBRUSH CCustomComboBox::CtlColor(CDC* pDC, UINT nC)
 {
-    if (nCtlColor == CTLCOLOR_LISTBOX)
+    if (nC == CTLCOLOR_LISTBOX)
     {
         pDC->SetBkColor(COLOR_COMBO_BG);
         pDC->SetTextColor(RGB(0, 0, 0));
@@ -1662,128 +2244,155 @@ HBRUSH CCustomComboBox::CtlColor(CDC* pDC, UINT nCtlColor)
     return NULL;
 }
 
-BOOL CCustomComboBox::OnEraseBkgnd(CDC*) { return TRUE; }
-
-void CCustomComboBox::OnPaint()
+BOOL CCustomComboBox::OnEraseBkgnd(CDC* pDC)
 {
-    CPaintDC dcPaint(this);
-    CRect rect;
-    GetClientRect(&rect);
-
-    CDC memDC;
-    CBitmap memBmp;
-    memDC.CreateCompatibleDC(&dcPaint);
-    memBmp.CreateCompatibleBitmap(&dcPaint, rect.Width(), rect.Height());
-    CBitmap* pOldBmp = memDC.SelectObject(&memBmp);
-
-    memDC.FillSolidRect(&rect, COLOR_COMBO_BG);
-
-    CPen penFrame(PS_SOLID, 2, COLOR_VINE_DECO);
-    CPen* pOldPen = memDC.SelectObject(&penFrame);
-    memDC.SelectStockObject(NULL_BRUSH);
-    memDC.RoundRect(&rect, CPoint(10, 10));
-
-    int nBtnWidth = GetSystemMetrics(SM_CXVSCROLL);
-    CRect rcBtn(rect.right - nBtnWidth - 4, rect.top + 4, rect.right - 4, rect.bottom - 4);
-
-    // [FIX❹] DrawItemと同様にFillSolidRectへ
-    memDC.FillSolidRect(&rcBtn, RGB(255, 200, 220));
-    // 角丸は既存のRoundRectで再描画
+    if (pDC)
     {
-        CPen penBtn(PS_SOLID, 1, RGB(200, 150, 180));
-        memDC.SelectObject(&penBtn);
-        memDC.SelectStockObject(NULL_BRUSH);
-        memDC.RoundRect(&rcBtn, CPoint(6, 6));
-        memDC.SelectObject(pOldPen);
+        CRect r;
+        GetClientRect(&r);
+        pDC->FillSolidRect(&r, COLOR_COMBO_BG);
+    }
+    return TRUE;
+}
+
+void CCustomComboBox::PaintClient(CDC& dc)
+{
+    CRect r;
+    GetClientRect(&r);
+
+    CDC mDC;
+    CBitmap mB;
+    mDC.CreateCompatibleDC(&dc);
+    mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
+    CBitmap* ob = mDC.SelectObject(&mB);
+
+    const BOOL bTrans = m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd);
+    if (bTrans)
+    {
+        mDC.FillSolidRect(&r, RGB(0, 0, 0));
+        FillRectAlpha(&mDC, r, COLOR_COMBO_BG, AERO_ALPHA_SEMI);
+    }
+    else mDC.FillSolidRect(&r, COLOR_COMBO_BG);
+
+    CPen pF(PS_SOLID, 2, COLOR_VINE_DECO);
+    CPen* op = mDC.SelectObject(&pF);
+    mDC.SelectStockObject(NULL_BRUSH);
+    mDC.RoundRect(&r, CPoint(10, 10));
+
+    int nb = GetSystemMetrics(SM_CXVSCROLL);
+    CRect rB(r.right - nb - 4, r.top + 4, r.right - 4, r.bottom - 4);
+    mDC.FillSolidRect(&rB, RGB(255, 200, 220));
+
+    {
+        CPen pb(PS_SOLID, 1, RGB(200, 150, 180));
+        mDC.SelectObject(&pb);
+        mDC.SelectStockObject(NULL_BRUSH);
+        mDC.RoundRect(&rB, CPoint(6, 6));
+        mDC.SelectObject(op);
     }
 
-    int nHeartSize = 6;
-    int nSpacing = 2;
-    int nStartX = rcBtn.left + (rcBtn.Width() - (nHeartSize * 3 + nSpacing * 2)) / 2;
-    int nCenterY = rcBtn.Height() / 2 + rcBtn.top;
+    int hs = 6, sp = 2;
+    int sx = rB.left + (rB.Width() - (hs * 3 + sp * 2)) / 2;
+    int cy2 = rB.Height() / 2 + rB.top;
 
     for (int i = 0; i < 3; i++)
     {
-        CRect rcHeart(
-            nStartX + i * (nHeartSize + nSpacing), nCenterY - nHeartSize / 2,
-            nStartX + i * (nHeartSize + nSpacing) + nHeartSize, nCenterY + nHeartSize / 2);
-        DrawHeart(&memDC, rcHeart, (i == 1) ? COLOR_HEART : RGB(255, 182, 193));
+        CRect rh(sx + i * (hs + sp), cy2 - hs / 2, sx + i * (hs + sp) + hs, cy2 + hs / 2);
+        DrawHeart(&mDC, rh, (i == 1) ? COLOR_HEART : RGB(255, 182, 193));
     }
 
-    DrawStar(&memDC, rect.right - 8, rect.top + 8, 3, RGB(255, 215, 0));
+    DrawStar(&mDC, r.right - 8, r.top + 8, 3, RGB(255, 215, 0));
 
-    int nPhysicalSel = CComboBox::GetCurSel();
-    CString strText;
-    if (nPhysicalSel != CB_ERR) GetLBText(nPhysicalSel, strText);
+    int nPS = CComboBox::GetCurSel();
+    CString st;
+    if (nPS != CB_ERR) GetLBText(nPS, st);
 
-    memDC.SetTextColor(RGB(0, 0, 0));
-    CFont* pOldFont = memDC.SelectObject(GetFont());
+    COLORREF tc = bTrans ? RGB(1, 1, 1) : RGB(0, 0, 0);
+    mDC.SetTextColor(tc);
 
-    CRect rcText = rect;
-    rcText.left += 12;
-    rcText.right = rcBtn.left - 4;
+    CFont* pOF = mDC.SelectObject(GetFont());
+    CRect rt = r;
+    rt.left += 12;
+    rt.right = rB.left - 4;
 
-    BOOL bIsLabel = (nPhysicalSel >= 0 && nPhysicalSel < (int)m_vDisabledItems.size() && m_vDisabledItems[nPhysicalSel]);
-    if (nPhysicalSel != CB_ERR && !bIsLabel)
+    BOOL bIL = (nPS >= 0 && nPS < (int)m_vDisabledItems.size() && m_vDisabledItems[nPS]);
+    if (nPS != CB_ERR && !bIL)
     {
-        int crownSize = (rcText.Height() - 8) / 2;
-        DrawCrown(&memDC, rcText.left + crownSize, rcText.Height() / 2, crownSize, RGB(255, 215, 0));
-        rcText.left += crownSize * 2 + 4;
+        int cs = (rt.Height() - 8) / 2;
+        DrawCrown(&mDC, rt.left + cs, rt.Height() / 2, cs, RGB(255, 215, 0));
+        rt.left += cs * 2 + 4;
     }
 
-    memDC.SetBkMode(TRANSPARENT);
-    memDC.DrawText(strText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    memDC.SelectObject(pOldFont);
+    mDC.SetBkMode(TRANSPARENT);
+    mDC.DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    mDC.SelectObject(pOF);
 
-    dcPaint.BitBlt(0, 0, rect.Width(), rect.Height(), &memDC, 0, 0, SRCCOPY);
-    memDC.SelectObject(pOldBmp);
-    memBmp.DeleteObject();
-    memDC.DeleteDC();
+    if (bTrans) CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, RGB(0, 0, 0));
+    else dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+
+    mDC.SelectObject(ob);
+    mB.DeleteObject();
+    mDC.DeleteDC();
+}
+
+void CCustomComboBox::OnPaint()
+{
+    CPaintDC dc(this);
+    PaintClient(dc);
+}
+
+LRESULT CCustomComboBox::OnPrintClient(WPARAM wParam, LPARAM)
+{
+    if (HDC hDC = (HDC)wParam)
+    {
+        CDC dc;
+        dc.Attach(hDC);
+        PaintClient(dc);
+        dc.Detach();
+    }
+    return 0;
 }
 
 void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 {
     if (lp->itemID == (UINT)-1) return;
     CDC* pDC = CDC::FromHandle(lp->hDC);
-    CRect rect = lp->rcItem;
+    CRect r = lp->rcItem;
+    BOOL bD = (lp->itemID < (UINT)m_vDisabledItems.size()) && m_vDisabledItems[lp->itemID];
+    BOOL bS = !bD && (lp->itemState & ODS_SELECTED);
+    COLORREF bg = bD ? m_clrLabelBg : (bS ? COLOR_SEL_BG : (lp->itemID % 2 == 0 ? COLOR_COMBO_BG : RGB(255, 232, 220)));
 
-    BOOL bDisabled = (lp->itemID < (UINT)m_vDisabledItems.size()) && m_vDisabledItems[lp->itemID];
-    BOOL bSel = !bDisabled && (lp->itemState & ODS_SELECTED);
-
-    COLORREF clrBg;
-    if (bDisabled)           clrBg = m_clrLabelBg;
-    else if (bSel)                clrBg = COLOR_SEL_BG;
-    else if (lp->itemID % 2 == 0)  clrBg = COLOR_COMBO_BG;
-    else                          clrBg = RGB(255, 232, 220);
-
-    pDC->FillSolidRect(&rect, clrBg);  // [FIX❹]
-
-    if (!bDisabled)
+    if (m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd))
     {
-        int iconType = lp->itemID % 4;
-        int iconSize = 8;
-        int iconX = rect.left + 6;
-        int iconY = rect.top + (rect.Height() - iconSize) / 2;
+        pDC->FillSolidRect(&r, RGB(0, 0, 0));
+        FillRectAlpha(pDC, r, bg, bS ? 180 : bD ? 200 : AERO_ALPHA_SEMI);
+    }
+    else pDC->FillSolidRect(&r, bg);
 
-        switch (iconType)
+    if (!bD)
+    {
+        int it = lp->itemID % 4;
+        int is = 8;
+        int ix = r.left + 6;
+        int iy = r.top + (r.Height() - is) / 2;
+        switch (it)
         {
-        case 0: DrawFlower(pDC, iconX + iconSize / 2, iconY + iconSize / 2, iconSize / 2, RGB(255, 200, 220)); break;
-        case 1: DrawStar(pDC, iconX + iconSize / 2, iconY + iconSize / 2, iconSize / 3, RGB(255, 215, 0)); break;
-        case 2: { CRect rcH(iconX, iconY, iconX + iconSize, iconY + iconSize); DrawHeart(pDC, rcH, COLOR_HEART); break; }
-        case 3: { CRect rcR(iconX, iconY, iconX + iconSize, iconY + iconSize); DrawRibbon(pDC, rcR, RGB(255, 182, 193)); break; }
+        case 0: DrawFlower(pDC, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
+        case 1: DrawStar(pDC, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
+        case 2: DrawHeart(pDC, CRect(ix, iy, ix + is, iy + is), COLOR_HEART); break;
+        case 3: DrawRibbon(pDC, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
         }
     }
 
-    CString strText;
-    GetLBText(lp->itemID, strText);
-
-    CFont* pOldFont = NULL;
-    CFont fontCustom;
-    CFont* pFont = GetFont();
+    CString st;
+    GetLBText(lp->itemID, st);
+    CFont* pOF = NULL;
+    CFont fc;
+    CFont* pF = GetFont();
     LOGFONT lf;
-    pFont->GetLogFont(&lf);
+    pF->GetLogFont(&lf);
 
-    if (bDisabled)
+    if (bD)
     {
         pDC->SetTextColor(m_clrLabelText);
         lf.lfWeight = FW_BOLD;
@@ -1791,98 +2400,770 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     }
     else
     {
-        pDC->SetTextColor(RGB(0, 0, 0));
+        pDC->SetTextColor(m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0));
         lf.lfWeight = FW_BOLD;
     }
-    fontCustom.CreateFontIndirect(&lf);
-    pOldFont = pDC->SelectObject(&fontCustom);
+    fc.CreateFontIndirect(&lf);
+    pOF = pDC->SelectObject(&fc);
     pDC->SetBkMode(TRANSPARENT);
-
-    CRect rcText = rect;
-    rcText.left += bDisabled ? 4 : 20;
-    pDC->DrawText(strText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-
-    if (pOldFont)
+    CRect rt = r;
+    rt.left += bD ? 4 : 20;
+    pDC->DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    if (pOF)
     {
-        pDC->SelectObject(pOldFont);  // [FIX❶]
-        fontCustom.DeleteObject();
+        pDC->SelectObject(pOF);
+        fc.DeleteObject();
     }
-
-    if (bSel && !bDisabled)
-        DrawCrown(pDC, rect.right - 14, rect.top + rect.Height() / 2, 6, RGB(255, 215, 0));
-
-    if (bDisabled)
-    {
-        CPen penSep(PS_SOLID, 2, RGB(200, 200, 240));
-        CPen* pOldPen = pDC->SelectObject(&penSep);
-        if (lp->itemID > 0) { pDC->MoveTo(rect.left + 2, rect.top); pDC->LineTo(rect.right - 2, rect.top); }
-        pDC->MoveTo(rect.left + 2, rect.bottom - 1); pDC->LineTo(rect.right - 2, rect.bottom - 1);
-        pDC->SelectObject(pOldPen);
-    }
-    else if (lp->itemID < (UINT)(GetCount() - 1))
-    {
-        BOOL bNextIsLabel = (lp->itemID + 1 < (UINT)m_vDisabledItems.size()) && m_vDisabledItems[lp->itemID + 1];
-        if (!bNextIsLabel)
-            DrawLaceLine(pDC, rect.left + 15, rect.bottom - 1, rect.right - 15, rect.bottom - 1, RGB(200, 180, 220));
-    }
+    if (bS && !bD) DrawCrown(pDC, r.right - 14, r.top + r.Height() / 2, 6, RGB(255, 215, 0));
 }
 
-void CCustomComboBox::MeasureItem(LPMEASUREITEMSTRUCT lp) { lp->itemHeight = 28; }
-void CCustomComboBox::OnDropdown() { UpdateDropDownWidth(); }
-
-BOOL CCustomComboBox::OnCommand(WPARAM wParam, LPARAM lParam)
+void CCustomComboBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
 {
-    WORD wNotifyCode = HIWORD(wParam);
-    if (wNotifyCode == CBN_SELCHANGE || wNotifyCode == CBN_SELENDOK)
+    lp->itemHeight = 28;
+}
+
+void CCustomComboBox::OnDropdown()
+{
+    UpdateDropDownWidth();
+}
+
+BOOL CCustomComboBox::OnCommand(WPARAM wP, LPARAM lP)
+{
+    WORD wN = HIWORD(wP);
+    if (wN == CBN_SELCHANGE || wN == CBN_SELENDOK)
     {
-        int nCurSel = CComboBox::GetCurSel();
-        if (nCurSel >= 0)
+        int n = CComboBox::GetCurSel();
+        if (n >= 0)
         {
-            BOOL bDisabled = (nCurSel < (int)m_vDisabledItems.size() && m_vDisabledItems[nCurSel]);
-            if (bDisabled)
+            BOOL bD = (n < (int)m_vDisabledItems.size() && m_vDisabledItems[n]);
+            if (bD)
             {
-                int nCount = CComboBox::GetCount();
-                for (int i = nCurSel + 1; i < nCount; i++)
+                int cnt = CComboBox::GetCount();
+                // 無効アイテムが選ばれた場合、次の有効アイテムへスキップ
+                for (int i = n + 1; i < cnt; i++)
                 {
                     if (!(i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]))
                     {
-                        CComboBox::SetCurSel(i); return TRUE;
+                        CComboBox::SetCurSel(i);
+                        return TRUE;
                     }
                 }
-                for (int i = nCurSel - 1; i >= 0; i--)
+                for (int i = n - 1; i >= 0; i--)
                 {
                     if (!(i < (int)m_vDisabledItems.size() && m_vDisabledItems[i]))
                     {
-                        CComboBox::SetCurSel(i); return TRUE;
+                        CComboBox::SetCurSel(i);
+                        return TRUE;
                     }
                 }
-                CComboBox::SetCurSel(-1);
-                return TRUE;
+                CComboBox::SetCurSel(-1); return TRUE;
             }
         }
     }
-    return CComboBox::OnCommand(wParam, lParam);
+    return CComboBox::OnCommand(wP, lP);
 }
 
 void CCustomComboBox::UpdateDropDownWidth()
 {
     CClientDC dc(this);
-    int nMaxWidth = 0;
-    CFont* pOldFont = dc.SelectObject(GetFont());
+    int mW = 0;
+    CFont* po = dc.SelectObject(GetFont());
+
     for (int i = 0; i < GetCount(); i++)
     {
-        CString str;
-        GetLBText(i, str);
-        nMaxWidth = max(nMaxWidth, dc.GetTextExtent(str).cx);
+        CString s;
+        GetLBText(i, s);
+        mW = max(mW, dc.GetTextExtent(s).cx);
     }
-    nMaxWidth += GetSystemMetrics(SM_CXVSCROLL) + 40;
-    CRect rect;
-    GetWindowRect(&rect);
-    SetDroppedWidth(max(nMaxWidth, rect.Width()));
-    dc.SelectObject(pOldFont);
+
+    mW += GetSystemMetrics(SM_CXVSCROLL) + 40;
+    CRect r;
+    GetWindowRect(&r);
+    SetDroppedWidth(max(mW, r.Width()));
+    dc.SelectObject(po);
 }
 
 // ============================================================================
+// CCustomSliderCtrl 実装
+// ============================================================================
+IMPLEMENT_DYNAMIC(CCustomSliderCtrl, CSliderCtrl)
+
+BEGIN_MESSAGE_MAP(CCustomSliderCtrl, CSliderCtrl)
+    ON_WM_PAINT()
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+    ON_WM_ERASEBKGND()
+    ON_MESSAGE(WM_MOUSEMOVE, OnMouseMoveMsg)
+    ON_MESSAGE(WM_LBUTTONDOWN, OnLButtonDownMsg)
+    ON_MESSAGE(WM_LBUTTONUP, OnLButtonUpMsg)
+END_MESSAGE_MAP()
+
+CCustomSliderCtrl::CCustomSliderCtrl() : m_bAutoDelete(FALSE), m_nMode(0), m_bAeroMode(FALSE) {}
+CCustomSliderCtrl::~CCustomSliderCtrl() {}
+
+void CCustomSliderCtrl::PostNcDestroy()
+{
+    CSliderCtrl::PostNcDestroy();
+    if (m_bAutoDelete) delete this;
+}
+
+void CCustomSliderCtrl::SetMode(int m)
+{
+    m_nMode = m;
+    if (GetSafeHwnd()) Invalidate(FALSE);
+}
+void CCustomSliderCtrl::SetPos(int nPos, BOOL bRedraw)
+{
+    CSliderCtrl::SetPos(nPos);
+    if (bRedraw && GetSafeHwnd())
+    {
+#if CCUSTOM_AERO_SUPPORT
+        CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+#endif
+        Invalidate(FALSE);
+        UpdateWindow();
+    }
+}
+void CCustomSliderCtrl::SetAeroMode(BOOL b)
+{
+    m_bAeroMode = b;
+    if (GetSafeHwnd())
+    {
+#if CCUSTOM_AERO_SUPPORT
+        CCC_SetChildTransparent(m_hWnd, FALSE);
+#endif
+        Invalidate(FALSE);
+    }
+}
+void CCustomSliderCtrl::PreSubclassWindow()
+{
+    CSliderCtrl::PreSubclassWindow();
+}
+
+void CCustomSliderCtrl::PaintClient(CDC& dc)
+{
+    CRect r;
+    GetClientRect(&r);
+    CDC mDC;
+    CBitmap mB;
+    mDC.CreateCompatibleDC(&dc);
+    mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
+    CBitmap* ob = mDC.SelectObject(&mB);
+
+    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    if (bTrans)
+    {
+        mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
+        DrawSlider(&mDC);
+        CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+    }
+    else
+    {
+        mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
+        DrawSlider(&mDC);
+        dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+    }
+    mDC.SelectObject(ob);
+    mB.DeleteObject();
+    mDC.DeleteDC();
+}
+
+void CCustomSliderCtrl::OnPaint()
+{
+    CPaintDC dc(this);
+    PaintClient(dc);
+}
+
+LRESULT CCustomSliderCtrl::OnPrintClient(WPARAM wParam, LPARAM)
+{
+    if (HDC hDC = (HDC)wParam)
+    {
+        CDC dc;
+        dc.Attach(hDC);
+        PaintClient(dc);
+        dc.Detach();
+    }
+    return 0;
+}
+
+BOOL CCustomSliderCtrl::OnEraseBkgnd(CDC* pDC)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_UseTransparentPaint(m_hWnd, m_bAeroMode)) return TRUE;
+#endif
+    if (pDC)
+    {
+        CRect r;
+        GetClientRect(&r);
+        pDC->FillSolidRect(&r, COLOR_DIALOG_BG);
+    }
+    return TRUE;
+}
+
+LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM w, LPARAM l)
+{
+    LRESULT r = Default();
+#if CCUSTOM_AERO_SUPPORT
+    CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+#endif
+    Invalidate(FALSE);
+    return r;
+}
+LRESULT CCustomSliderCtrl::OnLButtonDownMsg(WPARAM w, LPARAM l)
+{
+    LRESULT r = Default();
+#if CCUSTOM_AERO_SUPPORT
+    CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+#endif
+    Invalidate(FALSE);
+    return r;
+}
+LRESULT CCustomSliderCtrl::OnLButtonUpMsg(WPARAM w, LPARAM l)
+{
+    LRESULT r = Default();
+#if CCUSTOM_AERO_SUPPORT
+    CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+#endif
+    Invalidate(FALSE);
+    return r;
+}
+
+void CCustomSliderCtrl::DrawSlider(CDC* pDC)
+{
+    CRect r;
+    GetClientRect(&r);
+    int mn, mx;
+    GetRange(mn, mx);
+    int np = GetPos();
+    if (mx <= mn) return;
+
+    if (m_nMode == 0) DrawMode0(pDC, r, mn, mx, np);
+    else if (m_nMode == 1) DrawMode1(pDC, r, mn, mx, np);
+    else if (m_nMode == 2) DrawMode2(pDC, r, mn, mx, np);
+    else DrawMode1(pDC, r, mn, mx, np);
+}
+
+// 描画モード0：バーと音符のつまみ
+void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
+{
+    int nR = nMax - nMin;
+    BOOL bV = (GetStyle() & TBS_VERT);
+
+    if (!bV) // 横向き
+    {
+        int mX = 12, tL = rect.left + mX, tR = rect.right - mX, tW = tR - tL;
+        if (tW <= 0) return;
+        int tX = tL + (int)((double)(nPos - nMin) * tW / nR);
+        int cY = rect.Height() / 2, bY = rect.bottom - 8;
+
+        CPoint pts[4] = { {tL, bY}, {tL, bY - 2}, {tR, rect.top + 4}, {tR, bY} };
+        CBrush bB(COLOR_RANGE_SELECTION);
+        pDC->SelectObject(&bB);
+        CPen pV(PS_SOLID, 1, COLOR_VINE_DECO);
+        pDC->SelectObject(&pV);
+        pDC->Polygon(pts, 4);
+
+        if (tX > tL)
+        {
+            CRgn rP, rL;
+            rP.CreatePolygonRgn(pts, 4, WINDING);
+            rL.CreateRectRgn(rect.left, rect.top, tX, rect.bottom);
+            rP.CombineRgn(&rP, &rL, RGN_AND);
+            CBrush bA(RGB(180, 200, 255));
+            pDC->FillRgn(&rP, &bA);
+        }
+        CRect rN(tX - 10, cY - 12, tX + 10, cY + 12);
+        DrawMusicNote(pDC, rN, RGB(138, 43, 226));
+        DrawStar(pDC, tX - 12, cY - 14, 2, RGB(255, 215, 0));
+        DrawStar(pDC, tX + 12, cY - 14, 2, RGB(255, 215, 0));
+    }
+    else // 縦向き
+    {
+        int mY = 12, tT = rect.top + mY, tB = rect.bottom - mY, tH = tB - tT;
+        if (tH <= 0) return;
+        int tY = tT + (int)((double)(nPos - nMin) * tH / nR), cX = rect.Width() / 2;
+        CPoint pts[4] = { {cX - 8, tB}, {cX - 2, tT}, {cX + 2, tT}, {cX + 8, tB} };
+        CBrush bB(COLOR_RANGE_SELECTION);
+        pDC->SelectObject(&bB);
+        CPen pV2(PS_SOLID, 1, COLOR_VINE_DECO);
+        pDC->SelectObject(&pV2);
+        pDC->Polygon(pts, 4);
+
+        if (tY < tB)
+        {
+            CRgn rP, rB2;
+            rP.CreatePolygonRgn(pts, 4, WINDING);
+            rB2.CreateRectRgn(rect.left, tY, rect.right, rect.bottom);
+            rP.CombineRgn(&rP, &rB2, RGN_AND);
+            CBrush bA(RGB(180, 200, 255));
+            pDC->FillRgn(&rP, &bA);
+        }
+        CRect rN(cX - 10, tY - 12, cX + 10, tY + 12);
+        DrawMusicNote(pDC, rN, RGB(138, 43, 226));
+        DrawStar(pDC, cX + 14, tY, 2, RGB(255, 215, 0));
+    }
+}
+
+// 描画モード1：紫系グラデーションとダイヤのつまみ
+void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
+{
+    int nR = nMax - nMin;
+    BOOL bV = (GetStyle() & TBS_VERT);
+    if (!bV)
+    {
+        int cY = rect.Height() / 2;
+        int tL = 12;
+        int tR = rect.Width() - 12;
+        int tW = tR - tL;
+        if (tW <= 0) return;
+        int tP = tL + (int)((double)(nPos - nMin) * tW / nR);
+        CPen pA(PS_SOLID, 5, RGB(200, 150, 255));
+        pDC->SelectObject(&pA);
+        pDC->MoveTo(tL, cY);
+        pDC->LineTo(tP, cY);
+        CPen pI(PS_SOLID, 3, RGB(220, 220, 230));
+        pDC->SelectObject(&pI);
+        pDC->LineTo(tR, cY);
+        CPen pT(PS_SOLID, 2, RGB(150, 100, 200));
+        pDC->SelectObject(&pT);
+        for (int i = 0; i <= 10; i++)
+        {
+            int nx = tL + tW * i / 10;
+            int nh = (i % 5 == 0) ? 10 : 5;
+            pDC->MoveTo(nx, cY - nh);
+            pDC->LineTo(nx, cY + nh);
+            if (i % 5 == 0)
+            {
+                CBrush b(RGB(200, 180, 255));
+                CBrush* ob = pDC->SelectObject(&b);
+                pDC->Ellipse(nx - 3, cY - nh - 5, nx + 3, cY - nh + 1);
+                pDC->SelectObject(ob);
+            }
+        }
+        CRect rD(tP - 9, cY - 12, tP + 9, cY + 12);
+        DrawDiamond(pDC, rD, RGB(200, 180, 255));
+        CPen pL(PS_SOLID, 1, RGB(255, 240, 200));
+        pDC->SelectObject(&pL);
+        for (int a = 0; a < 360; a += 45)
+        {
+            double r = a * 3.14159 / 180.0;
+            pDC->MoveTo(tP + (int)(12 * cos(r)), cY + (int)(12 * sin(r)));
+            pDC->LineTo(tP + (int)(18 * cos(r)), cY + (int)(18 * sin(r)));
+        }
+    }
+    else
+    {
+        int cX = rect.Width() / 2;
+        int tT = 12;
+        int tB = rect.Height() - 12;
+        int tH = tB - tT;
+        if (tH <= 0) return;
+        int tP = tT + (int)((double)(nPos - nMin) * tH / nR);
+        CPen pA(PS_SOLID, 5, RGB(200, 150, 255));
+        pDC->SelectObject(&pA);
+        pDC->MoveTo(cX, tP);
+        pDC->LineTo(cX, tB);
+        CPen pI(PS_SOLID, 3, RGB(220, 220, 230));
+        pDC->SelectObject(&pI);
+        pDC->MoveTo(cX, tT);
+        pDC->LineTo(cX, tP);
+        CPen pT(PS_SOLID, 2, RGB(150, 100, 200));
+        pDC->SelectObject(&pT);
+        for (int i = 0; i <= 10; i++)
+        {
+            int ny = tT + tH * i / 10;
+            int nw = (i % 5 == 0) ? 10 : 5;
+            pDC->MoveTo(cX - nw, ny);
+            pDC->LineTo(cX + nw, ny);
+            if (i % 5 == 0)
+            {
+                CBrush b(RGB(200, 180, 255));
+                CBrush* ob = pDC->SelectObject(&b);
+                pDC->Ellipse(cX + nw + 1, ny - 3, cX + nw + 7, ny + 3);
+                pDC->SelectObject(ob);
+            }
+        }
+        CRect rD(cX - 9, tP - 12, cX + 9, tP + 12);
+        DrawDiamond(pDC, rD, RGB(200, 180, 255));
+    }
+}
+
+// 描画モード2：緑系グラデーションとダイヤのつまみ
+void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
+{
+    int nR = nMax - nMin;
+    BOOL bV = (GetStyle() & TBS_VERT);
+    if (!bV)
+    {
+        int cY = rect.Height() / 2;
+        int tL = 12;
+        int tR = rect.Width() - 12;
+        int tW = tR - tL;
+        if (tW <= 0) return;
+        int tP = tL + (int)((double)(nPos - nMin) * tW / nR);
+        CPen pA(PS_SOLID, 5, RGB(100, 200, 150));
+        pDC->SelectObject(&pA);
+        pDC->MoveTo(tL, cY);
+        pDC->LineTo(tP, cY);
+        CPen pI(PS_SOLID, 3, RGB(220, 220, 230));
+        pDC->SelectObject(&pI);
+        pDC->LineTo(tR, cY);
+        CPen pT(PS_SOLID, 2, RGB(80, 160, 120));
+        pDC->SelectObject(&pT);
+        for (int i = 0; i <= 10; i++)
+        {
+            int nx = tL + tW * i / 10;
+            int nh = (i % 5 == 0) ? 10 : 5;
+            pDC->MoveTo(nx, cY - nh);
+            pDC->LineTo(nx, cY + nh);
+            if (i % 5 == 0)
+            {
+                CBrush b(RGB(150, 220, 180));
+                CBrush* ob = pDC->SelectObject(&b);
+                pDC->Ellipse(nx - 3, cY - nh - 5, nx + 3, cY - nh + 1);
+                pDC->SelectObject(ob);
+            }
+        }
+        CRect rD(tP - 9, cY - 12, tP + 9, cY + 12);
+        DrawDiamond(pDC, rD, RGB(100, 220, 160));
+        CPen pL(PS_SOLID, 1, RGB(200, 255, 220));
+        pDC->SelectObject(&pL);
+        for (int a = 0; a < 360; a += 45)
+        {
+            double r = a * 3.14159 / 180.0;
+            pDC->MoveTo(tP + (int)(12 * cos(r)), cY + (int)(12 * sin(r)));
+            pDC->LineTo(tP + (int)(18 * cos(r)), cY + (int)(18 * sin(r)));
+        }
+    }
+    else
+    {
+        int cX = rect.Width() / 2;
+        int tT = 12;
+        int tB = rect.Height() - 12;
+        int tH = tB - tT;
+        if (tH <= 0) return;
+        int tP = tT + (int)((double)(nPos - nMin) * tH / nR);
+        CPen pA(PS_SOLID, 5, RGB(100, 200, 150));
+        pDC->SelectObject(&pA);
+        pDC->MoveTo(cX, tP);
+        pDC->LineTo(cX, tB);
+        CPen pI(PS_SOLID, 3, RGB(220, 220, 230));
+        pDC->SelectObject(&pI);
+        pDC->MoveTo(cX, tT);
+        pDC->LineTo(cX, tP);
+        CPen pT(PS_SOLID, 2, RGB(80, 160, 120));
+        pDC->SelectObject(&pT);
+        for (int i = 0; i <= 10; i++)
+        {
+            int ny = tT + tH * i / 10;
+            int nw = (i % 5 == 0) ? 10 : 5;
+            pDC->MoveTo(cX - nw, ny);
+            pDC->LineTo(cX + nw, ny);
+            if (i % 5 == 0)
+            {
+                CBrush b(RGB(150, 220, 180));
+                CBrush* ob = pDC->SelectObject(&b);
+                pDC->Ellipse(cX + nw + 1, ny - 3, cX + nw + 7, ny + 3);
+                pDC->SelectObject(ob);
+            }
+        }
+        CRect rD(cX - 9, tP - 12, cX + 9, tP + 12);
+        DrawDiamond(pDC, rD, RGB(100, 220, 160));
+    }
+}
+
+// ============================================================================
+// CCustomRangeSliderCtrl 実装
+// ============================================================================
+IMPLEMENT_DYNAMIC(CCustomRangeSliderCtrl, CSliderCtrl)
+
+BEGIN_MESSAGE_MAP(CCustomRangeSliderCtrl, CSliderCtrl)
+    ON_WM_PAINT()
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+    ON_WM_ERASEBKGND()
+    ON_WM_LBUTTONDOWN()
+    ON_WM_LBUTTONUP()
+    ON_WM_MOUSEMOVE()
+END_MESSAGE_MAP()
+
+CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
+    : m_bAutoDelete(FALSE), m_nMin(0), m_nMax(100), m_nSelMin(0), m_nSelMax(100),
+    m_nDragTarget(0), m_bDragging(FALSE), m_nVisualPos(0), m_nLogicalPos(0), m_bAeroMode(FALSE) {}
+CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl() {}
+
+void CCustomRangeSliderCtrl::PostNcDestroy()
+{
+    CSliderCtrl::PostNcDestroy();
+    if (m_bAutoDelete) delete this;
+}
+void CCustomRangeSliderCtrl::SetAeroMode(BOOL b)
+{
+    m_bAeroMode = b;
+    if (GetSafeHwnd())
+    {
+#if CCUSTOM_AERO_SUPPORT
+        CCC_SetChildTransparent(m_hWnd, FALSE);
+#endif
+        Invalidate(FALSE);
+    }
+}
+void CCustomRangeSliderCtrl::PreSubclassWindow()
+{
+    CSliderCtrl::PreSubclassWindow();
+
+    // テーマを無効化してオーナードロー描画を優先
+    HMODULE h = LoadLibrary(_T("UxTheme.dll"));
+    if (h)
+    {
+        typedef HRESULT(WINAPI* S)(HWND, LPCWSTR, LPCWSTR);
+        S p = (S)GetProcAddress(h, "SetWindowTheme");
+        if (p) p(m_hWnd, L"", L"");
+        FreeLibrary(h);
+    }
+
+    int mn, mx;
+    CSliderCtrl::GetRange(mn, mx);
+    m_nMin = mn;
+    m_nMax = mx;
+    m_nLogicalPos = m_nVisualPos = CSliderCtrl::GetPos();
+}
+
+void CCustomRangeSliderCtrl::SetPos(int p)
+{
+    if (m_bDragging) return;
+    p = max(m_nMin, min(m_nMax, p));
+    m_nLogicalPos = m_nVisualPos = p;
+    CSliderCtrl::SetPos(p);
+    if (::IsWindow(m_hWnd))
+        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+}
+
+int CCustomRangeSliderCtrl::GetPos() const
+{
+    return m_nLogicalPos;
+}
+
+void CCustomRangeSliderCtrl::SetRange(int mn, int mx, BOOL b)
+{
+    m_nMin = mn;
+    m_nMax = mx;
+    CSliderCtrl::SetRange(mn, mx, FALSE);
+    if (b && ::IsWindow(m_hWnd))
+        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+}
+
+void CCustomRangeSliderCtrl::SetSelection(int mn, int mx)
+{
+    m_nSelMin = mn;
+    m_nSelMax = mx;
+    if (m_nSelMin > m_nSelMax)
+    {
+        int t = m_nSelMin;
+        m_nSelMin = m_nSelMax;
+        m_nSelMax = t;
+    }
+    if (::IsWindow(m_hWnd))
+        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+}
+
+void CCustomRangeSliderCtrl::GetSelection(int& mn, int& mx) const
+{
+    mn = max(m_nMin, min(m_nMax, m_nSelMin));
+    mx = max(m_nMin, min(m_nMax, m_nSelMax));
+}
+
+void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
+{
+    CRect r;
+    GetClientRect(&r);
+    CDC mDC;
+    CBitmap mB;
+    mDC.CreateCompatibleDC(&dc);
+    mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
+    CBitmap* ob = mDC.SelectObject(&mB);
+
+    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    if (bTrans)
+    {
+        mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
+        DrawRangeSlider(&mDC);
+#if CCUSTOM_AERO_SUPPORT
+        if (CCC_IsAeroEnabled() && CCC_IsWin11())
+            CCC_BlitChromaNoFlicker(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
+                mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+        else
+#endif
+            CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
+                mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+    }
+    else
+    {
+        mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
+        DrawRangeSlider(&mDC);
+        dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+    }
+    mDC.SelectObject(ob);
+    mB.DeleteObject();
+    mDC.DeleteDC();
+}
+
+void CCustomRangeSliderCtrl::OnPaint()
+{
+    CPaintDC dc(this);
+    PaintClient(dc);
+}
+
+LRESULT CCustomRangeSliderCtrl::OnPrintClient(WPARAM wParam, LPARAM)
+{
+    if (HDC hDC = (HDC)wParam)
+    {
+        CDC dc;
+        dc.Attach(hDC);
+        PaintClient(dc);
+        dc.Detach();
+    }
+    return 0;
+}
+
+BOOL CCustomRangeSliderCtrl::OnEraseBkgnd(CDC* pDC)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_UseTransparentPaint(m_hWnd, m_bAeroMode)) return TRUE;
+#endif
+    if (pDC)
+    {
+        CRect r;
+        GetClientRect(&r);
+        pDC->FillSolidRect(&r, COLOR_DIALOG_BG);
+    }
+    return TRUE;
+}
+
+void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
+{
+    CRect r;
+    GetClientRect(&r);
+    if (m_nMax <= m_nMin) return;
+
+    int cy = r.Height() / 2;
+    int cur = m_bDragging ? m_nVisualPos : m_nLogicalPos;
+    int xMn = ValueToPixel(m_nSelMin);
+    int xMx = ValueToPixel(m_nSelMax);
+    int xP = ValueToPixel(cur);
+
+    // トラック（バー）
+    CPen pT(PS_SOLID, 4, RGB(200, 200, 200));
+    pDC->SelectObject(&pT);
+    pDC->MoveTo(14, cy);
+    pDC->LineTo(r.Width() - 14, cy);
+    if (xMx > xMn)
+        pDC->FillSolidRect(CRect(xMn, cy - 4, xMx, cy + 4), COLOR_RANGE_SELECTION);
+
+    // 最小・最大つまみ
+    COLORREF penC = m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0);
+    CPen pB(PS_SOLID, 1, penC);
+    pDC->SelectObject(&pB);
+    pDC->FillSolidRect(CRect(xMn - 5, cy - 8, xMn + 5, cy + 8), COLOR_RANGE_SLIDER_THUMB);
+    pDC->SelectObject(GetStockObject(NULL_BRUSH));
+    pDC->Rectangle(CRect(xMn - 5, cy - 8, xMn + 5, cy + 8));
+    pDC->FillSolidRect(CRect(xMx - 5, cy - 8, xMx + 5, cy + 8), COLOR_RANGE_SLIDER_THUMB);
+    pDC->Rectangle(CRect(xMx - 5, cy - 8, xMx + 5, cy + 8));
+
+    // 現在位置（ハート）
+    DrawHeart(pDC, CRect(xP - 9, cy - 12, xP + 9, cy + 6), COLOR_SLIDER_THUMB);
+}
+
+int CCustomRangeSliderCtrl::ValueToPixel(int v) const
+{
+    CRect r;
+    GetClientRect(&r);
+    int w = r.Width() - 28;
+    if (w <= 0 || m_nMax <= m_nMin) return 14;
+    return 14 + (int)((long long)(max(m_nMin, min(m_nMax, v)) - m_nMin) * w / (m_nMax - m_nMin));
+}
+
+int CCustomRangeSliderCtrl::PixelToValue(int x) const
+{
+    CRect r;
+    GetClientRect(&r);
+    int w = r.Width() - 28;
+    if (w <= 0 || m_nMax <= m_nMin) return m_nMin;
+    return m_nMin + (int)((double)(max(14, min(r.Width() - 14, x)) - 14) / w * (m_nMax - m_nMin) + 0.5);
+}
+
+int CCustomRangeSliderCtrl::HitTest(CPoint p) const
+{
+    CRect r;
+    GetClientRect(&r);
+    int cy = r.Height() / 2;
+    int xM = ValueToPixel(m_nLogicalPos);
+    int xMx = ValueToPixel(m_nSelMax);
+    int xMn = ValueToPixel(m_nSelMin);
+
+    if (CRect(xM - 10, cy - 14, xM + 10, cy + 14).PtInRect(p)) return 3; // 現在位置
+    if (CRect(xMx - 7, cy - 10, xMx + 7, cy + 10).PtInRect(p)) return 2;  // 最大つまみ
+    if (CRect(xMn - 7, cy - 10, xMn + 7, cy + 10).PtInRect(p)) return 1;  // 最小つまみ
+    return 0;
+}
+void CCustomRangeSliderCtrl::OnLButtonDown(UINT f, CPoint p)
+{
+#if CCUSTOM_AERO_SUPPORT
+    CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+#endif
+    SetFocus();
+    m_nVisualPos = m_nLogicalPos;
+    m_nDragTarget = HitTest(p);
+    if (m_nDragTarget == 0)
+    {
+        m_nVisualPos = PixelToValue(p.x);
+        m_nDragTarget = 3;
+        CSliderCtrl::SetPos(m_nVisualPos);
+    }
+    m_bDragging = TRUE;
+    SetCapture();
+    RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+}
+void CCustomRangeSliderCtrl::OnLButtonUp(UINT f, CPoint p)
+{
+    if (m_bDragging)
+    {
+        m_bDragging = FALSE;
+        ReleaseCapture();
+        if (m_nDragTarget == 3)
+        {
+            m_nLogicalPos = m_nVisualPos;
+            CSliderCtrl::SetPos(m_nLogicalPos);
+            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, m_nLogicalPos), (LPARAM)m_hWnd);
+        }
+#if CCUSTOM_AERO_SUPPORT
+        CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+#endif
+        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
+    }
+}
+void CCustomRangeSliderCtrl::OnMouseMove(UINT f, CPoint p)
+{
+    if (m_bDragging)
+    {
+#if CCUSTOM_AERO_SUPPORT
+        CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+#endif
+        int v = PixelToValue(p.x);
+        if (m_nDragTarget == 3)
+        {
+            m_nVisualPos = max(m_nMin, min(m_nMax, v));
+            CSliderCtrl::SetPos(m_nVisualPos);
+            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, m_nVisualPos), (LPARAM)m_hWnd);
+        }
+        else if (m_nDragTarget == 1)
+            m_nSelMin = min(v, m_nSelMax);
+        else if (m_nDragTarget == 2)
+            m_nSelMax = max(v, m_nSelMin);
+        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+    }
+}
+
+// ============================================================================
+// カスタムリストコントロール
 // CCustomListCtrl
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomListCtrl, CListCtrlA)
@@ -1895,11 +3176,18 @@ BEGIN_MESSAGE_MAP(CCustomListCtrl, CListCtrlA)
     ON_WM_VSCROLL()
     ON_WM_HSCROLL()
     ON_WM_MOUSEWHEEL()
+    ON_WM_WINDOWPOSCHANGED()
+    ON_WM_TIMER()
     ON_WM_PAINT()
     ON_WM_ERASEBKGND()
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+    ON_MESSAGE(CCC_WM_POST_OPAQUE_PAINT, OnPostOpaquePaint)
 END_MESSAGE_MAP()
 
-CCustomListCtrl::CCustomListCtrl() : m_bAutoDelete(FALSE), m_nHotItem(-1)
+static const UINT_PTR kListScrollOpaqueTimerId = 4108;
+
+CCustomListCtrl::CCustomListCtrl()
+    : m_bAutoDelete(FALSE), m_nHotItem(-1), m_bAeroMode(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
 }
@@ -1909,13 +3197,11 @@ CCustomListCtrl::~CCustomListCtrl()
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
-// [FIX❺]
 void CCustomListCtrl::PostNcDestroy()
 {
     CListCtrlA::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
-
 void CCustomListCtrl::PreSubclassWindow()
 {
     CListCtrlA::PreSubclassWindow();
@@ -1925,7 +3211,6 @@ void CCustomListCtrl::PreSubclassWindow()
     SetTextColor(RGB(0, 0, 0));
     SetExtendedStyle(GetExtendedStyle() | LVS_EX_DOUBLEBUFFER);
 }
-
 HBRUSH CCustomListCtrl::CtlColor(CDC* pDC, UINT)
 {
     pDC->SetBkColor(COLOR_LIST_BG);
@@ -1933,28 +3218,108 @@ HBRUSH CCustomListCtrl::CtlColor(CDC* pDC, UINT)
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
-void CCustomListCtrl::OnMouseMove(UINT nFlags, CPoint point)
+void CCustomListCtrl::OnMouseMove(UINT f, CPoint p)
 {
-    LVHITTESTINFO hti; hti.pt = point;
-    UpdateHotItem(SubItemHitTest(&hti));
-    TRACKMOUSEEVENT tme = { sizeof(tme),TME_LEAVE,m_hWnd,0 };
-    TrackMouseEvent(&tme);
-    CListCtrl::OnMouseMove(nFlags, point);
+    LVHITTESTINFO h;
+    h.pt = p;
+    UpdateHotItem(SubItemHitTest(&h));
+
+    TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
+    TrackMouseEvent(&t);
+    CListCtrl::OnMouseMove(f, p);
 }
 
-void CCustomListCtrl::OnMouseLeave() { UpdateHotItem(-1); CListCtrl::OnMouseLeave(); }
-void CCustomListCtrl::OnVScroll(UINT n, UINT p, CScrollBar* s) { CListCtrl::OnVScroll(n, p, s); UpdateHotItemFromCursor(); RedrawVisibleItems(); }
-void CCustomListCtrl::OnHScroll(UINT n, UINT p, CScrollBar* s) { CListCtrl::OnHScroll(n, p, s); UpdateHotItemFromCursor(); RedrawVisibleItems(); }
-BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p) { BOOL r = CListCtrl::OnMouseWheel(n, z, p); UpdateHotItemFromCursor(); RedrawVisibleItems(); return r; }
-
-void CCustomListCtrl::UpdateHotItem(int nItem)
+void CCustomListCtrl::OnMouseLeave()
 {
-    if (m_nHotItem == nItem) return;
-    int nOldHot = m_nHotItem;
-    m_nHotItem = nItem;
-    if (nOldHot >= 0) RedrawItems(nOldHot, nOldHot);
+    UpdateHotItem(-1);
+    CListCtrl::OnMouseLeave();
+}
+void CCustomListCtrl::ScheduleOpaqueRepaint()
+{
+    if (GetSafeHwnd())
+        PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+}
+
+LRESULT CCustomListCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    {
+        CClientDC dc(this);
+        PaintOpaqueClient(dc);
+    }
+#endif
+    return 0;
+}
+
+void CCustomListCtrl::OnVScroll(UINT n, UINT p, CScrollBar* s)
+{
+    CListCtrl::OnVScroll(n, p, s);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+        ScheduleOpaqueRepaint();
+#endif
+    UpdateHotItemFromCursor();
+    RedrawVisibleItems();
+}
+void CCustomListCtrl::OnHScroll(UINT n, UINT p, CScrollBar* s)
+{
+    CListCtrl::OnHScroll(n, p, s);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+        ScheduleOpaqueRepaint();
+#endif
+    UpdateHotItemFromCursor();
+    RedrawVisibleItems();
+}
+BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
+{
+    BOOL r = CListCtrl::OnMouseWheel(n, z, p);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    {
+        ScheduleOpaqueRepaint();
+        SetTimer(kListScrollOpaqueTimerId, 33, NULL);
+    }
+#endif
+    UpdateHotItemFromCursor();
+    RedrawVisibleItems();
+    return r;
+}
+
+void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
+{
+    if (nIDEvent == kListScrollOpaqueTimerId)
+    {
+        KillTimer(kListScrollOpaqueTimerId);
+#if CCUSTOM_AERO_SUPPORT
+        if (CCC_IsAeroEnabled() && CCC_IsWin11())
+        {
+            CClientDC dc(this);
+            PaintOpaqueClient(dc);
+        }
+#endif
+        return;
+    }
+    CListCtrl::OnTimer(nIDEvent);
+}
+
+void CCustomListCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
+{
+    CListCtrl::OnWindowPosChanged(lpwndpos);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+        ScheduleOpaqueRepaint();
+#endif
+}
+
+void CCustomListCtrl::UpdateHotItem(int n)
+{
+    if (m_nHotItem == n) return;
+    int o = m_nHotItem;
+    m_nHotItem = n;
+    if (o >= 0) RedrawItems(o, o);
     if (m_nHotItem >= 0) RedrawItems(m_nHotItem, m_nHotItem);
-    // UpdateWindow による同期全面描画は重い。LVS_EX_DOUBLEBUFFER と RedrawItems で十分。
 }
 
 void CCustomListCtrl::UpdateHotItemFromCursor()
@@ -1963,151 +3328,166 @@ void CCustomListCtrl::UpdateHotItemFromCursor()
     CPoint pt;
     if (!GetCursorPos(&pt)) return;
     ScreenToClient(&pt);
-    LVHITTESTINFO hti; hti.pt = pt;
-    UpdateHotItem(SubItemHitTest(&hti));
+    LVHITTESTINFO h;
+    h.pt = pt;
+    UpdateHotItem(SubItemHitTest(&h));
 }
 
 void CCustomListCtrl::RedrawVisibleItems()
 {
-    int nTop = GetTopIndex();
-    int nBottom = nTop + GetCountPerPage();
-    int nCount = GetItemCount();
-    if (nBottom >= nCount) nBottom = nCount - 1;
-    if (nTop >= 0 && nBottom >= nTop) RedrawItems(nTop, nBottom);
+    int t = GetTopIndex();
+    int b = t + GetCountPerPage();
+    int c = GetItemCount();
+    if (b >= c) b = c - 1;
+    if (t >= 0 && b >= t) RedrawItems(t, b);
 }
 
-BOOL CCustomListCtrl::OnEraseBkgnd(CDC*) { return FALSE; }
-void CCustomListCtrl::OnPaint() { Default(); }
-
-static void DrawTransparentIcon(CDC* pDC, CImageList* pImgList, int nImageIndex, CRect rcIcon, COLORREF clrMask)
+BOOL CCustomListCtrl::OnEraseBkgnd(CDC*)
 {
-    if (!pImgList || nImageIndex < 0) return;
-    IMAGEINFO ii;
-    if (!pImgList->GetImageInfo(nImageIndex, &ii)) return;
-    int w = CRect(ii.rcImage).Width();
-    int h = CRect(ii.rcImage).Height();
+    return FALSE;
+}
 
-    CDC memDC;
-    memDC.CreateCompatibleDC(pDC);
-    CBitmap bmp;
-    bmp.CreateCompatibleBitmap(pDC, w, h);
-    CBitmap* pOldBmp = memDC.SelectObject(&bmp);
-    memDC.FillSolidRect(0, 0, w, h, clrMask);
-    pImgList->Draw(&memDC, nImageIndex, CPoint(0, 0), ILD_NORMAL);
+void CCustomListCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
+{
+    if (!hdcBuf || !m_hWnd) return;
+    CRect r;
+    GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0) return;
+    ::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
+    ::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+}
 
-    int x = rcIcon.left + (rcIcon.Width() - w) / 2;
-    int y = rcIcon.top + (rcIcon.Height() - h) / 2;
-    ::TransparentBlt(pDC->GetSafeHdc(), x, y, w, h, memDC.GetSafeHdc(), 0, 0, w, h, clrMask);
-    memDC.SelectObject(pOldBmp);
+void CCustomListCtrl::PaintOpaqueClient(CDC& dc)
+{
+    CRect r;
+    GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0) return;
+
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    params.dwFlags = BPPF_ERASE;
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (!hdcBuf || !hBP)
+    {
+        Default();
+        return;
+    }
+    ::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
+    ::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+    ::BufferedPaintMakeOpaque(hBP, &r);
+    ::EndBufferedPaint(hBP, TRUE);
+}
+
+void CCustomListCtrl::OnPaint()
+{
+    Default();
+}
+
+LRESULT CCustomListCtrl::OnPrintClient(WPARAM wParam, LPARAM lParam)
+{
+    return DefWindowProc(WM_PRINTCLIENT, (WPARAM)wParam, (LPARAM)lParam);
 }
 
 void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 {
-    NMLVCUSTOMDRAW* pLVCD = reinterpret_cast<NMLVCUSTOMDRAW*>(pNMHDR);
+    NMLVCUSTOMDRAW* p = reinterpret_cast<NMLVCUSTOMDRAW*>(pNMHDR);
     *pResult = CDRF_DODEFAULT;
-
-    switch (pLVCD->nmcd.dwDrawStage)
+    switch (p->nmcd.dwDrawStage)
     {
     case CDDS_PREPAINT:
         *pResult = CDRF_NOTIFYITEMDRAW;
         break;
-
     case CDDS_ITEMPREPAINT:
         *pResult = CDRF_NOTIFYSUBITEMDRAW;
         break;
-
     case CDDS_ITEMPREPAINT | CDDS_SUBITEM:
     {
-        CDC* pDC = CDC::FromHandle(pLVCD->nmcd.hdc);
-        int nItem = (int)pLVCD->nmcd.dwItemSpec;
-        int nSubItem = pLVCD->iSubItem;
+        CDC* pDC = CDC::FromHandle(p->nmcd.hdc);
+        int ni = (int)p->nmcd.dwItemSpec;
+        int ns = p->iSubItem;
+        CRect r;
+        GetSubItemRect(ni, ns, LVIR_BOUNDS, r);
 
-        CRect rect;
-        GetSubItemRect(nItem, nSubItem, LVIR_BOUNDS, rect);
-        if (nSubItem == 0)
+        if (ns == 0)
         {
-            const int cx0 = GetColumnWidth(0);
-            if (cx0 > 0)
-                rect.right = (std::min)((int)rect.right, (int)rect.left + cx0);
+            int cx0 = GetColumnWidth(0);
+            if (cx0 > 0) r.right = (std::min)((int)r.right, (int)r.left + cx0);
         }
-        int nLastCol = GetHeaderCtrl()->GetItemCount() - 1;
-        CRect rcClient;
-        GetClientRect(&rcClient);
-        if (nSubItem >= nLastCol - 1 && rect.right < rcClient.right)
-            rect.right = (int)rcClient.right;
+        int nLC = GetHeaderCtrl()->GetItemCount() - 1;
+        CRect rcC;
+        GetClientRect(&rcC);
+        if (ns >= nLC - 1 && r.right < rcC.right) r.right = (int)rcC.right;
 
-        BOOL bSel = (GetItemState(nItem, LVIS_SELECTED) & LVIS_SELECTED);
-        BOOL bHot = (nItem == m_nHotItem);
+        BOOL bS = (GetItemState(ni, LVIS_SELECTED) & LVIS_SELECTED);
+        BOOL bH = (ni == m_nHotItem);
+        COLORREF bg = bS ? COLOR_SEL_BG : (ni % 2 == 0 ? COLOR_LIST_BG : RGB(183, 221, 238));
+        if (bH && !bS) bg = RGB(220, 235, 250);
 
-        COLORREF clrBg;
-        if (bSel)          clrBg = COLOR_SEL_BG;
-        else if (nItem % 2 == 0)    clrBg = COLOR_LIST_BG;
-        else                    clrBg = RGB(183, 221, 238);
-        if (bHot && !bSel)      clrBg = RGB(220, 235, 250);
-
-        pDC->FillSolidRect(&rect, clrBg);  // [FIX❹] CBrush廃止
-
-        if (nSubItem == 0)
+        if (m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd))
         {
-            if (bSel) { CRect rcH(rect.left + 2, rect.top + 4, rect.left + 16, rect.top + 18); DrawHeart(pDC, rcH, COLOR_HEART); }
+            pDC->FillSolidRect(&r, RGB(0, 0, 0));
+            FillRectAlpha(pDC, r, bg, bS ? 180 : bH ? 140 : AERO_ALPHA_SEMI);
+        }
+        else
+            pDC->FillSolidRect(&r, bg);
 
-            CRect rcIcon;
-            if (GetItemRect(nItem, &rcIcon, LVIR_ICON))
+        if (ns == 0)
+        {
+            if (bS) DrawHeart(pDC, CRect(r.left + 2, r.top + 4, r.left + 16, r.top + 18), COLOR_HEART);
+            CRect ri;
+            if (GetItemRect(ni, &ri, LVIR_ICON))
             {
                 LVITEM lvi = { 0 };
                 lvi.mask = LVIF_IMAGE;
-                lvi.iItem = nItem;
+                lvi.iItem = ni;
                 GetItem(&lvi);
-                CImageList* pImgList = GetImageList(LVSIL_SMALL);
-                if (pImgList && lvi.iImage >= 0)
-                    DrawTransparentIcon(pDC, pImgList, lvi.iImage, rcIcon, RGB(255, 255, 255));
+                CImageList* pIL = GetImageList(LVSIL_SMALL);
+                if (pIL && lvi.iImage >= 0)
+                    DrawTransparentIcon(pDC, pIL, lvi.iImage, ri, RGB(255, 255, 255));
             }
-
-            if (bHot && !bSel) DrawStar(pDC, rect.left + 10, rect.top + 10, 2, RGB(255, 215, 0));
+            if (bH && !bS) DrawStar(pDC, r.left + 10, r.top + 10, 2, RGB(255, 215, 0));
         }
 
-        CString strText = GetItemText(nItem, nSubItem);
-        pDC->SetTextColor(RGB(0, 0, 0));
-        pDC->SetBkColor(clrBg);
-        pDC->SetBkMode(OPAQUE);
+        CString st = GetItemText(ni, ns);
+        pDC->SetTextColor(m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0));
+        pDC->SetBkMode(TRANSPARENT);
 
-        CRect rcText = rect;
-        if (nSubItem == 0)
+        CRect rt = r;
+        if (ns == 0)
         {
-            int nTextLeft = rect.left + 36;
-            CRect rcIconBounds;
-            if (GetItemRect(nItem, &rcIconBounds, LVIR_ICON))
+            int tl = r.left + 36;
+            CRect ri;
+            if (GetItemRect(ni, &ri, LVIR_ICON))
             {
-                LVITEM lviProbe = { 0 };
-                lviProbe.mask = LVIF_IMAGE;
-                lviProbe.iItem = nItem;
-                GetItem(&lviProbe);
-                CImageList* pImgListProbe = GetImageList(LVSIL_SMALL);
-                if (pImgListProbe && lviProbe.iImage >= 0 && rcIconBounds.Width() > 0)
-                    nTextLeft = (std::max)(nTextLeft, (int)rcIconBounds.right + 4);
+                LVITEM lvi = { 0 };
+                lvi.mask = LVIF_IMAGE;
+                lvi.iItem = ni;
+                GetItem(&lvi);
+                CImageList* pIL = GetImageList(LVSIL_SMALL);
+                if (pIL && lvi.iImage >= 0 && ri.Width() > 0)
+                    tl = (std::max)(tl, (int)ri.right + 4);
             }
-            nTextLeft = (std::min)(nTextLeft, (int)rect.right - 4);
-            rcText.left = (std::max)(nTextLeft, (int)rect.left + 4);
+            tl = (std::min)(tl, (int)r.right - 4);
+            rt.left = (std::max)(tl, (int)r.left + 4);
         }
         else
-            rcText.left += 6;
-        rcText.DeflateRect(2, 0);
+            rt.left += 6;
+        rt.DeflateRect(2, 0);
 
-        CFont* pOldFont = pDC->SelectObject(GetFont());
-        DrawListSubitemCellText(pDC, strText, rcText);
-        pDC->SelectObject(pOldFont);
+        CFont* po = pDC->SelectObject(GetFont());
+        DrawListSubitemCellText(pDC, st, rt);
+        pDC->SelectObject(po);
 
-        if (nSubItem == nLastCol)
-            DrawLaceLine(pDC, rect.left + 10, rect.bottom - 1, rect.right - 10, rect.bottom - 1, RGB(200, 180, 220));
-
+        if (ns == nLC)
+            DrawLaceLine(pDC, r.left + 10, r.bottom - 1, r.right - 10, r.bottom - 1, RGB(200, 180, 220));
         if (GetExtendedStyle() & LVS_EX_GRIDLINES)
         {
-            CPen pen(PS_SOLID, 1, RGB(220, 220, 230));
-            CPen* pOldP = pDC->SelectObject(&pen);
-            pDC->MoveTo(rect.left, rect.bottom - 1); pDC->LineTo(rect.right, rect.bottom - 1);
-            pDC->SelectObject(pOldP);
+            CPen pp(PS_SOLID, 1, RGB(220, 220, 230));
+            CPen* po2 = pDC->SelectObject(&pp);
+            pDC->MoveTo(r.left, r.bottom - 1);
+            pDC->LineTo(r.right, r.bottom - 1);
+            pDC->SelectObject(po2);
         }
-
         *pResult = CDRF_SKIPDEFAULT;
         break;
     }
@@ -2115,7 +3495,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 }
 
 // ============================================================================
-// CCustomStandardButton
+// カスタム標準ボタンコントロール
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomStandardButton, CButton)
 
@@ -2123,6 +3503,7 @@ BEGIN_MESSAGE_MAP(CCustomStandardButton, CButton)
     ON_WM_CTLCOLOR_REFLECT()
     ON_WM_PAINT()
     ON_WM_ERASEBKGND()
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_MOUSEMOVE()
     ON_MESSAGE(WM_MOUSELEAVE, OnMouseLeave)
     ON_WM_SETFOCUS()
@@ -2131,11 +3512,10 @@ BEGIN_MESSAGE_MAP(CCustomStandardButton, CButton)
 END_MESSAGE_MAP()
 
 CCustomStandardButton::CCustomStandardButton()
-    : m_bAutoDelete(FALSE), m_bMouseOver(FALSE)
-    , m_clrGradStart(RGB(255, 255, 255)), m_clrGradEnd(RGB(255, 255, 255))
-    , m_nGradDirection(0), m_bGradEnable(FALSE)
-    , m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135)
-    , m_nShadowDistance(2), m_nShadowBlur(3), m_bShadowEnable(FALSE)
+    : m_bAutoDelete(FALSE), m_bMouseOver(FALSE), m_clrGradStart(RGB(255, 255, 255)),
+    m_clrGradEnd(RGB(255, 255, 255)), m_nGradDirection(0), m_bGradEnable(FALSE),
+    m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135), m_nShadowDistance(2),
+    m_nShadowBlur(3), m_bShadowEnable(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_BUTTON_BG);
 }
@@ -2145,7 +3525,6 @@ CCustomStandardButton::~CCustomStandardButton()
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
-// [FIX❺]
 void CCustomStandardButton::PostNcDestroy()
 {
     CButton::PostNcDestroy();
@@ -2154,654 +3533,220 @@ void CCustomStandardButton::PostNcDestroy()
 
 void CCustomStandardButton::SetGradation(COLORREF s, COLORREF e, int d, BOOL en)
 {
-    m_clrGradStart = s; m_clrGradEnd = e;
-    m_nGradDirection = d % 360; if (m_nGradDirection < 0)m_nGradDirection += 360;
+    m_clrGradStart = s;
+    m_clrGradEnd = e;
+    m_nGradDirection = d % 360;
+    if (m_nGradDirection < 0) m_nGradDirection += 360;
     m_bGradEnable = en;
-    if (GetSafeHwnd())Invalidate(FALSE);
+    if (GetSafeHwnd()) Invalidate(FALSE);
 }
+
 void CCustomStandardButton::GetGradation(COLORREF* ps, COLORREF* pe, int* pd, BOOL* pbe) const
 {
-    if (ps)*ps = m_clrGradStart; if (pe)*pe = m_clrGradEnd; if (pd)*pd = m_nGradDirection; if (pbe)*pbe = m_bGradEnable;
+    if (ps) *ps = m_clrGradStart;
+    if (pe) *pe = m_clrGradEnd;
+    if (pd) *pd = m_nGradDirection;
+    if (pbe) *pbe = m_bGradEnable;
 }
 
 void CCustomStandardButton::SetDropShadow(COLORREF c, int d, int dist, int blur, BOOL en)
 {
-    m_clrShadow = c; m_nShadowDirection = d % 360; if (m_nShadowDirection < 0)m_nShadowDirection += 360;
-    m_nShadowDistance = max(0, dist); m_nShadowBlur = max(0, min(20, blur)); m_bShadowEnable = en;
-    if (GetSafeHwnd())Invalidate(FALSE);
+    m_clrShadow = c;
+    m_nShadowDirection = d % 360;
+    if (m_nShadowDirection < 0) m_nShadowDirection += 360;
+    m_nShadowDistance = max(0, dist);
+    m_nShadowBlur = max(0, min(20, blur));
+    m_bShadowEnable = en;
+    if (GetSafeHwnd()) Invalidate(FALSE);
 }
+
 void CCustomStandardButton::GetDropShadow(COLORREF* pc, int* pd, int* pdist, int* pblur, BOOL* pbe) const
 {
-    if (pc)*pc = m_clrShadow; if (pd)*pd = m_nShadowDirection; if (pdist)*pdist = m_nShadowDistance; if (pblur)*pblur = m_nShadowBlur; if (pbe)*pbe = m_bShadowEnable;
+    if (pc) *pc = m_clrShadow;
+    if (pd) *pd = m_nShadowDirection;
+    if (pdist) *pdist = m_nShadowDistance;
+    if (pblur) *pblur = m_nShadowBlur;
+    if (pbe) *pbe = m_bShadowEnable;
 }
 
 void CCustomStandardButton::PreSubclassWindow()
 {
     CButton::PreSubclassWindow();
-    ModifyStyle(0, BS_OWNERDRAW);
 }
 
-HBRUSH CCustomStandardButton::CtlColor(CDC*, UINT) { return (HBRUSH)m_brBackground.GetSafeHandle(); }
+HBRUSH CCustomStandardButton::CtlColor(CDC*, UINT)
+{
+    return (HBRUSH)m_brBackground.GetSafeHandle();
+}
+
+void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
+{
+    CDC mDC;
+    CBitmap mB;
+    mDC.CreateCompatibleDC(&dc);
+    mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
+    CBitmap* ob = mDC.SelectObject(&mB);
+
+    BOOL bP = (GetState() & BST_PUSHED) != 0;
+    BOOL bF = (GetFocus() == this);
+    BOOL bD = !IsWindowEnabled();
+    if (((GetStyle() & BS_TYPEMASK) == BS_CHECKBOX || (GetStyle() & BS_TYPEMASK) == BS_AUTOCHECKBOX)
+        && (GetStyle() & BS_PUSHLIKE))
+    {
+        if (GetCheck() == BST_CHECKED) bP = TRUE;
+    }
+
+    COLORREF bg = bD ? RGB(200, 200, 200)
+        : (bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
+    if (m_bGradEnable && !bD)
+        DrawGradientBackground(&mDC, r, m_clrGradStart, m_clrGradEnd, m_nGradDirection);
+    else
+        mDC.FillSolidRect(&r, bg);
+
+    if (!bD)
+    {
+        DrawDecorations(&mDC, r, 0, bP);
+        if (m_bMouseOver && !bP)
+        {
+            DrawFlower(&mDC, r.Width() / 2 - 15, r.top + 10, 6, RGB(255, 200, 220));
+            DrawFlower(&mDC, r.Width() / 2 + 15, r.top + 10, 6, RGB(255, 200, 220));
+            DrawFlower(&mDC, r.Width() / 2, r.bottom - 10, 6, RGB(255, 200, 220));
+        }
+        if (bP)
+        {
+            DrawStar(&mDC, r.Width() / 2, r.top + 8, 3, RGB(255, 215, 0));
+            DrawStar(&mDC, r.left + 15, r.Height() / 2, 2, RGB(255, 240, 150));
+            DrawStar(&mDC, r.right - 15, r.Height() / 2, 2, RGB(255, 240, 150));
+            DrawStar(&mDC, r.Width() / 2, r.bottom - 8, 2, RGB(255, 240, 150));
+        }
+    }
+
+    CPen pL(PS_SOLID, 2, RGB(255, 255, 255));
+    CPen pD(PS_SOLID, 2, RGB(128, 128, 128));
+    CPen* op;
+    if (bP)
+    {
+        op = mDC.SelectObject(&pD);
+        mDC.MoveTo(r.left, r.bottom - 1);
+        mDC.LineTo(r.left, r.top);
+        mDC.LineTo(r.right - 1, r.top);
+        mDC.SelectObject(&pL);
+        mDC.LineTo(r.right - 1, r.bottom - 1);
+        mDC.LineTo(r.left, r.bottom - 1);
+        CRect ri = r;
+        ri.DeflateRect(2, 2);
+        mDC.SelectObject(&pD);
+        mDC.MoveTo(ri.left, ri.bottom - 1);
+        mDC.LineTo(ri.left, ri.top);
+        mDC.LineTo(ri.right - 1, ri.top);
+    }
+    else
+    {
+        op = mDC.SelectObject(&pL);
+        mDC.MoveTo(r.left, r.bottom - 1);
+        mDC.LineTo(r.left, r.top);
+        mDC.LineTo(r.right - 1, r.top);
+        mDC.SelectObject(&pD);
+        mDC.LineTo(r.right - 1, r.bottom - 1);
+        mDC.LineTo(r.left, r.bottom - 1);
+        CRect ri = r;
+        ri.DeflateRect(2, 2);
+        mDC.SelectObject(&pL);
+        mDC.MoveTo(ri.left, ri.bottom - 1);
+        mDC.LineTo(ri.left, ri.top);
+        mDC.LineTo(ri.right - 1, ri.top);
+    }
+    mDC.SelectObject(op);
+
+    if (bF && !bD)
+    {
+        CRect rf = r;
+        rf.DeflateRect(4, 4);
+        mDC.DrawFocusRect(&rf);
+    }
+
+    CString s;
+    GetWindowText(s);
+    CFont* pF = GetFont();
+    CFont* pOF = mDC.SelectObject(pF ? pF : (CFont*)mDC.SelectStockObject(DEFAULT_GUI_FONT));
+    DrawSmartText(&mDC, r, s, bD, bP);
+    mDC.SelectObject(pOF);
+
+    dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+    mDC.SelectObject(ob);
+    mB.DeleteObject();
+    mDC.DeleteDC();
+}
 
 void CCustomStandardButton::OnPaint()
 {
-    CPaintDC dcPaint(this);
-    CRect rect;
-    GetClientRect(&rect);
-
-    CDC memDC;
-    CBitmap memBmp;
-    memDC.CreateCompatibleDC(&dcPaint);
-    memBmp.CreateCompatibleBitmap(&dcPaint, rect.Width(), rect.Height());
-    CBitmap* pOldBmp = memDC.SelectObject(&memBmp);
-
-    BOOL bPushed = (GetState() & BST_PUSHED) != 0;
-    BOOL bFocused = (GetFocus() == this);
-    BOOL bDisabled = !IsWindowEnabled();
-
-    if (((GetStyle() & BS_TYPEMASK) == BS_CHECKBOX || (GetStyle() & BS_TYPEMASK) == BS_AUTOCHECKBOX) && (GetStyle() & BS_PUSHLIKE))
-        if (GetCheck() == BST_CHECKED) bPushed = TRUE;
-
-    COLORREF clrBg = bDisabled ? RGB(200, 200, 200) :
-        (bPushed ? COLOR_BUTTON_PUSHED :
-            (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
-
-    if (m_bGradEnable && !bDisabled)
-        DrawGradientBackground(&memDC, rect, m_clrGradStart, m_clrGradEnd, m_nGradDirection);
-    else
-        memDC.FillSolidRect(&rect, clrBg);
-
-    if (!bDisabled)
-    {
-        DrawDecorations(&memDC, rect, 0, bPushed);
-        if (m_bMouseOver && !bPushed)
-        {
-            DrawFlower(&memDC, rect.Width() / 2 - 15, rect.top + 10, 6, RGB(255, 200, 220));
-            DrawFlower(&memDC, rect.Width() / 2 + 15, rect.top + 10, 6, RGB(255, 200, 220));
-            DrawFlower(&memDC, rect.Width() / 2, rect.bottom - 10, 6, RGB(255, 200, 220));
-        }
-        if (bPushed)
-        {
-            DrawStar(&memDC, rect.Width() / 2, rect.top + 8, 3, RGB(255, 215, 0));
-            DrawStar(&memDC, rect.left + 15, rect.Height() / 2, 2, RGB(255, 240, 150));
-            DrawStar(&memDC, rect.right - 15, rect.Height() / 2, 2, RGB(255, 240, 150));
-            DrawStar(&memDC, rect.Width() / 2, rect.bottom - 8, 2, RGB(255, 240, 150));
-        }
-    }
-
-    CPen penLight(PS_SOLID, 2, RGB(255, 255, 255));
-    CPen penDark(PS_SOLID, 2, RGB(128, 128, 128));
-    CPen* pOldPen;
-
-    if (bPushed)
-    {
-        pOldPen = memDC.SelectObject(&penDark);
-        memDC.MoveTo(rect.left, rect.bottom - 1); memDC.LineTo(rect.left, rect.top); memDC.LineTo(rect.right - 1, rect.top);
-        memDC.SelectObject(&penLight);
-        memDC.LineTo(rect.right - 1, rect.bottom - 1); memDC.LineTo(rect.left, rect.bottom - 1);
-        CRect rcIn = rect; rcIn.DeflateRect(2, 2);
-        memDC.SelectObject(&penDark);
-        memDC.MoveTo(rcIn.left, rcIn.bottom - 1); memDC.LineTo(rcIn.left, rcIn.top); memDC.LineTo(rcIn.right - 1, rcIn.top);
-    }
-    else
-    {
-        pOldPen = memDC.SelectObject(&penLight);
-        memDC.MoveTo(rect.left, rect.bottom - 1); memDC.LineTo(rect.left, rect.top); memDC.LineTo(rect.right - 1, rect.top);
-        memDC.SelectObject(&penDark);
-        memDC.LineTo(rect.right - 1, rect.bottom - 1); memDC.LineTo(rect.left, rect.bottom - 1);
-        CRect rcIn = rect; rcIn.DeflateRect(2, 2);
-        memDC.SelectObject(&penLight);
-        memDC.MoveTo(rcIn.left, rcIn.bottom - 1); memDC.LineTo(rcIn.left, rcIn.top); memDC.LineTo(rcIn.right - 1, rcIn.top);
-    }
-    memDC.SelectObject(pOldPen);
-
-    if (bFocused && !bDisabled)
-    {
-        CRect rcF = rect; rcF.DeflateRect(4, 4);
-        memDC.DrawFocusRect(&rcF);
-    }
-
-    CString str;
-    GetWindowText(str);
-    CFont* pFont = GetFont();
-    CFont* pOldF = memDC.SelectObject(pFont ? pFont : (CFont*)memDC.SelectStockObject(DEFAULT_GUI_FONT));
-    DrawSmartText(&memDC, rect, str, bDisabled, bPushed);
-    memDC.SelectObject(pOldF);
-
-    dcPaint.BitBlt(0, 0, rect.Width(), rect.Height(), &memDC, 0, 0, SRCCOPY);
-    memDC.SelectObject(pOldBmp);
-    memBmp.DeleteObject();
-    memDC.DeleteDC();
-}
-
-BOOL CCustomStandardButton::OnEraseBkgnd(CDC*) { return TRUE; }
-
-void CCustomStandardButton::OnMouseMove(UINT nF, CPoint p)
-{
-    if (!m_bMouseOver)
-    {
-        TRACKMOUSEEVENT tme = { sizeof(tme),TME_LEAVE,m_hWnd,0 };
-        TrackMouseEvent(&tme);
-        m_bMouseOver = TRUE;
-        Invalidate(FALSE);
-    }
-    CButton::OnMouseMove(nF, p);
-}
-
-LRESULT CCustomStandardButton::OnMouseLeave(WPARAM, LPARAM) { m_bMouseOver = FALSE; Invalidate(FALSE); return 0; }
-void CCustomStandardButton::OnSetFocus(CWnd* p) { CButton::OnSetFocus(p);  Invalidate(FALSE); }
-void CCustomStandardButton::OnKillFocus(CWnd* p) { CButton::OnKillFocus(p); Invalidate(FALSE); }
-void CCustomStandardButton::OnEnable(BOOL b) { CButton::OnEnable(b);    Invalidate(FALSE); }
-
-// ============================================================================
-// CCustomSliderCtrl
-// ============================================================================
-IMPLEMENT_DYNAMIC(CCustomSliderCtrl, CSliderCtrl)
-
-BEGIN_MESSAGE_MAP(CCustomSliderCtrl, CSliderCtrl)
-    ON_WM_PAINT()
-    ON_WM_ERASEBKGND()
-    ON_MESSAGE(WM_MOUSEMOVE, OnMouseMoveMsg)
-    ON_MESSAGE(WM_LBUTTONDOWN, OnLButtonDownMsg)
-    ON_MESSAGE(WM_LBUTTONUP, OnLButtonUpMsg)
-END_MESSAGE_MAP()
-
-CCustomSliderCtrl::CCustomSliderCtrl() : m_bAutoDelete(FALSE), m_nMode(0) {}
-CCustomSliderCtrl::~CCustomSliderCtrl() {}
-
-// [FIX❺]
-void CCustomSliderCtrl::PostNcDestroy()
-{
-    CSliderCtrl::PostNcDestroy();
-    if (m_bAutoDelete) delete this;
-}
-
-void CCustomSliderCtrl::SetMode(int m) { if (m_nMode != m) { m_nMode = m; if (GetSafeHwnd())Invalidate(FALSE); } }
-void CCustomSliderCtrl::SetPos(int p, BOOL b) { CSliderCtrl::SetPos(p); if (b && GetSafeHwnd()) { Invalidate(FALSE); UpdateWindow(); } }
-void CCustomSliderCtrl::PreSubclassWindow() { CSliderCtrl::PreSubclassWindow(); }
-
-void CCustomSliderCtrl::OnPaint()
-{
-    CPaintDC dcPaint(this);
-    CRect r; GetClientRect(&r);
-
-    CDC memDC; CBitmap memBmp;
-    memDC.CreateCompatibleDC(&dcPaint);
-    memBmp.CreateCompatibleBitmap(&dcPaint, r.Width(), r.Height());
-    CBitmap* pOldB = memDC.SelectObject(&memBmp);
-    memDC.FillSolidRect(&r, COLOR_DIALOG_BG);
-    DrawSlider(&memDC);
-    dcPaint.BitBlt(0, 0, r.Width(), r.Height(), &memDC, 0, 0, SRCCOPY);
-    memDC.SelectObject(pOldB);
-    memBmp.DeleteObject(); memDC.DeleteDC();
-}
-
-BOOL CCustomSliderCtrl::OnEraseBkgnd(CDC*) { return TRUE; }
-
-LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM w, LPARAM l)
-{
-    if (m_nMode == 1 || m_nMode == 2)
-    {
-        int nMin, nMax; GetRange(nMin, nMax);
-        int nCenter = (nMin + nMax) / 2;
-        int nOldPos = CSliderCtrl::GetPos();
-        LRESULT result = Default();
-        int nNewPos = CSliderCtrl::GetPos();
-        if (nOldPos != nCenter && abs(nNewPos - nCenter) <= 2)
-        {
-            CSliderCtrl::SetPos(nCenter);
-            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, nCenter), (LPARAM)m_hWnd);
-        }
-        Invalidate(FALSE);
-        return result;
-    }
-    LRESULT result = Default(); Invalidate(FALSE); return result;
-}
-
-LRESULT CCustomSliderCtrl::OnLButtonDownMsg(WPARAM w, LPARAM l)
-{
-    LRESULT r = Default();
-    if (m_nMode == 1 || m_nMode == 2)
-    {
-        int nMin, nMax; GetRange(nMin, nMax);
-        int nCenter = (nMin + nMax) / 2;
-        if (abs(CSliderCtrl::GetPos() - nCenter) <= 2)
-        {
-            CSliderCtrl::SetPos(nCenter);
-            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, nCenter), (LPARAM)m_hWnd);
-        }
-    }
-    Invalidate(FALSE); return r;
-}
-
-LRESULT CCustomSliderCtrl::OnLButtonUpMsg(WPARAM w, LPARAM l)
-{
-    LRESULT r = Default();
-    if (m_nMode == 1 || m_nMode == 2)
-    {
-        int nMin, nMax; GetRange(nMin, nMax);
-        int nCenter = (nMin + nMax) / 2;
-        if (abs(CSliderCtrl::GetPos() - nCenter) <= 2)
-        {
-            CSliderCtrl::SetPos(nCenter);
-            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBPOSITION, nCenter), (LPARAM)m_hWnd);
-        }
-    }
-    Invalidate(FALSE); return r;
-}
-
-void CCustomSliderCtrl::DrawSlider(CDC* pDC)
-{
-    CRect r; GetClientRect(&r);
-    int nMin, nMax; GetRange(nMin, nMax);
-    int nPos = GetPos();
-    if (nMax <= nMin) return;
-
-    if (m_nMode == 0) DrawMode0(pDC, r, nMin, nMax, nPos);
-    else if (m_nMode == 1) DrawMode1(pDC, r, nMin, nMax, nPos);
-    else if (m_nMode == 2) DrawMode2(pDC, r, nMin, nMax, nPos);
-    else                 DrawMode1(pDC, r, nMin, nMax, nPos);
-}
-
-void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
-{
-    int nRange = nMax - nMin;
-    BOOL bVert = (GetStyle() & TBS_VERT);
-
-    if (!bVert)
-    {
-        int nMarginX = 12, nTrackL = rect.left + nMarginX, nTrackR = rect.right - nMarginX;
-        int nTrackW = nTrackR - nTrackL; if (nTrackW <= 0)return;
-        int nThumbX = nTrackL + (int)((double)(nPos - nMin) * nTrackW / nRange);
-        int nCenterY = rect.Height() / 2, nBottomY = rect.bottom - 8;
-
-        CPoint pts[4] = { {nTrackL,nBottomY},{nTrackL,nBottomY - 2},{nTrackR,rect.top + 4},{nTrackR,nBottomY} };
-        CBrush brBack(COLOR_RANGE_SELECTION);
-        pDC->SelectObject(&brBack);
-        CPen penVine(PS_SOLID, 1, COLOR_VINE_DECO);
-        pDC->SelectObject(&penVine);
-        pDC->Polygon(pts, 4);
-
-        if (nThumbX > nTrackL)
-        {
-            CRgn rgnP, rgnL;
-            rgnP.CreatePolygonRgn(pts, 4, WINDING);
-            rgnL.CreateRectRgn(rect.left, rect.top, nThumbX, rect.bottom);
-            rgnP.CombineRgn(&rgnP, &rgnL, RGN_AND);
-            CBrush brA(RGB(180, 200, 255));
-            pDC->FillRgn(&rgnP, &brA);
-        }
-
-        CRect rcNote(nThumbX - 10, nCenterY - 12, nThumbX + 10, nCenterY + 12);
-        DrawMusicNote(pDC, rcNote, RGB(138, 43, 226));
-        DrawStar(pDC, nThumbX - 12, nCenterY - 14, 2, RGB(255, 215, 0));
-        DrawStar(pDC, nThumbX + 12, nCenterY - 14, 2, RGB(255, 215, 0));
-    }
-    else
-    {
-        int nMarginY = 12, nTrackT = rect.top + nMarginY, nTrackB = rect.bottom - nMarginY;
-        int nTrackH = nTrackB - nTrackT; if (nTrackH <= 0)return;
-        int nThumbY = nTrackT + (int)((double)(nPos - nMin) * nTrackH / nRange);
-        int nCenterX = rect.Width() / 2;
-
-        CPoint pts[4] = { {nCenterX - 8,nTrackB},{nCenterX - 2,nTrackT},{nCenterX + 2,nTrackT},{nCenterX + 8,nTrackB} };
-        CBrush brBack(COLOR_RANGE_SELECTION);
-        pDC->SelectObject(&brBack);
-        CPen penVine(PS_SOLID, 1, COLOR_VINE_DECO);
-        pDC->SelectObject(&penVine);
-        pDC->Polygon(pts, 4);
-
-        if (nThumbY < nTrackB)
-        {
-            CRgn rgnP, rgnB;
-            rgnP.CreatePolygonRgn(pts, 4, WINDING);
-            rgnB.CreateRectRgn(rect.left, nThumbY, rect.right, rect.bottom);
-            rgnP.CombineRgn(&rgnP, &rgnB, RGN_AND);
-            CBrush brA(RGB(180, 200, 255));
-            pDC->FillRgn(&rgnP, &brA);
-        }
-
-        CRect rcNote(nCenterX - 10, nThumbY - 12, nCenterX + 10, nThumbY + 12);
-        DrawMusicNote(pDC, rcNote, RGB(138, 43, 226));
-        DrawStar(pDC, nCenterX + 14, nThumbY, 2, RGB(255, 215, 0));
-    }
-}
-
-void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
-{
-    int nRange = nMax - nMin;
-    BOOL bVert = (GetStyle() & TBS_VERT);
-
-    if (!bVert)
-    {
-        int nCenterY = rect.Height() / 2;
-        int nTrackL = 12, nTrackR = rect.Width() - 12, nTrackW = nTrackR - nTrackL;
-        if (nTrackW <= 0)return;
-        int nThumbPos = nTrackL + (int)((double)(nPos - nMin) * nTrackW / nRange);
-
-        CPen penA(PS_SOLID, 5, RGB(200, 150, 255));
-        pDC->SelectObject(&penA);
-        pDC->MoveTo(nTrackL, nCenterY); pDC->LineTo(nThumbPos, nCenterY);
-        CPen penI(PS_SOLID, 3, RGB(220, 220, 230));
-        pDC->SelectObject(&penI);
-        pDC->LineTo(nTrackR, nCenterY);
-
-        CPen penT(PS_SOLID, 2, RGB(150, 100, 200));
-        pDC->SelectObject(&penT);
-        for (int i = 0; i <= 10; i++)
-        {
-            int nTickX = nTrackL + (nTrackW * i / 10);
-            int nTickH = (i % 5 == 0) ? 10 : 5;
-            pDC->MoveTo(nTickX, nCenterY - nTickH); pDC->LineTo(nTickX, nCenterY + nTickH);
-            if (i % 5 == 0) { CBrush br(RGB(200, 180, 255)); CBrush* pOldBr = pDC->SelectObject(&br); pDC->Ellipse(nTickX - 3, nCenterY - nTickH - 5, nTickX + 3, nCenterY - nTickH + 1); pDC->SelectObject(pOldBr); }
-        }
-
-        CRect rcD(nThumbPos - 9, nCenterY - 12, nThumbPos + 9, nCenterY + 12);
-        DrawDiamond(pDC, rcD, RGB(200, 180, 255));
-
-        CPen penLight(PS_SOLID, 1, RGB(255, 240, 200));
-        pDC->SelectObject(&penLight);
-        for (int angle = 0; angle < 360; angle += 45)
-        {
-            double rad = angle * 3.14159 / 180.0;
-            pDC->MoveTo(nThumbPos + (int)(12 * cos(rad)), nCenterY + (int)(12 * sin(rad)));
-            pDC->LineTo(nThumbPos + (int)(18 * cos(rad)), nCenterY + (int)(18 * sin(rad)));
-        }
-    }
-    else
-    {
-        int nCenterX = rect.Width() / 2;
-        int nTrackT = 12, nTrackB = rect.Height() - 12, nTrackH = nTrackB - nTrackT;
-        if (nTrackH <= 0)return;
-        int nThumbPos = nTrackT + (int)((double)(nPos - nMin) * nTrackH / nRange);
-
-        CPen penA(PS_SOLID, 5, RGB(200, 150, 255)); pDC->SelectObject(&penA);
-        pDC->MoveTo(nCenterX, nThumbPos); pDC->LineTo(nCenterX, nTrackB);
-        CPen penI(PS_SOLID, 3, RGB(220, 220, 230)); pDC->SelectObject(&penI);
-        pDC->MoveTo(nCenterX, nTrackT);  pDC->LineTo(nCenterX, nThumbPos);
-
-        CPen penT(PS_SOLID, 2, RGB(150, 100, 200)); pDC->SelectObject(&penT);
-        for (int i = 0; i <= 10; i++)
-        {
-            int nTickY = nTrackT + (nTrackH * i / 10);
-            int nTickW = (i % 5 == 0) ? 10 : 5;
-            pDC->MoveTo(nCenterX - nTickW, nTickY); pDC->LineTo(nCenterX + nTickW, nTickY);
-            if (i % 5 == 0) { CBrush br(RGB(200, 180, 255)); CBrush* pOldBr = pDC->SelectObject(&br); pDC->Ellipse(nCenterX + nTickW + 1, nTickY - 3, nCenterX + nTickW + 7, nTickY + 3); pDC->SelectObject(pOldBr); }
-        }
-
-        CRect rcD(nCenterX - 9, nThumbPos - 12, nCenterX + 9, nThumbPos + 12);
-        DrawDiamond(pDC, rcD, RGB(200, 180, 255));
-    }
-}
-
-void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
-{
-    int nRange = nMax - nMin;
-    BOOL bVert = (GetStyle() & TBS_VERT);
-
-    if (!bVert)
-    {
-        int nCenterY = rect.Height() / 2;
-        int nTrackL = 12, nTrackR = rect.Width() - 12, nTrackW = nTrackR - nTrackL;
-        if (nTrackW <= 0)return;
-        int nThumbPos = nTrackL + (int)((double)(nPos - nMin) * nTrackW / nRange);
-
-        CPen penA(PS_SOLID, 5, RGB(100, 200, 150)); pDC->SelectObject(&penA);
-        pDC->MoveTo(nTrackL, nCenterY); pDC->LineTo(nThumbPos, nCenterY);
-        CPen penI(PS_SOLID, 3, RGB(220, 220, 230)); pDC->SelectObject(&penI);
-        pDC->LineTo(nTrackR, nCenterY);
-
-        CPen penT(PS_SOLID, 2, RGB(80, 160, 120)); pDC->SelectObject(&penT);
-        for (int i = 0; i <= 10; i++)
-        {
-            int nTickX = nTrackL + (nTrackW * i / 10);
-            int nTickH = (i % 5 == 0) ? 10 : 5;
-            pDC->MoveTo(nTickX, nCenterY - nTickH); pDC->LineTo(nTickX, nCenterY + nTickH);
-            if (i % 5 == 0) { CBrush br(RGB(150, 220, 180)); CBrush* pOldBr = pDC->SelectObject(&br); pDC->Ellipse(nTickX - 3, nCenterY - nTickH - 5, nTickX + 3, nCenterY - nTickH + 1); pDC->SelectObject(pOldBr); }
-        }
-
-        CRect rcD(nThumbPos - 9, nCenterY - 12, nThumbPos + 9, nCenterY + 12);
-        DrawDiamond(pDC, rcD, RGB(100, 220, 160));
-
-        CPen penLight(PS_SOLID, 1, RGB(200, 255, 220)); pDC->SelectObject(&penLight);
-        for (int angle = 0; angle < 360; angle += 45)
-        {
-            double rad = angle * 3.14159 / 180.0;
-            pDC->MoveTo(nThumbPos + (int)(12 * cos(rad)), nCenterY + (int)(12 * sin(rad)));
-            pDC->LineTo(nThumbPos + (int)(18 * cos(rad)), nCenterY + (int)(18 * sin(rad)));
-        }
-    }
-    else
-    {
-        int nCenterX = rect.Width() / 2;
-        int nTrackT = 12, nTrackB = rect.Height() - 12, nTrackH = nTrackB - nTrackT;
-        if (nTrackH <= 0)return;
-        int nThumbPos = nTrackT + (int)((double)(nPos - nMin) * nTrackH / nRange);
-
-        CPen penA(PS_SOLID, 5, RGB(100, 200, 150)); pDC->SelectObject(&penA);
-        pDC->MoveTo(nCenterX, nThumbPos); pDC->LineTo(nCenterX, nTrackB);
-        CPen penI(PS_SOLID, 3, RGB(220, 220, 230)); pDC->SelectObject(&penI);
-        pDC->MoveTo(nCenterX, nTrackT); pDC->LineTo(nCenterX, nThumbPos);
-
-        CPen penT(PS_SOLID, 2, RGB(80, 160, 120)); pDC->SelectObject(&penT);
-        for (int i = 0; i <= 10; i++)
-        {
-            int nTickY = nTrackT + (nTrackH * i / 10);
-            int nTickW = (i % 5 == 0) ? 10 : 5;
-            pDC->MoveTo(nCenterX - nTickW, nTickY); pDC->LineTo(nCenterX + nTickW, nTickY);
-            if (i % 5 == 0) { CBrush br(RGB(150, 220, 180)); CBrush* pOldBr = pDC->SelectObject(&br); pDC->Ellipse(nCenterX + nTickW + 1, nTickY - 3, nCenterX + nTickW + 7, nTickY + 3); pDC->SelectObject(pOldBr); }
-        }
-
-        CRect rcD(nCenterX - 9, nThumbPos - 12, nCenterX + 9, nThumbPos + 12);
-        DrawDiamond(pDC, rcD, RGB(100, 220, 160));
-    }
-}
-
-// ============================================================================
-// CCustomRangeSliderCtrl
-// ============================================================================
-IMPLEMENT_DYNAMIC(CCustomRangeSliderCtrl, CSliderCtrl)
-
-BEGIN_MESSAGE_MAP(CCustomRangeSliderCtrl, CSliderCtrl)
-    ON_WM_PAINT()
-    ON_WM_ERASEBKGND()
-    ON_WM_LBUTTONDOWN()
-    ON_WM_LBUTTONUP()
-    ON_WM_MOUSEMOVE()
-END_MESSAGE_MAP()
-
-CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
-    : m_bAutoDelete(FALSE), m_nMin(0), m_nMax(100), m_nSelMin(0), m_nSelMax(100)
-    , m_nDragTarget(0), m_bDragging(FALSE), m_nVisualPos(0), m_nLogicalPos(0)
-{}
-
-CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl() {}
-
-// [FIX❺]
-void CCustomRangeSliderCtrl::PostNcDestroy()
-{
-    CSliderCtrl::PostNcDestroy();
-    if (m_bAutoDelete) delete this;
-}
-
-void CCustomRangeSliderCtrl::PreSubclassWindow()
-{
-    CSliderCtrl::PreSubclassWindow();
-    HMODULE h = LoadLibrary(_T("UxTheme.dll"));
-    if (h)
-    {
-        typedef HRESULT(WINAPI* S)(HWND, LPCWSTR, LPCWSTR);
-        S p = (S)GetProcAddress(h, "SetWindowTheme");
-        if (p) p(m_hWnd, L"", L"");
-        FreeLibrary(h);
-    }
-    int mn, mx; CSliderCtrl::GetRange(mn, mx);
-    m_nMin = mn; m_nMax = mx;
-    m_nLogicalPos = m_nVisualPos = CSliderCtrl::GetPos();
-}
-
-void CCustomRangeSliderCtrl::SetPos(int p)
-{
-    if (m_bDragging) return;
-
-    p = max(m_nMin, min(m_nMax, p));
-    m_nLogicalPos = m_nVisualPos = p;
-    CSliderCtrl::SetPos(p);
-    if (::IsWindow(m_hWnd)) RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
-}
-int CCustomRangeSliderCtrl::GetPos() const { return m_nLogicalPos; }
-
-void CCustomRangeSliderCtrl::SetRange(int mn, int mx, BOOL b)
-{
-    m_nMin = mn; m_nMax = mx; m_nVisualPos = m_nLogicalPos;
-    CSliderCtrl::SetRange(mn, mx, FALSE);
-    if (b && ::IsWindow(m_hWnd)) RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
-}
-
-void CCustomRangeSliderCtrl::SetSelection(int mn, int mx)
-{
-    m_nSelMin = mn; m_nSelMax = mx;
-    if (m_nSelMin > m_nSelMax) { int t = m_nSelMin; m_nSelMin = m_nSelMax; m_nSelMax = t; }
-    if (::IsWindow(m_hWnd)) RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
-}
-
-void CCustomRangeSliderCtrl::GetSelection(int& mn, int& mx) const
-{
-    mn = max(m_nMin, min(m_nMax, m_nSelMin));
-    mx = max(m_nMin, min(m_nMax, m_nSelMax));
-}
-
-void CCustomRangeSliderCtrl::OnPaint()
-{
     CPaintDC dc(this);
-    CRect r; GetClientRect(&r);
-    CDC mDC; CBitmap mB;
-    mDC.CreateCompatibleDC(&dc);
-    mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
-    CBitmap* pOldB = mDC.SelectObject(&mB);
-    mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
-    DrawRangeSlider(&mDC);
-    dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
-    mDC.SelectObject(pOldB);
-    mB.DeleteObject(); mDC.DeleteDC();
+    CRect r;
+    GetClientRect(&r);
+    PaintClient(dc, r);
 }
 
-BOOL CCustomRangeSliderCtrl::OnEraseBkgnd(CDC*) { return TRUE; }
-
-void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
+LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
 {
-    CRect r; GetClientRect(&r);
-    if (m_nMax <= m_nMin) return;
-
-    int cy = r.Height() / 2;
-    int cur = m_bDragging ? m_nVisualPos : m_nLogicalPos;
-
-    int xMin = ValueToPixel(m_nSelMin);
-    int xMax = ValueToPixel(m_nSelMax);
-    int xPos = ValueToPixel(cur);
-
-    CPen penT(PS_SOLID, 4, RGB(200, 200, 200));
-    pDC->SelectObject(&penT);
-    pDC->MoveTo(14, cy); pDC->LineTo(r.Width() - 14, cy);
-
-    if (xMax > xMin) pDC->FillSolidRect(CRect(xMin, cy - 4, xMax, cy + 4), COLOR_RANGE_SELECTION);
-
-    CPen penB(PS_SOLID, 1, RGB(0, 0, 0));
-    pDC->SelectObject(&penB);
-
-    pDC->FillSolidRect(CRect(xMin - 5, cy - 8, xMin + 5, cy + 8), COLOR_RANGE_SLIDER_THUMB);
-    pDC->SelectObject(GetStockObject(NULL_BRUSH));
-    pDC->Rectangle(CRect(xMin - 5, cy - 8, xMin + 5, cy + 8));
-
-    pDC->FillSolidRect(CRect(xMax - 5, cy - 8, xMax + 5, cy + 8), COLOR_RANGE_SLIDER_THUMB);
-    pDC->Rectangle(CRect(xMax - 5, cy - 8, xMax + 5, cy + 8));
-
-    DrawHeart(pDC, CRect(xPos - 9, cy - 12, xPos + 9, cy + 6), COLOR_SLIDER_THUMB);
-}
-
-int CCustomRangeSliderCtrl::ValueToPixel(int v) const
-{
-    CRect r; GetClientRect(&r);
-    int w = r.Width() - 28;
-    if (w <= 0 || m_nMax <= m_nMin) return 14;
-    int val = max(m_nMin, min(m_nMax, v));
-    return 14 + (int)((long long)(val - m_nMin) * w / (m_nMax - m_nMin));
-}
-
-int CCustomRangeSliderCtrl::PixelToValue(int x) const
-{
-    CRect r; GetClientRect(&r);
-    int w = r.Width() - 28;
-    if (w <= 0 || m_nMax <= m_nMin) return m_nMin;
-    int px = max(14, min(r.Width() - 14, x));
-    return m_nMin + (int)((double)(px - 14) / w * (m_nMax - m_nMin) + 0.5);
-}
-
-int CCustomRangeSliderCtrl::HitTest(CPoint p) const
-{
-    CRect r; GetClientRect(&r);
-    int cy = r.Height() / 2;
-    int xM = ValueToPixel(m_nLogicalPos);
-    int xMx = ValueToPixel(m_nSelMax);
-    int xMn = ValueToPixel(m_nSelMin);
-    if (CRect(xM - 10, cy - 14, xM + 10, cy + 14).PtInRect(p))  return 3;
-    if (CRect(xMx - 7, cy - 10, xMx + 7, cy + 10).PtInRect(p))  return 2;
-    if (CRect(xMn - 7, cy - 10, xMn + 7, cy + 10).PtInRect(p))  return 1;
+    CDC* pDC = CDC::FromHandle((HDC)wParam);
+    if (pDC)
+    {
+        CRect r;
+        GetClientRect(&r);
+        PaintClient(*pDC, r);
+    }
     return 0;
 }
 
-void CCustomRangeSliderCtrl::OnLButtonDown(UINT nF, CPoint p)
+BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC)
 {
-    SetFocus();
-    m_nVisualPos = m_nLogicalPos;
-    m_nDragTarget = HitTest(p);
-
-    if (m_nDragTarget == 0)
+    if (pDC)
     {
-        m_nVisualPos = PixelToValue(p.x);
-        m_nDragTarget = 3;
-        CSliderCtrl::SetPos(m_nVisualPos);
-        // ★修正点: クリックした瞬間に送ると二重実行の原因になるため削除しました
+        CRect r;
+        GetClientRect(&r);
+        pDC->FillSolidRect(&r, COLOR_BUTTON_BG);
     }
-    m_bDragging = TRUE; SetCapture();
-    RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+    return TRUE;
+}
+void CCustomStandardButton::OnMouseMove(UINT f, CPoint p)
+{
+    if (!m_bMouseOver)
+    {
+        TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
+        TrackMouseEvent(&t);
+        m_bMouseOver = TRUE;
+        Invalidate(FALSE);
+    }
+    CButton::OnMouseMove(f, p);
 }
 
-void CCustomRangeSliderCtrl::OnLButtonUp(UINT nF, CPoint p)
+LRESULT CCustomStandardButton::OnMouseLeave(WPARAM, LPARAM)
 {
-    if (m_bDragging)
-    {
-        m_bDragging = FALSE; ReleaseCapture();
-        if (m_nDragTarget == 3)
-        {
-            m_nLogicalPos = m_nVisualPos;
-            CSliderCtrl::SetPos(m_nLogicalPos);
-            // ★修正点: 確定した時に「TB_ENDTRACK」の1つだけを綺麗に送るようにしました
-            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, m_nLogicalPos), (LPARAM)m_hWnd);
-        }
-        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
-    }
+    m_bMouseOver = FALSE;
+    Invalidate(FALSE);
+    return 0;
 }
 
-void CCustomRangeSliderCtrl::OnMouseMove(UINT nF, CPoint p)
+void CCustomStandardButton::OnSetFocus(CWnd* p)
 {
-    if (m_bDragging)
-    {
-        int v = PixelToValue(p.x);
-        if (m_nDragTarget == 3) {
-            m_nVisualPos = max(m_nMin, min(m_nMax, v));
-            CSliderCtrl::SetPos(m_nVisualPos);
-            // 元通り、表示更新用のメッセージを送ります
-            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, m_nVisualPos), (LPARAM)m_hWnd);
-        }
-        else if (m_nDragTarget == 1) m_nSelMin = min(v, m_nSelMax);
-        else if (m_nDragTarget == 2) m_nSelMax = max(v, m_nSelMin);
-        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
-    }
+    CButton::OnSetFocus(p);
+    Invalidate(FALSE);
+}
+
+void CCustomStandardButton::OnKillFocus(CWnd* p)
+{
+    CButton::OnKillFocus(p);
+    Invalidate(FALSE);
+}
+
+void CCustomStandardButton::OnEnable(BOOL b)
+{
+    CButton::OnEnable(b);
+    Invalidate(FALSE);
 }
 
 // ============================================================================
-// CCustomCheckBox
+// カスタムチェックボックスコントロール
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomCheckBox, CButton)
 
@@ -2816,20 +3761,29 @@ BEGIN_MESSAGE_MAP(CCustomCheckBox, CButton)
 END_MESSAGE_MAP()
 
 CCustomCheckBox::CCustomCheckBox()
-    : m_bAutoDelete(FALSE), m_bIsFlatStyle(FALSE), m_bIsPressed(FALSE), m_bIsHot(FALSE), m_bTracking(FALSE), m_nCheck(0)
-{
-}
+    : m_bAutoDelete(FALSE), m_bIsFlatStyle(FALSE), m_bIsPressed(FALSE),
+    m_bIsHot(FALSE), m_bTracking(FALSE), m_nCheck(0), m_bAeroMode(FALSE)
+{}
+
 CCustomCheckBox::~CCustomCheckBox() {}
 
-// [FIX❺]
 void CCustomCheckBox::PostNcDestroy()
 {
     CButton::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
-int  CCustomCheckBox::GetCheck() { return m_nCheck; }
-void CCustomCheckBox::SetCheck(int n) { m_nCheck = n; CButton::SetCheck(n); Invalidate(); }
+int CCustomCheckBox::GetCheck()
+{
+    return m_nCheck;
+}
+
+void CCustomCheckBox::SetCheck(int n)
+{
+    m_nCheck = n;
+    CButton::SetCheck(n);
+    Invalidate();
+}
 
 void CCustomCheckBox::PreSubclassWindow()
 {
@@ -2847,16 +3801,26 @@ void CCustomCheckBox::PreSubclassWindow()
     CButton::PreSubclassWindow();
 }
 
-void CCustomCheckBox::SetFont(CFont* pFont, BOOL bRedraw) { CButton::SetFont(pFont, bRedraw); }
+void CCustomCheckBox::SetFont(CFont* p, BOOL b)
+{
+    CButton::SetFont(p, b);
+}
 
-void CCustomCheckBox::OnLButtonDown(UINT n, CPoint p) { m_bIsPressed = m_bIsHot = TRUE; SetCapture(); Invalidate(); }
+void CCustomCheckBox::OnLButtonDown(UINT n, CPoint p)
+{
+    m_bIsPressed = m_bIsHot = TRUE;
+    SetCapture();
+    Invalidate();
+}
 
 void CCustomCheckBox::OnLButtonUp(UINT n, CPoint p)
 {
     if (m_bIsPressed)
     {
-        m_bIsPressed = FALSE; ReleaseCapture();
-        CRect r; GetClientRect(&r);
+        m_bIsPressed = FALSE;
+        ReleaseCapture();
+        CRect r;
+        GetClientRect(&r);
         if (r.PtInRect(p))
         {
             m_nCheck = (m_nCheck == BST_CHECKED) ? BST_UNCHECKED : BST_CHECKED;
@@ -2869,126 +3833,242 @@ void CCustomCheckBox::OnLButtonUp(UINT n, CPoint p)
 
 void CCustomCheckBox::OnMouseMove(UINT n, CPoint p)
 {
-    if (!m_bTracking) { TRACKMOUSEEVENT t = { sizeof(t),TME_LEAVE,m_hWnd,0 }; TrackMouseEvent(&t); m_bTracking = TRUE; }
-    CRect r; GetClientRect(&r);
+    if (!m_bTracking)
+    {
+        TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
+        TrackMouseEvent(&t);
+        m_bTracking = TRUE;
+    }
+    CRect r;
+    GetClientRect(&r);
     BOOL h = r.PtInRect(p);
-    if (m_bIsHot != h) { m_bIsHot = h; Invalidate(); }
+    if (m_bIsHot != h)
+    {
+        m_bIsHot = h;
+        Invalidate();
+    }
 }
 
-void CCustomCheckBox::OnMouseLeave() { m_bIsHot = m_bTracking = FALSE; Invalidate(); }
-void CCustomCheckBox::OnPaint() { CPaintDC dc(this); CRect r; GetClientRect(&r); OnDrawLayer(&dc, r); }
-LRESULT CCustomCheckBox::OnPrintClient(WPARAM w, LPARAM) { CDC* pDC = CDC::FromHandle((HDC)w); CRect r; GetClientRect(&r); OnDrawLayer(pDC, r); return 0; }
-BOOL CCustomCheckBox::OnEraseBkgnd(CDC*) { return TRUE; }
+void CCustomCheckBox::OnMouseLeave()
+{
+    m_bIsHot = m_bTracking = FALSE;
+    Invalidate();
+}
+
+void CCustomCheckBox::OnPaint()
+{
+    CPaintDC dc(this);
+    CRect r;
+    GetClientRect(&r);
+    OnDrawLayer(&dc, r);
+}
+
+LRESULT CCustomCheckBox::OnPrintClient(WPARAM w, LPARAM)
+{
+    CDC* pDC = CDC::FromHandle((HDC)w);
+    CRect r;
+    GetClientRect(&r);
+    OnDrawLayer(pDC, r);
+    return 0;
+}
+
+BOOL CCustomCheckBox::OnEraseBkgnd(CDC*)
+{
+    return TRUE;
+}
+
+static void CCC_CompositeTransparent(HWND hWnd, BOOL bAeroMode, CDC& destDC, const CRect& rect, std::function<void(CDC&)> drawFn)
+{
+    const BOOL bTrans = CCC_UseTransparentPaint(hWnd, bAeroMode);
+    if (!bTrans)
+    {
+        drawFn(destDC);
+        return;
+    }
+    CDC memDC;
+    memDC.CreateCompatibleDC(&destDC);
+    CBitmap bmp;
+    bmp.CreateCompatibleBitmap(&destDC, rect.Width(), rect.Height());
+    CBitmap* pOld = memDC.SelectObject(&bmp);
+    memDC.FillSolidRect(0, 0, rect.Width(), rect.Height(), CCC_AERO_CHROMA_KEY);
+    drawFn(memDC);
+    CCC_TransparentBltClearDest(destDC.GetSafeHdc(), rect.left, rect.top, rect.Width(), rect.Height(),
+        memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+    memDC.SelectObject(pOld);
+}
 
 void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
 {
-    BOOL bC = (m_nCheck == BST_CHECKED);
-    BOOL bD = !IsWindowEnabled();
-    BOOL bP = m_bIsPressed && m_bIsHot;
+    const int rw = rect.Width();
+    const int rh = rect.Height();
+    if (rw <= 0 || rh <= 0) return;
 
-    pDC->SelectObject(GetFont() ? GetFont() : (CFont*)pDC->SelectStockObject(DEFAULT_GUI_FONT));
-
-    if (m_bIsFlatStyle)
+    CCC_CompositeTransparent(m_hWnd, m_bAeroMode, *pDC, rect, [&](CDC& dc)
     {
-        BOOL s = bC || bP;
-        COLORREF bg = bD ? RGB(200, 200, 200) : (s ? COLOR_BUTTON_PUSHED : (m_bIsHot ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
-        pDC->FillSolidRect(&rect, bg);
-        if (!bD) DrawDecorations(pDC, rect, 0, s);
-        pDC->Draw3dRect(&rect, s ? RGB(100, 100, 100) : RGB(255, 255, 255), s ? RGB(255, 255, 255) : RGB(100, 100, 100));
-        CString t; GetWindowText(t);
-        DrawSmartText(pDC, rect, t, bD, s);
-    }
-    else
-    {
-        pDC->FillSolidRect(&rect, COLOR_DIALOG_BG);
-        int s = 18, cy = rect.Height() / 2;
-        CRect rcB(rect.left, cy - s / 2, rect.left + s, cy + s / 2);
-        CPen pen(PS_SOLID, 2, RGB(255, 140, 100));
-        CBrush br(RGB(255, 255, 255));
-        pDC->SelectObject(&pen); pDC->SelectObject(&br);
-        pDC->RoundRect(&rcB, CPoint(5, 5));
+        BOOL bC = (m_nCheck == BST_CHECKED); BOOL bD = !IsWindowEnabled(); BOOL bP = m_bIsPressed && m_bIsHot;
+        dc.SelectObject(GetFont() ? GetFont() : (CFont*)dc.SelectStockObject(DEFAULT_GUI_FONT));
 
-        if (bC) { CRect rcH = rcB; rcH.DeflateRect(1, 1); DrawHanamaru(pDC, rcH, RGB(255, 100, 150), RGB(255, 182, 193)); }
-
-        CString t; GetWindowText(t);
-        if (!t.IsEmpty()) { CRect rcT = rect; rcT.left = rcB.right + 8; DrawSmartText2(pDC, rcT, t, DT_LEFT | DT_VCENTER, bD, FALSE); }
-    }
-
-    if (GetFocus() == this)
-    {
-        CRect rcF = rect;
-        if (!m_bIsFlatStyle) rcF.left += 20; else rcF.DeflateRect(3, 3);
-        pDC->DrawFocusRect(&rcF);
-    }
+        if (m_bIsFlatStyle)
+        {
+            BOOL s = bC || bP;
+            COLORREF bg = bD ? RGB(200, 200, 200) : (s ? COLOR_BUTTON_PUSHED : (m_bIsHot ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
+            dc.FillSolidRect(0, 0, rw, rh, bg);
+            if (!bD) DrawDecorations(&dc, CRect(0, 0, rw, rh), 0, s);
+            dc.Draw3dRect(CRect(0, 0, rw, rh), s ? RGB(100, 100, 100) : RGB(255, 255, 255), s ? RGB(255, 255, 255) : RGB(100, 100, 100));
+            CString t; GetWindowText(t);
+            DrawSmartText(&dc, CRect(0, 0, rw, rh), t, bD, s);
+        }
+        else
+        {
+            const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+            if (!bTrans) dc.FillSolidRect(0, 0, rw, rh, COLOR_DIALOG_BG);
+            int s = 18; int cy2 = rh / 2;
+            CRect rcB(0, cy2 - s / 2, s, cy2 + s / 2);
+            CPen p2(PS_SOLID, 2, RGB(255, 140, 100)); CBrush b2(RGB(255, 255, 255));
+            dc.SelectObject(&p2); dc.SelectObject(&b2);
+            dc.RoundRect(&rcB, CPoint(5, 5));
+            if (bC)
+            {
+                CRect rh2 = rcB;
+                rh2.DeflateRect(1, 1);
+                DrawHanamaru(&dc, rh2, RGB(255, 100, 150), RGB(255, 182, 193));
+            }
+            CString t;
+            GetWindowText(t);
+            if (!t.IsEmpty())
+            {
+                CRect rt(0, 0, rw, rh);
+                rt.left = rcB.right + 8;
+                DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER, bD, FALSE);
+            }
+        }
+        if (GetFocus() == this)
+        {
+            CRect rf(0, 0, rw, rh);
+            if (!m_bIsFlatStyle) rf.left += 20; else rf.DeflateRect(3, 3);
+            dc.DrawFocusRect(&rf);
+        }
+    });
 }
 
 // ============================================================================
-// CCustomGroupBox
+// カスタムグループボックスコントロール
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomGroupBox, CButton)
 
 BEGIN_MESSAGE_MAP(CCustomGroupBox, CButton)
     ON_WM_PAINT()
+    ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
 
-CCustomGroupBox::CCustomGroupBox() : m_bAutoDelete(FALSE) {}
+CCustomGroupBox::CCustomGroupBox() : m_bAutoDelete(FALSE), m_bAeroMode(FALSE) {}
 CCustomGroupBox::~CCustomGroupBox() {}
 
-// [FIX❺]
 void CCustomGroupBox::PostNcDestroy()
 {
     CButton::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
 
-void CCustomGroupBox::PreSubclassWindow() { CButton::PreSubclassWindow(); }
-void CCustomGroupBox::OnPaint() { CPaintDC dc(this); CRect r; GetClientRect(&r); DrawGroupBox(&dc, r); }
-BOOL CCustomGroupBox::OnEraseBkgnd(CDC*) { return TRUE; }
+void CCustomGroupBox::PreSubclassWindow()
+{
+    CButton::PreSubclassWindow();
+}
+void CCustomGroupBox::OnPaint()
+{
+    CPaintDC dc(this);
+    CRect r;
+    GetClientRect(&r);
+    DrawGroupBox(&dc, r);
+}
+
+LRESULT CCustomGroupBox::OnPrintClient(WPARAM wParam, LPARAM)
+{
+    if (HDC hDC = (HDC)wParam)
+    {
+        CDC* pDC = CDC::FromHandle(hDC);
+        CRect r;
+        GetClientRect(&r);
+        DrawGroupBox(pDC, r);
+    }
+    return 0;
+}
+
+BOOL CCustomGroupBox::OnEraseBkgnd(CDC* pDC)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_UseTransparentPaint(m_hWnd, m_bAeroMode)) return TRUE;
+#endif
+    if (pDC)
+    {
+        CRect r;
+        GetClientRect(&r);
+        pDC->FillSolidRect(&r, COLOR_DIALOG_BG);
+    }
+    return TRUE;
+}
 
 void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
 {
-    CString t; GetWindowText(t);
-    CFont* pOldF = pDC->SelectObject(GetFont());
-    CSize s = pDC->GetTextExtent(t);
-    int nT = rect.top + s.cy / 2;
-
-    CPen penOuter(PS_SOLID, 2, RGB(255, 140, 180));
-    CPen penInner(PS_SOLID, 1, RGB(255, 200, 220));
-
-    pDC->SelectObject(&penOuter);
-    pDC->SelectObject(GetStockObject(NULL_BRUSH));
-    pDC->MoveTo(rect.left + 1, nT);
-    if (s.cx > 0) { pDC->LineTo(rect.left + 6, nT); pDC->MoveTo(rect.left + s.cx + 16, nT); }
-    pDC->LineTo(rect.right - 2, nT); pDC->LineTo(rect.right - 2, rect.bottom - 2);
-    pDC->LineTo(rect.left + 1, rect.bottom - 2); pDC->LineTo(rect.left + 1, nT);
-
-    pDC->SelectObject(&penInner);
-    int offset = 3;
-    pDC->MoveTo(rect.left + offset, nT + offset);
-    if (s.cx > 0) { pDC->LineTo(rect.left + 6 + offset, nT + offset); pDC->MoveTo(rect.left + s.cx + 16, nT + offset); }
-    pDC->LineTo(rect.right - offset, nT + offset); pDC->LineTo(rect.right - offset, rect.bottom - offset);
-    pDC->LineTo(rect.left + offset, rect.bottom - offset); pDC->LineTo(rect.left + offset, nT + offset);
-
-    DrawRibbon(pDC, CRect(rect.left + 2, nT - 8, rect.left + 14, nT + 4), RGB(255, 182, 193));
-    DrawRibbon(pDC, CRect(rect.right - 14, nT - 8, rect.right - 2, nT + 4), RGB(255, 182, 193));
-    DrawRibbon(pDC, CRect(rect.left + 2, rect.bottom - 12, rect.left + 14, rect.bottom), RGB(255, 182, 193));
-    DrawRibbon(pDC, CRect(rect.right - 14, rect.bottom - 12, rect.right - 2, rect.bottom), RGB(255, 182, 193));
-
-    if (!t.IsEmpty())
+    CCC_CompositeTransparent(m_hWnd, m_bAeroMode, *pDC, rect, [&](CDC& dc)
     {
-        CRect rcT(rect.left + 8, nT - s.cy / 2, rect.left + 8 + s.cx + 4, nT + s.cy / 2);
-        pDC->FillSolidRect(&rcT, COLOR_DIALOG_BG);
-        pDC->SetBkMode(TRANSPARENT);
-        pDC->SetTextColor(RGB(0, 0, 0));
-        pDC->DrawText(t, &rcT, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    }
+        CRect r(0, 0, rect.Width(), rect.Height());
+        CString t; GetWindowText(t);
+        CFont* pOF = dc.SelectObject(GetFont());
+        CSize s = dc.GetTextExtent(t);
+        int nT = r.top + s.cy / 2;
+        const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+        if (!bTrans) dc.FillSolidRect(&r, COLOR_DIALOG_BG);
 
-    pDC->SelectObject(pOldF);
+        CPen pO(PS_SOLID, 2, RGB(255, 140, 180));
+        CPen pI(PS_SOLID, 1, RGB(255, 200, 220));
+        dc.SelectObject(&pO);
+        dc.SelectStockObject(NULL_BRUSH);
+        dc.MoveTo(r.left + 1, nT);
+        if (s.cx > 0)
+        {
+            dc.LineTo(r.left + 6, nT);
+            dc.MoveTo(r.left + s.cx + 16, nT);
+        }
+        dc.LineTo(r.right - 2, nT);
+        dc.LineTo(r.right - 2, r.bottom - 2);
+        dc.LineTo(r.left + 1, r.bottom - 2);
+        dc.LineTo(r.left + 1, nT);
+
+        dc.SelectObject(&pI);
+        int off = 3;
+        dc.MoveTo(r.left + off, nT + off);
+        if (s.cx > 0)
+        {
+            dc.LineTo(r.left + 6 + off, nT + off);
+            dc.MoveTo(r.left + s.cx + 16, nT + off);
+        }
+        dc.LineTo(r.right - off, nT + off);
+        dc.LineTo(r.right - off, r.bottom - off);
+        dc.LineTo(r.left + off, r.bottom - off);
+        dc.LineTo(r.left + off, nT + off);
+
+        DrawRibbon(&dc, CRect(r.left + 2, nT - 8, r.left + 14, nT + 4), RGB(255, 182, 193));
+        DrawRibbon(&dc, CRect(r.right - 14, nT - 8, r.right - 2, nT + 4), RGB(255, 182, 193));
+        DrawRibbon(&dc, CRect(r.left + 2, r.bottom - 12, r.left + 14, r.bottom), RGB(255, 182, 193));
+        DrawRibbon(&dc, CRect(r.right - 14, r.bottom - 12, r.right - 2, r.bottom), RGB(255, 182, 193));
+
+        if (!t.IsEmpty())
+        {
+            CRect rt(r.left + 8, nT - s.cy / 2, r.left + 8 + s.cx + 4, nT + s.cy / 2);
+            if (bTrans) dc.FillSolidRect(&rt, CCC_AERO_CHROMA_KEY);
+            else dc.FillSolidRect(&rt, COLOR_DIALOG_BG);
+            dc.SetBkMode(TRANSPARENT);
+            dc.SetTextColor(RGB(0, 0, 0));
+            dc.DrawText(t, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        }
+        dc.SelectObject(pOF);
+    });
 }
 
 // ============================================================================
-// CCustomDialog
+// カスタムダイアログクラス基底 (CDialog版)
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomDialog, CDialog)
 
@@ -2999,128 +4079,523 @@ BEGIN_MESSAGE_MAP(CCustomDialog, CDialog)
     ON_MESSAGE(WM_USER + 1000, OnSubclassControls)
 END_MESSAGE_MAP()
 
-CCustomDialog::CCustomDialog() { m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG); }
-CCustomDialog::CCustomDialog(UINT nIDTemplate, CWnd* pParentWnd)
-    : CDialog(nIDTemplate, pParentWnd) {
+CCustomDialog::CCustomDialog() : m_bAeroEnabled(FALSE)
+{
     m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG);
+    m_brNull.CreateStockObject(NULL_BRUSH);
 }
-CCustomDialog::~CCustomDialog() { if (m_brDialog.GetSafeHandle())m_brDialog.DeleteObject(); }
+
+CCustomDialog::CCustomDialog(UINT n, CWnd* p) : CDialog(n, p), m_bAeroEnabled(FALSE)
+{
+    m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG);
+    m_brNull.CreateStockObject(NULL_BRUSH);
+}
+
+CCustomDialog::~CCustomDialog()
+{
+    if (m_brDialog.GetSafeHandle()) m_brDialog.DeleteObject();
+    if (m_brNull.GetSafeHandle()) m_brNull.DeleteObject();
+}
+
+void CCustomDialog::EnableAero(BOOL b)
+{
+    m_bAeroEnabled = b;
+#if CCUSTOM_AERO_SUPPORT
+    if (GetSafeHwnd())
+    {
+        CCC_ApplyAero(m_hWnd, b);
+        CCC_PrepareDialogSurface(m_hWnd, b);
+        PROPAGATE_AERO_TO_CHILDREN(m_hWnd, b);
+        Invalidate();
+    }
+#endif
+}
 
 BOOL CCustomDialog::OnInitDialog()
 {
-    BOOL bResult = CDialog::OnInitDialog();
-    // 同期サブクラス化: PostMessage 1 往復分を削減し、OnInitDialog 内の SetDlgItemText が
-    // カスタムコントロールに届いた状態で実行される（見た目・挙動は同等）。
+    BOOL r = CDialog::OnInitDialog();
     SubclassChildControls();
-    return bResult;
+    return r;
 }
 
-LRESULT CCustomDialog::OnSubclassControls(WPARAM, LPARAM) { SubclassChildControls(); return 0; }
+LRESULT CCustomDialog::OnSubclassControls(WPARAM, LPARAM)
+{
+    SubclassChildControls();
+    return 0;
+}
 
 void CCustomDialog::SubclassChildControls()
 {
-    HWND hWndChild = ::GetWindow(m_hWnd, GW_CHILD);
-    while (hWndChild != NULL)
-    {
-        if (!::IsWindow(hWndChild)) break;
-        if (!(::GetWindowLong(hWndChild, GWL_STYLE) & WS_VISIBLE)) { hWndChild = ::GetWindow(hWndChild, GW_HWNDNEXT); continue; }
-        CWnd* pWnd = CWnd::FromHandlePermanent(hWndChild);
-        if (pWnd != NULL && pWnd != this) { hWndChild = ::GetWindow(hWndChild, GW_HWNDNEXT); continue; }
-
-        TCHAR szClassName[256];
-        ::GetClassName(hWndChild, szClassName, 256);
-
-        if (_tcsicmp(szClassName, _T("Edit")) == 0) { CCustomEdit* p = new CCustomEdit();            p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        else if (_tcsicmp(szClassName, _T("Static")) == 0) { CCustomStatic* p = new CCustomStatic();        p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        else if (_tcsicmp(szClassName, _T("ListBox")) == 0) { CCustomListBox* p = new CCustomListBox();       p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        else if (_tcsicmp(szClassName, _T("ComboBox")) == 0) { CCustomComboBox* p = new CCustomComboBox();     p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        else if (_tcsicmp(szClassName, WC_LISTVIEW) == 0) { CCustomListCtrl* p = new CCustomListCtrl();     p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        else if (_tcsicmp(szClassName, _T("Button")) == 0)
-        {
-            LONG lStyle = ::GetWindowLong(hWndChild, GWL_STYLE);
-            UINT nType = lStyle & BS_TYPEMASK;
-            if (nType == BS_GROUPBOX) { CCustomGroupBox* p = new CCustomGroupBox();         p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-            else if (nType == BS_PUSHBUTTON || nType == BS_DEFPUSHBUTTON || (lStyle & BS_PUSHLIKE)) { CCustomStandardButton* p = new CCustomStandardButton(); p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-            else { CCustomCheckBox* p = new CCustomCheckBox();         p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        }
-        else if (_tcsicmp(szClassName, TRACKBAR_CLASS) == 0)
-        {
-            LONG lStyle = ::GetWindowLong(hWndChild, GWL_STYLE);
-            if (lStyle & TBS_ENABLESELRANGE) { CCustomRangeSliderCtrl* p = new CCustomRangeSliderCtrl(); p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-            else { CCustomSliderCtrl* p = new CCustomSliderCtrl();            p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        }
-
-        hWndChild = ::GetWindow(hWndChild, GW_HWNDNEXT);
-    }
+    DoSubclassChildControls(this);
 }
 
-HBRUSH CCustomDialog::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+HBRUSH CCustomDialog::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC)
 {
-    if (nCtlColor == CTLCOLOR_DLG) return (HBRUSH)m_brDialog.GetSafeHandle();
-
-    if (nCtlColor == CTLCOLOR_EDIT)
-    {
-        CWnd* pParent = pWnd->GetParent();
-        if (pParent)
-        {
-            TCHAR sz[256]; ::GetClassName(pParent->m_hWnd, sz, 256);
-            if (_tcsicmp(sz, _T("ComboBox")) == 0)
-            {
-                pDC->SetBkColor(COLOR_COMBO_BG); pDC->SetTextColor(RGB(0, 0, 0));
-                static CBrush brCombo(COLOR_COMBO_BG); return (HBRUSH)brCombo.GetSafeHandle();
-            }
-        }
-        pDC->SetBkColor(COLOR_EDIT_BG); pDC->SetTextColor(RGB(0, 0, 0));
-        static CBrush brEdit(COLOR_EDIT_BG); return (HBRUSH)brEdit.GetSafeHandle();
-    }
-
-    if (nCtlColor == CTLCOLOR_LISTBOX)
-    {
-        pDC->SetBkColor(COLOR_COMBO_BG); pDC->SetTextColor(RGB(0, 0, 0));
-        static CBrush brCombo(COLOR_COMBO_BG); return (HBRUSH)brCombo.GetSafeHandle();
-    }
-
-    if (nCtlColor == CTLCOLOR_STATIC || nCtlColor == CTLCOLOR_BTN)
-    {
-        pDC->SetBkColor(COLOR_DIALOG_BG); pDC->SetTextColor(RGB(0, 0, 0));
-        return (HBRUSH)m_brDialog.GetSafeHandle();
-    }
-
-    return CDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+    HBRUSH h = DlgOnCtlColor(pDC, pWnd, nC, m_brDialog, m_bAeroEnabled);
+    return h ? h : CDialog::OnCtlColor(pDC, pWnd, nC);
 }
 
 BOOL CCustomDialog::OnEraseBkgnd(CDC* pDC)
 {
-    CRect rect; GetClientRect(&rect);
-    pDC->FillRect(&rect, &m_brDialog);
-    return TRUE;
+    return DlgOnEraseBkgnd(pDC, m_brDialog, m_bAeroEnabled, m_hWnd);
 }
 
-void CCustomDialog::OnPaint() { Default(); }
+void CCustomDialog::OnPaint()
+{
+    if (m_bAeroEnabled)
+        DlgOnPaintAero(this, m_bAeroEnabled);
+    else
+        CDialog::OnPaint();
+}
+
+#if CCUSTOM_AERO_SUPPORT
+static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf);
+
+// Win11: 子ウィンドウの GDI はアルファ0のまま DWM に合成される。
+// BufferedPaint で全面 alpha=255 にしてから WM_PRINTCLIENT で CCustom* を描く。
+// ※WM_PRINTCLIENT を再帰的に PaintOpaque へ渡すと OnPrintClient が呼ばれず全面透過になる。
+class CCustomOpaqueFixer
+{
+public:
+    CCustomOpaqueFixer(COLORREF clrBg) : m_hWnd(NULL), m_bPrinting(FALSE), m_clrBg(clrBg) {}
+    ~CCustomOpaqueFixer() { Uninstall(); }
+
+    BOOL Install(HWND hWnd)
+    {
+        if (m_hWnd) return FALSE;
+        if (!::IsWindow(hWnd)) return FALSE;
+        m_hWnd = hWnd;
+        return ::SetWindowSubclass(hWnd, SubclassProc, (UINT_PTR)this, (DWORD_PTR)this);
+    }
+
+    void Uninstall()
+    {
+        if (m_hWnd && ::IsWindow(m_hWnd))
+            ::RemoveWindowSubclass(m_hWnd, SubclassProc, (UINT_PTR)this);
+        m_hWnd = NULL;
+    }
+
+private:
+    HWND m_hWnd;
+    BOOL m_bPrinting;
+    COLORREF m_clrBg;
+
+    static LRESULT CALLBACK SubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+        UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+    {
+        CCustomOpaqueFixer* pThis = (CCustomOpaqueFixer*)dwRefData;
+        switch (uMsg)
+        {
+        case WM_ERASEBKGND:
+            if (!pThis->m_bPrinting) return TRUE;
+            return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        case WM_PRINTCLIENT:
+            if (pThis->m_bPrinting)
+                return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            break;
+        case WM_PAINT:
+        {
+            PAINTSTRUCT ps = {};
+            HDC hDC = ::BeginPaint(hWnd, &ps);
+            if (hDC) pThis->PaintOpaque(hWnd, hDC);
+            ::EndPaint(hWnd, &ps);
+            return 0;
+        }
+        case WM_VSCROLL:
+        case WM_HSCROLL:
+        case WM_MOUSEWHEEL:
+        {
+            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            HDC hDC = ::GetDC(hWnd);
+            if (hDC)
+            {
+                pThis->PaintOpaque(hWnd, hDC);
+                ::ReleaseDC(hWnd, hDC);
+            }
+            ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+            return lRes;
+        }
+        case CCC_WM_POST_OPAQUE_PAINT:
+        {
+            HDC hDC = ::GetDC(hWnd);
+            if (hDC)
+            {
+                pThis->PaintOpaque(hWnd, hDC);
+                ::ReleaseDC(hWnd, hDC);
+            }
+            return 0;
+        }
+        case WM_SHOWWINDOW:
+        {
+            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            if (wParam)
+                ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+            return lRes;
+        }
+        case WM_DESTROY:
+            ::RemoveWindowSubclass(hWnd, SubclassProc, uIdSubclass);
+            pThis->m_hWnd = NULL;
+            break;
+        }
+        return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    void PaintClientIntoBuffer(HWND hWnd, HDC hdcBuf)
+    {
+        m_bPrinting = TRUE;
+        if (!CCC_PaintChildDirect(hWnd, hdcBuf))
+            ::SendMessage(hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+        m_bPrinting = FALSE;
+    }
+
+    void PaintOpaque(HWND hWnd, HDC hDestDC)
+    {
+        RECT rect = {};
+        ::GetClientRect(hWnd, &rect);
+        const int width = rect.right - rect.left;
+        const int height = rect.bottom - rect.top;
+        if (width <= 0 || height <= 0) return;
+
+        BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+        params.dwFlags = BPPF_ERASE;
+        HDC hdcBuf = NULL;
+        HPAINTBUFFER hBufferedPaint = ::BeginBufferedPaint(hDestDC, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+
+        if (hdcBuf && hBufferedPaint)
+        {
+            CBrush brush(m_clrBg);
+            ::FillRect(hdcBuf, &rect, (HBRUSH)brush.GetSafeHandle());
+            PaintClientIntoBuffer(hWnd, hdcBuf);
+            ::BufferedPaintMakeOpaque(hBufferedPaint, &rect);
+            ::EndBufferedPaint(hBufferedPaint, TRUE);
+            return;
+        }
+
+        // BeginBufferedPaint 失敗時: 互換 DC で不透明合成
+        CDC dcDest;
+        dcDest.Attach(hDestDC);
+        CDC dcMem;
+        dcMem.CreateCompatibleDC(&dcDest);
+        CBitmap bmp;
+        bmp.CreateCompatibleBitmap(&dcDest, width, height);
+        CBitmap* pOld = dcMem.SelectObject(&bmp);
+
+        CBrush brush(m_clrBg);
+        dcMem.FillRect(CRect(0, 0, width, height), &brush);
+        PaintClientIntoBuffer(hWnd, dcMem.GetSafeHdc());
+        dcDest.BitBlt(0, 0, width, height, &dcMem, 0, 0, SRCCOPY);
+
+        dcMem.SelectObject(pOld);
+        dcDest.Detach();
+    }
+};
+
+static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
+{
+    if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
+    {
+        if (dynamic_cast<CCustomListBox*>(pw) || dynamic_cast<CCustomListCtrl*>(pw)) return COLOR_LIST_BG;
+        if (dynamic_cast<CCustomComboBox*>(pw)) return COLOR_COMBO_BG;
+        if (dynamic_cast<CCustomStandardButton*>(pw) || dynamic_cast<CButtonST*>(pw)) return COLOR_BUTTON_BG;
+        if (dynamic_cast<CCustomEdit*>(pw)) return COLOR_EDIT_BG;
+    }
+    TCHAR cls[64] = {};
+    ::GetClassName(hWnd, cls, 63);
+    CString c(cls);
+    c.MakeUpper();
+    if (c.Find(_T("EDIT")) >= 0) return COLOR_EDIT_BG;
+    if (c.Find(_T("LISTBOX")) >= 0) return COLOR_LIST_BG;
+    if (c.Find(_T("SYSLISTVIEW32")) >= 0) return COLOR_LIST_BG;
+    if (c.Find(_T("COMBOBOX")) >= 0) return COLOR_COMBO_BG;
+    return COLOR_DIALOG_BG;
+}
+
+static BOOL CCC_IsTransparentBlurControl(HWND hWnd)
+{
+    if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
+    {
+        if (dynamic_cast<CCustomStatic*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomSliderCtrl*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomRangeSliderCtrl*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomGroupBox*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
+    }
+    TCHAR cls[64] = {};
+    ::GetClassName(hWnd, cls, 63);
+    CString c(cls);
+    c.MakeUpper();
+    if (c.Find(_T("STATIC")) >= 0) return TRUE;
+    if (c.Find(TRACKBAR_CLASS) >= 0) return TRUE;
+    return FALSE;
+}
+
+static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
+{
+    if (!::IsWindow(hWnd) || !::IsWindowVisible(hWnd)) return FALSE;
+    if (CCC_IsTransparentBlurControl(hWnd)) return FALSE;
+    if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
+    {
+        if (dynamic_cast<CCustomListBox*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomListCtrl*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomComboBox*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomStandardButton*>(pw)) return TRUE;
+        if (dynamic_cast<CButtonST*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomEdit*>(pw)) return FALSE;
+        return FALSE;
+    }
+    TCHAR cls[64] = {};
+    ::GetClassName(hWnd, cls, 63);
+    CString c(cls);
+    c.MakeUpper();
+    if (c.Find(_T("BUTTON")) >= 0) return TRUE;
+    if (c.Find(_T("LISTBOX")) >= 0) return TRUE;
+    if (c.Find(_T("SYSLISTVIEW32")) >= 0) return TRUE;
+    if (c.Find(_T("COMBOBOX")) >= 0) return TRUE;
+    if (c.Find(_T("EDIT")) >= 0) return TRUE;
+    if (c.Find(_T("SYSHEADER32")) >= 0) return TRUE;
+    return FALSE;
+}
+
+static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
+{
+    CWnd* pw = CWnd::FromHandlePermanent(hWnd);
+    if (!pw) return FALSE;
+    CDC dc;
+    dc.Attach(hdcBuf);
+    CRect r;
+    pw->GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0) { dc.Detach(); return FALSE; }
+
+    BOOL painted = FALSE;
+    if (auto* p = dynamic_cast<CCustomStandardButton*>(pw))
+    {
+        p->PaintClient(dc, r);
+        painted = TRUE;
+    }
+    else if (auto* pEdit = dynamic_cast<CCustomEdit*>(pw))
+    {
+        CBrush br(COLOR_EDIT_BG);
+        dc.FillRect(&r, &br);
+        dc.Detach();
+        ::SendMessage(hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+        return TRUE;
+    }
+    else if (auto* pList = dynamic_cast<CCustomListCtrl*>(pw))
+    {
+        pList->PaintOpaqueIntoBuffer(hdcBuf);
+        dc.Detach();
+        return TRUE;
+    }
+    else if (auto* pBtn = dynamic_cast<CButtonST*>(pw))
+    {
+        DRAWITEMSTRUCT dis = {};
+        dis.CtlType = ODT_BUTTON;
+        dis.CtlID = (UINT)::GetDlgCtrlID(hWnd);
+        dis.itemID = dis.CtlID;
+        dis.itemAction = ODA_DRAWENTIRE;
+        const UINT st = (UINT)::SendMessage(hWnd, BM_GETSTATE, 0, 0);
+        if (st & BST_PUSHED) dis.itemState |= ODS_SELECTED;
+        if (!::IsWindowEnabled(hWnd)) dis.itemState |= ODS_DISABLED;
+        if (::GetFocus() == hWnd) dis.itemState |= ODS_FOCUS;
+        dis.hwndItem = hWnd;
+        dis.hDC = hdcBuf;
+        ::GetClientRect(hWnd, &dis.rcItem);
+        pBtn->DrawItem(&dis);
+        dc.Detach();
+        return TRUE;
+    }
+    dc.Detach();
+    return painted;
+}
+
+static void CCC_ClearOpaqueFixerList(CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
+{
+    while (!fixers.IsEmpty())
+    {
+        CCustomOpaqueFixer* p = fixers.RemoveHead();
+        if (p) { p->Uninstall(); delete p; }
+    }
+}
+
+static void CCC_InstallOpaqueFixersRecursive(HWND hParent, CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
+{
+    for (HWND hChild = ::GetWindow(hParent, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
+    {
+        if (CCC_ShouldOpaqueFix(hChild))
+        {
+            CCustomOpaqueFixer* pFixer = new CCustomOpaqueFixer(CCC_OpaqueBgForHwnd(hChild));
+            if (pFixer->Install(hChild))
+                fixers.AddTail(pFixer);
+            else
+                delete pFixer;
+        }
+        CCC_InstallOpaqueFixersRecursive(hChild, fixers);
+    }
+}
+
+static void CCC_FinalizeBlurDialog(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
+    CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
+{
+    if (!pDlg || !pDlg->GetSafeHwnd()) return;
+
+    CCC_ClearOpaqueFixerList(fixers);
+    if (!bAero)
+    {
+        bBlurApplied = FALSE;
+        return;
+    }
+
+    bBlurApplied = CCC_ApplyAero(pDlg->m_hWnd, TRUE) != FALSE;
+    CCC_PrepareDialogSurface(pDlg->m_hWnd, TRUE);
+    PROPAGATE_AERO_TO_CHILDREN(pDlg->m_hWnd, TRUE);
+    pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+
+    if (CCC_IsWin11())
+        CCC_InstallOpaqueFixersRecursive(pDlg->m_hWnd, fixers);
+
+    pDlg->SetWindowPos(NULL, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_DRAWFRAME);
+    pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME);
+    if (CCC_IsWin11())
+        pDlg->PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
+}
+
+static void CCC_PostOpaqueRepaintRecursive(HWND hWnd)
+{
+    for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
+    {
+        if (CCC_ShouldOpaqueFix(hChild))
+            ::PostMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+        CCC_PostOpaqueRepaintRecursive(hChild);
+    }
+}
+
+static void CCC_ReapplyOpaqueFixers(CWnd* pDlg, CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
+{
+    if (!pDlg || !pDlg->GetSafeHwnd() || !CCC_IsWin11() || !CCC_IsAeroEnabled()) return;
+    CCC_ClearOpaqueFixerList(fixers);
+    CCC_InstallOpaqueFixersRecursive(pDlg->m_hWnd, fixers);
+    CCC_PostOpaqueRepaintRecursive(pDlg->m_hWnd);
+    pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE | RDW_ALLCHILDREN);
+}
+#endif
 
 // ============================================================================
-// CCustomBlurDialogBase
+// アクリルぼかし適用済みカスタムダイアログ (CDialog版)
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomBlurDialogBase, CCustomDialog)
 
-CCustomBlurDialogBase::CCustomBlurDialogBase() : m_bBlurApplied(FALSE) { m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG); }
-CCustomBlurDialogBase::CCustomBlurDialogBase(UINT nIDTemplate, CWnd* pParent) : CCustomDialog(nIDTemplate, pParent), m_bBlurApplied(FALSE) { m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG); }
-CCustomBlurDialogBase::~CCustomBlurDialogBase() { if (m_brDialog.GetSafeHandle())m_brDialog.DeleteObject(); }
+BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
+    ON_WM_SIZE()
+    ON_WM_WINDOWPOSCHANGED()
+    ON_WM_DWMCOMPOSITIONCHANGED()
+    ON_WM_DESTROY()
+#if CCUSTOM_AERO_SUPPORT
+    ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
+#endif
+END_MESSAGE_MAP()
 
-BOOL CCustomBlurDialogBase::OnInitDialog() { BOOL b = CCustomDialog::OnInitDialog(); ApplyDwmBlur(); return b; }
-int  CCustomBlurDialogBase::OnCreate(LPCREATESTRUCT lp) { if (CCustomDialog::OnCreate(lp) == -1)return -1; ApplyDwmBlur(); return 0; }
+static BOOL RegisterBlurDialogWndClass(LPCTSTR pszClass, LPCTSTR pszNewClass)
+{
+    WNDCLASS wc = {};
+    HINSTANCE hInst = AfxGetInstanceHandle();
+    if (!::GetClassInfo(hInst, pszClass, &wc) && !::GetClassInfo(NULL, pszClass, &wc))
+        return FALSE;
+    wc.hbrBackground = NULL;
+    wc.lpszClassName = pszNewClass;
+    wc.hInstance = hInst;
+    return AfxRegisterClass(&wc) != FALSE;
+}
+
+CCustomBlurDialogBase::CCustomBlurDialogBase() : m_bBlurApplied(FALSE) {}
+CCustomBlurDialogBase::CCustomBlurDialogBase(UINT n, CWnd* p) : CCustomDialog(n, p), m_bBlurApplied(FALSE) {}
+CCustomBlurDialogBase::~CCustomBlurDialogBase() {}
+
+BOOL CCustomBlurDialogBase::PreCreateWindow(CREATESTRUCT& cs)
+{
+    if (!CCustomDialog::PreCreateWindow(cs))
+        return FALSE;
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled())
+    {
+        RegisterBlurDialogWndClass(cs.lpszClass, _T("CCustomBlurDlg"));
+        cs.lpszClass = _T("CCustomBlurDlg");
+    }
+#endif
+    return TRUE;
+}
+
+BOOL CCustomBlurDialogBase::OnInitDialog()
+{
+    BOOL b = CCustomDialog::OnInitDialog();
+#if CCUSTOM_AERO_SUPPORT
+    ::SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, 0);
+#endif
+    ApplyDwmBlur();
+    return b;
+}
 
 void CCustomBlurDialogBase::ApplyDwmBlur()
 {
     if (!m_hWnd || !::IsWindow(m_hWnd)) return;
-    COSVersion os; os.GetVersionString();
-    if (os.in.dwMajorVersion == 10 && os.in.dwBuildNumber >= 22000) { EnableDwmAcrylicWin11(m_hWnd); EnableRoundedCorners(m_hWnd); }
-    else if (os.in.dwMajorVersion == 10 || os.in.dwMajorVersion >= 6) { EnableDwmBlurBehindWin10(m_hWnd); }
-    m_bBlurApplied = TRUE;
+#if CCUSTOM_AERO_SUPPORT
+    m_bAeroEnabled = CCC_IsAeroEnabled();
+    if (!m_bAeroEnabled)
+    {
+        CCC_ClearOpaqueFixerList(m_opaqueFixers);
+        CCC_ApplyAero(m_hWnd, FALSE);
+        CCC_PrepareDialogSurface(m_hWnd, FALSE);
+        PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
+        m_bBlurApplied = FALSE;
+        Invalidate();
+        return;
+    }
+    CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
+#else
+    m_bBlurApplied = FALSE;
+#endif
+}
+
+void CCustomBlurDialogBase::OnDestroy()
+{
+#if CCUSTOM_AERO_SUPPORT
+    CCC_ClearOpaqueFixerList(m_opaqueFixers);
+#endif
+    CCustomDialog::OnDestroy();
+}
+
+void CCustomBlurDialogBase::OnSize(UINT nType, int cx, int cy)
+{
+    CCustomDialog::OnSize(nType, cx, cy);
+}
+
+void CCustomBlurDialogBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
+{
+    CCustomDialog::OnWindowPosChanged(lpwndpos);
+#if CCUSTOM_AERO_SUPPORT
+    if ((lpwndpos->flags & SWP_SHOWWINDOW) && !m_bBlurApplied && CCC_IsAeroEnabled())
+        ApplyDwmBlur();
+#endif
+}
+
+void CCustomBlurDialogBase::OnCompositionChanged()
+{
+#if CCUSTOM_AERO_SUPPORT
+    ApplyDwmBlur();
+#endif
+}
+
+LRESULT CCustomBlurDialogBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (m_bAeroEnabled && CCC_IsWin11())
+        CCC_ReapplyOpaqueFixers(this, m_opaqueFixers);
+#endif
+    return 0;
 }
 
 // ============================================================================
-// CCustomDialogEx
+// カスタムダイアログクラス基底 (CDialogEx版)
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomDialogEx, CDialogEx)
 
@@ -3131,12 +4606,37 @@ BEGIN_MESSAGE_MAP(CCustomDialogEx, CDialogEx)
     ON_MESSAGE(WM_USER + 1000, OnSubclassControls)
 END_MESSAGE_MAP()
 
-CCustomDialogEx::CCustomDialogEx() { m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG); }
-CCustomDialogEx::CCustomDialogEx(UINT nIDTemplate, CWnd* pParentWnd)
-    : CDialogEx(nIDTemplate, pParentWnd) {
+CCustomDialogEx::CCustomDialogEx() : m_bAeroEnabled(FALSE)
+{
     m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG);
+    m_brNull.CreateStockObject(NULL_BRUSH);
 }
-CCustomDialogEx::~CCustomDialogEx() { if (m_brDialog.GetSafeHandle())m_brDialog.DeleteObject(); }
+
+CCustomDialogEx::CCustomDialogEx(UINT n, CWnd* p) : CDialogEx(n, p), m_bAeroEnabled(FALSE)
+{
+    m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG);
+    m_brNull.CreateStockObject(NULL_BRUSH);
+}
+
+CCustomDialogEx::~CCustomDialogEx()
+{
+    if (m_brDialog.GetSafeHandle()) m_brDialog.DeleteObject();
+    if (m_brNull.GetSafeHandle()) m_brNull.DeleteObject();
+}
+
+void CCustomDialogEx::EnableAero(BOOL b)
+{
+    m_bAeroEnabled = b;
+#if CCUSTOM_AERO_SUPPORT
+    if (GetSafeHwnd())
+    {
+        CCC_ApplyAero(m_hWnd, b);
+        CCC_PrepareDialogSurface(m_hWnd, b);
+        PROPAGATE_AERO_TO_CHILDREN(m_hWnd, b);
+        Invalidate();
+    }
+#endif
+}
 
 BOOL CCustomDialogEx::OnInitDialog()
 {
@@ -3144,109 +4644,135 @@ BOOL CCustomDialogEx::OnInitDialog()
     SubclassChildControls();
     return b;
 }
-LRESULT CCustomDialogEx::OnSubclassControls(WPARAM, LPARAM) { SubclassChildControls(); return 0; }
+
+LRESULT CCustomDialogEx::OnSubclassControls(WPARAM, LPARAM)
+{
+    SubclassChildControls();
+    return 0;
+}
 
 void CCustomDialogEx::SubclassChildControls()
 {
-    HWND hWndChild = ::GetWindow(m_hWnd, GW_CHILD);
-    while (hWndChild != NULL)
-    {
-        if (!::IsWindow(hWndChild)) break;
-        if (!(::GetWindowLong(hWndChild, GWL_STYLE) & WS_VISIBLE)) { hWndChild = ::GetWindow(hWndChild, GW_HWNDNEXT); continue; }
-        CWnd* pWnd = CWnd::FromHandlePermanent(hWndChild);
-        if (pWnd != NULL && pWnd != this) { hWndChild = ::GetWindow(hWndChild, GW_HWNDNEXT); continue; }
-
-        TCHAR szClassName[256];
-        ::GetClassName(hWndChild, szClassName, 256);
-
-        if (_tcsicmp(szClassName, _T("Edit")) == 0) { CCustomEdit* p = new CCustomEdit();            p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        else if (_tcsicmp(szClassName, _T("Static")) == 0) { CCustomStatic* p = new CCustomStatic();        p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        else if (_tcsicmp(szClassName, _T("ListBox")) == 0) { CCustomListBox* p = new CCustomListBox();       p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        else if (_tcsicmp(szClassName, _T("ComboBox")) == 0) { CCustomComboBox* p = new CCustomComboBox();     p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        else if (_tcsicmp(szClassName, WC_LISTVIEW) == 0) { CCustomListCtrl* p = new CCustomListCtrl();     p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        else if (_tcsicmp(szClassName, _T("Button")) == 0)
-        {
-            LONG lStyle = ::GetWindowLong(hWndChild, GWL_STYLE);
-            if ((lStyle & BS_CHECKBOX) || (lStyle & BS_AUTOCHECKBOX))
-            {
-                if (lStyle & BS_PUSHLIKE) { CCustomStandardButton* p = new CCustomStandardButton(); p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-                else { CCustomCheckBox* p = new CCustomCheckBox();              p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-            }
-            else if (lStyle & BS_GROUPBOX) { CCustomGroupBox* p = new CCustomGroupBox();         p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-            else { CCustomStandardButton* p = new CCustomStandardButton(); p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        }
-        else if (_tcsicmp(szClassName, TRACKBAR_CLASS) == 0)
-        {
-            LONG lStyle = ::GetWindowLong(hWndChild, GWL_STYLE);
-            if (lStyle & TBS_ENABLESELRANGE) { CCustomRangeSliderCtrl* p = new CCustomRangeSliderCtrl(); p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-            else { CCustomSliderCtrl* p = new CCustomSliderCtrl();            p->EnableAutoDelete(); p->SubclassWindow(hWndChild); }
-        }
-
-        hWndChild = ::GetWindow(hWndChild, GW_HWNDNEXT);
-    }
+    DoSubclassChildControls(this);
 }
 
-HBRUSH CCustomDialogEx::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+HBRUSH CCustomDialogEx::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC)
 {
-    if (nCtlColor == CTLCOLOR_DLG) return (HBRUSH)m_brDialog.GetSafeHandle();
-
-    if (nCtlColor == CTLCOLOR_EDIT)
-    {
-        CWnd* pParent = pWnd->GetParent();
-        if (pParent)
-        {
-            TCHAR sz[256]; ::GetClassName(pParent->m_hWnd, sz, 256);
-            if (_tcsicmp(sz, _T("ComboBox")) == 0)
-            {
-                pDC->SetBkColor(COLOR_COMBO_BG); pDC->SetTextColor(RGB(0, 0, 0));
-                static CBrush brCombo(COLOR_COMBO_BG); return (HBRUSH)brCombo.GetSafeHandle();
-            }
-        }
-        pDC->SetBkColor(COLOR_EDIT_BG); pDC->SetTextColor(RGB(0, 0, 0));
-        static CBrush brEdit(COLOR_EDIT_BG); return (HBRUSH)brEdit.GetSafeHandle();
-    }
-
-    if (nCtlColor == CTLCOLOR_LISTBOX)
-    {
-        pDC->SetBkColor(COLOR_COMBO_BG); pDC->SetTextColor(RGB(0, 0, 0));
-        static CBrush brCombo(COLOR_COMBO_BG); return (HBRUSH)brCombo.GetSafeHandle();
-    }
-
-    if (nCtlColor == CTLCOLOR_STATIC || nCtlColor == CTLCOLOR_BTN)
-    {
-        pDC->SetBkColor(COLOR_DIALOG_BG); pDC->SetTextColor(RGB(0, 0, 0));
-        return (HBRUSH)m_brDialog.GetSafeHandle();
-    }
-
-    return CDialogEx::OnCtlColor(pDC, pWnd, nCtlColor);
+    HBRUSH h = DlgOnCtlColor(pDC, pWnd, nC, m_brDialog, m_bAeroEnabled);
+    return h ? h : CDialogEx::OnCtlColor(pDC, pWnd, nC);
 }
 
 BOOL CCustomDialogEx::OnEraseBkgnd(CDC* pDC)
 {
-    CRect rect; GetClientRect(&rect);
-    pDC->FillRect(&rect, &m_brDialog);
-    return TRUE;
+    return DlgOnEraseBkgnd(pDC, m_brDialog, m_bAeroEnabled, m_hWnd);
 }
 
-void CCustomDialogEx::OnPaint() { Default(); }
+void CCustomDialogEx::OnPaint()
+{
+    if (m_bAeroEnabled)
+        DlgOnPaintAero(this, m_bAeroEnabled);
+    else
+        CDialogEx::OnPaint();
+}
 
 // ============================================================================
-// CCustomBlurDialogExBase
+// アクリルぼかし適用済みカスタムダイアログ (CDialogEx版)
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomBlurDialogExBase, CCustomDialogEx)
 
-CCustomBlurDialogExBase::CCustomBlurDialogExBase() : m_bBlurApplied(FALSE) { m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG); }
-CCustomBlurDialogExBase::CCustomBlurDialogExBase(UINT nIDTemplate, CWnd* pParent) : CCustomDialogEx(nIDTemplate, pParent), m_bBlurApplied(FALSE) { m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG); }
-CCustomBlurDialogExBase::~CCustomBlurDialogExBase() { if (m_brDialog.GetSafeHandle())m_brDialog.DeleteObject(); }
+BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
+    ON_WM_SIZE()
+    ON_WM_WINDOWPOSCHANGED()
+    ON_WM_DWMCOMPOSITIONCHANGED()
+    ON_WM_DESTROY()
+#if CCUSTOM_AERO_SUPPORT
+    ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
+#endif
+END_MESSAGE_MAP()
 
-BOOL CCustomBlurDialogExBase::OnInitDialog() { BOOL b = CCustomDialogEx::OnInitDialog(); ApplyDwmBlur(); return b; }
-int  CCustomBlurDialogExBase::OnCreate(LPCREATESTRUCT lp) { if (CCustomDialogEx::OnCreate(lp) == -1)return -1; ApplyDwmBlur(); return 0; }
+CCustomBlurDialogExBase::CCustomBlurDialogExBase() : m_bBlurApplied(FALSE) {}
+CCustomBlurDialogExBase::CCustomBlurDialogExBase(UINT n, CWnd* p) : CCustomDialogEx(n, p), m_bBlurApplied(FALSE) {}
+CCustomBlurDialogExBase::~CCustomBlurDialogExBase() {}
+
+BOOL CCustomBlurDialogExBase::PreCreateWindow(CREATESTRUCT& cs)
+{
+    if (!CCustomDialogEx::PreCreateWindow(cs))
+        return FALSE;
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled())
+    {
+        RegisterBlurDialogWndClass(cs.lpszClass, _T("CCustomBlurDlgEx"));
+        cs.lpszClass = _T("CCustomBlurDlgEx");
+    }
+#endif
+    return TRUE;
+}
+
+BOOL CCustomBlurDialogExBase::OnInitDialog()
+{
+    BOOL b = CCustomDialogEx::OnInitDialog();
+#if CCUSTOM_AERO_SUPPORT
+    ::SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, 0);
+#endif
+    ApplyDwmBlur();
+    return b;
+}
 
 void CCustomBlurDialogExBase::ApplyDwmBlur()
 {
     if (!m_hWnd || !::IsWindow(m_hWnd)) return;
-    COSVersion os; os.GetVersionString();
-    if (os.in.dwMajorVersion == 10 && os.in.dwBuildNumber >= 22000) { EnableDwmAcrylicWin11(m_hWnd); EnableRoundedCorners(m_hWnd); }
-    else if (os.in.dwMajorVersion == 10 || os.in.dwMajorVersion >= 6) { EnableDwmBlurBehindWin10(m_hWnd); }
-    m_bBlurApplied = TRUE;
+#if CCUSTOM_AERO_SUPPORT
+    m_bAeroEnabled = CCC_IsAeroEnabled();
+    if (!m_bAeroEnabled)
+    {
+        CCC_ClearOpaqueFixerList(m_opaqueFixers);
+        CCC_ApplyAero(m_hWnd, FALSE);
+        CCC_PrepareDialogSurface(m_hWnd, FALSE);
+        PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
+        m_bBlurApplied = FALSE;
+        Invalidate();
+        return;
+    }
+    CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
+#else
+    m_bBlurApplied = FALSE;
+#endif
+}
+
+void CCustomBlurDialogExBase::OnDestroy()
+{
+#if CCUSTOM_AERO_SUPPORT
+    CCC_ClearOpaqueFixerList(m_opaqueFixers);
+#endif
+    CCustomDialogEx::OnDestroy();
+}
+
+void CCustomBlurDialogExBase::OnSize(UINT nType, int cx, int cy)
+{
+    CCustomDialogEx::OnSize(nType, cx, cy);
+}
+
+void CCustomBlurDialogExBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
+{
+    CCustomDialogEx::OnWindowPosChanged(lpwndpos);
+#if CCUSTOM_AERO_SUPPORT
+    if ((lpwndpos->flags & SWP_SHOWWINDOW) && !m_bBlurApplied && CCC_IsAeroEnabled())
+        ApplyDwmBlur();
+#endif
+}
+
+void CCustomBlurDialogExBase::OnCompositionChanged()
+{
+#if CCUSTOM_AERO_SUPPORT
+    ApplyDwmBlur();
+#endif
+}
+
+LRESULT CCustomBlurDialogExBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (m_bAeroEnabled && CCC_IsWin11())
+        CCC_ReapplyOpaqueFixers(this, m_opaqueFixers);
+#endif
+    return 0;
 }

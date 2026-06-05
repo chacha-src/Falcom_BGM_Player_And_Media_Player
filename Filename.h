@@ -4,7 +4,7 @@
 
 // CFilename ダイアログ
 
-class CFilename : public CCustomDialog
+class CFilename : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CFilename)
 

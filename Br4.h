@@ -3,7 +3,7 @@
 
 // CBr4 ダイアログ
 
-class CBr4 : public CCustomDialog
+class CBr4 : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CBr4)
 

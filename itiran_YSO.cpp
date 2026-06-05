@@ -17,7 +17,7 @@ static char THIS_FILE[] = __FILE__;
 extern CString fnn;
 
 Citiran_YSO::Citiran_YSO(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(Citiran_YSO::IDD, pParent)
+	: CCustomBlurDialogBase(Citiran_YSO::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(Citiran_YSO)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -27,7 +27,7 @@ Citiran_YSO::Citiran_YSO(CWnd* pParent /*=NULL*/)
 
 void Citiran_YSO::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(Citiran_YSO)
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	//}}AFX_DATA_MAP
@@ -35,7 +35,7 @@ void Citiran_YSO::DoDataExchange(CDataExchange* pDX)
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(Citiran_YSO, CCustomDialog)
+BEGIN_MESSAGE_MAP(Citiran_YSO, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(Citiran_YSO)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	//}}AFX_MSG_MAP
@@ -163,7 +163,7 @@ YSO_ARR(tr)={YSO_INIT} YSO_ARR_END
 #undef YSO_ARR
 #undef YSO_ARR_END
 
-static inline CString YSO_TRACK(int i){ switch(savedata.lang){ case 0: return CString(CStringA(tiyso[i])); case 1: return CString(CStringA(tiyso_en[i])); case 2: return CString(CStringA(tiyso_fr[i])); case 3: return CString(CStringA(tiyso_it[i])); case 4: return CString(CStringA(tiyso_es[i])); case 5: return CString(CStringA(tiyso_ko[i])); case 6: return CString(CStringA(tiyso_zh[i])); case 7: return CString(CStringA(tiyso_ar[i])); case 8: return CString(CStringA(tiyso_ru[i])); case 9: return CString(CStringA(tiyso_de[i])); case 10: return CString(CStringA(tiyso_pt[i])); case 11: return CString(CStringA(tiyso_nl[i])); case 12: return CString(CStringA(tiyso_pl[i])); case 13: return CString(CStringA(tiyso_tr[i])); default: return CString(CStringA(tiyso_en[i])); }}
+static inline CString YSO_TRACK(int i){ switch(savedata.lang){ case 0: return GameTrackTitle(tiyso[i]); case 1: return GameTrackTitle(tiyso_en[i]); case 2: return GameTrackTitle(tiyso_fr[i]); case 3: return GameTrackTitle(tiyso_it[i]); case 4: return GameTrackTitle(tiyso_es[i]); case 5: return GameTrackTitle(tiyso_ko[i]); case 6: return GameTrackTitle(tiyso_zh[i]); case 7: return GameTrackTitle(tiyso_ar[i]); case 8: return GameTrackTitle(tiyso_ru[i]); case 9: return GameTrackTitle(tiyso_de[i]); case 10: return GameTrackTitle(tiyso_pt[i]); case 11: return GameTrackTitle(tiyso_nl[i]); case 12: return GameTrackTitle(tiyso_pl[i]); case 13: return GameTrackTitle(tiyso_tr[i]); default: return GameTrackTitle(tiyso_en[i]); }}
 
 CString Citiran_YSO::Gett(int a){
 	CString s,ss;
@@ -199,7 +199,7 @@ void Citiran_YSO::OnDblclkList1()
 
 BOOL Citiran_YSO::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"イース・オリジン", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	

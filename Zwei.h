@@ -3,7 +3,7 @@
 
 // CZwei ダイアログ
 
-class CZwei : public CCustomDialog
+class CZwei : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CZwei)
 

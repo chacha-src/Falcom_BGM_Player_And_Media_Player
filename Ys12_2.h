@@ -3,7 +3,7 @@
 
 // CYs12_2 ダイアログ
 
-class CYs12_2 : public CCustomDialog
+class CYs12_2 : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CYs12_2)
 

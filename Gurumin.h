@@ -3,7 +3,7 @@
 
 // CGurumin ダイアログ
 
-class CGurumin : public CCustomDialog
+class CGurumin : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CGurumin)
 

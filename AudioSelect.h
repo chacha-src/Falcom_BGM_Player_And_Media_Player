@@ -4,7 +4,7 @@
 
 // CAudioSelect ダイアログ
 
-class CAudioSelect : public CCustomDialog
+class CAudioSelect : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CAudioSelect)
 

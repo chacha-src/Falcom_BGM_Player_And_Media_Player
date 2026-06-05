@@ -3,7 +3,7 @@
 
 // CXA ダイアログ
 
-class CXA : public CCustomDialog
+class CXA : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CXA)
 

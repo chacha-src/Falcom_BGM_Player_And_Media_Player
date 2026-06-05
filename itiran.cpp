@@ -16,7 +16,7 @@ static char THIS_FILE[] = __FILE__;
 
 extern CString fnn;
 itiran::itiran(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(itiran::IDD, pParent)
+	: CCustomBlurDialogBase(itiran::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(itiran)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -26,7 +26,7 @@ itiran::itiran(CWnd* pParent /*=NULL*/)
 
 void itiran::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(itiran)
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	//}}AFX_DATA_MAP
@@ -34,7 +34,7 @@ void itiran::DoDataExchange(CDataExchange* pDX)
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(itiran, CCustomDialog)
+BEGIN_MESSAGE_MAP(itiran, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(itiran)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	//}}AFX_MSG_MAP
@@ -395,7 +395,7 @@ ITIRAN_LANG(tr) = { L"001 --/SC Dancing with the Wind SC Ver",L"010 --/SC Shine 
 #undef ITIRAN_LANG
 #undef ITIRAN_LANG_END
 
-static inline CString ITIRAN_TRACK(int i) { switch (savedata.lang) { case 0: return CString(CStringA(ti[i])); case 1: return CString(CStringA(ti_en[i])); case 2: return CString(CStringA(ti_fr[i])); case 3: return CString(CStringA(ti_it[i])); case 4: return CString(CStringA(ti_es[i])); case 5: return CString(CStringA(ti_ko[i])); case 6: return CString(CStringA(ti_zh[i])); case 7: return CString(CStringA(ti_ar[i])); case 8: return CString(CStringA(ti_ru[i])); case 9: return CString(CStringA(ti_de[i])); case 10: return CString(CStringA(ti_pt[i])); case 11: return CString(CStringA(ti_nl[i])); case 12: return CString(CStringA(ti_pl[i])); case 13: return CString(CStringA(ti_tr[i])); default: return CString(CStringA(ti_en[i])); } }
+static inline CString ITIRAN_TRACK(int i) { switch (savedata.lang) { case 0: return GameTrackTitle(ti[i]); case 1: return GameTrackTitle(ti_en[i]); case 2: return GameTrackTitle(ti_fr[i]); case 3: return GameTrackTitle(ti_it[i]); case 4: return GameTrackTitle(ti_es[i]); case 5: return GameTrackTitle(ti_ko[i]); case 6: return GameTrackTitle(ti_zh[i]); case 7: return GameTrackTitle(ti_ar[i]); case 8: return GameTrackTitle(ti_ru[i]); case 9: return GameTrackTitle(ti_de[i]); case 10: return GameTrackTitle(ti_pt[i]); case 11: return GameTrackTitle(ti_nl[i]); case 12: return GameTrackTitle(ti_pl[i]); case 13: return GameTrackTitle(ti_tr[i]); default: return GameTrackTitle(ti_en[i]); } }
 
 CString itiran::Gett(int a) {
 	CString s;
@@ -430,7 +430,7 @@ void itiran::OnDblclkList1()
 
 BOOL itiran::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"空の軌跡 Second Chapter", L"Trails in the Sky Second Chapter", L"Les Sentiers du Ciel Second Chapitre", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"하늘의 궤적 Second Chapter", L"空之轨迹 Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 
@@ -497,6 +497,6 @@ BOOL itiran::OnInitDialog()
 
 void itiran::OnBnClickedOk()
 {
-	CCustomDialog::OnOK();
+	CCustomBlurDialogBase::OnOK();
 }
 

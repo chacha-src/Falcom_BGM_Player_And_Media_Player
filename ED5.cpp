@@ -8,10 +8,10 @@
 
 // CED5 ダイアログ
 
-IMPLEMENT_DYNAMIC(CED5, CCustomDialog)
+IMPLEMENT_DYNAMIC(CED5, CCustomBlurDialogBase)
 
 CED5::CED5(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CED5::IDD, pParent)
+	: CCustomBlurDialogBase(CED5::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CED5::~CED5()
 
 void CED5::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CED5, CCustomDialog)
+BEGIN_MESSAGE_MAP(CED5, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CED5);
 
@@ -1497,7 +1497,7 @@ void CED5::OnDblclkList1()
 
 BOOL CED5::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"英雄伝説V 海の檻歌", L"Legend of Heroes V Cagesong of the Ocean", L"Légende des Héros V Chant des Profondeurs", L"Legend of Heroes V Canto dell'Oceano", L"Legend of Heroes V Cantico del Océano", L"영웅전설V 바다의 감옥곡", L"英雄传说V 海之槛歌", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Käfiglied des Ozeans", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	

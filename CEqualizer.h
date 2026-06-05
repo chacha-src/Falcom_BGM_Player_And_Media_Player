@@ -4,7 +4,7 @@
 
 // CEqualizer ダイアログ
 
-class CEqualizer : public CCustomDialogEx
+class CEqualizer : public CCustomBlurDialogExBase
 {
 	DECLARE_DYNAMIC(CEqualizer)
 

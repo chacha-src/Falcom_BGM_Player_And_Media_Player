@@ -8,10 +8,10 @@
 
 // CZwei ダイアログ
 
-IMPLEMENT_DYNAMIC(CZwei, CCustomDialog)
+IMPLEMENT_DYNAMIC(CZwei, CCustomBlurDialogBase)
 
 CZwei::CZwei(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CZwei::IDD, pParent)
+	: CCustomBlurDialogBase(CZwei::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CZwei::~CZwei()
 
 void CZwei::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CZwei, CCustomDialog)
+BEGIN_MESSAGE_MAP(CZwei, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	ON_BN_CLICKED(IDOK, &CZwei::OnBnClickedOk)
 cmn(CZwei);
@@ -116,9 +116,9 @@ char tiz1_en[][128]={
 
 static inline CString ZweiTrack(int i) {
 	switch (savedata.lang) {
-		case 0: return CString(CStringA(tiz1[i]));
-		case 1: return CString(CStringA(tiz1_en[i]));
-		default: return CString(CStringA(tiz1_en[i]));
+		case 0: return GameTrackTitle(tiz1[i]);
+		case 1: return GameTrackTitle(tiz1_en[i]);
+		default: return GameTrackTitle(tiz1_en[i]);
 	}
 }
 
@@ -149,7 +149,7 @@ void CZwei::OnDblclkList1()
 
 BOOL CZwei::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(L"Zwei!!");
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	
@@ -174,5 +174,5 @@ BOOL CZwei::OnInitDialog()
 
 void CZwei::OnBnClickedOk()
 {
-	CCustomDialog::OnOK();
+	CCustomBlurDialogBase::OnOK();
 }

@@ -3,7 +3,7 @@
 
 // CTUKI ダイアログ
 
-class CTUKI : public CCustomDialog
+class CTUKI : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CTUKI)
 

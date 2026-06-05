@@ -8,10 +8,10 @@
 
 // CED3 ダイアログ
 
-IMPLEMENT_DYNAMIC(CED3, CCustomDialog)
+IMPLEMENT_DYNAMIC(CED3, CCustomBlurDialogBase)
 
 CED3::CED3(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CED3::IDD, pParent)
+	: CCustomBlurDialogBase(CED3::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CED3::~CED3()
 
 void CED3::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CED3, CCustomDialog)
+BEGIN_MESSAGE_MAP(CED3, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CED3);
 
@@ -1063,7 +1063,7 @@ void CED3::OnDblclkList1()
 
 BOOL CED3::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"英雄伝説III 新・白き魔女", L"Legend of Heroes III White Witch", L"Légende des Héros III Sorcière Blanche", L"Legend of Heroes III Strega Bianca", L"Legend of Heroes III Bruja Blanca", L"영웅전설III 백색 마녀", L"英雄传说III 白之魔女", L"Legend of Heroes III White Witch", L"Legend of Heroes III White Witch", L"Legend of Heroes III Weiße Hexe", L"Legend of Heroes III White Witch", L"Legend of Heroes III White Witch", L"Legend of Heroes III Biała Czarownica", L"Legend of Heroes III White Witch"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	

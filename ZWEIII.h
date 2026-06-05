@@ -11,7 +11,7 @@
 // CZWEIII ダイアログ
 #include "CCustomControl.h"
 
-class CZWEIII : public CCustomDialog
+class CZWEIII : public CCustomBlurDialogBase
 {
 // コンストラクション
 public:

@@ -16,7 +16,7 @@ protected:
 
 // CKpilist ダイアログ
 
-class CKpilist : public CCustomDialog
+class CKpilist : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CKpilist)
 

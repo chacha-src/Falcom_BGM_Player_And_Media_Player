@@ -16,7 +16,7 @@ static char THIS_FILE[] = __FILE__;
 
 
 CYsC2::CYsC2(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CYsC2::IDD, pParent)
+	: CCustomBlurDialogBase(CYsC2::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(CYsC2)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -26,7 +26,7 @@ CYsC2::CYsC2(CWnd* pParent /*=NULL*/)
 
 void CYsC2::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(CYsC2)
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	//}}AFX_DATA_MAP
@@ -34,7 +34,7 @@ void CYsC2::DoDataExchange(CDataExchange* pDX)
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CYsC2, CCustomDialog)
+BEGIN_MESSAGE_MAP(CYsC2, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(CYsC2)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	//}}AFX_MSG_MAP
@@ -175,7 +175,7 @@ YSC2_ARR(tr)={YSC2_INIT} YSC2_ARR_END
 #undef YSC2_ARR
 #undef YSC2_ARR_END
 
-static inline CString YsC2Track(int i){ switch(savedata.lang){ case 0: return CString(CStringA(tiyc2[i])); case 1: return (i>=93) ? CString(CStringA(tiyc2_en_star[i-93])) : CString(CStringA(tiyc2[i])); case 2: return CString(CStringA(tiyc2_fr[i])); case 3: return CString(CStringA(tiyc2_it[i])); case 4: return CString(CStringA(tiyc2_es[i])); case 5: return CString(CStringA(tiyc2_ko[i])); case 6: return CString(CStringA(tiyc2_zh[i])); case 7: return CString(CStringA(tiyc2_ar[i])); case 8: return CString(CStringA(tiyc2_ru[i])); case 9: return CString(CStringA(tiyc2_de[i])); case 10: return CString(CStringA(tiyc2_pt[i])); case 11: return CString(CStringA(tiyc2_nl[i])); case 12: return CString(CStringA(tiyc2_pl[i])); case 13: return CString(CStringA(tiyc2_tr[i])); default: return (i>=93) ? CString(CStringA(tiyc2_en_star[i-93])) : CString(CStringA(tiyc2[i])); }}
+static inline CString YsC2Track(int i){ switch(savedata.lang){ case 0: return GameTrackTitle(tiyc2[i]); case 1: return (i>=93) ? GameTrackTitle(tiyc2_en_star[i-93]) : GameTrackTitle(tiyc2[i]); case 2: return GameTrackTitle(tiyc2_fr[i]); case 3: return GameTrackTitle(tiyc2_it[i]); case 4: return GameTrackTitle(tiyc2_es[i]); case 5: return GameTrackTitle(tiyc2_ko[i]); case 6: return GameTrackTitle(tiyc2_zh[i]); case 7: return GameTrackTitle(tiyc2_ar[i]); case 8: return GameTrackTitle(tiyc2_ru[i]); case 9: return GameTrackTitle(tiyc2_de[i]); case 10: return GameTrackTitle(tiyc2_pt[i]); case 11: return GameTrackTitle(tiyc2_nl[i]); case 12: return GameTrackTitle(tiyc2_pl[i]); case 13: return GameTrackTitle(tiyc2_tr[i]); default: return (i>=93) ? GameTrackTitle(tiyc2_en_star[i-93]) : GameTrackTitle(tiyc2[i]); }}
 
 CString CYsC2::Gett(int a){
 	CString s,ss;
@@ -209,7 +209,7 @@ void CYsC2::OnDblclkList1()
 
 BOOL CYsC2::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(L"Ys I&II Chronicles Ys 2");
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	

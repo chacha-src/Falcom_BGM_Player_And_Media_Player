@@ -4,7 +4,7 @@
 #include "CCustomControl.h"
 
 class CDailog1 :
-    public CCustomDialog
+    public CCustomBlurDialogBase
 {
 public:
     CDailog1() {

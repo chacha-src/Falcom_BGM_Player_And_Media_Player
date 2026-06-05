@@ -8,10 +8,10 @@
 
 // CYs12_2 ダイアログ
 
-IMPLEMENT_DYNAMIC(CYs12_2, CCustomDialog)
+IMPLEMENT_DYNAMIC(CYs12_2, CCustomBlurDialogBase)
 
 CYs12_2::CYs12_2(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CYs12_2::IDD, pParent)
+	: CCustomBlurDialogBase(CYs12_2::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CYs12_2::~CYs12_2()
 
 void CYs12_2::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CYs12_2, CCustomDialog)
+BEGIN_MESSAGE_MAP(CYs12_2, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CYs12_2);
 
@@ -127,7 +127,7 @@ YS122_ARR(tr)={YS122_INIT} YS122_ARR_END
 #undef YS122_ARR
 #undef YS122_ARR_END
 
-static inline CString Ys122Track(int i){ switch(savedata.lang){ case 0: return CString(CStringA(tiy122[i])); case 1: return CString(CStringA(tiy122_en[i])); case 2: return CString(CStringA(tiy122_fr[i])); case 3: return CString(CStringA(tiy122_it[i])); case 4: return CString(CStringA(tiy122_es[i])); case 5: return CString(CStringA(tiy122_ko[i])); case 6: return CString(CStringA(tiy122_zh[i])); case 7: return CString(CStringA(tiy122_ar[i])); case 8: return CString(CStringA(tiy122_ru[i])); case 9: return CString(CStringA(tiy122_de[i])); case 10: return CString(CStringA(tiy122_pt[i])); case 11: return CString(CStringA(tiy122_nl[i])); case 12: return CString(CStringA(tiy122_pl[i])); case 13: return CString(CStringA(tiy122_tr[i])); default: return CString(CStringA(tiy122_en[i])); }}
+static inline CString Ys122Track(int i){ switch(savedata.lang){ case 0: return GameTrackTitle(tiy122[i]); case 1: return GameTrackTitle(tiy122_en[i]); case 2: return GameTrackTitle(tiy122_fr[i]); case 3: return GameTrackTitle(tiy122_it[i]); case 4: return GameTrackTitle(tiy122_es[i]); case 5: return GameTrackTitle(tiy122_ko[i]); case 6: return GameTrackTitle(tiy122_zh[i]); case 7: return GameTrackTitle(tiy122_ar[i]); case 8: return GameTrackTitle(tiy122_ru[i]); case 9: return GameTrackTitle(tiy122_de[i]); case 10: return GameTrackTitle(tiy122_pt[i]); case 11: return GameTrackTitle(tiy122_nl[i]); case 12: return GameTrackTitle(tiy122_pl[i]); case 13: return GameTrackTitle(tiy122_tr[i]); default: return GameTrackTitle(tiy122_en[i]); }}
 
 CString CYs12_2::Gett(int a){
 	CString s,ss;
@@ -161,7 +161,7 @@ void CYs12_2::OnDblclkList1()
 
 BOOL CYs12_2::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"Ys 12 完全版 Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2", L"Ys 12 Complete Ys2"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	

@@ -9,10 +9,10 @@
 
 // CZeroFol ダイアログ
 
-IMPLEMENT_DYNAMIC(CZeroFol, CCustomDialog)
+IMPLEMENT_DYNAMIC(CZeroFol, CCustomBlurDialogBase)
 
 CZeroFol::CZeroFol(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(IDD_ZEROFOL, pParent)
+	: CCustomBlurDialogBase(IDD_ZEROFOL, pParent)
 {
 
 }
@@ -23,14 +23,14 @@ CZeroFol::~CZeroFol()
 
 void CZeroFol::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_EDIT2, m_fol);
 	DDX_Control(pDX, IDOK, m_okdummy);
 	DDX_Control(pDX, IDC_FOL, m_okdummya);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CZeroFol, CCustomDialog)
+BEGIN_MESSAGE_MAP(CZeroFol, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_FOL, &CZeroFol::OnBnClickedFol)
 	ON_BN_CLICKED(IDOK, &CZeroFol::OnBnClickedOk)
 	cmn(CZeroFol);
@@ -53,7 +53,7 @@ void CZeroFol::OnBnClickedFol()
 
 BOOL CZeroFol::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(L"碧の軌跡 t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt"));
 	SetDlgItemText(IDC_STATIC, LL14(L"碧の軌跡にはループデータ存在しないため、零の軌跡の「t_bgm..dt」を選択してください", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt"));
@@ -77,5 +77,5 @@ void CZeroFol::OnBnClickedOk()
 	_tcscpy(savedata.zero, ss);
 	s.ReleaseBuffer();
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
-	CCustomDialog::OnOK();
+	CCustomBlurDialogBase::OnOK();
 }

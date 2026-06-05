@@ -9,10 +9,10 @@
 
 // CEqualizer ダイアログ
 
-IMPLEMENT_DYNAMIC(CEqualizer, CCustomDialogEx)
+IMPLEMENT_DYNAMIC(CEqualizer, CCustomBlurDialogExBase)
 
 CEqualizer::CEqualizer(CWnd* pParent /*=nullptr*/)
-	: CCustomDialogEx(IDD_EQUALIZER, pParent)
+	: CCustomBlurDialogExBase(IDD_EQUALIZER, pParent)
 {
 
 }
@@ -23,7 +23,7 @@ CEqualizer::~CEqualizer()
 
 void CEqualizer::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialogEx::DoDataExchange(pDX);
+	CCustomBlurDialogExBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_SLIDER7, m_s0);
 	DDX_Control(pDX, IDC_SLIDER9, m_s1);
 	DDX_Control(pDX, IDC_SLIDER8, m_s2);
@@ -79,7 +79,7 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 }
 
 
-BEGIN_MESSAGE_MAP(CEqualizer, CCustomDialogEx)
+BEGIN_MESSAGE_MAP(CEqualizer, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_COMBO1, &CEqualizer::OnCbnSelchangeCombo1)
 	ON_CBN_SELCHANGE(IDC_COMBO5, &CEqualizer::OnCbnSelchangeCombo5)
 	ON_WM_TIMER()
@@ -94,7 +94,7 @@ extern int stflg;
 // CEqualizer メッセージ ハンドラー
 BOOL CEqualizer::OnInitDialog()
 {
-	CCustomDialogEx::OnInitDialog();
+	CCustomBlurDialogExBase::OnInitDialog();
 
 	SetWindowText(LL14(L"イコライザー", L"Equalizer", L"Equaliseur", L"Equalizer", L"Ecualizador", L"이퀄라이저", L"均衡器", L"المعادل", L"Эквалайзер", L"Equalizer", L"Equalizador", L"Equalizer", L"Korektor", L"Ekolayzer"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
@@ -173,10 +173,10 @@ BOOL CEqualizer::OnInitDialog()
 	m_srittai.SetMode(2);
 
 	ReapplyDecorativeTitleFont();
-	
-	m_t.SetPreferWideMode(TRUE);
+
+	m_t.SetPreferWideMode(FALSE);
 	m_t.SetGradation(COLOR_GRAD_DARK_GREEN, COLOR_RANGE_SELECTION, 135, TRUE); // 135 左上から右下
-	m_t.SetDropShadow(RGB(0,0,0), 45, 15, 6, TRUE);
+	m_t.SetDropShadow(RGB(0,0,0), 45, 4, 2, TRUE);
 
 	m_s0.SetRange(0, 200);
 	m_s1.SetRange(0, 200);
@@ -722,7 +722,7 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	}
 
 
-	CCustomDialogEx::OnTimer(nIDEvent);
+	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
 
 void CEqualizer::OnBnClickedOk3()
@@ -795,7 +795,7 @@ BOOL CEqualizer::PreTranslateMessage(MSG* pMsg)
 {
 	// TODO: ここに特定なコードを追加するか、もしくは基底クラスを呼び出してください。
 	m_tooltip.RelayEvent(pMsg);
-	return CCustomDialogEx::PreTranslateMessage(pMsg);
+	return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
 }
 
 void CEqualizer::OnBnClickedOk()

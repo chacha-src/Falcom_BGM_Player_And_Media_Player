@@ -176,7 +176,7 @@ void CControlFixer::OnPaint(HWND hWnd, HDC hDestDC)
 // CBlurDialogBase 実装
 // ---------------------------------------------------------
 
-IMPLEMENT_DYNAMIC(CBlurDialogBase, CCustomDialog)
+IMPLEMENT_DYNAMIC(CBlurDialogBase, CCustomBlurDialogBase)
 
 BEGIN_MESSAGE_MAP(CBlurDialogBase, CDialog)
 	ON_WM_CREATE()

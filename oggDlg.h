@@ -1,4 +1,4 @@
-﻿// oggDlg.h : ヘッダー ファイル
+// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -32,7 +32,7 @@ class CDouga;
 class CPlayList;
 class CRender;
 class COggApp;
-class COggDlg : public CCustomDialog
+class COggDlg : public CCustomBlurDialogBase
 {
 	friend class CDouga;
 	friend class CPlayList;
@@ -271,6 +271,8 @@ public:
 	LRESULT OnHotKey(WPARAM wp, LPARAM);
 	afx_msg void OnKillFocus(CWnd* pNewWnd);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	CCustomStandardButton m_playlist;
 	afx_msg void OnPlayList();

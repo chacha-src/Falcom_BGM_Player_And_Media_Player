@@ -11,7 +11,7 @@
 // itiran ダイアログ
 #include "CCustomControl.h"
 
-class itiran : public CCustomDialog
+class itiran : public CCustomBlurDialogBase
 {
 // コンストラクション
 public:

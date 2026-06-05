@@ -3,7 +3,7 @@
 
 // CSan1 ダイアログ
 
-class CSan1 : public CCustomDialog
+class CSan1 : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CSan1)
 

@@ -3,7 +3,7 @@
 
 // CNishi ダイアログ
 
-class CNishi : public CCustomDialog
+class CNishi : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CNishi)
 

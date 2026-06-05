@@ -5,7 +5,7 @@
 
 extern save savedata;
 extern CImageBase* Games;
-BEGIN_MESSAGE_MAP(CDailog1, CCustomDialog)
+BEGIN_MESSAGE_MAP(CDailog1, CCustomBlurDialogBase)
 	ON_WM_CREATE()
 	ON_WM_MOVING()
 	ON_WM_CTLCOLOR()
@@ -21,7 +21,7 @@ extern save savedata;
 extern CImageBase* Games;
 int CDailog1::OnCreate(LPCREATESTRUCT lpCreateStruct)
 {
-	if (CCustomDialog::OnCreate(lpCreateStruct) == -1)
+	if (CCustomBlurDialogBase::OnCreate(lpCreateStruct) == -1)
 		return -1;
 
 	// TODO: ここに特定な作成コードを追加してください。
@@ -41,7 +41,7 @@ int CDailog1::OnCreate(LPCREATESTRUCT lpCreateStruct)
 
 void CDailog1::OnMoving(UINT fwSide, LPRECT pRect)
 {
-	CCustomDialog::OnMoving(fwSide, pRect);
+	CCustomBlurDialogBase::OnMoving(fwSide, pRect);
 	CRect r;
 	GetWindowRect(&r);
 	if(Games)
@@ -52,7 +52,7 @@ void CDailog1::OnMoving(UINT fwSide, LPRECT pRect)
 
 HBRUSH CDailog1::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 {
-	HBRUSH hbr = CCustomDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
 
 	// TODO: ここで DC の属性を変更してください。
 	if (savedata.aero == 1) {
@@ -84,7 +84,7 @@ void CDailog1::OnTimer(UINT_PTR nIDEvent)
 		Games->MoveWindow(&r);
 	::SetWindowPos(Games->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-	CCustomDialog::OnTimer(nIDEvent);
+	CCustomBlurDialogBase::OnTimer(nIDEvent);
 }
 
 
@@ -92,5 +92,5 @@ BOOL CDailog1::OnNcActivate(BOOL bActive)
 {
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
 	SetTimer(500, 30, NULL);
-	return CCustomDialog::OnNcActivate(bActive);
+	return CCustomBlurDialogBase::OnNcActivate(bActive);
 }

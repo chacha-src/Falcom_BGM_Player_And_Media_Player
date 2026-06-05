@@ -19,7 +19,7 @@ static char THIS_FILE[] = __FILE__;
 
 
 CFolder::CFolder(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CFolder::IDD, pParent)
+	: CCustomBlurDialogBase(CFolder::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(CFolder)
 	//}}AFX_DATA_INIT
@@ -28,7 +28,7 @@ CFolder::CFolder(CWnd* pParent /*=NULL*/)
 
 void CFolder::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(CFolder)
 	DDX_Control(pDX, IDC_EDIT8, m_8s);
 	DDX_Control(pDX, IDC_EDIT7, m_7s);
@@ -86,7 +86,7 @@ void CFolder::DoDataExchange(CDataExchange* pDX)
 }
 
 
-BEGIN_MESSAGE_MAP(CFolder, CCustomDialog)
+BEGIN_MESSAGE_MAP(CFolder, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(CFolder)
 	ON_BN_CLICKED(IDC_BUTTON1, On1)
 	ON_BN_CLICKED(IDC_BUTTON5, On2)
@@ -130,7 +130,7 @@ extern save savedata;
 CImageBase* folderbase = NULL;
 BOOL CFolder::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(L"フォルダ設定", L"Folder Settings", L"Paramètres dossier", L"Impostazioni cartella", L"Configuración de carpeta", L"폴더 설정", L"文件夹设置", L"إعدادات المجلد", L"Настройки папки", L"Ordnereinstellungen", L"Configurações de pasta", L"Mapinstellingen", L"Ustawienia folderu", L"Klasör ayarları"));
 	SetDlgItemText(IDC_BUTTON57, LL14(
@@ -642,7 +642,7 @@ void CFolder::OnBnClickedButton57()
 
 HBRUSH CFolder::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 {
-	HBRUSH hbr = CCustomDialog::OnCtlColor(pDC, pWnd, nCtlColor);
+	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
 
 	// TODO: ここで DC の属性を変更してください。
 	if (savedata.aero == 1) {
@@ -664,7 +664,7 @@ HBRUSH CFolder::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 
 void CFolder::OnMoving(UINT fwSide, LPRECT pRect)
 {
-	CCustomDialog::OnMoving(fwSide, pRect);
+	CCustomBlurDialogBase::OnMoving(fwSide, pRect);
 	CRect r;
 	GetWindowRect(&r);
 	if (savedata.aero) {
@@ -676,7 +676,7 @@ void CFolder::OnMoving(UINT fwSide, LPRECT pRect)
 
 int CFolder::OnCreate(LPCREATESTRUCT lpCreateStruct)
 {
-	if (CCustomDialog::OnCreate(lpCreateStruct) == -1)
+	if (CCustomBlurDialogBase::OnCreate(lpCreateStruct) == -1)
 		return -1;
 
 	// TODO: ここに特定な作成コードを追加してください。
@@ -698,7 +698,7 @@ void CFolder::OnBnClickedOk()
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	if (folderbase)
 		delete folderbase;
-	CCustomDialog::OnOK();
+	CCustomBlurDialogBase::OnOK();
 }
 
 
@@ -707,7 +707,7 @@ void CFolder::OnBnClickedCancel()
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	if (folderbase)
 		delete folderbase;
-	CCustomDialog::OnCancel();
+	CCustomBlurDialogBase::OnCancel();
 }
 
 
@@ -719,5 +719,5 @@ void CFolder::OnTimer(UINT_PTR nIDEvent)
 	GetWindowRect(&r);
 	if (folderbase)
 	folderbase->MoveWindow(&r);
-	CCustomDialog::OnTimer(nIDEvent);
+	CCustomBlurDialogBase::OnTimer(nIDEvent);
 }

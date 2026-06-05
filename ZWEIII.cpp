@@ -17,7 +17,7 @@ static char THIS_FILE[] = __FILE__;
 extern CString fnn;
 
 CZWEIII::CZWEIII(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CZWEIII::IDD, pParent)
+	: CCustomBlurDialogBase(CZWEIII::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(CZWEIII)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -27,7 +27,7 @@ CZWEIII::CZWEIII(CWnd* pParent /*=NULL*/)
 
 void CZWEIII::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(CZWEIII)
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	//}}AFX_DATA_MAP
@@ -35,7 +35,7 @@ void CZWEIII::DoDataExchange(CDataExchange* pDX)
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CZWEIII, CCustomDialog)
+BEGIN_MESSAGE_MAP(CZWEIII, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(CZWEIII)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	//}}AFX_MSG_MAP
@@ -1077,7 +1077,7 @@ void CZWEIII::OnDblclkList1()
 
 BOOL CZWEIII::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(L"ZWEI II");
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 

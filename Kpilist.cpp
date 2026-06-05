@@ -8,10 +8,10 @@
 
 // CKpilist ダイアログ
 
-IMPLEMENT_DYNAMIC(CKpilist, CCustomDialog)
+IMPLEMENT_DYNAMIC(CKpilist, CCustomBlurDialogBase)
 
 CKpilist::CKpilist(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CKpilist::IDD, pParent)
+	: CCustomBlurDialogBase(CKpilist::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CKpilist::~CKpilist()
 
 void CKpilist::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_lc);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CKpilist, CCustomDialog)
+BEGIN_MESSAGE_MAP(CKpilist, CCustomBlurDialogBase)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST1, &CKpilist::OnLvnItemchangedList1)
 	ON_BN_CLICKED(IDOK, &CKpilist::OnBnClickedOk)
 cmn(CKpilist);
@@ -93,7 +93,7 @@ void CKpiListCtrl::BuildToolTipText(int row, int col, CString& out)
 
 BOOL CKpilist::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(L"kpi一覧", L"kpi list", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L""));
 	m_tooltip.Create(this);
@@ -275,11 +275,11 @@ BOOL CKpilist::PreTranslateMessage(MSG* pMsg)
 		return TRUE;
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
-	return CCustomDialog::PreTranslateMessage(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
 void CKpilist::OnBnClickedOk()
 {
-	CCustomDialog::OnOK();
+	CCustomBlurDialogBase::OnOK();
 }
 

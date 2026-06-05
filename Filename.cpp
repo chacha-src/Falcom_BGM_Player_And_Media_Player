@@ -10,10 +10,10 @@
 
 // CFilename ダイアログ
 
-IMPLEMENT_DYNAMIC(CFilename, CCustomDialog)
+IMPLEMENT_DYNAMIC(CFilename, CCustomBlurDialogBase)
 
 CFilename::CFilename(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CFilename::IDD, pParent)
+	: CCustomBlurDialogBase(CFilename::IDD, pParent)
 {
 
 }
@@ -24,7 +24,7 @@ CFilename::~CFilename()
 
 void CFilename::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_EDIT1, m_name);
 	DDX_Control(pDX, IDC_EDIT2, m_art);
 	DDX_Control(pDX, IDC_EDIT3, m_alb);
@@ -34,7 +34,7 @@ void CFilename::DoDataExchange(CDataExchange* pDX)
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CFilename, CCustomDialog)
+BEGIN_MESSAGE_MAP(CFilename, CCustomBlurDialogBase)
 	ON_BN_CLICKED(ID_OK, &CFilename::OnBnClickedOk)
 	ON_BN_CLICKED(IDOK, &CFilename::OnBnClickedOk2)
 	cmn(CFilename);
@@ -44,7 +44,7 @@ BEGIN_MESSAGE_MAP(CFilename, CCustomDialog)
 
 BOOL CFilename::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(L"ファイル名変更", L"Rename File", L"Renommer le fichier", L"Rinomina file", L"Cambiar nombre de archivo", L"파일 이름 바꾸기", L"重命名文件", L"إعادة تسمية الملف", L"Переименовать файл", L"Datei umbenennen", L"Renomear arquivo", L"Bestand hernoemen", L"Zmień nazwę pliku", L"Dosyayı yeniden adlandır"));
 	m_name.SetWindowText(pc.name);

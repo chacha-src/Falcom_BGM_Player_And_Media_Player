@@ -17,7 +17,7 @@ static char THIS_FILE[] = __FILE__;
 extern CString fnn;
 
 Citiran_YSF::Citiran_YSF(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(Citiran_YSF::IDD, pParent)
+	: CCustomBlurDialogBase(Citiran_YSF::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(Citiran_YSF)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -27,7 +27,7 @@ Citiran_YSF::Citiran_YSF(CWnd* pParent /*=NULL*/)
 
 void Citiran_YSF::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(Citiran_YSF)
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	//}}AFX_DATA_MAP
@@ -35,7 +35,7 @@ void Citiran_YSF::DoDataExchange(CDataExchange* pDX)
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(Citiran_YSF, CCustomDialog)
+BEGIN_MESSAGE_MAP(Citiran_YSF, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(Citiran_YSF)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	//}}AFX_MSG_MAP
@@ -137,7 +137,7 @@ YSF_ARR(tr)={L"01.Dancing on the road(unknown)",L"02.Omen =Styx=(Menu)",L"03.Tra
 #undef YSF_ARR
 #undef YSF_ARR_END
 
-static inline CString YSF_TRACK(int i){ switch(savedata.lang){ case 0: return CString(CStringA(tiys3[i])); case 1: return CString(CStringA(tiys3_en[i])); case 2: return CString(CStringA(tiys3_fr[i])); case 3: return CString(CStringA(tiys3_it[i])); case 4: return CString(CStringA(tiys3_es[i])); case 5: return CString(CStringA(tiys3_ko[i])); case 6: return CString(CStringA(tiys3_zh[i])); case 7: return CString(CStringA(tiys3_ar[i])); case 8: return CString(CStringA(tiys3_ru[i])); case 9: return CString(CStringA(tiys3_de[i])); case 10: return CString(CStringA(tiys3_pt[i])); case 11: return CString(CStringA(tiys3_nl[i])); case 12: return CString(CStringA(tiys3_pl[i])); case 13: return CString(CStringA(tiys3_tr[i])); default: return CString(CStringA(tiys3_en[i])); }}
+static inline CString YSF_TRACK(int i){ switch(savedata.lang){ case 0: return GameTrackTitle(tiys3[i]); case 1: return GameTrackTitle(tiys3_en[i]); case 2: return GameTrackTitle(tiys3_fr[i]); case 3: return GameTrackTitle(tiys3_it[i]); case 4: return GameTrackTitle(tiys3_es[i]); case 5: return GameTrackTitle(tiys3_ko[i]); case 6: return GameTrackTitle(tiys3_zh[i]); case 7: return GameTrackTitle(tiys3_ar[i]); case 8: return GameTrackTitle(tiys3_ru[i]); case 9: return GameTrackTitle(tiys3_de[i]); case 10: return GameTrackTitle(tiys3_pt[i]); case 11: return GameTrackTitle(tiys3_nl[i]); case 12: return GameTrackTitle(tiys3_pl[i]); case 13: return GameTrackTitle(tiys3_tr[i]); default: return GameTrackTitle(tiys3_en[i]); }}
 
 void Citiran_YSF::OnDblclkList1() 
 {
@@ -158,7 +158,7 @@ void Citiran_YSF::Gett(int a){
 
 BOOL Citiran_YSF::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"イース -フェルガナの誓い-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	

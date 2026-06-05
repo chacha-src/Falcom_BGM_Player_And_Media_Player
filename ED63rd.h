@@ -11,7 +11,7 @@
 // CED63rd ダイアログ
 #include "CCustomControl.h"
 
-class CED63rd : public CCustomDialog
+class CED63rd : public CCustomBlurDialogBase
 {
 // コンストラクション
 public:

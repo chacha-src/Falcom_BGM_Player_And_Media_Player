@@ -3,7 +3,7 @@
 
 // CED3 ダイアログ
 
-class CED3 : public CCustomDialog
+class CED3 : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CED3)
 

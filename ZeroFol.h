@@ -3,7 +3,7 @@
 
 // CZeroFol ダイアログ
 
-class CZeroFol : public CCustomDialog
+class CZeroFol : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CZeroFol)
 

@@ -3,7 +3,7 @@
 
 // CSor ダイアログ
 
-class CSor : public CCustomDialog
+class CSor : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CSor)
 

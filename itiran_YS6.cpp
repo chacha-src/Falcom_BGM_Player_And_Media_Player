@@ -17,7 +17,7 @@ static char THIS_FILE[] = __FILE__;
 extern CString fnn;
 
 Citiran_YS6::Citiran_YS6(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(Citiran_YS6::IDD, pParent)
+	: CCustomBlurDialogBase(Citiran_YS6::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(Citiran_YS6)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -27,7 +27,7 @@ Citiran_YS6::Citiran_YS6(CWnd* pParent /*=NULL*/)
 
 void Citiran_YS6::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(Citiran_YS6)
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	//}}AFX_DATA_MAP
@@ -35,7 +35,7 @@ void Citiran_YS6::DoDataExchange(CDataExchange* pDX)
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(Citiran_YS6, CCustomDialog)
+BEGIN_MESSAGE_MAP(Citiran_YS6, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(Citiran_YS6)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	//}}AFX_MSG_MAP
@@ -129,7 +129,7 @@ YS6_ARR(tr)={"01.Title/Load","02.Opening(with video)","03.Fin","04.Ledah's villa
 #undef YS6_ARR
 #undef YS6_ARR_END
 
-static inline CString YS6_TRACK(int i){ switch(savedata.lang){ case 0: return CString(CStringA(tiys6[i])); case 1: return CString(CStringA(tiys6_en[i])); case 2: return CString(CStringA(tiys6_fr[i])); case 3: return CString(CStringA(tiys6_it[i])); case 4: return CString(CStringA(tiys6_es[i])); case 5: return CString(CStringA(tiys6_ko[i])); case 6: return CString(CStringA(tiys6_zh[i])); case 7: return CString(CStringA(tiys6_ar[i])); case 8: return CString(CStringA(tiys6_ru[i])); case 9: return CString(CStringA(tiys6_de[i])); case 10: return CString(CStringA(tiys6_pt[i])); case 11: return CString(CStringA(tiys6_nl[i])); case 12: return CString(CStringA(tiys6_pl[i])); case 13: return CString(CStringA(tiys6_tr[i])); default: return CString(CStringA(tiys6_en[i])); }}
+static inline CString YS6_TRACK(int i){ switch(savedata.lang){ case 0: return GameTrackTitle(tiys6[i]); case 1: return GameTrackTitle(tiys6_en[i]); case 2: return GameTrackTitle(tiys6_fr[i]); case 3: return GameTrackTitle(tiys6_it[i]); case 4: return GameTrackTitle(tiys6_es[i]); case 5: return GameTrackTitle(tiys6_ko[i]); case 6: return GameTrackTitle(tiys6_zh[i]); case 7: return GameTrackTitle(tiys6_ar[i]); case 8: return GameTrackTitle(tiys6_ru[i]); case 9: return GameTrackTitle(tiys6_de[i]); case 10: return GameTrackTitle(tiys6_pt[i]); case 11: return GameTrackTitle(tiys6_nl[i]); case 12: return GameTrackTitle(tiys6_pl[i]); case 13: return GameTrackTitle(tiys6_tr[i]); default: return GameTrackTitle(tiys6_en[i]); }}
 
 void Citiran_YS6::OnDblclkList1() 
 {
@@ -150,7 +150,7 @@ void Citiran_YS6::Gett(int a){
 
 BOOL Citiran_YS6::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"イースⅥ -ナピシュテムの匣-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	

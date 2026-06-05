@@ -3,7 +3,7 @@
 #include "afxwin.h"
 #include "CCustomControl.h"
 
-class CKpiV5ConfigDlg : public CCustomDialog
+class CKpiV5ConfigDlg : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CKpiV5ConfigDlg)
 

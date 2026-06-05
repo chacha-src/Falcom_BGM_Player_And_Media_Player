@@ -11,7 +11,7 @@
 // CYsC1 ダイアログ
 #include "CCustomControl.h"
 
-class CYsC1 : public CCustomDialog
+class CYsC1 : public CCustomBlurDialogBase
 {
 // コンストラクション
 public:

@@ -291,7 +291,7 @@ extern int gameon; \
 extern int ip1; \
 int xxx::OnCreate(LPCREATESTRUCT lpCreateStruct) \
 { \
-	if (CCustomDialog::OnCreate(lpCreateStruct) == -1) \
+	if (CCustomBlurDialogBase::OnCreate(lpCreateStruct) == -1) \
 		return -1; \
 	if (savedata.aero == 1) { \
 		ModifyStyleEx(0, WS_EX_LAYERED); \
@@ -305,7 +305,7 @@ Games = NULL; \
 } \
 void xxx::OnMoving(UINT fwSide, LPRECT pRect) \
 { \
-	CCustomDialog::OnMoving(fwSide, pRect); \
+	CCustomBlurDialogBase::OnMoving(fwSide, pRect); \
 	CRect r; \
 	GetWindowRect(&r); \
 	if (Games) \
@@ -316,7 +316,7 @@ void xxx::OnLButtonDown(UINT nFlags, CPoint point) \
 	m_bMoving1 = TRUE; \
 	SetCapture(); \
 	m_pointOld1 = point; \
-	CCustomDialog::OnLButtonDown(nFlags, point); \
+	CCustomBlurDialogBase::OnLButtonDown(nFlags, point); \
 } \
 void xxx::OnLButtonUp(UINT nFlags, CPoint point) \
 { \
@@ -324,7 +324,7 @@ void xxx::OnLButtonUp(UINT nFlags, CPoint point) \
 		m_bMoving1 = FALSE; \
 		::ReleaseCapture(); \
 	} \
-	CCustomDialog::OnLButtonUp(nFlags, point); \
+	CCustomBlurDialogBase::OnLButtonUp(nFlags, point); \
 } \
 void xxx::OnMouseMove(UINT nFlags, CPoint point) \
 { \
@@ -341,11 +341,11 @@ void xxx::OnMouseMove(UINT nFlags, CPoint point) \
 		if (Games) \
 			Games->MoveWindow(&rect); \
 	} \
-	CCustomDialog::OnMouseMove(nFlags, point); \
+	CCustomBlurDialogBase::OnMouseMove(nFlags, point); \
 } \
 HBRUSH xxx::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor) \
 { \
-	HBRUSH hbr = CCustomDialog::OnCtlColor(pDC, pWnd, nCtlColor); \
+	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor); \
 	if (savedata.aero == 1) { \
 		if (nCtlColor == CTLCOLOR_DLG) \
 		{ \
@@ -383,7 +383,7 @@ void xxx::OnTimer(UINT_PTR nIDEvent) \
         ip1--; \
         if(ip1 <= 0){ ip1 = 0; KillTimer(501); }\
     } \
-	CCustomDialog::OnTimer(nIDEvent); \
+	CCustomBlurDialogBase::OnTimer(nIDEvent); \
 } \
 BOOL xxx::DestroyWindow() \
 { \
@@ -391,16 +391,36 @@ BOOL xxx::DestroyWindow() \
 		delete Games; \
     } \
     Games = NULL; \
-	return CCustomDialog::DestroyWindow(); \
+	return CCustomBlurDialogBase::DestroyWindow(); \
 } \
 BOOL xxx::OnNcActivate(BOOL bActive) \
 { \
 	SetTimer(500, 30, NULL); \
-	return CCustomDialog::OnNcActivate(bActive); \
+	return CCustomBlurDialogBase::OnNcActivate(bActive); \
 } 
 
 
 
+
+// Game dialog: /utf-8 char[] track titles, or existing TCHAR/L"..." tables
+inline CString GameTrackTitle(const char* utf8)
+{
+	if (!utf8 || !*utf8)
+		return CString();
+	const int wlen = ::MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
+	if (wlen <= 0)
+		return CString();
+	CString s;
+	LPWSTR buf = s.GetBuffer(wlen - 1);
+	::MultiByteToWideChar(CP_UTF8, 0, utf8, -1, buf, wlen);
+	s.ReleaseBuffer();
+	return s;
+}
+
+inline CString GameTrackTitle(LPCTSTR wide)
+{
+	return CString(wide);
+}
 
 #ifdef _UNICODE
 #if defined _M_IX86

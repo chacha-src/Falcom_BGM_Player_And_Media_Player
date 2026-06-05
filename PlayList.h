@@ -20,7 +20,7 @@ struct playlistdata{
 #include "ListCtrlA.h"
 #include "CCustomControl.h"
 
-class CPlayList : public CCustomDialog
+class CPlayList : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CPlayList)
 

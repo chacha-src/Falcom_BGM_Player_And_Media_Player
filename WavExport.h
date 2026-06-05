@@ -4,7 +4,7 @@
 
 // CWavExport ダイアログ - プレイリストからWAVへ出力（再生なし）
 
-class CWavExport : public CCustomDialog
+class CWavExport : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CWavExport)
 

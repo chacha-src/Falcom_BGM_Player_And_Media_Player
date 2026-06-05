@@ -18,7 +18,7 @@ static char THIS_FILE[] = __FILE__;
 
 
 CED63rd::CED63rd(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CED63rd::IDD, pParent)
+	: CCustomBlurDialogBase(CED63rd::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(CED63rd)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -28,7 +28,7 @@ CED63rd::CED63rd(CWnd* pParent /*=NULL*/)
 
 void CED63rd::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(CED63rd)
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	//}}AFX_DATA_MAP
@@ -36,7 +36,7 @@ void CED63rd::DoDataExchange(CDataExchange* pDX)
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CED63rd, CCustomDialog)
+BEGIN_MESSAGE_MAP(CED63rd, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(CED63rd)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	//}}AFX_MSG_MAP
@@ -2198,7 +2198,7 @@ void CED63rd::OnDblclkList1()
 
 BOOL CED63rd::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"空の軌跡 The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Les Sentiers du Ciel The 3rd -Chapitre Avancé-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"하늘의 궤적 The 3rd -Advanced Chapter-", L"空之轨迹 The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 

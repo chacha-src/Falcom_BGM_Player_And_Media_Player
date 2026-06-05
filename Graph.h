@@ -5,7 +5,7 @@
 
 // CGraph ダイアログ
 
-class CGraph : public CCustomDialog
+class CGraph : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CGraph)
 

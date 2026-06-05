@@ -8,10 +8,10 @@
 
 // CNishi ダイアログ
 
-IMPLEMENT_DYNAMIC(CNishi, CCustomDialog)
+IMPLEMENT_DYNAMIC(CNishi, CCustomBlurDialogBase)
 
 CNishi::CNishi(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CNishi::IDD, pParent)
+	: CCustomBlurDialogBase(CNishi::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CNishi::~CNishi()
 
 void CNishi::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CNishi, CCustomDialog)
+BEGIN_MESSAGE_MAP(CNishi, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CNishi);
 
@@ -714,7 +714,7 @@ void CNishi::OnDblclkList1()
 
 BOOL CNishi::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"西風の狂詩曲(ラプソディー)", L"Rhapsody of the West Wind", L"Rhapsodie du Vent d'Ouest", L"Rapsodia del Vento d'Occidente", L"Rapsodia del Viento del Oeste", L"서풍의 광시곡", L"西风狂想曲", L"Rhapsody of the West Wind", L"Рапсодия Западного Ветра", L"Rhapsodie des Westwinds", L"Rapsódia do Vento Oeste", L"Rapsodie van de Westenwind", L"Rapsodia Zachodniego Wiatru", L"Batı Rüzgarı Rapsodisi"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 

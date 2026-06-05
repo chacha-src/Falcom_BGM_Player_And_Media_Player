@@ -3,7 +3,7 @@
 
 // CArc ダイアログ
 
-class CArc : public CCustomDialog
+class CArc : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CArc)
 

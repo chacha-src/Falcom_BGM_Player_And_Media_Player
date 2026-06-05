@@ -8,10 +8,10 @@
 
 // CGurumin ダイアログ
 
-IMPLEMENT_DYNAMIC(CGurumin, CCustomDialog)
+IMPLEMENT_DYNAMIC(CGurumin, CCustomBlurDialogBase)
 
 CGurumin::CGurumin(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CGurumin::IDD, pParent)
+	: CCustomBlurDialogBase(CGurumin::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CGurumin::~CGurumin()
 
 void CGurumin::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CGurumin, CCustomDialog)
+BEGIN_MESSAGE_MAP(CGurumin, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CGurumin);
 
@@ -792,7 +792,7 @@ void CGurumin::OnDblclkList1()
 
 BOOL CGurumin::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"ぐるみん", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	

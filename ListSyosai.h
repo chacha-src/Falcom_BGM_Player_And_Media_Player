@@ -4,7 +4,7 @@
 
 // CListSyosai ダイアログ
 
-class CListSyosai : public CCustomDialog
+class CListSyosai : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CListSyosai)
 

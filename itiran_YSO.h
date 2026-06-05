@@ -11,7 +11,7 @@
 // Citiran_YSO ダイアログ
 #include "CCustomControl.h"
 
-class Citiran_YSO : public CCustomDialog
+class Citiran_YSO : public CCustomBlurDialogBase
 {
 // コンストラクション
 public:

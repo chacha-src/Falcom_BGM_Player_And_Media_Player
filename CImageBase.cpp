@@ -51,7 +51,7 @@ BOOL CImageBase::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
 
-	if (savedata.aero == 0) { ShowWindow(SW_HIDE); return TRUE; }
+	if (savedata.aero != 2) { ShowWindow(SW_HIDE); return TRUE; }
 	COSVersion os;
 	os.GetVersionString();
 	if (os.in.dwMajorVersion == 10 && os.in.dwBuildNumber >= 22000) { ShowWindow(SW_HIDE); return TRUE; }
@@ -81,7 +81,7 @@ BOOL CImageBase::OnInitDialog()
 				ACCENTPOLICY policy = { 3, 2, 0x77bb9999, 0 }; // ACCENT_ENABLE_BLURBEHIND=3...
 				WINCOMPATTRDATA data = { 19, &policy, sizeof(ACCENTPOLICY) }; // WCA_ACCENT_POLICY=19
 				extern save savedata;
-				if (savedata.aero == 1)
+				if (savedata.aero == 2)
 					SetWindowCompositionAttribute(m_hWnd, &data);
 			}
 			FreeLibrary(hModule);
@@ -114,7 +114,7 @@ int CImageBase::Create(CWnd* pWnd)
 	const BOOL bret = CCustomBlurDialogExBase::Create(CImageBase::IDD, this);
 	RECT r = { 0,0,0,0 };
 	MoveWindow(&r);
-	if (bret == TRUE && savedata.aero == 1) {
+	if (bret == TRUE && savedata.aero == 2) {
 		COSVersion os;
 		os.GetVersionString();
 		if (os.in.dwMajorVersion == 10 && os.in.dwBuildNumber >= 22000) {

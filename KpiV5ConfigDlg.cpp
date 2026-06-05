@@ -5,10 +5,10 @@
 
 #include <vector>
 
-IMPLEMENT_DYNAMIC(CKpiV5ConfigDlg, CCustomDialog)
+IMPLEMENT_DYNAMIC(CKpiV5ConfigDlg, CCustomBlurDialogBase)
 
 CKpiV5ConfigDlg::CKpiV5ConfigDlg(CWnd* pParent)
-	: CCustomDialog(CKpiV5ConfigDlg::IDD, pParent)
+	: CCustomBlurDialogBase(CKpiV5ConfigDlg::IDD, pParent)
 {
 }
 
@@ -18,7 +18,7 @@ CKpiV5ConfigDlg::~CKpiV5ConfigDlg()
 
 void CKpiV5ConfigDlg::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_EDIT_KPI5CFG, m_text);
 	DDX_Control(pDX, IDOK, m_ok);
 	DDX_Control(pDX, IDCANCEL, m_cancel);
@@ -26,14 +26,14 @@ void CKpiV5ConfigDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CKpiV5ConfigDlg, CCustomDialog)
+BEGIN_MESSAGE_MAP(CKpiV5ConfigDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDOK, &CKpiV5ConfigDlg::OnBnClickedOk)
 	ON_BN_CLICKED(IDCANCEL, &CKpiV5ConfigDlg::OnBnClickedCancel)
 	cmn(CKpiV5ConfigDlg);
 
 BOOL CKpiV5ConfigDlg::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(
 		L"KPI ver5 専用パラメータ設定",

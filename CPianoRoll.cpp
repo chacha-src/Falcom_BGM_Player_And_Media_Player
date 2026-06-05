@@ -12,7 +12,7 @@
 #include <algorithm>
 
 extern save savedata;
-IMPLEMENT_DYNAMIC(CPianoRoll, CCustomDialogEx)
+IMPLEMENT_DYNAMIC(CPianoRoll, CCustomBlurDialogExBase)
 
 namespace Cfg
 {
@@ -219,7 +219,7 @@ namespace Cfg
 }
 
 CPianoRoll::CPianoRoll(CWnd* pParent)
-    : CCustomDialogEx(IDD_PIANOROLL, pParent)
+    : CCustomBlurDialogExBase(IDD_PIANOROLL, pParent)
 {
     InitializeCriticalSection(&m_cs);
     m_ring.assign(RING_SIZE, 0.0);
@@ -309,20 +309,21 @@ void CPianoRoll::ResetPlaybackState()
 
 void CPianoRoll::DoDataExchange(CDataExchange* pDX)
 {
-    CCustomDialogEx::DoDataExchange(pDX);
+    CCustomBlurDialogExBase::DoDataExchange(pDX);
 }
 
-BEGIN_MESSAGE_MAP(CPianoRoll, CCustomDialogEx)
+BEGIN_MESSAGE_MAP(CPianoRoll, CCustomBlurDialogExBase)
     ON_WM_PAINT()
     ON_WM_TIMER()
     ON_WM_SIZE()
     ON_WM_MOVE()
+    ON_WM_SHOWWINDOW()
     ON_WM_CLOSE()
 END_MESSAGE_MAP()
 
 BOOL CPianoRoll::OnInitDialog()
 {
-    CCustomDialogEx::OnInitDialog();
+    CCustomBlurDialogExBase::OnInitDialog();
     SetWindowText(LL14(
         L"ピアノロール", L"Piano Roll", L"Rouleau piano", L"Rotolo pianoforte",
         L"Rollo de piano", L"피아노 롤", L"钢琴卷帘", L"لوحة البيانو",
@@ -332,7 +333,10 @@ BOOL CPianoRoll::OnInitDialog()
     ModifyStyle(WS_MINIMIZEBOX | WS_MAXIMIZEBOX, 0);
     SetIcon(nullptr, TRUE);
     SetIcon(nullptr, FALSE);
-    ModifyStyleEx(0, WS_EX_DLGMODALFRAME);
+#if CCUSTOM_AERO_SUPPORT
+    if (!CCC_IsAeroEnabled())
+#endif
+        ModifyStyleEx(0, WS_EX_DLGMODALFRAME);
 
     if (savedata.pianorollx != -1)
         SetWindowPos(&CWnd::wndTop,
@@ -346,6 +350,10 @@ BOOL CPianoRoll::OnInitDialog()
     EnsureAnalysisTables(m_inputSampleRate);
     SetTimer(1, 50, nullptr);
     m_historyDirty = true;
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled())
+        ApplyDwmBlur();
+#endif
     return TRUE;
 }
 
@@ -1114,7 +1122,13 @@ void CPianoRoll::OnPaint()
         memDC.SelectObject(pOldFont);
     }
 
-    dc.BitBlt(0, 0, rect.Width(), rect.Height(), &memDC, 0, 0, SRCCOPY);
+#if CCUSTOM_AERO_SUPPORT
+    if (savedata.aero == 1 && CCC_IsWin11())
+        CCC_BlitChromaNoFlicker(dc.GetSafeHdc(), 0, 0, rect.Width(), rect.Height(),
+            memDC.GetSafeHdc(), 0, 0, RGB(20, 20, 20));
+    else
+#endif
+        dc.BitBlt(0, 0, rect.Width(), rect.Height(), &memDC, 0, 0, SRCCOPY);
     memDC.SelectObject(pOld);
     m_historyDirty = false;
 }
@@ -1129,16 +1143,39 @@ void CPianoRoll::OnTimer(UINT_PTR nIDEvent)
             savedata.pianorollw = rc.Width(); savedata.pianorollh = rc.Height();
         }
     }
-    CCustomDialogEx::OnTimer(nIDEvent);
+    CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
 
 void CPianoRoll::OnSize(UINT nType, int cx, int cy)
 {
-    CCustomDialogEx::OnSize(nType, cx, cy);
+    CCustomBlurDialogExBase::OnSize(nType, cx, cy);
+#if CCUSTOM_AERO_SUPPORT
+    if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
+        ApplyDwmBlur();
+#endif
     Invalidate(FALSE);
 }
 
-void CPianoRoll::OnMove(int x, int y) { CCustomDialogEx::OnMove(x, y); }
+void CPianoRoll::OnMove(int x, int y)
+{
+    CCustomBlurDialogExBase::OnMove(x, y);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled())
+        CCC_RefreshDialogDwmBlur(m_hWnd);
+#endif
+}
+
+void CPianoRoll::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+    CCustomBlurDialogExBase::OnShowWindow(bShow, nStatus);
+#if CCUSTOM_AERO_SUPPORT
+    if (bShow && CCC_IsAeroEnabled())
+    {
+        ApplyDwmBlur();
+        Invalidate(FALSE);
+    }
+#endif
+}
 
 void CPianoRoll::OnClose()
 {
@@ -1149,5 +1186,5 @@ void CPianoRoll::OnClose()
 
 BOOL CPianoRoll::PreTranslateMessage(MSG* pMsg)
 {
-    return CCustomDialogEx::PreTranslateMessage(pMsg);
+    return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
 }

@@ -8,10 +8,10 @@
 
 // CDino ダイアログ
 
-IMPLEMENT_DYNAMIC(CDino, CCustomDialog)
+IMPLEMENT_DYNAMIC(CDino, CCustomBlurDialogBase)
 
 CDino::CDino(CWnd* pParent /*=NUL*/)
-	: CCustomDialog(CDino::IDD, pParent)
+	: CCustomBlurDialogBase(CDino::IDD, pParent)
 {
 
 }
@@ -22,13 +22,13 @@ CDino::~CDino()
 
 void CDino::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CDino, CCustomDialog)
+BEGIN_MESSAGE_MAP(CDino, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	cmn(CDino);
 
@@ -652,7 +652,7 @@ void CDino::OnDblclkList1()
 
 BOOL CDino::OnInitDialog() 
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"ダイナソア リザレクション", L"dinosaur Resurrection", L"Résurrection Dinosaure", L"Resurrezione Dinosauro", L"Resurrección Dinosaurio", L"공룡 부활", L"恐龙复活", L"dinosaur Resurrection", L"Динозавр: Воскрешение", L"dinosaurier Auferstehung", L"Ressurreição Dinossauro", L"dinosaur Resurrection", L"dinozaur Zmartwychwstanie", L"dinozor Diriliş"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
 	

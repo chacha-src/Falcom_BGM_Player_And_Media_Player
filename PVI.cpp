@@ -8,10 +8,10 @@
 
 // CPVI ダイアログ
 
-IMPLEMENT_DYNAMIC(CPVI, CCustomDialog)
+IMPLEMENT_DYNAMIC(CPVI, CCustomBlurDialogBase)
 
 CPVI::CPVI(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CPVI::IDD, pParent)
+	: CCustomBlurDialogBase(CPVI::IDD, pParent)
 {
 
 }
@@ -22,14 +22,14 @@ CPVI::~CPVI()
 
 void CPVI::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_EDIT1, m_pvi);
 	DDX_Control(pDX, IDOK, m_ok);
 	DDX_Control(pDX, IDCANCEL, m_cdummy);
 }
 
 #include "CImageBase.h"
-BEGIN_MESSAGE_MAP(CPVI, CCustomDialog)
+BEGIN_MESSAGE_MAP(CPVI, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDOK, &CPVI::OnBnClickedOk)
 	ON_EN_CHANGE(IDC_EDIT1, &CPVI::OnEnChangeEdit1)
 	cmn(CPVI);
@@ -39,7 +39,7 @@ BEGIN_MESSAGE_MAP(CPVI, CCustomDialog)
 
 BOOL CPVI::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(L"fmpmd.kpi PVIパス設定", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings"));
 	SetDlgItemText(IDC_STATIC, LL14(L"PVIパス \\で必ず終わること　複数指定は ; で指定", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths."));
@@ -170,7 +170,7 @@ static int CALLBACK EditWordBreakProc( LPTSTR , int , int , int );
 void CPVI::OnEnChangeEdit1()
 {
 	// TODO:  これが RICHEDIT コントロールの場合、
-	// まず、CCustomDialog::OnInitDialog() 関数をオーバーライドして、OR 状態の ENM_CHANGE
+	// まず、CCustomBlurDialogBase::OnInitDialog() 関数をオーバーライドして、OR 状態の ENM_CHANGE
 	// フラグをマスクに入れて、CRichEditCtrl().SetEventMask() を呼び出さない限り、
 	// コントロールは、この通知を送信しません。
 

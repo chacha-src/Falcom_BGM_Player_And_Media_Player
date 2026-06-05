@@ -10,10 +10,10 @@
 extern IGraphBuilder *pGraphBuilder;
 // CGraph ダイアログ
 
-IMPLEMENT_DYNAMIC(CGraph, CCustomDialog)
+IMPLEMENT_DYNAMIC(CGraph, CCustomBlurDialogBase)
 
 CGraph::CGraph(CWnd* pParent /*=NULL*/)
-	: CCustomDialog(CGraph::IDD, pParent)
+	: CCustomBlurDialogBase(CGraph::IDD, pParent)
 {
 
 }
@@ -24,13 +24,13 @@ CGraph::~CGraph()
 
 void CGraph::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomDialog::DoDataExchange(pDX);
+	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDOK, m_ok);
 	DDX_Control(pDX, IDC_LIST1, m_l);
 }
 
 
-BEGIN_MESSAGE_MAP(CGraph, CCustomDialog)
+BEGIN_MESSAGE_MAP(CGraph, CCustomBlurDialogBase)
 END_MESSAGE_MAP()
 
 extern IAMStreamSelect *iam;
@@ -38,7 +38,7 @@ extern IAMStreamSelect *iam;
 
 BOOL CGraph::OnInitDialog()
 {
-	CCustomDialog::OnInitDialog();
+	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(L"グラフフィルタ一覧", L"Graph Filter List", L"Liste filtres graphiques", L"Elenco filtri grafici", L"Lista filtros gráficos", L"그래프 필터 목록", L"图形过滤器列表", L"قائمة مرشحات الرسم", L"Список фильтров графика", L"Grafikfilterliste", L"Lista filtros gráficos", L"Grafiekfilterlijst", L"Lista filtrów graficznych", L"Grafik filtre listesi"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
