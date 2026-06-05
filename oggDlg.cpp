@@ -2132,6 +2132,7 @@ LARGE_INTEGER freq;
 //////////////////////////////////////////////////////////////////////////////
 DWORD g_oggUiThreadId = 0;
 static volatile LONG g_timerpPosted = 0;
+static volatile LONG g_gdiPaintPending = 0;
 
 static void COgg_RequestTimerp(COggDlg* dlg)
 {
@@ -2639,7 +2640,7 @@ BOOL COggDlg::OnInitDialog()
 	}
 #endif
 
-	AfxBeginThread((AFX_THREADPROC)TheadLoop, NULL, THREAD_PRIORITY_TIME_CRITICAL);
+	AfxBeginThread((AFX_THREADPROC)TheadLoop, NULL, THREAD_PRIORITY_ABOVE_NORMAL);
 	return TRUE;  // TRUE を返すとコントロールに設定したフォーカスは失われません。
 }
 //////////////////////////////////////////////////////////////////////////////
@@ -2679,13 +2680,20 @@ void COggDlg::OnPaint()
 			const BOOL bSpectrumOnly = (savedata.ms2 <= ms2
 				&& clip.bottom <= destH + 8
 				&& clip.Height() <= destH + 8);
-			if (savedata.aero == 1 && dc.m_hDC != NULL
-				&& (savedata.ms2 <= ms2 || bGdiIntersect))
+			if (savedata.aero == 1 && dc.m_hDC != NULL)
 			{
-				dcc.SelectClipRgn(NULL);
-				CCC_BlitStretchChromaNoFlicker(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
 				if (savedata.ms2 <= ms2)
+				{
+					dcc.SelectClipRgn(NULL);
+					CCC_BlitStretchChromaNoFlicker(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
 					ms2 = 0;
+					InterlockedExchange(&g_gdiPaintPending, 0);
+				}
+				else if (bGdiIntersect)
+				{
+					dcc.SelectClipRgn(NULL);
+					CCC_BlitStretchChroma(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
+				}
 			}
 			if (!bSpectrumOnly)
 			{
@@ -2711,6 +2719,7 @@ void COggDlg::OnPaint()
 				dcc.StretchBlt(0, 0, destW, destH, &dc, 0, 0, srcW, srcH, SRCCOPY);
 			}
 			ms2 = 0;
+			InterlockedExchange(&g_gdiPaintPending, 0);
 		}
 	}
 }
@@ -14893,6 +14902,8 @@ void COggDlg::timerp()
 		}
 	}
 	ms2++;
+	const BOOL bGdiFrame = (savedata.ms2 <= ms2)
+		&& (InterlockedCompareExchange(&g_gdiPaintPending, 0, 0) == 0);
 	CString s, ss, sss;
 	if (voldsf) {
 		voldsf = 0;
@@ -15009,6 +15020,8 @@ void COggDlg::timerp()
 	int tbl2 = t1 % 60;
 	int tcl2 = tt % 100;
 
+	if (bGdiFrame)
+	{
 	dc.FillSolidRect(0, 0, 3000, 2000, RGB(0, 0, 0));
 	//		dcsub.FillSolidRect(0,0,3000,30,RGB(1,1,1));
 
@@ -15461,11 +15474,7 @@ void COggDlg::timerp()
 		int alpha = 130 + (int)((220 - 130) * m_jacketFocus);
 		img.AlphaBlend(dc.m_hDC, x_dest, y_dest, w_dest, h_dest, 0, 0, jx, jy, alpha);
 	}
-
-	//	}
-
-
-
+	}
 
 	if (pl && plw) {
 		if (pl->m_renzoku.GetCheck()) {
@@ -15496,13 +15505,15 @@ void COggDlg::timerp()
 		}
 	}
 
-	RECT rect;
-	rect.top = 0;
-	rect.left = 0;
-	rect.bottom = (LONG)((101) * hD * 4);
-	rect.right = (LONG)((180 + 88 * 2 + 50) * hD * 4);
-	if (savedata.ms2 <= ms2) {
+	if (bGdiFrame)
+	{
+		RECT rect;
+		rect.top = 0;
+		rect.left = 0;
+		rect.bottom = (LONG)((101) * hD * 4);
+		rect.right = (LONG)((180 + 88 * 2 + 50) * hD * 4);
 		InvalidateRect(&rect, FALSE);
+		InterlockedExchange(&g_gdiPaintPending, 1);
 	}
 	//音量
 	//	if(tt>=4){
@@ -16146,6 +16157,8 @@ static unsigned __stdcall COgg_TimerpVsyncThreadProc(void* pParam)
 
 void COggDlg::StartTimerpVsyncThread()
 {
+	// TheadLoop が timerp を駆動。DwmFlush のみの補助スレッドは DWM/描画と競合するため起動しない。
+	return;
 	if (m_hTimerpVsyncThread)
 		return;
 	m_hTimerpVsyncStopEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
@@ -16269,6 +16282,7 @@ void timing1(WORD a, BOOL b, BOOL c)
 		for (;;) {
 			Timing64(fr2, FALSE);
 			if ((int)fr2 >= (int)(fpstiming + j)) break;
+			Sleep(0);
 		}
 }
 
@@ -16285,7 +16299,7 @@ UINT TheadLoop(LPVOID)
 		timing1((WORD)timen, FALSE, FALSE);
 		Timing64(f2, FALSE);
 		Timing64(fpstiming, FALSE);
-		DoEvent();
+		Sleep(0);
 	}
 }
 
@@ -16455,18 +16469,11 @@ void timerog1(UINT nIDEvent)
 	}
 
 	if (nIDEvent == 5657) {
-		BOOL bDecay = FALSE;
 		for (int i = 0; i < 300; i++) {
 			if (spetm[i] == 1) {
 				spelv[i]--;
 				if (spelv[i] < 0) spelv[i] = 0;
-				if (spelv[i] > 0)
-					bDecay = TRUE;
 			}
-		}
-		if (bDecay && og && og->m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) {
-			RECT rect = { 0, 0, (LONG)((180 + 88 * 2 + 50) * og->hD * 4), (LONG)((101) * og->hD * 4) };
-			og->InvalidateRect(&rect, FALSE);
 		}
 	}
 
