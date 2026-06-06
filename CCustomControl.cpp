@@ -1426,6 +1426,59 @@ HBRUSH CCustomEdit::CtlColor(CDC* pDC, UINT)
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
+void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
+{
+    CString text;
+    GetWindowText(text);
+
+    CFont* pFont = GetFont();
+    CFont* pOld = pFont ? dc.SelectObject(pFont) : nullptr;
+
+    dc.SetBkColor(COLOR_EDIT_BG);
+    dc.SetTextColor(COLOR_EDIT_TEXT);
+    dc.SetBkMode(OPAQUE);
+
+    const DWORD style = (DWORD)GetStyle();
+    UINT fmt = DT_NOPREFIX | DT_END_ELLIPSIS;
+    if (style & ES_CENTER)
+        fmt |= DT_CENTER;
+    else if (style & ES_RIGHT)
+        fmt |= DT_RIGHT;
+    else
+        fmt |= DT_LEFT;
+
+    if (style & ES_MULTILINE)
+        fmt |= DT_WORDBREAK;
+    else
+        fmt |= DT_SINGLELINE | DT_VCENTER;
+
+    CRect rc = r;
+    rc.DeflateRect(3, 1);
+    dc.DrawText(text, &rc, fmt);
+
+    if (pOld)
+        dc.SelectObject(pOld);
+}
+
+void CCustomEdit::RepaintClient()
+{
+    if (!GetSafeHwnd())
+        return;
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    {
+        CClientDC dc(this);
+        PaintOpaqueClient(dc);
+    }
+    else
+#endif
+    {
+        Invalidate(FALSE);
+        UpdateWindow();
+    }
+    SetWindowPos(NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+}
+
 void CCustomEdit::PaintOpaqueClient(CDC& dc)
 {
     CRect r;
@@ -1439,12 +1492,17 @@ void CCustomEdit::PaintOpaqueClient(CDC& dc)
     if (!hdcBuf || !hBP)
     {
         dc.FillSolidRect(&r, COLOR_EDIT_BG);
-        DefWindowProc(WM_PRINTCLIENT, (WPARAM)dc.GetSafeHdc(), PRF_CLIENT | PRF_ERASEBKGND);
+        DrawClientText(dc, r);
         return;
     }
     RECT rcBuf = { 0, 0, r.right, r.bottom };
     ::FillRect(hdcBuf, &rcBuf, (HBRUSH)m_brBackground.GetSafeHandle());
-    ::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+    {
+        CDC dcBuf;
+        dcBuf.Attach(hdcBuf);
+        DrawClientText(dcBuf, r);
+        dcBuf.Detach();
+    }
     ::BufferedPaintMakeOpaque(hBP, &r);
     ::EndBufferedPaint(hBP, TRUE);
 }
@@ -1452,7 +1510,7 @@ void CCustomEdit::PaintOpaqueClient(CDC& dc)
 void CCustomEdit::ScheduleOpaqueRepaint()
 {
     if (GetSafeHwnd())
-        PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+        SendMessage(CCC_WM_POST_OPAQUE_PAINT);
 }
 
 LRESULT CCustomEdit::OnPostOpaquePaint(WPARAM, LPARAM)
@@ -1523,13 +1581,15 @@ void CCustomEdit::OnNcPaint()
 
 LRESULT CCustomEdit::OnPrintClient(WPARAM wParam, LPARAM lParam)
 {
+    UNREFERENCED_PARAMETER(lParam);
     if (HDC hDC = (HDC)wParam)
     {
         CRect r;
         GetClientRect(&r);
         CDC* pDC = CDC::FromHandle(hDC);
         pDC->FillSolidRect(&r, COLOR_EDIT_BG);
-        return DefWindowProc(WM_PRINTCLIENT, (WPARAM)wParam, lParam);
+        DrawClientText(*pDC, r);
+        return 1;
     }
     return 0;
 }
@@ -1552,10 +1612,15 @@ void CCustomEdit::OnTimer(UINT_PTR nIDEvent)
 void CCustomEdit::OnShowWindow(BOOL bShow, UINT nStatus)
 {
     CEdit::OnShowWindow(bShow, nStatus);
+    if (bShow)
+    {
+        Invalidate(FALSE);
+        UpdateWindow();
 #if CCUSTOM_AERO_SUPPORT
-    if (bShow && CCC_IsAeroEnabled() && CCC_IsWin11())
-        ScheduleOpaqueRepaint();
+        if (CCC_IsAeroEnabled() && CCC_IsWin11())
+            ScheduleOpaqueRepaint();
 #endif
+    }
     UNREFERENCED_PARAMETER(nStatus);
 }
 
@@ -4239,7 +4304,7 @@ private:
         {
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             if (wParam)
-                ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+                ::SendMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
             return lRes;
         }
         case WM_DESTROY:
@@ -4382,12 +4447,12 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
         p->PaintClient(dc, r);
         painted = TRUE;
     }
-    else if (auto* pEdit = dynamic_cast<CCustomEdit*>(pw))
+    else if (dynamic_cast<CCustomEdit*>(pw))
     {
         CBrush br(COLOR_EDIT_BG);
         dc.FillRect(&r, &br);
         dc.Detach();
-        ::SendMessage(hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+        ::SendMessage(hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT);
         return TRUE;
     }
     else if (auto* pList = dynamic_cast<CCustomListCtrl*>(pw))
@@ -4488,6 +4553,116 @@ static void CCC_ReapplyOpaqueFixers(CWnd* pDlg, CTypedPtrList<CPtrList, CCustomO
     CCC_PostOpaqueRepaintRecursive(pDlg->m_hWnd);
     pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE | RDW_ALLCHILDREN);
 }
+
+void CCC_ForceRepaintHwnd(HWND hWnd)
+{
+    if (!hWnd || !::IsWindow(hWnd))
+        return;
+
+    CWnd* pw = CWnd::FromHandlePermanent(hWnd);
+    if (auto* pBtn = dynamic_cast<CButtonST*>(pw))
+    {
+        RECT rect = {};
+        ::GetClientRect(hWnd, &rect);
+        if (rect.right <= rect.left || rect.bottom <= rect.top)
+            return;
+#if CCUSTOM_AERO_SUPPORT
+        if (CCC_IsAeroEnabled() && CCC_IsWin11())
+        {
+            ::SendMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+            return;
+        }
+#endif
+        CClientDC dc(pw);
+        DRAWITEMSTRUCT dis = {};
+        dis.CtlType = ODT_BUTTON;
+        dis.CtlID = (UINT)::GetDlgCtrlID(hWnd);
+        dis.itemID = dis.CtlID;
+        dis.itemAction = ODA_DRAWENTIRE;
+        const UINT st = (UINT)::SendMessage(hWnd, BM_GETSTATE, 0, 0);
+        if (st & BST_PUSHED) dis.itemState |= ODS_SELECTED;
+        if (!::IsWindowEnabled(hWnd)) dis.itemState |= ODS_DISABLED;
+        if (::GetFocus() == hWnd) dis.itemState |= ODS_FOCUS;
+        dis.hwndItem = hWnd;
+        dis.hDC = dc.GetSafeHdc();
+        dis.rcItem = rect;
+        pBtn->DrawItem(&dis);
+        return;
+    }
+
+    if (auto* pEdit = dynamic_cast<CCustomEdit*>(pw))
+    {
+        pEdit->RepaintClient();
+        return;
+    }
+
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11() && CCC_ShouldOpaqueFix(hWnd))
+    {
+        ::SendMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+        return;
+    }
+#endif
+    ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
+}
+
+static BOOL CALLBACK CCC_RefreshChildProc(HWND hChild, LPARAM)
+{
+    CCC_ForceRepaintHwnd(hChild);
+    return TRUE;
+}
+
+void CCC_RefreshChildrenAfterShow(HWND hWnd)
+{
+    if (!hWnd || !::IsWindow(hWnd))
+        return;
+    ::EnumChildWindows(hWnd, CCC_RefreshChildProc, 0);
+}
+#endif
+
+#if !CCUSTOM_AERO_SUPPORT
+void CCC_ForceRepaintHwnd(HWND hWnd)
+{
+    if (!hWnd || !::IsWindow(hWnd))
+        return;
+    CWnd* pw = CWnd::FromHandlePermanent(hWnd);
+    if (auto* pBtn = dynamic_cast<CButtonST*>(pw))
+    {
+        RECT rect = {};
+        ::GetClientRect(hWnd, &rect);
+        if (rect.right <= rect.left || rect.bottom <= rect.top)
+            return;
+        CClientDC dc(pw);
+        DRAWITEMSTRUCT dis = {};
+        dis.CtlType = ODT_BUTTON;
+        dis.CtlID = (UINT)::GetDlgCtrlID(hWnd);
+        dis.itemID = dis.CtlID;
+        dis.itemAction = ODA_DRAWENTIRE;
+        const UINT st = (UINT)::SendMessage(hWnd, BM_GETSTATE, 0, 0);
+        if (st & BST_PUSHED) dis.itemState |= ODS_SELECTED;
+        if (!::IsWindowEnabled(hWnd)) dis.itemState |= ODS_DISABLED;
+        if (::GetFocus() == hWnd) dis.itemState |= ODS_FOCUS;
+        dis.hwndItem = hWnd;
+        dis.hDC = dc.GetSafeHdc();
+        dis.rcItem = rect;
+        pBtn->DrawItem(&dis);
+        return;
+    }
+    ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
+}
+
+static BOOL CALLBACK CCC_RefreshChildProcNoAero(HWND hChild, LPARAM)
+{
+    CCC_ForceRepaintHwnd(hChild);
+    return TRUE;
+}
+
+void CCC_RefreshChildrenAfterShow(HWND hWnd)
+{
+    if (!hWnd || !::IsWindow(hWnd))
+        return;
+    ::EnumChildWindows(hWnd, CCC_RefreshChildProcNoAero, 0);
+}
 #endif
 
 // ============================================================================
@@ -4498,12 +4673,14 @@ IMPLEMENT_DYNAMIC(CCustomBlurDialogBase, CCustomDialog)
 BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
     ON_WM_PAINT()
     ON_WM_SIZE()
+    ON_WM_SHOWWINDOW()
     ON_WM_WINDOWPOSCHANGED()
     ON_WM_DWMCOMPOSITIONCHANGED()
     ON_WM_DESTROY()
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
+    ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
 END_MESSAGE_MAP()
 
 static BOOL RegisterBlurDialogWndClass(LPCTSTR pszClass, LPCTSTR pszNewClass)
@@ -4559,12 +4736,36 @@ void CCustomBlurDialogBase::ApplyDwmBlur()
         PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
         m_bBlurApplied = FALSE;
         Invalidate();
+        CCC_RefreshChildrenAfterShow(m_hWnd);
         return;
     }
     CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
 #else
     m_bBlurApplied = FALSE;
 #endif
+}
+
+void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+    CCustomDialog::OnShowWindow(bShow, nStatus);
+    if (!bShow)
+        return;
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled())
+    {
+        ApplyDwmBlur();
+        CCC_RefreshDialogDwmBlur(m_hWnd);
+    }
+#endif
+    CCC_RefreshChildrenAfterShow(m_hWnd);
+    PostMessage(CCC_MSG_REFRESH_CHILDREN, 0, 0);
+    UNREFERENCED_PARAMETER(nStatus);
+}
+
+LRESULT CCustomBlurDialogBase::OnRefreshChildren(WPARAM, LPARAM)
+{
+    CCC_RefreshChildrenAfterShow(m_hWnd);
+    return 0;
 }
 
 void CCustomBlurDialogBase::OnPaint()
@@ -4596,6 +4797,8 @@ void CCustomBlurDialogBase::OnSize(UINT nType, int cx, int cy)
 void CCustomBlurDialogBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
     CCustomDialog::OnWindowPosChanged(lpwndpos);
+    if ((lpwndpos->flags & SWP_SHOWWINDOW) && !(lpwndpos->flags & SWP_HIDEWINDOW))
+        CCC_RefreshChildrenAfterShow(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
     if ((lpwndpos->flags & SWP_SHOWWINDOW) && !m_bBlurApplied && CCC_IsAeroEnabled())
         ApplyDwmBlur();
@@ -4707,12 +4910,14 @@ IMPLEMENT_DYNAMIC(CCustomBlurDialogExBase, CCustomDialogEx)
 BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
     ON_WM_PAINT()
     ON_WM_SIZE()
+    ON_WM_SHOWWINDOW()
     ON_WM_WINDOWPOSCHANGED()
     ON_WM_DWMCOMPOSITIONCHANGED()
     ON_WM_DESTROY()
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
+    ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
 END_MESSAGE_MAP()
 
 CCustomBlurDialogExBase::CCustomBlurDialogExBase() : m_bBlurApplied(FALSE) {}
@@ -4756,12 +4961,36 @@ void CCustomBlurDialogExBase::ApplyDwmBlur()
         PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
         m_bBlurApplied = FALSE;
         Invalidate();
+        CCC_RefreshChildrenAfterShow(m_hWnd);
         return;
     }
     CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
 #else
     m_bBlurApplied = FALSE;
 #endif
+}
+
+void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+    CCustomDialogEx::OnShowWindow(bShow, nStatus);
+    if (!bShow)
+        return;
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled())
+    {
+        ApplyDwmBlur();
+        CCC_RefreshDialogDwmBlur(m_hWnd);
+    }
+#endif
+    CCC_RefreshChildrenAfterShow(m_hWnd);
+    PostMessage(CCC_MSG_REFRESH_CHILDREN, 0, 0);
+    UNREFERENCED_PARAMETER(nStatus);
+}
+
+LRESULT CCustomBlurDialogExBase::OnRefreshChildren(WPARAM, LPARAM)
+{
+    CCC_RefreshChildrenAfterShow(m_hWnd);
+    return 0;
 }
 
 void CCustomBlurDialogExBase::OnPaint()
@@ -4793,6 +5022,8 @@ void CCustomBlurDialogExBase::OnSize(UINT nType, int cx, int cy)
 void CCustomBlurDialogExBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
     CCustomDialogEx::OnWindowPosChanged(lpwndpos);
+    if ((lpwndpos->flags & SWP_SHOWWINDOW) && !(lpwndpos->flags & SWP_HIDEWINDOW))
+        CCC_RefreshChildrenAfterShow(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
     if ((lpwndpos->flags & SWP_SHOWWINDOW) && !m_bBlurApplied && CCC_IsAeroEnabled())
         ApplyDwmBlur();

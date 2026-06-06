@@ -35,6 +35,7 @@
 #if CCUSTOM_AERO_SUPPORT
 #define CCC_MSG_REAPPLY_OPAQUE_FIXERS (WM_APP + 311)
 #define CCC_WM_POST_OPAQUE_PAINT      (WM_APP + 312)
+#define CCC_MSG_REFRESH_CHILDREN      (WM_APP + 313)
 // 透過合成のクロマキー（黒文字 RGB(0,0,0) と区別するため 1,1,1 を使用）
 #define CCC_AERO_CHROMA_KEY RGB(1, 1, 1)
 void CCC_SelectClipExcludeChildren(CDC& dc, CWnd* pWnd);
@@ -52,6 +53,10 @@ void CCC_RefreshDialogDwmBlur(HWND hWnd);
 void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr);
 void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey);
 #endif
+
+// 最小化復帰・再表示時: オーナードロー子が親 Invalidate だけでは再描画されないため明示的に更新
+void CCC_ForceRepaintHwnd(HWND hWnd);
+void CCC_RefreshChildrenAfterShow(HWND hWnd);
 
 // ============================================================================
 // 色定義
@@ -387,6 +392,9 @@ public:
     void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
     BOOL m_bAutoDelete;
 
+    // 最小化復帰等: WM_PRINTCLIENT は Edit 本文を描かないため明示的に再描画
+    void RepaintClient();
+
 protected:
     virtual void PreSubclassWindow();
     virtual void PostNcDestroy();
@@ -410,6 +418,7 @@ private:
     CBrush m_brBackground; // 背景塗りつぶし用ブラシ
     CFont m_fontBold;      // 太字フォント
     BOOL m_bHasFocus;      // 現在フォーカスを持っているかどうか
+    void DrawClientText(CDC& dc, const CRect& r);
     void PaintOpaqueClient(CDC& dc);
     void ScheduleOpaqueRepaint();
 };
@@ -1053,10 +1062,12 @@ protected:
     virtual void ApplyDwmBlur();
     afx_msg void OnPaint();
     afx_msg void OnSize(UINT nType, int cx, int cy);
+    afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
     afx_msg void OnCompositionChanged();
     afx_msg void OnDestroy();
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
+    afx_msg LRESULT OnRefreshChildren(WPARAM wParam, LPARAM lParam);
 
     DECLARE_MESSAGE_MAP()
 
@@ -1123,10 +1134,12 @@ protected:
     virtual void ApplyDwmBlur();
     afx_msg void OnPaint();
     afx_msg void OnSize(UINT nType, int cx, int cy);
+    afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
     afx_msg void OnCompositionChanged();
     afx_msg void OnDestroy();
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
+    afx_msg LRESULT OnRefreshChildren(WPARAM wParam, LPARAM lParam);
 
     DECLARE_MESSAGE_MAP()
 

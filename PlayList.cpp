@@ -432,19 +432,7 @@ BOOL CPlayList::OnInitDialog()
 	m_findup.SetFlat(TRUE);
 	m_finddown.SetIcon(IDR_UP);
 	m_finddown.SetFlat(TRUE);
-#if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled() && CCC_IsWin11())
-	{
-		const HWND btns[] = {
-			m_lsup.m_hWnd, m_lup.m_hWnd, m_lsdown.m_hWnd, m_ldown.m_hWnd,
-			m_findup.m_hWnd, m_finddown.m_hWnd
-		};
-		for (HWND h : btns)
-			if (h) ::PostMessage(h, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
-		if (m_find.GetSafeHwnd()) m_find.PostMessage(CCC_WM_POST_OPAQUE_PAINT);
-		if (m_e.GetSafeHwnd()) m_e.PostMessage(CCC_WM_POST_OPAQUE_PAINT);
-	}
-#endif
+	RefreshNavControls();
 
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
@@ -4962,12 +4950,33 @@ HBRUSH CPlayList::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 }
 
 
+void CPlayList::RefreshNavControls()
+{
+	if (m_find.GetSafeHwnd())
+		m_find.RepaintClient();
+	if (m_e.GetSafeHwnd())
+		m_e.RepaintClient();
+
+	const CWnd* btns[] = {
+		&m_lsup, &m_lup, &m_lsdown, &m_ldown,
+		&m_findup, &m_finddown
+	};
+	for (const CWnd* p : btns)
+	{
+		if (p && p->GetSafeHwnd())
+			CCC_ForceRepaintHwnd(p->m_hWnd);
+	}
+}
+
 void CPlayList::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
-	Invalidate();
-
-	// TODO: ここにメッセージ ハンドラー コードを追加します。
+	if (bShow)
+	{
+		RefreshNavControls();
+		PostMessage(CCC_MSG_REFRESH_CHILDREN, 0, 0);
+	}
+	UNREFERENCED_PARAMETER(nStatus);
 }
 
 

@@ -19959,14 +19959,7 @@ void COggDlg::OnKillFocus(CWnd * pNewWnd)
 void COggDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
-#if CCUSTOM_AERO_SUPPORT
-	if (bShow && CCC_IsAeroEnabled())
-	{
-		ApplyDwmBlur();
-		CCC_RefreshDialogDwmBlur(m_hWnd);
-		Invalidate(FALSE);
-	}
-#endif
+	UNREFERENCED_PARAMETER(nStatus);
 }
 
 BOOL COggDlg::OnEraseBkgnd(CDC* pDC)
@@ -20020,8 +20013,9 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 			//		playbase->ShowWindow(SW_RESTORE);
 		if (pl) {
 			if (pl->m_saisyo.GetCheck()) {
-				//pl->ShowWindow(SW_RESTORE);
-//				::SetWindowPos(pl->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+				pl->ShowWindow(SW_SHOWNORMAL);
+				CCC_RefreshChildrenAfterShow(pl->m_hWnd);
+				pl->PostMessage(CCC_MSG_REFRESH_CHILDREN, 0, 0);
 			}
 		}
 		if (pMainFrame1 && height != 0) {

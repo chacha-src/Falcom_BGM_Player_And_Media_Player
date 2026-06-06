@@ -62,6 +62,7 @@ public:
 	CBrush m_brDlg;
 
 	HICON m_hIcon;
+	void RefreshNavControls();
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV サポート
 	CToolTipCtrl m_tooltip;

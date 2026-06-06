@@ -119,6 +119,7 @@ BEGIN_MESSAGE_MAP(CButtonST, CButton)
 	ON_WM_SYSCOLORCHANGE()
 	ON_CONTROL_REFLECT_EX(BN_CLICKED, OnClicked)
 	ON_WM_ACTIVATE()
+	ON_WM_SHOWWINDOW()
 	ON_WM_ENABLE()
 	ON_WM_CANCELMODE()
 	ON_WM_GETDLGCODE()
@@ -328,6 +329,24 @@ void CButtonST::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 	CButton::OnActivate(nState, pWndOther, bMinimized);
 	if (nState == WA_INACTIVE)	CancelHover();
 } // End of OnActivate
+
+void CButtonST::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+	CButton::OnShowWindow(bShow, nStatus);
+	if (bShow)
+	{
+		// 非表示中に親背景が変わるとキャッシュがずれて消えて見える
+		if (m_dcBk.m_hDC != NULL)
+		{
+			if (m_pbmpOldBk != NULL)
+				m_dcBk.SelectObject(m_pbmpOldBk);
+			m_bmpBk.DeleteObject();
+			m_dcBk.DeleteDC();
+			m_pbmpOldBk = NULL;
+		}
+		Invalidate();
+	}
+} // End of OnShowWindow
 
 void CButtonST::OnCancelMode() 
 {
