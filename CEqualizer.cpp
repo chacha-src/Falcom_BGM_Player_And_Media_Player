@@ -174,9 +174,9 @@ BOOL CEqualizer::OnInitDialog()
 
 	ReapplyDecorativeTitleFont();
 
-	m_t.SetPreferWideMode(FALSE);
+	m_t.SetPreferWideMode(TRUE);
 	m_t.SetGradation(COLOR_GRAD_DARK_GREEN, COLOR_RANGE_SELECTION, 135, TRUE); // 135 左上から右下
-	m_t.SetDropShadow(RGB(0,0,0), 45, 4, 2, TRUE);
+	m_t.SetDropShadow(RGB(0, 0, 0), 45, 18, 7, TRUE);
 
 	m_s0.SetRange(0, 200);
 	m_s1.SetRange(0, 200);

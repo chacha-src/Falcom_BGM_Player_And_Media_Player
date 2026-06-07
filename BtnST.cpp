@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "BtnST.h"
+#include "CCustomControl.h"
 
 #ifdef	BTNST_USE_SOUND
 #pragma comment(lib, "winmm.lib")
@@ -330,21 +331,25 @@ void CButtonST::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 	if (nState == WA_INACTIVE)	CancelHover();
 } // End of OnActivate
 
+void CButtonST::ClearBackgroundCache()
+{
+	if (m_dcBk.m_hDC != NULL)
+	{
+		if (m_pbmpOldBk != NULL)
+			m_dcBk.SelectObject(m_pbmpOldBk);
+		m_bmpBk.DeleteObject();
+		m_dcBk.DeleteDC();
+		m_pbmpOldBk = NULL;
+	}
+}
+
 void CButtonST::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CButton::OnShowWindow(bShow, nStatus);
 	if (bShow)
 	{
-		// 非表示中に親背景が変わるとキャッシュがずれて消えて見える
-		if (m_dcBk.m_hDC != NULL)
-		{
-			if (m_pbmpOldBk != NULL)
-				m_dcBk.SelectObject(m_pbmpOldBk);
-			m_bmpBk.DeleteObject();
-			m_dcBk.DeleteDC();
-			m_pbmpOldBk = NULL;
-		}
-		Invalidate();
+		ClearBackgroundCache();
+		CCC_ForceRepaintHwnd(m_hWnd);
 	}
 } // End of OnShowWindow
 

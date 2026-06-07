@@ -250,7 +250,12 @@ BEGIN_MESSAGE_MAP(CPlayList, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_BUTTON3, &CPlayList::OnBnClickedButton3)
 	ON_BN_CLICKED(IDC_PLAYDELETE, &CPlayList::OnBnClickedPlaydelete)
 	ON_BN_CLICKED(IDC_PIANOROLL, &CPlayList::OnBnClickedPianoroll)
+#if CCUSTOM_AERO_SUPPORT
+	ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
+#endif
 END_MESSAGE_MAP()
+
+static const UINT_PTR kPlayListNavRefreshTimer = 4945;
 
 #include <eh.h>
 class SE_Exception1
@@ -405,6 +410,7 @@ BOOL CPlayList::OnInitDialog()
 	if (retfont) {
 		m_lc.SetFont(&m_fontList, TRUE);
 		m_find.SetFont(&m_fontList, TRUE);
+		m_e.SetFont(&m_fontList, TRUE);
 	}
 	Invalidate();
 	playbase = NULL;
@@ -432,7 +438,7 @@ BOOL CPlayList::OnInitDialog()
 	m_findup.SetFlat(TRUE);
 	m_finddown.SetIcon(IDR_UP);
 	m_finddown.SetFlat(TRUE);
-	RefreshNavControls();
+	ScheduleRefreshNavControls();
 
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
@@ -478,8 +484,10 @@ int CPlayList::Create(CWnd *pWnd)
 		// 赤色のブラシを作成する．
 		m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
 	}
-	if (bret == TRUE)
+	if (bret == TRUE) {
 		ShowWindow(SW_SHOW);
+		ScheduleRefreshNavControls();
+	}
 	return bret;
 }
 
@@ -4408,6 +4416,11 @@ void CPlayList::OnTimer(UINT_PTR nIDEvent)
 void CPlayList::OnTimer(UINT nIDEvent) 
 #endif
 {
+	if (nIDEvent == kPlayListNavRefreshTimer) {
+		KillTimer(kPlayListNavRefreshTimer);
+		RefreshNavControls();
+		return;
+	}
 	savedata.saveloop = m_loop.GetCheck();
 	savedata.saverenzoku = m_renzoku.GetCheck();
 	savedata.savecheck=m_savecheck.GetCheck();
@@ -4771,7 +4784,7 @@ void CPlayList::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 	}
 	if (nState == WA_ACTIVE || nState == WA_CLICKACTIVE) {
 		SetTimer(4927, 10, NULL);
-
+		ScheduleRefreshNavControls();
 	}
 	else {
 		UnregisterHotKey(og->m_hWnd, ID_HOTKEY0);
@@ -4959,7 +4972,8 @@ void CPlayList::RefreshNavControls()
 
 	const CWnd* btns[] = {
 		&m_lsup, &m_lup, &m_lsdown, &m_ldown,
-		&m_findup, &m_finddown
+		&m_findup, &m_finddown,
+		&m_namechage, &m_listdelete, &m_pianorollBtn
 	};
 	for (const CWnd* p : btns)
 	{
@@ -4968,16 +4982,29 @@ void CPlayList::RefreshNavControls()
 	}
 }
 
+void CPlayList::ScheduleRefreshNavControls()
+{
+	if (!GetSafeHwnd())
+		return;
+	SetTimer(kPlayListNavRefreshTimer, 50, NULL);
+}
+
 void CPlayList::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
 	if (bShow)
-	{
-		RefreshNavControls();
-		PostMessage(CCC_MSG_REFRESH_CHILDREN, 0, 0);
-	}
+		ScheduleRefreshNavControls();
 	UNREFERENCED_PARAMETER(nStatus);
 }
+
+#if CCUSTOM_AERO_SUPPORT
+LRESULT CPlayList::OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam)
+{
+	LRESULT r = CCustomBlurDialogBase::OnReapplyOpaqueFixers(wParam, lParam);
+	ScheduleRefreshNavControls();
+	return r;
+}
+#endif
 
 
 void CPlayList::OnMoving(UINT fwSide, LPRECT pRect)
@@ -5008,9 +5035,6 @@ void CPlayList::OnSizing(UINT fwSide, LPRECT pRect)
 void CPlayList::OnSetFocus(CWnd* pOldWnd)
 {
 	CCustomBlurDialogBase::OnSetFocus(pOldWnd);
-
-	// TODO: ここにメッセージ ハンドラー コードを追加します。
-
 }
 
 
@@ -5026,12 +5050,10 @@ BOOL CPlayList::OnNcActivate(BOOL bActive)
 		}
 	}
 	if (bActive) {
-		//aaaa = 1;
-//		if (playbase) playbase->ShowWindow(SW_SHOW);
-//		KillTimer(4930);
 		aa = SetTimer(4927, 10, NULL);
 		aaa = GetLastError();
 		aaa = aaa;
+		ScheduleRefreshNavControls();
 	}
 	else {
 		//if(!bActive)

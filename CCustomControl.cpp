@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <vector>
+
+#pragma comment(lib, "msimg32.lib")
 
 #ifdef SubclassWindow
 #undef SubclassWindow
@@ -436,59 +439,186 @@ static BOOL CCC_IsChromaBg(COLORREF clrBg)
 {
     return clrBg == CCC_AERO_CHROMA_KEY;
 }
+
+// 透過クロマキー合成: 描画は COLOR_DIALOG_BG 上で行い、未描画領域だけ chroma に置換する。
+// 背景を直接 chroma で塗るとシャドウ等のアンチエイリアス縁が RGB(1,1,1) に溶けて消える。
+static void CCC_RemapSolidColorInDC(CDC& dc, const CRect& r, COLORREF clrFrom, COLORREF clrTo)
+{
+    if (r.Width() <= 0 || r.Height() <= 0) return;
+    for (int y = r.top; y < r.bottom; ++y)
+    {
+        for (int x = r.left; x < r.right; ++x)
+        {
+            if (dc.GetPixel(x, y) == clrFrom)
+                dc.SetPixel(x, y, clrTo);
+        }
+    }
+}
 #else
 static BOOL CCC_IsChromaBg(COLORREF) { return FALSE; }
 #endif
 
-static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& str, UINT fmt, COLORREF clrT, COLORREF clrS, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg)
+static HBITMAP CCC_CreateShadowDib32(HDC hdcRef, int w, int h, void** ppBits)
 {
-    if (bSE && nDist > 0 && !CCC_IsChromaBg(clrBg))
+    if (ppBits) *ppBits = nullptr;
+    if (!hdcRef || w <= 0 || h <= 0) return NULL;
+
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = w;
+    bmi.bmiHeader.biHeight = -h;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HBITMAP hBmp = ::CreateDIBSection(hdcRef, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (ppBits) *ppBits = bits;
+    if (!hBmp || !bits)
     {
-        double rad = nSD * 3.14159265358979323846 / 180.0;
-        int ox = (int)(nDist * cos(rad));
-        int oy = (int)(nDist * sin(rad));
+        if (hBmp) ::DeleteObject(hBmp);
+        if (ppBits) *ppBits = nullptr;
+        return NULL;
+    }
+    return hBmp;
+}
 
-        for (int b = nBlur; b > 0; b--)
+static void CCC_BoxBlurAlpha(std::vector<BYTE>& alpha, int w, int h, int radius)
+{
+    if (radius <= 0 || w <= 0 || h <= 0) return;
+    const int n = w * h;
+    std::vector<BYTE> tmp(n);
+
+    for (int y = 0; y < h; ++y)
+    {
+        for (int x = 0; x < w; ++x)
         {
-            int a = 255 / (nBlur + 1) * (nBlur - b + 1) / nBlur;
-            int r = (GetRValue(clrS) * a + GetRValue(clrBg) * (255 - a)) / 255;
-            int g = (GetGValue(clrS) * a + GetGValue(clrBg) * (255 - a)) / 255;
-            int bl = (GetBValue(clrS) * a + GetBValue(clrBg) * (255 - a)) / 255;
-
-            pDC->SetTextColor(RGB(r, g, bl));
-            CRect rs = rect;
-            rs.OffsetRect(ox + (b - nBlur / 2), oy + (b - nBlur / 2));
-            pDC->DrawText(str, rs, fmt);
+            int sum = 0, cnt = 0;
+            for (int dx = -radius; dx <= radius; ++dx)
+            {
+                const int xx = x + dx;
+                if (xx >= 0 && xx < w) { sum += alpha[y * w + xx]; cnt++; }
+            }
+            tmp[y * w + x] = (BYTE)(sum / max(1, cnt));
         }
     }
+
+    for (int y = 0; y < h; ++y)
+    {
+        for (int x = 0; x < w; ++x)
+        {
+            int sum = 0, cnt = 0;
+            for (int dy = -radius; dy <= radius; ++dy)
+            {
+                const int yy = y + dy;
+                if (yy >= 0 && yy < h) { sum += tmp[yy * w + x]; cnt++; }
+            }
+            alpha[y * w + x] = (BYTE)(sum / max(1, cnt));
+        }
+    }
+}
+
+static void DrawDecorativeTextShadowLayers(CDC* pDC, const CRect& rect, const CString& str, UINT fmt,
+    COLORREF clrS, int nSD, int nDist, int nBlur, COLORREF clrBg, BOOL bAeroTrans,
+    float scaleX = 1.0f, float scaleY = 1.0f)
+{
+    UNREFERENCED_PARAMETER(clrBg);
+    if (nDist <= 0 || nBlur <= 0 || str.IsEmpty() || !pDC)
+        return;
+
+    if (scaleX < 0.01f) scaleX = 0.01f;
+    if (scaleY < 0.01f) scaleY = 0.01f;
+
+    const double rad = nSD * 3.14159265358979323846 / 180.0;
+    const int ox = (int)floor(nDist * cos(rad) / scaleX + 0.5);
+    const int oy = (int)floor(nDist * sin(rad) / scaleY + 0.5);
+    const int pad = max(3, nBlur + 2);
+
+    CSize sz = pDC->GetTextExtent(str);
+    LOGFONT lf = {};
+    if (CFont* pCF = pDC->GetCurrentFont())
+        pCF->GetLogFont(&lf);
+    const int italicMargin = lf.lfItalic ? (abs(lf.lfHeight) / 2) : 0;
+    const int textW = max(rect.Width(), sz.cx + italicMargin);
+    const int textH = max(rect.Height(), sz.cy);
+
+    const int bw = textW + abs(ox) + pad * 2;
+    const int bh = textH + abs(oy) + pad * 2;
+    if (bw <= 0 || bh <= 0) return;
+
+    void* pBits = nullptr;
+    HBITMAP hDib = CCC_CreateShadowDib32(pDC->GetSafeHdc(), bw, bh, &pBits);
+    if (!hDib || !pBits) return;
+
+    CDC dcShadow;
+    dcShadow.CreateCompatibleDC(pDC);
+    HGDIOBJ hOldBmp = ::SelectObject(dcShadow.GetSafeHdc(), hDib);
+
+    UINT32* px = (UINT32*)pBits;
+    const int nPx = bw * bh;
+    for (int i = 0; i < nPx; ++i)
+        px[i] = 0x00FFFFFFu;
+
+    CFont* pOldFont = dcShadow.SelectObject(pDC->GetCurrentFont());
+    dcShadow.SetBkMode(TRANSPARENT);
+    dcShadow.SetTextColor(RGB(0, 0, 0));
+
+    CRect tr(pad + max(0, ox), pad + max(0, oy),
+        pad + max(0, ox) + textW, pad + max(0, oy) + textH);
+    dcShadow.DrawText(str, &tr, fmt);
+
+    std::vector<BYTE> alpha(nPx);
+    for (int i = 0; i < nPx; ++i)
+    {
+        const UINT32 rgb = px[i] & 0x00FFFFFFu;
+        if (rgb >= 0x00FEFEFEu)
+            alpha[i] = 0;
+        else
+            alpha[i] = (BYTE)max(0, min(255, 255 - (int)GetRValue(rgb)));
+    }
+
+    const int blurR = max(1, (nBlur + 1) / 2);
+    CCC_BoxBlurAlpha(alpha, bw, bh, blurR);
+    if (nBlur >= 5)
+        CCC_BoxBlurAlpha(alpha, bw, bh, max(1, blurR / 2));
+
+    const int tintR = (GetRValue(clrS) * 3 + 32) / 4;
+    const int tintG = (GetGValue(clrS) * 3 + 28) / 4;
+    const int tintB = (GetBValue(clrS) * 3 + 40) / 4;
+    const int peakA = bAeroTrans ? 88 : 112;
+
+    for (int i = 0; i < nPx; ++i)
+    {
+        if (alpha[i] == 0) { px[i] = 0; continue; }
+        const BYTE a = (BYTE)((alpha[i] * peakA) / 255);
+        if (a < 2) { px[i] = 0; continue; }
+        px[i] = ((UINT32)a << 24) | ((UINT32)tintB << 16) | ((UINT32)tintG << 8) | (UINT32)tintR;
+    }
+
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    ::GdiAlphaBlend(pDC->GetSafeHdc(), rect.left - pad, rect.top - pad, bw, bh,
+        dcShadow.GetSafeHdc(), 0, 0, bw, bh, bf);
+
+    dcShadow.SelectObject(pOldFont);
+    ::SelectObject(dcShadow.GetSafeHdc(), hOldBmp);
+    ::DeleteObject(hDib);
+}
+
+static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& str, UINT fmt, COLORREF clrT, COLORREF clrS, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bAeroTrans = FALSE)
+{
+    if (bSE)
+        DrawDecorativeTextShadowLayers(pDC, rect, str, fmt, clrS, nSD, nDist, nBlur, clrBg, bAeroTrans);
     pDC->SetTextColor(clrT);
     CRect rt = rect;
     pDC->DrawText(str, rt, fmt);
 }
 
-static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str, UINT fmt, COLORREF cS, COLORREF cE, int nDir, COLORREF clrSh, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, int nActW = -1, BOOL bFB = FALSE)
+static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str, UINT fmt, COLORREF cS, COLORREF cE, int nDir, COLORREF clrSh, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, int nActW = -1, BOOL bFB = FALSE, BOOL bAeroTrans = FALSE)
 {
     if (str.IsEmpty()) return;
 
-    if (bSE && nDist > 0 && !CCC_IsChromaBg(clrBg))
-    {
-        double rad = nSD * 3.14159265358979323846 / 180.0;
-        int ox = (int)(nDist * cos(rad));
-        int oy = (int)(nDist * sin(rad));
-
-        for (int b = nBlur; b > 0; b--)
-        {
-            int a = 255 / (nBlur + 1) * (nBlur - b + 1) / nBlur;
-            int r = (GetRValue(clrSh) * a + GetRValue(clrBg) * (255 - a)) / 255;
-            int g = (GetGValue(clrSh) * a + GetGValue(clrBg) * (255 - a)) / 255;
-            int bl = (GetBValue(clrSh) * a + GetBValue(clrBg) * (255 - a)) / 255;
-
-            pDC->SetTextColor(RGB(r, g, bl));
-            CRect rs = rect;
-            rs.OffsetRect(ox + (b - nBlur / 2), oy + (b - nBlur / 2));
-            pDC->DrawText(str, rs, fmt);
-        }
-    }
+    if (bSE)
+        DrawDecorativeTextShadowLayers(pDC, rect, str, fmt, clrSh, nSD, nDist, nBlur, clrBg, bAeroTrans);
 
     CSize sz = pDC->GetTextExtent(str);
     int nW = (nActW > 0) ? nActW : sz.cx;
@@ -983,18 +1113,45 @@ static void DrawSmartText(CDC* pDC, CRect rect, CString str, BOOL bDis, BOOL bPu
 
 static void DrawFittedSingleLineDecorativeText(CDC& dc, const CRect& rect, const CString& str, UINT fmt,
     BOOL bGrad, COLORREF cGS, COLORREF cGE, int nDir,
-    COLORREF clrSh, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bPreferWide)
+    COLORREF clrSh, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bPreferWide, BOOL bAeroTrans = FALSE)
 {
     if (str.IsEmpty() || rect.Width() <= 0 || rect.Height() <= 0) return;
     dc.SetBkMode(TRANSPARENT);
     CSize sz = dc.GetTextExtent(str);
     if (sz.cx <= 0) sz.cx = 1;
-    const int nBudget = (std::max)(1, rect.Width() - 3);
 
-    if (bPreferWide || sz.cx <= nBudget)
+    TEXTMETRIC tm = {};
+    dc.GetTextMetrics(&tm);
+    const int nTextH = max(1, (int)tm.tmHeight);
+
+    int shadowPadX = 0;
+    int shadowPadY = 0;
+    if (bSE && nDist > 0 && nBlur > 0)
     {
-        if (bGrad) DrawTextWithGradient(&dc, rect, str, fmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, bSE, clrBg, sz.cx, bPreferWide);
-        else DrawTextWithShadow(&dc, rect, str, fmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, bSE, clrBg);
+        const double rad = nSD * 3.14159265358979323846 / 180.0;
+        shadowPadX = (int)floor(nDist * cos(rad) + (nBlur + 1) / 2 + 0.5);
+        shadowPadY = (int)floor(nDist * sin(rad) + (nBlur + 1) / 2 + 0.5);
+    }
+
+    CRect rectDraw = rect;
+    if (bSE && shadowPadX > 0)
+        rectDraw.right = (std::max)(rectDraw.left + 1, rectDraw.right - shadowPadX);
+
+    LOGFONT lfCur = {};
+    if (CFont* pCF = dc.GetCurrentFont())
+        pCF->GetLogFont(&lfCur);
+    const int italicMargin = lfCur.lfItalic ? (abs(lfCur.lfHeight) / 2) : 0;
+
+    const int nBudgetW = (std::max)(1, rectDraw.Width() - 3);
+    const int nBudgetH = (std::max)(1, rect.Height());
+    const int needW = sz.cx + italicMargin;
+
+    const bool fitsWithoutScale = (needW <= nBudgetW && nTextH <= nBudgetH);
+
+    if (fitsWithoutScale)
+    {
+        if (bGrad) DrawTextWithGradient(&dc, rectDraw, str, fmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, bSE, clrBg, sz.cx, bPreferWide, bAeroTrans);
+        else DrawTextWithShadow(&dc, rectDraw, str, fmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, bSE, clrBg, bAeroTrans);
         return;
     }
 
@@ -1002,36 +1159,38 @@ static void DrawFittedSingleLineDecorativeText(CDC& dc, const CRect& rect, const
     {
         CRect rd = rect;
         UINT ellFmt = fmt | DT_END_ELLIPSIS;
-        if (bGrad) DrawTextWithGradient(&dc, rd, str, ellFmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, bSE, clrBg, sz.cx, FALSE);
-        else DrawTextWithShadow(&dc, rd, str, ellFmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, bSE, clrBg);
+        if (bGrad) DrawTextWithGradient(&dc, rd, str, ellFmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, bSE, clrBg, sz.cx, FALSE, bAeroTrans);
+        else DrawTextWithShadow(&dc, rd, str, ellFmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, bSE, clrBg, bAeroTrans);
         return;
     }
 
-    TEXTMETRIC tm;
-    dc.GetTextMetrics(&tm);
-    int yTop = rect.top;
-    if (rect.Height() >= tm.tmHeight) yTop = rect.top + (rect.Height() - tm.tmHeight) / 2;
+    // ワイド文字: X 軸のみ縮小（旧実装どおり）。Y は収まらないときだけ最小限縮める。
+    float scaleX = 1.0f;
+    if (needW > nBudgetW)
+        scaleX = (float)nBudgetW / (float)needW;
+    scaleX *= 0.98f;
+    if (scaleX < 0.62f) scaleX = 0.62f;
+    if (scaleX > 1.0f) scaleX = 1.0f;
 
-    float scale = 1.0f;
-    for (int i = 0; i < 64; ++i)
-    {
-        float wd = (float)sz.cx * scale;
-        if (wd <= (float)nBudget) break;
-        scale *= (float)nBudget / wd;
-        if (scale < 0.12f) { scale = 0.12f; break; }
-    }
-    scale *= 0.95f;
-    if (scale < 0.12f) scale = 0.12f;
+    float scaleY = 1.0f;
+    if (nTextH > nBudgetH)
+        scaleY = (float)nBudgetH / (float)nTextH;
+
+    const int drawH = max(1, (int)(nTextH * scaleY + 0.5f));
+    const int yTop = rect.top + max(0, (nBudgetH - drawH) / 2);
 
     dc.SetGraphicsMode(GM_ADVANCED);
-    XFORM xf = { scale, 0.0f, 0.0f, 1.0f, (float)rect.left, (float)yTop };
+    XFORM xf = { scaleX, 0.0f, 0.0f, scaleY, (float)rectDraw.left, (float)yTop };
     dc.SetWorldTransform(&xf);
 
     int mCW = (tm.tmMaxCharWidth > 0) ? (int)tm.tmMaxCharWidth : (int)tm.tmAveCharWidth;
-    CRect rl(0, 0, sz.cx + (std::max)(16, mCW + 4), rect.Height());
+    const int rlH = max(1, (scaleY > 0.01f) ? (int)(rectDraw.Height() / scaleY + 0.5f) : rectDraw.Height());
+    CRect rl(0, 0, sz.cx + (std::max)(16, mCW + 4), rlH);
     const UINT fitFmt = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
-    if (bGrad) DrawTextWithGradient(&dc, rl, str, fitFmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, bSE, clrBg, sz.cx, FALSE);
-    else DrawTextWithShadow(&dc, rl, str, fitFmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, bSE, clrBg);
+    if (bSE)
+        DrawDecorativeTextShadowLayers(&dc, rl, str, fitFmt, clrSh, nSD, nDist, nBlur, clrBg, bAeroTrans, scaleX, scaleY);
+    if (bGrad) DrawTextWithGradient(&dc, rl, str, fitFmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, FALSE, clrBg, sz.cx, FALSE, bAeroTrans);
+    else DrawTextWithShadow(&dc, rl, str, fitFmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, FALSE, clrBg, bAeroTrans);
     dc.RestoreDC(-1);
 }
 
@@ -1467,15 +1626,13 @@ void CCustomEdit::RepaintClient()
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
     {
-        CClientDC dc(this);
-        PaintOpaqueClient(dc);
+        ::RedrawWindow(m_hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
+        SetWindowPos(NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        return;
     }
-    else
 #endif
-    {
-        Invalidate(FALSE);
-        UpdateWindow();
-    }
+    Invalidate(FALSE);
+    UpdateWindow();
     SetWindowPos(NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
 }
 
@@ -1613,14 +1770,7 @@ void CCustomEdit::OnShowWindow(BOOL bShow, UINT nStatus)
 {
     CEdit::OnShowWindow(bShow, nStatus);
     if (bShow)
-    {
-        Invalidate(FALSE);
-        UpdateWindow();
-#if CCUSTOM_AERO_SUPPORT
-        if (CCC_IsAeroEnabled() && CCC_IsWin11())
-            ScheduleOpaqueRepaint();
-#endif
-    }
+        RepaintClient();
     UNREFERENCED_PARAMETER(nStatus);
 }
 
@@ -1668,7 +1818,7 @@ CCustomStatic::CCustomStatic()
     m_nGradDirection(0), m_bGradEnable(FALSE),
     m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135),
     m_nShadowDistance(2), m_nShadowBlur(3), m_bShadowEnable(FALSE),
-    m_bPreferWideMode(FALSE), m_nCachedHeight(0), m_nCachedWidth(0),
+    m_bPreferWideMode(FALSE), m_nCachedHeight(0), m_nCachedWidth(0), m_fCachedScaleX(1.0f),
     m_strCachedText(_T("")), m_strText(_T("")),
     m_backstoreW(0), m_backstoreH(0), m_bAeroMode(FALSE)
 {}
@@ -1784,9 +1934,7 @@ void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const std::ve
     else if (fmt & DT_RIGHT) xP = rect.right - tot.cx;
 
     const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
-    COLORREF clrBg = bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG;
-    COLORREF safeShadowColor = m_clrShadow;
-    if (bTrans && safeShadowColor == RGB(0, 0, 0)) safeShadowColor = RGB(2, 2, 2);
+    const COLORREF clrBg = COLOR_DIALOG_BG;
 
     for (size_t i = 0; i < segs.size(); i++)
     {
@@ -1802,8 +1950,8 @@ void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const std::ve
         COLORREF tc = segs[i].bHasColor ? segs[i].clrText : RGB(0, 0, 0);
         if (bTrans && tc == RGB(0, 0, 0)) tc = RGB(2, 2, 2);
 
-        if (m_bGradEnable) DrawTextWithGradient(pDC, sr, segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, m_clrGradStart, m_clrGradEnd, m_nGradDirection, safeShadowColor, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg, sz.cx);
-        else DrawTextWithShadow(pDC, sr, segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, tc, safeShadowColor, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg);
+        if (m_bGradEnable) DrawTextWithGradient(pDC, sr, segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, m_clrGradStart, m_clrGradEnd, m_nGradDirection, m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg, sz.cx, FALSE, bTrans);
+        else DrawTextWithShadow(pDC, sr, segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, tc, m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg, bTrans);
 
         xP += sz.cx;
         pDC->SelectObject(po); ft.DeleteObject();
@@ -1869,6 +2017,7 @@ void CCustomStatic::SetFont(CFont* pF, BOOL bR)
         if (m_font.GetSafeHandle()) m_font.DeleteObject();
         m_font.CreateFontIndirect(&lf);
         CStatic::SetFont(&m_font, bR);
+        m_strCachedText.Empty();
     }
 }
 
@@ -1919,13 +2068,15 @@ void CCustomStatic::DrawClient(CDC& dc)
     CBitmap* ob = memDC.SelectObject(&m_memBackstore);
 
     const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
-    if (bTrans) memDC.FillSolidRect(&rect, CCC_AERO_CHROMA_KEY);
-    else memDC.FillSolidRect(&rect, COLOR_DIALOG_BG);
+    memDC.FillSolidRect(&rect, COLOR_DIALOG_BG);
 
     if (m_strText.IsEmpty())
     {
         if (bTrans)
+        {
+            CCC_RemapSolidColorInDC(memDC, rect, COLOR_DIALOG_BG, CCC_AERO_CHROMA_KEY);
             CCC_BlitTransparentChroma(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+        }
         else
             dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
         memDC.SelectObject(ob);
@@ -1938,8 +2089,9 @@ void CCustomStatic::DrawClient(CDC& dc)
     std::vector<TextSegment> segs;
     if (bHasFmt) segs = ParseFormattedText(strText);
 
-    CRect rwm = rect;
-    rwm.DeflateRect(1, 1);
+    CRect rectWithMargin = rect;
+    rectWithMargin.DeflateRect(1, 1);
+
     CFont* pBF = GetFont();
     CFont* pOF = memDC.SelectObject(pBF);
     memDC.SetBkMode(TRANSPARENT);
@@ -1953,8 +2105,173 @@ void CCustomStatic::DrawClient(CDC& dc)
         d->GetLogFont(&lfB);
     }
 
-    int fH = m_nCachedHeight > 0 ? m_nCachedHeight : abs(lfB.lfHeight);
-    int fW = m_nCachedWidth;
+    const int kMinHeight = 6;
+    const int baseHeight = abs(lfB.lfHeight);
+    int finalHeight = 0;
+    int finalWidth = 0;
+    CSize szFinal;
+
+    const BOOL bNeedRecalc = (strText != m_strCachedText) ||
+        (m_nCachedHeight == 0) ||
+        (m_rectCached != rect);
+
+    if (bNeedRecalc)
+    {
+        if (bHasFmt)
+        {
+            auto MeasureText = [&](int height, int width) -> CSize {
+                return MeasureSegmentedText(&memDC, segs, lfB, height, width);
+            };
+
+            int fitHeight = kMinHeight;
+            int baseWidth = 0;
+            CSize szFit;
+
+            for (int h = baseHeight; h >= kMinHeight; h--)
+            {
+                LOGFONT lfTry = lfB;
+                lfTry.lfHeight = -h;
+                lfTry.lfWidth = 0;
+                CFont fontTry;
+                fontTry.CreateFontIndirect(&lfTry);
+                CFont* pOld = memDC.SelectObject(&fontTry);
+                TEXTMETRIC tm;
+                memDC.GetTextMetrics(&tm);
+                memDC.SelectObject(pOld);
+                fontTry.DeleteObject();
+
+                CSize size = MeasureText(h, 0);
+                if (size.cx <= rectWithMargin.Width())
+                {
+                    fitHeight = h;
+                    szFit = size;
+                    baseWidth = tm.tmAveCharWidth;
+                    break;
+                }
+            }
+
+            finalHeight = fitHeight;
+            finalWidth = 0;
+            szFinal = szFit;
+
+            if (szFit.cy < rectWithMargin.Height())
+            {
+                const double stretch = (double)rectWithMargin.Height() / fitHeight;
+                if (stretch <= 1.35)
+                {
+                    finalHeight = rectWithMargin.Height();
+                    finalWidth = max(1, (int)(baseWidth / stretch));
+                    szFinal = MeasureText(finalHeight, finalWidth);
+                }
+            }
+
+            if (m_bPreferWideMode && szFinal.cx < rectWithMargin.Width())
+            {
+                const int startWidth = (finalWidth > 0) ? finalWidth : baseWidth;
+                const int maxWidth = startWidth * 3;
+                for (int w = startWidth; w <= maxWidth; w++)
+                {
+                    CSize sizeTry = MeasureText(finalHeight, w);
+                    if (sizeTry.cx <= rectWithMargin.Width() && sizeTry.cy <= rectWithMargin.Height())
+                    {
+                        finalWidth = w;
+                        szFinal = sizeTry;
+                    }
+                    else break;
+                }
+            }
+            m_fCachedScaleX = 1.0f;
+        }
+        else
+        {
+            auto MeasureText = [&](int height, int width) -> CSize {
+                LOGFONT lfTry = lfB;
+                lfTry.lfHeight = -height;
+                lfTry.lfWidth = width;
+                CFont fontTry;
+                fontTry.CreateFontIndirect(&lfTry);
+                CFont* pOld = memDC.SelectObject(&fontTry);
+                CSize size = memDC.GetTextExtent(strText);
+                memDC.SelectObject(pOld);
+                fontTry.DeleteObject();
+                return size;
+            };
+
+            int shadowPadX = 0;
+            int shadowPadY = 0;
+            if (m_bShadowEnable && m_nShadowDistance > 0 && m_nShadowBlur > 0)
+            {
+                const double rad = m_nShadowDirection * 3.14159265358979323846 / 180.0;
+                shadowPadX = (int)floor(m_nShadowDistance * cos(rad) + (m_nShadowBlur + 1) / 2 + 0.5);
+                shadowPadY = (int)floor(m_nShadowDistance * sin(rad) + (m_nShadowBlur + 1) / 2 + 0.5);
+            }
+            UNREFERENCED_PARAMETER(shadowPadY);
+
+            const int availW = (std::max)(1, rectWithMargin.Width() - shadowPadX - 3);
+            finalHeight = min(baseHeight, rectWithMargin.Height());
+            finalWidth = 0;
+            szFinal = MeasureText(finalHeight, 0);
+
+            int italicMargin = lfB.lfItalic ? (finalHeight / 2) : 0;
+            int needW = szFinal.cx + italicMargin;
+            float scaleX = 1.0f;
+            if (needW > availW)
+            {
+                scaleX = (float)availW / (float)needW;
+                const float kMinScaleX = 0.62f;
+                if (scaleX < kMinScaleX)
+                {
+                    finalHeight = max(kMinHeight, (int)(finalHeight * scaleX / kMinScaleX + 0.5f));
+                    szFinal = MeasureText(finalHeight, 0);
+                    italicMargin = lfB.lfItalic ? (finalHeight / 2) : 0;
+                    needW = szFinal.cx + italicMargin;
+                    scaleX = (float)availW / (float)needW;
+                }
+                scaleX *= 0.98f;
+                if (scaleX < kMinScaleX) scaleX = kMinScaleX;
+                if (scaleX > 1.0f) scaleX = 1.0f;
+            }
+
+            if (scaleX >= 0.98f && m_bPreferWideMode && szFinal.cx < availW)
+            {
+                LOGFONT lfTry = lfB;
+                lfTry.lfHeight = -finalHeight;
+                lfTry.lfWidth = 0;
+                CFont fontTry;
+                fontTry.CreateFontIndirect(&lfTry);
+                CFont* pOld = memDC.SelectObject(&fontTry);
+                TEXTMETRIC tm = {};
+                memDC.GetTextMetrics(&tm);
+                memDC.SelectObject(pOld);
+                fontTry.DeleteObject();
+
+                const int baseWidth = tm.tmAveCharWidth;
+                const int maxWidth = baseWidth * 3;
+                for (int w = baseWidth; w <= maxWidth; w++)
+                {
+                    CSize sizeTry = MeasureText(finalHeight, w);
+                    if (sizeTry.cx <= availW && sizeTry.cy <= rectWithMargin.Height())
+                    {
+                        finalWidth = w;
+                        szFinal = sizeTry;
+                    }
+                    else break;
+                }
+            }
+
+            m_fCachedScaleX = scaleX;
+        }
+
+        m_strCachedText = strText;
+        m_nCachedHeight = finalHeight;
+        m_nCachedWidth = finalWidth;
+        m_rectCached = rect;
+    }
+    else
+    {
+        finalHeight = m_nCachedHeight;
+        finalWidth = m_nCachedWidth;
+    }
 
     DWORD ds = GetStyle();
     UINT fmt = DT_VCENTER | DT_SINGLELINE;
@@ -1962,33 +2279,61 @@ void CCustomStatic::DrawClient(CDC& dc)
     else if (ds & SS_RIGHT) fmt |= DT_RIGHT;
     else fmt |= DT_LEFT;
 
-    COLORREF clrBg = bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG;
-    COLORREF safeShadowColor = m_clrShadow;
-    if (bTrans && safeShadowColor == RGB(0, 0, 0)) safeShadowColor = RGB(2, 2, 2);
+    const COLORREF clrBg = COLOR_DIALOG_BG;
 
-    if (bHasFmt) DrawSegmentedText(&memDC, rect, segs, lfB, fH, fW, fmt);
+    if (bHasFmt)
+    {
+        DrawSegmentedText(&memDC, rect, segs, lfB, finalHeight, finalWidth, fmt);
+    }
     else
     {
-        LOGFONT lff = lfB;
-        lff.lfHeight = -fH;
-        lff.lfWidth = fW;
-        CFont ff;
-        ff.CreateFontIndirect(&lff);
-        CFont* pOI = memDC.SelectObject(&ff);
-        DrawFittedSingleLineDecorativeText(memDC, rect, strText, fmt,
-            m_bGradEnable, m_clrGradStart, m_clrGradEnd, m_nGradDirection,
-            safeShadowColor, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-            m_bShadowEnable, clrBg, m_bPreferWideMode);
-        memDC.SelectObject(pOI);
-        ff.DeleteObject();
+        CFont fontFinal;
+        LOGFONT lfFinal = lfB;
+        lfFinal.lfHeight = -finalHeight;
+        lfFinal.lfWidth = finalWidth;
+        fontFinal.CreateFontIndirect(&lfFinal);
+        CFont* pOIF = memDC.SelectObject(&fontFinal);
+
+        if (m_fCachedScaleX < 0.98f)
+        {
+            DrawFittedSingleLineDecorativeText(memDC, rect, strText, fmt,
+                m_bGradEnable, m_clrGradStart, m_clrGradEnd, m_nGradDirection,
+                m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+                m_bShadowEnable, clrBg, FALSE, bTrans);
+        }
+        else
+        {
+            szFinal = memDC.GetTextExtent(strText);
+
+            if (m_bGradEnable)
+            {
+                DrawTextWithGradient(&memDC, rect, strText, fmt,
+                    m_clrGradStart, m_clrGradEnd, m_nGradDirection,
+                    m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+                    m_bShadowEnable, clrBg, szFinal.cx, m_bPreferWideMode, bTrans);
+            }
+            else
+            {
+                DrawTextWithShadow(&memDC, rect, strText, fmt, RGB(0, 0, 0),
+                    m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+                    m_bShadowEnable, clrBg, bTrans);
+            }
+        }
+
+        memDC.SelectObject(pOIF);
+        fontFinal.DeleteObject();
     }
 
+    memDC.SelectObject(pOF);
+
     if (bTrans)
+    {
+        CCC_RemapSolidColorInDC(memDC, rect, COLOR_DIALOG_BG, CCC_AERO_CHROMA_KEY);
         CCC_BlitTransparentChroma(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+    }
     else
         dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
 
-    memDC.SelectObject(pOF);
     memDC.SelectObject(ob);
     memDC.DeleteDC();
 }
@@ -3753,8 +4098,60 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     mDC.DeleteDC();
 }
 
+void CCustomStandardButton::PaintOpaqueClient(CDC& dc)
+{
+    CRect r;
+    GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0)
+        return;
+
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    params.dwFlags = BPPF_ERASE;
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (!hdcBuf || !hBP)
+    {
+        PaintClient(dc, r);
+        return;
+    }
+    {
+        CDC dcBuf;
+        dcBuf.Attach(hdcBuf);
+        PaintClient(dcBuf, r);
+        dcBuf.Detach();
+    }
+    ::BufferedPaintMakeOpaque(hBP, &r);
+    ::EndBufferedPaint(hBP, TRUE);
+}
+
+void CCustomStandardButton::RepaintClient()
+{
+    if (!GetSafeHwnd())
+        return;
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    {
+        CClientDC dc(this);
+        PaintOpaqueClient(dc);
+        return;
+    }
+#endif
+    CClientDC dc(this);
+    CRect r;
+    GetClientRect(&r);
+    PaintClient(dc, r);
+}
+
 void CCustomStandardButton::OnPaint()
 {
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    {
+        CPaintDC dc(this);
+        PaintOpaqueClient(dc);
+        return;
+    }
+#endif
     CPaintDC dc(this);
     CRect r;
     GetClientRect(&r);
@@ -3775,6 +4172,10 @@ LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
 
 BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC)
 {
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+        return TRUE;
+#endif
     if (pDC)
     {
         CRect r;
@@ -3783,6 +4184,7 @@ BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC)
     }
     return TRUE;
 }
+
 void CCustomStandardButton::OnMouseMove(UINT f, CPoint p)
 {
     if (!m_bMouseOver)
@@ -4226,6 +4628,47 @@ void CCustomDialog::OnPaint()
 #if CCUSTOM_AERO_SUPPORT
 static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf);
 
+static void CCC_DrawButtonSTClient(HWND hWnd, CButtonST* pBtn, HDC hdc, const RECT& rect)
+{
+    CBrush br(COLOR_BUTTON_BG);
+    ::FillRect(hdc, &rect, (HBRUSH)br.GetSafeHandle());
+    DRAWITEMSTRUCT dis = {};
+    dis.CtlType = ODT_BUTTON;
+    dis.CtlID = (UINT)::GetDlgCtrlID(hWnd);
+    dis.itemID = dis.CtlID;
+    dis.itemAction = ODA_DRAWENTIRE;
+    const UINT st = (UINT)::SendMessage(hWnd, BM_GETSTATE, 0, 0);
+    if (st & BST_PUSHED) dis.itemState |= ODS_SELECTED;
+    if (!::IsWindowEnabled(hWnd)) dis.itemState |= ODS_DISABLED;
+    if (::GetFocus() == hWnd) dis.itemState |= ODS_FOCUS;
+    dis.hwndItem = hWnd;
+    dis.hDC = hdc;
+    dis.rcItem = rect;
+    pBtn->DrawItem(&dis);
+}
+
+static void CCC_ForcePaintButtonST(HWND hWnd, CButtonST* pBtn)
+{
+    if (!hWnd || !::IsWindow(hWnd) || !pBtn)
+        return;
+    pBtn->ClearBackgroundCache();
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    {
+        ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
+        return;
+    }
+#endif
+    CWnd* pw = CWnd::FromHandlePermanent(hWnd);
+    if (!pw) return;
+    RECT rect = {};
+    ::GetClientRect(hWnd, &rect);
+    if (rect.right <= rect.left || rect.bottom <= rect.top)
+        return;
+    CClientDC dc(pw);
+    CCC_DrawButtonSTClient(hWnd, pBtn, dc.GetSafeHdc(), rect);
+}
+
 // Win11: 子ウィンドウの GDI はアルファ0のまま DWM に合成される。
 // BufferedPaint で全面 alpha=255 にしてから WM_PRINTCLIENT で CCustom* を描く。
 // ※WM_PRINTCLIENT を再帰的に PaintOpaque へ渡すと OnPrintClient が呼ばれず全面透過になる。
@@ -4406,16 +4849,15 @@ static BOOL CCC_IsTransparentBlurControl(HWND hWnd)
 
 static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
 {
-    if (!::IsWindow(hWnd) || !::IsWindowVisible(hWnd)) return FALSE;
+    if (!::IsWindow(hWnd)) return FALSE;
     if (CCC_IsTransparentBlurControl(hWnd)) return FALSE;
     if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
     {
         if (dynamic_cast<CCustomListBox*>(pw)) return TRUE;
         if (dynamic_cast<CCustomListCtrl*>(pw)) return TRUE;
         if (dynamic_cast<CCustomComboBox*>(pw)) return TRUE;
-        if (dynamic_cast<CCustomStandardButton*>(pw)) return TRUE;
         if (dynamic_cast<CButtonST*>(pw)) return TRUE;
-        if (dynamic_cast<CCustomEdit*>(pw)) return FALSE;
+        if (dynamic_cast<CCustomEdit*>(pw)) return TRUE;
         return FALSE;
     }
     TCHAR cls[64] = {};
@@ -4447,12 +4889,12 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
         p->PaintClient(dc, r);
         painted = TRUE;
     }
-    else if (dynamic_cast<CCustomEdit*>(pw))
+    else if (auto* pEdit = dynamic_cast<CCustomEdit*>(pw))
     {
         CBrush br(COLOR_EDIT_BG);
         dc.FillRect(&r, &br);
+        pEdit->DrawClientText(dc, r);
         dc.Detach();
-        ::SendMessage(hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT);
         return TRUE;
     }
     else if (auto* pList = dynamic_cast<CCustomListCtrl*>(pw))
@@ -4463,19 +4905,9 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     }
     else if (auto* pBtn = dynamic_cast<CButtonST*>(pw))
     {
-        DRAWITEMSTRUCT dis = {};
-        dis.CtlType = ODT_BUTTON;
-        dis.CtlID = (UINT)::GetDlgCtrlID(hWnd);
-        dis.itemID = dis.CtlID;
-        dis.itemAction = ODA_DRAWENTIRE;
-        const UINT st = (UINT)::SendMessage(hWnd, BM_GETSTATE, 0, 0);
-        if (st & BST_PUSHED) dis.itemState |= ODS_SELECTED;
-        if (!::IsWindowEnabled(hWnd)) dis.itemState |= ODS_DISABLED;
-        if (::GetFocus() == hWnd) dis.itemState |= ODS_FOCUS;
-        dis.hwndItem = hWnd;
-        dis.hDC = hdcBuf;
-        ::GetClientRect(hWnd, &dis.rcItem);
-        pBtn->DrawItem(&dis);
+        RECT rect = {};
+        ::GetClientRect(hWnd, &rect);
+        CCC_DrawButtonSTClient(hWnd, pBtn, hdcBuf, rect);
         dc.Detach();
         return TRUE;
     }
@@ -4560,33 +4992,24 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
         return;
 
     CWnd* pw = CWnd::FromHandlePermanent(hWnd);
+    if (auto* pStd = dynamic_cast<CCustomStandardButton*>(pw))
+    {
+        pStd->RepaintClient();
+        return;
+    }
     if (auto* pBtn = dynamic_cast<CButtonST*>(pw))
     {
-        RECT rect = {};
-        ::GetClientRect(hWnd, &rect);
-        if (rect.right <= rect.left || rect.bottom <= rect.top)
-            return;
-#if CCUSTOM_AERO_SUPPORT
         if (CCC_IsAeroEnabled() && CCC_IsWin11())
+            CCC_ForcePaintButtonST(hWnd, pBtn);
+        else
         {
-            ::SendMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
-            return;
+            RECT rect = {};
+            ::GetClientRect(hWnd, &rect);
+            if (rect.right <= rect.left || rect.bottom <= rect.top)
+                return;
+            CClientDC dc(pw);
+            CCC_DrawButtonSTClient(hWnd, pBtn, dc.GetSafeHdc(), rect);
         }
-#endif
-        CClientDC dc(pw);
-        DRAWITEMSTRUCT dis = {};
-        dis.CtlType = ODT_BUTTON;
-        dis.CtlID = (UINT)::GetDlgCtrlID(hWnd);
-        dis.itemID = dis.CtlID;
-        dis.itemAction = ODA_DRAWENTIRE;
-        const UINT st = (UINT)::SendMessage(hWnd, BM_GETSTATE, 0, 0);
-        if (st & BST_PUSHED) dis.itemState |= ODS_SELECTED;
-        if (!::IsWindowEnabled(hWnd)) dis.itemState |= ODS_DISABLED;
-        if (::GetFocus() == hWnd) dis.itemState |= ODS_FOCUS;
-        dis.hwndItem = hWnd;
-        dis.hDC = dc.GetSafeHdc();
-        dis.rcItem = rect;
-        pBtn->DrawItem(&dis);
         return;
     }
 
@@ -4599,7 +5022,7 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_IsAeroEnabled() && CCC_IsWin11() && CCC_ShouldOpaqueFix(hWnd))
     {
-        ::SendMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+        ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
         return;
     }
 #endif
@@ -4626,6 +5049,11 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
     if (!hWnd || !::IsWindow(hWnd))
         return;
     CWnd* pw = CWnd::FromHandlePermanent(hWnd);
+    if (auto* pStd = dynamic_cast<CCustomStandardButton*>(pw))
+    {
+        pStd->RepaintClient();
+        return;
+    }
     if (auto* pBtn = dynamic_cast<CButtonST*>(pw))
     {
         RECT rect = {};
@@ -4680,7 +5108,6 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
-    ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
 END_MESSAGE_MAP()
 
 static BOOL RegisterBlurDialogWndClass(LPCTSTR pszClass, LPCTSTR pszNewClass)
@@ -4736,7 +5163,6 @@ void CCustomBlurDialogBase::ApplyDwmBlur()
         PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
         m_bBlurApplied = FALSE;
         Invalidate();
-        CCC_RefreshChildrenAfterShow(m_hWnd);
         return;
     }
     CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
@@ -4757,15 +5183,7 @@ void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
         CCC_RefreshDialogDwmBlur(m_hWnd);
     }
 #endif
-    CCC_RefreshChildrenAfterShow(m_hWnd);
-    PostMessage(CCC_MSG_REFRESH_CHILDREN, 0, 0);
     UNREFERENCED_PARAMETER(nStatus);
-}
-
-LRESULT CCustomBlurDialogBase::OnRefreshChildren(WPARAM, LPARAM)
-{
-    CCC_RefreshChildrenAfterShow(m_hWnd);
-    return 0;
 }
 
 void CCustomBlurDialogBase::OnPaint()
@@ -4797,10 +5215,8 @@ void CCustomBlurDialogBase::OnSize(UINT nType, int cx, int cy)
 void CCustomBlurDialogBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
     CCustomDialog::OnWindowPosChanged(lpwndpos);
-    if ((lpwndpos->flags & SWP_SHOWWINDOW) && !(lpwndpos->flags & SWP_HIDEWINDOW))
-        CCC_RefreshChildrenAfterShow(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
-    if ((lpwndpos->flags & SWP_SHOWWINDOW) && !m_bBlurApplied && CCC_IsAeroEnabled())
+    if (lpwndpos && (lpwndpos->flags & SWP_SHOWWINDOW) && !m_bBlurApplied && CCC_IsAeroEnabled())
         ApplyDwmBlur();
 #endif
 }
@@ -4917,7 +5333,6 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
-    ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
 END_MESSAGE_MAP()
 
 CCustomBlurDialogExBase::CCustomBlurDialogExBase() : m_bBlurApplied(FALSE) {}
@@ -4961,7 +5376,6 @@ void CCustomBlurDialogExBase::ApplyDwmBlur()
         PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
         m_bBlurApplied = FALSE;
         Invalidate();
-        CCC_RefreshChildrenAfterShow(m_hWnd);
         return;
     }
     CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
@@ -4982,15 +5396,7 @@ void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
         CCC_RefreshDialogDwmBlur(m_hWnd);
     }
 #endif
-    CCC_RefreshChildrenAfterShow(m_hWnd);
-    PostMessage(CCC_MSG_REFRESH_CHILDREN, 0, 0);
     UNREFERENCED_PARAMETER(nStatus);
-}
-
-LRESULT CCustomBlurDialogExBase::OnRefreshChildren(WPARAM, LPARAM)
-{
-    CCC_RefreshChildrenAfterShow(m_hWnd);
-    return 0;
 }
 
 void CCustomBlurDialogExBase::OnPaint()
@@ -5022,10 +5428,8 @@ void CCustomBlurDialogExBase::OnSize(UINT nType, int cx, int cy)
 void CCustomBlurDialogExBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
     CCustomDialogEx::OnWindowPosChanged(lpwndpos);
-    if ((lpwndpos->flags & SWP_SHOWWINDOW) && !(lpwndpos->flags & SWP_HIDEWINDOW))
-        CCC_RefreshChildrenAfterShow(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
-    if ((lpwndpos->flags & SWP_SHOWWINDOW) && !m_bBlurApplied && CCC_IsAeroEnabled())
+    if (lpwndpos && (lpwndpos->flags & SWP_SHOWWINDOW) && !m_bBlurApplied && CCC_IsAeroEnabled())
         ApplyDwmBlur();
 #endif
 }

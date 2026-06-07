@@ -19959,6 +19959,8 @@ void COggDlg::OnKillFocus(CWnd * pNewWnd)
 void COggDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
+	if (bShow && pl && plw)
+		pl->ScheduleRefreshNavControls();
 	UNREFERENCED_PARAMETER(nStatus);
 }
 
@@ -20011,12 +20013,10 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 		}
 		//		if (playbase)
 			//		playbase->ShowWindow(SW_RESTORE);
-		if (pl) {
-			if (pl->m_saisyo.GetCheck()) {
+		if (pl && plw) {
+			if (pl->m_saisyo.GetCheck())
 				pl->ShowWindow(SW_SHOWNORMAL);
-				CCC_RefreshChildrenAfterShow(pl->m_hWnd);
-				pl->PostMessage(CCC_MSG_REFRESH_CHILDREN, 0, 0);
-			}
+			pl->ScheduleRefreshNavControls();
 		}
 		if (pMainFrame1 && height != 0) {
 			pMainFrame1->ShowWindow(SW_SHOWNORMAL);

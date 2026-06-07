@@ -394,6 +394,7 @@ public:
 
     // 最小化復帰等: WM_PRINTCLIENT は Edit 本文を描かないため明示的に再描画
     void RepaintClient();
+    void DrawClientText(CDC& dc, const CRect& r);
 
 protected:
     virtual void PreSubclassWindow();
@@ -418,7 +419,6 @@ private:
     CBrush m_brBackground; // 背景塗りつぶし用ブラシ
     CFont m_fontBold;      // 太字フォント
     BOOL m_bHasFocus;      // 現在フォーカスを持っているかどうか
-    void DrawClientText(CDC& dc, const CRect& r);
     void PaintOpaqueClient(CDC& dc);
     void ScheduleOpaqueRepaint();
 };
@@ -523,6 +523,7 @@ private:
     CString m_strText;                     // コントロールが保持しているテキスト
     CString m_strCachedText;               // キャッシュされたテキスト（再計算防止用）
     int m_nCachedHeight, m_nCachedWidth;   // キャッシュされたサイズ情報
+    float m_fCachedScaleX;               // 幅オーバー時の X 軸ワールド変換倍率（1.0=なし）
     CRect m_rectCached;                    // キャッシュされた描画領域
 
     CBitmap m_memBackstore;                // ちらつき防止のダブルバッファリング用バックバッファ
@@ -732,6 +733,7 @@ public:
     void GetDropShadow(COLORREF* pc, int* pd, int* pdist, int* pblur, BOOL* pbe) const;
 
     void PaintClient(CDC& dc, const CRect& r);
+    void RepaintClient();
 
 protected:
     virtual void PreSubclassWindow();
@@ -753,6 +755,7 @@ protected:
 private:
     CBrush m_brBackground; // 背景塗りつぶし用ブラシ
     BOOL m_bMouseOver;     // マウスカーソルがボタンに乗っているかどうか
+    void PaintOpaqueClient(CDC& dc);
 
     // プロパティ保持用メンバ変数
     COLORREF m_clrGradStart, m_clrGradEnd;
@@ -1067,7 +1070,6 @@ protected:
     afx_msg void OnCompositionChanged();
     afx_msg void OnDestroy();
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
-    afx_msg LRESULT OnRefreshChildren(WPARAM wParam, LPARAM lParam);
 
     DECLARE_MESSAGE_MAP()
 
@@ -1139,7 +1141,6 @@ protected:
     afx_msg void OnCompositionChanged();
     afx_msg void OnDestroy();
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
-    afx_msg LRESULT OnRefreshChildren(WPARAM wParam, LPARAM lParam);
 
     DECLARE_MESSAGE_MAP()
 

@@ -123,6 +123,7 @@ public:
 
 	DWORD SetURL(LPCTSTR lpszURL = NULL);
 	void DrawTransparent(BOOL bRepaint = FALSE);
+	void ClearBackgroundCache();
 	DWORD SetBk(CDC* pDC);
 
 	BOOL GetDefault();
