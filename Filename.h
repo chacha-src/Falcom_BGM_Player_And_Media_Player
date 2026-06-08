@@ -28,9 +28,10 @@ public:
 	CCustomEdit m_alb;
 	CCustomEdit m_art;
 	CCustomEdit m_fol;
-	CCustomStandardButton m_okdummy;
-	CCustomStandardButton m_okdummy2;
 	CCustomStandardButton m_cdummy;
-	CCustomStandardButton afsas;
 	CCustomStandardButton mok;
+	CCustomStatic m_lblName;
+	CCustomStatic m_lblArt;
+	CCustomStatic m_lblAlb;
+	CCustomStatic m_lblFol;
 };

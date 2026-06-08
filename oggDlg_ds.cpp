@@ -515,7 +515,6 @@ UINT HandleNotifications(LPVOID)
 				dsbFade->Stop();
 			}
 			og->OnPause();
-			og->m_ps.EnableWindow(FALSE);
 			playf = 0; thn = TRUE; reset = TRUE;
 			extern int eqflg; eqflg = TRUE;
 			AfxEndThread(0);

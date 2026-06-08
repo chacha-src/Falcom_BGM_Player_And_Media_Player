@@ -1,4 +1,4 @@
-// oggDlg.h : ヘッダー ファイル
+﻿// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -125,7 +125,6 @@ public:
 	CCustomCheckBox	m_ed6tc;
 	CCustomCheckBox	m_yso;
 	CCustomRangeSliderCtrl	m_time;
-	//CSliderCtrl	m_time;
 	CCustomEdit	m_kaisuu;
 	CCustomCheckBox	m_junji;
 	CCustomCheckBox	m_random;
@@ -151,6 +150,8 @@ public:
 	void play();
 	void stop();
 	void stop1();
+	void ResetPauseButtonUi();
+	void SyncPauseButtonUi();
 	static void Modec();
 CWinThread * m_thread;
 CWinThread* m_thread1;
@@ -310,6 +311,8 @@ public:
 	CCustomStandardButton m_folderrrr;
 	CCustomStandardButton m_syuryouuuu;
 	afx_msg void OnStnClickedStatic2();
+	CCustomGroupBox m_grpMulti;
+	CCustomGroupBox m_grpGame;
 	CCustomStatic dummys1;
 	CCustomStatic m_dummys2;
 	CCustomStatic m_dummys3;

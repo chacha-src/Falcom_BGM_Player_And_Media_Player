@@ -27,6 +27,7 @@ void CZeroFol::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_EDIT2, m_fol);
 	DDX_Control(pDX, IDOK, m_okdummy);
 	DDX_Control(pDX, IDC_FOL, m_okdummya);
+	DDX_Control(pDX, IDC_STATIC, m_msg);
 }
 
 #include "CImageBase.h"
@@ -56,7 +57,7 @@ BOOL CZeroFol::OnInitDialog()
 	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(L"碧の軌跡 t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt", L"Ao no Kiseki t_bgm._dt"));
-	SetDlgItemText(IDC_STATIC, LL14(L"碧の軌跡にはループデータ存在しないため、零の軌跡の「t_bgm..dt」を選択してください", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt"));
+	m_msg.SetWindowText(LL14(L"碧の軌跡にはループデータ存在しないため、零の軌跡の「t_bgm..dt」を選択してください", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt", L"Ao no Kiseki has no loop data; select Zero no Kiseki t_bgm._dt"));
 	m_fol.SetWindowText(savedata.zero);
 	RECT r;
 	GetWindowRect(&r);

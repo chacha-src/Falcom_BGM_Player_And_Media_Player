@@ -28,4 +28,9 @@ public:
 	CCustomEdit m_loop;
 	CCustomEdit m_path;
 	CCustomStatic m_status;
+	CCustomStatic m_loopLabel;
+	CCustomStatic m_pathLabel;
+	CCustomStandardButton m_browse;
+	CCustomStandardButton m_exec;
+	CCustomStandardButton m_close;
 };

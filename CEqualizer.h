@@ -86,6 +86,31 @@ public:
 	CCustomStatic m_keyMid;
 	CCustomStatic m_keyHigh;
 	CCustomStatic m_keyAll;
+	CCustomStatic m_lblDry;
+	CCustomStatic m_lblWet;
+	CCustomStatic m_lblAcoustic;
+	CCustomStatic m_lblSpectrum;
+	CCustomStatic m_lblFreq;
+	CCustomStatic m_lblBand;
+	CCustomStatic m_lblLoudness;
+	CCustomStatic m_lblWarmth;
+	CCustomStatic m_freq25;
+	CCustomStatic m_freq40;
+	CCustomStatic m_freq63;
+	CCustomStatic m_freq100;
+	CCustomStatic m_freq160;
+	CCustomStatic m_freq250;
+	CCustomStatic m_freq400;
+	CCustomStatic m_freq630;
+	CCustomStatic m_freq1000;
+	CCustomStatic m_freq1600;
+	CCustomStatic m_freq2500;
+	CCustomStatic m_freq4000;
+	CCustomStatic m_freq6300;
+	CCustomStatic m_freq10000;
+	CCustomStatic m_freq16000;
+	CCustomStatic m_unitHz;
+	CCustomStatic m_unitPct;
 
 	// OnTimer の差分抑制用（ダイアログ再作成時は HWND が空でも CString が残らないようメンバで保持）
 	CString m_cachedKeyLow;

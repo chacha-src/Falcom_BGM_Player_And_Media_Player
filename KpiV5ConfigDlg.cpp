@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "KpiV5ConfigDlg.h"
 #include "KpiV5ConfigStore.h"
@@ -51,7 +51,7 @@ BOOL CKpiV5ConfigDlg::OnInitDialog()
 		L"Parametry dedykowane KPI ver5",
 		L"KPI ver5 ozel parametreler"));
 
-	SetDlgItemText(IDC_STATIC_KPI5CFG, LL14(
+	m_cccc.SetWindowText(LL14(
 		L"1行ごとに plugin.section.key=value 形式で設定します。先頭 # はコメントです。",
 		L"One line: plugin.section.key=value. Lines starting with # are comments.",
 		L"Une ligne: plugin.section.key=value. Les lignes commencant par # sont des commentaires.",

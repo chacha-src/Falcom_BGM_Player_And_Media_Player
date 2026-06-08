@@ -28,6 +28,7 @@ public:
 	afx_msg void OnBnClickedOk();
 	CCustomStandardButton m_okdummy;
 	CCustomStandardButton m_okdummya;
+	CCustomStatic m_msg;
 };
 
 

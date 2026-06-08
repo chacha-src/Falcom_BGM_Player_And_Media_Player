@@ -41,4 +41,5 @@ public:
 	afx_msg void OnLvnItemchangedList1(NMHDR *pNMHDR, LRESULT *pResult);
 	afx_msg void OnBnClickedOk();
 	CCustomStandardButton m_okdummy;
+	CCustomStatic m_desc;
 };

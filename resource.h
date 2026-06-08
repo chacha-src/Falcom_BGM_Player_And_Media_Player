@@ -513,6 +513,69 @@
 #define IDC_COMBO_SPEAKER               3312
 #define IDD_PIANOROLL                   198
 #define IDC_PIANOROLL                   3313
+#define IDC_EQ_FREQ_25                  3314
+#define IDC_EQ_FREQ_40                  3315
+#define IDC_EQ_FREQ_63                  3316
+#define IDC_EQ_FREQ_100                 3317
+#define IDC_EQ_FREQ_160                 3318
+#define IDC_EQ_FREQ_250                 3319
+#define IDC_EQ_FREQ_400                 3320
+#define IDC_EQ_FREQ_630                 3321
+#define IDC_EQ_FREQ_1000                3322
+#define IDC_EQ_FREQ_1600                3323
+#define IDC_EQ_FREQ_2500                3324
+#define IDC_EQ_FREQ_4000                3325
+#define IDC_EQ_FREQ_6300                3326
+#define IDC_EQ_FREQ_10000               3327
+#define IDC_EQ_FREQ_16000               3328
+#define IDC_EQ_UNIT_HZ                  3329
+#define IDC_EQ_UNIT_PCT                 3330
+#define IDC_SYOSAI_LBL_NAME             3331
+#define IDC_SYOSAI_LBL_ID               3332
+#define IDC_SYOSAI_LBL_GAME             3333
+#define IDC_SYOSAI_LBL_ART              3334
+#define IDC_SYOSAI_LBL_ALB              3335
+#define IDC_SYOSAI_LBL_FILE             3336
+#define IDC_SYOSAI_LBL_YEAR             3337
+#define IDC_SYOSAI_LBL_TRACK            3338
+#define IDC_SYOSAI_LBL_GENRE            3339
+#define IDC_SYOSAI_LBL_CMT              3340
+#define IDC_FILENAME_LBL_NAME           3341
+#define IDC_FILENAME_LBL_ART            3342
+#define IDC_FILENAME_LBL_ALB            3343
+#define IDC_FILENAME_LBL_FOL            3344
+#define IDC_PVI_LBL_HINT                3345
+#define IDC_PVI_LBL_DRIVE               3346
+#define IDC_FOL_LBL01                   3347
+#define IDC_FOL_LBL02                   3348
+#define IDC_FOL_LBL03                   3349
+#define IDC_FOL_LBL04                   3350
+#define IDC_FOL_LBL05                   3351
+#define IDC_FOL_LBL06                   3352
+#define IDC_FOL_LBL07                   3353
+#define IDC_FOL_LBL08                   3354
+#define IDC_FOL_LBL09                   3355
+#define IDC_FOL_LBL10                   3356
+#define IDC_FOL_LBL11                   3357
+#define IDC_FOL_LBL12                   3358
+#define IDC_FOL_LBL13                   3359
+#define IDC_FOL_LBL14                   3360
+#define IDC_FOL_LBL15                   3361
+#define IDC_FOL_LBL16                   3362
+#define IDC_FOL_LBL17                   3363
+#define IDC_FOL_LBL18                   3364
+#define IDC_FOL_LBL19                   3365
+#define IDC_FOL_LBL20                   3366
+#define IDC_FOL_LBL21                   3367
+#define IDC_FOL_LBL22                   3368
+#define IDC_FOL_LBL23                   3369
+#define IDC_FOL_LBL24                   3370
+#define IDC_FOL_LBL25                   3371
+#define IDC_OGG_GRP_MULTI               3372
+#define IDC_OGG_GRP_GAME                3373
+#define IDC_ABOUT_VER                   3374
+#define IDC_ABOUT_COPY                  3375
+#define IDC_STATIC_R_HZ                 3376
 
 // Next default values for new objects
 // 
@@ -520,7 +583,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        199
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3314
+#define _APS_NEXT_CONTROL_VALUE         3377
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

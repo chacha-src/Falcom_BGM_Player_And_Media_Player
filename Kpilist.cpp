@@ -25,6 +25,7 @@ void CKpilist::DoDataExchange(CDataExchange* pDX)
 	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_lc);
 	DDX_Control(pDX, IDOK, m_okdummy);
+	DDX_Control(pDX, IDC_STATIC, m_desc);
 }
 
 #include "CImageBase.h"
@@ -98,7 +99,7 @@ BOOL CKpilist::OnInitDialog()
 	SetWindowText(LL14(L"kpi一覧", L"kpi list", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L""));
 	m_tooltip.Create(this);
 	m_tooltip.Activate(TRUE);
-	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"閉じます", L"Close", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L""));
+	m_tooltip.AddTool(&m_okdummy, LL14(L"閉じます", L"Close", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L""));
 	m_tooltip.SetDelayTime( TTDT_AUTOPOP, 10000 );
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 

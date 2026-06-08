@@ -1,4 +1,4 @@
-#include "afxwin.h"
+﻿#include "afxwin.h"
 #if !defined(AFX_FOLDER_H__08EFA55A_7FC1_4B30_8B0F_7987E91B5FB7__INCLUDED_)
 #define AFX_FOLDER_H__08EFA55A_7FC1_4B30_8B0F_7987E91B5FB7__INCLUDED_
 
@@ -130,6 +130,7 @@ public:
 	CCustomStandardButton m25;
 	CCustomStandardButton m27;
 	CCustomStandardButton m_fsafa;
+	CCustomStatic m_folLbl[25];
 };
 
 //{{AFX_INSERT_LOCATION}}

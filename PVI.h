@@ -29,4 +29,6 @@ public:
 	afx_msg void OnBnClickedOk();
 	afx_msg void OnEnChangeEdit1();
 	CCustomStandardButton m_cdummy;
+	CCustomStatic m_hint;
+	CCustomStatic m_drive;
 };

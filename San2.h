@@ -26,4 +26,5 @@ protected:
 	DECLARE_MESSAGE_MAP()
 public:
 	CCustomStandardButton m_okdummy;
+	CCustomStatic m_msg;
 };

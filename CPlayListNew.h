@@ -23,6 +23,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 public:
 	CString name;
+	CCustomStatic m_label;
 	CCustomEdit m_name;
 	afx_msg void OnBnClickedOk();
 	virtual BOOL OnInitDialog();

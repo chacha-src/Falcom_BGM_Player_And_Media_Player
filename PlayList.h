@@ -140,5 +140,8 @@ public:
 	CCustomStandardButton m_namechage;
 	CCustomStandardButton m_listdelete;
 	CCustomStandardButton m_pianorollBtn;
+	CCustomStandardButton m_okdummy;
+	CCustomGroupBox m_grpIdo;
+	CCustomGroupBox m_grpKen;
 	CFont m_fontList;
 };

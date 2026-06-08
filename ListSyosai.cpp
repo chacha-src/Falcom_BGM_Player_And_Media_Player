@@ -37,6 +37,16 @@ void CListSyosai::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_EDIT9, m_track);
 	DDX_Control(pDX, IDC_EDIT10, m_j);
 	DDX_Control(pDX, IDOK, m_okdummy);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_NAME, m_lblName);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_ID, m_lblId);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_GAME, m_lblGame);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_ART, m_lblArt);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_ALB, m_lblAlb);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_FILE, m_lblFile);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_YEAR, m_lblYear);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_TRACK, m_lblTrack);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_GENRE, m_lblGenre);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_CMT, m_lblCmt);
 }
 
 #include "CImageBase.h"
@@ -73,26 +83,11 @@ BOOL CListSyosai::OnInitDialog()
 	SetDlgItemText(IDOK999, LL14(L"フォルダを開く", L"Open folder", L"Ouvrir le dossier", L"Apri cartella", L"Abrir carpeta", L"폴더 열기", L"打开文件夹", L"فتح المجلد", L"Открыть папку", L"Ordner öffnen", L"Abrir pasta", L"Map openen", L"Otwórz folder", L"Klasörü aç"));
 	TCHAR dy[256];
 	// TODO:  ここに初期化を追加してください
-	{
-		CEdit * pEdit = (CEdit *)GetDlgItem(IDC_EDIT1);
-		::SendMessage(pEdit->m_hWnd, EM_SETWORDBREAKPROC, 0, (LPARAM)EditWordBreakProc);
-	}
-	{
-		CEdit * pEdit = (CEdit *)GetDlgItem(IDC_EDIT4);
-		::SendMessage(pEdit->m_hWnd, EM_SETWORDBREAKPROC, 0, (LPARAM)EditWordBreakProc);
-	}
-	{
-		CEdit * pEdit = (CEdit *)GetDlgItem(IDC_EDIT5);
-		::SendMessage(pEdit->m_hWnd, EM_SETWORDBREAKPROC, 0, (LPARAM)EditWordBreakProc);
-	}
-	{
-		CEdit * pEdit = (CEdit *)GetDlgItem(IDC_EDIT6);
-		::SendMessage(pEdit->m_hWnd, EM_SETWORDBREAKPROC, 0, (LPARAM)EditWordBreakProc);
-	}
-	{
-		CEdit * pEdit = (CEdit *)GetDlgItem(IDC_EDIT11);
-		::SendMessage(pEdit->m_hWnd, EM_SETWORDBREAKPROC, 0, (LPARAM)EditWordBreakProc);
-	}
+	::SendMessage(m_name.m_hWnd, EM_SETWORDBREAKPROC, 0, (LPARAM)EditWordBreakProc);
+	::SendMessage(m_art.m_hWnd, EM_SETWORDBREAKPROC, 0, (LPARAM)EditWordBreakProc);
+	::SendMessage(m_alb.m_hWnd, EM_SETWORDBREAKPROC, 0, (LPARAM)EditWordBreakProc);
+	::SendMessage(m_fol.m_hWnd, EM_SETWORDBREAKPROC, 0, (LPARAM)EditWordBreakProc);
+	::SendMessage(m_cmt.m_hWnd, EM_SETWORDBREAKPROC, 0, (LPARAM)EditWordBreakProc);
 	m_name.SetWindowText(pc.name);
 	m_id.SetWindowText(_itot(pc.sub,dy,10));
 	m_game.SetWindowText(pc.game);

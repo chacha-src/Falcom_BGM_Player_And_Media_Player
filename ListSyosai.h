@@ -41,4 +41,14 @@ public:
 	CCustomEdit m_track;
 	CCustomEdit m_j;
 	CCustomStandardButton m_okdummy;
+	CCustomStatic m_lblName;
+	CCustomStatic m_lblId;
+	CCustomStatic m_lblGame;
+	CCustomStatic m_lblArt;
+	CCustomStatic m_lblAlb;
+	CCustomStatic m_lblFile;
+	CCustomStatic m_lblYear;
+	CCustomStatic m_lblTrack;
+	CCustomStatic m_lblGenre;
+	CCustomStatic m_lblCmt;
 };

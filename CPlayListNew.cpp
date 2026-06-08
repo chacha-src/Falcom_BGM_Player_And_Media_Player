@@ -24,6 +24,7 @@ CPlayListNew::~CPlayListNew()
 void CPlayListNew::DoDataExchange(CDataExchange* pDX)
 {
 	CCustomBlurDialogExBase::DoDataExchange(pDX);
+	DDX_Control(pDX, IDC_STATIC, m_label);
 	DDX_Control(pDX, IDC_EDIT1, m_name);
 	DDX_Control(pDX, IDOK, afsasfafs);
 	DDX_Control(pDX, IDCANCEL, fsaascasa);
@@ -55,7 +56,7 @@ BOOL CPlayListNew::OnInitDialog()
 	CCustomBlurDialogExBase::OnInitDialog();
 
 	SetWindowText(LL14(L"新しいプレイリスト", L"New Playlist", L"Nouvelle liste", L"Nuova playlist", L"Nueva lista", L"새 재생 목록", L"新建播放列表", L"قائمة جديدة", L"Новый плейлист", L"Neue Playlist", L"Nova playlist", L"Nieuwe afspeellijst", L"Nowa playlist", L"Yeni çalma listesi"));
-	SetDlgItemText(IDC_STATIC, LL14(L"新しいプレイリスト名", L"New playlist name", L"Nom de la nouvelle liste", L"Nome nuova playlist", L"Nombre de nueva lista", L"새 재생 목록 이름", L"新建播放列表名称", L"اسم القائمة الجديدة", L"Имя нового плейлиста", L"Name der neuen Playlist", L"Nome da nova playlist", L"Naam nieuwe afspeellijst", L"Nazwa nowej playlisty", L"Yeni çalma listesi adı"));
+	m_label.SetWindowText(LL14(L"新しいプレイリスト名", L"New playlist name", L"Nom de la nouvelle liste", L"Nome nuova playlist", L"Nombre de nueva lista", L"새 재생 목록 이름", L"新建播放列表名称", L"اسم القائمة الجديدة", L"Имя нового плейлиста", L"Name der neuen Playlist", L"Nome da nova playlist", L"Naam nieuwe afspeellijst", L"Nazwa nowej playlisty", L"Yeni çalma listesi adı"));
 	m_name.SetWindowText(name);
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。

@@ -1,4 +1,4 @@
-// PVI.cpp : 実装ファイル
+﻿// PVI.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -26,6 +26,8 @@ void CPVI::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_EDIT1, m_pvi);
 	DDX_Control(pDX, IDOK, m_ok);
 	DDX_Control(pDX, IDCANCEL, m_cdummy);
+	DDX_Control(pDX, IDC_PVI_LBL_HINT, m_hint);
+	DDX_Control(pDX, IDC_PVI_LBL_DRIVE, m_drive);
 }
 
 #include "CImageBase.h"
@@ -42,7 +44,7 @@ BOOL CPVI::OnInitDialog()
 	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(L"fmpmd.kpi PVIパス設定", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings", L"fmpmd.kpi PVI Path Settings"));
-	SetDlgItemText(IDC_STATIC, LL14(L"PVIパス \\で必ず終わること　複数指定は ; で指定", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths."));
+	m_hint.SetWindowText(LL14(L"PVIパス \\で必ず終わること　複数指定は ; で指定", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths.", L"PVI path must end with \\. Use ; for multiple paths."));
 	SetDlgItemText(IDOK, LL14(
 		L"適用",
 		L"Apply",

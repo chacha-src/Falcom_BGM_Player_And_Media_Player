@@ -25,6 +25,7 @@ void CSan2::DoDataExchange(CDataExchange* pDX)
 	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_list);
 	DDX_Control(pDX, IDOK, m_okdummy);
+	DDX_Control(pDX, IDC_STATIC, m_msg);
 }
 
 #include "CImageBase.h"
@@ -888,7 +889,7 @@ BOOL CSan2::OnInitDialog()
 	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"幻想三国志２", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"환상삼국지 2", L"幻想三国志2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2", L"Fantasy Sanguo 2"));
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
-	SetDlgItemText(IDC_STATIC, LL14(L"動画(★印)を再生するにはBinkの環境が必要です\nreadme.txtを読んで導入してください。", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup."));
+	m_msg.SetWindowText(LL14(L"動画(★印)を再生するにはBinkの環境が必要です\nreadme.txtを読んで導入してください。", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup.", L"Bink runtime required for video (★) playback.\nSee readme.txt for setup."));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

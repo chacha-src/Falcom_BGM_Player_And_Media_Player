@@ -27,6 +27,11 @@ void CWavExport::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_WAVEXPORT_LOOP, m_loop);
 	DDX_Control(pDX, IDC_WAVEXPORT_PATH, m_path);
 	DDX_Control(pDX, IDC_WAVEXPORT_STATUS, m_status);
+	DDX_Control(pDX, IDC_WAVEXPORT_LOOP_LABEL, m_loopLabel);
+	DDX_Control(pDX, IDC_WAVEXPORT_PATH_LABEL, m_pathLabel);
+	DDX_Control(pDX, IDC_WAVEXPORT_BROWSE, m_browse);
+	DDX_Control(pDX, IDC_WAVEXPORT_EXEC, m_exec);
+	DDX_Control(pDX, IDC_WAVEXPORT_CLOSE, m_close);
 }
 
 BEGIN_MESSAGE_MAP(CWavExport, CCustomBlurDialogBase)
@@ -42,19 +47,19 @@ BOOL CWavExport::OnInitDialog()
 		L"Exportar a WAV", L"WAV로 내보내기", L"导出到WAV", L"تصدير إلى WAV",
 		L"Экспорт в WAV", L"Als WAV exportieren", L"Exportar para WAV", L"Exporteren naar WAV",
 		L"Eksportuj do WAV", L"WAV'e aktar"));
-	SetDlgItemText(IDC_WAVEXPORT_LOOP_LABEL, LL14(L"繰返し回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop",
+	m_loopLabel.SetWindowText(LL14(L"繰返し回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop",
 		L"Repeticiones", L"반복 횟수", L"循环次数", L"عدد التكرار",
 		L"Количество повторов", L"Schleifenzahl", L"Repetições", L"Aantal herhalingen",
 		L"Liczba powtórzeń", L"Döngü sayısı"));
-	SetDlgItemText(IDC_WAVEXPORT_PATH_LABEL, LL14(L"出力ファイル名", L"Output file", L"Fichier de sortie", L"File di output",
+	m_pathLabel.SetWindowText(LL14(L"出力ファイル名", L"Output file", L"Fichier de sortie", L"File di output",
 		L"Archivo de salida", L"출력 파일", L"输出文件名", L"اسم الملف",
 		L"Выходной файл", L"Ausgabedatei", L"Arquivo de saída", L"Uitvoerbestand",
 		L"Plik wyjściowy", L"Çıktı dosyası"));
-	SetDlgItemText(IDC_WAVEXPORT_CLOSE, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi",
+	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi",
 		L"Cerrar", L"닫기", L"关闭", L"إغلاق",
 		L"Закрыть", L"Schließen", L"Fechar", L"Sluiten",
 		L"Zamknij", L"Kapat"));
-	SetDlgItemText(IDC_WAVEXPORT_EXEC, LL14(L"実行", L"Execute", L"Exécuter", L"Esegui",
+	m_exec.SetWindowText(LL14(L"実行", L"Execute", L"Exécuter", L"Esegui",
 		L"Ejecutar", L"실행", L"执行", L"تنفيذ",
 		L"Выполнить", L"Ausführen", L"Executar", L"Uitvoeren",
 		L"Wykonaj", L"Çalıştır"));
@@ -115,10 +120,10 @@ void CWavExport::OnBnClickedWavExportExec()
 		L"Exportando...", L"내보내는 중...", L"导出中...", L"جاري التصدير...",
 		L"Экспорт...", L"Exportiere...", L"Exportando...", L"Exporteren...",
 		L"Eksportowanie...", L"Dışa aktarılıyor..."));
-	GetDlgItem(IDC_WAVEXPORT_EXEC)->EnableWindow(FALSE);
+	m_exec.EnableWindow(FALSE);
 	UpdateWindow();
 	BOOL ok = og->ExportToWav(&pc, path, loopCount);
-	GetDlgItem(IDC_WAVEXPORT_EXEC)->EnableWindow(TRUE);
+	m_exec.EnableWindow(TRUE);
 	if (ok) {
 		CString msg = LL14(L"完了", L"Complete", L"Termine", L"Completato",
 			L"Completado", L"완료", L"完成", L"اكتمل",

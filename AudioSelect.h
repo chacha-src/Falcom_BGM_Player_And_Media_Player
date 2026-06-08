@@ -29,4 +29,5 @@ public:
 	CCustomListBox m_lb;
 	virtual BOOL OnInitDialog();
 	CCustomStandardButton m_okdummy;
+	CCustomStatic m_desc;
 };

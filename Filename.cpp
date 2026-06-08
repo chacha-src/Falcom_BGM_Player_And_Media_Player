@@ -31,6 +31,10 @@ void CFilename::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_EDIT4, m_fol);
 	DDX_Control(pDX, IDCANCEL, m_cdummy);
 	DDX_Control(pDX, ID_OK, mok);
+	DDX_Control(pDX, IDC_FILENAME_LBL_NAME, m_lblName);
+	DDX_Control(pDX, IDC_FILENAME_LBL_ART, m_lblArt);
+	DDX_Control(pDX, IDC_FILENAME_LBL_ALB, m_lblAlb);
+	DDX_Control(pDX, IDC_FILENAME_LBL_FOL, m_lblFol);
 }
 
 #include "CImageBase.h"

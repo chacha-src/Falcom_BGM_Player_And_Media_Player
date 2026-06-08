@@ -133,6 +133,18 @@ public:
 	afx_msg void OnBnClickedCancel5();
 	CCustomCheckBox m_upscale;
 	CCustomComboBox m_speaker;
+	CCustomStatic m_lblLang;
+	CCustomStatic m_lblBuf;
+	CCustomStatic m_lblMp3;
+	CCustomStatic m_lblKpi;
+	CCustomStatic m_lblDisp;
+	CCustomStatic m_lblDev;
+	CCustomStatic m_lblSamp;
+	CCustomStatic m_lblSpeana;
+	CCustomStatic m_lblSpc;
+	CCustomStatic m_lblBit;
+	CCustomStatic m_lblSpeaker;
+	CCustomStatic m_lblHz;
 	afx_msg void OnCbnSelchangeSpeaker();
 	afx_msg void OnBnClickedCheckUpscale();
 	afx_msg void OnBnClicked32bit();
