@@ -109,7 +109,6 @@ extern size_t g_loopTailPos;
 
 extern std::mutex cl2;
 
-CImageBase* Games;
 
 #pragma warning(push)
 #pragma warning(disable : 4201)
@@ -216,6 +215,7 @@ MMRESULT    mmRes;
 HWAVEOUT    hwo;
 CPlayList* pl = NULL;
 CMp3Image* mi = NULL;
+CDouga* pMainFrame1 = NULL;
 BOOL plw, miw;
 extern TCHAR karento2[1024];
 char kare[256];
@@ -1353,7 +1353,6 @@ void COggDlg::OnSysCommand(UINT nID, LPARAM lParam)
 // コードを以下に記述する必要があります。MFC アプリケーションは document/view
 // モデルを使っているので、この処理はフレームワークにより自動的に処理されます。
 
-CImageBase* maini;
 // システムは、ユーザーが最小化ウィンドウをドラッグしている間、
 // カーソルを表示するためにここを呼び出します。
 HCURSOR COggDlg::OnQueryDragIcon()
@@ -1373,8 +1372,6 @@ void COggDlg::Resize()
 		rect_1.bottom = rect_2.bottom + 3;
 		rect_1.right = rect_2.right + 5;
 		MoveWindow(&rect_1);
-		if (maini)
-			maini->MoveWindow(&rect_1);
 	}
 	else {
 		m_ue.SetWindowText(_T("▼"));
@@ -1384,9 +1381,60 @@ void COggDlg::Resize()
 		rect_1.bottom = rect_2.bottom + 3;
 		rect_1.right = rect_2.right + 5;
 		MoveWindow(&rect_1);
-		if (maini)
-			maini->MoveWindow(&rect_1);
 	}
+}
+
+void COggDlg::RefreshAllAeroWindows()
+{
+#if CCUSTOM_AERO_SUPPORT
+	auto refreshBlur = [](CWnd* w) {
+		if (!w || !w->GetSafeHwnd() || !::IsWindowVisible(w->m_hWnd))
+			return;
+		if (auto* pBase = dynamic_cast<CCustomBlurDialogBase*>(w)) {
+			pBase->RefreshAeroMode();
+			return;
+		}
+		if (auto* pEx = dynamic_cast<CCustomBlurDialogExBase*>(w))
+			pEx->RefreshAeroMode();
+	};
+	refreshBlur(this);
+	refreshBlur(&m_EqualizerDlg);
+	refreshBlur(&m_PianoRollDlg);
+	if (pl)
+		refreshBlur(pl);
+	if (mi)
+		refreshBlur(mi);
+	if (pMainFrame1 && pMainFrame1->GetSafeHwnd() && ::IsWindowVisible(pMainFrame1->m_hWnd)) {
+		CCC_ApplyAero(pMainFrame1->m_hWnd, CCC_IsAeroEnabled() ? TRUE : FALSE);
+		pMainFrame1->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+	}
+#endif
+}
+
+void COggDlg::RefreshAeroGlassAlpha()
+{
+#if CCUSTOM_AERO_SUPPORT
+	auto refresh = [](CWnd* w) {
+		if (!w || !w->GetSafeHwnd() || !::IsWindowVisible(w->m_hWnd))
+			return;
+		if (auto* pEx = dynamic_cast<CCustomBlurDialogExBase*>(w)) {
+			pEx->RefreshAeroGlassAlpha();
+			return;
+		}
+		if (auto* pBase = dynamic_cast<CCustomBlurDialogBase*>(w)) {
+			pBase->RefreshAeroGlassAlpha();
+			return;
+		}
+		CCC_RefreshAeroGlassAlphaForHwnd(w->m_hWnd);
+	};
+	refresh(this);
+	refresh(&m_EqualizerDlg);
+	refresh(&m_PianoRollDlg);
+	if (pl) refresh(pl);
+	if (mi) refresh(mi);
+	if (pMainFrame1 && pMainFrame1->GetSafeHwnd() && ::IsWindowVisible(pMainFrame1->m_hWnd))
+		CCC_RefreshAeroGlassAlphaForHwnd(pMainFrame1->m_hWnd);
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2052,7 +2100,6 @@ void FreeOutputBuffer(void);
 void playwav();
 void playwavds(char* bw);
 
-CDouga* pMainFrame1 = NULL;
 OggVorbis_File vf;
 DWORD hw;
 PCMWAVEFORMAT p;
@@ -2622,9 +2669,6 @@ BOOL COggDlg::OnInitDialog()
 	m_newFont1->CreateFontIndirectW(&mylf);
 	m_os3.SetFont(m_newFont1);
 
-	//
-	SetTimer(15011, 200, NULL);
-
 	m_lrc.SetWindowText(L"");
 	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
 	m_lrc3.SetWindowText(L"");
@@ -2683,12 +2727,12 @@ void COggDlg::OnPaint()
 #if CCUSTOM_AERO_SUPPORT
 		if (CCC_IsAeroEnabled() && CCC_IsWin11())
 		{
-			const BOOL bSpectrumOnly = (savedata.ms2 <= ms2
+			const BOOL bSpectrumOnly = (OGG_DISPLAY_INTERVAL_TICKS <= ms2
 				&& clip.bottom <= destH + 8
 				&& clip.Height() <= destH + 8);
 			if (savedata.aero == 1 && dc.m_hDC != NULL)
 			{
-				if (savedata.ms2 <= ms2)
+				if (OGG_DISPLAY_INTERVAL_TICKS <= ms2)
 				{
 					dcc.SelectClipRgn(NULL);
 					CCC_BlitStretchChromaNoFlicker(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
@@ -2710,7 +2754,7 @@ void COggDlg::OnPaint()
 		}
 		else
 #endif
-		if (savedata.ms2 <= ms2) {
+		if (OGG_DISPLAY_INTERVAL_TICKS <= ms2) {
 #if CCUSTOM_AERO_SUPPORT
 			if (savedata.aero == 1 && CCC_IsWin11())
 			{
@@ -9001,7 +9045,6 @@ void COggDlg::play()
 	ResetPauseButtonUi();
 	SetTimer(1250, 100, NULL);
 	fade1 = 0;
-	if (maini) maini->SetActiveWindow();
 	SetActiveWindow();
 	m_jacketFocus = 0.0;
 	m_lastTick = 0;
@@ -14913,7 +14956,7 @@ void COggDlg::timerp()
 		}
 	}
 	ms2++;
-	const BOOL bGdiFrame = (savedata.ms2 <= ms2)
+	const BOOL bGdiFrame = (OGG_DISPLAY_INTERVAL_TICKS <= ms2)
 		&& (InterlockedCompareExchange(&g_gdiPaintPending, 0, 0) == 0);
 	CString s, ss, sss;
 	if (voldsf) {
@@ -16306,7 +16349,7 @@ UINT TheadLoop(LPVOID)
 		f1 = Timing64(f2, FALSE);
 		timen = GetTiming(f1);
 		COgg_RequestTimerp(og);
-		timen = (DWORD)(savedata.ms2 * (double)timen);
+		timen = (DWORD)((double)OGG_DISPLAY_INTERVAL_TICKS * (double)timen);
 		timing1((WORD)timen, FALSE, FALSE);
 		Timing64(f2, FALSE);
 		Timing64(fpstiming, FALSE);
@@ -16346,8 +16389,6 @@ void timerog1(UINT nIDEvent)
 	if (nIDEvent == 4923) {
 		og->KillTimer(4923);
 		if (ip != 0) return;
-		if (maini)
-			::SetWindowPos(maini->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		og->SetTimer(4930, 10, NULL);
 		RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY0, 0, VK_UP);
@@ -16494,27 +16535,6 @@ void timerog1(UINT nIDEvent)
 			og->KillTimer(11251);
 			og->OnRestart();
 		}
-	}
-
-	if (nIDEvent == 15011) {
-		og->KillTimer(15011);
-		if (maini) {
-			delete maini;
-			maini = NULL;
-		}
-
-		if (savedata.aero == 2) {
-			maini = new CImageBase;
-			maini->Create(og);
-			maini->oya = og;
-		}
-		RECT r;
-		og->GetWindowRect(&r);
-		if (maini)
-			maini->MoveWindow(&r);
-		if (maini)
-			::SetWindowPos(maini->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	}
 
 	if (nIDEvent == 1251) {
@@ -19309,7 +19329,7 @@ void COggDlg::moji(CString s, int x, int y, COLORREF rgb)
 	SetBkColor(dc, RGB(0, 0, 0));
 	dc.SetBkMode(TRANSPARENT);
 	GetTextExtentPoint32(dc, s, s.GetLength(), &szinfo);
-	if (savedata.ms2 <= ms2) {
+	if (OGG_DISPLAY_INTERVAL_TICKS <= ms2) {
 		dc.TextOut(x * 4, y * 4, s, s.GetLength());
 	}
 	SelectObject(dc, fo);
@@ -19332,7 +19352,7 @@ int COggDlg::mojisub(CString s, int x, int y, COLORREF rgb)
 	SetBkColor(dcsub, RGB(0, 0, 0));
 	SetBkMode(dcsub, TRANSPARENT);
 	szinfo = dcsub.GetOutputTextExtent(s);
-	if (savedata.ms2 <= ms2) {
+	if (OGG_DISPLAY_INTERVAL_TICKS <= ms2) {
 		if (szinfo.cx < (MDC + 8) * 4)
 			dcsub.FillSolidRect(0, 0, (MDC + 8) * 4, 30 * 4, RGB(0, 0, 0));
 		else
@@ -19347,10 +19367,6 @@ void COggDlg::OnButton9_Folder()
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	CFolder* a = new CFolder(CWnd::FromHandle(GetSafeHwnd()));
-	if (savedata.aero == 2) {
-		::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		if (maini)::SetWindowPos(maini->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-	}
 	CWnd::PostMessage(0x118);
 	a->DoModal();
 	Modec();
@@ -19994,8 +20010,6 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 		if (pMainFrame1) {
 			pMainFrame1->ShowWindow(SW_HIDE);
 		}
-		if (maini)
-			maini->ShowWindow(SW_MINIMIZE);
 		SetTimer(4924, 100, NULL);
 	}
 	if (nType == SIZE_RESTORED) {
@@ -20019,8 +20033,6 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 		}
 		CRect r;
 		GetWindowRect(&r);
-		if (maini)
-			maini->ShowWindow(SW_RESTORE);
 	}
 
 }
@@ -20098,17 +20110,6 @@ HBRUSH COggDlg::OnCtlColor(CDC * pDC, CWnd * pWnd, UINT nCtlColor)
 	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
 
 	// TODO:  ここで DC の属性を変更してください。
-	if (savedata.aero == 2) {
-		if (nCtlColor == CTLCOLOR_DLG)
-		{
-			return m_brDlg;
-		}
-		if (nCtlColor == CTLCOLOR_STATIC)
-		{
-			SetBkMode(pDC->m_hDC, TRANSPARENT);
-			return m_brDlg;
-		}
-	}
 	// TODO:  既定値を使用したくない場合は別のブラシを返します。
 	return hbr;
 }
@@ -20399,7 +20400,6 @@ void COggDlg::plugloop(CString ff)
 	}
 	cf1.Close();
 }
-CImageBase* jake = NULL;
 void COggDlg::OnBnmp3jake()
 {
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
@@ -20410,40 +20410,8 @@ void COggDlg::OnBnmp3jake()
 			delete mi;
 		mi = NULL;
 	}
-	if (jake) {
-		if (::IsWindow(jake->m_hWnd))
-			jake->DestroyWindow();
-		else
-			delete jake;
-		jake = NULL;
-	}
 	mi = new CMp3Image;
 	mi->Create(og);
-	if (savedata.aero == 2) {
-		jake = new CImageBase;
-		if (jake->Create(og) == FALSE) {
-			AfxMessageBox(LL14(
-				L"Baseの起動に失敗しました",               /* 日本語 */
-				L"Failed to start Base.",                 /* 英語 */
-				L"Échec du démarrage de Base.",           /* フランス語 */
-				L"Avvio di Base fallito.",                /* イタリア語 */
-				L"Error al iniciar Base.",                /* スペイン語 */
-				L"Base 시작에 실패했습니다.",               /* 韓国語 */
-				L"Base 启动失败。",                       /* 中国語 */
-				L"فشل تشغيل Base.",                      /* アラビア語 */
-				L"Не удалось запустить Base.",            /* ロシア語 */
-				L"Base konnte nicht gestartet werden.",    /* ドイツ語 */
-				L"Falha ao iniciar o Base.",              /* ポルトガル語 */
-				L"Kan Base niet starten.",                /* オランダ語 */
-				L"Nie udało się uruchomić Base.",         /* ポーランド語 */
-				L"Base başlatılamadı."));                 /* トルコ語 */
-		}
-		jake->ShowWindow(SW_HIDE);
-		jake->oya = mi;
-	}
-	else {
-		jake = NULL;
-	}
 	mi->Load(mp3file);
 
 }
@@ -20742,17 +20710,6 @@ int COggDlg::OnCreate(LPCREATESTRUCT lpCreateStruct)
 		return -1;
 
 	// TODO: ここに特定な作成コードを追加してください。
-	if (savedata.aero == 2) {
-		ModifyStyleEx(0, WS_EX_LAYERED);
-
-		// レイヤードウィンドウの不透明度と透明のカラーキー
-		SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
-
-		// 赤色のブラシを作成する．
-		m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
-	}
-
-
 	return 0;
 }
 
@@ -20764,13 +20721,6 @@ void COggDlg::OnMoving(UINT fwSide, LPRECT pRect)
 	if (CCC_IsAeroEnabled())
 		CCC_RefreshDialogDwmBlur(m_hWnd);
 #endif
-	CRect r;
-	GetWindowRect(&r);
-	if (maini)
-		maini->MoveWindow(&r);
-	//if (maini)
-//		::SetWindowPos(maini->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-//	::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	// TODO: ここにメッセージ ハンドラー コードを追加します。
 }
 

@@ -263,30 +263,17 @@ ON_WM_TIMER() \
 ON_WM_NCACTIVATE() \
 END_MESSAGE_MAP() \
 extern save savedata; \
-extern CImageBase* Games; \
 extern int gameon; \
-extern int ip1; \
 int xxx::OnCreate(LPCREATESTRUCT lpCreateStruct) \
 { \
 	if (CCustomBlurDialogBase::OnCreate(lpCreateStruct) == -1) \
 		return -1; \
-	if (savedata.aero == 1) { \
-		ModifyStyleEx(0, WS_EX_LAYERED); \
-		SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY); \
-		m_brDlg.CreateSolidBrush(RGB(255, 0, 0)); \
-	} \
-Games = NULL; \
-	SetTimer(500, 100, NULL); \
     m_bMoving1 = 0; \
 	return 0; \
 } \
 void xxx::OnMoving(UINT fwSide, LPRECT pRect) \
 { \
 	CCustomBlurDialogBase::OnMoving(fwSide, pRect); \
-	CRect r; \
-	GetWindowRect(&r); \
-	if (Games) \
-		Games->MoveWindow(&r); \
 } \
 void xxx::OnLButtonDown(UINT nFlags, CPoint point) \
 { \
@@ -315,64 +302,23 @@ void xxx::OnMouseMove(UINT nFlags, CPoint point) \
 		SetWindowPos(NULL, rect.left, rect.top, \
 			rect.right - rect.left, rect.bottom - rect.top, \
 			SWP_NOOWNERZORDER); \
-		if (Games) \
-			Games->MoveWindow(&rect); \
 	} \
 	CCustomBlurDialogBase::OnMouseMove(nFlags, point); \
 } \
 HBRUSH xxx::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor) \
 { \
-	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor); \
-	if (savedata.aero == 1) { \
-		if (nCtlColor == CTLCOLOR_DLG) \
-		{ \
-			return m_brDlg; \
-		} \
-		if (nCtlColor == CTLCOLOR_STATIC) \
-		{ \
-			SetBkMode(pDC->m_hDC, TRANSPARENT); \
-			return m_brDlg; \
-		} \
-	} \
-	return hbr; \
+	return CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor); \
 } \
 void xxx::OnTimer(UINT_PTR nIDEvent) \
 { \
-    if(nIDEvent==500 && savedata.aero){ \
-	KillTimer(500); \
-    if(ip1 != 0) return; \
-    if(Games == NULL){ \
-	Games = new CImageBase; \
-	Games->oya = this; \
-	Games->Create(this); \
-     } \
-	CRect r; \
-	GetWindowRect(&r); \
-	if (Games) \
-		Games->MoveWindow(&r); \
-	if (Games) \
-		::SetWindowPos(Games->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); \
-	::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); \
-    ip1 = 3; \
-    SetTimer(501,10,NULL); \
-    } \
-    if(nIDEvent==501 && savedata.aero){ \
-        ip1--; \
-        if(ip1 <= 0){ ip1 = 0; KillTimer(501); }\
-    } \
 	CCustomBlurDialogBase::OnTimer(nIDEvent); \
 } \
 BOOL xxx::DestroyWindow() \
 { \
-	if (Games){ \
-		delete Games; \
-    } \
-    Games = NULL; \
 	return CCustomBlurDialogBase::DestroyWindow(); \
 } \
 BOOL xxx::OnNcActivate(BOOL bActive) \
 { \
-	SetTimer(500, 30, NULL); \
 	return CCustomBlurDialogBase::OnNcActivate(bActive); \
 } 
 

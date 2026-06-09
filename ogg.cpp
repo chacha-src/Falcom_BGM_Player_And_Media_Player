@@ -252,6 +252,12 @@ BOOL COggApp::InitInstance()
 #endif
 	if (savedata.ms < 30) savedata.ms = 30;
 	if (savedata.ms > 80) savedata.ms = 80;
+	if (savedata.aero == 2)
+		savedata.aero = 0;
+	if (savedata.aero != 0)
+		savedata.aero = 1;
+	if (savedata.ms2 < 1) savedata.ms2 = 1;
+	if (savedata.ms2 > 60) savedata.ms2 = 60;
 	if (savedata.aerocheck == 99) {
 		int abc = AfxMessageBox(LL14(L"エアロ(透過処理)がメイン画面等に実装されました。是非試してみて貰えれば。\n有効にしますか？(少し不安定な部分あります)\n(このメッセージは一回しか表示されません)\nWindows11以降では、有効にしないで下さい。", L"Aero (transparency) has been implemented on the main window, etc. Please try it.\nEnable it? (Some instability may occur)\n(This message will only be shown once)\nDo not enable on Windows 11 or later.", L"Aero (transparence) a ete implemente. Souhaitez-vous l'activer ?", L"Aero (trasparenza) implementato. Abilitare?", L"Aero (transparencia) implementado. ?Activar?", L"Aero(??)? ???????. ??????????", L"已??Aero(透明)功能。是否?用？", L"?? ????? Aero. ?? ??????", L"Aero реализован. Включить?", L"Aero implementiert. Aktivieren?", L"Aero implementado. Ativar?", L"Aero geimplementeerd. Inschakelen?", L"Aero zaimplementowano. W??czy??", L"Aero uyguland?. Etkinle?tirilsin mi?"), MB_YESNO);
 		if (abc == IDYES) {

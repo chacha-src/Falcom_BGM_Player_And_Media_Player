@@ -51,58 +51,7 @@ BOOL CImageBase::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
 
-	if (savedata.aero != 2) { ShowWindow(SW_HIDE); return TRUE; }
-	COSVersion os;
-	os.GetVersionString();
-	if (os.in.dwMajorVersion == 10 && os.in.dwBuildNumber >= 22000) { ShowWindow(SW_HIDE); return TRUE; }
-	// TODO: ここに初期化を追加してください
-	if (os.in.dwMajorVersion == 10 && os.in.dwBuildNumber < 22000 && os.in.dwBuildNumber >= 18363)
-	{
-		const HINSTANCE hModule = LoadLibrary(TEXT("user32.dll"));
-		if (hModule)
-		{
-			struct ACCENTPOLICY
-			{
-				int nAccentState;
-				int nFlags;
-				int nColor;
-				int nAnimationId;
-			};
-			struct WINCOMPATTRDATA
-			{
-				int nAttribute;
-				PVOID pData;
-				ULONG ulDataSize;
-			};
-			typedef BOOL(WINAPI* pSetWindowCompositionAttribute)(HWND, WINCOMPATTRDATA*);
-			const pSetWindowCompositionAttribute SetWindowCompositionAttribute = (pSetWindowCompositionAttribute)GetProcAddress(hModule, "SetWindowCompositionAttribute");
-			if (SetWindowCompositionAttribute)
-			{
-				ACCENTPOLICY policy = { 3, 2, 0x77bb9999, 0 }; // ACCENT_ENABLE_BLURBEHIND=3...
-				WINCOMPATTRDATA data = { 19, &policy, sizeof(ACCENTPOLICY) }; // WCA_ACCENT_POLICY=19
-				extern save savedata;
-				if (savedata.aero == 2)
-					SetWindowCompositionAttribute(m_hWnd, &data);
-			}
-			FreeLibrary(hModule);
-		}
-	}
-	if (os.in.dwMajorVersion == 6) {
-		HMODULE hDLL;
-		typedef DWORD(WINAPI* PFUNC)(HWND, MARGINS*);
-		PFUNC pFunc;
-		hDLL = ::LoadLibrary(_T("Dwmapi"));
-		pFunc = (PFUNC)::GetProcAddress(hDLL, "DwmExtendFrameIntoClientArea");
-		MARGINS margin = { -1, -1, -1, -1 };
-		if (pFunc) {
-			pFunc(m_hWnd, &margin);
-		}
-		::FreeLibrary(hDLL);
-
-	}
-
-	brush.CreateSolidBrush(RGB(0, 0, 0));
-	SetTimer(10, 200, NULL);
+	ShowWindow(SW_HIDE);
 	return TRUE;  // return TRUE unless you set the focus to a control
 				  // 例外 : OCX プロパティ ページは必ず FALSE を返します。
 }
@@ -114,16 +63,7 @@ int CImageBase::Create(CWnd* pWnd)
 	const BOOL bret = CCustomBlurDialogExBase::Create(CImageBase::IDD, this);
 	RECT r = { 0,0,0,0 };
 	MoveWindow(&r);
-	if (bret == TRUE && savedata.aero == 2) {
-		COSVersion os;
-		os.GetVersionString();
-		if (os.in.dwMajorVersion == 10 && os.in.dwBuildNumber >= 22000) {
-			ShowWindow(SW_HIDE);
-		}
-		else {
-			ShowWindow(SW_SHOW);
-		}
-	}
+	ShowWindow(SW_HIDE);
 	return bret;
 }
 

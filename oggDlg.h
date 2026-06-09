@@ -57,6 +57,8 @@ public:
 	CString UTF8toSJIS(const char* a);
 	CString UTF8toUNI(const TCHAR* a);
 	void Resize();
+	void RefreshAllAeroWindows();
+	void RefreshAeroGlassAlpha();
 	void Closeds();
 	void timerp();
 	void Vol(int vol);

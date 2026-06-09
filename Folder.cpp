@@ -182,21 +182,10 @@ BOOL CFolder::OnInitDialog()
 	m_23s.SetWindowText(savedata.san1);
 	m_24s.SetWindowText(savedata.san2);
 
-	if (savedata.aero) {
-		folderbase = new CImageBase;
-		folderbase->Create(NULL);
-		folderbase->oya = this;
-	}
-	else {
-		folderbase = NULL;
-	}
+	folderbase = NULL;
 	CRect r;
 	GetWindowRect(&r);
 	MoveWindow(&r);
-	if (savedata.aero) {
-		if (folderbase)
-			folderbase->MoveWindow(&r);
-	}
 	extern CPlayList* pl;
 	extern COggDlg* og;
 	extern int ip;
@@ -206,13 +195,6 @@ BOOL CFolder::OnInitDialog()
 	if (pl) {
 		pl->KillTimer(4923);
 		pl->KillTimer(4924);
-	}
-	if (savedata.aero) {
-		if (folderbase)
-			::SetWindowPos(folderbase->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		if (folderbase)
-			SetTimer(10, 200, NULL);
 	}
 	return TRUE;  // コントロールにフォーカスを設定しないとき、戻り値は TRUE となります
 	              // 例外: OCX プロパティ ページの戻り値は FALSE となります
@@ -654,18 +636,6 @@ HBRUSH CFolder::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
 
 	// TODO: ここで DC の属性を変更してください。
-	if (savedata.aero == 1) {
-		if (nCtlColor == CTLCOLOR_DLG)
-		{
-			return m_brDlg;
-		}
-		if (nCtlColor == CTLCOLOR_STATIC)
-		{
-			SetBkMode(pDC->m_hDC, TRANSPARENT);
-			return m_brDlg;
-		}
-	}
-
 	// TODO: 既定値を使用したくない場合は別のブラシを返します。
 	return hbr;
 }
@@ -676,10 +646,6 @@ void CFolder::OnMoving(UINT fwSide, LPRECT pRect)
 	CCustomBlurDialogBase::OnMoving(fwSide, pRect);
 	CRect r;
 	GetWindowRect(&r);
-	if (savedata.aero) {
-		if (folderbase)
-			folderbase->MoveWindow(&r);
-	}
 }
 
 
@@ -689,15 +655,6 @@ int CFolder::OnCreate(LPCREATESTRUCT lpCreateStruct)
 		return -1;
 
 	// TODO: ここに特定な作成コードを追加してください。
-	if (savedata.aero == 1) {
-		ModifyStyleEx(0, WS_EX_LAYERED);
-
-		// レイヤードウィンドウの不透明度と透明のカラーキー
-		SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
-
-		// 赤色のブラシを作成する．
-		m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
-	}
 	return 0;
 }
 
@@ -705,8 +662,6 @@ int CFolder::OnCreate(LPCREATESTRUCT lpCreateStruct)
 void CFolder::OnBnClickedOk()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
-	if (folderbase)
-		delete folderbase;
 	CCustomBlurDialogBase::OnOK();
 }
 
@@ -714,8 +669,6 @@ void CFolder::OnBnClickedOk()
 void CFolder::OnBnClickedCancel()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
-	if (folderbase)
-		delete folderbase;
 	CCustomBlurDialogBase::OnCancel();
 }
 
@@ -723,10 +676,5 @@ void CFolder::OnBnClickedCancel()
 void CFolder::OnTimer(UINT_PTR nIDEvent)
 {
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
-	KillTimer(10);
-	CRect r;
-	GetWindowRect(&r);
-	if (folderbase)
-	folderbase->MoveWindow(&r);
 	CCustomBlurDialogBase::OnTimer(nIDEvent);
 }

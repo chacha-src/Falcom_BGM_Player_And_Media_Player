@@ -50,6 +50,8 @@ void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc
 void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
 void CCC_InvalidateBlurParent(HWND hWnd, BOOL bAeroMode);
 void CCC_RefreshDialogDwmBlur(HWND hWnd);
+void CCC_RefreshAeroWindowLayer(HWND hWnd);
+void CCC_RefreshAeroGlassAlphaForHwnd(HWND hWnd);
 void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr);
 void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey);
 #endif
@@ -82,8 +84,36 @@ void CCC_RefreshChildrenAfterShow(HWND hWnd);
 #define COLOR_GRAD_DARK_GREEN   RGB(  0, 100,   0) // グラデーション用の濃い緑
 #define COLOR_GRAD_DARK_PURPLE  RGB( 75,   0, 130) // グラデーション用の濃い紫
 
-// アクリル半透明オーバーレイ用アルファ値
+// アクリル半透明オーバーレイ用アルファ値（savedata.ms2=30 相当の基準）
 #define AERO_ALPHA_SEMI 160
+
+// 描画間隔は 16ms 固定（旧 savedata.ms2 表示間隔の代替）
+#define OGG_DISPLAY_INTERVAL_TICKS 1
+
+#if CCUSTOM_AERO_SUPPORT
+static inline BYTE CCC_GetAeroGlassAlpha()
+{
+    extern save savedata;
+    int v = savedata.ms2;
+    if (v < 1) v = 1;
+    if (v > 60) v = 60;
+    return (BYTE)(60 + (v - 1) * 170 / 59);
+}
+
+static inline BYTE CCC_ScaleGlassAlpha(BYTE baseAlpha)
+{
+    const int scaled = (int)baseAlpha * (int)CCC_GetAeroGlassAlpha() / (int)AERO_ALPHA_SEMI;
+    if (scaled < 0) return 0;
+    if (scaled > 255) return (BYTE)255;
+    return (BYTE)scaled;
+}
+
+// Win10 レイヤードウィンドウ全体の不透明度（基準 245 をスライダー連動）
+static inline BYTE CCC_GetAeroWindowLayerAlpha()
+{
+    return CCC_ScaleGlassAlpha((BYTE)245);
+}
+#endif
 
 // リスト／コンボ行ごとのガラス風背景
 // Phase1: SetRowStyle API / Phase2: ぼかしダイアログ上のゼブラベースティント
@@ -277,6 +307,9 @@ static inline BOOL CCC_ApplyAero(HWND hWnd, BOOL bAero)
                 ::EnableRoundedCorners(hWnd);
                 MARGINS margins = { -1, -1, -1, -1 };
                 ::DwmExtendFrameIntoClientArea(hWnd, &margins);
+                exStyle = ::GetWindowLong(hWnd, GWL_EXSTYLE);
+                ::SetWindowLong(hWnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
+                ::SetLayeredWindowAttributes(hWnd, 0, CCC_GetAeroWindowLayerAlpha(), LWA_ALPHA);
                 bApplied = TRUE;
             }
         }
@@ -285,7 +318,7 @@ static inline BOOL CCC_ApplyAero(HWND hWnd, BOOL bAero)
     {
         exStyle = ::GetWindowLong(hWnd, GWL_EXSTYLE);
         ::SetWindowLong(hWnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
-        ::SetLayeredWindowAttributes(hWnd, 0, 245, LWA_ALPHA);
+        ::SetLayeredWindowAttributes(hWnd, 0, CCC_GetAeroWindowLayerAlpha(), LWA_ALPHA);
 
         DWM_BLURBEHIND bb = {};
         bb.dwFlags = DWM_BB_ENABLE;
@@ -1150,6 +1183,8 @@ public:
     CCustomBlurDialogBase();
     CCustomBlurDialogBase(UINT nIDTemplate, CWnd* pParent = NULL);
     virtual ~CCustomBlurDialogBase();
+    void RefreshAeroMode() { ApplyDwmBlur(); }
+    void RefreshAeroGlassAlpha();
 
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
@@ -1221,6 +1256,8 @@ public:
     CCustomBlurDialogExBase();
     CCustomBlurDialogExBase(UINT nIDTemplate, CWnd* pParent = nullptr);
     virtual ~CCustomBlurDialogExBase();
+    void RefreshAeroMode() { ApplyDwmBlur(); }
+    void RefreshAeroGlassAlpha();
 
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);

@@ -9,7 +9,6 @@
 #include "dsound.h"
 #include "ZeroFol.h"
 #include "oggDlg.h"
-#include "CImageBase.h"
 #include "AudioUpscaler.h"
 #include <mutex>
 
@@ -83,7 +82,6 @@ static char THIS_FILE[] = __FILE__;
 #endif
 
 extern save savedata;
-CImageBase* renderbase;
 
 extern int sek;
 extern void DoEvent();
@@ -195,6 +193,10 @@ static void RenderRecreateSecondarySound(COggDlg* og)
 IMPLEMENT_DYNAMIC(CRender, CCustomBlurDialogExBase)
 CRender::CRender(CWnd* pParent /*=NULL*/)
 	: CCustomBlurDialogExBase(CRender::IDD, pParent)
+	, m_prevAero(-1)
+	, m_prevAeroBlur(-1)
+	, m_bakAero(0)
+	, m_bakAeroBlur(1)
 {
 	//{{AFX_DATA_INIT(CRender)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -302,6 +304,7 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_COMBO_SPEAKER, &CRender::OnCbnSelchangeSpeaker)
 	ON_BN_CLICKED(IDC_CHECK_UPSCALE, &CRender::OnBnClickedCheckUpscale)
 	ON_BN_CLICKED(IDC_CHECK51, &CRender::OnBnClicked32bit)
+	ON_BN_CLICKED(IDC_CHECK3, &CRender::OnBnClickedCheck3)
 	ON_WM_CTLCOLOR()
 	ON_WM_CREATE()
 	ON_WM_MOVING()
@@ -361,7 +364,7 @@ BOOL CRender::OnInitDialog()
 	m_lblBuf.SetWindowText(LL14(L"割込間隔", L"Buffer interval", L"Intervalle tampon", L"Intervallo buffer", L"Intervalo de búfer", L"버퍼 간격", L"缓冲区间隔", L"فاصل المخزن المؤقت", L"Интервал буфера", L"Pufferintervall", L"Intervalo de buffer", L"Bufferinterval", L"Interwał bufora", L"Ara belleği aralığı"));
 	m_lblMp3.SetWindowText(LL14(L"mp3音量", L"mp3 volume", L"Volume mp3", L"Volume mp3", L"Volumen mp3", L"mp3 볼륨", L"mp3 音量", L"حجم mp3", L"Громкость mp3", L"MP3-Lautstärke", L"Volume mp3", L"mp3-volume", L"Głośność mp3", L"mp3 sesi"));
 	m_lblKpi.SetWindowText(LL14(L"その他のkpi", L"Other kpi", L"Autres kpi", L"Altri kpi", L"Otros kpi", L"기타 kpi", L"其他 kpi", L"kpi أخرى", L"Другие kpi", L"Andere kpi", L"Outros kpi", L"Andere kpi", L"Inne kpi", L"Diğer kpi"));
-	m_lblDisp.SetWindowText(LL14(L"表示間隔", L"Display interval", L"Intervalle d'affichage", L"Intervallo display", L"Intervalo de pantalla", L"표시 간격", L"显示间隔", L"فاصل العرض", L"Интервал отображения", L"Anzeigeintervall", L"Intervalo de exibição", L"Weergave-interval", L"Interwał wyświetlania", L"Görüntüleme aralığı"));
+	m_lblDisp.SetWindowText(LL14(L"ぼかし度合い", L"Blur intensity", L"Intensité du flou", L"Intensità sfocatura", L"Intensidad de desenfoque", L"블러 강도", L"模糊强度", L"شدة التمويه", L"Интенсивность размытия", L"Unschärfe-Intensität", L"Intensidade do desfoque", L"Vervagingsintensiteit", L"Intensywność rozmycia", L"Bulanıklık yoğunluğu"));
 	m_lblDev.SetWindowText(LL14(L"再生デバイス", L"Playback device", L"Périphérique lecture", L"Dispositivo riproduzione", L"Dispositivo reproducción", L"재생 장치", L"播放设备", L"جهاز التشغيل", L"Устройство воспроизведения", L"Wiedergabegerät", L"Dispositivo reprodução", L"Afspeelapparaat", L"Urządzenie odtwarzania", L"Oynatma cihazı"));
 	m_lblSamp.SetWindowText(LL14(L"MAXサンプルレート：", L"MAX sample rate:", L"Freq. échantillonnage max:", L"Freq. campionamento max:", L"Frec. muestreo máx.:", L"최대 샘플레이트:", L"最大采样率：", L"معدل العينات الأقصى:", L"Макс. частота дискретизации:", L"Max. Abtastrate:", L"Taxa amostragem máx.:", L"Max. samplefrequentie:", L"Maks. częstotliwość:", L"Maks. örnekleme oranı:"));
 	m_lblSpeana.SetWindowText(LL14(L"スペアナ倍率", L"Spectrum scale", L"Échelle spectre", L"Scala spettro", L"Escala espectro", L"스펙트럼 배율", L"频谱倍率", L"مقياس الطيف", L"Масштаб спектра", L"Spektrumskala", L"Escala espectro", L"Spectrumschaal", L"Skala widma", L"Spektrum ölçeği"));
@@ -464,7 +467,7 @@ BOOL CRender::OnInitDialog()
 	m_tooltip.AddTool(&m_kpi, LL14(L"kpi一覧を表示します。", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list."));
 	m_tooltip.AddTool(&m_evr, LL14(L"Windows Vista/7以降で有効です。\nIndeoを用いた動画の場合OFFにしてください。\nそれ以外はONでいいです。", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON."));
 	m_tooltip.AddTool(&m_con, LL14(L"Windows Vista/7以降で有効です。\nデスクトップコンポジション(Aero)を使用するかどうかを選択します。\n使用しないにするとEVRじゃなくても動画画面はきれいになります。", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR."));
-	m_tooltip.AddTool(&m_a, LL14(L"Windows 10以降で有効です。\nAero Grassを使用するかどうか決めます。", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass."));
+	m_tooltip.AddTool(&m_a, LL14(L"Windows 10以降で有効です。\nアクリルぼかしUIを使用するかどうか決めます。\n変更は即座に全画面へ反映されます。", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows."));
 	m_tooltip.AddTool(&m_ffd, LL14(L"動画にffdshowを使うかどうか選択します。\nWindows7の場合、デフォルトでDivxなどを再生できるのでそちらを使いたい人はOFFにしてください。", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that."));
 	m_tooltip.AddTool(&m_vob, LL14(L"vobとdatファイルはHaaliを通さないように作られていますが、\nvobに複数音声があるときにはチェックを入れて下さい。", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks."));
 	m_tooltip.AddTool(&m_haali, LL14(L"動画にHaaliを使いません。\n動画が重いと思った時や複数音声が無い時はチェックを入れると軽くなります。", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio."));
@@ -497,7 +500,7 @@ BOOL CRender::OnInitDialog()
 	m_tooltip.AddTool(&m_kanren, LL14(L"win7くらいまで対応。関連付けに追加します。\nwin10以降でも追加はされるとは思いますがされないときもあります。", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always."));
 	m_tooltip.AddTool(&m_netlrc, LL14(L"歌詞情報をネットから参照するようにします。\n数パターン試すため少し再生までに時間かかります。", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback."));
 	m_tooltip.AddTool(&m_ms, LL14(L"演奏のバッファ処理での割り込み時間を設定します。\n少なすぎると音飛びする可能性があります。", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches."));
-	m_tooltip.AddTool(&m_hyouji2, LL14(L"描画の間隔時間を設定します。\nCPU使用が高いときに上げます。", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high."));
+	m_tooltip.AddTool(&m_hyouji2, LL14(L"アクリルUIの透過度（ぼかし度合い）を設定します。\n値が大きいほど不透明になります。", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque."));
 	m_tooltip.AddTool(&w_wups, LL14(L"スペアナの表示倍率を設定します。", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale."));
 	m_tooltip.AddTool(&m_comboLang, LL14(L"UI表示言語を切り替えます。\n設定を保存して再起動後に反映されます。", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting."));
 	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
@@ -508,7 +511,13 @@ BOOL CRender::OnInitDialog()
 	w_wups.SetMode(1);
 	m_evr.SetCheck(savedata.evr);
 	m_con.SetCheck(savedata.con);
-	m_a.SetCheck(savedata.aero);
+	if (savedata.aero != 0)
+		savedata.aero = 1;
+	m_a.SetCheck(savedata.aero ? BST_CHECKED : BST_UNCHECKED);
+	m_prevAero = savedata.aero;
+	m_prevAeroBlur = savedata.ms2;
+	m_bakAero = savedata.aero;
+	m_bakAeroBlur = savedata.ms2;
 	COSVersion os;
 	os.GetVersionString();
 	if (os.in.dwMajorVersion < 6)
@@ -536,12 +545,16 @@ BOOL CRender::OnInitDialog()
 	if (savedata.ms < 30) savedata.ms = 30;
 	m_ms.SetPos(savedata.ms);
 	if (savedata.ms > 80) savedata.ms = 80;
+	if (savedata.ms2 < 1) savedata.ms2 = 1;
+	if (savedata.ms2 > 60) savedata.ms2 = 60;
 	m_hyouji2.SetRange(1, 60);
 	m_hyouji2.SetPos(savedata.ms2);
 	{
 		const wchar_t* msUnit = LL14(L"ms", L"ms", L"ms", L"ms", L"ms", L"ms", L"毫秒", L"ms", L"мс", L"ms", L"ms", L"ms", L"ms", L"ms");
 		CString s; s.Format(L"%d%s", savedata.ms, msUnit);
 		m_ms2.SetWindowText(s);
+		CString sBlur; sBlur.Format(L"%d", savedata.ms2);
+		m_hyouji3.SetWindowText(sBlur);
 	}
 	SetTimer(11, 100, NULL);
 	w_wups.SetRange(100, 1000);
@@ -594,20 +607,6 @@ BOOL CRender::OnInitDialog()
 
 	m_netlrc.SetCheck(savedata.lrc_net);
 
-	if (savedata.aero){
-		renderbase = new CImageBase;
-	renderbase->Create(NULL);
-	renderbase->oya = this;
-	}
-	else {
-		renderbase = NULL;
-	}
-	CRect r;
-	GetWindowRect(&r);
-	if (savedata.aero)
-	renderbase->MoveWindow(&r);
-	if(renderbase)
-		::SetWindowPos(renderbase->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	return TRUE;  // コントロールにフォーカスを設定しないとき、戻り値は TRUE となります
 	              // 例外: OCX プロパティ ページの戻り値は FALSE となります
@@ -631,7 +630,7 @@ void CRender::OnOK()
 	savedata.render=m_1.GetCurSel();
 	savedata.evr=m_evr.GetCheck();
 	savedata.con=m_con.GetCheck();
-	savedata.aero=m_a.GetCheck();
+	savedata.aero = m_a.GetCheck() ? 1 : 0;
 	savedata.ffd=m_ffd.GetCheck();
 	savedata.vob=m_vob.GetCheck();
 	savedata.haali=m_haali.GetCheck();
@@ -646,8 +645,6 @@ void CRender::OnOK()
 	savedata.lang = m_comboLang.GetCurSel();
 
 	//	savedata.mp3orig=m_mp3orig.GetCheck();
-	if (savedata.aero)
-	delete renderbase;
 	CCustomBlurDialogExBase::OnOK();
 }
 
@@ -671,7 +668,6 @@ void CRender::OnBnClickedCancel2()
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
 	CGraph *a = new CGraph(CWnd::FromHandle(GetSafeHwnd()));
 	::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-	if (renderbase)::SetWindowPos(renderbase->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	if(pGraphBuilder)
 		a->DoModal();
 	delete a;
@@ -961,7 +957,7 @@ void CRender::OnBnClickedOk()
 	savedata.render = m_1.GetCurSel();
 	savedata.evr = m_evr.GetCheck();
 	savedata.con = m_con.GetCheck();
-	savedata.aero = m_a.GetCheck();
+	savedata.aero = m_a.GetCheck() ? 1 : 0;
 	savedata.ffd = m_ffd.GetCheck();
 	savedata.vob = m_vob.GetCheck();
 	savedata.haali = m_haali.GetCheck();
@@ -988,8 +984,6 @@ void CRender::OnBnClickedOk()
 		savedata.soundcur = dev;
 	}
 	extern int gameon;
-	if(savedata.aero)
-	delete renderbase;
 	CCustomBlurDialogExBase::OnOK();
 }
 
@@ -1089,11 +1083,19 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 		CString s; s.Format(L"%d%s", savedata.ms, msUnit);
 		m_ms2.SetWindowText(s);
 	}
-	savedata.ms2 = m_hyouji2.GetPos();
+	const int newBlur = m_hyouji2.GetPos();
+	if (newBlur < 1) savedata.ms2 = 1;
+	else if (newBlur > 60) savedata.ms2 = 60;
+	else savedata.ms2 = newBlur;
 	{
-		const wchar_t* msUnit = LL14(L"ms", L"ms", L"ms", L"ms", L"ms", L"ms", L"毫秒", L"ms", L"мс", L"ms", L"ms", L"ms", L"ms", L"ms");
-		CString s2; s2.Format(L"%d%s", savedata.ms2*16, msUnit);
+		CString s2; s2.Format(L"%d", savedata.ms2);
 		m_hyouji3.SetWindowText(s2);
+	}
+	if (newBlur != m_prevAeroBlur) {
+		m_prevAeroBlur = newBlur;
+		if (og)
+			og->RefreshAeroGlassAlpha();
+		RefreshAeroGlassAlpha();
 	}
 	savedata.wup = w_wups.GetPos()/ 100.0;
 	CString s;
@@ -1159,22 +1161,7 @@ void CRender::OnCbnSelchangeCombo3()
 
 HBRUSH CRender::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 {
-	HBRUSH hbr = CCustomBlurDialogExBase::OnCtlColor(pDC, pWnd, nCtlColor);
-
-	// TODO: ここで DC の属性を変更してください。
-	if (savedata.aero == 1) {
-		if (nCtlColor == CTLCOLOR_DLG)
-		{
-			return m_brDlg;
-		}
-		if (nCtlColor == CTLCOLOR_STATIC)
-		{
-			SetBkMode(pDC->m_hDC, TRANSPARENT);
-			return m_brDlg;
-		}
-	}
-	// TODO: 既定値を使用したくない場合は別のブラシを返します。
-	return hbr;
+	return CCustomBlurDialogExBase::OnCtlColor(pDC, pWnd, nCtlColor);
 }
 
 
@@ -1182,15 +1169,6 @@ int CRender::OnCreate(LPCREATESTRUCT lpCreateStruct)
 {
 	if (CCustomBlurDialogExBase::OnCreate(lpCreateStruct) == -1)
 		return -1;
-
-	// TODO: ここに特定な作成コードを追加してください。
-	ModifyStyleEx(0, WS_EX_LAYERED);
-
-	// レイヤードウィンドウの不透明度と透明のカラーキー
-	SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
-
-	// 赤色のブラシを作成する．
-	m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
 	return 0;
 }
 
@@ -1200,9 +1178,6 @@ void CRender::OnMoving(UINT fwSide, LPRECT pRect)
 	CCustomBlurDialogExBase::OnMoving(fwSide, pRect);
 	CRect r;
 	GetWindowRect(&r);
-	if (savedata.aero)
-
-	renderbase->MoveWindow(&r);
 	// TODO: ここにメッセージ ハンドラー コードを追加します。
 }
 
@@ -1210,18 +1185,21 @@ int CRender::Create(CWnd* pWnd)
 {
 	m_pParent = NULL;
 	BOOL bret = CCustomBlurDialogExBase::Create(CRender::IDD, this);
-	if (savedata.aero == 1) {
-		ModifyStyleEx(0, WS_EX_LAYERED);
-
-		// レイヤードウィンドウの不透明度と透明のカラーキー
-		SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
-
-		// 赤色のブラシを作成する．
-		m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
-	}
 	if (bret == TRUE)
 		ShowWindow(SW_SHOW);
 	return bret;
+}
+
+void CRender::OnBnClickedCheck3()
+{
+	const int newAero = m_a.GetCheck() ? 1 : 0;
+	if (savedata.aero == newAero)
+		return;
+	savedata.aero = newAero;
+	m_prevAero = newAero;
+	RefreshAeroMode();
+	if (og)
+		og->RefreshAllAeroWindows();
 }
 
 void CRender::OnBnClickedCancel()
@@ -1318,9 +1296,27 @@ void CRender::OnBnClickedCancel()
 		}
 	}
 
-	if (savedata.aero)
+	const bool bAeroChanged = (savedata.aero != m_bakAero);
+	const bool bBlurChanged = (savedata.ms2 != m_bakAeroBlur);
+	if (bAeroChanged || bBlurChanged) {
+		savedata.aero = m_bakAero;
+		savedata.ms2 = m_bakAeroBlur;
+		m_a.SetCheck(savedata.aero ? BST_CHECKED : BST_UNCHECKED);
+		m_hyouji2.SetPos(savedata.ms2);
+		CString sBlur; sBlur.Format(L"%d", savedata.ms2);
+		m_hyouji3.SetWindowText(sBlur);
+		if (bAeroChanged) {
+			RefreshAeroMode();
+			if (og)
+				og->RefreshAllAeroWindows();
+		}
+		else {
+			RefreshAeroGlassAlpha();
+			if (og)
+				og->RefreshAeroGlassAlpha();
+		}
+	}
 
-	delete renderbase;
 	CCustomBlurDialogExBase::OnCancel();
 }
 

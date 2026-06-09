@@ -17,7 +17,6 @@ extern CMp3Image *mi;
 extern int killw1;
 extern OggVorbis_File vf;
 extern ULONGLONG po;
-extern CImageBase* jake;
 void CMp3Image::OnNcDestroy()
 {
 	CCustomBlurDialogBase::OnNcDestroy();
@@ -207,14 +206,8 @@ void CMp3Image::OnPaint()
 	else
 #endif
 	{
-		if (savedata.aero == 2) {
-			CBrush brush(RGB(255, 0, 0));
-			dcc.FillRect(&rect, &brush);
-		}
-		else {
-			CBrush brush(RGB(0, 0, 0));
-			dcc.FillRect(&rect, &brush);
-		}
+		CBrush brush(RGB(0, 0, 0));
+		dcc.FillRect(&rect, &brush);
 		SetStretchBltMode(dcc.m_hDC, HALFTONE);
 		SetBrushOrgEx(dcc.m_hDC, 0, 0, NULL);
 		dcc.StretchBlt(0, 0, imgW, imgH, &dc, 0, 0, x, y, SRCCOPY);
@@ -227,9 +220,6 @@ void CMp3Image::OnPaint()
 	if (savedata.aero == 0) {
 		SetTextColor(dcc, RGB(255, 255, 255));
 		SetBkColor(dcc, RGB(0, 0, 0));
-	} else if (savedata.aero == 2) {
-		SetTextColor(dcc, RGB(0, 0, 0));
-		SetBkColor(dcc, RGB(255, 0, 0));
 	} else {
 		SetTextColor(dcc, RGB(0, 0, 0));
 	}
@@ -619,15 +609,8 @@ void CMp3Image::Load(CString s)
 
 	RECT r;
 	GetWindowRect(&r);
-	if (savedata.aero == 2 && jake) {
-		jake->MoveWindow(&r);
-		jake->ShowWindow(SW_SHOW);
-		SetWindowPos(jake, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER);
-		::SetWindowPos(jake->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		SetTimer(4923, 10, NULL);
-	}
 #if CCUSTOM_AERO_SUPPORT
-	else if (savedata.aero == 1) {
+	if (savedata.aero == 1) {
 		ApplyDwmBlur();
 	}
 #endif
@@ -649,11 +632,6 @@ int CMp3Image::Create(CWnd* pWnd)
 	m_pParent = NULL;
 	const BOOL bret = CCustomBlurDialogBase::Create(CMp3Image::IDD, this);
 
-	if (savedata.aero == 2) {
-		ModifyStyleEx(0, WS_EX_LAYERED);
-		SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
-		m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
-	}
     if( bret == TRUE)
         ShowWindow( SW_SHOW);
     return bret;
@@ -673,10 +651,6 @@ BOOL CMp3Image::DestroyWindow()
 	// TODO: ここに特定なコードを追加するか、もしくは基本クラスを呼び出してください。
 	img.Destroy();
 	BOOL rr=CCustomBlurDialogBase::DestroyWindow();
-	if (savedata.aero == 2 && jake) {
-		jake->DestroyWindow();
-		jake = NULL;
-	}
 	mi = NULL;
 	if(nnn)
 		delete this;
@@ -757,12 +731,6 @@ void CMp3Image::OnSizing(UINT fwSide, LPRECT pRect)
 	m_x.MoveWindow((int)(rrr.right - 50.0f * hD1), (int)(110.0f * hD1), (int)(50.0f * hD1), (int)(50.0f * hD1));
 	m_y.MoveWindow((int)(rrr.right - 50.0f * hD1), (int)(140.0f * hD1), (int)(50.0f * hD1), (int)(50.0f * hD1));
 	//SetWindowPos(NULL, 0,0,pRect->right, pRect->bottom,   SWP_NOMOVE|SWP_NOOWNERZORDER);
-	GetWindowRect(&rrr);
-	if (savedata.aero == 2 && jake) {
-		jake->MoveWindow(&rrr);
-		::SetWindowPos(jake->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		::SetWindowPos(jake->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-	}
 	::SetWindowPos(this->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	::SetWindowPos(this->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 
@@ -811,9 +779,6 @@ void CMp3Image::OnMouseMove(UINT nFlags, CPoint point)
 		SetWindowPos(NULL, rect.left, rect.top,
 			rect.right - rect.left, rect.bottom - rect.top,
 			SWP_NOOWNERZORDER);
-		if (savedata.aero == 2 && jake)
-			jake->MoveWindow(&rect);
-
 	}
 	CCustomBlurDialogBase::OnMouseMove(nFlags, point);
 }
@@ -834,10 +799,6 @@ void CMp3Image::OnRButtonDown(UINT nFlags, CPoint point)
 		this            	//このメニューを所有するウィンドウ
 		);
 	menu.DestroyMenu();
-	if (savedata.aero == 2 && jake) {
-		::SetWindowPos(jake->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		::SetWindowPos(jake->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-	}
 	::SetWindowPos(this->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	::SetWindowPos(this->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 
@@ -851,18 +812,7 @@ HBRUSH CMp3Image::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 //	pDC->SetBkMode(TRANSPARENT);
 //	return (HBRUSH)::GetStockObject(BLACK_BRUSH);
  
-	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
-
-		if (nCtlColor == CTLCOLOR_DLG || nCtlColor == CTLCOLOR_STATIC)
-		{
-			if (savedata.aero == 2) {
-				if (nCtlColor == CTLCOLOR_STATIC)
-					SetBkMode(pDC->m_hDC, TRANSPARENT);
-				return m_brDlg;
-			}
-		}
-
-	return hbr;
+	return CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
 }
 
 
@@ -906,15 +856,12 @@ void CMp3Image::OnCompositionChanged()
 	CCustomBlurDialogBase::OnCompositionChanged();
 }
 
-extern CImageBase* jake;
 void CMp3Image::OnTimer(UINT_PTR nIDEvent)
 {
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
 	if (nIDEvent == 4923) {
 		KillTimer(4923);
 		if (ip2 != 0) return;
-		if (savedata.aero == 2 && jake)
-			::SetWindowPos(jake->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		::SetWindowPos(m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		SetTimer(4930, 10, NULL);
 		ip2 = 3;
@@ -922,8 +869,6 @@ void CMp3Image::OnTimer(UINT_PTR nIDEvent)
 	if (nIDEvent == 4924) {
 		KillTimer(4924);
 		if (ip2 != 0) return;
-		if (savedata.aero == 2 && jake)
-			::SetWindowPos(jake->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		SetTimer(4930, 10, NULL);
 		ip2 = 3;

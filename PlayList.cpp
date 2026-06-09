@@ -417,15 +417,6 @@ BOOL CPlayList::OnInitDialog()
 	}
 	Invalidate();
 	playbase = NULL;
-	if (savedata.aero == 2) {
-		playbase = new CImageBase;
-		playbase->Create(pl);
-		playbase->oya = pl;
-	}
-	CRect r;
-	GetWindowRect(&r);
-	if(playbase)
-		playbase->MoveWindow(&r);
 
 	plw = 1;
 
@@ -478,15 +469,6 @@ int CPlayList::Create(CWnd *pWnd)
 {
 	 m_pParent = NULL;
 	BOOL bret = CCustomBlurDialogBase::Create( CPlayList::IDD, this);
-	if (savedata.aero == 2) {
-		ModifyStyleEx(0, WS_EX_LAYERED);
-
-		// レイヤードウィンドウの不透明度と透明のカラーキー
-		SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
-
-		// 赤色のブラシを作成する．
-		m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
-	}
 	if (bret == TRUE) {
 		ShowWindow(SW_SHOW);
 		ScheduleRefreshNavControls();
@@ -4945,17 +4927,6 @@ HBRUSH CPlayList::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 	hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
 
 	// TODO: ここで DC の属性を変更してください。
-	if (savedata.aero == 2) {
-		if (nCtlColor == CTLCOLOR_DLG)
-		{
-			return m_brDlg;
-		}
-		if (nCtlColor == CTLCOLOR_STATIC)
-		{
-			SetBkMode(pDC->m_hDC, TRANSPARENT);
-			return m_brDlg;
-		}
-	}
 	// TODO: 既定値を使用したくない場合は別のブラシを返します。
 	return hbr;
 }

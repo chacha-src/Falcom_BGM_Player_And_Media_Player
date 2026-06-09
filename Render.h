@@ -157,6 +157,11 @@ public:
 	int m_bakBit32;
 	TCHAR m_bakFont1[1024];
 	TCHAR m_bakFont2[1024];
+	int m_prevAero;
+	int m_prevAeroBlur;
+	int m_bakAero;
+	int m_bakAeroBlur;
+	afx_msg void OnBnClickedCheck3();
 };
 
 //{{AFX_INSERT_LOCATION}}
