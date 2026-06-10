@@ -432,7 +432,7 @@ BOOL CPlayList::OnInitDialog()
 	m_findup.SetFlat(TRUE);
 	m_finddown.SetIcon(IDR_UP);
 	m_finddown.SetFlat(TRUE);
-	ScheduleRefreshNavControls();
+	RefreshNavControls();
 
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
@@ -4951,6 +4951,16 @@ void CPlayList::RefreshNavControls()
 	}
 }
 
+#if CCUSTOM_AERO_SUPPORT
+void CPlayList::RefreshAeroGlassAlpha()
+{
+	// ナビ ButtonST/Edit は OnRefreshChildren 側で再描画する。
+	// ここで RefreshNavControls() すると HSCROLL 中に同期 RedrawWindow が走り、
+	// 直後の PostMessage 更新と二重になり DWM ガラスが消える。
+	CCustomBlurDialogBase::RefreshAeroGlassAlpha();
+}
+#endif
+
 void CPlayList::ScheduleRefreshNavControls()
 {
 	if (!GetSafeHwnd())
@@ -4962,7 +4972,7 @@ void CPlayList::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
 	if (bShow)
-		ScheduleRefreshNavControls();
+		RefreshNavControls();
 	UNREFERENCED_PARAMETER(nStatus);
 }
 
@@ -4970,7 +4980,7 @@ void CPlayList::OnShowWindow(BOOL bShow, UINT nStatus)
 LRESULT CPlayList::OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam)
 {
 	LRESULT r = CCustomBlurDialogBase::OnReapplyOpaqueFixers(wParam, lParam);
-	ScheduleRefreshNavControls();
+	RefreshNavControls();
 	return r;
 }
 #endif

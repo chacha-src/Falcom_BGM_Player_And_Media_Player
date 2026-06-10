@@ -993,6 +993,9 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
 	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
 	ON_MESSAGE(WM_OGG_DEFERRED_HEAVY_INIT, OnDeferredHeavyStartup)
+#if CCUSTOM_AERO_SUPPORT
+	ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
+#endif
 	ON_WM_COPYDATA()
 	ON_WM_KEYDOWN()
 	ON_WM_SYSKEYDOWN()
@@ -1360,6 +1363,24 @@ HCURSOR COggDlg::OnQueryDragIcon()
 	return (HCURSOR)m_hIcon;
 }
 
+BOOL COggDlg::IsMainDlgCollapsed() const
+{
+	CString s;
+	const_cast<COggDlg*>(this)->m_ue.GetWindowText(s);
+	return (s == _T("▲"));
+}
+
+const RECT* COggDlg::MainAeroGapPreserve(RECT* pBuf) const
+{
+	if (!pBuf || IsMainDlgCollapsed())
+		return nullptr;
+	pBuf->left = 0;
+	pBuf->top = 0;
+	pBuf->right = (int)((MDCP) * hD);
+	pBuf->bottom = (int)((81 + 16) * hD * 4);
+	return pBuf;
+}
+
 void COggDlg::Resize()
 {
 	CString s;
@@ -1382,28 +1403,38 @@ void COggDlg::Resize()
 		rect_1.right = rect_2.right + 5;
 		MoveWindow(&rect_1);
 	}
+#if CCUSTOM_AERO_SUPPORT
+	if (GetSafeHwnd() && CCC_IsAeroEnabled() && CCC_IsWin11())
+	{
+		RECT preserveBuf = {};
+		CCC_RepaintDialogAeroGaps(m_hWnd, MainAeroGapPreserve(&preserveBuf));
+		CCC_RefreshAeroGlassChildren(m_hWnd);
+	}
+#endif
 }
 
 void COggDlg::RefreshAllAeroWindows()
 {
 #if CCUSTOM_AERO_SUPPORT
-	auto refreshBlur = [](CWnd* w) {
+	auto refreshMode = [](CWnd* w) {
 		if (!w || !w->GetSafeHwnd() || !::IsWindowVisible(w->m_hWnd))
 			return;
 		if (auto* pBase = dynamic_cast<CCustomBlurDialogBase*>(w)) {
 			pBase->RefreshAeroMode();
 			return;
 		}
-		if (auto* pEx = dynamic_cast<CCustomBlurDialogExBase*>(w))
+		if (auto* pEx = dynamic_cast<CCustomBlurDialogExBase*>(w)) {
 			pEx->RefreshAeroMode();
+		}
 	};
-	refreshBlur(this);
-	refreshBlur(&m_EqualizerDlg);
-	refreshBlur(&m_PianoRollDlg);
+	refreshMode(this);
+	refreshMode(&m_EqualizerDlg);
+	refreshMode(&m_PianoRollDlg);
 	if (pl)
-		refreshBlur(pl);
+		refreshMode(pl);
 	if (mi)
-		refreshBlur(mi);
+		refreshMode(mi);
+	RefreshAeroGlassAlpha();
 	if (pMainFrame1 && pMainFrame1->GetSafeHwnd() && ::IsWindowVisible(pMainFrame1->m_hWnd)) {
 		CCC_ApplyAero(pMainFrame1->m_hWnd, CCC_IsAeroEnabled() ? TRUE : FALSE);
 		pMainFrame1->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
@@ -1414,27 +1445,43 @@ void COggDlg::RefreshAllAeroWindows()
 void COggDlg::RefreshAeroGlassAlpha()
 {
 #if CCUSTOM_AERO_SUPPORT
-	auto refresh = [](CWnd* w) {
+	if (GetSafeHwnd() && ::IsWindowVisible(m_hWnd) && CCC_IsAeroEnabled())
+	{
+		RECT preserveBuf = {};
+		CCC_RefreshAeroGlassAlphaForHwnd(m_hWnd, MainAeroGapPreserve(&preserveBuf));
+	}
+	auto refreshChild = [](CWnd* w) {
 		if (!w || !w->GetSafeHwnd() || !::IsWindowVisible(w->m_hWnd))
 			return;
 		if (auto* pEx = dynamic_cast<CCustomBlurDialogExBase*>(w)) {
-			pEx->RefreshAeroGlassAlpha();
+			pEx->CCustomBlurDialogExBase::RefreshAeroGlassAlpha();
 			return;
 		}
 		if (auto* pBase = dynamic_cast<CCustomBlurDialogBase*>(w)) {
-			pBase->RefreshAeroGlassAlpha();
+			pBase->CCustomBlurDialogBase::RefreshAeroGlassAlpha();
 			return;
 		}
 		CCC_RefreshAeroGlassAlphaForHwnd(w->m_hWnd);
 	};
-	refresh(this);
-	refresh(&m_EqualizerDlg);
-	refresh(&m_PianoRollDlg);
-	if (pl) refresh(pl);
-	if (mi) refresh(mi);
+	refreshChild(&m_EqualizerDlg);
+	refreshChild(&m_PianoRollDlg);
+	if (pl) refreshChild(pl);
+	if (mi) refreshChild(mi);
 	if (pMainFrame1 && pMainFrame1->GetSafeHwnd() && ::IsWindowVisible(pMainFrame1->m_hWnd))
 		CCC_RefreshAeroGlassAlphaForHwnd(pMainFrame1->m_hWnd);
 #endif
+}
+
+LRESULT COggDlg::OnRefreshChildren(WPARAM, LPARAM)
+{
+#if CCUSTOM_AERO_SUPPORT
+	if (GetSafeHwnd())
+	{
+		RECT preserveBuf = {};
+		CCC_RefreshAeroGlassAlphaOnDialog(m_hWnd, MainAeroGapPreserve(&preserveBuf));
+	}
+#endif
+	return 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2681,15 +2728,6 @@ BOOL COggDlg::OnInitDialog()
 	// ツールチップ・更新チェック・スペアナ窓関数テーブルなど、初回表示後でよい重い処理
 	PostMessage(WM_OGG_DEFERRED_HEAVY_INIT, 0, 0);
 
-#if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled())
-	{
-		ApplyDwmBlur();
-		Invalidate(FALSE);
-		UpdateWindow();
-	}
-#endif
-
 	AfxBeginThread((AFX_THREADPROC)TheadLoop, NULL, THREAD_PRIORITY_ABOVE_NORMAL);
 	return TRUE;  // TRUE を返すとコントロールに設定したフォーカスは失われません。
 }
@@ -2748,8 +2786,8 @@ void COggDlg::OnPaint()
 			if (!bSpectrumOnly)
 			{
 				dcc.SelectClipRgn(NULL);
-				const RECT gdiPreserve = { 0, 0, destW, destH };
-				CCC_PaintDialogAeroGaps(dcc, this, &gdiPreserve);
+				RECT preserveBuf = {};
+				CCC_PaintDialogAeroGaps(dcc, this, MainAeroGapPreserve(&preserveBuf));
 			}
 		}
 		else
@@ -19940,8 +19978,15 @@ void COggDlg::OnActivate(UINT nState, CWnd * pWndOther, BOOL bMinimized)
 		RegisterHotKey(GetSafeHwnd(), ID_HOTKEY1, 0, VK_DOWN);
 		RegisterHotKey(GetSafeHwnd(), ID_HOTKEY2, 0, VK_RIGHT);
 		RegisterHotKey(GetSafeHwnd(), ID_HOTKEY3, 0, VK_LEFT);
-		if (nState == WA_ACTIVE) {
+#if CCUSTOM_AERO_SUPPORT
+		if ((nState == WA_ACTIVE || nState == WA_CLICKACTIVE) && !bMinimized
+			&& CCC_IsAeroEnabled() && CCC_IsWin11() && GetSafeHwnd())
+		{
+			RECT preserveBuf = {};
+			CCC_RepaintDialogAeroGaps(m_hWnd, MainAeroGapPreserve(&preserveBuf));
+			CCC_RefreshAeroGlassChildren(m_hWnd);
 		}
+#endif
 	}
 	// TODO: ここにメッセージ ハンドラ コードを追加します。
 }
@@ -19971,16 +20016,31 @@ void COggDlg::OnKillFocus(CWnd * pNewWnd)
 void COggDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
-	if (bShow && pl && plw)
-		pl->ScheduleRefreshNavControls();
+	if (bShow)
+	{
+#if CCUSTOM_AERO_SUPPORT
+		if (CCC_IsAeroEnabled() && CCC_IsWin11() && GetSafeHwnd())
+		{
+			RECT preserveBuf = {};
+			CCC_RepaintDialogAeroGaps(m_hWnd, MainAeroGapPreserve(&preserveBuf));
+			CCC_RefreshAeroGlassChildren(m_hWnd);
+		}
+#endif
+		if (pl && plw)
+			pl->ScheduleRefreshNavControls();
+	}
 	UNREFERENCED_PARAMETER(nStatus);
 }
 
 BOOL COggDlg::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+	if (CCC_IsAeroEnabled() && CCC_IsWin11() && pDC)
+	{
+		RECT preserveBuf = {};
+		CCC_PaintDialogAeroGaps(*pDC, this, MainAeroGapPreserve(&preserveBuf));
 		return TRUE;
+	}
 #endif
 	return CCustomBlurDialogBase::OnEraseBkgnd(pDC);
 }
@@ -19990,7 +20050,13 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 	extern CImageBase* playbase;
 	CCustomBlurDialogBase::OnSize(nType, cx, cy);
 #if CCUSTOM_AERO_SUPPORT
-	if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
+	if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled() && CCC_IsWin11())
+	{
+		RECT preserveBuf = {};
+		CCC_RepaintDialogAeroGaps(m_hWnd, MainAeroGapPreserve(&preserveBuf));
+		CCC_RefreshAeroGlassChildren(m_hWnd);
+	}
+	else if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
 	{
 		ApplyDwmBlur();
 		Invalidate(FALSE);

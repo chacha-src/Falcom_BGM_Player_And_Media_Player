@@ -175,7 +175,7 @@ struct save{
 	int bit32;
 
 	int ms;
-	int ms2;
+	int aero_blur_Acrylic_Opacity; //aero=1時のぼかしのかかり方。
 
 	GUID soundguid;
 	int soundcur;

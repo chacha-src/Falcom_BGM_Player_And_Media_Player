@@ -58,7 +58,7 @@ public:
 	CString UTF8toUNI(const TCHAR* a);
 	void Resize();
 	void RefreshAllAeroWindows();
-	void RefreshAeroGlassAlpha();
+	void RefreshAeroGlassAlpha() override;
 	void Closeds();
 	void timerp();
 	void Vol(int vol);
@@ -136,8 +136,8 @@ public:
 	CCustomCheckBox	m_ed6fc;
 	CCustomCheckBox	m_ysf;
 	CCustomCheckBox	m_ys6;
-	CCustomCheckBox	m_st;
-	CCustomCheckBox	m_supe;
+	CCustomStandardButton	m_st;
+	CCustomStandardButton	m_supe;
 	CCustomStatic	m_sokudos;
 	CCustomStatic	m_onteis;
 	CCustomSliderCtrl	m_sokudo;
@@ -331,6 +331,10 @@ public:
 	afx_msg LRESULT OnTimerpVsyncTick(WPARAM wParam, LPARAM lParam);
 	HANDLE m_hTimerpVsyncThread;
 	HANDLE m_hTimerpVsyncStopEvent;
+
+	BOOL IsMainDlgCollapsed() const;
+	const RECT* MainAeroGapPreserve(RECT* pBuf) const;
+	afx_msg LRESULT OnRefreshChildren(WPARAM wParam, LPARAM lParam);
 };
 
 //{{AFX_INSERT_LOCATION}}

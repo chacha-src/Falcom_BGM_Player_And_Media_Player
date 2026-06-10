@@ -106,6 +106,9 @@ public:
 	CCustomSliderCtrl m_ms;
 	CCustomStatic m_ms2;
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	void ApplyAeroBlurFromSlider();
+	afx_msg void OnDestroy();
 	CCustomSliderCtrl m_hyouji2;
 	CCustomStatic m_hyouji3;
 	CCustomComboBox m_soundlist;

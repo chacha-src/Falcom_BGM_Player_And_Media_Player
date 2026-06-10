@@ -298,6 +298,8 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_CHECK50, &CRender::OnBnClickedCheck50)
 	ON_BN_CLICKED(IDCANCEL4, &CRender::OnBnClickedCancel4)
 	ON_WM_TIMER()
+	ON_WM_HSCROLL()
+	ON_WM_DESTROY()
 	ON_CBN_SELCHANGE(IDC_COMBO2, &CRender::OnCbnSelchangeCombo2)
 	ON_BN_CLICKED(IDC_BUTTON1, &CRender::OnBnClickedButton1)
 	ON_CBN_SELCHANGE(IDC_COMBO3, &CRender::OnCbnSelchangeCombo3)
@@ -515,9 +517,9 @@ BOOL CRender::OnInitDialog()
 		savedata.aero = 1;
 	m_a.SetCheck(savedata.aero ? BST_CHECKED : BST_UNCHECKED);
 	m_prevAero = savedata.aero;
-	m_prevAeroBlur = savedata.ms2;
+	m_prevAeroBlur = savedata.aero_blur_Acrylic_Opacity;
 	m_bakAero = savedata.aero;
-	m_bakAeroBlur = savedata.ms2;
+	m_bakAeroBlur = savedata.aero_blur_Acrylic_Opacity;
 	COSVersion os;
 	os.GetVersionString();
 	if (os.in.dwMajorVersion < 6)
@@ -545,15 +547,15 @@ BOOL CRender::OnInitDialog()
 	if (savedata.ms < 30) savedata.ms = 30;
 	m_ms.SetPos(savedata.ms);
 	if (savedata.ms > 80) savedata.ms = 80;
-	if (savedata.ms2 < 1) savedata.ms2 = 1;
-	if (savedata.ms2 > 60) savedata.ms2 = 60;
+	if (savedata.aero_blur_Acrylic_Opacity < 1) savedata.aero_blur_Acrylic_Opacity = 1;
+	if (savedata.aero_blur_Acrylic_Opacity > 60) savedata.aero_blur_Acrylic_Opacity = 60;
 	m_hyouji2.SetRange(1, 60);
-	m_hyouji2.SetPos(savedata.ms2);
+	m_hyouji2.SetPos(savedata.aero_blur_Acrylic_Opacity);
 	{
 		const wchar_t* msUnit = LL14(L"ms", L"ms", L"ms", L"ms", L"ms", L"ms", L"毫秒", L"ms", L"мс", L"ms", L"ms", L"ms", L"ms", L"ms");
 		CString s; s.Format(L"%d%s", savedata.ms, msUnit);
 		m_ms2.SetWindowText(s);
-		CString sBlur; sBlur.Format(L"%d", savedata.ms2);
+		CString sBlur; sBlur.Format(L"%d", savedata.aero_blur_Acrylic_Opacity);
 		m_hyouji3.SetWindowText(sBlur);
 	}
 	SetTimer(11, 100, NULL);
@@ -1067,6 +1069,35 @@ void CRender::OnBnClickedCancel4()
 }
 
 
+void CRender::ApplyAeroBlurFromSlider()
+{
+	const int newBlur = m_hyouji2.GetPos();
+	if (newBlur < 1) savedata.aero_blur_Acrylic_Opacity = 1;
+	else if (newBlur > 60) savedata.aero_blur_Acrylic_Opacity = 60;
+	else savedata.aero_blur_Acrylic_Opacity = newBlur;
+	CString s2; s2.Format(L"%d", savedata.aero_blur_Acrylic_Opacity);
+	m_hyouji3.SetWindowText(s2);
+	if (newBlur != m_prevAeroBlur) {
+		m_prevAeroBlur = newBlur;
+		if (og)
+			og->RefreshAeroGlassAlpha();
+		RefreshAeroGlassAlpha();
+	}
+}
+
+void CRender::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	if (pScrollBar && pScrollBar->GetSafeHwnd() == m_hyouji2.GetSafeHwnd())
+		ApplyAeroBlurFromSlider();
+	CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
+}
+
+void CRender::OnDestroy()
+{
+	KillTimer(11);
+	CCustomBlurDialogExBase::OnDestroy();
+}
+
 void CRender::OnTimer(UINT_PTR nIDEvent)
 {
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
@@ -1084,19 +1115,15 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 		m_ms2.SetWindowText(s);
 	}
 	const int newBlur = m_hyouji2.GetPos();
-	if (newBlur < 1) savedata.ms2 = 1;
-	else if (newBlur > 60) savedata.ms2 = 60;
-	else savedata.ms2 = newBlur;
+	if (newBlur < 1) savedata.aero_blur_Acrylic_Opacity = 1;
+	else if (newBlur > 60) savedata.aero_blur_Acrylic_Opacity = 60;
+	else savedata.aero_blur_Acrylic_Opacity = newBlur;
 	{
-		CString s2; s2.Format(L"%d", savedata.ms2);
+		CString s2; s2.Format(L"%d", savedata.aero_blur_Acrylic_Opacity);
 		m_hyouji3.SetWindowText(s2);
 	}
-	if (newBlur != m_prevAeroBlur) {
-		m_prevAeroBlur = newBlur;
-		if (og)
-			og->RefreshAeroGlassAlpha();
-		RefreshAeroGlassAlpha();
-	}
+	if (newBlur != m_prevAeroBlur)
+		ApplyAeroBlurFromSlider();
 	savedata.wup = w_wups.GetPos()/ 100.0;
 	CString s;
 	{
@@ -1297,13 +1324,13 @@ void CRender::OnBnClickedCancel()
 	}
 
 	const bool bAeroChanged = (savedata.aero != m_bakAero);
-	const bool bBlurChanged = (savedata.ms2 != m_bakAeroBlur);
+	const bool bBlurChanged = (savedata.aero_blur_Acrylic_Opacity != m_bakAeroBlur);
 	if (bAeroChanged || bBlurChanged) {
 		savedata.aero = m_bakAero;
-		savedata.ms2 = m_bakAeroBlur;
+		savedata.aero_blur_Acrylic_Opacity = m_bakAeroBlur;
 		m_a.SetCheck(savedata.aero ? BST_CHECKED : BST_UNCHECKED);
-		m_hyouji2.SetPos(savedata.ms2);
-		CString sBlur; sBlur.Format(L"%d", savedata.ms2);
+		m_hyouji2.SetPos(savedata.aero_blur_Acrylic_Opacity);
+		CString sBlur; sBlur.Format(L"%d", savedata.aero_blur_Acrylic_Opacity);
 		m_hyouji3.SetWindowText(sBlur);
 		if (bAeroChanged) {
 			RefreshAeroMode();

@@ -1,4 +1,4 @@
-﻿//
+//
 //	Class:		CButtonST
 //
 //	Compiler:	Visual C++
@@ -124,6 +124,9 @@ public:
 	DWORD SetURL(LPCTSTR lpszURL = NULL);
 	void DrawTransparent(BOOL bRepaint = FALSE);
 	void ClearBackgroundCache();
+	void SetAeroGlassMode(BOOL bEnable = TRUE);
+	void BeginGlassCompositeDraw() { m_bInGlassComposite = TRUE; m_bAeroGlassMode = TRUE; }
+	void EndGlassCompositeDraw() { m_bInGlassComposite = FALSE; }
 	DWORD SetBk(CDC* pDC);
 
 	BOOL GetDefault();
@@ -169,6 +172,9 @@ public:
 	POINT	m_ptPressedOffset;
 
 protected:
+#if CCUSTOM_AERO_SUPPORT
+	friend void CCC_PaintButtonSTGlass(HWND hWnd, CButtonST* pBtn, HDC hdcDest);
+#endif
     //{{AFX_MSG(CButtonST)
 	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
 	afx_msg void OnKillFocus(CWnd* pNewWnd);
@@ -195,6 +201,8 @@ protected:
 	BOOL		m_bIsFlat;			// Is a flat button?
 	BOOL		m_bMouseOnButton;	// Is mouse over the button?
 	BOOL		m_bDrawTransparent;	// Draw transparent?
+	BOOL		m_bAeroGlassMode;	// Blur dialog: chroma + glass composite
+	BOOL		m_bInGlassComposite;// internal: DrawItem core pass for glass composite
 	BOOL		m_bIsPressed;		// Is button pressed?
 	BOOL		m_bIsFocused;		// Is button focused?
 	BOOL		m_bIsDisabled;		// Is button disabled?
@@ -220,6 +228,7 @@ private:
 	LRESULT OnMouseLeave(WPARAM wParam, LPARAM lParam);
 
 	void CancelHover();
+	void RepaintHoverChange();
 	void FreeResources(BOOL bCheckForNULL = TRUE);
 	void PrepareImageRect(BOOL bHasTitle, RECT* rpItem, CRect* rpTitle, BOOL bIsPressed, DWORD dwWidth, DWORD dwHeight, CRect* rpImage);
 	HBITMAP CreateBitmapMask(HBITMAP hSourceBitmap, DWORD dwWidth, DWORD dwHeight, COLORREF crTransColor);
