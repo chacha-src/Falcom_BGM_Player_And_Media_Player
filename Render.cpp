@@ -1088,7 +1088,15 @@ void CRender::ApplyAeroBlurFromSlider()
 void CRender::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
 	if (pScrollBar && pScrollBar->GetSafeHwnd() == m_hyouji2.GetSafeHwnd())
+	{
 		ApplyAeroBlurFromSlider();
+		if (nSBCode == SB_ENDSCROLL || nSBCode == SB_THUMBPOSITION)
+		{
+			if (og)
+				og->RefreshAeroGlassAlpha(TRUE);
+			RefreshAeroGlassAlpha(TRUE);
+		}
+	}
 	CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
 }
 

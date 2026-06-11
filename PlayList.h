@@ -64,7 +64,7 @@ public:
 	HICON m_hIcon;
 	void RefreshNavControls();
 	void ScheduleRefreshNavControls();
-	void RefreshAeroGlassAlpha() override;
+	void RefreshAeroGlassAlpha(BOOL bImmediate = FALSE) override;
 protected:
 	afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV サポート

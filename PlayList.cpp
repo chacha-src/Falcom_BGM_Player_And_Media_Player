@@ -4765,6 +4765,10 @@ void CPlayList::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 	if (nState == WA_ACTIVE || nState == WA_CLICKACTIVE) {
 		SetTimer(4927, 10, NULL);
 		ScheduleRefreshNavControls();
+#if CCUSTOM_AERO_SUPPORT
+		if (CCC_IsAeroEnabled() && CCC_IsWin11())
+			RefreshAeroGlassAlpha(TRUE);
+#endif
 	}
 	else {
 		UnregisterHotKey(og->m_hWnd, ID_HOTKEY0);
@@ -4952,12 +4956,12 @@ void CPlayList::RefreshNavControls()
 }
 
 #if CCUSTOM_AERO_SUPPORT
-void CPlayList::RefreshAeroGlassAlpha()
+void CPlayList::RefreshAeroGlassAlpha(BOOL bImmediate)
 {
 	// ナビ ButtonST/Edit は OnRefreshChildren 側で再描画する。
 	// ここで RefreshNavControls() すると HSCROLL 中に同期 RedrawWindow が走り、
 	// 直後の PostMessage 更新と二重になり DWM ガラスが消える。
-	CCustomBlurDialogBase::RefreshAeroGlassAlpha();
+	CCustomBlurDialogBase::RefreshAeroGlassAlpha(bImmediate);
 }
 #endif
 

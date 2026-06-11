@@ -1442,43 +1442,43 @@ void COggDlg::RefreshAllAeroWindows()
 #endif
 }
 
-void COggDlg::RefreshAeroGlassAlpha()
+void COggDlg::RefreshAeroGlassAlpha(BOOL bImmediate)
 {
 #if CCUSTOM_AERO_SUPPORT
 	if (GetSafeHwnd() && ::IsWindowVisible(m_hWnd) && CCC_IsAeroEnabled())
 	{
 		RECT preserveBuf = {};
-		CCC_RefreshAeroGlassAlphaForHwnd(m_hWnd, MainAeroGapPreserve(&preserveBuf));
+		CCC_RefreshAeroGlassAlphaForHwnd(m_hWnd, MainAeroGapPreserve(&preserveBuf), bImmediate);
 	}
-	auto refreshChild = [](CWnd* w) {
+	auto refreshChild = [bImmediate](CWnd* w) {
 		if (!w || !w->GetSafeHwnd() || !::IsWindowVisible(w->m_hWnd))
 			return;
 		if (auto* pEx = dynamic_cast<CCustomBlurDialogExBase*>(w)) {
-			pEx->CCustomBlurDialogExBase::RefreshAeroGlassAlpha();
+			pEx->CCustomBlurDialogExBase::RefreshAeroGlassAlpha(bImmediate);
 			return;
 		}
 		if (auto* pBase = dynamic_cast<CCustomBlurDialogBase*>(w)) {
-			pBase->CCustomBlurDialogBase::RefreshAeroGlassAlpha();
+			pBase->CCustomBlurDialogBase::RefreshAeroGlassAlpha(bImmediate);
 			return;
 		}
-		CCC_RefreshAeroGlassAlphaForHwnd(w->m_hWnd);
+		CCC_RefreshAeroGlassAlphaForHwnd(w->m_hWnd, nullptr, bImmediate);
 	};
 	refreshChild(&m_EqualizerDlg);
 	refreshChild(&m_PianoRollDlg);
 	if (pl) refreshChild(pl);
 	if (mi) refreshChild(mi);
 	if (pMainFrame1 && pMainFrame1->GetSafeHwnd() && ::IsWindowVisible(pMainFrame1->m_hWnd))
-		CCC_RefreshAeroGlassAlphaForHwnd(pMainFrame1->m_hWnd);
+		CCC_RefreshAeroGlassAlphaForHwnd(pMainFrame1->m_hWnd, nullptr, bImmediate);
 #endif
 }
 
 LRESULT COggDlg::OnRefreshChildren(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
-	if (GetSafeHwnd())
+	if (GetSafeHwnd() && CCC_IsAeroEnabled())
 	{
 		RECT preserveBuf = {};
-		CCC_RefreshAeroGlassAlphaOnDialog(m_hWnd, MainAeroGapPreserve(&preserveBuf));
+		CCC_RefreshAeroGlassAlphaDeferred(m_hWnd, MainAeroGapPreserve(&preserveBuf));
 	}
 #endif
 	return 0;

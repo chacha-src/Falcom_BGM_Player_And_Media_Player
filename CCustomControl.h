@@ -32,39 +32,6 @@
 #define CCUSTOM_AERO_SUPPORT 0
 #endif
 
-#if CCUSTOM_AERO_SUPPORT
-#define CCC_MSG_REAPPLY_OPAQUE_FIXERS (WM_APP + 311)
-#define CCC_WM_POST_OPAQUE_PAINT      (WM_APP + 312)
-#define CCC_MSG_REFRESH_CHILDREN      (WM_APP + 313)
-// 透過合成のクロマキー（黒文字 RGB(0,0,0) と区別するため 1,1,1 を使用）
-#define CCC_AERO_CHROMA_KEY RGB(1, 1, 1)
-void CCC_SelectClipExcludeChildren(CDC& dc, CWnd* pWnd);
-void CCC_BlitStretchOpaque(HDC hdcDest, int x, int y, int destW, int destH,
-    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH);
-void CCC_BlitStretchChroma(HDC hdcDest, int x, int y, int destW, int destH,
-    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey);
-void CCC_BlitStretchChromaNoFlicker(HDC hdcDest, int x, int y, int destW, int destH,
-    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey);
-void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
-void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
-void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
-void CCC_InvalidateBlurParent(HWND hWnd, BOOL bAeroMode);
-void CCC_RefreshDialogDwmBlur(HWND hWnd);
-void CCC_RefreshAeroWindowLayer(HWND hWnd);
-void CCC_RepaintDialogAeroGaps(HWND hWnd, const RECT* pPreserveRect = nullptr);
-void CCC_RefreshAeroGlassAlphaForHwnd(HWND hWnd, const RECT* pGapPreserveRect = nullptr);
-void CCC_RefreshAeroGlassChildren(HWND hWnd);
-void CCC_RefreshAeroGlassAlphaOnDialog(HWND hWnd, const RECT* pGapPreserveRect = nullptr);
-void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr);
-void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey);
-class CButtonST;
-void CCC_PaintButtonSTGlass(HWND hWnd, CButtonST* pBtn, HDC hdcDest);
-#endif
-
-// 最小化復帰・再表示時: オーナードロー子が親 Invalidate だけでは再描画されないため明示的に更新
-void CCC_ForceRepaintHwnd(HWND hWnd);
-void CCC_RefreshChildrenAfterShow(HWND hWnd);
-
 // ============================================================================
 // 色定義
 // ============================================================================
@@ -88,6 +55,43 @@ void CCC_RefreshChildrenAfterShow(HWND hWnd);
 #define COLOR_SEL_BG            RGB(221, 160, 221) // リストなどの選択時背景色
 #define COLOR_GRAD_DARK_GREEN   RGB(  0, 100,   0) // グラデーション用の濃い緑
 #define COLOR_GRAD_DARK_PURPLE  RGB( 75,   0, 130) // グラデーション用の濃い紫
+
+
+#if CCUSTOM_AERO_SUPPORT
+#define CCC_MSG_REAPPLY_OPAQUE_FIXERS (WM_APP + 311)
+#define CCC_WM_POST_OPAQUE_PAINT      (WM_APP + 312)
+#define CCC_MSG_REFRESH_CHILDREN      (WM_APP + 313)
+// 透過合成のクロマキー（黒文字 RGB(0,0,0) と区別するため 1,1,1 を使用）
+#define CCC_AERO_CHROMA_KEY RGB(1, 1, 1)
+void CCC_SelectClipExcludeChildren(CDC& dc, CWnd* pWnd);
+void CCC_BlitStretchOpaque(HDC hdcDest, int x, int y, int destW, int destH,
+    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH);
+void CCC_BlitStretchChroma(HDC hdcDest, int x, int y, int destW, int destH,
+    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey);
+void CCC_BlitStretchChromaNoFlicker(HDC hdcDest, int x, int y, int destW, int destH,
+    HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey);
+void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
+void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
+void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
+void CCC_BlitAeroChildComposite(HDC hdcDest, int x, int y, int w, int h,
+    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, COLORREF clrGlassBase = COLOR_DIALOG_BG);
+void CCC_InvalidateBlurParent(HWND hWnd, BOOL bAeroMode);
+void CCC_RefreshDialogDwmBlur(HWND hWnd);
+void CCC_RefreshAeroWindowLayer(HWND hWnd);
+void CCC_RepaintDialogAeroGaps(HWND hWnd, const RECT* pPreserveRect = nullptr);
+void CCC_RefreshAeroGlassAlphaForHwnd(HWND hWnd, const RECT* pGapPreserveRect = nullptr, BOOL bImmediate = FALSE);
+void CCC_RefreshAeroGlassChildren(HWND hWnd);
+void CCC_RefreshAeroGlassAlphaOnDialog(HWND hWnd, const RECT* pGapPreserveRect = nullptr, BOOL bSyncChildren = FALSE);
+void CCC_RefreshAeroGlassAlphaDeferred(HWND hWnd, const RECT* pGapPreserveRect = nullptr);
+void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr);
+void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey);
+class CButtonST;
+void CCC_PaintButtonSTGlass(HWND hWnd, CButtonST* pBtn, HDC hdcDest);
+#endif
+
+// 最小化復帰・再表示時: オーナードロー子が親 Invalidate だけでは再描画されないため明示的に更新
+void CCC_ForceRepaintHwnd(HWND hWnd);
+void CCC_RefreshChildrenAfterShow(HWND hWnd);
 
 // アクリル半透明オーバーレイ用アルファ値（aero_blur_Acrylic_Opacity=30 相当の基準）
 #define AERO_ALPHA_SEMI 160
@@ -1204,7 +1208,7 @@ public:
     CCustomBlurDialogBase(UINT nIDTemplate, CWnd* pParent = NULL);
     virtual ~CCustomBlurDialogBase();
     void RefreshAeroMode() { ApplyDwmBlur(); }
-    virtual void RefreshAeroGlassAlpha();
+    virtual void RefreshAeroGlassAlpha(BOOL bImmediate = FALSE);
 
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
@@ -1280,7 +1284,7 @@ public:
     CCustomBlurDialogExBase(UINT nIDTemplate, CWnd* pParent = nullptr);
     virtual ~CCustomBlurDialogExBase();
     void RefreshAeroMode() { ApplyDwmBlur(); }
-    virtual void RefreshAeroGlassAlpha();
+    virtual void RefreshAeroGlassAlpha(BOOL bImmediate = FALSE);
 
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);

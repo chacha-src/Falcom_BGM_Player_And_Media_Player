@@ -58,7 +58,7 @@ public:
 	CString UTF8toUNI(const TCHAR* a);
 	void Resize();
 	void RefreshAllAeroWindows();
-	void RefreshAeroGlassAlpha() override;
+	void RefreshAeroGlassAlpha(BOOL bImmediate = FALSE) override;
 	void Closeds();
 	void timerp();
 	void Vol(int vol);

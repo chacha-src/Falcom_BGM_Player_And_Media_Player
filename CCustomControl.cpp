@@ -768,8 +768,8 @@ static BOOL CCC_BlitToRectAeroChildGlass(HDC hdcDest, const RECT& rect, HDC hdcS
     return bOk;
 }
 
-static void CCC_BlitAeroChildComposite(HDC hdcDest, int x, int y, int w, int h,
-    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, COLORREF clrGlassBase = COLOR_DIALOG_BG)
+void CCC_BlitAeroChildComposite(HDC hdcDest, int x, int y, int w, int h,
+    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, COLORREF clrGlassBase)
 {
     if (w <= 0 || h <= 0) return;
     RECT rect = { x, y, x + w, y + h };
@@ -7998,7 +7998,6 @@ static BOOL CCC_IsTransparentBlurControl(HWND hWnd)
         if (dynamic_cast<CCustomRangeSliderCtrl*>(pw)) return TRUE;
         if (dynamic_cast<CCustomGroupBox*>(pw)) return TRUE;
         if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
-        if (dynamic_cast<CButtonST*>(pw) && CCC_UseBlurChildGlassPaint(hWnd)) return TRUE;
     }
     TCHAR cls[64] = {};
     ::GetClassName(hWnd, cls, 63);
@@ -8048,7 +8047,132 @@ static BOOL CCC_UsesAeroGlassPaint(HWND hWnd)
         || CCC_UseListBoxRowGlass(hWnd) || CCC_UseListCtrlRowGlass(hWnd);
 }
 
-static void CCC_InvalidateGlassChildrenRecursive(HWND hWnd, BOOL bSyncGlassRepaint)
+static BOOL CCC_DialogHasVisibleChildren(HWND hWnd)
+{
+    if (!hWnd || !::IsWindow(hWnd)) return FALSE;
+    for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
+    {
+        if (::IsWindowVisible(hChild))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+// ガラス子: WM_PAINT 経由で同期再描画（RDW_ERASE なし）
+static void CCC_RepaintGlassChildAlphaSync(HWND hChild)
+{
+    if (!hChild || !::IsWindow(hChild) || !::IsWindowVisible(hChild))
+        return;
+    if (CCC_UseBlurChildGlassPaint(hChild) || CCC_UseEditGlass(hChild) || CCC_UseComboGlass(hChild))
+        ::RedrawWindow(hChild, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+}
+
+static BOOL CCC_IsGlassFieldChild(HWND hChild)
+{
+    return CCC_UseBlurChildGlassPaint(hChild) || CCC_UseEditGlass(hChild) || CCC_UseComboGlass(hChild);
+}
+
+static void CCC_RepaintChildDirectPrint(HWND hChild)
+{
+    if (!hChild || !::IsWindow(hChild) || !::IsWindowVisible(hChild))
+        return;
+    CWnd* pw = CWnd::FromHandlePermanent(hChild);
+    if (!pw) return;
+    CClientDC dc(pw);
+    ::SendMessage(hChild, WM_PRINTCLIENT, (WPARAM)dc.GetSafeHdc(), PRF_CLIENT);
+}
+
+static BOOL CCC_UseTransparentDirectPrint(HWND hChild)
+{
+    if (CWnd* pw = CWnd::FromHandlePermanent(hChild))
+    {
+        if (dynamic_cast<CCustomGroupBox*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomStatic*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomSliderCtrl*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomRangeSliderCtrl*>(pw)) return TRUE;
+    }
+    return FALSE;
+}
+
+static void CCC_RepaintGlassFieldChildDirect(HWND hChild)
+{
+    if (!CCC_IsGlassFieldChild(hChild))
+        return;
+    CCC_RepaintChildDirectPrint(hChild);
+}
+
+static void CCC_RepaintGlassFieldChildrenDirectRecursive(HWND hWnd)
+{
+    for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
+    {
+        if (::IsWindowVisible(hChild))
+            CCC_RepaintGlassFieldChildDirect(hChild);
+        CCC_RepaintGlassFieldChildrenDirectRecursive(hChild);
+    }
+}
+
+static void CCC_RefreshTransparentChildrenAlphaRecursive(HWND hWnd)
+{
+    for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
+    {
+        if (::IsWindowVisible(hChild))
+        {
+            // ButtonST/Edit/Combo は別パスで直接描画（二重 UPDATENOW でちらつく）
+            if (CCC_IsGlassFieldChild(hChild))
+                ;
+            else if (CCC_UseTransparentDirectPrint(hChild))
+                CCC_RepaintChildDirectPrint(hChild);
+            else if (CCC_UsesAeroGlassPaint(hChild) || CCC_IsTransparentBlurControl(hChild))
+                ::RedrawWindow(hChild, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+            else if (CCC_ShouldOpaqueFix(hChild))
+                ::SendMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+        }
+        CCC_RefreshTransparentChildrenAlphaRecursive(hChild);
+    }
+}
+
+static void CCC_RepaintAeroChildAlphaSync(HWND hChild)
+{
+    if (!hChild || !::IsWindow(hChild) || !::IsWindowVisible(hChild))
+        return;
+    if (CCC_IsGlassFieldChild(hChild))
+        CCC_RepaintGlassFieldChildDirect(hChild);
+    else if (CCC_UseTransparentDirectPrint(hChild))
+        CCC_RepaintChildDirectPrint(hChild);
+    else if (CCC_UsesAeroGlassPaint(hChild) || CCC_IsTransparentBlurControl(hChild))
+        ::RedrawWindow(hChild, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+    else if (CCC_ShouldOpaqueFix(hChild))
+        ::SendMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+}
+
+static void CCC_RefreshGlassChildrenAlphaRecursive(HWND hWnd)
+{
+    for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
+    {
+        if (::IsWindowVisible(hChild))
+            CCC_RepaintAeroChildAlphaSync(hChild);
+        CCC_RefreshGlassChildrenAlphaRecursive(hChild);
+    }
+}
+
+static void CCC_QueueGlassChildRepaint(HWND hChild, BOOL bSync)
+{
+    if (!hChild || !::IsWindow(hChild)) return;
+    const UINT rdwFlags = RDW_INVALIDATE | RDW_NOERASE | (bSync ? RDW_UPDATENOW : 0);
+    if (CCC_UseBlurChildGlassPaint(hChild) || CCC_UseEditGlass(hChild) || CCC_UseComboGlass(hChild))
+    {
+        if (bSync)
+            CCC_RepaintGlassHwnd(hChild);
+        else
+            ::RedrawWindow(hChild, NULL, NULL, rdwFlags);
+        return;
+    }
+    if (CCC_UsesAeroGlassPaint(hChild) || CCC_IsTransparentBlurControl(hChild))
+        ::RedrawWindow(hChild, NULL, NULL, rdwFlags);
+}
+
+static void CCC_InvalidateGlassChildrenRecursive(HWND hWnd, BOOL bSyncGlassRepaint, BOOL bSyncChildren)
 {
     for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
     {
@@ -8057,61 +8181,77 @@ static void CCC_InvalidateGlassChildrenRecursive(HWND hWnd, BOOL bSyncGlassRepai
             if (bSyncGlassRepaint)
                 CCC_RepaintGlassHwnd(hChild);
             else
-            {
-                ::InvalidateRect(hChild, NULL, FALSE);
-                ::UpdateWindow(hChild);
-            }
+                CCC_QueueGlassChildRepaint(hChild, bSyncChildren);
         }
         else if (::IsWindowVisible(hChild))
         {
             if (CCC_UsesAeroGlassPaint(hChild) || CCC_IsTransparentBlurControl(hChild))
-            {
-                ::InvalidateRect(hChild, NULL, FALSE);
-                ::UpdateWindow(hChild);
-            }
+                CCC_QueueGlassChildRepaint(hChild, bSyncChildren);
             else if (CCC_ShouldOpaqueFix(hChild))
-                ::PostMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+            {
+                if (bSyncChildren)
+                    ::SendMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+                else
+                    ::PostMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+            }
         }
-        CCC_InvalidateGlassChildrenRecursive(hChild, bSyncGlassRepaint);
+        CCC_InvalidateGlassChildrenRecursive(hChild, bSyncGlassRepaint, bSyncChildren);
     }
-}
-
-static void CCC_RefreshAeroGlassChildrenRecursive(HWND hWnd)
-{
-    CCC_InvalidateGlassChildrenRecursive(hWnd, TRUE);
 }
 
 void CCC_RefreshAeroGlassChildren(HWND hWnd)
 {
-    CCC_RefreshAeroGlassChildrenRecursive(hWnd);
+    CCC_RefreshGlassChildrenAlphaRecursive(hWnd);
 }
 
-void CCC_RefreshAeroGlassAlphaOnDialog(HWND hWnd, const RECT* pGapPreserveRect)
+void CCC_RefreshAeroGlassAlphaDeferred(HWND hWnd, const RECT* pGapPreserveRect)
 {
     if (!hWnd || !::IsWindow(hWnd) || !CCC_IsAeroEnabled() || !CCC_IsWin11())
         return;
     CCC_RepaintDialogAeroGaps(hWnd, pGapPreserveRect);
-    // スライダー経路: RDW_UPDATENOW の同期 RepaintGlassHwnd は DWM コミットを壊す。
-    // Invalidate+UpdateWindow の通常 WM_PAINT で alpha を反映する。
-    CCC_InvalidateGlassChildrenRecursive(hWnd, FALSE);
+    CCC_InvalidateGlassChildrenRecursive(hWnd, FALSE, FALSE);
+}
+
+void CCC_RefreshAeroGlassAlphaOnDialog(HWND hWnd, const RECT* pGapPreserveRect, BOOL bSyncChildren)
+{
+    if (!hWnd || !::IsWindow(hWnd) || !CCC_IsAeroEnabled() || !CCC_IsWin11())
+        return;
+    // 隙間を先に更新（子 HWND は clip 除外）。子を後から描く。逆順だと隙間描画が子を消す。
+    if (CCC_DialogHasVisibleChildren(hWnd))
+        CCC_RepaintDialogAeroGaps(hWnd, pGapPreserveRect);
+    else
+        ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
+    // グループボックス等の親背景 → 子の ButtonST/Edit（Invalidate なし直接描画でちらつき防止）
+    CCC_RefreshTransparentChildrenAlphaRecursive(hWnd);
+    CCC_RepaintGlassFieldChildrenDirectRecursive(hWnd);
+    if (bSyncChildren)
+        CCC_RepaintGlassFieldChildrenDirectRecursive(hWnd);
 }
 
 static void CCC_InvalidateGlassControlsOnDialog(HWND hDlg);
 
+static std::map<HWND, DWORD> g_lastAeroGlassAlphaRefreshTick;
+
 // aero_blur_Acrylic_Opacity: Win10=LWA_ALPHA / Win11=隙間+子コントロールガラス+リスト／コンボ
-void CCC_RefreshAeroGlassAlphaForHwnd(HWND hWnd, const RECT* pGapPreserveRect)
+void CCC_RefreshAeroGlassAlphaForHwnd(HWND hWnd, const RECT* pGapPreserveRect, BOOL bImmediate)
 {
     if (!hWnd || !::IsWindow(hWnd) || !CCC_IsAeroEnabled()) return;
 
     if (CCC_IsWin11())
     {
-        UNREFERENCED_PARAMETER(pGapPreserveRect);
-        // スライダー HSCROLL 中の同期 RedrawWindow は DWM ガラスがコミットされない。
-        // PostMessage で HSCROLL 返却後にまとめて再描画する。
-        MSG msg = {};
-        if (::PeekMessage(&msg, hWnd, CCC_MSG_REFRESH_CHILDREN, CCC_MSG_REFRESH_CHILDREN, PM_NOREMOVE))
-            return;
-        ::PostMessage(hWnd, CCC_MSG_REFRESH_CHILDREN, 0, 0);
+        if (bImmediate)
+            g_lastAeroGlassAlphaRefreshTick.erase(hWnd);
+        else
+        {
+            const DWORD now = ::GetTickCount();
+            DWORD& lastTick = g_lastAeroGlassAlphaRefreshTick[hWnd];
+            if (lastTick != 0 && (now - lastTick) < 16)
+                return;
+            lastTick = now;
+        }
+        // HSCROLL 中は PostMessage だとマウスキャプチャ下で処理されずリアルタイム性が失われるため同期呼び出し。
+        CCC_RefreshAeroGlassAlphaOnDialog(hWnd, pGapPreserveRect, bImmediate);
+        return;
     }
     else
     {
@@ -8332,7 +8472,7 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
     {
         if (CCC_UseBlurChildGlassPaint(hWnd))
         {
-            CCC_RepaintGlassHwnd(hWnd);
+            CCC_RepaintGlassChildAlphaSync(hWnd);
             return;
         }
         CCC_ForcePaintButtonST(hWnd, pBtn);
@@ -8348,7 +8488,7 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
     {
         if (CCC_UseEditGlass(hWnd))
         {
-            CCC_RepaintGlassHwnd(hWnd);
+            CCC_RepaintGlassChildAlphaSync(hWnd);
             return;
         }
         pEdit->RepaintClient();
@@ -8358,7 +8498,7 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
     {
         if (CCC_UseComboGlass(hWnd))
         {
-            CCC_RepaintGlassHwnd(hWnd);
+            CCC_RepaintGlassChildAlphaSync(hWnd);
             return;
         }
     }
@@ -8530,11 +8670,11 @@ void CCustomBlurDialogBase::ApplyDwmBlur()
 #endif
 }
 
-void CCustomBlurDialogBase::RefreshAeroGlassAlpha()
+void CCustomBlurDialogBase::RefreshAeroGlassAlpha(BOOL bImmediate)
 {
 #if CCUSTOM_AERO_SUPPORT
     if (!GetSafeHwnd() || !::IsWindow(m_hWnd) || !::IsWindowVisible(m_hWnd)) return;
-    CCC_RefreshAeroGlassAlphaForHwnd(m_hWnd, nullptr);
+    CCC_RefreshAeroGlassAlphaForHwnd(m_hWnd, nullptr, bImmediate);
 #endif
 }
 
@@ -8646,7 +8786,7 @@ LRESULT CCustomBlurDialogBase::OnRefreshChildren(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
     if (m_bBlurApplied && m_bAeroEnabled)
-        CCC_RefreshAeroGlassAlphaOnDialog(m_hWnd, nullptr);
+        CCC_RefreshAeroGlassAlphaDeferred(m_hWnd, nullptr);
 #endif
     return 0;
 }
@@ -8802,11 +8942,11 @@ void CCustomBlurDialogExBase::ApplyDwmBlur()
 #endif
 }
 
-void CCustomBlurDialogExBase::RefreshAeroGlassAlpha()
+void CCustomBlurDialogExBase::RefreshAeroGlassAlpha(BOOL bImmediate)
 {
 #if CCUSTOM_AERO_SUPPORT
     if (!GetSafeHwnd() || !::IsWindow(m_hWnd) || !::IsWindowVisible(m_hWnd)) return;
-    CCC_RefreshAeroGlassAlphaForHwnd(m_hWnd, nullptr);
+    CCC_RefreshAeroGlassAlphaForHwnd(m_hWnd, nullptr, bImmediate);
 #endif
 }
 
@@ -8896,7 +9036,7 @@ LRESULT CCustomBlurDialogExBase::OnRefreshChildren(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
     if (m_bBlurApplied && m_bAeroEnabled)
-        CCC_RefreshAeroGlassAlphaOnDialog(m_hWnd, nullptr);
+        CCC_RefreshAeroGlassAlphaDeferred(m_hWnd, nullptr);
 #endif
     return 0;
 }
