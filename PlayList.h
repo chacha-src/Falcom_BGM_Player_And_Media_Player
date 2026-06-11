@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxwin.h"
 #include "BtnST.h"
 #include "afxcmn.h"
@@ -64,7 +64,6 @@ public:
 	HICON m_hIcon;
 	void RefreshNavControls();
 	void ScheduleRefreshNavControls();
-	void RefreshAeroGlassAlpha(BOOL bImmediate = FALSE) override;
 protected:
 	afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV サポート
@@ -141,8 +140,5 @@ public:
 	CCustomStandardButton m_namechage;
 	CCustomStandardButton m_listdelete;
 	CCustomStandardButton m_pianorollBtn;
-	CCustomStandardButton m_okdummy;
-	CCustomGroupBox m_grpIdo;
-	CCustomGroupBox m_grpKen;
 	CFont m_fontList;
 };

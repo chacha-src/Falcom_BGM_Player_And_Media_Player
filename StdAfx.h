@@ -175,7 +175,7 @@ struct save{
 	int bit32;
 
 	int ms;
-	int aero_blur_Acrylic_Opacity; //aero=1時のぼかしのかかり方。
+	int ms2;
 
 	GUID soundguid;
 	int soundcur;
@@ -222,11 +222,34 @@ struct save{
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */
-const wchar_t* LangPick14(
+__forceinline const wchar_t* LangPick14(
 	const wchar_t* s0, const wchar_t* s1, const wchar_t* s2, const wchar_t* s3,
 	const wchar_t* s4, const wchar_t* s5, const wchar_t* s6, const wchar_t* s7,
 	const wchar_t* s8, const wchar_t* s9, const wchar_t* s10, const wchar_t* s11,
-	const wchar_t* s12, const wchar_t* s13);
+	const wchar_t* s12, const wchar_t* s13)
+{
+	/* Return string literals directly (no static/stack table). A static local table
+	   breaks when LangPick14 is not inlined; a stack table is UB after return. */
+	int lang = savedata.lang;
+	if (lang < 0 || lang > 13)
+		lang = 1;
+	switch (lang) {
+	case 0:  return s0;
+	case 2:  return s2;
+	case 3:  return s3;
+	case 4:  return s4;
+	case 5:  return s5;
+	case 6:  return s6;
+	case 7:  return s7;
+	case 8:  return s8;
+	case 9:  return s9;
+	case 10: return s10;
+	case 11: return s11;
+	case 12: return s12;
+	case 13: return s13;
+	default: return s1;
+	}
+}
 #define LL14(ja,en,fr,it,es,ko,zh,ar,ru,de,pt,nl,pl,tr) \
 	LangPick14(ja,en,fr,it,es,ko,zh,ar,ru,de,pt,nl,pl,tr)
 #define LL2(ja, en) LL14(ja, en, en, en, en, en, en, en, en, en, en, en, en, en)
@@ -263,17 +286,30 @@ ON_WM_TIMER() \
 ON_WM_NCACTIVATE() \
 END_MESSAGE_MAP() \
 extern save savedata; \
+extern CImageBase* Games; \
 extern int gameon; \
+extern int ip1; \
 int xxx::OnCreate(LPCREATESTRUCT lpCreateStruct) \
 { \
 	if (CCustomBlurDialogBase::OnCreate(lpCreateStruct) == -1) \
 		return -1; \
+	if (savedata.aero == 1) { \
+		ModifyStyleEx(0, WS_EX_LAYERED); \
+		SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY); \
+		m_brDlg.CreateSolidBrush(RGB(255, 0, 0)); \
+	} \
+Games = NULL; \
+	SetTimer(500, 100, NULL); \
     m_bMoving1 = 0; \
 	return 0; \
 } \
 void xxx::OnMoving(UINT fwSide, LPRECT pRect) \
 { \
 	CCustomBlurDialogBase::OnMoving(fwSide, pRect); \
+	CRect r; \
+	GetWindowRect(&r); \
+	if (Games) \
+		Games->MoveWindow(&r); \
 } \
 void xxx::OnLButtonDown(UINT nFlags, CPoint point) \
 { \
@@ -302,23 +338,64 @@ void xxx::OnMouseMove(UINT nFlags, CPoint point) \
 		SetWindowPos(NULL, rect.left, rect.top, \
 			rect.right - rect.left, rect.bottom - rect.top, \
 			SWP_NOOWNERZORDER); \
+		if (Games) \
+			Games->MoveWindow(&rect); \
 	} \
 	CCustomBlurDialogBase::OnMouseMove(nFlags, point); \
 } \
 HBRUSH xxx::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor) \
 { \
-	return CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor); \
+	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor); \
+	if (savedata.aero == 1) { \
+		if (nCtlColor == CTLCOLOR_DLG) \
+		{ \
+			return m_brDlg; \
+		} \
+		if (nCtlColor == CTLCOLOR_STATIC) \
+		{ \
+			SetBkMode(pDC->m_hDC, TRANSPARENT); \
+			return m_brDlg; \
+		} \
+	} \
+	return hbr; \
 } \
 void xxx::OnTimer(UINT_PTR nIDEvent) \
 { \
+    if(nIDEvent==500 && savedata.aero){ \
+	KillTimer(500); \
+    if(ip1 != 0) return; \
+    if(Games == NULL){ \
+	Games = new CImageBase; \
+	Games->oya = this; \
+	Games->Create(this); \
+     } \
+	CRect r; \
+	GetWindowRect(&r); \
+	if (Games) \
+		Games->MoveWindow(&r); \
+	if (Games) \
+		::SetWindowPos(Games->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); \
+	::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); \
+    ip1 = 3; \
+    SetTimer(501,10,NULL); \
+    } \
+    if(nIDEvent==501 && savedata.aero){ \
+        ip1--; \
+        if(ip1 <= 0){ ip1 = 0; KillTimer(501); }\
+    } \
 	CCustomBlurDialogBase::OnTimer(nIDEvent); \
 } \
 BOOL xxx::DestroyWindow() \
 { \
+	if (Games){ \
+		delete Games; \
+    } \
+    Games = NULL; \
 	return CCustomBlurDialogBase::DestroyWindow(); \
 } \
 BOOL xxx::OnNcActivate(BOOL bActive) \
 { \
+	SetTimer(500, 30, NULL); \
 	return CCustomBlurDialogBase::OnNcActivate(bActive); \
 } 
 

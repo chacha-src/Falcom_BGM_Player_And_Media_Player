@@ -1,6 +1,5 @@
 ﻿#include "stdafx.h"
 #include "CCustomControl.h"
-#include "BtnST.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -13,228 +12,35 @@
 #endif
 
 #if CCUSTOM_AERO_SUPPORT
-static UINT32 CCC_RgbMask(COLORREF clr);
-static BYTE CCC_ClampDwmGlassAlpha(BYTE a);
-static COLORREF CCC_DarkenGlassTint(COLORREF clr, BYTE rawAlpha);
-static void CCC_InstallComboDropListOpaqueFix(HWND hwndCombo);
-static void CCC_ReleaseComboDropListOpaqueFix(HWND hwndCombo);
-static void CCC_InstallComboDropListGlassFix(HWND hwndCombo);
-static void CCC_ReleaseComboDropListGlassFix(HWND hwndCombo);
-static void CCC_InstallComboDropListFix(HWND hwndCombo);
-static void CCC_ReleaseComboDropListFix(HWND hwndCombo);
-static BOOL CCC_IsComboDropGlassInstalled(HWND hwndCombo);
-static void CCC_RepaintComboDropGlass(HWND hwndCombo);
-static BOOL CCC_IsDescendantOf(HWND hAncestor, HWND hWnd);
-static void CCC_InvalidateAllButtonSTOnDialog(HWND hDlg);
-static void CCC_RepaintGlassHwnd(HWND hWnd);
-static void CCC_BlitTransparentChroma(HDC hdcDest, int x, int y, int w, int h,
-    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, COLORREF clrGlassBase);
-
-static BOOL CCC_UseListCtrlRowGlass(HWND hWnd)
-{
-    if (!hWnd || !CCC_IsAeroEnabled() || !CCC_IsWin11() || !CCC_IsBlurDialogChild(hWnd))
-        return FALSE;
-    CWnd* pw = CWnd::FromHandlePermanent(hWnd);
-    return pw && dynamic_cast<CCustomListCtrl*>(pw) != NULL;
-}
-
-static BOOL CCC_UseComboGlass(HWND hWnd)
-{
-    if (!hWnd || !CCC_IsAeroEnabled() || !CCC_IsWin11() || !CCC_IsBlurDialogChild(hWnd))
-        return FALSE;
-    CWnd* pw = CWnd::FromHandlePermanent(hWnd);
-    return pw && dynamic_cast<CCustomComboBox*>(pw) != NULL;
-}
-
-static CString CCC_FetchListSubitemText(HWND hList, int ni, int ns)
-{
-    if (!hList || ni < 0 || ns < 0) return CString();
-    TCHAR buf[1024];
-    buf[0] = _T('\0');
-    LVITEM lvi = {};
-    lvi.iSubItem = ns;
-    lvi.pszText = buf;
-    lvi.cchTextMax = (int)_countof(buf);
-    ::SendMessage(hList, LVM_GETITEMTEXT, (WPARAM)ni, (LPARAM)&lvi);
-    return buf;
-}
-
-static int CCC_ListHotItemFromPoint(CListCtrl* pList, CPoint ptClient)
-{
-    if (!pList || !pList->GetSafeHwnd()) return -1;
-    LVHITTESTINFO h = {};
-    h.pt = ptClient;
-    const int flags = pList->SubItemHitTest(&h);
-    if (flags & (LVHT_ONITEM | LVHT_ONITEMICON | LVHT_ONITEMLABEL | LVHT_ONITEMSTATEICON))
-        return h.iItem;
-    return -1;
-}
-
-static COLORREF CCC_ListZebraBg(int ni)
-{
-    return (ni % 2 == 0) ? COLOR_LIST_BG : COLOR_LIST_ZEBRA_ALT;
-}
-
-static COLORREF CCC_ListGlassRowBg(int ni, BOOL bS, BOOL bH)
-{
-    if (bS) return COLOR_SEL_BG;
-    if (bH) return COLOR_LIST_HOVER;
-    return CCC_ListZebraBg(ni);
-}
-
-static BYTE CCC_ListGlassRowAlpha(int ni, BOOL bS, BOOL bH)
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (bS) return CCC_ScaleGlassAlpha((BYTE)200);
-    if (bH) return CCC_ScaleGlassAlpha((BYTE)215);
-    return CCC_ScaleGlassAlpha((ni % 2 == 0) ? (BYTE)200 : (BYTE)220);
-#else
-    if (bS) return (BYTE)200;
-    if (bH) return (BYTE)215;
-    return (ni % 2 == 0) ? (BYTE)200 : (BYTE)220;
-#endif
-}
-
-static COLORREF CCC_ComboGlassRowBg(int ni, BOOL bS, BOOL bH, BOOL bD, COLORREF clrDisabledBg)
-{
-    if (bD) return clrDisabledBg;
-    if (bS) return COLOR_SEL_BG;
-    if (bH) return RGB(255, 185, 130);
-    return (ni % 2 == 0) ? COLOR_COMBO_BG : RGB(255, 232, 220);
-}
-
-static BYTE CCC_ComboGlassRowAlpha(int ni, BOOL bS, BOOL bH, BOOL bD, BOOL bNoScroll)
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (bS) return CCC_ScaleGlassAlpha((BYTE)180);
-    if (bD) return CCC_ScaleGlassAlpha((BYTE)200);
-    if (bH) return CCC_ScaleGlassAlpha((BYTE)195);
-    if (bNoScroll)
-        return CCC_ScaleGlassAlpha((ni % 2 == 0) ? (BYTE)178 : (BYTE)210);
-    return CCC_ScaleGlassAlpha((ni % 2 == 0) ? (BYTE)145 : (BYTE)178);
-#else
-    if (bS) return (BYTE)180;
-    if (bD) return (BYTE)200;
-    if (bH) return (BYTE)195;
-    if (bNoScroll)
-        return (ni % 2 == 0) ? (BYTE)178 : (BYTE)210;
-    return (ni % 2 == 0) ? (BYTE)145 : (BYTE)178;
-#endif
-}
-
-static void CCC_LbVisibleRange(HWND hList, const CRect& rcClient, int& nFirst, int& nLast)
-{
-    nFirst = 0;
-    nLast = -1;
-    if (!hList || !::IsWindow(hList)) return;
-    const int nCount = (int)::SendMessage(hList, LB_GETCOUNT, 0, 0);
-    if (nCount <= 0) return;
-    nFirst = (int)::SendMessage(hList, LB_GETTOPINDEX, 0, 0);
-    if (nFirst < 0) nFirst = 0;
-    for (int i = nFirst; i < nCount; ++i)
-    {
-        RECT rr = {};
-        if (!::SendMessage(hList, LB_GETITEMRECT, i, (LPARAM)&rr))
-            break;
-        if (rr.top >= rcClient.bottom)
-            break;
-        nLast = i;
-    }
-}
-
-static BOOL CCC_ComboDropListNoScroll(HWND hwndList)
-{
-    if (!hwndList || !::IsWindow(hwndList)) return FALSE;
-    CRect rc;
-    ::GetClientRect(hwndList, &rc);
-    const int nCount = (int)::SendMessage(hwndList, LB_GETCOUNT, 0, 0);
-    if (nCount <= 0) return TRUE;
-    RECT rrLast = {};
-    if (!::SendMessage(hwndList, LB_GETITEMRECT, nCount - 1, (LPARAM)&rrLast))
-        return FALSE;
-    return rrLast.bottom <= rc.bottom;
-}
-
-static BOOL CCC_UseListBoxRowGlass(HWND hWnd)
-{
-    if (!hWnd || !CCC_IsAeroEnabled() || !CCC_IsWin11() || !CCC_IsBlurDialogChild(hWnd))
-        return FALSE;
-    CWnd* pw = CWnd::FromHandlePermanent(hWnd);
-    return pw && dynamic_cast<CCustomListBox*>(pw) != NULL;
-}
-
-static int CCC_ListBoxHotItemFromPoint(CListBox* pList, CPoint ptClient)
-{
-    if (!pList || !pList->GetSafeHwnd()) return -1;
-    BOOL bOutside = FALSE;
-    const int idx = pList->ItemFromPoint(ptClient, bOutside);
-    if (bOutside || idx < 0 || idx >= pList->GetCount()) return -1;
-    return idx;
-}
-
-
-static void CCC_SetDibAlphaGlassRect(void* pBits, int dibW, int dibH, const RECT& rc, COLORREF clrKey, BYTE alpha)
-{
-    if (!pBits || dibW <= 0 || dibH <= 0) return;
-    const UINT32 key = CCC_RgbMask(clrKey);
-    const UINT32 a = ((UINT32)CCC_ClampDwmGlassAlpha(alpha)) << 24;
-    UINT32* px = (UINT32*)pBits;
-    const int y0 = (std::max)(0, (int)rc.top);
-    const int y1 = (std::min)(dibH, (int)rc.bottom);
-    const int x0 = (std::max)(0, (int)rc.left);
-    const int x1 = (std::min)(dibW, (int)rc.right);
-    for (int y = y0; y < y1; ++y)
-    {
-        UINT32* pRow = px + y * dibW;
-        for (int x = x0; x < x1; ++x)
-        {
-            const UINT32 rgb = pRow[x] & 0x00FFFFFFu;
-            if (rgb != key)
-                pRow[x] = rgb | a;
-        }
-    }
-}
-
 BOOL CCC_IsBlurDialogChild(HWND hWnd)
 {
     for (HWND h = hWnd; h; h = ::GetParent(h))
     {
         CWnd* pw = CWnd::FromHandlePermanent(h);
         if (!pw) continue;
-        if (dynamic_cast<CCustomDialog*>(pw) || dynamic_cast<CCustomDialogEx*>(pw))
-            return TRUE;
+        if (auto* p = dynamic_cast<CCustomDialog*>(pw)) return p->IsAeroEnabled();
+        if (auto* p = dynamic_cast<CCustomDialogEx*>(pw)) return p->IsAeroEnabled();
     }
     return FALSE;
 }
 
-// ぼかしダイアログ上: 前景だけ描き、未描画部は ms2 連動ガラス（Win11）／クロマ透過+Win10 LWA。
-// リスト／コンボは別ガラス DIB。ボタン／エディットは不透明 fixer。
+// ぼかしダイアログ上ではラベル・スライダー等は透過、ボタン・リスト等は不透明
 static BOOL CCC_UseTransparentPaint(HWND hWnd, BOOL bAeroMode)
 {
     if (CCC_IsBlurDialogChild(hWnd) && CCC_IsAeroEnabled()) return TRUE;
     return bAeroMode && !CCC_IsBlurDialogChild(hWnd);
 }
 
-static BOOL CCC_UseBlurChildGlassPaint(HWND hWnd)
-{
-    if (!hWnd || !CCC_IsAeroEnabled() || !CCC_IsWin11() || !CCC_IsBlurDialogChild(hWnd))
-        return FALSE;
-    CWnd* pw = CWnd::FromHandlePermanent(hWnd);
-    return pw && dynamic_cast<CButtonST*>(pw) != NULL;
-}
-
-static BOOL CCC_UseEditGlass(HWND hWnd)
-{
-    if (!hWnd || !CCC_IsAeroEnabled() || !CCC_IsWin11() || !CCC_IsBlurDialogChild(hWnd))
-        return FALSE;
-    CWnd* pw = CWnd::FromHandlePermanent(hWnd);
-    return pw && dynamic_cast<CCustomEdit*>(pw) != NULL;
-}
-
 void CCC_InvalidateBlurParent(HWND hWnd, BOOL bAeroMode)
 {
-    UNREFERENCED_PARAMETER(hWnd);
-    UNREFERENCED_PARAMETER(bAeroMode);
+    if (!CCC_UseTransparentPaint(hWnd, bAeroMode)) return;
+    HWND hParent = ::GetParent(hWnd);
+    if (!hParent || !::IsWindow(hParent)) return;
+    RECT rc = {};
+    ::GetWindowRect(hWnd, &rc);
+    ::MapWindowPoints(NULL, hParent, (LPPOINT)&rc, 2);
+    ::InflateRect(&rc, 6, 6);
+    ::InvalidateRect(hParent, &rc, FALSE);
 }
 
 void CCC_RefreshDialogDwmBlur(HWND hWnd)
@@ -247,30 +53,6 @@ void CCC_RefreshDialogDwmBlur(HWND hWnd)
     const MARGINS margins = { -1, -1, -1, -1 };
     ::DwmExtendFrameIntoClientArea(hWnd, &margins);
 }
-
-void CCC_RefreshAeroWindowLayer(HWND hWnd)
-{
-    if (!hWnd || !::IsWindow(hWnd) || !CCC_IsAeroEnabled()) return;
-
-    const DWORD build = CCC_GetWindowsBuildNumber();
-    if (build >= 22000)
-    {
-        CCC_RefreshDialogDwmBlur(hWnd);
-        return;
-    }
-    if (build < 10240) return;
-
-    CCC_ApplyAeroLayeredAlpha(hWnd);
-
-    DWM_BLURBEHIND bb = {};
-    bb.dwFlags = DWM_BB_ENABLE;
-    bb.fEnable = TRUE;
-    ::DwmEnableBlurBehindWindow(hWnd, &bb);
-}
-
-static void CCC_PaintDialogGlassRect(HDC hdcDest, const RECT& rect);
-static BOOL CCC_AlphaBlendChromaGlassToHDC(HDC hdcDest, int x, int y, int destW, int destH,
-    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, BYTE contentAlpha);
 
 static void CCC_TransparentBltClearDest(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
@@ -346,45 +128,6 @@ static void CCC_InitBufferedPaintTransparent(HPAINTBUFFER hBP, int w, int h)
     }
 }
 
-// リスト PaintGlassClient と同型: Win11 DWM へアルファをコミットする
-static thread_local int s_cccGlassPaintDepth = 0;
-
-static BOOL CCC_CommitGlassDibLayers(CDC& dc, const CRect& rcC, int w, int h,
-    HDC hdcGlass, HDC hdcFg, BOOL bHasFg, BOOL bToPaintBuffer)
-{
-    if (w <= 0 || h <= 0 || !hdcGlass) return FALSE;
-
-    const BLENDFUNCTION bfGlass = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    const BLENDFUNCTION bfFg = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-
-    auto BlendLayers = [&](HDC hdcDest) -> BOOL {
-        if (!::GdiAlphaBlend(hdcDest, 0, 0, w, h, hdcGlass, 0, 0, w, h, bfGlass))
-            return FALSE;
-        if (bHasFg && hdcFg)
-            return ::GdiAlphaBlend(hdcDest, 0, 0, w, h, hdcFg, 0, 0, w, h, bfFg) != FALSE;
-        return TRUE;
-    };
-
-    if (bToPaintBuffer)
-        return BlendLayers(dc.GetSafeHdc());
-
-    if (s_cccGlassPaintDepth > 0)
-        return BlendLayers(dc.GetSafeHdc());
-
-    struct CCC_GlassPaintGuard { int& d; CCC_GlassPaintGuard(int& x) : d(x) { ++d; } ~CCC_GlassPaintGuard() { --d; } };
-    CCC_GlassPaintGuard guard(s_cccGlassPaintDepth);
-
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &rcC, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP)
-        return BlendLayers(dc.GetSafeHdc());
-    CCC_InitBufferedPaintTransparent(hBP, w, h);
-    const BOOL ok = BlendLayers(hdcBuf);
-    ::EndBufferedPaint(hBP, TRUE);
-    return ok;
-}
-
 static UINT32 CCC_RgbMask(COLORREF clr)
 {
     return (UINT32)(GetRValue(clr) << 16) | (UINT32)(GetGValue(clr) << 8) | GetBValue(clr);
@@ -401,239 +144,6 @@ static void CCC_SetDibAlphaFromChroma(void* pBits, int w, int h, COLORREF clrKey
         const UINT32 rgb = px[i] & 0x00FFFFFFu;
         px[i] = (rgb == key) ? 0u : (rgb | 0xFF000000u);
     }
-}
-
-// Win11 DWM: アルファ>=128 の均一オーバーレイは背面ぼかしが打ち切られる（スライダー25付近で消失）
-static BYTE CCC_ClampDwmGlassAlpha(BYTE a)
-{
-    return (a > 126) ? (BYTE)126 : a;
-}
-
-static COLORREF CCC_DarkenGlassTint(COLORREF clr, BYTE rawAlpha)
-{
-    if (rawAlpha <= 127) return clr;
-    const int boost = (int)rawAlpha - 127;
-    const int mul = 255 - boost * 128 / 103;
-    return RGB(GetRValue(clr) * mul / 255, GetGValue(clr) * mul / 255, GetBValue(clr) * mul / 255);
-}
-
-static void CCC_SetDibAlphaGlass(void* pBits, int w, int h, COLORREF clrKey, BYTE contentAlpha)
-{
-    if (!pBits || w <= 0 || h <= 0) return;
-    const UINT32 key = CCC_RgbMask(clrKey);
-    const UINT32 a = ((UINT32)CCC_ClampDwmGlassAlpha(contentAlpha)) << 24;
-    UINT32* px = (UINT32*)pBits;
-    const int n = w * h;
-    for (int i = 0; i < n; ++i)
-    {
-        const UINT32 rgb = px[i] & 0x00FFFFFFu;
-        px[i] = (rgb == key) ? 0u : (rgb | a);
-    }
-}
-
-static void CCC_SetDibChromaTransparent(void* pBits, int w, int h, COLORREF clrKey)
-{
-    if (!pBits || w <= 0 || h <= 0) return;
-    const UINT32 key = CCC_RgbMask(clrKey);
-    UINT32* px = (UINT32*)pBits;
-    const int n = w * h;
-    for (int i = 0; i < n; ++i)
-    {
-        if ((px[i] & 0x00FFFFFFu) == key)
-            px[i] = 0u;
-    }
-}
-
-static HWND CCC_FindBlurDialogHwnd(HWND hWnd)
-{
-    for (HWND h = hWnd; h; h = ::GetParent(h))
-    {
-        CWnd* pw = CWnd::FromHandlePermanent(h);
-        if (!pw) continue;
-        if (dynamic_cast<CCustomDialog*>(pw) || dynamic_cast<CCustomDialogEx*>(pw))
-            return h;
-    }
-    return NULL;
-}
-
-static void CCC_ApplyComboDropListDwm(HWND hwndCombo, HWND hwndList)
-{
-    if (!hwndCombo || !hwndList || !::IsWindow(hwndList)) return;
-    const MARGINS margins = { -1, -1, -1, -1 };
-    ::DwmExtendFrameIntoClientArea(hwndList, &margins);
-    const int backdropType = 3;
-    ::DwmSetWindowAttribute(hwndList, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
-    UNREFERENCED_PARAMETER(hwndCombo);
-}
-
-// コンボのドロップダウンは別 HWND のポップアップのため、背面のぼかしを親ダイアログから転写する
-static void CCC_BlitDialogBackdropUnderPopup(HWND hwndCombo, HWND hwndPopup, HDC hdcDest, int destW, int destH)
-{
-    if (!hwndCombo || !hwndPopup || !hdcDest || destW <= 0 || destH <= 0) return;
-    HWND hDlg = CCC_FindBlurDialogHwnd(hwndCombo);
-    if (!hDlg || !::IsWindow(hDlg)) return;
-
-    CCC_RefreshDialogDwmBlur(hDlg);
-
-    CRect rcDlg;
-    ::GetClientRect(hDlg, &rcDlg);
-    if (rcDlg.IsRectEmpty()) return;
-
-    CRect rcPop;
-    ::GetClientRect(hwndPopup, &rcPop);
-    ::MapWindowPoints(hwndPopup, HWND_DESKTOP, (LPPOINT)&rcPop, 2);
-    CPoint pt(rcPop.left, rcPop.top);
-    ::ScreenToClient(hDlg, &pt);
-
-    const int srcW = min(destW, (int)rcDlg.right - pt.x);
-    const int srcH = min(destH, (int)rcDlg.bottom - pt.y);
-    if (srcW <= 0 || srcH <= 0) return;
-
-    CDC dcDest;
-    dcDest.Attach(hdcDest);
-    CDC dcCap;
-    dcCap.CreateCompatibleDC(&dcDest);
-    CBitmap bmpCap;
-    bmpCap.CreateCompatibleBitmap(&dcDest, rcDlg.Width(), rcDlg.Height());
-    CBitmap* obCap = dcCap.SelectObject(&bmpCap);
-    dcCap.FillSolidRect(0, 0, rcDlg.Width(), rcDlg.Height(), RGB(0, 0, 0));
-    if (!::PrintWindow(hDlg, dcCap.GetSafeHdc(), PW_CLIENTONLY))
-        ::SendMessage(hDlg, WM_PRINT, (WPARAM)dcCap.GetSafeHdc(), PRF_CLIENT | PRF_ERASEBKGND);
-    dcDest.BitBlt(0, 0, srcW, srcH, &dcCap, pt.x, pt.y, SRCCOPY);
-    dcCap.SelectObject(obCap);
-    dcDest.Detach();
-}
-
-struct CCC_ComboDropBackdropCache
-{
-    HWND hwndList;
-    CSize popupSize;
-    CBitmap bmp;
-    BOOL bValid;
-
-    CCC_ComboDropBackdropCache() : hwndList(NULL), bValid(FALSE) {}
-};
-
-static CCC_ComboDropBackdropCache g_comboDropBackdrop;
-
-static void CCC_ForcePaintAllButtonSTOnDialog(HWND hDlg);
-static void CCC_ForcePaintGlassFieldsOnDialog(HWND hDlg);
-static void CCC_InstallButtonSTGlassFixersRecursive(HWND hParent);
-static void CCC_InstallEditComboGlassFixersRecursive(HWND hParent);
-static void CCC_ReinstallBlurGlassFixersOnDialog(HWND hDlg);
-static void CCC_RepaintGlassHwnd(HWND hWnd);
-
-static const UINT_PTR kComboDropBackdropWarmTimerId = 0xCB02;
-
-static void CCC_InvalidateComboDropBackdrop(HWND hwndList)
-{
-    if (hwndList && g_comboDropBackdrop.hwndList != hwndList)
-        return;
-    g_comboDropBackdrop.bValid = FALSE;
-    g_comboDropBackdrop.hwndList = NULL;
-    if (g_comboDropBackdrop.bmp.GetSafeHandle())
-        g_comboDropBackdrop.bmp.DeleteObject();
-}
-
-static BOOL CCC_GetComboDropBackdropOffset(HWND hwndCombo, HWND hwndPopup, int destW, int destH,
-    HWND& hDlg, CRect& rcDlg, CPoint& ptDlg, int& srcW, int& srcH)
-{
-    hDlg = NULL;
-    ptDlg = CPoint(0, 0);
-    srcW = srcH = 0;
-    if (!hwndCombo || !hwndPopup || destW <= 0 || destH <= 0) return FALSE;
-    if (!::IsWindowVisible(hwndPopup)) return FALSE;
-
-    hDlg = CCC_FindBlurDialogHwnd(hwndCombo);
-    if (!hDlg || !::IsWindow(hDlg)) return FALSE;
-
-    ::GetClientRect(hDlg, &rcDlg);
-    if (rcDlg.IsRectEmpty()) return FALSE;
-
-    CRect rcPop;
-    ::GetWindowRect(hwndPopup, &rcPop);
-    if (rcPop.IsRectEmpty()) return FALSE;
-
-    ptDlg = CPoint(rcPop.left, rcPop.top);
-    ::ScreenToClient(hDlg, &ptDlg);
-    srcW = min(destW, (int)rcDlg.right - ptDlg.x);
-    srcH = min(destH, (int)rcDlg.bottom - ptDlg.y);
-    return srcW > 0 && srcH > 0;
-}
-
-static void CCC_ScheduleComboDropBackdropWarm(HWND hwndList)
-{
-    if (!hwndList || !::IsWindow(hwndList)) return;
-    ::SetTimer(hwndList, kComboDropBackdropWarmTimerId, 16, NULL);
-}
-
-static BOOL CCC_CaptureComboDropBackdrop(HWND hwndCombo, HWND hwndPopup, HDC hdcRef, int destW, int destH)
-{
-    if (!hwndCombo || !hwndPopup || !hdcRef || destW <= 0 || destH <= 0) return FALSE;
-
-    HWND hDlg = NULL;
-    CRect rcDlg;
-    CPoint ptDlg;
-    int srcW = 0, srcH = 0;
-    if (!CCC_GetComboDropBackdropOffset(hwndCombo, hwndPopup, destW, destH, hDlg, rcDlg, ptDlg, srcW, srcH))
-        return FALSE;
-
-    CDC dcCap, dcCache;
-    dcCap.CreateCompatibleDC(CDC::FromHandle(hdcRef));
-    dcCache.CreateCompatibleDC(CDC::FromHandle(hdcRef));
-    CBitmap bmpDlg, bmpSlice;
-    bmpDlg.CreateCompatibleBitmap(CDC::FromHandle(hdcRef), rcDlg.Width(), rcDlg.Height());
-    bmpSlice.CreateCompatibleBitmap(CDC::FromHandle(hdcRef), destW, destH);
-    CBitmap* obCap = dcCap.SelectObject(&bmpDlg);
-    dcCap.FillSolidRect(0, 0, rcDlg.Width(), rcDlg.Height(), RGB(0, 0, 0));
-    if (!::PrintWindow(hDlg, dcCap.GetSafeHdc(), PW_CLIENTONLY))
-        ::SendMessage(hDlg, WM_PRINT, (WPARAM)dcCap.GetSafeHdc(), PRF_CLIENT | PRF_ERASEBKGND);
-    CBitmap* obSlice = dcCache.SelectObject(&bmpSlice);
-    dcCache.BitBlt(0, 0, destW, destH, &dcCap, ptDlg.x, ptDlg.y, SRCCOPY);
-    dcCap.SelectObject(obCap);
-    dcCache.SelectObject(obSlice);
-
-    g_comboDropBackdrop.bValid = FALSE;
-    if (g_comboDropBackdrop.bmp.GetSafeHandle())
-        g_comboDropBackdrop.bmp.DeleteObject();
-    if (!g_comboDropBackdrop.bmp.CreateCompatibleBitmap(CDC::FromHandle(hdcRef), destW, destH))
-        return FALSE;
-
-    CDC dcStore;
-    dcStore.CreateCompatibleDC(CDC::FromHandle(hdcRef));
-    CBitmap* obStore = dcStore.SelectObject(&g_comboDropBackdrop.bmp);
-    dcStore.BitBlt(0, 0, destW, destH, &dcCache, 0, 0, SRCCOPY);
-    dcStore.SelectObject(obStore);
-    g_comboDropBackdrop.hwndList = hwndPopup;
-    g_comboDropBackdrop.popupSize = CSize(destW, destH);
-    g_comboDropBackdrop.bValid = TRUE;
-    CCC_ForcePaintAllButtonSTOnDialog(hDlg);
-    return TRUE;
-}
-
-static BOOL CCC_BlitComboDropBackdropCached(HWND hwndCombo, HWND hwndPopup, HDC hdcDest, int destW, int destH)
-{
-    if (!hwndCombo || !hwndPopup || !hdcDest || destW <= 0 || destH <= 0) return FALSE;
-
-    const BOOL bCacheHit = g_comboDropBackdrop.bValid && g_comboDropBackdrop.hwndList == hwndPopup
-        && g_comboDropBackdrop.popupSize.cx == destW && g_comboDropBackdrop.popupSize.cy == destH
-        && g_comboDropBackdrop.bmp.GetSafeHandle();
-
-    if (!bCacheHit && !CCC_CaptureComboDropBackdrop(hwndCombo, hwndPopup, hdcDest, destW, destH))
-        return FALSE;
-
-    if (!g_comboDropBackdrop.bValid || !g_comboDropBackdrop.bmp.GetSafeHandle())
-        return FALSE;
-
-    CDC dcDest;
-    dcDest.Attach(hdcDest);
-    CDC dcMem;
-    dcMem.CreateCompatibleDC(&dcDest);
-    CBitmap* ob = dcMem.SelectObject(&g_comboDropBackdrop.bmp);
-    dcDest.BitBlt(0, 0, destW, destH, &dcMem, 0, 0, SRCCOPY);
-    dcMem.SelectObject(ob);
-    dcDest.Detach();
-    return TRUE;
 }
 
 static HBITMAP CCC_CreateAlphaDib32(HDC hdcRef, int w, int h, void** ppBits)
@@ -681,100 +191,26 @@ static BOOL CCC_BlitToRectChromaNoFlicker(HDC hdcDest, const RECT& rect, HDC hdc
         dcDib.BitBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, SRCCOPY);
     CCC_SetDibAlphaFromChroma(pBits, destW, destH, clrKey);
 
-    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     HDC hdcBuf = NULL;
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    BOOL bOk = FALSE;
-    if (hdcBuf && hBP)
+    if (!hdcBuf || !hBP)
     {
-        CCC_InitBufferedPaintTransparent(hBP, destW, destH);
-        bOk = ::GdiAlphaBlend(hdcBuf, 0, 0, destW, destH, dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
-        ::EndBufferedPaint(hBP, TRUE);
+        ::SelectObject(dcDib.GetSafeHdc(), hOld);
+        ::DeleteObject(hDib);
+        dcSrc.Detach();
+        return FALSE;
     }
-    else
-    {
-        bOk = ::GdiAlphaBlend(hdcDest, rect.left, rect.top, destW, destH,
-            dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
-    }
+
+    CCC_InitBufferedPaintTransparent(hBP, destW, destH);
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    ::GdiAlphaBlend(hdcBuf, 0, 0, destW, destH, dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
+    ::EndBufferedPaint(hBP, TRUE);
 
     ::SelectObject(dcDib.GetSafeHdc(), hOld);
     ::DeleteObject(hDib);
     dcSrc.Detach();
-    return bOk;
-}
-
-static BOOL CCC_BlitToRectAeroChildGlass(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
-    int destW, int destH, int srcW, int srcH, COLORREF clrKey, BOOL bStretch, COLORREF clrGlassBase = COLOR_DIALOG_BG)
-{
-    if (destW <= 0 || destH <= 0) return FALSE;
-
-    void* pBits = nullptr;
-    HBITMAP hDib = CCC_CreateAlphaDib32(hdcDest, destW, destH, &pBits);
-    if (!hDib || !pBits) return FALSE;
-
-    CDC dcDib, dcSrc;
-    dcDib.CreateCompatibleDC(CDC::FromHandle(hdcDest));
-    dcSrc.Attach(hdcSrc);
-    HGDIOBJ hOld = ::SelectObject(dcDib.GetSafeHdc(), hDib);
-    dcDib.FillSolidRect(0, 0, destW, destH, clrKey);
-    dcDib.SetStretchBltMode(COLORONCOLOR);
-    if (bStretch)
-        dcDib.StretchBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
-    else
-        dcDib.BitBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, SRCCOPY);
-    CCC_SetDibAlphaFromChroma(pBits, destW, destH, clrKey);
-
-    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    BOOL bOk = FALSE;
-    if (hdcBuf && hBP)
-    {
-        CCC_InitBufferedPaintTransparent(hBP, destW, destH);
-        CDC memBase;
-        memBase.CreateCompatibleDC(CDC::FromHandle(hdcBuf));
-        CBitmap bmpBase;
-        bmpBase.CreateCompatibleBitmap(CDC::FromHandle(hdcBuf), destW, destH);
-        CBitmap* pOldBase = memBase.SelectObject(&bmpBase);
-        const BYTE rawA = CCC_GetAeroGlassAlpha();
-        memBase.FillSolidRect(0, 0, destW, destH, CCC_DarkenGlassTint(clrGlassBase, rawA));
-        CCC_AlphaBlendChromaGlassToHDC(hdcBuf, 0, 0, destW, destH, memBase.GetSafeHdc(), 0, 0,
-            CCC_AERO_CHROMA_KEY, rawA);
-        memBase.SelectObject(pOldBase);
-        bOk = ::GdiAlphaBlend(hdcBuf, 0, 0, destW, destH, dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
-        ::EndBufferedPaint(hBP, TRUE);
-    }
-    else
-    {
-        CDC memBase;
-        memBase.CreateCompatibleDC(CDC::FromHandle(hdcDest));
-        CBitmap bmpBase;
-        bmpBase.CreateCompatibleBitmap(CDC::FromHandle(hdcDest), destW, destH);
-        CBitmap* pOldBase = memBase.SelectObject(&bmpBase);
-        const BYTE rawA = CCC_GetAeroGlassAlpha();
-        memBase.FillSolidRect(0, 0, destW, destH, CCC_DarkenGlassTint(clrGlassBase, rawA));
-        CCC_AlphaBlendChromaGlassToHDC(hdcDest, rect.left, rect.top, destW, destH, memBase.GetSafeHdc(), 0, 0,
-            CCC_AERO_CHROMA_KEY, rawA);
-        memBase.SelectObject(pOldBase);
-        bOk = ::GdiAlphaBlend(hdcDest, rect.left, rect.top, destW, destH,
-            dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
-    }
-
-    ::SelectObject(dcDib.GetSafeHdc(), hOld);
-    ::DeleteObject(hDib);
-    dcSrc.Detach();
-    return bOk;
-}
-
-void CCC_BlitAeroChildComposite(HDC hdcDest, int x, int y, int w, int h,
-    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, COLORREF clrGlassBase)
-{
-    if (w <= 0 || h <= 0) return;
-    RECT rect = { x, y, x + w, y + h };
-    if (!CCC_BlitToRectAeroChildGlass(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE, clrGlassBase))
-        ::BitBlt(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, SRCCOPY);
+    return TRUE;
 }
 
 void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey)
@@ -793,48 +229,26 @@ void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey)
     }
 }
 
-void CCC_RepaintDialogAeroGaps(HWND hWnd, const RECT* pPreserveRect)
-{
-    if (!hWnd || !::IsWindow(hWnd) || !CCC_IsAeroEnabled()) return;
-    CWnd* pWnd = CWnd::FromHandlePermanent(hWnd);
-    if (!pWnd) return;
-    CClientDC dc(pWnd);
-    CCC_PaintDialogAeroGaps(dc, pWnd, pPreserveRect);
-}
-
 void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect)
 {
     if (!pWnd || !pWnd->GetSafeHwnd()) return;
     CRect clip;
-    if (dc.GetClipBox(&clip) == ERROR || clip.IsRectEmpty())
-    {
-        CRect cr;
-        pWnd->GetClientRect(&cr);
-        clip = cr;
-        dc.SelectClipRgn(NULL);
-    }
+    if (dc.GetClipBox(&clip) == ERROR || clip.IsRectEmpty()) return;
     CCC_SelectClipExcludeChildren(dc, pWnd);
-    // クライアント全体が preserve 内に収まる（格納状態など）と RGN_DIFF が空になり隙間が描画されない
-    CRect crClient;
-    pWnd->GetClientRect(&crClient);
-    const RECT* pEffPreserve = pPreserveRect;
     if (pPreserveRect)
     {
-        CRect rp(pPreserveRect);
-        if (crClient.bottom <= rp.bottom && crClient.right <= rp.right)
-            pEffPreserve = nullptr;
-    }
-    if (pEffPreserve)
-    {
+        CRect preserve(pPreserveRect);
+        if (preserve.PtInRect(clip.TopLeft()) && preserve.PtInRect(clip.BottomRight()))
+            return;
         CRgn rgnClip, rgnPreserve;
         rgnClip.CreateRectRgnIndirect(&clip);
-        rgnPreserve.CreateRectRgnIndirect(pEffPreserve);
+        rgnPreserve.CreateRectRgnIndirect(pPreserveRect);
         rgnClip.CombineRgn(&rgnClip, &rgnPreserve, RGN_DIFF);
         dc.SelectClipRgn(&rgnClip, RGN_AND);
         if (dc.GetClipBox(&clip) == NULLREGION || clip.IsRectEmpty()) return;
     }
     RECT rcClip = clip;
-    CCC_PaintDialogGlassRect(dc.GetSafeHdc(), rcClip);
+    CCC_ClearRectChroma(dc.GetSafeHdc(), rcClip, CCC_AERO_CHROMA_KEY);
 }
 
 void CCC_SelectClipExcludeChildren(CDC& dc, CWnd* pWnd)
@@ -942,108 +356,7 @@ void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc
 {
     RECT rect = { x, y, x + w, y + h };
     if (!CCC_BlitToRectChromaNoFlicker(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE))
-        ::BitBlt(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, SRCCOPY);
-}
-
-static BOOL CCC_BlitToRectChromaGlass(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
-    int destW, int destH, int srcW, int srcH, COLORREF clrKey, BYTE contentAlpha, BOOL bStretch)
-{
-    if (destW <= 0 || destH <= 0) return FALSE;
-
-    void* pBits = nullptr;
-    HBITMAP hDib = CCC_CreateAlphaDib32(hdcDest, destW, destH, &pBits);
-    if (!hDib || !pBits) return FALSE;
-
-    CDC dcDib, dcSrc;
-    dcDib.CreateCompatibleDC(CDC::FromHandle(hdcDest));
-    dcSrc.Attach(hdcSrc);
-    HGDIOBJ hOld = ::SelectObject(dcDib.GetSafeHdc(), hDib);
-    dcDib.FillSolidRect(0, 0, destW, destH, clrKey);
-    dcDib.SetStretchBltMode(COLORONCOLOR);
-    if (bStretch)
-        dcDib.StretchBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
-    else
-        dcDib.BitBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, SRCCOPY);
-    CCC_SetDibAlphaGlass(pBits, destW, destH, clrKey, contentAlpha);
-
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP)
-    {
-        ::SelectObject(dcDib.GetSafeHdc(), hOld);
-        ::DeleteObject(hDib);
-        dcSrc.Detach();
-        return FALSE;
-    }
-
-    CCC_InitBufferedPaintTransparent(hBP, destW, destH);
-    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    ::GdiAlphaBlend(hdcBuf, 0, 0, destW, destH, dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
-    ::EndBufferedPaint(hBP, TRUE);
-
-    ::SelectObject(dcDib.GetSafeHdc(), hOld);
-    ::DeleteObject(hDib);
-    dcSrc.Detach();
-    return TRUE;
-}
-
-static void CCC_BlitChromaGlass(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY,
-    COLORREF clrKey, BYTE contentAlpha)
-{
-    RECT rect = { x, y, x + w, y + h };
-    if (!CCC_BlitToRectChromaGlass(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, contentAlpha, FALSE))
-    {
-        if (!CCC_AlphaBlendChromaGlassToHDC(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey, contentAlpha))
-            ::BitBlt(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, SRCCOPY);
-    }
-}
-
-static void CCC_PaintDialogGlassRect(HDC hdcDest, const RECT& rect)
-{
-    const int w = rect.right - rect.left;
-    const int h = rect.bottom - rect.top;
-    if (!hdcDest || w <= 0 || h <= 0) return;
-
-    CDC memDC;
-    memDC.CreateCompatibleDC(CDC::FromHandle(hdcDest));
-    CBitmap memBmp;
-    memBmp.CreateCompatibleBitmap(CDC::FromHandle(hdcDest), w, h);
-    CBitmap* pOld = memDC.SelectObject(&memBmp);
-    const BYTE rawA = CCC_GetAeroGlassAlpha();
-    const BYTE glassA = CCC_ClampDwmGlassAlpha(rawA);
-    memDC.FillSolidRect(0, 0, w, h, CCC_DarkenGlassTint(COLOR_DIALOG_BG, glassA));
-    CCC_BlitChromaGlass(hdcDest, rect.left, rect.top, w, h, memDC.GetSafeHdc(), 0, 0,
-        CCC_AERO_CHROMA_KEY, glassA);
-    memDC.SelectObject(pOld);
-}
-
-// 既存 HDC（BufferedPaint バッファ等）へ直接アルファ合成。BeginBufferedPaint は呼ばない。
-static BOOL CCC_AlphaBlendChromaGlassToHDC(HDC hdcDest, int x, int y, int destW, int destH,
-    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, BYTE contentAlpha)
-{
-    if (!hdcDest || destW <= 0 || destH <= 0) return FALSE;
-
-    void* pBits = nullptr;
-    HBITMAP hDib = CCC_CreateAlphaDib32(hdcDest, destW, destH, &pBits);
-    if (!hDib || !pBits) return FALSE;
-
-    CDC dcDib, dcSrc;
-    dcDib.CreateCompatibleDC(CDC::FromHandle(hdcDest));
-    dcSrc.Attach(hdcSrc);
-    HGDIOBJ hOld = ::SelectObject(dcDib.GetSafeHdc(), hDib);
-    dcDib.FillSolidRect(0, 0, destW, destH, clrKey);
-    dcDib.SetStretchBltMode(COLORONCOLOR);
-    dcDib.BitBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, SRCCOPY);
-    CCC_SetDibAlphaGlass(pBits, destW, destH, clrKey, contentAlpha);
-
-    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    const BOOL ok = ::GdiAlphaBlend(hdcDest, x, y, destW, destH, dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
-
-    ::SelectObject(dcDib.GetSafeHdc(), hOld);
-    ::DeleteObject(hDib);
-    dcSrc.Detach();
-    return ok;
+        CCC_BlitChroma(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
 }
 
 void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
@@ -1051,108 +364,41 @@ void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int 
     CCC_BlitChromaNoFlicker(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
 }
 
-// Win11: 隙間と同一ガラス下地 + 前景不透明。Win10: クロマ透過 + LWA_ALPHA。
 static void CCC_BlitTransparentChroma(HDC hdcDest, int x, int y, int w, int h,
-    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, COLORREF clrGlassBase = COLOR_DIALOG_BG)
+    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
     if (w <= 0 || h <= 0) return;
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
-        CCC_BlitAeroChildComposite(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey, clrGlassBase);
-    else if (CCC_IsAeroEnabled())
         CCC_BlitChromaNoFlicker(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
     else
         CCC_TransparentBltClearDest(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
-}
-
-// リストと同型: 均一Tintガラス層 + 前景クロマ層 → DWMへコミット
-static BOOL CCC_CommitUniformGlassFromFgMem(CDC& dc, const CRect& rcC, COLORREF clrGlassTint,
-    HDC hdcFgMem, int w, int h, BOOL bToPaintBuffer)
-{
-    if (w <= 0 || h <= 0 || !hdcFgMem) return FALSE;
-
-    const BYTE rawA = CCC_GetAeroGlassAlpha();
-    const BYTE glassA = CCC_ClampDwmGlassAlpha(rawA);
-    void* pGlassBits = nullptr;
-    HBITMAP hGlassDib = CCC_CreateAlphaDib32(dc.GetSafeHdc(), w, h, &pGlassBits);
-    CDC memGlass, memTint;
-    memGlass.CreateCompatibleDC(&dc);
-    memTint.CreateCompatibleDC(&dc);
-    CBitmap bmpTint;
-    bmpTint.CreateCompatibleBitmap(&dc, w, h);
-    HGDIOBJ obGlass = nullptr;
-    if (hGlassDib)
-    {
-        obGlass = ::SelectObject(memGlass.GetSafeHdc(), hGlassDib);
-        memGlass.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-        CBitmap* pOldTint = memTint.SelectObject(&bmpTint);
-        memTint.FillSolidRect(0, 0, w, h, CCC_DarkenGlassTint(clrGlassTint, glassA));
-        CCC_AlphaBlendChromaGlassToHDC(memGlass.GetSafeHdc(), 0, 0, w, h,
-            memTint.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY, glassA);
-        memTint.SelectObject(pOldTint);
-        const RECT rrFull = { 0, 0, w, h };
-        CCC_SetDibAlphaGlassRect(pGlassBits, w, h, rrFull, CCC_AERO_CHROMA_KEY, glassA);
-        CCC_SetDibChromaTransparent(pGlassBits, w, h, CCC_AERO_CHROMA_KEY);
-    }
-
-    void* pFgBits = nullptr;
-    HBITMAP hFgDib = CCC_CreateAlphaDib32(dc.GetSafeHdc(), w, h, &pFgBits);
-    CDC memFgDib;
-    memFgDib.CreateCompatibleDC(&dc);
-    HGDIOBJ obFg = nullptr;
-    if (hFgDib)
-    {
-        obFg = ::SelectObject(memFgDib.GetSafeHdc(), hFgDib);
-        memFgDib.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-        ::BitBlt(memFgDib.GetSafeHdc(), 0, 0, w, h, hdcFgMem, 0, 0, SRCCOPY);
-        CCC_SetDibAlphaFromChroma(pFgBits, w, h, CCC_AERO_CHROMA_KEY);
-    }
-
-    BOOL ok = FALSE;
-    if (hGlassDib)
-        ok = CCC_CommitGlassDibLayers(dc, rcC, w, h, memGlass.GetSafeHdc(), memFgDib.GetSafeHdc(),
-            hFgDib != NULL, bToPaintBuffer);
-    if (!ok)
-        CCC_BlitChromaGlass(dc.GetSafeHdc(), 0, 0, w, h, hdcFgMem, 0, 0, CCC_AERO_CHROMA_KEY, glassA);
-
-    if (obGlass) ::SelectObject(memGlass.GetSafeHdc(), obGlass);
-    if (hGlassDib) ::DeleteObject(hGlassDib);
-    if (obFg) { ::SelectObject(memFgDib.GetSafeHdc(), obFg); ::DeleteObject(hFgDib); }
-    return ok;
 }
 #endif
 // ============================================================================
 // アイコンを透明色を抜いて描画する関数
 // ============================================================================
-static void DrawTransparentIcon(CDC* pDC, CImageList* pIL, int idx, CRect rc, COLORREF mask, COLORREF bgFill = CLR_NONE)
+static void DrawTransparentIcon(CDC * pDC, CImageList * pIL, int idx, CRect rc, COLORREF mask)
 {
-    if (!pIL || idx < 0 || !pDC) return;
+    if (!pIL || idx < 0) return;
 
     IMAGEINFO ii;
     if (!pIL->GetImageInfo(idx, &ii)) return;
 
-    const int w = CRect(ii.rcImage).Width();
-    const int h = CRect(ii.rcImage).Height();
-    if (w <= 0 || h <= 0) return;
+    int w = CRect(ii.rcImage).Width();
+    int h = CRect(ii.rcImage).Height();
 
-    const int x = rc.left + (rc.Width() - w) / 2;
-    const int y = rc.top + (rc.Height() - h) / 2;
-
-    // 不透明 fixer バッファでは転送先を先に不透明単色で埋める（alpha=0 抜け防止）
-    if (bgFill != CLR_NONE)
-        pDC->FillSolidRect(x, y, w, h, bgFill);
-
-    if (pIL->Draw(pDC, idx, CPoint(x, y), ILD_TRANSPARENT))
-        return;
-
-    // ILC_COLOR 向け白キー透過（力業）
     CDC mDC;
-    CBitmap b;
     mDC.CreateCompatibleDC(pDC);
+    CBitmap b;
     b.CreateCompatibleBitmap(pDC, w, h);
     CBitmap* ob = mDC.SelectObject(&b);
+
     mDC.FillSolidRect(0, 0, w, h, mask);
     pIL->Draw(&mDC, idx, CPoint(0, 0), ILD_NORMAL);
-    ::TransparentBlt(pDC->GetSafeHdc(), x, y, w, h, mDC.GetSafeHdc(), 0, 0, w, h, mask);
+
+    ::TransparentBlt(pDC->GetSafeHdc(), rc.left + (rc.Width() - w) / 2, rc.top + (rc.Height() - h) / 2, w, h,
+        mDC.GetSafeHdc(), 0, 0, w, h, mask);
+
     mDC.SelectObject(ob);
     b.DeleteObject();
     mDC.DeleteDC();
@@ -2053,28 +1299,9 @@ static void DrawSmartText2(CDC* pDC, CRect rect, CString str, UINT fmt, BOOL bDi
     ff.DeleteObject();
 }
 
-static COLORREF CCC_BlendOnColor(COLORREF dst, COLORREF src, BYTE srcAlpha)
-{
-    const int sa = (int)srcAlpha;
-    const int da = 255 - sa;
-    const int r = (GetRValue(src) * sa + GetRValue(dst) * da) / 255;
-    const int g = (GetGValue(src) * sa + GetGValue(dst) * da) / 255;
-    const int b = (GetBValue(src) * sa + GetBValue(dst) * da) / 255;
-    return RGB(r, g, b);
-}
-
-static COLORREF CCC_BlendOnBlack(COLORREF clr, BYTE alpha)
-{
-    return CCC_BlendOnColor(RGB(0, 0, 0), clr, alpha);
-}
-
 static void FillRectAlpha(CDC* pDC, const CRect& rc, COLORREF clr, BYTE alpha)
 {
     if (rc.Width() <= 0 || rc.Height() <= 0) return;
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsWin11())
-        alpha = CCC_ClampDwmGlassAlpha(alpha);
-#endif
     CDC mDC;
     CBitmap mB;
     mDC.CreateCompatibleDC(pDC);
@@ -2088,130 +1315,6 @@ static void FillRectAlpha(CDC* pDC, const CRect& rc, COLORREF clr, BYTE alpha)
     mDC.SelectObject(ob);
     mB.DeleteObject();
     mDC.DeleteDC();
-}
-
-#if CCUSTOM_AERO_SUPPORT
-static BOOL CCC_DeferListToOpaquePaint(HWND hWnd)
-{
-    if (!hWnd || !CCC_IsAeroEnabled() || !CCC_IsWin11() || !CCC_IsBlurDialogChild(hWnd))
-        return FALSE;
-    if (CCC_UseListCtrlRowGlass(hWnd) || CCC_UseListBoxRowGlass(hWnd))
-        return FALSE;
-    if (CCC_UseComboGlass(hWnd) || CCC_UseEditGlass(hWnd))
-        return FALSE;
-    return TRUE;
-}
-#endif
-
-static const CCC_RowGlassStyle* CCC_LookupRowStyle(const std::map<int, CCC_RowGlassStyle>& styles, int nRow)
-{
-    std::map<int, CCC_RowGlassStyle>::const_iterator it = styles.find(nRow);
-    if (it == styles.end() || !it->second.bValid)
-        return NULL;
-    return &it->second;
-}
-
-static void CCC_ResolveRowGlassStyle(HWND hWnd, HWND hPaintWnd, BOOL bAeroMode, COLORREF bg, BYTE alpha,
-    BOOL bUnderlayBlack, const CCC_RowGlassStyle* pCustom,
-    COLORREF& drawBg, BYTE& drawAlpha, BOOL& bGlass, BOOL& bBlurChild, BOOL& bLegacyAeroGlass)
-{
-    drawBg = bg;
-    drawAlpha = alpha;
-    bGlass = FALSE;
-    bBlurChild = FALSE;
-    bLegacyAeroGlass = bAeroMode;
-
-#if CCUSTOM_AERO_SUPPORT
-    const BOOL bDialogAero = CCC_IsAeroEnabled();
-    bBlurChild = (hWnd && CCC_IsBlurDialogChild(hWnd));
-    const BOOL bComboDrop = (hPaintWnd && hWnd && hPaintWnd != hWnd);
-    const BOOL bDropdownGlass = bComboDrop && bBlurChild && bDialogAero;
-    bLegacyAeroGlass = bDialogAero && ((bAeroMode && !bBlurChild) || bBlurChild || bDropdownGlass);
-#else
-    UNREFERENCED_PARAMETER(hPaintWnd);
-#endif
-    bGlass = bLegacyAeroGlass;
-
-    if (pCustom && pCustom->bValid)
-    {
-        drawBg = pCustom->clrBg;
-        if (pCustom->nAlpha > 0)
-            drawAlpha = pCustom->nAlpha;
-        if (pCustom->bUseGlass)
-            bGlass = TRUE;
-    }
-
-    UNREFERENCED_PARAMETER(bUnderlayBlack);
-}
-
-static COLORREF CCC_RowSolidFillColor(HWND hWnd, HWND hPaintWnd, BOOL bAeroMode, COLORREF bg, BYTE alpha,
-    BOOL bUnderlayBlack, const CCC_RowGlassStyle* pCustom)
-{
-    COLORREF drawBg;
-    BYTE drawAlpha;
-    BOOL bGlass, bBlurChild, bLegacyAeroGlass;
-    CCC_ResolveRowGlassStyle(hWnd, hPaintWnd, bAeroMode, bg, alpha, bUnderlayBlack, pCustom,
-        drawBg, drawAlpha, bGlass, bBlurChild, bLegacyAeroGlass);
-
-    if (!bGlass)
-        return drawBg;
-#if CCUSTOM_AERO_SUPPORT
-    if (bBlurChild)
-    {
-        // 不透明 fixer 用: 黒ブレンドは意図的な暗化ではないため、元の行色をそのまま使う
-        UNREFERENCED_PARAMETER(bUnderlayBlack);
-        return drawBg;
-    }
-#endif
-    return drawBg;
-}
-
-static void CCC_DrawRowGlassBackground(CDC* pDC, const CRect& r, HWND hWnd, BOOL bAeroMode,
-    COLORREF bg, BYTE alpha, BOOL bUnderlayBlack, const CCC_RowGlassStyle* pCustom, HWND hPaintWnd = NULL)
-{
-    if (!pDC || r.Width() <= 0 || r.Height() <= 0) return;
-    if (!hPaintWnd) hPaintWnd = hWnd;
-
-    COLORREF drawBg;
-    BYTE drawAlpha;
-    BOOL bGlass, bBlurChild, bLegacyAeroGlass;
-    CCC_ResolveRowGlassStyle(hWnd, hPaintWnd, bAeroMode, bg, alpha, bUnderlayBlack, pCustom,
-        drawBg, drawAlpha, bGlass, bBlurChild, bLegacyAeroGlass);
-
-    if (bGlass)
-    {
-#if CCUSTOM_AERO_SUPPORT
-        if (bBlurChild)
-        {
-            if (CCC_UseListCtrlRowGlass(hWnd))
-                FillRectAlpha(pDC, r, drawBg, drawAlpha);
-            else
-            {
-                const COLORREF solid = CCC_RowSolidFillColor(hWnd, hPaintWnd, bAeroMode, bg, alpha, bUnderlayBlack, pCustom);
-                pDC->FillSolidRect(&r, solid);
-            }
-        }
-        else
-#endif
-        {
-            if (bUnderlayBlack && bLegacyAeroGlass)
-                pDC->FillSolidRect(&r, RGB(0, 0, 0));
-            FillRectAlpha(pDC, r, drawBg, drawAlpha);
-        }
-    }
-    else
-        pDC->FillSolidRect(&r, drawBg);
-}
-
-static void CCC_SetRowStyleMap(std::map<int, CCC_RowGlassStyle>& styles, int nRow, COLORREF clrBg, BYTE nAlpha, BOOL bUseGlass)
-{
-    if (nRow < 0) return;
-    CCC_RowGlassStyle s;
-    s.bValid = TRUE;
-    s.clrBg = clrBg;
-    s.nAlpha = nAlpha;
-    s.bUseGlass = bUseGlass;
-    styles[nRow] = s;
 }
 
 // ============================================================================
@@ -2340,12 +1443,6 @@ static HBRUSH DlgOnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC, CBrush& brDlg, BOOL b
         }
         if (nC == CTLCOLOR_EDIT)
         {
-            if (pWnd && CCC_UseEditGlass(pWnd->GetSafeHwnd()))
-            {
-                pDC->SetBkMode(TRANSPARENT);
-                pDC->SetTextColor(COLOR_EDIT_TEXT);
-                return (HBRUSH)GetStockObject(NULL_BRUSH);
-            }
             pDC->SetBkMode(OPAQUE);
             pDC->SetBkColor(COLOR_EDIT_BG);
             pDC->SetTextColor(COLOR_EDIT_TEXT);
@@ -2476,22 +1573,15 @@ void CCustomEdit::PreSubclassWindow()
     pF->GetLogFont(&lf);
     lf.lfWeight = FW_BOLD;
 
-    if (m_fontBold.GetSafeHandle()) m_fontBold.DeleteObject();
+            if (m_fontBold.GetSafeHandle()) m_fontBold.DeleteObject();
     m_fontBold.CreateFontIndirect(&lf);
     CEdit::SetFont(&m_fontBold);
 }
 
 HBRUSH CCustomEdit::CtlColor(CDC* pDC, UINT)
 {
-    pDC->SetTextColor(COLOR_EDIT_TEXT);
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseEditGlass(m_hWnd))
-    {
-        pDC->SetBkMode(TRANSPARENT);
-        return (HBRUSH)::GetStockObject(HOLLOW_BRUSH);
-    }
-#endif
     pDC->SetBkColor(COLOR_EDIT_BG);
+    pDC->SetTextColor(COLOR_EDIT_TEXT);
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
@@ -2503,15 +1593,9 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
     CFont* pFont = GetFont();
     CFont* pOld = pFont ? dc.SelectObject(pFont) : nullptr;
 
-    const BOOL bGlass = CCC_UseEditGlass(m_hWnd);
+    dc.SetBkColor(COLOR_EDIT_BG);
     dc.SetTextColor(COLOR_EDIT_TEXT);
-    if (bGlass)
-        dc.SetBkMode(TRANSPARENT);
-    else
-    {
-        dc.SetBkColor(COLOR_EDIT_BG);
-        dc.SetBkMode(OPAQUE);
-    }
+    dc.SetBkMode(OPAQUE);
 
     const DWORD style = (DWORD)GetStyle();
     UINT fmt = DT_NOPREFIX | DT_END_ELLIPSIS;
@@ -2535,76 +1619,11 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
         dc.SelectObject(pOld);
 }
 
-void CCustomEdit::PaintGlassClient(CDC& dc, BOOL bToPaintBuffer)
-{
-#if CCUSTOM_AERO_SUPPORT
-    CRect rcC;
-    GetClientRect(&rcC);
-    const int w = rcC.Width();
-    const int h = rcC.Height();
-    if (w <= 0 || h <= 0) return;
-
-    CDC memFG;
-    memFG.CreateCompatibleDC(&dc);
-    CBitmap bmpFG;
-    bmpFG.CreateCompatibleBitmap(&dc, w, h);
-    CBitmap* pOldFG = memFG.SelectObject(&bmpFG);
-    memFG.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-    DrawClientText(memFG, rcC);
-
-    CCC_CommitUniformGlassFromFgMem(dc, rcC, COLOR_EDIT_BG, memFG.GetSafeHdc(), w, h, bToPaintBuffer);
-
-    memFG.SelectObject(pOldFG);
-#endif
-}
-
-void CCustomEdit::SyncGlassCaret()
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (!GetSafeHwnd() || !CCC_UseEditGlass(m_hWnd) || !m_bHasFocus)
-        return;
-
-    CString text;
-    GetWindowText(text);
-    int nStart = 0, nEnd = 0;
-    GetSel(nStart, nEnd);
-    const int len = text.GetLength();
-    nStart = max(0, min(nStart, len));
-
-    CClientDC dc(this);
-    CFont* pFont = GetFont();
-    CFont* pOld = pFont ? dc.SelectObject(pFont) : nullptr;
-    TEXTMETRIC tm = {};
-    dc.GetTextMetrics(&tm);
-    CSize sz = dc.GetTextExtent(text.Left(nStart));
-    if (pOld) dc.SelectObject(pOld);
-
-    CRect rc;
-    GetClientRect(&rc);
-    const int caretH = max(12, tm.tmHeight);
-    const int y = rc.top + max(0, (rc.Height() - caretH) / 2);
-    const int x = rc.left + 3 + sz.cx;
-
-    ::HideCaret(m_hWnd);
-    ::DestroyCaret();
-    if (::CreateCaret(m_hWnd, NULL, 2, caretH))
-    {
-        ::SetCaretPos(x, y);
-        ::ShowCaret(m_hWnd);
-    }
-#endif
-}
-
 void CCustomEdit::RepaintClient()
 {
     if (!GetSafeHwnd())
         return;
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseEditGlass(m_hWnd))
-    {
-        CCC_RepaintGlassHwnd(m_hWnd);
-        return;
-    }
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
     {
         ::RedrawWindow(m_hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
@@ -2654,8 +1673,6 @@ void CCustomEdit::ScheduleOpaqueRepaint()
 LRESULT CCustomEdit::OnPostOpaquePaint(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseEditGlass(m_hWnd))
-        return 0;
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
     {
         CClientDC dc(this);
@@ -2668,12 +1685,6 @@ LRESULT CCustomEdit::OnPostOpaquePaint(WPARAM, LPARAM)
 void CCustomEdit::OnPaint()
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseEditGlass(m_hWnd))
-    {
-        CPaintDC dc(this);
-        PaintGlassClient(dc, FALSE);
-        return;
-    }
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
     {
         CPaintDC dc(this);
@@ -2687,11 +1698,6 @@ void CCustomEdit::OnPaint()
 BOOL CCustomEdit::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseEditGlass(m_hWnd))
-    {
-        UNREFERENCED_PARAMETER(pDC);
-        return TRUE;
-    }
     if (CCC_IsAeroEnabled() && CCC_IsWin11() && pDC)
     {
         CRect r;
@@ -2735,21 +1741,11 @@ LRESULT CCustomEdit::OnPrintClient(WPARAM wParam, LPARAM lParam)
     UNREFERENCED_PARAMETER(lParam);
     if (HDC hDC = (HDC)wParam)
     {
-        CDC dc;
-        dc.Attach(hDC);
         CRect r;
         GetClientRect(&r);
-#if CCUSTOM_AERO_SUPPORT
-        if (CCC_UseEditGlass(m_hWnd))
-        {
-            PaintGlassClient(dc, TRUE);
-            dc.Detach();
-            return 1;
-        }
-#endif
-        dc.FillSolidRect(&r, COLOR_EDIT_BG);
-        DrawClientText(dc, r);
-        dc.Detach();
+        CDC* pDC = CDC::FromHandle(hDC);
+        pDC->FillSolidRect(&r, COLOR_EDIT_BG);
+        DrawClientText(*pDC, r);
         return 1;
     }
     return 0;
@@ -2757,14 +1753,6 @@ LRESULT CCustomEdit::OnPrintClient(WPARAM wParam, LPARAM lParam)
 
 void CCustomEdit::OnEnUpdate()
 {
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseEditGlass(m_hWnd))
-    {
-        ::InvalidateRect(m_hWnd, NULL, FALSE);
-        SyncGlassCaret();
-        return;
-    }
-#endif
     ScheduleOpaqueRepaint();
 }
 
@@ -2781,59 +1769,32 @@ void CCustomEdit::OnTimer(UINT_PTR nIDEvent)
 void CCustomEdit::OnShowWindow(BOOL bShow, UINT nStatus)
 {
     CEdit::OnShowWindow(bShow, nStatus);
-#if CCUSTOM_AERO_SUPPORT
     if (bShow)
         RepaintClient();
-#endif
     UNREFERENCED_PARAMETER(nStatus);
 }
 
 void CCustomEdit::OnSetFocus(CWnd* p)
 {
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseEditGlass(m_hWnd))
-    {
-        m_bHasFocus = TRUE;
-        SetWindowPos(NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-        ::InvalidateRect(m_hWnd, NULL, FALSE);
-        SyncGlassCaret();
-        return;
-    }
-#endif
-    m_bHasFocus = TRUE;
     CEdit::OnSetFocus(p);
+    m_bHasFocus = TRUE;
     SetWindowPos(NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-#if CCUSTOM_AERO_SUPPORT
     Invalidate(FALSE);
     ScheduleOpaqueRepaint();
+#if CCUSTOM_AERO_SUPPORT
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
         SetTimer(kEditOpaqueTimerId, 50, NULL);
-#else
-    Invalidate(FALSE);
 #endif
 }
 
 void CCustomEdit::OnKillFocus(CWnd* p)
 {
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseEditGlass(m_hWnd))
-    {
-        m_bHasFocus = FALSE;
-        ::HideCaret(m_hWnd);
-        ::DestroyCaret();
-        SetWindowPos(NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-        ::InvalidateRect(m_hWnd, NULL, FALSE);
-        return;
-    }
-#endif
     CEdit::OnKillFocus(p);
     m_bHasFocus = FALSE;
     KillTimer(kEditOpaqueTimerId);
     SetWindowPos(NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-#if CCUSTOM_AERO_SUPPORT
     Invalidate(FALSE);
     ScheduleOpaqueRepaint();
-#endif
 }
 
 // ============================================================================
@@ -3459,111 +2420,6 @@ CSize CCustomStatic::MeasureSegmentedText(CDC* pDC, const std::vector<TextSegmen
 
 
 // ============================================================================
-// 行スタイル API（ListBox / Combo / ListCtrl 共通）
-// ============================================================================
-const CCC_RowGlassStyle* CCustomListBox::LookupRowStyle(int nRow) const
-{
-    return CCC_LookupRowStyle(m_rowStyles, nRow);
-}
-
-void CCustomListBox::SetRowStyle(int nRow, COLORREF clrBg, BYTE nAlpha, BOOL bUseGlass)
-{
-    CCC_SetRowStyleMap(m_rowStyles, nRow, clrBg, nAlpha, bUseGlass);
-    if (GetSafeHwnd() && nRow >= 0 && nRow < GetCount())
-        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_NOERASE);
-}
-
-void CCustomListBox::ClearRowStyle(int nRow)
-{
-    m_rowStyles.erase(nRow);
-    if (GetSafeHwnd() && nRow >= 0 && nRow < GetCount())
-        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_NOERASE);
-}
-
-void CCustomListBox::ClearAllRowStyles()
-{
-    m_rowStyles.clear();
-    if (GetSafeHwnd()) Invalidate(FALSE);
-}
-
-BOOL CCustomListBox::GetRowStyle(int nRow, CCC_RowGlassStyle* pOut) const
-{
-    if (!pOut) return FALSE;
-    const CCC_RowGlassStyle* p = LookupRowStyle(nRow);
-    if (!p) return FALSE;
-    *pOut = *p;
-    return TRUE;
-}
-
-const CCC_RowGlassStyle* CCustomComboBox::LookupRowStyle(int nRow) const
-{
-    return CCC_LookupRowStyle(m_rowStyles, nRow);
-}
-
-void CCustomComboBox::SetRowStyle(int nRow, COLORREF clrBg, BYTE nAlpha, BOOL bUseGlass)
-{
-    CCC_SetRowStyleMap(m_rowStyles, nRow, clrBg, nAlpha, bUseGlass);
-    if (GetSafeHwnd() && nRow >= 0 && nRow < GetCount())
-        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_NOERASE);
-}
-
-void CCustomComboBox::ClearRowStyle(int nRow)
-{
-    m_rowStyles.erase(nRow);
-    if (GetSafeHwnd() && nRow >= 0 && nRow < GetCount())
-        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_NOERASE);
-}
-
-void CCustomComboBox::ClearAllRowStyles()
-{
-    m_rowStyles.clear();
-    if (GetSafeHwnd()) Invalidate(FALSE);
-}
-
-BOOL CCustomComboBox::GetRowStyle(int nRow, CCC_RowGlassStyle* pOut) const
-{
-    if (!pOut) return FALSE;
-    const CCC_RowGlassStyle* p = LookupRowStyle(nRow);
-    if (!p) return FALSE;
-    *pOut = *p;
-    return TRUE;
-}
-
-const CCC_RowGlassStyle* CCustomListCtrl::LookupRowStyle(int nRow) const
-{
-    return CCC_LookupRowStyle(m_rowStyles, nRow);
-}
-
-void CCustomListCtrl::SetRowStyle(int nRow, COLORREF clrBg, BYTE nAlpha, BOOL bUseGlass)
-{
-    CCC_SetRowStyleMap(m_rowStyles, nRow, clrBg, nAlpha, bUseGlass);
-    if (GetSafeHwnd() && nRow >= 0 && nRow < GetItemCount())
-        RedrawItems(nRow, nRow);
-}
-
-void CCustomListCtrl::ClearRowStyle(int nRow)
-{
-    m_rowStyles.erase(nRow);
-    if (GetSafeHwnd() && nRow >= 0 && nRow < GetItemCount())
-        RedrawItems(nRow, nRow);
-}
-
-void CCustomListCtrl::ClearAllRowStyles()
-{
-    m_rowStyles.clear();
-    if (GetSafeHwnd()) Invalidate(FALSE);
-}
-
-BOOL CCustomListCtrl::GetRowStyle(int nRow, CCC_RowGlassStyle* pOut) const
-{
-    if (!pOut) return FALSE;
-    const CCC_RowGlassStyle* p = LookupRowStyle(nRow);
-    if (!p) return FALSE;
-    *pOut = *p;
-    return TRUE;
-}
-
-// ============================================================================
 // カスタムリストボックスコントロール
 // CCustomListBox
 // ============================================================================
@@ -3574,20 +2430,9 @@ BEGIN_MESSAGE_MAP(CCustomListBox, CListBox)
     ON_WM_PAINT()
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_ERASEBKGND()
-    ON_WM_LBUTTONDOWN()
-    ON_WM_LBUTTONUP()
-    ON_WM_MOUSEMOVE()
-    ON_WM_MOUSELEAVE()
-    ON_WM_VSCROLL()
-    ON_WM_MOUSEWHEEL()
-    ON_WM_TIMER()
-    ON_CONTROL_REFLECT(LBN_SELCHANGE, &CCustomListBox::OnSelChange)
-    ON_MESSAGE(CCC_WM_POST_OPAQUE_PAINT, OnPostOpaquePaint)
 END_MESSAGE_MAP()
 
-static const UINT_PTR kListBoxGlassCoalesceTimerId = 4110;
-
-CCustomListBox::CCustomListBox() : m_bAutoDelete(FALSE), m_bAeroMode(FALSE), m_bInOpaqueFullPaint(FALSE), m_nHotItem(-1)
+CCustomListBox::CCustomListBox() : m_bAutoDelete(FALSE), m_bAeroMode(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
 }
@@ -3611,13 +2456,6 @@ void CCustomListBox::PreSubclassWindow()
 
 HBRUSH CCustomListBox::CtlColor(CDC* pDC, UINT)
 {
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListBoxRowGlass(m_hWnd))
-    {
-        pDC->SetBkMode(TRANSPARENT);
-        return (HBRUSH)::GetStockObject(HOLLOW_BRUSH);
-    }
-#endif
     pDC->SetBkColor(COLOR_LIST_BG);
     pDC->SetTextColor(RGB(0, 0, 0));
     return (HBRUSH)m_brBackground.GetSafeHandle();
@@ -3625,558 +2463,89 @@ HBRUSH CCustomListBox::CtlColor(CDC* pDC, UINT)
 
 void CCustomListBox::OnPaint()
 {
-    CPaintDC dc(this);
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListBoxRowGlass(m_hWnd))
-    {
-        PaintGlassClient(dc);
-        return;
-    }
-    if (CCC_DeferListToOpaquePaint(m_hWnd))
-    {
-        PaintOpaqueClient(dc);
-        return;
-    }
-#endif
-    PaintListBoxClientBuffered(dc);
-}
-
-void CCustomListBox::DrawListBoxRow(CDC& dc, int i)
-{
-    if (i < 0) return;
-    CRect rcClient;
-    GetClientRect(&rcClient);
-    CRect itemRc;
-    if (!GetItemRect(i, &itemRc)) return;
-    if (itemRc.right < rcClient.right) itemRc.right = rcClient.right;
-
-    DRAWITEMSTRUCT dis = {};
-    dis.CtlType = ODT_LISTBOX;
-    dis.CtlID = (UINT)GetDlgCtrlID();
-    dis.itemID = (UINT)i;
-    dis.itemAction = ODA_DRAWENTIRE;
-    dis.hwndItem = m_hWnd;
-    dis.hDC = dc.GetSafeHdc();
-    dis.rcItem = itemRc;
-    dis.itemState = (GetSel(i) > 0) ? ODS_SELECTED : 0;
-    if (!IsWindowEnabled()) dis.itemState |= ODS_DISABLED;
-    DrawItem(&dis);
-}
-
-void CCustomListBox::PaintListBoxClientBuffered(CDC& dc)
-{
-    CRect r;
-    GetClientRect(&r);
-    if (r.IsRectEmpty()) return;
-
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    params.dwFlags = BPPF_ERASE;
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP)
-    {
-        PaintListBoxClient(dc);
-        return;
-    }
-    CDC buf;
-    buf.Attach(hdcBuf);
-    PaintListBoxClient(buf);
-    buf.Detach();
-    ::EndBufferedPaint(hBP, TRUE);
-}
-
-void CCustomListBox::RepaintListBoxRows(int iFirst, int iLast)
-{
-    if (!GetSafeHwnd() || iFirst < 0 || iLast < iFirst) return;
-
-    CRect rcClient;
-    GetClientRect(&rcClient);
-    CRect paintRc;
-    BOOL bGot = FALSE;
-    for (int i = iFirst; i <= iLast; ++i)
-    {
-        CRect r;
-        if (!GetItemRect(i, &r)) continue;
-        if (r.right < rcClient.right) r.right = rcClient.right;
-        if (!bGot) { paintRc = r; bGot = TRUE; }
-        else paintRc.UnionRect(&paintRc, &r);
-    }
-    if (!bGot) return;
-
-    CClientDC dc(this);
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &paintRc, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (hdcBuf && hBP)
-    {
-        CDC buf;
-        buf.Attach(hdcBuf);
-        for (int i = iFirst; i <= iLast; ++i)
-            DrawListBoxRow(buf, i);
-        buf.Detach();
-        ::EndBufferedPaint(hBP, TRUE);
-        return;
-    }
-    for (int i = iFirst; i <= iLast; ++i)
-        DrawListBoxRow(dc, i);
-}
-
-void CCustomListBox::PaintOpaqueIntoBuffer(HDC hdcBuf)
-{
-    if (!hdcBuf || !m_hWnd) return;
-    OnPrintClient((WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
-}
-
-void CCustomListBox::PaintOpaqueClient(CDC& dc)
-{
-    CRect r;
-    GetClientRect(&r);
-    if (r.Width() <= 0 || r.Height() <= 0) return;
-
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    params.dwFlags = BPPF_ERASE;
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP)
-    {
-        OnPrintClient((WPARAM)dc.GetSafeHdc(), PRF_CLIENT | PRF_ERASEBKGND);
-        return;
-    }
-    OnPrintClient((WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
-    ::BufferedPaintMakeOpaque(hBP, &r);
-    ::EndBufferedPaint(hBP, TRUE);
-}
-
-void CCustomListBox::RepaintOpaqueIfNeeded()
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (!CCC_DeferListToOpaquePaint(m_hWnd) || m_bInOpaqueFullPaint) return;
-    m_bInOpaqueFullPaint = TRUE;
-    CClientDC dc(this);
-    PaintOpaqueClient(dc);
-    m_bInOpaqueFullPaint = FALSE;
-#endif
-}
-
-void CCustomListBox::PaintListBoxClient(CDC& dc)
-{
-    CRect rc;
-    GetClientRect(&rc);
-    if (rc.IsRectEmpty()) return;
-
-    dc.FillSolidRect(&rc, COLOR_LIST_BG);
-
-    int nFirst = 0, nLast = -1;
-    CCC_LbVisibleRange(m_hWnd, rc, nFirst, nLast);
-    if (nLast < nFirst) return;
-
-    for (int i = nFirst; i <= nLast; ++i)
-        DrawListBoxRow(dc, i);
-
-    CRect rLast;
-    if (GetItemRect(nLast, &rLast) && rLast.bottom < rc.bottom)
-    {
-        CRect fill(rc.left, rLast.bottom, rc.right, rc.bottom);
-        dc.FillSolidRect(&fill, CCC_ListZebraBg(nLast + 1));
-    }
-}
-
-void CCustomListBox::RepaintClient()
-{
-    if (!GetSafeHwnd()) return;
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListBoxRowGlass(m_hWnd))
-    {
-        RequestGlassRepaint(TRUE);
-        return;
-    }
-    if (CCC_DeferListToOpaquePaint(m_hWnd))
-    {
-        RepaintOpaqueIfNeeded();
-        return;
-    }
-#endif
-    Invalidate(FALSE);
-}
-
-void CCustomListBox::OnSelChange()
-{
-    RepaintClient();
-}
-
-void CCustomListBox::OnLButtonDown(UINT nFlags, CPoint point)
-{
-    CListBox::OnLButtonDown(nFlags, point);
-}
-
-void CCustomListBox::OnLButtonUp(UINT nFlags, CPoint point)
-{
-    CListBox::OnLButtonUp(nFlags, point);
-}
-
-void CCustomListBox::OnMouseMove(UINT nFlags, CPoint point)
-{
-    UNREFERENCED_PARAMETER(nFlags);
-    UpdateHotItem(CCC_ListBoxHotItemFromPoint(this, point));
-    TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
-    TrackMouseEvent(&t);
-}
-
-void CCustomListBox::OnMouseLeave()
-{
-    UpdateHotItem(-1);
-    CListBox::OnMouseLeave();
-}
-
-void CCustomListBox::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
-{
-    CListBox::OnVScroll(nSBCode, nPos, pScrollBar);
-    UpdateHotItemFromCursor();
-}
-
-BOOL CCustomListBox::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
-{
-    const BOOL r = CListBox::OnMouseWheel(nFlags, zDelta, pt);
-    UpdateHotItemFromCursor();
-    return r;
-}
-
-void CCustomListBox::OnTimer(UINT_PTR nIDEvent)
-{
-    if (nIDEvent == kListBoxGlassCoalesceTimerId)
-    {
-        KillTimer(kListBoxGlassCoalesceTimerId);
-        if (GetSafeHwnd())
-            Invalidate(FALSE);
-        return;
-    }
-    CListBox::OnTimer(nIDEvent);
-}
-
-void CCustomListBox::RequestGlassRepaint(BOOL bImmediate)
-{
-    if (!GetSafeHwnd()) return;
-    if (bImmediate)
-    {
-        KillTimer(kListBoxGlassCoalesceTimerId);
-        Invalidate(FALSE);
-        UpdateWindow();
-        return;
-    }
-    SetTimer(kListBoxGlassCoalesceTimerId, 16, NULL);
-}
-
-void CCustomListBox::RefreshRows(int iFirst, int iLast)
-{
-    UNREFERENCED_PARAMETER(iFirst);
-    UNREFERENCED_PARAMETER(iLast);
-    RepaintClient();
-}
-
-void CCustomListBox::UpdateHotItem(int n)
-{
-    if (m_nHotItem == n) return;
-    const int o = m_nHotItem;
-    m_nHotItem = n;
-    if (!GetSafeHwnd()) return;
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListBoxRowGlass(m_hWnd))
-    {
-        RequestGlassRepaint(TRUE);
-        return;
-    }
-    if (CCC_DeferListToOpaquePaint(m_hWnd))
-    {
-        RepaintOpaqueIfNeeded();
-        return;
-    }
-#endif
-    if (o < 0 && n < 0) return;
-    int iFirst = o, iLast = n;
-    if (o < 0) iFirst = n;
-    if (n < 0) iLast = o;
-    if (iFirst > iLast) { const int t = iFirst; iFirst = iLast; iLast = t; }
-    RepaintListBoxRows(iFirst, iLast);
-}
-
-void CCustomListBox::UpdateHotItemFromCursor()
-{
-    if (!GetSafeHwnd()) return;
-    CPoint pt;
-    if (!GetCursorPos(&pt)) return;
-    ScreenToClient(&pt);
-    UpdateHotItem(CCC_ListBoxHotItemFromPoint(this, pt));
-}
-
-LRESULT CCustomListBox::OnPostOpaquePaint(WPARAM, LPARAM)
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListBoxRowGlass(m_hWnd))
-        return 0;
-    if (CCC_DeferListToOpaquePaint(m_hWnd))
-    {
-        CClientDC dc(this);
-        PaintOpaqueClient(dc);
-    }
-#endif
-    return 0;
+    Default();
 }
 
 LRESULT CCustomListBox::OnPrintClient(WPARAM wParam, LPARAM)
 {
     CDC* pDC = CDC::FromHandle((HDC)wParam);
-    if (!pDC || !GetSafeHwnd()) return 0;
-
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListBoxRowGlass(m_hWnd))
+    if (!pDC) return 0;
+    CRect rc;
+    GetClientRect(&rc);
+    pDC->FillSolidRect(&rc, COLOR_LIST_BG);
+    const int n = GetCount();
+    for (int i = 0; i < n; ++i)
     {
-        PaintGlassClient(*pDC);
-        return 0;
+        CRect itemRc;
+        if (!GetItemRect(i, &itemRc)) continue;
+        DRAWITEMSTRUCT dis = {};
+        dis.CtlType = ODT_LISTBOX;
+        dis.CtlID = (UINT)GetDlgCtrlID();
+        dis.itemID = (UINT)i;
+        dis.itemAction = ODA_DRAWENTIRE;
+        dis.hwndItem = m_hWnd;
+        dis.hDC = (HDC)wParam;
+        dis.rcItem = itemRc;
+        dis.itemState = (GetSel(i) > 0) ? ODS_SELECTED : 0;
+        if (!IsWindowEnabled()) dis.itemState |= ODS_DISABLED;
+        DrawItem(&dis);
     }
-#endif
-
-    PaintListBoxClient(*pDC);
     return 0;
 }
 
 BOOL CCustomListBox::OnEraseBkgnd(CDC* pDC)
 {
-    UNREFERENCED_PARAMETER(pDC);
+    if (pDC)
+    {
+        CRect r;
+        GetClientRect(&r);
+        pDC->FillSolidRect(&r, COLOR_LIST_BG);
+    }
     return TRUE;
 }
 
-void CCustomListBox::PaintListBoxGlassBackgrounds(CDC& dc, const CRect& rcClient, BOOL bChromaSolid)
+void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
 {
-    const int nCount = GetCount();
-    if (nCount <= 0) return;
+    if (lp->itemID == (UINT)-1) return;
+    CDC* pDC = CDC::FromHandle(lp->hDC);
+    CRect r = lp->rcItem;
+    COLORREF bg = (lp->itemState & ODS_SELECTED) ? COLOR_SEL_BG : (lp->itemID % 2 == 0 ? COLOR_LIST_BG : RGB(183, 221, 238));
 
-    int nFirst = 0, nLast = -1;
-    CCC_LbVisibleRange(m_hWnd, rcClient, nFirst, nLast);
-    if (nLast < nFirst) return;
+    if (m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd))
+        FillRectAlpha(pDC, r, bg, (lp->itemState & ODS_SELECTED) ? 180 : AERO_ALPHA_SEMI);
+    else
+        pDC->FillSolidRect(&r, bg);
 
-    for (int ni = nFirst; ni <= nLast; ++ni)
-    {
-        CRect r;
-        if (!GetItemRect(ni, &r)) continue;
-        if (r.right < rcClient.right) r.right = rcClient.right;
-
-        const BOOL bS = (GetSel(ni) > 0);
-        const BOOL bH = (ni == m_nHotItem);
-        COLORREF bg = CCC_ListGlassRowBg(ni, bS, bH);
-        const CCC_RowGlassStyle* pCustom = LookupRowStyle(ni);
-        if (pCustom && pCustom->bValid && pCustom->bUseGlass)
-            bg = pCustom->clrBg;
-
-        if (bChromaSolid && CCC_UseListBoxRowGlass(m_hWnd))
-            dc.FillSolidRect(&r, bg);
-        else
-        {
-            const BYTE alpha = CCC_ListGlassRowAlpha(ni, bS, bH);
-            CCC_DrawRowGlassBackground(&dc, r, m_hWnd, m_bAeroMode, bg, alpha, bS, pCustom);
-        }
-    }
-
-    CRect rLast;
-    if (GetItemRect(nLast, &rLast) && rLast.bottom < rcClient.bottom)
-    {
-        CRect fill(rcClient.left, rLast.bottom, rcClient.right, rcClient.bottom);
-        if (bChromaSolid)
-            dc.FillSolidRect(&fill, COLOR_LIST_BG);
-        else
-            FillRectAlpha(&dc, fill, COLOR_LIST_BG, CCC_ScaleGlassAlpha((BYTE)200));
-    }
-}
-
-void CCustomListBox::PaintListBoxItemForeground(CDC& dc, int ni, const CRect& r, DWORD itemState)
-{
-    if (ni < 0) return;
-
-    int it = ni % 4;
+    int it = lp->itemID % 4;
     int is = 8;
     int ix = r.left + 5;
     int iy = r.top + (r.Height() - is) / 2;
 
     switch (it)
     {
-    case 0: DrawFlower(&dc, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
-    case 1: DrawStar(&dc, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
-    case 2: DrawHeart(&dc, CRect(ix, iy, ix + is, iy + is), COLOR_HEART); break;
-    case 3: DrawRibbon(&dc, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
+    case 0: DrawFlower(pDC, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
+    case 1: DrawStar(pDC, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
+    case 2: DrawHeart(pDC, CRect(ix, iy, ix + is, iy + is), COLOR_HEART); break;
+    case 3: DrawRibbon(pDC, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
     }
 
-    if (itemState & ODS_SELECTED)
-        DrawStar(&dc, r.right - 12, r.top + r.Height() / 2, 3, RGB(255, 215, 0));
+    if (lp->itemState & ODS_SELECTED) DrawStar(pDC, r.right - 12, r.top + r.Height() / 2, 3, RGB(255, 215, 0));
 
     CString st;
-    GetText(ni, st);
+    GetText(lp->itemID, st);
     CRect rt = r;
     rt.left += 20;
     rt.DeflateRect(1, 1);
 
-    dc.SetTextColor(RGB(0, 0, 0));
-    dc.SetBkMode(TRANSPARENT);
+    COLORREF tc = m_bAeroMode ? RGB(1, 1, 1) : COLOR_EDIT_TEXT;
+    pDC->SetTextColor(tc);
+    pDC->SetBkMode(TRANSPARENT);
 
-    CFont* po = dc.SelectObject(GetFont());
-    DrawListSubitemCellText(&dc, st, rt);
-    dc.SelectObject(po);
+    CFont* po = pDC->SelectObject(GetFont());
+    DrawListSubitemCellText(pDC, st, rt);
+    pDC->SelectObject(po);
 
-    if (ni < GetCount() - 1)
-        DrawLaceLine(&dc, r.left + 15, r.bottom - 1, r.right - 15, r.bottom - 1, RGB(200, 180, 220));
-}
-
-void CCustomListBox::PaintListBoxForeground(CDC& dc, const CRect& rcClient)
-{
-    const int nCount = GetCount();
-    if (nCount <= 0) return;
-
-    int nFirst = 0, nLast = -1;
-    CCC_LbVisibleRange(m_hWnd, rcClient, nFirst, nLast);
-    if (nLast < nFirst) return;
-
-    for (int ni = nFirst; ni <= nLast; ++ni)
-    {
-        CRect r;
-        if (!GetItemRect(ni, &r)) continue;
-        DWORD st = (GetSel(ni) > 0) ? ODS_SELECTED : 0;
-        if (!IsWindowEnabled()) st |= ODS_DISABLED;
-        PaintListBoxItemForeground(dc, ni, r, st);
-    }
-}
-
-void CCustomListBox::PaintGlassClient(CDC& dc)
-{
-#if CCUSTOM_AERO_SUPPORT
-    CRect rcC;
-    GetClientRect(&rcC);
-    const int w = rcC.Width();
-    const int h = rcC.Height();
-    if (w <= 0 || h <= 0) return;
-
-    void* pGlassBits = nullptr;
-    HBITMAP hGlassDib = CCC_CreateAlphaDib32(dc.GetSafeHdc(), w, h, &pGlassBits);
-    CDC memGlass;
-    memGlass.CreateCompatibleDC(&dc);
-    HGDIOBJ obGlass = nullptr;
-    if (hGlassDib)
-    {
-        obGlass = ::SelectObject(memGlass.GetSafeHdc(), hGlassDib);
-        memGlass.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-        PaintListBoxGlassBackgrounds(memGlass, rcC, TRUE);
-
-        int nFirst = 0, nLast = -1;
-        CCC_LbVisibleRange(m_hWnd, rcC, nFirst, nLast);
-        for (int ni = nFirst; ni <= nLast; ++ni)
-        {
-            CRect r;
-            if (!GetItemRect(ni, &r)) continue;
-            if (r.right < rcC.right) r.right = rcC.right;
-            const BOOL bS = (GetSel(ni) > 0);
-            const BOOL bH = (ni == m_nHotItem);
-            RECT rr = r;
-            CCC_SetDibAlphaGlassRect(pGlassBits, w, h, rr, CCC_AERO_CHROMA_KEY, CCC_ListGlassRowAlpha(ni, bS, bH));
-        }
-        CRect rLast;
-        if (nLast >= nFirst && GetItemRect(nLast, &rLast) && rLast.bottom < rcC.bottom)
-        {
-            RECT fill = { rcC.left, rLast.bottom, rcC.right, rcC.bottom };
-            CCC_SetDibAlphaGlassRect(pGlassBits, w, h, fill, CCC_AERO_CHROMA_KEY, CCC_ScaleGlassAlpha((BYTE)200));
-        }
-        CCC_SetDibChromaTransparent(pGlassBits, w, h, CCC_AERO_CHROMA_KEY);
-    }
-
-    void* pFgBits = nullptr;
-    HBITMAP hFgDib = CCC_CreateAlphaDib32(dc.GetSafeHdc(), w, h, &pFgBits);
-    CDC memFg;
-    memFg.CreateCompatibleDC(&dc);
-    HGDIOBJ obFg = nullptr;
-    if (hFgDib)
-    {
-        obFg = ::SelectObject(memFg.GetSafeHdc(), hFgDib);
-        memFg.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-        PaintListBoxForeground(memFg, rcC);
-        CCC_SetDibAlphaFromChroma(pFgBits, w, h, CCC_AERO_CHROMA_KEY);
-    }
-
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &rcC, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP || !hGlassDib)
-    {
-        if (obGlass) ::SelectObject(memGlass.GetSafeHdc(), obGlass);
-        if (hGlassDib) ::DeleteObject(hGlassDib);
-        if (obFg) { ::SelectObject(memFg.GetSafeHdc(), obFg); ::DeleteObject(hFgDib); }
-        CDC memFb;
-        CBitmap bmpFb;
-        memFb.CreateCompatibleDC(&dc);
-        bmpFb.CreateCompatibleBitmap(&dc, w, h);
-        CBitmap* obFb = memFb.SelectObject(&bmpFb);
-        memFb.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-        PaintListBoxGlassBackgrounds(memFb, rcC, TRUE);
-        CCC_BlitChromaGlass(dc.GetSafeHdc(), 0, 0, w, h, memFb.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY, CCC_GetAeroGlassAlpha());
-        memFb.SelectObject(obFb);
-        PaintListBoxForeground(dc, rcC);
-        return;
-    }
-
-    CCC_InitBufferedPaintTransparent(hBP, w, h);
-    const BLENDFUNCTION bfGlass = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    ::GdiAlphaBlend(hdcBuf, 0, 0, w, h, memGlass.GetSafeHdc(), 0, 0, w, h, bfGlass);
-    if (hFgDib && pFgBits)
-    {
-        const BLENDFUNCTION bfFg = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-        ::GdiAlphaBlend(hdcBuf, 0, 0, w, h, memFg.GetSafeHdc(), 0, 0, w, h, bfFg);
-    }
-    ::EndBufferedPaint(hBP, TRUE);
-
-    if (obGlass) ::SelectObject(memGlass.GetSafeHdc(), obGlass);
-    if (hGlassDib) ::DeleteObject(hGlassDib);
-    if (obFg)
-    {
-        ::SelectObject(memFg.GetSafeHdc(), obFg);
-        ::DeleteObject(hFgDib);
-    }
-#endif
-}
-
-void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
-{
-    if (lp->itemID == (UINT)-1) return;
-
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListBoxRowGlass(m_hWnd))
-        return;
-
-    if (CCC_DeferListToOpaquePaint(m_hWnd) && !m_bInOpaqueFullPaint
-        && (lp->itemAction & ODA_DRAWENTIRE) == 0)
-    {
-        RepaintOpaqueIfNeeded();
-        return;
-    }
-#endif
-
-    CDC* pDC = CDC::FromHandle(lp->hDC);
-    CRect r = lp->rcItem;
-    const int ni = (int)lp->itemID;
-    const BOOL bSel = (lp->itemState & ODS_SELECTED) != 0;
-    const BOOL bH = !bSel && (ni == m_nHotItem);
-    COLORREF bg = CCC_ListGlassRowBg(ni, bSel, bH);
-    const CCC_RowGlassStyle* pCustom = LookupRowStyle(ni);
-    if (pCustom && pCustom->bValid)
-        bg = pCustom->clrBg;
-
-#if CCUSTOM_AERO_SUPPORT
-    const BOOL bGlassLv = CCC_UseListBoxRowGlass(m_hWnd);
-    const BOOL bOpaqueDefer = CCC_DeferListToOpaquePaint(m_hWnd);
-    if (!bGlassLv && bOpaqueDefer && CCC_IsAeroEnabled())
-    {
-        const BYTE alpha = CCC_ListGlassRowAlpha(ni, bSel, bH);
-        CCC_DrawRowGlassBackground(pDC, r, m_hWnd, m_bAeroMode, bg, alpha, bSel, pCustom);
-    }
-    else if (!bGlassLv)
-#endif
-        pDC->FillSolidRect(&r, bg);
-
-    PaintListBoxItemForeground(*pDC, ni, r, lp->itemState);
+    if (lp->itemID < (UINT)(GetCount() - 1)) DrawLaceLine(pDC, r.left + 15, r.bottom - 1, r.right - 15, r.bottom - 1, RGB(200, 180, 220));
 }
 
 void CCustomListBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
@@ -4196,28 +2565,17 @@ BEGIN_MESSAGE_MAP(CCustomComboBox, CComboBox)
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_ERASEBKGND()
     ON_CONTROL_REFLECT(CBN_DROPDOWN, &CCustomComboBox::OnDropdown)
-    ON_CONTROL_REFLECT(CBN_CLOSEUP, &CCustomComboBox::OnCloseUp)
-#if CCUSTOM_AERO_SUPPORT
-    ON_WM_TIMER()
-#endif
 END_MESSAGE_MAP()
-
-#if CCUSTOM_AERO_SUPPORT
-static const UINT_PTR kComboDropGlassRetryTimerId = 0xCB01;
-#endif
 
 CCustomComboBox::CCustomComboBox()
     : m_bAutoDelete(FALSE), m_clrLabelText(RGB(240, 240, 255)),
-    m_clrLabelBg(RGB(80, 60, 120)), m_bAeroMode(FALSE), m_nDropHotItem(-1)
+    m_clrLabelBg(RGB(80, 60, 120)), m_bAeroMode(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_COMBO_BG);
 }
 
 CCustomComboBox::~CCustomComboBox()
 {
-#if CCUSTOM_AERO_SUPPORT
-    CCC_ReleaseComboDropListFix(m_hWnd);
-#endif
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
@@ -4293,27 +2651,12 @@ void CCustomComboBox::PreSubclassWindow()
     dw |= CBS_OWNERDRAWFIXED | CBS_HASSTRINGS;
     ModifyStyle(0, CBS_OWNERDRAWFIXED | CBS_HASSTRINGS);
     SetWindowLong(GetSafeHwnd(), GWL_STYLE, dw);
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseComboGlass(m_hWnd))
-    {
-        COMBOBOXINFO cbi = { sizeof(COMBOBOXINFO) };
-        if (::GetComboBoxInfo(m_hWnd, &cbi) && cbi.hwndItem && cbi.hwndItem != m_hWnd)
-            ::ShowWindow(cbi.hwndItem, SW_HIDE);
-    }
-#endif
 }
 
 HBRUSH CCustomComboBox::CtlColor(CDC* pDC, UINT nC)
 {
     if (nC == CTLCOLOR_LISTBOX)
     {
-#if CCUSTOM_AERO_SUPPORT
-        if (CCC_UseComboGlass(m_hWnd))
-        {
-            pDC->SetBkMode(TRANSPARENT);
-            return (HBRUSH)::GetStockObject(HOLLOW_BRUSH);
-        }
-#endif
         pDC->SetBkColor(COLOR_COMBO_BG);
         pDC->SetTextColor(RGB(0, 0, 0));
         return (HBRUSH)m_brBackground.GetSafeHandle();
@@ -4323,10 +2666,6 @@ HBRUSH CCustomComboBox::CtlColor(CDC* pDC, UINT nC)
 
 BOOL CCustomComboBox::OnEraseBkgnd(CDC* pDC)
 {
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseComboGlass(m_hWnd))
-        return TRUE;
-#endif
     if (pDC)
     {
         CRect r;
@@ -4336,347 +2675,8 @@ BOOL CCustomComboBox::OnEraseBkgnd(CDC* pDC)
     return TRUE;
 }
 
-void CCustomComboBox::PaintComboClosedForeground(CDC& dc, const CRect& r)
-{
-    CPen pF(PS_SOLID, 2, COLOR_VINE_DECO);
-    CPen* op = dc.SelectObject(&pF);
-    dc.SelectStockObject(NULL_BRUSH);
-    dc.RoundRect(&r, CPoint(10, 10));
-
-    int nb = GetSystemMetrics(SM_CXVSCROLL);
-    COMBOBOXINFO cbiBtn = { sizeof(COMBOBOXINFO) };
-    if (::GetComboBoxInfo(m_hWnd, &cbiBtn))
-    {
-        const int btnW = cbiBtn.rcButton.right - cbiBtn.rcButton.left;
-        if (btnW > 0) nb = btnW;
-    }
-    CRect rB(r.right - nb - 4, r.top + 4, r.right - 4, r.bottom - 4);
-    dc.FillSolidRect(&rB, RGB(255, 200, 220));
-
-    {
-        CPen pb(PS_SOLID, 1, RGB(200, 150, 180));
-        dc.SelectObject(&pb);
-        dc.SelectStockObject(NULL_BRUSH);
-        dc.RoundRect(&rB, CPoint(6, 6));
-        dc.SelectObject(op);
-    }
-
-    int hs = 6, sp = 2;
-    int sx = rB.left + (rB.Width() - (hs * 3 + sp * 2)) / 2;
-    int cy2 = rB.Height() / 2 + rB.top;
-
-    for (int i = 0; i < 3; i++)
-    {
-        CRect rh(sx + i * (hs + sp), cy2 - hs / 2, sx + i * (hs + sp) + hs, cy2 + hs / 2);
-        DrawHeart(&dc, rh, (i == 1) ? COLOR_HEART : RGB(255, 182, 193));
-    }
-
-    DrawStar(&dc, r.right - 8, r.top + 8, 3, RGB(255, 215, 0));
-
-    int nPS = CComboBox::GetCurSel();
-    CString st;
-    if (nPS != CB_ERR) GetLBText(nPS, st);
-
-    CFont* pOF = dc.SelectObject(GetFont());
-    CRect rt = r;
-    rt.left += 12;
-    rt.right = rB.left - 4;
-
-    BOOL bIL = (nPS >= 0 && nPS < (int)m_vDisabledItems.size() && m_vDisabledItems[nPS]);
-    if (nPS != CB_ERR && !bIL)
-    {
-        int cs = (rt.Height() - 8) / 2;
-        DrawCrown(&dc, rt.left + cs, rt.Height() / 2, cs, RGB(255, 215, 0));
-        rt.left += cs * 2 + 4;
-    }
-
-    dc.SetTextColor(RGB(0, 0, 0));
-    dc.SetBkMode(TRANSPARENT);
-    dc.DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    dc.SelectObject(pOF);
-}
-
-void CCustomComboBox::PaintGlassClient(CDC& dc, BOOL bToPaintBuffer)
-{
-#if CCUSTOM_AERO_SUPPORT
-    CRect rcC;
-    GetClientRect(&rcC);
-    const int w = rcC.Width();
-    const int h = rcC.Height();
-    if (w <= 0 || h <= 0) return;
-
-    CDC memFG;
-    memFG.CreateCompatibleDC(&dc);
-    CBitmap bmpFG;
-    bmpFG.CreateCompatibleBitmap(&dc, w, h);
-    CBitmap* pOldFG = memFG.SelectObject(&bmpFG);
-    memFG.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-    PaintComboClosedForeground(memFG, rcC);
-
-    CCC_CommitUniformGlassFromFgMem(dc, rcC, COLOR_COMBO_BG, memFG.GetSafeHdc(), w, h, bToPaintBuffer);
-
-    memFG.SelectObject(pOldFG);
-#endif
-}
-
-void CCustomComboBox::PaintComboDropGlassBackgrounds(CDC& dc, HWND hwndList, const CRect& rcClient, BOOL bChromaSolid)
-{
-    if (!hwndList || !::IsWindow(hwndList)) return;
-    const int nCount = (int)::SendMessage(hwndList, LB_GETCOUNT, 0, 0);
-    if (nCount <= 0) return;
-
-    int nFirst = 0, nLast = -1;
-    CCC_LbVisibleRange(hwndList, rcClient, nFirst, nLast);
-    if (nLast < nFirst) return;
-
-    const int nSel = (int)::SendMessage(hwndList, LB_GETCURSEL, 0, 0);
-    const BOOL bNoScroll = CCC_ComboDropListNoScroll(hwndList);
-
-    for (int ni = nFirst; ni <= nLast; ++ni)
-    {
-        RECT rr = {};
-        if (!::SendMessage(hwndList, LB_GETITEMRECT, ni, (LPARAM)&rr)) continue;
-        CRect r(rr);
-        if (r.right < rcClient.right) r.right = rcClient.right;
-
-        const BOOL bD = (ni < (int)m_vDisabledItems.size()) && m_vDisabledItems[ni];
-        const BOOL bS = !bD && (ni == nSel);
-        const BOOL bH = !bD && !bS && (ni == m_nDropHotItem);
-        COLORREF bg = CCC_ComboGlassRowBg(ni, bS, bH, bD, m_clrLabelBg);
-        const CCC_RowGlassStyle* pCustom = LookupRowStyle(ni);
-        if (pCustom && pCustom->bValid && pCustom->bUseGlass)
-            bg = pCustom->clrBg;
-
-        if (bChromaSolid && CCC_UseComboGlass(m_hWnd))
-            dc.FillSolidRect(&r, bg);
-        else
-        {
-            const BYTE alpha = CCC_ComboGlassRowAlpha(ni, bS, bH, bD, bNoScroll);
-            CCC_DrawRowGlassBackground(&dc, r, m_hWnd, m_bAeroMode, bg, alpha, (bS || bD), pCustom, hwndList);
-        }
-    }
-
-    RECT rrLast = {};
-    if (::SendMessage(hwndList, LB_GETITEMRECT, nLast, (LPARAM)&rrLast) && rrLast.bottom < rcClient.bottom)
-    {
-        CRect fill(rcClient.left, rrLast.bottom, rcClient.right, rcClient.bottom);
-        const BYTE fillAlpha = bNoScroll ? CCC_ScaleGlassAlpha((BYTE)190) : CCC_GetAeroGlassAlpha();
-        if (bChromaSolid)
-            dc.FillSolidRect(&fill, COLOR_COMBO_BG);
-        else
-            FillRectAlpha(&dc, fill, COLOR_COMBO_BG, fillAlpha);
-    }
-}
-
-void CCustomComboBox::PaintComboDropItemForeground(CDC& dc, int itemID, const CRect& r, DWORD itemState)
-{
-    if (itemID < 0) return;
-    const BOOL bD = (itemID < (int)m_vDisabledItems.size()) && m_vDisabledItems[itemID];
-    const BOOL bS = !bD && (itemState & ODS_SELECTED);
-
-    if (!bD)
-    {
-        int it = itemID % 4;
-        const int is = 10;
-        const int ix = r.left + 4;
-        const int iy = r.top + (r.Height() - is) / 2;
-        switch (it)
-        {
-        case 0: DrawFlower(&dc, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
-        case 1: DrawStar(&dc, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
-        case 2: DrawHeart(&dc, CRect(ix, iy, ix + is, iy + is), COLOR_HEART); break;
-        case 3: DrawRibbon(&dc, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
-        }
-    }
-
-    CString st;
-    GetLBText(itemID, st);
-    CFont* pOF = NULL;
-    CFont fc;
-    CFont* pF = GetFont();
-    LOGFONT lf;
-    pF->GetLogFont(&lf);
-
-    if (bD)
-    {
-        dc.SetTextColor(m_clrLabelText);
-        lf.lfWeight = FW_BOLD;
-        lf.lfItalic = TRUE;
-    }
-    else
-    {
-        dc.SetTextColor(RGB(0, 0, 0));
-        lf.lfWeight = FW_BOLD;
-    }
-    fc.CreateFontIndirect(&lf);
-    pOF = dc.SelectObject(&fc);
-    dc.SetBkMode(TRANSPARENT);
-    CRect rt = r;
-    rt.left += bD ? 4 : 20;
-    dc.DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    if (pOF)
-    {
-        dc.SelectObject(pOF);
-        fc.DeleteObject();
-    }
-    if (bS && !bD) DrawCrown(&dc, r.right - 14, r.top + r.Height() / 2, 6, RGB(255, 215, 0));
-}
-
-void CCustomComboBox::PaintDropListGlassClient(HWND hwndList, HDC hdc)
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (!hwndList || !hdc || !CCC_UseComboGlass(m_hWnd)) return;
-
-    CRect rcC;
-    ::GetClientRect(hwndList, &rcC);
-    const int w = rcC.Width();
-    const int h = rcC.Height();
-    if (w <= 0 || h <= 0) return;
-
-    CDC dc;
-    dc.Attach(hdc);
-
-    const BOOL bNoScroll = CCC_ComboDropListNoScroll(hwndList);
-    int nFirst = 0, nLast = -1;
-    CCC_LbVisibleRange(hwndList, rcC, nFirst, nLast);
-    const int nSel = (int)::SendMessage(hwndList, LB_GETCURSEL, 0, 0);
-    const BYTE fillAlpha = bNoScroll ? CCC_ScaleGlassAlpha((BYTE)190) : CCC_GetAeroGlassAlpha();
-
-    void* pGlassBits = nullptr;
-    HBITMAP hGlassDib = CCC_CreateAlphaDib32(dc.GetSafeHdc(), w, h, &pGlassBits);
-    CDC memGlass;
-    memGlass.CreateCompatibleDC(&dc);
-    HGDIOBJ obGlass = nullptr;
-    if (hGlassDib)
-    {
-        obGlass = ::SelectObject(memGlass.GetSafeHdc(), hGlassDib);
-        memGlass.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-        PaintComboDropGlassBackgrounds(memGlass, hwndList, rcC, TRUE);
-
-        if (nLast >= nFirst)
-        {
-            for (int ni = nFirst; ni <= nLast; ++ni)
-            {
-                RECT rr = {};
-                if (!::SendMessage(hwndList, LB_GETITEMRECT, ni, (LPARAM)&rr)) continue;
-                if (rr.right < rcC.right) rr.right = rcC.right;
-                const BOOL bD = (ni < (int)m_vDisabledItems.size()) && m_vDisabledItems[ni];
-                const BOOL bS = !bD && (ni == nSel);
-                const BOOL bH = !bD && !bS && (ni == m_nDropHotItem);
-                CCC_SetDibAlphaGlassRect(pGlassBits, w, h, rr, CCC_AERO_CHROMA_KEY,
-                    CCC_ComboGlassRowAlpha(ni, bS, bH, bD, bNoScroll));
-            }
-            CRect rLast;
-            if (::SendMessage(hwndList, LB_GETITEMRECT, nLast, (LPARAM)&rLast) && rLast.bottom < rcC.bottom)
-            {
-                RECT fill = { rcC.left, rLast.bottom, rcC.right, rcC.bottom };
-                CCC_SetDibAlphaGlassRect(pGlassBits, w, h, fill, CCC_AERO_CHROMA_KEY, fillAlpha);
-            }
-        }
-        CCC_SetDibChromaTransparent(pGlassBits, w, h, CCC_AERO_CHROMA_KEY);
-    }
-
-    void* pFgBits = nullptr;
-    HBITMAP hFgDib = CCC_CreateAlphaDib32(dc.GetSafeHdc(), w, h, &pFgBits);
-    CDC memFg;
-    memFg.CreateCompatibleDC(&dc);
-    HGDIOBJ obFg = nullptr;
-    if (hFgDib)
-    {
-        obFg = ::SelectObject(memFg.GetSafeHdc(), hFgDib);
-        memFg.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-
-        if (nLast >= nFirst)
-        {
-            for (int ni = nFirst; ni <= nLast; ++ni)
-            {
-                RECT rr = {};
-                if (!::SendMessage(hwndList, LB_GETITEMRECT, ni, (LPARAM)&rr)) continue;
-                DWORD st = (ni == nSel) ? ODS_SELECTED : 0;
-                PaintComboDropItemForeground(memFg, ni, CRect(rr), st);
-            }
-        }
-        CCC_SetDibAlphaFromChroma(pFgBits, w, h, CCC_AERO_CHROMA_KEY);
-    }
-
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdc, &rcC, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP || !hGlassDib)
-    {
-        if (obGlass) ::SelectObject(memGlass.GetSafeHdc(), obGlass);
-        if (hGlassDib) ::DeleteObject(hGlassDib);
-        if (obFg) { ::SelectObject(memFg.GetSafeHdc(), obFg); ::DeleteObject(hFgDib); }
-        CDC memFb;
-        CBitmap bmpFb;
-        memFb.CreateCompatibleDC(&dc);
-        bmpFb.CreateCompatibleBitmap(&dc, w, h);
-        CBitmap* obFb = memFb.SelectObject(&bmpFb);
-        memFb.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-        PaintComboDropGlassBackgrounds(memFb, hwndList, rcC, TRUE);
-        if (!CCC_BlitComboDropBackdropCached(m_hWnd, hwndList, hdc, w, h))
-        {
-            CCC_ScheduleComboDropBackdropWarm(hwndList);
-            dc.Detach();
-            return;
-        }
-        CCC_BlitChromaGlass(hdc, 0, 0, w, h, memFb.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY, fillAlpha);
-        memFb.SelectObject(obFb);
-        if (nLast >= nFirst)
-        {
-            for (int ni = nFirst; ni <= nLast; ++ni)
-            {
-                RECT rr = {};
-                if (!::SendMessage(hwndList, LB_GETITEMRECT, ni, (LPARAM)&rr)) continue;
-                DWORD st = (ni == nSel) ? ODS_SELECTED : 0;
-                PaintComboDropItemForeground(dc, ni, CRect(rr), st);
-            }
-        }
-        dc.Detach();
-        return;
-    }
-
-    CCC_InitBufferedPaintTransparent(hBP, w, h);
-    if (!CCC_BlitComboDropBackdropCached(m_hWnd, hwndList, hdcBuf, w, h))
-    {
-        ::EndBufferedPaint(hBP, TRUE);
-        if (obGlass) ::SelectObject(memGlass.GetSafeHdc(), obGlass);
-        if (hGlassDib) ::DeleteObject(hGlassDib);
-        if (obFg) { ::SelectObject(memFg.GetSafeHdc(), obFg); ::DeleteObject(hFgDib); }
-        CCC_ScheduleComboDropBackdropWarm(hwndList);
-        dc.Detach();
-        return;
-    }
-    const BLENDFUNCTION bfGlass = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    ::GdiAlphaBlend(hdcBuf, 0, 0, w, h, memGlass.GetSafeHdc(), 0, 0, w, h, bfGlass);
-    if (hFgDib && pFgBits)
-    {
-        const BLENDFUNCTION bfFg = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-        ::GdiAlphaBlend(hdcBuf, 0, 0, w, h, memFg.GetSafeHdc(), 0, 0, w, h, bfFg);
-    }
-    ::EndBufferedPaint(hBP, TRUE);
-
-    if (obGlass) ::SelectObject(memGlass.GetSafeHdc(), obGlass);
-    if (hGlassDib) ::DeleteObject(hGlassDib);
-    if (obFg)
-    {
-        ::SelectObject(memFg.GetSafeHdc(), obFg);
-        ::DeleteObject(hFgDib);
-    }
-    dc.Detach();
-#endif
-}
-
 void CCustomComboBox::PaintClient(CDC& dc)
 {
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseComboGlass(m_hWnd))
-    {
-        PaintGlassClient(dc);
-        return;
-    }
-#endif
-
     CRect r;
     GetClientRect(&r);
 
@@ -4690,11 +2690,62 @@ void CCustomComboBox::PaintClient(CDC& dc)
     if (bTrans)
     {
         mDC.FillSolidRect(&r, RGB(0, 0, 0));
-        FillRectAlpha(&mDC, r, COLOR_COMBO_BG, CCC_GetAeroGlassAlpha());
+        FillRectAlpha(&mDC, r, COLOR_COMBO_BG, AERO_ALPHA_SEMI);
     }
     else mDC.FillSolidRect(&r, COLOR_COMBO_BG);
 
-    PaintComboClosedForeground(mDC, r);
+    CPen pF(PS_SOLID, 2, COLOR_VINE_DECO);
+    CPen* op = mDC.SelectObject(&pF);
+    mDC.SelectStockObject(NULL_BRUSH);
+    mDC.RoundRect(&r, CPoint(10, 10));
+
+    int nb = GetSystemMetrics(SM_CXVSCROLL);
+    CRect rB(r.right - nb - 4, r.top + 4, r.right - 4, r.bottom - 4);
+    mDC.FillSolidRect(&rB, RGB(255, 200, 220));
+
+    {
+        CPen pb(PS_SOLID, 1, RGB(200, 150, 180));
+        mDC.SelectObject(&pb);
+        mDC.SelectStockObject(NULL_BRUSH);
+        mDC.RoundRect(&rB, CPoint(6, 6));
+        mDC.SelectObject(op);
+    }
+
+    int hs = 6, sp = 2;
+    int sx = rB.left + (rB.Width() - (hs * 3 + sp * 2)) / 2;
+    int cy2 = rB.Height() / 2 + rB.top;
+
+    for (int i = 0; i < 3; i++)
+    {
+        CRect rh(sx + i * (hs + sp), cy2 - hs / 2, sx + i * (hs + sp) + hs, cy2 + hs / 2);
+        DrawHeart(&mDC, rh, (i == 1) ? COLOR_HEART : RGB(255, 182, 193));
+    }
+
+    DrawStar(&mDC, r.right - 8, r.top + 8, 3, RGB(255, 215, 0));
+
+    int nPS = CComboBox::GetCurSel();
+    CString st;
+    if (nPS != CB_ERR) GetLBText(nPS, st);
+
+    COLORREF tc = bTrans ? RGB(1, 1, 1) : RGB(0, 0, 0);
+    mDC.SetTextColor(tc);
+
+    CFont* pOF = mDC.SelectObject(GetFont());
+    CRect rt = r;
+    rt.left += 12;
+    rt.right = rB.left - 4;
+
+    BOOL bIL = (nPS >= 0 && nPS < (int)m_vDisabledItems.size() && m_vDisabledItems[nPS]);
+    if (nPS != CB_ERR && !bIL)
+    {
+        int cs = (rt.Height() - 8) / 2;
+        DrawCrown(&mDC, rt.left + cs, rt.Height() / 2, cs, RGB(255, 215, 0));
+        rt.left += cs * 2 + 4;
+    }
+
+    mDC.SetBkMode(TRANSPARENT);
+    mDC.DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    mDC.SelectObject(pOF);
 
     if (bTrans) CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, RGB(0, 0, 0));
     else dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
@@ -4725,46 +2776,65 @@ LRESULT CCustomComboBox::OnPrintClient(WPARAM wParam, LPARAM)
 void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 {
     if (lp->itemID == (UINT)-1) return;
-#if CCUSTOM_AERO_SUPPORT
-    const BOOL bDropList = (lp->hwndItem && ::IsWindow(lp->hwndItem) && lp->hwndItem != m_hWnd);
-    if (bDropList && CCC_UseComboGlass(m_hWnd))
-    {
-        CCC_InstallComboDropListFix(m_hWnd);
-        return;
-    }
-#endif
-
     CDC* pDC = CDC::FromHandle(lp->hDC);
     CRect r = lp->rcItem;
     BOOL bD = (lp->itemID < (UINT)m_vDisabledItems.size()) && m_vDisabledItems[lp->itemID];
     BOOL bS = !bD && (lp->itemState & ODS_SELECTED);
-    const COLORREF zebra = (lp->itemID % 2 == 0) ? COLOR_COMBO_BG : RGB(255, 232, 220);
-    COLORREF bg = bD ? m_clrLabelBg : (bS ? COLOR_SEL_BG : zebra);
-    const BYTE alpha = bS ? CCC_ScaleGlassAlpha((BYTE)180) : (bD ? CCC_ScaleGlassAlpha((BYTE)200) : CCC_GetAeroGlassAlpha());
-    const BOOL bBlackUnder = (bS || bD);
-#if CCUSTOM_AERO_SUPPORT
-    const BOOL bBlurCombo = CCC_IsBlurDialogChild(m_hWnd) && CCC_IsAeroEnabled();
-    const BOOL bOpaqueRow = !CCC_UseComboGlass(m_hWnd) && (bBlurCombo || (bDropList && CCC_IsAeroEnabled()));
-    const COLORREF rowSolid = bOpaqueRow
-        ? CCC_RowSolidFillColor(m_hWnd, lp->hwndItem, m_bAeroMode, bg, alpha, bBlackUnder, LookupRowStyle((int)lp->itemID))
-        : bg;
-    if (bOpaqueRow)
+    COLORREF bg = bD ? m_clrLabelBg : (bS ? COLOR_SEL_BG : (lp->itemID % 2 == 0 ? COLOR_COMBO_BG : RGB(255, 232, 220)));
+
+    if (m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd))
     {
-        CRect rf = r;
-        if (bDropList)
-            rf.bottom += 1;
-        pDC->FillSolidRect(&rf, rowSolid);
+        pDC->FillSolidRect(&r, RGB(0, 0, 0));
+        FillRectAlpha(pDC, r, bg, bS ? 180 : bD ? 200 : AERO_ALPHA_SEMI);
+    }
+    else pDC->FillSolidRect(&r, bg);
+
+    if (!bD)
+    {
+        int it = lp->itemID % 4;
+        int is = 8;
+        int ix = r.left + 6;
+        int iy = r.top + (r.Height() - is) / 2;
+        switch (it)
+        {
+        case 0: DrawFlower(pDC, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
+        case 1: DrawStar(pDC, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
+        case 2: DrawHeart(pDC, CRect(ix, iy, ix + is, iy + is), COLOR_HEART); break;
+        case 3: DrawRibbon(pDC, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
+        }
+    }
+
+    CString st;
+    GetLBText(lp->itemID, st);
+    CFont* pOF = NULL;
+    CFont fc;
+    CFont* pF = GetFont();
+    LOGFONT lf;
+    pF->GetLogFont(&lf);
+
+    if (bD)
+    {
+        pDC->SetTextColor(m_clrLabelText);
+        lf.lfWeight = FW_BOLD;
+        lf.lfItalic = TRUE;
     }
     else
-#endif
-        CCC_DrawRowGlassBackground(pDC, r, m_hWnd, m_bAeroMode, bg, alpha, bBlackUnder, LookupRowStyle((int)lp->itemID), lp->hwndItem);
-
-#if CCUSTOM_AERO_SUPPORT
-    if (bDropList && bBlurCombo)
-        CCC_InstallComboDropListFix(m_hWnd);
-#endif
-
-    PaintComboDropItemForeground(*pDC, (int)lp->itemID, r, lp->itemState);
+    {
+        pDC->SetTextColor(m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0));
+        lf.lfWeight = FW_BOLD;
+    }
+    fc.CreateFontIndirect(&lf);
+    pOF = pDC->SelectObject(&fc);
+    pDC->SetBkMode(TRANSPARENT);
+    CRect rt = r;
+    rt.left += bD ? 4 : 20;
+    pDC->DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    if (pOF)
+    {
+        pDC->SelectObject(pOF);
+        fc.DeleteObject();
+    }
+    if (bS && !bD) DrawCrown(pDC, r.right - 14, r.top + r.Height() / 2, 6, RGB(255, 215, 0));
 }
 
 void CCustomComboBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
@@ -4775,40 +2845,7 @@ void CCustomComboBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
 void CCustomComboBox::OnDropdown()
 {
     UpdateDropDownWidth();
-#if CCUSTOM_AERO_SUPPORT
-    CCC_InstallComboDropListFix(m_hWnd);
-    if (CCC_UseComboGlass(m_hWnd) && !CCC_IsComboDropGlassInstalled(m_hWnd))
-        SetTimer(kComboDropGlassRetryTimerId, 10, NULL);
-    else
-        CCC_RepaintComboDropGlass(m_hWnd);
-#endif
 }
-
-void CCustomComboBox::OnCloseUp()
-{
-#if CCUSTOM_AERO_SUPPORT
-    KillTimer(kComboDropGlassRetryTimerId);
-    SetDropListHotItem(-1);
-    CCC_ReleaseComboDropListFix(m_hWnd);
-#endif
-}
-
-#if CCUSTOM_AERO_SUPPORT
-void CCustomComboBox::OnTimer(UINT_PTR nIDEvent)
-{
-    if (nIDEvent == kComboDropGlassRetryTimerId)
-    {
-        CCC_InstallComboDropListFix(m_hWnd);
-        if (CCC_IsComboDropGlassInstalled(m_hWnd))
-        {
-            KillTimer(kComboDropGlassRetryTimerId);
-            CCC_RepaintComboDropGlass(m_hWnd);
-        }
-        return;
-    }
-    CComboBox::OnTimer(nIDEvent);
-}
-#endif
 
 BOOL CCustomComboBox::OnCommand(WPARAM wP, LPARAM lP)
 {
@@ -4986,9 +3023,9 @@ LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM w, LPARAM l)
 {
     LRESULT r = Default();
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseTransparentPaint(m_hWnd, m_bAeroMode))
-        Invalidate(FALSE);
+    CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
 #endif
+    Invalidate(FALSE);
     return r;
 }
 LRESULT CCustomSliderCtrl::OnLButtonDownMsg(WPARAM w, LPARAM l)
@@ -5369,7 +3406,14 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
     {
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
         DrawRangeSlider(&mDC);
-        CCC_BlitTransparentChroma(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+#if CCUSTOM_AERO_SUPPORT
+        if (CCC_IsAeroEnabled() && CCC_IsWin11())
+            CCC_BlitChromaNoFlicker(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
+                mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+        else
+#endif
+            CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
+                mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     }
     else
     {
@@ -5547,7 +3591,6 @@ IMPLEMENT_DYNAMIC(CCustomListCtrl, CListCtrlA)
 BEGIN_MESSAGE_MAP(CCustomListCtrl, CListCtrlA)
     ON_WM_CTLCOLOR_REFLECT()
     ON_NOTIFY_REFLECT(NM_CUSTOMDRAW, OnCustomDraw)
-    ON_NOTIFY_REFLECT(LVN_ITEMCHANGED, OnItemChanged)
     ON_WM_MOUSEMOVE()
     ON_WM_MOUSELEAVE()
     ON_WM_VSCROLL()
@@ -5562,7 +3605,6 @@ BEGIN_MESSAGE_MAP(CCustomListCtrl, CListCtrlA)
 END_MESSAGE_MAP()
 
 static const UINT_PTR kListScrollOpaqueTimerId = 4108;
-static const UINT_PTR kGlassCoalesceTimerId = 4109;
 
 CCustomListCtrl::CCustomListCtrl()
     : m_bAutoDelete(FALSE), m_nHotItem(-1), m_bAeroMode(FALSE)
@@ -5580,40 +3622,6 @@ void CCustomListCtrl::PostNcDestroy()
     CListCtrlA::PostNcDestroy();
     if (m_bAutoDelete) delete this;
 }
-void CCustomListCtrl::SetAeroMode(BOOL b)
-{
-    m_bAeroMode = b;
-    if (GetSafeHwnd())
-    {
-        ApplyListViewGlassStyle();
-        Invalidate();
-    }
-}
-
-DWORD CCustomListCtrl::SetExtendedStyle(DWORD dwNewStyle)
-{
-    if (GetSafeHwnd() && CCC_UseListCtrlRowGlass(m_hWnd))
-        dwNewStyle &= ~LVS_EX_DOUBLEBUFFER;
-    return CListCtrl::SetExtendedStyle(dwNewStyle);
-}
-
-void CCustomListCtrl::ApplyListViewGlassStyle()
-{
-    if (!GetSafeHwnd()) return;
-#if CCUSTOM_AERO_SUPPORT
-    DWORD ex = GetExtendedStyle();
-    DWORD want = ex;
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-        want &= ~LVS_EX_DOUBLEBUFFER;
-    else
-        want |= LVS_EX_DOUBLEBUFFER;
-    if (want != ex)
-        CListCtrl::SetExtendedStyle(want);
-#else
-    CListCtrl::SetExtendedStyle(GetExtendedStyle() | LVS_EX_DOUBLEBUFFER);
-#endif
-}
-
 void CCustomListCtrl::PreSubclassWindow()
 {
     CListCtrlA::PreSubclassWindow();
@@ -5621,7 +3629,7 @@ void CCustomListCtrl::PreSubclassWindow()
     SetBkColor(COLOR_LIST_BG);
     SetTextBkColor(COLOR_LIST_BG);
     SetTextColor(RGB(0, 0, 0));
-    ApplyListViewGlassStyle();
+    SetExtendedStyle(GetExtendedStyle() | LVS_EX_DOUBLEBUFFER);
 }
 HBRUSH CCustomListCtrl::CtlColor(CDC* pDC, UINT)
 {
@@ -5632,14 +3640,12 @@ HBRUSH CCustomListCtrl::CtlColor(CDC* pDC, UINT)
 
 void CCustomListCtrl::OnMouseMove(UINT f, CPoint p)
 {
-    UpdateHotItem(CCC_ListHotItemFromPoint(this, p));
+    LVHITTESTINFO h;
+    h.pt = p;
+    UpdateHotItem(SubItemHitTest(&h));
 
     TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
     TrackMouseEvent(&t);
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-        return;
-#endif
     CListCtrl::OnMouseMove(f, p);
 }
 
@@ -5650,25 +3656,13 @@ void CCustomListCtrl::OnMouseLeave()
 }
 void CCustomListCtrl::ScheduleOpaqueRepaint()
 {
-    if (!GetSafeHwnd()) return;
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-    {
-        RequestGlassRepaint();
-        return;
-    }
-    if (CCC_DeferListToOpaquePaint(m_hWnd))
-        SendMessage(CCC_WM_POST_OPAQUE_PAINT);
-    else
-#endif
+    if (GetSafeHwnd())
         PostMessage(CCC_WM_POST_OPAQUE_PAINT);
 }
 
 LRESULT CCustomListCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-        return 0;
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
     {
         CClientDC dc(this);
@@ -5682,11 +3676,6 @@ void CCustomListCtrl::OnVScroll(UINT n, UINT p, CScrollBar* s)
 {
     CListCtrl::OnVScroll(n, p, s);
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-    {
-        UpdateHotItemFromCursor();
-        return;
-    }
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
         ScheduleOpaqueRepaint();
 #endif
@@ -5697,11 +3686,6 @@ void CCustomListCtrl::OnHScroll(UINT n, UINT p, CScrollBar* s)
 {
     CListCtrl::OnHScroll(n, p, s);
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-    {
-        UpdateHotItemFromCursor();
-        return;
-    }
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
         ScheduleOpaqueRepaint();
 #endif
@@ -5712,11 +3696,6 @@ BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
 {
     BOOL r = CListCtrl::OnMouseWheel(n, z, p);
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-    {
-        UpdateHotItemFromCursor();
-        return r;
-    }
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
     {
         ScheduleOpaqueRepaint();
@@ -5730,20 +3709,11 @@ BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
 
 void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
 {
-    if (nIDEvent == kGlassCoalesceTimerId)
-    {
-        KillTimer(kGlassCoalesceTimerId);
-        if (GetSafeHwnd())
-            Invalidate(FALSE);
-        return;
-    }
     if (nIDEvent == kListScrollOpaqueTimerId)
     {
         KillTimer(kListScrollOpaqueTimerId);
 #if CCUSTOM_AERO_SUPPORT
-        if (CCC_UseListCtrlRowGlass(m_hWnd))
-            RequestGlassRepaint();
-        else if (CCC_IsAeroEnabled() && CCC_IsWin11())
+        if (CCC_IsAeroEnabled() && CCC_IsWin11())
         {
             CClientDC dc(this);
             PaintOpaqueClient(dc);
@@ -5758,51 +3728,16 @@ void CCustomListCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
     CListCtrl::OnWindowPosChanged(lpwndpos);
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-    {
-        if (lpwndpos && !(lpwndpos->flags & SWP_NOSIZE))
-            RequestGlassRepaint();
-        return;
-    }
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
         ScheduleOpaqueRepaint();
 #endif
 }
 
-void CCustomListCtrl::RequestGlassRepaint()
-{
-    if (!GetSafeHwnd()) return;
-    SetTimer(kGlassCoalesceTimerId, 16, NULL);
-}
-
-void CCustomListCtrl::RefreshRows(int iFirst, int iLast)
-{
-    if (!GetSafeHwnd() || iFirst < 0) return;
-    if (iLast < iFirst) iLast = iFirst;
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-    {
-        RequestGlassRepaint();
-        return;
-    }
-#endif
-    RedrawItems(iFirst, iLast);
-}
-
 void CCustomListCtrl::UpdateHotItem(int n)
 {
     if (m_nHotItem == n) return;
-    const int o = m_nHotItem;
+    int o = m_nHotItem;
     m_nHotItem = n;
-    if (!GetSafeHwnd()) return;
-
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-    {
-        RequestGlassRepaint();
-        return;
-    }
-#endif
     if (o >= 0) RedrawItems(o, o);
     if (m_nHotItem >= 0) RedrawItems(m_nHotItem, m_nHotItem);
 }
@@ -5813,7 +3748,9 @@ void CCustomListCtrl::UpdateHotItemFromCursor()
     CPoint pt;
     if (!GetCursorPos(&pt)) return;
     ScreenToClient(&pt);
-    UpdateHotItem(CCC_ListHotItemFromPoint(this, pt));
+    LVHITTESTINFO h;
+    h.pt = pt;
+    UpdateHotItem(SubItemHitTest(&h));
 }
 
 void CCustomListCtrl::RedrawVisibleItems()
@@ -5827,17 +3764,17 @@ void CCustomListCtrl::RedrawVisibleItems()
 
 BOOL CCustomListCtrl::OnEraseBkgnd(CDC*)
 {
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-        return TRUE;
-#endif
     return FALSE;
 }
 
 void CCustomListCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 {
     if (!hdcBuf || !m_hWnd) return;
-    OnPrintClient((WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+    CRect r;
+    GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0) return;
+    ::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
+    ::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
 }
 
 void CCustomListCtrl::PaintOpaqueClient(CDC& dc)
@@ -5855,208 +3792,10 @@ void CCustomListCtrl::PaintOpaqueClient(CDC& dc)
         Default();
         return;
     }
-    OnPrintClient((WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+    ::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
+    ::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
     ::BufferedPaintMakeOpaque(hBP, &r);
     ::EndBufferedPaint(hBP, TRUE);
-}
-
-void CCustomListCtrl::PaintListCtrlClient(CDC& dc, BOOL bChromaCanvas)
-{
-    CRect rcC;
-    GetClientRect(&rcC);
-    if (rcC.Width() <= 0 || rcC.Height() <= 0) return;
-
-    const BOOL bGlassDirect = CCC_UseListCtrlRowGlass(m_hWnd) && !bChromaCanvas;
-    const COLORREF canvas = bChromaCanvas ? CCC_AERO_CHROMA_KEY : COLOR_LIST_BG;
-    if (!bGlassDirect)
-        dc.FillSolidRect(&rcC, canvas);
-
-    CHeaderCtrl* pHdr = GetHeaderCtrl();
-    const int nCols = pHdr ? pHdr->GetItemCount() : 0;
-    if (nCols <= 0) return;
-    const int nLC = nCols - 1;
-
-    const int nCount = GetItemCount();
-    if (nCount <= 0) return;
-
-    int nFirst = GetTopIndex();
-    if (nFirst < 0) nFirst = 0;
-    int nLast = nFirst + GetCountPerPage();
-    if (nLast >= nCount) nLast = nCount - 1;
-
-    for (int ni = nFirst; ni <= nLast; ++ni)
-    {
-        for (int ns = 0; ns < nCols; ++ns)
-            DrawListCtrlSubItem(&dc, ni, ns, nLC, rcC);
-    }
-
-    CRect rLast;
-    if (!bGlassDirect && GetItemRect(nLast, &rLast, LVIR_BOUNDS) && rLast.bottom < rcC.bottom)
-    {
-        CRect fill(rcC.left, rLast.bottom, rcC.right, rcC.bottom);
-        dc.FillSolidRect(&fill, canvas);
-    }
-}
-
-void CCustomListCtrl::PaintListCtrlGlassBackgrounds(CDC& dc, const CRect& rcClient, BOOL bChromaSolid)
-{
-    CHeaderCtrl* pHdr = GetHeaderCtrl();
-    const int nCols = pHdr ? pHdr->GetItemCount() : 0;
-    if (nCols <= 0) return;
-
-    const int nCount = GetItemCount();
-    if (nCount <= 0) return;
-
-    int nFirst = GetTopIndex();
-    if (nFirst < 0) nFirst = 0;
-    int nLast = nFirst + GetCountPerPage();
-    if (nLast >= nCount) nLast = nCount - 1;
-
-    for (int ni = nFirst; ni <= nLast; ++ni)
-        DrawListCtrlRowBackground(&dc, ni, rcClient, bChromaSolid);
-
-    CRect rLast;
-    if (GetItemRect(nLast, &rLast, LVIR_BOUNDS) && rLast.bottom < rcClient.bottom)
-    {
-        CRect fill(rcClient.left, rLast.bottom, rcClient.right, rcClient.bottom);
-        if (bChromaSolid)
-            dc.FillSolidRect(&fill, COLOR_LIST_BG);
-        else
-            FillRectAlpha(&dc, fill, COLOR_LIST_BG, CCC_ScaleGlassAlpha((BYTE)200));
-    }
-}
-
-void CCustomListCtrl::PaintListCtrlRowForeground(CDC& dc, int ni, const CRect& rcClient)
-{
-    CHeaderCtrl* pHdr = GetHeaderCtrl();
-    const int nCols = pHdr ? pHdr->GetItemCount() : 0;
-    if (nCols <= 0 || ni < 0) return;
-    const int nLC = nCols - 1;
-    for (int ns = 0; ns < nCols; ++ns)
-        DrawListCtrlSubItemForeground(&dc, ni, ns, nLC, rcClient);
-}
-
-void CCustomListCtrl::PaintListCtrlForeground(CDC& dc, const CRect& rcClient)
-{
-    CHeaderCtrl* pHdr = GetHeaderCtrl();
-    const int nCols = pHdr ? pHdr->GetItemCount() : 0;
-    if (nCols <= 0) return;
-
-    const int nCount = GetItemCount();
-    if (nCount <= 0) return;
-
-    int nFirst = GetTopIndex();
-    if (nFirst < 0) nFirst = 0;
-    int nLast = nFirst + GetCountPerPage();
-    if (nLast >= nCount) nLast = nCount - 1;
-
-    for (int ni = nFirst; ni <= nLast; ++ni)
-        PaintListCtrlRowForeground(dc, ni, rcClient);
-}
-
-void CCustomListCtrl::PaintGlassClient(CDC& dc)
-{
-#if CCUSTOM_AERO_SUPPORT
-    CRect rcC;
-    GetClientRect(&rcC);
-    const int w = rcC.Width();
-    const int h = rcC.Height();
-    if (w <= 0 || h <= 0) return;
-
-    void* pGlassBits = nullptr;
-    HBITMAP hGlassDib = CCC_CreateAlphaDib32(dc.GetSafeHdc(), w, h, &pGlassBits);
-    CDC memGlass;
-    memGlass.CreateCompatibleDC(&dc);
-    HGDIOBJ obGlass = nullptr;
-    if (hGlassDib)
-    {
-        obGlass = ::SelectObject(memGlass.GetSafeHdc(), hGlassDib);
-        memGlass.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-        PaintListCtrlGlassBackgrounds(memGlass, rcC, TRUE);
-
-        CHeaderCtrl* pHdr = GetHeaderCtrl();
-        const int nCount = GetItemCount();
-        if (pHdr && pHdr->GetItemCount() > 0 && nCount > 0)
-        {
-            int nFirst = GetTopIndex();
-            if (nFirst < 0) nFirst = 0;
-            int nLast = nFirst + GetCountPerPage();
-            if (nLast >= nCount) nLast = nCount - 1;
-            for (int ni = nFirst; ni <= nLast; ++ni)
-            {
-                CRect r;
-                if (!GetItemRect(ni, &r, LVIR_BOUNDS)) continue;
-                if (r.right < rcC.right) r.right = rcC.right;
-                const BOOL bS = (GetItemState(ni, LVIS_SELECTED) & LVIS_SELECTED);
-                const BOOL bH = (ni == m_nHotItem);
-                RECT rr = r;
-                CCC_SetDibAlphaGlassRect(pGlassBits, w, h, rr, CCC_AERO_CHROMA_KEY, CCC_ListGlassRowAlpha(ni, bS, bH));
-            }
-            CRect rLast;
-            if (GetItemRect(nLast, &rLast, LVIR_BOUNDS) && rLast.bottom < rcC.bottom)
-            {
-                RECT fill = { rcC.left, rLast.bottom, rcC.right, rcC.bottom };
-                CCC_SetDibAlphaGlassRect(pGlassBits, w, h, fill, CCC_AERO_CHROMA_KEY, CCC_ScaleGlassAlpha((BYTE)200));
-            }
-        }
-        CCC_SetDibChromaTransparent(pGlassBits, w, h, CCC_AERO_CHROMA_KEY);
-    }
-
-    void* pFgBits = nullptr;
-    HBITMAP hFgDib = CCC_CreateAlphaDib32(dc.GetSafeHdc(), w, h, &pFgBits);
-    CDC memFg;
-    memFg.CreateCompatibleDC(&dc);
-    HGDIOBJ obFg = nullptr;
-    if (hFgDib)
-    {
-        obFg = ::SelectObject(memFg.GetSafeHdc(), hFgDib);
-        memFg.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-        PaintListCtrlForeground(memFg, rcC);
-        CCC_SetDibAlphaFromChroma(pFgBits, w, h, CCC_AERO_CHROMA_KEY);
-    }
-
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &rcC, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP || !hGlassDib)
-    {
-        if (obGlass) ::SelectObject(memGlass.GetSafeHdc(), obGlass);
-        if (hGlassDib) ::DeleteObject(hGlassDib);
-        if (obFg) { ::SelectObject(memFg.GetSafeHdc(), obFg); ::DeleteObject(hFgDib); }
-
-        CDC memFb;
-        CBitmap bmpFb;
-        memFb.CreateCompatibleDC(&dc);
-        bmpFb.CreateCompatibleBitmap(&dc, w, h);
-        CBitmap* obFb = memFb.SelectObject(&bmpFb);
-        memFb.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-        PaintListCtrlGlassBackgrounds(memFb, rcC, TRUE);
-        CCC_BlitChromaGlass(dc.GetSafeHdc(), 0, 0, w, h, memFb.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY, CCC_GetAeroGlassAlpha());
-        memFb.SelectObject(obFb);
-        PaintListCtrlForeground(dc, rcC);
-        return;
-    }
-
-    CCC_InitBufferedPaintTransparent(hBP, w, h);
-    const BLENDFUNCTION bfGlass = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    ::GdiAlphaBlend(hdcBuf, 0, 0, w, h, memGlass.GetSafeHdc(), 0, 0, w, h, bfGlass);
-    if (hFgDib && pFgBits)
-    {
-        const BLENDFUNCTION bfFg = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-        ::GdiAlphaBlend(hdcBuf, 0, 0, w, h, memFg.GetSafeHdc(), 0, 0, w, h, bfFg);
-    }
-    ::EndBufferedPaint(hBP, TRUE);
-
-    if (obGlass) ::SelectObject(memGlass.GetSafeHdc(), obGlass);
-    if (hGlassDib) ::DeleteObject(hGlassDib);
-    if (obFg)
-    {
-        ::SelectObject(memFg.GetSafeHdc(), obFg);
-        ::DeleteObject(hFgDib);
-    }
-#else
-    PaintListCtrlClient(dc, FALSE);
-#endif
 }
 
 void CCustomListCtrl::OnPaint()
@@ -6064,236 +3803,21 @@ void CCustomListCtrl::OnPaint()
     Default();
 }
 
-void CCustomListCtrl::DrawListCtrlRowBackground(CDC* pDC, int ni, const CRect& rcClient, BOOL bChromaSolid)
+LRESULT CCustomListCtrl::OnPrintClient(WPARAM wParam, LPARAM lParam)
 {
-    if (!pDC || ni < 0) return;
-
-    CRect r;
-    if (!GetItemRect(ni, &r, LVIR_BOUNDS)) return;
-    if (r.right < rcClient.right) r.right = rcClient.right;
-
-    const BOOL bS = (GetItemState(ni, LVIS_SELECTED) & LVIS_SELECTED);
-    const BOOL bH = (ni == m_nHotItem);
-    COLORREF bg = CCC_ListGlassRowBg(ni, bS, bH);
-    const CCC_RowGlassStyle* pCustom = LookupRowStyle(ni);
-    if (pCustom && pCustom->bValid && pCustom->bUseGlass)
-        bg = pCustom->clrBg;
-    const BYTE alpha = CCC_ListGlassRowAlpha(ni, bS, bH);
-
-    if (bChromaSolid && CCC_UseListCtrlRowGlass(m_hWnd))
-        pDC->FillSolidRect(&r, bg);
-    else
-        CCC_DrawRowGlassBackground(pDC, r, m_hWnd, m_bAeroMode, bg, alpha, bS, pCustom);
-}
-
-void CCustomListCtrl::DrawListCtrlSubItemForeground(CDC* pDC, int ni, int ns, int nLC, const CRect& rcClient)
-{
-    if (!pDC || ni < 0) return;
-
-    CRect r;
-    if (!GetSubItemRect(ni, ns, LVIR_BOUNDS, r)) return;
-
-    if (ns == 0)
-    {
-        int cx0 = GetColumnWidth(0);
-        if (cx0 > 0) r.right = (std::min)((int)r.right, (int)r.left + cx0);
-    }
-    if (ns >= nLC - 1 && r.right < rcClient.right) r.right = (int)rcClient.right;
-
-    const BOOL bS = (GetItemState(ni, LVIS_SELECTED) & LVIS_SELECTED);
-    const BOOL bH = (ni == m_nHotItem);
-
-    if (ns == 0)
-    {
-        if (bS)
-            DrawHeart(pDC, CRect(r.left + 2, r.top + 4, r.left + 16, r.top + 18), COLOR_HEART);
-        COLORREF rowBg = CCC_ListGlassRowBg(ni, bS, bH);
-        const CCC_RowGlassStyle* pCustom = LookupRowStyle(ni);
-        if (pCustom && pCustom->bValid)
-            rowBg = pCustom->clrBg;
-        COLORREF iconBg = rowBg;
-#if CCUSTOM_AERO_SUPPORT
-        const BOOL bGlassLv = CCC_UseListCtrlRowGlass(m_hWnd);
-        if (!bGlassLv && CCC_IsBlurDialogChild(m_hWnd) && CCC_IsAeroEnabled())
-        {
-            const BYTE alpha = CCC_ListGlassRowAlpha(ni, bS, bH);
-            iconBg = CCC_RowSolidFillColor(m_hWnd, m_hWnd, m_bAeroMode, rowBg, alpha, bS, pCustom);
-        }
-#else
-        const BOOL bGlassLv = FALSE;
-#endif
-        CRect ri;
-        if (GetItemRect(ni, &ri, LVIR_ICON))
-        {
-            LVITEM lvi = { 0 };
-            lvi.mask = LVIF_IMAGE;
-            lvi.iItem = ni;
-            GetItem(&lvi);
-            CImageList* pIL = GetImageList(LVSIL_SMALL);
-            if (pIL && lvi.iImage >= 0)
-            {
-                const COLORREF iconFill = bGlassLv ? CLR_NONE : iconBg;
-                DrawTransparentIcon(pDC, pIL, lvi.iImage, ri, RGB(255, 255, 255), iconFill);
-            }
-        }
-        if (bH && !bS) DrawStar(pDC, r.left + 10, r.top + 10, 2, RGB(255, 215, 0));
-    }
-
-    CString st = CCC_FetchListSubitemText(m_hWnd, ni, ns);
-#if CCUSTOM_AERO_SUPPORT
-    const BOOL bGlassText = CCC_UseListCtrlRowGlass(m_hWnd);
-#else
-    const BOOL bGlassText = FALSE;
-#endif
-    pDC->SetTextColor((m_bAeroMode && !bGlassText) ? RGB(1, 1, 1) : RGB(0, 0, 0));
-    pDC->SetBkMode(TRANSPARENT);
-
-    CRect rt = r;
-    if (ns == 0)
-    {
-        int tl = r.left + 36;
-        CRect ri;
-        if (GetItemRect(ni, &ri, LVIR_ICON))
-        {
-            LVITEM lvi = { 0 };
-            lvi.mask = LVIF_IMAGE;
-            lvi.iItem = ni;
-            GetItem(&lvi);
-            CImageList* pIL = GetImageList(LVSIL_SMALL);
-            if (pIL && lvi.iImage >= 0 && ri.Width() > 0)
-                tl = (std::max)(tl, (int)ri.right + 4);
-        }
-        tl = (std::min)(tl, (int)r.right - 4);
-        rt.left = (std::max)(tl, (int)r.left + 4);
-    }
-    else
-        rt.left += 6;
-    rt.DeflateRect(2, 0);
-
-    CFont* po = pDC->SelectObject(GetFont());
-    DrawListSubitemCellText(pDC, st, rt);
-    pDC->SelectObject(po);
-
-    if (ns == nLC)
-        DrawLaceLine(pDC, r.left + 10, r.bottom - 1, r.right - 10, r.bottom - 1, RGB(200, 180, 220));
-    if (GetExtendedStyle() & LVS_EX_GRIDLINES)
-    {
-        CPen pp(PS_SOLID, 1, RGB(220, 220, 230));
-        CPen* po2 = pDC->SelectObject(&pp);
-        pDC->MoveTo(r.left, r.bottom - 1);
-        pDC->LineTo(r.right, r.bottom - 1);
-        pDC->SelectObject(po2);
-    }
-}
-
-void CCustomListCtrl::DrawListCtrlSubItem(CDC* pDC, int ni, int ns, int nLC, const CRect& rcClient)
-{
-    if (!pDC || ni < 0) return;
-
-    CRect r;
-    if (!GetSubItemRect(ni, ns, LVIR_BOUNDS, r)) return;
-
-    if (ns == 0)
-    {
-        int cx0 = GetColumnWidth(0);
-        if (cx0 > 0) r.right = (std::min)((int)r.right, (int)r.left + cx0);
-    }
-    if (ns >= nLC - 1 && r.right < rcClient.right) r.right = (int)rcClient.right;
-
-    const BOOL bS = (GetItemState(ni, LVIS_SELECTED) & LVIS_SELECTED);
-    const BOOL bH = (ni == m_nHotItem);
-    COLORREF bg = CCC_ListGlassRowBg(ni, bS, bH);
-    const CCC_RowGlassStyle* pCustom = LookupRowStyle(ni);
-    if (pCustom && pCustom->bValid && pCustom->bUseGlass)
-        bg = pCustom->clrBg;
-    const BYTE alpha = CCC_ListGlassRowAlpha(ni, bS, bH);
-    CCC_DrawRowGlassBackground(pDC, r, m_hWnd, m_bAeroMode, bg, alpha, bS, pCustom);
-    DrawListCtrlSubItemForeground(pDC, ni, ns, nLC, rcClient);
-}
-
-LRESULT CCustomListCtrl::OnPrintClient(WPARAM wParam, LPARAM)
-{
-    CDC* pDC = CDC::FromHandle((HDC)wParam);
-    if (!pDC || !GetSafeHwnd()) return 0;
-
-    CRect rcC;
-    GetClientRect(&rcC);
-    if (rcC.Width() <= 0 || rcC.Height() <= 0) return 0;
-
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-    {
-        PaintGlassClient(*pDC);
-        return 0;
-    }
-#endif
-    PaintListCtrlClient(*pDC, FALSE);
-    return 0;
-}
-
-void CCustomListCtrl::OnItemChanged(NMHDR* pNMHDR, LRESULT* pResult)
-{
-    *pResult = 0;
-    const NMLISTVIEW* p = reinterpret_cast<NMLISTVIEW*>(pNMHDR);
-    if (!p || !(p->uChanged & LVIF_STATE)) return;
-    const UINT stMask = LVIS_SELECTED | LVIS_FOCUSED;
-    if (!(p->uOldState & stMask) && !(p->uNewState & stMask)) return;
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseListCtrlRowGlass(m_hWnd))
-        RequestGlassRepaint();
-    else if (CCC_DeferListToOpaquePaint(m_hWnd))
-        SendMessage(CCC_WM_POST_OPAQUE_PAINT);
-#endif
+    return DefWindowProc(WM_PRINTCLIENT, (WPARAM)wParam, (LPARAM)lParam);
 }
 
 void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 {
     NMLVCUSTOMDRAW* p = reinterpret_cast<NMLVCUSTOMDRAW*>(pNMHDR);
     *pResult = CDRF_DODEFAULT;
-#if CCUSTOM_AERO_SUPPORT
-    static thread_local BOOL s_tlGlassPaintedThisFrame = FALSE;
-    if (p->nmcd.dwDrawStage == CDDS_PREPAINT)
-        s_tlGlassPaintedThisFrame = FALSE;
-#endif
     switch (p->nmcd.dwDrawStage)
     {
     case CDDS_PREPAINT:
-#if CCUSTOM_AERO_SUPPORT
-        if (CCC_UseListCtrlRowGlass(m_hWnd))
-        {
-            CDC dc;
-            dc.Attach(p->nmcd.hdc);
-            PaintGlassClient(dc);
-            dc.Detach();
-            s_tlGlassPaintedThisFrame = TRUE;
-            *pResult = CDRF_SKIPDEFAULT;
-            return;
-        }
-        if (CCC_DeferListToOpaquePaint(m_hWnd))
-        {
-            *pResult = CDRF_SKIPDEFAULT;
-            SendMessage(CCC_WM_POST_OPAQUE_PAINT);
-            return;
-        }
-#endif
         *pResult = CDRF_NOTIFYITEMDRAW;
         break;
     case CDDS_ITEMPREPAINT:
-#if CCUSTOM_AERO_SUPPORT
-        if (CCC_UseListCtrlRowGlass(m_hWnd))
-        {
-            if (!s_tlGlassPaintedThisFrame)
-            {
-                CDC dc;
-                dc.Attach(p->nmcd.hdc);
-                PaintGlassClient(dc);
-                dc.Detach();
-                s_tlGlassPaintedThisFrame = TRUE;
-            }
-            *pResult = CDRF_SKIPDEFAULT;
-            return;
-        }
-#endif
         *pResult = CDRF_NOTIFYSUBITEMDRAW;
         break;
     case CDDS_ITEMPREPAINT | CDDS_SUBITEM:
@@ -6301,10 +3825,89 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         CDC* pDC = CDC::FromHandle(p->nmcd.hdc);
         int ni = (int)p->nmcd.dwItemSpec;
         int ns = p->iSubItem;
+        CRect r;
+        GetSubItemRect(ni, ns, LVIR_BOUNDS, r);
+
+        if (ns == 0)
+        {
+            int cx0 = GetColumnWidth(0);
+            if (cx0 > 0) r.right = (std::min)((int)r.right, (int)r.left + cx0);
+        }
+        int nLC = GetHeaderCtrl()->GetItemCount() - 1;
         CRect rcC;
         GetClientRect(&rcC);
-        int nLC = GetHeaderCtrl()->GetItemCount() - 1;
-        DrawListCtrlSubItem(pDC, ni, ns, nLC, rcC);
+        if (ns >= nLC - 1 && r.right < rcC.right) r.right = (int)rcC.right;
+
+        BOOL bS = (GetItemState(ni, LVIS_SELECTED) & LVIS_SELECTED);
+        BOOL bH = (ni == m_nHotItem);
+        COLORREF bg = bS ? COLOR_SEL_BG : (ni % 2 == 0 ? COLOR_LIST_BG : RGB(183, 221, 238));
+        if (bH && !bS) bg = RGB(220, 235, 250);
+
+        if (m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd))
+        {
+            pDC->FillSolidRect(&r, RGB(0, 0, 0));
+            FillRectAlpha(pDC, r, bg, bS ? 180 : bH ? 140 : AERO_ALPHA_SEMI);
+        }
+        else
+            pDC->FillSolidRect(&r, bg);
+
+        if (ns == 0)
+        {
+            if (bS) DrawHeart(pDC, CRect(r.left + 2, r.top + 4, r.left + 16, r.top + 18), COLOR_HEART);
+            CRect ri;
+            if (GetItemRect(ni, &ri, LVIR_ICON))
+            {
+                LVITEM lvi = { 0 };
+                lvi.mask = LVIF_IMAGE;
+                lvi.iItem = ni;
+                GetItem(&lvi);
+                CImageList* pIL = GetImageList(LVSIL_SMALL);
+                if (pIL && lvi.iImage >= 0)
+                    DrawTransparentIcon(pDC, pIL, lvi.iImage, ri, RGB(255, 255, 255));
+            }
+            if (bH && !bS) DrawStar(pDC, r.left + 10, r.top + 10, 2, RGB(255, 215, 0));
+        }
+
+        CString st = GetItemText(ni, ns);
+        pDC->SetTextColor(m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0));
+        pDC->SetBkMode(TRANSPARENT);
+
+        CRect rt = r;
+        if (ns == 0)
+        {
+            int tl = r.left + 36;
+            CRect ri;
+            if (GetItemRect(ni, &ri, LVIR_ICON))
+            {
+                LVITEM lvi = { 0 };
+                lvi.mask = LVIF_IMAGE;
+                lvi.iItem = ni;
+                GetItem(&lvi);
+                CImageList* pIL = GetImageList(LVSIL_SMALL);
+                if (pIL && lvi.iImage >= 0 && ri.Width() > 0)
+                    tl = (std::max)(tl, (int)ri.right + 4);
+            }
+            tl = (std::min)(tl, (int)r.right - 4);
+            rt.left = (std::max)(tl, (int)r.left + 4);
+        }
+        else
+            rt.left += 6;
+        rt.DeflateRect(2, 0);
+
+        CFont* po = pDC->SelectObject(GetFont());
+        DrawListSubitemCellText(pDC, st, rt);
+        pDC->SelectObject(po);
+
+        if (ns == nLC)
+            DrawLaceLine(pDC, r.left + 10, r.bottom - 1, r.right - 10, r.bottom - 1, RGB(200, 180, 220));
+        if (GetExtendedStyle() & LVS_EX_GRIDLINES)
+        {
+            CPen pp(PS_SOLID, 1, RGB(220, 220, 230));
+            CPen* po2 = pDC->SelectObject(&pp);
+            pDC->MoveTo(r.left, r.bottom - 1);
+            pDC->LineTo(r.right, r.bottom - 1);
+            pDC->SelectObject(po2);
+        }
         *pResult = CDRF_SKIPDEFAULT;
         break;
     }
@@ -6631,12 +4234,11 @@ BEGIN_MESSAGE_MAP(CCustomCheckBox, CButton)
     ON_WM_LBUTTONUP()
     ON_WM_MOUSEMOVE()
     ON_WM_MOUSELEAVE()
-    ON_WM_SHOWWINDOW()
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
 END_MESSAGE_MAP()
 
 CCustomCheckBox::CCustomCheckBox()
-    : m_bAutoDelete(FALSE), m_bIsFlatStyle(FALSE), m_bIsPushLike(FALSE), m_bIsPressed(FALSE),
+    : m_bAutoDelete(FALSE), m_bIsFlatStyle(FALSE), m_bIsPressed(FALSE),
     m_bIsHot(FALSE), m_bTracking(FALSE), m_nCheck(0), m_bAeroMode(FALSE)
 {}
 
@@ -6660,16 +4262,6 @@ void CCustomCheckBox::SetCheck(int n)
     Invalidate();
 }
 
-void CCustomCheckBox::RepaintClient()
-{
-    if (!GetSafeHwnd())
-        return;
-    CClientDC dc(this);
-    CRect r;
-    GetClientRect(&r);
-    OnDrawLayer(&dc, r);
-}
-
 void CCustomCheckBox::PreSubclassWindow()
 {
     HMODULE h = LoadLibrary(_T("UxTheme.dll"));
@@ -6680,12 +4272,10 @@ void CCustomCheckBox::PreSubclassWindow()
         if (p) p(m_hWnd, L"", L"");
         FreeLibrary(h);
     }
-    m_bIsPushLike = (GetStyle() & BS_PUSHLIKE) != 0;
-    m_bIsFlatStyle = (GetStyle() & BS_FLAT) || m_bIsPushLike;
+    m_bIsFlatStyle = (GetStyle() & BS_FLAT) || (GetStyle() & BS_PUSHLIKE);
     m_nCheck = CButton::GetCheck();
-    ModifyStyle(BS_FLAT | BS_PUSHLIKE, 0);
+    ModifyStyle(BS_TYPEMASK | BS_FLAT | BS_PUSHLIKE, BS_OWNERDRAW);
     CButton::PreSubclassWindow();
-    Invalidate(FALSE);
 }
 
 void CCustomCheckBox::SetFont(CFont* p, BOOL b)
@@ -6740,13 +4330,6 @@ void CCustomCheckBox::OnMouseLeave()
 {
     m_bIsHot = m_bTracking = FALSE;
     Invalidate();
-}
-
-void CCustomCheckBox::OnShowWindow(BOOL bShow, UINT nStatus)
-{
-    CButton::OnShowWindow(bShow, nStatus);
-    if (bShow)
-        RepaintClient();
 }
 
 void CCustomCheckBox::OnPaint()
@@ -6811,18 +4394,6 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             dc.Draw3dRect(CRect(0, 0, rw, rh), s ? RGB(100, 100, 100) : RGB(255, 255, 255), s ? RGB(255, 255, 255) : RGB(100, 100, 100));
             CString t; GetWindowText(t);
             DrawSmartText(&dc, CRect(0, 0, rw, rh), t, bD, s);
-            if (CCC_UseTransparentPaint(m_hWnd, m_bAeroMode) && !m_bIsPushLike)
-            {
-                const CRect full(0, 0, rw, rh);
-                CCC_RemapSolidColorInDC(dc, full, COLOR_BUTTON_BG, CCC_AERO_CHROMA_KEY);
-                CCC_RemapSolidColorInDC(dc, full, COLOR_BUTTON_HOVER, CCC_AERO_CHROMA_KEY);
-                CCC_RemapSolidColorInDC(dc, full, COLOR_BUTTON_PUSHED, CCC_AERO_CHROMA_KEY);
-                CCC_RemapSolidColorInDC(dc, full, RGB(200, 200, 200), CCC_AERO_CHROMA_KEY);
-            }
-            else if (CCC_UseTransparentPaint(m_hWnd, m_bAeroMode) && m_bIsPushLike)
-            {
-                // ボタン見た目: 前景色は不透明のまま、隙間のみガラス（CCustomStandardButton へ移行推奨）
-            }
         }
         else
         {
@@ -7057,46 +4628,6 @@ void CCustomDialog::OnPaint()
 #if CCUSTOM_AERO_SUPPORT
 static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf);
 
-void CCC_PaintButtonSTGlass(HWND hWnd, CButtonST* pBtn, HDC hdcDest)
-{
-    if (!hWnd || !pBtn || !hdcDest) return;
-    RECT rect = {};
-    ::GetClientRect(hWnd, &rect);
-    const int w = rect.right - rect.left;
-    const int h = rect.bottom - rect.top;
-    if (w <= 0 || h <= 0) return;
-
-    CDC memDC;
-    memDC.CreateCompatibleDC(CDC::FromHandle(hdcDest));
-    CBitmap bmp;
-    bmp.CreateCompatibleBitmap(CDC::FromHandle(hdcDest), w, h);
-    CBitmap* pOld = memDC.SelectObject(&bmp);
-    memDC.FillSolidRect(0, 0, w, h, CCC_AERO_CHROMA_KEY);
-
-    DRAWITEMSTRUCT dis = {};
-    dis.CtlType = ODT_BUTTON;
-    dis.CtlID = (UINT)::GetDlgCtrlID(hWnd);
-    dis.itemID = dis.CtlID;
-    dis.itemAction = ODA_DRAWENTIRE;
-    const UINT st = (UINT)::SendMessage(hWnd, BM_GETSTATE, 0, 0);
-    if (st & BST_PUSHED) dis.itemState |= ODS_SELECTED;
-    if (!::IsWindowEnabled(hWnd)) dis.itemState |= ODS_DISABLED;
-    if (::GetFocus() == hWnd) dis.itemState |= ODS_FOCUS;
-    dis.hwndItem = hWnd;
-    dis.hDC = memDC.GetSafeHdc();
-    dis.rcItem = { 0, 0, w, h };
-    pBtn->BeginGlassCompositeDraw();
-    pBtn->DrawItem(&dis);
-    pBtn->EndGlassCompositeDraw();
-
-    CRect rcC(0, 0, w, h);
-    CDC dcDest;
-    dcDest.Attach(hdcDest);
-    CCC_CommitUniformGlassFromFgMem(dcDest, rcC, COLOR_BUTTON_BG, memDC.GetSafeHdc(), w, h, FALSE);
-    dcDest.Detach();
-    memDC.SelectObject(pOld);
-}
-
 static void CCC_DrawButtonSTClient(HWND hWnd, CButtonST* pBtn, HDC hdc, const RECT& rect)
 {
     CBrush br(COLOR_BUTTON_BG);
@@ -7116,31 +4647,18 @@ static void CCC_DrawButtonSTClient(HWND hWnd, CButtonST* pBtn, HDC hdc, const RE
     pBtn->DrawItem(&dis);
 }
 
-static void CCC_RepaintGlassHwnd(HWND hWnd)
-{
-    if (!hWnd || !::IsWindow(hWnd))
-        return;
-    // 親の UpdateWindow では子の WM_PAINT は走らない。各ガラス子を同期再描画する。
-    ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
-}
-
 static void CCC_ForcePaintButtonST(HWND hWnd, CButtonST* pBtn)
 {
     if (!hWnd || !::IsWindow(hWnd) || !pBtn)
         return;
+    pBtn->ClearBackgroundCache();
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseBlurChildGlassPaint(hWnd))
-    {
-        CCC_RepaintGlassHwnd(hWnd);
-        return;
-    }
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
     {
-        ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+        ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
         return;
     }
 #endif
-    pBtn->ClearBackgroundCache();
     CWnd* pw = CWnd::FromHandlePermanent(hWnd);
     if (!pw) return;
     RECT rect = {};
@@ -7149,401 +4667,6 @@ static void CCC_ForcePaintButtonST(HWND hWnd, CButtonST* pBtn)
         return;
     CClientDC dc(pw);
     CCC_DrawButtonSTClient(hWnd, pBtn, dc.GetSafeHdc(), rect);
-}
-
-class CCustomButtonSTGlassFixer
-{
-public:
-    CCustomButtonSTGlassFixer() : m_hWnd(NULL), m_pBtn(NULL) {}
-    ~CCustomButtonSTGlassFixer() { Uninstall(); }
-
-    BOOL Install(HWND hWnd, CButtonST* pBtn)
-    {
-        if (m_hWnd || !pBtn) return FALSE;
-        if (!::IsWindow(hWnd)) return FALSE;
-        m_hWnd = hWnd;
-        m_pBtn = pBtn;
-        m_pBtn->SetAeroGlassMode(TRUE);
-        return ::SetWindowSubclass(hWnd, SubclassProc, (UINT_PTR)this, (DWORD_PTR)this);
-    }
-
-    void Uninstall()
-    {
-        if (m_hWnd && ::IsWindow(m_hWnd))
-            ::RemoveWindowSubclass(m_hWnd, SubclassProc, (UINT_PTR)this);
-        m_hWnd = NULL;
-        m_pBtn = NULL;
-    }
-
-private:
-    HWND m_hWnd;
-    CButtonST* m_pBtn;
-
-    static void PaintBtn(CCustomButtonSTGlassFixer* pThis, HDC hDC)
-    {
-        if (!pThis || !pThis->m_pBtn || !hDC || !pThis->m_hWnd)
-            return;
-        CCC_PaintButtonSTGlass(pThis->m_hWnd, pThis->m_pBtn, hDC);
-    }
-
-    static LRESULT CALLBACK SubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
-        UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
-    {
-        CCustomButtonSTGlassFixer* pThis = (CCustomButtonSTGlassFixer*)dwRefData;
-        switch (uMsg)
-        {
-        case WM_ERASEBKGND:
-            return TRUE;
-        case WM_PAINT:
-        {
-            PAINTSTRUCT ps = {};
-            HDC hDC = ::BeginPaint(hWnd, &ps);
-            if (hDC)
-                PaintBtn(pThis, hDC);
-            ::EndPaint(hWnd, &ps);
-            return 0;
-        }
-        case WM_PRINTCLIENT:
-            PaintBtn(pThis, (HDC)wParam);
-            return 0;
-        case WM_SHOWWINDOW:
-        {
-            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            if (wParam && pThis->m_pBtn)
-                CCC_ForcePaintButtonST(hWnd, pThis->m_pBtn);
-            return lRes;
-        }
-        case WM_DESTROY:
-            ::RemoveWindowSubclass(hWnd, SubclassProc, uIdSubclass);
-            pThis->m_hWnd = NULL;
-            pThis->m_pBtn = NULL;
-            break;
-        }
-        return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-    }
-};
-
-static std::map<HWND, CCustomButtonSTGlassFixer*> g_buttonSTGlassFixers;
-
-static void CCC_PaintEditGlass(HWND hWnd, CCustomEdit* pEdit, HDC hdcDest)
-{
-    if (!hWnd || !pEdit || !hdcDest) return;
-    CDC dc;
-    dc.Attach(hdcDest);
-    pEdit->PaintGlassClient(dc, FALSE);
-    dc.Detach();
-}
-
-static void CCC_PaintComboGlass(HWND hWnd, CCustomComboBox* pCombo, HDC hdcDest)
-{
-    if (!hWnd || !pCombo || !hdcDest) return;
-    CDC dc;
-    dc.Attach(hdcDest);
-    pCombo->PaintGlassClient(dc, FALSE);
-    dc.Detach();
-}
-
-class CCustomEditGlassFixer
-{
-public:
-    CCustomEditGlassFixer() : m_hWnd(NULL), m_pEdit(NULL) {}
-    ~CCustomEditGlassFixer() { Uninstall(); }
-
-    BOOL Install(HWND hWnd, CCustomEdit* pEdit)
-    {
-        if (m_hWnd || !pEdit) return FALSE;
-        if (!::IsWindow(hWnd)) return FALSE;
-        m_hWnd = hWnd;
-        m_pEdit = pEdit;
-        return ::SetWindowSubclass(hWnd, SubclassProc, (UINT_PTR)this, (DWORD_PTR)this);
-    }
-
-    void Uninstall()
-    {
-        if (m_hWnd && ::IsWindow(m_hWnd))
-            ::RemoveWindowSubclass(m_hWnd, SubclassProc, (UINT_PTR)this);
-        m_hWnd = NULL;
-        m_pEdit = NULL;
-    }
-
-private:
-    HWND m_hWnd;
-    CCustomEdit* m_pEdit;
-
-    static void PaintEdit(CCustomEditGlassFixer* pThis, HDC hDC)
-    {
-        if (!pThis || !pThis->m_pEdit || !hDC || !pThis->m_hWnd)
-            return;
-        CCC_PaintEditGlass(pThis->m_hWnd, pThis->m_pEdit, hDC);
-    }
-
-    static LRESULT CALLBACK SubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
-        UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
-    {
-        CCustomEditGlassFixer* pThis = (CCustomEditGlassFixer*)dwRefData;
-        switch (uMsg)
-        {
-        case WM_ERASEBKGND:
-            return TRUE;
-        case WM_PAINT:
-        {
-            PAINTSTRUCT ps = {};
-            HDC hDC = ::BeginPaint(hWnd, &ps);
-            if (hDC)
-                PaintEdit(pThis, hDC);
-            ::EndPaint(hWnd, &ps);
-            return 0;
-        }
-        case WM_PRINTCLIENT:
-            PaintEdit(pThis, (HDC)wParam);
-            return 0;
-        case WM_DESTROY:
-            ::RemoveWindowSubclass(hWnd, SubclassProc, uIdSubclass);
-            pThis->m_hWnd = NULL;
-            pThis->m_pEdit = NULL;
-            break;
-        }
-        return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-    }
-};
-
-class CCustomComboGlassFixer
-{
-public:
-    CCustomComboGlassFixer() : m_hWnd(NULL), m_pCombo(NULL) {}
-    ~CCustomComboGlassFixer() { Uninstall(); }
-
-    BOOL Install(HWND hWnd, CCustomComboBox* pCombo)
-    {
-        if (m_hWnd || !pCombo) return FALSE;
-        if (!::IsWindow(hWnd)) return FALSE;
-        m_hWnd = hWnd;
-        m_pCombo = pCombo;
-        COMBOBOXINFO cbi = { sizeof(COMBOBOXINFO) };
-        if (::GetComboBoxInfo(hWnd, &cbi) && cbi.hwndItem && cbi.hwndItem != hWnd)
-            ::ShowWindow(cbi.hwndItem, SW_HIDE);
-        return ::SetWindowSubclass(hWnd, SubclassProc, (UINT_PTR)this, (DWORD_PTR)this);
-    }
-
-    void Uninstall()
-    {
-        if (m_hWnd && ::IsWindow(m_hWnd))
-            ::RemoveWindowSubclass(m_hWnd, SubclassProc, (UINT_PTR)this);
-        m_hWnd = NULL;
-        m_pCombo = NULL;
-    }
-
-private:
-    HWND m_hWnd;
-    CCustomComboBox* m_pCombo;
-
-    static void PaintCombo(CCustomComboGlassFixer* pThis, HDC hDC)
-    {
-        if (!pThis || !pThis->m_pCombo || !hDC || !pThis->m_hWnd)
-            return;
-        CCC_PaintComboGlass(pThis->m_hWnd, pThis->m_pCombo, hDC);
-    }
-
-    static LRESULT CALLBACK SubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
-        UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
-    {
-        CCustomComboGlassFixer* pThis = (CCustomComboGlassFixer*)dwRefData;
-        switch (uMsg)
-        {
-        case WM_ERASEBKGND:
-            return TRUE;
-        case WM_PAINT:
-        {
-            PAINTSTRUCT ps = {};
-            HDC hDC = ::BeginPaint(hWnd, &ps);
-            if (hDC)
-                PaintCombo(pThis, hDC);
-            ::EndPaint(hWnd, &ps);
-            return 0;
-        }
-        case WM_PRINTCLIENT:
-            PaintCombo(pThis, (HDC)wParam);
-            return 0;
-        case WM_DESTROY:
-            ::RemoveWindowSubclass(hWnd, SubclassProc, uIdSubclass);
-            pThis->m_hWnd = NULL;
-            pThis->m_pCombo = NULL;
-            break;
-        }
-        return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-    }
-};
-
-static std::map<HWND, CCustomEditGlassFixer*> g_editGlassFixers;
-static std::map<HWND, CCustomComboGlassFixer*> g_comboGlassFixers;
-
-static void CCC_ClearEditComboGlassFixersForDialog(HWND hDlg)
-{
-    if (!hDlg) return;
-    for (auto it = g_editGlassFixers.begin(); it != g_editGlassFixers.end(); )
-    {
-        if (CCC_IsDescendantOf(hDlg, it->first))
-        {
-            if (it->second) { it->second->Uninstall(); delete it->second; }
-            it = g_editGlassFixers.erase(it);
-        }
-        else
-            ++it;
-    }
-    for (auto it = g_comboGlassFixers.begin(); it != g_comboGlassFixers.end(); )
-    {
-        if (CCC_IsDescendantOf(hDlg, it->first))
-        {
-            if (it->second) { it->second->Uninstall(); delete it->second; }
-            it = g_comboGlassFixers.erase(it);
-        }
-        else
-            ++it;
-    }
-}
-
-static void CCC_InstallEditComboGlassFixersRecursive(HWND hParent)
-{
-    for (HWND hChild = ::GetWindow(hParent, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (CWnd* pw = CWnd::FromHandlePermanent(hChild))
-        {
-            if (CCC_UseEditGlass(hChild))
-            {
-                if (CCustomEdit* pEdit = dynamic_cast<CCustomEdit*>(pw))
-                {
-                    if (g_editGlassFixers.find(hChild) == g_editGlassFixers.end())
-                    {
-                        CCustomEditGlassFixer* pFixer = new CCustomEditGlassFixer();
-                        if (pFixer->Install(hChild, pEdit))
-                            g_editGlassFixers[hChild] = pFixer;
-                        else
-                            delete pFixer;
-                    }
-                    ::InvalidateRect(hChild, NULL, FALSE);
-                }
-            }
-            if (CCC_UseComboGlass(hChild))
-            {
-                if (CCustomComboBox* pCombo = dynamic_cast<CCustomComboBox*>(pw))
-                {
-                    if (g_comboGlassFixers.find(hChild) == g_comboGlassFixers.end())
-                    {
-                        CCustomComboGlassFixer* pFixer = new CCustomComboGlassFixer();
-                        if (pFixer->Install(hChild, pCombo))
-                            g_comboGlassFixers[hChild] = pFixer;
-                        else
-                            delete pFixer;
-                    }
-                    ::InvalidateRect(hChild, NULL, FALSE);
-                }
-            }
-        }
-        CCC_InstallEditComboGlassFixersRecursive(hChild);
-    }
-}
-
-static void CCC_ForcePaintGlassFieldsOnDialog(HWND hDlg)
-{
-    if (!hDlg || !::IsWindow(hDlg)) return;
-    for (HWND hChild = ::GetWindow(hDlg, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (CCC_UseEditGlass(hChild) || CCC_UseComboGlass(hChild))
-            CCC_RepaintGlassHwnd(hChild);
-        CCC_ForcePaintGlassFieldsOnDialog(hChild);
-    }
-}
-
-static void CCC_ReinstallBlurGlassFixersOnDialog(HWND hDlg)
-{
-    if (!hDlg || !::IsWindow(hDlg) || !CCC_IsAeroEnabled() || !CCC_IsWin11()) return;
-    CCC_InstallButtonSTGlassFixersRecursive(hDlg);
-    CCC_InstallEditComboGlassFixersRecursive(hDlg);
-    CCC_ForcePaintAllButtonSTOnDialog(hDlg);
-    CCC_ForcePaintGlassFieldsOnDialog(hDlg);
-}
-
-static void CCC_RestoreParentBlurGlassFixers(CWnd* pDlg)
-{
-    if (!pDlg) return;
-    CWnd* pParent = pDlg->GetParent();
-    if (!pParent || !pParent->GetSafeHwnd()) return;
-    if (dynamic_cast<CCustomBlurDialogBase*>(pParent) || dynamic_cast<CCustomBlurDialogExBase*>(pParent))
-        CCC_ReinstallBlurGlassFixersOnDialog(pParent->GetSafeHwnd());
-}
-
-static BOOL CCC_IsDescendantOf(HWND hAncestor, HWND hWnd)
-{
-    if (!hAncestor || !hWnd || !::IsWindow(hAncestor) || !::IsWindow(hWnd))
-        return FALSE;
-    for (HWND h = hWnd; h; h = ::GetParent(h))
-    {
-        if (h == hAncestor)
-            return TRUE;
-    }
-    return FALSE;
-}
-
-static void CCC_ClearButtonSTGlassFixersForDialog(HWND hDlg)
-{
-    if (!hDlg) return;
-    for (auto it = g_buttonSTGlassFixers.begin(); it != g_buttonSTGlassFixers.end(); )
-    {
-        if (CCC_IsDescendantOf(hDlg, it->first))
-        {
-            if (it->second)
-            {
-                it->second->Uninstall();
-                delete it->second;
-            }
-            it = g_buttonSTGlassFixers.erase(it);
-        }
-        else
-            ++it;
-    }
-}
-
-static void CCC_ClearButtonSTGlassFixers()
-{
-    for (auto it = g_buttonSTGlassFixers.begin(); it != g_buttonSTGlassFixers.end(); ++it)
-    {
-        if (it->second)
-        {
-            it->second->Uninstall();
-            delete it->second;
-        }
-    }
-    g_buttonSTGlassFixers.clear();
-}
-
-static void CCC_InstallButtonSTGlassFixersRecursive(HWND hParent)
-{
-    for (HWND hChild = ::GetWindow(hParent, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (CWnd* pw = CWnd::FromHandlePermanent(hChild))
-        {
-            if (CButtonST* pBtn = dynamic_cast<CButtonST*>(pw))
-            {
-                auto it = g_buttonSTGlassFixers.find(hChild);
-                if (it != g_buttonSTGlassFixers.end())
-                {
-                    ::InvalidateRect(hChild, NULL, FALSE);
-                }
-                else
-                {
-                    CCustomButtonSTGlassFixer* pFixer = new CCustomButtonSTGlassFixer();
-                    if (pFixer->Install(hChild, pBtn))
-                    {
-                        g_buttonSTGlassFixers[hChild] = pFixer;
-                        CCC_ForcePaintButtonST(hChild, pBtn);
-                    }
-                    else
-                        delete pFixer;
-                }
-            }
-        }
-        CCC_InstallButtonSTGlassFixersRecursive(hChild);
-    }
 }
 
 // Win11: 子ウィンドウの GDI はアルファ0のまま DWM に合成される。
@@ -7582,20 +4705,8 @@ private:
         switch (uMsg)
         {
         case WM_ERASEBKGND:
-        {
-            if (!pThis->m_bPrinting)
-            {
-                if (HDC hdc = (HDC)wParam)
-                {
-                    RECT rect = {};
-                    ::GetClientRect(hWnd, &rect);
-                    CBrush br(pThis->m_clrBg);
-                    ::FillRect(hdc, &rect, (HBRUSH)br.GetSafeHandle());
-                }
-                return TRUE;
-            }
+            if (!pThis->m_bPrinting) return TRUE;
             return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-        }
         case WM_PRINTCLIENT:
             if (pThis->m_bPrinting)
                 return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
@@ -7608,39 +4719,18 @@ private:
             ::EndPaint(hWnd, &ps);
             return 0;
         }
-        case WM_LBUTTONUP:
-        {
-            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-#if CCUSTOM_AERO_SUPPORT
-            if (CCC_DeferListToOpaquePaint(hWnd))
-            {
-                HDC hDC = ::GetDC(hWnd);
-                if (hDC)
-                {
-                    pThis->PaintOpaque(hWnd, hDC);
-                    ::ReleaseDC(hWnd, hDC);
-                }
-            }
-#endif
-            return lRes;
-        }
         case WM_VSCROLL:
         case WM_HSCROLL:
         case WM_MOUSEWHEEL:
         {
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-#if CCUSTOM_AERO_SUPPORT
-            if (CCC_DeferListToOpaquePaint(hWnd))
+            HDC hDC = ::GetDC(hWnd);
+            if (hDC)
             {
-                HDC hDC = ::GetDC(hWnd);
-                if (hDC)
-                {
-                    pThis->PaintOpaque(hWnd, hDC);
-                    ::ReleaseDC(hWnd, hDC);
-                }
-                ::SendMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+                pThis->PaintOpaque(hWnd, hDC);
+                ::ReleaseDC(hWnd, hDC);
             }
-#endif
+            ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
             return lRes;
         }
         case CCC_WM_POST_OPAQUE_PAINT:
@@ -7718,244 +4808,6 @@ private:
     }
 };
 
-static std::map<HWND, CCustomOpaqueFixer*> g_comboDropFixers;
-static std::map<HWND, class CCustomComboDropGlassFixer*> g_comboDropGlassFixers;
-
-static BOOL CCC_IsComboDropGlassInstalled(HWND hwndCombo)
-{
-    return hwndCombo && g_comboDropGlassFixers.find(hwndCombo) != g_comboDropGlassFixers.end();
-}
-
-static void CCC_RepaintComboDropGlass(HWND hwndCombo)
-{
-    if (!CCC_IsComboDropGlassInstalled(hwndCombo)) return;
-    COMBOBOXINFO cbi = { sizeof(COMBOBOXINFO) };
-    if (!::GetComboBoxInfo(hwndCombo, &cbi) || !cbi.hwndList || !::IsWindow(cbi.hwndList))
-        return;
-    ::InvalidateRect(cbi.hwndList, NULL, FALSE);
-    ::UpdateWindow(cbi.hwndList);
-}
-
-class CCustomComboDropGlassFixer
-{
-public:
-    CCustomComboDropGlassFixer(HWND hwndCombo) : m_hwndCombo(hwndCombo), m_hwndList(NULL), m_bTrackingMouse(FALSE) {}
-    ~CCustomComboDropGlassFixer() { Uninstall(); }
-
-    BOOL Install(HWND hwndList)
-    {
-        if (m_hwndList) return FALSE;
-        if (!::IsWindow(hwndList) || !::IsWindow(m_hwndCombo)) return FALSE;
-        m_hwndList = hwndList;
-        return ::SetWindowSubclass(hwndList, SubclassProc, (UINT_PTR)this, (DWORD_PTR)this);
-    }
-
-    void Uninstall()
-    {
-        if (m_hwndList && ::IsWindow(m_hwndList))
-            ::RemoveWindowSubclass(m_hwndList, SubclassProc, (UINT_PTR)this);
-        m_hwndList = NULL;
-    }
-
-private:
-    HWND m_hwndCombo;
-    HWND m_hwndList;
-    BOOL m_bTrackingMouse;
-
-    void PaintGlass(HWND hWnd, HDC hDestDC)
-    {
-        CCustomComboBox* pCombo = dynamic_cast<CCustomComboBox*>(CWnd::FromHandlePermanent(m_hwndCombo));
-        if (!pCombo) return;
-        pCombo->PaintDropListGlassClient(hWnd, hDestDC);
-    }
-
-    static LRESULT CALLBACK SubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
-        UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
-    {
-        CCustomComboDropGlassFixer* pThis = (CCustomComboDropGlassFixer*)dwRefData;
-        switch (uMsg)
-        {
-        case WM_ERASEBKGND:
-            return TRUE;
-        case WM_PAINT:
-        {
-            PAINTSTRUCT ps = {};
-            HDC hDC = ::BeginPaint(hWnd, &ps);
-            if (hDC) pThis->PaintGlass(hWnd, hDC);
-            ::EndPaint(hWnd, &ps);
-            return 0;
-        }
-        case WM_PRINTCLIENT:
-            if (HDC hdc = (HDC)wParam)
-                pThis->PaintGlass(hWnd, hdc);
-            return 0;
-        case WM_MOUSEMOVE:
-        {
-            if (!pThis->m_bTrackingMouse)
-            {
-                TRACKMOUSEEVENT tme = { sizeof(TRACKMOUSEEVENT), TME_LEAVE, hWnd, 0 };
-                if (::TrackMouseEvent(&tme))
-                    pThis->m_bTrackingMouse = TRUE;
-            }
-            CCustomComboBox* pCombo = dynamic_cast<CCustomComboBox*>(CWnd::FromHandlePermanent(pThis->m_hwndCombo));
-            if (pCombo)
-            {
-                const DWORD hit = (DWORD)::SendMessage(hWnd, LB_ITEMFROMPOINT, 0, lParam);
-                const int idx = (int)(short)LOWORD(hit);
-                if (HIWORD(hit) == 0 && idx >= 0)
-                {
-                    if (pCombo->GetDropListHotItem() != idx)
-                    {
-                        pCombo->SetDropListHotItem(idx);
-                        ::InvalidateRect(hWnd, NULL, FALSE);
-                        ::UpdateWindow(hWnd);
-                    }
-                }
-            }
-            return 0;
-        }
-        case WM_MOUSELEAVE:
-        {
-            pThis->m_bTrackingMouse = FALSE;
-            if (CCustomComboBox* pCombo = dynamic_cast<CCustomComboBox*>(CWnd::FromHandlePermanent(pThis->m_hwndCombo)))
-            {
-                if (pCombo->GetDropListHotItem() != -1)
-                {
-                    pCombo->SetDropListHotItem(-1);
-                    ::InvalidateRect(hWnd, NULL, FALSE);
-                    ::UpdateWindow(hWnd);
-                }
-            }
-            return 0;
-        }
-        case WM_VSCROLL:
-        case WM_MOUSEWHEEL:
-        case WM_LBUTTONUP:
-        case WM_KEYDOWN:
-        {
-            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            CCC_RepaintComboDropGlass(pThis->m_hwndCombo);
-            return lRes;
-        }
-        case WM_TIMER:
-            if (wParam == kComboDropBackdropWarmTimerId)
-            {
-                ::KillTimer(hWnd, kComboDropBackdropWarmTimerId);
-                ::InvalidateRect(hWnd, NULL, FALSE);
-                ::UpdateWindow(hWnd);
-                return 0;
-            }
-            break;
-        case WM_SHOWWINDOW:
-            if (wParam)
-            {
-                CCC_InvalidateComboDropBackdrop(hWnd);
-                ::SetTimer(hWnd, kComboDropBackdropWarmTimerId, 1, NULL);
-                return 0;
-            }
-            return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-        case WM_DESTROY:
-            ::KillTimer(hWnd, kComboDropBackdropWarmTimerId);
-            CCC_InvalidateComboDropBackdrop(hWnd);
-            ::RemoveWindowSubclass(hWnd, SubclassProc, uIdSubclass);
-            pThis->m_hwndList = NULL;
-            break;
-        }
-        return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-    }
-};
-
-static void CCC_InstallComboDropListOpaqueFix(HWND hwndCombo)
-{
-    if (!hwndCombo || !::IsWindow(hwndCombo)) return;
-    if (!CCC_IsAeroEnabled() || !CCC_IsWin11() || !CCC_IsBlurDialogChild(hwndCombo))
-        return;
-
-    CCC_ReleaseComboDropListOpaqueFix(hwndCombo);
-
-    COMBOBOXINFO cbi = { sizeof(COMBOBOXINFO) };
-    if (!::GetComboBoxInfo(hwndCombo, &cbi) || !cbi.hwndList || !::IsWindow(cbi.hwndList))
-        return;
-
-    CCustomOpaqueFixer* pFixer = new CCustomOpaqueFixer(COLOR_COMBO_BG);
-    if (!pFixer->Install(cbi.hwndList))
-    {
-        delete pFixer;
-        return;
-    }
-    g_comboDropFixers[hwndCombo] = pFixer;
-    ::InvalidateRect(cbi.hwndList, NULL, TRUE);
-    ::UpdateWindow(cbi.hwndList);
-}
-
-static void CCC_ReleaseComboDropListOpaqueFix(HWND hwndCombo)
-{
-    auto it = g_comboDropFixers.find(hwndCombo);
-    if (it == g_comboDropFixers.end()) return;
-    if (it->second)
-    {
-        it->second->Uninstall();
-        delete it->second;
-    }
-    g_comboDropFixers.erase(it);
-}
-
-static void CCC_InstallComboDropListGlassFix(HWND hwndCombo)
-{
-    if (!hwndCombo || !::IsWindow(hwndCombo)) return;
-    if (!CCC_UseComboGlass(hwndCombo)) return;
-
-    CCC_ReleaseComboDropListGlassFix(hwndCombo);
-
-    COMBOBOXINFO cbi = { sizeof(COMBOBOXINFO) };
-    if (!::GetComboBoxInfo(hwndCombo, &cbi) || !cbi.hwndList || !::IsWindow(cbi.hwndList))
-        return;
-
-    CCustomComboDropGlassFixer* pFixer = new CCustomComboDropGlassFixer(hwndCombo);
-    if (!pFixer->Install(cbi.hwndList))
-    {
-        delete pFixer;
-        return;
-    }
-    g_comboDropGlassFixers[hwndCombo] = pFixer;
-    CCC_InvalidateComboDropBackdrop(cbi.hwndList);
-    CCC_ApplyComboDropListDwm(hwndCombo, cbi.hwndList);
-    ::InvalidateRect(cbi.hwndList, NULL, FALSE);
-    ::UpdateWindow(cbi.hwndList);
-    if (HWND hDlg = CCC_FindBlurDialogHwnd(hwndCombo))
-        CCC_ForcePaintAllButtonSTOnDialog(hDlg);
-}
-
-static void CCC_ReleaseComboDropListGlassFix(HWND hwndCombo)
-{
-    auto it = g_comboDropGlassFixers.find(hwndCombo);
-    if (it == g_comboDropGlassFixers.end()) return;
-    if (it->second)
-    {
-        it->second->Uninstall();
-        delete it->second;
-    }
-    g_comboDropGlassFixers.erase(it);
-    CCC_InvalidateComboDropBackdrop(NULL);
-    if (HWND hDlg = CCC_FindBlurDialogHwnd(hwndCombo))
-        CCC_ForcePaintAllButtonSTOnDialog(hDlg);
-}
-
-static void CCC_InstallComboDropListFix(HWND hwndCombo)
-{
-    if (!hwndCombo || !::IsWindow(hwndCombo)) return;
-    if (CCC_UseComboGlass(hwndCombo))
-        CCC_InstallComboDropListGlassFix(hwndCombo);
-    else
-        CCC_InstallComboDropListOpaqueFix(hwndCombo);
-}
-
-static void CCC_ReleaseComboDropListFix(HWND hwndCombo)
-{
-    CCC_ReleaseComboDropListGlassFix(hwndCombo);
-    CCC_ReleaseComboDropListOpaqueFix(hwndCombo);
-}
-
 static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
 {
     if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
@@ -7971,23 +4823,10 @@ static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
     c.MakeUpper();
     if (c.Find(_T("EDIT")) >= 0) return COLOR_EDIT_BG;
     if (c.Find(_T("LISTBOX")) >= 0) return COLOR_LIST_BG;
-    if (c.Find(_T("COMBOLBOX")) >= 0) return COLOR_COMBO_BG;
     if (c.Find(_T("SYSLISTVIEW32")) >= 0) return COLOR_LIST_BG;
     if (c.Find(_T("COMBOBOX")) >= 0) return COLOR_COMBO_BG;
     return COLOR_DIALOG_BG;
 }
-
-static BOOL CCC_IsGlassComboInternalEdit(HWND hWnd)
-{
-    if (!hWnd) return FALSE;
-    TCHAR cls[16] = {};
-    if (!::GetClassName(hWnd, cls, 15)) return FALSE;
-    if (_tcsicmp(cls, _T("Edit")) != 0) return FALSE;
-    const HWND hParent = ::GetParent(hWnd);
-    return hParent && CCC_UseComboGlass(hParent);
-}
-
-static BOOL CCC_IsTransparentBlurControl(HWND hWnd);
 
 static BOOL CCC_IsTransparentBlurControl(HWND hWnd)
 {
@@ -8012,19 +4851,13 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
 {
     if (!::IsWindow(hWnd)) return FALSE;
     if (CCC_IsTransparentBlurControl(hWnd)) return FALSE;
-    if (CCC_IsGlassComboInternalEdit(hWnd)) return FALSE;
     if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
     {
-        if (dynamic_cast<CCustomListBox*>(pw))
-            return !CCC_UseListBoxRowGlass(hWnd);
-        if (dynamic_cast<CCustomListCtrl*>(pw))
-            return !CCC_UseListCtrlRowGlass(hWnd);
-        if (dynamic_cast<CCustomComboBox*>(pw))
-            return !CCC_UseComboGlass(hWnd);
-        if (dynamic_cast<CButtonST*>(pw))
-            return !CCC_UseBlurChildGlassPaint(hWnd);
-        if (dynamic_cast<CCustomEdit*>(pw))
-            return !CCC_UseEditGlass(hWnd);
+        if (dynamic_cast<CCustomListBox*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomListCtrl*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomComboBox*>(pw)) return TRUE;
+        if (dynamic_cast<CButtonST*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomEdit*>(pw)) return TRUE;
         return FALSE;
     }
     TCHAR cls[64] = {};
@@ -8034,230 +4867,10 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
     if (c.Find(_T("BUTTON")) >= 0) return TRUE;
     if (c.Find(_T("LISTBOX")) >= 0) return TRUE;
     if (c.Find(_T("SYSLISTVIEW32")) >= 0) return TRUE;
-    if (c.Find(_T("COMBOBOX")) >= 0)
-        return !CCC_UseComboGlass(hWnd);
-    if (c.Find(_T("EDIT")) >= 0) return !CCC_UseEditGlass(hWnd);
+    if (c.Find(_T("COMBOBOX")) >= 0) return TRUE;
+    if (c.Find(_T("EDIT")) >= 0) return TRUE;
     if (c.Find(_T("SYSHEADER32")) >= 0) return TRUE;
     return FALSE;
-}
-
-static BOOL CCC_UsesAeroGlassPaint(HWND hWnd)
-{
-    return CCC_UseComboGlass(hWnd) || CCC_UseEditGlass(hWnd)
-        || CCC_UseListBoxRowGlass(hWnd) || CCC_UseListCtrlRowGlass(hWnd);
-}
-
-static BOOL CCC_DialogHasVisibleChildren(HWND hWnd)
-{
-    if (!hWnd || !::IsWindow(hWnd)) return FALSE;
-    for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (::IsWindowVisible(hChild))
-            return TRUE;
-    }
-    return FALSE;
-}
-
-// ガラス子: WM_PAINT 経由で同期再描画（RDW_ERASE なし）
-static void CCC_RepaintGlassChildAlphaSync(HWND hChild)
-{
-    if (!hChild || !::IsWindow(hChild) || !::IsWindowVisible(hChild))
-        return;
-    if (CCC_UseBlurChildGlassPaint(hChild) || CCC_UseEditGlass(hChild) || CCC_UseComboGlass(hChild))
-        ::RedrawWindow(hChild, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
-}
-
-static BOOL CCC_IsGlassFieldChild(HWND hChild)
-{
-    return CCC_UseBlurChildGlassPaint(hChild) || CCC_UseEditGlass(hChild) || CCC_UseComboGlass(hChild);
-}
-
-static void CCC_RepaintChildDirectPrint(HWND hChild)
-{
-    if (!hChild || !::IsWindow(hChild) || !::IsWindowVisible(hChild))
-        return;
-    CWnd* pw = CWnd::FromHandlePermanent(hChild);
-    if (!pw) return;
-    CClientDC dc(pw);
-    ::SendMessage(hChild, WM_PRINTCLIENT, (WPARAM)dc.GetSafeHdc(), PRF_CLIENT);
-}
-
-static BOOL CCC_UseTransparentDirectPrint(HWND hChild)
-{
-    if (CWnd* pw = CWnd::FromHandlePermanent(hChild))
-    {
-        if (dynamic_cast<CCustomGroupBox*>(pw)) return TRUE;
-        if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
-        if (dynamic_cast<CCustomStatic*>(pw)) return TRUE;
-        if (dynamic_cast<CCustomSliderCtrl*>(pw)) return TRUE;
-        if (dynamic_cast<CCustomRangeSliderCtrl*>(pw)) return TRUE;
-    }
-    return FALSE;
-}
-
-static void CCC_RepaintGlassFieldChildDirect(HWND hChild)
-{
-    if (!CCC_IsGlassFieldChild(hChild))
-        return;
-    CCC_RepaintChildDirectPrint(hChild);
-}
-
-static void CCC_RepaintGlassFieldChildrenDirectRecursive(HWND hWnd)
-{
-    for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (::IsWindowVisible(hChild))
-            CCC_RepaintGlassFieldChildDirect(hChild);
-        CCC_RepaintGlassFieldChildrenDirectRecursive(hChild);
-    }
-}
-
-static void CCC_RefreshTransparentChildrenAlphaRecursive(HWND hWnd)
-{
-    for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (::IsWindowVisible(hChild))
-        {
-            // ButtonST/Edit/Combo は別パスで直接描画（二重 UPDATENOW でちらつく）
-            if (CCC_IsGlassFieldChild(hChild))
-                ;
-            else if (CCC_UseTransparentDirectPrint(hChild))
-                CCC_RepaintChildDirectPrint(hChild);
-            else if (CCC_UsesAeroGlassPaint(hChild) || CCC_IsTransparentBlurControl(hChild))
-                ::RedrawWindow(hChild, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
-            else if (CCC_ShouldOpaqueFix(hChild))
-                ::SendMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
-        }
-        CCC_RefreshTransparentChildrenAlphaRecursive(hChild);
-    }
-}
-
-static void CCC_RepaintAeroChildAlphaSync(HWND hChild)
-{
-    if (!hChild || !::IsWindow(hChild) || !::IsWindowVisible(hChild))
-        return;
-    if (CCC_IsGlassFieldChild(hChild))
-        CCC_RepaintGlassFieldChildDirect(hChild);
-    else if (CCC_UseTransparentDirectPrint(hChild))
-        CCC_RepaintChildDirectPrint(hChild);
-    else if (CCC_UsesAeroGlassPaint(hChild) || CCC_IsTransparentBlurControl(hChild))
-        ::RedrawWindow(hChild, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
-    else if (CCC_ShouldOpaqueFix(hChild))
-        ::SendMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
-}
-
-static void CCC_RefreshGlassChildrenAlphaRecursive(HWND hWnd)
-{
-    for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (::IsWindowVisible(hChild))
-            CCC_RepaintAeroChildAlphaSync(hChild);
-        CCC_RefreshGlassChildrenAlphaRecursive(hChild);
-    }
-}
-
-static void CCC_QueueGlassChildRepaint(HWND hChild, BOOL bSync)
-{
-    if (!hChild || !::IsWindow(hChild)) return;
-    const UINT rdwFlags = RDW_INVALIDATE | RDW_NOERASE | (bSync ? RDW_UPDATENOW : 0);
-    if (CCC_UseBlurChildGlassPaint(hChild) || CCC_UseEditGlass(hChild) || CCC_UseComboGlass(hChild))
-    {
-        if (bSync)
-            CCC_RepaintGlassHwnd(hChild);
-        else
-            ::RedrawWindow(hChild, NULL, NULL, rdwFlags);
-        return;
-    }
-    if (CCC_UsesAeroGlassPaint(hChild) || CCC_IsTransparentBlurControl(hChild))
-        ::RedrawWindow(hChild, NULL, NULL, rdwFlags);
-}
-
-static void CCC_InvalidateGlassChildrenRecursive(HWND hWnd, BOOL bSyncGlassRepaint, BOOL bSyncChildren)
-{
-    for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (CCC_UseBlurChildGlassPaint(hChild) || CCC_UseEditGlass(hChild) || CCC_UseComboGlass(hChild))
-        {
-            if (bSyncGlassRepaint)
-                CCC_RepaintGlassHwnd(hChild);
-            else
-                CCC_QueueGlassChildRepaint(hChild, bSyncChildren);
-        }
-        else if (::IsWindowVisible(hChild))
-        {
-            if (CCC_UsesAeroGlassPaint(hChild) || CCC_IsTransparentBlurControl(hChild))
-                CCC_QueueGlassChildRepaint(hChild, bSyncChildren);
-            else if (CCC_ShouldOpaqueFix(hChild))
-            {
-                if (bSyncChildren)
-                    ::SendMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
-                else
-                    ::PostMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
-            }
-        }
-        CCC_InvalidateGlassChildrenRecursive(hChild, bSyncGlassRepaint, bSyncChildren);
-    }
-}
-
-void CCC_RefreshAeroGlassChildren(HWND hWnd)
-{
-    CCC_RefreshGlassChildrenAlphaRecursive(hWnd);
-}
-
-void CCC_RefreshAeroGlassAlphaDeferred(HWND hWnd, const RECT* pGapPreserveRect)
-{
-    if (!hWnd || !::IsWindow(hWnd) || !CCC_IsAeroEnabled() || !CCC_IsWin11())
-        return;
-    CCC_RepaintDialogAeroGaps(hWnd, pGapPreserveRect);
-    CCC_InvalidateGlassChildrenRecursive(hWnd, FALSE, FALSE);
-}
-
-void CCC_RefreshAeroGlassAlphaOnDialog(HWND hWnd, const RECT* pGapPreserveRect, BOOL bSyncChildren)
-{
-    if (!hWnd || !::IsWindow(hWnd) || !CCC_IsAeroEnabled() || !CCC_IsWin11())
-        return;
-    // 隙間を先に更新（子 HWND は clip 除外）。子を後から描く。逆順だと隙間描画が子を消す。
-    if (CCC_DialogHasVisibleChildren(hWnd))
-        CCC_RepaintDialogAeroGaps(hWnd, pGapPreserveRect);
-    else
-        ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
-    // グループボックス等の親背景 → 子の ButtonST/Edit（Invalidate なし直接描画でちらつき防止）
-    CCC_RefreshTransparentChildrenAlphaRecursive(hWnd);
-    CCC_RepaintGlassFieldChildrenDirectRecursive(hWnd);
-    if (bSyncChildren)
-        CCC_RepaintGlassFieldChildrenDirectRecursive(hWnd);
-}
-
-static void CCC_InvalidateGlassControlsOnDialog(HWND hDlg);
-
-static std::map<HWND, DWORD> g_lastAeroGlassAlphaRefreshTick;
-
-// aero_blur_Acrylic_Opacity: Win10=LWA_ALPHA / Win11=隙間+子コントロールガラス+リスト／コンボ
-void CCC_RefreshAeroGlassAlphaForHwnd(HWND hWnd, const RECT* pGapPreserveRect, BOOL bImmediate)
-{
-    if (!hWnd || !::IsWindow(hWnd) || !CCC_IsAeroEnabled()) return;
-
-    if (CCC_IsWin11())
-    {
-        if (bImmediate)
-            g_lastAeroGlassAlphaRefreshTick.erase(hWnd);
-        else
-        {
-            const DWORD now = ::GetTickCount();
-            DWORD& lastTick = g_lastAeroGlassAlphaRefreshTick[hWnd];
-            if (lastTick != 0 && (now - lastTick) < 16)
-                return;
-            lastTick = now;
-        }
-        // HSCROLL 中は PostMessage だとマウスキャプチャ下で処理されずリアルタイム性が失われるため同期呼び出し。
-        CCC_RefreshAeroGlassAlphaOnDialog(hWnd, pGapPreserveRect, bImmediate);
-        return;
-    }
-    else
-    {
-        CCC_RefreshAeroWindowLayer(hWnd);
-        ::InvalidateRect(hWnd, NULL, FALSE);
-    }
 }
 
 static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
@@ -8278,42 +4891,15 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     }
     else if (auto* pEdit = dynamic_cast<CCustomEdit*>(pw))
     {
-#if CCUSTOM_AERO_SUPPORT
-        if (CCC_UseEditGlass(hWnd))
-        {
-            pEdit->PaintGlassClient(dc, TRUE);
-            dc.Detach();
-            return TRUE;
-        }
-#endif
         CBrush br(COLOR_EDIT_BG);
         dc.FillRect(&r, &br);
         pEdit->DrawClientText(dc, r);
         dc.Detach();
         return TRUE;
     }
-    else if (auto* pCombo = dynamic_cast<CCustomComboBox*>(pw))
-    {
-#if CCUSTOM_AERO_SUPPORT
-        if (CCC_UseComboGlass(hWnd))
-        {
-            pCombo->PaintGlassClient(dc, TRUE);
-            dc.Detach();
-            return TRUE;
-        }
-#endif
-        dc.Detach();
-        return FALSE;
-    }
     else if (auto* pList = dynamic_cast<CCustomListCtrl*>(pw))
     {
         pList->PaintOpaqueIntoBuffer(hdcBuf);
-        dc.Detach();
-        return TRUE;
-    }
-    else if (auto* pLB = dynamic_cast<CCustomListBox*>(pw))
-    {
-        pLB->PaintOpaqueIntoBuffer(hdcBuf);
         dc.Detach();
         return TRUE;
     }
@@ -8354,71 +4940,17 @@ static void CCC_InstallOpaqueFixersRecursive(HWND hParent, CTypedPtrList<CPtrLis
     }
 }
 
-static void CCC_InvalidateAllButtonSTOnDialog(HWND hDlg)
-{
-    if (!hDlg || !::IsWindow(hDlg)) return;
-    for (HWND hChild = ::GetWindow(hDlg, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (CWnd* pw = CWnd::FromHandlePermanent(hChild))
-        {
-            if (dynamic_cast<CButtonST*>(pw))
-                ::InvalidateRect(hChild, NULL, FALSE);
-        }
-        CCC_InvalidateAllButtonSTOnDialog(hChild);
-    }
-}
-
-static void CCC_ForcePaintAllButtonSTOnDialog(HWND hDlg)
-{
-    if (!hDlg || !::IsWindow(hDlg)) return;
-    for (HWND hChild = ::GetWindow(hDlg, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (CWnd* pw = CWnd::FromHandlePermanent(hChild))
-        {
-            if (CButtonST* pBtn = dynamic_cast<CButtonST*>(pw))
-            {
-                if (CCC_UseBlurChildGlassPaint(hChild))
-                    CCC_ForcePaintButtonST(hChild, pBtn);
-            }
-        }
-        CCC_ForcePaintAllButtonSTOnDialog(hChild);
-    }
-}
-
-static void CCC_InvalidateGlassControlsOnDialog(HWND hDlg)
-{
-    if (!hDlg || !::IsWindow(hDlg)) return;
-    for (HWND hChild = ::GetWindow(hDlg, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
-    {
-        if (CCC_UseComboGlass(hChild) || CCC_UseEditGlass(hChild))
-            ::InvalidateRect(hChild, NULL, FALSE);
-        CCC_InvalidateGlassControlsOnDialog(hChild);
-    }
-}
-
 static void CCC_FinalizeBlurDialog(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
     CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
 {
     if (!pDlg || !pDlg->GetSafeHwnd()) return;
 
+    CCC_ClearOpaqueFixerList(fixers);
     if (!bAero)
     {
-        CCC_ClearOpaqueFixerList(fixers);
-        CCC_ClearButtonSTGlassFixersForDialog(pDlg->m_hWnd);
-        CCC_ClearEditComboGlassFixersForDialog(pDlg->m_hWnd);
         bBlurApplied = FALSE;
         return;
     }
-    if (bBlurApplied)
-    {
-        // イコライザー等の追加で RefreshAeroMode が呼ばれたとき fixer を外すと ButtonST が消える
-        CCC_RefreshAeroGlassAlphaForHwnd(pDlg->m_hWnd, nullptr);
-        return;
-    }
-
-    CCC_ClearOpaqueFixerList(fixers);
-    CCC_ClearButtonSTGlassFixersForDialog(pDlg->m_hWnd);
-    CCC_ClearEditComboGlassFixersForDialog(pDlg->m_hWnd);
 
     bBlurApplied = CCC_ApplyAero(pDlg->m_hWnd, TRUE) != FALSE;
     CCC_PrepareDialogSurface(pDlg->m_hWnd, TRUE);
@@ -8426,17 +4958,13 @@ static void CCC_FinalizeBlurDialog(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
     pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
 
     if (CCC_IsWin11())
-    {
         CCC_InstallOpaqueFixersRecursive(pDlg->m_hWnd, fixers);
-        CCC_InstallButtonSTGlassFixersRecursive(pDlg->m_hWnd);
-        CCC_InstallEditComboGlassFixersRecursive(pDlg->m_hWnd);
-    }
 
     pDlg->SetWindowPos(NULL, 0, 0, 0, 0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_DRAWFRAME);
-    pDlg->Invalidate(FALSE);
+    pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME);
     if (CCC_IsWin11())
-        pDlg->PostMessage(CCC_MSG_REFRESH_CHILDREN, 0, 0);
+        pDlg->PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 }
 
 static void CCC_PostOpaqueRepaintRecursive(HWND hWnd)
@@ -8451,10 +4979,11 @@ static void CCC_PostOpaqueRepaintRecursive(HWND hWnd)
 
 static void CCC_ReapplyOpaqueFixers(CWnd* pDlg, CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
 {
-    UNREFERENCED_PARAMETER(fixers);
     if (!pDlg || !pDlg->GetSafeHwnd() || !CCC_IsWin11() || !CCC_IsAeroEnabled()) return;
-    CCC_RepaintDialogAeroGaps(pDlg->m_hWnd, nullptr);
-    CCC_RefreshChildrenAfterShow(pDlg->m_hWnd);
+    CCC_ClearOpaqueFixerList(fixers);
+    CCC_InstallOpaqueFixersRecursive(pDlg->m_hWnd, fixers);
+    CCC_PostOpaqueRepaintRecursive(pDlg->m_hWnd);
+    pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE | RDW_ALLCHILDREN);
 }
 
 void CCC_ForceRepaintHwnd(HWND hWnd)
@@ -8470,57 +4999,34 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
     }
     if (auto* pBtn = dynamic_cast<CButtonST*>(pw))
     {
-        if (CCC_UseBlurChildGlassPaint(hWnd))
+        if (CCC_IsAeroEnabled() && CCC_IsWin11())
+            CCC_ForcePaintButtonST(hWnd, pBtn);
+        else
         {
-            CCC_RepaintGlassChildAlphaSync(hWnd);
-            return;
+            RECT rect = {};
+            ::GetClientRect(hWnd, &rect);
+            if (rect.right <= rect.left || rect.bottom <= rect.top)
+                return;
+            CClientDC dc(pw);
+            CCC_DrawButtonSTClient(hWnd, pBtn, dc.GetSafeHdc(), rect);
         }
-        CCC_ForcePaintButtonST(hWnd, pBtn);
-        return;
-    }
-    if (auto* pCb = dynamic_cast<CCustomCheckBox*>(pw))
-    {
-        pCb->RepaintClient();
         return;
     }
 
     if (auto* pEdit = dynamic_cast<CCustomEdit*>(pw))
     {
-        if (CCC_UseEditGlass(hWnd))
-        {
-            CCC_RepaintGlassChildAlphaSync(hWnd);
-            return;
-        }
         pEdit->RepaintClient();
         return;
     }
-    if (auto* pCombo = dynamic_cast<CCustomComboBox*>(pw))
-    {
-        if (CCC_UseComboGlass(hWnd))
-        {
-            CCC_RepaintGlassChildAlphaSync(hWnd);
-            return;
-        }
-    }
 
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    if (CCC_IsAeroEnabled() && CCC_IsWin11() && CCC_ShouldOpaqueFix(hWnd))
     {
-        // RDW_ERASE は Win11 DWM 上で alpha=0 の消去→再描画遅延により点滅／消失の原因になる
-        if (CCC_UsesAeroGlassPaint(hWnd) || CCC_IsTransparentBlurControl(hWnd))
-        {
-            ::InvalidateRect(hWnd, NULL, FALSE);
-            return;
-        }
-        if (CCC_ShouldOpaqueFix(hWnd))
-        {
-            ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
-            return;
-        }
+        ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
+        return;
     }
 #endif
-    ::InvalidateRect(hWnd, NULL, FALSE);
-    ::UpdateWindow(hWnd);
+    ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
 }
 
 static BOOL CALLBACK CCC_RefreshChildProc(HWND hChild, LPARAM)
@@ -8593,17 +5099,14 @@ void CCC_RefreshChildrenAfterShow(HWND hWnd)
 IMPLEMENT_DYNAMIC(CCustomBlurDialogBase, CCustomDialog)
 
 BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
-    ON_WM_ERASEBKGND()
     ON_WM_PAINT()
     ON_WM_SIZE()
     ON_WM_SHOWWINDOW()
     ON_WM_WINDOWPOSCHANGED()
     ON_WM_DWMCOMPOSITIONCHANGED()
     ON_WM_DESTROY()
-    ON_WM_DRAWITEM()
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
-    ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
 #endif
 END_MESSAGE_MAP()
 
@@ -8655,8 +5158,6 @@ void CCustomBlurDialogBase::ApplyDwmBlur()
     if (!m_bAeroEnabled)
     {
         CCC_ClearOpaqueFixerList(m_opaqueFixers);
-        CCC_ClearButtonSTGlassFixersForDialog(m_hWnd);
-        CCC_ClearEditComboGlassFixersForDialog(m_hWnd);
         CCC_ApplyAero(m_hWnd, FALSE);
         CCC_PrepareDialogSurface(m_hWnd, FALSE);
         PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
@@ -8670,62 +5171,19 @@ void CCustomBlurDialogBase::ApplyDwmBlur()
 #endif
 }
 
-void CCustomBlurDialogBase::RefreshAeroGlassAlpha(BOOL bImmediate)
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (!GetSafeHwnd() || !::IsWindow(m_hWnd) || !::IsWindowVisible(m_hWnd)) return;
-    CCC_RefreshAeroGlassAlphaForHwnd(m_hWnd, nullptr, bImmediate);
-#endif
-}
-
 void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
 {
     CCustomDialog::OnShowWindow(bShow, nStatus);
     if (!bShow)
         return;
 #if CCUSTOM_AERO_SUPPORT
-    if (m_bBlurApplied && CCC_IsAeroEnabled() && CCC_IsWin11())
+    if (CCC_IsAeroEnabled())
     {
+        ApplyDwmBlur();
         CCC_RefreshDialogDwmBlur(m_hWnd);
-        CCC_RepaintDialogAeroGaps(m_hWnd, nullptr);
-        CCC_RefreshChildrenAfterShow(m_hWnd);
     }
 #endif
     UNREFERENCED_PARAMETER(nStatus);
-}
-
-void CCustomBlurDialogBase::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (lpDrawItemStruct && lpDrawItemStruct->hDC && CCC_UseBlurChildGlassPaint(lpDrawItemStruct->hwndItem))
-    {
-        if (CWnd* pw = CWnd::FromHandlePermanent(lpDrawItemStruct->hwndItem))
-        {
-            if (CButtonST* pBtn = dynamic_cast<CButtonST*>(pw))
-            {
-                pBtn->SetAeroGlassMode(TRUE);
-                CCC_PaintButtonSTGlass(lpDrawItemStruct->hwndItem, pBtn, lpDrawItemStruct->hDC);
-                return;
-            }
-        }
-    }
-#else
-    UNREFERENCED_PARAMETER(nIDCtl);
-    UNREFERENCED_PARAMETER(lpDrawItemStruct);
-#endif
-    CCustomDialog::OnDrawItem(nIDCtl, lpDrawItemStruct);
-}
-
-BOOL CCustomBlurDialogBase::OnEraseBkgnd(CDC* pDC)
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (m_bAeroEnabled && CCC_IsWin11() && pDC)
-    {
-        CCC_PaintDialogAeroGaps(*pDC, this, nullptr);
-        return TRUE;
-    }
-#endif
-    return CCustomDialog::OnEraseBkgnd(pDC);
 }
 
 void CCustomBlurDialogBase::OnPaint()
@@ -8745,9 +5203,6 @@ void CCustomBlurDialogBase::OnDestroy()
 {
 #if CCUSTOM_AERO_SUPPORT
     CCC_ClearOpaqueFixerList(m_opaqueFixers);
-    CCC_ClearButtonSTGlassFixersForDialog(m_hWnd);
-    CCC_ClearEditComboGlassFixersForDialog(m_hWnd);
-    CCC_RestoreParentBlurGlassFixers(this);
 #endif
     CCustomDialog::OnDestroy();
 }
@@ -8778,15 +5233,6 @@ LRESULT CCustomBlurDialogBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
 #if CCUSTOM_AERO_SUPPORT
     if (m_bAeroEnabled && CCC_IsWin11())
         CCC_ReapplyOpaqueFixers(this, m_opaqueFixers);
-#endif
-    return 0;
-}
-
-LRESULT CCustomBlurDialogBase::OnRefreshChildren(WPARAM, LPARAM)
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (m_bBlurApplied && m_bAeroEnabled)
-        CCC_RefreshAeroGlassAlphaDeferred(m_hWnd, nullptr);
 #endif
     return 0;
 }
@@ -8878,7 +5324,6 @@ void CCustomDialogEx::OnPaint()
 IMPLEMENT_DYNAMIC(CCustomBlurDialogExBase, CCustomDialogEx)
 
 BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
-    ON_WM_ERASEBKGND()
     ON_WM_PAINT()
     ON_WM_SIZE()
     ON_WM_SHOWWINDOW()
@@ -8887,7 +5332,6 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
     ON_WM_DESTROY()
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
-    ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
 #endif
 END_MESSAGE_MAP()
 
@@ -8927,8 +5371,6 @@ void CCustomBlurDialogExBase::ApplyDwmBlur()
     if (!m_bAeroEnabled)
     {
         CCC_ClearOpaqueFixerList(m_opaqueFixers);
-        CCC_ClearButtonSTGlassFixersForDialog(m_hWnd);
-        CCC_ClearEditComboGlassFixersForDialog(m_hWnd);
         CCC_ApplyAero(m_hWnd, FALSE);
         CCC_PrepareDialogSurface(m_hWnd, FALSE);
         PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
@@ -8942,40 +5384,19 @@ void CCustomBlurDialogExBase::ApplyDwmBlur()
 #endif
 }
 
-void CCustomBlurDialogExBase::RefreshAeroGlassAlpha(BOOL bImmediate)
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (!GetSafeHwnd() || !::IsWindow(m_hWnd) || !::IsWindowVisible(m_hWnd)) return;
-    CCC_RefreshAeroGlassAlphaForHwnd(m_hWnd, nullptr, bImmediate);
-#endif
-}
-
 void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
 {
     CCustomDialogEx::OnShowWindow(bShow, nStatus);
     if (!bShow)
         return;
 #if CCUSTOM_AERO_SUPPORT
-    if (m_bBlurApplied && CCC_IsAeroEnabled() && CCC_IsWin11())
+    if (CCC_IsAeroEnabled())
     {
+        ApplyDwmBlur();
         CCC_RefreshDialogDwmBlur(m_hWnd);
-        CCC_RepaintDialogAeroGaps(m_hWnd, nullptr);
-        CCC_RefreshChildrenAfterShow(m_hWnd);
     }
 #endif
     UNREFERENCED_PARAMETER(nStatus);
-}
-
-BOOL CCustomBlurDialogExBase::OnEraseBkgnd(CDC* pDC)
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (m_bAeroEnabled && CCC_IsWin11() && pDC)
-    {
-        CCC_PaintDialogAeroGaps(*pDC, this, nullptr);
-        return TRUE;
-    }
-#endif
-    return CCustomDialogEx::OnEraseBkgnd(pDC);
 }
 
 void CCustomBlurDialogExBase::OnPaint()
@@ -8995,9 +5416,6 @@ void CCustomBlurDialogExBase::OnDestroy()
 {
 #if CCUSTOM_AERO_SUPPORT
     CCC_ClearOpaqueFixerList(m_opaqueFixers);
-    CCC_ClearButtonSTGlassFixersForDialog(m_hWnd);
-    CCC_ClearEditComboGlassFixersForDialog(m_hWnd);
-    CCC_RestoreParentBlurGlassFixers(this);
 #endif
     CCustomDialogEx::OnDestroy();
 }
@@ -9028,15 +5446,6 @@ LRESULT CCustomBlurDialogExBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
 #if CCUSTOM_AERO_SUPPORT
     if (m_bAeroEnabled && CCC_IsWin11())
         CCC_ReapplyOpaqueFixers(this, m_opaqueFixers);
-#endif
-    return 0;
-}
-
-LRESULT CCustomBlurDialogExBase::OnRefreshChildren(WPARAM, LPARAM)
-{
-#if CCUSTOM_AERO_SUPPORT
-    if (m_bBlurApplied && m_bAeroEnabled)
-        CCC_RefreshAeroGlassAlphaDeferred(m_hWnd, nullptr);
 #endif
     return 0;
 }

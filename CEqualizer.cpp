@@ -76,31 +76,6 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATIC_key2, m_keyMid);
 	DDX_Control(pDX, IDC_STATIC_key3, m_keyHigh);
 	DDX_Control(pDX, IDC_STATIC_key4, m_keyAll);
-	DDX_Control(pDX, IDC_STATIC_EQ_DRY, m_lblDry);
-	DDX_Control(pDX, IDC_STATIC_EQ_WET, m_lblWet);
-	DDX_Control(pDX, IDC_STATIC_EQ_ACOUSTIC, m_lblAcoustic);
-	DDX_Control(pDX, IDC_STATIC_EQ_SPECTRUM, m_lblSpectrum);
-	DDX_Control(pDX, IDC_STATIC_EQ_FREQ, m_lblFreq);
-	DDX_Control(pDX, IDC_STATIC_EQ_BAND, m_lblBand);
-	DDX_Control(pDX, IDC_STATIC_EQ_LOUDNESS, m_lblLoudness);
-	DDX_Control(pDX, IDC_STATIC_EQ_WARMTH, m_lblWarmth);
-	DDX_Control(pDX, IDC_EQ_FREQ_25, m_freq25);
-	DDX_Control(pDX, IDC_EQ_FREQ_40, m_freq40);
-	DDX_Control(pDX, IDC_EQ_FREQ_63, m_freq63);
-	DDX_Control(pDX, IDC_EQ_FREQ_100, m_freq100);
-	DDX_Control(pDX, IDC_EQ_FREQ_160, m_freq160);
-	DDX_Control(pDX, IDC_EQ_FREQ_250, m_freq250);
-	DDX_Control(pDX, IDC_EQ_FREQ_400, m_freq400);
-	DDX_Control(pDX, IDC_EQ_FREQ_630, m_freq630);
-	DDX_Control(pDX, IDC_EQ_FREQ_1000, m_freq1000);
-	DDX_Control(pDX, IDC_EQ_FREQ_1600, m_freq1600);
-	DDX_Control(pDX, IDC_EQ_FREQ_2500, m_freq2500);
-	DDX_Control(pDX, IDC_EQ_FREQ_4000, m_freq4000);
-	DDX_Control(pDX, IDC_EQ_FREQ_6300, m_freq6300);
-	DDX_Control(pDX, IDC_EQ_FREQ_10000, m_freq10000);
-	DDX_Control(pDX, IDC_EQ_FREQ_16000, m_freq16000);
-	DDX_Control(pDX, IDC_EQ_UNIT_HZ, m_unitHz);
-	DDX_Control(pDX, IDC_EQ_UNIT_PCT, m_unitPct);
 }
 
 
@@ -125,19 +100,19 @@ BOOL CEqualizer::OnInitDialog()
 	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	SetDlgItemText(IDOK3, LL14(L"イコライザーリセット", L"Equalizer reset", L"Réinitialiser égaliseur", L"Reset equalizer", L"Restablecer ecualizador", L"이퀄라이저 초기화", L"均衡器重置", L"إعادة تعيين المعادل", L"Сброс эквалайзера", L"Equalizer zurücksetzen", L"Reset equalizador", L"Equalizer resetten", L"Reset korektora", L"Ekolayzeri sıfırla"));
 	SetDlgItemText(IDOK4, LL14(L"グローバルリセット", L"Global reset", L"Réinitialisation globale", L"Reset globale", L"Restablecer global", L"전역 초기화", L"全局重置", L"إعادة تعيين عامة", L"Глобальный сброс", L"Global zurücksetzen", L"Reset global", L"Globaal resetten", L"Reset globalny", L"Genel sıfırlama"));
-	m_lblDry.SetWindowText(LL14(L"環境", L"Environment", L"Environnement", L"Ambiente", L"Entorno", L"환경", L"环境", L"البيئة", L"Среда", L"Umgebung", L"Ambiente", L"Omgeving", L"Środowisko", L"Ortam"));
-	m_lblWet.SetWindowText(LL14(L"プリセット", L"Wet", L"Mouillé", L"Bagnato", L"Húmedo", L"습함", L"湿", L"رطب", L"Мокрый", L"Wet", L"Molhado", L"Nat", L"Mokry", L"Islak"));
-	m_lblAcoustic.SetWindowText(LL14(L"環境のかかり具合", L"Acoustic space model", L"Modèle d'espace acoustique", L"Modello spazio acustico", L"Modelo espacio acústico", L"음향 공간 모델", L"声学空间模型", L"نموذج الفضاء الصوتي", L"Модель акустического пространства", L"Akustisches Raummodell", L"Modelo espaço acústico", L"Akoestisch ruimtemodel", L"Model przestrzeni akustycznej", L"Akustik alan modeli"));
-	m_lblSpectrum.SetWindowText(LL14(L"マスター", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"));
-	m_lblFreq.SetWindowText(LL14(L"周波数", L"Frequency", L"Fréquence", L"Frequenza", L"Frecuencia", L"주파수", L"频率", L"التردد", L"Частота", L"Frequenz", L"Frequência", L"Frequentie", L"Częstotliwość", L"Frekans"));
-	m_lblBand.SetWindowText(LL14(L"バランス", L"Band", L"Bande", L"Banda", L"Banda", L"밴드", L"频段", L"النطاق", L"Полоса", L"Band", L"Banda", L"Band", L"Pasmo", L"Bant"));
-	m_lblLoudness.SetWindowText(LL14(L"密度", L"Loudness", L"Sonorité", L"Volume", L"Sonoridad", L"음량", L"响度", L"جهارة الصوت", L"Громкость", L"Lautheit", L"Sonoridade", L"Luidheid", L"Głośność", L"Ses yüksekliği"));
-	m_lblWarmth.SetWindowText(LL14(L"立体", L"Warmth", L"Chaleur", L"Calore", L"Calidez", L"따뜻함", L"温暖", L"الدفء", L"Теплота", L"Wärme", L"Calor", L"Warmte", L"Ciepło", L"Sıcaklık"));
+	SetDlgItemText(IDC_STATIC_EQ_DRY, LL14(L"環境", L"Environment", L"Environnement", L"Ambiente", L"Entorno", L"환경", L"环境", L"البيئة", L"Среда", L"Umgebung", L"Ambiente", L"Omgeving", L"Środowisko", L"Ortam"));
+	SetDlgItemText(IDC_STATIC_EQ_WET, LL14(L"プリセット", L"Wet", L"Mouillé", L"Bagnato", L"Húmedo", L"습함", L"湿", L"رطب", L"Мокрый", L"Wet", L"Molhado", L"Nat", L"Mokry", L"Islak"));
+	SetDlgItemText(IDC_STATIC_EQ_ACOUSTIC, LL14(L"環境のかかり具合", L"Acoustic space model", L"Modèle d'espace acoustique", L"Modello spazio acustico", L"Modelo espacio acústico", L"음향 공간 모델", L"声学空间模型", L"نموذج الفضاء الصوتي", L"Модель акустического пространства", L"Akustisches Raummodell", L"Modelo espaço acústico", L"Akoestisch ruimtemodel", L"Model przestrzeni akustycznej", L"Akustik alan modeli"));
+	SetDlgItemText(IDC_STATIC_EQ_SPECTRUM, LL14(L"マスター", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"));
+	SetDlgItemText(IDC_STATIC_EQ_FREQ, LL14(L"周波数", L"Frequency", L"Fréquence", L"Frequenza", L"Frecuencia", L"주파수", L"频率", L"التردد", L"Частота", L"Frequenz", L"Frequência", L"Frequentie", L"Częstotliwość", L"Frekans"));
+	SetDlgItemText(IDC_STATIC_EQ_BAND, LL14(L"バランス", L"Band", L"Bande", L"Banda", L"Banda", L"밴드", L"频段", L"النطاق", L"Полоса", L"Band", L"Banda", L"Band", L"Pasmo", L"Bant"));
+	SetDlgItemText(IDC_STATIC_EQ_LOUDNESS, LL14(L"密度", L"Loudness", L"Sonorité", L"Volume", L"Sonoridad", L"음량", L"响度", L"جهارة الصوت", L"Громкость", L"Lautheit", L"Sonoridade", L"Luidheid", L"Głośność", L"Ses yüksekliği"));
+	SetDlgItemText(IDC_STATIC_EQ_WARMTH, LL14(L"立体", L"Warmth", L"Chaleur", L"Calore", L"Calidez", L"따뜻함", L"温暖", L"الدفء", L"Теплота", L"Wärme", L"Calor", L"Warmte", L"Ciepło", L"Sıcaklık"));
 	m_tooltip.Create(this);
 	m_tooltip.Activate(TRUE);
-	m_tooltip.AddTool(&m_ok, LL14(L"閉じます", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
-	m_tooltip.AddTool(&dum, LL14(L"イコライザーの値をリセットします", L"Reset equalizer values", L"Réinitialiser les valeurs de l'égaliseur", L"Reimposta valori equalizer", L"Restablecer valores del ecualizador", L"이퀄라이저 값 초기화", L"重置均衡器数值", L"إعادة تعيين قيم المعادل", L"Сброс значений эквалайзера", L"Equalizerwerte zurücksetzen", L"Redefinir valores do equalizador", L"Equalizatorwaarden resetten", L"Resetuj wartości korektora", L"Ekolayzer değerlerini sıfırla"));
-	m_tooltip.AddTool(&sdasdsdadsd, LL14(L"グローバルの値をリセットします", L"Reset global values", L"Réinitialiser les valeurs globales", L"Reimposta valori globali", L"Restablecer valores globales", L"전역 값 초기화", L"重置全局数值", L"إعادة تعيين القيم العامة", L"Сброс глобальных значений", L"Globale Werte zurücksetzen", L"Redefinir valores globais", L"Globale waarden resetten", L"Resetuj wartości globalne", L"Genel değerleri sıfırla"));
+	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"閉じます", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	m_tooltip.AddTool(GetDlgItem(IDOK3), LL14(L"イコライザーの値をリセットします", L"Reset equalizer values", L"Réinitialiser les valeurs de l'égaliseur", L"Reimposta valori equalizer", L"Restablecer valores del ecualizador", L"이퀄라이저 값 초기화", L"重置均衡器数值", L"إعادة تعيين قيم المعادل", L"Сброс значений эквалайзера", L"Equalizerwerte zurücksetzen", L"Redefinir valores do equalizador", L"Equalizatorwaarden resetten", L"Resetuj wartości korektora", L"Ekolayzer değerlerini sıfırla"));
+	m_tooltip.AddTool(GetDlgItem(IDOK4), LL14(L"グローバルの値をリセットします", L"Reset global values", L"Réinitialiser les valeurs globales", L"Reimposta valori globali", L"Restablecer valores globales", L"전역 값 초기화", L"重置全局数值", L"إعادة تعيين القيم العامة", L"Сброс глобальных значений", L"Globale Werte zurücksetzen", L"Redefinir valores globais", L"Globale waarden resetten", L"Resetuj wartości globalne", L"Genel değerleri sıfırla"));
 	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 

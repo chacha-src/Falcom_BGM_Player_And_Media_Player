@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "BtnST.h"
 #include "CCustomControl.h"
 
@@ -62,8 +62,6 @@ CButtonST::CButtonST()
 
 	// Do not draw as a transparent button
 	m_bDrawTransparent = FALSE;
-	m_bAeroGlassMode = FALSE;
-	m_bInGlassComposite = FALSE;
 	m_pbmpOldBk = NULL;
 
 	// No URL defined
@@ -373,19 +371,6 @@ BOOL CButtonST::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 	return CButton::OnSetCursor(pWnd, nHitTest, message);
 } // End of OnSetCursor
 
-void CButtonST::RepaintHoverChange()
-{
-#if CCUSTOM_AERO_SUPPORT
-	if (m_bAeroGlassMode && GetSafeHwnd())
-	{
-		Invalidate(FALSE);
-		CCC_ForceRepaintHwnd(m_hWnd);
-		return;
-	}
-#endif
-	Invalidate();
-}
-
 void CButtonST::CancelHover()
 {
 	// Only for flat buttons
@@ -394,7 +379,7 @@ void CButtonST::CancelHover()
 		if (m_bMouseOnButton)
 		{
 			m_bMouseOnButton = FALSE;
-			RepaintHoverChange();
+			Invalidate();
 		} // if
 	} // if
 } // End of CancelHover
@@ -424,7 +409,7 @@ void CButtonST::OnMouseMove(UINT nFlags, CPoint point)
 		{
 			m_bMouseOnButton = TRUE;
 
-			RepaintHoverChange();
+			Invalidate();
 
 #ifdef	BTNST_USE_SOUND
 			// Play sound ?
@@ -516,13 +501,6 @@ BOOL CButtonST::OnClicked()
 
 void CButtonST::DrawItem(LPDRAWITEMSTRUCT lpDIS)
 {
-#if CCUSTOM_AERO_SUPPORT
-	if (m_bAeroGlassMode && lpDIS && lpDIS->hDC && !m_bInGlassComposite)
-	{
-		CCC_PaintButtonSTGlass(m_hWnd, this, lpDIS->hDC);
-		return;
-	}
-#endif
 	CDC*	pDC = CDC::FromHandle(lpDIS->hDC);
 	CPen*	pOldPen;
 
@@ -1773,13 +1751,6 @@ void CButtonST::DrawTransparent(BOOL bRepaint)
 	if (bRepaint) Invalidate();
 } // End of DrawTransparent
 
-void CButtonST::SetAeroGlassMode(BOOL bEnable)
-{
-	m_bAeroGlassMode = bEnable ? TRUE : FALSE;
-	if (GetSafeHwnd())
-		Invalidate(FALSE);
-}
-
 DWORD CButtonST::SetBk(CDC* pDC)
 {
 	if (m_bDrawTransparent && pDC)
@@ -2098,13 +2069,6 @@ DWORD CButtonST::SetSound(LPCTSTR lpszSound, HMODULE hMod, BOOL bPlayOnClick, BO
 //
 DWORD CButtonST::OnDrawBackground(CDC* pDC, LPCRECT pRect)
 {
-#if CCUSTOM_AERO_SUPPORT
-	if (m_bAeroGlassMode)
-	{
-		pDC->FillSolidRect(pRect, CCC_AERO_CHROMA_KEY);
-		return BTNST_OK;
-	}
-#endif
 	COLORREF	crColor;
 
 	if (m_bMouseOnButton || m_bIsPressed)

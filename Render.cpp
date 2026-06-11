@@ -9,6 +9,7 @@
 #include "dsound.h"
 #include "ZeroFol.h"
 #include "oggDlg.h"
+#include "CImageBase.h"
 #include "AudioUpscaler.h"
 #include <mutex>
 
@@ -82,6 +83,7 @@ static char THIS_FILE[] = __FILE__;
 #endif
 
 extern save savedata;
+CImageBase* renderbase;
 
 extern int sek;
 extern void DoEvent();
@@ -193,10 +195,6 @@ static void RenderRecreateSecondarySound(COggDlg* og)
 IMPLEMENT_DYNAMIC(CRender, CCustomBlurDialogExBase)
 CRender::CRender(CWnd* pParent /*=NULL*/)
 	: CCustomBlurDialogExBase(CRender::IDD, pParent)
-	, m_prevAero(-1)
-	, m_prevAeroBlur(-1)
-	, m_bakAero(0)
-	, m_bakAeroBlur(1)
 {
 	//{{AFX_DATA_INIT(CRender)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -256,18 +254,6 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_COMBO_LANG, m_comboLang);
 	DDX_Control(pDX, IDC_CHECK_UPSCALE, m_upscale);
 	DDX_Control(pDX, IDC_COMBO_SPEAKER, m_speaker);
-	DDX_Control(pDX, IDC_STATIC_LANG, m_lblLang);
-	DDX_Control(pDX, IDC_STATIC_R_BUF, m_lblBuf);
-	DDX_Control(pDX, IDC_STATIC_R_MP3, m_lblMp3);
-	DDX_Control(pDX, IDC_STATIC_R_KPI, m_lblKpi);
-	DDX_Control(pDX, IDC_STATIC_R_DISP, m_lblDisp);
-	DDX_Control(pDX, IDC_STATIC_R_DEV, m_lblDev);
-	DDX_Control(pDX, IDC_STATIC_R_SAMP, m_lblSamp);
-	DDX_Control(pDX, IDC_STATIC_R_SPEANA, m_lblSpeana);
-	DDX_Control(pDX, IDC_STATIC_R_SPC, m_lblSpc);
-	DDX_Control(pDX, IDC_STATIC_R_BIT, m_lblBit);
-	DDX_Control(pDX, IDC_STATIC_R_SPEAKER, m_lblSpeaker);
-	DDX_Control(pDX, IDC_STATIC_R_HZ, m_lblHz);
 }
 
 
@@ -298,15 +284,12 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_CHECK50, &CRender::OnBnClickedCheck50)
 	ON_BN_CLICKED(IDCANCEL4, &CRender::OnBnClickedCancel4)
 	ON_WM_TIMER()
-	ON_WM_HSCROLL()
-	ON_WM_DESTROY()
 	ON_CBN_SELCHANGE(IDC_COMBO2, &CRender::OnCbnSelchangeCombo2)
 	ON_BN_CLICKED(IDC_BUTTON1, &CRender::OnBnClickedButton1)
 	ON_CBN_SELCHANGE(IDC_COMBO3, &CRender::OnCbnSelchangeCombo3)
 	ON_CBN_SELCHANGE(IDC_COMBO_SPEAKER, &CRender::OnCbnSelchangeSpeaker)
 	ON_BN_CLICKED(IDC_CHECK_UPSCALE, &CRender::OnBnClickedCheckUpscale)
 	ON_BN_CLICKED(IDC_CHECK51, &CRender::OnBnClicked32bit)
-	ON_BN_CLICKED(IDC_CHECK3, &CRender::OnBnClickedCheck3)
 	ON_WM_CTLCOLOR()
 	ON_WM_CREATE()
 	ON_WM_MOVING()
@@ -362,19 +345,19 @@ BOOL CRender::OnInitDialog()
 	SetDlgItemText(IDC_BUTTON1, LL14(L"碧の軌跡用t_bgm._dt", L"t_bgm._dt for Ao no Kiseki", L"t_bgm._dt pour Ao no Kiseki", L"t_bgm._dt per Ao no Kiseki", L"t_bgm._dt para Ao no Kiseki", L"아오의 궤적용 t_bgm._dt", L"碧之轨迹用 t_bgm._dt", L"t_bgm._dt لـ Ao no Kiseki", L"t_bgm._dt для Ao no Kiseki", L"t_bgm._dt für Ao no Kiseki", L"t_bgm._dt para Ao no Kiseki", L"t_bgm._dt voor Ao no Kiseki", L"t_bgm._dt dla Ao no Kiseki", L"Ao no Kiseki için t_bgm._dt"));
 	SetDlgItemText(IDC_FONT, LL14(L"メイン用フォント", L"Main font", L"Police principale", L"Carattere principale", L"Fuente principal", L"메인 글꼴", L"主字体", L"الخط الرئيسي", L"Основной шрифт", L"Hauptschriftart", L"Fonte principal", L"Hoofdlettertype", L"Czcionka główna", L"Ana yazı tipi"));
 	SetDlgItemText(IDC_FONT2, LL14(L"リスト用フォント", L"List font", L"Police liste", L"Carattere lista", L"Fuente de lista", L"목록 글꼴", L"列表字体", L"خط القائمة", L"Шрифт списка", L"Listenschriftart", L"Fonte da lista", L"Lijstlettertype", L"Czcionka listy", L"Liste yazı tipi"));
-	m_lblLang.SetWindowText(LL14(L"言語", L"Language", L"Langue", L"Lingua", L"Idioma", L"언어", L"语言", L"اللغة", L"Язык", L"Sprache", L"Idioma", L"Taal", L"Język", L"Dil"));
-	m_lblBuf.SetWindowText(LL14(L"割込間隔", L"Buffer interval", L"Intervalle tampon", L"Intervallo buffer", L"Intervalo de búfer", L"버퍼 간격", L"缓冲区间隔", L"فاصل المخزن المؤقت", L"Интервал буфера", L"Pufferintervall", L"Intervalo de buffer", L"Bufferinterval", L"Interwał bufora", L"Ara belleği aralığı"));
-	m_lblMp3.SetWindowText(LL14(L"mp3音量", L"mp3 volume", L"Volume mp3", L"Volume mp3", L"Volumen mp3", L"mp3 볼륨", L"mp3 音量", L"حجم mp3", L"Громкость mp3", L"MP3-Lautstärke", L"Volume mp3", L"mp3-volume", L"Głośność mp3", L"mp3 sesi"));
-	m_lblKpi.SetWindowText(LL14(L"その他のkpi", L"Other kpi", L"Autres kpi", L"Altri kpi", L"Otros kpi", L"기타 kpi", L"其他 kpi", L"kpi أخرى", L"Другие kpi", L"Andere kpi", L"Outros kpi", L"Andere kpi", L"Inne kpi", L"Diğer kpi"));
-	m_lblDisp.SetWindowText(LL14(L"ぼかし度合い", L"Blur intensity", L"Intensité du flou", L"Intensità sfocatura", L"Intensidad de desenfoque", L"블러 강도", L"模糊强度", L"شدة التمويه", L"Интенсивность размытия", L"Unschärfe-Intensität", L"Intensidade do desfoque", L"Vervagingsintensiteit", L"Intensywność rozmycia", L"Bulanıklık yoğunluğu"));
-	m_lblDev.SetWindowText(LL14(L"再生デバイス", L"Playback device", L"Périphérique lecture", L"Dispositivo riproduzione", L"Dispositivo reproducción", L"재생 장치", L"播放设备", L"جهاز التشغيل", L"Устройство воспроизведения", L"Wiedergabegerät", L"Dispositivo reprodução", L"Afspeelapparaat", L"Urządzenie odtwarzania", L"Oynatma cihazı"));
-	m_lblSamp.SetWindowText(LL14(L"MAXサンプルレート：", L"MAX sample rate:", L"Freq. échantillonnage max:", L"Freq. campionamento max:", L"Frec. muestreo máx.:", L"최대 샘플레이트:", L"最大采样率：", L"معدل العينات الأقصى:", L"Макс. частота дискретизации:", L"Max. Abtastrate:", L"Taxa amostragem máx.:", L"Max. samplefrequentie:", L"Maks. częstotliwość:", L"Maks. örnekleme oranı:"));
-	m_lblSpeana.SetWindowText(LL14(L"スペアナ倍率", L"Spectrum scale", L"Échelle spectre", L"Scala spettro", L"Escala espectro", L"스펙트럼 배율", L"频谱倍率", L"مقياس الطيف", L"Масштаб спектра", L"Spektrumskala", L"Escala espectro", L"Spectrumschaal", L"Skala widma", L"Spektrum ölçeği"));
-	m_lblSpc.SetWindowText(LL14(L".SPC,.HES音量(kpi)", L".SPC,.HES volume(kpi)", L"Volume .SPC,.HES (kpi)", L"Volume .SPC,.HES (kpi)", L"Volumen .SPC,.HES (kpi)", L".SPC,.HES 볼륨(kpi)", L".SPC,.HES 音量(kpi)", L"حجم .SPC,.HES (kpi)", L"Громкость .SPC,.HES (kpi)", L".SPC,.HES-Lautstärke (kpi)", L"Volume .SPC,.HES (kpi)", L".SPC,.HES-volume (kpi)", L"Głośność .SPC,.HES (kpi)", L".SPC,.HES sesi (kpi)"));
-	m_lblBit.SetWindowText(LL14(L"演奏bit深度：", L"Playback bits:", L"Bits lecture:", L"Bit riproduzione:", L"Bits reproducción:", L"재생 비트:", L"播放位深：", L"بت التشغيل:", L"Битность воспроизведения:", L"Wiedergabe-Bits:", L"Bits reprodução:", L"Afspeelbits:", L"Bity odtwarzania:", L"Oynatma bitleri:"));
-	m_lblSpeaker.SetWindowText(LL14(L"出力チャンネル", L"Output channels", L"Canaux de sortie", L"Canali di uscita", L"Canales de salida", L"출력 채널", L"输出声道", L"قنوات الإخراج", L"Выходные каналы", L"Ausgabekanäle", L"Canais de saída", L"Uitgangskanalen", L"Kanały wyjściowe", L"Çıkış kanalları"));
+	SetDlgItemText(IDC_STATIC_LANG, LL14(L"言語", L"Language", L"Langue", L"Lingua", L"Idioma", L"언어", L"语言", L"اللغة", L"Язык", L"Sprache", L"Idioma", L"Taal", L"Język", L"Dil"));
+	SetDlgItemText(IDC_STATIC_R_BUF, LL14(L"割込間隔", L"Buffer interval", L"Intervalle tampon", L"Intervallo buffer", L"Intervalo de búfer", L"버퍼 간격", L"缓冲区间隔", L"فاصل المخزن المؤقت", L"Интервал буфера", L"Pufferintervall", L"Intervalo de buffer", L"Bufferinterval", L"Interwał bufora", L"Ara belleği aralığı"));
+	SetDlgItemText(IDC_STATIC_R_MP3, LL14(L"mp3音量", L"mp3 volume", L"Volume mp3", L"Volume mp3", L"Volumen mp3", L"mp3 볼륨", L"mp3 音量", L"حجم mp3", L"Громкость mp3", L"MP3-Lautstärke", L"Volume mp3", L"mp3-volume", L"Głośność mp3", L"mp3 sesi"));
+	SetDlgItemText(IDC_STATIC_R_KPI, LL14(L"その他のkpi", L"Other kpi", L"Autres kpi", L"Altri kpi", L"Otros kpi", L"기타 kpi", L"其他 kpi", L"kpi أخرى", L"Другие kpi", L"Andere kpi", L"Outros kpi", L"Andere kpi", L"Inne kpi", L"Diğer kpi"));
+	SetDlgItemText(IDC_STATIC_R_DISP, LL14(L"表示間隔", L"Display interval", L"Intervalle d'affichage", L"Intervallo display", L"Intervalo de pantalla", L"표시 간격", L"显示间隔", L"فاصل العرض", L"Интервал отображения", L"Anzeigeintervall", L"Intervalo de exibição", L"Weergave-interval", L"Interwał wyświetlania", L"Görüntüleme aralığı"));
+	SetDlgItemText(IDC_STATIC_R_DEV, LL14(L"再生デバイス", L"Playback device", L"Périphérique lecture", L"Dispositivo riproduzione", L"Dispositivo reproducción", L"재생 장치", L"播放设备", L"جهاز التشغيل", L"Устройство воспроизведения", L"Wiedergabegerät", L"Dispositivo reprodução", L"Afspeelapparaat", L"Urządzenie odtwarzania", L"Oynatma cihazı"));
+	SetDlgItemText(IDC_STATIC_R_SAMP, LL14(L"MAXサンプルレート：", L"MAX sample rate:", L"Freq. échantillonnage max:", L"Freq. campionamento max:", L"Frec. muestreo máx.:", L"최대 샘플레이트:", L"最大采样率：", L"معدل العينات الأقصى:", L"Макс. частота дискретизации:", L"Max. Abtastrate:", L"Taxa amostragem máx.:", L"Max. samplefrequentie:", L"Maks. częstotliwość:", L"Maks. örnekleme oranı:"));
+	SetDlgItemText(IDC_STATIC_R_SPEANA, LL14(L"スペアナ倍率", L"Spectrum scale", L"Échelle spectre", L"Scala spettro", L"Escala espectro", L"스펙트럼 배율", L"频谱倍率", L"مقياس الطيف", L"Масштаб спектра", L"Spektrumskala", L"Escala espectro", L"Spectrumschaal", L"Skala widma", L"Spektrum ölçeği"));
+	SetDlgItemText(IDC_STATIC_R_SPC, LL14(L".SPC,.HES音量(kpi)", L".SPC,.HES volume(kpi)", L"Volume .SPC,.HES (kpi)", L"Volume .SPC,.HES (kpi)", L"Volumen .SPC,.HES (kpi)", L".SPC,.HES 볼륨(kpi)", L".SPC,.HES 音量(kpi)", L"حجم .SPC,.HES (kpi)", L"Громкость .SPC,.HES (kpi)", L".SPC,.HES-Lautstärke (kpi)", L"Volume .SPC,.HES (kpi)", L".SPC,.HES-volume (kpi)", L"Głośność .SPC,.HES (kpi)", L".SPC,.HES sesi (kpi)"));
+	SetDlgItemText(IDC_STATIC_R_BIT, LL14(L"演奏bit深度：", L"Playback bits:", L"Bits lecture:", L"Bit riproduzione:", L"Bits reproducción:", L"재생 비트:", L"播放位深：", L"بت التشغيل:", L"Битность воспроизведения:", L"Wiedergabe-Bits:", L"Bits reprodução:", L"Afspeelbits:", L"Bity odtwarzania:", L"Oynatma bitleri:"));
+	SetDlgItemText(IDC_STATIC_R_SPEAKER, LL14(L"出力チャンネル", L"Output channels", L"Canaux de sortie", L"Canali di uscita", L"Canales de salida", L"출력 채널", L"输出声道", L"قنوات الإخراج", L"Выходные каналы", L"Ausgabekanäle", L"Canais de saída", L"Uitgangskanalen", L"Kanały wyjściowe", L"Çıkış kanalları"));
 	SetDlgItemText(IDC_CHECK_UPSCALE, LL14(L"アップスケール出力", L"Upscale output", L"Sortie upscalée", L"Upscaling in uscita", L"Salida con upscaling", L"업스케일 출력", L"升频输出", L"تحسين الدقة للإخراج", L"Апскейл вывода", L"Upscale-Ausgabe", L"Saída com upscaling", L"Upscale uitvoer", L"Wyjście upscaling", L"Yükseltmeli çıkış"));
-	m_wup.SetWindowText(LL14(L"倍", L"x", L"x", L"x", L"x", L"x", L"倍", L"x", L"x", L"x", L"x", L"x", L"x", L"x"));
+	SetDlgItemText(IDC_STATIC12, LL14(L"倍", L"x", L"x", L"x", L"x", L"x", L"倍", L"x", L"x", L"x", L"x", L"x", L"x", L"x"));
 	// SPC volume checkboxes (x1, x2, x4, x8, x16)
 	SetDlgItemText(IDC_CHECK35, LL14(L"等倍", L"1x", L"1x", L"1x", L"1x", L"1x", L"1倍", L"1x", L"1x", L"1x", L"1x", L"1x", L"1x", L"1x"));
 	SetDlgItemText(IDC_CHECK32, LL14(L"2倍", L"2x", L"2x", L"2x", L"2x", L"2x", L"2倍", L"2x", L"2x", L"2x", L"2x", L"2x", L"2x", L"2x"));
@@ -463,48 +446,49 @@ BOOL CRender::OnInitDialog()
 
 	m_tooltip.Create(this);
 	m_tooltip.Activate(TRUE);
-	m_tooltip.AddTool(&m_okdummy, LL14(L"保存して閉じます", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close"));
-	m_tooltip.AddTool(&m_canceldummy, LL14(L"保存せずに閉じます", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving"));
-	m_tooltip.AddTool(&m_l, LL14(L"再生中の使用DirectShowフィルタを表示します。", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback."));
-	m_tooltip.AddTool(&m_kpi, LL14(L"kpi一覧を表示します。", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list."));
-	m_tooltip.AddTool(&m_evr, LL14(L"Windows Vista/7以降で有効です。\nIndeoを用いた動画の場合OFFにしてください。\nそれ以外はONでいいです。", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON."));
-	m_tooltip.AddTool(&m_con, LL14(L"Windows Vista/7以降で有効です。\nデスクトップコンポジション(Aero)を使用するかどうかを選択します。\n使用しないにするとEVRじゃなくても動画画面はきれいになります。", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR."));
-	m_tooltip.AddTool(&m_a, LL14(L"Windows 10以降で有効です。\nアクリルぼかしUIを使用するかどうか決めます。\n変更は即座に全画面へ反映されます。", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows.", L"Effective on Windows 10+.\nEnable acrylic blur UI.\nChanges apply immediately to all open windows."));
-	m_tooltip.AddTool(&m_ffd, LL14(L"動画にffdshowを使うかどうか選択します。\nWindows7の場合、デフォルトでDivxなどを再生できるのでそちらを使いたい人はOFFにしてください。", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that."));
-	m_tooltip.AddTool(&m_vob, LL14(L"vobとdatファイルはHaaliを通さないように作られていますが、\nvobに複数音声があるときにはチェックを入れて下さい。", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks."));
-	m_tooltip.AddTool(&m_haali, LL14(L"動画にHaaliを使いません。\n動画が重いと思った時や複数音声が無い時はチェックを入れると軽くなります。", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio."));
-	m_tooltip.AddTool(&m_spc2x, LL14(L"kpi SPC/NEZplug++等のSPCの音量を2倍にします。", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC."));
-	m_tooltip.AddTool(&m_spc4x, LL14(L"kpi SPC/NEZplug++等のSPCの音量を3倍にします。", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC."));
-	m_tooltip.AddTool(&m_spc8x, LL14(L"kpi SPC/NEZplug++等のSPCの音量を4倍にします。", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC."));
-	m_tooltip.AddTool(&m_spc1x, LL14(L"kpi SPC/NEZplug++等のSPCの音量を等倍にします。", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC."));
-	m_tooltip.AddTool(&m_spc16x, LL14(L"kpi SPC/NEZplug++等のSPCの音量を5倍にします。", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC."));
-	m_tooltip.AddTool(&m_mp31, LL14(L"mp3の音量を等倍にします。", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume."));
-	m_tooltip.AddTool(&m_mp315, LL14(L"mp3の音量を1.5倍にします。", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume."));
-	m_tooltip.AddTool(&m_mp32, LL14(L"mp3の音量を2倍にします。", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume."));
-	m_tooltip.AddTool(&m_mp325, LL14(L"mp3の音量を2.5倍にします。", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume."));
-	m_tooltip.AddTool(&m_mp33, LL14(L"mp3の音量を3倍にします。", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume."));
-	m_tooltip.AddTool(&m_kpi10, LL14(L"kpiの音量を等倍にします。", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume."));
-	m_tooltip.AddTool(&m_kpi15, LL14(L"kpiの音量を2倍にします。", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume."));
-	m_tooltip.AddTool(&m_kpi20, LL14(L"kpiの音量を3倍にします。", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume."));
-	m_tooltip.AddTool(&m_kpi25, LL14(L"kpiの音量を4倍にします。", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume."));
-	m_tooltip.AddTool(&m_kpi30, LL14(L"kpiの音量を5倍にします。", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume."));
-	m_tooltip.AddTool(&m_mp3orig, LL14(L"mp3のデコーダをオリジナルのデコーダを使わずに、独自で使ったデコーダを使う。\nエラーなどで演奏できないときにチェック入れて下さい。\nまた独自で正常にならない時ははずして下さい。", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues."));
-	m_tooltip.AddTool(&m_audiost, LL14(L"複数音声のある動画を再生する時に、再生前に\n音声ストリームの選択画面を表示します。\n通常ストリーム1がメインとして使われ、ストリーム2以降はコメンタリや英語音声などに使われています。", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc."));
-	m_tooltip.AddTool(&m_24, LL14(L"対応しているkpiを24bit(ハイレゾ)で再生します。\n通常は16bitですが、まれに対応しているものがあります。\n音割れについては考慮されていないため、spcなど倍率を上げないといけないものは気をつけて下さい。", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc."));
-	m_tooltip.AddTool(&m_32bit, LL14(L"対応しているkpiを32bit(ハイレゾ)で再生します。\n通常は16bitですが、まれに対応しているものがあります。\n音割れについては考慮されていないため、spcなど倍率を上げないといけないものは気をつけて下さい。", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc."));
-	m_tooltip.AddTool(&m_m4a, LL14(L"m4aを内蔵エンジンで演奏します。", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine."));
-	m_tooltip.AddTool(&m_speana, LL14(L"スペアナの表示モードを切り替えます", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode"));
-	m_tooltip.AddTool(&m_Hz, LL14(L"再生するサンプルレートを設定します。\nサウンドカードが対応していない場合自動的に再生時対応上限まで下げます。", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported."));
-	m_tooltip.AddTool(&m_upscale, LL14(L"設定したサンプルレート・ビット深度・チャンネルでDirectSoundに出力します。\nオフにするとソース形式のまま出力します。", L"Output to DirectSound at configured rate, bit depth, and channels.\nOff keeps the source format.", L"Sortie DirectSound au débit / bits / canaux configurés.\nDésactivé = format source.", L"Uscita DirectSound con frequenza, bit e canali impostati.\nSpento = formato sorgente.", L"Salida DirectSound con frecuencia, bits y canales configurados.\nApagado = formato de origen.", L"설정한 샘플레이트·비트·채널로 DirectSound 출력.\n끄면 소스 형식 유지.", L"按设置的采样率、位深和声道输出到 DirectSound。\n关闭则保持源格式。", L"إخراج DirectSound بالمعدل والبت والقنوات المضبوطة.\nإيقاف = تنسيق المصدر.", L"Вывод в DirectSound с заданной частотой, битностью и каналами.\nВыкл. — формат источника.", L"Ausgabe an DirectSound mit eingestellter Rate, Bittiefe und Kanälen.\nAus = Quellformat.", L"Saída DirectSound com taxa, bits e canais configurados.\nDesligado = formato da fonte.", L"DirectSound-uitvoer met ingestelde rate, bits en kanalen.\nUit = bronformaat.", L"Wyjście DirectSound z ustawioną częstotliwością, bitami i kanałami.\nWył. = format źródła.", L"Ayarlanan hız, bit ve kanallarla DirectSound çıkışı.\nKapalı = kaynak biçimi."));
-	m_tooltip.AddTool(&m_speaker, LL14(L"アップスケール時の出力チャンネル配置（2ch / 2.1 / 4ch / 5.1 / 7.1 / マッピングなし）を選びます。マッピングなしはソースのチャンネル数のまま、レート・ビット深度のみ変換します。", L"Speaker layout when upscaling (2ch / 2.1 / 4ch / 5.1 / 7.1 / no mapping). No mapping keeps source channel count; only rate and bit depth change.", L"Disposition haut-parleurs en upscaling (2ch / 2.1 / 4ch / 5.1 / 7.1 / sans mappage). Sans mappage : même nombre de canaux, seuls débit et bits changent.", L"Layout altoparlanti (2ch / 2.1 / 4ch / 5.1 / 7.1 / nessun mapping). Nessun mapping: stessi canali, solo frequenza e bit.", L"Disposición de altavoces (2ch / 2.1 / 4ch / 5.1 / 7.1 / sin mapeo). Sin mapeo: mismos canales; solo tasa y bits.", L"업스케일 시 스피커(2ch/2.1/4ch/5.1/7.1/매핑 없음). 매핑 없음은 소스 채널 수 유지, 레이트·비트만 변환.", L"升频时的扬声器布局（含不映射声道）。不映射则保持源声道数，仅转换采样率与位深。", L"تخطيط السماعات مع خيار بدون تعيين. بدون تعيين: نفس عدد القنوات؛ تغيير المعدل والبت فقط.", L"Раскладка каналов при апскейле; «без маппинга» сохраняет число каналов источника, меняются только частота и битность.", L"Lautsprecher-Layout; „kein Mapping“ behält Kanalzahl, nur Rate/Bits.", L"Layout de altifalante; sem mapeamento mantém canais da fonte, só taxa e bits.", L"Luidsprekerindeling; geen mapping behoudt bronkanalen, alleen rate en bits.", L"Układ kanałów; bez mapowania = ta sama liczba kanałów, zmiana tylko częstotliwości i bitów.", L"Hoparlör düzeni; eşleme yok kaynak kanal sayısını korur, yalnızca hız ve bit derinliği değişir."));
-	m_tooltip.AddTool(&m_speana_num, LL14(L"スペアナで表示する表示方法を選択します。\n使う時は横のチェックボックスにチェックを入れてください\n音階：88鍵盤として表示します\n周波数帯：周波数として表示します\n標準：既定の見やすい形のスペアナで表示します", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum"));
-	m_tooltip.AddTool(&m_ao, LL14(L"碧の軌跡用のt_bgm._dtを設定します。", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki."));
-	m_tooltip.AddTool(&m_kanren, LL14(L"win7くらいまで対応。関連付けに追加します。\nwin10以降でも追加はされるとは思いますがされないときもあります。", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always."));
-	m_tooltip.AddTool(&m_netlrc, LL14(L"歌詞情報をネットから参照するようにします。\n数パターン試すため少し再生までに時間かかります。", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback."));
-	m_tooltip.AddTool(&m_ms, LL14(L"演奏のバッファ処理での割り込み時間を設定します。\n少なすぎると音飛びする可能性があります。", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches."));
-	m_tooltip.AddTool(&m_hyouji2, LL14(L"アクリルUIの透過度（ぼかし度合い）を設定します。\n値が大きいほど不透明になります。", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque.", L"Set acrylic UI transparency (blur intensity).\nHigher values are more opaque."));
-	m_tooltip.AddTool(&w_wups, LL14(L"スペアナの表示倍率を設定します。", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale."));
-	m_tooltip.AddTool(&m_comboLang, LL14(L"UI表示言語を切り替えます。\n設定を保存して再起動後に反映されます。", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting."));
+	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"保存して閉じます", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close", L"Save and close"));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL14(L"保存せずに閉じます", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving", L"Close without saving"));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL2), LL14(L"再生中の使用DirectShowフィルタを表示します。", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback.", L"Show DirectShow filters in use during playback."));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL3), LL14(L"kpi一覧を表示します。", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list.", L"Show kpi list."));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL4), LL14(L"各種ファイルを簡易プレイヤに関連づけします。\nうまくいかない場合もあります。", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work.", L"Associate files with simple player.\nMay not always work."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK1), LL14(L"Windows Vista/7以降で有効です。\nIndeoを用いた動画の場合OFFにしてください。\nそれ以外はONでいいです。", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON.", L"Effective on Windows Vista/7+.\nTurn OFF for Indeo video.\nOtherwise ON."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK2), LL14(L"Windows Vista/7以降で有効です。\nデスクトップコンポジション(Aero)を使用するかどうかを選択します。\n使用しないにするとEVRじゃなくても動画画面はきれいになります。", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR.", L"Effective on Vista/7+.\nUse desktop composition (Aero).\nWithout it, video may still look good without EVR."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK3), LL14(L"Windows 10以降で有効です。\nAero Grassを使用するかどうか決めます。", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass.", L"Effective on Windows 10+.\nEnable Aero Grass."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK27), LL14(L"動画にffdshowを使うかどうか選択します。\nWindows7の場合、デフォルトでDivxなどを再生できるのでそちらを使いたい人はOFFにしてください。", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that.", L"Use ffdshow for video.\nOn Win7, DivX works by default; turn OFF if you prefer that."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK30), LL14(L"vobとdatファイルはHaaliを通さないように作られていますが、\nvobに複数音声があるときにはチェックを入れて下さい。", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks.", L"vob/dat skip Haali by default.\nCheck when vob has multiple audio tracks."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK31), LL14(L"動画にHaaliを使いません。\n動画が重いと思った時や複数音声が無い時はチェックを入れると軽くなります。", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio.", L"Do not use Haali for video.\nCheck if video is heavy or has no multiple audio."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK32), LL14(L"kpi SPC/NEZplug++等のSPCの音量を2倍にします。", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC.", L"2x volume for kpi SPC/NEZplug++ SPC."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK33), LL14(L"kpi SPC/NEZplug++等のSPCの音量を3倍にします。", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC.", L"3x volume for kpi SPC/NEZplug++ SPC."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK34), LL14(L"kpi SPC/NEZplug++等のSPCの音量を4倍にします。", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC.", L"4x volume for kpi SPC/NEZplug++ SPC."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK35), LL14(L"kpi SPC/NEZplug++等のSPCの音量を等倍にします。", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC.", L"1x volume for kpi SPC/NEZplug++ SPC."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK36), LL14(L"kpi SPC/NEZplug++等のSPCの音量を5倍にします。", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC.", L"5x volume for kpi SPC/NEZplug++ SPC."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK40), LL14(L"mp3の音量を等倍にします。", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume.", L"1x mp3 volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK37), LL14(L"mp3の音量を1.5倍にします。", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume.", L"1.5x mp3 volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK38), LL14(L"mp3の音量を2倍にします。", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume.", L"2x mp3 volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK39), LL14(L"mp3の音量を2.5倍にします。", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume.", L"2.5x mp3 volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK41), LL14(L"mp3の音量を3倍にします。", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume.", L"3x mp3 volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK45), LL14(L"kpiの音量を等倍にします。", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume.", L"1x kpi volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK42), LL14(L"kpiの音量を2倍にします。", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume.", L"2x kpi volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK43), LL14(L"kpiの音量を3倍にします。", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume.", L"3x kpi volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK44), LL14(L"kpiの音量を4倍にします。", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume.", L"4x kpi volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK46), LL14(L"kpiの音量を5倍にします。", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume.", L"5x kpi volume."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK47), LL14(L"mp3のデコーダをオリジナルのデコーダを使わずに、独自で使ったデコーダを使う。\nエラーなどで演奏できないときにチェック入れて下さい。\nまた独自で正常にならない時ははずして下さい。", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK48), LL14(L"複数音声のある動画を再生する時に、再生前に\n音声ストリームの選択画面を表示します。\n通常ストリーム1がメインとして使われ、ストリーム2以降はコメンタリや英語音声などに使われています。", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc.", L"Show audio stream selection before playing multi-audio video.\nStream 1 is usually main; 2+ for commentary/English etc."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK49), LL14(L"対応しているkpiを24bit(ハイレゾ)で再生します。\n通常は16bitですが、まれに対応しているものがあります。\n音割れについては考慮されていないため、spcなど倍率を上げないといけないものは気をつけて下さい。", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc.", L"Play supported kpi at 24bit.\nUsually 16bit; some support 24bit.\nClipping not considered for spc etc."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK51), LL14(L"対応しているkpiを32bit(ハイレゾ)で再生します。\n通常は16bitですが、まれに対応しているものがあります。\n音割れについては考慮されていないため、spcなど倍率を上げないといけないものは気をつけて下さい。", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc.", L"Play supported kpi at 32bit.\nUsually 16bit; some support 32bit.\nClipping not considered for spc etc."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK50), LL14(L"m4aを内蔵エンジンで演奏します。", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine.", L"Play m4a with built-in engine."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK52), LL14(L"スペアナの表示モードを切り替えます", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode", L"Switch spectrum analyzer display mode"));
+	m_tooltip.AddTool(GetDlgItem(IDC_COMBO3), LL14(L"再生するサンプルレートを設定します。\nサウンドカードが対応していない場合自動的に再生時対応上限まで下げます。", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported.", L"Set playback sample rate.\nAuto-lowers if sound card unsupported."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_UPSCALE), LL14(L"設定したサンプルレート・ビット深度・チャンネルでDirectSoundに出力します。\nオフにするとソース形式のまま出力します。", L"Output to DirectSound at configured rate, bit depth, and channels.\nOff keeps the source format.", L"Sortie DirectSound au débit / bits / canaux configurés.\nDésactivé = format source.", L"Uscita DirectSound con frequenza, bit e canali impostati.\nSpento = formato sorgente.", L"Salida DirectSound con frecuencia, bits y canales configurados.\nApagado = formato de origen.", L"설정한 샘플레이트·비트·채널로 DirectSound 출력.\n끄면 소스 형식 유지.", L"按设置的采样率、位深和声道输出到 DirectSound。\n关闭则保持源格式。", L"إخراج DirectSound بالمعدل والبت والقنوات المضبوطة.\nإيقاف = تنسيق المصدر.", L"Вывод в DirectSound с заданной частотой, битностью и каналами.\nВыкл. — формат источника.", L"Ausgabe an DirectSound mit eingestellter Rate, Bittiefe und Kanälen.\nAus = Quellformat.", L"Saída DirectSound com taxa, bits e canais configurados.\nDesligado = formato da fonte.", L"DirectSound-uitvoer met ingestelde rate, bits en kanalen.\nUit = bronformaat.", L"Wyjście DirectSound z ustawioną częstotliwością, bitami i kanałami.\nWył. = format źródła.", L"Ayarlanan hız, bit ve kanallarla DirectSound çıkışı.\nKapalı = kaynak biçimi."));
+	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_SPEAKER), LL14(L"アップスケール時の出力チャンネル配置（2ch / 2.1 / 4ch / 5.1 / 7.1 / マッピングなし）を選びます。マッピングなしはソースのチャンネル数のまま、レート・ビット深度のみ変換します。", L"Speaker layout when upscaling (2ch / 2.1 / 4ch / 5.1 / 7.1 / no mapping). No mapping keeps source channel count; only rate and bit depth change.", L"Disposition haut-parleurs en upscaling (2ch / 2.1 / 4ch / 5.1 / 7.1 / sans mappage). Sans mappage : même nombre de canaux, seuls débit et bits changent.", L"Layout altoparlanti (2ch / 2.1 / 4ch / 5.1 / 7.1 / nessun mapping). Nessun mapping: stessi canali, solo frequenza e bit.", L"Disposición de altavoces (2ch / 2.1 / 4ch / 5.1 / 7.1 / sin mapeo). Sin mapeo: mismos canales; solo tasa y bits.", L"업스케일 시 스피커(2ch/2.1/4ch/5.1/7.1/매핑 없음). 매핑 없음은 소스 채널 수 유지, 레이트·비트만 변환.", L"升频时的扬声器布局（含不映射声道）。不映射则保持源声道数，仅转换采样率与位深。", L"تخطيط السماعات مع خيار بدون تعيين. بدون تعيين: نفس عدد القنوات؛ تغيير المعدل والبت فقط.", L"Раскладка каналов при апскейле; «без маппинга» сохраняет число каналов источника, меняются только частота и битность.", L"Lautsprecher-Layout; „kein Mapping“ behält Kanalzahl, nur Rate/Bits.", L"Layout de altifalante; sem mapeamento mantém canais da fonte, só taxa e bits.", L"Luidsprekerindeling; geen mapping behoudt bronkanalen, alleen rate en bits.", L"Układ kanałów; bez mapowania = ta sama liczba kanałów, zmiana tylko częstotliwości i bitów.", L"Hoparlör düzeni; eşleme yok kaynak kanal sayısını korur, yalnızca hız ve bit derinliği değişir."));
+	m_tooltip.AddTool(GetDlgItem(IDC_COMBO4), LL14(L"スペアナで表示する表示方法を選択します。\n使う時は横のチェックボックスにチェックを入れてください\n音階：88鍵盤として表示します\n周波数帯：周波数として表示します\n標準：既定の見やすい形のスペアナで表示します", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum"));
+	m_tooltip.AddTool(GetDlgItem(IDC_BUTTON1), LL14(L"碧の軌跡用のt_bgm._dtを設定します。", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki.", L"Set t_bgm._dt for Ao no Kiseki."));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL5), LL14(L"win7くらいまで対応。関連付けに追加します。\nwin10以降でも追加はされるとは思いますがされないときもあります。", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Up to Win7. Add file associations.\nMay work on Win10+ but not always."));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_lrc), LL14(L"歌詞情報をネットから参照するようにします。\n数パターン試すため少し再生までに時間かかります。", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Fetch lyrics from network.\nMay take longer to start playback."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER3), LL14(L"演奏のバッファ処理での割り込み時間を設定します。\n少なすぎると音飛びする可能性があります。", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Set buffer interrupt time.\nToo low may cause audio glitches."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER5), LL14(L"描画の間隔時間を設定します。\nCPU使用が高いときに上げます。", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high.", L"Set render interval.\nIncrease when CPU usage is high."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER6), LL14(L"スペアナの表示倍率を設定します。", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale.", L"Set spectrum display scale."));
+	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_LANG), LL14(L"UI表示言語を切り替えます。\n設定を保存して再起動後に反映されます。", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting.", L"Switch UI language.\nTakes effect after saving and restarting."));
 	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 
@@ -513,13 +497,7 @@ BOOL CRender::OnInitDialog()
 	w_wups.SetMode(1);
 	m_evr.SetCheck(savedata.evr);
 	m_con.SetCheck(savedata.con);
-	if (savedata.aero != 0)
-		savedata.aero = 1;
-	m_a.SetCheck(savedata.aero ? BST_CHECKED : BST_UNCHECKED);
-	m_prevAero = savedata.aero;
-	m_prevAeroBlur = savedata.aero_blur_Acrylic_Opacity;
-	m_bakAero = savedata.aero;
-	m_bakAeroBlur = savedata.aero_blur_Acrylic_Opacity;
+	m_a.SetCheck(savedata.aero);
 	COSVersion os;
 	os.GetVersionString();
 	if (os.in.dwMajorVersion < 6)
@@ -547,16 +525,12 @@ BOOL CRender::OnInitDialog()
 	if (savedata.ms < 30) savedata.ms = 30;
 	m_ms.SetPos(savedata.ms);
 	if (savedata.ms > 80) savedata.ms = 80;
-	if (savedata.aero_blur_Acrylic_Opacity < 1) savedata.aero_blur_Acrylic_Opacity = 1;
-	if (savedata.aero_blur_Acrylic_Opacity > 60) savedata.aero_blur_Acrylic_Opacity = 60;
 	m_hyouji2.SetRange(1, 60);
-	m_hyouji2.SetPos(savedata.aero_blur_Acrylic_Opacity);
+	m_hyouji2.SetPos(savedata.ms2);
 	{
 		const wchar_t* msUnit = LL14(L"ms", L"ms", L"ms", L"ms", L"ms", L"ms", L"毫秒", L"ms", L"мс", L"ms", L"ms", L"ms", L"ms", L"ms");
 		CString s; s.Format(L"%d%s", savedata.ms, msUnit);
 		m_ms2.SetWindowText(s);
-		CString sBlur; sBlur.Format(L"%d", savedata.aero_blur_Acrylic_Opacity);
-		m_hyouji3.SetWindowText(sBlur);
 	}
 	SetTimer(11, 100, NULL);
 	w_wups.SetRange(100, 1000);
@@ -609,6 +583,20 @@ BOOL CRender::OnInitDialog()
 
 	m_netlrc.SetCheck(savedata.lrc_net);
 
+	if (savedata.aero){
+		renderbase = new CImageBase;
+	renderbase->Create(NULL);
+	renderbase->oya = this;
+	}
+	else {
+		renderbase = NULL;
+	}
+	CRect r;
+	GetWindowRect(&r);
+	if (savedata.aero)
+	renderbase->MoveWindow(&r);
+	if(renderbase)
+		::SetWindowPos(renderbase->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	return TRUE;  // コントロールにフォーカスを設定しないとき、戻り値は TRUE となります
 	              // 例外: OCX プロパティ ページの戻り値は FALSE となります
@@ -632,7 +620,7 @@ void CRender::OnOK()
 	savedata.render=m_1.GetCurSel();
 	savedata.evr=m_evr.GetCheck();
 	savedata.con=m_con.GetCheck();
-	savedata.aero = m_a.GetCheck() ? 1 : 0;
+	savedata.aero=m_a.GetCheck();
 	savedata.ffd=m_ffd.GetCheck();
 	savedata.vob=m_vob.GetCheck();
 	savedata.haali=m_haali.GetCheck();
@@ -647,6 +635,8 @@ void CRender::OnOK()
 	savedata.lang = m_comboLang.GetCurSel();
 
 	//	savedata.mp3orig=m_mp3orig.GetCheck();
+	if (savedata.aero)
+	delete renderbase;
 	CCustomBlurDialogExBase::OnOK();
 }
 
@@ -670,6 +660,7 @@ void CRender::OnBnClickedCancel2()
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
 	CGraph *a = new CGraph(CWnd::FromHandle(GetSafeHwnd()));
 	::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	if (renderbase)::SetWindowPos(renderbase->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	if(pGraphBuilder)
 		a->DoModal();
 	delete a;
@@ -959,7 +950,7 @@ void CRender::OnBnClickedOk()
 	savedata.render = m_1.GetCurSel();
 	savedata.evr = m_evr.GetCheck();
 	savedata.con = m_con.GetCheck();
-	savedata.aero = m_a.GetCheck() ? 1 : 0;
+	savedata.aero = m_a.GetCheck();
 	savedata.ffd = m_ffd.GetCheck();
 	savedata.vob = m_vob.GetCheck();
 	savedata.haali = m_haali.GetCheck();
@@ -986,6 +977,8 @@ void CRender::OnBnClickedOk()
 		savedata.soundcur = dev;
 	}
 	extern int gameon;
+	if(savedata.aero)
+	delete renderbase;
 	CCustomBlurDialogExBase::OnOK();
 }
 
@@ -1069,43 +1062,6 @@ void CRender::OnBnClickedCancel4()
 }
 
 
-void CRender::ApplyAeroBlurFromSlider()
-{
-	const int newBlur = m_hyouji2.GetPos();
-	if (newBlur < 1) savedata.aero_blur_Acrylic_Opacity = 1;
-	else if (newBlur > 60) savedata.aero_blur_Acrylic_Opacity = 60;
-	else savedata.aero_blur_Acrylic_Opacity = newBlur;
-	CString s2; s2.Format(L"%d", savedata.aero_blur_Acrylic_Opacity);
-	m_hyouji3.SetWindowText(s2);
-	if (newBlur != m_prevAeroBlur) {
-		m_prevAeroBlur = newBlur;
-		if (og)
-			og->RefreshAeroGlassAlpha();
-		RefreshAeroGlassAlpha();
-	}
-}
-
-void CRender::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
-{
-	if (pScrollBar && pScrollBar->GetSafeHwnd() == m_hyouji2.GetSafeHwnd())
-	{
-		ApplyAeroBlurFromSlider();
-		if (nSBCode == SB_ENDSCROLL || nSBCode == SB_THUMBPOSITION)
-		{
-			if (og)
-				og->RefreshAeroGlassAlpha(TRUE);
-			RefreshAeroGlassAlpha(TRUE);
-		}
-	}
-	CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
-}
-
-void CRender::OnDestroy()
-{
-	KillTimer(11);
-	CCustomBlurDialogExBase::OnDestroy();
-}
-
 void CRender::OnTimer(UINT_PTR nIDEvent)
 {
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
@@ -1122,16 +1078,12 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 		CString s; s.Format(L"%d%s", savedata.ms, msUnit);
 		m_ms2.SetWindowText(s);
 	}
-	const int newBlur = m_hyouji2.GetPos();
-	if (newBlur < 1) savedata.aero_blur_Acrylic_Opacity = 1;
-	else if (newBlur > 60) savedata.aero_blur_Acrylic_Opacity = 60;
-	else savedata.aero_blur_Acrylic_Opacity = newBlur;
+	savedata.ms2 = m_hyouji2.GetPos();
 	{
-		CString s2; s2.Format(L"%d", savedata.aero_blur_Acrylic_Opacity);
+		const wchar_t* msUnit = LL14(L"ms", L"ms", L"ms", L"ms", L"ms", L"ms", L"毫秒", L"ms", L"мс", L"ms", L"ms", L"ms", L"ms", L"ms");
+		CString s2; s2.Format(L"%d%s", savedata.ms2*16, msUnit);
 		m_hyouji3.SetWindowText(s2);
 	}
-	if (newBlur != m_prevAeroBlur)
-		ApplyAeroBlurFromSlider();
 	savedata.wup = w_wups.GetPos()/ 100.0;
 	CString s;
 	{
@@ -1196,7 +1148,22 @@ void CRender::OnCbnSelchangeCombo3()
 
 HBRUSH CRender::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 {
-	return CCustomBlurDialogExBase::OnCtlColor(pDC, pWnd, nCtlColor);
+	HBRUSH hbr = CCustomBlurDialogExBase::OnCtlColor(pDC, pWnd, nCtlColor);
+
+	// TODO: ここで DC の属性を変更してください。
+	if (savedata.aero == 1) {
+		if (nCtlColor == CTLCOLOR_DLG)
+		{
+			return m_brDlg;
+		}
+		if (nCtlColor == CTLCOLOR_STATIC)
+		{
+			SetBkMode(pDC->m_hDC, TRANSPARENT);
+			return m_brDlg;
+		}
+	}
+	// TODO: 既定値を使用したくない場合は別のブラシを返します。
+	return hbr;
 }
 
 
@@ -1204,6 +1171,15 @@ int CRender::OnCreate(LPCREATESTRUCT lpCreateStruct)
 {
 	if (CCustomBlurDialogExBase::OnCreate(lpCreateStruct) == -1)
 		return -1;
+
+	// TODO: ここに特定な作成コードを追加してください。
+	ModifyStyleEx(0, WS_EX_LAYERED);
+
+	// レイヤードウィンドウの不透明度と透明のカラーキー
+	SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
+
+	// 赤色のブラシを作成する．
+	m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
 	return 0;
 }
 
@@ -1213,6 +1189,9 @@ void CRender::OnMoving(UINT fwSide, LPRECT pRect)
 	CCustomBlurDialogExBase::OnMoving(fwSide, pRect);
 	CRect r;
 	GetWindowRect(&r);
+	if (savedata.aero)
+
+	renderbase->MoveWindow(&r);
 	// TODO: ここにメッセージ ハンドラー コードを追加します。
 }
 
@@ -1220,21 +1199,18 @@ int CRender::Create(CWnd* pWnd)
 {
 	m_pParent = NULL;
 	BOOL bret = CCustomBlurDialogExBase::Create(CRender::IDD, this);
+	if (savedata.aero == 1) {
+		ModifyStyleEx(0, WS_EX_LAYERED);
+
+		// レイヤードウィンドウの不透明度と透明のカラーキー
+		SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
+
+		// 赤色のブラシを作成する．
+		m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
+	}
 	if (bret == TRUE)
 		ShowWindow(SW_SHOW);
 	return bret;
-}
-
-void CRender::OnBnClickedCheck3()
-{
-	const int newAero = m_a.GetCheck() ? 1 : 0;
-	if (savedata.aero == newAero)
-		return;
-	savedata.aero = newAero;
-	m_prevAero = newAero;
-	RefreshAeroMode();
-	if (og)
-		og->RefreshAllAeroWindows();
 }
 
 void CRender::OnBnClickedCancel()
@@ -1331,27 +1307,9 @@ void CRender::OnBnClickedCancel()
 		}
 	}
 
-	const bool bAeroChanged = (savedata.aero != m_bakAero);
-	const bool bBlurChanged = (savedata.aero_blur_Acrylic_Opacity != m_bakAeroBlur);
-	if (bAeroChanged || bBlurChanged) {
-		savedata.aero = m_bakAero;
-		savedata.aero_blur_Acrylic_Opacity = m_bakAeroBlur;
-		m_a.SetCheck(savedata.aero ? BST_CHECKED : BST_UNCHECKED);
-		m_hyouji2.SetPos(savedata.aero_blur_Acrylic_Opacity);
-		CString sBlur; sBlur.Format(L"%d", savedata.aero_blur_Acrylic_Opacity);
-		m_hyouji3.SetWindowText(sBlur);
-		if (bAeroChanged) {
-			RefreshAeroMode();
-			if (og)
-				og->RefreshAllAeroWindows();
-		}
-		else {
-			RefreshAeroGlassAlpha();
-			if (og)
-				og->RefreshAeroGlassAlpha();
-		}
-	}
+	if (savedata.aero)
 
+	delete renderbase;
 	CCustomBlurDialogExBase::OnCancel();
 }
 

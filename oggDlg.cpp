@@ -109,6 +109,7 @@ extern size_t g_loopTailPos;
 
 extern std::mutex cl2;
 
+CImageBase* Games;
 
 #pragma warning(push)
 #pragma warning(disable : 4201)
@@ -215,7 +216,6 @@ MMRESULT    mmRes;
 HWAVEOUT    hwo;
 CPlayList* pl = NULL;
 CMp3Image* mi = NULL;
-CDouga* pMainFrame1 = NULL;
 BOOL plw, miw;
 extern TCHAR karento2[1024];
 char kare[256];
@@ -244,12 +244,6 @@ static char THIS_FILE[] = __FILE__;
 int fade1, playf;
 BOOL thn = TRUE;
 BOOL thn1 = FALSE;
-
-// stop/stop1 が thn1 を立て、デコーダ解放前に stf も立てる。再生スレッド内の while(true) は必ずこれを見る。
-static inline bool IsPlaybackStopRequested()
-{
-	return thn1 != FALSE || stf != 0;
-}
 LPDIRECTSOUND8 m_ds;
 LPDIRECTSOUNDBUFFER m_dsb1 = NULL;
 LPDIRECTSOUNDBUFFER8 m_dsb = NULL;
@@ -486,13 +480,11 @@ protected:
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 public:
-	CCustomStatic m_in;
+	CStatic m_in;
 	virtual BOOL OnInitDialog();
 	CLinkStatic m_link;
-	CCustomStatic m_cpu;
+	CStatic m_cpu;
 	CCustomStandardButton m_okdummy;
-	CCustomStatic m_ver;
-	CCustomStatic m_copy;
 };
 
 CAboutDlg::CAboutDlg(CWnd* pParent) : CCustomBlurDialogBase(CAboutDlg::IDD, pParent)
@@ -510,8 +502,6 @@ void CAboutDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_Link, m_link);
 	DDX_Control(pDX, IDC_STATICin2, m_cpu);
 	DDX_Control(pDX, IDOK, m_okdummy);
-	DDX_Control(pDX, IDC_ABOUT_VER, m_ver);
-	DDX_Control(pDX, IDC_ABOUT_COPY, m_copy);
 }
 
 BEGIN_MESSAGE_MAP(CAboutDlg, CCustomBlurDialogBase)
@@ -938,8 +928,6 @@ void COggDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_BUTTON21, m_setteiii);
 	DDX_Control(pDX, IDC_BUTTON9, m_folderrrr);
 	DDX_Control(pDX, IDOK, m_syuryouuuu);
-	DDX_Control(pDX, IDC_OGG_GRP_MULTI, m_grpMulti);
-	DDX_Control(pDX, IDC_OGG_GRP_GAME, m_grpGame);
 	DDX_Control(pDX, IDC_STATICaaa, dummys1);
 	DDX_Control(pDX, IDC_STATICaaab, m_dummys2);
 	DDX_Control(pDX, IDC_STATICaaac, m_dummys3);
@@ -999,9 +987,6 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
 	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
 	ON_MESSAGE(WM_OGG_DEFERRED_HEAVY_INIT, OnDeferredHeavyStartup)
-#if CCUSTOM_AERO_SUPPORT
-	ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
-#endif
 	ON_WM_COPYDATA()
 	ON_WM_KEYDOWN()
 	ON_WM_SYSKEYDOWN()
@@ -1238,8 +1223,6 @@ extern __int64 playb;
 
 void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 {
-	if (IsPlaybackStopRequested())
-		return;
 	if (!g_pcm_upscale_active || len1 + len2 <= 0) {
 		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
 			playwavBuffwav(bufwav3, oldw, len1, len2);
@@ -1264,8 +1247,6 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 	int wp = 0;
 	int guard = 0;
 	while (wp < total && guard < 512) {
-		if (IsPlaybackStopRequested())
-			break;
 		++guard;
 		int chunk = total - wp;
 		int got = g_audioUpscaler.PullInterleaved(linear.data() + wp, chunk);
@@ -1366,29 +1347,12 @@ void COggDlg::OnSysCommand(UINT nID, LPARAM lParam)
 // コードを以下に記述する必要があります。MFC アプリケーションは document/view
 // モデルを使っているので、この処理はフレームワークにより自動的に処理されます。
 
+CImageBase* maini;
 // システムは、ユーザーが最小化ウィンドウをドラッグしている間、
 // カーソルを表示するためにここを呼び出します。
 HCURSOR COggDlg::OnQueryDragIcon()
 {
 	return (HCURSOR)m_hIcon;
-}
-
-BOOL COggDlg::IsMainDlgCollapsed() const
-{
-	CString s;
-	const_cast<COggDlg*>(this)->m_ue.GetWindowText(s);
-	return (s == _T("▲"));
-}
-
-const RECT* COggDlg::MainAeroGapPreserve(RECT* pBuf) const
-{
-	if (!pBuf || IsMainDlgCollapsed())
-		return nullptr;
-	pBuf->left = 0;
-	pBuf->top = 0;
-	pBuf->right = (int)((MDCP) * hD);
-	pBuf->bottom = (int)((81 + 16) * hD * 4);
-	return pBuf;
 }
 
 void COggDlg::Resize()
@@ -1403,6 +1367,8 @@ void COggDlg::Resize()
 		rect_1.bottom = rect_2.bottom + 3;
 		rect_1.right = rect_2.right + 5;
 		MoveWindow(&rect_1);
+		if (maini)
+			maini->MoveWindow(&rect_1);
 	}
 	else {
 		m_ue.SetWindowText(_T("▼"));
@@ -1412,86 +1378,9 @@ void COggDlg::Resize()
 		rect_1.bottom = rect_2.bottom + 3;
 		rect_1.right = rect_2.right + 5;
 		MoveWindow(&rect_1);
+		if (maini)
+			maini->MoveWindow(&rect_1);
 	}
-#if CCUSTOM_AERO_SUPPORT
-	if (GetSafeHwnd() && CCC_IsAeroEnabled() && CCC_IsWin11())
-	{
-		RECT preserveBuf = {};
-		CCC_RepaintDialogAeroGaps(m_hWnd, MainAeroGapPreserve(&preserveBuf));
-		CCC_RefreshAeroGlassChildren(m_hWnd);
-	}
-#endif
-}
-
-void COggDlg::RefreshAllAeroWindows()
-{
-#if CCUSTOM_AERO_SUPPORT
-	auto refreshMode = [](CWnd* w) {
-		if (!w || !w->GetSafeHwnd() || !::IsWindowVisible(w->m_hWnd))
-			return;
-		if (auto* pBase = dynamic_cast<CCustomBlurDialogBase*>(w)) {
-			pBase->RefreshAeroMode();
-			return;
-		}
-		if (auto* pEx = dynamic_cast<CCustomBlurDialogExBase*>(w)) {
-			pEx->RefreshAeroMode();
-		}
-	};
-	refreshMode(this);
-	refreshMode(&m_EqualizerDlg);
-	refreshMode(&m_PianoRollDlg);
-	if (pl)
-		refreshMode(pl);
-	if (mi)
-		refreshMode(mi);
-	RefreshAeroGlassAlpha();
-	if (pMainFrame1 && pMainFrame1->GetSafeHwnd() && ::IsWindowVisible(pMainFrame1->m_hWnd)) {
-		CCC_ApplyAero(pMainFrame1->m_hWnd, CCC_IsAeroEnabled() ? TRUE : FALSE);
-		pMainFrame1->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
-	}
-#endif
-}
-
-void COggDlg::RefreshAeroGlassAlpha(BOOL bImmediate)
-{
-#if CCUSTOM_AERO_SUPPORT
-	if (GetSafeHwnd() && ::IsWindowVisible(m_hWnd) && CCC_IsAeroEnabled())
-	{
-		RECT preserveBuf = {};
-		CCC_RefreshAeroGlassAlphaForHwnd(m_hWnd, MainAeroGapPreserve(&preserveBuf), bImmediate);
-	}
-	auto refreshChild = [bImmediate](CWnd* w) {
-		if (!w || !w->GetSafeHwnd() || !::IsWindowVisible(w->m_hWnd))
-			return;
-		if (auto* pEx = dynamic_cast<CCustomBlurDialogExBase*>(w)) {
-			pEx->CCustomBlurDialogExBase::RefreshAeroGlassAlpha(bImmediate);
-			return;
-		}
-		if (auto* pBase = dynamic_cast<CCustomBlurDialogBase*>(w)) {
-			pBase->CCustomBlurDialogBase::RefreshAeroGlassAlpha(bImmediate);
-			return;
-		}
-		CCC_RefreshAeroGlassAlphaForHwnd(w->m_hWnd, nullptr, bImmediate);
-	};
-	refreshChild(&m_EqualizerDlg);
-	refreshChild(&m_PianoRollDlg);
-	if (pl) refreshChild(pl);
-	if (mi) refreshChild(mi);
-	if (pMainFrame1 && pMainFrame1->GetSafeHwnd() && ::IsWindowVisible(pMainFrame1->m_hWnd))
-		CCC_RefreshAeroGlassAlphaForHwnd(pMainFrame1->m_hWnd, nullptr, bImmediate);
-#endif
-}
-
-LRESULT COggDlg::OnRefreshChildren(WPARAM, LPARAM)
-{
-#if CCUSTOM_AERO_SUPPORT
-	if (GetSafeHwnd() && CCC_IsAeroEnabled())
-	{
-		RECT preserveBuf = {};
-		CCC_RefreshAeroGlassAlphaDeferred(m_hWnd, MainAeroGapPreserve(&preserveBuf));
-	}
-#endif
-	return 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2148,7 +2037,7 @@ typedef struct {
 WAVEFILEHEADER wh;
 
 int mcopy(char* a, int len);
-long LoadOggVorbis(const TCHAR* file_name, int word, char** ogg, CCustomRangeSliderCtrl& m_time);
+long LoadOggVorbis(const TCHAR* file_name, int word, char** ogg, CSliderCtrl& m_time);
 void ReleaseOggVorbis(char**);
 void DoEvent();
 VOID CALLBACK waveOutProc(HWAVEOUT hwo, UINT uMsg, DWORD dwInstance, DWORD dwParam1, DWORD dwParam2);
@@ -2157,6 +2046,7 @@ void FreeOutputBuffer(void);
 void playwav();
 void playwavds(char* bw);
 
+CDouga* pMainFrame1 = NULL;
 OggVorbis_File vf;
 DWORD hw;
 PCMWAVEFORMAT p;
@@ -2363,14 +2253,14 @@ BOOL COggDlg::OnInitDialog()
 	SetDlgItemText(IDC_CHECK20, L"Zwei!!");
 	SetDlgItemText(IDC_CHECK21, LL14(L"ぐるみん", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin"));
 	SetDlgItemText(IDC_CHECK22, LL14(L"ダイナソア リザレクション", L"Dinosaur Resurrection", L"Resurrection Dinosaure", L"Resurrezione Dinosauro", L"Resurreccion Dinosaurio", L"공룡 부활", L"恐龙复活", L"ديناصور القيامة", L"Динозавр: Воскрешение", L"Dinosaurier Auferstehung", L"Ressurreicao Dinossauro", L"Dinosaurus Herrijzenis", L"Dinozaur Zmartwychwstanie", L"Dinozor Dirili?"));
-	m_dummys4.SetWindowText(LL14(L"ループ回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop", L"Cuenta de bucle", L"루프 횟수", L"循环次数", L"عدد الحلقات", L"Количество повторов", L"Schleifenzahler", L"Contagem de loop", L"Loopaantal", L"Liczba p?tli", L"Dongu say?s?"));
+	SetDlgItemText(IDC_STATICaaad, LL14(L"ループ回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop", L"Cuenta de bucle", L"루프 횟수", L"循环次数", L"عدد الحلقات", L"Количество повторов", L"Schleifenzahler", L"Contagem de loop", L"Loopaantal", L"Liczba p?tli", L"Dongu say?s?"));
 	SetDlgItemText(IDC_CHECK2, LL14(L"WAVファイルへ保存", L"Save to WAV file", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV 파일로 저장", L"保存到WAV文件", L"حفظ كـ WAV", L"Сохранить в WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
 	SetDlgItemText(IDC_CHECK3, LL14(L"動画も表示する", L"Show video", L"Afficher video", L"Mostra video", L"Mostrar video", L"동영상 표시", L"显示视频", L"عرض الفيديو", L"Показывать видео", L"Video anzeigen", L"Mostrar video", L"Video tonen", L"Poka? wideo", L"Videoyu goster"));
-	m_dummys2.SetWindowText(LL14(L"主音量", L"Master volume", L"Volume principal", L"Volume master", L"Volumen maestro", L"마스터 볼륨", L"主音量", L"مستوى الصوت الرئيسي", L"Общая громкость", L"Hauptlautstarke", L"Volume mestre", L"Hoofdvolume", L"G?o?no?? g?owna", L"Ana ses"));
-	dummys1.SetWindowText(LL14(L"DirectSound音量", L"DirectSound volume", L"Volume DirectSound", L"Volume DirectSound", L"Volumen DirectSound", L"DirectSound 볼륨", L"DirectSound音量", L"مستوى DirectSound", L"Громкость DirectSound", L"DirectSound-Lautstarke", L"Volume DirectSound", L"DirectSound-volume", L"G?o?no?? DirectSound", L"DirectSound sesi"));
-	m_dummys3.SetWindowText(LL14(L"拡張音量", L"Extended volume", L"Volume etendu", L"Volume esteso", L"Volumen extendido", L"확장 볼륨", L"扩展音量", L"مستوى الصوت الممتد", L"Доп. громкость", L"Erweiterte Lautstarke", L"Volume estendido", L"Uitgebreid volume", L"G?o?no?? rozszerzona", L"Geni?letilmi? ses"));
-	m_temp_s.SetWindowText(LL14(L"テンポ", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"템포", L"速度", L"الإيقاع", L"Темп", L"Tempo", L"Andamento", L"Tempo", L"Tempo", L"Tempo"));
-	m_pitch_s.SetWindowText(LL14(L"ピッチ", L"Pitch", L"Hauteur", L"Tono", L"Tono", L"피치", L"音高", L"درجة الصوت", L"Высота тона", L"Tonhohe", L"Tom", L"Toonhoogte", L"Wysoko??", L"Perde"));
+	SetDlgItemText(IDC_STATICaaab, LL14(L"主音量", L"Master volume", L"Volume principal", L"Volume master", L"Volumen maestro", L"마스터 볼륨", L"主音量", L"مستوى الصوت الرئيسي", L"Общая громкость", L"Hauptlautstarke", L"Volume mestre", L"Hoofdvolume", L"G?o?no?? g?owna", L"Ana ses"));
+	SetDlgItemText(IDC_STATICaaa, LL14(L"DirectSound音量", L"DirectSound volume", L"Volume DirectSound", L"Volume DirectSound", L"Volumen DirectSound", L"DirectSound 볼륨", L"DirectSound音量", L"مستوى DirectSound", L"Громкость DirectSound", L"DirectSound-Lautstarke", L"Volume DirectSound", L"DirectSound-volume", L"G?o?no?? DirectSound", L"DirectSound sesi"));
+	SetDlgItemText(IDC_STATICaaac, LL14(L"拡張音量", L"Extended volume", L"Volume etendu", L"Volume esteso", L"Volumen extendido", L"확장 볼륨", L"扩展音量", L"مستوى الصوت الممتد", L"Доп. громкость", L"Erweiterte Lautstarke", L"Volume estendido", L"Uitgebreid volume", L"G?o?no?? rozszerzona", L"Geni?letilmi? ses"));
+	SetDlgItemText(IDC_STATIC_t, LL14(L"テンポ", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"템포", L"速度", L"الإيقاع", L"Темп", L"Tempo", L"Andamento", L"Tempo", L"Tempo", L"Tempo"));
+	SetDlgItemText(IDC_STATIC_p, LL14(L"ピッチ", L"Pitch", L"Hauteur", L"Tono", L"Tono", L"피치", L"音高", L"درجة الصوت", L"Высота тона", L"Tonhohe", L"Tom", L"Toonhoogte", L"Wysoko??", L"Perde"));
 	SetDlgItemText(IDC_BUTTON39, L"Brandish4");
 	SetDlgItemText(IDC_CHECK23, LL14(L"ブランディッシュ４", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4"));
 	SetDlgItemText(IDC_BUTTON44, LL14(L"白き魔女", L"White Witch", L"Sorciere Blanche", L"Strega Bianca", L"Bruja Blanca", L"흰 마녀", L"白之魔女", L"الساحرة البيضاء", L"Белая Ведьма", L"Weise Hexe", L"Bruxa Branca", L"Witte Heks", L"Bia?a Czarownica", L"Beyaz Cad?"));
@@ -2726,6 +2616,9 @@ BOOL COggDlg::OnInitDialog()
 	m_newFont1->CreateFontIndirectW(&mylf);
 	m_os3.SetFont(m_newFont1);
 
+	//
+	SetTimer(15011, 200, NULL);
+
 	m_lrc.SetWindowText(L"");
 	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
 	m_lrc3.SetWindowText(L"");
@@ -2737,6 +2630,15 @@ BOOL COggDlg::OnInitDialog()
 
 	// ツールチップ・更新チェック・スペアナ窓関数テーブルなど、初回表示後でよい重い処理
 	PostMessage(WM_OGG_DEFERRED_HEAVY_INIT, 0, 0);
+
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled())
+	{
+		ApplyDwmBlur();
+		Invalidate(FALSE);
+		UpdateWindow();
+	}
+#endif
 
 	AfxBeginThread((AFX_THREADPROC)TheadLoop, NULL, THREAD_PRIORITY_ABOVE_NORMAL);
 	return TRUE;  // TRUE を返すとコントロールに設定したフォーカスは失われません。
@@ -2775,12 +2677,12 @@ void COggDlg::OnPaint()
 #if CCUSTOM_AERO_SUPPORT
 		if (CCC_IsAeroEnabled() && CCC_IsWin11())
 		{
-			const BOOL bSpectrumOnly = (OGG_DISPLAY_INTERVAL_TICKS <= ms2
+			const BOOL bSpectrumOnly = (savedata.ms2 <= ms2
 				&& clip.bottom <= destH + 8
 				&& clip.Height() <= destH + 8);
 			if (savedata.aero == 1 && dc.m_hDC != NULL)
 			{
-				if (OGG_DISPLAY_INTERVAL_TICKS <= ms2)
+				if (savedata.ms2 <= ms2)
 				{
 					dcc.SelectClipRgn(NULL);
 					CCC_BlitStretchChromaNoFlicker(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
@@ -2796,13 +2698,13 @@ void COggDlg::OnPaint()
 			if (!bSpectrumOnly)
 			{
 				dcc.SelectClipRgn(NULL);
-				RECT preserveBuf = {};
-				CCC_PaintDialogAeroGaps(dcc, this, MainAeroGapPreserve(&preserveBuf));
+				const RECT gdiPreserve = { 0, 0, destW, destH };
+				CCC_PaintDialogAeroGaps(dcc, this, &gdiPreserve);
 			}
 		}
 		else
 #endif
-		if (OGG_DISPLAY_INTERVAL_TICKS <= ms2) {
+		if (savedata.ms2 <= ms2) {
 #if CCUSTOM_AERO_SUPPORT
 			if (savedata.aero == 1 && CCC_IsWin11())
 			{
@@ -2905,7 +2807,7 @@ ov_callbacks callbacks = {
 
 
 
-long LoadOggVorbis(const TCHAR* file_name, int word, char** ogg, CCustomRangeSliderCtrl& m_time)
+long LoadOggVorbis(const TCHAR* file_name, int word, char** ogg, CSliderCtrl& m_time)
 {
 	int eof = 0;
 	oggf = 0;
@@ -5763,6 +5665,7 @@ void COggDlg::play()
 	muon = MUON;
 	kpi_silence_bytes = 0;
 	rrr = 1;
+	m_ps.EnableWindow(TRUE);
 	CWaitCursor rrr;
 	m_mp3jake.EnableWindow(FALSE);
 	mp3file = filen;
@@ -9090,9 +8993,24 @@ void COggDlg::play()
 		}
 	}
 	m_saisai.EnableWindow(TRUE); playy = 1;
-	ResetPauseButtonUi();
-	SetTimer(1250, 100, NULL);
+	ps = 0;
+	m_ps.SetWindowText(LL14(
+		L"一時停止",            /* 日本語 */
+		L"Pause",               /* 英語 */
+		L"Pause",               /* フランス語 */
+		L"Pausa",               /* イタリア語 */
+		L"Pausa",               /* スペイン語 */
+		L"일시 정지",            /* 韓国語 */
+		L"暂停",                /* 中国語 */
+		L"إيقاف مؤقت",          /* アラビア語 */
+		L"Пауза",               /* ロシア語 */
+		L"Pause",               /* ドイツ語 */
+		L"Pausar",              /* ポルトガル語 */
+		L"Pauzeren",            /* オランダ語 */
+		L"Wstrzymaj",           /* ポーランド語 */
+		L"Duraklat"));          /* トルコ語 */	SetTimer(1250, 100, NULL);
 	fade1 = 0;
+	if (maini) maini->SetActiveWindow();
 	SetActiveWindow();
 	m_jacketFocus = 0.0;
 	m_lastTick = 0;
@@ -11261,8 +11179,6 @@ int readBuffwav(char* bw, int cnt)
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
 		while (true) {
-			if (IsPlaybackStopRequested())
-				return 0;
 			int f = 0;
 			if (adbuf2 == NULL) return 0;
 			// fade は ApplyFadeCubed で音量(例: 1.0=フル)。ここでは「無音に近い」ときだけゼロ埋め+muon。
@@ -11302,7 +11218,6 @@ int readBuffwav(char* bw, int cnt)
 			}
 			// playb はリングから bw へ渡したバイト数で進める（len2 積み上げは cnt を超え表示が実長より長くなる）
 			if (poss4 > cnt) break;
-			if (len2 <= 0 && fade1 == 1) break;
 		}
 	}
 
@@ -12068,8 +11983,6 @@ int readkpi(BYTE* bw, int cnt)
 			r = 0;
 			for (int kl = 0; kl < 5; kl++) {
 				for (;;) {
-					if (IsPlaybackStopRequested())
-						break;
 					DWORD requestBytes = cnt1;
 					if (cnt2 <= cnt3) {
 						r = 1;
@@ -12231,8 +12144,6 @@ int readkpi(BYTE* bw, int cnt)
 
 					cnt3 += r;
 				}
-				if (IsPlaybackStopRequested())
-					break;
 				int len2 = readtempo(bufkpi, cnt);
 
 				if (len2 > 0) {
@@ -12551,14 +12462,8 @@ int readm4a(BYTE* bw, int cnt)
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 <= cnt) {
 			while (true) {
-				if (IsPlaybackStopRequested())
-					break;
-				if (rrr != 1)
-					break;
 				if (rrr == 1) {
 					for (;;) {
-						if (IsPlaybackStopRequested())
-							break;
 						if (cnt2 <= cnt3) break;
 						r = m4a_.Render(og->kmp, (BYTE*)bufkpi + cnt3, cnt1);
 						cnt3 += r;
@@ -12835,8 +12740,6 @@ int readflac(BYTE* bw, int cnt)
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 < lenl) {
 			while (true) {
-				if (IsPlaybackStopRequested())
-					break;
 
 				if (rrr == 1)
 					r = flac_.Render(og->kmp, (BYTE*)bufkpi, lenl);
@@ -12904,7 +12807,6 @@ int readflac(BYTE* bw, int cnt)
 				}
 				// len2==0 でもデコードが部分読みなら上位へ返さないとループし得る
 				if (cnt4 != lenl) return cnt4;
-				if (len2 <= 0 && (fade1 == 1 || IsPlaybackStopRequested())) break;
 			}
 		}
 
@@ -13060,8 +12962,6 @@ int readopus(BYTE* bw, int cnt)
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 <= cnt) {
 			for (int k = 0; k < 3; k++) {
-				if (IsPlaybackStopRequested())
-					break;
 				if (rrr == 1) {
 					r = opus_.Render(og->kmp, (BYTE*)bufkpi, cnt);
 					if (r != cnt && savedata.saveloop == 0)
@@ -13279,8 +13179,6 @@ int readdsd(BYTE* bw, int cnt)
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
 		while (true) {
-			if (IsPlaybackStopRequested())
-				break;
 			if(fade1 == 0)
 				cnt3 = dsd_.kpiRender(og->kmp, (BYTE*)bufkpi, cnt / (wavchannel * wavsam_depth / 8)) * (wavchannel * wavsam_depth / 8);
 
@@ -13320,7 +13218,6 @@ int readdsd(BYTE* bw, int cnt)
 			}
 			if (len4 != 0) break;
 			if (poss4 > cnt) break;
-			if (fade1 == 1 && muon == 0 && len2 <= 0) break;
 		}
 	}
 
@@ -13365,8 +13262,6 @@ static int ReadMp3Accumulate(BYTE* dst, int wantBytes)
 	int guard = 0;
 	const int maxIters = 8192;
 	while (got < wantBytes && guard++ < maxIters) {
-		if (IsPlaybackStopRequested())
-			break;
 		int n = readmp3(dst + got, wantBytes - got);
 		if (n <= 0)
 			break;
@@ -13485,8 +13380,6 @@ int readwav(BYTE* bw, int cnt)
 	int outBytesPerSample = (wavsam_depth / 8) * wavchannel;
 	if (poss4 <= cnt) {
 		while (true) {
-			if (IsPlaybackStopRequested())
-				break;
 			int toRead = rr;
 			if (bytesPerSample != outBytesPerSample) {
 				toRead = (int)((__int64)rr * bytesPerSample / outBytesPerSample);
@@ -13682,8 +13575,6 @@ int readmp3(BYTE* bw, int cnt)
 		int mp3RbStallIters = 0;
 		const int kMp3RbStallMax = 512;
 		while (true) {
-			if (IsPlaybackStopRequested())
-				break;
 			if (savedata.mp3orig)
 				r = mp3_.Render2(bufkpi, rr, kbps);
 			else
@@ -13727,8 +13618,6 @@ int readmp3(BYTE* bw, int cnt)
 			// readtempo が 0 のときは上の if (len2>0) に入らず、ここに来る。
 			// r<rr（デコード欠け／EOF）で抜けないと while(true) が無限ループする
 			if (rr > r) break;
-			if (len2 <= 0 && r == 0) break;
-			if (fade1 == 1 && muon == 0 && len2 <= 0) break;
 			// フルブロック decode 済みだが RB がまだ出さない → 追加デコードで埋める（シーク直後のレイテンシ対策）
 			if (len2 <= 0 && r > 0 && rr == r) {
 				if (++mp3RbStallIters >= kMp3RbStallMax)
@@ -14304,9 +14193,7 @@ void COggDlg::dp(CString a)
 			L"Pausar",              /* ポルトガル語 */
 			L"Pauzeren",            /* オランダ語 */
 			L"Wstrzymaj",           /* ポーランド語 */
-			L"Duraklat"));          /* トルコ語 */
-		SyncPauseButtonUi();
-		if (pMediaPosition)pMediaPosition->get_StopTime(&aa);
+			L"Duraklat"));          /* トルコ語 */		if (pMediaPosition)pMediaPosition->get_StopTime(&aa);
 		aa1 = oggsize2 = aa;
 		m_time.SetRange(0, (int)((REFTIME)aa * 100.0), TRUE);
 		m_time.SetSelection(0, (int)((REFTIME)aa * 100.0) - 1);
@@ -14449,38 +14336,6 @@ BOOL CALLBACK pp(HWND hwnd, LPARAM p)
 }
 
 CString filenback;
-
-void COggDlg::SyncPauseButtonUi()
-{
-	if (!m_ps.GetSafeHwnd())
-		return;
-	m_ps.EnableWindow(TRUE);
-	m_ps.RepaintClient();
-}
-
-void COggDlg::ResetPauseButtonUi()
-{
-	if (!m_ps.GetSafeHwnd())
-		return;
-	ps = 0;
-	m_ps.SetWindowText(LL14(
-		L"一時停止",            /* 日本語 */
-		L"Pause",               /* 英語 */
-		L"Pause",               /* フランス語 */
-		L"Pausa",               /* イタリア語 */
-		L"Pausa",               /* スペイン語 */
-		L"일시 정지",            /* 韓国語 */
-		L"暂停",                /* 中国語 */
-		L"إيقاف مؤقت",          /* アラビア語 */
-		L"Пауза",               /* ロシア語 */
-		L"Pause",               /* ドイツ語 */
-		L"Pausar",              /* ポルトガル語 */
-		L"Pauzeren",            /* オランダ語 */
-		L"Wstrzymaj",           /* ポーランド語 */
-		L"Duraklat"));          /* トルコ語 */
-	SyncPauseButtonUi();
-}
-
 void COggDlg::stop()
 {
 	if (!img.IsNull()) {
@@ -14553,6 +14408,22 @@ void COggDlg::stop()
 		if (ps == 1) {
 			OnPause();
 		}
+		ps = 0; m_ps.SetWindowText(LL14(
+			L"一時停止",            /* 日本語 */
+			L"Pause",               /* 英語 */
+			L"Pause",               /* フランス語 */
+			L"Pausa",               /* イタリア語 */
+			L"Pausa",               /* スペイン語 */
+			L"일시 정지",            /* 韓国語 */
+			L"暂停",                /* 中国語 */
+			L"إيقاف مؤقت",          /* アラビア語 */
+			L"Пауза",               /* ロシア語 */
+			L"Pause",               /* ドイツ語 */
+			L"Pausar",              /* ポルトガル語 */
+			L"Pauzeren",            /* オランダ語 */
+			L"Wstrzymaj",           /* ポーランド語 */
+			L"Duraklat"));          /* トルコ語 */	
+		ps = 0;
 		if (m_dsb)m_dsb->Stop();
 		if (pAudioClient) pAudioClient->Stop();
 		if (m_dou.GetCheck() == 1)
@@ -14619,7 +14490,6 @@ void COggDlg::stop()
 	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
 	m_lrc3.SetWindowText(L"");
 
-	ResetPauseButtonUi();
 	eqflg = TRUE;
 }
 
@@ -14712,7 +14582,6 @@ void COggDlg::stop1()
 	m_lrc.SetWindowText(L"");
 	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
 	m_lrc3.SetWindowText(L"");
-	ResetPauseButtonUi();
 	eqflg = TRUE;
 }
 
@@ -14842,8 +14711,6 @@ int mcopy(char* a, int len)
 
 			int i = 0;
 			for (;;) {
-				if (IsPlaybackStopRequested())
-					break;
 				ret = ov_read(&vf, (char*)(bufwav + poss * bpf), 4096, 0, 2, 1, &current_section) / bpf;
 				poss += ret;
 				if (ret == 0) break;
@@ -15035,7 +14902,7 @@ void COggDlg::timerp()
 		}
 	}
 	ms2++;
-	const BOOL bGdiFrame = (OGG_DISPLAY_INTERVAL_TICKS <= ms2)
+	const BOOL bGdiFrame = (savedata.ms2 <= ms2)
 		&& (InterlockedCompareExchange(&g_gdiPaintPending, 0, 0) == 0);
 	CString s, ss, sss;
 	if (voldsf) {
@@ -16428,7 +16295,7 @@ UINT TheadLoop(LPVOID)
 		f1 = Timing64(f2, FALSE);
 		timen = GetTiming(f1);
 		COgg_RequestTimerp(og);
-		timen = (DWORD)((double)OGG_DISPLAY_INTERVAL_TICKS * (double)timen);
+		timen = (DWORD)(savedata.ms2 * (double)timen);
 		timing1((WORD)timen, FALSE, FALSE);
 		Timing64(f2, FALSE);
 		Timing64(fpstiming, FALSE);
@@ -16468,6 +16335,8 @@ void timerog1(UINT nIDEvent)
 	if (nIDEvent == 4923) {
 		og->KillTimer(4923);
 		if (ip != 0) return;
+		if (maini)
+			::SetWindowPos(maini->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		og->SetTimer(4930, 10, NULL);
 		RegisterHotKey(og->GetSafeHwnd(), ID_HOTKEY0, 0, VK_UP);
@@ -16614,6 +16483,27 @@ void timerog1(UINT nIDEvent)
 			og->KillTimer(11251);
 			og->OnRestart();
 		}
+	}
+
+	if (nIDEvent == 15011) {
+		og->KillTimer(15011);
+		if (maini) {
+			delete maini;
+			maini = NULL;
+		}
+
+		if (savedata.aero == 2) {
+			maini = new CImageBase;
+			maini->Create(og);
+			maini->oya = og;
+		}
+		RECT r;
+		og->GetWindowRect(&r);
+		if (maini)
+			maini->MoveWindow(&r);
+		if (maini)
+			::SetWindowPos(maini->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	}
 
 	if (nIDEvent == 1251) {
@@ -18358,9 +18248,7 @@ void COggDlg::OnPause()
 			L"Retomar",         /* ポルトガル語 */
 			L"Hervatten",       /* オランダ語 */
 			L"Wznów",           /* ポーランド語 */
-			L"Devam Et"));      /* トルコ語 */
-		ps = 1;
-		SyncPauseButtonUi();
+			L"Devam Et"));      /* トルコ語 */		ps = 1;
 	}
 	else {
 		if (ogg != NULL || adbuf2 != NULL || mod != NULL || wav != NULL || mode == -9) {
@@ -18395,13 +18283,11 @@ void COggDlg::OnPause()
 			L"Pausar",              /* ポルトガル語 */
 			L"Pauzeren",            /* オランダ語 */
 			L"Wstrzymaj",           /* ポーランド語 */
-			L"Duraklat"));          /* トルコ語 */
-		if (pMainFrame1 != NULL && (mode == -2 || (mode > 0 && videoonly == TRUE)))
+			L"Duraklat"));          /* トルコ語 */		if (pMainFrame1 != NULL && (mode == -2 || (mode > 0 && videoonly == TRUE)))
 		{
 			pMainFrame1->pause(1);
 		}
 		ps = 0;
-		SyncPauseButtonUi();
 	}
 }
 
@@ -18440,6 +18326,7 @@ void COggDlg::OnRestart()
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	CString ti;
 	stop();
+	m_ps.EnableWindow(TRUE);
 	if (filen != "") {
 		ti = filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1);
 		int sub_ = mode;
@@ -18598,7 +18485,22 @@ void COggDlg::OnRestart()
 			int a = 0; aa2 = 0;
 			REFTIME aa = 0;
 			aa2 = 0;
-			ResetPauseButtonUi();
+			ps = 0; 
+			ps = 0; m_ps.SetWindowText(LL14(
+				L"一時停止",            /* 日本語 */
+				L"Pause",               /* 英語 */
+				L"Pause",               /* フランス語 */
+				L"Pausa",               /* イタリア語 */
+				L"Pausa",               /* スペイン語 */
+				L"일시 정지",            /* 韓国語 */
+				L"暂停",                /* 中国語 */
+				L"إيقاف مؤقت",          /* アラビア語 */
+				L"Пауза",               /* ロシア語 */
+				L"Pause",               /* ドイツ語 */
+				L"Pausar",              /* ポルトガル語 */
+				L"Pauzeren",            /* オランダ語 */
+				L"Wstrzymaj",           /* ポーランド語 */
+				L"Duraklat"));          /* トルコ語 */
 			if (pMediaPosition)pMediaPosition->get_StopTime(&aa);
 			aa1 = oggsize2 = aa;
 			m_time.SetRange(0, (int)((REFTIME)aa * 100.0), TRUE);
@@ -19408,7 +19310,7 @@ void COggDlg::moji(CString s, int x, int y, COLORREF rgb)
 	SetBkColor(dc, RGB(0, 0, 0));
 	dc.SetBkMode(TRANSPARENT);
 	GetTextExtentPoint32(dc, s, s.GetLength(), &szinfo);
-	if (OGG_DISPLAY_INTERVAL_TICKS <= ms2) {
+	if (savedata.ms2 <= ms2) {
 		dc.TextOut(x * 4, y * 4, s, s.GetLength());
 	}
 	SelectObject(dc, fo);
@@ -19431,7 +19333,7 @@ int COggDlg::mojisub(CString s, int x, int y, COLORREF rgb)
 	SetBkColor(dcsub, RGB(0, 0, 0));
 	SetBkMode(dcsub, TRANSPARENT);
 	szinfo = dcsub.GetOutputTextExtent(s);
-	if (OGG_DISPLAY_INTERVAL_TICKS <= ms2) {
+	if (savedata.ms2 <= ms2) {
 		if (szinfo.cx < (MDC + 8) * 4)
 			dcsub.FillSolidRect(0, 0, (MDC + 8) * 4, 30 * 4, RGB(0, 0, 0));
 		else
@@ -19446,6 +19348,10 @@ void COggDlg::OnButton9_Folder()
 {
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	CFolder* a = new CFolder(CWnd::FromHandle(GetSafeHwnd()));
+	if (savedata.aero == 2) {
+		::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		if (maini)::SetWindowPos(maini->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	}
 	CWnd::PostMessage(0x118);
 	a->DoModal();
 	Modec();
@@ -19535,7 +19441,8 @@ extern BOOL	syoriflg;
 void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
 	// スライダーの特定（ここは共通処理なのでロック外）
-	if (!pScrollBar || pScrollBar->GetDlgCtrlID() != IDC_SLIDER2) return;
+	CSliderCtrl* r = (CSliderCtrl*)pScrollBar;
+	if (!r || r->GetDlgCtrlID() != IDC_SLIDER2) return;
 
 	int minpos;
 	int maxpos;
@@ -19561,16 +19468,16 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 
 		ResetAudioUpscalerPipeline();
 
-		m_time.GetRange(minpos, maxpos);
-		curpos = m_time.GetPos();
+		r->GetRange(minpos, maxpos);
+		curpos = r->GetPos();
 
 		// ページ移動の計算
 		if (nSBCode == SB_PAGELEFT) {
-			int info = m_time.GetLineSize();
+			int info = r->GetLineSize();
 			if (curpos > minpos) curpos = max(minpos, curpos - info);
 		}
 		else if (nSBCode == SB_PAGERIGHT) {
-			int info = m_time.GetLineSize();
+			int info = r->GetLineSize();
 			if (curpos < maxpos) curpos = min(maxpos, curpos + info);
 			else { hsc = 2; sflg = FALSE; return; }
 		}
@@ -19590,7 +19497,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		else {
 			if ((loop1 + loop2) < curpos && endf == 0) curpos = (loop1 + loop2);
 		}
-		m_time.SetPos(curpos);
+		r->SetPos(curpos);
 		playb = (__int64)curpos;
 
 		// 1. 動画・メディアポジションのシーク
@@ -19691,7 +19598,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			}
 			else { // OGG / Others
 				SeekAndWarmupRubberBand((ogg_int64_t)playb); playb += 4096 + 128; poss5 += 4096 + 128;
-				m_time.SetPos((int)playb);
+				r->SetPos(playb);
 			}
 
 			sek = TRUE;
@@ -19739,13 +19646,15 @@ void COggDlg::OnNMReleasedcaptureSlider2(NMHDR * pNMHDR, LRESULT * pResult)
 	if (hsc != 1) return;
 
 	std::unique_lock<std::mutex> hscroll_lock(cl2);
+	CSliderCtrl* r = (CSliderCtrl*)GetDlgItem(IDC_SLIDER2);
+	if (!r) return;
 
 	int minpos, maxpos;
-	m_time.GetRange(minpos, maxpos);
-	int curpos = m_time.GetPos();
+	r->GetRange(minpos, maxpos);
+	int curpos = r->GetPos();
 	if (curpos < minpos) curpos = minpos;
 	if (curpos > maxpos) curpos = maxpos;
-	m_time.SetPos(curpos);
+	r->SetPos(curpos);
 	playb = (__int64)curpos;
 
 	if (aa2 == 0) pMainFrame1->seek((LONGLONG)((float)curpos * 100000.0f));
@@ -19806,7 +19715,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					OnPause();
 					ZeroMemory(bufwav3, sizeof(bufwav3));
 					syukai = 1; syukai2 = 0;
-					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1 || thn1) break; DoEvent(); } hscroll_lock.lock(); }
+					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1)break; DoEvent(); } hscroll_lock.lock(); }
 					if (savedata.mp3orig) {
 						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
@@ -19896,7 +19805,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					OnPause();
 					ZeroMemory(bufwav3, sizeof(bufwav3));
 					syukai = 1; syukai2 = 0;
-					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1 || thn1) break; DoEvent(); } hscroll_lock.lock(); }
+					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1)break; DoEvent(); } hscroll_lock.lock(); }
 					if (savedata.mp3orig) {
 						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
@@ -20019,15 +19928,8 @@ void COggDlg::OnActivate(UINT nState, CWnd * pWndOther, BOOL bMinimized)
 		RegisterHotKey(GetSafeHwnd(), ID_HOTKEY1, 0, VK_DOWN);
 		RegisterHotKey(GetSafeHwnd(), ID_HOTKEY2, 0, VK_RIGHT);
 		RegisterHotKey(GetSafeHwnd(), ID_HOTKEY3, 0, VK_LEFT);
-#if CCUSTOM_AERO_SUPPORT
-		if ((nState == WA_ACTIVE || nState == WA_CLICKACTIVE) && !bMinimized
-			&& CCC_IsAeroEnabled() && CCC_IsWin11() && GetSafeHwnd())
-		{
-			RECT preserveBuf = {};
-			CCC_RepaintDialogAeroGaps(m_hWnd, MainAeroGapPreserve(&preserveBuf));
-			CCC_RefreshAeroGlassChildren(m_hWnd);
+		if (nState == WA_ACTIVE) {
 		}
-#endif
 	}
 	// TODO: ここにメッセージ ハンドラ コードを追加します。
 }
@@ -20057,31 +19959,16 @@ void COggDlg::OnKillFocus(CWnd * pNewWnd)
 void COggDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
-	if (bShow)
-	{
-#if CCUSTOM_AERO_SUPPORT
-		if (CCC_IsAeroEnabled() && CCC_IsWin11() && GetSafeHwnd())
-		{
-			RECT preserveBuf = {};
-			CCC_RepaintDialogAeroGaps(m_hWnd, MainAeroGapPreserve(&preserveBuf));
-			CCC_RefreshAeroGlassChildren(m_hWnd);
-		}
-#endif
-		if (pl && plw)
-			pl->ScheduleRefreshNavControls();
-	}
+	if (bShow && pl && plw)
+		pl->ScheduleRefreshNavControls();
 	UNREFERENCED_PARAMETER(nStatus);
 }
 
 BOOL COggDlg::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled() && CCC_IsWin11() && pDC)
-	{
-		RECT preserveBuf = {};
-		CCC_PaintDialogAeroGaps(*pDC, this, MainAeroGapPreserve(&preserveBuf));
+	if (CCC_IsAeroEnabled() && CCC_IsWin11())
 		return TRUE;
-	}
 #endif
 	return CCustomBlurDialogBase::OnEraseBkgnd(pDC);
 }
@@ -20091,13 +19978,7 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 	extern CImageBase* playbase;
 	CCustomBlurDialogBase::OnSize(nType, cx, cy);
 #if CCUSTOM_AERO_SUPPORT
-	if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled() && CCC_IsWin11())
-	{
-		RECT preserveBuf = {};
-		CCC_RepaintDialogAeroGaps(m_hWnd, MainAeroGapPreserve(&preserveBuf));
-		CCC_RefreshAeroGlassChildren(m_hWnd);
-	}
-	else if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
+	if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
 	{
 		ApplyDwmBlur();
 		Invalidate(FALSE);
@@ -20117,6 +19998,8 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 		if (pMainFrame1) {
 			pMainFrame1->ShowWindow(SW_HIDE);
 		}
+		if (maini)
+			maini->ShowWindow(SW_MINIMIZE);
 		SetTimer(4924, 100, NULL);
 	}
 	if (nType == SIZE_RESTORED) {
@@ -20140,6 +20023,8 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 		}
 		CRect r;
 		GetWindowRect(&r);
+		if (maini)
+			maini->ShowWindow(SW_RESTORE);
 	}
 
 }
@@ -20217,6 +20102,17 @@ HBRUSH COggDlg::OnCtlColor(CDC * pDC, CWnd * pWnd, UINT nCtlColor)
 	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
 
 	// TODO:  ここで DC の属性を変更してください。
+	if (savedata.aero == 2) {
+		if (nCtlColor == CTLCOLOR_DLG)
+		{
+			return m_brDlg;
+		}
+		if (nCtlColor == CTLCOLOR_STATIC)
+		{
+			SetBkMode(pDC->m_hDC, TRANSPARENT);
+			return m_brDlg;
+		}
+	}
 	// TODO:  既定値を使用したくない場合は別のブラシを返します。
 	return hbr;
 }
@@ -20507,6 +20403,7 @@ void COggDlg::plugloop(CString ff)
 	}
 	cf1.Close();
 }
+CImageBase* jake = NULL;
 void COggDlg::OnBnmp3jake()
 {
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
@@ -20517,8 +20414,40 @@ void COggDlg::OnBnmp3jake()
 			delete mi;
 		mi = NULL;
 	}
+	if (jake) {
+		if (::IsWindow(jake->m_hWnd))
+			jake->DestroyWindow();
+		else
+			delete jake;
+		jake = NULL;
+	}
 	mi = new CMp3Image;
 	mi->Create(og);
+	if (savedata.aero == 2) {
+		jake = new CImageBase;
+		if (jake->Create(og) == FALSE) {
+			AfxMessageBox(LL14(
+				L"Baseの起動に失敗しました",               /* 日本語 */
+				L"Failed to start Base.",                 /* 英語 */
+				L"Échec du démarrage de Base.",           /* フランス語 */
+				L"Avvio di Base fallito.",                /* イタリア語 */
+				L"Error al iniciar Base.",                /* スペイン語 */
+				L"Base 시작에 실패했습니다.",               /* 韓国語 */
+				L"Base 启动失败。",                       /* 中国語 */
+				L"فشل تشغيل Base.",                      /* アラビア語 */
+				L"Не удалось запустить Base.",            /* ロシア語 */
+				L"Base konnte nicht gestartet werden.",    /* ドイツ語 */
+				L"Falha ao iniciar o Base.",              /* ポルトガル語 */
+				L"Kan Base niet starten.",                /* オランダ語 */
+				L"Nie udało się uruchomić Base.",         /* ポーランド語 */
+				L"Base başlatılamadı."));                 /* トルコ語 */
+		}
+		jake->ShowWindow(SW_HIDE);
+		jake->oya = mi;
+	}
+	else {
+		jake = NULL;
+	}
 	mi->Load(mp3file);
 
 }
@@ -20817,6 +20746,17 @@ int COggDlg::OnCreate(LPCREATESTRUCT lpCreateStruct)
 		return -1;
 
 	// TODO: ここに特定な作成コードを追加してください。
+	if (savedata.aero == 2) {
+		ModifyStyleEx(0, WS_EX_LAYERED);
+
+		// レイヤードウィンドウの不透明度と透明のカラーキー
+		SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
+
+		// 赤色のブラシを作成する．
+		m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
+	}
+
+
 	return 0;
 }
 
@@ -20828,6 +20768,13 @@ void COggDlg::OnMoving(UINT fwSide, LPRECT pRect)
 	if (CCC_IsAeroEnabled())
 		CCC_RefreshDialogDwmBlur(m_hWnd);
 #endif
+	CRect r;
+	GetWindowRect(&r);
+	if (maini)
+		maini->MoveWindow(&r);
+	//if (maini)
+//		::SetWindowPos(maini->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+//	::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	// TODO: ここにメッセージ ハンドラー コードを追加します。
 }
 

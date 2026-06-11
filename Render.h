@@ -106,9 +106,6 @@ public:
 	CCustomSliderCtrl m_ms;
 	CCustomStatic m_ms2;
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
-	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
-	void ApplyAeroBlurFromSlider();
-	afx_msg void OnDestroy();
 	CCustomSliderCtrl m_hyouji2;
 	CCustomStatic m_hyouji3;
 	CCustomComboBox m_soundlist;
@@ -136,18 +133,6 @@ public:
 	afx_msg void OnBnClickedCancel5();
 	CCustomCheckBox m_upscale;
 	CCustomComboBox m_speaker;
-	CCustomStatic m_lblLang;
-	CCustomStatic m_lblBuf;
-	CCustomStatic m_lblMp3;
-	CCustomStatic m_lblKpi;
-	CCustomStatic m_lblDisp;
-	CCustomStatic m_lblDev;
-	CCustomStatic m_lblSamp;
-	CCustomStatic m_lblSpeana;
-	CCustomStatic m_lblSpc;
-	CCustomStatic m_lblBit;
-	CCustomStatic m_lblSpeaker;
-	CCustomStatic m_lblHz;
 	afx_msg void OnCbnSelchangeSpeaker();
 	afx_msg void OnBnClickedCheckUpscale();
 	afx_msg void OnBnClicked32bit();
@@ -160,11 +145,6 @@ public:
 	int m_bakBit32;
 	TCHAR m_bakFont1[1024];
 	TCHAR m_bakFont2[1024];
-	int m_prevAero;
-	int m_prevAeroBlur;
-	int m_bakAero;
-	int m_bakAeroBlur;
-	afx_msg void OnBnClickedCheck3();
 };
 
 //{{AFX_INSERT_LOCATION}}

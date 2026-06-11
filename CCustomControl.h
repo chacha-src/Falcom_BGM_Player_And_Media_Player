@@ -32,31 +32,6 @@
 #define CCUSTOM_AERO_SUPPORT 0
 #endif
 
-// ============================================================================
-// 色定義
-// ============================================================================
-#define COLOR_DIALOG_BG         RGB(255, 225, 235) // ダイアログの基本背景色
-#define COLOR_EDIT_BG           RGB(255, 222, 210) // エディットボックスの背景色
-#define COLOR_EDIT_TEXT         RGB(0,   0,   0)   // エディットボックスの文字色
-#define COLOR_LIST_BG           RGB(173, 216, 230) // リストの背景色（ゼブラ偶数行）
-#define COLOR_LIST_ZEBRA_ALT    RGB(183, 221, 238) // リストのゼブラ奇数行
-#define COLOR_LIST_HOVER        RGB(255, 200, 140) // リストのホバー時背景色
-#define COLOR_COMBO_BG          RGB(255, 222, 210) // コンボボックスの背景色
-#define COLOR_BUTTON_BG         RGB(200, 232, 190) // ボタンの通常時背景色
-#define COLOR_BUTTON_PUSHED     RGB( 60, 160,  60) // ボタンの押下時背景色
-#define COLOR_BUTTON_HOVER      RGB(100, 200, 100) // ボタンのホバー時背景色
-#define COLOR_SLIDER_THUMB      RGB(128,   0, 128) // スライダーのつまみの色
-#define COLOR_RANGE_SLIDER_THUMB RGB(255, 255, 255) // 範囲スライダーのつまみ色
-#define COLOR_RANGE_SELECTION   RGB(221, 160, 221) // 範囲スライダーの選択範囲色
-#define COLOR_HANAMARU          RGB(255,   0,   0) // はなまるの色
-#define COLOR_FLOWER_DECO       RGB(255, 240, 245) // お花の装飾色
-#define COLOR_VINE_DECO         RGB( 80, 140,  80) // 蔓（つる）の装飾色
-#define COLOR_HEART             RGB(255, 105, 180) // ハートの装飾色
-#define COLOR_SEL_BG            RGB(221, 160, 221) // リストなどの選択時背景色
-#define COLOR_GRAD_DARK_GREEN   RGB(  0, 100,   0) // グラデーション用の濃い緑
-#define COLOR_GRAD_DARK_PURPLE  RGB( 75,   0, 130) // グラデーション用の濃い紫
-
-
 #if CCUSTOM_AERO_SUPPORT
 #define CCC_MSG_REAPPLY_OPAQUE_FIXERS (WM_APP + 311)
 #define CCC_WM_POST_OPAQUE_PAINT      (WM_APP + 312)
@@ -73,111 +48,40 @@ void CCC_BlitStretchChromaNoFlicker(HDC hdcDest, int x, int y, int destW, int de
 void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
 void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
 void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
-void CCC_BlitAeroChildComposite(HDC hdcDest, int x, int y, int w, int h,
-    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, COLORREF clrGlassBase = COLOR_DIALOG_BG);
 void CCC_InvalidateBlurParent(HWND hWnd, BOOL bAeroMode);
 void CCC_RefreshDialogDwmBlur(HWND hWnd);
-void CCC_RefreshAeroWindowLayer(HWND hWnd);
-void CCC_RepaintDialogAeroGaps(HWND hWnd, const RECT* pPreserveRect = nullptr);
-void CCC_RefreshAeroGlassAlphaForHwnd(HWND hWnd, const RECT* pGapPreserveRect = nullptr, BOOL bImmediate = FALSE);
-void CCC_RefreshAeroGlassChildren(HWND hWnd);
-void CCC_RefreshAeroGlassAlphaOnDialog(HWND hWnd, const RECT* pGapPreserveRect = nullptr, BOOL bSyncChildren = FALSE);
-void CCC_RefreshAeroGlassAlphaDeferred(HWND hWnd, const RECT* pGapPreserveRect = nullptr);
 void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr);
 void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey);
-class CButtonST;
-void CCC_PaintButtonSTGlass(HWND hWnd, CButtonST* pBtn, HDC hdcDest);
 #endif
 
 // 最小化復帰・再表示時: オーナードロー子が親 Invalidate だけでは再描画されないため明示的に更新
 void CCC_ForceRepaintHwnd(HWND hWnd);
 void CCC_RefreshChildrenAfterShow(HWND hWnd);
 
-// アクリル半透明オーバーレイ用アルファ値（aero_blur_Acrylic_Opacity=30 相当の基準）
+// ============================================================================
+// 色定義
+// ============================================================================
+#define COLOR_DIALOG_BG         RGB(255, 225, 235) // ダイアログの基本背景色
+#define COLOR_EDIT_BG           RGB(255, 222, 210) // エディットボックスの背景色
+#define COLOR_EDIT_TEXT         RGB(0,   0,   0)   // エディットボックスの文字色
+#define COLOR_LIST_BG           RGB(173, 216, 230) // リストボックスの背景色
+#define COLOR_COMBO_BG          RGB(255, 222, 210) // コンボボックスの背景色
+#define COLOR_BUTTON_BG         RGB(200, 232, 190) // ボタンの通常時背景色
+#define COLOR_BUTTON_PUSHED     RGB( 60, 160,  60) // ボタンの押下時背景色
+#define COLOR_BUTTON_HOVER      RGB(100, 200, 100) // ボタンのホバー時背景色
+#define COLOR_SLIDER_THUMB      RGB(128,   0, 128) // スライダーのつまみの色
+#define COLOR_RANGE_SLIDER_THUMB RGB(255, 255, 255) // 範囲スライダーのつまみ色
+#define COLOR_RANGE_SELECTION   RGB(221, 160, 221) // 範囲スライダーの選択範囲色
+#define COLOR_HANAMARU          RGB(255,   0,   0) // はなまるの色
+#define COLOR_FLOWER_DECO       RGB(255, 240, 245) // お花の装飾色
+#define COLOR_VINE_DECO         RGB( 80, 140,  80) // 蔓（つる）の装飾色
+#define COLOR_HEART             RGB(255, 105, 180) // ハートの装飾色
+#define COLOR_SEL_BG            RGB(221, 160, 221) // リストなどの選択時背景色
+#define COLOR_GRAD_DARK_GREEN   RGB(  0, 100,   0) // グラデーション用の濃い緑
+#define COLOR_GRAD_DARK_PURPLE  RGB( 75,   0, 130) // グラデーション用の濃い紫
+
+// アクリル半透明オーバーレイ用アルファ値
 #define AERO_ALPHA_SEMI 160
-
-// 描画間隔は 16ms 固定（旧 savedata.ms2 表示間隔の代替）
-#define OGG_DISPLAY_INTERVAL_TICKS 1
-
-#if CCUSTOM_AERO_SUPPORT
-// OSビルド番号取得 (ntdll RtlGetVersion経由)
-static inline DWORD CCC_GetWindowsBuildNumber()
-{
-    typedef LONG(WINAPI* PFN_RtlGetVersion)(PRTL_OSVERSIONINFOW);
-    static DWORD s_build = 0;
-    static bool  s_done = false;
-
-    if (s_done) return s_build;
-
-    HMODULE h = ::GetModuleHandleW(L"ntdll.dll");
-    if (h)
-    {
-        PFN_RtlGetVersion fn = reinterpret_cast<PFN_RtlGetVersion>(::GetProcAddress(h, "RtlGetVersion"));
-        if (fn)
-        {
-            RTL_OSVERSIONINFOW oi = { sizeof(oi) };
-            if (fn(&oi) == 0)
-                s_build = oi.dwBuildNumber;
-        }
-    }
-    s_done = true;
-    return s_build;
-}
-
-static inline BOOL CCC_IsWin11()
-{
-    return CCC_GetWindowsBuildNumber() >= 22000;
-}
-
-static inline BYTE CCC_GetAeroGlassAlpha()
-{
-    extern save savedata;
-    int v = savedata.aero_blur_Acrylic_Opacity;
-    if (v < 1) v = 1;
-    if (v > 60) v = 60;
-    // Win11 DWM: 均一 alpha>=128 で背面ぼかしが打ち切られる → 60..126 に収める
-    if (CCC_IsWin11())
-        return (BYTE)(60 + (v - 1) * 66 / 59);
-    return (BYTE)(60 + (v - 1) * 170 / 59);
-}
-
-static inline BYTE CCC_ScaleGlassAlpha(BYTE baseAlpha)
-{
-    const int scaled = (int)baseAlpha * (int)CCC_GetAeroGlassAlpha() / (int)AERO_ALPHA_SEMI;
-    if (scaled < 0) return 0;
-    if (scaled > 255) return (BYTE)255;
-    return (BYTE)scaled;
-}
-
-// Win10 レイヤードウィンドウ全体の不透明度（基準 245 をスライダー連動）
-// Win11 は Mica + 隙間／コントロール未描画部のガラス DIB（LWA_ALPHA は子を透かすため使わない）
-static inline BYTE CCC_GetAeroWindowLayerAlpha()
-{
-    return CCC_ScaleGlassAlpha((BYTE)245);
-}
-
-static inline void CCC_ApplyAeroLayeredAlpha(HWND hWnd)
-{
-    if (!hWnd || !::IsWindow(hWnd)) return;
-    LONG exStyle = ::GetWindowLong(hWnd, GWL_EXSTYLE);
-    if (!(exStyle & WS_EX_LAYERED))
-        ::SetWindowLong(hWnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
-    ::SetLayeredWindowAttributes(hWnd, 0, CCC_GetAeroWindowLayerAlpha(), LWA_ALPHA);
-}
-#endif
-
-// リスト／コンボ行ごとのガラス風背景
-// Phase1: SetRowStyle API / Phase2: ぼかしダイアログ上のゼブラベースティント
-struct CCC_RowGlassStyle
-{
-    BOOL     bValid;
-    COLORREF clrBg;
-    BYTE     nAlpha;
-    BOOL     bUseGlass;
-
-    CCC_RowGlassStyle()
-        : bValid(FALSE), clrBg(0), nAlpha(0), bUseGlass(FALSE) {}
-};
 
 // ============================================================================
 // DWM / SetWindowCompositionAttribute 定数と構造体
@@ -226,7 +130,38 @@ class CCustomOpaqueFixer;
 
 BOOL CCC_IsBlurDialogChild(HWND hWnd);
 
-// (CCC_GetWindowsBuildNumber / CCC_IsWin11 は GetAeroGlassAlpha より前で定義済み)
+// OSビルド番号取得 (ntdll RtlGetVersion経由)
+static inline DWORD CCC_GetWindowsBuildNumber()
+{
+    typedef LONG(WINAPI* PFN_RtlGetVersion)(PRTL_OSVERSIONINFOW);
+    static DWORD s_build = 0;
+    static bool  s_done = false;
+
+    // 既に取得済みならキャッシュを返す
+    if (s_done) return s_build;
+
+    HMODULE h = ::GetModuleHandleW(L"ntdll.dll");
+    if (h)
+    {
+        PFN_RtlGetVersion fn = reinterpret_cast<PFN_RtlGetVersion>(::GetProcAddress(h, "RtlGetVersion"));
+        if (fn)
+        {
+            RTL_OSVERSIONINFOW oi = { sizeof(oi) };
+            if (fn(&oi) == 0)
+            {
+                s_build = oi.dwBuildNumber;
+            }
+        }
+    }
+    s_done = true;
+    return s_build;
+}
+
+// Windows 11 かどうかの判定 (ビルド番号 22000 以上)
+static inline BOOL CCC_IsWin11()
+{
+    return CCC_GetWindowsBuildNumber() >= 22000;
+}
 
 // savedata.aero==1 のときのみぼかしを有効化
 static inline BOOL CCC_IsAeroEnabled()
@@ -335,7 +270,7 @@ static inline BOOL CCC_ApplyAero(HWND hWnd, BOOL bAero)
     {
         exStyle = ::GetWindowLong(hWnd, GWL_EXSTYLE);
         ::SetWindowLong(hWnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
-        CCC_ApplyAeroLayeredAlpha(hWnd);
+        ::SetLayeredWindowAttributes(hWnd, 0, 245, LWA_ALPHA);
 
         DWM_BLURBEHIND bb = {};
         bb.dwFlags = DWM_BB_ENABLE;
@@ -460,10 +395,6 @@ public:
     // 最小化復帰等: WM_PRINTCLIENT は Edit 本文を描かないため明示的に再描画
     void RepaintClient();
     void DrawClientText(CDC& dc, const CRect& r);
-#if CCUSTOM_AERO_SUPPORT
-    void PaintGlassClient(CDC& dc, BOOL bToPaintBuffer = FALSE);
-    void SyncGlassCaret();
-#endif
 
 protected:
     virtual void PreSubclassWindow();
@@ -623,14 +554,6 @@ public:
         if (GetSafeHwnd()) Invalidate();
     }
 
-    void SetRowStyle(int nRow, COLORREF clrBg, BYTE nAlpha = AERO_ALPHA_SEMI, BOOL bUseGlass = TRUE);
-    void ClearRowStyle(int nRow);
-    void ClearAllRowStyles();
-    BOOL GetRowStyle(int nRow, CCC_RowGlassStyle* pOut) const;
-
-    void PaintOpaqueIntoBuffer(HDC hdcBuf);
-    void RefreshRows(int iFirst, int iLast = -1);
-
 protected:
     virtual void PreSubclassWindow();
     virtual void PostNcDestroy();
@@ -644,40 +567,12 @@ protected:
     afx_msg void OnPaint();
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg BOOL OnEraseBkgnd(CDC*);
-    afx_msg void OnSelChange();
-    afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
-    afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
-    afx_msg LRESULT OnPostOpaquePaint(WPARAM, LPARAM);
-    afx_msg void OnMouseMove(UINT nFlags, CPoint point);
-    afx_msg void OnMouseLeave();
-    afx_msg void OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
-    afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
-    afx_msg void OnTimer(UINT_PTR nIDEvent);
 
     DECLARE_MESSAGE_MAP()
 
 private:
     CBrush m_brBackground; // 背景塗りつぶし用ブラシ
     BOOL m_bAeroMode;      // アクリルモードが有効かどうか
-    BOOL m_bInOpaqueFullPaint;
-    int m_nHotItem;
-    std::map<int, CCC_RowGlassStyle> m_rowStyles;
-
-    const CCC_RowGlassStyle* LookupRowStyle(int nRow) const;
-    void PaintOpaqueClient(CDC& dc);
-    void PaintListBoxClient(CDC& dc);
-    void PaintListBoxClientBuffered(CDC& dc);
-    void DrawListBoxRow(CDC& dc, int i);
-    void RepaintListBoxRows(int iFirst, int iLast);
-    void RepaintClient();
-    void RepaintOpaqueIfNeeded();
-    void PaintListBoxGlassBackgrounds(CDC& dc, const CRect& rcClient, BOOL bChromaSolid);
-    void PaintListBoxItemForeground(CDC& dc, int ni, const CRect& rcItem, DWORD itemState);
-    void PaintListBoxForeground(CDC& dc, const CRect& rcClient);
-    void PaintGlassClient(CDC& dc);
-    void RequestGlassRepaint(BOOL bImmediate = FALSE);
-    void UpdateHotItem(int n);
-    void UpdateHotItemFromCursor();
 };
 
 // ============================================================================
@@ -717,18 +612,6 @@ public:
         if (GetSafeHwnd()) Invalidate();
     }
 
-    void SetRowStyle(int nRow, COLORREF clrBg, BYTE nAlpha = AERO_ALPHA_SEMI, BOOL bUseGlass = TRUE);
-    void ClearRowStyle(int nRow);
-    void ClearAllRowStyles();
-    BOOL GetRowStyle(int nRow, CCC_RowGlassStyle* pOut) const;
-
-#if CCUSTOM_AERO_SUPPORT
-    void PaintGlassClient(CDC& dc, BOOL bToPaintBuffer = FALSE);
-    void PaintDropListGlassClient(HWND hwndList, HDC hdc);
-    void SetDropListHotItem(int nItem) { m_nDropHotItem = nItem; }
-    int GetDropListHotItem() const { return m_nDropHotItem; }
-#endif
-
 protected:
     CBrush m_brBackground;                  // 背景塗りつぶし用ブラシ
     std::vector<BOOL> m_vDisabledItems;     // 各アイテムが無効化されているかどうかのフラグリスト
@@ -736,10 +619,6 @@ protected:
 
     COLORREF m_clrLabelText, m_clrLabelBg;  // ラベル（無効化アイテム）の文字色と背景色
     BOOL m_bAeroMode;                       // アクリルモードが有効かどうか
-    int m_nDropHotItem;                     // ドロップリストのホバー行（ガラス描画用）
-    std::map<int, CCC_RowGlassStyle> m_rowStyles;
-
-    const CCC_RowGlassStyle* LookupRowStyle(int nRow) const;
 
     // 論理インデックスと物理インデックスの相互変換
     int LogicalToPhysical(int n) const;
@@ -762,19 +641,10 @@ protected:
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg BOOL OnEraseBkgnd(CDC*);
     afx_msg void OnDropdown();
-    afx_msg void OnCloseUp();
-#if CCUSTOM_AERO_SUPPORT
-    afx_msg void OnTimer(UINT_PTR nIDEvent);
-#endif
 
     DECLARE_MESSAGE_MAP()
 
     void PaintClient(CDC& dc);
-    void PaintComboClosedForeground(CDC& dc, const CRect& rcClient);
-    void PaintComboDropItemForeground(CDC& dc, int itemID, const CRect& rcItem, DWORD itemState);
-#if CCUSTOM_AERO_SUPPORT
-    void PaintComboDropGlassBackgrounds(CDC& dc, HWND hwndList, const CRect& rcClient, BOOL bChromaSolid);
-#endif
 };
 
 // ============================================================================
@@ -792,18 +662,14 @@ public:
     void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
 
     // アクリルモードの設定
-    void SetAeroMode(BOOL b);
-    DWORD SetExtendedStyle(DWORD dwNewStyle);
-
-    void SetRowStyle(int nRow, COLORREF clrBg, BYTE nAlpha = AERO_ALPHA_SEMI, BOOL bUseGlass = TRUE);
-    void ClearRowStyle(int nRow);
-    void ClearAllRowStyles();
-    BOOL GetRowStyle(int nRow, CCC_RowGlassStyle* pOut) const;
+    void SetAeroMode(BOOL b)
+    {
+        m_bAeroMode = b;
+        if (GetSafeHwnd()) Invalidate();
+    }
 
     // CCustomOpaqueFixer 用: 外側の BufferedPaint バッファへ直接描画
     void PaintOpaqueIntoBuffer(HDC hdcBuf);
-    // ガラス描画時は RedrawItems の代わりに使う（部分更新で行が消えるのを防ぐ）
-    void RefreshRows(int iFirst, int iLast = -1);
 
 protected:
     BOOL m_bAutoDelete;
@@ -815,7 +681,6 @@ protected:
     // メッセージハンドラ群
     afx_msg HBRUSH CtlColor(CDC*, UINT);
     afx_msg void OnCustomDraw(NMHDR*, LRESULT*);
-    afx_msg void OnItemChanged(NMHDR*, LRESULT*);
     afx_msg void OnMouseMove(UINT, CPoint);
     afx_msg void OnMouseLeave();
     afx_msg void OnVScroll(UINT, UINT, CScrollBar*);
@@ -833,16 +698,6 @@ protected:
 private:
     CBrush m_brBackground; // 背景塗りつぶし用ブラシ
     int m_nHotItem;        // 現在マウスカーソルが乗っているアイテムのインデックス（ホバー処理用）
-    std::map<int, CCC_RowGlassStyle> m_rowStyles;
-
-    const CCC_RowGlassStyle* LookupRowStyle(int nRow) const;
-    void DrawListCtrlRowBackground(CDC* pDC, int ni, const CRect& rcClient, BOOL bChromaSolid = FALSE);
-    void DrawListCtrlSubItemForeground(CDC* pDC, int ni, int ns, int nLC, const CRect& rcClient);
-    void DrawListCtrlSubItem(CDC* pDC, int ni, int ns, int nLC, const CRect& rcClient);
-    void PaintListCtrlGlassBackgrounds(CDC& dc, const CRect& rcClient, BOOL bChromaSolid);
-    void PaintListCtrlForeground(CDC& dc, const CRect& rcClient);
-    void PaintListCtrlRowForeground(CDC& dc, int ni, const CRect& rcClient);
-    void RequestGlassRepaint();
 
     // ホバー状態のアイテムを更新し、必要に応じて再描画します
     void UpdateHotItem(int n);
@@ -851,9 +706,6 @@ private:
     // 表示されているアイテム領域を再描画します
     void RedrawVisibleItems();
     void PaintOpaqueClient(CDC& dc);
-    void PaintListCtrlClient(CDC& dc, BOOL bChromaCanvas);
-    void PaintGlassClient(CDC& dc);
-    void ApplyListViewGlassStyle();
     void ScheduleOpaqueRepaint();
 };
 
@@ -1055,7 +907,6 @@ public:
     void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
     int GetCheck();
     void SetCheck(int n);
-    void RepaintClient();
 
     // アクリルモードの設定
     void SetAeroMode(BOOL b)
@@ -1075,7 +926,6 @@ protected:
     afx_msg void OnLButtonUp(UINT, CPoint);
     afx_msg void OnMouseMove(UINT, CPoint);
     afx_msg void OnMouseLeave();
-    afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
 
     DECLARE_MESSAGE_MAP()
@@ -1085,7 +935,6 @@ private:
 
     // 状態保持用メンバ変数
     BOOL m_bIsFlatStyle; // フラットスタイルかどうか
-    BOOL m_bIsPushLike;  // BS_PUSHLIKE（ボタン見た目のチェック）
     BOOL m_bIsPressed;   // 押下状態かどうか
     BOOL m_bIsHot;       // ホバー状態かどうか
     BOOL m_bTracking;    // マウストラッキング中かどうか
@@ -1135,7 +984,7 @@ private:
 // アクリル設定を子コントロールへ伝播させるマクロ
 // PROPAGATE_AERO_TO_CHILDREN
 // ============================================================================
-// ラベル・スライダー等はクロマ透過、リスト／コンボはガラス DIB、ボタン類は不透明 fixer
+// ラベル・スライダー・グループ枠は透過、リスト・ボタン類は不透明
 #define PROPAGATE_AERO_TO_CHILDREN(hWndParent, bAero)                                  \
 do {                                                                                   \
     const BOOL _bA = (bAero);                                                          \
@@ -1149,7 +998,7 @@ do {                                                                            
             else if (auto* p = dynamic_cast<CCustomRangeSliderCtrl*>(_pw)) p->SetAeroMode(_bA); \
             else if (auto* p = dynamic_cast<CCustomListBox*>(_pw))         p->SetAeroMode(FALSE); \
             else if (auto* p = dynamic_cast<CCustomComboBox*>(_pw))        p->SetAeroMode(FALSE); \
-            else if (auto* p = dynamic_cast<CCustomListCtrl*>(_pw))        p->SetAeroMode(_bA); \
+            else if (auto* p = dynamic_cast<CCustomListCtrl*>(_pw))        p->SetAeroMode(FALSE); \
             else if (auto* p = dynamic_cast<CCustomCheckBox*>(_pw))        p->SetAeroMode(_bA); \
             CCC_SetChildTransparent(_hc, FALSE);                                       \
             _pw->Invalidate();                                                         \
@@ -1207,8 +1056,6 @@ public:
     CCustomBlurDialogBase();
     CCustomBlurDialogBase(UINT nIDTemplate, CWnd* pParent = NULL);
     virtual ~CCustomBlurDialogBase();
-    void RefreshAeroMode() { ApplyDwmBlur(); }
-    virtual void RefreshAeroGlassAlpha(BOOL bImmediate = FALSE);
 
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
@@ -1216,16 +1063,13 @@ protected:
 
     // savedata.aero==1 のとき DWM ぼかしを適用
     virtual void ApplyDwmBlur();
-    afx_msg BOOL OnEraseBkgnd(CDC* pDC);
     afx_msg void OnPaint();
     afx_msg void OnSize(UINT nType, int cx, int cy);
     afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
     afx_msg void OnCompositionChanged();
     afx_msg void OnDestroy();
-    afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct);
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
-    afx_msg LRESULT OnRefreshChildren(WPARAM wParam, LPARAM lParam);
 
     DECLARE_MESSAGE_MAP()
 
@@ -1283,8 +1127,6 @@ public:
     CCustomBlurDialogExBase();
     CCustomBlurDialogExBase(UINT nIDTemplate, CWnd* pParent = nullptr);
     virtual ~CCustomBlurDialogExBase();
-    void RefreshAeroMode() { ApplyDwmBlur(); }
-    virtual void RefreshAeroGlassAlpha(BOOL bImmediate = FALSE);
 
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
@@ -1292,7 +1134,6 @@ protected:
 
     // savedata.aero==1 のとき DWM ぼかしを適用
     virtual void ApplyDwmBlur();
-    afx_msg BOOL OnEraseBkgnd(CDC* pDC);
     afx_msg void OnPaint();
     afx_msg void OnSize(UINT nType, int cx, int cy);
     afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
@@ -1300,7 +1141,6 @@ protected:
     afx_msg void OnCompositionChanged();
     afx_msg void OnDestroy();
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
-    afx_msg LRESULT OnRefreshChildren(WPARAM wParam, LPARAM lParam);
 
     DECLARE_MESSAGE_MAP()
 

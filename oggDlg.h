@@ -1,4 +1,4 @@
-﻿// oggDlg.h : ヘッダー ファイル
+// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -57,8 +57,6 @@ public:
 	CString UTF8toSJIS(const char* a);
 	CString UTF8toUNI(const TCHAR* a);
 	void Resize();
-	void RefreshAllAeroWindows();
-	void RefreshAeroGlassAlpha(BOOL bImmediate = FALSE) override;
 	void Closeds();
 	void timerp();
 	void Vol(int vol);
@@ -127,6 +125,7 @@ public:
 	CCustomCheckBox	m_ed6tc;
 	CCustomCheckBox	m_yso;
 	CCustomRangeSliderCtrl	m_time;
+	//CSliderCtrl	m_time;
 	CCustomEdit	m_kaisuu;
 	CCustomCheckBox	m_junji;
 	CCustomCheckBox	m_random;
@@ -136,8 +135,8 @@ public:
 	CCustomCheckBox	m_ed6fc;
 	CCustomCheckBox	m_ysf;
 	CCustomCheckBox	m_ys6;
-	CCustomStandardButton	m_st;
-	CCustomStandardButton	m_supe;
+	CCustomCheckBox	m_st;
+	CCustomCheckBox	m_supe;
 	CCustomStatic	m_sokudos;
 	CCustomStatic	m_onteis;
 	CCustomSliderCtrl	m_sokudo;
@@ -152,8 +151,6 @@ public:
 	void play();
 	void stop();
 	void stop1();
-	void ResetPauseButtonUi();
-	void SyncPauseButtonUi();
 	static void Modec();
 CWinThread * m_thread;
 CWinThread* m_thread1;
@@ -313,8 +310,6 @@ public:
 	CCustomStandardButton m_folderrrr;
 	CCustomStandardButton m_syuryouuuu;
 	afx_msg void OnStnClickedStatic2();
-	CCustomGroupBox m_grpMulti;
-	CCustomGroupBox m_grpGame;
 	CCustomStatic dummys1;
 	CCustomStatic m_dummys2;
 	CCustomStatic m_dummys3;
@@ -331,10 +326,6 @@ public:
 	afx_msg LRESULT OnTimerpVsyncTick(WPARAM wParam, LPARAM lParam);
 	HANDLE m_hTimerpVsyncThread;
 	HANDLE m_hTimerpVsyncStopEvent;
-
-	BOOL IsMainDlgCollapsed() const;
-	const RECT* MainAeroGapPreserve(RECT* pBuf) const;
-	afx_msg LRESULT OnRefreshChildren(WPARAM wParam, LPARAM lParam);
 };
 
 //{{AFX_INSERT_LOCATION}}

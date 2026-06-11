@@ -1124,11 +1124,8 @@ void CPianoRoll::OnPaint()
 
 #if CCUSTOM_AERO_SUPPORT
     if (savedata.aero == 1 && CCC_IsWin11())
-    {
-        static const COLORREF kPrChroma = RGB(20, 20, 20);
-        CCC_BlitAeroChildComposite(dc.GetSafeHdc(), 0, 0, rect.Width(), rect.Height(),
-            memDC.GetSafeHdc(), 0, 0, kPrChroma, kPrChroma);
-    }
+        CCC_BlitChromaNoFlicker(dc.GetSafeHdc(), 0, 0, rect.Width(), rect.Height(),
+            memDC.GetSafeHdc(), 0, 0, RGB(20, 20, 20));
     else
 #endif
         dc.BitBlt(0, 0, rect.Width(), rect.Height(), &memDC, 0, 0, SRCCOPY);
