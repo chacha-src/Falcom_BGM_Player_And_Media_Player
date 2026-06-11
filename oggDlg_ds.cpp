@@ -473,6 +473,8 @@ UINT HandleNotifications(LPVOID)
 		}
 		timeee += savedata.ms;
 
+		if (thn1)
+			return stopPlaybackAndExit();
 		sflg = TRUE;
 		DispatchPlaywavFill(bufwav3, oldw, len1, len2);
 		// 曲最後まで行ったとき
@@ -560,6 +562,8 @@ void HandleNotifications_export()
 			len2 = 0;
 			oldw = 0;
 		}
+		if (thn1)
+			break;
 		sflg = TRUE;
 		DispatchPlaywavFill(bufwav3, oldw, len1, len2);
 		oldw = (oldw + len1 + len2) % bufSize;

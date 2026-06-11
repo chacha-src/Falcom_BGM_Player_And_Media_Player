@@ -244,6 +244,12 @@ static char THIS_FILE[] = __FILE__;
 int fade1, playf;
 BOOL thn = TRUE;
 BOOL thn1 = FALSE;
+
+// stop/stop1 が thn1 を立て、デコーダ解放前に stf も立てる。再生スレッド内の while(true) は必ずこれを見る。
+static inline bool IsPlaybackStopRequested()
+{
+	return thn1 != FALSE || stf != 0;
+}
 LPDIRECTSOUND8 m_ds;
 LPDIRECTSOUNDBUFFER m_dsb1 = NULL;
 LPDIRECTSOUNDBUFFER8 m_dsb = NULL;
@@ -1232,6 +1238,8 @@ extern __int64 playb;
 
 void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 {
+	if (IsPlaybackStopRequested())
+		return;
 	if (!g_pcm_upscale_active || len1 + len2 <= 0) {
 		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
 			playwavBuffwav(bufwav3, oldw, len1, len2);
@@ -1256,6 +1264,8 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 	int wp = 0;
 	int guard = 0;
 	while (wp < total && guard < 512) {
+		if (IsPlaybackStopRequested())
+			break;
 		++guard;
 		int chunk = total - wp;
 		int got = g_audioUpscaler.PullInterleaved(linear.data() + wp, chunk);
@@ -11251,6 +11261,8 @@ int readBuffwav(char* bw, int cnt)
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
 		while (true) {
+			if (IsPlaybackStopRequested())
+				return 0;
 			int f = 0;
 			if (adbuf2 == NULL) return 0;
 			// fade は ApplyFadeCubed で音量(例: 1.0=フル)。ここでは「無音に近い」ときだけゼロ埋め+muon。
@@ -11290,6 +11302,7 @@ int readBuffwav(char* bw, int cnt)
 			}
 			// playb はリングから bw へ渡したバイト数で進める（len2 積み上げは cnt を超え表示が実長より長くなる）
 			if (poss4 > cnt) break;
+			if (len2 <= 0 && fade1 == 1) break;
 		}
 	}
 
@@ -12055,6 +12068,8 @@ int readkpi(BYTE* bw, int cnt)
 			r = 0;
 			for (int kl = 0; kl < 5; kl++) {
 				for (;;) {
+					if (IsPlaybackStopRequested())
+						break;
 					DWORD requestBytes = cnt1;
 					if (cnt2 <= cnt3) {
 						r = 1;
@@ -12216,6 +12231,8 @@ int readkpi(BYTE* bw, int cnt)
 
 					cnt3 += r;
 				}
+				if (IsPlaybackStopRequested())
+					break;
 				int len2 = readtempo(bufkpi, cnt);
 
 				if (len2 > 0) {
@@ -12534,8 +12551,14 @@ int readm4a(BYTE* bw, int cnt)
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 <= cnt) {
 			while (true) {
+				if (IsPlaybackStopRequested())
+					break;
+				if (rrr != 1)
+					break;
 				if (rrr == 1) {
 					for (;;) {
+						if (IsPlaybackStopRequested())
+							break;
 						if (cnt2 <= cnt3) break;
 						r = m4a_.Render(og->kmp, (BYTE*)bufkpi + cnt3, cnt1);
 						cnt3 += r;
@@ -12812,6 +12835,8 @@ int readflac(BYTE* bw, int cnt)
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 < lenl) {
 			while (true) {
+				if (IsPlaybackStopRequested())
+					break;
 
 				if (rrr == 1)
 					r = flac_.Render(og->kmp, (BYTE*)bufkpi, lenl);
@@ -12879,6 +12904,7 @@ int readflac(BYTE* bw, int cnt)
 				}
 				// len2==0 でもデコードが部分読みなら上位へ返さないとループし得る
 				if (cnt4 != lenl) return cnt4;
+				if (len2 <= 0 && (fade1 == 1 || IsPlaybackStopRequested())) break;
 			}
 		}
 
@@ -13034,6 +13060,8 @@ int readopus(BYTE* bw, int cnt)
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 <= cnt) {
 			for (int k = 0; k < 3; k++) {
+				if (IsPlaybackStopRequested())
+					break;
 				if (rrr == 1) {
 					r = opus_.Render(og->kmp, (BYTE*)bufkpi, cnt);
 					if (r != cnt && savedata.saveloop == 0)
@@ -13251,6 +13279,8 @@ int readdsd(BYTE* bw, int cnt)
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
 		while (true) {
+			if (IsPlaybackStopRequested())
+				break;
 			if(fade1 == 0)
 				cnt3 = dsd_.kpiRender(og->kmp, (BYTE*)bufkpi, cnt / (wavchannel * wavsam_depth / 8)) * (wavchannel * wavsam_depth / 8);
 
@@ -13290,6 +13320,7 @@ int readdsd(BYTE* bw, int cnt)
 			}
 			if (len4 != 0) break;
 			if (poss4 > cnt) break;
+			if (fade1 == 1 && muon == 0 && len2 <= 0) break;
 		}
 	}
 
@@ -13334,6 +13365,8 @@ static int ReadMp3Accumulate(BYTE* dst, int wantBytes)
 	int guard = 0;
 	const int maxIters = 8192;
 	while (got < wantBytes && guard++ < maxIters) {
+		if (IsPlaybackStopRequested())
+			break;
 		int n = readmp3(dst + got, wantBytes - got);
 		if (n <= 0)
 			break;
@@ -13452,6 +13485,8 @@ int readwav(BYTE* bw, int cnt)
 	int outBytesPerSample = (wavsam_depth / 8) * wavchannel;
 	if (poss4 <= cnt) {
 		while (true) {
+			if (IsPlaybackStopRequested())
+				break;
 			int toRead = rr;
 			if (bytesPerSample != outBytesPerSample) {
 				toRead = (int)((__int64)rr * bytesPerSample / outBytesPerSample);
@@ -13647,6 +13682,8 @@ int readmp3(BYTE* bw, int cnt)
 		int mp3RbStallIters = 0;
 		const int kMp3RbStallMax = 512;
 		while (true) {
+			if (IsPlaybackStopRequested())
+				break;
 			if (savedata.mp3orig)
 				r = mp3_.Render2(bufkpi, rr, kbps);
 			else
@@ -13690,6 +13727,8 @@ int readmp3(BYTE* bw, int cnt)
 			// readtempo が 0 のときは上の if (len2>0) に入らず、ここに来る。
 			// r<rr（デコード欠け／EOF）で抜けないと while(true) が無限ループする
 			if (rr > r) break;
+			if (len2 <= 0 && r == 0) break;
+			if (fade1 == 1 && muon == 0 && len2 <= 0) break;
 			// フルブロック decode 済みだが RB がまだ出さない → 追加デコードで埋める（シーク直後のレイテンシ対策）
 			if (len2 <= 0 && r > 0 && rr == r) {
 				if (++mp3RbStallIters >= kMp3RbStallMax)
@@ -14803,6 +14842,8 @@ int mcopy(char* a, int len)
 
 			int i = 0;
 			for (;;) {
+				if (IsPlaybackStopRequested())
+					break;
 				ret = ov_read(&vf, (char*)(bufwav + poss * bpf), 4096, 0, 2, 1, &current_section) / bpf;
 				poss += ret;
 				if (ret == 0) break;
@@ -19765,7 +19806,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					OnPause();
 					ZeroMemory(bufwav3, sizeof(bufwav3));
 					syukai = 1; syukai2 = 0;
-					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1)break; DoEvent(); } hscroll_lock.lock(); }
+					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1 || thn1) break; DoEvent(); } hscroll_lock.lock(); }
 					if (savedata.mp3orig) {
 						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
@@ -19855,7 +19896,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					OnPause();
 					ZeroMemory(bufwav3, sizeof(bufwav3));
 					syukai = 1; syukai2 = 0;
-					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1)break; DoEvent(); } hscroll_lock.lock(); }
+					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1 || thn1) break; DoEvent(); } hscroll_lock.lock(); }
 					if (savedata.mp3orig) {
 						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
