@@ -258,6 +258,7 @@ extern int ps;
 extern COggDlg* og;
 extern BOOL thn;
 extern BOOL thn1;
+extern int stf;
 extern int endf;
 extern int lenl;
 extern int fade1;
@@ -315,6 +316,7 @@ static CCriticalSection s_playNotifyThreadCs;
 void SignalPlaybackNotifyThreadStop()
 {
 	thn1 = TRUE;
+	stf = 1;
 	syukai = 2;
 	// OnHScroll が syukai2==1 を待っているとき stop で syukai=2 にすると
 	// 再生スレッドは syukai2 を立てずに終了するため、ここで必ず解放する。

@@ -1057,6 +1057,8 @@ public:
     CCustomBlurDialogBase(UINT nIDTemplate, CWnd* pParent = NULL);
     virtual ~CCustomBlurDialogBase();
 
+    void RefreshAeroMode() { ApplyDwmBlur(); }
+
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
     virtual BOOL OnInitDialog();
@@ -1127,6 +1129,8 @@ public:
     CCustomBlurDialogExBase();
     CCustomBlurDialogExBase(UINT nIDTemplate, CWnd* pParent = nullptr);
     virtual ~CCustomBlurDialogExBase();
+
+    void RefreshAeroMode() { ApplyDwmBlur(); }
 
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);

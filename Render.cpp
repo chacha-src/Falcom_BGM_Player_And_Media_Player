@@ -85,6 +85,20 @@ static char THIS_FILE[] = __FILE__;
 extern save savedata;
 CImageBase* renderbase;
 
+static void ReleaseRenderGrassBackdrop()
+{
+	if (!renderbase)
+		return;
+	CImageBase* p = renderbase;
+	renderbase = NULL;
+	if (p->GetSafeHwnd())
+		p->DestroyWindow();
+	else
+		delete p;
+}
+
+static void SyncRenderGrassBackdrop(CRender* pRender);
+
 extern int sek;
 extern void DoEvent();
 extern int fade1;
@@ -290,6 +304,7 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_COMBO_SPEAKER, &CRender::OnCbnSelchangeSpeaker)
 	ON_BN_CLICKED(IDC_CHECK_UPSCALE, &CRender::OnBnClickedCheckUpscale)
 	ON_BN_CLICKED(IDC_CHECK51, &CRender::OnBnClicked32bit)
+	ON_BN_CLICKED(IDC_CHECK3, &CRender::OnBnClickedCheck3)
 	ON_WM_CTLCOLOR()
 	ON_WM_CREATE()
 	ON_WM_MOVING()
@@ -320,6 +335,7 @@ BOOL CRender::OnInitDialog()
 	m_bakSpeaker = savedata.speaker_layout;
 	m_bakBit24 = savedata.bit24;
 	m_bakBit32 = savedata.bit32;
+	m_bakAero = savedata.aero;
 	_tcscpy(m_bakFont1, savedata.font1);
 	_tcscpy(m_bakFont2, savedata.font2);
 
@@ -526,11 +542,16 @@ BOOL CRender::OnInitDialog()
 	m_ms.SetPos(savedata.ms);
 	if (savedata.ms > 80) savedata.ms = 80;
 	m_hyouji2.SetRange(1, 60);
-	m_hyouji2.SetPos(savedata.ms2);
+	int ms2Pos = (savedata.ms2 + 15) / 16;
+	if (ms2Pos < 1) ms2Pos = 1;
+	if (ms2Pos > 60) ms2Pos = 60;
+	m_hyouji2.SetPos(ms2Pos);
 	{
 		const wchar_t* msUnit = LL14(L"ms", L"ms", L"ms", L"ms", L"ms", L"ms", L"毫秒", L"ms", L"мс", L"ms", L"ms", L"ms", L"ms", L"ms");
 		CString s; s.Format(L"%d%s", savedata.ms, msUnit);
 		m_ms2.SetWindowText(s);
+		CString s2; s2.Format(L"%d%s", ms2Pos * 16, msUnit);
+		m_hyouji3.SetWindowText(s2);
 	}
 	SetTimer(11, 100, NULL);
 	w_wups.SetRange(100, 1000);
@@ -583,18 +604,19 @@ BOOL CRender::OnInitDialog()
 
 	m_netlrc.SetCheck(savedata.lrc_net);
 
-	if (savedata.aero){
+	if (savedata.aero && !CCC_IsWin11()) {
+		ReleaseRenderGrassBackdrop();
 		renderbase = new CImageBase;
-	renderbase->Create(NULL);
-	renderbase->oya = this;
+		renderbase->Create(NULL);
+		renderbase->oya = this;
 	}
 	else {
-		renderbase = NULL;
+		ReleaseRenderGrassBackdrop();
 	}
 	CRect r;
 	GetWindowRect(&r);
-	if (savedata.aero)
-	renderbase->MoveWindow(&r);
+	if (renderbase && renderbase->GetSafeHwnd())
+		renderbase->MoveWindow(&r);
 	if(renderbase)
 		::SetWindowPos(renderbase->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
@@ -629,14 +651,14 @@ void CRender::OnOK()
 	savedata.bit32 = m_32bit.GetCheck();
 	savedata.m4a = m_m4a.GetCheck();
 	savedata.ms = m_ms.GetPos();
+	savedata.ms2 = m_hyouji2.GetPos() * 16;
 	savedata.samples = samp[m_Hz.GetCurSel()];
 	savedata.speanamode = m_speana.GetCheck();
 	savedata.speananum = m_speana_num.GetCurSel();
 	savedata.lang = m_comboLang.GetCurSel();
 
 	//	savedata.mp3orig=m_mp3orig.GetCheck();
-	if (savedata.aero)
-	delete renderbase;
+	ReleaseRenderGrassBackdrop();
 	CCustomBlurDialogExBase::OnOK();
 }
 
@@ -960,6 +982,7 @@ void CRender::OnBnClickedOk()
 	savedata.m4a = m_m4a.GetCheck();
 	savedata.lrc_net = m_netlrc.GetCheck();
 	savedata.ms = m_ms.GetPos();
+	savedata.ms2 = m_hyouji2.GetPos() * 16;
 	savedata.speanamode = m_speana.GetCheck();
 	savedata.speananum = m_speana_num.GetCurSel();
 	savedata.lang = m_comboLang.GetCurSel();
@@ -977,8 +1000,7 @@ void CRender::OnBnClickedOk()
 		savedata.soundcur = dev;
 	}
 	extern int gameon;
-	if(savedata.aero)
-	delete renderbase;
+	ReleaseRenderGrassBackdrop();
 	CCustomBlurDialogExBase::OnOK();
 }
 
@@ -1078,10 +1100,10 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 		CString s; s.Format(L"%d%s", savedata.ms, msUnit);
 		m_ms2.SetWindowText(s);
 	}
-	savedata.ms2 = m_hyouji2.GetPos();
+	savedata.ms2 = m_hyouji2.GetPos() * 16;
 	{
 		const wchar_t* msUnit = LL14(L"ms", L"ms", L"ms", L"ms", L"ms", L"ms", L"毫秒", L"ms", L"мс", L"ms", L"ms", L"ms", L"ms", L"ms");
-		CString s2; s2.Format(L"%d%s", savedata.ms2*16, msUnit);
+		CString s2; s2.Format(L"%d%s", savedata.ms2, msUnit);
 		m_hyouji3.SetWindowText(s2);
 	}
 	savedata.wup = w_wups.GetPos()/ 100.0;
@@ -1148,21 +1170,21 @@ void CRender::OnCbnSelchangeCombo3()
 
 HBRUSH CRender::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 {
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+		return CCustomBlurDialogExBase::OnCtlColor(pDC, pWnd, nCtlColor);
+#endif
 	HBRUSH hbr = CCustomBlurDialogExBase::OnCtlColor(pDC, pWnd, nCtlColor);
 
-	// TODO: ここで DC の属性を変更してください。
 	if (savedata.aero == 1) {
 		if (nCtlColor == CTLCOLOR_DLG)
-		{
 			return m_brDlg;
-		}
 		if (nCtlColor == CTLCOLOR_STATIC)
 		{
 			SetBkMode(pDC->m_hDC, TRANSPARENT);
 			return m_brDlg;
 		}
 	}
-	// TODO: 既定値を使用したくない場合は別のブラシを返します。
 	return hbr;
 }
 
@@ -1172,13 +1194,12 @@ int CRender::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	if (CCustomBlurDialogExBase::OnCreate(lpCreateStruct) == -1)
 		return -1;
 
-	// TODO: ここに特定な作成コードを追加してください。
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsWin11())
+		return 0;
+#endif
 	ModifyStyleEx(0, WS_EX_LAYERED);
-
-	// レイヤードウィンドウの不透明度と透明のカラーキー
 	SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
-
-	// 赤色のブラシを作成する．
 	m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
 	return 0;
 }
@@ -1189,9 +1210,8 @@ void CRender::OnMoving(UINT fwSide, LPRECT pRect)
 	CCustomBlurDialogExBase::OnMoving(fwSide, pRect);
 	CRect r;
 	GetWindowRect(&r);
-	if (savedata.aero)
-
-	renderbase->MoveWindow(&r);
+	if (savedata.aero && renderbase && renderbase->GetSafeHwnd())
+		renderbase->MoveWindow(&r);
 	// TODO: ここにメッセージ ハンドラー コードを追加します。
 }
 
@@ -1199,18 +1219,43 @@ int CRender::Create(CWnd* pWnd)
 {
 	m_pParent = NULL;
 	BOOL bret = CCustomBlurDialogExBase::Create(CRender::IDD, this);
-	if (savedata.aero == 1) {
+#if CCUSTOM_AERO_SUPPORT
+	if (savedata.aero == 1 && !CCC_IsWin11())
+#else
+	if (savedata.aero == 1)
+#endif
+	{
 		ModifyStyleEx(0, WS_EX_LAYERED);
-
-		// レイヤードウィンドウの不透明度と透明のカラーキー
 		SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
-
-		// 赤色のブラシを作成する．
-		m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
+		if (!m_brDlg.GetSafeHandle())
+			m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
 	}
 	if (bret == TRUE)
 		ShowWindow(SW_SHOW);
 	return bret;
+}
+
+void CRender::OnBnClickedCheck3()
+{
+	const int newAero = m_a.GetCheck() ? 1 : 0;
+	if (savedata.aero == newAero)
+		return;
+	savedata.aero = newAero;
+	RefreshAeroMode();
+#if CCUSTOM_AERO_SUPPORT
+	if (!CCC_IsWin11())
+		SyncRenderGrassBackdrop(this);
+	else
+	{
+		ReleaseRenderGrassBackdrop();
+		ModifyStyleEx(WS_EX_LAYERED, 0);
+	}
+#else
+	SyncRenderGrassBackdrop(this);
+#endif
+	Invalidate(FALSE);
+	if (og)
+		og->PostRefreshAllAeroWindows();
 }
 
 void CRender::OnBnClickedCancel()
@@ -1307,10 +1352,70 @@ void CRender::OnBnClickedCancel()
 		}
 	}
 
-	if (savedata.aero)
+	const bool bAeroChanged = (savedata.aero != m_bakAero);
+	if (bAeroChanged) {
+		savedata.aero = m_bakAero;
+		m_a.SetCheck(savedata.aero ? BST_CHECKED : BST_UNCHECKED);
+		RefreshAeroMode();
+#if CCUSTOM_AERO_SUPPORT
+		if (!CCC_IsWin11())
+			SyncRenderGrassBackdrop(this);
+		else
+		{
+			ReleaseRenderGrassBackdrop();
+			ModifyStyleEx(WS_EX_LAYERED, 0);
+		}
+#else
+		SyncRenderGrassBackdrop(this);
+#endif
+		Invalidate(FALSE);
+		if (og)
+			og->PostRefreshAllAeroWindows();
+	}
 
-	delete renderbase;
+	ReleaseRenderGrassBackdrop();
 	CCustomBlurDialogExBase::OnCancel();
+}
+
+static void SyncRenderGrassBackdrop(CRender* pRender)
+{
+	if (!pRender || !pRender->GetSafeHwnd())
+		return;
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsWin11())
+	{
+		ReleaseRenderGrassBackdrop();
+		pRender->ModifyStyleEx(WS_EX_LAYERED, 0);
+		return;
+	}
+#endif
+	CRect r;
+	pRender->GetWindowRect(&r);
+	if (CCC_IsAeroEnabled())
+	{
+		if (renderbase && !renderbase->GetSafeHwnd())
+			ReleaseRenderGrassBackdrop();
+		if (!renderbase)
+		{
+			renderbase = new CImageBase;
+			renderbase->Create(NULL);
+			renderbase->oya = pRender;
+		}
+		if (renderbase && renderbase->GetSafeHwnd())
+		{
+			renderbase->MoveWindow(&r);
+			::SetWindowPos(renderbase->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		}
+		if (!pRender->m_brDlg.GetSafeHandle())
+			pRender->m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
+		pRender->ModifyStyleEx(0, WS_EX_LAYERED);
+		pRender->SetLayeredWindowAttributes(RGB(255, 0, 0), 0, LWA_COLORKEY);
+	}
+	else
+	{
+		ReleaseRenderGrassBackdrop();
+		pRender->ModifyStyleEx(WS_EX_LAYERED, 0);
+	}
 }
 
 void CRender::OnBnClickedCheck52()

@@ -1,4 +1,4 @@
-// oggDlg.h : ヘッダー ファイル
+﻿// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -7,6 +7,9 @@
 
 #ifndef WM_TIMERP_VSYNC_TICK
 #define WM_TIMERP_VSYNC_TICK (WM_APP + 70)
+#endif
+#ifndef WM_REFRESH_AERO_ALL
+#define WM_REFRESH_AERO_ALL (WM_APP + 71)
 #endif
 #ifndef WM_OGG_DEFERRED_HEAVY_INIT
 #define WM_OGG_DEFERRED_HEAVY_INIT (WM_APP + 100)
@@ -151,6 +154,8 @@ public:
 	void play();
 	void stop();
 	void stop1();
+	void RefreshAllAeroWindows();
+	void PostRefreshAllAeroWindows();
 	static void Modec();
 CWinThread * m_thread;
 CWinThread* m_thread1;
@@ -324,6 +329,7 @@ public:
 	void StartTimerpVsyncThread();
 	void StopTimerpVsyncThread();
 	afx_msg LRESULT OnTimerpVsyncTick(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnRefreshAeroAll(WPARAM wParam, LPARAM lParam);
 	HANDLE m_hTimerpVsyncThread;
 	HANDLE m_hTimerpVsyncStopEvent;
 };

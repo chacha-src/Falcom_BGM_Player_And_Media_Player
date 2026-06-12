@@ -4486,62 +4486,46 @@ BOOL CCustomGroupBox::OnEraseBkgnd(CDC* pDC)
     return TRUE;
 }
 
+static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOOL bTrans);
+static void CCC_BlitGroupBoxFrameChroma(HDC hdcDest, int x, int y, int w, int h,
+    HDC hdcSrc, COLORREF clrKey, const CRect& innerClient);
+
 void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
 {
-    CCC_CompositeTransparent(m_hWnd, m_bAeroMode, *pDC, rect, [&](CDC& dc)
+    const int rw = rect.Width();
+    const int rh = rect.Height();
+    if (!pDC || rw <= 0 || rh <= 0) return;
+
+    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    CString t;
+    GetWindowText(t);
+
+    if (!bTrans)
     {
-        CRect r(0, 0, rect.Width(), rect.Height());
-        CString t; GetWindowText(t);
-        CFont* pOF = dc.SelectObject(GetFont());
-        CSize s = dc.GetTextExtent(t);
-        int nT = r.top + s.cy / 2;
-        const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
-        if (!bTrans) dc.FillSolidRect(&r, COLOR_DIALOG_BG);
+        pDC->FillSolidRect(&rect, COLOR_DIALOG_BG);
+        CFont* pF = GetFont();
+        if (pF) pDC->SelectObject(pF);
+        CCC_DrawGroupBoxFrame(*pDC, CRect(0, 0, rw, rh), t, FALSE);
+        return;
+    }
 
-        CPen pO(PS_SOLID, 2, RGB(255, 140, 180));
-        CPen pI(PS_SOLID, 1, RGB(255, 200, 220));
-        dc.SelectObject(&pO);
-        dc.SelectStockObject(NULL_BRUSH);
-        dc.MoveTo(r.left + 1, nT);
-        if (s.cx > 0)
-        {
-            dc.LineTo(r.left + 6, nT);
-            dc.MoveTo(r.left + s.cx + 16, nT);
-        }
-        dc.LineTo(r.right - 2, nT);
-        dc.LineTo(r.right - 2, r.bottom - 2);
-        dc.LineTo(r.left + 1, r.bottom - 2);
-        dc.LineTo(r.left + 1, nT);
+    CDC memDC;
+    memDC.CreateCompatibleDC(pDC);
+    CBitmap bmp;
+    bmp.CreateCompatibleBitmap(pDC, rw, rh);
+    CBitmap* pOld = memDC.SelectObject(&bmp);
+    memDC.FillSolidRect(0, 0, rw, rh, CCC_AERO_CHROMA_KEY);
+    CFont* pF = GetFont();
+    if (pF) memDC.SelectObject(pF);
+    CCC_DrawGroupBoxFrame(memDC, CRect(0, 0, rw, rh), t, TRUE);
 
-        dc.SelectObject(&pI);
-        int off = 3;
-        dc.MoveTo(r.left + off, nT + off);
-        if (s.cx > 0)
-        {
-            dc.LineTo(r.left + 6 + off, nT + off);
-            dc.MoveTo(r.left + s.cx + 16, nT + off);
-        }
-        dc.LineTo(r.right - off, nT + off);
-        dc.LineTo(r.right - off, r.bottom - off);
-        dc.LineTo(r.left + off, r.bottom - off);
-        dc.LineTo(r.left + off, nT + off);
-
-        DrawRibbon(&dc, CRect(r.left + 2, nT - 8, r.left + 14, nT + 4), RGB(255, 182, 193));
-        DrawRibbon(&dc, CRect(r.right - 14, nT - 8, r.right - 2, nT + 4), RGB(255, 182, 193));
-        DrawRibbon(&dc, CRect(r.left + 2, r.bottom - 12, r.left + 14, r.bottom), RGB(255, 182, 193));
-        DrawRibbon(&dc, CRect(r.right - 14, r.bottom - 12, r.right - 2, r.bottom), RGB(255, 182, 193));
-
-        if (!t.IsEmpty())
-        {
-            CRect rt(r.left + 8, nT - s.cy / 2, r.left + 8 + s.cx + 4, nT + s.cy / 2);
-            if (bTrans) dc.FillSolidRect(&rt, CCC_AERO_CHROMA_KEY);
-            else dc.FillSolidRect(&rt, COLOR_DIALOG_BG);
-            dc.SetBkMode(TRANSPARENT);
-            dc.SetTextColor(RGB(0, 0, 0));
-            dc.DrawText(t, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        }
-        dc.SelectObject(pOF);
-    });
+    CSize ts = t.IsEmpty() ? CSize(0, 0) : memDC.GetTextExtent(t);
+    const int nT = ts.cy > 0 ? ts.cy / 2 : 8;
+    const int inset = 12;
+    CRect inner(inset, nT + 2, rw - inset, rh - inset);
+    CCC_BlitGroupBoxFrameChroma(pDC->GetSafeHdc(), rect.left, rect.top, rw, rh,
+        memDC.GetSafeHdc(), CCC_AERO_CHROMA_KEY, inner);
+    memDC.SelectObject(pOld);
 }
 
 // ============================================================================
@@ -4628,10 +4612,36 @@ void CCustomDialog::OnPaint()
 #if CCUSTOM_AERO_SUPPORT
 static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf);
 
+static BOOL CCC_ButtonSTNeedsChromaPaint(HWND hWnd)
+{
+    return CCC_IsBlurDialogChild(hWnd) && CCC_IsAeroEnabled() && CCC_IsWin11();
+}
+
+static void CCC_RemapButtonSTBackgroundToChroma(CDC& dc, CButtonST* pBtn, const CRect& r)
+{
+    CCC_RemapSolidColorInDC(dc, r, COLOR_DIALOG_BG, CCC_AERO_CHROMA_KEY);
+    CCC_RemapSolidColorInDC(dc, r, COLOR_BUTTON_BG, CCC_AERO_CHROMA_KEY);
+    if (!pBtn) return;
+    COLORREF cr = 0;
+    if (pBtn->GetColor(CButtonST::BTNST_COLOR_BK_OUT, &cr) == BTNST_OK)
+        CCC_RemapSolidColorInDC(dc, r, cr, CCC_AERO_CHROMA_KEY);
+    if (pBtn->GetColor(CButtonST::BTNST_COLOR_BK_IN, &cr) == BTNST_OK)
+        CCC_RemapSolidColorInDC(dc, r, cr, CCC_AERO_CHROMA_KEY);
+    if (pBtn->GetColor(CButtonST::BTNST_COLOR_BK_FOCUS, &cr) == BTNST_OK)
+        CCC_RemapSolidColorInDC(dc, r, cr, CCC_AERO_CHROMA_KEY);
+}
+
 static void CCC_DrawButtonSTClient(HWND hWnd, CButtonST* pBtn, HDC hdc, const RECT& rect)
 {
-    CBrush br(COLOR_BUTTON_BG);
+    if (!pBtn || !hdc) return;
+    const int rw = rect.right - rect.left;
+    const int rh = rect.bottom - rect.top;
+    if (rw <= 0 || rh <= 0) return;
+
+    const BOOL bChroma = CCC_ButtonSTNeedsChromaPaint(hWnd);
+    CBrush br(bChroma ? COLOR_DIALOG_BG : COLOR_BUTTON_BG);
     ::FillRect(hdc, &rect, (HBRUSH)br.GetSafeHandle());
+
     DRAWITEMSTRUCT dis = {};
     dis.CtlType = ODT_BUTTON;
     dis.CtlID = (UINT)::GetDlgCtrlID(hWnd);
@@ -4645,6 +4655,34 @@ static void CCC_DrawButtonSTClient(HWND hWnd, CButtonST* pBtn, HDC hdc, const RE
     dis.hDC = hdc;
     dis.rcItem = rect;
     pBtn->DrawItem(&dis);
+
+    if (bChroma)
+    {
+        CDC dc;
+        dc.Attach(hdc);
+        CCC_RemapButtonSTBackgroundToChroma(dc, pBtn, CRect(0, 0, rw, rh));
+        dc.Detach();
+    }
+}
+
+static void CCC_BlitButtonSTChromaToDest(HDC hdcDest, HWND hWnd, CButtonST* pBtn, const RECT& rect)
+{
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    if (width <= 0 || height <= 0) return;
+
+    CDC dcDest;
+    dcDest.Attach(hdcDest);
+    CDC dcMem;
+    dcMem.CreateCompatibleDC(&dcDest);
+    CBitmap bmp;
+    bmp.CreateCompatibleBitmap(&dcDest, width, height);
+    CBitmap* pOld = dcMem.SelectObject(&bmp);
+    CCC_DrawButtonSTClient(hWnd, pBtn, dcMem.GetSafeHdc(), rect);
+    CCC_BlitTransparentChroma(hdcDest, rect.left, rect.top, width, height,
+        dcMem.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+    dcMem.SelectObject(pOld);
+    dcDest.Detach();
 }
 
 static void CCC_ForcePaintButtonST(HWND hWnd, CButtonST* pBtn)
@@ -4652,13 +4690,6 @@ static void CCC_ForcePaintButtonST(HWND hWnd, CButtonST* pBtn)
     if (!hWnd || !::IsWindow(hWnd) || !pBtn)
         return;
     pBtn->ClearBackgroundCache();
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
-    {
-        ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
-        return;
-    }
-#endif
     CWnd* pw = CWnd::FromHandlePermanent(hWnd);
     if (!pw) return;
     RECT rect = {};
@@ -4666,7 +4697,7 @@ static void CCC_ForcePaintButtonST(HWND hWnd, CButtonST* pBtn)
     if (rect.right <= rect.left || rect.bottom <= rect.top)
         return;
     CClientDC dc(pw);
-    CCC_DrawButtonSTClient(hWnd, pBtn, dc.GetSafeHdc(), rect);
+    CCC_BlitButtonSTChromaToDest(dc.GetSafeHdc(), hWnd, pBtn, rect);
 }
 
 // Win11: 子ウィンドウの GDI はアルファ0のまま DWM に合成される。
@@ -4675,7 +4706,7 @@ static void CCC_ForcePaintButtonST(HWND hWnd, CButtonST* pBtn)
 class CCustomOpaqueFixer
 {
 public:
-    CCustomOpaqueFixer(COLORREF clrBg) : m_hWnd(NULL), m_bPrinting(FALSE), m_clrBg(clrBg) {}
+    CCustomOpaqueFixer(COLORREF clrBg, BOOL bChroma = FALSE) : m_hWnd(NULL), m_bPrinting(FALSE), m_clrBg(clrBg), m_bChroma(bChroma) {}
     ~CCustomOpaqueFixer() { Uninstall(); }
 
     BOOL Install(HWND hWnd)
@@ -4697,6 +4728,7 @@ private:
     HWND m_hWnd;
     BOOL m_bPrinting;
     COLORREF m_clrBg;
+    BOOL m_bChroma;
 
     static LRESULT CALLBACK SubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
@@ -4773,6 +4805,23 @@ private:
         const int width = rect.right - rect.left;
         const int height = rect.bottom - rect.top;
         if (width <= 0 || height <= 0) return;
+
+        if (m_bChroma)
+        {
+            CDC dcDest;
+            dcDest.Attach(hDestDC);
+            CDC dcMem;
+            dcMem.CreateCompatibleDC(&dcDest);
+            CBitmap bmp;
+            bmp.CreateCompatibleBitmap(&dcDest, width, height);
+            CBitmap* pOld = dcMem.SelectObject(&bmp);
+            PaintClientIntoBuffer(hWnd, dcMem.GetSafeHdc());
+            CCC_BlitTransparentChroma(hDestDC, 0, 0, width, height,
+                dcMem.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+            dcMem.SelectObject(pOld);
+            dcDest.Detach();
+            return;
+        }
 
         BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
         params.dwFlags = BPPF_ERASE;
@@ -4930,7 +4979,11 @@ static void CCC_InstallOpaqueFixersRecursive(HWND hParent, CTypedPtrList<CPtrLis
     {
         if (CCC_ShouldOpaqueFix(hChild))
         {
-            CCustomOpaqueFixer* pFixer = new CCustomOpaqueFixer(CCC_OpaqueBgForHwnd(hChild));
+            BOOL bChromaBtn = FALSE;
+            if (CWnd* pw = CWnd::FromHandlePermanent(hChild))
+                bChromaBtn = (dynamic_cast<CButtonST*>(pw) != NULL) && CCC_ButtonSTNeedsChromaPaint(hChild);
+            CCustomOpaqueFixer* pFixer = new CCustomOpaqueFixer(
+                bChromaBtn ? COLOR_DIALOG_BG : CCC_OpaqueBgForHwnd(hChild), bChromaBtn);
             if (pFixer->Install(hChild))
                 fixers.AddTail(pFixer);
             else
@@ -4938,6 +4991,92 @@ static void CCC_InstallOpaqueFixersRecursive(HWND hParent, CTypedPtrList<CPtrLis
         }
         CCC_InstallOpaqueFixersRecursive(hChild, fixers);
     }
+}
+
+static void CCC_SendGroupBoxesToBack(HWND hDlg)
+{
+    if (!hDlg || !::IsWindow(hDlg)) return;
+    for (HWND h = ::GetWindow(hDlg, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT))
+    {
+        if ((::GetWindowLong(h, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX)
+            ::SetWindowPos(h, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+static void CCC_BlitGroupBoxFrameChroma(HDC hdcDest, int x, int y, int w, int h,
+    HDC hdcSrc, COLORREF clrKey, const CRect& innerClient)
+{
+    if (w <= 0 || h <= 0) return;
+    CRgn rgnOuter, rgnInner, rgnFrame;
+    rgnOuter.CreateRectRgn(0, 0, w, h);
+    if (innerClient.Width() > 0 && innerClient.Height() > 0)
+    {
+        rgnInner.CreateRectRgnIndirect(&innerClient);
+        rgnFrame.CreateRectRgn(0, 0, 0, 0);
+        rgnFrame.CombineRgn(&rgnOuter, &rgnInner, RGN_DIFF);
+    }
+    else
+    {
+        rgnFrame.CreateRectRgn(0, 0, w, h);
+    }
+    HRGN hrgnScreen = ::CreateRectRgn(0, 0, 0, 0);
+    ::CombineRgn(hrgnScreen, (HRGN)rgnFrame.GetSafeHandle(), NULL, RGN_COPY);
+    ::OffsetRgn(hrgnScreen, x, y);
+    const int saved = ::SaveDC(hdcDest);
+    ::ExtSelectClipRgn(hdcDest, hrgnScreen, RGN_AND);
+    CCC_BlitChromaNoFlicker(hdcDest, x, y, w, h, hdcSrc, 0, 0, clrKey);
+    ::RestoreDC(hdcDest, saved);
+    ::DeleteObject(hrgnScreen);
+}
+
+static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOOL bTrans)
+{
+    CFont* pOF = dc.SelectObject(dc.GetCurrentFont());
+    CSize s = t.IsEmpty() ? CSize(0, 0) : dc.GetTextExtent(t);
+    int nT = r.top + (s.cy > 0 ? s.cy / 2 : 8);
+
+    CPen pO(PS_SOLID, 2, RGB(255, 140, 180));
+    CPen pI(PS_SOLID, 1, RGB(255, 200, 220));
+    dc.SelectObject(&pO);
+    dc.SelectStockObject(NULL_BRUSH);
+    dc.MoveTo(r.left + 1, nT);
+    if (s.cx > 0)
+    {
+        dc.LineTo(r.left + 6, nT);
+        dc.MoveTo(r.left + s.cx + 16, nT);
+    }
+    dc.LineTo(r.right - 2, nT);
+    dc.LineTo(r.right - 2, r.bottom - 2);
+    dc.LineTo(r.left + 1, r.bottom - 2);
+    dc.LineTo(r.left + 1, nT);
+
+    dc.SelectObject(&pI);
+    const int off = 3;
+    dc.MoveTo(r.left + off, nT + off);
+    if (s.cx > 0)
+    {
+        dc.LineTo(r.left + 6 + off, nT + off);
+        dc.MoveTo(r.left + s.cx + 16, nT + off);
+    }
+    dc.LineTo(r.right - off, nT + off);
+    dc.LineTo(r.right - off, r.bottom - off);
+    dc.LineTo(r.left + off, r.bottom - off);
+    dc.LineTo(r.left + off, nT + off);
+
+    DrawRibbon(&dc, CRect(r.left + 2, nT - 8, r.left + 14, nT + 4), RGB(255, 182, 193));
+    DrawRibbon(&dc, CRect(r.right - 14, nT - 8, r.right - 2, nT + 4), RGB(255, 182, 193));
+    DrawRibbon(&dc, CRect(r.left + 2, r.bottom - 12, r.left + 14, r.bottom), RGB(255, 182, 193));
+    DrawRibbon(&dc, CRect(r.right - 14, r.bottom - 12, r.right - 2, r.bottom), RGB(255, 182, 193));
+
+    if (!t.IsEmpty())
+    {
+        CRect rt(r.left + 8, nT - s.cy / 2, r.left + 8 + s.cx + 4, nT + s.cy / 2);
+        dc.FillSolidRect(&rt, bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG);
+        dc.SetBkMode(TRANSPARENT);
+        dc.SetTextColor(RGB(0, 0, 0));
+        dc.DrawText(t, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    }
+    dc.SelectObject(pOF);
 }
 
 static void CCC_FinalizeBlurDialog(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
@@ -4956,6 +5095,7 @@ static void CCC_FinalizeBlurDialog(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
     CCC_PrepareDialogSurface(pDlg->m_hWnd, TRUE);
     PROPAGATE_AERO_TO_CHILDREN(pDlg->m_hWnd, TRUE);
     pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+    CCC_SendGroupBoxesToBack(pDlg->m_hWnd);
 
     if (CCC_IsWin11())
         CCC_InstallOpaqueFixersRecursive(pDlg->m_hWnd, fixers);
@@ -4999,7 +5139,7 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
     }
     if (auto* pBtn = dynamic_cast<CButtonST*>(pw))
     {
-        if (CCC_IsAeroEnabled() && CCC_IsWin11())
+        if (CCC_ButtonSTNeedsChromaPaint(hWnd))
             CCC_ForcePaintButtonST(hWnd, pBtn);
         else
         {

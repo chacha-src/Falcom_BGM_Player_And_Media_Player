@@ -244,6 +244,12 @@ static char THIS_FILE[] = __FILE__;
 int fade1, playf;
 BOOL thn = TRUE;
 BOOL thn1 = FALSE;
+
+// stop/stop1 が thn1 を立て、デコーダ解放前に stf も立てる。再生スレッド内の while(true) は必ずこれを見る。
+static inline bool IsPlaybackStopRequested()
+{
+	return thn1 != FALSE || stf != 0;
+}
 LPDIRECTSOUND8 m_ds;
 LPDIRECTSOUNDBUFFER m_dsb1 = NULL;
 LPDIRECTSOUNDBUFFER8 m_dsb = NULL;
@@ -985,6 +991,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_APP + 1, dp1)
 	ON_MESSAGE(WM_APP + 2, dp2)
 	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
+	ON_MESSAGE(WM_REFRESH_AERO_ALL, &COggDlg::OnRefreshAeroAll)
 	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
 	ON_MESSAGE(WM_OGG_DEFERRED_HEAVY_INIT, OnDeferredHeavyStartup)
 	ON_WM_COPYDATA()
@@ -1223,6 +1230,8 @@ extern __int64 playb;
 
 void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 {
+	if (IsPlaybackStopRequested())
+		return;
 	if (!g_pcm_upscale_active || len1 + len2 <= 0) {
 		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
 			playwavBuffwav(bufwav3, oldw, len1, len2);
@@ -1247,6 +1256,8 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 	int wp = 0;
 	int guard = 0;
 	while (wp < total && guard < 512) {
+		if (IsPlaybackStopRequested())
+			break;
 		++guard;
 		int chunk = total - wp;
 		int got = g_audioUpscaler.PullInterleaved(linear.data() + wp, chunk);
@@ -2119,6 +2130,19 @@ int horizontalDPI;
 int ms2;
 int endflg = 0;
 
+static inline int Ms2FrameUnits()
+{
+	int ms = savedata.ms2;
+	if (ms < 16) ms = 16;
+	if (ms > 960) ms = 960;
+	return (ms + 15) / 16;
+}
+
+static inline BOOL Ms2DrawDue(int frameCounter)
+{
+	return frameCounter >= Ms2FrameUnits();
+}
+
 int tempo;
 int pitch;
 
@@ -2677,12 +2701,12 @@ void COggDlg::OnPaint()
 #if CCUSTOM_AERO_SUPPORT
 		if (CCC_IsAeroEnabled() && CCC_IsWin11())
 		{
-			const BOOL bSpectrumOnly = (savedata.ms2 <= ms2
+			const BOOL bSpectrumOnly = (Ms2DrawDue(ms2)
 				&& clip.bottom <= destH + 8
 				&& clip.Height() <= destH + 8);
 			if (savedata.aero == 1 && dc.m_hDC != NULL)
 			{
-				if (savedata.ms2 <= ms2)
+				if (Ms2DrawDue(ms2))
 				{
 					dcc.SelectClipRgn(NULL);
 					CCC_BlitStretchChromaNoFlicker(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
@@ -2704,7 +2728,7 @@ void COggDlg::OnPaint()
 		}
 		else
 #endif
-		if (savedata.ms2 <= ms2) {
+		if (Ms2DrawDue(ms2)) {
 #if CCUSTOM_AERO_SUPPORT
 			if (savedata.aero == 1 && CCC_IsWin11())
 			{
@@ -11179,6 +11203,8 @@ int readBuffwav(char* bw, int cnt)
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
 		while (true) {
+			if (IsPlaybackStopRequested())
+				return 0;
 			int f = 0;
 			if (adbuf2 == NULL) return 0;
 			// fade は ApplyFadeCubed で音量(例: 1.0=フル)。ここでは「無音に近い」ときだけゼロ埋め+muon。
@@ -11218,6 +11244,7 @@ int readBuffwav(char* bw, int cnt)
 			}
 			// playb はリングから bw へ渡したバイト数で進める（len2 積み上げは cnt を超え表示が実長より長くなる）
 			if (poss4 > cnt) break;
+			if (len2 <= 0 && fade1 == 1) break;
 		}
 	}
 
@@ -11346,6 +11373,8 @@ int readadpcm(CFile& adpcmf, char* bw, int len)
 	int ak = 0, lbuf = 0;
 	bw2 = (unsigned char*)bw;
 	for (;;) {
+		if (IsPlaybackStopRequested())
+			return 0;
 		if (lbuf == 0) {
 			adpcmf.Read(abuf, 0x8);
 			lbuf = 0x5000;
@@ -11463,6 +11492,8 @@ int readadpcmzwei(CFile& adpcmf, char* bw, int len)
 	int ak = 0, lbuf = 0, o = 0;
 	bw2 = (unsigned char*)bw;
 	for (;;) {
+		if (IsPlaybackStopRequested())
+			return 0;
 		if (lbuf == 0) {
 			adpcmf.Read(abuf, 0x8);
 			lbuf = 0x5000;
@@ -11524,6 +11555,8 @@ int readadpcmgurumin(CFile& adpcmf, char* bw, int len)
 	int ak = 0, lbuf = 0;
 	bw2 = (unsigned char*)bw;
 	for (;;) {
+		if (IsPlaybackStopRequested())
+			return 0;
 		if (lbuf == 0) {
 			adpcmf.Read(abuf, 0x8);
 			lbuf = 0x5000;
@@ -11983,6 +12016,8 @@ int readkpi(BYTE* bw, int cnt)
 			r = 0;
 			for (int kl = 0; kl < 5; kl++) {
 				for (;;) {
+					if (IsPlaybackStopRequested())
+						break;
 					DWORD requestBytes = cnt1;
 					if (cnt2 <= cnt3) {
 						r = 1;
@@ -12144,6 +12179,8 @@ int readkpi(BYTE* bw, int cnt)
 
 					cnt3 += r;
 				}
+				if (IsPlaybackStopRequested())
+					break;
 				int len2 = readtempo(bufkpi, cnt);
 
 				if (len2 > 0) {
@@ -12462,8 +12499,14 @@ int readm4a(BYTE* bw, int cnt)
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 <= cnt) {
 			while (true) {
+				if (IsPlaybackStopRequested())
+					break;
+				if (rrr != 1)
+					break;
 				if (rrr == 1) {
 					for (;;) {
+						if (IsPlaybackStopRequested())
+							break;
 						if (cnt2 <= cnt3) break;
 						r = m4a_.Render(og->kmp, (BYTE*)bufkpi + cnt3, cnt1);
 						cnt3 += r;
@@ -12740,6 +12783,8 @@ int readflac(BYTE* bw, int cnt)
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 < lenl) {
 			while (true) {
+				if (IsPlaybackStopRequested())
+					break;
 
 				if (rrr == 1)
 					r = flac_.Render(og->kmp, (BYTE*)bufkpi, lenl);
@@ -12807,6 +12852,7 @@ int readflac(BYTE* bw, int cnt)
 				}
 				// len2==0 でもデコードが部分読みなら上位へ返さないとループし得る
 				if (cnt4 != lenl) return cnt4;
+				if (len2 <= 0 && (fade1 == 1 || IsPlaybackStopRequested())) break;
 			}
 		}
 
@@ -12962,6 +13008,8 @@ int readopus(BYTE* bw, int cnt)
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 <= cnt) {
 			for (int k = 0; k < 3; k++) {
+				if (IsPlaybackStopRequested())
+					break;
 				if (rrr == 1) {
 					r = opus_.Render(og->kmp, (BYTE*)bufkpi, cnt);
 					if (r != cnt && savedata.saveloop == 0)
@@ -13179,6 +13227,8 @@ int readdsd(BYTE* bw, int cnt)
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
 		while (true) {
+			if (IsPlaybackStopRequested())
+				break;
 			if(fade1 == 0)
 				cnt3 = dsd_.kpiRender(og->kmp, (BYTE*)bufkpi, cnt / (wavchannel * wavsam_depth / 8)) * (wavchannel * wavsam_depth / 8);
 
@@ -13218,6 +13268,7 @@ int readdsd(BYTE* bw, int cnt)
 			}
 			if (len4 != 0) break;
 			if (poss4 > cnt) break;
+			if (fade1 == 1 && muon == 0 && len2 <= 0) break;
 		}
 	}
 
@@ -13262,6 +13313,8 @@ static int ReadMp3Accumulate(BYTE* dst, int wantBytes)
 	int guard = 0;
 	const int maxIters = 8192;
 	while (got < wantBytes && guard++ < maxIters) {
+		if (IsPlaybackStopRequested())
+			break;
 		int n = readmp3(dst + got, wantBytes - got);
 		if (n <= 0)
 			break;
@@ -13380,6 +13433,8 @@ int readwav(BYTE* bw, int cnt)
 	int outBytesPerSample = (wavsam_depth / 8) * wavchannel;
 	if (poss4 <= cnt) {
 		while (true) {
+			if (IsPlaybackStopRequested())
+				break;
 			int toRead = rr;
 			if (bytesPerSample != outBytesPerSample) {
 				toRead = (int)((__int64)rr * bytesPerSample / outBytesPerSample);
@@ -13575,6 +13630,8 @@ int readmp3(BYTE* bw, int cnt)
 		int mp3RbStallIters = 0;
 		const int kMp3RbStallMax = 512;
 		while (true) {
+			if (IsPlaybackStopRequested())
+				break;
 			if (savedata.mp3orig)
 				r = mp3_.Render2(bufkpi, rr, kbps);
 			else
@@ -13618,6 +13675,8 @@ int readmp3(BYTE* bw, int cnt)
 			// readtempo が 0 のときは上の if (len2>0) に入らず、ここに来る。
 			// r<rr（デコード欠け／EOF）で抜けないと while(true) が無限ループする
 			if (rr > r) break;
+			if (len2 <= 0 && r == 0) break;
+			if (fade1 == 1 && muon == 0 && len2 <= 0) break;
 			// フルブロック decode 済みだが RB がまだ出さない → 追加デコードで埋める（シーク直後のレイテンシ対策）
 			if (len2 <= 0 && r > 0 && rr == r) {
 				if (++mp3RbStallIters >= kMp3RbStallMax)
@@ -13774,6 +13833,8 @@ void SeekAndWarmupRubberBand(int targetPos)
 
 	// 助走区間のデコードと処理
 	while (discardedSoFar < targetDiscardOutput) {
+		if (IsPlaybackStopRequested())
+			break;
 		int current_section;
 		long bytesRead = ov_read(&vf, (char*)tempRawBuf.data(), 4096, 0, 2, 1, &current_section);
 		if (bytesRead <= 0) break;
@@ -13803,6 +13864,8 @@ void SeekAndWarmupRubberBand(int targetPos)
 		for (int ch = 0; ch < wavchannel; ++ch) outPtrs[ch] = outBuf[ch].data();
 
 		while (g_rubberBandStretcher->available() > 0) {
+			if (IsPlaybackStopRequested())
+				break;
 			size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
 			size_t retrieved = g_rubberBandStretcher->retrieve(outPtrs.data(), toGet);
 			if (retrieved == 0) break;
@@ -14338,6 +14401,9 @@ BOOL CALLBACK pp(HWND hwnd, LPARAM p)
 CString filenback;
 void COggDlg::stop()
 {
+	if (playf || ogg || adbuf2 || mod || wav || mode == 999 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6)
+		SignalPlaybackNotifyThreadStop();
+
 	if (!img.IsNull()) {
 		img.Destroy();
 	}
@@ -14495,6 +14561,9 @@ void COggDlg::stop()
 
 void COggDlg::stop1()
 {
+	if (playf || ogg != NULL || adbuf2 != NULL || wav || mode == 999 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == -3)
+		SignalPlaybackNotifyThreadStop();
+
 	if (!img.IsNull()) {
 		img.Destroy();
 	}
@@ -14711,6 +14780,8 @@ int mcopy(char* a, int len)
 
 			int i = 0;
 			for (;;) {
+				if (IsPlaybackStopRequested())
+					break;
 				ret = ov_read(&vf, (char*)(bufwav + poss * bpf), 4096, 0, 2, 1, &current_section) / bpf;
 				poss += ret;
 				if (ret == 0) break;
@@ -14859,6 +14930,7 @@ DWORD videocnt = 0, videocnt2 = 0, videocnt3;
 
 int pox, poy;
 
+static int s_lastMs2DrawMs = 0;
 
 void COggDlg::timerp()
 {
@@ -14867,6 +14939,11 @@ void COggDlg::timerp()
 		return;
 	}
 	if (playy == 0)return;
+
+	if (s_lastMs2DrawMs != savedata.ms2) {
+		s_lastMs2DrawMs = savedata.ms2;
+		ms2 = 0;
+	}
 
 	// Update focus transition (about 2 seconds for a full transition)
 	{
@@ -14902,7 +14979,7 @@ void COggDlg::timerp()
 		}
 	}
 	ms2++;
-	const BOOL bGdiFrame = (savedata.ms2 <= ms2)
+	const BOOL bGdiFrame = Ms2DrawDue(ms2)
 		&& (InterlockedCompareExchange(&g_gdiPaintPending, 0, 0) == 0);
 	CString s, ss, sss;
 	if (voldsf) {
@@ -16286,17 +16363,15 @@ void timing1(WORD a, BOOL b, BOOL c)
 		}
 }
 
-DWORD f1 = 0, f2 = 0, timen;
+DWORD f1 = 0, f2 = 0;
 
 UINT TheadLoop(LPVOID)
 {
 	for (;;) {
 		if (drawth == TRUE) return TRUE;
-		f1 = Timing64(f2, FALSE);
-		timen = GetTiming(f1);
+		Timing64(f2, FALSE);
 		COgg_RequestTimerp(og);
-		timen = (DWORD)(savedata.ms2 * (double)timen);
-		timing1((WORD)timen, FALSE, FALSE);
+		timing1(1, FALSE, FALSE);
 		Timing64(f2, FALSE);
 		Timing64(fpstiming, FALSE);
 		Sleep(0);
@@ -19310,7 +19385,7 @@ void COggDlg::moji(CString s, int x, int y, COLORREF rgb)
 	SetBkColor(dc, RGB(0, 0, 0));
 	dc.SetBkMode(TRANSPARENT);
 	GetTextExtentPoint32(dc, s, s.GetLength(), &szinfo);
-	if (savedata.ms2 <= ms2) {
+	if (Ms2DrawDue(ms2)) {
 		dc.TextOut(x * 4, y * 4, s, s.GetLength());
 	}
 	SelectObject(dc, fo);
@@ -19333,7 +19408,7 @@ int COggDlg::mojisub(CString s, int x, int y, COLORREF rgb)
 	SetBkColor(dcsub, RGB(0, 0, 0));
 	SetBkMode(dcsub, TRANSPARENT);
 	szinfo = dcsub.GetOutputTextExtent(s);
-	if (savedata.ms2 <= ms2) {
+	if (Ms2DrawDue(ms2)) {
 		if (szinfo.cx < (MDC + 8) * 4)
 			dcsub.FillSolidRect(0, 0, (MDC + 8) * 4, 30 * 4, RGB(0, 0, 0));
 		else
@@ -19715,7 +19790,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					OnPause();
 					ZeroMemory(bufwav3, sizeof(bufwav3));
 					syukai = 1; syukai2 = 0;
-					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1)break; DoEvent(); } hscroll_lock.lock(); }
+					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1 || thn1) break; DoEvent(); } hscroll_lock.lock(); }
 					if (savedata.mp3orig) {
 						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
@@ -19805,7 +19880,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					OnPause();
 					ZeroMemory(bufwav3, sizeof(bufwav3));
 					syukai = 1; syukai2 = 0;
-					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1)break; DoEvent(); } hscroll_lock.lock(); }
+					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1 || thn1) break; DoEvent(); } hscroll_lock.lock(); }
 					if (savedata.mp3orig) {
 						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
@@ -19962,6 +20037,45 @@ void COggDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 	if (bShow && pl && plw)
 		pl->ScheduleRefreshNavControls();
 	UNREFERENCED_PARAMETER(nStatus);
+}
+
+void COggDlg::PostRefreshAllAeroWindows()
+{
+	if (!GetSafeHwnd())
+		return;
+	PostMessage(WM_REFRESH_AERO_ALL, 0, 0);
+}
+
+LRESULT COggDlg::OnRefreshAeroAll(WPARAM, LPARAM)
+{
+	RefreshAllAeroWindows();
+	return 0;
+}
+
+void COggDlg::RefreshAllAeroWindows()
+{
+#if CCUSTOM_AERO_SUPPORT
+	auto refreshMode = [](CWnd* w) {
+		if (!w || !w->GetSafeHwnd() || !::IsWindowVisible(w->m_hWnd))
+			return;
+		if (auto* pEx = dynamic_cast<CCustomBlurDialogExBase*>(w)) {
+			pEx->RefreshAeroMode();
+			return;
+		}
+		if (auto* pBase = dynamic_cast<CCustomBlurDialogBase*>(w)) {
+			pBase->RefreshAeroMode();
+		}
+	};
+	refreshMode(this);
+	refreshMode(&m_EqualizerDlg);
+	refreshMode(&m_PianoRollDlg);
+	if (pl) refreshMode(pl);
+	if (mi) refreshMode(mi);
+	if (pMainFrame1 && pMainFrame1->GetSafeHwnd() && ::IsWindowVisible(pMainFrame1->m_hWnd)) {
+		CCC_ApplyAero(pMainFrame1->m_hWnd, CCC_IsAeroEnabled() ? TRUE : FALSE);
+		pMainFrame1->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+	}
+#endif
 }
 
 BOOL COggDlg::OnEraseBkgnd(CDC* pDC)
