@@ -3271,9 +3271,11 @@ void CDouga::pause(int a)
 	{
 		pMediaControl->Pause();
 		ps=1;og->m_ps.SetWindowText(LL14(L"再開", L"Resume", L"Reprendre", L"Riprendi", L"Reanudar", L"재개", L"恢复", L"استئناف", L"Продолжить", L"Fortsetzen", L"Retomar", L"Hervatten", L"Wznów", L"Sürdür"));
+		og->SyncPauseButtonUi();
 	}else{
 		pMediaControl->Run();
 		ps=0;og->m_ps.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
+		og->SyncPauseButtonUi();
 	}
 }
 

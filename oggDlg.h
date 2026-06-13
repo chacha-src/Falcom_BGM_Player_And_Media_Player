@@ -154,6 +154,8 @@ public:
 	void play();
 	void stop();
 	void stop1();
+	void ResetPauseButtonUi();
+	void SyncPauseButtonUi();
 	void RefreshAllAeroWindows();
 	void PostRefreshAllAeroWindows();
 	static void Modec();

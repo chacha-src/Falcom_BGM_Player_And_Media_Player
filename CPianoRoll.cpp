@@ -9,6 +9,7 @@
 #include "CPianoRoll.h"
 #include "resource.h"
 #include "NoteFundamentalPick.h"
+#include "PianoRollPick.h"
 #include <algorithm>
 
 extern save savedata;
@@ -18,6 +19,7 @@ namespace Cfg
 {
     // piano roll3: 基音ピック + NormalizeDisplayPeak + 包絡ホールド
     static constexpr float IIR_ALPHA = 0.40f;
+    static constexpr float IIR_ALPHA_BASS = 0.28f;
     static constexpr float SILENCE_ABS = 0.007f;
     static constexpr float BAND_SILENCE_BASS = 0.005f;
     static constexpr float BAND_SILENCE_MID = 0.004f;
@@ -42,6 +44,69 @@ namespace Cfg
     static constexpr float WEAK_MID_RATIO = 0.15f;
     static constexpr float WEAK_TRE_RATIO = 0.14f;
     static constexpr float BASS_LATCH_RATIO = 0.21f;
+    static constexpr int   BASS_LOCK_HOLD = 14;
+
+    static void NormalizeBandPeak(float* values, int lo, int hi, float cap)
+    {
+        if (!values || lo >= hi || cap <= 0.0f) return;
+        float maxV = 0.0f;
+        for (int i = lo; i < hi; ++i)
+            if (values[i] > maxV) maxV = values[i];
+        if (maxV <= cap) return;
+        const float scale = cap / maxV;
+        for (int i = lo; i < hi; ++i)
+            values[i] *= scale;
+    }
+
+    static void SuppressFalseSubharmonicPicks(const float* st, bool* picked,
+        int bandStart, int bandEnd)
+    {
+        if (!st || !picked || bandStart >= bandEnd) return;
+        static const int kUpSemi[] = { 12, 19, 24, 7 };
+        for (int i = bandStart; i < bandEnd; ++i) {
+            if (!picked[i]) continue;
+            for (int up : kUpSemi) {
+                const int hi = i + up;
+                if (hi >= bandEnd) continue;
+                if (!picked[hi]) continue;
+                if (st[hi] >= st[i] * 0.46f)
+                    picked[i] = false;
+            }
+        }
+    }
+
+    static void SnapPicksToLocalMaxima(const float* st, bool* picked,
+        int bandStart, int bandEnd, int radius)
+    {
+        if (!st || !picked || bandStart >= bandEnd || radius < 1) return;
+        bool snapTo[128];
+        memset(snapTo, 0, sizeof(snapTo));
+        for (int i = bandStart; i < bandEnd; ++i) {
+            if (!picked[i]) continue;
+            int best = i;
+            float bestS = st[i];
+            const int jl = (i - radius < bandStart) ? bandStart : (i - radius);
+            const int jh = (i + radius >= bandEnd) ? (bandEnd - 1) : (i + radius);
+            for (int j = jl; j <= jh; ++j) {
+                if (st[j] > bestS) {
+                    bestS = st[j];
+                    best = j;
+                }
+            }
+            snapTo[best] = true;
+        }
+        for (int i = bandStart; i < bandEnd; ++i)
+            picked[i] = snapTo[i];
+    }
+
+    static void StabilizeBassBandPicks(const float* st, bool* picked,
+        int bandStart, int bandEnd)
+    {
+        if (!st || !picked || bandStart >= bandEnd) return;
+        SuppressFalseSubharmonicPicks(st, picked, bandStart, bandEnd);
+        SnapPicksToLocalMaxima(st, picked, bandStart, bandEnd, 2);
+        CollapseNearbyPicks(st, picked, bandStart, bandEnd, 2, false);
+    }
 
     static constexpr float BUFWAV3_TARGET_PEAK_DB = -11.0f;
     static constexpr float BUFWAV3_GAIN_DB_MAX = 32.0f;
@@ -179,10 +244,15 @@ namespace Cfg
         PickFundamentalNotesToBand(st, bandPick, 88,
             bandStart, bandEnd, bandSpan, relThresh);
         SuppressSubharmonicPicksInBand(st, bandPick, 88, bandStart, bandEnd);
-        RefineToLocalPeaksInBand(st, bandPick, 88, bandStart, bandEnd, 1);
+        const int peakRadius = (bandStart == 0) ? 2 : 1;
+        RefineToLocalPeaksInBand(st, bandPick, 88, bandStart, bandEnd, peakRadius);
+        if (bandStart == 0)
+            StabilizeBassBandPicks(st, bandPick, bandStart, bandEnd);
         PruneBandPicks(st, bandPick, bandStart, bandEnd,
             bandSpan, PRUNE_BAND_RATIO, PRUNE_TOP_RATIO);
         SuppressSubharmonicPicksInBand(st, bandPick, 88, bandStart, bandEnd);
+        if (bandStart == 0)
+            StabilizeBassBandPicks(st, bandPick, bandStart, bandEnd);
 
         for (int i = bandStart; i < bandEnd; ++i) {
             if (bandPick[i])
@@ -238,9 +308,18 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     memset(m_strengthDipFrames, 0, sizeof(m_strengthDipFrames));
     memset(m_bandMask, 0, sizeof(m_bandMask));
     memset(m_laneStrength, 0, sizeof(m_laneStrength));
+    m_bassLockKey = -1;
+    m_bassLockHold = 0;
     memset(m_prevRawStrengths, 0, sizeof(m_prevRawStrengths));
     memset(m_onsetStrengths, 0, sizeof(m_onsetStrengths));
     memset(m_prevOnsetStrengths, 0, sizeof(m_prevOnsetStrengths));
+    memset(m_prevActiveKeys, 0, sizeof(m_prevActiveKeys));
+    memset(m_prevNoteStrength, 0, sizeof(m_prevNoteStrength));
+    memset(m_noteAgeFrames, 0, sizeof(m_noteAgeFrames));
+    memset(m_scoopLatch, 0, sizeof(m_scoopLatch));
+    memset(m_exprFlags, 0, sizeof(m_exprFlags));
+    memset(m_vibHist, 0, sizeof(m_vibHist));
+    memset(m_vibHistCount, 0, sizeof(m_vibHistCount));
     for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
         m_chMeterDb[i] = -60.0f;
         m_chMeterFill[i] = 0.0f;
@@ -253,12 +332,15 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
         memset(f.segment, 0, sizeof(f.segment));
         memset(f.bandMask, 0, sizeof(f.bandMask));
         memset(f.laneStrength, 0, sizeof(f.laneStrength));
+        memset(f.expr, 0, sizeof(f.expr));
+        memset(f.dynLevel, 0, sizeof(f.dynLevel));
     }
 }
 
 CPianoRoll::~CPianoRoll()
 {
     m_feedEnabled = false;
+    InvalidateHistoryCache();
     DeleteCriticalSection(&m_cs);
 }
 
@@ -284,6 +366,13 @@ void CPianoRoll::ResetPlaybackState()
     memset(m_prevRawStrengths, 0, sizeof(m_prevRawStrengths));
     memset(m_onsetStrengths, 0, sizeof(m_onsetStrengths));
     memset(m_prevOnsetStrengths, 0, sizeof(m_prevOnsetStrengths));
+    memset(m_prevActiveKeys, 0, sizeof(m_prevActiveKeys));
+    memset(m_prevNoteStrength, 0, sizeof(m_prevNoteStrength));
+    memset(m_noteAgeFrames, 0, sizeof(m_noteAgeFrames));
+    memset(m_scoopLatch, 0, sizeof(m_scoopLatch));
+    memset(m_exprFlags, 0, sizeof(m_exprFlags));
+    memset(m_vibHist, 0, sizeof(m_vibHist));
+    memset(m_vibHistCount, 0, sizeof(m_vibHistCount));
     memset(m_smoothedStrengths, 0, sizeof(m_smoothedStrengths));
     memset(m_consecActive, 0, sizeof(m_consecActive));
     memset(m_consecSilent, 0, sizeof(m_consecSilent));
@@ -293,7 +382,11 @@ void CPianoRoll::ResetPlaybackState()
     memset(m_strengthDipFrames, 0, sizeof(m_strengthDipFrames));
     memset(m_bandMask, 0, sizeof(m_bandMask));
     memset(m_laneStrength, 0, sizeof(m_laneStrength));
+    m_bassLockKey = -1;
+    m_bassLockHold = 0;
     m_analysisHasBass = false;
+    ++m_historyPushSerial;
+    InvalidateHistoryCache();
     m_historyDirty = true;
     if (!m_ring.empty())
         std::fill(m_ring.begin(), m_ring.end(), 0.0);
@@ -303,6 +396,8 @@ void CPianoRoll::ResetPlaybackState()
         memset(f.segment, 0, sizeof(f.segment));
         memset(f.bandMask, 0, sizeof(f.bandMask));
         memset(f.laneStrength, 0, sizeof(f.laneStrength));
+        memset(f.expr, 0, sizeof(f.expr));
+        memset(f.dynLevel, 0, sizeof(f.dynLevel));
     }
     LeaveCriticalSection(&m_cs);
 }
@@ -571,11 +666,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow8192,
     for (int i = 0; i < KEY_COUNT; ++i)
     {
         double raw = 0.0;
-        if (i < Cfg::BAND_BASS_END && hasBass) {
-            raw = GoertzelMagnitude(
-                m_bassAnalysisBuf.data(), WIN_BASS, m_goertzelCoeffs[i], m_hannBass.data());
-        }
-        else if (i < LOW_KEY_SPLIT) {
+        if (i < LOW_KEY_SPLIT) {
             raw = GoertzelMagnitude(
                 m_analysisBuf.data(), WIN_LOW, m_goertzelCoeffs[i], m_hannLow.data());
         }
@@ -584,14 +675,13 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow8192,
                 m_analysisBuf.data() + (WIN_LOW - WIN_HIGH), WIN_HIGH,
                 m_goertzelCoeffs[i], m_blackmanHigh.data());
         }
-        m_rawStrengths[i] = (i < Cfg::BAND_BASS_END)
-            ? (float)Cfg::ScaleGoertzelAmpD(raw, i)
-            : ApplyDisplayScale((float)raw, i);
+        m_rawStrengths[i] = ApplyDisplayScale((float)raw, i);
     }
 
     for (int i = 0; i < KEY_COUNT; ++i) {
+        const float alpha = (i < Cfg::BAND_BASS_END) ? Cfg::IIR_ALPHA_BASS : Cfg::IIR_ALPHA;
         m_smoothedStrengths[i] =
-            m_smoothedStrengths[i] * (1.0f - Cfg::IIR_ALPHA) + m_rawStrengths[i] * Cfg::IIR_ALPHA;
+            m_smoothedStrengths[i] * (1.0f - alpha) + m_rawStrengths[i] * alpha;
     }
 
     UpdateNoteStates();
@@ -609,8 +699,12 @@ void CPianoRoll::UpdateNoteStates()
         trackStrength[i] = m_smoothedStrengths[i];
     }
 
-    NormalizeDisplayPeak(pickStrength, KEY_COUNT, DISPLAY_PEAK_CAP);
-    NormalizeDisplayPeak(trackStrength, KEY_COUNT, DISPLAY_PEAK_CAP);
+    NormalizeBandPeak(pickStrength, 0, BAND_BASS_END, DISPLAY_PEAK_CAP);
+    NormalizeBandPeak(pickStrength, BAND_BASS_END, BAND_MID_END, DISPLAY_PEAK_CAP);
+    NormalizeBandPeak(pickStrength, BAND_MID_END, KEY_COUNT, DISPLAY_PEAK_CAP);
+    NormalizeBandPeak(trackStrength, 0, BAND_BASS_END, DISPLAY_PEAK_CAP);
+    NormalizeBandPeak(trackStrength, BAND_BASS_END, BAND_MID_END, DISPLAY_PEAK_CAP);
+    NormalizeBandPeak(trackStrength, BAND_MID_END, KEY_COUNT, DISPLAY_PEAK_CAP);
 
     const float pickScale = PickThreshScaleFromLevelDb(m_bufwav3LevelDb);
 
@@ -627,6 +721,8 @@ void CPianoRoll::UpdateNoteStates()
         treMax >= BAND_SILENCE_TRE;
 
     if (!anyBandLive || maxS < SILENCE_ABS) {
+        m_bassLockKey = -1;
+        m_bassLockHold = 0;
         for (int i = 0; i < KEY_COUNT; ++i) {
             m_activeKeys[i] = false;
             m_noteStrength[i] = 0.0f;
@@ -667,6 +763,32 @@ void CPianoRoll::UpdateNoteStates()
     }
 
     SuppressWeakBandPicks(pickStrength, bassPick, midPick, treblePick);
+
+    {
+        int bestBass = -1;
+        float bestBS = 0.0f;
+        for (int i = 0; i < BAND_BASS_END; ++i) {
+            if (!bassPick[i]) continue;
+            if (pickStrength[i] > bestBS) {
+                bestBS = pickStrength[i];
+                bestBass = i;
+            }
+        }
+        if (bestBass >= 0) {
+            m_bassLockKey = bestBass;
+            m_bassLockHold = BASS_LOCK_HOLD;
+        }
+        else if (m_bassLockHold > 0) {
+            --m_bassLockHold;
+        }
+        if (m_bassLockKey >= 0 && m_bassLockHold > 0 && !bassPick[m_bassLockKey]) {
+            if (bassMax > 1e-6f &&
+                trackStrength[m_bassLockKey] >= bassMax * BASS_LATCH_RATIO * 0.80f)
+                bassPick[m_bassLockKey] = true;
+        }
+        if (m_bassLockHold <= 0)
+            m_bassLockKey = -1;
+    }
 
     for (int i = 0; i < KEY_COUNT; ++i)
         picked[i] = bassPick[i] || midPick[i] || treblePick[i];
@@ -772,6 +894,102 @@ void CPianoRoll::UpdateNoteStates()
             m_laneStrength[i][lane++] = bandStr[b];
         }
     }
+
+    DetectExpressions();
+}
+
+namespace
+{
+    static bool HistDetectVibrato(const float* hist, int count, float envPeak)
+    {
+        if (count < 8 || envPeak < 0.04f) return false;
+        float mean = 0.0f;
+        for (int k = 0; k < count; ++k) mean += hist[k];
+        mean /= (float)count;
+        float minV = mean, maxV = mean;
+        int reversals = 0;
+        float prevDet = 0.0f;
+        int prevSign = 0;
+        for (int k = 0; k < count; ++k) {
+            const float v = hist[k];
+            if (v < minV) minV = v;
+            if (v > maxV) maxV = v;
+            const float det = v - mean;
+            const int sign = (det > 0.015f * envPeak) ? 1 : ((det < -0.015f * envPeak) ? -1 : 0);
+            if (sign != 0 && prevSign != 0 && sign != prevSign)
+                ++reversals;
+            if (sign != 0) prevSign = sign;
+            prevDet = det;
+        }
+        const float swing = maxV - minV;
+        return reversals >= 2 && swing >= envPeak * 0.08f;
+    }
+}
+
+namespace PianoExpr {
+    static constexpr uint8_t ACCENT  = 0x01;
+    static constexpr uint8_t SCOOP   = 0x02;
+    static constexpr uint8_t VIBRATO = 0x04;
+    static constexpr uint8_t SLIDE   = 0x08;
+}
+
+void CPianoRoll::DetectExpressions()
+{
+    for (int i = 1; i < KEY_COUNT; ++i) {
+        if (m_scoopLatch[i] > 0) --m_scoopLatch[i];
+        if (m_activeKeys[i - 1])
+            m_scoopLatch[i] = 5;
+    }
+
+    for (int i = 0; i < KEY_COUNT; ++i) {
+        m_exprFlags[i] = 0;
+        const bool wasActive = m_prevActiveKeys[i];
+        const bool nowActive = m_activeKeys[i];
+
+        if (!nowActive) {
+            m_noteAgeFrames[i] = 0;
+            m_vibHistCount[i] = 0;
+            continue;
+        }
+
+        if (!wasActive)
+            m_noteAgeFrames[i] = 0;
+        else if (m_noteAgeFrames[i] < 255)
+            ++m_noteAgeFrames[i];
+
+        if (!wasActive) {
+            if (i > 0 && m_scoopLatch[i] >= 2)
+                m_exprFlags[i] |= PianoExpr::SCOOP;
+            if (i > 0 && m_prevActiveKeys[i - 1])
+                m_exprFlags[i] |= PianoExpr::SLIDE;
+            if (i + 1 < KEY_COUNT && m_prevActiveKeys[i + 1])
+                m_exprFlags[i] |= PianoExpr::SLIDE;
+        }
+
+        if (m_noteAgeFrames[i] <= 3) {
+            const float prev = m_prevNoteStrength[i];
+            const float cur = m_noteStrength[i];
+            if (cur - prev > 0.18f || (prev > 0.03f && (cur - prev) / prev > 0.28f))
+                m_exprFlags[i] |= PianoExpr::ACCENT;
+        }
+
+        if (m_vibHistCount[i] < VIB_HIST_LEN)
+            ++m_vibHistCount[i];
+        for (int k = 0; k < VIB_HIST_LEN - 1; ++k)
+            m_vibHist[i][k] = m_vibHist[i][k + 1];
+        m_vibHist[i][VIB_HIST_LEN - 1] = m_noteStrength[i];
+
+        if (m_noteAgeFrames[i] >= 5 && m_vibHistCount[i] >= 8) {
+            const int n = min((int)m_vibHistCount[i], VIB_HIST_LEN);
+            if (HistDetectVibrato(m_vibHist[i] + (VIB_HIST_LEN - n), n,
+                m_envPeak[i] > 0.01f ? m_envPeak[i] : 1.0f))
+                m_exprFlags[i] |= PianoExpr::VIBRATO;
+        }
+    }
+
+    memcpy(m_prevActiveKeys, m_activeKeys, sizeof(m_activeKeys));
+    for (int i = 0; i < KEY_COUNT; ++i)
+        m_prevNoteStrength[i] = m_noteStrength[i];
 }
 
 void CPianoRoll::PushFrame()
@@ -782,10 +1000,22 @@ void CPianoRoll::PushFrame()
         frame.strength[i] = m_noteStrength[i];
         frame.segment[i] = m_segmentId[i];
         frame.bandMask[i] = m_bandMask[i];
+        frame.expr[i] = m_exprFlags[i];
         memcpy(frame.laneStrength[i], m_laneStrength[i], sizeof(frame.laneStrength[i]));
+        if (m_activeKeys[i]) {
+            const float pk = m_envPeak[i] > 0.02f ? m_envPeak[i] : 1.0f;
+            float dyn = m_noteStrength[i] / pk;
+            if (dyn < 0.12f) dyn = 0.12f;
+            if (dyn > 1.0f) dyn = 1.0f;
+            frame.dynLevel[i] = dyn;
+        }
+        else {
+            frame.dynLevel[i] = 0.0f;
+        }
     }
     m_history.insert(m_history.begin(), frame);
     if (m_history.size() > MAX_HISTORY) m_history.pop_back();
+    ++m_historyPushSerial;
     m_historyDirty = true;
 }
 
@@ -822,7 +1052,7 @@ void CPianoRoll::GetWhiteKeyRect52(int midi, int width, int& xL, int& xR) const
     if (xR <= xL) xR = xL + 1;
 }
 
-namespace
+namespace PianoDraw
 {
     static const wchar_t* WhiteKeyLabel(int midi)
     {
@@ -955,6 +1185,87 @@ namespace
             DrawBevelKey(dc, sub, LocalKeyColor(keyIndex, st, blackKey), pressed); ++slot;
         }
     }
+
+    static CRect DynInsetRect(CRect rc, float dynLevel)
+    {
+        if (dynLevel < 0.0f) dynLevel = 0.0f;
+        if (dynLevel > 1.0f) dynLevel = 1.0f;
+        const int w = rc.Width();
+        int shrink = (int)((1.0f - dynLevel) * w * 0.44f);
+        if (shrink > w / 2 - 1) shrink = w / 2 - 1;
+        if (shrink < 0) shrink = 0;
+        rc.left += shrink;
+        rc.right -= shrink;
+        if (rc.right <= rc.left) rc.right = rc.left + 1;
+        return rc;
+    }
+
+    static COLORREF ExprPrimaryColor(uint8_t expr)
+    {
+        if (expr & PianoExpr::SCOOP) return RGB(255, 220, 80);
+        if (expr & PianoExpr::ACCENT) return RGB(255, 100, 100);
+        if (expr & PianoExpr::VIBRATO) return RGB(120, 255, 180);
+        if (expr & PianoExpr::SLIDE) return RGB(120, 160, 255);
+        return RGB(255, 255, 255);
+    }
+
+    static void BuildExprSymbolString(uint8_t expr, CString& sym)
+    {
+        sym.Empty();
+        if (expr & PianoExpr::SCOOP) sym += L"\x2197"; // ↗
+        if (expr & PianoExpr::VIBRATO) sym += L"~";
+        if (expr & PianoExpr::ACCENT) sym += L"\x25B8"; // ▸
+        if (expr & PianoExpr::SLIDE) sym += L"\x2192"; // →
+    }
+
+    static void DrawVibratoWobble(CDC& dc, CRect rc, COLORREF col)
+    {
+        if (rc.Height() < 2 || rc.Width() < 2) return;
+        const int amp = min(2, max(1, rc.Width() / 3));
+        const int xBase = rc.right - 1;
+        for (int y = rc.top; y < rc.bottom; ++y) {
+            const int off = (int)(sin((y - rc.top) * 0.75) * amp);
+            const int x = xBase + off;
+            if (x >= rc.left && x < rc.right)
+                dc.SetPixel(x, y, col);
+        }
+    }
+
+    static void DrawExprBadgeTop(CDC& dc, CRect cell, uint8_t expr, int clipTop, CFont* pBadgeFont)
+    {
+        if (!expr || cell.Width() < 2) return;
+
+        const int badgeH = max(10, min(16, cell.Width() * 2 / 3 + 8));
+        CRect badge(cell.left, cell.top - badgeH + 2, cell.right, cell.top + 2);
+        if (badge.top < clipTop) badge.top = clipTop;
+        if (badge.bottom <= badge.top || badge.Width() < 2) return;
+
+        dc.FillSolidRect(badge, RGB(18, 18, 22));
+        const COLORREF edge = ExprPrimaryColor(expr);
+        dc.FillSolidRect(CRect(badge.left, badge.bottom - 2, badge.right, badge.bottom), edge);
+
+        CString sym;
+        BuildExprSymbolString(expr, sym);
+        if (sym.IsEmpty() || !pBadgeFont) return;
+
+        CFont* pOld = dc.SelectObject(pBadgeFont);
+        dc.SetBkMode(TRANSPARENT);
+        dc.SetTextColor(RGB(255, 255, 255));
+        CRect tr = badge;
+        tr.bottom -= 2;
+        dc.DrawText(sym, tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_NOCLIP);
+        dc.SelectObject(pOld);
+    }
+
+    static void DrawHistoryNote(CDC& dc, CRect rc, uint8_t bandMask, const float* laneStr,
+        int keyIndex, float strength, float dynLevel, uint8_t expr, bool blackKey)
+    {
+        if (rc.Width() <= 0 || rc.Height() <= 0) return;
+        CRect bar = DynInsetRect(rc, dynLevel > 0.0f ? dynLevel : 0.5f);
+        DrawLaneFill(dc, bar, bandMask, laneStr, keyIndex, strength, blackKey);
+        if (expr & PianoExpr::VIBRATO)
+            DrawVibratoWobble(dc, bar, RGB(120, 255, 180));
+    }
 }
 
 void CPianoRoll::DrawChannelDbBars(CDC& dc, const CRect& rc, const float* chFill, int chCount) const
@@ -998,12 +1309,128 @@ void CPianoRoll::DrawChannelDbBars(CDC& dc, const CRect& rc, const float* chFill
     }
 }
 
+void CPianoRoll::InvalidateHistoryCache()
+{
+    if (m_histCacheDC.GetSafeHdc()) {
+        if (m_histCacheOldBmp)
+            m_histCacheDC.SelectObject(m_histCacheOldBmp);
+        m_histCacheDC.DeleteDC();
+    }
+    m_histCacheBmp.DeleteObject();
+    m_histCacheOldBmp = nullptr;
+    m_histCacheReady = false;
+    m_histCacheW = 0;
+    m_histCacheH = 0;
+    m_histCacheSerial = 0;
+}
+
+void CPianoRoll::DrawHistoryGrid(CDC& dc, int width, int rollH, int yFrom, int yTo) const
+{
+    if (yFrom < 0) yFrom = 0;
+    if (yTo > rollH) yTo = rollH;
+    if (yFrom >= yTo) return;
+    CPen gridPen(PS_SOLID, 1, RGB(34, 34, 34));
+    CPen* pOldPen = dc.SelectObject(&gridPen);
+    for (int i = 1; i < KEY_COUNT; ++i) {
+        int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
+        dc.MoveTo(xL, yFrom);
+        dc.LineTo(xL, yTo);
+    }
+    dc.SelectObject(pOldPen);
+}
+
+void CPianoRoll::DrawHistoryRow(CDC& dc, int width, int rollH, size_t r, const NoteFrame& frame, CFont* badgeFont) const
+{
+    const int yTop = (int)((MAX_HISTORY - 1 - r) * (float)rollH / MAX_HISTORY);
+    const int yBot = (int)((MAX_HISTORY - r) * (float)rollH / MAX_HISTORY);
+    if (yBot <= yTop) return;
+
+    for (int i = 0; i < KEY_COUNT; ++i) {
+        if (!frame.active[i]) continue;
+        const int midi = MIDI_BASE + i;
+        int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
+        const uint8_t bMask = frame.bandMask[i] ? frame.bandMask[i] : (uint8_t)(1u << KeyBandIndex(i));
+        PianoDraw::DrawHistoryNote(dc, CRect(xL + 1, yTop, xR - 1, yBot), bMask, frame.laneStrength[i],
+            i, frame.strength[i], frame.dynLevel[i], frame.expr[i], IsBlackKey(midi));
+    }
+    for (int i = 0; i < KEY_COUNT; ++i) {
+        if (!frame.active[i] || !frame.expr[i]) continue;
+        int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
+        PianoDraw::DrawExprBadgeTop(dc, CRect(xL + 1, yTop, xR - 1, yBot), frame.expr[i], 0, badgeFont);
+    }
+}
+
+void CPianoRoll::RebuildHistoryCache(int width, int rollH, const std::vector<NoteFrame>& hist)
+{
+    m_histCacheDC.FillSolidRect(0, 0, width, rollH, RGB(20, 20, 20));
+    DrawHistoryGrid(m_histCacheDC, width, rollH, 0, rollH);
+    CFont badgeFont;
+    badgeFont.CreateFont(-10, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Symbol");
+    for (size_t r = 0; r < hist.size(); ++r)
+        DrawHistoryRow(m_histCacheDC, width, rollH, r, hist[r], &badgeFont);
+}
+
+void CPianoRoll::AdvanceHistoryCache(int width, int rollH, const std::vector<NoteFrame>& hist, int delta)
+{
+    if (delta <= 0) return;
+    if (delta >= (int)MAX_HISTORY) {
+        RebuildHistoryCache(width, rollH, hist);
+        return;
+    }
+
+    const int rowH = max(1, (int)((float)rollH / MAX_HISTORY));
+    const int scrollPx = rowH * delta;
+    if (scrollPx >= rollH) {
+        RebuildHistoryCache(width, rollH, hist);
+        return;
+    }
+
+    m_histCacheDC.BitBlt(0, 0, width, rollH - scrollPx, &m_histCacheDC, 0, scrollPx, SRCCOPY);
+    m_histCacheDC.FillSolidRect(0, rollH - scrollPx, width, scrollPx, RGB(20, 20, 20));
+    DrawHistoryGrid(m_histCacheDC, width, rollH, rollH - scrollPx, rollH);
+
+    CFont badgeFont;
+    badgeFont.CreateFont(-10, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Symbol");
+    const int drawRows = min(delta, (int)hist.size());
+    for (int r = 0; r < drawRows; ++r)
+        DrawHistoryRow(m_histCacheDC, width, rollH, (size_t)r, hist[r], &badgeFont);
+}
+
+void CPianoRoll::SyncHistoryCache(CDC& refDC, int width, int rollH, const std::vector<NoteFrame>& hist, uint32_t pushSerial)
+{
+    if (width <= 0 || rollH <= 0) return;
+
+    if (!m_histCacheReady || width != m_histCacheW || rollH != m_histCacheH) {
+        InvalidateHistoryCache();
+        m_histCacheDC.CreateCompatibleDC(&refDC);
+        m_histCacheBmp.CreateCompatibleBitmap(&refDC, width, rollH);
+        m_histCacheOldBmp = m_histCacheDC.SelectObject(&m_histCacheBmp);
+        m_histCacheW = width;
+        m_histCacheH = rollH;
+        RebuildHistoryCache(width, rollH, hist);
+        m_histCacheSerial = pushSerial;
+        m_histCacheReady = true;
+        return;
+    }
+
+    const uint32_t delta = pushSerial - m_histCacheSerial;
+    if (delta > 0) {
+        AdvanceHistoryCache(width, rollH, hist, (int)delta);
+        m_histCacheSerial = pushSerial;
+    }
+}
+
 void CPianoRoll::OnPaint()
 {
     CPaintDC dc(this);
     CRect rect;
     GetClientRect(&rect);
     if (rect.Width() <= 0 || rect.Height() <= 0) return;
+    using namespace PianoDraw;
 
     CDC memDC; memDC.CreateCompatibleDC(&dc);
     CBitmap memBmp; memBmp.CreateCompatibleBitmap(&dc, rect.Width(), rect.Height());
@@ -1020,9 +1447,11 @@ void CPianoRoll::OnPaint()
     float laneStrengthCopy[KEY_COUNT][3];
     float chFillCopy[PIANO_METER_CH_MAX];
     int chCountCopy = 0;
+    uint32_t pushSerialCopy = 0;
     {
         EnterCriticalSection(&m_cs);
         histCopy = m_history;
+        pushSerialCopy = m_historyPushSerial;
         memcpy(activesCopy, m_activeKeys, sizeof(m_activeKeys));
         memcpy(bandMaskCopy, m_bandMask, sizeof(m_bandMask));
         memcpy(laneStrengthCopy, m_laneStrength, sizeof(m_laneStrength));
@@ -1031,28 +1460,9 @@ void CPianoRoll::OnPaint()
         LeaveCriticalSection(&m_cs);
     }
 
-    {
-        CPen gridPen(PS_SOLID, 1, RGB(34, 34, 34));
-        CPen* pOldPen = memDC.SelectObject(&gridPen);
-        for (int i = 1; i < KEY_COUNT; ++i) {
-            int xL, xR; GetChromaticKeyRect(i, rect.Width(), xL, xR);
-            memDC.MoveTo(xL, 0); memDC.LineTo(xL, rollH);
-        }
-        memDC.SelectObject(pOldPen);
-    }
-
-    for (size_t r = 0; r < histCopy.size(); ++r) {
-        for (int i = 0; i < KEY_COUNT; ++i) {
-            if (!histCopy[r].active[i]) continue;
-            const int midi = MIDI_BASE + i;
-            int xL, xR; GetChromaticKeyRect(i, rect.Width(), xL, xR);
-            const int yTop = (int)((MAX_HISTORY - 1 - r) * (float)rollH / MAX_HISTORY);
-            const int yBot = (int)((MAX_HISTORY - r) * (float)rollH / MAX_HISTORY);
-            const uint8_t bMask = histCopy[r].bandMask[i] ? histCopy[r].bandMask[i] : (uint8_t)(1u << KeyBandIndex(i));
-            DrawLaneFill(memDC, CRect(xL + 1, yTop, xR - 1, yBot), bMask, histCopy[r].laneStrength[i],
-                i, histCopy[r].strength[i], IsBlackKey(midi));
-        }
-    }
+    SyncHistoryCache(memDC, rect.Width(), rollH, histCopy, pushSerialCopy);
+    if (m_histCacheReady)
+        memDC.BitBlt(0, 0, rect.Width(), rollH, &m_histCacheDC, 0, 0, SRCCOPY);
 
     const int bkH = keyH * 52 / 100;
     const int labelH = min(16, keyH / 4);
@@ -1175,6 +1585,7 @@ void CPianoRoll::OnTimer(UINT_PTR nIDEvent)
 void CPianoRoll::OnSize(UINT nType, int cx, int cy)
 {
     CCustomBlurDialogExBase::OnSize(nType, cx, cy);
+    InvalidateHistoryCache();
 #if CCUSTOM_AERO_SUPPORT
     if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
         ApplyDwmBlur();

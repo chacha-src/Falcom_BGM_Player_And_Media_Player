@@ -41,12 +41,21 @@ protected:
     virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 private:
+    struct NoteExpr {
+        static constexpr uint8_t ACCENT  = 0x01;
+        static constexpr uint8_t SCOOP   = 0x02; // しゃくり
+        static constexpr uint8_t VIBRATO = 0x04;
+        static constexpr uint8_t SLIDE   = 0x08;
+    };
+
     struct NoteFrame {
         bool     active[88];
         float    strength[88];
         uint8_t  segment[88];   // 同音連打区切り
         uint8_t  bandMask[88];   // bit0=低音 bit1=中音 bit2=高音 (同キー複数声部)
         float    laneStrength[88][3];
+        uint8_t  expr[88];        // NoteExpr フラグ
+        float    dynLevel[88];    // 0..1 ダイナミクス（バー幅）
     };
 
     static constexpr int   KEY_COUNT    = 88;
@@ -76,6 +85,8 @@ private:
     int     m_strengthDipFrames[88];
     uint8_t m_bandMask[88];
     float   m_laneStrength[88][3];
+    int     m_bassLockKey = -1;
+    int     m_bassLockHold = 0;
 
     std::vector<double> m_ring;
     int                 m_ringWrite = 0;
@@ -92,6 +103,14 @@ private:
     float m_prevRawStrengths[KEY_COUNT];
     float m_onsetStrengths[KEY_COUNT];
     float m_prevOnsetStrengths[KEY_COUNT];
+    bool  m_prevActiveKeys[KEY_COUNT];
+    float m_prevNoteStrength[KEY_COUNT];
+    uint8_t m_noteAgeFrames[KEY_COUNT];
+    uint8_t m_scoopLatch[KEY_COUNT];
+    uint8_t m_exprFlags[KEY_COUNT];
+    float m_vibHist[KEY_COUNT][10];
+    uint8_t m_vibHistCount[KEY_COUNT];
+    static constexpr int VIB_HIST_LEN = 10;
     bool  m_analysisHasBass = false;
     std::vector<double> m_analysisBuf;
     std::vector<double> m_bassAnalysisBuf;
@@ -110,6 +129,7 @@ private:
     void EnsureAnalysisTables(int sampleRate);
     void RunGoertzelFromBuffer(const double* winLow8192, const double* winBass, int bassWinLen);
     void UpdateNoteStates();
+    void DetectExpressions();
     void PushFrame();
 
     static double ReadMonoSample(const uint8_t* sp, int bits);
@@ -124,4 +144,20 @@ private:
     void GetChromaticKeyRect(int keyIndex, int width, int& xL, int& xR) const;
     void GetWhiteKeyRect52(int midi, int width, int& xL, int& xR) const;
     void DrawChannelDbBars(CDC& dc, const CRect& rc, const float* chFill, int chCount) const;
+
+    CDC     m_histCacheDC;
+    CBitmap m_histCacheBmp;
+    CBitmap* m_histCacheOldBmp = nullptr;
+    int     m_histCacheW = 0;
+    int     m_histCacheH = 0;
+    uint32_t m_historyPushSerial = 0;
+    uint32_t m_histCacheSerial = 0;
+    bool    m_histCacheReady = false;
+
+    void InvalidateHistoryCache();
+    void SyncHistoryCache(CDC& refDC, int width, int rollH, const std::vector<NoteFrame>& hist, uint32_t pushSerial);
+    void RebuildHistoryCache(int width, int rollH, const std::vector<NoteFrame>& hist);
+    void AdvanceHistoryCache(int width, int rollH, const std::vector<NoteFrame>& hist, int delta);
+    void DrawHistoryGrid(CDC& dc, int width, int rollH, int yFrom, int yTo) const;
+    void DrawHistoryRow(CDC& dc, int width, int rollH, size_t r, const NoteFrame& frame, CFont* badgeFont) const;
 };

@@ -5689,7 +5689,6 @@ void COggDlg::play()
 	muon = MUON;
 	kpi_silence_bytes = 0;
 	rrr = 1;
-	m_ps.EnableWindow(TRUE);
 	CWaitCursor rrr;
 	m_mp3jake.EnableWindow(FALSE);
 	mp3file = filen;
@@ -5915,7 +5914,7 @@ void COggDlg::play()
 				dougaplay(ret2);
 				if (pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
-				m_saisai.EnableWindow(TRUE); playy = 1;
+				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
 				pMediaPosition->get_Duration(&aa);
 				aa1 = oggsize2 = aa;
@@ -5949,7 +5948,7 @@ void COggDlg::play()
 				dougaplay(ret2);
 				if (pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
-				m_saisai.EnableWindow(TRUE); playy = 1;
+				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
 				pMediaPosition->get_Duration(&aa);
 				aa1 = oggsize2 = aa;
@@ -5970,7 +5969,7 @@ void COggDlg::play()
 				dougaplay(ret2);
 				if (pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
-				m_saisai.EnableWindow(TRUE); playy = 1;
+				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
 				pMediaPosition->get_Duration(&aa);
 				aa1 = oggsize2 = aa;
@@ -5989,7 +5988,7 @@ void COggDlg::play()
 				dougaplay(ret2);
 				if (pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
-				m_saisai.EnableWindow(TRUE); playy = 1;
+				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
 				pMediaPosition->get_Duration(&aa);
 				aa1 = oggsize2 = aa;
@@ -6009,7 +6008,7 @@ void COggDlg::play()
 				dougaplay(ret2);
 				if (pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
-				m_saisai.EnableWindow(TRUE); playy = 1;
+				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
 				pMediaPosition->get_Duration(&aa);
 				aa1 = oggsize2 = aa;
@@ -6032,7 +6031,7 @@ void COggDlg::play()
 				dougaplay(ret2);
 				if (pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
-				m_saisai.EnableWindow(TRUE); playy = 1;
+				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
 				pMediaPosition->get_Duration(&aa);
 				aa1 = oggsize2 = aa;
@@ -6073,7 +6072,7 @@ void COggDlg::play()
 				dougaplay(ret2);
 				if (pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
-				m_saisai.EnableWindow(TRUE); playy = 1;
+				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
 				pMediaPosition->get_Duration(&aa);
 				aa1 = oggsize2 = aa;
@@ -6094,7 +6093,7 @@ void COggDlg::play()
 				dougaplay(ret2);
 				if (pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
-				m_saisai.EnableWindow(TRUE); playy = 1;
+				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
 				pMediaPosition->get_Duration(&aa);
 				aa1 = oggsize2 = aa;
@@ -6115,7 +6114,7 @@ void COggDlg::play()
 				dougaplay(ret2);
 				if (pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
-				m_saisai.EnableWindow(TRUE); playy = 1;
+				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
 				pMediaPosition->get_Duration(&aa);
 				aa1 = oggsize2 = aa;
@@ -6136,7 +6135,7 @@ void COggDlg::play()
 				dougaplay(ret2);
 				if (pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
-				m_saisai.EnableWindow(TRUE); playy = 1;
+				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
 				pMediaPosition->get_Duration(&aa);
 				aa1 = oggsize2 = aa;
@@ -6157,7 +6156,7 @@ void COggDlg::play()
 				dougaplay(ret2);
 				if (pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
-				m_saisai.EnableWindow(TRUE); playy = 1;
+				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
 				pMediaPosition->get_Duration(&aa);
 				aa1 = oggsize2 = aa;
@@ -6188,7 +6187,7 @@ void COggDlg::play()
 										dougaplay(ret2);
 										if (pGraphBuilder)pMainFrame1->plays2();
 										if (pMediaControl)pMediaControl->Run();
-										m_saisai.EnableWindow(TRUE); playy = 1;
+										m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 										REFTIME aa;
 										pMediaPosition->get_Duration(&aa);
 										aa1 = oggsize2 = aa;
@@ -6208,7 +6207,7 @@ void COggDlg::play()
 			dougaplay(ret2);
 			if (pGraphBuilder)pMainFrame1->plays2();
 			if (pMediaControl)pMediaControl->Run();
-			m_saisai.EnableWindow(TRUE); playy = 1;
+			m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 			REFTIME aa;
 			pMediaPosition->get_Duration(&aa);
 			aa1 = oggsize2 = aa;
@@ -9016,23 +9015,8 @@ void COggDlg::play()
 			pl->SIcon(plc);
 		}
 	}
-	m_saisai.EnableWindow(TRUE); playy = 1;
-	ps = 0;
-	m_ps.SetWindowText(LL14(
-		L"一時停止",            /* 日本語 */
-		L"Pause",               /* 英語 */
-		L"Pause",               /* フランス語 */
-		L"Pausa",               /* イタリア語 */
-		L"Pausa",               /* スペイン語 */
-		L"일시 정지",            /* 韓国語 */
-		L"暂停",                /* 中国語 */
-		L"إيقاف مؤقت",          /* アラビア語 */
-		L"Пауза",               /* ロシア語 */
-		L"Pause",               /* ドイツ語 */
-		L"Pausar",              /* ポルトガル語 */
-		L"Pauzeren",            /* オランダ語 */
-		L"Wstrzymaj",           /* ポーランド語 */
-		L"Duraklat"));          /* トルコ語 */	SetTimer(1250, 100, NULL);
+	m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
+	SetTimer(1250, 100, NULL);
 	fade1 = 0;
 	if (maini) maini->SetActiveWindow();
 	SetActiveWindow();
@@ -14242,21 +14226,8 @@ void COggDlg::dp(CString a)
 		int a = 0; aa2 = 0;
 		REFTIME aa = 0;
 		aa2 = 0;
-		ps = 0; m_ps.SetWindowText(LL14(
-			L"一時停止",            /* 日本語 */
-			L"Pause",               /* 英語 */
-			L"Pause",               /* フランス語 */
-			L"Pausa",               /* イタリア語 */
-			L"Pausa",               /* スペイン語 */
-			L"일시 정지",            /* 韓国語 */
-			L"暂停",                /* 中国語 */
-			L"إيقاف مؤقت",          /* アラビア語 */
-			L"Пауза",               /* ロシア語 */
-			L"Pause",               /* ドイツ語 */
-			L"Pausar",              /* ポルトガル語 */
-			L"Pauzeren",            /* オランダ語 */
-			L"Wstrzymaj",           /* ポーランド語 */
-			L"Duraklat"));          /* トルコ語 */		if (pMediaPosition)pMediaPosition->get_StopTime(&aa);
+		ResetPauseButtonUi();
+		if (pMediaPosition)pMediaPosition->get_StopTime(&aa);
 		aa1 = oggsize2 = aa;
 		m_time.SetRange(0, (int)((REFTIME)aa * 100.0), TRUE);
 		m_time.SetSelection(0, (int)((REFTIME)aa * 100.0) - 1);
@@ -14399,6 +14370,38 @@ BOOL CALLBACK pp(HWND hwnd, LPARAM p)
 }
 
 CString filenback;
+
+void COggDlg::SyncPauseButtonUi()
+{
+	if (!m_ps.GetSafeHwnd())
+		return;
+	m_ps.EnableWindow(TRUE);
+	m_ps.RepaintClient();
+}
+
+void COggDlg::ResetPauseButtonUi()
+{
+	if (!m_ps.GetSafeHwnd())
+		return;
+	ps = 0;
+	m_ps.SetWindowText(LL14(
+		L"一時停止",            /* 日本語 */
+		L"Pause",               /* 英語 */
+		L"Pause",               /* フランス語 */
+		L"Pausa",               /* イタリア語 */
+		L"Pausa",               /* スペイン語 */
+		L"일시 정지",            /* 韓国語 */
+		L"暂停",                /* 中国語 */
+		L"إيقاف مؤقت",          /* アラビア語 */
+		L"Пауза",               /* ロシア語 */
+		L"Pause",               /* ドイツ語 */
+		L"Pausar",              /* ポルトガル語 */
+		L"Pauzeren",            /* オランダ語 */
+		L"Wstrzymaj",           /* ポーランド語 */
+		L"Duraklat"));          /* トルコ語 */
+	SyncPauseButtonUi();
+}
+
 void COggDlg::stop()
 {
 	if (playf || ogg || adbuf2 || mod || wav || mode == 999 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6)
@@ -14474,22 +14477,6 @@ void COggDlg::stop()
 		if (ps == 1) {
 			OnPause();
 		}
-		ps = 0; m_ps.SetWindowText(LL14(
-			L"一時停止",            /* 日本語 */
-			L"Pause",               /* 英語 */
-			L"Pause",               /* フランス語 */
-			L"Pausa",               /* イタリア語 */
-			L"Pausa",               /* スペイン語 */
-			L"일시 정지",            /* 韓国語 */
-			L"暂停",                /* 中国語 */
-			L"إيقاف مؤقت",          /* アラビア語 */
-			L"Пауза",               /* ロシア語 */
-			L"Pause",               /* ドイツ語 */
-			L"Pausar",              /* ポルトガル語 */
-			L"Pauzeren",            /* オランダ語 */
-			L"Wstrzymaj",           /* ポーランド語 */
-			L"Duraklat"));          /* トルコ語 */	
-		ps = 0;
 		if (m_dsb)m_dsb->Stop();
 		if (pAudioClient) pAudioClient->Stop();
 		if (m_dou.GetCheck() == 1)
@@ -14556,6 +14543,7 @@ void COggDlg::stop()
 	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
 	m_lrc3.SetWindowText(L"");
 
+	ResetPauseButtonUi();
 	eqflg = TRUE;
 }
 
@@ -14651,6 +14639,7 @@ void COggDlg::stop1()
 	m_lrc.SetWindowText(L"");
 	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
 	m_lrc3.SetWindowText(L"");
+	ResetPauseButtonUi();
 	eqflg = TRUE;
 }
 
@@ -18324,6 +18313,7 @@ void COggDlg::OnPause()
 			L"Hervatten",       /* オランダ語 */
 			L"Wznów",           /* ポーランド語 */
 			L"Devam Et"));      /* トルコ語 */		ps = 1;
+		SyncPauseButtonUi();
 	}
 	else {
 		if (ogg != NULL || adbuf2 != NULL || mod != NULL || wav != NULL || mode == -9) {
@@ -18363,6 +18353,7 @@ void COggDlg::OnPause()
 			pMainFrame1->pause(1);
 		}
 		ps = 0;
+		SyncPauseButtonUi();
 	}
 }
 
@@ -18401,7 +18392,6 @@ void COggDlg::OnRestart()
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	CString ti;
 	stop();
-	m_ps.EnableWindow(TRUE);
 	if (filen != "") {
 		ti = filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1);
 		int sub_ = mode;
@@ -18560,22 +18550,7 @@ void COggDlg::OnRestart()
 			int a = 0; aa2 = 0;
 			REFTIME aa = 0;
 			aa2 = 0;
-			ps = 0; 
-			ps = 0; m_ps.SetWindowText(LL14(
-				L"一時停止",            /* 日本語 */
-				L"Pause",               /* 英語 */
-				L"Pause",               /* フランス語 */
-				L"Pausa",               /* イタリア語 */
-				L"Pausa",               /* スペイン語 */
-				L"일시 정지",            /* 韓国語 */
-				L"暂停",                /* 中国語 */
-				L"إيقاف مؤقت",          /* アラビア語 */
-				L"Пауза",               /* ロシア語 */
-				L"Pause",               /* ドイツ語 */
-				L"Pausar",              /* ポルトガル語 */
-				L"Pauzeren",            /* オランダ語 */
-				L"Wstrzymaj",           /* ポーランド語 */
-				L"Duraklat"));          /* トルコ語 */
+			ResetPauseButtonUi();
 			if (pMediaPosition)pMediaPosition->get_StopTime(&aa);
 			aa1 = oggsize2 = aa;
 			m_time.SetRange(0, (int)((REFTIME)aa * 100.0), TRUE);
@@ -18760,6 +18735,7 @@ void COggDlg::SyncPianoRollFast()
 void COggDlg::SyncPianoRollFromPlayCursor()
 {
 	if (playf == 0 || thn1) return;
+	if (ps == 1) return; // 一時停止中は履歴スクロール・解析更新を止める
 	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd())) return;
 	if (!bufwav3) return;
 
