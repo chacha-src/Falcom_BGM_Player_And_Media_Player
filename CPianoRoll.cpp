@@ -369,27 +369,6 @@ int CPianoRoll::KeyBandIndex(int keyIndex)
     return 2;
 }
 
-COLORREF CPianoRoll::BandNoteColor(int bandId, float strength, bool blackKey)
-{
-    const float st = min(strength / 3.0f, 1.0f);
-    int r = 0, g = 0, b = 0;
-    switch (bandId) {
-    case 0: r = 48;  g = 130; b = 200; break;
-    case 1: r = 42;  g = 168; b = 88;  break;
-    default: r = 210; g = 175; b = 48;  break;
-    }
-    if (blackKey) {
-        r = min(255, r + 25);
-        g = max(0, g - 15);
-        b = max(0, b - 10);
-    }
-    const int dim = (int)((1.0f - st * 0.65f) * 80.0f);
-    r = max(0, min(255, r - dim));
-    g = max(0, min(255, g - dim));
-    b = max(0, min(255, b - dim));
-    return RGB(r, g, b);
-}
-
 double CPianoRoll::ReadMonoSample(const uint8_t* sp, int bits)
 {
     switch (bits)
@@ -861,6 +840,56 @@ namespace
 
     static int MidiOctaveNumber(int midi) { return (midi / 12) - 1; }
 
+    static void LerpRgb(float t, int r0, int g0, int b0, int r1, int g1, int b1, int& r, int& g, int& b)
+    {
+        r = (int)(r0 + t * (r1 - r0));
+        g = (int)(g0 + t * (g1 - g0));
+        b = (int)(b0 + t * (b1 - b0));
+    }
+
+    static void SampleKeyGradient(float t, int& r, int& g, int& b)
+    {
+        static const struct { float pos; int r, g, b; } stops[] = {
+            { 0.00f,  50, 110, 225 }, // 低音: 青
+            { 0.20f,  30, 185, 215 }, // シアン
+            { 0.40f,  55, 200,  80 }, // 緑
+            { 0.60f, 215, 210,  45 }, // 黄
+            { 0.80f, 235, 140,  40 }, // オレンジ
+            { 1.00f, 225,  50,  50 }, // 高音: 赤
+        };
+        if (t <= stops[0].pos) { r = stops[0].r; g = stops[0].g; b = stops[0].b; return; }
+        for (int i = 1; i < (int)(sizeof(stops) / sizeof(stops[0])); ++i) {
+            if (t > stops[i].pos) continue;
+            const float seg = (t - stops[i - 1].pos) / (stops[i].pos - stops[i - 1].pos);
+            LerpRgb(seg, stops[i - 1].r, stops[i - 1].g, stops[i - 1].b,
+                stops[i].r, stops[i].g, stops[i].b, r, g, b);
+            return;
+        }
+        const int n = (int)(sizeof(stops) / sizeof(stops[0])) - 1;
+        r = stops[n].r; g = stops[n].g; b = stops[n].b;
+    }
+
+    static COLORREF KeyNoteColorImpl(int keyIndex, float strength, bool blackKey)
+    {
+        static constexpr int kKeys = 88;
+        if (keyIndex < 0) keyIndex = 0;
+        if (keyIndex >= kKeys) keyIndex = kKeys - 1;
+        const float t = (float)keyIndex / (float)(kKeys - 1);
+        const float st = min(strength / 3.0f, 1.0f);
+        int r, g, b;
+        SampleKeyGradient(t, r, g, b);
+        if (blackKey) {
+            r = min(255, r + 25);
+            g = max(0, g - 15);
+            b = max(0, b - 10);
+        }
+        const int dim = (int)((1.0f - st * 0.65f) * 80.0f);
+        r = max(0, min(255, r - dim));
+        g = max(0, min(255, g - dim));
+        b = max(0, min(255, b - dim));
+        return RGB(r, g, b);
+    }
+
     static void DrawBevelKey(CDC& dc, CRect rc, COLORREF fill, bool pressed)
     {
         if (rc.Width() <= 1 || rc.Height() <= 1) return;
@@ -877,33 +906,21 @@ namespace
         dc.SelectObject(pOld);
     }
 
-    static COLORREF LocalBandColor(int bandId, float strength, bool blackKey)
+    static COLORREF LocalKeyColor(int keyIndex, float strength, bool blackKey)
     {
-        const float st = min(strength / 3.0f, 1.0f);
-        int r = 0, g = 0, b = 0;
-        switch (bandId) {
-        case 0: r = 48;  g = 130; b = 200; break;
-        case 1: r = 42;  g = 168; b = 88;  break;
-        default: r = 210; g = 175; b = 48; break;
-        }
-        if (blackKey) { r = min(255, r + 25); g = max(0, g - 15); b = max(0, b - 10); }
-        const int dim = (int)((1.0f - st * 0.65f) * 80.0f);
-        r = max(0, min(255, r - dim)); g = max(0, min(255, g - dim)); b = max(0, min(255, b - dim));
-        return RGB(r, g, b);
+        return KeyNoteColorImpl(keyIndex, strength, blackKey);
     }
 
     static void DrawLaneFill(CDC& dc, CRect rc, uint8_t bandMask, const float* laneStr,
-        int fallbackBand, float fallbackStrength, bool blackKey)
+        int keyIndex, float fallbackStrength, bool blackKey)
     {
         if (rc.Width() <= 0 || rc.Height() <= 0) return;
         int laneCount = 0;
         for (int b = 0; b < 3; ++b) if (bandMask & (1u << b)) ++laneCount;
-        if (laneCount <= 0) { dc.FillSolidRect(&rc, LocalBandColor(fallbackBand, fallbackStrength, blackKey)); return; }
+        if (laneCount <= 0) { dc.FillSolidRect(&rc, LocalKeyColor(keyIndex, fallbackStrength, blackKey)); return; }
         if (laneCount == 1) {
-            int bandId = 0;
-            for (int b = 0; b < 3; ++b) if (bandMask & (1u << b)) { bandId = b; break; }
             const float st = laneStr && laneStr[0] > 0.0f ? laneStr[0] : fallbackStrength;
-            dc.FillSolidRect(&rc, LocalBandColor(bandId, st, blackKey)); return;
+            dc.FillSolidRect(&rc, LocalKeyColor(keyIndex, st, blackKey)); return;
         }
         int slot = 0;
         for (int b = 0; b < 3; ++b) {
@@ -913,22 +930,20 @@ namespace
             sub.left = rc.left + (w * slot) / laneCount; sub.right = rc.left + (w * (slot + 1)) / laneCount;
             if (sub.right <= sub.left) sub.right = sub.left + 1;
             const float st = (laneStr && laneStr[slot] > 0.0f) ? laneStr[slot] : fallbackStrength;
-            dc.FillSolidRect(&sub, LocalBandColor(b, st, blackKey)); ++slot;
+            dc.FillSolidRect(&sub, LocalKeyColor(keyIndex, st, blackKey)); ++slot;
         }
     }
 
     static void DrawLaneKey(CDC& dc, CRect rc, uint8_t bandMask, const float* laneStr,
-        int fallbackBand, float fallbackStrength, bool blackKey, bool pressed)
+        int keyIndex, float fallbackStrength, bool blackKey, bool pressed)
     {
         if (rc.Width() <= 1 || rc.Height() <= 1) return;
         if (pressed) rc.OffsetRect(0, min(2, rc.Height() / 5));
         int laneCount = 0;
         for (int b = 0; b < 3; ++b) if (bandMask & (1u << b)) ++laneCount;
         if (laneCount <= 1) {
-            int bandId = fallbackBand;
-            for (int b = 0; b < 3; ++b) if (bandMask & (1u << b)) { bandId = b; break; }
             const float st = laneStr && laneStr[0] > 0.0f ? laneStr[0] : fallbackStrength;
-            DrawBevelKey(dc, rc, LocalBandColor(bandId, st, blackKey), pressed); return;
+            DrawBevelKey(dc, rc, LocalKeyColor(keyIndex, st, blackKey), pressed); return;
         }
         int slot = 0;
         for (int b = 0; b < 3; ++b) {
@@ -937,7 +952,7 @@ namespace
             sub.top = rc.top + (rc.Height() * slot) / laneCount; sub.bottom = rc.top + (rc.Height() * (slot + 1)) / laneCount;
             if (sub.bottom <= sub.top) sub.bottom = sub.top + 1;
             const float st = (laneStr && laneStr[slot] > 0.0f) ? laneStr[slot] : fallbackStrength;
-            DrawBevelKey(dc, sub, LocalBandColor(b, st, blackKey), pressed); ++slot;
+            DrawBevelKey(dc, sub, LocalKeyColor(keyIndex, st, blackKey), pressed); ++slot;
         }
     }
 }
@@ -1035,7 +1050,7 @@ void CPianoRoll::OnPaint()
             const int yBot = (int)((MAX_HISTORY - r) * (float)rollH / MAX_HISTORY);
             const uint8_t bMask = histCopy[r].bandMask[i] ? histCopy[r].bandMask[i] : (uint8_t)(1u << KeyBandIndex(i));
             DrawLaneFill(memDC, CRect(xL + 1, yTop, xR - 1, yBot), bMask, histCopy[r].laneStrength[i],
-                KeyBandIndex(i), histCopy[r].strength[i], IsBlackKey(midi));
+                i, histCopy[r].strength[i], IsBlackKey(midi));
         }
     }
 
@@ -1054,7 +1069,7 @@ void CPianoRoll::OnPaint()
         const bool on = activesCopy[i];
         if (on) {
             const uint8_t bMask = bandMaskCopy[i] ? bandMaskCopy[i] : (uint8_t)(1u << KeyBandIndex(i));
-            DrawLaneKey(memDC, CRect(kc.left + 1, kc.top, kc.right - 1, kc.bottom), bMask, laneStrengthCopy[i], KeyBandIndex(i), 2.5f, false, on);
+            DrawLaneKey(memDC, CRect(kc.left + 1, kc.top, kc.right - 1, kc.bottom), bMask, laneStrengthCopy[i], i, 2.5f, false, on);
         }
         else { DrawBevelKey(memDC, CRect(kc.left + 1, kc.top, kc.right - 1, kc.bottom), whiteFace, false); }
     }
@@ -1065,7 +1080,7 @@ void CPianoRoll::OnPaint()
         const bool on = activesCopy[i];
         if (on) {
             const uint8_t bMask = bandMaskCopy[i] ? bandMaskCopy[i] : (uint8_t)(1u << KeyBandIndex(i));
-            DrawLaneKey(memDC, kc, bMask, laneStrengthCopy[i], KeyBandIndex(i), 2.5f, false, on);
+            DrawLaneKey(memDC, kc, bMask, laneStrengthCopy[i], i, 2.5f, false, on);
         }
         else { DrawBevelKey(memDC, kc, whiteFace, false); }
     }
@@ -1076,9 +1091,20 @@ void CPianoRoll::OnPaint()
         const bool on = activesCopy[i];
         if (on) {
             const uint8_t bMask = bandMaskCopy[i] ? bandMaskCopy[i] : (uint8_t)(1u << KeyBandIndex(i));
-            DrawLaneKey(memDC, kc, bMask, laneStrengthCopy[i], KeyBandIndex(i), 2.5f, true, on);
+            DrawLaneKey(memDC, kc, bMask, laneStrengthCopy[i], i, 2.5f, true, on);
         }
         else { DrawBevelKey(memDC, kc, blackFace, false); }
+    }
+    for (int i = 0; i < KEY_COUNT; ++i) {
+        const int midi = MIDI_BASE + i;
+        if (!IsBlackKey(midi) || !activesCopy[i]) continue;
+        const int parentMidi = midi - 1;
+        int xL, xR; GetWhiteKeyRect52(parentMidi, rect.Width(), xL, xR);
+        if (xR <= xL) continue;
+        CRect kc(xL + 1, rect.Height() - labelH - 2, xR - 1, rect.Height() - 2);
+        if (kc.Height() < 2) continue;
+        const uint8_t bMask = bandMaskCopy[i] ? bandMaskCopy[i] : (uint8_t)(1u << KeyBandIndex(i));
+        DrawLaneKey(memDC, kc, bMask, laneStrengthCopy[i], i, 2.5f, false, true);
     }
 
     {

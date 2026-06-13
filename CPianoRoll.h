@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include <vector>
@@ -117,7 +117,6 @@ private:
         double coefficient, const double* window);
     static float  ApplyDisplayScale(float rawAmp, int keyIndex);
     static float  MidiToFreq(int midi);
-    static COLORREF BandNoteColor(int bandId, float strength, bool blackKey);
     static int      KeyBandIndex(int keyIndex);
 
     bool IsBlackKey(int midiNote) const;

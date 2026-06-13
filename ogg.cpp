@@ -193,6 +193,7 @@ BOOL COggApp::InitInstance()
 	savedata.pianorolly = -1;
 	savedata.pianorollw = 800;
 	savedata.pianorollh = 450;
+	savedata.saveversion = 1;
 
 #if _UNICODE
 	if(GetKeyState(VK_CONTROL) < 0){
@@ -216,9 +217,12 @@ BOOL COggApp::InitInstance()
 #endif
 	}else{
 		if(ab.m_hFile != CFile::hFileNull){
-			int a = ab.GetLength();
-			ab.Read(&savedata,a);
+			const int a = (int)ab.GetLength();
+			const int toRead = (a < (int)sizeof(save)) ? a : (int)sizeof(save);
+			ab.Read(&savedata, toRead);
 			ab.Close();
+			if (a < (int)sizeof(save))
+				savedata.saveversion = 0;
 		}
 	}
 	if (savedata.speaker_layout < 0 || savedata.speaker_layout > 5)
@@ -256,10 +260,12 @@ BOOL COggApp::InitInstance()
 		savedata.aero = 0;
 	if (savedata.aero != 0)
 		savedata.aero = 1;
-	// 旧形式(1..60のスライダー位置)のみ ms へ変換。新形式(16..960, 16の倍数)はそのまま。
-	if (savedata.ms2 >= 1 && savedata.ms2 <= 60) {
-		if (savedata.ms2 < 16 || (savedata.ms2 % 16) != 0)
-			savedata.ms2 *= 16;
+	// saveversion 0: ms2 はスライダー位置(1..60)。1: ms2 は描画間隔ms(16..960, 16の倍数)。
+	if (savedata.saveversion < 1) {
+		if (savedata.ms2 < 1) savedata.ms2 = 1;
+		if (savedata.ms2 > 60) savedata.ms2 = 60;
+		savedata.ms2 *= 16;
+		savedata.saveversion = 1;
 	}
 	if (savedata.ms2 < 16) savedata.ms2 = 16;
 	if (savedata.ms2 > 960) savedata.ms2 = 960;
