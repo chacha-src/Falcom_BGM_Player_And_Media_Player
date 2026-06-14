@@ -2954,6 +2954,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CPianoRoll.cpp" />
+    <ClCompile Include="PianoRollGoertzelAvx2.cpp" />
     <ClCompile Include="KpiHostClient.cpp" />
     <ClCompile Include="Arc.cpp" />
     <ClCompile Include="AudioUpscaler.cpp" />
@@ -3036,6 +3037,7 @@
     <ClInclude Include="NoteFundamentalPick.h" />
     <ClInclude Include="PianoKeyTable.h" />
     <ClInclude Include="CPianoRoll.h" />
+    <ClInclude Include="PianoRollGoertzelAvx2.h" />
     <ClInclude Include="KpiHostClient.h" />
     <ClInclude Include="kpi_host_ipc.h" />
     <ClInclude Include="ALACAudioTypes.h" />

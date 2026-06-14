@@ -10,6 +10,7 @@
 #include "resource.h"
 #include "NoteFundamentalPick.h"
 #include "PianoRollPick.h"
+#include "PianoRollGoertzelAvx2.h"
 #include <algorithm>
 
 extern save savedata;
@@ -44,6 +45,9 @@ namespace Cfg
     static constexpr float WEAK_BASS_RATIO = 0.17f;
     static constexpr float WEAK_MID_RATIO = 0.15f;
     static constexpr float WEAK_TRE_RATIO = 0.14f;
+    static constexpr int   ONSET_KEY_START = 41;
+    static constexpr float ONSET_DELTA_THRESH = 0.045f;
+    static constexpr float ONSET_MIN_STRENGTH = 0.08f;
 
     static void NormalizeBandPeak(float* values, int lo, int hi, float cap)
     {
@@ -224,10 +228,20 @@ namespace Cfg
         const int span = hi - lo;
         if (span <= 1) return baseFrames;
         const float t = (float)(keyIndex - lo) / (float)(span - 1);
-        const float scale = 1.90f - t * 1.45f;
+        float scale;
+        if (keyIndex >= BAND_MID_END)
+            scale = 1.35f - t * 1.00f;
+        else
+            scale = 1.90f - t * 1.45f;
         int f = (int)(baseFrames * scale + 0.5f);
-        if (f < 2) f = 2;
-        if (f > 20) f = 20;
+        if (keyIndex >= BAND_MID_END) {
+            if (f < 1) f = 1;
+            if (f > 12) f = 12;
+        }
+        else {
+            if (f < 2) f = 2;
+            if (f > 20) f = 20;
+        }
         return f;
     }
 
@@ -337,9 +351,13 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     : CCustomBlurDialogExBase(IDD_PIANOROLL, pParent)
 {
     InitializeCriticalSection(&m_cs);
+    InitializeCriticalSection(&m_jobCs);
     m_ring.assign(RING_SIZE, 0.0);
     m_analysisBuf.assign(WIN_LOW, 0.0);
     m_bassAnalysisBuf.assign(WIN_BASS, 0.0);
+    m_windowedLow.assign(WIN_LOW, 0.0);
+    m_windowedHigh.assign(WIN_HIGH, 0.0);
+    m_windowedOnset.assign(WIN_ONSET, 0.0);
 
     memset(m_activeKeys, 0, sizeof(m_activeKeys));
     memset(m_noteStrength, 0, sizeof(m_noteStrength));
@@ -371,8 +389,10 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
         m_chMeterFill[i] = 0.0f;
         m_chMeterAutoPeak[i] = 0.02f;
     }
-    m_history.resize(MAX_HISTORY);
-    for (auto& f : m_history) {
+    m_historyCount = 0;
+    m_historyHead = 0;
+    for (int hi = 0; hi < (int)MAX_HISTORY; ++hi) {
+        auto& f = m_historyRing[hi];
         memset(f.active, 0, sizeof(f.active));
         memset(f.strength, 0, sizeof(f.strength));
         memset(f.segment, 0, sizeof(f.segment));
@@ -385,13 +405,20 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
 
 CPianoRoll::~CPianoRoll()
 {
+    StopAnalysisWorker();
     m_feedEnabled = false;
     ReleasePaintBuffers();
+    DeleteCriticalSection(&m_jobCs);
     DeleteCriticalSection(&m_cs);
 }
 
 void CPianoRoll::ResetPlaybackState()
 {
+    InterlockedExchange(&m_jobPending, 0);
+    EnterCriticalSection(&m_jobCs);
+    m_jobFrameCount = 0;
+    LeaveCriticalSection(&m_jobCs);
+
     EnterCriticalSection(&m_cs);
     m_ringWrite = 0;
     m_ringCount = 0;
@@ -435,10 +462,12 @@ void CPianoRoll::ResetPlaybackState()
     ReleasePaintBuffers();
     m_historyDirty = true;
     m_keyDirty = true;
-    m_framesPending = 0;
+    m_historyCount = 0;
+    m_historyHead = 0;
     if (!m_ring.empty())
         std::fill(m_ring.begin(), m_ring.end(), 0.0);
-    for (auto& f : m_history) {
+    for (int hi = 0; hi < (int)MAX_HISTORY; ++hi) {
+        auto& f = m_historyRing[hi];
         memset(f.active, 0, sizeof(f.active));
         memset(f.strength, 0, sizeof(f.strength));
         memset(f.segment, 0, sizeof(f.segment));
@@ -463,6 +492,7 @@ BEGIN_MESSAGE_MAP(CPianoRoll, CCustomBlurDialogExBase)
     ON_WM_SHOWWINDOW()
     ON_WM_CLOSE()
     ON_MESSAGE(WM_PIANOROLL_SYNC, &CPianoRoll::OnSyncRequest)
+    ON_MESSAGE(WM_PIANOROLL_ANALYSIS_DONE, &CPianoRoll::OnAnalysisDone)
 END_MESSAGE_MAP()
 
 BOOL CPianoRoll::OnInitDialog()
@@ -492,6 +522,7 @@ BOOL CPianoRoll::OnInitDialog()
             SWP_NOZORDER | SWP_NOOWNERZORDER);
 
     EnsureAnalysisTables(m_inputSampleRate);
+    StartAnalysisWorker();
     UpdatePianoRollTimer();
     m_feedEnabled = true;
     m_paintDisabled = false;
@@ -572,6 +603,12 @@ void CPianoRoll::EnsureAnalysisTables(int sampleRate)
         m_blackmanHigh[n] = 0.42 - 0.5 * cos(2.0 * M_PI * n / (WIN_HIGH - 1))
             + 0.08 * cos(4.0 * M_PI * n / (WIN_HIGH - 1));
     }
+
+    m_windowedLow.assign(WIN_LOW, 0.0);
+    m_windowedHigh.assign(WIN_HIGH, 0.0);
+    m_windowedOnset.assign(WIN_ONSET, 0.0);
+    m_analysisBuf.assign(WIN_LOW, 0.0);
+    m_bassAnalysisBuf.assign(WIN_BASS, 0.0);
 }
 
 double CPianoRoll::GoertzelMagnitude(const double* samples, int numSamples,
@@ -629,21 +666,21 @@ void CPianoRoll::FeedPCM(const void* pData, int frames,
 void CPianoRoll::AnalyzePlayCursorMono(const double* mono, int frameCount, int sampleRate)
 {
     if (!mono || frameCount < WIN_LOW || sampleRate < 8000) return;
+    if (!m_hAnalysisWake || m_workerStop) return;
 
     const DWORD now = GetTickCount();
     if (m_lastAnalyzeTick != 0 && (now - m_lastAnalyzeTick) < ANALYZE_MIN_MS)
         return;
     m_lastAnalyzeTick = now;
 
-    EnterCriticalSection(&m_cs);
-    EnsureAnalysisTables(sampleRate);
-    const double* lowWin = mono + (frameCount - WIN_LOW);
-    const int bassLen = (frameCount >= WIN_BASS) ? WIN_BASS : WIN_LOW;
-    const double* bassWin = (frameCount >= WIN_BASS)
-        ? mono + (frameCount - WIN_BASS)
-        : lowWin;
-    RunGoertzelFromBuffer(lowWin, bassWin, bassLen);
-    LeaveCriticalSection(&m_cs);
+    EnterCriticalSection(&m_jobCs);
+    const int copyFrames = (frameCount > PIANO_BASS_FRAMES) ? PIANO_BASS_FRAMES : frameCount;
+    memcpy(m_jobMono, mono, (size_t)copyFrames * sizeof(double));
+    m_jobFrameCount = copyFrames;
+    m_jobSampleRate = sampleRate;
+    InterlockedExchange(&m_jobPending, 1);
+    LeaveCriticalSection(&m_jobCs);
+    SetEvent(m_hAnalysisWake);
 }
 
 void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
@@ -720,19 +757,37 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow8192,
     if (hasBass)
         Cfg::ApplyGainDbInPlace(m_bassAnalysisBuf.data(), WIN_BASS, gainDb);
 
-    for (int i = 0; i < KEY_COUNT; ++i)
-    {
-        double raw = 0.0;
-        if (i < LOW_KEY_SPLIT) {
-            raw = GoertzelMagnitude(
-                m_analysisBuf.data(), WIN_LOW, m_goertzelCoeffs[i], m_hannLow.data());
-        }
-        else {
-            raw = GoertzelMagnitude(
-                m_analysisBuf.data() + (WIN_LOW - WIN_HIGH), WIN_HIGH,
-                m_goertzelCoeffs[i], m_blackmanHigh.data());
-        }
-        m_rawStrengths[i] = ApplyDisplayScale((float)raw, i);
+    for (int i = 0; i < WIN_LOW; ++i)
+        m_windowedLow[i] = m_analysisBuf[i] * m_hannLow[i];
+    for (int i = 0; i < WIN_HIGH; ++i)
+        m_windowedHigh[i] = m_analysisBuf[i + (WIN_LOW - WIN_HIGH)] * m_blackmanHigh[i];
+    const double* onsetSrc = m_analysisBuf.data() + (WIN_LOW - WIN_ONSET);
+    for (int i = 0; i < WIN_ONSET; ++i)
+        m_windowedOnset[i] = onsetSrc[i] * m_hannOnset[i];
+
+    for (int i = 0; i < WIN_ONSET; ++i)
+        m_windowedOnset[i] = onsetSrc[i] * m_hannOnset[i];
+
+    PianoRollGoertzelBatchAvx2(
+        m_windowedLow.data(), WIN_LOW, m_goertzelCoeffs.data(),
+        0, LOW_KEY_SPLIT, m_goertzelRawScratch);
+    for (int i = 0; i < LOW_KEY_SPLIT; ++i)
+        m_rawStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i], i);
+
+    PianoRollGoertzelBatchAvx2(
+        m_windowedHigh.data(), WIN_HIGH, m_goertzelCoeffs.data(),
+        LOW_KEY_SPLIT, KEY_COUNT, m_goertzelRawScratch);
+    for (int i = LOW_KEY_SPLIT; i < KEY_COUNT; ++i)
+        m_rawStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i - LOW_KEY_SPLIT], i);
+
+    PianoRollGoertzelBatchAvx2(
+        m_windowedOnset.data(), WIN_ONSET, m_goertzelCoeffs.data(),
+        Cfg::ONSET_KEY_START, KEY_COUNT, m_goertzelRawScratch);
+    for (int i = 0; i < Cfg::ONSET_KEY_START; ++i)
+        m_onsetStrengths[i] = 0.0f;
+    for (int i = Cfg::ONSET_KEY_START; i < KEY_COUNT; ++i) {
+        m_onsetStrengths[i] = ApplyDisplayScale(
+            (float)m_goertzelRawScratch[i - Cfg::ONSET_KEY_START], i);
     }
 
     for (int i = 0; i < KEY_COUNT; ++i) {
@@ -742,7 +797,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow8192,
     }
 
     UpdateNoteStates();
-    PushFrame();
+    PushFrame(false);
 }
 
 void CPianoRoll::UpdateNoteStates()
@@ -826,6 +881,14 @@ void CPianoRoll::UpdateNoteStates()
     {
         const float sigStrength = pickStrength[i];
         bool effectivePicked = picked[i];
+
+        if (!effectivePicked && i >= ONSET_KEY_START) {
+            const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
+            if (onsetDelta >= ONSET_DELTA_THRESH &&
+                m_onsetStrengths[i] >= ONSET_MIN_STRENGTH &&
+                pickStrength[i] >= TRE_PICK_THRESH * pickScale * 0.55f)
+                effectivePicked = true;
+        }
 
         if (!effectivePicked && m_activeKeys[i]) {
             if (i < BAND_BASS_END) {
@@ -925,6 +988,8 @@ void CPianoRoll::UpdateNoteStates()
     }
 
     DetectExpressions();
+
+    memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
 }
 
 namespace
@@ -960,6 +1025,9 @@ namespace PianoExpr {
     static constexpr uint8_t SCOOP   = 0x02;
     static constexpr uint8_t VIBRATO = 0x04;
     static constexpr uint8_t SLIDE   = 0x08;
+    static constexpr uint8_t FALL    = 0x10;
+    static constexpr uint8_t SUSTAIN = 0x20;
+    static constexpr uint8_t ALL_MASK = ACCENT | SCOOP | VIBRATO | SLIDE | FALL | SUSTAIN;
 }
 
 void CPianoRoll::DetectExpressions()
@@ -991,9 +1059,14 @@ void CPianoRoll::DetectExpressions()
                 m_exprFlags[i] |= PianoExpr::SCOOP;
             if (i > 0 && m_prevActiveKeys[i - 1])
                 m_exprFlags[i] |= PianoExpr::SLIDE;
-            if (i + 1 < KEY_COUNT && m_prevActiveKeys[i + 1])
+            if (i + 1 < KEY_COUNT && m_prevActiveKeys[i + 1]) {
                 m_exprFlags[i] |= PianoExpr::SLIDE;
+                m_exprFlags[i] |= PianoExpr::FALL;
+            }
         }
+
+        if (nowActive && m_noteAgeFrames[i] >= 12)
+            m_exprFlags[i] |= PianoExpr::SUSTAIN;
 
         if (m_noteAgeFrames[i] <= 3) {
             const float prev = m_prevNoteStrength[i];
@@ -1080,15 +1153,14 @@ void CPianoRoll::BuildLiveNoteFrame(NoteFrame& frame) const
     }
 }
 
-void CPianoRoll::PushFrame()
+void CPianoRoll::PushFrame(bool requestUiInvalidate)
 {
     if (!m_feedEnabled || m_paintDisabled) return;
-    NoteFrame frame;
-    BuildLiveNoteFrame(frame);
-    m_history.insert(m_history.begin(), frame);
-    if (m_history.size() > MAX_HISTORY) m_history.pop_back();
+    m_historyHead = (m_historyHead + (int)MAX_HISTORY - 1) % (int)MAX_HISTORY;
+    BuildLiveNoteFrame(m_historyRing[m_historyHead]);
+    if (m_historyCount < (int)MAX_HISTORY)
+        ++m_historyCount;
     ++m_framesPending;
-    InvalidatePianoRollRegions(true, false);
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (m_activeKeys[i] != m_keySnapActive[i]) {
@@ -1096,6 +1168,38 @@ void CPianoRoll::PushFrame()
             break;
         }
     }
+
+    if (requestUiInvalidate)
+        InvalidatePianoRollRegions(true, false);
+}
+
+int CPianoRoll::HistoryCountLocked() const
+{
+    return m_historyCount;
+}
+
+const CPianoRoll::NoteFrame& CPianoRoll::HistoryAt(int indexFromNewest) const
+{
+    static NoteFrame s_empty;
+    static bool s_emptyInit = false;
+    if (!s_emptyInit) {
+        memset(&s_empty, 0, sizeof(s_empty));
+        s_emptyInit = true;
+    }
+    if (indexFromNewest < 0 || indexFromNewest >= m_historyCount)
+        return s_empty;
+    const int idx = (m_historyHead + indexFromNewest) % (int)MAX_HISTORY;
+    return m_historyRing[idx];
+}
+
+void CPianoRoll::CopyHistorySnapshot(NoteFrame* out, int maxOut, int& outCount) const
+{
+    outCount = 0;
+    if (!out || maxOut <= 0 || m_historyCount <= 0) return;
+    const int n = (m_historyCount < maxOut) ? m_historyCount : maxOut;
+    for (int i = 0; i < n; ++i)
+        out[i] = HistoryAt(i);
+    outCount = n;
 }
 
 bool CPianoRoll::IsBlackKey(int midiNote) const
@@ -1280,12 +1384,27 @@ namespace PianoDraw
         return rc;
     }
 
+    static COLORREF ExprColorForFlag(uint8_t flag)
+    {
+        switch (flag) {
+        case PianoExpr::SCOOP:   return RGB(255, 220, 80);
+        case PianoExpr::ACCENT:  return RGB(255, 100, 100);
+        case PianoExpr::VIBRATO: return RGB(120, 255, 180);
+        case PianoExpr::SLIDE:   return RGB(120, 160, 255);
+        case PianoExpr::FALL:    return RGB(255, 170, 90);
+        case PianoExpr::SUSTAIN: return RGB(190, 190, 210);
+        default:                 return RGB(255, 255, 255);
+        }
+    }
+
     static COLORREF ExprPrimaryColor(uint8_t expr)
     {
-        if (expr & PianoExpr::SCOOP) return RGB(255, 220, 80);
-        if (expr & PianoExpr::ACCENT) return RGB(255, 100, 100);
-        if (expr & PianoExpr::VIBRATO) return RGB(120, 255, 180);
-        if (expr & PianoExpr::SLIDE) return RGB(120, 160, 255);
+        if (expr & PianoExpr::SCOOP) return ExprColorForFlag(PianoExpr::SCOOP);
+        if (expr & PianoExpr::ACCENT) return ExprColorForFlag(PianoExpr::ACCENT);
+        if (expr & PianoExpr::VIBRATO) return ExprColorForFlag(PianoExpr::VIBRATO);
+        if (expr & PianoExpr::SLIDE) return ExprColorForFlag(PianoExpr::SLIDE);
+        if (expr & PianoExpr::FALL) return ExprColorForFlag(PianoExpr::FALL);
+        if (expr & PianoExpr::SUSTAIN) return ExprColorForFlag(PianoExpr::SUSTAIN);
         return RGB(255, 255, 255);
     }
 
@@ -1297,38 +1416,113 @@ namespace PianoDraw
         if (expr & PianoExpr::VIBRATO) dyn = max(dyn, min(1.0f, dyn + 0.24f));
         if (expr & PianoExpr::SCOOP) dyn = max(dyn, min(1.0f, dyn + 0.14f));
         if (expr & PianoExpr::SLIDE) dyn = max(dyn, min(1.0f, dyn + 0.20f));
+        if (expr & PianoExpr::FALL) dyn = max(dyn, min(1.0f, dyn + 0.12f));
+        if (expr & PianoExpr::SUSTAIN) dyn = max(dyn, min(1.0f, dyn + 0.08f));
         return dyn;
     }
 
-    static void BuildExprSymbolString(uint8_t expr, CString& sym)
+    static const wchar_t* ExprGlyphForFlag(uint8_t flag)
     {
-        sym.Empty();
-        if (expr & PianoExpr::SCOOP) sym += L"\x2197"; // ↗
-        if (expr & PianoExpr::VIBRATO) sym += L"~";
-        if (expr & PianoExpr::ACCENT) sym += L"\x25B8"; // ▸
-        if (expr & PianoExpr::SLIDE) sym += L"\x2192"; // →
+        switch (flag) {
+        case PianoExpr::SCOOP:   return L"\x2197";
+        case PianoExpr::ACCENT:  return L"\x25B8";
+        case PianoExpr::VIBRATO: return L"~";
+        case PianoExpr::SLIDE:   return L"\x2192";
+        case PianoExpr::FALL:    return L"\x2198";
+        case PianoExpr::SUSTAIN: return L"\x2015";
+        default:                 return L"?";
+        }
     }
 
-    static void DrawExprSymbolTop(CDC& dc, CRect cell, uint8_t expr, int clipTop, int clipBottom, CFont* pSymFont)
+    static int CountExprFlags(uint8_t expr)
+    {
+        int n = 0;
+        for (uint8_t f = 1; f <= PianoExpr::SUSTAIN; f <<= 1)
+            if (expr & f) ++n;
+        return n;
+    }
+
+    static void DrawExprBadgePanel(CDC& dc, CRect rc, uint8_t flag, CFont* pFont)
+    {
+        if (rc.Width() < 4 || rc.Height() < 4 || !pFont) return;
+        const COLORREF fg = ExprColorForFlag(flag);
+        dc.FillSolidRect(&rc, RGB(14, 14, 20));
+        CPen border(PS_SOLID, 1, fg);
+        CPen* pOldPen = dc.SelectObject(&border);
+        dc.MoveTo(rc.left, rc.bottom - 1); dc.LineTo(rc.left, rc.top); dc.LineTo(rc.right - 1, rc.top);
+        dc.LineTo(rc.right - 1, rc.bottom - 1); dc.LineTo(rc.left, rc.bottom - 1);
+        dc.SelectObject(pOldPen);
+
+        CFont* pOld = dc.SelectObject(pFont);
+        dc.SetBkMode(TRANSPARENT);
+        dc.SetTextColor(fg);
+        dc.DrawText(ExprGlyphForFlag(flag), rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        dc.SelectObject(pOld);
+    }
+
+    static void DrawExprGlyphOnNote(CDC& dc, CRect rc, uint8_t flag, CFont* pFont)
+    {
+        if (rc.Width() < 3 || rc.Height() < 3 || !pFont) return;
+        const COLORREF fg = ExprColorForFlag(flag);
+        CFont* pOld = dc.SelectObject(pFont);
+        dc.SetBkMode(TRANSPARENT);
+        dc.SetTextColor(RGB(0, 0, 0));
+        CRect sh = rc; sh.OffsetRect(1, 1);
+        dc.DrawText(ExprGlyphForFlag(flag), sh, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        dc.SetTextColor(fg);
+        dc.DrawText(ExprGlyphForFlag(flag), rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        dc.SelectObject(pOld);
+    }
+
+    static void DrawExprGlyphsAboveCell(CDC& dc, CRect cell, uint8_t expr,
+        int clipTop, int clipBottom, CFont* pSymFont, int rowPitch)
     {
         if (!expr || cell.Width() < 2 || !pSymFont) return;
 
-        const int symH = max(10, min(16, cell.Width() * 2 / 3 + 8));
+        const int flagCount = CountExprFlags(expr);
+        if (flagCount <= 0) return;
+
+        const int spaceAbove = cell.top - clipTop;
+        if (spaceAbove < 6) return;
+
+        int symH = max(10, min(22, rowPitch + 6));
+        if (cell.Width() >= 10)
+            symH = max(symH, min(22, cell.Width() / 2 + 6));
+        symH = min(symH, spaceAbove);
+
         CRect sym(cell.left, cell.top - symH, cell.right, cell.top);
-        if (sym.top < clipTop)
-            sym.top = clipTop;
-        if (clipBottom > 0 && sym.bottom > clipBottom) sym.bottom = clipBottom;
-        if (sym.bottom <= sym.top || sym.Width() < 2 || sym.Height() < 6) return;
+        if (sym.top < clipTop) sym.top = clipTop;
+        if (sym.bottom > cell.top) sym.bottom = cell.top;
+        if (sym.bottom <= sym.top || sym.Height() < 6) return;
 
-        CString text;
-        BuildExprSymbolString(expr, text);
-        if (text.IsEmpty()) return;
+        const int gap = 1;
+        int badgeW = (sym.Width() - gap * (flagCount - 1)) / flagCount;
+        if (badgeW < 8) badgeW = 8;
+        int totalW = badgeW * flagCount + gap * (flagCount - 1);
+        if (totalW > sym.Width()) {
+            badgeW = max(8, (sym.Width() - gap * (flagCount - 1)) / flagCount);
+            totalW = badgeW * flagCount + gap * (flagCount - 1);
+        }
+        int x0 = sym.left + (sym.Width() - totalW) / 2;
 
-        CFont* pOld = dc.SelectObject(pSymFont);
-        dc.SetBkMode(TRANSPARENT);
-        dc.SetTextColor((expr & PianoExpr::VIBRATO) ? RGB(120, 255, 180) : RGB(255, 255, 255));
-        dc.DrawText(text, sym, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        dc.SelectObject(pOld);
+        static const uint8_t kOrder[] = {
+            PianoExpr::ACCENT, PianoExpr::SCOOP, PianoExpr::FALL,
+            PianoExpr::SLIDE, PianoExpr::VIBRATO, PianoExpr::SUSTAIN
+        };
+        int drawn = 0;
+        for (uint8_t flag : kOrder) {
+            if (!(expr & flag)) continue;
+            CRect badge(x0 + drawn * (badgeW + gap), sym.top,
+                x0 + drawn * (badgeW + gap) + badgeW, sym.bottom);
+            DrawExprGlyphOnNote(dc, badge, flag, pSymFont);
+            ++drawn;
+        }
+    }
+
+    static void DrawExprSymbolTop(CDC& dc, CRect cell, uint8_t expr,
+        int clipTop, int clipBottom, CFont* pSymFont, int rowPitch)
+    {
+        DrawExprGlyphsAboveCell(dc, cell, expr, clipTop, clipBottom, pSymFont, rowPitch);
     }
 
     static void DrawVibratoWobble(CDC& dc, CRect rc, COLORREF col)
@@ -1364,10 +1558,18 @@ namespace PianoDraw
                 ExprPrimaryColor(PianoExpr::SCOOP));
         if ((expr & PianoExpr::ACCENT) && bar.Height() >= 1)
             dc.FillSolidRect(CRect(bar.left, bar.top, bar.right, bar.top + 1),
-                ExprPrimaryColor(PianoExpr::ACCENT));
+                ExprColorForFlag(PianoExpr::ACCENT));
         if (expr & PianoExpr::SLIDE)
             dc.FillSolidRect(CRect(bar.right - 1, bar.top, bar.right, bar.bottom),
-                ExprPrimaryColor(PianoExpr::SLIDE));
+                ExprColorForFlag(PianoExpr::SLIDE));
+        if ((expr & PianoExpr::FALL) && bar.Width() >= 2)
+            dc.FillSolidRect(CRect(bar.right - max(1, bar.Width() / 3), bar.top, bar.right, bar.bottom),
+                ExprColorForFlag(PianoExpr::FALL));
+        if ((expr & PianoExpr::SUSTAIN) && bar.Height() >= 3) {
+            const int mid = bar.top + bar.Height() / 2;
+            dc.FillSolidRect(CRect(bar.left, mid, bar.right, mid + 1),
+                ExprColorForFlag(PianoExpr::SUSTAIN));
+        }
     }
 }
 
@@ -1418,6 +1620,7 @@ void CPianoRoll::DetachForDestroy()
     m_feedEnabled = false;
     m_paintDisabled = true;
     InterlockedExchange(&m_syncPosted, 0);
+    StopAnalysisWorker();
     EnterCriticalSection(&m_cs);
     m_framesPending = 0;
     LeaveCriticalSection(&m_cs);
@@ -1465,6 +1668,7 @@ void CPianoRoll::ReleasePaintBuffers()
     if (m_fontKeyOct.GetSafeHandle()) m_fontKeyOct.DeleteObject();
     if (m_fontMeterTag.GetSafeHandle()) m_fontMeterTag.DeleteObject();
     if (m_fontExprSymbol.GetSafeHandle()) m_fontExprSymbol.DeleteObject();
+    if (m_fontExprLegend.GetSafeHandle()) m_fontExprLegend.DeleteObject();
     m_paintFontsReady = false;
 }
 
@@ -1538,18 +1742,21 @@ bool CPianoRoll::EnsureKeyBuffer(CDC& refDC, int width, int keySectionH)
     return true;
 }
 
-void CPianoRoll::EnsurePaintFonts(int clientW, int keyH)
+void CPianoRoll::EnsurePaintFonts(int clientW, int keyH, int rollH)
 {
+    const int rowPitch = HistoryRowPitch(rollH);
     const int notePx = max(9, min(14, clientW / 52));
     const int octPx = max(8, min(12, clientW / 52));
     const int tagPx = max(7, min(11, keyH / 4));
-    const int symPx = max(8, min(12, clientW / 48));
+    const int symPx = max(12, min(22, max(clientW / 36, rowPitch + 8)));
+    const int legPx = max(8, min(12, clientW / 58));
     if (m_paintFontsReady) return;
 
     if (m_fontKeyNote.GetSafeHandle()) m_fontKeyNote.DeleteObject();
     if (m_fontKeyOct.GetSafeHandle()) m_fontKeyOct.DeleteObject();
     if (m_fontMeterTag.GetSafeHandle()) m_fontMeterTag.DeleteObject();
     if (m_fontExprSymbol.GetSafeHandle()) m_fontExprSymbol.DeleteObject();
+    if (m_fontExprLegend.GetSafeHandle()) m_fontExprLegend.DeleteObject();
 
     m_fontKeyNote.CreateFont(-notePx, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
@@ -1558,8 +1765,68 @@ void CPianoRoll::EnsurePaintFonts(int clientW, int keyH)
     m_fontMeterTag.CreateFont(-tagPx, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     m_fontExprSymbol.CreateFont(-symPx, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Symbol");
+    m_fontExprLegend.CreateFont(-legPx, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     m_paintFontsReady = true;
+}
+
+void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH) const
+{
+    using namespace PianoDraw;
+    if (rollW < 80 || rollH < 60) return;
+    if (!m_paintFontsReady || !m_fontExprLegend.GetSafeHandle() || !m_fontExprSymbol.GetSafeHandle())
+        return;
+
+    static const uint8_t kFlags[] = {
+        PianoExpr::ACCENT, PianoExpr::SCOOP, PianoExpr::FALL,
+        PianoExpr::SLIDE, PianoExpr::VIBRATO, PianoExpr::SUSTAIN
+    };
+    static const wchar_t* kLabels[] = {
+        LL14(L"アクセント", L"Accent", L"Accent", L"Accento", L"Acento", L"액센트", L"重音", L"لهجة", L"Акцент", L"Akzent", L"Acento", L"Accent", L"Akcent", L"Aksan"),
+        LL14(L"スクープ", L"Scoop", L"Scoop", L"Scoop", L"Scoop", L"스쿱", L"滑音(上)", L"Scoop", L"Скуп", L"Scoop", L"Scoop", L"Scoop", L"Scoop", L"Scoop"),
+        LL14(L"フォール", L"Fall", L"Chute", L"Fall", L"Caída", L"하강", L"滑音(下)", L"Fall", L"Падение", L"Fall", L"Queda", L"Fall", L"Spadek", L"Düşüş"),
+        LL14(L"スライド", L"Slide", L"Glissé", L"Slide", L"Desliz", L"슬라이드", L"滑音", L"Slide", L"Слайд", L"Slide", L"Slide", L"Slide", L"Slide", L"Slide"),
+        LL14(L"ビブラート", L"Vibrato", L"Vibrato", L"Vibrato", L"Vibrato", L"비브라토", L"颤音", L"Vibrato", L"Вибрато", L"Vibrato", L"Vibrato", L"Vibrato", L"Wibrato", L"Vibrato"),
+        LL14(L"サステイン", L"Sustain", L"Sustain", L"Sustain", L"Sustain", L"서스테인", L"延音", L"Sustain", L"Длит.", L"Sustain", L"Sustain", L"Sustain", L"Sustain", L"Sustain")
+    };
+
+    const int lineH = 17;
+    const int badgeW = 16;
+    const int pad = 6;
+    const int titleH = 16;
+    const int n = (int)(sizeof(kFlags) / sizeof(kFlags[0]));
+    const int panelW = min(rollW - 8, 228);
+    const int panelH = pad * 2 + titleH + n * lineH;
+
+    CRect panel(6, 6, 6 + panelW, 6 + panelH);
+    dc.FillSolidRect(&panel, RGB(14, 14, 20));
+    CPen border(PS_SOLID, 1, RGB(70, 70, 82));
+    CPen* pOldPen = dc.SelectObject(&border);
+    dc.MoveTo(panel.left, panel.bottom - 1); dc.LineTo(panel.left, panel.top);
+    dc.LineTo(panel.right - 1, panel.top); dc.LineTo(panel.right - 1, panel.bottom - 1);
+    dc.LineTo(panel.left, panel.bottom - 1);
+    dc.SelectObject(pOldPen);
+
+    CFont* pLeg = CFont::FromHandle((HFONT)m_fontExprLegend.GetSafeHandle());
+    CFont* pSym = CFont::FromHandle((HFONT)m_fontExprSymbol.GetSafeHandle());
+    CFont* pOldF = dc.SelectObject(pLeg);
+    dc.SetBkMode(TRANSPARENT);
+    dc.SetTextColor(RGB(210, 210, 220));
+    CRect titleR(panel.left + pad, panel.top + pad, panel.right - pad, panel.top + pad + titleH);
+    dc.DrawText(LL14(L"記号の意味", L"Symbol legend", L"Légende", L"Legenda simboli", L"Leyenda", L"기호 설명", L"符号说明", L"دليل الرموز", L"Обозначения", L"Symbollegende", L"Legenda", L"Symbolen", L"Legenda symboli", L"Semboller"),
+        titleR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    int y = panel.top + pad + titleH;
+    for (int i = 0; i < n; ++i) {
+        CRect badgeR(panel.left + pad, y + 1, panel.left + pad + badgeW, y + 1 + lineH - 2);
+        DrawExprBadgePanel(dc, badgeR, kFlags[i], pSym);
+        CRect labelR(badgeR.right + 5, y, panel.right - pad, y + lineH);
+        dc.SetTextColor(ExprColorForFlag(kFlags[i]));
+        dc.DrawText(kLabels[i], labelR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        y += lineH;
+    }
+    dc.SelectObject(pOldF);
 }
 
 void CPianoRoll::DrawHistoryGrid(CDC& dc, int width, int yFrom, int yTo) const
@@ -1614,6 +1881,7 @@ void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const 
 {
     using namespace PianoDraw;
     if (yBot <= yTop) return;
+    const int rowPitch = yBot - yTop;
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (!frame.active[i]) continue;
@@ -1629,7 +1897,8 @@ void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const 
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (!frame.active[i] || !frame.expr[i]) continue;
         int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
-        DrawExprSymbolTop(dc, CRect(xL + 1, yTop, xR - 1, yBot), frame.expr[i], 0, yBot, pSymFont);
+        DrawExprSymbolTop(dc, CRect(xL + 1, yTop, xR - 1, yBot), frame.expr[i],
+            0, yBot, pSymFont, rowPitch);
     }
 }
 
@@ -1640,20 +1909,22 @@ void CPianoRoll::DrawHistoryRow(CDC& dc, int width, int rollH, size_t rowIndex, 
     DrawHistoryRowAt(dc, width, yTop, yBot, frame);
 }
 
-void CPianoRoll::DrawHistoryArea(CDC& dc, int width, int rollH, const std::vector<NoteFrame>& hist) const
+void CPianoRoll::DrawHistoryArea(CDC& dc, int width, int rollH, int histCount, const NoteFrame* hist) const
 {
     dc.FillSolidRect(0, 0, width, rollH, RGB(20, 20, 20));
     DrawHistoryGrid(dc, width, 0, rollH);
     // row0=live（DrawPlayheadRow）。row r>=1 には hist[r-1]（PushFrame で row0 に入った直前フレーム）
-    for (size_t r = 1; r < hist.size() && r < MAX_HISTORY; ++r)
-        DrawHistoryRow(dc, width, rollH, (int)r, hist[r - 1]);
+    if (!hist) return;
+    for (int r = 1; r < histCount && r < (int)MAX_HISTORY; ++r)
+        DrawHistoryRow(dc, width, rollH, r, hist[r - 1]);
 }
 
 void CPianoRoll::ComposeRollBuffer(CDC& dc, int width, int rollH,
-    const std::vector<NoteFrame>& hist, const NoteFrame& live) const
+    int histCount, const NoteFrame* hist, const NoteFrame& live) const
 {
-    DrawHistoryArea(dc, width, rollH, hist);
+    DrawHistoryArea(dc, width, rollH, histCount, hist);
     DrawPlayheadRow(dc, width, rollH, live);
+    DrawExprLegend(dc, width, rollH);
 }
 
 void CPianoRoll::DrawPlayheadRow(CDC& dc, int width, int rollH, const NoteFrame& live) const
@@ -1667,10 +1938,12 @@ void CPianoRoll::DrawPlayheadRow(CDC& dc, int width, int rollH, const NoteFrame&
     DrawHistoryRowAt(dc, width, yTop, yBot, live);
 }
 
-bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, const std::vector<NoteFrame>& hist,
+bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const NoteFrame* hist,
     int pendingCount, const NoteFrame& live)
 {
     (void)pendingCount;
+    (void)histCount;
+    (void)hist;
     m_lastScrollPx = 0;
     m_lastScrollHealTop = 0;
     if (!m_rollReady || rollH <= 0)
@@ -1698,6 +1971,7 @@ bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, const std::vector<No
     DrawPlayheadRow(m_rollScratchDC, width, rollH, live);
 
     m_rollDC.BitBlt(0, 0, width, rollH, &m_rollScratchDC, 0, 0, SRCCOPY);
+    DrawExprLegend(m_rollDC, width, rollH);
     m_lastScrollPx = scrollPx;
     m_lastScrollHealTop = 0;
     return true;
@@ -1734,6 +2008,101 @@ LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
     COggDlg_SyncPianoRollFast();
     ApplySyncInvalidate();
     return 0;
+}
+
+LRESULT CPianoRoll::OnAnalysisDone(WPARAM, LPARAM)
+{
+    if (m_paintDisabled || !::IsWindow(m_hWnd)) return 0;
+    ApplySyncInvalidate();
+    return 0;
+}
+
+DWORD WINAPI CPianoRoll::AnalysisWorkerThreadEntry(LPVOID param)
+{
+    return static_cast<CPianoRoll*>(param)->AnalysisWorkerLoop();
+}
+
+void CPianoRoll::StartAnalysisWorker()
+{
+    if (m_hAnalysisThread) return;
+    InterlockedExchange(&m_workerStop, 0);
+    InterlockedExchange(&m_jobPending, 0);
+    m_hAnalysisWake = CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (!m_hAnalysisWake) return;
+    m_hAnalysisThread = CreateThread(
+        NULL, 0, AnalysisWorkerThreadEntry, this, 0, NULL);
+    if (!m_hAnalysisThread) {
+        CloseHandle(m_hAnalysisWake);
+        m_hAnalysisWake = NULL;
+    }
+}
+
+void CPianoRoll::StopAnalysisWorker()
+{
+    if (!m_hAnalysisThread && !m_hAnalysisWake) return;
+    InterlockedExchange(&m_workerStop, 1);
+    if (m_hAnalysisWake)
+        SetEvent(m_hAnalysisWake);
+    if (m_hAnalysisThread) {
+        WaitForSingleObject(m_hAnalysisThread, 10000);
+        CloseHandle(m_hAnalysisThread);
+        m_hAnalysisThread = NULL;
+    }
+    if (m_hAnalysisWake) {
+        CloseHandle(m_hAnalysisWake);
+        m_hAnalysisWake = NULL;
+    }
+}
+
+DWORD CPianoRoll::AnalysisWorkerLoop()
+{
+    for (;;) {
+        const DWORD wait = WaitForSingleObject(m_hAnalysisWake, INFINITE);
+        if (wait != WAIT_OBJECT_0)
+            continue;
+        if (InterlockedCompareExchange(&m_workerStop, 0, 0) != 0)
+            break;
+
+        bool didWork = false;
+        while (InterlockedCompareExchange(&m_jobPending, 0, 1) == 1) {
+            if (ProcessAnalysisJob())
+                didWork = true;
+        }
+
+        if (didWork && ::IsWindow(m_hWnd))
+            PostMessage(WM_PIANOROLL_ANALYSIS_DONE, 0, 0);
+    }
+    return 0;
+}
+
+bool CPianoRoll::ProcessAnalysisJob()
+{
+    double localMono[PIANO_BASS_FRAMES];
+    int frameCount = 0;
+    int sampleRate = 44100;
+
+    EnterCriticalSection(&m_jobCs);
+    frameCount = m_jobFrameCount;
+    sampleRate = m_jobSampleRate;
+    if (frameCount > PIANO_BASS_FRAMES) frameCount = PIANO_BASS_FRAMES;
+    if (frameCount > 0)
+        memcpy(localMono, m_jobMono, (size_t)frameCount * sizeof(double));
+    LeaveCriticalSection(&m_jobCs);
+
+    if (frameCount < WIN_LOW || sampleRate < 8000)
+        return false;
+
+    const double* lowWin = localMono + (frameCount - WIN_LOW);
+    const int bassLen = (frameCount >= WIN_BASS) ? WIN_BASS : WIN_LOW;
+    const double* bassWin = (frameCount >= WIN_BASS)
+        ? localMono + (frameCount - WIN_BASS)
+        : lowWin;
+
+    EnterCriticalSection(&m_cs);
+    EnsureAnalysisTables(sampleRate);
+    RunGoertzelFromBuffer(lowWin, bassWin, bassLen);
+    LeaveCriticalSection(&m_cs);
+    return true;
 }
 
 void CPianoRoll::DrawKeyboardToBuffer(CDC& memDC, int width, int keySectionH, int keyH,
@@ -1853,7 +2222,7 @@ void CPianoRoll::OnPaint()
     const bool clipRoll = clip.top < rollH;
     const bool clipKey = clip.bottom > rollH;
 
-    EnsurePaintFonts(w, keyH);
+    EnsurePaintFonts(w, keyH, rollH);
     if (!EnsureRollBuffer(dc, w, rollH) || !EnsureKeyBuffer(dc, w, keySectionH))
         return;
 
@@ -1876,10 +2245,11 @@ void CPianoRoll::OnPaint()
         m_keyDirty = true;
 
     int pending = 0;
-    std::vector<NoteFrame> histFull;
+    NoteFrame histSnap[MAX_HISTORY];
+    int histCount = 0;
     EnterCriticalSection(&m_cs);
     pending = m_framesPending;
-    histFull = m_history;
+    CopyHistorySnapshot(histSnap, MAX_HISTORY, histCount);
     LeaveCriticalSection(&m_cs);
 
     const bool rollDirty = m_historyDirty;
@@ -1889,7 +2259,7 @@ void CPianoRoll::OnPaint()
     bool needAnotherRollFrame = false;
 
     if (pending > 0 && m_rollReady
-        && TryAdvanceRollBuffer(w, rollH, histFull, pending, liveSnap)) {
+        && TryAdvanceRollBuffer(w, rollH, histCount, histSnap, pending, liveSnap)) {
         EnterCriticalSection(&m_cs);
         if (m_framesPending > 0) --m_framesPending;
         needAnotherRollFrame = (m_framesPending > 0);
@@ -1900,7 +2270,7 @@ void CPianoRoll::OnPaint()
         didRollScroll = true;
     }
     else if (pending > 0 || rollDirty || !m_rollReady) {
-        ComposeRollBuffer(m_rollDC, w, rollH, histFull, liveSnap);
+        ComposeRollBuffer(m_rollDC, w, rollH, histCount, histSnap, liveSnap);
         EnterCriticalSection(&m_cs);
         m_framesPending = 0;
         LeaveCriticalSection(&m_cs);

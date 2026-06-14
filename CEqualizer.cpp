@@ -506,11 +506,16 @@ void CEqualizer::ReapplyDecorativeTitleFont()
 {
 	if (!m_t.GetSafeHwnd())
 		return;
+	UINT dpi = 96;
+	if (HDC hdc = ::GetDC(m_t.GetSafeHwnd())) {
+		dpi = (UINT)GetDeviceCaps(hdc, LOGPIXELSX);
+		::ReleaseDC(m_t.GetSafeHwnd(), hdc);
+	}
+	if (dpi < 96) dpi = 96;
 	LOGFONT lf;
 	memset(&lf, 0, sizeof(lf));
-	lf.lfHeight = -12;
+	lf.lfHeight = -MulDiv(12 * 4, (int)dpi, 96);
 	const int li = (savedata.lang < 0) ? 0 : (savedata.lang > 13 ? 13 : savedata.lang);
-	lf.lfHeight *= 4;
 	lf.lfItalic = TRUE;
 	CFont fn;
 	if (fn.CreateFontIndirect(&lf))

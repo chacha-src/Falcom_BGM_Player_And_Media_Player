@@ -15117,7 +15117,7 @@ void COggDlg::timerp()
 	}
 
 
-	if (plf == 1 && (wav || ogg) && ::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+	if (plf == 1 && (wav || ogg) && ::IsWindow(m_PianoRollDlg.GetSafeHwnd()) && Ms2DrawDue(ms2))
 		m_PianoRollDlg.RequestSyncFromMainUi();
 	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) Speana();
 	s = L""; ss = L"";

@@ -543,6 +543,7 @@ private:
     int m_nCachedHeight, m_nCachedWidth;   // キャッシュされたサイズ情報
     float m_fCachedScaleX;               // 幅オーバー時の X 軸ワールド変換倍率（1.0=なし）
     CRect m_rectCached;                    // キャッシュされた描画領域
+    UINT  m_nCachedDpi;                    // キャッシュ時の DPI（Per-Monitor 対応）
 
     CBitmap m_memBackstore;                // ちらつき防止のダブルバッファリング用バックバッファ
     int m_backstoreW, m_backstoreH;        // バックバッファの寸法

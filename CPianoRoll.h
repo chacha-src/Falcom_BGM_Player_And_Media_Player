@@ -40,6 +40,7 @@ protected:
     afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg void OnClose();
     afx_msg LRESULT OnSyncRequest(WPARAM wParam, LPARAM lParam);
+    afx_msg LRESULT OnAnalysisDone(WPARAM wParam, LPARAM lParam);
     virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 private:
@@ -48,6 +49,8 @@ private:
         static constexpr uint8_t SCOOP   = 0x02;
         static constexpr uint8_t VIBRATO = 0x04;
         static constexpr uint8_t SLIDE   = 0x08;
+        static constexpr uint8_t FALL    = 0x10;
+        static constexpr uint8_t SUSTAIN = 0x20;
     };
 
     struct NoteFrame {
@@ -73,8 +76,11 @@ private:
     static constexpr int   DETECT_KEYS    = 108;
     static constexpr int   KEY_OFFSET       = 9;
     static constexpr UINT  WM_PIANOROLL_SYNC = WM_APP + 420;
+    static constexpr UINT  WM_PIANOROLL_ANALYSIS_DONE = WM_APP + 421;
 
-    std::vector<NoteFrame> m_history;
+    NoteFrame m_historyRing[MAX_HISTORY];
+    int       m_historyCount = 0;
+    int       m_historyHead = 0;
 
     bool  m_activeKeys[88];
     float m_noteStrength[88];
@@ -116,8 +122,21 @@ private:
     bool  m_analysisHasBass = false;
     std::vector<double> m_analysisBuf;
     std::vector<double> m_bassAnalysisBuf;
+    std::vector<double> m_windowedLow;
+    std::vector<double> m_windowedHigh;
+    std::vector<double> m_windowedOnset;
 
     CRITICAL_SECTION m_cs;
+    CRITICAL_SECTION m_jobCs;
+    HANDLE           m_hAnalysisThread = NULL;
+    HANDLE           m_hAnalysisWake = NULL;
+    volatile LONG    m_workerStop = 0;
+    volatile LONG    m_jobPending = 0;
+    double           m_jobMono[PIANO_BASS_FRAMES];
+    int              m_jobFrameCount = 0;
+    int              m_jobSampleRate = 44100;
+    double           m_goertzelRawScratch[KEY_COUNT];
+
     bool m_feedEnabled = true;
     bool m_paintDisabled = false;
     bool m_historyDirty = true;
@@ -136,7 +155,15 @@ private:
     void RunGoertzelFromBuffer(const double* winLow8192, const double* winBass, int bassWinLen);
     void UpdateNoteStates();
     void DetectExpressions();
-    void PushFrame();
+    void PushFrame(bool requestUiInvalidate);
+    void StartAnalysisWorker();
+    void StopAnalysisWorker();
+    DWORD AnalysisWorkerLoop();
+    bool ProcessAnalysisJob();
+    static DWORD WINAPI AnalysisWorkerThreadEntry(LPVOID param);
+    int  HistoryCountLocked() const;
+    void CopyHistorySnapshot(NoteFrame* out, int maxOut, int& outCount) const;
+    const NoteFrame& HistoryAt(int indexFromNewest) const;
 
     static double ReadMonoSample(const uint8_t* sp, int bits);
     static double GoertzelMagnitude(const double* samples, int numSamples,
@@ -175,6 +202,7 @@ private:
     CFont   m_fontKeyOct;
     CFont   m_fontMeterTag;
     CFont   m_fontExprSymbol;
+    CFont   m_fontExprLegend;
     bool    m_paintFontsReady = false;
     volatile LONG m_syncPosted = 0;
 
@@ -193,16 +221,17 @@ private:
     void MarkKeyVisualDirty();
     void ApplySyncInvalidate();
     void InvalidatePianoRollRegions(bool roll, bool key);
-    void EnsurePaintFonts(int clientW, int keyH);
+    void EnsurePaintFonts(int clientW, int keyH, int rollH);
+    void DrawExprLegend(CDC& dc, int rollW, int rollH) const;
     void DrawHistoryGrid(CDC& dc, int width, int yFrom, int yTo) const;
     int  HistoryRowPitch(int rollH) const;
     int  HistoryScrollPx(int rollH, int rowsToScroll) const;
     void DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const NoteFrame& frame) const;
     void DrawHistoryRow(CDC& dc, int width, int rollH, size_t rowIndex, const NoteFrame& frame) const;
-    void DrawHistoryArea(CDC& dc, int width, int rollH, const std::vector<NoteFrame>& hist) const;
+    void DrawHistoryArea(CDC& dc, int width, int rollH, int histCount, const NoteFrame* hist) const;
     void GetHistoryRowBounds(int rollH, int rowFromBottom, int& yTop, int& yBot) const;
-    void ComposeRollBuffer(CDC& dc, int width, int rollH, const std::vector<NoteFrame>& hist, const NoteFrame& live) const;
-    bool TryAdvanceRollBuffer(int width, int rollH, const std::vector<NoteFrame>& hist, int pendingCount, const NoteFrame& live);
+    void ComposeRollBuffer(CDC& dc, int width, int rollH, int histCount, const NoteFrame* hist, const NoteFrame& live) const;
+    bool TryAdvanceRollBuffer(int width, int rollH, int histCount, const NoteFrame* hist, int pendingCount, const NoteFrame& live);
     void BuildLiveNoteFrame(NoteFrame& frame) const;
     void DrawPlayheadRow(CDC& dc, int width, int rollH, const NoteFrame& live) const;
     void DrawKeyboardToBuffer(CDC& dc, int width, int keySectionH, int keyH,

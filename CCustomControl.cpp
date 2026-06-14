@@ -7,6 +7,35 @@
 
 #pragma comment(lib, "msimg32.lib")
 
+static UINT CCC_GetControlDpi(HWND hWnd)
+{
+    if (!hWnd) return 96;
+    HDC hdc = ::GetDC(hWnd);
+    if (!hdc) return 96;
+    const UINT dpi = (UINT)GetDeviceCaps(hdc, LOGPIXELSX);
+    ::ReleaseDC(hWnd, hdc);
+    return (dpi > 0) ? dpi : 96;
+}
+
+static int CCC_ScaleDpi(int value, UINT dpi)
+{
+    return MulDiv(value, (int)dpi, 96);
+}
+
+static void CCC_ComputeShadowPad(int nSD, int nDist, int nBlur, BOOL bSE, UINT dpi,
+    int& padX, int& padY)
+{
+    padX = padY = 0;
+    if (!bSE || nDist <= 0 || nBlur <= 0) return;
+    const int dist = CCC_ScaleDpi(nDist, dpi);
+    const int blur = CCC_ScaleDpi(nBlur, dpi);
+    const double rad = nSD * 3.14159265358979323846 / 180.0;
+    padX = (int)floor(dist * cos(rad) + (blur + 1) / 2 + 0.5);
+    padY = (int)floor(dist * sin(rad) + (blur + 1) / 2 + 0.5);
+    if (padX < 0) padX = 0;
+    if (padY < 0) padY = 0;
+}
+
 #ifdef SubclassWindow
 #undef SubclassWindow
 #endif
@@ -1280,7 +1309,8 @@ static void DrawSmartText(CDC* pDC, CRect rect, CString str, BOOL bDis, BOOL bPu
 
 static void DrawFittedSingleLineDecorativeText(CDC& dc, const CRect& rect, const CString& str, UINT fmt,
     BOOL bGrad, COLORREF cGS, COLORREF cGE, int nDir,
-    COLORREF clrSh, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bPreferWide, BOOL bAeroTrans = FALSE)
+    COLORREF clrSh, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bPreferWide,
+    BOOL bAeroTrans = FALSE, UINT dpi = 96)
 {
     if (str.IsEmpty() || rect.Width() <= 0 || rect.Height() <= 0) return;
     dc.SetBkMode(TRANSPARENT);
@@ -1293,12 +1323,7 @@ static void DrawFittedSingleLineDecorativeText(CDC& dc, const CRect& rect, const
 
     int shadowPadX = 0;
     int shadowPadY = 0;
-    if (bSE && nDist > 0 && nBlur > 0)
-    {
-        const double rad = nSD * 3.14159265358979323846 / 180.0;
-        shadowPadX = (int)floor(nDist * cos(rad) + (nBlur + 1) / 2 + 0.5);
-        shadowPadY = (int)floor(nDist * sin(rad) + (nBlur + 1) / 2 + 0.5);
-    }
+    CCC_ComputeShadowPad(nSD, nDist, nBlur, bSE, dpi, shadowPadX, shadowPadY);
 
     CRect rectDraw = rect;
     if (bSE && shadowPadX > 0)
@@ -1309,7 +1334,8 @@ static void DrawFittedSingleLineDecorativeText(CDC& dc, const CRect& rect, const
         pCF->GetLogFont(&lfCur);
     const int italicMargin = lfCur.lfItalic ? (abs(lfCur.lfHeight) / 2) : 0;
 
-    const int nBudgetW = (std::max)(1, rectDraw.Width() - 3);
+    const int sidePad = max(1, CCC_ScaleDpi(3, dpi));
+    const int nBudgetW = (std::max)(1, rectDraw.Width() - sidePad);
     const int nBudgetH = (std::max)(1, rect.Height());
     const int needW = sz.cx + italicMargin;
 
@@ -1986,7 +2012,7 @@ CCustomStatic::CCustomStatic()
     m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135),
     m_nShadowDistance(2), m_nShadowBlur(3), m_bShadowEnable(FALSE),
     m_bPreferWideMode(FALSE), m_nCachedHeight(0), m_nCachedWidth(0), m_fCachedScaleX(1.0f),
-    m_strCachedText(_T("")), m_strText(_T("")),
+    m_strCachedText(_T("")), m_strText(_T("")), m_nCachedDpi(0),
     m_backstoreW(0), m_backstoreH(0), m_bAeroMode(FALSE)
 {}
 
@@ -2167,6 +2193,7 @@ void CCustomStatic::SetPreferWideMode(BOOL b)
 {
     m_bPreferWideMode = b;
     m_strCachedText.Empty();
+    m_nCachedDpi = 0;
     if (GetSafeHwnd()) Invalidate();
 }
 
@@ -2257,7 +2284,9 @@ void CCustomStatic::DrawClient(CDC& dc)
     if (bHasFmt) segs = ParseFormattedText(strText);
 
     CRect rectWithMargin = rect;
-    rectWithMargin.DeflateRect(1, 1);
+    const UINT dpi = CCC_GetControlDpi(m_hWnd);
+    const int marginPx = max(1, CCC_ScaleDpi(1, dpi));
+    rectWithMargin.DeflateRect(marginPx, marginPx);
 
     CFont* pBF = GetFont();
     CFont* pOF = memDC.SelectObject(pBF);
@@ -2272,7 +2301,7 @@ void CCustomStatic::DrawClient(CDC& dc)
         d->GetLogFont(&lfB);
     }
 
-    const int kMinHeight = 6;
+    const int kMinHeight = max(6, CCC_ScaleDpi(6, dpi));
     const int baseHeight = abs(lfB.lfHeight);
     int finalHeight = 0;
     int finalWidth = 0;
@@ -2280,7 +2309,8 @@ void CCustomStatic::DrawClient(CDC& dc)
 
     const BOOL bNeedRecalc = (strText != m_strCachedText) ||
         (m_nCachedHeight == 0) ||
-        (m_rectCached != rect);
+        (m_rectCached != rect) ||
+        (m_nCachedDpi != dpi);
 
     if (bNeedRecalc)
     {
@@ -2332,19 +2362,33 @@ void CCustomStatic::DrawClient(CDC& dc)
                 }
             }
 
-            if (m_bPreferWideMode && szFinal.cx < rectWithMargin.Width())
+            int fmtShadowPadX = 0, fmtShadowPadY = 0;
+            CCC_ComputeShadowPad(m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+                m_bShadowEnable, dpi, fmtShadowPadX, fmtShadowPadY);
+            UNREFERENCED_PARAMETER(fmtShadowPadY);
+            const int fmtSidePad = max(1, CCC_ScaleDpi(3, dpi));
+            const int fmtAvailW = (std::max)(1, rectWithMargin.Width() - fmtShadowPadX - fmtSidePad);
+
+            if (m_bPreferWideMode && szFinal.cx < fmtAvailW)
             {
                 const int startWidth = (finalWidth > 0) ? finalWidth : baseWidth;
                 const int maxWidth = startWidth * 3;
+                int bestW = 0;
+                CSize bestSz = szFinal;
                 for (int w = startWidth; w <= maxWidth; w++)
                 {
                     CSize sizeTry = MeasureText(finalHeight, w);
-                    if (sizeTry.cx <= rectWithMargin.Width() && sizeTry.cy <= rectWithMargin.Height())
+                    if (sizeTry.cx <= fmtAvailW && sizeTry.cy <= rectWithMargin.Height())
                     {
-                        finalWidth = w;
-                        szFinal = sizeTry;
+                        bestW = w;
+                        bestSz = sizeTry;
                     }
                     else break;
+                }
+                if (bestW > 0)
+                {
+                    finalWidth = bestW;
+                    szFinal = bestSz;
                 }
             }
             m_fCachedScaleX = 1.0f;
@@ -2366,15 +2410,12 @@ void CCustomStatic::DrawClient(CDC& dc)
 
             int shadowPadX = 0;
             int shadowPadY = 0;
-            if (m_bShadowEnable && m_nShadowDistance > 0 && m_nShadowBlur > 0)
-            {
-                const double rad = m_nShadowDirection * 3.14159265358979323846 / 180.0;
-                shadowPadX = (int)floor(m_nShadowDistance * cos(rad) + (m_nShadowBlur + 1) / 2 + 0.5);
-                shadowPadY = (int)floor(m_nShadowDistance * sin(rad) + (m_nShadowBlur + 1) / 2 + 0.5);
-            }
+            CCC_ComputeShadowPad(m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
+                m_bShadowEnable, dpi, shadowPadX, shadowPadY);
             UNREFERENCED_PARAMETER(shadowPadY);
 
-            const int availW = (std::max)(1, rectWithMargin.Width() - shadowPadX - 3);
+            const int sidePad = max(1, CCC_ScaleDpi(3, dpi));
+            const int availW = (std::max)(1, rectWithMargin.Width() - shadowPadX - sidePad);
             finalHeight = min(baseHeight, rectWithMargin.Height());
             finalWidth = 0;
             szFinal = MeasureText(finalHeight, 0);
@@ -2399,7 +2440,7 @@ void CCustomStatic::DrawClient(CDC& dc)
                 if (scaleX > 1.0f) scaleX = 1.0f;
             }
 
-            if (scaleX >= 0.98f && m_bPreferWideMode && szFinal.cx < availW)
+            if (m_bPreferWideMode && szFinal.cx < availW)
             {
                 LOGFONT lfTry = lfB;
                 lfTry.lfHeight = -finalHeight;
@@ -2414,15 +2455,23 @@ void CCustomStatic::DrawClient(CDC& dc)
 
                 const int baseWidth = tm.tmAveCharWidth;
                 const int maxWidth = baseWidth * 3;
+                int bestW = 0;
+                CSize bestSz = szFinal;
                 for (int w = baseWidth; w <= maxWidth; w++)
                 {
                     CSize sizeTry = MeasureText(finalHeight, w);
-                    if (sizeTry.cx <= availW && sizeTry.cy <= rectWithMargin.Height())
+                    const int tryItalic = lfB.lfItalic ? (finalHeight / 2) : 0;
+                    if (sizeTry.cx + tryItalic <= availW && sizeTry.cy <= rectWithMargin.Height())
                     {
-                        finalWidth = w;
-                        szFinal = sizeTry;
+                        bestW = w;
+                        bestSz = sizeTry;
                     }
                     else break;
+                }
+                if (bestW > 0)
+                {
+                    finalWidth = bestW;
+                    szFinal = bestSz;
                 }
             }
 
@@ -2433,6 +2482,7 @@ void CCustomStatic::DrawClient(CDC& dc)
         m_nCachedHeight = finalHeight;
         m_nCachedWidth = finalWidth;
         m_rectCached = rect;
+        m_nCachedDpi = dpi;
     }
     else
     {
@@ -2466,7 +2516,7 @@ void CCustomStatic::DrawClient(CDC& dc)
             DrawFittedSingleLineDecorativeText(memDC, rect, strText, fmt,
                 m_bGradEnable, m_clrGradStart, m_clrGradEnd, m_nGradDirection,
                 m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
-                m_bShadowEnable, clrBg, FALSE, bTrans);
+                m_bShadowEnable, clrBg, FALSE, bTrans, dpi);
         }
         else
         {
