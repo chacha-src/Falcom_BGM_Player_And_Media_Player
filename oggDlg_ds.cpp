@@ -352,13 +352,11 @@ void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 			og->timer.SetEvent();
 		DoEvent();
 		elapsed += pollMs;
-		if (thn == TRUE && elapsed >= 50)
-			break;
 		if (elapsed >= timeoutMs)
 			break;
 	}
 	// thn が立っていてもスレッドハンドルが生きていれば最後まで Join
-	for (int i = 0; i < 200; ++i) {
+	for (int i = 0; i < 500; ++i) {
 		if (WaitForSingleObject(hThread, 0) == WAIT_OBJECT_0)
 			break;
 		if (og)

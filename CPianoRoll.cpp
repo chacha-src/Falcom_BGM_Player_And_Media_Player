@@ -504,7 +504,7 @@ BOOL CPianoRoll::OnInitDialog()
         L"Пианоролл", L"Klavierrolle", L"Rolo de piano", L"Pianorol",
         L"Rolka pianina", L"Piyano rulosu"));
 
-    ModifyStyle(WS_MINIMIZEBOX | WS_MAXIMIZEBOX, 0);
+    ModifyStyle(WS_MINIMIZEBOX, 0);
     SetIcon(nullptr, TRUE);
     SetIcon(nullptr, FALSE);
 #if CCUSTOM_AERO_SUPPORT

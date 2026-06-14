@@ -2990,6 +2990,16 @@ void DoEvent()
 	}
 }
 
+static void PumpUntilFlagOrTimeout(int& flag, DWORD timeoutMs = 10000)
+{
+	const DWORD t0 = GetTickCount();
+	for (; flag == 0;) {
+		DoEvent();
+		if (GetTickCount() - t0 >= timeoutMs)
+			break;
+	}
+}
+
 DWORD COggDlg::GetVol()
 {
 	WAVEFORMATEX wfx1;
@@ -5730,8 +5740,7 @@ void COggDlg::play()
 	if (mi) {
 		killw1 = 0;
 		mi->DestroyWindow();
-		for (; killw1 == 0;)
-			DoEvent();
+		PumpUntilFlagOrTimeout(killw1);
 		mi = NULL;
 	}
 	//
@@ -14659,8 +14668,7 @@ BOOL COggDlg::DestroyWindow()
 	if (pl && plw) {
 		killw1 = 0;
 		pl->DestroyWindow();
-		for (; killw1 == 0;)
-			DoEvent();
+		PumpUntilFlagOrTimeout(killw1);
 		pl = NULL;
 		savedata.pl = 1;
 	}
@@ -14668,9 +14676,11 @@ BOOL COggDlg::DestroyWindow()
 	if (mi) {
 		killw1 = 0;
 		mi->DestroyWindow();
-		for (; killw1 == 0;)
-			DoEvent();
+		PumpUntilFlagOrTimeout(killw1);
 		mi = NULL;
+	}
+	if (::IsWindow(m_EqualizerDlg.GetSafeHwnd())) {
+		m_EqualizerDlg.DestroyWindow();
 	}
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd())) {
 		m_PianoRollDlg.DetachForDestroy();
@@ -20221,8 +20231,7 @@ void COggDlg::OnPlayList()
 			pl->nnn = 1;
 			//			pl->DestroyWindow();
 			pl->OnClose();
-			for (; killw1 == 0;)
-				DoEvent();
+			PumpUntilFlagOrTimeout(killw1);
 			delete pl;
 			pl = NULL;
 		}
