@@ -202,7 +202,11 @@ private:
     CFont   m_fontKeyOct;
     CFont   m_fontMeterTag;
     CFont   m_fontExprSymbol;
+    CFont   m_fontExprSymbolCompact;
     CFont   m_fontExprLegend;
+    int     m_fontCacheClientW = 0;
+    int     m_fontCacheKeyH = 0;
+    int     m_fontCacheRollH = 0;
     bool    m_paintFontsReady = false;
     volatile LONG m_syncPosted = 0;
 
@@ -223,6 +227,7 @@ private:
     void InvalidatePianoRollRegions(bool roll, bool key);
     void EnsurePaintFonts(int clientW, int keyH, int rollH);
     void DrawExprLegend(CDC& dc, int rollW, int rollH) const;
+    void GetExprLegendPanelRect(int rollW, int rollH, CRect& panel) const;
     void DrawHistoryGrid(CDC& dc, int width, int yFrom, int yTo) const;
     int  HistoryRowPitch(int rollH) const;
     int  HistoryScrollPx(int rollH, int rowsToScroll) const;

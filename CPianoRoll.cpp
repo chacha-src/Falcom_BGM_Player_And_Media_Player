@@ -1483,39 +1483,59 @@ namespace PianoDraw
         if (flagCount <= 0) return;
 
         const int spaceAbove = cell.top - clipTop;
-        if (spaceAbove < 6) return;
+        if (spaceAbove < 5) return;
 
-        int symH = max(10, min(22, rowPitch + 6));
-        if (cell.Width() >= 10)
-            symH = max(symH, min(22, cell.Width() / 2 + 6));
-        symH = min(symH, spaceAbove);
-
-        CRect sym(cell.left, cell.top - symH, cell.right, cell.top);
-        if (sym.top < clipTop) sym.top = clipTop;
-        if (sym.bottom > cell.top) sym.bottom = cell.top;
-        if (sym.bottom <= sym.top || sym.Height() < 6) return;
-
-        const int gap = 1;
-        int badgeW = (sym.Width() - gap * (flagCount - 1)) / flagCount;
-        if (badgeW < 8) badgeW = 8;
-        int totalW = badgeW * flagCount + gap * (flagCount - 1);
-        if (totalW > sym.Width()) {
-            badgeW = max(8, (sym.Width() - gap * (flagCount - 1)) / flagCount);
-            totalW = badgeW * flagCount + gap * (flagCount - 1);
-        }
-        int x0 = sym.left + (sym.Width() - totalW) / 2;
-
+        const int laneW = cell.Width();
         static const uint8_t kOrder[] = {
             PianoExpr::ACCENT, PianoExpr::SCOOP, PianoExpr::FALL,
             PianoExpr::SLIDE, PianoExpr::VIBRATO, PianoExpr::SUSTAIN
         };
-        int drawn = 0;
+
+        uint8_t flags[8];
+        int nFlags = 0;
         for (uint8_t flag : kOrder) {
-            if (!(expr & flag)) continue;
-            CRect badge(x0 + drawn * (badgeW + gap), sym.top,
-                x0 + drawn * (badgeW + gap) + badgeW, sym.bottom);
-            DrawExprGlyphOnNote(dc, badge, flag, pSymFont);
-            ++drawn;
+            if (expr & flag)
+                flags[nFlags++] = flag;
+        }
+        if (nFlags <= 0) return;
+
+        const int gap = 1;
+        const int needW = nFlags * 5 + gap * (nFlags - 1);
+        const bool vertical = (nFlags > 1 && laneW < needW);
+
+        int symH = vertical
+            ? max(nFlags * 5, min(spaceAbove, nFlags * 7 + 2))
+            : max(8, min(spaceAbove, max(10, rowPitch + 4)));
+        symH = min(symH, spaceAbove);
+
+        CRect sym(cell.left, cell.top - symH, cell.right, cell.top);
+        if (sym.bottom > cell.top) sym.bottom = cell.top;
+        if (sym.bottom <= sym.top) return;
+
+        if (vertical) {
+            const int rowH = max(4, sym.Height() / nFlags);
+            int y = sym.top;
+            for (int i = 0; i < nFlags; ++i) {
+                CRect badge(sym.left, y, sym.right, min(sym.bottom, y + rowH));
+                if (badge.bottom > badge.top)
+                    DrawExprGlyphOnNote(dc, badge, flags[i], pSymFont);
+                y += rowH;
+            }
+        }
+        else {
+            int badgeW = (laneW - gap * (nFlags - 1)) / nFlags;
+            if (badgeW < 3) badgeW = 3;
+            int totalW = badgeW * nFlags + gap * (nFlags - 1);
+            if (totalW > laneW) {
+                badgeW = max(3, (laneW - gap * (nFlags - 1)) / nFlags);
+                totalW = badgeW * nFlags + gap * (nFlags - 1);
+            }
+            int x0 = sym.left + (laneW - totalW) / 2;
+            for (int i = 0; i < nFlags; ++i) {
+                CRect badge(x0 + i * (badgeW + gap), sym.top,
+                    x0 + i * (badgeW + gap) + badgeW, sym.bottom);
+                DrawExprGlyphOnNote(dc, badge, flags[i], pSymFont);
+            }
         }
     }
 
@@ -1668,8 +1688,12 @@ void CPianoRoll::ReleasePaintBuffers()
     if (m_fontKeyOct.GetSafeHandle()) m_fontKeyOct.DeleteObject();
     if (m_fontMeterTag.GetSafeHandle()) m_fontMeterTag.DeleteObject();
     if (m_fontExprSymbol.GetSafeHandle()) m_fontExprSymbol.DeleteObject();
+    if (m_fontExprSymbolCompact.GetSafeHandle()) m_fontExprSymbolCompact.DeleteObject();
     if (m_fontExprLegend.GetSafeHandle()) m_fontExprLegend.DeleteObject();
     m_paintFontsReady = false;
+    m_fontCacheClientW = 0;
+    m_fontCacheKeyH = 0;
+    m_fontCacheRollH = 0;
 }
 
 bool CPianoRoll::EnsureRollBuffer(CDC& refDC, int width, int rollH)
@@ -1744,18 +1768,26 @@ bool CPianoRoll::EnsureKeyBuffer(CDC& refDC, int width, int keySectionH)
 
 void CPianoRoll::EnsurePaintFonts(int clientW, int keyH, int rollH)
 {
+    if (m_paintFontsReady &&
+        m_fontCacheClientW == clientW &&
+        m_fontCacheKeyH == keyH &&
+        m_fontCacheRollH == rollH)
+        return;
+
     const int rowPitch = HistoryRowPitch(rollH);
+    const int lanePx = max(5, clientW / 88);
     const int notePx = max(9, min(14, clientW / 52));
     const int octPx = max(8, min(12, clientW / 52));
     const int tagPx = max(7, min(11, keyH / 4));
-    const int symPx = max(12, min(22, max(clientW / 36, rowPitch + 8)));
-    const int legPx = max(8, min(12, clientW / 58));
-    if (m_paintFontsReady) return;
+    const int symPx = max(10, min(20, max(clientW / 38, rowPitch + 6)));
+    const int symCompactPx = max(6, min(10, lanePx + 1));
+    const int legPx = max(7, min(11, min(clientW / 58, rollH / 15)));
 
     if (m_fontKeyNote.GetSafeHandle()) m_fontKeyNote.DeleteObject();
     if (m_fontKeyOct.GetSafeHandle()) m_fontKeyOct.DeleteObject();
     if (m_fontMeterTag.GetSafeHandle()) m_fontMeterTag.DeleteObject();
     if (m_fontExprSymbol.GetSafeHandle()) m_fontExprSymbol.DeleteObject();
+    if (m_fontExprSymbolCompact.GetSafeHandle()) m_fontExprSymbolCompact.DeleteObject();
     if (m_fontExprLegend.GetSafeHandle()) m_fontExprLegend.DeleteObject();
 
     m_fontKeyNote.CreateFont(-notePx, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
@@ -1766,15 +1798,63 @@ void CPianoRoll::EnsurePaintFonts(int clientW, int keyH, int rollH)
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     m_fontExprSymbol.CreateFont(-symPx, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Symbol");
+    m_fontExprSymbolCompact.CreateFont(-symCompactPx, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Symbol");
     m_fontExprLegend.CreateFont(-legPx, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+    m_fontCacheClientW = clientW;
+    m_fontCacheKeyH = keyH;
+    m_fontCacheRollH = rollH;
     m_paintFontsReady = true;
+}
+
+void CPianoRoll::GetExprLegendPanelRect(int rollW, int rollH, CRect& panel) const
+{
+    panel.SetRectEmpty();
+    if (rollW < 72 || rollH < 48) return;
+
+    static const int kItemCount = 6;
+    const int pad = max(3, min(6, rollW / 90));
+    int lineH = max(9, min(16, rollH / 14));
+    int titleH = max(10, min(14, lineH + 1));
+    int badgeW = max(10, min(15, rollW / 28));
+
+    int cols = 1;
+    const int fullH = pad * 2 + titleH + kItemCount * lineH;
+    if (rollW >= 210 && rollH < fullH - 8)
+        cols = 2;
+
+    const int rows = (kItemCount + cols - 1) / cols;
+    int panelW = min(rollW - 8, max(88, rollW * 55 / 100));
+    if (cols == 2)
+        panelW = min(panelW, min(240, rollW - 8));
+    else
+        panelW = min(panelW, min(200, rollW - 8));
+
+    int panelH = pad * 2 + titleH + rows * lineH;
+    const int maxH = rollH * 42 / 100;
+    if (panelH > maxH) {
+        lineH = max(8, (maxH - pad * 2 - titleH) / rows);
+        panelH = pad * 2 + titleH + rows * lineH;
+    }
+    if (rollH < 100) {
+        titleH = 0;
+        lineH = max(8, min(12, rollH / 8));
+        badgeW = max(8, min(12, rollW / 40));
+        panelH = pad * 2 + lineH;
+        panelW = min(rollW - 8, pad * 2 + kItemCount * (badgeW + 2));
+    }
+
+    panel.SetRect(4, 4, 4 + panelW, 4 + panelH);
 }
 
 void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH) const
 {
     using namespace PianoDraw;
-    if (rollW < 80 || rollH < 60) return;
+    CRect panel;
+    GetExprLegendPanelRect(rollW, rollH, panel);
+    if (panel.IsRectEmpty()) return;
     if (!m_paintFontsReady || !m_fontExprLegend.GetSafeHandle() || !m_fontExprSymbol.GetSafeHandle())
         return;
 
@@ -1790,16 +1870,17 @@ void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH) const
         LL14(L"ビブラート", L"Vibrato", L"Vibrato", L"Vibrato", L"Vibrato", L"비브라토", L"颤音", L"Vibrato", L"Вибрато", L"Vibrato", L"Vibrato", L"Vibrato", L"Wibrato", L"Vibrato"),
         LL14(L"サステイン", L"Sustain", L"Sustain", L"Sustain", L"Sustain", L"서스테인", L"延音", L"Sustain", L"Длит.", L"Sustain", L"Sustain", L"Sustain", L"Sustain", L"Sustain")
     };
-
-    const int lineH = 17;
-    const int badgeW = 16;
-    const int pad = 6;
-    const int titleH = 16;
     const int n = (int)(sizeof(kFlags) / sizeof(kFlags[0]));
-    const int panelW = min(rollW - 8, 228);
-    const int panelH = pad * 2 + titleH + n * lineH;
+    const int pad = max(3, min(6, rollW / 90));
+    const int lineH = max(8, (panel.Height() - pad * 2) / (rollH < 100 ? 1 : (n + 1)));
+    const int titleH = (rollH < 100) ? 0 : max(10, min(14, lineH + 1));
+    const int badgeW = max(8, min(15, rollW / 28));
+    const bool iconsOnly = (rollH < 100);
+    int cols = 1;
+    if (!iconsOnly && rollW >= 210 && panel.Height() < pad * 2 + titleH + n * lineH - 4)
+        cols = 2;
+    const int rows = iconsOnly ? 1 : (n + cols - 1) / cols;
 
-    CRect panel(6, 6, 6 + panelW, 6 + panelH);
     dc.FillSolidRect(&panel, RGB(14, 14, 20));
     CPen border(PS_SOLID, 1, RGB(70, 70, 82));
     CPen* pOldPen = dc.SelectObject(&border);
@@ -1812,19 +1893,50 @@ void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH) const
     CFont* pSym = CFont::FromHandle((HFONT)m_fontExprSymbol.GetSafeHandle());
     CFont* pOldF = dc.SelectObject(pLeg);
     dc.SetBkMode(TRANSPARENT);
-    dc.SetTextColor(RGB(210, 210, 220));
-    CRect titleR(panel.left + pad, panel.top + pad, panel.right - pad, panel.top + pad + titleH);
-    dc.DrawText(LL14(L"記号の意味", L"Symbol legend", L"Légende", L"Legenda simboli", L"Leyenda", L"기호 설명", L"符号说明", L"دليل الرموز", L"Обозначения", L"Symbollegende", L"Legenda", L"Symbolen", L"Legenda symboli", L"Semboller"),
-        titleR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
-    int y = panel.top + pad + titleH;
-    for (int i = 0; i < n; ++i) {
-        CRect badgeR(panel.left + pad, y + 1, panel.left + pad + badgeW, y + 1 + lineH - 2);
-        DrawExprBadgePanel(dc, badgeR, kFlags[i], pSym);
-        CRect labelR(badgeR.right + 5, y, panel.right - pad, y + lineH);
-        dc.SetTextColor(ExprColorForFlag(kFlags[i]));
-        dc.DrawText(kLabels[i], labelR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-        y += lineH;
+    int y = panel.top + pad;
+    if (!iconsOnly) {
+        dc.SetTextColor(RGB(210, 210, 220));
+        CRect titleR(panel.left + pad, y, panel.right - pad, y + titleH);
+        dc.DrawText(LL14(L"記号の意味", L"Symbol legend", L"Légende", L"Legenda simboli", L"Leyenda", L"기호 설명", L"符号说明", L"دليل الرموز", L"Обозначения", L"Symbollegende", L"Legenda", L"Symbolen", L"Legenda symboli", L"Semboller"),
+            titleR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        y += titleH;
+    }
+
+    if (iconsOnly) {
+        const int gap = 2;
+        int bw = (panel.Width() - pad * 2 - gap * (n - 1)) / n;
+        if (bw < 8) bw = 8;
+        int x = panel.left + pad;
+        for (int i = 0; i < n; ++i) {
+            CRect badgeR(x, y, min(panel.right - pad, x + bw), y + lineH);
+            DrawExprBadgePanel(dc, badgeR, kFlags[i], pSym);
+            x += bw + gap;
+        }
+    }
+    else if (cols == 2) {
+        const int colW = (panel.Width() - pad * 2) / 2;
+        for (int i = 0; i < n; ++i) {
+            const int col = i / rows;
+            const int row = i % rows;
+            const int x0 = panel.left + pad + col * colW;
+            const int y0 = y + row * lineH;
+            CRect badgeR(x0, y0 + 1, x0 + badgeW, y0 + lineH - 1);
+            DrawExprBadgePanel(dc, badgeR, kFlags[i], pSym);
+            CRect labelR(badgeR.right + 4, y0, x0 + colW - 2, y0 + lineH);
+            dc.SetTextColor(ExprColorForFlag(kFlags[i]));
+            dc.DrawText(kLabels[i], labelR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        }
+    }
+    else {
+        for (int i = 0; i < n; ++i) {
+            CRect badgeR(panel.left + pad, y + 1, panel.left + pad + badgeW, y + lineH - 1);
+            DrawExprBadgePanel(dc, badgeR, kFlags[i], pSym);
+            CRect labelR(badgeR.right + 4, y, panel.right - pad, y + lineH);
+            dc.SetTextColor(ExprColorForFlag(kFlags[i]));
+            dc.DrawText(kLabels[i], labelR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+            y += lineH;
+        }
     }
     dc.SelectObject(pOldF);
 }
@@ -1897,6 +2009,11 @@ void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const 
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (!frame.active[i] || !frame.expr[i]) continue;
         int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
+        const int laneW = xR - xL - 2;
+        if (laneW < 14 && m_fontExprSymbolCompact.GetSafeHandle())
+            pSymFont = CFont::FromHandle((HFONT)m_fontExprSymbolCompact.GetSafeHandle());
+        else
+            pSymFont = CFont::FromHandle((HFONT)m_fontExprSymbol.GetSafeHandle());
         DrawExprSymbolTop(dc, CRect(xL + 1, yTop, xR - 1, yBot), frame.expr[i],
             0, yBot, pSymFont, rowPitch);
     }
