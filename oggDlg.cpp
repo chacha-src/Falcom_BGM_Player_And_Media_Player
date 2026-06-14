@@ -14673,6 +14673,7 @@ BOOL COggDlg::DestroyWindow()
 		mi = NULL;
 	}
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd())) {
+		m_PianoRollDlg.DetachForDestroy();
 		m_PianoRollDlg.DestroyWindow();
 	}
 	if (m_pDlgColor)delete m_pDlgColor;
@@ -15117,7 +15118,7 @@ void COggDlg::timerp()
 
 
 	if (plf == 1 && (wav || ogg) && ::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
-		SyncPianoRollFromPlayCursor();
+		m_PianoRollDlg.RequestSyncFromMainUi();
 	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) Speana();
 	s = L""; ss = L"";
 	s = "name:";
@@ -21028,6 +21029,7 @@ void COggDlg::TogglePianoRoll()
 		savedata.pianorollwindow = 1;
 	}
 	else {
+		m_PianoRollDlg.DetachForDestroy();
 		m_PianoRollDlg.DestroyWindow();
 		savedata.pianorollwindow = 0;
 	}

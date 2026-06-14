@@ -11,19 +11,20 @@ public:
     CPianoRoll(CWnd* pParent = nullptr);
     virtual ~CPianoRoll();
 
+    void RequestSyncFromMainUi();
+
 #ifdef AFX_DESIGN_TIME
     enum { IDD = IDD_PIANOROLL };
 #endif
 
-    // playbackDelaySamples: DS バッファ内の write-play 差（再生同期用・レガシー）
     void FeedPCM(const void* pData, int frames, int sampleRate, int bits, int channels,
         int playbackDelaySamples = 0);
     void AnalyzePlayCursorMono(const double* mono, int frameCount, int sampleRate);
     void SetChannelMeterDb(const float* dbPerChannel, int channelCount);
     void ResetPlaybackState();
+    void DetachForDestroy();
 
     static constexpr int PIANO_METER_CH_MAX = 8;
-
     static constexpr int PIANO_BASS_FRAMES = 16384;
     static constexpr int PIANO_LOW_FRAMES  = 8192;
 
@@ -38,12 +39,13 @@ protected:
     afx_msg void OnMove(int x, int y);
     afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg void OnClose();
+    afx_msg LRESULT OnSyncRequest(WPARAM wParam, LPARAM lParam);
     virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 private:
     struct NoteExpr {
         static constexpr uint8_t ACCENT  = 0x01;
-        static constexpr uint8_t SCOOP   = 0x02; // しゃくり
+        static constexpr uint8_t SCOOP   = 0x02;
         static constexpr uint8_t VIBRATO = 0x04;
         static constexpr uint8_t SLIDE   = 0x08;
     };
@@ -51,25 +53,26 @@ private:
     struct NoteFrame {
         bool     active[88];
         float    strength[88];
-        uint8_t  segment[88];   // 同音連打区切り
-        uint8_t  bandMask[88];   // bit0=低音 bit1=中音 bit2=高音 (同キー複数声部)
+        uint8_t  segment[88];
+        uint8_t  bandMask[88];
         float    laneStrength[88][3];
-        uint8_t  expr[88];        // NoteExpr フラグ
-        float    dynLevel[88];    // 0..1 ダイナミクス（バー幅）
+        uint8_t  expr[88];
+        float    dynLevel[88];
     };
 
     static constexpr int   KEY_COUNT    = 88;
     static constexpr int   WHITE_KEY_COUNT = 52;
-    static constexpr int   MIDI_BASE      = 21;   // A0
+    static constexpr int   MIDI_BASE      = 21;
     static constexpr size_t MAX_HISTORY   = 120;
     static constexpr int   RING_SIZE      = 131072;
-    static constexpr int   WIN_LOW        = 8192; // mode0_Note 低域窓長
-    static constexpr int   WIN_BASS       = 16384; // 低音帯 Goertzel 窓
-    static constexpr int   WIN_HIGH       = 4096; // mode0_Note 高域窓長
-    static constexpr int   WIN_ONSET      = 1024; // 短い音符用（64分@180≈21ms）
-    static constexpr int   LOW_KEY_SPLIT  = 50;   // bin<50 → 8192点 (スペアナ mode0 同様)
-    static constexpr int   DETECT_KEYS    = 108;  // スペアナ mode0 同系
-    static constexpr int   KEY_OFFSET       = 9;    // display[i] <- detect[i+9] (A0=MIDI21)
+    static constexpr int   WIN_LOW        = 8192;
+    static constexpr int   WIN_BASS       = 16384;
+    static constexpr int   WIN_HIGH       = 4096;
+    static constexpr int   WIN_ONSET      = 1024;
+    static constexpr int   LOW_KEY_SPLIT  = 41;
+    static constexpr int   DETECT_KEYS    = 108;
+    static constexpr int   KEY_OFFSET       = 9;
+    static constexpr UINT  WM_PIANOROLL_SYNC = WM_APP + 420;
 
     std::vector<NoteFrame> m_history;
 
@@ -85,8 +88,7 @@ private:
     int     m_strengthDipFrames[88];
     uint8_t m_bandMask[88];
     float   m_laneStrength[88][3];
-    int     m_bassLockKey = -1;
-    int     m_bassLockHold = 0;
+    uint8_t m_prevBandMask[KEY_COUNT];
 
     std::vector<double> m_ring;
     int                 m_ringWrite = 0;
@@ -117,7 +119,11 @@ private:
 
     CRITICAL_SECTION m_cs;
     bool m_feedEnabled = true;
+    bool m_paintDisabled = false;
     bool m_historyDirty = true;
+    bool m_keyDirty = true;
+    bool m_meterDirty = false;
+    int  m_framesPending = 0;
     DWORD m_lastAnalyzeTick = 0;
     float m_bufwav3LevelDb = -60.0f;
     float m_chMeterDb[PIANO_METER_CH_MAX];
@@ -145,19 +151,62 @@ private:
     void GetWhiteKeyRect52(int midi, int width, int& xL, int& xR) const;
     void DrawChannelDbBars(CDC& dc, const CRect& rc, const float* chFill, int chCount) const;
 
-    CDC     m_histCacheDC;
-    CBitmap m_histCacheBmp;
-    CBitmap* m_histCacheOldBmp = nullptr;
-    int     m_histCacheW = 0;
-    int     m_histCacheH = 0;
-    uint32_t m_historyPushSerial = 0;
-    uint32_t m_histCacheSerial = 0;
-    bool    m_histCacheReady = false;
+    CDC     m_rollDC;
+    CBitmap m_rollBmp;
+    CBitmap* m_rollOldBmp = nullptr;
+    CDC     m_rollScratchDC;
+    CBitmap m_rollScratchBmp;
+    CBitmap* m_rollScratchOldBmp = nullptr;
+    int     m_rollW = 0;
+    int     m_rollH = 0;
+    bool    m_rollReady = false;
+    bool    m_rollScrollValid = false;
+    int     m_lastScrollPx = 0;
+    int     m_lastScrollHealTop = 0;
 
-    void InvalidateHistoryCache();
-    void SyncHistoryCache(CDC& refDC, int width, int rollH, const std::vector<NoteFrame>& hist, uint32_t pushSerial);
-    void RebuildHistoryCache(int width, int rollH, const std::vector<NoteFrame>& hist);
-    void AdvanceHistoryCache(int width, int rollH, const std::vector<NoteFrame>& hist, int delta);
-    void DrawHistoryGrid(CDC& dc, int width, int rollH, int yFrom, int yTo) const;
-    void DrawHistoryRow(CDC& dc, int width, int rollH, size_t r, const NoteFrame& frame, CFont* badgeFont) const;
+    CDC     m_keyDC;
+    CBitmap m_keyBmp;
+    CBitmap* m_keyOldBmp = nullptr;
+    int     m_keyW = 0;
+    int     m_keyH = 0;
+    bool    m_keyBufReady = false;
+
+    CFont   m_fontKeyNote;
+    CFont   m_fontKeyOct;
+    CFont   m_fontMeterTag;
+    CFont   m_fontExprSymbol;
+    bool    m_paintFontsReady = false;
+    volatile LONG m_syncPosted = 0;
+
+#if CCUSTOM_AERO_SUPPORT
+    CCC_ChromaBlitCache m_chromaCache;
+    bool    m_chromaReady = false;
+    int     m_chromaW = 0;
+    int     m_chromaH = 0;
+#endif
+    bool    m_keySnapActive[KEY_COUNT];
+    uint8_t m_keySnapBand[KEY_COUNT];
+
+    void ReleasePaintBuffers();
+    bool EnsureRollBuffer(CDC& refDC, int width, int rollH);
+    bool EnsureKeyBuffer(CDC& refDC, int width, int keySectionH);
+    void MarkKeyVisualDirty();
+    void ApplySyncInvalidate();
+    void InvalidatePianoRollRegions(bool roll, bool key);
+    void EnsurePaintFonts(int clientW, int keyH);
+    void DrawHistoryGrid(CDC& dc, int width, int yFrom, int yTo) const;
+    int  HistoryRowPitch(int rollH) const;
+    int  HistoryScrollPx(int rollH, int rowsToScroll) const;
+    void DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const NoteFrame& frame) const;
+    void DrawHistoryRow(CDC& dc, int width, int rollH, size_t rowIndex, const NoteFrame& frame) const;
+    void DrawHistoryArea(CDC& dc, int width, int rollH, const std::vector<NoteFrame>& hist) const;
+    void GetHistoryRowBounds(int rollH, int rowFromBottom, int& yTop, int& yBot) const;
+    void ComposeRollBuffer(CDC& dc, int width, int rollH, const std::vector<NoteFrame>& hist, const NoteFrame& live) const;
+    bool TryAdvanceRollBuffer(int width, int rollH, const std::vector<NoteFrame>& hist, int pendingCount, const NoteFrame& live);
+    void BuildLiveNoteFrame(NoteFrame& frame) const;
+    void DrawPlayheadRow(CDC& dc, int width, int rollH, const NoteFrame& live) const;
+    void DrawKeyboardToBuffer(CDC& dc, int width, int keySectionH, int keyH,
+        const bool* activesCopy, const uint8_t* bandMaskCopy, const float laneStrengthCopy[KEY_COUNT][3],
+        const float* chFillCopy, int chCountCopy) const;
+    void UpdatePianoRollTimer();
 };

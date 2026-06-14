@@ -133,17 +133,43 @@ static UINT32 CCC_RgbMask(COLORREF clr)
     return (UINT32)(GetRValue(clr) << 16) | (UINT32)(GetGValue(clr) << 8) | GetBValue(clr);
 }
 
+static void CCC_SetDibAlphaFromChromaRect(void* pBits, int dibW, int dibH, const RECT& rc, COLORREF clrKey)
+{
+    if (!pBits || dibW <= 0 || dibH <= 0) return;
+    int x0 = rc.left, y0 = rc.top, x1 = rc.right, y1 = rc.bottom;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > dibW) x1 = dibW;
+    if (y1 > dibH) y1 = dibH;
+    if (x0 >= x1 || y0 >= y1) return;
+
+    const UINT32 key = CCC_RgbMask(clrKey);
+    const UINT32 opaque = 0xFF000000u;
+    UINT32* base = (UINT32*)pBits;
+    for (int y = y0; y < y1; ++y) {
+        UINT32* row = base + y * dibW + x0;
+        const int n = x1 - x0;
+        int i = 0;
+        for (; i + 3 < n; i += 4) {
+            UINT32 p0 = row[i];     UINT32 p1 = row[i + 1];
+            UINT32 p2 = row[i + 2]; UINT32 p3 = row[i + 3];
+            row[i]     = ((p0 & 0x00FFFFFFu) == key) ? 0u : (p0 | opaque);
+            row[i + 1] = ((p1 & 0x00FFFFFFu) == key) ? 0u : (p1 | opaque);
+            row[i + 2] = ((p2 & 0x00FFFFFFu) == key) ? 0u : (p2 | opaque);
+            row[i + 3] = ((p3 & 0x00FFFFFFu) == key) ? 0u : (p3 | opaque);
+        }
+        for (; i < n; ++i) {
+            const UINT32 p = row[i];
+            row[i] = ((p & 0x00FFFFFFu) == key) ? 0u : (p | opaque);
+        }
+    }
+}
+
 static void CCC_SetDibAlphaFromChroma(void* pBits, int w, int h, COLORREF clrKey)
 {
     if (!pBits || w <= 0 || h <= 0) return;
-    const UINT32 key = CCC_RgbMask(clrKey);
-    UINT32* px = (UINT32*)pBits;
-    const int n = w * h;
-    for (int i = 0; i < n; ++i)
-    {
-        const UINT32 rgb = px[i] & 0x00FFFFFFu;
-        px[i] = (rgb == key) ? 0u : (rgb | 0xFF000000u);
-    }
+    RECT rc = { 0, 0, w, h };
+    CCC_SetDibAlphaFromChromaRect(pBits, w, h, rc, clrKey);
 }
 
 static HBITMAP CCC_CreateAlphaDib32(HDC hdcRef, int w, int h, void** ppBits)
@@ -167,6 +193,136 @@ static HBITMAP CCC_CreateAlphaDib32(HDC hdcRef, int w, int h, void** ppBits)
         return NULL;
     }
     return hBmp;
+}
+
+void CCC_ChromaBlitCache::Release()
+{
+    if (hdcDib) {
+        if (hOldBmp) ::SelectObject(hdcDib, hOldBmp);
+        ::DeleteDC(hdcDib);
+    }
+    if (hDib) ::DeleteObject(hDib);
+    hDib = NULL;
+    hdcDib = NULL;
+    hOldBmp = NULL;
+    pBits = nullptr;
+    dibW = 0;
+    dibH = 0;
+}
+
+BOOL CCC_ChromaBlitCache::Ensure(HDC hdcRef, int w, int h)
+{
+    if (w <= 0 || h <= 0 || !hdcRef) return FALSE;
+    if (hDib && hdcDib && pBits && dibW == w && dibH == h) return TRUE;
+    Release();
+    hDib = CCC_CreateAlphaDib32(hdcRef, w, h, &pBits);
+    if (!hDib || !pBits) {
+        Release();
+        return FALSE;
+    }
+    hdcDib = ::CreateCompatibleDC(hdcRef);
+    if (!hdcDib) {
+        Release();
+        return FALSE;
+    }
+    hOldBmp = ::SelectObject(hdcDib, hDib);
+    dibW = w;
+    dibH = h;
+    return TRUE;
+}
+
+void CCC_ChromaBlitCache::ScrollRows(int y, int height, int scrollPx)
+{
+    if (!pBits || dibW <= 0 || scrollPx <= 0 || height <= scrollPx || y < 0 || y + height > dibH)
+        return;
+    UINT32* base = (UINT32*)pBits;
+    const int preserveH = height - scrollPx;
+    UINT32* dst = base + y * dibW;
+    UINT32* src = base + (y + scrollPx) * dibW;
+    memmove(dst, src, (size_t)preserveH * (size_t)dibW * sizeof(UINT32));
+}
+
+BOOL CCC_ChromaBlitCache::UpdateRect(HDC hdcSrc, int srcX, int srcY, int dx, int dy, int rw, int rh, COLORREF clrKey)
+{
+    if (!hdcSrc || rw <= 0 || rh <= 0 || !pBits || !hdcDib) return FALSE;
+    if (dx < 0 || dy < 0 || dx + rw > dibW || dy + rh > dibH) return FALSE;
+
+    {
+        CDC dcDib;
+        dcDib.Attach(hdcDib);
+        dcDib.SetStretchBltMode(COLORONCOLOR);
+        dcDib.BitBlt(dx, dy, rw, rh, CDC::FromHandle(hdcSrc), srcX, srcY, SRCCOPY);
+        dcDib.Detach();
+    }
+    RECT rc = { dx, dy, dx + rw, dy + rh };
+    CCC_SetDibAlphaFromChromaRect(pBits, dibW, dibH, rc, clrKey);
+    return TRUE;
+}
+
+BOOL CCC_ChromaBlitCache::BlitRect(HDC hdcDest, int x, int y, int w, int h)
+{
+    if (!hdcDest || w <= 0 || h <= 0 || !pBits || !hdcDib || dibW <= 0 || dibH <= 0) return FALSE;
+    if (x < 0 || y < 0 || x + w > dibW || y + h > dibH) return FALSE;
+
+    RECT rect = { x, y, x + w, y + h };
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (!hdcBuf || !hBP) return FALSE;
+
+    CCC_InitBufferedPaintTransparent(hBP, w, h);
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    ::GdiAlphaBlend(hdcBuf, x, y, w, h, hdcDib, x, y, w, h, bf);
+    ::EndBufferedPaint(hBP, TRUE);
+    return TRUE;
+}
+
+BOOL CCC_ChromaBlitCache::BlitFull(HDC hdcDest, int x, int y, int w, int h)
+{
+    if (!hdcDest || w <= 0 || h <= 0 || !pBits || !hdcDib || dibW != w || dibH != h) return FALSE;
+
+    RECT rect = { x, y, x + w, y + h };
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (!hdcBuf || !hBP) return FALSE;
+
+    CCC_InitBufferedPaintTransparent(hBP, w, h);
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    ::GdiAlphaBlend(hdcBuf, 0, 0, w, h, hdcDib, 0, 0, w, h, bf);
+    ::EndBufferedPaint(hBP, TRUE);
+    return TRUE;
+}
+
+static BOOL CCC_BlitToRectChromaNoFlickerCached(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
+    int destW, int destH, int srcW, int srcH, COLORREF clrKey, CCC_ChromaBlitCache& cache)
+{
+    if (destW <= 0 || destH <= 0) return FALSE;
+    if (!cache.Ensure(hdcDest, destW, destH)) return FALSE;
+
+    {
+        CDC dcDib;
+        dcDib.Attach(cache.hdcDib);
+        dcDib.FillSolidRect(0, 0, destW, destH, clrKey);
+        dcDib.SetStretchBltMode(COLORONCOLOR);
+        if (destW != srcW || destH != srcH)
+            dcDib.StretchBlt(0, 0, destW, destH, CDC::FromHandle(hdcSrc), srcX, srcY, srcW, srcH, SRCCOPY);
+        else
+            dcDib.BitBlt(0, 0, destW, destH, CDC::FromHandle(hdcSrc), srcX, srcY, SRCCOPY);
+        dcDib.Detach();
+    }
+    CCC_SetDibAlphaFromChroma(cache.pBits, destW, destH, clrKey);
+
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (!hdcBuf || !hBP) return FALSE;
+
+    CCC_InitBufferedPaintTransparent(hBP, destW, destH);
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    ::GdiAlphaBlend(hdcBuf, 0, 0, destW, destH, cache.hdcDib, 0, 0, destW, destH, bf);
+    ::EndBufferedPaint(hBP, TRUE);
+    return TRUE;
 }
 
 // 画面 FillRect なし。バッファを毎回クロマキーで全面初期化してからアルファ合成（残像防止）
@@ -357,6 +513,17 @@ void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc
     RECT rect = { x, y, x + w, y + h };
     if (!CCC_BlitToRectChromaNoFlicker(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE))
         CCC_BlitChroma(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
+}
+
+BOOL CCC_BlitChromaNoFlickerCached(HDC hdcDest, int x, int y, int w, int h,
+    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, CCC_ChromaBlitCache& cache)
+{
+    if (w <= 0 || h <= 0) return FALSE;
+    RECT rect = { x, y, x + w, y + h };
+    if (CCC_BlitToRectChromaNoFlickerCached(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, cache))
+        return TRUE;
+    CCC_BlitChromaNoFlicker(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
+    return TRUE;
 }
 
 void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)

@@ -370,7 +370,7 @@ BEGIN
     LTEXT           "割込間隔",IDC_STATIC_R_BUF,7,7,47,8
     CONTROL         "デフォルトでEVRを使う(Vista以降)",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,61,112,10
     CONTROL         "デスクトップコンポジションを使用する",IDC_CHECK2,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,72,118,10
-    CONTROL         "AeroでGrass効果を使用する",IDC_CHECK3,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,82,118,10
+    CONTROL         "アクリルモードを使用する",IDC_CHECK3,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,82,118,10
     CONTROL         "ffdshowを使う",IDC_CHECK27,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,173,7,10,10
     PUSHBUTTON      "DirectShowフィルタ一覧",IDCANCEL2,77,327,73,14
     CONTROL         "vobも複数ストリーム対応とする",IDC_CHECK30,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,172,7,11,10
@@ -875,7 +875,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,402
+ FILEVERSION 0,8,7,410
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -893,10 +893,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.06.10"
-            VALUE "FileVersion", "0.8.7.402"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.06.14"
+            VALUE "FileVersion", "0.8.7.410"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.06.10"
+            VALUE "LegalCopyright", "Copyright (C) 2026.06.14"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

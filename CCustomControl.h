@@ -38,6 +38,22 @@
 #define CCC_MSG_REFRESH_CHILDREN      (WM_APP + 313)
 // 透過合成のクロマキー（黒文字 RGB(0,0,0) と区別するため 1,1,1 を使用）
 #define CCC_AERO_CHROMA_KEY RGB(1, 1, 1)
+
+struct CCC_ChromaBlitCache {
+    HBITMAP hDib = NULL;
+    HDC     hdcDib = NULL;
+    HGDIOBJ hOldBmp = NULL;
+    void*   pBits = nullptr;
+    int     dibW = 0;
+    int     dibH = 0;
+    void Release();
+    BOOL Ensure(HDC hdcRef, int w, int h);
+    void ScrollRows(int y, int height, int scrollPx);
+    BOOL UpdateRect(HDC hdcSrc, int srcX, int srcY, int dx, int dy, int rw, int rh, COLORREF clrKey);
+    BOOL BlitRect(HDC hdcDest, int x, int y, int w, int h);
+    BOOL BlitFull(HDC hdcDest, int x, int y, int w, int h);
+};
+
 void CCC_SelectClipExcludeChildren(CDC& dc, CWnd* pWnd);
 void CCC_BlitStretchOpaque(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH);
@@ -47,6 +63,8 @@ void CCC_BlitStretchChromaNoFlicker(HDC hdcDest, int x, int y, int destW, int de
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey);
 void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
 void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
+BOOL CCC_BlitChromaNoFlickerCached(HDC hdcDest, int x, int y, int w, int h,
+    HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, CCC_ChromaBlitCache& cache);
 void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
 void CCC_InvalidateBlurParent(HWND hWnd, BOOL bAeroMode);
 void CCC_RefreshDialogDwmBlur(HWND hWnd);
