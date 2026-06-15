@@ -3109,7 +3109,6 @@
     <ClCompile Include="ED4.cpp" />
     <ClCompile Include="ED5.cpp" />
     <ClCompile Include="ED63rd.cpp" />
-    <ClCompile Include="Filename.cpp" />
     <ClCompile Include="WavExport.cpp" />
     <ClCompile Include="Folder.cpp" />
     <ClCompile Include="Graph.cpp" />
@@ -3397,7 +3396,6 @@
     <ClInclude Include="ED4.h" />
     <ClInclude Include="ED5.h" />
     <ClInclude Include="ED63rd.h" />
-    <ClInclude Include="Filename.h" />
     <ClInclude Include="WavExport.h" />
     <ClInclude Include="flac.h" />
     <ClInclude Include="Folder.h" />

@@ -9014,6 +9014,20 @@ void COggDlg::play()
 		else
 			plc = pl->chk(fnn, mode, tagname, filen, 0);
 
+		{
+			int syncIdx = plc;
+			if (syncIdx < 0 && pl->playcnt > 0)
+				syncIdx = pl->playcnt - 1;
+			if (syncIdx >= 0 && syncIdx < pl->playcnt) {
+				pl->pc[syncIdx].loop1 = loop1;
+				pl->pc[syncIdx].loop2 = loop2;
+				if (mode != -10 && mode != 999 && mode != -9 && mode != -8 && mode != -7 && mode != -3) {
+					if (oggsize > 0 && wavchannel > 0 && wavbit_sample_Hz > 0)
+						pl->pc[syncIdx].time = oggsize / (2 * wavchannel * wavbit_sample_Hz);
+				}
+			}
+		}
+
 		if (plc == -1) {
 			int i = pl->m_lc.GetItemCount() - 1;
 			plcnt = i;
@@ -11187,8 +11201,10 @@ int readtempo(BYTE* data, int len,bool t = false)
 }
 using namespace std;
 void equaliser(void* data, int len, BOOL reset = FALSE);
+void EqualiserSetFormatVolContext(int mode, BOOL spcApplicable);
 int readBuffwav(char* bw, int cnt)
 {
+	EqualiserSetFormatVolContext(0, FALSE);
 	int r = cnt, rr = cnt;
 	int cnt2;
 	if (rr == 0)return 0;
@@ -11388,10 +11404,6 @@ int readadpcm(CFile& adpcmf, char* bw, int len)
 			sample1R = R16(bbuf1);    bbuf1 += 2;
 			sample2L = R16(bbuf1);    bbuf1 += 2;
 			sample2R = R16(bbuf1);    bbuf1 += 2;
-			sample1L = (int)((float)sample1L * (float)savedata.kakuVal / 100.0f);
-			sample2L = (int)((float)sample2L * (float)savedata.kakuVal / 100.0f);
-			sample1R = (int)((float)sample1R * (float)savedata.kakuVal / 100.0f);
-			sample2R = (int)((float)sample2R * (float)savedata.kakuVal / 100.0f);
 			W16(bw2, sample2L);      bw2 += 2;
 			W16(bw2, sample2R);      bw2 += 2;
 			W16(bw2, sample1L);      bw2 += 2;
@@ -11400,10 +11412,8 @@ int readadpcm(CFile& adpcmf, char* bw, int len)
 		}
 		for (int k = ak; k < (cnt - 14); k++) {
 			process_nibble(*bbuf1 >> 4, &ideltaL, &sample1L, &sample2L, &coeffL);
-			sample1L = (int)((float)sample1L * (float)savedata.kakuVal / 100.0f);
 			W16(bw2, sample1L);	bw2 += 2;
 			process_nibble(*bbuf1++ & 0x0F, &ideltaR, &sample1R, &sample2R, &coeffR);
-			sample1R = (int)((float)sample1R * (float)savedata.kakuVal / 100.0f);
 			W16(bw2, sample1R);	bw2 += 2;	lbuf--;
 			c += 4; if (c >= (int)(WAVDALen / OUTPUT_BUFFER_NUM) * 8)	wavwait = 1;
 			if (thend1 == TRUE) return 1;
@@ -11441,10 +11451,6 @@ static BOOL decode_msadpcm_wav(CFile& f, const wavinfo& wi, char** outBuf, int* 
 		s1R = (nCh >= 2) ? (short)(p[0] | (p[1] << 8)) : s1L; p += (nCh >= 2) ? 2 : 0;
 		s2L = (short)(p[0] | (p[1] << 8)); p += 2;
 		s2R = (nCh >= 2) ? (short)(p[0] | (p[1] << 8)) : s2L; p += (nCh >= 2) ? 2 : 0;
-		s1L = (int)((float)s1L * (float)savedata.kakuVal / 100.0f);
-		s2L = (int)((float)s2L * (float)savedata.kakuVal / 100.0f);
-		s1R = (int)((float)s1R * (float)savedata.kakuVal / 100.0f);
-		s2R = (int)((float)s2R * (float)savedata.kakuVal / 100.0f);
 		W16(dst, s2L); dst += 2;
 		if (nCh >= 2) { W16(dst, s2R); dst += 2; }
 		W16(dst, s1L); dst += 2;
@@ -11454,18 +11460,14 @@ static BOOL decode_msadpcm_wav(CFile& f, const wavinfo& wi, char** outBuf, int* 
 			unsigned char b = p[i];
 			if (nCh >= 2) {
 				process_nibble(b >> 4, &ideltaL, &s1L, &s2L, &coeffL);
-				s1L = (int)((float)s1L * (float)savedata.kakuVal / 100.0f);
 				W16(dst, s1L); dst += 2;
 				process_nibble(b & 0x0F, &ideltaR, &s1R, &s2R, &coeffR);
-				s1R = (int)((float)s1R * (float)savedata.kakuVal / 100.0f);
 				W16(dst, s1R); dst += 2;
 			}
 			else {
 				process_nibble(b >> 4, &ideltaL, &s1L, &s2L, &coeffL);
-				s1L = (int)((float)s1L * (float)savedata.kakuVal / 100.0f);
 				W16(dst, s1L); dst += 2;
 				process_nibble(b & 0x0F, &ideltaL, &s1L, &s2L, &coeffL);
-				s1L = (int)((float)s1L * (float)savedata.kakuVal / 100.0f);
 				W16(dst, s1L); dst += 2;
 			}
 		}
@@ -11504,10 +11506,6 @@ int readadpcmzwei(CFile& adpcmf, char* bw, int len)
 			sample1R = R16(bbuf1);    bbuf1 += 2;
 			sample2L = R16(bbuf1);    bbuf1 += 2;
 			sample2R = R16(bbuf1);    bbuf1 += 2;
-			sample1L = (int)((float)sample1L * (float)savedata.kakuVal / 100.0f);
-			sample2L = (int)((float)sample2L * (float)savedata.kakuVal / 100.0f);
-			sample1R = (int)((float)sample1R * (float)savedata.kakuVal / 100.0f);
-			sample2R = (int)((float)sample2R * (float)savedata.kakuVal / 100.0f);
 			W16(bw2, sample2L);      bw2 += 2;
 			W16(bw2, sample2R);      bw2 += 2;
 			W16(bw2, sample1L);      bw2 += 2;
@@ -11520,7 +11518,6 @@ int readadpcmzwei(CFile& adpcmf, char* bw, int len)
 				W16(bw2, 0);	bw2 += 2;
 			}
 			else {
-				sample1L = (int)((float)sample1L * (float)savedata.kakuVal / 100.0f);
 				W16(bw2, sample1L);	bw2 += 2;
 			}
 			process_nibble(*bbuf1++ & 0x0F, &ideltaR, &sample1R, &sample2R, &coeffR);
@@ -11528,7 +11525,6 @@ int readadpcmzwei(CFile& adpcmf, char* bw, int len)
 				W16(bw2, 0);	bw2 += 2;
 			}
 			else {
-				sample1R = (int)((float)sample1R * (float)savedata.kakuVal / 100.0f);
 				W16(bw2, sample1R);	bw2 += 2;
 			}
 			len--; lbuf--;
@@ -11567,10 +11563,6 @@ int readadpcmgurumin(CFile& adpcmf, char* bw, int len)
 			sample1R = R16(bbuf1);    bbuf1 += 2;
 			sample2L = R16(bbuf1);    bbuf1 += 2;
 			sample2R = R16(bbuf1);    bbuf1 += 2;
-			sample1L = (int)((float)sample1L * (float)savedata.kakuVal / 100.0f);
-			sample2L = (int)((float)sample2L * (float)savedata.kakuVal / 100.0f);
-			sample1R = (int)((float)sample1R * (float)savedata.kakuVal / 100.0f);
-			sample2R = (int)((float)sample2R * (float)savedata.kakuVal / 100.0f);
 			W16(bw2, sample2L);      bw2 += 2;
 			W16(bw2, sample2R);      bw2 += 2;
 			W16(bw2, sample1L);      bw2 += 2;
@@ -11579,10 +11571,8 @@ int readadpcmgurumin(CFile& adpcmf, char* bw, int len)
 		}
 		for (int k = ak; k < (cnt - 14); k++) {
 			process_nibble(*bbuf1 >> 4, &ideltaL, &sample1L, &sample2L, &coeffL);
-			sample1L = (int)((float)sample1L * (float)savedata.kakuVal / 100.0f);
 			W16(bw2, sample1L);	bw2 += 2;
 			process_nibble(*bbuf1++ & 0x0F, &ideltaR, &sample1R, &sample2R, &coeffR);
-			sample1R = (int)((float)sample1R * (float)savedata.kakuVal / 100.0f);
 			W16(bw2, sample1R);	bw2 += 2;
 			len--; lbuf--;
 			c += 4; if (c >= (int)(WAVDALen / OUTPUT_BUFFER_NUM) * 8)	wavwait = 1;
@@ -12001,6 +11991,7 @@ int readkpi(BYTE* bw, int cnt)
 	CString sss;
 	sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
 	sss.MakeLower();
+	EqualiserSetFormatVolContext(1, (sss == "spc" || sss.Left(3) == "hes"));
 
 	try {
 		int len3 = 0, len4 = 0;
@@ -12263,111 +12254,6 @@ int readkpi(BYTE* bw, int cnt)
 		int* b32c;
 		b32c = (int*)bw;
 
-		if (wavsam_depth == 32) {
-			for (int i = 0; i < cnt / 4; i++) {
-				double c4 = (double)b32c[i] * ((double)savedata.kakuVal / 100.0);
-				if (c4 > 2147483647.0) c4 = 2147483647.0;
-				if (c4 < -2147483648.0) c4 = -2147483648.0;
-				b32c[i] = (int)c4;
-			}
-		}
-		else if (wavsam_depth == 24) {
-			for (int i = 0; i < cnt / 3; i++) {
-				double c4 = (double)b24c[i] * ((double)savedata.kakuVal / 100.0);
-				if (c4 > 8388607.0) c4 = 8388607.0;
-				if (c4 < -8388608.0) c4 = -8388608.0;
-				b24c[i] = (int)c4;
-			}
-		}
-		else {
-			for (int i = 0; i < cnt / 2; i++) {
-				double cv = (double)b[i] * ((double)savedata.kakuVal / 100.0);
-				if (cv > 32767.0) cv = 32767.0;
-				if (cv < -32768.0) cv = -32768.0;
-				b[i] = (short)cv;
-			}
-		}
-
-		if (sss == "spc" || sss.Left(3) == "hes") {
-			if (savedata.spc != 1) {
-				if (wavsam_depth == 32) {
-					for (int i = 0; i < cnt / 4; i++) {
-						double c4 = (double)b32c[i];
-						if (savedata.spc == 2) c4 *= 2.0;
-						else if (savedata.spc == 4) c4 *= 3.0;
-						else if (savedata.spc == 8) c4 *= 4.0;
-						else if (savedata.spc == 16) c4 *= 5.0;
-						if (c4 > 2147483647.0) c4 = 2147483647.0;
-						if (c4 < -2147483648.0) c4 = -2147483648.0;
-						b32c[i] = (int)c4;
-					}
-				}
-				else if (wavsam_depth == 24) {
-					for (int i = 0; i < cnt / 3; i++) {
-						double c4 = (double)b24c[i];
-						if (savedata.spc == 2) c4 *= 2.0;
-						else if (savedata.spc == 4) c4 *= 3.0;
-						else if (savedata.spc == 8) c4 *= 4.0;
-						else if (savedata.spc == 16) c4 *= 5.0;
-						if (c4 > 8388607.0) c4 = 8388607.0;
-						if (c4 < -8388608.0) c4 = -8388608.0;
-						b24c[i] = (int)c4;
-					}
-				}
-				else {
-					for (int i = 0; i < cnt / 2; i++) {
-						double cv = (double)b[i];
-						if (savedata.spc == 2) cv *= 2.0;
-						else if (savedata.spc == 4) cv *= 3.0;
-						else if (savedata.spc == 8) cv *= 4.0;
-						else if (savedata.spc == 16) cv *= 5.0;
-						if (cv > 32767.0) cv = 32767.0;
-						if (cv < -32768.0) cv = -32768.0;
-						b[i] = (short)cv;
-					}
-				}
-			}
-		}
-
-		if (savedata.kpivol != 1) {
-			if (wavsam_depth == 32) {
-				for (int i = 0; i < cnt / 4; i++) {
-					double c4 = (double)b32c[i];
-					if (savedata.kpivol == 2) c4 *= 2.0;
-					else if (savedata.kpivol == 4) c4 *= 3.0;
-					else if (savedata.kpivol == 8) c4 *= 4.0;
-					else if (savedata.kpivol == 16) c4 *= 5.0;
-					if (c4 > 2147483647.0) c4 = 2147483647.0;
-					if (c4 < -2147483648.0) c4 = -2147483648.0;
-					b32c[i] = (int)c4;
-				}
-			}
-			else if (wavsam_depth == 24) {
-				for (int i = 0; i < cnt / 3; i++) {
-					double c4 = (double)b24c[i];
-					if (savedata.kpivol == 2) c4 *= 2.0;
-					else if (savedata.kpivol == 4) c4 *= 3.0;
-					else if (savedata.kpivol == 8) c4 *= 4.0;
-					else if (savedata.kpivol == 16) c4 *= 5.0;
-					if (c4 > 8388607.0) c4 = 8388607.0;
-					if (c4 < -8388608.0) c4 = -8388608.0;
-					b24c[i] = (int)c4;
-				}
-			}
-			else {
-				for (int i = 0; i < cnt / 2; i++) {
-					double cv = (double)b[i];
-					if (savedata.kpivol == 2) cv *= 2.0;
-					else if (savedata.kpivol == 3) cv *= 3.0;
-					else if (savedata.kpivol == 4) cv *= 4.0;
-					else if (savedata.kpivol == 5) cv *= 5.0;
-					if (cv > 32767.0) cv = 32767.0;
-					if (cv < -32768.0) cv = -32768.0;
-					b[i] = (short)cv;
-				}
-			}
-		}
-
 		fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
 		if (wavsam_depth == 32) {
 			for (int i = 0; i < cnt / 4; i++) {
@@ -12484,6 +12370,7 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 int readm4a(BYTE* bw, int cnt)
 {
 	if (cnt == 0) return 0;
+	EqualiserSetFormatVolContext(2, FALSE);
 	_set_se_translator(trans_func);
 	DWORD cnt1 = og->sikpi.dwUnitRender, cnt2 = (DWORD)cnt, cnt4 = 0; if (cnt1 == 0) cnt1 = 4096;
 	DWORD r = 0;
@@ -12627,44 +12514,6 @@ int readm4a(BYTE* bw, int cnt)
 		b24c = (Int24*)bw;
 		short* b, c;
 		b = (short*)bw;
-		if (wavsam_depth == 24) {
-			for (int i = 0; i < cnt / 3; i++) {
-				int c4 = b24c[i];
-				c4 = (int)((float)c4 * ((float)savedata.kakuVal / 100.0f));
-				b24c[i] = c4;
-			}
-		}
-		else {
-			for (int i = 0; i < cnt / 2; i++) {
-				int c = (int)b[i];
-				c = (int)((float)c * ((float)savedata.kakuVal / 100.0f));
-				b[i] = (short)c;
-			}
-		}
-		if (wavsam_depth == 24) {
-			for (int i = 0; i < cnt / 3; i++) {
-				int c4 = b24c[i];
-				if (savedata.mp3 == 2)	c4 = (int)((float)c4 * 2.0f);
-				else if (savedata.mp3 == 4) c4 = (int)((float)c4 * 3.0f);
-				else if (savedata.mp3 == 8) c4 = (int)((float)c4 * 4.0f);
-				else if (savedata.mp3 == 16) c4 = (int)((float)c4 * 5.0f);
-				if (c4 > 8388607)c4 = 8388607;
-				if (c4 < -8388608)c4 = -8388608;
-				b24c[i] = c4;
-			}
-		}
-		else {
-			for (int i = 0; i < cnt / 2; i++) {
-				int c = (int)b[i];
-				if (savedata.mp3 == 2)	c = (int)((float)b[i] * 1.5f);
-				else if (savedata.mp3 == 3) c = (int)((float)b[i] * 2.0f);
-				else if (savedata.mp3 == 4) c = (int)((float)b[i] * 2.5f);
-				else if (savedata.mp3 == 5) c = (int)((float)b[i] * 3.0f);
-				if (c >= 32768)c = 32767;
-				if (c <= -32767)c = -32766;
-				b[i] = (short)c;
-			}
-		}
 		fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
 		//fadeを三乗して計算密度を変更
 		if (wavsam_depth == 24) {
@@ -12766,6 +12615,7 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 int readflac(BYTE* bw, int cnt)
 {
 	if (cnt == 0)return 0;
+	EqualiserSetFormatVolContext(0, FALSE);
 	_set_se_translator(trans_func);
 	DWORD cnt1 = og->sikpi.dwUnitRender * 2, cnt2 = (DWORD)cnt, cnt4 = 0, lenl = cnt; if (cnt1 == 0) cnt1 = 1024;
 	DWORD r = 0;
@@ -13572,34 +13422,14 @@ int readwav(BYTE* bw, int cnt)
 	fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
 	if (wavsam_depth == 24) {
 		for (int i = 0; i < cnt2 / 3; i++) {
-			int c4 = b24c[i];
-			c4 = (int)((float)c4 * ((float)savedata.kakuVal / 100.0f));
-			b24c[i] = c4;
-			c4 = b24c[i];
-			if (savedata.mp3 == 2) c4 = (int)((float)c4 * 2.0f);
-			else if (savedata.mp3 == 4) c4 = (int)((float)c4 * 3.0f);
-			else if (savedata.mp3 == 8) c4 = (int)((float)c4 * 4.0f);
-			else if (savedata.mp3 == 16) c4 = (int)((float)c4 * 5.0f);
-			if (c4 > 8388607) c4 = 8388607;
-			if (c4 < -8388608) c4 = -8388608;
-			b24c[i] = c4;
-			{ float c4f; int c5; c5 = b24c[i]; c4f = (float)c5 * fade * fade; b24c[i] = (Int24)(int)c4f; }
+			float c4f; int c5;
+			c5 = b24c[i]; c4f = (float)c5 * fade * fade; b24c[i] = (Int24)(int)c4f;
 		}
 	}
 	else {
 		for (int i = 0; i < cnt2 / 2; i++) {
-			int c = (int)b[i];
-			c = (int)((float)c * ((float)savedata.kakuVal / 100.0f));
-			b[i] = (short)c;
-			c = (int)b[i];
-			if (savedata.mp3 == 2) c = (int)((float)b[i] * 1.5f);
-			else if (savedata.mp3 == 3) c = (int)((float)b[i] * 2.0f);
-			else if (savedata.mp3 == 4) c = (int)((float)b[i] * 2.5f);
-			else if (savedata.mp3 == 5) c = (int)((float)b[i] * 3.0f);
-			if (c >= 32768) c = 32767;
-			if (c <= -32767) c = -32766;
-			b[i] = (short)c;
-			c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c;
+			int c = b[i];
+			c = (short)(((float)c) * fade * fade); b[i] = (short)c;
 		}
 	}
 	if ((UINT)wl < (UINT)0x7fff0000) {
@@ -13614,6 +13444,7 @@ int readmp3(BYTE* bw, int cnt)
 {
 	int r = cnt, rr = cnt;
 	if (cnt == 0) return 0;
+	EqualiserSetFormatVolContext(2, FALSE);
 
 	int cnt2;
 	int len3 = 0, len4 = 0;
@@ -13719,39 +13550,15 @@ int readmp3(BYTE* bw, int cnt)
 	fade += fadeadd; if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
 	if (wavsam_depth == 24) {
 		for (int i = 0; i < cnt2 / 3; i++) {
-			int c4 = b24c[i];
-			c4 = (int)((float)c4 * ((float)savedata.kakuVal / 100.0f));
-			b24c[i] = c4;
-			c4 = b24c[i];
-			if (savedata.mp3 == 2)	c4 = (int)((float)c4 * 2.0f);
-			else if (savedata.mp3 == 4) c4 = (int)((float)c4 * 3.0f);
-			else if (savedata.mp3 == 8) c4 = (int)((float)c4 * 4.0f);
-			else if (savedata.mp3 == 16) c4 = (int)((float)c4 * 5.0f);
-			if (c4 > 8388607)c4 = 8388607;
-			if (c4 < -8388608)c4 = -8388608;
-			b24c[i] = c4;
-			{
-				float c4;
-				int c5;
-				c5 = b24c[i]; c4 = (float)c5;
-				c4 = c4 * fade * fade; c5 = (int)c4;
-				b24c[i] = c5;
-			}
+			float c4;
+			int c5;
+			c5 = b24c[i]; c4 = (float)c5;
+			c4 = c4 * fade * fade; c5 = (int)c4;
+			b24c[i] = c5;
 		}
 	}
 	else {
 		for (int i = 0; i < cnt2 / 2; i++) {
-			int c = (int)b[i];
-			c = (int)((float)c * ((float)savedata.kakuVal / 100.0f));
-			b[i] = (short)c;
-			c = (int)b[i];
-			if (savedata.mp3 == 2)	c = (int)((float)b[i] * 1.5f);
-			else if (savedata.mp3 == 3) c = (int)((float)b[i] * 2.0f);
-			else if (savedata.mp3 == 4) c = (int)((float)b[i] * 2.5f);
-			else if (savedata.mp3 == 5) c = (int)((float)b[i] * 3.0f);
-			if (c >= 32768)c = 32767;
-			if (c <= -32767)c = -32766;
-			b[i] = (short)c;
 			c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c;
 		}
 	}
@@ -14761,6 +14568,7 @@ BOOL COggDlg::DestroyWindow()
 int mcopy(char* a, int len)
 {
 	if (len == 0) return 0;
+	EqualiserSetFormatVolContext(0, FALSE);
 	const int bpf = (wavchannel > 0) ? (wavchannel * 2) : 4;
 	if (bpf <= 0) return 0;
 	int ret = 0, lenl = len / bpf, cnt2;

@@ -1479,6 +1479,11 @@ static DynamicLimiter g_limiter[2] = {
 	{ 1.0f, 0.95f, 0.0f, 0.0f }   // R ch
 };
 
+static DynamicLimiter g_extBoostLimiter[2] = {
+	{ 1.0f, 0.95f, 0.0f, 0.0f },
+	{ 1.0f, 0.95f, 0.0f, 0.0f }
+};
+
 // ===== EQ Frequencies =====
 static const float EQ_FREQS[EQ_BANDS] = {
 	   25.0f, 40.0f, 63.0f, 100.0f, 160.0f,
@@ -3696,6 +3701,10 @@ static void InitEngine(int rate) {
 		g_limiter[ch].threshold = 0.95f;
 		g_limiter[ch].attackCoeff = expf(-1.0f / (0.001f * rate));
 		g_limiter[ch].releaseCoeff = expf(-1.0f / (0.100f * rate));
+		g_extBoostLimiter[ch].envelope = 1.0f;
+		g_extBoostLimiter[ch].threshold = 0.95f;
+		g_extBoostLimiter[ch].attackCoeff = g_limiter[ch].attackCoeff;
+		g_extBoostLimiter[ch].releaseCoeff = g_limiter[ch].releaseCoeff;
 	}
 
 	g_lastEffectAmount = 50;
@@ -3759,13 +3768,162 @@ static void ApplyEnvSeparation(int presetIndex, EnvParams* env) {
 	env->damping = ClampFloat(env->damping + kDampBias[category] + h2 * 0.20f, 0.0f, 1.0f);
 }
 
-// 旧ダイナミックリミッター (equaliser内では未使用・互換維持のみ)
 static float ProcessDynamicLimiter(DynamicLimiter* lim, float input) {
 	float absInput = fabsf(input);
 	float targetGain = (absInput > lim->threshold) ? lim->threshold / absInput : 1.0f;
 	float coeff = (targetGain < lim->envelope) ? lim->attackCoeff : lim->releaseCoeff;
 	lim->envelope = targetGain + coeff * (lim->envelope - targetGain);
 	return input * lim->envelope;
+}
+
+// ============================================================
+// 拡張音量 / フォーマット別音量ブースト (マスター音量とは独立)
+// COggDlg 拡張音量 + CRender SPC/KPI/MP3 倍率をここで1本化
+// ============================================================
+#define EQ_FMT_VOL_NONE 0
+#define EQ_FMT_VOL_KPI  1
+#define EQ_FMT_VOL_MP3  2
+
+static int  g_eqFormatVolMode = EQ_FMT_VOL_NONE;
+static BOOL g_eqFormatVolSpc = FALSE;
+
+void EqualiserSetFormatVolContext(int mode, BOOL spcApplicable)
+{
+	g_eqFormatVolMode = mode;
+	g_eqFormatVolSpc = spcApplicable;
+}
+
+static float EqCalcSpcVolumeGain(int spcVal)
+{
+	switch (spcVal) {
+	case 2:  return 2.0f;
+	case 4:  return 3.0f;
+	case 8:  return 4.0f;
+	case 16: return 5.0f;
+	default: return 1.0f;
+	}
+}
+
+static float EqCalcKpiVolumeGain(int kpiVal, int bitDepth)
+{
+	if (kpiVal == 1) return 1.0f;
+	if (bitDepth == 16) {
+		switch (kpiVal) {
+		case 2: return 2.0f;
+		case 3: return 3.0f;
+		case 4: return 4.0f;
+		case 5: return 5.0f;
+		default: return 1.0f;
+		}
+	}
+	switch (kpiVal) {
+	case 2:  return 2.0f;
+	case 4:  return 3.0f;
+	case 8:  return 4.0f;
+	case 16: return 5.0f;
+	default: return 1.0f;
+	}
+}
+
+static float EqCalcMp3VolumeGain(int mp3Val, int bitDepth)
+{
+	if (mp3Val == 1) return 1.0f;
+	if (bitDepth == 24 || bitDepth == 32) {
+		switch (mp3Val) {
+		case 2:  return 2.0f;
+		case 4:  return 3.0f;
+		case 8:  return 4.0f;
+		case 16: return 5.0f;
+		default: return 1.0f;
+		}
+	}
+	switch (mp3Val) {
+	case 2: return 1.5f;
+	case 3: return 2.0f;
+	case 4: return 2.5f;
+	case 5: return 3.0f;
+	default: return 1.0f;
+	}
+}
+
+static float GetFormatVolumeGain(void)
+{
+	switch (g_eqFormatVolMode) {
+	case EQ_FMT_VOL_KPI: {
+		float g = EqCalcKpiVolumeGain(savedata.kpivol, wavsam_depth);
+		if (g_eqFormatVolSpc)
+			g *= EqCalcSpcVolumeGain(savedata.spc);
+		return g;
+	}
+	case EQ_FMT_VOL_MP3:
+		return EqCalcMp3VolumeGain(savedata.mp3, wavsam_depth);
+	default:
+		return 1.0f;
+	}
+}
+
+static float GetExternalBoostGain(void)
+{
+	const float kakuGain = ClampFloat((float)savedata.kakuVal / 100.0f, 1.0f, 9.0f);
+	return kakuGain * GetFormatVolumeGain();
+}
+
+static inline float PcmSampleToFloat(const unsigned char* pRaw, int offset, int wavsam)
+{
+	if (wavsam == 16)
+		return *((short*)(pRaw + offset)) / 32768.0f;
+	if (wavsam == 24) {
+		int val = pRaw[offset] | (pRaw[offset + 1] << 8) | ((signed char)pRaw[offset + 2] << 16);
+		return val / 8388608.0f;
+	}
+	if (wavsam == 32)
+		return *((int*)(pRaw + offset)) / 2147483648.0f;
+	return (pRaw[offset] - 128) / 128.0f;
+}
+
+static inline void FloatToPcmSample(unsigned char* pRaw, int offset, int wavsam, float finalOut)
+{
+	if (finalOut > 1.0f)  finalOut = 1.0f;
+	if (finalOut < -1.0f) finalOut = -1.0f;
+
+	if (wavsam == 16) {
+		int32_t v = (int32_t)roundf(finalOut * 32768.0f);
+		if (v > 32767) v = 32767; if (v < -32768) v = -32768;
+		*((short*)(pRaw + offset)) = (short)v;
+	}
+	else if (wavsam == 24) {
+		int32_t v = (int32_t)roundf(finalOut * 8388608.0f);
+		if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
+		pRaw[offset] = v & 0xFF;
+		pRaw[offset + 1] = (v >> 8) & 0xFF;
+		pRaw[offset + 2] = (v >> 16) & 0xFF;
+	}
+	else if (wavsam == 32)
+		*((int*)(pRaw + offset)) = (int)(finalOut * 2147483647.0f);
+	else
+		pRaw[offset] = (unsigned char)(finalOut * 127.0f + 128.0f);
+}
+
+static float ApplyExternalBoostSample(float sample, int ch, float extGain)
+{
+	const int limCh = (ch < 2) ? ch : (ch & 1);
+	sample *= extGain;
+	sample = ProcessDynamicLimiter(&g_extBoostLimiter[limCh], sample);
+	return ProfessionalSoftSaturate(sample);
+}
+
+static void ApplyExternalBoostOnlyToBuffer(
+	unsigned char* pRaw, int numSamples, int wavch, int wavsam, int bytesPerSample)
+{
+	const float extGain = GetExternalBoostGain();
+	for (int i = 0; i < numSamples; i++) {
+		for (int ch = 0; ch < wavch; ch++) {
+			int offset = (i * wavch + ch) * bytesPerSample;
+			float s = PcmSampleToFloat(pRaw, offset, wavsam);
+			s = ApplyExternalBoostSample(s, ch, extGain);
+			FloatToPcmSample(pRaw, offset, wavsam, s);
+		}
+	}
 }
 
 
@@ -4079,9 +4237,22 @@ void equaliser(void* data, int len, BOOL reset) {
 			if (savedata.eq[i] != 100) { allFlat = false; break; }
 		}
 		if (allFlat) {
-			// テンポラリバッファが確保されていれば解放
-			if (needsResampling && tempBuffer) free(tempBuffer);
-			return;   // 完全スルー: data の内容を一切変更しない
+			const float extBoostGain = GetExternalBoostGain();
+			if (extBoostGain <= 1.0001f) {
+				if (needsResampling && tempBuffer) free(tempBuffer);
+				return;
+			}
+			{
+				const int bytesPerSample = wavsam_depth / 8;
+				const int numSamples = processLen / (bytesPerSample * wavchannel);
+				ApplyExternalBoostOnlyToBuffer(
+					(unsigned char*)processData, numSamples, wavchannel, wavsam_depth, bytesPerSample);
+			}
+			if (needsResampling) {
+				ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavchannel, wavsam_depth);
+				free(tempBuffer);
+			}
+			return;
 		}
 	}
 
@@ -4452,12 +4623,15 @@ void equaliser(void* data, int len, BOOL reset) {
 	}
 
 	// ===================================================
-	// 【最終段】プロフェッショナル・ソフトサチュレーション
-	// [FIX-2] knee=0.78 により正常信号(≤0.70)は完全透明通過
+	// 【最終段】拡張音量 + フォーマット別ブースト → リミッター → ソフトサチュレーション
+	// マスター音量(eq[15])とは独立。ピークのみ動的に抑え、静部は減衰しない。
 	// ===================================================
-	for (int i = 0; i < bufferIndex; i++) {
-		leftSamples[i] = ProfessionalSoftSaturate(leftSamples[i]);
-		rightSamples[i] = ProfessionalSoftSaturate(rightSamples[i]);
+	{
+		const float extBoostGain = GetExternalBoostGain();
+		for (int i = 0; i < bufferIndex; i++) {
+			leftSamples[i] = ApplyExternalBoostSample(leftSamples[i], 0, extBoostGain);
+			rightSamples[i] = ApplyExternalBoostSample(rightSamples[i], 1, extBoostGain);
+		}
 	}
 
 	// ===== 最終出力: float → 整数PCM 書き戻し =====

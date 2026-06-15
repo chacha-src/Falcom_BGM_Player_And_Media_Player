@@ -9,7 +9,6 @@
 #include "ListCtrlA.h"
 #include "PlayList.h"
 #include "ListSyosai.h"
-#include "Filename.h"
 #include "WavExport.h"
 #include "Douga.h"
 #include "mp3image.h"
@@ -334,6 +333,8 @@ BOOL CPlayList::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO1), LL14(L"プレイリストを変更または追加します。", L"Change or add playlists.", L"Modifier ou ajouter des listes.", L"Cambia o aggiungi playlist.", L"Cambiar o anadir listas.", L"재생 목록 변경 또는 추가.", L"更改或添加播放列表。", L"تغيير أو إضافة قوائم التشغيل.", L"Изменить или добавить плейлисты.", L"Playlists andern oder hinzufugen.", L"Alterar ou adicionar listas.", L"Playlists wijzigen of toevoegen.", L"Zmie? lub dodaj listy.", L"Listeleri de?i?tir veya ekle."));
 	m_tooltip.AddTool(GetDlgItem(IDC_BUTTON3), LL14(L"プレイリスト名を変更します。", L"Rename playlist.", L"Renommer la liste.", L"Rinomina playlist.", L"Cambiar nombre de lista.", L"재생 목록 이름 변경.", L"重命名播放列表。", L"إعادة تسمية قائمة التشغيل.", L"Переименовать плейлист.", L"Playlist umbenennen.", L"Renomear lista.", L"Playlist hernoemen.", L"Zmie? nazw? listy.", L"Liste ad?n? de?i?tir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_PLAYDELETE), LL14(L"表示されているプレイリストを削除します。\n※削除したものは復活できないので注意ください。", L"Delete the displayed playlist.\n*Deleted playlists cannot be recovered.", L"Supprimer la liste affichee.\n*Les listes supprimees ne peuvent pas etre recuperees.", L"Elimina la playlist visualizzata.\n*Le playlist eliminate non possono essere recuperate.", L"Eliminar la lista mostrada.\n*Las listas eliminadas no se pueden recuperar.", L"표시된 재생 목록 삭제.\n*삭제 후 복구 불가.", L"删除显示的播放列表。\n*删除后无法恢复。", L"حذف قائمة التشغيل المعروضة.\n*لا يمكن استرداد المحذوفة.", L"Удалить отображаемый плейлист.\n*Удалённые плейлисты восстановить нельзя.", L"Angezeigte Playlist loschen.\n*Geloschte Playlists konnen nicht wiederhergestellt werden.", L"Excluir lista exibida.\n*Listas excluidas nao podem ser recuperadas.", L"Getoonde playlist verwijderen.\n*Verwijderde playlists kunnen niet worden hersteld.", L"Usu? wy?wietlan? list?.\n*Usuni?tych list nie mo?na odzyska?.", L"Gosterilen listeyi sil.\n*Silinen listeler geri al?namaz."));
+	m_tooltip.AddTool(GetDlgItem(IDC_PIANOROLL), LL14(L"ピアノロール表示を開きます。\n再生中の音程を鍵盤状に表示します。", L"Open piano roll view.\nShows pitch of playing audio on a keyboard layout.", L"Ouvrir le rouleau piano.\nAffiche la hauteur du son en cours sur un clavier.", L"Apri rotolo pianoforte.\nMostra l'altezza dell'audio in riproduzione su tastiera.", L"Abrir rollo de piano.\nMuestra el tono del audio en reproduccion en un teclado.", L"피아노 롤 창을 엽니다.\n재생 중 음정을 건반 형태로 표시합니다.", L"打开钢琴卷帘。\n以键盘形式显示正在播放的音频音高。", L"فتح لوحة البيانو.\nيعرض طبقة الصوت على شكل لوحة مفاتيح.", L"Открыть пианоролл.\nПоказывает высоту звука на клавиатуре.", L"Klavierrolle offnen.\nZeigt Tonhohe als Tastatur.", L"Abrir rolo de piano.\nMostra altura do audio em teclado.", L"Pianorol openen.\nToont toonhoogte op een toetsenbord.", L"Otworz rolke pianina.\nPokazuje wysokosc dzwieku na klawiaturze.", L"Piyano rulosunu ac.\nCalan sesin perdesini klavye duzeninde gosterir."));
+	m_tooltip.AddTool(GetDlgItem(IDC_EDIT2), LL14(L"あいまい検索のキーワードを入力します。\n上下の検索ボタンでリスト内を検索します。", L"Enter fuzzy search keyword.\nUse search buttons above/below to find in list.", L"Saisir le mot-cle de recherche floue.\nUtilisez les boutons pour chercher dans la liste.", L"Inserisci parola chiave ricerca fuzzy.\nUsa i pulsanti per cercare nella lista.", L"Introduzca palabra clave de busqueda difusa.\nUse los botones para buscar en la lista.", L"퍼지 검색 키워드를 입력합니다.\n위/아래 검색 버튼으로 목록을 검색합니다.", L"输入模糊搜索关键字。\n用上下搜索按钮在列表中查找。", L"أدخل كلمة البحث الغامض.\nاستخدم أزرار البحث للعثور في القائمة.", L"Введите ключевое слово нечеткого поиска.\nКнопками ищите в списке.", L"Suchbegriff fur Fuzzy-Suche eingeben.\nMit Suchtasten in der Liste suchen.", L"Digite palavra-chave de pesquisa fuzzy.\nUse os botoes para buscar na lista.", L"Voer fuzzy-zoekterm in.\nGebruik zoekknoppen in de lijst.", L"Wpisz slowo kluczowe wyszukiwania rozmytego.\nPrzyciskami szukaj na liscie.", L"Bulanik arama anahtar kelimesini girin.\nListede aramak icin arama dugmelerini kullanin."));
 	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 //	m_lc.SetMaxTipWidth(500)
@@ -644,6 +645,9 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 
 	if(f)
 		if((cnt1=chk(name,sub,art,fol,ret))!=-1){
+			pc[cnt1].loop1=loop1;
+			pc[cnt1].loop2=loop2;
+			pc[cnt1].ret2=ret;
 			pc[cnt1].time=time;
 			RECT r;
 			m_lc.GetItemRect(cnt1,&r,LVIR_BOUNDS);
@@ -985,6 +989,7 @@ void CPlayList::Fol(CString fname)
 				if (ft.Right(4) == ".ogg" || ft.Right(6) == ".qull3") {
 					p.sub = -1;
 					mode = -1;
+					int oggL1 = 0, oggL2 = 0;
 					FILE *fp;
 					fp = _tfopen(fname, _T("rb"));
 					if (fp == NULL) {
@@ -1033,6 +1038,10 @@ void CPlayList::Fol(CString fname)
 #endif
 							_tcscpy(p.alb, ss);
 						}
+						if (cc.Left(10) == "LOOPSTART=")
+							oggL1 = _tstoi(cc.Mid(10));
+						if (cc.Left(11) == "LOOPLENGTH=")
+							oggL2 = _tstoi(cc.Mid(11));
 					}
 					ov_clear(&vf1);
 					fclose(fp);
@@ -1110,7 +1119,7 @@ void CPlayList::Fol(CString fname)
 									break;
 								}
 							}
-							loop1 = j;
+							oggL1 = j;
 							j = 0;
 							for (i = 0; i < 8; i++) {
 								switch (aa1->ed[i])
@@ -1147,7 +1156,7 @@ void CPlayList::Fol(CString fname)
 									break;
 								}
 							}
-							loop2 = j - loop1;
+							oggL2 = j - oggL1;
 							p1 += sizeof(aa) + 1;
 							for (; *p1 == 0x09; p1++);
 							p1 += 3;
@@ -1162,7 +1171,7 @@ void CPlayList::Fol(CString fname)
 							ss = outcm;
 							_tcscpy(p.name, ss.Trim());
 							if (looping == 0) {
-								loop1 = loop2 = 0;
+								oggL1 = oggL2 = 0;
 							}
 							free(buff); break;
 						}
@@ -1783,7 +1792,8 @@ void CPlayList::Fol(CString fname)
 						_tcscpy(p.name, a);
 					}
 					_tcscpy(p.fol, fname1);
-					p.loop1 = p.loop2 = 0;
+					p.loop1 = oggL1;
+					p.loop2 = oggL2;
 						}
 				else if (fname.Right(fname.GetLength() - fname.ReverseFind('\\') - 1).Mid(0,3) == L"ed8" && (ft.Right(4) == ".wav")) {
 					p.sub = 21; p.loop1 = p.loop2 = 0;
@@ -4721,17 +4731,11 @@ void CPlayList::OnNMRclickList1(NMHDR *pNMHDR, LRESULT *pResult)
 
 	CMenu menu;
 	menu.CreatePopupMenu();
-	menu.AppendMenu(MF_STRING | MF_ENABLED, ID_POP_32787,
-		LL14(L"ファイル名変更", L"Rename File", L"Renommer le fichier", L"Rinomina file",
-			L"Renombrar archivo", L"파일 이름 변경", L"重命名文件", L"إعادة تسمية الملف",
-			L"Переименовать файл", L"Datei umbenennen", L"Renomear arquivo", L"Bestand hernoemen",
-			L"Zmień nazwę pliku", L"Dosyayı yeniden adlandır"));
-
 	menu.AppendMenu(MF_STRING | MF_ENABLED, ID_POP_32776,
-		LL14(L"ファイル詳細", L"File Details", L"Détails du fichier", L"Dettagli file",
-			L"Detalles del archivo", L"파일 상세 정보", L"文件详细信息", L"تفاصيل الملف",
-			L"Сведения о файле", L"Dateidetails", L"Detalhes do arquivo", L"Bestandsdetails",
-			L"Szczegóły pliku", L"Dosya ayrıntıları"));
+		LL14(L"ファイル情報", L"File Info", L"Infos fichier", L"Info file",
+			L"Info. de archivo", L"파일 정보", L"文件信息", L"معلومات الملف",
+			L"Сведения о файле", L"Dateiinfo", L"Info. do arquivo", L"Bestandsinfo",
+			L"Informacje o pliku", L"Dosya bilgisi"));
 
 	menu.AppendMenu(MF_STRING | MF_ENABLED, ID_POP_WAVEXPORT,
 		LL14(L"WAVへ出力", L"Export to WAV", L"Exporter en WAV", L"Esporta in WAV",
@@ -4757,14 +4761,26 @@ void CPlayList::OnNMRclickList1(NMHDR *pNMHDR, LRESULT *pResult)
 
 void CPlayList::OnList()
 {
-	int Lindex=-1;
-	Lindex=m_lc.GetNextItem(Lindex,LVNI_ALL |LVNI_SELECTED);
+	int Lindex = -1;
+	Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED);
+	if (Lindex < 0) return;
 	CListSyosai *a = new CListSyosai(CWnd::FromHandle(GetSafeHwnd()));
-	w_flg=FALSE;
+	w_flg = FALSE;
 	CWnd::PostMessage(0x118);
-	memcpy(&a->pc,&pc[Lindex],sizeof(playlistdata0));
-	a->DoModal();
-	w_flg=TRUE;
+	memcpy(&a->pc, &pc[Lindex], sizeof(playlistdata0));
+	int ret = a->DoModal();
+	pc[Lindex].loop1 = a->pc.loop1;
+	pc[Lindex].loop2 = a->pc.loop2;
+	if (ret == IDOK) {
+		_tcscpy(pc[Lindex].name, a->pc.name);
+		_tcscpy(pc[Lindex].art, a->pc.art);
+		_tcscpy(pc[Lindex].alb, a->pc.alb);
+		_tcscpy(pc[Lindex].fol, a->pc.fol);
+		RECT r;
+		m_lc.GetItemRect(Lindex, &r, LVIR_BOUNDS);
+		m_lc.RedrawWindow(&r);
+	}
+	w_flg = TRUE;
 	delete a;
 }
 #define ID_HOTKEY0 8000
@@ -4800,27 +4816,9 @@ void CPlayList::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 	// TODO: ここにメッセージ ハンドラ コードを追加します。
 }
 
-void CPlayList::OnPop32787()//ファイル名変更
+void CPlayList::OnPop32787()//ファイル名変更（統合画面へ）
 {
-	// TODO: ここにコマンド ハンドラ コードを追加します。
-	int Lindex=-1;
-	Lindex=m_lc.GetNextItem(Lindex,LVNI_ALL |LVNI_SELECTED);
-	CFilename *a = new CFilename(CWnd::FromHandle(GetSafeHwnd()));
-	w_flg=FALSE;
-	memcpy(&a->pc,&pc[Lindex],sizeof(playlistdata0));
-	CWnd::PostMessage(0x118);
-	int ret=a->DoModal();
-	if(ret==IDOK){
-		_tcscpy(pc[Lindex].name,a->pc.name);
-		_tcscpy(pc[Lindex].art,a->pc.art);
-		_tcscpy(pc[Lindex].alb,a->pc.alb);
-		_tcscpy(pc[Lindex].fol,a->pc.fol);
-		RECT r;
-		m_lc.GetItemRect(Lindex,&r,LVIR_BOUNDS);
-		m_lc.RedrawWindow(&r);
-	}
-	w_flg=TRUE;
-	delete a;
+	OnList();
 }
 
 void CPlayList::OnPopWavExport()

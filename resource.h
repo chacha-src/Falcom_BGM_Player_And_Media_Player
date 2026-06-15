@@ -3,8 +3,8 @@
 // ogg.rc で使用
 //
 #define IDOK2                           2
-#define IDOK999                         2
 #define IDC_FOL                         2
+#define IDOK999                         3383
 #define IDCANCEL2                       3
 #define IDOK3                           3
 #define IDCANCEL3                       4
@@ -576,6 +576,12 @@
 #define IDC_ABOUT_VER                   3374
 #define IDC_ABOUT_COPY                  3375
 #define IDC_STATIC_R_HZ                 3376
+#define IDC_SYOSAI_GRP_EDIT             3377
+#define IDC_SYOSAI_GRP_TAG                3378
+#define IDC_SYOSAI_GRP_INTERNAL           3379
+#define IDC_SYOSAI_LBL_TIME               3380
+#define IDC_SYOSAI_LBL_LOOP               3381
+#define IDC_SYOSAI_LBL_RET2               3382
 
 // Next default values for new objects
 // 
@@ -583,7 +589,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        199
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3377
+#define _APS_NEXT_CONTROL_VALUE         3384
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

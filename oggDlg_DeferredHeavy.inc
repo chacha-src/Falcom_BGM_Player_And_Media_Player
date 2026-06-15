@@ -1,4 +1,4 @@
-	// Deferred: tooltips + fnWFilter (moved from OnInitDialog for faster first paint)
+﻿		// Deferred: tooltips + fnWFilter (moved from OnInitDialog for faster first paint)
 	COSVersion os;
 	DWORD edition;
 	OSVERSIONINFOEX in;
@@ -607,6 +607,22 @@
 			L"Prze??cz analizator widma mi?dzy mono a stereo",
 			L"Spektrum analizorunu mono ve stereo aras?nda de?i?tir"));
 
+		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON14), LL14(
+			L"「再生するゲーム」で選択されたゲームの演奏を開始します",
+			L"Start playback of games selected in \"Games to play\"",
+			L"Demarrer la lecture des jeux selectionnes dans « Jeux a lire »",
+			L"Avvia la riproduzione dei giochi selezionati in \"Giochi da riprodurre\"",
+			L"Iniciar la reproduccion de los juegos seleccionados en \"Juegos a reproducir\"",
+			L"「재생할 게임」에서 선택한 게임 재생 시작",
+			L"开始播放「播放游戏」中选中的游戏",
+			L"بدء تشغيل الألعاب المحددة في \"ألعاب للتشغيل\"",
+			L"Начать воспроизведение игр, выбранных в «Игры для воспроизведения»",
+			L"Wiedergabe der in „Wiederzugebende Spiele“ ausgewahlten Spiele starten",
+			L"Iniciar reproducao dos jogos selecionados em \"Jogos a reproduzir\"",
+			L"Start afspelen van spellen geselecteerd in \"Af te spelen spellen\"",
+			L"Rozpocznij odtwarzanie gier wybranych w „Grach do odtworzenia”",
+			L"\"Oynatilacak Oyunlar\"da secilen oyunlari calmaya basla"));
+
 		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON12), LL14(
 			L"拡張パネルを開く/閉じる",
 			L"Open/close extended panel",
@@ -670,26 +686,26 @@
 			L"Odtwarza gry wybrane w „Gry do odtworzenia” w odpowiedniej kolejności.", /* ポーランド語 */
 			L"\"Oynatılacak Oyunlar\" kısmında seçilen oyunları sırayla oynatır.")); /* トルコ語 */
 
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK7), LL14(L"イース6 ナピシュテムの匣", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK8), LL14(L"イース フェルガナの誓い", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK9), LL14(L"空の軌跡 First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter", L"Sora no Kiseki First Chapter"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK10), LL14(L"空の軌跡 Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter", L"Sora no Kiseki Second Chapter"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK11), LL14(L"イース オリジン", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK12), LL14(L"空の軌跡 The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd", L"Sora no Kiseki The 3rd"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK13), LL14(L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II", L"Zweii II"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK14), LL14(L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1", L"YS I&&II Chronicles Ys 1"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK15), LL14(L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2", L"YS I&&II Chronicles Ys 2"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK16), LL14(L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT", L"XANADU NEXT"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK17), LL14(L"Ys 完全版 Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK18), LL14(L"Ys 完全版 Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK19), LL14(L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK20), LL14(L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!", L"Zwei!!"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK21), LL14(L"ぐるみん", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK22), LL14(L"ダイナソア リザレクション", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK23), LL14(L"Brandish4 - ブランディッシュ4 眠れる神の塔", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God", L"Brandish4 - Tower of the Sleeping God"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK24), LL14(L"英雄伝説III 白き魔女", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch", L"Legend of Heroes III - White Witch"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK25), LL14(L"英雄伝説IV 朱紅い雫", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion", L"Legend of Heroes IV - A Tear of Vermillion"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK26), LL14(L"英雄伝説V 海の檻歌", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean", L"Legend of Heroes V - Cagesong of the Ocean"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK7), LL14(L"「再生するゲーム」の対象：YS6 ナピシュテムの匣", L"Include in \"Games to play\": Ys VI Napishtim no Hako", L"Inclure dans « Jeux a lire » : Ys VI Napishtim no Hako", L"Includi in \"Giochi da riprodurre\": Ys VI Napishtim no Hako", L"Incluir en \"Juegos a reproducir\": Ys VI Napishtim no Hako", L"「재생할 게임」 대상: Ys VI Napishtim no Hako", L"纳入「播放游戏」：Ys VI Napishtim no Hako", L"ضمن \"ألعاب للتشغيل\": Ys VI Napishtim no Hako", L"В «Игры для воспроизведения»: Ys VI Napishtim no Hako", L"In „Wiederzugebende Spiele“: Ys VI Napishtim no Hako", L"Incluir em \"Jogos a reproduzir\": Ys VI Napishtim no Hako", L"Opnemen in \"Af te spelen spellen\": Ys VI Napishtim no Hako", L"W „Grach do odtworzenia”: Ys VI Napishtim no Hako", L"\"Oynatilacak Oyunlar\" hedefi: Ys VI Napishtim no Hako"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK8), LL14(L"「再生するゲーム」の対象：YS フェルガナの誓い", L"Include in \"Games to play\": Ys Felghana no Chikai", L"Inclure dans « Jeux a lire » : Ys Felghana no Chikai", L"Includi in \"Giochi da riprodurre\": Ys Felghana no Chikai", L"Incluir en \"Juegos a reproducir\": Ys Felghana no Chikai", L"「재생할 게임」 대상: Ys Felghana no Chikai", L"纳入「播放游戏」：Ys Felghana no Chikai", L"ضمن \"ألعاب للتشغيل\": Ys Felghana no Chikai", L"В «Игры для воспроизведения»: Ys Felghana no Chikai", L"In „Wiederzugebende Spiele“: Ys Felghana no Chikai", L"Incluir em \"Jogos a reproduzir\": Ys Felghana no Chikai", L"Opnemen in \"Af te spelen spellen\": Ys Felghana no Chikai", L"W „Grach do odtworzenia”: Ys Felghana no Chikai", L"\"Oynatilacak Oyunlar\" hedefi: Ys Felghana no Chikai"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK9), LL14(L"「再生するゲーム」の対象：英雄伝説6空の軌跡FC", L"Include in \"Games to play\": Legend of Heroes VI Trails in the Sky FC", L"Inclure dans « Jeux a lire » : Legende des Heros VI Les Sentiers du Ciel FC", L"Includi in \"Giochi da riprodurre\": Legend of Heroes VI Trails in the Sky FC", L"Incluir en \"Juegos a reproducir\": Legend of Heroes VI Trails in the Sky FC", L"「재생할 게임」 대상: 영웅전설6 하늘의 궤적 FC", L"纳入「播放游戏」：英雄传说6 空之轨迹FC", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes VI Trails in the Sky FC", L"В «Игры для воспроизведения»: Legend of Heroes VI Trails in the Sky FC", L"In „Wiederzugebende Spiele“: Legend of Heroes VI Trails in the Sky FC", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes VI Trails in the Sky FC", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes VI Trails in the Sky FC", L"W „Grach do odtworzenia”: Legend of Heroes VI Trails in the Sky FC", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes VI Trails in the Sky FC"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK10), LL14(L"「再生するゲーム」の対象：英雄伝説6空の軌跡SC", L"Include in \"Games to play\": Legend of Heroes VI Trails in the Sky SC", L"Inclure dans « Jeux a lire » : Legende des Heros VI Les Sentiers du Ciel SC", L"Includi in \"Giochi da riprodurre\": Legend of Heroes VI Trails in the Sky SC", L"Incluir en \"Juegos a reproducir\": Legend of Heroes VI Trails in the Sky SC", L"「재생할 게임」 대상: 영웅전설6 하늘의 궤적 SC", L"纳入「播放游戏」：英雄传说6 空之轨迹SC", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes VI Trails in the Sky SC", L"В «Игры для воспроизведения»: Legend of Heroes VI Trails in the Sky SC", L"In „Wiederzugebende Spiele“: Legend of Heroes VI Trails in the Sky SC", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes VI Trails in the Sky SC", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes VI Trails in the Sky SC", L"W „Grach do odtworzenia”: Legend of Heroes VI Trails in the Sky SC", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes VI Trails in the Sky SC"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK11), LL14(L"「再生するゲーム」の対象：YS オリジン", L"Include in \"Games to play\": Ys Origin", L"Inclure dans « Jeux a lire » : Ys Origin", L"Includi in \"Giochi da riprodurre\": Ys Origin", L"Incluir en \"Juegos a reproducir\": Ys Origin", L"「재생할 게임」 대상: Ys Origin", L"纳入「播放游戏」：Ys Origin", L"ضمن \"ألعاب للتشغيل\": Ys Origin", L"В «Игры для воспроизведения»: Ys Origin", L"In „Wiederzugebende Spiele“: Ys Origin", L"Incluir em \"Jogos a reproduzir\": Ys Origin", L"Opnemen in \"Af te spelen spellen\": Ys Origin", L"W „Grach do odtworzenia”: Ys Origin", L"\"Oynatilacak Oyunlar\" hedefi: Ys Origin"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK12), LL14(L"「再生するゲーム」の対象：英雄伝説6空の軌跡TC", L"Include in \"Games to play\": Legend of Heroes VI Trails in the Sky The 3rd", L"Inclure dans « Jeux a lire » : Legende des Heros VI Les Sentiers du Ciel The 3rd", L"Includi in \"Giochi da riprodurre\": Legend of Heroes VI Trails in the Sky The 3rd", L"Incluir en \"Juegos a reproducir\": Legend of Heroes VI Trails in the Sky The 3rd", L"「재생할 게임」 대상: 영웅전설6 하늘의 궤적 The 3rd", L"纳入「播放游戏」：英雄传说6 空之轨迹The3rd", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes VI Trails in the Sky The 3rd", L"В «Игры для воспроизведения»: Legend of Heroes VI Trails in the Sky The 3rd", L"In „Wiederzugebende Spiele“: Legend of Heroes VI Trails in the Sky The 3rd", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes VI Trails in the Sky The 3rd", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes VI Trails in the Sky The 3rd", L"W „Grach do odtworzenia”: Legend of Heroes VI Trails in the Sky The 3rd", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes VI Trails in the Sky The 3rd"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK13), LL14(L"「再生するゲーム」の対象：ZWEI II", L"Include in \"Games to play\": ZWEI II", L"Inclure dans « Jeux a lire » : ZWEI II", L"Includi in \"Giochi da riprodurre\": ZWEI II", L"Incluir en \"Juegos a reproducir\": ZWEI II", L"「재생할 게임」 대상: ZWEI II", L"纳入「播放游戏」：ZWEI II", L"ضمن \"ألعاب للتشغيل\": ZWEI II", L"В «Игры для воспроизведения»: ZWEI II", L"In „Wiederzugebende Spiele“: ZWEI II", L"Incluir em \"Jogos a reproduzir\": ZWEI II", L"Opnemen in \"Af te spelen spellen\": ZWEI II", L"W „Grach do odtworzenia”: ZWEI II", L"\"Oynatilacak Oyunlar\" hedefi: ZWEI II"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK14), LL14(L"「再生するゲーム」の対象：Ys Chronicles Ys 1", L"Include in \"Games to play\": Ys Chronicles Ys 1", L"Inclure dans « Jeux a lire » : Ys Chronicles Ys 1", L"Includi in \"Giochi da riprodurre\": Ys Chronicles Ys 1", L"Incluir en \"Juegos a reproducir\": Ys Chronicles Ys 1", L"「재생할 게임」 대상: Ys Chronicles Ys 1", L"纳入「播放游戏」：Ys Chronicles Ys 1", L"ضمن \"ألعاب للتشغيل\": Ys Chronicles Ys 1", L"В «Игры для воспроизведения»: Ys Chronicles Ys 1", L"In „Wiederzugebende Spiele“: Ys Chronicles Ys 1", L"Incluir em \"Jogos a reproduzir\": Ys Chronicles Ys 1", L"Opnemen in \"Af te spelen spellen\": Ys Chronicles Ys 1", L"W „Grach do odtworzenia”: Ys Chronicles Ys 1", L"\"Oynatilacak Oyunlar\" hedefi: Ys Chronicles Ys 1"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK15), LL14(L"「再生するゲーム」の対象：Ys Chronicles Ys 2", L"Include in \"Games to play\": Ys Chronicles Ys 2", L"Inclure dans « Jeux a lire » : Ys Chronicles Ys 2", L"Includi in \"Giochi da riprodurre\": Ys Chronicles Ys 2", L"Incluir en \"Juegos a reproducir\": Ys Chronicles Ys 2", L"「재생할 게임」 대상: Ys Chronicles Ys 2", L"纳入「播放游戏」：Ys Chronicles Ys 2", L"ضمن \"ألعاب للتشغيل\": Ys Chronicles Ys 2", L"В «Игры для воспроизведения»: Ys Chronicles Ys 2", L"In „Wiederzugebende Spiele“: Ys Chronicles Ys 2", L"Incluir em \"Jogos a reproduzir\": Ys Chronicles Ys 2", L"Opnemen in \"Af te spelen spellen\": Ys Chronicles Ys 2", L"W „Grach do odtworzenia”: Ys Chronicles Ys 2", L"\"Oynatilacak Oyunlar\" hedefi: Ys Chronicles Ys 2"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK16), LL14(L"「再生するゲーム」の対象：XANADU NEXT", L"Include in \"Games to play\": XANADU NEXT", L"Inclure dans « Jeux a lire » : XANADU NEXT", L"Includi in \"Giochi da riprodurre\": XANADU NEXT", L"Incluir en \"Juegos a reproducir\": XANADU NEXT", L"「재생할 게임」 대상: XANADU NEXT", L"纳入「播放游戏」：XANADU NEXT", L"ضمن \"ألعاب للتشغيل\": XANADU NEXT", L"В «Игры для воспроизведения»: XANADU NEXT", L"In „Wiederzugebende Spiele“: XANADU NEXT", L"Incluir em \"Jogos a reproduzir\": XANADU NEXT", L"Opnemen in \"Af te spelen spellen\": XANADU NEXT", L"W „Grach do odtworzenia”: XANADU NEXT", L"\"Oynatilacak Oyunlar\" hedefi: XANADU NEXT"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK17), LL14(L"「再生するゲーム」の対象：Ys 完全版 Ys 1", L"Include in \"Games to play\": Ys Complete Ys 1", L"Inclure dans « Jeux a lire » : Ys Complete Ys 1", L"Includi in \"Giochi da riprodurre\": Ys Complete Ys 1", L"Incluir en \"Juegos a reproducir\": Ys Complete Ys 1", L"「재생할 게임」 대상: Ys Complete Ys 1", L"纳入「播放游戏」：Ys Complete Ys 1", L"ضمن \"ألعاب للتشغيل\": Ys Complete Ys 1", L"В «Игры для воспроизведения»: Ys Complete Ys 1", L"In „Wiederzugebende Spiele“: Ys Complete Ys 1", L"Incluir em \"Jogos a reproduzir\": Ys Complete Ys 1", L"Opnemen in \"Af te spelen spellen\": Ys Complete Ys 1", L"W „Grach do odtworzenia”: Ys Complete Ys 1", L"\"Oynatilacak Oyunlar\" hedefi: Ys Complete Ys 1"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK18), LL14(L"「再生するゲーム」の対象：Ys 完全版 Ys 2", L"Include in \"Games to play\": Ys Complete Ys 2", L"Inclure dans « Jeux a lire » : Ys Complete Ys 2", L"Includi in \"Giochi da riprodurre\": Ys Complete Ys 2", L"Incluir en \"Juegos a reproducir\": Ys Complete Ys 2", L"「재생할 게임」 대상: Ys Complete Ys 2", L"纳入「播放游戏」：Ys Complete Ys 2", L"ضمن \"ألعاب للتشغيل\": Ys Complete Ys 2", L"В «Игры для воспроизведения»: Ys Complete Ys 2", L"In „Wiederzugebende Spiele“: Ys Complete Ys 2", L"Incluir em \"Jogos a reproduzir\": Ys Complete Ys 2", L"Opnemen in \"Af te spelen spellen\": Ys Complete Ys 2", L"W „Grach do odtworzenia”: Ys Complete Ys 2", L"\"Oynatilacak Oyunlar\" hedefi: Ys Complete Ys 2"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK19), LL14(L"「再生するゲーム」の対象：Sorcerian Original", L"Include in \"Games to play\": Sorcerian Original", L"Inclure dans « Jeux a lire » : Sorcerian Original", L"Includi in \"Giochi da riprodurre\": Sorcerian Original", L"Incluir en \"Juegos a reproducir\": Sorcerian Original", L"「재생할 게임」 대상: Sorcerian Original", L"纳入「播放游戏」：Sorcerian Original", L"ضمن \"ألعاب للتشغيل\": Sorcerian Original", L"В «Игры для воспроизведения»: Sorcerian Original", L"In „Wiederzugebende Spiele“: Sorcerian Original", L"Incluir em \"Jogos a reproduzir\": Sorcerian Original", L"Opnemen in \"Af te spelen spellen\": Sorcerian Original", L"W „Grach do odtworzenia”: Sorcerian Original", L"\"Oynatilacak Oyunlar\" hedefi: Sorcerian Original"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK20), LL14(L"「再生するゲーム」の対象：Zwei!!", L"Include in \"Games to play\": Zwei!!", L"Inclure dans « Jeux a lire » : Zwei!!", L"Includi in \"Giochi da riprodurre\": Zwei!!", L"Incluir en \"Juegos a reproducir\": Zwei!!", L"「재생할 게임」 대상: Zwei!!", L"纳入「播放游戏」：Zwei!!", L"ضمن \"ألعاب للتشغيل\": Zwei!!", L"В «Игры для воспроизведения»: Zwei!!", L"In „Wiederzugebende Spiele“: Zwei!!", L"Incluir em \"Jogos a reproduzir\": Zwei!!", L"Opnemen in \"Af te spelen spellen\": Zwei!!", L"W „Grach do odtworzenia”: Zwei!!", L"\"Oynatilacak Oyunlar\" hedefi: Zwei!!"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK21), LL14(L"「再生するゲーム」の対象：ぐるみん", L"Include in \"Games to play\": Gurumin", L"Inclure dans « Jeux a lire » : Gurumin", L"Includi in \"Giochi da riprodurre\": Gurumin", L"Incluir en \"Juegos a reproducir\": Gurumin", L"「재생할 게임」 대상: 그루민", L"纳入「播放游戏」：咕噜小天使", L"ضمن \"ألعاب للتشغيل\": Gurumin", L"В «Игры для воспроизведения»: Gurumin", L"In „Wiederzugebende Spiele“: Gurumin", L"Incluir em \"Jogos a reproduzir\": Gurumin", L"Opnemen in \"Af te spelen spellen\": Gurumin", L"W „Grach do odtworzenia”: Gurumin", L"\"Oynatilacak Oyunlar\" hedefi: Gurumin"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK22), LL14(L"「再生するゲーム」の対象：ダイナソア リザレクション", L"Include in \"Games to play\": Dinosaur Resurrection", L"Inclure dans « Jeux a lire » : Resurrection Dinosaure", L"Includi in \"Giochi da riprodurre\": Resurrezione Dinosauro", L"Incluir en \"Juegos a reproducir\": Resurreccion Dinosaurio", L"「재생할 게임」 대상: 공룡 부활", L"纳入「播放游戏」：恐龙复活", L"ضمن \"ألعاب للتشغيل\": Dinosaur Resurrection", L"В «Игры для воспроизведения»: Dinosaur Resurrection", L"In „Wiederzugebende Spiele“: Dinosaurier Auferstehung", L"Incluir em \"Jogos a reproduzir\": Ressurreicao Dinossauro", L"Opnemen in \"Af te spelen spellen\": Dinosaurus Herrijzenis", L"W „Grach do odtworzenia”: Dinozaur Zmartwychwstanie", L"\"Oynatilacak Oyunlar\" hedefi: Dinozor Dirilisi"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK23), LL14(L"「再生するゲーム」の対象：ブランディッシュ４", L"Include in \"Games to play\": Brandish4", L"Inclure dans « Jeux a lire » : Brandish4", L"Includi in \"Giochi da riprodurre\": Brandish4", L"Incluir en \"Juegos a reproducir\": Brandish4", L"「재생할 게임」 대상: Brandish4", L"纳入「播放游戏」：Brandish4", L"ضمن \"ألعاب للتشغيل\": Brandish4", L"В «Игры для воспроизведения»: Brandish4", L"In „Wiederzugebende Spiele“: Brandish4", L"Incluir em \"Jogos a reproduzir\": Brandish4", L"Opnemen in \"Af te spelen spellen\": Brandish4", L"W „Grach do odtworzenia”: Brandish4", L"\"Oynatilacak Oyunlar\" hedefi: Brandish4"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK24), LL14(L"「再生するゲーム」の対象：英雄伝説III 白き魔女", L"Include in \"Games to play\": Legend of Heroes III White Witch", L"Inclure dans « Jeux a lire » : Legende des Heros III Sorciere Blanche", L"Includi in \"Giochi da riprodurre\": Legend of Heroes III Strega Bianca", L"Incluir en \"Juegos a reproducir\": Legend of Heroes III Bruja Blanca", L"「재생할 게임」 대상: 영웅전설III 흰 마녀", L"纳入「播放游戏」：英雄传说III 白之魔女", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes III White Witch", L"В «Игры для воспроизведения»: Legend of Heroes III White Witch", L"In „Wiederzugebende Spiele“: Legend of Heroes III Weise Hexe", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes III Bruxa Branca", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes III White Witch", L"W „Grach do odtworzenia”: Legend of Heroes III Biala Czarownica", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes III White Witch"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK25), LL14(L"「再生するゲーム」の対象：英雄伝説IV 朱紅い雫", L"Include in \"Games to play\": Legend of Heroes IV Tear of Vermillion", L"Inclure dans « Jeux a lire » : Legende des Heros IV Larme de Vermillon", L"Includi in \"Giochi da riprodurre\": Legend of Heroes IV Lacrima di Vermiglio", L"Incluir en \"Juegos a reproducir\": Legend of Heroes IV Lagrima de Bermellon", L"「재생할 게임」 대상: 영웅전설IV 주홍의 눈물", L"纳入「播放游戏」：英雄传说IV 朱红之泪", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes IV Tear of Vermillion", L"В «Игры для воспроизведения»: Legend of Heroes IV Tear of Vermillion", L"In „Wiederzugebende Spiele“: Legend of Heroes IV Trane der Purpur", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes IV Tear of Vermillion", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes IV Tear of Vermillion", L"W „Grach do odtworzenia”: Legend of Heroes IV Tear of Vermillion", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes IV Tear of Vermillion"));
+		m_tooltip.AddTool(GetDlgItem(IDC_CHECK26), LL14(L"「再生するゲーム」の対象：英雄伝説V 海の檻歌", L"Include in \"Games to play\": Legend of Heroes V Cagesong of the Ocean", L"Inclure dans « Jeux a lire » : Legende des Heros V Chant des Profondeurs", L"Includi in \"Giochi da riprodurre\": Legend of Heroes V Canto dell'Oceano", L"Incluir en \"Juegos a reproducir\": Legend of Heroes V Cantico del Oceano", L"「재생할 게임」 대상: 영웅전설V 바다의 감옥가", L"纳入「播放游戏」：英雄传说V 海之槛歌", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes V Cagesong of the Ocean", L"В «Игры для воспроизведения»: Legend of Heroes V Cagesong of the Ocean", L"In „Wiederzugebende Spiele“: Legend of Heroes V Käfiglied des Ozeans", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes V Cagesong of the Ocean", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes V Cagesong of the Ocean", L"W „Grach do odtworzenia”: Legend of Heroes V Cagesong of the Ocean", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes V Cagesong of the Ocean"));
 		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON58), LL14(
 			L"mp3/m4a/ogg/flacに埋め込まれているジャケットを表示します。", /* 日本語 */
 			L"Shows album art embedded in mp3/m4a/ogg/flac files.", /* 英語 */
@@ -722,36 +738,96 @@
 			L"Ustaw liczb? p?tli przed nast?pnym utworem",
 			L"Sonraki parcaya gecmeden once dongu say?s?n? ayarla"));
 
+		m_tooltip.AddTool(GetDlgItem(IDC_STATICaaab), LL14(
+			L"Windows全体の主音量（IDC_SLIDER1と連動）",
+			L"Overall Windows master volume (linked to IDC_SLIDER1)",
+			L"Volume principal Windows (lie a IDC_SLIDER1)",
+			L"Volume master Windows (collegato a IDC_SLIDER1)",
+			L"Volumen maestro de Windows (vinculado a IDC_SLIDER1)",
+			L"Windows 전체 마스터 볼륨(IDC_SLIDER1 연동)",
+			L"Windows 整体主音量（与 IDC_SLIDER1 联动）",
+			L"مستوى الصوت الرئيسي لـ Windows (مرتبط بـ IDC_SLIDER1)",
+			L"Общая громкость Windows (связана с IDC_SLIDER1)",
+			L"Windows-Hauptlautstarke (verbunden mit IDC_SLIDER1)",
+			L"Volume mestre do Windows (ligado ao IDC_SLIDER1)",
+			L"Hoofdvolume Windows (gekoppeld aan IDC_SLIDER1)",
+			L"Glowna glosnosc Windows (powiazana z IDC_SLIDER1)",
+			L"Windows ana ses seviyesi (IDC_SLIDER1 ile bagli)"));
+		m_tooltip.AddTool(GetDlgItem(IDC_STATICaaa), LL14(
+			L"このプレイヤ専用のDirectSound音量（IDC_SLIDER3と連動）",
+			L"DirectSound volume for this player only (linked to IDC_SLIDER3)",
+			L"Volume DirectSound de ce lecteur uniquement (lie a IDC_SLIDER3)",
+			L"Volume DirectSound solo per questo lettore (collegato a IDC_SLIDER3)",
+			L"Volumen DirectSound solo de este reproductor (vinculado a IDC_SLIDER3)",
+			L"이 플레이어 전용 DirectSound 볼륨(IDC_SLIDER3 연동)",
+			L"此播放器专用 DirectSound 音量（与 IDC_SLIDER3 联动）",
+			L"مستوى DirectSound لهذا المشغل فقط (مرتبط بـ IDC_SLIDER3)",
+			L"Громкость DirectSound только для этого плеера (связана с IDC_SLIDER3)",
+			L"DirectSound-Lautstarke nur fur diesen Player (verbunden mit IDC_SLIDER3)",
+			L"Volume DirectSound apenas deste player (ligado ao IDC_SLIDER3)",
+			L"DirectSound-volume alleen voor deze speler (gekoppeld aan IDC_SLIDER3)",
+			L"Glosnosc DirectSound tylko tego odtwarzacza (powiazana z IDC_SLIDER3)",
+			L"Yalnizca bu oynatici DirectSound sesi (IDC_SLIDER3 ile bagli)"));
+		m_tooltip.AddTool(GetDlgItem(IDC_STATICaaac), LL14(
+			L"拡張音量（IDC_SLIDER4と連動）\n100%超も可能。イコライザーで音割れを抑えます",
+			L"Extended volume (linked to IDC_SLIDER4)\nCan exceed 100%. Clipping is handled by the equalizer",
+			L"Volume etendu (lie a IDC_SLIDER4)\nPeut depasser 100 %. L'egaliseur evite la saturation",
+			L"Volume esteso (collegato a IDC_SLIDER4)\nOltre 100%. L'equalizzatore evita il clipping",
+			L"Volumen extendido (vinculado a IDC_SLIDER4)\nMas del 100%. El ecualizador evita el recorte",
+			L"확장 볼륨(IDC_SLIDER4 연동)\n100% 초과 가능. 이퀄라이저가 클리핑 방지",
+			L"扩展音量（与 IDC_SLIDER4 联动）\n可超过100%。均衡器防止削波",
+			L"مستوى الصوت الممتد (مرتبط بـ IDC_SLIDER4)\nيمكن تجاوز 100%. المعادل يمنع القص",
+			L"Доп. громкость (связана с IDC_SLIDER4)\nСвыше 100%. Эквалайзер предотвращает клиппинг",
+			L"Erweiterte Lautstarke (IDC_SLIDER4)\nUber 100%. Equalizer verhindert Clipping",
+			L"Volume estendido (IDC_SLIDER4)\nAcima de 100%. Equalizador evita clipping",
+			L"Uitgebreid volume (IDC_SLIDER4)\nBoven 100%. Equalizer voorkomt clipping",
+			L"Rozszerzona glosnosc (IDC_SLIDER4)\nPowyzej 100%. Korektor zapobiega przesterowaniu",
+			L"Genisletilmis ses (IDC_SLIDER4)\n%%100 ustune cikabilir. Ekolayzer kirpilmayi onler"));
+		m_tooltip.AddTool(GetDlgItem(IDC_STATICaaad), LL14(
+			L"次の曲へ進むまでのループ回数（IDC_EDIT1と連動）",
+			L"Loop count before next track (linked to IDC_EDIT1)",
+			L"Nombre de boucles avant la piste suivante (lie a IDC_EDIT1)",
+			L"Numero di loop prima del brano successivo (collegato a IDC_EDIT1)",
+			L"Numero de bucles antes de la siguiente pista (vinculado a IDC_EDIT1)",
+			L"다음 곡까지 루프 횟수(IDC_EDIT1 연동)",
+			L"进入下一曲前的循环次数（与 IDC_EDIT1 联动）",
+			L"عدد الحلقات قبل المسار التالي (مرتبط بـ IDC_EDIT1)",
+			L"Количество повторов перед следующим треком (связано с IDC_EDIT1)",
+			L"Schleifenzahl vor dem nachsten Titel (verbunden mit IDC_EDIT1)",
+			L"Numero de loops antes da proxima faixa (ligado ao IDC_EDIT1)",
+			L"Aantal herhalingen voor volgend nummer (gekoppeld aan IDC_EDIT1)",
+			L"Liczba petli przed nastepnym utworem (powiazana z IDC_EDIT1)",
+			L"Sonraki parcaya kadar dongu sayisi (IDC_EDIT1 ile bagli)"));
 		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER4), LL14(
-			L"100%以上の音量を設定できます",
-			L"Volume can exceed 100%",
-			L"Le volume peut depasser 100%",
-			L"Il volume puo superare il 100%",
-			L"El volumen puede superar el 100%",
-			L"100% 초과 볼륨 설정 가능",
-			L"音量可设置超100%以上",
-			L"يمكن أن يتجاوز مستوى الصوت 100%",
-			L"Громкость может превышать 100%",
-			L"Lautstarke kann 100% uberschreiten",
-			L"Volume pode exceder 100%",
-			L"Volume kan meer dan 100% zijn",
-			L"G?o?no?? mo?e przekracza? 100%",
-			L"Ses seviyesi %100'u a?abilir"));
+			L"100%以上の拡張音量を設定できます\nイコライザー処理で音割れを抑えます",
+			L"Set extended volume above 100%\nClipping is handled by the equalizer",
+			L"Regler un volume etendu au-dela de 100 %\nL'egaliseur evite la saturation",
+			L"Imposta volume esteso oltre il 100%\nL'equalizzatore evita il clipping",
+			L"Ajustar volumen extendido por encima del 100%\nEl ecualizador evita el recorte",
+			L"100% 초과 확장 볼륨 설정\n이퀄라이저가 클리핑 방지",
+			L"可设置超过100%的扩展音量\n均衡器防止削波",
+			L"تعيين مستوى ممتد فوق 100%\nالمعادل يمنع القص",
+			L"Установить доп. громкость выше 100%\nЭквалайзер предотвращает клиппинг",
+			L"Erweiterte Lautstarke uber 100% einstellen\nEqualizer verhindert Clipping",
+			L"Definir volume estendido acima de 100%\nEqualizador evita clipping",
+			L"Uitgebreid volume boven 100% instellen\nEqualizer voorkomt clipping",
+			L"Ustaw rozszerzona glosnosc powyzej 100%\nKorektor zapobiega przesterowaniu",
+			L"%%100 ustune genisletilmis ses\nEkolayzer kirpilmayi onler"));
 		m_tooltip.AddTool(GetDlgItem(IDC_STATICds2), LL14(
-			L"100%以上の音量を設定できます",
-			L"Volume can exceed 100%",
-			L"Le volume peut depasser 100%",
-			L"Il volume puo superare il 100%",
-			L"El volumen puede superar el 100%",
-			L"100% 초과 볼륨 설정 가능",
-			L"音量可设置超100%以上",
-			L"يمكن أن يتجاوز مستوى الصوت 100%",
-			L"Громкость может превышать 100%",
-			L"Lautstarke kann 100% uberschreiten",
-			L"Volume pode exceder 100%",
-			L"Volume kan meer dan 100% zijn",
-			L"G?o?no?? mo?e przekracza? 100%",
-			L"Ses seviyesi %100'u a?abilir"));
+			L"100%以上の拡張音量を設定できます\nイコライザー処理で音割れを抑えます",
+			L"Set extended volume above 100%\nClipping is handled by the equalizer",
+			L"Regler un volume etendu au-dela de 100 %\nL'egaliseur evite la saturation",
+			L"Imposta volume esteso oltre il 100%\nL'equalizzatore evita il clipping",
+			L"Ajustar volumen extendido por encima del 100%\nEl ecualizador evita el recorte",
+			L"100% 초과 확장 볼륨 설정\n이퀄라이저가 클리핑 방지",
+			L"可设置超过100%的扩展音量\n均衡器防止削波",
+			L"تعيين مستوى ممتد فوق 100%\nالمعادل يمنع القص",
+			L"Установить доп. громкость выше 100%\nЭквалайзер предотвращает клиппинг",
+			L"Erweiterte Lautstarke uber 100% einstellen\nEqualizer verhindert Clipping",
+			L"Definir volume estendido acima de 100%\nEqualizador evita clipping",
+			L"Uitgebreid volume boven 100% instellen\nEqualizer voorkomt clipping",
+			L"Ustaw rozszerzona glosnosc powyzej 100%\nKorektor zapobiega przesterowaniu",
+			L"%%100 ustune genisletilmis ses\nEkolayzer kirpilmayi onler"));
 		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER7), LL14(
 			L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpiのテンポを変えます。wav,動画は変わりません。", /* 日本語 */
 			L"Changes tempo for mp3, ogg, flac, m4a, opus, adpcm, dsd, kpi. (wav and video are not affected.)", /* 英語 */

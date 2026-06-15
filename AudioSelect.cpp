@@ -69,6 +69,7 @@ BOOL CAudioSelect::OnInitDialog()
 	m_tooltip.Create(this);
 	m_tooltip.Activate(TRUE);
 	m_tooltip.AddTool(&m_okdummy, LL14(L"音声ストリームを決定します", L"Determine audio stream", L"Définir le flux audio", L"Determina flusso audio", L"Determinar flujo de audio", L"오디오 스트림 결정", L"确定音频流", L"تحديد دفق الصوت", L"Определить аудиопоток", L"Audiostream festlegen", L"Determinar fluxo de áudio", L"Audiostroom bepalen", L"Określ strumień audio", L"Ses akışını belirle"));
+	m_tooltip.AddTool(GetDlgItem(IDC_LIST1), LL14(L"再生する音声ストリームを選択します。\n複数チャンネルがある動画などで表示されます。", L"Select the audio stream to play.\nShown for videos with multiple channels.", L"Selectionner le flux audio a lire.\nAffiche pour les videos a plusieurs canaux.", L"Seleziona il flusso audio da riprodurre.\nPer video con piu canali.", L"Seleccionar flujo de audio a reproducir.\nPara videos con varios canales.", L"재생할 오디오 스트림을 선택합니다.\n여러 채널이 있는 동영상 등에서 표시됩니다.", L"选择要播放的音频流。\n多声道视频等会显示此界面。", L"اختر دفق الصوت للتشغيل.\nيظهر للفيديو بعدة قنوات.", L"Выберите аудиопоток для воспроизведения.\nДля видео с несколькими каналами.", L"Audiostream zum Abspielen wahlen.\nBei Videos mit mehreren Kanalen.", L"Selecione o fluxo de audio.\nPara videos com varios canais.", L"Selecteer audiostroom.\nBij video met meerdere kanalen.", L"Wybierz strumien audio do odtworzenia.\nDla wideo z wieloma kanalami.", L"Calinacak ses akisini secin.\nBirden fazla kanalli videolarda gosterilir."));
 	m_tooltip.SetDelayTime( TTDT_AUTOPOP, 10000 );
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 
