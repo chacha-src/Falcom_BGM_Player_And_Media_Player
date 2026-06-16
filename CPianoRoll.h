@@ -72,7 +72,7 @@ private:
     static constexpr int   WIN_BASS       = 16384;
     static constexpr int   WIN_HIGH       = 4096;
     static constexpr int   WIN_ONSET      = 1024;
-    static constexpr int   LOW_KEY_SPLIT  = 41;
+    static constexpr int   LOW_KEY_SPLIT  = 51; // C5: これ未満は低音/中低音窓
     static constexpr int   DETECT_KEYS    = 108;
     static constexpr int   KEY_OFFSET       = 9;
     static constexpr UINT  WM_PIANOROLL_SYNC = WM_APP + 420;

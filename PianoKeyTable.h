@@ -54,6 +54,13 @@ namespace PianoKey
         return false;
     }
 
+    inline bool IsOctaveRelated(int hi, int lo)
+    {
+        if (hi <= lo || lo < 0 || hi >= COUNT) return false;
+        const int d = hi - lo;
+        return d == 12 || d == 24 || d == 36 || d == 48;
+    }
+
     struct HarmonicMap
     {
         int up[COUNT][HARMONIC_COUNT];

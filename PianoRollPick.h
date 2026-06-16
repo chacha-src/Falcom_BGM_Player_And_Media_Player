@@ -289,6 +289,16 @@ inline void ResolveHarmonicPicks(const float* st, bool* active, int lo, int hi)
     for (int i = hi - 1; i >= lo; --i) {
         if (!active[i]) continue;
         if (PianoKey::PassesFundamentalTest(st, i, count)) continue;
+        bool hasMelodicAbove = false;
+        for (int j = i + 1; j < hi; ++j) {
+            if (!active[j]) continue;
+            const int d = j - i;
+            if (d >= 1 && d <= 11 && !PianoKey::IsHarmonicPair(j, i) && !PianoKey::IsOctaveRelated(j, i)) {
+                hasMelodicAbove = true;
+                break;
+            }
+        }
+        if (hasMelodicAbove) continue;
         const float curSal = HarmonicFundamentalScore(st, i, count);
         int bestRoot = -1;
         float bestRootSal = 0.0f;
