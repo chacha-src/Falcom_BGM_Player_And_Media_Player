@@ -123,6 +123,7 @@ private:
     std::vector<double> m_analysisBuf;
     std::vector<double> m_bassAnalysisBuf;
     std::vector<double> m_windowedLow;
+    std::vector<double> m_windowedBass;
     std::vector<double> m_windowedHigh;
     std::vector<double> m_windowedOnset;
 

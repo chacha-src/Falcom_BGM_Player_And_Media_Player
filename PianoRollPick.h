@@ -1,7 +1,8 @@
-#pragma once
+﻿#pragma once
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include "PianoKeyTable.h"
 
 // 帯域内: 局部ピーク -> 倍音整合 -> 基音条件を満たすものをすべて採用（本数上限なし）
 
@@ -242,4 +243,107 @@ inline bool BandContainsPeakNear(const float* st, int lo, int hi, int key, int r
             return true;
     }
     return false;
+}
+
+// 複音: 偽サブハーモニックと上倍音ゴーストのみ除去（和音の3度/5度は残す）
+inline void ResolveHarmonicPicksLight(const float* st, bool* active, int lo, int hi)
+{
+    if (!st || !active || lo >= hi) return;
+
+    for (int i = lo; i < hi; ++i) {
+        if (!active[i]) continue;
+        const float sc = st[i];
+        for (int j = i + 1; j < hi; ++j) {
+            if (!PianoKey::IsHarmonicPair(j, i)) continue;
+            if (!active[j]) continue;
+            if (st[j] >= sc * 0.70f) {
+                active[i] = false;
+                break;
+            }
+        }
+    }
+    RejectUpperHarmonicPicks(st, active, lo, hi);
+}
+
+// 単音スタック: 倍音整理 + 基音昇格（ハープ等の過検出抑制）
+inline void ResolveHarmonicPicks(const float* st, bool* active, int lo, int hi)
+{
+    if (!st || !active || lo >= hi) return;
+    const int count = PianoKey::COUNT;
+
+    for (int i = lo; i < hi; ++i) {
+        if (!active[i]) continue;
+        const float sc = st[i];
+        for (int j = i + 1; j < hi; ++j) {
+            if (!PianoKey::IsHarmonicPair(j, i)) continue;
+            if (!active[j]) continue;
+            if (st[j] >= sc * 0.70f) {
+                active[i] = false;
+                break;
+            }
+        }
+    }
+
+    RejectUpperHarmonicPicks(st, active, lo, hi);
+
+    for (int i = hi - 1; i >= lo; --i) {
+        if (!active[i]) continue;
+        if (PianoKey::PassesFundamentalTest(st, i, count)) continue;
+        const float curSal = HarmonicFundamentalScore(st, i, count);
+        int bestRoot = -1;
+        float bestRootSal = 0.0f;
+        for (int j = lo; j < i; ++j) {
+            if (!PianoKey::IsHarmonicPair(i, j)) continue;
+            const float rootSal = HarmonicFundamentalScore(st, j, count);
+            if (rootSal > bestRootSal) {
+                bestRootSal = rootSal;
+                bestRoot = j;
+            }
+        }
+        if (bestRoot < 0 || (i - bestRoot) > 14) continue;
+        if (bestRootSal >= curSal * 0.78f || st[bestRoot] >= st[i] * 0.42f) {
+            active[i] = false;
+            active[bestRoot] = true;
+        }
+    }
+
+    for (int i = hi - 1; i >= lo; --i) {
+        if (!active[i]) continue;
+        for (int j = lo; j < i; ++j) {
+            if (!active[j]) continue;
+            if (!PianoKey::IsHarmonicPair(i, j)) continue;
+            if (st[j] >= st[i] * 0.32f)
+                active[i] = false;
+            else
+                active[j] = false;
+            break;
+        }
+    }
+}
+
+inline void FilterWeakIsolatedOutliers(const float* st, bool* active, int lo, int hi,
+    float relToBandMax = 0.20f)
+{
+    if (!st || !active || lo >= hi) return;
+    const float bandMax = BandMaxInRange(st, lo, hi);
+    if (bandMax < 1e-6f) return;
+    const float absMin = bandMax * relToBandMax;
+
+    for (int i = lo; i < hi; ++i) {
+        if (!active[i] || st[i] >= absMin) continue;
+        bool related = false;
+        for (int j = lo; j < hi; ++j) {
+            if (j == i || !active[j]) continue;
+            if (PianoKey::IsHarmonicPair(i, j) || PianoKey::IsHarmonicPair(j, i)) {
+                related = true;
+                break;
+            }
+            if (abs(i - j) <= 2 && st[j] >= absMin) {
+                related = true;
+                break;
+            }
+        }
+        if (!related)
+            active[i] = false;
+    }
 }

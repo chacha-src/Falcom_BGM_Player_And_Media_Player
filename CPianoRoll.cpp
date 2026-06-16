@@ -10,6 +10,7 @@
 #include "resource.h"
 #include "NoteFundamentalPick.h"
 #include "PianoRollPick.h"
+#include "PianoKeyTable.h"
 #include "PianoRollGoertzelAvx2.h"
 #include <algorithm>
 
@@ -245,9 +246,72 @@ namespace Cfg
         return f;
     }
 
+    static int CountSpectralPeaksInBand(const float* st, int lo, int hi, float relToMax)
+    {
+        if (!st || lo >= hi) return 0;
+        const float bandMax = BandMaxStrength(st, lo, hi);
+        if (bandMax < 1e-6f) return 0;
+        const float minV = bandMax * relToMax;
+        int n = 0;
+        for (int i = lo; i < hi; ++i) {
+            if (st[i] < minV) continue;
+            const int jl = (i - 1 < lo) ? lo : (i - 1);
+            const int jh = (i + 1 >= hi) ? (hi - 1) : (i + 1);
+            bool isPeak = true;
+            for (int j = jl; j <= jh; ++j) {
+                if (j == i) continue;
+                if (st[j] >= st[i]) {
+                    isPeak = false;
+                    break;
+                }
+            }
+            if (isPeak) ++n;
+        }
+        return n;
+    }
+
+    // 正規化後スペクトルから複音を推定（ピック数ではなくピーク数）
+    static bool FrameLooksPolyphonic(const float* st)
+    {
+        if (!st) return false;
+        const int bassPeaks = CountSpectralPeaksInBand(st, 0, BAND_BASS_END, 0.17f);
+        const int midPeaks = CountSpectralPeaksInBand(st, BAND_BASS_END, BAND_MID_END, 0.14f);
+        const int trePeaks = CountSpectralPeaksInBand(st, BAND_MID_END, 88, 0.14f);
+        int liveBands = 0;
+        if (bassPeaks >= 2) ++liveBands;
+        if (midPeaks >= 4) ++liveBands;
+        if (trePeaks >= 4) ++liveBands;
+        return liveBands >= 2 || (midPeaks >= 5 && (bassPeaks + trePeaks) >= 3);
+    }
+
+    // ピック結果が単一音の倍音列か（ハープ等）
+    static bool FrameLooksLikeSingleSource(const bool* picked, int lo, int hi)
+    {
+        if (!picked || lo >= hi) return true;
+        int picks[32];
+        int n = 0;
+        for (int i = lo; i < hi; ++i) {
+            if (!picked[i]) continue;
+            if (n < 32) picks[n++] = i;
+        }
+        if (n <= 1) return true;
+
+        int root = picks[0];
+        for (int k = 1; k < n; ++k)
+            if (picks[k] < root) root = picks[k];
+
+        int harmonic = 0;
+        for (int k = 0; k < n; ++k) {
+            if (picks[k] == root) continue;
+            if (PianoKey::IsHarmonicPair(picks[k], root) || PianoKey::IsHarmonicPair(root, picks[k]))
+                ++harmonic;
+        }
+        return harmonic + 1 >= n || (float)(harmonic + 1) / (float)n >= 0.62f;
+    }
+
     // 同時音数上限なし: 帯域内の鍵数だけをループ上限に使う
     static void ApplyBandFundamentalPick(const float* st, bool* picked,
-        int bandStart, int bandEnd, float relThresh)
+        int bandStart, int bandEnd, float relThresh, bool polyFrame)
     {
         if (!st || !picked || bandStart >= bandEnd) return;
         const int bandSpan = bandEnd - bandStart;
@@ -267,6 +331,22 @@ namespace Cfg
         if (bandStart == 0)
             StabilizeBassBandPicks(st, bandPick, bandStart, bandEnd);
 
+        int bandPickCount = 0;
+        for (int i = bandStart; i < bandEnd; ++i)
+            if (bandPick[i]) ++bandPickCount;
+
+        if (polyFrame && bandStart >= BAND_BASS_END) {
+            const int minPoly = (bandSpan >= 10) ? 3 : 2;
+            if (bandPickCount < minPoly) {
+                bool extra[128];
+                memset(extra, 0, sizeof(extra));
+                PickAllFundamentalsInBand(st, extra, 88, bandStart, bandEnd,
+                    0.58f, relThresh * 0.72f);
+                for (int i = bandStart; i < bandEnd; ++i)
+                    if (extra[i]) bandPick[i] = true;
+            }
+        }
+
         for (int i = bandStart; i < bandEnd; ++i) {
             if (bandPick[i])
                 picked[i] = true;
@@ -274,26 +354,30 @@ namespace Cfg
     }
 
     static void SuppressWeakBandPicks(const float* strengths,
-        bool* bassPick, bool* midPick, bool* treblePick)
+        bool* bassPick, bool* midPick, bool* treblePick, bool polyFrame)
     {
         if (!strengths || !bassPick || !midPick || !treblePick) return;
+
+        const float bassR = WEAK_BASS_RATIO * (polyFrame ? 0.82f : 1.0f);
+        const float midR = WEAK_MID_RATIO * (polyFrame ? 0.90f : 1.0f);
+        const float treR = WEAK_TRE_RATIO * (polyFrame ? 0.92f : 1.0f);
 
         const float bassMax = BandMaxStrength(strengths, 0, BAND_BASS_END);
         const float midMax = BandMaxStrength(strengths, BAND_BASS_END, BAND_MID_END);
         const float treMax = BandMaxStrength(strengths, BAND_MID_END, 88);
 
         if (bassMax > 1e-6f) {
-            const float minB = bassMax * WEAK_BASS_RATIO;
+            const float minB = bassMax * bassR;
             for (int i = 0; i < BAND_BASS_END; ++i)
                 if (bassPick[i] && strengths[i] < minB) bassPick[i] = false;
         }
         if (midMax > 1e-6f) {
-            const float minM = midMax * WEAK_MID_RATIO;
+            const float minM = midMax * midR;
             for (int i = BAND_BASS_END; i < BAND_MID_END; ++i)
                 if (midPick[i] && strengths[i] < minM) midPick[i] = false;
         }
         if (treMax > 1e-6f) {
-            const float minT = treMax * WEAK_TRE_RATIO;
+            const float minT = treMax * treR;
             for (int i = BAND_MID_END; i < 88; ++i)
                 if (treblePick[i] && strengths[i] < minT) treblePick[i] = false;
         }
@@ -356,6 +440,7 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     m_analysisBuf.assign(WIN_LOW, 0.0);
     m_bassAnalysisBuf.assign(WIN_BASS, 0.0);
     m_windowedLow.assign(WIN_LOW, 0.0);
+    m_windowedBass.assign(WIN_BASS, 0.0);
     m_windowedHigh.assign(WIN_HIGH, 0.0);
     m_windowedOnset.assign(WIN_ONSET, 0.0);
 
@@ -605,6 +690,7 @@ void CPianoRoll::EnsureAnalysisTables(int sampleRate)
     }
 
     m_windowedLow.assign(WIN_LOW, 0.0);
+    m_windowedBass.assign(WIN_BASS, 0.0);
     m_windowedHigh.assign(WIN_HIGH, 0.0);
     m_windowedOnset.assign(WIN_ONSET, 0.0);
     m_analysisBuf.assign(WIN_LOW, 0.0);
@@ -765,14 +851,22 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow8192,
     for (int i = 0; i < WIN_ONSET; ++i)
         m_windowedOnset[i] = onsetSrc[i] * m_hannOnset[i];
 
-    for (int i = 0; i < WIN_ONSET; ++i)
-        m_windowedOnset[i] = onsetSrc[i] * m_hannOnset[i];
-
-    PianoRollGoertzelBatchAvx2(
-        m_windowedLow.data(), WIN_LOW, m_goertzelCoeffs.data(),
-        0, LOW_KEY_SPLIT, m_goertzelRawScratch);
-    for (int i = 0; i < LOW_KEY_SPLIT; ++i)
-        m_rawStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i], i);
+    if (hasBass) {
+        for (int i = 0; i < WIN_BASS; ++i)
+            m_windowedBass[i] = m_bassAnalysisBuf[i] * m_hannBass[i];
+        PianoRollGoertzelBatchAvx2(
+            m_windowedBass.data(), WIN_BASS, m_goertzelCoeffs.data(),
+            0, LOW_KEY_SPLIT, m_goertzelRawScratch);
+        for (int i = 0; i < LOW_KEY_SPLIT; ++i)
+            m_rawStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i], i);
+    }
+    else {
+        PianoRollGoertzelBatchAvx2(
+            m_windowedLow.data(), WIN_LOW, m_goertzelCoeffs.data(),
+            0, LOW_KEY_SPLIT, m_goertzelRawScratch);
+        for (int i = 0; i < LOW_KEY_SPLIT; ++i)
+            m_rawStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i], i);
+    }
 
     PianoRollGoertzelBatchAvx2(
         m_windowedHigh.data(), WIN_HIGH, m_goertzelCoeffs.data(),
@@ -819,6 +913,7 @@ void CPianoRoll::UpdateNoteStates()
     NormalizeBandPeak(trackStrength, BAND_MID_END, KEY_COUNT, DISPLAY_PEAK_CAP);
 
     const float pickScale = PickThreshScaleFromLevelDb(m_bufwav3LevelDb);
+    const bool polyFrame = FrameLooksPolyphonic(pickStrength);
 
     float maxS = 0.0f;
     for (int i = 0; i < KEY_COUNT; ++i)
@@ -858,11 +953,11 @@ void CPianoRoll::UpdateNoteStates()
     memset(picked, 0, sizeof(picked));
 
     ApplyBassBandSpeanaPick(pickStrength, picked, 0, BAND_BASS_END,
-        BASS_PICK_THRESH * pickScale);
+        BASS_PICK_THRESH * pickScale * (polyFrame ? 0.88f : 1.0f));
     ApplyBandFundamentalPick(pickStrength, picked, BAND_BASS_END, BAND_MID_END,
-        MID_PICK_THRESH * pickScale);
+        MID_PICK_THRESH * pickScale * (polyFrame ? 0.93f : 1.0f), polyFrame);
     ApplyBandFundamentalPick(pickStrength, picked, BAND_MID_END, KEY_COUNT,
-        TRE_PICK_THRESH * pickScale);
+        TRE_PICK_THRESH * pickScale, polyFrame);
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         bassPick[i] = midPick[i] = treblePick[i] = false;
@@ -872,10 +967,27 @@ void CPianoRoll::UpdateNoteStates()
         else treblePick[i] = true;
     }
 
-    SuppressWeakBandPicks(pickStrength, bassPick, midPick, treblePick);
+    SuppressWeakBandPicks(pickStrength, bassPick, midPick, treblePick, polyFrame);
 
     for (int i = 0; i < KEY_COUNT; ++i)
         picked[i] = bassPick[i] || midPick[i] || treblePick[i];
+
+    const bool singleSource = FrameLooksLikeSingleSource(picked, 0, KEY_COUNT);
+    if (singleSource) {
+        ResolveHarmonicPicks(pickStrength, picked, 0, KEY_COUNT);
+        FilterWeakIsolatedOutliers(pickStrength, picked, 0, KEY_COUNT, 0.21f);
+    }
+    else {
+        ResolveHarmonicPicksLight(pickStrength, picked, 0, KEY_COUNT);
+    }
+
+    for (int i = 0; i < KEY_COUNT; ++i) {
+        bassPick[i] = midPick[i] = treblePick[i] = false;
+        if (!picked[i]) continue;
+        if (i < BAND_BASS_END) bassPick[i] = true;
+        else if (i < BAND_MID_END) midPick[i] = true;
+        else treblePick[i] = true;
+    }
 
     for (int i = 0; i < KEY_COUNT; ++i)
     {
@@ -886,7 +998,8 @@ void CPianoRoll::UpdateNoteStates()
             const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
             if (onsetDelta >= ONSET_DELTA_THRESH &&
                 m_onsetStrengths[i] >= ONSET_MIN_STRENGTH &&
-                pickStrength[i] >= TRE_PICK_THRESH * pickScale * 0.55f)
+                pickStrength[i] >= TRE_PICK_THRESH * pickScale * 0.55f &&
+                !PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked, 0, KEY_COUNT, KEY_COUNT))
                 effectivePicked = true;
         }
 
@@ -897,7 +1010,8 @@ void CPianoRoll::UpdateNoteStates()
             else {
                 const float holdRatio = HoldEnvRatio(i);
                 if (holdRatio > 0.0f && m_envPeak[i] > 0.001f &&
-                    trackStrength[i] >= m_envPeak[i] * holdRatio)
+                    trackStrength[i] >= m_envPeak[i] * holdRatio &&
+                    !PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked, 0, KEY_COUNT, KEY_COUNT, 0.78f))
                     effectivePicked = true;
             }
         }

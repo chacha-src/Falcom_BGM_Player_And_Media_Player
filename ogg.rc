@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -653,7 +653,7 @@ BEGIN
     LTEXT           "ジャンル",IDC_SYOSAI_LBL_GENRE,144,119,26,8
     EDITTEXT        IDC_EDIT10,174,116,87,12,ES_AUTOHSCROLL | ES_READONLY
     LTEXT           "コメント",IDC_SYOSAI_LBL_CMT,14,136,23,8
-    EDITTEXT        IDC_EDIT11,42,133,219,24,ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL
+    EDITTEXT        IDC_EDIT11,42,133,219,24,ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL
     GROUPBOX        "内部情報",IDC_SYOSAI_GRP_INTERNAL,7,170,261,55
     LTEXT           "内部ID",IDC_SYOSAI_LBL_ID,14,183,24,8
     EDITTEXT        IDC_EDIT2,42,180,40,12,ES_AUTOHSCROLL | ES_READONLY
@@ -886,7 +886,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,410
+ FILEVERSION 0,8,7,412
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -904,10 +904,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.06.14"
-            VALUE "FileVersion", "0.8.7.410"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.06.16"
+            VALUE "FileVersion", "0.8.7.412"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.06.14"
+            VALUE "LegalCopyright", "Copyright (C) 2026.06.16"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
