@@ -2079,7 +2079,6 @@ int ret2;
 // WAV出力（再生なし）用
 CString wavExportPath;
 int wavExportLoopCount = 0;
-BOOL wavExportMute = FALSE;
 
 //#define OUTPUT_BUFFER_NUM  10
 //#define BUFSZ			(4096*6)
@@ -5735,6 +5734,8 @@ void COggDlg::play()
 	wavbit_sample_Hz = 44100;
 	loop3 = 0; fade1 = 0;
 	playy = 0;
+	ms2 = 0;
+	InterlockedExchange(&g_gdiPaintPending, 0);
 	cnt3 = 0;
 	bufzero = 0;
 	if (mi) {
@@ -9085,42 +9086,14 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount)
 	ret2 = pc->ret2;
 	wavExportPath = outputPath;
 	wavExportLoopCount = loopCount;
-	wavExportMute = TRUE;
 	int saveloop_bak = savedata.saveloop;
 	savedata.saveloop = 1;  // ループを有効にしてwavExportLoopCountで制御
-	const int volPosBak = m_sl.GetPos();
-	if (wavExportMute) m_sl.SetPos(0);
 	play();
-	m_sl.SetPos(volPosBak);
-	// エクスポート中に timerp が主音量を 0 に落とす。play 後は playy==0 で timerp が音量を戻さないためここで復帰
-	{
-		float vol = (float)m_sl.GetPos();
-		vol /= 1000.0f;
-		if (deve == NULL) {
-			if (hwo) {
-				WORD leftv = (WORD)(0xFFFF * vol);
-				WORD rightv = (WORD)(0xFFFF * vol);
-				waveOutSetVolume(hwo, MAKELONG(leftv, rightv));
-			}
-		}
-		else if (audio) {
-			audio->SetMasterVolumeLevelScalar(vol / 100.0f, &GUID_NULL);
-		}
-		CString sv;
-		if (deve)
-			sv.Format(_T("%3d%%"), (int)vol);
-		else
-			sv.Format(_T("%3d%%"), (int)(vol * 100));
-		CString curv;
-		m_vol.GetWindowText(curv);
-		if (sv != curv)
-			m_vol.SetWindowText(sv);
-	}
+	const BOOL ok = (wl > 0 && cc1 == 0);
 	wavExportPath.Empty();
 	wavExportLoopCount = 0;
-	wavExportMute = FALSE;
 	savedata.saveloop = saveloop_bak;
-	return TRUE;
+	return ok;
 }
 
 HANDLE hp;

@@ -75,6 +75,7 @@ void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey);
 // 最小化復帰・再表示時: オーナードロー子が親 Invalidate だけでは再描画されないため明示的に更新
 void CCC_ForceRepaintHwnd(HWND hWnd);
 void CCC_RefreshChildrenAfterShow(HWND hWnd);
+void CCC_SendGroupBoxesToBack(HWND hDlg);
 
 // ============================================================================
 // 色定義

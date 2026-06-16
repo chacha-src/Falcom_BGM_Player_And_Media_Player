@@ -122,6 +122,7 @@ typedef struct
 
 } mp4ff_track_t;
 
+#ifndef USE_TAGGING
 /* metadata tag structure */
 typedef struct
 {
@@ -135,6 +136,7 @@ typedef struct
 	mp4ff_tag_t *tags;
 	uint32_t count;
 } mp4ff_metadata_t;
+#endif
 
 /* mp4 main file structure */
 typedef struct

@@ -534,7 +534,12 @@ void HandleNotifications_export()
 	struct ExportModeGuard {
 		~ExportModeGuard() { g_isWavExportRendering = false; }
 	} exportModeGuard;
-	thn1 = FALSE;  // 2回目以降：前回stop1()でTRUEになったままなのでリセット必須
+	// play() 先頭の stop1() が playf==1 のため SignalPlaybackNotifyThreadStop し、
+	// syukai==2 / stf!=0 のままだとループ即終了＋DispatchPlaywavFill が無音になる
+	thn1 = FALSE;
+	stf = 0;
+	syukai = 0;
+	syukai2 = 0;
 	oldw = 0;
 	fade1 = 0;
 	const ULONG bufSize = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM_DS;

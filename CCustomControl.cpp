@@ -4826,6 +4826,16 @@ void CCustomDialog::OnPaint()
         CDialog::OnPaint();
 }
 
+void CCC_SendGroupBoxesToBack(HWND hDlg)
+{
+    if (!hDlg || !::IsWindow(hDlg)) return;
+    for (HWND h = ::GetWindow(hDlg, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT))
+    {
+        if ((::GetWindowLong(h, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX)
+            ::SetWindowPos(h, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
 #if CCUSTOM_AERO_SUPPORT
 static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf);
 
@@ -5207,16 +5217,6 @@ static void CCC_InstallOpaqueFixersRecursive(HWND hParent, CTypedPtrList<CPtrLis
                 delete pFixer;
         }
         CCC_InstallOpaqueFixersRecursive(hChild, fixers);
-    }
-}
-
-static void CCC_SendGroupBoxesToBack(HWND hDlg)
-{
-    if (!hDlg || !::IsWindow(hDlg)) return;
-    for (HWND h = ::GetWindow(hDlg, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT))
-    {
-        if ((::GetWindowLong(h, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX)
-            ::SetWindowPos(h, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 }
 

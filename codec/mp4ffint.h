@@ -28,6 +28,10 @@
 ** $Id: mp4ffint.h,v 1.27 2009/03/09 21:22:22 menno Exp $
 **/
 
+#ifndef USE_TAGGING
+#define USE_TAGGING
+#endif
+
 #ifndef MP4FF_INTERNAL_H
 #define MP4FF_INTERNAL_H
 

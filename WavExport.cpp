@@ -10,6 +10,114 @@
 extern COggDlg* og;
 extern void DoEvent();
 
+namespace {
+
+wchar_t WavExportMapInvalidFilenameChar(wchar_t c)
+{
+	switch (c) {
+	case L'\\': return L'＼';
+	case L'/':  return L'／';
+	case L':':  return L'：';
+	case L'*':  return L'＊';
+	case L'?':  return L'？';
+	case L'"':  return L'\xFF02';
+	case L'<':  return L'＜';
+	case L'>':  return L'＞';
+	case L'|':  return L'｜';
+	default:
+		return (c < 32) ? L'_' : c;
+	}
+}
+
+void WavExportTrimTrailingDotsAndSpaces(CString& s)
+{
+	while (s.GetLength() > 0) {
+		const wchar_t c = s[s.GetLength() - 1];
+		if (c == L'.' || c == L' ') s.Truncate(s.GetLength() - 1);
+		else break;
+	}
+	if (s.IsEmpty()) s = L"_";
+}
+
+bool WavExportIsReservedDeviceName(const CString& upper)
+{
+	static const wchar_t* reserved[] = {
+		L"CON", L"PRN", L"AUX", L"NUL",
+		L"COM1", L"COM2", L"COM3", L"COM4", L"COM5", L"COM6", L"COM7", L"COM8", L"COM9",
+		L"LPT1", L"LPT2", L"LPT3", L"LPT4", L"LPT5", L"LPT6", L"LPT7", L"LPT8", L"LPT9",
+		NULL
+	};
+	for (int i = 0; reserved[i]; ++i) {
+		const int n = (int)wcslen(reserved[i]);
+		if (upper.GetLength() == n && upper == reserved[i]) return true;
+		if (upper.GetLength() > n && upper.Left(n) == reserved[i] && upper[n] == L'.') return true;
+	}
+	return false;
+}
+
+CString WavExportSanitizePathComponent(const CString& component)
+{
+	CString s = component;
+	for (int i = 0; i < s.GetLength(); ++i)
+		s.SetAt(i, WavExportMapInvalidFilenameChar(s[i]));
+	WavExportTrimTrailingDotsAndSpaces(s);
+	CString upper = s;
+	upper.MakeUpper();
+	if (WavExportIsReservedDeviceName(upper))
+		s = L"_" + s;
+	return s;
+}
+
+CString WavExportSanitizeFilePath(const CString& pathIn)
+{
+	if (pathIn.IsEmpty()) return pathIn;
+
+	CString out;
+	int i = 0;
+	const int len = pathIn.GetLength();
+
+	if (len >= 2 && pathIn[0] == L'\\' && pathIn[1] == L'\\') {
+		out = L"\\\\";
+		i = 2;
+		int j = i;
+		while (j < len && pathIn[j] != L'\\') ++j;
+		if (j > i) out += WavExportSanitizePathComponent(pathIn.Mid(i, j - i));
+		i = j;
+	}
+	else if (len >= 2 && pathIn[1] == L':') {
+		out = pathIn.Left(2);
+		i = 2;
+	}
+
+	if (i < len && pathIn[i] == L'\\') {
+		out += L'\\';
+		++i;
+	}
+
+	while (i < len) {
+		int j = i;
+		while (j < len && pathIn[j] != L'\\') ++j;
+		CString part = pathIn.Mid(i, j - i);
+		if (!part.IsEmpty())
+			out += WavExportSanitizePathComponent(part);
+		i = j;
+		if (i < len && pathIn[i] == L'\\') {
+			out += L'\\';
+			++i;
+		}
+	}
+	return out;
+}
+
+CString WavExportNormalizeOutputPath(const CString& pathIn)
+{
+	CString path = pathIn;
+	if (path.Right(4).MakeLower() != L".wav") path += L".wav";
+	return WavExportSanitizeFilePath(path);
+}
+
+} // namespace
+
 IMPLEMENT_DYNAMIC(CWavExport, CCustomBlurDialogBase)
 
 CWavExport::CWavExport(CWnd* pParent)
@@ -71,6 +179,7 @@ BOOL CWavExport::OnInitDialog()
 	int dot = defPath.ReverseFind(L'.');
 	if (dot >= 0) defPath = defPath.Left(dot);
 	defPath += L".wav";
+	defPath = WavExportNormalizeOutputPath(defPath);
 	m_path.SetWindowText(defPath);
 	m_status.SetWindowText(L"");
 	return TRUE;
@@ -114,8 +223,12 @@ void CWavExport::OnBnClickedWavExportExec()
 			L"Geef bestandsnaam op", L"Podaj nazwę pliku", L"Dosya adini belirtin"));
 		return;
 	}
-	CString path = pathStr;
-	if (path.Right(4).MakeLower() != L".wav") path += L".wav";
+	CString path = WavExportNormalizeOutputPath(pathStr);
+	CString pathForCompare = pathStr;
+	if (pathForCompare.Right(4).MakeLower() != L".wav")
+		pathForCompare += L".wav";
+	if (path != pathForCompare)
+		m_path.SetWindowText(path);
 	m_status.SetWindowText(LL14(L"出力中...", L"Exporting...", L"Export en cours...", L"Esportazione...",
 		L"Exportando...", L"내보내는 중...", L"导出中...", L"جاري التصدير...",
 		L"Экспорт...", L"Exportiere...", L"Exportando...", L"Exporteren...",

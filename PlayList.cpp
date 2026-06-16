@@ -256,6 +256,49 @@ END_MESSAGE_MAP()
 
 static const UINT_PTR kPlayListNavRefreshTimer = 4945;
 
+static void ClampPlaylistSelectionIndices(CPlayList* pl)
+{
+	if (!pl || pl->playcnt <= 0) {
+		if (pl) {
+			pl->pnt = -1;
+			pl->pnt1 = -1;
+		}
+		return;
+	}
+	if (pl->pnt < 0 || pl->pnt >= pl->playcnt)
+		pl->pnt = -1;
+	if (pl->pnt1 < 0 || pl->pnt1 >= pl->playcnt)
+		pl->pnt1 = -1;
+}
+
+static bool PlaylistItemMatchesKeyword(const playlistdata0& item, const CString& keywordLower)
+{
+	const TCHAR* fields[] = {
+		item.name, item.art, item.alb, item.fol, item.game
+	};
+	for (const TCHAR* field : fields) {
+		if (!field || !*field)
+			continue;
+		CString ssl(field);
+		ssl.MakeLower();
+		if (ssl.Find(keywordLower) != -1)
+			return true;
+	}
+	return false;
+}
+
+static int GetFuzzySearchAnchor(const CPlayList* pl)
+{
+	if (!pl || pl->playcnt <= 0)
+		return -1;
+	int anchor = pl->pnt;
+	if (pl->pnt1 != -1)
+		anchor = pl->pnt1;
+	if (anchor < 0 || anchor >= pl->playcnt)
+		return -1;
+	return anchor;
+}
+
 #include <eh.h>
 class SE_Exception1
 {
@@ -830,6 +873,15 @@ void CPlayList::Get(int i)
 		SIcon(i);
 }
 
+extern int gameon;
+static void RequestPlaylistRestartAsync()
+{
+	// 再生停止/開始をメッセージキューに逃がして、UI操作中の同期競合を避ける
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		og->PostMessage(WM_APP + 2, 0, 0);
+	}
+}
+
 void CPlayList::OnLvnKeydownList1(NMHDR *pNMHDR, LRESULT *pResult)
 {
 	LPNMLVKEYDOWN pLVKeyDow = reinterpret_cast<LPNMLVKEYDOWN>(pNMHDR);
@@ -859,47 +911,31 @@ void CPlayList::OnDropFiles(HDROP hDropInfo)
 	m_lc.Invalidate();
 	m_lc.UpdateWindow();
 	_tchdir(tmp);
-	if(syo==1 && (fade1==1 || playf==0) && !pMediaPosition){
-		plcnt=ii;
-		SIcon(ii);
-	}
-	if(syo==1 && m_renzoku.GetCheck()==FALSE){
-		plcnt=ii;
-		SIcon(ii);
-		if(PathIsDirectory(syos)==FALSE)
-			filen = syos;
-		else
-			filen = syos + L"\\" + fnn;
-		if (syomode == 30) {
-			filen = syos;
+	if (syo == 1) {
+		BOOL requestPlay = FALSE;
+		if (m_renzoku.GetCheck() == FALSE) {
+			requestPlay = TRUE;
 		}
-		if (og && ::IsWindow(og->GetSafeHwnd())) {
-			og->PostMessage(WM_APP + 1, 0, 0);
-		}
-	}
-	if(syo==1 && pMediaPosition){
-		if(mode==-2 || videoonly==TRUE){
-			REFTIME aa,bb;
+		if (pMediaPosition && (mode == -2 || videoonly == TRUE)) {
+			REFTIME aa, bb;
 			pMediaPosition->get_CurrentPosition(&aa);
 			pMediaPosition->get_Duration(&bb);
-			if(aa>=bb){
-				if (PathIsDirectory(syos) == FALSE)
-					filen = syos;
-				else
-					filen = syos + L"\\" + fnn;
-				if (og && ::IsWindow(og->GetSafeHwnd())) {
-					og->PostMessage(WM_APP + 1, 0, 0);
-				}
+			if (aa >= bb) {
+				requestPlay = TRUE;
 			}
 		}
-	}
-	if(syo==1 && (fade1==1 || playf==0) && !pMediaPosition){
-		if (PathIsDirectory(syos) == FALSE)
-			filen = syos;
-		else
-			filen = syos + L"\\" + fnn;
-		if (og && ::IsWindow(og->GetSafeHwnd())) {
-			og->PostMessage(WM_APP + 1, 0, 0);
+		if ((fade1 == 1 || playf == 0) && !pMediaPosition) {
+			requestPlay = TRUE;
+		}
+		if (requestPlay && ii >= 0 && ii < playcnt) {
+			plcnt = ii;
+			Get(plcnt);
+			gameon = 0;
+			RequestPlaylistRestartAsync();
+		}
+		else if ((fade1 == 1 || playf == 0) && !pMediaPosition && ii >= 0 && ii < playcnt) {
+			plcnt = ii;
+			SIcon(ii);
 		}
 	}
 	Save();
@@ -4182,6 +4218,7 @@ void CPlayList::Load()
 		pnt1=-1;f.Read(&pnt1,4);//if(c!=-1)SIcon(pnt);
 		f.Close();
 	}
+	ClampPlaylistSelectionIndices(this);
 	_tchdir(tmp);
 	if(GetAsyncKeyState(VK_LCONTROL)&0x8000){
 		x=-10000;
@@ -4227,14 +4264,6 @@ void CPlayList::SIconTimer(int i){
 }
 extern int ps;
 extern void DoEvent();
-extern int gameon;
-static void RequestPlaylistRestartAsync()
-{
-	// 再生停止/開始をメッセージキューに逃がして、UI操作中の同期競合を避ける
-	if (og && ::IsWindow(og->GetSafeHwnd())) {
-		og->PostMessage(WM_APP + 2, 0, 0);
-	}
-}
 void CPlayList::OnNMDblclkList1(NMHDR *pNMHDR, LRESULT *pResult)
 {
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
@@ -4842,28 +4871,14 @@ void CPlayList::OnFindUp()
 	m_find.GetWindowText(s);
 	s.MakeLower();
 	if(s==_T("")) return;
-	int pnt2;
 
-	if(pnt<0) pnt=-1;
-	if(pnt>=playcnt) pnt=playcnt;
-
-	pnt2=pnt;
-	if(pnt1!=-1) pnt2=pnt1;
-
+	ClampPlaylistSelectionIndices(this);
+	const int pnt2 = GetFuzzySearchAnchor(this);
 
 	int flg=0;
-	int i;
-	for(i=pnt2;i<playcnt;i++){
-		CString ss,ssl;
-		ss=pc[i].name;
-		ssl=ss;ssl.MakeLower();
-		if(ssl.Find(s)!=-1 && pnt2!=i) {flg=1;break;}
-		ss=pc[i].alb;
-		ssl=ss;ssl.MakeLower();
-		if(ssl.Find(s)!=-1 && pnt2!=i) {flg=1;break;}
-		ss=pc[i].art;
-		ssl=ss;ssl.MakeLower();
-		if(ssl.Find(s)!=-1 && pnt2!=i) {flg=1;break;}
+	int i = -1;
+	for(int k = pnt2 + 1; k < playcnt; k++){
+		if(PlaylistItemMatchesKeyword(pc[k], s)) { i = k; flg = 1; break; }
 	}
 
 	if(flg){
@@ -4876,7 +4891,9 @@ void CPlayList::OnFindUp()
 		m_lc.SetItemState(i, LVIS_SELECTED, LVIS_SELECTED);
 		m_lc.EnsureVisible(i,FALSE);
 	}
-	m_lc.SetFocus();
+	RefreshNavControls();
+	if (m_find.GetSafeHwnd())
+		m_find.SetFocus();
 }
 
 void CPlayList::OnFindDown()
@@ -4886,28 +4903,14 @@ void CPlayList::OnFindDown()
 	m_find.GetWindowText(s);
 	s.MakeLower();
 	if(s==_T("")) return;
-	int pnt2;
 
-	if(pnt<0) pnt=-1;
-	if(pnt>=playcnt) pnt=playcnt;
-
-	pnt2=pnt;
-	if(pnt1!=-1) pnt2=pnt1;
-
+	ClampPlaylistSelectionIndices(this);
+	const int pnt2 = GetFuzzySearchAnchor(this);
 
 	int flg=0;
-	int i;
-	for(i=pnt2;i>=0;i--){
-		CString ss,ssl;
-		ss=pc[i].name;
-		ssl=ss;ssl.MakeLower();
-		if(ssl.Find(s)!=-1 && pnt2!=i) {flg=1;break;}
-		ss=pc[i].alb;
-		ssl=ss;ssl.MakeLower();
-		if(ssl.Find(s)!=-1 && pnt2!=i) {flg=1;break;}
-		ss=pc[i].art;
-		ssl=ss;ssl.MakeLower();
-		if(ssl.Find(s)!=-1 && pnt2!=i) {flg=1;break;}
+	int i = -1;
+	for(int k = (pnt2 < 0 ? playcnt - 1 : pnt2 - 1); k >= 0; k--){
+		if(PlaylistItemMatchesKeyword(pc[k], s)) { i = k; flg = 1; break; }
 	}
 
 	if(flg){
@@ -4919,7 +4922,9 @@ void CPlayList::OnFindDown()
 		m_lc.SetItemState(i, LVIS_SELECTED, LVIS_SELECTED);
 		m_lc.EnsureVisible(i,FALSE);
 	}
-	m_lc.SetFocus();
+	RefreshNavControls();
+	if (m_find.GetSafeHwnd())
+		m_find.SetFocus();
 }
 
 
@@ -4963,6 +4968,18 @@ HBRUSH CPlayList::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 
 void CPlayList::RefreshNavControls()
 {
+	if (GetSafeHwnd()) {
+		CCC_SendGroupBoxesToBack(m_hWnd);
+		const HWND topCtrls[] = {
+			m_finddown.GetSafeHwnd(),
+			m_findup.GetSafeHwnd(),
+			m_find.GetSafeHwnd(),
+		};
+		for (HWND h : topCtrls) {
+			if (h && ::IsWindow(h))
+				::SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		}
+	}
 	if (m_find.GetSafeHwnd())
 		m_find.RepaintClient();
 	if (m_e.GetSafeHwnd())
@@ -5069,6 +5086,8 @@ void CPlayList::OnCbnSelchangeCombo1()
 	int num = m_listchange.GetCurSel();
 	savedata.playlistnum = num;
 	playcnt = 0;
+	pnt = -1;
+	pnt1 = -1;
 	playlistdata0* tmp; tmp = pc;
 	free(pc);
 	pc = NULL;
@@ -5078,6 +5097,7 @@ void CPlayList::OnCbnSelchangeCombo1()
 	}
 	m_lc.SetItemCount(playcnt);
 	for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
+	ClampPlaylistSelectionIndices(this);
 	m_lc.RedrawWindow();
 	Save();
 
@@ -5289,6 +5309,8 @@ void CPlayList::OnBnClickedPlaydelete()
 		int num = m_listchange.GetCurSel();
 		savedata.playlistnum = num;
 		playcnt = 0;
+		pnt = -1;
+		pnt1 = -1;
 		playlistdata0* tmp; tmp = pc;
 		free(pc);
 		pc = NULL;
@@ -5298,6 +5320,7 @@ void CPlayList::OnBnClickedPlaydelete()
 		}
 		m_lc.SetItemCount(playcnt);
 		for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
+		ClampPlaylistSelectionIndices(this);
 		m_lc.RedrawWindow();
 		Save();
 		changeflg = FALSE;

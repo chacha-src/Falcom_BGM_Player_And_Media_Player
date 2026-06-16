@@ -1,4 +1,4 @@
-/*
+﻿/*
 ** FAAD2 - Freeware Advanced Audio (AAC) Decoder including SBR decoding
 ** Copyright (C) 2003-2005 M. Bakker, Nero AG, http://www.nero.com
 **  
@@ -28,12 +28,12 @@
 ** $Id: mp4meta.c,v 1.22 2009/03/09 21:22:22 menno Exp $
 **/
 
-#ifdef USE_TAGGING
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include "mp4ffint.h"
+
+#ifdef USE_TAGGING
 
 
 
@@ -222,7 +222,7 @@ static int32_t mp4ff_set_metadata_name(mp4ff_t *f, const uint8_t atom_type, char
     case ATOM_SEASON: tag_idx = 28; break;
     case ATOM_EPISODE: tag_idx = 29; break;
     case ATOM_PODCAST: tag_idx = 30; break;
-    case ATOM_CPRT: tag_idx = 31;break;// added by Kobarin (copyright �Ή�)
+    case ATOM_CPRT: tag_idx = 31;break;// added by Kobarin (copyright Î)
     default: tag_idx = 0; break;
     }
 
@@ -312,7 +312,7 @@ static int32_t mp4ff_parse_tag(mp4ff_t *f, const uint8_t parent_atom_type, const
 		        	if (name){
                         mp4ff_tag_add_field(&(f->tags), name, data, (subsize-(header_size+8)));
                         free(data);data=NULL;
-                    }                                     //�����܂�
+                    }                                     //±±ÜÅ
                 } else
 				{
 					if (data) {free(data);data = NULL;}
@@ -385,7 +385,7 @@ static int32_t mp4ff_meta_find_by_name(const mp4ff_t *f, const char *item, char 
     /* not found */
     return 0;
 }
-//�ǉ� by Kobarin
+//ÇÁ by Kobarin
 int32_t mp4ff_meta_find_by_name_added_by_kobarin(const mp4ff_t *f, const char *item, const char **value)
 {
     //return mp4ff_meta_find_by_name((const mp4ff_t*)vf, item, value);
@@ -449,7 +449,7 @@ int32_t mp4ff_meta_get_by_index(const mp4ff_t *f, uint32_t index,
 		return 1;
     }
 }
-//�ǉ� by Kobarin
+//ÇÁ by Kobarin
 int32_t mp4ff_meta_get_by_index_added_by_kobarin(const mp4ff_t *f, uint32_t index,
                                 char **item, char **value, uint32_t *value_size)
 {
