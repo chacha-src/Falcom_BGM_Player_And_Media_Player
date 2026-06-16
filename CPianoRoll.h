@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include <vector>
@@ -134,6 +134,7 @@ private:
     volatile LONG    m_workerStop = 0;
     volatile LONG    m_jobPending = 0;
     double           m_jobMono[PIANO_BASS_FRAMES];
+    std::vector<double> m_workerMonoScratch;
     int              m_jobFrameCount = 0;
     int              m_jobSampleRate = 44100;
     double           m_goertzelRawScratch[KEY_COUNT];

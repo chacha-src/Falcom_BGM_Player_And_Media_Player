@@ -318,6 +318,8 @@ void SignalPlaybackNotifyThreadStop()
 	thn1 = TRUE;
 	stf = 1;
 	syukai = 2;
+	sek4 = FALSE;
+	sflg = FALSE;
 	// OnHScroll が syukai2==1 を待っているとき stop で syukai=2 にすると
 	// 再生スレッドは syukai2 を立てずに終了するため、ここで必ず解放する。
 	syukai2 = 1;
@@ -356,13 +358,14 @@ void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 			break;
 	}
 	// thn が立っていてもスレッドハンドルが生きていれば最後まで Join
-	for (int i = 0; i < 500; ++i) {
+	for (int i = 0; i < 2000; ++i) {
 		if (WaitForSingleObject(hThread, 0) == WAIT_OBJECT_0)
 			break;
 		if (og)
 			og->timer.SetEvent();
 		DoEvent();
-		Sleep(1);
+		if ((i % 10) == 9)
+			Sleep(1);
 	}
 	{
 		CSingleLock lk(&s_playNotifyThreadCs, TRUE);
@@ -509,6 +512,8 @@ UINT HandleNotifications(LPVOID)
 
 		// 終了・エラー判定（ロックを外して終了処理へ）
 		if (fade1 && muon == 0) {
+			if (thn1 || stf != 0 || syukai == 2)
+				return stopPlaybackAndExit();
 			playf = 1; thn = FALSE;
 			if (!(mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999)) Sleep(800);
 			LPDIRECTSOUNDBUFFER8 dsbFade = m_dsb;

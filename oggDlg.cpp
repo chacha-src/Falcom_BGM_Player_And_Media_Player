@@ -91,6 +91,7 @@ int g_kpiSourceBitsPerSample = 16;
 #include "LyricsProgressWnd.h"
 #include "AudioUpscaler.h"
 #include "Bufwav3Sync.h"
+#include "SpeanaNoteDetector.h"
 
 bool ProcessAudioWithRubberBand(float tempoRate, bool t);
 void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
@@ -2124,6 +2125,7 @@ void st1();
 void st2();
 int bufzero = 0;
 extern 	int syukai;
+extern int syukai2;
 
 int horizontalDPI;
 int ms2;
@@ -2996,6 +2998,22 @@ static void PumpUntilFlagOrTimeout(int& flag, DWORD timeoutMs = 10000)
 		DoEvent();
 		if (GetTickCount() - t0 >= timeoutMs)
 			break;
+	}
+}
+
+// OnHScroll が syukai2 を待つ間に stop が走ると syukai2 は Signal で立つが、
+// 再生スレッドが cl2 内でデコード中だと応答が遅れる。タイムアウトで永久待ちを防ぐ。
+static void WaitForSyukai2OrPlaybackStop(DWORD timeoutMs = 5000)
+{
+	const DWORD t0 = GetTickCount();
+	for (;;) {
+		if (syukai2 == 1 || thn1 || stf != 0)
+			break;
+		DoEvent();
+		if (GetTickCount() - t0 >= timeoutMs) {
+			syukai2 = 1;
+			break;
+		}
 	}
 }
 
@@ -8972,9 +8990,15 @@ void COggDlg::play()
 		fade1 = 0;
 		sflg = FALSE;
 		DoEvent();
-		for (;;) {
-			if (sflg == FALSE) break;
-			DoEvent();
+		{
+			const DWORD sflgWaitStart = GetTickCount();
+			while (sflg != FALSE) {
+				DoEvent();
+				if (GetTickCount() - sflgWaitStart >= 3000) {
+					sflg = FALSE;
+					break;
+				}
+			}
 		}
 		BeginPlaybackNotifyThread();
 	}
@@ -11184,6 +11208,8 @@ int readBuffwav(char* bw, int cnt)
 
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
+		int buffRbStallIters = 0;
+		const int kBuffRbStallMax = 512;
 		while (true) {
 			if (IsPlaybackStopRequested())
 				return 0;
@@ -11211,6 +11237,7 @@ int readBuffwav(char* bw, int cnt)
 			lenl += cnt;
 
 			if (len2 > 0) {
+				buffRbStallIters = 0;
 				// 書き込み
 				if (poss2 + len2 > max_buffer_size) {
 					int first = max_buffer_size - poss2;
@@ -11227,6 +11254,10 @@ int readBuffwav(char* bw, int cnt)
 			// playb はリングから bw へ渡したバイト数で進める（len2 積み上げは cnt を超え表示が実長より長くなる）
 			if (poss4 > cnt) break;
 			if (len2 <= 0 && fade1 == 1) break;
+			if (len2 <= 0) {
+				if (++buffRbStallIters >= kBuffRbStallMax)
+					break;
+			}
 		}
 	}
 
@@ -12598,6 +12629,8 @@ int readflac(BYTE* bw, int cnt)
 		int len3 = 0, len4 = 0;
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 < lenl) {
+			int flacRbStallIters = 0;
+			const int kFlacRbStallMax = 512;
 			while (true) {
 				if (IsPlaybackStopRequested())
 					break;
@@ -12651,6 +12684,7 @@ int readflac(BYTE* bw, int cnt)
 
 				int len2 = readtempo(bufkpi, lenl);
 				if (len2 > 0) {
+					flacRbStallIters = 0;
 					// 書き込み
 					if (poss2 + len2 > max_buffer_size) {
 						int first = max_buffer_size - poss2;
@@ -12669,6 +12703,12 @@ int readflac(BYTE* bw, int cnt)
 				// len2==0 でもデコードが部分読みなら上位へ返さないとループし得る
 				if (cnt4 != lenl) return cnt4;
 				if (len2 <= 0 && (fade1 == 1 || IsPlaybackStopRequested())) break;
+				// フルブロック decode 済みだが RB がまだ出さない（readmp3 と同様）
+				if (len2 <= 0 && r > 0 && r == (DWORD)lenl) {
+					if (++flacRbStallIters >= kFlacRbStallMax)
+						break;
+					continue;
+				}
 			}
 		}
 
@@ -13042,6 +13082,8 @@ int readdsd(BYTE* bw, int cnt)
 	int len3 = 0, len4 = 0;
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
+		int dsdRbStallIters = 0;
+		const int kDsdRbStallMax = 512;
 		while (true) {
 			if (IsPlaybackStopRequested())
 				break;
@@ -13069,6 +13111,7 @@ int readdsd(BYTE* bw, int cnt)
 			}
 
 			if (len2 > 0) {
+				dsdRbStallIters = 0;
 				// 書き込み
 				if (poss2 + len2 > max_buffer_size) {
 					int first = max_buffer_size - poss2;
@@ -13085,6 +13128,10 @@ int readdsd(BYTE* bw, int cnt)
 			if (len4 != 0) break;
 			if (poss4 > cnt) break;
 			if (fade1 == 1 && muon == 0 && len2 <= 0) break;
+			if (len2 <= 0 && fade1 == 0 && poss4 <= cnt) {
+				if (++dsdRbStallIters >= kDsdRbStallMax)
+					break;
+			}
 		}
 	}
 
@@ -13248,6 +13295,8 @@ int readwav(BYTE* bw, int cnt)
 	int bytesPerSample = (wav_.m_info.wBitsPerSample + 7) / 8 * wav_.m_info.nChannels;
 	int outBytesPerSample = (wavsam_depth / 8) * wavchannel;
 	if (poss4 <= cnt) {
+		int wavRbStallIters = 0;
+		const int kWavRbStallMax = 512;
 		while (true) {
 			if (IsPlaybackStopRequested())
 				break;
@@ -13348,6 +13397,7 @@ int readwav(BYTE* bw, int cnt)
 				if (convLen > 0) len2 = readtempo(convBuf, convLen);
 			}
 			if (len2 > 0) {
+				wavRbStallIters = 0;
 				if (poss2 + len2 > max_buffer_size) {
 					int first = max_buffer_size - poss2;
 					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
@@ -13369,6 +13419,10 @@ int readwav(BYTE* bw, int cnt)
 					else endflg = 1;
 				}
 				break;
+			}
+			if (len2 <= 0 && r > 0 && r == rr) {
+				if (++wavRbStallIters >= kWavRbStallMax)
+					break;
 			}
 		}
 	}
@@ -14191,9 +14245,18 @@ void COggDlg::ResetPauseButtonUi()
 	SyncPauseButtonUi();
 }
 
+// 再生通知スレッドが動いている／動いていた可能性があるか（形式を問わず）
+static inline bool PlaybackNotifyThreadMayBeActive()
+{
+	return plf != 0 || playf != 0 || ogg != NULL || adbuf2 != NULL || (og && og->mod != NULL)
+		|| wav != NULL || mode == 999 || mode == -10 || mode == -9 || mode == -8
+		|| mode == -7 || mode == -6 || mode == -3 || mode == -1
+		|| (mode > 0 && mode <= 21);
+}
+
 void COggDlg::stop()
 {
-	if (playf || ogg || adbuf2 || mod || wav || mode == 999 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6)
+	if (PlaybackNotifyThreadMayBeActive())
 		SignalPlaybackNotifyThreadStop();
 
 	if (!img.IsNull()) {
@@ -14206,7 +14269,6 @@ void COggDlg::stop()
 	KillTimer(1250);
 	gamenkill();
 	videoonly = FALSE;
-	fade1 = 1;
 	if (savedata.savecheck == 1 && (mode == -10 || mode == -2) && filenback == filen) {
 		try {
 			int flg = 0;
@@ -14255,17 +14317,13 @@ void COggDlg::stop()
 	}
 	filenback = filen;
 	playb = 0;
-	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
-		m_PianoRollDlg.ResetPlaybackState();
 	if (ptl)ptl->SetProgressValue(m_hWnd, (LONGLONG)0, (LONGLONG)1);
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
-	if ((ogg || adbuf2 || mod || wav || mode == 999 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6) && mode != -2)
+	if (PlaybackNotifyThreadMayBeActive() && mode != -2)
 	{
 		SignalPlaybackNotifyThreadStop();
 		if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
-		if (ps == 1) {
-			OnPause();
-		}
+		ps = 0;
 		if (m_dsb)m_dsb->Stop();
 		if (pAudioClient) pAudioClient->Stop();
 		if (m_dou.GetCheck() == 1)
@@ -14322,6 +14380,8 @@ void COggDlg::stop()
 		thend = 1;
 		fadeadd = 0; fade = 1.0;
 	}
+	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+		m_PianoRollDlg.ResetPlaybackState();
 	if (wav) free(wav);
 	wav = NULL;
 	playf = 0;
@@ -14338,7 +14398,7 @@ void COggDlg::stop()
 
 void COggDlg::stop1()
 {
-	if (playf || ogg != NULL || adbuf2 != NULL || wav || mode == 999 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == -3)
+	if (PlaybackNotifyThreadMayBeActive())
 		SignalPlaybackNotifyThreadStop();
 
 	if (!img.IsNull()) {
@@ -14353,13 +14413,13 @@ void COggDlg::stop1()
 	videoonly = FALSE;
 	if (ptl)ptl->SetProgressValue(m_hWnd, (LONGLONG)0, (LONGLONG)1);
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
-	if (ogg != NULL || adbuf2 != NULL || wav || mode == 999 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == -3)
+	if (PlaybackNotifyThreadMayBeActive())
 	{
 		SignalPlaybackNotifyThreadStop();
 		if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
-		if (ps == 1) {
-			OnPause();
-		}
+		ps = 0;
+		if (m_dsb)m_dsb->Stop();
+		if (pAudioClient) pAudioClient->Stop();
 		if (m_dou.GetCheck() == 1)
 			if (cc1 == 1) {
 				cc.SeekToBegin();
@@ -14392,8 +14452,6 @@ void COggDlg::stop1()
 		}
 		Sleep(50);
 		playb = 0;
-		if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
-			m_PianoRollDlg.ResetPlaybackState();
 		// 実際に再生していた形式のデコーダのみClose（OnRestartでstop後、mode=新形式のままstop1が呼ばる場合を考慮）
 		int mode_for_decoder = -999;
 		if (adbuf2 != NULL) mode_for_decoder = mode;
@@ -14421,6 +14479,8 @@ void COggDlg::stop1()
 		thend = 1;
 		fadeadd = 0; fade = 1.0;
 	}
+	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+		m_PianoRollDlg.ResetPlaybackState();
 	if (wav) free(wav);
 	wav = NULL;
 	playf = 0;
@@ -14571,6 +14631,8 @@ int mcopy(char* a, int len)
 
 			int to_process = lenl;
 			int len2 = readtempo(bufwav, to_process * bpf);
+			if (IsPlaybackStopRequested())
+				break;
 			playb += len2 / bpf;
 
 			if (len2 > 0) {
@@ -14596,6 +14658,7 @@ int mcopy(char* a, int len)
 			}
 			if (len4 != 0) break;
 			if (poss4 > len) break;
+			if (len2 <= 0 && poss4 <= len) break;
 		}
 	}
 
@@ -16655,8 +16718,7 @@ void COggDlg::gamenkill()
 		::SendMessage(pMainFrame1->m_hWnd, WM_CLOSE, NULL, NULL);
 		//		delete pMainFrame1;
 		//動画画面が閉じるのを待つ
-		for (; killw == 0;)
-			DoEvent();
+		PumpUntilFlagOrTimeout(killw, 10000);
 		//delete pMainFrame1;
 		pMainFrame1 = NULL;
 		//		for(int i=0;i<20;i++){DoEvent();Sleep(5);};
@@ -18575,6 +18637,8 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	if (savedata.speanamode == 1 && (savedata.speananum == 0 || savedata.speananum == 1))
 		speanaFrames = 8192;
 	const int speanaBytes = speanaFrames * bytesPerFrame;
+	// 追加遅延は0（06.09/06.14と同じ）。早出しの原因は読み取り遅延ではなく
+	// 06.16で入った fastAttack(オンセット即時ON) だったため、そちらを撤去して対応。
 	long prPos = PianoRollWideReadPos(playCur, prBytes, speanaBytes, bytesPerFrame, (int)ringBytes, sampleRate, 0);
 
 	static std::vector<char> prRaw;
@@ -18732,11 +18796,15 @@ void COggDlg::Speana()
 
 	// 解析バッファサイズ
 	// 低音解像度が必要なモード(0,1)はサイズを大きく取る
+	// mode0(音階)は88鍵ノート検出エンジン用に低音窓16384サンプルを確保する。
+	// readPos+bytesTotalToRead = PlayCursor+latencyBytes なので、読み取り長を
+	// 伸ばしても末尾(同期点)はlatencySettingで決まり、表示タイミングは不変。
 	int analysisSize = 4096;
-	if (mode0_Note || mode1_Low) analysisSize = 8192;
+	if (mode1_Low) analysisSize = 8192;
+	if (mode0_Note) analysisSize = 16384;
 
-	// タイミング調整 (Latency) — ユーザー調整値。8192→-1600ms / 4096→-800ms
-	int latencySetting = (analysisSize == 8192) ? -1600 : -800;
+	// タイミング調整 (Latency) — ユーザー調整値。低音長窓→-1600ms / 4096→-800ms
+	int latencySetting = (mode0_Note || analysisSize == 8192) ? -1600 : -800;
 
 	{
 		const int rateForLatency = (int)(sampleRate + 0.5);
@@ -18982,107 +19050,56 @@ void COggDlg::Speana()
 	// モード0: 音階モード
 	// ========================================
 	else if (mode0_Note) {
-		static std::vector<double> noteFreqsExpanded;
-		static std::vector<double> goertzelCoeffs;
-		static std::vector<double> blackmanWindow;
-		static double noteModeSampleRate = 0.0;
+		// ピアノロールと同一の88鍵ノート検出エンジンを使用（検出音のみバー表示）。
+		// L/R独立検出のため検出器を3つ保持（モノ/左/右）。
+		static SpeanaNoteDetector s_detMono, s_detL, s_detR;
+		s_detMono.Configure(sampleRate);
+		s_detL.Configure(sampleRate);
+		s_detR.Configure(sampleRate);
 
-		if (noteFreqsExpanded.empty() || fabs(sampleRate - noteModeSampleRate) > 0.5) {
-			noteModeSampleRate = sampleRate;
-			noteFreqsExpanded.resize(DETECT_KEYS);
-			goertzelCoeffs.resize(DETECT_KEYS);
-			blackmanWindow.resize(4096);
-
-			for (int k = 0; k < DETECT_KEYS; ++k) {
-				int midiNote = 12 + k;
-				double freq = 440.0 * pow(2.0, (midiNote - 69.0) / 12.0);
-				noteFreqsExpanded[k] = freq;
-				goertzelCoeffs[k] = 2.0 * cos(2.0 * M_PI * freq / sampleRate);
-			}
-			for (int n = 0; n < 4096; ++n) {
-				blackmanWindow[n] = 0.42 - 0.5 * cos(2.0 * M_PI * (double)n / 4095.0) + 0.08 * cos(4.0 * M_PI * (double)n / 4095.0);
-			}
-		}
-
-		auto ProcessGoertzel = [&](const std::vector<double>& input, int offset_idx, bool isRight) {
-			std::vector<double> rawResults(DETECT_KEYS, 0.0);
-			int maxLen = (int)input.size();
-
-			// 低音域解析 (8192サンプル)
-			const int LOW_KEY_LIMIT = 50;
-			const int LEN_LOW = 8192;
-			int useLenLow = (maxLen < LEN_LOW) ? maxLen : LEN_LOW;
-			int startLow = maxLen - useLenLow;
-
-			const double* hannLow = SpeanaHannTable(8192);
-			for (int k = 0; k < LOW_KEY_LIMIT; k++) {
-				double coeff = goertzelCoeffs[k];
-				double s_prev = 0.0, s_prev2 = 0.0;
-				for (int n = 0; n < useLenLow; ++n) {
-					double val = input[startLow + n] * hannLow[n];
-					double s = val + coeff * s_prev - s_prev2;
-					s_prev2 = s_prev;
-					s_prev = s;
-				}
-				double p = s_prev2 * s_prev2 + s_prev * s_prev - coeff * s_prev * s_prev2;
-				rawResults[k] = sqrt(p > 0 ? p : 0) * 2.5 / useLenLow;
-			}
-
-			// 中高音域解析 (4096サンプル)
-			const int LEN_HIGH = 4096;
-			int startHigh = (maxLen > LEN_HIGH) ? (maxLen - LEN_HIGH) : 0;
-
-			for (int k = LOW_KEY_LIMIT; k < DETECT_KEYS; k++) {
-				double coeff = goertzelCoeffs[k];
-				double s_prev = 0.0, s_prev2 = 0.0;
-				for (int n = 0; n < LEN_HIGH; ++n) {
-					double val = input[startHigh + n] * blackmanWindow[n];
-					double s = val + coeff * s_prev - s_prev2;
-					s_prev2 = s_prev;
-					s_prev = s;
-				}
-				double p = s_prev2 * s_prev2 + s_prev * s_prev - coeff * s_prev * s_prev2;
-				rawResults[k] = sqrt(p > 0 ? p : 0) * 2.5 / LEN_HIGH;
-			}
-
-			// ダウンミックス & 描画
+		// バー高の視覚フォールオフ用保持配列（モノ=0 / L=1 / R=2）。
+		// 検出のactiveが一瞬落ちても緑本体が即消えないよう、立ち上がりは即時・
+		// 下降のみ緩やかにする（スペアナ定石。ピアノロールの履歴帯に相当）。
+		static int s_barHold[3][DISP_KEYS] = {};
+		auto DrawDetected = [&](const SpeanaNoteDetector& det, int offset_idx, bool isRight) {
+			const bool* act = det.Active();
+			const float* st = det.Strength();
 			std::vector<double> displayAmp(DISP_KEYS, 0.0);
-
-			for (int k = 0; k < DETECT_KEYS; k++) {
-				const float scaled = ScaleGoertzelAmp((float)rawResults[k], k, DETECT_KEYS);
-
-				if (k < KEY_OFFSET) {
-					if (scaled > displayAmp[0]) displayAmp[0] = scaled;
-				}
-				else if (k >= KEY_OFFSET + DISP_KEYS) {
-					if (scaled > displayAmp[DISP_KEYS - 1]) displayAmp[DISP_KEYS - 1] = scaled;
-				}
-				else {
-					displayAmp[k - KEY_OFFSET] = scaled;
-				}
-			}
+			for (int i = 0; i < DISP_KEYS; ++i)
+				displayAmp[i] = act[i] ? (double)st[i] : 0.0;
 
 			NormalizeDisplayPeakD(displayAmp.data(), DISP_KEYS, 5.0);
 
+			const int bank = (offset_idx == 0) ? 0 : (offset_idx == 100 ? 1 : 2);
+			const int FALL_PER_FRAME = 9; // 高さ(0..96)単位。約150ms(@16ms)で消える
 			for (int i = 0; i < DISP_KEYS; i++) {
-				const int h = ValToBarHeight(displayAmp[i] * savedata.wup);
+				int target = ValToBarHeight(displayAmp[i] * savedata.wup);
+				int held = s_barHold[bank][i];
+				if (target >= held) held = target;               // 立ち上がりは即時
+				else { held -= FALL_PER_FRAME; if (held < target) held = target; } // 下降は緩やか
+				s_barHold[bank][i] = held;
+
 				const int idx = offset_idx + i;
 				int x, w;
 				if (!isRight && !stereoSpeana) { x = (21 * 8 + i * 2) * 4; w = 8; }
 				else if (!isRight) { x = (21 * 8 + i) * 4; w = 4; }
 				else { x = (21 * 8 + 89 + i) * 4; w = 4; }
-				SpeanaDrawBar(dc, x, w, idx, h);
+				SpeanaDrawBar(dc, x, w, idx, held);
 			}
 			};
 
 		if (!stereoSpeana) {
-			std::vector<double> monoInput(framesToRead);
+			static std::vector<double> monoInput;
+			if ((int)monoInput.size() < framesToRead) monoInput.resize(framesToRead);
 			for (int k = 0; k < framesToRead; k++) monoInput[k] = (bufL[k] + bufR[k]) * 0.5;
-			ProcessGoertzel(monoInput, 0, false);
+			s_detMono.Process(monoInput.data(), framesToRead);
+			DrawDetected(s_detMono, 0, false);
 		}
 		else {
-			ProcessGoertzel(bufL, 100, false);
-			ProcessGoertzel(bufR, 200, true);
+			s_detL.Process(bufL.data(), framesToRead);
+			s_detR.Process(bufR.data(), framesToRead);
+			DrawDetected(s_detL, 100, false);
+			DrawDetected(s_detR, 200, true);
 			dc.FillSolidRect((21 * 8 + 88) * 4, 20, 4, 368, RGB(0, 255, 255));
 		}
 	}
@@ -19558,7 +19575,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					OnPause();
 					ZeroMemory(bufwav3, sizeof(bufwav3));
 					syukai = 1; syukai2 = 0;
-					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1 || thn1) break; DoEvent(); } hscroll_lock.lock(); }
+					if (thn == FALSE) { hscroll_lock.unlock(); WaitForSyukai2OrPlaybackStop(); hscroll_lock.lock(); }
 					if (savedata.mp3orig) {
 						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
@@ -19648,7 +19665,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 					OnPause();
 					ZeroMemory(bufwav3, sizeof(bufwav3));
 					syukai = 1; syukai2 = 0;
-					if (thn == FALSE) { hscroll_lock.unlock(); for (;;) { if (syukai2 == 1 || thn1) break; DoEvent(); } hscroll_lock.lock(); }
+					if (thn == FALSE) { hscroll_lock.unlock(); WaitForSyukai2OrPlaybackStop(); hscroll_lock.lock(); }
 					if (savedata.mp3orig) {
 						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
 					}
@@ -20832,7 +20849,7 @@ void COggDlg::TogglePianoRoll()
 
 void COggDlg::FeedPianoRoll(const void* pData, int bytes)
 {
-	if (!pData || bytes <= 0 || playf == 0 || thn1)
+	if (!pData || bytes <= 0 || playf == 0 || thn1 || stf != 0)
 		return;
 	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		return;
