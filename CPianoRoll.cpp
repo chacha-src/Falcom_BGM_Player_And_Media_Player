@@ -1132,6 +1132,28 @@ void CPianoRoll::UpdateNoteStates()
     ApplyBandFundamentalPick(pickStrength, picked, BAND_MID_END, KEY_COUNT,
         TRE_PICK_THRESH * pickScale, polyFrame);
 
+    // ストリングス救済(低域ほど弱い対策): 弦はブロードで瞬間ピックが弱いが「持続」する。
+    // 平滑強度(trackStrength)の明確な局所ピークを副ピックで拾う。瞬間的なゴーストは
+    // 平滑値が低いので拾わない＝出過ぎを抑えつつ持続音(ストリングス)だけ拾える。
+    {
+        auto SustainStringPick = [&](int lo, int hi, float rel) {
+            const float trkMax = BandMaxStrength(trackStrength, lo, hi);
+            if (trkMax < 1e-6f) return;
+            const float minT = trkMax * rel;
+            for (int i = lo; i < hi; ++i) {
+                if (picked[i]) continue;
+                if (trackStrength[i] < minT) continue;
+                const float l = (i > lo) ? trackStrength[i - 1] : 0.0f;
+                const float r = (i + 1 < hi) ? trackStrength[i + 1] : 0.0f;
+                if (trackStrength[i] >= l && trackStrength[i] >= r)
+                    picked[i] = true;
+            }
+        };
+        // 低い弦ほど拾いにくいので mid 側をやや低閾値、treble はやや高め。
+        SustainStringPick(BAND_BASS_END, BAND_MID_END, 0.30f);
+        SustainStringPick(BAND_MID_END, KEY_COUNT, 0.34f);
+    }
+
     for (int i = 0; i < KEY_COUNT; ++i) {
         bassPick[i] = midPick[i] = treblePick[i] = false;
         if (!picked[i]) continue;
@@ -1463,6 +1485,7 @@ void CPianoRoll::MarkKeyVisualDirty()
     m_keyDirty = true;
     memcpy(m_keySnapActive, m_activeKeys, sizeof(m_keySnapActive));
     memcpy(m_keySnapBand, m_bandMask, sizeof(m_keySnapBand));
+    memcpy(m_keySnapExpr, m_exprFlags, sizeof(m_keySnapExpr));
 }
 
 void CPianoRoll::InvalidatePianoRollRegions(bool roll, bool key)
@@ -1522,7 +1545,8 @@ void CPianoRoll::PushFrame(bool requestUiInvalidate)
     ++m_framesPending;
 
     for (int i = 0; i < KEY_COUNT; ++i) {
-        if (m_activeKeys[i] != m_keySnapActive[i]) {
+        if (m_activeKeys[i] != m_keySnapActive[i] ||
+            m_exprFlags[i] != m_keySnapExpr[i]) {
             MarkKeyVisualDirty();
             break;
         }
@@ -1862,9 +1886,10 @@ namespace PianoDraw
         const int needW = nFlags * 5 + gap * (nFlags - 1);
         const bool vertical = (nFlags > 1 && laneW < needW);
 
+        // 記号高さもレーン幅・行高に比例して拡大（リサイズで見やすく）。
         int symH = vertical
-            ? max(nFlags * 5, min(spaceAbove, nFlags * 7 + 2))
-            : max(8, min(spaceAbove, max(10, rowPitch + 4)));
+            ? max(nFlags * 6, min(spaceAbove, nFlags * 9 + 2))
+            : max(10, min(spaceAbove, max(laneW + 2, rowPitch + 4)));
         symH = min(symH, spaceAbove);
 
         CRect sym(cell.left, cell.top - symH, cell.right, cell.top);
@@ -2138,8 +2163,10 @@ void CPianoRoll::EnsurePaintFonts(int clientW, int keyH, int rollH)
     const int notePx = max(9, min(14, clientW / 52));
     const int octPx = max(8, min(12, clientW / 52));
     const int tagPx = max(7, min(11, keyH / 4));
-    const int symPx = max(10, min(20, max(clientW / 38, rowPitch + 6)));
-    const int symCompactPx = max(6, min(10, lanePx + 1));
+    // 表現記号: ウィンドウを広げたらレーン幅(lanePx)・行高(rowPitch)に比例して拡大。
+    // 以前は上限20/10で頭打ちだったので引き上げ、リサイズで見やすくなるようにする。
+    const int symPx = max(11, min(30, max(lanePx * 2, rowPitch + 6)));
+    const int symCompactPx = max(7, min(18, lanePx + 2));
     const int legPx = max(7, min(11, min(clientW / 58, rollH / 15)));
 
     if (m_fontKeyNote.GetSafeHandle()) m_fontKeyNote.DeleteObject();
@@ -2393,6 +2420,57 @@ void CPianoRoll::DrawHistoryArea(CDC& dc, int width, int rollH, int histCount, c
     if (!hist) return;
     for (int r = 1; r < histCount && r < (int)MAX_HISTORY; ++r)
         DrawHistoryRow(dc, width, rollH, r, hist[r - 1]);
+
+    DrawPitchTransitions(dc, width, rollH, histCount, hist);
+}
+
+// 音階移行(スライド/フォール/スクープ)の斜め描画:
+// 隣接フレーム間で音が隣接音階へ移った箇所を、行境界をまたいで斜めの帯で繋ぎ、
+// 縦バーの段差ではなく滑らかな移行に見せる（既存の縦バーはそのまま＝互換性重視）。全音域。
+void CPianoRoll::DrawPitchTransitions(CDC& dc, int width, int rollH, int histCount, const NoteFrame* hist) const
+{
+    if (!hist || histCount < 3) return;
+    const int maxR = (histCount < (int)MAX_HISTORY) ? histCount : (int)MAX_HISTORY;
+    const uint8_t kTransMask = PianoExpr::SLIDE | PianoExpr::FALL | PianoExpr::SCOOP;
+
+    for (int r = 1; r + 1 < maxR; ++r) {
+        const NoteFrame& fNew = hist[r - 1]; // 下(新しい)行 = row r
+        const NoteFrame& fOld = hist[r];     // 上(古い)行 = row r+1
+        int yTopNew, yBotNew, yTopOld, yBotOld;
+        GetHistoryRowBounds(rollH, r, yTopNew, yBotNew);
+        GetHistoryRowBounds(rollH, r + 1, yTopOld, yBotOld);
+        const int midNew = (yTopNew + yBotNew) / 2;
+        const int midOld = (yTopOld + yBotOld) / 2;
+
+        for (int j = 0; j < KEY_COUNT; ++j) {
+            if (!fNew.active[j] || !(fNew.expr[j] & kTransMask)) continue;
+            // 移行元(古い行)で隣接(±1〜±2半音)に鳴っていた音を探す
+            int src = -1;
+            for (int d = 1; d <= 2 && src < 0; ++d) {
+                if (j - d >= 0 && fOld.active[j - d]) src = j - d;
+                else if (j + d < KEY_COUNT && fOld.active[j + d]) src = j + d;
+            }
+            if (src < 0 || src == j) continue;
+
+            int xLs, xRs, xLd, xRd;
+            GetChromaticKeyRect(src, width, xLs, xRs);
+            GetChromaticKeyRect(j, width, xLd, xRd);
+            if (xRs <= xLs || xRd <= xLd) continue;
+
+            const COLORREF col = PianoDraw::LocalKeyColor(j, fNew.strength[j], false);
+            CBrush br(col);
+            CBrush* pOld = dc.SelectObject(&br);
+            CPen pen(PS_SOLID, 1, col);
+            CPen* pOldPen = dc.SelectObject(&pen);
+            POINT pts[4] = {
+                { xLs + 1, midOld }, { xRs - 1, midOld },
+                { xRd - 1, midNew }, { xLd + 1, midNew }
+            };
+            dc.Polygon(pts, 4);
+            dc.SelectObject(pOld);
+            dc.SelectObject(pOldPen);
+        }
+    }
 }
 
 void CPianoRoll::ComposeRollBuffer(CDC& dc, int width, int rollH,
@@ -2586,7 +2664,7 @@ bool CPianoRoll::ProcessAnalysisJob()
 
 void CPianoRoll::DrawKeyboardToBuffer(CDC& memDC, int width, int keySectionH, int keyH,
     const bool* activesCopy, const uint8_t* bandMaskCopy, const float laneStrengthCopy[KEY_COUNT][3],
-    const float* chFillCopy, int chCountCopy) const
+    const float* chFillCopy, int chCountCopy, const uint8_t* exprCopy) const
 {
     using namespace PianoDraw;
 
@@ -2651,6 +2729,34 @@ void CPianoRoll::DrawKeyboardToBuffer(CDC& memDC, int width, int keySectionH, in
         memDC.SelectObject(pOldPen);
     }
 
+    // アクティブキーに表現記号を重ねる（履歴バーと同じグリフをキー側にも表示）。
+    // クロマチックキー上部(keyTop付近)に主要フラグのグリフを1つ描く。
+    if (exprCopy && m_paintFontsReady && bkH >= 8) {
+        CFont* pSym = nullptr;
+        if (m_fontExprSymbolCompact.GetSafeHandle())
+            pSym = CFont::FromHandle((HFONT)m_fontExprSymbolCompact.GetSafeHandle());
+        else if (m_fontExprSymbol.GetSafeHandle())
+            pSym = CFont::FromHandle((HFONT)m_fontExprSymbol.GetSafeHandle());
+        if (pSym) {
+            // 主要フラグの優先順位（履歴の ExprPrimaryColor と同順）
+            static const uint8_t kPri[] = {
+                PianoExpr::ACCENT, PianoExpr::SCOOP, PianoExpr::VIBRATO,
+                PianoExpr::SLIDE, PianoExpr::FALL, PianoExpr::SUSTAIN
+            };
+            const int glyphH = min(bkH, 22);
+            for (int i = 0; i < KEY_COUNT; ++i) {
+                if (!activesCopy[i] || !exprCopy[i]) continue;
+                uint8_t flag = 0;
+                for (uint8_t f : kPri) { if (exprCopy[i] & f) { flag = f; break; } }
+                if (!flag) continue;
+                int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
+                if (xR - xL < 3) continue;
+                CRect gr(xL, keyTop + 1, xR, keyTop + 1 + glyphH);
+                DrawExprGlyphOnNote(memDC, gr, flag, pSym);
+            }
+        }
+    }
+
     if (chCountCopy > 0 && labelH >= 4) {
         CRect meterStrip(2, 1, width - 2, labelH + 1);
         DrawChannelDbBars(memDC, meterStrip, chFillCopy, chCountCopy);
@@ -2710,12 +2816,14 @@ void CPianoRoll::OnPaint()
     uint8_t bandMaskCopy[KEY_COUNT];
     float laneStrengthCopy[KEY_COUNT][3];
     float chFillCopy[PIANO_METER_CH_MAX];
+    uint8_t exprCopy[KEY_COUNT];
     int chCountCopy = 0;
     EnterCriticalSection(&m_cs);
     BuildLiveNoteFrame(liveSnap);
     memcpy(activesCopy, m_activeKeys, sizeof(m_activeKeys));
     memcpy(bandMaskCopy, m_bandMask, sizeof(m_bandMask));
     memcpy(laneStrengthCopy, m_laneStrength, sizeof(m_laneStrength));
+    memcpy(exprCopy, m_exprFlags, sizeof(m_exprFlags));
     chCountCopy = m_chMeterCount;
     memcpy(chFillCopy, m_chMeterFill, sizeof(chFillCopy));
     LeaveCriticalSection(&m_cs);
@@ -2724,11 +2832,8 @@ void CPianoRoll::OnPaint()
         m_keyDirty = true;
 
     int pending = 0;
-    NoteFrame histSnap[MAX_HISTORY];
-    int histCount = 0;
     EnterCriticalSection(&m_cs);
     pending = m_framesPending;
-    CopyHistorySnapshot(histSnap, MAX_HISTORY, histCount);
     LeaveCriticalSection(&m_cs);
 
     const bool rollDirty = m_historyDirty;
@@ -2737,8 +2842,10 @@ void CPianoRoll::OnPaint()
     bool didRollScroll = false;
     bool needAnotherRollFrame = false;
 
+    // スクロール経路は履歴フレームを使わない(TryAdvanceRollBufferはBitBltのみ)。
+    // 全描画(ComposeRollBuffer)が必要なときだけ履歴120フレーム(約253KB)をコピーする。
     if (pending > 0 && m_rollReady
-        && TryAdvanceRollBuffer(w, rollH, histCount, histSnap, pending, liveSnap)) {
+        && TryAdvanceRollBuffer(w, rollH, 0, nullptr, pending, liveSnap)) {
         EnterCriticalSection(&m_cs);
         if (m_framesPending > 0) --m_framesPending;
         needAnotherRollFrame = (m_framesPending > 0);
@@ -2749,6 +2856,11 @@ void CPianoRoll::OnPaint()
         didRollScroll = true;
     }
     else if (pending > 0 || rollDirty || !m_rollReady) {
+        NoteFrame histSnap[MAX_HISTORY];
+        int histCount = 0;
+        EnterCriticalSection(&m_cs);
+        CopyHistorySnapshot(histSnap, MAX_HISTORY, histCount);
+        LeaveCriticalSection(&m_cs);
         ComposeRollBuffer(m_rollDC, w, rollH, histCount, histSnap, liveSnap);
         EnterCriticalSection(&m_cs);
         m_framesPending = 0;
@@ -2764,7 +2876,7 @@ void CPianoRoll::OnPaint()
     }
 
     if (needKeyDraw) {
-        DrawKeyboardToBuffer(m_keyDC, w, keySectionH, keyH, activesCopy, bandMaskCopy, laneStrengthCopy, chFillCopy, chCountCopy);
+        DrawKeyboardToBuffer(m_keyDC, w, keySectionH, keyH, activesCopy, bandMaskCopy, laneStrengthCopy, chFillCopy, chCountCopy, exprCopy);
         m_keyBufReady = true;
     }
 
@@ -2777,8 +2889,26 @@ void CPianoRoll::OnPaint()
             m_chromaH = h;
         }
         if (m_chromaCache.Ensure(dc.GetSafeHdc(), w, h)) {
-            if (m_rollReady && didRollUpdate)
-                m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(), 0, 0, 0, 0, w, rollH, PIANO_CHROMA_KEY);
+            if (m_rollReady && didRollUpdate) {
+                if (didRollScroll && m_lastScrollPx > 0 && m_chromaReady) {
+                    // スクロール時: キャッシュDIBを memmove で繰り上げ、
+                    // チャネルキー→アルファ変換は変化領域(下端の新ライブ行＋凡例)のみ。
+                    // ロール全域(O(w×rollH))の再変換を避けてアクリル時を大幅軽量化。
+                    m_chromaCache.ScrollRows(0, rollH, m_lastScrollPx);
+                    const int rowPitch = HistoryRowPitch(rollH);
+                    int bandTop = rollH - m_lastScrollPx - rowPitch - 2;
+                    if (bandTop < 0) bandTop = 0;
+                    const int bandH = rollH - bandTop;
+                    if (bandH > 0)
+                        m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(), 0, bandTop, 0, bandTop, w, bandH, PIANO_CHROMA_KEY);
+                    CRect lg; GetExprLegendPanelRect(w, rollH, lg);
+                    if (lg.Width() > 0 && lg.Height() > 0)
+                        m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(), lg.left, lg.top, lg.left, lg.top, lg.Width(), lg.Height(), PIANO_CHROMA_KEY);
+                }
+                else {
+                    m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(), 0, 0, 0, 0, w, rollH, PIANO_CHROMA_KEY);
+                }
+            }
             if (needKeyDraw || !m_chromaReady)
                 m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, keySectionH, PIANO_CHROMA_KEY);
             m_chromaReady = true;

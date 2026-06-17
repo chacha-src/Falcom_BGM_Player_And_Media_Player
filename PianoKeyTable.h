@@ -39,7 +39,7 @@ namespace PianoKey
     }
 
     // hi / lo が n:1 の等倍音関係（±3%×n、鍵インデックスは厳密でなく周波数比）
-    inline bool IsHarmonicPair(int hi, int lo)
+    inline bool IsHarmonicPairCompute(int hi, int lo)
     {
         if (hi <= lo || lo < 0 || hi >= COUNT) return false;
         const float fh = KeyHz(hi);
@@ -52,6 +52,21 @@ namespace PianoKey
                 return true;
         }
         return false;
+    }
+
+    // 検出パイプラインの O(n^2) ループで多用されるため事前計算テーブル化（結果は不変）。
+    // C++11 のスレッドセーフな関数ローカル static で初期化（worker/Speana 双方から安全に参照）。
+    inline bool IsHarmonicPair(int hi, int lo)
+    {
+        static const bool* const tbl = []() -> const bool* {
+            static bool t[COUNT * COUNT];
+            for (int a = 0; a < COUNT; ++a)
+                for (int b = 0; b < COUNT; ++b)
+                    t[a * COUNT + b] = IsHarmonicPairCompute(a, b);
+            return t;
+        }();
+        if (hi <= lo || lo < 0 || hi >= COUNT) return false;
+        return tbl[hi * COUNT + lo];
     }
 
     inline bool IsOctaveRelated(int hi, int lo)

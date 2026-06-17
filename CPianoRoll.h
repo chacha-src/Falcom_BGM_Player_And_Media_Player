@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include <vector>
@@ -220,6 +220,7 @@ private:
 #endif
     bool    m_keySnapActive[KEY_COUNT];
     uint8_t m_keySnapBand[KEY_COUNT];
+    uint8_t m_keySnapExpr[KEY_COUNT];
 
     void ReleasePaintBuffers();
     bool EnsureRollBuffer(CDC& refDC, int width, int rollH);
@@ -235,6 +236,7 @@ private:
     int  HistoryScrollPx(int rollH, int rowsToScroll) const;
     void DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const NoteFrame& frame) const;
     void DrawHistoryRow(CDC& dc, int width, int rollH, size_t rowIndex, const NoteFrame& frame) const;
+    void DrawPitchTransitions(CDC& dc, int width, int rollH, int histCount, const NoteFrame* hist) const;
     void DrawHistoryArea(CDC& dc, int width, int rollH, int histCount, const NoteFrame* hist) const;
     void GetHistoryRowBounds(int rollH, int rowFromBottom, int& yTop, int& yBot) const;
     void ComposeRollBuffer(CDC& dc, int width, int rollH, int histCount, const NoteFrame* hist, const NoteFrame& live) const;
@@ -243,6 +245,6 @@ private:
     void DrawPlayheadRow(CDC& dc, int width, int rollH, const NoteFrame& live) const;
     void DrawKeyboardToBuffer(CDC& dc, int width, int keySectionH, int keyH,
         const bool* activesCopy, const uint8_t* bandMaskCopy, const float laneStrengthCopy[KEY_COUNT][3],
-        const float* chFillCopy, int chCountCopy) const;
+        const float* chFillCopy, int chCountCopy, const uint8_t* exprCopy) const;
     void UpdatePianoRollTimer();
 };

@@ -337,6 +337,12 @@ void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 	}
 	// スレッド未起動なら thn 待ちで 15 秒ブロックしない（固まりの主因の一つ）
 	if (!hThread) {
+		// ハンドルが取れない CWinThread が残っていれば破棄してリークを防ぐ
+		CSingleLock lk(&s_playNotifyThreadCs, TRUE);
+		if (s_playNotifyThread) {
+			delete s_playNotifyThread;
+			s_playNotifyThread = nullptr;
+		}
 		thn = TRUE;
 		thn1 = FALSE;
 		syukai = 0;
@@ -368,8 +374,14 @@ void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 			Sleep(1);
 	}
 	{
+		// m_bAutoDelete=FALSE で生成しているため、ここで明示的に破棄する。
+		// （自動破棄に任せるとスレッド自己終了時に s_playNotifyThread が
+		//   ダングリングになり、次回 stop で無効ハンドルを待って固まる）
 		CSingleLock lk(&s_playNotifyThreadCs, TRUE);
-		s_playNotifyThread = nullptr;
+		if (s_playNotifyThread) {
+			delete s_playNotifyThread;
+			s_playNotifyThread = nullptr;
+		}
 	}
 	thn = TRUE;
 	thn1 = FALSE;
@@ -380,7 +392,15 @@ void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 void BeginPlaybackNotifyThread()
 {
 	WaitForPlaybackNotifyThreadExit(15000);
-	CWinThread* t = AfxBeginThread((AFX_THREADPROC)HandleNotifications, NULL, THREAD_PRIORITY_TIME_CRITICAL);
+	// CREATE_SUSPENDED で起動し、スレッド本体が走り出す前に m_bAutoDelete を
+	// 落として寿命を自前管理する。これによりスレッドが自己終了しても
+	// CWinThread オブジェクトとスレッドハンドルは破棄されず、安全に Join できる。
+	CWinThread* t = AfxBeginThread((AFX_THREADPROC)HandleNotifications, NULL,
+		THREAD_PRIORITY_TIME_CRITICAL, 0, CREATE_SUSPENDED);
+	if (t) {
+		t->m_bAutoDelete = FALSE;
+		t->ResumeThread();
+	}
 	CSingleLock lk(&s_playNotifyThreadCs, TRUE);
 	s_playNotifyThread = t;
 }
@@ -3787,6 +3807,61 @@ static float ProcessDynamicLimiter(DynamicLimiter* lim, float input) {
 }
 
 // ============================================================
+// ★ ルックアヘッド・ピークリミッター（最終段・ステレオリンク）
+// ============================================================
+//  ブロック全体がバッファ済みなので「先読み」が可能。各サンプルで
+//  今後 La サンプル以内の最大ピークを見て、ピーク到達前にゲインを下げる。
+//  → オーバーシュートが出ないので tanh サチュレーションが不要になり、
+//    0.78〜0.97 域の高調波歪み(音割れ感/濁り)が乗らない。
+//  → 静部は無処理・ピークのみ動的減衰なので音量(ラウドネス)は維持。
+//  L/R 同一ゲインで処理しステレオ像を保つ。遅延はバッファ内先読みのため0。
+static float g_laLimEnv = 1.0f; // リリース包絡（ブロック間で継続）
+
+static void ApplyLookaheadLimiterStereo(float* L, float* R, int n, int rate, float ceiling)
+{
+	if (!L || !R || n <= 0 || rate <= 0) return;
+	static const int CAP = 8192 * 40;
+	if (n > CAP) n = CAP;
+
+	int La = rate / 700;            // 先読み ≈ 1.4ms
+	if (La < 8)    La = 8;
+	if (La > 1024) La = 1024;
+
+	static float req[CAP];          // 各サンプルの必要ゲイン(<=1)
+	static int   dq[CAP];           // 単調デック(スライディング最小)
+
+	for (int i = 0; i < n; ++i) {
+		const float p = fmaxf(fabsf(L[i]), fabsf(R[i]));
+		req[i] = (p > ceiling) ? (ceiling / p) : 1.0f;
+	}
+
+	int dqHead = 0, dqTail = 0;
+	auto pushBack = [&](int k) {
+		while (dqTail > dqHead && req[dq[dqTail - 1]] >= req[k]) --dqTail;
+		dq[dqTail++] = k;
+	};
+	for (int k = 0; k <= La && k < n; ++k) pushBack(k);
+
+	const float atkCoeff = expf(-1.0f / (0.0003f * (float)rate)); // ~0.3ms (La内で収束)
+	const float relCoeff = expf(-1.0f / (0.080f * (float)rate));  // ~80ms
+
+	for (int i = 0; i < n; ++i) {
+		const float laMin = req[dq[dqHead]];      // [i, i+La] の最小必要ゲイン
+		const int add = i + La + 1;
+		if (add < n) pushBack(add);
+		if (dq[dqHead] == i) ++dqHead;
+
+		const float coeff = (laMin < g_laLimEnv) ? atkCoeff : relCoeff;
+		g_laLimEnv = laMin + coeff * (g_laLimEnv - laMin);
+		if (g_laLimEnv > 1.0f) g_laLimEnv = 1.0f;
+		if (g_laLimEnv < 0.0f) g_laLimEnv = 0.0f;
+
+		L[i] *= g_laLimEnv;
+		R[i] *= g_laLimEnv;
+	}
+}
+
+// ============================================================
 // 拡張音量 / フォーマット別音量ブースト (マスター音量とは独立)
 // COggDlg 拡張音量 + CRender SPC/KPI/MP3 倍率をここで1本化
 // ============================================================
@@ -4633,15 +4708,21 @@ void equaliser(void* data, int len, BOOL reset) {
 	}
 
 	// ===================================================
-	// 【最終段】拡張音量 + フォーマット別ブースト → リミッター → ソフトサチュレーション
+	// 【最終段】拡張音量 + フォーマット別ブースト → ルックアヘッド・ピークリミッター
 	// マスター音量(eq[15])とは独立。ピークのみ動的に抑え、静部は減衰しない。
-	// ===================================================
+	// 以前は tanh サチュレーション(knee0.78)で 0.78〜0.97 域に高調波歪みが常時乗り、
+	// それが「音割れ感/濁り」の主因だった。先読みリミッターでオーバーシュートを出さず
+	// 上限へ収めるため、サチュレーションを使わずクリア＆音量維持を両立する。
+	// (最終の整数化で ±1.0 ハードクランプが究極の安全装置として残る)
 	{
 		const float extBoostGain = GetExternalBoostGain();
-		for (int i = 0; i < bufferIndex; i++) {
-			leftSamples[i] = ApplyExternalBoostSample(leftSamples[i], 0, extBoostGain);
-			rightSamples[i] = ApplyExternalBoostSample(rightSamples[i], 1, extBoostGain);
+		if (extBoostGain != 1.0f) {
+			for (int i = 0; i < bufferIndex; i++) {
+				leftSamples[i] *= extBoostGain;
+				rightSamples[i] *= extBoostGain;
+			}
 		}
+		ApplyLookaheadLimiterStereo(leftSamples, rightSamples, bufferIndex, wavbitbackup, 0.97f);
 	}
 
 	// ===== 最終出力: float → 整数PCM 書き戻し =====
