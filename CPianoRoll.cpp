@@ -36,8 +36,10 @@ namespace Cfg
     static constexpr int   BAND_MID_END = 53;
     static constexpr int   BAND_MID_LO_END = 45; // O3帯 / O4上端で正規化分割（A4付近）
     static constexpr float BASS_PICK_THRESH = 0.20f;
-    static constexpr float MID_PICK_THRESH = 0.19f;
-    static constexpr float TRE_PICK_THRESH = 0.16f;
+    // ストリングス(ブロード/持続的でピークが弱い)を拾うため mid/treble を控えめに低減。
+    // 出過ぎ防止のため小幅(約13%)に留める。
+    static constexpr float MID_PICK_THRESH = 0.165f;
+    static constexpr float TRE_PICK_THRESH = 0.14f;
     static constexpr float PRUNE_BAND_RATIO = 0.11f;
     static constexpr float PRUNE_TOP_RATIO = 0.17f;
     static constexpr float HOLD_ENV_BASS = 0.34f;
