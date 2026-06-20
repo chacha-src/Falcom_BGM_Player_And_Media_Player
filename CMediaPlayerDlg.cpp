@@ -487,9 +487,13 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		RefreshAeroMode();   // レイアウト確定後にアクリル/不透明化を再適用
 #endif
 
-	m_lastMs2 = (savedata.ms2 >= 16) ? savedata.ms2 : 16;
+	// 描画タイマーは og のスレッド基準(16ms=60fps)に合わせて固定する。
+	// 実際のスペアナ等の更新頻度は og 側が savedata.ms2 で律速しており(ms2カウンタ)、
+	// mp はそれを 60fps で Blit して pending を解除するだけ。ここで savedata.ms2 を
+	// そのまま間隔に使うと描画全体がその間隔まで律速され遅くなる(=不具合の原因)。
+	m_lastMs2 = 16;
 	SetTimer(1, 250, NULL);          // 低速: テキスト/リスト/コンボ/チェックの同期
-	SetTimer(2, m_lastMs2, NULL);    // 描画: スペアナ等のBlit + 合成継続(設定ms2追従=最大60fps)
+	SetTimer(2, 16, NULL);           // 描画: dc の Blit + 合成継続(60fps固定。実更新はog側がms2律速)
 	SetTimer(3, 33, NULL);           // 高速: シーク(playb追従)/時間/音量のミラー
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1)
@@ -726,7 +730,11 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 	// 項目を挿入し終えた「後」に ♪ 行へカーソルを当てる(初回もここで確実に追従)。
 	m_lastScroll = -2;        // 再構築後は強制的に再追従させる
 	FollowPlayingRow();
-	m_list.Invalidate();
+	// SetRedraw(FALSE)中に項目を挿入するとスクロール範囲(非クライアント=スクロールバー)が
+	// 再計算されず、スクロールするまで出てこない描画ミスが起きる。フレーム再計算を明示する。
+	m_list.SetWindowPos(NULL, 0, 0, 0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+	m_list.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
 }
 
 // 再生中(♪)の行へカーソル(選択)を移動して可視化する。
@@ -874,13 +882,8 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		RefreshList(FALSE);
 		// 起動直後に裏画面が残る対策: メディアプレイヤーモード中は必ず隠す(監視)
 		EnforceFalcomHidden();
-		// 設定の描画間隔(ms2)が変わったら描画タイマーを張り直す
-		int ms2 = (savedata.ms2 >= 16) ? savedata.ms2 : 16;
-		if (ms2 != m_lastMs2) {
-			m_lastMs2 = ms2;
-			KillTimer(2);
-			SetTimer(2, ms2, NULL);
-		}
+		// 描画タイマー(2)は 60fps 固定。更新頻度の律速は og 側(ms2カウンタ)が行うため、
+		// ここで張り直す必要はない。
 	}
 	else if (nIDEvent == 2) {
 		// 描画駆動: dc を直接 Blit(CClientDC=Invalidateしない)し、og の合成継続のため pending を解除。
@@ -936,7 +939,7 @@ void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 		RedrawWindow(NULL, NULL,
 			RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 		if (::IsWindow(m_list.GetSafeHwnd()))
-			m_list.Invalidate(FALSE);
+			m_list.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
 	}
 }
 

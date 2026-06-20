@@ -15496,6 +15496,14 @@ void COggDlg::timerp()
 			rect.bottom = (LONG)((101) * hD * 4);
 			rect.right = (LONG)((180 + 88 * 2 + 50) * hD * 4);
 			InvalidateRect(&rect, FALSE);
+			// この後 og の OnPaint が ms2=0 リセットと pending 解除を行う(通常モード)。
+		}
+		else {
+			// メディアプレイヤーモードでは og の OnPaint が走らないため、ここで
+			// フレームを「消費」する。ms2 カウンタを 0 に戻さないと伸び続け、
+			// Ms2DrawDue が常時真になってピアノロール等が ms2 設定を無視し 60fps で
+			// 描画され重くなる(=ファルコム特化型では起きない現象)。OnPaint と同じ扱いにする。
+			ms2 = 0;
 		}
 		InterlockedExchange(&g_gdiPaintPending, 1);
 	}
