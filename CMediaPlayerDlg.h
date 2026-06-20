@@ -61,6 +61,7 @@ public:
 	int  Create(CWnd* pParent);
 	void DoLayout();              // DPI/リサイズ対応の手動レイアウト
 	void RefreshList(BOOL bForce = FALSE);  // pl->pc をそのまま反映
+	void FollowPlayingRow();                // 再生中(♪)の行へカーソル追従(項目挿入後に呼ぶ)
 	void SyncFromMain();         // og/pl の状態をUIへ反映
 	void MirrorSeekVol();        // 再生位置(playb追従)/時間/音量を高速ミラー
 	void SavePos();              // 座標を savedata に保存

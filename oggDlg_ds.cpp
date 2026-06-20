@@ -3947,12 +3947,12 @@ static void FxProcessReverb(float* L, float* R, int n, int rate, float amount, B
 	if (g_fxReverb.rate != rate) FxReverbReset(rate);
 	if (amount > 1.0f) amount = 1.0f;
 
-	const float roomSize = 0.70f + amount * 0.265f;   // フィードバック 0.70..~0.965
-	const float damp = 0.18f + amount * 0.10f;
+	const float roomSize = 0.74f + amount * 0.245f;   // フィードバック 0.74..~0.985 (残響を長く)
+	const float damp = 0.15f + amount * 0.08f;         // ダンピングを弱め残響を明瞭に
 	const float damp1 = damp, damp2 = 1.0f - damp;
-	const float inGain = 0.015f;                       // 並列コムの発散防止入力ゲイン
-	const float wetMix = amount * 0.55f;               // 最大 55% wet
-	const float dryMix = 1.0f - wetMix * 0.5f;         // dry を一部残す
+	const float inGain = 0.028f;                       // 入力ゲインを上げウェットを増強
+	const float wetMix = amount * 0.95f;               // 最大 95% wet (効きを強化)
+	const float dryMix = 1.0f - wetMix * 0.30f;        // dry をより多く残し音量感を確保
 	const float panRate = 0.20f;                       // パンリバーブの自動パン速度(Hz)
 
 	for (int i = 0; i < n; i++) {
@@ -4035,9 +4035,9 @@ static void FxProcessChorus(float* L, float* R, int n, int rate, float amount, B
 	if (amount > 1.0f) amount = 1.0f;
 
 	const float baseSamp = 16.0f * rate / 1000.0f;          // 基準遅延 16ms
-	const float depthSamp = (4.0f + amount * 5.0f) * rate / 1000.0f; // 深さ 4-9ms
-	const float lfoHz = 0.5f;
-	const float wetMix = 0.5f * amount;
+	const float depthSamp = (6.0f + amount * 9.0f) * rate / 1000.0f; // 深さ 6-15ms (うねりを強化)
+	const float lfoHz = 0.6f;                                // 変調をやや速く存在感を強化
+	const float wetMix = 0.95f * amount;                     // 最大 95% wet (効きを強化)
 	const float drive = 1.0f + amount * 3.0f;
 	const float driveNorm = 1.0f / tanhf(drive);
 
@@ -4058,7 +4058,7 @@ static void FxProcessChorus(float* L, float* R, int n, int rate, float amount, B
 			}
 			wet *= 0.4f;  // 3声合計の正規化
 			if (distMode) wet = tanhf(wet * drive) * driveNorm;  // コーラスディストーション
-			float out = dry * (1.0f - wetMix * 0.5f) + wet * wetMix;
+			float out = dry * (1.0f - wetMix * 0.45f) + wet * wetMix;
 			if (++wp >= FX_CHO_MAX) wp = 0;
 			g_fxChorus.wpos[ch] = wp;
 			if (ch == 0) L[i] = isfinite(out) ? out : 0.0f;
@@ -4090,8 +4090,8 @@ static void FxProcessDelay(float* L, float* R, int n, int rate, float amount, BO
 	int d2 = (int)(0.375f * rate);   // 375ms 第2タップ(マルチ用)
 	if (d1 >= FX_DLY_MAX) d1 = FX_DLY_MAX - 1;
 	if (d2 >= FX_DLY_MAX) d2 = FX_DLY_MAX - 1;
-	const float feedback = 0.25f + amount * 0.45f;   // 0.25..0.70
-	const float wetMix = 0.45f * amount;
+	const float feedback = 0.30f + amount * 0.55f;   // 0.30..0.85 (反復を増やし効きを強化)
+	const float wetMix = 0.6f * amount;              // 最大 60% wet (やや強めに)
 
 	float* bL = g_fxDelay.buf[0];
 	float* bR = g_fxDelay.buf[1];

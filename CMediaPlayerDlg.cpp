@@ -258,8 +258,13 @@ END_MESSAGE_MAP()
 int CMediaPlayerDlg::Create(CWnd* pParent)
 {
 	BOOL bret = CCustomBlurDialogBase::Create(CMediaPlayerDlg::IDD, pParent);
-	if (bret == TRUE)
+	if (bret == TRUE) {
 		ShowWindow(SW_SHOW);
+		// 表示が確定してから ♪ 行へ確実にスクロール/選択する。
+		// (OnInitDialog 時点ではウィンドウ未実現で EnsureVisible が効かないことがあるため)
+		m_lastScroll = -2;
+		FollowPlayingRow();
+	}
 	return bret;
 }
 
@@ -683,16 +688,6 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 	}
 	int cnt = pl->playcnt;
 
-	// 再生中の行へ自動スクロール(再生インデックスが変わった時のみ。ユーザーのスクロールを邪魔しない)
-	{
-		int cur = plcnt;
-		if (cur < 0 || cur >= cnt) cur = pl->pnt;
-		if (cur >= 0 && cur < cnt && cur != m_lastScroll) {
-			m_list.EnsureVisible(cur, FALSE);
-			m_lastScroll = cur;
-		}
-	}
-
 	if (!bForce && cnt == m_lastCount) {
 		// 件数据え置き: 再生中行のアイコンだけ pc[].icon に合わせて更新(点滅含む)。
 		// プレイリスト本体(pl->pnt)が再生中行。毎tickの全走査はしない。
@@ -706,6 +701,7 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 		// 再生行アイコンを最新の pc[].icon に同期(SIconTimer の点滅を反映)
 		if (pnt >= 0 && pnt < cnt)
 			m_list.SetItem(pnt, 0, LVIF_IMAGE, NULL, pl->pc[pnt].icon, 0, 0, 0);
+		FollowPlayingRow();   // ♪ 行へカーソル追従(項目は既に存在)
 		return;
 	}
 	m_list.SetRedraw(FALSE);
@@ -727,7 +723,30 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 	m_list.SetRedraw(TRUE);
 	m_lastCount = cnt;
 	m_lastPlcnt = pl->pnt;
+	// 項目を挿入し終えた「後」に ♪ 行へカーソルを当てる(初回もここで確実に追従)。
+	m_lastScroll = -2;        // 再構築後は強制的に再追従させる
+	FollowPlayingRow();
 	m_list.Invalidate();
+}
+
+// 再生中(♪)の行へカーソル(選択)を移動して可視化する。
+// ♪ の行は pl->pnt(SIcon が pc[pnt].icon を再生中アイコンへ切替えている)。
+// 項目挿入後に呼ぶこと。pnt が変わった時のみ追従し、同一曲中のユーザー選択は邪魔しない。
+void CMediaPlayerDlg::FollowPlayingRow()
+{
+	if (!::IsWindow(m_list.GetSafeHwnd())) return;
+	if (!pl || pl->pc == NULL) return;
+	int cnt = pl->playcnt;
+	int play = pl->pnt;
+	if (play < 0 || play >= cnt) return;
+	if (play == m_lastScroll) return;
+	if (m_list.GetItemCount() < cnt) return;   // 項目未挿入なら何もしない
+	int k = -1;
+	while ((k = m_list.GetNextItem(k, LVNI_SELECTED)) != -1)
+		m_list.SetItemState(k, 0, LVIS_SELECTED | LVIS_FOCUSED);
+	m_list.SetItemState(play, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+	m_list.EnsureVisible(play, FALSE);
+	m_lastScroll = play;
 }
 
 void CMediaPlayerDlg::SyncFromMain()
