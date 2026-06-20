@@ -80,24 +80,32 @@ void CCC_SendGroupBoxesToBack(HWND hDlg);
 // ============================================================================
 // 色定義
 // ============================================================================
-#define COLOR_DIALOG_BG         RGB(255, 225, 235) // ダイアログの基本背景色
-#define COLOR_EDIT_BG           RGB(255, 222, 210) // エディットボックスの背景色
+// よりふんわり・甘いマカロン系パステルへ調整（全コントロール共通）
+#define COLOR_DIALOG_BG         RGB(255, 233, 243) // ダイアログの基本背景色（やさしい綿あめピンク）
+#define COLOR_EDIT_BG           RGB(255, 241, 232) // エディットボックスの背景色（クリームピーチ）
 #define COLOR_EDIT_TEXT         RGB(0,   0,   0)   // エディットボックスの文字色
-#define COLOR_LIST_BG           RGB(173, 216, 230) // リストボックスの背景色
-#define COLOR_COMBO_BG          RGB(255, 222, 210) // コンボボックスの背景色
-#define COLOR_BUTTON_BG         RGB(200, 232, 190) // ボタンの通常時背景色
-#define COLOR_BUTTON_PUSHED     RGB( 60, 160,  60) // ボタンの押下時背景色
-#define COLOR_BUTTON_HOVER      RGB(100, 200, 100) // ボタンのホバー時背景色
-#define COLOR_SLIDER_THUMB      RGB(128,   0, 128) // スライダーのつまみの色
+#define COLOR_LIST_BG           RGB(216, 237, 252) // リストボックスの背景色（ふんわり水色）
+#define COLOR_COMBO_BG          RGB(255, 241, 232) // コンボボックスの背景色
+#define COLOR_BUTTON_BG         RGB(206, 240, 215) // ボタンの通常時背景色（やわらかミント）
+#define COLOR_BUTTON_PUSHED     RGB(150, 210, 170) // ボタンの押下時背景色（やさしい緑）
+#define COLOR_BUTTON_HOVER      RGB(182, 230, 198) // ボタンのホバー時背景色
+#define COLOR_SLIDER_THUMB      RGB(255, 120, 170) // スライダーのつまみの色（キャンディピンク）
 #define COLOR_RANGE_SLIDER_THUMB RGB(255, 255, 255) // 範囲スライダーのつまみ色
-#define COLOR_RANGE_SELECTION   RGB(221, 160, 221) // 範囲スライダーの選択範囲色
+#define COLOR_RANGE_SELECTION   RGB(255, 201, 224) // 範囲スライダーの選択範囲色（甘いピンク）
 #define COLOR_HANAMARU          RGB(255,   0,   0) // はなまるの色
 #define COLOR_FLOWER_DECO       RGB(255, 240, 245) // お花の装飾色
-#define COLOR_VINE_DECO         RGB( 80, 140,  80) // 蔓（つる）の装飾色
+#define COLOR_VINE_DECO         RGB(124, 194, 146) // 蔓（つる）の装飾色（やわらかい緑）
 #define COLOR_HEART             RGB(255, 105, 180) // ハートの装飾色
-#define COLOR_SEL_BG            RGB(221, 160, 221) // リストなどの選択時背景色
+#define COLOR_SEL_BG            RGB(255, 206, 229) // リストなどの選択時背景色（甘いピンク）
 #define COLOR_GRAD_DARK_GREEN   RGB(  0, 100,   0) // グラデーション用の濃い緑
 #define COLOR_GRAD_DARK_PURPLE  RGB( 75,   0, 130) // グラデーション用の濃い紫
+
+// --- 追加: 可愛さ強化用の装飾カラー ---
+#define COLOR_GLOSS             RGB(255, 255, 255) // ぷるんとしたツヤ(光沢)ハイライト色
+#define COLOR_SPARKLE           RGB(255, 250, 205) // きらめき(キラキラ)の装飾色
+#define COLOR_SPARKLE_CORE      RGB(255, 255, 255) // きらめきの白い芯
+#define COLOR_BOW               RGB(255, 173, 203) // リボン(ちょうちょ結び)の色
+#define COLOR_BUTTON_GLOSS_TOP  RGB(245, 255, 248) // ボタン上部のつや色
 
 // アクリル半透明オーバーレイ用アルファ値
 #define AERO_ALPHA_SEMI 160

@@ -75,6 +75,8 @@ public:
 	CCustomSliderCtrl m_dsvol, m_kvol, m_tempo, m_pitch;   // DS音量/拡張音量/テンポ/ピッチ(og 流用)
 	CCustomStatic m_dsvolL, m_kvolL, m_tempoL, m_pitchL;
 	CCustomStandardButton m_prev, m_play, m_pause, m_stop, m_next, m_eq, m_piano, m_switch, m_settings, m_exit, m_jacket;
+	CCustomStandardButton m_fadeout;   // フェードアウト(og IDC_BUTTON5 流用)
+	CCustomStandardButton m_folder;    // フォルダ設定(og IDC_BUTTON9 流用)
 	CCustomStandardButton m_plrename, m_pldelete, m_itemdel;
 	CButtonST m_lsup, m_up, m_down, m_lsdown;   // 一番上/上/下/一番下(ButtonST 流用)
 	CButtonST m_findup, m_finddown;             // あいまい検索 上/下(ButtonST)
@@ -90,7 +92,7 @@ public:
 	CCustomGroupBox m_grpInfo, m_grpSnd, m_grpPl;         // 区分け枠(WS_CLIPSIBLINGS+最背面で兄弟を覆わない)
 	CCustomListCtrl m_list;
 	CImageList il;
-	CFont m_fontList, m_fontTitle, m_fontInfo;
+	CFont m_fontList, m_fontTitle, m_fontInfo, m_fontChk;
 	CBrush m_brDlg;
 	HICON m_hIcon;
 	int  m_lastCount;
@@ -136,6 +138,8 @@ protected:
 	afx_msg void OnNext();
 	afx_msg void OnEq();
 	afx_msg void OnPiano();
+	afx_msg void OnFadeout();
+	afx_msg void OnFolder();
 	afx_msg void OnExit();
 	afx_msg void OnJacket();
 	afx_msg void OnSettings();

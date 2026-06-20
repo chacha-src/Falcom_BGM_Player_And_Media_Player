@@ -167,6 +167,8 @@ void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_MP_SETTINGS, m_settings);
 	DDX_Control(pDX, IDC_MP_EXIT, m_exit);
 	DDX_Control(pDX, IDC_MP_JACK, m_jacket);
+	DDX_Control(pDX, IDC_MP_FADEOUT, m_fadeout);
+	DDX_Control(pDX, IDC_MP_FOLDER, m_folder);
 	DDX_Control(pDX, IDC_MP_DSVOL, m_dsvol);
 	DDX_Control(pDX, IDC_MP_DSVOL_L, m_dsvolL);
 	DDX_Control(pDX, IDC_MP_KVOL, m_kvol);
@@ -219,6 +221,8 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_MP_NEXT, &CMediaPlayerDlg::OnNext)
 	ON_BN_CLICKED(IDC_MP_EQ, &CMediaPlayerDlg::OnEq)
 	ON_BN_CLICKED(IDC_MP_PIANO, &CMediaPlayerDlg::OnPiano)
+	ON_BN_CLICKED(IDC_MP_FADEOUT, &CMediaPlayerDlg::OnFadeout)
+	ON_BN_CLICKED(IDC_MP_FOLDER, &CMediaPlayerDlg::OnFolder)
 	ON_BN_CLICKED(IDC_MP_EXIT, &CMediaPlayerDlg::OnExit)
 	ON_BN_CLICKED(IDC_MP_JACK, &CMediaPlayerDlg::OnJacket)
 	ON_BN_CLICKED(IDC_MP_SETTINGS, &CMediaPlayerDlg::OnSettings)
@@ -281,17 +285,21 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_play.SetWindowText(LL14(L"再生", L"Play", L"Lire", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Играть", L"Wiedergabe", L"Reproduzir", L"Afspelen", L"Odtwarzaj", L"Oynat"));
 	m_pause.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat"));
 	m_stop.SetWindowText(LL14(L"停止", L"Stop", L"Arret", L"Stop", L"Detener", L"정지", L"停止", L"إيقاف", L"Стоп", L"Stopp", L"Parar", L"Stop", L"Stop", L"Durdur"));
-	m_renzoku.SetWindowText(LL14(L"連続", L"Cont.", L"Cont.", L"Cont.", L"Cont.", L"연속", L"连续", L"متتابع", L"Подряд", L"Folge", L"Cont.", L"Doorl.", L"Ci?g?e", L"Surekli"));
-	m_loop.SetWindowText(LL14(L"ループ", L"Loop", L"Boucle", L"Loop", L"Bucle", L"루프", L"循环", L"تكرار", L"Цикл", L"Schleife", L"Loop", L"Lus", L"P?tla", L"Dongu"));
-	m_random.SetWindowText(LL14(L"ランダム", L"Random", L"Aleatoire", L"Casuale", L"Aleatorio", L"랜덤", L"随机", L"عشوائي", L"Случайно", L"Zufall", L"Aleatorio", L"Willekeurig", L"Losowo", L"Rastgele"));
+	m_renzoku.SetWindowText(LL14(L"連続再生", L"Continuous", L"Lect. continue", L"Continua", L"Continua", L"연속 재생", L"连续播放", L"تشغيل متتابع", L"Подряд", L"Folge", L"Continuo", L"Doorlopend", L"Ci?g?e", L"Surekli cal"));
+	m_loop.SetWindowText(LL14(L"ループ再生", L"Loop play", L"Lecture boucle", L"Riproduci loop", L"Repetir", L"루프 재생", L"循环播放", L"تشغيل متكرر", L"Цикл", L"Schleife", L"Repetir", L"Lus afspelen", L"Odtwarz. p?tli", L"Donguye al"));
+	m_random.SetWindowText(LL14(L"ランダム再生", L"Random play", L"Lect. aleatoire", L"Casuale", L"Aleatorio", L"랜덤 재생", L"随机播放", L"تشغيل عشوائي", L"Случайно", L"Zufall", L"Aleatorio", L"Willekeurig", L"Losowo", L"Rastgele cal"));
 	m_eq.SetWindowText(LL14(L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ"));
 	m_piano.SetWindowText(LL14(L"ピアノ", L"Piano", L"Piano", L"Piano", L"Piano", L"피아노", L"钢琴", L"بيانو", L"Пиано", L"Klavier", L"Piano", L"Piano", L"Pianino", L"Piyano"));
 	m_switch.SetWindowText(LL14(L"ファルコム特化型へ", L"To Falcom screen", L"Vers ecran Falcom", L"Alla schermata Falcom", L"A pantalla Falcom", L"팔콤 화면으로", L"切换到Falcom画面", L"إلى شاشة Falcom", L"К экрану Falcom", L"Zum Falcom-Bildschirm", L"Para tela Falcom", L"Naar Falcom-scherm", L"Do ekranu Falcom", L"Falcom ekran?na"));
 	m_settings.SetWindowText(LL14(L"設定", L"Settings", L"Reglages", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"إعدادات", L"Настройки", L"Einstellungen", L"Config.", L"Instellingen", L"Ustawienia", L"Ayarlar"));
 	m_jacket.SetWindowText(LL14(L"ジャケ", L"Cover", L"Pochette", L"Copertina", L"Caratula", L"커버", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Ok?adka", L"Kapak"));
 	m_exit.SetWindowText(LL14(L"終了", L"Exit", L"Quitter", L"Esci", L"Salir", L"종료", L"退出", L"خروج", L"Выход", L"Beenden", L"Sair", L"Afsluiten", L"Zako?cz", L"C?k??"));
+	m_fadeout.SetWindowText(LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Fade out", L"Zanikanie", L"Solukla?t?r"));
+	m_folder.SetWindowText(LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"مجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"));
 	m_jacket.SetGradation(RGB(255, 235, 245), RGB(255, 200, 225), 0, TRUE);
 	m_exit.SetGradation(RGB(255, 210, 210), RGB(255, 160, 160), 0, TRUE);
+	m_fadeout.SetGradation(RGB(255, 235, 215), RGB(255, 200, 150), 0, TRUE);
+	m_folder.SetGradation(RGB(220, 240, 230), RGB(180, 220, 200), 0, TRUE);
 	m_vollabel.SetWindowText(LL14(L"主音量", L"Volume", L"Volume", L"Volume", L"Volumen", L"음량", L"音量", L"الصوت", L"Громкость", L"Lautstarke", L"Volume", L"Volume", L"G?o?no??", L"Ses"));
 	m_plrename.SetWindowText(LL14(L"名前変更", L"Rename", L"Renommer", L"Rinomina", L"Renombrar", L"이름변경", L"重命名", L"إعادة تسمية", L"Переименовать", L"Umbenennen", L"Renomear", L"Hernoemen", L"Zmie? nazw?", L"Yeniden adland?r"));
 	m_pldelete.SetWindowText(LL14(L"リスト削除", L"Delete list", L"Suppr. liste", L"Elimina lista", L"Eliminar lista", L"목록삭제", L"删除列表", L"حذف القائمة", L"Удалить список", L"Liste loschen", L"Excluir lista", L"Lijst wissen", L"Usu? list?", L"Listeyi sil"));
@@ -359,6 +367,15 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_fontTitle.CreateFont(-(int)(20 * hD2), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
 	m_fontInfo.CreateFont(-(int)(13 * hD2), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
 	m_fontList.CreateFont(-(int)(14 * hD2), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
+	// チェックボックス用に少し大きめのフォント(下部チェックを見やすく)
+	m_fontChk.CreateFont(-(int)(15 * hD2), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
+	m_tip.SetFont(&m_fontChk, TRUE);
+	m_mini.SetFont(&m_fontChk, TRUE);
+	m_savemp3.SetFont(&m_fontChk, TRUE);
+	m_saveds.SetFont(&m_fontChk, TRUE);
+	m_renzoku.SetFont(&m_fontChk, TRUE);
+	m_loop.SetFont(&m_fontChk, TRUE);
+	m_random.SetFont(&m_fontChk, TRUE);
 	// タイトル/アーティスト/アルバムはバナーGDIに表示されるのでスタティックは隠す(縦幅節約)
 	m_title.ShowWindow(SW_HIDE);
 	m_artist.ShowWindow(SW_HIDE);
@@ -397,6 +414,9 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 				if (ph > 200) h = ph + (int)(360 * hD2); // プレイリスト分+情報/操作部
 			}
 		}
+		// 最小サイズを下回らないようにクランプ(レイアウト崩れ防止)
+		if (w < (int)(620 * hD2)) w = (int)(620 * hD2);
+		if (h < (int)(560 * hD2)) h = (int)(560 * hD2);
 		// 画面外チェック
 		RECT rcWork; SystemParametersInfo(SPI_GETWORKAREA, 0, &rcWork, 0);
 		if (x < rcWork.left - 50 || x > rcWork.right - 50) x = rcWork.left + 40;
@@ -425,6 +445,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_tooltip.AddTool(&m_exit, LL14(L"アプリケーションを終了します。", L"Exit the application.", L"Quitter l'application.", L"Esci dall'applicazione.", L"Salir de la aplicacion.", L"앱을 종료합니다.", L"退出应用程序。", L"إنهاء التطبيق.", L"Выйти из приложения.", L"Anwendung beenden.", L"Sair do aplicativo.", L"Toepassing afsluiten.", L"Zamknij aplikacj?.", L"Uygulamadan c?k."));
 	m_tooltip.AddTool(&m_list, LL14(L"ダブルクリックで再生。ファイルをドロップして追加できます。", L"Double-click to play. Drop files to add.", L"Double-clic pour lire. Glissez des fichiers.", L"Doppio clic per riprodurre. Trascina file.", L"Doble clic para reproducir. Suelta archivos.", L"더블 클릭으로 재생. 파일을 드롭해 추가.", L"双击播放。拖入文件添加。", L"انقر مزدوجاً للتشغيل. أفلت الملفات.", L"Двойной клик — воспроизведение. Перетащите файлы.", L"Doppelklick zum Abspielen. Dateien ablegen.", L"Clique duplo para tocar. Solte arquivos.", L"Dubbelklik om af te spelen. Sleep bestanden.", L"Kliknij dwukrotnie. Upu?? pliki.", L"Cift t?kla cal. Dosya b?rak."));
 	m_tooltip.AddTool(&m_settings, LL14(L"設定画面を開きます。", L"Open settings.", L"Ouvrir les reglages.", L"Apri le impostazioni.", L"Abrir ajustes.", L"설정 화면을 엽니다.", L"打开设置。", L"فتح الإعدادات.", L"Открыть настройки.", L"Einstellungen offnen.", L"Abrir configuracoes.", L"Instellingen openen.", L"Otworz ustawienia.", L"Ayarlar? ac."));
+	m_tooltip.AddTool(&m_fadeout, LL14(L"再生中の曲をフェードアウトして停止します。", L"Fade out and stop the current track.", L"Fondu et arret du morceau.", L"Dissolvenza e stop del brano.", L"Desvanecer y detener la pista.", L"현재 곡을 페이드 아웃하여 정지합니다.", L"淡出并停止当前曲目。", L"تلاشي وإيقاف المقطع الحالي.", L"Затухание и остановка трека.", L"Aktuellen Titel ausblenden und stoppen.", L"Desvanecer e parar a faixa.", L"Huidige track uitfaden en stoppen.", L"Wycisz i zatrzymaj utwor.", L"Parcay? soluklast?r?p durdur."));
+	m_tooltip.AddTool(&m_folder, LL14(L"フォルダ設定画面を開きます(フォルダの登録/追加)。", L"Open folder settings (register/add folders).", L"Ouvrir les parametres de dossier.", L"Apri impostazioni cartella.", L"Abrir config. de carpeta.", L"폴더 설정 화면을 엽니다.", L"打开文件夹设置。", L"فتح إعدادات المجلد.", L"Открыть настройки папки.", L"Ordnereinstellungen offnen.", L"Abrir config. de pasta.", L"Mapinstellingen openen.", L"Otworz ustawienia folderu.", L"Klasor ayarlar?n? ac."));
 	m_tooltip.AddTool(&m_dsvol, LL14(L"DirectSound音量を調整します。", L"Adjust DirectSound volume.", L"Reglez le volume DirectSound.", L"Regola il volume DirectSound.", L"Ajustar volumen DirectSound.", L"DirectSound 음량 조절.", L"调整DirectSound音量。", L"ضبط مستوى صوت DirectSound.", L"Громкость DirectSound.", L"DirectSound-Lautstarke.", L"Volume DirectSound.", L"DirectSound-volume.", L"G?o?no?? DirectSound.", L"DirectSound sesi."));
 	m_tooltip.AddTool(&m_kvol, LL14(L"拡張音量(ブースト)を調整します。", L"Adjust extended (boost) volume.", L"Volume etendu (boost).", L"Volume esteso (boost).", L"Volumen extendido (boost).", L"확장(부스트) 음량 조절.", L"调整扩展(增益)音量。", L"ضبط الصوت الموسع (التعزيز).", L"Расширенная громкость (буст).", L"Erweiterte Lautstarke (Boost).", L"Volume estendido (boost).", L"Uitgebreid (boost) volume.", L"Rozszerzona g?o?no??.", L"Geni?letilmi? ses."));
 	m_tooltip.AddTool(&m_tempo, LL14(L"再生テンポを調整します(ラベルをクリックで100%に戻す)。", L"Adjust playback tempo (click label to reset to 100%).", L"Tempo de lecture (clic sur le label = 100%).", L"Tempo (clic sull'etichetta = 100%).", L"Tempo (clic en etiqueta = 100%).", L"재생 템포 조절(라벨 클릭 시 100%).", L"调整播放速度(点击标签恢复100%)。", L"ضبط الإيقاع (انقر التسمية لإعادة 100%).", L"Темп (клик по метке = 100%).", L"Tempo (Label klicken = 100%).", L"Tempo (clique no rotulo = 100%).", L"Tempo (klik label = 100%).", L"Tempo (etykieta = 100%).", L"Tempo (etikete t?kla = %100)."));
@@ -513,18 +535,18 @@ void CMediaPlayerDlg::DoLayout()
 	if (bannerH < bannerMin) bannerH = bannerMin;
 	m_bannerRect.SetRect(M, M, M + bannerW, M + bannerH);
 
-	const int gTitle = (int)(13 * s);   // グループ枠のタイトル分の高さ
-	const int gPad = (int)(4 * s);      // グループ内側の余白
+	const int gTitle = (int)(14 * s);   // グループ枠のタイトル分の高さ
+	const int gPad = (int)(5 * s);      // グループ内側の余白
 
-	// ===== 情報グループ(歌詞3行 + OS/CPU を圧縮) =====
+	// ===== 情報グループ(歌詞3行 + OS/CPU) フォントが収まる高さを確保 =====
 	int infoTop = M + bannerH + (int)(2 * s);
 	int ix = M + gPad, iw = W - M * 2 - gPad * 2;
 	int y = infoTop + gTitle;
-	int lh = (int)(13 * s);
+	int lh = (int)(17 * s);   // 情報フォント13px が収まる行高
 	MoveCtl(&m_lrc, ix, y, iw, lh); y += lh;
 	MoveCtl(&m_lrc2, ix, y, iw, lh); y += lh;
 	MoveCtl(&m_lrc3, ix, y, iw, lh); y += lh + (int)(1 * s);
-	int osH = (int)(11 * s);
+	int osH = (int)(15 * s);
 	// OS と CPU を1行に、os3 を1行に(2行で圧縮)
 	MoveCtl(&m_os, ix, y, iw * 3 / 5, osH);
 	MoveCtl(&m_cpu, ix + iw * 3 / 5, y, iw * 2 / 5, osH); y += osH;
@@ -533,47 +555,58 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_grpInfo, M, infoTop, W - M * 2, infoBottom - infoTop);
 
 	// ===== シーク(範囲スライダー, 全幅) + 時間% =====
-	int seekY = infoBottom + (int)(4 * s);
-	int timeW = (int)(40 * s);
-	MoveCtl(&m_seek, M, seekY, W - M * 2 - timeW - (int)(4 * s), (int)(15 * s));
-	MoveCtl(&m_time, W - M - timeW, seekY + (int)(2 * s), timeW, (int)(11 * s));
+	int seekY = infoBottom + (int)(5 * s);
+	int timeW = (int)(42 * s);
+	MoveCtl(&m_seek, M, seekY, W - M * 2 - timeW - (int)(4 * s), (int)(16 * s));
+	MoveCtl(&m_time, W - M - timeW, seekY + (int)(2 * s), timeW, (int)(14 * s));
 
-	// ===== 操作行: 前/再生/一時停止/停止/次  +  主音量(右) =====
-	int by = seekY + (int)(19 * s);
-	int bw = (int)(42 * s), bh = (int)(20 * s), gap = (int)(3 * s);
+	// ===== 操作行: 前/再生/一時停止/停止/フェードアウト/次 + ジャケ/EQ/ピアノ + 主音量(右) =====
+	// 主音量手前の空きへ ジャケ/EQ/ピアノ を配置し、音量スライダーは残り幅へ伸縮させる。
+	int by = seekY + (int)(22 * s);
+	int bh = (int)(24 * s), gap = (int)(3 * s);
 	int bx = M;
-	MoveCtl(&m_prev, bx, by, bw, bh); bx += bw + gap;
-	MoveCtl(&m_play, bx, by, bw, bh); bx += bw + gap;
-	MoveCtl(&m_pause, bx, by, (int)(48 * s), bh); bx += (int)(48 * s) + gap;
-	MoveCtl(&m_stop, bx, by, bw, bh); bx += bw + gap;
-	MoveCtl(&m_next, bx, by, bw, bh); bx += bw + gap;
-	int volValW = (int)(28 * s), volLblW = (int)(36 * s), volSlW = (int)(110 * s);
-	int volBlockW = volLblW + volSlW + volValW + (int)(6 * s);
-	int volX = W - M - volBlockW;
-	if (volX < bx + (int)(6 * s)) volX = bx + (int)(6 * s);
-	MoveCtl(&m_vollabel, volX, by + (int)(4 * s), volLblW, (int)(12 * s));
-	MoveCtl(&m_vol, volX + volLblW, by + (int)(2 * s), volSlW, (int)(15 * s));
-	MoveCtl(&m_volval, volX + volLblW + volSlW + (int)(2 * s), by + (int)(4 * s), volValW, (int)(12 * s));
+	MoveCtl(&m_prev, bx, by, (int)(40 * s), bh); bx += (int)(40 * s) + gap;
+	MoveCtl(&m_play, bx, by, (int)(44 * s), bh); bx += (int)(44 * s) + gap;
+	MoveCtl(&m_pause, bx, by, (int)(52 * s), bh); bx += (int)(52 * s) + gap;
+	MoveCtl(&m_stop, bx, by, (int)(44 * s), bh); bx += (int)(44 * s) + gap;
+	MoveCtl(&m_fadeout, bx, by, (int)(72 * s), bh); bx += (int)(72 * s) + gap;
+	MoveCtl(&m_next, bx, by, (int)(40 * s), bh); bx += (int)(40 * s) + (int)(8 * s);
+	int jkw = (int)(48 * s), ebw = (int)(40 * s), pbw = (int)(50 * s);
+	MoveCtl(&m_jacket, bx, by, jkw, bh); bx += jkw + gap;
+	MoveCtl(&m_eq, bx, by, ebw, bh); bx += ebw + gap;
+	MoveCtl(&m_piano, bx, by, pbw, bh); bx += pbw + (int)(8 * s);
+	int volValW = (int)(30 * s), volLblW = (int)(38 * s);
+	int volvalX = W - M - volValW;
+	int volLblX = bx;
+	int volSlX = volLblX + volLblW;
+	int volSlW = volvalX - (int)(2 * s) - volSlX;
+	if (volSlW < (int)(50 * s)) volSlW = (int)(50 * s);
+	MoveCtl(&m_vollabel, volLblX, by + (int)(5 * s), volLblW, (int)(15 * s));
+	MoveCtl(&m_vol, volSlX, by + (int)(4 * s), volSlW, (int)(16 * s));
+	MoveCtl(&m_volval, volvalX, by + (int)(5 * s), volValW, (int)(15 * s));
 
-	// ===== オプション行: 連続/ループ/ランダム/スペアナ/ST  +  EQ/ピアノ(右) =====
-	int by2 = by + bh + (int)(3 * s);
-	int ch = (int)(15 * s);
+	// ===== オプション行: 連続再生/ループ再生/ランダム再生(左) + スペアナ/ST/フォルダ(右寄せ) =====
+	int by2 = by + bh + (int)(4 * s);
+	int ch = (int)(22 * s);             // 行高(フォルダボタン)
+	int ckH = (int)(17 * s);            // チェックボックス高(フォントが収まる)
+	int ckY2 = by2 + (ch - ckH) / 2;    // 縦中央
 	int cx = M;
-	MoveCtl(&m_renzoku, cx, by2 + (int)(2 * s), (int)(44 * s), (int)(12 * s)); cx += (int)(46 * s);
-	MoveCtl(&m_loop, cx, by2 + (int)(2 * s), (int)(48 * s), (int)(12 * s)); cx += (int)(50 * s);
-	MoveCtl(&m_random, cx, by2 + (int)(2 * s), (int)(56 * s), (int)(12 * s)); cx += (int)(60 * s);
-	MoveCtl(&m_supe, cx, by2 + (int)(1 * s), (int)(42 * s), (int)(12 * s)); cx += (int)(44 * s);
-	MoveCtl(&m_st, cx, by2 + (int)(1 * s), (int)(24 * s), (int)(12 * s));
-	int ebw = (int)(44 * s), pbw = (int)(52 * s);
-	MoveCtl(&m_piano, W - M - pbw, by2, pbw, ch);
-	MoveCtl(&m_eq, W - M - pbw - gap - ebw, by2, ebw, ch);
+	MoveCtl(&m_renzoku, cx, ckY2, (int)(72 * s), ckH); cx += (int)(76 * s);
+	MoveCtl(&m_loop, cx, ckY2, (int)(80 * s), ckH); cx += (int)(84 * s);
+	MoveCtl(&m_random, cx, ckY2, (int)(90 * s), ckH);
+	// スペアナ/ST/フォルダ は右寄せ(STの後ろにフォルダを置く)
+	int folW = (int)(54 * s), stW = (int)(30 * s), supeW = (int)(50 * s);
+	int rcx = W - M - folW;
+	MoveCtl(&m_folder, rcx, by2, folW, ch); rcx -= (int)(4 * s) + stW;
+	MoveCtl(&m_st, rcx, ckY2, stW, ckH); rcx -= (int)(2 * s) + supeW;
+	MoveCtl(&m_supe, rcx, ckY2, supeW, ckH);
 
 	// ===== サウンドグループ: 設定 + DS/拡張/テンポ/ピッチ(1段で省スペース) =====
-	int sndTop = by2 + ch + (int)(4 * s);
+	int sndTop = by2 + ch + (int)(5 * s);
 	int sy = sndTop + gTitle;
-	int slLabelH = (int)(10 * s), slH = (int)(13 * s);
-	MoveCtl(&m_settings, M + gPad, sy + (int)(3 * s), (int)(46 * s), (int)(18 * s));
-	int slX = M + gPad + (int)(52 * s);
+	int slLabelH = (int)(15 * s), slH = (int)(16 * s);   // ラベル(13px)が収まる高さ
+	MoveCtl(&m_settings, M + gPad, sy + (int)(4 * s), (int)(48 * s), (int)(24 * s));
+	int slX = M + gPad + (int)(54 * s);
 	int slGap = (int)(8 * s);
 	int slW = (W - M - gPad - slX - slGap * 3) / 4;
 	if (slW < (int)(56 * s)) slW = (int)(56 * s);
@@ -583,15 +616,15 @@ void CMediaPlayerDlg::DoLayout()
 	for (int i = 0; i < 4; i++) {
 		int cxs = slX + i * (slW + slGap);
 		MoveCtl(snd[i].lbl, cxs, sy, slW, slLabelH);
-		MoveCtl(snd[i].sl, cxs, sy + slLabelH, slW, slH);
+		MoveCtl(snd[i].sl, cxs, sy + slLabelH + (int)(1 * s), slW, slH);
 	}
-	int sndBottom = sy + slLabelH + slH + gPad;
+	int sndBottom = sy + slLabelH + slH + (int)(1 * s) + gPad;
 	MoveCtl(&m_grpSnd, M, sndTop, W - M * 2, sndBottom - sndTop);
 
 	// ===== プレイリストグループ: ツールバー + リスト + 下部チェック =====
-	int plTop = sndBottom + (int)(4 * s);
+	int plTop = sndBottom + (int)(5 * s);
 	int by4 = plTop + gTitle;
-	int tbH = (int)(16 * s);
+	int tbH = (int)(19 * s);
 	int comboW = (int)(120 * s);
 	MoveCtl(&m_plsel, M + gPad, by4, comboW, (int)(200 * s));
 	int tx = M + gPad + comboW + (int)(5 * s);
@@ -610,28 +643,32 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_up, rx, by4, ibw, tbH); rx -= ibw + (int)(1 * s);
 	MoveCtl(&m_lsup, rx, by4, ibw, tbH);
 
-	int swH = (int)(18 * s);
-	int chkRowH = (int)(13 * s);
-	int listY = by4 + tbH + (int)(3 * s);
-	int listH = H - listY - chkRowH - swH - M - gPad - (int)(5 * s);
+	int swH = (int)(22 * s);
+	int chkRowH = (int)(17 * s);
+	int listY = by4 + tbH + (int)(4 * s);
+	int listH = H - listY - chkRowH - swH - M - gPad - (int)(8 * s);
 	if (listH < (int)(50 * s)) listH = (int)(50 * s);
 	MoveCtl(&m_list, M + gPad, listY, W - M * 2 - gPad * 2, listH);
 
-	int ckY = listY + listH + (int)(2 * s);
+	// 下部チェック(ツールチップ/最小化連動/mp3途中保存/DShow途中保存)は横いっぱいに均等配置
+	int ckY = listY + listH + (int)(3 * s);
+	int availCk = W - (M + gPad) * 2;
+	int gapCk = (int)(6 * s);
+	int ckW = (availCk - gapCk * 3) / 4;
+	if (ckW < (int)(60 * s)) ckW = (int)(60 * s);
 	int ckx = M + gPad;
-	MoveCtl(&m_tip, ckx, ckY, (int)(66 * s), chkRowH); ckx += (int)(70 * s);
-	MoveCtl(&m_mini, ckx, ckY, (int)(72 * s), chkRowH); ckx += (int)(76 * s);
-	MoveCtl(&m_savemp3, ckx, ckY, (int)(84 * s), chkRowH); ckx += (int)(88 * s);
-	MoveCtl(&m_saveds, ckx, ckY, (int)(96 * s), chkRowH);
+	MoveCtl(&m_tip, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
+	MoveCtl(&m_mini, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
+	MoveCtl(&m_savemp3, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
+	MoveCtl(&m_saveds, ckx, ckY, ckW, chkRowH);
 	int plBottom = ckY + chkRowH + gPad;
 	MoveCtl(&m_grpPl, M, plTop, W - M * 2, plBottom - plTop);
 
-	// 最下部: 切替(左) / ジャケ・終了(右)
+	// 最下部: 切替(左) / 終了(右)  ※ジャケは操作行へ移動済み
 	int botY = H - swH - M + (int)(2 * s);
-	MoveCtl(&m_switch, M, botY, (int)(130 * s), swH);
-	int exW = (int)(64 * s), jkW = (int)(50 * s);
+	MoveCtl(&m_switch, M, botY, (int)(140 * s), swH);
+	int exW = (int)(80 * s);
 	MoveCtl(&m_exit, W - M - exW, botY, exW, swH);
-	MoveCtl(&m_jacket, W - M - exW - (int)(4 * s) - jkW, botY, jkW, swH);
 
 	Invalidate();
 }
@@ -886,8 +923,8 @@ void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 
 void CMediaPlayerDlg::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
 {
-	lpMMI->ptMinTrackSize.x = (int)(480 * hD2);
-	lpMMI->ptMinTrackSize.y = (int)(540 * hD2);
+	lpMMI->ptMinTrackSize.x = (int)(620 * hD2);
+	lpMMI->ptMinTrackSize.y = (int)(560 * hD2);
 	CCustomBlurDialogBase::OnGetMinMaxInfo(lpMMI);
 }
 
@@ -1097,6 +1134,18 @@ void CMediaPlayerDlg::OnPiano()
 {
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->TogglePianoRoll();
+}
+
+void CMediaPlayerDlg::OnFadeout()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON5, BN_CLICKED), 0);  // フェードアウト
+}
+
+void CMediaPlayerDlg::OnFolder()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON9, BN_CLICKED), 0);  // フォルダ設定
 }
 
 void CMediaPlayerDlg::OnSettings()

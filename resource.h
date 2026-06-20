@@ -657,6 +657,8 @@
 #define IDC_MP_VOL_L                    3459
 #define IDC_MP_EXIT                     3460
 #define IDC_MP_JACK                     3461
+#define IDC_MP_FADEOUT                  3462
+#define IDC_MP_FOLDER                   3463
 
 // Next default values for new objects
 // 
@@ -664,7 +666,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        201
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3462
+#define _APS_NEXT_CONTROL_VALUE         3464
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

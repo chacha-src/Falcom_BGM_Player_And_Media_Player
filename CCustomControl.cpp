@@ -1511,6 +1511,97 @@ static void FillRectAlpha(CDC* pDC, const CRect& rc, COLORREF clr, BYTE alpha)
 }
 
 // ============================================================================
+// 可愛さ強化用の共通描画プリミティブ
+// （全カスタムコントロールで共有して使用します）
+// ============================================================================
+
+// ぷるんとしたガラス/キャンディ風のツヤを上半分にのせる。
+// 不透明な面の上にのみ使用すること（クロマキー透過領域には使わない）。
+static void DrawGlossHighlight(CDC* pDC, const CRect& rc, int radius)
+{
+    if (!pDC || rc.Width() <= 4 || rc.Height() <= 6) return;
+    CRgn rgn;
+    const int d = max(2, radius * 2);
+    if (!rgn.CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, d, d))
+        return;
+    pDC->SelectClipRgn(&rgn);
+    CRect top = rc;
+    top.bottom = rc.top + max(2, rc.Height() * 42 / 100);
+    FillRectAlpha(pDC, top, COLOR_GLOSS, 96);
+    // 上端の細いハイライト線でさらにつやっと
+    CRect line = rc;
+    line.DeflateRect(radius, 0);
+    line.top += max(1, rc.Height() / 12);
+    line.bottom = line.top + max(1, rc.Height() / 16);
+    if (line.Width() > 2 && line.Height() > 0)
+        FillRectAlpha(pDC, line, COLOR_GLOSS, 150);
+    pDC->SelectClipRgn(NULL);
+}
+
+// キラキラ(4方向にのびるダイヤ型の光 + 白い芯)
+static void DrawSparkle(CDC* pDC, int cx, int cy, int sz, COLORREF c)
+{
+    if (!pDC) return;
+    if (sz < 2) sz = 2;
+    CPen pen(PS_SOLID, 1, c);
+    CBrush br(c);
+    CPen* op = pDC->SelectObject(&pen);
+    CBrush* ob = pDC->SelectObject(&br);
+
+    POINT v[4] = { {cx, cy - sz}, {cx + sz / 2, cy}, {cx, cy + sz}, {cx - sz / 2, cy} };
+    pDC->Polygon(v, 4);
+    POINT h[4] = { {cx - sz, cy}, {cx, cy - sz / 2}, {cx + sz, cy}, {cx, cy + sz / 2} };
+    pDC->Polygon(h, 4);
+
+    CBrush bc(COLOR_SPARKLE_CORE);
+    pDC->SelectObject(&bc);
+    int r = max(1, sz / 3);
+    pDC->Ellipse(cx - r, cy - r, cx + r, cy + r);
+
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+// ちょうちょ結びのリボン(ぷっくり羽 + 中央の結び目)
+static void DrawBow(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    if (!pDC || rc.Width() < 4 || rc.Height() < 4) return;
+    const int cx = rc.CenterPoint().x;
+    const int cy = rc.CenterPoint().y;
+    const int w = max(3, rc.Width() / 2);
+    const int h = max(2, rc.Height() / 2);
+
+    CBrush br(c);
+    CPen pen(PS_SOLID, 1, RGB(224, 120, 162));
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
+
+    POINT l[3] = { {cx, cy}, {cx - w, cy - h}, {cx - w, cy + h} };
+    POINT r2[3] = { {cx, cy}, {cx + w, cy - h}, {cx + w, cy + h} };
+    pDC->Polygon(l, 3);
+    pDC->Polygon(r2, 3);
+
+    // 羽の内側のハイライト
+    CBrush bh(RGB(255, 224, 236));
+    pDC->SelectObject(&bh);
+    pDC->SelectObject(GetStockObject(NULL_PEN));
+    int iw = max(1, w / 3), ih = max(1, h / 3);
+    pDC->Ellipse(cx - w + 2, cy - ih, cx - w + 2 + iw, cy + ih);
+    pDC->Ellipse(cx + w - 2 - iw, cy - ih, cx + w - 2, cy + ih);
+
+    // 中央の結び目
+    CBrush bk(c);
+    pDC->SelectObject(&bk);
+    pDC->SelectObject(&pen);
+    int k = max(2, w / 4);
+    CRect rk(cx - k, cy - max(2, h / 2), cx + k, cy + max(2, h / 2));
+    pDC->RoundRect(&rk, CPoint(2, 2));
+
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+// ============================================================================
 // 子コントロールを一括でサブクラス化する処理
 // ============================================================================
 template<typename DlgBase>
@@ -1918,9 +2009,10 @@ void CCustomEdit::OnNcPaint()
 
     if (m_bHasFocus)
     {
-        DrawStar(&dc, r.right - 8, r.top + 8, 3, RGB(255, 215, 0));
-        DrawStar(&dc, r.left + 8, r.top + 8, 2, RGB(255, 240, 150));
-        DrawStar(&dc, r.right - 8, r.bottom - 8, 2, RGB(255, 240, 150));
+        DrawSparkle(&dc, r.right - 8, r.top + 8, 3, COLOR_SPARKLE);
+        DrawSparkle(&dc, r.left + 8, r.top + 8, 2, COLOR_SPARKLE);
+        DrawSparkle(&dc, r.right - 8, r.bottom - 8, 2, COLOR_SPARKLE);
+        DrawBow(&dc, CRect(r.CenterPoint().x - 8, r.top - 1, r.CenterPoint().x + 8, r.top + 9), COLOR_BOW);
     }
 
     CRect rL(r.left + 2, r.CenterPoint().y - 3, r.left + 8, r.CenterPoint().y + 3);
@@ -2728,10 +2820,14 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     CRect r = lp->rcItem;
     COLORREF bg = (lp->itemState & ODS_SELECTED) ? COLOR_SEL_BG : (lp->itemID % 2 == 0 ? COLOR_LIST_BG : RGB(183, 221, 238));
 
-    if (m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd))
+    const BOOL bListAero = m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd);
+    if (bListAero)
         FillRectAlpha(pDC, r, bg, (lp->itemState & ODS_SELECTED) ? 180 : AERO_ALPHA_SEMI);
     else
         pDC->FillSolidRect(&r, bg);
+
+    if ((lp->itemState & ODS_SELECTED) && !bListAero)
+        DrawGlossHighlight(pDC, r, 6);
 
     int it = lp->itemID % 4;
     int is = 8;
@@ -2919,6 +3015,7 @@ void CCustomComboBox::PaintClient(CDC& dc)
     int nb = GetSystemMetrics(SM_CXVSCROLL);
     CRect rB(r.right - nb - 4, r.top + 4, r.right - 4, r.bottom - 4);
     mDC.FillSolidRect(&rB, RGB(255, 200, 220));
+    DrawGlossHighlight(&mDC, rB, 6);
 
     {
         CPen pb(PS_SOLID, 1, RGB(200, 150, 180));
@@ -2938,7 +3035,7 @@ void CCustomComboBox::PaintClient(CDC& dc)
         DrawHeart(&mDC, rh, (i == 1) ? COLOR_HEART : RGB(255, 182, 193));
     }
 
-    DrawStar(&mDC, r.right - 8, r.top + 8, 3, RGB(255, 215, 0));
+    DrawSparkle(&mDC, r.right - 8, r.top + 8, 4, COLOR_SPARKLE);
 
     int nPS = CComboBox::GetCurSel();
     CString st;
@@ -3378,6 +3475,7 @@ void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMa
         }
         CRect rD(tP - 9, cY - 12, tP + 9, cY + 12);
         DrawDiamond(pDC, rD, RGB(200, 180, 255));
+        DrawSparkle(pDC, tP, cY - 16, 3, COLOR_SPARKLE);
         CPen pL(PS_SOLID, 1, RGB(255, 240, 200));
         pDC->SelectObject(&pL);
         for (int a = 0; a < 360; a += 45)
@@ -3462,6 +3560,7 @@ void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMa
         }
         CRect rD(tP - 9, cY - 12, tP + 9, cY + 12);
         DrawDiamond(pDC, rD, RGB(100, 220, 160));
+        DrawSparkle(pDC, tP, cY - 16, 3, COLOR_SPARKLE);
         CPen pL(PS_SOLID, 1, RGB(200, 255, 220));
         pDC->SelectObject(&pL);
         for (int a = 0; a < 360; a += 45)
@@ -3705,8 +3804,9 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
     pDC->FillSolidRect(CRect(xMx - 5, cy - 8, xMx + 5, cy + 8), COLOR_RANGE_SLIDER_THUMB);
     pDC->Rectangle(CRect(xMx - 5, cy - 8, xMx + 5, cy + 8));
 
-    // 現在位置（ハート）
+    // 現在位置（ハート + きらめき）
     DrawHeart(pDC, CRect(xP - 9, cy - 12, xP + 9, cy + 6), COLOR_SLIDER_THUMB);
+    DrawSparkle(pDC, xP + 7, cy - 12, 3, COLOR_SPARKLE);
 }
 
 int CCustomRangeSliderCtrl::ValueToPixel(int v) const
@@ -4060,13 +4160,17 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         COLORREF bg = bS ? COLOR_SEL_BG : (ni % 2 == 0 ? COLOR_LIST_BG : RGB(183, 221, 238));
         if (bH && !bS) bg = RGB(220, 235, 250);
 
-        if (m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd))
+        const BOOL bLvAero = m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd);
+        if (bLvAero)
         {
             pDC->FillSolidRect(&r, RGB(0, 0, 0));
             FillRectAlpha(pDC, r, bg, bS ? 180 : bH ? 140 : AERO_ALPHA_SEMI);
         }
         else
             pDC->FillSolidRect(&r, bg);
+
+        if (bS && !bLvAero)
+            DrawGlossHighlight(pDC, r, 6);
 
         if (ns == 0)
         {
@@ -4242,19 +4346,28 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 
     if (!bD)
     {
+        // キャンディのようなぷるんとしたツヤ
+        CRect rg = r;
+        if (bP) rg.OffsetRect(1, 1);
+        DrawGlossHighlight(&mDC, rg, 8);
+
         DrawDecorations(&mDC, r, 0, bP);
+        // 四隅にさりげないキラキラ
+        DrawSparkle(&mDC, r.left + 9, r.top + 9, 3, COLOR_SPARKLE);
+        DrawSparkle(&mDC, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
         if (m_bMouseOver && !bP)
         {
             DrawFlower(&mDC, r.Width() / 2 - 15, r.top + 10, 6, RGB(255, 200, 220));
             DrawFlower(&mDC, r.Width() / 2 + 15, r.top + 10, 6, RGB(255, 200, 220));
             DrawFlower(&mDC, r.Width() / 2, r.bottom - 10, 6, RGB(255, 200, 220));
+            DrawSparkle(&mDC, r.right - 10, r.top + 10, 4, COLOR_SPARKLE);
         }
         if (bP)
         {
-            DrawStar(&mDC, r.Width() / 2, r.top + 8, 3, RGB(255, 215, 0));
+            DrawSparkle(&mDC, r.Width() / 2, r.top + 8, 4, COLOR_SPARKLE);
             DrawStar(&mDC, r.left + 15, r.Height() / 2, 2, RGB(255, 240, 150));
             DrawStar(&mDC, r.right - 15, r.Height() / 2, 2, RGB(255, 240, 150));
-            DrawStar(&mDC, r.Width() / 2, r.bottom - 8, 2, RGB(255, 240, 150));
+            DrawHeart(&mDC, CRect(r.Width() / 2 - 5, r.bottom - 12, r.Width() / 2 + 5, r.bottom - 2), COLOR_HEART);
         }
     }
 
@@ -4621,11 +4734,13 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             CPen p2(PS_SOLID, 2, RGB(255, 140, 100)); CBrush b2(RGB(255, 255, 255));
             dc.SelectObject(&p2); dc.SelectObject(&b2);
             dc.RoundRect(&rcB, CPoint(5, 5));
+            DrawGlossHighlight(&dc, rcB, 4);
             if (bC)
             {
                 CRect rh2 = rcB;
                 rh2.DeflateRect(1, 1);
                 DrawHanamaru(&dc, rh2, RGB(255, 100, 150), RGB(255, 182, 193));
+                DrawSparkle(&dc, rcB.right - 1, rcB.top + 1, 3, COLOR_SPARKLE);
             }
             CString t;
             GetWindowText(t);
@@ -5280,10 +5395,15 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
     dc.LineTo(r.left + off, r.bottom - off);
     dc.LineTo(r.left + off, nT + off);
 
-    DrawRibbon(&dc, CRect(r.left + 2, nT - 8, r.left + 14, nT + 4), RGB(255, 182, 193));
-    DrawRibbon(&dc, CRect(r.right - 14, nT - 8, r.right - 2, nT + 4), RGB(255, 182, 193));
     DrawRibbon(&dc, CRect(r.left + 2, r.bottom - 12, r.left + 14, r.bottom), RGB(255, 182, 193));
     DrawRibbon(&dc, CRect(r.right - 14, r.bottom - 12, r.right - 2, r.bottom), RGB(255, 182, 193));
+
+    // 右上の角はちょうちょ結びのリボンで可愛く（左上はタイトルと重なるため省略）
+    DrawBow(&dc, CRect(r.right - 17, nT - 7, r.right - 1, nT + 5), COLOR_BOW);
+    if (t.IsEmpty())
+        DrawBow(&dc, CRect(r.left + 1, nT - 7, r.left + 17, nT + 5), COLOR_BOW);
+    DrawSparkle(&dc, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
+    DrawSparkle(&dc, r.left + 9, r.bottom - 9, 3, COLOR_SPARKLE);
 
     if (!t.IsEmpty())
     {
