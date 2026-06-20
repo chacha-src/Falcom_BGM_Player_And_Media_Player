@@ -824,12 +824,17 @@ void CMediaPlayerDlg::SyncFromMain()
 		v2 = pl->m_saisyo.GetCheck() ? 1 : 0; if (m_mini.GetCheck() != v2) m_mini.SetCheck(v2);
 		v2 = pl->m_save_mp3.GetCheck() ? 1 : 0; if (m_savemp3.GetCheck() != v2) m_savemp3.SetCheck(v2);
 		v2 = pl->m_save_kpi.GetCheck() ? 1 : 0; if (m_saveds.GetCheck() != v2) m_saveds.SetCheck(v2);
-		// プレイリスト一覧の増減や選択変更を反映
+		// プレイリスト一覧の増減や選択変更を反映。
+		// ただしユーザーがコンボを操作中(ドロップダウン展開中/フォーカス中)は
+		// SetCurSel で選択を奪わない。さもないと「2を選んでも1に戻る」不具合になる。
 		if (::IsWindow(pl->m_listchange.GetSafeHwnd())) {
+			BOOL busy = m_plsel.GetDroppedState() ||
+				(GetFocus() == (CWnd*)&m_plsel);
 			int n = pl->m_listchange.GetCount();
-			if (n != m_lastComboCount)
-				ReloadPlaylistCombo();
-			else if (m_plsel.GetCurSel() != savedata.playlistnum)
+			if (n != m_lastComboCount) {
+				if (!busy) ReloadPlaylistCombo();
+			}
+			else if (!busy && m_plsel.GetCurSel() != savedata.playlistnum)
 				m_plsel.SetCurSel(savedata.playlistnum);
 		}
 	}
