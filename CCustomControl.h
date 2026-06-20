@@ -80,32 +80,36 @@ void CCC_SendGroupBoxesToBack(HWND hDlg);
 // ============================================================================
 // 色定義
 // ============================================================================
-// よりふんわり・甘いマカロン系パステルへ調整（全コントロール共通）
-#define COLOR_DIALOG_BG         RGB(255, 233, 243) // ダイアログの基本背景色（やさしい綿あめピンク）
-#define COLOR_EDIT_BG           RGB(255, 241, 232) // エディットボックスの背景色（クリームピーチ）
+// エロ可愛い系: 色気のあるローズ／ブラッシュピンク基調へ（全コントロール共通）
+#define COLOR_DIALOG_BG         RGB(255, 224, 236) // ダイアログの基本背景色（とろけるブラッシュピンク）
+#define COLOR_EDIT_BG           RGB(255, 234, 238) // エディットボックスの背景色（ローズクリーム）
 #define COLOR_EDIT_TEXT         RGB(0,   0,   0)   // エディットボックスの文字色
-#define COLOR_LIST_BG           RGB(216, 237, 252) // リストボックスの背景色（ふんわり水色）
-#define COLOR_COMBO_BG          RGB(255, 241, 232) // コンボボックスの背景色
-#define COLOR_BUTTON_BG         RGB(206, 240, 215) // ボタンの通常時背景色（やわらかミント）
-#define COLOR_BUTTON_PUSHED     RGB(150, 210, 170) // ボタンの押下時背景色（やさしい緑）
-#define COLOR_BUTTON_HOVER      RGB(182, 230, 198) // ボタンのホバー時背景色
-#define COLOR_SLIDER_THUMB      RGB(255, 120, 170) // スライダーのつまみの色（キャンディピンク）
+#define COLOR_LIST_BG           RGB(252, 228, 240) // リストボックスの背景色（淡いローズ）
+#define COLOR_COMBO_BG          RGB(255, 234, 238) // コンボボックスの背景色
+#define COLOR_BUTTON_BG         RGB(255, 206, 224) // ボタンの通常時背景色（キャンディピンク）
+#define COLOR_BUTTON_PUSHED     RGB(240, 140, 180) // ボタンの押下時背景色（濃いローズ）
+#define COLOR_BUTTON_HOVER      RGB(255, 178, 206) // ボタンのホバー時背景色（あまいローズ）
+#define COLOR_SLIDER_THUMB      RGB(255,  92, 150) // スライダーのつまみの色（色っぽいローズ）
 #define COLOR_RANGE_SLIDER_THUMB RGB(255, 255, 255) // 範囲スライダーのつまみ色
-#define COLOR_RANGE_SELECTION   RGB(255, 201, 224) // 範囲スライダーの選択範囲色（甘いピンク）
+#define COLOR_RANGE_SELECTION   RGB(255, 182, 213) // 範囲スライダーの選択範囲色（ローズ）
 #define COLOR_HANAMARU          RGB(255,   0,   0) // はなまるの色
 #define COLOR_FLOWER_DECO       RGB(255, 240, 245) // お花の装飾色
-#define COLOR_VINE_DECO         RGB(124, 194, 146) // 蔓（つる）の装飾色（やわらかい緑）
-#define COLOR_HEART             RGB(255, 105, 180) // ハートの装飾色
-#define COLOR_SEL_BG            RGB(255, 206, 229) // リストなどの選択時背景色（甘いピンク）
+#define COLOR_VINE_DECO         RGB(216, 132, 176) // 蔓（つる）の装飾色（ローズモーヴ）
+#define COLOR_HEART             RGB(255,  86, 150) // ハートの装飾色（色っぽい濃ピンク）
+#define COLOR_SEL_BG            RGB(255, 184, 212) // リストなどの選択時背景色（ローズ）
 #define COLOR_GRAD_DARK_GREEN   RGB(  0, 100,   0) // グラデーション用の濃い緑
 #define COLOR_GRAD_DARK_PURPLE  RGB( 75,   0, 130) // グラデーション用の濃い紫
 
 // --- 追加: 可愛さ強化用の装飾カラー ---
-#define COLOR_GLOSS             RGB(255, 255, 255) // ぷるんとしたツヤ(光沢)ハイライト色
+#define COLOR_GLOSS             RGB(255, 255, 255) // ぷるんとした濡れツヤ(光沢)ハイライト色
 #define COLOR_SPARKLE           RGB(255, 250, 205) // きらめき(キラキラ)の装飾色
 #define COLOR_SPARKLE_CORE      RGB(255, 255, 255) // きらめきの白い芯
-#define COLOR_BOW               RGB(255, 173, 203) // リボン(ちょうちょ結び)の色
-#define COLOR_BUTTON_GLOSS_TOP  RGB(245, 255, 248) // ボタン上部のつや色
+#define COLOR_BOW               RGB(255, 150, 190) // リボン(ちょうちょ結び)の色
+#define COLOR_BUTTON_GLOSS_TOP  RGB(255, 240, 246) // ボタン上部のつや色
+#define COLOR_BLUSH             RGB(255, 138, 176) // ほんのり頬染め(ブラッシュ)の色
+#define COLOR_HEART_DEEP        RGB(229,  56, 120) // 深いローズハート(縁取り/陰影用)
+#define COLOR_LACE              RGB(255, 196, 220) // レース(縁飾り)の色
+#define COLOR_CHECK             RGB(226,  64, 124) // チェック(レ点)の色(深めローズ)
 
 // アクリル半透明オーバーレイ用アルファ値
 #define AERO_ALPHA_SEMI 160
@@ -777,12 +781,16 @@ protected:
     afx_msg void OnSetFocus(CWnd*);
     afx_msg void OnKillFocus(CWnd*);
     afx_msg void OnEnable(BOOL);
+    afx_msg void OnTimer(UINT_PTR nIDEvent);
 
     DECLARE_MESSAGE_MAP()
 
 private:
     CBrush m_brBackground; // 背景塗りつぶし用ブラシ
     BOOL m_bMouseOver;     // マウスカーソルがボタンに乗っているかどうか
+    UINT m_nAnimTick;      // アニメーション用カウンタ(流れるツヤ・鼓動パルス)
+    BOOL m_bAnimRunning;   // アニメーションタイマー動作中か
+    void UpdateAnimTimer(); // ホバー/フォーカス状態に応じてタイマーを開始/停止
     void PaintOpaqueClient(CDC& dc);
 
     // プロパティ保持用メンバ変数
@@ -837,12 +845,17 @@ protected:
     afx_msg LRESULT OnMouseMoveMsg(WPARAM, LPARAM);
     afx_msg LRESULT OnLButtonDownMsg(WPARAM, LPARAM);
     afx_msg LRESULT OnLButtonUpMsg(WPARAM, LPARAM);
+    afx_msg LRESULT OnMouseLeaveMsg(WPARAM, LPARAM);
+    afx_msg void OnTimer(UINT_PTR nIDEvent);
 
     DECLARE_MESSAGE_MAP()
 
     void PaintClient(CDC& dc);
 
 private:
+    UINT m_nShimmer; // 流れるシマー用カウンタ
+    BOOL m_bHover;   // マウスがスライダー上にあるか
+
     // 描画モードごとの実際の描画処理
     void DrawSlider(CDC* pDC);
     void DrawMode0(CDC* pDC, const CRect& r, int mn, int mx, int pos);
@@ -958,12 +971,14 @@ protected:
     afx_msg void OnLButtonUp(UINT, CPoint);
     afx_msg void OnMouseMove(UINT, CPoint);
     afx_msg void OnMouseLeave();
+    afx_msg void OnTimer(UINT_PTR nIDEvent);
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
 
     DECLARE_MESSAGE_MAP()
 
 private:
     void OnDrawLayer(CDC* pDC, CRect rect); // 実際の描画処理
+    void StartCheckBounce();                // チェックON時のぷるんバウンス開始
 
     // 状態保持用メンバ変数
     BOOL m_bIsFlatStyle; // フラットスタイルかどうか
@@ -972,6 +987,7 @@ private:
     BOOL m_bTracking;    // マウストラッキング中かどうか
     int m_nCheck;        // チェック状態 (BST_CHECKED / BST_UNCHECKED)
     BOOL m_bAeroMode;    // アクリルモードが有効かどうか
+    int m_nBounce;       // チェックON時のバウンス残りフレーム
 };
 
 // ============================================================================

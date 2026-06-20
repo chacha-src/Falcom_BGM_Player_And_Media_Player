@@ -904,10 +904,41 @@ static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str
     }
 }
 
+// 色を暗くする(縁取り・陰影用)。pct は残す明るさの割合(0..100)。
+static COLORREF CCC_Darken(COLORREF c, int pct)
+{
+    if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+    return RGB(GetRValue(c) * pct / 100, GetGValue(c) * pct / 100, GetBValue(c) * pct / 100);
+}
+
+// 色を白方向に明るくする。pct は白へ寄せる割合(0..100)。
+static COLORREF CCC_Lighten(COLORREF c, int pct)
+{
+    if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+    return RGB(
+        GetRValue(c) + (255 - GetRValue(c)) * pct / 100,
+        GetGValue(c) + (255 - GetGValue(c)) * pct / 100,
+        GetBValue(c) + (255 - GetBValue(c)) * pct / 100);
+}
+
+// 不透明なシェイプの上にのせる白い濡れツヤのハイライト(べた塗りなのでクロマ透過でも安全)
+static void DrawShine(CDC* pDC, int cx, int cy, int rx, int ry, COLORREF c = RGB(255, 255, 255))
+{
+    if (!pDC) return;
+    if (rx < 1) rx = 1;
+    if (ry < 1) ry = 1;
+    CBrush b(c);
+    CBrush* ob = pDC->SelectObject(&b);
+    CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
+    pDC->Ellipse(cx - rx, cy - ry, cx + rx, cy + ry);
+    if (op) pDC->SelectObject(op);
+    pDC->SelectObject(ob);
+}
+
 static void DrawHeart(CDC* pDC, CRect rc, COLORREF c)
 {
     CBrush br(c);
-    CPen p(PS_SOLID, 1, c);
+    CPen p(PS_SOLID, 1, CCC_Darken(c, 68)); // 濃いローズで縁取りして色っぽく
     CBrush* ob = pDC->SelectObject(&br);
     CPen* op = pDC->SelectObject(&p);
 
@@ -921,6 +952,10 @@ static void DrawHeart(CDC* pDC, CRect rc, COLORREF c)
         {cx, cy - w / 2}, {cx + w, cy - w}, {cx + w, cy - w / 3}, {cx, cy + w}
     };
     pDC->Polygon(pts, 8);
+
+    // 左ローブにぷるんとした濡れツヤ
+    if (w >= 3)
+        DrawShine(pDC, cx - w / 2, cy - w / 3, max(1, w / 4), max(1, w / 3));
 
     pDC->SelectObject(ob);
     pDC->SelectObject(op);
@@ -967,6 +1002,9 @@ static void DrawMusicNote(CDC* pDC, CRect rc, COLORREF c)
     pDC->SelectObject(GetStockObject(NULL_PEN));
     pDC->Polygon(pts, 4);
 
+    // 音符の玉に濡れツヤ
+    DrawShine(pDC, cx - w / 4, cy + h / 4 + w / 4, max(1, w / 5), max(1, w / 4));
+
     pDC->SelectObject(ob);
     pDC->SelectObject(op);
 }
@@ -979,8 +1017,8 @@ static void DrawDiamond(CDC* pDC, CRect rc, COLORREF c)
     int h = rc.Height() / 2;
 
     CPoint pts[4] = { {cx, cy - h}, {cx + w, cy}, {cx, cy + h}, {cx - w, cy} };
-    CBrush bO(RGB(200, 200, 255));
-    CPen pO(PS_SOLID, 1, RGB(150, 150, 255));
+    CBrush bO(RGB(255, 214, 232)); // ローズクリスタル
+    CPen pO(PS_SOLID, 1, RGB(232, 120, 170));
     CBrush* ob = pDC->SelectObject(&bO);
     CPen* op = pDC->SelectObject(&pO);
     pDC->Polygon(pts, 4);
@@ -993,9 +1031,11 @@ static void DrawDiamond(CDC* pDC, CRect rc, COLORREF c)
     pDC->SelectObject(&bI);
     pDC->Polygon(pi, 4);
 
+    // 上面の濡れツヤ + 小さなきらめき
     CBrush bH(RGB(255, 255, 255));
     pDC->SelectObject(&bH);
-    pDC->Ellipse(cx - 2, cy - 3, cx + 2, cy + 1);
+    pDC->Ellipse(cx - max(2, w / 4), cy - h / 2, cx + 1, cy - h / 6);
+    pDC->Ellipse(cx - 1, cy - 2, cx + 2, cy + 2);
     pDC->SelectObject(ob);
     pDC->SelectObject(op);
 
@@ -1026,11 +1066,14 @@ static void DrawCrown(CDC* pDC, int cx, int cy, int sz, COLORREF c)
     };
     pDC->Polygon(pts, 7);
 
-    CBrush bJ(RGB(255, 100, 100));
+    CBrush bJ(COLOR_HEART); // 宝石はローズハート色で色っぽく
     pDC->SelectObject(&bJ);
     pDC->Ellipse(cx - 2, cy - sz - 2, cx + 2, cy - sz + 2);
     pDC->Ellipse(cx - sz * 2 / 3 - 2, cy - sz / 2 - 2, cx - sz * 2 / 3 + 2, cy - sz / 2 + 2);
     pDC->Ellipse(cx + sz * 2 / 3 - 2, cy - sz / 2 - 2, cx + sz * 2 / 3 + 2, cy - sz / 2 + 2);
+
+    // 王冠の帯に濡れツヤ
+    DrawShine(pDC, cx - sz / 3, cy + sz / 6, max(1, sz / 5), max(1, sz / 7));
 
     pDC->SelectObject(ob);
     pDC->SelectObject(op);
@@ -1058,7 +1101,7 @@ static void DrawLaceLine(CDC* pDC, int x1, int y1, int x2, int y2, COLORREF c)
 static void DrawRibbon(CDC* pDC, CRect rc, COLORREF c)
 {
     CBrush br(c);
-    CPen pen(PS_SOLID, 1, RGB(200, 100, 150));
+    CPen pen(PS_SOLID, 1, CCC_Darken(c, 70));
     CBrush* ob = pDC->SelectObject(&br);
     CPen* op = pDC->SelectObject(&pen);
 
@@ -1074,6 +1117,13 @@ static void DrawRibbon(CDC* pDC, CRect rc, COLORREF c)
     CRect rR(cx, cy - h, cx + w / 3, cy + h);
     pDC->Ellipse(&rR);
 
+    // 左右の輪に濡れツヤ
+    if (w >= 4 && h >= 3)
+    {
+        DrawShine(pDC, cx - w / 6, cy - h / 3, max(1, w / 8), max(1, h / 3));
+        DrawShine(pDC, cx + w / 6, cy - h / 3, max(1, w / 8), max(1, h / 3));
+    }
+
     pDC->SelectObject(ob);
     pDC->SelectObject(op);
 }
@@ -1081,7 +1131,7 @@ static void DrawRibbon(CDC* pDC, CRect rc, COLORREF c)
 static void DrawFlower(CDC* pDC, int cx, int cy, int sz, COLORREF c)
 {
     CBrush br(c);
-    CPen pen(PS_SOLID, 1, c);
+    CPen pen(PS_SOLID, 1, CCC_Darken(c, 80));
     CBrush* ob = pDC->SelectObject(&br);
     CPen* op = pDC->SelectObject(&pen);
 
@@ -1091,10 +1141,16 @@ static void DrawFlower(CDC* pDC, int cx, int cy, int sz, COLORREF c)
         int px = cx + (int)(sz * 0.6 * cos(a));
         int py = cy + (int)(sz * 0.6 * sin(a));
         pDC->Ellipse(px - sz / 3, py - sz / 3, px + sz / 3, py + sz / 3);
+        // 各花びらに小さなツヤ
+        if (sz >= 6)
+            DrawShine(pDC, px - sz / 8, py - sz / 8, max(1, sz / 10), max(1, sz / 10));
     }
-    CBrush bC(RGB(255, 255, 100));
+    CBrush bC(RGB(255, 220, 120));
     pDC->SelectObject(&bC);
+    pDC->SelectStockObject(NULL_PEN);
     pDC->Ellipse(cx - sz / 4, cy - sz / 4, cx + sz / 4, cy + sz / 4);
+    // 中心にツヤ
+    DrawShine(pDC, cx - sz / 10, cy - sz / 10, max(1, sz / 10), max(1, sz / 10));
 
     pDC->SelectObject(ob);
     pDC->SelectObject(op);
@@ -1156,6 +1212,18 @@ static void DrawHanamaru(CDC* pDC, CRect rc, COLORREF cC, COLORREF cP)
     int sr = radius / 6;
     CRect rS(cx - sr, cy - sr, cx + sr, cy + sr);
     pDC->Ellipse(&rS);
+
+    // ぽっと頬染め(ほっぺ)でエロ可愛い表情に + 中心に小さなハート
+    if (radius >= 6)
+    {
+        int cr = max(2, radius / 5);
+        DrawShine(pDC, cx - radius / 4, cy + radius / 4, cr, max(1, cr * 3 / 4), RGB(255, 150, 185));
+        DrawShine(pDC, cx + radius / 4, cy + radius / 4, cr, max(1, cr * 3 / 4), RGB(255, 150, 185));
+    }
+    DrawHeart(pDC, CRect(cx - sr, cy - sr - 1, cx + sr, cy + sr - 1), COLOR_HEART_DEEP);
+
+    // 外側リングの上面に濡れツヤ
+    DrawShine(pDC, cx - radius / 3, cy - radius / 2, max(1, radius / 5), max(1, radius / 7));
 
     pDC->SelectObject(ob);
     pDC->SelectObject(op);
@@ -1515,7 +1583,7 @@ static void FillRectAlpha(CDC* pDC, const CRect& rc, COLORREF clr, BYTE alpha)
 // （全カスタムコントロールで共有して使用します）
 // ============================================================================
 
-// ぷるんとしたガラス/キャンディ風のツヤを上半分にのせる。
+// ぷるんとした濡れツヤ(ガラス/リップグロス風)を上半分にのせる。
 // 不透明な面の上にのみ使用すること（クロマキー透過領域には使わない）。
 static void DrawGlossHighlight(CDC* pDC, const CRect& rc, int radius)
 {
@@ -1525,17 +1593,38 @@ static void DrawGlossHighlight(CDC* pDC, const CRect& rc, int radius)
     if (!rgn.CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, d, d))
         return;
     pDC->SelectClipRgn(&rgn);
+    // 上半分のとろっとしたツヤ
     CRect top = rc;
-    top.bottom = rc.top + max(2, rc.Height() * 42 / 100);
-    FillRectAlpha(pDC, top, COLOR_GLOSS, 96);
-    // 上端の細いハイライト線でさらにつやっと
+    top.bottom = rc.top + max(2, rc.Height() * 46 / 100);
+    FillRectAlpha(pDC, top, COLOR_GLOSS, 120);
+    // 上端の強いハイライト線でリップグロスのような濡れ感
     CRect line = rc;
     line.DeflateRect(radius, 0);
-    line.top += max(1, rc.Height() / 12);
-    line.bottom = line.top + max(1, rc.Height() / 16);
+    line.top += max(1, rc.Height() / 14);
+    line.bottom = line.top + max(1, rc.Height() / 12);
     if (line.Width() > 2 && line.Height() > 0)
-        FillRectAlpha(pDC, line, COLOR_GLOSS, 150);
+        FillRectAlpha(pDC, line, COLOR_GLOSS, 195);
+    // 下側のほんのりした照り返し
+    CRect bottom = rc;
+    bottom.top = rc.top + rc.Height() * 72 / 100;
+    bottom.DeflateRect(radius, 0);
+    if (bottom.Width() > 2 && bottom.Height() > 1)
+        FillRectAlpha(pDC, bottom, COLOR_GLOSS, 42);
     pDC->SelectClipRgn(NULL);
+}
+
+// ほんのり頬染め(ブラッシュ): やわらかいピンクのにじみを置く
+static void DrawBlush(CDC* pDC, int cx, int cy, int rx, int ry)
+{
+    if (!pDC || rx < 2 || ry < 1) return;
+    // 外側うっすら → 内側やや濃く、の二段でにじませる
+    for (int i = 0; i < 2; ++i)
+    {
+        const int sx = (i == 0) ? rx : (rx * 6 / 10);
+        const int sy = (i == 0) ? ry : (ry * 6 / 10);
+        CRect r(cx - sx, cy - sy, cx + sx, cy + sy);
+        FillRectAlpha(pDC, r, COLOR_BLUSH, (i == 0) ? 40 : 60);
+    }
 }
 
 // キラキラ(4方向にのびるダイヤ型の光 + 白い芯)
@@ -1593,6 +1682,135 @@ static void DrawBow(CDC* pDC, const CRect& rc, COLORREF c)
     CBrush bk(c);
     pDC->SelectObject(&bk);
     pDC->SelectObject(&pen);
+    int k = max(2, w / 4);
+    CRect rk(cx - k, cy - max(2, h / 2), cx + k, cy + max(2, h / 2));
+    pDC->RoundRect(&rk, CPoint(2, 2));
+
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+// ぷるんとした濡れツヤ付きのチェック(レ点)。丸端の太線でやわらかく。
+static void DrawCheckMark(CDC* pDC, const CRect& rc, COLORREF c, int thick)
+{
+    if (!pDC || rc.Width() < 5 || rc.Height() < 5) return;
+    if (thick < 2) thick = 2;
+    const int x1 = rc.left + rc.Width() * 12 / 100, y1 = rc.top + rc.Height() * 54 / 100;
+    const int x2 = rc.left + rc.Width() * 40 / 100, y2 = rc.top + rc.Height() * 82 / 100;
+    const int x3 = rc.left + rc.Width() * 92 / 100, y3 = rc.top + rc.Height() * 14 / 100;
+
+    // 影でぷっくり立体感
+    CPen psh(PS_SOLID, thick, CCC_Darken(c, 45));
+    CPen* op = pDC->SelectObject(&psh);
+    pDC->MoveTo(x1, y1 + 2); pDC->LineTo(x2, y2 + 2); pDC->LineTo(x3, y3 + 2);
+
+    // 本体(丸端・丸つなぎのジオメトリックペン)
+    LOGBRUSH lb = { BS_SOLID, c, 0 };
+    CPen pc;
+    if (pc.CreatePen(PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_ROUND | PS_JOIN_ROUND, thick, &lb))
+        pDC->SelectObject(&pc);
+    pDC->MoveTo(x1, y1); pDC->LineTo(x2, y2); pDC->LineTo(x3, y3);
+    pDC->SelectObject(op);
+
+    // 長い方の線に濡れツヤ
+    DrawShine(pDC, (x2 + x3 * 3) / 4, (y2 + y3 * 3) / 4 - thick / 3, max(1, thick / 3), max(1, thick / 4));
+}
+
+// サテン/シルク質感: 縦グラデ + 上寄りの一筋ハイライト + 下の照り返し。
+// (不透明な面の上でのみ使用すること)
+static void DrawSatinFill(CDC* pDC, const CRect& rc, COLORREF base)
+{
+    if (!pDC || rc.Width() <= 1 || rc.Height() <= 1) return;
+    const COLORREF top = CCC_Lighten(base, 24);
+    const COLORREF bot = CCC_Darken(base, 84);
+    DrawGradientBackground(pDC, rc, top, bot, 0); // 縦(上→下)
+
+    // サテンの照り(上1/8〜2/5あたりの水平ハイライト帯)
+    CRect band = rc;
+    band.top = rc.top + rc.Height() / 8;
+    band.bottom = rc.top + rc.Height() * 40 / 100;
+    if (band.Height() > 0)
+        FillRectAlpha(pDC, band, RGB(255, 255, 255), 64);
+
+    // 下側のやわらかい照り返し
+    CRect rim = rc;
+    rim.top = rc.top + rc.Height() * 80 / 100;
+    if (rim.Height() > 0)
+        FillRectAlpha(pDC, rim, CCC_Lighten(base, 32), 70);
+}
+
+// ぷっくりジェリー感: 角丸内に上端リムライト + 下側インナーシャドウ。
+static void DrawJellyEdges(CDC* pDC, const CRect& rc, int radius, COLORREF shadowTint)
+{
+    if (!pDC || rc.Width() <= 4 || rc.Height() <= 6) return;
+    CRgn rgn;
+    const int d = max(2, radius * 2);
+    if (!rgn.CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, d, d))
+        return;
+    pDC->SelectClipRgn(&rgn);
+    // 下側のインナーシャドウ
+    CRect lower = rc;
+    lower.top = rc.top + rc.Height() * 68 / 100;
+    FillRectAlpha(pDC, lower, shadowTint, 30);
+    // 上端のリムライト(細い強ハイライト)
+    CRect rim = rc;
+    rim.DeflateRect(radius, 0);
+    rim.bottom = rim.top + max(1, rc.Height() / 14);
+    if (rim.Width() > 2)
+        FillRectAlpha(pDC, rim, RGB(255, 255, 255), 170);
+    pDC->SelectClipRgn(NULL);
+}
+
+// シアー(透け)レース: 下向きスカラップ(半円)の連なり + ピコ(小さなドット)。
+// 細い線なので半透明風の繊細な印象。べた塗りなのでクロマ透過でも安全。
+static void DrawLaceScallop(CDC* pDC, int x1, int y, int x2, int r, COLORREF c)
+{
+    if (!pDC || r < 2 || x2 - x1 < r * 2) return;
+    CPen p(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&p);
+    CGdiObject* ob = pDC->SelectStockObject(NULL_BRUSH);
+    const int step = r * 2;
+    for (int cx = x1 + r; cx <= x2 - r; cx += step)
+    {
+        // 下向きの半円(スカラップ)
+        pDC->Arc(cx - r, y - r, cx + r, y + r, cx + r, y, cx - r, y);
+        // スカラップの底に小さなピコ
+        pDC->SetPixel(cx, y + r, c);
+    }
+    if (ob) pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+// ほどけかけリボン: 左右非対称のループ + だらりと垂れた2本のテール。色っぽいしどけなさ。
+static void DrawLooseRibbon(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    if (!pDC || rc.Width() < 6 || rc.Height() < 5) return;
+    const int cx = rc.CenterPoint().x;
+    const int cy = rc.top + rc.Height() / 3;
+    const int w = max(3, rc.Width() / 2);
+    const int h = max(2, rc.Height() / 3);
+
+    CBrush br(c);
+    CPen pen(PS_SOLID, 1, CCC_Darken(c, 64));
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
+
+    // 垂れたテール(下に伸びる2本)
+    POINT tailL[4] = { {cx - 1, cy}, {cx - w / 2 - 1, rc.bottom}, {cx - w / 6, rc.bottom}, {cx, cy + h / 2} };
+    POINT tailR[4] = { {cx + 1, cy}, {cx + w / 3, rc.bottom}, {cx + w * 2 / 3, rc.bottom - 2}, {cx, cy + h / 2} };
+    pDC->Polygon(tailL, 4);
+    pDC->Polygon(tailR, 4);
+
+    // 左ループ(やや大きく傾く) / 右ループ(小さめ=ほどけかけ)
+    POINT loopL[3] = { {cx, cy}, {cx - w, cy - h - 1}, {cx - w + 1, cy + h} };
+    POINT loopR[3] = { {cx, cy}, {cx + w * 4 / 5, cy - h + 1}, {cx + w * 3 / 5, cy + h - 1} };
+    pDC->Polygon(loopL, 3);
+    pDC->Polygon(loopR, 3);
+
+    // ループ内のツヤ
+    DrawShine(pDC, cx - w * 3 / 5, cy - h / 4, max(1, w / 6), max(1, h / 2));
+
+    // 中央の結び目
     int k = max(2, w / 4);
     CRect rk(cx - k, cy - max(2, h / 2), cx + k, cy + max(2, h / 2));
     pDC->RoundRect(&rk, CPoint(2, 2));
@@ -1826,6 +2044,9 @@ BEGIN_MESSAGE_MAP(CCustomEdit, CEdit)
 END_MESSAGE_MAP()
 
 static const UINT_PTR kEditOpaqueTimerId = 4107;
+static const UINT_PTR kButtonAnimTimerId    = 4120; // ボタンの流れるツヤ/鼓動パルス
+static const UINT_PTR kCheckBounceTimerId   = 4121; // チェックON時のバウンス
+static const UINT_PTR kSliderShimmerTimerId = 4122; // スライダーの流れるシマー
 
 CCustomEdit::CCustomEdit() : m_bHasFocus(FALSE), m_bAutoDelete(FALSE)
 {
@@ -3025,14 +3246,11 @@ void CCustomComboBox::PaintClient(CDC& dc)
         mDC.SelectObject(op);
     }
 
-    int hs = 6, sp = 2;
-    int sx = rB.left + (rB.Width() - (hs * 3 + sp * 2)) / 2;
-    int cy2 = rB.Height() / 2 + rB.top;
-
-    for (int i = 0; i < 3; i++)
+    // ハート3つはやめ、ひとつのリボンで上品に
     {
-        CRect rh(sx + i * (hs + sp), cy2 - hs / 2, sx + i * (hs + sp) + hs, cy2 + hs / 2);
-        DrawHeart(&mDC, rh, (i == 1) ? COLOR_HEART : RGB(255, 182, 193));
+        int cy2 = rB.Height() / 2 + rB.top;
+        int bw = min(rB.Width() - 4, 16);
+        DrawBow(&mDC, CRect(rB.CenterPoint().x - bw / 2, cy2 - 5, rB.CenterPoint().x + bw / 2, cy2 + 5), COLOR_BOW);
     }
 
     DrawSparkle(&mDC, r.right - 8, r.top + 8, 4, COLOR_SPARKLE);
@@ -3229,10 +3447,32 @@ BEGIN_MESSAGE_MAP(CCustomSliderCtrl, CSliderCtrl)
     ON_MESSAGE(WM_MOUSEMOVE, OnMouseMoveMsg)
     ON_MESSAGE(WM_LBUTTONDOWN, OnLButtonDownMsg)
     ON_MESSAGE(WM_LBUTTONUP, OnLButtonUpMsg)
+    ON_MESSAGE(WM_MOUSELEAVE, OnMouseLeaveMsg)
+    ON_WM_TIMER()
 END_MESSAGE_MAP()
 
-CCustomSliderCtrl::CCustomSliderCtrl() : m_bAutoDelete(FALSE), m_nMode(0), m_bAeroMode(FALSE) {}
+CCustomSliderCtrl::CCustomSliderCtrl() : m_bAutoDelete(FALSE), m_nMode(0), m_bAeroMode(FALSE),
+    m_nShimmer(0), m_bHover(FALSE) {}
 CCustomSliderCtrl::~CCustomSliderCtrl() {}
+
+LRESULT CCustomSliderCtrl::OnMouseLeaveMsg(WPARAM, LPARAM)
+{
+    m_bHover = FALSE;
+    KillTimer(kSliderShimmerTimerId);
+    Invalidate(FALSE);
+    return 0;
+}
+
+void CCustomSliderCtrl::OnTimer(UINT_PTR nIDEvent)
+{
+    if (nIDEvent == kSliderShimmerTimerId)
+    {
+        m_nShimmer++;
+        Invalidate(FALSE);
+        return;
+    }
+    CSliderCtrl::OnTimer(nIDEvent);
+}
 
 void CCustomSliderCtrl::PostNcDestroy()
 {
@@ -3336,6 +3576,13 @@ BOOL CCustomSliderCtrl::OnEraseBkgnd(CDC* pDC)
 LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM w, LPARAM l)
 {
     LRESULT r = Default();
+    if (!m_bHover)
+    {
+        TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
+        TrackMouseEvent(&t);
+        m_bHover = TRUE;
+        SetTimer(kSliderShimmerTimerId, 40, NULL);
+    }
 #if CCUSTOM_AERO_SUPPORT
     CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
 #endif
@@ -3374,6 +3621,39 @@ void CCustomSliderCtrl::DrawSlider(CDC* pDC)
     else if (m_nMode == 1) DrawMode1(pDC, r, mn, mx, np);
     else if (m_nMode == 2) DrawMode2(pDC, r, mn, mx, np);
     else DrawMode1(pDC, r, mn, mx, np);
+
+    // ホバー中: 通ってきたトラック上をきらめきがスーッと流れる
+    if (m_bHover && mx > mn)
+    {
+        const BOOL bV = (GetStyle() & TBS_VERT);
+        if (!bV)
+        {
+            const int tL = 12, tR = r.Width() - 12;
+            const int cY = r.Height() / 2;
+            const int tP = tL + (int)((double)(np - mn) * (tR - tL) / (mx - mn));
+            const int span = tP - tL;
+            if (span > 8)
+            {
+                const int gx = tL + (int)((m_nShimmer * 4) % (UINT)span);
+                DrawShine(pDC, gx, cY, 3, 3);
+                DrawSparkle(pDC, gx, cY, 2, COLOR_SPARKLE);
+            }
+        }
+        else
+        {
+            // 縦は「つまみ〜下端」がアクティブ部分。シマーは下から上へ流す。
+            const int tT = 12, tB = r.Height() - 12;
+            const int cX = r.Width() / 2;
+            const int tP = tT + (int)((double)(np - mn) * (tB - tT) / (mx - mn));
+            const int span = tB - tP;
+            if (span > 8)
+            {
+                const int gy = tB - (int)((m_nShimmer * 4) % (UINT)span);
+                DrawShine(pDC, cX, gy, 3, 3);
+                DrawSparkle(pDC, cX, gy, 2, COLOR_SPARKLE);
+            }
+        }
+    }
 }
 
 // 描画モード0：バーと音符のつまみ
@@ -4250,15 +4530,45 @@ BEGIN_MESSAGE_MAP(CCustomStandardButton, CButton)
     ON_WM_SETFOCUS()
     ON_WM_KILLFOCUS()
     ON_WM_ENABLE()
+    ON_WM_TIMER()
 END_MESSAGE_MAP()
 
 CCustomStandardButton::CCustomStandardButton()
-    : m_bAutoDelete(FALSE), m_bMouseOver(FALSE), m_clrGradStart(RGB(255, 255, 255)),
+    : m_bAutoDelete(FALSE), m_bMouseOver(FALSE), m_nAnimTick(0), m_bAnimRunning(FALSE),
+    m_clrGradStart(RGB(255, 255, 255)),
     m_clrGradEnd(RGB(255, 255, 255)), m_nGradDirection(0), m_bGradEnable(FALSE),
     m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135), m_nShadowDistance(2),
     m_nShadowBlur(3), m_bShadowEnable(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_BUTTON_BG);
+}
+
+void CCustomStandardButton::UpdateAnimTimer()
+{
+    if (!GetSafeHwnd()) return;
+    const BOOL bWant = IsWindowEnabled() && (m_bMouseOver || (GetFocus() == this));
+    if (bWant && !m_bAnimRunning)
+    {
+        m_bAnimRunning = TRUE;
+        SetTimer(kButtonAnimTimerId, 33, NULL);
+    }
+    else if (!bWant && m_bAnimRunning)
+    {
+        m_bAnimRunning = FALSE;
+        KillTimer(kButtonAnimTimerId);
+        Invalidate(FALSE);
+    }
+}
+
+void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
+{
+    if (nIDEvent == kButtonAnimTimerId)
+    {
+        m_nAnimTick++;
+        Invalidate(FALSE);
+        return;
+    }
+    CButton::OnTimer(nIDEvent);
 }
 
 CCustomStandardButton::~CCustomStandardButton()
@@ -4341,33 +4651,68 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         : (bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
     if (m_bGradEnable && !bD)
         DrawGradientBackground(&mDC, r, m_clrGradStart, m_clrGradEnd, m_nGradDirection);
+    else if (!bD)
+        DrawSatinFill(&mDC, r, bg);          // サテン/シルク質感
     else
         mDC.FillSolidRect(&r, bg);
 
     if (!bD)
     {
-        // キャンディのようなぷるんとしたツヤ
+        // ぷるんとした濡れツヤ + ジェリー感(リムライト&インナーシャドウ)
         CRect rg = r;
         if (bP) rg.OffsetRect(1, 1);
         DrawGlossHighlight(&mDC, rg, 8);
+        DrawJellyEdges(&mDC, rg, 8, RGB(120, 40, 80));
+
+        // 大きめのボタンは裾に透けレースの色気を
+        if (r.Width() >= 64 && r.Height() >= 26)
+            DrawLaceScallop(&mDC, r.left + 8, r.bottom - 6, r.right - 8, 3, COLOR_LACE);
+
+        // ホバー: とろみハイライトがスーッと流れる
+        if (m_bMouseOver && !bP)
+        {
+            const int W = r.Width();
+            const int bandW = max(10, W / 4);
+            const int period = W + bandW + W / 2;
+            const int pos = (int)((m_nAnimTick * 7) % (UINT)max(1, period));
+            CRect band(r.left + pos - bandW, r.top, r.left + pos, r.bottom);
+            CRgn rgn; rgn.CreateRoundRectRgn(r.left, r.top, r.right + 1, r.bottom + 1, 16, 16);
+            mDC.SelectClipRgn(&rgn);
+            FillRectAlpha(&mDC, band, RGB(255, 255, 255), 72);
+            mDC.SelectClipRgn(NULL);
+        }
+        // フォーカス: 鼓動のようにほのかに明滅
+        if (bF)
+        {
+            const double ph = (m_nAnimTick % 44) / 44.0 * 6.2831853;
+            const int a = 24 + (int)(26 * (0.5 + 0.5 * sin(ph)));
+            FillRectAlpha(&mDC, r, COLOR_BUTTON_HOVER, a);
+        }
 
         DrawDecorations(&mDC, r, 0, bP);
         // 四隅にさりげないキラキラ
         DrawSparkle(&mDC, r.left + 9, r.top + 9, 3, COLOR_SPARKLE);
         DrawSparkle(&mDC, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
+        // ほんのり頬染めで色っぽく
+        {
+            const int by = r.top + r.Height() * 64 / 100;
+            const int bx = max(10, r.Width() / 6);
+            DrawBlush(&mDC, r.left + bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
+            DrawBlush(&mDC, r.right - bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
+        }
         if (m_bMouseOver && !bP)
         {
-            DrawFlower(&mDC, r.Width() / 2 - 15, r.top + 10, 6, RGB(255, 200, 220));
-            DrawFlower(&mDC, r.Width() / 2 + 15, r.top + 10, 6, RGB(255, 200, 220));
-            DrawFlower(&mDC, r.Width() / 2, r.bottom - 10, 6, RGB(255, 200, 220));
+            // ほどけかけリボン + きらめきで色っぽく
+            DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 11, r.top + 2, r.Width() / 2 + 11, r.top + 16), COLOR_BOW);
             DrawSparkle(&mDC, r.right - 10, r.top + 10, 4, COLOR_SPARKLE);
+            DrawSparkle(&mDC, r.left + 12, r.bottom - 10, 3, COLOR_SPARKLE);
         }
         if (bP)
         {
             DrawSparkle(&mDC, r.Width() / 2, r.top + 8, 4, COLOR_SPARKLE);
             DrawStar(&mDC, r.left + 15, r.Height() / 2, 2, RGB(255, 240, 150));
             DrawStar(&mDC, r.right - 15, r.Height() / 2, 2, RGB(255, 240, 150));
-            DrawHeart(&mDC, CRect(r.Width() / 2 - 5, r.bottom - 12, r.Width() / 2 + 5, r.bottom - 2), COLOR_HEART);
+            DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 10, r.bottom - 15, r.Width() / 2 + 10, r.bottom - 2), COLOR_BOW);
         }
     }
 
@@ -4522,6 +4867,7 @@ void CCustomStandardButton::OnMouseMove(UINT f, CPoint p)
         TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
         TrackMouseEvent(&t);
         m_bMouseOver = TRUE;
+        UpdateAnimTimer();
         Invalidate(FALSE);
     }
     CButton::OnMouseMove(f, p);
@@ -4530,6 +4876,7 @@ void CCustomStandardButton::OnMouseMove(UINT f, CPoint p)
 LRESULT CCustomStandardButton::OnMouseLeave(WPARAM, LPARAM)
 {
     m_bMouseOver = FALSE;
+    UpdateAnimTimer();
     Invalidate(FALSE);
     return 0;
 }
@@ -4537,18 +4884,21 @@ LRESULT CCustomStandardButton::OnMouseLeave(WPARAM, LPARAM)
 void CCustomStandardButton::OnSetFocus(CWnd* p)
 {
     CButton::OnSetFocus(p);
+    UpdateAnimTimer();
     Invalidate(FALSE);
 }
 
 void CCustomStandardButton::OnKillFocus(CWnd* p)
 {
     CButton::OnKillFocus(p);
+    UpdateAnimTimer();
     Invalidate(FALSE);
 }
 
 void CCustomStandardButton::OnEnable(BOOL b)
 {
     CButton::OnEnable(b);
+    UpdateAnimTimer();
     Invalidate(FALSE);
 }
 
@@ -4564,13 +4914,33 @@ BEGIN_MESSAGE_MAP(CCustomCheckBox, CButton)
     ON_WM_LBUTTONUP()
     ON_WM_MOUSEMOVE()
     ON_WM_MOUSELEAVE()
+    ON_WM_TIMER()
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
 END_MESSAGE_MAP()
 
 CCustomCheckBox::CCustomCheckBox()
     : m_bAutoDelete(FALSE), m_bIsFlatStyle(FALSE), m_bIsPressed(FALSE),
-    m_bIsHot(FALSE), m_bTracking(FALSE), m_nCheck(0), m_bAeroMode(FALSE)
+    m_bIsHot(FALSE), m_bTracking(FALSE), m_nCheck(0), m_bAeroMode(FALSE), m_nBounce(0)
 {}
+
+void CCustomCheckBox::StartCheckBounce()
+{
+    if (!GetSafeHwnd()) return;
+    m_nBounce = 8;
+    SetTimer(kCheckBounceTimerId, 28, NULL);
+    Invalidate();
+}
+
+void CCustomCheckBox::OnTimer(UINT_PTR nIDEvent)
+{
+    if (nIDEvent == kCheckBounceTimerId)
+    {
+        if (--m_nBounce <= 0) { m_nBounce = 0; KillTimer(kCheckBounceTimerId); }
+        Invalidate();
+        return;
+    }
+    CButton::OnTimer(nIDEvent);
+}
 
 CCustomCheckBox::~CCustomCheckBox() {}
 
@@ -4589,6 +4959,7 @@ void CCustomCheckBox::SetCheck(int n)
 {
     m_nCheck = n;
     CButton::SetCheck(n);
+    if (n == BST_CHECKED) StartCheckBounce();
     Invalidate();
 }
 
@@ -4632,6 +5003,7 @@ void CCustomCheckBox::OnLButtonUp(UINT n, CPoint p)
         {
             m_nCheck = (m_nCheck == BST_CHECKED) ? BST_UNCHECKED : BST_CHECKED;
             CButton::SetCheck(m_nCheck);
+            if (m_nCheck == BST_CHECKED) StartCheckBounce();
             GetParent()->SendMessage(WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(), BN_CLICKED), (LPARAM)m_hWnd);
         }
         Invalidate();
@@ -4731,23 +5103,47 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             if (!bTrans) dc.FillSolidRect(0, 0, rw, rh, COLOR_DIALOG_BG);
             int s = 18; int cy2 = rh / 2;
             CRect rcB(0, cy2 - s / 2, s, cy2 + s / 2);
-            CPen p2(PS_SOLID, 2, RGB(255, 140, 100)); CBrush b2(RGB(255, 255, 255));
+            // チェック枠はやわらかいローズで
+            CPen p2(PS_SOLID, 2, bC ? RGB(255, 120, 165) : RGB(255, 156, 184));
+            CBrush b2(RGB(255, 249, 252));
             dc.SelectObject(&p2); dc.SelectObject(&b2);
-            dc.RoundRect(&rcB, CPoint(5, 5));
+            dc.RoundRect(&rcB, CPoint(6, 6));
             DrawGlossHighlight(&dc, rcB, 4);
+            DrawJellyEdges(&dc, rcB, 4, RGB(120, 40, 80));   // ぷっくりジェリー感
+            // 箱の下に透けレース + 黒の細レースでランジェリー風の色気
+            if (rcB.bottom + 5 < rh)
+            {
+                DrawLaceLine(&dc, rcB.left + 1, rcB.bottom + 2, rcB.right - 1, rcB.bottom + 2, RGB(60, 40, 55));
+                DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, COLOR_LACE);
+            }
             if (bC)
             {
-                CRect rh2 = rcB;
-                rh2.DeflateRect(1, 1);
-                DrawHanamaru(&dc, rh2, RGB(255, 100, 150), RGB(255, 182, 193));
-                DrawSparkle(&dc, rcB.right - 1, rcB.top + 1, 3, COLOR_SPARKLE);
+                // ハート/花丸はやめて、上品なツヤ✓ + ほどけかけリボンで色気を
+                CRect rk = rcB;
+                rk.InflateRect(s / 6, s / 6);   // 箱から少しだけはみ出す
+                rk.OffsetRect(1, 0);
+                // チェックON時のぷるんバウンス(一度ふくらんで戻る)
+                if (m_nBounce > 0)
+                {
+                    const double bf = sin(3.14159265 * (8 - m_nBounce) / 8.0);
+                    rk.InflateRect((int)(rk.Width() * 0.22 * bf), (int)(rk.Height() * 0.22 * bf));
+                }
+                if (rk.top < 0)     rk.OffsetRect(0, -rk.top);
+                if (rk.bottom > rh) rk.OffsetRect(0, rh - rk.bottom);
+                if (rk.left < 0)    rk.OffsetRect(-rk.left, 0);
+
+                DrawCheckMark(&dc, rk, COLOR_CHECK, max(3, s / 4));
+                // 右上にしどけないリボン
+                if (rk.top >= 6)
+                    DrawLooseRibbon(&dc, CRect(rk.right - 10, rk.top - 5, rk.right + 6, rk.top + 8), COLOR_BOW);
+                DrawSparkle(&dc, rk.left + 2, rk.bottom - 3, 2, COLOR_SPARKLE);
             }
             CString t;
             GetWindowText(t);
             if (!t.IsEmpty())
             {
                 CRect rt(0, 0, rw, rh);
-                rt.left = rcB.right + 8;
+                rt.left = rcB.right + 10;
                 DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER, bD, FALSE);
             }
         }
@@ -5437,12 +5833,15 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
     DrawRibbon(&dc, CRect(r.left + 2, r.bottom - 12, r.left + 14, r.bottom), RGB(255, 182, 193));
     DrawRibbon(&dc, CRect(r.right - 14, r.bottom - 12, r.right - 2, r.bottom), RGB(255, 182, 193));
 
-    // 右上の角はちょうちょ結びのリボンで可愛く（左上はタイトルと重なるため省略）
-    DrawBow(&dc, CRect(r.right - 17, nT - 7, r.right - 1, nT + 5), COLOR_BOW);
+    // 右上の角はしどけないリボンで色っぽく（左上はタイトルと重なるため省略）
+    DrawLooseRibbon(&dc, CRect(r.right - 19, nT - 8, r.right - 1, nT + 8), COLOR_BOW);
     if (t.IsEmpty())
-        DrawBow(&dc, CRect(r.left + 1, nT - 7, r.left + 17, nT + 5), COLOR_BOW);
+        DrawLooseRibbon(&dc, CRect(r.left + 1, nT - 8, r.left + 19, nT + 8), COLOR_BOW);
     DrawSparkle(&dc, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
     DrawSparkle(&dc, r.left + 9, r.bottom - 9, 3, COLOR_SPARKLE);
+    // 下辺に黒の細レース + 透けレースのスカラップでランジェリー風の色気
+    DrawLaceLine(&dc, r.left + 18, r.bottom - 7, r.right - 18, r.bottom - 7, RGB(60, 40, 55));
+    DrawLaceScallop(&dc, r.left + 16, r.bottom - 5, r.right - 16, 3, COLOR_LACE);
 
     if (!t.IsEmpty())
     {

@@ -541,13 +541,21 @@ void CMediaPlayerDlg::DoLayout()
 	const float s = hD2;
 	const int M = (int)(10 * s);             // マージン
 
-	// 上部: ビジュアライザ(スペアナ+ジャケ+時間)の帯。リスト領域確保のため低めに抑える。
-	int bannerW = W - M * 2;
-	int bannerH = (int)((double)bannerW * (double)MP_SRCH / (double)MP_SRCW);
-	int bannerMax = (int)(96 * s), bannerMin = (int)(54 * s);
-	if (bannerH > bannerMax) bannerH = bannerMax;
-	if (bannerH < bannerMin) bannerH = bannerMin;
-	m_bannerRect.SetRect(M, M, M + bannerW, M + bannerH);
+	// 上部: ビジュアライザ(スペアナ+ジャケ+時間)の帯。
+	// アスペクト比(MP_SRCW:MP_SRCH)を保ったまま、高さを上限に抑えて幅を決める。
+	// 横に伸ばしすぎると文字や隠れジャケットが見にくいため、最大幅を超えたら
+	// それ以上ストレッチせず中央寄せにし、左右の余白は背景色/アクリルにする(OnPaintが処理)。
+	int avail = W - M * 2;
+	int bannerH = (int)(96 * s);                                  // 既定の帯高さ(上限)
+	int bannerW = (int)((double)bannerH * (double)MP_SRCW / (double)MP_SRCH);  // 高さからアスペクト幅
+	if (bannerW > avail) {                                        // 幅が足りない狭い窓では幅に合わせて縮小
+		bannerW = avail;
+		bannerH = (int)((double)bannerW * (double)MP_SRCH / (double)MP_SRCW);
+		int bannerMin = (int)(54 * s);
+		if (bannerH < bannerMin) bannerH = bannerMin;
+	}
+	int bannerX = M + (avail - bannerW) / 2;                      // 中央寄せ
+	m_bannerRect.SetRect(bannerX, M, bannerX + bannerW, M + bannerH);
 
 	const int gTitle = (int)(14 * s);   // グループ枠のタイトル分の高さ
 	const int gPad = (int)(5 * s);      // グループ内側の余白

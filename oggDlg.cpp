@@ -14823,6 +14823,11 @@ int pox, poy;
 
 static int s_lastMs2DrawMs = 0;
 
+// KPI(mode==-11)は無限ループで loopcnt が増えないため、連続再生時は経過時間で次曲へ進める。
+static DWORD g_kpiRenzokuTick = 0;   // 現在曲の計測開始tick(0=計測なし/発火済み)
+static int   g_kpiRenzokuPnt = -999; // 計測中の曲インデックス(変化で計測リセット)
+static const DWORD KPI_RENZOKU_LIMIT_MS = 120000;  // 2分
+
 void COggDlg::timerp()
 {
 	if (g_oggUiThreadId != 0 && GetCurrentThreadId() != g_oggUiThreadId) {
@@ -14931,7 +14936,31 @@ void COggDlg::timerp()
 			if (pMediaPosition && (snap_oggsize2 < aa) && plf == 1) {
 				aa = 0; plf = 0;
 				if (pMainFrame1 != NULL && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
-					pMainFrame1->pause(0);
+					// 動画終端: ループ再生 / 連続再生 に対応(プレイリスト再生中のみ)。
+					// 再生経路は MP_PlayIndex と同じ pl->Get + WM_APP+2 を使い、
+					// play() 経由で動画グラフを正しく作り直す(確実・安全)。
+					BOOL handled = FALSE;
+					if (pl && plw && plcnt >= 0 && plcnt < pl->playcnt) {
+						if (pl->m_loop.GetCheck() == TRUE) {
+							// ループ再生: 同じ動画を先頭から再生し直す
+							pl->Get(plcnt);
+							gameon = 0;
+							PostMessage(WM_APP + 2, 0, 0);
+							handled = TRUE;
+						}
+						else if (pl->m_renzoku.GetCheck() == TRUE) {
+							// 連続再生: 次の曲へ(末尾なら先頭へ)
+							int idx = plcnt + 1;
+							if (idx >= pl->playcnt) idx = 0;
+							pl->Get(idx);
+							plcnt = idx;
+							gameon = 0;
+							PostMessage(WM_APP + 2, 0, 0);
+							handled = TRUE;
+						}
+					}
+					if (!handled)
+						pMainFrame1->pause(0);   // 従来動作: 終端で一時停止
 				}
 			}
 			aa1_ = aa;
@@ -15478,8 +15507,24 @@ void COggDlg::timerp()
 	}
 	else if (pl && plw) {
 		if (pl->m_renzoku.GetCheck() == TRUE) {
-			CString s; m_kaisuu.GetWindowText(s);
-			if (loopcnt >= _tstoi(s)) OnButton5();
+			// KPI(kb media player)は mode==-3。無限ループで loopcnt が増えないため、
+			// 連続再生時のみ2分経過で次曲へ進める。
+			if (mode == -3) {
+				if (g_kpiRenzokuPnt != pl->pnt) {
+					g_kpiRenzokuPnt = pl->pnt;
+					g_kpiRenzokuTick = GetTickCount();
+				}
+				else if (g_kpiRenzokuTick != 0 &&
+					(DWORD)(GetTickCount() - g_kpiRenzokuTick) >= KPI_RENZOKU_LIMIT_MS) {
+					g_kpiRenzokuTick = 0;   // 次曲へ移るまで再発火させない
+					OnButton5();
+				}
+			}
+			else {
+				CString s; m_kaisuu.GetWindowText(s);
+				int kc = _tstoi(s); if (kc < 1) kc = 1;   // 回数0/空は最低1ループ(即フェード防止)
+				if (loopcnt >= kc) OnButton5();
+			}
 		}
 	}
 
@@ -16070,7 +16115,8 @@ void COggDlg::timerp()
 			}
 			else {
 				CString s; m_kaisuu.GetWindowText(s);
-				if (loopcnt >= _tstoi(s)) OnButton5();
+				int kc = _tstoi(s); if (kc < 1) kc = 1;   // 回数0/空は最低1ループ(即フェード防止)
+				if (loopcnt >= kc) OnButton5();
 			}
 		}
 	}
