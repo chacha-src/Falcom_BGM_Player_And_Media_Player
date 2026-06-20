@@ -15504,6 +15504,10 @@ void COggDlg::timerp()
 			// Ms2DrawDue が常時真になってピアノロール等が ms2 設定を無視し 60fps で
 			// 描画され重くなる(=ファルコム特化型では起きない現象)。OnPaint と同じ扱いにする。
 			ms2 = 0;
+			// 新フレームができた時(=ms2レート)だけ mp のバナーを再描画させる。
+			// mp の OnPaint が dc を Blit し pending を解除する。これで mp 側の Blit も
+			// ms2 レートになり(60fps常時 Blit を避け)ファルコム特化型と同等の負荷になる。
+			if (mp) mp->InvalidateRect(&mp->m_bannerRect, FALSE);
 		}
 		InterlockedExchange(&g_gdiPaintPending, 1);
 	}

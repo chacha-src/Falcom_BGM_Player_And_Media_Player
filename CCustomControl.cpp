@@ -5093,6 +5093,15 @@ private:
             ::EndPaint(hWnd, &ps);
             return 0;
         }
+        case WM_NCPAINT:
+        {
+            // 非クライアント(スクロールバー/枠)は既定描画だとアクリル(ガラス)上で
+            // アルファ0になり透過して見えなくなる。既定描画後にウィンドウ全体の
+            // アルファを不透明化して、スクロールバーを確実に表示させる。
+            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            pThis->MakeWindowOpaque(hWnd);
+            return lRes;
+        }
         case WM_VSCROLL:
         case WM_HSCROLL:
         case WM_MOUSEWHEEL:
@@ -5104,6 +5113,8 @@ private:
                 pThis->PaintOpaque(hWnd, hDC);
                 ::ReleaseDC(hWnd, hDC);
             }
+            // スクロール操作でスクロールバーの表示が変わるので NC も不透明化し直す
+            pThis->MakeWindowOpaque(hWnd);
             ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
             return lRes;
         }
@@ -5138,6 +5149,34 @@ private:
         if (!CCC_PaintChildDirect(hWnd, hdcBuf))
             ::SendMessage(hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
         m_bPrinting = FALSE;
+    }
+
+    // ウィンドウ全体(クライアント+非クライアント=スクロールバー/枠)の現在のピクセルを
+    // 取り込み、アルファを不透明(255)にして書き戻す。アクリル(ガラス)上で GDI 描画の
+    // 非クライアントがアルファ0となり透過してしまうのを防ぎ、スクロールバーを表示させる。
+    void MakeWindowOpaque(HWND hWnd)
+    {
+        if (!::IsWindow(hWnd)) return;
+        RECT wr = {};
+        ::GetWindowRect(hWnd, &wr);
+        const int w = wr.right - wr.left;
+        const int h = wr.bottom - wr.top;
+        if (w <= 0 || h <= 0) return;
+        HDC hdcWin = ::GetWindowDC(hWnd);
+        if (!hdcWin) return;
+        RECT rc = { 0, 0, w, h };
+        BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+        HDC hdcBuf = NULL;
+        HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcWin, &rc, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+        if (hdcBuf && hBP)
+        {
+            // 現在描画済みの内容(枠/スクロールバー含む)をバッファへ取り込み
+            ::BitBlt(hdcBuf, 0, 0, w, h, hdcWin, 0, 0, SRCCOPY);
+            // アルファを不透明化して書き戻す
+            ::BufferedPaintMakeOpaque(hBP, &rc);
+            ::EndBufferedPaint(hBP, TRUE);
+        }
+        ::ReleaseDC(hWnd, hdcWin);
     }
 
     void PaintOpaque(HWND hWnd, HDC hDestDC)

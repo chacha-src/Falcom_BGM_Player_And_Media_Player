@@ -250,6 +250,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_MP_FINDDOWN, &CMediaPlayerDlg::OnFindDown)
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONUP()
+	ON_NOTIFY(LVN_GETDISPINFO, IDC_MP_LIST, &CMediaPlayerDlg::OnGetdispinfoList)
 	ON_NOTIFY(NM_DBLCLK, IDC_MP_LIST, &CMediaPlayerDlg::OnDblclkList)
 	ON_NOTIFY(NM_RCLICK, IDC_MP_LIST, &CMediaPlayerDlg::OnRclickList)
 	ON_NOTIFY(LVN_BEGINDRAG, IDC_MP_LIST, &CMediaPlayerDlg::OnBeginDragList)
@@ -493,12 +494,16 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	// そのまま間隔に使うと描画全体がその間隔まで律速され遅くなる(=不具合の原因)。
 	m_lastMs2 = 16;
 	SetTimer(1, 250, NULL);          // 低速: テキスト/リスト/コンボ/チェックの同期
-	SetTimer(2, 16, NULL);           // 描画: dc の Blit + 合成継続(60fps固定。実更新はog側がms2律速)
+	SetTimer(2, 100, NULL);          // 安全網: 取りこぼし時のみバナー再描画(通常はtimerpが駆動)
 	SetTimer(3, 33, NULL);           // 高速: シーク(playb追従)/時間/音量のミラー
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1)
 		SetTimer(4, 250, NULL);  // 遅延でアクリル再適用(ウィンドウ合成確定後)。一回で止める。
 #endif
+	// 起動直後はリスト項目を不可視時に設定したためスクロールバーが未実現。
+	// 表示確定後にリストの非クライアント(枠/スクロールバー)を再描画して確実に表示
+	// (アクリル時は OpaqueFixer の WM_NCPAINT で不透明化される)。一回限り。
+	SetTimer(6, 120, NULL);
 	return TRUE;
 }
 
@@ -682,59 +687,65 @@ void CMediaPlayerDlg::DoLayout()
 	Invalidate();
 }
 
+// プレイリスト(pl)と同じく仮想リスト(LVS_OWNERDATA)としてミラーする。
+// 仮想リストは SetItemCount でスクロール範囲(=スクロールバー)が直接確定するため、
+// アクリル時に OpaqueFixer が WM_PAINT を横取りしてもスクロールバーが正しく表示される。
+// (非仮想だと WM_PAINT 依存でスクロールバーが出ない/消える不具合になっていた。)
 void CMediaPlayerDlg::RefreshList(BOOL bForce)
 {
 	if (!::IsWindow(m_list.GetSafeHwnd())) return;
 	if (!pl || pl->pc == NULL) {
-		if (m_list.GetItemCount() > 0) m_list.DeleteAllItems();
-		m_lastCount = 0;
+		if (m_list.GetItemCount() > 0) { m_list.SetItemCount(0); m_lastCount = 0; }
 		return;
 	}
 	int cnt = pl->playcnt;
 
-	if (!bForce && cnt == m_lastCount) {
-		// 件数据え置き: 再生中行のアイコンだけ pc[].icon に合わせて更新(点滅含む)。
-		// プレイリスト本体(pl->pnt)が再生中行。毎tickの全走査はしない。
-		int pnt = pl->pnt;
-		if (pnt != m_lastPlcnt) {
-			// 再生行が移動 → 旧行のアイコンを通常へ戻す
-			if (m_lastPlcnt >= 0 && m_lastPlcnt < cnt)
-				m_list.SetItem(m_lastPlcnt, 0, LVIF_IMAGE, NULL, pl->pc[m_lastPlcnt].icon, 0, 0, 0);
-			m_lastPlcnt = pnt;
+	// 件数変化 or 強制(並べ替え/タグ更新/追加削除)時に範囲を再設定。
+	if (bForce || cnt != m_lastCount) {
+		m_list.SetItemCount(cnt);   // 仮想リスト: スクロール範囲を確定(pl と同じ仕組み)
+		m_lastCount = cnt;
+		if (bForce) m_list.Invalidate(FALSE);   // 表示内容(順序/タグ)の変化を反映
+	}
+
+	// 再生中(♪)アイコンの点滅・移動を反映(該当行だけ再取得=GetDispInfo 再問合せ)
+	int pnt = pl->pnt;
+	if (pnt != m_lastPlcnt) {
+		if (m_lastPlcnt >= 0 && m_lastPlcnt < cnt) m_list.RedrawItems(m_lastPlcnt, m_lastPlcnt);
+		m_lastPlcnt = pnt;
+	}
+	if (pnt >= 0 && pnt < cnt) m_list.RedrawItems(pnt, pnt);
+
+	FollowPlayingRow();   // ♪ 行へカーソル追従
+}
+
+// 仮想リスト(LVS_OWNERDATA)の表示内容を pl->pc から供給する(pl の同名処理と同等)。
+void CMediaPlayerDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	NMLVDISPINFO* di = reinterpret_cast<NMLVDISPINFO*>(pNMHDR);
+	*pResult = 0;
+	if (di == NULL || !pl || pl->pc == NULL || pl->playcnt <= 0) return;
+	int i = di->item.iItem;
+	if (i < 0 || i >= pl->playcnt) i = 0;
+	const playlistdata0& d = pl->pc[i];
+	if (di->item.mask & LVIF_TEXT) {
+		switch (di->item.iSubItem) {
+		case 0: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.name); break;
+		case 1: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.game); break;
+		case 2: {
+			CString s;
+			if (d.time == 0) s = _T("");
+			else if (d.time == -1) s = LL14(L"取得不能", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A");
+			else if (d.time >= 3600) s.Format(_T("%d:%02d:%02d"), d.time / 3600, (d.time / 60) % 60, d.time % 60);
+			else s.Format(_T("%d:%02d"), d.time / 60, d.time % 60);
+			_tcsncpy_s(di->item.pszText, di->item.cchTextMax, s, _TRUNCATE);
+		} break;
+		case 3: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.art); break;
+		case 4: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.alb); break;
+		default: break;
 		}
-		// 再生行アイコンを最新の pc[].icon に同期(SIconTimer の点滅を反映)
-		if (pnt >= 0 && pnt < cnt)
-			m_list.SetItem(pnt, 0, LVIF_IMAGE, NULL, pl->pc[pnt].icon, 0, 0, 0);
-		FollowPlayingRow();   // ♪ 行へカーソル追従(項目は既に存在)
-		return;
 	}
-	m_list.SetRedraw(FALSE);
-	m_list.DeleteAllItems();
-	for (int i = 0; i < cnt; i++) {
-		const playlistdata0& d = pl->pc[i];
-		int img = d.icon;   // プレイリストと同じアイコン(通常=1, 再生中=0/2)
-		m_list.InsertItem(i, d.name, img);
-		m_list.SetItemText(i, 1, d.game);
-		CString st;
-		if (d.time == 0) st = _T("");
-		else if (d.time == -1) st = LL14(L"取得不能", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A");
-		else if (d.time >= 3600) st.Format(_T("%d:%02d:%02d"), d.time / 3600, (d.time / 60) % 60, d.time % 60);
-		else st.Format(_T("%d:%02d"), d.time / 60, d.time % 60);
-		m_list.SetItemText(i, 2, st);
-		m_list.SetItemText(i, 3, d.art);
-		m_list.SetItemText(i, 4, d.alb);
-	}
-	m_list.SetRedraw(TRUE);
-	m_lastCount = cnt;
-	m_lastPlcnt = pl->pnt;
-	// 項目を挿入し終えた「後」に ♪ 行へカーソルを当てる(初回もここで確実に追従)。
-	m_lastScroll = -2;        // 再構築後は強制的に再追従させる
-	FollowPlayingRow();
-	// SetRedraw(FALSE)中に項目を挿入するとスクロール範囲(非クライアント=スクロールバー)が
-	// 再計算されず、スクロールするまで出てこない描画ミスが起きる。フレーム再計算を明示する。
-	m_list.SetWindowPos(NULL, 0, 0, 0, 0,
-		SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-	m_list.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
+	if (di->item.mask & LVIF_IMAGE)
+		di->item.iImage = d.icon;
 }
 
 // 再生中(♪)の行へカーソル(選択)を移動して可視化する。
@@ -886,14 +897,12 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		// ここで張り直す必要はない。
 	}
 	else if (nIDEvent == 2) {
-		// 描画駆動: dc を直接 Blit(CClientDC=Invalidateしない)し、og の合成継続のため pending を解除。
-		// 約60fps。これで再生中も確実に更新される(timerp→WM_PAINT 経路の取りこぼしを回避)。
-		if (::IsWindowVisible(GetSafeHwnd()) && !IsIconic()) {
-			CClientDC cdc(this);
-			BlitVisualizer(&cdc);
-			extern void COgg_ClearGdiPaintPending();
-			COgg_ClearGdiPaintPending();
-		}
+		// 安全網: 通常は og の timerp が新フレーム時(ms2レート)に mp バナーを無効化し、
+		// mp の OnPaint が Blit + pending 解除を行う(=ファルコム特化型と同等の負荷)。
+		// 万一 WM_PAINT が取りこぼされて pending が固着し合成が止まるのを防ぐため、
+		// 低頻度でバナーの再描画だけ促す(60fpsの常時Blitはしない=ピアノロール等の負荷源を排除)。
+		if (::IsWindowVisible(GetSafeHwnd()) && !IsIconic())
+			InvalidateRect(&m_bannerRect, FALSE);
 	}
 	else if (nIDEvent == 3) {
 		// 高速: 再生位置(playb)に追従するシーク・時間・音量のミラー
@@ -924,6 +933,18 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 		}
 #endif
+	}
+	else if (nIDEvent == 6) {
+		// 起動直後のスクロールバー未表示対策(両モード)。モード切替時と同じく
+		// 子の非クライアント(枠/スクロールバー)を再描画させる。RDW_FRAME により
+		// リストへ WM_NCPAINT が飛び、アクリル時は OpaqueFixer が不透明化する。
+		KillTimer(6);
+		if (::IsWindow(m_list.GetSafeHwnd())) {
+			if (pl) m_list.SetItemCount(pl->playcnt);   // 可視状態で範囲を再確定
+			m_list.RedrawWindow(NULL, NULL,
+				RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
+		}
+		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
 	CCustomBlurDialogBase::OnTimer(nIDEvent);
 }
