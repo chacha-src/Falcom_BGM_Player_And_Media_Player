@@ -33,6 +33,12 @@
 #pragma comment(lib,"rubberband-library")
 #endif
 extern int fade1;
+extern int endflg;
+// 曲終端のジャスト検出用（oggDlg.cpp 定義）。単位は「DS バッファへ書き込んだ総バイト数」。
+extern __int64 g_dsWrittenBytes;
+extern __int64 g_endWrittenBytes;
+extern __int64 g_heardBytes;
+extern int g_outBytesPerFrame;
 extern 	LPDIRECTSOUND8 m_ds;
 extern 	LPDIRECTSOUNDBUFFER m_dsb1;
 extern 	LPDIRECTSOUNDBUFFER8 m_dsb;
@@ -474,15 +480,19 @@ UINT HandleNotifications(LPVOID)
 
 		// 書き込み位置の計算
 		dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
+		const ULONG ringBytes = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
 		int len1 = (int)WriteCursor - (int)oldw;
 		int len2 = 0;
 
 		if (len1 == 0) continue;
 		if (len1 < 0) {
-			const ULONG ringBytes = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
 			len1 = (int)ringBytes - (int)oldw;
 			len2 = (int)WriteCursor;
 		}
+
+		// 終端ドレイン中か（実音声が終わった後の純無音サイクル）。終端確定後、書込みヘッドが
+		// 終端位置を越えていれば、このサイクルはすべて無音で埋める（古いループ音の漏れ防止）。
+		const bool drainSilence = (g_endWrittenBytes != 0 && g_dsWrittenBytes >= g_endWrittenBytes);
 
 		{
 			std::lock_guard<std::mutex> guard(cl2);
@@ -501,6 +511,7 @@ UINT HandleNotifications(LPVOID)
 		sflg = TRUE;
 		DispatchPlaywavFill(bufwav3, oldw, len1, len2);
 		// 曲最後まで行ったとき
+		const int readmeThisCycle = readme; // 終端確定に使うため reset 前に退避
 		if (readme) {
 			if (len1 > readme)
 				ZeroMemory(bufwav3 + readme, len2);
@@ -516,11 +527,23 @@ UINT HandleNotifications(LPVOID)
 			if (hr == DS_OK) {
 				thn = FALSE;
 				memcpy(pdsb1, bufwav3 + oldw, len3);
-				if (fade2) ZeroMemory(pdsb1, len3);
+				if (fade2 || drainSilence) ZeroMemory(pdsb1, len3);
 				if (len4 != 0) memcpy(pdsb2, bufwav3, len4);
-				if (len4 != 0 && fade2) ZeroMemory(pdsb2, len4);
+				if (len4 != 0 && (fade2 || drainSilence)) ZeroMemory(pdsb2, len4);
 				dsb->Unlock(pdsb1, len3, pdsb2, len4);
 			}
+		}
+		// このサイクルで実際に DS バッファへ書き込んだバイト数を累積。
+		const int writtenThisCycle = len1 + len2;
+		const __int64 writtenBefore = g_dsWrittenBytes;
+		g_dsWrittenBytes += (writtenThisCycle > 0) ? writtenThisCycle : 0;
+		// EOF（fade1=停止 / endflg=連続）を最初に検出したサイクルで実音声の終端を確定。
+		// readme があれば最終チャンク内の実バイト境界が分かるのでそれを使う。無ければこのサイクル末尾。
+		if (g_endWrittenBytes == 0 && (fade1 || endflg)) {
+			if (readmeThisCycle > 0 && readmeThisCycle <= writtenThisCycle)
+				g_endWrittenBytes = writtenBefore + readmeThisCycle;
+			else
+				g_endWrittenBytes = g_dsWrittenBytes;
 		}
 		readme = 0;
 		fade2 = fade1;
@@ -530,22 +553,52 @@ UINT HandleNotifications(LPVOID)
 
 		} // guard(cl2) — 終了処理はロック外（OnPause と競合しない）
 
-		// 終了・エラー判定（ロックを外して終了処理へ）
-		if (fade1 && muon == 0) {
-			if (thn1 || stf != 0 || syukai == 2)
-				return stopPlaybackAndExit();
-			playf = 1; thn = FALSE;
-			if (!(mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999)) Sleep(800);
-			LPDIRECTSOUNDBUFFER8 dsbFade = m_dsb;
-			if (dsbFade) {
-				dsbFade->SetVolume(DSBVOLUME_MIN);
-				dsbFade->Stop();
+		// 終端の短フェード＆ジャスト停止判定（ロックを外して終了処理へ）。
+		// playb(デコード先頭)ではなく DS 再生カーソルが実音声終端へ到達した瞬間を「曲終わり」とする。
+		// 実再生バイト数 = 累積書込み − 未再生キュー(我々の書込みヘッド oldw と再生カーソル pc の差)。
+		// oldw はリング上の実書込み位置。g_dsWrittenBytes%ring とは初期オフセット分ずれるため oldw を使う。
+		if (g_endWrittenBytes != 0) {
+			LPDIRECTSOUNDBUFFER8 dsbb = m_dsb;
+			__int64 heard = g_endWrittenBytes; // 既定: 終端到達扱い（dsb 取得失敗時の保険）
+			if (dsbb) {
+				ULONG pc = 0, wc = 0;
+				if (dsbb->GetCurrentPosition(&pc, &wc) == DS_OK && ringBytes > 0) {
+					const __int64 queued = (__int64)(((ULONG)oldw + ringBytes - pc) % ringBytes);
+					heard = g_dsWrittenBytes - queued;
+				}
+				g_heardBytes = heard; // 連続再生のタイマー 9000 などが参照
+				// 終端直前の残り実音声に短いフェードをかけてクリック/プツ音を防ぐ。
+				const __int64 remain = g_endWrittenBytes - heard;
+				const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
+				const __int64 fadeBytes = (__int64)bpf * (__int64)wavbit_sample_Hz * 35 / 1000; // 約35ms
+				if (remain > 0 && remain < fadeBytes && fadeBytes > 0) {
+					LONG vol = (LONG)((double)DSBVOLUME_MIN * (1.0 - (double)remain / (double)fadeBytes));
+					if (vol > 0) vol = 0;
+					if (vol < DSBVOLUME_MIN) vol = DSBVOLUME_MIN;
+					dsbb->SetVolume(vol);
+				}
 			}
-			og->OnPause();
-			playf = 0; thn = TRUE; reset = TRUE;
-			extern int eqflg; eqflg = TRUE;
-			AfxEndThread(0);
-			return 0;
+			else {
+				g_heardBytes = heard;
+			}
+
+			// fade1(=停止 / 連続でない) のときだけ DS スレッドで停止する。
+			// 連続再生(endflg)の次曲遷移は UI 側タイマー 9000 が同じ終端到達判定で行う。
+			if (fade1 && heard >= g_endWrittenBytes) {
+				if (thn1 || stf != 0 || syukai == 2)
+					return stopPlaybackAndExit();
+				playf = 1; thn = FALSE;
+				LPDIRECTSOUNDBUFFER8 dsbFade = m_dsb;
+				if (dsbFade) {
+					dsbFade->SetVolume(DSBVOLUME_MIN);
+					dsbFade->Stop();
+				}
+				og->OnPause();
+				playf = 0; thn = TRUE; reset = TRUE;
+				extern int eqflg; eqflg = TRUE;
+				AfxEndThread(0);
+				return 0;
+			}
 		}
 	}
 	return 0;
@@ -1433,6 +1486,21 @@ typedef struct {
 	float warmthState, brightnessState, shimmerState;
 	float flutterPhase, dopplerPhase, phasingPhase;
 
+	// ===== 各プリセットの音響キャラクター差異付け用の状態 =====
+	// (従来 DSP で未使用だった環境パラメータを活かすために追加)
+	float wetAirState;     // airAbsorption/humidity/altitude による残響尾の高域吸収
+	float wetColorState;   // reverbColor (残響の明暗) 用ローパス状態
+	float echoToneState;   // echoFeedbackTone (山彦の明暗) 用ローパス状態
+	float wetSmoothState;  // reverbSmooth (残響の滑らかさ) 用平滑状態
+	float combBuf[2048];   // combFiltering 用ショートディレイ
+	int   combPos;
+	float windPhase;       // windEffect 用の超低周波ゆらぎ位相
+	float wetWeightState;  // weight (低域の量感) 用
+	float bodyToneState;   // woodiness/concrete (中低域の色付け) 用
+	float softState;       // softness (高域/トランジェントの丸め) 用
+	float phaserLfo;       // phasing 用 LFO 位相
+	float phaserState[2];  // phasing 用オールパス段
+
 	// Yamabiko buffers
 	float* yamabikoBuf;
 	int yamabikoBufSize;
@@ -1448,6 +1516,18 @@ static int g_lastEnvPreset = -1;
 static int g_lastEqValues[15];
 static int g_lastExtendedParams[5];
 static int g_lastEffectAmount = 50;
+
+// ===== 追加エフェクトパラメータ (リバーブ/コーラス/ディレイ) =====
+// equaliser() で savedata から取り込む。
+//   値域 0-200、0 = オフ (既定値)
+//   1-100   : モードA  強さ = v / 100
+//   101-200 : モードB  強さ = (v - 100) / 100
+//     g_eqReverb : 1-100 リバーブ / 101-200 パンリバーブ
+//     g_eqChorus : 1-100 コーラス / 101-200 コーラスディストーション
+//     g_eqDelay  : 1-100 ディレイ / 101-200 マルチディレイ
+static int g_eqReverb = 0;
+static int g_eqChorus = 0;
+static int g_eqDelay = 0;
 static BOOL g_initialized = FALSE;
 
 /*
@@ -3551,6 +3631,134 @@ static inline float ProcessDoppler(ChannelState* cs, float input, float amount, 
 	return input * (1.0f + sinf(cs->dopplerPhase * 2.0f * M_PI) * amount * 0.02f);
 }
 
+// ============================================================
+// ★ ウェット(残響/エコー)信号のキャラクター付与
+// ============================================================
+//  従来 DSP で宣言だけされ未使用だった環境パラメータ
+//  (airAbsorption / humidity / altitude / reverbColor / reverbSmooth /
+//   combFiltering / windEffect) をここで残響成分に反映する。
+//  これにより 100 個の音響プリセットが「残響の明暗・吸収・揺らぎ・筒鳴り」
+//  といった質感で互いに聴き分けられるようになる。
+//  音量(ピーク)は最終段のルックアヘッドリミッターが抑えるため、
+//  ここでは音割れを気にせずトーン/質感の差異付けに専念できる。
+static inline float ProcessWetCharacter(ChannelState* cs, float wet,
+	const EnvParams* env, int sampleRate)
+{
+	if (!isfinite(wet)) return 0.0f;
+
+	// --- 空気吸収: 距離・湿度・高度が高いほど残響尾の高域を減衰 ---
+	float airHF = env->airAbsorption + env->humidity * 0.4f + env->altitude * 0.3f;
+	if (airHF > 0.0f) {
+		if (airHF > 1.0f) airHF = 1.0f;
+		float a = 0.10f + airHF * 0.80f;            // airHF大→平滑強→高域減衰
+		cs->wetAirState += a * (wet - cs->wetAirState);
+		wet = wet * (1.0f - airHF) + cs->wetAirState * airHF;
+	}
+
+	// --- 残響の色味 (reverbColor: 0=暗い, 0.5=中立, 1=明るい) ---
+	if (fabsf(env->reverbColor - 0.5f) > 0.01f) {
+		cs->wetColorState += 0.25f * (wet - cs->wetColorState);
+		float lowPart = cs->wetColorState;
+		float highPart = wet - lowPart;
+		float tilt = (env->reverbColor - 0.5f) * 1.6f;  // -0.8..+0.8
+		wet = lowPart + highPart * (1.0f + tilt);
+	}
+
+	// --- 残響の滑らかさ (reverbSmooth: 0=粗い, 1=滑らか) ---
+	if (env->reverbSmooth > 0.0f) {
+		float sc = 0.06f + env->reverbSmooth * 0.40f;
+		cs->wetSmoothState += sc * (wet - cs->wetSmoothState);
+		float mix = env->reverbSmooth * 0.6f;
+		wet = wet * (1.0f - mix) + cs->wetSmoothState * mix;
+	}
+
+	// --- コムフィルタリング (筒・金属・反復反射の色付け) ---
+	if (env->combFiltering > 0.0f) {
+		float baseFreq = (env->resonanceFreq > 80.0f) ? env->resonanceFreq : 220.0f;
+		int d = (int)((float)sampleRate / baseFreq);
+		if (d < 8) d = 8;
+		if (d > 2047) d = 2047;
+		int rp = cs->combPos - d; if (rp < 0) rp += 2048;
+		float dl = cs->combBuf[rp];
+		float g = env->combFiltering * 0.55f;
+		float out = wet + dl * g;
+		cs->combBuf[cs->combPos] = wet;
+		cs->combPos = (cs->combPos + 1) & 2047;
+		wet = out * (1.0f - g * 0.4f);              // ピーク膨張を補正
+	}
+
+	// --- 風の効果 (屋外プリセットの自然な揺らぎ) ---
+	if (env->windEffect > 0.0f) {
+		cs->windPhase += 0.27f / (float)sampleRate; // ~0.27Hz の超低周波ゆらぎ
+		if (cs->windPhase >= 1.0f) cs->windPhase -= 1.0f;
+		float w = sinf(cs->windPhase * 2.0f * (float)M_PI)
+			+ 0.5f * sinf(cs->windPhase * 6.3f * (float)M_PI);
+		wet *= (1.0f + w * env->windEffect * 0.12f);
+	}
+
+	return isfinite(wet) ? wet : 0.0f;
+}
+
+// ============================================================
+// ★ 最終ミックス(ドライ+ウェット)のキャラクター付与
+// ============================================================
+//  未使用だった weight / woodiness / concrete / softness / phasing /
+//  distortion を最終ミックスに反映し、プリセット固有の「音の重さ・素材感・
+//  柔らかさ・うねり・質感歪み」を付ける。
+//  distortion はプリセット意図に基づく軽いサチュレーションで、
+//  最終リミッターによりハードクリップ(音割れ)には至らない。
+static inline float ProcessMixCharacter(ChannelState* cs, float mixed,
+	const EnvParams* env, int sampleRate)
+{
+	if (!isfinite(mixed)) return 0.0f;
+
+	// --- 重さ (weight: 0=軽い, 0.5=中立, 1=重い) 低域の量感 ---
+	if (fabsf(env->weight - 0.5f) > 0.01f) {
+		cs->wetWeightState += 0.05f * (mixed - cs->wetWeightState);
+		float w = (env->weight - 0.5f) * 1.2f;      // -0.6..+0.6
+		mixed += cs->wetWeightState * w * 0.6f;
+	}
+
+	// --- 素材感 (木質=暖色寄り / コンクリート=硬く乾いた色) ---
+	float bodyTone = env->woodiness * 0.5f - env->concrete * 0.4f;
+	if (fabsf(bodyTone) > 0.01f) {
+		cs->bodyToneState += 0.12f * (mixed - cs->bodyToneState);
+		mixed += cs->bodyToneState * bodyTone * 0.25f;
+	}
+
+	// --- 柔らかさ (softness: 高域/トランジェントを軽く丸める) ---
+	if (env->softness > 0.0f) {
+		float a = 0.5f - env->softness * 0.35f;
+		cs->softState += a * (mixed - cs->softState);
+		float mix = env->softness * 0.4f;
+		mixed = mixed * (1.0f - mix) + cs->softState * mix;
+	}
+
+	// --- フェイジング (うねり: 2段オールパス) ---
+	if (env->phasing > 0.0f) {
+		cs->phaserLfo += 0.5f / (float)sampleRate;
+		if (cs->phaserLfo >= 1.0f) cs->phaserLfo -= 1.0f;
+		float mod = 0.4f + 0.4f * sinf(cs->phaserLfo * 2.0f * (float)M_PI);
+		float x = mixed;
+		for (int s = 0; s < 2; s++) {
+			float y = -mod * x + cs->phaserState[s];
+			cs->phaserState[s] = x + mod * y;
+			x = y;
+		}
+		float mix = env->phasing * 0.5f;
+		mixed = mixed * (1.0f - mix) + x * mix;
+	}
+
+	// --- 質感歪み (distortion: プリセット意図の軽いサチュレーション) ---
+	if (env->distortion > 0.0f) {
+		float drive = 1.0f + env->distortion * 2.5f;
+		float d = tanhf(mixed * drive) / tanhf(drive);
+		mixed = mixed * (1.0f - env->distortion) + d * env->distortion;
+	}
+
+	return isfinite(mixed) ? mixed : 0.0f;
+}
+
 
 // ============================================================
 // ★ プロフェッショナル・ソフトサチュレーション [FIX-2]
@@ -3677,6 +3885,283 @@ static BlockAnalysis AnalyzeBlock(
 static float g_stagingGainSmooth = 1.0f;
 
 
+// ============================================================
+// ★ ユーザー制御エフェクト: リバーブ / コーラス / ディレイ
+// ============================================================
+//  環境(ENV_PRESETS)エフェクトとは独立した、ユーザーが直接量を決める
+//  エフェクト群。値は savedata.eq_reverb / eq_chorus / eq_delay (0-200)。
+//    0        : オフ (既定値)
+//    1-100    : モードA  強さ = v / 100
+//    101-200  : モードB  強さ = (v - 100) / 100
+//      eq_reverb  A=リバーブ      B=パンリバーブ
+//      eq_chorus  A=コーラス      B=コーラスディストーション
+//      eq_delay   A=ディレイ      B=マルチディレイ(ピンポン)
+//  L/R バッファ(出力直前)に対してブロック単位で処理する。状態はブロックを
+//  跨いで保持。ピーク制御は最終段のルックアヘッドリミッターが担うため、
+//  ここでウェット量を足してもハードクリップ(音割れ)には至らない。
+// ============================================================
+
+// ---------- リバーブ (Freeverb 風: 並列コム8 + 直列オールパス4) ----------
+#define FX_REV_COMBS   8
+#define FX_REV_ALLPS   4
+#define FX_REV_MAXCOMB 8192   // 192kHz でも最長コム(約7040)を収容
+#define FX_REV_MAXALL  3072   // 192kHz でも最長オールパス(約2421)を収容
+typedef struct {
+	float comb[2][FX_REV_COMBS][FX_REV_MAXCOMB];
+	int   combPos[2][FX_REV_COMBS];
+	int   combLen[2][FX_REV_COMBS];
+	float combLP[2][FX_REV_COMBS];      // ダンピング用 one-pole 状態
+	float allp[2][FX_REV_ALLPS][FX_REV_MAXALL];
+	int   allpPos[2][FX_REV_ALLPS];
+	int   allpLen[2][FX_REV_ALLPS];
+	float panPhase;                     // パンリバーブ用 自動パン LFO 位相
+	int   rate;
+} FxReverb;
+static FxReverb g_fxReverb;
+
+static void FxReverbReset(int rate) {
+	memset(&g_fxReverb, 0, sizeof(g_fxReverb));
+	// Freeverb の標準チューニング (44100Hz 基準のサンプル数)
+	static const int combTune[FX_REV_COMBS] = { 1116,1188,1277,1356,1422,1491,1557,1617 };
+	static const int allpTune[FX_REV_ALLPS] = { 556,441,341,225 };
+	const int spread = 23;  // 右チャンネルのステレオスプレッド
+	for (int ch = 0; ch < 2; ch++) {
+		for (int c = 0; c < FX_REV_COMBS; c++) {
+			int len = (int)((long long)combTune[c] * rate / 44100) + (ch ? spread : 0);
+			if (len < 8) len = 8;
+			if (len >= FX_REV_MAXCOMB) len = FX_REV_MAXCOMB - 1;
+			g_fxReverb.combLen[ch][c] = len;
+		}
+		for (int a = 0; a < FX_REV_ALLPS; a++) {
+			int len = (int)((long long)allpTune[a] * rate / 44100) + (ch ? spread : 0);
+			if (len < 8) len = 8;
+			if (len >= FX_REV_MAXALL) len = FX_REV_MAXALL - 1;
+			g_fxReverb.allpLen[ch][a] = len;
+		}
+	}
+	g_fxReverb.rate = rate;
+}
+
+static void FxProcessReverb(float* L, float* R, int n, int rate, float amount, BOOL panMode) {
+	if (amount <= 0.0f || n <= 0) return;
+	if (g_fxReverb.rate != rate) FxReverbReset(rate);
+	if (amount > 1.0f) amount = 1.0f;
+
+	const float roomSize = 0.70f + amount * 0.265f;   // フィードバック 0.70..~0.965
+	const float damp = 0.18f + amount * 0.10f;
+	const float damp1 = damp, damp2 = 1.0f - damp;
+	const float inGain = 0.015f;                       // 並列コムの発散防止入力ゲイン
+	const float wetMix = amount * 0.55f;               // 最大 55% wet
+	const float dryMix = 1.0f - wetMix * 0.5f;         // dry を一部残す
+	const float panRate = 0.20f;                       // パンリバーブの自動パン速度(Hz)
+
+	for (int i = 0; i < n; i++) {
+		float inMono = (L[i] + R[i]) * 0.5f * inGain;
+		float outCh[2] = { 0.0f, 0.0f };
+		for (int ch = 0; ch < 2; ch++) {
+			float acc = 0.0f;
+			// 並列コムフィルタ (各々ダンピング付きフィードバック)
+			for (int c = 0; c < FX_REV_COMBS; c++) {
+				int p = g_fxReverb.combPos[ch][c];
+				float y = g_fxReverb.comb[ch][c][p];
+				g_fxReverb.combLP[ch][c] = y * damp2 + g_fxReverb.combLP[ch][c] * damp1;
+				g_fxReverb.comb[ch][c][p] = inMono + g_fxReverb.combLP[ch][c] * roomSize;
+				if (++p >= g_fxReverb.combLen[ch][c]) p = 0;
+				g_fxReverb.combPos[ch][c] = p;
+				acc += y;
+			}
+			// 直列オールパス (拡散)
+			for (int a = 0; a < FX_REV_ALLPS; a++) {
+				int p = g_fxReverb.allpPos[ch][a];
+				float bufout = g_fxReverb.allp[ch][a][p];
+				float y = -acc + bufout;
+				g_fxReverb.allp[ch][a][p] = acc + bufout * 0.5f;
+				if (++p >= g_fxReverb.allpLen[ch][a]) p = 0;
+				g_fxReverb.allpPos[ch][a] = p;
+				acc = y;
+			}
+			outCh[ch] = acc;
+		}
+		float wetL = outCh[0];
+		float wetR = outCh[1];
+		if (panMode) {
+			// パンリバーブ: 残響を左右にゆっくり回す
+			g_fxReverb.panPhase += panRate / (float)rate;
+			if (g_fxReverb.panPhase >= 1.0f) g_fxReverb.panPhase -= 1.0f;
+			float lfo = sinf(g_fxReverb.panPhase * 2.0f * (float)M_PI);
+			float gL = 0.5f + 0.5f * lfo;
+			float gR = 1.0f - gL;
+			float mixL = wetL * gL + wetR * gR;
+			float mixR = wetL * gR + wetR * gL;
+			wetL = mixL; wetR = mixR;
+		}
+		float oL = L[i] * dryMix + wetL * wetMix;
+		float oR = R[i] * dryMix + wetR * wetMix;
+		L[i] = isfinite(oL) ? oL : 0.0f;
+		R[i] = isfinite(oR) ? oR : 0.0f;
+	}
+}
+
+// ---------- フラクショナル遅延読み出し (コーラス用) ----------
+static inline float FxReadFrac(const float* buf, int wpos, float delaySamp, int maxLen) {
+	if (delaySamp < 1.0f) delaySamp = 1.0f;
+	if (delaySamp > (float)(maxLen - 2)) delaySamp = (float)(maxLen - 2);
+	float rp = (float)wpos - delaySamp;
+	while (rp < 0.0f) rp += (float)maxLen;
+	int i0 = (int)rp;
+	float frac = rp - (float)i0;
+	int i1 = i0 + 1; if (i1 >= maxLen) i1 -= maxLen;
+	return buf[i0] * (1.0f - frac) + buf[i1] * frac;
+}
+
+// ---------- コーラス (3声モジュレーションディレイ) ----------
+#define FX_CHO_MAX 8192
+typedef struct {
+	float buf[2][FX_CHO_MAX];
+	int   wpos[2];
+	float lfoPhase;
+	int   rate;
+} FxChorus;
+static FxChorus g_fxChorus;
+
+static void FxChorusReset(int rate) {
+	memset(&g_fxChorus, 0, sizeof(g_fxChorus));
+	g_fxChorus.rate = rate;
+}
+
+static void FxProcessChorus(float* L, float* R, int n, int rate, float amount, BOOL distMode) {
+	if (amount <= 0.0f || n <= 0) return;
+	if (g_fxChorus.rate != rate) FxChorusReset(rate);
+	if (amount > 1.0f) amount = 1.0f;
+
+	const float baseSamp = 16.0f * rate / 1000.0f;          // 基準遅延 16ms
+	const float depthSamp = (4.0f + amount * 5.0f) * rate / 1000.0f; // 深さ 4-9ms
+	const float lfoHz = 0.5f;
+	const float wetMix = 0.5f * amount;
+	const float drive = 1.0f + amount * 3.0f;
+	const float driveNorm = 1.0f / tanhf(drive);
+
+	for (int i = 0; i < n; i++) {
+		g_fxChorus.lfoPhase += lfoHz / (float)rate;
+		if (g_fxChorus.lfoPhase >= 1.0f) g_fxChorus.lfoPhase -= 1.0f;
+		for (int ch = 0; ch < 2; ch++) {
+			float* buf = g_fxChorus.buf[ch];
+			int wp = g_fxChorus.wpos[ch];
+			float dry = (ch == 0) ? L[i] : R[i];
+			buf[wp] = dry;
+			float wet = 0.0f;
+			for (int v = 0; v < 3; v++) {
+				float ph = g_fxChorus.lfoPhase + (float)v / 3.0f + (ch ? 0.25f : 0.0f);
+				float lfo = sinf(ph * 2.0f * (float)M_PI);
+				float d = baseSamp + depthSamp * (0.5f + 0.5f * lfo);
+				wet += FxReadFrac(buf, wp, d, FX_CHO_MAX);
+			}
+			wet *= 0.4f;  // 3声合計の正規化
+			if (distMode) wet = tanhf(wet * drive) * driveNorm;  // コーラスディストーション
+			float out = dry * (1.0f - wetMix * 0.5f) + wet * wetMix;
+			if (++wp >= FX_CHO_MAX) wp = 0;
+			g_fxChorus.wpos[ch] = wp;
+			if (ch == 0) L[i] = isfinite(out) ? out : 0.0f;
+			else         R[i] = isfinite(out) ? out : 0.0f;
+		}
+	}
+}
+
+// ---------- ディレイ / マルチディレイ(ピンポン) ----------
+#define FX_DLY_MAX 96000   // 0.5s @192kHz / 約2.18s @44.1kHz
+typedef struct {
+	float buf[2][FX_DLY_MAX];
+	int   wpos[2];
+	int   rate;
+} FxDelay;
+static FxDelay g_fxDelay;
+
+static void FxDelayReset(int rate) {
+	memset(&g_fxDelay, 0, sizeof(g_fxDelay));
+	g_fxDelay.rate = rate;
+}
+
+static void FxProcessDelay(float* L, float* R, int n, int rate, float amount, BOOL multiMode) {
+	if (amount <= 0.0f || n <= 0) return;
+	if (g_fxDelay.rate != rate) FxDelayReset(rate);
+	if (amount > 1.0f) amount = 1.0f;
+
+	int d1 = (int)(0.250f * rate);   // 250ms 主ディレイ
+	int d2 = (int)(0.375f * rate);   // 375ms 第2タップ(マルチ用)
+	if (d1 >= FX_DLY_MAX) d1 = FX_DLY_MAX - 1;
+	if (d2 >= FX_DLY_MAX) d2 = FX_DLY_MAX - 1;
+	const float feedback = 0.25f + amount * 0.45f;   // 0.25..0.70
+	const float wetMix = 0.45f * amount;
+
+	float* bL = g_fxDelay.buf[0];
+	float* bR = g_fxDelay.buf[1];
+
+	for (int i = 0; i < n; i++) {
+		int wpL = g_fxDelay.wpos[0];
+		int wpR = g_fxDelay.wpos[1];
+
+		int rL = wpL - d1; if (rL < 0) rL += FX_DLY_MAX;
+		int rR = wpR - d1; if (rR < 0) rR += FX_DLY_MAX;
+		float dlL = bL[rL];
+		float dlR = bR[rR];
+
+		float dryL = L[i], dryR = R[i];
+		float wetL, wetR, fbL, fbR;
+
+		if (multiMode) {
+			// マルチディレイ: クロスフィードバックのピンポン + 第2タップ
+			int r2L = wpL - d2; if (r2L < 0) r2L += FX_DLY_MAX;
+			int r2R = wpR - d2; if (r2R < 0) r2R += FX_DLY_MAX;
+			wetL = dlL + bR[r2R] * 0.6f;
+			wetR = dlR + bL[r2L] * 0.6f;
+			fbL = dryL + dlR * feedback;   // L には R のエコーが返る
+			fbR = dryR + dlL * feedback;   // R には L のエコーが返る
+		}
+		else {
+			wetL = dlL;
+			wetR = dlR;
+			fbL = dryL + dlL * feedback;
+			fbR = dryR + dlR * feedback;
+		}
+
+		bL[wpL] = isfinite(fbL) ? fbL : 0.0f;
+		bR[wpR] = isfinite(fbR) ? fbR : 0.0f;
+
+		float oL = dryL + wetL * wetMix;
+		float oR = dryR + wetR * wetMix;
+		L[i] = isfinite(oL) ? oL : 0.0f;
+		R[i] = isfinite(oR) ? oR : 0.0f;
+
+		if (++wpL >= FX_DLY_MAX) wpL = 0;
+		if (++wpR >= FX_DLY_MAX) wpR = 0;
+		g_fxDelay.wpos[0] = wpL;
+		g_fxDelay.wpos[1] = wpR;
+	}
+}
+
+// ---------- savedata 値(0-200)を解釈してエフェクトを適用 ----------
+// チェーン順: コーラス → ディレイ → リバーブ (一般的なシグナルフロー)
+static void FxApplyUserEffects(float* L, float* R, int n, int rate) {
+	if (n <= 0) return;
+
+	if (g_eqChorus > 0) {
+		BOOL dist = (g_eqChorus > 100);
+		float amt = dist ? (g_eqChorus - 100) / 100.0f : g_eqChorus / 100.0f;
+		FxProcessChorus(L, R, n, rate, amt, dist);
+	}
+	if (g_eqDelay > 0) {
+		BOOL multi = (g_eqDelay > 100);
+		float amt = multi ? (g_eqDelay - 100) / 100.0f : g_eqDelay / 100.0f;
+		FxProcessDelay(L, R, n, rate, amt, multi);
+	}
+	if (g_eqReverb > 0) {
+		BOOL pan = (g_eqReverb > 100);
+		float amt = pan ? (g_eqReverb - 100) / 100.0f : g_eqReverb / 100.0f;
+		FxProcessReverb(L, R, n, rate, amt, pan);
+	}
+}
+
+
 // ===== エンジン初期化 =====
 // サンプルレート変更または reset==1 時に呼ばれる
 // 全チャンネル状態のクリア、ディレイバッファのゼロ埋め、
@@ -3739,6 +4224,16 @@ static void InitEngine(int rate) {
 
 	g_lastEffectAmount = 50;
 	g_initialized = TRUE;
+
+	// 追加エフェクトパラメータ (0 = オフ)
+	g_eqReverb = 0;
+	g_eqChorus = 0;
+	g_eqDelay = 0;
+
+	// 追加エフェクト(リバーブ/コーラス/ディレイ)の状態とディレイ尾をクリア
+	FxReverbReset(rate);
+	FxChorusReset(rate);
+	FxDelayReset(rate);
 
 	// [FIX-COMP] ブロック間平滑ゲインをリセット
 	g_stagingGainSmooth = 1.0f;
@@ -4304,18 +4799,36 @@ void equaliser(void* data, int len, BOOL reset) {
 	spatial = (int)ClampFloat((float)spatial, 0.0f, 200.0f);
 
 	// ============================================================
+	// 追加エフェクトパラメータ (リバーブ/コーラス/ディレイ) の取り込み
+	//   0 = オフ / 1-100 = モードA / 101-200 = モードB
+	//   eq_reverb : 1-100 リバーブ / 101-200 パンリバーブ
+	//   eq_chorus : 1-100 コーラス / 101-200 コーラスディストーション
+	//   eq_delay  : 1-100 ディレイ / 101-200 マルチディレイ
+	// ============================================================
+	g_eqReverb = (int)ClampFloat((float)savedata.eq_reverb, 0.0f, 200.0f);
+	g_eqChorus = (int)ClampFloat((float)savedata.eq_chorus, 0.0f, 200.0f);
+	g_eqDelay = (int)ClampFloat((float)savedata.eq_delay, 0.0f, 200.0f);
+	savedata.eq_reverb = g_eqReverb;
+	savedata.eq_chorus = g_eqChorus;
+	savedata.eq_delay = g_eqDelay;
+	// TODO: g_eqReverb / g_eqChorus / g_eqDelay を用いた
+	//       リバーブ・コーラス・ディレイの実処理をここに追加する。
+
+	// ============================================================
 	// [FIX-BYPASS] 完全バイパス判定
 	// 条件:
 	//   ・環境プリセット == 0 (無処理環境)
 	//   ・masterVolume/clarity/balance/density/spatial がすべて100
 	//   ・EQ帯域 eq[0-14] がすべて100 (フラット)
+	//   ・追加エフェクト(リバーブ/コーラス/ディレイ)がすべて0 (オフ)
 	// 上記すべて満たす場合は一切の処理をせず即返す。
 	// リサンプリングが不要な場合(≥44100Hz)はそのまま、
 	// リサンプリングが走っていた場合は tempBuffer を解放して返す。
 	// ============================================================
 	if (currentEnvPre == 0 &&
 		masterVolume == 100 && clarity == 100 &&
-		balance == 100 && density == 100 && spatial == 100)
+		balance == 100 && density == 100 && spatial == 100 &&
+		g_eqReverb == 0 && g_eqChorus == 0 && g_eqDelay == 0)
 	{
 		bool allFlat = true;
 		for (int i = 0; i < 15; i++) {
@@ -4512,14 +5025,19 @@ void equaliser(void* data, int len, BOOL reset) {
 	// 実効マスターゲイン = ユーザー設定 × 平滑化済みstagingGain
 	float effectiveMasterGain = masterGain * g_stagingGainSmooth;
 
-	// [FIX-4] チップチューン/FM音源検出時のスケーリング係数
-	// isChiptune=TRUE のとき:
-	//   wetScale=0.22       : リバーブ感を大幅削減 (エコーが前に出すぎないように)
-	//   harmonicScale=0.00  : 高調波歪み完全無効 (元々歪みの少ない信号に追加しない)
-	//   diffusionScale=0.12 : 拡散を最小限に (チップ音の輪郭を保つ)
-	float wetScale = ba.isChiptune ? 0.22f : 1.0f;
+	// [FIX-4 改] チップチューン/FM音源検出時のスケーリング係数
+	//
+	// 【変更理由: 100音響プリセットが同じに聞こえる問題の修正】
+	//   本アプリは SPC/NEZ/チップチューン等の低クレストファクター音源が主対象のため
+	//   ba.isChiptune がほぼ常時 TRUE になる。旧値 wetScale=0.22 / diffusionScale=0.12
+	//   では残響・拡散がほぼ消え、100 個の環境プリセットの差が聴き取れず
+	//   「全部同じ音」になっていた。
+	//   音割れ防止は最終段のルックアヘッドリミッターが担うため、ここで残響を
+	//   潰す必要はない。環境キャラクターが分かる範囲まで緩和する。
+	//   harmonicScale のみ 0.0 を維持 (元々歪みの少ない信号に倍音を足さない)。
+	float wetScale = ba.isChiptune ? 0.70f : 1.0f;
 	float harmonicScale = ba.isChiptune ? 0.00f : 1.0f;
-	float diffusionScale = ba.isChiptune ? 0.12f : 1.0f;
+	float diffusionScale = ba.isChiptune ? 0.55f : 1.0f;
 
 	// 出力用サンプルバッファ (最大約40ブロック分)
 	static float leftSamples[8192 * 40], rightSamples[8192 * 40];
@@ -4584,15 +5102,25 @@ void equaliser(void* data, int len, BOOL reset) {
 					while (rPos < 0) rPos += MAX_DELAY_SAMPLES;
 					float earlyGain = (env->type == TYPE_MOUNTAIN_ECHO) ? 0.18f : 0.25f;
 					float earlyRef = cs->delayBuffer[rPos] * earlyGain;
+					// echoClarity が高いほど拡散を弱めてエコーの輪郭を保つ (従来は未使用)
+					float clarityCut = 1.0f - env->echoClarity * 0.6f;
 					// 弱いディフュージョン (山彦の輪郭を保ちつつ自然な拡散を付加)
-					float weakDiff = env->diffusion * coreScale * 0.22f * diffusionScale;
-					float weakDens = env->density * 0.28f * diffusionScale;
+					float weakDiff = env->diffusion * coreScale * 0.22f * diffusionScale * clarityCut;
+					float weakDens = env->density * 0.28f * diffusionScale * clarityCut;
 					float late = ProcessDiffusion(cs, echo, weakDiff, weakDens, env->type);
+					// echoFeedbackTone で反射音の明暗を傾ける (-1=暗く, +1=明るく / 従来は未使用)
+					if (fabsf(env->echoFeedbackTone) > 0.01f) {
+						cs->echoToneState += 0.25f * (late - cs->echoToneState);
+						float highPart = late - cs->echoToneState;
+						late = cs->echoToneState + highPart * (1.0f + env->echoFeedbackTone * 0.8f);
+					}
 					// 後期残響エンベロープ
 					float lateEnv = powf(0.94f, 1.0f / (env->lateReverbDecay * 1.3f));
 					cs->lateEnvelope = cs->lateEnvelope * lateEnv + late * (1.0f - lateEnv);
 					// ウェット信号合成: 直接エコー + 早期反射 + 後期残響
 					wetSignal = echo * 0.88f + earlyRef * 0.35f + cs->lateEnvelope * 0.55f * 0.52f;
+					// 残響キャラクター付与 (空気吸収/色味/滑らかさ/コム/風)
+					wetSignal = ProcessWetCharacter(cs, wetSignal, env, wavbitbackup);
 					wetSignal *= fminf(0.90f, env->wetMix * coreScale) * wetScale;
 				}
 				else {
@@ -4614,12 +5142,17 @@ void equaliser(void* data, int len, BOOL reset) {
 					delayMain = ProcessBiquad(&cs->envLpf, delayMain);
 					delayMain = ProcessBiquad(&cs->envHpf, delayMain);
 
-					// ディフュージョン (チップチューン時は大幅削減)
+					// ディフュージョン (チップチューン時は削減)
+					// bassDiffusion/trebleDiffusion を密度に反映し、プリセット毎に
+					// 拡散プロファイルが変わるようにする (従来は未使用パラメータ)
+					float diffProfile = 0.5f + (env->bassDiffusion + env->trebleDiffusion) * 0.5f;
 					delayMain = ProcessDiffusion(cs, delayMain,
 						env->diffusion * coreScale * diffusionScale,
-						env->density * diffusionScale, env->type);
+						env->density * diffProfile * diffusionScale, env->type);
 
 					// 早期反射: 8タップ、時間経過とともに指数減衰
+					// reflectionDensity で反射の密度感を可変 (従来は未使用パラメータ)
+					float reflDens = 0.6f + env->reflectionDensity * 0.8f;
 					float earlyRef = 0.0f;
 					for (int r = 0; r < 8; r++) {
 						int rPos = cs->writePos - (refSamps[r] + preDelaySamps + chOffset);
@@ -4628,6 +5161,7 @@ void equaliser(void* data, int len, BOOL reset) {
 						earlyRef += cs->delayBuffer[rPos] * env->earlyRef[r * 2 + 1]
 							* reflectionScale * 1.4f * envelope;
 					}
+					earlyRef *= reflDens;
 
 					// 後期残響エンベロープ (exponential decay)
 					float lateEnv = powf(0.95f, 1.0f / env->lateReverbDecay);
@@ -4636,6 +5170,8 @@ void equaliser(void* data, int len, BOOL reset) {
 					// 早期反射 + 後期残響 合成
 					wetSignal = (earlyRef * env->earlyLateBalance)
 						+ (cs->lateEnvelope * (1.0f - env->earlyLateBalance * 0.5f));
+					// 残響キャラクター付与 (空気吸収/色味/滑らかさ/コム/風)
+					wetSignal = ProcessWetCharacter(cs, wetSignal, env, wavbitbackup);
 					wetSignal *= wetScale;  // [FIX-4]
 
 					// フィードバック: ウォームス + 材質吸収を適用した後にバッファ書き込み
@@ -4670,6 +5206,9 @@ void equaliser(void* data, int len, BOOL reset) {
 
 			mixed = ProcessBrightness(mixed, &cs->brightnessState, env->brightness);
 
+			// 質感キャラクター付与 (weight/woodiness/concrete/softness/phasing/distortion)
+			mixed = ProcessMixCharacter(cs, mixed, env, wavbitbackup);
+
 			// L/R バッファへ格納 (モノラル時は両方に同値)
 			if (wavchannel == 2) {
 				if (ch == 0) leftSamples[bufferIndex] = mixed;
@@ -4690,6 +5229,8 @@ void equaliser(void* data, int len, BOOL reset) {
 			w *= (env->ceilingHeight > 1.0f)
 				? (1.0f + (env->ceilingHeight - 1.0f) * 0.2f)
 				: env->ceilingHeight;
+			// enclosure (密閉度) が高いほどステレオ像を狭め包まれ感を出す (従来は未使用)
+			w *= (1.0f - env->enclosure * 0.35f);
 			float mid = (leftSamples[bufferIndex] + rightSamples[bufferIndex]) * 0.5f;
 			float side = (leftSamples[bufferIndex] - rightSamples[bufferIndex]) * 0.5f * w;
 			leftSamples[bufferIndex] = mid + side;
@@ -4698,6 +5239,12 @@ void equaliser(void* data, int len, BOOL reset) {
 
 		bufferIndex++;
 	}
+
+	// ===================================================
+	// 【追加エフェクト】リバーブ / コーラス / ディレイ
+	// 環境処理後・メイクアップ/リミッター前に適用 (ピークは最終段で制御)
+	// ===================================================
+	FxApplyUserEffects(leftSamples, rightSamples, bufferIndex, wavbitbackup);
 
 	// ===================================================
 	// 【最終段前】メイクアップゲインの適用

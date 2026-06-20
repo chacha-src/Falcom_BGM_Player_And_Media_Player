@@ -186,6 +186,16 @@ private:
     CDC     m_rollScratchDC;
     CBitmap m_rollScratchBmp;
     CBitmap* m_rollScratchOldBmp = nullptr;
+
+    // 表現記号の凡例キャッシュ（静的内容を毎フレーム再描画せず BitBlt するため）
+    mutable CDC      m_legendDC;
+    mutable CBitmap  m_legendBmp;
+    mutable CBitmap* m_legendOldBmp = nullptr;
+    mutable int      m_legendW = 0;
+    mutable int      m_legendH = 0;
+    mutable bool     m_legendReady = false;
+    mutable int      m_legendCacheRollW = -1;
+    mutable int      m_legendCacheRollH = -1;
     int     m_rollW = 0;
     int     m_rollH = 0;
     bool    m_rollReady = false;
@@ -230,6 +240,9 @@ private:
     void InvalidatePianoRollRegions(bool roll, bool key);
     void EnsurePaintFonts(int clientW, int keyH, int rollH);
     void DrawExprLegend(CDC& dc, int rollW, int rollH) const;
+    void DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRect& panel) const;
+    bool EnsureExprLegendCache(CDC& refDC, int rollW, int rollH) const;
+    void ReleaseExprLegendCache() const;
     void GetExprLegendPanelRect(int rollW, int rollH, CRect& panel) const;
     void DrawHistoryGrid(CDC& dc, int width, int yFrom, int yTo) const;
     int  HistoryRowPitch(int rollH) const;

@@ -24,6 +24,7 @@ int flacmode = 0;
 #include "mp3info.h"
 #include "ogg.h"
 #include "oggDlg.h"
+#include "CMediaPlayerDlg.h"
 #include "NoteFundamentalPick.h"
 #include <math.h>
 #include <vorbis/codec.h>
@@ -1006,6 +1007,9 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_WM_ERASEBKGND()
 	ON_WM_CTLCOLOR()
 	ON_BN_CLICKED(IDC_BUTTON57, &COggDlg::OnPlayList)
+	ON_BN_CLICKED(IDC_OGG_SWITCHMODE, &COggDlg::OnSwitchMode)
+	ON_MESSAGE(WM_MP_ENTER_FALCOM, &COggDlg::OnEnterFalcomMsg)
+	ON_WM_WINDOWPOSCHANGING()
 	ON_BN_CLICKED(IDC_BUTTON58, &COggDlg::OnBnmp3jake)
 	ON_WM_DESTROY()
 	ON_WM_CREATE()
@@ -2070,6 +2074,14 @@ PCMWAVEFORMAT    wfx;
 UINT ttt;
 int cc1, wl, t, oggsize, dd, loop1, loop2, loop1_2;//,oggsize1,oggsize2;
 __int64 playb;
+// 曲終端のジャスト検出用（DirectSound 再生カーソル基準）。すべて「DS バッファへ書き込んだ総バイト数」の単位。
+//   g_dsWrittenBytes  : play() 開始以降に DS バッファへ書き込んだ累積バイト数（単調増加）
+//   g_endWrittenBytes : 0=未終端 / >0=実音声が終わる絶対書込みバイト位置（EOF 検出時に確定）
+//   g_outBytesPerFrame: 出力 1 フレームのバイト数（短フェード尺の計算用に UI 側から共有）
+__int64 g_dsWrittenBytes = 0;
+__int64 g_endWrittenBytes = 0;
+__int64 g_heardBytes = 0;       // 実際に再生カーソルが消化した累積バイト数（DS スレッドが毎サイクル更新）
+int g_outBytesPerFrame = 4;
 int ru2 = 0, ru;
 int lo, loc, endf, ps = 0, locs;
 int poss = 0, poss2 = 0, poss3 = 0, poss4 = 0, poss5 = 0, poss6 = 0, loopcnt, pl_no;
@@ -2158,6 +2170,14 @@ LARGE_INTEGER freq;
 DWORD g_oggUiThreadId = 0;
 static volatile LONG g_timerpPosted = 0;
 static volatile LONG g_gdiPaintPending = 0;
+
+// メディアプレイヤーモードでメイン画面(og)が非表示の間は OnPaint が呼ばれず
+// g_gdiPaintPending が下がらないため timerp の GDI 合成(bGdiFrame)が止まる。
+// メディアプレイヤー側が dc を Blit した後にこれを呼んで合成を継続させる。
+void COgg_ClearGdiPaintPending()
+{
+	InterlockedExchange(&g_gdiPaintPending, 0);
+}
 
 static void COgg_RequestTimerp(COggDlg* dlg)
 {
@@ -2301,6 +2321,7 @@ BOOL COggDlg::OnInitDialog()
 	SetDlgItemText(IDC_BUTTON54, LL14(L"三国志2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2"));
 	SetDlgItemText(IDC_BUTTON57, LL14(L"プレイリスト", L"Playlist", L"Liste de lecture", L"Playlist", L"Lista de reproduccion", L"재생 목록", L"播放列表", L"قائمة التشغيل", L"Плейлист", L"Wiedergabeliste", L"Lista de reproducao", L"Afspeellijst", L"Lista odtwarzania", L"Calma listesi"));
 	SetDlgItemText(IDC_BUTTON58, LL14(L"ジャケ", L"Cover", L"Pochette", L"Copertina", L"Caratula", L"커버", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Ok?adka", L"Kapak"));
+	SetDlgItemText(IDC_OGG_SWITCHMODE, LL14(L"MP画面", L"MP screen", L"Ecran MP", L"Schermo MP", L"Pantalla MP", L"MP화면", L"MP画面", L"شاشة MP", L"Экран MP", L"MP-Ansicht", L"Tela MP", L"MP-scherm", L"Ekran MP", L"MP ekran?"));
 
 	// TODO: 特別な初期化を行う時はこの場所に追加してください。
 	//フォント設定
@@ -2512,6 +2533,9 @@ BOOL COggDlg::OnInitDialog()
 
 	SetTimer(5211, 20, NULL);
 	SetTimer(9998, 1000, NULL);
+	// メディアプレイヤーモードで起動する場合は初期化完了後に遷移(og/pl は OnShowWindow 防御で隠れる)
+	if (savedata.playerMode == 1)
+		SetTimer(5990, 1, NULL);
 	Modec();
 
 
@@ -9003,6 +9027,10 @@ void COggDlg::play()
 		BeginPlaybackNotifyThread();
 	}
 	endflg = 0;
+	g_dsWrittenBytes = 0;
+	g_endWrittenBytes = 0;
+	g_heardBytes = 0;
+	g_outBytesPerFrame = PcmOutBytesPerFrame();
 	SetTimer(9000, 10, NULL);
 	//	::SetPriorityClass(m_thread, HIGH_PRIORITY_CLASS);
 	endf = 0;
@@ -9066,8 +9094,11 @@ void COggDlg::play()
 	m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 	SetTimer(1250, 100, NULL);
 	fade1 = 0;
-	if (maini) maini->SetActiveWindow();
-	SetActiveWindow();
+	// メディアプレイヤーモードではメイン画面を前面化しない(裏に隠したまま)
+	if (savedata.playerMode != 1) {
+		if (maini) maini->SetActiveWindow();
+		SetActiveWindow();
+	}
 	m_jacketFocus = 0.0;
 	m_lastTick = 0;
 	LoadJacket(mp3file);
@@ -14112,8 +14143,12 @@ void COggDlg::dp(CString a)
 void COggDlg::OnDropFiles(HDROP hDropInfo)
 {
 	// TODO: この位置にメッセージ ハンドラ用のコードを追加するかまたはデフォルトの処理を呼び出してください
-	if (pl && plw) {
+	// プレイリストが存在すれば(表示/非表示問わず)そちらへ追加し、両方のリストビューを整合させる。
+	// メディアプレイヤーモードでは pl は裏で生きているのでここに入る。
+	if (pl && ::IsWindow(pl->GetSafeHwnd())) {
 		pl->OnDropFiles(hDropInfo);
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->RefreshList(TRUE);
 		return;
 	}
 
@@ -14505,6 +14540,12 @@ BOOL COggDlg::DestroyWindow()
 		dev->Release();
 		deve->Release();
 	}
+	// メディアプレイヤー画面(オーナー無しトップレベル)を後始末
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		mp->SavePos();
+		mp->DestroyWindow();
+	}
+	if (mp) { delete mp; mp = NULL; }
 	if (pl && plw) {
 		killw1 = 0;
 		pl->DestroyWindow();
@@ -14612,6 +14653,12 @@ int mcopy(char* a, int len)
 		for (int k = 0; k < 5; k++) {
 			ret = 0;
 			if ((int)playb > (data_size + 20000) / bpf && endf == 1) {
+				// 実音声はここで尽きている。無音先詰め(MUON 分)を待たず、真の終端到達と同時に
+				// 終端シグナルを立てる（中央の g_endWrittenBytes 確定をジャストに近づける）。
+				if (g_endWrittenBytes == 0) {
+					if (savedata.saverenzoku == 0) fade1 = 1;
+					else endflg = 1;
+				}
 				playb += lenl;
 				if (muon != 0) { muon--; ZeroMemory(a, len); }
 				if (muon == MUON) { ZeroMemory(a, len); muon--; rrr = 0; }
@@ -14813,6 +14860,9 @@ void COggDlg::timerp()
 				is_hovered = true;
 			}
 		}
+		// メディアプレイヤーモード: バナー上のホバーも同じアニメ対象にする
+		extern int g_mpBannerHover;
+		if (g_mpBannerHover) is_hovered = true;
 
 		if (is_hovered) {
 			m_jacketFocus += dt / 2.0;
@@ -14845,6 +14895,19 @@ void COggDlg::timerp()
 		snap_oggsize2 = oggsize2;
 		snap_loop1 = loop1;
 		snap_loop2 = loop2;
+	}
+
+	// 実再生位置補正: playb はデコード先頭（先読み分だけ先）。DS 再生カーソルがまだ消化していない
+	// キュー分(qSamples)を差し引くと「実際に聴こえている位置」になる。時間表示・スライダーで共用。
+	long qSamplesHeard = 0;
+	{
+		const int bpfHeardNow = PcmOutBytesPerFrame();
+		g_outBytesPerFrame = bpfHeardNow; // DS スレッドの短フェード尺計算用に共有
+		if (m_dsb) {
+			ULONG hp = 0, hw = 0;
+			if (m_dsb->GetCurrentPosition(&hp, &hw) == DS_OK)
+				qSamplesHeard = DsQueuedSamples(hp, hw, bpfHeardNow);
+		}
 	}
 
 	//時間
@@ -14901,16 +14964,10 @@ void COggDlg::timerp()
 		t3 = (double)snap_playb / (double)(wavbit_sample_Hz / wavv2[wavchannel]);// / (double)(wavsam_depth / 16.0f);
 		//先読み分を除去: playb はデコード先頭、実際に聴こえる位置は DS キュー分だけ過去
 		// playb は PcmOutBytesPerFrame 基準のフレーム数。MP3 はシークも含めフレーム単位に統一（旧×4は廃止）。
+		// 全 DS 出力モード（FLAC/ゲーム系含む）で実再生カーソル基準に統一する。
+		if (qSamplesHeard > 0 && snap_playb > qSamplesHeard)
+			t3 = (double)(snap_playb - qSamplesHeard) / (double)(wavbit_sample_Hz / wavv2[wavchannel]);
 		if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
-		if (m_dsb && !(mode == -8 || mode >= 1)) {
-			ULONG heardPc = 0, heardWc = 0;
-			if (m_dsb->GetCurrentPosition(&heardPc, &heardWc) == DS_OK) {
-				const int bpfHeard = PcmOutBytesPerFrame();
-				const long qSamples = DsQueuedSamples(heardPc, heardWc, bpfHeard);
-				if (qSamples > 0 && snap_playb > qSamples)
-					t3 = (double)(snap_playb - qSamples) / (double)(wavbit_sample_Hz / wavv2[wavchannel]);
-			}
-		}
 		if (t3 < 0.0) t3 = 0.0;
 		tt = (int)(t3 * 100.0);
 		if (tt < 0) tt = 0;
@@ -15428,12 +15485,18 @@ void COggDlg::timerp()
 
 	if (bGdiFrame)
 	{
-		RECT rect;
-		rect.top = 0;
-		rect.left = 0;
-		rect.bottom = (LONG)((101) * hD * 4);
-		rect.right = (LONG)((180 + 88 * 2 + 50) * hD * 4);
-		InvalidateRect(&rect, FALSE);
+		extern CMediaPlayerDlg* mp;
+		const bool mediaHidden = (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()) && !IsWindowVisible());
+		// メディアプレイヤーモード(メイン非表示)では og を再描画しない。
+		// mp は自前タイマーで dc を Blit し pending を解除して合成を継続させる。
+		if (!mediaHidden) {
+			RECT rect;
+			rect.top = 0;
+			rect.left = 0;
+			rect.bottom = (LONG)((101) * hD * 4);
+			rect.right = (LONG)((180 + 88 * 2 + 50) * hD * 4);
+			InvalidateRect(&rect, FALSE);
+		}
 		InterlockedExchange(&g_gdiPaintPending, 1);
 	}
 	//音量
@@ -15475,6 +15538,9 @@ void COggDlg::timerp()
 			pb = playb;
 			ogs = oggsize;
 		}
+		// スライダーも時間表示と同じく実再生位置（DS 先読み分を除去）に揃える。
+		if (qSamplesHeard > 0 && pb > qSamplesHeard) pb -= qSamplesHeard;
+		else if (qSamplesHeard > 0) pb = 0;
 		if (mode == -10) {
 			m_time.SetPos((int)(pb / 100));
 			if (ptl) {
@@ -16253,6 +16319,21 @@ void timerog1(UINT nIDEvent)
 
 	if (nIDEvent == 4923) {
 		og->KillTimer(4923);
+		// このタイマーは遅延発火するため、保留中に他ウィンドウへフォーカスが
+		// 移ると、解除処理の後から発火してホットキーを再登録してしまう。
+		// 自プロセスが前面でない場合は登録せず、確実に解除しておく。
+		{
+			HWND fg = ::GetForegroundWindow();
+			DWORD fgpid = 0;
+			::GetWindowThreadProcessId(fg, &fgpid);
+			if (fgpid != ::GetCurrentProcessId()) {
+				UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY0);
+				UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY1);
+				UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY2);
+				UnregisterHotKey(og->GetSafeHwnd(), ID_HOTKEY3);
+				return;
+			}
+		}
 		if (ip != 0) return;
 		if (maini)
 			::SetWindowPos(maini->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
@@ -16295,17 +16376,14 @@ void timerog1(UINT nIDEvent)
 		}
 	}
 	if (nIDEvent == 9000) {
-		// 連続再生: endflg 直後に即 OnRestart すると DS バッファの未再生分が切れる。数ティック待つ。
+		// 連続再生: 曲末で次曲へ。固定待ち(旧 ≒500ms)ではなく、DS 再生カーソルが実音声の
+		// 終端(g_endWrittenBytes)へジャストに到達してから OnRestart する。
 		// 曲末の RubberBand 尻尾は各 read* が readtempo(len==0) で吐き切る（g_rubberBandFinalFlushed で二重 final は抑止）。
-		static int s_contPlayEofWaitTicks = 0;
 		if (savedata.saverenzoku == 1 && endflg == 1) {
-			const int kContPlayEofWaitTicks = 50; // タイマ 10ms 想定 ≒500ms（必要なら調整）
-			if (s_contPlayEofWaitTicks <= 0)
-				s_contPlayEofWaitTicks = kContPlayEofWaitTicks;
-			s_contPlayEofWaitTicks--;
-			if (s_contPlayEofWaitTicks > 0)
-				return;
-			s_contPlayEofWaitTicks = 0;
+			// 終端が未確定、または実再生カーソルが終端へ到達するまで次曲へ進めない。
+			// g_heardBytes は DS スレッドが毎サイクル更新する実再生位置（バイト）。
+			if (g_endWrittenBytes == 0 || g_heardBytes < g_endWrittenBytes)
+				return; // まだ実音声が鳴り切っていない。次のティックで再判定。
 			plcnt++;
 			if (pl && plcnt >= pl->m_lc.GetItemCount()) plcnt = 0;
 			endflg = 0;
@@ -16318,13 +16396,16 @@ void timerog1(UINT nIDEvent)
 				og->OnRestart();
 			}
 		}
-		else
-			s_contPlayEofWaitTicks = 0;
 	}
 	if (nIDEvent == 6555) {
 		if (pl)
 			pl->SIconTimer(SC1);
 		SC1++; SC1 = SC1 % 2;
+	}
+	if (nIDEvent == 5990) {
+		og->KillTimer(5990);
+		EnterMediaPlayerMode();
+		return;
 	}
 	if (nIDEvent == 5211) {
 		og->KillTimer(5211);
@@ -19770,7 +19851,7 @@ void COggDlg::OnActivate(UINT nState, CWnd * pWndOther, BOOL bMinimized)
 
 	CCustomBlurDialogBase::OnActivate(nState, pWndOther, bMinimized);
 	int l = 5;
-	if (plw) {
+	if (plw && savedata.playerMode != 1) {
 		if ((nState == WA_ACTIVE || nState == WA_CLICKACTIVE) && bMinimized == 0 && pl->m_saisyo.GetCheck()) {
 			ogpl0 = 1;
 			pl->ShowWindow(SW_RESTORE);
@@ -19778,6 +19859,8 @@ void COggDlg::OnActivate(UINT nState, CWnd * pWndOther, BOOL bMinimized)
 	}
 	if (nState == WA_INACTIVE) //非アクティブ
 	{
+		// 保留中の再登録タイマーが後から発火して再登録するのを防ぐ。
+		KillTimer(4923);
 		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY0);
 		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY1);
 		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY2);
@@ -19803,6 +19886,8 @@ void COggDlg::OnKillFocus(CWnd * pNewWnd)
 {
 
 	CCustomBlurDialogBase::OnKillFocus(pNewWnd);
+	// 保留中の再登録タイマーが後から発火して再登録するのを防ぐ。
+	KillTimer(4923);
 	UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY0);
 	UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY1);
 	UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY2);
@@ -19819,6 +19904,11 @@ void COggDlg::OnKillFocus(CWnd * pNewWnd)
 void COggDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
+	// メディアプレイヤーモード中は(起動直後で mp 未生成でも)必ず裏へ隠す
+	if (bShow && savedata.playerMode == 1 && GetSafeHwnd()) {
+		ShowWindow(SW_HIDE);
+		return;
+	}
 	if (bShow && pl && plw)
 		pl->ScheduleRefreshNavControls();
 	UNREFERENCED_PARAMETER(nStatus);
@@ -19855,6 +19945,14 @@ void COggDlg::RefreshAllAeroWindows()
 	refreshMode(&m_EqualizerDlg);
 	refreshMode(&m_PianoRollDlg);
 	if (pl) refreshMode(pl);
+	{
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && ::IsWindowVisible(mp->m_hWnd)) {
+			refreshMode(mp);
+			// アクリル<->通常の切替時に全コントロールを確実に再描画
+			mp->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+		}
+	}
 	if (mi) refreshMode(mi);
 	if (pMainFrame1 && pMainFrame1->GetSafeHwnd() && ::IsWindowVisible(pMainFrame1->m_hWnd)) {
 		CCC_ApplyAero(pMainFrame1->m_hWnd, CCC_IsAeroEnabled() ? TRUE : FALSE);
@@ -20020,18 +20118,17 @@ HBRUSH COggDlg::OnCtlColor(CDC * pDC, CWnd * pWnd, UINT nCtlColor)
 void COggDlg::OnPlayList()
 {
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
-	if (plw == 0) pl = NULL;
-	if (pl) {
-		if (plw)
+	// メディアプレイヤーモードやDnD整合のため、閉じる時は破棄せず非表示にして
+	// プレイリスト本体は裏で生かしておく(再表示時は ShowWindow)。
+	if (pl && ::IsWindow(pl->GetSafeHwnd())) {
+		if (plw) {
+			pl->Save();
+			::ShowWindow(pl->m_hWnd, SW_HIDE);
 			plw = 0;
-		killw1 = 0;
-		if (pl) {
-			pl->nnn = 1;
-			//			pl->DestroyWindow();
-			pl->OnClose();
-			PumpUntilFlagOrTimeout(killw1);
-			delete pl;
-			pl = NULL;
+		}
+		else {
+			::ShowWindow(pl->m_hWnd, SW_SHOW);
+			plw = 1;
 		}
 	}
 	else {
@@ -20040,7 +20137,7 @@ void COggDlg::OnPlayList()
 		pl->Create(this);
 		plw = 1;
 	}
-	if (pl)
+	if (pl && plw)
 		savedata.pl = 1;
 	else
 		savedata.pl = 0;
@@ -20059,6 +20156,40 @@ void COggDlg::OnPlayList()
 	}
 	_chdir(tmp);
 	}
+
+void COggDlg::OnSwitchMode()
+{
+	// メディアプレイヤーモードへ切替
+	EnterMediaPlayerMode();
+}
+
+LRESULT COggDlg::OnEnterFalcomMsg(WPARAM, LPARAM)
+{
+	// mp の操作ハンドラから抜けた後に安全に切替(mp を破棄)
+	EnterFalcomMode();
+	return 0;
+}
+
+void COggDlg::OnWindowPosChanging(WINDOWPOS* lpwndpos)
+{
+	// メディアプレイヤーモード中はメイン画面を一切表示させない(初回再生時のちら出し対策)
+	if (lpwndpos && savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+		lpwndpos->flags &= ~SWP_SHOWWINDOW;
+	CCustomBlurDialogBase::OnWindowPosChanging(lpwndpos);
+}
+
+BOOL COggDlg::PreCreateWindow(CREATESTRUCT& cs)
+{
+	BOOL r = CCustomBlurDialogBase::PreCreateWindow(cs);
+	// メディアプレイヤーモードで起動する場合、メイン画面は最初から非表示・画面外で生成し
+	// 一瞬のちらつきを完全に防ぐ(切替時に EnterFalcomMode で表示する)。
+	if (savedata.playerMode == 1) {
+		cs.style &= ~WS_VISIBLE;
+		cs.x = -32000;
+		cs.y = -32000;
+	}
+	return r;
+}
 
 void plus1(int& c);
 void plus2(int& c);
@@ -20703,6 +20834,8 @@ void COggDlg::OnActivateApp(BOOL bActive, DWORD dwThreadID)
 	// ホットキーが解除されないことがある。WM_ACTIVATEAPPは全トップレベル
 	// ウィンドウに送られるため、アプリ全体の非アクティブを確実に検知できる。
 	if (!bActive && ::IsWindow(GetSafeHwnd())) {
+		// 保留中の再登録タイマーが後から発火して再登録するのを防ぐ。
+		KillTimer(4923);
 		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY0);
 		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY1);
 		UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY2);
@@ -20723,6 +20856,8 @@ BOOL COggDlg::OnNcActivate(BOOL bActive)
 		SetTimer(4923, 20, NULL);
 	}
 	else {
+		// 保留中の再登録タイマーが後から発火して再登録するのを防ぐ。
+		KillTimer(4923);
 		SetTimer(4924, 10, NULL);
 	}
 	return CCustomBlurDialogBase::OnNcActivate(bActive);

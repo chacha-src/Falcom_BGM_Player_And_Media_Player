@@ -328,6 +328,10 @@ public:
 	CCustomStandardButton m_eqq;
 	BOOL drawth = FALSE;
 
+	afx_msg void OnSwitchMode();   // メディアプレイヤーモードへ切替
+	afx_msg LRESULT OnEnterFalcomMsg(WPARAM, LPARAM);  // mp→ファルコム特化型 復帰(遅延実行)
+	afx_msg void OnWindowPosChanging(WINDOWPOS* lpwndpos);
+	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	void StartTimerpVsyncThread();
 	void StopTimerpVsyncThread();
 	afx_msg LRESULT OnTimerpVsyncTick(WPARAM wParam, LPARAM lParam);

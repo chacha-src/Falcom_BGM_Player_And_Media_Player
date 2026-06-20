@@ -1,0 +1,1552 @@
+﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+//
+// 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
+// メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
+//
+#include "stdafx.h"
+#include "ogg.h"
+#include "CMediaPlayerDlg.h"
+#include "CImageBase.h"
+#include "Mp3Image.h"
+#include <direct.h>
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+/////////////////////////////////////////////////////////////////////////////
+// 外部参照(既存のグローバル/メイン画面・プレイリストの状態を流用)
+extern COggDlg* og;
+extern CPlayList* pl;
+extern BOOL plw;
+extern int plcnt;
+extern int gameon;
+extern int killw1;
+extern save savedata;
+extern TCHAR karento2[1024];
+extern CString filen, fnn, tagname, tagfile, tagalbum;
+extern int playy;   // 再生中フラグ(oggDlg.cpp)
+extern CDC dc;   // COggDlg のオフスクリーン合成面(スペアナ+ジャケ+時間)を流用
+
+// og 側のオフスクリーン面のソース寸法(oggDlg.cpp の OnPaint と一致させる: srcW=MDCP+5)
+static const int MP_SRCW = (88 * 2 + 175) * 4 + 5; // = 1409 (og の srcW と一致)
+static const int MP_SRCH = (81 + 16) * 4;          // = 388
+
+CMediaPlayerDlg* mp = NULL;
+int g_mpBannerHover = 0;   // バナー(GDI)上にマウスがあるか(og の timerp がジャケットアニメに使用)
+
+/////////////////////////////////////////////////////////////////////////////
+// CModeSelectDlg
+/////////////////////////////////////////////////////////////////////////////
+IMPLEMENT_DYNAMIC(CModeSelectDlg, CCustomBlurDialogBase)
+
+CModeSelectDlg::CModeSelectDlg(CWnd* pParent)
+	: CCustomBlurDialogBase(CModeSelectDlg::IDD, pParent)
+{
+}
+
+CModeSelectDlg::~CModeSelectDlg()
+{
+}
+
+void CModeSelectDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CCustomBlurDialogBase::DoDataExchange(pDX);
+	DDX_Control(pDX, IDC_MODE_FALCOM, m_btnFalcom);
+	DDX_Control(pDX, IDC_MODE_MEDIA, m_btnMedia);
+	DDX_Control(pDX, IDC_MODE_ASK, m_ask);
+}
+
+BEGIN_MESSAGE_MAP(CModeSelectDlg, CCustomBlurDialogBase)
+	ON_BN_CLICKED(IDC_MODE_FALCOM, &CModeSelectDlg::OnFalcom)
+	ON_BN_CLICKED(IDC_MODE_MEDIA, &CModeSelectDlg::OnMedia)
+	ON_WM_CTLCOLOR()
+END_MESSAGE_MAP()
+
+BOOL CModeSelectDlg::OnInitDialog()
+{
+	CCustomBlurDialogBase::OnInitDialog();
+
+	SetWindowText(LL14(L"起動モードの選択", L"Select startup mode", L"Selection du mode de demarrage", L"Selezione modalita di avvio", L"Seleccion del modo de inicio", L"시작 모드 선택", L"选择启动模式", L"اختيار وضع البدء", L"Выбор режима запуска", L"Startmodus auswahlen", L"Selecionar modo de inicializacao", L"Opstartmodus selecteren", L"Tryb uruchamiania", L"Ba?lang?c modunu sec"));
+	SetDlgItemText(IDC_STATIC, LL14(L"どちらの画面で起動しますか？", L"Which screen to start with?", L"Quel ecran au demarrage ?", L"Quale schermata avviare?", L"?Con que pantalla iniciar?", L"어느 화면으로 시작할까요?", L"以哪个画面启动？", L"بأي شاشة تبدأ؟", L"С какого экрана начать?", L"Mit welchem Bildschirm starten?", L"Qual tela iniciar?", L"Met welk scherm starten?", L"Ktorym ekranem uruchomic?", L"Hangi ekranla ba?las?n?"));
+	m_btnFalcom.SetWindowText(LL14(L"ファルコムbgm特化型画面", L"Falcom BGM dedicated screen", L"Ecran dedie BGM Falcom", L"Schermata BGM Falcom", L"Pantalla dedicada BGM Falcom", L"팔콤 BGM 전용 화면", L"Falcom BGM 专用画面", L"شاشة Falcom BGM المخصصة", L"Экран Falcom BGM", L"Falcom-BGM-Bildschirm", L"Tela dedicada Falcom BGM", L"Falcom BGM-scherm", L"Ekran Falcom BGM", L"Falcom BGM ekran?"));
+	m_btnMedia.SetWindowText(LL14(L"メディアプレイヤー画面", L"Media player screen", L"Ecran lecteur multimedia", L"Schermata lettore multimediale", L"Pantalla reproductor multimedia", L"미디어 플레이어 화면", L"媒体播放器画面", L"شاشة مشغل الوسائط", L"Экран медиаплеера", L"Media-Player-Bildschirm", L"Tela do reprodutor de midia", L"Mediaspeler-scherm", L"Ekran odtwarzacza multimediow", L"Medya oynat?c? ekran?"));
+	m_ask.SetWindowText(LL14(L"次回も起動時に確認する", L"Ask again next startup", L"Demander au prochain demarrage", L"Chiedi al prossimo avvio", L"Preguntar en el proximo inicio", L"다음에도 시작 시 확인", L"下次启动时也询问", L"اسأل في المرة القادمة", L"Спрашивать при следующем запуске", L"Beim nachsten Start fragen", L"Perguntar no proximo inicio", L"Volgende keer opnieuw vragen", L"Zapytaj przy nast?pnym starcie", L"Sonraki ac?l??ta tekrar sor"));
+	m_ask.SetCheck(savedata.startupAsk ? 1 : 0);
+
+	// 少し可愛い系: ボタンを大きめのフォントに
+	m_btnFalcom.SetGradation(RGB(255, 210, 230), RGB(255, 170, 205), 0, TRUE);
+	m_btnMedia.SetGradation(RGB(205, 230, 255), RGB(170, 205, 255), 0, TRUE);
+
+	return TRUE;
+}
+
+void CModeSelectDlg::OnFalcom()
+{
+	savedata.playerMode = 0;
+	savedata.startupAsk = m_ask.GetCheck() ? 1 : 0;
+	EndDialog(IDOK);
+}
+
+void CModeSelectDlg::OnMedia()
+{
+	savedata.playerMode = 1;
+	savedata.startupAsk = m_ask.GetCheck() ? 1 : 0;
+	EndDialog(IDOK);
+}
+
+HBRUSH CModeSelectDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
+	if (savedata.aero != 1) {
+		if (m_brDlg.GetSafeHandle() == NULL)
+			m_brDlg.CreateSolidBrush(COLOR_DIALOG_BG);
+		if (nCtlColor == CTLCOLOR_DLG)
+			return m_brDlg;
+		if (nCtlColor == CTLCOLOR_STATIC) {
+			pDC->SetBkMode(TRANSPARENT);
+			return m_brDlg;
+		}
+	}
+	return hbr;
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// CMediaPlayerDlg
+/////////////////////////////////////////////////////////////////////////////
+IMPLEMENT_DYNAMIC(CMediaPlayerDlg, CCustomBlurDialogBase)
+
+CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
+	: CCustomBlurDialogBase(CMediaPlayerDlg::IDD, pParent)
+{
+	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+	m_lastCount = -1;
+	m_lastPlcnt = -2;
+	m_lastScroll = -2;
+	m_lastComboCount = -1;
+	m_lastMs2 = 0;
+	m_seekDragging = 0;
+	m_dragging = 0;
+	m_dragSrc = -1;
+	m_hDragImage = NULL;
+	hD2 = 1.0f;
+	m_bannerRect.SetRectEmpty();
+	m_bannerCacheW = 0;
+	m_bannerCacheH = 0;
+}
+
+CMediaPlayerDlg::~CMediaPlayerDlg()
+{
+}
+
+void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CCustomBlurDialogBase::DoDataExchange(pDX);
+	DDX_Control(pDX, IDC_MP_TITLE, m_title);
+	DDX_Control(pDX, IDC_MP_ARTIST, m_artist);
+	DDX_Control(pDX, IDC_MP_ALBUM, m_album);
+	DDX_Control(pDX, IDC_MP_LRC, m_lrc);
+	DDX_Control(pDX, IDC_MP_LRC2, m_lrc2);
+	DDX_Control(pDX, IDC_MP_LRC3, m_lrc3);
+	DDX_Control(pDX, IDC_MP_OS, m_os);
+	DDX_Control(pDX, IDC_MP_CPU, m_cpu);
+	DDX_Control(pDX, IDC_MP_OS3, m_os3);
+	DDX_Control(pDX, IDC_MP_TIME, m_time);
+	DDX_Control(pDX, IDC_MP_VOLVAL, m_volval);
+	DDX_Control(pDX, IDC_MP_VOL_L, m_vollabel);
+	DDX_Control(pDX, IDC_MP_SEEK, m_seek);
+	DDX_Control(pDX, IDC_MP_VOL, m_vol);
+	DDX_Control(pDX, IDC_MP_PREV, m_prev);
+	DDX_Control(pDX, IDC_MP_PLAY, m_play);
+	DDX_Control(pDX, IDC_MP_PAUSE, m_pause);
+	DDX_Control(pDX, IDC_MP_STOP, m_stop);
+	DDX_Control(pDX, IDC_MP_NEXT, m_next);
+	DDX_Control(pDX, IDC_MP_EQ, m_eq);
+	DDX_Control(pDX, IDC_MP_PIANO, m_piano);
+	DDX_Control(pDX, IDC_MP_SWITCHMODE, m_switch);
+	DDX_Control(pDX, IDC_MP_SETTINGS, m_settings);
+	DDX_Control(pDX, IDC_MP_EXIT, m_exit);
+	DDX_Control(pDX, IDC_MP_JACK, m_jacket);
+	DDX_Control(pDX, IDC_MP_DSVOL, m_dsvol);
+	DDX_Control(pDX, IDC_MP_DSVOL_L, m_dsvolL);
+	DDX_Control(pDX, IDC_MP_KVOL, m_kvol);
+	DDX_Control(pDX, IDC_MP_KVOL_L, m_kvolL);
+	DDX_Control(pDX, IDC_MP_TEMPO, m_tempo);
+	DDX_Control(pDX, IDC_MP_TEMPO_L, m_tempoL);
+	DDX_Control(pDX, IDC_MP_PITCH, m_pitch);
+	DDX_Control(pDX, IDC_MP_PITCH_L, m_pitchL);
+	DDX_Control(pDX, IDC_MP_RENZOKU, m_renzoku);
+	DDX_Control(pDX, IDC_MP_LOOP, m_loop);
+	DDX_Control(pDX, IDC_MP_RANDOM, m_random);
+	DDX_Control(pDX, IDC_MP_PLSEL, m_plsel);
+	DDX_Control(pDX, IDC_MP_PLRENAME, m_plrename);
+	DDX_Control(pDX, IDC_MP_PLDELETE, m_pldelete);
+	DDX_Control(pDX, IDC_MP_LSUP, m_lsup);
+	DDX_Control(pDX, IDC_MP_UP, m_up);
+	DDX_Control(pDX, IDC_MP_DOWN, m_down);
+	DDX_Control(pDX, IDC_MP_LSDOWN, m_lsdown);
+	DDX_Control(pDX, IDC_MP_ITEMDEL, m_itemdel);
+	DDX_Control(pDX, IDC_MP_FIND, m_find);
+	DDX_Control(pDX, IDC_MP_FINDUP, m_findup);
+	DDX_Control(pDX, IDC_MP_FINDDOWN, m_finddown);
+	DDX_Control(pDX, IDC_MP_SUPE, m_supe);
+	DDX_Control(pDX, IDC_MP_ST, m_st);
+	DDX_Control(pDX, IDC_MP_TIP, m_tip);
+	DDX_Control(pDX, IDC_MP_MINI, m_mini);
+	DDX_Control(pDX, IDC_MP_SAVEMP3, m_savemp3);
+	DDX_Control(pDX, IDC_MP_SAVEDS, m_saveds);
+	DDX_Control(pDX, IDC_MP_GRP_INFO, m_grpInfo);
+	DDX_Control(pDX, IDC_MP_GRP_SND, m_grpSnd);
+	DDX_Control(pDX, IDC_MP_GRP_PL, m_grpPl);
+	DDX_Control(pDX, IDC_MP_LIST, m_list);
+}
+
+BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogBase)
+	ON_WM_SIZE()
+	ON_WM_GETMINMAXINFO()
+	ON_WM_TIMER()
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CTLCOLOR()
+	ON_WM_DROPFILES()
+	ON_WM_DESTROY()
+	ON_WM_CLOSE()
+	ON_WM_HSCROLL()
+	ON_BN_CLICKED(IDC_MP_PREV, &CMediaPlayerDlg::OnPrev)
+	ON_BN_CLICKED(IDC_MP_PLAY, &CMediaPlayerDlg::OnPlay)
+	ON_BN_CLICKED(IDC_MP_PAUSE, &CMediaPlayerDlg::OnPauseBtn)
+	ON_BN_CLICKED(IDC_MP_STOP, &CMediaPlayerDlg::OnStopBtn)
+	ON_BN_CLICKED(IDC_MP_NEXT, &CMediaPlayerDlg::OnNext)
+	ON_BN_CLICKED(IDC_MP_EQ, &CMediaPlayerDlg::OnEq)
+	ON_BN_CLICKED(IDC_MP_PIANO, &CMediaPlayerDlg::OnPiano)
+	ON_BN_CLICKED(IDC_MP_EXIT, &CMediaPlayerDlg::OnExit)
+	ON_BN_CLICKED(IDC_MP_JACK, &CMediaPlayerDlg::OnJacket)
+	ON_BN_CLICKED(IDC_MP_SETTINGS, &CMediaPlayerDlg::OnSettings)
+	ON_STN_CLICKED(IDC_MP_TEMPO_L, &CMediaPlayerDlg::OnTempoReset)
+	ON_STN_CLICKED(IDC_MP_PITCH_L, &CMediaPlayerDlg::OnPitchReset)
+	ON_BN_CLICKED(IDC_MP_SWITCHMODE, &CMediaPlayerDlg::OnSwitch)
+	ON_BN_CLICKED(IDC_MP_RENZOKU, &CMediaPlayerDlg::OnRenzoku)
+	ON_BN_CLICKED(IDC_MP_LOOP, &CMediaPlayerDlg::OnLoop)
+	ON_BN_CLICKED(IDC_MP_RANDOM, &CMediaPlayerDlg::OnRandom)
+	ON_CBN_SELCHANGE(IDC_MP_PLSEL, &CMediaPlayerDlg::OnPlSel)
+	ON_BN_CLICKED(IDC_MP_PLRENAME, &CMediaPlayerDlg::OnPlRename)
+	ON_BN_CLICKED(IDC_MP_PLDELETE, &CMediaPlayerDlg::OnPlDelete)
+	ON_BN_CLICKED(IDC_MP_LSUP, &CMediaPlayerDlg::OnMoveTop)
+	ON_BN_CLICKED(IDC_MP_UP, &CMediaPlayerDlg::OnMoveUp)
+	ON_BN_CLICKED(IDC_MP_DOWN, &CMediaPlayerDlg::OnMoveDown)
+	ON_BN_CLICKED(IDC_MP_LSDOWN, &CMediaPlayerDlg::OnMoveBottom)
+	ON_BN_CLICKED(IDC_MP_ITEMDEL, &CMediaPlayerDlg::OnItemDel)
+	ON_BN_CLICKED(IDC_MP_SUPE, &CMediaPlayerDlg::OnSupe)
+	ON_BN_CLICKED(IDC_MP_ST, &CMediaPlayerDlg::OnSt)
+	ON_BN_CLICKED(IDC_MP_TIP, &CMediaPlayerDlg::OnTip)
+	ON_BN_CLICKED(IDC_MP_MINI, &CMediaPlayerDlg::OnMini)
+	ON_BN_CLICKED(IDC_MP_SAVEMP3, &CMediaPlayerDlg::OnSaveMp3)
+	ON_BN_CLICKED(IDC_MP_SAVEDS, &CMediaPlayerDlg::OnSaveDs)
+	ON_BN_CLICKED(IDC_MP_FINDUP, &CMediaPlayerDlg::OnFindUp)
+	ON_BN_CLICKED(IDC_MP_FINDDOWN, &CMediaPlayerDlg::OnFindDown)
+	ON_WM_MOUSEMOVE()
+	ON_WM_LBUTTONUP()
+	ON_NOTIFY(NM_DBLCLK, IDC_MP_LIST, &CMediaPlayerDlg::OnDblclkList)
+	ON_NOTIFY(NM_RCLICK, IDC_MP_LIST, &CMediaPlayerDlg::OnRclickList)
+	ON_NOTIFY(LVN_BEGINDRAG, IDC_MP_LIST, &CMediaPlayerDlg::OnBeginDragList)
+END_MESSAGE_MAP()
+
+int CMediaPlayerDlg::Create(CWnd* pParent)
+{
+	BOOL bret = CCustomBlurDialogBase::Create(CMediaPlayerDlg::IDD, pParent);
+	if (bret == TRUE)
+		ShowWindow(SW_SHOW);
+	return bret;
+}
+
+BOOL CMediaPlayerDlg::OnInitDialog()
+{
+	CCustomBlurDialogBase::OnInitDialog();
+
+	// 子コントロールを親の再描画で塗り潰さない(スタティック消失・リスト欠け・ちらつき防止)
+	ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+
+	SetIcon(m_hIcon, TRUE);
+	SetIcon(m_hIcon, FALSE);
+
+	CDC* dc = GetDC();
+	if (dc) {
+		hD2 = (float)GetDeviceCaps(dc->m_hDC, LOGPIXELSX) / 96.0f;
+		ReleaseDC(dc);
+	}
+	if (hD2 < 1.0f) hD2 = 1.0f;
+
+	SetWindowText(LL14(L"メディアプレイヤー", L"Media Player", L"Lecteur multimedia", L"Lettore multimediale", L"Reproductor multimedia", L"미디어 플레이어", L"媒体播放器", L"مشغل الوسائط", L"Медиаплеер", L"Media-Player", L"Reprodutor de midia", L"Mediaspeler", L"Odtwarzacz multimediow", L"Medya Oynat?c?"));
+
+	m_play.SetWindowText(LL14(L"再生", L"Play", L"Lire", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Играть", L"Wiedergabe", L"Reproduzir", L"Afspelen", L"Odtwarzaj", L"Oynat"));
+	m_pause.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat"));
+	m_stop.SetWindowText(LL14(L"停止", L"Stop", L"Arret", L"Stop", L"Detener", L"정지", L"停止", L"إيقاف", L"Стоп", L"Stopp", L"Parar", L"Stop", L"Stop", L"Durdur"));
+	m_renzoku.SetWindowText(LL14(L"連続", L"Cont.", L"Cont.", L"Cont.", L"Cont.", L"연속", L"连续", L"متتابع", L"Подряд", L"Folge", L"Cont.", L"Doorl.", L"Ci?g?e", L"Surekli"));
+	m_loop.SetWindowText(LL14(L"ループ", L"Loop", L"Boucle", L"Loop", L"Bucle", L"루프", L"循环", L"تكرار", L"Цикл", L"Schleife", L"Loop", L"Lus", L"P?tla", L"Dongu"));
+	m_random.SetWindowText(LL14(L"ランダム", L"Random", L"Aleatoire", L"Casuale", L"Aleatorio", L"랜덤", L"随机", L"عشوائي", L"Случайно", L"Zufall", L"Aleatorio", L"Willekeurig", L"Losowo", L"Rastgele"));
+	m_eq.SetWindowText(LL14(L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ"));
+	m_piano.SetWindowText(LL14(L"ピアノ", L"Piano", L"Piano", L"Piano", L"Piano", L"피아노", L"钢琴", L"بيانو", L"Пиано", L"Klavier", L"Piano", L"Piano", L"Pianino", L"Piyano"));
+	m_switch.SetWindowText(LL14(L"ファルコム特化型へ", L"To Falcom screen", L"Vers ecran Falcom", L"Alla schermata Falcom", L"A pantalla Falcom", L"팔콤 화면으로", L"切换到Falcom画面", L"إلى شاشة Falcom", L"К экрану Falcom", L"Zum Falcom-Bildschirm", L"Para tela Falcom", L"Naar Falcom-scherm", L"Do ekranu Falcom", L"Falcom ekran?na"));
+	m_settings.SetWindowText(LL14(L"設定", L"Settings", L"Reglages", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"إعدادات", L"Настройки", L"Einstellungen", L"Config.", L"Instellingen", L"Ustawienia", L"Ayarlar"));
+	m_jacket.SetWindowText(LL14(L"ジャケ", L"Cover", L"Pochette", L"Copertina", L"Caratula", L"커버", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Ok?adka", L"Kapak"));
+	m_exit.SetWindowText(LL14(L"終了", L"Exit", L"Quitter", L"Esci", L"Salir", L"종료", L"退出", L"خروج", L"Выход", L"Beenden", L"Sair", L"Afsluiten", L"Zako?cz", L"C?k??"));
+	m_jacket.SetGradation(RGB(255, 235, 245), RGB(255, 200, 225), 0, TRUE);
+	m_exit.SetGradation(RGB(255, 210, 210), RGB(255, 160, 160), 0, TRUE);
+	m_vollabel.SetWindowText(LL14(L"主音量", L"Volume", L"Volume", L"Volume", L"Volumen", L"음량", L"音量", L"الصوت", L"Громкость", L"Lautstarke", L"Volume", L"Volume", L"G?o?no??", L"Ses"));
+	m_plrename.SetWindowText(LL14(L"名前変更", L"Rename", L"Renommer", L"Rinomina", L"Renombrar", L"이름변경", L"重命名", L"إعادة تسمية", L"Переименовать", L"Umbenennen", L"Renomear", L"Hernoemen", L"Zmie? nazw?", L"Yeniden adland?r"));
+	m_pldelete.SetWindowText(LL14(L"リスト削除", L"Delete list", L"Suppr. liste", L"Elimina lista", L"Eliminar lista", L"목록삭제", L"删除列表", L"حذف القائمة", L"Удалить список", L"Liste loschen", L"Excluir lista", L"Lijst wissen", L"Usu? list?", L"Listeyi sil"));
+	m_itemdel.SetWindowText(LL14(L"曲削除", L"Remove", L"Retirer", L"Rimuovi", L"Quitar", L"곡삭제", L"删除曲目", L"حذف", L"Удалить", L"Entfernen", L"Remover", L"Verwijder", L"Usu? utwor", L"Parcay? sil"));
+	m_supe.SetWindowText(LL14(L"スペアナ", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"));
+	m_st.SetWindowText(LL14(L"ST", L"ST", L"ST", L"ST", L"ST", L"ST", L"ST", L"ST", L"ST", L"ST", L"ST", L"ST", L"ST", L"ST"));
+	m_tip.SetWindowText(LL14(L"ツールチップ", L"Tooltips", L"Info-bulles", L"Suggerimenti", L"Sugerencias", L"툴팁", L"工具提示", L"تلميحات", L"Подсказки", L"Tooltips", L"Dicas", L"Tooltips", L"Etykiety", L"?puclar?"));
+	m_mini.SetWindowText(LL14(L"最小化連動", L"Min. sync", L"Min. sync", L"Min. sync", L"Min. sync", L"최소화 연동", L"最小化联动", L"تزامن التصغير", L"Синхр. сверт.", L"Min.-Sync", L"Sinc. min.", L"Min. sync", L"Synch. min.", L"Min. e?itle"));
+	m_savemp3.SetWindowText(LL14(L"mp3途中保存", L"mp3 resume", L"mp3 reprise", L"mp3 ripresa", L"mp3 reanudar", L"mp3 위치저장", L"mp3续播", L"حفظ mp3", L"mp3 позиция", L"mp3 Position", L"mp3 retomar", L"mp3 hervat", L"mp3 wznow", L"mp3 surdur"));
+	m_saveds.SetWindowText(LL14(L"DShow途中保存", L"DShow resume", L"DShow reprise", L"DShow ripresa", L"DShow reanudar", L"DShow 위치저장", L"DShow续播", L"حفظ DShow", L"DShow позиция", L"DShow Position", L"DShow retomar", L"DShow hervat", L"DShow wznow", L"DShow surdur"));
+	m_grpInfo.SetWindowText(LL14(L"情報", L"Info", L"Info", L"Info", L"Info", L"정보", L"信息", L"معلومات", L"Инфо", L"Info", L"Info", L"Info", L"Info", L"Bilgi"));
+	m_grpSnd.SetWindowText(LL14(L"サウンド調整", L"Sound", L"Son", L"Audio", L"Sonido", L"사운드", L"声音", L"الصوت", L"Звук", L"Sound", L"Som", L"Geluid", L"D?wi?k", L"Ses"));
+	m_grpPl.SetWindowText(LL14(L"プレイリスト", L"Playlist", L"Liste", L"Playlist", L"Lista", L"재생목록", L"播放列表", L"قائمة", L"Плейлист", L"Playlist", L"Lista", L"Playlist", L"Lista", L"Liste"));
+	// グループ枠は最背面 + WS_CLIPSIBLINGS で、内側のコントロールを塗り潰さない
+	m_grpInfo.ModifyStyle(0, WS_CLIPSIBLINGS);
+	m_grpSnd.ModifyStyle(0, WS_CLIPSIBLINGS);
+	m_grpPl.ModifyStyle(0, WS_CLIPSIBLINGS);
+	// ButtonST(プレイリストと同じアイコン): 一番上/上/下/一番下 と あいまい検索 上/下
+	m_lsup.SetIcon(IDR_SUP);    m_lsup.SetFlat(TRUE);
+	m_up.SetIcon(IDR_UP);       m_up.SetFlat(TRUE);
+	m_down.SetIcon(IDR_DOWN);   m_down.SetFlat(TRUE);
+	m_lsdown.SetIcon(IDR_SDOWN); m_lsdown.SetFlat(TRUE);
+	m_finddown.SetIcon(IDR_DOWN); m_finddown.SetFlat(TRUE);
+	m_findup.SetIcon(IDR_UP);    m_findup.SetFlat(TRUE);
+
+	// サウンド調整スライダー(og の各スライダーと同じ範囲に合わせる)
+	m_dsvol.SetRange(-498, 1);  m_dsvol.SetMode(1);
+	m_kvol.SetRange(100, 900);
+	m_tempo.SetRange(0, 400);   m_tempo.SetMode(1);
+	m_pitch.SetRange(0, 400);   m_pitch.SetMode(1);
+
+	// 少し可愛い系の配色
+	m_prev.SetGradation(RGB(215, 235, 255), RGB(165, 205, 245), 0, TRUE);
+	m_play.SetGradation(RGB(200, 240, 200), RGB(140, 210, 150), 0, TRUE);
+	m_pause.SetGradation(RGB(255, 240, 200), RGB(255, 210, 140), 0, TRUE);
+	m_stop.SetGradation(RGB(255, 215, 220), RGB(255, 170, 185), 0, TRUE);
+	m_next.SetGradation(RGB(215, 235, 255), RGB(165, 205, 245), 0, TRUE);
+	m_eq.SetGradation(RGB(230, 220, 255), RGB(200, 185, 250), 0, TRUE);
+	m_piano.SetGradation(RGB(230, 220, 255), RGB(200, 185, 250), 0, TRUE);
+	m_switch.SetGradation(RGB(225, 210, 255), RGB(190, 170, 255), 0, TRUE);
+	m_settings.SetGradation(RGB(255, 235, 205), RGB(255, 205, 150), 0, TRUE);
+	m_plrename.SetGradation(RGB(220, 240, 255), RGB(180, 215, 250), 0, TRUE);
+	m_pldelete.SetGradation(RGB(255, 220, 225), RGB(255, 180, 190), 0, TRUE);
+	m_itemdel.SetGradation(RGB(255, 220, 225), RGB(255, 180, 190), 0, TRUE);
+	CCustomControlUtility::SetControlBackgroundColor(&m_plsel, COLOR_COMBO_BG);
+	// タイトルに淡いドロップシャドウで可愛く強調
+	m_title.SetDropShadow(RGB(255, 220, 235), 0, 1, 0, TRUE);
+
+	// リスト列(プレイリストと同じ並び)
+	DWORD ex = m_list.GetExtendedStyle();
+	ex |= LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES;
+	m_list.SetExtendedStyle(ex);
+	il.Create(16, 16, ILC_COLOR, 0, 1);   // プレイリストと同じ生成方法に合わせる
+	il.Add(AfxGetApp()->LoadIcon(IDI_ICON1));
+	il.Add(AfxGetApp()->LoadIcon(IDI_ICON2));
+	il.Add(AfxGetApp()->LoadIcon(IDI_ICON3));
+	m_list.SetImageList(&il, LVSIL_SMALL);
+	m_list.InsertColumn(0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, (int)(220 * hD2));
+	m_list.InsertColumn(1, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, (int)(60 * hD2));
+	m_list.InsertColumn(2, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, (int)(60 * hD2));
+	m_list.InsertColumn(3, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatc?"), LVCFMT_LEFT, (int)(160 * hD2));
+	m_list.InsertColumn(4, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Comm.", L"Album/Comm.", L"Album/Com.", L"앨범/댓글", L"专辑/注释", L"الألبوم/تعليق", L"Альбом/Комм.", L"Album/Komm.", L"Album/Coment.", L"Album/Opm.", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, (int)(160 * hD2));
+
+	// フォント
+	m_fontTitle.CreateFont(-(int)(20 * hD2), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
+	m_fontInfo.CreateFont(-(int)(13 * hD2), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
+	m_fontList.CreateFont(-(int)(14 * hD2), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
+	// タイトル/アーティスト/アルバムはバナーGDIに表示されるのでスタティックは隠す(縦幅節約)
+	m_title.ShowWindow(SW_HIDE);
+	m_artist.ShowWindow(SW_HIDE);
+	m_album.ShowWindow(SW_HIDE);
+	m_lrc.SetFont(&m_fontInfo, TRUE);
+	m_lrc2.SetFont(&m_fontInfo, TRUE);
+	m_lrc3.SetFont(&m_fontInfo, TRUE);
+	m_dsvolL.SetFont(&m_fontInfo, TRUE);
+	m_kvolL.SetFont(&m_fontInfo, TRUE);
+	m_tempoL.SetFont(&m_fontInfo, TRUE);
+	m_pitchL.SetFont(&m_fontInfo, TRUE);
+	m_vollabel.SetFont(&m_fontInfo, TRUE);
+	m_list.SetFont(&m_fontList, TRUE);
+
+	// タイトルは可愛くピンク強調
+	m_title.SetGradation(RGB(255, 105, 180), RGB(150, 60, 160), 0, TRUE);
+
+	m_vol.SetRange(0, 100);
+	m_vol.SetPos(100);
+
+	// 初期座標: 保存座標があればそれ、なければファルコム画面の位置・プレイリストの大きさ
+	{
+		int x = savedata.mpx, y = savedata.mpy, w = savedata.mpw, h = savedata.mph;
+		if (!savedata.mpHasPos || w < 100 || h < 100) {
+			RECT ro = { 0,0,0,0 };
+			if (og && ::IsWindow(og->GetSafeHwnd()))
+				og->GetWindowRect(&ro);
+			x = (ro.left != 0 || ro.right != 0) ? ro.left : 100;
+			y = (ro.top != 0 || ro.bottom != 0) ? ro.top : 100;
+			w = (int)(580 * hD2);
+			h = (int)(620 * hD2);
+			if (pl && ::IsWindow(pl->GetSafeHwnd())) {
+				RECT rp; pl->GetWindowRect(&rp);
+				int pw = rp.right - rp.left, ph = rp.bottom - rp.top;
+				if (pw > 200) w = pw;
+				if (ph > 200) h = ph + (int)(360 * hD2); // プレイリスト分+情報/操作部
+			}
+		}
+		// 画面外チェック
+		RECT rcWork; SystemParametersInfo(SPI_GETWORKAREA, 0, &rcWork, 0);
+		if (x < rcWork.left - 50 || x > rcWork.right - 50) x = rcWork.left + 40;
+		if (y < rcWork.top - 10 || y > rcWork.bottom - 50) y = rcWork.top + 40;
+		MoveWindow(x, y, w, h);
+	}
+
+	m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_BALLOON);
+	m_tooltip.Activate(TRUE);
+	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
+	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 360);
+	m_tooltip.AddTool(&m_switch, LL14(L"ファルコムbgm特化型画面へ戻します。", L"Return to the Falcom BGM dedicated screen.", L"Revenir a l'ecran Falcom.", L"Torna alla schermata Falcom.", L"Volver a la pantalla Falcom.", L"팔콤 전용 화면으로 돌아갑니다.", L"返回Falcom专用画面。", L"العودة إلى شاشة Falcom.", L"Вернуться к экрану Falcom.", L"Zum Falcom-Bildschirm zuruck.", L"Voltar para a tela Falcom.", L"Terug naar Falcom-scherm.", L"Powrot do ekranu Falcom.", L"Falcom ekran?na don."));
+	m_tooltip.AddTool(&m_prev, LL14(L"前の曲へ。", L"Previous track.", L"Piste precedente.", L"Traccia precedente.", L"Pista anterior.", L"이전 곡.", L"上一曲。", L"المقطع السابق.", L"Предыдущий трек.", L"Vorheriger Titel.", L"Faixa anterior.", L"Vorige track.", L"Poprzedni utwor.", L"Onceki parca."));
+	m_tooltip.AddTool(&m_play, LL14(L"再生 / 選択曲を再生します。", L"Play / play the selected track.", L"Lire la piste selectionnee.", L"Riproduci la traccia selezionata.", L"Reproducir la pista seleccionada.", L"선택한 곡을 재생합니다.", L"播放所选曲目。", L"تشغيل المقطع المحدد.", L"Воспроизвести выбранный трек.", L"Ausgewahlten Titel abspielen.", L"Reproduzir a faixa selecionada.", L"Geselecteerde track afspelen.", L"Odtworz wybrany utwor.", L"Secili parcay? cal."));
+	m_tooltip.AddTool(&m_pause, LL14(L"一時停止 / 再開します。", L"Pause / resume.", L"Pause / reprise.", L"Pausa / riprendi.", L"Pausar / reanudar.", L"일시정지 / 재개.", L"暂停/继续。", L"إيقاف مؤقت / استئناف.", L"Пауза / продолжить.", L"Pause / Fortsetzen.", L"Pausar / retomar.", L"Pauze / hervatten.", L"Pauza / wznow.", L"Duraklat / surdur."));
+	m_tooltip.AddTool(&m_stop, LL14(L"停止します。", L"Stop.", L"Arreter.", L"Ferma.", L"Detener.", L"정지합니다.", L"停止。", L"إيقاف.", L"Остановить.", L"Stoppen.", L"Parar.", L"Stoppen.", L"Zatrzymaj.", L"Durdur."));
+	m_tooltip.AddTool(&m_next, LL14(L"次の曲へ。", L"Next track.", L"Piste suivante.", L"Traccia successiva.", L"Pista siguiente.", L"다음 곡.", L"下一曲。", L"المقطع التالي.", L"Следующий трек.", L"Nachster Titel.", L"Proxima faixa.", L"Volgende track.", L"Nast?pny utwor.", L"Sonraki parca."));
+	m_tooltip.AddTool(&m_renzoku, LL14(L"プレイリストを順番に連続再生します。", L"Play the playlist continuously in order.", L"Lecture continue dans l'ordre.", L"Riproduzione continua in ordine.", L"Reproduccion continua en orden.", L"순서대로 연속 재생.", L"按顺序连续播放。", L"تشغيل متواصل بالترتيب.", L"Непрерывное воспроизведение по порядку.", L"Fortlaufend in Reihenfolge abspielen.", L"Reproducao continua em ordem.", L"Doorlopend afspelen op volgorde.", L"Odtwarzaj po kolei.", L"S?rayla surekli cal."));
+	m_tooltip.AddTool(&m_loop, LL14(L"選択した曲をループ再生します。", L"Loop the selected track.", L"Lire la piste en boucle.", L"Ripeti la traccia.", L"Repetir la pista.", L"선택한 곡을 반복 재생.", L"循环播放所选曲目。", L"تكرار المقطع المحدد.", L"Зациклить выбранный трек.", L"Ausgewahlten Titel wiederholen.", L"Repetir a faixa selecionada.", L"Geselecteerde track herhalen.", L"Zap?tl wybrany utwor.", L"Secili parcay? donguye al."));
+	m_tooltip.AddTool(&m_random, LL14(L"ランダム再生 / 順次再生を切り替えます。", L"Toggle random / sequential play.", L"Lecture aleatoire / sequentielle.", L"Riproduzione casuale / sequenziale.", L"Reproduccion aleatoria / secuencial.", L"랜덤 / 순차 재생 전환.", L"切换随机/顺序播放。", L"تبديل التشغيل العشوائي/المتسلسل.", L"Случайное / последовательное.", L"Zufall / Reihenfolge umschalten.", L"Aleatorio / sequencial.", L"Willekeurig / opeenvolgend.", L"Losowo / po kolei.", L"Rastgele / s?ral?."));
+	m_tooltip.AddTool(&m_seek, LL14(L"再生位置。ドラッグでシークします(ループ範囲も表示)。", L"Playback position. Drag to seek (loop range shown).", L"Position de lecture. Glissez pour chercher.", L"Posizione. Trascina per cercare.", L"Posicion. Arrastra para buscar.", L"재생 위치. 드래그로 탐색.", L"播放位置。拖动以定位。", L"موضع التشغيل. اسحب للبحث.", L"Позиция. Перетащите для перемотки.", L"Position. Zum Suchen ziehen.", L"Posicao. Arraste para buscar.", L"Positie. Sleep om te zoeken.", L"Pozycja. Przeci?gnij.", L"Konum. Surukleyerek ara."));
+	m_tooltip.AddTool(&m_vol, LL14(L"音量を調整します。", L"Adjust volume.", L"Regler le volume.", L"Regola il volume.", L"Ajustar el volumen.", L"음량을 조절합니다.", L"调整音量。", L"ضبط مستوى الصوت.", L"Регулировка громкости.", L"Lautstarke einstellen.", L"Ajustar o volume.", L"Volume aanpassen.", L"Reguluj g?o?no??.", L"Sesi ayarla."));
+	m_tooltip.AddTool(&m_eq, LL14(L"イコライザーを開きます。", L"Open the equalizer.", L"Ouvrir l'egaliseur.", L"Apri l'equalizzatore.", L"Abrir el ecualizador.", L"이퀄라이저를 엽니다.", L"打开均衡器。", L"فتح المعادل.", L"Открыть эквалайзер.", L"Equalizer offnen.", L"Abrir o equalizador.", L"Equalizer openen.", L"Otworz korektor.", L"Ekolayzeri ac."));
+	m_tooltip.AddTool(&m_piano, LL14(L"ピアノロールを開きます。", L"Open the piano roll.", L"Ouvrir le rouleau piano.", L"Apri il piano roll.", L"Abrir el rollo de piano.", L"피아노 롤을 엽니다.", L"打开钢琴卷帘。", L"فتح لوحة البيانو.", L"Открыть пианоролл.", L"Klavierrolle offnen.", L"Abrir o piano roll.", L"Pianorol openen.", L"Otworz rolke pianina.", L"Piyano rulosunu ac."));
+	m_tooltip.AddTool(&m_jacket, LL14(L"ジャケット画像を別窓で表示します。", L"Show cover art in a separate window.", L"Afficher la pochette.", L"Mostra la copertina.", L"Mostrar la caratula.", L"커버 이미지를 표시합니다.", L"在单独窗口显示封面。", L"عرض صورة الغلاف.", L"Показать обложку.", L"Cover anzeigen.", L"Mostrar a capa.", L"Toon hoes.", L"Poka? ok?adk?.", L"Kapak resmini goster."));
+	m_tooltip.AddTool(&m_exit, LL14(L"アプリケーションを終了します。", L"Exit the application.", L"Quitter l'application.", L"Esci dall'applicazione.", L"Salir de la aplicacion.", L"앱을 종료합니다.", L"退出应用程序。", L"إنهاء التطبيق.", L"Выйти из приложения.", L"Anwendung beenden.", L"Sair do aplicativo.", L"Toepassing afsluiten.", L"Zamknij aplikacj?.", L"Uygulamadan c?k."));
+	m_tooltip.AddTool(&m_list, LL14(L"ダブルクリックで再生。ファイルをドロップして追加できます。", L"Double-click to play. Drop files to add.", L"Double-clic pour lire. Glissez des fichiers.", L"Doppio clic per riprodurre. Trascina file.", L"Doble clic para reproducir. Suelta archivos.", L"더블 클릭으로 재생. 파일을 드롭해 추가.", L"双击播放。拖入文件添加。", L"انقر مزدوجاً للتشغيل. أفلت الملفات.", L"Двойной клик — воспроизведение. Перетащите файлы.", L"Doppelklick zum Abspielen. Dateien ablegen.", L"Clique duplo para tocar. Solte arquivos.", L"Dubbelklik om af te spelen. Sleep bestanden.", L"Kliknij dwukrotnie. Upu?? pliki.", L"Cift t?kla cal. Dosya b?rak."));
+	m_tooltip.AddTool(&m_settings, LL14(L"設定画面を開きます。", L"Open settings.", L"Ouvrir les reglages.", L"Apri le impostazioni.", L"Abrir ajustes.", L"설정 화면을 엽니다.", L"打开设置。", L"فتح الإعدادات.", L"Открыть настройки.", L"Einstellungen offnen.", L"Abrir configuracoes.", L"Instellingen openen.", L"Otworz ustawienia.", L"Ayarlar? ac."));
+	m_tooltip.AddTool(&m_dsvol, LL14(L"DirectSound音量を調整します。", L"Adjust DirectSound volume.", L"Reglez le volume DirectSound.", L"Regola il volume DirectSound.", L"Ajustar volumen DirectSound.", L"DirectSound 음량 조절.", L"调整DirectSound音量。", L"ضبط مستوى صوت DirectSound.", L"Громкость DirectSound.", L"DirectSound-Lautstarke.", L"Volume DirectSound.", L"DirectSound-volume.", L"G?o?no?? DirectSound.", L"DirectSound sesi."));
+	m_tooltip.AddTool(&m_kvol, LL14(L"拡張音量(ブースト)を調整します。", L"Adjust extended (boost) volume.", L"Volume etendu (boost).", L"Volume esteso (boost).", L"Volumen extendido (boost).", L"확장(부스트) 음량 조절.", L"调整扩展(增益)音量。", L"ضبط الصوت الموسع (التعزيز).", L"Расширенная громкость (буст).", L"Erweiterte Lautstarke (Boost).", L"Volume estendido (boost).", L"Uitgebreid (boost) volume.", L"Rozszerzona g?o?no??.", L"Geni?letilmi? ses."));
+	m_tooltip.AddTool(&m_tempo, LL14(L"再生テンポを調整します(ラベルをクリックで100%に戻す)。", L"Adjust playback tempo (click label to reset to 100%).", L"Tempo de lecture (clic sur le label = 100%).", L"Tempo (clic sull'etichetta = 100%).", L"Tempo (clic en etiqueta = 100%).", L"재생 템포 조절(라벨 클릭 시 100%).", L"调整播放速度(点击标签恢复100%)。", L"ضبط الإيقاع (انقر التسمية لإعادة 100%).", L"Темп (клик по метке = 100%).", L"Tempo (Label klicken = 100%).", L"Tempo (clique no rotulo = 100%).", L"Tempo (klik label = 100%).", L"Tempo (etykieta = 100%).", L"Tempo (etikete t?kla = %100)."));
+	m_tooltip.AddTool(&m_pitch, LL14(L"再生ピッチ(音程)を調整します(ラベルをクリックで100%に戻す)。", L"Adjust playback pitch (click label to reset to 100%).", L"Hauteur (clic sur le label = 100%).", L"Altezza (clic sull'etichetta = 100%).", L"Tono (clic en etiqueta = 100%).", L"재생 피치 조절(라벨 클릭 시 100%).", L"调整音高(点击标签恢复100%)。", L"ضبط طبقة الصوت (انقر التسمية لإعادة 100%).", L"Высота (клик по метке = 100%).", L"Tonhohe (Label klicken = 100%).", L"Tom (clique no rotulo = 100%).", L"Toonhoogte (klik label = 100%).", L"Wysokosc (klik = 100%).", L"Perde (etikete t?kla = %100)."));
+	m_tooltip.AddTool(&m_plsel, LL14(L"プレイリストを切り替え/新規追加します。", L"Switch / add a playlist.", L"Changer / ajouter une liste.", L"Cambia / aggiungi playlist.", L"Cambiar / anadir lista.", L"재생목록 전환/추가.", L"切换/新建播放列表。", L"تبديل / إضافة قائمة.", L"Сменить / добавить плейлист.", L"Playlist wechseln / hinzufugen.", L"Trocar / adicionar lista.", L"Playlist wisselen/toevoegen.", L"Zmie?/dodaj list?.", L"Liste de?i?tir/ekle."));
+	m_tooltip.AddTool(&m_plrename, LL14(L"現在のプレイリスト名を変更します。", L"Rename the current playlist.", L"Renommer la liste.", L"Rinomina la playlist.", L"Renombrar la lista.", L"현재 재생목록 이름 변경.", L"重命名当前播放列表。", L"إعادة تسمية القائمة.", L"Переименовать плейлист.", L"Playlist umbenennen.", L"Renomear a lista.", L"Lijst hernoemen.", L"Zmie? nazw? listy.", L"Listeyi yeniden adland?r."));
+	m_tooltip.AddTool(&m_pldelete, LL14(L"現在のプレイリストを削除します。", L"Delete the current playlist.", L"Supprimer la liste.", L"Elimina la playlist.", L"Eliminar la lista.", L"현재 재생목록 삭제.", L"删除当前播放列表。", L"حذف القائمة.", L"Удалить плейлист.", L"Playlist loschen.", L"Excluir a lista.", L"Lijst verwijderen.", L"Usu? list?.", L"Listeyi sil."));
+	m_tooltip.AddTool(&m_up, LL14(L"選択した曲を上へ移動します。", L"Move selected track up.", L"Monter la piste.", L"Sposta su.", L"Subir pista.", L"선택 곡을 위로.", L"上移所选曲目。", L"تحريك لأعلى.", L"Переместить вверх.", L"Nach oben.", L"Mover para cima.", L"Omhoog verplaatsen.", L"Przesu? w gore.", L"Yukar? ta??."));
+	m_tooltip.AddTool(&m_down, LL14(L"選択した曲を下へ移動します。", L"Move selected track down.", L"Descendre la piste.", L"Sposta giu.", L"Bajar pista.", L"선택 곡을 아래로.", L"下移所选曲目。", L"تحريك لأسفل.", L"Переместить вниз.", L"Nach unten.", L"Mover para baixo.", L"Omlaag verplaatsen.", L"Przesu? w dol.", L"A?a?? ta??."));
+	m_tooltip.AddTool(&m_itemdel, LL14(L"選択した曲をリストから削除します。", L"Remove selected track(s) from the list.", L"Retirer les pistes selectionnees.", L"Rimuovi le tracce selezionate.", L"Quitar pistas seleccionadas.", L"선택 곡을 목록에서 삭제.", L"从列表删除所选曲目。", L"حذف المقاطع المحددة.", L"Удалить выбранные треки.", L"Ausgewahlte Titel entfernen.", L"Remover faixas selecionadas.", L"Geselecteerde tracks verwijderen.", L"Usu? zaznaczone utwory.", L"Secili parcalar? sil."));
+	m_tooltip.AddTool(&m_supe, LL14(L"スペアナ表示を切り替えます。", L"Toggle spectrum display.", L"Afficher le spectre.", L"Mostra spettro.", L"Mostrar espectro.", L"스펙트럼 표시 전환.", L"切换频谱显示。", L"تبديل عرض الطيف.", L"Спектр вкл/выкл.", L"Spektrum umschalten.", L"Alternar espectro.", L"Spectrum wisselen.", L"Prze??cz widmo.", L"Spektrumu de?i?tir."));
+	m_tooltip.AddTool(&m_st, LL14(L"スペアナのST表示を切り替えます。", L"Toggle spectrum ST mode.", L"Mode ST du spectre.", L"Modalita ST spettro.", L"Modo ST espectro.", L"스펙트럼 ST 모드.", L"切换频谱ST模式。", L"وضع ST للطيف.", L"Режим ST спектра.", L"Spektrum-ST-Modus.", L"Modo ST do espectro.", L"Spectrum ST-modus.", L"Tryb ST widma.", L"Spektrum ST modu."));
+	m_tooltip.AddTool(&m_find, LL14(L"あいまい検索キーワード。▲▼で前後検索。", L"Fuzzy search keyword. Use up/down to find.", L"Mot-cle recherche floue.", L"Parola chiave ricerca fuzzy.", L"Palabra busqueda difusa.", L"퍼지 검색어. ▲▼로 검색.", L"模糊搜索关键字。▲▼查找。", L"كلمة بحث غامض.", L"Слово нечеткого поиска.", L"Fuzzy-Suchbegriff.", L"Palavra de busca fuzzy.", L"Fuzzy zoekterm.", L"S?owo wyszukiwania.", L"Bulan?k arama kelimesi."));
+	m_tooltip.AddTool(&m_findup, LL14(L"上方向に検索します。", L"Search upward.", L"Chercher vers le haut.", L"Cerca in alto.", L"Buscar arriba.", L"위로 검색.", L"向上搜索。", L"بحث للأعلى.", L"Искать вверх.", L"Aufwarts suchen.", L"Buscar acima.", L"Omhoog zoeken.", L"Szukaj w gore.", L"Yukar? ara."));
+	m_tooltip.AddTool(&m_finddown, LL14(L"下方向に検索します。", L"Search downward.", L"Chercher vers le bas.", L"Cerca in basso.", L"Buscar abajo.", L"아래로 검색.", L"向下搜索。", L"بحث للأسفل.", L"Искать вниз.", L"Abwarts suchen.", L"Buscar abaixo.", L"Omlaag zoeken.", L"Szukaj w dol.", L"A?a?? ara."));
+	m_tooltip.AddTool(&m_lsup, LL14(L"選択曲を一番上へ移動。", L"Move to top.", L"Tout en haut.", L"In cima.", L"Al principio.", L"맨 위로.", L"移到顶部。", L"إلى الأعلى.", L"В начало.", L"Ganz nach oben.", L"Para o topo.", L"Naar boven.", L"Na gore.", L"En uste."));
+	m_tooltip.AddTool(&m_up, LL14(L"選択曲を上へ移動。", L"Move up.", L"Monter.", L"Su.", L"Subir.", L"위로.", L"上移。", L"لأعلى.", L"Вверх.", L"Hoch.", L"Cima.", L"Omhoog.", L"W gore.", L"Yukar?."));
+	m_tooltip.AddTool(&m_down, LL14(L"選択曲を下へ移動。", L"Move down.", L"Descendre.", L"Giu.", L"Bajar.", L"아래로.", L"下移。", L"لأسفل.", L"Вниз.", L"Runter.", L"Baixo.", L"Omlaag.", L"W dol.", L"A?a??."));
+	m_tooltip.AddTool(&m_lsdown, LL14(L"選択曲を一番下へ移動。", L"Move to bottom.", L"Tout en bas.", L"In fondo.", L"Al final.", L"맨 아래로.", L"移到底部。", L"إلى الأسفل.", L"В конец.", L"Ganz nach unten.", L"Para o final.", L"Naar beneden.", L"Na dol.", L"En alta."));
+	m_tooltip.AddTool(&m_tip, LL14(L"行ツールチップの表示を切り替えます。", L"Toggle row tooltips.", L"Info-bulles des lignes.", L"Suggerimenti righe.", L"Sugerencias de filas.", L"행 툴팁 표시 전환.", L"切换行工具提示。", L"تبديل تلميحات الصفوف.", L"Подсказки строк.", L"Zeilen-Tooltips.", L"Dicas de linha.", L"Rij-tooltips.", L"Etykiety wierszy.", L"Sat?r ipuclar?."));
+	m_tooltip.AddTool(&m_mini, LL14(L"最小化/復帰をメイン画面と連動させます。", L"Sync minimize/restore with main window.", L"Synchroniser min./rest.", L"Sincronizza min./rip.", L"Sincronizar min./rest.", L"최소화/복원 연동.", L"最小化/还原联动。", L"تزامن التصغير/الاستعادة.", L"Синхр. сверт./восст.", L"Min./Wiederh. synchron.", L"Sincronizar min./rest.", L"Min./herstel synch.", L"Synch. min./przywr.", L"Min./geri yukleme e?itle."));
+	m_tooltip.AddTool(&m_savemp3, LL14(L"mp3再生時に途中保存を有効にします。", L"Enable resume save for mp3.", L"Reprise pour mp3.", L"Ripresa per mp3.", L"Reanudar para mp3.", L"mp3 위치 저장.", L"mp3续播保存。", L"حفظ موضع mp3.", L"Сохранение позиции mp3.", L"mp3-Position speichern.", L"Retomar mp3.", L"mp3 hervatten.", L"Wznawianie mp3.", L"mp3 surdurme."));
+	m_tooltip.AddTool(&m_saveds, LL14(L"DirectShow(動画等)で途中保存を有効にします。", L"Enable resume save for DirectShow.", L"Reprise pour DirectShow.", L"Ripresa per DirectShow.", L"Reanudar para DirectShow.", L"DirectShow 위치 저장.", L"DirectShow续播保存。", L"حفظ موضع DirectShow.", L"Сохранение позиции DirectShow.", L"DirectShow-Position.", L"Retomar DirectShow.", L"DirectShow hervatten.", L"Wznawianie DirectShow.", L"DirectShow surdurme."));
+	m_find.SetFont(&m_fontList, TRUE);
+
+	DoLayout();
+	CCC_SendGroupBoxesToBack(GetSafeHwnd());   // 区分け枠を最背面へ(兄弟コントロールを覆わない)
+	ReloadPlaylistCombo();
+	RefreshList(TRUE);
+	SyncFromMain();
+#if CCUSTOM_AERO_SUPPORT
+	if (savedata.aero == 1)
+		RefreshAeroMode();   // レイアウト確定後にアクリル/不透明化を再適用
+#endif
+
+	m_lastMs2 = (savedata.ms2 >= 16) ? savedata.ms2 : 16;
+	SetTimer(1, 250, NULL);          // 低速: テキスト/リスト/コンボ/チェックの同期
+	SetTimer(2, m_lastMs2, NULL);    // 描画: スペアナ等のBlit + 合成継続(設定ms2追従=最大60fps)
+	SetTimer(3, 33, NULL);           // 高速: シーク(playb追従)/時間/音量のミラー
+#if CCUSTOM_AERO_SUPPORT
+	if (savedata.aero == 1)
+		SetTimer(4, 250, NULL);  // 遅延でアクリル再適用(ウィンドウ合成確定後)。一回で止める。
+#endif
+	return TRUE;
+}
+
+BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
+}
+
+BOOL CMediaPlayerDlg::DestroyWindow()
+{
+	SavePos();
+	KillTimer(1);
+	KillTimer(2);
+	KillTimer(3);
+	KillTimer(4);
+	if (m_bmpBanner.GetSafeHandle()) m_bmpBanner.DeleteObject();
+	if (m_memBanner.GetSafeHdc()) m_memBanner.DeleteDC();
+	return CCustomBlurDialogBase::DestroyWindow();
+}
+
+// 1コントロールを移動するヘルパ
+static void MoveCtl(CWnd* p, int x, int y, int w, int h)
+{
+	if (p && p->GetSafeHwnd())
+		p->MoveWindow(x, y, w, h);
+}
+
+void CMediaPlayerDlg::DoLayout()
+{
+	if (!::IsWindow(GetSafeHwnd())) return;
+	CRect rc; GetClientRect(&rc);
+	const int W = rc.Width(), H = rc.Height();
+	const float s = hD2;
+	const int M = (int)(10 * s);             // マージン
+
+	// 上部: ビジュアライザ(スペアナ+ジャケ+時間)の帯。リスト領域確保のため低めに抑える。
+	int bannerW = W - M * 2;
+	int bannerH = (int)((double)bannerW * (double)MP_SRCH / (double)MP_SRCW);
+	int bannerMax = (int)(96 * s), bannerMin = (int)(54 * s);
+	if (bannerH > bannerMax) bannerH = bannerMax;
+	if (bannerH < bannerMin) bannerH = bannerMin;
+	m_bannerRect.SetRect(M, M, M + bannerW, M + bannerH);
+
+	const int gTitle = (int)(13 * s);   // グループ枠のタイトル分の高さ
+	const int gPad = (int)(4 * s);      // グループ内側の余白
+
+	// ===== 情報グループ(歌詞3行 + OS/CPU を圧縮) =====
+	int infoTop = M + bannerH + (int)(2 * s);
+	int ix = M + gPad, iw = W - M * 2 - gPad * 2;
+	int y = infoTop + gTitle;
+	int lh = (int)(13 * s);
+	MoveCtl(&m_lrc, ix, y, iw, lh); y += lh;
+	MoveCtl(&m_lrc2, ix, y, iw, lh); y += lh;
+	MoveCtl(&m_lrc3, ix, y, iw, lh); y += lh + (int)(1 * s);
+	int osH = (int)(11 * s);
+	// OS と CPU を1行に、os3 を1行に(2行で圧縮)
+	MoveCtl(&m_os, ix, y, iw * 3 / 5, osH);
+	MoveCtl(&m_cpu, ix + iw * 3 / 5, y, iw * 2 / 5, osH); y += osH;
+	MoveCtl(&m_os3, ix, y, iw, osH); y += osH + gPad;
+	int infoBottom = y;
+	MoveCtl(&m_grpInfo, M, infoTop, W - M * 2, infoBottom - infoTop);
+
+	// ===== シーク(範囲スライダー, 全幅) + 時間% =====
+	int seekY = infoBottom + (int)(4 * s);
+	int timeW = (int)(40 * s);
+	MoveCtl(&m_seek, M, seekY, W - M * 2 - timeW - (int)(4 * s), (int)(15 * s));
+	MoveCtl(&m_time, W - M - timeW, seekY + (int)(2 * s), timeW, (int)(11 * s));
+
+	// ===== 操作行: 前/再生/一時停止/停止/次  +  主音量(右) =====
+	int by = seekY + (int)(19 * s);
+	int bw = (int)(42 * s), bh = (int)(20 * s), gap = (int)(3 * s);
+	int bx = M;
+	MoveCtl(&m_prev, bx, by, bw, bh); bx += bw + gap;
+	MoveCtl(&m_play, bx, by, bw, bh); bx += bw + gap;
+	MoveCtl(&m_pause, bx, by, (int)(48 * s), bh); bx += (int)(48 * s) + gap;
+	MoveCtl(&m_stop, bx, by, bw, bh); bx += bw + gap;
+	MoveCtl(&m_next, bx, by, bw, bh); bx += bw + gap;
+	int volValW = (int)(28 * s), volLblW = (int)(36 * s), volSlW = (int)(110 * s);
+	int volBlockW = volLblW + volSlW + volValW + (int)(6 * s);
+	int volX = W - M - volBlockW;
+	if (volX < bx + (int)(6 * s)) volX = bx + (int)(6 * s);
+	MoveCtl(&m_vollabel, volX, by + (int)(4 * s), volLblW, (int)(12 * s));
+	MoveCtl(&m_vol, volX + volLblW, by + (int)(2 * s), volSlW, (int)(15 * s));
+	MoveCtl(&m_volval, volX + volLblW + volSlW + (int)(2 * s), by + (int)(4 * s), volValW, (int)(12 * s));
+
+	// ===== オプション行: 連続/ループ/ランダム/スペアナ/ST  +  EQ/ピアノ(右) =====
+	int by2 = by + bh + (int)(3 * s);
+	int ch = (int)(15 * s);
+	int cx = M;
+	MoveCtl(&m_renzoku, cx, by2 + (int)(2 * s), (int)(44 * s), (int)(12 * s)); cx += (int)(46 * s);
+	MoveCtl(&m_loop, cx, by2 + (int)(2 * s), (int)(48 * s), (int)(12 * s)); cx += (int)(50 * s);
+	MoveCtl(&m_random, cx, by2 + (int)(2 * s), (int)(56 * s), (int)(12 * s)); cx += (int)(60 * s);
+	MoveCtl(&m_supe, cx, by2 + (int)(1 * s), (int)(42 * s), (int)(12 * s)); cx += (int)(44 * s);
+	MoveCtl(&m_st, cx, by2 + (int)(1 * s), (int)(24 * s), (int)(12 * s));
+	int ebw = (int)(44 * s), pbw = (int)(52 * s);
+	MoveCtl(&m_piano, W - M - pbw, by2, pbw, ch);
+	MoveCtl(&m_eq, W - M - pbw - gap - ebw, by2, ebw, ch);
+
+	// ===== サウンドグループ: 設定 + DS/拡張/テンポ/ピッチ(1段で省スペース) =====
+	int sndTop = by2 + ch + (int)(4 * s);
+	int sy = sndTop + gTitle;
+	int slLabelH = (int)(10 * s), slH = (int)(13 * s);
+	MoveCtl(&m_settings, M + gPad, sy + (int)(3 * s), (int)(46 * s), (int)(18 * s));
+	int slX = M + gPad + (int)(52 * s);
+	int slGap = (int)(8 * s);
+	int slW = (W - M - gPad - slX - slGap * 3) / 4;
+	if (slW < (int)(56 * s)) slW = (int)(56 * s);
+	struct { CCustomStatic* lbl; CCustomSliderCtrl* sl; } snd[4] = {
+		{ &m_dsvolL, &m_dsvol }, { &m_kvolL, &m_kvol }, { &m_tempoL, &m_tempo }, { &m_pitchL, &m_pitch }
+	};
+	for (int i = 0; i < 4; i++) {
+		int cxs = slX + i * (slW + slGap);
+		MoveCtl(snd[i].lbl, cxs, sy, slW, slLabelH);
+		MoveCtl(snd[i].sl, cxs, sy + slLabelH, slW, slH);
+	}
+	int sndBottom = sy + slLabelH + slH + gPad;
+	MoveCtl(&m_grpSnd, M, sndTop, W - M * 2, sndBottom - sndTop);
+
+	// ===== プレイリストグループ: ツールバー + リスト + 下部チェック =====
+	int plTop = sndBottom + (int)(4 * s);
+	int by4 = plTop + gTitle;
+	int tbH = (int)(16 * s);
+	int comboW = (int)(120 * s);
+	MoveCtl(&m_plsel, M + gPad, by4, comboW, (int)(200 * s));
+	int tx = M + gPad + comboW + (int)(5 * s);
+	int tbw = (int)(50 * s);
+	MoveCtl(&m_plrename, tx, by4, tbw, tbH); tx += tbw + (int)(3 * s);
+	MoveCtl(&m_pldelete, tx, by4, tbw, tbH); tx += tbw + (int)(8 * s);
+	int ibw = (int)(16 * s);
+	int findW = (int)(86 * s);
+	MoveCtl(&m_find, tx, by4 + (int)(1 * s), findW, tbH - (int)(2 * s)); tx += findW + (int)(2 * s);
+	MoveCtl(&m_finddown, tx, by4, ibw, tbH); tx += ibw + (int)(1 * s);
+	MoveCtl(&m_findup, tx, by4, ibw, tbH);
+	int rx = W - M - gPad - (int)(50 * s);
+	MoveCtl(&m_itemdel, rx, by4, (int)(50 * s), tbH); rx -= ibw + (int)(2 * s);
+	MoveCtl(&m_lsdown, rx, by4, ibw, tbH); rx -= ibw + (int)(1 * s);
+	MoveCtl(&m_down, rx, by4, ibw, tbH); rx -= ibw + (int)(1 * s);
+	MoveCtl(&m_up, rx, by4, ibw, tbH); rx -= ibw + (int)(1 * s);
+	MoveCtl(&m_lsup, rx, by4, ibw, tbH);
+
+	int swH = (int)(18 * s);
+	int chkRowH = (int)(13 * s);
+	int listY = by4 + tbH + (int)(3 * s);
+	int listH = H - listY - chkRowH - swH - M - gPad - (int)(5 * s);
+	if (listH < (int)(50 * s)) listH = (int)(50 * s);
+	MoveCtl(&m_list, M + gPad, listY, W - M * 2 - gPad * 2, listH);
+
+	int ckY = listY + listH + (int)(2 * s);
+	int ckx = M + gPad;
+	MoveCtl(&m_tip, ckx, ckY, (int)(66 * s), chkRowH); ckx += (int)(70 * s);
+	MoveCtl(&m_mini, ckx, ckY, (int)(72 * s), chkRowH); ckx += (int)(76 * s);
+	MoveCtl(&m_savemp3, ckx, ckY, (int)(84 * s), chkRowH); ckx += (int)(88 * s);
+	MoveCtl(&m_saveds, ckx, ckY, (int)(96 * s), chkRowH);
+	int plBottom = ckY + chkRowH + gPad;
+	MoveCtl(&m_grpPl, M, plTop, W - M * 2, plBottom - plTop);
+
+	// 最下部: 切替(左) / ジャケ・終了(右)
+	int botY = H - swH - M + (int)(2 * s);
+	MoveCtl(&m_switch, M, botY, (int)(130 * s), swH);
+	int exW = (int)(64 * s), jkW = (int)(50 * s);
+	MoveCtl(&m_exit, W - M - exW, botY, exW, swH);
+	MoveCtl(&m_jacket, W - M - exW - (int)(4 * s) - jkW, botY, jkW, swH);
+
+	Invalidate();
+}
+
+void CMediaPlayerDlg::RefreshList(BOOL bForce)
+{
+	if (!::IsWindow(m_list.GetSafeHwnd())) return;
+	if (!pl || pl->pc == NULL) {
+		if (m_list.GetItemCount() > 0) m_list.DeleteAllItems();
+		m_lastCount = 0;
+		return;
+	}
+	int cnt = pl->playcnt;
+
+	// 再生中の行へ自動スクロール(再生インデックスが変わった時のみ。ユーザーのスクロールを邪魔しない)
+	{
+		int cur = plcnt;
+		if (cur < 0 || cur >= cnt) cur = pl->pnt;
+		if (cur >= 0 && cur < cnt && cur != m_lastScroll) {
+			m_list.EnsureVisible(cur, FALSE);
+			m_lastScroll = cur;
+		}
+	}
+
+	if (!bForce && cnt == m_lastCount) {
+		// 件数据え置き: 再生中行のアイコンだけ pc[].icon に合わせて更新(点滅含む)。
+		// プレイリスト本体(pl->pnt)が再生中行。毎tickの全走査はしない。
+		int pnt = pl->pnt;
+		if (pnt != m_lastPlcnt) {
+			// 再生行が移動 → 旧行のアイコンを通常へ戻す
+			if (m_lastPlcnt >= 0 && m_lastPlcnt < cnt)
+				m_list.SetItem(m_lastPlcnt, 0, LVIF_IMAGE, NULL, pl->pc[m_lastPlcnt].icon, 0, 0, 0);
+			m_lastPlcnt = pnt;
+		}
+		// 再生行アイコンを最新の pc[].icon に同期(SIconTimer の点滅を反映)
+		if (pnt >= 0 && pnt < cnt)
+			m_list.SetItem(pnt, 0, LVIF_IMAGE, NULL, pl->pc[pnt].icon, 0, 0, 0);
+		return;
+	}
+	m_list.SetRedraw(FALSE);
+	m_list.DeleteAllItems();
+	for (int i = 0; i < cnt; i++) {
+		const playlistdata0& d = pl->pc[i];
+		int img = d.icon;   // プレイリストと同じアイコン(通常=1, 再生中=0/2)
+		m_list.InsertItem(i, d.name, img);
+		m_list.SetItemText(i, 1, d.game);
+		CString st;
+		if (d.time == 0) st = _T("");
+		else if (d.time == -1) st = LL14(L"取得不能", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A");
+		else if (d.time >= 3600) st.Format(_T("%d:%02d:%02d"), d.time / 3600, (d.time / 60) % 60, d.time % 60);
+		else st.Format(_T("%d:%02d"), d.time / 60, d.time % 60);
+		m_list.SetItemText(i, 2, st);
+		m_list.SetItemText(i, 3, d.art);
+		m_list.SetItemText(i, 4, d.alb);
+	}
+	m_list.SetRedraw(TRUE);
+	m_lastCount = cnt;
+	m_lastPlcnt = pl->pnt;
+	m_list.Invalidate();
+}
+
+void CMediaPlayerDlg::SyncFromMain()
+{
+	if (!::IsWindow(GetSafeHwnd())) return;
+
+	// タイトル/アーティスト/アルバムはバナーGDIに表示されるためここでは更新しない。
+
+	// 歌詞(3行) / OS / CPU (og からそのまま引き継ぐ)
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		CString s, s2;
+		og->m_lrc.GetWindowText(s); m_lrc.GetWindowText(s2); if (s != s2) m_lrc.SetWindowText(s);
+		og->m_lrc2.GetWindowText(s); m_lrc2.GetWindowText(s2); if (s != s2) m_lrc2.SetWindowText(s);
+		og->m_lrc3.GetWindowText(s); m_lrc3.GetWindowText(s2); if (s != s2) m_lrc3.SetWindowText(s);
+		og->m_OS.GetWindowText(s); m_os.GetWindowText(s2); if (s != s2) m_os.SetWindowText(s);
+		og->m_cpu.GetWindowText(s); m_cpu.GetWindowText(s2); if (s != s2) m_cpu.SetWindowText(s);
+		og->m_os3.GetWindowText(s); m_os3.GetWindowText(s2); if (s != s2) m_os3.SetWindowText(s);
+
+		// シーク/音量は高速タイマーで追従(ここでも一応呼ぶ)
+		MirrorSeekVol();
+
+		// サウンド調整(DS音量/拡張/テンポ/ピッチ)を og からミラー。ドラッグ中のものは触らない。
+		CWnd* pf2 = GetFocus();
+		HWND hf = pf2 ? pf2->GetSafeHwnd() : NULL;
+		if (hf != m_dsvol.GetSafeHwnd()) m_dsvol.SetPos(og->m_dsval.GetPos());
+		if (hf != m_kvol.GetSafeHwnd())  m_kvol.SetPos(og->m_kakuVol.GetPos());
+		if (hf != m_tempo.GetSafeHwnd()) m_tempo.SetPos(og->m_tempo_sl.GetPos());
+		if (hf != m_pitch.GetSafeHwnd()) m_pitch.SetPos(og->m_pitch_sl.GetPos());
+		CString l;
+		int dsp = (og->m_dsval.GetPos() + 499) * 2 / 10;
+		l.Format(LL2(L"DS音量 %d%%", L"DS %d%%"), dsp); m_dsvolL.GetWindowText(s2); if (l != s2) m_dsvolL.SetWindowText(l);
+		l.Format(LL2(L"拡張 %d", L"Boost %d"), og->m_kakuVol.GetPos()); m_kvolL.GetWindowText(s2); if (l != s2) m_kvolL.SetWindowText(l);
+		l.Format(LL2(L"テンポ %d%%", L"Tempo %d%%"), og->m_tempo_sl.GetPos() / 2); m_tempoL.GetWindowText(s2); if (l != s2) m_tempoL.SetWindowText(l);
+		l.Format(LL2(L"ピッチ %d%%", L"Pitch %d%%"), og->m_pitch_sl.GetPos() / 2); m_pitchL.GetWindowText(s2); if (l != s2) m_pitchL.SetWindowText(l);
+
+		// 乱数/順次・スペアナ/ST の状態(変化時のみ。毎tick SetCheck はちらつくため)
+		int v1;
+		v1 = og->m_random.GetCheck() ? 1 : 0; if (m_random.GetCheck() != v1) m_random.SetCheck(v1);
+		v1 = og->m_supe.GetCheck() ? 1 : 0; if (m_supe.GetCheck() != v1) m_supe.SetCheck(v1);
+		v1 = og->m_st.GetCheck() ? 1 : 0; if (m_st.GetCheck() != v1) m_st.SetCheck(v1);
+	}
+
+	if (pl && ::IsWindow(pl->GetSafeHwnd())) {
+		int v2;
+		v2 = pl->m_renzoku.GetCheck() ? 1 : 0; if (m_renzoku.GetCheck() != v2) m_renzoku.SetCheck(v2);
+		v2 = pl->m_loop.GetCheck() ? 1 : 0; if (m_loop.GetCheck() != v2) m_loop.SetCheck(v2);
+		v2 = pl->m_tool.GetCheck() ? 1 : 0; if (m_tip.GetCheck() != v2) m_tip.SetCheck(v2);
+		v2 = pl->m_saisyo.GetCheck() ? 1 : 0; if (m_mini.GetCheck() != v2) m_mini.SetCheck(v2);
+		v2 = pl->m_save_mp3.GetCheck() ? 1 : 0; if (m_savemp3.GetCheck() != v2) m_savemp3.SetCheck(v2);
+		v2 = pl->m_save_kpi.GetCheck() ? 1 : 0; if (m_saveds.GetCheck() != v2) m_saveds.SetCheck(v2);
+		// プレイリスト一覧の増減や選択変更を反映
+		if (::IsWindow(pl->m_listchange.GetSafeHwnd())) {
+			int n = pl->m_listchange.GetCount();
+			if (n != m_lastComboCount)
+				ReloadPlaylistCombo();
+			else if (m_plsel.GetCurSel() != savedata.playlistnum)
+				m_plsel.SetCurSel(savedata.playlistnum);
+		}
+	}
+}
+
+void CMediaPlayerDlg::EnforceFalcomHidden()
+{
+	if (savedata.playerMode != 1) return;
+	extern CImageBase* maini;
+	extern CImageBase* playbase;
+	if (og && ::IsWindow(og->GetSafeHwnd()) && ::IsWindowVisible(og->m_hWnd))
+		::ShowWindow(og->m_hWnd, SW_HIDE);
+	if (pl && ::IsWindow(pl->GetSafeHwnd()) && ::IsWindowVisible(pl->m_hWnd))
+		::ShowWindow(pl->m_hWnd, SW_HIDE);
+	if (maini && ::IsWindow(maini->GetSafeHwnd()) && ::IsWindowVisible(maini->m_hWnd))
+		::ShowWindow(maini->m_hWnd, SW_HIDE);
+	if (playbase && ::IsWindow(playbase->GetSafeHwnd()) && ::IsWindowVisible(playbase->m_hWnd))
+		::ShowWindow(playbase->m_hWnd, SW_HIDE);
+}
+
+void CMediaPlayerDlg::MirrorSeekVol()
+{
+	if (!og || !::IsWindow(og->GetSafeHwnd()) || !::IsWindow(GetSafeHwnd())) return;
+	CString s2;
+	// シーク(og->m_time=範囲スライダー。timerp が playb を SetPos するのでそれに追従)
+	if (!m_seekDragging) {
+		int mn = og->m_time.GetMinValue();
+		int mx = og->m_time.GetMaxValue();
+		if (mx <= mn) mx = mn + 1;
+		int ps = og->m_time.GetPos();
+		int selMn, selMx; og->m_time.GetSelection(selMn, selMx);
+		m_seek.SetRange(mn, mx, FALSE);
+		m_seek.SetSelection(selMn, selMx);
+		m_seek.SetPos(ps);
+		int pct = (int)((double)(ps - mn) * 100.0 / (double)(mx - mn));
+		if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+		CString t; t.Format(_T("%d%%"), pct);
+		m_time.GetWindowText(s2); if (t != s2) m_time.SetWindowText(t);
+	}
+	// 音量(og->m_sl 0..100000 を 0..100 でミラー)
+	int v = og->m_sl.GetPos() / 1000;
+	if (v < 0) v = 0; if (v > 100) v = 100;
+	CWnd* pf = GetFocus();
+	if (!(pf && pf->GetSafeHwnd() == m_vol.GetSafeHwnd())) m_vol.SetPos(v);
+	CString vs; vs.Format(_T("%d"), v); m_volval.GetWindowText(s2); if (vs != s2) m_volval.SetWindowText(vs);
+}
+
+void CMediaPlayerDlg::SavePos()
+{
+	if (!::IsWindow(GetSafeHwnd())) return;
+	if (IsIconic()) return;
+	RECT r; GetWindowRect(&r);
+	savedata.mpx = r.left;
+	savedata.mpy = r.top;
+	savedata.mpw = r.right - r.left;
+	savedata.mph = r.bottom - r.top;
+	savedata.mpHasPos = 1;
+}
+
+#if WIN64
+void CMediaPlayerDlg::OnTimer(UINT_PTR nIDEvent)
+#else
+void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
+#endif
+{
+	if (nIDEvent == 1) {
+		// 低速: テキスト/リスト/シーク/音量を同期(変化時のみ更新)
+		SyncFromMain();
+		RefreshList(FALSE);
+		// 起動直後に裏画面が残る対策: メディアプレイヤーモード中は必ず隠す(監視)
+		EnforceFalcomHidden();
+		// 設定の描画間隔(ms2)が変わったら描画タイマーを張り直す
+		int ms2 = (savedata.ms2 >= 16) ? savedata.ms2 : 16;
+		if (ms2 != m_lastMs2) {
+			m_lastMs2 = ms2;
+			KillTimer(2);
+			SetTimer(2, ms2, NULL);
+		}
+	}
+	else if (nIDEvent == 2) {
+		// 描画駆動: dc を直接 Blit(CClientDC=Invalidateしない)し、og の合成継続のため pending を解除。
+		// 約60fps。これで再生中も確実に更新される(timerp→WM_PAINT 経路の取りこぼしを回避)。
+		if (::IsWindowVisible(GetSafeHwnd()) && !IsIconic()) {
+			CClientDC cdc(this);
+			BlitVisualizer(&cdc);
+			extern void COgg_ClearGdiPaintPending();
+			COgg_ClearGdiPaintPending();
+		}
+	}
+	else if (nIDEvent == 3) {
+		// 高速: 再生位置(playb)に追従するシーク・時間・音量のミラー
+		MirrorSeekVol();
+		// バナーのホバー状態を再計算(カーソルが帯の上にあれば前面化アニメ継続)。
+		// 前面ウィンドウ条件は付けない(再生でフォーカスが移ってもアニメを止めない)。
+		if (::IsWindowVisible(GetSafeHwnd()) && !IsIconic()) {
+			CPoint pt; ::GetCursorPos(&pt); ScreenToClient(&pt);
+			g_mpBannerHover = m_bannerRect.PtInRect(pt) ? 1 : 0;
+		}
+		else g_mpBannerHover = 0;
+	}
+	else if (nIDEvent == 4) {
+		// 遅延アクリル再適用(合成確定後)。一度きり。
+		KillTimer(4);
+#if CCUSTOM_AERO_SUPPORT
+		if (savedata.aero == 1) {
+			RefreshAeroMode();
+			if (CCC_IsWin11()) {
+				BOOL comp = FALSE;
+				if (SUCCEEDED(::DwmIsCompositionEnabled(&comp)) && comp) {
+					int bt = 3;  // DWMSBT_TRANSIENTWINDOW(アクリル)
+					::DwmSetWindowAttribute(m_hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &bt, sizeof(bt));
+					MARGINS mg = { -1, -1, -1, -1 };
+					::DwmExtendFrameIntoClientArea(m_hWnd, &mg);
+				}
+			}
+			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+		}
+#endif
+	}
+	CCustomBlurDialogBase::OnTimer(nIDEvent);
+}
+
+void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
+{
+	CCustomBlurDialogBase::OnSize(nType, cx, cy);
+	if (nType != SIZE_MINIMIZED && ::IsWindow(m_hWnd)) {
+		DoLayout();
+		// リサイズ中はカスタムコントロール(ボタン/スライダー/リストビュー)が
+		// 部分描画のまま崩れるので、子も含めて確実に再描画させる。
+		// WS_CLIPCHILDREN 済みなので親の ERASE が子を塗り潰すことはない。
+		RedrawWindow(NULL, NULL,
+			RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+		if (::IsWindow(m_list.GetSafeHwnd()))
+			m_list.Invalidate(FALSE);
+	}
+}
+
+void CMediaPlayerDlg::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
+{
+	lpMMI->ptMinTrackSize.x = (int)(480 * hD2);
+	lpMMI->ptMinTrackSize.y = (int)(540 * hD2);
+	CCustomBlurDialogBase::OnGetMinMaxInfo(lpMMI);
+}
+
+// og のオフスクリーン合成面(スペアナ+ジャケ+時間)を帯に描画(同一UIスレッドなので安全)
+void CMediaPlayerDlg::BlitVisualizer(CDC* pDC)
+{
+	if (!pDC || m_bannerRect.IsRectEmpty()) return;
+	if (dc.GetSafeHdc() == NULL) return;
+	int dw = m_bannerRect.Width(), dh = m_bannerRect.Height();
+	if (dw <= 0 || dh <= 0) return;
+
+#if CCUSTOM_AERO_SUPPORT
+	if (savedata.aero == 1 && CCC_IsWin11()) {
+		// アクリル(Win11ガラス)時: 通常Blitはアルファ0で透明になってしまうため、
+		// og と同じ専用ヘルパで黒透過＋実体ピクセルを不透明合成する。
+		CCC_BlitStretchChromaNoFlicker(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, dw, dh,
+			dc.GetSafeHdc(), 0, 0, MP_SRCW, MP_SRCH, RGB(0, 0, 0));
+		return;
+	}
+#endif
+	// 非アクリル: 永続メモリDCにキャッシュして軽量Blit(毎フレームのビットマップ生成を回避)
+	if (m_memBanner.GetSafeHdc() == NULL)
+		m_memBanner.CreateCompatibleDC(pDC);
+	if (m_bannerCacheW != dw || m_bannerCacheH != dh || m_bmpBanner.GetSafeHandle() == NULL) {
+		if (m_bmpBanner.GetSafeHandle()) m_bmpBanner.DeleteObject();
+		m_bmpBanner.CreateCompatibleBitmap(pDC, dw, dh);
+		m_bannerCacheW = dw; m_bannerCacheH = dh;
+	}
+	HGDIOBJ oldBmp = ::SelectObject(m_memBanner.GetSafeHdc(), m_bmpBanner.GetSafeHandle());
+	int oldMode = ::SetStretchBltMode(m_memBanner.GetSafeHdc(), COLORONCOLOR);
+	::SetBrushOrgEx(m_memBanner.GetSafeHdc(), 0, 0, NULL);
+	::StretchBlt(m_memBanner.GetSafeHdc(), 0, 0, dw, dh, dc.GetSafeHdc(), 0, 0, MP_SRCW, MP_SRCH, SRCCOPY);
+	::SetStretchBltMode(m_memBanner.GetSafeHdc(), oldMode);
+	::BitBlt(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, dw, dh, m_memBanner.GetSafeHdc(), 0, 0, SRCCOPY);
+	::SelectObject(m_memBanner.GetSafeHdc(), oldBmp);
+}
+
+BOOL CMediaPlayerDlg::OnEraseBkgnd(CDC* pDC)
+{
+	// 描画は OnPaint / Blit で完結させ、ここでは消去しない(チラつき防止)
+	return TRUE;
+}
+
+void CMediaPlayerDlg::OnPaint()
+{
+	extern void COgg_ClearGdiPaintPending();
+#if CCUSTOM_AERO_SUPPORT
+	// アクリル(Win11): 基底と同じ方式で隙間のみアクリル背景を描き、バナーは上から Blit
+	if (savedata.aero == 1 && CCC_IsWin11()) {
+		CPaintDC dc(this);
+		const RECT preserve = m_bannerRect;
+		CCC_PaintDialogAeroGaps(dc, this, &preserve);
+		BlitVisualizer(&dc);
+		COgg_ClearGdiPaintPending();
+		return;
+	}
+#endif
+	CPaintDC pdc(this);
+	// 非アクリル時は背景をベース色で塗る。ただしバナー部は Blit で上書きするので
+	// 塗らない(塗ってから Blit すると一瞬ピンクが見えてチラつくため)。
+	{
+		CRect rcc; GetClientRect(&rcc);
+		int saved = pdc.SaveDC();
+		pdc.ExcludeClipRect(&m_bannerRect);
+		CBrush bg(COLOR_DIALOG_BG);
+		pdc.FillRect(&rcc, &bg);
+		pdc.RestoreDC(saved);
+	}
+	BlitVisualizer(&pdc);
+	COgg_ClearGdiPaintPending();
+}
+
+HBRUSH CMediaPlayerDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
+{
+	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
+	if (savedata.aero != 1) {
+		if (m_brDlg.GetSafeHandle() == NULL)
+			m_brDlg.CreateSolidBrush(COLOR_DIALOG_BG);
+		if (nCtlColor == CTLCOLOR_DLG)
+			return m_brDlg;
+		if (nCtlColor == CTLCOLOR_STATIC) {
+			pDC->SetBkMode(TRANSPARENT);
+			return m_brDlg;
+		}
+	}
+	return hbr;
+}
+
+void CMediaPlayerDlg::OnDropFiles(HDROP hDropInfo)
+{
+	// プレイリストへ追加(両リストビューへ反映するため pl 経由)。
+	// メディアプレイヤーモードでは pl は裏で生きているので pl->OnDropFiles を呼ぶ。
+	if (pl)
+		pl->OnDropFiles(hDropInfo);
+	RefreshList(TRUE);
+	CCustomBlurDialogBase::OnDropFiles(hDropInfo);
+}
+
+void CMediaPlayerDlg::OnDestroy()
+{
+	SavePos();
+	KillTimer(1);
+	CCustomBlurDialogBase::OnDestroy();
+}
+
+void CMediaPlayerDlg::OnClose()
+{
+	// メディアプレイヤー画面の×はアプリ終了(メイン画面を閉じる)
+	SavePos();
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+}
+
+void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	CSliderCtrl* r = (CSliderCtrl*)pScrollBar;
+	if (r && r->GetSafeHwnd() == m_seek.GetSafeHwnd()) {
+		if (nSBCode == SB_THUMBTRACK) {
+			m_seekDragging = 1;
+			CCustomBlurDialogBase::OnHScroll(nSBCode, nPos, pScrollBar);
+			return;
+		}
+		if (nSBCode == SB_THUMBPOSITION || nSBCode == SB_ENDSCROLL ||
+			nSBCode == SB_PAGELEFT || nSBCode == SB_PAGERIGHT ||
+			nSBCode == SB_LINELEFT || nSBCode == SB_LINERIGHT) {
+			int p = m_seek.GetPos();
+			if (og && ::IsWindow(og->GetSafeHwnd())) {
+				// og 側の m_time を動かして og の既存シーク処理を流用
+				og->m_time.SetPos(p);
+				og->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, p), (LPARAM)og->m_time.GetSafeHwnd());
+			}
+			m_seekDragging = 0;
+		}
+	}
+	else if (r && r->GetSafeHwnd() == m_vol.GetSafeHwnd()) {
+		int v = m_vol.GetPos();
+		if (og && ::IsWindow(og->GetSafeHwnd()))
+			og->m_sl.SetPos(v * 1000);
+		CString vs; vs.Format(_T("%d"), v); m_volval.SetWindowText(vs);
+	}
+	else if (og && ::IsWindow(og->GetSafeHwnd()) && r) {
+		// サウンド調整スライダー → og の対応スライダーへ反映(timerp がライブ取得)
+		HWND h = r->GetSafeHwnd();
+		if (h == m_dsvol.GetSafeHwnd())      og->m_dsval.SetPos(m_dsvol.GetPos());
+		else if (h == m_kvol.GetSafeHwnd())  og->m_kakuVol.SetPos(m_kvol.GetPos());
+		else if (h == m_tempo.GetSafeHwnd()) og->m_tempo_sl.SetPos(m_tempo.GetPos());
+		else if (h == m_pitch.GetSafeHwnd()) og->m_pitch_sl.SetPos(m_pitch.GetPos());
+	}
+	CCustomBlurDialogBase::OnHScroll(nSBCode, nPos, pScrollBar);
+}
+
+// ----- プレイリスト操作(og/pl 流用) -----
+static void MP_PlayIndex(int idx)
+{
+	if (!pl || idx < 0 || idx >= pl->playcnt) return;
+	pl->Get(idx);          // fnn/filen/modesub/loop1/loop2/ret2 をセット + 選択
+	plcnt = idx;
+	gameon = 0;
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_APP + 2, 0, 0);  // 再生(再演奏)
+}
+
+void CMediaPlayerDlg::OnPrev()
+{
+	if (!pl || pl->playcnt <= 0) return;
+	int idx = plcnt - 1;
+	if (idx < 0) idx = pl->playcnt - 1;
+	MP_PlayIndex(idx);
+}
+
+void CMediaPlayerDlg::OnNext()
+{
+	if (!pl || pl->playcnt <= 0) return;
+	int idx = plcnt + 1;
+	if (idx >= pl->playcnt) idx = 0;
+	MP_PlayIndex(idx);
+}
+
+void CMediaPlayerDlg::OnPlay()
+{
+	int sel = m_list.GetNextItem(-1, LVNI_SELECTED);
+	if (sel >= 0 && pl && sel < pl->playcnt)
+		MP_PlayIndex(sel);
+	else if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_APP + 2, 0, 0);
+}
+
+void CMediaPlayerDlg::OnPauseBtn()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->OnPause();
+}
+
+void CMediaPlayerDlg::OnStopBtn()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON1, BN_CLICKED), 0);
+}
+
+void CMediaPlayerDlg::OnEq()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON59, BN_CLICKED), 0);
+}
+
+void CMediaPlayerDlg::OnPiano()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->TogglePianoRoll();
+}
+
+void CMediaPlayerDlg::OnSettings()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON21, BN_CLICKED), 0);  // 設定
+}
+
+void CMediaPlayerDlg::OnJacket()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->OnBnmp3jake();   // ジャケット表示(別窓)
+}
+
+void CMediaPlayerDlg::OnExit()
+{
+	// アプリ終了(メイン画面の終了処理へ委譲)
+	SavePos();
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+}
+
+void CMediaPlayerDlg::OnTempoReset()
+{
+	// ラベルクリックでテンポを 100%(200) に戻す(og の既存処理を流用)
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		og->OnTempoStatic();
+		m_tempo.SetPos(og->m_tempo_sl.GetPos());
+	}
+}
+
+void CMediaPlayerDlg::OnPitchReset()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		og->OnPitchStatic();
+		m_pitch.SetPos(og->m_pitch_sl.GetPos());
+	}
+}
+
+void CMediaPlayerDlg::OnSwitch()
+{
+	// mp 自身を破棄する処理(EnterFalcomMode)を mp のハンドラ内で直接呼ばず、og へ委ねる
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_MP_ENTER_FALCOM, 0, 0);
+}
+
+void CMediaPlayerDlg::OnRenzoku()
+{
+	if (!pl) return;
+	int st = m_renzoku.GetCheck() ? 1 : 0;
+	pl->m_renzoku.SetCheck(st);
+	pl->OnBnClickedCheck1();   // 既存処理(保存)
+}
+
+void CMediaPlayerDlg::OnLoop()
+{
+	if (!pl) return;
+	int st = m_loop.GetCheck() ? 1 : 0;
+	pl->m_loop.SetCheck(st);
+	pl->OnBnClickedCheck4();   // 既存処理(保存)
+}
+
+void CMediaPlayerDlg::OnRandom()
+{
+	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
+	int st = m_random.GetCheck() ? 1 : 0;
+	// 既存ハンドラ(OnCheck5=ランダム / OnCheck6=順次)を WM_COMMAND で流用
+	if (st) og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CHECK5, BN_CLICKED), 0);
+	else    og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CHECK6, BN_CLICKED), 0);
+}
+
+void CMediaPlayerDlg::OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	int sel = m_list.GetNextItem(-1, LVNI_SELECTED);
+	if (sel >= 0)
+		MP_PlayIndex(sel);
+}
+
+// pl のプレイリスト一覧コンボをそのままミラー(全項目 enabled / 論理=物理)
+void CMediaPlayerDlg::ReloadPlaylistCombo()
+{
+	if (!pl || !::IsWindow(pl->m_listchange.GetSafeHwnd()) || !::IsWindow(m_plsel.GetSafeHwnd()))
+		return;
+	int n = pl->m_listchange.GetCount();
+	m_plsel.ResetContent();
+	for (int i = 0; i < n; i++) {
+		CString s;
+		pl->m_listchange.GetLBText(i, s);
+		m_plsel.AddString(s);
+	}
+	m_plsel.SetCurSel(savedata.playlistnum);
+	m_lastComboCount = n;
+}
+
+// mp リストの選択状態を pl リストへ反映(上下移動/削除を pl の既存処理へ委譲するため)
+void CMediaPlayerDlg::SyncSelectionToPlaylist()
+{
+	if (!pl || !::IsWindow(pl->m_lc.GetSafeHwnd())) return;
+	int n = m_list.GetItemCount();
+	for (int i = 0; i < n && i < pl->playcnt; i++) {
+		UINT st = m_list.GetItemState(i, LVIS_SELECTED);
+		pl->m_lc.SetItemState(i, (st & LVIS_SELECTED) ? LVIS_SELECTED : 0, LVIS_SELECTED);
+	}
+}
+
+void CMediaPlayerDlg::OnPlSel()
+{
+	if (!pl || !::IsWindow(pl->m_listchange.GetSafeHwnd())) return;
+	int sel = m_plsel.GetCurSel();
+	if (sel < 0) return;
+	pl->m_listchange.SetCurSel(sel);
+	pl->OnCbnSelchangeCombo1();   // プレイリスト切替/新規作成(既存処理)
+	ReloadPlaylistCombo();
+	RefreshList(TRUE);
+}
+
+void CMediaPlayerDlg::OnPlRename()
+{
+	if (!pl) return;
+	pl->OnBnClickedButton3();
+	ReloadPlaylistCombo();
+}
+
+void CMediaPlayerDlg::OnPlDelete()
+{
+	if (!pl) return;
+	pl->OnBnClickedPlaydelete();
+	ReloadPlaylistCombo();
+	RefreshList(TRUE);
+}
+
+void CMediaPlayerDlg::OnMoveTop()
+{
+	if (!pl) return;
+	SyncSelectionToPlaylist();
+	pl->OnSUP();
+	RefreshList(TRUE);
+}
+
+void CMediaPlayerDlg::OnMoveUp()
+{
+	if (!pl) return;
+	SyncSelectionToPlaylist();
+	pl->OnUP();
+	RefreshList(TRUE);
+}
+
+void CMediaPlayerDlg::OnMoveDown()
+{
+	if (!pl) return;
+	SyncSelectionToPlaylist();
+	pl->OnDOWN();
+	RefreshList(TRUE);
+}
+
+void CMediaPlayerDlg::OnMoveBottom()
+{
+	if (!pl) return;
+	SyncSelectionToPlaylist();
+	pl->OnSDOWN();
+	RefreshList(TRUE);
+}
+
+void CMediaPlayerDlg::OnItemDel()
+{
+	if (!pl) return;
+	SyncSelectionToPlaylist();
+	pl->Del();
+	RefreshList(TRUE);
+}
+
+void CMediaPlayerDlg::OnSupe()
+{
+	if (og && ::IsWindow(og->m_supe.GetSafeHwnd()))
+		og->m_supe.SetCheck(m_supe.GetCheck() ? 1 : 0);   // timerp がライブ参照
+}
+
+void CMediaPlayerDlg::OnSt()
+{
+	if (og && ::IsWindow(og->m_st.GetSafeHwnd()))
+		og->m_st.SetCheck(m_st.GetCheck() ? 1 : 0);
+}
+
+void CMediaPlayerDlg::OnTip()
+{
+	if (pl && ::IsWindow(pl->m_tool.GetSafeHwnd()))
+		pl->m_tool.SetCheck(m_tip.GetCheck() ? 1 : 0);   // pl のタイマーが反映
+}
+
+void CMediaPlayerDlg::OnMini()
+{
+	if (pl && ::IsWindow(pl->m_saisyo.GetSafeHwnd()))
+		pl->m_saisyo.SetCheck(m_mini.GetCheck() ? 1 : 0);
+}
+
+void CMediaPlayerDlg::OnSaveMp3()
+{
+	if (!pl) return;
+	pl->m_save_mp3.SetCheck(m_savemp3.GetCheck() ? 1 : 0);
+	pl->OnBnClickedCheck6mp3();   // savedata へ保存(既存処理)
+}
+
+void CMediaPlayerDlg::OnSaveDs()
+{
+	if (!pl) return;
+	pl->m_save_kpi.SetCheck(m_saveds.GetCheck() ? 1 : 0);
+	pl->OnBnClickedCheck7dshow();
+}
+
+// リスト右クリック: 詳細編集 / WAV保存 / 削除(pl の処理を流用)
+void CMediaPlayerDlg::OnRclickList(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	if (!pl) return;
+	SyncSelectionToPlaylist();
+	CPoint pt; ::GetCursorPos(&pt);
+	CMenu menu; menu.CreatePopupMenu();
+	menu.AppendMenu(MF_STRING, 1, LL14(L"詳細編集", L"Edit details", L"Editer details", L"Modifica dettagli", L"Editar detalles", L"상세 편집", L"详细编辑", L"تحرير التفاصيل", L"Изменить детали", L"Details bearbeiten", L"Editar detalhes", L"Details bewerken", L"Edytuj szczego?y", L"Detaylar? duzenle"));
+	menu.AppendMenu(MF_STRING, 2, LL14(L"WAVに保存", L"Save as WAV", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV로 저장", L"保存为WAV", L"حفظ كـ WAV", L"Сохранить как WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
+	menu.AppendMenu(MF_SEPARATOR, 0, (LPCTSTR)NULL);
+	menu.AppendMenu(MF_STRING, 3, LL14(L"削除", L"Delete", L"Supprimer", L"Elimina", L"Eliminar", L"삭제", L"删除", L"حذف", L"Удалить", L"Loschen", L"Excluir", L"Verwijderen", L"Usu?", L"Sil"));
+	int cmd = menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RETURNCMD, pt.x, pt.y, this);
+	if (cmd == 1) pl->OnList();
+	else if (cmd == 2) pl->OnPopWavExport();
+	else if (cmd == 3) { pl->Del(); RefreshList(TRUE); }
+}
+
+// あいまい検索: pl のキーワード欄へ転記して pl の検索処理を流用し、結果を mp リストへ反映
+void CMediaPlayerDlg::OnFindUp()
+{
+	if (!pl || !::IsWindow(pl->GetSafeHwnd())) return;
+	CString s; m_find.GetWindowText(s);
+	pl->m_find.SetWindowText(s);
+	pl->OnFindUp();
+	int i = pl->pnt1;
+	if (i >= 0 && i < pl->playcnt && i < m_list.GetItemCount()) {
+		for (int k = m_list.GetItemCount() - 1; k >= 0; k--)
+			m_list.SetItemState(k, 0, LVIS_SELECTED);
+		m_list.SetItemState(i, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+		m_list.EnsureVisible(i, FALSE);
+		m_lastScroll = i;
+	}
+	if (m_find.GetSafeHwnd()) m_find.SetFocus();
+}
+
+void CMediaPlayerDlg::OnFindDown()
+{
+	if (!pl || !::IsWindow(pl->GetSafeHwnd())) return;
+	CString s; m_find.GetWindowText(s);
+	pl->m_find.SetWindowText(s);
+	pl->OnFindDown();
+	int i = pl->pnt1;
+	if (i >= 0 && i < pl->playcnt && i < m_list.GetItemCount()) {
+		for (int k = m_list.GetItemCount() - 1; k >= 0; k--)
+			m_list.SetItemState(k, 0, LVIS_SELECTED);
+		m_list.SetItemState(i, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+		m_list.EnsureVisible(i, FALSE);
+		m_lastScroll = i;
+	}
+	if (m_find.GetSafeHwnd()) m_find.SetFocus();
+}
+
+// pc[] を src→dst へ移動(リスト内ドラッグ移動)。再生インデックスも追従。
+static void MP_MovePlaylistItem(int src, int dst)
+{
+	if (!pl || !pl->pc) return;
+	int n = pl->playcnt;
+	if (src < 0 || src >= n || dst < 0 || dst >= n || src == dst) return;
+	playlistdata0 tmp = pl->pc[src];
+	if (src < dst) for (int i = src; i < dst; i++) pl->pc[i] = pl->pc[i + 1];
+	else           for (int i = src; i > dst; i--) pl->pc[i] = pl->pc[i - 1];
+	pl->pc[dst] = tmp;
+	auto adj = [&](int idx)->int {
+		if (idx == src) return dst;
+		if (src < dst && idx > src && idx <= dst) return idx - 1;
+		if (src > dst && idx >= dst && idx < src) return idx + 1;
+		return idx;
+	};
+	plcnt = adj(plcnt);
+	pl->pnt = adj(pl->pnt);
+	pl->pnt1 = adj(pl->pnt1);
+	if (::IsWindow(pl->m_lc.GetSafeHwnd())) pl->m_lc.RedrawWindow();
+	pl->Save();
+}
+
+void CMediaPlayerDlg::OnBeginDragList(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	LPNMLISTVIEW nm = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
+	m_dragSrc = nm->iItem;
+	if (m_dragSrc < 0) return;
+	m_dragging = 1;
+	// ドラッグ画像(プレイリストと同様の見た目)
+	POINT ptHot = { 0,0 };
+	m_hDragImage = ListView_CreateDragImage(m_list.m_hWnd, m_dragSrc, &ptHot);
+	if (m_hDragImage) {
+		ImageList_BeginDrag(m_hDragImage, 0, 0, 0);
+		POINT pc = nm->ptAction;          // リストクライアント座標
+		m_list.ClientToScreen(&pc);
+		ScreenToClient(&pc);
+		ImageList_DragEnter(GetSafeHwnd(), pc.x, pc.y);
+	}
+	SetCapture();
+}
+
+void CMediaPlayerDlg::OnMouseMove(UINT nFlags, CPoint point)
+{
+	// バナー上ホバーで og と同じジャケットアニメを発火
+	g_mpBannerHover = m_bannerRect.PtInRect(point) ? 1 : 0;
+	if (m_dragging) {
+		::SetCursor(::LoadCursor(NULL, IDC_HAND));
+		if (m_hDragImage) {
+			ImageList_DragMove(point.x, point.y);
+		}
+	}
+	CCustomBlurDialogBase::OnMouseMove(nFlags, point);
+}
+
+void CMediaPlayerDlg::OnLButtonUp(UINT nFlags, CPoint point)
+{
+	if (m_dragging) {
+		m_dragging = 0;
+		ReleaseCapture();
+		if (m_hDragImage) {
+			ImageList_DragLeave(GetSafeHwnd());
+			ImageList_EndDrag();
+			ImageList_Destroy(m_hDragImage);
+			m_hDragImage = NULL;
+		}
+		// ドロップ先の行を mp リスト座標で判定
+		CPoint sp = point; ClientToScreen(&sp);
+		CPoint lp = sp; m_list.ScreenToClient(&lp);
+		UINT fl = 0;
+		int dst = m_list.HitTest(lp, &fl);
+		if (dst < 0) {
+			CRect rc; m_list.GetClientRect(&rc);
+			if (lp.y >= rc.bottom) dst = m_list.GetItemCount() - 1; // 末尾へ
+		}
+		if (pl && m_dragSrc >= 0 && dst >= 0 && dst != m_dragSrc && dst < pl->playcnt) {
+			MP_MovePlaylistItem(m_dragSrc, dst);
+			RefreshList(TRUE);
+			if (dst < m_list.GetItemCount()) {
+				m_list.SetItemState(dst, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+				m_list.EnsureVisible(dst, FALSE);
+			}
+		}
+		m_dragSrc = -1;
+	}
+	CCustomBlurDialogBase::OnLButtonUp(nFlags, point);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// モード切替
+/////////////////////////////////////////////////////////////////////////////
+void EnterMediaPlayerMode()
+{
+	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {  // 既に MP モード
+		mp->ShowWindow(SW_SHOW);
+		return;
+	}
+
+	// プレイリストを必ず生成(裏で生かす)。再生はプレイリスト方式にする。
+	if (!pl) {
+		killw1 = 0;
+		pl = new CPlayList;
+		pl->Create(og);
+	}
+	plw = 1;
+	savedata.playerMode = 1;
+
+	// メディアプレイヤー画面を生成・表示。
+	mp = new CMediaPlayerDlg;
+	mp->Create(og);
+	// 注意: オーナーが非表示の og のままだと DWM のアクリル背景が合成されないため、
+	// オーナーを解除してトップレベル化し、アクリルを再適用する。
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		::SetWindowLongPtr(mp->m_hWnd, GWLP_HWNDPARENT, 0);
+		::SetWindowPos(mp->m_hWnd, NULL, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+#if CCUSTOM_AERO_SUPPORT
+		if (savedata.aero == 1)
+			mp->RefreshAeroMode();
+#endif
+	}
+
+	// 重複防止: プレイリスト/メイン画面/aeroオーバーレイの単独ウィンドウを隠す
+	extern CImageBase* maini;
+	extern CImageBase* playbase;
+	if (pl && ::IsWindow(pl->GetSafeHwnd()))
+		::ShowWindow(pl->m_hWnd, SW_HIDE);
+	if (maini && ::IsWindow(maini->GetSafeHwnd()))
+		::ShowWindow(maini->m_hWnd, SW_HIDE);
+	if (playbase && ::IsWindow(playbase->GetSafeHwnd()))
+		::ShowWindow(playbase->m_hWnd, SW_HIDE);
+	// イコライザー/ピアノロールはオプション窓なので閉じない(そのまま維持)
+	::ShowWindow(og->m_hWnd, SW_HIDE);
+
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		::SetForegroundWindow(mp->m_hWnd);
+		mp->SetFocus();
+#if CCUSTOM_AERO_SUPPORT
+		if (savedata.aero == 1)
+			mp->RefreshAeroMode();   // 前面化後に再適用
+#endif
+	}
+}
+
+void EnterFalcomMode()
+{
+	savedata.playerMode = 0;
+
+	// メディアプレイヤー画面を破棄
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		mp->SavePos();
+		mp->DestroyWindow();
+	}
+	if (mp) { delete mp; mp = NULL; }
+
+	// メイン画面を表示し、aero/全コントロールを確実に再反映(▲▼の開閉状態は保持=Resizeは呼ばない)
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		::ShowWindow(og->m_hWnd, SW_SHOW);
+		::SetForegroundWindow(og->m_hWnd);
+		CCC_SendGroupBoxesToBack(og->m_hWnd);   // 枠を最背面へ(チェックボックスを覆わない)
+#if CCUSTOM_AERO_SUPPORT
+		og->RefreshAeroMode();                   // アクリル/非アクリルを再適用
+#endif
+		CCC_RefreshChildrenAfterShow(og->m_hWnd);   // 再表示時の子コントロール再描画
+		og->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+		og->PostRefreshAllAeroWindows();         // EQ/ピアノ/プレイリスト等も再反映
+	}
+
+	// プレイリストは savedata.pl に従って表示/非表示
+	if (pl && ::IsWindow(pl->GetSafeHwnd())) {
+		if (savedata.pl) {
+			::ShowWindow(pl->m_hWnd, SW_SHOW);
+			plw = 1;
+		}
+		else {
+			::ShowWindow(pl->m_hWnd, SW_HIDE);
+			plw = 0;
+		}
+	}
+
+	// aero オーバーレイを復帰(aero==2 のときのみ存在)
+	extern CImageBase* maini;
+	extern CImageBase* playbase;
+	if (maini && ::IsWindow(maini->GetSafeHwnd()))
+		::ShowWindow(maini->m_hWnd, SW_SHOW);
+	if (playbase && ::IsWindow(playbase->GetSafeHwnd()) && savedata.pl)
+		::ShowWindow(playbase->m_hWnd, SW_SHOW);
+}

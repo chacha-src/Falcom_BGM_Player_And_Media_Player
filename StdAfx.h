@@ -221,6 +221,19 @@ struct save{
 	int pianorollh;
 
 	int saveversion; // 0=旧(ms2=スライダー1..60) 1=新(ms2=16..960ms)
+
+	int eq_reverb; // 0-100 リバーブ 101-200 パンリバーブ
+	int eq_chorus; // 0-100 コーラス 101-200 コーラスディストーション
+	int eq_delay; // 0-100 ディレイ 101-200 マルチディレイ
+
+	// --- メディアプレイヤーモード関連(末尾追記。旧.datは部分読込のため0初期化される) ---
+	int playerMode;    // 現在の画面モード 0=ファルコム特化型 1=メディアプレイヤー
+	int startupAsk;    // 起動時にモード選択ダイアログを出すか 1=出す 0=出さない
+	int mpHasPos;      // メディアプレイヤー画面の保存座標が有効か 0=未設定 1=設定済み
+	int mpx;           // メディアプレイヤー画面の左座標
+	int mpy;           // メディアプレイヤー画面の上座標
+	int mpw;           // メディアプレイヤー画面の幅
+	int mph;           // メディアプレイヤー画面の高さ
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */

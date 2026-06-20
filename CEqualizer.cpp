@@ -76,6 +76,12 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATIC_key2, m_keyMid);
 	DDX_Control(pDX, IDC_STATIC_key3, m_keyHigh);
 	DDX_Control(pDX, IDC_STATIC_key4, m_keyAll);
+	DDX_Control(pDX, IDC_SLIDER28, m_reverb);
+	DDX_Control(pDX, IDC_SLIDER29, m_chorus);
+	DDX_Control(pDX, IDC_SLIDER30, m_delay);
+	DDX_Control(pDX, IDC_STATIC_e20, m_reverbi);
+	DDX_Control(pDX, IDC_STATIC_e21, m_chorusi);
+	DDX_Control(pDX, IDC_STATIC_e22, m_delayi);
 }
 
 
@@ -108,6 +114,12 @@ BOOL CEqualizer::OnInitDialog()
 	SetDlgItemText(IDC_STATIC_EQ_BAND, LL14(L"バランス", L"Band", L"Bande", L"Banda", L"Banda", L"밴드", L"频段", L"النطاق", L"Полоса", L"Band", L"Banda", L"Band", L"Pasmo", L"Bant"));
 	SetDlgItemText(IDC_STATIC_EQ_LOUDNESS, LL14(L"密度", L"Loudness", L"Sonorité", L"Volume", L"Sonoridad", L"음량", L"响度", L"جهارة الصوت", L"Громкость", L"Lautheit", L"Sonoridade", L"Luidheid", L"Głośność", L"Ses yüksekliği"));
 	SetDlgItemText(IDC_STATIC_EQ_WARMTH, LL14(L"立体", L"Warmth", L"Chaleur", L"Calore", L"Calidez", L"따뜻함", L"温暖", L"الدفء", L"Теплота", L"Wärme", L"Calor", L"Warmte", L"Ciepło", L"Sıcaklık"));
+
+	SetDlgItemText(IDC_STATIC_EQ_REVERB, LL14(L"リバーブ", L"Reverb", L"Réverbération", L"Riverbero", L"Reverberación", L"리버브", L"混响", L"صدى", L"Реверберация", L"Hall", L"Reverberação", L"Galm", L"Pogłos", L"Yankı"));
+	SetDlgItemText(IDC_STATIC_EQ_CHORUS, LL14(L"コーラス", L"Chorus", L"Chorus", L"Chorus", L"Chorus", L"코러스", L"合唱", L"كورس", L"Хорус", L"Chorus", L"Chorus", L"Chorus", L"Chorus", L"Koro"));
+	SetDlgItemText(IDC_STATIC_EQ_DELAY, LL14(L"ディレイ", L"Delay", L"Délai", L"Delay", L"Delay", L"딜레이", L"延迟", L"تأخير", L"Задержка", L"Delay", L"Delay", L"Delay", L"Delay", L"Gecikme"));
+
+
 	m_tooltip.Create(this);
 	m_tooltip.Activate(TRUE);
 	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"閉じます", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
@@ -180,6 +192,11 @@ BOOL CEqualizer::OnInitDialog()
 	m_smitsudo.SetMode(2);
 	m_srittai.SetMode(2);
 
+	m_reverb.SetMode(2);
+	m_chorus.SetMode(2);
+	m_delay.SetMode(2);
+
+
 	ReapplyDecorativeTitleFont();
 
 	m_t.SetPreferWideMode(TRUE);
@@ -231,6 +248,22 @@ BOOL CEqualizer::OnInitDialog()
 	m_srittai.SetPos(200 - savedata.eq[19]);
 	s.Format(L"%d", savedata.eq[19]);
 	m_vrittai.SetWindowText(s);
+
+	m_reverb.SetRange(0, 200);
+	m_reverb.SetPos(200 - savedata.eq_reverb);
+	s.Format(L"%d", savedata.eq_reverb);
+	m_reverbi.SetWindowText(s);
+
+	m_chorus.SetRange(0, 200);
+	m_chorus.SetPos(200 - savedata.eq_chorus);
+	s.Format(L"%d", savedata.eq_chorus);
+	m_chorusi.SetWindowText(s);
+
+	m_delay.SetRange(0, 200);
+	m_delay.SetPos(200 - savedata.eq_delay);
+	s.Format(L"%d", savedata.eq_delay);
+	m_delayi.SetWindowText(s);
+
 
 	m_s0.SetPos(200 - savedata.eq[0]);
 	m_s1.SetPos(200 - savedata.eq[1]);
@@ -696,6 +729,15 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	if (vol != savedata.eq[19]) { s.Format(L"%d", vol); m_vrittai.SetWindowText(s); }
 	savedata.eq[19] = vol;
 
+	vol = 200 - m_reverb.GetPos();
+	if (vol != savedata.eq_reverb) { s.Format(L"%d", vol); m_reverbi.SetWindowText(s); }
+	savedata.eq_reverb = vol;
+	vol = 200 - m_chorus.GetPos();
+	if (vol != savedata.eq_chorus) { s.Format(L"%d", vol); m_chorusi.SetWindowText(s); }
+	savedata.eq_chorus = vol;
+	vol = 200 - m_delay.GetPos();
+	if (vol != savedata.eq_delay) { s.Format(L"%d", vol); m_delayi.SetWindowText(s); }
+	savedata.eq_delay = vol;
 
 	vol = m_eff.GetPos();
 	if(vol / 2 != savedata.eqsoundeffect) { s.Format(L"%d", vol); m_seff.SetWindowText(s); }
@@ -827,11 +869,18 @@ void CEqualizer::OnBnClickedOk4()
 	savedata.eq[17] = 100;
 	savedata.eq[18] = 100;
 	savedata.eq[19] = 100;
+	savedata.eq_reverb = 0;   // 0 = オフ
+	savedata.eq_chorus = 0;   // 0 = オフ
+	savedata.eq_delay = 0;    // 0 = オフ
 	m_smaster.SetPos(200 - savedata.eq[15]);
 	m_ssenmei.SetPos(200 - savedata.eq[16]);
 	m_skoutei.SetPos(200 - savedata.eq[17]);
 	m_smitsudo.SetPos(200 - savedata.eq[18]);
 	m_srittai.SetPos(200 - savedata.eq[19]);
+
+	m_reverb.SetPos(200 - savedata.eq_reverb);
+	m_chorus.SetPos(200 - savedata.eq_chorus);
+	m_delay.SetPos(200 - savedata.eq_delay);
 	CString s;
 	s.Format(L"%d", savedata.eq[15]);
 	m_vmaster.SetWindowText(s);
@@ -843,5 +892,11 @@ void CEqualizer::OnBnClickedOk4()
 	m_vmitsudo.SetWindowText(s);
 	s.Format(L"%d", savedata.eq[19]);
 	m_vrittai.SetWindowText(s);
+	s.Format(L"%d", savedata.eq_reverb);
+	m_reverbi.SetWindowText(s);
+	s.Format(L"%d", savedata.eq_chorus);
+	m_chorusi.SetWindowText(s);
+	s.Format(L"%d", savedata.eq_delay);
+	m_delayi.SetWindowText(s);
 }
 

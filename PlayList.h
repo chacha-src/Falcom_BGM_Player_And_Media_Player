@@ -76,6 +76,7 @@ public:
 	CString UTF8toUNI(const TCHAR* a);
 
 	virtual BOOL OnInitDialog();
+	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	CButtonST m_lsup;
 	CButtonST m_lup;

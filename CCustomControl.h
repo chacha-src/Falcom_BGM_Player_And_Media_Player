@@ -870,6 +870,10 @@ public:
     void SetPos(int nPos);
     int GetPos() const;
 
+    // 範囲(最小/最大)の取得(メディアプレイヤー画面のシーク表示用)
+    int GetMinValue() const { return m_nMin; }
+    int GetMaxValue() const { return m_nMax; }
+
     // アクリルモードの設定
     void SetAeroMode(BOOL b);
 

@@ -117,4 +117,10 @@ public:
 	CString m_cachedKeyMid;
 	CString m_cachedKeyHigh;
 	CString m_cachedKeyAll;
+	CCustomSliderCtrl m_reverb;
+	CCustomSliderCtrl m_chorus;
+	CCustomSliderCtrl m_delay;
+	CCustomStatic m_reverbi;
+	CCustomStatic m_chorusi;
+	CCustomStatic m_delayi;
 };

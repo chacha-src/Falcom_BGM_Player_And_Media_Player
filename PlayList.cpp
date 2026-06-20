@@ -529,10 +529,24 @@ int CPlayList::Create(CWnd *pWnd)
 		m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
 	}
 	if (bret == TRUE) {
-		ShowWindow(SW_SHOW);
+		// メディアプレイヤーモード中は単独表示しない(裏で生かすのみ)
+		if (savedata.playerMode != 1)
+			ShowWindow(SW_SHOW);
 		ScheduleRefreshNavControls();
 	}
 	return bret;
+}
+
+BOOL CPlayList::PreCreateWindow(CREATESTRUCT& cs)
+{
+	BOOL r = CCustomBlurDialogBase::PreCreateWindow(cs);
+	// メディアプレイヤーモードでは最初から非表示・画面外で生成(ちらつき防止)
+	if (savedata.playerMode == 1) {
+		cs.style &= ~WS_VISIBLE;
+		cs.x = -32000;
+		cs.y = -32000;
+	}
+	return r;
 }
 
 void CPlayList::OnClose()
@@ -5007,6 +5021,11 @@ void CPlayList::ScheduleRefreshNavControls()
 void CPlayList::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
+	// メディアプレイヤーモード中はプレイリスト単独ウィンドウを出さない(裏で生かすのみ)
+	if (bShow && savedata.playerMode == 1 && GetSafeHwnd()) {
+		ShowWindow(SW_HIDE);
+		return;
+	}
 	if (bShow)
 		ScheduleRefreshNavControls();
 	UNREFERENCED_PARAMETER(nStatus);

@@ -1934,12 +1934,28 @@ namespace PianoDraw
         if (rc.Height() < 1 || rc.Width() < 2) return;
         const int amp = min(2, max(1, rc.Width() / 3));
         const int xBase = rc.right - 1;
-        for (int y = rc.top; y < rc.bottom; ++y) {
+        // SetPixel(1px毎=最も遅いGDI)を廃し、Polylineで一括描画する。
+        // 縦に長い場合のスタック確保を避けるため上限を設ける。
+        static const int MAXPTS = 4096;
+        POINT pts[MAXPTS];
+        int nPts = 0;
+        for (int y = rc.top; y < rc.bottom && nPts < MAXPTS; ++y) {
             const int off = (int)(sin((y - rc.top) * 0.75) * amp);
-            const int x = xBase + off;
-            if (x >= rc.left && x < rc.right)
-                dc.SetPixel(x, y, col);
+            int x = xBase + off;
+            if (x < rc.left) x = rc.left;
+            if (x > rc.right - 1) x = rc.right - 1;
+            pts[nPts].x = x;
+            pts[nPts].y = y;
+            ++nPts;
         }
+        if (nPts < 2) {
+            if (nPts == 1) dc.SetPixel(pts[0].x, pts[0].y, col);
+            return;
+        }
+        CPen pen(PS_SOLID, 1, col);
+        CPen* pOld = dc.SelectObject(&pen);
+        dc.Polyline(pts, nPts);
+        dc.SelectObject(pOld);
     }
 
     static void DrawHistoryNote(CDC& dc, CRect rc, uint8_t bandMask, const float* laneStr,
@@ -2078,6 +2094,8 @@ void CPianoRoll::ReleasePaintBuffers()
     m_fontCacheClientW = 0;
     m_fontCacheKeyH = 0;
     m_fontCacheRollH = 0;
+
+    ReleaseExprLegendCache();
 }
 
 bool CPianoRoll::EnsureRollBuffer(CDC& refDC, int width, int rollH)
@@ -2235,11 +2253,71 @@ void CPianoRoll::GetExprLegendPanelRect(int rollW, int rollH, CRect& panel) cons
     panel.SetRect(4, 4, 4 + panelW, 4 + panelH);
 }
 
-void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH) const
+void CPianoRoll::ReleaseExprLegendCache() const
 {
-    using namespace PianoDraw;
+    if (m_legendDC.GetSafeHdc()) {
+        if (m_legendOldBmp) m_legendDC.SelectObject(m_legendOldBmp);
+        m_legendDC.DeleteDC();
+    }
+    m_legendBmp.DeleteObject();
+    m_legendOldBmp = nullptr;
+    m_legendW = m_legendH = 0;
+    m_legendReady = false;
+    m_legendCacheRollW = m_legendCacheRollH = -1;
+}
+
+bool CPianoRoll::EnsureExprLegendCache(CDC& refDC, int rollW, int rollH) const
+{
     CRect panel;
     GetExprLegendPanelRect(rollW, rollH, panel);
+    if (panel.IsRectEmpty()) return false;
+    if (!m_paintFontsReady || !m_fontExprLegend.GetSafeHandle() || !m_fontExprSymbol.GetSafeHandle())
+        return false;
+
+    const int pw = panel.Width();
+    const int ph = panel.Height();
+    if (pw <= 0 || ph <= 0) return false;
+
+    // サイズ(=フォントサイズ依存)が変わったら作り直す。内容は静的なので一度だけ描画。
+    if (m_legendReady && m_legendCacheRollW == rollW && m_legendCacheRollH == rollH
+        && m_legendW == pw && m_legendH == ph && m_legendDC.GetSafeHdc())
+        return true;
+
+    ReleaseExprLegendCache();
+
+    if (!m_legendDC.CreateCompatibleDC(&refDC)) return false;
+    if (!m_legendBmp.CreateCompatibleBitmap(&refDC, pw, ph)) {
+        m_legendDC.DeleteDC();
+        return false;
+    }
+    m_legendOldBmp = m_legendDC.SelectObject(&m_legendBmp);
+
+    DrawExprLegendContent(m_legendDC, rollW, rollH, CRect(0, 0, pw, ph));
+
+    m_legendW = pw;
+    m_legendH = ph;
+    m_legendCacheRollW = rollW;
+    m_legendCacheRollH = rollH;
+    m_legendReady = true;
+    return true;
+}
+
+void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH) const
+{
+    CRect panel;
+    GetExprLegendPanelRect(rollW, rollH, panel);
+    if (panel.IsRectEmpty()) return;
+    if (!EnsureExprLegendCache(dc, rollW, rollH)) {
+        // キャッシュ生成失敗時は従来どおり直接描画（保険）
+        DrawExprLegendContent(dc, rollW, rollH, panel);
+        return;
+    }
+    dc.BitBlt(panel.left, panel.top, m_legendW, m_legendH, &m_legendDC, 0, 0, SRCCOPY);
+}
+
+void CPianoRoll::DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRect& panel) const
+{
+    using namespace PianoDraw;
     if (panel.IsRectEmpty()) return;
     if (!m_paintFontsReady || !m_fontExprLegend.GetSafeHandle() || !m_fontExprSymbol.GetSafeHandle())
         return;

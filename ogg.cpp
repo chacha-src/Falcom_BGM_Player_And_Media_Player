@@ -5,6 +5,7 @@
 #include "Windows.h"
 #include "ogg.h"
 #include "oggDlg.h"
+#include "CMediaPlayerDlg.h"
 #include "direct.h"
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -195,6 +196,14 @@ BOOL COggApp::InitInstance()
 	savedata.pianorollh = 450;
 	savedata.saveversion = 1;
 
+	savedata.playerMode = 0;   // 既定はファルコム特化型
+	savedata.startupAsk = 1;   // 既定で起動時にモード選択ダイアログを表示
+	savedata.mpHasPos = 0;     // メディアプレイヤー座標は未設定
+	savedata.mpx = -10000;
+	savedata.mpy = -10000;
+	savedata.mpw = 0;
+	savedata.mph = 0;
+
 #if _UNICODE
 	if(GetKeyState(VK_CONTROL) < 0){
 		if(AfxMessageBox(LL14(L"ANSI版からのコンバートを行いますか？", L"Convert from ANSI version?", L"Convertir depuis la version ANSI ?", L"Convertire dalla versione ANSI?", L"?Convertir desde version ANSI?", L"ANSI ???? ?????????", L"从ANSI版本??？", L"??????? ?? ????? ANSI?", L"Конвертировать из версии ANSI?", L"Von ANSI-Version konvertieren?", L"Converter da versao ANSI?", L"Converteren van ANSI-versie?", L"Konwertowa? z wersji ANSI?", L"ANSI surumunden donu?turulsun mu?"),MB_YESNO)==IDYES){
@@ -289,6 +298,23 @@ BOOL COggApp::InitInstance()
 		ab.Write(&savedata, sizeof(save));
 		ab.Close();
 	}
+	// 起動時のモード選択(ファルコムbgm特化型画面 / メディアプレイヤー画面)
+	if (savedata.startupAsk) {
+		CModeSelectDlg msd;
+		msd.DoModal();   // savedata.playerMode / savedata.startupAsk を更新
+		// 選択結果を即保存
+		_tchdir(karento2);
+		CFile sf;
+#if _UNICODE
+		if (sf.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#else
+		if (sf.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#endif
+			sf.Write(&savedata, sizeof(save));
+			sf.Close();
+		}
+	}
+
 	COggDlg dlg;
 	og=&dlg;
 	m_pMainWnd = &dlg;
