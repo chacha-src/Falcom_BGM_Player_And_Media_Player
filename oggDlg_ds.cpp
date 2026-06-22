@@ -5190,7 +5190,15 @@ void equaliser(void* data, int len, BOOL reset) {
 
 			// [FIX-1] ウェットミックス量を [0, 0.90] で厳格にクランプ
 			float effectiveWetMix = fminf(0.90f, env->wetMix * coreScale);
-			float mixed = signal + wetSignal * effectiveWetMix;
+			// [FIX-CLIP] ドライ/ウェットのクロスフェード(ドライダッキング):
+			//   ウェット(=残響=環境キャラクター)が増えるほどドライを下げる。
+			//   ・dry+wet の合算ピーク肥大を抑え、最終段ルックアヘッドリミッターが
+			//     全環境を同じレベルまで潰す(=どの環境も同じ音に聞こえる/音割れ感)
+			//     のを防ぐ。
+			//   ・残響の相対レベルが上がるため、100環境それぞれの差が一目瞭然になる。
+			//   低wet環境(スタジオ/防音室など wet≒0)はほぼ無影響(dryGain≒1.0)。
+			float dryGain = 1.0f - 0.45f * effectiveWetMix;
+			float mixed = signal * dryGain + wetSignal * effectiveWetMix;
 
 			// エフェクト追加処理 (各パラメータが有効な場合のみ)
 			if (env->exciterAmount > 0.0f && effectAmount > 0)

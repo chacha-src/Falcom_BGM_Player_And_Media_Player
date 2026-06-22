@@ -25,6 +25,7 @@ int flacmode = 0;
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CMediaPlayerDlg.h"
+#include "FileTagInfo.h"
 #include "NoteFundamentalPick.h"
 #include <math.h>
 #include <vorbis/codec.h>
@@ -2132,6 +2133,7 @@ DWORD cnt3 = 0;
 
 int loop3;
 CString tagname, tagfile, tagalbum;
+CString tagtrack;   // 曲番号(トラック番号)。全形式でタグから補完して表示に使用
 int playy = 1;
 void st1();
 void st2();
@@ -6354,8 +6356,26 @@ void COggDlg::play()
 		CWread* g_pThread;// = (CWread*)pRuntime->CreateObject();
 		//g_pThread->CreateThread(0, 0, NULL);
 		g_pThread = (CWread*)AfxBeginThread(RUNTIME_CLASS(CWread), THREAD_PRIORITY_ABOVE_NORMAL, NULL, 0, NULL);
-		::SetPriorityClass(g_pThread, HIGH_PRIORITY_CLASS);
-		g_pThread->PostThreadMessage(WM_APP + 100, NULL, NULL);
+		if (g_pThread) {
+			::SetPriorityClass(g_pThread, HIGH_PRIORITY_CLASS);
+			// PostThreadMessage はワーカースレッドがメッセージキューを生成する前に呼ぶと
+			// 失敗してメッセージを取りこぼす。取りこぼすと wavread1 が実行されず wavwait が
+			// 0 のまま残り、下の「wavwait 待ち」ループが永久に固まる（曲切替/終了時のまれな
+			// フリーズの主因）。成功するまでリトライしてデコード開始を保証する。
+			BOOL posted = FALSE;
+			for (int retry = 0; retry < 5000 && !posted; ++retry) {
+				if (g_pThread->PostThreadMessage(WM_APP + 100, NULL, NULL))
+					posted = TRUE;
+				else
+					Sleep(1);
+			}
+			// 念のため: 起動に失敗しても待ちループを抜けられるようフラグを立てる。
+			if (!posted) { wavwait = 1; thend = 1; }
+		}
+		else {
+			// スレッド生成自体に失敗した場合も永久待ちを防ぐ。
+			wavwait = 1; thend = 1;
+		}
 		for (int k = 0; k < 100; k++)
 			DoEvent();
 	}
@@ -6851,7 +6871,17 @@ void COggDlg::play()
 	ZeroMemory(bufwav3, sizeof(bufwav3));
 	DWORD  dwDataLen = WAVDALen / OUTPUT_BUFFER_NUM;
 	if (((mode >= 10 && mode <= 21) || mode <= -10) && mode != -10 || mode == -6 || mode == 30) {
-		for (; wavwait == 0;) { CWaitCursor rrr2; DoEvent(); }
+		{
+			// wavwait はデコード用ワーカースレッド(CWread)が完了時に立てる。
+			// 万一立たなくても UI が永久フリーズしないよう保険のタイムアウトを設ける
+			// （本来の取りこぼしは上の PostThreadMessage リトライで解消済み）。
+			const DWORD wavWaitT0 = GetTickCount();
+			for (; wavwait == 0;) {
+				CWaitCursor rrr2;
+				DoEvent();
+				if (GetTickCount() - wavWaitT0 >= 30000) break;
+			}
+		}
 		if (adbuf2 == NULL) { endflg = 0; return; }
 		//		if(mode!=-10)
 		//			playwavBuffwav(bufwav3,0,dwDataLen*4,0);
@@ -9031,6 +9061,20 @@ void COggDlg::play()
 	g_endWrittenBytes = 0;
 	g_heardBytes = 0;
 	g_outBytesPerFrame = PcmOutBytesPerFrame();
+
+	// 全ての音声形式で、タイトル/アーティスト/アルバム/曲番号をファイルのタグから補完する。
+	// ogg は従来タイトル(stitle)のみ、wav 等はプレイリスト由来のみだったため、空欄を埋める。
+	// 既に各形式の読み込みで設定済みの値は上書きしない（タグが無いゲーム形式等は no-op）。
+	if (mode == -1 || mode == -6 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999) {
+		FileTagFields _tf;
+		ReadFileTagFields(filen, _tf);
+		if (stitle.IsEmpty() && !_tf.title.IsEmpty())   stitle = _tf.title;
+		if (tagname.IsEmpty() && !_tf.artist.IsEmpty()) tagname = _tf.artist;
+		if (tagalbum.IsEmpty() && !_tf.album.IsEmpty()) tagalbum = _tf.album;
+		if (tagfile.IsEmpty() && !_tf.title.IsEmpty())  tagfile = _tf.title;
+		tagtrack = _tf.track;
+	}
+
 	SetTimer(9000, 10, NULL);
 	//	::SetPriorityClass(m_thread, HIGH_PRIORITY_CLASS);
 	endf = 0;
@@ -15029,11 +15073,12 @@ void COggDlg::timerp()
 
 	if (bGdiFrame)
 	{
+	extern int g_mpSideJacket;   // 1=ジャケットを mp 左余白へ分離表示中(内蔵ジャケ抑止)
 	dc.FillSolidRect(0, 0, 3000, 2000, RGB(0, 0, 0));
 	//		dcsub.FillSolidRect(0,0,3000,30,RGB(1,1,1));
 
 	bool draw_jacket_early = (m_jacketFocus < 0.5);
-	if (draw_jacket_early && jx != -1 && !img.IsNull()) {
+	if (draw_jacket_early && jx != -1 && !img.IsNull() && !g_mpSideJacket) {
 		int h_dest = 388;
 		int w_dest = (int)(388.0 * jxy);
 		if (w_dest <= 0) w_dest = 388;
@@ -15471,7 +15516,7 @@ void COggDlg::timerp()
 		//			m_11.SetWindowText(s);
 	}
 
-	if (!draw_jacket_early && jx != -1 && !img.IsNull()) {
+	if (!draw_jacket_early && jx != -1 && !img.IsNull() && !g_mpSideJacket) {
 		int h_dest = 388;
 		int w_dest = (int)(388.0 * jxy);
 		if (w_dest <= 0) w_dest = 388;
@@ -18352,6 +18397,8 @@ void COggDlg::OnPause()
 
 BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 {
+	if (CCC_ProcessInwomanHotkey(pMsg, this))
+		return TRUE; // 隠し: F12を5回で淫女モード切替
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);

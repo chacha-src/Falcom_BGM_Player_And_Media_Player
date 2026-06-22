@@ -9,6 +9,7 @@
 #include "CImageBase.h"
 #include "Mp3Image.h"
 #include <direct.h>
+#include <shobjidl.h>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -25,7 +26,12 @@ extern int killw1;
 extern save savedata;
 extern TCHAR karento2[1024];
 extern CString filen, fnn, tagname, tagfile, tagalbum;
+extern CString stitle;   // ゲーム内タイトル等(oggDlg.cpp)
+extern CString tagtrack; // 曲番号(トラック番号。oggDlg.cpp)
+extern int mode;         // 再生モード(タイトル解決に使用, oggDlg.cpp)
 extern int playy;   // 再生中フラグ(oggDlg.cpp)
+extern int plf;          // 再生中(1=再生中。oggDlg.cpp)
+extern ITaskbarList3* ptl;   // タスクバー進捗(oggDlg.cpp で初期化)
 extern CDC dc;   // COggDlg のオフスクリーン合成面(スペアナ+ジャケ+時間)を流用
 
 // og 側のオフスクリーン面のソース寸法(oggDlg.cpp の OnPaint と一致させる: srcW=MDCP+5)
@@ -34,6 +40,9 @@ static const int MP_SRCH = (81 + 16) * 4;          // = 388
 
 CMediaPlayerDlg* mp = NULL;
 int g_mpBannerHover = 0;   // バナー(GDI)上にマウスがあるか(og の timerp がジャケットアニメに使用)
+// 幅拡張時にジャケットを左余白へ分離表示しているか。1 の間は og の timerp が
+// バナー内蔵ジャケット(半透明・タイトル背後)を描かない(二重表示・かぶり防止)。
+int g_mpSideJacket = 0;
 
 /////////////////////////////////////////////////////////////////////////////
 // CModeSelectDlg
@@ -131,6 +140,8 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_hDragImage = NULL;
 	hD2 = 1.0f;
 	m_bannerRect.SetRectEmpty();
+	m_jacketRect.SetRectEmpty();
+	m_infoPanelRect.SetRectEmpty();
 	m_bannerCacheW = 0;
 	m_bannerCacheH = 0;
 }
@@ -253,6 +264,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogBase)
 	ON_NOTIFY(LVN_GETDISPINFO, IDC_MP_LIST, &CMediaPlayerDlg::OnGetdispinfoList)
 	ON_NOTIFY(NM_DBLCLK, IDC_MP_LIST, &CMediaPlayerDlg::OnDblclkList)
 	ON_NOTIFY(NM_RCLICK, IDC_MP_LIST, &CMediaPlayerDlg::OnRclickList)
+	ON_NOTIFY(LVN_KEYDOWN, IDC_MP_LIST, &CMediaPlayerDlg::OnKeydownList)
 	ON_NOTIFY(LVN_BEGINDRAG, IDC_MP_LIST, &CMediaPlayerDlg::OnBeginDragList)
 END_MESSAGE_MAP()
 
@@ -337,6 +349,10 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_tempo.SetRange(0, 400);   m_tempo.SetMode(1);
 	m_pitch.SetRange(0, 400);   m_pitch.SetMode(1);
 
+	// シークスライダーに選択範囲(緑)を有効化。リソースでは付いていないため
+	// ここで付与しないと MirrorSeekVol の SetSelection(ループ範囲/緑追随)が描画されない。
+	m_seek.ModifyStyle(0, TBS_ENABLESELRANGE);
+
 	// 少し可愛い系の配色
 	m_prev.SetGradation(RGB(215, 235, 255), RGB(165, 205, 245), 0, TRUE);
 	m_play.SetGradation(RGB(200, 240, 200), RGB(140, 210, 150), 0, TRUE);
@@ -368,6 +384,12 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_list.InsertColumn(2, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, (int)(60 * hD2));
 	m_list.InsertColumn(3, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatc?"), LVCFMT_LEFT, (int)(160 * hD2));
 	m_list.InsertColumn(4, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Comm.", L"Album/Comm.", L"Album/Com.", L"앨범/댓글", L"专辑/注释", L"الألبوم/تعليق", L"Альбом/Комм.", L"Album/Komm.", L"Album/Coment.", L"Album/Opm.", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, (int)(160 * hD2));
+
+	// 保存済みの列幅を復元(0=未設定なら上で設定した既定値のまま)
+	for (int ci = 0; ci < 5; ++ci) {
+		if (savedata.mpcol[ci] > 0)
+			m_list.SetColumnWidth(ci, savedata.mpcol[ci]);
+	}
 
 	// フォント
 	m_fontTitle.CreateFont(-(int)(20 * hD2), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
@@ -509,6 +531,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 
 BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 {
+	if (CCC_ProcessInwomanHotkey(pMsg, this))
+		return TRUE; // 隠し: F12を5回で淫女モード切替
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
@@ -517,6 +541,9 @@ BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 BOOL CMediaPlayerDlg::DestroyWindow()
 {
 	SavePos();
+	// バナー内蔵ジャケ(ファルコム特化型のミニジャケ)抑止フラグを必ず解除する。
+	// これを残すと、ファルコム特化型へ戻した後もミニジャケが表示されなくなる。
+	g_mpSideJacket = 0;
 	KillTimer(1);
 	KillTimer(2);
 	KillTimer(3);
@@ -554,8 +581,45 @@ void CMediaPlayerDlg::DoLayout()
 		int bannerMin = (int)(54 * s);
 		if (bannerH < bannerMin) bannerH = bannerMin;
 	}
-	int bannerX = M + (avail - bannerW) / 2;                      // 中央寄せ
+
+	// ===== 余白(左右)の有効活用 =====
+	// バナーはアスペクト維持のため幅に上限があり、窓を広げると左右に余白ができる。
+	// その余白へ: 左=ジャケット(ミニ・正方形), 右=曲情報パネル を順に展開する。
+	// 余白が少ない狭い窓では従来どおりバナーを中央寄せするだけ(サイドパネル無し)。
+	m_jacketRect.SetRectEmpty();
+	m_infoPanelRect.SetRectEmpty();
+	const int sideGap = (int)(10 * s);
+	int freeSpace = avail - bannerW;                              // 左右に使える余白の合計
+	int jacketSide = bannerH;                                     // ジャケットは帯と同じ高さの正方形
+	bool showJacket = (freeSpace >= jacketSide + sideGap * 2);
+	int leftZone = showJacket ? (jacketSide + sideGap) : 0;       // [ジャケ][gap] の占有幅
+	int minInfo = (int)(130 * s);                                 // 情報パネルを出す最小幅
+	int remainFree = freeSpace - leftZone;                        // ジャケ配置後に残る余白
+	bool showInfo = showJacket && (remainFree >= minInfo + sideGap);
+
+	int bannerX;
+	if (!showJacket) {
+		bannerX = M + freeSpace / 2;                              // 従来: 中央寄せのみ
+	}
+	else if (!showInfo) {
+		// ジャケ+バナーのみ: 左右に余白を均等配分して塊を中央寄せ(空白を最小化)
+		int pad = remainFree / 2;
+		int jacketX = M + pad;
+		m_jacketRect.SetRect(jacketX, M, jacketX + jacketSide, M + bannerH);
+		bannerX = jacketX + leftZone;
+	}
+	else {
+		// ジャケ(左端)+ バナー + 情報パネル(右端まで)で余白を埋め切る
+		int jacketX = M;
+		m_jacketRect.SetRect(jacketX, M, jacketX + jacketSide, M + bannerH);
+		bannerX = jacketX + leftZone;
+		int infoX = bannerX + bannerW + sideGap;
+		m_infoPanelRect.SetRect(infoX, M, M + avail, M + bannerH);
+	}
 	m_bannerRect.SetRect(bannerX, M, bannerX + bannerW, M + bannerH);
+
+	// og の timerp 側: ジャケットを左へ分離している間はバナー内蔵ジャケ描画を抑止
+	g_mpSideJacket = showJacket ? 1 : 0;
 
 	const int gTitle = (int)(14 * s);   // グループ枠のタイトル分の高さ
 	const int gPad = (int)(5 * s);      // グループ内側の余白
@@ -838,6 +902,20 @@ void CMediaPlayerDlg::SyncFromMain()
 				m_plsel.SetCurSel(savedata.playlistnum);
 		}
 	}
+
+	// サイドパネル(左ジャケ/右曲情報)の表示内容が変わったら再描画。
+	// 毎フレーム描画はせず、曲(タイトル/アーティスト/アルバム/ジャケ)変化時のみ更新。
+	if (!m_jacketRect.IsRectEmpty() || !m_infoPanelRect.IsRectEmpty()) {
+		CString fmt; if (::IsWindow(m_os.GetSafeHwnd())) m_os.GetWindowText(fmt);
+		CString key;
+		key.Format(_T("%s\x01%s\x01%s\x01%s\x01%s\x01%d"),
+			(LPCTSTR)CurrentTrackTitle(), (LPCTSTR)tagname, (LPCTSTR)tagalbum,
+			(LPCTSTR)tagtrack, (LPCTSTR)fmt, og ? og->jx : -1);
+		if (key != m_lastBannerKey) {
+			m_lastBannerKey = key;
+			InvalidateSidePanels();
+		}
+	}
 }
 
 void CMediaPlayerDlg::EnforceFalcomHidden()
@@ -873,6 +951,18 @@ void CMediaPlayerDlg::MirrorSeekVol()
 		if (pct < 0) pct = 0; if (pct > 100) pct = 100;
 		CString t; t.Format(_T("%d%%"), pct);
 		m_time.GetWindowText(s2); if (t != s2) m_time.SetWindowText(t);
+
+		// タスクバー進捗(緑追随)。og は非表示なので og->m_hWnd ではなく
+		// このメディアプレイヤー画面のウィンドウに対して設定する必要がある。
+		if (ptl) {
+			if (plf && mx > mn) {
+				ptl->SetProgressState(m_hWnd, TBPF_NORMAL);
+				ptl->SetProgressValue(m_hWnd, (ULONGLONG)(ps - mn), (ULONGLONG)(mx - mn));
+			}
+			else {
+				ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
+			}
+		}
 	}
 	// 音量(og->m_sl 0..100000 を 0..100 でミラー)
 	int v = og->m_sl.GetPos() / 1000;
@@ -892,6 +982,14 @@ void CMediaPlayerDlg::SavePos()
 	savedata.mpw = r.right - r.left;
 	savedata.mph = r.bottom - r.top;
 	savedata.mpHasPos = 1;
+	// リストの列幅も保存(次回起動時に復元)
+	if (::IsWindow(m_list.GetSafeHwnd())) {
+		for (int ci = 0; ci < 5; ++ci) {
+			int w = m_list.GetColumnWidth(ci);
+			if (w > 0)
+				savedata.mpcol[ci] = w;
+		}
+	}
 }
 
 #if WIN64
@@ -924,7 +1022,9 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		// 前面ウィンドウ条件は付けない(再生でフォーカスが移ってもアニメを止めない)。
 		if (::IsWindowVisible(GetSafeHwnd()) && !IsIconic()) {
 			CPoint pt; ::GetCursorPos(&pt); ScreenToClient(&pt);
-			g_mpBannerHover = m_bannerRect.PtInRect(pt) ? 1 : 0;
+			// ジャケットを左へ分離している間はバナー内蔵ジャケが無いので
+			// ホバー演出(タイトル減光・ジャケ前面化)は無効化する。
+			g_mpBannerHover = (!g_mpSideJacket && m_bannerRect.PtInRect(pt)) ? 1 : 0;
 		}
 		else g_mpBannerHover = 0;
 	}
@@ -1018,6 +1118,148 @@ void CMediaPlayerDlg::BlitVisualizer(CDC* pDC)
 	::SelectObject(m_memBanner.GetSafeHdc(), oldBmp);
 }
 
+// og と同じ規則で表示用タイトルを解決(timerp の sss 決定ロジックと一致)
+CString CMediaPlayerDlg::CurrentTrackTitle() const
+{
+	CString t = fnn;
+	if (mode == -10 || mode == -9 || mode == -8 || mode == -7) t = tagfile;
+	if ((stitle != _T("") && mode == -1) || mode == 21 || mode == -6) t = stitle;
+	// wav 等もタグのタイトルがあれば優先(無ければファイル名のまま)
+	if (mode == 999 && !stitle.IsEmpty()) t = stitle;
+	return t;
+}
+
+void CMediaPlayerDlg::InvalidateSidePanels()
+{
+	if (!::IsWindow(GetSafeHwnd())) return;
+	if (!m_jacketRect.IsRectEmpty())    InvalidateRect(&m_jacketRect, FALSE);
+	if (!m_infoPanelRect.IsRectEmpty()) InvalidateRect(&m_infoPanelRect, FALSE);
+}
+
+// 左ジャケット / 右曲情報 パネルを描画。バナーと同じ黒地に統一し、上部の帯全体が
+// ひとつのメディアバー(左:ジャケ / 中央:スペアナ / 右:曲情報)に見えるようにする。
+// 内容は曲変更/リサイズ時のみ再描画されるため(毎フレームではない)ちらつかない。
+void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
+{
+	if (!pDC) return;
+	if (m_jacketRect.IsRectEmpty() && m_infoPanelRect.IsRectEmpty()) return;
+
+	bool aero = false;
+#if CCUSTOM_AERO_SUPPORT
+	aero = (savedata.aero == 1 && CCC_IsWin11());
+#endif
+	const COLORREF kBg = RGB(0, 0, 0);   // バナーと同じ黒(アクリル時は黒=ガラス抜き)
+
+	// 更新領域(クリップ)に重なるパネルだけ再構築する。バナーは毎フレーム無効化
+	// されるが、その際クリップはバナー矩形のみなので、ここでの重い描画(画像縮小/
+	// 文字描画)は走らない(=サイドパネルは曲変更/リサイズ時のみ再描画)。
+	CRect clip; pDC->GetClipBox(&clip);
+
+	// ---- 左: ジャケット(ミニ・余白へ分離) ----
+	if (!m_jacketRect.IsRectEmpty() && CRect().IntersectRect(&clip, &m_jacketRect)) {
+		int w = m_jacketRect.Width(), h = m_jacketRect.Height();
+		if (w > 0 && h > 0) {
+			CDC mem; mem.CreateCompatibleDC(pDC);
+			CBitmap bm; bm.CreateCompatibleBitmap(pDC, w, h);
+			CBitmap* ob = mem.SelectObject(&bm);
+			mem.FillSolidRect(0, 0, w, h, kBg);
+			if (og && og->jx > 0 && !og->img.IsNull()) {
+				double jr = og->jxy; if (jr <= 0.0) jr = 1.0;
+				int dw = w, dh = h;                 // アスペクト維持で正方形内にフィット
+				if (jr >= 1.0) { dw = w; dh = (int)((double)w / jr); }
+				else { dh = h; dw = (int)((double)h * jr); }
+				if (dw > w) { dw = w; dh = (int)((double)w / jr); }
+				if (dh > h) { dh = h; dw = (int)((double)h * jr); }
+				if (dw < 1) dw = 1; if (dh < 1) dh = 1;
+				int dx = (w - dw) / 2, dy = (h - dh) / 2;
+				int om = ::SetStretchBltMode(mem.GetSafeHdc(), HALFTONE);
+				::SetBrushOrgEx(mem.GetSafeHdc(), 0, 0, NULL);
+				og->img.Draw(mem.GetSafeHdc(), dx, dy, dw, dh, 0, 0, og->jx, og->jy);
+				::SetStretchBltMode(mem.GetSafeHdc(), om);
+			}
+			else if (m_hIcon) {                     // ジャケ無し: アイコンを中央に(空白回避)
+				int isz = (w < h ? w : h) * 11 / 20;
+				::DrawIconEx(mem.GetSafeHdc(), (w - isz) / 2, (h - isz) / 2, m_hIcon, isz, isz, 0, NULL, DI_NORMAL);
+			}
+			if (aero)
+				CCC_BlitStretchChromaNoFlicker(pDC->m_hDC, m_jacketRect.left, m_jacketRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);
+			else
+				pDC->BitBlt(m_jacketRect.left, m_jacketRect.top, w, h, &mem, 0, 0, SRCCOPY);
+			mem.SelectObject(ob);
+		}
+	}
+
+	// ---- 右: 曲情報パネル(タイトル/アーティスト/アルバム/形式) ----
+	if (!m_infoPanelRect.IsRectEmpty() && CRect().IntersectRect(&clip, &m_infoPanelRect)) {
+		int w = m_infoPanelRect.Width(), h = m_infoPanelRect.Height();
+		if (w > 0 && h > 0) {
+			CDC mem; mem.CreateCompatibleDC(pDC);
+			CBitmap bm; bm.CreateCompatibleBitmap(pDC, w, h);
+			CBitmap* ob = mem.SelectObject(&bm);
+			mem.FillSolidRect(0, 0, w, h, kBg);
+			mem.SetBkMode(TRANSPARENT);
+
+			const int pad = (int)(8 * hD2);
+			int tx = pad, tw = w - pad * 2;
+			if (tw < 1) tw = 1;
+
+			// 収集
+			CString title = CurrentTrackTitle();
+			CString artist = tagname, album = tagalbum;
+			CString track = tagtrack;
+			CString fmt; if (::IsWindow(m_os.GetSafeHwnd())) m_os.GetWindowText(fmt);
+			// 曲番号は "Track 3" のように整形(タグが "3/12" 等でもそのまま表示)
+			CString trackLine;
+			if (!track.IsEmpty())
+				trackLine.Format(LL2(L"曲番号 %s", L"Track %s"), (LPCTSTR)track);
+
+			// 行高を見積もって縦中央寄せ
+			int titleH = (int)(24 * hD2);
+			int lineH = (int)(17 * hD2);
+			int rows = 1;
+			if (!artist.IsEmpty()) rows++;
+			if (!album.IsEmpty())  rows++;
+			if (!trackLine.IsEmpty()) rows++;
+			if (!fmt.IsEmpty())    rows++;
+			int ruleGap = (int)(6 * hD2);
+			int totalH = titleH + ruleGap + (rows - 1 > 0 ? (rows - 1) * lineH : 0);
+			int y = (h - totalH) / 2; if (y < 0) y = 0;
+
+			// タイトル(白・太字・省略記号)
+			CFont* of = mem.SelectObject(&m_fontTitle);
+			mem.SetTextColor(RGB(255, 255, 255));
+			CRect rt(tx, y, tx + tw, y + titleH);
+			mem.DrawText(title.IsEmpty() ? CString(_T("‐")) : title, &rt, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+			y += titleH;
+
+			// アクセント罫線(スペアナの緑系で帯全体と調和)
+			mem.FillSolidRect(tx, y + ruleGap / 2, tw, (int)(1 * hD2 + 0.5), RGB(0, 160, 0));
+			y += ruleGap;
+
+			mem.SelectObject(&m_fontInfo);
+			struct Row { CString s; COLORREF c; };
+			Row items[4]; int n = 0;
+			if (!artist.IsEmpty())    { items[n].s = artist;    items[n].c = RGB(225, 225, 225); n++; }
+			if (!album.IsEmpty())     { items[n].s = album;     items[n].c = RGB(190, 190, 190); n++; }
+			if (!trackLine.IsEmpty()) { items[n].s = trackLine; items[n].c = RGB(180, 180, 210); n++; }
+			if (!fmt.IsEmpty())       { items[n].s = fmt;       items[n].c = RGB(150, 200, 150); n++; }
+			for (int i = 0; i < n; i++) {
+				mem.SetTextColor(items[i].c);
+				CRect rr(tx, y, tx + tw, y + lineH);
+				mem.DrawText(items[i].s, &rr, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+				y += lineH;
+			}
+			mem.SelectObject(of);
+
+			if (aero)
+				CCC_BlitStretchChromaNoFlicker(pDC->m_hDC, m_infoPanelRect.left, m_infoPanelRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);
+			else
+				pDC->BitBlt(m_infoPanelRect.left, m_infoPanelRect.top, w, h, &mem, 0, 0, SRCCOPY);
+			mem.SelectObject(ob);
+		}
+	}
+}
+
 BOOL CMediaPlayerDlg::OnEraseBkgnd(CDC* pDC)
 {
 	// 描画は OnPaint / Blit で完結させ、ここでは消去しない(チラつき防止)
@@ -1034,6 +1276,7 @@ void CMediaPlayerDlg::OnPaint()
 		const RECT preserve = m_bannerRect;
 		CCC_PaintDialogAeroGaps(dc, this, &preserve);
 		BlitVisualizer(&dc);
+		DrawSidePanels(&dc);
 		COgg_ClearGdiPaintPending();
 		return;
 	}
@@ -1050,6 +1293,7 @@ void CMediaPlayerDlg::OnPaint()
 		pdc.RestoreDC(saved);
 	}
 	BlitVisualizer(&pdc);
+	DrawSidePanels(&pdc);
 	COgg_ClearGdiPaintPending();
 }
 
@@ -1430,6 +1674,19 @@ void CMediaPlayerDlg::OnRclickList(NMHDR* pNMHDR, LRESULT* pResult)
 	else if (cmd == 3) { pl->Del(); RefreshList(TRUE); }
 }
 
+// リストでの DELETE キー押下: 選択曲を削除（プレイリスト本体の Del を流用）
+void CMediaPlayerDlg::OnKeydownList(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	LPNMLVKEYDOWN pLVKeyDown = reinterpret_cast<LPNMLVKEYDOWN>(pNMHDR);
+	*pResult = 0;
+	if (!pl) return;
+	if (pLVKeyDown && pLVKeyDown->wVKey == VK_DELETE) {
+		SyncSelectionToPlaylist();
+		pl->Del();
+		RefreshList(TRUE);
+	}
+}
+
 // あいまい検索: pl のキーワード欄へ転記して pl の検索処理を流用し、結果を mp リストへ反映
 void CMediaPlayerDlg::OnFindUp()
 {
@@ -1510,8 +1767,8 @@ void CMediaPlayerDlg::OnBeginDragList(NMHDR* pNMHDR, LRESULT* pResult)
 
 void CMediaPlayerDlg::OnMouseMove(UINT nFlags, CPoint point)
 {
-	// バナー上ホバーで og と同じジャケットアニメを発火
-	g_mpBannerHover = m_bannerRect.PtInRect(point) ? 1 : 0;
+	// バナー上ホバーで og と同じジャケットアニメを発火(ジャケ分離中は無効)
+	g_mpBannerHover = (!g_mpSideJacket && m_bannerRect.PtInRect(point)) ? 1 : 0;
 	if (m_dragging) {
 		::SetCursor(::LoadCursor(NULL, IDC_HAND));
 		if (m_hDragImage) {
@@ -1614,6 +1871,9 @@ void EnterMediaPlayerMode()
 void EnterFalcomMode()
 {
 	savedata.playerMode = 0;
+
+	// ファルコム特化型では内蔵(ミニ)ジャケを必ず表示するため抑止フラグを解除。
+	g_mpSideJacket = 0;
 
 	// メディアプレイヤー画面を破棄
 	if (mp && ::IsWindow(mp->GetSafeHwnd())) {

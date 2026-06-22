@@ -47,6 +47,9 @@ static void SetIfEmpty(CString& dest, const CString& src)
 
 static void MergeFields(FileTagFields& dest, const FileTagFields& src)
 {
+	SetIfEmpty(dest.title, src.title);
+	SetIfEmpty(dest.artist, src.artist);
+	SetIfEmpty(dest.album, src.album);
 	SetIfEmpty(dest.year, src.year);
 	SetIfEmpty(dest.track, src.track);
 	SetIfEmpty(dest.genre, src.genre);
@@ -79,7 +82,15 @@ static void ApplyVorbisCommentLine(const CString& cc, FileTagFields& out)
 	CString key = cc.Left(eq);
 	CString val = cc.Mid(eq + 1);
 	key.MakeUpper();
-	if (key == _T("DATE") || key == _T("YEAR") || key == _T("ORIGINALDATE") || key == _T("ORIGINALYEAR"))
+	if (key == _T("TITLE"))
+		SetIfEmpty(out.title, val);
+	else if (key == _T("ARTIST"))
+		SetIfEmpty(out.artist, val);
+	else if (key == _T("ALBUMARTIST") || key == _T("ALBUM ARTIST"))
+		SetIfEmpty(out.artist, val);
+	else if (key == _T("ALBUM"))
+		SetIfEmpty(out.album, val);
+	else if (key == _T("DATE") || key == _T("YEAR") || key == _T("ORIGINALDATE") || key == _T("ORIGINALYEAR"))
 		SetIfEmpty(out.year, val);
 	else if (key == _T("TRACK") || key == _T("TRACKNUMBER") || key == _T("TRACKNUM"))
 		SetIfEmpty(out.track, val);
@@ -98,9 +109,18 @@ static void ReadId3Tags(LPCTSTR path, FileTagFields& out)
 	CId3tagv1 ta1;
 	CId3tagv2 ta2;
 	int b = ta2.Load(path);
+	bool v1loaded = false;
+	auto ensureV1 = [&]() { if (!v1loaded) { ta1.Load(path); v1loaded = true; } };
+	SetIfEmpty(out.title, ta2.GetTitle());
+	if (b == -1) { ensureV1(); SetIfEmpty(out.title, ta1.GetTitle()); }
+	SetIfEmpty(out.artist, ta2.GetArtist());
+	if (out.artist.IsEmpty()) SetIfEmpty(out.artist, ta2.GetAlbumArtist());
+	if (b == -1) { ensureV1(); SetIfEmpty(out.artist, ta1.GetArtist()); }
+	SetIfEmpty(out.album, ta2.GetAlbum());
+	if (b == -1) { ensureV1(); SetIfEmpty(out.album, ta1.GetAlbum()); }
 	SetIfEmpty(out.year, ta2.GetYear());
 	if (b == -1) {
-		ta1.Load(path);
+		ensureV1();
 		SetIfEmpty(out.year, ta1.GetYear());
 	}
 	SetIfEmpty(out.track, ta2.GetTrackNo());
@@ -162,7 +182,13 @@ static CString DecodeId3v2TextFrame(const BYTE* data, DWORD size, bool v24)
 
 static void ApplyId3v2Frame(const char frameId[5], const BYTE* data, DWORD size, bool v24, FileTagFields& out)
 {
-	if (!memcmp(frameId, "TYER", 4) || !memcmp(frameId, "TDRC", 4))
+	if (!memcmp(frameId, "TIT2", 4))
+		SetIfEmpty(out.title, DecodeId3v2TextFrame(data, size, v24));
+	else if (!memcmp(frameId, "TPE1", 4) || !memcmp(frameId, "TPE2", 4))
+		SetIfEmpty(out.artist, DecodeId3v2TextFrame(data, size, v24));
+	else if (!memcmp(frameId, "TALB", 4))
+		SetIfEmpty(out.album, DecodeId3v2TextFrame(data, size, v24));
+	else if (!memcmp(frameId, "TYER", 4) || !memcmp(frameId, "TDRC", 4))
 		SetIfEmpty(out.year, DecodeId3v2TextFrame(data, size, v24));
 	else if (!memcmp(frameId, "TRCK", 4))
 		SetIfEmpty(out.track, DecodeId3v2TextFrame(data, size, v24));
@@ -489,7 +515,13 @@ static void ApplyMp4TagItem(const char* item, const char* value, FileTagFields& 
 	CString name = Utf8ToCString(item);
 	CString val = Utf8ToCString(value);
 	name.MakeLower();
-	if (name == _T("date") || name == _T("year"))
+	if (name == _T("title") || name == _T("name"))
+		SetIfEmpty(out.title, val);
+	else if (name == _T("artist") || name == _T("album artist") || name == _T("albumartist"))
+		SetIfEmpty(out.artist, val);
+	else if (name == _T("album"))
+		SetIfEmpty(out.album, val);
+	else if (name == _T("date") || name == _T("year"))
 		SetIfEmpty(out.year, val);
 	else if (name == _T("track") || name == _T("tracknumber"))
 		SetIfEmpty(out.track, val);
@@ -535,6 +567,14 @@ static void ReadMp4TagsFromBuffer(LPCTSTR path, FileTagFields& out)
 	}
 	ReadMp4UdtaStringFromBuffer(buf, read, "day", out.year);
 	ReadMp4UdtaStringFromBuffer(buf, read, "cmt", out.comment);
+	{
+		const char namKey[4] = { (char)0xA9, 'n', 'a', 'm' };
+		const char artKey[4] = { (char)0xA9, 'A', 'R', 'T' };
+		const char albKey[4] = { (char)0xA9, 'a', 'l', 'b' };
+		ReadMp4UdtaStringFromBuffer(buf, read, namKey, out.title);
+		ReadMp4UdtaStringFromBuffer(buf, read, artKey, out.artist);
+		ReadMp4UdtaStringFromBuffer(buf, read, albKey, out.album);
+	}
 	for (int i = 0; i < read - 12; i++) {
 		if (buf[i] == 'g' && buf[i + 1] == 'n' && buf[i + 2] == 'r' && buf[i + 3] == 'e') {
 			for (int j = i + 4; j < read - 10; j++) {
@@ -730,6 +770,12 @@ static void ReadWavRiffInfoTags(LPCTSTR path, FileTagFields& out)
 							SetIfEmpty(out.comment, t);
 						else if (subid == 0x4B525449) // ITRK
 							SetIfEmpty(out.track, t);
+						else if (subid == 0x4D414E49) // INAM (title)
+							SetIfEmpty(out.title, t);
+						else if (subid == 0x54524149) // IART (artist)
+							SetIfEmpty(out.artist, t);
+						else if (subid == 0x44525049) // IPRD (album/product)
+							SetIfEmpty(out.album, t);
 					}
 				}
 				k += 8ULL + (ULONGLONG)((subsize + 1u) & ~1u);
@@ -768,7 +814,13 @@ static bool ParseApeItems(const BYTE* data, DWORD dataSize, DWORD itemCount, Fil
 		CString keyU = Utf8ToCString(key);
 		keyU.MakeUpper();
 		CString valS = Utf8ToCString(val);
-		if (keyU == _T("YEAR"))
+		if (keyU == _T("TITLE"))
+			SetIfEmpty(out.title, valS);
+		else if (keyU == _T("ARTIST") || keyU == _T("ALBUM ARTIST"))
+			SetIfEmpty(out.artist, valS);
+		else if (keyU == _T("ALBUM"))
+			SetIfEmpty(out.album, valS);
+		else if (keyU == _T("YEAR"))
 			SetIfEmpty(out.year, valS);
 		else if (keyU == _T("TRACK"))
 			SetIfEmpty(out.track, valS);
@@ -952,6 +1004,9 @@ static void ReadWsdTags(LPCTSTR path, FileTagFields& out)
 		return;
 	}
 	f.Close();
+	SetIfEmpty(out.title, FixedTextFieldToCString((const char*)text.title, 128));
+	SetIfEmpty(out.artist, FixedTextFieldToCString((const char*)text.artist, 128));
+	SetIfEmpty(out.album, FixedTextFieldToCString((const char*)text.album, 128));
 	SetIfEmpty(out.year, FixedTextFieldToCString((const char*)text.dateAndTime, 32));
 	SetIfEmpty(out.genre, FixedTextFieldToCString((const char*)text.genre, 32));
 	SetIfEmpty(out.comment, FixedTextFieldToCString((const char*)text.comment, 512));

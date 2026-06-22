@@ -194,7 +194,7 @@ BOOL COggApp::InitInstance()
 	savedata.pianorolly = -1;
 	savedata.pianorollw = 800;
 	savedata.pianorollh = 450;
-	savedata.saveversion = 1;
+	savedata.saveversion = 2;
 
 	savedata.playerMode = 0;   // 既定はファルコム特化型
 	savedata.startupAsk = 1;   // 既定で起動時にモード選択ダイアログを表示
@@ -214,6 +214,9 @@ BOOL COggApp::InitInstance()
 		}
 	}
 	CFile ab,ac;
+	// .dat が eq_reverb 以降(メディアプレイヤーモード版=36bab3c以降)のフィールドを
+	// 含んでいたか。含む.datは ms2 を一度だけ誤って ×16 した不具合版で保存されたもの。
+	bool datHadMpFields = false;
 	if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeRead | CFile::shareDenyWrite,NULL)!=TRUE && ac.Open(L"oggYSEDbgm.dat",CFile::modeRead | CFile::shareDenyWrite,NULL)==TRUE){
 		ac.Close();
 		AfxMessageBox(LL14(L"ANSI版からのコンバートを行います。", L"Converting from ANSI version.", L"Conversion depuis la version ANSI en cours.", L"Conversione dalla versione ANSI in corso.", L"Convirtiendo desde version ANSI.", L"ANSI ???? ?? ????.", L"正在从ANSI版本??。", L"???? ??????? ?? ????? ANSI.", L"Конвертация из версии ANSI.", L"Konvertierung von ANSI-Version.", L"Convertendo da versao ANSI.", L"Converteren van ANSI-versie.", L"Konwertowanie z wersji ANSI.", L"ANSI surumunden donu?turuluyor."));
@@ -230,8 +233,18 @@ BOOL COggApp::InitInstance()
 			const int toRead = (a < (int)sizeof(save)) ? a : (int)sizeof(save);
 			ab.Read(&savedata, toRead);
 			ab.Close();
-			if (a < (int)sizeof(save))
+			// 末尾にフィールドを追加すると旧.datは sizeof(save) より小さくなるが、
+			// それだけで「旧形式」と決めつけると、saveversion を既に持つ中間
+			// バージョンの.datまで version 0 とみなして ms2 を再変換(×16)し、
+			// 16ms→256ms のように値が壊れてしまう。
+			// saveversion フィールドまで実際に読めていればその値を信頼し、
+			// それより前(=saveversion 導入前)の.datだけを version 0 とみなす。
+			if (a < (int)(offsetof(save, saveversion) + sizeof(savedata.saveversion)))
 				savedata.saveversion = 0;
+			// eq_reverb 以降のフィールドまで読めていれば、その.datは
+			// メディアプレイヤーモード版(=ms2 を一度だけ誤って ×16 した版)で
+			// 保存されたもの。後段の version 1→2 修復で ÷16 を行う判定に使う。
+			datHadMpFields = (a >= (int)(offsetof(save, eq_reverb) + sizeof(savedata.eq_reverb)));
 		}
 	}
 	if (savedata.speaker_layout < 0 || savedata.speaker_layout > 5)
@@ -269,12 +282,23 @@ BOOL COggApp::InitInstance()
 		savedata.aero = 0;
 	if (savedata.aero != 0)
 		savedata.aero = 1;
-	// saveversion 0: ms2 はスライダー位置(1..60)。1: ms2 は描画間隔ms(16..960, 16の倍数)。
+	// saveversion 0: ms2 はスライダー位置(1..60)。1以降: ms2 は描画間隔ms(16..960, 16の倍数)。
 	if (savedata.saveversion < 1) {
 		if (savedata.ms2 < 1) savedata.ms2 = 1;
 		if (savedata.ms2 > 60) savedata.ms2 = 60;
 		savedata.ms2 *= 16;
 		savedata.saveversion = 1;
+	}
+	// saveversion 1→2: メディアプレイヤーモードでフィールドが増えた版(36bab3c以降)は、
+	// 部分読込判定で saveversion を誤って 0 に戻し、ms2 を一度だけ ×16 してしまう不具合が
+	// あった(例: 16ms→256ms)。設定画面を知らないユーザーは直せないため、ここで自動修復する。
+	// eq_reverb 以降を持つ.dat(=その不具合版で保存された.dat)で、まだ version 2 に
+	// なっていないものは、その誤った ×16 を ÷16 で取り消す。
+	// (中間版[saveversion導入〜MPモード前]の.datは eq_reverb を持たないため対象外=値はそのまま)
+	if (savedata.saveversion < 2) {
+		if (datHadMpFields)
+			savedata.ms2 /= 16;
+		savedata.saveversion = 2;
 	}
 	if (savedata.ms2 < 16) savedata.ms2 = 16;
 	if (savedata.ms2 > 960) savedata.ms2 = 960;

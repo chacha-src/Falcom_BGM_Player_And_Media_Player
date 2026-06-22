@@ -72,6 +72,20 @@ void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nu
 void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey);
 #endif
 
+// ============================================================================
+// 隠し機能: 淫女モード (savedata.inwoman==1 のときだけ UI 演出を盛る)
+// F12 を5回連打でトグル。音は出さず見た目だけで恥ずかしくなる遊び。
+// ============================================================================
+extern save savedata;
+static inline BOOL CCC_IsInwoman()
+{
+    return savedata.inwoman == 1;
+}
+// F12連打を監視してトグル。各メインダイアログの PreTranslateMessage から呼ぶ。
+BOOL CCC_ProcessInwomanHotkey(MSG* pMsg, CWnd* pWnd);
+// 淫女モードのアニメ用に全ウィンドウを定期再描画するタイマーを用意(冪等)
+void CCC_EnsureInwomanTimer();
+
 // 最小化復帰・再表示時: オーナードロー子が親 Invalidate だけでは再描画されないため明示的に更新
 void CCC_ForceRepaintHwnd(HWND hWnd);
 void CCC_RefreshChildrenAfterShow(HWND hWnd);

@@ -234,6 +234,10 @@ struct save{
 	int mpy;           // メディアプレイヤー画面の上座標
 	int mpw;           // メディアプレイヤー画面の幅
 	int mph;           // メディアプレイヤー画面の高さ
+
+	int inwoman;       // 隠し: 0=通常 1=淫女モード(UI演出のみ。F12を5回で切替)
+
+	int mpcol[5];      // メディアプレイヤー画面リストの各列幅(0=未設定=既定値を使用)
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */

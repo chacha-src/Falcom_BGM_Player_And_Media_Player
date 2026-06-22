@@ -1820,11 +1820,185 @@ static void DrawLooseRibbon(CDC* pDC, const CRect& rc, COLORREF c)
 }
 
 // ============================================================================
+// 隠し機能: 淫女モード (F12を5回でトグル / UI演出のみ)
+// ============================================================================
+static UINT_PTR g_inwomanTimer = 0;
+static int      g_f12Count = 0;
+static DWORD    g_f12Last = 0;
+
+// ちらつき対策: 背景消去を伴う全画面再描画はやめ、オーナードロー(ダブルバッファ)の
+// カスタムコントロールだけを消去なしで無効化する。
+static BOOL CALLBACK CCC_InwomanInvalidateChild(HWND hChild, LPARAM)
+{
+    CWnd* p = CWnd::FromHandlePermanent(hChild);
+    if (p && ::IsWindowVisible(hChild) &&
+        (p->IsKindOf(RUNTIME_CLASS(CCustomStandardButton)) ||
+         p->IsKindOf(RUNTIME_CLASS(CCustomCheckBox)) ||
+         p->IsKindOf(RUNTIME_CLASS(CCustomSliderCtrl)) ||
+         p->IsKindOf(RUNTIME_CLASS(CCustomRangeSliderCtrl)) ||
+         p->IsKindOf(RUNTIME_CLASS(CCustomComboBox))))
+    {
+        ::InvalidateRect(hChild, NULL, FALSE); // 消去なし=ちらつかない
+    }
+    return TRUE;
+}
+
+static BOOL CALLBACK CCC_InwomanTopProc(HWND hTop, LPARAM)
+{
+    if (::IsWindowVisible(hTop))
+        ::EnumChildWindows(hTop, CCC_InwomanInvalidateChild, 0);
+    return TRUE;
+}
+
+static void CCC_InwomanInvalidateAll()
+{
+    ::EnumThreadWindows(::GetCurrentThreadId(), CCC_InwomanTopProc, 0);
+}
+
+static void CALLBACK CCC_InwomanTimerProc(HWND, UINT, UINT_PTR, DWORD)
+{
+    if (!CCC_IsInwoman()) return; // 通常モード時は何もしない
+    CCC_InwomanInvalidateAll();
+}
+
+void CCC_EnsureInwomanTimer()
+{
+    if (g_inwomanTimer == 0)
+        g_inwomanTimer = ::SetTimer(NULL, 0, 70, CCC_InwomanTimerProc);
+}
+
+BOOL CCC_ProcessInwomanHotkey(MSG* pMsg, CWnd* pWnd)
+{
+    UNREFERENCED_PARAMETER(pWnd);
+    CCC_EnsureInwomanTimer();
+    if (!pMsg || pMsg->message != WM_KEYDOWN || pMsg->wParam != VK_F12)
+        return FALSE;
+
+    const DWORD now = ::GetTickCount();
+    if (now - g_f12Last > 2500) g_f12Count = 0; // 連打が途切れたらリセット
+    g_f12Last = now;
+
+    if (++g_f12Count >= 5)
+    {
+        g_f12Count = 0;
+        savedata.inwoman = savedata.inwoman ? 0 : 1;
+        CCC_InwomanInvalidateAll(); // ON/OFFどちらも1回更新して反映
+        return TRUE; // 5回目はトグルとして消費
+    }
+    return FALSE;
+}
+
+// とろけ顔(ハート目 + 半開きの口 + ほてり + 汗)。発情した子の表情をコンパクトに。
+// コントロールの隅に小さく置く想定(中央や文字の上は塗らない)。
+static void CCC_DrawAhegaoFace(CDC* pDC, int cx, int cy, int sz, double twitch, BOOL bAeroTrans)
+{
+    if (!pDC || sz < 8) return;
+
+    // ほてり(頬の赤み)
+    if (!bAeroTrans)
+    {
+        const int rx = sz / 2, ry = sz / 3;
+        FillRectAlpha(pDC, CRect(cx - sz / 2 - rx / 2, cy, cx - sz / 6, cy + ry), RGB(255, 90, 130), 70);
+        FillRectAlpha(pDC, CRect(cx + sz / 6, cy, cx + sz / 2 + rx / 2, cy + ry), RGB(255, 90, 130), 70);
+    }
+
+    // ハート目 ×2(イってる感)
+    const int eo = sz / 3;
+    const int ey = cy - sz / 8 - (int)(sz / 8 * twitch); // ビクッで上に
+    const int es = max(4, sz / 2);
+    DrawHeart(pDC, CRect(cx - eo - es / 2, ey - es / 2, cx - eo + es / 2, ey + es / 2), RGB(255, 40, 92));
+    DrawHeart(pDC, CRect(cx + eo - es / 2, ey - es / 2, cx + eo + es / 2, ey + es / 2), RGB(255, 40, 92));
+
+    // 半開きの口 + とろけた舌
+    const int my = cy + sz / 3;
+    const int mw = max(3, sz / 3);
+    const int mh = max(2, sz / 5) + (int)(sz / 6 * twitch); // ビクッで開く
+    CBrush bm(RGB(150, 30, 52));
+    CBrush* ob = pDC->SelectObject(&bm);
+    CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
+    pDC->Ellipse(cx - mw / 2, my - mh / 2, cx + mw / 2, my + mh / 2 + 1);
+    // 舌(下に少し垂れる)
+    CBrush bt(RGB(255, 120, 150));
+    pDC->SelectObject(&bt);
+    pDC->RoundRect(cx - mw / 4, my, cx + mw / 4, my + mh / 2 + 2, 2, 2);
+    if (op) pDC->SelectObject(op);
+    pDC->SelectObject(ob);
+
+    // 汗(こめかみ)
+    CBrush bs(RGB(190, 225, 255));
+    CBrush* ob2 = pDC->SelectObject(&bs);
+    CGdiObject* op2 = pDC->SelectStockObject(NULL_PEN);
+    pDC->Ellipse(cx + sz / 2 - 1, cy - sz / 2, cx + sz / 2 + 2, cy - sz / 2 + 3);
+    if (op2) pDC->SelectObject(op2);
+    pDC->SelectObject(ob2);
+}
+
+// 淫女モードの演出オーバーレイ(方向性: 発情して自慰中の子が"そこにいる"雰囲気)。
+// SM/拘束は無し。読みやすさ優先で中央は塗らず、縁と隅だけで火照り・トロ顔・汗・ビクッ。
+// bAeroTrans時は半透明演出を避ける。
+static void CCC_DrawInwomanOverlay(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
+{
+    if (!pDC || !CCC_IsInwoman() || rc.Width() < 8 || rc.Height() < 8)
+        return;
+
+    const DWORD t = ::GetTickCount();
+    const int W = rc.Width(), H = rc.Height();
+
+    // はぁ…はぁ… ゆっくりした発情の脈動 + ビクッ(鋭いスパイク)
+    const double breath = 0.5 + 0.5 * sin(t / 600.0);
+    const double cyc = (t % 1700) / 1700.0;
+    double twitch = (cyc < 0.12) ? sin(cyc / 0.12 * 3.14159265) : 0.0;
+    twitch *= twitch;
+    const double heat = min(1.0, breath * 0.6 + twitch);
+
+    // --- 発情の火照り: 縁だけ熱く脈打つ(中央は塗らない=文字/アイコンは読める) ---
+    if (!bAeroTrans)
+    {
+        const int g = 14 + (int)(55 * heat);
+        const COLORREF hot = RGB(255, 70, 120);
+        const int b = max(2, min(W, H) / 8);
+        FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.right, rc.top + b), hot, g);
+        FillRectAlpha(pDC, CRect(rc.left, rc.bottom - b, rc.right, rc.bottom), hot, g);
+        FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.left + b, rc.bottom), hot, g * 6 / 10);
+        FillRectAlpha(pDC, CRect(rc.right - b, rc.top, rc.right, rc.bottom), hot, g * 6 / 10);
+    }
+
+    // --- トロ顔: ちょっと大きめのコントロールだけ、右上の隅に小さく ---
+    if (W >= 46 && H >= 24)
+    {
+        const int fs = min(16, min(W * 4 / 10, H * 7 / 10));
+        const int fcx = rc.right - fs - 2 + (int)(2 * sin(t / 70.0)); // 小刻みに震える
+        const int fcy = rc.top + fs / 2 + 2 + (int)(2 * twitch);
+        CCC_DrawAhegaoFace(pDC, fcx, fcy, fs, twitch, bAeroTrans);
+    }
+    else
+    {
+        // 小さいコントロール: 右上にハート目ひとつだけ、ちょこっと
+        const int hx = rc.right - 7, hy = rc.top + 6;
+        DrawHeart(pDC, CRect(hx - 4, hy - 4, hx + 4, hy + 4), RGB(255, 40, 92));
+    }
+
+    // --- 汗の玉: 左上から1粒、ゆらゆら(べた塗りなので透過でも安全) ---
+    {
+        const int sx = rc.left + 5 + (int)(2 * sin(t / 85.0));
+        const int sy = rc.top + 4 + (int)(3 * (0.5 + 0.5 * sin(t / 120.0)));
+        CBrush bb(RGB(190, 225, 255));
+        CBrush* ob = pDC->SelectObject(&bb);
+        CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
+        pDC->Ellipse(sx - 2, sy - 3, sx + 2, sy + 2);
+        if (op) pDC->SelectObject(op);
+        pDC->SelectObject(ob);
+        DrawShine(pDC, sx - 1, sy - 1, 1, 1);
+    }
+}
+
+// ============================================================================
 // 子コントロールを一括でサブクラス化する処理
 // ============================================================================
 template<typename DlgBase>
 static void DoSubclassChildControls(DlgBase* pDlg)
 {
+    CCC_EnsureInwomanTimer();
     HWND hc = ::GetWindow(pDlg->m_hWnd, GW_CHILD);
     while (hc)
     {
@@ -3279,6 +3453,8 @@ void CCustomComboBox::PaintClient(CDC& dc)
     mDC.DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     mDC.SelectObject(pOF);
 
+    CCC_DrawInwomanOverlay(&mDC, r, bTrans);
+
     if (bTrans) CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, RGB(0, 0, 0));
     else dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
 
@@ -3528,12 +3704,14 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
     {
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
         DrawSlider(&mDC);
+        CCC_DrawInwomanOverlay(&mDC, r, TRUE);
         CCC_BlitTransparentChroma(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     }
     else
     {
         mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
         DrawSlider(&mDC);
+        CCC_DrawInwomanOverlay(&mDC, r, FALSE);
         dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
     }
     mDC.SelectObject(ob);
@@ -4002,6 +4180,7 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
     {
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
         DrawRangeSlider(&mDC);
+        CCC_DrawInwomanOverlay(&mDC, r, TRUE);
 #if CCUSTOM_AERO_SUPPORT
         if (CCC_IsAeroEnabled() && CCC_IsWin11())
             CCC_BlitChromaNoFlicker(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
@@ -4015,6 +4194,7 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
     {
         mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
         DrawRangeSlider(&mDC);
+        CCC_DrawInwomanOverlay(&mDC, r, FALSE);
         dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
     }
     mDC.SelectObject(ob);
@@ -4767,6 +4947,8 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     DrawSmartText(&mDC, r, s, bD, bP);
     mDC.SelectObject(pOF);
 
+    if (!bD) CCC_DrawInwomanOverlay(&mDC, r, FALSE); // 淫女モード演出
+
     dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
     mDC.SelectObject(ob);
     mB.DeleteObject();
@@ -5039,7 +5221,24 @@ void CCustomCheckBox::OnPaint()
     CPaintDC dc(this);
     CRect r;
     GetClientRect(&r);
-    OnDrawLayer(&dc, r);
+
+    // 透過(アクリル)時は CompositeTransparent が処理するので従来通り直接描画
+    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    if (bTrans || r.Width() <= 0 || r.Height() <= 0)
+    {
+        OnDrawLayer(&dc, r);
+        return;
+    }
+
+    // 非透過時はダブルバッファ化してちらつきを防ぐ(淫女モードの毎フレーム再描画対策)
+    CDC mem;
+    if (!mem.CreateCompatibleDC(&dc)) { OnDrawLayer(&dc, r); return; }
+    CBitmap bmp;
+    if (!bmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height())) { OnDrawLayer(&dc, r); return; }
+    CBitmap* ob = mem.SelectObject(&bmp);
+    OnDrawLayer(&mem, r);
+    dc.BitBlt(0, 0, r.Width(), r.Height(), &mem, 0, 0, SRCCOPY);
+    mem.SelectObject(ob);
 }
 
 LRESULT CCustomCheckBox::OnPrintClient(WPARAM w, LPARAM)
@@ -5116,28 +5315,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
                 DrawLaceLine(&dc, rcB.left + 1, rcB.bottom + 2, rcB.right - 1, rcB.bottom + 2, RGB(60, 40, 55));
                 DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, COLOR_LACE);
             }
-            if (bC)
-            {
-                // ハート/花丸はやめて、上品なツヤ✓ + ほどけかけリボンで色気を
-                CRect rk = rcB;
-                rk.InflateRect(s / 6, s / 6);   // 箱から少しだけはみ出す
-                rk.OffsetRect(1, 0);
-                // チェックON時のぷるんバウンス(一度ふくらんで戻る)
-                if (m_nBounce > 0)
-                {
-                    const double bf = sin(3.14159265 * (8 - m_nBounce) / 8.0);
-                    rk.InflateRect((int)(rk.Width() * 0.22 * bf), (int)(rk.Height() * 0.22 * bf));
-                }
-                if (rk.top < 0)     rk.OffsetRect(0, -rk.top);
-                if (rk.bottom > rh) rk.OffsetRect(0, rh - rk.bottom);
-                if (rk.left < 0)    rk.OffsetRect(-rk.left, 0);
-
-                DrawCheckMark(&dc, rk, COLOR_CHECK, max(3, s / 4));
-                // 右上にしどけないリボン
-                if (rk.top >= 6)
-                    DrawLooseRibbon(&dc, CRect(rk.right - 10, rk.top - 5, rk.right + 6, rk.top + 8), COLOR_BOW);
-                DrawSparkle(&dc, rk.left + 2, rk.bottom - 3, 2, COLOR_SPARKLE);
-            }
+            // 先にテキストを描く(チェック✓はこの上に乗せる)
             CString t;
             GetWindowText(t);
             if (!t.IsEmpty())
@@ -5146,6 +5324,32 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
                 rt.left = rcB.right + 10;
                 DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER, bD, FALSE);
             }
+            if (bC)
+            {
+                // 枠から豪快にはみ出してOK(テキストの上に乗る)。クライアント内にはクランプ。
+                CRect rk = rcB;
+                rk.InflateRect(s / 4, s / 4);
+                rk.OffsetRect(2, 0);
+                // チェックON時のぷるんバウンス
+                if (m_nBounce > 0)
+                {
+                    const double bf = sin(3.14159265 * (8 - m_nBounce) / 8.0);
+                    rk.InflateRect((int)(rk.Width() * 0.20 * bf), (int)(rk.Height() * 0.20 * bf));
+                }
+                // 自分のクライアント矩形内に収める(隣のコントロールにはみ出さない=切れ防止)
+                if (rk.left < 0)     rk.left = 0;
+                if (rk.top < 0)      rk.top = 0;
+                if (rk.right > rw)   rk.right = rw;
+                if (rk.bottom > rh)  rk.bottom = rh;
+
+                DrawCheckMark(&dc, rk, COLOR_CHECK, max(3, s / 4));
+                DrawSparkle(&dc, rk.left + 2, rk.top + 1, 2, COLOR_SPARKLE);
+                if (rk.top >= 6)
+                {
+                    int bL = max(0, rcB.right - 10);
+                    DrawLooseRibbon(&dc, CRect(bL, rcB.top - 6, min(rw, bL + 14), rcB.top + 4), COLOR_BOW);
+                }
+            }
         }
         if (GetFocus() == this)
         {
@@ -5153,6 +5357,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             if (!m_bIsFlatStyle) rf.left += 20; else rf.DeflateRect(3, 3);
             dc.DrawFocusRect(&rf);
         }
+        CCC_DrawInwomanOverlay(&dc, CRect(0, 0, rw, rh), CCC_UseTransparentPaint(m_hWnd, m_bAeroMode));
     });
 }
 

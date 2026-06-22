@@ -102,12 +102,18 @@ public:
 	int  m_lastMs2;            // 描画タイマー間隔(savedata.ms2)の変化検出用
 	int  m_seekDragging;
 	float hD2;     // DPIスケール
-	CRect m_bannerRect;   // ビジュアライザ(スペアナ+ジャケ+時間)描画領域
+	CRect m_bannerRect;   // ビジュアライザ(スペアナ+時間)を実際に Blit する領域(アスペクト維持・中央寄せ)
+	CRect m_jacketRect;   // 幅拡張時に左余白へ分離表示するジャケット(ミニ)領域(空=非表示)
+	CRect m_infoPanelRect;// 幅拡張時に右余白へ追加表示する曲情報パネル領域(空=非表示)
+	CString m_lastBannerKey;  // サイドパネル再描画判定用(タイトル/アーティスト/アルバム+ジャケ世代)
 	CDC m_memBanner;      // バナー用永続メモリDC(毎フレームのビットマップ生成を回避)
 	CBitmap m_bmpBanner;
 	int m_bannerCacheW, m_bannerCacheH;
 
 	void BlitVisualizer(CDC* pDC);   // og のオフスクリーン面を帯に描画
+	void DrawSidePanels(CDC* pDC);   // 左ジャケット/右曲情報パネルを GDI 描画(余白の有効活用)
+	void InvalidateSidePanels();     // サイドパネルの再描画要求(曲変更時など)
+	CString CurrentTrackTitle() const; // og と同じ規則で表示用タイトルを解決
 
 	virtual BOOL DestroyWindow();
 
@@ -169,6 +175,7 @@ protected:
 	afx_msg void OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnRclickList(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnKeydownList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnBeginDragList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);

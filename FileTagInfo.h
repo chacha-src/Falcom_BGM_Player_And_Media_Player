@@ -1,6 +1,9 @@
 ﻿#pragma once
 
 struct FileTagFields {
+	CString title;
+	CString artist;
+	CString album;
 	CString year;
 	CString track;
 	CString genre;
@@ -10,6 +13,9 @@ struct FileTagFields {
 
 	FileTagFields() : loop1(0), loop2(0) {}
 	void Clear() {
+		title.Empty();
+		artist.Empty();
+		album.Empty();
 		year.Empty();
 		track.Empty();
 		genre.Empty();
@@ -18,6 +24,9 @@ struct FileTagFields {
 	}
 	bool HasAnyTagField() const {
 		return year.GetLength() || track.GetLength() || genre.GetLength() || comment.GetLength();
+	}
+	bool HasTitleArtistAlbum() const {
+		return title.GetLength() || artist.GetLength() || album.GetLength();
 	}
 };
 
