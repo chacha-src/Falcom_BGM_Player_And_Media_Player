@@ -2093,6 +2093,9 @@ int ret2;
 // WAV出力（再生なし）用
 CString wavExportPath;
 int wavExportLoopCount = 0;
+// WAV書き出しの実データバイト数(64bit)。グローバル wl(int) は2GBで溢れるため、
+// ヘッダ確定/成否判定にはファイル実長から求めるこの値を用いる。
+__int64 g_wavExportDataBytes = 0;
 
 //#define OUTPUT_BUFFER_NUM  10
 //#define BUFSZ			(4096*6)
@@ -2995,6 +2998,88 @@ void wav_start()
 	memcpy(wav + s, &wh.WaveFmt, sizeof(wh.WaveFmt));        s += sizeof(wh.WaveFmt);
 	memcpy(wav + s, &wh.ckidData, sizeof(wh.ckidData));      s += sizeof(wh.ckidData);
 	memcpy(wav + s, &wh.ckSizeData, sizeof(wh.ckSizeData));
+}
+
+// ============================================================
+// 2GB超対応 WAV(RF64) ストリーム出力ヘルパ
+//   通常RIFF WAVは32bitサイズのため2GB(符号付int)〜4GBが壁になる。
+//   出力サイズが2GBを超える場合は RF64 として書き出す。
+//   ストリーム出力では最終サイズが事前に不明なため、先頭に ds64 と
+//   同サイズ(28byte)の 'JUNK' を予約しておき、確定時にサイズが収まれば
+//   通常 'RIFF' のまま、2GB超なら 'JUNK'→'ds64' / 'RIFF'→'RF64' に
+//   書き換える(libsndfile等と同方式)。ヘッダ長は常に80byte。
+//   フォーマット情報は wav_start() が設定した wh.WaveFmt を使用する。
+// ============================================================
+#define WAVX_HEADER_SIZE 80
+#define WAVX_RF64_THRESHOLD ((__int64)0x7FFFFFFF)  // 2GB(符号付32bitの壁)
+
+static void WriteWavStreamHeaderRF64(CFile& f)
+{
+	BYTE h[WAVX_HEADER_SIZE];
+	memset(h, 0, sizeof(h));
+	const WORD ch = (wh.WaveFmt.wf.nChannels > 0) ? wh.WaveFmt.wf.nChannels : (WORD)2;
+	const DWORD hz = (wh.WaveFmt.wf.nSamplesPerSec > 0) ? wh.WaveFmt.wf.nSamplesPerSec : (DWORD)44100;
+	const WORD bits = (wh.WaveFmt.wBitsPerSample > 0) ? wh.WaveFmt.wBitsPerSample : (WORD)16;
+	const WORD blockAlign = (WORD)(ch * bits / 8);
+
+	memcpy(h + 0, "RIFF", 4);
+	*(DWORD*)(h + 4) = 0;                 // riffSize (確定時に設定)
+	memcpy(h + 8, "WAVE", 4);
+	memcpy(h + 12, "JUNK", 4);            // RF64化のための予約 (= ds64 payload 28byte)
+	*(DWORD*)(h + 16) = 28;
+	// h+20..47 : 28byte 予約(0)
+	memcpy(h + 48, "fmt ", 4);
+	*(DWORD*)(h + 52) = 16;
+	*(WORD*)(h + 56) = WAVE_FORMAT_PCM;
+	*(WORD*)(h + 58) = ch;
+	*(DWORD*)(h + 60) = hz;
+	*(DWORD*)(h + 64) = hz * blockAlign;  // nAvgBytesPerSec
+	*(WORD*)(h + 68) = blockAlign;
+	*(WORD*)(h + 70) = bits;
+	memcpy(h + 72, "data", 4);
+	*(DWORD*)(h + 76) = 0;                // dataSize (確定時に設定)
+	f.Write(h, WAVX_HEADER_SIZE);
+}
+
+static void FinalizeWavStreamHeaderRF64(CFile& f)
+{
+	const __int64 fileLen = (__int64)f.GetLength();
+	__int64 dataBytes = fileLen - WAVX_HEADER_SIZE;
+	if (dataBytes < 0) dataBytes = 0;
+	WORD ch = (wh.WaveFmt.wf.nChannels > 0) ? wh.WaveFmt.wf.nChannels : (WORD)2;
+	WORD bits = (wh.WaveFmt.wBitsPerSample > 0) ? wh.WaveFmt.wBitsPerSample : (WORD)16;
+	int blockAlign = ch * bits / 8; if (blockAlign <= 0) blockAlign = 4;
+
+	f.SeekToBegin();
+	if (dataBytes <= WAVX_RF64_THRESHOLD) {
+		// 通常RIFF(2GB以下)。'JUNK'予約はそのまま残し、サイズのみ確定。
+		BYTE riff[12];
+		memcpy(riff + 0, "RIFF", 4);
+		*(DWORD*)(riff + 4) = (DWORD)(fileLen - 8);
+		memcpy(riff + 8, "WAVE", 4);
+		f.Write(riff, 12);
+		f.Seek(76, CFile::begin);
+		DWORD ds = (DWORD)dataBytes;
+		f.Write(&ds, 4);
+	}
+	else {
+		// RF64(2GB超)。'JUNK'→'ds64' に変換し64bitサイズを格納。
+		BYTE hdr[48];
+		memcpy(hdr + 0, "RF64", 4);
+		*(DWORD*)(hdr + 4) = 0xFFFFFFFF;
+		memcpy(hdr + 8, "WAVE", 4);
+		memcpy(hdr + 12, "ds64", 4);
+		*(DWORD*)(hdr + 16) = 28;
+		*(__int64*)(hdr + 20) = fileLen - 8;              // riffSize
+		*(__int64*)(hdr + 28) = dataBytes;                // dataSize
+		*(__int64*)(hdr + 36) = dataBytes / blockAlign;   // sampleCount
+		*(DWORD*)(hdr + 44) = 0;                           // tableLength
+		f.Write(hdr, 48);
+		f.Seek(76, CFile::begin);
+		DWORD ds = 0xFFFFFFFF;
+		f.Write(&ds, 4);
+	}
+	g_wavExportDataBytes = dataBytes;
 }
 
 void ReleaseOggVorbis(char** ogg)
@@ -8455,8 +8540,8 @@ void COggDlg::play()
 			endflg = 0;
 			return;
 		}
-		if (ogg)	cc.Write(ogg, whsize);
-		if (wav) cc.Write(wav, whsize);
+		// 2GB超対応(RF64)ヘッダ。確定はstop()/stop1()のFinalizeWavStreamHeaderRF64で行う。
+		WriteWavStreamHeaderRF64(cc);
 	}
 	if (mode == 30) { wavbit_sample_Hz = 48000; wavsam_depth = 16; wavchannel = 2; }
 	NormalizePlaybackWaveFormat();
@@ -8551,8 +8636,8 @@ void COggDlg::play()
 			endflg = 0;
 			return;
 		}
-		if (ogg) cc.Write(ogg, whsize);
-		if (wav) cc.Write(wav, whsize);
+		// 2GB超対応(RF64)ヘッダを書き込み。確定は出力完了後に行う。
+		WriteWavStreamHeaderRF64(cc);
 		endflg = 0;
 		SetTimer(9000, 10, NULL);
 		endf = 0;
@@ -8563,13 +8648,8 @@ void COggDlg::play()
 		HandleNotifications_export();
 		// WAV出力時はm_douに関係なくccを閉じる（2回目以降のエクスポートでcc.Openが成功するため）
 		if (cc1 == 1) {
-			cc.SeekToBegin();
-			WAVEFILEHEADER wh1;
-			cc.Read(&wh1, sizeof(wh1));
-			wh1.ckSizeRIFF = wl + 44 - 8;
-			wh1.ckSizeData = wl;
-			cc.SeekToBegin();
-			cc.Write(&wh1, sizeof(wh1));
+			// ファイル実長から64bitでサイズ確定。2GB超なら自動的にRF64へ書き換える。
+			FinalizeWavStreamHeaderRF64(cc);
 			cc.Close();
 			cc1 = 0;
 		}
@@ -9187,8 +9267,10 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount)
 	wavExportLoopCount = loopCount;
 	int saveloop_bak = savedata.saveloop;
 	savedata.saveloop = 1;  // ループを有効にしてwavExportLoopCountで制御
+	g_wavExportDataBytes = 0;
 	play();
-	const BOOL ok = (wl > 0 && cc1 == 0);
+	// wl(int)は2GBで溢れるため、実書き込みバイト数(64bit)で成否判定する
+	const BOOL ok = (g_wavExportDataBytes > 0 && cc1 == 0);
 	wavExportPath.Empty();
 	wavExportLoopCount = 0;
 	savedata.saveloop = saveloop_bak;
@@ -14407,13 +14489,8 @@ void COggDlg::stop()
 		if (pAudioClient) pAudioClient->Stop();
 		if (m_dou.GetCheck() == 1)
 			if (cc1 == 1) {
-				cc.SeekToBegin();
-				WAVEFILEHEADER wh1;
-				cc.Read(&wh1, sizeof(wh1));
-				wh1.ckSizeRIFF = wl + 44 - 8;
-				wh1.ckSizeData = wl;
-				cc.SeekToBegin();
-				cc.Write(&wh1, sizeof(wh1));
+				// 2GB超対応(RF64): ファイル実長から64bitでサイズ確定
+				FinalizeWavStreamHeaderRF64(cc);
 				cc.Close();
 				cc1 = 0;
 			}
@@ -14501,13 +14578,8 @@ void COggDlg::stop1()
 		if (pAudioClient) pAudioClient->Stop();
 		if (m_dou.GetCheck() == 1)
 			if (cc1 == 1) {
-				cc.SeekToBegin();
-				WAVEFILEHEADER wh1;
-				cc.Read(&wh1, sizeof(wh1));
-				wh1.ckSizeRIFF = wl + 44 - 8;
-				wh1.ckSizeData = wl;
-				cc.SeekToBegin();
-				cc.Write(&wh1, sizeof(wh1));
+				// 2GB超対応(RF64): ファイル実長から64bitでサイズ確定
+				FinalizeWavStreamHeaderRF64(cc);
 				cc.Close();
 				cc1 = 0;
 			}

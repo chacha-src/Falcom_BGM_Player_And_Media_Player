@@ -89,8 +89,28 @@ public:
 		RIFFHEADER riff;
 		if (m_file.Read(&riff, sizeof(riff)) != sizeof(riff))
 			return FALSE;
-		if (riff.dwChunkId != 0x46464952 || riff.dwFormat != 0x45564157) // 'RIFF','WAVE'
+		// 'RIFF'(通常) / 'RF64','BW64'(2GB/4GB超の拡張WAV) を許容
+		const BOOL isRiff = (riff.dwChunkId == 0x46464952);
+		const BOOL isRF64 = (riff.dwChunkId == 0x34364652 /*'RF64'*/ ||
+		                     riff.dwChunkId == 0x34365742 /*'BW64'*/);
+		if ((!isRiff && !isRF64) || riff.dwFormat != 0x45564157) // 'WAVE'
 			return FALSE;
+
+		// RF64/BW64 では直後に 'ds64' チャンクが必須。64bitの実サイズを取得する。
+		__int64 rf64DataSize = -1;
+		if (isRF64) {
+			DWORD dsId, dsSize;
+			if (m_file.Read(&dsId, 4) != 4) return FALSE;
+			if (m_file.Read(&dsSize, 4) != 4) return FALSE;
+			if (dsId != 0x34367364 /*'ds64'*/) return FALSE;
+			BYTE ds[512];
+			UINT dsRead = (dsSize < sizeof(ds)) ? dsSize : (UINT)sizeof(ds);
+			if (m_file.Read(ds, dsRead) < 24) return FALSE; // riffSize(8)+dataSize(8)+sampleCount(8)
+			rf64DataSize = *(__int64*)&ds[8]; // dataSize
+			if (dsSize > dsRead)
+				m_file.Seek((LONGLONG)(dsSize - dsRead), CFile::current);
+			if (dsSize & 1) m_file.Seek(1, CFile::current); // ワード境界パディング
+		}
 
 		FMTCHUNK fmt;
 		memset(&fmt, 0, sizeof(fmt));
@@ -152,17 +172,22 @@ public:
 			if (m_file.Read(&chunkSize, 4) != 4) return FALSE;
 			if (chunkId == 0x61746164) { // 'data'
 				m_info.dataOffset = m_file.GetPosition();
-				m_info.dataSize = chunkSize;
+				// RF64: data チャンクサイズが 0xFFFFFFFF の場合は ds64 の64bit値を採用
+				if (isRF64 && (chunkSize == 0xFFFFFFFF) && rf64DataSize >= 0)
+					m_info.dataSize = rf64DataSize;
+				else
+					m_info.dataSize = chunkSize;
+				const __int64 dataBytes = m_info.dataSize; // 64bit (2GB超対応)
 				if (m_formatTag == WAVE_FORMAT_ADPCM || m_formatTag == WAVE_FORMAT_IMA_ADPCM) {
 					if (m_info.nBlockAlign > 0 && m_info.nSamplesPerBlock > 0)
-						m_info.totalSamples = (chunkSize / m_info.nBlockAlign) * m_info.nSamplesPerBlock;
+						m_info.totalSamples = (dataBytes / m_info.nBlockAlign) * m_info.nSamplesPerBlock;
 					else
-						m_info.totalSamples = chunkSize * 4;
+						m_info.totalSamples = dataBytes * 4;
 				}
 				else {
 					DWORD bytesPerSample = (m_info.wBitsPerSample + 7) / 8 * m_info.nChannels;
 					if (bytesPerSample > 0)
-						m_info.totalSamples = chunkSize / bytesPerSample;
+						m_info.totalSamples = dataBytes / bytesPerSample;
 					else
 						m_info.totalSamples = 0;
 				}
@@ -198,7 +223,7 @@ public:
 		__int64 pos = m_info.dataOffset + samplePos * bytesPerSample;
 		if (pos < m_info.dataOffset || pos >= m_info.dataOffset + m_info.dataSize)
 			return FALSE;
-		m_file.Seek((LONG)pos, CFile::begin);
+		m_file.Seek((LONGLONG)pos, CFile::begin); // 64bit (2GB超対応)
 		return TRUE;
 	}
 
@@ -213,10 +238,10 @@ public:
 	{
 		if (!m_bOpen || m_info.dataSize < 2) return FALSE;
 		ULONGLONG savePos = m_file.GetPosition();
-		m_file.Seek((LONG)m_info.dataOffset, CFile::begin);
+		m_file.Seek((LONGLONG)m_info.dataOffset, CFile::begin);
 		BYTE hdr[2];
 		BOOL ok = (m_file.Read(hdr, 2) == 2 && hdr[0] == 0xFF && (hdr[1] & 0xF0) == 0xF0);
-		m_file.Seek((LONG)savePos, CFile::begin);
+		m_file.Seek((LONGLONG)savePos, CFile::begin);
 		return ok;
 	}
 };
