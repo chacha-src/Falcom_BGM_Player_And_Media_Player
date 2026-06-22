@@ -21,6 +21,12 @@ class CPlayList;
 #define WM_MP_ENTER_FALCOM (WM_APP + 60)
 #endif
 
+// TheadLoop から ~30fps で投げる info パネルスクロール tick
+// (Timer3 の代替: VSync 同期で滑らかにするため PostMessage 経由)
+#ifndef WM_MP_INFO_SCROLL
+#define WM_MP_INFO_SCROLL  (WM_APP + 61)
+#endif
+
 /////////////////////////////////////////////////////////////////////////////
 // CModeSelectDlg : 起動時のモード選択ダイアログ
 //   ファルコムbgm特化型画面 / メディアプレイヤー画面 のどちらで起動するか選ぶ。
@@ -69,51 +75,94 @@ public:
 	void ReloadPlaylistCombo();  // pl のプレイリスト一覧コンボをミラー
 	void SyncSelectionToPlaylist(); // mp リストの選択を pl リストへ反映
 
-	// 表示系コントロール(張りぼて)
+	// ---- 情報表示スタティック(バナー GDI に隠れているものは SW_HIDE してある) ----
 	CCustomStatic m_title, m_artist, m_album, m_lrc, m_lrc2, m_lrc3, m_os, m_cpu, m_os3, m_time, m_volval, m_vollabel;
-	CCustomRangeSliderCtrl m_seek;   // 再生位置(範囲スライダー: og->m_time と同型)
+
+	// シークバー: og->m_time と同じ CCustomRangeSliderCtrl(ループ範囲表示付き)
+	CCustomRangeSliderCtrl m_seek;
 	CCustomSliderCtrl m_vol;
-	CCustomSliderCtrl m_dsvol, m_kvol, m_tempo, m_pitch;   // DS音量/拡張音量/テンポ/ピッチ(og 流用)
+	// og 側の各スライダーを DoLayout で同位置にミラー配置(og は非表示のまま)
+	CCustomSliderCtrl m_dsvol, m_kvol, m_tempo, m_pitch;
 	CCustomStatic m_dsvolL, m_kvolL, m_tempoL, m_pitchL;
+
+	// ---- 操作ボタン ----
 	CCustomStandardButton m_prev, m_play, m_pause, m_stop, m_next, m_eq, m_piano, m_switch, m_settings, m_exit, m_jacket;
-	CCustomStandardButton m_fadeout;   // フェードアウト(og IDC_BUTTON5 流用)
-	CCustomStandardButton m_folder;    // フォルダ設定(og IDC_BUTTON9 流用)
+	CCustomStandardButton m_fadeout;   // フェードアウト(og IDC_BUTTON5 と同じ処理を委譲)
+	CCustomStandardButton m_folder;    // フォルダ設定(og IDC_BUTTON9 と同じ処理を委譲)
 	CCustomStandardButton m_plrename, m_pldelete, m_itemdel;
-	CButtonST m_lsup, m_up, m_down, m_lsdown;   // 一番上/上/下/一番下(ButtonST 流用)
-	CButtonST m_findup, m_finddown;             // あいまい検索 上/下(ButtonST)
-	CCustomEdit m_find;                          // あいまい検索キーワード
-	CCustomCheckBox m_supe, m_st;                // スペアナ / ST トグル(og 流用)
+	CButtonST m_lsup, m_up, m_down, m_lsdown;   // プレイリスト行移動(一番上/上/下/一番下)
+	CButtonST m_findup, m_finddown;              // あいまい検索 上/下
+	CCustomEdit m_find;
+
+	// ---- 状態チェックボックス(og/pl の状態を SyncFromMain でミラー) ----
+	CCustomCheckBox m_supe, m_st;
 	CCustomComboBox m_plsel;     // プレイリスト切替/追加(pl->m_listchange のミラー)
-	int m_lastComboCount;
-	int m_dragging;              // リスト内ドラッグ移動中フラグ
-	int m_dragSrc;              // ドラッグ元インデックス
-	HIMAGELIST m_hDragImage;     // ドラッグ中の画像
+	int m_lastComboCount;        // コンボ項目数の変化検出用
+
+	// ---- プレイリストのドラッグ&ドロップ移動 ----
+	int m_dragging;              // ドラッグ操作中(0/1)
+	int m_dragSrc;               // ドラッグ元の行インデックス
+	HIMAGELIST m_hDragImage;     // DragMove に使うゴースト画像
+
 	CCustomCheckBox m_renzoku, m_loop, m_random;
-	CCustomCheckBox m_tip, m_mini, m_savemp3, m_saveds;   // ツールチップ/最小化連動/mp3保存/DShow保存
-	CCustomGroupBox m_grpInfo, m_grpSnd, m_grpPl;         // 区分け枠(WS_CLIPSIBLINGS+最背面で兄弟を覆わない)
+	CCustomCheckBox m_tip, m_mini, m_savemp3, m_saveds;
+	// グループ枠は WS_CLIPSIBLINGS + 最背面で、内側コントロールを塗り潰さない
+	CCustomGroupBox m_grpInfo, m_grpSnd, m_grpPl;
 	CCustomListCtrl m_list;
 	CImageList il;
 	CFont m_fontList, m_fontTitle, m_fontInfo, m_fontChk;
 	CBrush m_brDlg;
 	HICON m_hIcon;
-	int  m_lastCount;
+
+	// ---- リスト同期の変化検出 ----
+	int  m_lastCount;    // 前回描画時の pl->playcnt(差分更新用)
 	int  m_lastPlcnt;
-	int  m_lastScroll;
-	int  m_lastMs2;            // 描画タイマー間隔(savedata.ms2)の変化検出用
-	int  m_seekDragging;
-	float hD2;     // DPIスケール
-	CRect m_bannerRect;   // ビジュアライザ(スペアナ+時間)を実際に Blit する領域(アスペクト維持・中央寄せ)
-	CRect m_jacketRect;   // 幅拡張時に左余白へ分離表示するジャケット(ミニ)領域(空=非表示)
-	CRect m_infoPanelRect;// 幅拡張時に右余白へ追加表示する曲情報パネル領域(空=非表示)
-	CString m_lastBannerKey;  // サイドパネル再描画判定用(タイトル/アーティスト/アルバム+ジャケ世代)
-	CDC m_memBanner;      // バナー用永続メモリDC(毎フレームのビットマップ生成を回避)
+	int  m_lastScroll;   // 前回 EnsureVisible した再生行(同一なら再スクロール不要)
+	int  m_lastMs2;      // savedata.ms2 の変化検出用(タイマー間隔の変更を反映するため)
+	int  m_seekDragging; // ユーザーがシークをドラッグ中なら 1(ミラー更新をスキップ)
+	float hD2;           // DPI スケール係数(96dpi = 1.0)
+
+	// ---- バナー領域(ビジュアライザ Blit 先) ----
+	// DoLayout でアスペクト比維持のまま計算された矩形。OnPaint で BlitVisualizer が使用。
+	CRect m_bannerRect;
+	// 幅拡張時に左余白へ分離するジャケット(ミニ)領域。IsRectEmpty なら非表示。
+	CRect m_jacketRect;
+	// 幅拡張時に右余白へ展開する曲情報パネル領域。IsRectEmpty なら非表示。
+	CRect m_infoPanelRect;
+	// サイドパネルの再描画判定キー(タイトル/アーティスト/アルバム/ジャケ世代を結合した文字列)
+	CString m_lastBannerKey;
+	// 非アクリル時のバナー Blit 用永続メモリ DC(サイズ変化時のみ再確保)
+	CDC m_memBanner;
 	CBitmap m_bmpBanner;
 	int m_bannerCacheW, m_bannerCacheH;
 
-	void BlitVisualizer(CDC* pDC);   // og のオフスクリーン面を帯に描画
-	void DrawSidePanels(CDC* pDC);   // 左ジャケット/右曲情報パネルを GDI 描画(余白の有効活用)
-	void InvalidateSidePanels();     // サイドパネルの再描画要求(曲変更時など)
-	CString CurrentTrackTitle() const; // og と同じ規則で表示用タイトルを解決
+	// ---- 右曲情報パネルのテキスト marquee スクロール ----
+	// WM_MP_INFO_SCROLL(TheadLoop ~30fps)で進行。収まる行は静止したまま。
+	// [0]=タイトル, [1]=アーティスト, [2]=アルバム, [3]=曲番号, [4]=オーディオ情報, [5]=フォーマット
+	static const int kInfoRows = 6;
+	int  m_isc[kInfoRows];   // 各行の現在スクロールオフセット(px)。0=静止
+	int  m_iscW[kInfoRows];  // テキスト+セパレータの全幅(0=行が収まるため不要)
+	bool m_iscActive;        // 少なくとも1行がスクロール中。次の WM_MP_INFO_SCROLL 発行を判定
+	int  m_lastInfoPanelW;   // パネル幅変化検出用(リサイズ時にオフセットをリセット)
+
+	// og のオフスクリーン合成 DC(スペアナ+ジャケ+時間)を m_bannerRect へ StretchBlit する。
+	// アクリル(Win11)時は黒透過合成、非アクリル時は永続メモリ DC でキャッシュ Blit。
+	void BlitVisualizer(CDC* pDC);
+	// 左ジャケット・右曲情報パネルをオフスクリーンバッファで GDI 描画して Blit する。
+	// クリップ矩形がサイドパネルと重ならない限り重い処理は走らない(バナーの毎フレーム無効化と共存)。
+	void DrawSidePanels(CDC* pDC);
+	void InvalidateSidePanels();     // 曲変更・リサイズ時にサイドパネルの WM_PAINT を要求
+	void ResetInfoScroll();          // 曲変更・リサイズ時に marquee オフセットを全行リセット
+	// m_tip チェックの ON/OFF を m_list のカスタムツールチップ(CListCtrlA)に反映する。
+	// LVS_EX_INFOTIP はカスタム実装と競合するため、ON 時は除去・OFF 時は付与する。
+	void ApplyListTooltipState();
+	// og の timerp で使う sss 決定ロジックと同じ規則でタイトルを解決する。
+	// mode 値により tagfile / stitle / fnn のどれを使うかが変わる。
+	CString CurrentTrackTitle() const;
+	// 1行分のテキストを mem DC へ描画する。収まれば静止描画(false)、はみ出せば
+	// 2コピーのワイド DC を作り marquee オフセットで切り出して BitBlt する(true)。
+	bool DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lineH,
+		const CString& text, COLORREF clr, int rowIdx, COLORREF kBg, CFont* font);
 
 	virtual BOOL DestroyWindow();
 
@@ -179,6 +228,7 @@ protected:
 	afx_msg void OnBeginDragList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
+	afx_msg LRESULT OnInfoScrollTick(WPARAM wParam, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 };
 

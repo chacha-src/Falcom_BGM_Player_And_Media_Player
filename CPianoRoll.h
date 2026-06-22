@@ -1,4 +1,21 @@
-﻿#pragma once
+﻿// CPianoRoll.h : リアルタイムピアノロールビジュアライザ
+//
+// PCM ストリームを Goertzel アルゴリズムで 88 鍵分に変換し、ノートのオン/オフと
+// 強度を推定してピアノロール形式で描画する。
+//
+// スレッドモデル:
+//   - FeedPCM()          … 再生スレッドから呼ばれる。モノラル変換後リングバッファへ書込
+//   - AnalyzePlayCursor() … 同スレッドから呼ばれる。ワーカーへジョブをポスト
+//   - AnalysisWorkerLoop() … 専用ワーカースレッド。Goertzel 実行 → WM_PIANOROLL_ANALYSIS_DONE ポスト
+//   - OnAnalysisDone()   … UI スレッド。UpdateNoteStates/DetectExpressions を実行しフレーム確定
+//   - OnPaint() / OnTimer() … UI スレッド。確定済みフレームを GDI バッファへ描画
+//
+// 描画バッファ(メモリDC)は 3 種:
+//   m_rollDC  … ピアノロール(時間軸スクロール: 最新行を下端に追記)
+//   m_rollScratchDC … 一時合成用
+//   m_keyDC   … 鍵盤(ノートアクティブ時に着色。変化時のみ再描画)
+//
+#pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include <vector>
@@ -17,16 +34,21 @@ public:
     enum { IDD = IDD_PIANOROLL };
 #endif
 
+    // 再生スレッドから呼ぶ。各フォーマットをモノラル double に変換してリングバッファへ積む
     void FeedPCM(const void* pData, int frames, int sampleRate, int bits, int channels,
         int playbackDelaySamples = 0);
+    // bufwav3 経路(再生バッファ直後)から呼ぶ。ワーカーに分析ジョブをキューイング
     void AnalyzePlayCursorMono(const double* mono, int frameCount, int sampleRate);
+    // チャンネル別 dB を受け取りメーターバーへ反映(レベルメーターは Goertzel 非依存)
     void SetChannelMeterDb(const float* dbPerChannel, int channelCount);
+    // 曲切替時などに分析状態/リングバッファ/ノート履歴を全クリア
     void ResetPlaybackState();
+    // ウィンドウ破棄前に呼ぶ。ワーカースレッド停止と GDI バッファ解放を安全に行う
     void DetachForDestroy();
 
-    static constexpr int PIANO_METER_CH_MAX = 8;
-    static constexpr int PIANO_BASS_FRAMES = 16384;
-    static constexpr int PIANO_LOW_FRAMES  = 8192;
+    static constexpr int PIANO_METER_CH_MAX = 8;       // レベルメーターの最大チャンネル数
+    static constexpr int PIANO_BASS_FRAMES = 16384;    // 低音窓サイズ(AnalyzePlayCursorMono に渡す最大フレーム数)
+    static constexpr int PIANO_LOW_FRAMES  = 8192;     // 中低音窓サイズ
 
 protected:
     virtual void DoDataExchange(CDataExchange* pDX);
@@ -44,79 +66,95 @@ protected:
     virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 private:
+    // 各ノートに付与する表現記号フラグ(DetectExpressions で設定、ピアノロール描画で参照)
     struct NoteExpr {
-        static constexpr uint8_t ACCENT  = 0x01;
-        static constexpr uint8_t SCOOP   = 0x02;
-        static constexpr uint8_t VIBRATO = 0x04;
-        static constexpr uint8_t SLIDE   = 0x08;
-        static constexpr uint8_t FALL    = 0x10;
-        static constexpr uint8_t SUSTAIN = 0x20;
+        static constexpr uint8_t ACCENT  = 0x01;  // 強調(アタック急峻)
+        static constexpr uint8_t SCOOP   = 0x02;  // スクープ(下から音程が上がる)
+        static constexpr uint8_t VIBRATO = 0x04;  // ビブラート(強度が周期的に変動)
+        static constexpr uint8_t SLIDE   = 0x08;  // スライドアップ
+        static constexpr uint8_t FALL    = 0x10;  // フォール(音程が下降消音)
+        static constexpr uint8_t SUSTAIN = 0x20;  // サスティン(長く保たれる持続音)
     };
 
+    // 1 分析フレーム分のノートスナップショット(履歴リングバッファの要素)
     struct NoteFrame {
-        bool     active[88];
-        float    strength[88];
-        uint8_t  segment[88];
-        uint8_t  bandMask[88];
-        float    laneStrength[88][3];
-        uint8_t  expr[88];
-        float    dynLevel[88];
+        bool     active[88];           // ノートがオンか
+        float    strength[88];         // 表示強度(NormalizeDisplayPeak 後)
+        uint8_t  segment[88];          // ノートセグメント ID(再トリガー検出用)
+        uint8_t  bandMask[88];         // どの周波数帯(bass/mid/treble)で拾われたか
+        float    laneStrength[88][3];  // 帯別強度(bass/mid/treble レーン着色用)
+        uint8_t  expr[88];             // 表現記号フラグ(NoteExpr の組み合わせ)
+        float    dynLevel[88];         // ダイナミクスレベル(ベロシティ表示用)
     };
 
-    static constexpr int   KEY_COUNT    = 88;
+    // ---- 鍵盤定数 ----
+    static constexpr int   KEY_COUNT    = 88;          // A0〜C8
     static constexpr int   WHITE_KEY_COUNT = 52;
-    static constexpr int   MIDI_BASE      = 21;
-    static constexpr size_t MAX_HISTORY   = 120;
-    static constexpr int   RING_SIZE      = 131072;
-    static constexpr int   WIN_LOW        = 8192;
-    static constexpr int   WIN_BASS       = 16384;
-    static constexpr int   WIN_HIGH       = 4096;
-    static constexpr int   WIN_ONSET      = 1024;
-    static constexpr int   LOW_KEY_SPLIT  = 51; // C5: これ未満は低音/中低音窓
-    static constexpr int   DETECT_KEYS    = 108;
-    static constexpr int   KEY_OFFSET       = 9;
-    static constexpr UINT  WM_PIANOROLL_SYNC = WM_APP + 420;
-    static constexpr UINT  WM_PIANOROLL_ANALYSIS_DONE = WM_APP + 421;
+    static constexpr int   MIDI_BASE      = 21;        // A0 = MIDI 21
 
-    NoteFrame m_historyRing[MAX_HISTORY];
-    int       m_historyCount = 0;
-    int       m_historyHead = 0;
+    // ---- 分析バッファ / 履歴 ----
+    static constexpr size_t MAX_HISTORY   = 120;       // ロール上に表示するフレーム行数(上限)
+    static constexpr int   RING_SIZE      = 131072;    // PCM インプットのリングバッファサイズ(サンプル数)
 
+    // ---- Goertzel 窓サイズ(サンプル数) ----
+    // 低音域は周波数分解能確保のため長窓、高音域は時間分解能優先で短窓を使う
+    static constexpr int   WIN_LOW        = 8192;      // 中低音(Hann 窓)
+    static constexpr int   WIN_BASS       = 16384;     // 低音(Hann 窓)
+    static constexpr int   WIN_HIGH       = 4096;      // 高音(Blackman 窓)
+    static constexpr int   WIN_ONSET      = 1024;      // オンセット検出(Hann 窓)
+    static constexpr int   LOW_KEY_SPLIT  = 51;        // C5: これ未満は低音/中低音窓を使用
+    static constexpr int   DETECT_KEYS    = 108;       // ApplyDisplayScale の正規化範囲
+    static constexpr int   KEY_OFFSET       = 9;       // MIDI_BASE からのオフセット(A0→A#0=9)
+
+    // ---- カスタムウィンドウメッセージ ----
+    static constexpr UINT  WM_PIANOROLL_SYNC = WM_APP + 420;           // UI 同期要求(RequestSyncFromMainUi)
+    static constexpr UINT  WM_PIANOROLL_ANALYSIS_DONE = WM_APP + 421;  // ワーカーからの分析完了通知
+
+    // ---- フレーム履歴リングバッファ(UI スレッドのみ読み書き) ----
+    NoteFrame m_historyRing[MAX_HISTORY];  // 確定済みフレームの環状配列
+    int       m_historyCount = 0;          // 有効フレーム数(MAX_HISTORY 未満の間は増える)
+    int       m_historyHead = 0;           // 次に書き込むインデックス(新→旧 = head-1, head-2, ...)
+
+    // ---- ノート状態(UI スレッド / m_cs 保護なし。OnAnalysisDone からのみ更新) ----
     bool  m_activeKeys[88];
-    float m_noteStrength[88];
-    float m_rawStrengths[88];
-    float m_smoothedStrengths[88];
-    int   m_consecActive[88];
-    int   m_consecSilent[88];
-    uint8_t m_segmentId[88];
-    float   m_envPeak[88];
-    int     m_unpickedFrames[88];
-    int     m_strengthDipFrames[88];
+    float m_noteStrength[88];         // 表示強度(NormalizeDisplayPeak + 包絡ホールド後)
+    float m_rawStrengths[88];         // Goertzel 生値(IIR 平滑前)
+    float m_smoothedStrengths[88];    // IIR 平滑後(ストリングス等の持続音追跡)
+    int   m_consecActive[88];         // 連続アクティブフレーム数
+    int   m_consecSilent[88];         // 連続サイレントフレーム数
+    uint8_t m_segmentId[88];          // 再トリガー検出用ノートセグメント ID
+    float   m_envPeak[88];            // エンベロープホールドのピーク値
+    int     m_unpickedFrames[88];     // ピックされなかった連続フレーム数
+    int     m_strengthDipFrames[88];  // 強度低下フレーム数(SUSTAIN 判定用)
     uint8_t m_bandMask[88];
     float   m_laneStrength[88][3];
     uint8_t m_prevBandMask[KEY_COUNT];
 
+    // ---- PCM インプット / リングバッファ(m_cs で保護) ----
     std::vector<double> m_ring;
     int                 m_ringWrite = 0;
     int                 m_ringCount = 0;
     int                 m_inputSampleRate = 44100;
-    int                 m_samplesSinceAnalyze = 0;
-    int                 m_playbackDelaySamples = 0;
+    int                 m_samplesSinceAnalyze = 0;   // 前回分析からのサンプル数(ANALYZE_INTERVAL トリガー用)
+    int                 m_playbackDelaySamples = 0;  // 再生バッファ遅延の補正値(IIR 平均)
 
-    std::vector<double> m_goertzelCoeffs;
+    // ---- Goertzel 係数 / 窓関数(サンプルレート変化時に再計算) ----
+    std::vector<double> m_goertzelCoeffs;   // 2*cos(2π*f/sr) の事前計算値
     std::vector<double> m_hannLow;
     std::vector<double> m_hannOnset;
     std::vector<double> m_hannBass;
-    std::vector<double> m_blackmanHigh;
+    std::vector<double> m_blackmanHigh;     // 高域はサイドローブ抑制のため Blackman 窓
+
+    // ---- 前フレーム値 / 表現記号検出用 ----
     float m_prevRawStrengths[KEY_COUNT];
-    float m_onsetStrengths[KEY_COUNT];
+    float m_onsetStrengths[KEY_COUNT];       // オンセット検出用(短窓 Goertzel 値)
     float m_prevOnsetStrengths[KEY_COUNT];
     bool  m_prevActiveKeys[KEY_COUNT];
     float m_prevNoteStrength[KEY_COUNT];
-    uint8_t m_noteAgeFrames[KEY_COUNT];
+    uint8_t m_noteAgeFrames[KEY_COUNT];      // ノートオン後の経過フレーム(スクープ/スライド判定)
     uint8_t m_scoopLatch[KEY_COUNT];
     uint8_t m_exprFlags[KEY_COUNT];
-    float m_vibHist[KEY_COUNT][10];
+    float m_vibHist[KEY_COUNT][10];          // 強度変動履歴(ビブラート判定用)
     uint8_t m_vibHistCount[KEY_COUNT];
     static constexpr int VIB_HIST_LEN = 10;
     bool  m_analysisHasBass = false;
@@ -127,45 +165,51 @@ private:
     std::vector<double> m_windowedHigh;
     std::vector<double> m_windowedOnset;
 
-    CRITICAL_SECTION m_cs;
-    CRITICAL_SECTION m_jobCs;
+    // ---- 分析ワーカースレッド ----
+    // 再生スレッドからのジョブを受け取り Goertzel 解析を行う専用スレッド。
+    // 結果は WM_PIANOROLL_ANALYSIS_DONE で UI スレッドへ通知される。
+    CRITICAL_SECTION m_cs;                // リングバッファ保護
+    CRITICAL_SECTION m_jobCs;             // ジョブバッファ(m_jobMono)保護
     HANDLE           m_hAnalysisThread = NULL;
-    HANDLE           m_hAnalysisWake = NULL;
-    volatile LONG    m_workerStop = 0;
-    volatile LONG    m_jobPending = 0;
-    double           m_jobMono[PIANO_BASS_FRAMES];
+    HANDLE           m_hAnalysisWake = NULL;   // SetEvent でワーカーを起こすイベント
+    volatile LONG    m_workerStop = 0;    // 1 にするとワーカーが自己終了
+    volatile LONG    m_jobPending = 0;    // InterlockedExchange で管理するジョブ有無フラグ
+    double           m_jobMono[PIANO_BASS_FRAMES];  // m_jobCs 保護下でコピーされる入力バッファ
     std::vector<double> m_workerMonoScratch;
     int              m_jobFrameCount = 0;
     int              m_jobSampleRate = 44100;
     double           m_goertzelRawScratch[KEY_COUNT];
 
-    bool m_feedEnabled = true;
+    // ---- 描画制御フラグ ----
+    bool m_feedEnabled = true;       // false にすると FeedPCM が即リターン(破棄前のシャットダウン用)
     bool m_paintDisabled = false;
-    bool m_historyDirty = true;
-    bool m_keyDirty = true;
+    bool m_historyDirty = true;      // ロールバッファ再描画が必要か
+    bool m_keyDirty = true;          // 鍵盤バッファ再描画が必要か
     bool m_meterDirty = false;
-    int  m_framesPending = 0;
-    DWORD m_lastAnalyzeTick = 0;
-    float m_bufwav3LevelDb = -60.0f;
-    float m_chMeterDb[PIANO_METER_CH_MAX];
-    float m_chMeterFill[PIANO_METER_CH_MAX];
-    float m_chMeterAutoPeak[PIANO_METER_CH_MAX];
-    int   m_chMeterCount = 0;
-    static constexpr DWORD ANALYZE_MIN_MS = 4;
+    int  m_framesPending = 0;        // スクロール済み未コミットフレーム数
+    DWORD m_lastAnalyzeTick = 0;     // スロットリング用(ANALYZE_MIN_MS 未満は再分析しない)
 
-    void EnsureAnalysisTables(int sampleRate);
+    // ---- レベルメーター ----
+    float m_bufwav3LevelDb = -60.0f;          // 入力 dB(ピックの閾値スケーリングに利用)
+    float m_chMeterDb[PIANO_METER_CH_MAX];
+    float m_chMeterFill[PIANO_METER_CH_MAX];      // 表示用 IIR 平滑フィル値(0.0〜1.0)
+    float m_chMeterAutoPeak[PIANO_METER_CH_MAX];  // 自動ピーク(棒グラフ上端の目印)
+    int   m_chMeterCount = 0;
+    static constexpr DWORD ANALYZE_MIN_MS = 4;    // 連続分析の最短間隔(過負荷防止)
+
+    void EnsureAnalysisTables(int sampleRate);   // Goertzel 係数と窓関数をサンプルレートに合わせて再計算
     void RunGoertzelFromBuffer(const double* winLow8192, const double* winBass, int bassWinLen);
-    void UpdateNoteStates();
-    void DetectExpressions();
-    void PushFrame(bool requestUiInvalidate);
+    void UpdateNoteStates();    // ピック結果からノートのオン/オフ・強度・セグメントを更新
+    void DetectExpressions();   // UpdateNoteStates 後に表現記号(アクセント/ビブラート等)を付与
+    void PushFrame(bool requestUiInvalidate);  // 確定フレームを履歴リングバッファへ追加
     void StartAnalysisWorker();
     void StopAnalysisWorker();
     DWORD AnalysisWorkerLoop();
-    bool ProcessAnalysisJob();
+    bool ProcessAnalysisJob();  // ワーカースレッド内。ジョブバッファの Goertzel 解析を実行
     static DWORD WINAPI AnalysisWorkerThreadEntry(LPVOID param);
     int  HistoryCountLocked() const;
     void CopyHistorySnapshot(NoteFrame* out, int maxOut, int& outCount) const;
-    const NoteFrame& HistoryAt(int indexFromNewest) const;
+    const NoteFrame& HistoryAt(int indexFromNewest) const;  // 0=最新フレーム
 
     static double ReadMonoSample(const uint8_t* sp, int bits);
     static double GoertzelMagnitude(const double* samples, int numSamples,
@@ -180,10 +224,13 @@ private:
     void GetWhiteKeyRect52(int midi, int width, int& xL, int& xR) const;
     void DrawChannelDbBars(CDC& dc, const CRect& rc, const float* chFill, int chCount) const;
 
+    // ---- GDI オフスクリーンバッファ ----
+    // ピアノロール(時間軸スクロール領域)。最新フレームを下端に BitBlt で追記し、
+    // 残りを1行分上へシフトするためダブルバッファで回す。
     CDC     m_rollDC;
     CBitmap m_rollBmp;
     CBitmap* m_rollOldBmp = nullptr;
-    CDC     m_rollScratchDC;
+    CDC     m_rollScratchDC;    // 1行分のスクロール合成に使う作業バッファ
     CBitmap m_rollScratchBmp;
     CBitmap* m_rollScratchOldBmp = nullptr;
 
@@ -203,6 +250,8 @@ private:
     int     m_lastScrollPx = 0;
     int     m_lastScrollHealTop = 0;
 
+    // 鍵盤描画バッファ。ノートがオン/オフするたびに再描画するが、毎フレーム再生成
+    // しないためサイズ変化時にのみ再確保する。
     CDC     m_keyDC;
     CBitmap m_keyBmp;
     CBitmap* m_keyOldBmp = nullptr;
@@ -210,17 +259,18 @@ private:
     int     m_keyH = 0;
     bool    m_keyBufReady = false;
 
-    CFont   m_fontKeyNote;
-    CFont   m_fontKeyOct;
-    CFont   m_fontMeterTag;
-    CFont   m_fontExprSymbol;
-    CFont   m_fontExprSymbolCompact;
-    CFont   m_fontExprLegend;
+    // ---- フォントキャッシュ(ウィンドウサイズ変化時のみ再生成) ----
+    CFont   m_fontKeyNote;            // 鍵盤上のノート名(C3, A4 等)
+    CFont   m_fontKeyOct;             // オクターブ表示
+    CFont   m_fontMeterTag;           // メーターのチャンネルラベル
+    CFont   m_fontExprSymbol;         // 表現記号アイコン
+    CFont   m_fontExprSymbolCompact;  // 狭い行向けの小さい表現記号
+    CFont   m_fontExprLegend;         // 凡例パネルのラベル
     int     m_fontCacheClientW = 0;
     int     m_fontCacheKeyH = 0;
     int     m_fontCacheRollH = 0;
     bool    m_paintFontsReady = false;
-    volatile LONG m_syncPosted = 0;
+    volatile LONG m_syncPosted = 0;   // RequestSyncFromMainUi の多重ポスト防止フラグ
 
 #if CCUSTOM_AERO_SUPPORT
     CCC_ChromaBlitCache m_chromaCache;

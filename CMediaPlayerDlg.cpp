@@ -28,6 +28,9 @@ extern TCHAR karento2[1024];
 extern CString filen, fnn, tagname, tagfile, tagalbum;
 extern CString stitle;   // ゲーム内タイトル等(oggDlg.cpp)
 extern CString tagtrack; // 曲番号(トラック番号。oggDlg.cpp)
+extern int wavbit_sample_Hz; // サンプルレート Hz (oggDlg.cpp)
+extern int wavchannel;       // チャンネル数 (oggDlg.cpp)
+extern int wavsam_depth;     // ビット深度 (oggDlg.cpp)
 extern int mode;         // 再生モード(タイトル解決に使用, oggDlg.cpp)
 extern int playy;   // 再生中フラグ(oggDlg.cpp)
 extern int plf;          // 再生中(1=再生中。oggDlg.cpp)
@@ -144,6 +147,9 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_infoPanelRect.SetRectEmpty();
 	m_bannerCacheW = 0;
 	m_bannerCacheH = 0;
+	for (int i = 0; i < kInfoRows; i++) { m_isc[i] = 0; m_iscW[i] = 0; }
+	m_iscActive    = false;
+	m_lastInfoPanelW = 0;
 }
 
 CMediaPlayerDlg::~CMediaPlayerDlg()
@@ -266,6 +272,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogBase)
 	ON_NOTIFY(NM_RCLICK, IDC_MP_LIST, &CMediaPlayerDlg::OnRclickList)
 	ON_NOTIFY(LVN_KEYDOWN, IDC_MP_LIST, &CMediaPlayerDlg::OnKeydownList)
 	ON_NOTIFY(LVN_BEGINDRAG, IDC_MP_LIST, &CMediaPlayerDlg::OnBeginDragList)
+	ON_MESSAGE(WM_MP_INFO_SCROLL, &CMediaPlayerDlg::OnInfoScrollTick)
 END_MESSAGE_MAP()
 
 int CMediaPlayerDlg::Create(CWnd* pParent)
@@ -372,7 +379,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 
 	// リスト列(プレイリストと同じ並び)
 	DWORD ex = m_list.GetExtendedStyle();
-	ex |= LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES;
+	ex |= LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_INFOTIP;
 	m_list.SetExtendedStyle(ex);
 	il.Create(16, 16, ILC_COLOR, 0, 1);   // プレイリストと同じ生成方法に合わせる
 	il.Add(AfxGetApp()->LoadIcon(IDI_ICON1));
@@ -417,6 +424,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_pitchL.SetFont(&m_fontInfo, TRUE);
 	m_vollabel.SetFont(&m_fontInfo, TRUE);
 	m_list.SetFont(&m_fontList, TRUE);
+	// ツールチップは SyncFromMain が m_tip を確定した後に ApplyListTooltipState で設定
 
 	// タイトルは可愛くピンク強調
 	m_title.SetGradation(RGB(255, 105, 180), RGB(150, 60, 160), 0, TRUE);
@@ -533,6 +541,10 @@ BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (CCC_ProcessInwomanHotkey(pMsg, this))
 		return TRUE; // 隠し: F12を5回で淫女モード切替
+	// リスト行ツールチップ (CListCtrlA 実装): ツールチップ表示ON時のみリレー
+	if (m_list.GetSafeHwnd() && m_tip.GetCheck())
+		if (m_list.PreTranslateMessage(pMsg))
+			return TRUE;
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
@@ -560,6 +572,10 @@ static void MoveCtl(CWnd* p, int x, int y, int w, int h)
 		p->MoveWindow(x, y, w, h);
 }
 
+// DPI/リサイズ対応の手動レイアウト。RC で固定配置すると高 DPI で壊れるため
+// OnInitDialog 後・OnSize ごとに呼ぶ。コントロール座標は hD2 スケールで計算する。
+// バナー領域の計算はアスペクト維持(MP_SRCW:MP_SRCH)で行い、余白は DoLayout
+// 内で m_jacketRect / m_infoPanelRect に割り当てる。
 void CMediaPlayerDlg::DoLayout()
 {
 	if (!::IsWindow(GetSafeHwnd())) return;
@@ -763,6 +779,9 @@ void CMediaPlayerDlg::DoLayout()
 // 仮想リストは SetItemCount でスクロール範囲(=スクロールバー)が直接確定するため、
 // アクリル時に OpaqueFixer が WM_PAINT を横取りしてもスクロールバーが正しく表示される。
 // (非仮想だと WM_PAINT 依存でスクロールバーが出ない/消える不具合になっていた。)
+// 仮想リスト(LVS_OWNERDATA)の件数変化・再生中アイコン移動を反映する。
+// Timer1(250ms)から呼ばれる。件数が同じなら SetItemCount は呼ばずコストを最小化する。
+// bForce=TRUE は並べ替え/タグ更新時など表示内容が変わった場合に全行再取得を強制する。
 void CMediaPlayerDlg::RefreshList(BOOL bForce)
 {
 	if (!::IsWindow(m_list.GetSafeHwnd())) return;
@@ -823,6 +842,9 @@ void CMediaPlayerDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 // 再生中(♪)の行へカーソル(選択)を移動して可視化する。
 // ♪ の行は pl->pnt(SIcon が pc[pnt].icon を再生中アイコンへ切替えている)。
 // 項目挿入後に呼ぶこと。pnt が変わった時のみ追従し、同一曲中のユーザー選択は邪魔しない。
+// 再生中(♪)行へスクロールして選択する。pl->pnt が変化した場合のみ動作する。
+// OnInitDialog 時点ではウィンドウ未実現で EnsureVisible が効かないことがあるため、
+// Create() の ShowWindow 後にも呼んでいる。
 void CMediaPlayerDlg::FollowPlayingRow()
 {
 	if (!::IsWindow(m_list.GetSafeHwnd())) return;
@@ -840,6 +862,9 @@ void CMediaPlayerDlg::FollowPlayingRow()
 	m_lastScroll = play;
 }
 
+// og/pl の UI 状態(歌詞・スライダー位置・チェック状態・コンボ選択)をこの画面へ反映する。
+// 差分のみ SetWindowText / SetCheck するのはちらつき防止のため。
+// Timer1(250ms)から定期呼び出しされるほか、コントロール操作直後にも都度呼ぶ。
 void CMediaPlayerDlg::SyncFromMain()
 {
 	if (!::IsWindow(GetSafeHwnd())) return;
@@ -884,7 +909,8 @@ void CMediaPlayerDlg::SyncFromMain()
 		int v2;
 		v2 = pl->m_renzoku.GetCheck() ? 1 : 0; if (m_renzoku.GetCheck() != v2) m_renzoku.SetCheck(v2);
 		v2 = pl->m_loop.GetCheck() ? 1 : 0; if (m_loop.GetCheck() != v2) m_loop.SetCheck(v2);
-		v2 = pl->m_tool.GetCheck() ? 1 : 0; if (m_tip.GetCheck() != v2) m_tip.SetCheck(v2);
+		v2 = pl->m_tool.GetCheck() ? 1 : 0;
+		if (m_tip.GetCheck() != v2) { m_tip.SetCheck(v2); ApplyListTooltipState(); }
 		v2 = pl->m_saisyo.GetCheck() ? 1 : 0; if (m_mini.GetCheck() != v2) m_mini.SetCheck(v2);
 		v2 = pl->m_save_mp3.GetCheck() ? 1 : 0; if (m_savemp3.GetCheck() != v2) m_savemp3.SetCheck(v2);
 		v2 = pl->m_save_kpi.GetCheck() ? 1 : 0; if (m_saveds.GetCheck() != v2) m_saveds.SetCheck(v2);
@@ -913,6 +939,7 @@ void CMediaPlayerDlg::SyncFromMain()
 			(LPCTSTR)tagtrack, (LPCTSTR)fmt, og ? og->jx : -1);
 		if (key != m_lastBannerKey) {
 			m_lastBannerKey = key;
+			ResetInfoScroll();   // 曲変更時はスクロール位置をリセット
 			InvalidateSidePanels();
 		}
 	}
@@ -933,6 +960,10 @@ void CMediaPlayerDlg::EnforceFalcomHidden()
 		::ShowWindow(playbase->m_hWnd, SW_HIDE);
 }
 
+// 再生位置・時間表示・音量を og からミラーする高速ミラー関数。
+// Timer3(100ms)と SyncFromMain から呼ばれる。og の timerp が playb(再生位置)を
+// SetPos するため、それに合わせて m_seek と m_time を追従させる。
+// タスクバー進捗(ITaskbarList3)も og ではなく mp のウィンドウに対して設定する。
 void CMediaPlayerDlg::MirrorSeekVol()
 {
 	if (!og || !::IsWindow(og->GetSafeHwnd()) || !::IsWindow(GetSafeHwnd())) return;
@@ -1025,6 +1056,9 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 			// ジャケットを左へ分離している間はバナー内蔵ジャケが無いので
 			// ホバー演出(タイトル減光・ジャケ前面化)は無効化する。
 			g_mpBannerHover = (!g_mpSideJacket && m_bannerRect.PtInRect(pt)) ? 1 : 0;
+
+			// info パネルスクロールは TheadLoop から WM_MP_INFO_SCROLL で駆動（~30fps V-Sync同期）
+			// Timer3 では行わない（精度不足のため TheadLoop ベースに移植済み）
 		}
 		else g_mpBannerHover = 0;
 	}
@@ -1136,6 +1170,172 @@ void CMediaPlayerDlg::InvalidateSidePanels()
 	if (!m_infoPanelRect.IsRectEmpty()) InvalidateRect(&m_infoPanelRect, FALSE);
 }
 
+// m_tip チェックボックスの状態を m_list のツールチップ設定に反映。
+// CListCtrlA 実装のカスタムツールチップ(行詳細)を ON/OFF する。
+// PlayList の m_lc.EnableToolTips/SetExtendedStyle と同じ方式。
+void CMediaPlayerDlg::ApplyListTooltipState()
+{
+	if (!::IsWindow(m_list.GetSafeHwnd())) return;
+	const bool on = (m_tip.GetCheck() != 0);
+	m_list.EnableToolTips(on ? TRUE : FALSE);
+	DWORD exStyle = m_list.GetExtendedStyle();
+	if (on)
+		exStyle &= ~LVS_EX_INFOTIP;   // カスタムツールチップ使用中はシステム infotip を無効
+	else
+		exStyle |= LVS_EX_INFOTIP;
+	m_list.SetExtendedStyle(exStyle);
+}
+
+// WM_MP_INFO_SCROLL ハンドラ。TheadLoop から ~30fps で PostMessage される。
+// タイマーよりも V-Sync に近いタイミングで呼ばれるため marquee が滑らかになる。
+// m_iscActive が true なら右曲情報パネルを無効化 → DrawSidePanels がスクロールを1段進めて
+// 再び true にセットする(→次 tick でまた無効化)。スクロール不要なら m_iscActive は
+// false のままで再描画は発生しない。
+LRESULT CMediaPlayerDlg::OnInfoScrollTick(WPARAM, LPARAM)
+{
+	if (m_iscActive && !m_infoPanelRect.IsRectEmpty()) {
+		m_iscActive = false;   // DrawSidePanels が再セット(スクロール継続中なら true に戻す)
+		InvalidateRect(&m_infoPanelRect, FALSE);
+	}
+	return 0;
+}
+
+void CMediaPlayerDlg::ResetInfoScroll()
+{
+	for (int i = 0; i < kInfoRows; i++) { m_isc[i] = 0; m_iscW[i] = 0; }
+	m_iscActive = false;
+}
+
+// 1行のテキストをスクロール対応で mem DC へ描画する。
+//
+// 収まる場合: DrawText で静止描画して false を返す(スクロール不要)。
+//
+// はみ出す場合: 「テキスト + セパレータ」を2回並べたワイド DC を作り、
+// m_isc[rowIdx] をオフセットとして可視幅(tw)分だけ切り出して BitBlt する。
+// オフセットは 2px/呼び出し 進むため ~30fps で呼べば ~60px/sec になる。
+// セパレータ部には左右ドット + 中央ダイヤの GDI 装飾を描く(視覚的な区切り)。
+//
+// rowIdx: m_isc/m_iscW のインデックス(0=タイトル行, 1〜5=サブ行)
+bool CMediaPlayerDlg::DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lineH,
+	const CString& text, COLORREF clr, int rowIdx, COLORREF kBg, CFont* font)
+{
+	if (text.IsEmpty() || tw <= 0 || lineH <= 0) return false;
+
+	CFont* oldFont = mem.SelectObject(font);
+	CSize szText = mem.GetTextExtent(text);
+	mem.SelectObject(oldFont);
+
+	if (szText.cx <= tw) {
+		// テキストが収まる場合: 通常描画、カウンタリセット
+		m_isc[rowIdx]  = 0;
+		m_iscW[rowIdx] = 0;
+		mem.SelectObject(font);
+		mem.SetTextColor(clr);
+		CRect rr(tx, y, tx + tw, y + lineH);
+		mem.DrawText(text, &rr, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+		mem.SelectObject(oldFont);
+		return false;
+	}
+
+	// テキストが収まらない場合: セパレータ付き marquee スクロール
+	const CString kSep = _T("　　 ");   // 全角2+半角1スペース（自然な間隔）
+	CString scrollText = text + kSep;
+	mem.SelectObject(font);
+	CSize szFull = mem.GetTextExtent(scrollText);
+	mem.SelectObject(oldFont);
+
+	if (szFull.cx <= 0) return false;
+	m_iscW[rowIdx] = szFull.cx;
+
+	// スクロール用ワイド一時 DC を作成（テキスト2連続 = シームレスループ）
+	int wideW = szFull.cx * 2 + 4;
+	CDC wdc; wdc.CreateCompatibleDC(&mem);
+	CBitmap wbm; wbm.CreateCompatibleBitmap(&mem, wideW, lineH);
+	CBitmap* ob = wdc.SelectObject(&wbm);
+	wdc.FillSolidRect(0, 0, wideW, lineH, kBg);
+	wdc.SetBkMode(TRANSPARENT);
+	wdc.SetTextColor(clr);
+
+	// テキストを2回描画（シームレスループ用）
+	CFont* wf = wdc.SelectObject(font);
+	CRect wr1(0, 0, szFull.cx + 4, lineH);
+	wdc.DrawText(scrollText, &wr1, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+	CRect wr2(szFull.cx, 0, szFull.cx * 2 + 4, lineH);
+	wdc.DrawText(scrollText, &wr2, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+
+	// セパレータ部に GDI 装飾を描画（左右ドット + 細線）
+	CSize szTextOnly = wdc.GetTextExtent(text);
+	int sx = szTextOnly.cx;           // セパレータ開始X
+	int sw = szFull.cx - szTextOnly.cx; // セパレータ幅
+	if (sw > 8) {
+		int cy = lineH / 2;
+		int dr = max(2, lineH / 10);
+		CPen nullPen(PS_NULL, 0, RGB(0, 0, 0));
+		CBrush brDeco(clr);
+		CPen* opDeco  = wdc.SelectObject(&nullPen);
+		CBrush* obDeco = wdc.SelectObject(&brDeco);
+
+		// 左ドット
+		int lx = sx + sw / 3;
+		wdc.Ellipse(lx - dr, cy - dr, lx + dr, cy + dr);
+		// 右ドット
+		int rx = sx + sw * 2 / 3;
+		wdc.Ellipse(rx - dr, cy - dr, rx + dr, cy + dr);
+		// 中央小ダイヤ
+		int mx = sx + sw / 2;
+		int mr = max(2, lineH / 8);
+		POINT diaPts[4] = { {mx, cy - mr}, {mx + mr, cy}, {mx, cy + mr}, {mx - mr, cy} };
+		wdc.Polygon(diaPts, 4);
+
+		// 細線（左端〜左ドット, 右ドット〜右端）
+		CPen linePen(PS_SOLID, 1, clr);
+		wdc.SelectObject(&linePen);
+		wdc.SelectStockObject(NULL_BRUSH);
+		wdc.MoveTo(sx + 2,  cy); wdc.LineTo(lx - dr - 1, cy);
+		wdc.MoveTo(rx + dr + 1, cy); wdc.LineTo(sx + sw - 2, cy);
+
+		// 2コピー目にも同じ装飾
+		int sx2 = sx + szFull.cx;
+		int lx2 = sx2 + sw / 3, rx2 = sx2 + sw * 2 / 3, mx2 = sx2 + sw / 2;
+		wdc.SelectObject(&nullPen);
+		wdc.SelectObject(&brDeco);
+		wdc.Ellipse(lx2 - dr, cy - dr, lx2 + dr, cy + dr);
+		wdc.Ellipse(rx2 - dr, cy - dr, rx2 + dr, cy + dr);
+		POINT diaPts2[4] = { {mx2, cy - mr}, {mx2 + mr, cy}, {mx2, cy + mr}, {mx2 - mr, cy} };
+		wdc.Polygon(diaPts2, 4);
+		wdc.SelectObject(&linePen);
+		wdc.SelectStockObject(NULL_BRUSH);
+		wdc.MoveTo(sx2 + 2,     cy); wdc.LineTo(lx2 - dr - 1, cy);
+		wdc.MoveTo(rx2 + dr + 1, cy); wdc.LineTo(sx2 + sw - 2, cy);
+
+		wdc.SelectObject(obDeco);
+		wdc.SelectObject(opDeco);
+	}
+	wdc.SelectObject(wf);
+
+	// 現在のオフセット位置から tw 幅分だけ切り出して Blit する。
+	// ワイド DC には「A〜Z + sep + A〜Z + sep」と2周分描画してあるため、
+	// off が szFull.cx を超えてもシームレスにラップアラウンドする。
+	int off = m_isc[rowIdx] % szFull.cx;
+	if (off < 0) off = 0;
+
+	int saved = mem.SaveDC();
+	mem.IntersectClipRect(tx, y, tx + tw, y + lineH);
+	// 1コピー目: left = tx - off (off=0 のとき先頭と一致)
+	mem.BitBlt(tx - off, y, szFull.cx, lineH, &wdc, 0, 0, SRCCOPY);
+	// 2コピー目: 1コピー目が左へずれた分の右端を埋めるラップアラウンド
+	mem.BitBlt(tx + szFull.cx - off, y, tw, lineH, &wdc, szFull.cx, 0, SRCCOPY);
+	mem.RestoreDC(saved);
+
+	wdc.SelectObject(ob);
+
+	// スクロールカウンタを進める（2px/呼び出し ≈ 60px/sec @30fps）
+	m_isc[rowIdx] += 2;
+	if (m_isc[rowIdx] >= szFull.cx) m_isc[rowIdx] -= szFull.cx;
+
+	return true;
+}
+
 // 左ジャケット / 右曲情報 パネルを描画。バナーと同じ黒地に統一し、上部の帯全体が
 // ひとつのメディアバー(左:ジャケ / 中央:スペアナ / 右:曲情報)に見えるようにする。
 // 内容は曲変更/リサイズ時のみ再描画されるため(毎フレームではない)ちらつかない。
@@ -1189,9 +1389,13 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 		}
 	}
 
-	// ---- 右: 曲情報パネル(タイトル/アーティスト/アルバム/形式) ----
+	// ---- 右: 曲情報パネル(タイトル/アーティスト/アルバム/形式, スクロール対応) ----
 	if (!m_infoPanelRect.IsRectEmpty() && CRect().IntersectRect(&clip, &m_infoPanelRect)) {
 		int w = m_infoPanelRect.Width(), h = m_infoPanelRect.Height();
+
+		// リサイズ検出: パネル幅変化時はスクロールをリセット
+		if (w != m_lastInfoPanelW) { ResetInfoScroll(); m_lastInfoPanelW = w; }
+
 		if (w > 0 && h > 0) {
 			CDC mem; mem.CreateCompatibleDC(pDC);
 			CBitmap bm; bm.CreateCompatibleBitmap(pDC, w, h);
@@ -1203,53 +1407,83 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			int tx = pad, tw = w - pad * 2;
 			if (tw < 1) tw = 1;
 
-			// 収集
+			// ---- 情報収集 ----
 			CString title = CurrentTrackTitle();
 			CString artist = tagname, album = tagalbum;
 			CString track = tagtrack;
 			CString fmt; if (::IsWindow(m_os.GetSafeHwnd())) m_os.GetWindowText(fmt);
-			// 曲番号は "Track 3" のように整形(タグが "3/12" 等でもそのまま表示)
+
+			// 曲番号行
 			CString trackLine;
 			if (!track.IsEmpty())
 				trackLine.Format(LL2(L"曲番号 %s", L"Track %s"), (LPCTSTR)track);
 
-			// 行高を見積もって縦中央寄せ
-			int titleH = (int)(24 * hD2);
-			int lineH = (int)(17 * hD2);
-			int rows = 1;
-			if (!artist.IsEmpty()) rows++;
-			if (!album.IsEmpty())  rows++;
-			if (!trackLine.IsEmpty()) rows++;
-			if (!fmt.IsEmpty())    rows++;
+			// Hz / チャンネル / ビット深度行
+			CString audioLine;
+			if (wavbit_sample_Hz > 0 && wavchannel > 0) {
+				CString chStr;
+				switch (wavchannel) {
+				case 1: chStr = L"mono";   break;
+				case 2: chStr = L"stereo"; break;
+				case 3: chStr = L"3ch";    break;
+				case 4: chStr = L"4ch";    break;
+				case 5: chStr = L"4.1ch";  break;
+				case 6: chStr = L"5.1ch";  break;
+				case 7: chStr = L"6.1ch";  break;
+				case 8: chStr = L"7.1ch";  break;
+				default: chStr.Format(L"%dch", wavchannel); break;
+				}
+				int bitsDisp = abs(wavsam_depth);
+				if (bitsDisp > 0)
+					audioLine.Format(L"%d Hz  %s  %d bit", wavbit_sample_Hz, (LPCTSTR)chStr, bitsDisp);
+				else
+					audioLine.Format(L"%d Hz  %s", wavbit_sample_Hz, (LPCTSTR)chStr);
+			}
+
+			// ---- 行高・縦中央寄せ ----
+			int titleH  = (int)(24 * hD2);
+			int lineH   = (int)(17 * hD2);
+			if (lineH < 12) lineH = 12;
 			int ruleGap = (int)(6 * hD2);
-			int totalH = titleH + ruleGap + (rows - 1 > 0 ? (rows - 1) * lineH : 0);
+			int rows = 1; // タイトル
+			if (!artist.IsEmpty())    rows++;
+			if (!album.IsEmpty())     rows++;
+			if (!trackLine.IsEmpty()) rows++;
+			if (!audioLine.IsEmpty()) rows++;
+			if (!fmt.IsEmpty())       rows++;
+			int totalH = titleH + ruleGap + (rows - 1) * lineH;
 			int y = (h - totalH) / 2; if (y < 0) y = 0;
 
-			// タイトル(白・太字・省略記号)
+			// ---- タイトル行(スクロール対応) ----
 			CFont* of = mem.SelectObject(&m_fontTitle);
-			mem.SetTextColor(RGB(255, 255, 255));
-			CRect rt(tx, y, tx + tw, y + titleH);
-			mem.DrawText(title.IsEmpty() ? CString(_T("‐")) : title, &rt, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+			mem.SetBkMode(TRANSPARENT);
+			bool titleScrolled = DrawInfoScrollRow(mem, tx, y, tw, titleH,
+				title.IsEmpty() ? CString(_T("‐")) : title,
+				RGB(255, 255, 255), 0, kBg, &m_fontTitle);
+			if (titleScrolled) m_iscActive = true;
 			y += titleH;
+			mem.SelectObject(of);
 
-			// アクセント罫線(スペアナの緑系で帯全体と調和)
-			mem.FillSolidRect(tx, y + ruleGap / 2, tw, (int)(1 * hD2 + 0.5), RGB(0, 160, 0));
+			// アクセント罫線（グリーン系でスペアナと調和）
+			mem.FillSolidRect(tx, y + ruleGap / 2, tw, max(1, (int)(1 * hD2 + 0.5)), RGB(0, 160, 0));
 			y += ruleGap;
 
-			mem.SelectObject(&m_fontInfo);
-			struct Row { CString s; COLORREF c; };
-			Row items[4]; int n = 0;
-			if (!artist.IsEmpty())    { items[n].s = artist;    items[n].c = RGB(225, 225, 225); n++; }
-			if (!album.IsEmpty())     { items[n].s = album;     items[n].c = RGB(190, 190, 190); n++; }
-			if (!trackLine.IsEmpty()) { items[n].s = trackLine; items[n].c = RGB(180, 180, 210); n++; }
-			if (!fmt.IsEmpty())       { items[n].s = fmt;       items[n].c = RGB(150, 200, 150); n++; }
+			// ---- サブ行（アーティスト/アルバム/曲番号/オーディオ/フォーマット、各スクロール対応） ----
+			struct SubRow { CString s; COLORREF c; int idx; };
+			SubRow items[5]; int n = 0;
+			if (!artist.IsEmpty())    { items[n] = { artist,    RGB(225, 225, 225), 1 }; n++; }
+			if (!album.IsEmpty())     { items[n] = { album,     RGB(190, 190, 190), 2 }; n++; }
+			if (!trackLine.IsEmpty()) { items[n] = { trackLine, RGB(180, 180, 210), 3 }; n++; }
+			if (!audioLine.IsEmpty()) { items[n] = { audioLine, RGB(130, 210, 230), 4 }; n++; }
+			if (!fmt.IsEmpty())       { items[n] = { fmt,       RGB(150, 200, 150), 5 }; n++; }
+
+			mem.SetBkMode(TRANSPARENT);
 			for (int i = 0; i < n; i++) {
-				mem.SetTextColor(items[i].c);
-				CRect rr(tx, y, tx + tw, y + lineH);
-				mem.DrawText(items[i].s, &rr, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
+				bool scrolled = DrawInfoScrollRow(mem, tx, y, tw, lineH,
+					items[i].s, items[i].c, items[i].idx, kBg, &m_fontInfo);
+				if (scrolled) m_iscActive = true;
 				y += lineH;
 			}
-			mem.SelectObject(of);
 
 			if (aero)
 				CCC_BlitStretchChromaNoFlicker(pDC->m_hDC, m_infoPanelRect.left, m_infoPanelRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);
@@ -1282,12 +1516,14 @@ void CMediaPlayerDlg::OnPaint()
 	}
 #endif
 	CPaintDC pdc(this);
-	// 非アクリル時は背景をベース色で塗る。ただしバナー部は Blit で上書きするので
-	// 塗らない(塗ってから Blit すると一瞬ピンクが見えてチラつくため)。
+	// 非アクリル時は背景をベース色で塗る。バナー/サイドパネルは直後の Blit/GDI で
+	// 完全に上書きするため除外する（先に塗ると一瞬フラッシュしてちらつく）。
 	{
 		CRect rcc; GetClientRect(&rcc);
 		int saved = pdc.SaveDC();
 		pdc.ExcludeClipRect(&m_bannerRect);
+		if (!m_jacketRect.IsRectEmpty())   pdc.ExcludeClipRect(&m_jacketRect);
+		if (!m_infoPanelRect.IsRectEmpty()) pdc.ExcludeClipRect(&m_infoPanelRect);
 		CBrush bg(COLOR_DIALOG_BG);
 		pdc.FillRect(&rcc, &bg);
 		pdc.RestoreDC(saved);
@@ -1634,6 +1870,7 @@ void CMediaPlayerDlg::OnTip()
 {
 	if (pl && ::IsWindow(pl->m_tool.GetSafeHwnd()))
 		pl->m_tool.SetCheck(m_tip.GetCheck() ? 1 : 0);   // pl のタイマーが反映
+	ApplyListTooltipState();   // m_list にも即時反映
 }
 
 void CMediaPlayerDlg::OnMini()
@@ -1814,6 +2051,9 @@ void CMediaPlayerDlg::OnLButtonUp(UINT nFlags, CPoint point)
 /////////////////////////////////////////////////////////////////////////////
 // モード切替
 /////////////////////////////////////////////////////////////////////////////
+// ファルコム特化型 → メディアプレイヤーモードへ切替。
+// mp を新規生成し og/pl を非表示にする。og は再生エンジンとして裏で動き続ける。
+// DWM アクリル問題対策として mp をトップレベル化(オーナー解除)してから RefreshAeroMode する。
 void EnterMediaPlayerMode()
 {
 	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
@@ -1868,6 +2108,10 @@ void EnterMediaPlayerMode()
 	}
 }
 
+// メディアプレイヤー → ファルコム特化型モードへ切替。
+// mp を破棄して og を再表示する。EnterFalcomMode 自体は og->m_hWnd の OnReceive
+// (WM_MP_ENTER_FALCOM)から遅延呼び出しされるため、mp のハンドラ内で mp を破棄
+// してしまう問題を避けられる。
 void EnterFalcomMode()
 {
 	savedata.playerMode = 0;

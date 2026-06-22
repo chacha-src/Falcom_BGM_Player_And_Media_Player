@@ -14944,6 +14944,9 @@ static DWORD g_kpiRenzokuTick = 0;   // 現在曲の計測開始tick(0=計測な
 static int   g_kpiRenzokuPnt = -999; // 計測中の曲インデックス(変化で計測リセット)
 static const DWORD KPI_RENZOKU_LIMIT_MS = 120000;  // 2分
 
+// スクロールテキスト区切り装飾（定義は mojisub の後）
+static void DrawScrollSepDeco(CDC& dc, int x_px, int h_px, int w_px, COLORREF clr = RGB(255, 255, 255));
+
 void COggDlg::timerp()
 {
 	if (g_oggUiThreadId != 0 && GetCurrentThreadId() != g_oggUiThreadId) {
@@ -15185,9 +15188,13 @@ void COggDlg::timerp()
 	if (stitle != "" && mode == -1 || mode == 21 || mode == -6)	sss = stitle;
 	int si = mojisub(sss, 1, 0, 0xffffff);
 	if (si > MDC) {
-		ss = sss + _T("》---《");
-		if (mode == -10) ss = sss + _T("》---《");
+		int sss_w = si;   // 本文ピクセル幅（セパレータ開始位置の計算に使用）
+		ss = sss + _T("　　　");   // 全角スペース3文字でセパレータ幅を確保
 		si = mojisub(ss, 1, 0, 0xffffff);
+		// セパレータ部に GDI 装飾を重ね描き
+		// h_px: テキストが使うフォント高さ(16*4)を渡す。行域全体(30*4)では cy がテキスト中心からズレる。
+		if (Ms2DrawDue(ms2))
+			DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w);
 	}
 	//枠はみ出し時スクロール処理
 	if (si > MDC) {
@@ -15461,9 +15468,12 @@ void COggDlg::timerp()
 		moji(s, 1, 64, 0x7fffff);
 		int si = mojisub(tagname, 1, 0, 0x7fffff);
 		if (si > MDC) {
-			ss = fnn + _T("》---《");
-			if (mode == -8 || mode == -7) ss = tagname + _T("》---《");
+			int sss_w = si;
+			CString base = (mode == -8 || mode == -7) ? tagname : fnn;
+			ss = base + _T("　　　");
 			si = mojisub(ss, 1, 0, 0x7fffff);
+			if (Ms2DrawDue(ms2))
+				DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w, RGB(200, 240, 255));
 		}
 		//枠はみ出し時スクロール処理
 		if (si > MDC) {
@@ -15507,9 +15517,11 @@ void COggDlg::timerp()
 		//			dcsub.FillSolidRect(0,0,3000,30,RGB(1,1,1));
 		int si = mojisub(tagname, 1, 0, 0x7fffff);
 		if (si > MDC) {
-			ss = fnn + _T("》---《");
-			if (mode == -10 || mode == -9) ss = tagname + _T("》---《");
+			int sss_w = si;
+			ss = tagname + _T("　　　");
 			si = mojisub(ss, 1, 0, 0x7fffff);
+			if (Ms2DrawDue(ms2))
+				DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w, RGB(200, 240, 255));
 		}
 		//枠はみ出し時スクロール処理
 		if (si > MDC) {
@@ -15551,8 +15563,11 @@ void COggDlg::timerp()
 		//			dcsub.FillSolidRect(0,0,3000,30,RGB(1,1,1));
 		int si = mojisub(tagalbum, 1, 0, 0x7fffff);
 		if (si > MDC) {
-			ss = tagalbum + _T("》---《");
+			int sss_w = si;
+			ss = tagalbum + _T("　　　");
 			si = mojisub(ss, 1, 0, 0x7fffff);
+			if (Ms2DrawDue(ms2))
+				DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w, RGB(200, 240, 255));
 		}
 		//枠はみ出し時スクロール処理
 		if (si > MDC) {
@@ -16452,10 +16467,24 @@ DWORD f1 = 0, f2 = 0;
 
 UINT TheadLoop(LPVOID)
 {
+	int infoScrollDiv = 0;   // 60fps÷2 = 30fps で info パネルスクロール tick を投げる
 	for (;;) {
 		if (drawth == TRUE) return TRUE;
 		Timing64(f2, FALSE);
 		COgg_RequestTimerp(og);
+
+		// info パネルスクロール: TheadLoop の 60fps をそのまま使い、1フレームおきに
+		// PostMessage することで ~30fps を実現。Timer3 より精度が高く V-Sync に同期する。
+		if (++infoScrollDiv >= 2) {
+			infoScrollDiv = 0;
+			extern CMediaPlayerDlg* mp;
+			if (mp) {
+				HWND hmp = mp->GetSafeHwnd();
+				if (::IsWindow(hmp) && mp->m_iscActive)
+					::PostMessage(hmp, WM_MP_INFO_SCROLL, 0, 0);
+			}
+		}
+
 		timing1(1, FALSE, FALSE);
 		Timing64(f2, FALSE);
 		Timing64(fpstiming, FALSE);
@@ -19460,6 +19489,54 @@ int COggDlg::mojisub(CString s, int x, int y, COLORREF rgb)
 		SelectObject(dcsub, fo);
 	}
 	return szinfo.cx;
+}
+
+// スクロールテキストの区切り装飾を dcsub に描画（mojisub の直後に呼ぶ）
+// x_px : セパレータ描画開始 X 座標（4x スケール済みピクセル、テキスト末尾位置）
+// h_px : テキスト行全体の高さ（4x スケール済みピクセル = 30*4）
+// w_px : セパレータ全幅（4x スケール済みピクセル）
+// 描画内容: 中央ダイヤモンド + 左右ドット + 細線
+// SRCINVERT 合成のため白(0xFFFFFF)で描く（黒地→白表示、スペアナ色地→反転で存在感を保つ）
+static void DrawScrollSepDeco(CDC& dc, int x_px, int h_px, int w_px, COLORREF clr)
+{
+	if (w_px < 32) return;
+	const int cy = h_px / 2;
+
+	CPen nullPen(PS_NULL, 0, RGB(0, 0, 0));
+	CBrush br(clr);
+	CBrush* ob = dc.SelectObject(&br);
+	CPen* op = dc.SelectObject(&nullPen);
+
+	// 中央ダイヤモンド
+	const int cr = h_px / 10; // ダイヤモンドの半径（高さの 1/10）
+	if (cr >= 2) {
+		int cx = x_px + w_px / 2;
+		POINT dia[4] = {
+			{cx,      cy - cr},
+			{cx + cr, cy},
+			{cx,      cy + cr},
+			{cx - cr, cy}
+		};
+		dc.Polygon(dia, 4);
+	}
+
+	// 左右の小ドット
+	const int dr = max(2, h_px / 16);
+	int lx = x_px + w_px / 4;
+	int rx = x_px + w_px * 3 / 4;
+	dc.Ellipse(lx - dr, cy - dr, lx + dr, cy + dr);
+	dc.Ellipse(rx - dr, cy - dr, rx + dr, cy + dr);
+
+	// 細線（ドット〜ダイヤモンド間）
+	CPen linePen(PS_SOLID, 2, clr);
+	dc.SelectObject(&linePen);
+	dc.SelectStockObject(NULL_BRUSH);
+	int mid_cx = x_px + w_px / 2;
+	dc.MoveTo(lx + dr,       cy); dc.LineTo(mid_cx - cr - 1, cy);
+	dc.MoveTo(mid_cx + cr + 1, cy); dc.LineTo(rx - dr,       cy);
+
+	dc.SelectObject(ob);
+	dc.SelectObject(op);
 }
 
 void COggDlg::OnButton9_Folder()

@@ -18,23 +18,24 @@ extern save savedata;
 void COggDlg_SyncPianoRollFast();
 IMPLEMENT_DYNAMIC(CPianoRoll, CCustomBlurDialogExBase)
 
+// 分析パラメータ。値は実音への応答とゴースト抑制のバランスで調整済み。
+// 基音ピック + NormalizeBandPeak + 包絡ホールドの3本柱で動作する。
 namespace Cfg
 {
-    // piano roll3: 基音ピック + NormalizeDisplayPeak + 包絡ホールド
-    static constexpr float IIR_ALPHA = 0.40f;
-    static constexpr float IIR_ALPHA_BASS = 0.28f;
-    static constexpr float SILENCE_ABS = 0.007f;
+    static constexpr float IIR_ALPHA = 0.40f;       // 中高音 IIR 平滑係数(大きいほど追従が速い)
+    static constexpr float IIR_ALPHA_BASS = 0.28f;  // 低音はゆっくり追従(倍音影響を抑える)
+    static constexpr float SILENCE_ABS = 0.007f;    // 全帯域の絶対無音閾値
     static constexpr float BAND_SILENCE_BASS = 0.005f;
     static constexpr float BAND_SILENCE_MID = 0.004f;
     static constexpr float BAND_SILENCE_TRE = 0.004f;
-    static constexpr int   ATTACK_FRAMES = 1;
-    static constexpr int   RELEASE_FRAMES = 7;
-    static constexpr int   VIS_GAP_FRAMES = 6;
-    static constexpr int   VIS_GAP_FRAMES_BASS = 2;
-    static constexpr float RETRIGGER_RATIO = 0.32f;
-    static constexpr int   BAND_BASS_END = 25;
+    static constexpr int   ATTACK_FRAMES = 1;        // ノートオンに必要な連続アクティブフレーム数
+    static constexpr int   RELEASE_FRAMES = 7;       // ノートオフに必要な連続サイレントフレーム数
+    static constexpr int   VIS_GAP_FRAMES = 6;       // 中高音の再トリガーギャップ(視覚的区切り)
+    static constexpr int   VIS_GAP_FRAMES_BASS = 2;  // 低音の再トリガーギャップ(低音は長いノートが多い)
+    static constexpr float RETRIGGER_RATIO = 0.32f;  // ピーク比がこれ未満に落ちると再トリガー
+    static constexpr int   BAND_BASS_END = 25;        // 低音帯の上限インデックス(B2相当)
     static constexpr int   BAND_MID_END = 53;
-    static constexpr int   BAND_MID_LO_END = 45; // O3帯 / O4上端で正規化分割（A4付近）
+    static constexpr int   BAND_MID_LO_END = 45;     // O3帯 / O4上端で正規化分割(A4付近)
     static constexpr float BASS_PICK_THRESH = 0.20f;
     // ストリングス(ブロード/持続的でピークが弱い)を拾うため mid/treble を控えめに低減。
     // 出過ぎ防止のため小幅(約13%)に留める。
@@ -652,6 +653,10 @@ CPianoRoll::~CPianoRoll()
     DeleteCriticalSection(&m_cs);
 }
 
+// 再生停止・曲切替時に呼ぶ。リングバッファ・ノート状態・履歴を全クリアする。
+// m_cs を TryEnterCriticalSection でポーリング取得しているのは、
+// 再生スレッドが FeedPCM で長時間 m_cs を保持している間もデッドロックしないため。
+// 最大200ms(200*1ms)待ってロックを諦める。
 void CPianoRoll::ResetPlaybackState()
 {
     InterlockedExchange(&m_jobPending, 0);
@@ -818,6 +823,9 @@ double CPianoRoll::ReadMonoSample(const uint8_t* sp, int bits)
     }
 }
 
+// Goertzel 係数と各窓関数をサンプルレートに合わせて計算/再計算する。
+// サンプルレートが変化しなければキャッシュを流用するため低コスト。
+// FeedPCM の EnterCriticalSection 内から呼ばれる。
 void CPianoRoll::EnsureAnalysisTables(int sampleRate)
 {
     if (sampleRate < 8000) sampleRate = 44100;
@@ -858,6 +866,11 @@ void CPianoRoll::EnsureAnalysisTables(int sampleRate)
     m_bassAnalysisBuf.assign(WIN_BASS, 0.0);
 }
 
+// Goertzel アルゴリズムで単一周波数の振幅(magnitude)を計算する。
+// 係数 coefficient = 2*cos(2π*f/sr) は EnsureAnalysisTables で事前計算済み。
+// window が非 null なら掛け算でサイドローブを抑制する(Hann, Blackman 等)。
+// 戻り値は numSamples で正規化した振幅(0.0〜)。FFT 全帯域ではなく対象周波数だけ
+// 計算するため 88 鍵 × O(N) の計算量で済む(FFT の O(N log N) より有利な用途)。
 double CPianoRoll::GoertzelMagnitude(const double* samples, int numSamples,
     double coefficient, const double* window)
 {
@@ -877,6 +890,9 @@ float CPianoRoll::ApplyDisplayScale(float rawAmp, int keyIndex)
     return ScaleGoertzelAmp(rawAmp, keyIndex + KEY_OFFSET, DETECT_KEYS);
 }
 
+// 再生スレッドからデコード済み PCM を受け取り、モノラル double に変換して
+// リングバッファへ書き込む。m_cs で保護されているためスレッドセーフ。
+// ResetPlaybackState 後は m_feedEnabled=true に戻すまで書き込まれない。
 void CPianoRoll::FeedPCM(const void* pData, int frames,
     int sampleRate, int bits, int channels, int playbackDelaySamples)
 {
@@ -910,6 +926,11 @@ void CPianoRoll::FeedPCM(const void* pData, int frames,
     LeaveCriticalSection(&m_cs);
 }
 
+// bufwav3 の再生バッファ直後から呼ばれる。mono は既にモノラル変換済み。
+// ANALYZE_MIN_MS(4ms)のスロットリングでワーカーを過負荷から守る。
+// ジョブバッファ(m_jobMono)へコピーして SetEvent でワーカーを起こす。
+// 前のジョブが完了していない場合も InterlockedExchange で上書きする
+// (古い分析より最新フレームを優先する)。
 void CPianoRoll::AnalyzePlayCursorMono(const double* mono, int frameCount, int sampleRate)
 {
     if (!mono || frameCount < WIN_LOW || sampleRate < 8000) return;
@@ -979,6 +1000,11 @@ void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
         m_meterDirty = true;
 }
 
+// 窓掛け済みバッファから Goertzel 解析を実行し m_rawStrengths を更新する。
+// 低音(C0〜B3): WIN_LOW(8192) 窓 + Hann、高音(C4〜): WIN_HIGH(4096) 窓 + Blackman、
+// オンセット: WIN_ONSET(1024) 窓 + Hann で独立解析する。
+// AVX2 バッチ実装(PianoRollGoertzelBatchAvx2)を使用。
+// 最後に IIR 平滑を適用して m_smoothedStrengths を更新し UpdateNoteStates を呼ぶ。
 void CPianoRoll::RunGoertzelFromBuffer(const double* winLow8192,
     const double* winBass, int bassWinLen)
 {
@@ -1049,6 +1075,15 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow8192,
     PushFrame(false);
 }
 
+// 最新の Goertzel 振幅値(m_rawStrengths / m_smoothedStrengths)をもとに
+// 88 鍵それぞれのノートオン/オフ・強度・セグメント ID を更新する。
+//
+// 処理の流れ:
+//   1. 各帯域を NormalizeBandPeak で正規化(帯域内最大を DISPLAY_PEAK_CAP でキャップ)
+//   2. バス/ミッド/トレブル別のファンダメンタルピック → SuppressFalseSubharmonicPicks
+//   3. ストリングス補完ピック(平滑強度の局所最大値)
+//   4. RETRIGGER_RATIO 未満への落ち込みで再トリガー → segmentId をインクリメント
+//   5. ATTACK_FRAMES / RELEASE_FRAMES で包絡的な ON/OFF 判定
 void CPianoRoll::UpdateNoteStates()
 {
     using namespace Cfg;
@@ -1411,6 +1446,14 @@ namespace PianoExpr {
     static constexpr uint8_t ALL_MASK = ACCENT | SCOOP | VIBRATO | SLIDE | FALL | SUSTAIN;
 }
 
+// UpdateNoteStates の直後に呼ばれ、各アクティブノートへ表現記号フラグを付与する。
+// 検出ロジック概要:
+//   SCOOP   … 直前フレームで隣のキーがアクティブだった(音程が下から上がってきた)
+//   SLIDE   … 上下隣キーからの遷移
+//   FALL    … 上隣キーからの遷移(下降消音)
+//   ACCENT  … ノートオン直後(age <= 3)に強度が急上昇
+//   SUSTAIN … 12フレーム以上継続(持続音・ストリングス)
+//   VIBRATO … 強度の周期的変動を VIB_HIST_LEN 分の自己相関で検出
 void CPianoRoll::DetectExpressions()
 {
     for (int i = 1; i < KEY_COUNT; ++i) {
@@ -2570,6 +2613,10 @@ void CPianoRoll::DrawPlayheadRow(CDC& dc, int width, int rollH, const NoteFrame&
     DrawHistoryRowAt(dc, width, yTop, yBot, live);
 }
 
+// 1フレーム分だけロールバッファをスクロールアップして最新行を下端に描く。
+// スクロール処理: ロールバッファ全体を scrollPx 分 BitBlt で上へずらし、
+// 空いた下端に DrawPlayheadRow で最新フレームを描画する。
+// ComposeRollBuffer(全再描画)と異なり毎フレームの差分更新のみで済む。
 bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const NoteFrame* hist,
     int pendingCount, const NoteFrame& live)
 {
@@ -2654,6 +2701,8 @@ DWORD WINAPI CPianoRoll::AnalysisWorkerThreadEntry(LPVOID param)
     return static_cast<CPianoRoll*>(param)->AnalysisWorkerLoop();
 }
 
+// 分析ワーカースレッドを起動する。OnInitDialog から呼ばれる。
+// イベント(m_hAnalysisWake)で眠り、AnalyzePlayCursorMono が SetEvent で起こす。
 void CPianoRoll::StartAnalysisWorker()
 {
     if (m_hAnalysisThread) return;
@@ -2669,6 +2718,8 @@ void CPianoRoll::StartAnalysisWorker()
     }
 }
 
+// m_workerStop フラグを立てて SetEvent でワーカーを起こし、終了を最大10秒待つ。
+// デストラクタと DetachForDestroy から呼ばれる。
 void CPianoRoll::StopAnalysisWorker()
 {
     if (!m_hAnalysisThread && !m_hAnalysisWake) return;
@@ -2686,6 +2737,10 @@ void CPianoRoll::StopAnalysisWorker()
     }
 }
 
+// ワーカースレッドのメインループ。イベント待ちで眠り、起こされたら
+// m_jobPending を CAS で取得して ProcessAnalysisJob を実行する。
+// 解析完了後、::IsWindow チェックを挟んでから PostMessage するのは
+// ウィンドウが既に破棄されている場合の HWND 再利用バグを防ぐため。
 DWORD CPianoRoll::AnalysisWorkerLoop()
 {
     for (;;) {
@@ -2707,6 +2762,10 @@ DWORD CPianoRoll::AnalysisWorkerLoop()
     return 0;
 }
 
+// ジョブバッファをローカルにコピーしてから m_jobCs を解放し、
+// 長い Goertzel 演算中はジョブバッファを解放しておく(再生スレッドが
+// 次のジョブを書き込める状態を保つ)。
+// 結果は m_goertzelRawScratch へ書き込み、OnAnalysisDone で参照される。
 bool CPianoRoll::ProcessAnalysisJob()
 {
     int frameCount = 0;
