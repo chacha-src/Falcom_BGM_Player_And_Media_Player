@@ -738,6 +738,9 @@ protected:
     afx_msg void OnPaint();
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg LRESULT OnPostOpaquePaint(WPARAM, LPARAM);
+    // リストが WS_EX_ACCEPTFILES を持つ場合に、リスト上へのファイルドロップを
+    // 親ダイアログへ転送する(リストが親を覆い、親がドロップを受け取れない問題への対処)。
+    afx_msg void OnDropFiles(HDROP hDropInfo);
 
     DECLARE_MESSAGE_MAP()
 
@@ -1073,7 +1076,10 @@ do {                                                                            
 // カスタムダイアログクラス (CDialog派生)
 // CCustomDialog
 // ============================================================================
-class CCustomDialog : public CDialog
+// 基底は CDialogEx。CDialog 派生だと非アクティブ時に DWM アクリル背景が落ちる
+// (EQ/ピアノロール等 CDialogEx 派生窓だけが非アクティブでもアクリルを維持する)。
+// この基底を CDialogEx にすることで、派生する全ぼかし窓を一括で維持側に揃える。
+class CCustomDialog : public CDialogEx
 {
     DECLARE_DYNAMIC(CCustomDialog)
 public:

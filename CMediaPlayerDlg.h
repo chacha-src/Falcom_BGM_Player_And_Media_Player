@@ -56,7 +56,10 @@ protected:
 /////////////////////////////////////////////////////////////////////////////
 // CMediaPlayerDlg : メディアプレイヤーモード画面(ファサード)
 /////////////////////////////////////////////////////////////////////////////
-class CMediaPlayerDlg : public CCustomBlurDialogBase
+// 基底は CCustomBlurDialogExBase(CDialogEx派生)。
+// CDialog派生の CCustomBlurDialogBase だと非アクティブ時に DWM アクリルが落ちる
+// (EQ/ピアノロール等の動作する窓と同じ CDialogEx 系に合わせる)。
+class CMediaPlayerDlg : public CCustomBlurDialogExBase
 {
 	DECLARE_DYNAMIC(CMediaPlayerDlg)
 public:
@@ -74,6 +77,9 @@ public:
 	void EnforceFalcomHidden();  // メディアモード中に裏画面が出ていたら隠す(監視)
 	void ReloadPlaylistCombo();  // pl のプレイリスト一覧コンボをミラー
 	void SyncSelectionToPlaylist(); // mp リストの選択を pl リストへ反映
+	// 選択行の並べ替え(mode: 0=一番上 / 1=上へ / 2=下へ / 3=一番下)。
+	// pl->pc を直接並べ替え、再生インデックス(plcnt/pnt/pnt1)と選択を追従させる。
+	void MoveSelected(int mode);
 
 	// ---- 情報表示スタティック(バナー GDI に隠れているものは SW_HIDE してある) ----
 	CCustomStatic m_title, m_artist, m_album, m_lrc, m_lrc2, m_lrc3, m_os, m_cpu, m_os3, m_time, m_volval, m_vollabel;
@@ -171,6 +177,7 @@ protected:
 
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
+	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 	afx_msg void OnSize(UINT nType, int cx, int cy);
@@ -229,6 +236,7 @@ protected:
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg LRESULT OnInfoScrollTick(WPARAM wParam, LPARAM lParam);
+	afx_msg BOOL OnNcActivate(BOOL bActive);
 	DECLARE_MESSAGE_MAP()
 };
 

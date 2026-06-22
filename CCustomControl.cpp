@@ -349,12 +349,15 @@ static BOOL CCC_BlitToRectChromaNoFlickerCached(HDC hdcDest, const RECT& rect, H
 
     CCC_InitBufferedPaintTransparent(hBP, destW, destH);
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    ::GdiAlphaBlend(hdcBuf, 0, 0, destW, destH, cache.hdcDib, 0, 0, destW, destH, bf);
+    ::GdiAlphaBlend(hdcBuf, rect.left, rect.top, destW, destH, cache.hdcDib, 0, 0, destW, destH, bf);
     ::EndBufferedPaint(hBP, TRUE);
     return TRUE;
 }
 
 // 画面 FillRect なし。バッファを毎回クロマキーで全面初期化してからアルファ合成（残像防止）
+// BeginBufferedPaint の buffer DC はクライアント座標系を共有するため、
+// GdiAlphaBlend の描画先は (0,0) でなく (rect.left, rect.top) でなければならない。
+// (0,0) に描くと EndBufferedPaint が prcTarget でクリップした際に座標がずれる。
 static BOOL CCC_BlitToRectChromaNoFlicker(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
     int destW, int destH, int srcW, int srcH, COLORREF clrKey, BOOL bStretch)
 {
@@ -389,7 +392,8 @@ static BOOL CCC_BlitToRectChromaNoFlicker(HDC hdcDest, const RECT& rect, HDC hdc
 
     CCC_InitBufferedPaintTransparent(hBP, destW, destH);
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    ::GdiAlphaBlend(hdcBuf, 0, 0, destW, destH, dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
+    // buffer DC はクライアント座標系なので rect の左上から描画する
+    ::GdiAlphaBlend(hdcBuf, rect.left, rect.top, destW, destH, dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
     ::EndBufferedPaint(hBP, TRUE);
 
     ::SelectObject(dcDib.GetSafeHdc(), hOld);
@@ -4379,9 +4383,24 @@ BEGIN_MESSAGE_MAP(CCustomListCtrl, CListCtrlA)
     ON_WM_ERASEBKGND()
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_MESSAGE(CCC_WM_POST_OPAQUE_PAINT, OnPostOpaquePaint)
+    ON_WM_DROPFILES()
 END_MESSAGE_MAP()
 
 static const UINT_PTR kListScrollOpaqueTimerId = 4108;
+
+// リスト上にドロップされたファイルを親ダイアログへ転送する。
+// (プレイリストではリストがダイアログの大部分を覆っているため、ダイアログだけが
+//  WS_EX_ACCEPTFILES を持っていてもリスト上へのドロップは届かない。DragAcceptFiles で
+//  リスト自身を登録し、ここで受け取って親の OnDropFiles へ中継する。)
+void CCustomListCtrl::OnDropFiles(HDROP hDropInfo)
+{
+    CWnd* pParent = GetParent();
+    if (pParent && pParent->GetSafeHwnd()) {
+        pParent->SendMessage(WM_DROPFILES, (WPARAM)hDropInfo, 0);
+        return;   // DragFinish は転送先(親の OnDropFiles)側で完結させる
+    }
+    CListCtrlA::OnDropFiles(hDropInfo);
+}
 
 CCustomListCtrl::CCustomListCtrl()
     : m_bAutoDelete(FALSE), m_nHotItem(-1), m_bAeroMode(FALSE)
@@ -5452,12 +5471,12 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
     if (pF) memDC.SelectObject(pF);
     CCC_DrawGroupBoxFrame(memDC, CRect(0, 0, rw, rh), t, TRUE);
 
-    CSize ts = t.IsEmpty() ? CSize(0, 0) : memDC.GetTextExtent(t);
-    const int nT = ts.cy > 0 ? ts.cy / 2 : 8;
-    const int inset = 12;
-    CRect inner(inset, nT + 2, rw - inset, rh - inset);
+    // memDC は「クロマキー地に枠・デコ・ラベルを描画」したもの。
+    // 内側を除外せず全面をクロマ合成すると、クロマ部分=透過(アクリル)・
+    // 枠ピクセル=不透明 となり、内部透過と下辺を含む枠が一度に正しく出る。
+    // (内側除外方式だと内部が未処理=白のまま残り、下辺も欠ける)
     CCC_BlitGroupBoxFrameChroma(pDC->GetSafeHdc(), rect.left, rect.top, rw, rh,
-        memDC.GetSafeHdc(), CCC_AERO_CHROMA_KEY, inner);
+        memDC.GetSafeHdc(), CCC_AERO_CHROMA_KEY, CRect(0, 0, 0, 0));
     memDC.SelectObject(pOld);
 }
 
@@ -5466,7 +5485,7 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomDialog, CDialog)
 
-BEGIN_MESSAGE_MAP(CCustomDialog, CDialog)
+BEGIN_MESSAGE_MAP(CCustomDialog, CDialogEx)
     ON_WM_CTLCOLOR()
     ON_WM_ERASEBKGND()
     ON_WM_PAINT()
@@ -5479,7 +5498,7 @@ CCustomDialog::CCustomDialog() : m_bAeroEnabled(FALSE)
     m_brNull.CreateStockObject(NULL_BRUSH);
 }
 
-CCustomDialog::CCustomDialog(UINT n, CWnd* p) : CDialog(n, p), m_bAeroEnabled(FALSE)
+CCustomDialog::CCustomDialog(UINT n, CWnd* p) : CDialogEx(n, p), m_bAeroEnabled(FALSE)
 {
     m_brDialog.CreateSolidBrush(COLOR_DIALOG_BG);
     m_brNull.CreateStockObject(NULL_BRUSH);
@@ -5507,7 +5526,7 @@ void CCustomDialog::EnableAero(BOOL b)
 
 BOOL CCustomDialog::OnInitDialog()
 {
-    BOOL r = CDialog::OnInitDialog();
+    BOOL r = CDialogEx::OnInitDialog();
     SubclassChildControls();
     return r;
 }
@@ -5526,7 +5545,7 @@ void CCustomDialog::SubclassChildControls()
 HBRUSH CCustomDialog::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC)
 {
     HBRUSH h = DlgOnCtlColor(pDC, pWnd, nC, m_brDialog, m_bAeroEnabled);
-    return h ? h : CDialog::OnCtlColor(pDC, pWnd, nC);
+    return h ? h : CDialogEx::OnCtlColor(pDC, pWnd, nC);
 }
 
 BOOL CCustomDialog::OnEraseBkgnd(CDC* pDC)
@@ -5539,7 +5558,7 @@ void CCustomDialog::OnPaint()
     if (m_bAeroEnabled)
         DlgOnPaintAero(this, m_bAeroEnabled);
     else
-        CDialog::OnPaint();
+        CDialogEx::OnPaint();
 }
 
 void CCC_SendGroupBoxesToBack(HWND hDlg)

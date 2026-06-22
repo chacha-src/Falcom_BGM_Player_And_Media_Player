@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -663,9 +663,9 @@ BEGIN
     CONTROL         "最小化連動",IDC_MP_MINI,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,68,300,60,9
     CONTROL         "mp3途中保存",IDC_MP_SAVEMP3,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,130,300,66,9
     CONTROL         "DShow途中保存",IDC_MP_SAVEDS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,198,300,72,9
-    CONTROL         "情報",IDC_MP_GRP_INFO,"Button",BS_GROUPBOX | WS_CLIPSIBLINGS,2,58,476,68
-    CONTROL         "サウンド調整",IDC_MP_GRP_SND,"Button",BS_GROUPBOX | WS_CLIPSIBLINGS,2,164,476,26
-    CONTROL         "プレイリスト",IDC_MP_GRP_PL,"Button",BS_GROUPBOX | WS_CLIPSIBLINGS,2,190,476,124
+    GROUPBOX        "情報",IDC_MP_GRP_INFO,2,58,476,68,WS_CLIPSIBLINGS
+    GROUPBOX        "サウンド調整",IDC_MP_GRP_SND,2,164,476,26,WS_CLIPSIBLINGS
+    GROUPBOX        "プレイリスト",IDC_MP_GRP_PL,2,190,476,124,WS_CLIPSIBLINGS
     LTEXT           "主音量",IDC_MP_VOL_L,326,150,28,8
     CONTROL         "",IDC_MP_VOL,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,344,148,90,12
     RTEXT           "100",IDC_MP_VOLVAL,436,150,38,8
@@ -974,7 +974,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,415
+ FILEVERSION 0,8,7,417
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -992,10 +992,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.06.19"
-            VALUE "FileVersion", "0.8.7.415"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.06.23"
+            VALUE "FileVersion", "0.8.7.417"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.06.19"
+            VALUE "LegalCopyright", "Copyright (C) 2026.06.23"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

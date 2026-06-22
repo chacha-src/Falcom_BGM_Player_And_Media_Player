@@ -126,10 +126,10 @@ HBRUSH CModeSelectDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 /////////////////////////////////////////////////////////////////////////////
 // CMediaPlayerDlg
 /////////////////////////////////////////////////////////////////////////////
-IMPLEMENT_DYNAMIC(CMediaPlayerDlg, CCustomBlurDialogBase)
+IMPLEMENT_DYNAMIC(CMediaPlayerDlg, CCustomBlurDialogExBase)
 
 CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
-	: CCustomBlurDialogBase(CMediaPlayerDlg::IDD, pParent)
+	: CCustomBlurDialogExBase(CMediaPlayerDlg::IDD, pParent)
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 	m_lastCount = -1;
@@ -158,7 +158,7 @@ CMediaPlayerDlg::~CMediaPlayerDlg()
 
 void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
 {
-	CCustomBlurDialogBase::DoDataExchange(pDX);
+	CCustomBlurDialogExBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_MP_TITLE, m_title);
 	DDX_Control(pDX, IDC_MP_ARTIST, m_artist);
 	DDX_Control(pDX, IDC_MP_ALBUM, m_album);
@@ -220,7 +220,7 @@ void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_MP_LIST, m_list);
 }
 
-BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogBase)
+BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_WM_SIZE()
 	ON_WM_GETMINMAXINFO()
 	ON_WM_TIMER()
@@ -273,11 +273,12 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogBase)
 	ON_NOTIFY(LVN_KEYDOWN, IDC_MP_LIST, &CMediaPlayerDlg::OnKeydownList)
 	ON_NOTIFY(LVN_BEGINDRAG, IDC_MP_LIST, &CMediaPlayerDlg::OnBeginDragList)
 	ON_MESSAGE(WM_MP_INFO_SCROLL, &CMediaPlayerDlg::OnInfoScrollTick)
+	ON_WM_NCACTIVATE()
 END_MESSAGE_MAP()
 
 int CMediaPlayerDlg::Create(CWnd* pParent)
 {
-	BOOL bret = CCustomBlurDialogBase::Create(CMediaPlayerDlg::IDD, pParent);
+	BOOL bret = CCustomBlurDialogExBase::Create(CMediaPlayerDlg::IDD, pParent);
 	if (bret == TRUE) {
 		ShowWindow(SW_SHOW);
 		// 表示が確定してから ♪ 行へ確実にスクロール/選択する。
@@ -290,7 +291,7 @@ int CMediaPlayerDlg::Create(CWnd* pParent)
 
 BOOL CMediaPlayerDlg::OnInitDialog()
 {
-	CCustomBlurDialogBase::OnInitDialog();
+	CCustomBlurDialogExBase::OnInitDialog();
 
 	// 子コントロールを親の再描画で塗り潰さない(スタティック消失・リスト欠け・ちらつき防止)
 	ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
@@ -537,6 +538,16 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	return TRUE;
 }
 
+// og 所有のまま(EQ/ピアノロールと同じアクリルグループ)にして非アクティブでも
+// アクリルを維持しつつ、WS_EX_APPWINDOW でタスクバーに単独ボタンを出す。
+BOOL CMediaPlayerDlg::PreCreateWindow(CREATESTRUCT& cs)
+{
+	if (!CCustomBlurDialogExBase::PreCreateWindow(cs))
+		return FALSE;
+	cs.dwExStyle |= WS_EX_APPWINDOW;
+	return TRUE;
+}
+
 BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (CCC_ProcessInwomanHotkey(pMsg, this))
@@ -547,7 +558,7 @@ BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 			return TRUE;
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
-	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
+	return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
 }
 
 BOOL CMediaPlayerDlg::DestroyWindow()
@@ -562,7 +573,7 @@ BOOL CMediaPlayerDlg::DestroyWindow()
 	KillTimer(4);
 	if (m_bmpBanner.GetSafeHandle()) m_bmpBanner.DeleteObject();
 	if (m_memBanner.GetSafeHdc()) m_memBanner.DeleteDC();
-	return CCustomBlurDialogBase::DestroyWindow();
+	return CCustomBlurDialogExBase::DestroyWindow();
 }
 
 // 1コントロールを移動するヘルパ
@@ -1093,12 +1104,12 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		}
 		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
-	CCustomBlurDialogBase::OnTimer(nIDEvent);
+	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
 
 void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 {
-	CCustomBlurDialogBase::OnSize(nType, cx, cy);
+	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
 	if (nType != SIZE_MINIMIZED && ::IsWindow(m_hWnd)) {
 		DoLayout();
 		// リサイズ中はカスタムコントロール(ボタン/スライダー/リストビュー)が
@@ -1115,7 +1126,7 @@ void CMediaPlayerDlg::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
 {
 	lpMMI->ptMinTrackSize.x = (int)(620 * hD2);
 	lpMMI->ptMinTrackSize.y = (int)(560 * hD2);
-	CCustomBlurDialogBase::OnGetMinMaxInfo(lpMMI);
+	CCustomBlurDialogExBase::OnGetMinMaxInfo(lpMMI);
 }
 
 // og のオフスクリーン合成面(スペアナ+ジャケ+時間)を帯に描画(同一UIスレッドなので安全)
@@ -1198,6 +1209,21 @@ LRESULT CMediaPlayerDlg::OnInfoScrollTick(WPARAM, LPARAM)
 		InvalidateRect(&m_infoPanelRect, FALSE);
 	}
 	return 0;
+}
+
+// 非アクティブ化でアクリル背景が落ちる対策。
+// mp はタスクバー表示のためトップレベル化(オーナー解除)されており、
+// EQ/ピアノロール等の og 所有ウィンドウと違い、非アクティブ時に DWM の
+// アクリルバックドロップが維持されない。活性が変わるたびに backdrop 属性と
+// フレーム拡張を再適用して、非アクティブでもアクリルを保つ。
+BOOL CMediaPlayerDlg::OnNcActivate(BOOL bActive)
+{
+	BOOL r = CCustomBlurDialogExBase::OnNcActivate(bActive);
+#if CCUSTOM_AERO_SUPPORT
+	if (savedata.aero == 1 && CCC_IsWin11())
+		CCC_RefreshDialogDwmBlur(m_hWnd);   // backdrop=acrylic + フレーム拡張を再適用
+#endif
+	return r;
 }
 
 void CMediaPlayerDlg::ResetInfoScroll()
@@ -1348,7 +1374,8 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 #if CCUSTOM_AERO_SUPPORT
 	aero = (savedata.aero == 1 && CCC_IsWin11());
 #endif
-	const COLORREF kBg = RGB(0, 0, 0);   // バナーと同じ黒(アクリル時は黒=ガラス抜き)
+	// アクリル時は黒 = クロマキー(ガラス透過)。非アクリル時も黒背景でバナーと統一。
+	const COLORREF kBg = RGB(0, 0, 0);
 
 	// 更新領域(クリップ)に重なるパネルだけ再構築する。バナーは毎フレーム無効化
 	// されるが、その際クリップはバナー矩形のみなので、ここでの重い描画(画像縮小/
@@ -1504,18 +1531,32 @@ void CMediaPlayerDlg::OnPaint()
 {
 	extern void COgg_ClearGdiPaintPending();
 #if CCUSTOM_AERO_SUPPORT
-	// アクリル(Win11): 基底と同じ方式で隙間のみアクリル背景を描き、バナーは上から Blit
+	// アクリル(Win11) パス
+	// CCC_PaintDialogAeroGaps は SelectClipRgn を書き換えるため SaveDC/RestoreDC で挟む。
+	// preserve=&m_bannerRect でバナーを保護(毎フレームのクリアを防いで点滅なし)。
+	// グループボックスは CCC_SelectClipExcludeChildren で除外されて白くなるため、
+	// RestoreDC 後に個別で CCC_ClearRectChroma を呼んで明示的にクロマクリアする。
 	if (savedata.aero == 1 && CCC_IsWin11()) {
 		CPaintDC dc(this);
-		const RECT preserve = m_bannerRect;
-		CCC_PaintDialogAeroGaps(dc, this, &preserve);
-		BlitVisualizer(&dc);
+		// 更新領域がバナーに重なる時だけバナーを Blit する。
+		// info パネルのスクロール tick(30fps)では clip=infoPanelRect となり、
+		// アクリル時に重い BlitVisualizer(毎回 DIB 生成+バッファペイント)を回避する。
+		CRect clipBox; dc.GetClipBox(&clipBox);
+		bool hitBanner = !m_bannerRect.IsRectEmpty() && CRect().IntersectRect(&clipBox, &m_bannerRect);
+		{
+			int saved = dc.SaveDC();
+			CCC_PaintDialogAeroGaps(dc, this, &m_bannerRect);
+			dc.RestoreDC(saved);
+		}
+		if (hitBanner) BlitVisualizer(&dc);
 		DrawSidePanels(&dc);
 		COgg_ClearGdiPaintPending();
 		return;
 	}
 #endif
 	CPaintDC pdc(this);
+	CRect clipBox; pdc.GetClipBox(&clipBox);
+	bool hitBanner = !m_bannerRect.IsRectEmpty() && CRect().IntersectRect(&clipBox, &m_bannerRect);
 	// 非アクリル時は背景をベース色で塗る。バナー/サイドパネルは直後の Blit/GDI で
 	// 完全に上書きするため除外する（先に塗ると一瞬フラッシュしてちらつく）。
 	{
@@ -1528,14 +1569,44 @@ void CMediaPlayerDlg::OnPaint()
 		pdc.FillRect(&rcc, &bg);
 		pdc.RestoreDC(saved);
 	}
-	BlitVisualizer(&pdc);
+	if (hitBanner) BlitVisualizer(&pdc);
 	DrawSidePanels(&pdc);
 	COgg_ClearGdiPaintPending();
 }
 
 HBRUSH CMediaPlayerDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 {
-	HBRUSH hbr = CCustomBlurDialogBase::OnCtlColor(pDC, pWnd, nCtlColor);
+	HBRUSH hbr = CCustomBlurDialogExBase::OnCtlColor(pDC, pWnd, nCtlColor);
+
+#if CCUSTOM_AERO_SUPPORT
+	if (savedata.aero == 1 && CCC_IsWin11()) {
+		// アクリル/Win11: リスト・エディットを暗色で統一(ベースクラスの薄ピンクを上書き)。
+		// CTLCOLOR_STATIC/BTN はベースクラスが NULL_BRUSH+黒テキストを返す(そのまま使う)。
+		static CBrush s_brListAero(RGB(25, 25, 30));
+		static CBrush s_brEditAero(RGB(22, 22, 28));
+		if (nCtlColor == CTLCOLOR_LISTBOX) {
+			pDC->SetBkColor(RGB(25, 25, 30));
+			pDC->SetTextColor(RGB(200, 200, 210));
+			return (HBRUSH)s_brListAero.GetSafeHandle();
+		}
+		if (nCtlColor == CTLCOLOR_EDIT) {
+			pDC->SetBkColor(RGB(22, 22, 28));
+			pDC->SetTextColor(RGB(200, 200, 210));
+			return (HBRUSH)s_brEditAero.GetSafeHandle();
+		}
+		// CTLCOLOR_STATIC / CTLCOLOR_BTN (グループボックス含む):
+		// ベースクラスは黒テキスト+NULL_BRUSH だが、アクリル越しでは見えない場合がある。
+		// 白テキストに変更(ガラス上でどんな背景でも視認可)。
+		if (nCtlColor == CTLCOLOR_STATIC || nCtlColor == CTLCOLOR_BTN) {
+			pDC->SetBkMode(TRANSPARENT);
+			pDC->SetTextColor(RGB(230, 230, 230));
+			return (HBRUSH)GetStockObject(NULL_BRUSH);
+		}
+		return hbr;
+	}
+#endif
+
+	// 非アクリル: ダイアログ背景色で統一
 	if (savedata.aero != 1) {
 		if (m_brDlg.GetSafeHandle() == NULL)
 			m_brDlg.CreateSolidBrush(COLOR_DIALOG_BG);
@@ -1556,14 +1627,14 @@ void CMediaPlayerDlg::OnDropFiles(HDROP hDropInfo)
 	if (pl)
 		pl->OnDropFiles(hDropInfo);
 	RefreshList(TRUE);
-	CCustomBlurDialogBase::OnDropFiles(hDropInfo);
+	CCustomBlurDialogExBase::OnDropFiles(hDropInfo);
 }
 
 void CMediaPlayerDlg::OnDestroy()
 {
 	SavePos();
 	KillTimer(1);
-	CCustomBlurDialogBase::OnDestroy();
+	CCustomBlurDialogExBase::OnDestroy();
 }
 
 void CMediaPlayerDlg::OnClose()
@@ -1580,7 +1651,7 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	if (r && r->GetSafeHwnd() == m_seek.GetSafeHwnd()) {
 		if (nSBCode == SB_THUMBTRACK) {
 			m_seekDragging = 1;
-			CCustomBlurDialogBase::OnHScroll(nSBCode, nPos, pScrollBar);
+			CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
 			return;
 		}
 		if (nSBCode == SB_THUMBPOSITION || nSBCode == SB_ENDSCROLL ||
@@ -1609,7 +1680,7 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		else if (h == m_tempo.GetSafeHwnd()) og->m_tempo_sl.SetPos(m_tempo.GetPos());
 		else if (h == m_pitch.GetSafeHwnd()) og->m_pitch_sl.SetPos(m_pitch.GetPos());
 	}
-	CCustomBlurDialogBase::OnHScroll(nSBCode, nPos, pScrollBar);
+	CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
 }
 
 // ----- プレイリスト操作(og/pl 流用) -----
@@ -1814,36 +1885,110 @@ void CMediaPlayerDlg::OnPlDelete()
 	RefreshList(TRUE);
 }
 
+// 選択行の並べ替え。mp リストの選択を基準に pl->pc を直接並べ替える。
+// 旧実装は pl->m_lc(裏側の隠しリスト)の選択状態に依存していたため、
+// 選択同期のズレや一番上/上ボタンの取り違え、OnSDOWN のヒープ範囲外書込みで
+// 「位置がおかしい / 行が消える / 以降の曲が消える」不具合が発生していた。
+// ここでは配列を直接操作し、再生インデックスと選択を確実に追従させる。
+void CMediaPlayerDlg::MoveSelected(int mode)
+{
+	if (!pl || pl->pc == NULL || pl->playcnt <= 0) return;
+	if (!::IsWindow(m_list.GetSafeHwnd())) return;
+	const int n = pl->playcnt;
+
+	// mp リストの選択フラグを取得
+	char* sel = (char*)calloc((size_t)n, 1);
+	if (!sel) return;
+	int selCount = 0;
+	int k = -1;
+	while ((k = m_list.GetNextItem(k, LVNI_SELECTED)) != -1) {
+		if (k >= 0 && k < n) { sel[k] = 1; selCount++; }
+	}
+	if (selCount == 0 || selCount == n) { free(sel); return; }  // 何もない/全選択は移動不要
+
+	// arr[新しい位置] = 元のインデックス
+	int* arr = (int*)malloc(sizeof(int) * (size_t)n);
+	if (!arr) { free(sel); return; }
+	int idx = 0;
+	if (mode == 0) {                       // 一番上
+		for (int i = 0; i < n; i++) if (sel[i]) arr[idx++] = i;
+		for (int i = 0; i < n; i++) if (!sel[i]) arr[idx++] = i;
+	} else if (mode == 3) {                // 一番下
+		for (int i = 0; i < n; i++) if (!sel[i]) arr[idx++] = i;
+		for (int i = 0; i < n; i++) if (sel[i]) arr[idx++] = i;
+	} else {
+		for (int i = 0; i < n; i++) arr[i] = i;
+		if (mode == 1) {                   // 上へ1つ(選択ブロックは結合したまま)
+			for (int i = 1; i < n; i++)
+				if (sel[arr[i]] && !sel[arr[i - 1]]) { int t = arr[i]; arr[i] = arr[i - 1]; arr[i - 1] = t; }
+		} else {                           // 下へ1つ
+			for (int i = n - 2; i >= 0; i--)
+				if (sel[arr[i]] && !sel[arr[i + 1]]) { int t = arr[i]; arr[i] = arr[i + 1]; arr[i + 1] = t; }
+		}
+	}
+
+	BOOL changed = FALSE;
+	for (int i = 0; i < n; i++) if (arr[i] != i) { changed = TRUE; break; }
+	if (!changed) { free(arr); free(sel); return; }
+
+	// 並べ替え後の pc を作成し、元→新の位置写像 pos を作る
+	playlistdata0* np = (playlistdata0*)malloc(sizeof(playlistdata0) * (size_t)n);
+	int* pos = (int*)malloc(sizeof(int) * (size_t)n);
+	if (!np || !pos) { free(np); free(pos); free(arr); free(sel); return; }
+	for (int i = 0; i < n; i++) { np[i] = pl->pc[arr[i]]; pos[arr[i]] = i; }   // 再生中アイコン等もそのまま追従
+	memcpy(pl->pc, np, sizeof(playlistdata0) * (size_t)n);
+	free(np);
+
+	// 再生インデックスを追従
+	if (plcnt >= 0 && plcnt < n) plcnt = pos[plcnt];
+	if (pl->pnt >= 0 && pl->pnt < n) pl->pnt = pos[pl->pnt];
+	if (pl->pnt1 >= 0 && pl->pnt1 < n) pl->pnt1 = pos[pl->pnt1];
+
+	// 裏の pl->m_lc の選択も合わせておく(Falcom 画面との整合)
+	if (::IsWindow(pl->m_lc.GetSafeHwnd())) {
+		for (int i = 0; i < n; i++)
+			pl->m_lc.SetItemState(i, sel[arr[i]] ? LVIS_SELECTED : 0, LVIS_SELECTED);
+	}
+
+	pl->Save();
+	RefreshList(TRUE);
+
+	// mp リストの選択を移動後の行へ追従させる
+	int total = m_list.GetItemCount();
+	for (int i = total - 1; i >= 0; i--)
+		m_list.SetItemState(i, 0, LVIS_SELECTED | LVIS_FOCUSED);
+	int firstSel = -1;
+	for (int i = 0; i < n && i < total; i++) {
+		if (sel[arr[i]]) {
+			m_list.SetItemState(i, LVIS_SELECTED | (firstSel < 0 ? LVIS_FOCUSED : 0), LVIS_SELECTED | LVIS_FOCUSED);
+			if (firstSel < 0) firstSel = i;
+		}
+	}
+	if (firstSel >= 0) m_list.EnsureVisible(firstSel, FALSE);
+	// FollowPlayingRow が選択を奪わないように、再生行の追従基準を更新しておく
+	m_lastScroll = (pl->pnt >= 0 && pl->pnt < n) ? pl->pnt : firstSel;
+
+	free(pos); free(arr); free(sel);
+}
+
 void CMediaPlayerDlg::OnMoveTop()
 {
-	if (!pl) return;
-	SyncSelectionToPlaylist();
-	pl->OnSUP();
-	RefreshList(TRUE);
+	MoveSelected(0);
 }
 
 void CMediaPlayerDlg::OnMoveUp()
 {
-	if (!pl) return;
-	SyncSelectionToPlaylist();
-	pl->OnUP();
-	RefreshList(TRUE);
+	MoveSelected(1);
 }
 
 void CMediaPlayerDlg::OnMoveDown()
 {
-	if (!pl) return;
-	SyncSelectionToPlaylist();
-	pl->OnDOWN();
-	RefreshList(TRUE);
+	MoveSelected(2);
 }
 
 void CMediaPlayerDlg::OnMoveBottom()
 {
-	if (!pl) return;
-	SyncSelectionToPlaylist();
-	pl->OnSDOWN();
-	RefreshList(TRUE);
+	MoveSelected(3);
 }
 
 void CMediaPlayerDlg::OnItemDel()
@@ -2012,7 +2157,7 @@ void CMediaPlayerDlg::OnMouseMove(UINT nFlags, CPoint point)
 			ImageList_DragMove(point.x, point.y);
 		}
 	}
-	CCustomBlurDialogBase::OnMouseMove(nFlags, point);
+	CCustomBlurDialogExBase::OnMouseMove(nFlags, point);
 }
 
 void CMediaPlayerDlg::OnLButtonUp(UINT nFlags, CPoint point)
@@ -2045,7 +2190,7 @@ void CMediaPlayerDlg::OnLButtonUp(UINT nFlags, CPoint point)
 		}
 		m_dragSrc = -1;
 	}
-	CCustomBlurDialogBase::OnLButtonUp(nFlags, point);
+	CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -2072,14 +2217,13 @@ void EnterMediaPlayerMode()
 	savedata.playerMode = 1;
 
 	// メディアプレイヤー画面を生成・表示。
+	// オーナーは og のまま(EQ/ピアノロールと同じアクリルグループ)にして、
+	// 非アクティブ時もアクリルが維持されるようにする。トップレベル化(オーナー解除)は
+	// 孤立窓となり非アクティブでアクリルが落ちるため行わない。タスクバー単独表示は
+	// PreCreateWindow の WS_EX_APPWINDOW で確保する。
 	mp = new CMediaPlayerDlg;
 	mp->Create(og);
-	// 注意: オーナーが非表示の og のままだと DWM のアクリル背景が合成されないため、
-	// オーナーを解除してトップレベル化し、アクリルを再適用する。
 	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
-		::SetWindowLongPtr(mp->m_hWnd, GWLP_HWNDPARENT, 0);
-		::SetWindowPos(mp->m_hWnd, NULL, 0, 0, 0, 0,
-			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 #if CCUSTOM_AERO_SUPPORT
 		if (savedata.aero == 1)
 			mp->RefreshAeroMode();

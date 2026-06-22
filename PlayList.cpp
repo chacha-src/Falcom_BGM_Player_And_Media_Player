@@ -389,6 +389,9 @@ BOOL CPlayList::OnInitDialog()
 	il.Add(::AfxGetApp()->LoadIcon(IDI_ICON2)); 
 	il.Add(::AfxGetApp()->LoadIcon(IDI_ICON3)); 
 	m_lc.SetImageList(&il,LVSIL_SMALL);
+	// リストがダイアログの大部分を覆うため、リスト自身もファイルドロップを受け付ける。
+	// 受け取ったドロップは CCustomListCtrl::OnDropFiles が親(本ダイアログ)へ中継する。
+	m_lc.DragAcceptFiles(TRUE);
 	m_lc.ModifyStyle ( 0, LVS_REPORT );
 	m_lc.InsertColumn ( 0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, 200, 0 );
 	m_lc.InsertColumn ( 1, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, 50, 0 );
@@ -823,7 +826,7 @@ void CPlayList::OnSDOWN()
 		for(int j=i-1;j>0;j--){
 			if((m_lc.GetItemState(j-1,LVIS_SELECTED)&LVIS_SELECTED)&&!(m_lc.GetItemState(j,LVIS_SELECTED)&LVIS_SELECTED)){
 			playlistdata0 ppp;
-			pc[j].icon=pc[j+1].icon=1;
+			pc[j].icon=pc[j-1].icon=1;   // 旧 pc[j+1] は j=playcnt-1 のとき pc[playcnt] へのヒープ範囲外書込みで破壊の原因
 			memcpy(&ppp,&pc[j-1],sizeof(playlistdata0));
 			memcpy(&pc[j-1],&pc[j],sizeof(playlistdata0));
 			memcpy(&pc[j],&ppp,sizeof(playlistdata0));
