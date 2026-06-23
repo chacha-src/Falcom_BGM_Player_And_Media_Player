@@ -30,7 +30,7 @@
 ### メディアプレイヤー画面モード搭載
 普通のメディアプレイヤーのようなモード搭載。
 
-![ファルコムプレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git5.PNG)
+![ファルコムプレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git6.png)
 
 ![メディアプレイヤー画面](https://ppp.oohara.jp/img/mp_2.png)
 
@@ -138,7 +138,7 @@ A simplified piano roll has been implemented.
 ### Media Player Screen Mode Included
 Includes a mode similar to that of a standard media player.
 
-![Player Screen](https://ppp.oohara.jp/img/ysedplay2_20260305e.PNG)
+![Player Screen](https://ppp.oohara.jp/img/ysedplay2e_git6.png)
 
 ![Player Screen](https://ppp.oohara.jp/img/mpe.png)
 
