@@ -32,7 +32,7 @@
 
 ![ファルコムプレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git5.PNG)
 
-![メディアプレイヤー画面](https://ppp.oohara.jp/img/mp.png)
+![メディアプレイヤー画面](https://ppp.oohara.jp/img/mp_2.png)
 
 ## 対応ゲームタイトル
 以下のゲームのBGMループ再生に対応しています。
