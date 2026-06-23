@@ -27,7 +27,12 @@
 ### ピアノロール機能
 簡易ピアノロールが実装されました。
 
-![プレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git5.PNG)
+### メディアプレイヤー画面モード搭載
+普通のメディアプレイヤーのようなモード搭載。
+
+![ファルコムプレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git5.PNG)
+
+![メディアプレイヤー画面](https://ppp.oohara.jp/img/mp.png)
 
 ## 対応ゲームタイトル
 以下のゲームのBGMループ再生に対応しています。
@@ -130,7 +135,12 @@ Additionally, the intensity of the environmental effects can be adjusted, offeri
 ### Piano Roll Feature
 A simplified piano roll has been implemented.
 
+### Media Player Screen Mode Included
+Includes a mode similar to that of a standard media player.
+
 ![Player Screen](https://ppp.oohara.jp/img/ysedplay2_20260305e.PNG)
+
+![Player Screen](https://ppp.oohara.jp/img/mpe.png)
 
 ## Supported Game Titles
 The player supports seamless BGM looping for the following titles:
