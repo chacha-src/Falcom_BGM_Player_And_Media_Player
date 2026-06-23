@@ -4311,8 +4311,26 @@ void CPlayList::OnSize(UINT nType, int cx, int cy)
 	// TODO: ここにメッセージ ハンドラ コードを追加します。
 	RECT r;
 	GetClientRect(&r);
-	if( ::IsWindow( this->GetSafeHwnd()) == TRUE &&  this->IsWindowVisible() == TRUE)
+	if( ::IsWindow( this->GetSafeHwnd()) == TRUE &&  this->IsWindowVisible() == TRUE){
 		m_lc.SetWindowPos(&wndNoTopMost, 0, 0, (int)(r.right - 20 * (hD2 )), (int)(r.bottom - 80 * (hD2 )), SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOZORDER);
+		// アルバム/コメント列(列4)をリスト右端へぴたりとフィットさせる。
+		// 後ろのフォルダ列(列5)は 0 幅にして余白(空列)を残さない。
+		// 他列の合計を引いた残り幅を割り当て、最低幅を下回る狭い窓では
+		// 最低幅に固定して横スクロールバーが出るに任せる。
+		if (::IsWindow(m_lc.GetSafeHwnd())) {
+			m_lc.SetColumnWidth(5, 0);
+			CRect lcr; m_lc.GetClientRect(&lcr);   // 縦スクロールバー分を除いた可視幅
+			int used = 0;
+			used += m_lc.GetColumnWidth(0);
+			used += m_lc.GetColumnWidth(1);
+			used += m_lc.GetColumnWidth(2);
+			used += m_lc.GetColumnWidth(3);
+			int minLast = (int)(80 * hD2);
+			int last = lcr.Width() - used;
+			if (last < minLast) last = minLast;
+			if (m_lc.GetColumnWidth(4) != last) m_lc.SetColumnWidth(4, last);
+		}
+	}
 	if(pl){
 		if (nType == SIZE_MINIMIZED){
 			if(m_saisyo.GetCheck())

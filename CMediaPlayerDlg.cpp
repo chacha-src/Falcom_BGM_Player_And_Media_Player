@@ -138,6 +138,9 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_lastComboCount = -1;
 	m_lastMs2 = 0;
 	m_seekDragging = 0;
+	m_lastPlayIcon = -999;
+	m_savedEqVisible = 0;
+	m_savedPianoVisible = 0;
 	m_dragging = 0;
 	m_dragSrc = -1;
 	m_hDragImage = NULL;
@@ -763,6 +766,19 @@ void CMediaPlayerDlg::DoLayout()
 	if (listH < (int)(50 * s)) listH = (int)(50 * s);
 	MoveCtl(&m_list, M + gPad, listY, W - M * 2 - gPad * 2, listH);
 
+	// アルバム/コメント列(最終列=4)をリスト右端へぴたりとフィットさせる。
+	// 他列の合計を引いた残り幅を割り当て、後ろに余白(空列)を残さない。
+	// 最低幅を下回る狭い窓では最低幅に固定し、横スクロールバーが出るに任せる。
+	if (::IsWindow(m_list.GetSafeHwnd())) {
+		CRect lcr; m_list.GetClientRect(&lcr);   // 縦スクロールバー分を除いた可視幅
+		int used = 0;
+		for (int ci = 0; ci < 4; ++ci) used += m_list.GetColumnWidth(ci);
+		int minLast = (int)(80 * s);
+		int last = lcr.Width() - used;
+		if (last < minLast) last = minLast;
+		if (m_list.GetColumnWidth(4) != last) m_list.SetColumnWidth(4, last);
+	}
+
 	// 下部チェック(ツールチップ/最小化連動/mp3途中保存/DShow途中保存)は横いっぱいに均等配置
 	int ckY = listY + listH + (int)(3 * s);
 	int availCk = W - (M + gPad) * 2;
@@ -809,13 +825,23 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 		if (bForce) m_list.Invalidate(FALSE);   // 表示内容(順序/タグ)の変化を反映
 	}
 
-	// 再生中(♪)アイコンの点滅・移動を反映(該当行だけ再取得=GetDispInfo 再問合せ)
+	// 再生中(♪)アイコンの点滅・移動を反映(該当行だけ再取得=GetDispInfo 再問合せ)。
+	// Timer1(250ms)毎に無条件で RedrawItems すると、pl 側の点滅周期(1200ms)とずれて
+	// 行が小刻みに再描画されちらつく(=ぎこちなく見える)。アイコン値が実際に
+	// 変化したフレームだけ再描画して、pl 同様のなめらかな点滅にする。
 	int pnt = pl->pnt;
 	if (pnt != m_lastPlcnt) {
 		if (m_lastPlcnt >= 0 && m_lastPlcnt < cnt) m_list.RedrawItems(m_lastPlcnt, m_lastPlcnt);
 		m_lastPlcnt = pnt;
+		m_lastPlayIcon = -999;   // 行が変わったら次回必ず再描画
 	}
-	if (pnt >= 0 && pnt < cnt) m_list.RedrawItems(pnt, pnt);
+	if (pnt >= 0 && pnt < cnt) {
+		int ic = pl->pc[pnt].icon;
+		if (ic != m_lastPlayIcon) {
+			m_list.RedrawItems(pnt, pnt);
+			m_lastPlayIcon = ic;
+		}
+	}
 
 	FollowPlayingRow();   // ♪ 行へカーソル追従
 }
@@ -1110,7 +1136,32 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 {
 	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
-	if (nType != SIZE_MINIMIZED && ::IsWindow(m_hWnd)) {
+	if (nType == SIZE_MINIMIZED) {
+		// 最小化連動: ファルコム特化型では og 最小化で OS がオプション窓(EQ/ピアノロール)を
+		// 自動で隠すが、メディアプレイヤーモードでは mp が独立窓のため自前で連動させる。
+		// これらは og 所有のため、最小化前の表示状態を覚えて復帰時に戻す。
+		if (m_mini.GetCheck() && og && ::IsWindow(og->GetSafeHwnd())) {
+			if (::IsWindow(og->m_EqualizerDlg.GetSafeHwnd())) {
+				m_savedEqVisible = ::IsWindowVisible(og->m_EqualizerDlg.m_hWnd) ? 1 : 0;
+				if (m_savedEqVisible) ::ShowWindow(og->m_EqualizerDlg.m_hWnd, SW_HIDE);
+			}
+			if (::IsWindow(og->m_PianoRollDlg.GetSafeHwnd())) {
+				m_savedPianoVisible = ::IsWindowVisible(og->m_PianoRollDlg.m_hWnd) ? 1 : 0;
+				if (m_savedPianoVisible) ::ShowWindow(og->m_PianoRollDlg.m_hWnd, SW_HIDE);
+			}
+		}
+		return;
+	}
+	if (::IsWindow(m_hWnd)) {
+		// 最小化からの復帰: 連動で隠したオプション窓(EQ/ピアノロール)を元に戻す。
+		if (nType == SIZE_RESTORED && m_mini.GetCheck() && og && ::IsWindow(og->GetSafeHwnd())) {
+			if (m_savedEqVisible && ::IsWindow(og->m_EqualizerDlg.GetSafeHwnd()))
+				::ShowWindow(og->m_EqualizerDlg.m_hWnd, SW_SHOW);
+			if (m_savedPianoVisible && ::IsWindow(og->m_PianoRollDlg.GetSafeHwnd()))
+				::ShowWindow(og->m_PianoRollDlg.m_hWnd, SW_SHOW);
+			m_savedEqVisible = 0;
+			m_savedPianoVisible = 0;
+		}
 		DoLayout();
 		// リサイズ中はカスタムコントロール(ボタン/スライダー/リストビュー)が
 		// 部分描画のまま崩れるので、子も含めて確実に再描画させる。

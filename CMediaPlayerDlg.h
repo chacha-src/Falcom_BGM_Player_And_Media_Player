@@ -126,6 +126,9 @@ public:
 	int  m_lastScroll;   // 前回 EnsureVisible した再生行(同一なら再スクロール不要)
 	int  m_lastMs2;      // savedata.ms2 の変化検出用(タイマー間隔の変更を反映するため)
 	int  m_seekDragging; // ユーザーがシークをドラッグ中なら 1(ミラー更新をスキップ)
+	int  m_lastPlayIcon; // 再生行(♪)の前回アイコン値。変化時のみ再描画して点滅をなめらかに
+	int  m_savedEqVisible;    // 最小化連動: 最小化前にイコライザーが表示されていたか
+	int  m_savedPianoVisible; // 最小化連動: 最小化前にピアノロールが表示されていたか
 	float hD2;           // DPI スケール係数(96dpi = 1.0)
 
 	// ---- バナー領域(ビジュアライザ Blit 先) ----
