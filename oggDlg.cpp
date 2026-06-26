@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -2161,9 +2161,18 @@ static inline void OggFlushKpi3Ring()
 	poss4 = 0;
 }
 
-// loop2 末尾と loop1 先頭の境界で短い等電力クロスフェード（RB リセット由来の段差を消す）
+// 32kHz 等の低レート向け。44.1kHz はループ点がシームレスなことが多く、
+// クロスフェード/リングプリフィルは loop1 のダブりを招く。
+static inline bool OggUseLowRateLoopExtras()
+{
+	return (wavbit_sample_Hz > 0 && wavbit_sample_Hz < 44100);
+}
+
+// loop2 末尾と loop1 先頭の境界で短いクロスフェード（32k の RB 段差向け）
 static void OggApplyLoopBoundaryCrossfade(char* pcmBase, int tailBytes, int headBytes)
 {
+	if (!OggUseLowRateLoopExtras())
+		return;
 	if (!pcmBase || tailBytes < 4 || headBytes < 4)
 		return;
 	const int bpf = PcmOutBytesPerFrame();
@@ -13769,18 +13778,33 @@ float tempoRate2;
 // ─────────────────────────────────────────────────────────────────────
 bool InitializeRubberBandStretcher();
 
-void SeekAndWarmupRubberBand(int targetPos)
+void SeekAndWarmupRubberBand(int targetPos, bool loopJump)
 {
+	const int bpfWarm = PcmOutBytesPerFrame();
+	if (bpfWarm <= 0)
+		return;
+
+	// 44.1kHz ループ: playwavds 互換（RB/リングを触らず seek のみ）
+	if (loopJump && !OggUseLowRateLoopExtras()) {
+		g_loopTailBuffer.clear();
+		g_loopTailPos = 0;
+		ov_pcm_seek_lap(&vf, (ogg_int64_t)targetPos);
+		playb = targetPos;
+		g_oggPcmDecodePos = targetPos;
+		poss5 = targetPos;
+		poss = 0;
+		poss6 = 0;
+		g_oggRbPrimingNeed = 0;
+		reset = FALSE;
+		return;
+	}
+
 	ResetAudioUpscalerPipeline();
 	g_loopTailBuffer.clear();
 	g_loopTailPos = 0;
 	OggFlushKpi3Ring();
 	poss = 0;
 	poss6 = 0;
-
-	const int bpfWarm = PcmOutBytesPerFrame();
-	if (bpfWarm <= 0)
-		return;
 	const int ovChunkBytes = 4096;
 	const int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 
@@ -13874,92 +13898,99 @@ void SeekAndWarmupRubberBand(int targetPos)
 	ov_pcm_seek_lap(&vf, (ogg_int64_t)targetPos);
 	g_oggPcmDecodePos = targetPos;
 
-	// ── Phase 3: loop1 から1回だけデコードし、リングをプリフィル（引っ掛かり防止）──
+	// ── Phase 3: 32kHz 等のみリングプリフィル（44.1kHz はシームレスループでダブりになる）
 	const int primingTarget = OggRbLatencyReserveBytes();
-	int maxBufSamples = (int)(sizeof(bufwav) / (size_t)bpfWarm);
-	int safeFillSamples = maxBufSamples - (ovChunkBytes / bpfWarm) - 1;
-	if (safeFillSamples < 1)
-		safeFillSamples = 1;
+	if (OggUseLowRateLoopExtras()) {
+		int maxBufSamples = (int)(sizeof(bufwav) / (size_t)bpfWarm);
+		int safeFillSamples = maxBufSamples - (ovChunkBytes / bpfWarm) - 1;
+		if (safeFillSamples < 1)
+			safeFillSamples = 1;
 
-	const bool prevWarmup = g_inWarmup;
-	g_inWarmup = true;
-	g_warmupRBOutputBytes = 0;
+		const bool prevWarmup = g_inWarmup;
+		g_inWarmup = true;
+		g_warmupRBOutputBytes = 0;
 
-	int prefillStall = 0;
-	const int kPrefillStallMax = 8192;
-	while (poss4 < primingTarget) {
-		if (IsPlaybackStopRequested())
-			break;
-
-		int ret = 0;
-		for (;;) {
+		int prefillStall = 0;
+		const int kPrefillStallMax = 8192;
+		while (poss4 < primingTarget) {
 			if (IsPlaybackStopRequested())
 				break;
-			if (poss < 0 || poss > safeFillSamples)
-				poss = 0;
-			if (poss >= safeFillSamples)
-				break;
 
-			long readBytes = ovChunkBytes;
-			const int roomSamples = safeFillSamples - poss;
-			const int maxChunkBytes = roomSamples * bpfWarm;
-			if (maxChunkBytes > 0 && readBytes > maxChunkBytes)
-				readBytes = maxChunkBytes;
+			int ret = 0;
+			for (;;) {
+				if (IsPlaybackStopRequested())
+					break;
+				if (poss < 0 || poss > safeFillSamples)
+					poss = 0;
+				if (poss >= safeFillSamples)
+					break;
 
-			int current_section;
-			long bytesRead = ov_read(&vf, (char*)(bufwav + poss * bpfWarm), readBytes, 0, 2, 1, &current_section);
-			if (bytesRead <= 0) {
-				ret = 0;
+				long readBytes = ovChunkBytes;
+				const int roomSamples = safeFillSamples - poss;
+				const int maxChunkBytes = roomSamples * bpfWarm;
+				if (maxChunkBytes > 0 && readBytes > maxChunkBytes)
+					readBytes = maxChunkBytes;
+
+				int current_section;
+				long bytesRead = ov_read(&vf, (char*)(bufwav + poss * bpfWarm), readBytes, 0, 2, 1, &current_section);
+				if (bytesRead <= 0) {
+					ret = 0;
+					break;
+				}
+				ret = (int)(bytesRead / bpfWarm);
+				if (ret <= 0)
+					break;
+				poss += ret;
+				if (poss >= safeFillSamples / 2)
+					break;
+			}
+
+			int validSamples = poss;
+			if (validSamples > safeFillSamples)
+				validSamples = safeFillSamples;
+			if (validSamples <= 0) {
+				if (++prefillStall >= kPrefillStallMax)
+					break;
+				if (ret == 0)
+					break;
+				continue;
+			}
+
+			int len2 = readtempo(bufwav, validSamples * bpfWarm);
+			g_oggPcmDecodePos += validSamples;
+			poss = 0;
+
+			if (len2 > 0) {
+				prefillStall = 0;
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+				poss4 += len2;
+				g_warmupRBOutputBytes += len2;
+				SanitizeKpi3RingState(max_buffer_size);
+			}
+			else if (ret > 0) {
+				if (++prefillStall >= kPrefillStallMax)
+					break;
+				continue;
+			}
+			else {
 				break;
 			}
-			ret = (int)(bytesRead / bpfWarm);
-			if (ret <= 0)
-				break;
-			poss += ret;
-			if (poss >= safeFillSamples / 2)
-				break;
 		}
 
-		int validSamples = poss;
-		if (validSamples > safeFillSamples)
-			validSamples = safeFillSamples;
-		if (validSamples <= 0) {
-			if (++prefillStall >= kPrefillStallMax)
-				break;
-			if (ret == 0)
-				break;
-			continue;
-		}
-
-		int len2 = readtempo(bufwav, validSamples * bpfWarm);
-		g_oggPcmDecodePos += validSamples;
+		g_inWarmup = prevWarmup;
 		poss = 0;
-
-		if (len2 > 0) {
-			prefillStall = 0;
-			RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
-			poss4 += len2;
-			g_warmupRBOutputBytes += len2;
-			SanitizeKpi3RingState(max_buffer_size);
-		}
-		else if (ret > 0) {
-			if (++prefillStall >= kPrefillStallMax)
-				break;
-			continue;
-		}
-		else {
-			break;
-		}
+		poss3 = 0;
+		g_oggRbPrimingNeed = 0;
 	}
-
-	g_inWarmup = prevWarmup;
-	poss = 0;
-	poss3 = 0;
+	else {
+		poss = 0;
+		poss3 = 0;
+		// 44.1kHz: リングは空のまま mcopy のプライミング待ちで RB レイテンシを吸収
+		g_oggRbPrimingNeed = primingTarget;
+	}
 
 	playb = targetPos;
 	poss5 = targetPos;
-	// ウォームアップでリングに loop1 以降を溜め済み。mcopy は即出力してよい
-	g_oggRbPrimingNeed = 0;
 	// ループ時 EQ 強制 InitEngine は境界ポツ音の一因になる（フラット時も InitEngine が走る）
 	reset = FALSE;
 }
@@ -13977,9 +14008,14 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 		}
 		else {
 			loopcnt++;
-			OggFlushKpi3Ring();
-			poss = 0;
-			SeekAndWarmupRubberBand(loop1);
+			if (OggUseLowRateLoopExtras()) {
+				OggFlushKpi3Ring();
+				poss = 0;
+			}
+			else {
+				poss = 0;
+			}
+			SeekAndWarmupRubberBand(loop1, true);
 			{
 				const int got2 = McopyAccumulate((char*)bw + old + rrr, (int)l1 - rrr);
 				if (rrr > 0 && got2 > 0)
@@ -13995,9 +14031,14 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 			}
 			else {
 				loopcnt++;
-				OggFlushKpi3Ring();
-				poss = 0;
-				SeekAndWarmupRubberBand(loop1);
+				if (OggUseLowRateLoopExtras()) {
+					OggFlushKpi3Ring();
+					poss = 0;
+				}
+				else {
+					poss = 0;
+				}
+				SeekAndWarmupRubberBand(loop1, true);
 				{
 					const int got2 = McopyAccumulate((char*)bw + rrr, (int)l2 - rrr);
 					if (rrr > 0 && got2 > 0)
@@ -14870,13 +14911,19 @@ int mcopy(char* a, int len)
 		const int totalSamples = (bpf > 0) ? (int)((__int64)data_size / bpf) : 0;
 		if (totalSamples > 0 && loopEndSamples > totalSamples)
 			loopEndSamples = totalSamples;
-		const int playbPos = (int)playb;
+		const int heardPos = (int)playb;
+		const int decodePos = (int)g_oggPcmDecodePos;
+		// 出力(playb)とデコード位置のずれで loop2 越え/loop1 ダブりが起きるため、
+		// ループ残量は「聴こえた位置」と「デコード済み位置」の遅れの小さい方で決める
+		int posForLoop = heardPos;
+		if (decodePos < heardPos)
+			posForLoop = decodePos;
 		if (loopEndSamples > 0 && endf == 0) {
-			if (playbPos >= loopEndSamples) {
+			if (posForLoop >= loopEndSamples) {
 				to_read = 0;
 			}
 			else {
-				const int remainSamples = loopEndSamples - playbPos;
+				const int remainSamples = loopEndSamples - posForLoop;
 				const int remainBytes = remainSamples * bpf;
 				if (remainBytes < to_read)
 					to_read = remainBytes;
@@ -14889,7 +14936,8 @@ int mcopy(char* a, int len)
 			playb = loopEndSamples;
 			g_oggPcmDecodePos = loopEndSamples;
 			poss5 = loopEndSamples;
-			OggFlushKpi3Ring();
+			if (OggUseLowRateLoopExtras())
+				OggFlushKpi3Ring();
 		}
 		return 0;
 	}
@@ -15056,8 +15104,10 @@ int mcopy(char* a, int len)
 	if (loopEndSamples > 0 && (int)playb > loopEndSamples)
 		playb = loopEndSamples;
 
-	// ループ端: 余ったリングデータを破棄（次周回への loop2 漏れ防止）
-	if (loopEndSamples > 0 && endf == 0 && (int)playb >= loopEndSamples) {
+	// ループ端: 余ったリングデータを破棄（32k 等。44.1k はシームレス維持のため触らない）
+	if (OggUseLowRateLoopExtras() && loopEndSamples > 0 && endf == 0 &&
+		(int)playb >= loopEndSamples && g_oggPcmDecodePos >= loopEndSamples) {
+		playb = loopEndSamples;
 		g_oggPcmDecodePos = loopEndSamples;
 		OggFlushKpi3Ring();
 		poss = 0;
@@ -20026,7 +20076,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				m4a_.SetPosition(kmp, pla);
 			}
 			else { // OGG / Others
-				SeekAndWarmupRubberBand((ogg_int64_t)curpos);
+				SeekAndWarmupRubberBand((int)curpos, false);
 				r->SetPos(curpos);
 			}
 
