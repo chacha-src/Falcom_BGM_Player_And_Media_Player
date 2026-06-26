@@ -2404,7 +2404,7 @@ BOOL CDFFDecoderKpi::Open(LPWSTR szFileName, SOUNDINFO* pInfo, ULONGLONG& dwTagS
 	dsd2pcm.Open(dsd_fs, soundinfo.dwSamplesPerSec, channels, soundinfo.dwBitsPerSample);
 	{
 		uint64_t samples = file.FRM8().dsd.DataSize();
-		dwTagSize = samples;
+		dwTagSize = 0;   // DFF: ID3 位置はジャケ読込側で先頭/末尾スキャン
 		samples <<= 3;
 		samples *= 1000;
 		samples /= dsd_fs;
@@ -2526,6 +2526,7 @@ void CWSDDecoderKpi::Reset()
 
 BOOL CWSDDecoderKpi::Open(LPWSTR szFileName, SOUNDINFO* pInfo, ULONGLONG& dwTagSize)
 {
+	dwTagSize = 0;   // WSD: ID3 位置はジャケ読込側で先頭/末尾スキャン
 	if (!file.Open(szFileName))
 		return FALSE;
 

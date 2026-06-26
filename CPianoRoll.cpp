@@ -1412,27 +1412,30 @@ namespace
 {
     static bool HistDetectVibrato(const float* hist, int count, float envPeak)
     {
-        if (count < 8 || envPeak < 0.04f) return false;
+        // 判定が甘いと装飾音やトレモロ・わずかな揺れまでビブラート扱いになるため、
+        // 「十分長く・はっきりした周期的振動」のみを通すよう厳しめにする。
+        if (count < 12 || envPeak < 0.06f) return false;
         float mean = 0.0f;
         for (int k = 0; k < count; ++k) mean += hist[k];
         mean /= (float)count;
         float minV = mean, maxV = mean;
         int reversals = 0;
-        float prevDet = 0.0f;
         int prevSign = 0;
+        // ノイズ床: 平均からの偏差がこの値未満は「揺れていない」とみなす。
+        const float dead = 0.05f * envPeak;
         for (int k = 0; k < count; ++k) {
             const float v = hist[k];
             if (v < minV) minV = v;
             if (v > maxV) maxV = v;
             const float det = v - mean;
-            const int sign = (det > 0.015f * envPeak) ? 1 : ((det < -0.015f * envPeak) ? -1 : 0);
+            const int sign = (det > dead) ? 1 : ((det < -dead) ? -1 : 0);
             if (sign != 0 && prevSign != 0 && sign != prevSign)
                 ++reversals;
             if (sign != 0) prevSign = sign;
-            prevDet = det;
         }
         const float swing = maxV - minV;
-        return reversals >= 2 && swing >= envPeak * 0.08f;
+        // 反転4回以上(=おおむね2周期以上)かつ十分な振幅のみビブラートと判定。
+        return reversals >= 4 && swing >= envPeak * 0.18f;
     }
 }
 
@@ -1443,7 +1446,9 @@ namespace PianoExpr {
     static constexpr uint8_t SLIDE   = 0x08;
     static constexpr uint8_t FALL    = 0x10;
     static constexpr uint8_t SUSTAIN = 0x20;
-    static constexpr uint8_t ALL_MASK = ACCENT | SCOOP | VIBRATO | SLIDE | FALL | SUSTAIN;
+    static constexpr uint8_t CRESC   = 0x40;   // クレッシェンド(持続音が膨らむ)
+    static constexpr uint8_t DECRESC = 0x80;   // デクレッシェンド(持続音がしぼむ)
+    static constexpr uint8_t ALL_MASK = ACCENT | SCOOP | VIBRATO | SLIDE | FALL | SUSTAIN | CRESC | DECRESC;
 }
 
 // UpdateNoteStates の直後に呼ばれ、各アクティブノートへ表現記号フラグを付与する。
@@ -1505,11 +1510,28 @@ void CPianoRoll::DetectExpressions()
             m_vibHist[i][k] = m_vibHist[i][k + 1];
         m_vibHist[i][VIB_HIST_LEN - 1] = m_noteStrength[i];
 
-        if (m_noteAgeFrames[i] >= 5 && m_vibHistCount[i] >= 8) {
+        if (m_noteAgeFrames[i] >= 10 && m_vibHistCount[i] >= 12) {
             const int n = min((int)m_vibHistCount[i], VIB_HIST_LEN);
             if (HistDetectVibrato(m_vibHist[i] + (VIB_HIST_LEN - n), n,
                 m_envPeak[i] > 0.01f ? m_envPeak[i] : 1.0f))
                 m_exprFlags[i] |= PianoExpr::VIBRATO;
+        }
+
+        // クレッシェンド/デクレッシェンド: 持続音(SUSTAIN)で、強度が一方向へ
+        // はっきり推移しているときだけ付与する。ビブラート(揺れ)とは排他。
+        // 自然減衰の撥弦音を拾わないよう、持続が十分長く振幅も保っている音に限定。
+        if ((m_exprFlags[i] & PianoExpr::SUSTAIN) && !(m_exprFlags[i] & PianoExpr::VIBRATO)
+            && m_noteAgeFrames[i] >= 16 && m_vibHistCount[i] >= VIB_HIST_LEN) {
+            const float* h = m_vibHist[i];
+            const int half = VIB_HIST_LEN / 2;
+            float a = 0.0f, b = 0.0f;
+            for (int k = 0; k < half; ++k) a += h[k];
+            for (int k = half; k < VIB_HIST_LEN; ++k) b += h[k];
+            a /= (float)half; b /= (float)(VIB_HIST_LEN - half);
+            const float pk = m_envPeak[i] > 0.01f ? m_envPeak[i] : 1.0f;
+            const float diff = b - a;
+            if (diff > pk * 0.28f) m_exprFlags[i] |= PianoExpr::CRESC;
+            else if (diff < -pk * 0.28f && b > pk * 0.18f) m_exprFlags[i] |= PianoExpr::DECRESC;
         }
     }
 
@@ -1585,7 +1607,12 @@ void CPianoRoll::PushFrame(bool requestUiInvalidate)
     BuildLiveNoteFrame(m_historyRing[m_historyHead]);
     if (m_historyCount < (int)MAX_HISTORY)
         ++m_historyCount;
-    ++m_framesPending;
+    // 保留フレームは上限を設ける。描画が解析に追いつかない(特にアクリル時)と
+    // 無制限に溜まり、OnPaint の追い付き再描画ループが UI スレッドを占有して
+    // 他処理(モード切替など)が数十秒固まる原因になる。上限で頭打ちにして
+    // 追いつけない分は間引く(可視化なので体感への影響は小さい)。
+    if (m_framesPending < 3)
+        ++m_framesPending;
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (m_activeKeys[i] != m_keySnapActive[i] ||
@@ -1819,6 +1846,8 @@ namespace PianoDraw
         case PianoExpr::SLIDE:   return RGB(120, 160, 255);
         case PianoExpr::FALL:    return RGB(255, 170, 90);
         case PianoExpr::SUSTAIN: return RGB(190, 190, 210);
+        case PianoExpr::CRESC:   return RGB(120, 230, 255);
+        case PianoExpr::DECRESC: return RGB(200, 150, 255);
         default:                 return RGB(255, 255, 255);
         }
     }
@@ -1830,6 +1859,8 @@ namespace PianoDraw
         if (expr & PianoExpr::VIBRATO) return ExprColorForFlag(PianoExpr::VIBRATO);
         if (expr & PianoExpr::SLIDE) return ExprColorForFlag(PianoExpr::SLIDE);
         if (expr & PianoExpr::FALL) return ExprColorForFlag(PianoExpr::FALL);
+        if (expr & PianoExpr::CRESC) return ExprColorForFlag(PianoExpr::CRESC);
+        if (expr & PianoExpr::DECRESC) return ExprColorForFlag(PianoExpr::DECRESC);
         if (expr & PianoExpr::SUSTAIN) return ExprColorForFlag(PianoExpr::SUSTAIN);
         return RGB(255, 255, 255);
     }
@@ -1843,6 +1874,8 @@ namespace PianoDraw
         if (expr & PianoExpr::SCOOP) dyn = max(dyn, min(1.0f, dyn + 0.14f));
         if (expr & PianoExpr::SLIDE) dyn = max(dyn, min(1.0f, dyn + 0.20f));
         if (expr & PianoExpr::FALL) dyn = max(dyn, min(1.0f, dyn + 0.12f));
+        if (expr & PianoExpr::CRESC) dyn = max(dyn, min(1.0f, dyn + 0.16f));
+        if (expr & PianoExpr::DECRESC) dyn = max(dyn, min(1.0f, dyn + 0.10f));
         if (expr & PianoExpr::SUSTAIN) dyn = max(dyn, min(1.0f, dyn + 0.08f));
         return dyn;
     }
@@ -1856,6 +1889,8 @@ namespace PianoDraw
         case PianoExpr::SLIDE:   return L"\x2192";
         case PianoExpr::FALL:    return L"\x2198";
         case PianoExpr::SUSTAIN: return L"\x2015";
+        case PianoExpr::CRESC:   return L"\x003C";   // '<' クレッシェンド
+        case PianoExpr::DECRESC: return L"\x003E";   // '>' デクレッシェンド
         default:                 return L"?";
         }
     }
@@ -1863,8 +1898,8 @@ namespace PianoDraw
     static int CountExprFlags(uint8_t expr)
     {
         int n = 0;
-        for (uint8_t f = 1; f <= PianoExpr::SUSTAIN; f <<= 1)
-            if (expr & f) ++n;
+        for (int f = 1; f <= (int)PianoExpr::DECRESC; f <<= 1)
+            if (expr & (uint8_t)f) ++n;
         return n;
     }
 
@@ -1914,7 +1949,8 @@ namespace PianoDraw
         const int laneW = cell.Width();
         static const uint8_t kOrder[] = {
             PianoExpr::ACCENT, PianoExpr::SCOOP, PianoExpr::FALL,
-            PianoExpr::SLIDE, PianoExpr::VIBRATO, PianoExpr::SUSTAIN
+            PianoExpr::SLIDE, PianoExpr::VIBRATO, PianoExpr::CRESC,
+            PianoExpr::DECRESC, PianoExpr::SUSTAIN
         };
 
         uint8_t flags[8];
@@ -2261,7 +2297,7 @@ void CPianoRoll::GetExprLegendPanelRect(int rollW, int rollH, CRect& panel) cons
     panel.SetRectEmpty();
     if (rollW < 72 || rollH < 48) return;
 
-    static const int kItemCount = 6;
+    static const int kItemCount = 8;
     const int pad = max(3, min(6, rollW / 90));
     int lineH = max(9, min(16, rollH / 14));
     int titleH = max(10, min(14, lineH + 1));
@@ -2345,17 +2381,54 @@ bool CPianoRoll::EnsureExprLegendCache(CDC& refDC, int rollW, int rollH) const
     return true;
 }
 
+// 凡例パネル背景を半透明で塗る(下のバーを透かす)。1x1のソースを引き伸ばして
+// AlphaBlend する軽量実装(msimg32 の AlphaBlend を CDC 経由で使用)。
+static void PianoFillRectAlpha(CDC& dc, const CRect& rc, COLORREF clr, BYTE alpha)
+{
+    if (rc.Width() <= 0 || rc.Height() <= 0) return;
+    CDC mem;
+    if (!mem.CreateCompatibleDC(&dc)) return;
+    CBitmap bmp;
+    if (!bmp.CreateCompatibleBitmap(&dc, 1, 1)) { mem.DeleteDC(); return; }
+    CBitmap* ob = mem.SelectObject(&bmp);
+    mem.SetPixelV(0, 0, clr);
+    BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, 0 };
+    dc.AlphaBlend(rc.left, rc.top, rc.Width(), rc.Height(), &mem, 0, 0, 1, 1, bf);
+    mem.SelectObject(ob);
+    mem.DeleteDC();
+}
+
 void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH) const
 {
     CRect panel;
     GetExprLegendPanelRect(rollW, rollH, panel);
     if (panel.IsRectEmpty()) return;
-    if (!EnsureExprLegendCache(dc, rollW, rollH)) {
-        // キャッシュ生成失敗時は従来どおり直接描画（保険）
-        DrawExprLegendContent(dc, rollW, rollH, panel);
-        return;
-    }
-    dc.BitBlt(panel.left, panel.top, m_legendW, m_legendH, &m_legendDC, 0, 0, SRCCOPY);
+    const int pw = panel.Width(), ph = panel.Height();
+    if (pw <= 0 || ph <= 0) return;
+
+    // ちらつき(点滅)対策: 画面 dc へ「バー描画 → α重ね」を直接2段で行うと、
+    // GDI は可視サーフェスへ直接描くため一瞬バーが見えて点滅する。
+    // パネルサイズのオフスクリーン DC で合成し、1回の BitBlt で提示する。
+    // 下地のバーは凡例を焼き込んでいない m_rollDC の該当領域から取得するため、
+    // フレーム蓄積(α重ねの濃化)も起きない。
+    CDC mem;
+    if (!mem.CreateCompatibleDC(&dc)) { DrawExprLegendContent(dc, rollW, rollH, panel); return; }
+    CBitmap bmp;
+    if (!bmp.CreateCompatibleBitmap(&dc, pw, ph)) { mem.DeleteDC(); DrawExprLegendContent(dc, rollW, rollH, panel); return; }
+    CBitmap* ob = mem.SelectObject(&bmp);
+
+    // 下地(流れるバー)を m_rollDC から取り込む。未準備なら背景色で埋める。
+    if (m_rollDC.GetSafeHdc())
+        mem.BitBlt(0, 0, pw, ph, const_cast<CDC*>(&m_rollDC), panel.left, panel.top, SRCCOPY);
+    else
+        mem.FillSolidRect(0, 0, pw, ph, RGB(20, 20, 20));
+
+    // 凡例本体を (0,0) 原点で合成(背景はα、その上に枠・バッジ・文字)。
+    DrawExprLegendContent(mem, rollW, rollH, CRect(0, 0, pw, ph));
+
+    dc.BitBlt(panel.left, panel.top, pw, ph, &mem, 0, 0, SRCCOPY);
+    mem.SelectObject(ob);
+    mem.DeleteDC();
 }
 
 void CPianoRoll::DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRect& panel) const
@@ -2367,7 +2440,8 @@ void CPianoRoll::DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRec
 
     static const uint8_t kFlags[] = {
         PianoExpr::ACCENT, PianoExpr::SCOOP, PianoExpr::FALL,
-        PianoExpr::SLIDE, PianoExpr::VIBRATO, PianoExpr::SUSTAIN
+        PianoExpr::SLIDE, PianoExpr::VIBRATO, PianoExpr::CRESC,
+        PianoExpr::DECRESC, PianoExpr::SUSTAIN
     };
     static const wchar_t* kLabels[] = {
         LL14(L"アクセント", L"Accent", L"Accent", L"Accento", L"Acento", L"액센트", L"重音", L"لهجة", L"Акцент", L"Akzent", L"Acento", L"Accent", L"Akcent", L"Aksan"),
@@ -2375,6 +2449,8 @@ void CPianoRoll::DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRec
         LL14(L"フォール", L"Fall", L"Chute", L"Fall", L"Caída", L"하강", L"滑音(下)", L"Fall", L"Падение", L"Fall", L"Queda", L"Fall", L"Spadek", L"Düşüş"),
         LL14(L"スライド", L"Slide", L"Glissé", L"Slide", L"Desliz", L"슬라이드", L"滑音", L"Slide", L"Слайд", L"Slide", L"Slide", L"Slide", L"Slide", L"Slide"),
         LL14(L"ビブラート", L"Vibrato", L"Vibrato", L"Vibrato", L"Vibrato", L"비브라토", L"颤音", L"Vibrato", L"Вибрато", L"Vibrato", L"Vibrato", L"Vibrato", L"Wibrato", L"Vibrato"),
+        LL14(L"クレッシェンド", L"Cresc.", L"Cresc.", L"Cresc.", L"Cresc.", L"크레셴도", L"渐强", L"Cresc.", L"Крещ.", L"Cresc.", L"Cresc.", L"Cresc.", L"Cresc.", L"Cresc."),
+        LL14(L"デクレッシェンド", L"Decresc.", L"Decresc.", L"Decresc.", L"Decresc.", L"데크레셴도", L"渐弱", L"Decresc.", L"Дим.", L"Decresc.", L"Decresc.", L"Decresc.", L"Decresc.", L"Decresc."),
         LL14(L"サステイン", L"Sustain", L"Sustain", L"Sustain", L"Sustain", L"서스테인", L"延音", L"Sustain", L"Длит.", L"Sustain", L"Sustain", L"Sustain", L"Sustain", L"Sustain")
     };
     const int n = (int)(sizeof(kFlags) / sizeof(kFlags[0]));
@@ -2388,7 +2464,8 @@ void CPianoRoll::DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRec
         cols = 2;
     const int rows = iconsOnly ? 1 : (n + cols - 1) / cols;
 
-    dc.FillSolidRect(&panel, RGB(14, 14, 20));
+    // 背景は半透明で塗り、下を流れるバーがうっすら透ける(可読性は保つ濃さ)。
+    PianoFillRectAlpha(dc, panel, RGB(14, 14, 20), 170);
     CPen border(PS_SOLID, 1, RGB(70, 70, 82));
     CPen* pOldPen = dc.SelectObject(&border);
     dc.MoveTo(panel.left, panel.bottom - 1); dc.LineTo(panel.left, panel.top);
@@ -2599,7 +2676,8 @@ void CPianoRoll::ComposeRollBuffer(CDC& dc, int width, int rollH,
 {
     DrawHistoryArea(dc, width, rollH, histCount, hist);
     DrawPlayheadRow(dc, width, rollH, live);
-    DrawExprLegend(dc, width, rollH);
+    // 凡例(記号の意味)はロールバッファへ焼き込まず、OnPaint で最終画面へ
+    // 半透明オーバーレイとして重ねる(背景の黒をアルファ化して下のバーを透かす)。
 }
 
 void CPianoRoll::DrawPlayheadRow(CDC& dc, int width, int rollH, const NoteFrame& live) const
@@ -2650,7 +2728,7 @@ bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const
     DrawPlayheadRow(m_rollScratchDC, width, rollH, live);
 
     m_rollDC.BitBlt(0, 0, width, rollH, &m_rollScratchDC, 0, 0, SRCCOPY);
-    DrawExprLegend(m_rollDC, width, rollH);
+    // 凡例はここでは焼き込まない(OnPaint で半透明オーバーレイ描画)。
     m_lastScrollPx = scrollPx;
     m_lastScrollHealTop = 0;
     return true;
@@ -2692,6 +2770,9 @@ LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
 LRESULT CPianoRoll::OnAnalysisDone(WPARAM, LPARAM)
 {
     if (m_paintDisabled || !::IsWindow(m_hWnd)) return 0;
+    // V-Sync には縛らず、解析が出来たフレームからどんどん描画する(自由走行)。
+    // V-Sync 同期にするとかえってカクついたため、解析完了ごとに再描画して
+    // 流れるようにスクロールさせる。
     ApplySyncInvalidate();
     return 0;
 }
@@ -3017,6 +3098,30 @@ void CPianoRoll::OnPaint()
         m_keyBufReady = true;
     }
 
+    // 凡例(記号の意味)は m_rollDC に「半透明で焼き込み」してから提示する。
+    // アクリル時の最終面はアルファ前提(クロマキャッシュ)で、GDI で直接重ねると
+    // アルファ0=完全透過になり文字すら出なくなる。そこで一旦 m_rollDC に焼き込み、
+    // 通常Blit/クロマ変換の両方で正しく不透明に提示されるようにする。
+    // 焼き込み前の下地バーを退避し、提示後に書き戻すことで、次のスクロールに
+    // 凡例が混入(α重ねの蓄積)するのを防ぐ。下地バーは毎フレーム新鮮なので
+    // バーが透けて見える表現は維持される。
+    CRect lgPanel;
+    GetExprLegendPanelRect(w, rollH, lgPanel);
+    const bool haveLegend = m_rollReady && !lgPanel.IsRectEmpty() && m_rollDC.GetSafeHdc();
+    CDC   lgBgDC;
+    CBitmap lgBgBmp;
+    CBitmap* lgBgOld = nullptr;
+    bool legendBaked = false;
+    if (haveLegend) {
+        const int pw = lgPanel.Width(), ph = lgPanel.Height();
+        if (lgBgDC.CreateCompatibleDC(&dc) && lgBgBmp.CreateCompatibleBitmap(&dc, pw, ph)) {
+            lgBgOld = lgBgDC.SelectObject(&lgBgBmp);
+            lgBgDC.BitBlt(0, 0, pw, ph, &m_rollDC, lgPanel.left, lgPanel.top, SRCCOPY); // 下地退避
+            DrawExprLegendContent(m_rollDC, w, rollH, lgPanel);                          // 焼き込み(α合成)
+            legendBaked = true;
+        }
+    }
+
 #if CCUSTOM_AERO_SUPPORT
     if (savedata.aero == 1 && CCC_IsWin11()) {
         if (m_chromaW != w || m_chromaH != h) {
@@ -3070,14 +3175,23 @@ void CPianoRoll::OnPaint()
             dc.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
     }
 
+	// 提示が終わったら m_rollDC の凡例領域を下地バーへ戻す(次スクロールへの混入防止)。
+	if (legendBaked) {
+		m_rollDC.BitBlt(lgPanel.left, lgPanel.top, lgPanel.Width(), lgPanel.Height(),
+			&lgBgDC, 0, 0, SRCCOPY);
+		if (lgBgOld) lgBgDC.SelectObject(lgBgOld);
+	}
+
     if (didRollUpdate)
         m_historyDirty = false;
     if (clipKey || needKeyDraw) {
         m_keyDirty = false;
         m_meterDirty = false;
     }
-    if (needAnotherRollFrame)
-        Invalidate(FALSE);
+    // 追い付き用の即時自己再描画はしない。ここで Invalidate すると WM_PAINT が
+    // 連鎖し、アクリル時の重いペイントで UI スレッドを占有してしまう。
+    // 残りの保留フレームは次の解析完了(OnAnalysisDone)/同期(OnSyncRequest)時に描く。
+    (void)needAnotherRollFrame;
 }
 
 void CPianoRoll::OnTimer(UINT_PTR nIDEvent)

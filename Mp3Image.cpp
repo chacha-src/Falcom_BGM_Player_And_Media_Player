@@ -17,6 +17,60 @@ extern CMp3Image *mi;
 extern int killw1;
 extern OggVorbis_File vf;
 extern ULONGLONG po;
+
+static bool FindId3ApicInBuffer(const BYTE* bufimage, int scanLen, ULONGLONG baseOffset, ULONGLONG& absImagePos, UINT& size)
+{
+	if (!bufimage || scanLen < 20)
+		return false;
+	for (int j = 0; j < scanLen - 10; j++) {
+		if (bufimage[j] != 0x41 || bufimage[j + 1] != 0x50 || bufimage[j + 2] != 0x49 || bufimage[j + 3] != 0x43)
+			continue;
+		size = (UINT)bufimage[j + 4];
+		size <<= 8;
+		size |= (UINT)bufimage[j + 5];
+		size <<= 8;
+		size |= (UINT)bufimage[j + 6];
+		size <<= 8;
+		size |= (UINT)bufimage[j + 7];
+		ULONGLONG enc = bufimage[j + 10];
+		ULONGLONG rel = (ULONGLONG)j + (4 + 4 + 3 + 6);
+		int flg = 0;
+		for (; rel < (ULONGLONG)scanLen; rel++) {
+			if (bufimage[rel] == 0)
+				break;
+		}
+		rel += 2;
+		if (rel < (ULONGLONG)scanLen && (bufimage[rel] == 0xff || bufimage[rel] == 0xfe)) {
+			for (; rel < (ULONGLONG)scanLen; rel++) {
+				if (enc == 1) {
+					if (bufimage[rel] == 0 && bufimage[rel + 1] == 0) {
+						if (rel + 2 < (ULONGLONG)scanLen && bufimage[rel + 1] == 0 && bufimage[rel + 2] == 0)
+							flg = 1;
+						break;
+					}
+				}
+				else {
+					if (bufimage[rel] == 0) {
+						flg = 1;
+						break;
+					}
+				}
+			}
+			if (rel >= (ULONGLONG)scanLen)
+				return false;
+			rel += (ULONGLONG)flg;
+			if (enc == 1)
+				rel += 2;
+		}
+		else {
+			rel++;
+		}
+		absImagePos = baseOffset + rel;
+		return (size > 0);
+	}
+	return false;
+}
+
 void CMp3Image::OnNcDestroy()
 {
 	CCustomBlurDialogBase::OnNcDestroy();
@@ -470,44 +524,66 @@ void CMp3Image::Load(CString s)
 		i += 4;
 		s2 += _T("111.bmp");
 	}
-	else if (s.Right(3) == "dsf" || s.Right(3) == "dff") {
-		CString tagfile, tagname, tagalbum;
-		CFile f; f.Open(s, CFile::modeRead | CFile::shareDenyWrite);
-		f.Seek((ULONGLONG)po, CFile::begin);
-		int read = f.Read(bufimage, sizeof(bufimage));
-		f.Close();
-		for (i = 0; i < read; i++) {// 00 06 5D 6A 64 61 74 61
-			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'j' && bufimage[i + 7] == 'p' && bufimage[i + 8] == 'e' && bufimage[i + 9] == 'g') {
-				s1 += _T("111.jpg");
-				i++;
-				break;
-			}
-			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'p' && bufimage[i + 7] == 'n' && bufimage[i + 8] == 'g') {
-				s1 += _T("111.png");
-				break;
-			}
-		}
-		if (i == read) {
+	else if (s.Right(3) == "wav") {
+		const int kScan = 512 * 1024;
+		const ULONGLONG fLen = ff.GetLength();
+		int scanLen = (fLen > (ULONGLONG)kScan) ? kScan : (int)fLen;
+		bool ok = false;
+		auto tryRegion = [&](ULONGLONG off) -> bool {
+			if (scanLen <= 0)
+				return false;
+			ZeroMemory(bufimage, scanLen + 1);
+			ff.Seek(off, CFile::begin);
+			if ((UINT)ff.Read(bufimage, scanLen) != (UINT)scanLen)
+				return false;
+			ULONGLONG imgPos = 0;
+			if (!FindId3ApicInBuffer(bufimage, scanLen, off, imgPos, size))
+				return false;
+			i = imgPos;
+			s2 += _T("111.bmp");
+			return true;
+		};
+		ok = tryRegion(0);
+		if (!ok && fLen > (ULONGLONG)kScan)
+			ok = tryRegion(fLen - (ULONGLONG)kScan);
+		if (!ok) {
 			DestroyWindow();
 			return;
 		}
-		for (i = 0; i < read; i++) {
-			if (bufimage[i] == 'A' && bufimage[i + 1] == 'P' && bufimage[i + 2] == 'I' && bufimage[i + 3] == 'C') {
-				break;
-			}
+	}
+	else if (s.Right(3) == "dsf" || s.Right(3) == "dff" || s.Right(3) == "wsd") {
+		const int kScan = 512 * 1024;
+		const ULONGLONG fLen = ff.GetLength();
+		bool ok = false;
+		auto tryRegion = [&](ULONGLONG off, bool requireId3) -> bool {
+			if (off >= fLen)
+				return false;
+			int scanLen = (fLen - off > (ULONGLONG)kScan) ? kScan : (int)(fLen - off);
+			if (scanLen < 20)
+				return false;
+			ZeroMemory(bufimage, scanLen + 1);
+			ff.Seek(off, CFile::begin);
+			if ((UINT)ff.Read(bufimage, scanLen) != (UINT)scanLen)
+				return false;
+			if (requireId3 && (bufimage[0] != 'I' || bufimage[1] != 'D' || bufimage[2] != '3'))
+				return false;
+			ULONGLONG imgPos = 0;
+			if (!FindId3ApicInBuffer(bufimage, scanLen, off, imgPos, size))
+				return false;
+			i = imgPos;
+			s2 += _T("111.bmp");
+			return true;
+		};
+		if (po > 0 && po < fLen)
+			ok = tryRegion(po, true);
+		if (!ok)
+			ok = tryRegion(0, false);
+		if (!ok && fLen > (ULONGLONG)kScan)
+			ok = tryRegion(fLen - (ULONGLONG)kScan, false);
+		if (!ok) {
+			DestroyWindow();
+			return;
 		}
-		i += 4;
-		size = (UINT)bufimage[i];
-		size <<= 8;
-		size |= (UINT)bufimage[i + 1];
-		size <<= 8;
-		size |= (UINT)bufimage[i + 2];
-		size <<= 8;
-		size |= (UINT)bufimage[i + 3];
-
-		i += 4 + po + 16;
-		s2 += _T("111.bmp");
-
 	}
 
 	if (!(s.Right(3) == "ogg" || s.Right(6) == ".qull3")) {

@@ -1828,7 +1828,7 @@ static void DrawLooseRibbon(CDC* pDC, const CRect& rc, COLORREF c)
 // ============================================================================
 static UINT_PTR g_inwomanTimer = 0;
 static int      g_f12Count = 0;
-static DWORD    g_f12Last = 0;
+static DWORD    g_f12First = 0;   // 連打シーケンスの最初の F12 を押した時刻
 
 // ちらつき対策: 背景消去を伴う全画面再描画はやめ、オーナードロー(ダブルバッファ)の
 // カスタムコントロールだけを消去なしで無効化する。
@@ -1879,8 +1879,13 @@ BOOL CCC_ProcessInwomanHotkey(MSG* pMsg, CWnd* pWnd)
         return FALSE;
 
     const DWORD now = ::GetTickCount();
-    if (now - g_f12Last > 2500) g_f12Count = 0; // 連打が途切れたらリセット
-    g_f12Last = now;
+    // 裏モードらしく「2秒以内に5連打」を要求する。最初の押下から2秒を超えたら
+    // 回数をリセットして最初からやり直し。
+    if (g_f12Count == 0 || (now - g_f12First) > 2000)
+    {
+        g_f12Count = 0;
+        g_f12First = now;
+    }
 
     if (++g_f12Count >= 5)
     {
@@ -1898,35 +1903,63 @@ static void CCC_DrawAhegaoFace(CDC* pDC, int cx, int cy, int sz, double twitch, 
 {
     if (!pDC || sz < 8) return;
 
-    // ほてり(頬の赤み)
+    // 深い火照り(頬の赤み)— 濃いめにして発情感を強める
     if (!bAeroTrans)
     {
         const int rx = sz / 2, ry = sz / 3;
-        FillRectAlpha(pDC, CRect(cx - sz / 2 - rx / 2, cy, cx - sz / 6, cy + ry), RGB(255, 90, 130), 70);
-        FillRectAlpha(pDC, CRect(cx + sz / 6, cy, cx + sz / 2 + rx / 2, cy + ry), RGB(255, 90, 130), 70);
+        FillRectAlpha(pDC, CRect(cx - sz / 2 - rx / 2, cy, cx - sz / 6, cy + ry), RGB(255, 70, 120), 110);
+        FillRectAlpha(pDC, CRect(cx + sz / 6, cy, cx + sz / 2 + rx / 2, cy + ry), RGB(255, 70, 120), 110);
     }
 
-    // ハート目 ×2(イってる感)
     const int eo = sz / 3;
     const int ey = cy - sz / 8 - (int)(sz / 8 * twitch); // ビクッで上に
     const int es = max(4, sz / 2);
-    DrawHeart(pDC, CRect(cx - eo - es / 2, ey - es / 2, cx - eo + es / 2, ey + es / 2), RGB(255, 40, 92));
-    DrawHeart(pDC, CRect(cx + eo - es / 2, ey - es / 2, cx + eo + es / 2, ey + es / 2), RGB(255, 40, 92));
+    // 目: 普段は「とろん」と潤んだ半目(ハート頼みを減らす)。
+    //     絶頂(twitch高)の瞬間だけハート目にして"イってる"感を出す。
+    if (twitch > 0.55)
+    {
+        DrawHeart(pDC, CRect(cx - eo - es / 2, ey - es / 2, cx - eo + es / 2, ey + es / 2), RGB(255, 40, 92));
+        DrawHeart(pDC, CRect(cx + eo - es / 2, ey - es / 2, cx + eo + es / 2, ey + es / 2), RGB(255, 40, 92));
+    }
+    else
+    {
+        const int er = max(2, es / 2);
+        CBrush be(RGB(90, 40, 70));
+        CBrush* obe = pDC->SelectObject(&be);
+        CGdiObject* ope = pDC->SelectStockObject(NULL_PEN);
+        pDC->Ellipse(cx - eo - er, ey - er, cx - eo + er, ey + er);
+        pDC->Ellipse(cx + eo - er, ey - er, cx + eo + er, ey + er);
+        if (ope) pDC->SelectObject(ope);
+        pDC->SelectObject(obe);
+        DrawShine(pDC, cx - eo - er / 3, ey - er / 3, max(1, er / 3), max(1, er / 2), RGB(255, 200, 225));
+        DrawShine(pDC, cx + eo - er / 3, ey - er / 3, max(1, er / 3), max(1, er / 2), RGB(255, 200, 225));
+        // 重い上まぶた(半目)
+        CPen lid(PS_SOLID, max(1, sz / 14), RGB(120, 40, 70));
+        CPen* opn = pDC->SelectObject(&lid);
+        pDC->MoveTo(cx - eo - er, ey - er / 2); pDC->LineTo(cx - eo + er, ey - er / 2);
+        pDC->MoveTo(cx + eo - er, ey - er / 2); pDC->LineTo(cx + eo + er, ey - er / 2);
+        pDC->SelectObject(opn);
+    }
 
-    // 半開きの口 + とろけた舌
+    // 半開きの口 + だらしなく伸びた舌(ビクッで大きく開く)
     const int my = cy + sz / 3;
-    const int mw = max(3, sz / 3);
-    const int mh = max(2, sz / 5) + (int)(sz / 6 * twitch); // ビクッで開く
+    const int mw = max(4, sz * 2 / 5);
+    const int mh = max(3, sz / 5) + (int)(sz / 5 * twitch);
     CBrush bm(RGB(150, 30, 52));
     CBrush* ob = pDC->SelectObject(&bm);
     CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
     pDC->Ellipse(cx - mw / 2, my - mh / 2, cx + mw / 2, my + mh / 2 + 1);
-    // 舌(下に少し垂れる)
+    // 舌(下にだらりと伸びる)
     CBrush bt(RGB(255, 120, 150));
     pDC->SelectObject(&bt);
-    pDC->RoundRect(cx - mw / 4, my, cx + mw / 4, my + mh / 2 + 2, 2, 2);
+    pDC->RoundRect(cx - mw / 4, my, cx + mw / 4, my + mh / 2 + (int)(sz / 4 * (0.4 + twitch)), 3, 3);
     if (op) pDC->SelectObject(op);
     pDC->SelectObject(ob);
+
+    // よだれ(口角から1筋たらり)
+    if (!bAeroTrans)
+        FillRectAlpha(pDC, CRect(cx + mw / 2 - 1, my, cx + mw / 2 + 1, my + sz / 3), RGB(235, 240, 255), 140);
+    DrawShine(pDC, cx - mw / 6, my, max(1, mw / 6), max(1, mh / 4), RGB(255, 200, 220));
 
     // 汗(こめかみ)
     CBrush bs(RGB(190, 225, 255));
@@ -1937,8 +1970,105 @@ static void CCC_DrawAhegaoFace(CDC* pDC, int cx, int cy, int sz, double twitch, 
     pDC->SelectObject(ob2);
 }
 
+// 愛液表現: 下端からとろりと滴る半透明のしずく + 細い糸。
+// 透明感のある乳白色〜淡いピンクで、脈動(breath)とビクッ(twitch)で伸縮する。
+static void CCC_DrawLoveFluid(CDC* pDC, const CRect& rc, double breath, double twitch, BOOL bAeroTrans)
+{
+    if (!pDC || rc.Width() < 12 || rc.Height() < 12) return;
+    const COLORREF fluid = RGB(235, 240, 255);
+    const COLORREF tint  = RGB(255, 226, 241);
+
+    // 下端にとろりとした溜まり(薄い半透明の帯)を敷いて"濡れ"感を強める
+    if (!bAeroTrans)
+    {
+        const int pool = max(2, rc.Height() / 12);
+        FillRectAlpha(pDC, CRect(rc.left, rc.bottom - pool, rc.right, rc.bottom), fluid, 70);
+    }
+
+    const int n = (rc.Width() >= 64) ? 4 : 3;
+    for (int i = 0; i < n; ++i)
+    {
+        int x = rc.left + rc.Width() * (i * 2 + 1) / (n * 2);
+        x += (int)(2 * sin((double)i * 1.7 + breath * 6.2831853));
+        int drip = (int)(rc.Height() * 0.22 * (0.5 + 0.5 * breath) + rc.Height() * 0.16 * twitch);
+        if (drip < 4) drip = 4;
+        if (drip > rc.Height() * 3 / 5) drip = rc.Height() * 3 / 5;
+        const int y0 = rc.bottom - drip;
+        if (!bAeroTrans)
+            FillRectAlpha(pDC, CRect(x - 1, y0, x + 1, rc.bottom), fluid, 140);
+        const int r = max(2, rc.Width() / 22);
+        CBrush bb(tint);
+        CBrush* ob = pDC->SelectObject(&bb);
+        CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
+        pDC->Ellipse(x - r, rc.bottom - r * 2, x + r, rc.bottom);
+        if (op) pDC->SelectObject(op);
+        pDC->SelectObject(ob);
+        DrawShine(pDC, x - r / 2, rc.bottom - r - r / 2, max(1, r / 3), max(1, r / 2));
+    }
+}
+
+// バイブ表現(主役): 丸い先端のトイ + ブーンの振動線。twitch/時間で小刻みに震える。
+// 愛液まみれの照り(濡れツヤ)をまとい、本体の下端から愛液を糸を引いて滴らせる。
+// 方向性: 体液・玩具中心 / イッてる最中(脈動 breath とビクッ twitch で滴りが伸びる)。
+static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double twitch, double breath, BOOL bAeroTrans)
+{
+    if (!pDC || sz < 10) return;
+    cx += (int)(2 * sin(t / 16.0)) + (int)(2 * twitch);   // ブーンと震える
+    const int w = max(5, sz / 3);
+    const int h = sz;
+    const int top = cy - h / 2;
+    const int bot = cy + h / 2;
+    const COLORREF body  = RGB(228, 126, 198);
+    const COLORREF tip   = RGB(255, 182, 226);
+    const COLORREF fluid = RGB(235, 240, 255);
+
+    CBrush bb(body);
+    CBrush* ob = pDC->SelectObject(&bb);
+    CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
+    pDC->RoundRect(cx - w / 2, top + w / 2, cx + w / 2, bot, w, w);   // 本体
+    CBrush bt(tip);
+    pDC->SelectObject(&bt);
+    pDC->Ellipse(cx - w / 2, top, cx + w / 2, top + w);              // 丸い先端
+    if (op) pDC->SelectObject(op);
+    pDC->SelectObject(ob);
+
+    // 愛液まみれの濡れツヤ(縦ハイライト2本)
+    DrawShine(pDC, cx - w / 5, top + w / 3, max(1, w / 6), max(2, h / 3), RGB(255, 235, 245));
+    DrawShine(pDC, cx + w / 6, cy, max(1, w / 8), max(1, h / 6), RGB(255, 255, 255));
+
+    // 振動線(ブーン)
+    CPen pen(PS_SOLID, 1, RGB(255, 212, 236));
+    CPen* opn = pDC->SelectObject(&pen);
+    for (int s = 0; s < 2; ++s)
+    {
+        const int dx = w / 2 + 3 + s * 3;
+        pDC->MoveTo(cx - dx, cy - h / 5); pDC->LineTo(cx - dx, cy + h / 8);
+        pDC->MoveTo(cx + dx, cy - h / 5); pDC->LineTo(cx + dx, cy + h / 8);
+    }
+    pDC->SelectObject(opn);
+
+    // 本体下端から愛液を垂らす(糸+先端のしずく。脈動/ビクッで伸びる)
+    for (int i = 0; i < 2; ++i)
+    {
+        const int x = cx + ((i == 0) ? -w / 5 : w / 5);
+        int drip = (int)(h * 0.32 * (0.5 + 0.5 * breath) + h * 0.28 * twitch);
+        if (drip < 4) drip = 4;
+        if (!bAeroTrans)
+            FillRectAlpha(pDC, CRect(x - 1, bot - 1, x + 1, bot + drip), fluid, 155);
+        const int r = max(2, w / 4);
+        CBrush bf(RGB(255, 230, 244));
+        CBrush* obf = pDC->SelectObject(&bf);
+        CGdiObject* opf = pDC->SelectStockObject(NULL_PEN);
+        pDC->Ellipse(x - r, bot + drip - r, x + r, bot + drip + r);
+        if (opf) pDC->SelectObject(opf);
+        pDC->SelectObject(obf);
+        DrawShine(pDC, x - r / 3, bot + drip - r / 3, max(1, r / 3), max(1, r / 2));
+    }
+}
+
 // 淫女モードの演出オーバーレイ(方向性: 発情して自慰中の子が"そこにいる"雰囲気)。
 // SM/拘束は無し。読みやすさ優先で中央は塗らず、縁と隅だけで火照り・トロ顔・汗・ビクッ。
+// ハート一辺倒にならないよう、愛液(滴り)とバイブ(振動)も添える。
 // bAeroTrans時は半透明演出を避ける。
 static void CCC_DrawInwomanOverlay(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
 {
@@ -1955,32 +2085,47 @@ static void CCC_DrawInwomanOverlay(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
     twitch *= twitch;
     const double heat = min(1.0, breath * 0.6 + twitch);
 
-    // --- 発情の火照り: 縁だけ熱く脈打つ(中央は塗らない=文字/アイコンは読める) ---
+    // --- 発情の火照り: 縁が熱く脈打つ(中央は塗らない=文字/アイコンは読める) ---
+    //     濃いめ+広めにして"のぼせた"色気を強調する。
     if (!bAeroTrans)
     {
-        const int g = 14 + (int)(55 * heat);
-        const COLORREF hot = RGB(255, 70, 120);
-        const int b = max(2, min(W, H) / 8);
+        const int g = 22 + (int)(78 * heat);
+        const COLORREF hot = RGB(255, 60, 110);
+        const int b = max(3, min(W, H) / 6);
         FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.right, rc.top + b), hot, g);
         FillRectAlpha(pDC, CRect(rc.left, rc.bottom - b, rc.right, rc.bottom), hot, g);
-        FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.left + b, rc.bottom), hot, g * 6 / 10);
-        FillRectAlpha(pDC, CRect(rc.right - b, rc.top, rc.right, rc.bottom), hot, g * 6 / 10);
+        FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.left + b, rc.bottom), hot, g * 7 / 10);
+        FillRectAlpha(pDC, CRect(rc.right - b, rc.top, rc.right, rc.bottom), hot, g * 7 / 10);
+
+        // 上端から立ちのぼる"はぁ…"の湯気(白い半透明の小さな塊が揺らぐ)
+        if (W >= 40 && H >= 22)
+        {
+            const int puffs = (W >= 80) ? 3 : 2;
+            for (int i = 0; i < puffs; ++i)
+            {
+                const double ph = t / 520.0 + i * 1.3;
+                const int px = rc.left + rc.Width() * (i * 2 + 1) / (puffs * 2) + (int)(3 * sin(ph));
+                const int rise = (int)((0.5 + 0.5 * sin(ph)) * (H / 6));
+                const int py = rc.top + 3 + rise;
+                const int pr = max(2, W / 26);
+                FillRectAlpha(pDC, CRect(px - pr, py - pr, px + pr, py + pr), RGB(255, 245, 250), 26);
+            }
+        }
     }
 
-    // --- トロ顔: ちょっと大きめのコントロールだけ、右上の隅に小さく ---
-    if (W >= 46 && H >= 24)
+    // --- 主役: 愛液を垂らしたバイブ(体液・玩具中心。顔は出さない) ---
+    // 右寄りに立てて中央の文字/アイコンを大きく覆わないようにしつつ、はっきり見せる。
+    if (W >= 40 && H >= 20)
     {
-        const int fs = min(16, min(W * 4 / 10, H * 7 / 10));
-        const int fcx = rc.right - fs - 2 + (int)(2 * sin(t / 70.0)); // 小刻みに震える
-        const int fcy = rc.top + fs / 2 + 2 + (int)(2 * twitch);
-        CCC_DrawAhegaoFace(pDC, fcx, fcy, fs, twitch, bAeroTrans);
+        const int vs = min(H * 7 / 10, max(16, W * 4 / 10));
+        const int vw = max(5, vs / 3);
+        const int vx = rc.right - vw / 2 - max(4, W / 12);
+        const int vy = rc.top + H / 2 - (int)(2 * twitch);
+        CCC_DrawVibrator(pDC, vx, vy, vs, (double)t, twitch, breath, bAeroTrans);
     }
-    else
-    {
-        // 小さいコントロール: 右上にハート目ひとつだけ、ちょこっと
-        const int hx = rc.right - 7, hy = rc.top + 6;
-        DrawHeart(pDC, CRect(hx - 4, hy - 4, hx + 4, hy + 4), RGB(255, 40, 92));
-    }
+
+    // --- 愛液: 下端からとろりと滴る(溜まり+しずく) ---
+    CCC_DrawLoveFluid(pDC, rc, breath, twitch, bAeroTrans);
 
     // --- 汗の玉: 左上から1粒、ゆらゆら(べた塗りなので透過でも安全) ---
     {

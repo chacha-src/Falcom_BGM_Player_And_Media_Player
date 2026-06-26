@@ -14,6 +14,9 @@
 #ifndef WM_OGG_DEFERRED_HEAVY_INIT
 #define WM_OGG_DEFERRED_HEAVY_INIT (WM_APP + 100)
 #endif
+#ifndef WM_PLAYBACK_AUTO_STOPPED
+#define WM_PLAYBACK_AUTO_STOPPED (WM_APP + 72)
+#endif
 
 #if _MSC_VER > 1000
 #pragma once
@@ -336,6 +339,7 @@ public:
 	void StopTimerpVsyncThread();
 	afx_msg LRESULT OnTimerpVsyncTick(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnRefreshAeroAll(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnPlaybackAutoStopped(WPARAM wParam, LPARAM lParam);
 	HANDLE m_hTimerpVsyncThread;
 	HANDLE m_hTimerpVsyncStopEvent;
 };

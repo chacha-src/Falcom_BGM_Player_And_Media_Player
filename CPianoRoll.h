@@ -154,9 +154,9 @@ private:
     uint8_t m_noteAgeFrames[KEY_COUNT];      // ノートオン後の経過フレーム(スクープ/スライド判定)
     uint8_t m_scoopLatch[KEY_COUNT];
     uint8_t m_exprFlags[KEY_COUNT];
-    float m_vibHist[KEY_COUNT][10];          // 強度変動履歴(ビブラート判定用)
+    float m_vibHist[KEY_COUNT][16];          // 強度変動履歴(ビブラート判定用)
     uint8_t m_vibHistCount[KEY_COUNT];
-    static constexpr int VIB_HIST_LEN = 10;
+    static constexpr int VIB_HIST_LEN = 16;
     bool  m_analysisHasBass = false;
     std::vector<double> m_analysisBuf;
     std::vector<double> m_bassAnalysisBuf;

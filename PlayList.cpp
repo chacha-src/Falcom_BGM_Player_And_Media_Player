@@ -326,6 +326,7 @@ extern int fade1;
 extern IMediaPosition *pMediaPosition;
 extern int mode,videoonly,playf;
 extern int plcnt;
+extern int playy;
 extern save savedata;
 extern CPlayList* pl;
 CImageBase* playbase;
@@ -569,6 +570,13 @@ void CPlayList::OnBnClickedOk()
 
 BOOL CPlayList::PreTranslateMessage(MSG* pMsg)
 {
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN) {
+		CWnd* pFocus = GetFocus();
+		if (pFocus && pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()) {
+			OnFindUp();  // Enter = 次の候補へ（親ダイアログの IDOK/終了を防ぐ）
+			return TRUE;
+		}
+	}
 	if (m_lc.GetSafeHwnd() && m_tool.GetCheck())
 	{
 		if (m_lc.PreTranslateMessage(pMsg))
@@ -882,6 +890,7 @@ extern int loop1, loop2;
 
 void CPlayList::Get(int i)
 {
+		pnt1 = -1;  // 再生曲選択時はあいまい検索アンカーを解除
 		fnn=pc[i].name; filen=pc[i].fol; modesub=pc[i].sub; loop1=pc[i].loop1; loop2=pc[i].loop2; ret2=pc[i].ret2;
 		for(int k=0;k<playcnt;k++){
 			m_lc.SetItemState(k,m_lc.GetItemState(k,LVIS_SELECTED)&~LVIS_SELECTED,LVIS_SELECTED);
@@ -4396,9 +4405,10 @@ void timerpl1(UINT nIDEvent,CPlayList* pl)
 			pl->KillTimer(4930);
 		}
 	}
+	// Timer 5000: pnt1 はあいまい検索用。SIcon(pnt1) すると再生中♪が検索行へ飛び、
+	// スクロール位置が元に戻る不具合の原因になるため何もしない。
 	if(nIDEvent==5000){
 		pl->KillTimer(5000);
-		pl->SIcon(pl->pnt1);
 	}
 	if(nIDEvent==40){
 		pl->KillTimer(40);
@@ -5137,6 +5147,16 @@ void CPlayList::OnCbnSelchangeCombo1()
 	}
 	m_lc.SetItemCount(playcnt);
 	for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
+	// 再生中にプレイリストを切り替えた場合、同一曲があれば ♪ を復元
+	if (playy != 0 && filen.GetLength() > 0) {
+		for (int j = 0; j < playcnt; j++) {
+			if (filen.CompareNoCase(pc[j].fol) == 0) {
+				plcnt = j;
+				SIcon(j);
+				break;
+			}
+		}
+	}
 	ClampPlaylistSelectionIndices(this);
 	m_lc.RedrawWindow();
 	Save();

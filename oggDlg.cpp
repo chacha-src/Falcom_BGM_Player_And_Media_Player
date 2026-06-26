@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -997,6 +997,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_REFRESH_AERO_ALL, &COggDlg::OnRefreshAeroAll)
 	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
 	ON_MESSAGE(WM_OGG_DEFERRED_HEAVY_INIT, OnDeferredHeavyStartup)
+	ON_MESSAGE(WM_PLAYBACK_AUTO_STOPPED, OnPlaybackAutoStopped)
 	ON_WM_COPYDATA()
 	ON_WM_KEYDOWN()
 	ON_WM_SYSKEYDOWN()
@@ -1101,6 +1102,49 @@ static int PcmOutBytesPerFrame()
 		ch = 2;
 	const int bpf = ch * (bits / 8);
 	return (bpf > 0) ? bpf : 4;
+}
+
+// bufkpi3 リングバッファ。poss が bufSize に達すると従来コードは OOB memcpy になるため pos>=bufSize で 0 に戻す。
+static inline void RingBufWrite(BYTE* buf, int bufSize, int& pos, const void* src, int len)
+{
+	if (len <= 0 || bufSize <= 0)
+		return;
+	const uint8_t* p = (const uint8_t*)src;
+	pos %= bufSize;
+	if (pos < 0)
+		pos = 0;
+	while (len > 0) {
+		int chunk = bufSize - pos;
+		if (chunk > len)
+			chunk = len;
+		memcpy(buf + pos, p, chunk);
+		pos += chunk;
+		if (pos >= bufSize)
+			pos = 0;
+		p += chunk;
+		len -= chunk;
+	}
+}
+
+static inline void RingBufRead(void* dest, const BYTE* buf, int bufSize, int& pos, int len)
+{
+	if (len <= 0 || bufSize <= 0)
+		return;
+	uint8_t* p = (uint8_t*)dest;
+	pos %= bufSize;
+	if (pos < 0)
+		pos = 0;
+	while (len > 0) {
+		int chunk = bufSize - pos;
+		if (chunk > len)
+			chunk = len;
+		memcpy(p, buf + pos, chunk);
+		pos += chunk;
+		if (pos >= bufSize)
+			pos = 0;
+		p += chunk;
+		len -= chunk;
+	}
 }
 
 // MP3: playb を PCM フレーム数で扱う。従来は内部 playb が「フレーム×4」で、seek へは playb/(stereoなら4) を渡していた。
@@ -1355,6 +1399,14 @@ void COggDlg::OnSysCommand(UINT nID, LPARAM lParam)
 	{
 		CCustomBlurDialogBase::OnSysCommand(nID, lParam);
 	}
+}
+
+// バージョン情報ダイアログをモーダル表示する(他画面=メディアプレイヤー側から呼ぶ)。
+// CAboutDlg は oggDlg.cpp 内のローカルクラスなので、ここで公開ラッパを用意する。
+void ShowOggAboutDialog(CWnd* pParent)
+{
+	CAboutDlg dlgAbout(pParent);
+	dlgAbout.DoModal();
 }
 
 #define MDC (88*2+170-8*5)*4
@@ -2054,6 +2106,7 @@ typedef struct {
 WAVEFILEHEADER wh;
 
 int mcopy(char* a, int len);
+static int McopyAccumulate(char* dst, int wantBytes);
 long LoadOggVorbis(const TCHAR* file_name, int word, char** ogg, CSliderCtrl& m_time);
 void ReleaseOggVorbis(char**);
 void DoEvent();
@@ -2086,6 +2139,88 @@ int g_outBytesPerFrame = 4;
 int ru2 = 0, ru;
 int lo, loc, endf, ps = 0, locs;
 int poss = 0, poss2 = 0, poss3 = 0, poss4 = 0, poss5 = 0, poss6 = 0, loopcnt, pl_no;
+
+// OGG+RB: デコード位置（入力 PCM サンプル）。playb は出力側、こちらは ov_read 進行用。
+static __int64 g_oggPcmDecodePos = 0;
+// ループ/シーク直後: リングに溜める最低バイト数（RB レイテンシ吸収）。0 なら不要。
+static int g_oggRbPrimingNeed = 0;
+
+static inline int OggRbLatencyReserveBytes()
+{
+	const int bpf = PcmOutBytesPerFrame();
+	if (bpf <= 0 || wavbit_sample_Hz <= 0)
+		return 8192;
+	// 約 80ms 分を常時リングに残す（32k で ~2560 サンプル = 10KB stereo16）
+	return bpf * wavbit_sample_Hz * 80 / 1000;
+}
+
+static inline void OggFlushKpi3Ring()
+{
+	poss2 = 0;
+	poss3 = 0;
+	poss4 = 0;
+}
+
+// loop2 末尾と loop1 先頭の境界で短い等電力クロスフェード（RB リセット由来の段差を消す）
+static void OggApplyLoopBoundaryCrossfade(char* pcmBase, int tailBytes, int headBytes)
+{
+	if (!pcmBase || tailBytes < 4 || headBytes < 4)
+		return;
+	const int bpf = PcmOutBytesPerFrame();
+	if (bpf <= 0 || wavchannel <= 0)
+		return;
+	tailBytes -= tailBytes % bpf;
+	headBytes -= headBytes % bpf;
+	if (tailBytes < bpf || headBytes < bpf)
+		return;
+
+	int fadeFrames = (wavbit_sample_Hz > 0) ? (wavbit_sample_Hz / 250) : 128;
+	if (fadeFrames < 24)
+		fadeFrames = 24;
+	if (fadeFrames > 256)
+		fadeFrames = 256;
+
+	const int tailFrames = tailBytes / bpf;
+	const int headFrames = headBytes / bpf;
+	if (fadeFrames > tailFrames)
+		fadeFrames = tailFrames;
+	if (fadeFrames > headFrames)
+		fadeFrames = headFrames;
+	if (fadeFrames <= 1)
+		return;
+
+	short* pcm = (short*)pcmBase;
+	const int ch = wavchannel;
+
+	for (int i = 0; i < fadeFrames; ++i) {
+		const float t = (float)(i + 1) / (float)(fadeFrames + 1);
+		const float w = t * t * (3.0f - 2.0f * t); // smoothstep
+		const int tailFrame = tailFrames - fadeFrames + i;
+		const int headFrame = tailFrames + i;
+		for (int c = 0; c < ch; ++c) {
+			const int ti = tailFrame * ch + c;
+			const int hi = headFrame * ch + c;
+			const float tailS = (float)pcm[ti];
+			const float headS = (float)pcm[hi];
+			pcm[ti] = (short)(tailS * (1.0f - w));
+			pcm[hi] = (short)(tailS * (1.0f - w) + headS * w);
+		}
+	}
+}
+
+// bufkpi3 リングの poss2/3/4 がずれるとヒープ外書き込み→別スレッドでまちまち AV になる。mcopy 入口で正規化。
+static inline void SanitizeKpi3RingState(int maxBufBytes)
+{
+	if (maxBufBytes <= 0)
+		return;
+	if (poss2 < 0 || poss3 < 0 || poss4 < 0 ||
+		poss2 >= maxBufBytes || poss3 >= maxBufBytes || poss4 > maxBufBytes) {
+		poss2 = 0;
+		poss3 = 0;
+		poss4 = 0;
+	}
+}
+
 int current_section;
 long whsize;
 int ret2;
@@ -6537,6 +6672,8 @@ void COggDlg::play()
 	m_time.SetPos((int)playb);
 	if (ogg) ov_pcm_seek_lap(&vf, (ogg_int64_t)0);
 	poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
+	g_oggPcmDecodePos = 0;
+	g_oggRbPrimingNeed = 0;
 	ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 	ZeroMemory(bufkpi_, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 	ZeroMemory(bufkpi2, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
@@ -8989,6 +9126,8 @@ void COggDlg::play()
 	thn = TRUE;
 	plf = 1; fade1 = 0; fade = 1.0f; fadeadd = 0.0f;
 	poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
+	g_oggPcmDecodePos = 0;
+	g_oggRbPrimingNeed = OggRbLatencyReserveBytes();
 	mcnt = mcnt1 = mcnt2 = mcnt3 = mcnt4 = mcnt5 = mcnt6 = 0;
 	char* pdsb;
 	lo = 0; loc = 0;
@@ -9010,6 +9149,7 @@ void COggDlg::play()
 	if (true) {
 		ULONG PlayCursor, WriteCursor = 0;
 		playb = 0;
+		g_oggPcmDecodePos = 0;
 		if (m_dsb)m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);//再生位置取得
 		len1 = (int)WriteCursor;//書き込み範囲取得
 		len2 = 0;
@@ -11396,16 +11536,7 @@ int readBuffwav(char* bw, int cnt)
 			if (len2 > 0) {
 				buffRbStallIters = 0;
 				// 書き込み
-				if (poss2 + len2 > max_buffer_size) {
-					int first = max_buffer_size - poss2;
-					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
-					memcpy(bufkpi3, outputRawBytesData.data() + first, len2 - first);
-					poss2 = (poss2 + len2) % max_buffer_size;
-				}
-				else {
-					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), len2);
-					poss2 += len2;
-				}
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 				poss4 += len2;
 			}
 			// playb はリングから bw へ渡したバイト数で進める（len2 積み上げは cnt を超え表示が実長より長くなる）
@@ -11438,16 +11569,7 @@ int readBuffwav(char* bw, int cnt)
 	cnt2 = cnt0;
 
 	if (cnt2 > 0) {
-		if (poss3 + cnt0 > max_buffer_size) {
-			int first = max_buffer_size - poss3;
-			memcpy(bw, bufkpi3 + poss3, first);
-			memcpy(bw + first, bufkpi3, cnt0 - first);
-			poss3 = (poss3 + cnt0) % max_buffer_size;
-		}
-		else {
-			memcpy(bw, bufkpi3 + poss3, cnt0);
-			poss3 += cnt0;
-		}
+		RingBufRead(bw, bufkpi3, max_buffer_size, poss3, cnt0);
 		poss4 -= cnt0;
 		{
 			const int bpf = PcmOutBytesPerFrame();
@@ -12329,16 +12451,7 @@ int readkpi(BYTE* bw, int cnt)
 				int len2 = readtempo(bufkpi, cnt);
 
 				if (len2 > 0) {
-					if (poss2 + len2 > max_buffer_size) {
-						int first = max_buffer_size - poss2;
-						memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
-						memcpy(bufkpi3, outputRawBytesData.data() + first, len2 - first);
-						poss2 = (poss2 + len2) % max_buffer_size;
-					}
-					else {
-						memcpy(bufkpi3 + poss2, outputRawBytesData.data(), len2);
-						poss2 += len2;
-					}
+					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 					poss4 += len2;
 					if (cnt3 < cnt)
 						return cnt4;
@@ -12355,16 +12468,7 @@ int readkpi(BYTE* bw, int cnt)
 
 		if (cnt2 > 0) {
 			int to_read = cnt;
-			if (poss3 + to_read > max_buffer_size) {
-				int first = max_buffer_size - poss3;
-				memcpy(bw, bufkpi3 + poss3, first);
-				memcpy(bw + first, bufkpi3, to_read - first);
-				poss3 = (poss3 + to_read) % max_buffer_size;
-			}
-			else {
-				memcpy(bw, bufkpi3 + poss3, to_read);
-				poss3 += to_read;
-			}
+			RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
 			poss4 -= to_read;
 		}
 
@@ -12570,16 +12674,7 @@ int readm4a(BYTE* bw, int cnt)
 
 					if (len2 > 0) {
 						// 書き込み
-						if (poss2 + len2 > max_buffer_size) {
-							int first = max_buffer_size - poss2;
-							memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
-							memcpy(bufkpi3, outputRawBytesData.data() + first, len2 - first);
-							poss2 = (poss2 + len2) % max_buffer_size;
-						}
-						else {
-							memcpy(bufkpi3 + poss2, outputRawBytesData.data(), len2);
-							poss2 += len2;
-						}
+						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 						poss4 += len2;
 						if (cnt3 < cnt) return cnt4;
 						if (cnt2 <= cnt3) {
@@ -12599,16 +12694,7 @@ int readm4a(BYTE* bw, int cnt)
 
 		if (cnt2 > 0) {
 			int to_read = cnt;
-			if (poss3 + to_read > max_buffer_size) {
-				int first = max_buffer_size - poss3;
-				memcpy(bw, bufkpi3 + poss3, first);
-				memcpy(bw + first, bufkpi3, to_read - first);
-				poss3 = (poss3 + to_read) % max_buffer_size;
-			}
-			else {
-				memcpy(bw, bufkpi3 + poss3, to_read);
-				poss3 += to_read;
-			}
+			RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
 			poss4 -= to_read;
 		}
 
@@ -12824,16 +12910,7 @@ int readflac(BYTE* bw, int cnt)
 					// デコード EOF: readtempo(0) が RB 尻尾を常に吐く（fade1 含む）
 					int tailLen = readtempo(bufkpi, 0);
 					if (tailLen > 0) {
-						if (poss2 + tailLen > max_buffer_size) {
-							int first = max_buffer_size - poss2;
-							memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
-							memcpy(bufkpi3, outputRawBytesData.data() + first, tailLen - first);
-							poss2 = (poss2 + tailLen) % max_buffer_size;
-						}
-						else {
-							memcpy(bufkpi3 + poss2, outputRawBytesData.data(), tailLen);
-							poss2 += tailLen;
-						}
+						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), tailLen);
 						poss4 += tailLen;
 					}
 					break;
@@ -12843,16 +12920,7 @@ int readflac(BYTE* bw, int cnt)
 				if (len2 > 0) {
 					flacRbStallIters = 0;
 					// 書き込み
-					if (poss2 + len2 > max_buffer_size) {
-						int first = max_buffer_size - poss2;
-						memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
-						memcpy(bufkpi3, outputRawBytesData.data() + first, len2 - first);
-						poss2 = (poss2 + len2) % max_buffer_size;
-					}
-					else {
-						memcpy(bufkpi3 + poss2, outputRawBytesData.data(), len2);
-						poss2 += len2;
-					}
+					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 					poss4 += len2;
 					if (cnt4 != lenl) return cnt4;
 					if (poss4 > lenl) break;
@@ -12873,16 +12941,7 @@ int readflac(BYTE* bw, int cnt)
 
 		if (cnt2 > 0) {
 			int to_read = lenl;
-			if (poss3 + to_read > max_buffer_size) {
-				int first = max_buffer_size - poss3;
-				memcpy(bw, bufkpi3 + poss3, first);
-				memcpy(bw + first, bufkpi3, to_read - first);
-				poss3 = (poss3 + to_read) % max_buffer_size;
-			}
-			else {
-				memcpy(bw, bufkpi3 + poss3, to_read);
-				poss3 += to_read;
-			}
+			RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
 			poss4 -= to_read;
 		}
 
@@ -13050,16 +13109,7 @@ int readopus(BYTE* bw, int cnt)
 
 					if (len2 > 0) {
 						// 書き込み
-						if (poss2 + len2 > max_buffer_size) {
-							int first = max_buffer_size - poss2;
-							memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
-							memcpy(bufkpi3, outputRawBytesData.data() + first, len2 - first);
-							poss2 = (poss2 + len2) % max_buffer_size;
-						}
-						else {
-							memcpy(bufkpi3 + poss2, outputRawBytesData.data(), len2);
-							poss2 += len2;
-						}
+						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 						poss4 += len2;
 						if (r < cnt) return cnt4;
 
@@ -13073,16 +13123,7 @@ int readopus(BYTE* bw, int cnt)
 
 			if (cnt2 > 0) {
 				int to_read = cnt;
-				if (poss3 + to_read > max_buffer_size) {
-					int first = max_buffer_size - poss3;
-					memcpy(bw, bufkpi3 + poss3, first);
-					memcpy(bw + first, bufkpi3, to_read - first);
-					poss3 = (poss3 + to_read) % max_buffer_size;
-				}
-				else {
-					memcpy(bw, bufkpi3 + poss3, to_read);
-					poss3 += to_read;
-				}
+				RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
 				poss4 -= to_read;
 			}
 		}
@@ -13240,7 +13281,9 @@ int readdsd(BYTE* bw, int cnt)
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 	if (poss4 <= cnt) {
 		int dsdRbStallIters = 0;
+		int fadeTailIters = 0;
 		const int kDsdRbStallMax = 512;
+		const int kFadeTailMax = 128;
 		while (true) {
 			if (IsPlaybackStopRequested())
 				break;
@@ -13270,21 +13313,15 @@ int readdsd(BYTE* bw, int cnt)
 			if (len2 > 0) {
 				dsdRbStallIters = 0;
 				// 書き込み
-				if (poss2 + len2 > max_buffer_size) {
-					int first = max_buffer_size - poss2;
-					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
-					memcpy(bufkpi3, outputRawBytesData.data() + first, len2 - first);
-					poss2 = (poss2 + len2) % max_buffer_size;
-				}
-				else {
-					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), len2);
-					poss2 += len2;
-				}
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 				poss4 += len2;
 			}
 			if (len4 != 0) break;
 			if (poss4 > cnt) break;
-			if (fade1 == 1 && muon == 0 && len2 <= 0) break;
+			if (fade1 == 1 && muon == 0) {
+				if (len2 <= 0) break;
+				if (++fadeTailIters >= kFadeTailMax) break;
+			}
 			if (len2 <= 0 && fade1 == 0 && poss4 <= cnt) {
 				if (++dsdRbStallIters >= kDsdRbStallMax)
 					break;
@@ -13300,16 +13337,7 @@ int readdsd(BYTE* bw, int cnt)
 	}
 
 	if (cnt2 > 0) {
-		if (poss3 + to_read > max_buffer_size) {
-			int first = max_buffer_size - poss3;
-			memcpy(bw, bufkpi3 + poss3, first);
-			memcpy(bw + first, bufkpi3, to_read - first);
-			poss3 = (poss3 + to_read) % max_buffer_size;
-		}
-		else {
-			memcpy(bw, bufkpi3 + poss3, to_read);
-			poss3 += to_read;
-		}
+		RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
 		poss4 -= to_read;
 	}
 
@@ -13555,16 +13583,7 @@ int readwav(BYTE* bw, int cnt)
 			}
 			if (len2 > 0) {
 				wavRbStallIters = 0;
-				if (poss2 + len2 > max_buffer_size) {
-					int first = max_buffer_size - poss2;
-					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
-					memcpy(bufkpi3, outputRawBytesData.data() + first, len2 - first);
-					poss2 = (poss2 + len2) % max_buffer_size;
-				}
-				else {
-					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), len2);
-					poss2 += len2;
-				}
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 				poss4 += len2;
 				if (rr > r) return r;
 				if (poss4 > cnt) break;
@@ -13586,16 +13605,7 @@ int readwav(BYTE* bw, int cnt)
 	cnt2 = (poss4 < cnt) ? poss4 : cnt;
 	if (cnt2 > 0) {
 		int to_read = cnt2;
-		if (poss3 + to_read > max_buffer_size) {
-			int first = max_buffer_size - poss3;
-			memcpy(bw, bufkpi3 + poss3, first);
-			memcpy(bw + first, bufkpi3, to_read - first);
-			poss3 = (poss3 + to_read) % max_buffer_size;
-		}
-		else {
-			memcpy(bw, bufkpi3 + poss3, to_read);
-			poss3 += to_read;
-		}
+		RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
 		poss4 -= to_read;
 	}
 	equaliser(bw, cnt2, reset);
@@ -13636,7 +13646,9 @@ int readmp3(BYTE* bw, int cnt)
 	if (poss4 <= cnt) {
 		// シーク直後など RB 初期レイテンシで「入力はあるが len2==0」が続く。break すると return 0 になり再生停止するので continue で足す
 		int mp3RbStallIters = 0;
+		int fadeTailIters = 0;
 		const int kMp3RbStallMax = 512;
+		const int kFadeTailMax = 128;
 		while (true) {
 			if (IsPlaybackStopRequested())
 				break;
@@ -13664,16 +13676,7 @@ int readmp3(BYTE* bw, int cnt)
 			if (len2 > 0) {
 				mp3RbStallIters = 0;
 				// 書き込み
-				if (poss2 + len2 > max_buffer_size) {
-					int first = max_buffer_size - poss2;
-					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
-					memcpy(bufkpi3, outputRawBytesData.data() + first, len2 - first);
-					poss2 = (poss2 + len2) % max_buffer_size;
-				}
-				else {
-					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), len2);
-					poss2 += len2;
-				}
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 				poss4 += len2;
 				// playb はここでは進めない。len2 を積むと「今回 bw に渡す cnt バイト」より多く数えてしまい（例: ~1.5 倍）、表示時間が実長より長くなる。
 				// ここで return r すると bw へ未コピーのまま戻り、r はデコードバイトで伸縮後バイトと単位が違う → playwavmp3 が早 EOF・fade1 誤発火・ポコ音
@@ -13684,7 +13687,10 @@ int readmp3(BYTE* bw, int cnt)
 			// r<rr（デコード欠け／EOF）で抜けないと while(true) が無限ループする
 			if (rr > r) break;
 			if (len2 <= 0 && r == 0) break;
-			if (fade1 == 1 && muon == 0 && len2 <= 0) break;
+			if (fade1 == 1 && muon == 0) {
+				if (len2 <= 0) break;
+				if (++fadeTailIters >= kFadeTailMax) break;
+			}
 			// フルブロック decode 済みだが RB がまだ出さない → 追加デコードで埋める（シーク直後のレイテンシ対策）
 			if (len2 <= 0 && r > 0 && rr == r) {
 				if (++mp3RbStallIters >= kMp3RbStallMax)
@@ -13701,16 +13707,7 @@ int readmp3(BYTE* bw, int cnt)
 	cnt2 = to_read;
 
 	if (cnt2 > 0) {
-		if (poss3 + cnt2 > max_buffer_size) {
-			int first = max_buffer_size - poss3;
-			memcpy(bw, bufkpi3 + poss3, first);
-			memcpy(bw + first, bufkpi3, cnt2 - first);
-			poss3 = (poss3 + cnt2) % max_buffer_size;
-		}
-		else {
-			memcpy(bw, bufkpi3 + poss3, cnt2);
-			poss3 += cnt2;
-		}
+		RingBufRead(bw, bufkpi3, max_buffer_size, poss3, cnt2);
 		poss4 -= cnt2;
 		{
 			const int bpf = PcmOutBytesPerFrame();
@@ -13775,150 +13772,196 @@ bool InitializeRubberBandStretcher();
 void SeekAndWarmupRubberBand(int targetPos)
 {
 	ResetAudioUpscalerPipeline();
-	// ループ境界で前周回の残骸が混ざらないよう、尻尾バッファは都度破棄
 	g_loopTailBuffer.clear();
 	g_loopTailPos = 0;
+	OggFlushKpi3Ring();
+	poss = 0;
+	poss6 = 0;
 
-	// ゴムバンドの初期化またはリセット
+	const int bpfWarm = PcmOutBytesPerFrame();
+	if (bpfWarm <= 0)
+		return;
+	const int ovChunkBytes = 4096;
+	const int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
+
+	float te = (float)tempo;
+	if (te >= 200.0f) te -= 100.0f;
+	else te = te / 3.0f + 33.3f;
+	tempoRate2 = te / 100.0f;
+
 	if (!g_rubberBandStretcher) {
-		float te = (float)tempo;
-		if (te >= 200.0f) te -= 100.0f;
-		else te = te / 3.0f + 33.3f;
-		tempoRate2 = te / 100.0f;
-
 		if (!InitializeRubberBandStretcher()) return;
 	}
 	else {
 		g_rubberBandStretcher->reset();
 	}
 
-	// 助走（プリロール）の計算
+	// 助走長はサンプルレートに比例（32k でも 44.1k と同じ約 186ms）
 	int preRollInputSamples = 8192;
+	if (wavbit_sample_Hz > 0 && wavbit_sample_Hz != 44100)
+		preRollInputSamples = (int)(8192.0 * (double)wavbit_sample_Hz / 44100.0 + 0.5);
+	if (preRollInputSamples < 4096)
+		preRollInputSamples = 4096;
+
 	int startPos = targetPos - preRollInputSamples;
 	if (startPos < 0) {
 		preRollInputSamples = targetPos;
 		startPos = 0;
 	}
 
-	// シーク実行（lapなしの通常シークでダブリを防止）
-	ov_pcm_seek(&vf, (ogg_int64_t)startPos);
+	// ── Phase 1: [startPos, targetPos) のみ RB に投入。出力はすべて破棄 ──
+	// loop1 以降を読むと seek 後に二重入力になるため、絶対に targetPos を越えない。
+	ov_pcm_seek_lap(&vf, (ogg_int64_t)startPos);
 
-	float te = (float)tempo;
-	if (te >= 200.0f) te -= 100.0f;
-	else te = te / 3.0f + 33.3f;
-	float ratio = te / 100.0f;
+	uint16_t bps = (uint16_t)((wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth));
+	std::vector<uint8_t> tempRawBuf((size_t)ovChunkBytes);
+	const size_t pullSize = 4096;
+	std::vector<std::vector<float>> outBuf(wavchannel, std::vector<float>(pullSize));
+	std::vector<float*> outPtrs(wavchannel);
+	for (int ch = 0; ch < wavchannel; ++ch)
+		outPtrs[ch] = outBuf[ch].data();
 
-	// 捨てるべき出力サンプル数
-	int targetDiscardOutput = (int)(preRollInputSamples / ratio);
-	int discardedSoFar = 0;
-
-	std::vector<uint8_t> tempRawBuf(4096);
-	m_convertedPcmFloatData.clear();
-
-	// 助走区間のデコードと処理
-	while (discardedSoFar < targetDiscardOutput) {
+	int inputFed = 0;
+	while (inputFed < preRollInputSamples) {
 		if (IsPlaybackStopRequested())
 			break;
+		const int remainBeforeTarget = targetPos - startPos - inputFed;
+		if (remainBeforeTarget <= 0)
+			break;
+
+		long readBytes = ovChunkBytes;
+		const int maxChunkBytes = remainBeforeTarget * bpfWarm;
+		if (maxChunkBytes > 0 && readBytes > maxChunkBytes)
+			readBytes = maxChunkBytes;
+
 		int current_section;
-		long bytesRead = ov_read(&vf, (char*)tempRawBuf.data(), 4096, 0, 2, 1, &current_section);
-		if (bytesRead <= 0) break;
+		long bytesRead = ov_read(&vf, (char*)tempRawBuf.data(), readBytes, 0, 2, 1, &current_section);
+		if (bytesRead <= 0)
+			break;
 
-		int samplesRead = bytesRead / (wavchannel * 2);
+		int samplesRead = (int)(bytesRead / bpfWarm);
+		if (samplesRead > remainBeforeTarget)
+			samplesRead = remainBeforeTarget;
+		if (samplesRead <= 0)
+			break;
 
-		// ★ 引数を整理しました（元データ、ビット数、チャンネル数）
+		std::vector<uint8_t> chunk(tempRawBuf.begin(), tempRawBuf.begin() + samplesRead * bpfWarm);
 		std::vector<float> inFloat;
-		uint16_t bps = (uint16_t)((wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth));
+		ConvertRawBytesToFloat(chunk, bps, wavchannel, inFloat);
 
-		// 読み込んだサイズ分だけのテンポラリバッファを作成して渡します
-		std::vector<uint8_t> actualReadData(tempRawBuf.begin(), tempRawBuf.begin() + bytesRead);
-		ConvertRawBytesToFloat(actualReadData, bps, wavchannel, inFloat);
-
-		std::vector<std::vector<float>> chData(wavchannel, std::vector<float>(samplesRead));
+		std::vector<std::vector<float>> chData(wavchannel, std::vector<float>((size_t)samplesRead));
 		for (int i = 0; i < samplesRead; ++i) {
-			for (int ch = 0; ch < wavchannel; ++ch) chData[ch][i] = inFloat[i * wavchannel + ch];
+			for (int ch = 0; ch < wavchannel; ++ch)
+				chData[ch][i] = inFloat[(size_t)i * (size_t)wavchannel + (size_t)ch];
 		}
 		std::vector<float*> chPtrs(wavchannel);
-		for (int ch = 0; ch < wavchannel; ++ch) chPtrs[ch] = chData[ch].data();
+		for (int ch = 0; ch < wavchannel; ++ch)
+			chPtrs[ch] = chData[ch].data();
 
-		g_rubberBandStretcher->process(chPtrs.data(), samplesRead, false);
-
-		const size_t pullSize = 4096;
-		std::vector<std::vector<float>> outBuf(wavchannel, std::vector<float>(pullSize));
-		std::vector<float*> outPtrs(wavchannel);
-		for (int ch = 0; ch < wavchannel; ++ch) outPtrs[ch] = outBuf[ch].data();
+		g_rubberBandStretcher->process(chPtrs.data(), (size_t)samplesRead, false);
+		inputFed += samplesRead;
 
 		while (g_rubberBandStretcher->available() > 0) {
 			if (IsPlaybackStopRequested())
 				break;
 			size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
-			size_t retrieved = g_rubberBandStretcher->retrieve(outPtrs.data(), toGet);
-			if (retrieved == 0) break;
-
-			if (discardedSoFar + retrieved <= (size_t)targetDiscardOutput) {
-				discardedSoFar += (int)retrieved;
-			}
-			else {
-				// ターゲット位置を越えた分を保存
-				int discardAmountForThisChunk = targetDiscardOutput - discardedSoFar;
-				if (discardAmountForThisChunk < 0) discardAmountForThisChunk = 0;
-
-				for (int i = discardAmountForThisChunk; i < (int)retrieved; ++i) {
-					for (int ch = 0; ch < wavchannel; ++ch) {
-						m_convertedPcmFloatData.push_back(outBuf[ch][i]);
-					}
-				}
-				discardedSoFar += (int)retrieved;
-			}
+			if (g_rubberBandStretcher->retrieve(outPtrs.data(), toGet) == 0)
+				break;
 		}
 	}
 
-	// バッファ管理変数の初期化
-	poss = 0;
-	poss2 = 0; poss3 = 0; poss4 = 0; poss6 = 0;
+	// ── Phase 2: ループ先頭へ seek ──
+	ov_pcm_seek_lap(&vf, (ogg_int64_t)targetPos);
+	g_oggPcmDecodePos = targetPos;
 
-	int keptSamples = (int)(m_convertedPcmFloatData.size() / wavchannel);
-	if (keptSamples > 0 && !g_isWavExportRendering) {
-		outputRawBytesData.clear();
-		outputRawBytesData.resize(keptSamples * wavchannel * 2);
-		int16_t* rawOut = (int16_t*)outputRawBytesData.data();
-		for (size_t i = 0; i < m_convertedPcmFloatData.size(); ++i) {
-			float val = m_convertedPcmFloatData[i];
-			if (val > 1.0f) val = 1.0f;
-			else if (val < -1.0f) val = -1.0f;
-			rawOut[i] = (int16_t)(val * 32767.0f);
+	// ── Phase 3: loop1 から1回だけデコードし、リングをプリフィル（引っ掛かり防止）──
+	const int primingTarget = OggRbLatencyReserveBytes();
+	int maxBufSamples = (int)(sizeof(bufwav) / (size_t)bpfWarm);
+	int safeFillSamples = maxBufSamples - (ovChunkBytes / bpfWarm) - 1;
+	if (safeFillSamples < 1)
+		safeFillSamples = 1;
+
+	const bool prevWarmup = g_inWarmup;
+	g_inWarmup = true;
+	g_warmupRBOutputBytes = 0;
+
+	int prefillStall = 0;
+	const int kPrefillStallMax = 8192;
+	while (poss4 < primingTarget) {
+		if (IsPlaybackStopRequested())
+			break;
+
+		int ret = 0;
+		for (;;) {
+			if (IsPlaybackStopRequested())
+				break;
+			if (poss < 0 || poss > safeFillSamples)
+				poss = 0;
+			if (poss >= safeFillSamples)
+				break;
+
+			long readBytes = ovChunkBytes;
+			const int roomSamples = safeFillSamples - poss;
+			const int maxChunkBytes = roomSamples * bpfWarm;
+			if (maxChunkBytes > 0 && readBytes > maxChunkBytes)
+				readBytes = maxChunkBytes;
+
+			int current_section;
+			long bytesRead = ov_read(&vf, (char*)(bufwav + poss * bpfWarm), readBytes, 0, 2, 1, &current_section);
+			if (bytesRead <= 0) {
+				ret = 0;
+				break;
+			}
+			ret = (int)(bytesRead / bpfWarm);
+			if (ret <= 0)
+				break;
+			poss += ret;
+			if (poss >= safeFillSamples / 2)
+				break;
 		}
 
-		int byteLen = keptSamples * wavchannel * 2;
-		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
-		if (byteLen > max_buffer_size) byteLen = max_buffer_size;
+		int validSamples = poss;
+		if (validSamples > safeFillSamples)
+			validSamples = safeFillSamples;
+		if (validSamples <= 0) {
+			if (++prefillStall >= kPrefillStallMax)
+				break;
+			if (ret == 0)
+				break;
+			continue;
+		}
 
-		memcpy(bufkpi3, outputRawBytesData.data(), byteLen);
+		int len2 = readtempo(bufwav, validSamples * bpfWarm);
+		g_oggPcmDecodePos += validSamples;
+		poss = 0;
 
-		poss2 = byteLen;
-		poss4 = byteLen;
-
-		// 重要：playb を「実際に読み進めたファイル上の位置」まで進めます
-		int inputSamplesUsed = (int)(keptSamples * ratio);
-		playb = targetPos + inputSamplesUsed;
-		poss5 = playb;
-	}
-	else {
-		// WAVエクスポート時はウォームアップ出力の先行注入を行わず、
-		// 次の mcopy/readtempo のみで連続波形を作ることで重複を防ぐ
-		poss2 = 0;
-		poss4 = 0;
-		if (keptSamples > 0) {
-			int inputSamplesUsed = (int)(keptSamples * ratio);
-			playb = targetPos + inputSamplesUsed;
-			poss5 = playb;
+		if (len2 > 0) {
+			prefillStall = 0;
+			RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+			poss4 += len2;
+			g_warmupRBOutputBytes += len2;
+			SanitizeKpi3RingState(max_buffer_size);
+		}
+		else if (ret > 0) {
+			if (++prefillStall >= kPrefillStallMax)
+				break;
+			continue;
 		}
 		else {
-			playb = targetPos;
-			poss5 = targetPos;
+			break;
 		}
 	}
 
-	reset = TRUE;
+	g_inWarmup = prevWarmup;
+	poss = 0;
+	poss3 = 0;
+
+	playb = targetPos;
+	poss5 = targetPos;
+	// ウォームアップでリングに loop1 以降を溜め済み。mcopy は即出力してよい
+	g_oggRbPrimingNeed = 0;
+	// ループ時 EQ 強制 InitEngine は境界ポツ音の一因になる（フラット時も InitEngine が走る）
+	reset = FALSE;
 }
 
 void playwavds2(BYTE* bw, int old, int l1, int l2)
@@ -13926,7 +13969,7 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 	//データ読み込み
 	if (l1 == 0)return;
 	oggyomikomi = TRUE;
-	int rrr = mcopy((char*)bw + old, l1);
+	int rrr = McopyAccumulate((char*)bw + old, l1);
 
 	if (l1 != rrr) {
 		if (savedata.saveloop == 0 && endf == 1) {
@@ -13934,28 +13977,32 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 		}
 		else {
 			loopcnt++;
-
-			// ★ 女神様考案のウォームアップ処理を実行 ★
+			OggFlushKpi3Ring();
+			poss = 0;
 			SeekAndWarmupRubberBand(loop1);
-
-			// ウォームアップが済んでいるので、あとは通常通り mcopy に任せるだけです！
-			// mcopy 側はごちゃごちゃしたフラグや差分計算を一切気にする必要はありません。
-			mcopy((char*)bw + old + rrr, (int)l1 - rrr);
+			{
+				const int got2 = McopyAccumulate((char*)bw + old + rrr, (int)l1 - rrr);
+				if (rrr > 0 && got2 > 0)
+					OggApplyLoopBoundaryCrossfade((char*)bw + old, rrr, got2);
+			}
 		}
 	}
 	if (l2) {
-		rrr = mcopy((char*)bw, l2);
+		rrr = McopyAccumulate((char*)bw, l2);
 		if (l2 != rrr) {
 			if (savedata.saveloop == 0 && endf == 1) {
 				l2 = rrr; fade1 = 1;
 			}
 			else {
 				loopcnt++;
-
-				// ★ こちらも同様にウォームアップ処理を実行 ★
+				OggFlushKpi3Ring();
+				poss = 0;
 				SeekAndWarmupRubberBand(loop1);
-
-				mcopy((char*)bw + rrr, (int)l2 - rrr);
+				{
+					const int got2 = McopyAccumulate((char*)bw + rrr, (int)l2 - rrr);
+					if (rrr > 0 && got2 > 0)
+						OggApplyLoopBoundaryCrossfade((char*)bw, rrr, got2);
+				}
 			}
 		}
 	}
@@ -14420,6 +14467,9 @@ void COggDlg::stop()
 	if (PlaybackNotifyThreadMayBeActive())
 		SignalPlaybackNotifyThreadStop();
 
+	fade1 = 0;
+	endflg = 0;
+
 	if (!img.IsNull()) {
 		img.Destroy();
 	}
@@ -14428,6 +14478,8 @@ void COggDlg::stop()
 	loop1_2 = -1;
 	stflg = TRUE;
 	KillTimer(1250);
+	if ((mode == -2 || videoonly) && pMediaControl)
+		pMediaControl->Stop();
 	gamenkill();
 	videoonly = FALSE;
 	if (savedata.savecheck == 1 && (mode == -10 || mode == -2) && filenback == filen) {
@@ -14480,7 +14532,7 @@ void COggDlg::stop()
 	playb = 0;
 	if (ptl)ptl->SetProgressValue(m_hWnd, (LONGLONG)0, (LONGLONG)1);
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
-	if (PlaybackNotifyThreadMayBeActive() && mode != -2)
+	if (PlaybackNotifyThreadMayBeActive())
 	{
 		SignalPlaybackNotifyThreadStop();
 		if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
@@ -14510,11 +14562,12 @@ void COggDlg::stop()
 		//		for(int l=0;l<20;l++){Sleep(50);DoEvent();}
 		if (adbuf2)free(adbuf2);//delete [] adbuf2;
 		adbuf2 = NULL;
-		if (mode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
-		if (mode == -8) flac_.Close(og->kmp);
-		if (mode == -9) m4a_.Close(og->kmp);
-		if (mode == -7) dsd_.kpiClose(og->kmp);
-		if (mode == 999) wav_.Close();
+		const int stoppingMode = mode;
+		if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
+		if (stoppingMode == -8) flac_.Close(og->kmp);
+		if (stoppingMode == -9) m4a_.Close(og->kmp);
+		if (stoppingMode == -7) dsd_.kpiClose(og->kmp);
+		if (stoppingMode == 999) wav_.Close();
 		kmp = NULL;
 		if (mod) {
 			if (mod->Close) mod->Close(kmp1);
@@ -14556,6 +14609,9 @@ void COggDlg::stop1()
 {
 	if (PlaybackNotifyThreadMayBeActive())
 		SignalPlaybackNotifyThreadStop();
+
+	fade1 = 0;
+	endflg = 0;
 
 	if (!img.IsNull()) {
 		img.Destroy();
@@ -14754,23 +14810,103 @@ BOOL COggDlg::DestroyWindow()
 
 	return CCustomBlurDialogBase::DestroyWindow();
 }
+
+// mcopy は RB レイテンシで 1 回の要求バイトに満たないことがある。部分返却を繰り返して DS 要求分を満たす（readmp3 と同じ）
+static int McopyAccumulate(char* dst, int wantBytes)
+{
+	int got = 0;
+	int guard = 0;
+	int zeroStreak = 0;
+	const int maxIters = 8192;
+	const int maxZeroStreak = 512;
+	while (got < wantBytes && guard++ < maxIters) {
+		if (IsPlaybackStopRequested())
+			break;
+		int n = mcopy(dst + got, wantBytes - got);
+		if (n > 0) {
+			got += n;
+			zeroStreak = 0;
+			continue;
+		}
+		if (n < 0)
+			break;
+		// n==0: RB プライミング中はリトライ（真の EOF/ループ端は playwavds2 側で処理）
+		if (++zeroStreak >= maxZeroStreak)
+			break;
+	}
+	return got;
+}
+
 //oggから実際にデータを獲得する
 int mcopy(char* a, int len)
 {
 	if (len == 0) return 0;
 	EqualiserSetFormatVolContext(0, FALSE);
-	const int bpf = (wavchannel > 0) ? (wavchannel * 2) : 4;
+	const int bpf = PcmOutBytesPerFrame();
 	if (bpf <= 0) return 0;
 	int ret = 0, lenl = len / bpf, cnt2;
-	int len3 = 0, len4 = 0;
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
+	const int ovChunkBytes = 4096;
+	int maxBufSamples = (int)(sizeof(bufwav) / (size_t)bpf);
+	int safeFillSamples = maxBufSamples - (ovChunkBytes / bpf) - 1;
+	if (safeFillSamples < 1)
+		safeFillSamples = 1;
+	if (lenl > safeFillSamples)
+		lenl = safeFillSamples;
+	if (poss < 0 || poss > safeFillSamples)
+		poss = 0;
+	SanitizeKpi3RingState(max_buffer_size);
 
-	if (poss4 <= len) {
-		for (int k = 0; k < 5; k++) {
+	// 1) ループ境界を先に計算し、このコールで返すべきバイト数 to_read を決める
+	int to_read = len;
+	int loopEndSamples = 0;
+	{
+		if (loop1 == 0 && loop2 == 0) {
+			loopEndSamples = (bpf > 0) ? (int)((__int64)data_size / bpf) : 0;
+		}
+		else {
+			loopEndSamples = loop1 + loop2;
+		}
+		const int totalSamples = (bpf > 0) ? (int)((__int64)data_size / bpf) : 0;
+		if (totalSamples > 0 && loopEndSamples > totalSamples)
+			loopEndSamples = totalSamples;
+		const int playbPos = (int)playb;
+		if (loopEndSamples > 0 && endf == 0) {
+			if (playbPos >= loopEndSamples) {
+				to_read = 0;
+			}
+			else {
+				const int remainSamples = loopEndSamples - playbPos;
+				const int remainBytes = remainSamples * bpf;
+				if (remainBytes < to_read)
+					to_read = remainBytes;
+			}
+		}
+	}
+	to_read -= to_read % bpf;
+	if (to_read <= 0) {
+		if (loopEndSamples > 0) {
+			playb = loopEndSamples;
+			g_oggPcmDecodePos = loopEndSamples;
+			poss5 = loopEndSamples;
+			OggFlushKpi3Ring();
+		}
+		return 0;
+	}
+
+	// 2) リング充填: to_read + レイテンシ余裕（またはプライミング要求）までデコード
+	{
+		int fillTarget = to_read + OggRbLatencyReserveBytes();
+		if (g_oggRbPrimingNeed > fillTarget)
+			fillTarget = g_oggRbPrimingNeed;
+
+		int oggRbStallIters = 0;
+		const int kOggRbStallMax = 8192;
+		while (poss4 < fillTarget) {
 			ret = 0;
+			if (IsPlaybackStopRequested())
+				break;
 			if ((int)playb > (data_size + 20000) / bpf && endf == 1) {
-				// 実音声はここで尽きている。無音先詰め(MUON 分)を待たず、真の終端到達と同時に
-				// 終端シグナルを立てる（中央の g_endWrittenBytes 確定をジャストに近づける）。
 				if (g_endWrittenBytes == 0) {
 					if (savedata.saverenzoku == 0) fade1 = 1;
 					else endflg = 1;
@@ -14782,106 +14918,182 @@ int mcopy(char* a, int len)
 				return len;
 			}
 
-			int i = 0;
+			// ループ終端以降は ov_read しない（loop2 越えのデコード→リング残留→だぶりの原因）
+			if (loopEndSamples > 0 && endf == 0 && g_oggPcmDecodePos >= loopEndSamples)
+				break;
+
 			for (;;) {
 				if (IsPlaybackStopRequested())
 					break;
-				ret = ov_read(&vf, (char*)(bufwav + poss * bpf), 4096, 0, 2, 1, &current_section) / bpf;
+				if (loopEndSamples > 0 && endf == 0 && g_oggPcmDecodePos >= loopEndSamples)
+					break;
+				if (poss < 0 || poss > safeFillSamples)
+					poss = 0;
+				if (poss >= safeFillSamples)
+					break;
+
+				int maxChunkSamples = safeFillSamples - poss;
+				if (loopEndSamples > 0 && endf == 0) {
+					const __int64 remainIn = (__int64)loopEndSamples - g_oggPcmDecodePos - poss;
+					if (remainIn <= 0)
+						break;
+					if (remainIn < maxChunkSamples)
+						maxChunkSamples = (int)remainIn;
+				}
+				if (maxChunkSamples <= 0)
+					break;
+
+				long readBytes = ovChunkBytes;
+				const int maxChunkBytes = maxChunkSamples * bpf;
+				if (maxChunkBytes > 0 && readBytes > maxChunkBytes)
+					readBytes = maxChunkBytes;
+
+				long bytesRead = ov_read(&vf, (char*)(bufwav + poss * bpf), readBytes, 0, 2, 1, &current_section);
+				if (bytesRead <= 0) {
+					ret = 0;
+					break;
+				}
+				ret = (int)(bytesRead / bpf);
+				if (ret <= 0)
+					break;
+				if (maxChunkSamples > 0 && ret > maxChunkSamples)
+					ret = maxChunkSamples;
+				if (ret <= 0)
+					break;
 				poss += ret;
-				if (ret == 0) break;
-				if (lenl <= poss) break;
+				if (lenl <= poss)
+					break;
 			}
 
-			int to_process = lenl;
-			int len2 = readtempo(bufwav, to_process * bpf);
+			int validSamples = poss;
+			if (validSamples > lenl)
+				validSamples = lenl;
+			if (validSamples < 0)
+				validSamples = 0;
+			if (loopEndSamples > 0 && endf == 0) {
+				const __int64 remainIn = (__int64)loopEndSamples - g_oggPcmDecodePos;
+				if (remainIn <= 0) {
+					validSamples = 0;
+				}
+				else if (validSamples > remainIn) {
+					validSamples = (int)remainIn;
+				}
+			}
+
+			int len2 = 0;
+			if (validSamples > 0)
+				len2 = readtempo(bufwav, validSamples * bpf);
 			if (IsPlaybackStopRequested())
 				break;
-			playb += len2 / bpf;
+
+			if (validSamples > 0)
+				g_oggPcmDecodePos += validSamples;
 
 			if (len2 > 0) {
-				if (poss2 + len2 > max_buffer_size) {
-					int first = max_buffer_size - poss2;
-					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), first);
-					memcpy(bufkpi3, outputRawBytesData.data() + first, len2 - first);
-					poss2 = (poss2 + len2) % max_buffer_size;
-				}
-				else {
-					memcpy(bufkpi3 + poss2, outputRawBytesData.data(), len2);
-					poss2 += len2;
-				}
+				oggRbStallIters = 0;
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 				poss4 += len2;
-
-				// ★ warmup中はRubberBand出力バイトを別途カウント
+				if (poss4 > max_buffer_size)
+					poss4 = max_buffer_size;
+				SanitizeKpi3RingState(max_buffer_size);
 				if (g_inWarmup)
 					g_warmupRBOutputBytes += len2;
 			}
-			if (lenl <= poss) {
-				poss -= lenl;
-				if (poss != 0) memcpy(bufwav, bufwav + lenl * bpf, poss * bpf);
+			if (validSamples > 0 && validSamples < poss) {
+				const int leftover = poss - validSamples;
+				if (leftover > 0)
+					memmove(bufwav, bufwav + validSamples * bpf, (size_t)leftover * (size_t)bpf);
+				poss = leftover;
 			}
-			if (len4 != 0) break;
-			if (poss4 > len) break;
-			if (len2 <= 0 && poss4 <= len) break;
+			else if (lenl <= poss) {
+				poss -= lenl;
+				if (poss < 0)
+					poss = 0;
+				if (poss > safeFillSamples)
+					poss = safeFillSamples;
+				if (poss != 0)
+					memmove(bufwav, bufwav + lenl * bpf, poss * bpf);
+			}
+			if (poss4 >= fillTarget)
+				break;
+			if (loopEndSamples > 0 && endf == 0 && g_oggPcmDecodePos >= loopEndSamples)
+				break;
+			if (ret == 0 && len2 <= 0)
+				break;
+			if (len2 <= 0 && ret > 0) {
+				if (++oggRbStallIters >= kOggRbStallMax)
+					break;
+				continue;
+			}
+			if (len2 <= 0) {
+				if (++oggRbStallIters >= kOggRbStallMax)
+					break;
+			}
 		}
 	}
 
-	int cnt0 = len / bpf;
-	if (loop1 + loop2 < poss5 + cnt0 && endf == 0)
-		cnt0 = (loop1 + loop2) - poss5;
+	// ループ/シーク直後: プライミング完了まで出力しない
+	if (g_oggRbPrimingNeed > 0 && poss4 < g_oggRbPrimingNeed)
+		return 0;
+	if (g_oggRbPrimingNeed > 0)
+		g_oggRbPrimingNeed = 0;
+
+	// 3) リングから to_read 分だけ返す
+	cnt2 = to_read;
+	if (poss4 < to_read)
+		cnt2 = poss4;
+	cnt2 -= cnt2 % bpf;
+	if (cnt2 <= 0)
+		return 0;
+
+	RingBufRead(a, bufkpi3, max_buffer_size, poss3, cnt2);
+	poss4 -= cnt2;
+	if (poss4 < 0)
+		poss4 = 0;
+	SanitizeKpi3RingState(max_buffer_size);
+
+	playb += cnt2 / bpf;
+	if (loopEndSamples > 0 && (int)playb > loopEndSamples)
+		playb = loopEndSamples;
+
+	// ループ端: 余ったリングデータを破棄（次周回への loop2 漏れ防止）
+	if (loopEndSamples > 0 && endf == 0 && (int)playb >= loopEndSamples) {
+		g_oggPcmDecodePos = loopEndSamples;
+		OggFlushKpi3Ring();
+		poss = 0;
+	}
 
 	{
 		float te = (float)tempo;
 		if (te >= 200.0f) te -= 100.0f;
 		else              te = te / 3.0f + 33.3f;
-		poss5 += (int)(cnt0 * (te / 100.0f));
-	}
-	cnt0 *= bpf;
-	cnt2 = cnt0;
-	int to_read = cnt0;
-
-	if (cnt2 > 0) {
-		if (poss3 + to_read > max_buffer_size) {
-			int first = max_buffer_size - poss3;
-			memcpy(a, bufkpi3 + poss3, first);
-			memcpy(a + first, bufkpi3, to_read - first);
-			poss3 = (poss3 + to_read) % max_buffer_size;
-		}
-		else {
-			memcpy(a, bufkpi3 + poss3, to_read);
-			poss3 += to_read;
-		}
-		poss4 -= to_read;
+		poss5 += (int)((cnt2 / bpf) * (te / 100.0f));
 	}
 
-	// ★ warmup中はEQをスキップ（loop1以前の音声にEQをかけると
-	//    フィルター状態がloop1以降の本処理に引き継がれて音色が壊れる）
-	if (!g_inWarmup) {
+	if (!g_inWarmup && cnt2 > 0) {
 		equaliser(a, cnt2, reset);
 		og->FeedPianoRoll(a, cnt2);
 		reset = FALSE;
 	}
 
-	// fade計算
 	short* b, c;
 	b = (short*)a;
-	CString sss;
-	sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
-	sss.MakeLower();
 	fade += fadeadd;
 	if (fade < 0.0001) { fade = 0.0; fadeadd = 0; }
-	for (int i = 0; i < cnt0 / 2; i++) {
-		c = b[i];
-		c = (short)(((float)c) * fade * fade);
-		b[i] = c;
+	if (cnt2 > 0) {
+		for (int i = 0; i < cnt2 / 2; i++) {
+			c = b[i];
+			c = (short)(((float)c) * fade * fade);
+			b[i] = c;
+		}
 	}
 
 	if ((UINT)wl < (UINT)0x7fff0000) {
-		// ★ warmup中はファイル書き込みもスキップ
-		if (cc1 == 1 && !g_inWarmup) cc.Write(a, cnt0);
-		wl += cnt0;
+		if (cc1 == 1 && !g_inWarmup && cnt2 > 0) cc.Write(a, cnt2);
+		if (cnt2 > 0) wl += cnt2;
 	}
 
-	return cnt0;
+	return cnt2;
 }
 
 /*
@@ -16597,7 +16809,7 @@ void timerog1(UINT nIDEvent)
 				fade1 = 0; lenl = 0;
 				fade = 1.0f; plf = 0;
 				og->KillTimer(9000);
-				og->OnRestart();
+				og->PostMessage(WM_APP + 2, 0, 0);
 			}
 		}
 	}
@@ -16617,7 +16829,12 @@ void timerog1(UINT nIDEvent)
 			pl = new CPlayList;
 			pl->Create(og);
 			if (!plw) {
-				for (;;) { if (plw) break; }
+				const DWORD t0 = GetTickCount();
+				for (;;) {
+					if (plw) break;
+					DoEvent();
+					if (GetTickCount() - t0 >= 10000) break;
+				}
 			}
 			if (pl && plw && filen != "" && !(wavbit_sample_Hz == 0 || wavchannel == 0 || wavsam_depth == 0)) {
 				int plc;
@@ -16710,31 +16927,8 @@ void timerog1(UINT nIDEvent)
 		::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	}
 
-	if (nIDEvent == 1251) {
-		if (pMediaPosition && pl && plw) {
-			if ((mode == -2 || videoonly == TRUE)) {
-				REFTIME aa, bb;
-				pMediaPosition->get_CurrentPosition(&aa);
-				pMediaPosition->get_Duration(&bb);
-				if (aa >= bb) {
-				if (pl->m_renzoku.GetCheck() == TRUE) {
-					plcnt++;
-					if (plcnt >= pl->m_lc.GetItemCount()) plcnt = 0;
-					endflg = 0;
-					if (plcnt < pl->m_lc.GetItemCount()) {
-						pl->Get(plcnt);
-						pl->SIcon(plcnt);
-						og->KillTimer(1250);
-						fade1 = 0; lenl = 0;
-						fade = 1.0f; plf = 0;
-						int m = mode;
-						og->OnRestart();
-					}
-				}
-				}
-			}
-		}
-
+	if (nIDEvent == 1250) {
+		// フェードアウト完了後の連続再生(SetTimer(1250) と ID を一致)
 		if ((fade1 == 1 && pl && plw)) {
 			if (pl->m_renzoku.GetCheck() == TRUE) {
 				plcnt++;
@@ -16745,18 +16939,16 @@ void timerog1(UINT nIDEvent)
 					pl->Get(plcnt);
 					pl->SIcon(plcnt);
 					thn = FALSE;
+					const DWORD t0 = GetTickCount();
 					for (int j = 0; j < 200; j++) {
 						DoEvent();
 						Sleep(10);
-						if (thn == TRUE) {
-							break;
-						}
+						if (thn == TRUE) break;
+						if (GetTickCount() - t0 >= 3000) break;
 					}
 					og->stop();
 					fade1 = 0; lenl = 0;
-					og->OnRestart();
-					//					if(mode==-2){og->SetTimer(11251,300,NULL); ttt_=0;}
-					//SendMessage(WM_USER+2,0,0);//OnRestart();
+					og->PostMessage(WM_APP + 2, 0, 0);
 				}
 			}
 		}
@@ -16788,6 +16980,27 @@ void COggDlg::OnTimer(UINT nIDEvent)
 LRESULT COggDlg::dp2(WPARAM, LPARAM)
 {
 	OnRestart();
+	return 0;
+}
+
+// 曲末フェード完了後、再生通知スレッドから PostMessage される。
+// ワーカースレッド上で OnPause/UI 操作をしない（UI フリーズ/デッドロック防止）。
+LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
+{
+	WaitForPlaybackNotifyThreadExit(5000);
+	fade1 = 0;
+	endflg = 0;
+	plf = 0;
+	playf = 0;
+	ps = 0;
+	stf = 0;
+	thn1 = FALSE;
+	thn = TRUE;
+	eqflg = TRUE;
+	KillTimer(1250);
+	ResetPauseButtonUi();
+	if (ptl)
+		ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
 	return 0;
 }
 
@@ -18498,6 +18711,13 @@ void COggDlg::OnPause()
 
 BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 {
+	// メディアプレイヤーモード: DoModal 中は mp の PreTranslateMessage が呼ばれない。
+	// あいまい検索欄の Enter をここで中継し、og の IDOK(終了)へ流さない。
+	if (savedata.playerMode == 1) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->RelayPreTranslateMessage(pMsg))
+			return TRUE;
+	}
 	if (CCC_ProcessInwomanHotkey(pMsg, this))
 		return TRUE; // 隠し: F12を5回で淫女モード切替
 	if (m_tooltip.GetSafeHwnd())
@@ -18536,35 +18756,49 @@ void COggDlg::OnRestart()
 	if (filen != "") {
 		ti = filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1);
 		int sub_ = mode;
+		// ゲーム形式トラックは拡張子による上書きを行わない。
+		// 各ゲームのBGMは ED6001.ogg / YS6xxx.ogg / *.wav 等、拡張子が
+		// .ogg/.wav でもゲーム専用のデコード経路(BGMフォルダへのchdir等)が必須で、
+		// 単体ファイル(modesub=-1等)として再生すると鳴らせない。
+		// stop() により mode は再生対象アイテム本来のモード(=pc[i].sub)へ復元済みなので、
+		// それを用いてゲーム形式か否かを判定する。
+		const bool isGameMode =
+			(mode >= 1 && mode <= 30) ||
+			mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15;
 		// ネイティブ音声形式は拡張子のみで判定（game形式等からの切り替えも可能に）
-		if (filen.Right(5).MakeLower() == ".opus") {
+		if (!isGameMode && filen.Right(5).MakeLower() == ".opus") {
 			modesub = -6;
 			playb = 0;
 			play();
 		}
-		else if (filen.Right(4).MakeLower() == ".ogg" || filen.Right(4) == ".OGG" || filen.Right(6).MakeLower() == ".qull3") {
+		else if (!isGameMode && (filen.Right(4).MakeLower() == ".ogg" || filen.Right(4) == ".OGG" || filen.Right(6).MakeLower() == ".qull3")) {
 			modesub = -1;
 			play();
 		}
-		else if (filen.Right(4).MakeLower() == ".dsf" || filen.Right(5) == ".DSF" || filen.Right(4).MakeLower() == ".dff" || filen.Right(4) == ".DFF" || filen.Right(4).MakeLower() == ".wsd" || filen.Right(4) == ".WSD") {
+		else if (!isGameMode && (filen.Right(4).MakeLower() == ".dsf" || filen.Right(5) == ".DSF" || filen.Right(4).MakeLower() == ".dff" || filen.Right(4) == ".DFF" || filen.Right(4).MakeLower() == ".wsd" || filen.Right(4) == ".WSD")) {
 			modesub = -7;
 			play();
 		}
-		else if (filen.Right(5).MakeLower() == ".flac" || filen.Right(5) == ".FLAC" || filen.Right(7).MakeLower() == L".qull3h") {
+		else if (!isGameMode && (filen.Right(5).MakeLower() == ".flac" || filen.Right(5) == ".FLAC" || filen.Right(7).MakeLower() == L".qull3h")) {
 			modesub = -8;
 			play();
 		}
-		else if (filen.Right(4).MakeLower() == ".m4a" || filen.Right(4) == ".M4A" || filen.Right(4).MakeLower() == ".aac" || filen.Right(4) == ".AAC") {
+		else if (!isGameMode && (filen.Right(4).MakeLower() == ".m4a" || filen.Right(4) == ".M4A" || filen.Right(4).MakeLower() == ".aac" || filen.Right(4) == ".AAC")) {
 			modesub = -9;
 			play();
 		}
-		else if (filen.Right(4).MakeLower() == ".mp3" || filen.Right(4) == ".MP3" || filen.Right(4).MakeLower() == ".mp2" || filen.Right(4) == ".MP2" ||
-			filen.Right(4).MakeLower() == ".mp1" || filen.Right(4) == ".MP1" || filen.Right(4).MakeLower() == ".rmp" || filen.Right(4) == ".RMP") {
+		else if (!isGameMode && (filen.Right(4).MakeLower() == ".mp3" || filen.Right(4) == ".MP3" || filen.Right(4).MakeLower() == ".mp2" || filen.Right(4) == ".MP2" ||
+			filen.Right(4).MakeLower() == ".mp1" || filen.Right(4) == ".MP1" || filen.Right(4).MakeLower() == ".rmp" || filen.Right(4) == ".RMP")) {
 			modesub = -10;
 			play();
 		}
-		else if (filen.Right(4).MakeLower() == ".wav" || filen.Right(4) == ".WAV") {
+		else if (!isGameMode && (filen.Right(4).MakeLower() == ".wav" || filen.Right(4) == ".WAV")) {
 			modesub = 999;
+			play();
+		}
+		else if (isGameMode) {
+			if (mode == 19) filen = filen.Left(5);
+			modesub = mode;
 			play();
 		}
 		else if (mode == -2 || mode == -3) {
@@ -19792,8 +20026,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				m4a_.SetPosition(kmp, pla);
 			}
 			else { // OGG / Others
-				SeekAndWarmupRubberBand((ogg_int64_t)playb); playb += 4096 + 128; poss5 += 4096 + 128;
-				r->SetPos(playb);
+				SeekAndWarmupRubberBand((ogg_int64_t)curpos);
+				r->SetPos(curpos);
 			}
 
 			sek = TRUE;
@@ -20687,6 +20921,91 @@ void COggDlg::plugloop(CString ff)
 	cf1.Close();
 }
 CImageBase* jake = NULL;
+
+static bool FindId3ApicInBuffer(const BYTE* bufimage, int scanLen, ULONGLONG baseOffset, ULONGLONG& absImagePos, UINT& size)
+{
+	if (!bufimage || scanLen < 20)
+		return false;
+	for (int j = 0; j < scanLen - 10; j++) {
+		if (bufimage[j] != 0x41 || bufimage[j + 1] != 0x50 || bufimage[j + 2] != 0x49 || bufimage[j + 3] != 0x43)
+			continue;
+		size = (UINT)bufimage[j + 4];
+		size <<= 8;
+		size |= (UINT)bufimage[j + 5];
+		size <<= 8;
+		size |= (UINT)bufimage[j + 6];
+		size <<= 8;
+		size |= (UINT)bufimage[j + 7];
+		ULONGLONG enc = bufimage[j + 10];
+		ULONGLONG rel = (ULONGLONG)j + (4 + 4 + 3 + 6);
+		int flg = 0;
+		for (; rel < (ULONGLONG)scanLen; rel++) {
+			if (bufimage[rel] == 0)
+				break;
+		}
+		rel += 2;
+		if (rel < (ULONGLONG)scanLen && (bufimage[rel] == 0xff || bufimage[rel] == 0xfe)) {
+			for (; rel < (ULONGLONG)scanLen; rel++) {
+				if (enc == 1) {
+					if (bufimage[rel] == 0 && bufimage[rel + 1] == 0) {
+						if (rel + 2 < (ULONGLONG)scanLen && bufimage[rel + 1] == 0 && bufimage[rel + 2] == 0)
+							flg = 1;
+						break;
+					}
+				}
+				else {
+					if (bufimage[rel] == 0) {
+						flg = 1;
+						break;
+					}
+				}
+			}
+			if (rel >= (ULONGLONG)scanLen)
+				return false;
+			rel += (ULONGLONG)flg;
+			if (enc == 1)
+				rel += 2;
+		}
+		else {
+			rel++;
+		}
+		absImagePos = baseOffset + rel;
+		return (size > 0);
+	}
+	return false;
+}
+
+// ID3 APIC をファイル先頭／末尾／DSD の po ヒント付近から探す。
+static bool TryId3ApicRegions(CFile& ff, BYTE* bufimage, ULONGLONG hintOff,
+	ULONGLONG& absImagePos, UINT& size)
+{
+	const int kScan = 512 * 1024;
+	const ULONGLONG fLen = ff.GetLength();
+	auto tryRegion = [&](ULONGLONG off) -> bool {
+		if (off >= fLen)
+			return false;
+		int scanLen = (fLen - off > (ULONGLONG)kScan) ? kScan : (int)(fLen - off);
+		if (scanLen < 20)
+			return false;
+		ZeroMemory(bufimage, scanLen + 1);
+		ff.Seek(off, CFile::begin);
+		if ((UINT)ff.Read(bufimage, scanLen) != (UINT)scanLen)
+			return false;
+		if (hintOff > 0 && off == hintOff) {
+			if (bufimage[0] != 'I' || bufimage[1] != 'D' || bufimage[2] != '3')
+				return false;
+		}
+		return FindId3ApicInBuffer(bufimage, scanLen, off, absImagePos, size);
+	};
+	if (hintOff > 0 && hintOff < fLen && tryRegion(hintOff))
+		return true;
+	if (tryRegion(0))
+		return true;
+	if (fLen > (ULONGLONG)kScan && tryRegion(fLen - (ULONGLONG)kScan))
+		return true;
+	return false;
+}
+
 void COggDlg::OnBnmp3jake()
 {
 	// TODO: ここにコントロール通知ハンドラ コードを追加します。
@@ -20931,43 +21250,37 @@ void COggDlg::LoadJacket(CString s)
 		i += 4;
 		s2 += _T("111.bmp");
 	}
-	else if (s.Right(3) == "dsf" || s.Right(3) == "dff") {
-		CFile f;
-		if (f.Open(s, CFile::modeRead | CFile::shareDenyWrite) == FALSE) {
+	else if (s.Right(3) == "wav") {
+		const int kScan = 512 * 1024;
+		const ULONGLONG fLen = ff.GetLength();
+		int scanLen = (fLen > (ULONGLONG)kScan) ? kScan : (int)fLen;
+		bool ok = false;
+		auto tryRegion = [&](ULONGLONG off) -> bool {
+			if (scanLen <= 0)
+				return false;
+			ZeroMemory(bufimage, scanLen + 1);
+			ff.Seek(off, CFile::begin);
+			if ((UINT)ff.Read(bufimage, scanLen) != (UINT)scanLen)
+				return false;
+			ULONGLONG imgPos = 0;
+			if (!FindId3ApicInBuffer(bufimage, scanLen, off, imgPos, size))
+				return false;
+			i = imgPos;
+			s2 += _T("111.bmp");
+			return true;
+		};
+		ok = tryRegion(0);
+		if (!ok && fLen > (ULONGLONG)kScan)
+			ok = tryRegion(fLen - (ULONGLONG)kScan);
+		if (!ok)
 			return;
-		}
-		f.Seek((ULONGLONG)po, CFile::begin);
-		int read = f.Read(bufimage, 0x300000);
-		f.Close();
-		for (i = 0; i < (ULONGLONG)read; i++) {// 00 06 5D 6A 64 61 74 61
-			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'j' && bufimage[i + 7] == 'p' && bufimage[i + 8] == 'e' && bufimage[i + 9] == 'g') {
-				s1 += _T("111.jpg");
-				i++;
-				break;
-			}
-			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'p' && bufimage[i + 7] == 'n' && bufimage[i + 8] == 'g') {
-				s1 += _T("111.png");
-				break;
-			}
-		}
-		if (i == (ULONGLONG)read) {
+	}
+	else if (s.Right(3) == "dsf" || s.Right(3) == "dff" || s.Right(3) == "wsd") {
+		extern ULONGLONG po;
+		ULONGLONG imgPos = 0;
+		if (!TryId3ApicRegions(ff, bufimage, po, imgPos, size))
 			return;
-		}
-		for (i = 0; i < (ULONGLONG)read; i++) {
-			if (bufimage[i] == 'A' && bufimage[i + 1] == 'P' && bufimage[i + 2] == 'I' && bufimage[i + 3] == 'C') {
-				break;
-			}
-		}
-		i += 4;
-		size = (UINT)bufimage[i];
-		size <<= 8;
-		size |= (UINT)bufimage[i + 1];
-		size <<= 8;
-		size |= (UINT)bufimage[i + 2];
-		size <<= 8;
-		size |= (UINT)bufimage[i + 3];
-
-		i += 4 + po + 16;
+		i = imgPos;
 		s2 += _T("111.bmp");
 	}
 
@@ -20997,6 +21310,8 @@ void COggDlg::LoadJacket(CString s)
 			jx = img.GetWidth();
 			jy = img.GetHeight();
 			jxy = (double)jx / (double)jy;
+			if (jx > 0 && ::IsWindow(m_mp3jake.GetSafeHwnd()))
+				m_mp3jake.EnableWindow(TRUE);
 		}
 		stream->Release();
 	}

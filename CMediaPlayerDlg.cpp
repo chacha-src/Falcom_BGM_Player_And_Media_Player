@@ -36,6 +36,7 @@ extern int playy;   // 再生中フラグ(oggDlg.cpp)
 extern int plf;          // 再生中(1=再生中。oggDlg.cpp)
 extern ITaskbarList3* ptl;   // タスクバー進捗(oggDlg.cpp で初期化)
 extern CDC dc;   // COggDlg のオフスクリーン合成面(スペアナ+ジャケ+時間)を流用
+extern void ShowOggAboutDialog(CWnd* pParent);   // バージョン情報ダイアログ(oggDlg.cpp)
 
 // og 側のオフスクリーン面のソース寸法(oggDlg.cpp の OnPaint と一致させる: srcW=MDCP+5)
 static const int MP_SRCW = (88 * 2 + 175) * 4 + 5; // = 1409 (og の srcW と一致)
@@ -141,6 +142,7 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_lastPlayIcon = -999;
 	m_savedEqVisible = 0;
 	m_savedPianoVisible = 0;
+	m_inSizeMove = false;
 	m_dragging = 0;
 	m_dragSrc = -1;
 	m_hDragImage = NULL;
@@ -269,7 +271,10 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_FINDUP, &CMediaPlayerDlg::OnFindUp)
 	ON_BN_CLICKED(IDC_MP_FINDDOWN, &CMediaPlayerDlg::OnFindDown)
 	ON_WM_MOUSEMOVE()
+	ON_WM_LBUTTONDOWN()
 	ON_WM_LBUTTONUP()
+	ON_WM_ENTERSIZEMOVE()
+	ON_WM_EXITSIZEMOVE()
 	ON_NOTIFY(LVN_GETDISPINFO, IDC_MP_LIST, &CMediaPlayerDlg::OnGetdispinfoList)
 	ON_NOTIFY(NM_DBLCLK, IDC_MP_LIST, &CMediaPlayerDlg::OnDblclkList)
 	ON_NOTIFY(NM_RCLICK, IDC_MP_LIST, &CMediaPlayerDlg::OnRclickList)
@@ -277,6 +282,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_NOTIFY(LVN_BEGINDRAG, IDC_MP_LIST, &CMediaPlayerDlg::OnBeginDragList)
 	ON_MESSAGE(WM_MP_INFO_SCROLL, &CMediaPlayerDlg::OnInfoScrollTick)
 	ON_WM_NCACTIVATE()
+	ON_WM_SYSCOMMAND()
 END_MESSAGE_MAP()
 
 int CMediaPlayerDlg::Create(CWnd* pParent)
@@ -284,10 +290,9 @@ int CMediaPlayerDlg::Create(CWnd* pParent)
 	BOOL bret = CCustomBlurDialogExBase::Create(CMediaPlayerDlg::IDD, pParent);
 	if (bret == TRUE) {
 		ShowWindow(SW_SHOW);
-		// 表示が確定してから ♪ 行へ確実にスクロール/選択する。
-		// (OnInitDialog 時点ではウィンドウ未実現で EnsureVisible が効かないことがあるため)
-		m_lastScroll = -2;
-		FollowPlayingRow();
+		// OnInitDialog 時点では EnsureVisible が効かないことがあるため、
+		// 表示確定後にプレイリスト側の選択位置へ復元する。
+		InitListScrollPosition();
 	}
 	return bret;
 }
@@ -301,6 +306,22 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 
 	SetIcon(m_hIcon, TRUE);
 	SetIcon(m_hIcon, FALSE);
+
+	// "バージョン情報..." メニュー項目をシステム メニュー(左上アイコンのメニュー)へ追加。
+	// ファルコム特化型画面(COggDlg)と同じ挙動にそろえる。
+	ASSERT((IDM_ABOUTBOX & 0xFFF0) == IDM_ABOUTBOX);
+	ASSERT(IDM_ABOUTBOX < 0xF000);
+	CMenu* pSysMenu = GetSystemMenu(FALSE);
+	if (pSysMenu != NULL)
+	{
+		CString strAboutMenu;
+		strAboutMenu.LoadString(IDS_ABOUTBOX);
+		if (!strAboutMenu.IsEmpty())
+		{
+			pSysMenu->AppendMenu(MF_SEPARATOR);
+			pSysMenu->AppendMenu(MF_STRING, IDM_ABOUTBOX, strAboutMenu);
+		}
+	}
 
 	CDC* dc = GetDC();
 	if (dc) {
@@ -551,8 +572,22 @@ BOOL CMediaPlayerDlg::PreCreateWindow(CREATESTRUCT& cs)
 	return TRUE;
 }
 
+BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
+{
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN) {
+		CWnd* pFocus = GetFocus();
+		if (pFocus && pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()) {
+			OnFindUp();  // Enter = 次の候補へ(og の IDOK/終了へ流さない)
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 {
+	if (RelayPreTranslateMessage(pMsg))
+		return TRUE;
 	if (CCC_ProcessInwomanHotkey(pMsg, this))
 		return TRUE; // 隠し: F12を5回で淫女モード切替
 	// リスト行ツールチップ (CListCtrlA 実装): ツールチップ表示ON時のみリレー
@@ -562,6 +597,13 @@ BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 	return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
+}
+
+void CMediaPlayerDlg::RequestAppShutdown()
+{
+	SavePos();
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
 }
 
 BOOL CMediaPlayerDlg::DestroyWindow()
@@ -820,8 +862,11 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 
 	// 件数変化 or 強制(並べ替え/タグ更新/追加削除)時に範囲を再設定。
 	if (bForce || cnt != m_lastCount) {
+		int anchor = GetListScrollAnchor();
 		m_list.SetItemCount(cnt);   // 仮想リスト: スクロール範囲を確定(pl と同じ仕組み)
 		m_lastCount = cnt;
+		if (cnt > 0)
+			RestoreListScrollAnchor(anchor);   // SetItemCount で先頭へ戻るのを防ぐ
 		if (bForce) m_list.Invalidate(FALSE);   // 表示内容(順序/タグ)の変化を反映
 	}
 
@@ -876,16 +921,58 @@ void CMediaPlayerDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 		di->item.iImage = d.icon;
 }
 
+int CMediaPlayerDlg::GetListScrollAnchor() const
+{
+	if (!pl || pl->playcnt <= 0) return 0;
+	if (pl->pnt1 >= 0 && pl->pnt1 < pl->playcnt) return pl->pnt1;
+	if (plcnt >= 0 && plcnt < pl->playcnt) return plcnt;
+	if (::IsWindow(m_list.GetSafeHwnd())) {
+		int sel = m_list.GetNextItem(-1, LVNI_SELECTED);
+		if (sel >= 0 && sel < pl->playcnt) return sel;
+	}
+	if (::IsWindow(pl->m_lc.GetSafeHwnd())) {
+		int sel = pl->m_lc.GetNextItem(-1, LVNI_SELECTED);
+		if (sel >= 0 && sel < pl->playcnt) return sel;
+		int top = pl->m_lc.GetTopIndex();
+		if (top >= 0 && top < pl->playcnt) return top;
+	}
+	if (pl->pnt >= 0 && pl->pnt < pl->playcnt) return pl->pnt;
+	return 0;
+}
+
+void CMediaPlayerDlg::RestoreListScrollAnchor(int anchor)
+{
+	if (!::IsWindow(m_list.GetSafeHwnd()) || !pl || pl->playcnt <= 0) return;
+	if (anchor < 0 || anchor >= pl->playcnt) anchor = 0;
+	for (int k = -1; (k = m_list.GetNextItem(k, LVNI_SELECTED)) != -1; )
+		m_list.SetItemState(k, 0, LVIS_SELECTED | LVIS_FOCUSED);
+	m_list.SetItemState(anchor, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+	m_list.EnsureVisible(anchor, FALSE);
+}
+
+void CMediaPlayerDlg::InitListScrollPosition()
+{
+	if (!::IsWindow(m_list.GetSafeHwnd()) || !pl || pl->playcnt <= 0) return;
+	int anchor = GetListScrollAnchor();
+	RestoreListScrollAnchor(anchor);
+	// FollowPlayingRow の初回強制追従を抑え、♪行が変わった時だけ追従する
+	if (pl->pnt >= 0 && pl->pnt < pl->playcnt)
+		m_lastScroll = pl->pnt;
+	else
+		m_lastScroll = anchor;
+}
+
 // 再生中(♪)の行へカーソル(選択)を移動して可視化する。
 // ♪ の行は pl->pnt(SIcon が pc[pnt].icon を再生中アイコンへ切替えている)。
 // 項目挿入後に呼ぶこと。pnt が変わった時のみ追従し、同一曲中のユーザー選択は邪魔しない。
 // 再生中(♪)行へスクロールして選択する。pl->pnt が変化した場合のみ動作する。
-// OnInitDialog 時点ではウィンドウ未実現で EnsureVisible が効かないことがあるため、
-// Create() の ShowWindow 後にも呼んでいる。
+// 起動時の位置復元は InitListScrollPosition() を使う。
 void CMediaPlayerDlg::FollowPlayingRow()
 {
 	if (!::IsWindow(m_list.GetSafeHwnd())) return;
 	if (!pl || pl->pc == NULL) return;
+	// あいまい検索で別行を選択中(pnt1)は、再生行(♪)への強制追従をしない
+	if (pl->pnt1 != -1) return;
 	int cnt = pl->playcnt;
 	int play = pl->pnt;
 	if (play < 0 || play >= cnt) return;
@@ -1124,7 +1211,11 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		// リストへ WM_NCPAINT が飛び、アクリル時は OpaqueFixer が不透明化する。
 		KillTimer(6);
 		if (::IsWindow(m_list.GetSafeHwnd())) {
-			if (pl) m_list.SetItemCount(pl->playcnt);   // 可視状態で範囲を再確定
+			if (pl && pl->playcnt > 0) {
+				int anchor = GetListScrollAnchor();
+				m_list.SetItemCount(pl->playcnt);   // 可視状態で範囲を再確定
+				RestoreListScrollAnchor(anchor);    // SetItemCount で先頭へ戻るのを防ぐ
+			}
 			m_list.RedrawWindow(NULL, NULL,
 				RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
 		}
@@ -1163,14 +1254,41 @@ void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 			m_savedPianoVisible = 0;
 		}
 		DoLayout();
-		// リサイズ中はカスタムコントロール(ボタン/スライダー/リストビュー)が
-		// 部分描画のまま崩れるので、子も含めて確実に再描画させる。
-		// WS_CLIPCHILDREN 済みなので親の ERASE が子を塗り潰すことはない。
+		if (m_inSizeMove) {
+			// 対話的リサイズ中(枠ドラッグ中)は同期再描画(RDW_UPDATENOW)を避け、
+			// 無効化のみでペイントをコアレスさせて軽量化する。確定時(OnExitSizeMove)に
+			// 一度だけ全子コントロールを同期再描画してきれいに整える。
+			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+		}
+		else {
+			// プログラム的なサイズ変更/最大化など: 従来どおり即時できれいに整える。
+			// WS_CLIPCHILDREN 済みなので親の ERASE が子を塗り潰すことはない。
+			RedrawWindow(NULL, NULL,
+				RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+			if (::IsWindow(m_list.GetSafeHwnd()))
+				m_list.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
+		}
+	}
+}
+
+void CMediaPlayerDlg::OnEnterSizeMove()
+{
+	m_inSizeMove = true;
+	Default();
+}
+
+void CMediaPlayerDlg::OnExitSizeMove()
+{
+	m_inSizeMove = false;
+	if (::IsWindow(m_hWnd) && !IsIconic()) {
+		DoLayout();
+		// 確定時に一度だけ同期再描画して、ドラッグ中の簡易描画の崩れを整える。
 		RedrawWindow(NULL, NULL,
 			RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 		if (::IsWindow(m_list.GetSafeHwnd()))
 			m_list.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
 	}
+	Default();
 }
 
 void CMediaPlayerDlg::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
@@ -1275,6 +1393,21 @@ BOOL CMediaPlayerDlg::OnNcActivate(BOOL bActive)
 		CCC_RefreshDialogDwmBlur(m_hWnd);   // backdrop=acrylic + フレーム拡張を再適用
 #endif
 	return r;
+}
+
+void CMediaPlayerDlg::OnSysCommand(UINT nID, LPARAM lParam)
+{
+	if ((nID & 0xFFF0) == IDM_ABOUTBOX)
+	{
+		ShowOggAboutDialog(this);
+		return;
+	}
+	if ((nID & 0xFFF0) == SC_CLOSE)
+	{
+		OnClose();
+		return;
+	}
+	CCustomBlurDialogExBase::OnSysCommand(nID, lParam);
 }
 
 void CMediaPlayerDlg::ResetInfoScroll()
@@ -1691,9 +1824,7 @@ void CMediaPlayerDlg::OnDestroy()
 void CMediaPlayerDlg::OnClose()
 {
 	// メディアプレイヤー画面の×はアプリ終了(メイン画面を閉じる)
-	SavePos();
-	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+	RequestAppShutdown();
 }
 
 void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
@@ -1820,10 +1951,7 @@ void CMediaPlayerDlg::OnJacket()
 
 void CMediaPlayerDlg::OnExit()
 {
-	// アプリ終了(メイン画面の終了処理へ委譲)
-	SavePos();
-	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+	RequestAppShutdown();
 }
 
 void CMediaPlayerDlg::OnTempoReset()
@@ -2198,10 +2326,35 @@ void CMediaPlayerDlg::OnBeginDragList(NMHDR* pNMHDR, LRESULT* pResult)
 	SetCapture();
 }
 
+// ミニジャケット(幅拡張時に左へ分離表示する正方形ジャケ)クリックで、
+// ジャケボタンと同じくジャケット拡大表示を開く。座標は DoLayout が m_jacketRect を
+// 毎リサイズ更新するので、リサイズで位置が変わっても追従する。
+// ジャケ分離していない狭い窓ではバナー内蔵ジャケなので、バナー領域クリックでも開く。
+void CMediaPlayerDlg::OnLButtonDown(UINT nFlags, CPoint point)
+{
+	if (g_mpSideJacket && !m_jacketRect.IsRectEmpty() && m_jacketRect.PtInRect(point)) {
+		OnJacket();
+		return;
+	}
+	if (!g_mpSideJacket && !m_bannerRect.IsRectEmpty() && m_bannerRect.PtInRect(point)) {
+		OnJacket();
+		return;
+	}
+	CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
+}
+
 void CMediaPlayerDlg::OnMouseMove(UINT nFlags, CPoint point)
 {
 	// バナー上ホバーで og と同じジャケットアニメを発火(ジャケ分離中は無効)
 	g_mpBannerHover = (!g_mpSideJacket && m_bannerRect.PtInRect(point)) ? 1 : 0;
+	// ジャケ拡大できる領域(ミニジャケ or バナー内蔵ジャケ)では手のひらカーソル
+	if (!m_dragging) {
+		const bool overJacket =
+			(g_mpSideJacket && !m_jacketRect.IsRectEmpty() && m_jacketRect.PtInRect(point)) ||
+			(!g_mpSideJacket && !m_bannerRect.IsRectEmpty() && m_bannerRect.PtInRect(point));
+		if (overJacket)
+			::SetCursor(::LoadCursor(NULL, IDC_HAND));
+	}
 	if (m_dragging) {
 		::SetCursor(::LoadCursor(NULL, IDC_HAND));
 		if (m_hDragImage) {

@@ -100,9 +100,9 @@ void CCC_SendGroupBoxesToBack(HWND hDlg);
 #define COLOR_EDIT_TEXT         RGB(0,   0,   0)   // エディットボックスの文字色
 #define COLOR_LIST_BG           RGB(252, 228, 240) // リストボックスの背景色（淡いローズ）
 #define COLOR_COMBO_BG          RGB(255, 234, 238) // コンボボックスの背景色
-#define COLOR_BUTTON_BG         RGB(255, 206, 224) // ボタンの通常時背景色（キャンディピンク）
-#define COLOR_BUTTON_PUSHED     RGB(240, 140, 180) // ボタンの押下時背景色（濃いローズ）
-#define COLOR_BUTTON_HOVER      RGB(255, 178, 206) // ボタンのホバー時背景色（あまいローズ）
+#define COLOR_BUTTON_BG         RGB(200, 232, 190) // ボタンの通常時背景色（やさしい緑：ファルコム特化型）
+#define COLOR_BUTTON_PUSHED     RGB( 60, 160,  60) // ボタンの押下時背景色（濃い緑）
+#define COLOR_BUTTON_HOVER      RGB(100, 200, 100) // ボタンのホバー時背景色（あかるい緑）
 #define COLOR_SLIDER_THUMB      RGB(255,  92, 150) // スライダーのつまみの色（色っぽいローズ）
 #define COLOR_RANGE_SLIDER_THUMB RGB(255, 255, 255) // 範囲スライダーのつまみ色
 #define COLOR_RANGE_SELECTION   RGB(255, 182, 213) // 範囲スライダーの選択範囲色（ローズ）

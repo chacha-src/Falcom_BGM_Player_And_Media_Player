@@ -71,6 +71,7 @@ public:
 	void DoLayout();              // DPI/リサイズ対応の手動レイアウト
 	void RefreshList(BOOL bForce = FALSE);  // pl->pc をそのまま反映
 	void FollowPlayingRow();                // 再生中(♪)の行へカーソル追従(項目挿入後に呼ぶ)
+	void InitListScrollPosition();          // 起動/表示確定時にリスト位置を復元
 	void SyncFromMain();         // og/pl の状態をUIへ反映
 	void MirrorSeekVol();        // 再生位置(playb追従)/時間/音量を高速ミラー
 	void SavePos();              // 座標を savedata に保存
@@ -80,6 +81,8 @@ public:
 	// 選択行の並べ替え(mode: 0=一番上 / 1=上へ / 2=下へ / 3=一番下)。
 	// pl->pc を直接並べ替え、再生インデックス(plcnt/pnt/pnt1)と選択を追従させる。
 	void MoveSelected(int mode);
+	BOOL RelayPreTranslateMessage(MSG* pMsg);  // og::DoModal 中の Enter 等を中継
+	void RequestAppShutdown();
 
 	// ---- 情報表示スタティック(バナー GDI に隠れているものは SW_HIDE してある) ----
 	CCustomStatic m_title, m_artist, m_album, m_lrc, m_lrc2, m_lrc3, m_os, m_cpu, m_os3, m_time, m_volval, m_vollabel;
@@ -129,6 +132,7 @@ public:
 	int  m_lastPlayIcon; // 再生行(♪)の前回アイコン値。変化時のみ再描画して点滅をなめらかに
 	int  m_savedEqVisible;    // 最小化連動: 最小化前にイコライザーが表示されていたか
 	int  m_savedPianoVisible; // 最小化連動: 最小化前にピアノロールが表示されていたか
+	bool m_inSizeMove;        // ユーザーが枠をドラッグしてリサイズ中(重い同期再描画を抑制)
 	float hD2;           // DPI スケール係数(96dpi = 1.0)
 
 	// ---- バナー領域(ビジュアライザ Blit 先) ----
@@ -165,6 +169,8 @@ public:
 	// m_tip チェックの ON/OFF を m_list のカスタムツールチップ(CListCtrlA)に反映する。
 	// LVS_EX_INFOTIP はカスタム実装と競合するため、ON 時は除去・OFF 時は付与する。
 	void ApplyListTooltipState();
+	int  GetListScrollAnchor() const;
+	void RestoreListScrollAnchor(int anchor);
 	// og の timerp で使う sss 決定ロジックと同じ規則でタイトルを解決する。
 	// mode 値により tagfile / stitle / fnn のどれを使うかが変わる。
 	CString CurrentTrackTitle() const;
@@ -184,6 +190,8 @@ protected:
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnEnterSizeMove();
+	afx_msg void OnExitSizeMove();
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
 #if WIN64
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
@@ -237,9 +245,11 @@ protected:
 	afx_msg void OnKeydownList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnBeginDragList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg LRESULT OnInfoScrollTick(WPARAM wParam, LPARAM lParam);
 	afx_msg BOOL OnNcActivate(BOOL bActive);
+	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
 };
 

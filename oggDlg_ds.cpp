@@ -425,8 +425,16 @@ UINT HandleNotifications(LPVOID)
 	HANDLE ev[] = { (HANDLE)og->timer };
 	ULONG PlayCursor, WriteCursor = 0, len3, len4;
 
+	auto isPlausibleDsb = [](LPDIRECTSOUNDBUFFER8 p) -> bool {
+		if (!p)
+			return false;
+		const ULONG_PTR v = reinterpret_cast<ULONG_PTR>(p);
+		// ヒープ破壊で m_dsb が 0x36 等のゴミになると if(p) を通過して AV するため
+		return v >= 0x10000 && (v % sizeof(void*)) == 0;
+	};
+
 	oldw = 0;
-	if (m_dsb)
+	if (isPlausibleDsb(m_dsb))
 		m_dsb->SetCurrentPosition(0);
 	if (mode == -10 || mode == 999) {
 		oldw = OUTPUT_BUFFER_SIZE * 2;
@@ -439,7 +447,7 @@ UINT HandleNotifications(LPVOID)
 		playf = 1;
 		thn = FALSE;
 		LPDIRECTSOUNDBUFFER8 dsbStop = m_dsb;
-		if (dsbStop) {
+		if (isPlausibleDsb(dsbStop)) {
 			dsbStop->SetVolume(DSBVOLUME_MIN);
 			dsbStop->Stop();
 		}
@@ -475,7 +483,7 @@ UINT HandleNotifications(LPVOID)
 		if (ps == 1) continue;
 
 		LPDIRECTSOUNDBUFFER8 dsb = m_dsb;
-		if (!dsb)
+		if (!isPlausibleDsb(dsb))
 			continue;
 
 		// 書き込み位置の計算
@@ -522,7 +530,7 @@ UINT HandleNotifications(LPVOID)
 		if (thn1)
 			return stopPlaybackAndExit();
 		dsb = m_dsb;
-		if (dsb) {
+		if (isPlausibleDsb(dsb)) {
 			hr = dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, &len3, (LPVOID*)&pdsb2, &len4, 0);
 			if (hr == DS_OK) {
 				thn = FALSE;
@@ -560,7 +568,7 @@ UINT HandleNotifications(LPVOID)
 		if (g_endWrittenBytes != 0) {
 			LPDIRECTSOUNDBUFFER8 dsbb = m_dsb;
 			__int64 heard = g_endWrittenBytes; // 既定: 終端到達扱い（dsb 取得失敗時の保険）
-			if (dsbb) {
+			if (isPlausibleDsb(dsbb)) {
 				ULONG pc = 0, wc = 0;
 				if (dsbb->GetCurrentPosition(&pc, &wc) == DS_OK && ringBytes > 0) {
 					const __int64 queued = (__int64)(((ULONG)oldw + ringBytes - pc) % ringBytes);
@@ -587,15 +595,14 @@ UINT HandleNotifications(LPVOID)
 			if (fade1 && heard >= g_endWrittenBytes) {
 				if (thn1 || stf != 0 || syukai == 2)
 					return stopPlaybackAndExit();
-				playf = 1; thn = FALSE;
+				playf = 0; thn = TRUE; reset = TRUE;
 				LPDIRECTSOUNDBUFFER8 dsbFade = m_dsb;
-				if (dsbFade) {
+				if (isPlausibleDsb(dsbFade)) {
 					dsbFade->SetVolume(DSBVOLUME_MIN);
 					dsbFade->Stop();
 				}
-				og->OnPause();
-				playf = 0; thn = TRUE; reset = TRUE;
-				extern int eqflg; eqflg = TRUE;
+				if (og && ::IsWindow(og->GetSafeHwnd()))
+					og->PostMessage(WM_PLAYBACK_AUTO_STOPPED, 0, 0);
 				AfxEndThread(0);
 				return 0;
 			}
@@ -4510,7 +4517,7 @@ static void ApplyExternalBoostOnlyToBuffer(
 // ============================================================
 // ResampleUp() - Lanczos-2 アップサンプリング
 // ============================================================
-// srcRate < 44100 の音源を 44100Hz に変換して内部処理する
+// srcRate < 32000 の音源のみ 44100Hz に変換して内部処理する（32kHz OGG 等はネイティブ）
 // Lanczos カーネル (a=2): sinc(x) * sinc(x/a) の積
 // タップ数: ±2 (計5点) — 品質とCPU負荷のバランス点
 // ============================================================
@@ -4531,16 +4538,35 @@ static inline float LanczosKernel2(float x) {
 
 void ResampleUp(void* srcData, int srcLen, void** dstData, int* dstLen,
 	int srcRate, int dstRate, int channels, int bitDepth) {
+	*dstData = NULL;
+	*dstLen = 0;
+	if (!srcData || srcLen <= 0 || srcRate <= 0 || dstRate <= 0 || channels <= 0 || bitDepth <= 0)
+		return;
 	int bytesPerSample = bitDepth / 8;
-	int srcSamples = srcLen / (channels * bytesPerSample);
+	int frameBytes = channels * bytesPerSample;
+	if (frameBytes <= 0 || srcLen < frameBytes)
+		return;
+	int srcSamples = srcLen / frameBytes;
+	if (srcSamples <= 0)
+		return;
 	int dstSamples = (int)((double)srcSamples * dstRate / srcRate + 0.5);
+	if (dstSamples <= 0)
+		return;
 
-	*dstLen = dstSamples * channels * bytesPerSample;
+	*dstLen = dstSamples * frameBytes;
 	*dstData = malloc(*dstLen);
 	if (!(*dstData)) return;
 
 	float* srcFloat = (float*)malloc(srcSamples * channels * sizeof(float));
 	float* dstFloat = (float*)malloc(dstSamples * channels * sizeof(float));
+	if (!srcFloat || !dstFloat) {
+		free(srcFloat);
+		free(dstFloat);
+		free(*dstData);
+		*dstData = NULL;
+		*dstLen = 0;
+		return;
+	}
 	unsigned char* pSrc = (unsigned char*)srcData;
 
 	// 整数 PCM → 浮動小数点 [-1.0, 1.0] に変換
@@ -4645,12 +4671,24 @@ static void ApplyFastLPF(float* data, int samples, int channels, float cutoff) {
 // cutoff < 0.9 の場合は3点LPFでエイリアシングを抑制
 void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 	int srcRate, int dstRate, int channels, int bitDepth) {
+	if (!srcData || !dstData || srcLen <= 0 || dstLen <= 0 || srcRate <= 0 || dstRate <= 0 || channels <= 0 || bitDepth <= 0)
+		return;
 	int bytesPerSample = bitDepth / 8;
-	int srcSamples = srcLen / (channels * bytesPerSample);
-	int dstSamples = dstLen / (channels * bytesPerSample);
+	int frameBytes = channels * bytesPerSample;
+	if (frameBytes <= 0 || srcLen < frameBytes || dstLen < frameBytes)
+		return;
+	int srcSamples = srcLen / frameBytes;
+	int dstSamples = dstLen / frameBytes;
+	if (srcSamples <= 0 || dstSamples <= 0)
+		return;
 
 	float* srcFloat = (float*)malloc(srcSamples * channels * sizeof(float));
 	float* dstFloat = (float*)malloc(dstSamples * channels * sizeof(float));
+	if (!srcFloat || !dstFloat) {
+		free(srcFloat);
+		free(dstFloat);
+		return;
+	}
 	unsigned char* pSrc = (unsigned char*)srcData;
 
 	if (bitDepth == 8) {
@@ -4751,23 +4789,39 @@ void equaliser(void* data, int len, BOOL reset) {
 	}
 
 	// ========================================
-	// リサンプリング: 44100Hz未満を一時的に44100Hzへ変換
-	// 内部処理は常に44100Hz以上で行い、終端でダウンサンプル
+	// リサンプリング: 22050Hz 等の低レートのみ 44100Hz へ一時変換。
+	// 32000Hz / 44100Hz / 48000Hz はネイティブレートで EQ 処理（32kHz OGG 向け）。
 	// ========================================
+	if (len <= 0)
+		return;
+
 	int  originalRate = wavbit_sample_Hz;
 	int  originalLen = len;
 	void* processData = data;
 	int   processLen = len;
 	void* tempBuffer = NULL;
-	BOOL  needsResampling = (originalRate < 44100);
+	const int kEqNativeMinRate = 32000;
+	BOOL  needsResampling = (originalRate > 0 && originalRate < kEqNativeMinRate);
 
 	wavbitbackup = originalRate;
 
 	if (needsResampling) {
 		ResampleUp(data, len, &tempBuffer, &processLen, originalRate, 44100, wavchannel, wavsam_depth);
-		if (!tempBuffer) return;
+		if (!tempBuffer || processLen <= 0) {
+			if (tempBuffer) free(tempBuffer);
+			return;
+		}
 		processData = tempBuffer;
 		wavbitbackup = 44100;
+	}
+
+	{
+		const int bpfEq = (wavsam_depth / 8) * wavchannel;
+		if (bpfEq <= 0 || processLen < bpfEq) {
+			if (needsResampling && tempBuffer)
+				free(tempBuffer);
+			return;
+		}
 	}
 
 	// ========================================
