@@ -170,6 +170,8 @@ void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_MP_LRC, m_lrc);
 	DDX_Control(pDX, IDC_MP_LRC2, m_lrc2);
 	DDX_Control(pDX, IDC_MP_LRC3, m_lrc3);
+	DDX_Control(pDX, IDC_MP_LRC4, m_lrc4);
+	DDX_Control(pDX, IDC_MP_LRC5, m_lrc5);
 	DDX_Control(pDX, IDC_MP_OS, m_os);
 	DDX_Control(pDX, IDC_MP_CPU, m_cpu);
 	DDX_Control(pDX, IDC_MP_OS3, m_os3);
@@ -443,6 +445,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_lrc.SetFont(&m_fontInfo, TRUE);
 	m_lrc2.SetFont(&m_fontInfo, TRUE);
 	m_lrc3.SetFont(&m_fontInfo, TRUE);
+	m_lrc4.SetFont(&m_fontInfo, TRUE);
+	m_lrc5.SetFont(&m_fontInfo, TRUE);
 	m_dsvolL.SetFont(&m_fontInfo, TRUE);
 	m_kvolL.SetFont(&m_fontInfo, TRUE);
 	m_tempoL.SetFont(&m_fontInfo, TRUE);
@@ -696,20 +700,46 @@ void CMediaPlayerDlg::DoLayout()
 	const int gTitle = (int)(14 * s);   // グループ枠のタイトル分の高さ
 	const int gPad = (int)(5 * s);      // グループ内側の余白
 
-	// ===== 情報グループ(歌詞3行 + OS/CPU) フォントが収まる高さを確保 =====
+	// ===== 情報グループ(歌詞5行 or 歌詞3行+OS/CPU) =====
+	// 歌詞有無で中身は切替えるが、枠の高さは固定(5行分)にしてプレイリスト位置が動かないようにする。
 	int infoTop = M + bannerH + (int)(2 * s);
 	int ix = M + gPad, iw = W - M * 2 - gPad * 2;
 	int y = infoTop + gTitle;
 	int lh = (int)(17 * s);   // 情報フォント13px が収まる行高
-	MoveCtl(&m_lrc, ix, y, iw, lh); y += lh;
-	MoveCtl(&m_lrc2, ix, y, iw, lh); y += lh;
-	MoveCtl(&m_lrc3, ix, y, iw, lh); y += lh + (int)(1 * s);
-	int osH = (int)(15 * s);
-	// OS と CPU を1行に、os3 を1行に(2行で圧縮)
-	MoveCtl(&m_os, ix, y, iw * 3 / 5, osH);
-	MoveCtl(&m_cpu, ix + iw * 3 / 5, y, iw * 2 / 5, osH); y += osH;
-	MoveCtl(&m_os3, ix, y, iw, osH); y += osH + gPad;
-	int infoBottom = y;
+	const int osH = (int)(15 * s);
+	const int infoInnerH = lh * 5 + (int)(1 * s);
+	const bool hasLyrics = (og && og->lrcnum >= 2);
+	if (hasLyrics) {
+		MoveCtl(&m_lrc, ix, y, iw, lh); y += lh;
+		MoveCtl(&m_lrc2, ix, y, iw, lh); y += lh;
+		MoveCtl(&m_lrc3, ix, y, iw, lh); y += lh;
+		MoveCtl(&m_lrc4, ix, y, iw, lh); y += lh;
+		MoveCtl(&m_lrc5, ix, y, iw, lh);
+		m_lrc4.ShowWindow(SW_SHOW);
+		m_lrc5.ShowWindow(SW_SHOW);
+		MoveCtl(&m_os, ix, infoTop, 0, 0);
+		MoveCtl(&m_cpu, ix, infoTop, 0, 0);
+		MoveCtl(&m_os3, ix, infoTop, 0, 0);
+		m_os.ShowWindow(SW_HIDE);
+		m_cpu.ShowWindow(SW_HIDE);
+		m_os3.ShowWindow(SW_HIDE);
+	}
+	else {
+		MoveCtl(&m_lrc, ix, y, iw, lh); y += lh;
+		MoveCtl(&m_lrc2, ix, y, iw, lh); y += lh;
+		MoveCtl(&m_lrc3, ix, y, iw, lh); y += lh + (int)(1 * s);
+		MoveCtl(&m_os, ix, y, iw * 3 / 5, osH);
+		MoveCtl(&m_cpu, ix + iw * 3 / 5, y, iw * 2 / 5, osH); y += osH;
+		MoveCtl(&m_os3, ix, y, iw, osH);
+		MoveCtl(&m_lrc4, ix, infoTop, 0, 0);
+		MoveCtl(&m_lrc5, ix, infoTop, 0, 0);
+		m_lrc4.ShowWindow(SW_HIDE);
+		m_lrc5.ShowWindow(SW_HIDE);
+		m_os.ShowWindow(SW_SHOW);
+		m_cpu.ShowWindow(SW_SHOW);
+		m_os3.ShowWindow(SW_SHOW);
+	}
+	const int infoBottom = infoTop + gTitle + infoInnerH + gPad;
 	MoveCtl(&m_grpInfo, M, infoTop, W - M * 2, infoBottom - infoTop);
 
 	// ===== シーク(範囲スライダー, 全幅) + 時間% =====
@@ -784,7 +814,7 @@ void CMediaPlayerDlg::DoLayout()
 	int by4 = plTop + gTitle;
 	int tbH = (int)(19 * s);
 	int comboW = (int)(120 * s);
-	MoveCtl(&m_plsel, M + gPad, by4, comboW, (int)(200 * s));
+	MoveCtl(&m_plsel, M + gPad, by4, comboW, tbH);
 	int tx = M + gPad + comboW + (int)(5 * s);
 	int tbw = (int)(50 * s);
 	MoveCtl(&m_plrename, tx, by4, tbw, tbH); tx += tbw + (int)(3 * s);
@@ -804,7 +834,9 @@ void CMediaPlayerDlg::DoLayout()
 	int swH = (int)(22 * s);
 	int chkRowH = (int)(17 * s);
 	int listY = by4 + tbH + (int)(4 * s);
-	int listH = H - listY - chkRowH - swH - M - gPad - (int)(8 * s);
+	const int botY = H - swH - M + (int)(2 * s);
+	const int ckY = botY - (int)(8 * s) - chkRowH;
+	int listH = ckY - (int)(3 * s) - listY;
 	if (listH < (int)(50 * s)) listH = (int)(50 * s);
 	MoveCtl(&m_list, M + gPad, listY, W - M * 2 - gPad * 2, listH);
 
@@ -822,7 +854,6 @@ void CMediaPlayerDlg::DoLayout()
 	}
 
 	// 下部チェック(ツールチップ/最小化連動/mp3途中保存/DShow途中保存)は横いっぱいに均等配置
-	int ckY = listY + listH + (int)(3 * s);
 	int availCk = W - (M + gPad) * 2;
 	int gapCk = (int)(6 * s);
 	int ckW = (availCk - gapCk * 3) / 4;
@@ -836,12 +867,26 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_grpPl, M, plTop, W - M * 2, plBottom - plTop);
 
 	// 最下部: 切替(左) / 終了(右)  ※ジャケは操作行へ移動済み
-	int botY = H - swH - M + (int)(2 * s);
 	MoveCtl(&m_switch, M, botY, (int)(140 * s), swH);
 	int exW = (int)(80 * s);
 	MoveCtl(&m_exit, W - M - exW, botY, exW, swH);
 
 	Invalidate();
+}
+
+// 手動レイアウト後に仮想リストのスクロール範囲と Z 順を再確定する。
+// OnSize では RedrawWindow するが、歌詞モード切替など DoLayout 単独呼び出し時は必要。
+void CMediaPlayerDlg::RefreshListAfterLayout()
+{
+	if (!::IsWindow(m_list.GetSafeHwnd())) return;
+	if (pl && pl->playcnt > 0) {
+		int anchor = GetListScrollAnchor();
+		m_list.SetItemCount(pl->playcnt);
+		m_lastCount = pl->playcnt;
+		RestoreListScrollAnchor(anchor);
+	}
+	m_list.SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	m_list.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
 }
 
 // プレイリスト(pl)と同じく仮想リスト(LVS_OWNERDATA)としてミラーする。
@@ -995,15 +1040,32 @@ void CMediaPlayerDlg::SyncFromMain()
 
 	// タイトル/アーティスト/アルバムはバナーGDIに表示されるためここでは更新しない。
 
-	// 歌詞(3行) / OS / CPU (og からそのまま引き継ぐ)
+	// 歌詞(5行) / OS / CPU (og からそのまま引き継ぐ)
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
 		CString s, s2;
+		const bool hasLyrics = (og->lrcnum >= 2);
 		og->m_lrc.GetWindowText(s); m_lrc.GetWindowText(s2); if (s != s2) m_lrc.SetWindowText(s);
 		og->m_lrc2.GetWindowText(s); m_lrc2.GetWindowText(s2); if (s != s2) m_lrc2.SetWindowText(s);
 		og->m_lrc3.GetWindowText(s); m_lrc3.GetWindowText(s2); if (s != s2) m_lrc3.SetWindowText(s);
-		og->m_OS.GetWindowText(s); m_os.GetWindowText(s2); if (s != s2) m_os.SetWindowText(s);
-		og->m_cpu.GetWindowText(s); m_cpu.GetWindowText(s2); if (s != s2) m_cpu.SetWindowText(s);
-		og->m_os3.GetWindowText(s); m_os3.GetWindowText(s2); if (s != s2) m_os3.SetWindowText(s);
+		if (hasLyrics) {
+			og->m_lrc4.GetWindowText(s); m_lrc4.GetWindowText(s2); if (s != s2) m_lrc4.SetWindowText(s);
+			og->m_lrc5.GetWindowText(s); m_lrc5.GetWindowText(s2); if (s != s2) m_lrc5.SetWindowText(s);
+		}
+		if (!hasLyrics) {
+			og->m_OS.GetWindowText(s); m_os.GetWindowText(s2); if (s != s2) m_os.SetWindowText(s);
+			og->m_cpu.GetWindowText(s); m_cpu.GetWindowText(s2); if (s != s2) m_cpu.SetWindowText(s);
+			og->m_os3.GetWindowText(s); m_os3.GetWindowText(s2); if (s != s2) m_os3.SetWindowText(s);
+		}
+		static int s_lastLyricsMode = -1;
+		const int lyricsMode = hasLyrics ? 1 : 0;
+		if (s_lastLyricsMode != lyricsMode) {
+			s_lastLyricsMode = lyricsMode;
+			DoLayout();
+			CCC_SendGroupBoxesToBack(GetSafeHwnd());
+			RefreshListAfterLayout();
+			RedrawWindow(NULL, NULL,
+				RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+		}
 
 		// シーク/音量は高速タイマーで追従(ここでも一応呼ぶ)
 		MirrorSeekVol();

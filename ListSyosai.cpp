@@ -132,6 +132,7 @@ static void RefreshPcDetails(playlistdata0& pc)
 BOOL CListSyosai::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
+	CCC_BringDialogToForeground(this);
 	RefreshPcDetails(pc);
 	SetWindowText(LL14(L"ファイル情報", L"File Info", L"Infos fichier", L"Info file", L"Info. de archivo", L"파일 정보", L"文件信息", L"معلومات الملف", L"Сведения о файле", L"Dateiinfo", L"Info. do arquivo", L"Bestandsinfo", L"Informacje o pliku", L"Dosya bilgisi"));
 	SetDlgItemText(ID_OK, LL14(L"OK", L"OK", L"OK", L"OK", L"OK", L"OK", L"确定", L"موافق", L"ОК", L"OK", L"OK", L"OK", L"OK", L"Tamam"));

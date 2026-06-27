@@ -467,6 +467,38 @@ int ogpl0 = 0;
 // アプリケーションのバージョン情報で使われている CAboutDlg ダイアログ
 extern void DoEvent();
 #include "CCustomControl.h"
+
+static CString BuildCpuInstructionListString()
+{
+	CString avx2 = LL14(L"使用可能命令：", L"Available instructions: ", L"Instructions disponibles : ", L"Istruzioni disponibili: ", L"Instrucciones disponibles: ", L"사용 가능 명령: ", L"可用指令：", L"التعليمات المتاحة: ", L"Доступные инструкции: ", L"Verfugbare Befehle: ", L"Instrucoes disponiveis: ", L"Beschikbare instructies: ", L"Dostepne instrukcje: ", L"Kullanilabilir talimatlar: ");
+	int CPUInfo[4] = { -1 };
+	__cpuid(CPUInfo, 0x00000001);
+	if (CPUInfo[0] >= 2) {
+		if (CPUInfo[3] & (1 << 23))  avx2 += L"MMX ";
+		if (CPUInfo[3] & (1 << 25))  avx2 += L"SSE ";
+		if (CPUInfo[3] & (1 << 26))  avx2 += L"SSE2 ";
+		if (CPUInfo[2] & (1))        avx2 += L"SSE3 ";
+		if (CPUInfo[2] & (1 << 9))   avx2 += L"SSSE3 ";
+		if (CPUInfo[2] & (1 << 12))  avx2 += L"FMA3 ";
+		if (CPUInfo[2] & (1 << 19))  avx2 += L"SSE4.1 ";
+		if (CPUInfo[2] & (1 << 20))  avx2 += L"SSE4.2 ";
+	}
+	if (CPUInfo[0] >= 2) {
+		__cpuid(CPUInfo, 0x80000001);
+		if (CPUInfo[2] & (1 << 6))  avx2 += L"SSE4a ";
+	}
+	__cpuid(CPUInfo, 0x00000001);
+	if (CPUInfo[0] >= 2) {
+		if (CPUInfo[2] & (1 << 28))  avx2 += L"AVX ";
+	}
+	if (CPUInfo[0] >= 7) {
+		__cpuid(CPUInfo, 0x00000007);
+		if (CPUInfo[1] & (1 << 5))  avx2 += L"AVX2 ";
+		if (CPUInfo[1] & (1 << 16))  avx2 += L"AVX512 ";
+	}
+	return avx2;
+}
+
 class CAboutDlg : public CCustomBlurDialogBase
 {
 public:
@@ -493,6 +525,7 @@ public:
 	virtual BOOL OnInitDialog();
 	CLinkStatic m_link;
 	CStatic m_cpu;
+	CCustomEdit m_os3;
 	CCustomStandardButton m_okdummy;
 };
 
@@ -510,6 +543,7 @@ void CAboutDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATICin, m_in);
 	DDX_Control(pDX, IDC_Link, m_link);
 	DDX_Control(pDX, IDC_STATICin2, m_cpu);
+	DDX_Control(pDX, IDC_STATICin3, m_os3);
 	DDX_Control(pDX, IDOK, m_okdummy);
 }
 
@@ -829,6 +863,13 @@ BOOL CAboutDlg::OnInitDialog()
 	s = CPUBrandString;
 	m_cpu.SetWindowText(s);
 
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->m_os3.GetWindowText(s);
+	else
+		s = BuildCpuInstructionListString();
+	m_os3.SetWindowText(s);
+	m_os3.SetReadOnly(TRUE);
+
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
 }
@@ -929,6 +970,8 @@ void COggDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATICds3, m_temp_num);
 	DDX_Control(pDX, IDC_STATIC_LRC2, m_lrc2);
 	DDX_Control(pDX, IDC_STATIC_LRC3, m_lrc3);
+	DDX_Control(pDX, IDC_STATIC_LRC4, m_lrc4);
+	DDX_Control(pDX, IDC_STATIC_LRC5, m_lrc5);
 	DDX_Control(pDX, IDC_STATICds4, m_pitch);
 	DDX_Control(pDX, IDC_SLIDER8, m_pitch_sl);
 	DDX_Control(pDX, IDC_STATIC_t, m_temp_s);
@@ -2820,6 +2863,8 @@ BOOL COggDlg::OnInitDialog()
 	m_lrc.SetWindowText(L"");
 	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
 	m_lrc3.SetWindowText(L"");
+	m_lrc4.SetWindowText(L"");
+	m_lrc5.SetWindowText(L"");
 	lrc_backup = L"";
 
 	stflg = TRUE;
@@ -3224,6 +3269,217 @@ static void FinalizeWavStreamHeaderRF64(CFile& f)
 		f.Write(&ds, 4);
 	}
 	g_wavExportDataBytes = dataBytes;
+}
+
+struct WavPcmStreamInfo {
+	WORD ch;
+	DWORD hz;
+	WORD bits;
+	int blockAlign;
+	__int64 dataOffset;
+	__int64 dataBytes;
+	__int64 totalFrames;
+};
+
+static BOOL WavExportReadPcmStreamInfo(CFile& f, WavPcmStreamInfo& info)
+{
+	const __int64 fileLen = (__int64)f.GetLength();
+	if (fileLen <= WAVX_HEADER_SIZE) return FALSE;
+	BYTE hdr[WAVX_HEADER_SIZE];
+	f.SeekToBegin();
+	if (f.Read(hdr, WAVX_HEADER_SIZE) != WAVX_HEADER_SIZE) return FALSE;
+	info.dataOffset = WAVX_HEADER_SIZE;
+	info.dataBytes = fileLen - WAVX_HEADER_SIZE;
+	if (memcmp(hdr, "RF64", 4) == 0)
+		info.dataBytes = *(__int64*)(hdr + 28);
+	info.ch = *(WORD*)(hdr + 58);
+	info.hz = *(DWORD*)(hdr + 60);
+	info.bits = *(WORD*)(hdr + 70);
+	info.blockAlign = info.ch * info.bits / 8;
+	if (info.blockAlign <= 0) info.blockAlign = 4;
+	if (info.hz == 0 || info.dataBytes <= 0) return FALSE;
+	info.totalFrames = info.dataBytes / info.blockAlign;
+	return TRUE;
+}
+
+static void WavExportApplyGainToFrame(BYTE* frame, int blockAlign, int bits, float g)
+{
+	if (!frame || blockAlign <= 0) return;
+	if (bits == 8) {
+		for (int i = 0; i < blockAlign; ++i) {
+			float v = ((float)frame[i] - 128.f) * g + 128.f;
+			int u = (int)floorf(v + 0.5f);
+			if (u < 0) u = 0; else if (u > 255) u = 255;
+			frame[i] = (unsigned char)u;
+		}
+	}
+	else if (bits == 16) {
+		short* s = (short*)frame;
+		const int n = blockAlign / 2;
+		for (int i = 0; i < n; ++i) {
+			float v = (float)s[i] * g;
+			int x = (int)floorf(v + 0.5f);
+			if (x > 32767) x = 32767;
+			else if (x < -32768) x = -32768;
+			s[i] = (short)x;
+		}
+	}
+	else if (bits == 24) {
+		for (int o = 0; o + 2 < blockAlign; o += 3) {
+			const int val = frame[o] | (frame[o + 1] << 8) | ((int)(signed char)frame[o + 2] << 16);
+			float v = (float)val * g;
+			int x = (int)floorf(v + 0.5f);
+			if (x > 8388607) x = 8388607;
+			else if (x < -8388608) x = -8388608;
+			frame[o] = (BYTE)(x & 0xFF);
+			frame[o + 1] = (BYTE)((x >> 8) & 0xFF);
+			frame[o + 2] = (BYTE)((x >> 16) & 0xFF);
+		}
+	}
+	else if (bits == 32) {
+		int* s = (int*)frame;
+		const int n = blockAlign / 4;
+		for (int i = 0; i < n; ++i) {
+			float v = (float)s[i] * g;
+			int x = (int)floorf(v + 0.5f);
+			s[i] = x;
+		}
+	}
+}
+
+static BOOL ApplyTailFadeOutWavFile(const CString& path, int fadeSec)
+{
+	if (fadeSec <= 0) return TRUE;
+	CFile f;
+	if (!f.Open(path, CFile::modeReadWrite | CFile::shareExclusive, NULL))
+		return FALSE;
+	WavPcmStreamInfo info = {};
+	if (!WavExportReadPcmStreamInfo(f, info)) {
+		f.Close();
+		return FALSE;
+	}
+	__int64 fadeFrames = (__int64)fadeSec * (__int64)info.hz;
+	if (fadeFrames > info.totalFrames) fadeFrames = info.totalFrames;
+	if (fadeFrames <= 1) {
+		f.Close();
+		return TRUE;
+	}
+	const __int64 fadeStartFrame = info.totalFrames - fadeFrames;
+	std::vector<BYTE> frame(info.blockAlign);
+	for (__int64 fi = fadeStartFrame; fi < info.totalFrames; ++fi) {
+		const float t = (float)(fi - fadeStartFrame) / (float)(fadeFrames - 1);
+		const float g = (1.f - t) * (1.f - t);
+		const __int64 pos = info.dataOffset + fi * info.blockAlign;
+		f.Seek(pos, CFile::begin);
+		if (f.Read(frame.data(), info.blockAlign) != (UINT)info.blockAlign) break;
+		WavExportApplyGainToFrame(frame.data(), info.blockAlign, info.bits, g);
+		f.Seek(pos, CFile::begin);
+		f.Write(frame.data(), info.blockAlign);
+	}
+	f.Close();
+	return TRUE;
+}
+
+static bool WavExportFrameIsSilent(const BYTE* frame, int blockAlign, int bits, int threshold)
+{
+	if (!frame || blockAlign <= 0) return true;
+	if (bits == 8) {
+		for (int i = 0; i < blockAlign; ++i) {
+			if (abs((int)frame[i] - 128) > threshold) return false;
+		}
+		return true;
+	}
+	if (bits == 16) {
+		const short* s = (const short*)frame;
+		const int n = blockAlign / 2;
+		for (int i = 0; i < n; ++i) {
+			if (abs((int)s[i]) > threshold) return false;
+		}
+		return true;
+	}
+	if (bits == 24) {
+		for (int o = 0; o + 2 < blockAlign; o += 3) {
+			const int val = frame[o] | (frame[o + 1] << 8) | ((int)(signed char)frame[o + 2] << 16);
+			if (abs(val) > threshold) return false;
+		}
+		return true;
+	}
+	if (bits == 32) {
+		const int* s = (const int*)frame;
+		const int n = blockAlign / 4;
+		for (int i = 0; i < n; ++i) {
+			if (abs(s[i]) > threshold) return false;
+		}
+		return true;
+	}
+	return false;
+}
+
+static BOOL TrimLeadingSilenceWavFile(const CString& path, int keepSec)
+{
+	if (keepSec < 0) keepSec = 0;
+	CFile f;
+	if (!f.Open(path, CFile::modeReadWrite | CFile::shareExclusive, NULL))
+		return FALSE;
+	WavPcmStreamInfo info = {};
+	if (!WavExportReadPcmStreamInfo(f, info)) {
+		f.Close();
+		return FALSE;
+	}
+	const int blockAlign = info.blockAlign;
+	const DWORD hz = info.hz;
+	const WORD bits = info.bits;
+	const __int64 dataBytes = info.dataBytes;
+
+	int threshold = 200;
+	if (bits == 8) threshold = 3;
+	else if (bits == 24) threshold = 8000;
+	else if (bits == 32) threshold = 8000;
+
+	std::vector<BYTE> frame(blockAlign);
+	__int64 leadingSilentFrames = 0;
+	f.Seek(info.dataOffset, CFile::begin);
+	while (leadingSilentFrames * blockAlign < dataBytes) {
+		const UINT rd = f.Read(frame.data(), blockAlign);
+		if (rd != (UINT)blockAlign) break;
+		if (!WavExportFrameIsSilent(frame.data(), blockAlign, bits, threshold)) break;
+		++leadingSilentFrames;
+	}
+
+	const __int64 keepFrames = (__int64)keepSec * (__int64)hz;
+	__int64 trimFrames = leadingSilentFrames - keepFrames;
+	if (trimFrames <= 0) {
+		f.Close();
+		return TRUE;
+	}
+	const __int64 trimBytes = trimFrames * blockAlign;
+	if (trimBytes >= dataBytes) {
+		f.Close();
+		return FALSE;
+	}
+	const __int64 newDataBytes = dataBytes - trimBytes;
+	const int bufSize = 65536;
+	std::vector<BYTE> buf(bufSize);
+	__int64 src = info.dataOffset + trimBytes;
+	__int64 dst = info.dataOffset;
+	__int64 remaining = newDataBytes;
+	while (remaining > 0) {
+		const int toMove = (int)((remaining > bufSize) ? bufSize : remaining);
+		f.Seek(src, CFile::begin);
+		if (f.Read(buf.data(), toMove) != (UINT)toMove) {
+			f.Close();
+			return FALSE;
+		}
+		f.Seek(dst, CFile::begin);
+		f.Write(buf.data(), toMove);
+		src += toMove;
+		dst += toMove;
+		remaining -= toMove;
+	}
+	f.SetLength(info.dataOffset + newDataBytes);
+	FinalizeWavStreamHeaderRF64(f);
+	f.Close();
+	return TRUE;
 }
 
 void ReleaseOggVorbis(char** ogg)
@@ -9394,9 +9650,17 @@ void COggDlg::SetAdd(CString fnn, int mode, int loop1, int loop2, CString filen,
 	}
 }
 
-BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount)
+BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts)
 {
 	if (!pc || outputPath.IsEmpty() || loopCount < 1) return FALSE;
+	WavExportOptions localOpts = {};
+	if (opts) localOpts = *opts;
+	else {
+		localOpts.fadeEnable = savedata.wav_export_fade;
+		localOpts.fadeSec = savedata.wav_export_fade_sec > 0 ? savedata.wav_export_fade_sec : 15;
+		localOpts.trimLeadEnable = savedata.wav_export_trim_lead;
+		localOpts.trimKeepSec = savedata.wav_export_trim_keep_sec > 0 ? savedata.wav_export_trim_keep_sec : 1;
+	}
 	// 2回目以降：初回と同じ状態へリセット（前回のエクスポートで変更されたグローバルを戻す）
 	if (cc1 == 1) { cc.Close(); cc1 = 0; }
 	wl = 0;
@@ -9419,7 +9683,13 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount)
 	g_wavExportDataBytes = 0;
 	play();
 	// wl(int)は2GBで溢れるため、実書き込みバイト数(64bit)で成否判定する
-	const BOOL ok = (g_wavExportDataBytes > 0 && cc1 == 0);
+	BOOL ok = (g_wavExportDataBytes > 0 && cc1 == 0);
+	if (ok && localOpts.trimLeadEnable)
+		ok = TrimLeadingSilenceWavFile(outputPath, localOpts.trimKeepSec);
+	if (ok && localOpts.fadeEnable) {
+		const int fadeSec = localOpts.fadeSec > 0 ? localOpts.fadeSec : 15;
+		ok = ApplyTailFadeOutWavFile(outputPath, fadeSec);
+	}
 	wavExportPath.Empty();
 	wavExportLoopCount = 0;
 	savedata.saveloop = saveloop_bak;
@@ -14641,6 +14911,8 @@ void COggDlg::stop()
 	m_lrc.SetWindowText(L"");
 	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
 	m_lrc3.SetWindowText(L"");
+	m_lrc4.SetWindowText(L"");
+	m_lrc5.SetWindowText(L"");
 
 	ResetPauseButtonUi();
 	eqflg = TRUE;
@@ -14736,6 +15008,8 @@ void COggDlg::stop1()
 	m_lrc.SetWindowText(L"");
 	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
 	m_lrc3.SetWindowText(L"");
+	m_lrc4.SetWindowText(L"");
+	m_lrc5.SetWindowText(L"");
 	ResetPauseButtonUi();
 	eqflg = TRUE;
 }
@@ -15429,11 +15703,13 @@ void COggDlg::timerp()
 	for (int lp = 0; lp < lrcnum - 1; lp++) {
 		if (lrctm[lp] <= ttt && lrctm[lp + 1] > ttt) {
 			CString s;
-			m_lrc2.GetWindowText(s);
+			m_lrc3.GetWindowText(s);
 			if (lrc[lp] == lrc_backup) continue;
-			if (lp != 0) m_lrc.SetWindowText(lrc[lp - 1]);
-			m_lrc2.SetWindowText(lrc[lp]);
-			m_lrc3.SetWindowText(lrc[lp + 1]);
+			m_lrc.SetWindowText(lp >= 2 ? lrc[lp - 2] : L"");
+			m_lrc2.SetWindowText(lp >= 1 ? lrc[lp - 1] : L"");
+			m_lrc3.SetWindowText(lrc[lp]);
+			m_lrc4.SetWindowText(lrc[lp + 1]);
+			m_lrc5.SetWindowText((lp + 2 < lrcnum - 1) ? lrc[lp + 2] : L"");
 			lrc_backup = lrc[lp];
 		}
 	}
@@ -15897,7 +16173,8 @@ void COggDlg::timerp()
 	}
 
 	if (wavExportLoopCount > 0) {
-		if (loopcnt >= wavExportLoopCount) OnButton5();
+		if (loopcnt >= wavExportLoopCount && wavExportPath.IsEmpty())
+			OnButton5();
 	}
 	else if (pl && plw) {
 		if (pl->m_renzoku.GetCheck() == TRUE) {
@@ -16505,7 +16782,8 @@ void COggDlg::timerp()
 		}
 		else {
 			if (wavExportLoopCount > 0) {
-				if (loopcnt >= wavExportLoopCount) OnButton5();
+				if (loopcnt >= wavExportLoopCount && wavExportPath.IsEmpty())
+					OnButton5();
 			}
 			else {
 				CString s; m_kaisuu.GetWindowText(s);
@@ -19182,10 +19460,21 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 
 	const int bytesPerSample = (bitDepth / 8) < 1 ? 2 : (bitDepth / 8);
 	const int bytesPerFrame = bytesPerSample * channels;
-	const int prFrames = CPianoRoll::PIANO_BASS_FRAMES;
-	const int prBytes = prFrames * bytesPerFrame;
 	const int TOTAL_BUF_BYTES = (int)((g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM));
-	if (prBytes <= 0 || TOTAL_BUF_BYTES <= prBytes) return;
+	if (bytesPerFrame <= 0 || TOTAL_BUF_BYTES <= bytesPerFrame) return;
+	const int ringFrames = TOTAL_BUF_BYTES / bytesPerFrame;
+	const int srInt = (int)(sampleRate + 0.5);
+	// スペアナ窓＋リング先頭余白を除いた最大キャプチャ(192k等で窓=全リングになり解析スキップするのを防ぐ)
+	int speanaFrames = 4096;
+	if (savedata.speanamode == 1 && (savedata.speananum == 0 || savedata.speananum == 1))
+		speanaFrames = 8192;
+	const int capMargin = 128;
+	const int maxPrFrames = ringFrames - speanaFrames - capMargin;
+	if (maxPrFrames <= 0) return;
+	const int prFrames = CPianoRoll::CaptureFrameCount(srInt, maxPrFrames);
+	if (prFrames < CPianoRoll::MinAnalyzeFrameCount(srInt, maxPrFrames)) return;
+	const int prBytes = prFrames * bytesPerFrame;
+	if (prBytes <= 0 || prBytes > TOTAL_BUF_BYTES) return;
 
 	ULONG playCur = PlayCursor2;
 	ULONG writeCur = WriteCursor;
@@ -19204,9 +19493,6 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	(void)writeCur;
 	// レイテンシクランプは windowBytes に依存する。16384 窓だと Speana(8192) より
 	// 手前を読んで表示が早くなるため、Speana と同じ窓長で readPos を決める。
-	int speanaFrames = 4096;
-	if (savedata.speanamode == 1 && (savedata.speananum == 0 || savedata.speananum == 1))
-		speanaFrames = 8192;
 	const int speanaBytes = speanaFrames * bytesPerFrame;
 	// 追加遅延は0（06.09/06.14と同じ）。早出しの原因は読み取り遅延ではなく
 	// 06.16で入った fastAttack(オンセット即時ON) だったため、そちらを撤去して対応。

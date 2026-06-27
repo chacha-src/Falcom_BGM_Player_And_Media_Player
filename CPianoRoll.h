@@ -47,8 +47,16 @@ public:
     void DetachForDestroy();
 
     static constexpr int PIANO_METER_CH_MAX = 8;       // レベルメーターの最大チャンネル数
-    static constexpr int PIANO_BASS_FRAMES = 16384;    // 低音窓サイズ(AnalyzePlayCursorMono に渡す最大フレーム数)
-    static constexpr int PIANO_LOW_FRAMES  = 8192;     // 中低音窓サイズ
+
+    // 44100 Hz 基準の Goertzel 窓(サンプル数)。実際の窓長は ScaleWinSamples でレートに比例。
+    static constexpr int REF_SAMPLE_RATE = 44100;
+    static constexpr int WIN_LOW_REF     = 8192;
+    static constexpr int WIN_BASS_REF    = 16384;
+    static constexpr int WIN_HIGH_REF    = 4096;
+    static constexpr int WIN_ONSET_REF     = 1024;
+    static int ScaleWinSamples(int refSamples, int sampleRate, int capSamples = 0);
+    static int CaptureFrameCount(int sampleRate, int capSamples = 0);
+    static int MinAnalyzeFrameCount(int sampleRate, int capSamples = 0);
 
 protected:
     virtual void DoDataExchange(CDataExchange* pDX);
@@ -96,12 +104,12 @@ private:
     static constexpr size_t MAX_HISTORY   = 120;       // ロール上に表示するフレーム行数(上限)
     static constexpr int   RING_SIZE      = 131072;    // PCM インプットのリングバッファサイズ(サンプル数)
 
-    // ---- Goertzel 窓サイズ(サンプル数) ----
-    // 低音域は周波数分解能確保のため長窓、高音域は時間分解能優先で短窓を使う
-    static constexpr int   WIN_LOW        = 8192;      // 中低音(Hann 窓)
-    static constexpr int   WIN_BASS       = 16384;     // 低音(Hann 窓)
-    static constexpr int   WIN_HIGH       = 4096;      // 高音(Blackman 窓)
-    static constexpr int   WIN_ONSET      = 1024;      // オンセット検出(Hann 窓)
+    // ---- Goertzel 窓サイズ(サンプル数・実行時) ----
+    // 44100 Hz 基準長を REF_SAMPLE_RATE に比例スケール(EnsureAnalysisTables で設定)
+    int   m_winLow = WIN_LOW_REF;
+    int   m_winBass = WIN_BASS_REF;
+    int   m_winHigh = WIN_HIGH_REF;
+    int   m_winOnset = WIN_ONSET_REF;
     static constexpr int   LOW_KEY_SPLIT  = 51;        // C5: これ未満は低音/中低音窓を使用
     static constexpr int   DETECT_KEYS    = 108;       // ApplyDisplayScale の正規化範囲
     static constexpr int   KEY_OFFSET       = 9;       // MIDI_BASE からのオフセット(A0→A#0=9)
@@ -174,7 +182,7 @@ private:
     HANDLE           m_hAnalysisWake = NULL;   // SetEvent でワーカーを起こすイベント
     volatile LONG    m_workerStop = 0;    // 1 にするとワーカーが自己終了
     volatile LONG    m_jobPending = 0;    // InterlockedExchange で管理するジョブ有無フラグ
-    double           m_jobMono[PIANO_BASS_FRAMES];  // m_jobCs 保護下でコピーされる入力バッファ
+    std::vector<double> m_jobMono;  // m_jobCs 保護下でコピーされる入力バッファ
     std::vector<double> m_workerMonoScratch;
     int              m_jobFrameCount = 0;
     int              m_jobSampleRate = 44100;
@@ -197,8 +205,8 @@ private:
     int   m_chMeterCount = 0;
     static constexpr DWORD ANALYZE_MIN_MS = 4;    // 連続分析の最短間隔(過負荷防止)
 
-    void EnsureAnalysisTables(int sampleRate);   // Goertzel 係数と窓関数をサンプルレートに合わせて再計算
-    void RunGoertzelFromBuffer(const double* winLow8192, const double* winBass, int bassWinLen);
+    void EnsureAnalysisTables(int sampleRate, int capCaptureFrames = 0);   // Goertzel 係数と窓関数を再計算
+    void RunGoertzelFromBuffer(const double* winLow, const double* winBass, int bassWinLen);
     void UpdateNoteStates();    // ピック結果からノートのオン/オフ・強度・セグメントを更新
     void DetectExpressions();   // UpdateNoteStates 後に表現記号(アクセント/ビブラート等)を付与
     void PushFrame(bool requestUiInvalidate);  // 確定フレームを履歴リングバッファへ追加

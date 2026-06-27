@@ -1,8 +1,10 @@
 ﻿#pragma once
 #include "afxwin.h"
 #include "CCustomControl.h"
+#include "oggDlg.h"
+#include <vector>
 
-// CWavExport ダイアログ - プレイリストからWAVへ出力（再生なし）
+// WavExportOptions は oggDlg.h で定義
 
 class CWavExport : public CCustomBlurDialogBase
 {
@@ -14,6 +16,8 @@ public:
 
 	enum { IDD = IDD_WAVEXPORT };
 	playlistdata0 pc;
+	std::vector<playlistdata0> pcs;
+	bool multiFile;
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -33,4 +37,10 @@ public:
 	CCustomStandardButton m_browse;
 	CCustomStandardButton m_exec;
 	CCustomStandardButton m_close;
+	CCustomCheckBox m_fadeCheck;
+	CCustomEdit m_fadeSec;
+	CCustomStatic m_fadeLabel;
+	CCustomCheckBox m_trimCheck;
+	CCustomEdit m_trimSec;
+	CCustomStatic m_trimLabel;
 };

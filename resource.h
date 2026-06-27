@@ -659,6 +659,17 @@
 #define IDC_MP_JACK                     3461
 #define IDC_MP_FADEOUT                  3462
 #define IDC_MP_FOLDER                   3463
+#define IDC_WAVEXPORT_FADE              3464
+#define IDC_WAVEXPORT_FADE_SEC          3465
+#define IDC_WAVEXPORT_FADE_LABEL        3466
+#define IDC_WAVEXPORT_TRIM              3467
+#define IDC_WAVEXPORT_TRIM_SEC          3468
+#define IDC_WAVEXPORT_TRIM_LABEL        3469
+#define IDC_STATIC_LRC4                 3470
+#define IDC_STATIC_LRC5                 3471
+#define IDC_MP_LRC4                     3472
+#define IDC_MP_LRC5                     3473
+#define IDC_STATICin3                   3474
 
 // Next default values for new objects
 // 
@@ -666,7 +677,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        201
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3464
+#define _APS_NEXT_CONTROL_VALUE         3475
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

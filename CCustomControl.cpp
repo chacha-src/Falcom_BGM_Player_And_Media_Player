@@ -2177,6 +2177,14 @@ static void DoSubclassChildControls(DlgBase* pDlg)
         }
         else if (_tcsicmp(cls, _T("Static")) == 0)
         {
+            const LONG ls = ::GetWindowLong(hc, GWL_STYLE);
+            const UINT st = (UINT)(ls & SS_TYPEMASK);
+            // アイコン/ビットマップ Static は CCustomStatic 化すると描画されなくなる
+            if (st == SS_ICON || st == SS_BITMAP)
+            {
+                hc = ::GetWindow(hc, GW_HWNDNEXT);
+                continue;
+            }
             CCustomStatic* p = new CCustomStatic();
             p->EnableAutoDelete();
             p->SetAeroMode(FALSE);

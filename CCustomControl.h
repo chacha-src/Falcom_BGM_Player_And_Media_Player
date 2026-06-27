@@ -86,6 +86,16 @@ BOOL CCC_ProcessInwomanHotkey(MSG* pMsg, CWnd* pWnd);
 // 淫女モードのアニメ用に全ウィンドウを定期再描画するタイマーを用意(冪等)
 void CCC_EnsureInwomanTimer();
 
+// モーダルダイアログを親の背後に隠さず前面へ出す(メディアプレイヤー等)
+inline void CCC_BringDialogToForeground(CWnd* dlg)
+{
+    if (!dlg || !::IsWindow(dlg->GetSafeHwnd())) return;
+    dlg->ShowWindow(SW_SHOW);
+    ::SetWindowPos(dlg->GetSafeHwnd(), HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    dlg->BringWindowToTop();
+    dlg->SetForegroundWindow();
+}
+
 // 最小化復帰・再表示時: オーナードロー子が親 Invalidate だけでは再描画されないため明示的に更新
 void CCC_ForceRepaintHwnd(HWND hWnd);
 void CCC_RefreshChildrenAfterShow(HWND hWnd);

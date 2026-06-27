@@ -5,7 +5,8 @@
 #include <cstring>
 
 // ストリーミング用 PCM アップスケール（レート変換・チャンネル展開・ビット拡張）
-// 内部は float インターリーブで保持し、4 点 Catmull-Rom 補間でリサンプリングする。
+// 内部は float インターリーブで保持し、Lanczos-2 補間でリサンプリングする。
+// ビット深度のみ上げる場合はサブサンプル位相の補間合成＋TPDF ディザで LSB を有効活用する。
 class AudioUpscaler {
 public:
 	AudioUpscaler();
@@ -32,8 +33,10 @@ public:
 private:
 	void EnsureConfigured() const;
 	static void PcmToFloat(const uint8_t* p, int nFrames, int ch, int bits, std::vector<float>& out);
-	static int FloatToPcm(const float* interleaved, int nFrames, int ch, int bits, uint8_t* dst);
+	static int FloatToPcm(const float* interleaved, int nFrames, int ch, int srcBits, int dstBits, uint8_t* dst, uint32_t& rng);
 
+	float SampleInputLanczos(int ch, double posFrames) const;
+	float SampleInputBitEnhanced(int ch, double posFrames) const;
 	float SampleInput(int ch, double posFrames) const;
 	void BuildOutputFrame(double pos, float* dstCh) const;
 
@@ -44,6 +47,8 @@ private:
 	int m_dstCh = 2;
 	int m_dstBits = 16;
 	bool m_active = false;
+	bool m_bitDepthEnhance = false; // 同一レートでビット深度のみ拡張
+	uint32_t m_ditherRng = 0xC0FFEE01u;
 
 	std::vector<float> m_fifo; // インターリーブ float, サイズ = m_srcCh * frames
 	double m_readPos = 0.0;    // fifo 先頭からのフレーム位置（小数）

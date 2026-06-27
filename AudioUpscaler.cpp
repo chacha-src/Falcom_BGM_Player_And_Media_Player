@@ -2,6 +2,9 @@
 #include "AudioUpscaler.h"
 #include <algorithm>
 #include <cmath>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 AudioUpscaler g_audioUpscaler;
 int g_ds_pcm_ch = 2;
@@ -104,6 +107,7 @@ void AudioUpscaler::Configure(int srcRate, int srcCh, int srcBits,
 	m_dstCh = dstCh;
 	m_dstBits = dstBits;
 
+	m_bitDepthEnhance = (srcRate == dstRate && srcCh == dstCh && dstBits > srcBits);
 	m_active = (srcRate != dstRate || srcCh != dstCh || srcBits != dstBits);
 	if (!m_active) {
 		m_fifo.clear();
@@ -119,6 +123,33 @@ void AudioUpscaler::Reset()
 {
 	m_fifo.clear();
 	m_readPos = 0.0;
+	m_ditherRng = 0xC0FFEE01u;
+}
+
+namespace {
+	static inline float LanczosKernel2(float x)
+	{
+		if (x == 0.0f) return 1.0f;
+		if (fabsf(x) >= 2.0f) return 0.0f;
+		const float pix = (float)M_PI * x;
+		return (sinf(pix) / pix) * (sinf(pix * 0.5f) / (pix * 0.5f));
+	}
+
+	static inline float TpdfUnit(uint32_t& rng)
+	{
+		rng = rng * 1664525u + 1013904223u;
+		const float a = (float)(rng & 0xFFFFu) / 65536.0f;
+		rng = rng * 1664525u + 1013904223u;
+		const float b = (float)(rng & 0xFFFFu) / 65536.0f;
+		return (a + b) - 1.0f;
+	}
+
+	static inline float DitherAmplitudeFloat(int dstBits)
+	{
+		if (dstBits >= 32) return 1.0f / 2147483648.0f;
+		if (dstBits >= 24) return 1.0f / 8388608.0f;
+		return 1.0f / 32768.0f;
+	}
 }
 
 void AudioUpscaler::EnsureConfigured() const
@@ -155,29 +186,34 @@ void AudioUpscaler::PcmToFloat(const uint8_t* p, int nFrames, int ch, int bits, 
 	}
 }
 
-int AudioUpscaler::FloatToPcm(const float* interleaved, int nFrames, int ch, int bits, uint8_t* dst)
+int AudioUpscaler::FloatToPcm(const float* interleaved, int nFrames, int ch, int srcBits, int dstBits, uint8_t* dst, uint32_t& rng)
 {
 	const int n = nFrames * ch;
-	if (bits == 16) {
+	const bool expandBits = (dstBits > srcBits);
+	const float ditherAmp = expandBits ? DitherAmplitudeFloat(dstBits) : 0.0f;
+
+	if (dstBits == 16) {
 		int16_t* o = (int16_t*)dst;
 		for (int i = 0; i < n; ++i) {
-			float x = interleaved[i];
-			if (x > 1.0f) x = 1.0f;
-			else if (x < -1.0f) x = -1.0f;
-			int v = (int)floor((double)x * 32767.0 + 0.5);
+			double x = interleaved[i];
+			if (expandBits) x += (double)TpdfUnit(rng) * (double)ditherAmp;
+			if (x > 1.0) x = 1.0;
+			else if (x < -1.0) x = -1.0;
+			int v = (int)floor(x * 32767.0 + 0.5);
 			if (v > 32767) v = 32767;
 			if (v < -32768) v = -32768;
 			o[i] = (int16_t)v;
 		}
 		return n * 2;
 	}
-	if (bits == 24) {
+	if (dstBits == 24) {
 		int o = 0;
 		for (int i = 0; i < n; ++i) {
-			float x = interleaved[i];
-			if (x > 1.0f) x = 1.0f;
-			else if (x < -1.0f) x = -1.0f;
-			int v = (int)floor((double)x * 8388607.0 + 0.5);
+			double x = interleaved[i];
+			if (expandBits) x += (double)TpdfUnit(rng) * (double)ditherAmp;
+			if (x > 1.0) x = 1.0;
+			else if (x < -1.0) x = -1.0;
+			int v = (int)floor(x * 8388607.0 + 0.5);
 			if (v > 8388607) v = 8388607;
 			if (v < -8388608) v = -8388608;
 			dst[o++] = (uint8_t)(v & 0xFF);
@@ -189,11 +225,11 @@ int AudioUpscaler::FloatToPcm(const float* interleaved, int nFrames, int ch, int
 	// 32
 	int32_t* o = (int32_t*)dst;
 	for (int i = 0; i < n; ++i) {
-		float x = interleaved[i];
-		if (x > 1.0f) x = 1.0f;
-		else if (x < -1.0f) x = -1.0f;
-		double sc = (double)x * 2147483647.0;
-		int64_t v = (int64_t)floor(sc + 0.5);
+		double x = interleaved[i];
+		if (expandBits) x += (double)TpdfUnit(rng) * (double)ditherAmp;
+		if (x > 1.0) x = 1.0;
+		else if (x < -1.0) x = -1.0;
+		int64_t v = (int64_t)floor(x * 2147483647.0 + 0.5);
 		if (v > 2147483647LL) v = 2147483647LL;
 		if (v < -2147483648LL) v = -2147483648LL;
 		o[i] = (int32_t)v;
@@ -201,38 +237,118 @@ int AudioUpscaler::FloatToPcm(const float* interleaved, int nFrames, int ch, int
 	return n * 4;
 }
 
-float AudioUpscaler::SampleInput(int ch, double posFrames) const
+float AudioUpscaler::SampleInputLanczos(int ch, double posFrames) const
 {
 	const int64_t totalFrames = (int64_t)(m_fifo.size() / (size_t)m_srcCh);
 	if (totalFrames <= 0) return 0.0f;
 	double x = posFrames;
 	if (x < 0.0) x = 0.0;
 	if (x > (double)totalFrames - 1.0) x = (double)totalFrames - 1.0;
-	int i0 = (int)floor(x);
-	int i1 = i0 + 1;
-	int i_1 = i0 - 1;
-	int i2 = i0 + 2;
+	const int i0 = (int)floor(x);
+	const float frac = (float)(x - floor(x));
 	auto getS = [&](int frameIdx, int c) -> float {
 		if (frameIdx < 0) frameIdx = 0;
 		if (frameIdx >= (int)totalFrames) frameIdx = (int)totalFrames - 1;
 		return m_fifo[(size_t)frameIdx * (size_t)m_srcCh + (size_t)c];
 	};
-	float p0 = getS(i_1, ch);
-	float p1 = getS(i0, ch);
-	float p2 = getS(i1, ch);
-	float p3 = getS(i2, ch);
-	double t = x - floor(x);
-	// Catmull-Rom (uniform)
-	double t2 = t * t;
-	double t3 = t2 * t;
-	double c0 = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
-	double c1 = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
-	double c2 = -0.5 * p0 + 0.5 * p2;
-	double c3 = p1;
-	float y = (float)(c0 * t3 + c1 * t2 + c2 * t + c3);
+	double sum = 0.0;
+	double wsum = 0.0;
+	for (int j = -2; j <= 2; ++j) {
+		const float w = LanczosKernel2(frac - (float)j);
+		if (w == 0.0f) continue;
+		sum += (double)getS(i0 + j, ch) * (double)w;
+		wsum += (double)w;
+	}
+	if (wsum <= 1e-12) return getS(i0, ch);
+	float y = (float)(sum / wsum);
 	if (y > 1.0f) y = 1.0f;
 	else if (y < -1.0f) y = -1.0f;
 	return y;
+}
+
+// 同一レートでビット深度のみ上げる場合: サブサンプル位相の Lanczos 合成で
+// 量子化格子の間を補間し、24/32bit 出力に意味のある小数部を載せる。
+float AudioUpscaler::SampleInputBitEnhanced(int ch, double posFrames) const
+{
+	const float c0 = SampleInputLanczos(ch, posFrames - 0.5);
+	const float c1 = SampleInputLanczos(ch, posFrames);
+	const float c2 = SampleInputLanczos(ch, posFrames + 0.5);
+	return c0 * 0.25f + c1 * 0.5f + c2 * 0.25f;
+}
+
+float AudioUpscaler::SampleInput(int ch, double posFrames) const
+{
+	if (m_bitDepthEnhance)
+		return SampleInputBitEnhanced(ch, posFrames);
+	return SampleInputLanczos(ch, posFrames);
+}
+
+// ステレオ → マルチch: 5.1→2ch ダウンミックスと対になる ITU 系マトリクス。
+// リア/サイドは L−R 差分（モノ成分はセンター/LFE、差分はサラウンドへ）。
+static void UpmixStereoToSurround(float L, float R, int dstCh, float* dstChOut, float s2)
+{
+	auto clip1 = [](float x) -> float {
+		if (x > 1.0f) return 1.0f;
+		if (x < -1.0f) return -1.0f;
+		return x;
+	};
+
+	const float diff = L - R;
+	const float C = (L + R) * s2;
+	const float lfe = (L + R) * 0.25f;
+	// 旧: s2*0.5 ≈ 0.35 で差分が二重減衰。5.1→2ch の s2 係数に合わせつつ体感補正。
+	const float kSurround51 = 0.85f;
+	const float kSide71 = 0.85f;
+	const float kRear71 = 0.65f;
+
+	if (dstCh == 2) {
+		dstChOut[0] = clip1(L);
+		dstChOut[1] = clip1(R);
+	}
+	else if (dstCh == 3) {
+		dstChOut[0] = clip1(L);
+		dstChOut[1] = clip1(R);
+		dstChOut[2] = clip1(lfe);
+	}
+	else if (dstCh == 4) {
+		// FL, FR, BL, BR
+		const float rear = diff * kSurround51;
+		dstChOut[0] = clip1(L);
+		dstChOut[1] = clip1(R);
+		dstChOut[2] = clip1(rear);
+		dstChOut[3] = clip1(-rear);
+	}
+	else if (dstCh == 6) {
+		// FL, FR, FC, LFE, BL, BR
+		const float rear = diff * kSurround51;
+		dstChOut[0] = clip1(L);
+		dstChOut[1] = clip1(R);
+		dstChOut[2] = clip1(C);
+		dstChOut[3] = clip1(lfe);
+		dstChOut[4] = clip1(rear);
+		dstChOut[5] = clip1(-rear);
+	}
+	else if (dstCh >= 8) {
+		// FL, FR, FC, LFE, BL, BR, SL, SR
+		const float rear = diff * kRear71;
+		const float side = diff * kSide71;
+		dstChOut[0] = clip1(L);
+		dstChOut[1] = clip1(R);
+		dstChOut[2] = clip1(C);
+		dstChOut[3] = clip1(lfe);
+		dstChOut[4] = clip1(rear);
+		dstChOut[5] = clip1(-rear);
+		dstChOut[6] = clip1(side);
+		dstChOut[7] = clip1(-side);
+		for (int d = 8; d < dstCh; ++d)
+			dstChOut[d] = clip1(C);
+	}
+	else {
+		dstChOut[0] = clip1(L);
+		if (dstCh >= 2) dstChOut[1] = clip1(R);
+		for (int d = 2; d < dstCh; ++d)
+			dstChOut[d] = clip1(C);
+	}
 }
 
 void AudioUpscaler::BuildOutputFrame(double posInSrcFrames, float* dstCh) const
@@ -260,25 +376,47 @@ void AudioUpscaler::BuildOutputFrame(double posInSrcFrames, float* dstCh) const
 
 	if (m_srcCh == 1) {
 		float m = srcSamp[0];
-		if (m_dstCh >= 1) dstCh[0] = m;
-		if (m_dstCh >= 2) dstCh[1] = m;
-		if (m_dstCh >= 3) dstCh[2] = m * 0.5f;
-		for (int d = 3; d < m_dstCh; ++d) dstCh[d] = m;
+		if (m_dstCh == 2) {
+			dstCh[0] = clip1(m);
+			dstCh[1] = clip1(m);
+		}
+		else if (m_dstCh == 3) {
+			dstCh[0] = clip1(m);
+			dstCh[1] = clip1(m);
+			dstCh[2] = clip1(m * 0.5f);
+		}
+		else if (m_dstCh == 4) {
+			dstCh[0] = clip1(m);
+			dstCh[1] = clip1(m);
+			dstCh[2] = clip1(m);
+			dstCh[3] = clip1(m);
+		}
+		else if (m_dstCh == 6) {
+			dstCh[0] = clip1(m);
+			dstCh[1] = clip1(m);
+			dstCh[2] = clip1(m * s2);
+			dstCh[3] = clip1(m * 0.25f);
+			dstCh[4] = 0.0f;
+			dstCh[5] = 0.0f;
+		}
+		else if (m_dstCh >= 8) {
+			dstCh[0] = clip1(m);
+			dstCh[1] = clip1(m);
+			dstCh[2] = clip1(m * s2);
+			dstCh[3] = clip1(m * 0.25f);
+			for (int d = 4; d < m_dstCh; ++d)
+				dstCh[d] = 0.0f;
+		}
+		else {
+			if (m_dstCh >= 1) dstCh[0] = clip1(m);
+			for (int d = 1; d < m_dstCh; ++d)
+				dstCh[d] = clip1(m);
+		}
 		return;
 	}
 
 	if (m_srcCh == 2) {
-		float L = srcSamp[0], R = srcSamp[1];
-		float C = (L + R) * 0.5f;
-		float lfe = (L + R) * 0.25f;
-		if (m_dstCh == 2) { dstCh[0] = L; dstCh[1] = R; }
-		else if (m_dstCh == 3) { dstCh[0] = L; dstCh[1] = R; dstCh[2] = lfe; }
-		else if (m_dstCh == 4) { dstCh[0] = L; dstCh[1] = R; dstCh[2] = L; dstCh[3] = R; }
-		else {
-			dstCh[0] = L; dstCh[1] = R; dstCh[2] = C; dstCh[3] = lfe;
-			dstCh[4] = L; dstCh[5] = R;
-			for (int d = 6; d < m_dstCh; ++d) dstCh[d] = C;
-		}
+		UpmixStereoToSurround(srcSamp[0], srcSamp[1], m_dstCh, dstCh, s2);
 		return;
 	}
 
@@ -347,13 +485,15 @@ void AudioUpscaler::BuildOutputFrame(double posInSrcFrames, float* dstCh) const
 		return;
 	}
 
-	// 4 -> 5.1（簡易）
+	// 4 -> 5.1
 	if (m_srcCh == 4 && m_dstCh == 6) {
 		float fl = srcSamp[0], fr = srcSamp[1], bl = srcSamp[2], br = srcSamp[3];
-		dstCh[0] = fl; dstCh[1] = fr;
-		dstCh[2] = (fl + fr) * 0.5f;
-		dstCh[3] = (fl + fr) * 0.25f;
-		dstCh[4] = bl; dstCh[5] = br;
+		dstCh[0] = clip1(fl);
+		dstCh[1] = clip1(fr);
+		dstCh[2] = clip1((fl + fr) * s2);
+		dstCh[3] = clip1((fl + fr) * 0.25f);
+		dstCh[4] = clip1(bl);
+		dstCh[5] = clip1(br);
 		return;
 	}
 
@@ -459,5 +599,5 @@ int AudioUpscaler::PullInterleaved(uint8_t* dst, int dstCapacity)
 	}
 
 	if (produced == 0) return 0;
-	return FloatToPcm(inter.data(), produced, m_dstCh, m_dstBits, dst);
+	return FloatToPcm(inter.data(), produced, m_dstCh, m_srcBits, m_dstBits, dst, m_ditherRng);
 }

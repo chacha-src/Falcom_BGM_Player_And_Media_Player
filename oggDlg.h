@@ -5,6 +5,13 @@
 #if !defined(AFX_OGGDLG_H__6E748E56_5CF6_4ADE_8B4F_7FE83E42DCFA__INCLUDED_)
 #define AFX_OGGDLG_H__6E748E56_5CF6_4ADE_8B4F_7FE83E42DCFA__INCLUDED_
 
+struct WavExportOptions {
+	int fadeEnable;
+	int fadeSec;
+	int trimLeadEnable;
+	int trimKeepSec;
+};
+
 #ifndef WM_TIMERP_VSYNC_TICK
 #define WM_TIMERP_VSYNC_TICK (WM_APP + 70)
 #endif
@@ -70,7 +77,7 @@ public:
 	LRESULT dp1(WPARAM, LPARAM);
 	LRESULT dp2(WPARAM, LPARAM);
 	void SetAdd(CString fnn,int mode,int loop1,int loop2,CString filen,int ret2,REFTIME time);
-	BOOL ExportToWav(playlistdata0* pc, CString outputPath, int loopCount);
+	BOOL ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts = NULL);
 	double goertzel(const float* data, int N, double target_freq, double sample_rate);
 	double hanWindow(int value, int index, int offset, int size);
 	void LoadJacket(CString s);
@@ -307,6 +314,8 @@ public:
 	CCustomStatic m_temp_num;
 	CCustomStatic m_lrc2;
 	CCustomStatic m_lrc3;
+	CCustomStatic m_lrc4;
+	CCustomStatic m_lrc5;
 	CCustomStatic m_pitch;
 	CCustomSliderCtrl m_pitch_sl;
 	CCustomStatic m_temp_s;

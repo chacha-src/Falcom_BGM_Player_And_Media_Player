@@ -69,6 +69,7 @@ public:
 
 	int  Create(CWnd* pParent);
 	void DoLayout();              // DPI/リサイズ対応の手動レイアウト
+	void RefreshListAfterLayout(); // レイアウト変更後に仮想リストの描画範囲を再確定
 	void RefreshList(BOOL bForce = FALSE);  // pl->pc をそのまま反映
 	void FollowPlayingRow();                // 再生中(♪)の行へカーソル追従(項目挿入後に呼ぶ)
 	void InitListScrollPosition();          // 起動/表示確定時にリスト位置を復元
@@ -85,7 +86,7 @@ public:
 	void RequestAppShutdown();
 
 	// ---- 情報表示スタティック(バナー GDI に隠れているものは SW_HIDE してある) ----
-	CCustomStatic m_title, m_artist, m_album, m_lrc, m_lrc2, m_lrc3, m_os, m_cpu, m_os3, m_time, m_volval, m_vollabel;
+	CCustomStatic m_title, m_artist, m_album, m_lrc, m_lrc2, m_lrc3, m_lrc4, m_lrc5, m_os, m_cpu, m_os3, m_time, m_volval, m_vollabel;
 
 	// シークバー: og->m_time と同じ CCustomRangeSliderCtrl(ループ範囲表示付き)
 	CCustomRangeSliderCtrl m_seek;

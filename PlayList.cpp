@@ -10,8 +10,23 @@
 #include "PlayList.h"
 #include "ListSyosai.h"
 #include "WavExport.h"
+#include <vector>
 #include "Douga.h"
 #include "mp3image.h"
+#include "CMediaPlayerDlg.h"
+
+static CWnd* GetPlaylistModalOwner(CPlayList* plDlg)
+{
+	extern CMediaPlayerDlg* mp;
+	if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()) && ::IsWindowVisible(mp->GetSafeHwnd()))
+		return mp;
+	if (plDlg && ::IsWindow(plDlg->GetSafeHwnd()))
+		return plDlg;
+	extern COggDlg* og;
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		return og;
+	return AfxGetMainWnd();
+}
 
 static bool DeserializeLogFont(const TCHAR* str, LOGFONT* lf)
 {
@@ -4838,7 +4853,7 @@ void CPlayList::OnList()
 	int Lindex = -1;
 	Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED);
 	if (Lindex < 0) return;
-	CListSyosai *a = new CListSyosai(CWnd::FromHandle(GetSafeHwnd()));
+	CListSyosai *a = new CListSyosai(GetPlaylistModalOwner(this));
 	w_flg = FALSE;
 	CWnd::PostMessage(0x118);
 	memcpy(&a->pc, &pc[Lindex], sizeof(playlistdata0));
@@ -4897,12 +4912,26 @@ void CPlayList::OnPop32787()//ファイル名変更（統合画面へ）
 
 void CPlayList::OnPopWavExport()
 {
+	std::vector<int> indices;
 	int Lindex = -1;
-	Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED);
-	if (Lindex < 0 || Lindex >= playcnt) return;
-	CWavExport* a = new CWavExport(CWnd::FromHandle(GetSafeHwnd()));
+	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		if (Lindex < playcnt) indices.push_back(Lindex);
+	}
+	if (indices.empty()) return;
+	CWavExport* a = new CWavExport(GetPlaylistModalOwner(this));
 	w_flg = FALSE;
-	memcpy(&a->pc, &pc[Lindex], sizeof(playlistdata0));
+	if (indices.size() == 1) {
+		a->multiFile = false;
+		memcpy(&a->pc, &pc[indices[0]], sizeof(playlistdata0));
+	}
+	else {
+		a->multiFile = true;
+		a->pcs.reserve(indices.size());
+		for (size_t i = 0; i < indices.size(); ++i) {
+			a->pcs.push_back(pc[indices[i]]);
+		}
+		memcpy(&a->pc, &pc[indices[0]], sizeof(playlistdata0));
+	}
 	CWnd::PostMessage(0x118);
 	a->DoModal();
 	w_flg = TRUE;

@@ -238,6 +238,12 @@ struct save{
 	int inwoman;       // 隠し: 0=通常 1=淫女モード(UI演出のみ。F12を5回で切替)
 
 	int mpcol[5];      // メディアプレイヤー画面リストの各列幅(0=未設定=既定値を使用)
+
+	// WAV出力オプション(末尾追記)
+	int wav_export_fade;           // 1=フェードアウト有効
+	int wav_export_fade_sec;       // フェード秒数(既定15)
+	int wav_export_trim_lead;      // 1=先頭無音カット有効
+	int wav_export_trim_keep_sec;  // 先頭に残す無音秒数(既定1)
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */

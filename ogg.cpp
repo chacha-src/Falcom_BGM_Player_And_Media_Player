@@ -203,6 +203,10 @@ BOOL COggApp::InitInstance()
 	savedata.mpy = -10000;
 	savedata.mpw = 0;
 	savedata.mph = 0;
+	savedata.wav_export_fade = 0;
+	savedata.wav_export_fade_sec = 15;
+	savedata.wav_export_trim_lead = 0;
+	savedata.wav_export_trim_keep_sec = 1;
 
 #if _UNICODE
 	if(GetKeyState(VK_CONTROL) < 0){
@@ -249,6 +253,10 @@ BOOL COggApp::InitInstance()
 	}
 	if (savedata.speaker_layout < 0 || savedata.speaker_layout > 5)
 		savedata.speaker_layout = 0;
+	if (savedata.wav_export_fade_sec <= 0)
+		savedata.wav_export_fade_sec = 15;
+	if (savedata.wav_export_trim_keep_sec <= 0)
+		savedata.wav_export_trim_keep_sec = 1;
 	if (savedata.langselect == 0) {
 		LANGID langId = GetUserDefaultUILanguage();
 		WORD prim = PRIMARYLANGID(langId);

@@ -99,18 +99,19 @@ IDI_T4                  ICON                    "res\\ico00004.ico"
 // Dialog
 //
 
-IDD_ABOUTBOX DIALOGEX 0, 0, 235, 69
+IDD_ABOUTBOX DIALOGEX 0, 0, 320, 112
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "oggのﾊﾞｰｼﾞｮﾝ情報"
 FONT 9, "ＭＳ Ｐゴシック", 0, 0, 0x0
 BEGIN
-    ICON            IDR_MAINFRAME,IDC_STATIC,11,17,20,20
-    LTEXT           "ogg Version Ver 0.8x Release series",IDC_ABOUT_VER,40,10,119,8,SS_NOPREFIX
-    LTEXT           "Copyright (C) ちゃちゃ/ちゃー",IDC_ABOUT_COPY,40,20,87,8
-    DEFPUSHBUTTON   "OK",IDOK,178,7,50,14,WS_GROUP
-    LTEXT           "スタティック",IDC_STATICin,40,30,188,8
-    LTEXT           "http://ppp.oohara.jp/",IDC_Link,40,56,172,8,SS_NOTIFY
-    LTEXT           "スタティック",IDC_STATICin2,40,42,188,8
+    ICON            IDR_MAINFRAME,IDC_STATIC,11,10,20,48
+    LTEXT           "ogg Version Ver 0.8x Release series",IDC_ABOUT_VER,40,10,200,8,SS_NOPREFIX
+    LTEXT           "Copyright (C) ちゃちゃ/ちゃー",IDC_ABOUT_COPY,40,22,200,8
+    DEFPUSHBUTTON   "OK",IDOK,260,7,50,14,WS_GROUP
+    LTEXT           "スタティック",IDC_STATICin,40,34,268,8
+    LTEXT           "スタティック",IDC_STATICin2,40,46,268,8
+    EDITTEXT        IDC_STATICin3,40,58,268,36,ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | NOT WS_TABSTOP
+    LTEXT           "http://ppp.oohara.jp/",IDC_Link,40,98,268,8,SS_NOTIFY
 END
 
 IDD_OGG_DIALOG DIALOGEX 0, 0, 416, 329
@@ -206,6 +207,8 @@ BEGIN
     RTEXT           "100",IDC_STATICds3,193,95,14,8
     LTEXT           "　",IDC_STATIC_LRC2,7,291,203,8,SS_NOTIFY
     LTEXT           "　",IDC_STATIC_LRC3,7,300,203,8,SS_NOTIFY
+    LTEXT           "　",IDC_STATIC_LRC4,7,309,203,8,SS_NOTIFY
+    LTEXT           "　",IDC_STATIC_LRC5,7,318,203,8,SS_NOTIFY
     RTEXT           "ピッチ",IDC_STATIC_p,0,94,28,8
     CONTROL         "",IDC_SLIDER8,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,31,94,56,12
     RTEXT           "100",IDC_STATICds4,86,95,15,8
@@ -644,6 +647,8 @@ BEGIN
     LTEXT           "　",IDC_MP_LRC,138,62,336,11,SS_NOTIFY
     LTEXT           "　",IDC_MP_LRC2,138,73,336,11,SS_NOTIFY
     LTEXT           "　",IDC_MP_LRC3,138,84,336,11,SS_NOTIFY
+    LTEXT           "　",IDC_MP_LRC4,138,95,336,11,SS_NOTIFY
+    LTEXT           "　",IDC_MP_LRC5,138,106,336,11,SS_NOTIFY
     LTEXT           "　",IDC_MP_OS,138,94,336,9,SS_NOTIFY
     LTEXT           "　",IDC_MP_CPU,138,104,336,9,SS_NOTIFY
     LTEXT           "　",IDC_MP_OS3,138,114,336,9,SS_NOTIFY
@@ -840,19 +845,25 @@ BEGIN
     EDITTEXT        IDC_EDIT1,88,25,103,14,ES_AUTOHSCROLL
 END
 
-IDD_WAVEXPORT DIALOGEX 0, 0, 320, 120
+IDD_WAVEXPORT DIALOGEX 0, 0, 360, 185
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "WAVへ出力"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    LTEXT           "繰返し回数",IDC_WAVEXPORT_LOOP_LABEL,7,12,40,8
-    EDITTEXT        IDC_WAVEXPORT_LOOP,52,10,40,14,ES_AUTOHSCROLL
-    LTEXT           "出力ファイル名",IDC_WAVEXPORT_PATH_LABEL,7,32,50,8
-    EDITTEXT        IDC_WAVEXPORT_PATH,62,30,200,14,ES_AUTOHSCROLL
-    PUSHBUTTON      "...",IDC_WAVEXPORT_BROWSE,268,29,40,14
-    PUSHBUTTON      "実行",IDC_WAVEXPORT_EXEC,120,55,80,18
-    PUSHBUTTON      "閉じる",IDC_WAVEXPORT_CLOSE,220,55,80,18
-    LTEXT           "",IDC_WAVEXPORT_STATUS,7,85,306,12
+    LTEXT           "繰返し回数",IDC_WAVEXPORT_LOOP_LABEL,7,10,55,10
+    EDITTEXT        IDC_WAVEXPORT_LOOP,65,8,45,14,ES_AUTOHSCROLL
+    LTEXT           "出力ファイル名",IDC_WAVEXPORT_PATH_LABEL,7,28,346,10
+    EDITTEXT        IDC_WAVEXPORT_PATH,7,42,306,14,ES_AUTOHSCROLL
+    PUSHBUTTON      "...",IDC_WAVEXPORT_BROWSE,318,41,35,16
+    CONTROL         "フェードアウト",IDC_WAVEXPORT_FADE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,64,68,10
+    LTEXT           "秒",IDC_WAVEXPORT_FADE_LABEL,125,65,12,8
+    EDITTEXT        IDC_WAVEXPORT_FADE_SEC,82,62,40,14,ES_AUTOHSCROLL
+    CONTROL         "先頭無音カット",IDC_WAVEXPORT_TRIM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,84,76,10
+    LTEXT           "保持秒",IDC_WAVEXPORT_TRIM_LABEL,125,85,28,8
+    EDITTEXT        IDC_WAVEXPORT_TRIM_SEC,82,82,40,14,ES_AUTOHSCROLL
+    PUSHBUTTON      "実行",IDC_WAVEXPORT_EXEC,130,110,80,18
+    PUSHBUTTON      "閉じる",IDC_WAVEXPORT_CLOSE,230,110,80,18
+    LTEXT           "",IDC_WAVEXPORT_STATUS,7,138,346,12
 END
 
 IDD_IMAGE DIALOGEX 0, 0, 310, 176
@@ -974,7 +985,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,421
+ FILEVERSION 0,8,7,423
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -992,10 +1003,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.06.26"
-            VALUE "FileVersion", "0.8.7.421"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.06.27"
+            VALUE "FileVersion", "0.8.7.423"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.06.26"
+            VALUE "LegalCopyright", "Copyright (C) 2026.06.27"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -1020,9 +1031,9 @@ BEGIN
     IDD_ABOUTBOX, DIALOG
     BEGIN
         LEFTMARGIN, 7
-        RIGHTMARGIN, 228
+        RIGHTMARGIN, 313
         TOPMARGIN, 7
-        BOTTOMMARGIN, 62
+        BOTTOMMARGIN, 105
     END
 
     IDD_OGG_DIALOG, DIALOG
@@ -1337,9 +1348,9 @@ BEGIN
     IDD_WAVEXPORT, DIALOG
     BEGIN
         LEFTMARGIN, 7
-        RIGHTMARGIN, 313
+        RIGHTMARGIN, 353
         TOPMARGIN, 7
-        BOTTOMMARGIN, 113
+        BOTTOMMARGIN, 150
     END
 
     IDD_IMAGE, DIALOG
