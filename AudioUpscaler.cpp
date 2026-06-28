@@ -83,6 +83,60 @@ std::uint32_t DirectSoundChannelMaskForOutput(int outCh, int speaker_layout)
 	}
 }
 
+CString ChannelLayoutLabel(int ch)
+{
+	switch (ch) {
+	case 1: return L"mono";
+	case 2: return L"stereo";
+	case 3: return L"3ch";
+	case 4: return L"4ch";
+	case 5: return L"4.1ch";
+	case 6: return L"5.1ch";
+	case 7: return L"6.1ch";
+	case 8: return L"7.1ch";
+	default: {
+		CString s;
+		s.Format(L"%dch", ch);
+		return s;
+	}
+	}
+}
+
+const wchar_t* AudioUpscaleFlowSymbol()
+{
+	return L"\u2726"; // ✦（スクロール装飾のダイヤと同系）
+}
+
+CString FormatAudioPlaybackSpec(int rateHz, int ch, int bits)
+{
+	if (rateHz <= 0 || ch <= 0)
+		return CString();
+	const CString chStr = ChannelLayoutLabel(ch);
+	const int b = abs(bits);
+	CString s;
+	if (b > 0)
+		s.Format(L"%d Hz  %s  %d bit", rateHz, (LPCTSTR)chStr, b);
+	else
+		s.Format(L"%d Hz  %s", rateHz, (LPCTSTR)chStr);
+	return s;
+}
+
+CString FormatAudioPlaybackDisplay(int srcRate, int srcCh, int srcBits)
+{
+	const CString src = FormatAudioPlaybackSpec(srcRate, srcCh, srcBits);
+	if (src.IsEmpty() || !g_pcm_upscale_active)
+		return src;
+	const int dstBits = g_ds_pcm_bits;
+	if (srcRate == g_ds_pcm_rate && srcCh == g_ds_pcm_ch && abs(srcBits) == dstBits)
+		return src;
+	const CString dst = FormatAudioPlaybackSpec(g_ds_pcm_rate, g_ds_pcm_ch, dstBits);
+	if (dst.IsEmpty())
+		return src;
+	CString out;
+	out.Format(L"%s  %s  %s", (LPCTSTR)src, AudioUpscaleFlowSymbol(), (LPCTSTR)dst);
+	return out;
+}
+
 AudioUpscaler::AudioUpscaler()
 {
 	m_scratchFrame.resize(16);

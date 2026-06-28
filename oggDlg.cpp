@@ -15463,6 +15463,36 @@ CString wavb(int d) {
 	return wavbit1;
 }
 
+static CString FormatBannerDataAudioLine()
+{
+	const int srcRate = wavbit_sample_Hz;
+	const int srcCh = wavchannel;
+	const int srcBits = abs(wavsam_depth);
+	if (srcRate <= 0 || srcCh <= 0)
+		return CString();
+
+	auto specBody = [](LPCTSTR rateStr, int ch, int bits) -> CString {
+		CString body;
+		body.Format(_T("%sHz %s %dbit"), rateStr, (LPCTSTR)ChannelLayoutLabel(ch), abs(bits));
+		return body;
+	};
+
+	const CString rateSrc = wavb(srcRate);
+	if (!g_pcm_upscale_active
+		|| (srcRate == g_ds_pcm_rate && srcCh == g_ds_pcm_ch && srcBits == g_ds_pcm_bits)) {
+		CString s;
+		s.Format(_T("data:%s"), (LPCTSTR)specBody(rateSrc, srcCh, srcBits));
+		return s;
+	}
+
+	CString s;
+	s.Format(_T("data:%s  %s  %s"),
+		(LPCTSTR)specBody(rateSrc, srcCh, srcBits),
+		AudioUpscaleFlowSymbol(),
+		(LPCTSTR)specBody(wavb(g_ds_pcm_rate), g_ds_pcm_ch, g_ds_pcm_bits));
+	return s;
+}
+
 extern IBasicAudio* pBasicAudio;
 extern IBaseFilter* prend;
 extern double rate;
@@ -15981,26 +16011,14 @@ void COggDlg::timerp()
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -3) {
-		s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, (dispCh == 1) ? _T("mono") : _T("stereo"), dispSam);
-		if (dispCh == 3)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("3ch"), dispSam);
-		if (dispCh == 4)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("4ch"), dispSam);
-		if (dispCh == 5)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("4.1ch"), dispSam);
-		if (dispCh == 6)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("5.1ch"), dispSam);
-		if (dispCh == 7)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("6.1ch"), dispSam);
-		if (dispCh == 8)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("7.1ch"), dispSam);
+		s = FormatBannerDataAudioLine();
 		moji(s, 1, 48, 0x7fffff);
 		sss = kpi;
 		s.Format(_T("kpi :%s"), sss.Right(sss.GetLength() - sss.ReverseFind('\\') - 1));
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -8 || mode == -7 || mode == 999) {
-		s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, (dispCh == 1) ? _T("mono") : _T("stereo"), dispSam);
-		if (dispCh == 3)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("3ch"), dispSam);
-		if (dispCh == 4)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("4ch"), dispSam);
-		if (dispCh == 5)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("4.1ch"), dispSam);
-		if (dispCh == 6)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("5.1ch"), dispSam);
-		if (dispCh == 7)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("6.1ch"), dispSam);
-		if (dispCh == 8)s.Format(_T("data:%sHz %s %dbit"), wavbit1_disp, _T("7.1ch"), dispSam);
+		s = FormatBannerDataAudioLine();
 		moji(s, 1, 48, 0x7fffff);
 		s = "Arti:";
 		moji(s, 1, 64, 0x7fffff);

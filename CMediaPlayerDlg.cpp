@@ -8,6 +8,7 @@
 #include "CMediaPlayerDlg.h"
 #include "CImageBase.h"
 #include "Mp3Image.h"
+#include "AudioUpscaler.h"
 #include <direct.h>
 #include <shobjidl.h>
 
@@ -1120,9 +1121,11 @@ void CMediaPlayerDlg::SyncFromMain()
 	if (!m_jacketRect.IsRectEmpty() || !m_infoPanelRect.IsRectEmpty()) {
 		CString fmt; if (::IsWindow(m_os.GetSafeHwnd())) m_os.GetWindowText(fmt);
 		CString key;
-		key.Format(_T("%s\x01%s\x01%s\x01%s\x01%s\x01%d"),
+		key.Format(_T("%s\x01%s\x01%s\x01%s\x01%s\x01%d\x01%d\x01%d\x01%d\x01%d\x01%d\x01%d"),
 			(LPCTSTR)CurrentTrackTitle(), (LPCTSTR)tagname, (LPCTSTR)tagalbum,
-			(LPCTSTR)tagtrack, (LPCTSTR)fmt, og ? og->jx : -1);
+			(LPCTSTR)tagtrack, (LPCTSTR)fmt, og ? og->jx : -1,
+			g_pcm_upscale_active, wavbit_sample_Hz, wavchannel, wavsam_depth,
+			g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
 		if (key != m_lastBannerKey) {
 			m_lastBannerKey = key;
 			ResetInfoScroll();   // 曲変更時はスクロール位置をリセット
@@ -1691,27 +1694,8 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			if (!track.IsEmpty())
 				trackLine.Format(LL2(L"曲番号 %s", L"Track %s"), (LPCTSTR)track);
 
-			// Hz / チャンネル / ビット深度行
-			CString audioLine;
-			if (wavbit_sample_Hz > 0 && wavchannel > 0) {
-				CString chStr;
-				switch (wavchannel) {
-				case 1: chStr = L"mono";   break;
-				case 2: chStr = L"stereo"; break;
-				case 3: chStr = L"3ch";    break;
-				case 4: chStr = L"4ch";    break;
-				case 5: chStr = L"4.1ch";  break;
-				case 6: chStr = L"5.1ch";  break;
-				case 7: chStr = L"6.1ch";  break;
-				case 8: chStr = L"7.1ch";  break;
-				default: chStr.Format(L"%dch", wavchannel); break;
-				}
-				int bitsDisp = abs(wavsam_depth);
-				if (bitsDisp > 0)
-					audioLine.Format(L"%d Hz  %s  %d bit", wavbit_sample_Hz, (LPCTSTR)chStr, bitsDisp);
-				else
-					audioLine.Format(L"%d Hz  %s", wavbit_sample_Hz, (LPCTSTR)chStr);
-			}
+			// Hz / チャンネル / ビット深度行（アップスケール時は src ✦ dst）
+			CString audioLine = FormatAudioPlaybackDisplay(wavbit_sample_Hz, wavchannel, wavsam_depth);
 
 			// ---- 行高・縦中央寄せ ----
 			int titleH  = (int)(24 * hD2);

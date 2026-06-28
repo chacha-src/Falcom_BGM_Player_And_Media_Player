@@ -70,3 +70,9 @@ void ConfigurePlaybackOutputAndUpscaler();
 int SpeakerLayoutToOutChannels(int layout); // 0=2ch 1=2.1 2=4ch 3=5.1 4=7.1（5=マッピングなしは Configure 側で wavch を使用）
 // DirectSound 用: マスクのビット数が常に outCh と一致する（4ch で FC 混入5マスクによる不一致を防ぐ）
 std::uint32_t DirectSoundChannelMaskForOutput(int outCh, int speaker_layout);
+
+// UI 表示: "44100 Hz stereo 16 bit" / アップスケール時 "… ✦ 192000 Hz …"
+CString ChannelLayoutLabel(int ch);
+const wchar_t* AudioUpscaleFlowSymbol();
+CString FormatAudioPlaybackSpec(int rateHz, int ch, int bits);
+CString FormatAudioPlaybackDisplay(int srcRate, int srcCh, int srcBits);
