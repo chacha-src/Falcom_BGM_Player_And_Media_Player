@@ -1079,9 +1079,9 @@ void CMediaPlayerDlg::SyncFromMain()
 		if (hf != m_tempo.GetSafeHwnd()) m_tempo.SetPos(og->m_tempo_sl.GetPos());
 		if (hf != m_pitch.GetSafeHwnd()) m_pitch.SetPos(og->m_pitch_sl.GetPos());
 		CString l;
-		int dsp = (og->m_dsval.GetPos() + 499) * 2 / 10;
-		l.Format(LL2(L"DS音量 %d%%", L"DS %d%%"), dsp); m_dsvolL.GetWindowText(s2); if (l != s2) m_dsvolL.SetWindowText(l);
-		l.Format(LL2(L"拡張 %d", L"Boost %d"), og->m_kakuVol.GetPos()); m_kvolL.GetWindowText(s2); if (l != s2) m_kvolL.SetWindowText(l);
+		double dsp = (og->m_dsval.GetPos() + 499) * 2.0 / 10.0;
+		l.Format(LL2(L"DS音量 %.1f%%", L"DS %.1f%%"), dsp); m_dsvolL.GetWindowText(s2); if (l != s2) m_dsvolL.SetWindowText(l);
+		l.Format(LL2(L"拡張音量 %.1f%%", L"Ext %.1f%%"), (double)og->m_kakuVol.GetPos()); m_kvolL.GetWindowText(s2); if (l != s2) m_kvolL.SetWindowText(l);
 		l.Format(LL2(L"テンポ %d%%", L"Tempo %d%%"), og->m_tempo_sl.GetPos() / 2); m_tempoL.GetWindowText(s2); if (l != s2) m_tempoL.SetWindowText(l);
 		l.Format(LL2(L"ピッチ %d%%", L"Pitch %d%%"), og->m_pitch_sl.GetPos() / 2); m_pitchL.GetWindowText(s2); if (l != s2) m_pitchL.SetWindowText(l);
 
@@ -1167,9 +1167,9 @@ void CMediaPlayerDlg::MirrorSeekVol()
 		m_seek.SetRange(mn, mx, FALSE);
 		m_seek.SetSelection(selMn, selMx);
 		m_seek.SetPos(ps);
-		int pct = (int)((double)(ps - mn) * 100.0 / (double)(mx - mn));
-		if (pct < 0) pct = 0; if (pct > 100) pct = 100;
-		CString t; t.Format(_T("%d%%"), pct);
+		double pct = (double)(ps - mn) * 100.0 / (double)(mx - mn);
+		if (pct < 0.0) pct = 0.0; if (pct > 100.0) pct = 100.0;
+		CString t; t.Format(_T("%.1f%%"), pct);
 		m_time.GetWindowText(s2); if (t != s2) m_time.SetWindowText(t);
 
 		// タスクバー進捗(緑追随)。og は非表示なので og->m_hWnd ではなく
@@ -1189,7 +1189,9 @@ void CMediaPlayerDlg::MirrorSeekVol()
 	if (v < 0) v = 0; if (v > 100) v = 100;
 	CWnd* pf = GetFocus();
 	if (!(pf && pf->GetSafeHwnd() == m_vol.GetSafeHwnd())) m_vol.SetPos(v);
-	CString vs; vs.Format(_T("%d"), v); m_volval.GetWindowText(s2); if (vs != s2) m_volval.SetWindowText(vs);
+	double vpct = (double)og->m_sl.GetPos() / 1000.0;
+	if (!og->deve) vpct *= 100.0;
+	CString vs; vs.Format(_T("%.1f"), vpct); m_volval.GetWindowText(s2); if (vs != s2) m_volval.SetWindowText(vs);
 }
 
 void CMediaPlayerDlg::SavePos()
@@ -1898,7 +1900,7 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		int v = m_vol.GetPos();
 		if (og && ::IsWindow(og->GetSafeHwnd()))
 			og->m_sl.SetPos(v * 1000);
-		CString vs; vs.Format(_T("%d"), v); m_volval.SetWindowText(vs);
+		CString vs; vs.Format(_T("%.1f"), (double)v); m_volval.SetWindowText(vs);
 	}
 	else if (og && ::IsWindow(og->GetSafeHwnd()) && r) {
 		// サウンド調整スライダー → og の対応スライダーへ反映(timerp がライブ取得)

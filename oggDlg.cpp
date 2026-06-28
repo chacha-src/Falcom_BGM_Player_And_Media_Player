@@ -2829,7 +2829,7 @@ BOOL COggDlg::OnInitDialog()
 
 
 	m_kakuVol.SetRange(100, 900);
-	s.Format(_T("%3d"), savedata.kakuVal);
+	s.Format(_T("%.1f%%"), (double)savedata.kakuVal);
 	m_kakuVolval.SetWindowText(s);
 	m_kakuVol.SetPos(savedata.kakuVol);
 	CKpilist kp;
@@ -16260,9 +16260,9 @@ void COggDlg::timerp()
 		}
 	}
 	if (deve)
-		s.Format(_T("%3d%%"), (int)vol);
+		s.Format(_T("%.1f%%"), vol);
 	else
-		s.Format(_T("%3d%%"), (int)(vol * 100));
+		s.Format(_T("%.1f%%"), vol * 100.0f);
 	m_vol.GetWindowText(ss);
 	if (s != ss)
 		m_vol.SetWindowText(s);
@@ -16332,7 +16332,7 @@ void COggDlg::timerp()
 
 	savedata.kakuVol = m_kakuVol.GetPos();
 	savedata.kakuVal = savedata.kakuVol;
-	s.Format(_T("%3d%%"), savedata.kakuVal);
+	s.Format(_T("%.1f%%"), (double)savedata.kakuVal);
 	m_kakuVolval.SetWindowText(s);
 
 	//ランダム演奏用
@@ -16813,7 +16813,7 @@ void COggDlg::timerp()
 
 	savedata.dsvol = m_dsval.GetPos();
 	if (savedata.dsvol == 0)savedata.dsvol = 1;
-	s.Format(_T("%3d%%"), (savedata.dsvol + 499) * 2 / 10);
+	s.Format(_T("%.1f%%"), (savedata.dsvol + 499) * 2.0 / 10.0);
 	m_dsvols.GetWindowText(ss);
 	if (s != ss)
 		m_dsvols.SetWindowText(s);

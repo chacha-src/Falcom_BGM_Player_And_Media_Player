@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -175,11 +175,11 @@ BEGIN
     LTEXT           "Static",IDC_STATIC11,16,7,81,44,NOT WS_VISIBLE
     CONTROL         "動画も表示する",IDC_CHECK3,"Button",BS_AUTOCHECKBOX | NOT WS_VISIBLE | WS_TABSTOP,15,58,62,10
     LTEXT           "主音量",IDC_STATICaaab,8,80,25,8
-    RTEXT           "100",IDC_STATIC2,86,81,15,8
+    RTEXT           "100.0",IDC_STATIC2,80,81,22,8
     GROUPBOX        "複数演奏オプション",IDC_OGG_GRP_MULTI,214,8,195,230
     GROUPBOX        "再生するゲーム",IDC_OGG_GRP_GAME,312,14,88,216
     RTEXT           "DirectSound音量",IDC_STATICaaa,80,69,50,8
-    RTEXT           "100",IDC_STATICds,194,70,13,8
+    RTEXT           "100.0",IDC_STATICds,188,70,20,8
     PUSHBUTTON      "Brandish4",IDC_BUTTON39,72,176,64,14
     CONTROL         "ブランディッシュ４",IDC_CHECK23,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,316,184,81,10
     PUSHBUTTON      "白き魔女",IDC_BUTTON44,7,190,43,14
@@ -198,7 +198,7 @@ BEGIN
     LTEXT           "　",IDC_STATIC_OS,7,250,203,8,SS_NOTIFY
     RTEXT           "拡張音量",IDC_STATICaaac,102,81,28,8
     CONTROL         "",IDC_SLIDER4,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,133,81,58,12
-    RTEXT           "100",IDC_STATICds2,193,82,14,8
+    RTEXT           "100.0",IDC_STATICds2,185,82,22,8
     LTEXT           "　",IDC_STATIC_OS2,7,259,203,8,SS_NOTIFY
     LTEXT           "　",IDC_STATIC_OS3,7,268,203,8,SS_NOTIFY
     LTEXT           "　",IDC_STATIC_LRC,7,283,203,8,SS_NOTIFY
@@ -673,13 +673,13 @@ BEGIN
     GROUPBOX        "プレイリスト",IDC_MP_GRP_PL,2,190,476,124,WS_CLIPSIBLINGS
     LTEXT           "主音量",IDC_MP_VOL_L,326,150,28,8
     CONTROL         "",IDC_MP_VOL,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,344,148,90,12
-    RTEXT           "100",IDC_MP_VOLVAL,436,150,38,8
+    RTEXT           "100.0",IDC_MP_VOLVAL,430,150,44,8
     PUSHBUTTON      "EQ",IDC_MP_EQ,326,160,24,12
     PUSHBUTTON      "ピアノ",IDC_MP_PIANO,352,160,34,12
     PUSHBUTTON      "設定",IDC_MP_SETTINGS,7,168,40,12
     LTEXT           "DS音量",IDC_MP_DSVOL_L,52,168,48,9,SS_NOTIFY
     CONTROL         "",IDC_MP_DSVOL,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,52,177,90,12
-    LTEXT           "拡張",IDC_MP_KVOL_L,148,168,48,9,SS_NOTIFY
+    LTEXT           "拡張音量",IDC_MP_KVOL_L,148,168,48,9,SS_NOTIFY
     CONTROL         "",IDC_MP_KVOL,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,148,177,90,12
     LTEXT           "テンポ",IDC_MP_TEMPO_L,244,168,48,9,SS_NOTIFY
     CONTROL         "",IDC_MP_TEMPO,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,244,177,90,12
