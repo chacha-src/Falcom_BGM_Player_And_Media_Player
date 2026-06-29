@@ -695,7 +695,8 @@ static void WavBytesToTchar(const char* val, TCHAR* out, int outCount)
 	if (!val || !out || outCount <= 0)
 		return;
 	out[0] = 0;
-	if (MultiByteToWideChar(CP_UTF8, 0, val, -1, out, outCount) > 0)
+	// MB_ERR_INVALID_CHARS: Shift-JIS の RIFF INFO を UTF-8 と誤認して文字化けしない
+	if (MultiByteToWideChar(CP_UTF8, 8, val, -1, out, outCount) > 0)
 		return;
 	MultiByteToWideChar(CP_ACP, 0, val, -1, out, outCount);
 }

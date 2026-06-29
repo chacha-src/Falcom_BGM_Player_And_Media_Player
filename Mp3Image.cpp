@@ -71,6 +71,44 @@ static bool FindId3ApicInBuffer(const BYTE* bufimage, int scanLen, ULONGLONG bas
 	return false;
 }
 
+static bool TryWavRiffId3Apic(CFile& ff, BYTE* buf, int bufCap, ULONGLONG& absImagePos, UINT& size)
+{
+	const ULONGLONG fileLen = ff.GetLength();
+	if (fileLen < 12 || !buf || bufCap < 20)
+		return false;
+	BYTE riff[12];
+	ff.SeekToBegin();
+	if (ff.Read(riff, 12) != 12)
+		return false;
+	if (memcmp(riff, "RIFF", 4) != 0 || memcmp(riff + 8, "WAVE", 4) != 0)
+		return false;
+	ULONGLONG pos = 12;
+	while (pos + 8 <= fileLen) {
+		ff.Seek((LONGLONG)pos, CFile::begin);
+		DWORD chunkId = 0, chunkSize = 0;
+		if (ff.Read(&chunkId, 4) != 4 || ff.Read(&chunkSize, 4) != 4)
+			break;
+		ULONGLONG dataOff = pos + 8;
+		ULONGLONG nextPos = pos + 8ULL + (ULONGLONG)((chunkSize + 1) & ~1u);
+		if (nextPos > fileLen)
+			break;
+		if (chunkId == 0x20336469) {
+			int readLen = (int)chunkSize;
+			if (readLen > bufCap)
+				readLen = bufCap;
+			if (readLen < 20)
+				break;
+			ZeroMemory(buf, readLen + 1);
+			ff.Seek((LONGLONG)dataOff, CFile::begin);
+			if (ff.Read(buf, readLen) != (UINT)readLen)
+				return false;
+			return FindId3ApicInBuffer(buf, readLen, dataOff, absImagePos, size);
+		}
+		pos = nextPos;
+	}
+	return false;
+}
+
 void CMp3Image::OnNcDestroy()
 {
 	CCustomBlurDialogBase::OnNcDestroy();
@@ -332,6 +370,7 @@ extern int flacmode;
 void CMp3Image::Load(CString s)
 {
 	CString s1, s2;
+	const CString origPath = s;
 	TCHAR env[256];
 	GetEnvironmentVariable(_T("temp"), env, sizeof(env));
 	s1 = env; s1 += "\\";
@@ -339,7 +378,8 @@ void CMp3Image::Load(CString s)
 
 	char* cBit;
 	HGLOBAL hG = NULL;
-	IStream* stream;
+	IStream* stream = NULL;
+	bool preloadedImage = false;
 
 	CFile ff;
 	if (ff.Open(s, CFile::modeRead | CFile::shareDenyWrite, NULL) == FALSE) {
@@ -527,17 +567,19 @@ void CMp3Image::Load(CString s)
 	else if (s.Right(3) == "wav") {
 		const int kScan = 512 * 1024;
 		const ULONGLONG fLen = ff.GetLength();
-		int scanLen = (fLen > (ULONGLONG)kScan) ? kScan : (int)fLen;
 		bool ok = false;
 		auto tryRegion = [&](ULONGLONG off) -> bool {
-			if (scanLen <= 0)
+			if (off >= fLen)
 				return false;
-			ZeroMemory(bufimage, scanLen + 1);
+			int regionLen = (fLen - off > (ULONGLONG)kScan) ? kScan : (int)(fLen - off);
+			if (regionLen < 20)
+				return false;
+			ZeroMemory(bufimage, regionLen + 1);
 			ff.Seek(off, CFile::begin);
-			if ((UINT)ff.Read(bufimage, scanLen) != (UINT)scanLen)
+			if ((UINT)ff.Read(bufimage, regionLen) != (UINT)regionLen)
 				return false;
 			ULONGLONG imgPos = 0;
-			if (!FindId3ApicInBuffer(bufimage, scanLen, off, imgPos, size))
+			if (!FindId3ApicInBuffer(bufimage, regionLen, off, imgPos, size))
 				return false;
 			i = imgPos;
 			s2 += _T("111.bmp");
@@ -546,9 +588,33 @@ void CMp3Image::Load(CString s)
 		ok = tryRegion(0);
 		if (!ok && fLen > (ULONGLONG)kScan)
 			ok = tryRegion(fLen - (ULONGLONG)kScan);
+		if (!ok)
+			ok = TryWavRiffId3Apic(ff, bufimage, 0x300000, i, size);
 		if (!ok) {
-			DestroyWindow();
-			return;
+			ff.Close();
+			static const TCHAR* kSidecarExts[] = { _T(".jpg"), _T(".jpeg"), _T(".png"), _T(".bmp") };
+			int dot = origPath.ReverseFind(_T('.'));
+			if (dot > 0) {
+				CString base = origPath.Left(dot);
+				for (int ei = 0; ei < 4; ei++) {
+					CString sidecar = base + kSidecarExts[ei];
+					if (::GetFileAttributes(sidecar) == INVALID_FILE_ATTRIBUTES)
+						continue;
+					if (img.Load(sidecar) != E_FAIL && !img.IsNull() && img.GetWidth() > 0) {
+						preloadedImage = true;
+						break;
+					}
+					if (!img.IsNull())
+						img.Destroy();
+				}
+			}
+			if (!preloadedImage) {
+				DestroyWindow();
+				return;
+			}
+		}
+		else if (s2.IsEmpty()) {
+			s2 += _T("111.bmp");
 		}
 	}
 	else if (s.Right(3) == "dsf" || s.Right(3) == "dff" || s.Right(3) == "wsd") {
@@ -586,7 +652,7 @@ void CMp3Image::Load(CString s)
 		}
 	}
 
-	if (!(s.Right(3) == "ogg" || s.Right(6) == ".qull3")) {
+	if (!preloadedImage && !(s.Right(3) == "ogg" || s.Right(6) == ".qull3")) {
 		//int ijk = i;
 		//CFile fff;
 		//if (fff.Open(s1, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == FALSE){
@@ -622,7 +688,7 @@ void CMp3Image::Load(CString s)
 	}
 
 	cdc0 = GetDC();
-	if (img.Load(stream) == E_FAIL) {
+	if (!preloadedImage && img.Load(stream) == E_FAIL) {
 		MessageBox(LL14(L"画像データが開けません。", L"Could not open image data.", L"Impossible d'ouvrir les donnees image.", L"Impossibile aprire i dati immagine.", L"No se puede abrir la imagen.", L"??? ???? ? ? ????.", L"无法打??像数据。", L"???? ??? ?????? ??????.", L"Не удалось открыть данные изображения.", L"Bilddaten konnten nicht geoffnet werden.", L"Nao foi possivel abrir os dados da imagem.", L"Kan afbeeldingsgegevens niet openen.", L"Nie mo?na otworzy? danych obrazu.", L"Goruntu verileri ac?lamad?."));
 		GlobalFree(hG);
 		DestroyWindow();

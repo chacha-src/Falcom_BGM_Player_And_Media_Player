@@ -15753,7 +15753,8 @@ void COggDlg::timerp()
 	moji(s, 1, 0, 0xffffff);
 	if (fnn != L"")		sss = fnn;
 	if (mode == -10 || mode == -9 || mode == -8 || mode == -7) sss = tagfile;
-	if (stitle != "" && mode == -1 || mode == 21 || mode == -6)	sss = stitle;
+	if ((stitle != "" && mode == -1) || mode == 21 || mode == -6 || (mode == 999 && stitle != ""))
+		sss = stitle;
 	int si = mojisub(sss, 1, 0, 0xffffff);
 	if (si > MDC) {
 		int sss_w = si;   // 本文ピクセル幅（セパレータ開始位置の計算に使用）
@@ -21274,8 +21275,6 @@ void COggDlg::plugloop(CString ff)
 	}
 	cf1.Close();
 }
-CImageBase* jake = NULL;
-
 static bool FindId3ApicInBuffer(const BYTE* bufimage, int scanLen, ULONGLONG baseOffset, ULONGLONG& absImagePos, UINT& size)
 {
 	if (!bufimage || scanLen < 20)
@@ -21328,6 +21327,47 @@ static bool FindId3ApicInBuffer(const BYTE* bufimage, int scanLen, ULONGLONG bas
 	}
 	return false;
 }
+
+// RIFF/WAVE 内の id3 チャンクから APIC を探す(タグ付き WAV 用)
+static bool TryWavRiffId3Apic(CFile& ff, BYTE* buf, int bufCap, ULONGLONG& absImagePos, UINT& size)
+{
+	const ULONGLONG fileLen = ff.GetLength();
+	if (fileLen < 12 || !buf || bufCap < 20)
+		return false;
+	BYTE riff[12];
+	ff.SeekToBegin();
+	if (ff.Read(riff, 12) != 12)
+		return false;
+	if (memcmp(riff, "RIFF", 4) != 0 || memcmp(riff + 8, "WAVE", 4) != 0)
+		return false;
+	ULONGLONG pos = 12;
+	while (pos + 8 <= fileLen) {
+		ff.Seek((LONGLONG)pos, CFile::begin);
+		DWORD chunkId = 0, chunkSize = 0;
+		if (ff.Read(&chunkId, 4) != 4 || ff.Read(&chunkSize, 4) != 4)
+			break;
+		ULONGLONG dataOff = pos + 8;
+		ULONGLONG nextPos = pos + 8ULL + (ULONGLONG)((chunkSize + 1) & ~1u);
+		if (nextPos > fileLen)
+			break;
+		if (chunkId == 0x20336469) { // 'id3 '
+			int readLen = (int)chunkSize;
+			if (readLen > bufCap)
+				readLen = bufCap;
+			if (readLen < 20)
+				break;
+			ZeroMemory(buf, readLen + 1);
+			ff.Seek((LONGLONG)dataOff, CFile::begin);
+			if (ff.Read(buf, readLen) != (UINT)readLen)
+				return false;
+			return FindId3ApicInBuffer(buf, readLen, dataOff, absImagePos, size);
+		}
+		pos = nextPos;
+	}
+	return false;
+}
+
+CImageBase* jake = NULL;
 
 // ID3 APIC をファイル先頭／末尾／DSD の po ヒント付近から探す。
 static bool TryId3ApicRegions(CFile& ff, BYTE* bufimage, ULONGLONG hintOff,
@@ -21420,6 +21460,7 @@ void COggDlg::LoadJacket(CString s)
 		return;
 	}
 
+	const CString origPath = s;
 	CString s1, s2;
 	TCHAR env[256];
 	GetEnvironmentVariable(_T("temp"), env, sizeof(env));
@@ -21607,17 +21648,19 @@ void COggDlg::LoadJacket(CString s)
 	else if (s.Right(3) == "wav") {
 		const int kScan = 512 * 1024;
 		const ULONGLONG fLen = ff.GetLength();
-		int scanLen = (fLen > (ULONGLONG)kScan) ? kScan : (int)fLen;
 		bool ok = false;
 		auto tryRegion = [&](ULONGLONG off) -> bool {
-			if (scanLen <= 0)
+			if (off >= fLen)
 				return false;
-			ZeroMemory(bufimage, scanLen + 1);
+			int regionLen = (fLen - off > (ULONGLONG)kScan) ? kScan : (int)(fLen - off);
+			if (regionLen < 20)
+				return false;
+			ZeroMemory(bufimage, regionLen + 1);
 			ff.Seek(off, CFile::begin);
-			if ((UINT)ff.Read(bufimage, scanLen) != (UINT)scanLen)
+			if ((UINT)ff.Read(bufimage, regionLen) != (UINT)regionLen)
 				return false;
 			ULONGLONG imgPos = 0;
-			if (!FindId3ApicInBuffer(bufimage, scanLen, off, imgPos, size))
+			if (!FindId3ApicInBuffer(bufimage, regionLen, off, imgPos, size))
 				return false;
 			i = imgPos;
 			s2 += _T("111.bmp");
@@ -21627,7 +21670,33 @@ void COggDlg::LoadJacket(CString s)
 		if (!ok && fLen > (ULONGLONG)kScan)
 			ok = tryRegion(fLen - (ULONGLONG)kScan);
 		if (!ok)
+			ok = TryWavRiffId3Apic(ff, bufimage, (int)bufimage_vec.size() - 16, i, size);
+		if (!ok) {
+			ff.Close();
+			static const TCHAR* kSidecarExts[] = { _T(".jpg"), _T(".jpeg"), _T(".png"), _T(".bmp") };
+			int dot = origPath.ReverseFind(_T('.'));
+			if (dot > 0) {
+				CString base = origPath.Left(dot);
+				for (int ei = 0; ei < 4; ei++) {
+					CString sidecar = base + kSidecarExts[ei];
+					if (::GetFileAttributes(sidecar) == INVALID_FILE_ATTRIBUTES)
+						continue;
+					if (img.Load(sidecar) != E_FAIL && !img.IsNull() && img.GetWidth() > 0) {
+						jx = img.GetWidth();
+						jy = img.GetHeight();
+						jxy = (double)jx / (double)jy;
+						if (jx > 0 && ::IsWindow(m_mp3jake.GetSafeHwnd()))
+							m_mp3jake.EnableWindow(TRUE);
+						return;
+					}
+					if (!img.IsNull())
+						img.Destroy();
+				}
+			}
 			return;
+		}
+		if (s2.IsEmpty())
+			s2 += _T("111.bmp");
 	}
 	else if (s.Right(3) == "dsf" || s.Right(3) == "dff" || s.Right(3) == "wsd") {
 		extern ULONGLONG po;

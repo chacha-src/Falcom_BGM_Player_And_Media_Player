@@ -341,11 +341,11 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_renzoku.SetWindowText(LL14(L"連続再生", L"Continuous", L"Lect. continue", L"Continua", L"Continua", L"연속 재생", L"连续播放", L"تشغيل متتابع", L"Подряд", L"Folge", L"Continuo", L"Doorlopend", L"Ci?g?e", L"Surekli cal"));
 	m_loop.SetWindowText(LL14(L"ループ再生", L"Loop play", L"Lecture boucle", L"Riproduci loop", L"Repetir", L"루프 재생", L"循环播放", L"تشغيل متكرر", L"Цикл", L"Schleife", L"Repetir", L"Lus afspelen", L"Odtwarz. p?tli", L"Donguye al"));
 	m_random.SetWindowText(LL14(L"ランダム再生", L"Random play", L"Lect. aleatoire", L"Casuale", L"Aleatorio", L"랜덤 재생", L"随机播放", L"تشغيل عشوائي", L"Случайно", L"Zufall", L"Aleatorio", L"Willekeurig", L"Losowo", L"Rastgele cal"));
-	m_eq.SetWindowText(LL14(L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ"));
-	m_piano.SetWindowText(LL14(L"ピアノ", L"Piano", L"Piano", L"Piano", L"Piano", L"피아노", L"钢琴", L"بيانو", L"Пиано", L"Klavier", L"Piano", L"Piano", L"Pianino", L"Piyano"));
+	m_eq.SetWindowText(LL14(L"イコライザー", L"Equalizer", L"Egaliseur", L"Equalizzatore", L"Ecualizador", L"이퀄라이저", L"均衡器", L"المعادل", L"Эквалайзер", L"Equalizer", L"Equalizador", L"Equalizer", L"Korektor", L"Ekolayzer"));
+	m_piano.SetWindowText(LL14(L"ピアノロール", L"Piano roll", L"Rouleau piano", L"Piano roll", L"Rollo piano", L"피아노 롤", L"钢琴卷帘", L"لوحة البيانو", L"Пианоролл", L"Klavierrolle", L"Piano roll", L"Pianorol", L"Rolka pianina", L"Piyano rulosu"));
 	m_switch.SetWindowText(LL14(L"ファルコム特化型へ", L"To Falcom screen", L"Vers ecran Falcom", L"Alla schermata Falcom", L"A pantalla Falcom", L"팔콤 화면으로", L"切换到Falcom画面", L"إلى شاشة Falcom", L"К экрану Falcom", L"Zum Falcom-Bildschirm", L"Para tela Falcom", L"Naar Falcom-scherm", L"Do ekranu Falcom", L"Falcom ekran?na"));
 	m_settings.SetWindowText(LL14(L"設定", L"Settings", L"Reglages", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"إعدادات", L"Настройки", L"Einstellungen", L"Config.", L"Instellingen", L"Ustawienia", L"Ayarlar"));
-	m_jacket.SetWindowText(LL14(L"ジャケ", L"Cover", L"Pochette", L"Copertina", L"Caratula", L"커버", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Ok?adka", L"Kapak"));
+	m_jacket.SetWindowText(LL14(L"ジャケット", L"Jacket", L"Pochette", L"Copertina", L"Caratula", L"자켓", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Ok?adka", L"Kapak"));
 	m_exit.SetWindowText(LL14(L"終了", L"Exit", L"Quitter", L"Esci", L"Salir", L"종료", L"退出", L"خروج", L"Выход", L"Beenden", L"Sair", L"Afsluiten", L"Zako?cz", L"C?k??"));
 	m_fadeout.SetWindowText(LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Fade out", L"Zanikanie", L"Solukla?t?r"));
 	m_folder.SetWindowText(LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"مجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"));
@@ -427,11 +427,15 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	}
 
 	// フォント
-	m_fontTitle.CreateFont(-(int)(20 * hD2), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
-	m_fontInfo.CreateFont(-(int)(13 * hD2), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
-	m_fontList.CreateFont(-(int)(14 * hD2), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
+	{
+		LPCTSTR infoFace = _tcslen(savedata.font2) ? savedata.font2
+			: (_tcslen(savedata.font1) ? savedata.font1 : _T("メイリオ"));
+		m_fontTitle.CreateFont(-(int)(20 * hD2), 0, 0, 0, FW_BOLD, 0, 0, 0, SHIFTJIS_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, infoFace);
+		m_fontInfo.CreateFont(-(int)(13 * hD2), 0, 0, 0, FW_NORMAL, 0, 0, 0, SHIFTJIS_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, infoFace);
+	}
+	m_fontList.CreateFont(-(int)(14 * hD2), 0, 0, 0, FW_NORMAL, 0, 0, 0, SHIFTJIS_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
 	// チェックボックス用に少し大きめのフォント(下部チェックを見やすく)
-	m_fontChk.CreateFont(-(int)(15 * hD2), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
+	m_fontChk.CreateFont(-(int)(15 * hD2), 0, 0, 0, FW_NORMAL, 0, 0, 0, SHIFTJIS_CHARSET, OUT_TT_PRECIS, CLIP_CHARACTER_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, _tcslen(savedata.font2) ? savedata.font2 : _T("メイリオ"));
 	m_tip.SetFont(&m_fontChk, TRUE);
 	m_mini.SetFont(&m_fontChk, TRUE);
 	m_savemp3.SetFont(&m_fontChk, TRUE);
@@ -760,16 +764,16 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_stop, bx, by, (int)(44 * s), bh); bx += (int)(44 * s) + gap;
 	MoveCtl(&m_fadeout, bx, by, (int)(72 * s), bh); bx += (int)(72 * s) + gap;
 	MoveCtl(&m_next, bx, by, (int)(40 * s), bh); bx += (int)(40 * s) + (int)(8 * s);
-	int jkw = (int)(48 * s), ebw = (int)(40 * s), pbw = (int)(50 * s);
+	int jkw = (int)(62 * s), ebw = (int)(68 * s), pbw = (int)(72 * s);
 	MoveCtl(&m_jacket, bx, by, jkw, bh); bx += jkw + gap;
 	MoveCtl(&m_eq, bx, by, ebw, bh); bx += ebw + gap;
-	MoveCtl(&m_piano, bx, by, pbw, bh); bx += pbw + (int)(8 * s);
+	MoveCtl(&m_piano, bx, by, pbw, bh);
+	// 主音量は右端へ固定幅で配置(リサイズでスライダー幅は変えない)
 	int volValW = (int)(30 * s), volLblW = (int)(38 * s);
+	const int volSlW = (int)(100 * s);
 	int volvalX = W - M - volValW;
-	int volLblX = bx;
-	int volSlX = volLblX + volLblW;
-	int volSlW = volvalX - (int)(2 * s) - volSlX;
-	if (volSlW < (int)(50 * s)) volSlW = (int)(50 * s);
+	int volSlX = volvalX - (int)(4 * s) - volSlW;
+	int volLblX = volSlX - volLblW;
 	MoveCtl(&m_vollabel, volLblX, by + (int)(5 * s), volLblW, (int)(15 * s));
 	MoveCtl(&m_vol, volSlX, by + (int)(4 * s), volSlW, (int)(16 * s));
 	MoveCtl(&m_volval, volvalX, by + (int)(5 * s), volValW, (int)(15 * s));
@@ -989,11 +993,13 @@ int CMediaPlayerDlg::GetListScrollAnchor() const
 void CMediaPlayerDlg::RestoreListScrollAnchor(int anchor)
 {
 	if (!::IsWindow(m_list.GetSafeHwnd()) || !pl || pl->playcnt <= 0) return;
-	if (anchor < 0 || anchor >= pl->playcnt) anchor = 0;
+	if (anchor < 0) anchor = 0;
+	if (anchor >= pl->playcnt) anchor = pl->playcnt - 1;
 	for (int k = -1; (k = m_list.GetNextItem(k, LVNI_SELECTED)) != -1; )
 		m_list.SetItemState(k, 0, LVIS_SELECTED | LVIS_FOCUSED);
 	m_list.SetItemState(anchor, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
 	m_list.EnsureVisible(anchor, FALSE);
+	m_lastScroll = anchor;   // FollowPlayingRow が直後の選択を上書きしない
 }
 
 void CMediaPlayerDlg::InitListScrollPosition()
@@ -1080,10 +1086,10 @@ void CMediaPlayerDlg::SyncFromMain()
 		if (hf != m_pitch.GetSafeHwnd()) m_pitch.SetPos(og->m_pitch_sl.GetPos());
 		CString l;
 		double dsp = (og->m_dsval.GetPos() + 499) * 2.0 / 10.0;
-		l.Format(LL2(L"DS音量 %.1f%%", L"DS %.1f%%"), dsp); m_dsvolL.GetWindowText(s2); if (l != s2) m_dsvolL.SetWindowText(l);
-		l.Format(LL2(L"拡張音量 %.1f%%", L"Ext %.1f%%"), (double)og->m_kakuVol.GetPos()); m_kvolL.GetWindowText(s2); if (l != s2) m_kvolL.SetWindowText(l);
-		l.Format(LL2(L"テンポ %d%%", L"Tempo %d%%"), og->m_tempo_sl.GetPos() / 2); m_tempoL.GetWindowText(s2); if (l != s2) m_tempoL.SetWindowText(l);
-		l.Format(LL2(L"ピッチ %d%%", L"Pitch %d%%"), og->m_pitch_sl.GetPos() / 2); m_pitchL.GetWindowText(s2); if (l != s2) m_pitchL.SetWindowText(l);
+		l.Format(LL14(L"DS音量 %.1f%%", L"DS volume %.1f%%", L"Volume DS %.1f%%", L"Volume DS %.1f%%", L"Volumen DS %.1f%%", L"DS 음량 %.1f%%", L"DS音量 %.1f%%", L"مستوى DS %.1f%%", L"Громкость DS %.1f%%", L"DS-Lautstarke %.1f%%", L"Volume DS %.1f%%", L"DS-volume %.1f%%", L"Głośność DS %.1f%%", L"DS sesi %.1f%%"), dsp); m_dsvolL.GetWindowText(s2); if (l != s2) m_dsvolL.SetWindowText(l);
+		l.Format(LL14(L"拡張音量 %.1f%%", L"Extended volume %.1f%%", L"Volume etendu %.1f%%", L"Volume esteso %.1f%%", L"Volumen extendido %.1f%%", L"확장 음량 %.1f%%", L"扩展音量 %.1f%%", L"الصوت الموسع %.1f%%", L"Расшир. громкость %.1f%%", L"Erweiterte Lautstarke %.1f%%", L"Volume estendido %.1f%%", L"Uitgebreid volume %.1f%%", L"Rozszerzona głośność %.1f%%", L"Genisletilmis ses %.1f%%"), (double)og->m_kakuVol.GetPos()); m_kvolL.GetWindowText(s2); if (l != s2) m_kvolL.SetWindowText(l);
+		l.Format(LL14(L"テンポ %d%%", L"Tempo %d%%", L"Tempo %d%%", L"Tempo %d%%", L"Tempo %d%%", L"템포 %d%%", L"速度 %d%%", L"الإيقاع %d%%", L"Темп %d%%", L"Tempo %d%%", L"Tempo %d%%", L"Tempo %d%%", L"Tempo %d%%", L"Tempo %d%%"), og->m_tempo_sl.GetPos() / 2); m_tempoL.GetWindowText(s2); if (l != s2) m_tempoL.SetWindowText(l);
+		l.Format(LL14(L"ピッチ %d%%", L"Pitch %d%%", L"Hauteur %d%%", L"Altezza %d%%", L"Tono %d%%", L"피치 %d%%", L"音高 %d%%", L"طبقة الصوت %d%%", L"Высота %d%%", L"Tonhohe %d%%", L"Tom %d%%", L"Toonhoogte %d%%", L"Wysokość %d%%", L"Perde %d%%"), og->m_pitch_sl.GetPos() / 2); m_pitchL.GetWindowText(s2); if (l != s2) m_pitchL.SetWindowText(l);
 
 		// 乱数/順次・スペアナ/ST の状態(変化時のみ。毎tick SetCheck はちらつくため)
 		int v1;
@@ -1694,7 +1700,7 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			// 曲番号行
 			CString trackLine;
 			if (!track.IsEmpty())
-				trackLine.Format(LL2(L"曲番号 %s", L"Track %s"), (LPCTSTR)track);
+				trackLine.Format(LL14(L"曲番号 %s", L"Track %s", L"Piste %s", L"Traccia %s", L"Pista %s", L"곡번호 %s", L"曲号 %s", L"المقطع %s", L"Трек %s", L"Titel %s", L"Faixa %s", L"Track %s", L"Utwór %s", L"Parça %s"), (LPCTSTR)track);
 
 			// Hz / チャンネル / ビット深度行（アップスケール時は src ✦ dst）
 			CString audioLine = FormatAudioPlaybackDisplay(wavbit_sample_Hz, wavchannel, wavsam_depth);
