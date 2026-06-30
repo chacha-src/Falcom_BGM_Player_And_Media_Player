@@ -1410,6 +1410,115 @@ ICustomDestinationList* pcdl;
 IObjectCollection* poc;
 
 int plcnt = 0;
+extern int gameon;
+
+static void MpPersistSavedataQuick()
+{
+	TCHAR tmp[1024];
+	_tgetcwd(tmp, 1000);
+	_tchdir(karento2);
+	CFile ab;
+#if _UNICODE
+	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#else
+	if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#endif
+		ab.Write(&savedata, sizeof(save));
+		ab.Close();
+	}
+	_tchdir(tmp);
+}
+
+void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
+{
+	if (!path || !*path) return;
+	CString p(path), n(displayName ? displayName : _T(""));
+	p.Trim(); n.Trim();
+	if (p.IsEmpty()) return;
+	if (n.IsEmpty()) {
+		int slash = p.ReverseFind(_T('\\'));
+		n = (slash >= 0) ? p.Mid(slash + 1) : p;
+	}
+	// 同一曲は先頭へ
+	for (int i = 0; i < savedata.mpHistCnt && i < 8; ++i) {
+		if (p.CompareNoCase(savedata.mpHistPath[i]) == 0) {
+			for (int j = i; j > 0; --j) {
+				_tcscpy(savedata.mpHistPath[j], savedata.mpHistPath[j - 1]);
+				_tcscpy(savedata.mpHistName[j], savedata.mpHistName[j - 1]);
+			}
+			_tcscpy(savedata.mpHistPath[0], p);
+			_tcsncpy(savedata.mpHistName[0], n, _countof(savedata.mpHistName[0]) - 1);
+			savedata.mpHistName[0][_countof(savedata.mpHistName[0]) - 1] = 0;
+			MpPersistSavedataQuick();
+			if (savedata.playerMode == 1)
+				RefreshTaskbarJumpList(TRUE);
+			return;
+		}
+	}
+	const int nMove = (savedata.mpHistCnt < 8) ? savedata.mpHistCnt : 7;
+	for (int j = nMove; j > 0; --j) {
+		_tcscpy(savedata.mpHistPath[j], savedata.mpHistPath[j - 1]);
+		_tcscpy(savedata.mpHistName[j], savedata.mpHistName[j - 1]);
+	}
+	_tcscpy(savedata.mpHistPath[0], p);
+	_tcsncpy(savedata.mpHistName[0], n, _countof(savedata.mpHistName[0]) - 1);
+	savedata.mpHistName[0][_countof(savedata.mpHistName[0]) - 1] = 0;
+	if (savedata.mpHistCnt < 8)
+		savedata.mpHistCnt++;
+	MpPersistSavedataQuick();
+	if (savedata.playerMode == 1)
+		RefreshTaskbarJumpList(TRUE);
+}
+
+static int MpCurrentPlayIndex()
+{
+	if (!pl || pl->playcnt <= 0) return -1;
+	if (pl->pnt >= 0 && pl->pnt < pl->playcnt) return pl->pnt;
+	if (plcnt >= 0 && plcnt < pl->playcnt) return plcnt;
+	return 0;
+}
+
+void MpTaskbarReplay()
+{
+	if (pl && pl->playcnt > 0)
+		pl->RestoreSavedPlaybackRow();
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_APP + 2, 0, 0);
+}
+
+void MpTaskbarNextTrack()
+{
+	if (!pl || pl->playcnt <= 0) return;
+	int idx = MpCurrentPlayIndex();
+	if (idx < 0) idx = 0;
+	else {
+		idx++;
+		if (idx >= pl->playcnt) idx = 0;
+	}
+	pl->Get(idx);
+	plcnt = idx;
+	gameon = 0;
+	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_APP + 2, 0, 0);
+}
+
+void MpTaskbarPrevTrack()
+{
+	if (!pl || pl->playcnt <= 0) return;
+	int idx = MpCurrentPlayIndex();
+	if (idx < 0) idx = 0;
+	else {
+		idx--;
+		if (idx < 0) idx = pl->playcnt - 1;
+	}
+	pl->Get(idx);
+	plcnt = idx;
+	gameon = 0;
+	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_APP + 2, 0, 0);
+}
 
 // タスクバー: サムネイルツールバー(再生/停止等)とジャンプリスト(右クリック)をモード別に設定
 void SetupTaskbarThumbButtons(HWND hwnd, BOOL mediaPlayerMode)
@@ -1456,11 +1565,42 @@ void RefreshTaskbarJumpList(BOOL mediaPlayerMode)
 	IObjectArray* poaRemoved = NULL;
 	if (FAILED(pcdl->BeginList(&cMinSlots, IID_PPV_ARGS(&poaRemoved)))) return;
 
+	IShellLink* psl = NULL;
+	auto addHistLink = [&](IObjectCollection* pocHist, LPCTSTR arg, LPCTSTR title) {
+		og->_CreateShellLink((LPTSTR)arg, (LPTSTR)title, &psl, 0, true);
+		pocHist->AddObject(psl);
+		psl->Release();
+	};
+
+	// 最近再生した曲は Tasks とは別カテゴリ(ジャンプリスト上部)
+	if (mediaPlayerMode && savedata.mpHistCnt > 0) {
+		IObjectCollection* pocHist = NULL;
+		if (SUCCEEDED(CoCreateInstance(CLSID_EnumerableObjectCollection, NULL, CLSCTX_INPROC, IID_PPV_ARGS(&pocHist))) && pocHist) {
+			UINT histAdded = 0;
+			for (int hi = 0; hi < savedata.mpHistCnt && hi < 8; ++hi) {
+				if (savedata.mpHistPath[hi][0] == 0) continue;
+				CString title = savedata.mpHistName[hi];
+				if (title.IsEmpty()) title = savedata.mpHistPath[hi];
+				if (title.GetLength() > 64)
+					title = title.Left(61) + _T("...");
+				addHistLink(pocHist, savedata.mpHistPath[hi], title);
+				histAdded++;
+			}
+			if (histAdded > 0) {
+				IObjectArray* poaHist = NULL;
+				if (SUCCEEDED(pocHist->QueryInterface(IID_PPV_ARGS(&poaHist)))) {
+					pcdl->AppendCategory(LL14(L"最近再生した曲", L"Recently played", L"Recemment ecoute", L"Riprodotti di recente", L"Reproducido recientemente", L"최근 재생", L"最近播放", L"المشغل مؤخرا", L"Недавно проиграно", L"Zuletzt gespielt", L"Reproduzido recentemente", L"Recent afgespeeld", L"Ostatnio odtwarzane", L"Son calinanlar"), poaHist);
+					poaHist->Release();
+				}
+			}
+			pocHist->Release();
+		}
+	}
+
 	IObjectCollection* pocNew = NULL;
 	CoCreateInstance(CLSID_EnumerableObjectCollection, NULL, CLSCTX_INPROC, IID_PPV_ARGS(&pocNew));
 	if (!pocNew) { pcdl->AbortList(); if (poaRemoved) poaRemoved->Release(); return; }
 
-	IShellLink* psl = NULL;
 	auto addLink = [&](LPCTSTR arg, LPCTSTR title) {
 		og->_CreateShellLink((LPTSTR)arg, (LPTSTR)title, &psl, 0, true);
 		pocNew->AddObject(psl);
@@ -14457,12 +14597,12 @@ BOOL COggDlg::OnCopyData(CWnd* pWnd, COPYDATASTRUCT* pCopyDataStruct)
 	else if (filen_ == "*5") OnButton21();
 	else if (filen_ == "*6") OnButton9_Folder();
 	else if (filen_ == "*7") {
-		if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
-			mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_NEXT, BN_CLICKED), 0);
+		if (savedata.playerMode == 1)
+			MpTaskbarNextTrack();
 	}
 	else if (filen_ == "*8") {
-		if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
-			mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PREV, BN_CLICKED), 0);
+		if (savedata.playerMode == 1)
+			MpTaskbarPrevTrack();
 	}
 	else if (filen_ == "*9") {
 		if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
@@ -14490,12 +14630,12 @@ void COggDlg::dp(CString a)
 		else if (a == "*5") OnButton21();
 		else if (a == "*6") OnButton9_Folder();
 		else if (a == "*7") {
-			if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
-				mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_NEXT, BN_CLICKED), 0);
+			if (savedata.playerMode == 1)
+				MpTaskbarNextTrack();
 		}
 		else if (a == "*8") {
-			if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
-				mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PREV, BN_CLICKED), 0);
+			if (savedata.playerMode == 1)
+				MpTaskbarPrevTrack();
 		}
 		else if (a == "*9") {
 			if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
@@ -19207,6 +19347,8 @@ void COggDlg::OnRestart()
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	CString ti;
 	stop();
+	if (filen == _T("") && pl && pl->playcnt > 0)
+		pl->RestoreSavedPlaybackRow();
 	if (filen != "") {
 		ti = filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1);
 		int sub_ = mode;

@@ -244,6 +244,11 @@ struct save{
 	int wav_export_fade_sec;       // フェード秒数(既定15)
 	int wav_export_trim_lead;      // 1=先頭無音カット有効
 	int wav_export_trim_keep_sec;  // 先頭に残す無音秒数(既定1)
+
+	// タスクバージャンプリスト用: 最近再生した曲(最大8件。必ず構造体末尾に追記)
+	int mpHistCnt;
+	TCHAR mpHistName[8][200];
+	TCHAR mpHistPath[8][1024];
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */

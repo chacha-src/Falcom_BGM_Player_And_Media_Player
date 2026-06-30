@@ -48,6 +48,7 @@ public:
 	void plug(CString ff,KMPMODULE *mod);
 	void plugs(CString ext1,playlistdata *p,TCHAR* kpi, BYTE& kv);
 	void Get(int i);
+	void RestoreSavedPlaybackRow(); // Load 後: 保存 pnt(♪行)から filen/plcnt を復元
 
 	void OnDrag(int x,int y);
 	void OnEndDrag();

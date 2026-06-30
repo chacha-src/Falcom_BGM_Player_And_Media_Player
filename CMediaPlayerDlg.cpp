@@ -38,8 +38,10 @@ extern int mode;         // 再生モード(タイトル解決に使用, oggDlg.
 extern int playy;   // 再生中フラグ(oggDlg.cpp)
 extern int plf;          // 再生中(1=再生中。oggDlg.cpp)
 extern ITaskbarList3* ptl;   // タスクバー進捗(oggDlg.cpp で初期化)
-extern void SetupTaskbarThumbButtons(HWND hwnd, BOOL mediaPlayerMode);
-extern void RefreshTaskbarJumpList(BOOL mediaPlayerMode);
+extern void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName);
+extern void MpTaskbarReplay();
+extern void MpTaskbarNextTrack();
+extern void MpTaskbarPrevTrack();
 extern CDC dc;   // COggDlg のオフスクリーン合成面(スペアナ+ジャケ+時間)を流用
 extern void ShowOggAboutDialog(CWnd* pParent);   // バージョン情報ダイアログ(oggDlg.cpp)
 
@@ -2206,24 +2208,19 @@ static void MP_PlayIndex(int idx)
 	pl->Get(idx);          // fnn/filen/modesub/loop1/loop2/ret2 をセット + 選択
 	plcnt = idx;
 	gameon = 0;
+	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->PostMessage(WM_APP + 2, 0, 0);  // 再生(再演奏)
 }
 
 void CMediaPlayerDlg::OnPrev()
 {
-	if (!pl || pl->playcnt <= 0) return;
-	int idx = plcnt - 1;
-	if (idx < 0) idx = pl->playcnt - 1;
-	MP_PlayIndex(idx);
+	MpTaskbarPrevTrack();
 }
 
 void CMediaPlayerDlg::OnNext()
 {
-	if (!pl || pl->playcnt <= 0) return;
-	int idx = plcnt + 1;
-	if (idx >= pl->playcnt) idx = 0;
-	MP_PlayIndex(idx);
+	MpTaskbarNextTrack();
 }
 
 void CMediaPlayerDlg::OnPlay()
@@ -2231,8 +2228,8 @@ void CMediaPlayerDlg::OnPlay()
 	int sel = m_list.GetNextItem(-1, LVNI_SELECTED);
 	if (sel >= 0 && pl && sel < pl->playcnt)
 		MP_PlayIndex(sel);
-	else if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->PostMessage(WM_APP + 2, 0, 0);
+	else
+		MpTaskbarReplay();
 }
 
 void CMediaPlayerDlg::OnPauseBtn()

@@ -221,6 +221,7 @@ BOOL COggApp::InitInstance()
 	// .dat が eq_reverb 以降(メディアプレイヤーモード版=36bab3c以降)のフィールドを
 	// 含んでいたか。含む.datは ms2 を一度だけ誤って ×16 した不具合版で保存されたもの。
 	bool datHadMpFields = false;
+	int datFileSize = 0;
 	if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeRead | CFile::shareDenyWrite,NULL)!=TRUE && ac.Open(L"oggYSEDbgm.dat",CFile::modeRead | CFile::shareDenyWrite,NULL)==TRUE){
 		ac.Close();
 		AfxMessageBox(LL14(L"ANSI版からのコンバートを行います。", L"Converting from ANSI version.", L"Conversion depuis la version ANSI en cours.", L"Conversione dalla versione ANSI in corso.", L"Convirtiendo desde version ANSI.", L"ANSI ???? ?? ????.", L"正在从ANSI版本??。", L"???? ??????? ?? ????? ANSI.", L"Конвертация из версии ANSI.", L"Konvertierung von ANSI-Version.", L"Convertendo da versao ANSI.", L"Converteren van ANSI-versie.", L"Konwertowanie z wersji ANSI.", L"ANSI surumunden donu?turuluyor."));
@@ -229,11 +230,15 @@ BOOL COggApp::InitInstance()
 		ReleaseMutex(Mutex);
 		exit(0);
 #else
-	CFile ab;	if(ab.Open("oggYSEDbgm.dat",CFile::modeRead | CFile::shareDenyWrite,NULL)!=TRUE){
+	CFile ab;
+	bool datHadMpFields = false;
+	int datFileSize = 0;
+	if(ab.Open("oggYSEDbgm.dat",CFile::modeRead | CFile::shareDenyWrite,NULL)!=TRUE){
 #endif
 	}else{
 		if(ab.m_hFile != CFile::hFileNull){
 			const int a = (int)ab.GetLength();
+			datFileSize = a;
 			const int toRead = (a < (int)sizeof(save)) ? a : (int)sizeof(save);
 			ab.Read(&savedata, toRead);
 			ab.Close();
@@ -257,6 +262,13 @@ BOOL COggApp::InitInstance()
 		savedata.wav_export_fade_sec = 15;
 	if (savedata.wav_export_trim_keep_sec <= 0)
 		savedata.wav_export_trim_keep_sec = 1;
+	// mpHist は構造体末尾追記。旧.dat(これより短い)は mpHist 領域を読まないので空にする。
+	if (datFileSize < (int)offsetof(save, mpHistCnt)
+		|| savedata.mpHistCnt < 0 || savedata.mpHistCnt > 8) {
+		savedata.mpHistCnt = 0;
+		ZeroMemory(savedata.mpHistName, sizeof(savedata.mpHistName));
+		ZeroMemory(savedata.mpHistPath, sizeof(savedata.mpHistPath));
+	}
 	if (savedata.langselect == 0) {
 		LANGID langId = GetUserDefaultUILanguage();
 		WORD prim = PRIMARYLANGID(langId);

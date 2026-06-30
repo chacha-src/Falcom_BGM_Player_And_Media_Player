@@ -919,6 +919,24 @@ void CPlayList::Get(int i)
 		SIcon(i);
 }
 
+void CPlayList::RestoreSavedPlaybackRow()
+{
+	extern int plcnt;
+	if (pnt < 0 || pnt >= playcnt || !pc)
+		return;
+	plcnt = pnt;
+	fnn = pc[pnt].name;
+	filen = pc[pnt].fol;
+	modesub = pc[pnt].sub;
+	loop1 = pc[pnt].loop1;
+	loop2 = pc[pnt].loop2;
+	ret2 = pc[pnt].ret2;
+	for (int k = 0; k < playcnt; k++)
+		m_lc.SetItemState(k, m_lc.GetItemState(k, LVIS_SELECTED) & ~LVIS_SELECTED, LVIS_SELECTED);
+	m_lc.SetItemState(pnt, LVIS_SELECTED, LVIS_SELECTED);
+	SIcon(pnt);
+}
+
 extern int gameon;
 static void RequestPlaylistRestartAsync()
 {
@@ -4261,10 +4279,13 @@ void CPlayList::Load()
 		c=1;f.Read(&c,4);m_saisyo.SetCheck(c);
 		c=-1;f.Read(&c,4);if(c!=-1)m_lc.SetColumnWidth(2,c);
 		c=-1;f.Read(&c,4);if(c!=-1)m_lc.SetColumnWidth(5,c);
-		pnt1=-1;f.Read(&pnt1,4);//if(c!=-1)SIcon(pnt);
+		pnt = -1;
+		pnt1 = -1;
+		f.Read(&pnt, 4);
 		f.Close();
 	}
 	ClampPlaylistSelectionIndices(this);
+	RestoreSavedPlaybackRow();
 	_tchdir(tmp);
 	if(GetAsyncKeyState(VK_LCONTROL)&0x8000){
 		x=-10000;
