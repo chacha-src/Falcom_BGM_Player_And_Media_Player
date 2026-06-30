@@ -793,6 +793,7 @@ public:
 
     void PaintClient(CDC& dc, const CRect& r);
     void RepaintClient();
+    void EnsureAnimTimer();   // 押下状態変化後に流れるアニメを再開
 
 protected:
     virtual void PreSubclassWindow();

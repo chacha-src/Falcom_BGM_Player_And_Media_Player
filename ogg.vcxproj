@@ -3136,6 +3136,8 @@
     <ClCompile Include="AppMixerMuteCheck.cpp" />
     <ClCompile Include="ogg.cpp" />
     <ClCompile Include="CMediaPlayerDlg.cpp" />
+    <ClCompile Include="CMpM3uImportDlg.cpp" />
+    <ClCompile Include="CMpPlaylistIO.cpp" />
     <ClCompile Include="oggDlg.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='sse2|Win32'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='sse2|ARM'">Use</PrecompiledHeader>
@@ -3426,6 +3428,8 @@
     <ClInclude Include="Nishi.h" />
     <ClInclude Include="ogg.h" />
     <ClInclude Include="CMediaPlayerDlg.h" />
+    <ClInclude Include="CMpM3uImportDlg.h" />
+    <ClInclude Include="CMpPlaylistIO.h" />
     <ClInclude Include="oggDlg.h" />
     <ClInclude Include="opus.h" />
     <ClInclude Include="opus\opus.h" />

@@ -607,6 +607,7 @@ int pnt1=-1;
 
 int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 {
+	if(!pc || playcnt<=0) return -1;
 	int i=m_lc.GetItemCount(),c=0;
 	pnt1=-1;
 	CString s,s1;
@@ -739,6 +740,10 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 		}
 //	if(playcnt<60000){
 		if(ff){
+			if(pc==NULL){
+				pc=(playlistdata0*)malloc(sizeof(playlistdata0));
+				if(!pc) return -1;
+			}
 			playlistdata0 *tmp;	tmp=pc;
 		size_t size=_msize(pc);
 		playlistdata0 *newPc = (playlistdata0*)realloc(tmp, size + sizeof(playlistdata0));

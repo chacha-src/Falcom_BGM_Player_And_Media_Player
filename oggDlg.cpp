@@ -1411,8 +1411,94 @@ IObjectCollection* poc;
 
 int plcnt = 0;
 
+// タスクバー: サムネイルツールバー(再生/停止等)とジャンプリスト(右クリック)をモード別に設定
+void SetupTaskbarThumbButtons(HWND hwnd, BOOL mediaPlayerMode)
+{
+	if (!ptl || !hwnd || !::IsWindow(hwnd)) return;
 
+	static BOOL s_hasThumbOg = FALSE;
+	static BOOL s_hasThumbMp = FALSE;
+	static HWND s_mpThumbHwnd = NULL;
+	BOOL* pHas = &s_hasThumbOg;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && hwnd == mp->m_hWnd) {
+		if (s_mpThumbHwnd != hwnd) { s_hasThumbMp = FALSE; s_mpThumbHwnd = hwnd; }
+		pHas = &s_hasThumbMp;
+	}
 
+	THUMBBUTTON b[4];
+	ZeroMemory(b, sizeof(b));
+	b[0].hIcon = ::AfxGetApp()->LoadIcon(IDI_T1); b[0].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
+	b[0].dwFlags = THBF_ENABLED; b[0].iId = 0;
+	wcscpy(b[0].szTip, L"再演奏");
+	b[1].hIcon = ::AfxGetApp()->LoadIcon(IDI_T2); b[1].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
+	b[1].dwFlags = THBF_ENABLED; b[1].iId = 1;
+	wcscpy(b[1].szTip, L"一時停止");
+	b[2].hIcon = ::AfxGetApp()->LoadIcon(IDI_T3); b[2].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
+	b[2].dwFlags = THBF_ENABLED; b[2].iId = 2;
+	wcscpy(b[2].szTip, L"停止");
+	b[3].hIcon = ::AfxGetApp()->LoadIcon(IDI_T4); b[3].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
+	b[3].dwFlags = THBF_ENABLED; b[3].iId = 3;
+	if (mediaPlayerMode)
+		wcscpy(b[3].szTip, L"次の曲");
+	else
+		wcscpy(b[3].szTip, L"プレイリスト開閉");
+
+	if (*pHas)
+		ptl->ThumbBarUpdateButtons(hwnd, 4, b);
+	else if (SUCCEEDED(ptl->ThumbBarAddButtons(hwnd, 4, b)))
+		*pHas = TRUE;
+}
+
+void RefreshTaskbarJumpList(BOOL mediaPlayerMode)
+{
+	if (!pcdl || !og) return;
+	UINT cMinSlots;
+	IObjectArray* poaRemoved = NULL;
+	if (FAILED(pcdl->BeginList(&cMinSlots, IID_PPV_ARGS(&poaRemoved)))) return;
+
+	IObjectCollection* pocNew = NULL;
+	CoCreateInstance(CLSID_EnumerableObjectCollection, NULL, CLSCTX_INPROC, IID_PPV_ARGS(&pocNew));
+	if (!pocNew) { pcdl->AbortList(); if (poaRemoved) poaRemoved->Release(); return; }
+
+	IShellLink* psl = NULL;
+	auto addLink = [&](LPCTSTR arg, LPCTSTR title) {
+		og->_CreateShellLink((LPTSTR)arg, (LPTSTR)title, &psl, 0, true);
+		pocNew->AddObject(psl);
+		psl->Release();
+	};
+	auto addSep = [&]() {
+		og->_CreateShellLink(_T(""), _T(""), &psl, 0, true, FALSE);
+		pocNew->AddObject(psl);
+		psl->Release();
+	};
+
+	addLink(_T("*1"), _T("再演奏"));
+	addLink(_T("*2"), _T("一時停止"));
+	addLink(_T("*3"), _T("停止"));
+	addSep();
+	if (mediaPlayerMode) {
+		addLink(_T("*7"), LL14(L"次の曲", L"Next track", L"Piste suivante", L"Traccia succ.", L"Pista sig.", L"다음 곡", L"下一曲", L"التالي", L"Следующий", L"Naechster", L"Proxima", L"Volgende", L"Nastepny", L"Sonraki"));
+		addLink(_T("*8"), LL14(L"前の曲", L"Previous track", L"Piste precedente", L"Traccia prec.", L"Pista ant.", L"이전 곡", L"上一曲", L"السابق", L"Предыдущий", L"Vorheriger", L"Anterior", L"Vorige", L"Poprzedni", L"Onceki"));
+		addSep();
+		addLink(_T("*9"), LL14(L"イコライザー", L"Equalizer", L"Egaliseur", L"Equalizzatore", L"Ecualizador", L"이퀄라이저", L"均衡器", L"المعادل", L"Эквалайзер", L"Equalizer", L"Equalizador", L"Equalizer", L"Korektor", L"Ekolayzer"));
+		addLink(_T("*A"), LL14(L"ジャケット", L"Jacket art", L"Pochette", L"Copertina", L"Caratula", L"자켓", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Hoes", L"Okładka", L"Kapak"));
+	}
+	else {
+		addLink(_T("*4"), _T("プレイリスト開閉"));
+	}
+	addSep();
+	addLink(_T("*5"), _T("レンダリング設定"));
+	addLink(_T("*6"), _T("フォルダ設定"));
+
+	IObjectArray* poa = NULL;
+	if (SUCCEEDED(pocNew->QueryInterface(IID_PPV_ARGS(&poa)))) {
+		pcdl->AddUserTasks(poa);
+		poa->Release();
+	}
+	pcdl->CommitList();
+	if (poaRemoved) poaRemoved->Release();
+	pocNew->Release();
+}
 
 
 BOOL COggDlg::OnCommand(WPARAM wParam, LPARAM lParam)
@@ -2666,31 +2752,7 @@ BOOL COggDlg::OnInitDialog()
 	pcdl = NULL;
 	CoCreateInstance(CLSID_DestinationList, NULL, CLSCTX_INPROC_SERVER, IID_ICustomDestinationList, (void**)&pcdl);
 	if (pcdl) {
-		UINT cMinSlots;
-		IObjectArray* poaRemoved;
-		pcdl->BeginList(&cMinSlots, IID_PPV_ARGS(&poaRemoved));
-		CoCreateInstance(CLSID_EnumerableObjectCollection, NULL, CLSCTX_INPROC, IID_PPV_ARGS(&poc));
-		IShellLink* psl = NULL;
-		_CreateShellLink(_T("*1"), _T("再演奏"), &psl, 0, true);
-		poc->AddObject(psl);	psl->Release();
-		_CreateShellLink(_T("*2"), _T("一時停止"), &psl, 0, true);
-		poc->AddObject(psl);	psl->Release();
-		_CreateShellLink(_T("*3"), _T("停止"), &psl, 0, true);
-		poc->AddObject(psl);	psl->Release();
-		_CreateShellLink(_T(""), _T(""), &psl, 0, true, FALSE);
-		poc->AddObject(psl);	psl->Release();
-		_CreateShellLink(_T("*4"), _T("プレイリスト開閉"), &psl, 0, true);
-		poc->AddObject(psl);	psl->Release();
-		_CreateShellLink(_T(""), _T(""), &psl, 0, true, FALSE);
-		poc->AddObject(psl);	psl->Release();
-		_CreateShellLink(_T("*5"), _T("レンダリング設定"), &psl, 0, true);
-		poc->AddObject(psl);	psl->Release();
-		_CreateShellLink(_T("*6"), _T("フォルダ設定"), &psl, 0, true);
-		poc->AddObject(psl);	psl->Release();
-		IObjectArray* poa; poc->QueryInterface(IID_PPV_ARGS(&poa));
-		pcdl->AddUserTasks(poa); poa->Release();
-		pcdl->CommitList(); poaRemoved->Release();
-		poc->Release();
+		RefreshTaskbarJumpList(savedata.playerMode == 1);
 	}
 
 	m_pDlgColor = NULL;
@@ -14394,6 +14456,26 @@ BOOL COggDlg::OnCopyData(CWnd* pWnd, COPYDATASTRUCT* pCopyDataStruct)
 	else if (filen_ == "*4") OnPlayList();
 	else if (filen_ == "*5") OnButton21();
 	else if (filen_ == "*6") OnButton9_Folder();
+	else if (filen_ == "*7") {
+		if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_NEXT, BN_CLICKED), 0);
+	}
+	else if (filen_ == "*8") {
+		if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PREV, BN_CLICKED), 0);
+	}
+	else if (filen_ == "*9") {
+		if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_EQ, BN_CLICKED), 0);
+		else
+			SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON59, BN_CLICKED), 0);
+	}
+	else if (filen_ == "*A") {
+		if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_JACK, BN_CLICKED), 0);
+		else
+			OnBnmp3jake();
+	}
 	else filen = filen_;
 	return CCustomBlurDialogBase::OnCopyData(pWnd, pCopyDataStruct);
 }
@@ -14407,6 +14489,26 @@ void COggDlg::dp(CString a)
 		else if (a == "*4") OnPlayList();
 		else if (a == "*5") OnButton21();
 		else if (a == "*6") OnButton9_Folder();
+		else if (a == "*7") {
+			if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_NEXT, BN_CLICKED), 0);
+		}
+		else if (a == "*8") {
+			if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PREV, BN_CLICKED), 0);
+		}
+		else if (a == "*9") {
+			if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_EQ, BN_CLICKED), 0);
+			else
+				SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON59, BN_CLICKED), 0);
+		}
+		else if (a == "*A") {
+			if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_JACK, BN_CLICKED), 0);
+			else
+				OnBnmp3jake();
+		}
 		return;
 	}
 	filen = a;
@@ -14739,6 +14841,19 @@ void COggDlg::SyncPauseButtonUi()
 		return;
 	m_ps.EnableWindow(TRUE);
 	m_ps.RepaintClient();
+	// メディアプレイヤーモード: 裏側 og の一時停止ボタン表記を mp へミラー
+	if (savedata.playerMode == 1) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && ::IsWindow(mp->m_pause.GetSafeHwnd())) {
+			CString s, s2;
+			m_ps.GetWindowText(s);
+			mp->m_pause.GetWindowText(s2);
+			if (s != s2) {
+				mp->m_pause.SetWindowText(s);
+				mp->m_pause.RepaintClient();
+			}
+		}
+	}
 }
 
 void COggDlg::ResetPauseButtonUi()
@@ -17216,21 +17331,13 @@ void timerog1(UINT nIDEvent)
 
 	if (nIDEvent == 5219) {
 		og->KillTimer(5219);
-		THUMBBUTTON b[4];
-		b[0].hIcon = ::AfxGetApp()->LoadIcon(IDI_T1);	b[0].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
-		b[0].dwFlags = THBF_ENABLED;	b[0].iId = 0;
-		wcscpy(b[0].szTip, L"再演奏");
-		b[1].hIcon = ::AfxGetApp()->LoadIcon(IDI_T2);	b[1].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
-		b[1].dwFlags = THBF_ENABLED;	b[1].iId = 1;
-		wcscpy(b[1].szTip, L"一時停止");
-		b[2].hIcon = ::AfxGetApp()->LoadIcon(IDI_T3);	b[2].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
-		b[2].dwFlags = THBF_ENABLED;	b[2].iId = 2;
-		wcscpy(b[2].szTip, L"停止");
-		b[3].hIcon = ::AfxGetApp()->LoadIcon(IDI_T4);	b[3].dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS;
-		b[3].dwFlags = THBF_ENABLED;	b[3].iId = 3;
-		wcscpy(b[3].szTip, L"プレイリスト開閉");
-		if (ptl)ptl->ThumbBarAddButtons(og->m_hWnd, 4, b);
-
+		const BOOL mpMode = (savedata.playerMode == 1);
+		HWND hTarget = og->m_hWnd;
+		if (mpMode && mp && ::IsWindow(mp->GetSafeHwnd()))
+			hTarget = mp->m_hWnd;
+		else if (mpMode)
+			return;   // EnterMediaPlayerMode 側で設定
+		SetupTaskbarThumbButtons(hTarget, mpMode);
 	}
 	if (nIDEvent == 5656) {
 		for (int i = 0; i < 300; i++)spetm[i] = 1;

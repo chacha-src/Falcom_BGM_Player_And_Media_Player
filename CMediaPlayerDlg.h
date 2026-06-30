@@ -79,6 +79,8 @@ public:
 	void EnforceFalcomHidden();  // メディアモード中に裏画面が出ていたら隠す(監視)
 	void ReloadPlaylistCombo();  // pl のプレイリスト一覧コンボをミラー
 	void SyncSelectionToPlaylist(); // mp リストの選択を pl リストへ反映
+	void FitPlaylistLastColumn(int dragCol = -1, int dragWidth = -1); // 最終列をリスト右端へフィット(余白防止)
+	void SyncPushToggleButtons();   // スペアナ/ST/EQ/ピアノの押下見た目
 	// 選択行の並べ替え(mode: 0=一番上 / 1=上へ / 2=下へ / 3=一番下)。
 	// pl->pc を直接並べ替え、再生インデックス(plcnt/pnt/pnt1)と選択を追従させる。
 	void MoveSelected(int mode);
@@ -100,12 +102,13 @@ public:
 	CCustomStandardButton m_fadeout;   // フェードアウト(og IDC_BUTTON5 と同じ処理を委譲)
 	CCustomStandardButton m_folder;    // フォルダ設定(og IDC_BUTTON9 と同じ処理を委譲)
 	CCustomStandardButton m_plrename, m_pldelete, m_itemdel;
+	CCustomStandardButton m_m3uExport, m_m3uImport;
+	CCustomStandardButton m_supe, m_st;
 	CButtonST m_lsup, m_up, m_down, m_lsdown;   // プレイリスト行移動(一番上/上/下/一番下)
 	CButtonST m_findup, m_finddown;              // あいまい検索 上/下
 	CCustomEdit m_find;
 
 	// ---- 状態チェックボックス(og/pl の状態を SyncFromMain でミラー) ----
-	CCustomCheckBox m_supe, m_st;
 	CCustomComboBox m_plsel;     // プレイリスト切替/追加(pl->m_listchange のミラー)
 	int m_lastComboCount;        // コンボ項目数の変化検出用
 
@@ -157,7 +160,13 @@ public:
 	int  m_isc[kInfoRows];   // 各行の現在スクロールオフセット(px)。0=静止
 	int  m_iscW[kInfoRows];  // テキスト+セパレータの全幅(0=行が収まるため不要)
 	bool m_iscActive;        // 少なくとも1行がスクロール中。次の WM_MP_INFO_SCROLL 発行を判定
-	int  m_lastInfoPanelW;   // パネル幅変化検出用(リサイズ時にオフセットをリセット)
+	int  m_lastInfoPanelW;   // 曲情報パネル幅(リサイズ検出→marquee リセット)
+	int  m_listHdrDragCol;   // 列幅ドラッグ中の列(-1=なし)。HDN_TRACK 追随用
+	int  m_lastToggleSupe;   // 押下トグル見た目の変化検出用(-1=未同期)
+	int  m_lastToggleSt;
+	int  m_lastToggleEq;
+	int  m_lastTogglePiano;
+	int  m_dsvolSlW;         // DS音量スライダー幅(DoLayout)。ラベル省略判定に使用
 
 	// og のオフスクリーン合成 DC(スペアナ+ジャケ+時間)を m_bannerRect へ StretchBlit する。
 	// アクリル(Win11)時は黒透過合成、非アクリル時は永続メモリ DC でキャッシュ Blit。
@@ -189,6 +198,7 @@ protected:
 	virtual BOOL OnInitDialog();
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
 
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnEnterSizeMove();
@@ -232,6 +242,8 @@ protected:
 	afx_msg void OnMoveDown();
 	afx_msg void OnMoveBottom();
 	afx_msg void OnItemDel();
+	afx_msg void OnM3uExport();
+	afx_msg void OnM3uImport();
 	afx_msg void OnSupe();
 	afx_msg void OnSt();
 	afx_msg void OnTip();
@@ -245,6 +257,11 @@ protected:
 	afx_msg void OnRclickList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnKeydownList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnBeginDragList(NMHDR* pNMHDR, LRESULT* pResult);
+	void OnPlaylistHeaderNotify(NMHDR* pNMHDR, LRESULT* pResult);
+	void TickListHdrDragFit(); // 列ドラッグ中: ヘッダー幅を読んで最終列を追随
+	static LRESULT CALLBACK ListHeaderNotifySubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
+	afx_msg void OnListHeaderEndTrack(NMHDR* pNMHDR, LRESULT* pResult);
+	virtual BOOL OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);

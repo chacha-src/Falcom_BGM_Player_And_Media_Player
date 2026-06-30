@@ -1459,7 +1459,7 @@ static void DrawFittedSingleLineDecorativeText(CDC& dc, const CRect& rect, const
     dc.RestoreDC(-1);
 }
 
-static void DrawListSubitemCellText(CDC* pDC, const CString& str, const CRect& rcInner)
+static void DrawListSubitemCellText(CDC* pDC, const CString& str, const CRect& rcInner, UINT uAlignFmt = DT_LEFT)
 {
     if (!pDC || str.IsEmpty() || rcInner.Width() <= 0 || rcInner.Height() <= 0) return;
 
@@ -1477,7 +1477,7 @@ static void DrawListSubitemCellText(CDC* pDC, const CString& str, const CRect& r
     if (!::GetTextExtentPoint32(pDC->GetSafeHdc(), str, str.GetLength(), &sz)) return;
     if (sz.cx <= 0) sz.cx = 1;
 
-    const UINT uDT = DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX;
+    const UINT uDT = (uAlignFmt & (DT_LEFT | DT_RIGHT | DT_CENTER)) | DT_TOP | DT_SINGLELINE | DT_NOPREFIX;
 
     if (sz.cx <= nMW)
     {
@@ -4782,10 +4782,24 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             int cx0 = GetColumnWidth(0);
             if (cx0 > 0) r.right = (std::min)((int)r.right, (int)r.left + cx0);
         }
-        int nLC = GetHeaderCtrl()->GetItemCount() - 1;
+        CHeaderCtrl* pHdr = GetHeaderCtrl();
+        int nCols = pHdr ? pHdr->GetItemCount() : 0;
         CRect rcC;
         GetClientRect(&rcC);
-        if (ns >= nLC - 1 && r.right < rcC.right) r.right = (int)rcC.right;
+        // 最終列(アルバム/コメント)だけ右端まで伸ばし、後ろの余白をなくす
+        if (nCols > 0 && ns == nCols - 1 && r.right < rcC.right) r.right = rcC.right;
+
+        UINT uColFmt = DT_LEFT;
+        if (pHdr)
+        {
+            HDITEM hi = {};
+            hi.mask = HDI_FORMAT;
+            if (pHdr->GetItem(ns, &hi))
+            {
+                if (hi.fmt & LVCFMT_RIGHT) uColFmt = DT_RIGHT;
+                else if (hi.fmt & LVCFMT_CENTER) uColFmt = DT_CENTER;
+            }
+        }
 
         BOOL bS = (GetItemState(ni, LVIS_SELECTED) & LVIS_SELECTED);
         BOOL bH = (ni == m_nHotItem);
@@ -4843,15 +4857,17 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             tl = (std::min)(tl, (int)r.right - 4);
             rt.left = (std::max)(tl, (int)r.left + 4);
         }
+        else if (uColFmt == DT_RIGHT)
+            rt.right -= 4;
         else
             rt.left += 6;
         rt.DeflateRect(2, 0);
 
         CFont* po = pDC->SelectObject(GetFont());
-        DrawListSubitemCellText(pDC, st, rt);
+        DrawListSubitemCellText(pDC, st, rt, uColFmt);
         pDC->SelectObject(po);
 
-        if (ns == nLC)
+        if (nCols > 0 && ns == nCols - 1)
             DrawLaceLine(pDC, r.left + 10, r.bottom - 1, r.right - 10, r.bottom - 1, RGB(200, 180, 220));
         if (GetExtendedStyle() & LVS_EX_GRIDLINES)
         {
@@ -4893,6 +4909,11 @@ CCustomStandardButton::CCustomStandardButton()
     m_nShadowBlur(3), m_bShadowEnable(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_BUTTON_BG);
+}
+
+void CCustomStandardButton::EnsureAnimTimer()
+{
+    UpdateAnimTimer();
 }
 
 void CCustomStandardButton::UpdateAnimTimer()
@@ -4993,11 +5014,11 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     BOOL bP = (GetState() & BST_PUSHED) != 0;
     BOOL bF = (GetFocus() == this);
     BOOL bD = !IsWindowEnabled();
-    if (((GetStyle() & BS_TYPEMASK) == BS_CHECKBOX || (GetStyle() & BS_TYPEMASK) == BS_AUTOCHECKBOX)
-        && (GetStyle() & BS_PUSHLIKE))
-    {
-        if (GetCheck() == BST_CHECKED) bP = TRUE;
-    }
+    const UINT stBtn = GetStyle() & BS_TYPEMASK;
+    const BOOL bPushLike = (stBtn == BS_CHECKBOX || stBtn == BS_AUTOCHECKBOX)
+        && (GetStyle() & BS_PUSHLIKE);
+    if (bPushLike && (GetCheck() == BST_CHECKED)) bP = TRUE;
+    const BOOL bShowFlow = m_bMouseOver;
 
     COLORREF bg = bD ? RGB(200, 200, 200)
         : (bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
@@ -5020,8 +5041,8 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         if (r.Width() >= 64 && r.Height() >= 26)
             DrawLaceScallop(&mDC, r.left + 8, r.bottom - 6, r.right - 8, 3, COLOR_LACE);
 
-        // ホバー: とろみハイライトがスーッと流れる
-        if (m_bMouseOver && !bP)
+        // ホバー時: とろみハイライトがスーッと流れる(押下トグル上でもホバー中は表示)
+        if (bShowFlow)
         {
             const int W = r.Width();
             const int bandW = max(10, W / 4);
@@ -5030,7 +5051,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             CRect band(r.left + pos - bandW, r.top, r.left + pos, r.bottom);
             CRgn rgn; rgn.CreateRoundRectRgn(r.left, r.top, r.right + 1, r.bottom + 1, 16, 16);
             mDC.SelectClipRgn(&rgn);
-            FillRectAlpha(&mDC, band, RGB(255, 255, 255), 72);
+            FillRectAlpha(&mDC, band, RGB(255, 255, 255), bP ? 48 : 72);
             mDC.SelectClipRgn(NULL);
         }
         // フォーカス: 鼓動のようにほのかに明滅

@@ -187,18 +187,16 @@ BOOL CListCtrlA::PreTranslateMessage(MSG* pMsg)
 BOOL CListCtrlA::OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult)
 {
 	// TODO: ここに特定なコードを追加するか、もしくは基本クラスを呼び出してください。
-	HD_NOTIFY * phdn = (HD_NOTIFY *)lParam;
-	switch(phdn->hdr.code)
-		{
+	LPNMHDR pN = reinterpret_cast<LPNMHDR>(lParam);
+	if (pN) {
+		switch (pN->code) {
 		case HDN_BEGINTRACKA:
 		case HDN_BEGINTRACKW:
 		case HDN_DIVIDERDBLCLICKA:
 		case HDN_DIVIDERDBLCLICKW:
-//			if(phdn->iItem > 3)
-//				*pResult = TRUE;
-//				return TRUE;
 			break;
 		}
+	}
 
 	return CListCtrl::OnNotify(wParam, lParam, pResult);
 }

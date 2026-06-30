@@ -355,6 +355,9 @@ public:
 
 void COggDlg_SyncPianoRollFast();
 
+void SetupTaskbarThumbButtons(HWND hwnd, BOOL mediaPlayerMode);
+void RefreshTaskbarJumpList(BOOL mediaPlayerMode);
+
 //{{AFX_INSERT_LOCATION}}
 // Microsoft Visual C++ は前行の直前に追加の宣言を挿入します。
 
