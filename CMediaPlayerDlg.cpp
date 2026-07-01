@@ -498,7 +498,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_list.SetImageList(&il, LVSIL_SMALL);
 	m_list.InsertColumn(0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, (int)(220 * hD2));
 	m_list.InsertColumn(1, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, (int)(60 * hD2));
-	m_list.InsertColumn(2, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, (int)(60 * hD2));
+	m_list.InsertColumn(2, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, (int)(72 * hD2));
 	m_list.InsertColumn(3, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatc?"), LVCFMT_LEFT, (int)(160 * hD2));
 	m_list.InsertColumn(4, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Comm.", L"Album/Comm.", L"Album/Com.", L"앨범/댓글", L"专辑/注释", L"الألبوم/تعليق", L"Альбом/Комм.", L"Album/Komm.", L"Album/Coment.", L"Album/Opm.", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, (int)(160 * hD2));
 
@@ -506,8 +506,12 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	// 最終列(4)は FitPlaylistLastColumn で右端フィットするため復元しない
 	savedata.mpcol[4] = 0;
 	for (int ci = 0; ci < 4; ++ci) {
-		if (savedata.mpcol[ci] > 0)
-			m_list.SetColumnWidth(ci, savedata.mpcol[ci]);
+		if (savedata.mpcol[ci] > 0) {
+			int w = savedata.mpcol[ci];
+			if (ci == 2 && w < (int)(72 * hD2))
+				w = (int)(72 * hD2);   // 「取得不能」等が切れない最小幅
+			m_list.SetColumnWidth(ci, w);
+		}
 	}
 	FitPlaylistLastColumn();
 	// 列ドラッグ中も幅をライブ反映(HDN_TRACK + ヘッダー幅ポーリング)
@@ -2395,12 +2399,18 @@ void CMediaPlayerDlg::SyncSelectionToPlaylist()
 	}
 }
 
+extern BOOL changeflg;
+
 void CMediaPlayerDlg::OnPlSel()
 {
 	if (!pl || !::IsWindow(pl->m_listchange.GetSafeHwnd())) return;
 	int sel = m_plsel.GetCurSel();
 	if (sel < 0) return;
+	if (sel == savedata.playlistnum && pl->pc != NULL && pl->playcnt > 0)
+		return;
+	changeflg = TRUE;
 	pl->m_listchange.SetCurSel(sel);
+	changeflg = FALSE;
 	pl->OnCbnSelchangeCombo1();   // プレイリスト切替/新規作成(既存処理)
 	ReloadPlaylistCombo();
 	RefreshList(TRUE);

@@ -1505,12 +1505,20 @@ static void DrawListSubitemCellText(CDC* pDC, const CString& str, const CRect& r
     scale *= 0.95f;
     if (scale < 0.12f) scale = 0.12f;
 
-    XFORM xf = { scale, 0.0f, 0.0f, 1.0f, (float)rcInner.left, (float)yTop };
+    const float scaledW = (float)sz.cx * scale;
+    float tx = (float)rcInner.left;
+    if (uAlignFmt & DT_RIGHT)
+        tx = (float)rcInner.right - scaledW;
+    else if (uAlignFmt & DT_CENTER)
+        tx = (float)rcInner.left + ((float)rcInner.Width() - scaledW) * 0.5f;
+    if (tx < (float)rcInner.left)
+        tx = (float)rcInner.left;
+
+    XFORM xf = { scale, 0.0f, 0.0f, 1.0f, tx, (float)yTop };
     pDC->SetWorldTransform(&xf);
 
-    int mCW = (tm.tmMaxCharWidth > 0) ? (int)tm.tmMaxCharWidth : (int)tm.tmAveCharWidth;
-    CRect rl(0, 0, sz.cx + (std::max)(16, mCW + 4), drawH + 6);
-    pDC->DrawText(str, &rl, uDT);
+    CRect rl(0, 0, sz.cx, drawH);
+    pDC->DrawText(str, &rl, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
     pDC->RestoreDC(-1);
 }
 
@@ -4857,8 +4865,10 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             tl = (std::min)(tl, (int)r.right - 4);
             rt.left = (std::max)(tl, (int)r.left + 4);
         }
-        else if (uColFmt == DT_RIGHT)
+        else if (uColFmt == DT_RIGHT) {
+            rt.left += 4;
             rt.right -= 4;
+        }
         else
             rt.left += 6;
         rt.DeflateRect(2, 0);

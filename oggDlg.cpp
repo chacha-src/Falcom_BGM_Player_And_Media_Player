@@ -17587,8 +17587,10 @@ void timerog1(UINT nIDEvent)
 	if (nIDEvent == 5211) {
 		og->KillTimer(5211);
 		if (savedata.pl == 1) {
-			pl = new CPlayList;
-			pl->Create(og);
+			if (!pl) {
+				pl = new CPlayList;
+				pl->Create(og);
+			}
 			if (!plw) {
 				const DWORD t0 = GetTickCount();
 				for (;;) {
@@ -17597,7 +17599,15 @@ void timerog1(UINT nIDEvent)
 					if (GetTickCount() - t0 >= 10000) break;
 				}
 			}
+			// RestoreSavedPlaybackRow 後の filen は既にリストにあることが多い。
+			// oggsize==0 の Add は time=0 で既存行を上書きしてしまうためスキップする。
 			if (pl && plw && filen != "" && !(wavbit_sample_Hz == 0 || wavchannel == 0 || wavsam_depth == 0)) {
+				const int existing = pl->FindByPath(filen);
+				if (existing >= 0 && oggsize == 0) {
+					plcnt = existing;
+					pl->SIcon(existing);
+				}
+				else {
 				int plc;
 				if (mode == -10)
 					plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, oggsize / (2 * wavchannel * wavbit_sample_Hz / 4), 1);
@@ -17623,6 +17633,7 @@ void timerog1(UINT nIDEvent)
 				else {
 					plcnt = plc;
 					pl->SIcon(plc);
+				}
 				}
 			}
 		}

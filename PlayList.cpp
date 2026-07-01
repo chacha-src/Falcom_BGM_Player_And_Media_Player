@@ -411,7 +411,7 @@ BOOL CPlayList::OnInitDialog()
 	m_lc.ModifyStyle ( 0, LVS_REPORT );
 	m_lc.InsertColumn ( 0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, 200, 0 );
 	m_lc.InsertColumn ( 1, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, 50, 0 );
-	m_lc.InsertColumn ( 2, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, 50, 0 );
+	m_lc.InsertColumn ( 2, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, 72, 0 );
 	m_lc.InsertColumn ( 3, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatc?"), LVCFMT_LEFT, 200, 0 );
 	m_lc.InsertColumn ( 4, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Commentaire", L"Album/Commento", L"Album/Comentario", L"앨범/댓글", L"专辑/注释", L"الألبوم/التعليق", L"Альбом/Комментарий", L"Album/Kommentar", L"Album/Comentario", L"Album/Opmerking", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, 200, 0 );
 	m_lc.InsertColumn ( 5, LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"المجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"), LVCFMT_LEFT, 50, 0 );
@@ -429,9 +429,8 @@ BOOL CPlayList::OnInitDialog()
 	m_save_mp3.SetCheck(savedata.savecheck_mp3);
 	m_save_kpi.SetCheck(savedata.savecheck_dshow);
 
-	loadplaylistname();
-
 	Load();
+	loadplaylistname();
 	if(pc==NULL){
 		pc = (playlistdata0*)malloc(sizeof(playlistdata0));
 	}
@@ -772,14 +771,16 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 			pc[byPath].loop1 = loop1;
 			pc[byPath].loop2 = loop2;
 			pc[byPath].ret2 = ret;
-			pc[byPath].time = time;
+			if (time != 0)
+				pc[byPath].time = time;
 			return byPath;
 		}
 		if((cnt1=chk(name,sub,art,fol,ret))!=-1){
 			pc[cnt1].loop1=loop1;
 			pc[cnt1].loop2=loop2;
 			pc[cnt1].ret2=ret;
-			pc[cnt1].time=time;
+			if (time != 0)
+				pc[cnt1].time=time;
 			RECT r;
 			m_lc.GetItemRect(cnt1,&r,LVIR_BOUNDS);
 			m_lc.RedrawWindow(&r);	
@@ -4296,6 +4297,11 @@ void CPlayList::Load(BOOL restoreSavedRow)
 {
 	TCHAR tmp[1024];int cnt;
 	int cx,cy,x=-10000,y,c;
+	playcnt = 0;
+	if (pc) {
+		free(pc);
+		pc = NULL;
+	}
 	_tgetcwd(tmp,1000);
 	_tchdir(karento2);
 #if _UNICODE
@@ -4330,7 +4336,7 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		c=0;f.Read(&c,4);m_renzoku.SetCheck(c);
 		c=1;f.Read(&c,4);m_tool.SetCheck(c);
 		c=1;f.Read(&c,4);m_saisyo.SetCheck(c);
-		c=-1;f.Read(&c,4);if(c!=-1)m_lc.SetColumnWidth(2,c);
+		c=-1;f.Read(&c,4);if(c!=-1){ if(c<72) c=72; m_lc.SetColumnWidth(2,c); }
 		c=-1;f.Read(&c,4);if(c!=-1)m_lc.SetColumnWidth(5,c);
 		pnt = -1;
 		pnt1 = -1;
@@ -5241,6 +5247,11 @@ void CPlayList::OnCbnSelchangeCombo1()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	if (changeflg == TRUE) return;
+	int num = m_listchange.GetCurSel();
+	if (num < 0) return;
+	// 起動時/同期時の同一選択通知で Save→Load を繰り返さない(時間列の消失防止)
+	if (num == savedata.playlistnum && pc != NULL && playcnt > 0)
+		return;
 	// 再生中/一時停止中は filen・mode を維持(Load の RestoreSavedPlaybackRow で上書きしない)
 	const BOOL keepPlayback = (plf != 0 || playf != 0) && filen.GetLength() > 0;
 	CString keepFol, keepFnn;
@@ -5254,8 +5265,8 @@ void CPlayList::OnCbnSelchangeCombo1()
 		keepLoop2 = loop2;
 		keepRet2 = ret2;
 	}
-	Save();
-	int num = m_listchange.GetCurSel();
+	if (pc != NULL && playcnt > 0)
+		Save();
 	savedata.playlistnum = num;
 	playcnt = 0;
 	pnt = -1;
@@ -5355,12 +5366,14 @@ void CPlayList::loadplaylistname()
 		L"<Nowa lista odtwarzania>",         /* ポーランド語 */
 		L"<Yeni oynatma listesi>"));         /* トルコ語 */
 
+	changeflg = TRUE;
 	m_listchange.SetCurSel(savedata.playlistnum);
 	int num = m_listchange.GetCurSel();
 	if (num != savedata.playlistnum) {
 		savedata.playlistnum = 0;
 		m_listchange.SetCurSel(savedata.playlistnum);
 	}
+	changeflg = FALSE;
 }
 
 CString CPlayList::GetModulePath()
