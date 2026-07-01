@@ -979,6 +979,7 @@ void CPlayList::RestoreSavedPlaybackRow()
 	fnn = pc[pnt].name;
 	filen = pc[pnt].fol;
 	modesub = pc[pnt].sub;
+	mode = modesub;
 	loop1 = pc[pnt].loop1;
 	loop2 = pc[pnt].loop2;
 	ret2 = pc[pnt].ret2;

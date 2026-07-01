@@ -1965,6 +1965,8 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			CString title = CurrentTrackTitle();
 			CString artist = tagname, album = tagalbum;
 			CString track = tagtrack;
+			if (mode == -3)
+				track.Empty();
 			CString fmt; if (::IsWindow(m_os.GetSafeHwnd())) m_os.GetWindowText(fmt);
 
 			// 曲番号行

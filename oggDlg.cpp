@@ -1401,6 +1401,8 @@ int kpicnt;
 
 // forward declarations
 static WORD GetPeMachine(const CString& path);
+static int ResolveKpiArchBits(const CString& kpiPath, const CString& mediaPathIn);
+static CString KpiArchLabel(int archBits);
 
 /////////////////////////////////////////////////////////////////////////////
 // COggDlg メッセージ ハンドラ
@@ -1766,6 +1768,7 @@ const KPI_MEDIAINFO* pMediaInfo = NULL;
 KPI_MEDIAINFO me5;
 IKpiDecoder* kpidec = NULL;
 static bool g_kpiRemote = false;
+static int g_kpiPlaybackArch = 0;   // 0=不明 32=x86 64=x64（再生中の KPI arch 表示用）
 static KpiHost64Client g_kpiHost;
 static KpiHost64Session g_kpiSession;
 static std::vector<uint8_t> g_kpiRemoteCache;
@@ -1797,6 +1800,57 @@ static bool SplitKpiSubsongPath(const CString& in, CString& outPath, uint32_t& o
 	outSel = (uint32_t)_tstoi(tail);
 	if (outSel == 0) outSel = 1;
 	return true;
+}
+
+static int KpiArchBitsFromIndex(int i)
+{
+	if (i < 0 || i >= kpicnt) return 0;
+	if (kpiarch[i] == 64) return 64;
+	if (kpiarch[i] == 32) return 32;
+	return 0;
+}
+
+static CString KpiArchLabel(int archBits)
+{
+	if (archBits == 64) return L"x64";
+	if (archBits == 32) return L"x86";
+	return L"?";
+}
+
+// KPI プラグインの CPU アーキテクチャを解決する。
+// kpi パス未設定時(プレイリスト復元直後など)は拡張子から kpiarch[] を参照する。
+static int ResolveKpiArchBits(const CString& kpiPath, const CString& mediaPathIn)
+{
+	if (g_kpiRemote) return 64;
+	if (!kpiPath.IsEmpty()) {
+		const WORD km = GetPeMachine(kpiPath);
+		if (km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64) return 64;
+		if (km == IMAGE_FILE_MACHINE_I386) return 32;
+		const CString kpiBase = kpiPath.Mid(kpiPath.ReverseFind(L'\\') + 1);
+		for (int i = 0; i < kpicnt; ++i) {
+			if (kpif[i].CompareNoCase(kpiPath) == 0)
+				return KpiArchBitsFromIndex(i);
+			const CString kpBase = kpif[i].Mid(kpif[i].ReverseFind(L'\\') + 1);
+			if (!kpiBase.IsEmpty() && kpiBase.CompareNoCase(kpBase) == 0)
+				return KpiArchBitsFromIndex(i);
+		}
+	}
+	CString mediaPath = mediaPathIn;
+	uint32_t sel = 1;
+	SplitKpiSubsongPath(mediaPathIn, mediaPath, sel);
+	const int dot = mediaPath.ReverseFind(L'.');
+	if (dot < 0) return 0;
+	CString extPart = mediaPath.Mid(dot);
+	extPart.MakeLower();
+	for (int i = 0; i < kpicnt; ++i) {
+		if (!kpichk[i]) continue;
+		for (int j = 0; ; ++j) {
+			if (ext[i][j].IsEmpty()) break;
+			if (ext[i][j].CompareNoCase(extPart) == 0)
+				return KpiArchBitsFromIndex(i);
+		}
+	}
+	return 0;
 }
 
 static std::wstring KpiDirOf(const wchar_t* path)
@@ -2631,6 +2685,9 @@ static void COgg_RequestTimerp(COggDlg* dlg)
 BOOL COggDlg::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
+	// メディアプレイヤーモード起動時は OnInitDialog 中もメイン画面を出さない
+	if (savedata.playerMode == 1)
+		ShowWindow(SW_HIDE);
 	g_oggUiThreadId = GetCurrentThreadId();
 	ms2 = 0;
 	QueryPerformanceFrequency(&freq);
@@ -2946,9 +3003,6 @@ BOOL COggDlg::OnInitDialog()
 
 	SetTimer(5211, 20, NULL);
 	SetTimer(9998, 1000, NULL);
-	// メディアプレイヤーモードで起動する場合は初期化完了後に遷移(og/pl は OnShowWindow 防御で隠れる)
-	if (savedata.playerMode == 1)
-		SetTimer(5990, 1, NULL);
 	Modec();
 
 
@@ -2971,7 +3025,7 @@ BOOL COggDlg::OnInitDialog()
 	plug(karento2, NULL);
 	g_pActiveLoadingWnd = NULL;
 	loadingWnd.DestroyWindow();
-#endif	
+#endif
 	WAVEFORMATEX wfx1;
 	wfx1.wFormatTag = WAVE_FORMAT_PCM;
 	wfx1.nChannels = 2;
@@ -3096,7 +3150,7 @@ BOOL COggDlg::OnInitDialog()
 	PostMessage(WM_OGG_DEFERRED_HEAVY_INIT, 0, 0);
 
 #if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled())
+	if (CCC_IsAeroEnabled() && savedata.playerMode != 1)
 	{
 		ApplyDwmBlur();
 		Invalidate(FALSE);
@@ -3105,6 +3159,10 @@ BOOL COggDlg::OnInitDialog()
 #endif
 
 	AfxBeginThread((AFX_THREADPROC)TheadLoop, NULL, THREAD_PRIORITY_ABOVE_NORMAL);
+	// DoModal がメイン画面を表示する前に mp を用意する(ファルコム画面のちらつき防止)。
+	// KPI 読み込み完了後・OnInitDialog  return 前に同期的に遷移する。
+	if (savedata.playerMode == 1)
+		EnterMediaPlayerMode();
 	return TRUE;  // TRUE を返すとコントロールに設定したフォーカスは失われません。
 }
 //////////////////////////////////////////////////////////////////////////////
@@ -6453,6 +6511,7 @@ void COggDlg::play()
 	mp3file = filen;
 	sflg = FALSE;
 	tagname = tagfile = tagalbum = "";
+	tagtrack = "";
 	//	m_rund.EnableWindow(FALSE);
 	m_saisai.EnableWindow(FALSE);
 	WAVDALen = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM; WAVDAStartLen = OUTPUT_BUFFER_SIZE;
@@ -8197,6 +8256,7 @@ void COggDlg::play()
 	else if (mode == -3) { // kpi
 		ret2 = 0;
 		g_kpiRemote = false;
+		g_kpiPlaybackArch = ResolveKpiArchBits(CString(kpi), filen);
 		ZeroMemory(&g_kpiSession, sizeof(g_kpiSession));
 		const WORD km = GetPeMachine(kpi);
 		if (km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64) {
@@ -8253,6 +8313,7 @@ void COggDlg::play()
 			}
 
 			g_kpiRemote = true;
+			g_kpiPlaybackArch = 64;
 			ResetKpiRemoteCache();
 			wavbit_sample_Hz = g_kpiSession.mediaInfo.dwSampleRate;
 			wavchannel = g_kpiSession.mediaInfo.dwChannels;
@@ -8272,6 +8333,12 @@ void COggDlg::play()
 			// 以降の共通処理(UI更新/画像抽出など)も実行させる
 		}
 		else {
+			if (!g_kpiPlaybackArch) {
+				if (km == IMAGE_FILE_MACHINE_I386)
+					g_kpiPlaybackArch = 32;
+				else
+					g_kpiPlaybackArch = ResolveKpiArchBits(CString(kpi), filen);
+			}
 			hDLLk = LoadKpiLibraryWithDependencies((const wchar_t*)kpi);
 			typedef HRESULT(WINAPI* kpi_CreateInstance)(REFIID riid, void** ppvObject, IKpiUnknown* pUnknown);
 			kpi_CreateInstance cr = (kpi_CreateInstance)GetProcAddress(hDLLk, "kpi_CreateInstance");
@@ -15176,6 +15243,7 @@ void COggDlg::stop()
 			g_kpiRemote = false;
 			ResetKpiRemoteCache();
 		}
+		g_kpiPlaybackArch = 0;
 		DoEvent();
 		thend = 1;
 		fadeadd = 0; fade = 1.0;
@@ -16067,9 +16135,28 @@ void COggDlg::timerp()
 	}
 
 	//mcnt1++;
-	if (modesub == 5 || modesub == 7 || modesub == 8 || modesub == 9 || modesub == 10)	s.Format(_T("file:%s"), filen);
+	if (g_pActiveLoadingWnd != NULL) {
+		s.Format(LL14(
+			L"file:KPI読み込み中…",
+			L"file:Loading KPI…",
+			L"file:Chargement KPI…",
+			L"file:Caricamento KPI…",
+			L"file:Cargando KPI…",
+			L"file:KPI 로딩 중…",
+			L"file:正在加载KPI…",
+			L"file:جاري تحميل KPI…",
+			L"file:Загрузка KPI…",
+			L"file:KPI wird geladen…",
+			L"file:Carregando KPI…",
+			L"file:KPI laden…",
+			L"file:Ładowanie KPI…",
+			L"file:KPI yükleniyor…"));
+	}
+	else if (modesub == 5 || modesub == 7 || modesub == 8 || modesub == 9 || modesub == 10)	s.Format(_T("file:%s"), filen);
 	else if (mode == 21)
 		s.Format(_T("file:%s"), filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1));
+	else if (savedata.playerMode == 1 && plf == 0 && fnn != _T(""))
+		s.Format(_T("file:%s"), fnn);
 	else			s.Format(_T("file:%s"), filen);
 	//		if(fnn.Right(4)=="動画"||fnn.Right(5).Left(4)=="動画")		s.Format("file:動画");
 	if (filen.Left(2) == L"★")		s.Format(LL14(
@@ -16106,15 +16193,10 @@ void COggDlg::timerp()
 	}
 	if (mode == -2 || mode == -3) sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
 	if (mode == -3) {
-		CString arch = L"?";
-		if (g_kpiRemote) {
-			arch = L"x64";
-		}
-		else {
-			const WORD km = GetPeMachine(kpi);
-			if (km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64) arch = L"x64";
-			else if (km == IMAGE_FILE_MACHINE_I386) arch = L"x86";
-		}
+		int archBits = g_kpiPlaybackArch;
+		if (!archBits)
+			archBits = ResolveKpiArchBits(CString(kpi), filen);
+		const CString arch = KpiArchLabel(archBits);
 		s.Format(LL14(
 			L"file:kpiプラグイン(%s %s)",
 			L"file:kpi plugin (%s %s)",
@@ -21289,8 +21371,8 @@ LRESULT COggDlg::OnEnterFalcomMsg(WPARAM, LPARAM)
 
 void COggDlg::OnWindowPosChanging(WINDOWPOS* lpwndpos)
 {
-	// メディアプレイヤーモード中はメイン画面を一切表示させない(初回再生時のちら出し対策)
-	if (lpwndpos && savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+	// メディアプレイヤーモード中はメイン画面を一切表示させない(初回起動時のちら出し対策)
+	if (lpwndpos && savedata.playerMode == 1)
 		lpwndpos->flags &= ~SWP_SHOWWINDOW;
 	CCustomBlurDialogBase::OnWindowPosChanging(lpwndpos);
 }
