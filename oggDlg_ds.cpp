@@ -319,6 +319,10 @@ extern int readme;
 static CWinThread* s_playNotifyThread = nullptr;
 static CCriticalSection s_playNotifyThreadCs;
 
+// stop()/BeginPlaybackNotifyThread が Join する上限。曲切替時は短く(UI 応答性)。
+DWORD g_playbackNotifyJoinTimeoutMs = 2500;
+volatile LONG g_interactiveTrackChange = 0;
+
 void SignalPlaybackNotifyThreadStop()
 {
 	thn1 = TRUE;
@@ -358,6 +362,7 @@ void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 
 	DWORD elapsed = 0;
 	const DWORD pollMs = 10;
+	BOOL timedOut = FALSE;
 	for (;;) {
 		const DWORD w = WaitForSingleObject(hThread, pollMs);
 		if (w == WAIT_OBJECT_0)
@@ -366,17 +371,20 @@ void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 			og->timer.SetEvent();
 		DoEvent();
 		elapsed += pollMs;
-		if (elapsed >= timeoutMs)
+		if (elapsed >= timeoutMs) {
+			timedOut = TRUE;
 			break;
+		}
 	}
-	// thn が立っていてもスレッドハンドルが生きていれば最後まで Join
-	for (int i = 0; i < 2000; ++i) {
+	// タイムアウト後に 2000 回 DoEvent すると曲連打時に UI が長時間固まるため短い猶予のみ
+	const int graceIters = timedOut ? 30 : 8;
+	for (int i = 0; i < graceIters; ++i) {
 		if (WaitForSingleObject(hThread, 0) == WAIT_OBJECT_0)
 			break;
 		if (og)
 			og->timer.SetEvent();
 		DoEvent();
-		if ((i % 10) == 9)
+		if ((i % 5) == 4)
 			Sleep(1);
 	}
 	{
@@ -397,7 +405,7 @@ void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 
 void BeginPlaybackNotifyThread()
 {
-	WaitForPlaybackNotifyThreadExit(15000);
+	WaitForPlaybackNotifyThreadExit(g_playbackNotifyJoinTimeoutMs);
 	// CREATE_SUSPENDED で起動し、スレッド本体が走り出す前に m_bAutoDelete を
 	// 落として寿命を自前管理する。これによりスレッドが自己終了しても
 	// CWinThread オブジェクトとスレッドハンドルは破棄されず、安全に Join できる。

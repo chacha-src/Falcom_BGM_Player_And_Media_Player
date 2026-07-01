@@ -339,7 +339,7 @@ CString syos;
 extern TCHAR karento2[1024];
 extern int fade1;
 extern IMediaPosition *pMediaPosition;
-extern int mode,videoonly,playf;
+extern int mode,videoonly,playf,plf;
 extern int plcnt;
 extern int playy;
 extern save savedata;
@@ -995,10 +995,8 @@ void CPlayList::RestoreSavedPlaybackRow()
 extern int gameon;
 static void RequestPlaylistRestartAsync()
 {
-	// 再生停止/開始をメッセージキューに逃がして、UI操作中の同期競合を避ける
-	if (og && ::IsWindow(og->GetSafeHwnd())) {
-		og->PostMessage(WM_APP + 2, 0, 0);
-	}
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		RequestPlaybackRestart(og->GetSafeHwnd());
 }
 
 void CPlayList::OnLvnKeydownList1(NMHDR *pNMHDR, LRESULT *pResult)
@@ -4294,7 +4292,7 @@ void CPlayList::Save()
 }
 
 
-void CPlayList::Load()
+void CPlayList::Load(BOOL restoreSavedRow)
 {
 	TCHAR tmp[1024];int cnt;
 	int cx,cy,x=-10000,y,c;
@@ -4340,7 +4338,8 @@ void CPlayList::Load()
 		f.Close();
 	}
 	ClampPlaylistSelectionIndices(this);
-	RestoreSavedPlaybackRow();
+	if (restoreSavedRow)
+		RestoreSavedPlaybackRow();
 	_tchdir(tmp);
 	if(GetAsyncKeyState(VK_LCONTROL)&0x8000){
 		x=-10000;
@@ -5242,6 +5241,19 @@ void CPlayList::OnCbnSelchangeCombo1()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	if (changeflg == TRUE) return;
+	// 再生中/一時停止中は filen・mode を維持(Load の RestoreSavedPlaybackRow で上書きしない)
+	const BOOL keepPlayback = (plf != 0 || playf != 0) && filen.GetLength() > 0;
+	CString keepFol, keepFnn;
+	int keepMode = 0, keepModesub = 0, keepLoop1 = 0, keepLoop2 = 0, keepRet2 = 0;
+	if (keepPlayback) {
+		keepFol = filen;
+		keepFnn = fnn;
+		keepMode = mode;
+		keepModesub = modesub;
+		keepLoop1 = loop1;
+		keepLoop2 = loop2;
+		keepRet2 = ret2;
+	}
 	Save();
 	int num = m_listchange.GetCurSel();
 	savedata.playlistnum = num;
@@ -5251,20 +5263,34 @@ void CPlayList::OnCbnSelchangeCombo1()
 	playlistdata0* tmp; tmp = pc;
 	free(pc);
 	pc = NULL;
-	Load();
+	Load(!keepPlayback);
 	if (pc == NULL) {
 		pc = (playlistdata0*)malloc(sizeof(playlistdata0));
 	}
 	m_lc.SetItemCount(playcnt);
 	for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
-	// 再生中にプレイリストを切り替えた場合、同一曲があれば ♪ を復元
-	if (playy != 0 && filen.GetLength() > 0) {
+	if (keepPlayback) {
+		filen = keepFol;
+		fnn = keepFnn;
+		mode = keepMode;
+		modesub = keepModesub;
+		loop1 = keepLoop1;
+		loop2 = keepLoop2;
+		ret2 = keepRet2;
+		int match = -1;
 		for (int j = 0; j < playcnt; j++) {
-			if (filen.CompareNoCase(pc[j].fol) == 0) {
-				plcnt = j;
-				SIcon(j);
+			if (keepFol.CompareNoCase(pc[j].fol) == 0) {
+				match = j;
 				break;
 			}
+		}
+		if (match >= 0) {
+			plcnt = match;
+			SIcon(match);
+		}
+		else {
+			pnt = -1;
+			plcnt = -1;
 		}
 	}
 	ClampPlaylistSelectionIndices(this);

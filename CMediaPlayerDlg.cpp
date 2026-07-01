@@ -5,6 +5,7 @@
 //
 #include "stdafx.h"
 #include "ogg.h"
+#include "oggDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "CImageBase.h"
 #include "Mp3Image.h"
@@ -1224,6 +1225,7 @@ void CMediaPlayerDlg::OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult)
 	if (!pl || i < 0 || i >= pl->playcnt) return;
 	pl->Get(i);
 	plcnt = i;
+	m_lastScroll = i;
 }
 
 int CMediaPlayerDlg::GetListScrollAnchor() const
@@ -2229,7 +2231,7 @@ static void MP_PlayIndex(int idx)
 	gameon = 0;
 	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
 	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->PostMessage(WM_APP + 2, 0, 0);  // 再生(再演奏)
+		RequestPlaybackRestart(og->GetSafeHwnd());  // 再生(再演奏)
 }
 
 void CMediaPlayerDlg::OnPrev()

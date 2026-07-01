@@ -41,7 +41,7 @@ public:
 	void SIconTimer(int i);
 	int Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f=TRUE,BOOL ff=TRUE);
 	void Del();
-	void Load();
+	void Load(BOOL restoreSavedRow = TRUE);
 	void Save();
 	int chk(CString name,int sub,CString art,CString fol,int ret);
 	int FindByPath(LPCTSTR fol); // 絶対パス一致(大文字小文字・正規化)。-1=なし

@@ -267,7 +267,9 @@ UINT HandleNotifications(LPVOID lpvoid);
 UINT WASAPIHandleNotifications(LPVOID lpvoid);
 void HandleNotifications_export();  // WAV出力専用（DirectSoundなし、ファイル書き込みのみ）
 void SignalPlaybackNotifyThreadStop();
-void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs = 15000);
+void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs = 2500);
+extern DWORD g_playbackNotifyJoinTimeoutMs;
+extern volatile LONG g_interactiveTrackChange;
 void BeginPlaybackNotifyThread();
 ULONG WAVDALen;
 UINT WAVDAStartLen;
@@ -1475,6 +1477,24 @@ void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
 		RefreshTaskbarJumpList(TRUE);
 }
 
+static volatile LONG s_restartMsgQueued = 0;
+static volatile LONG s_restartWanted = 0;
+
+// WM_APP+2(再演奏)を 1 件にまとめる。リストで曲を連打しても stop/play が直列に
+// 何十回も走らないようにする(キュー溜めによる UI 固まり対策)。
+void RequestPlaybackRestart(HWND hwnd)
+{
+	if (!hwnd) {
+		if (og && ::IsWindow(og->GetSafeHwnd()))
+			hwnd = og->GetSafeHwnd();
+	}
+	if (!hwnd || !::IsWindow(hwnd))
+		return;
+	InterlockedExchange(&s_restartWanted, 1);
+	if (InterlockedCompareExchange(&s_restartMsgQueued, 1, 0) == 0)
+		::PostMessage(hwnd, WM_APP + 2, 0, 0);
+}
+
 static int MpCurrentPlayIndex()
 {
 	if (!pl || pl->playcnt <= 0) return -1;
@@ -1488,7 +1508,7 @@ void MpTaskbarReplay()
 	if (pl && pl->playcnt > 0)
 		pl->RestoreSavedPlaybackRow();
 	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->PostMessage(WM_APP + 2, 0, 0);
+		RequestPlaybackRestart(og->GetSafeHwnd());
 }
 
 void MpTaskbarNextTrack()
@@ -1505,7 +1525,7 @@ void MpTaskbarNextTrack()
 	gameon = 0;
 	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
 	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->PostMessage(WM_APP + 2, 0, 0);
+		RequestPlaybackRestart(og->GetSafeHwnd());
 }
 
 void MpTaskbarPrevTrack()
@@ -1522,7 +1542,7 @@ void MpTaskbarPrevTrack()
 	gameon = 0;
 	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
 	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->PostMessage(WM_APP + 2, 0, 0);
+		RequestPlaybackRestart(og->GetSafeHwnd());
 }
 
 static BOOL MpPlayExistingPlaylistPath(LPCTSTR path)
@@ -1537,7 +1557,7 @@ static BOOL MpPlayExistingPlaylistPath(LPCTSTR path)
 	if (mp && ::IsWindow(mp->GetSafeHwnd()))
 		mp->FollowPlayingRow();
 	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->PostMessage(WM_APP + 2, 0, 0);
+		RequestPlaybackRestart(og->GetSafeHwnd());
 	return TRUE;
 }
 
@@ -7152,7 +7172,7 @@ void COggDlg::play()
 			// 0 のまま残り、下の「wavwait 待ち」ループが永久に固まる（曲切替/終了時のまれな
 			// フリーズの主因）。成功するまでリトライしてデコード開始を保証する。
 			BOOL posted = FALSE;
-			for (int retry = 0; retry < 5000 && !posted; ++retry) {
+			for (int retry = 0; retry < 800 && !posted; ++retry) {
 				if (g_pThread->PostThreadMessage(WM_APP + 100, NULL, NULL))
 					posted = TRUE;
 				else
@@ -7664,13 +7684,13 @@ void COggDlg::play()
 	if (((mode >= 10 && mode <= 21) || mode <= -10) && mode != -10 || mode == -6 || mode == 30) {
 		{
 			// wavwait はデコード用ワーカースレッド(CWread)が完了時に立てる。
-			// 万一立たなくても UI が永久フリーズしないよう保険のタイムアウトを設ける
-			// （本来の取りこぼしは上の PostThreadMessage リトライで解消済み）。
+			// 万一立たなくても UI が長時間固まらないよう短いタイムアウト(曲切替時は約2.5秒)
 			const DWORD wavWaitT0 = GetTickCount();
+			const DWORD wavWaitLimitMs = g_interactiveTrackChange ? 2500u : 8000u;
 			for (; wavwait == 0;) {
 				CWaitCursor rrr2;
 				DoEvent();
-				if (GetTickCount() - wavWaitT0 >= 30000) break;
+				if (GetTickCount() - wavWaitT0 >= wavWaitLimitMs) break;
 			}
 		}
 		if (adbuf2 == NULL) { endflg = 0; return; }
@@ -15230,7 +15250,7 @@ void COggDlg::stop()
 		CCriticalLock _ccl(&cs);
 		stf = 1;
 		_ccl.Leave();
-		WaitForPlaybackNotifyThreadExit();
+		WaitForPlaybackNotifyThreadExit(g_playbackNotifyJoinTimeoutMs);
 
 		Closeds();
 		//		FreeOutputBuffer();
@@ -15328,7 +15348,7 @@ void COggDlg::stop1()
 		CCriticalLock _ccl(&cs);
 		stf = 1;
 		_ccl.Leave();
-		WaitForPlaybackNotifyThreadExit();
+		WaitForPlaybackNotifyThreadExit(g_playbackNotifyJoinTimeoutMs);
 		Closeds();
 		//		FreeOutputBuffer();
 		plf = 0;
@@ -16003,7 +16023,7 @@ void COggDlg::timerp()
 							// ループ再生: 同じ動画を先頭から再生し直す
 							pl->Get(plcnt);
 							gameon = 0;
-							PostMessage(WM_APP + 2, 0, 0);
+							RequestPlaybackRestart(GetSafeHwnd());
 							handled = TRUE;
 						}
 						else if (pl->m_renzoku.GetCheck() == TRUE) {
@@ -16013,7 +16033,7 @@ void COggDlg::timerp()
 							pl->Get(idx);
 							plcnt = idx;
 							gameon = 0;
-							PostMessage(WM_APP + 2, 0, 0);
+							RequestPlaybackRestart(GetSafeHwnd());
 							handled = TRUE;
 						}
 					}
@@ -17522,7 +17542,12 @@ void timerog1(UINT nIDEvent)
 		og->KillTimer(9998);
 		if (ndd != "") {
 			if (pl) {
-				for (; plw == 0;) { DoEvent(); }
+				const DWORD plwT0 = GetTickCount();
+				for (; plw == 0;) {
+					DoEvent();
+					if (GetTickCount() - plwT0 >= 5000)
+						break;
+				}
 			}
 			og->dp(ndd);
 		}
@@ -17545,7 +17570,7 @@ void timerog1(UINT nIDEvent)
 				fade1 = 0; lenl = 0;
 				fade = 1.0f; plf = 0;
 				og->KillTimer(9000);
-				og->PostMessage(WM_APP + 2, 0, 0);
+				RequestPlaybackRestart(og->GetSafeHwnd());
 			}
 		}
 	}
@@ -17676,7 +17701,7 @@ void timerog1(UINT nIDEvent)
 					}
 					og->stop();
 					fade1 = 0; lenl = 0;
-					og->PostMessage(WM_APP + 2, 0, 0);
+					RequestPlaybackRestart(og->GetSafeHwnd());
 				}
 			}
 		}
@@ -17707,6 +17732,8 @@ void COggDlg::OnTimer(UINT nIDEvent)
 }
 LRESULT COggDlg::dp2(WPARAM, LPARAM)
 {
+	InterlockedExchange(&s_restartMsgQueued, 0);
+	InterlockedExchange(&s_restartWanted, 0);
 	OnRestart();
 	return 0;
 }
@@ -17715,7 +17742,7 @@ LRESULT COggDlg::dp2(WPARAM, LPARAM)
 // ワーカースレッド上で OnPause/UI 操作をしない（UI フリーズ/デッドロック防止）。
 LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 {
-	WaitForPlaybackNotifyThreadExit(5000);
+	WaitForPlaybackNotifyThreadExit(g_playbackNotifyJoinTimeoutMs);
 	fade1 = 0;
 	endflg = 0;
 	plf = 0;
@@ -19456,27 +19483,33 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 void COggDlg::OnOK()
 {
 	// TODO: この位置にその他の検証用のコードを追加してください
+	const DWORD prevJoin = g_playbackNotifyJoinTimeoutMs;
+	g_playbackNotifyJoinTimeoutMs = 8000;
 	stop();
+	g_playbackNotifyJoinTimeoutMs = prevJoin;
 	CCustomBlurDialogBase::OnOK();
 }
 extern IMediaEvent* pMediaEvent;
 static volatile LONG s_onRestartBusy = 0;
-static volatile LONG s_onRestartPending = 0;
 
 void COggDlg::OnRestart()
 {
 	if (InterlockedCompareExchange(&s_onRestartBusy, 1, 0) != 0) {
-		InterlockedExchange(&s_onRestartPending, 1);
+		InterlockedExchange(&s_restartWanted, 1);
 		return;
 	}
 	struct RestartBusyGuard {
 		COggDlg* dlg;
 		~RestartBusyGuard() {
 			InterlockedExchange(&s_onRestartBusy, 0);
-			if (InterlockedExchange(&s_onRestartPending, 0) != 0 && dlg && ::IsWindow(dlg->GetSafeHwnd()))
-				dlg->PostMessage(WM_APP + 2, 0, 0);
+			if (InterlockedExchange(&s_restartWanted, 0) != 0 && dlg && ::IsWindow(dlg->GetSafeHwnd()))
+				RequestPlaybackRestart(dlg->GetSafeHwnd());
 		}
 	} restartBusyGuard{ this };
+	struct InteractiveTrackGuard {
+		InteractiveTrackGuard() { InterlockedExchange(&g_interactiveTrackChange, 1); }
+		~InteractiveTrackGuard() { InterlockedExchange(&g_interactiveTrackChange, 0); }
+	} interactiveTrackGuard;
 
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	CString ti;
