@@ -134,6 +134,11 @@ int readadpcmzwei(CFile& adpcmf, char* bw, int len);
 int readadpcmgurumin(CFile& adpcmf, char* bw, int len);
 int readadpcmarc(CFile& adpcmf, char* bw, int len);
 int seekadpcm(int pos);
+// adbuf2 全量読み込み形式(mode 10-21, -6, 30, -11〜 等)は seekadpcm。OGG/KPI 等と混同しないこと。
+static inline bool ModeUsesSeekAdpcm(int m)
+{
+	return ((m >= 10 && m <= 21) || m <= -10 || m == 999 || m == -6 || m == 30);
+}
 static BOOL decode_msadpcm_wav(CFile& f, const wavinfo& wi, char** outBuf, int* outSize);
 BOOL wavwait, thend;
 int wavchannel = 2;
@@ -12225,6 +12230,11 @@ int seekadpcm(int pos)
 	lenl = pos * bpf;
 	playb = pos;
 	poss5 = lenl;
+	poss = 0;
+	if (g_rubberBandStretcher) {
+		delete g_rubberBandStretcher;
+		g_rubberBandStretcher = NULL;
+	}
 	return 0;
 }
 
@@ -20731,7 +20741,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			ZeroMemory(bufkpi4, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 			poss = 0;
 
-			if ((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999) {
+			if (ModeUsesSeekAdpcm(mode)) {
 				if (mode == -10) {
 					hsc = 2;
 					// m_time レンジは (総フレーム F)/100 程度なので、フレーム位置 = curpos×100
@@ -20955,7 +20965,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 			if (pMainFrame1) {
 				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
 			}
-			if ((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999) {
+			if (ModeUsesSeekAdpcm(mode)) {
 				seekadpcm((int)playb);
 				sek = TRUE;
 				timer.SetEvent();
@@ -21045,7 +21055,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 			if (pMainFrame1) {
 				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
 			}
-			if ((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999) {
+			if (ModeUsesSeekAdpcm(mode)) {
 				seekadpcm((int)playb);
 				sek = TRUE;
 				timer.SetEvent();
@@ -21102,7 +21112,7 @@ void COggDlg::rl(int a)
 	if (pMainFrame1) {
 		pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
 	}
-	if ((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999) {
+	if (ModeUsesSeekAdpcm(mode)) {
 		if (mode != -10)
 			seekadpcm((int)playb);
 		sek = TRUE;

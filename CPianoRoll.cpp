@@ -48,9 +48,9 @@ namespace Cfg
     static constexpr float HOLD_ENV_TRE = 0.19f;
     static constexpr float DISPLAY_PEAK_CAP = 5.0f;
     static constexpr int   ANALYZE_INTERVAL = 1024;
-    static constexpr float WEAK_BASS_RATIO = 0.17f;
+    static constexpr float WEAK_BASS_RATIO = 0.13f;
     static constexpr float WEAK_MID_RATIO = 0.15f;
-    static constexpr float WEAK_TRE_RATIO = 0.14f;
+    static constexpr float WEAK_TRE_RATIO = 0.11f;
     static constexpr int   ONSET_KEY_START = 41;
     static constexpr float ONSET_DELTA_THRESH = 0.045f;
     static constexpr float ONSET_MIN_STRENGTH = 0.08f;
@@ -1079,12 +1079,18 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     for (int i = 0; i < m_winOnset; ++i)
         m_windowedOnset[i] = onsetSrc[i] * m_hannOnset[i];
 
-    // 低音帯は06.14と同じ8192窓で解析（16384窓はタイミングを早めて実音とズレる）。
-    // 低音の周波数解像度はタイミング一致を確認後に別手段で取り戻す。
-    (void)hasBass;
-    PianoRollGoertzelBatchAvx2(
-        m_windowedLow.data(), m_winLow, m_goertzelCoeffs.data(),
-        0, LOW_KEY_SPLIT, m_goertzelRawScratch);
+    if (hasBass) {
+        for (int i = 0; i < m_winBass; ++i)
+            m_windowedBass[i] = m_bassAnalysisBuf[i] * m_hannBass[i];
+        PianoRollGoertzelBatchAvx2(
+            m_windowedBass.data(), m_winBass, m_goertzelCoeffs.data(),
+            0, LOW_KEY_SPLIT, m_goertzelRawScratch);
+    }
+    else {
+        PianoRollGoertzelBatchAvx2(
+            m_windowedLow.data(), m_winLow, m_goertzelCoeffs.data(),
+            0, LOW_KEY_SPLIT, m_goertzelRawScratch);
+    }
     for (int i = 0; i < LOW_KEY_SPLIT; ++i)
         m_rawStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i], i);
 
@@ -1267,10 +1273,10 @@ void CPianoRoll::UpdateNoteStates()
     // 和音・旋律の音程は整数比でないため残り、単音の倍音だけが消える。
     for (int i = LOW_KEY_SPLIT; i < KEY_COUNT; ++i) {
         if (!picked[i]) continue;
-        for (int j = 0; j < i; ++j) {
+        for (int j = 0; j < i && j < BAND_MID_END; ++j) {
             if (!picked[j]) continue;
-            if (!PianoKey::IsHarmonicPair(i, j)) continue; // i が j の整数倍音
-            if (m_rawStrengths[j] >= m_rawStrengths[i] * 0.30f) {
+            if (!PianoKey::IsHarmonicPair(i, j)) continue;
+            if (m_rawStrengths[j] >= m_rawStrengths[i] * 0.48f) {
                 picked[i] = false;
                 break;
             }

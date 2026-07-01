@@ -4494,7 +4494,8 @@ void CCustomRangeSliderCtrl::OnLButtonUp(UINT f, CPoint p)
         {
             m_nLogicalPos = m_nVisualPos;
             CSliderCtrl::SetPos(m_nLogicalPos);
-            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, m_nLogicalPos), (LPARAM)m_hWnd);
+            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, m_nLogicalPos), (LPARAM)m_hWnd);
+            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_ENDSCROLL, m_nLogicalPos), (LPARAM)m_hWnd);
         }
 #if CCUSTOM_AERO_SUPPORT
         CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
