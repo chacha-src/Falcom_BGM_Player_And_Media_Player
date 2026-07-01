@@ -605,13 +605,52 @@ BOOL CPlayList::PreTranslateMessage(MSG* pMsg)
 
 int pnt1=-1;
 
+static bool PlIsAbsoluteMediaPath(LPCTSTR p)
+{
+	if (!p || !*p) return false;
+	if (p[0] == _T('\\') && p[1] == _T('\\')) return true;
+	return ((int)_tcslen(p) >= 3 && p[1] == _T(':') && (p[2] == _T('\\') || p[2] == _T('/')));
+}
+
+CString NormalizePlaylistPath(LPCTSTR fol)
+{
+	if (!fol || !*fol) return CString();
+	TCHAR full[MAX_PATH];
+	DWORD n = GetFullPathName(fol, MAX_PATH, full, NULL);
+	CString s = (n > 0 && n < MAX_PATH) ? CString(full) : CString(fol);
+	s.Replace(_T('/'), _T('\\'));
+	return s;
+}
+
+int CPlayList::FindByPath(LPCTSTR fol)
+{
+	if (!pc || playcnt <= 0 || !fol || !*fol) return -1;
+	if (!PlIsAbsoluteMediaPath(fol)) return -1;
+	const CString want = NormalizePlaylistPath(fol);
+	if (want.IsEmpty()) return -1;
+	for (int j = 0; j < playcnt; j++) {
+		if (!pc[j].fol[0]) continue;
+		if (NormalizePlaylistPath(pc[j].fol).CompareNoCase(want) == 0)
+			return j;
+	}
+	return -1;
+}
+
 int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 {
 	if(!pc || playcnt<=0) return -1;
 	int i=m_lc.GetItemCount(),c=0;
 	pnt1=-1;
 	CString s,s1;
+	// 単体メディアファイルはパス+形式(sub)で同一判定(タグ名とプレイリスト表示名の差異を吸収)
+	const bool pathKeyOnly = (sub == -1 || sub == -6 || sub == -7 || sub == -8 || sub == -9 ||
+		sub == -10 || sub == 999 || sub == -2 || sub == -3);
 	for(int j=0;j<i;j++){
+		if (pathKeyOnly) {
+			if (_tcsicmp(pc[j].fol, fol) == 0 && pc[j].sub == sub)
+				return j;
+			continue;
+		}
 		c=0;
 		if ((pc[j].sub == -10) || (pc[j].sub == -2) || (pc[j].sub == -3 || pc[j].sub == 30) || (pc[j].sub == 999)) {
 			if (_tcscmp(pc[j].fol, fol) == 0 && pc[j].sub == sub && _tcscmp(pc[j].name, name) == 0)
@@ -727,7 +766,15 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 			break;
 	}
 
-	if(f)
+	if(f) {
+		int byPath = FindByPath(fol);
+		if (byPath >= 0) {
+			pc[byPath].loop1 = loop1;
+			pc[byPath].loop2 = loop2;
+			pc[byPath].ret2 = ret;
+			pc[byPath].time = time;
+			return byPath;
+		}
 		if((cnt1=chk(name,sub,art,fol,ret))!=-1){
 			pc[cnt1].loop1=loop1;
 			pc[cnt1].loop2=loop2;
@@ -738,6 +785,7 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 			m_lc.RedrawWindow(&r);	
 			return cnt1;
 		}
+	}
 //	if(playcnt<60000){
 		if(ff){
 			if(pc==NULL){
@@ -757,7 +805,10 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 		_tcscpy(pc[playcnt].name,name);
 		_tcscpy(pc[playcnt].art,art);
 		_tcscpy(pc[playcnt].alb,alb);
-		_tcscpy(pc[playcnt].fol,fol);
+		{
+			CString nf = NormalizePlaylistPath(fol);
+			_tcscpy(pc[playcnt].fol, nf.IsEmpty() ? (LPCTSTR)fol : (LPCTSTR)nf);
+		}
 		_tcscpy(pc[playcnt].game,s);
 		pc[playcnt].loop1=loop1;
 		pc[playcnt].loop2=loop2;

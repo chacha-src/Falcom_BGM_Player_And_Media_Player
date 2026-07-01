@@ -44,6 +44,7 @@ public:
 	void Load();
 	void Save();
 	int chk(CString name,int sub,CString art,CString fol,int ret);
+	int FindByPath(LPCTSTR fol); // 絶対パス一致(大文字小文字・正規化)。-1=なし
 	void Fol(CString fname);
 	void plug(CString ff,KMPMODULE *mod);
 	void plugs(CString ext1,playlistdata *p,TCHAR* kpi, BYTE& kv);
@@ -144,3 +145,5 @@ public:
 	CCustomStandardButton m_pianorollBtn;
 	CFont m_fontList;
 };
+
+CString NormalizePlaylistPath(LPCTSTR fol);

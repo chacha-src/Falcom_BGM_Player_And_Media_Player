@@ -81,8 +81,10 @@ static void MpEnsurePlaylistBuffer()
 static BOOL MpHasDuplicateFol(LPCTSTR fol)
 {
 	if (!pl || !pl->pc) return FALSE;
+	const CString want = NormalizePlaylistPath(fol);
+	if (want.IsEmpty()) return FALSE;
 	for (int i = 0; i < pl->playcnt; i++) {
-		if (_tcsicmp(pl->pc[i].fol, fol) == 0) return TRUE;
+		if (NormalizePlaylistPath(pl->pc[i].fol).CompareNoCase(want) == 0) return TRUE;
 	}
 	return FALSE;
 }

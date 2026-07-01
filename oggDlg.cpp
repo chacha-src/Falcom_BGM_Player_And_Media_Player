@@ -1432,8 +1432,11 @@ static void MpPersistSavedataQuick()
 void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
 {
 	if (!path || !*path) return;
-	CString p(path), n(displayName ? displayName : _T(""));
-	p.Trim(); n.Trim();
+	CString p = NormalizePlaylistPath(path);
+	if (p.IsEmpty()) p = path;
+	p.Trim();
+	CString n(displayName ? displayName : _T(""));
+	n.Trim();
 	if (p.IsEmpty()) return;
 	if (n.IsEmpty()) {
 		int slash = p.ReverseFind(_T('\\'));
@@ -1441,7 +1444,7 @@ void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
 	}
 	// 同一曲は先頭へ
 	for (int i = 0; i < savedata.mpHistCnt && i < 8; ++i) {
-		if (p.CompareNoCase(savedata.mpHistPath[i]) == 0) {
+		if (NormalizePlaylistPath(savedata.mpHistPath[i]).CompareNoCase(p) == 0) {
 			for (int j = i; j > 0; --j) {
 				_tcscpy(savedata.mpHistPath[j], savedata.mpHistPath[j - 1]);
 				_tcscpy(savedata.mpHistName[j], savedata.mpHistName[j - 1]);
@@ -1518,6 +1521,22 @@ void MpTaskbarPrevTrack()
 	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->PostMessage(WM_APP + 2, 0, 0);
+}
+
+static BOOL MpPlayExistingPlaylistPath(LPCTSTR path)
+{
+	if (!pl) return FALSE;
+	const int idx = pl->FindByPath(path);
+	if (idx < 0) return FALSE;
+	pl->Get(idx);
+	plcnt = idx;
+	gameon = 0;
+	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->FollowPlayingRow();
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_APP + 2, 0, 0);
+	return TRUE;
 }
 
 // タスクバー: サムネイルツールバー(再生/停止等)とジャンプリスト(右クリック)をモード別に設定
@@ -6489,6 +6508,7 @@ void COggDlg::play()
 	endflg = 0;
 	stop1();
 	eqflg = FALSE;
+	mode = modesub;
 
 	CWaitCursor rrr1;
 	wavwait = 0; thend = 1; stitle = "";
@@ -14616,7 +14636,10 @@ BOOL COggDlg::OnCopyData(CWnd* pWnd, COPYDATASTRUCT* pCopyDataStruct)
 		else
 			OnBnmp3jake();
 	}
-	else filen = filen_;
+	else if (savedata.playerMode == 1 && MpPlayExistingPlaylistPath(filen_))
+		;
+	else
+		filen = filen_;
 	return CCustomBlurDialogBase::OnCopyData(pWnd, pCopyDataStruct);
 }
 
@@ -14654,6 +14677,8 @@ void COggDlg::dp(CString a)
 	filen = a;
 	if (filen.Left(1) == "\"") filen = filen.Right(filen.GetLength() - 1);
 	if (filen.Right(1) == "\"") filen = filen.Left(filen.GetLength() - 1);
+	if (savedata.playerMode == 1 && MpPlayExistingPlaylistPath(filen))
+		return;
 	ti = filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1);
 	stop1();
 	if (filen.Right(5).MakeLower() == ".opus") {
