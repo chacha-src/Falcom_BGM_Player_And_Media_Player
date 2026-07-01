@@ -962,7 +962,9 @@ extern int loop1, loop2;
 void CPlayList::Get(int i)
 {
 		pnt1 = -1;  // 再生曲選択時はあいまい検索アンカーを解除
-		fnn=pc[i].name; filen=pc[i].fol; modesub=pc[i].sub; loop1=pc[i].loop1; loop2=pc[i].loop2; ret2=pc[i].ret2;
+		fnn=pc[i].name; filen=pc[i].fol; modesub=pc[i].sub; mode=modesub;
+		loop1=pc[i].loop1; loop2=pc[i].loop2; ret2=pc[i].ret2;
+		ApplyPlaylistRowDisplay(pc[i]);
 		for(int k=0;k<playcnt;k++){
 			m_lc.SetItemState(k,m_lc.GetItemState(k,LVIS_SELECTED)&~LVIS_SELECTED,LVIS_SELECTED);
 		}
@@ -983,6 +985,7 @@ void CPlayList::RestoreSavedPlaybackRow()
 	loop1 = pc[pnt].loop1;
 	loop2 = pc[pnt].loop2;
 	ret2 = pc[pnt].ret2;
+	ApplyPlaylistRowDisplay(pc[pnt]);
 	for (int k = 0; k < playcnt; k++)
 		m_lc.SetItemState(k, m_lc.GetItemState(k, LVIS_SELECTED) & ~LVIS_SELECTED, LVIS_SELECTED);
 	m_lc.SetItemState(pnt, LVIS_SELECTED, LVIS_SELECTED);

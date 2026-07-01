@@ -12,6 +12,9 @@ struct WavExportOptions {
 	int trimKeepSec;
 };
 
+// プレイリスト行の表示用メタデータを og 側へ反映(未再生時のバナー/情報パネル用)
+void ApplyPlaylistRowDisplay(const playlistdata0& row);
+
 #ifndef WM_TIMERP_VSYNC_TICK
 #define WM_TIMERP_VSYNC_TICK (WM_APP + 70)
 #endif

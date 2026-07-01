@@ -2623,6 +2623,29 @@ DWORD cnt3 = 0;
 int loop3;
 CString tagname, tagfile, tagalbum;
 CString tagtrack;   // 曲番号(トラック番号)。全形式でタグから補完して表示に使用
+
+void ApplyPlaylistRowDisplay(const playlistdata0& row)
+{
+	tagfile = row.name;
+	tagname = row.art;
+	tagalbum = row.alb;
+	tagtrack = _T("");
+	stitle = _T("");
+	const int sub = row.sub;
+	// タグ/ゲーム曲はプレイリスト保存名を停止中の表示に使う(再生開始で上書き)
+	if (sub == -1 || sub == -6 || sub == 999 || sub == 21 ||
+		(sub >= 1 && sub <= 30) || sub == -11 || sub == -12 || sub == -13 || sub == -14 || sub == -15) {
+		if (row.name[0])
+			stitle = row.name;
+	}
+	extern CMediaPlayerDlg* mp;
+	if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd())) {
+		mp->InvalidateSidePanels();
+		if (!mp->m_bannerRect.IsRectEmpty())
+			mp->InvalidateRect(&mp->m_bannerRect, FALSE);
+	}
+}
+
 int playy = 1;
 void st1();
 void st2();
@@ -15264,6 +15287,8 @@ void COggDlg::stop()
 
 	ResetPauseButtonUi();
 	eqflg = TRUE;
+	if (pl && plw && pl->pnt >= 0 && pl->pnt < pl->playcnt)
+		ApplyPlaylistRowDisplay(pl->pc[pl->pnt]);
 }
 
 void COggDlg::stop1()
@@ -16100,7 +16125,9 @@ void COggDlg::timerp()
 	s = "name:";
 	moji(s, 1, 0, 0xffffff);
 	if (fnn != L"")		sss = fnn;
-	if (mode == -10 || mode == -9 || mode == -8 || mode == -7) sss = tagfile;
+	if (mode == -10 || mode == -9 || mode == -8 || mode == -7) {
+		if (!tagfile.IsEmpty()) sss = tagfile;
+	}
 	if ((stitle != "" && mode == -1) || mode == 21 || mode == -6 || (mode == 999 && stitle != ""))
 		sss = stitle;
 	int si = mojisub(sss, 1, 0, 0xffffff);

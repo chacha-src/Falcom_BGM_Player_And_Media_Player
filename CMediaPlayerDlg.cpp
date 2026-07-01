@@ -326,6 +326,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_WM_ENTERSIZEMOVE()
 	ON_WM_EXITSIZEMOVE()
 	ON_NOTIFY(LVN_GETDISPINFO, IDC_MP_LIST, &CMediaPlayerDlg::OnGetdispinfoList)
+	ON_NOTIFY(LVN_ITEMCHANGED, IDC_MP_LIST, &CMediaPlayerDlg::OnListItemChanged)
 	ON_NOTIFY(NM_DBLCLK, IDC_MP_LIST, &CMediaPlayerDlg::OnDblclkList)
 	ON_NOTIFY(NM_RCLICK, IDC_MP_LIST, &CMediaPlayerDlg::OnRclickList)
 	ON_NOTIFY(LVN_KEYDOWN, IDC_MP_LIST, &CMediaPlayerDlg::OnKeydownList)
@@ -1211,6 +1212,20 @@ void CMediaPlayerDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 		di->item.iImage = d.icon;
 }
 
+void CMediaPlayerDlg::OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	if (plf) return;   // 再生中は表示を差し替えない
+	const NMLISTVIEW* p = reinterpret_cast<NMLISTVIEW*>(pNMHDR);
+	if (!p || !(p->uChanged & LVIF_STATE)) return;
+	if (!((p->uNewState ^ p->uOldState) & LVIS_SELECTED)) return;
+	if (!(p->uNewState & LVIS_SELECTED)) return;
+	const int i = p->iItem;
+	if (!pl || i < 0 || i >= pl->playcnt) return;
+	pl->Get(i);
+	plcnt = i;
+}
+
 int CMediaPlayerDlg::GetListScrollAnchor() const
 {
 	if (!pl || pl->playcnt <= 0) return 0;
@@ -1679,7 +1694,9 @@ void CMediaPlayerDlg::BlitVisualizer(CDC* pDC)
 CString CMediaPlayerDlg::CurrentTrackTitle() const
 {
 	CString t = fnn;
-	if (mode == -10 || mode == -9 || mode == -8 || mode == -7) t = tagfile;
+	if (mode == -10 || mode == -9 || mode == -8 || mode == -7) {
+		if (!tagfile.IsEmpty()) t = tagfile;
+	}
 	if ((stitle != _T("") && mode == -1) || mode == 21 || mode == -6) t = stitle;
 	// wav 等もタグのタイトルがあれば優先(無ければファイル名のまま)
 	if (mode == 999 && !stitle.IsEmpty()) t = stitle;

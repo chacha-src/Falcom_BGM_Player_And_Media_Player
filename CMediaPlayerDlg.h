@@ -253,6 +253,7 @@ protected:
 	afx_msg void OnFindUp();
 	afx_msg void OnFindDown();
 	afx_msg void OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnRclickList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnKeydownList(NMHDR* pNMHDR, LRESULT* pResult);
