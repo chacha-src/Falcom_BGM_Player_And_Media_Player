@@ -192,14 +192,8 @@ BOOL CWread::InitInstance() { return TRUE; }
 BEGIN_MESSAGE_MAP(CWread, CWinThread)
 	ON_THREAD_MESSAGE(WM_APP + 100, wavread1)
 END_MESSAGE_MAP()
-static volatile LONG s_wavDecodeRunning = 0;
-
 void CWread::wavread1(WPARAM a, LPARAM b) {
-	InterlockedExchange(&s_wavDecodeRunning, 1);
-	wavread();
-	thend = 1; wavwait = 1;
-	InterlockedExchange(&s_wavDecodeRunning, 0);
-	AfxEndThread(0); return;
+	wavread(); thend = 1; wavwait = 1; AfxEndThread(0); return;
 }
 
 #define ID_HOTKEY0 8000
@@ -6528,39 +6522,24 @@ CString GetLrcFromAPI(const CString& trackName, const CString& albumName,
 
 extern BOOL reset;
 
-// ファルコム各タイトル BGM 形式（OnRestart の isGameMode と同一判定）
 static bool IsFalcomGameBgmMode(int m)
 {
-	return (m >= 1 && m <= 30) ||
+	return (m >= 1 && m <= 21) || m == 30 ||
 		m == -11 || m == -12 || m == -13 || m == -14 || m == -15;
 }
 
-// CWread デコードワーカーの終了待ち。abort=TRUE で thend1 により中断を促す。
-static void SignalAndWaitWavDecodeWorker(DWORD limitMs, BOOL abort)
+static CString StripToBasename(const CString& path)
 {
-	if (abort)
-		thend1 = TRUE;
-	const DWORD t0 = GetTickCount();
-	for (;;) {
-		const BOOL running = (InterlockedCompareExchange(&s_wavDecodeRunning, 0, 0) != 0);
-		if (!running && (wavwait != 0 || abort))
-			break;
-		if (!running && !abort && thend != 0)
-			break;
-		DoEvent();
-		if (limitMs && GetTickCount() - t0 >= limitMs)
-			break;
-		Sleep(1);
-	}
-	if (abort && InterlockedCompareExchange(&s_wavDecodeRunning, 0, 0) != 0) {
-		thend = 1;
-		wavwait = 1;
-	}
-	if (abort)
-		thend1 = FALSE;
+	CString s = path;
+	int slash = s.ReverseFind(_T('\\'));
+	if (slash >= 0)
+		s = s.Mid(slash + 1);
+	slash = s.ReverseFind(_T('/'));
+	if (slash >= 0)
+		s = s.Mid(slash + 1);
+	return s;
 }
 
-// Zwei!! 用: プレイリスト fol のフルパス等を bgmXX(wav.dat) 形式へ正規化
 static CString NormalizeZweiPlaybackFol(const CString& fol, int listIndex)
 {
 	CString s = fol;
@@ -6675,13 +6654,19 @@ void COggDlg::play()
 	fade = 0;
 	endflg = 0;
 	stop1();
+	// stop1() は通知スレッド停止のため stf=1 にする。CWread デコードは
+	// IsPlaybackStopRequested() で即 return するため、ここで戻さないと無音になる。
+	stf = 0;
+	thn1 = FALSE;
+	thend1 = FALSE;
 	eqflg = FALSE;
 	mode = modesub;
 	if (mode == 14)
 		filen = NormalizeZweiPlaybackFol(filen, ret2);
-	// play() 中に filen が差し替わってもプレイリスト同一判定用キーを保持する
-	// （ZWEI II: ret2 65/66 で ZW2_002/003 へ morph するため）
-	const CString playlistKeyFol = filen;
+	// プレイリストにフルパスが入っていても chdir 先ではファイル名のみ参照する
+	// （例: mode16 の wavread は filen.Left(8) で dinow_XX と照合）
+	if (IsFalcomGameBgmMode(mode))
+		filen = StripToBasename(filen);
 
 	CWaitCursor rrr1;
 	wavwait = 0; thend = 1; stitle = "";
@@ -6846,7 +6831,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -6880,7 +6865,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -6901,7 +6886,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -6920,7 +6905,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -6940,7 +6925,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -6963,7 +6948,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7004,7 +6989,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7025,7 +7010,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7046,7 +7031,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7067,7 +7052,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7088,7 +7073,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7119,7 +7104,7 @@ void COggDlg::play()
 									else {
 										plf = 1;
 										dougaplay(ret2);
-										if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+										if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 										if (pMediaControl)pMediaControl->Run();
 										m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 										REFTIME aa;
@@ -7139,7 +7124,7 @@ void COggDlg::play()
 		{
 			plf = 1;
 			dougaplay(ret2);
-			if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 			if (pMediaControl)pMediaControl->Run();
 			m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 			REFTIME aa;
@@ -7208,7 +7193,7 @@ void COggDlg::play()
 	m_mp3jake.EnableWindow(FALSE);
 	if (m_dou.GetCheck() == 1) {
 		dougaplay(ret2, ss);
-		if (pMainFrame1 && pGraphBuilder && pMediaControl) {
+		if (pGraphBuilder && pMediaControl) {
 			pMediaControl->Pause();
 		}
 
@@ -7229,8 +7214,6 @@ void COggDlg::play()
 		wavwait = 0;
 		if (mode == 30) wavbit_sample_Hz = 48000;
 		thend = 0;
-		SignalAndWaitWavDecodeWorker(60000, TRUE);
-		if (adbuf2) { free(adbuf2); adbuf2 = NULL; }
 		wav_start();
 		//		m_thread1 = ::AfxBeginThread((AFX_THREADPROC)wavread, (LPVOID)NULL,THREAD_PRIORITY_ABOVE_NORMAL,0,0,0);
 		//		::SetPriorityClass(m_thread1, HIGH_PRIORITY_CLASS);
@@ -7757,17 +7740,16 @@ void COggDlg::play()
 	if (((mode >= 10 && mode <= 21) || mode <= -10) && mode != -10 || mode == -6 || mode == 30) {
 		{
 			// wavwait はデコード用ワーカースレッド(CWread)が完了時に立てる。
-			DWORD wavWaitLimitMs = g_interactiveTrackChange ? 15000u : 8000u;
-			if (IsFalcomGameBgmMode(mode))
-				wavWaitLimitMs = 60000u;
-			SignalAndWaitWavDecodeWorker(wavWaitLimitMs, FALSE);
+			// 万一立たなくても UI が長時間固まらないよう短いタイムアウト(曲切替時は約2.5秒)
+			const DWORD wavWaitT0 = GetTickCount();
+			const DWORD wavWaitLimitMs = g_interactiveTrackChange ? 2500u : 8000u;
+			for (; wavwait == 0;) {
+				CWaitCursor rrr2;
+				DoEvent();
+				if (GetTickCount() - wavWaitT0 >= wavWaitLimitMs) break;
+			}
 		}
-		if (adbuf2 == NULL) {
-			endflg = 0;
-			m_saisai.EnableWindow(TRUE);
-			playf = 0;
-			return;
-		}
+		if (adbuf2 == NULL) { endflg = 0; return; }
 		//		if(mode!=-10)
 		//			playwavBuffwav(bufwav3,0,dwDataLen*4,0);
 		//		else
@@ -9882,7 +9864,7 @@ void COggDlg::play()
 			}
 			if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
 				f123.Close();
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 				if (mode == -10) {
 					if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
@@ -9918,7 +9900,7 @@ void COggDlg::play()
 				}
 			}
 			else {
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 				if (pMainFrame1) { pMainFrame1->seek(0); }
 			}
@@ -9975,14 +9957,7 @@ void COggDlg::play()
 	loopcnt = 0;
 	if (pl && plw) {
 		int plc = 1;
-		const CString plFol = IsFalcomGameBgmMode(mode) ? playlistKeyFol : filen;
-		// プレイリストからの再演奏(MP_PlayIndex 等: gameon==0)では新規行を追加しない
-		const bool replayPlaylistRow = (gameon == 0 && plcnt >= 0 && plcnt < pl->playcnt &&
-			pl->pc[plcnt].sub == mode);
-		if (replayPlaylistRow) {
-			plc = plcnt;
-		}
-		else if (mode == -10)
+		if (mode == -10)
 			plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, (oggsize / (2 * wavchannel * wavbit_sample_Hz / 4) / ((mode == -9) ? 4 : 1)), 1);
 		else if (mode == 999)
 			plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, (wavbit_sample_Hz > 0) ? (int)(loop2 / wavbit_sample_Hz) : 0, 1);
@@ -10005,7 +9980,7 @@ void COggDlg::play()
 					plc = pl->chk(fnn, mode, tagname, filen, 0);
 		}
 		else if (!((pMainFrame1 && mode == -1) || mode == -3))
-			plc = pl->Add(fnn, mode, loop1, loop2, stitle, tagalbum, plFol, ret2, oggsize / (2 * wavchannel * wavbit_sample_Hz));
+			plc = pl->Add(fnn, mode, loop1, loop2, stitle, tagalbum, filen, ret2, oggsize / (2 * wavchannel * wavbit_sample_Hz));
 		else
 			plc = pl->chk(fnn, mode, tagname, filen, 0);
 
@@ -10016,9 +9991,6 @@ void COggDlg::play()
 			if (syncIdx >= 0 && syncIdx < pl->playcnt) {
 				pl->pc[syncIdx].loop1 = loop1;
 				pl->pc[syncIdx].loop2 = loop2;
-				if (mode == 14 && plFol.Find(L"(wav.dat)") >= 0 &&
-					_tcscmp(pl->pc[syncIdx].fol, plFol) != 0)
-					_tcscpy(pl->pc[syncIdx].fol, plFol);
 				if (mode != -10 && mode != 999 && mode != -9 && mode != -8 && mode != -7 && mode != -3) {
 					if (oggsize > 0 && wavchannel > 0 && wavbit_sample_Hz > 0)
 						pl->pc[syncIdx].time = oggsize / (2 * wavchannel * wavbit_sample_Hz);
@@ -11782,32 +11754,13 @@ void CWread::wavread()
 		};
 		a aa;
 		int st, cnt;
-		if (!adpcmf.Open(_T("wav.dat"), CFile::modeRead | CFile::typeBinary | CFile::shareDenyWrite, NULL)) {
-			fnn = LL14(
-				L"ファイル又はフォルダがありません",
-				L"File or folder not found",
-				L"Fichier ou dossier introuvable",
-				L"File o cartella non trovati",
-				L"Archivo o carpeta no encontrados",
-				L"파일 또는 폴더가 없습니다",
-				L"找不到文件或文件夹",
-				L"الملف أو المجلد غير موجود",
-				L"Файл или папка не найдены",
-				L"Datei oder Ordner nicht gefunden",
-				L"Arquivo ou pasta não encontrados",
-				L"Bestand of map niet gevonden",
-				L"Nie znaleziono pliku ani folderu",
-				L"Dosya veya klasör bulunamadı");
-			wavwait = 1; thend = 1;
-			return;
-		}
+		adpcmf.Open(_T("wav.dat"), CFile::modeRead | CFile::typeBinary | CFile::shareDenyWrite, NULL);
 		adpcmf.Read(bbuf, 5);
 		if (bbuf[4] == 2) {//wav else adpcm
 			adpcmf.SeekToBegin();
 			adpcmf.Read(bbuf, 0x20);
 			CString sss, sss1;
 			for (;;) {
-				if (thend1 == TRUE) { thend = 1; adpcmf.Close(); return; }
 				adpcmf.Read(&aa, sizeof(a));	sss = aa.aa;	if (sss == "bgm") break;
 			}
 			adpcmf.SeekToBegin();
@@ -11821,7 +11774,6 @@ void CWread::wavread()
 				cnt = sss.Find(filen.Left(4));
 			else
 				cnt = sss.Find(filen.Left(5));
-			if (cnt < 0) { adpcmf.Close(); wavwait = 1; thend = 1; return; }
 			st = sss.Find(',', cnt);//bgm00.wav,st,end;
 			cnt = sss.Find(',', st + 1);		sss1 = sss.Mid(st + 1, (cnt - 1) - (st));		loop1 = _tstoi(sss1);
 			st = sss.Find(';', cnt + 1);		sss1 = sss.Mid(cnt + 1, (st - 1) - (cnt));		loop2 = _tstoi(sss1) - loop1;
@@ -11835,7 +11787,6 @@ void CWread::wavread()
 				adpcmf.SeekToBegin();
 				adpcmf.Read(bbuf, 0x44);
 				for (;;) {
-					if (thend1 == TRUE) { thend = 1; adpcmf.Close(); return; }
 					adpcmf.Read(&aa, sizeof(a));	sss = aa.aa;	if (sss == filen.Left(5)) break; if (sss.GetLength() == 4 && sss == filen.Left(4)) break;
 				}
 				adpcmf.SeekToBegin();
@@ -11846,13 +11797,11 @@ void CWread::wavread()
 				lenl = 0;
 				if (readadpcmzwei(adpcmf, adbuf2, aa.p1)) { thend = 1; adpcmf.Close(); return; }
 				adpcmf.Close();
-				wavwait = 1;
 			}
 			else {
 				adpcmf.SeekToBegin();
 				adpcmf.Read(bbuf, 0x20);
 				for (;;) {
-					if (thend1 == TRUE) { thend = 1; adpcmf.Close(); return; }
 					adpcmf.Read(&aa, sizeof(a));	sss = aa.aa;	if (sss == filen.Left(5)) break; if (sss.GetLength() == 4 && sss == filen.Left(4)) break;
 				}
 				adpcmf.SeekToBegin();
@@ -11883,7 +11832,6 @@ void CWread::wavread()
 			adpcmf.Read(bbuf, 0x2c);
 			CString sss, sss1;
 			for (;;) {
-				if (thend1 == TRUE) { thend = 1; adpcmf.Close(); return; }
 				adpcmf.Read(&aa, sizeof(a));	sss = aa.aa;	if (sss == "bgm") break;
 			}
 			adpcmf.SeekToBegin();
@@ -11897,7 +11845,6 @@ void CWread::wavread()
 				cnt = sss.Find(filen.Left(4));
 			else
 				cnt = sss.Find(filen.Left(5));
-			if (cnt < 0) { adpcmf.Close(); wavwait = 1; thend = 1; return; }
 			st = sss.Find(',', cnt);//bgm00.wav,st,end;
 			cnt = sss.Find(',', st + 1);		sss1 = sss.Mid(st + 1, (cnt - 1) - (st));		loop1 = _tstoi(sss1);
 			st = sss.Find(';', cnt + 1);		sss1 = sss.Mid(cnt + 1, (st - 1) - (cnt));		loop2 = _tstoi(sss1) - loop1;
@@ -11911,7 +11858,6 @@ void CWread::wavread()
 				adpcmf.SeekToBegin();
 				adpcmf.Read(bbuf, 0x44);
 				for (;;) {
-					if (thend1 == TRUE) { thend = 1; adpcmf.Close(); return; }
 					adpcmf.Read(&aa, sizeof(a));	sss = aa.aa;	if (sss == filen.Left(5)) break; if (sss.GetLength() == 4 && sss == filen.Left(4)) break;
 				}
 				adpcmf.SeekToBegin();
@@ -11922,13 +11868,11 @@ void CWread::wavread()
 				lenl = 0;
 				if (readadpcmzwei(adpcmf, adbuf2, aa.p1)) { thend = 1; adpcmf.Close(); return; }
 				adpcmf.Close();
-				wavwait = 1;
 			}
 			else {
 				adpcmf.SeekToBegin();
 				adpcmf.Read(bbuf, 0x2c);
 				for (;;) {
-					if (thend1 == TRUE) { thend = 1; adpcmf.Close(); return; }
 					adpcmf.Read(&aa, sizeof(a));	sss = aa.aa;	if (sss == filen.Left(5)) break; if (sss.GetLength() == 4 && sss == filen.Left(4)) break;
 				}
 				adpcmf.SeekToBegin();
@@ -11939,7 +11883,6 @@ void CWread::wavread()
 				lenl = 0;
 				if (readadpcmzwei(adpcmf, adbuf2, aa.p1)) { thend = 1; adpcmf.Close(); return; }
 				adpcmf.Close();
-				wavwait = 1;
 			}
 		}
 		/*	}else if(mode==-100){//なし
@@ -15045,7 +14988,7 @@ void COggDlg::dp(CString a)
 		}
 		if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
 			f123.Close();
-			if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 			if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 			if (mode == -10) {
 				if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
@@ -15069,8 +15012,8 @@ void COggDlg::dp(CString a)
 				}
 			}
 		}
-			else {
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+		else {
+			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 			if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 			if (pMainFrame1) { pMainFrame1->seek(0); }
 		}
@@ -15272,21 +15215,13 @@ void COggDlg::ResetPauseButtonUi()
 	SyncPauseButtonUi();
 }
 
-
 // 再生通知スレッドが動いている／動いていた可能性があるか（形式を問わず）
 static inline bool PlaybackNotifyThreadMayBeActive()
 {
-	if (plf != 0 || playf != 0)
-		return true;
-	if (ogg != NULL || adbuf2 != NULL || wav != NULL)
-		return true;
-	if (og && og->mod != NULL)
-		return true;
-	if (og->kmp != NULL)
-		return true;
-	if (InterlockedCompareExchange(&s_wavDecodeRunning, 0, 0) != 0)
-		return true;
-	return false;
+	return plf != 0 || playf != 0 || ogg != NULL || adbuf2 != NULL || (og && og->mod != NULL)
+		|| wav != NULL || mode == 999 || mode == -10 || mode == -9 || mode == -8
+		|| mode == -7 || mode == -6 || mode == -3 || mode == -1
+		|| (mode > 0 && mode <= 21);
 }
 
 void COggDlg::stop()
@@ -15383,17 +15318,13 @@ void COggDlg::stop()
 		ogg = NULL;
 
 		//		for(int l=0;l<20;l++){Sleep(50);DoEvent();}
-		if (InterlockedCompareExchange(&s_wavDecodeRunning, 0, 0) != 0) {
-			const DWORD wlimit = IsFalcomGameBgmMode(mode) ? 60000u : 15000u;
-			SignalAndWaitWavDecodeWorker(wlimit, TRUE);
-		}
 		if (adbuf2)free(adbuf2);//delete [] adbuf2;
 		adbuf2 = NULL;
 		const int stoppingMode = mode;
 		if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
-		if (stoppingMode == -8 && og) flac_.Close(og->kmp);
-		if (stoppingMode == -9 && og) m4a_.Close(og->kmp);
-		if (stoppingMode == -7 && og) dsd_.kpiClose(og->kmp);
+		if (stoppingMode == -8) flac_.Close(og->kmp);
+		if (stoppingMode == -9) m4a_.Close(og->kmp);
+		if (stoppingMode == -7) dsd_.kpiClose(og->kmp);
 		if (stoppingMode == 999) wav_.Close();
 		kmp = NULL;
 		if (mod) {
@@ -15486,9 +15417,13 @@ void COggDlg::stop1()
 		if (ogg)ReleaseOggVorbis(&ogg);
 		ogg = NULL;
 
-		if (InterlockedCompareExchange(&s_wavDecodeRunning, 0, 0) != 0) {
-			const DWORD wlimit = IsFalcomGameBgmMode(mode) ? 60000u : 15000u;
-			SignalAndWaitWavDecodeWorker(wlimit, TRUE);
+		if (thend == FALSE) {
+			thend1 = TRUE;
+			for (int kk = 0; kk < 50; kk++) {
+				if (thend == 1) break;
+				DoEvent();
+				Sleep(1);
+			}
 		}
 		Sleep(50);
 		playb = 0;
@@ -15499,9 +15434,9 @@ void COggDlg::stop1()
 		if (adbuf2)free(adbuf2);//delete [] adbuf2;
 		adbuf2 = NULL;
 		if (mode_for_decoder == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
-		if (mode_for_decoder == -8 && og) flac_.Close(og->kmp);
-		if (mode_for_decoder == -9 && og) m4a_.Close(og->kmp);
-		if (mode_for_decoder == -7 && og) dsd_.kpiClose(og->kmp);
+		if (mode_for_decoder == -8) flac_.Close(og->kmp);
+		if (mode_for_decoder == -9) m4a_.Close(og->kmp);
+		if (mode_for_decoder == -7) dsd_.kpiClose(og->kmp);
 		if (had_wav) wav_.Close();
 		kmp = NULL;
 		if (mod) {
@@ -15518,6 +15453,8 @@ void COggDlg::stop1()
 		DoEvent();
 		thend = 1;
 		fadeadd = 0; fade = 1.0;
+		stf = 0;
+		thn1 = FALSE;
 	}
 	if (pMainFrame1 != NULL)
 		pMainFrame1->stop();
@@ -16330,11 +16267,9 @@ void COggDlg::timerp()
 			L"file:Ładowanie KPI…",
 			L"file:KPI yükleniyor…"));
 	}
-	else if (modesub == 5 || modesub == 7 || modesub == 8 || modesub == 9 || modesub == 10 || modesub == 14)	s.Format(_T("file:%s"), filen);
+	else if (modesub == 5 || modesub == 7 || modesub == 8 || modesub == 9 || modesub == 10)	s.Format(_T("file:%s"), filen);
 	else if (mode == 21)
 		s.Format(_T("file:%s"), filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1));
-	else if (savedata.playerMode == 1 && plf == 0 && IsFalcomGameBgmMode(modesub) && filen != _T(""))
-		s.Format(_T("file:%s"), filen);
 	else if (savedata.playerMode == 1 && plf == 0 && fnn != _T(""))
 		s.Format(_T("file:%s"), fnn);
 	else			s.Format(_T("file:%s"), filen);
@@ -17756,11 +17691,6 @@ void timerog1(UINT nIDEvent)
 					else
 						plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, oggsize / (2 * wavchannel * wavbit_sample_Hz), 1);
 				}
-				else if (IsFalcomGameBgmMode(mode)) {
-					plc = pl->chk(fnn, mode, tagname, filen, ret2);
-					if (plc < 0)
-						plc = pl->Add(fnn, mode, loop1, loop2, tagname, tagalbum, filen, ret2, oggsize / (2 * wavchannel * wavbit_sample_Hz));
-				}
 				else
 					plc = pl->Add(fnn, mode, loop1, loop2, tagname, tagalbum, filen, ret2, oggsize / (2 * wavchannel * wavbit_sample_Hz));
 				if (plc == -1) {
@@ -18115,8 +18045,6 @@ void COggDlg::gamenkill()
 		pMainFrame1->GetWindowRect(&r);
 		savedata.gx = r.left;
 		savedata.gy = r.top;
-		// WM_CLOSE だけだと DirectShow グラフが残り、pGraphBuilder/pMediaControl が
-		// 悬空のまま次曲 play() で参照されてクラッシュする（ゲーム動画→flac 等）。
 		pMainFrame1->stop();
 		::SendMessage(pMainFrame1->m_hWnd, WM_CLOSE, NULL, NULL);
 		//		delete pMainFrame1;
@@ -19675,7 +19603,9 @@ void COggDlg::OnRestart()
 		// 単体ファイル(modesub=-1等)として再生すると鳴らせない。
 		// stop() により mode は再生対象アイテム本来のモード(=pc[i].sub)へ復元済みなので、
 		// それを用いてゲーム形式か否かを判定する。
-		const bool isGameMode = IsFalcomGameBgmMode(mode);
+		const bool isGameMode =
+			(mode >= 1 && mode <= 30) ||
+			mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15;
 		// ネイティブ音声形式は拡張子のみで判定（game形式等からの切り替えも可能に）
 		if (!isGameMode && filen.Right(5).MakeLower() == ".opus") {
 			modesub = -6;
@@ -19787,7 +19717,7 @@ void COggDlg::OnRestart()
 			}
 			if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
 				f123.Close();
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl) {
 					for (int y = 0; y < 45; y++) {
 						Sleep(10); DoEvent();
@@ -19820,7 +19750,7 @@ void COggDlg::OnRestart()
 				}
 			}
 			else {
-				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl) {
 					for (int y = 0; y < 45; y++) {
 						Sleep(10); DoEvent();

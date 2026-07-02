@@ -635,6 +635,30 @@ int CPlayList::FindByPath(LPCTSTR fol)
 	return -1;
 }
 
+static bool PlIsFalcomGameBgmMode(int sub)
+{
+	return (sub >= 1 && sub <= 21) || sub == 30 ||
+		sub == -11 || sub == -12 || sub == -13 || sub == -14 || sub == -15;
+}
+
+static CString PlStorePlaylistFol(LPCTSTR fol, int sub)
+{
+	if (!fol || !*fol)
+		return CString();
+	if (PlIsFalcomGameBgmMode(sub)) {
+		CString s = fol;
+		int slash = s.ReverseFind(_T('\\'));
+		if (slash >= 0)
+			s = s.Mid(slash + 1);
+		slash = s.ReverseFind(_T('/'));
+		if (slash >= 0)
+			s = s.Mid(slash + 1);
+		return s;
+	}
+	CString nf = NormalizePlaylistPath(fol);
+	return nf.IsEmpty() ? CString(fol) : nf;
+}
+
 int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 {
 	if(!pc || playcnt<=0) return -1;
@@ -765,17 +789,21 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 			break;
 	}
 
+	const CString folNorm = PlStorePlaylistFol(fol, sub);
+
 	if(f) {
-		int byPath = FindByPath(fol);
-		if (byPath >= 0) {
-			pc[byPath].loop1 = loop1;
-			pc[byPath].loop2 = loop2;
-			pc[byPath].ret2 = ret;
-			if (time != 0)
-				pc[byPath].time = time;
-			return byPath;
+		if (!PlIsFalcomGameBgmMode(sub)) {
+			int byPath = FindByPath(folNorm);
+			if (byPath >= 0) {
+				pc[byPath].loop1 = loop1;
+				pc[byPath].loop2 = loop2;
+				pc[byPath].ret2 = ret;
+				if (time != 0)
+					pc[byPath].time = time;
+				return byPath;
+			}
 		}
-		if((cnt1=chk(name,sub,art,fol,ret))!=-1){
+		if((cnt1=chk(name,sub,art,folNorm,ret))!=-1){
 			pc[cnt1].loop1=loop1;
 			pc[cnt1].loop2=loop2;
 			pc[cnt1].ret2=ret;
@@ -806,10 +834,7 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 		_tcscpy(pc[playcnt].name,name);
 		_tcscpy(pc[playcnt].art,art);
 		_tcscpy(pc[playcnt].alb,alb);
-		{
-			CString nf = NormalizePlaylistPath(fol);
-			_tcscpy(pc[playcnt].fol, nf.IsEmpty() ? (LPCTSTR)fol : (LPCTSTR)nf);
-		}
+		_tcscpy(pc[playcnt].fol, folNorm);
 		_tcscpy(pc[playcnt].game,s);
 		pc[playcnt].loop1=loop1;
 		pc[playcnt].loop2=loop2;
