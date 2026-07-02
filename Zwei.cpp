@@ -130,6 +130,18 @@ CString CZwei::Gett(int a){
 	return ss;
 }
 
+CString ZweiFolFromIndex(int idx)
+{
+	if (idx < 0 || idx >= 36) return CString();
+	CString s = ZweiTrack(idx);
+	CString ss = s.Left(5);
+	ss.TrimRight();
+	if (ss.IsEmpty()) return CString();
+	CString fol;
+	fol.Format(_T("%s(wav.dat)"), (LPCTSTR)ss);
+	return fol;
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // CZWEIII メッセージ ハンドラ
 void CZwei::OnDblclkList1() 

@@ -29,3 +29,6 @@ public:
 	afx_msg void OnBnClickedOk();
 	CCustomStandardButton m_okdummy;
 };
+
+// Zwei!! プレイリスト行の fol 復元用（ret2 = リスト選択インデックス）
+CString ZweiFolFromIndex(int idx);
