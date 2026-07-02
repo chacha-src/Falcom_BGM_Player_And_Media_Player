@@ -304,6 +304,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_LOOP, &CMediaPlayerDlg::OnLoop)
 	ON_BN_CLICKED(IDC_MP_RANDOM, &CMediaPlayerDlg::OnRandom)
 	ON_CBN_SELCHANGE(IDC_MP_PLSEL, &CMediaPlayerDlg::OnPlSel)
+	ON_CBN_DROPDOWN(IDC_MP_PLSEL, &CMediaPlayerDlg::OnPlselDropdown)
 	ON_BN_CLICKED(IDC_MP_PLRENAME, &CMediaPlayerDlg::OnPlRename)
 	ON_BN_CLICKED(IDC_MP_PLDELETE, &CMediaPlayerDlg::OnPlDelete)
 	ON_BN_CLICKED(IDC_MP_LSUP, &CMediaPlayerDlg::OnMoveTop)
@@ -740,6 +741,20 @@ static void MoveCtl(CWnd* p, int x, int y, int w, int h)
 		p->MoveWindow(x, y, w, h);
 }
 
+#ifndef CB_SETMINVISIBLE
+#define CB_SETMINVISIBLE 0x1702
+#endif
+
+// m_plsel: 選択欄のサイズは MoveCtl のまま。ドロップダウンリストだけ別途復元する。
+static void FixPlselDropList(CCustomComboBox& cb)
+{
+	if (!cb.GetSafeHwnd()) return;
+	cb.SetItemHeight(0, 28);
+	const int cnt = cb.GetCount();
+	if (cnt > 0)
+		cb.SendMessage(CB_SETMINVISIBLE, (WPARAM)min(cnt, 12), 0);
+}
+
 // DPI/リサイズ対応の手動レイアウト。RC で固定配置すると高 DPI で壊れるため
 // OnInitDialog 後・OnSize ごとに呼ぶ。コントロール座標は hD2 スケールで計算する。
 // バナー領域の計算はアスペクト維持(MP_SRCW:MP_SRCH)で行い、余白は DoLayout
@@ -926,6 +941,7 @@ void CMediaPlayerDlg::DoLayout()
 	int tbH = (int)(19 * s);
 	int comboW = (int)(120 * s);
 	MoveCtl(&m_plsel, M + gPad, by4, comboW, tbH);
+	FixPlselDropList(m_plsel);
 	int tx = M + gPad + comboW + (int)(5 * s);
 	int tbw = (int)(50 * s);
 	MoveCtl(&m_plrename, tx, by4, tbw, tbH); tx += tbw + (int)(3 * s);
@@ -978,6 +994,7 @@ void CMediaPlayerDlg::DoLayout()
 	int exW = (int)(80 * s);
 	MoveCtl(&m_exit, W - M - exW, botY, exW, swH);
 
+	CCC_SendGroupBoxesToBack(GetSafeHwnd());   // 枠は最背面(子コントロールを覆わない)
 	Invalidate();
 }
 
@@ -2385,7 +2402,13 @@ void CMediaPlayerDlg::ReloadPlaylistCombo()
 		m_plsel.AddString(s);
 	}
 	m_plsel.SetCurSel(savedata.playlistnum);
+	FixPlselDropList(m_plsel);
 	m_lastComboCount = n;
+}
+
+void CMediaPlayerDlg::OnPlselDropdown()
+{
+	FixPlselDropList(m_plsel);
 }
 
 // mp リストの選択状態を pl リストへ反映(上下移動/削除を pl の既存処理へ委譲するため)

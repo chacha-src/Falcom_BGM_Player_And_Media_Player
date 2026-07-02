@@ -271,6 +271,16 @@ namespace Cfg
         return TemporalFrames(keyIndex, base);
     }
 
+    // 48kHz超(96k/192k等)では窓の時間長は同じでもHFノイズ・倍音ピークが増えやすい。
+    // 高音ピック/オンセット閾値だけをサンプルレートに応じてわずかに上げる。
+    static float TrebleThreshScaleFromSampleRate(int sampleRate)
+    {
+        if (sampleRate <= 48000) return 1.0f;
+        float s = 1.0f + 0.10f * ((float)sampleRate - 48000.0f) / 48000.0f;
+        if (s > 1.14f) s = 1.14f;
+        return s;
+    }
+
     static bool IsMelodicNeighbor(int a, int b)
     {
         if (a == b) return false;
@@ -315,8 +325,8 @@ namespace Cfg
         int liveBands = 0;
         if (bassPeaks >= 2) ++liveBands;
         if (midPeaks >= 4) ++liveBands;
-        if (trePeaks >= 4) ++liveBands;
-        return liveBands >= 2 || (midPeaks >= 5 && (bassPeaks + trePeaks) >= 3);
+        if (trePeaks >= 5) ++liveBands;
+        return liveBands >= 2 || (midPeaks >= 5 && (bassPeaks + trePeaks) >= 4);
     }
 
     // ピック結果が単一音の倍音列か（ハープ等）
@@ -400,7 +410,8 @@ namespace Cfg
         for (int i = bandStart; i < bandEnd; ++i)
             if (bandPick[i]) ++bandPickCount;
 
-        if (polyFrame && bandStart >= BAND_BASS_END) {
+        // 複音補完の緩い全ピックは中音域のみ。高音域で行うとHFノイズが一斉点灯する。
+        if (polyFrame && bandStart >= BAND_BASS_END && bandStart < BAND_MID_END) {
             const int minPoly = (bandSpan >= 10) ? 3 : 2;
             if (bandPickCount < minPoly) {
                 bool extra[128];
@@ -1152,6 +1163,7 @@ void CPianoRoll::UpdateNoteStates()
     NormalizeBandPeak(trackStrength, BAND_MID_END, KEY_COUNT, DISPLAY_PEAK_CAP);
 
     const float pickScale = PickThreshScaleFromLevelDb(m_bufwav3LevelDb);
+    const float treSrScale = TrebleThreshScaleFromSampleRate(m_inputSampleRate);
     const bool polyFrame = FrameLooksPolyphonic(pickStrength);
 
     float maxS = 0.0f;
@@ -1212,7 +1224,7 @@ void CPianoRoll::UpdateNoteStates()
     ApplyBandFundamentalPick(pickStrength, picked, BAND_BASS_END, BAND_MID_END,
         MID_PICK_THRESH * pickScale * (polyFrame ? 0.93f : 1.0f), polyFrame);
     ApplyBandFundamentalPick(pickStrength, picked, BAND_MID_END, KEY_COUNT,
-        TRE_PICK_THRESH * pickScale, polyFrame);
+        TRE_PICK_THRESH * pickScale * treSrScale, polyFrame);
 
     // ストリングス救済(低域ほど弱い対策): 弦はブロードで瞬間ピックが弱いが「持続」する。
     // 平滑強度(trackStrength)の明確な局所ピークを副ピックで拾う。瞬間的なゴーストは
@@ -1233,7 +1245,7 @@ void CPianoRoll::UpdateNoteStates()
         };
         // 低い弦ほど拾いにくいので mid 側をやや低閾値、treble はやや高め。
         SustainStringPick(BAND_BASS_END, BAND_MID_END, 0.30f);
-        SustainStringPick(BAND_MID_END, KEY_COUNT, 0.34f);
+        SustainStringPick(BAND_MID_END, KEY_COUNT, 0.38f);
     }
 
     for (int i = 0; i < KEY_COUNT; ++i) {
@@ -1273,10 +1285,9 @@ void CPianoRoll::UpdateNoteStates()
     // 和音・旋律の音程は整数比でないため残り、単音の倍音だけが消える。
     for (int i = LOW_KEY_SPLIT; i < KEY_COUNT; ++i) {
         if (!picked[i]) continue;
-        for (int j = 0; j < i && j < BAND_MID_END; ++j) {
-            if (!picked[j]) continue;
+        for (int j = 0; j < i; ++j) {
             if (!PianoKey::IsHarmonicPair(i, j)) continue;
-            if (m_rawStrengths[j] >= m_rawStrengths[i] * 0.48f) {
+            if (pickStrength[j] >= pickStrength[i] * 0.48f) {
                 picked[i] = false;
                 break;
             }
@@ -1289,9 +1300,16 @@ void CPianoRoll::UpdateNoteStates()
     SnapPicksToLocalMaxima(pickStrength, picked, 0, 15, 4);
     SnapPicksToLocalMaxima(pickStrength, picked, 15, BAND_BASS_END, 3);
     SnapPicksToLocalMaxima(pickStrength, picked, BAND_BASS_END, BAND_MID_LO_END, 2);
+    // 高音域も中低音と同様に局所ピークへ収束・近接統合(未処理だとHFゴーストが密集する)
+    ResolveHarmonicPicksLight(pickStrength, picked, BAND_MID_END, KEY_COUNT);
+    SnapPicksToLocalMaxima(pickStrength, picked, BAND_MID_LO_END, BAND_MID_END, 1);
+    SnapPicksToLocalMaxima(pickStrength, picked, BAND_MID_END, KEY_COUNT, 1);
     CollapseNearbyPicks(pickStrength, picked, 0, 15, 4, false);
     CollapseNearbyPicks(pickStrength, picked, 0, BAND_BASS_END, 3, false);
     CollapseNearbyPicks(pickStrength, picked, BAND_BASS_END, BAND_MID_LO_END, 2, false);
+    CollapseNearbyPicks(pickStrength, picked, BAND_MID_LO_END, BAND_MID_END, 2, false);
+    CollapseNearbyPicks(pickStrength, picked, BAND_MID_END, KEY_COUNT, 2, false);
+    FilterWeakIsolatedOutliers(pickStrength, picked, BAND_MID_END, KEY_COUNT, 0.22f);
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         bassPick[i] = midPick[i] = treblePick[i] = false;
@@ -1326,9 +1344,10 @@ void CPianoRoll::UpdateNoteStates()
 
         if (!effectivePicked && i >= ONSET_KEY_START) {
             const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
-            if (onsetDelta >= ONSET_DELTA_THRESH &&
-                m_onsetStrengths[i] >= ONSET_MIN_STRENGTH &&
-                pickStrength[i] >= TRE_PICK_THRESH * pickScale * 0.55f &&
+            if (onsetDelta >= ONSET_DELTA_THRESH * treSrScale &&
+                m_onsetStrengths[i] >= ONSET_MIN_STRENGTH * treSrScale &&
+                pickStrength[i] >= TRE_PICK_THRESH * pickScale * 0.68f * treSrScale &&
+                IsLocalPeakInBand(pickStrength, i, BAND_MID_END, KEY_COUNT) &&
                 !PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked, 0, KEY_COUNT, KEY_COUNT))
                 effectivePicked = true;
         }
@@ -1427,8 +1446,12 @@ void CPianoRoll::UpdateNoteStates()
             m_noteStrength[i] = 0.0f;
             continue;
         }
-        if (m_noteStrength[i] <= 0.0f)
-            m_noteStrength[i] = m_rawStrengths[i];
+        // 表示バー高は包絡ピーク(帯域正規化済み)を使う。生強度だとサステイン中に
+        // 細い線になり、オンセットだけ太いゴーストと混在して見える。
+        float disp = m_envPeak[i];
+        if (disp <= 0.0f) disp = pickStrength[i];
+        if (disp <= 0.0f) disp = m_rawStrengths[i];
+        m_noteStrength[i] = disp;
     }
 
     for (int i = 0; i < KEY_COUNT; ++i) {

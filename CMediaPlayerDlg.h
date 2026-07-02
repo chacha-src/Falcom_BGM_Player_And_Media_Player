@@ -235,6 +235,7 @@ protected:
 	afx_msg void OnLoop();
 	afx_msg void OnRandom();
 	afx_msg void OnPlSel();
+	afx_msg void OnPlselDropdown();
 	afx_msg void OnPlRename();
 	afx_msg void OnPlDelete();
 	afx_msg void OnMoveTop();
