@@ -6846,7 +6846,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -6880,7 +6880,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -6901,7 +6901,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -6920,7 +6920,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -6940,7 +6940,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -6963,7 +6963,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7004,7 +7004,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7025,7 +7025,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7046,7 +7046,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7067,7 +7067,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7088,7 +7088,7 @@ void COggDlg::play()
 			if (m_dou.GetCheck() == 1) {
 				plf = 1;
 				dougaplay(ret2);
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl)pMediaControl->Run();
 				m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 				REFTIME aa;
@@ -7119,7 +7119,7 @@ void COggDlg::play()
 									else {
 										plf = 1;
 										dougaplay(ret2);
-										if (pGraphBuilder)pMainFrame1->plays2();
+										if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 										if (pMediaControl)pMediaControl->Run();
 										m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 										REFTIME aa;
@@ -7139,7 +7139,7 @@ void COggDlg::play()
 		{
 			plf = 1;
 			dougaplay(ret2);
-			if (pGraphBuilder)pMainFrame1->plays2();
+			if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 			if (pMediaControl)pMediaControl->Run();
 			m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 			REFTIME aa;
@@ -7208,7 +7208,7 @@ void COggDlg::play()
 	m_mp3jake.EnableWindow(FALSE);
 	if (m_dou.GetCheck() == 1) {
 		dougaplay(ret2, ss);
-		if (pGraphBuilder && pMediaControl) {
+		if (pMainFrame1 && pGraphBuilder && pMediaControl) {
 			pMediaControl->Pause();
 		}
 
@@ -9882,7 +9882,7 @@ void COggDlg::play()
 			}
 			if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
 				f123.Close();
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 				if (mode == -10) {
 					if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
@@ -9918,7 +9918,7 @@ void COggDlg::play()
 				}
 			}
 			else {
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 				if (pMainFrame1) { pMainFrame1->seek(0); }
 			}
@@ -15045,7 +15045,7 @@ void COggDlg::dp(CString a)
 		}
 		if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
 			f123.Close();
-			if (pGraphBuilder)pMainFrame1->plays2();
+			if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 			if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 			if (mode == -10) {
 				if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
@@ -15069,8 +15069,8 @@ void COggDlg::dp(CString a)
 				}
 			}
 		}
-		else {
-			if (pGraphBuilder)pMainFrame1->plays2();
+			else {
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 			if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 			if (pMainFrame1) { pMainFrame1->seek(0); }
 		}
@@ -15272,13 +15272,21 @@ void COggDlg::ResetPauseButtonUi()
 	SyncPauseButtonUi();
 }
 
+
 // 再生通知スレッドが動いている／動いていた可能性があるか（形式を問わず）
 static inline bool PlaybackNotifyThreadMayBeActive()
 {
-	return plf != 0 || playf != 0 || ogg != NULL || adbuf2 != NULL || (og && og->mod != NULL)
-		|| wav != NULL || mode == 999 || mode == -10 || mode == -9 || mode == -8
-		|| mode == -7 || mode == -6 || mode == -3 || mode == -1
-		|| (mode > 0 && mode <= 21);
+	if (plf != 0 || playf != 0)
+		return true;
+	if (ogg != NULL || adbuf2 != NULL || wav != NULL)
+		return true;
+	if (og && og->mod != NULL)
+		return true;
+	if (og->kmp != NULL)
+		return true;
+	if (InterlockedCompareExchange(&s_wavDecodeRunning, 0, 0) != 0)
+		return true;
+	return false;
 }
 
 void COggDlg::stop()
@@ -15297,10 +15305,6 @@ void COggDlg::stop()
 	loop1_2 = -1;
 	stflg = TRUE;
 	KillTimer(1250);
-	if ((mode == -2 || videoonly) && pMediaControl)
-		pMediaControl->Stop();
-	gamenkill();
-	videoonly = FALSE;
 	if (savedata.savecheck == 1 && (mode == -10 || mode == -2) && filenback == filen) {
 		try {
 			int flg = 0;
@@ -15387,9 +15391,9 @@ void COggDlg::stop()
 		adbuf2 = NULL;
 		const int stoppingMode = mode;
 		if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
-		if (stoppingMode == -8) flac_.Close(og->kmp);
-		if (stoppingMode == -9) m4a_.Close(og->kmp);
-		if (stoppingMode == -7) dsd_.kpiClose(og->kmp);
+		if (stoppingMode == -8 && og) flac_.Close(og->kmp);
+		if (stoppingMode == -9 && og) m4a_.Close(og->kmp);
+		if (stoppingMode == -7 && og) dsd_.kpiClose(og->kmp);
 		if (stoppingMode == 999) wav_.Close();
 		kmp = NULL;
 		if (mod) {
@@ -15413,6 +15417,13 @@ void COggDlg::stop()
 		thend = 1;
 		fadeadd = 0; fade = 1.0;
 	}
+	// 通知スレッドが pMediaControl を触るのを止めてから動画グラフを解放する
+	if (pMainFrame1 != NULL)
+		pMainFrame1->stop();
+	else if ((mode == -2 || videoonly) && pMediaControl)
+		pMediaControl->Stop();
+	gamenkill();
+	videoonly = FALSE;
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		m_PianoRollDlg.ResetPlaybackState();
 	if (wav) free(wav);
@@ -15449,8 +15460,6 @@ void COggDlg::stop1()
 	loop1_2 = -1;
 
 	//	for(int i=0;i<10;i++){DoEvent();Sleep(10);}
-	gamenkill();
-	videoonly = FALSE;
 	if (ptl)ptl->SetProgressValue(m_hWnd, (LONGLONG)0, (LONGLONG)1);
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
 	if (PlaybackNotifyThreadMayBeActive())
@@ -15490,9 +15499,9 @@ void COggDlg::stop1()
 		if (adbuf2)free(adbuf2);//delete [] adbuf2;
 		adbuf2 = NULL;
 		if (mode_for_decoder == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
-		if (mode_for_decoder == -8) flac_.Close(og->kmp);
-		if (mode_for_decoder == -9) m4a_.Close(og->kmp);
-		if (mode_for_decoder == -7) dsd_.kpiClose(og->kmp);
+		if (mode_for_decoder == -8 && og) flac_.Close(og->kmp);
+		if (mode_for_decoder == -9 && og) m4a_.Close(og->kmp);
+		if (mode_for_decoder == -7 && og) dsd_.kpiClose(og->kmp);
 		if (had_wav) wav_.Close();
 		kmp = NULL;
 		if (mod) {
@@ -15510,6 +15519,10 @@ void COggDlg::stop1()
 		thend = 1;
 		fadeadd = 0; fade = 1.0;
 	}
+	if (pMainFrame1 != NULL)
+		pMainFrame1->stop();
+	gamenkill();
+	videoonly = FALSE;
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		m_PianoRollDlg.ResetPlaybackState();
 	if (wav) free(wav);
@@ -18102,8 +18115,9 @@ void COggDlg::gamenkill()
 		pMainFrame1->GetWindowRect(&r);
 		savedata.gx = r.left;
 		savedata.gy = r.top;
-		//		pMainFrame1->stop();
-		//		pMainFrame1->DestroyWindow(); 
+		// WM_CLOSE だけだと DirectShow グラフが残り、pGraphBuilder/pMediaControl が
+		// 悬空のまま次曲 play() で参照されてクラッシュする（ゲーム動画→flac 等）。
+		pMainFrame1->stop();
 		::SendMessage(pMainFrame1->m_hWnd, WM_CLOSE, NULL, NULL);
 		//		delete pMainFrame1;
 		//動画画面が閉じるのを待つ
@@ -19773,7 +19787,7 @@ void COggDlg::OnRestart()
 			}
 			if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
 				f123.Close();
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl) {
 					for (int y = 0; y < 45; y++) {
 						Sleep(10); DoEvent();
@@ -19806,7 +19820,7 @@ void COggDlg::OnRestart()
 				}
 			}
 			else {
-				if (pGraphBuilder)pMainFrame1->plays2();
+				if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
 				if (pMediaControl) {
 					for (int y = 0; y < 45; y++) {
 						Sleep(10); DoEvent();

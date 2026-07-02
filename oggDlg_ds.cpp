@@ -299,6 +299,7 @@ BYTE bufkpim[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3];
 
 extern IGraphBuilder* pGraphBuilder;
 extern IMediaControl* pMediaControl;
+extern CDouga* pMainFrame1;
 
 extern CString wavExportPath;
 extern int wavExportLoopCount;
@@ -514,7 +515,7 @@ UINT HandleNotifications(LPVOID)
 			std::lock_guard<std::mutex> guard(cl2);
 
 		// 3. 各種デコード処理（ロック内で実行）
-		if (og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
+		if (og->m_dou.GetCheck() == 1 && pMainFrame1 && pGraphBuilder && pMediaControl) {
 			if (timeee > 900 && dougainit == 0) {
 				pMediaControl->Run();
 				dougainit = 1;

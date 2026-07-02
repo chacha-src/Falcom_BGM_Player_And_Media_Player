@@ -98,7 +98,7 @@ public:
 	void WASAPIChange(WAVEFORMATEX* pwfx);
 	static UINT wavread(LPVOID);
 	CEvent timer;
-
+	HKMP kmp, kmp1;
 #if _UNICODE
 	void _CreateShellLink(LPWSTR pszArguments, LPWSTR pszTitle, IShellLink **ppsl, int iconindex, bool WA,BOOL wa2=TRUE);
 #else
@@ -115,7 +115,6 @@ public:
 	CString lrc_backup;
 
 	KMPMODULE *mod;
-	HKMP kmp,kmp1;
 	HINSTANCE hDLLk;
 	pfnGetKMPModule pFunck;
 	SOUNDINFO sikpi;
