@@ -24,9 +24,26 @@ inline long DsQueuedSamples(ULONG playCur, ULONG writeCur, int bytesPerFrame)
 	return (long)(DsQueuedBytes(playCur, writeCur, ringBytes) / (ULONG)bytesPerFrame);
 }
 
+inline int Bufwav3ScaleRefSamples(int refSamples, double sampleRate)
+{
+	if (refSamples <= 0) return 0;
+	const int sr = (int)(sampleRate + 0.5);
+	if (sr < 8000) return refSamples;
+	int64_t n = ((int64_t)refSamples * (int64_t)sr + 22050) / 44100;
+	if (n < 64) n = 64;
+	return (int)n;
+}
+
+inline int SpeanaAnalysisLatencySettingMs(int windowBytes, int bytesPerFrame, double sampleRate)
+{
+	const int windowFrames = (bytesPerFrame > 0) ? (windowBytes / bytesPerFrame) : 0;
+	const int thresh8192 = Bufwav3ScaleRefSamples(8192, sampleRate);
+	return (windowFrames >= thresh8192) ? -1600 : -800;
+}
+
 inline long SpeanaAnalysisLatencyBytes(double sampleRate, int bytesPerFrame, int windowBytes, int ringBytes)
 {
-	int latencySetting = (windowBytes >= 8192) ? -1600 : -800;
+	int latencySetting = SpeanaAnalysisLatencySettingMs(windowBytes, bytesPerFrame, sampleRate);
 	const int rateForLatency = (int)(sampleRate + 0.5);
 	if (rateForLatency > 0 && rateForLatency < 44100) {
 		latencySetting = (int)((float)latencySetting * (44100.0f / (float)rateForLatency));
@@ -35,6 +52,9 @@ inline long SpeanaAnalysisLatencyBytes(double sampleRate, int bytesPerFrame, int
 	const long maxSafeLatency = -(long)(ringBytes * 0.9) + windowBytes;
 	if (latencyBytes < maxSafeLatency)
 		latencyBytes = maxSafeLatency;
+	// 正の latency は同期点が PlayCursor より先＝表示が実音より早くなる
+	if (latencyBytes > 0)
+		latencyBytes = 0;
 	return latencyBytes;
 }
 

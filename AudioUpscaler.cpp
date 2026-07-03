@@ -24,7 +24,12 @@ static void RefreshDsBufferBytesFromFormat()
 		g_ds_buffer_bytes = kDsBaseRingBytes;
 		return;
 	}
+	int rate = g_ds_pcm_rate;
+	if (rate < 8000)
+		rate = 44100;
 	ULONG frames = kDsBaseRingBytes / (ULONG)refAlign;
+	// 44100Hz 基準のリング秒数を全レートで維持（高SRで過去読み不足→ピアノロール/スペアナ早出しを防ぐ）
+	frames = (ULONG)(((uint64_t)frames * (uint64_t)rate + 22050ULL) / 44100ULL);
 	ULONG bytes = frames * (ULONG)outAlign;
 	// bufwav3[ kBase * 8 ] 上限（8ch×32bit まで想定）
 	const ULONG cap = kDsBaseRingBytes * 8;
