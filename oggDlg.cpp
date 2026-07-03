@@ -20060,9 +20060,7 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 
 	const ULONG ringBytes = Bufwav3RingBytes();
 	// 窓末尾は Speana と同じ readPos（-800/-1600ms レイテンシ込み）。
-	// PianoRollHeardReadPos（playCursor 直結+キュー補正）は Speana 基準より
-	// 1秒以上手前を読み表示が大幅に早くなるため使わない。
-	// 実音より早いときは extraLatencyMs でさらに過去へずらす（約0.3s早出し報告に対応）
+	// 実音より早いときは extraLatencyMs でさらに過去へずらす
 	const int kPianoRollExtraLatencyMs = 700;
 	const int speanaBytes = speanaFrames * bytesPerFrame;
 	long prPos = PianoRollWideReadPos(playCur, prBytes, speanaBytes, bytesPerFrame, (int)ringBytes, sampleRate, kPianoRollExtraLatencyMs);
@@ -20107,7 +20105,6 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 		};
 
 	const int meterCh = (channels < 1) ? 1 : ((channels > CPianoRoll::PIANO_METER_CH_MAX) ? CPianoRoll::PIANO_METER_CH_MAX : channels);
-	// dBメーター: ピアノロール/スペアナと同じ同期点末尾の短窓（44100Hz で ~46ms）
 	const int meterFrames = CPianoRoll::ScaleWinSamples(2048, srInt);
 	const int meterBytes = meterFrames * bytesPerFrame;
 	std::vector<double> chPeak((size_t)meterCh, 0.0);
@@ -20238,21 +20235,21 @@ void COggDlg::Speana()
 
 	int bytesPerFrame = bytesPerSample * channels;
 
-	// 解析バッファサイズ（44100Hz 基準フレーム数をレートに比例）
+	// 解析バッファサイズ
 	// 低音解像度が必要なモード(0,1)はサイズを大きく取る
 	// mode0(音階)は88鍵ノート検出エンジン用に低音窓16384サンプルを確保する。
+	// FFT/ddst・Hann テーブルは 4096/8192/16384 固定のためレート比例にしない。
 	// readPos+bytesTotalToRead = PlayCursor+latencyBytes なので、読み取り長を
 	// 伸ばしても末尾(同期点)はlatencySettingで決まり、表示タイミングは不変。
-	int analysisSizeRef = 4096;
-	if (mode1_Low) analysisSizeRef = 8192;
-	if (mode0_Note) analysisSizeRef = 16384;
-	const int rateForLatency = (int)(sampleRate + 0.5);
-	int analysisSize = CPianoRoll::ScaleWinSamples(analysisSizeRef, rateForLatency);
+	int analysisSize = 4096;
+	if (mode1_Low) analysisSize = 8192;
+	if (mode0_Note) analysisSize = 16384;
 
 	// タイミング調整 (Latency) — ユーザー調整値。低音長窓→-1600ms / 4096→-800ms
-	int latencySetting = (mode0_Note || analysisSizeRef >= 8192) ? -1600 : -800;
+	int latencySetting = (mode0_Note || analysisSize == 8192) ? -1600 : -800;
 
 	{
+		const int rateForLatency = (int)(sampleRate + 0.5);
 		if (rateForLatency > 0 && rateForLatency < 44100) {
 			latencySetting = (int)((float)latencySetting * (44100.0f / (float)rateForLatency));
 		}

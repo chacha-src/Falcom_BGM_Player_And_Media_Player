@@ -28,32 +28,28 @@ namespace Cfg
     static constexpr float BAND_SILENCE_BASS = 0.005f;
     static constexpr float BAND_SILENCE_MID = 0.004f;
     static constexpr float BAND_SILENCE_TRE = 0.004f;
+    // O6+ 物理エネルギー判定は廃止（上声部は同一処理）
     static constexpr int   ATTACK_FRAMES = 1;        // ノートオンに必要な連続アクティブフレーム数
     static constexpr int   RELEASE_FRAMES = 5;       // サステイン維持と高速音のバランス
     static constexpr int   VIS_GAP_FRAMES = 4;       // 中高音の再トリガーギャップ
     static constexpr int   VIS_GAP_FRAMES_BASS = 2;  // 低音の再トリガーギャップ(低音は長いノートが多い)
     static constexpr float RETRIGGER_RATIO = 0.28f;  // サステイン中の一瞬の落ち込みを許容
     static constexpr int   BAND_BASS_END = 25;        // 低音帯の上限インデックス(B2相当)
-    static constexpr int   BAND_MID_END = 53;
-    static constexpr int   BAND_MID_LO_END = 45;     // O3帯 / O4上端で正規化分割(A4付近)
-    static constexpr int   BAND_TRE_HI_START = 63;   // O6/C6: 木琴・超高音は別正規化/閾値
-    static constexpr float BASS_PICK_THRESH = 0.20f;
-    // 弱い持続声部(フルート)・短命な打音(ベル)向けに mid/treble 閾値を下げる。
-    static constexpr float MID_PICK_THRESH = 0.100f;
-    static constexpr float TRE_PICK_THRESH = 0.085f;
-    static constexpr float TRE_HI_PICK_THRESH = 0.058f;
+    static constexpr int   BAND_UPPER_START = 25;     // 上声部（旧 mid+treble 統合）
+    static constexpr int   BAND_MID_END = 53;         // 表示レーン色分けのみ
+    static constexpr int   BAND_TRE_VIS = 63;         // 表現記号判定の表示用境界
+    static constexpr float UPPER_PICK_THRESH = 0.068f;
+    static constexpr float WEAK_UPPER_RATIO = 0.052f;
+    static constexpr float HOLD_ENV_UPPER_LO = 0.21f;
+    static constexpr float HOLD_ENV_UPPER_HI = 0.14f;
     static constexpr float PRUNE_BAND_RATIO = 0.08f;
     static constexpr float PRUNE_TOP_RATIO = 0.12f;
     static constexpr float HOLD_ENV_BASS = 0.34f;
-    static constexpr float HOLD_ENV_MID = 0.21f;
-    static constexpr float HOLD_ENV_TRE = 0.19f;
-    static constexpr float HOLD_ENV_TRE_HI = 0.11f;  // O6+ベル: 減衰が速いのでホールドを緩める
     static constexpr float DISPLAY_PEAK_CAP = 5.0f;
     static constexpr int   ANALYZE_INTERVAL = 1024;
     static constexpr float WEAK_BASS_RATIO = 0.13f;
-    static constexpr float WEAK_MID_RATIO = 0.10f;
-    static constexpr float WEAK_TRE_RATIO = 0.08f;
-    static constexpr float WEAK_TRE_HI_RATIO = 0.055f;
+    static constexpr int   KEY_TOTAL = 88;
+    static constexpr float BASS_PICK_THRESH = 0.20f;
     static constexpr float ONSET_DELTA_THRESH = 0.036f;
     static constexpr float ONSET_MIN_STRENGTH = 0.065f;
     static constexpr float BASS_ONSET_DELTA_THRESH = 0.034f;
@@ -124,6 +120,14 @@ namespace Cfg
         SuppressFalseSubharmonicPicks(st, picked, bandStart, bandEnd, polyMix);
         SnapPicksToLocalMaxima(st, picked, bandStart, bandEnd, 2);
         CollapseNearbyPicks(st, picked, bandStart, bandEnd, 2, false);
+    }
+
+    // 廃止: 上声部は低音と同じノート処理（表示レーンのみ mid/tre 色分け）
+    static void ClearBandPicks(bool* picked, int lo, int hi)
+    {
+        if (!picked || lo >= hi) return;
+        for (int i = lo; i < hi; ++i)
+            picked[i] = false;
     }
 
     static constexpr float BUFWAV3_TARGET_PEAK_DB = -11.0f;
@@ -227,52 +231,78 @@ namespace Cfg
         return amp;
     }
 
+    static void SupplementUpperSustainedPeaks(const float* norm, const float* track,
+        bool* picked, const bool* activeKeys)
+    {
+        if (!norm || !track || !picked) return;
+        const int lo = BAND_UPPER_START;
+        const int hi = KEY_TOTAL;
+        const float sm = BandMaxStrength(norm, lo, hi);
+        if (sm < 1e-6f) return;
+        const float minPick = sm * 0.10f;
+        const float minTrack = sm * 0.07f;
+        for (int i = lo; i < hi; ++i) {
+            if (picked[i]) continue;
+            const bool sustaining = activeKeys && activeKeys[i];
+            if (norm[i] < minPick && track[i] < minTrack) continue;
+            if (!sustaining && norm[i] < minPick) continue;
+            if (!IsLocalPeakInBand(norm, i, lo, hi) && track[i] < minTrack * 1.15f)
+                continue;
+            if (sustaining && track[i] >= minTrack * 0.85f) {
+                picked[i] = true;
+                continue;
+            }
+            if (norm[i] >= minPick)
+                picked[i] = true;
+        }
+    }
+
+    static float UpperPickThresh(float pickScale, bool polyFrame, float treSrScale)
+    {
+        return UPPER_PICK_THRESH * pickScale * treSrScale * (polyFrame ? 0.98f : 1.0f);
+    }
+
+    static float UpperWeakPickRatio(bool polyFrame)
+    {
+        return WEAK_UPPER_RATIO * (polyFrame ? 0.96f : 1.0f);
+    }
+
     static float HoldEnvRatio(int keyIndex)
     {
         if (keyIndex < BAND_BASS_END) return HOLD_ENV_BASS;
-        if (keyIndex < BAND_MID_END) return HOLD_ENV_MID;
-        if (keyIndex >= BAND_TRE_HI_START) return HOLD_ENV_TRE_HI;
-        return HOLD_ENV_TRE;
+        const int lo = BAND_UPPER_START;
+        const int hi = KEY_TOTAL - 1;
+        const float t = (hi > lo) ? (float)(keyIndex - lo) / (float)(hi - lo) : 0.0f;
+        return HOLD_ENV_UPPER_LO + (HOLD_ENV_UPPER_HI - HOLD_ENV_UPPER_LO) * t;
     }
 
     static int TemporalFrames(int keyIndex, int baseFrames)
     {
-        int lo = 0, hi = 88;
+        int lo = 0, hi = KEY_TOTAL;
         if (keyIndex < BAND_BASS_END) { lo = 0; hi = BAND_BASS_END; }
-        else if (keyIndex < BAND_MID_END) { lo = BAND_BASS_END; hi = BAND_MID_END; }
-        else { lo = BAND_MID_END; hi = 88; }
+        else { lo = BAND_UPPER_START; hi = KEY_TOTAL; }
         const int span = hi - lo;
         if (span <= 1) return baseFrames;
         const float t = (float)(keyIndex - lo) / (float)(span - 1);
         float scale;
-        if (keyIndex >= BAND_MID_END)
+        if (keyIndex >= BAND_UPPER_START)
             scale = 1.35f - t * 1.00f;
-        else if (keyIndex >= BAND_BASS_END)
-            scale = 1.50f - t * 0.55f; // O3〜O4: フレーム数の帯域内ばらつきを抑える
         else
             scale = 1.90f - t * 1.45f;
         int f = (int)(baseFrames * scale + 0.5f);
-        if (keyIndex >= BAND_MID_END) {
+        if (keyIndex >= BAND_UPPER_START) {
             if (f < 1) f = 1;
             if (f > 7) f = 7;
         }
         else {
-            if (keyIndex < BAND_BASS_END) {
-                if (f < 1) f = 1;
-                if (f > 8) f = 8;
-            }
-            else {
-                if (f < 2) f = 2;
-                if (f > 12) f = 12;
-            }
+            if (f < 1) f = 1;
+            if (f > 8) f = 8;
         }
         return f;
     }
 
     static int VisGapFrames(int keyIndex)
     {
-        if (keyIndex >= BAND_TRE_HI_START)
-            return TemporalFrames(keyIndex, VIS_GAP_FRAMES + 4);
         const int base = (keyIndex < BAND_BASS_END) ? VIS_GAP_FRAMES_BASS : VIS_GAP_FRAMES;
         return TemporalFrames(keyIndex, base);
     }
@@ -323,13 +353,11 @@ namespace Cfg
     {
         if (!st) return false;
         const int bassPeaks = CountSpectralPeaksInBand(st, 0, BAND_BASS_END, 0.17f);
-        const int midPeaks = CountSpectralPeaksInBand(st, BAND_BASS_END, BAND_MID_END, 0.14f);
-        const int trePeaks = CountSpectralPeaksInBand(st, BAND_MID_END, 88, 0.14f);
+        const int upperPeaks = CountSpectralPeaksInBand(st, BAND_UPPER_START, KEY_TOTAL, 0.13f);
         int liveBands = 0;
         if (bassPeaks >= 2) ++liveBands;
-        if (midPeaks >= 4) ++liveBands;
-        if (trePeaks >= 5) ++liveBands;
-        return liveBands >= 2 || (midPeaks >= 5 && (bassPeaks + trePeaks) >= 4);
+        if (upperPeaks >= 5) ++liveBands;
+        return liveBands >= 2 || (upperPeaks >= 7 && bassPeaks >= 2);
     }
 
     // ピック結果が単一音の倍音列か（ハープ等）
@@ -413,8 +441,8 @@ namespace Cfg
         for (int i = bandStart; i < bandEnd; ++i)
             if (bandPick[i]) ++bandPickCount;
 
-        // 複音補完の緩い全ピックは中音域のみ。高音域で行うとHFノイズが一斉点灯する。
-        if (polyFrame && bandStart >= BAND_BASS_END && bandStart < BAND_MID_END) {
+        // 複音補完の緩い全ピックは上声部のみ（低音は倍音ピックで足りる）
+        if (polyFrame && bandStart >= BAND_UPPER_START) {
             const int minPoly = (bandSpan >= 10) ? 3 : 2;
             if (bandPickCount < minPoly) {
                 bool extra[128];
@@ -433,36 +461,23 @@ namespace Cfg
     }
 
     static void SuppressWeakBandPicks(const float* strengths,
-        bool* bassPick, bool* midPick, bool* treblePick, bool polyFrame)
+        bool* bassPick, bool* upperPick, bool polyFrame)
     {
-        if (!strengths || !bassPick || !midPick || !treblePick) return;
+        if (!strengths || !bassPick || !upperPick) return;
 
         const float bassR = WEAK_BASS_RATIO * (polyFrame ? 0.82f : 1.0f);
-        const float midR = WEAK_MID_RATIO * (polyFrame ? 0.90f : 1.0f);
-        const float treR = WEAK_TRE_RATIO * (polyFrame ? 0.92f : 1.0f);
-
         const float bassMax = BandMaxStrength(strengths, 0, BAND_BASS_END);
-        const float midMax = BandMaxStrength(strengths, BAND_BASS_END, BAND_MID_END);
-        const float treLoMax = BandMaxStrength(strengths, BAND_MID_END, BAND_TRE_HI_START);
-        const float treHiMax = BandMaxStrength(strengths, BAND_TRE_HI_START, 88);
-
         if (bassMax > 1e-6f) {
             const float minB = bassMax * bassR;
             for (int i = 0; i < BAND_BASS_END; ++i)
                 if (bassPick[i] && strengths[i] < minB) bassPick[i] = false;
         }
-        if (midMax > 1e-6f) {
-            const float minM = midMax * midR;
-            for (int i = BAND_BASS_END; i < BAND_MID_END; ++i)
-                if (midPick[i] && strengths[i] < minM) midPick[i] = false;
-        }
-        if (treLoMax > 1e-6f || treHiMax > 1e-6f) {
-            const float minLo = (treLoMax > 1e-6f) ? treLoMax * treR : 0.0f;
-            const float minHi = (treHiMax > 1e-6f) ? treHiMax * WEAK_TRE_HI_RATIO * (polyFrame ? 0.92f : 1.0f) : 0.0f;
-            for (int i = BAND_MID_END; i < BAND_TRE_HI_START; ++i)
-                if (treblePick[i] && strengths[i] < minLo) treblePick[i] = false;
-            for (int i = BAND_TRE_HI_START; i < 88; ++i)
-                if (treblePick[i] && strengths[i] < minHi) treblePick[i] = false;
+
+        const float upperMax = BandMaxStrength(strengths, BAND_UPPER_START, KEY_TOTAL);
+        if (upperMax > 1e-6f) {
+            const float minU = upperMax * UpperWeakPickRatio(polyFrame);
+            for (int i = BAND_UPPER_START; i < KEY_TOTAL; ++i)
+                if (upperPick[i] && strengths[i] < minU) upperPick[i] = false;
         }
     }
 
@@ -633,7 +648,8 @@ namespace Cfg
             if (!picked[i]) continue;
             for (int j = lo; j < i; ++j) {
                 if (!picked[j] || !PianoKey::IsHarmonicPair(i, j)) continue;
-                if (st[j] >= st[i] * 0.72f) {
+                const float stripRatio = 0.72f;
+                if (st[j] >= st[i] * stripRatio) {
                     picked[i] = false;
                     break;
                 }
@@ -641,14 +657,12 @@ namespace Cfg
         }
     }
 
-    static int RequiredAttackFrames(int keyIndex, float strength = 0.0f, float bandMax = 0.0f)
+    static int RequiredAttackFrames(int keyIndex, float strength, float upperBandMax)
     {
         const int base = TemporalFrames(keyIndex, ATTACK_FRAMES);
-        if (keyIndex >= BAND_TRE_HI_START) {
-            if (bandMax > 1e-6f && strength >= bandMax * 0.46f) return 1;
-            const int hiMin = 2;
-            return base < hiMin ? hiMin : base;
-        }
+        if (keyIndex >= BAND_UPPER_START && upperBandMax > 1e-6f &&
+            strength >= upperBandMax * 0.40f)
+            return 1;
         return base;
     }
 
@@ -712,117 +726,133 @@ namespace Cfg
             picked[items[k].idx] = false;
     }
 
-    // O6+: スペクトルピークが多いのに鍵がコロコロ変わる＝HFノイズ状クラスター
-    static void PruneHighFrequencyClutter(const float* norm, bool* picked, const bool* activeKeys)
+    // 上声部: ピーク過多時のみクラスター整理（全音域同一ルール）
+    static void PruneUpperOverpick(const float* norm, bool* picked, const bool* activeKeys)
     {
         if (!norm || !picked) return;
-        const int lo = BAND_TRE_HI_START;
-        const int hi = 88;
-        const int peaks = CountSpectralPeaksInBand(norm, lo, hi, 0.09f);
+        const int lo = BAND_UPPER_START;
+        const int hi = KEY_TOTAL;
+        const int peaks = CountSpectralPeaksInBand(norm, lo, hi, 0.11f);
+        if (peaks < 11) return;
         const float bandMax = BandMaxStrength(norm, lo, hi);
         if (bandMax < 1e-6f) return;
-
-        const float minRelNew = (peaks >= 6) ? 0.50f : (peaks >= 4) ? 0.42f : 0.34f;
-        const float minRelActive = 0.22f;
         for (int i = lo; i < hi; ++i) {
             if (!picked[i]) continue;
-            const float rel = (activeKeys && activeKeys[i]) ? minRelActive : minRelNew;
-            if (norm[i] < bandMax * rel)
+            if (activeKeys && activeKeys[i]) continue;
+            if (norm[i] < bandMax * 0.22f)
                 picked[i] = false;
         }
-        FilterWeakIsolatedOutliers(norm, picked, lo, hi, (peaks >= 5) ? 0.36f : 0.30f);
-        if (peaks >= 4)
-            CapBandPicksPreferActive(norm, picked, lo, hi, 2, activeKeys);
-        else if (peaks >= 2)
-            CapBandPicksPreferActive(norm, picked, lo, hi, 3, activeKeys);
+        FilterWeakIsolatedOutliers(norm, picked, lo, hi, (peaks >= 13) ? 0.22f : 0.19f);
+        if (peaks >= 14)
+            CapBandPicksPreferActive(norm, picked, lo, hi, 5, activeKeys);
+        else if (peaks >= 12)
+            CapBandPicksPreferActive(norm, picked, lo, hi, 6, activeKeys);
+    }
 
-        // 新規の弱い鍵だけ落とす（鳴り続けているベルは上で緩め済み）
-        if (peaks >= 4) {
+    // 上声部: 隣接ゴーストを潰し、音階を整える（単音かつ過多ピック時のみ）
+    static void FinalizeUpperPitchPicks(const float* norm, bool* picked,
+        const bool* activeKeys, bool polyFrame)
+    {
+        if (!norm || !picked) return;
+        const int lo = BAND_UPPER_START;
+        const int hi = KEY_TOTAL;
+        SnapPicksToLocalMaxima(norm, picked, lo, hi, 1);
+        CollapseNearbyPicks(norm, picked, lo, hi, 2, false);
+
+        int pickCount = 0;
+        for (int i = lo; i < hi; ++i)
+            if (picked[i]) ++pickCount;
+
+        if (!polyFrame && pickCount > 9) {
+            int best = -1;
+            float bestS = 0.0f;
             for (int i = lo; i < hi; ++i) {
                 if (!picked[i]) continue;
-                if (activeKeys && activeKeys[i]) continue;
-                if (norm[i] < bandMax * 0.46f)
-                    picked[i] = false;
+                if (norm[i] > bestS) {
+                    bestS = norm[i];
+                    best = i;
+                }
+            }
+            if (best >= 0) {
+                int second = -1;
+                float secondS = bestS * 0.46f;
+                for (int i = lo; i < hi; ++i) {
+                    if (i == best || !picked[i]) continue;
+                    if (abs(i - best) <= 2) continue;
+                    if (PianoKey::IsHarmonicPair(i, best) || PianoKey::IsOctaveRelated(i, best))
+                        continue;
+                    if (norm[i] >= secondS) {
+                        secondS = norm[i];
+                        second = i;
+                    }
+                }
+                for (int i = lo; i < hi; ++i) {
+                    if (i == best || i == second) continue;
+                    if (!picked[i]) continue;
+                    if (activeKeys && activeKeys[i] && norm[i] >= bestS * 0.48f)
+                        continue;
+                    if (norm[i] < bestS * 0.28f || abs(i - best) <= 2)
+                        picked[i] = false;
+                }
             }
         }
-    }
 
-    // 中音基音の倍音が帯域別正規化で高音に独立音として漏れるのを抑える
-    static bool TrebleLooksIndependentOfMid(const float* norm, const float* raw, int keyIndex)
-    {
-        if (!norm || !raw || keyIndex < BAND_MID_END) return true;
-        const int treHi = 88;
-        if (keyIndex >= BAND_TRE_HI_START) {
-            const float hiMax = BandMaxStrength(norm, BAND_TRE_HI_START, treHi);
-            return PianoKey::SalienceLooksLikeFundamental(raw, keyIndex, treHi) &&
-                norm[keyIndex] >= hiMax * 0.56f;
-        }
-        const float loMax = BandMaxStrength(norm, BAND_MID_END, BAND_TRE_HI_START);
-        return PianoKey::SalienceLooksLikeFundamental(raw, keyIndex, treHi) &&
-            norm[keyIndex] >= loMax * 0.60f;
-    }
-
-    static bool IsMidHarmonicLeak(const float* norm, const float* raw, int treKey,
-        const bool* picked, const bool* activeKeys)
-    {
-        if (!norm || !raw || treKey < BAND_MID_END) return false;
-        for (int j = BAND_BASS_END; j < BAND_MID_END; ++j) {
-            if (!picked[j] && !(activeKeys && activeKeys[j])) continue;
-            if (!PianoKey::IsHarmonicPair(treKey, j) && !PianoKey::IsOctaveRelated(treKey, j))
-                continue;
-            if (raw[j] >= raw[treKey] * 0.20f)
-                return !TrebleLooksIndependentOfMid(norm, raw, treKey);
-        }
-        return false;
-    }
-
-    static void SuppressCrossBandHarmonicLeaks(const float* norm, const float* raw,
-        bool* picked, const bool* activeKeys)
-    {
-        if (!norm || !raw || !picked) return;
-        for (int i = BAND_MID_END; i < 88; ++i) {
-            if (!picked[i]) continue;
-            if (IsMidHarmonicLeak(norm, raw, i, picked, activeKeys))
+        for (int i = lo + 1; i < hi - 1; ++i) {
+            if (!picked[i] || (activeKeys && activeKeys[i])) continue;
+            if (norm[i] < norm[i - 1] * 0.98f && norm[i] < norm[i + 1] * 0.98f)
                 picked[i] = false;
         }
     }
 
-    // 剪定後も鳴り続けている O6+ ベルを拾い直す（中音倍音は復活させない）
-    static void ReinstateActiveHighBells(const float* norm, const float* raw,
-        bool* picked, const bool* activeKeys)
+    // 上声部: ピッチが別鍵へ移ったら旧鍵のホールドを即解除
+    static void HandoffUpperActiveKeys(const float* norm, const bool* picked,
+        bool* activeKeys, float* envPeak, int* unpickedFrames,
+        int* strengthDipFrames, int* consecActive)
     {
-        if (!norm || !raw || !picked || !activeKeys) return;
-        const int lo = BAND_TRE_HI_START;
-        const int hi = 88;
-        const float bandMax = BandMaxStrength(norm, lo, hi);
-        if (bandMax < 1e-6f) return;
-        for (int i = lo; i < hi; ++i) {
-            if (!activeKeys[i]) continue;
-            if (IsMidHarmonicLeak(norm, raw, i, picked, activeKeys)) continue;
-            if (norm[i] >= bandMax * 0.13f)
-                picked[i] = true;
-        }
-    }
+        if (!norm || !picked || !activeKeys) return;
+        const int lo = BAND_UPPER_START;
 
-    // O6+ 打楽器: 倍音が乏しい純音。Salience なしで局所ピークを足す。
-    static void SupplementHighBellPeaks(const float* norm, const float* raw, bool* picked,
-        int bandStart, int bandEnd, float relOfBandMax)
-    {
-        if (!norm || !raw || !picked || bandStart >= bandEnd) return;
-        const int peaks = CountSpectralPeaksInBand(norm, bandStart, bandEnd, 0.09f);
-        if (peaks >= 8) return;
-        const float bandMax = BandMaxStrength(norm, bandStart, bandEnd);
-        if (bandMax < 1e-6f) return;
-        const float minS = bandMax * relOfBandMax;
-        for (int i = bandStart; i < bandEnd; ++i) {
-            if (picked[i]) continue;
-            if (norm[i] < minS) continue;
-            if (!IsLocalPeakInBand(norm, i, bandStart, bandEnd)) continue;
-            if (norm[i] < bandMax * 0.32f) continue;
-            if (IsMidHarmonicLeak(norm, raw, i, picked, nullptr)) continue;
-            if (PianoKey::IsHarmonicOfAnyActive(norm, i, picked, bandStart, bandEnd, 88, 0.74f))
-                continue;
-            picked[i] = true;
+        int domPick = -1;
+        float domS = 0.0f;
+        for (int i = lo; i < KEY_TOTAL; ++i) {
+            if (!picked[i]) continue;
+            if (norm[i] > domS) {
+                domS = norm[i];
+                domPick = i;
+            }
+        }
+
+        if (domPick >= 0) {
+            for (int i = lo; i < KEY_TOTAL; ++i) {
+                if (i == domPick || !activeKeys[i]) continue;
+                const int d = (i > domPick) ? (i - domPick) : (domPick - i);
+                if (d > 6) continue;
+                if ((PianoKey::IsHarmonicPair(domPick, i) || PianoKey::IsOctaveRelated(domPick, i)) &&
+                    norm[i] >= domS * 0.42f)
+                    continue;
+                if (!picked[i] && norm[i] < domS * 0.40f) {
+                    activeKeys[i] = false;
+                    if (envPeak) envPeak[i] = 0.0f;
+                    if (unpickedFrames) unpickedFrames[i] = 0;
+                    if (strengthDipFrames) strengthDipFrames[i] = 0;
+                    if (consecActive) consecActive[i] = 0;
+                }
+            }
+        }
+
+        for (int i = lo; i < KEY_TOTAL; ++i) {
+            if (!activeKeys[i]) continue;
+            for (int j = i + 1; j < KEY_TOTAL && j <= i + 5; ++j) {
+                if (!activeKeys[j]) continue;
+                if (PianoKey::IsHarmonicPair(j, i) || PianoKey::IsOctaveRelated(j, i))
+                    continue;
+                const int kill = (norm[i] >= norm[j]) ? j : i;
+                activeKeys[kill] = false;
+                if (envPeak) envPeak[kill] = 0.0f;
+                if (unpickedFrames) unpickedFrames[kill] = 0;
+                if (strengthDipFrames) strengthDipFrames[kill] = 0;
+                if (consecActive) consecActive[kill] = 0;
+            }
         }
     }
 
@@ -879,7 +909,7 @@ namespace Cfg
         }
 
         FilterWeakIsolatedOutliers(norm, picked, BAND_BASS_END, 88, 0.26f);
-        CapBandPicksByStrength(norm, picked, BAND_MID_END, 88, 4);
+        CapBandPicksByStrength(norm, picked, BAND_UPPER_START, KEY_TOTAL, 5);
         CapBandPicksByStrength(norm, picked, 0, BAND_BASS_END, 2);
     }
 
@@ -1441,15 +1471,9 @@ void CPianoRoll::UpdateNoteStates()
     }
 
     NormalizeBandPeak(pickStrength, 0, BAND_BASS_END, DISPLAY_PEAK_CAP);
-    NormalizeBandPeak(pickStrength, BAND_BASS_END, BAND_MID_LO_END, DISPLAY_PEAK_CAP);
-    NormalizeBandPeak(pickStrength, BAND_MID_LO_END, BAND_MID_END, DISPLAY_PEAK_CAP);
-    NormalizeBandPeak(pickStrength, BAND_MID_END, BAND_TRE_HI_START, DISPLAY_PEAK_CAP);
-    NormalizeBandPeak(pickStrength, BAND_TRE_HI_START, KEY_COUNT, DISPLAY_PEAK_CAP);
+    NormalizeBandPeak(pickStrength, BAND_UPPER_START, KEY_COUNT, DISPLAY_PEAK_CAP);
     NormalizeBandPeak(trackStrength, 0, BAND_BASS_END, DISPLAY_PEAK_CAP);
-    NormalizeBandPeak(trackStrength, BAND_BASS_END, BAND_MID_LO_END, DISPLAY_PEAK_CAP);
-    NormalizeBandPeak(trackStrength, BAND_MID_LO_END, BAND_MID_END, DISPLAY_PEAK_CAP);
-    NormalizeBandPeak(trackStrength, BAND_MID_END, BAND_TRE_HI_START, DISPLAY_PEAK_CAP);
-    NormalizeBandPeak(trackStrength, BAND_TRE_HI_START, KEY_COUNT, DISPLAY_PEAK_CAP);
+    NormalizeBandPeak(trackStrength, BAND_UPPER_START, KEY_COUNT, DISPLAY_PEAK_CAP);
 
     const float pickScale = PickThreshScaleFromLevelDb(m_bufwav3LevelDb);
     const float treSrScale = TrebleThreshScaleFromSampleRate(m_inputSampleRate);
@@ -1460,13 +1484,10 @@ void CPianoRoll::UpdateNoteStates()
         if (pickStrength[i] > maxS) maxS = pickStrength[i];
 
     const float bassMax = BandMaxStrength(pickStrength, 0, BAND_BASS_END);
-    const float midMax = BandMaxStrength(pickStrength, BAND_BASS_END, BAND_MID_END);
-    const float treMax = max(BandMaxStrength(pickStrength, BAND_MID_END, BAND_TRE_HI_START),
-        BandMaxStrength(pickStrength, BAND_TRE_HI_START, KEY_COUNT));
+    const float upperMax = BandMaxStrength(pickStrength, BAND_UPPER_START, KEY_COUNT);
     const bool anyBandLive =
         bassMax >= BAND_SILENCE_BASS ||
-        midMax >= BAND_SILENCE_MID ||
-        treMax >= BAND_SILENCE_TRE;
+        upperMax >= BAND_SILENCE_MID;
 
     if (!anyBandLive || maxS < SILENCE_ABS) {
         for (int i = 0; i < KEY_COUNT; ++i) {
@@ -1486,10 +1507,12 @@ void CPianoRoll::UpdateNoteStates()
     }
 
     bool bassPick[KEY_COUNT];
+    bool upperPick[KEY_COUNT];
     bool midPick[KEY_COUNT];
     bool treblePick[KEY_COUNT];
     bool picked[KEY_COUNT];
     memset(bassPick, 0, sizeof(bassPick));
+    memset(upperPick, 0, sizeof(upperPick));
     memset(midPick, 0, sizeof(midPick));
     memset(treblePick, 0, sizeof(treblePick));
     memset(picked, 0, sizeof(picked));
@@ -1509,15 +1532,11 @@ void CPianoRoll::UpdateNoteStates()
         BASS_PICK_THRESH * pickScale * (polyFrame ? 0.82f : 1.0f));
     const bool bassDominantFrame =
         bassMax >= BAND_SILENCE_BASS &&
-        bassMax >= midMax * 0.72f;
+        bassMax >= upperMax * 0.72f;
     if (polyFrame && (bassOnsetFrame || bassDominantFrame))
         SupplementPolyBassPeak(pickStrength, picked, 0, BAND_BASS_END);
-    ApplyBandFundamentalPick(pickStrength, picked, BAND_BASS_END, BAND_MID_END,
-        MID_PICK_THRESH * pickScale * (polyFrame ? 0.93f : 1.0f), polyFrame);
-    ApplyBandFundamentalPick(pickStrength, picked, BAND_MID_END, BAND_TRE_HI_START,
-        TRE_PICK_THRESH * pickScale * treSrScale, polyFrame);
-    ApplyBandFundamentalPick(pickStrength, picked, BAND_TRE_HI_START, KEY_COUNT,
-        TRE_HI_PICK_THRESH * pickScale * treSrScale, polyFrame);
+    ApplyBandFundamentalPick(pickStrength, picked, BAND_UPPER_START, KEY_COUNT,
+        UpperPickThresh(pickScale, polyFrame, treSrScale) * 0.88f, polyFrame);
 
     {
         auto SustainStringPick = [&](int lo, int hi, float rel) {
@@ -1533,23 +1552,22 @@ void CPianoRoll::UpdateNoteStates()
                     picked[i] = true;
             }
         };
-        SustainStringPick(BAND_BASS_END, BAND_MID_END, 0.24f);
-        SustainStringPick(BAND_MID_END, BAND_TRE_HI_START, 0.30f);
-        SustainStringPick(BAND_TRE_HI_START, KEY_COUNT, 0.16f);
+        SustainStringPick(BAND_UPPER_START, KEY_COUNT, 0.15f);
     }
+
+    SupplementUpperSustainedPeaks(pickStrength, trackStrength, picked, m_activeKeys);
 
     for (int i = 0; i < KEY_COUNT; ++i) {
-        bassPick[i] = midPick[i] = treblePick[i] = false;
+        bassPick[i] = upperPick[i] = false;
         if (!picked[i]) continue;
         if (i < BAND_BASS_END) bassPick[i] = true;
-        else if (i < BAND_MID_END) midPick[i] = true;
-        else treblePick[i] = true;
+        else upperPick[i] = true;
     }
 
-    SuppressWeakBandPicks(pickStrength, bassPick, midPick, treblePick, polyFrame);
+    SuppressWeakBandPicks(pickStrength, bassPick, upperPick, polyFrame);
 
     for (int i = 0; i < KEY_COUNT; ++i)
-        picked[i] = bassPick[i] || midPick[i] || treblePick[i];
+        picked[i] = bassPick[i] || upperPick[i];
 
     const bool singleSource = !polyFrame && (
         FrameLooksLikeSingleSource(picked, 0, KEY_COUNT)
@@ -1564,73 +1582,57 @@ void CPianoRoll::UpdateNoteStates()
         ResolveHarmonicPicksLight(pickStrength, picked, 0, BAND_BASS_END);
     }
     else {
-        // 複音時は中高音旋律帯の倍音整理をスキップ（伴奏の下音に飲まれる）
         ResolveHarmonicPicksLight(pickStrength, picked, 0, BAND_BASS_END);
     }
 
     for (int i = LOW_KEY_SPLIT; i < KEY_COUNT; ++i) {
         if (!picked[i]) continue;
-        if (polyFrame && i >= BAND_TRE_HI_START) continue;
-        for (int j = 0; j < i; ++j) {
-            if (!PianoKey::IsHarmonicPair(i, j)) continue;
-            if (polyFrame && !picked[j] && !m_activeKeys[j]) continue;
-            const bool crossBand = (j < BAND_MID_END && i >= BAND_MID_END);
-            if (crossBand) {
-                if (m_rawStrengths[j] >= m_rawStrengths[i] * 0.24f &&
-                    !TrebleLooksIndependentOfMid(pickStrength, m_rawStrengths, i)) {
-                    picked[i] = false;
-                    break;
-                }
+        for (int j = 0; j < BAND_BASS_END; ++j) {
+            if (!picked[j] || !PianoKey::IsHarmonicPair(i, j)) continue;
+            const float stripRatio = polyFrame ? 0.68f : 0.55f;
+            if (pickStrength[j] >= pickStrength[i] * stripRatio) {
+                picked[i] = false;
+                break;
             }
-            else {
-                const float stripRatio = polyFrame ? 0.60f : 0.48f;
-                if (pickStrength[j] >= pickStrength[i] * stripRatio) {
-                    picked[i] = false;
-                    break;
-                }
+        }
+    }
+    for (int i = BAND_UPPER_START; i < KEY_COUNT; ++i) {
+        if (!picked[i]) continue;
+        for (int j = BAND_UPPER_START; j < i; ++j) {
+            if (!picked[j] || !PianoKey::IsHarmonicPair(i, j)) continue;
+            if (polyFrame && !m_activeKeys[j]) continue;
+            const float stripRatio = polyFrame ? 0.72f : 0.58f;
+            if (pickStrength[j] >= pickStrength[i] * stripRatio) {
+                picked[i] = false;
+                break;
             }
         }
     }
 
-    // 低音は8192窓の解像度不足で1音が±2〜3半音に漏れ、隣接団子(ゴースト)になる。
-    // 周波数が低いほどスナップ半径・統合ギャップを広げ、漏れを1音へ収束させる。
-    // 深低音(C2=key15未満)は最も漏れが広いので最大、O3付近は控えめ。
     SnapPicksToLocalMaxima(pickStrength, picked, 0, 15, 5);
     SnapPicksToLocalMaxima(pickStrength, picked, 15, BAND_BASS_END, 4);
-    SnapPicksToLocalMaxima(pickStrength, picked, BAND_BASS_END, BAND_MID_LO_END, 2);
-    // 複音時は高音旋律を倍音整理で落としやすいのでスキップ（単音時のみ整理）
-    if (!polyFrame) {
-        ResolveHarmonicPicksLight(pickStrength, picked, BAND_MID_END, BAND_TRE_HI_START);
-        ResolveHarmonicPicksLight(pickStrength, picked, BAND_TRE_HI_START, KEY_COUNT);
-    }
-    SnapPicksToLocalMaxima(pickStrength, picked, BAND_MID_LO_END, BAND_MID_END, 1);
-    SnapPicksToLocalMaxima(pickStrength, picked, BAND_MID_END, BAND_TRE_HI_START, 1);
-    SnapPicksToLocalMaxima(pickStrength, picked, BAND_TRE_HI_START, KEY_COUNT, 1);
+    if (!polyFrame)
+        ResolveHarmonicPicksLight(pickStrength, picked, BAND_UPPER_START, KEY_COUNT);
+    SnapPicksToLocalMaxima(pickStrength, picked, BAND_UPPER_START, KEY_COUNT, 1);
     CollapseNearbyPicks(pickStrength, picked, 0, 15, 5, false);
     CollapseNearbyPicks(pickStrength, picked, 0, BAND_BASS_END, 4, false);
-    CollapseNearbyPicks(pickStrength, picked, BAND_BASS_END, BAND_MID_LO_END, 2, false);
-    CollapseNearbyPicks(pickStrength, picked, BAND_MID_LO_END, BAND_MID_END, 2, false);
-    CollapseNearbyPicks(pickStrength, picked, BAND_MID_END, BAND_TRE_HI_START, 2, false);
-    CollapseNearbyPicks(pickStrength, picked, BAND_TRE_HI_START, KEY_COUNT, 3, false);
-    FilterWeakIsolatedOutliers(pickStrength, picked, BAND_MID_END, BAND_TRE_HI_START, 0.21f);
-    FilterWeakIsolatedOutliers(pickStrength, picked, BAND_TRE_HI_START, KEY_COUNT, 0.30f);
-    SupplementHighBellPeaks(pickStrength, m_rawStrengths, picked, BAND_TRE_HI_START, KEY_COUNT, 0.085f);
-    PruneHighFrequencyClutter(pickStrength, picked, m_activeKeys);
-    ReinstateActiveHighBells(pickStrength, m_rawStrengths, picked, m_activeKeys);
-    SuppressCrossBandHarmonicLeaks(pickStrength, m_rawStrengths, picked, m_activeKeys);
+    CollapseNearbyPicks(pickStrength, picked, BAND_UPPER_START, KEY_COUNT, 2, false);
+    FilterWeakIsolatedOutliers(pickStrength, picked, BAND_UPPER_START, KEY_COUNT, 0.17f);
+    SupplementUpperSustainedPeaks(pickStrength, trackStrength, picked, m_activeKeys);
+    PruneUpperOverpick(pickStrength, picked, m_activeKeys);
+    SupplementUpperSustainedPeaks(pickStrength, trackStrength, picked, m_activeKeys);
+    FinalizeUpperPitchPicks(pickStrength, picked, m_activeKeys, polyFrame);
     if (polyFrame) {
         SupplementPolyMelodyPeaks(pickStrength, m_rawStrengths, picked,
-            BAND_MID_LO_END, BAND_TRE_HI_START, 0.12f);
-        PrunePolyMelodyHarmonicDupes(pickStrength, picked, BAND_MID_LO_END, BAND_TRE_HI_START);
-        FilterWeakIsolatedOutliers(pickStrength, picked, BAND_MID_LO_END, BAND_TRE_HI_START, 0.23f);
+            BAND_UPPER_START, KEY_COUNT, 0.09f);
+        PrunePolyMelodyHarmonicDupes(pickStrength, picked, BAND_UPPER_START, KEY_COUNT);
+        FilterWeakIsolatedOutliers(pickStrength, picked, BAND_UPPER_START, KEY_COUNT, 0.18f);
     }
 
     const bool percussiveFrame = FrameLooksPercussiveBurst(
         pickStrength, m_onsetStrengths, m_prevOnsetStrengths, picked);
     if (percussiveFrame)
         SuppressPercussivePicks(pickStrength, m_rawStrengths, picked);
-
-    const float treHiBandMax = BandMaxStrength(pickStrength, BAND_TRE_HI_START, KEY_COUNT);
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         bassPick[i] = midPick[i] = treblePick[i] = false;
@@ -1645,10 +1647,6 @@ void CPianoRoll::UpdateNoteStates()
         const float sigStrength = pickStrength[i];
         bool effectivePicked = picked[i];
 
-        if (effectivePicked && i >= BAND_MID_END &&
-            IsMidHarmonicLeak(pickStrength, m_rawStrengths, i, picked, m_activeKeys))
-            effectivePicked = false;
-
         if (!effectivePicked && i < BAND_BASS_END) {
             const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
             if (onsetDelta >= BASS_ONSET_DELTA_THRESH &&
@@ -1658,45 +1656,27 @@ void CPianoRoll::UpdateNoteStates()
             }
         }
 
-        if (!effectivePicked && polyFrame && i >= BAND_BASS_END && i < BAND_MID_END) {
+        if (!effectivePicked && i >= BAND_UPPER_START) {
             const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
-            if (onsetDelta >= MID_ONSET_DELTA_THRESH &&
-                m_onsetStrengths[i] >= MID_ONSET_MIN_STRENGTH &&
-                pickStrength[i] >= MID_PICK_THRESH * pickScale * 0.40f &&
-                !PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked, 0, KEY_COUNT, KEY_COUNT, 0.80f))
+            const float onsetScale = polyFrame ? 0.88f : 1.0f;
+            if (onsetDelta >= MID_ONSET_DELTA_THRESH * onsetScale &&
+                m_onsetStrengths[i] >= MID_ONSET_MIN_STRENGTH * onsetScale &&
+                pickStrength[i] >= UpperPickThresh(pickScale, polyFrame, treSrScale) * (polyFrame ? 0.30f : 0.38f) &&
+                IsLocalPeakInBand(pickStrength, i, BAND_UPPER_START, KEY_COUNT) &&
+                !PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked, BAND_UPPER_START, KEY_COUNT, KEY_COUNT, 0.86f))
                 effectivePicked = true;
         }
 
-        if (!effectivePicked && i >= BAND_TRE_HI_START) {
-            const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
-            const bool strongBell = (treHiBandMax > 1e-6f &&
-                pickStrength[i] >= treHiBandMax * 0.44f);
-            const bool continuing = m_activeKeys[i] && pickStrength[i] >= treHiBandMax * 0.12f &&
-                !IsMidHarmonicLeak(pickStrength, m_rawStrengths, i, picked, m_activeKeys);
-            if (continuing) {
-                effectivePicked = true;
-            }
-            else if (onsetDelta >= ONSET_DELTA_THRESH * 0.78f * treSrScale &&
-                m_onsetStrengths[i] >= ONSET_MIN_STRENGTH * 0.72f * treSrScale &&
-                pickStrength[i] >= TRE_HI_PICK_THRESH * pickScale * 0.48f * treSrScale &&
-                IsLocalPeakInBand(pickStrength, i, BAND_TRE_HI_START, KEY_COUNT) &&
-                (strongBell || LooksLikeTonalFundamental(m_rawStrengths, i)) &&
-                !PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked, 0, KEY_COUNT, KEY_COUNT, 0.82f))
-                effectivePicked = true;
-        }
-
-        if (!effectivePicked && i >= ONSET_KEY_START && i < BAND_TRE_HI_START) {
-            const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
-            if (onsetDelta >= ONSET_DELTA_THRESH * treSrScale &&
-                m_onsetStrengths[i] >= ONSET_MIN_STRENGTH * treSrScale &&
-                pickStrength[i] >= TRE_PICK_THRESH * pickScale * 0.55f * treSrScale &&
-                IsLocalPeakInBand(pickStrength, i, BAND_MID_END, KEY_COUNT) &&
-                !PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked, 0, KEY_COUNT, KEY_COUNT))
+        if (!effectivePicked && i >= BAND_UPPER_START) {
+            if (upperMax > 1e-6f && (picked[i] || m_activeKeys[i]) &&
+                pickStrength[i] >= upperMax * 0.10f &&
+                trackStrength[i] >= upperMax * 0.06f &&
+                IsLocalPeakInBand(pickStrength, i, BAND_UPPER_START, KEY_COUNT))
                 effectivePicked = true;
         }
 
         // ハープ等: 上の音が残っていても、下が今フレームでピックされていれば下降音を採用
-        if (!effectivePicked && picked[i] && i >= BAND_BASS_END) {
+        if (!effectivePicked && picked[i] && i >= BAND_UPPER_START) {
             for (int j = i + 1; j < i + 13 && j < KEY_COUNT; ++j) {
                 if (!m_activeKeys[j]) continue;
                 if (!IsMelodicNeighbor(i, j)) continue;
@@ -1718,9 +1698,15 @@ void CPianoRoll::UpdateNoteStates()
             else {
                 const float holdRatio = HoldEnvRatio(i);
                 if (holdRatio > 0.0f && m_envPeak[i] > 0.001f &&
-                    trackStrength[i] >= m_envPeak[i] * holdRatio &&
-                    !PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked, 0, KEY_COUNT, KEY_COUNT, 0.78f))
-                    effectivePicked = true;
+                    trackStrength[i] >= m_envPeak[i] * holdRatio) {
+                    const bool harmBlock = (i >= BAND_UPPER_START)
+                        ? PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked,
+                            BAND_UPPER_START, KEY_COUNT, KEY_COUNT, 0.82f)
+                        : PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked,
+                            0, KEY_COUNT, KEY_COUNT, 0.78f);
+                    if (!harmBlock)
+                        effectivePicked = true;
+                }
             }
         }
 
@@ -1741,7 +1727,7 @@ void CPianoRoll::UpdateNoteStates()
             m_consecSilent[i] = 0;
             m_unpickedFrames[i] = 0;
             float envSample = sigStrength;
-            if (i >= BAND_TRE_HI_START) {
+            if (i >= BAND_UPPER_START) {
                 if (pickStrength[i] > envSample) envSample = pickStrength[i];
                 if (trackStrength[i] > envSample) envSample = trackStrength[i];
             }
@@ -1767,12 +1753,26 @@ void CPianoRoll::UpdateNoteStates()
         bool cur = m_activeKeys[i];
         if (!cur) {
             if (effectivePicked &&
-                m_consecActive[i] >= RequiredAttackFrames(i, pickStrength[i], treHiBandMax)) {
+                m_consecActive[i] >= RequiredAttackFrames(i, pickStrength[i], upperMax)) {
                 cur = true;
                 m_consecSilent[i] = 0;
                 ++m_segmentId[i];
+                if (i >= BAND_UPPER_START) {
+                    for (int j = BAND_UPPER_START; j < KEY_COUNT; ++j) {
+                        if (j == i || !m_activeKeys[j]) continue;
+                        const int d = (j > i) ? (j - i) : (i - j);
+                        if (d > 5) continue;
+                        if (PianoKey::IsHarmonicPair(i, j) || PianoKey::IsOctaveRelated(i, j))
+                            continue;
+                        m_activeKeys[j] = false;
+                        m_envPeak[j] = 0.0f;
+                        m_unpickedFrames[j] = 0;
+                        m_strengthDipFrames[j] = 0;
+                        m_consecActive[j] = 0;
+                    }
+                }
                 float envSample = sigStrength;
-                if (i >= BAND_TRE_HI_START) {
+                if (i >= BAND_UPPER_START) {
                     if (pickStrength[i] > envSample) envSample = pickStrength[i];
                     if (trackStrength[i] > envSample) envSample = trackStrength[i];
                 }
@@ -1787,8 +1787,7 @@ void CPianoRoll::UpdateNoteStates()
                 m_strengthDipFrames[i] = 0;
             }
             const int gapLimit = VisGapFrames(i);
-            const int releaseBase = (i >= BAND_TRE_HI_START) ? (RELEASE_FRAMES + 3) : RELEASE_FRAMES;
-            const int releaseLimit = TemporalFrames(i, releaseBase);
+            const int releaseLimit = TemporalFrames(i, RELEASE_FRAMES);
             const bool gapDetected =
                 m_unpickedFrames[i] >= gapLimit ||
                 m_strengthDipFrames[i] >= gapLimit;
@@ -1803,15 +1802,16 @@ void CPianoRoll::UpdateNoteStates()
         m_activeKeys[i] = cur;
     }
 
+    HandoffUpperActiveKeys(pickStrength, picked, m_activeKeys, m_envPeak,
+        m_unpickedFrames, m_strengthDipFrames, m_consecActive);
+
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (!m_activeKeys[i]) {
             m_noteStrength[i] = 0.0f;
             continue;
         }
-        // 表示バー高は包絡ピーク(帯域正規化済み)を使う。生強度だとサステイン中に
-        // 細い線になり、オンセットだけ太いゴーストと混在して見える。
         float disp = m_envPeak[i];
-        if (i >= BAND_TRE_HI_START) {
+        if (i >= BAND_UPPER_START) {
             if (pickStrength[i] > disp) disp = pickStrength[i];
             if (trackStrength[i] > disp) disp = trackStrength[i];
         }
@@ -1902,7 +1902,7 @@ void CPianoRoll::DetectExpressions()
 
     for (int i = 1; i < KEY_COUNT; ++i) {
         if (m_scoopLatch[i] > 0) --m_scoopLatch[i];
-        if (m_activeKeys[i - 1] && i < BAND_TRE_HI_START)
+        if (m_activeKeys[i - 1] && i < BAND_TRE_VIS)
             m_scoopLatch[i] = 5;
     }
 
@@ -1910,7 +1910,7 @@ void CPianoRoll::DetectExpressions()
         m_exprFlags[i] = 0;
         const bool wasActive = m_prevActiveKeys[i];
         const bool nowActive = m_activeKeys[i];
-        const bool hiScatter = (i >= BAND_TRE_HI_START);
+        const bool hiScatter = (i >= BAND_TRE_VIS);
 
         if (!nowActive) {
             m_noteAgeFrames[i] = 0;
