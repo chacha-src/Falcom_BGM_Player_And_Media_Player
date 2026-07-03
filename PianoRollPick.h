@@ -204,16 +204,17 @@ inline void CollapseNearbyPicks(const float* st, bool* active, int lo, int hi, i
         active[items[keepIdx[j]].idx] = true;
 }
 
-inline void RejectUpperHarmonicPicks(const float* st, bool* active, int lo, int hi)
+inline void RejectUpperHarmonicPicks(const float* st, bool* active, int lo, int hi,
+    const bool* lockKeys = nullptr)
 {
     if (!st || !active || lo >= hi) return;
     static const int kUp[] = { 12, 19, 24, 17, 7, 5, 4, 3 };
     for (int i = hi - 1; i >= lo; --i) {
         if (!active[i]) continue;
+        if (lockKeys && lockKeys[i]) continue;
         for (int h : kUp) {
             const int loIdx = i - h;
             if (loIdx < 0) continue;
-            // 下側に同等エネルギーがあれば上音（倍音候補）を除去。active 未選択でも st で判定
             if (st[loIdx] >= st[i] * 0.50f) {
                 active[i] = false;
                 break;
@@ -246,7 +247,8 @@ inline bool BandContainsPeakNear(const float* st, int lo, int hi, int key, int r
 }
 
 // 複音: 偽サブハーモニックと上倍音ゴーストのみ除去（和音の3度/5度は残す）
-inline void ResolveHarmonicPicksLight(const float* st, bool* active, int lo, int hi)
+inline void ResolveHarmonicPicksLight(const float* st, bool* active, int lo, int hi,
+    const bool* lockKeys = nullptr)
 {
     if (!st || !active || lo >= hi) return;
 
@@ -257,16 +259,25 @@ inline void ResolveHarmonicPicksLight(const float* st, bool* active, int lo, int
             if (!PianoKey::IsHarmonicPair(j, i)) continue;
             if (!active[j]) continue;
             if (st[j] >= sc * 0.70f) {
-                active[i] = false;
+                if (lockKeys && lockKeys[i]) {
+                    active[j] = false;
+                }
+                else if (lockKeys && lockKeys[j]) {
+                    // keep locked upper
+                }
+                else {
+                    active[i] = false;
+                }
                 break;
             }
         }
     }
-    RejectUpperHarmonicPicks(st, active, lo, hi);
+    RejectUpperHarmonicPicks(st, active, lo, hi, lockKeys);
 }
 
 // 単音スタック: 倍音整理 + 基音昇格（ハープ等の過検出抑制）
-inline void ResolveHarmonicPicks(const float* st, bool* active, int lo, int hi)
+inline void ResolveHarmonicPicks(const float* st, bool* active, int lo, int hi,
+    const bool* lockKeys = nullptr)
 {
     if (!st || !active || lo >= hi) return;
     const int count = PianoKey::COUNT;
@@ -278,16 +289,24 @@ inline void ResolveHarmonicPicks(const float* st, bool* active, int lo, int hi)
             if (!PianoKey::IsHarmonicPair(j, i)) continue;
             if (!active[j]) continue;
             if (st[j] >= sc * 0.70f) {
-                active[i] = false;
+                if (lockKeys && lockKeys[i]) {
+                    active[j] = false;
+                }
+                else if (lockKeys && lockKeys[j]) {
+                }
+                else {
+                    active[i] = false;
+                }
                 break;
             }
         }
     }
 
-    RejectUpperHarmonicPicks(st, active, lo, hi);
+    RejectUpperHarmonicPicks(st, active, lo, hi, lockKeys);
 
     for (int i = hi - 1; i >= lo; --i) {
         if (!active[i]) continue;
+        if (lockKeys && lockKeys[i]) continue;
         if (PianoKey::PassesFundamentalTest(st, i, count)) continue;
         bool hasMelodicAbove = false;
         for (int j = i + 1; j < hi; ++j) {
@@ -312,6 +331,7 @@ inline void ResolveHarmonicPicks(const float* st, bool* active, int lo, int hi)
         }
         if (bestRoot < 0 || (i - bestRoot) > 14) continue;
         if (bestRootSal >= curSal * 0.78f || st[bestRoot] >= st[i] * 0.42f) {
+            if (lockKeys && lockKeys[bestRoot]) continue;
             active[i] = false;
             active[bestRoot] = true;
         }
@@ -319,15 +339,56 @@ inline void ResolveHarmonicPicks(const float* st, bool* active, int lo, int hi)
 
     for (int i = hi - 1; i >= lo; --i) {
         if (!active[i]) continue;
+        if (lockKeys && lockKeys[i]) continue;
         for (int j = lo; j < i; ++j) {
             if (!active[j]) continue;
             if (!PianoKey::IsHarmonicPair(i, j)) continue;
+            if (lockKeys && lockKeys[j]) continue;
             if (st[j] >= st[i] * 0.32f)
                 active[i] = false;
             else
                 active[j] = false;
             break;
         }
+    }
+}
+
+// 鳴っている音のオクターブをフレーム間で固定（倍音整理の入れ替わりを防ぐ）
+inline void StabilizeOctavePicks(const float* st, bool* picked,
+    const bool* activeKeys, const bool* prevActiveKeys, int lo, int hi)
+{
+    if (!st || !picked || lo >= hi) return;
+
+    for (int i = lo; i < hi; ++i) {
+        if (!activeKeys || !activeKeys[i]) continue;
+        picked[i] = true;
+        for (int d = 12; d <= 24; d += 12) {
+            if (i + d < hi && picked[i + d] && (!activeKeys[i + d]))
+                picked[i + d] = false;
+            if (i - d >= lo && picked[i - d] && st[i] >= st[i - d] * 0.28f)
+                picked[i - d] = false;
+        }
+    }
+
+    if (prevActiveKeys) {
+        for (int i = lo; i < hi - 12; ++i) {
+            if (!prevActiveKeys[i] || (activeKeys && activeKeys[i])) continue;
+            if (!picked[i + 12] || picked[i]) continue;
+            if (st[i] >= st[i + 12] * 0.35f) {
+                picked[i] = true;
+                picked[i + 12] = false;
+            }
+        }
+    }
+
+    for (int i = lo; i < hi - 12; ++i) {
+        if (!picked[i] || !picked[i + 12]) continue;
+        if (activeKeys && (activeKeys[i] || activeKeys[i + 12])) continue;
+        if (prevActiveKeys && (prevActiveKeys[i] || prevActiveKeys[i + 12])) continue;
+        if (st[i] >= st[i + 12] * 0.36f)
+            picked[i + 12] = false;
+        else
+            picked[i] = false;
     }
 }
 

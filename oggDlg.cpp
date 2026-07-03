@@ -17818,7 +17818,9 @@ LRESULT COggDlg::dp2(WPARAM, LPARAM)
 }
 
 // 曲末フェード完了後、再生通知スレッドから PostMessage される。
-// ワーカースレッド上で OnPause/UI 操作をしない（UI フリーズ/デッドロック防止）。
+// ワーカースレッド上で stop()/OnPause を呼ばない（UI フリーズ/デッドロック防止）。
+// スレッドは既に Join 済みなので、DS/デコーダをここで解放し次曲開始時の
+// stop()→play() が二重 Join や停止済みバッファ上でのデコード待ちで固まらないようにする。
 LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 {
 	WaitForPlaybackNotifyThreadExit(g_playbackNotifyJoinTimeoutMs);
@@ -17830,8 +17832,61 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	stf = 0;
 	thn1 = FALSE;
 	thn = TRUE;
+	g_endWrittenBytes = 0;
+	g_dsWrittenBytes = 0;
+	g_heardBytes = 0;
 	eqflg = TRUE;
 	KillTimer(1250);
+	if (m_dsb) {
+		m_dsb->SetVolume(DSBVOLUME_MIN);
+		m_dsb->Stop();
+	}
+	if (pAudioClient)
+		pAudioClient->Stop();
+	Closeds();
+	if (ogg) {
+		ReleaseOggVorbis(&ogg);
+		ogg = NULL;
+	}
+	if (adbuf2) {
+		free(adbuf2);
+		adbuf2 = NULL;
+	}
+	const int stoppingMode = mode;
+	if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
+	if (stoppingMode == -8 && og) flac_.Close(og->kmp);
+	if (stoppingMode == -9 && og) m4a_.Close(og->kmp);
+	if (stoppingMode == -7 && og) dsd_.kpiClose(og->kmp);
+	if (stoppingMode == 999) wav_.Close();
+	kmp = NULL;
+	if (mod) {
+		if (mod->Close) mod->Close(kmp1);
+		if (mod->Deinit) mod->Deinit();
+		FreeLibrary(hDLLk);
+		mod = NULL; kmp1 = NULL; hDLLk = NULL;
+	}
+	if (kpidec) {
+		kpidec->Release();
+		kpidec = NULL;
+	}
+	if (ob5) {
+		ob5->Release();
+		ob5 = NULL;
+	}
+	if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+		g_kpiHost.Close(g_kpiSession.sessionId);
+		ZeroMemory(&g_kpiSession, sizeof(g_kpiSession));
+		g_kpiRemote = false;
+		ResetKpiRemoteCache();
+	}
+	g_kpiPlaybackArch = 0;
+	thend = 1;
+	if (wav) {
+		free(wav);
+		wav = NULL;
+	}
+	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+		m_PianoRollDlg.ResetPlaybackState();
 	ResetPauseButtonUi();
 	if (ptl)
 		ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
@@ -20003,13 +20058,13 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	}
 
 	const ULONG ringBytes = Bufwav3RingBytes();
-	(void)writeCur;
-	// レイテンシクランプは windowBytes に依存する。16384 窓だと Speana(8192) より
-	// 手前を読んで表示が早くなるため、Speana と同じ窓長で readPos を決める。
+	// 窓末尾は Speana と同じ readPos（-800/-1600ms レイテンシ込み）。
+	// PianoRollHeardReadPos（playCursor 直結+キュー補正）は Speana 基準より
+	// 1秒以上手前を読み表示が大幅に早くなるため使わない。
+	// 実音より早いときは extraLatencyMs でさらに過去へずらす（約0.3s早出し報告に対応）
 	const int speanaBytes = speanaFrames * bytesPerFrame;
-	// 追加遅延は0（06.09/06.14と同じ）。早出しの原因は読み取り遅延ではなく
-	// 06.16で入った fastAttack(オンセット即時ON) だったため、そちらを撤去して対応。
-	long prPos = PianoRollWideReadPos(playCur, prBytes, speanaBytes, bytesPerFrame, (int)ringBytes, sampleRate, 0);
+	const int kPianoRollExtraLatencyMs = 700;
+	long prPos = PianoRollWideReadPos(playCur, prBytes, speanaBytes, bytesPerFrame, (int)ringBytes, sampleRate, kPianoRollExtraLatencyMs);
 
 	static std::vector<char> prRaw;
 	static std::vector<double> prMono;

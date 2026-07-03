@@ -164,6 +164,21 @@ namespace PianoKey
         return true;
     }
 
+    // サリエンス補完用: 明らかな上倍音だけ拒否（弱い基音のFM/弦は通す）
+    inline bool SalienceLooksLikeFundamental(const float* st, int candidate, int count)
+    {
+        if (!st || candidate < 0 || candidate >= count) return false;
+        const float sc = st[candidate];
+        if (sc <= 0.0f) return false;
+        static const int kDown[] = { 12, 19, 24, 7, 5 };
+        for (int d : kDown) {
+            const int lo = candidate - d;
+            if (lo < 0) continue;
+            if (st[lo] >= sc * 0.62f) return false;
+        }
+        return true;
+    }
+
     inline bool IsHarmonicOfAnyActive(const float* st, int candidate, const bool* active,
         int bandStart, int bandEnd, int count, float strengthRatio = 0.82f)
     {

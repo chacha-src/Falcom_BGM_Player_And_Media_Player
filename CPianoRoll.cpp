@@ -22,42 +22,41 @@ IMPLEMENT_DYNAMIC(CPianoRoll, CCustomBlurDialogExBase)
 // 基音ピック + NormalizeBandPeak + 包絡ホールドの3本柱で動作する。
 namespace Cfg
 {
-    static constexpr float IIR_ALPHA = 0.40f;       // 中高音 IIR 平滑係数(大きいほど追従が速い)
+    static constexpr float IIR_ALPHA = 0.46f;       // 中高音 IIR（弱いアタックレス音の立ち上がりを速く）
     static constexpr float IIR_ALPHA_BASS = 0.28f;  // 低音はゆっくり追従(倍音影響を抑える)
     static constexpr float SILENCE_ABS = 0.007f;    // 全帯域の絶対無音閾値
     static constexpr float BAND_SILENCE_BASS = 0.005f;
     static constexpr float BAND_SILENCE_MID = 0.004f;
     static constexpr float BAND_SILENCE_TRE = 0.004f;
     static constexpr int   ATTACK_FRAMES = 1;        // ノートオンに必要な連続アクティブフレーム数
-    static constexpr int   RELEASE_FRAMES = 7;       // ノートオフに必要な連続サイレントフレーム数
-    static constexpr int   VIS_GAP_FRAMES = 6;       // 中高音の再トリガーギャップ(視覚的区切り)
+    static constexpr int   RELEASE_FRAMES = 5;       // サステイン維持と高速音のバランス
+    static constexpr int   VIS_GAP_FRAMES = 4;       // 中高音の再トリガーギャップ
     static constexpr int   VIS_GAP_FRAMES_BASS = 2;  // 低音の再トリガーギャップ(低音は長いノートが多い)
-    static constexpr float RETRIGGER_RATIO = 0.32f;  // ピーク比がこれ未満に落ちると再トリガー
+    static constexpr float RETRIGGER_RATIO = 0.28f;  // サステイン中の一瞬の落ち込みを許容
     static constexpr int   BAND_BASS_END = 25;        // 低音帯の上限インデックス(B2相当)
     static constexpr int   BAND_MID_END = 53;
     static constexpr int   BAND_MID_LO_END = 45;     // O3帯 / O4上端で正規化分割(A4付近)
     static constexpr float BASS_PICK_THRESH = 0.20f;
-    // ストリングス(ブロード/持続的でピークが弱い)を拾うため mid/treble を控えめに低減。
-    // 出過ぎ防止のため小幅(約13%)に留める。
-    static constexpr float MID_PICK_THRESH = 0.165f;
-    static constexpr float TRE_PICK_THRESH = 0.14f;
-    static constexpr float PRUNE_BAND_RATIO = 0.11f;
-    static constexpr float PRUNE_TOP_RATIO = 0.17f;
+    // 弱い持続声部(フルート)・短命な打音(ベル)向けに mid/treble 閾値を下げる。
+    static constexpr float MID_PICK_THRESH = 0.100f;
+    static constexpr float TRE_PICK_THRESH = 0.085f;
+    static constexpr float PRUNE_BAND_RATIO = 0.08f;
+    static constexpr float PRUNE_TOP_RATIO = 0.12f;
     static constexpr float HOLD_ENV_BASS = 0.34f;
     static constexpr float HOLD_ENV_MID = 0.21f;
     static constexpr float HOLD_ENV_TRE = 0.19f;
     static constexpr float DISPLAY_PEAK_CAP = 5.0f;
     static constexpr int   ANALYZE_INTERVAL = 1024;
     static constexpr float WEAK_BASS_RATIO = 0.13f;
-    static constexpr float WEAK_MID_RATIO = 0.15f;
-    static constexpr float WEAK_TRE_RATIO = 0.11f;
-    static constexpr int   ONSET_KEY_START = 41;
-    static constexpr float ONSET_DELTA_THRESH = 0.045f;
-    static constexpr float ONSET_MIN_STRENGTH = 0.08f;
+    static constexpr float WEAK_MID_RATIO = 0.10f;
+    static constexpr float WEAK_TRE_RATIO = 0.08f;
+    static constexpr float ONSET_DELTA_THRESH = 0.036f;
+    static constexpr float ONSET_MIN_STRENGTH = 0.065f;
     static constexpr float BASS_ONSET_DELTA_THRESH = 0.034f;
     static constexpr float BASS_ONSET_MIN_STRENGTH = 0.055f;
-    static constexpr float MID_ONSET_DELTA_THRESH = 0.040f;
-    static constexpr float MID_ONSET_MIN_STRENGTH = 0.065f;
+    static constexpr float MID_ONSET_DELTA_THRESH = 0.030f;
+    static constexpr int   ONSET_KEY_START = 41;
+    static constexpr float MID_ONSET_MIN_STRENGTH = 0.050f;
 
     static void NormalizeBandPeak(float* values, int lo, int hi, float cap)
     {
@@ -250,7 +249,7 @@ namespace Cfg
         int f = (int)(baseFrames * scale + 0.5f);
         if (keyIndex >= BAND_MID_END) {
             if (f < 1) f = 1;
-            if (f > 12) f = 12;
+            if (f > 7) f = 7;
         }
         else {
             if (keyIndex < BAND_BASS_END) {
@@ -259,7 +258,7 @@ namespace Cfg
             }
             else {
                 if (f < 2) f = 2;
-                if (f > 20) f = 20;
+                if (f > 12) f = 12;
             }
         }
         return f;
@@ -271,14 +270,11 @@ namespace Cfg
         return TemporalFrames(keyIndex, base);
     }
 
-    // 48kHz超(96k/192k等)では窓の時間長は同じでもHFノイズ・倍音ピークが増えやすい。
-    // 高音ピック/オンセット閾値だけをサンプルレートに応じてわずかに上げる。
+    // 96kHz等でも主ピック閾値は据え置き（上げると埋もれた旋律が拾えない）
     static float TrebleThreshScaleFromSampleRate(int sampleRate)
     {
-        if (sampleRate <= 48000) return 1.0f;
-        float s = 1.0f + 0.10f * ((float)sampleRate - 48000.0f) / 48000.0f;
-        if (s > 1.14f) s = 1.14f;
-        return s;
+        (void)sampleRate;
+        return 1.0f;
     }
 
     static bool IsMelodicNeighbor(int a, int b)
@@ -464,15 +460,13 @@ namespace Cfg
     //   norm = 帯域正規化後の強度（局所ピーク判定・闾値に使用）
     // 合成音検証済み: 基音が弱く2倍音が最強でも、サリエンスは正しい基音に当たる。
     static void ApplyBassHarmonicPick(const float* norm, const float* raw, bool* picked,
-        int bandStart, int bandEnd, float relThresh)
+        int bandStart, int bandEnd, float relThresh, bool supplementalFundamentalOnly = false)
     {
         if (!norm || !raw || picked == nullptr || bandStart >= bandEnd) return;
 
-        // 絶対ノイズ下限: 生強度で帯域に実音が無ければ何もしない（無音時の砂嵐を断つ）
         const float rawBandMax = BandMaxStrength(raw, bandStart, bandEnd);
         if (rawBandMax < 0.0025f) return;
 
-        // 倍音(上方)を基音に足し込む調波サリエンス（フルスペクトル参照）
         float sal[128];
         memset(sal, 0, sizeof(sal));
         float salMax = 0.0f;
@@ -482,9 +476,6 @@ namespace Cfg
             const float h2 = (i + 12 < 88) ? raw[i + 12] : 0.0f;
             const float h3 = (i + 19 < 88) ? raw[i + 19] : 0.0f;
             const float h4 = (i + 24 < 88) ? raw[i + 24] : 0.0f;
-            // 先頭にfを掛けて「基音の存在」を必須化（BuildHarmonicSalienceと同設計）。
-            // 加算式(f + 倍音…)だと基音f≈0でも上の倍音(C3以上の別声部)だけで
-            // 点灯し、鳴っていない低音ゴーストが出る。f乗算でそれを断つ。
             sal[i] = f * (f + h2 * 0.5f + h3 * 0.33f + h4 * 0.25f);
             if (sal[i] > salMax) salMax = sal[i];
         }
@@ -492,7 +483,14 @@ namespace Cfg
 
         const float minSal = salMax * relThresh;
         for (int i = bandStart; i < bandEnd; ++i) {
+            if (supplementalFundamentalOnly && picked[i]) continue;
             if (sal[i] < minSal) continue;
+            if (supplementalFundamentalOnly &&
+                !PianoKey::SalienceLooksLikeFundamental(raw, i, 88))
+                continue;
+            if (supplementalFundamentalOnly &&
+                PianoKey::IsHarmonicOfAnyActive(raw, i, picked, bandStart, bandEnd, 88, 0.70f))
+                continue;
             // 厳格な局所ピーク（±1）: 滲みで隣接鍵が同時点灯するのを防ぐ
             const int jl = (i - 1 < bandStart) ? bandStart : (i - 1);
             const int jh = (i + 1 >= bandEnd) ? (bandEnd - 1) : (i + 1);
@@ -594,6 +592,42 @@ namespace Cfg
         if (best < 0) return;
         if (second >= 0 && bestS < secondS * 1.18f) return;
         picked[best] = true;
+    }
+
+    // 複音BGMの旋律: 基音グリーディが伴奏倍音を拾い、倍音整理で本当の旋律が落ちる。
+    // 帯域内の局所ピークを足す。Salience+倍音チェックでゴーストを抑える。
+    static void SupplementPolyMelodyPeaks(const float* norm, const float* raw, bool* picked,
+        int bandStart, int bandEnd, float relOfBandMax)
+    {
+        if (!norm || !raw || !picked || bandStart >= bandEnd) return;
+        const float bandMax = BandMaxStrength(norm, bandStart, bandEnd);
+        if (bandMax < 1e-6f) return;
+        const float minS = bandMax * relOfBandMax;
+        for (int i = bandStart; i < bandEnd; ++i) {
+            if (picked[i]) continue;
+            if (norm[i] < minS) continue;
+            if (!IsLocalPeakInBand(norm, i, bandStart, bandEnd)) continue;
+            if (!PianoKey::SalienceLooksLikeFundamental(raw, i, 88)) continue;
+            if (PianoKey::IsHarmonicOfAnyActive(norm, i, picked, bandStart, bandEnd, 88, 0.68f))
+                continue;
+            picked[i] = true;
+        }
+    }
+
+    // 複音旋律: 下の音もピック済みで明らかに強いときだけ上の倍音を落とす
+    static void PrunePolyMelodyHarmonicDupes(const float* st, bool* picked, int lo, int hi)
+    {
+        if (!st || !picked || lo >= hi) return;
+        for (int i = hi - 1; i >= lo; --i) {
+            if (!picked[i]) continue;
+            for (int j = lo; j < i; ++j) {
+                if (!picked[j] || !PianoKey::IsHarmonicPair(i, j)) continue;
+                if (st[j] >= st[i] * 0.72f) {
+                    picked[i] = false;
+                    break;
+                }
+            }
+        }
     }
 
 }
@@ -1191,6 +1225,7 @@ void CPianoRoll::UpdateNoteStates()
             memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
             m_smoothedStrengths[i] *= 0.4f;
         }
+        memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
         return;
     }
 
@@ -1226,9 +1261,6 @@ void CPianoRoll::UpdateNoteStates()
     ApplyBandFundamentalPick(pickStrength, picked, BAND_MID_END, KEY_COUNT,
         TRE_PICK_THRESH * pickScale * treSrScale, polyFrame);
 
-    // ストリングス救済(低域ほど弱い対策): 弦はブロードで瞬間ピックが弱いが「持続」する。
-    // 平滑強度(trackStrength)の明確な局所ピークを副ピックで拾う。瞬間的なゴーストは
-    // 平滑値が低いので拾わない＝出過ぎを抑えつつ持続音(ストリングス)だけ拾える。
     {
         auto SustainStringPick = [&](int lo, int hi, float rel) {
             const float trkMax = BandMaxStrength(trackStrength, lo, hi);
@@ -1243,9 +1275,8 @@ void CPianoRoll::UpdateNoteStates()
                     picked[i] = true;
             }
         };
-        // 低い弦ほど拾いにくいので mid 側をやや低閾値、treble はやや高め。
-        SustainStringPick(BAND_BASS_END, BAND_MID_END, 0.30f);
-        SustainStringPick(BAND_MID_END, KEY_COUNT, 0.38f);
+        SustainStringPick(BAND_BASS_END, BAND_MID_END, 0.24f);
+        SustainStringPick(BAND_MID_END, KEY_COUNT, 0.30f);
     }
 
     for (int i = 0; i < KEY_COUNT; ++i) {
@@ -1274,20 +1305,17 @@ void CPianoRoll::UpdateNoteStates()
         ResolveHarmonicPicksLight(pickStrength, picked, 0, BAND_BASS_END);
     }
     else {
-        ResolveHarmonicPicksLight(pickStrength, picked, BAND_BASS_END, LOW_KEY_SPLIT);
+        // 複音時は中高音旋律帯の倍音整理をスキップ（伴奏の下音に飲まれる）
         ResolveHarmonicPicksLight(pickStrength, picked, 0, BAND_BASS_END);
     }
 
-    // O5以上の倍音ゴースト除去:
-    // 高音をクロス帯域整理から外したことで、単音でも下の音の倍音(C5以上に並ぶ)が
-    // 全部ゴースト点灯していた。真の倍音(整数比 IsHarmonicPair)に当たる高音で、
-    // 下に明確な基音(picked かつ生強度が一定以上)があるものだけ除去する。
-    // 和音・旋律の音程は整数比でないため残り、単音の倍音だけが消える。
     for (int i = LOW_KEY_SPLIT; i < KEY_COUNT; ++i) {
         if (!picked[i]) continue;
         for (int j = 0; j < i; ++j) {
             if (!PianoKey::IsHarmonicPair(i, j)) continue;
-            if (pickStrength[j] >= pickStrength[i] * 0.48f) {
+            if (polyFrame && !picked[j]) continue;
+            const float stripRatio = polyFrame ? 0.60f : 0.48f;
+            if (pickStrength[j] >= pickStrength[i] * stripRatio) {
                 picked[i] = false;
                 break;
             }
@@ -1300,8 +1328,9 @@ void CPianoRoll::UpdateNoteStates()
     SnapPicksToLocalMaxima(pickStrength, picked, 0, 15, 4);
     SnapPicksToLocalMaxima(pickStrength, picked, 15, BAND_BASS_END, 3);
     SnapPicksToLocalMaxima(pickStrength, picked, BAND_BASS_END, BAND_MID_LO_END, 2);
-    // 高音域も中低音と同様に局所ピークへ収束・近接統合(未処理だとHFゴーストが密集する)
-    ResolveHarmonicPicksLight(pickStrength, picked, BAND_MID_END, KEY_COUNT);
+    // 複音時は高音旋律を倍音整理で落としやすいのでスキップ（単音時のみ整理）
+    if (!polyFrame)
+        ResolveHarmonicPicksLight(pickStrength, picked, BAND_MID_END, KEY_COUNT);
     SnapPicksToLocalMaxima(pickStrength, picked, BAND_MID_LO_END, BAND_MID_END, 1);
     SnapPicksToLocalMaxima(pickStrength, picked, BAND_MID_END, KEY_COUNT, 1);
     CollapseNearbyPicks(pickStrength, picked, 0, 15, 4, false);
@@ -1309,7 +1338,13 @@ void CPianoRoll::UpdateNoteStates()
     CollapseNearbyPicks(pickStrength, picked, BAND_BASS_END, BAND_MID_LO_END, 2, false);
     CollapseNearbyPicks(pickStrength, picked, BAND_MID_LO_END, BAND_MID_END, 2, false);
     CollapseNearbyPicks(pickStrength, picked, BAND_MID_END, KEY_COUNT, 2, false);
-    FilterWeakIsolatedOutliers(pickStrength, picked, BAND_MID_END, KEY_COUNT, 0.22f);
+    FilterWeakIsolatedOutliers(pickStrength, picked, BAND_MID_END, KEY_COUNT, 0.20f);
+    if (polyFrame) {
+        SupplementPolyMelodyPeaks(pickStrength, m_rawStrengths, picked,
+            BAND_MID_LO_END, KEY_COUNT, 0.12f);
+        PrunePolyMelodyHarmonicDupes(pickStrength, picked, BAND_MID_LO_END, KEY_COUNT);
+        FilterWeakIsolatedOutliers(pickStrength, picked, BAND_MID_LO_END, KEY_COUNT, 0.21f);
+    }
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         bassPick[i] = midPick[i] = treblePick[i] = false;
@@ -1337,7 +1372,7 @@ void CPianoRoll::UpdateNoteStates()
             const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
             if (onsetDelta >= MID_ONSET_DELTA_THRESH &&
                 m_onsetStrengths[i] >= MID_ONSET_MIN_STRENGTH &&
-                pickStrength[i] >= MID_PICK_THRESH * pickScale * 0.48f &&
+                pickStrength[i] >= MID_PICK_THRESH * pickScale * 0.40f &&
                 !PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked, 0, KEY_COUNT, KEY_COUNT, 0.80f))
                 effectivePicked = true;
         }
@@ -1346,7 +1381,7 @@ void CPianoRoll::UpdateNoteStates()
             const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
             if (onsetDelta >= ONSET_DELTA_THRESH * treSrScale &&
                 m_onsetStrengths[i] >= ONSET_MIN_STRENGTH * treSrScale &&
-                pickStrength[i] >= TRE_PICK_THRESH * pickScale * 0.68f * treSrScale &&
+                pickStrength[i] >= TRE_PICK_THRESH * pickScale * 0.55f * treSrScale &&
                 IsLocalPeakInBand(pickStrength, i, BAND_MID_END, KEY_COUNT) &&
                 !PianoKey::IsHarmonicOfAnyActive(pickStrength, i, picked, 0, KEY_COUNT, KEY_COUNT))
                 effectivePicked = true;
@@ -1408,9 +1443,6 @@ void CPianoRoll::UpdateNoteStates()
 
         bool cur = m_activeKeys[i];
         if (!cur) {
-            // 06.14のアタック挙動に復帰: オンセット即時ON(fastAttack)は使わず、
-            // 窓検出の蓄積(consecActive)でのみ点灯させる。fastAttackは直近の短窓で
-            // アタックを捉えて約186ms早く点灯し、実音より前にノートが出る原因だった。
             if (effectivePicked && m_consecActive[i] >= TemporalFrames(i, ATTACK_FRAMES)) {
                 cur = true;
                 m_consecSilent[i] = 0;
@@ -1450,6 +1482,7 @@ void CPianoRoll::UpdateNoteStates()
         // 細い線になり、オンセットだけ太いゴーストと混在して見える。
         float disp = m_envPeak[i];
         if (disp <= 0.0f) disp = pickStrength[i];
+        if (disp <= 0.0f) disp = trackStrength[i];
         if (disp <= 0.0f) disp = m_rawStrengths[i];
         m_noteStrength[i] = disp;
     }

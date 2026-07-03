@@ -2088,12 +2088,17 @@ void CMediaPlayerDlg::OnPaint()
 	// RestoreDC 後に個別で CCC_ClearRectChroma を呼んで明示的にクロマクリアする。
 	if (savedata.aero == 1 && CCC_IsWin11()) {
 		CPaintDC dc(this);
-		// 更新領域がバナーに重なる時だけバナーを Blit する。
-		// info パネルのスクロール tick(30fps)では clip=infoPanelRect となり、
-		// アクリル時に重い BlitVisualizer(毎回 DIB 生成+バッファペイント)を回避する。
 		CRect clipBox; dc.GetClipBox(&clipBox);
+		auto clipInside = [](const CRect& clip, const CRect& rect) -> bool {
+			return !rect.IsRectEmpty()
+				&& rect.PtInRect(clip.TopLeft()) && rect.PtInRect(clip.BottomRight());
+		};
+		// サイドパネルだけの再描画(曲情報スクロール等)では gap クリアをしない。
+		// アクリル gap クリア→再描画の1フレーム空白が曲番号 GDI のちらつきになる。
+		const bool sidePanelOnly =
+			clipInside(clipBox, m_infoPanelRect) || clipInside(clipBox, m_jacketRect);
 		bool hitBanner = !m_bannerRect.IsRectEmpty() && CRect().IntersectRect(&clipBox, &m_bannerRect);
-		{
+		if (!sidePanelOnly) {
 			int saved = dc.SaveDC();
 			CCC_PaintDialogAeroGaps(dc, this, &m_bannerRect);
 			dc.RestoreDC(saved);
