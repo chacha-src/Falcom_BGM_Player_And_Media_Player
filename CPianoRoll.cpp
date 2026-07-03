@@ -747,26 +747,68 @@ namespace Cfg
         }
     }
 
-    // 剪定後も鳴り続けている O6+ ベルを拾い直す
-    static void ReinstateActiveHighBells(const float* norm, bool* picked, const bool* activeKeys)
+    // 中音基音の倍音が帯域別正規化で高音に独立音として漏れるのを抑える
+    static bool TrebleLooksIndependentOfMid(const float* norm, const float* raw, int keyIndex)
     {
-        if (!norm || !picked || !activeKeys) return;
+        if (!norm || !raw || keyIndex < BAND_MID_END) return true;
+        const int treHi = 88;
+        if (keyIndex >= BAND_TRE_HI_START) {
+            const float hiMax = BandMaxStrength(norm, BAND_TRE_HI_START, treHi);
+            return PianoKey::SalienceLooksLikeFundamental(raw, keyIndex, treHi) &&
+                norm[keyIndex] >= hiMax * 0.56f;
+        }
+        const float loMax = BandMaxStrength(norm, BAND_MID_END, BAND_TRE_HI_START);
+        return PianoKey::SalienceLooksLikeFundamental(raw, keyIndex, treHi) &&
+            norm[keyIndex] >= loMax * 0.60f;
+    }
+
+    static bool IsMidHarmonicLeak(const float* norm, const float* raw, int treKey,
+        const bool* picked, const bool* activeKeys)
+    {
+        if (!norm || !raw || treKey < BAND_MID_END) return false;
+        for (int j = BAND_BASS_END; j < BAND_MID_END; ++j) {
+            if (!picked[j] && !(activeKeys && activeKeys[j])) continue;
+            if (!PianoKey::IsHarmonicPair(treKey, j) && !PianoKey::IsOctaveRelated(treKey, j))
+                continue;
+            if (raw[j] >= raw[treKey] * 0.20f)
+                return !TrebleLooksIndependentOfMid(norm, raw, treKey);
+        }
+        return false;
+    }
+
+    static void SuppressCrossBandHarmonicLeaks(const float* norm, const float* raw,
+        bool* picked, const bool* activeKeys)
+    {
+        if (!norm || !raw || !picked) return;
+        for (int i = BAND_MID_END; i < 88; ++i) {
+            if (!picked[i]) continue;
+            if (IsMidHarmonicLeak(norm, raw, i, picked, activeKeys))
+                picked[i] = false;
+        }
+    }
+
+    // 剪定後も鳴り続けている O6+ ベルを拾い直す（中音倍音は復活させない）
+    static void ReinstateActiveHighBells(const float* norm, const float* raw,
+        bool* picked, const bool* activeKeys)
+    {
+        if (!norm || !raw || !picked || !activeKeys) return;
         const int lo = BAND_TRE_HI_START;
         const int hi = 88;
         const float bandMax = BandMaxStrength(norm, lo, hi);
         if (bandMax < 1e-6f) return;
         for (int i = lo; i < hi; ++i) {
             if (!activeKeys[i]) continue;
+            if (IsMidHarmonicLeak(norm, raw, i, picked, activeKeys)) continue;
             if (norm[i] >= bandMax * 0.13f)
                 picked[i] = true;
         }
     }
 
     // O6+ 打楽器: 倍音が乏しい純音。Salience なしで局所ピークを足す。
-    static void SupplementHighBellPeaks(const float* norm, bool* picked,
+    static void SupplementHighBellPeaks(const float* norm, const float* raw, bool* picked,
         int bandStart, int bandEnd, float relOfBandMax)
     {
-        if (!norm || !picked || bandStart >= bandEnd) return;
+        if (!norm || !raw || !picked || bandStart >= bandEnd) return;
         const int peaks = CountSpectralPeaksInBand(norm, bandStart, bandEnd, 0.09f);
         if (peaks >= 8) return;
         const float bandMax = BandMaxStrength(norm, bandStart, bandEnd);
@@ -777,6 +819,7 @@ namespace Cfg
             if (norm[i] < minS) continue;
             if (!IsLocalPeakInBand(norm, i, bandStart, bandEnd)) continue;
             if (norm[i] < bandMax * 0.32f) continue;
+            if (IsMidHarmonicLeak(norm, raw, i, picked, nullptr)) continue;
             if (PianoKey::IsHarmonicOfAnyActive(norm, i, picked, bandStart, bandEnd, 88, 0.74f))
                 continue;
             picked[i] = true;
@@ -1530,11 +1573,21 @@ void CPianoRoll::UpdateNoteStates()
         if (polyFrame && i >= BAND_TRE_HI_START) continue;
         for (int j = 0; j < i; ++j) {
             if (!PianoKey::IsHarmonicPair(i, j)) continue;
-            if (polyFrame && !picked[j]) continue;
-            const float stripRatio = polyFrame ? 0.60f : 0.48f;
-            if (pickStrength[j] >= pickStrength[i] * stripRatio) {
-                picked[i] = false;
-                break;
+            if (polyFrame && !picked[j] && !m_activeKeys[j]) continue;
+            const bool crossBand = (j < BAND_MID_END && i >= BAND_MID_END);
+            if (crossBand) {
+                if (m_rawStrengths[j] >= m_rawStrengths[i] * 0.24f &&
+                    !TrebleLooksIndependentOfMid(pickStrength, m_rawStrengths, i)) {
+                    picked[i] = false;
+                    break;
+                }
+            }
+            else {
+                const float stripRatio = polyFrame ? 0.60f : 0.48f;
+                if (pickStrength[j] >= pickStrength[i] * stripRatio) {
+                    picked[i] = false;
+                    break;
+                }
             }
         }
     }
@@ -1561,9 +1614,10 @@ void CPianoRoll::UpdateNoteStates()
     CollapseNearbyPicks(pickStrength, picked, BAND_TRE_HI_START, KEY_COUNT, 3, false);
     FilterWeakIsolatedOutliers(pickStrength, picked, BAND_MID_END, BAND_TRE_HI_START, 0.21f);
     FilterWeakIsolatedOutliers(pickStrength, picked, BAND_TRE_HI_START, KEY_COUNT, 0.30f);
-    SupplementHighBellPeaks(pickStrength, picked, BAND_TRE_HI_START, KEY_COUNT, 0.085f);
+    SupplementHighBellPeaks(pickStrength, m_rawStrengths, picked, BAND_TRE_HI_START, KEY_COUNT, 0.085f);
     PruneHighFrequencyClutter(pickStrength, picked, m_activeKeys);
-    ReinstateActiveHighBells(pickStrength, picked, m_activeKeys);
+    ReinstateActiveHighBells(pickStrength, m_rawStrengths, picked, m_activeKeys);
+    SuppressCrossBandHarmonicLeaks(pickStrength, m_rawStrengths, picked, m_activeKeys);
     if (polyFrame) {
         SupplementPolyMelodyPeaks(pickStrength, m_rawStrengths, picked,
             BAND_MID_LO_END, BAND_TRE_HI_START, 0.12f);
@@ -1591,6 +1645,10 @@ void CPianoRoll::UpdateNoteStates()
         const float sigStrength = pickStrength[i];
         bool effectivePicked = picked[i];
 
+        if (effectivePicked && i >= BAND_MID_END &&
+            IsMidHarmonicLeak(pickStrength, m_rawStrengths, i, picked, m_activeKeys))
+            effectivePicked = false;
+
         if (!effectivePicked && i < BAND_BASS_END) {
             const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
             if (onsetDelta >= BASS_ONSET_DELTA_THRESH &&
@@ -1613,8 +1671,8 @@ void CPianoRoll::UpdateNoteStates()
             const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
             const bool strongBell = (treHiBandMax > 1e-6f &&
                 pickStrength[i] >= treHiBandMax * 0.44f);
-            const bool continuing = m_activeKeys[i] &&
-                pickStrength[i] >= treHiBandMax * 0.12f;
+            const bool continuing = m_activeKeys[i] && pickStrength[i] >= treHiBandMax * 0.12f &&
+                !IsMidHarmonicLeak(pickStrength, m_rawStrengths, i, picked, m_activeKeys);
             if (continuing) {
                 effectivePicked = true;
             }

@@ -20063,59 +20063,77 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	// PianoRollHeardReadPos（playCursor 直結+キュー補正）は Speana 基準より
 	// 1秒以上手前を読み表示が大幅に早くなるため使わない。
 	// 実音より早いときは extraLatencyMs でさらに過去へずらす（約0.3s早出し報告に対応）
-	const int speanaBytes = speanaFrames * bytesPerFrame;
 	const int kPianoRollExtraLatencyMs = 700;
+	const int speanaBytes = speanaFrames * bytesPerFrame;
 	long prPos = PianoRollWideReadPos(playCur, prBytes, speanaBytes, bytesPerFrame, (int)ringBytes, sampleRate, kPianoRollExtraLatencyMs);
 
 	static std::vector<char> prRaw;
+	static std::vector<char> meterRaw;
 	static std::vector<double> prMono;
 	if (prRaw.size() < (size_t)prBytes) prRaw.resize(prBytes);
 	if (prMono.size() < (size_t)prFrames) prMono.resize(prFrames);
 
 	const char* srcBufBase = (const char*)bufwav3;
-	char* prDst = prRaw.data();
-	if (prPos + prBytes <= TOTAL_BUF_BYTES) {
-		memcpy(prDst, srcBufBase + prPos, prBytes);
-	}
-	else {
-		const int firstPart = TOTAL_BUF_BYTES - prPos;
-		const int secondPart = prBytes - firstPart;
-		if (firstPart < 0 || secondPart < 0) return;
-		memcpy(prDst, srcBufBase + prPos, firstPart);
-		memcpy(prDst + firstPart, srcBufBase, secondPart);
-	}
+	auto ReadRingPcm = [&](long bytePos, int byteCount, char* dst) -> bool {
+		if (bytePos < 0 || byteCount <= 0) return false;
+		if (bytePos + byteCount <= TOTAL_BUF_BYTES) {
+			memcpy(dst, srcBufBase + bytePos, byteCount);
+			return true;
+		}
+		const int firstPart = TOTAL_BUF_BYTES - (int)bytePos;
+		const int secondPart = byteCount - firstPart;
+		if (firstPart < 0 || secondPart < 0) return false;
+		memcpy(dst, srcBufBase + bytePos, firstPart);
+		memcpy(dst + firstPart, srcBufBase, secondPart);
+		return true;
+		};
 
-	auto GetSampleValue = [&](int sampleIndex, int chIndex) -> double {
+	char* prDst = prRaw.data();
+	if (!ReadRingPcm(prPos, prBytes, prDst))
+		return;
+
+	auto GetSampleValueFrom = [&](const char* pcmBase, int sampleIndex, int chIndex) -> double {
 		const int offset = sampleIndex * bytesPerFrame + chIndex * bytesPerSample;
-		if (bitDepth == 16) return (double)(*(short*)(prDst + offset)) / 32768.0;
+		if (bitDepth == 16) return (double)(*(const short*)(pcmBase + offset)) / 32768.0;
 		if (bitDepth == 24) {
-			unsigned char* p = (unsigned char*)(prDst + offset);
+			const unsigned char* p = (const unsigned char*)(pcmBase + offset);
 			int val = (p[0]) | (p[1] << 8) | (p[2] << 16);
 			if (val & 0x800000) val |= 0xFF000000;
 			return (double)val / 8388608.0;
 		}
-		if (bitDepth == 32) return (double)(*(int*)(prDst + offset)) / 2147483648.0;
-		if (bitDepth == 8) return ((double)(*(unsigned char*)(prDst + offset)) - 128.0) / 128.0;
+		if (bitDepth == 32) return (double)(*(const int*)(pcmBase + offset)) / 2147483648.0;
+		if (bitDepth == 8) return ((double)(*(const unsigned char*)(pcmBase + offset)) - 128.0) / 128.0;
 		return 0.0;
 		};
 
 	const int meterCh = (channels < 1) ? 1 : ((channels > CPianoRoll::PIANO_METER_CH_MAX) ? CPianoRoll::PIANO_METER_CH_MAX : channels);
-	// メーターは直近のみ（16384 全体だと常にピーク張り付きで動かない）
-	static const int kMeterFrames = 2048;
-	const int meterStart = (prFrames > kMeterFrames) ? (prFrames - kMeterFrames) : 0;
-	const int meterN = prFrames - meterStart;
+	// dBメーター: ピアノロール/スペアナと同じ同期点末尾の短窓（44100Hz で ~46ms）
+	const int meterFrames = CPianoRoll::ScaleWinSamples(2048, srInt);
+	const int meterBytes = meterFrames * bytesPerFrame;
 	std::vector<double> chPeak((size_t)meterCh, 0.0);
 	std::vector<double> chSumSq((size_t)meterCh, 0.0);
-
-	for (int i = 0; i < prFrames; ++i) {
-		if (i >= meterStart) {
-			for (int ch = 0; ch < meterCh; ++ch) {
-				const double a = fabs(GetSampleValue(i, ch));
-				if (a > chPeak[ch]) chPeak[ch] = a;
-				chSumSq[ch] += a * a;
+	int meterN = 0;
+	if (meterBytes > 0) {
+		if (meterRaw.size() < (size_t)meterBytes) meterRaw.resize(meterBytes);
+		const long meterPos = SpeanaAnalysisReadPos(playCur, meterBytes, bytesPerFrame, (int)ringBytes, sampleRate, kPianoRollExtraLatencyMs);
+		if (ReadRingPcm(meterPos, meterBytes, meterRaw.data())) {
+			const char* mDst = meterRaw.data();
+			meterN = meterFrames;
+			for (int i = 0; i < meterFrames; ++i) {
+				for (int ch = 0; ch < meterCh; ++ch) {
+					const double a = fabs(GetSampleValueFrom(mDst, i, ch));
+					if (a > chPeak[ch]) chPeak[ch] = a;
+					chSumSq[ch] += a * a;
+				}
 			}
 		}
+	}
 
+	auto GetSampleValue = [&](int sampleIndex, int chIndex) -> double {
+		return GetSampleValueFrom(prDst, sampleIndex, chIndex);
+		};
+
+	for (int i = 0; i < prFrames; ++i) {
 		double smpL = 0.0, smpR = 0.0;
 		if (channels <= 2) {
 			smpL = GetSampleValue(i, 0);
