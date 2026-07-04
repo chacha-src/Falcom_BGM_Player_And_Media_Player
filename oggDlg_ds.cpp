@@ -337,7 +337,10 @@ void SignalPlaybackNotifyThreadStop()
 		og->timer.SetEvent();
 }
 
-void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
+// 戻り値: 再生スレッドが確実に終了したとき TRUE。FALSE のときデコーダを閉じてはならない。
+// Join 中は DoEvent しない（再入で stop1/play が走り、生存中スレッドのデコーダを
+// 二重解放したり、新スレッドのポインタを上書きして UAF になる）。
+BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 {
 	HANDLE hThread = NULL;
 	{
@@ -345,67 +348,68 @@ void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 		if (s_playNotifyThread && s_playNotifyThread->m_hThread)
 			hThread = s_playNotifyThread->m_hThread;
 	}
-	// スレッド未起動なら thn 待ちで 15 秒ブロックしない（固まりの主因の一つ）
+	// スレッド未起動なら thn 待ちでブロックしない
 	if (!hThread) {
-		// ハンドルが取れない CWinThread が残っていれば破棄してリークを防ぐ
 		CSingleLock lk(&s_playNotifyThreadCs, TRUE);
 		if (s_playNotifyThread) {
 			delete s_playNotifyThread;
 			s_playNotifyThread = nullptr;
 		}
 		thn = TRUE;
-		thn1 = FALSE;
 		syukai = 0;
 		syukai2 = 1;
-		return;
+		return TRUE;
 	}
 
-	DWORD elapsed = 0;
+	// 再生スレッドが終わるまで待つ。途中で破棄すると flac/m4a/dsd/wav 切替時に
+	// playwav* が解放済みデコーダ/adbuf2 を触ってクラッシュする。
+	// timeoutMs==0 のときは無限待ち。非0 は上限（通常は無限で呼ぶ）。
 	const DWORD pollMs = 10;
-	BOOL timedOut = FALSE;
+	DWORD elapsed = 0;
+	BOOL exited = FALSE;
 	for (;;) {
+		// 停止要求を維持（Join 中に他経路で thn1/stf が落ちても再開させない）
+		thn1 = TRUE;
+		stf = 1;
+		syukai = 2;
 		const DWORD w = WaitForSingleObject(hThread, pollMs);
-		if (w == WAIT_OBJECT_0)
-			break;
-		if (og)
-			og->timer.SetEvent();
-		DoEvent();
-		elapsed += pollMs;
-		if (elapsed >= timeoutMs) {
-			timedOut = TRUE;
+		if (w == WAIT_OBJECT_0) {
+			exited = TRUE;
 			break;
 		}
-	}
-	// タイムアウト後に 2000 回 DoEvent すると曲連打時に UI が長時間固まるため短い猶予のみ
-	const int graceIters = timedOut ? 30 : 8;
-	for (int i = 0; i < graceIters; ++i) {
-		if (WaitForSingleObject(hThread, 0) == WAIT_OBJECT_0)
-			break;
 		if (og)
 			og->timer.SetEvent();
-		DoEvent();
-		if ((i % 5) == 4)
-			Sleep(1);
+		if (timeoutMs != 0) {
+			elapsed += pollMs;
+			if (elapsed >= timeoutMs)
+				break;
+		}
 	}
-	{
-		// m_bAutoDelete=FALSE で生成しているため、ここで明示的に破棄する。
-		// （自動破棄に任せるとスレッド自己終了時に s_playNotifyThread が
-		//   ダングリングになり、次回 stop で無効ハンドルを待って固まる）
+
+	// スレッド生存中に CWinThread を delete しない（UAF）
+	if (exited) {
 		CSingleLock lk(&s_playNotifyThreadCs, TRUE);
 		if (s_playNotifyThread) {
 			delete s_playNotifyThread;
 			s_playNotifyThread = nullptr;
 		}
+		thn = TRUE;
+		syukai = 0;
+		syukai2 = 1;
 	}
-	thn = TRUE;
-	thn1 = FALSE;
-	syukai = 0;
-	syukai2 = 1;
+	// thn1/stf は呼び出し側がデコーダ解放後に落とす（ここで落とすと解放前にデコード再開し得る）
+	return exited;
 }
+
+extern int g_openDecoderMode;
 
 void BeginPlaybackNotifyThread()
 {
-	WaitForPlaybackNotifyThreadExit(g_playbackNotifyJoinTimeoutMs);
+	// 旧スレッドが残っている間は新スレッドを立てない（ポインタ上書きで Join 不能になる）
+	if (!WaitForPlaybackNotifyThreadExit(0))
+		return;
+	// この時点の mode が「実際に再生するデコーダ形式」（stop1 はこれを見て閉じる）
+	g_openDecoderMode = mode;
 	// CREATE_SUSPENDED で起動し、スレッド本体が走り出す前に m_bAutoDelete を
 	// 落として寿命を自前管理する。これによりスレッドが自己終了しても
 	// CWinThread オブジェクトとスレッドハンドルは破棄されず、安全に Join できる。
@@ -444,7 +448,8 @@ UINT HandleNotifications(LPVOID)
 	oldw = 0;
 	if (isPlausibleDsb(m_dsb))
 		m_dsb->SetCurrentPosition(0);
-	if (mode == -10 || mode == 999) {
+	// mode ではなく Open 中の形式（曲切替で mode が先に変わる）
+	if (g_openDecoderMode == -10 || g_openDecoderMode == 999) {
 		oldw = OUTPUT_BUFFER_SIZE * 2;
 		og->timer.SetEvent();
 	}
@@ -525,7 +530,7 @@ UINT HandleNotifications(LPVOID)
 		if (thn1)
 			return stopPlaybackAndExit();
 		sflg = TRUE;
-		DispatchPlaywavFill(bufwav3, oldw, len1, len2);
+		if(m_dsb)DispatchPlaywavFill(bufwav3, oldw, len1, len2);
 		// 曲最後まで行ったとき
 		const int readmeThisCycle = readme; // 終端確定に使うため reset 前に退避
 		if (readme) {

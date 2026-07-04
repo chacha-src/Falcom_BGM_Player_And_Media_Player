@@ -41,8 +41,12 @@ public:
     void AnalyzePlayCursorMono(const double* mono, int frameCount, int sampleRate);
     // チャンネル別 dB を受け取りメーターバーへ反映(レベルメーターは Goertzel 非依存)
     void SetChannelMeterDb(const float* dbPerChannel, int channelCount);
-    // 曲切替時などに分析状態/リングバッファ/ノート履歴を全クリア
+    // stop/曲切替の先頭で呼ぶ。DoEvent より前に解析を止める
+    void PauseAnalysis();
+    // 曲切替時などに分析状態を全クリアし、解析ワーカーを作り直す
     void ResetPlaybackState();
+    // 再生スレッド稼働後に解析を再開する
+    void ResumePlaybackFeed();
     // ウィンドウ破棄前に呼ぶ。ワーカースレッド停止と GDI バッファ解放を安全に行う
     void DetachForDestroy();
 
@@ -182,6 +186,8 @@ private:
     HANDLE           m_hAnalysisWake = NULL;   // SetEvent でワーカーを起こすイベント
     volatile LONG    m_workerStop = 0;    // 1 にするとワーカーが自己終了
     volatile LONG    m_jobPending = 0;    // InterlockedExchange で管理するジョブ有無フラグ
+    volatile LONG    m_analysisBusy = 0;  // ProcessAnalysisJob 実行中
+    volatile LONG    m_analysisEpoch = 0; // Reset ごとに加算。古いジョブを破棄
     std::vector<double> m_jobMono;  // m_jobCs 保護下でコピーされる入力バッファ
     std::vector<double> m_workerMonoScratch;
     int              m_jobFrameCount = 0;
@@ -212,8 +218,11 @@ private:
     void PushFrame(bool requestUiInvalidate);  // 確定フレームを履歴リングバッファへ追加
     void StartAnalysisWorker();
     void StopAnalysisWorker();
+    // 死亡/停止済みワーカーを検出して再起動。Resume/解析投入のたびに呼ぶ
+    bool EnsureAnalysisWorkerAlive();
     DWORD AnalysisWorkerLoop();
     bool ProcessAnalysisJob();  // ワーカースレッド内。ジョブバッファの Goertzel 解析を実行
+    bool ProcessAnalysisJobBody(const double* mono, int frameCount, int sampleRate, LONG epochAtStart);
     static DWORD WINAPI AnalysisWorkerThreadEntry(LPVOID param);
     int  HistoryCountLocked() const;
     void CopyHistorySnapshot(NoteFrame* out, int maxOut, int& outCount) const;

@@ -165,7 +165,7 @@ public:
 	//}}AFX_DATA
 	void play();
 	void stop();
-	void stop1();
+	BOOL stop1();
 	void ResetPauseButtonUi();
 	void SyncPauseButtonUi();
 	void RefreshAllAeroWindows();

@@ -215,7 +215,8 @@ inline void RejectUpperHarmonicPicks(const float* st, bool* active, int lo, int 
         for (int h : kUp) {
             const int loIdx = i - h;
             if (loIdx < 0) continue;
-            if (st[loIdx] >= st[i] * 0.50f) {
+            // 上の方が明らかに弱いときだけ倍音ゴースト。強い上声部は独立した音。
+            if (st[i] <= st[loIdx] * 0.70f) {
                 active[i] = false;
                 break;
             }

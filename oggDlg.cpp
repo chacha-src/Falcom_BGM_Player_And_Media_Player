@@ -258,6 +258,31 @@ static inline bool IsPlaybackStopRequested()
 {
 	return thn1 != FALSE || stf != 0;
 }
+
+// play/stop/stop1 の DoEvent 再入でデコーダを二重解放しないためのガード（UI スレッド専用）
+static bool s_inPlay = false;
+static bool s_inStop1 = false;
+
+// 実際に Open 中のデコーダ形式。playlist Get() が mode を次曲に差し替えても、
+// stop/stop1 はこちらで正しいデコーダを閉じる（停止ボタンでは mode が一致するため落ちない）。
+int g_openDecoderMode = INT_MIN;
+
+static int PeekOpenDecoderMode(int fallbackMode)
+{
+	return (g_openDecoderMode != INT_MIN) ? g_openDecoderMode : fallbackMode;
+}
+
+static void ClearOpenDecoderMode()
+{
+	g_openDecoderMode = INT_MIN;
+}
+
+// 再生スレッド用。playlist Get() が mode を次曲に差し替えても、Open 中の形式だけをデコードする。
+// INT_MIN のときはデコーダ無し（解放済み）なので mode にフォールバックしない。
+static inline int ActiveDecodeMode()
+{
+	return g_openDecoderMode;
+}
 LPDIRECTSOUND8 m_ds;
 LPDIRECTSOUNDBUFFER m_dsb1 = NULL;
 LPDIRECTSOUNDBUFFER8 m_dsb = NULL;
@@ -272,7 +297,7 @@ UINT HandleNotifications(LPVOID lpvoid);
 UINT WASAPIHandleNotifications(LPVOID lpvoid);
 void HandleNotifications_export();  // WAV出力専用（DirectSoundなし、ファイル書き込みのみ）
 void SignalPlaybackNotifyThreadStop();
-void WaitForPlaybackNotifyThreadExit(DWORD timeoutMs = 2500);
+BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs = 2500);
 extern DWORD g_playbackNotifyJoinTimeoutMs;
 extern volatile LONG g_interactiveTrackChange;
 void BeginPlaybackNotifyThread();
@@ -1136,7 +1161,8 @@ int Mp3GetDecoderBitsForRubberBand(void)
 static int PcmOutBytesPerFrame()
 {
 	int bits;
-	if (mode == -10) {
+	// 再生スレッドからも呼ばれる。mode ではなく Open 中の形式を見る
+	if (ActiveDecodeMode() == -10) {
 		bits = Mp3DecoderBitsClampedFromObject();
 	}
 	else {
@@ -1276,19 +1302,22 @@ static void ApplyFadeCubedToInterleavedPcm(void* data, int byteLen)
 
 static void DecodeSourceIntoScratch(uint8_t* scratch, int sb)
 {
-	if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
+	const int dm = ActiveDecodeMode();
+	if (dm == INT_MIN)
+		return;
+	if ((dm >= 10 && dm <= 21) || dm < -10 || dm == -6 || dm == 30 || (dm == 999 && wav999_use_adbuf))
 		playwavBuffwav(scratch, 0, sb, 0);
-	else if (mode == -10)
+	else if (dm == -10)
 		playwavmp3(scratch, 0, sb, 0);
-	else if (mode == 999)
+	else if (dm == 999)
 		playwavwav(scratch, 0, sb, 0);
-	else if (mode == -3)
+	else if (dm == -3)
 		playwavkpi(scratch, 0, sb, 0);
-	else if (mode == -7)
+	else if (dm == -7)
 		playwavdsd(scratch, 0, sb, 0);
-	else if (mode == -8)
+	else if (dm == -8)
 		playwavflac(scratch, 0, sb, 0);
-	else if (mode == -9)
+	else if (dm == -9)
 		playwavm4a(scratch, 0, sb, 0);
 	else
 		playwavds2(scratch, 0, sb, 0);
@@ -1332,20 +1361,24 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 {
 	if (IsPlaybackStopRequested())
 		return;
+	// mode は Get()/次曲選択で先に書き換わる。再生スレッドは Open 中の形式だけ見る。
+	const int dm = ActiveDecodeMode();
+	if (dm == INT_MIN)
+		return;
 	if (!g_pcm_upscale_active || len1 + len2 <= 0) {
-		if ((mode >= 10 && mode <= 21) || mode < -10 || mode == -6 || mode == 30 || (mode == 999 && wav999_use_adbuf))
+		if ((dm >= 10 && dm <= 21) || dm < -10 || dm == -6 || dm == 30 || (dm == 999 && wav999_use_adbuf))
 			playwavBuffwav(bufwav3, oldw, len1, len2);
-		else if (mode == -10)
+		else if (dm == -10)
 			playwavmp3(bufwav3, oldw, len1, len2);
-		else if (mode == 999)
+		else if (dm == 999)
 			playwavwav(bufwav3, oldw, len1, len2);
-		else if (mode == -3)
+		else if (dm == -3)
 			playwavkpi(bufwav3, oldw, len1, len2);
-		else if (mode == -7)
+		else if (dm == -7)
 			playwavdsd(bufwav3, oldw, len1, len2);
-		else if (mode == -8)
+		else if (dm == -8)
 			playwavflac(bufwav3, oldw, len1, len2);
-		else if (mode == -9)
+		else if (dm == -9)
 			playwavm4a(bufwav3, oldw, len1, len2);
 		else
 			playwavds2(bufwav3, oldw, len1, len2);
@@ -3914,6 +3947,7 @@ void COggDlg::dsdload(CString& filen, CString& tagfile, CString& tagname, CStrin
 			kmp = dsd_.Open(filen, &sikpi);
 #endif
 			if (kmp == NULL) { m_saisai.EnableWindow(TRUE); return; }
+			g_openDecoderMode = -7;
 		}
 		else {
 		}
@@ -6565,6 +6599,25 @@ static CString NormalizeZweiPlaybackFol(const CString& fol, int listIndex)
 
 void COggDlg::play()
 {
+	// stop1/play 実行中の DoEvent 再入で形式切替が重なるとデコーダ UAF になる
+	if (s_inPlay || s_inStop1)
+		return;
+	s_inPlay = true;
+	struct ClearInPlay { ~ClearInPlay() { s_inPlay = false; } } _clearInPlay;
+
+	// 共有状態を触る前に旧再生を止める（Get() 後でも g_openDecoderMode で正しい形式を閉じる）
+	KillTimer(1250);
+	KillTimer(9000);
+	if (!stop1()) {
+		playf = 0;
+		return;
+	}
+	stf = 0;
+	thn1 = FALSE;
+	thend1 = FALSE;
+	eqflg = FALSE;
+	mode = modesub;
+
 	reset = TRUE;
 	stflg = FALSE;
 	CheckMixerMuteOnPlayModal();
@@ -6653,14 +6706,9 @@ void COggDlg::play()
 	if (mode == 16) { pl_no = ret2; }//ysc2
 	fade = 0;
 	endflg = 0;
-	stop1();
-	// stop1() は通知スレッド停止のため stf=1 にする。CWread デコードは
-	// IsPlaybackStopRequested() で即 return するため、ここで戻さないと無音になる。
+	// stop1 は先頭で済み。CWread 用に停止フラグは下ろしておく。
 	stf = 0;
 	thn1 = FALSE;
-	thend1 = FALSE;
-	eqflg = FALSE;
-	mode = modesub;
 	if (mode == 14)
 		filen = NormalizeZweiPlaybackFol(filen, ret2);
 	// プレイリストにフルパスが入っていても chdir 先ではファイル名のみ参照する
@@ -7814,6 +7862,7 @@ void COggDlg::play()
 		si1.dwBitsPerSample = 24;
 		if (savedata.bit24 == 0) si1.dwBitsPerSample = 16;
 		mp3_.Open(ss, &si1);
+		g_openDecoderMode = -10;
 		CMp3Info mp3__;
 		mp3__.Load(ss);
 
@@ -7867,6 +7916,7 @@ void COggDlg::play()
 		if (!wav_.Open(filen, &wi)) {
 			m_saisai.EnableWindow(TRUE); endflg = 0; return;
 		}
+		g_openDecoderMode = 999;
 		wav999_use_adbuf = 0;
 		if (wav_.IsMSADPCM()) {
 			CWaitCursor aaaa;
@@ -7966,6 +8016,7 @@ void COggDlg::play()
 				kmp = flac_.Open(filen, &sikpi);
 #endif
 				if (kmp == NULL) { m_saisai.EnableWindow(TRUE); endflg = 0; return; }
+				g_openDecoderMode = -8;
 			}
 			else {
 			}
@@ -8222,6 +8273,7 @@ void COggDlg::play()
 				kmp = m4a_.Open(filen, &sikpi);
 #endif
 				if (kmp == NULL) { m_saisai.EnableWindow(TRUE); endflg = 0; return; }
+				g_openDecoderMode = -9;
 			}
 			else {
 			}
@@ -9916,11 +9968,11 @@ void COggDlg::play()
 		}
 		fade1 = 0;
 		sflg = FALSE;
-		DoEvent();
+		// 通知スレッド起動直前は DoEvent しない（再入 play が旧デコーダを潰す）
 		{
 			const DWORD sflgWaitStart = GetTickCount();
 			while (sflg != FALSE) {
-				DoEvent();
+				Sleep(1);
 				if (GetTickCount() - sflgWaitStart >= 3000) {
 					sflg = FALSE;
 					break;
@@ -12149,7 +12201,8 @@ int readtempo(BYTE* data, int len,bool t = false)
 	}
 //	ProcessAudioWithSoundTouch(te,t);
 	int bits;
-	if (mode == -10) {
+	// 再生スレッドから呼ばれる。mode は次曲に差し替わっていることがある
+	if (ActiveDecodeMode() == -10) {
 		bits = Mp3DecoderBitsClampedFromObject();
 	}
 	else {
@@ -13307,6 +13360,8 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 int readm4a(BYTE* bw, int cnt)
 {
 	if (cnt == 0) return 0;
+	if (IsPlaybackStopRequested() || !og || !og->kmp)
+		return 0;
 	EqualiserSetFormatVolContext(2, FALSE);
 	_set_se_translator(trans_func);
 	DWORD cnt1 = og->sikpi.dwUnitRender, cnt2 = (DWORD)cnt, cnt4 = 0; if (cnt1 == 0) cnt1 = 4096;
@@ -13316,13 +13371,13 @@ int readm4a(BYTE* bw, int cnt)
 		int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
 		if (poss4 <= cnt) {
 			while (true) {
-				if (IsPlaybackStopRequested())
+				if (IsPlaybackStopRequested() || !og->kmp)
 					break;
 				if (rrr != 1)
 					break;
 				if (rrr == 1) {
 					for (;;) {
-						if (IsPlaybackStopRequested())
+						if (IsPlaybackStopRequested() || !og->kmp)
 							break;
 						if (cnt2 <= cnt3) break;
 						r = m4a_.Render(og->kmp, (BYTE*)bufkpi + cnt3, cnt1);
@@ -13534,6 +13589,8 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 int readflac(BYTE* bw, int cnt)
 {
 	if (cnt == 0)return 0;
+	if (IsPlaybackStopRequested() || !og || !og->kmp)
+		return 0;
 	EqualiserSetFormatVolContext(0, FALSE);
 	_set_se_translator(trans_func);
 	DWORD cnt1 = og->sikpi.dwUnitRender * 2, cnt2 = (DWORD)cnt, cnt4 = 0, lenl = cnt; if (cnt1 == 0) cnt1 = 1024;
@@ -13547,7 +13604,7 @@ int readflac(BYTE* bw, int cnt)
 			int flacRbStallIters = 0;
 			const int kFlacRbStallMax = 512;
 			while (true) {
-				if (IsPlaybackStopRequested())
+				if (IsPlaybackStopRequested() || !og->kmp)
 					break;
 
 				if (rrr == 1)
@@ -13946,21 +14003,26 @@ extern int flg3;
 int readdsd(BYTE* bw, int cnt)
 {
 	if (cnt == 0)return 0;
+	if (IsPlaybackStopRequested() || !og || !og->kmp)
+		return 0;
 	//_set_se_translator(trans_func);
 	DWORD cnt2 = (DWORD)cnt;
 	DWORD r = 0;
 	int len3 = 0, len4 = 0;
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
+	const int dsdFrame = wavchannel * (wavsam_depth / 8);
+	if (dsdFrame <= 0)
+		return 0;
 	if (poss4 <= cnt) {
 		int dsdRbStallIters = 0;
 		int fadeTailIters = 0;
 		const int kDsdRbStallMax = 512;
 		const int kFadeTailMax = 128;
 		while (true) {
-			if (IsPlaybackStopRequested())
+			if (IsPlaybackStopRequested() || !og->kmp)
 				break;
 			if(fade1 == 0)
-				cnt3 = dsd_.kpiRender(og->kmp, (BYTE*)bufkpi, cnt / (wavchannel * wavsam_depth / 8)) * (wavchannel * wavsam_depth / 8);
+				cnt3 = dsd_.kpiRender(og->kmp, (BYTE*)bufkpi, cnt / dsdFrame) * dsdFrame;
 
 			if (fade1 == 1 && muon != 0) {
 				r = cnt;
@@ -14148,9 +14210,18 @@ int readwav(BYTE* bw, int cnt)
 	int r = cnt, rr = cnt;
 	int cnt2;
 	if (rr == 0) return 0;
+	if (IsPlaybackStopRequested())
+		return 0;
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
-	int bytesPerSample = (wav_.m_info.wBitsPerSample + 7) / 8 * wav_.m_info.nChannels;
+	const int bits = (int)wav_.m_info.wBitsPerSample;
+	const int ch = (int)wav_.m_info.nChannels;
+	if (bits <= 0 || ch <= 0)
+		return 0;
+	int bytesPerSample = ((bits + 7) / 8) * ch;
 	int outBytesPerSample = (wavsam_depth / 8) * wavchannel;
+	// 形式切替直後に depth/ch が未設定だと 0 除算する
+	if (bytesPerSample <= 0 || outBytesPerSample <= 0)
+		return 0;
 	if (poss4 <= cnt) {
 		int wavRbStallIters = 0;
 		const int kWavRbStallMax = 512;
@@ -14162,6 +14233,8 @@ int readwav(BYTE* bw, int cnt)
 				toRead = (int)((__int64)rr * bytesPerSample / outBytesPerSample);
 				toRead = (toRead / bytesPerSample) * bytesPerSample;
 			}
+			if (toRead <= 0)
+				break;
 			r = wav_.Render(bufkpi, toRead);
 			// fade1 で break する前に readtempo しないと、曲末の実データがストレッチャを通らず欠ける
 			int len2 = 0;
@@ -15226,6 +15299,24 @@ static inline bool PlaybackNotifyThreadMayBeActive()
 
 void COggDlg::stop()
 {
+	// play/stop1 実行中の再入: 停止要求だけ出して本体は触らない
+	if (s_inPlay || s_inStop1) {
+		playf = 0;
+		plf = 0;
+		SignalPlaybackNotifyThreadStop();
+		if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+			m_PianoRollDlg.PauseAnalysis();
+		return;
+	}
+	s_inStop1 = true;
+	struct ClearInStop1 { ~ClearInStop1() { s_inStop1 = false; } } _clearInStop1;
+
+	// DoEvent 再入より先に解析を止める（停止ボタンでは起きず曲切替で落ちる主因）
+	playf = 0;
+	plf = 0;
+	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+		m_PianoRollDlg.PauseAnalysis();
+
 	if (PlaybackNotifyThreadMayBeActive())
 		SignalPlaybackNotifyThreadStop();
 
@@ -15307,7 +15398,9 @@ void COggDlg::stop()
 		CCriticalLock _ccl(&cs);
 		stf = 1;
 		_ccl.Leave();
-		WaitForPlaybackNotifyThreadExit(g_playbackNotifyJoinTimeoutMs);
+		// Join 完了までデコーダ/DS を触らない（timeoutMs=0: 無限待ち、DoEvent なし）
+		if (!WaitForPlaybackNotifyThreadExit(0))
+			return;
 
 		Closeds();
 		//		FreeOutputBuffer();
@@ -15320,13 +15413,15 @@ void COggDlg::stop()
 		//		for(int l=0;l<20;l++){Sleep(50);DoEvent();}
 		if (adbuf2)free(adbuf2);//delete [] adbuf2;
 		adbuf2 = NULL;
-		const int stoppingMode = mode;
+		// mode ではなく「実際に Open 中の形式」（曲切替前に Get が mode を差し替えても正しい）
+		const int stoppingMode = PeekOpenDecoderMode(mode);
 		if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
 		if (stoppingMode == -8) flac_.Close(og->kmp);
 		if (stoppingMode == -9) m4a_.Close(og->kmp);
 		if (stoppingMode == -7) dsd_.kpiClose(og->kmp);
 		if (stoppingMode == 999) wav_.Close();
 		kmp = NULL;
+		ClearOpenDecoderMode();
 		if (mod) {
 			if (mod->Close) mod->Close(kmp1);
 			if (mod->Deinit) mod->Deinit();
@@ -15344,7 +15439,9 @@ void COggDlg::stop()
 			ResetKpiRemoteCache();
 		}
 		g_kpiPlaybackArch = 0;
-		DoEvent();
+		thn1 = FALSE;
+		stf = 0;
+		// Join/解放後に DoEvent しない（再入で別形式の play が走り UAF になる）
 		thend = 1;
 		fadeadd = 0; fade = 1.0;
 	}
@@ -15355,11 +15452,12 @@ void COggDlg::stop()
 		pMediaControl->Stop();
 	gamenkill();
 	videoonly = FALSE;
+	plf = 0;
+	playf = 0;
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		m_PianoRollDlg.ResetPlaybackState();
 	if (wav) free(wav);
 	wav = NULL;
-	playf = 0;
 	mode = modesub;
 	stflg = FALSE;
 	SetTimer(4923, 30, NULL);
@@ -15375,10 +15473,47 @@ void COggDlg::stop()
 		ApplyPlaylistRowDisplay(pl->pc[pl->pnt]);
 }
 
-void COggDlg::stop1()
+BOOL COggDlg::stop1()
 {
-	if (PlaybackNotifyThreadMayBeActive())
+
+	// 再入（Join 後の旧 DoEvent や play 中のメッセージ）ではデコーダを触らない
+	if (s_inStop1) {
 		SignalPlaybackNotifyThreadStop();
+		return FALSE;
+	}
+	s_inStop1 = true;
+	struct ClearInStop1 { ~ClearInStop1() { s_inStop1 = false; } } _clearInStop1;
+
+	// playlist Get() が mode を次曲形式に差し替えた後でも、Open 中の形式で閉じる
+	const int stoppingMode = PeekOpenDecoderMode(mode);
+
+	// DoEvent 再入より先に解析を止める（形式違いの曲切替クラッシュ防止）
+	playf = 0;
+	plf = 0;
+	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+		m_PianoRollDlg.PauseAnalysis();
+
+	// 形式を問わず停止要求。Join 前にデコーダを閉じない。
+	SignalPlaybackNotifyThreadStop();
+	KillTimer(1250);
+	KillTimer(9000);
+
+	// デコーダ解放後に停止フラグを落とす（play() がすぐ再開できる）
+	thn1 = FALSE;
+	stf = 0;
+
+	// Join/解放後は DoEvent しない。再入 play が別形式のデコーダを開き、
+	// この stop1 の続きが mode/kmp を壊して flac/m4a/dsd/wav の Render で UAF する。
+	if (thend == FALSE) {
+		thend1 = TRUE;
+		for (int kk = 0; kk < 50; kk++) {
+			if (thend == 1) break;
+			Sleep(1);
+		}
+	}
+	Sleep(50);
+	playb = 0;
+	thend = 1;
 
 	fade1 = 0;
 	endflg = 0;
@@ -15393,78 +15528,73 @@ void COggDlg::stop1()
 	//	for(int i=0;i<10;i++){DoEvent();Sleep(10);}
 	if (ptl)ptl->SetProgressValue(m_hWnd, (LONGLONG)0, (LONGLONG)1);
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
-	if (PlaybackNotifyThreadMayBeActive())
+
+	if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
+	ps = 0;
+	if (m_dsb)m_dsb->Stop();
+	if (pAudioClient) pAudioClient->Stop();
+	if (m_dou.GetCheck() == 1)
+		if (cc1 == 1) {
+			// 2GB超対応(RF64): ファイル実長から64bitでサイズ確定
+			FinalizeWavStreamHeaderRF64(cc);
+			cc.Close();
+			cc1 = 0;
+		}
 	{
-		SignalPlaybackNotifyThreadStop();
-		if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
-		ps = 0;
-		if (m_dsb)m_dsb->Stop();
-		if (pAudioClient) pAudioClient->Stop();
-		if (m_dou.GetCheck() == 1)
-			if (cc1 == 1) {
-				// 2GB超対応(RF64): ファイル実長から64bitでサイズ確定
-				FinalizeWavStreamHeaderRF64(cc);
-				cc.Close();
-				cc1 = 0;
-			}
 		CCriticalLock _ccl(&cs);
 		stf = 1;
 		_ccl.Leave();
-		WaitForPlaybackNotifyThreadExit(g_playbackNotifyJoinTimeoutMs);
-		Closeds();
-		//		FreeOutputBuffer();
-		plf = 0;
-		if (ogg)ReleaseOggVorbis(&ogg);
-		ogg = NULL;
-
-		if (thend == FALSE) {
-			thend1 = TRUE;
-			for (int kk = 0; kk < 50; kk++) {
-				if (thend == 1) break;
-				DoEvent();
-				Sleep(1);
-			}
-		}
-		Sleep(50);
-		playb = 0;
-		// 実際に再生していた形式のデコーダのみClose（OnRestartでstop後、mode=新形式のままstop1が呼ばる場合を考慮）
-		int mode_for_decoder = -999;
-		if (adbuf2 != NULL) mode_for_decoder = mode;
-		BOOL had_wav = (wav != 0);
-		if (adbuf2)free(adbuf2);//delete [] adbuf2;
-		adbuf2 = NULL;
-		if (mode_for_decoder == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
-		if (mode_for_decoder == -8) flac_.Close(og->kmp);
-		if (mode_for_decoder == -9) m4a_.Close(og->kmp);
-		if (mode_for_decoder == -7) dsd_.kpiClose(og->kmp);
-		if (had_wav) wav_.Close();
-		kmp = NULL;
-		if (mod) {
-			if (mod->Close) mod->Close(kmp1);
-			if (mod->Deinit) mod->Deinit();
-			FreeLibrary(hDLLk);
-			mod = NULL; kmp1 = NULL; hDLLk = NULL;
-		}
-		if (kpidec)
-			kpidec->Release();
-		if (ob5)
-			ob5->Release();
-
-		DoEvent();
-		thend = 1;
-		fadeadd = 0; fade = 1.0;
-		stf = 0;
-		thn1 = FALSE;
 	}
+	// timeoutMs=0: 無限待ち。Join 中は DoEvent しない（再入 UAF 防止）
+	if (!WaitForPlaybackNotifyThreadExit(0))
+		return FALSE;
+
+	Closeds();
+	//		FreeOutputBuffer();
+	plf = 0;
+	if (ogg)ReleaseOggVorbis(&ogg);
+	ogg = NULL;
+
+	// デコーダ解放は必ず Join 後（flac/m4a/dsd/wav は通知スレッドが Render 中）
+	if (adbuf2) {
+		free(adbuf2);
+		adbuf2 = NULL;
+	}
+	wav999_use_adbuf = 0;
+	if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
+	if (stoppingMode == -8 && kmp) { flac_.Close(kmp); }
+	if (stoppingMode == -9 && kmp) { m4a_.Close(kmp); }
+	if (stoppingMode == -7 && kmp) { dsd_.kpiClose(kmp); }
+	if (stoppingMode == 999) wav_.Close();
+	kmp = NULL;
+	ClearOpenDecoderMode();
+	if (mod) {
+		if (mod->Close) mod->Close(kmp1);
+		if (mod->Deinit) mod->Deinit();
+		FreeLibrary(hDLLk);
+		mod = NULL; kmp1 = NULL; hDLLk = NULL;
+	}
+	if (kpidec) {
+		kpidec->Release();
+		kpidec = NULL;
+	}
+	if (ob5) {
+		ob5->Release();
+		ob5 = NULL;
+	}
+
+	fadeadd = 0; fade = 1.0;
+
 	if (pMainFrame1 != NULL)
 		pMainFrame1->stop();
 	gamenkill();
 	videoonly = FALSE;
+	plf = 0;
+	playf = 0;
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		m_PianoRollDlg.ResetPlaybackState();
 	if (wav) free(wav);
 	wav = NULL;
-	playf = 0;
 	mode = modesub;
 	m_lrc.SetWindowText(L"");
 	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
@@ -15473,6 +15603,7 @@ void COggDlg::stop1()
 	m_lrc5.SetWindowText(L"");
 	ResetPauseButtonUi();
 	eqflg = TRUE;
+	return TRUE;
 }
 
 
@@ -16206,7 +16337,7 @@ void COggDlg::timerp()
 	}
 
 
-	if (plf == 1 && (wav || ogg) && ::IsWindow(m_PianoRollDlg.GetSafeHwnd()) && Ms2DrawDue(ms2))
+	if (plf == 1 && ::IsWindow(m_PianoRollDlg.GetSafeHwnd()) && Ms2DrawDue(ms2))
 		m_PianoRollDlg.RequestSyncFromMainUi();
 	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) Speana();
 	s = L""; ss = L"";
@@ -17823,14 +17954,18 @@ LRESULT COggDlg::dp2(WPARAM, LPARAM)
 // stop()→play() が二重 Join や停止済みバッファ上でのデコード待ちで固まらないようにする。
 LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 {
-	WaitForPlaybackNotifyThreadExit(g_playbackNotifyJoinTimeoutMs);
+	// play/stop1 実行中は触らない（曲切替中の自動停止メッセージでデコーダを潰さない）
+	if (s_inPlay || s_inStop1)
+		return 0;
+	// スレッドは PostMessage 前に終了済み想定だが、念のため Join（DoEvent なし）
+	SignalPlaybackNotifyThreadStop();
+	if (!WaitForPlaybackNotifyThreadExit(0))
+		return 0;
 	fade1 = 0;
 	endflg = 0;
 	plf = 0;
 	playf = 0;
 	ps = 0;
-	stf = 0;
-	thn1 = FALSE;
 	thn = TRUE;
 	g_endWrittenBytes = 0;
 	g_dsWrittenBytes = 0;
@@ -17852,13 +17987,14 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 		free(adbuf2);
 		adbuf2 = NULL;
 	}
-	const int stoppingMode = mode;
+	const int stoppingMode = PeekOpenDecoderMode(mode);
 	if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
 	if (stoppingMode == -8 && og) flac_.Close(og->kmp);
 	if (stoppingMode == -9 && og) m4a_.Close(og->kmp);
 	if (stoppingMode == -7 && og) dsd_.kpiClose(og->kmp);
 	if (stoppingMode == 999) wav_.Close();
 	kmp = NULL;
+	ClearOpenDecoderMode();
 	if (mod) {
 		if (mod->Close) mod->Close(kmp1);
 		if (mod->Deinit) mod->Deinit();
@@ -17880,7 +18016,11 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 		ResetKpiRemoteCache();
 	}
 	g_kpiPlaybackArch = 0;
+	thn1 = FALSE;
+	stf = 0;
 	thend = 1;
+	plf = 0;
+	playf = 0;
 	if (wav) {
 		free(wav);
 		wav = NULL;
@@ -19998,17 +20138,20 @@ void COggDlg_SyncPianoRollFast()
 
 void COggDlg::SyncPianoRollFast()
 {
-	if (plf != 1 || !(wav || ogg)) return;
+	// wav/ogg 非依存。KPI 等でも bufwav3+DS があれば解析する。
+	if (plf != 1) return;
 	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd())) return;
 	SyncPianoRollFromPlayCursor();
 }
 
 void COggDlg::SyncPianoRollFromPlayCursor()
 {
-	if (playf == 0 || thn1) return;
+	if (playf == 0 || thn1 || plf != 1) return;
 	if (ps == 1) return; // 一時停止中は履歴スクロール・解析更新を止める
 	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd())) return;
 	if (!bufwav3) return;
+	// DS 未生成中は解析しない（形式切替の隙間で旧パラメータを使わない）
+	if (!m_dsb) return;
 
 	double sampleRate;
 	int channels;
@@ -20025,42 +20168,50 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	}
 	if (sampleRate < 8000.0) sampleRate = 44100.0;
 	if (channels < 1) channels = 2;
+	if (bitDepth != 8 && bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
+		bitDepth = abs(bitDepth);
+	if (bitDepth != 8 && bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
+		return;
 
 	const int bytesPerSample = (bitDepth / 8) < 1 ? 2 : (bitDepth / 8);
 	const int bytesPerFrame = bytesPerSample * channels;
 	const int TOTAL_BUF_BYTES = (int)((g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM));
 	if (bytesPerFrame <= 0 || TOTAL_BUF_BYTES <= bytesPerFrame) return;
+
+	m_PianoRollDlg.ResumePlaybackFeed();
 	const int ringFrames = TOTAL_BUF_BYTES / bytesPerFrame;
 	const int srInt = (int)(sampleRate + 0.5);
-	// スペアナ窓＋リング先頭余白を除いた最大キャプチャ(192k等で窓=全リングになり解析スキップするのを防ぐ)
+	// スペアナ窓分を空けたいが、192k/多ch で speana>=ring になると maxPrFrames<=0 になり
+	// 解析が永久スキップされてロールが止まる。最低限 MinAnalyze 分は必ず確保する。
 	int speanaFramesRef = 4096;
 	if (savedata.speanamode == 1 && (savedata.speananum == 0 || savedata.speananum == 1))
 		speanaFramesRef = 8192;
 	const int speanaFrames = CPianoRoll::ScaleWinSamples(speanaFramesRef, srInt);
 	const int capMargin = 128;
-	const int maxPrFrames = ringFrames - speanaFrames - capMargin;
-	if (maxPrFrames <= 0) return;
+	const int ringUsable = ringFrames - capMargin;
+	if (ringUsable <= 0) return;
+	const int minNeed = CPianoRoll::MinAnalyzeFrameCount(srInt, ringUsable);
+	if (ringUsable < minNeed) return;
+	int maxPrFrames = ringUsable;
+	if (speanaFrames > 0 && ringUsable > speanaFrames + minNeed)
+		maxPrFrames = ringUsable - speanaFrames;
+	if (maxPrFrames < minNeed)
+		maxPrFrames = ringUsable;
 	const int prFrames = CPianoRoll::CaptureFrameCount(srInt, maxPrFrames);
-	if (prFrames < CPianoRoll::MinAnalyzeFrameCount(srInt, maxPrFrames)) return;
+	if (prFrames < minNeed) return;
 	const int prBytes = prFrames * bytesPerFrame;
 	if (prBytes <= 0 || prBytes > TOTAL_BUF_BYTES) return;
 
-	ULONG playCur = PlayCursor2;
-	ULONG writeCur = WriteCursor;
-	HRESULT rett = E_FAIL;
-	if (m_dsb) rett = m_dsb->GetCurrentPosition(&playCur, &writeCur);
-	if (rett == DS_OK) {
-		PlayCursor2 = playCur;
-		WriteCursor = writeCur;
-	}
-	else {
-		playCur = PlayCursor2;
-		writeCur = WriteCursor;
-	}
+	ULONG playCur = 0, writeCur = 0;
+	if (m_dsb->GetCurrentPosition(&playCur, &writeCur) != DS_OK)
+		return;
+	PlayCursor2 = playCur;
+	WriteCursor = writeCur;
 
 	const ULONG ringBytes = Bufwav3RingBytes();
 	// 窓末尾は Speana と同じ readPos（-800/-1600ms レイテンシ込み）。
-	// 実音より早いときは extraLatencyMs でさらに過去へずらす
+	// メーターとロールは同じ extra に揃える（ロールだけ小さいと音より先にバーが出る）。
+	const int kMeterExtraLatencyMs = 700;
 	const int kPianoRollExtraLatencyMs = 700;
 	const int speanaBytes = speanaFrames * bytesPerFrame;
 	long prPos = PianoRollWideReadPos(playCur, prBytes, speanaBytes, bytesPerFrame, (int)ringBytes, sampleRate, kPianoRollExtraLatencyMs);
@@ -20112,7 +20263,7 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	int meterN = 0;
 	if (meterBytes > 0) {
 		if (meterRaw.size() < (size_t)meterBytes) meterRaw.resize(meterBytes);
-		const long meterPos = SpeanaAnalysisReadPos(playCur, meterBytes, bytesPerFrame, (int)ringBytes, sampleRate, kPianoRollExtraLatencyMs);
+		const long meterPos = SpeanaAnalysisReadPos(playCur, meterBytes, bytesPerFrame, (int)ringBytes, sampleRate, kMeterExtraLatencyMs);
 		if (ReadRingPcm(meterPos, meterBytes, meterRaw.data())) {
 			const char* mDst = meterRaw.data();
 			meterN = meterFrames;
@@ -22544,10 +22695,13 @@ void COggDlg::TogglePianoRoll()
 
 void COggDlg::FeedPianoRoll(const void* pData, int bytes)
 {
-	if (!pData || bytes <= 0 || playf == 0 || thn1 || stf != 0)
+	if (!pData || bytes <= 0 || playf == 0 || thn1 || stf != 0 || plf != 1)
+		return;
+	if (!m_dsb)
 		return;
 	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		return;
+	m_PianoRollDlg.ResumePlaybackFeed();
 
 	int feed_rate = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_rate : wavbit_sample_Hz;
 	int feed_ch = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_ch : wavchannel;
