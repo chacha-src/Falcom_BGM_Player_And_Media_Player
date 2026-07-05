@@ -682,6 +682,9 @@
 #define IDC_MPI_SKIPDUP                 3484
 #define IDC_MPI_BROWSE                  3485
 #define IDC_MPI_IMPORT                  3486
+#define IDC_MP_SAVEWAV                  3487
+#define IDC_MP_KAISUU                   3488
+#define IDC_MP_KAISUU_L                 3489
 
 #define IDD_MP_M3U_IMPORT               201
 
@@ -691,7 +694,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        202
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3487
+#define _APS_NEXT_CONTROL_VALUE         3490
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

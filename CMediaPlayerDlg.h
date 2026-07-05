@@ -118,7 +118,9 @@ public:
 	HIMAGELIST m_hDragImage;     // DragMove に使うゴースト画像
 
 	CCustomCheckBox m_renzoku, m_loop, m_random;
-	CCustomCheckBox m_tip, m_mini, m_savemp3, m_saveds;
+	CCustomCheckBox m_tip, m_mini, m_savemp3, m_saveds, m_savewav;
+	CCustomStatic m_kaisuuL;
+	CCustomEdit m_kaisuu;
 	// グループ枠は WS_CLIPSIBLINGS + 最背面で、内側コントロールを塗り潰さない
 	CCustomGroupBox m_grpInfo, m_grpSnd, m_grpPl;
 	CCustomListCtrl m_list;
@@ -251,6 +253,8 @@ protected:
 	afx_msg void OnMini();
 	afx_msg void OnSaveMp3();
 	afx_msg void OnSaveDs();
+	afx_msg void OnSaveWav();
+	afx_msg void OnKaisuuKillFocus();
 	afx_msg void OnFindUp();
 	afx_msg void OnFindDown();
 	afx_msg void OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult);

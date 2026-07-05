@@ -1454,7 +1454,7 @@ IObjectCollection* poc;
 int plcnt = 0;
 extern int gameon;
 
-static void MpPersistSavedataQuick()
+void MpPersistSavedataQuick()
 {
 	TCHAR tmp[1024];
 	_tgetcwd(tmp, 1000);
@@ -18033,8 +18033,9 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	return 0;
 }
 
-LRESULT COggDlg::OnUpdateAvailable(WPARAM, LPARAM)
+LRESULT COggDlg::OnUpdateAvailable(WPARAM wParam, LPARAM)
 {
+	UpdateCheckBeginPrompt();
 	int ret = AfxMessageBox(LL14(
 		L"アップデートファイルがあります。\n今すぐ更新しますか？", /* 日本語 */
 		L"An update file is available.\nWould you like to update now?", /* 英語 */
@@ -18050,9 +18051,20 @@ LRESULT COggDlg::OnUpdateAvailable(WPARAM, LPARAM)
 		L"Er is een updatebestand beschikbaar.\nNu bijwerken?", /* オランダ語 */
 		L"Dostępny jest plik aktualizacji.\nCzy zaktualizować teraz?", /* ポーランド語 */
 		L"Güncelleme dosyası mevcut.\nŞimdi güncellemek istiyor musunuz?" /* トルコ語 */
-	), MB_YESNO); if (ret == IDYES && DoUpdateAndRestart())
+	), MB_YESNO);
+	if (ret == IDYES && DoUpdateAndRestart())
 	{
+		UpdateCheckEndPrompt(false, 0);
 		OnOK();  // ダイアログを閉じてアプリ終了
+	}
+	else
+	{
+		const bool dismissed = (ret == IDNO);
+		if (dismissed && wParam != 0)
+			savedata.lastUpdateCheck = (__int64)wParam;
+		UpdateCheckEndPrompt(dismissed, (__int64)wParam);
+		if (dismissed && wParam != 0)
+			MpPersistSavedataQuick();
 	}
 	return 0;
 }

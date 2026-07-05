@@ -213,6 +213,29 @@ static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, cons
 
 static const DWORD CHECK_INTERVAL_SEC = 600;  // 10分
 
+static volatile LONG g_updatePromptOpen = 0;
+static volatile LONG g_updateMsgQueued = 0;
+static volatile __int64 g_updateDismissedVersion = 0;
+
+void UpdateCheckDismissVersion(__int64 serverModified)
+{
+	if (serverModified > 0)
+		InterlockedExchange64(&g_updateDismissedVersion, serverModified);
+}
+
+void UpdateCheckBeginPrompt()
+{
+	InterlockedExchange(&g_updateMsgQueued, 0);
+	InterlockedExchange(&g_updatePromptOpen, 1);
+}
+
+void UpdateCheckEndPrompt(bool dismissedNo, __int64 serverModified)
+{
+	InterlockedExchange(&g_updatePromptOpen, 0);
+	if (dismissedNo && serverModified > 0)
+		UpdateCheckDismissVersion(serverModified);
+}
+
 static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 {
 	extern save savedata; // 保存データを参照できるように追加いたしましたわ
@@ -253,10 +276,16 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 
 		// サーバーの時間が「プログラム更新時間＋指定時間」より新しく、かつ、
 		// 「保存データに記録された前回の更新時間」よりも新しい場合のみ更新通知を出しますわ
-		if (serverModified != 0 && serverModified > threshold && (__int64)serverModified > savedata.lastUpdateCheck)
+		const __int64 dismissed = InterlockedCompareExchange64(&g_updateDismissedVersion, 0, 0);
+		if (serverModified != 0 && serverModified > threshold &&
+			(__int64)serverModified > savedata.lastUpdateCheck &&
+			(__int64)serverModified > dismissed &&
+			InterlockedCompareExchange(&g_updatePromptOpen, 0, 0) == 0 &&
+			InterlockedCompareExchange(&g_updateMsgQueued, 0, 0) == 0)
 		{
 			OutputDebugString(_T("[UpdateCheck] 更新を検知いたしました！メッセージを送信しますわ。\n"));
-			PostMessage(hWnd, WM_APP_UPDATE_AVAILABLE, 0, 0);
+			InterlockedExchange(&g_updateMsgQueued, 1);
+			PostMessage(hWnd, WM_APP_UPDATE_AVAILABLE, (WPARAM)serverModified, 0);
 		}
 
 		// 10分待機（1秒ずつ分割してウィンドウ破棄を検知）

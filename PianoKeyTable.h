@@ -1,12 +1,12 @@
 ﻿#pragma once
-// 88鍵（A0=21 … C8=108）の等律周波数と倍音キー対応（Goertzel ピック用）
+// 108鍵（MIDI 0…107）の等律周波数と倍音キー対応。A0=21, C8=108 は範囲内。
 
 #include <cmath>
 
 namespace PianoKey
 {
-    static constexpr int COUNT = 88;
-    static constexpr int MIDI_BASE = 21;
+    static constexpr int COUNT = 108;
+    static constexpr int MIDI_BASE = 0;
     static constexpr int HARMONIC_N_MIN = 2;
     static constexpr int HARMONIC_N_MAX = 9;
     static constexpr int HARMONIC_COUNT = HARMONIC_N_MAX - HARMONIC_N_MIN + 1;

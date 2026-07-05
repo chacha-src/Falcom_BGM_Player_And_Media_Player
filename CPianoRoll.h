@@ -88,21 +88,21 @@ private:
         static constexpr uint8_t SUSTAIN = 0x20;  // サスティン(長く保たれる持続音)
     };
 
+    // ---- 鍵盤定数 ----
+    static constexpr int   KEY_COUNT    = 108;         // MIDI 0…107（A0=21, フルレンジ）
+    static constexpr int   WHITE_KEY_COUNT = 63;       // MIDI 0..107 の白鍵数
+    static constexpr int   MIDI_BASE      = 0;
+
     // 1 分析フレーム分のノートスナップショット(履歴リングバッファの要素)
     struct NoteFrame {
-        bool     active[88];           // ノートがオンか
-        float    strength[88];         // 表示強度(NormalizeDisplayPeak 後)
-        uint8_t  segment[88];          // ノートセグメント ID(再トリガー検出用)
-        uint8_t  bandMask[88];         // どの周波数帯(bass/mid/treble)で拾われたか
-        float    laneStrength[88][3];  // 帯別強度(bass/mid/treble レーン着色用)
-        uint8_t  expr[88];             // 表現記号フラグ(NoteExpr の組み合わせ)
-        float    dynLevel[88];         // ダイナミクスレベル(ベロシティ表示用)
+        bool     active[KEY_COUNT];
+        float    strength[KEY_COUNT];
+        uint8_t  segment[KEY_COUNT];
+        uint8_t  bandMask[KEY_COUNT];
+        float    laneStrength[KEY_COUNT][3];
+        uint8_t  expr[KEY_COUNT];
+        float    dynLevel[KEY_COUNT];
     };
-
-    // ---- 鍵盤定数 ----
-    static constexpr int   KEY_COUNT    = 88;          // A0〜C8
-    static constexpr int   WHITE_KEY_COUNT = 52;
-    static constexpr int   MIDI_BASE      = 21;        // A0 = MIDI 21
 
     // ---- 分析バッファ / 履歴 ----
     static constexpr size_t MAX_HISTORY   = 120;       // ロール上に表示するフレーム行数(上限)
@@ -114,8 +114,9 @@ private:
     int   m_winBass = WIN_BASS_REF;
     int   m_winHigh = WIN_HIGH_REF;
     int   m_winOnset = WIN_ONSET_REF;
-    static constexpr int   LOW_KEY_SPLIT  = 51;        // C5: これ未満は低音/中低音窓を使用
-    static constexpr int   DETECT_KEYS    = 108;       // ApplyDisplayScale の正規化範囲
+    // 分析: [0,BASS_ANALYSIS_END) は 16384 窓、それ以上は 8192 同一窓
+    static constexpr int   BASS_ANALYSIS_END = 46;
+    static constexpr int   DETECT_KEYS    = KEY_COUNT;
     static constexpr int   KEY_OFFSET       = 9;       // MIDI_BASE からのオフセット(A0→A#0=9)
 
     // ---- カスタムウィンドウメッセージ ----
@@ -128,18 +129,18 @@ private:
     int       m_historyHead = 0;           // 次に書き込むインデックス(新→旧 = head-1, head-2, ...)
 
     // ---- ノート状態(UI スレッド / m_cs 保護なし。OnAnalysisDone からのみ更新) ----
-    bool  m_activeKeys[88];
-    float m_noteStrength[88];         // 表示強度(NormalizeDisplayPeak + 包絡ホールド後)
-    float m_rawStrengths[88];         // Goertzel 生値(IIR 平滑前)
-    float m_smoothedStrengths[88];    // IIR 平滑後(ストリングス等の持続音追跡)
-    int   m_consecActive[88];         // 連続アクティブフレーム数
-    int   m_consecSilent[88];         // 連続サイレントフレーム数
-    uint8_t m_segmentId[88];          // 再トリガー検出用ノートセグメント ID
-    float   m_envPeak[88];            // エンベロープホールドのピーク値
-    int     m_unpickedFrames[88];     // ピックされなかった連続フレーム数
-    int     m_strengthDipFrames[88];  // 強度低下フレーム数(SUSTAIN 判定用)
-    uint8_t m_bandMask[88];
-    float   m_laneStrength[88][3];
+    bool  m_activeKeys[KEY_COUNT];
+    float m_noteStrength[KEY_COUNT];
+    float m_rawStrengths[KEY_COUNT];
+    float m_smoothedStrengths[KEY_COUNT];
+    int   m_consecActive[KEY_COUNT];
+    int   m_consecSilent[KEY_COUNT];
+    uint8_t m_segmentId[KEY_COUNT];
+    float   m_envPeak[KEY_COUNT];
+    int     m_unpickedFrames[KEY_COUNT];
+    int     m_strengthDipFrames[KEY_COUNT];
+    uint8_t m_bandMask[KEY_COUNT];
+    float   m_laneStrength[KEY_COUNT][3];
     uint8_t m_prevBandMask[KEY_COUNT];
 
     // ---- PCM インプット / リングバッファ(m_cs で保護) ----

@@ -5504,7 +5504,10 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
         {
             const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
             if (!bTrans) dc.FillSolidRect(0, 0, rw, rh, COLOR_DIALOG_BG);
-            int s = 18; int cy2 = rh / 2;
+            int s = rh - 4;
+            if (s > 18) s = 18;
+            if (s < 14) s = 14;
+            int cy2 = rh / 2;
             CRect rcB(0, cy2 - s / 2, s, cy2 + s / 2);
             // チェック枠はやわらかいローズで
             CPen p2(PS_SOLID, 2, bC ? RGB(255, 120, 165) : RGB(255, 156, 184));
@@ -5524,8 +5527,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             GetWindowText(t);
             if (!t.IsEmpty())
             {
-                CRect rt(0, 0, rw, rh);
-                rt.left = rcB.right + 10;
+                CRect rt(rcB.right + 10, rcB.top, rw, rcB.bottom);
                 DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER, bD, FALSE);
             }
             if (bC)

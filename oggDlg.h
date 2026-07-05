@@ -360,6 +360,7 @@ void COggDlg_SyncPianoRollFast();
 void SetupTaskbarThumbButtons(HWND hwnd, BOOL mediaPlayerMode);
 void RefreshTaskbarJumpList(BOOL mediaPlayerMode);
 void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName);
+void MpPersistSavedataQuick();
 void MpTaskbarReplay();
 void MpTaskbarNextTrack();
 void MpTaskbarPrevTrack();

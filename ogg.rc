@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -660,14 +660,17 @@ BEGIN
     PUSHBUTTON      "停止",IDC_MP_STOP,137,146,40,18
     PUSHBUTTON      ">>|",IDC_MP_NEXT,179,146,40,18
     CONTROL         "連続",IDC_MP_RENZOKU,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,228,148,40,8
-    CONTROL         "ループ",IDC_MP_LOOP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,228,158,44,8
     CONTROL         "ランダム",IDC_MP_RANDOM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,274,148,48,8
+    CONTROL         "ループ",IDC_MP_LOOP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,228,158,44,8
+    LTEXT           "ループ回数",IDC_MP_KAISUU_L,314,160,56,8
+    EDITTEXT        IDC_MP_KAISUU,372,158,28,12,ES_AUTOHSCROLL | ES_NUMBER
     CONTROL         "スペアナ",IDC_MP_SUPE,"Button",BS_AUTOCHECKBOX | BS_PUSHLIKE | WS_TABSTOP,274,158,31,9
     CONTROL         "ST",IDC_MP_ST,"Button",BS_AUTOCHECKBOX | BS_PUSHLIKE | WS_TABSTOP,306,158,18,9
     CONTROL         "ツールチップ",IDC_MP_TIP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,300,60,9
     CONTROL         "最小化連動",IDC_MP_MINI,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,68,300,60,9
     CONTROL         "mp3途中保存",IDC_MP_SAVEMP3,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,130,300,66,9
     CONTROL         "DShow途中保存",IDC_MP_SAVEDS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,198,300,72,9
+    CONTROL         "WAV保存",IDC_MP_SAVEWAV,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,272,300,52,9
     GROUPBOX        "情報",IDC_MP_GRP_INFO,2,58,476,68,WS_CLIPSIBLINGS
     GROUPBOX        "サウンド調整",IDC_MP_GRP_SND,2,164,476,26,WS_CLIPSIBLINGS
     GROUPBOX        "プレイリスト",IDC_MP_GRP_PL,2,190,476,124,WS_CLIPSIBLINGS
@@ -1005,7 +1008,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,504
+ FILEVERSION 0,8,7,505
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1023,10 +1026,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.07.04"
-            VALUE "FileVersion", "0.8.7.504"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.07.05"
+            VALUE "FileVersion", "0.8.7.505"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.07.04"
+            VALUE "LegalCopyright", "Copyright (C) 2026.07.05"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
