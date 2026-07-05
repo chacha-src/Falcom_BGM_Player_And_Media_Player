@@ -890,6 +890,11 @@ void CPianoRoll::UpdateNoteStates()
     PianoRollSimPick::PickAllBands(pickStrength, shaped, picked, KEY_COUNT,
         m_inputSampleRate, m_winBass, m_winLow, pickScale);
 
+    bool midPicked[KEY_COUNT];
+    memset(midPicked, 0, sizeof(midPicked));
+    for (int k = BAND_BASS_END; k < BAND_MID_END; ++k)
+        midPicked[k] = picked[k];
+
     for (int i = 0; i < KEY_COUNT; ++i) {
         const float sigStrength = pickStrength[i];
         bool effectivePicked = picked[i];
@@ -902,6 +907,33 @@ void CPianoRoll::UpdateNoteStates()
                 IsLocalPeakInBand(pickStrength, i, BAND_MID_END, KEY_COUNT) &&
                 PianoRollSimPick::PassesTrebleBellPick(pickStrength, i, KEY_COUNT, treCtx.treMax))
                 effectivePicked = true;
+        }
+
+        // 16分音符級: 8192 pick で落ちた短い中高音を onset レーンで拾う（持続ゴーストは pick 側で除外済み）
+        if (!effectivePicked && i >= ONSET_KEY_START) {
+            const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
+            const bool isTre = i >= BAND_MID_END;
+            const float odTh = isTre
+                ? UPPER_ONSET_DELTA_THRESH * 0.82f
+                : ONSET_DELTA_THRESH * 0.85f;
+            const float osTh = isTre
+                ? UPPER_ONSET_MIN_STRENGTH * 0.52f
+                : ONSET_MIN_STRENGTH * 0.55f;
+            const float bandRef = isTre ? treMax : midMax;
+            const int bandLo = isTre ? BAND_MID_END : BAND_BASS_END;
+            const int bandHi = isTre ? KEY_COUNT : BAND_MID_END;
+            if (onsetDelta >= odTh &&
+                m_onsetStrengths[i] >= osTh &&
+                sigStrength >= bandRef * 0.065f &&
+                IsLocalPeakInBand(pickStrength, i, bandLo, bandHi)) {
+                if (isTre) {
+                    if (PianoRollSimPick::PassesTreblePick(pickStrength, i, KEY_COUNT, treCtx, midPicked))
+                        effectivePicked = true;
+                }
+                else if (PianoKey::PassesFundamentalTest(pickStrength, i, KEY_COUNT)) {
+                    effectivePicked = true;
+                }
+            }
         }
 
         if (!effectivePicked && m_activeKeys[i]) {
