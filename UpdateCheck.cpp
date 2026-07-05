@@ -45,7 +45,8 @@ static time_t GetExecutableModificationTimeUtc()
 static time_t HttpGetLastModified(const CString& url)
 {
 	time_t result = 0;
-	HINTERNET hInternet = InternetOpen(_T("oggUpdateCheck/1.0"), INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+	// プロキシ環境下の方でも検知できるよう、システム（IE/WPAD/PAC）のプロキシ設定を使用いたしますわ
+	HINTERNET hInternet = InternetOpen(_T("oggUpdateCheck/1.0"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (!hInternet) return 0;
 
 	DWORD timeout = 5000;
@@ -80,10 +81,6 @@ static time_t HttpGetLastModified(const CString& url)
 	DWORD rawLen = sizeof(rawDate);
 	if (HttpQueryInfoA(hConnect, HTTP_QUERY_LAST_MODIFIED, rawDate, &rawLen, NULL))
 	{
-		CString dbgRaw;
-		dbgRaw.Format(_T("[UpdateCheck] サーバーからの生の応答日時: %S\n"), rawDate);
-		OutputDebugString(dbgRaw);
-
 		SYSTEMTIME st = { 0 };
 		// 生の文字列を解釈して、確実に世界標準時(UTC)のまま時間を取得いたします
 		if (InternetTimeToSystemTimeA(rawDate, &st, 0))
@@ -105,7 +102,8 @@ static time_t HttpGetLastModified(const CString& url)
 // ZIP をダウンロード、成功時はパスを返す
 static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 {
-	HINTERNET hInternet = InternetOpen(_T("oggUpdateCheck/1.0"), INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+	// プロキシ環境下の方でもダウンロードできるよう、システムのプロキシ設定を使用いたしますわ
+	HINTERNET hInternet = InternetOpen(_T("oggUpdateCheck/1.0"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (!hInternet) return false;
 
 	DWORD timeout = 60000; // 60秒
@@ -249,10 +247,6 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 	// プログラムの更新時刻 + 2分（120秒）に変更いたしましたわ
 	time_t threshold = exeTime + 120;
 
-	CString dbgMsg;
-	dbgMsg.Format(_T("[UpdateCheck] ExeTime: %lld, Threshold: %lld\n"), (long long)exeTime, (long long)threshold);
-	OutputDebugString(dbgMsg);
-
 	for (;;)
 	{
 		if (!IsWindow(hWnd)) break;
@@ -271,9 +265,6 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 
 		time_t serverModified = HttpGetLastModified(UPDATE_URL);
 
-		dbgMsg.Format(_T("[UpdateCheck] ServerModified: %lld, LastUpdateCheck: %lld\n"), (long long)serverModified, (long long)savedata.lastUpdateCheck);
-		OutputDebugString(dbgMsg);
-
 		// サーバーの時間が「プログラム更新時間＋指定時間」より新しく、かつ、
 		// 「保存データに記録された前回の更新時間」よりも新しい場合のみ更新通知を出しますわ
 		const __int64 dismissed = InterlockedCompareExchange64(&g_updateDismissedVersion, 0, 0);
@@ -283,7 +274,6 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 			InterlockedCompareExchange(&g_updatePromptOpen, 0, 0) == 0 &&
 			InterlockedCompareExchange(&g_updateMsgQueued, 0, 0) == 0)
 		{
-			OutputDebugString(_T("[UpdateCheck] 更新を検知いたしました！メッセージを送信しますわ。\n"));
 			InterlockedExchange(&g_updateMsgQueued, 1);
 			PostMessage(hWnd, WM_APP_UPDATE_AVAILABLE, (WPARAM)serverModified, 0);
 		}
@@ -307,7 +297,6 @@ void StartUpdateCheckThread(HWND hNotifyWnd)
 bool DoUpdateAndRestart()
 {
 	extern TCHAR karento2[1024];
-	extern save savedata;
 
 	// 現在実行しているファイルの名前を取得いたしますわ
 	TCHAR exePath[MAX_PATH] = { 0 };
@@ -371,6 +360,10 @@ bool DoUpdateAndRestart()
 	CString extractedHostPath;
 	extractedHostPath.Format(_T("%s\\%s"), extractDir, TARGET_HOST_EXE_NAME);
 
+	// 展開したファイルの時刻をサーバー時刻に合わせておきますわ。
+	// copy コマンドは元ファイルの時刻を引き継ぐため、上書きが「実際に成功したファイルだけ」が
+	// サーバー時刻になり、失敗したファイルは古いままとなります。
+	// これにより、権限不足などで上書きに失敗した場合は次回に再検知される仕組みですわ。
 	time_t serverTime = HttpGetLastModified(UPDATE_URL);
 	if (serverTime > 0)
 	{
@@ -397,57 +390,7 @@ bool DoUpdateAndRestart()
 			SetFileTime(hFile2, &ft, &ft, &ft);
 			CloseHandle(hFile2);
 		}
-
-		// ファイルシステムの読み取り誤差を完全に防ぐため、
-		// 計算した時間をそのまま直接保存データに記録いたしますわ
-		savedata.lastUpdateCheck = (__int64)newTime;
 	}
-	else
-	{
-		// サーバーの時間が取れなかった時の保険ですわ
-		savedata.lastUpdateCheck = (__int64)time(NULL);
-	}
-
-	// ----------------------------------------------------------------------------------
-	// 作業フォルダが迷子にならないよう、保存するファイルの住所（フルパス）を確実に作りますわ
-	// ----------------------------------------------------------------------------------
-	TCHAR datPath[MAX_PATH] = { 0 };
-	_tcscpy_s(datPath, MAX_PATH, targetExePath);
-	TCHAR* pSlashDat = _tcsrchr(datPath, _T('\\'));
-	if (pSlashDat != NULL)
-	{
-		*(pSlashDat + 1) = _T('\0');
-#if _UNICODE
-		_tcscat_s(datPath, MAX_PATH, _T("oggYSEDbgmu.dat"));
-#else
-		_tcscat_s(datPath, MAX_PATH, _T("oggYSEDbgm.dat"));
-#endif
-	}
-	else
-	{
-#if _UNICODE
-		_tcscpy_s(datPath, MAX_PATH, _T("oggYSEDbgmu.dat"));
-#else
-		_tcscpy_s(datPath, MAX_PATH, _T("oggYSEDbgm.dat"));
-#endif
-	}
-
-#if _UNICODE
-	CFile ab;
-	if (ab.Open(datPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL))
-	{
-		ab.Write(&savedata, sizeof(save));
-		ab.Close();
-	}
-#else
-	CFile ab;
-	if (ab.Open(datPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL))
-	{
-		ab.Write(&savedata, sizeof(save));
-		ab.Close();
-	}
-#endif
-	// ----------------------------------------------------------------------------------
 
 	// 命令書（バッチファイル）の作成
 	CFile bat;
@@ -458,10 +401,8 @@ bool DoUpdateAndRestart()
 	CStringA extractDirA(extractDir);
 	CStringA targetExeA(TARGET_EXE_NAME);
 	CStringA targetHostExeA(TARGET_HOST_EXE_NAME);
-	CStringA exePathA(exePath);              // 現在動いているファイル
 	CStringA targetExePathA(targetExePath);  // 新しく作る正しい名前のファイル
 	CStringA targetHostExePathA(targetHostExePath); // 新しいホストexe
-	CStringA tempPathA(tempPath);
 
 	// 実行ファイルがある正しいフォルダのパスを抜き出しますわ
 	CStringA exeDirA = targetExePathA;
@@ -471,43 +412,54 @@ bool DoUpdateAndRestart()
 		exeDirA = exeDirA.Left(slashPos);
 	}
 
+	// 命令書は二段構えでございます。
+	//   ランチャー部（常に通常権限）… プロセス終了待ち→書込可否を判定→
+	//                                 書込可なら worker を同じ権限で実行、
+	//                                 書込不可なら worker だけを昇格（UAC）で実行し、
+	//                                 最後に必ず通常権限でアプリを再起動して自身を削除。
+	//   worker 部（昇格され得る）  … 対象の停止と上書きのみを担当し、再起動も削除も行いません。
+	// これにより Program Files 等でも上書きでき、昇格を断られた場合でも必ず起動し直します。
 	CStringA batContentA;
-	// 命令書の中で「プログラムを起動する前に、必ず本来のフォルダに移動しなさい(cd /d)」と指定いたしますわ
 	batContentA.Format(
 		"@echo off\r\n"
-		"set LOG=\"%sogg_update_log.txt\"\r\n"
-		"echo 更新処理を開始いたします > %%LOG%%\r\n"
+		"setlocal\r\n"
+		"if \"%%~1\"==\"worker\" goto worker\r\n"
+		"taskkill /IM %s /F >nul 2>&1\r\n"
+		"ping -n 4 127.0.0.1 >nul\r\n"
+		"taskkill /IM %s /F >nul 2>&1\r\n"
+		"set \"PROBE=%s\\ogg_upd_probe.tmp\"\r\n"
+		"type nul > \"%%PROBE%%\" 2>nul\r\n"
+		"if exist \"%%PROBE%%\" (\r\n"
+		"  del \"%%PROBE%%\" >nul 2>&1\r\n"
+		"  call :worker\r\n"
+		") else (\r\n"
+		"  powershell -NoProfile -Command \"Start-Process -FilePath '%%~f0' -ArgumentList 'worker' -Verb RunAs -Wait\" >nul 2>&1\r\n"
+		")\r\n"
+		"cd /d \"%s\"\r\n"
+		"start \"\" \"%s\"\r\n"
+		"del \"%%~f0\"\r\n"
+		"goto :eof\r\n"
+		":worker\r\n"
 		"set RETRY=0\r\n"
-		"taskkill /IM %s /F >> %%LOG%% 2>&1\r\n"
 		":wait\r\n"
 		"ping -n 4 127.0.0.1 >nul\r\n"
-		"taskkill /IM %s /F >> %%LOG%% 2>&1\r\n"
-		"copy /y \"%s\\%s\" \"%s\" >> %%LOG%% 2>&1\r\n"
+		"taskkill /IM %s /F >nul 2>&1\r\n"
+		"copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
 		"if errorlevel 1 goto retry\r\n"
-		"copy /y \"%s\\%s\" \"%s\" >> %%LOG%% 2>&1\r\n"
-		"if not errorlevel 1 goto success\r\n"
+		"copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
+		"if not errorlevel 1 goto :eof\r\n"
 		":retry\r\n"
 		"set /a RETRY+=1\r\n"
-		"if %%RETRY%% geq 15 goto fail\r\n"
-		"goto wait\r\n"
-		":success\r\n"
-		"echo 上書きに成功いたしました！ >> %%LOG%%\r\n"
-		"cd /d \"%s\"\r\n"
-		"start \"\" \"%s\"\r\n"
-		"goto end\r\n"
-		":fail\r\n"
-		"echo 上書きに失敗いたしました... >> %%LOG%%\r\n"
-		"cd /d \"%s\"\r\n"
-		"start \"\" \"%s\"\r\n"
-		":end\r\n"
-		"del \"%%~f0\"\r\n",
-		(LPCSTR)tempPathA,
-		(LPCSTR)targetHostExeA,
-		(LPCSTR)targetHostExeA,
-		(LPCSTR)extractDirA, (LPCSTR)targetHostExeA, (LPCSTR)targetHostExePathA,
-		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA,
-		(LPCSTR)exeDirA, (LPCSTR)targetExePathA, // 成功時は元のフォルダに移動して起動
-		(LPCSTR)exeDirA, (LPCSTR)exePathA        // 失敗時も元のフォルダに移動して起動
+		"if %%RETRY%% geq 15 goto :eof\r\n"
+		"goto wait\r\n",
+		(LPCSTR)targetHostExeA,                                       // 起動直後の停止（host）
+		(LPCSTR)targetHostExeA,                                       // 再度の停止（host）
+		(LPCSTR)exeDirA,                                              // 書込可否テスト先フォルダ
+		(LPCSTR)exeDirA,                                              // 再起動前の移動先
+		(LPCSTR)targetExePathA,                                       // 再起動する本体
+		(LPCSTR)targetHostExeA,                                       // worker内の停止（host）
+		(LPCSTR)extractDirA, (LPCSTR)targetHostExeA, (LPCSTR)targetHostExePathA, // host 上書き
+		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA          // 本体 上書き
 	);
 
 	bat.Write(batContentA, batContentA.GetLength());
