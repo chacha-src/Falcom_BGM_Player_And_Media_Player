@@ -4965,17 +4965,17 @@ void equaliser(void* data, int len, BOOL reset) {
 				float qVal = (b >= 10) ? 1.0f : 1.414f;
 				CalcPeakingEQ(&g_channels[ch].eqFilters[b], EQ_FREQS[b], qVal, (float)savedata.eq[b], wavbitbackup);
 			}
-			// クラリティ: 5kHz 前後のプレゼンス調整
-			float clarityDb = (clarity - 100.0f) * 0.18f;
+			// クラリティ: 5kHz 前後のプレゼンス調整 (感度2倍)
+			float clarityDb = (clarity - 100.0f) * 0.36f;
 			CalcPeakingEQ(&g_channels[ch].clarityFilter, 5000.0f, 1.5f, 100.0f + clarityDb / 0.12f, wavbitbackup);
 
-			// バランス: 低域/高域のシェルフで輪郭/温もりのバランスを調整
-			float balanceDb = (balance - 100.0f) * 0.12f;
+			// バランス: 低域/高域のシェルフで輪郭/温もりのバランスを調整 (感度2倍)
+			float balanceDb = (balance - 100.0f) * 0.24f;
 			CalcShelvingEQ(&g_channels[ch].bassBalanceFilter, 0, 250.0f, -balanceDb, wavbitbackup);
 			CalcShelvingEQ(&g_channels[ch].trebleBalanceFilter, 1, 4000.0f, balanceDb, wavbitbackup);
 
-			// デンシティ: 600Hz/1400Hz 近傍の中域密度を調整
-			float densityDb = (density - 100.0f) * 0.15f;
+			// デンシティ: 600Hz/1400Hz 近傍の中域密度を調整 (感度2倍)
+			float densityDb = (density - 100.0f) * 0.30f;
 			CalcPeakingEQ(&g_channels[ch].densityFilter1, 600.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
 			CalcPeakingEQ(&g_channels[ch].densityFilter2, 1400.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
 		}
@@ -5041,7 +5041,8 @@ void equaliser(void* data, int len, BOOL reset) {
 	// [FIX-3][FIX-4] ブロック解析
 	// ブロック単位でコンテンツ検出 + ゲインステージング
 	// ============================================================
-	float masterGain = masterVolume / 100.0f;
+	// eq[15]: 100=1.0倍、偏差を2倍にしてスライダー差を明確化
+	float masterGain = fmaxf(0.0f, 1.0f + (masterVolume - 100.0f) / 50.0f);
 
 	// 0dB(100)を超えるブースト量に応じて内部ヘッドルームを自動確保する。
 	// 体感音量はなるべく維持しつつ、EQ強ブースト時のハードクリップを抑える。
@@ -5052,9 +5053,9 @@ void equaliser(void* data, int len, BOOL reset) {
 	}
 	float maxExtendedBoostDb = 0.0f;
 	{
-		const float clarityDb = (clarity - 100.0f) * 0.18f;
-		const float balanceDb = fabsf((balance - 100.0f) * 0.12f);
-		const float densityDb = fabsf((density - 100.0f) * 0.15f);
+		const float clarityDb = (clarity - 100.0f) * 0.36f;
+		const float balanceDb = fabsf((balance - 100.0f) * 0.24f);
+		const float densityDb = fabsf((density - 100.0f) * 0.30f);
 		maxExtendedBoostDb = fmaxf(clarityDb, fmaxf(balanceDb, densityDb));
 	}
 	const float totalBoostDb = maxBandBoostDb + maxExtendedBoostDb;
@@ -5110,8 +5111,9 @@ void equaliser(void* data, int len, BOOL reset) {
 	static float leftSamples[8192 * 40], rightSamples[8192 * 40];
 	int bufferIndex = 0;
 
-	float harmonicAmount = (density - 100.0f) / 200.0f;
-	float spatialWidth = 0.5f + (spatial / 100.0f);
+	float harmonicAmount = (density - 100.0f) / 100.0f;
+	// eq[19]: 100=ニュートラル(幅1.0)、偏差2倍 (0→0.05, 200→3.0)
+	float spatialWidth = fmaxf(0.05f, 1.0f + (spatial - 100.0f) / 50.0f);
 
 	// ===== 信号処理メインループ =====
 	for (int i = 0; i < numSamples; i++) {
@@ -5149,7 +5151,7 @@ void equaliser(void* data, int len, BOOL reset) {
 			// 3次高調波付加 (harmonicScale=0 のとき完全無効)
 			// [FIX-4] チップチューン時は 0.00 で呼び出し自体をスキップ
 			if (harmonicScale > 0.0f && fabs(harmonicAmount) > 0.01f) {
-				float harmonic = signal * signal * signal * harmonicAmount * 0.15f * harmonicScale;
+				float harmonic = signal * signal * signal * harmonicAmount * 0.30f * harmonicScale;
 				cs->harmonicState = cs->harmonicState * 0.95f + harmonic * 0.05f;
 				signal += cs->harmonicState;
 			}

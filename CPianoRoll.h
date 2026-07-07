@@ -18,6 +18,8 @@
 #pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
+#include "PianoKeyTable.h"
+#include "PianoRoll108Detect.h"
 #include <vector>
 
 class CPianoRoll : public CCustomBlurDialogExBase
@@ -114,10 +116,9 @@ private:
     int   m_winBass = WIN_BASS_REF;
     int   m_winHigh = WIN_HIGH_REF;
     int   m_winOnset = WIN_ONSET_REF;
-    // 分析: [0,BASS_ANALYSIS_END) は 16384 窓、それ以上は 8192 同一窓
-    static constexpr int   BASS_ANALYSIS_END = 46;
+    // 分析: [0,60) 16384 / [60,84) 8192 / [84,108) 4096（108鍵・周波数基準）
+    static constexpr int   BASS_ANALYSIS_END = PianoKey::BASS_BAND_END;
     static constexpr int   DETECT_KEYS    = KEY_COUNT;
-    static constexpr int   KEY_OFFSET       = 9;       // MIDI_BASE からのオフセット(A0→A#0=9)
 
     // ---- カスタムウィンドウメッセージ ----
     static constexpr UINT  WM_PIANOROLL_SYNC = WM_APP + 420;           // UI 同期要求(RequestSyncFromMainUi)
@@ -139,6 +140,7 @@ private:
     float   m_envPeak[KEY_COUNT];
     int     m_unpickedFrames[KEY_COUNT];
     int     m_strengthDipFrames[KEY_COUNT];
+    uint8_t m_transientHold[KEY_COUNT];
     uint8_t m_bandMask[KEY_COUNT];
     float   m_laneStrength[KEY_COUNT][3];
     uint8_t m_prevBandMask[KEY_COUNT];
@@ -210,7 +212,7 @@ private:
     float m_chMeterFill[PIANO_METER_CH_MAX];      // 表示用 IIR 平滑フィル値(0.0〜1.0)
     float m_chMeterAutoPeak[PIANO_METER_CH_MAX];  // 自動ピーク(棒グラフ上端の目印)
     int   m_chMeterCount = 0;
-    static constexpr DWORD ANALYZE_MIN_MS = 4;    // 連続分析の最短間隔(過負荷防止)
+    static constexpr DWORD ANALYZE_MIN_MS = 3;    // 連続分析の最短間隔(16分音符対応)
 
     void EnsureAnalysisTables(int sampleRate, int capCaptureFrames = 0);   // Goertzel 係数と窓関数を再計算
     void RunGoertzelFromBuffer(const double* winLow, const double* winBass, int bassWinLen);
@@ -232,7 +234,7 @@ private:
     static double ReadMonoSample(const uint8_t* sp, int bits);
     static double GoertzelMagnitude(const double* samples, int numSamples,
         double coefficient, const double* window);
-    static float  ApplyDisplayScale(float rawAmp, int keyIndex);
+    static float  ApplyDisplayScale(float rawAmp, int keyIndex, int winSamples, int refWinSamples);
     static float  MidiToFreq(int midi);
     static int      KeyBandIndex(int keyIndex);
 

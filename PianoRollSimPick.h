@@ -8,9 +8,9 @@
 
 namespace PianoRollSimPick
 {
-    // MIDI 0 基準: 旧 88鍵 index+21 と同じ音高境界
-    static constexpr int BAND_BASS_END = 46;  // 低音ピック帯 [0,46) ≒ MIDI 21..45
-    static constexpr int BAND_MID_END = 73;   // 中音 [46,73), 高音 [73,KEY_COUNT)
+    // MIDI 絶対境界（PianoKeyTable.h）。108鍵化後も旧88鍵と同じ音高帯を維持。
+    static constexpr int BAND_BASS_END = PianoKey::BASS_BAND_END;  // [0,67) ≒ MIDI 0..66
+    static constexpr int BAND_MID_END = PianoKey::MID_BAND_END;    // 中音 [67,94), 高音 [94,COUNT)
 
     static constexpr float BAND_PICK_REL_BASS = 0.26f;
     static constexpr float BAND_PICK_REL_MID  = 0.26f;
@@ -196,7 +196,7 @@ namespace PianoRollSimPick
     }
 
     inline void SupplementTrebleBellPeaks(const float* st, const float* shaped, bool* active,
-        int count, int sampleRate, int winBass, int winUpper, const TrebleContext& ctx,
+        int count, int sampleRate, int winBass, int winMid, const TrebleContext& ctx,
         float pickScale = 1.0f)
     {
         if (!st || !shaped || !active || count <= 0 || !ctx.sparseBell) return;
@@ -231,32 +231,34 @@ namespace PianoRollSimPick
         const int hi = count;
         if (lo >= hi) return;
 
-        if (CountBandPeaks(st, lo, hi, 0.12f) >= 12)
+        if (CountBandPeaks(st, lo, hi, 0.12f) >= 10)
             return;
 
         float bandMax = 0.0f;
         for (int i = lo; i < hi; ++i)
             if (st[i] > bandMax) bandMax = st[i];
-        if (bandMax < 0.006f) return;
+        if (bandMax < 0.008f) return;
 
-        const float minS = bandMax * (0.10f * pickScale);
+        const float minS = bandMax * (0.14f * pickScale);
         for (int i = lo; i < hi; ++i) {
             if (active[i] || st[i] < minS) continue;
             if (!IsStrongTrebleMelodyPeak(st, i, ctx, count)) continue;
             if (!PassesTrebleMelodyPick(st, i, count, midPicked)) continue;
-            if (shaped[i] < bandMax * 0.05f && st[i] < bandMax * 0.18f) continue;
+            if (shaped[i] < bandMax * 0.08f && st[i] < bandMax * 0.24f) continue;
             active[i] = true;
         }
     }
 
-    inline int WinSamplesForBlur(int keyIndex, int winBass, int winUpper)
+    inline int WinSamplesForBlur(int keyIndex, int winBass, int winMid, int winTreble)
     {
-        return (keyIndex < BAND_BASS_END) ? winBass : winUpper;
+        if (keyIndex < BAND_BASS_END) return winBass;
+        if (keyIndex < PianoKey::TREBLE_WIN_START) return winMid;
+        return winTreble;
     }
 
-    inline int BlurSemi(int keyIndex, int sampleRate, int winBass, int winUpper)
+    inline int BlurSemi(int keyIndex, int sampleRate, int winBass, int winMid, int winTreble)
     {
-        const int n = WinSamplesForBlur(keyIndex, winBass, winUpper);
+        const int n = WinSamplesForBlur(keyIndex, winBass, winMid, winTreble);
         const float bw = 2.5f * (float)sampleRate / (float)n;
         const float semi = PianoKey::KeyHz(keyIndex) * 0.0594631f;
         int r = (int)(bw / semi + 0.65f);
@@ -265,20 +267,20 @@ namespace PianoRollSimPick
         return r;
     }
 
-    inline bool SharesLobe(int i, int j, int sampleRate, int winBass, int winUpper)
+    inline bool SharesLobe(int i, int j, int sampleRate, int winBass, int winMid, int winTreble)
     {
         const int d = (i > j) ? (i - j) : (j - i);
-        return d <= BlurSemi(i, sampleRate, winBass, winUpper)
-            || d <= BlurSemi(j, sampleRate, winBass, winUpper);
+        return d <= BlurSemi(i, sampleRate, winBass, winMid, winTreble)
+            || d <= BlurSemi(j, sampleRate, winBass, winMid, winTreble);
     }
 
     inline void ApplyLobeShaping(const float* st, float* shaped, int count, int sampleRate,
-        int winBass, int winUpper)
+        int winBass, int winMid, int winTreble)
     {
         if (!st || !shaped || count <= 0) return;
         memcpy(shaped, st, (size_t)count * sizeof(float));
         for (int i = 0; i < count; ++i) {
-            const int r = BlurSemi(i, sampleRate, winBass, winUpper);
+            const int r = BlurSemi(i, sampleRate, winBass, winMid, winTreble);
             if (r <= 1) continue;
             const int jl = (i - r < 0) ? 0 : (i - r);
             const int jh = (i + r + 1 >= count) ? count : (i + r + 1);
@@ -301,7 +303,7 @@ namespace PianoRollSimPick
     }
 
     inline void CollapseLobePicks(const float* st, bool* active, int lo, int hi, int sampleRate,
-        int winBass, int winUpper)
+        int winBass, int winMid, int winTreble)
     {
         if (!st || !active || lo >= hi) return;
         bool keep[128];
@@ -310,7 +312,7 @@ namespace PianoRollSimPick
         for (int i = lo; i < hi; ++i) {
             if (!active[i]) continue;
             for (int j = i + 1; j < hi; ++j) {
-                if (!active[j] || !SharesLobe(i, j, sampleRate, winBass, winUpper))
+                if (!active[j] || !SharesLobe(i, j, sampleRate, winBass, winMid, winTreble))
                     continue;
                 if (PianoKey::IsHarmonicPair(j, i) || PianoKey::IsHarmonicPair(i, j))
                     continue;
@@ -325,7 +327,7 @@ namespace PianoRollSimPick
     }
 
     inline void PickBand(const float* st, const float* shaped, bool* activeOut,
-        int lo, int hi, int count, int sampleRate, int winBass, int winUpper,
+        int lo, int hi, int count, int sampleRate, int winBass, int winMid, int winTreble,
         float rel = 0.26f, float prom = 0.14f, const TrebleContext* treCtx = nullptr,
         const bool* midPicked = nullptr)
     {
@@ -412,13 +414,13 @@ namespace PianoRollSimPick
         }
 
         if (!(treCtx && treCtx->sparseBell && lo >= BAND_MID_END))
-            CollapseLobePicks(st, bandActive, lo, hi, sampleRate, winBass, winUpper);
+            CollapseLobePicks(st, bandActive, lo, hi, sampleRate, winBass, winMid, winTreble);
         for (int i = lo; i < hi; ++i)
             if (bandActive[i]) activeOut[i] = true;
     }
 
     inline void PickAllBands(const float* st, const float* shaped, bool* active, int count,
-        int sampleRate, int winBass, int winUpper, float pickScale = 1.0f)
+        int sampleRate, int winBass, int winMid, int winTreble, float pickScale = 1.0f)
     {
         if (!st || !shaped || !active || count <= 0) return;
         const TrebleContext treCtx = AnalyzeTrebleContext(st, count);
@@ -436,29 +438,24 @@ namespace PianoRollSimPick
         treProm *= pickScale;
 
         memset(active, 0, (size_t)count * sizeof(bool));
-        PickBand(st, shaped, active, 0, BAND_BASS_END, count, sampleRate, winBass, winUpper,
+        PickBand(st, shaped, active, 0, BAND_BASS_END, count, sampleRate, winBass, winMid, winTreble,
             BAND_PICK_REL_BASS * pickScale, BAND_PICK_PROM_BASS * pickScale);
-        PickBand(st, shaped, active, BAND_BASS_END, BAND_MID_END, count, sampleRate, winBass, winUpper,
+        PickBand(st, shaped, active, BAND_BASS_END, BAND_MID_END, count, sampleRate, winBass, winMid, winTreble,
             BAND_PICK_REL_MID * pickScale, BAND_PICK_PROM_MID * pickScale);
         bool midPicked[128];
         memset(midPicked, 0, sizeof(midPicked));
         for (int i = BAND_BASS_END; i < BAND_MID_END && i < count; ++i)
             midPicked[i] = active[i];
-        PickBand(st, shaped, active, BAND_MID_END, count, count, sampleRate, winBass, winUpper,
+        PickBand(st, shaped, active, BAND_MID_END, count, count, sampleRate, winBass, winMid, winTreble,
             treRel, treProm, &treCtx, midPicked);
-        SupplementTrebleBellPeaks(st, shaped, active, count, sampleRate, winBass, winUpper,
-            treCtx, pickScale);
-        SupplementMelodyTreblePeaks(st, shaped, active, count, treCtx, pickScale, midPicked);
+        // 高音ゴーストの主因だった supplement は無効化（PickBand + 基音テストのみ）
     }
 
     inline float BandDisplayBoost(int keyIndex)
     {
-        if (keyIndex < BAND_MID_END)
-            return (keyIndex >= BAND_BASS_END) ? 1.06f : 1.0f;
-        const int span = PianoKey::COUNT - BAND_MID_END;
-        if (span <= 1) return 1.28f;
-        const float t = (float)(keyIndex - BAND_MID_END) / (float)(span - 1);
-        return 1.12f + t * 0.38f;
+        if (keyIndex < BAND_BASS_END) return 1.0f;
+        if (keyIndex < BAND_MID_END) return 1.04f;
+        return 1.0f;
     }
 
 } // namespace PianoRollSimPick

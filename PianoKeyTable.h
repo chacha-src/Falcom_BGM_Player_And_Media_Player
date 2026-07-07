@@ -7,6 +7,12 @@ namespace PianoKey
 {
     static constexpr int COUNT = 108;
     static constexpr int MIDI_BASE = 0;
+    // 88鍵(A0=21起)時代の帯域境界を MIDI 絶対値で維持（108鍵化で index だけ変えず残っていた不整合を解消）
+    // 旧 BAND_BASS_END=46 → MIDI 21..66, 旧 BAND_MID_END=73 → MIDI 67..93
+    static constexpr int BASS_BAND_END = 67;  // [0,67) 低音 Goertzel 長窓 + 低音ピック
+    static constexpr int MID_BAND_END = 94;   // [67,94) 中音, [94,COUNT) 高音
+    // 旧88鍵 LOW_KEY_SPLIT=50 + MIDI21 → MIDI71(B4)。高音は 4096 Blackman 窓。
+    static constexpr int TREBLE_WIN_START = 71;
     static constexpr int HARMONIC_N_MIN = 2;
     static constexpr int HARMONIC_N_MAX = 9;
     static constexpr int HARMONIC_COUNT = HARMONIC_N_MAX - HARMONIC_N_MIN + 1;
@@ -21,6 +27,14 @@ namespace PianoKey
         if (keyIndex < 0) return MidiToHz(MIDI_BASE);
         if (keyIndex >= COUNT) return MidiToHz(MIDI_BASE + COUNT - 1);
         return MidiToHz(MIDI_BASE + keyIndex);
+    }
+
+    // 108鍵フルレンジ: キー index をそのまま使う（88鍵時代の -12 オフセットは廃止）
+    inline int GoertzelScaleKeyIndex(int keyIndex)
+    {
+        if (keyIndex < 0) return 0;
+        if (keyIndex >= COUNT) return COUNT - 1;
+        return keyIndex;
     }
 
     inline int NearestKeyIndex(float hz)
@@ -174,6 +188,22 @@ namespace PianoKey
         for (int d : kDown) {
             const int lo = candidate - d;
             if (lo < 0) continue;
+            if (st[lo] >= sc * 0.62f) return false;
+        }
+        return true;
+    }
+
+    // 中高音: 低音帯の漏れを無視し、近接音のみで倍音判定（オクターブ和音は通す）
+    inline bool SalienceAboveLowBand(const float* st, int candidate, int count, int bassBandEnd)
+    {
+        if (!st || candidate < 0 || candidate >= count) return false;
+        const float sc = st[candidate];
+        if (sc <= 0.0f) return false;
+        static const int kDown[] = { 5, 7 };
+        for (int d : kDown) {
+            const int lo = candidate - d;
+            if (lo < 0) continue;
+            if (candidate >= bassBandEnd && lo < bassBandEnd) continue;
             if (st[lo] >= sc * 0.62f) return false;
         }
         return true;

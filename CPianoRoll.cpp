@@ -10,7 +10,7 @@
 #include "resource.h"
 #include "NoteFundamentalPick.h"
 #include "PianoRollPick.h"
-#include "PianoRollSimPick.h"
+#include "PianoRoll108Detect.h"
 #include "PianoKeyTable.h"
 #include "PianoRollGoertzelAvx2.h"
 #include <algorithm>
@@ -26,37 +26,39 @@ namespace Cfg
     // piano roll3: 基音ピック + NormalizeDisplayPeak + 包絡ホールド
     static constexpr float IIR_ALPHA = 0.40f;
     static constexpr float IIR_ALPHA_BASS = 0.28f;
-    static constexpr float SILENCE_ABS = 0.007f;
-    static constexpr float BAND_SILENCE_BASS = 0.005f;
-    static constexpr float BAND_SILENCE_MID = 0.004f;
-    static constexpr float BAND_SILENCE_TRE = 0.004f;
+    static constexpr float SILENCE_ABS = 0.002f;
+    static constexpr float BAND_SILENCE_BASS = 0.0015f;
+    static constexpr float BAND_SILENCE_MID = 0.0012f;
+    static constexpr float BAND_SILENCE_TRE = 0.0012f;
     static constexpr int   ATTACK_FRAMES = 1;
+    static constexpr int   ATTACK_FRAMES_EDGE = 2;
     static constexpr int   RELEASE_FRAMES = 5;
-    static constexpr int   VIS_GAP_FRAMES = 4;
-    static constexpr int   VIS_GAP_FRAMES_BASS = 2;
+    static constexpr int   VIS_GAP_FRAMES = 2;
+    static constexpr int   VIS_GAP_FRAMES_BASS = 3;
+    static constexpr int   VIS_GAP_FRAMES_MID = 1;
+    static constexpr int   VIS_GAP_FRAMES_TRE = 2;
+    static constexpr int   VIS_GAP_SUSTAIN_BONUS = 2;
+    static constexpr int   ATTACK_MISS_GRACE = 2;
     static constexpr float RETRIGGER_RATIO = 0.28f;
-    static constexpr int   BAND_BASS_END = 46;
-    static constexpr int   BAND_MID_END = 73;
-    static constexpr int   BAND_MID_LO_END = 66;
-     // 上声部内の低め側スナップ用（ピック帯ではない）
-    // O2G=key22, O5C=key51, O7C=key75
-    static constexpr int   KEY_O2G = 22;
-    static constexpr int   KEY_O5C = 51;
-    static constexpr int   KEY_O7C = 75;
+    static constexpr int   BAND_BASS_END = PianoRoll108::BASS_END;
+    static constexpr int   BAND_MID_END = PianoRoll108::MID_END;
+    static constexpr int   KEY_O2G = 43;   // G2
+    static constexpr int   KEY_O5C = 72;   // C5
+    static constexpr int   KEY_O7C = 96;   // C7
     // ノート有無: 調波サリエンスの局所ピークが領域ノイズ床×SNR を超えること。
     // 帯域max比は使わない（静音で高音が消え、派手な曲で砂になるため）。
     static constexpr float BASS_PICK_THRESH = 0.20f;
     static constexpr float UPPER_PICK_THRESH = 0.06f;
     static constexpr float PEAK_SNR = 3.0f;
     static constexpr float PEAK_REGION_REL = 0.055f;  // legacy pick helpers (unused path)
-    static constexpr float HOLD_ENV_BASS = 0.34f;
-    static constexpr float HOLD_ENV_MID = 0.21f;
-    static constexpr float HOLD_ENV_TRE = 0.19f;
+    static constexpr float HOLD_ENV_BASS = 0.28f;
+    static constexpr float HOLD_ENV_MID = 0.14f;
+    static constexpr float HOLD_ENV_TRE = 0.16f;
     static constexpr float DISPLAY_PEAK_CAP = 5.0f;
     static constexpr int   ANALYZE_INTERVAL = 1024;
-    static constexpr int   ONSET_KEY_START = 41;
-    static constexpr float ONSET_DELTA_THRESH = 0.036f;
-    static constexpr float ONSET_MIN_STRENGTH = 0.065f;
+    static constexpr int   ONSET_KEY_START = 62;  // D4（旧 index 41 + MIDI base 21）
+    static constexpr float ONSET_DELTA_THRESH = 0.012f;
+    static constexpr float ONSET_MIN_STRENGTH = 0.018f;
     static constexpr float BASS_ONSET_DELTA_THRESH = 0.034f;
     static constexpr float BASS_ONSET_MIN_STRENGTH = 0.055f;
     static constexpr float UPPER_ONSET_DELTA_THRESH = 0.040f;
@@ -180,10 +182,34 @@ namespace Cfg
         return f;
     }
 
+    static int AttackFramesForKey(int keyIndex)
+    {
+        if (keyIndex >= PianoRoll108::BASS_END && keyIndex < PianoRoll108::EDGE_HI)
+            return 1;
+        if (keyIndex < 12 || keyIndex >= PianoRoll108::EDGE_HI)
+            return TemporalFrames(keyIndex, ATTACK_FRAMES_EDGE);
+        return 1;
+    }
+
     static int VisGapFrames(int keyIndex)
     {
-        const int base = (keyIndex < BAND_BASS_END) ? VIS_GAP_FRAMES_BASS : VIS_GAP_FRAMES;
+        if (keyIndex >= PianoRoll108::BASS_END && keyIndex < PianoRoll108::MID_END)
+            return VIS_GAP_FRAMES_MID;
+        const int base = (keyIndex < BAND_BASS_END) ? VIS_GAP_FRAMES_BASS
+            : (keyIndex >= BAND_MID_END) ? VIS_GAP_FRAMES_TRE : VIS_GAP_FRAMES;
         return TemporalFrames(keyIndex, base);
+    }
+
+    static void NormalizeBandPeak(float* values, int lo, int hi, float cap)
+    {
+        if (!values || lo >= hi || cap <= 0.0f) return;
+        float maxV = 0.0f;
+        for (int i = lo; i < hi; ++i)
+            if (values[i] > maxV) maxV = values[i];
+        if (maxV <= cap) return;
+        const float scale = cap / maxV;
+        for (int i = lo; i < hi; ++i)
+            values[i] *= scale;
     }
 
 
@@ -208,7 +234,7 @@ int CPianoRoll::CaptureFrameCount(int sampleRate, int capSamples)
 
 int CPianoRoll::MinAnalyzeFrameCount(int sampleRate, int capSamples)
 {
-    return ScaleWinSamples(WIN_LOW_REF, sampleRate, capSamples);
+    return ScaleWinSamples(WIN_BASS_REF, sampleRate, capSamples);
 }
 
 CPianoRoll::CPianoRoll(CWnd* pParent)
@@ -229,6 +255,7 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     memset(m_envPeak, 0, sizeof(m_envPeak));
     memset(m_unpickedFrames, 0, sizeof(m_unpickedFrames));
     memset(m_strengthDipFrames, 0, sizeof(m_strengthDipFrames));
+    memset(m_transientHold, 0, sizeof(m_transientHold));
     memset(m_bandMask, 0, sizeof(m_bandMask));
     memset(m_laneStrength, 0, sizeof(m_laneStrength));
     memset(m_prevBandMask, 0, sizeof(m_prevBandMask));
@@ -343,6 +370,7 @@ void CPianoRoll::ResetPlaybackState()
         memset(m_envPeak, 0, sizeof(m_envPeak));
         memset(m_unpickedFrames, 0, sizeof(m_unpickedFrames));
         memset(m_strengthDipFrames, 0, sizeof(m_strengthDipFrames));
+        memset(m_transientHold, 0, sizeof(m_transientHold));
         memset(m_bandMask, 0, sizeof(m_bandMask));
         memset(m_laneStrength, 0, sizeof(m_laneStrength));
         memset(m_prevBandMask, 0, sizeof(m_prevBandMask));
@@ -512,9 +540,7 @@ float CPianoRoll::MidiToFreq(int midi)
 
 int CPianoRoll::KeyBandIndex(int keyIndex)
 {
-    if (keyIndex < Cfg::BAND_BASS_END) return 0;
-    if (keyIndex < Cfg::BAND_MID_END) return 1;
-    return 2;
+    return PianoRoll108::KeyBandIndex(keyIndex);
 }
 
 double CPianoRoll::ReadMonoSample(const uint8_t* sp, int bits)
@@ -627,9 +653,34 @@ double CPianoRoll::GoertzelMagnitude(const double* samples, int numSamples,
     return sqrt(power > 0.0 ? power : 0.0) * 2.5 / numSamples;
 }
 
-float CPianoRoll::ApplyDisplayScale(float rawAmp, int keyIndex)
+float CPianoRoll::ApplyDisplayScale(float rawAmp, int keyIndex, int winSamples, int refWinSamples)
 {
-    return ScaleGoertzelAmp(rawAmp, keyIndex, KEY_COUNT);
+    if (rawAmp <= 1e-10f) return 0.0f;
+    if (winSamples <= 0) winSamples = refWinSamples;
+    if (refWinSamples <= 0) refWinSamples = WIN_LOW_REF;
+
+    float amp = (float)rawAmp * ((float)winSamples / (float)refWinSamples);
+
+    const float hz = PianoKey::KeyHz(keyIndex);
+    float eq = sqrtf(440.0f / (hz > 20.0f ? hz : 20.0f));
+    float eqMin = 0.60f;
+    float eqMax = 1.8f;
+    if (keyIndex < PianoRoll108::BASS_END)
+        eqMax = 1.05f;
+    else if (keyIndex < 12)
+        eqMax = 1.6f;
+    else if (keyIndex >= 84)
+        eqMin = 0.72f;
+    else if (keyIndex >= 72)
+        eqMin = 0.65f;
+    if (eq < eqMin) eq = eqMin;
+    if (eq > eqMax) eq = eqMax;
+    amp *= eq;
+
+    const double x = (double)amp * 80.0;
+    double out = x * x * 0.003;
+    if (out > 10.0) out = 10.0;
+    return (float)out;
 }
 
 
@@ -750,9 +801,7 @@ void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
 }
 
 // 窓掛け済みバッファから Goertzel 解析を実行し m_rawStrengths を更新する。
-// 低音 [0,BASS_ANALYSIS_END): 16384+Hann 専用バッファ。
-// 中高音 [BASS_ANALYSIS_END,KEY_COUNT): 8192+Hann 同一バッファ（分割窓なし）。
-// オンセット: WIN_ONSET 短窓。
+// 108鍵3窓: [0,60) 16384 / [60,84) 8192 / [84,108) 4096
 void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     const double* winBass, int bassWinLen)
 {
@@ -773,7 +822,13 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
         hasBass ? m_bassAnalysisBuf.data() : nullptr,
         hasBass ? m_winBass : 0);
     m_bufwav3LevelDb = levelDb;
-    if (levelDb < -54.0f) {
+
+    const float gainDb = Cfg::MakeupGainDbForBufwav3(levelDb);
+    Cfg::ApplyGainDbInPlace(m_analysisBuf.data(), m_winLow, gainDb);
+    if (hasBass)
+        Cfg::ApplyGainDbInPlace(m_bassAnalysisBuf.data(), m_winBass, gainDb);
+
+    if (levelDb < -58.0f && gainDb < 3.0f) {
         for (int i = 0; i < KEY_COUNT; ++i) {
             m_activeKeys[i] = false;
             m_noteStrength[i] = 0.0f;
@@ -784,6 +839,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_consecSilent[i] = 0;
             m_unpickedFrames[i] = 0;
             m_strengthDipFrames[i] = 0;
+            m_transientHold[i] = 0;
             m_envPeak[i] = 0.0f;
             m_bandMask[i] = 0;
             memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
@@ -792,45 +848,60 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
         PushFrame(false);
         return;
     }
-    (void)levelDb;
 
     for (int i = 0; i < m_winLow; ++i)
         m_windowedLow[i] = m_analysisBuf[i] * m_hannLow[i];
+    for (int i = 0; i < m_winHigh; ++i)
+        m_windowedHigh[i] = m_analysisBuf[i + (m_winLow - m_winHigh)] * m_blackmanHigh[i];
     const double* onsetSrc = m_analysisBuf.data() + (m_winLow - m_winOnset);
     for (int i = 0; i < m_winOnset; ++i)
         m_windowedOnset[i] = onsetSrc[i] * m_hannOnset[i];
 
-    const int bassEnd = BASS_ANALYSIS_END;
+    const int splitLo = PianoRoll108::WIN_LONG_END;
+    const int splitHi = PianoRoll108::WIN_MID_END;
+
     if (hasBass) {
         for (int i = 0; i < m_winBass; ++i)
             m_windowedBass[i] = m_bassAnalysisBuf[i] * m_hannBass[i];
         PianoRollGoertzelBatchAvx2(
             m_windowedBass.data(), m_winBass, m_goertzelCoeffs.data(),
-            0, bassEnd, m_goertzelRawScratch);
+            0, splitLo, m_goertzelRawScratch);
+        for (int i = 0; i < splitLo; ++i)
+            m_rawStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i], i,
+                m_winBass, WIN_BASS_REF);
     }
     else {
         PianoRollGoertzelBatchAvx2(
             m_windowedLow.data(), m_winLow, m_goertzelCoeffs.data(),
-            0, bassEnd, m_goertzelRawScratch);
+            0, splitLo, m_goertzelRawScratch);
+        for (int i = 0; i < splitLo; ++i)
+            m_rawStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i], i,
+                m_winLow, WIN_BASS_REF);
     }
-    for (int i = 0; i < bassEnd; ++i)
-        m_rawStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i], i);
 
     PianoRollGoertzelBatchAvx2(
         m_windowedLow.data(), m_winLow, m_goertzelCoeffs.data(),
-        bassEnd, KEY_COUNT, m_goertzelRawScratch);
-    for (int i = bassEnd; i < KEY_COUNT; ++i)
+        splitLo, splitHi, m_goertzelRawScratch);
+    for (int i = splitLo; i < splitHi; ++i)
         m_rawStrengths[i] = ApplyDisplayScale(
-            (float)m_goertzelRawScratch[i - bassEnd], i);
+            (float)m_goertzelRawScratch[i - splitLo], i, m_winLow, WIN_LOW_REF);
+
+    PianoRollGoertzelBatchAvx2(
+        m_windowedHigh.data(), m_winHigh, m_goertzelCoeffs.data(),
+        splitHi, KEY_COUNT, m_goertzelRawScratch);
+    for (int i = splitHi; i < KEY_COUNT; ++i)
+        m_rawStrengths[i] = ApplyDisplayScale(
+            (float)m_goertzelRawScratch[i - splitHi], i, m_winHigh, WIN_HIGH_REF);
 
     PianoRollGoertzelBatchAvx2(
         m_windowedOnset.data(), m_winOnset, m_goertzelCoeffs.data(),
         0, KEY_COUNT, m_goertzelRawScratch);
     for (int i = 0; i < KEY_COUNT; ++i)
-        m_onsetStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i], i);
+        m_onsetStrengths[i] = ApplyDisplayScale(
+            (float)m_goertzelRawScratch[i], i, m_winOnset, WIN_ONSET_REF);
 
     for (int i = 0; i < KEY_COUNT; ++i) {
-        const float alpha = (i < Cfg::BAND_BASS_END) ? Cfg::IIR_ALPHA_BASS : Cfg::IIR_ALPHA;
+        const float alpha = PianoRoll108::IirAlphaForKey(i);
         m_smoothedStrengths[i] =
             m_smoothedStrengths[i] * (1.0f - alpha) + m_rawStrengths[i] * alpha;
     }
@@ -843,20 +914,18 @@ void CPianoRoll::UpdateNoteStates()
 {
     using namespace Cfg;
 
-    float pickStrength[KEY_COUNT];
-    float trackStrength[KEY_COUNT];
-    for (int i = 0; i < KEY_COUNT; ++i) {
-        pickStrength[i] = m_rawStrengths[i];
-        trackStrength[i] = m_smoothedStrengths[i];
-    }
+    const float pickScale = PickThreshScaleFromLevelDb(m_bufwav3LevelDb);
 
     float maxS = 0.0f;
     for (int i = 0; i < KEY_COUNT; ++i)
-        if (pickStrength[i] > maxS) maxS = pickStrength[i];
+        if (m_smoothedStrengths[i] > maxS) maxS = m_smoothedStrengths[i];
 
-    const float bassMax = BandMaxStrength(pickStrength, 0, BAND_BASS_END);
-    const float midMax = BandMaxStrength(pickStrength, BAND_BASS_END, BAND_MID_END);
-    const float treMax = BandMaxStrength(pickStrength, BAND_MID_END, KEY_COUNT);
+    float blend[KEY_COUNT];
+    PianoRoll108::BuildDetectionSpectrum(m_smoothedStrengths, m_rawStrengths, blend, KEY_COUNT);
+
+    const float bassMax = BandMaxStrength(blend, 0, PianoRoll108::BASS_END);
+    const float midMax = BandMaxStrength(blend, PianoRoll108::BASS_END, PianoRoll108::MID_END);
+    const float treMax = BandMaxStrength(blend, PianoRoll108::MID_END, KEY_COUNT);
     const bool anyBandLive =
         bassMax >= BAND_SILENCE_BASS ||
         midMax >= BAND_SILENCE_MID ||
@@ -870,82 +939,34 @@ void CPianoRoll::UpdateNoteStates()
             m_consecSilent[i] = 0;
             m_unpickedFrames[i] = 0;
             m_strengthDipFrames[i] = 0;
+            m_transientHold[i] = 0;
             m_envPeak[i] = 0.0f;
             m_bandMask[i] = 0;
             memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
+            m_smoothedStrengths[i] *= 0.4f;
         }
         memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
         return;
     }
 
-    float shaped[KEY_COUNT];
-    PianoRollSimPick::ApplyLobeShaping(pickStrength, shaped, KEY_COUNT, m_inputSampleRate,
-        m_winBass, m_winLow);
-
-    const float pickScale = PickThreshScaleFromLevelDb(m_bufwav3LevelDb);
-    const PianoRollSimPick::TrebleContext treCtx =
-        PianoRollSimPick::AnalyzeTrebleContext(pickStrength, KEY_COUNT);
     bool picked[KEY_COUNT];
-    memset(picked, 0, sizeof(picked));
-    PianoRollSimPick::PickAllBands(pickStrength, shaped, picked, KEY_COUNT,
-        m_inputSampleRate, m_winBass, m_winLow, pickScale);
-
-    bool midPicked[KEY_COUNT];
-    memset(midPicked, 0, sizeof(midPicked));
-    for (int k = BAND_BASS_END; k < BAND_MID_END; ++k)
-        midPicked[k] = picked[k];
+    PianoRoll108::BuildFramePicks(blend, picked, KEY_COUNT, pickScale);
 
     for (int i = 0; i < KEY_COUNT; ++i) {
-        const float sigStrength = pickStrength[i];
-        bool effectivePicked = picked[i];
+        const float sigStrength = blend[i];
+        bool effective = picked[i];
 
-        if (!effectivePicked && treCtx.sparseBell && i >= BAND_MID_END) {
-            const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
-            if (onsetDelta >= ONSET_DELTA_THRESH * 0.72f &&
-                m_onsetStrengths[i] >= ONSET_MIN_STRENGTH * 0.50f &&
-                sigStrength >= treMax * 0.07f &&
-                IsLocalPeakInBand(pickStrength, i, BAND_MID_END, KEY_COUNT) &&
-                PianoRollSimPick::PassesTrebleBellPick(pickStrength, i, KEY_COUNT, treCtx.treMax))
-                effectivePicked = true;
-        }
-
-        // 16分音符級: 8192 pick で落ちた短い中高音を onset レーンで拾う（持続ゴーストは pick 側で除外済み）
-        if (!effectivePicked && i >= ONSET_KEY_START) {
-            const float onsetDelta = m_onsetStrengths[i] - m_prevOnsetStrengths[i];
-            const bool isTre = i >= BAND_MID_END;
-            const float odTh = isTre
-                ? UPPER_ONSET_DELTA_THRESH * 0.82f
-                : ONSET_DELTA_THRESH * 0.85f;
-            const float osTh = isTre
-                ? UPPER_ONSET_MIN_STRENGTH * 0.52f
-                : ONSET_MIN_STRENGTH * 0.55f;
-            const float bandRef = isTre ? treMax : midMax;
-            const int bandLo = isTre ? BAND_MID_END : BAND_BASS_END;
-            const int bandHi = isTre ? KEY_COUNT : BAND_MID_END;
-            if (onsetDelta >= odTh &&
-                m_onsetStrengths[i] >= osTh &&
-                sigStrength >= bandRef * 0.065f &&
-                IsLocalPeakInBand(pickStrength, i, bandLo, bandHi)) {
-                if (isTre) {
-                    if (PianoRollSimPick::PassesTreblePick(pickStrength, i, KEY_COUNT, treCtx, midPicked))
-                        effectivePicked = true;
-                }
-                else if (PianoKey::PassesFundamentalTest(pickStrength, i, KEY_COUNT)) {
-                    effectivePicked = true;
-                }
+        if (!effective && m_activeKeys[i]) {
+            const float holdRatio = HoldEnvRatio(i);
+            if (holdRatio > 0.0f && m_envPeak[i] > 0.001f) {
+                if (sigStrength >= m_envPeak[i] * holdRatio)
+                    effective = true;
+                else if (m_smoothedStrengths[i] >= m_envPeak[i] * holdRatio * 0.82f)
+                    effective = true;
             }
         }
 
-        if (!effectivePicked && m_activeKeys[i]) {
-            const float holdRatio = HoldEnvRatio(i);
-            if (holdRatio > 0.0f && m_envPeak[i] > 0.001f &&
-                trackStrength[i] >= m_envPeak[i] * holdRatio)
-                effectivePicked = true;
-        }
-
-        m_noteStrength[i] = effectivePicked ? m_rawStrengths[i] : 0.0f;
-
-        if (effectivePicked) {
+        if (effective) {
             ++m_consecActive[i];
             m_consecSilent[i] = 0;
             m_unpickedFrames[i] = 0;
@@ -957,7 +978,10 @@ void CPianoRoll::UpdateNoteStates()
         }
         else {
             ++m_consecSilent[i];
-            m_consecActive[i] = 0;
+            if (!m_activeKeys[i]) {
+                if (m_consecSilent[i] >= ATTACK_MISS_GRACE)
+                    m_consecActive[i] = 0;
+            }
             if (m_activeKeys[i]) {
                 ++m_unpickedFrames[i];
                 if (m_envPeak[i] > 0.001f &&
@@ -968,9 +992,13 @@ void CPianoRoll::UpdateNoteStates()
             }
         }
 
+        const bool onsetBoost = picked[i] &&
+            PianoRoll108::OnsetSupportsPick(m_onsetStrengths, m_prevOnsetStrengths, i, pickScale);
+        const int attackNeed = onsetBoost ? 1 : AttackFramesForKey(i);
+
         bool cur = m_activeKeys[i];
         if (!cur) {
-            if (effectivePicked && m_consecActive[i] >= TemporalFrames(i, ATTACK_FRAMES)) {
+            if (effective && m_consecActive[i] >= attackNeed) {
                 cur = true;
                 m_consecSilent[i] = 0;
                 ++m_segmentId[i];
@@ -980,11 +1008,13 @@ void CPianoRoll::UpdateNoteStates()
             }
         }
         else {
-            if (effectivePicked) {
+            if (effective) {
                 m_unpickedFrames[i] = 0;
                 m_strengthDipFrames[i] = 0;
             }
-            const int gapLimit = VisGapFrames(i);
+            int gapLimit = VisGapFrames(i);
+            if (m_envPeak[i] > 0.12f)
+                gapLimit += VIS_GAP_SUSTAIN_BONUS;
             const int releaseLimit = TemporalFrames(i, RELEASE_FRAMES);
             const bool gapDetected =
                 m_unpickedFrames[i] >= gapLimit ||
@@ -1005,15 +1035,9 @@ void CPianoRoll::UpdateNoteStates()
             m_noteStrength[i] = 0.0f;
             continue;
         }
-        if (m_noteStrength[i] <= 0.0f) {
-            if (trackStrength[i] > 0.0f)
-                m_noteStrength[i] = trackStrength[i];
-            else if (m_envPeak[i] > 0.0f)
-                m_noteStrength[i] = m_envPeak[i];
-            else
-                m_noteStrength[i] = m_rawStrengths[i];
-        }
-        float disp = m_noteStrength[i] * PianoRollSimPick::BandDisplayBoost(i);
+        float disp = m_envPeak[i];
+        if (disp <= 0.0f) disp = m_smoothedStrengths[i];
+        if (disp <= 0.0f) disp = m_rawStrengths[i];
         if (disp > 10.0f) disp = 10.0f;
         m_noteStrength[i] = disp;
     }
@@ -1107,7 +1131,7 @@ void CPianoRoll::DetectExpressions()
         else if (m_noteAgeFrames[i] < 255)
             ++m_noteAgeFrames[i];
 
-        if (m_noteAgeFrames[i] >= 16)
+        if (m_noteAgeFrames[i] >= 10)
             m_exprFlags[i] |= PianoExpr::SUSTAIN;
     }
 
@@ -1156,12 +1180,13 @@ void CPianoRoll::InvalidatePianoRollRegions(bool roll, bool key)
 
 void CPianoRoll::BuildLiveNoteFrame(NoteFrame& frame) const
 {
-    // 太さはフレーム内の生強度比。envPeak(イコライズ後)で割ると鍵ごとに定数になり
-    // ゴーストと実音が同じ太さになる。
-    float rawMax = 0.0f;
+    // 太さは帯域内の生強度比（低音支配時に中高音バーが消えないよう帯域別に正規化）
+    float bandRawMax[3] = { 0.0f, 0.0f, 0.0f };
     for (int i = 0; i < KEY_COUNT; ++i) {
-        if (m_activeKeys[i] && m_rawStrengths[i] > rawMax)
-            rawMax = m_rawStrengths[i];
+        if (!m_activeKeys[i]) continue;
+        const int band = PianoRoll108::KeyBandIndex(i);
+        if (m_rawStrengths[i] > bandRawMax[band])
+            bandRawMax[band] = m_rawStrengths[i];
     }
 
     for (int i = 0; i < KEY_COUNT; ++i) {
@@ -1171,9 +1196,11 @@ void CPianoRoll::BuildLiveNoteFrame(NoteFrame& frame) const
         frame.bandMask[i] = m_bandMask[i];
         frame.expr[i] = m_exprFlags[i];
         memcpy(frame.laneStrength[i], m_laneStrength[i], sizeof(frame.laneStrength[i]));
-        if (m_activeKeys[i] && rawMax > 1e-6f) {
-            float dyn = m_rawStrengths[i] / rawMax;
-            if (dyn < 0.10f) dyn = 0.10f;
+        if (m_activeKeys[i]) {
+            const int band = PianoRoll108::KeyBandIndex(i);
+            const float ref = bandRawMax[band];
+            float dyn = (ref > 1e-6f) ? (m_rawStrengths[i] / ref) : 0.5f;
+            if (dyn < 0.06f) dyn = 0.0f;
             if (dyn > 1.0f) dyn = 1.0f;
             frame.dynLevel[i] = dyn;
         }
@@ -2552,7 +2579,7 @@ bool CPianoRoll::ProcessAnalysisJobBody(const double* mono, int frameCount, int 
         return false;
 
     try {
-        EnsureAnalysisTables(sampleRate, frameCount);
+        EnsureAnalysisTables(sampleRate);
         if (frameCount < m_winLow || m_winLow <= 0 ||
             (int)m_goertzelCoeffs.size() < KEY_COUNT ||
             (int)m_windowedLow.size() < m_winLow)
