@@ -27,6 +27,11 @@ class CPlayList;
 #define WM_MP_INFO_SCROLL  (WM_APP + 61)
 #endif
 
+// ドロップダウン展開直後にリストボックス(hwndList)の高さを再設定する(環境差対策)
+#ifndef WM_MP_PLSEL_EXPAND
+#define WM_MP_PLSEL_EXPAND  (WM_APP + 62)
+#endif
+
 /////////////////////////////////////////////////////////////////////////////
 // CModeSelectDlg : 起動時のモード選択ダイアログ
 //   ファルコムbgm特化型画面 / メディアプレイヤー画面 のどちらで起動するか選ぶ。
@@ -69,6 +74,7 @@ public:
 
 	int  Create(CWnd* pParent);
 	void DoLayout();              // DPI/リサイズ対応の手動レイアウト
+	void LayoutPlselCombo(int x, int y, int w, int tbH, float s); // m_plsel: 高さは初回のみ設定
 	void RefreshListAfterLayout(); // レイアウト変更後に仮想リストの描画範囲を再確定
 	void RefreshList(BOOL bForce = FALSE);  // pl->pc をそのまま反映
 	void FollowPlayingRow();                // 再生中(♪)の行へカーソル追従(項目挿入後に呼ぶ)
@@ -111,6 +117,8 @@ public:
 	// ---- 状態チェックボックス(og/pl の状態を SyncFromMain でミラー) ----
 	CCustomComboBox m_plsel;     // プレイリスト切替/追加(pl->m_listchange のミラー)
 	int m_lastComboCount;        // コンボ項目数の変化検出用
+	int m_plselDropExtent;       // DROPDOWNLIST のドロップダウン高さ(初回のみ MoveWindow で設定)
+	float m_plselLayoutDpi;      // 上記を設定したときの hD2(DPI 変化時に再初期化)
 
 	// ---- プレイリストのドラッグ&ドロップ移動 ----
 	int m_dragging;              // ドラッグ操作中(0/1)
@@ -272,6 +280,7 @@ protected:
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg LRESULT OnInfoScrollTick(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnPlselExpandPopup(WPARAM wParam, LPARAM lParam);
 	afx_msg BOOL OnNcActivate(BOOL bActive);
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()

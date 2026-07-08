@@ -176,6 +176,8 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_lastPlcnt = -2;
 	m_lastScroll = -2;
 	m_lastComboCount = -1;
+	m_plselDropExtent = 0;
+	m_plselLayoutDpi = 0.f;
 	m_lastMs2 = 0;
 	m_seekDragging = 0;
 	m_lastPlayIcon = -999;
@@ -345,6 +347,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_NOTIFY(HDN_TRACKA, IDC_MP_LIST, &CMediaPlayerDlg::OnListHeaderEndTrack)
 	ON_NOTIFY(HDN_TRACKW, IDC_MP_LIST, &CMediaPlayerDlg::OnListHeaderEndTrack)
 	ON_MESSAGE(WM_MP_INFO_SCROLL, &CMediaPlayerDlg::OnInfoScrollTick)
+	ON_MESSAGE(WM_MP_PLSEL_EXPAND, &CMediaPlayerDlg::OnPlselExpandPopup)
 	ON_WM_NCACTIVATE()
 	ON_WM_SYSCOMMAND()
 END_MESSAGE_MAP()
@@ -758,18 +761,100 @@ static void MoveCtl(CWnd* p, int x, int y, int w, int h)
 		p->MoveWindow(x, y, w, h);
 }
 
+// m_plsel: CBS_DROPDOWNLIST の MoveWindow 高さはドロップダウン領域。毎回 tbH を渡すと潰れる。
+// 初回だけ RC 相当の dropExtent を設定し、以降のリサイズは位置・幅のみ変更する。
 #ifndef CB_SETMINVISIBLE
 #define CB_SETMINVISIBLE 0x1702
 #endif
 
-// m_plsel: 選択欄のサイズは MoveCtl のまま。ドロップダウンリストだけ別途復元する。
-static void FixPlselDropList(CCustomComboBox& cb)
+static int MpPlselClosedH(float s)
 {
-	if (!cb.GetSafeHwnd()) return;
-	cb.SetItemHeight(0, 28);
-	const int cnt = cb.GetCount();
+	return max(1, (int)(19 * s + 0.5f));
+}
+
+static const int kMpPlselListRowH = 28;
+
+static int MpPlselQueryRowH(HWND hCombo)
+{
+	int h = (int)(INT_PTR)::SendMessage(hCombo, CB_GETITEMHEIGHT, 0, 0);
+	if (h <= 1)
+		h = (int)(INT_PTR)::SendMessage(hCombo, CB_GETITEMHEIGHT, (WPARAM)-1, 0);
+	if (h <= 1)
+		h = kMpPlselListRowH;
+	return h;
+}
+
+// listRowH = ドロップダウン行の高さ(MeasureItem と同じ 28px)
+// closedH  = 選択欄の高さ(MoveCtl の tbH と同じ)。index 1 で明示する。
+static void FixPlselDropList(CCustomComboBox& cb, int listRowH, int closedH)
+{
+	if (!cb.GetSafeHwnd() || listRowH <= 0 || closedH <= 0) return;
+	const HWND h = cb.GetSafeHwnd();
+	const auto setH = [&](WPARAM idx, int ht) -> LRESULT {
+		return ::SendMessage(h, CB_SETITEMHEIGHT, idx, (LPARAM)ht);
+	};
+	const LRESULT r0 = setH(0, listRowH);
+	if (cb.GetStyle() & CBS_OWNERDRAWVARIABLE)
+	{
+		const int n = (int)::SendMessage(h, CB_GETCOUNT, 0, 0);
+		for (int i = 1; i < n; ++i)
+			setH((WPARAM)i, listRowH);
+	}
+	else if (r0 == CB_ERR)
+	{
+		setH((WPARAM)-1, listRowH);
+	}
+	setH(1, closedH);
+	const int cnt = (int)::SendMessage(h, CB_GETCOUNT, 0, 0);
 	if (cnt > 0)
-		cb.SendMessage(CB_SETMINVISIBLE, (WPARAM)min(cnt, 12), 0);
+		::SendMessage(h, CB_SETMINVISIBLE, (WPARAM)min(cnt, 12), 0);
+}
+
+static void ExpandPlselDropListPopup(HWND hCombo)
+{
+	if (!hCombo) return;
+	COMBOBOXINFO ci = { sizeof(ci) };
+	if (!::GetComboBoxInfo(hCombo, &ci) || !ci.hwndList)
+		return;
+	const int cnt = (int)::SendMessage(hCombo, CB_GETCOUNT, 0, 0);
+	if (cnt <= 0) return;
+	const int vis = min(cnt, 12);
+	const int rowH = MpPlselQueryRowH(hCombo);
+	const int needH = rowH * vis + ::GetSystemMetrics(SM_CYEDGE) * 2;
+	CRect lr;
+	::GetWindowRect(ci.hwndList, &lr);
+	::SetWindowPos(ci.hwndList, NULL, 0, 0, lr.Width(), needH,
+		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void CMediaPlayerDlg::LayoutPlselCombo(int x, int y, int w, int tbH, float s)
+{
+	if (!::IsWindow(m_plsel.GetSafeHwnd())) return;
+	if (m_plselDropExtent > 0 && fabs(m_plselLayoutDpi - s) > 0.01f)
+		m_plselDropExtent = 0;
+
+	const int closedH = MpPlselClosedH(s);
+	const int dropExt = max((int)(182 * s + 0.5f), kMpPlselListRowH * 12);
+
+	if (m_plselDropExtent <= 0)
+	{
+		m_plsel.MoveWindow(x, y, w, dropExt);
+		m_plselDropExtent = dropExt;
+		m_plselLayoutDpi = s;
+		FixPlselDropList(m_plsel, kMpPlselListRowH, closedH);
+	}
+	else
+	{
+		m_plsel.SetWindowPos(NULL, x, y, w, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+		FixPlselDropList(m_plsel, kMpPlselListRowH, closedH);
+	}
+
+	CRect cr;
+	m_plsel.GetWindowRect(&cr);
+	ScreenToClient(&cr);
+	const int dy = y + max(0, (tbH - cr.Height()) / 2);
+	if (cr.left != x || cr.top != dy)
+		m_plsel.SetWindowPos(NULL, x, dy, w, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 // DPI/リサイズ対応の手動レイアウト。RC で固定配置すると高 DPI で壊れるため
@@ -959,8 +1044,7 @@ void CMediaPlayerDlg::DoLayout()
 	int by4 = plTop + gTitle;
 	int tbH = (int)(19 * s);
 	int comboW = (int)(120 * s);
-	MoveCtl(&m_plsel, M + gPad, by4, comboW, tbH);
-	FixPlselDropList(m_plsel);
+	LayoutPlselCombo(M + gPad, by4, comboW, tbH, s);
 	int tx = M + gPad + comboW + (int)(5 * s);
 	int tbw = (int)(50 * s);
 	MoveCtl(&m_plrename, tx, by4, tbw, tbH); tx += tbw + (int)(3 * s);
@@ -2435,13 +2519,22 @@ void CMediaPlayerDlg::ReloadPlaylistCombo()
 		m_plsel.AddString(s);
 	}
 	m_plsel.SetCurSel(savedata.playlistnum);
-	FixPlselDropList(m_plsel);
+	FixPlselDropList(m_plsel, kMpPlselListRowH, MpPlselClosedH(hD2));
 	m_lastComboCount = n;
 }
 
 void CMediaPlayerDlg::OnPlselDropdown()
 {
-	FixPlselDropList(m_plsel);
+	FixPlselDropList(m_plsel, kMpPlselListRowH, MpPlselClosedH(hD2));
+	ExpandPlselDropListPopup(m_plsel.GetSafeHwnd());
+	PostMessage(WM_MP_PLSEL_EXPAND, 0, 0);
+}
+
+LRESULT CMediaPlayerDlg::OnPlselExpandPopup(WPARAM, LPARAM)
+{
+	if (!::IsWindow(m_plsel.GetSafeHwnd())) return 0;
+	ExpandPlselDropListPopup(m_plsel.GetSafeHwnd());
+	return 0;
 }
 
 // mp リストの選択状態を pl リストへ反映(上下移動/削除を pl の既存処理へ委譲するため)
