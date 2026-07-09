@@ -819,11 +819,18 @@ static void ExpandPlselDropListPopup(HWND hCombo)
 	const int cnt = (int)::SendMessage(hCombo, CB_GETCOUNT, 0, 0);
 	if (cnt <= 0) return;
 	const int vis = min(cnt, 12);
-	const int rowH = MpPlselQueryRowH(hCombo);
-	const int needH = rowH * vis + ::GetSystemMetrics(SM_CYEDGE) * 2;
-	CRect lr;
-	::GetWindowRect(ci.hwndList, &lr);
-	::SetWindowPos(ci.hwndList, NULL, 0, 0, lr.Width(), needH,
+	// 行高はリストボックス自身から取得(コンボの CB_GETITEMHEIGHT とずれる環境がある)
+	int rowH = (int)(INT_PTR)::SendMessage(ci.hwndList, LB_GETITEMHEIGHT, 0, 0);
+	if (rowH <= 1)
+		rowH = MpPlselQueryRowH(hCombo);
+	// リストボックスの実際の枠(非クライアント)ぶんを実測して足す。SM_CYEDGE 固定だと
+	// テーマ/DPI により誤差が出て下に空白が残る。
+	CRect wr, cr;
+	::GetWindowRect(ci.hwndList, &wr);
+	::GetClientRect(ci.hwndList, &cr);
+	const int ncH = max(0, wr.Height() - cr.Height());
+	const int needH = rowH * vis + ncH;
+	::SetWindowPos(ci.hwndList, NULL, 0, 0, wr.Width(), needH,
 		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
