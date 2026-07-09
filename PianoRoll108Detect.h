@@ -1,5 +1,8 @@
 ﻿#pragma once
 // 108鍵ピアノロール検出: 帯域ピック → 独立基音へ統合（本数上限なし、倍音は1系列1基音）。
+// ※ このファイルは今回の再アタック/音色分類の追加にあたり変更しておりません。
+//    ドラム/打撃ゴーストの抑制は CPianoRoll::UpdateEnvelopeAndReattack() 側の
+//    NoteEnvelope::LooksImpulsive() 判定(opt-in)で行っています。
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -44,7 +47,6 @@ namespace PianoRoll108
         return mx;
     }
 
-    // 帯域内のみ調波系列を1基音へ（maxGap>0 で遠距離連鎖マージを防止）
     inline void ConsolidateHarmonicsInBand(const float* blend, bool* picked,
         int bandLo, int bandHi, int count, float scoreRatio, bool promoteFundamental,
         int maxSemitoneGap = 0, bool skipOctaveDoubling = false)
@@ -73,12 +75,12 @@ namespace PianoRoll108
                 x = parent[x];
             }
             return x;
-        };
+            };
         auto unite = [&](int a, int b) {
             a = findRoot(a);
             b = findRoot(b);
             if (a != b) parent[b] = a;
-        };
+            };
 
         for (int i = 0; i < n; ++i) {
             for (int j = i + 1; j < n; ++j) {
@@ -141,7 +143,6 @@ namespace PianoRoll108
             picked[i] = keep[i];
     }
 
-    // 中高音: 近い下側倍音で明らかに弱いものだけ落とす（和音・オクターブは維持）
     inline void PruneWeakUpperHarmonicsInBand(const float* blend, bool* picked,
         int bandLo, int bandHi, int maxSemitoneGap = 14, float strengthRatio = 0.82f)
     {
@@ -166,7 +167,6 @@ namespace PianoRoll108
         int count, float scoreRatio = 0.28f)
     {
         if (!blend || !picked || count <= 0) return;
-        // 低音: 帯域内統合のみ。中高音: サブ帯域ごと・近距離倍音のみ（連鎖マージ禁止）
         ConsolidateHarmonicsInBand(blend, picked, 0, BASS_END, count, scoreRatio, false, 0, false);
         ConsolidateHarmonicsInBand(blend, picked, BASS_END, C4_KEY, count, 0.32f, true, 9, true);
         ConsolidateHarmonicsInBand(blend, picked, C4_KEY, MID_END, count, scoreRatio, true, 11, true);
@@ -209,7 +209,6 @@ namespace PianoRoll108
         }
     }
 
-    // O4 未満: 低音ピックの倍音・漏れエネルギーを落とす（ドラム/ベース漏れの C2〜G2 帯）
     inline void PruneLowMidAgainstBass(const float* blend, bool* picked, int count)
     {
         if (!blend || !picked || count <= 0) return;
@@ -227,7 +226,6 @@ namespace PianoRoll108
         }
     }
 
-    // 低音: 調波スコアで1本。2位が近い且つ非倍音なら未確定として拾わない（フレーム間暴れ抑制）
     inline void PickSingleBassNote(const float* blend, bool* outPicked, int count, float thresh)
     {
         if (!blend || !outPicked || count <= 0) return;
@@ -261,12 +259,15 @@ namespace PianoRoll108
     inline void PruneWeakRelativePerBand(const float* blend, bool* picked, int count)
     {
         if (!blend || !picked || count <= 0) return;
+        // [調整] C4_KEY〜EDGE_HI(中高音、主旋律が乗りやすい帯域)を 0.08 → 0.06 に緩め、
+        // 音量の小さい主旋律ノートが帯域内の強い伴奏に埋もれて弾かれにくくする。
+        // ゴースト増加の懸念は m_harmonicGhostGuardEnabled 側の強化で相殺する狙い。
         const struct BandFloor { int lo, hi; float relFloor; } bands[] = {
             { 0, BASS_END, 0.32f },
             { BASS_END, LOW_MID_SPLIT, 0.16f },
             { LOW_MID_SPLIT, C4_KEY, 0.12f },
-            { C4_KEY, MID_END, 0.08f },
-            { MID_END, EDGE_HI, 0.08f },
+            { C4_KEY, MID_END, 0.06f },
+            { MID_END, EDGE_HI, 0.06f },
             { EDGE_HI, COUNT, 0.18f },
         };
         for (const BandFloor& b : bands) {
@@ -321,16 +322,18 @@ namespace PianoRoll108
         if (scale < 0.70f) scale = 0.70f;
         if (scale > 1.10f) scale = 1.10f;
 
-        // 低音: 1本のみ（調波スコア＋曖昧時は拾わない）。中高音: 上限なし帯域ピック。
         {
             PickSingleBassNote(blend, outPicked, count, 0.40f * scale);
         }
 
+        // [調整] C4_KEY〜EDGE_HI(主旋律が乗りやすい帯域)を少し緩め、
+        // 伴奏より音量の小さい主旋律ノートを拾いやすくする。
+        // 元値: {0.16f,0.10f}, {0.15f,0.095f}
         const struct BandCfg { int lo, hi; float scoreRatio; float peakRatio; int maxNotes; } bands[] = {
             { BASS_END, LOW_MID_SPLIT, 0.22f, 0.16f, 2 },
             { LOW_MID_SPLIT, C4_KEY, 0.18f, 0.12f, 0 },
-            { C4_KEY, MID_END, 0.16f, 0.10f, 0 },
-            { MID_END, EDGE_HI, 0.15f, 0.095f, 0 },
+            { C4_KEY, MID_END, 0.13f, 0.085f, 0 },
+            { MID_END, EDGE_HI, 0.12f, 0.080f, 0 },
             { EDGE_HI, COUNT, 0.24f, 0.15f, 0 },
         };
         for (const BandCfg& b : bands) {
@@ -348,7 +351,6 @@ namespace PianoRoll108
         RefineToLocalPeaksInBand(blend, outPicked, count, BASS_END, MID_END, 1);
         RefineToLocalPeaksInBand(blend, outPicked, count, MID_END, COUNT, 1);
 
-        // 倍音スパムを先に1系列1基音へ（Salience 前に実施）
         ConsolidateToIndependentFundamentals(blend, outPicked, count, 0.28f);
 
         for (int i = 0; i < BASS_END; ++i) {

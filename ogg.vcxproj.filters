@@ -54,9 +54,6 @@
     <ClCompile Include="ED63rd.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Filename.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Folder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -426,6 +423,21 @@
     <ClCompile Include="CPianoRoll.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PianoRollGoertzelAvx2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="FileTagInfo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CMediaPlayerDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CMpM3uImportDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CMpPlaylistIO.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ogg.rc">
@@ -458,9 +470,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ED63rd.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Filename.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Folder.h">
@@ -911,6 +920,27 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="NoteFundamentalPick.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PianoKeyTable.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PianoRollGoertzelAvx2.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="FileTagInfo.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CMediaPlayerDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CMpM3uImportDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CMpPlaylistIO.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="NoteEnvelopeModel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

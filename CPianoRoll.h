@@ -20,6 +20,7 @@
 #include "CCustomControl.h"
 #include "PianoKeyTable.h"
 #include "PianoRoll108Detect.h"
+#include "NoteEnvelopeModel.h"
 #include <vector>
 
 class CPianoRoll : public CCustomBlurDialogExBase
@@ -56,13 +57,35 @@ public:
 
     // 44100 Hz 基準の Goertzel 窓(サンプル数)。実際の窓長は ScaleWinSamples でレートに比例。
     static constexpr int REF_SAMPLE_RATE = 44100;
-    static constexpr int WIN_LOW_REF     = 8192;
-    static constexpr int WIN_BASS_REF    = 16384;
-    static constexpr int WIN_HIGH_REF    = 4096;
-    static constexpr int WIN_ONSET_REF     = 1024;
+    static constexpr int WIN_LOW_REF = 8192;
+    static constexpr int WIN_BASS_REF = 16384;
+    static constexpr int WIN_HIGH_REF = 4096;
+    static constexpr int WIN_ONSET_REF = 1024;
     static int ScaleWinSamples(int refSamples, int sampleRate, int capSamples = 0);
     static int CaptureFrameCount(int sampleRate, int capSamples = 0);
     static int MinAnalyzeFrameCount(int sampleRate, int capSamples = 0);
+
+    // 再アタック判定(ゲート連結中の同鍵連打分離)を有効にするかどうか。
+    // [重要] 既定 false。短窓オンセット信号は測定ノイズの影響を受けやすく、
+    // 実際の音源で2度にわたり持続音への誤発火(暴走)が確認されたため、
+    // 実音源で聴きながら閾値(NoteEnvelopeModel.h の kPresets)を
+    // 調整できるまでは無効のままにしておくことを強く推奨する。
+    bool m_reattackDetectEnabled = false;
+    // 音色分類に基づく打撃音(ドラム等)ゴースト抑制。既定は無効(opt-in)。
+    // 誤って弱いピアノのスタッカートまで消してしまう可能性があるため、
+    // 効果を確認しながら有効化することを推奨する。
+    bool m_impulsiveGhostSuppressEnabled = false;
+
+    // 倍音ゴースト抑制: 既に鳴っている音の倍音(オクターブ等)にあたる候補が、
+    // 一瞬だけ基音より強くなって PassesFundamentalTest 等の閾値を超えた場合でも、
+    // 単発フレームで即座に独立ノートとして通さず、連続 kHarmonicGhostConfirmFrames
+    // フレーム分そのまま通過し続けた時だけ新規ノートと認める。
+    // 実音源(悲しみ2)の実測で、通常は正しく棄却される倍音/基音比が
+    // アタック直後などの一瞬だけ閾値(0.78)を超えて誤通過することを確認済み。
+    // 既定は無効(opt-in)。和音で意図的に倍音関係の2音を同時に弾いた場合、
+    // 後から鳴らした方の検出が数ms(既定設定で約12ms)遅れる副作用があるため、
+    // 実音源で確認しながら有効化すること。
+    bool m_harmonicGhostGuardEnabled = false;
 
 protected:
     virtual void DoDataExchange(CDataExchange* pDX);
@@ -82,18 +105,18 @@ protected:
 private:
     // 各ノートに付与する表現記号フラグ(DetectExpressions で設定、ピアノロール描画で参照)
     struct NoteExpr {
-        static constexpr uint8_t ACCENT  = 0x01;  // 強調(アタック急峻)
-        static constexpr uint8_t SCOOP   = 0x02;  // スクープ(下から音程が上がる)
+        static constexpr uint8_t ACCENT = 0x01;  // 強調(アタック急峻)
+        static constexpr uint8_t SCOOP = 0x02;  // スクープ(下から音程が上がる)
         static constexpr uint8_t VIBRATO = 0x04;  // ビブラート(強度が周期的に変動)
-        static constexpr uint8_t SLIDE   = 0x08;  // スライドアップ
-        static constexpr uint8_t FALL    = 0x10;  // フォール(音程が下降消音)
+        static constexpr uint8_t SLIDE = 0x08;  // スライドアップ
+        static constexpr uint8_t FALL = 0x10;  // フォール(音程が下降消音)
         static constexpr uint8_t SUSTAIN = 0x20;  // サスティン(長く保たれる持続音)
     };
 
     // ---- 鍵盤定数 ----
-    static constexpr int   KEY_COUNT    = 108;         // MIDI 0…107（A0=21, フルレンジ）
+    static constexpr int   KEY_COUNT = 108;         // MIDI 0…107（A0=21, フルレンジ）
     static constexpr int   WHITE_KEY_COUNT = 63;       // MIDI 0..107 の白鍵数
-    static constexpr int   MIDI_BASE      = 0;
+    static constexpr int   MIDI_BASE = 0;
 
     // 1 分析フレーム分のノートスナップショット(履歴リングバッファの要素)
     struct NoteFrame {
@@ -104,11 +127,12 @@ private:
         float    laneStrength[KEY_COUNT][3];
         uint8_t  expr[KEY_COUNT];
         float    dynLevel[KEY_COUNT];
+        bool     reattack[KEY_COUNT];   // このフレームで再アタック(タイ分割)が起きたか
     };
 
     // ---- 分析バッファ / 履歴 ----
-    static constexpr size_t MAX_HISTORY   = 120;       // ロール上に表示するフレーム行数(上限)
-    static constexpr int   RING_SIZE      = 131072;    // PCM インプットのリングバッファサイズ(サンプル数)
+    static constexpr size_t MAX_HISTORY = 120;       // ロール上に表示するフレーム行数(上限)
+    static constexpr int   RING_SIZE = 131072;    // PCM インプットのリングバッファサイズ(サンプル数)
 
     // ---- Goertzel 窓サイズ(サンプル数・実行時) ----
     // 44100 Hz 基準長を REF_SAMPLE_RATE に比例スケール(EnsureAnalysisTables で設定)
@@ -118,7 +142,7 @@ private:
     int   m_winOnset = WIN_ONSET_REF;
     // 分析: [0,60) 16384 / [60,84) 8192 / [84,108) 4096（108鍵・周波数基準）
     static constexpr int   BASS_ANALYSIS_END = PianoKey::BASS_BAND_END;
-    static constexpr int   DETECT_KEYS    = KEY_COUNT;
+    static constexpr int   DETECT_KEYS = KEY_COUNT;
 
     // ---- カスタムウィンドウメッセージ ----
     static constexpr UINT  WM_PIANOROLL_SYNC = WM_APP + 420;           // UI 同期要求(RequestSyncFromMainUi)
@@ -144,6 +168,32 @@ private:
     uint8_t m_bandMask[KEY_COUNT];
     float   m_laneStrength[KEY_COUNT][3];
     uint8_t m_prevBandMask[KEY_COUNT];
+
+    // ---- 音色エンベロープモデル(再アタック検出用。NoteEnvelopeModel.h) ----
+    NoteEnvelope::NoteEnvelopeState m_envModel[KEY_COUNT];
+    bool m_reattackMark[KEY_COUNT];   // このフレームで再アタックと判定された鍵(表示用)
+    // このフレーム、短窓Goertzelのオンセット検出が「本物のアタックらしい」と
+    // 判定したか(UpdateNoteStates 内で計算し、UpdateEnvelopeAndReattack へ引き渡す)。
+    bool m_onsetBoostThisFrame[KEY_COUNT];
+    // m_onsetBoostThisFrame が連続で true だったフレーム数。
+    // 生のピック判定(picked[])は音の終わり際や、密なミックス中では他の楽器の
+    // エネルギー漏れ込みにより閾値付近でチラつく(フリッカーする)ことが、
+    // 実音源(ASTNEEZAL)での実測でも確認された(単発フレームでのオンセット
+    // 誤発火率が低音域で12.9%〜18.2%)。そのため単発フレームのオンセット支持
+    // だけで再アタックを確定させず、連続 kOnsetConfirmFrames フレーム以上
+    // 続いた場合のみ「本物の攻撃」と扱う。
+    uint8_t m_onsetBoostStreak[KEY_COUNT];
+    static constexpr uint8_t kOnsetConfirmFrames = 3;
+
+    // 倍音ゴースト抑制用: 既存活性音の倍音として疑わしい候補が、
+    // 連続何フレーム閾値超えを維持しているか(m_harmonicGhostGuardEnabled 用)。
+    uint8_t m_harmonicGhostStreak[KEY_COUNT];
+    // 「疑わしい」と見なす際の IsHarmonicOfAnyActive 用しきい値。低いほど広く疑う。
+    // [調整] 0.10 → 0.08: ゴースト検知の網を広げる
+    static constexpr float kHarmonicGhostSuspectRatio = 0.08f;
+    // 疑わしい状態が何フレーム連続したら新規ノートとして認めるか(3ms/frame換算)。
+    // [調整] 4 → 6(約18ms): より確実にゴーストを弾く
+    static constexpr uint8_t kHarmonicGhostConfirmFrames = 6;
 
     // ---- PCM インプット / リングバッファ(m_cs で保護) ----
     std::vector<double> m_ring;
@@ -218,6 +268,10 @@ private:
     void RunGoertzelFromBuffer(const double* winLow, const double* winBass, int bassWinLen);
     void UpdateNoteStates();    // ピック結果からノートのオン/オフ・強度・セグメントを更新
     void DetectExpressions();   // UpdateNoteStates 後に表現記号(アクセント/ビブラート等)を付与
+    // 音色エンベロープモデルを更新し、再アタック(タイ分割)を判定する。
+    // 「谷からのリバウンド量」と「短窓オンセット判定」の両方が揃った時のみ発火するため、
+    // 持続音の自然な揺らぎだけでは連鎖的に誤発火しない(v1の既知不具合の修正版)。
+    void UpdateEnvelopeAndReattack();
     void PushFrame(bool requestUiInvalidate);  // 確定フレームを履歴リングバッファへ追加
     void StartAnalysisWorker();
     void StopAnalysisWorker();

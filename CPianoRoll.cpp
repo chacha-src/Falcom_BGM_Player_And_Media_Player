@@ -271,6 +271,14 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     memset(m_vibHistCount, 0, sizeof(m_vibHistCount));
     memset(m_keySnapActive, 0, sizeof(m_keySnapActive));
     memset(m_keySnapBand, 0, sizeof(m_keySnapBand));
+    // 音色エンベロープモデルは各要素が既定コンストラクタで初期化済み(ResetOff相当の値)。
+    // 念のため明示的にもオフ状態へ揃えておく。
+    for (int i = 0; i < KEY_COUNT; ++i)
+        m_envModel[i].ResetOff();
+    memset(m_reattackMark, 0, sizeof(m_reattackMark));
+    memset(m_onsetBoostThisFrame, 0, sizeof(m_onsetBoostThisFrame));
+    memset(m_onsetBoostStreak, 0, sizeof(m_onsetBoostStreak));
+    memset(m_harmonicGhostStreak, 0, sizeof(m_harmonicGhostStreak));
     for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
         m_chMeterDb[i] = -60.0f;
         m_chMeterFill[i] = 0.0f;
@@ -287,6 +295,7 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
         memset(f.laneStrength, 0, sizeof(f.laneStrength));
         memset(f.expr, 0, sizeof(f.expr));
         memset(f.dynLevel, 0, sizeof(f.dynLevel));
+        memset(f.reattack, 0, sizeof(f.reattack));
     }
 }
 
@@ -376,6 +385,12 @@ void CPianoRoll::ResetPlaybackState()
         memset(m_prevBandMask, 0, sizeof(m_prevBandMask));
         memset(m_keySnapActive, 0, sizeof(m_keySnapActive));
         memset(m_keySnapBand, 0, sizeof(m_keySnapBand));
+        // 曲切替時は音色エンベロープモデルも必ずリセット(前曲の減衰予測を持ち越さない)
+        for (int i = 0; i < KEY_COUNT; ++i)
+            m_envModel[i].ResetOff();
+        memset(m_reattackMark, 0, sizeof(m_reattackMark));
+        memset(m_onsetBoostStreak, 0, sizeof(m_onsetBoostStreak));
+        memset(m_harmonicGhostStreak, 0, sizeof(m_harmonicGhostStreak));
         m_historyDirty = true;
         m_keyDirty = true;
         m_historyCount = 0;
@@ -393,8 +408,9 @@ void CPianoRoll::ResetPlaybackState()
             memset(f.laneStrength, 0, sizeof(f.laneStrength));
             memset(f.expr, 0, sizeof(f.expr));
             memset(f.dynLevel, 0, sizeof(f.dynLevel));
+            memset(f.reattack, 0, sizeof(f.reattack));
         }
-    };
+        };
 
     bool gotCs = false;
     for (int attempt = 0; attempt < 50; ++attempt) {
@@ -843,6 +859,11 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_envPeak[i] = 0.0f;
             m_bandMask[i] = 0;
             memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
+            // 無音区間は音色エンベロープモデルもオフへ戻す(次の音を新規オンセットとして扱う)
+            m_envModel[i].ResetOff();
+            m_reattackMark[i] = false;
+            m_onsetBoostStreak[i] = 0;
+            m_harmonicGhostStreak[i] = 0;
         }
         memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
         PushFrame(false);
@@ -944,6 +965,11 @@ void CPianoRoll::UpdateNoteStates()
             m_bandMask[i] = 0;
             memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
             m_smoothedStrengths[i] *= 0.4f;
+            // 無音区間は音色エンベロープモデルもオフへ戻す
+            m_envModel[i].ResetOff();
+            m_reattackMark[i] = false;
+            m_onsetBoostStreak[i] = 0;
+            m_harmonicGhostStreak[i] = 0;
         }
         memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
         return;
@@ -994,17 +1020,45 @@ void CPianoRoll::UpdateNoteStates()
 
         const bool onsetBoost = picked[i] &&
             PianoRoll108::OnsetSupportsPick(m_onsetStrengths, m_prevOnsetStrengths, i, pickScale);
+        // 再アタック判定(UpdateEnvelopeAndReattack)は本関数の後段で呼ばれるため、
+        // ここで計算済みのオンセット判定結果を保存しておいて使い回す。
+        m_onsetBoostThisFrame[i] = onsetBoost;
+        if (onsetBoost) {
+            if (m_onsetBoostStreak[i] < 255) ++m_onsetBoostStreak[i];
+        }
+        else {
+            m_onsetBoostStreak[i] = 0;
+        }
         const int attackNeed = onsetBoost ? 1 : AttackFramesForKey(i);
 
         bool cur = m_activeKeys[i];
         if (!cur) {
             if (effective && m_consecActive[i] >= attackNeed) {
-                cur = true;
-                m_consecSilent[i] = 0;
-                ++m_segmentId[i];
-                m_envPeak[i] = sigStrength;
-                m_unpickedFrames[i] = 0;
-                m_strengthDipFrames[i] = 0;
+                bool allowOn = true;
+                if (m_harmonicGhostGuardEnabled) {
+                    const bool suspect = PianoKey::IsHarmonicOfAnyActive(
+                        blend, i, m_activeKeys, 0, KEY_COUNT, KEY_COUNT,
+                        kHarmonicGhostSuspectRatio);
+                    if (suspect) {
+                        if (m_harmonicGhostStreak[i] < 255) ++m_harmonicGhostStreak[i];
+                        allowOn = (m_harmonicGhostStreak[i] >= kHarmonicGhostConfirmFrames);
+                    }
+                    else {
+                        m_harmonicGhostStreak[i] = 0;
+                    }
+                }
+                if (allowOn) {
+                    cur = true;
+                    m_consecSilent[i] = 0;
+                    ++m_segmentId[i];
+                    m_envPeak[i] = sigStrength;
+                    m_unpickedFrames[i] = 0;
+                    m_strengthDipFrames[i] = 0;
+                    m_harmonicGhostStreak[i] = 0;
+                }
+            }
+            else {
+                m_harmonicGhostStreak[i] = 0;
             }
         }
         else {
@@ -1052,7 +1106,66 @@ void CPianoRoll::UpdateNoteStates()
     }
 
     DetectExpressions();
+
+    // 音色エンベロープ更新 + 再アタック(ゲート連結中の同鍵連打)検出。
+    // DetectExpressions() の後で呼ぶこと(exprFlags をリセットせず ACCENT を追加するため)。
+    UpdateEnvelopeAndReattack();
+
     memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
+}
+
+// 音色エンベロープモデル(NoteEnvelopeModel.h)の更新。
+// 各アクティブ鍵につき:
+//   1) NoteEnvelope::Update() で「直近の谷からの実測リバウンド量」と
+//      「このフレームの短窓オンセット判定(m_onsetBoostThisFrame)」の
+//      両方が同時に成立した場合のみ再アタックと判定し、セグメントID
+//      (見た目上のノート境界)を進めて ACCENT を立てる。
+//      片方だけでは発火しないため、持続音の自然な揺らぎだけでは暴走しない。
+//   2) m_impulsiveGhostSuppressEnabled が true の場合のみ、
+//      打撃/ノイズ的な減衰形状(LooksImpulsive)と判定された鍵をオフに戻す。
+//      既定は無効(opt-in)。誤検出で弱いスタッカートまで消す可能性があるため、
+//      効果を確認しながら有効化すること。
+void CPianoRoll::UpdateEnvelopeAndReattack()
+{
+    const float nowMs = (float)GetTickCount();
+
+    for (int i = 0; i < KEY_COUNT; ++i) {
+        if (!m_activeKeys[i]) {
+            m_envModel[i].ResetOff();
+            m_reattackMark[i] = false;
+            continue;
+        }
+
+        if (!m_reattackDetectEnabled) {
+            // 機能自体を無効化している場合でも、状態は前回オフのまま維持し
+            // 従来通りの見た目(タイ検出なし)にする。
+            m_reattackMark[i] = false;
+            continue;
+        }
+
+        // 単発フレームのオンセット支持(picked[]のチラつき起因を含む)を除外するため、
+        // 連続 kOnsetConfirmFrames フレーム以上支持が続いた場合のみ「本物の攻撃」として扱う。
+        const bool confirmedOnset = m_onsetBoostStreak[i] >= kOnsetConfirmFrames;
+        const bool reattack = NoteEnvelope::Update(m_envModel[i], nowMs, m_noteStrength[i],
+            confirmedOnset);
+        m_reattackMark[i] = reattack;
+        if (reattack) {
+            ++m_segmentId[i];
+            m_exprFlags[i] |= NoteExpr::ACCENT;
+        }
+
+        if (m_impulsiveGhostSuppressEnabled &&
+            NoteEnvelope::LooksImpulsive(m_envModel[i])) {
+            // 打撃/ノイズ的な鍵だけをオフへ戻す。他の鍵の状態には触れない。
+            m_activeKeys[i] = false;
+            m_noteStrength[i] = 0.0f;
+            m_envPeak[i] = 0.0f;
+            m_bandMask[i] = 0;
+            memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
+            m_envModel[i].ResetOff();
+            m_reattackMark[i] = false;
+        }
+    }
 }
 
 
@@ -1105,7 +1218,7 @@ namespace PianoExpr {
 //   SCOOP   … 直前フレームで隣のキーがアクティブだった(音程が下から上がってきた)
 //   SLIDE   … 上下隣キーからの遷移
 //   FALL    … 上隣キーからの遷移(下降消音)
-//   ACCENT  … ノートオン直後(age <= 3)に強度が急上昇
+//   ACCENT  … ノートオン直後(age <= 3)に強度が急上昇、または本モジュールの再アタック検出
 //   SUSTAIN … 12フレーム以上継続(持続音・ストリングス)
 //   VIBRATO … 強度の周期的変動を VIB_HIST_LEN 分の自己相関で検出
 void CPianoRoll::DetectExpressions()
@@ -1196,6 +1309,7 @@ void CPianoRoll::BuildLiveNoteFrame(NoteFrame& frame) const
         frame.bandMask[i] = m_bandMask[i];
         frame.expr[i] = m_exprFlags[i];
         memcpy(frame.laneStrength[i], m_laneStrength[i], sizeof(frame.laneStrength[i]));
+        frame.reattack[i] = m_activeKeys[i] && m_reattackMark[i];
         if (m_activeKeys[i]) {
             const int band = PianoRoll108::KeyBandIndex(i);
             const float ref = bandRawMax[band];
@@ -2196,6 +2310,20 @@ void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const 
         const uint8_t bMask = frame.bandMask[i] ? frame.bandMask[i] : (uint8_t)(1u << KeyBandIndex(i));
         DrawHistoryNote(dc, CRect(xL + 1, yTop, xR - 1, yBot), bMask, frame.laneStrength[i],
             i, frame.strength[i], frame.dynLevel[i], frame.expr[i], IsBlackKey(midi));
+    }
+
+    // 再アタック(タイ連結中の同鍵連打)が起きた鍵は、バーの左端に細い白線を
+    // 一本引いて「ここでノートが切り替わった」ことを見た目でも分かるようにする。
+    // ゲート100で沈黙区間がなくても、この線でO6L4CCCCCCのような連打を区別できる。
+    for (int i = 0; i < KEY_COUNT; ++i) {
+        if (!frame.active[i] || !frame.reattack[i]) continue;
+        int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
+        if (xR - xL < 2) continue;
+        CPen sepPen(PS_SOLID, 1, RGB(255, 255, 255));
+        CPen* pOldPen = dc.SelectObject(&sepPen);
+        dc.MoveTo(xL + 1, yTop);
+        dc.LineTo(xL + 1, yBot);
+        dc.SelectObject(pOldPen);
     }
 
     if (!m_paintFontsReady || !m_fontExprSymbol.GetSafeHandle()) return;
