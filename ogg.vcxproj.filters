@@ -946,6 +946,9 @@
     <ClInclude Include="PianoRollPick.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="HarmonicProfile.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="res\ico00001.ico">

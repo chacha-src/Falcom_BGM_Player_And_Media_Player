@@ -3034,6 +3034,7 @@
     <ClCompile Include="CPlayListNew.cpp" />
     <ClCompile Include="Dino.cpp" />
     <ClCompile Include="Douga.cpp" />
+    <ClInclude Include="HarmonicProfile.h" />
     <ClInclude Include="NoteEnvelopeModel.h" />
     <ClInclude Include="NoteFundamentalPick.h" />
     <ClInclude Include="PianoKeyTable.h" />

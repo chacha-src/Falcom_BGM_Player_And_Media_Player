@@ -21,6 +21,7 @@
 #include "PianoKeyTable.h"
 #include "PianoRoll108Detect.h"
 #include "NoteEnvelopeModel.h"
+#include "HarmonicProfile.h"
 #include <vector>
 
 class CPianoRoll : public CCustomBlurDialogExBase
@@ -86,6 +87,15 @@ public:
     // 後から鳴らした方の検出が数ms(既定設定で約12ms)遅れる副作用があるため、
     // 実音源で確認しながら有効化すること。
     bool m_harmonicGhostGuardEnabled = true;
+
+    // 倍音比率プロファイル(HarmonicProfile.h)による音色分類を、既存のゴースト判定に
+    // 追加の判断材料として組み込むかどうか。
+    // [重要] 各プロファイルの数値は実測較正されたものではなく目安値のため、
+    // 実音源で確認しながら HarmonicProfile.h の数値を調整することを前提とする。
+    // LooksLikeNoiseProfile は「最良ノイズ ≥ 閾値 かつ 最良楽器を明確に上回る」ときだけ拒否。
+    bool m_harmonicProfileGuardEnabled = true;
+    // ノイズ系とみなす最低確信度(コサイン類似度)。楽器側とのマージン判定と併用。
+    static constexpr float kHarmonicProfileNoiseMinConfidence = 0.92f;
 
 protected:
     virtual void DoDataExchange(CDataExchange* pDX);

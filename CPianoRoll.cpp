@@ -1165,6 +1165,16 @@ void CPianoRoll::UpdateNoteStates()
                         m_harmonicGhostStreak[i] = 0;
                     }
                 }
+                if (allowOn && m_harmonicProfileGuardEnabled) {
+                    // 倍音比率プロファイル(HarmonicProfile.h)による追加判断。
+                    // 「ノイズ系」プロファイルに高い確信度で一致した場合のみ、
+                    // 他の判定結果に関係なく不採用にする(過剰検出を避けるため、
+                    // 確信度が低い/該当なしの場合はここでは何も判断しない)。
+                    if (HarmonicProfile::LooksLikeNoiseProfile(
+                        blend, i, KEY_COUNT, kHarmonicProfileNoiseMinConfidence)) {
+                        allowOn = false;
+                    }
+                }
                 if (allowOn) {
                     cur = true;
                     m_consecSilent[i] = 0;
