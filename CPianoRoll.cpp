@@ -51,6 +51,7 @@ namespace Cfg
     static constexpr float UPPER_PICK_THRESH = 0.06f;
     static constexpr float PEAK_SNR = 3.0f;
     static constexpr float PEAK_REGION_REL = 0.055f;  // legacy pick helpers (unused path)
+    // [検証のため元値へ復帰] 隣接ホッピング対策を単独の変数として切り分けて検証する。
     static constexpr float HOLD_ENV_BASS = 0.28f;
     static constexpr float HOLD_ENV_MID = 0.14f;
     static constexpr float HOLD_ENV_TRE = 0.16f;
@@ -840,6 +841,10 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     m_bufwav3LevelDb = levelDb;
 
     const float gainDb = Cfg::MakeupGainDbForBufwav3(levelDb);
+    // 絶対値ノイズフロアをこのフレームのゲインに連動させるため保存しておく
+    // (ゲイン補正は信号もノイズも一緒に増幅するため、フロアも追従させないと
+    // 静かな曲全体では強すぎ、逆に静かな減衰末尾では弱すぎるちぐはぐが生じる)。
+    m_lastGainDb = gainDb;
     Cfg::ApplyGainDbInPlace(m_analysisBuf.data(), m_winLow, gainDb);
     if (hasBass)
         Cfg::ApplyGainDbInPlace(m_bassAnalysisBuf.data(), m_winBass, gainDb);
@@ -931,6 +936,67 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     PushFrame(false);
 }
 
+namespace
+{
+    // 倍音ゴースト抑制用: candidate が「他の音の倍音として際どく通過した」かどうかを判定する。
+    // PianoKeyTable.h の PassesFundamentalTest/PassesFundamentalTestSustain と同じ
+    // 判定式(下側の潜在的な基音候補との比率が 0.78 を超えたら本来は倍音として棄却)
+    // を土台にしているが、目的が異なるため単純化して再現している:
+    //   - あちらは「棄却するかどうか」の最終判定(1回だけ実行)
+    //   - こちらは「棄却ラインのすぐ近く(僅差)で生き残ったか」だけを見る予備検知
+    // 明確に独立している音(下の潜在基音がほとんど鳴っていない)は対象外となり、
+    // 実際にゴーストが観測された「閾値をまたいで一瞬だけ通過する」ケースだけを狙う。
+    bool IsMarginalFundamentalPass(const float* blend, int candidate, int count, float marginRatio)
+    {
+        if (!blend || candidate < 0 || candidate >= count) return false;
+        const float sc = blend[candidate];
+        if (sc <= 0.0f) return false;
+        for (int n = PianoKey::HARMONIC_N_MIN; n <= PianoKey::HARMONIC_N_MAX; ++n) {
+            const int lo = PianoKey::HarmonicDownKey(candidate, n);
+            if (lo < 0 || lo >= count || lo >= candidate) continue;
+            const float rejectAt = sc * 0.78f;
+            const float marginAt = rejectAt * marginRatio;
+            if (blend[lo] >= marginAt && blend[lo] < rejectAt)
+                return true;
+        }
+        return false;
+    }
+}
+
+namespace
+{
+    // 隣接半音間のピック“ホッピング”対策。
+    // 実音の周波数が2鍵のちょうど中間に近いと、IsLocalPeakInBand/SnapToLocalMaximum
+    // (NoteFundamentalPick.h)の判定がフレームごとに僅差で入れ替わり、同じ1音が
+    // 隣接する2鍵の間を毎フレーム飛び移ってしまう。m_activeKeys は鍵ごとに独立して
+    // いるため、これがそのまま「隣接する2本のバーが交互にチラつく」症状になる。
+    // 前フレームで鳴っていた鍵(prevActive)と、今フレーム僅差で勝った隣の鍵の値が
+    // 近い(marginRatio以内)場合は、前フレームの鍵を優先して復活させ、
+    // 隣の鍵は降ろすことでホッピングを抑える。
+    // NoteFundamentalPick.h 側の判定式自体には一切手を入れない、後付けの安定化。
+    void StabilizeAdjacentBinHopping(const float* blend, bool* picked,
+        const bool* prevActive, int count, float marginRatio)
+    {
+        if (!blend || !picked || !prevActive || count <= 0) return;
+        for (int i = 0; i < count; ++i) {
+            if (!prevActive[i] || picked[i]) continue;
+            const float bi = blend[i];
+            if (bi <= 0.0f) continue;
+            for (int d = -1; d <= 1; d += 2) {
+                const int j = i + d;
+                if (j < 0 || j >= count || !picked[j]) continue;
+                const float bj = blend[j];
+                if (bj <= 0.0f) continue;
+                if (bi >= bj * marginRatio) {
+                    picked[i] = true;
+                    picked[j] = false;
+                    break;
+                }
+            }
+        }
+    }
+}
+
 void CPianoRoll::UpdateNoteStates()
 {
     using namespace Cfg;
@@ -975,8 +1041,41 @@ void CPianoRoll::UpdateNoteStates()
         return;
     }
 
+    // ゲインに連動した絶対値ノイズフロア。
+    // 基準値(ゲイン0dB時)は0.0015程度とし、メイクアップゲインがかかった分だけ
+    // 線形にフロアも持ち上げる(信号もノイズも同じ倍率で増幅されるため)。
+    const float gainLinear = powf(10.0f, m_lastGainDb / 20.0f);
+    const float absFloor = 0.0015f * gainLinear;
+
     bool picked[KEY_COUNT];
-    PianoRoll108::BuildFramePicks(blend, picked, KEY_COUNT, pickScale);
+    PianoRoll108::BuildFramePicks(blend, picked, KEY_COUNT, pickScale, absFloor);
+
+#ifdef _DEBUG
+    // [診断用] BuildFramePicks直後、picked[]そのものが絶対値フロアで
+    // 本当に弾かれているかを確認する。ここで picked[i]==false なのに
+    // 後段で active=1 になっているなら、原因はホールド系ロジック側にある。
+    {
+        static DWORD s_dbgPickLogTick = 0;
+        const DWORD dbgNow2 = GetTickCount();
+        if (dbgNow2 - s_dbgPickLogTick >= 500) {
+            for (int i = 0; i < KEY_COUNT; ++i) {
+                if (picked[i] && blend[i] < 0.02f) {
+                    char buf[160];
+                    sprintf_s(buf, "[PianoRollDbg][FLOOR-LEAK] key=%d picked=1 blend=%.5f (floor=0.02 should have blocked this)\n",
+                        i, blend[i]);
+                    OutputDebugStringA(buf);
+                }
+            }
+            s_dbgPickLogTick = dbgNow2;
+        }
+    }
+#endif
+
+    // 隣接半音ホッピング対策(実験的、既定で常時有効)。
+    // 前フレームでアクティブだった鍵(m_activeKeys、この時点ではまだ前フレームの値)を
+    // 基準に、僅差で入れ替わっただけの隣接ピックを元に戻す。
+    static constexpr float kAdjacentHoppingMarginRatio = 0.85f;
+    StabilizeAdjacentBinHopping(blend, picked, m_activeKeys, KEY_COUNT, kAdjacentHoppingMarginRatio);
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         const float sigStrength = blend[i];
@@ -1036,9 +1135,8 @@ void CPianoRoll::UpdateNoteStates()
             if (effective && m_consecActive[i] >= attackNeed) {
                 bool allowOn = true;
                 if (m_harmonicGhostGuardEnabled) {
-                    const bool suspect = PianoKey::IsHarmonicOfAnyActive(
-                        blend, i, m_activeKeys, 0, KEY_COUNT, KEY_COUNT,
-                        kHarmonicGhostSuspectRatio);
+                    const bool suspect = IsMarginalFundamentalPass(
+                        blend, i, KEY_COUNT, kHarmonicGhostMarginRatio);
                     if (suspect) {
                         if (m_harmonicGhostStreak[i] < 255) ++m_harmonicGhostStreak[i];
                         allowOn = (m_harmonicGhostStreak[i] >= kHarmonicGhostConfirmFrames);
@@ -1083,6 +1181,37 @@ void CPianoRoll::UpdateNoteStates()
         }
         m_activeKeys[i] = cur;
     }
+
+#ifdef _DEBUG
+    // [診断用] 表示(スクロール描画)ではなく、検出(m_activeKeys)そのものが
+    // 実際にどれだけ高頻度で点滅しているかを直接確認するためのログ。
+    // 0.5秒間に3回以上オン/オフが切り替わった鍵だけを出力する。
+    // DebugView やVisual Studioの出力ウィンドウで確認できる。
+    {
+        static bool s_dbgPrevActive[KEY_COUNT] = {};
+        static int  s_dbgTransitions[KEY_COUNT] = {};
+        static DWORD s_dbgLastLogTick = 0;
+        for (int i = 0; i < KEY_COUNT; ++i) {
+            if (m_activeKeys[i] != s_dbgPrevActive[i]) {
+                ++s_dbgTransitions[i];
+                s_dbgPrevActive[i] = m_activeKeys[i];
+            }
+        }
+        const DWORD dbgNow = GetTickCount();
+        if (dbgNow - s_dbgLastLogTick >= 500) {
+            for (int i = 0; i < KEY_COUNT; ++i) {
+                if (s_dbgTransitions[i] >= 3) {
+                    char buf[160];
+                    sprintf_s(buf, "[PianoRollDbg] key=%d transitions/0.5s=%d blend=%.4f envPeak=%.4f active=%d\n",
+                        i, s_dbgTransitions[i], blend[i], m_envPeak[i], (int)m_activeKeys[i]);
+                    OutputDebugStringA(buf);
+                }
+                s_dbgTransitions[i] = 0;
+            }
+            s_dbgLastLogTick = dbgNow;
+        }
+    }
+#endif
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (!m_activeKeys[i]) {
@@ -3038,6 +3167,7 @@ void CPianoRoll::OnPaint()
     // 連鎖し、アクリル時の重いペイントで UI スレッドを占有してしまう。
     // 残りの保留フレームは次の解析完了(OnAnalysisDone)/同期(OnSyncRequest)時に描く。
     (void)needAnotherRollFrame;
+
 }
 
 void CPianoRoll::OnTimer(UINT_PTR nIDEvent)

@@ -74,7 +74,7 @@ public:
     // 音色分類に基づく打撃音(ドラム等)ゴースト抑制。既定は無効(opt-in)。
     // 誤って弱いピアノのスタッカートまで消してしまう可能性があるため、
     // 効果を確認しながら有効化することを推奨する。
-    bool m_impulsiveGhostSuppressEnabled = false;
+    bool m_impulsiveGhostSuppressEnabled = true;
 
     // 倍音ゴースト抑制: 既に鳴っている音の倍音(オクターブ等)にあたる候補が、
     // 一瞬だけ基音より強くなって PassesFundamentalTest 等の閾値を超えた場合でも、
@@ -85,7 +85,7 @@ public:
     // 既定は無効(opt-in)。和音で意図的に倍音関係の2音を同時に弾いた場合、
     // 後から鳴らした方の検出が数ms(既定設定で約12ms)遅れる副作用があるため、
     // 実音源で確認しながら有効化すること。
-    bool m_harmonicGhostGuardEnabled = false;
+    bool m_harmonicGhostGuardEnabled = true;
 
 protected:
     virtual void DoDataExchange(CDataExchange* pDX);
@@ -188,12 +188,20 @@ private:
     // 倍音ゴースト抑制用: 既存活性音の倍音として疑わしい候補が、
     // 連続何フレーム閾値超えを維持しているか(m_harmonicGhostGuardEnabled 用)。
     uint8_t m_harmonicGhostStreak[KEY_COUNT];
-    // 「疑わしい」と見なす際の IsHarmonicOfAnyActive 用しきい値。低いほど広く疑う。
-    // [調整] 0.10 → 0.08: ゴースト検知の網を広げる
-    static constexpr float kHarmonicGhostSuspectRatio = 0.08f;
-    // 疑わしい状態が何フレーム連続したら新規ノートとして認めるか(3ms/frame換算)。
-    // [調整] 4 → 6(約18ms): より確実にゴーストを弾く
-    static constexpr uint8_t kHarmonicGhostConfirmFrames = 6;
+    // 「疑わしい」と見なす基準。
+    // [重要・修正] 以前は「他に鳴っている音と倍音関係にあるだけ」で疑う設計だったが、
+    // 実際の音楽ではメロディ音がベースのオクターブ/5度上であることはごく普通で、
+    // 本物のメロディ音の大半がこの条件に該当してしまい、通常のホールド機構による
+    // 一瞬の再ピック(本来は継続音として自然に埋まるはず)まで足止めしてしまい、
+    // 継続音が途切れて見える「漏れ」を引き起こしていた。
+    // そこで、実際の基音判定式(PianoKeyTable.h の PassesFundamentalTest 系、
+    // 閾値0.78)が「ギリギリで通過したか」だけを見る方式に変更した
+    // (IsMarginalFundamentalPass、CPianoRoll.cpp 側に実装)。
+    // marginRatio: 0.78の閾値に対し、この比率以上に接近していたら「際どい通過」とみなす。
+    static constexpr float kHarmonicGhostMarginRatio = 0.85f;
+    // 際どい通過が何フレーム連続したら新規ノートとして認めるか(3ms/frame換算)。
+    // 判定条件を狭く正確にした分、確認フレーム数も短縮して反応を速くする。
+    static constexpr uint8_t kHarmonicGhostConfirmFrames = 3;
 
     // ---- PCM インプット / リングバッファ(m_cs で保護) ----
     std::vector<double> m_ring;
@@ -258,6 +266,8 @@ private:
 
     // ---- レベルメーター ----
     float m_bufwav3LevelDb = -60.0f;          // 入力 dB(ピックの閾値スケーリングに利用)
+    float m_lastGainDb = 0.0f;                // 直近フレームのメイクアップゲイン(dB)。
+    // 絶対値ノイズフロアをこれに連動させるために保持。
     float m_chMeterDb[PIANO_METER_CH_MAX];
     float m_chMeterFill[PIANO_METER_CH_MAX];      // 表示用 IIR 平滑フィル値(0.0〜1.0)
     float m_chMeterAutoPeak[PIANO_METER_CH_MAX];  // 自動ピーク(棒グラフ上端の目印)

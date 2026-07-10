@@ -1,8 +1,12 @@
 ﻿#pragma once
 // 108鍵ピアノロール検出: 帯域ピック → 独立基音へ統合（本数上限なし、倍音は1系列1基音）。
-// ※ このファイルは今回の再アタック/音色分類の追加にあたり変更しておりません。
-//    ドラム/打撃ゴーストの抑制は CPianoRoll::UpdateEnvelopeAndReattack() 側の
-//    NoteEnvelope::LooksImpulsive() 判定(opt-in)で行っています。
+// [更新履歴]
+//   - 帯域しきい値は元値に復帰済み(隣接ホッピング対策等の実験切り分けのため)。
+//   - BuildFramePicks 末尾に PruneAbsoluteNoiseFloor(絶対値ノイズフロア0.02)を追加。
+//     実音源のデバッグログで確認された、鍵盤全域に散らばる微小ノイズ(blend値
+//     0.0000〜0.0113程度)の picked[] 誤通過を弾くためのもの。
+//   ※ 過去のバージョンで「このファイルは変更していません」という注記を残して
+//     しまっていたが誤りだった。以後、変更履歴は必ずこのヘッダーに明記する。
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -259,15 +263,14 @@ namespace PianoRoll108
     inline void PruneWeakRelativePerBand(const float* blend, bool* picked, int count)
     {
         if (!blend || !picked || count <= 0) return;
-        // [調整] C4_KEY〜EDGE_HI(中高音、主旋律が乗りやすい帯域)を 0.08 → 0.06 に緩め、
-        // 音量の小さい主旋律ノートが帯域内の強い伴奏に埋もれて弾かれにくくする。
-        // ゴースト増加の懸念は m_harmonicGhostGuardEnabled 側の強化で相殺する狙い。
+        // [検証のため元値へ復帰] 隣接ホッピング対策(StabilizeAdjacentBinHopping)を
+        // 単独の変数として切り分けて検証するため、しきい値は元の値に戻した。
         const struct BandFloor { int lo, hi; float relFloor; } bands[] = {
             { 0, BASS_END, 0.32f },
             { BASS_END, LOW_MID_SPLIT, 0.16f },
             { LOW_MID_SPLIT, C4_KEY, 0.12f },
-            { C4_KEY, MID_END, 0.06f },
-            { MID_END, EDGE_HI, 0.06f },
+            { C4_KEY, MID_END, 0.08f },
+            { MID_END, EDGE_HI, 0.08f },
             { EDGE_HI, COUNT, 0.18f },
         };
         for (const BandFloor& b : bands) {
@@ -305,6 +308,24 @@ namespace PianoRoll108
         }
     }
 
+    // 全帯域共通の絶対値ノイズフロア。
+    // 実音源(悲しみ2)の実測デバッグログで、鍵盤全域(key=12〜88)にわたって
+    // blend値0.0000〜0.0086程度の純粋な数値/スペクトルノイズが picked[] を
+    // 通過し、フリッカーの原因になっていることを確認した。
+    // 既存の PruneWeakRelativePerBand 等は「帯域最大値に対する相対比率」のみで
+    // 判定するため、その帯域自体に信号がほとんど無い(帯域最大値がほぼ0)瞬間には
+    // 相対しきい値が実質無力化される(ほぼ0の6〜8%は依然ほぼ0)。
+    // ここでは帯域に関係なく、実測ノイズ上限より十分高い絶対値で最終的に弾く。
+    inline void PruneAbsoluteNoiseFloor(const float* blend, bool* outPicked, int count,
+        float absFloor = 0.02f)
+    {
+        if (!blend || !outPicked) return;
+        for (int i = 0; i < count; ++i) {
+            if (outPicked[i] && blend[i] < absFloor)
+                outPicked[i] = false;
+        }
+    }
+
     inline void BuildDetectionSpectrum(const float* smoothed, const float* raw, float* out, int count)
     {
         if (!smoothed || !raw || !out || count <= 0) return;
@@ -313,7 +334,7 @@ namespace PianoRoll108
     }
 
     inline void BuildFramePicks(const float* blend, bool* outPicked, int count,
-        float levelScale = 1.0f)
+        float levelScale = 1.0f, float absNoiseFloor = 0.02f)
     {
         if (!blend || !outPicked || count != COUNT) return;
         memset(outPicked, 0, (size_t)count * sizeof(bool));
@@ -326,14 +347,12 @@ namespace PianoRoll108
             PickSingleBassNote(blend, outPicked, count, 0.40f * scale);
         }
 
-        // [調整] C4_KEY〜EDGE_HI(主旋律が乗りやすい帯域)を少し緩め、
-        // 伴奏より音量の小さい主旋律ノートを拾いやすくする。
-        // 元値: {0.16f,0.10f}, {0.15f,0.095f}
+        // [検証のため元値へ復帰]
         const struct BandCfg { int lo, hi; float scoreRatio; float peakRatio; int maxNotes; } bands[] = {
             { BASS_END, LOW_MID_SPLIT, 0.22f, 0.16f, 2 },
             { LOW_MID_SPLIT, C4_KEY, 0.18f, 0.12f, 0 },
-            { C4_KEY, MID_END, 0.13f, 0.085f, 0 },
-            { MID_END, EDGE_HI, 0.12f, 0.080f, 0 },
+            { C4_KEY, MID_END, 0.16f, 0.10f, 0 },
+            { MID_END, EDGE_HI, 0.15f, 0.095f, 0 },
             { EDGE_HI, COUNT, 0.24f, 0.15f, 0 },
         };
         for (const BandCfg& b : bands) {
@@ -384,6 +403,7 @@ namespace PianoRoll108
         CollapseNearbyPicks(blend, outPicked, C4_KEY, COUNT, 4, false);
 
         PruneEdgeRegisterNoise(blend, outPicked, count);
+        PruneAbsoluteNoiseFloor(blend, outPicked, count, absNoiseFloor);
     }
 
     inline bool OnsetSupportsPick(const float* onset, const float* prevOnset,

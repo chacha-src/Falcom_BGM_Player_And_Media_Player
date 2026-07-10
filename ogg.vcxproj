@@ -3401,6 +3401,7 @@
     <ClInclude Include="ED4.h" />
     <ClInclude Include="ED5.h" />
     <ClInclude Include="ED63rd.h" />
+    <ClInclude Include="PianoRollPick.h" />
     <ClInclude Include="WavExport.h" />
     <ClInclude Include="flac.h" />
     <ClInclude Include="Folder.h" />
