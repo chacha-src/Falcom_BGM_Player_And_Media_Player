@@ -300,10 +300,46 @@ namespace PianoRoll108
                 outPicked[i] = false;
         }
 
+        // [大幅強化] O6F以上と伺っている最高音域は、多少の本物の見逃しを許容してでも
+        // ゴーストを潰す方針とする。絶対値・相対値をさらに引き上げ、加えて
+        // 「近傍(±2鍵)よりどれだけ突出しているか」も要求する。
+        // ディストーション/ドラムの広帯域ノイズは特定の1鍵だけが鋭く突出することが
+        // 少ない(なだらかに広がる)ため、これで人の耳の「音色の鋭さ」判断を
+        // 簡易的に近似する狙い。
         const float treMax = BandMax(blend, MID_END, COUNT);
+        // [緩衝帯] O6F の実際の鍵番号が境界(EDGE_HI=100)と完全には一致しない
+        // 可能性を考慮し、その手前(94〜99)にも中間的な厳しさを適用しておく。
+        for (int i = 94; i < EDGE_HI; ++i) {
+            if (!outPicked[i]) continue;
+            if (blend[i] < 0.15f || blend[i] < treMax * 0.45f) {
+                outPicked[i] = false;
+                continue;
+            }
+            float neighborMax2 = 0.0f;
+            for (int d = -2; d <= 2; ++d) {
+                if (d == 0) continue;
+                const int j = i + d;
+                if (j < MID_END || j >= COUNT) continue;
+                if (blend[j] > neighborMax2) neighborMax2 = blend[j];
+            }
+            if (neighborMax2 > 0.0f && blend[i] < neighborMax2 * 1.5f)
+                outPicked[i] = false;
+        }
+
         for (int i = EDGE_HI; i < COUNT; ++i) {
             if (!outPicked[i]) continue;
-            if (blend[i] < 0.09f || blend[i] < treMax * 0.32f)
+            if (blend[i] < 0.25f || blend[i] < treMax * 0.60f) {
+                outPicked[i] = false;
+                continue;
+            }
+            float neighborMax = 0.0f;
+            for (int d = -2; d <= 2; ++d) {
+                if (d == 0) continue;
+                const int j = i + d;
+                if (j < MID_END || j >= COUNT) continue;
+                if (blend[j] > neighborMax) neighborMax = blend[j];
+            }
+            if (neighborMax > 0.0f && blend[i] < neighborMax * 1.8f)
                 outPicked[i] = false;
         }
     }
@@ -351,8 +387,11 @@ namespace PianoRoll108
         const struct BandCfg { int lo, hi; float scoreRatio; float peakRatio; int maxNotes; } bands[] = {
             { BASS_END, LOW_MID_SPLIT, 0.22f, 0.16f, 2 },
             { LOW_MID_SPLIT, C4_KEY, 0.18f, 0.12f, 0 },
-            { C4_KEY, MID_END, 0.16f, 0.10f, 0 },
-            { MID_END, EDGE_HI, 0.15f, 0.095f, 0 },
+            // [再挑戦] 絶対値ノイズフロア(ゲイン連動)とオンセット特性ベースの
+            // ゴースト判定が揃ったので、中高音の速いパッセージ(T140の16分音符等)を
+            // 拾いやすくするため、しきい値を再度緩める。元値: 0.16f/0.10f, 0.15f/0.095f
+            { C4_KEY, MID_END, 0.13f, 0.085f, 0 },
+            { MID_END, EDGE_HI, 0.12f, 0.080f, 0 },
             { EDGE_HI, COUNT, 0.24f, 0.15f, 0 },
         };
         for (const BandCfg& b : bands) {

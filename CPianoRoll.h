@@ -74,7 +74,7 @@ public:
     // 音色分類に基づく打撃音(ドラム等)ゴースト抑制。既定は無効(opt-in)。
     // 誤って弱いピアノのスタッカートまで消してしまう可能性があるため、
     // 効果を確認しながら有効化することを推奨する。
-    bool m_impulsiveGhostSuppressEnabled = true;
+    bool m_impulsiveGhostSuppressEnabled = false;
 
     // 倍音ゴースト抑制: 既に鳴っている音の倍音(オクターブ等)にあたる候補が、
     // 一瞬だけ基音より強くなって PassesFundamentalTest 等の閾値を超えた場合でも、
@@ -198,9 +198,13 @@ private:
     // 閾値0.78)が「ギリギリで通過したか」だけを見る方式に変更した
     // (IsMarginalFundamentalPass、CPianoRoll.cpp 側に実装)。
     // marginRatio: 0.78の閾値に対し、この比率以上に接近していたら「際どい通過」とみなす。
-    static constexpr float kHarmonicGhostMarginRatio = 0.85f;
-    // 際どい通過が何フレーム連続したら新規ノートとして認めるか(3ms/frame換算)。
-    // 判定条件を狭く正確にした分、確認フレーム数も短縮して反応を速くする。
+    // [調整] 0.85 → 0.75: 疑わしいと見なす範囲を少し広げ、悲しみ2L実測で
+    // 残っていた微小なゴーストをできる範囲で追い込む。
+    static constexpr float kHarmonicGhostMarginRatio = 0.75f;
+    // [特性ベース判定へ変更] 際どい通過をした候補について、振幅の持続時間ではなく
+    // 「それ自体の短窓オンセット(アタック transient)が連続何フレーム観測されたか」
+    // (m_onsetBoostStreak)を合否基準にする。ゴースト(親音への追従に過ぎない漏れ込み)
+    // は自分自身のアタックを持たないため、これを要求するだけで振幅に関係なく弾ける。
     static constexpr uint8_t kHarmonicGhostConfirmFrames = 3;
 
     // ---- PCM インプット / リングバッファ(m_cs で保護) ----

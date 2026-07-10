@@ -519,7 +519,18 @@ BOOL CPianoRoll::OnInitDialog()
         L"Rollo de piano", L"피아노 롤", L"钢琴卷帘", L"لوحة البيانو",
         L"Пианоролл", L"Klavierrolle", L"Rolo de piano", L"Pianorol",
         L"Rolka pianina", L"Piyano rulosu"));
-
+    // [ビルド確認用タグ] この文字列がタイトルバーに出ていれば、この CPianoRoll.cpp が
+    // 実際にビルド・実行されている証拠になる。出ていなければ、差し替え忘れ/
+    // 別コピーのビルド/キャッシュ等、ファイルが反映されていない問題を疑うこと。
+    // 動作確認が済んだら削除して構わない。
+#if 0
+    {
+        CString curTitle;
+        GetWindowText(curTitle);
+        curTitle += L" [PR-DBG-v7]";
+        SetWindowText(curTitle);
+    }
+#endif
     ModifyStyle(WS_MINIMIZEBOX, 0);
     SetIcon(nullptr, TRUE);
     SetIcon(nullptr, FALSE);
@@ -1138,8 +1149,17 @@ void CPianoRoll::UpdateNoteStates()
                     const bool suspect = IsMarginalFundamentalPass(
                         blend, i, KEY_COUNT, kHarmonicGhostMarginRatio);
                     if (suspect) {
-                        if (m_harmonicGhostStreak[i] < 255) ++m_harmonicGhostStreak[i];
-                        allowOn = (m_harmonicGhostStreak[i] >= kHarmonicGhostConfirmFrames);
+                        // [特性ベース判定] 振幅のしきい値では「本物の小さい音」と
+                        // 「ゴースト(親音への追従に過ぎない漏れ込み)」は区別できない。
+                        // 違いは振る舞いの「形」にある: ゴーストは親音の減衰に
+                        // ただ追従するだけで、それ自体のアタック(短窓オンセットの
+                        // 立ち上がり)を持たない。本物の音は音量が小さくても、
+                        // 自分自身のアタック transient を持つはずである。
+                        // そこで振幅の持続フレーム数ではなく、m_onsetBoostStreak
+                        // (実測済みの短窓オンセット信号が連続で立っているか)を
+                        // 直接の合否基準にする。
+                        m_harmonicGhostStreak[i] = m_onsetBoostStreak[i];
+                        allowOn = (m_onsetBoostStreak[i] >= kHarmonicGhostConfirmFrames);
                     }
                     else {
                         m_harmonicGhostStreak[i] = 0;
@@ -3168,6 +3188,29 @@ void CPianoRoll::OnPaint()
     // 残りの保留フレームは次の解析完了(OnAnalysisDone)/同期(OnSyncRequest)時に描く。
     (void)needAnotherRollFrame;
 
+    // [デバッグ用] どの機能が有効な状態でビルド・実行されているかを画面に直接表示する。
+    // これが表示されなければ、この CPianoRoll.cpp が実際には動いていない証拠になる。
+    // 動作確認が済んだら、このブロックごと削除して構わない。
+#if 0
+    {
+        CString dbg;
+        dbg.Format(L"PR-DBG-v7  reattack=%s  ghostGuard=%s  impulsive=%s",
+            m_reattackDetectEnabled ? L"ON" : L"off",
+            m_harmonicGhostGuardEnabled ? L"ON" : L"off",
+            m_impulsiveGhostSuppressEnabled ? L"ON" : L"off");
+        CFont dbgFont;
+        dbgFont.CreateFont(-14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        CFont* pOldDbg = dc.SelectObject(&dbgFont);
+        dc.SetBkMode(OPAQUE);
+        dc.SetBkColor(RGB(0, 0, 0));
+        dc.SetTextColor(RGB(255, 255, 0));
+        CRect dbgRect(4, 4, w - 4, 24);
+        dc.DrawText(dbg, dbgRect, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+        dc.SelectObject(pOldDbg);
+    }
+#endif
 }
 
 void CPianoRoll::OnTimer(UINT_PTR nIDEvent)
