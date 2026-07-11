@@ -32,8 +32,9 @@ namespace
 			return (float)v / 8388608.0f;
 		}
 		if (bits == 32) {
-			const float* f = (const float*)pData;
-			return f[frame * channels + ch];
+			// DS/アップスケール出力は int32（IEEE float ではない）。Speana/ピアノロールと同じ正規化。
+			const int* s = (const int*)pData;
+			return (float)((double)s[frame * channels + ch] / 2147483648.0);
 		}
 		if (bits == 8) {
 			const unsigned char* u = (const unsigned char*)pData;

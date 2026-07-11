@@ -20243,15 +20243,21 @@ void COggDlg::SyncAnalyzerFromPlayCursor()
 	if (m_dsb->GetCurrentPosition(&playCur, &writeCur) != DS_OK)
 		return;
 
-	// Speana と同じ時間軸: 窓末尾 = PlayCursor + latency(-800/-1600ms)
-	// 増分だけ Feed して波形スクロールを実時間に合わせる
-	const int probeFrames = Bufwav3ScaleRefSamples(4096, sampleRate);
-	const int probeBytes = probeFrames * bytesPerFrame;
-	if (probeBytes <= 0 || (ULONG)probeBytes >= ringBytes) return;
+	// endPos = PlayCursor + Speana latency。窓長はリングに収まるよう制限
+	// （高レート/多ch アップスケールで probe がリング超過して早期 return しない）
+	int winFrames = 4096;
+	int winBytes = winFrames * bytesPerFrame;
+	const ULONG maxWin = ringBytes / 4;
+	if ((ULONG)winBytes > maxWin && bytesPerFrame > 0) {
+		winFrames = (int)(maxWin / (ULONG)bytesPerFrame);
+		if (winFrames < 64) winFrames = 64;
+		winBytes = winFrames * bytesPerFrame;
+	}
+	if (winBytes <= 0 || (ULONG)winBytes >= ringBytes) return;
 
 	const long readPos = SpeanaAnalysisReadPos(
-		playCur, probeBytes, bytesPerFrame, (int)ringBytes, sampleRate, 0);
-	ULONG endPos = (ULONG)((readPos + probeBytes) % (long)ringBytes);
+		playCur, winBytes, bytesPerFrame, (int)ringBytes, sampleRate, 0);
+	ULONG endPos = (ULONG)((readPos + winBytes) % (long)ringBytes);
 	endPos -= (endPos % (ULONG)bytesPerFrame);
 
 	if (!m_analyzerSyncValid) {
@@ -20265,11 +20271,18 @@ void COggDlg::SyncAnalyzerFromPlayCursor()
 	advance -= (advance % (ULONG)bytesPerFrame);
 	if (advance == 0) return;
 
-	// シーク等で飛んだときは再同期のみ（巨大チャンクを流し込まない）
-	const ULONG maxAdvance = (ULONG)((sampleRate * (double)bytesPerFrame) / 2.0); // ~0.5s
-	if (advance > maxAdvance || advance > ringBytes / 4) {
+	// シーク等で飛んだときは再同期のみ
+	const ULONG maxJump = (ULONG)((sampleRate * (double)bytesPerFrame) / 2.0); // ~0.5s
+	if (advance > maxJump || advance > ringBytes / 4) {
 		m_analyzerSyncEndPos = endPos;
 		return;
+	}
+
+	// 1回の Feed は最大 ~50ms（高レートで UI を詰まらせない）
+	const ULONG feedCap = (ULONG)((sampleRate * (double)bytesPerFrame) / 20.0);
+	if (feedCap >= (ULONG)bytesPerFrame && advance > feedCap) {
+		advance = feedCap - (feedCap % (ULONG)bytesPerFrame);
+		if (advance == 0) advance = (ULONG)bytesPerFrame;
 	}
 
 	const ULONG startPos = (endPos + ringBytes - advance) % ringBytes;
