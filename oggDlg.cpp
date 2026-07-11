@@ -16957,6 +16957,12 @@ void COggDlg::timerp()
 			}
 		}
 	}
+	// MP: playb 更新と同じ UI ターンでシークを追従(Timer3 の遅延 Invalidate を避ける)
+	if (savedata.playerMode == 1) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && ::IsWindowVisible(mp->GetSafeHwnd()))
+			mp->MirrorSeekVol();
+	}
 
 	tempo = m_tempo_sl.GetPos();
 	float te = (float)tempo;

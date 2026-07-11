@@ -4303,8 +4303,8 @@ void CCustomRangeSliderCtrl::SetPos(int p)
     if (p == m_nLogicalPos && p == m_nVisualPos) return;
     m_nLogicalPos = m_nVisualPos = p;
     CSliderCtrl::SetPos(p);
-    // UPDATENOW はドラッグ中のみ。通常は Invalidate 合流で他 UI と競合しない。
-    if (::IsWindow(m_hWnd))
+    // 非表示(MP時の og->m_time)は描画不要。表示中は Invalidate(ドラッグは UPDATENOW)。
+    if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
         Invalidate(FALSE);
 }
 
@@ -4345,6 +4345,11 @@ void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax,
     selMax = max(rangeMin, min(rangeMax, selMax));
     nPos = max(rangeMin, min(rangeMax, nPos));
 
+    // range 更新前の見た目(px)。サブピクセルの値変化は描画しない。
+    const int oldThumb = ValueToPixel(m_nLogicalPos);
+    const int oldSel0 = ValueToPixel(m_nSelMin);
+    const int oldSel1 = ValueToPixel(m_nSelMax);
+
     BOOL dirty = FALSE;
     if (rangeMin != m_nMin || rangeMax != m_nMax) {
         m_nMin = rangeMin;
@@ -4362,8 +4367,18 @@ void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax,
         CSliderCtrl::SetPos(nPos);
         dirty = TRUE;
     }
-    if (dirty && ::IsWindow(m_hWnd))
-        Invalidate(FALSE);
+    if (!dirty || !::IsWindow(m_hWnd) || !::IsWindowVisible(m_hWnd))
+        return;
+
+    const int newThumb = ValueToPixel(m_nLogicalPos);
+    const int newSel0 = ValueToPixel(m_nSelMin);
+    const int newSel1 = ValueToPixel(m_nSelMax);
+    if (newThumb == oldThumb && newSel0 == oldSel0 && newSel1 == oldSel1)
+        return;
+
+    // バナー Invalidate に合流させると再生が進むほど描画間隔が崩れるため、
+    // 見た目変化時のみこのコントロールを即時再描画(状態は上で一括更新済み)。
+    RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 }
 
 void CCustomRangeSliderCtrl::GetSelection(int& mn, int& mx) const

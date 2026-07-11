@@ -1817,7 +1817,7 @@ void CMediaPlayerDlg::MirrorSeekVol()
 		if (mx <= mn) mx = mn + 1;
 		int ps = og->m_time.GetPos();
 		int selMn, selMx; og->m_time.GetSelection(selMn, selMx);
-		// 一括更新+Invalidate1回。旧 SetSelection→SetPos の二重 UPDATENOW は飛び飛びの原因。
+		// 一括更新+見た目変化時のみ1回 UPDATENOW(バナー合流の Invalidate だと経過で遅延)。
 		m_seek.SetPlaybackMirror(ps, selMn, selMx, mn, mx);
 		double pct = (double)(ps - mn) * 100.0 / (double)(mx - mn);
 		if (pct < 0.0) pct = 0.0; if (pct > 100.0) pct = 100.0;
