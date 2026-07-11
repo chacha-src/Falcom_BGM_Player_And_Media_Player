@@ -236,6 +236,7 @@ BOOL CAnalyzerDlg::OnInitDialog()
 	m_eqOverlay = (savedata.analyzereqoverlay != 0);
 	m_frozen = false;
 	m_hoverPlot.SetRectEmpty();
+	m_hoverPlotCount = 0;
 
 	m_feedEnabled = true;
 	StartSpecWorker();
@@ -1191,11 +1192,19 @@ void CAnalyzerDlg::RedrawSpectrum(COLORREF bg)
 	const int gap = 4;
 	const int padL = 4, padR = 4, padT = 16, padB = 4;
 	CRect area(padL, padT, m_specW - padR, m_specH - padB);
-	CRect primaryPlot;
+
+	m_hoverPlotCount = 0;
+	auto addHoverPlot = [&](const CRect& plot, int ch) {
+		if (m_hoverPlotCount >= HOVER_PLOT_MAX) return;
+		m_hoverPlots[m_hoverPlotCount] = plot;
+		m_hoverPlotCh[m_hoverPlotCount] = ch;
+		++m_hoverPlotCount;
+	};
 
 	if (layout == SpecOverlay || channels <= 1) {
 		CRect plot(area.left + 28, area.top, area.right, area.bottom - 12);
-		primaryPlot = plot;
+		// 重ね描き: ホバーは全chから最大dBのチャンネルを選ぶ(UpdateHover側)
+		addHoverPlot(plot, -1);
 		DrawSpecPanel(m_specDC, plot, 0, channels, spec, peak, channels, sr, true);
 	}
 	else if (layout == SpecSplitV) {
@@ -1204,7 +1213,7 @@ void CAnalyzerDlg::RedrawSpectrum(COLORREF bg)
 		for (int i = 0; i < n; ++i) {
 			CRect plot(area.left + 20, area.top + i * (cellH + gap),
 				area.right, area.top + i * (cellH + gap) + cellH);
-			if (i == 0) primaryPlot = plot;
+			addHoverPlot(plot, i);
 			DrawSpecPanel(m_specDC, plot, i, 1, spec, peak, channels, sr, i == 0);
 		}
 	}
@@ -1214,7 +1223,7 @@ void CAnalyzerDlg::RedrawSpectrum(COLORREF bg)
 		for (int i = 0; i < n; ++i) {
 			CRect plot(area.left + i * (cellW + gap), area.top,
 				area.left + i * (cellW + gap) + cellW, area.bottom - 4);
-			if (i == 0) primaryPlot = plot;
+			addHoverPlot(plot, i);
 			DrawSpecPanel(m_specDC, plot, i, 1, spec, peak, channels, sr, i == 0);
 		}
 	}
@@ -1227,7 +1236,7 @@ void CAnalyzerDlg::RedrawSpectrum(COLORREF bg)
 			const int r = i / cols, c = i % cols;
 			CRect plot(area.left + c * (cellW + gap), area.top + r * (cellH + gap),
 				area.left + c * (cellW + gap) + cellW, area.top + r * (cellH + gap) + cellH);
-			if (i == 0) primaryPlot = plot;
+			addHoverPlot(plot, i);
 			DrawSpecPanel(m_specDC, plot, i, 1, spec, peak, channels, sr, i == 0);
 		}
 	}
@@ -1240,13 +1249,12 @@ void CAnalyzerDlg::RedrawSpectrum(COLORREF bg)
 			const int r = i / cols, c = i % cols;
 			CRect plot(area.left + c * (cellW + gap), area.top + r * (cellH + gap),
 				area.left + c * (cellW + gap) + cellW, area.top + r * (cellH + gap) + cellH);
-			if (i == 0) primaryPlot = plot;
+			addHoverPlot(plot, i);
 			DrawSpecPanel(m_specDC, plot, i, 1, spec, peak, channels, sr, i == 0);
 		}
 	}
 
-	// ホバー用: スペクトラムBB内座標 → クライアント(split加算は Present/UpdateHover 側)
-	m_hoverPlot = primaryPlot;
+	// アクティブな m_hoverPlot は UpdateHoverFromPoint がカーソルで決める(ここで [0]=L に戻さない)
 
 	m_specDC.SelectObject(oldFont);
 	m_specReady = true;
@@ -1342,10 +1350,11 @@ void CAnalyzerDlg::DrawHoverReadout(CDC& dc, const CRect& clientRc)
 	dc.FillSolidRect(cx - 2, cy - 2, 5, 5, RGB(255, 230, 120));
 
 	CString s;
+	const int channels = (std::max)(1, (std::min)(m_channels, CH_MAX));
 	if (m_hoverHz >= 1000.0f)
-		s.Format(_T("%.2f kHz  %.1f dB"), m_hoverHz / 1000.0f, m_hoverDb);
+		s.Format(_T("%s  %.2f kHz  %.1f dB"), ChannelLabel(m_hoverCh, channels), m_hoverHz / 1000.0f, m_hoverDb);
 	else
-		s.Format(_T("%.0f Hz  %.1f dB"), m_hoverHz, m_hoverDb);
+		s.Format(_T("%s  %.0f Hz  %.1f dB"), ChannelLabel(m_hoverCh, channels), m_hoverHz, m_hoverDb);
 	if (m_frozen)
 		s += _T("  [FREEZE]");
 
@@ -1366,28 +1375,40 @@ bool CAnalyzerDlg::UpdateHoverFromPoint(CPoint ptClient)
 	const bool wasValid = m_hoverValid;
 	const int oldBin = m_hoverBin;
 	const float oldDb = m_hoverDb;
+	const int oldCh = m_hoverCh;
 
 	m_hoverValid = false;
 	m_hoverBin = -1;
-	if (m_hoverPlot.IsRectEmpty() || m_hoverSplitY <= 0)
+	if (m_hoverPlotCount <= 0 || m_hoverSplitY <= 0)
 		return wasValid;
 
-	CRect plot = m_hoverPlot;
-	plot.OffsetRect(0, m_hoverSplitY);
-	if (!plot.PtInRect(ptClient) || plot.Width() < 8 || plot.Height() < 8)
+	// カーソル下のパネルを探す(分割時は各ch、重ね時は1枚で ch=-1)
+	int hit = -1;
+	CRect hitPlot;
+	for (int i = 0; i < m_hoverPlotCount; ++i) {
+		CRect plot = m_hoverPlots[i];
+		plot.OffsetRect(0, m_hoverSplitY);
+		if (plot.PtInRect(ptClient) && plot.Width() >= 8 && plot.Height() >= 8) {
+			hit = i;
+			hitPlot = plot;
+			break;
+		}
+	}
+	if (hit < 0)
 		return wasValid;
 
-	int sr = 44100;
-	float localBins[SPEC_BINS];
+	int sr = 44100, channels = 2;
+	float localBins[CH_MAX][SPEC_BINS];
 	EnterCriticalSection(&m_cs);
 	sr = m_sampleRate > 0 ? m_sampleRate : 44100;
-	memcpy(localBins, m_specDb[0], sizeof(localBins));
+	channels = (std::max)(1, (std::min)(m_channels, CH_MAX));
+	memcpy(localBins, m_specDb, sizeof(localBins));
 	LeaveCriticalSection(&m_cs);
 
 	const float nyquist = (float)sr * 0.5f;
 	const float fMin = 20.0f;
 	const float fMax = (std::max)(fMin * 1.01f, nyquist);
-	const float tx = (float)(ptClient.x - plot.left) / (float)plot.Width();
+	const float tx = (float)(ptClient.x - hitPlot.left) / (float)hitPlot.Width();
 	const float hz = fMin * powf(fMax / fMin, (std::max)(0.0f, (std::min)(1.0f, tx)));
 
 	int bestB = 0;
@@ -1397,13 +1418,31 @@ bool CAnalyzerDlg::UpdateHoverFromPoint(CPoint ptClient)
 		const float d = fabsf(logf((std::max)(cHz, 1.0f) / (std::max)(hz, 1.0f)));
 		if (d < bestDist) { bestDist = d; bestB = b; }
 	}
+
+	int ch = m_hoverPlotCh[hit];
+	if (ch < 0) {
+		// 重ね描き: そのビンで最も大きい ch を表示
+		ch = 0;
+		float bestDb = localBins[0][bestB];
+		for (int c = 1; c < channels; ++c) {
+			if (localBins[c][bestB] > bestDb) {
+				bestDb = localBins[c][bestB];
+				ch = c;
+			}
+		}
+	}
+	if (ch < 0) ch = 0;
+	if (ch >= channels) ch = channels - 1;
+
 	m_hoverHz = SpecCenterHz(bestB, SPEC_BINS, nyquist);
-	m_hoverDb = localBins[bestB];
-	m_hoverCh = 0;
+	m_hoverDb = localBins[ch][bestB];
+	m_hoverCh = ch;
 	m_hoverBin = bestB;
+	m_hoverPlot = m_hoverPlots[hit];
 	m_hoverValid = true;
 
-	return !wasValid || oldBin != m_hoverBin || fabsf(oldDb - m_hoverDb) >= 0.5f;
+	return !wasValid || oldBin != m_hoverBin || oldCh != m_hoverCh
+		|| fabsf(oldDb - m_hoverDb) >= 0.5f;
 }
 
 void CAnalyzerDlg::Present(CDC& dc, const CRect& rc, BOOL bAero)
@@ -1512,6 +1551,13 @@ void CAnalyzerDlg::OnPaint()
 		RedrawSpectrum(bg);
 
 	m_hoverSplitY = split;
+	// マウス停止中も解析描画でパネル表が更新されるため、カーソル位置からホバーを再同期
+	if (m_trackingMouse) {
+		CPoint pt;
+		GetCursorPos(&pt);
+		ScreenToClient(&pt);
+		UpdateHoverFromPoint(pt);
+	}
 	m_hoverChanged = false;
 
 	// 未消化の波形スクロールがあれば次フレームへ(追い付き用の自己 Invalidate は
@@ -1568,10 +1614,11 @@ void CAnalyzerDlg::OnPaint()
 				CRect plot = m_hoverPlot;
 				plot.OffsetRect(0, split);
 				CString s;
+				const int channels = (std::max)(1, (std::min)(m_channels, CH_MAX));
 				if (m_hoverHz >= 1000.0f)
-					s.Format(_T("%.2f kHz  %.1f dB"), m_hoverHz / 1000.0f, m_hoverDb);
+					s.Format(_T("%s  %.2f kHz  %.1f dB"), ChannelLabel(m_hoverCh, channels), m_hoverHz / 1000.0f, m_hoverDb);
 				else
-					s.Format(_T("%.0f Hz  %.1f dB"), m_hoverHz, m_hoverDb);
+					s.Format(_T("%s  %.0f Hz  %.1f dB"), ChannelLabel(m_hoverCh, channels), m_hoverHz, m_hoverDb);
 				CDC* pTmp = &m_waveScratchDC;
 				if (pTmp->GetSafeHdc()) {
 					CFont* of = pTmp->SelectObject(&m_font);

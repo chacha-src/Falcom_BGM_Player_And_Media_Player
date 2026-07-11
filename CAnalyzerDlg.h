@@ -152,8 +152,12 @@ private:
 	CBitmap* m_frameOld = nullptr;
 	int m_frameW = 0, m_frameH = 0;
 
-	// ホバー読取用(クライアント座標のスペクトラム主プロット)
-	CRect m_hoverPlot;
+	// ホバー読取用(スペクトラム各パネル。BB座標 → クライアントは split 加算)
+	static constexpr int HOVER_PLOT_MAX = CH_MAX;
+	CRect m_hoverPlots[HOVER_PLOT_MAX];
+	int m_hoverPlotCh[HOVER_PLOT_MAX] = {};
+	int m_hoverPlotCount = 0;
+	CRect m_hoverPlot; // 現在ホバー中のパネル(描画用)
 	int m_hoverSplitY = 0;
 	bool m_hoverValid = false;
 	bool m_hoverChanged = false;
