@@ -4447,6 +4447,10 @@ void CPlayList::SIconTimer(int i){
 	RECT r;
 	m_lc.GetItemRect(pnt,&r,LVIR_ICON);
 	m_lc.RedrawWindow(&r);
+	// MP画面は 250ms ポーリングだと点滅が欠けるので即通知
+	extern CMediaPlayerDlg* mp;
+	if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->NotifyPlayIconChanged();
 }
 extern int ps;
 extern void DoEvent();

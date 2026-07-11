@@ -923,6 +923,10 @@ public:
     void SetPos(int nPos);
     int GetPos() const;
 
+    // 再生追従用: 範囲・選択・位置を一括更新し Invalidate は1回だけ
+    // (SetSelection→SetPos の二重 RDW_UPDATENOW が飛び飛び描画の原因だった)
+    void SetPlaybackMirror(int nPos, int selMin, int selMax, int rangeMin, int rangeMax);
+
     // 範囲(最小/最大)の取得(メディアプレイヤー画面のシーク表示用)
     int GetMinValue() const { return m_nMin; }
     int GetMaxValue() const { return m_nMax; }

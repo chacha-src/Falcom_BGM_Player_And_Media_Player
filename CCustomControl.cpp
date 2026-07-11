@@ -4300,10 +4300,12 @@ void CCustomRangeSliderCtrl::SetPos(int p)
 {
     if (m_bDragging) return;
     p = max(m_nMin, min(m_nMax, p));
+    if (p == m_nLogicalPos && p == m_nVisualPos) return;
     m_nLogicalPos = m_nVisualPos = p;
     CSliderCtrl::SetPos(p);
+    // UPDATENOW はドラッグ中のみ。通常は Invalidate 合流で他 UI と競合しない。
     if (::IsWindow(m_hWnd))
-        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+        Invalidate(FALSE);
 }
 
 int CCustomRangeSliderCtrl::GetPos() const
@@ -4313,25 +4315,55 @@ int CCustomRangeSliderCtrl::GetPos() const
 
 void CCustomRangeSliderCtrl::SetRange(int mn, int mx, BOOL b)
 {
+    if (mn == m_nMin && mx == m_nMax) {
+        if (b && ::IsWindow(m_hWnd)) Invalidate(FALSE);
+        return;
+    }
     m_nMin = mn;
     m_nMax = mx;
     CSliderCtrl::SetRange(mn, mx, FALSE);
     if (b && ::IsWindow(m_hWnd))
-        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+        Invalidate(FALSE);
 }
 
 void CCustomRangeSliderCtrl::SetSelection(int mn, int mx)
 {
+    if (mn > mx) { int t = mn; mn = mx; mx = t; }
+    if (mn == m_nSelMin && mx == m_nSelMax) return;
     m_nSelMin = mn;
     m_nSelMax = mx;
-    if (m_nSelMin > m_nSelMax)
-    {
-        int t = m_nSelMin;
-        m_nSelMin = m_nSelMax;
-        m_nSelMax = t;
-    }
     if (::IsWindow(m_hWnd))
-        RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+        Invalidate(FALSE);
+}
+
+void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax, int rangeMin, int rangeMax)
+{
+    if (m_bDragging) return;
+    if (rangeMax <= rangeMin) rangeMax = rangeMin + 1;
+    if (selMin > selMax) { int t = selMin; selMin = selMax; selMax = t; }
+    selMin = max(rangeMin, min(rangeMax, selMin));
+    selMax = max(rangeMin, min(rangeMax, selMax));
+    nPos = max(rangeMin, min(rangeMax, nPos));
+
+    BOOL dirty = FALSE;
+    if (rangeMin != m_nMin || rangeMax != m_nMax) {
+        m_nMin = rangeMin;
+        m_nMax = rangeMax;
+        CSliderCtrl::SetRange(rangeMin, rangeMax, FALSE);
+        dirty = TRUE;
+    }
+    if (selMin != m_nSelMin || selMax != m_nSelMax) {
+        m_nSelMin = selMin;
+        m_nSelMax = selMax;
+        dirty = TRUE;
+    }
+    if (nPos != m_nLogicalPos || nPos != m_nVisualPos) {
+        m_nLogicalPos = m_nVisualPos = nPos;
+        CSliderCtrl::SetPos(nPos);
+        dirty = TRUE;
+    }
+    if (dirty && ::IsWindow(m_hWnd))
+        Invalidate(FALSE);
 }
 
 void CCustomRangeSliderCtrl::GetSelection(int& mn, int& mx) const

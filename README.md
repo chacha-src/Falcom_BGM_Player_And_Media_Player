@@ -16,10 +16,10 @@
 
 ### 環境モデル・イコライザー機能
 イコライザー機能が追加され100種類の環境モデルや15バンドのイコライザーも実装されました。
-イコライザープリセットも50個用意されています、
+イコライザープリセットも100個用意されています、
 環境モデルで音割れ防止のため、楽曲が既に大きいボリュームの場合、ダイナミックコンプレッサーにより音割れしないよう処理が施されております。
 
-グローバルパラメータとして、鮮明さ、低音域高音域バランス、音の密度、音の立体感も用意してあります。
+グローバルパラメータとして、鮮明さ、低音域高音域バランス、音の密度、音の立体感、リバーブ、コーラス、ディレイも用意してあります。
 これらは環境モデルとは別で動作します。
 
 また環境モデルのかかり方の度合いの変更できるため、かなり自由度が高くなっています。
@@ -137,10 +137,10 @@ Japanese, English, Français, Italiano, Español, 한국어, 中文, العرب�
 
 ### Environmental Modeling & Equalizer
 An Equalizer function has been added, featuring **100 environmental models** and a **15-band EQ**.
-50 EQ Presets are also included.
+100 EQ Presets are also included.
 To prevent audio clipping when using environmental models, a **Dynamic Compressor** is implemented to automatically process tracks with high volume levels.
 
-Global parameters such as **Sharpness**, **Low/High Balance**, **Sound Density**, and **Stereo Depth** are also available.
+Global parameters such as **Sharpness**, **Low/High Balance**, **Sound Density**, **Stereo Depth**, **Reverb**, **Chorus**, and **Delay** are also available.
 These operate independently of the environmental models.
 
 Additionally, the intensity of the environmental effects can be adjusted, offering a high degree of acoustic freedom.

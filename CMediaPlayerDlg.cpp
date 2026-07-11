@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -1519,6 +1519,26 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 	FollowPlayingRow();   // ♪ 行へカーソル追従
 }
 
+void CMediaPlayerDlg::NotifyPlayIconChanged()
+{
+	// PlayList::SIconTimer から呼ばれる。Timer1(250ms)待ちだと点滅が間引かれて飛び飛びに見える。
+	if (!::IsWindow(m_list.GetSafeHwnd()) || !pl || pl->pc == NULL) return;
+	const int cnt = pl->playcnt;
+	const int pnt = pl->pnt;
+	if (pnt < 0 || pnt >= cnt) return;
+	const int ic = pl->pc[pnt].icon;
+	if (pnt != m_lastPlcnt) {
+		if (m_lastPlcnt >= 0 && m_lastPlcnt < cnt)
+			m_list.RedrawItems(m_lastPlcnt, m_lastPlcnt);
+		m_lastPlcnt = pnt;
+		m_lastPlayIcon = -999;
+	}
+	if (ic != m_lastPlayIcon) {
+		m_list.RedrawItems(pnt, pnt);
+		m_lastPlayIcon = ic;
+	}
+}
+
 // 仮想リスト(LVS_OWNERDATA)の表示内容を pl->pc から供給する(pl の同名処理と同等)。
 void CMediaPlayerDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 {
@@ -1797,9 +1817,8 @@ void CMediaPlayerDlg::MirrorSeekVol()
 		if (mx <= mn) mx = mn + 1;
 		int ps = og->m_time.GetPos();
 		int selMn, selMx; og->m_time.GetSelection(selMn, selMx);
-		m_seek.SetRange(mn, mx, FALSE);
-		m_seek.SetSelection(selMn, selMx);
-		m_seek.SetPos(ps);
+		// 一括更新+Invalidate1回。旧 SetSelection→SetPos の二重 UPDATENOW は飛び飛びの原因。
+		m_seek.SetPlaybackMirror(ps, selMn, selMx, mn, mx);
 		double pct = (double)(ps - mn) * 100.0 / (double)(mx - mn);
 		if (pct < 0.0) pct = 0.0; if (pct > 100.0) pct = 100.0;
 		CString t; t.Format(_T("!@C206830%.1f%%"), pct);

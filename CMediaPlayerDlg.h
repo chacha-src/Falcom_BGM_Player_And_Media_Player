@@ -78,6 +78,7 @@ public:
 	void RefreshListAfterLayout(); // レイアウト変更後に仮想リストの描画範囲を再確定
 	void RefreshList(BOOL bForce = FALSE);  // pl->pc をそのまま反映
 	void FollowPlayingRow();                // 再生中(♪)の行へカーソル追従(項目挿入後に呼ぶ)
+	void NotifyPlayIconChanged();          // SIconTimer 直後に♪点滅を即反映(250ms待ちしない)
 	void InitListScrollPosition();          // 起動/表示確定時にリスト位置を復元
 	void SyncFromMain();         // og/pl の状態をUIへ反映
 	void MirrorSeekVol();        // 再生位置(playb追従)/時間/音量を高速ミラー
