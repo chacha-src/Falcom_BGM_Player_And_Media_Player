@@ -59,7 +59,7 @@ inline long SpeanaAnalysisLatencyBytes(double sampleRate, int bytesPerFrame, int
 }
 
 // Speana() と同じ: readPos = PlayCursor - windowBytes + latencyBytes
-// extraLatencyMs>0: さらに過去を読む（ピアノロールが音より早いとき用）
+// extraLatencyMs>0: さらに過去を読む（簡易ピアノロールが音より早いとき用）
 inline long SpeanaAnalysisReadPos(ULONG playCursor, int windowBytes, int bytesPerFrame, int ringBytes, double sampleRate, int extraLatencyMs = 0)
 {
 	long latencyBytes = SpeanaAnalysisLatencyBytes(sampleRate, bytesPerFrame, windowBytes, ringBytes);
@@ -73,7 +73,7 @@ inline long SpeanaAnalysisReadPos(ULONG playCursor, int windowBytes, int bytesPe
 	return readPos;
 }
 
-// ピアノロール: スペアナと同じ readPos（writeCursor / queued 補正は未使用）
+// 簡易ピアノロール: スペアナと同じ readPos（writeCursor / queued 補正は未使用）
 inline long PianoAnalysisReadPos(ULONG playCursor, ULONG /*writeCursor*/, int windowBytes, int bytesPerFrame, int ringBytes, double sampleRate, int extraLatencyMs = 0)
 {
 	return SpeanaAnalysisReadPos(playCursor, windowBytes, bytesPerFrame, ringBytes, sampleRate, extraLatencyMs);

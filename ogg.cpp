@@ -194,6 +194,11 @@ BOOL COggApp::InitInstance()
 	savedata.pianorolly = -1;
 	savedata.pianorollw = 800;
 	savedata.pianorollh = 450;
+	savedata.analyzerwindow = 0;
+	savedata.analyzerx = -1;
+	savedata.analyzery = -1;
+	savedata.analyzerw = 720;
+	savedata.analyzerh = 420;
 	savedata.saveversion = 2;
 
 	savedata.playerMode = 0;   // 既定はファルコム特化型
@@ -262,12 +267,87 @@ BOOL COggApp::InitInstance()
 		savedata.wav_export_fade_sec = 15;
 	if (savedata.wav_export_trim_keep_sec <= 0)
 		savedata.wav_export_trim_keep_sec = 1;
-	// mpHist は構造体末尾追記。旧.dat(これより短い)は mpHist 領域を読まないので空にする。
-	if (datFileSize < (int)offsetof(save, mpHistCnt)
-		|| savedata.mpHistCnt < 0 || savedata.mpHistCnt > 8) {
-		savedata.mpHistCnt = 0;
-		ZeroMemory(savedata.mpHistName, sizeof(savedata.mpHistName));
-		ZeroMemory(savedata.mpHistPath, sizeof(savedata.mpHistPath));
+	// アナライザー窓: 必ず構造体末尾に追記(旧.datは部分読込で未設定のまま→既定値)
+	if (datFileSize < (int)(offsetof(save, analyzerwindow) + sizeof(savedata.analyzerwindow))) {
+		savedata.analyzerwindow = 0;
+		savedata.analyzerx = -1;
+		savedata.analyzery = -1;
+		savedata.analyzerw = 720;
+		savedata.analyzerh = 420;
+	} else if (savedata.analyzerw < 200 || savedata.analyzerh < 120
+		|| savedata.analyzerw > 10000 || savedata.analyzerh > 10000) {
+		savedata.analyzerx = -1;
+		savedata.analyzery = -1;
+		savedata.analyzerw = 720;
+		savedata.analyzerh = 420;
+	}
+	// ジャンプリスト履歴: 途中フィールド挿入で .dat がずれた場合などは破棄する
+	{
+		auto clearMpHist = []() {
+			savedata.mpHistCnt = 0;
+			ZeroMemory(savedata.mpHistName, sizeof(savedata.mpHistName));
+			ZeroMemory(savedata.mpHistPath, sizeof(savedata.mpHistPath));
+		};
+		const bool histTooShort = (datFileSize < (int)offsetof(save, mpHistCnt));
+		if (histTooShort || savedata.mpHistCnt < 0 || savedata.mpHistCnt > 8) {
+			clearMpHist();
+		}
+		else {
+			bool histBad = false;
+			for (int i = 0; i < savedata.mpHistCnt; ++i) {
+				savedata.mpHistPath[i][_countof(savedata.mpHistPath[i]) - 1] = 0;
+				savedata.mpHistName[i][_countof(savedata.mpHistName[i]) - 1] = 0;
+				const TCHAR* p = savedata.mpHistPath[i];
+				if (p[0] == 0) { histBad = true; break; }
+				const bool absDrive = (p[0] != 0 && p[1] == _T(':')
+					&& (p[2] == _T('\\') || p[2] == _T('/')));
+				const bool absUnc = (p[0] == _T('\\') && p[1] == _T('\\') && p[2] != 0);
+				if (!absDrive && !absUnc) { histBad = true; break; }
+				for (const TCHAR* c = p; *c; ++c) {
+					if ((unsigned short)*c < 0x20) { histBad = true; break; }
+				}
+				if (histBad) break;
+				for (const TCHAR* c = savedata.mpHistName[i]; *c; ++c) {
+					if ((unsigned short)*c < 0x20) { histBad = true; break; }
+				}
+				if (histBad) break;
+			}
+			if (histBad)
+				clearMpHist();
+		}
+	}
+	// MP窓座標もずれ破損しやすいので、明らかに不正なら未設定扱いにする
+	if (savedata.mpHasPos) {
+		if (savedata.mpw < 100 || savedata.mph < 100
+			|| savedata.mpw > 10000 || savedata.mph > 10000) {
+			savedata.mpHasPos = 0;
+			savedata.mpx = -10000;
+			savedata.mpy = -10000;
+			savedata.mpw = 0;
+			savedata.mph = 0;
+		}
+	}
+	// 列幅・フォント名もずれで壊れやすい。異常値は捨てる
+	{
+		bool colBad = false;
+		for (int i = 0; i < 5; ++i) {
+			if (savedata.mpcol[i] < 0 || savedata.mpcol[i] > 4000) {
+				colBad = true;
+				break;
+			}
+		}
+		if (colBad)
+			ZeroMemory(savedata.mpcol, sizeof(savedata.mpcol));
+		savedata.font1[_countof(savedata.font1) - 1] = 0;
+		savedata.font2[_countof(savedata.font2) - 1] = 0;
+		for (TCHAR* p = savedata.font1; *p; ++p) {
+			if ((unsigned short)*p < 0x20) { savedata.font1[0] = 0; break; }
+		}
+		for (TCHAR* p = savedata.font2; *p; ++p) {
+			if ((unsigned short)*p < 0x20) { savedata.font2[0] = 0; break; }
+		}
+		if (savedata.lang < 0 || savedata.lang > 13)
+			savedata.lang = 0;
 	}
 	if (savedata.langselect == 0) {
 		LANGID langId = GetUserDefaultUILanguage();

@@ -52,15 +52,20 @@ namespace PianoKey
         return best;
     }
 
+    // ゴースト剪定用: 高次倍音(10〜24次)まで含めた整数比判定。
+    // プロファイル次元(h2..h9)とは独立。漏れ込みタワーは n>9 も普通に出る。
+    static constexpr int HARMONIC_PAIR_N_MAX = 24;
+
     // hi / lo が n:1 の等倍音関係（±3%×n、鍵インデックスは厳密でなく周波数比）
-    inline bool IsHarmonicPairCompute(int hi, int lo)
+    inline bool IsHarmonicPairCompute(int hi, int lo, int nMax = HARMONIC_N_MAX)
     {
         if (hi <= lo || lo < 0 || hi >= COUNT) return false;
         const float fh = KeyHz(hi);
         const float fl = KeyHz(lo);
         if (fl <= 1e-3f) return false;
         const float ratio = fh / fl;
-        for (int n = HARMONIC_N_MIN; n <= HARMONIC_N_MAX; ++n) {
+        const int nHi = (nMax < HARMONIC_N_MIN) ? HARMONIC_N_MIN : nMax;
+        for (int n = HARMONIC_N_MIN; n <= nHi; ++n) {
             const float e = (float)n;
             if (fabsf(ratio - e) < 0.028f * e)
                 return true;
@@ -68,19 +73,151 @@ namespace PianoKey
         return false;
     }
 
+    // 基音候補 fundKey の n 次倍音に最も近い鍵（n は 2 以上、HARMONIC_N_MAX 外も可）
+    inline int HarmonicDownKeyAny(int partialKey, int harmonicN)
+    {
+        if (partialKey < 0 || partialKey >= COUNT || harmonicN < 2) return -1;
+        return NearestKeyIndex(KeyHz(partialKey) / (float)harmonicN);
+    }
+
+    inline int HarmonicUpKeyAny(int fundKey, int harmonicN)
+    {
+        if (fundKey < 0 || fundKey >= COUNT || harmonicN < 2) return -1;
+        return NearestKeyIndex(KeyHz(fundKey) * (float)harmonicN);
+    }
+
     // 検出パイプラインの O(n^2) ループで多用されるため事前計算テーブル化（結果は不変）。
-    // C++11 のスレッドセーフな関数ローカル static で初期化（worker/Speana 双方から安全に参照）。
+    // テーブルは h2..h9（従来互換）。高次は IsHarmonicPairExtended を使う。
     inline bool IsHarmonicPair(int hi, int lo)
     {
         static const bool* const tbl = []() -> const bool* {
             static bool t[COUNT * COUNT];
             for (int a = 0; a < COUNT; ++a)
                 for (int b = 0; b < COUNT; ++b)
-                    t[a * COUNT + b] = IsHarmonicPairCompute(a, b);
+                    t[a * COUNT + b] = IsHarmonicPairCompute(a, b, HARMONIC_N_MAX);
             return t;
         }();
         if (hi <= lo || lo < 0 || hi >= COUNT) return false;
         return tbl[hi * COUNT + lo];
+    }
+
+    inline bool IsHarmonicPairExtended(int hi, int lo)
+    {
+        return IsHarmonicPairCompute(hi, lo, HARMONIC_PAIR_N_MAX);
+    }
+
+    // candidate が、より強い下側ピークの整数倍音として説明できるか（漏れ込みゴースト判定）。
+    // parentMustBePeak: 親が局所ピークであることまで要求（平坦ノイズ床での誤爆防止）
+    inline bool IsPartialOfStrongerLower(const float* st, int candidate, int count,
+        float parentMinRatio = 0.55f, float upperMaxRatio = 1.05f, bool parentMustBePeak = true)
+    {
+        if (!st || candidate <= 0 || candidate >= count) return false;
+        const float sc = st[candidate];
+        if (sc <= 1e-8f) return false;
+
+        for (int n = HARMONIC_N_MIN; n <= HARMONIC_PAIR_N_MAX; ++n) {
+            const int lo = HarmonicDownKeyAny(candidate, n);
+            if (lo < 0 || lo >= candidate) continue;
+            if (!IsHarmonicPairExtended(candidate, lo)) continue;
+
+            const float loSc = st[lo];
+            if (loSc < sc * parentMinRatio) continue;
+            if (sc > loSc * upperMaxRatio) continue; // 上が明らかに強い → 独立メロディ寄り
+
+            if (parentMustBePeak) {
+                if (lo > 0 && st[lo - 1] > loSc) continue;
+                if (lo + 1 < count && st[lo + 1] > loSc) continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    // 候補自身が基音らしい倍音列を持つか（オクターブ重ねメロディ保護用）
+    inline bool HasOwnOvertoneSupport(const float* st, int candidate, int count,
+        float minRatio = 0.14f)
+    {
+        if (!st || candidate < 0 || candidate >= count) return false;
+        const float sc = st[candidate];
+        if (sc <= 1e-8f) return false;
+        float own = 0.0f;
+        const int h2 = HarmonicUpKeyAny(candidate, 2);
+        const int h3 = HarmonicUpKeyAny(candidate, 3);
+        if (h2 >= 0 && h2 < count) own += st[h2];
+        if (h3 >= 0 && h3 < count) own += st[h3] * 0.70f;
+        return own >= sc * minRatio;
+    }
+
+    // 漏れ込みゴースト判定。
+    // [重要] n は 2〜8 のみ。n=9〜24 まで広げると O5 主旋律がベースの
+    // 15〜20次倍音として誤認され食われる（ガウバン参上 0〜10秒で確認）。
+    // 実害のある漏れ込みはほぼ h2〜h6（オクターブ〜2オクターブ＋α）。
+    // bassBandEnd: 低音帯の終端(PianoRoll108::BASS_END を渡す)
+    inline bool IsHarmonicGhostPartial(const float* st, int candidate, int count,
+        int bassBandEnd = 36)
+    {
+        if (!st || candidate <= 0 || candidate >= count) return false;
+        const float sc = st[candidate];
+        if (sc <= 1e-8f) return false;
+
+        static constexpr int kGhostHarmonicNMax = 8;
+
+        int bandLo = 0, bandHi = count;
+        if (candidate < bassBandEnd) {
+            bandLo = 0; bandHi = bassBandEnd;
+        }
+        else if (candidate < 60) {
+            bandLo = bassBandEnd; bandHi = 60;
+        }
+        else if (candidate < 72) {
+            bandLo = 60; bandHi = 72;
+        }
+        else if (candidate < 100) {
+            bandLo = 72; bandHi = 100;
+        }
+        else {
+            bandLo = 100; bandHi = count;
+        }
+        float bandMax = 0.0f;
+        for (int i = bandLo; i < bandHi; ++i)
+            if (st[i] > bandMax) bandMax = st[i];
+        const bool bandProminent = (bandMax > 1e-6f && sc >= bandMax * 0.18f);
+
+        if (HasOwnOvertoneSupport(st, candidate, count, 0.12f) && bandProminent)
+            return false;
+
+        for (int n = HARMONIC_N_MIN; n <= kGhostHarmonicNMax; ++n) {
+            const int lo = HarmonicDownKeyAny(candidate, n);
+            if (lo < 0 || lo >= candidate) continue;
+            // n<=8 なので通常の IsHarmonicPair で足りるが、念のため Extended の
+            // 計算を nMax=8 相当で行う（ペア表は h9 までなので compute 直呼び）
+            if (!IsHarmonicPairCompute(candidate, lo, kGhostHarmonicNMax)) continue;
+
+            const float loSc = st[lo];
+            if (lo > 0 && st[lo - 1] > loSc) continue;
+            if (lo + 1 < count && st[lo + 1] > loSc) continue;
+
+            const bool octaveLike = (n == 2 || n == 4 || n == 8);
+            const bool parentInBass = (lo < bassBandEnd);
+
+            if (octaveLike) {
+                if (parentInBass) {
+                    if (!bandProminent && sc < bandMax * 0.12f && sc < loSc * 0.40f)
+                        return true;
+                    continue;
+                }
+                if (!bandProminent && sc < loSc * 0.65f)
+                    return true;
+            }
+            else {
+                // h3/h5/h6/h7: 帯域トップ級はメロディ候補として残す
+                if (sc >= bandMax * 0.40f)
+                    continue;
+                if (loSc >= sc * 0.55f && sc <= loSc * 0.90f)
+                    return true;
+            }
+        }
+        return false;
     }
 
     inline bool IsOctaveRelated(int hi, int lo)

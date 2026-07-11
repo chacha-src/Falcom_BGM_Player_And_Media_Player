@@ -271,6 +271,21 @@ void CCC_ChromaBlitCache::ScrollRows(int y, int height, int scrollPx)
     memmove(dst, src, (size_t)preserveH * (size_t)dibW * sizeof(UINT32));
 }
 
+void CCC_ChromaBlitCache::ScrollCols(int x, int y, int width, int height, int scrollPx)
+{
+    // 矩形内を左へ scrollPx ずらす(波形スクロール用)。アルファ付きピクセルをそのまま移動。
+    if (!pBits || dibW <= 0 || scrollPx <= 0 || width <= scrollPx)
+        return;
+    if (x < 0 || y < 0 || x + width > dibW || y + height > dibH)
+        return;
+    UINT32* base = (UINT32*)pBits;
+    const int keep = width - scrollPx;
+    for (int row = 0; row < height; ++row) {
+        UINT32* dst = base + (y + row) * dibW + x;
+        memmove(dst, dst + scrollPx, (size_t)keep * sizeof(UINT32));
+    }
+}
+
 BOOL CCC_ChromaBlitCache::UpdateRect(HDC hdcSrc, int srcX, int srcY, int dx, int dy, int rw, int rh, COLORREF clrKey)
 {
     if (!hdcSrc || rw <= 0 || rh <= 0 || !pBits || !hdcDib) return FALSE;
@@ -285,6 +300,21 @@ BOOL CCC_ChromaBlitCache::UpdateRect(HDC hdcSrc, int srcX, int srcY, int dx, int
     }
     RECT rc = { dx, dy, dx + rw, dy + rh };
     CCC_SetDibAlphaFromChromaRect(pBits, dibW, dibH, rc, clrKey);
+    return TRUE;
+}
+
+BOOL CCC_ChromaBlitCache::FillOpaqueRect(int x, int y, int rw, int rh, COLORREF color, COLORREF chromaKey)
+{
+    if (!hdcDib || !pBits || rw <= 0 || rh <= 0) return FALSE;
+    if (x < 0 || y < 0 || x + rw > dibW || y + rh > dibH) return FALSE;
+    {
+        CDC dcDib;
+        dcDib.Attach(hdcDib);
+        dcDib.FillSolidRect(x, y, rw, rh, color);
+        dcDib.Detach();
+    }
+    RECT rc = { x, y, x + rw, y + rh };
+    CCC_SetDibAlphaFromChromaRect(pBits, dibW, dibH, rc, chromaKey);
     return TRUE;
 }
 
@@ -1321,62 +1351,40 @@ static void DrawSmartText(CDC* pDC, CRect rect, CString str, BOOL bDis, BOOL bPu
     if (sz.cx <= rt.Width())
     {
         pDC->DrawText(str, &rt, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        pDC->SelectObject(po);
+        fs.DeleteObject();
+        return;
     }
-    else
-    {
-        CRect rc = rt;
-        int nH = pDC->DrawText(str, &rc, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
-        if (nH <= rt.Height())
-        {
-            CRect rd = rt;
-            rd.top += (rt.Height() - nH) / 2;
-            pDC->DrawText(str, &rd, DT_CENTER | DT_WORDBREAK);
-        }
-        else
-        {
-            pDC->SelectObject(po);
-            fs.DeleteObject();
-            BOOL bP = FALSE;
 
-            while (tH > 6)
-            {
-                tH--;
-                lf.lfHeight = -tH;
-                CFont ft;
-                ft.CreateFontIndirect(&lf);
-                pDC->SelectObject(&ft);
-
-                CRect ry = rt;
-                int nh = pDC->DrawText(str, &ry, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
-                if (nh <= rt.Height() && ry.Width() <= rt.Width())
-                {
-                    CRect rd = rt;
-                    rd.top += (rt.Height() - nh) / 2;
-                    pDC->DrawText(str, &rd, DT_CENTER | DT_WORDBREAK);
-                    pDC->SelectObject(po);
-                    ft.DeleteObject();
-                    bP = TRUE;
-                    break;
-                }
-                pDC->SelectObject(po);
-                ft.DeleteObject();
-            }
-
-            if (!bP)
-            {
-                lf.lfHeight = -6;
-                CFont fm;
-                fm.CreateFontIndirect(&lf);
-                pDC->SelectObject(&fm);
-                pDC->DrawText(str, &rt, DT_CENTER | DT_WORDBREAK | DT_VCENTER);
-                pDC->SelectObject(po);
-                fm.DeleteObject();
-            }
-            return;
-        }
-    }
+    // ボタン幅不足時は折り返しではなくフォント縮小で1行に収める
     pDC->SelectObject(po);
     fs.DeleteObject();
+    while (tH > 6)
+    {
+        tH--;
+        lf.lfHeight = -tH;
+        CFont ft;
+        ft.CreateFontIndirect(&lf);
+        pDC->SelectObject(&ft);
+        sz = pDC->GetTextExtent(str);
+        if (sz.cx <= rt.Width() && sz.cy <= rt.Height())
+        {
+            pDC->DrawText(str, &rt, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            pDC->SelectObject(po);
+            ft.DeleteObject();
+            return;
+        }
+        pDC->SelectObject(po);
+        ft.DeleteObject();
+    }
+
+    lf.lfHeight = -6;
+    CFont fm;
+    fm.CreateFontIndirect(&lf);
+    pDC->SelectObject(&fm);
+    pDC->DrawText(str, &rt, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    pDC->SelectObject(po);
+    fm.DeleteObject();
 }
 
 static void DrawFittedSingleLineDecorativeText(CDC& dc, const CRect& rect, const CString& str, UINT fmt,
@@ -5016,6 +5024,7 @@ HBRUSH CCustomStandardButton::CtlColor(CDC*, UINT)
 
 void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 {
+    if (r.Width() <= 0 || r.Height() <= 0) return;
     CDC mDC;
     CBitmap mB;
     mDC.CreateCompatibleDC(&dc);
@@ -5189,6 +5198,10 @@ void CCustomStandardButton::RepaintClient()
 {
     if (!GetSafeHwnd())
         return;
+    CRect r;
+    GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0)
+        return;
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
     {
@@ -5198,8 +5211,6 @@ void CCustomStandardButton::RepaintClient()
     }
 #endif
     CClientDC dc(this);
-    CRect r;
-    GetClientRect(&r);
     PaintClient(dc, r);
 }
 

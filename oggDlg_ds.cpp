@@ -6249,7 +6249,7 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 	}
 }
 
-// 外部から現在のノート強度配列を取得する (ピアノロール表示等に使用)
+// 外部から現在のノート強度配列を取得する (簡易ピアノロール表示等に使用)
 void GetCurrentNoteStrengths(float* output108) {
 	if (output108) memcpy(output108, g_noteStrength, sizeof(g_noteStrength));
 }

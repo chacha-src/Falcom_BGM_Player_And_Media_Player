@@ -623,7 +623,7 @@ BEGIN
     COMBOBOX        IDC_COMBO1,7,23,81,182,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     PUSHBUTTON      "名前変更",IDC_BUTTON3,89,23,50,11
     PUSHBUTTON      "リスト削除",IDC_PLAYDELETE,140,23,50,11
-    PUSHBUTTON      "ピアノロール",IDC_PIANOROLL,195,23,50,11
+    PUSHBUTTON      "簡易ピアノロール",IDC_PIANOROLL,185,23,60,11
 END
 
 IDD_GRAPH DIALOGEX 0, 0, 253, 135
@@ -677,7 +677,7 @@ BEGIN
     LTEXT           "主音量",IDC_MP_VOL_L,326,150,28,8
     CONTROL         "",IDC_MP_VOL,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,344,148,90,12
     RTEXT           "100.0",IDC_MP_VOLVAL,430,150,44,8
-    PUSHBUTTON      "EQ",IDC_MP_EQ,326,160,24,12
+	PUSHBUTTON      "EQ",IDC_MP_EQ,326,160,24,12
     PUSHBUTTON      "ピアノ",IDC_MP_PIANO,352,160,34,12
     PUSHBUTTON      "設定",IDC_MP_SETTINGS,7,168,40,12
     LTEXT           "DS音量",IDC_MP_DSVOL_L,52,168,48,9,SS_NOTIFY
@@ -995,10 +995,19 @@ END
 IDD_PIANOROLL DIALOGEX 0, 0, 400, 200
 STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 EXSTYLE WS_EX_ACCEPTFILES
-CAPTION "ピアノロール"
+CAPTION "簡易ピアノロール"
 FONT 9, "メイリオ", 400, 0, 0x80
 BEGIN
     DEFPUSHBUTTON   "閉じる",IDOK,343,179,50,14,NOT WS_VISIBLE
+END
+
+IDD_ANALYZER DIALOGEX 0, 0, 360, 210
+STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+EXSTYLE WS_EX_ACCEPTFILES
+CAPTION "アナライザー"
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    DEFPUSHBUTTON   "閉じる",IDOK,303,189,50,14,NOT WS_VISIBLE
 END
 
 
@@ -1008,7 +1017,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,507
+ FILEVERSION 0,8,7,508
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1026,10 +1035,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.07.07"
-            VALUE "FileVersion", "0.8.7.507"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.07.11"
+            VALUE "FileVersion", "0.8.7.508"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.07.07"
+            VALUE "LegalCopyright", "Copyright (C) 2026.07.11"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -1403,6 +1412,10 @@ BEGIN
     IDD_PIANOROLL, DIALOG
     BEGIN
     END
+
+    IDD_ANALYZER, DIALOG
+    BEGIN
+    END
 END
 #endif    // APSTUDIO_INVOKED
 
@@ -1724,6 +1737,11 @@ BEGIN
 END
 
 IDD_PIANOROLL AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_ANALYZER AFX_DIALOG_LAYOUT
 BEGIN
     0
 END

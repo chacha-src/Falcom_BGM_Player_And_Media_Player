@@ -63,7 +63,7 @@ protected:
 /////////////////////////////////////////////////////////////////////////////
 // 基底は CCustomBlurDialogExBase(CDialogEx派生)。
 // CDialog派生の CCustomBlurDialogBase だと非アクティブ時に DWM アクリルが落ちる
-// (EQ/ピアノロール等の動作する窓と同じ CDialogEx 系に合わせる)。
+// (EQ/簡易ピアノロール等の動作する窓と同じ CDialogEx 系に合わせる)。
 class CMediaPlayerDlg : public CCustomBlurDialogExBase
 {
 	DECLARE_DYNAMIC(CMediaPlayerDlg)
@@ -104,7 +104,7 @@ public:
 	CCustomStatic m_dsvolL, m_kvolL, m_tempoL, m_pitchL;
 
 	// ---- 操作ボタン ----
-	CCustomStandardButton m_prev, m_play, m_pause, m_stop, m_next, m_eq, m_piano, m_switch, m_settings, m_exit, m_jacket;
+	CCustomStandardButton m_prev, m_play, m_pause, m_stop, m_next, m_eq, m_piano, m_analyzer, m_switch, m_settings, m_exit, m_jacket;
 	CCustomStandardButton m_fadeout;   // フェードアウト(og IDC_BUTTON5 と同じ処理を委譲)
 	CCustomStandardButton m_folder;    // フォルダ設定(og IDC_BUTTON9 と同じ処理を委譲)
 	CCustomStandardButton m_plrename, m_pldelete, m_itemdel;
@@ -144,8 +144,9 @@ public:
 	int  m_lastMs2;      // savedata.ms2 の変化検出用(タイマー間隔の変更を反映するため)
 	int  m_seekDragging; // ユーザーがシークをドラッグ中なら 1(ミラー更新をスキップ)
 	int  m_lastPlayIcon; // 再生行(♪)の前回アイコン値。変化時のみ再描画して点滅をなめらかに
-	int  m_savedEqVisible;    // 最小化連動: 最小化前にイコライザーが表示されていたか
-	int  m_savedPianoVisible; // 最小化連動: 最小化前にピアノロールが表示されていたか
+	int  m_savedEqVisible;       // 最小化連動: 最小化前にイコライザーが表示されていたか
+	int  m_savedPianoVisible;    // 最小化連動: 最小化前に簡易ピアノロールが表示されていたか
+	int  m_savedAnalyzerVisible; // 最小化連動: 最小化前にアナライザーが表示されていたか
 	bool m_inSizeMove;        // ユーザーが枠をドラッグしてリサイズ中(重い同期再描画を抑制)
 	float hD2;           // DPI スケール係数(96dpi = 1.0)
 
@@ -176,7 +177,9 @@ public:
 	int  m_lastToggleSt;
 	int  m_lastToggleEq;
 	int  m_lastTogglePiano;
+	int  m_lastToggleAnalyzer;
 	int  m_dsvolSlW;         // DS音量スライダー幅(DoLayout)。ラベル省略判定に使用
+	int  m_mpBtnShort;       // 操作行 EQ/ロール/アナ の短縮ラベル状態(DoLayout)
 
 	// og のオフスクリーン合成 DC(スペアナ+ジャケ+時間)を m_bannerRect へ StretchBlit する。
 	// アクリル(Win11)時は黒透過合成、非アクリル時は永続メモリ DC でキャッシュ Blit。
@@ -233,6 +236,7 @@ protected:
 	afx_msg void OnNext();
 	afx_msg void OnEq();
 	afx_msg void OnPiano();
+	afx_msg void OnAnalyzer();
 	afx_msg void OnFadeout();
 	afx_msg void OnFolder();
 	afx_msg void OnExit();

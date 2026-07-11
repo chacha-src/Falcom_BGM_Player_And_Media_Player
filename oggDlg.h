@@ -24,6 +24,9 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 #ifndef WM_OGG_DEFERRED_HEAVY_INIT
 #define WM_OGG_DEFERRED_HEAVY_INIT (WM_APP + 100)
 #endif
+#ifndef WM_OGG_ENTER_MP_MODE
+#define WM_OGG_ENTER_MP_MODE (WM_APP + 101)
+#endif
 #ifndef WM_PLAYBACK_AUTO_STOPPED
 #define WM_PLAYBACK_AUTO_STOPPED (WM_APP + 72)
 #endif
@@ -44,6 +47,7 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 #include "CCustomControl.h"
 #include "CEqualizer.h"
 #include "CPianoRoll.h"
+#include "CAnalyzerDlg.h"
 class CDouga;
 class CPlayList;
 class CRender;
@@ -66,7 +70,9 @@ public:
 	void Speana();
 	void SyncPianoRollFromPlayCursor();
 	void SyncPianoRollFast();
+	void SyncAnalyzerFromPlayCursor();
 	void TogglePianoRoll();
+	void ToggleAnalyzer();
 	void FeedPianoRoll(const void* pData, int bytes);
 	void moji(CString s,int x,int y,COLORREF rgb);
 	int  mojisub(CString s,int x,int y,COLORREF rgb);
@@ -108,6 +114,10 @@ public:
 
 	CEqualizer m_EqualizerDlg;
 	CPianoRoll m_PianoRollDlg;
+	CAnalyzerDlg m_AnalyzerDlg;
+	// SyncAnalyzerFromPlayCursor: bufwav3 上の前回終端バイト位置
+	BOOL m_analyzerSyncValid = FALSE;
+	ULONG m_analyzerSyncEndPos = 0;
 
 	CString lrc[300];
 	DWORD lrctm[300];
@@ -351,6 +361,7 @@ public:
 	afx_msg LRESULT OnTimerpVsyncTick(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnRefreshAeroAll(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPlaybackAutoStopped(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnEnterMpModeMsg(WPARAM wParam, LPARAM lParam);
 	HANDLE m_hTimerpVsyncThread;
 	HANDLE m_hTimerpVsyncStopEvent;
 };

@@ -1,5 +1,5 @@
 ﻿#pragma once
-// 108鍵ピアノロール検出: 帯域ピック → 独立基音へ統合（本数上限なし、倍音は1系列1基音）。
+// 108鍵簡易ピアノロール検出: 帯域ピック → 独立基音へ統合（本数上限なし、倍音は1系列1基音）。
 // [更新履歴]
 //   - 帯域しきい値は元値に復帰済み(隣接ホッピング対策等の実験切り分けのため)。
 //   - BuildFramePicks 末尾に PruneAbsoluteNoiseFloor(絶対値ノイズフロア0.02)を追加。
@@ -25,6 +25,8 @@ namespace PianoRoll108
     static constexpr int MID_END = 72;
     static constexpr int C4_KEY = 60;   // O4 境界（この下を低中音として厳格化）
     static constexpr int LOW_MID_SPLIT = 48; // C3: これ未満はベース漏れが多い
+    static constexpr int O5_LO = 72;    // C5 = O5 開始（主旋律帯）
+    static constexpr int O5_HI = 84;    // C6 = O5 終端
     static constexpr int EDGE_LO = 12;
     static constexpr int EDGE_HI = 100;
 
@@ -95,7 +97,7 @@ namespace PianoRoll108
                     continue;
                 if (skipOctaveDoubling && (dist == 12 || dist == 24 || dist == 36))
                     continue;
-                if (!PianoKey::IsHarmonicPair(hi, lo))
+                if (!PianoKey::IsHarmonicPairExtended(hi, lo))
                     continue;
                 unite(i, j);
             }
@@ -148,17 +150,17 @@ namespace PianoRoll108
     }
 
     inline void PruneWeakUpperHarmonicsInBand(const float* blend, bool* picked,
-        int bandLo, int bandHi, int maxSemitoneGap = 14, float strengthRatio = 0.82f)
+        int bandLo, int bandHi, int maxSemitoneGap = 36, float strengthRatio = 0.82f)
     {
         if (!blend || !picked || bandLo >= bandHi) return;
-        static const int kUp[] = { 3, 4, 5, 7, 12, 19 };
+        static const int kUp[] = { 3, 4, 5, 7, 12, 19, 24, 28, 31, 36 };
         for (int i = bandHi - 1; i >= bandLo; --i) {
             if (!picked[i]) continue;
             for (int d : kUp) {
                 if (d > maxSemitoneGap) continue;
                 const int loIdx = i - d;
                 if (loIdx < bandLo || !picked[loIdx]) continue;
-                if (!PianoKey::IsHarmonicPair(i, loIdx)) continue;
+                if (!PianoKey::IsHarmonicPairExtended(i, loIdx)) continue;
                 if (blend[i] <= blend[loIdx] * strengthRatio) {
                     picked[i] = false;
                     break;
@@ -176,8 +178,8 @@ namespace PianoRoll108
         ConsolidateHarmonicsInBand(blend, picked, C4_KEY, MID_END, count, scoreRatio, true, 11, true);
         ConsolidateHarmonicsInBand(blend, picked, MID_END, EDGE_HI, count, scoreRatio, true, 11, true);
         ConsolidateHarmonicsInBand(blend, picked, EDGE_HI, COUNT, count, 0.36f, true, 9, false);
-        PruneWeakUpperHarmonicsInBand(blend, picked, BASS_END, EDGE_HI, 14, 0.82f);
-        PruneWeakUpperHarmonicsInBand(blend, picked, EDGE_HI, COUNT, 12, 0.78f);
+        PruneWeakUpperHarmonicsInBand(blend, picked, BASS_END, EDGE_HI, 36, 0.88f);
+        PruneWeakUpperHarmonicsInBand(blend, picked, EDGE_HI, COUNT, 36, 0.82f);
     }
 
     inline void PruneBassSubharmonics(const float* blend, bool* picked, int count)
@@ -204,7 +206,7 @@ namespace PianoRoll108
             const float sc = blend[i];
             for (int j = BASS_END; j < EDGE_HI; ++j) {
                 if (!picked[j]) continue;
-                if (!PianoKey::IsHarmonicPair(i, j)) continue;
+                if (!PianoKey::IsHarmonicPairExtended(i, j)) continue;
                 if (blend[j] >= sc * 0.42f) {
                     picked[i] = false;
                     break;
@@ -213,18 +215,42 @@ namespace PianoRoll108
         }
     }
 
+    // 帯域をまたぐ倍音漏れを落とす。
+    // ベース上の弱い主旋律は「親より小さいオクターブ」でも自帯域で目立っていれば残す。
+    inline void PruneCrossBandHarmonicGhosts(const float* blend, bool* picked, int count)
+    {
+        if (!blend || !picked || count <= 0) return;
+        for (int hi = count - 1; hi >= BASS_END; --hi) {
+            if (!picked[hi]) continue;
+            if (PianoKey::IsHarmonicGhostPartial(blend, hi, count, BASS_END))
+                picked[hi] = false;
+        }
+    }
+
     inline void PruneLowMidAgainstBass(const float* blend, bool* picked, int count)
     {
         if (!blend || !picked || count <= 0) return;
+        const float lowMidMax = BandMax(blend, BASS_END, C4_KEY);
         for (int b = 0; b < BASS_END; ++b) {
             if (!picked[b]) continue;
             const float bsc = blend[b];
             if (bsc < 1e-6f) continue;
             for (int i = BASS_END; i < C4_KEY; ++i) {
                 if (!picked[i]) continue;
-                if (!PianoKey::IsHarmonicPair(i, b) && !PianoKey::IsHarmonicPair(b, i))
+                if (!PianoKey::IsHarmonicPairExtended(i, b))
                     continue;
-                if (i > b && blend[i] < bsc * 0.58f)
+                const int dist = i - b;
+                const bool octaveLike = (dist == 12 || dist == 24 || dist == 36);
+                // オクターブ: 低中音帯で目立つ弱い主旋律は残す
+                if (octaveLike) {
+                    if (lowMidMax > 1e-6f && blend[i] >= lowMidMax * 0.18f)
+                        continue;
+                    if (blend[i] < bsc * 0.35f)
+                        picked[i] = false;
+                    continue;
+                }
+                // 非オクターブ高次のみ従来どおり
+                if (blend[i] < bsc * 0.58f)
                     picked[i] = false;
             }
         }
@@ -344,20 +370,24 @@ namespace PianoRoll108
         }
     }
 
-    // 全帯域共通の絶対値ノイズフロア。
-    // 実音源(悲しみ2)の実測デバッグログで、鍵盤全域(key=12〜88)にわたって
-    // blend値0.0000〜0.0086程度の純粋な数値/スペクトルノイズが picked[] を
-    // 通過し、フリッカーの原因になっていることを確認した。
-    // 既存の PruneWeakRelativePerBand 等は「帯域最大値に対する相対比率」のみで
-    // 判定するため、その帯域自体に信号がほとんど無い(帯域最大値がほぼ0)瞬間には
-    // 相対しきい値が実質無力化される(ほぼ0の6〜8%は依然ほぼ0)。
-    // ここでは帯域に関係なく、実測ノイズ上限より十分高い絶対値で最終的に弾く。
+    // 全帯域共通ではなく帯域別の絶対値ノイズフロア。
+    // 低音ピークが大きい曲では中高音の実メロディ絶対値が小さくなり、
+    // 一律 0.02 だと C4 以上が全滅する（ガウバン参上等で確認）。
     inline void PruneAbsoluteNoiseFloor(const float* blend, bool* outPicked, int count,
         float absFloor = 0.02f)
     {
         if (!blend || !outPicked) return;
+        const float floorBass = absFloor;
+        const float floorLowMid = absFloor * 0.45f;
+        const float floorMid = absFloor * 0.22f;
+        const float floorTre = absFloor * 0.28f;
         for (int i = 0; i < count; ++i) {
-            if (outPicked[i] && blend[i] < absFloor)
+            if (!outPicked[i]) continue;
+            float fl = floorMid;
+            if (i < BASS_END) fl = floorBass;
+            else if (i < C4_KEY) fl = floorLowMid;
+            else if (i >= MID_END) fl = floorTre;
+            if (blend[i] < fl)
                 outPicked[i] = false;
         }
     }
@@ -369,8 +399,111 @@ namespace PianoRoll108
             out[i] = smoothed[i] * 0.52f + raw[i] * 0.48f;
     }
 
+    inline bool OnsetSupportsPick(const float* onset, const float* prevOnset,
+        int keyIndex, float levelScale)
+    {
+        if (!onset || !prevOnset || keyIndex < 0 || keyIndex >= COUNT) return false;
+
+        float oMax = 0.0f;
+        for (int i = 0; i < COUNT; ++i)
+            if (onset[i] > oMax) oMax = onset[i];
+        if (oMax < 0.004f) return false;
+
+        float scale = levelScale;
+        if (scale < 0.70f) scale = 0.70f;
+        if (scale > 1.10f) scale = 1.10f;
+
+        const float delta = onset[keyIndex] - prevOnset[keyIndex];
+        return onset[keyIndex] >= oMax * 0.22f * scale &&
+            delta >= oMax * 0.14f;
+    }
+
+    // 帯域内オンセット: 全体最大ではなく対象帯域のオンセット最大を基準にする。
+    // ベース/ドラムの短窓エネルギーが全体を支配すると O5 主旋律の onset が埋もれるため。
+    inline bool OnsetSupportsPickInBand(const float* onset, const float* prevOnset,
+        int keyIndex, int bandLo, int bandHi, float levelScale)
+    {
+        if (!onset || !prevOnset || keyIndex < bandLo || keyIndex >= bandHi) return false;
+        float oMax = 0.0f;
+        for (int i = bandLo; i < bandHi; ++i)
+            if (onset[i] > oMax) oMax = onset[i];
+        if (oMax < 0.0025f) return false;
+
+        float scale = levelScale;
+        if (scale < 0.70f) scale = 0.70f;
+        if (scale > 1.10f) scale = 1.10f;
+
+        const float delta = onset[keyIndex] - prevOnset[keyIndex];
+        return onset[keyIndex] >= oMax * 0.18f * scale &&
+            delta >= oMax * 0.10f;
+    }
+
+    // 弱い主旋律救済: O5 帯で局所ピークかつ帯域内オンセットがあるものを強制ピック。
+    // 振幅はベースに負けていても、アタックを持つ実音はここを通る。
+    inline void PromoteOnsetMelodyInBand(const float* blend, const float* onset,
+        const float* prevOnset, bool* picked, int count,
+        int bandLo, int bandHi, float levelScale, float bandPeakRatio = 0.16f)
+    {
+        if (!blend || !onset || !prevOnset || !picked || bandLo >= bandHi) return;
+        const float bmax = BandMax(blend, bandLo, bandHi);
+        if (bmax < 1e-6f) return;
+        const float peakMin = bmax * bandPeakRatio;
+
+        for (int i = bandLo; i < bandHi; ++i) {
+            if (picked[i]) continue;
+            if (blend[i] < peakMin) continue;
+            if (i > bandLo && blend[i - 1] >= blend[i]) continue;
+            if (i + 1 < bandHi && blend[i + 1] > blend[i]) continue;
+            if (!OnsetSupportsPickInBand(onset, prevOnset, i, bandLo, bandHi, levelScale))
+                continue;
+            // 明らかな低次倍音ゴーストだけは救済しない
+            if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END))
+                continue;
+            picked[i] = true;
+        }
+    }
+
+    // 高音ゴースト抑制: オンセットが無く、帯域内でも弱い／ゴースト形のピックを落とす。
+    // 主旋律帯(O5)はオンセット無しでも帯域トップ級なら残す（サスティン中の弱い保持）。
+    inline void PruneTrebleGhostsWithoutOnset(const float* blend, const float* onset,
+        const float* prevOnset, bool* picked, int count, float levelScale)
+    {
+        if (!blend || !onset || !prevOnset || !picked) return;
+
+        const float o5Max = BandMax(blend, O5_LO, O5_HI);
+        const float hiMax = BandMax(blend, O5_HI, COUNT);
+
+        for (int i = O5_LO; i < COUNT; ++i) {
+            if (!picked[i]) continue;
+            const bool hasOnset = (i < O5_HI)
+                ? OnsetSupportsPickInBand(onset, prevOnset, i, O5_LO, O5_HI, levelScale)
+                : OnsetSupportsPickInBand(onset, prevOnset, i, O5_HI, COUNT, levelScale);
+
+            if (hasOnset) continue;
+
+            if (i < O5_HI) {
+                // O5: サスティン中の主旋律は残す。薄い漏れだけ落とす。
+                if (o5Max > 1e-6f && blend[i] < o5Max * 0.22f)
+                    picked[i] = false;
+                else if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END))
+                    picked[i] = false;
+            }
+            else {
+                // O6+: オンセット無しは原則ゴースト扱い（ドラム/漏れの赤点対策）
+                if (hiMax > 1e-6f && blend[i] < hiMax * 0.45f) {
+                    picked[i] = false;
+                    continue;
+                }
+                if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END) ||
+                    !PianoKey::HasOwnOvertoneSupport(blend, i, count, 0.10f))
+                    picked[i] = false;
+            }
+        }
+    }
+
     inline void BuildFramePicks(const float* blend, bool* outPicked, int count,
-        float levelScale = 1.0f, float absNoiseFloor = 0.02f)
+        float levelScale = 1.0f, float absNoiseFloor = 0.02f,
+        const float* onset = nullptr, const float* prevOnset = nullptr)
     {
         if (!blend || !outPicked || count != COUNT) return;
         memset(outPicked, 0, (size_t)count * sizeof(bool));
@@ -379,29 +512,36 @@ namespace PianoRoll108
         if (scale < 0.70f) scale = 0.70f;
         if (scale > 1.10f) scale = 1.10f;
 
+        // ベース支配時: 中高音の弱い主旋律を拾いやすくする（帯域内相対ピックの感度だけ緩和）。
+        const float bassMx = BandMax(blend, 0, BASS_END);
+        const float midHiMx = BandMax(blend, C4_KEY, COUNT);
+        float melodyScale = scale;
+        if (bassMx > 1e-6f && midHiMx > 1e-8f && bassMx >= midHiMx * 2.5f) {
+            melodyScale = scale * 0.82f;
+            if (melodyScale < 0.55f) melodyScale = 0.55f;
+        }
+
         {
             PickSingleBassNote(blend, outPicked, count, 0.40f * scale);
         }
 
-        // [検証のため元値へ復帰]
-        const struct BandCfg { int lo, hi; float scoreRatio; float peakRatio; int maxNotes; } bands[] = {
-            { BASS_END, LOW_MID_SPLIT, 0.22f, 0.16f, 2 },
-            { LOW_MID_SPLIT, C4_KEY, 0.18f, 0.12f, 0 },
-            // [再挑戦] 絶対値ノイズフロア(ゲイン連動)とオンセット特性ベースの
-            // ゴースト判定が揃ったので、中高音の速いパッセージ(T140の16分音符等)を
-            // 拾いやすくするため、しきい値を再度緩める。元値: 0.16f/0.10f, 0.15f/0.095f
-            { C4_KEY, MID_END, 0.13f, 0.085f, 0 },
-            { MID_END, EDGE_HI, 0.12f, 0.080f, 0 },
-            { EDGE_HI, COUNT, 0.24f, 0.15f, 0 },
+        const struct BandCfg { int lo, hi; float scoreRatio; float peakRatio; int maxNotes; bool melodyBand; } bands[] = {
+            { BASS_END, LOW_MID_SPLIT, 0.22f, 0.16f, 2, false },
+            { LOW_MID_SPLIT, C4_KEY, 0.16f, 0.10f, 0, true },
+            { C4_KEY, O5_LO, 0.11f, 0.070f, 0, true },
+            { O5_LO, O5_HI, 0.09f, 0.055f, 0, true },  // O5 主旋律帯: より敏感
+            { O5_HI, EDGE_HI, 0.14f, 0.090f, 0, false },
+            { EDGE_HI, COUNT, 0.26f, 0.16f, 0, false },
         };
         for (const BandCfg& b : bands) {
+            const float s = b.melodyBand ? melodyScale : scale;
             if (b.maxNotes > 0) {
                 PickHarmonicPeaksInBand(blend, outPicked, count,
-                    b.lo, b.hi, b.maxNotes, b.scoreRatio * scale, b.peakRatio * scale);
+                    b.lo, b.hi, b.maxNotes, b.scoreRatio * s, b.peakRatio * s);
             }
             else {
                 PickAllFundamentalsInBand(blend, outPicked, count,
-                    b.lo, b.hi, b.scoreRatio * scale, b.peakRatio * scale);
+                    b.lo, b.hi, b.scoreRatio * s, b.peakRatio * s);
             }
         }
 
@@ -429,38 +569,35 @@ namespace PianoRoll108
             else if (i < C4_KEY &&
                 !PianoKey::PassesFundamentalTestSustain(blend, i, count))
                 outPicked[i] = false;
+            else if (i >= C4_KEY &&
+                PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END))
+                outPicked[i] = false;
         }
 
         PruneBassSubharmonics(blend, outPicked, count);
         PruneLowMidAgainstBass(blend, outPicked, count);
+        PruneCrossBandHarmonicGhosts(blend, outPicked, count);
         PruneUltraTrebleHarmonics(blend, outPicked, count);
+
+        // オンセット軸: 弱い O5 主旋律を拾い、オンセット無しの高音ゴーストを落とす
+        if (onset && prevOnset) {
+            PromoteOnsetMelodyInBand(blend, onset, prevOnset, outPicked, count,
+                O5_LO, O5_HI, melodyScale, 0.14f);
+            PromoteOnsetMelodyInBand(blend, onset, prevOnset, outPicked, count,
+                C4_KEY, O5_LO, melodyScale, 0.18f);
+            PruneTrebleGhostsWithoutOnset(blend, onset, prevOnset, outPicked, count, scale);
+        }
+
         PruneWeakRelativePerBand(blend, outPicked, count);
 
         CollapseNearbyPicks(blend, outPicked, 0, BASS_END, 7, false);
         CollapseNearbyPicks(blend, outPicked, BASS_END, LOW_MID_SPLIT, 3, false);
         CollapseNearbyPicks(blend, outPicked, LOW_MID_SPLIT, C4_KEY, 4, false);
-        CollapseNearbyPicks(blend, outPicked, C4_KEY, COUNT, 4, false);
+        CollapseNearbyPicks(blend, outPicked, C4_KEY, O5_LO, 3, false);
+        CollapseNearbyPicks(blend, outPicked, O5_LO, O5_HI, 3, false);
+        CollapseNearbyPicks(blend, outPicked, O5_HI, COUNT, 4, false);
 
         PruneEdgeRegisterNoise(blend, outPicked, count);
         PruneAbsoluteNoiseFloor(blend, outPicked, count, absNoiseFloor);
-    }
-
-    inline bool OnsetSupportsPick(const float* onset, const float* prevOnset,
-        int keyIndex, float levelScale)
-    {
-        if (!onset || !prevOnset || keyIndex < 0 || keyIndex >= COUNT) return false;
-
-        float oMax = 0.0f;
-        for (int i = 0; i < COUNT; ++i)
-            if (onset[i] > oMax) oMax = onset[i];
-        if (oMax < 0.004f) return false;
-
-        float scale = levelScale;
-        if (scale < 0.70f) scale = 0.70f;
-        if (scale > 1.10f) scale = 1.10f;
-
-        const float delta = onset[keyIndex] - prevOnset[keyIndex];
-        return onset[keyIndex] >= oMax * 0.22f * scale &&
-            delta >= oMax * 0.14f;
     }
 }

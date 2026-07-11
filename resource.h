@@ -74,6 +74,7 @@
 #define IDD_WAVEXPORT                   195
 #define IDD_KPI5CFG                     196
 #define IDD_PIANOROLL                   198
+#define IDD_ANALYZER                    202
 #define IDC_STATIC11                    1000
 #define IDC_BUTTON1                     1001
 #define IDC_BUTTON5                     1002
@@ -623,6 +624,7 @@
 #define IDC_MP_VOLVAL                   3425
 #define IDC_MP_EQ                       3426
 #define IDC_MP_PIANO                    3427
+#define IDC_MP_ANALYZER                 3490
 #define IDC_MP_LRC2                     3428
 #define IDC_MP_LRC3                     3429
 #define IDC_MP_SETTINGS                 3430
@@ -692,9 +694,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        202
+#define _APS_NEXT_RESOURCE_VALUE        203
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3490
+#define _APS_NEXT_CONTROL_VALUE         3491
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

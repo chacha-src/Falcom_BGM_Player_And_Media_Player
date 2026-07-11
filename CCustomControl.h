@@ -49,7 +49,9 @@ struct CCC_ChromaBlitCache {
     void Release();
     BOOL Ensure(HDC hdcRef, int w, int h);
     void ScrollRows(int y, int height, int scrollPx);
+    void ScrollCols(int x, int y, int width, int height, int scrollPx);
     BOOL UpdateRect(HDC hdcSrc, int srcX, int srcY, int dx, int dy, int rw, int rh, COLORREF clrKey);
+    BOOL FillOpaqueRect(int x, int y, int rw, int rh, COLORREF color, COLORREF chromaKey);
     BOOL BlitRect(HDC hdcDest, int x, int y, int w, int h);
     BOOL BlitFull(HDC hdcDest, int x, int y, int w, int h);
 };
@@ -1088,7 +1090,7 @@ do {                                                                            
 // CCustomDialog
 // ============================================================================
 // 基底は CDialogEx。CDialog 派生だと非アクティブ時に DWM アクリル背景が落ちる
-// (EQ/ピアノロール等 CDialogEx 派生窓だけが非アクティブでもアクリルを維持する)。
+// (EQ/簡易ピアノロール等 CDialogEx 派生窓だけが非アクティブでもアクリルを維持する)。
 // この基底を CDialogEx にすることで、派生する全ぼかし窓を一括で維持側に揃える。
 class CCustomDialog : public CDialogEx
 {

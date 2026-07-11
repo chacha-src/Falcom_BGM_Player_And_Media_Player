@@ -3,7 +3,7 @@
 // SpeanaNoteDetector
 //   COggDlg スペアナ音階モード用の 88 鍵ノート検出エンジン。
 //   CPianoRoll の検出ロジック（基音ピック + 倍音サリエンス + 包絡ホールド）を
-//   独立・自己完結の形で複製したもの。ピアノロール本体には一切依存しない。
+//   独立・自己完結の形で複製したもの。簡易ピアノロール本体には一切依存しない。
 //   ピック等の重い処理は共有ヘッダ（NoteFundamentalPick.h / PianoRollPick.h /
 //   PianoKeyTable.h / PianoRollGoertzelAvx2.h）を再利用する。
 //
@@ -49,8 +49,8 @@ namespace SpndCfg
     static constexpr float BAND_SILENCE_TRE = 0.004f;
     static constexpr int   ATTACK_FRAMES = 1;
     // Task2方針転換: 速い音符は「オンセット即時ON + 窓短縮」で捕捉し、
-    // ノートオフはピアノロール実績値を維持して持続音の途切れを防ぐ。
-    // (スペアナは描画間隔ms2でしか呼ばれず、ピアノロールの固定23msより遅い/不規則なため、
+    // ノートオフは簡易ピアノロール実績値を維持して持続音の途切れを防ぐ。
+    // (スペアナは描画間隔ms2でしか呼ばれず、簡易ピアノロールの固定23msより遅い/不規則なため、
     //  フレーム基準のホールドを短くすると実時間で持続が足りず途切れる。)
     static constexpr int   RELEASE_FRAMES = 7;
     static constexpr int   VIS_GAP_FRAMES = 6;

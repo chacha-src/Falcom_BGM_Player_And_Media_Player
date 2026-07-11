@@ -1072,6 +1072,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_REFRESH_AERO_ALL, &COggDlg::OnRefreshAeroAll)
 	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
 	ON_MESSAGE(WM_OGG_DEFERRED_HEAVY_INIT, OnDeferredHeavyStartup)
+	ON_MESSAGE(WM_OGG_ENTER_MP_MODE, &COggDlg::OnEnterMpModeMsg)
 	ON_MESSAGE(WM_PLAYBACK_AUTO_STOPPED, OnPlaybackAutoStopped)
 	ON_WM_COPYDATA()
 	ON_WM_KEYDOWN()
@@ -1645,25 +1646,35 @@ void RefreshTaskbarJumpList(BOOL mediaPlayerMode)
 	if (FAILED(pcdl->BeginList(&cMinSlots, IID_PPV_ARGS(&poaRemoved)))) return;
 
 	IShellLink* psl = NULL;
-	auto addHistLink = [&](IObjectCollection* pocHist, LPCTSTR arg, LPCTSTR title) {
+	auto addHistLink = [&](IObjectCollection* pocHist, LPCTSTR arg, LPCTSTR title) -> bool {
+		psl = NULL;
 		og->_CreateShellLink((LPTSTR)arg, (LPTSTR)title, &psl, 0, true);
-		pocHist->AddObject(psl);
+		if (!psl) return false;
+		const HRESULT hr = pocHist->AddObject(psl);
 		psl->Release();
+		psl = NULL;
+		return SUCCEEDED(hr);
 	};
 
 	// 最近再生した曲は Tasks とは別カテゴリ(ジャンプリスト上部)
-	if (mediaPlayerMode && savedata.mpHistCnt > 0) {
+	// 壊れた履歴パスはシェル側で ERROR_INVALID_PARAMETER になり得るためスキップ
+	if (mediaPlayerMode && savedata.mpHistCnt > 0 && savedata.mpHistCnt <= 8) {
 		IObjectCollection* pocHist = NULL;
 		if (SUCCEEDED(CoCreateInstance(CLSID_EnumerableObjectCollection, NULL, CLSCTX_INPROC, IID_PPV_ARGS(&pocHist))) && pocHist) {
 			UINT histAdded = 0;
 			for (int hi = 0; hi < savedata.mpHistCnt && hi < 8; ++hi) {
-				if (savedata.mpHistPath[hi][0] == 0) continue;
+				const TCHAR* path = savedata.mpHistPath[hi];
+				if (!path || path[0] == 0) continue;
+				const bool absDrive = (path[1] == _T(':')
+					&& (path[2] == _T('\\') || path[2] == _T('/')));
+				const bool absUnc = (path[0] == _T('\\') && path[1] == _T('\\'));
+				if (!absDrive && !absUnc) continue;
 				CString title = savedata.mpHistName[hi];
-				if (title.IsEmpty()) title = savedata.mpHistPath[hi];
+				if (title.IsEmpty()) title = path;
 				if (title.GetLength() > 64)
 					title = title.Left(61) + _T("...");
-				addHistLink(pocHist, savedata.mpHistPath[hi], title);
-				histAdded++;
+				if (addHistLink(pocHist, path, title))
+					histAdded++;
 			}
 			if (histAdded > 0) {
 				IObjectArray* poaHist = NULL;
@@ -1681,14 +1692,20 @@ void RefreshTaskbarJumpList(BOOL mediaPlayerMode)
 	if (!pocNew) { pcdl->AbortList(); if (poaRemoved) poaRemoved->Release(); return; }
 
 	auto addLink = [&](LPCTSTR arg, LPCTSTR title) {
+		psl = NULL;
 		og->_CreateShellLink((LPTSTR)arg, (LPTSTR)title, &psl, 0, true);
+		if (!psl) return;
 		pocNew->AddObject(psl);
 		psl->Release();
+		psl = NULL;
 	};
 	auto addSep = [&]() {
+		psl = NULL;
 		og->_CreateShellLink(_T(""), _T(""), &psl, 0, true, FALSE);
+		if (!psl) return;
 		pocNew->AddObject(psl);
 		psl->Release();
+		psl = NULL;
 	};
 
 	addLink(_T("*1"), _T("再演奏"));
@@ -3240,10 +3257,11 @@ BOOL COggDlg::OnInitDialog()
 #endif
 
 	AfxBeginThread((AFX_THREADPROC)TheadLoop, NULL, THREAD_PRIORITY_ABOVE_NORMAL);
-	// DoModal がメイン画面を表示する前に mp を用意する(ファルコム画面のちらつき防止)。
-	// KPI 読み込み完了後・OnInitDialog  return 前に同期的に遷移する。
+	// CreateDialogIndirectParam(親) の WM_INITDIALOG 中に mp->Create すると
+	// ネストした CreateDialogIndirectParam が ERROR_INVALID_PARAMETER
+	// （「引数が正しくありません」）になり得る。親の作成完了後に遅延する。
 	if (savedata.playerMode == 1)
-		EnterMediaPlayerMode();
+		PostMessage(WM_OGG_ENTER_MP_MODE, 0, 0);
 	return TRUE;  // TRUE を返すとコントロールに設定したフォーカスは失われません。
 }
 //////////////////////////////////////////////////////////////////////////////
@@ -15306,6 +15324,8 @@ void COggDlg::stop()
 		SignalPlaybackNotifyThreadStop();
 		if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 			m_PianoRollDlg.PauseAnalysis();
+		if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
+			m_AnalyzerDlg.PauseFeed();
 		return;
 	}
 	s_inStop1 = true;
@@ -15316,6 +15336,8 @@ void COggDlg::stop()
 	plf = 0;
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		m_PianoRollDlg.PauseAnalysis();
+	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
+		m_AnalyzerDlg.PauseFeed();
 
 	if (PlaybackNotifyThreadMayBeActive())
 		SignalPlaybackNotifyThreadStop();
@@ -15456,6 +15478,9 @@ void COggDlg::stop()
 	playf = 0;
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		m_PianoRollDlg.ResetPlaybackState();
+	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
+		m_AnalyzerDlg.ResetPlaybackState();
+	m_analyzerSyncValid = FALSE;
 	if (wav) free(wav);
 	wav = NULL;
 	mode = modesub;
@@ -15492,6 +15517,8 @@ BOOL COggDlg::stop1()
 	plf = 0;
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		m_PianoRollDlg.PauseAnalysis();
+	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
+		m_AnalyzerDlg.PauseFeed();
 
 	// 形式を問わず停止要求。Join 前にデコーダを閉じない。
 	SignalPlaybackNotifyThreadStop();
@@ -15593,6 +15620,9 @@ BOOL COggDlg::stop1()
 	playf = 0;
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		m_PianoRollDlg.ResetPlaybackState();
+	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
+		m_AnalyzerDlg.ResetPlaybackState();
+	m_analyzerSyncValid = FALSE;
 	if (wav) free(wav);
 	wav = NULL;
 	mode = modesub;
@@ -15645,6 +15675,10 @@ BOOL COggDlg::DestroyWindow()
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd())) {
 		m_PianoRollDlg.DetachForDestroy();
 		m_PianoRollDlg.DestroyWindow();
+	}
+	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd())) {
+		m_AnalyzerDlg.DetachForDestroy();
+		m_AnalyzerDlg.DestroyWindow();
 	}
 	if (m_pDlgColor)delete m_pDlgColor;
 	if (ptl) ptl->Release();
@@ -16339,6 +16373,9 @@ void COggDlg::timerp()
 
 	if (plf == 1 && ::IsWindow(m_PianoRollDlg.GetSafeHwnd()) && Ms2DrawDue(ms2))
 		m_PianoRollDlg.RequestSyncFromMainUi();
+	// アナライザーは decode 先行ではなく Speana と同じ PlayCursor 時間軸
+	if (plf == 1 && ::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
+		SyncAnalyzerFromPlayCursor();
 	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) Speana();
 	s = L""; ss = L"";
 	s = "name:";
@@ -16844,7 +16881,7 @@ void COggDlg::timerp()
 		else {
 			// メディアプレイヤーモードでは og の OnPaint が走らないため、ここで
 			// フレームを「消費」する。ms2 カウンタを 0 に戻さないと伸び続け、
-			// Ms2DrawDue が常時真になってピアノロール等が ms2 設定を無視し 60fps で
+			// Ms2DrawDue が常時真になって簡易ピアノロール等が ms2 設定を無視し 60fps で
 			// 描画され重くなる(=ファルコム特化型では起きない現象)。OnPaint と同じ扱いにする。
 			ms2 = 0;
 			// 新フレームができた時(=ms2レート)だけ mp のバナーを再描画させる。
@@ -17685,6 +17722,17 @@ void timerog1(UINT nIDEvent)
 
 			og->m_PianoRollDlg.ShowWindow(SW_SHOW);
 		}
+		if (savedata.analyzerwindow == 1) {
+			// 親作成直後の同期 Create は避ける(CreateDialog ネスト対策)。
+			// タイマー発火時点では親は既に生きているのでここは安全。
+			if (!::IsWindow(og->m_AnalyzerDlg.GetSafeHwnd()))
+			{
+				if (!og->m_AnalyzerDlg.Create(IDD_ANALYZER, og))
+					savedata.analyzerwindow = 0;
+			}
+			if (::IsWindow(og->m_AnalyzerDlg.GetSafeHwnd()))
+				og->m_AnalyzerDlg.ShowWindow(SW_SHOW);
+		}
 
 	}
 
@@ -18027,6 +18075,9 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	}
 	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
 		m_PianoRollDlg.ResetPlaybackState();
+	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
+		m_AnalyzerDlg.ResetPlaybackState();
+	m_analyzerSyncValid = FALSE;
 	ResetPauseButtonUi();
 	if (ptl)
 		ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
@@ -20156,6 +20207,93 @@ void COggDlg::SyncPianoRollFast()
 	SyncPianoRollFromPlayCursor();
 }
 
+void COggDlg::SyncAnalyzerFromPlayCursor()
+{
+	if (playf == 0 || thn1 || plf != 1) return;
+	if (ps == 1) return;
+	if (!::IsWindow(m_AnalyzerDlg.GetSafeHwnd())) return;
+	if (!bufwav3 || !m_dsb) return;
+
+	double sampleRate;
+	int channels;
+	int bitDepth;
+	if (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) {
+		sampleRate = (double)g_ds_pcm_rate;
+		channels = g_ds_pcm_ch;
+		bitDepth = g_ds_pcm_bits;
+	}
+	else {
+		sampleRate = (double)wavbit_sample_Hz;
+		channels = wavchannel;
+		bitDepth = wavsam_depth;
+	}
+	if (sampleRate < 8000.0) sampleRate = 44100.0;
+	if (channels < 1) channels = 2;
+	if (bitDepth != 8 && bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
+		bitDepth = abs(bitDepth);
+	if (bitDepth != 8 && bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
+		return;
+
+	const int bytesPerSample = (bitDepth / 8) < 1 ? 2 : (bitDepth / 8);
+	const int bytesPerFrame = bytesPerSample * channels;
+	const ULONG ringBytes = Bufwav3RingBytes();
+	if (bytesPerFrame <= 0 || ringBytes <= (ULONG)bytesPerFrame) return;
+
+	ULONG playCur = 0, writeCur = 0;
+	if (m_dsb->GetCurrentPosition(&playCur, &writeCur) != DS_OK)
+		return;
+
+	// Speana と同じ時間軸: 窓末尾 = PlayCursor + latency(-800/-1600ms)
+	// 増分だけ Feed して波形スクロールを実時間に合わせる
+	const int probeFrames = Bufwav3ScaleRefSamples(4096, sampleRate);
+	const int probeBytes = probeFrames * bytesPerFrame;
+	if (probeBytes <= 0 || (ULONG)probeBytes >= ringBytes) return;
+
+	const long readPos = SpeanaAnalysisReadPos(
+		playCur, probeBytes, bytesPerFrame, (int)ringBytes, sampleRate, 0);
+	ULONG endPos = (ULONG)((readPos + probeBytes) % (long)ringBytes);
+	endPos -= (endPos % (ULONG)bytesPerFrame);
+
+	if (!m_analyzerSyncValid) {
+		m_analyzerSyncEndPos = endPos;
+		m_analyzerSyncValid = TRUE;
+		m_AnalyzerDlg.ResumePlaybackFeed();
+		return;
+	}
+
+	ULONG advance = (endPos + ringBytes - m_analyzerSyncEndPos) % ringBytes;
+	advance -= (advance % (ULONG)bytesPerFrame);
+	if (advance == 0) return;
+
+	// シーク等で飛んだときは再同期のみ（巨大チャンクを流し込まない）
+	const ULONG maxAdvance = (ULONG)((sampleRate * (double)bytesPerFrame) / 2.0); // ~0.5s
+	if (advance > maxAdvance || advance > ringBytes / 4) {
+		m_analyzerSyncEndPos = endPos;
+		return;
+	}
+
+	const ULONG startPos = (endPos + ringBytes - advance) % ringBytes;
+	static std::vector<char> anaRaw;
+	if (anaRaw.size() < (size_t)advance)
+		anaRaw.resize(advance);
+
+	const char* src = (const char*)bufwav3;
+	if (startPos + advance <= ringBytes) {
+		memcpy(anaRaw.data(), src + startPos, advance);
+	}
+	else {
+		const ULONG first = ringBytes - startPos;
+		memcpy(anaRaw.data(), src + startPos, first);
+		memcpy(anaRaw.data() + first, src, advance - first);
+	}
+
+	m_analyzerSyncEndPos = endPos;
+	m_AnalyzerDlg.ResumePlaybackFeed();
+	const int frames = (int)(advance / (ULONG)bytesPerFrame);
+	if (frames > 0)
+		m_AnalyzerDlg.FeedPCM(anaRaw.data(), frames, (int)(sampleRate + 0.5), bitDepth, channels);
+}
+
 void COggDlg::SyncPianoRollFromPlayCursor()
 {
 	if (playf == 0 || thn1 || plf != 1) return;
@@ -20657,7 +20795,7 @@ void COggDlg::Speana()
 	// モード0: 音階モード
 	// ========================================
 	else if (mode0_Note) {
-		// ピアノロールと同一の88鍵ノート検出エンジンを使用（検出音のみバー表示）。
+		// 簡易ピアノロールと同一の88鍵ノート検出エンジンを使用（検出音のみバー表示）。
 		// L/R独立検出のため検出器を3つ保持（モノ/左/右）。
 		static SpeanaNoteDetector s_detMono, s_detL, s_detR;
 		s_detMono.Configure(sampleRate);
@@ -20666,7 +20804,7 @@ void COggDlg::Speana()
 
 		// バー高の視覚フォールオフ用保持配列（モノ=0 / L=1 / R=2）。
 		// 検出のactiveが一瞬落ちても緑本体が即消えないよう、立ち上がりは即時・
-		// 下降のみ緩やかにする（スペアナ定石。ピアノロールの履歴帯に相当）。
+		// 下降のみ緩やかにする（スペアナ定石。簡易ピアノロールの履歴帯に相当）。
 		static int s_barHold[3][DISP_KEYS] = {};
 		auto DrawDetected = [&](const SpeanaNoteDetector& det, int offset_idx, bool isRight) {
 			const bool* act = det.Active();
@@ -21518,6 +21656,7 @@ void COggDlg::RefreshAllAeroWindows()
 	refreshMode(this);
 	refreshMode(&m_EqualizerDlg);
 	refreshMode(&m_PianoRollDlg);
+	refreshMode(&m_AnalyzerDlg);
 	if (pl) refreshMode(pl);
 	{
 		extern CMediaPlayerDlg* mp;
@@ -21605,14 +21744,18 @@ void COggDlg::_CreateShellLink(LPWSTR pszArguments, LPWSTR pszTitle, IShellLink 
 void COggDlg::_CreateShellLink(LPSTR pszArguments, LPSTR pszTitle, IShellLink * *ppsl, int iconindex, bool WA, BOOL wa2)
 #endif
 {
+	if (ppsl) *ppsl = NULL;
 	IShellLink* psl;
 	HRESULT hr = CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&psl));
 	if (SUCCEEDED(hr)) {
 		if (WA) {
 			TCHAR fname[MAX_PATH];
 			TCHAR shortfname[MAX_PATH];
+			fname[0] = 0;
+			shortfname[0] = 0;
 			GetModuleFileName(0, fname, MAX_PATH);
-			GetShortPathName(fname, shortfname, MAX_PATH);
+			if (!GetShortPathName(fname, shortfname, MAX_PATH) || shortfname[0] == 0)
+				_tcscpy(shortfname, fname);
 			CString s = pszArguments;
 			if (s == "*4")
 				psl->SetIconLocation(fname, 6);
@@ -21741,6 +21884,13 @@ LRESULT COggDlg::OnEnterFalcomMsg(WPARAM, LPARAM)
 {
 	// mp の操作ハンドラから抜けた後に安全に切替(mp を破棄)
 	EnterFalcomMode();
+	return 0;
+}
+
+LRESULT COggDlg::OnEnterMpModeMsg(WPARAM, LPARAM)
+{
+	// 親 DoModal/CreateDialogIndirectParam 完了後に MP を生成する
+	EnterMediaPlayerMode();
 	return 0;
 }
 
@@ -22705,15 +22855,37 @@ void COggDlg::TogglePianoRoll()
 	}
 }
 
+void COggDlg::ToggleAnalyzer()
+{
+	if (!::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
+	{
+		if (!m_AnalyzerDlg.Create(IDD_ANALYZER, this)) {
+			savedata.analyzerwindow = 0;
+			return;
+		}
+		savedata.analyzerwindow = 1;
+	}
+	else {
+		m_AnalyzerDlg.DetachForDestroy();
+		m_AnalyzerDlg.DestroyWindow();
+		savedata.analyzerwindow = 0;
+	}
+
+	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd())) {
+		m_AnalyzerDlg.ShowWindow(SW_SHOW);
+		m_AnalyzerDlg.SetFocus();
+	}
+}
+
 void COggDlg::FeedPianoRoll(const void* pData, int bytes)
 {
 	if (!pData || bytes <= 0 || playf == 0 || thn1 || stf != 0 || plf != 1)
 		return;
 	if (!m_dsb)
 		return;
-	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+	const bool pianoOpen = ::IsWindow(m_PianoRollDlg.GetSafeHwnd()) != FALSE;
+	if (!pianoOpen)
 		return;
-	m_PianoRollDlg.ResumePlaybackFeed();
 
 	int feed_rate = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_rate : wavbit_sample_Hz;
 	int feed_ch = (g_pcm_upscale_active && g_ds_pcm_ch >= 1 && g_ds_pcm_bits >= 8) ? g_ds_pcm_ch : wavchannel;
@@ -22736,7 +22908,9 @@ void COggDlg::FeedPianoRoll(const void* pData, int bytes)
 			delaySamples = (int)(aheadBytes / (ULONG)bpf);
 		}
 	}
-	m_PianoRollDlg.FeedPCM(pData, bytes / bpf, feed_rate, feed_bits, feed_ch, delaySamples);
+	const int frames = bytes / bpf;
+	m_PianoRollDlg.ResumePlaybackFeed();
+	m_PianoRollDlg.FeedPCM(pData, frames, feed_rate, feed_bits, feed_ch, delaySamples);
 }
 
 void COggDlg::DeferredHeavyStartupImpl()

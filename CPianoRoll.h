@@ -1,7 +1,7 @@
-﻿// CPianoRoll.h : リアルタイムピアノロールビジュアライザ
+﻿// CPianoRoll.h : リアルタイム簡易ピアノロールビジュアライザ
 //
 // PCM ストリームを Goertzel アルゴリズムで 88 鍵分に変換し、ノートのオン/オフと
-// 強度を推定してピアノロール形式で描画する。
+// 強度を推定して簡易ピアノロール形式で描画する。
 //
 // スレッドモデル:
 //   - FeedPCM()          … 再生スレッドから呼ばれる。モノラル変換後リングバッファへ書込
@@ -11,7 +11,7 @@
 //   - OnPaint() / OnTimer() … UI スレッド。確定済みフレームを GDI バッファへ描画
 //
 // 描画バッファ(メモリDC)は 3 種:
-//   m_rollDC  … ピアノロール(時間軸スクロール: 最新行を下端に追記)
+//   m_rollDC  … 簡易ピアノロール(時間軸スクロール: 最新行を下端に追記)
 //   m_rollScratchDC … 一時合成用
 //   m_keyDC   … 鍵盤(ノートアクティブ時に着色。変化時のみ再描画)
 //
@@ -113,7 +113,7 @@ protected:
     virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 private:
-    // 各ノートに付与する表現記号フラグ(DetectExpressions で設定、ピアノロール描画で参照)
+    // 各ノートに付与する表現記号フラグ(DetectExpressions で設定、簡易ピアノロール描画で参照)
     struct NoteExpr {
         static constexpr uint8_t ACCENT = 0x01;  // 強調(アタック急峻)
         static constexpr uint8_t SCOOP = 0x02;  // スクープ(下から音程が上がる)
@@ -323,7 +323,7 @@ private:
     void DrawChannelDbBars(CDC& dc, const CRect& rc, const float* chFill, int chCount) const;
 
     // ---- GDI オフスクリーンバッファ ----
-    // ピアノロール(時間軸スクロール領域)。最新フレームを下端に BitBlt で追記し、
+    // 簡易ピアノロール(時間軸スクロール領域)。最新フレームを下端に BitBlt で追記し、
     // 残りを1行分上へシフトするためダブルバッファで回す。
     CDC     m_rollDC;
     CBitmap m_rollBmp;

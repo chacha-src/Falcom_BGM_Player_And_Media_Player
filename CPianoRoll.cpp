@@ -515,10 +515,10 @@ BOOL CPianoRoll::OnInitDialog()
 {
     CCustomBlurDialogExBase::OnInitDialog();
     SetWindowText(LL14(
-        L"ピアノロール", L"Piano Roll", L"Rouleau piano", L"Rotolo pianoforte",
-        L"Rollo de piano", L"피아노 롤", L"钢琴卷帘", L"لوحة البيانو",
-        L"Пианоролл", L"Klavierrolle", L"Rolo de piano", L"Pianorol",
-        L"Rolka pianina", L"Piyano rulosu"));
+        L"簡易ピアノロール", L"Simple Piano Roll", L"Rouleau piano simple", L"Rotolo pianoforte semplice",
+        L"Rollo de piano simple", L"간이 피아노 롤", L"简易钢琴卷帘", L"لوحة بيانو بسيطة",
+        L"Простой пианоролл", L"Einfache Klavierrolle", L"Rolo de piano simples", L"Eenvoudige pianorol",
+        L"Prosta rolka pianina", L"Basit piyano rulosu"));
     // [ビルド確認用タグ] この文字列がタイトルバーに出ていれば、この CPianoRoll.cpp が
     // 実際にビルド・実行されている証拠になる。出ていなければ、差し替え忘れ/
     // 別コピーのビルド/キャッシュ等、ファイルが反映されていない問題を疑うこと。
@@ -1059,7 +1059,8 @@ void CPianoRoll::UpdateNoteStates()
     const float absFloor = 0.0015f * gainLinear;
 
     bool picked[KEY_COUNT];
-    PianoRoll108::BuildFramePicks(blend, picked, KEY_COUNT, pickScale, absFloor);
+    PianoRoll108::BuildFramePicks(blend, picked, KEY_COUNT, pickScale, absFloor,
+        m_onsetStrengths, m_prevOnsetStrengths);
 
 #ifdef _DEBUG
     // [診断用] BuildFramePicks直後、picked[]そのものが絶対値フロアで
@@ -1100,6 +1101,13 @@ void CPianoRoll::UpdateNoteStates()
                 else if (m_smoothedStrengths[i] >= m_envPeak[i] * holdRatio * 0.82f)
                     effective = true;
             }
+        }
+
+        // ホールドで倍音ゴーストが無限に伸びるのを防ぐ。
+        // オクターブ上の独立メロディは IsHarmonicGhostPartial で保護される。
+        if (effective && i >= PianoRoll108::BASS_END &&
+            PianoKey::IsHarmonicGhostPartial(blend, i, KEY_COUNT, PianoRoll108::BASS_END)) {
+            effective = false;
         }
 
         if (effective) {
@@ -1172,6 +1180,11 @@ void CPianoRoll::UpdateNoteStates()
                     // 確信度が低い/該当なしの場合はここでは何も判断しない)。
                     if (HarmonicProfile::LooksLikeNoiseProfile(
                         blend, i, KEY_COUNT, kHarmonicProfileNoiseMinConfidence)) {
+                        allowOn = false;
+                    }
+                    // 楽器形のまま残る整数倍音ゴーストはプロファイルでは弾けないので、
+                    // 構造判定(親ピークの partial)を併用する。
+                    else if (HarmonicProfile::LooksLikePartialGhost(blend, i, KEY_COUNT)) {
                         allowOn = false;
                     }
                 }
@@ -1384,7 +1397,7 @@ void CPianoRoll::DetectExpressions()
 {
     using namespace Cfg;
 
-    // 記号だらけでピアノロールに見えないので、長い持続だけ SUSTAIN を付ける。
+    // 記号だらけで簡易ピアノロールに見えないので、長い持続だけ SUSTAIN を付ける。
     for (int i = 0; i < KEY_COUNT; ++i) {
         m_exprFlags[i] = 0;
         const bool wasActive = m_prevActiveKeys[i];
@@ -3252,7 +3265,7 @@ void CPianoRoll::OnSize(UINT nType, int cx, int cy)
 void CPianoRoll::OnMove(int x, int y)
 {
     CCustomBlurDialogExBase::OnMove(x, y);
-    // ピアノロールは高頻度更新のため Move 毎の DWM 再合成は行わない（重い）
+    // 簡易ピアノロールは高頻度更新のため Move 毎の DWM 再合成は行わない（重い）
 }
 
 void CPianoRoll::OnShowWindow(BOOL bShow, UINT nStatus)

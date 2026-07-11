@@ -208,6 +208,10 @@ namespace HarmonicProfile
     // minConfidence: これ未満の類似度なら「該当なし」として false を返す
     // (倍音がほとんど無い/測定不能な場合に誤ってノイズ扱いしないためのガード)。
     // 加えて、最良ノイズが最良楽器を kNoiseOverMusicalMargin 以上上回るときだけ true。
+    //
+    // [限界] 実音の整数倍音ゴーストは観測ベクトルが Piano/Saw に近く、ここだけでは
+    // ほぼ弾けない。漏れ込みタワーの除去は PianoKey::IsPartialOfStrongerLower /
+    // PianoRoll108::PruneCrossBandHarmonicGhosts 側が本体。
     inline bool LooksLikeNoiseProfile(const float* blend, int candidate, int count,
         float minConfidence = 0.75f)
     {
@@ -215,5 +219,12 @@ namespace HarmonicProfile
         ScoreMusicalVsNoise(blend, candidate, count, &bestM, &bestN, nullptr);
         if (bestN < minConfidence) return false;
         return bestN >= bestM + kNoiseOverMusicalMargin;
+    }
+
+    // 構造的ゴースト: 下側の強い親ピークの整数倍として説明できるか。
+    // プロファイル類似度とは別軸。CPianoRoll のノートON抑制にも使える。
+    inline bool LooksLikePartialGhost(const float* blend, int candidate, int count)
+    {
+        return PianoKey::IsHarmonicGhostPartial(blend, candidate, count, 36);
     }
 }
