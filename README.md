@@ -27,6 +27,19 @@
 ### ピアノロール機能
 簡易ピアノロールが実装されました。
 
+### 波形・周波数アナライザー
+Ozone風のリアルタイムアナライザーを追加しました。
+
+- **上部:** 多チャンネルPCM波形（横スクロール）と L/R レベルメーター
+- **下部:** 対数軸の周波数特性（塗+線 / 線のみ / バー、ピークホールド）
+- **レイアウト:** 重ね描き / 上下分割 / 左右分割 / 2x2 / 2x4（右クリックメニュー）
+- **EQオーバーレイ:** 既存15バンドEQ（`eq[0..14]`）の帯域とゲイン曲線をスペクトラム上に表示
+- **マウス読取:** ホバーで周波数・dB・チャンネル（分割時はカーソル下のパネル）を表示
+- **操作:** フリーズ（F） / ピークホールド（P） / EQ表示（E） / ピークリセット（Space・ダブルクリック）
+- **描画:** 解析ワーカースレッド＋UI自由走行（ピアノロールと同様）。アクリル（ぼかし）モードにも対応
+
+メディアプレイヤー画面モードの再生中アイコン（♪点滅2コマ）と選択♡の描画順も整備しました。
+
 ### メディアプレイヤー画面モード搭載
 普通のメディアプレイヤーのようなモード搭載。
 
@@ -134,6 +147,19 @@ Additionally, the intensity of the environmental effects can be adjusted, offeri
 
 ### Piano Roll Feature
 A simplified piano roll has been implemented.
+
+### Waveform & Spectrum Analyzer
+An Ozone-inspired real-time analyzer has been added.
+
+- **Top:** Multi-channel scrolling PCM waveform with L/R level meters
+- **Bottom:** Log-frequency spectrum (fill+line / line / bars, with peak hold)
+- **Layouts:** Overlay / split vertical / split horizontal / 2x2 / 2x4 (right-click menu)
+- **EQ overlay:** Shows the existing 15-band EQ (`eq[0..14]`) band markers and gain curve on the spectrum
+- **Mouse readout:** Hover to read Hz, dB, and channel (on split layouts, the panel under the cursor)
+- **Controls:** Freeze (F) / Peak hold (P) / EQ overlay (E) / Reset peaks (Space or double-click)
+- **Rendering:** Analysis worker thread with free-running UI present (same approach as the piano roll), including Acrylic (blur) mode support
+
+Playback note icon blinking (two frames) and heart (♡) draw order on the media-player list were also fixed.
 
 ### Media Player Screen Mode Included
 Includes a mode similar to that of a standard media player.
