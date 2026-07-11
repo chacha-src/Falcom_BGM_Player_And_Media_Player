@@ -148,6 +148,7 @@ public:
 	int  m_savedPianoVisible;    // 最小化連動: 最小化前に簡易ピアノロールが表示されていたか
 	int  m_savedAnalyzerVisible; // 最小化連動: 最小化前にアナライザーが表示されていたか
 	bool m_inSizeMove;        // ユーザーが枠をドラッグしてリサイズ中(重い同期再描画を抑制)
+	bool m_uiReady;           // OnInitDialog 完了前の WM_SIZE では GetCheck/DoLayout しない
 	float hD2;           // DPI スケール係数(96dpi = 1.0)
 
 	// ---- バナー領域(ビジュアライザ Blit 先) ----
@@ -179,7 +180,7 @@ public:
 	int  m_lastTogglePiano;
 	int  m_lastToggleAnalyzer;
 	int  m_dsvolSlW;         // DS音量スライダー幅(DoLayout)。ラベル省略判定に使用
-	int  m_mpBtnShort;       // 操作行 EQ/ロール/アナ の短縮ラベル状態(DoLayout)
+	int  m_mpBtnShort;       // 0=フル 1=EQ/ロール/アナ短縮 2=さらにフェード/JK等短縮
 
 	// og のオフスクリーン合成 DC(スペアナ+ジャケ+時間)を m_bannerRect へ StretchBlit する。
 	// アクリル(Win11)時は黒透過合成、非アクリル時は永続メモリ DC でキャッシュ Blit。

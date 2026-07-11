@@ -18,10 +18,7 @@
 #pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
-#include "PianoKeyTable.h"
-#include "PianoRoll108Detect.h"
 #include "NoteEnvelopeModel.h"
-#include "HarmonicProfile.h"
 #include <vector>
 
 class CPianoRoll : public CCustomBlurDialogExBase
@@ -151,7 +148,7 @@ private:
     int   m_winHigh = WIN_HIGH_REF;
     int   m_winOnset = WIN_ONSET_REF;
     // 分析: [0,60) 16384 / [60,84) 8192 / [84,108) 4096（108鍵・周波数基準）
-    static constexpr int   BASS_ANALYSIS_END = PianoKey::BASS_BAND_END;
+    static constexpr int   BASS_ANALYSIS_END = 67; // PianoKey::BASS_BAND_END(ヘッダ依存回避)
     static constexpr int   DETECT_KEYS = KEY_COUNT;
 
     // ---- カスタムウィンドウメッセージ ----

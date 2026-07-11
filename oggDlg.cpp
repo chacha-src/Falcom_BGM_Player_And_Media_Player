@@ -24,6 +24,9 @@ int flacmode = 0;
 #include "mp3info.h"
 #include "ogg.h"
 #include "oggDlg.h"
+#include "CEqualizer.h"
+#include "CPianoRoll.h"
+#include "CAnalyzerDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "FileTagInfo.h"
 #include "NoteFundamentalPick.h"
@@ -920,6 +923,9 @@ COggDlg::COggDlg(CWnd* pParent /*=NULL*/)
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 	m_jacketFocus = 0.0;
 	m_lastTick = 0;
+	m_EqualizerDlg = new CEqualizer();
+	m_PianoRollDlg = new CPianoRoll();
+	m_AnalyzerDlg = new CAnalyzerDlg();
 }
 
 void COggDlg::DoDataExchange(CDataExchange* pDX)
@@ -3257,11 +3263,11 @@ BOOL COggDlg::OnInitDialog()
 #endif
 
 	AfxBeginThread((AFX_THREADPROC)TheadLoop, NULL, THREAD_PRIORITY_ABOVE_NORMAL);
-	// CreateDialogIndirectParam(親) の WM_INITDIALOG 中に mp->Create すると
-	// ネストした CreateDialogIndirectParam が ERROR_INVALID_PARAMETER
-	// （「引数が正しくありません」）になり得る。親の作成完了後に遅延する。
+	// d6b90a5(analyzer 前)と同じ: OnInitDialog 内で同期的に MP へ遷移する。
+	// cb7e594 以降の PostMessage/SetTimer 遅延は DeferredHeavy(更新チェック)より
+	// 後回しになり、KPI〜MP 間で CInvalidArgException が出る順序に変わっていた。
 	if (savedata.playerMode == 1)
-		PostMessage(WM_OGG_ENTER_MP_MODE, 0, 0);
+		EnterMediaPlayerMode();
 	return TRUE;  // TRUE を返すとコントロールに設定したフォーカスは失われません。
 }
 //////////////////////////////////////////////////////////////////////////////
@@ -15322,10 +15328,10 @@ void COggDlg::stop()
 		playf = 0;
 		plf = 0;
 		SignalPlaybackNotifyThreadStop();
-		if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
-			m_PianoRollDlg.PauseAnalysis();
-		if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
-			m_AnalyzerDlg.PauseFeed();
+		if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
+			m_PianoRollDlg->PauseAnalysis();
+		if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
+			m_AnalyzerDlg->PauseFeed();
 		return;
 	}
 	s_inStop1 = true;
@@ -15334,10 +15340,10 @@ void COggDlg::stop()
 	// DoEvent 再入より先に解析を止める（停止ボタンでは起きず曲切替で落ちる主因）
 	playf = 0;
 	plf = 0;
-	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
-		m_PianoRollDlg.PauseAnalysis();
-	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
-		m_AnalyzerDlg.PauseFeed();
+	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
+		m_PianoRollDlg->PauseAnalysis();
+	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
+		m_AnalyzerDlg->PauseFeed();
 
 	if (PlaybackNotifyThreadMayBeActive())
 		SignalPlaybackNotifyThreadStop();
@@ -15476,10 +15482,10 @@ void COggDlg::stop()
 	videoonly = FALSE;
 	plf = 0;
 	playf = 0;
-	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
-		m_PianoRollDlg.ResetPlaybackState();
-	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
-		m_AnalyzerDlg.ResetPlaybackState();
+	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
+		m_PianoRollDlg->ResetPlaybackState();
+	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
+		m_AnalyzerDlg->ResetPlaybackState();
 	m_analyzerSyncValid = FALSE;
 	if (wav) free(wav);
 	wav = NULL;
@@ -15515,10 +15521,10 @@ BOOL COggDlg::stop1()
 	// DoEvent 再入より先に解析を止める（形式違いの曲切替クラッシュ防止）
 	playf = 0;
 	plf = 0;
-	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
-		m_PianoRollDlg.PauseAnalysis();
-	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
-		m_AnalyzerDlg.PauseFeed();
+	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
+		m_PianoRollDlg->PauseAnalysis();
+	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
+		m_AnalyzerDlg->PauseFeed();
 
 	// 形式を問わず停止要求。Join 前にデコーダを閉じない。
 	SignalPlaybackNotifyThreadStop();
@@ -15618,10 +15624,10 @@ BOOL COggDlg::stop1()
 	videoonly = FALSE;
 	plf = 0;
 	playf = 0;
-	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
-		m_PianoRollDlg.ResetPlaybackState();
-	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
-		m_AnalyzerDlg.ResetPlaybackState();
+	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
+		m_PianoRollDlg->ResetPlaybackState();
+	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
+		m_AnalyzerDlg->ResetPlaybackState();
 	m_analyzerSyncValid = FALSE;
 	if (wav) free(wav);
 	wav = NULL;
@@ -15669,17 +15675,20 @@ BOOL COggDlg::DestroyWindow()
 		PumpUntilFlagOrTimeout(killw1);
 		mi = NULL;
 	}
-	if (::IsWindow(m_EqualizerDlg.GetSafeHwnd())) {
-		m_EqualizerDlg.DestroyWindow();
+	if (::IsWindow(m_EqualizerDlg->GetSafeHwnd())) {
+		m_EqualizerDlg->DestroyWindow();
 	}
-	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd())) {
-		m_PianoRollDlg.DetachForDestroy();
-		m_PianoRollDlg.DestroyWindow();
+	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd())) {
+		m_PianoRollDlg->DetachForDestroy();
+		m_PianoRollDlg->DestroyWindow();
 	}
-	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd())) {
-		m_AnalyzerDlg.DetachForDestroy();
-		m_AnalyzerDlg.DestroyWindow();
+	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd())) {
+		m_AnalyzerDlg->DetachForDestroy();
+		m_AnalyzerDlg->DestroyWindow();
 	}
+	delete m_EqualizerDlg; m_EqualizerDlg = nullptr;
+	delete m_PianoRollDlg; m_PianoRollDlg = nullptr;
+	delete m_AnalyzerDlg; m_AnalyzerDlg = nullptr;
 	if (m_pDlgColor)delete m_pDlgColor;
 	if (ptl) ptl->Release();
 	if (pcdl) pcdl->Release();
@@ -16371,10 +16380,10 @@ void COggDlg::timerp()
 	}
 
 
-	if (plf == 1 && ::IsWindow(m_PianoRollDlg.GetSafeHwnd()) && Ms2DrawDue(ms2))
-		m_PianoRollDlg.RequestSyncFromMainUi();
+	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
+		m_PianoRollDlg->RequestSyncFromMainUi();
 	// アナライザーは decode 先行ではなく Speana と同じ PlayCursor 時間軸
-	if (plf == 1 && ::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
+	if (plf == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
 		SyncAnalyzerFromPlayCursor();
 	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) Speana();
 	s = L""; ss = L"";
@@ -17707,31 +17716,31 @@ void timerog1(UINT nIDEvent)
 	if (nIDEvent == 59877) {
 		og->KillTimer(59877);
 		if (savedata.eqwindow == 1) {
-			if (!::IsWindow(og->m_EqualizerDlg.GetSafeHwnd()))
+			if (!::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
 			{
-				og->m_EqualizerDlg.Create(IDD_EQUALIZER, og);
+				og->m_EqualizerDlg->Create(IDD_EQUALIZER, og);
 			}
 
-			og->m_EqualizerDlg.ShowWindow(SW_SHOW);
+			og->m_EqualizerDlg->ShowWindow(SW_SHOW);
 		}
 		if (savedata.pianorollwindow == 1) {
-			if (!::IsWindow(og->m_PianoRollDlg.GetSafeHwnd()))
+			if (!::IsWindow(og->m_PianoRollDlg->GetSafeHwnd()))
 			{
-				og->m_PianoRollDlg.Create(IDD_PIANOROLL, og);
+				og->m_PianoRollDlg->Create(IDD_PIANOROLL, og);
 			}
 
-			og->m_PianoRollDlg.ShowWindow(SW_SHOW);
+			og->m_PianoRollDlg->ShowWindow(SW_SHOW);
 		}
 		if (savedata.analyzerwindow == 1) {
 			// 親作成直後の同期 Create は避ける(CreateDialog ネスト対策)。
 			// タイマー発火時点では親は既に生きているのでここは安全。
-			if (!::IsWindow(og->m_AnalyzerDlg.GetSafeHwnd()))
+			if (!::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
 			{
-				if (!og->m_AnalyzerDlg.Create(IDD_ANALYZER, og))
+				if (!og->m_AnalyzerDlg->Create(IDD_ANALYZER, og))
 					savedata.analyzerwindow = 0;
 			}
-			if (::IsWindow(og->m_AnalyzerDlg.GetSafeHwnd()))
-				og->m_AnalyzerDlg.ShowWindow(SW_SHOW);
+			if (::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
+				og->m_AnalyzerDlg->ShowWindow(SW_SHOW);
 		}
 
 	}
@@ -18073,10 +18082,10 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 		free(wav);
 		wav = NULL;
 	}
-	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
-		m_PianoRollDlg.ResetPlaybackState();
-	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
-		m_AnalyzerDlg.ResetPlaybackState();
+	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
+		m_PianoRollDlg->ResetPlaybackState();
+	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
+		m_AnalyzerDlg->ResetPlaybackState();
 	m_analyzerSyncValid = FALSE;
 	ResetPauseButtonUi();
 	if (ptl)
@@ -20203,7 +20212,7 @@ void COggDlg::SyncPianoRollFast()
 {
 	// wav/ogg 非依存。KPI 等でも bufwav3+DS があれば解析する。
 	if (plf != 1) return;
-	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd())) return;
+	if (!::IsWindow(m_PianoRollDlg->GetSafeHwnd())) return;
 	SyncPianoRollFromPlayCursor();
 }
 
@@ -20211,7 +20220,7 @@ void COggDlg::SyncAnalyzerFromPlayCursor()
 {
 	if (playf == 0 || thn1 || plf != 1) return;
 	if (ps == 1) return;
-	if (!::IsWindow(m_AnalyzerDlg.GetSafeHwnd())) return;
+	if (!::IsWindow(m_AnalyzerDlg->GetSafeHwnd())) return;
 	if (!bufwav3 || !m_dsb) return;
 
 	double sampleRate;
@@ -20263,7 +20272,7 @@ void COggDlg::SyncAnalyzerFromPlayCursor()
 	if (!m_analyzerSyncValid) {
 		m_analyzerSyncEndPos = endPos;
 		m_analyzerSyncValid = TRUE;
-		m_AnalyzerDlg.ResumePlaybackFeed();
+		m_AnalyzerDlg->ResumePlaybackFeed();
 		return;
 	}
 
@@ -20301,17 +20310,17 @@ void COggDlg::SyncAnalyzerFromPlayCursor()
 	}
 
 	m_analyzerSyncEndPos = endPos;
-	m_AnalyzerDlg.ResumePlaybackFeed();
+	m_AnalyzerDlg->ResumePlaybackFeed();
 	const int frames = (int)(advance / (ULONG)bytesPerFrame);
 	if (frames > 0)
-		m_AnalyzerDlg.FeedPCM(anaRaw.data(), frames, (int)(sampleRate + 0.5), bitDepth, channels);
+		m_AnalyzerDlg->FeedPCM(anaRaw.data(), frames, (int)(sampleRate + 0.5), bitDepth, channels);
 }
 
 void COggDlg::SyncPianoRollFromPlayCursor()
 {
 	if (playf == 0 || thn1 || plf != 1) return;
 	if (ps == 1) return; // 一時停止中は履歴スクロール・解析更新を止める
-	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd())) return;
+	if (!::IsWindow(m_PianoRollDlg->GetSafeHwnd())) return;
 	if (!bufwav3) return;
 	// DS 未生成中は解析しない（形式切替の隙間で旧パラメータを使わない）
 	if (!m_dsb) return;
@@ -20341,7 +20350,7 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	const int TOTAL_BUF_BYTES = (int)((g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM));
 	if (bytesPerFrame <= 0 || TOTAL_BUF_BYTES <= bytesPerFrame) return;
 
-	m_PianoRollDlg.ResumePlaybackFeed();
+	m_PianoRollDlg->ResumePlaybackFeed();
 	const int ringFrames = TOTAL_BUF_BYTES / bytesPerFrame;
 	const int srInt = (int)(sampleRate + 0.5);
 	// スペアナ窓分を空けたいが、192k/多ch で speana>=ring になると maxPrFrames<=0 になり
@@ -20495,8 +20504,8 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 		if (level < 1e-9) chDb[ch] = -60.0f;
 		else chDb[ch] = (float)(20.0 * log10(level));
 	}
-	m_PianoRollDlg.SetChannelMeterDb(chDb, meterCh);
-	m_PianoRollDlg.AnalyzePlayCursorMono(prMono.data(), prFrames, (int)(sampleRate + 0.5));
+	m_PianoRollDlg->SetChannelMeterDb(chDb, meterCh);
+	m_PianoRollDlg->AnalyzePlayCursorMono(prMono.data(), prFrames, (int)(sampleRate + 0.5));
 }
 
 void COggDlg::Speana()
@@ -21667,9 +21676,9 @@ void COggDlg::RefreshAllAeroWindows()
 		}
 	};
 	refreshMode(this);
-	refreshMode(&m_EqualizerDlg);
-	refreshMode(&m_PianoRollDlg);
-	refreshMode(&m_AnalyzerDlg);
+	refreshMode(m_EqualizerDlg);
+	refreshMode(m_PianoRollDlg);
+	refreshMode(m_AnalyzerDlg);
 	if (pl) refreshMode(pl);
 	{
 		extern CMediaPlayerDlg* mp;
@@ -21701,9 +21710,10 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 	extern CImageBase* playbase;
 	CCustomBlurDialogBase::OnSize(nType, cx, cy);
 #if CCUSTOM_AERO_SUPPORT
+	// Finalize 再実行はしない。リサイズ時は DWM 属性の軽い再適用 + 再描画のみ。
 	if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
 	{
-		ApplyDwmBlur();
+		CCC_RefreshDialogDwmBlur(m_hWnd);
 		Invalidate(FALSE);
 	}
 #endif
@@ -22137,12 +22147,18 @@ void COggDlg::plugloop(CString ff)
 					}
 
 					// Pump messages to keep loading window responsive!
+					// ただし親 COggDlg の WM_INITDIALOG 中なので、WM_TIMER で
+					// pl->Create / 他ダイアログをネスト CreateDialog すると
+					// ERROR_INVALID_PARAMETER→「引数が正しくありません」になり得る。
+					// 進捗表示は SetPos の Invalidate で足りるため TIMER は後回し。
 					MSG msg;
 					while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 						if (msg.message == WM_QUIT) {
 							::PostQuitMessage((int)msg.wParam);
 							break;
 						}
+						if (msg.message == WM_TIMER)
+							continue;
 						::TranslateMessage(&msg);
 						::DispatchMessage(&msg);
 					}
@@ -22835,58 +22851,57 @@ void COggDlg::OnStnDblclickStatict()
 }
 void COggDlg::OnBnClickedButton59()
 {
-	if (!::IsWindow(m_EqualizerDlg.GetSafeHwnd()))
+	if (!::IsWindow(m_EqualizerDlg->GetSafeHwnd()))
 	{
-		m_EqualizerDlg.Create(IDD_EQUALIZER, this);
+		m_EqualizerDlg->Create(IDD_EQUALIZER, this);
 		savedata.eqwindow = 1;
+		m_EqualizerDlg->ShowWindow(SW_SHOW);
+		m_EqualizerDlg->SetFocus();
 	}
 	else {
-		m_EqualizerDlg.DestroyWindow();
+		m_EqualizerDlg->DestroyWindow();
 		savedata.eqwindow = 0;
 	}
-
-	m_EqualizerDlg.ShowWindow(SW_SHOW);
-	m_EqualizerDlg.SetFocus();
 }
 
 void COggDlg::TogglePianoRoll()
 {
-	if (!::IsWindow(m_PianoRollDlg.GetSafeHwnd()))
+	if (!::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
 	{
-		m_PianoRollDlg.Create(IDD_PIANOROLL, this);
+		m_PianoRollDlg->Create(IDD_PIANOROLL, this);
 		savedata.pianorollwindow = 1;
 	}
 	else {
-		m_PianoRollDlg.DetachForDestroy();
-		m_PianoRollDlg.DestroyWindow();
+		m_PianoRollDlg->DetachForDestroy();
+		m_PianoRollDlg->DestroyWindow();
 		savedata.pianorollwindow = 0;
 	}
 
-	if (::IsWindow(m_PianoRollDlg.GetSafeHwnd())) {
-		m_PianoRollDlg.ShowWindow(SW_SHOW);
-		m_PianoRollDlg.SetFocus();
+	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd())) {
+		m_PianoRollDlg->ShowWindow(SW_SHOW);
+		m_PianoRollDlg->SetFocus();
 	}
 }
 
 void COggDlg::ToggleAnalyzer()
 {
-	if (!::IsWindow(m_AnalyzerDlg.GetSafeHwnd()))
+	if (!::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
 	{
-		if (!m_AnalyzerDlg.Create(IDD_ANALYZER, this)) {
+		if (!m_AnalyzerDlg->Create(IDD_ANALYZER, this)) {
 			savedata.analyzerwindow = 0;
 			return;
 		}
 		savedata.analyzerwindow = 1;
 	}
 	else {
-		m_AnalyzerDlg.DetachForDestroy();
-		m_AnalyzerDlg.DestroyWindow();
+		m_AnalyzerDlg->DetachForDestroy();
+		m_AnalyzerDlg->DestroyWindow();
 		savedata.analyzerwindow = 0;
 	}
 
-	if (::IsWindow(m_AnalyzerDlg.GetSafeHwnd())) {
-		m_AnalyzerDlg.ShowWindow(SW_SHOW);
-		m_AnalyzerDlg.SetFocus();
+	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd())) {
+		m_AnalyzerDlg->ShowWindow(SW_SHOW);
+		m_AnalyzerDlg->SetFocus();
 	}
 }
 
@@ -22896,7 +22911,7 @@ void COggDlg::FeedPianoRoll(const void* pData, int bytes)
 		return;
 	if (!m_dsb)
 		return;
-	const bool pianoOpen = ::IsWindow(m_PianoRollDlg.GetSafeHwnd()) != FALSE;
+	const bool pianoOpen = ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) != FALSE;
 	if (!pianoOpen)
 		return;
 
@@ -22922,13 +22937,25 @@ void COggDlg::FeedPianoRoll(const void* pData, int bytes)
 		}
 	}
 	const int frames = bytes / bpf;
-	m_PianoRollDlg.ResumePlaybackFeed();
-	m_PianoRollDlg.FeedPCM(pData, frames, feed_rate, feed_bits, feed_ch, delaySamples);
+	m_PianoRollDlg->ResumePlaybackFeed();
+	m_PianoRollDlg->FeedPCM(pData, frames, feed_rate, feed_bits, feed_ch, delaySamples);
 }
 
 void COggDlg::DeferredHeavyStartupImpl()
 {
+	try {
 #include "oggDlg_DeferredHeavy.inc"
+	}
+	catch (CException* e)
+	{
+		TCHAR msg[512] = {};
+		e->GetErrorMessage(msg, _countof(msg) - 1);
+		CString line;
+		line.Format(_T("[DeferredHeavy] swallowed %hs: %s\n"),
+			e->GetRuntimeClass()->m_lpszClassName, msg);
+		OutputDebugString(line);
+		e->Delete();
+	}
 }
 
 LRESULT COggDlg::OnDeferredHeavyStartup(WPARAM, LPARAM)

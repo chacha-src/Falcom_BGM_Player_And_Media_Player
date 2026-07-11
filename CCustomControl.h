@@ -6,6 +6,7 @@
 #include "ListCtrlA.h"
 #include "OSVersion.h"
 #include <map>
+#include <vector>
 #include <dwmapi.h>
 #include "DwmBlurHelper.h"
 
@@ -474,7 +475,8 @@ protected:
 
 private:
     CBrush m_brBackground; // 背景塗りつぶし用ブラシ
-    CFont m_fontBold;      // 太字フォント
+    CFont m_fontBold;      // 内部キャッシュフォント(太字固定ではない)
+
     BOOL m_bHasFocus;      // 現在フォーカスを持っているかどうか
     void PaintOpaqueClient(CDC& dc);
     void ScheduleOpaqueRepaint();
@@ -1138,13 +1140,14 @@ public:
     CCustomBlurDialogBase(UINT nIDTemplate, CWnd* pParent = NULL);
     virtual ~CCustomBlurDialogBase();
 
-    void RefreshAeroMode() { ApplyDwmBlur(); }
+    // モード切替・子再配置後など、ぼかしを強制再適用する
+    void RefreshAeroMode();
 
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
     virtual BOOL OnInitDialog();
 
-    // savedata.aero==1 のとき DWM ぼかしを適用
+    // savedata.aero==1 のとき DWM ぼかしを適用（既適用なら no-op）
     virtual void ApplyDwmBlur();
     afx_msg void OnPaint();
     afx_msg void OnSize(UINT nType, int cx, int cy);
@@ -1157,6 +1160,7 @@ protected:
     DECLARE_MESSAGE_MAP()
 
 private:
+    void ApplyDwmBlurCore(BOOL bForce);
     BOOL m_bBlurApplied;
     CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers;
 };
@@ -1211,13 +1215,14 @@ public:
     CCustomBlurDialogExBase(UINT nIDTemplate, CWnd* pParent = nullptr);
     virtual ~CCustomBlurDialogExBase();
 
-    void RefreshAeroMode() { ApplyDwmBlur(); }
+    // モード切替・子再配置後など、ぼかしを強制再適用する
+    void RefreshAeroMode();
 
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
     virtual BOOL OnInitDialog();
 
-    // savedata.aero==1 のとき DWM ぼかしを適用
+    // savedata.aero==1 のとき DWM ぼかしを適用（既適用なら no-op）
     virtual void ApplyDwmBlur();
     afx_msg void OnPaint();
     afx_msg void OnSize(UINT nType, int cx, int cy);
@@ -1230,6 +1235,7 @@ protected:
     DECLARE_MESSAGE_MAP()
 
 private:
+    void ApplyDwmBlurCore(BOOL bForce);
     BOOL m_bBlurApplied;
     CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers;
 };

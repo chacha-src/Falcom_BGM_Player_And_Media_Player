@@ -1,7 +1,8 @@
 ﻿#pragma once
 // CAnalyzerDlg.h : 簡易波形アナライザー
 // 上部: PCM 波形(横スクロール・バックバッファ) / 下部: 周波数特性
-// ステレオ〜7.1ch(最大8)対応。高さに余裕がある分だけ ch を並べる。
+// ステレオ〜7.1ch(最大8)対応。周波数特性は右クリックで分割レイアウト切替。
+// Ozone 風: 塗/線/バー、ピークホールド、EQオーバーレイ、ホバー読取、レベルメーター、フリーズ。
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include <vector>
@@ -19,9 +20,24 @@ public:
 #endif
 
 	static constexpr int CH_MAX = 8;
-	static constexpr int RING_SAMPLES = 8192;  // FFT/波形用
-	static constexpr int FFT_SIZE = 2048;      // 低域分解能(≈21Hz@44.1k)
-	static constexpr int SPEC_BINS = 120;      // 対数軸の表示点数
+	static constexpr int RING_SAMPLES = 8192;
+	static constexpr int FFT_SIZE = 2048;
+	static constexpr int SPEC_BINS = 120;
+	static constexpr int EQ_OVERLAY_BANDS = 15;
+
+	enum SpecLayout {
+		SpecOverlay = 0, // 全ch重ね描き
+		SpecSplitV = 1,  // 上下分割
+		SpecSplitH = 2,  // 左右分割
+		SpecGrid4 = 3,   // 2x2(4ch+)
+		SpecGrid8 = 4    // 2x4(8ch)
+	};
+
+	enum SpecStyle {
+		StyleFill = 0, // 塗+線(Ozone風)
+		StyleLine = 1, // 線のみ
+		StyleBars = 2  // バー
+	};
 
 	void FeedPCM(const void* pData, int frames, int sampleRate, int bits, int channels);
 	void ResumePlaybackFeed();
@@ -40,37 +56,73 @@ protected:
 	afx_msg void OnClose();
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
+	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+	afx_msg void OnMouseLeave();
+	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
+	afx_msg void OnSpecLayoutOverlay();
+	afx_msg void OnSpecLayoutSplitV();
+	afx_msg void OnSpecLayoutSplitH();
+	afx_msg void OnSpecLayoutGrid4();
+	afx_msg void OnSpecLayoutGrid8();
+	afx_msg void OnSpecStyleFill();
+	afx_msg void OnSpecStyleLine();
+	afx_msg void OnSpecStyleBars();
+	afx_msg void OnTogglePeakHold();
+	afx_msg void OnToggleEqOverlay();
+	afx_msg void OnToggleFreeze();
+	afx_msg void OnResetPeakHold();
+	afx_msg LRESULT OnSpecAnalysisDone(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnPresentRequest(WPARAM wParam, LPARAM lParam);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 private:
 	void UpdateSpectrumFromRing();
 	void FullRedrawWave(COLORREF bg);
-	// 戻り値: 横スクロールした px。全面再描画時は -1、何もしなければ 0
-	int ScrollWaveAndDrawNew(COLORREF bg);
+	int ScrollWaveAndDrawNew(COLORREF bg, int maxScroll = 0);
 	void RedrawSpectrum(COLORREF bg);
+	void DrawSpecPanel(CDC& dc, const CRect& plot, int chBegin, int chCount,
+		float spec[][SPEC_BINS], float peak[][SPEC_BINS], int channels, int sr, bool drawTitle);
+	void DrawEqOverlay(CDC& dc, const CRect& plot, float nyquist);
+	void DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg);
+	void DrawHoverReadout(CDC& dc, const CRect& clientRc);
 	void Present(CDC& dc, const CRect& rc, BOOL bAero);
 	void ReleaseBuffers();
 	bool EnsureWaveBuffer(CDC& refDC, int w, int h);
 	bool EnsureSpecBuffer(CDC& refDC, int w, int h);
+	bool EnsureFrameBuffer(CDC& refDC, int w, int h);
+	void KickUiPresent();
 	bool SnapshotRing(int& outWrite, int& outFilled, int& outChannels);
 	int VisibleChannelCount(int waveH) const;
 	static LPCTSTR ChannelLabel(int ch, int channels);
+	void SetSpecLayout(int layout);
+	void SetSpecStyle(int style);
+	void ResetPeakHold();
+	bool UpdateHoverFromPoint(CPoint ptClient); // true=表示内容が変わった
+	void StartSpecWorker();
+	void StopSpecWorker();
+	void RequestSpecAnalysis();
+	static DWORD WINAPI SpecWorkerEntry(LPVOID param);
+	DWORD SpecWorkerLoop();
 
 	CRITICAL_SECTION m_cs;
 	bool m_feedEnabled = false;
 	int m_sampleRate = 44100;
 	int m_channels = 2;
+	int m_specLayout = SpecOverlay;
+	int m_specStyle = StyleFill;
+	bool m_peakHold = true;
+	bool m_eqOverlay = true;
+	bool m_frozen = false;
 
-	// チャンネル別リング(最新 RING_SAMPLES)
 	std::vector<float> m_ring[CH_MAX];
-	std::vector<float> m_ringSnap[CH_MAX]; // 描画用スナップショット(ロック外で描く)
+	std::vector<float> m_ringSnap[CH_MAX];
 	int m_ringWrite = 0;
 	int m_ringFilled = 0;
-	int m_accSamples = 0;          // 波形1px 分の蓄積
-	int m_samplesPerCol = 64;      // 1px あたりサンプル数
-	int m_pendingScroll = 0;       // 未描画の横スクロール量(px)
+	int m_accSamples = 0;
+	int m_samplesPerCol = 64;
+	int m_pendingScroll = 0;
 
-	// 波形バックバッファ(幅=表示幅、1px=1カラム)
 	CDC m_waveDC;
 	CBitmap m_waveBmp;
 	CBitmap* m_waveOld = nullptr;
@@ -79,9 +131,8 @@ private:
 	CBitmap* m_waveScratchOld = nullptr;
 	int m_waveW = 0, m_waveH = 0;
 	bool m_waveReady = false;
-	int m_waveLayoutCh = 0;        // バッファ作成時の表示 ch 数
+	int m_waveLayoutCh = 0;
 
-	// スペクトル用
 	float m_specDb[CH_MAX][SPEC_BINS];
 	float m_specPeakDb[CH_MAX][SPEC_BINS];
 	std::vector<float> m_fftRe;
@@ -95,10 +146,38 @@ private:
 	int m_specW = 0, m_specH = 0;
 	bool m_specReady = false;
 
+	// 最終合成バッファ(1回 BitBlt で点滅抑制)
+	CDC m_frameDC;
+	CBitmap m_frameBmp;
+	CBitmap* m_frameOld = nullptr;
+	int m_frameW = 0, m_frameH = 0;
+
+	// ホバー読取用(クライアント座標のスペクトラム主プロット)
+	CRect m_hoverPlot;
+	int m_hoverSplitY = 0;
+	bool m_hoverValid = false;
+	bool m_hoverChanged = false;
+	bool m_trackingMouse = false;
+	float m_hoverHz = 0.0f;
+	float m_hoverDb = -96.0f;
+	int m_hoverCh = 0;
+	int m_hoverBin = -1;
+
+	// レベルメーター(L/Rピーク)
+	float m_meterPeak[2] = { 0.0f, 0.0f };
+	float m_meterHold[2] = { 0.0f, 0.0f };
+
+	// UI 提示要求(音声/ワーカーは Invalidate せず PostMessage 合流 — ピアノロールと同じ自由走行)
+	volatile LONG m_presentPosted = 0;
+
 	CFont m_font;
 
+	HANDLE m_hSpecThread = nullptr;
+	HANDLE m_hSpecWake = nullptr;
+	volatile LONG m_specStop = 0;
+	volatile LONG m_specNeed = 0;
+
 #if CCUSTOM_AERO_SUPPORT
-	// ピアノロールと同様: クロマ→α 変換結果を保持し、差分更新する
 	CCC_ChromaBlitCache m_chromaCache;
 	bool m_chromaReady = false;
 	int m_chromaW = 0, m_chromaH = 0;

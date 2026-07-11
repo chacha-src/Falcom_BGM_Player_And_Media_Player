@@ -9,6 +9,7 @@
 #include "dsound.h"
 #include "ZeroFol.h"
 #include "oggDlg.h"
+#include "PlayList.h"
 #include "CImageBase.h"
 #include "AudioUpscaler.h"
 #include <mutex>

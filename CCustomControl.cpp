@@ -2421,13 +2421,15 @@ void CCustomEdit::PreSubclassWindow()
     CFont* pF = pP->GetFont();
     if (!pF) return;
 
-    LOGFONT lf;
-    pF->GetLogFont(&lf);
-    lf.lfWeight = FW_BOLD;
-
-            if (m_fontBold.GetSafeHandle()) m_fontBold.DeleteObject();
-    m_fontBold.CreateFontIndirect(&lf);
-    CEdit::SetFont(&m_fontBold);
+    // 親フォントを内部キャッシュへ。太字固定はしない(明示 SetFont で上書きされる)。
+    // SetFont オーバーライドは作らない: ウィンドウに紐づいた HFONT を
+    // DeleteObject すると後続で CInvalidArgException になり得るため。
+    LOGFONT lf = {};
+    if (!pF->GetLogFont(&lf)) return;
+    lf.lfWeight = FW_NORMAL;
+    if (m_fontBold.GetSafeHandle()) m_fontBold.DeleteObject();
+    if (m_fontBold.CreateFontIndirect(&lf))
+        CEdit::SetFont(&m_fontBold);
 }
 
 HBRUSH CCustomEdit::CtlColor(CDC* pDC, UINT)
@@ -4837,18 +4839,33 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
         if (ns == 0)
         {
-            if (bS) DrawHeart(pDC, CRect(r.left + 2, r.top + 4, r.left + 16, r.top + 18), COLOR_HEART);
+            // 再生アイコン: ImageList と pc[].icon の対応は
+            //   0=♪A(IDI_ICON1) / 1=空(IDI_ICON2・透明) / 2=♪B(IDI_ICON3)
+            // SIconTimer は 0↔2 で点滅。1 は非再生行。0 をスキップすると片方の♪が消える。
+            // ♡ は選択装飾なので ♪ の上(手前)に描く。
             CRect ri;
-            if (GetItemRect(ni, &ri, LVIR_ICON))
+            const BOOL hasIconRect = GetItemRect(ni, &ri, LVIR_ICON);
+            LVITEM lvi = { 0 };
+            lvi.mask = LVIF_IMAGE;
+            lvi.iItem = ni;
+            GetItem(&lvi);
+            CImageList* pIL = GetImageList(LVSIL_SMALL);
+            if (hasIconRect && pIL && lvi.iImage >= 0 && lvi.iImage != 1)
             {
-                LVITEM lvi = { 0 };
-                lvi.mask = LVIF_IMAGE;
-                lvi.iItem = ni;
-                GetItem(&lvi);
-                CImageList* pIL = GetImageList(LVSIL_SMALL);
-                if (pIL && lvi.iImage >= 0)
-                    DrawTransparentIcon(pDC, pIL, lvi.iImage, ri, RGB(255, 255, 255));
+                // ILC_MASK 付き ImageList は ILD_TRANSPARENT の方が塗り残しが少ない
+                IMAGEINFO ii = {};
+                int iw = 16, ih = 16;
+                if (pIL->GetImageInfo(lvi.iImage, &ii))
+                {
+                    iw = CRect(ii.rcImage).Width();
+                    ih = CRect(ii.rcImage).Height();
+                }
+                const int ix = ri.left + (ri.Width() - iw) / 2;
+                const int iy = ri.top + (ri.Height() - ih) / 2;
+                pIL->Draw(pDC, lvi.iImage, CPoint(ix, iy), ILD_TRANSPARENT);
             }
+            if (bS)
+                DrawHeart(pDC, CRect(r.left + 2, r.top + 4, r.left + 16, r.top + 18), COLOR_HEART);
             if (bH && !bS) DrawStar(pDC, r.left + 10, r.top + 10, 2, RGB(255, 215, 0));
         }
 
@@ -4867,8 +4884,8 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 lvi.mask = LVIF_IMAGE;
                 lvi.iItem = ni;
                 GetItem(&lvi);
-                CImageList* pIL = GetImageList(LVSIL_SMALL);
-                if (pIL && lvi.iImage >= 0 && ri.Width() > 0)
+                // ♪表示中(0/2)のみテキストをアイコン右へ。空(1)は無視
+                if (lvi.iImage >= 0 && lvi.iImage != 1 && ri.Width() > 0)
                     tl = (std::max)(tl, (int)ri.right + 4);
             }
             tl = (std::min)(tl, (int)r.right - 4);
@@ -5533,13 +5550,14 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
                 DrawLaceLine(&dc, rcB.left + 1, rcB.bottom + 2, rcB.right - 1, rcB.bottom + 2, RGB(60, 40, 55));
                 DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, COLOR_LACE);
             }
-            // 先にテキストを描く(チェック✓はこの上に乗せる)
+            // 先にテキストを描く(チェック✓はこの上に乗せる)。
+            // 文字高さは箱(最大18)ではなくコントロール全体を使い、意図したフォントが縮小されないようにする。
             CString t;
             GetWindowText(t);
             if (!t.IsEmpty())
             {
-                CRect rt(rcB.right + 10, rcB.top, rw, rcB.bottom);
-                DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER, bD, FALSE);
+                CRect rt(rcB.right + 8, 0, rw, rh);
+                DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_SINGLELINE, bD, FALSE);
             }
             if (bC)
             {
@@ -6487,23 +6505,41 @@ BOOL CCustomBlurDialogBase::OnInitDialog()
     return b;
 }
 
+void CCustomBlurDialogBase::RefreshAeroMode()
+{
+    ApplyDwmBlurCore(TRUE);
+}
+
 void CCustomBlurDialogBase::ApplyDwmBlur()
+{
+    ApplyDwmBlurCore(FALSE);
+}
+
+void CCustomBlurDialogBase::ApplyDwmBlurCore(BOOL bForce)
 {
     if (!m_hWnd || !::IsWindow(m_hWnd)) return;
 #if CCUSTOM_AERO_SUPPORT
-    m_bAeroEnabled = CCC_IsAeroEnabled();
-    if (!m_bAeroEnabled)
+    const BOOL bWant = CCC_IsAeroEnabled();
+    if (bWant)
     {
-        CCC_ClearOpaqueFixerList(m_opaqueFixers);
-        CCC_ApplyAero(m_hWnd, FALSE);
-        CCC_PrepareDialogSurface(m_hWnd, FALSE);
-        PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
-        m_bBlurApplied = FALSE;
-        Invalidate();
+        if (m_bBlurApplied && !bForce)
+            return;
+        m_bAeroEnabled = TRUE;
+        CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
         return;
     }
-    CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
+
+    m_bAeroEnabled = FALSE;
+    if (!m_bBlurApplied && !bForce)
+        return;
+    CCC_ClearOpaqueFixerList(m_opaqueFixers);
+    CCC_ApplyAero(m_hWnd, FALSE);
+    CCC_PrepareDialogSurface(m_hWnd, FALSE);
+    PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
+    m_bBlurApplied = FALSE;
+    Invalidate();
 #else
+    UNREFERENCED_PARAMETER(bForce);
     m_bBlurApplied = FALSE;
 #endif
 }
@@ -6516,6 +6552,7 @@ void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_IsAeroEnabled())
     {
+        // 初回のみ Finalize。以降の再表示は DWM 属性の軽い再適用だけで足りる。
         ApplyDwmBlur();
         CCC_RefreshDialogDwmBlur(m_hWnd);
     }
@@ -6561,7 +6598,7 @@ void CCustomBlurDialogBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 void CCustomBlurDialogBase::OnCompositionChanged()
 {
 #if CCUSTOM_AERO_SUPPORT
-    ApplyDwmBlur();
+    ApplyDwmBlurCore(TRUE);
 #endif
 }
 
@@ -6700,23 +6737,41 @@ BOOL CCustomBlurDialogExBase::OnInitDialog()
     return b;
 }
 
+void CCustomBlurDialogExBase::RefreshAeroMode()
+{
+    ApplyDwmBlurCore(TRUE);
+}
+
 void CCustomBlurDialogExBase::ApplyDwmBlur()
+{
+    ApplyDwmBlurCore(FALSE);
+}
+
+void CCustomBlurDialogExBase::ApplyDwmBlurCore(BOOL bForce)
 {
     if (!m_hWnd || !::IsWindow(m_hWnd)) return;
 #if CCUSTOM_AERO_SUPPORT
-    m_bAeroEnabled = CCC_IsAeroEnabled();
-    if (!m_bAeroEnabled)
+    const BOOL bWant = CCC_IsAeroEnabled();
+    if (bWant)
     {
-        CCC_ClearOpaqueFixerList(m_opaqueFixers);
-        CCC_ApplyAero(m_hWnd, FALSE);
-        CCC_PrepareDialogSurface(m_hWnd, FALSE);
-        PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
-        m_bBlurApplied = FALSE;
-        Invalidate();
+        if (m_bBlurApplied && !bForce)
+            return;
+        m_bAeroEnabled = TRUE;
+        CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
         return;
     }
-    CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
+
+    m_bAeroEnabled = FALSE;
+    if (!m_bBlurApplied && !bForce)
+        return;
+    CCC_ClearOpaqueFixerList(m_opaqueFixers);
+    CCC_ApplyAero(m_hWnd, FALSE);
+    CCC_PrepareDialogSurface(m_hWnd, FALSE);
+    PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
+    m_bBlurApplied = FALSE;
+    Invalidate();
 #else
+    UNREFERENCED_PARAMETER(bForce);
     m_bBlurApplied = FALSE;
 #endif
 }
@@ -6729,6 +6784,7 @@ void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_IsAeroEnabled())
     {
+        // 初回のみ Finalize。以降の再表示は DWM 属性の軽い再適用だけで足りる。
         ApplyDwmBlur();
         CCC_RefreshDialogDwmBlur(m_hWnd);
     }
@@ -6774,7 +6830,7 @@ void CCustomBlurDialogExBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 void CCustomBlurDialogExBase::OnCompositionChanged()
 {
 #if CCUSTOM_AERO_SUPPORT
-    ApplyDwmBlur();
+    ApplyDwmBlurCore(TRUE);
 #endif
 }
 

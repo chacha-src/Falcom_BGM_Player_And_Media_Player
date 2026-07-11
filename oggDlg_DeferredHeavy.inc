@@ -19,9 +19,18 @@
 		m_tooltip.Create(this);
 		m_tooltip.Activate(TRUE);
 
+		auto addTip = [this](int id, LPCTSTR text) {
+			if (!m_tooltip.GetSafeHwnd() || !text) return;
+			CWnd* w = GetDlgItem(id);
+			HWND hw = w ? w->GetSafeHwnd() : NULL;
+			if (!hw || !::IsWindow(hw)) return;
+			m_tooltip.AddTool(w, text);
+		};
+
+
 		// TODO: コントロールを追加するために以下のフォームの 1 つを使用してください:
-		// m_tooltip.AddTool(GetDlgItem(IDC_<name>), <string-table-id>);
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON1), LL14(
+		// addTip(IDC_<name>, <string-table-id>);
+		addTip(IDC_BUTTON1, LL14(
 			L"演奏中のogg/wav/mp3/avi/kpiファイルを停止します",
 			L"Stop playing ogg/wav/mp3/avi/kpi file",
 			L"Arreter la lecture du fichier ogg/wav/mp3/avi/kpi",
@@ -36,7 +45,7 @@
 			L"Afspelen van ogg/wav/mp3/avi/kpi-bestand stoppen",
 			L"Zatrzymaj odtwarzanie pliku ogg/wav/mp3/avi/kpi",
 			L"ogg/wav/mp3/avi/kpi dosyas?n?n oynat?lmas?n? durdur"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON2), LL14(
+		addTip(IDC_BUTTON2, LL14(
 			L"曲一覧表からoggを選択し再生します",
 			L"Select and play ogg from track list",
 			L"Selectionner et lire un ogg depuis la liste",
@@ -51,7 +60,7 @@
 			L"ogg selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz ogg z listy utworow",
 			L"Parca listesinden ogg sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON6), LL14(
+		addTip(IDC_BUTTON6, LL14(
 			L"曲一覧表からoggを選択し再生します",
 			L"Select and play ogg from track list",
 			L"Selectionner et lire un ogg depuis la liste",
@@ -66,7 +75,7 @@
 			L"ogg selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz ogg z listy utworow",
 			L"Parca listesinden ogg sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON7), LL14(
+		addTip(IDC_BUTTON7, LL14(
 			L"曲一覧表からoggを選択し再生します",
 			L"Select and play ogg from track list",
 			L"Selectionner et lire un ogg depuis la liste",
@@ -81,7 +90,7 @@
 			L"ogg selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz ogg z listy utworow",
 			L"Parca listesinden ogg sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON8), LL14(
+		addTip(IDC_BUTTON8, LL14(
 			L"曲一覧表からoggを選択し再生します",
 			L"Select and play ogg from track list",
 			L"Selectionner et lire un ogg depuis la liste",
@@ -96,7 +105,7 @@
 			L"ogg selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz ogg z listy utworow",
 			L"Parca listesinden ogg sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON15), LL14(
+		addTip(IDC_BUTTON15, LL14(
 			L"曲一覧表からoggを選択し再生します",
 			L"Select and play ogg from track list",
 			L"Selectionner et lire un ogg depuis la liste",
@@ -111,7 +120,7 @@
 			L"ogg selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz ogg z listy utworow",
 			L"Parca listesinden ogg sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON17), LL14(
+		addTip(IDC_BUTTON17, LL14(
 			L"曲一覧表からoggを選択し再生します",
 			L"Select and play ogg from track list",
 			L"Selectionner et lire un ogg depuis la liste",
@@ -126,7 +135,7 @@
 			L"ogg selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz ogg z listy utworow",
 			L"Parca listesinden ogg sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON19), LL14(
+		addTip(IDC_BUTTON19, LL14(
 			L"曲一覧表からoggを選択し再生します",
 			L"Select and play ogg from track list",
 			L"Selectionner et lire un ogg depuis la liste",
@@ -141,7 +150,7 @@
 			L"ogg selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz ogg z listy utworow",
 			L"Parca listesinden ogg sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON25), LL14(
+		addTip(IDC_BUTTON25, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -156,7 +165,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON23), LL14(
+		addTip(IDC_BUTTON23, LL14(
 			L"曲一覧表からoggを選択し再生します",
 			L"Select and play ogg from track list",
 			L"Selectionner et lire un ogg depuis la liste",
@@ -171,7 +180,7 @@
 			L"ogg selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz ogg z listy utworow",
 			L"Parca listesinden ogg sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON24), LL14(
+		addTip(IDC_BUTTON24, LL14(
 			L"曲一覧表からoggを選択し再生します",
 			L"Select and play ogg from track list",
 			L"Selectionner et lire un ogg depuis la liste",
@@ -186,7 +195,7 @@
 			L"ogg selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz ogg z listy utworow",
 			L"Parca listesinden ogg sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON27), LL14(
+		addTip(IDC_BUTTON27, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -201,7 +210,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON28), LL14(
+		addTip(IDC_BUTTON28, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -216,7 +225,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON31), LL14(
+		addTip(IDC_BUTTON31, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -231,7 +240,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON35), LL14(
+		addTip(IDC_BUTTON35, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -246,7 +255,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON33), LL14(
+		addTip(IDC_BUTTON33, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -261,7 +270,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON37), LL14(
+		addTip(IDC_BUTTON37, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -276,7 +285,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON39), LL14(
+		addTip(IDC_BUTTON39, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -291,7 +300,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON44), LL14(
+		addTip(IDC_BUTTON44, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -306,7 +315,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON45), LL14(
+		addTip(IDC_BUTTON45, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -321,7 +330,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON46), LL14(
+		addTip(IDC_BUTTON46, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -336,7 +345,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON47), LL14(
+		addTip(IDC_BUTTON47, LL14(
 			L"曲一覧表からmp3を選択し再生します",
 			L"Select and play mp3 from track list",
 			L"Selectionner et lire un mp3 depuis la liste",
@@ -351,7 +360,7 @@
 			L"mp3 selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz mp3 z listy utworow",
 			L"Parca listesinden mp3 sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON48), LL14(
+		addTip(IDC_BUTTON48, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -366,7 +375,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON51), LL14(
+		addTip(IDC_BUTTON51, LL14(
 			L"曲一覧表からwav(adp)を選択し再生します",
 			L"Select and play wav(adp) from track list",
 			L"Selectionner et lire un wav(adp) depuis la liste",
@@ -381,7 +390,7 @@
 			L"wav(adp) selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav(adp) z listy utworow",
 			L"Parca listesinden wav(adp) sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON53), LL14(
+		addTip(IDC_BUTTON53, LL14(
 			L"曲一覧表からwavを選択し再生します",
 			L"Select and play wav from track list",
 			L"Selectionner et lire un wav depuis la liste",
@@ -396,7 +405,7 @@
 			L"wav selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz wav z listy utworow",
 			L"Parca listesinden wav sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON54), LL14(
+		addTip(IDC_BUTTON54, LL14(
 			L"曲一覧表からmp3を選択し再生します",
 			L"Select and play mp3 from track list",
 			L"Selectionner et lire un mp3 depuis la liste",
@@ -411,7 +420,7 @@
 			L"mp3 selecteren en afspelen uit de tracklist",
 			L"Wybierz i odtworz mp3 z listy utworow",
 			L"Parca listesinden mp3 sec ve oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON57), LL14(
+		addTip(IDC_BUTTON57, LL14(
 			L"プレイリストを表示／非表示します。\n表示されている時に演奏を開始またはドロップで演奏するとリストに追加されます。\n非表示の時はリストには追加されません。\n本体へのドロップは1つだけでしたがプレイリストへのドロップは複数出来ます。",
 			L"Show/hide playlist.\nWhen visible, playback or drop adds to list.\nWhen hidden, items are not added.\nMain window accepts single drop; playlist accepts multiple.",
 			L"Afficher/masquer la liste de lecture.\nVisible : la lecture ou le depot ajoute a la liste.\nMasque : les elements ne sont pas ajoutes.\nFenetre principale : un seul depot ; liste : plusieurs.",
@@ -426,7 +435,7 @@
 			L"Afspeellijst tonen/verbergen.\nZichtbaar: afspelen of neerzetten voegt toe aan lijst.\nVerborgen: items worden niet toegevoegd.\nHoofdvenster: een bestand; afspeellijst: meerdere.",
 			L"Poka?/ukryj list? odtwarzania.\nGdy widoczna: odtwarzanie lub upuszczenie dodaje do listy.\nGdy ukryta: elementy nie s? dodawane.\nG?owne okno: jeden plik; lista: wiele.",
 			L"Calma listesini goster/gizle.\nGorunurken, oynatma veya b?rakma listeye ekler.\nGizliyken, o?eler eklenmez.\nAna pencere: tek dosya; calma listesi: birden fazla."));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON59), LL14(
+		addTip(IDC_BUTTON59, LL14(
 			L"イコライザーを設定します",
 			L"Open equalizer settings",
 			L"Ouvrir les parametres de l'egaliseur",
@@ -441,7 +450,7 @@
 			L"Equalizerinstellingen openen",
 			L"Otworz ustawienia korektora",
 			L"Ekolayzer ayarlar?n? ac"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON3), LL14(
+		addTip(IDC_BUTTON3, LL14(
 			L"演奏中のogg/wav/mp3/avi/kpiファイルを一時停止/再開します",
 			L"Pause/resume playing ogg/wav/mp3/avi/kpi file",
 			L"Suspendre/reprendre la lecture du fichier ogg/wav/mp3/avi/kpi",
@@ -456,7 +465,7 @@
 			L"Afspelen van ogg/wav/mp3/avi/kpi-bestand pauzeren/hervatten",
 			L"Wstrzymaj/wznow odtwarzanie pliku ogg/wav/mp3/avi/kpi",
 			L"ogg/wav/mp3/avi/kpi dosyas?n?n oynat?lmas?n? duraklat/devam ettir"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON4), LL14(
+		addTip(IDC_BUTTON4, LL14(
 			L"演奏中だった曲を頭から再演奏します",
 			L"Restart current track from beginning",
 			L"Redemarrer la piste depuis le debut",
@@ -471,7 +480,7 @@
 			L"Huidig nummer vanaf het begin opnieuw starten",
 			L"Uruchom ponownie bie??cy utwor od pocz?tku",
 			L"Gecerli parcay? ba?tan yeniden ba?lat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON5), LL14(
+		addTip(IDC_BUTTON5, LL14(
 			L"フェードアウトして停止します。(内蔵デコーダのみ)",
 			L"Fade out and stop (built-in decoder only)",
 			L"Fondu et arret (decodeur integre uniquement)",
@@ -486,7 +495,7 @@
 			L"Uitfaden en stoppen (alleen ingebouwde decoder)",
 			L"Wycisz i zatrzymaj (tylko wbudowany dekoder)",
 			L"Solukla?t?r ve durdur (yaln?zca dahili kod cozucu)"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON9), LL14(
+		addTip(IDC_BUTTON9, LL14(
 			L"各ゲームのフォルダ位置を指定します",
 			L"Specify folder location for each game",
 			L"Specifier l'emplacement du dossier pour chaque jeu",
@@ -501,7 +510,7 @@
 			L"Maplocatie voor elk spel opgeven",
 			L"Okre?l lokalizacj? folderu dla ka?dej gry",
 			L"Her oyun icin klasor konumunu belirt"));
-		m_tooltip.AddTool(GetDlgItem(IDOK), LL14(
+		addTip(IDOK, LL14(
 			L"簡易プレイヤを終了します",
 			L"Exit simple player",
 			L"Quitter le lecteur simple",
@@ -516,7 +525,7 @@
 			L"Eenvoudige speler afsluiten",
 			L"Zamknij prosty odtwarzacz",
 			L"Basit oynat?c?dan c?k"));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER1), LL14(
+		addTip(IDC_SLIDER1, LL14(
 			L"音量を変更します\nWindows全体の音量が関係してきます。",
 			L"Change volume\nAffects overall Windows volume.",
 			L"Modifier le volume\nAffecte le volume global de Windows.",
@@ -531,7 +540,7 @@
 			L"Volume aanpassen\nBeinvloedt het algehele Windows-volume.",
 			L"Zmie? g?o?no??\nWp?ywa na ogoln? g?o?no?? systemu Windows.",
 			L"Sesi de?i?tir\nWindows genel ses seviyesini etkiler."));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER3), LL14(
+		addTip(IDC_SLIDER3, LL14(
 			L"DirectSound音量を変更します\nこの簡易プレイヤのみの変更でとどまります。\nWindowsの音量は変化しません。",
 			L"Change DirectSound volume\nOnly affects this player.\nWindows volume unchanged.",
 			L"Modifier le volume DirectSound\nAffecte uniquement ce lecteur.\nLe volume Windows reste inchange.",
@@ -546,7 +555,7 @@
 			L"DirectSound-volume aanpassen\nBeinvloedt alleen deze speler.\nWindows-volume blijft ongewijzigd.",
 			L"Zmie? g?o?no?? DirectSound\nWp?ywa tylko na ten odtwarzacz.\nG?o?no?? Windows pozostaje bez zmian.",
 			L"DirectSound sesini de?i?tir\nYaln?zca bu oynat?c?y? etkiler.\nWindows ses seviyesi de?i?mez."));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK1), LL14(
+		addTip(IDC_CHECK1, LL14(
 			L"スペクトルアナライザー(波形)を表示/非表示します",
 			L"Show/hide spectrum analyzer (waveform)",
 			L"Afficher/masquer l'analyseur de spectre (forme d'onde)",
@@ -561,7 +570,7 @@
 			L"Spectrumanalyzer (golfvorm) tonen/verbergen",
 			L"Poka?/ukryj analizator widma (kszta?t fali)",
 			L"Spektrum analizorunu (dalga formu) goster/gizle"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK2), LL14(
+		addTip(IDC_CHECK2, LL14(
 			L"演奏中の曲をwavで保存します",
 			L"Save playing track as wav",
 			L"Enregistrer la piste en cours de lecture en wav",
@@ -576,7 +585,7 @@
 			L"Afspelend nummer opslaan als wav",
 			L"Zapisz odtwarzany utwor jako wav",
 			L"Oynat?lan parcay? wav olarak kaydet"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK3), LL14(
+		addTip(IDC_CHECK3, LL14(
 			L"動画(OPやイベント)のoggの時に動画画面も表示します",
 			L"Show video window for video ogg (OP, events)",
 			L"Afficher la fenetre video pour les ogg video (OP, evenements)",
@@ -591,7 +600,7 @@
 			L"Videovenster tonen voor video-ogg (OP, events)",
 			L"Poka? okno wideo dla ogg wideo (OP, zdarzenia)",
 			L"Video ogg (OP, olaylar) icin video penceresini goster"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK4), LL14(
+		addTip(IDC_CHECK4, LL14(
 			L"スペクトルアナライザー(波形)をモノラル表示、ステレオ表示切り替えを行います",
 			L"Switch spectrum analyzer between mono and stereo",
 			L"Basculer l'analyseur de spectre entre mono et stereo",
@@ -607,7 +616,7 @@
 			L"Prze??cz analizator widma mi?dzy mono a stereo",
 			L"Spektrum analizorunu mono ve stereo aras?nda de?i?tir"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON14), LL14(
+		addTip(IDC_BUTTON14, LL14(
 			L"「再生するゲーム」で選択されたゲームの演奏を開始します",
 			L"Start playback of games selected in \"Games to play\"",
 			L"Demarrer la lecture des jeux selectionnes dans « Jeux a lire »",
@@ -623,7 +632,7 @@
 			L"Rozpocznij odtwarzanie gier wybranych w „Grach do odtworzenia”",
 			L"\"Oynatilacak Oyunlar\"da secilen oyunlari calmaya basla"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON12), LL14(
+		addTip(IDC_BUTTON12, LL14(
 			L"拡張パネルを開く/閉じる",
 			L"Open/close extended panel",
 			L"Ouvrir/fermer le panneau etendu",
@@ -639,7 +648,7 @@
 			L"Otworz/zamknij rozszerzony panel",
 			L"Geni?letilmi? paneli ac/kapat"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON21), LL14(
+		addTip(IDC_BUTTON21, LL14(
 			L"各種設定を行います。",
 			L"Open settings.",
 			L"Ouvrir les parametres.",
@@ -655,7 +664,7 @@
 			L"Otworz ustawienia.",
 			L"Ayarlar? ac."));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK5), LL14(
+		addTip(IDC_CHECK5, LL14(
 			L"「再生するゲーム」で選択されているゲームをランダムに演奏します",
 			L"Random play from selected games",
 			L"Lecture aleatoire depuis les jeux selectionnes",
@@ -670,7 +679,7 @@
 			L"Willekeurig afspelen van geselecteerde spellen",
 			L"Losowe odtwarzanie z wybranych gier",
 			L"Secilen oyunlardan rastgele oynat"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK6), LL14(
+		addTip(IDC_CHECK6, LL14(
 			L"「再生するゲーム」で選択されているゲームを順番に演奏します", /* 日本語 */
 			L"Plays the games selected in \"Games to Play\" in order.", /* 英語 */
 			L"Joue les jeux sélectionnés dans « Jeux à lire » dans l'ordre.", /* フランス語 */
@@ -686,27 +695,27 @@
 			L"Odtwarza gry wybrane w „Gry do odtworzenia” w odpowiedniej kolejności.", /* ポーランド語 */
 			L"\"Oynatılacak Oyunlar\" kısmında seçilen oyunları sırayla oynatır.")); /* トルコ語 */
 
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK7), LL14(L"「再生するゲーム」の対象：YS6 ナピシュテムの匣", L"Include in \"Games to play\": Ys VI Napishtim no Hako", L"Inclure dans « Jeux a lire » : Ys VI Napishtim no Hako", L"Includi in \"Giochi da riprodurre\": Ys VI Napishtim no Hako", L"Incluir en \"Juegos a reproducir\": Ys VI Napishtim no Hako", L"「재생할 게임」 대상: Ys VI Napishtim no Hako", L"纳入「播放游戏」：Ys VI Napishtim no Hako", L"ضمن \"ألعاب للتشغيل\": Ys VI Napishtim no Hako", L"В «Игры для воспроизведения»: Ys VI Napishtim no Hako", L"In „Wiederzugebende Spiele“: Ys VI Napishtim no Hako", L"Incluir em \"Jogos a reproduzir\": Ys VI Napishtim no Hako", L"Opnemen in \"Af te spelen spellen\": Ys VI Napishtim no Hako", L"W „Grach do odtworzenia”: Ys VI Napishtim no Hako", L"\"Oynatilacak Oyunlar\" hedefi: Ys VI Napishtim no Hako"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK8), LL14(L"「再生するゲーム」の対象：YS フェルガナの誓い", L"Include in \"Games to play\": Ys Felghana no Chikai", L"Inclure dans « Jeux a lire » : Ys Felghana no Chikai", L"Includi in \"Giochi da riprodurre\": Ys Felghana no Chikai", L"Incluir en \"Juegos a reproducir\": Ys Felghana no Chikai", L"「재생할 게임」 대상: Ys Felghana no Chikai", L"纳入「播放游戏」：Ys Felghana no Chikai", L"ضمن \"ألعاب للتشغيل\": Ys Felghana no Chikai", L"В «Игры для воспроизведения»: Ys Felghana no Chikai", L"In „Wiederzugebende Spiele“: Ys Felghana no Chikai", L"Incluir em \"Jogos a reproduzir\": Ys Felghana no Chikai", L"Opnemen in \"Af te spelen spellen\": Ys Felghana no Chikai", L"W „Grach do odtworzenia”: Ys Felghana no Chikai", L"\"Oynatilacak Oyunlar\" hedefi: Ys Felghana no Chikai"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK9), LL14(L"「再生するゲーム」の対象：英雄伝説6空の軌跡FC", L"Include in \"Games to play\": Legend of Heroes VI Trails in the Sky FC", L"Inclure dans « Jeux a lire » : Legende des Heros VI Les Sentiers du Ciel FC", L"Includi in \"Giochi da riprodurre\": Legend of Heroes VI Trails in the Sky FC", L"Incluir en \"Juegos a reproducir\": Legend of Heroes VI Trails in the Sky FC", L"「재생할 게임」 대상: 영웅전설6 하늘의 궤적 FC", L"纳入「播放游戏」：英雄传说6 空之轨迹FC", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes VI Trails in the Sky FC", L"В «Игры для воспроизведения»: Legend of Heroes VI Trails in the Sky FC", L"In „Wiederzugebende Spiele“: Legend of Heroes VI Trails in the Sky FC", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes VI Trails in the Sky FC", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes VI Trails in the Sky FC", L"W „Grach do odtworzenia”: Legend of Heroes VI Trails in the Sky FC", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes VI Trails in the Sky FC"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK10), LL14(L"「再生するゲーム」の対象：英雄伝説6空の軌跡SC", L"Include in \"Games to play\": Legend of Heroes VI Trails in the Sky SC", L"Inclure dans « Jeux a lire » : Legende des Heros VI Les Sentiers du Ciel SC", L"Includi in \"Giochi da riprodurre\": Legend of Heroes VI Trails in the Sky SC", L"Incluir en \"Juegos a reproducir\": Legend of Heroes VI Trails in the Sky SC", L"「재생할 게임」 대상: 영웅전설6 하늘의 궤적 SC", L"纳入「播放游戏」：英雄传说6 空之轨迹SC", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes VI Trails in the Sky SC", L"В «Игры для воспроизведения»: Legend of Heroes VI Trails in the Sky SC", L"In „Wiederzugebende Spiele“: Legend of Heroes VI Trails in the Sky SC", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes VI Trails in the Sky SC", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes VI Trails in the Sky SC", L"W „Grach do odtworzenia”: Legend of Heroes VI Trails in the Sky SC", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes VI Trails in the Sky SC"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK11), LL14(L"「再生するゲーム」の対象：YS オリジン", L"Include in \"Games to play\": Ys Origin", L"Inclure dans « Jeux a lire » : Ys Origin", L"Includi in \"Giochi da riprodurre\": Ys Origin", L"Incluir en \"Juegos a reproducir\": Ys Origin", L"「재생할 게임」 대상: Ys Origin", L"纳入「播放游戏」：Ys Origin", L"ضمن \"ألعاب للتشغيل\": Ys Origin", L"В «Игры для воспроизведения»: Ys Origin", L"In „Wiederzugebende Spiele“: Ys Origin", L"Incluir em \"Jogos a reproduzir\": Ys Origin", L"Opnemen in \"Af te spelen spellen\": Ys Origin", L"W „Grach do odtworzenia”: Ys Origin", L"\"Oynatilacak Oyunlar\" hedefi: Ys Origin"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK12), LL14(L"「再生するゲーム」の対象：英雄伝説6空の軌跡TC", L"Include in \"Games to play\": Legend of Heroes VI Trails in the Sky The 3rd", L"Inclure dans « Jeux a lire » : Legende des Heros VI Les Sentiers du Ciel The 3rd", L"Includi in \"Giochi da riprodurre\": Legend of Heroes VI Trails in the Sky The 3rd", L"Incluir en \"Juegos a reproducir\": Legend of Heroes VI Trails in the Sky The 3rd", L"「재생할 게임」 대상: 영웅전설6 하늘의 궤적 The 3rd", L"纳入「播放游戏」：英雄传说6 空之轨迹The3rd", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes VI Trails in the Sky The 3rd", L"В «Игры для воспроизведения»: Legend of Heroes VI Trails in the Sky The 3rd", L"In „Wiederzugebende Spiele“: Legend of Heroes VI Trails in the Sky The 3rd", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes VI Trails in the Sky The 3rd", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes VI Trails in the Sky The 3rd", L"W „Grach do odtworzenia”: Legend of Heroes VI Trails in the Sky The 3rd", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes VI Trails in the Sky The 3rd"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK13), LL14(L"「再生するゲーム」の対象：ZWEI II", L"Include in \"Games to play\": ZWEI II", L"Inclure dans « Jeux a lire » : ZWEI II", L"Includi in \"Giochi da riprodurre\": ZWEI II", L"Incluir en \"Juegos a reproducir\": ZWEI II", L"「재생할 게임」 대상: ZWEI II", L"纳入「播放游戏」：ZWEI II", L"ضمن \"ألعاب للتشغيل\": ZWEI II", L"В «Игры для воспроизведения»: ZWEI II", L"In „Wiederzugebende Spiele“: ZWEI II", L"Incluir em \"Jogos a reproduzir\": ZWEI II", L"Opnemen in \"Af te spelen spellen\": ZWEI II", L"W „Grach do odtworzenia”: ZWEI II", L"\"Oynatilacak Oyunlar\" hedefi: ZWEI II"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK14), LL14(L"「再生するゲーム」の対象：Ys Chronicles Ys 1", L"Include in \"Games to play\": Ys Chronicles Ys 1", L"Inclure dans « Jeux a lire » : Ys Chronicles Ys 1", L"Includi in \"Giochi da riprodurre\": Ys Chronicles Ys 1", L"Incluir en \"Juegos a reproducir\": Ys Chronicles Ys 1", L"「재생할 게임」 대상: Ys Chronicles Ys 1", L"纳入「播放游戏」：Ys Chronicles Ys 1", L"ضمن \"ألعاب للتشغيل\": Ys Chronicles Ys 1", L"В «Игры для воспроизведения»: Ys Chronicles Ys 1", L"In „Wiederzugebende Spiele“: Ys Chronicles Ys 1", L"Incluir em \"Jogos a reproduzir\": Ys Chronicles Ys 1", L"Opnemen in \"Af te spelen spellen\": Ys Chronicles Ys 1", L"W „Grach do odtworzenia”: Ys Chronicles Ys 1", L"\"Oynatilacak Oyunlar\" hedefi: Ys Chronicles Ys 1"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK15), LL14(L"「再生するゲーム」の対象：Ys Chronicles Ys 2", L"Include in \"Games to play\": Ys Chronicles Ys 2", L"Inclure dans « Jeux a lire » : Ys Chronicles Ys 2", L"Includi in \"Giochi da riprodurre\": Ys Chronicles Ys 2", L"Incluir en \"Juegos a reproducir\": Ys Chronicles Ys 2", L"「재생할 게임」 대상: Ys Chronicles Ys 2", L"纳入「播放游戏」：Ys Chronicles Ys 2", L"ضمن \"ألعاب للتشغيل\": Ys Chronicles Ys 2", L"В «Игры для воспроизведения»: Ys Chronicles Ys 2", L"In „Wiederzugebende Spiele“: Ys Chronicles Ys 2", L"Incluir em \"Jogos a reproduzir\": Ys Chronicles Ys 2", L"Opnemen in \"Af te spelen spellen\": Ys Chronicles Ys 2", L"W „Grach do odtworzenia”: Ys Chronicles Ys 2", L"\"Oynatilacak Oyunlar\" hedefi: Ys Chronicles Ys 2"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK16), LL14(L"「再生するゲーム」の対象：XANADU NEXT", L"Include in \"Games to play\": XANADU NEXT", L"Inclure dans « Jeux a lire » : XANADU NEXT", L"Includi in \"Giochi da riprodurre\": XANADU NEXT", L"Incluir en \"Juegos a reproducir\": XANADU NEXT", L"「재생할 게임」 대상: XANADU NEXT", L"纳入「播放游戏」：XANADU NEXT", L"ضمن \"ألعاب للتشغيل\": XANADU NEXT", L"В «Игры для воспроизведения»: XANADU NEXT", L"In „Wiederzugebende Spiele“: XANADU NEXT", L"Incluir em \"Jogos a reproduzir\": XANADU NEXT", L"Opnemen in \"Af te spelen spellen\": XANADU NEXT", L"W „Grach do odtworzenia”: XANADU NEXT", L"\"Oynatilacak Oyunlar\" hedefi: XANADU NEXT"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK17), LL14(L"「再生するゲーム」の対象：Ys 完全版 Ys 1", L"Include in \"Games to play\": Ys Complete Ys 1", L"Inclure dans « Jeux a lire » : Ys Complete Ys 1", L"Includi in \"Giochi da riprodurre\": Ys Complete Ys 1", L"Incluir en \"Juegos a reproducir\": Ys Complete Ys 1", L"「재생할 게임」 대상: Ys Complete Ys 1", L"纳入「播放游戏」：Ys Complete Ys 1", L"ضمن \"ألعاب للتشغيل\": Ys Complete Ys 1", L"В «Игры для воспроизведения»: Ys Complete Ys 1", L"In „Wiederzugebende Spiele“: Ys Complete Ys 1", L"Incluir em \"Jogos a reproduzir\": Ys Complete Ys 1", L"Opnemen in \"Af te spelen spellen\": Ys Complete Ys 1", L"W „Grach do odtworzenia”: Ys Complete Ys 1", L"\"Oynatilacak Oyunlar\" hedefi: Ys Complete Ys 1"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK18), LL14(L"「再生するゲーム」の対象：Ys 完全版 Ys 2", L"Include in \"Games to play\": Ys Complete Ys 2", L"Inclure dans « Jeux a lire » : Ys Complete Ys 2", L"Includi in \"Giochi da riprodurre\": Ys Complete Ys 2", L"Incluir en \"Juegos a reproducir\": Ys Complete Ys 2", L"「재생할 게임」 대상: Ys Complete Ys 2", L"纳入「播放游戏」：Ys Complete Ys 2", L"ضمن \"ألعاب للتشغيل\": Ys Complete Ys 2", L"В «Игры для воспроизведения»: Ys Complete Ys 2", L"In „Wiederzugebende Spiele“: Ys Complete Ys 2", L"Incluir em \"Jogos a reproduzir\": Ys Complete Ys 2", L"Opnemen in \"Af te spelen spellen\": Ys Complete Ys 2", L"W „Grach do odtworzenia”: Ys Complete Ys 2", L"\"Oynatilacak Oyunlar\" hedefi: Ys Complete Ys 2"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK19), LL14(L"「再生するゲーム」の対象：Sorcerian Original", L"Include in \"Games to play\": Sorcerian Original", L"Inclure dans « Jeux a lire » : Sorcerian Original", L"Includi in \"Giochi da riprodurre\": Sorcerian Original", L"Incluir en \"Juegos a reproducir\": Sorcerian Original", L"「재생할 게임」 대상: Sorcerian Original", L"纳入「播放游戏」：Sorcerian Original", L"ضمن \"ألعاب للتشغيل\": Sorcerian Original", L"В «Игры для воспроизведения»: Sorcerian Original", L"In „Wiederzugebende Spiele“: Sorcerian Original", L"Incluir em \"Jogos a reproduzir\": Sorcerian Original", L"Opnemen in \"Af te spelen spellen\": Sorcerian Original", L"W „Grach do odtworzenia”: Sorcerian Original", L"\"Oynatilacak Oyunlar\" hedefi: Sorcerian Original"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK20), LL14(L"「再生するゲーム」の対象：Zwei!!", L"Include in \"Games to play\": Zwei!!", L"Inclure dans « Jeux a lire » : Zwei!!", L"Includi in \"Giochi da riprodurre\": Zwei!!", L"Incluir en \"Juegos a reproducir\": Zwei!!", L"「재생할 게임」 대상: Zwei!!", L"纳入「播放游戏」：Zwei!!", L"ضمن \"ألعاب للتشغيل\": Zwei!!", L"В «Игры для воспроизведения»: Zwei!!", L"In „Wiederzugebende Spiele“: Zwei!!", L"Incluir em \"Jogos a reproduzir\": Zwei!!", L"Opnemen in \"Af te spelen spellen\": Zwei!!", L"W „Grach do odtworzenia”: Zwei!!", L"\"Oynatilacak Oyunlar\" hedefi: Zwei!!"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK21), LL14(L"「再生するゲーム」の対象：ぐるみん", L"Include in \"Games to play\": Gurumin", L"Inclure dans « Jeux a lire » : Gurumin", L"Includi in \"Giochi da riprodurre\": Gurumin", L"Incluir en \"Juegos a reproducir\": Gurumin", L"「재생할 게임」 대상: 그루민", L"纳入「播放游戏」：咕噜小天使", L"ضمن \"ألعاب للتشغيل\": Gurumin", L"В «Игры для воспроизведения»: Gurumin", L"In „Wiederzugebende Spiele“: Gurumin", L"Incluir em \"Jogos a reproduzir\": Gurumin", L"Opnemen in \"Af te spelen spellen\": Gurumin", L"W „Grach do odtworzenia”: Gurumin", L"\"Oynatilacak Oyunlar\" hedefi: Gurumin"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK22), LL14(L"「再生するゲーム」の対象：ダイナソア リザレクション", L"Include in \"Games to play\": Dinosaur Resurrection", L"Inclure dans « Jeux a lire » : Resurrection Dinosaure", L"Includi in \"Giochi da riprodurre\": Resurrezione Dinosauro", L"Incluir en \"Juegos a reproducir\": Resurreccion Dinosaurio", L"「재생할 게임」 대상: 공룡 부활", L"纳入「播放游戏」：恐龙复活", L"ضمن \"ألعاب للتشغيل\": Dinosaur Resurrection", L"В «Игры для воспроизведения»: Dinosaur Resurrection", L"In „Wiederzugebende Spiele“: Dinosaurier Auferstehung", L"Incluir em \"Jogos a reproduzir\": Ressurreicao Dinossauro", L"Opnemen in \"Af te spelen spellen\": Dinosaurus Herrijzenis", L"W „Grach do odtworzenia”: Dinozaur Zmartwychwstanie", L"\"Oynatilacak Oyunlar\" hedefi: Dinozor Dirilisi"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK23), LL14(L"「再生するゲーム」の対象：ブランディッシュ４", L"Include in \"Games to play\": Brandish4", L"Inclure dans « Jeux a lire » : Brandish4", L"Includi in \"Giochi da riprodurre\": Brandish4", L"Incluir en \"Juegos a reproducir\": Brandish4", L"「재생할 게임」 대상: Brandish4", L"纳入「播放游戏」：Brandish4", L"ضمن \"ألعاب للتشغيل\": Brandish4", L"В «Игры для воспроизведения»: Brandish4", L"In „Wiederzugebende Spiele“: Brandish4", L"Incluir em \"Jogos a reproduzir\": Brandish4", L"Opnemen in \"Af te spelen spellen\": Brandish4", L"W „Grach do odtworzenia”: Brandish4", L"\"Oynatilacak Oyunlar\" hedefi: Brandish4"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK24), LL14(L"「再生するゲーム」の対象：英雄伝説III 白き魔女", L"Include in \"Games to play\": Legend of Heroes III White Witch", L"Inclure dans « Jeux a lire » : Legende des Heros III Sorciere Blanche", L"Includi in \"Giochi da riprodurre\": Legend of Heroes III Strega Bianca", L"Incluir en \"Juegos a reproducir\": Legend of Heroes III Bruja Blanca", L"「재생할 게임」 대상: 영웅전설III 흰 마녀", L"纳入「播放游戏」：英雄传说III 白之魔女", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes III White Witch", L"В «Игры для воспроизведения»: Legend of Heroes III White Witch", L"In „Wiederzugebende Spiele“: Legend of Heroes III Weise Hexe", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes III Bruxa Branca", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes III White Witch", L"W „Grach do odtworzenia”: Legend of Heroes III Biala Czarownica", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes III White Witch"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK25), LL14(L"「再生するゲーム」の対象：英雄伝説IV 朱紅い雫", L"Include in \"Games to play\": Legend of Heroes IV Tear of Vermillion", L"Inclure dans « Jeux a lire » : Legende des Heros IV Larme de Vermillon", L"Includi in \"Giochi da riprodurre\": Legend of Heroes IV Lacrima di Vermiglio", L"Incluir en \"Juegos a reproducir\": Legend of Heroes IV Lagrima de Bermellon", L"「재생할 게임」 대상: 영웅전설IV 주홍의 눈물", L"纳入「播放游戏」：英雄传说IV 朱红之泪", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes IV Tear of Vermillion", L"В «Игры для воспроизведения»: Legend of Heroes IV Tear of Vermillion", L"In „Wiederzugebende Spiele“: Legend of Heroes IV Trane der Purpur", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes IV Tear of Vermillion", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes IV Tear of Vermillion", L"W „Grach do odtworzenia”: Legend of Heroes IV Tear of Vermillion", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes IV Tear of Vermillion"));
-		m_tooltip.AddTool(GetDlgItem(IDC_CHECK26), LL14(L"「再生するゲーム」の対象：英雄伝説V 海の檻歌", L"Include in \"Games to play\": Legend of Heroes V Cagesong of the Ocean", L"Inclure dans « Jeux a lire » : Legende des Heros V Chant des Profondeurs", L"Includi in \"Giochi da riprodurre\": Legend of Heroes V Canto dell'Oceano", L"Incluir en \"Juegos a reproducir\": Legend of Heroes V Cantico del Oceano", L"「재생할 게임」 대상: 영웅전설V 바다의 감옥가", L"纳入「播放游戏」：英雄传说V 海之槛歌", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes V Cagesong of the Ocean", L"В «Игры для воспроизведения»: Legend of Heroes V Cagesong of the Ocean", L"In „Wiederzugebende Spiele“: Legend of Heroes V Käfiglied des Ozeans", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes V Cagesong of the Ocean", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes V Cagesong of the Ocean", L"W „Grach do odtworzenia”: Legend of Heroes V Cagesong of the Ocean", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes V Cagesong of the Ocean"));
-		m_tooltip.AddTool(GetDlgItem(IDC_BUTTON58), LL14(
+		addTip(IDC_CHECK7, LL14(L"「再生するゲーム」の対象：YS6 ナピシュテムの匣", L"Include in \"Games to play\": Ys VI Napishtim no Hako", L"Inclure dans « Jeux a lire » : Ys VI Napishtim no Hako", L"Includi in \"Giochi da riprodurre\": Ys VI Napishtim no Hako", L"Incluir en \"Juegos a reproducir\": Ys VI Napishtim no Hako", L"「재생할 게임」 대상: Ys VI Napishtim no Hako", L"纳入「播放游戏」：Ys VI Napishtim no Hako", L"ضمن \"ألعاب للتشغيل\": Ys VI Napishtim no Hako", L"В «Игры для воспроизведения»: Ys VI Napishtim no Hako", L"In „Wiederzugebende Spiele“: Ys VI Napishtim no Hako", L"Incluir em \"Jogos a reproduzir\": Ys VI Napishtim no Hako", L"Opnemen in \"Af te spelen spellen\": Ys VI Napishtim no Hako", L"W „Grach do odtworzenia”: Ys VI Napishtim no Hako", L"\"Oynatilacak Oyunlar\" hedefi: Ys VI Napishtim no Hako"));
+		addTip(IDC_CHECK8, LL14(L"「再生するゲーム」の対象：YS フェルガナの誓い", L"Include in \"Games to play\": Ys Felghana no Chikai", L"Inclure dans « Jeux a lire » : Ys Felghana no Chikai", L"Includi in \"Giochi da riprodurre\": Ys Felghana no Chikai", L"Incluir en \"Juegos a reproducir\": Ys Felghana no Chikai", L"「재생할 게임」 대상: Ys Felghana no Chikai", L"纳入「播放游戏」：Ys Felghana no Chikai", L"ضمن \"ألعاب للتشغيل\": Ys Felghana no Chikai", L"В «Игры для воспроизведения»: Ys Felghana no Chikai", L"In „Wiederzugebende Spiele“: Ys Felghana no Chikai", L"Incluir em \"Jogos a reproduzir\": Ys Felghana no Chikai", L"Opnemen in \"Af te spelen spellen\": Ys Felghana no Chikai", L"W „Grach do odtworzenia”: Ys Felghana no Chikai", L"\"Oynatilacak Oyunlar\" hedefi: Ys Felghana no Chikai"));
+		addTip(IDC_CHECK9, LL14(L"「再生するゲーム」の対象：英雄伝説6空の軌跡FC", L"Include in \"Games to play\": Legend of Heroes VI Trails in the Sky FC", L"Inclure dans « Jeux a lire » : Legende des Heros VI Les Sentiers du Ciel FC", L"Includi in \"Giochi da riprodurre\": Legend of Heroes VI Trails in the Sky FC", L"Incluir en \"Juegos a reproducir\": Legend of Heroes VI Trails in the Sky FC", L"「재생할 게임」 대상: 영웅전설6 하늘의 궤적 FC", L"纳入「播放游戏」：英雄传说6 空之轨迹FC", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes VI Trails in the Sky FC", L"В «Игры для воспроизведения»: Legend of Heroes VI Trails in the Sky FC", L"In „Wiederzugebende Spiele“: Legend of Heroes VI Trails in the Sky FC", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes VI Trails in the Sky FC", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes VI Trails in the Sky FC", L"W „Grach do odtworzenia”: Legend of Heroes VI Trails in the Sky FC", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes VI Trails in the Sky FC"));
+		addTip(IDC_CHECK10, LL14(L"「再生するゲーム」の対象：英雄伝説6空の軌跡SC", L"Include in \"Games to play\": Legend of Heroes VI Trails in the Sky SC", L"Inclure dans « Jeux a lire » : Legende des Heros VI Les Sentiers du Ciel SC", L"Includi in \"Giochi da riprodurre\": Legend of Heroes VI Trails in the Sky SC", L"Incluir en \"Juegos a reproducir\": Legend of Heroes VI Trails in the Sky SC", L"「재생할 게임」 대상: 영웅전설6 하늘의 궤적 SC", L"纳入「播放游戏」：英雄传说6 空之轨迹SC", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes VI Trails in the Sky SC", L"В «Игры для воспроизведения»: Legend of Heroes VI Trails in the Sky SC", L"In „Wiederzugebende Spiele“: Legend of Heroes VI Trails in the Sky SC", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes VI Trails in the Sky SC", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes VI Trails in the Sky SC", L"W „Grach do odtworzenia”: Legend of Heroes VI Trails in the Sky SC", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes VI Trails in the Sky SC"));
+		addTip(IDC_CHECK11, LL14(L"「再生するゲーム」の対象：YS オリジン", L"Include in \"Games to play\": Ys Origin", L"Inclure dans « Jeux a lire » : Ys Origin", L"Includi in \"Giochi da riprodurre\": Ys Origin", L"Incluir en \"Juegos a reproducir\": Ys Origin", L"「재생할 게임」 대상: Ys Origin", L"纳入「播放游戏」：Ys Origin", L"ضمن \"ألعاب للتشغيل\": Ys Origin", L"В «Игры для воспроизведения»: Ys Origin", L"In „Wiederzugebende Spiele“: Ys Origin", L"Incluir em \"Jogos a reproduzir\": Ys Origin", L"Opnemen in \"Af te spelen spellen\": Ys Origin", L"W „Grach do odtworzenia”: Ys Origin", L"\"Oynatilacak Oyunlar\" hedefi: Ys Origin"));
+		addTip(IDC_CHECK12, LL14(L"「再生するゲーム」の対象：英雄伝説6空の軌跡TC", L"Include in \"Games to play\": Legend of Heroes VI Trails in the Sky The 3rd", L"Inclure dans « Jeux a lire » : Legende des Heros VI Les Sentiers du Ciel The 3rd", L"Includi in \"Giochi da riprodurre\": Legend of Heroes VI Trails in the Sky The 3rd", L"Incluir en \"Juegos a reproducir\": Legend of Heroes VI Trails in the Sky The 3rd", L"「재생할 게임」 대상: 영웅전설6 하늘의 궤적 The 3rd", L"纳入「播放游戏」：英雄传说6 空之轨迹The3rd", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes VI Trails in the Sky The 3rd", L"В «Игры для воспроизведения»: Legend of Heroes VI Trails in the Sky The 3rd", L"In „Wiederzugebende Spiele“: Legend of Heroes VI Trails in the Sky The 3rd", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes VI Trails in the Sky The 3rd", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes VI Trails in the Sky The 3rd", L"W „Grach do odtworzenia”: Legend of Heroes VI Trails in the Sky The 3rd", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes VI Trails in the Sky The 3rd"));
+		addTip(IDC_CHECK13, LL14(L"「再生するゲーム」の対象：ZWEI II", L"Include in \"Games to play\": ZWEI II", L"Inclure dans « Jeux a lire » : ZWEI II", L"Includi in \"Giochi da riprodurre\": ZWEI II", L"Incluir en \"Juegos a reproducir\": ZWEI II", L"「재생할 게임」 대상: ZWEI II", L"纳入「播放游戏」：ZWEI II", L"ضمن \"ألعاب للتشغيل\": ZWEI II", L"В «Игры для воспроизведения»: ZWEI II", L"In „Wiederzugebende Spiele“: ZWEI II", L"Incluir em \"Jogos a reproduzir\": ZWEI II", L"Opnemen in \"Af te spelen spellen\": ZWEI II", L"W „Grach do odtworzenia”: ZWEI II", L"\"Oynatilacak Oyunlar\" hedefi: ZWEI II"));
+		addTip(IDC_CHECK14, LL14(L"「再生するゲーム」の対象：Ys Chronicles Ys 1", L"Include in \"Games to play\": Ys Chronicles Ys 1", L"Inclure dans « Jeux a lire » : Ys Chronicles Ys 1", L"Includi in \"Giochi da riprodurre\": Ys Chronicles Ys 1", L"Incluir en \"Juegos a reproducir\": Ys Chronicles Ys 1", L"「재생할 게임」 대상: Ys Chronicles Ys 1", L"纳入「播放游戏」：Ys Chronicles Ys 1", L"ضمن \"ألعاب للتشغيل\": Ys Chronicles Ys 1", L"В «Игры для воспроизведения»: Ys Chronicles Ys 1", L"In „Wiederzugebende Spiele“: Ys Chronicles Ys 1", L"Incluir em \"Jogos a reproduzir\": Ys Chronicles Ys 1", L"Opnemen in \"Af te spelen spellen\": Ys Chronicles Ys 1", L"W „Grach do odtworzenia”: Ys Chronicles Ys 1", L"\"Oynatilacak Oyunlar\" hedefi: Ys Chronicles Ys 1"));
+		addTip(IDC_CHECK15, LL14(L"「再生するゲーム」の対象：Ys Chronicles Ys 2", L"Include in \"Games to play\": Ys Chronicles Ys 2", L"Inclure dans « Jeux a lire » : Ys Chronicles Ys 2", L"Includi in \"Giochi da riprodurre\": Ys Chronicles Ys 2", L"Incluir en \"Juegos a reproducir\": Ys Chronicles Ys 2", L"「재생할 게임」 대상: Ys Chronicles Ys 2", L"纳入「播放游戏」：Ys Chronicles Ys 2", L"ضمن \"ألعاب للتشغيل\": Ys Chronicles Ys 2", L"В «Игры для воспроизведения»: Ys Chronicles Ys 2", L"In „Wiederzugebende Spiele“: Ys Chronicles Ys 2", L"Incluir em \"Jogos a reproduzir\": Ys Chronicles Ys 2", L"Opnemen in \"Af te spelen spellen\": Ys Chronicles Ys 2", L"W „Grach do odtworzenia”: Ys Chronicles Ys 2", L"\"Oynatilacak Oyunlar\" hedefi: Ys Chronicles Ys 2"));
+		addTip(IDC_CHECK16, LL14(L"「再生するゲーム」の対象：XANADU NEXT", L"Include in \"Games to play\": XANADU NEXT", L"Inclure dans « Jeux a lire » : XANADU NEXT", L"Includi in \"Giochi da riprodurre\": XANADU NEXT", L"Incluir en \"Juegos a reproducir\": XANADU NEXT", L"「재생할 게임」 대상: XANADU NEXT", L"纳入「播放游戏」：XANADU NEXT", L"ضمن \"ألعاب للتشغيل\": XANADU NEXT", L"В «Игры для воспроизведения»: XANADU NEXT", L"In „Wiederzugebende Spiele“: XANADU NEXT", L"Incluir em \"Jogos a reproduzir\": XANADU NEXT", L"Opnemen in \"Af te spelen spellen\": XANADU NEXT", L"W „Grach do odtworzenia”: XANADU NEXT", L"\"Oynatilacak Oyunlar\" hedefi: XANADU NEXT"));
+		addTip(IDC_CHECK17, LL14(L"「再生するゲーム」の対象：Ys 完全版 Ys 1", L"Include in \"Games to play\": Ys Complete Ys 1", L"Inclure dans « Jeux a lire » : Ys Complete Ys 1", L"Includi in \"Giochi da riprodurre\": Ys Complete Ys 1", L"Incluir en \"Juegos a reproducir\": Ys Complete Ys 1", L"「재생할 게임」 대상: Ys Complete Ys 1", L"纳入「播放游戏」：Ys Complete Ys 1", L"ضمن \"ألعاب للتشغيل\": Ys Complete Ys 1", L"В «Игры для воспроизведения»: Ys Complete Ys 1", L"In „Wiederzugebende Spiele“: Ys Complete Ys 1", L"Incluir em \"Jogos a reproduzir\": Ys Complete Ys 1", L"Opnemen in \"Af te spelen spellen\": Ys Complete Ys 1", L"W „Grach do odtworzenia”: Ys Complete Ys 1", L"\"Oynatilacak Oyunlar\" hedefi: Ys Complete Ys 1"));
+		addTip(IDC_CHECK18, LL14(L"「再生するゲーム」の対象：Ys 完全版 Ys 2", L"Include in \"Games to play\": Ys Complete Ys 2", L"Inclure dans « Jeux a lire » : Ys Complete Ys 2", L"Includi in \"Giochi da riprodurre\": Ys Complete Ys 2", L"Incluir en \"Juegos a reproducir\": Ys Complete Ys 2", L"「재생할 게임」 대상: Ys Complete Ys 2", L"纳入「播放游戏」：Ys Complete Ys 2", L"ضمن \"ألعاب للتشغيل\": Ys Complete Ys 2", L"В «Игры для воспроизведения»: Ys Complete Ys 2", L"In „Wiederzugebende Spiele“: Ys Complete Ys 2", L"Incluir em \"Jogos a reproduzir\": Ys Complete Ys 2", L"Opnemen in \"Af te spelen spellen\": Ys Complete Ys 2", L"W „Grach do odtworzenia”: Ys Complete Ys 2", L"\"Oynatilacak Oyunlar\" hedefi: Ys Complete Ys 2"));
+		addTip(IDC_CHECK19, LL14(L"「再生するゲーム」の対象：Sorcerian Original", L"Include in \"Games to play\": Sorcerian Original", L"Inclure dans « Jeux a lire » : Sorcerian Original", L"Includi in \"Giochi da riprodurre\": Sorcerian Original", L"Incluir en \"Juegos a reproducir\": Sorcerian Original", L"「재생할 게임」 대상: Sorcerian Original", L"纳入「播放游戏」：Sorcerian Original", L"ضمن \"ألعاب للتشغيل\": Sorcerian Original", L"В «Игры для воспроизведения»: Sorcerian Original", L"In „Wiederzugebende Spiele“: Sorcerian Original", L"Incluir em \"Jogos a reproduzir\": Sorcerian Original", L"Opnemen in \"Af te spelen spellen\": Sorcerian Original", L"W „Grach do odtworzenia”: Sorcerian Original", L"\"Oynatilacak Oyunlar\" hedefi: Sorcerian Original"));
+		addTip(IDC_CHECK20, LL14(L"「再生するゲーム」の対象：Zwei!!", L"Include in \"Games to play\": Zwei!!", L"Inclure dans « Jeux a lire » : Zwei!!", L"Includi in \"Giochi da riprodurre\": Zwei!!", L"Incluir en \"Juegos a reproducir\": Zwei!!", L"「재생할 게임」 대상: Zwei!!", L"纳入「播放游戏」：Zwei!!", L"ضمن \"ألعاب للتشغيل\": Zwei!!", L"В «Игры для воспроизведения»: Zwei!!", L"In „Wiederzugebende Spiele“: Zwei!!", L"Incluir em \"Jogos a reproduzir\": Zwei!!", L"Opnemen in \"Af te spelen spellen\": Zwei!!", L"W „Grach do odtworzenia”: Zwei!!", L"\"Oynatilacak Oyunlar\" hedefi: Zwei!!"));
+		addTip(IDC_CHECK21, LL14(L"「再生するゲーム」の対象：ぐるみん", L"Include in \"Games to play\": Gurumin", L"Inclure dans « Jeux a lire » : Gurumin", L"Includi in \"Giochi da riprodurre\": Gurumin", L"Incluir en \"Juegos a reproducir\": Gurumin", L"「재생할 게임」 대상: 그루민", L"纳入「播放游戏」：咕噜小天使", L"ضمن \"ألعاب للتشغيل\": Gurumin", L"В «Игры для воспроизведения»: Gurumin", L"In „Wiederzugebende Spiele“: Gurumin", L"Incluir em \"Jogos a reproduzir\": Gurumin", L"Opnemen in \"Af te spelen spellen\": Gurumin", L"W „Grach do odtworzenia”: Gurumin", L"\"Oynatilacak Oyunlar\" hedefi: Gurumin"));
+		addTip(IDC_CHECK22, LL14(L"「再生するゲーム」の対象：ダイナソア リザレクション", L"Include in \"Games to play\": Dinosaur Resurrection", L"Inclure dans « Jeux a lire » : Resurrection Dinosaure", L"Includi in \"Giochi da riprodurre\": Resurrezione Dinosauro", L"Incluir en \"Juegos a reproducir\": Resurreccion Dinosaurio", L"「재생할 게임」 대상: 공룡 부활", L"纳入「播放游戏」：恐龙复活", L"ضمن \"ألعاب للتشغيل\": Dinosaur Resurrection", L"В «Игры для воспроизведения»: Dinosaur Resurrection", L"In „Wiederzugebende Spiele“: Dinosaurier Auferstehung", L"Incluir em \"Jogos a reproduzir\": Ressurreicao Dinossauro", L"Opnemen in \"Af te spelen spellen\": Dinosaurus Herrijzenis", L"W „Grach do odtworzenia”: Dinozaur Zmartwychwstanie", L"\"Oynatilacak Oyunlar\" hedefi: Dinozor Dirilisi"));
+		addTip(IDC_CHECK23, LL14(L"「再生するゲーム」の対象：ブランディッシュ４", L"Include in \"Games to play\": Brandish4", L"Inclure dans « Jeux a lire » : Brandish4", L"Includi in \"Giochi da riprodurre\": Brandish4", L"Incluir en \"Juegos a reproducir\": Brandish4", L"「재생할 게임」 대상: Brandish4", L"纳入「播放游戏」：Brandish4", L"ضمن \"ألعاب للتشغيل\": Brandish4", L"В «Игры для воспроизведения»: Brandish4", L"In „Wiederzugebende Spiele“: Brandish4", L"Incluir em \"Jogos a reproduzir\": Brandish4", L"Opnemen in \"Af te spelen spellen\": Brandish4", L"W „Grach do odtworzenia”: Brandish4", L"\"Oynatilacak Oyunlar\" hedefi: Brandish4"));
+		addTip(IDC_CHECK24, LL14(L"「再生するゲーム」の対象：英雄伝説III 白き魔女", L"Include in \"Games to play\": Legend of Heroes III White Witch", L"Inclure dans « Jeux a lire » : Legende des Heros III Sorciere Blanche", L"Includi in \"Giochi da riprodurre\": Legend of Heroes III Strega Bianca", L"Incluir en \"Juegos a reproducir\": Legend of Heroes III Bruja Blanca", L"「재생할 게임」 대상: 영웅전설III 흰 마녀", L"纳入「播放游戏」：英雄传说III 白之魔女", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes III White Witch", L"В «Игры для воспроизведения»: Legend of Heroes III White Witch", L"In „Wiederzugebende Spiele“: Legend of Heroes III Weise Hexe", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes III Bruxa Branca", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes III White Witch", L"W „Grach do odtworzenia”: Legend of Heroes III Biala Czarownica", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes III White Witch"));
+		addTip(IDC_CHECK25, LL14(L"「再生するゲーム」の対象：英雄伝説IV 朱紅い雫", L"Include in \"Games to play\": Legend of Heroes IV Tear of Vermillion", L"Inclure dans « Jeux a lire » : Legende des Heros IV Larme de Vermillon", L"Includi in \"Giochi da riprodurre\": Legend of Heroes IV Lacrima di Vermiglio", L"Incluir en \"Juegos a reproducir\": Legend of Heroes IV Lagrima de Bermellon", L"「재생할 게임」 대상: 영웅전설IV 주홍의 눈물", L"纳入「播放游戏」：英雄传说IV 朱红之泪", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes IV Tear of Vermillion", L"В «Игры для воспроизведения»: Legend of Heroes IV Tear of Vermillion", L"In „Wiederzugebende Spiele“: Legend of Heroes IV Trane der Purpur", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes IV Tear of Vermillion", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes IV Tear of Vermillion", L"W „Grach do odtworzenia”: Legend of Heroes IV Tear of Vermillion", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes IV Tear of Vermillion"));
+		addTip(IDC_CHECK26, LL14(L"「再生するゲーム」の対象：英雄伝説V 海の檻歌", L"Include in \"Games to play\": Legend of Heroes V Cagesong of the Ocean", L"Inclure dans « Jeux a lire » : Legende des Heros V Chant des Profondeurs", L"Includi in \"Giochi da riprodurre\": Legend of Heroes V Canto dell'Oceano", L"Incluir en \"Juegos a reproducir\": Legend of Heroes V Cantico del Oceano", L"「재생할 게임」 대상: 영웅전설V 바다의 감옥가", L"纳入「播放游戏」：英雄传说V 海之槛歌", L"ضمن \"ألعاب للتشغيل\": Legend of Heroes V Cagesong of the Ocean", L"В «Игры для воспроизведения»: Legend of Heroes V Cagesong of the Ocean", L"In „Wiederzugebende Spiele“: Legend of Heroes V Käfiglied des Ozeans", L"Incluir em \"Jogos a reproduzir\": Legend of Heroes V Cagesong of the Ocean", L"Opnemen in \"Af te spelen spellen\": Legend of Heroes V Cagesong of the Ocean", L"W „Grach do odtworzenia”: Legend of Heroes V Cagesong of the Ocean", L"\"Oynatilacak Oyunlar\" hedefi: Legend of Heroes V Cagesong of the Ocean"));
+		addTip(IDC_BUTTON58, LL14(
 			L"mp3/m4a/ogg/flacに埋め込まれているジャケットを表示します。", /* 日本語 */
 			L"Shows album art embedded in mp3/m4a/ogg/flac files.", /* 英語 */
 			L"Affiche la pochette intégrée dans les fichiers mp3/m4a/ogg/flac.", /* フランス語 */
@@ -722,7 +731,7 @@
 			L"Pokazuje okładkę albumu osadzoną w plikach mp3/m4a/ogg/flac.", /* ポーランド語 */
 			L"mp3/m4a/ogg/flac dosyalarına gömülü albüm kapağını gösterir.")); /* トルコ語 */
 
-		m_tooltip.AddTool(GetDlgItem(IDC_EDIT1), LL14(
+		addTip(IDC_EDIT1, LL14(
 			L"次の曲へいくためのループ回数を設定します",
 			L"Set loop count before next track",
 			L"Definir le nombre de boucles avant la piste suivante",
@@ -738,7 +747,7 @@
 			L"Ustaw liczb? p?tli przed nast?pnym utworem",
 			L"Sonraki parcaya gecmeden once dongu say?s?n? ayarla"));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_STATICaaab), LL14(
+		addTip(IDC_STATICaaab, LL14(
 			L"Windows全体の主音量（IDC_SLIDER1と連動）",
 			L"Overall Windows master volume (linked to IDC_SLIDER1)",
 			L"Volume principal Windows (lie a IDC_SLIDER1)",
@@ -753,7 +762,7 @@
 			L"Hoofdvolume Windows (gekoppeld aan IDC_SLIDER1)",
 			L"Glowna glosnosc Windows (powiazana z IDC_SLIDER1)",
 			L"Windows ana ses seviyesi (IDC_SLIDER1 ile bagli)"));
-		m_tooltip.AddTool(GetDlgItem(IDC_STATICaaa), LL14(
+		addTip(IDC_STATICaaa, LL14(
 			L"このプレイヤ専用のDirectSound音量（IDC_SLIDER3と連動）",
 			L"DirectSound volume for this player only (linked to IDC_SLIDER3)",
 			L"Volume DirectSound de ce lecteur uniquement (lie a IDC_SLIDER3)",
@@ -768,7 +777,7 @@
 			L"DirectSound-volume alleen voor deze speler (gekoppeld aan IDC_SLIDER3)",
 			L"Glosnosc DirectSound tylko tego odtwarzacza (powiazana z IDC_SLIDER3)",
 			L"Yalnizca bu oynatici DirectSound sesi (IDC_SLIDER3 ile bagli)"));
-		m_tooltip.AddTool(GetDlgItem(IDC_STATICaaac), LL14(
+		addTip(IDC_STATICaaac, LL14(
 			L"拡張音量（IDC_SLIDER4と連動）\n100%超も可能。イコライザーで音割れを抑えます",
 			L"Extended volume (linked to IDC_SLIDER4)\nCan exceed 100%. Clipping is handled by the equalizer",
 			L"Volume etendu (lie a IDC_SLIDER4)\nPeut depasser 100 %. L'egaliseur evite la saturation",
@@ -783,7 +792,7 @@
 			L"Uitgebreid volume (IDC_SLIDER4)\nBoven 100%. Equalizer voorkomt clipping",
 			L"Rozszerzona glosnosc (IDC_SLIDER4)\nPowyzej 100%. Korektor zapobiega przesterowaniu",
 			L"Genisletilmis ses (IDC_SLIDER4)\n%%100 ustune cikabilir. Ekolayzer kirpilmayi onler"));
-		m_tooltip.AddTool(GetDlgItem(IDC_STATICaaad), LL14(
+		addTip(IDC_STATICaaad, LL14(
 			L"次の曲へ進むまでのループ回数（IDC_EDIT1と連動）",
 			L"Loop count before next track (linked to IDC_EDIT1)",
 			L"Nombre de boucles avant la piste suivante (lie a IDC_EDIT1)",
@@ -798,7 +807,7 @@
 			L"Aantal herhalingen voor volgend nummer (gekoppeld aan IDC_EDIT1)",
 			L"Liczba petli przed nastepnym utworem (powiazana z IDC_EDIT1)",
 			L"Sonraki parcaya kadar dongu sayisi (IDC_EDIT1 ile bagli)"));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER4), LL14(
+		addTip(IDC_SLIDER4, LL14(
 			L"100%以上の拡張音量を設定できます\nイコライザー処理で音割れを抑えます",
 			L"Set extended volume above 100%\nClipping is handled by the equalizer",
 			L"Regler un volume etendu au-dela de 100 %\nL'egaliseur evite la saturation",
@@ -813,7 +822,7 @@
 			L"Uitgebreid volume boven 100% instellen\nEqualizer voorkomt clipping",
 			L"Ustaw rozszerzona glosnosc powyzej 100%\nKorektor zapobiega przesterowaniu",
 			L"%%100 ustune genisletilmis ses\nEkolayzer kirpilmayi onler"));
-		m_tooltip.AddTool(GetDlgItem(IDC_STATICds2), LL14(
+		addTip(IDC_STATICds2, LL14(
 			L"100%以上の拡張音量を設定できます\nイコライザー処理で音割れを抑えます",
 			L"Set extended volume above 100%\nClipping is handled by the equalizer",
 			L"Regler un volume etendu au-dela de 100 %\nL'egaliseur evite la saturation",
@@ -828,7 +837,7 @@
 			L"Uitgebreid volume boven 100% instellen\nEqualizer voorkomt clipping",
 			L"Ustaw rozszerzona glosnosc powyzej 100%\nKorektor zapobiega przesterowaniu",
 			L"%%100 ustune genisletilmis ses\nEkolayzer kirpilmayi onler"));
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER7), LL14(
+		addTip(IDC_SLIDER7, LL14(
 			L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpiのテンポを変えます。wav,動画は変わりません。", /* 日本語 */
 			L"Changes tempo for mp3, ogg, flac, m4a, opus, adpcm, dsd, kpi. (wav and video are not affected.)", /* 英語 */
 			L"Modifie le tempo pour mp3, ogg, flac, m4a, opus, adpcm, dsd, kpi. (wav et vidéo inchangés.)", /* フランス語 */
@@ -844,7 +853,7 @@
 			L"Zmienia tempo dla mp3, ogg, flac, m4a, opus, adpcm, dsd, kpi. (wav i wideo bez zmian.)", /* ポーランド語 */
 			L"mp3, ogg, flac, m4a, opus, adpcm, dsd, kpi için tempoyu değiştirir. wav ve video değişmez.")); /* トルコ語 */
 
-		m_tooltip.AddTool(GetDlgItem(IDC_SLIDER8), LL14(
+		addTip(IDC_SLIDER8, LL14(
 			L"mp3,ogg,flac,m4a,opus,adpcm,dsd,kpiのピッチを変えます。wav,動画は変わりません。", /* 日本語 */
 			L"Changes pitch for mp3, ogg, flac, m4a, opus, adpcm, dsd, kpi. (wav and video are not affected.)", /* 英語 */
 			L"Modifie la hauteur pour mp3, ogg, flac, m4a, opus, adpcm, dsd, kpi. (wav et vidéo inchangés.)", /* フランス語 */
@@ -860,7 +869,7 @@
 			L"Zmienia wysokość tonu dla mp3, ogg, flac, m4a, opus, adpcm, dsd, kpi. (wav i wideo bez zmian.)", /* ポーランド語 */
 			L"mp3, ogg, flac, m4a, opus, adpcm, dsd, kpi için perdeyi değiştirir. wav ve video değişmez.")); /* トルコ語 */
 
-		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_t), LL14(
+		addTip(IDC_STATIC_t, LL14(
 			L"テンポを100に戻します。",
 			L"Resets tempo to 100.",
 			L"Réinitialise le tempo à 100.",
@@ -876,7 +885,7 @@
 			L"Resetuje tempo do 100.",
 			L"Tempoyu 100'e sıfırlar."));
 
-		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_p), LL14(
+		addTip(IDC_STATIC_p, LL14(
 			L"ピッチを100に戻します。",
 			L"Resets pitch to 100.",
 			L"Réinitialise la hauteur à 100.",
@@ -910,11 +919,13 @@
 			L"%s\nYukarıdaki bilgiler yanlışsa, lütfen aşağıdaki içeriği yazara gönderin.\nAyrıntılar: Ver %d.%d(%d) Build %d\n\n%s"), /* トルコ語 */
 			os.GetVersionString(), in.dwMajorVersion, in.dwMinorVersion, edition, in.dwBuildNumber, cpus);
 
-		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_OS), s);
-		m_tooltip.AddTool(GetDlgItem(IDC_STATIC_OS2), s);
+		addTip(IDC_STATIC_OS, s);
+		addTip(IDC_STATIC_OS2, s);
 	}
-	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
-	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
+	if (m_tooltip.GetSafeHwnd()) {
+		m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
+		m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
+	}
 	// FFT三角関数テーブルの初期化
 	ipTab2[0] = 0;
 	int i;

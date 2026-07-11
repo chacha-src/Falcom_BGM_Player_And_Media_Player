@@ -44,10 +44,11 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 #include "afxwin.h"
 
 #include <cstddef>
+#include "resource.h"
 #include "CCustomControl.h"
-#include "CEqualizer.h"
-#include "CPianoRoll.h"
-#include "CAnalyzerDlg.h"
+class CEqualizer;
+class CPianoRoll;
+class CAnalyzerDlg;
 class CDouga;
 class CPlayList;
 class CRender;
@@ -112,9 +113,10 @@ public:
 #endif
 	CBrush *m_pDlgColor;
 
-	CEqualizer m_EqualizerDlg;
-	CPianoRoll m_PianoRollDlg;
-	CAnalyzerDlg m_AnalyzerDlg;
+	// ポインタ化: ヘッダ完結型不要 → PCH/依存TUがピアノロール変更で全再ビルドされない
+	CEqualizer* m_EqualizerDlg = nullptr;
+	CPianoRoll* m_PianoRollDlg = nullptr;
+	CAnalyzerDlg* m_AnalyzerDlg = nullptr;
 	// SyncAnalyzerFromPlayCursor: bufwav3 上の前回終端バイト位置
 	BOOL m_analyzerSyncValid = FALSE;
 	ULONG m_analyzerSyncEndPos = 0;

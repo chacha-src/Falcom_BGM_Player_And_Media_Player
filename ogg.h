@@ -29,6 +29,7 @@ public:
 	//{{AFX_VIRTUAL(COggApp)
 	public:
 	virtual BOOL InitInstance();
+	virtual LRESULT ProcessWndProcException(CException* e, const MSG* pMsg);
 	//}}AFX_VIRTUAL
 
 // インプリメンテーション

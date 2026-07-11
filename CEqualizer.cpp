@@ -24,64 +24,73 @@ CEqualizer::~CEqualizer()
 void CEqualizer::DoDataExchange(CDataExchange* pDX)
 {
 	CCustomBlurDialogExBase::DoDataExchange(pDX);
-	DDX_Control(pDX, IDC_SLIDER7, m_s0);
-	DDX_Control(pDX, IDC_SLIDER9, m_s1);
-	DDX_Control(pDX, IDC_SLIDER8, m_s2);
-	DDX_Control(pDX, IDC_SLIDER10, m_s3);
-	DDX_Control(pDX, IDC_SLIDER11, m_s4);
-	DDX_Control(pDX, IDC_SLIDER12, m_s5);
-	DDX_Control(pDX, IDC_SLIDER13, m_s6);
-	DDX_Control(pDX, IDC_SLIDER14, m_s7);
-	DDX_Control(pDX, IDC_SLIDER15, m_s8);
-	DDX_Control(pDX, IDC_SLIDER16, m_s9);
-	DDX_Control(pDX, IDC_STATIC_e0, m_v0);
-	DDX_Control(pDX, IDC_STATIC_e1, m_v1);
-	DDX_Control(pDX, IDC_STATIC_e2, m_v2);
-	DDX_Control(pDX, IDC_STATIC_e3, m_v3);
-	DDX_Control(pDX, IDC_STATIC_e4, m_v4);
-	DDX_Control(pDX, IDC_STATIC_e5, m_v5);
-	DDX_Control(pDX, IDC_STATIC_e6, m_v6);
-	DDX_Control(pDX, IDC_STATIC_e7, m_v7);
-	DDX_Control(pDX, IDC_STATIC_e8, m_v8);
-	DDX_Control(pDX, IDC_STATIC_e9, m_v9);
-	DDX_Control(pDX, IDC_COMBO1, m_env);
-	DDX_Control(pDX, IDC_COMBO5, m_pre);
-	DDX_Control(pDX, IDOK, m_ok);
-	DDX_Control(pDX, IDOK3, dum);
-	DDX_Control(pDX, IDC_STATIC_e10, m_v10);
-	DDX_Control(pDX, IDC_STATIC_e11, m_v11);
-	DDX_Control(pDX, IDC_STATIC_e12, m_v12);
-	DDX_Control(pDX, IDC_STATIC_e13, m_v13);
-	DDX_Control(pDX, IDC_STATIC_e14, m_v14);
-	DDX_Control(pDX, IDC_SLIDER21, m_s14);
-	DDX_Control(pDX, IDC_SLIDER20, m_s13);
-	DDX_Control(pDX, IDC_SLIDER19, m_s12);
-	DDX_Control(pDX, IDC_SLIDER18, m_s11);
-	DDX_Control(pDX, IDC_SLIDER17, m_s10);
-	DDX_Control(pDX, IDC_STATIC_eff, m_seff);
-	DDX_Control(pDX, IDC_SLIDER22, m_eff);
-	DDX_Control(pDX, IDC_SLIDER23, m_smaster);
-	DDX_Control(pDX, IDC_SLIDER24, m_ssenmei);
-	DDX_Control(pDX, IDC_SLIDER25, m_skoutei);
-	DDX_Control(pDX, IDC_SLIDER26, m_smitsudo);
-	DDX_Control(pDX, IDC_SLIDER27, m_srittai);
-	DDX_Control(pDX, IDC_STATIC_e15, m_vmaster);
-	DDX_Control(pDX, IDC_STATIC_e16, m_vsenmei);
-	DDX_Control(pDX, IDC_STATIC_e17, m_vkoutei);
-	DDX_Control(pDX, IDC_STATIC_e18, m_vmitsudo);
-	DDX_Control(pDX, IDC_STATIC_e19, m_vrittai);
-	DDX_Control(pDX, IDOK4, sdasdsdadsd);
-	DDX_Control(pDX, IDC_STATICf, m_t);
-	DDX_Control(pDX, IDC_STATIC_key, m_keyLow);
-	DDX_Control(pDX, IDC_STATIC_key2, m_keyMid);
-	DDX_Control(pDX, IDC_STATIC_key3, m_keyHigh);
-	DDX_Control(pDX, IDC_STATIC_key4, m_keyAll);
-	DDX_Control(pDX, IDC_SLIDER28, m_reverb);
-	DDX_Control(pDX, IDC_SLIDER29, m_chorus);
-	DDX_Control(pDX, IDC_SLIDER30, m_delay);
-	DDX_Control(pDX, IDC_STATIC_e20, m_reverbi);
-	DDX_Control(pDX, IDC_STATIC_e21, m_chorusi);
-	DDX_Control(pDX, IDC_STATIC_e22, m_delayi);
+	// 欠落コントロールや二重 Subclass で CInvalidArgException
+	// （「引数が正しくありません」）になり Init が途中終了するのを防ぐ
+	auto bind = [](CDataExchange* dx, int id, CWnd& wnd) {
+		if (!dx || !dx->m_pDlgWnd) return;
+		if (wnd.GetSafeHwnd()) return;
+		HWND hDlg = dx->m_pDlgWnd->GetSafeHwnd();
+		if (!hDlg || !::GetDlgItem(hDlg, id)) return;
+		DDX_Control(dx, id, wnd);
+	};
+	bind(pDX, IDC_SLIDER7, m_s0);
+	bind(pDX, IDC_SLIDER9, m_s1);
+	bind(pDX, IDC_SLIDER8, m_s2);
+	bind(pDX, IDC_SLIDER10, m_s3);
+	bind(pDX, IDC_SLIDER11, m_s4);
+	bind(pDX, IDC_SLIDER12, m_s5);
+	bind(pDX, IDC_SLIDER13, m_s6);
+	bind(pDX, IDC_SLIDER14, m_s7);
+	bind(pDX, IDC_SLIDER15, m_s8);
+	bind(pDX, IDC_SLIDER16, m_s9);
+	bind(pDX, IDC_STATIC_e0, m_v0);
+	bind(pDX, IDC_STATIC_e1, m_v1);
+	bind(pDX, IDC_STATIC_e2, m_v2);
+	bind(pDX, IDC_STATIC_e3, m_v3);
+	bind(pDX, IDC_STATIC_e4, m_v4);
+	bind(pDX, IDC_STATIC_e5, m_v5);
+	bind(pDX, IDC_STATIC_e6, m_v6);
+	bind(pDX, IDC_STATIC_e7, m_v7);
+	bind(pDX, IDC_STATIC_e8, m_v8);
+	bind(pDX, IDC_STATIC_e9, m_v9);
+	bind(pDX, IDC_COMBO1, m_env);
+	bind(pDX, IDC_COMBO5, m_pre);
+	bind(pDX, IDOK, m_ok);
+	bind(pDX, IDOK3, dum);
+	bind(pDX, IDC_STATIC_e10, m_v10);
+	bind(pDX, IDC_STATIC_e11, m_v11);
+	bind(pDX, IDC_STATIC_e12, m_v12);
+	bind(pDX, IDC_STATIC_e13, m_v13);
+	bind(pDX, IDC_STATIC_e14, m_v14);
+	bind(pDX, IDC_SLIDER21, m_s14);
+	bind(pDX, IDC_SLIDER20, m_s13);
+	bind(pDX, IDC_SLIDER19, m_s12);
+	bind(pDX, IDC_SLIDER18, m_s11);
+	bind(pDX, IDC_SLIDER17, m_s10);
+	bind(pDX, IDC_STATIC_eff, m_seff);
+	bind(pDX, IDC_SLIDER22, m_eff);
+	bind(pDX, IDC_SLIDER23, m_smaster);
+	bind(pDX, IDC_SLIDER24, m_ssenmei);
+	bind(pDX, IDC_SLIDER25, m_skoutei);
+	bind(pDX, IDC_SLIDER26, m_smitsudo);
+	bind(pDX, IDC_SLIDER27, m_srittai);
+	bind(pDX, IDC_STATIC_e15, m_vmaster);
+	bind(pDX, IDC_STATIC_e16, m_vsenmei);
+	bind(pDX, IDC_STATIC_e17, m_vkoutei);
+	bind(pDX, IDC_STATIC_e18, m_vmitsudo);
+	bind(pDX, IDC_STATIC_e19, m_vrittai);
+	bind(pDX, IDOK4, sdasdsdadsd);
+	bind(pDX, IDC_STATICf, m_t);
+	bind(pDX, IDC_STATIC_key, m_keyLow);
+	bind(pDX, IDC_STATIC_key2, m_keyMid);
+	bind(pDX, IDC_STATIC_key3, m_keyHigh);
+	bind(pDX, IDC_STATIC_key4, m_keyAll);
+	bind(pDX, IDC_SLIDER28, m_reverb);
+	bind(pDX, IDC_SLIDER29, m_chorus);
+	bind(pDX, IDC_SLIDER30, m_delay);
+	bind(pDX, IDC_STATIC_e20, m_reverbi);
+	bind(pDX, IDC_STATIC_e21, m_chorusi);
+	bind(pDX, IDC_STATIC_e22, m_delayi);
 }
 
 
@@ -122,17 +131,23 @@ BOOL CEqualizer::OnInitDialog()
 
 	m_tooltip.Create(this);
 	m_tooltip.Activate(TRUE);
-	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"閉じます", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
-	m_tooltip.AddTool(GetDlgItem(IDOK3), LL14(L"イコライザーの値をリセットします", L"Reset equalizer values", L"Réinitialiser les valeurs de l'égaliseur", L"Reimposta valori equalizer", L"Restablecer valores del ecualizador", L"이퀄라이저 값 초기화", L"重置均衡器数值", L"إعادة تعيين قيم المعادل", L"Сброс значений эквалайзера", L"Equalizerwerte zurücksetzen", L"Redefinir valores do equalizador", L"Equalizatorwaarden resetten", L"Resetuj wartości korektora", L"Ekolayzer değerlerini sıfırla"));
-	m_tooltip.AddTool(GetDlgItem(IDOK4), LL14(L"グローバルの値をリセットします", L"Reset global values", L"Réinitialiser les valeurs globales", L"Reimposta valori globali", L"Restablecer valores globales", L"전역 값 초기화", L"重置全局数值", L"إعادة تعيين القيم العامة", L"Сброс глобальных значений", L"Globale Werte zurücksetzen", L"Redefinir valores globais", L"Globale waarden resetten", L"Resetuj wartości globalne", L"Genel değerleri sıfırla"));
-	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER22), LL14(L"サウンドエフェクトの強さを調整します（左の数値が現在値）", L"Adjust sound effect strength (number at left is current value)", L"Ajuster l'intensite de l'effet sonore (nombre a gauche = valeur actuelle)", L"Regola intensita effetto sonoro (numero a sinistra = valore attuale)", L"Ajustar intensidad del efecto de sonido (numero a la izquierda = valor actual)", L"사운드 이펙트 강도 조정(왼쪽 숫자가 현재값)", L"调整音效强度（左侧数字为当前值）", L"ضبط قوة المؤثر الصوتي (الرقم على اليسار = القيمة الحالية)", L"Настроить силу звукового эффекта (число слева — текущее значение)", L"Soundeffekt-Starke einstellen (Zahl links = aktueller Wert)", L"Ajustar intensidade do efeito sonoro (numero a esquerda = valor atual)", L"Sterkte geluidseffect instellen (getal links = huidige waarde)", L"Reguluj sile efektu dzwiekowego (liczba po lewej = biezaca wartosc)", L"Ses efekti gucunu ayarla (soldaki sayi guncel deger)"));
-	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER23), LL14(L"マスター音量を調整します（左の数値が現在値）\n拡張音量・形式別倍率とは別です", L"Adjust master volume (number at left is current value)\nSeparate from extended/format volume", L"Regler le volume master (nombre a gauche = valeur actuelle)\nDistinct du volume etendu/format", L"Regola volume master (numero a sinistra = valore attuale)\nSeparato da volume esteso/formato", L"Ajustar volumen maestro (numero a la izquierda = valor actual)\nSeparado del volumen extendido/formato", L"마스터 볼륨 조정(왼쪽 숫자가 현재값)\n확장/형식별 볼륨과 별개", L"调整主音量（左侧数字为当前值）\n与扩展/格式音量分开", L"ضبط مستوى الصوت الرئيسي (الرقم على اليسار = القيمة الحالية)\nمنفصل عن الصوت الممتد/حسب التنسيق", L"Настроить общую громкость (число слева — текущее значение)\nОтдельно от доп. и форматной громкости", L"Master-Lautstarke einstellen (Zahl links = aktueller Wert)\nGetrennt von erweiterter/Format-Lautstarke", L"Ajustar volume mestre (numero a esquerda = valor atual)\nSeparado do volume estendido/formato", L"Hoofdvolume instellen (getal links = huidige waarde)\nAparte van uitgebreid/formaatvolume", L"Reguluj glosnosc glowna (liczba po lewej = biezaca wartosc)\nOsobno od rozszerzonej/formatowej", L"Ana ses seviyesini ayarla (soldaki sayi guncel deger)\nGenisletilmis/format sesinden ayri)"));
-	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER24), LL14(L"明瞭度（クリアさ）を調整します（左の数値が現在値）", L"Adjust clarity (number at left is current value)", L"Ajuster la clarte (nombre a gauche = valeur actuelle)", L"Regola chiarezza (numero a sinistra = valore attuale)", L"Ajustar claridad (numero a la izquierda = valor actual)", L"선명도 조정(왼쪽 숫자가 현재값)", L"调整清晰度（左侧数字为当前值）", L"ضبط الوضوح (الرقم على اليسار = القيمة الحالية)", L"Настроить четкость (число слева — текущее значение)", L"Klarheit einstellen (Zahl links = aktueller Wert)", L"Ajustar clareza (numero a esquerda = valor atual)", L"Helderheid instellen (getal links = huidige waarde)", L"Reguluj klarownosc (liczba po lewej = biezaca wartosc)", L"Netligi ayarla (soldaki sayi guncel deger)"));
-	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER25), LL14(L"バランス（左右・帯域バランス）を調整します（左の数値が現在値）", L"Adjust balance (number at left is current value)", L"Ajuster l'equilibre (nombre a gauche = valeur actuelle)", L"Regola bilanciamento (numero a sinistra = valore attuale)", L"Ajustar balance (numero a la izquierda = valor actual)", L"밸런스 조정(왼쪽 숫자가 현재값)", L"调整平衡（左侧数字为当前值）", L"ضبط التوازن (الرقم على اليسار = القيمة الحالية)", L"Настроить баланс (число слева — текущее значение)", L"Balance einstellen (Zahl links = aktueller Wert)", L"Ajustar balanco (numero a esquerda = valor atual)", L"Balans instellen (getal links = huidige waarde)", L"Reguluj balans (liczba po lewej = biezaca wartosc)", L"Dengeyi ayarla (soldaki sayi guncel deger)"));
-	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER26), LL14(L"密度（音の厚み）を調整します（左の数値が現在値）", L"Adjust density (number at left is current value)", L"Ajuster la densite (nombre a gauche = valeur actuelle)", L"Regola densita (numero a sinistra = valore attuale)", L"Ajustar densidad (numero a la izquierda = valor actual)", L"밀도 조정(왼쪽 숫자가 현재값)", L"调整密度（左侧数字为当前值）", L"ضبط الكثافة (الرقم على اليسار = القيمة الحالية)", L"Настроить плотность (число слева — текущее значение)", L"Dichte einstellen (Zahl links = aktueller Wert)", L"Ajustar densidade (numero a esquerda = valor atual)", L"Dichtheid instellen (getal links = huidige waarde)", L"Reguluj gestosc (liczba po lewej = biezaca wartosc)", L"Yogunlugu ayarla (soldaki sayi guncel deger)"));
-	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER27), LL14(L"立体感（空間感）を調整します（左の数値が現在値）", L"Adjust spatial width (number at left is current value)", L"Ajuster l'espace stereo (nombre a gauche = valeur actuelle)", L"Regola spazialita (numero a sinistra = valore attuale)", L"Ajustar amplitud espacial (numero a la izquierda = valor actual)", L"입체감 조정(왼쪽 숫자가 현재값)", L"调整立体感（左侧数字为当前值）", L"ضبط العرض المكاني (الرقم على اليسار = القيمة الحالية)", L"Настроить пространственность (число слева — текущее значение)", L"Raumlichkeit einstellen (Zahl links = aktueller Wert)", L"Ajustar espacialidade (numero a esquerda = valor atual)", L"Ruimtelijkheid instellen (getal links = huidige waarde)", L"Reguluj przestrzennosc (liczba po lewej = biezaca wartosc)", L"Mekansal genisligi ayarla (soldaki sayi guncel deger)"));
-	m_tooltip.AddTool(GetDlgItem(IDC_COMBO1), LL14(L"再生環境（部屋の響き）プリセットを選択します", L"Select acoustic environment preset", L"Choisir le preset d'environnement acoustique", L"Seleziona preset ambiente acustico", L"Seleccionar preset de entorno acustico", L"재생 환경(음향) 프리셋 선택", L"选择播放环境（混响）预设", L"اختر إعداد البيئة الصوتية", L"Выбрать пресет акустической среды", L"Akustische Umgebungsvoreinstellung wahlen", L"Selecionar preset de ambiente acustico", L"Akoestische omgevingspreset kiezen", L"Wybierz preset srodowiska akustycznego", L"Akustik ortam on ayarini sec"));
-	m_tooltip.AddTool(GetDlgItem(IDC_COMBO5), LL14(L"イコライザープリセットを選択します", L"Select equalizer preset", L"Choisir un preset d'egaliseur", L"Seleziona preset equalizzatore", L"Seleccionar preset del ecualizador", L"이퀄라이저 프리셋 선택", L"选择均衡器预设", L"اختر إعداد المعادل", L"Выбрать пресет эквалайзера", L"Equalizer-Voreinstellung wahlen", L"Selecionar preset do equalizador", L"Equalizerpreset kiezen", L"Wybierz preset korektora", L"Ekolayzer on ayarini sec"));
+	// AddTool(NULL) は CInvalidArgException（「引数が正しくありません」）になる
+	auto addTip = [this](int id, LPCTSTR text) {
+		CWnd* w = GetDlgItem(id);
+		if (w && w->GetSafeHwnd())
+			m_tooltip.AddTool(w, text);
+	};
+	addTip(IDOK, LL14(L"閉じます", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	addTip(IDOK3, LL14(L"イコライザーの値をリセットします", L"Reset equalizer values", L"Réinitialiser les valeurs de l'égaliseur", L"Reimposta valori equalizer", L"Restablecer valores del ecualizador", L"이퀄라이저 값 초기화", L"重置均衡器数值", L"إعادة تعيين قيم المعادل", L"Сброс значений эквалайзера", L"Equalizerwerte zurücksetzen", L"Redefinir valores do equalizador", L"Equalizatorwaarden resetten", L"Resetuj wartości korektora", L"Ekolayzer değerlerini sıfırla"));
+	addTip(IDOK4, LL14(L"グローバルの値をリセットします", L"Reset global values", L"Réinitialiser les valeurs globales", L"Reimposta valori globali", L"Restablecer valores globales", L"전역 값 초기화", L"重置全局数值", L"إعادة تعيين القيم العامة", L"Сброс глобальных значений", L"Globale Werte zurücksetzen", L"Redefinir valores globais", L"Globale waarden resetten", L"Resetuj wartości globalne", L"Genel değerleri sıfırla"));
+	addTip(IDC_SLIDER22, LL14(L"サウンドエフェクトの強さを調整します（左の数値が現在値）", L"Adjust sound effect strength (number at left is current value)", L"Ajuster l'intensite de l'effet sonore (nombre a gauche = valeur actuelle)", L"Regola intensita effetto sonoro (numero a sinistra = valore attuale)", L"Ajustar intensidad del efecto de sonido (numero a la izquierda = valor actual)", L"사운드 이펙트 강도 조정(왼쪽 숫자가 현재값)", L"调整音效强度（左侧数字为当前值）", L"ضبط قوة المؤثر الصوتي (الرقم على اليسار = القيمة الحالية)", L"Настроить силу звукового эффекта (число слева — текущее значение)", L"Soundeffekt-Starke einstellen (Zahl links = aktueller Wert)", L"Ajustar intensidade do efeito sonoro (numero a esquerda = valor atual)", L"Sterkte geluidseffect instellen (getal links = huidige waarde)", L"Reguluj sile efektu dzwiekowego (liczba po lewej = biezaca wartosc)", L"Ses efekti gucunu ayarla (soldaki sayi guncel deger)"));
+	addTip(IDC_SLIDER23, LL14(L"マスター音量を調整します（左の数値が現在値）\n拡張音量・形式別倍率とは別です", L"Adjust master volume (number at left is current value)\nSeparate from extended/format volume", L"Regler le volume master (nombre a gauche = valeur actuelle)\nDistinct du volume etendu/format", L"Regola volume master (numero a sinistra = valore attuale)\nSeparato da volume esteso/formato", L"Ajustar volumen maestro (numero a la izquierda = valor actual)\nSeparado del volumen extendido/formato", L"마스터 볼륨 조정(왼쪽 숫자가 현재값)\n확장/형식별 볼륨과 별개", L"调整主音量（左侧数字为当前值）\n与扩展/格式音量分开", L"ضبط مستوى الصوت الرئيسي (الرقم على اليسار = القيمة الحالية)\nمنفصل عن الصوت الممتد/حسب التنسيق", L"Настроить общую громкость (число слева — текущее значение)\nОтдельно от доп. и форматной громкости", L"Master-Lautstarke einstellen (Zahl links = aktueller Wert)\nGetrennt von erweiterter/Format-Lautstarke", L"Ajustar volume mestre (numero a esquerda = valor atual)\nSeparado do volume estendido/formato", L"Hoofdvolume instellen (getal links = huidige waarde)\nAparte van uitgebreid/formaatvolume", L"Reguluj glosnosc glowna (liczba po lewej = biezaca wartosc)\nOsobno od rozszerzonej/formatowej", L"Ana ses seviyesini ayarla (soldaki sayi guncel deger)\nGenisletilmis/format sesinden ayri)"));
+	addTip(IDC_SLIDER24, LL14(L"明瞭度（クリアさ）を調整します（左の数値が現在値）", L"Adjust clarity (number at left is current value)", L"Ajuster la clarte (nombre a gauche = valeur actuelle)", L"Regola chiarezza (numero a sinistra = valore attuale)", L"Ajustar claridad (numero a la izquierda = valor actual)", L"선명도 조정(왼쪽 숫자가 현재값)", L"调整清晰度（左侧数字为当前值）", L"ضبط الوضوح (الرقم على اليسار = القيمة الحالية)", L"Настроить четкость (число слева — текущее значение)", L"Klarheit einstellen (Zahl links = aktueller Wert)", L"Ajustar clareza (numero a esquerda = valor atual)", L"Helderheid instellen (getal links = huidige waarde)", L"Reguluj klarownosc (liczba po lewej = biezaca wartosc)", L"Netligi ayarla (soldaki sayi guncel deger)"));
+	addTip(IDC_SLIDER25, LL14(L"バランス（左右・帯域バランス）を調整します（左の数値が現在値）", L"Adjust balance (number at left is current value)", L"Ajuster l'equilibre (nombre a gauche = valeur actuelle)", L"Regola bilanciamento (numero a sinistra = valore attuale)", L"Ajustar balance (numero a la izquierda = valor actual)", L"밸런스 조정(왼쪽 숫자가 현재값)", L"调整平衡（左侧数字为当前值）", L"ضبط التوازن (الرقم على اليسار = القيمة الحالية)", L"Настроить баланс (число слева — текущее значение)", L"Balance einstellen (Zahl links = aktueller Wert)", L"Ajustar balanco (numero a esquerda = valor atual)", L"Balans instellen (getal links = huidige waarde)", L"Reguluj balans (liczba po lewej = biezaca wartosc)", L"Dengeyi ayarla (soldaki sayi guncel deger)"));
+	addTip(IDC_SLIDER26, LL14(L"密度（音の厚み）を調整します（左の数値が現在値）", L"Adjust density (number at left is current value)", L"Ajuster la densite (nombre a gauche = valeur actuelle)", L"Regola densita (numero a sinistra = valore attuale)", L"Ajustar densidad (numero a la izquierda = valor actual)", L"밀도 조정(왼쪽 숫자가 현재값)", L"调整密度（左侧数字为当前值）", L"ضبط الكثافة (الرقم على اليسار = القيمة الحالية)", L"Настроить плотность (число слева — текущее значение)", L"Dichte einstellen (Zahl links = aktueller Wert)", L"Ajustar densidade (numero a esquerda = valor atual)", L"Dichtheid instellen (getal links = huidige waarde)", L"Reguluj gestosc (liczba po lewej = biezaca wartosc)", L"Yogunlugu ayarla (soldaki sayi guncel deger)"));
+	addTip(IDC_SLIDER27, LL14(L"立体感（空間感）を調整します（左の数値が現在値）", L"Adjust spatial width (number at left is current value)", L"Ajuster l'espace stereo (nombre a gauche = valeur actuelle)", L"Regola spazialita (numero a sinistra = valore attuale)", L"Ajustar amplitud espacial (numero a la izquierda = valor actual)", L"입체감 조정(왼쪽 숫자가 현재값)", L"调整立体感（左侧数字为当前值）", L"ضبط العرض المكاني (الرقم على اليسار = القيمة الحالية)", L"Настроить пространственность (число слева — текущее значение)", L"Raumlichkeit einstellen (Zahl links = aktueller Wert)", L"Ajustar espacialidade (numero a esquerda = valor atual)", L"Ruimtelijkheid instellen (getal links = huidige waarde)", L"Reguluj przestrzennosc (liczba po lewej = biezaca wartosc)", L"Mekansal genisligi ayarla (soldaki sayi guncel deger)"));
+	addTip(IDC_COMBO1, LL14(L"再生環境（部屋の響き）プリセットを選択します", L"Select acoustic environment preset", L"Choisir le preset d'environnement acoustique", L"Seleziona preset ambiente acustico", L"Seleccionar preset de entorno acustico", L"재생 환경(음향) 프리셋 선택", L"选择播放环境（混响）预设", L"اختر إعداد البيئة الصوتية", L"Выбрать пресет акустической среды", L"Akustische Umgebungsvoreinstellung wahlen", L"Selecionar preset de ambiente acustico", L"Akoestische omgevingspreset kiezen", L"Wybierz preset srodowiska akustycznego", L"Akustik ortam on ayarini sec"));
+	addTip(IDC_COMBO5, LL14(L"イコライザープリセットを選択します", L"Select equalizer preset", L"Choisir un preset d'egaliseur", L"Seleziona preset equalizzatore", L"Seleccionar preset del ecualizador", L"이퀄라이저 프리셋 선택", L"选择均衡器预设", L"اختر إعداد المعادل", L"Выбрать пресет эквалайзера", L"Equalizer-Voreinstellung wahlen", L"Selecionar preset do equalizador", L"Equalizerpreset kiezen", L"Wybierz preset korektora", L"Ekolayzer on ayarini sec"));
 	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
 
@@ -531,7 +546,9 @@ BOOL CEqualizer::OnInitDialog()
 	m_pre.AddString(LL14(L"FM(Hi-Fi安全)", L"FM Hi-Fi Safe", L"FM Hi-Fi sûr", L"FM Hi-Fi sicuro", L"FM Hi-Fi seguro", L"FM(Hi-Fi 안전)", L"FM Hi-Fi安全", L"FM Hi-Fi آمن", L"FM Hi-Fi безопасно", L"FM Hi-Fi sicher", L"FM Hi-Fi seguro", L"FM Hi-Fi veilig", L"FM Hi-Fi bezpieczny", L"FM Hi-Fi Güvenli"));
 	m_pre.SetCurSel(savedata.eqsoundeq);
 
-	if(savedata.eqx != -1)
+	if(savedata.eqx != -1
+		&& savedata.eqx > -30000 && savedata.eqx < 30000
+		&& savedata.eqy > -30000 && savedata.eqy < 30000)
 		SetWindowPos(&CWnd::wndTop, savedata.eqx, savedata.eqy, 0, 0, SWP_NOSIZE| SWP_NOZORDER| SWP_NOOWNERZORDER);
 
 	m_cachedKeyLow.Empty();

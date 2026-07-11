@@ -61,6 +61,31 @@ BOOL CALLBACK ew(HWND hwnd,LPARAM lParam) {
 	return FALSE;
 }
 
+LRESULT COggApp::ProcessWndProcException(CException* e, const MSG* pMsg)
+{
+	// デバッガ出力に「どのウィンドウのどのメッセージ処理中か」を残す
+	if (e) {
+		TCHAR errmsg[512] = {};
+		e->GetErrorMessage(errmsg, _countof(errmsg) - 1);
+		TCHAR cls[128] = {};
+		TCHAR title[128] = {};
+		if (pMsg && pMsg->hwnd) {
+			::GetClassName(pMsg->hwnd, cls, _countof(cls));
+			::GetWindowText(pMsg->hwnd, title, _countof(title));
+		}
+		CString line;
+		line.Format(_T("[ProcessWndProcException] %hs msg=0x%04X hwnd=0x%p class=%s title=%s: %s\n"),
+			e->GetRuntimeClass() ? e->GetRuntimeClass()->m_lpszClassName : "?",
+			pMsg ? (UINT)pMsg->message : 0,
+			pMsg ? pMsg->hwnd : NULL,
+			cls[0] ? cls : _T("?"),
+			title[0] ? title : _T(""),
+			errmsg);
+		OutputDebugString(line);
+	}
+	return CWinApp::ProcessWndProcException(e, pMsg);
+}
+
 BOOL COggApp::InitInstance()
 {
 //	INITCOMMONCONTROLSEX InitCtrls;
@@ -199,6 +224,10 @@ BOOL COggApp::InitInstance()
 	savedata.analyzery = -1;
 	savedata.analyzerw = 720;
 	savedata.analyzerh = 420;
+	savedata.analyzerspeclayout = 0;
+	savedata.analyzerspecstyle = 0;
+	savedata.analyzerpeakhold = 1;
+	savedata.analyzereqoverlay = 1;
 	savedata.saveversion = 2;
 
 	savedata.playerMode = 0;   // 既定はファルコム特化型
@@ -274,6 +303,10 @@ BOOL COggApp::InitInstance()
 		savedata.analyzery = -1;
 		savedata.analyzerw = 720;
 		savedata.analyzerh = 420;
+		savedata.analyzerspeclayout = 0;
+		savedata.analyzerspecstyle = 0;
+		savedata.analyzerpeakhold = 1;
+		savedata.analyzereqoverlay = 1;
 	} else if (savedata.analyzerw < 200 || savedata.analyzerh < 120
 		|| savedata.analyzerw > 10000 || savedata.analyzerh > 10000) {
 		savedata.analyzerx = -1;
@@ -281,6 +314,20 @@ BOOL COggApp::InitInstance()
 		savedata.analyzerw = 720;
 		savedata.analyzerh = 420;
 	}
+	if (datFileSize < (int)(offsetof(save, analyzerspeclayout) + sizeof(savedata.analyzerspeclayout))
+		|| savedata.analyzerspeclayout < 0 || savedata.analyzerspeclayout > 4)
+		savedata.analyzerspeclayout = 0;
+	if (datFileSize < (int)(offsetof(save, analyzerspecstyle) + sizeof(savedata.analyzerspecstyle))
+		|| savedata.analyzerspecstyle < 0 || savedata.analyzerspecstyle > 2)
+		savedata.analyzerspecstyle = 0;
+	if (datFileSize < (int)(offsetof(save, analyzerpeakhold) + sizeof(savedata.analyzerpeakhold)))
+		savedata.analyzerpeakhold = 1;
+	else if (savedata.analyzerpeakhold != 0)
+		savedata.analyzerpeakhold = 1;
+	if (datFileSize < (int)(offsetof(save, analyzereqoverlay) + sizeof(savedata.analyzereqoverlay)))
+		savedata.analyzereqoverlay = 1;
+	else if (savedata.analyzereqoverlay != 0)
+		savedata.analyzereqoverlay = 1;
 	// ジャンプリスト履歴: 途中フィールド挿入で .dat がずれた場合などは破棄する
 	{
 		auto clearMpHist = []() {

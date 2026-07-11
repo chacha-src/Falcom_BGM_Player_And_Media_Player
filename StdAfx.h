@@ -1,6 +1,8 @@
 ﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
+
+// uni_avx2_vs2026|x86(oggのみ)でビルドすること。
 #pragma once
 #pragma warning( disable : 4142 4091 )
 #ifndef VC_EXTRALEAN
@@ -30,6 +32,8 @@
 #ifndef _AFX_NO_AFXCMN_SUPPORT
 #include <afxcmn.h>             // MFC の Windows コモン コントロール サポート
 #endif // _AFX_NO_AFXCMN_SUPPORT
+
+#include <atlimage.h> // CImage / GDI+（oggDlg を PCH から外したためここで確保）
 
 #pragma warning(disable : 4995)
 
@@ -67,6 +71,7 @@ struct playlistdata0{
 	int time;
 };
 
+// 必ず末尾に追加すること
 struct save{
 	TCHAR ysf[1024];
 	TCHAR ys6[1024];
@@ -258,6 +263,10 @@ struct save{
 	int analyzery;
 	int analyzerw;
 	int analyzerh;
+	int analyzerspeclayout; // 0=重ね 1=上下 2=左右 3=2x2 4=2x4
+	int analyzerspecstyle;  // 0=塗+線(Ozone風) 1=線のみ 2=バー
+	int analyzerpeakhold;   // 1=ピークホールド ON
+	int analyzereqoverlay;  // 1=EQ帯域/ゲイン曲線オーバーレイ
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */
@@ -268,6 +277,7 @@ const wchar_t* LangPick14(
 	const wchar_t* s12, const wchar_t* s13);
 #define LL14(ja,en,fr,it,es,ko,zh,ar,ru,de,pt,nl,pl,tr) \
 	LangPick14(ja,en,fr,it,es,ko,zh,ar,ru,de,pt,nl,pl,tr)
+// LL2は使用しないこと。LL14のみ。翻訳は手抜きしない。
 #define LL2(ja, en) LL14(ja, en, en, en, en, en, en, en, en, en, en, en, en, en)
 extern int loop1;
 extern int loop1_2;
@@ -289,9 +299,9 @@ afx_msg BOOL OnNcActivate(BOOL bActive); \
 afx_msg void OnMoving(UINT fwSide, LPRECT pRect); \
 int m_bMoving1; \
 CPoint m_pointOld1;
-#include "ogg.h"
-#include "oggDlg.h"
-#include "PlayList.h"
+// ogg.h / oggDlg.h / PlayList.h は PCH に入れない(ピアノロール等の変更で全TU再ビルドになるため)。
+// 必要な .cpp 側で個別 include すること。
+class CImageBase;
 #define cmn(xxx) 	ON_WM_CREATE()  \
 ON_WM_MOUSEMOVE()  \
 ON_WM_LBUTTONDOWN() \

@@ -12,6 +12,7 @@
 #include "PianoRollPick.h"
 #include "PianoRoll108Detect.h"
 #include "PianoKeyTable.h"
+#include "HarmonicProfile.h"
 #include "PianoRollGoertzelAvx2.h"
 #include <algorithm>
 
@@ -554,10 +555,6 @@ BOOL CPianoRoll::OnInitDialog()
     m_feedEnabled = true;
     m_paintDisabled = false;
     m_historyDirty = true;
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled())
-        ApplyDwmBlur();
-#endif
     return TRUE;
 }
 
@@ -3256,8 +3253,9 @@ void CPianoRoll::OnSize(UINT nType, int cx, int cy)
     m_keyDirty = true;
     m_framesPending = 0;
 #if CCUSTOM_AERO_SUPPORT
+    // Finalize の再実行はしない。DWM 属性の軽い再適用のみ。
     if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
-        ApplyDwmBlur();
+        CCC_RefreshDialogDwmBlur(m_hWnd);
 #endif
     Invalidate(FALSE);
 }
@@ -3272,9 +3270,9 @@ void CPianoRoll::OnShowWindow(BOOL bShow, UINT nStatus)
 {
     CCustomBlurDialogExBase::OnShowWindow(bShow, nStatus);
 #if CCUSTOM_AERO_SUPPORT
+    // 基底側で Apply/Refresh 済み。内容の再同期のみ行う。
     if (bShow && CCC_IsAeroEnabled())
     {
-        ApplyDwmBlur();
         m_keyDirty = true;
         m_rollScrollValid = false;
         RequestSyncFromMainUi();

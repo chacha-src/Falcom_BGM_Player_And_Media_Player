@@ -1,8 +1,10 @@
-// Folder.cpp : インプリメンテーション ファイル
+﻿// Folder.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
 #include "ogg.h"
+#include "oggDlg.h"
+#include "PlayList.h"
 #include "Folder.h"
 #include "PVI.h"
 #include "KpiV5ConfigDlg.h"
