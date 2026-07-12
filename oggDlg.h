@@ -369,6 +369,7 @@ public:
 };
 
 void COggDlg_SyncPianoRollFast();
+void COggDlg_SyncAnalyzerFast();
 
 void SetupTaskbarThumbButtons(HWND hwnd, BOOL mediaPlayerMode);
 void RefreshTaskbarJumpList(BOOL mediaPlayerMode);

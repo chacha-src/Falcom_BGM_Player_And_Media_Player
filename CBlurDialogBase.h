@@ -55,7 +55,7 @@ protected:
 	void FixListControlsBackground();
 
 	// コントロール不透明化のメイン関数
-	void ApplyOpacityFixToAllChildren();
+	void FixChildOpacity();
 	// ★追加：再帰的に子ウィンドウを探すヘルパー
 	void RecursiveApplyFix(HWND hWndParent);
 

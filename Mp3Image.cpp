@@ -291,7 +291,7 @@ void CMp3Image::OnPaint()
 		SetStretchBltMode(memDC.m_hDC, HALFTONE);
 		SetBrushOrgEx(memDC.m_hDC, 0, 0, NULL);
 		memDC.StretchBlt(0, 0, imgW, imgH, &dc, 0, 0, x, y, SRCCOPY);
-		CCC_BlitChromaNoFlicker(dcc.m_hDC, 0, 0, rect.Width(), rect.Height(),
+		CCC_BlitChromaNF(dcc.m_hDC, 0, 0, rect.Width(), rect.Height(),
 			memDC.GetSafeHdc(), 0, 0, RGB(0, 0, 0));
 		memDC.SelectObject(pOldMem);
 	}

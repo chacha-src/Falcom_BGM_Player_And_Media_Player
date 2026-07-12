@@ -295,7 +295,7 @@ BOOL CBlurDialogBase::OnInitDialog()
 	FixListControlsBackground();
 
 	// 不透明化フックの適用（再帰的に全コントロールへ）
-	ApplyOpacityFixToAllChildren();
+	FixChildOpacity();
 
 	ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
 
@@ -307,7 +307,7 @@ BOOL CBlurDialogBase::OnInitDialog()
 	return TRUE;
 }
 
-void CBlurDialogBase::ApplyOpacityFixToAllChildren()
+void CBlurDialogBase::FixChildOpacity()
 {
 	COSVersion os;
 	os.GetVersionString();

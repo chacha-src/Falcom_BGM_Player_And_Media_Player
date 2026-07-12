@@ -54,15 +54,15 @@ BOOL CCC_IsBlurDialogChild(HWND hWnd)
 }
 
 // ぼかしダイアログ上ではラベル・スライダー等は透過、ボタン・リスト等は不透明
-static BOOL CCC_UseTransparentPaint(HWND hWnd, BOOL bAeroMode)
+static BOOL CCC_UseTransPaint(HWND hWnd, BOOL bAeroMode)
 {
     if (CCC_IsBlurDialogChild(hWnd) && CCC_IsAeroEnabled()) return TRUE;
     return bAeroMode && !CCC_IsBlurDialogChild(hWnd);
 }
 
-void CCC_InvalidateBlurParent(HWND hWnd, BOOL bAeroMode)
+void CCC_InvalidateParent(HWND hWnd, BOOL bAeroMode)
 {
-    if (!CCC_UseTransparentPaint(hWnd, bAeroMode)) return;
+    if (!CCC_UseTransPaint(hWnd, bAeroMode)) return;
     HWND hParent = ::GetParent(hWnd);
     if (!hParent || !::IsWindow(hParent)) return;
     RECT rc = {};
@@ -72,7 +72,7 @@ void CCC_InvalidateBlurParent(HWND hWnd, BOOL bAeroMode)
     ::InvalidateRect(hParent, &rc, FALSE);
 }
 
-void CCC_RefreshDialogDwmBlur(HWND hWnd)
+void CCC_RefreshDwmBlur(HWND hWnd)
 {
     if (!hWnd || !::IsWindow(hWnd) || !CCC_IsAeroEnabled() || !CCC_IsWin11()) return;
     BOOL compositionEnabled = FALSE;
@@ -83,7 +83,7 @@ void CCC_RefreshDialogDwmBlur(HWND hWnd)
     ::DwmExtendFrameIntoClientArea(hWnd, &margins);
 }
 
-static void CCC_TransparentBltClearDest(HDC hdcDest, int x, int y, int w, int h,
+static void CCC_ClearDestBlt(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
     if (w <= 0 || h <= 0) return;
@@ -143,7 +143,7 @@ static void DlgOnPaintAero(CWnd* pWnd, BOOL bAeroEnabled)
 #pragma comment(lib, "msimg32.lib")
 #pragma comment(lib, "uxtheme.lib")
 
-static void CCC_InitBufferedPaintTransparent(HPAINTBUFFER hBP, int w, int h)
+static void CCC_InitBPClear(HPAINTBUFFER hBP, int w, int h)
 {
     RGBQUAD* pPixels = nullptr;
     int rowLength = 0;
@@ -162,7 +162,7 @@ static UINT32 CCC_RgbMask(COLORREF clr)
     return (UINT32)(GetRValue(clr) << 16) | (UINT32)(GetGValue(clr) << 8) | GetBValue(clr);
 }
 
-static void CCC_SetDibAlphaFromChromaRect(void* pBits, int dibW, int dibH, const RECT& rc, COLORREF clrKey)
+static void CCC_AlphaFromChromaRect(void* pBits, int dibW, int dibH, const RECT& rc, COLORREF clrKey)
 {
     if (!pBits || dibW <= 0 || dibH <= 0) return;
     int x0 = rc.left, y0 = rc.top, x1 = rc.right, y1 = rc.bottom;
@@ -194,11 +194,11 @@ static void CCC_SetDibAlphaFromChromaRect(void* pBits, int dibW, int dibH, const
     }
 }
 
-static void CCC_SetDibAlphaFromChroma(void* pBits, int w, int h, COLORREF clrKey)
+static void CCC_AlphaFromChroma(void* pBits, int w, int h, COLORREF clrKey)
 {
     if (!pBits || w <= 0 || h <= 0) return;
     RECT rc = { 0, 0, w, h };
-    CCC_SetDibAlphaFromChromaRect(pBits, w, h, rc, clrKey);
+    CCC_AlphaFromChromaRect(pBits, w, h, rc, clrKey);
 }
 
 static HBITMAP CCC_CreateAlphaDib32(HDC hdcRef, int w, int h, void** ppBits)
@@ -299,7 +299,7 @@ BOOL CCC_ChromaBlitCache::UpdateRect(HDC hdcSrc, int srcX, int srcY, int dx, int
         dcDib.Detach();
     }
     RECT rc = { dx, dy, dx + rw, dy + rh };
-    CCC_SetDibAlphaFromChromaRect(pBits, dibW, dibH, rc, clrKey);
+    CCC_AlphaFromChromaRect(pBits, dibW, dibH, rc, clrKey);
     return TRUE;
 }
 
@@ -314,7 +314,7 @@ BOOL CCC_ChromaBlitCache::FillOpaqueRect(int x, int y, int rw, int rh, COLORREF 
         dcDib.Detach();
     }
     RECT rc = { x, y, x + rw, y + rh };
-    CCC_SetDibAlphaFromChromaRect(pBits, dibW, dibH, rc, chromaKey);
+    CCC_AlphaFromChromaRect(pBits, dibW, dibH, rc, chromaKey);
     return TRUE;
 }
 
@@ -329,7 +329,7 @@ BOOL CCC_ChromaBlitCache::BlitRect(HDC hdcDest, int x, int y, int w, int h)
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (!hdcBuf || !hBP) return FALSE;
 
-    CCC_InitBufferedPaintTransparent(hBP, w, h);
+    CCC_InitBPClear(hBP, w, h);
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     ::GdiAlphaBlend(hdcBuf, x, y, w, h, hdcDib, x, y, w, h, bf);
     ::EndBufferedPaint(hBP, TRUE);
@@ -346,14 +346,14 @@ BOOL CCC_ChromaBlitCache::BlitFull(HDC hdcDest, int x, int y, int w, int h)
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (!hdcBuf || !hBP) return FALSE;
 
-    CCC_InitBufferedPaintTransparent(hBP, w, h);
+    CCC_InitBPClear(hBP, w, h);
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     ::GdiAlphaBlend(hdcBuf, 0, 0, w, h, hdcDib, 0, 0, w, h, bf);
     ::EndBufferedPaint(hBP, TRUE);
     return TRUE;
 }
 
-static BOOL CCC_BlitToRectChromaNoFlickerCached(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
+static BOOL CCC_BlitChromaCachedRect(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
     int destW, int destH, int srcW, int srcH, COLORREF clrKey, CCC_ChromaBlitCache& cache)
 {
     if (destW <= 0 || destH <= 0) return FALSE;
@@ -370,14 +370,14 @@ static BOOL CCC_BlitToRectChromaNoFlickerCached(HDC hdcDest, const RECT& rect, H
             dcDib.BitBlt(0, 0, destW, destH, CDC::FromHandle(hdcSrc), srcX, srcY, SRCCOPY);
         dcDib.Detach();
     }
-    CCC_SetDibAlphaFromChroma(cache.pBits, destW, destH, clrKey);
+    CCC_AlphaFromChroma(cache.pBits, destW, destH, clrKey);
 
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     HDC hdcBuf = NULL;
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (!hdcBuf || !hBP) return FALSE;
 
-    CCC_InitBufferedPaintTransparent(hBP, destW, destH);
+    CCC_InitBPClear(hBP, destW, destH);
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     ::GdiAlphaBlend(hdcBuf, rect.left, rect.top, destW, destH, cache.hdcDib, 0, 0, destW, destH, bf);
     ::EndBufferedPaint(hBP, TRUE);
@@ -388,7 +388,7 @@ static BOOL CCC_BlitToRectChromaNoFlickerCached(HDC hdcDest, const RECT& rect, H
 // BeginBufferedPaint の buffer DC はクライアント座標系を共有するため、
 // GdiAlphaBlend の描画先は (0,0) でなく (rect.left, rect.top) でなければならない。
 // (0,0) に描くと EndBufferedPaint が prcTarget でクリップした際に座標がずれる。
-static BOOL CCC_BlitToRectChromaNoFlicker(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
+static BOOL CCC_BlitChromaNFRect(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
     int destW, int destH, int srcW, int srcH, COLORREF clrKey, BOOL bStretch)
 {
     if (destW <= 0 || destH <= 0) return FALSE;
@@ -407,7 +407,7 @@ static BOOL CCC_BlitToRectChromaNoFlicker(HDC hdcDest, const RECT& rect, HDC hdc
         dcDib.StretchBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
     else
         dcDib.BitBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, SRCCOPY);
-    CCC_SetDibAlphaFromChroma(pBits, destW, destH, clrKey);
+    CCC_AlphaFromChroma(pBits, destW, destH, clrKey);
 
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     HDC hdcBuf = NULL;
@@ -420,7 +420,7 @@ static BOOL CCC_BlitToRectChromaNoFlicker(HDC hdcDest, const RECT& rect, HDC hdc
         return FALSE;
     }
 
-    CCC_InitBufferedPaintTransparent(hBP, destW, destH);
+    CCC_InitBPClear(hBP, destW, destH);
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     // buffer DC はクライアント座標系なので rect の左上から描画する
     ::GdiAlphaBlend(hdcBuf, rect.left, rect.top, destW, destH, dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
@@ -443,17 +443,17 @@ void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey)
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (hdcBuf && hBP)
     {
-        CCC_InitBufferedPaintTransparent(hBP, w, h);
+        CCC_InitBPClear(hBP, w, h);
         ::EndBufferedPaint(hBP, TRUE);
     }
 }
 
-void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect)
+void CCC_PaintAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect)
 {
     if (!pWnd || !pWnd->GetSafeHwnd()) return;
     CRect clip;
     if (dc.GetClipBox(&clip) == ERROR || clip.IsRectEmpty()) return;
-    CCC_SelectClipExcludeChildren(dc, pWnd);
+    CCC_ClipNoChildren(dc, pWnd);
     if (pPreserveRect)
     {
         CRect preserve(pPreserveRect);
@@ -470,7 +470,7 @@ void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect)
     CCC_ClearRectChroma(dc.GetSafeHdc(), rcClip, CCC_AERO_CHROMA_KEY);
 }
 
-void CCC_SelectClipExcludeChildren(CDC& dc, CWnd* pWnd)
+void CCC_ClipNoChildren(CDC& dc, CWnd* pWnd)
 {
     if (!pWnd || !pWnd->GetSafeHwnd()) return;
     CRect cr;
@@ -543,7 +543,7 @@ static void CCC_BlitToRectChroma(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
         memDC.StretchBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
     else
         memDC.BitBlt(0, 0, destW, destH, &dcSrc, srcX, srcY, SRCCOPY);
-    CCC_TransparentBltClearDest(hdcDest, rect.left, rect.top, destW, destH,
+    CCC_ClearDestBlt(hdcDest, rect.left, rect.top, destW, destH,
         memDC.GetSafeHdc(), 0, 0, clrKey);
     memDC.SelectObject(pOld);
     dcDest.Detach();
@@ -557,16 +557,16 @@ void CCC_BlitStretchChroma(HDC hdcDest, int x, int y, int destW, int destH,
     CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE);
 }
 
-void CCC_BlitStretchChromaNoFlicker(HDC hdcDest, int x, int y, int destW, int destH,
+void CCC_BlitStretchNF(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey)
 {
     // UI スレッド想定。DIB を再利用して毎フレーム CreateDIBSection を避ける。
     static CCC_ChromaBlitCache s_nfCache;
     RECT rect = { x, y, x + destW, y + destH };
     if (destW > 0 && destH > 0 &&
-        CCC_BlitToRectChromaNoFlickerCached(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, s_nfCache))
+        CCC_BlitChromaCachedRect(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, s_nfCache))
         return;
-    if (!CCC_BlitToRectChromaNoFlicker(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE))
+    if (!CCC_BlitChromaNFRect(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE))
         CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE);
 }
 
@@ -576,44 +576,44 @@ void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int src
     CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE);
 }
 
-void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
+void CCC_BlitChromaNF(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
     // UI スレッド想定。DIB を再利用して毎フレーム CreateDIBSection を避ける。
     static CCC_ChromaBlitCache s_nfCache;
     RECT rect = { x, y, x + w, y + h };
     if (w > 0 && h > 0 &&
-        CCC_BlitToRectChromaNoFlickerCached(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, s_nfCache))
+        CCC_BlitChromaCachedRect(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, s_nfCache))
         return;
-    if (!CCC_BlitToRectChromaNoFlicker(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE))
+    if (!CCC_BlitChromaNFRect(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE))
         CCC_BlitChroma(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
 }
 
-BOOL CCC_BlitChromaNoFlickerCached(HDC hdcDest, int x, int y, int w, int h,
+BOOL CCC_BlitChromaCached(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, CCC_ChromaBlitCache& cache)
 {
     if (w <= 0 || h <= 0) return FALSE;
     RECT rect = { x, y, x + w, y + h };
-    if (CCC_BlitToRectChromaNoFlickerCached(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, cache))
+    if (CCC_BlitChromaCachedRect(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, cache))
         return TRUE;
     // 呼び出し側キャッシュ失敗時は一時 DIB 経路(再帰しないよう NoFlicker の静的キャッシュは使わない)
-    if (!CCC_BlitToRectChromaNoFlicker(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE))
+    if (!CCC_BlitChromaNFRect(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE))
         CCC_BlitChroma(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
     return TRUE;
 }
 
 void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
-    CCC_BlitChromaNoFlicker(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
+    CCC_BlitChromaNF(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
 }
 
-static void CCC_BlitTransparentChroma(HDC hdcDest, int x, int y, int w, int h,
+static void CCC_BlitChromaTrans(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
     if (w <= 0 || h <= 0) return;
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
-        CCC_BlitChromaNoFlicker(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
+        CCC_BlitChromaNF(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
     else
-        CCC_TransparentBltClearDest(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
+        CCC_ClearDestBlt(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
 }
 #endif
 // ============================================================================
@@ -760,7 +760,7 @@ static void CCC_BoxBlurAlpha(std::vector<BYTE>& alpha, int w, int h, int radius)
     }
 }
 
-static void DrawDecorativeTextShadowLayers(CDC* pDC, const CRect& rect, const CString& str, UINT fmt,
+static void DrawTextShadow(CDC* pDC, const CRect& rect, const CString& str, UINT fmt,
     COLORREF clrS, int nSD, int nDist, int nBlur, COLORREF clrBg, BOOL bAeroTrans,
     float scaleX = 1.0f, float scaleY = 1.0f)
 {
@@ -888,7 +888,7 @@ static void DrawDecorativeTextShadowLayers(CDC* pDC, const CRect& rect, const CS
 static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& str, UINT fmt, COLORREF clrT, COLORREF clrS, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bAeroTrans = FALSE)
 {
     if (bSE)
-        DrawDecorativeTextShadowLayers(pDC, rect, str, fmt, clrS, nSD, nDist, nBlur, clrBg, bAeroTrans);
+        DrawTextShadow(pDC, rect, str, fmt, clrS, nSD, nDist, nBlur, clrBg, bAeroTrans);
     pDC->SetTextColor(clrT);
     CRect rt = rect;
     pDC->DrawText(str, rt, fmt);
@@ -899,7 +899,7 @@ static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str
     if (str.IsEmpty()) return;
 
     if (bSE)
-        DrawDecorativeTextShadowLayers(pDC, rect, str, fmt, clrSh, nSD, nDist, nBlur, clrBg, bAeroTrans);
+        DrawTextShadow(pDC, rect, str, fmt, clrSh, nSD, nDist, nBlur, clrBg, bAeroTrans);
 
     CSize sz = pDC->GetTextExtent(str);
     int nW = (nActW > 0) ? nActW : sz.cx;
@@ -1438,7 +1438,7 @@ static void DrawSmartText(CDC* pDC, CRect rect, CString str, BOOL bDis, BOOL bPu
     fm.DeleteObject();
 }
 
-static void DrawFittedSingleLineDecorativeText(CDC& dc, const CRect& rect, const CString& str, UINT fmt,
+static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT fmt,
     BOOL bGrad, COLORREF cGS, COLORREF cGE, int nDir,
     COLORREF clrSh, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bPreferWide,
     BOOL bAeroTrans = FALSE, UINT dpi = 96)
@@ -1512,7 +1512,7 @@ static void DrawFittedSingleLineDecorativeText(CDC& dc, const CRect& rect, const
     CRect rl(0, 0, sz.cx + (std::max)(16, mCW + 4), rlH);
     const UINT fitFmt = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
     if (bSE)
-        DrawDecorativeTextShadowLayers(&dc, rl, str, fitFmt, clrSh, nSD, nDist, nBlur, clrBg, bAeroTrans, scaleX, scaleY);
+        DrawTextShadow(&dc, rl, str, fitFmt, clrSh, nSD, nDist, nBlur, clrBg, bAeroTrans, scaleX, scaleY);
     if (bGrad) DrawTextWithGradient(&dc, rl, str, fitFmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, FALSE, clrBg, sz.cx, FALSE, bAeroTrans);
     else DrawTextWithShadow(&dc, rl, str, fitFmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, FALSE, clrBg, bAeroTrans);
     dc.RestoreDC(-1);
@@ -1932,16 +1932,16 @@ static void CALLBACK CCC_InwomanTimerProc(HWND, UINT, UINT_PTR, DWORD)
     CCC_InwomanInvalidateAll();
 }
 
-void CCC_EnsureInwomanTimer()
+void CCC_StartInwomanTimer()
 {
     if (g_inwomanTimer == 0)
         g_inwomanTimer = ::SetTimer(NULL, 0, 70, CCC_InwomanTimerProc);
 }
 
-BOOL CCC_ProcessInwomanHotkey(MSG* pMsg, CWnd* pWnd)
+BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd)
 {
     UNREFERENCED_PARAMETER(pWnd);
-    CCC_EnsureInwomanTimer();
+    CCC_StartInwomanTimer();
     if (!pMsg || pMsg->message != WM_KEYDOWN || pMsg->wParam != VK_F12)
         return FALSE;
 
@@ -2137,7 +2137,7 @@ static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double 
 // SM/拘束は無し。読みやすさ優先で中央は塗らず、縁と隅だけで火照り・トロ顔・汗・ビクッ。
 // ハート一辺倒にならないよう、愛液(滴り)とバイブ(振動)も添える。
 // bAeroTrans時は半透明演出を避ける。
-static void CCC_DrawInwomanOverlay(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
+static void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
 {
     if (!pDC || !CCC_IsInwoman() || rc.Width() < 8 || rc.Height() < 8)
         return;
@@ -2214,7 +2214,7 @@ static void CCC_DrawInwomanOverlay(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
 template<typename DlgBase>
 static void DoSubclassChildControls(DlgBase* pDlg)
 {
-    CCC_EnsureInwomanTimer();
+    CCC_StartInwomanTimer();
     HWND hc = ::GetWindow(pDlg->m_hWnd, GW_CHILD);
     while (hc)
     {
@@ -2726,7 +2726,7 @@ CCustomStatic::CCustomStatic()
     m_nShadowDistance(2), m_nShadowBlur(3), m_bShadowEnable(FALSE),
     m_bPreferWideMode(FALSE), m_nCachedHeight(0), m_nCachedWidth(0), m_fCachedScaleX(1.0f),
     m_strCachedText(_T("")), m_strText(_T("")), m_nCachedDpi(0),
-    m_backstoreW(0), m_backstoreH(0), m_bAeroMode(FALSE)
+    m_backstoreW(0), m_backstoreH(0), m_bAeroMode(FALSE), m_bNoParentInvalidate(FALSE)
 {}
 
 CCustomStatic::~CCustomStatic()
@@ -2839,7 +2839,7 @@ void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const std::ve
     if (fmt & DT_CENTER) xP = rect.left + (rect.Width() - tot.cx) / 2;
     else if (fmt & DT_RIGHT) xP = rect.right - tot.cx;
 
-    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
     const COLORREF clrBg = COLOR_DIALOG_BG;
 
     for (size_t i = 0; i < segs.size(); i++)
@@ -2943,7 +2943,7 @@ void CCustomStatic::PreSubclassWindow()
 BOOL CCustomStatic::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseTransparentPaint(m_hWnd, m_bAeroMode)) return TRUE;
+    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode)) return TRUE;
 #endif
     if (pDC)
     {
@@ -2974,7 +2974,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     }
     CBitmap* ob = memDC.SelectObject(&m_memBackstore);
 
-    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
     memDC.FillSolidRect(&rect, COLOR_DIALOG_BG);
 
     if (m_strText.IsEmpty())
@@ -2982,7 +2982,7 @@ void CCustomStatic::DrawClient(CDC& dc)
         if (bTrans)
         {
             CCC_RemapSolidColorInDC(memDC, rect, COLOR_DIALOG_BG, CCC_AERO_CHROMA_KEY);
-            CCC_BlitTransparentChroma(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+            CCC_BlitChromaTrans(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
         }
         else
             dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
@@ -3226,7 +3226,7 @@ void CCustomStatic::DrawClient(CDC& dc)
 
         if (m_fCachedScaleX < 0.98f)
         {
-            DrawFittedSingleLineDecorativeText(memDC, rect, strText, fmt,
+            DrawFittedText(memDC, rect, strText, fmt,
                 m_bGradEnable, m_clrGradStart, m_clrGradEnd, m_nGradDirection,
                 m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
                 m_bShadowEnable, clrBg, FALSE, bTrans, dpi);
@@ -3259,7 +3259,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     if (bTrans)
     {
         CCC_RemapSolidColorInDC(memDC, rect, COLOR_DIALOG_BG, CCC_AERO_CHROMA_KEY);
-        CCC_BlitTransparentChroma(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+        CCC_BlitChromaTrans(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     }
     else
         dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
@@ -3294,7 +3294,8 @@ LRESULT CCustomStatic::OnSetText(WPARAM, LPARAM lp)
     if (GetSafeHwnd())
     {
 #if CCUSTOM_AERO_SUPPORT
-        CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+        if (!m_bNoParentInvalidate)
+            CCC_InvalidateParent(m_hWnd, m_bAeroMode);
 #endif
         Invalidate(FALSE);
     }
@@ -3679,9 +3680,9 @@ void CCustomComboBox::PaintClient(CDC& dc)
     mDC.DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     mDC.SelectObject(pOF);
 
-    CCC_DrawInwomanOverlay(&mDC, r, bTrans);
+    CCC_DrawInwoman(&mDC, r, bTrans);
 
-    if (bTrans) CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, RGB(0, 0, 0));
+    if (bTrans) CCC_ClearDestBlt(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, RGB(0, 0, 0));
     else dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
 
     mDC.SelectObject(ob);
@@ -3893,7 +3894,7 @@ void CCustomSliderCtrl::SetPos(int nPos, BOOL bRedraw)
     if (bRedraw && GetSafeHwnd())
     {
 #if CCUSTOM_AERO_SUPPORT
-        CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+        CCC_InvalidateParent(m_hWnd, m_bAeroMode);
 #endif
         Invalidate(FALSE);
         UpdateWindow();
@@ -3925,19 +3926,19 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
     mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
     CBitmap* ob = mDC.SelectObject(&mB);
 
-    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
     if (bTrans)
     {
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
         DrawSlider(&mDC);
-        CCC_DrawInwomanOverlay(&mDC, r, TRUE);
-        CCC_BlitTransparentChroma(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+        CCC_DrawInwoman(&mDC, r, TRUE);
+        CCC_BlitChromaTrans(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     }
     else
     {
         mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
         DrawSlider(&mDC);
-        CCC_DrawInwomanOverlay(&mDC, r, FALSE);
+        CCC_DrawInwoman(&mDC, r, FALSE);
         dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
     }
     mDC.SelectObject(ob);
@@ -3966,7 +3967,7 @@ LRESULT CCustomSliderCtrl::OnPrintClient(WPARAM wParam, LPARAM)
 BOOL CCustomSliderCtrl::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseTransparentPaint(m_hWnd, m_bAeroMode)) return TRUE;
+    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode)) return TRUE;
 #endif
     if (pDC)
     {
@@ -3988,7 +3989,7 @@ LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM w, LPARAM l)
         SetTimer(kSliderShimmerTimerId, 40, NULL);
     }
 #if CCUSTOM_AERO_SUPPORT
-    CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+    CCC_InvalidateParent(m_hWnd, m_bAeroMode);
 #endif
     Invalidate(FALSE);
     return r;
@@ -3997,7 +3998,7 @@ LRESULT CCustomSliderCtrl::OnLButtonDownMsg(WPARAM w, LPARAM l)
 {
     LRESULT r = Default();
 #if CCUSTOM_AERO_SUPPORT
-    CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+    CCC_InvalidateParent(m_hWnd, m_bAeroMode);
 #endif
     Invalidate(FALSE);
     return r;
@@ -4006,7 +4007,7 @@ LRESULT CCustomSliderCtrl::OnLButtonUpMsg(WPARAM w, LPARAM l)
 {
     LRESULT r = Default();
 #if CCUSTOM_AERO_SUPPORT
-    CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+    CCC_InvalidateParent(m_hWnd, m_bAeroMode);
 #endif
     Invalidate(FALSE);
     return r;
@@ -4448,26 +4449,26 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
     mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
     CBitmap* ob = mDC.SelectObject(&mB);
 
-    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
     if (bTrans)
     {
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
         DrawRangeSlider(&mDC);
-        CCC_DrawInwomanOverlay(&mDC, r, TRUE);
+        CCC_DrawInwoman(&mDC, r, TRUE);
 #if CCUSTOM_AERO_SUPPORT
         if (CCC_IsAeroEnabled() && CCC_IsWin11())
-            CCC_BlitChromaNoFlicker(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
+            CCC_BlitChromaNF(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
                 mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
         else
 #endif
-            CCC_TransparentBltClearDest(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
+            CCC_ClearDestBlt(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
                 mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     }
     else
     {
         mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
         DrawRangeSlider(&mDC);
-        CCC_DrawInwomanOverlay(&mDC, r, FALSE);
+        CCC_DrawInwoman(&mDC, r, FALSE);
         dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
     }
     mDC.SelectObject(ob);
@@ -4496,7 +4497,7 @@ LRESULT CCustomRangeSliderCtrl::OnPrintClient(WPARAM wParam, LPARAM)
 BOOL CCustomRangeSliderCtrl::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseTransparentPaint(m_hWnd, m_bAeroMode)) return TRUE;
+    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode)) return TRUE;
 #endif
     if (pDC)
     {
@@ -4577,7 +4578,7 @@ int CCustomRangeSliderCtrl::HitTest(CPoint p) const
 void CCustomRangeSliderCtrl::OnLButtonDown(UINT f, CPoint p)
 {
 #if CCUSTOM_AERO_SUPPORT
-    CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+    CCC_InvalidateParent(m_hWnd, m_bAeroMode);
 #endif
     SetFocus();
     m_nVisualPos = m_nLogicalPos;
@@ -4606,7 +4607,7 @@ void CCustomRangeSliderCtrl::OnLButtonUp(UINT f, CPoint p)
             GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_ENDSCROLL, m_nLogicalPos), (LPARAM)m_hWnd);
         }
 #if CCUSTOM_AERO_SUPPORT
-        CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+        CCC_InvalidateParent(m_hWnd, m_bAeroMode);
 #endif
         RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
     }
@@ -4616,7 +4617,7 @@ void CCustomRangeSliderCtrl::OnMouseMove(UINT f, CPoint p)
     if (m_bDragging)
     {
 #if CCUSTOM_AERO_SUPPORT
-        CCC_InvalidateBlurParent(m_hWnd, m_bAeroMode);
+        CCC_InvalidateParent(m_hWnd, m_bAeroMode);
 #endif
         int v = PixelToValue(p.x);
         if (m_nDragTarget == 3)
@@ -5275,7 +5276,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     DrawSmartText(&mDC, r, s, bD, bP);
     mDC.SelectObject(pOF);
 
-    if (!bD) CCC_DrawInwomanOverlay(&mDC, r, FALSE); // 淫女モード演出
+    if (!bD) CCC_DrawInwoman(&mDC, r, FALSE); // 淫女モード演出
 
     dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
     mDC.SelectObject(ob);
@@ -5553,7 +5554,7 @@ void CCustomCheckBox::OnPaint()
     GetClientRect(&r);
 
     // 透過(アクリル)時は CompositeTransparent が処理するので従来通り直接描画
-    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
     if (bTrans || r.Width() <= 0 || r.Height() <= 0)
     {
         OnDrawLayer(&dc, r);
@@ -5585,9 +5586,9 @@ BOOL CCustomCheckBox::OnEraseBkgnd(CDC*)
     return TRUE;
 }
 
-static void CCC_CompositeTransparent(HWND hWnd, BOOL bAeroMode, CDC& destDC, const CRect& rect, std::function<void(CDC&)> drawFn)
+static void CCC_CompositeTrans(HWND hWnd, BOOL bAeroMode, CDC& destDC, const CRect& rect, std::function<void(CDC&)> drawFn)
 {
-    const BOOL bTrans = CCC_UseTransparentPaint(hWnd, bAeroMode);
+    const BOOL bTrans = CCC_UseTransPaint(hWnd, bAeroMode);
     if (!bTrans)
     {
         drawFn(destDC);
@@ -5600,7 +5601,7 @@ static void CCC_CompositeTransparent(HWND hWnd, BOOL bAeroMode, CDC& destDC, con
     CBitmap* pOld = memDC.SelectObject(&bmp);
     memDC.FillSolidRect(0, 0, rect.Width(), rect.Height(), CCC_AERO_CHROMA_KEY);
     drawFn(memDC);
-    CCC_BlitTransparentChroma(destDC.GetSafeHdc(), rect.left, rect.top, rect.Width(), rect.Height(),
+    CCC_BlitChromaTrans(destDC.GetSafeHdc(), rect.left, rect.top, rect.Width(), rect.Height(),
         memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     memDC.SelectObject(pOld);
 }
@@ -5611,7 +5612,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
     const int rh = rect.Height();
     if (rw <= 0 || rh <= 0) return;
 
-    CCC_CompositeTransparent(m_hWnd, m_bAeroMode, *pDC, rect, [&](CDC& dc)
+    CCC_CompositeTrans(m_hWnd, m_bAeroMode, *pDC, rect, [&](CDC& dc)
     {
         BOOL bC = (m_nCheck == BST_CHECKED); BOOL bD = !IsWindowEnabled(); BOOL bP = m_bIsPressed && m_bIsHot;
         dc.SelectObject(GetFont() ? GetFont() : (CFont*)dc.SelectStockObject(DEFAULT_GUI_FONT));
@@ -5628,7 +5629,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
         }
         else
         {
-            const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+            const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
             if (!bTrans) dc.FillSolidRect(0, 0, rw, rh, COLOR_DIALOG_BG);
             int s = rh - 4;
             if (s > 18) s = 18;
@@ -5690,7 +5691,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             if (!m_bIsFlatStyle) rf.left += 20; else rf.DeflateRect(3, 3);
             dc.DrawFocusRect(&rf);
         }
-        CCC_DrawInwomanOverlay(&dc, CRect(0, 0, rw, rh), CCC_UseTransparentPaint(m_hWnd, m_bAeroMode));
+        CCC_DrawInwoman(&dc, CRect(0, 0, rw, rh), CCC_UseTransPaint(m_hWnd, m_bAeroMode));
     });
 }
 
@@ -5741,7 +5742,7 @@ LRESULT CCustomGroupBox::OnPrintClient(WPARAM wParam, LPARAM)
 BOOL CCustomGroupBox::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseTransparentPaint(m_hWnd, m_bAeroMode)) return TRUE;
+    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode)) return TRUE;
 #endif
     if (pDC)
     {
@@ -5753,7 +5754,7 @@ BOOL CCustomGroupBox::OnEraseBkgnd(CDC* pDC)
 }
 
 static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOOL bTrans);
-static void CCC_BlitGroupBoxFrameChroma(HDC hdcDest, int x, int y, int w, int h,
+static void CCC_BlitGroupFrame(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, COLORREF clrKey, const CRect& innerClient);
 
 void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
@@ -5762,7 +5763,7 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
     const int rh = rect.Height();
     if (!pDC || rw <= 0 || rh <= 0) return;
 
-    const BOOL bTrans = CCC_UseTransparentPaint(m_hWnd, m_bAeroMode);
+    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
     CString t;
     GetWindowText(t);
 
@@ -5789,7 +5790,7 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
     // 内側を除外せず全面をクロマ合成すると、クロマ部分=透過(アクリル)・
     // 枠ピクセル=不透明 となり、内部透過と下辺を含む枠が一度に正しく出る。
     // (内側除外方式だと内部が未処理=白のまま残り、下辺も欠ける)
-    CCC_BlitGroupBoxFrameChroma(pDC->GetSafeHdc(), rect.left, rect.top, rw, rh,
+    CCC_BlitGroupFrame(pDC->GetSafeHdc(), rect.left, rect.top, rw, rh,
         memDC.GetSafeHdc(), CCC_AERO_CHROMA_KEY, CRect(0, 0, 0, 0));
     memDC.SelectObject(pOld);
 }
@@ -5875,7 +5876,7 @@ void CCustomDialog::OnPaint()
         CDialogEx::OnPaint();
 }
 
-void CCC_SendGroupBoxesToBack(HWND hDlg)
+void CCC_GroupBoxesBack(HWND hDlg)
 {
     if (!hDlg || !::IsWindow(hDlg)) return;
     for (HWND h = ::GetWindow(hDlg, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT))
@@ -5888,12 +5889,12 @@ void CCC_SendGroupBoxesToBack(HWND hDlg)
 #if CCUSTOM_AERO_SUPPORT
 static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf);
 
-static BOOL CCC_ButtonSTNeedsChromaPaint(HWND hWnd)
+static BOOL CCC_BtnSTNeedsChroma(HWND hWnd)
 {
     return CCC_IsBlurDialogChild(hWnd) && CCC_IsAeroEnabled() && CCC_IsWin11();
 }
 
-static void CCC_RemapButtonSTBackgroundToChroma(CDC& dc, CButtonST* pBtn, const CRect& r)
+static void CCC_RemapBtnSTChroma(CDC& dc, CButtonST* pBtn, const CRect& r)
 {
     CCC_RemapSolidColorInDC(dc, r, COLOR_DIALOG_BG, CCC_AERO_CHROMA_KEY);
     CCC_RemapSolidColorInDC(dc, r, COLOR_BUTTON_BG, CCC_AERO_CHROMA_KEY);
@@ -5914,7 +5915,7 @@ static void CCC_DrawButtonSTClient(HWND hWnd, CButtonST* pBtn, HDC hdc, const RE
     const int rh = rect.bottom - rect.top;
     if (rw <= 0 || rh <= 0) return;
 
-    const BOOL bChroma = CCC_ButtonSTNeedsChromaPaint(hWnd);
+    const BOOL bChroma = CCC_BtnSTNeedsChroma(hWnd);
     CBrush br(bChroma ? COLOR_DIALOG_BG : COLOR_BUTTON_BG);
     ::FillRect(hdc, &rect, (HBRUSH)br.GetSafeHandle());
 
@@ -5936,12 +5937,12 @@ static void CCC_DrawButtonSTClient(HWND hWnd, CButtonST* pBtn, HDC hdc, const RE
     {
         CDC dc;
         dc.Attach(hdc);
-        CCC_RemapButtonSTBackgroundToChroma(dc, pBtn, CRect(0, 0, rw, rh));
+        CCC_RemapBtnSTChroma(dc, pBtn, CRect(0, 0, rw, rh));
         dc.Detach();
     }
 }
 
-static void CCC_BlitButtonSTChromaToDest(HDC hdcDest, HWND hWnd, CButtonST* pBtn, const RECT& rect)
+static void CCC_BlitBtnSTChroma(HDC hdcDest, HWND hWnd, CButtonST* pBtn, const RECT& rect)
 {
     const int width = rect.right - rect.left;
     const int height = rect.bottom - rect.top;
@@ -5955,7 +5956,7 @@ static void CCC_BlitButtonSTChromaToDest(HDC hdcDest, HWND hWnd, CButtonST* pBtn
     bmp.CreateCompatibleBitmap(&dcDest, width, height);
     CBitmap* pOld = dcMem.SelectObject(&bmp);
     CCC_DrawButtonSTClient(hWnd, pBtn, dcMem.GetSafeHdc(), rect);
-    CCC_BlitTransparentChroma(hdcDest, rect.left, rect.top, width, height,
+    CCC_BlitChromaTrans(hdcDest, rect.left, rect.top, width, height,
         dcMem.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     dcMem.SelectObject(pOld);
     dcDest.Detach();
@@ -5973,7 +5974,7 @@ static void CCC_ForcePaintButtonST(HWND hWnd, CButtonST* pBtn)
     if (rect.right <= rect.left || rect.bottom <= rect.top)
         return;
     CClientDC dc(pw);
-    CCC_BlitButtonSTChromaToDest(dc.GetSafeHdc(), hWnd, pBtn, rect);
+    CCC_BlitBtnSTChroma(dc.GetSafeHdc(), hWnd, pBtn, rect);
 }
 
 // Win11: 子ウィンドウの GDI はアルファ0のまま DWM に合成される。
@@ -6131,7 +6132,7 @@ private:
             bmp.CreateCompatibleBitmap(&dcDest, width, height);
             CBitmap* pOld = dcMem.SelectObject(&bmp);
             PaintClientIntoBuffer(hWnd, dcMem.GetSafeHdc());
-            CCC_BlitTransparentChroma(hDestDC, 0, 0, width, height,
+            CCC_BlitChromaTrans(hDestDC, 0, 0, width, height,
                 dcMem.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
             dcMem.SelectObject(pOld);
             dcDest.Detach();
@@ -6192,7 +6193,7 @@ static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
     return COLOR_DIALOG_BG;
 }
 
-static BOOL CCC_IsTransparentBlurControl(HWND hWnd)
+static BOOL CCC_IsBlurControl(HWND hWnd)
 {
     if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
     {
@@ -6214,7 +6215,7 @@ static BOOL CCC_IsTransparentBlurControl(HWND hWnd)
 static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
 {
     if (!::IsWindow(hWnd)) return FALSE;
-    if (CCC_IsTransparentBlurControl(hWnd)) return FALSE;
+    if (CCC_IsBlurControl(hWnd)) return FALSE;
     if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
     {
         if (dynamic_cast<CCustomListBox*>(pw)) return TRUE;
@@ -6288,7 +6289,7 @@ static void CCC_ClearOpaqueFixerList(CTypedPtrList<CPtrList, CCustomOpaqueFixer*
     }
 }
 
-static void CCC_InstallOpaqueFixersRecursive(HWND hParent, CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
+static void CCC_InstallOpaqueFixers(HWND hParent, CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
 {
     for (HWND hChild = ::GetWindow(hParent, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
     {
@@ -6296,7 +6297,7 @@ static void CCC_InstallOpaqueFixersRecursive(HWND hParent, CTypedPtrList<CPtrLis
         {
             BOOL bChromaBtn = FALSE;
             if (CWnd* pw = CWnd::FromHandlePermanent(hChild))
-                bChromaBtn = (dynamic_cast<CButtonST*>(pw) != NULL) && CCC_ButtonSTNeedsChromaPaint(hChild);
+                bChromaBtn = (dynamic_cast<CButtonST*>(pw) != NULL) && CCC_BtnSTNeedsChroma(hChild);
             CCustomOpaqueFixer* pFixer = new CCustomOpaqueFixer(
                 bChromaBtn ? COLOR_DIALOG_BG : CCC_OpaqueBgForHwnd(hChild), bChromaBtn);
             if (pFixer->Install(hChild))
@@ -6304,11 +6305,11 @@ static void CCC_InstallOpaqueFixersRecursive(HWND hParent, CTypedPtrList<CPtrLis
             else
                 delete pFixer;
         }
-        CCC_InstallOpaqueFixersRecursive(hChild, fixers);
+        CCC_InstallOpaqueFixers(hChild, fixers);
     }
 }
 
-static void CCC_BlitGroupBoxFrameChroma(HDC hdcDest, int x, int y, int w, int h,
+static void CCC_BlitGroupFrame(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, COLORREF clrKey, const CRect& innerClient)
 {
     if (w <= 0 || h <= 0) return;
@@ -6329,7 +6330,7 @@ static void CCC_BlitGroupBoxFrameChroma(HDC hdcDest, int x, int y, int w, int h,
     ::OffsetRgn(hrgnScreen, x, y);
     const int saved = ::SaveDC(hdcDest);
     ::ExtSelectClipRgn(hdcDest, hrgnScreen, RGN_AND);
-    CCC_BlitChromaNoFlicker(hdcDest, x, y, w, h, hdcSrc, 0, 0, clrKey);
+    CCC_BlitChromaNF(hdcDest, x, y, w, h, hdcSrc, 0, 0, clrKey);
     ::RestoreDC(hdcDest, saved);
     ::DeleteObject(hrgnScreen);
 }
@@ -6392,7 +6393,7 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
     dc.SelectObject(pOF);
 }
 
-static void CCC_FinalizeBlurDialog(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
+static void CCC_FinishBlurDlg(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
     CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
 {
     if (!pDlg || !pDlg->GetSafeHwnd()) return;
@@ -6408,10 +6409,10 @@ static void CCC_FinalizeBlurDialog(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
     CCC_PrepareDialogSurface(pDlg->m_hWnd, TRUE);
     PROPAGATE_AERO_TO_CHILDREN(pDlg->m_hWnd, TRUE);
     pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
-    CCC_SendGroupBoxesToBack(pDlg->m_hWnd);
+    CCC_GroupBoxesBack(pDlg->m_hWnd);
 
     if (CCC_IsWin11())
-        CCC_InstallOpaqueFixersRecursive(pDlg->m_hWnd, fixers);
+        CCC_InstallOpaqueFixers(pDlg->m_hWnd, fixers);
 
     pDlg->SetWindowPos(NULL, 0, 0, 0, 0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_DRAWFRAME);
@@ -6420,22 +6421,22 @@ static void CCC_FinalizeBlurDialog(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
         pDlg->PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 }
 
-static void CCC_PostOpaqueRepaintRecursive(HWND hWnd)
+static void CCC_PostOpaqueRepaint(HWND hWnd)
 {
     for (HWND hChild = ::GetWindow(hWnd, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
     {
         if (CCC_ShouldOpaqueFix(hChild))
             ::PostMessage(hChild, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
-        CCC_PostOpaqueRepaintRecursive(hChild);
+        CCC_PostOpaqueRepaint(hChild);
     }
 }
 
-static void CCC_ReapplyOpaqueFixers(CWnd* pDlg, CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
+static void CCC_ReapplyOpaqueFix(CWnd* pDlg, CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
 {
     if (!pDlg || !pDlg->GetSafeHwnd() || !CCC_IsWin11() || !CCC_IsAeroEnabled()) return;
     CCC_ClearOpaqueFixerList(fixers);
-    CCC_InstallOpaqueFixersRecursive(pDlg->m_hWnd, fixers);
-    CCC_PostOpaqueRepaintRecursive(pDlg->m_hWnd);
+    CCC_InstallOpaqueFixers(pDlg->m_hWnd, fixers);
+    CCC_PostOpaqueRepaint(pDlg->m_hWnd);
     pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE | RDW_ALLCHILDREN);
 }
 
@@ -6452,7 +6453,7 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
     }
     if (auto* pBtn = dynamic_cast<CButtonST*>(pw))
     {
-        if (CCC_ButtonSTNeedsChromaPaint(hWnd))
+        if (CCC_BtnSTNeedsChroma(hWnd))
             CCC_ForcePaintButtonST(hWnd, pBtn);
         else
         {
@@ -6488,7 +6489,7 @@ static BOOL CALLBACK CCC_RefreshChildProc(HWND hChild, LPARAM)
     return TRUE;
 }
 
-void CCC_RefreshChildrenAfterShow(HWND hWnd)
+void CCC_RefreshKids(HWND hWnd)
 {
     if (!hWnd || !::IsWindow(hWnd))
         return;
@@ -6538,7 +6539,7 @@ static BOOL CALLBACK CCC_RefreshChildProcNoAero(HWND hChild, LPARAM)
     return TRUE;
 }
 
-void CCC_RefreshChildrenAfterShow(HWND hWnd)
+void CCC_RefreshKids(HWND hWnd)
 {
     if (!hWnd || !::IsWindow(hWnd))
         return;
@@ -6623,7 +6624,7 @@ void CCustomBlurDialogBase::ApplyDwmBlurCore(BOOL bForce)
         if (m_bBlurApplied && !bForce)
             return;
         m_bAeroEnabled = TRUE;
-        CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
+        CCC_FinishBlurDlg(this, TRUE, m_bBlurApplied, m_opaqueFixers);
         return;
     }
 
@@ -6652,7 +6653,7 @@ void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
     {
         // 初回のみ Finalize。以降の再表示は DWM 属性の軽い再適用だけで足りる。
         ApplyDwmBlur();
-        CCC_RefreshDialogDwmBlur(m_hWnd);
+        CCC_RefreshDwmBlur(m_hWnd);
     }
 #endif
     UNREFERENCED_PARAMETER(nStatus);
@@ -6664,7 +6665,7 @@ void CCustomBlurDialogBase::OnPaint()
     if (m_bAeroEnabled && CCC_IsWin11())
     {
         CPaintDC dc(this);
-        CCC_PaintDialogAeroGaps(dc, this, nullptr);
+        CCC_PaintAeroGaps(dc, this, nullptr);
         return;
     }
 #endif
@@ -6704,7 +6705,7 @@ LRESULT CCustomBlurDialogBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
     if (m_bAeroEnabled && CCC_IsWin11())
-        CCC_ReapplyOpaqueFixers(this, m_opaqueFixers);
+        CCC_ReapplyOpaqueFix(this, m_opaqueFixers);
 #endif
     return 0;
 }
@@ -6855,7 +6856,7 @@ void CCustomBlurDialogExBase::ApplyDwmBlurCore(BOOL bForce)
         if (m_bBlurApplied && !bForce)
             return;
         m_bAeroEnabled = TRUE;
-        CCC_FinalizeBlurDialog(this, TRUE, m_bBlurApplied, m_opaqueFixers);
+        CCC_FinishBlurDlg(this, TRUE, m_bBlurApplied, m_opaqueFixers);
         return;
     }
 
@@ -6884,7 +6885,7 @@ void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
     {
         // 初回のみ Finalize。以降の再表示は DWM 属性の軽い再適用だけで足りる。
         ApplyDwmBlur();
-        CCC_RefreshDialogDwmBlur(m_hWnd);
+        CCC_RefreshDwmBlur(m_hWnd);
     }
 #endif
     UNREFERENCED_PARAMETER(nStatus);
@@ -6896,7 +6897,7 @@ void CCustomBlurDialogExBase::OnPaint()
     if (m_bAeroEnabled && CCC_IsWin11())
     {
         CPaintDC dc(this);
-        CCC_PaintDialogAeroGaps(dc, this, nullptr);
+        CCC_PaintAeroGaps(dc, this, nullptr);
         return;
     }
 #endif
@@ -6936,7 +6937,7 @@ LRESULT CCustomBlurDialogExBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
     if (m_bAeroEnabled && CCC_IsWin11())
-        CCC_ReapplyOpaqueFixers(this, m_opaqueFixers);
+        CCC_ReapplyOpaqueFix(this, m_opaqueFixers);
 #endif
     return 0;
 }

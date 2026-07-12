@@ -100,13 +100,13 @@ namespace Cfg
     }
 
     // フル窓ピークのみ。静かな半分を使うと音頭前の無音でゲインが跳ね、ノイズ床がノートになる。
-    static float Bufwav3LevelDbForDynamics(const double* winLow, int nLow,
+    static float LevelDbForDynamics(const double* winLow, int nLow,
         const double* winBass, int nBass)
     {
         return PeakDbFsWindows(winLow, nLow, winBass, nBass);
     }
 
-    static float MakeupGainDbForBufwav3(float peakDbFs)
+    static float MakeupGainDb(float peakDbFs)
     {
         if (peakDbFs >= BUFWAV3_GAIN_ZERO_DB) return 0.0f;
         float g = BUFWAV3_TARGET_PEAK_DB - peakDbFs;
@@ -717,34 +717,11 @@ float CPianoRoll::ApplyDisplayScale(float rawAmp, int keyIndex, int winSamples, 
 void CPianoRoll::FeedPCM(const void* pData, int frames,
     int sampleRate, int bits, int channels, int playbackDelaySamples)
 {
-    if (!m_feedEnabled || !pData || frames <= 0 || channels <= 0 || bits < 8) return;
-
-    EnterCriticalSection(&m_cs);
-    EnsureAnalysisTables(sampleRate);
-    if (playbackDelaySamples > 0) {
-        m_playbackDelaySamples = (m_playbackDelaySamples * 3 + playbackDelaySamples) / 4;
-    }
-
-    const uint8_t* p = static_cast<const uint8_t*>(pData);
-    const int bytesPerSample = bits / 8;
-    const int frameBytes = bytesPerSample * channels;
-
-    for (int f = 0; f < frames; ++f)
-    {
-        double mono = 0.0;
-        for (int ch = 0; ch < channels; ++ch) {
-            const uint8_t* sp = p + f * frameBytes + ch * bytesPerSample;
-            mono += ReadMonoSample(sp, bits);
-        }
-        mono /= channels;
-
-        m_ring[m_ringWrite] = mono;
-        m_ringWrite = (m_ringWrite + 1) % RING_SIZE;
-        if (m_ringCount < RING_SIZE) ++m_ringCount;
-        ++m_samplesSinceAnalyze;
-    }
-
-    LeaveCriticalSection(&m_cs);
+    // SyncPianoRollFromPlayCursor → AnalyzePlayCursorMono が解析の正本。
+    // リングは誰も読まないのに再生スレッドが毎サンプル m_cs で書いており、
+    // 解析/UI と争奪して滞留の一因になるため書き込みを停止する。
+    (void)pData; (void)frames; (void)sampleRate; (void)bits;
+    (void)channels; (void)playbackDelaySamples;
 }
 
 // bufwav3 の再生バッファ直後から呼ばれる。mono は既にモノラル変換済み。
@@ -842,13 +819,13 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_bassAnalysisBuf[i] = winBass[i];
     }
 
-    const float levelDb = Cfg::Bufwav3LevelDbForDynamics(
+    const float levelDb = Cfg::LevelDbForDynamics(
         m_analysisBuf.data(), m_winLow,
         hasBass ? m_bassAnalysisBuf.data() : nullptr,
         hasBass ? m_winBass : 0);
     m_bufwav3LevelDb = levelDb;
 
-    const float gainDb = Cfg::MakeupGainDbForBufwav3(levelDb);
+    const float gainDb = Cfg::MakeupGainDb(levelDb);
     // 絶対値ノイズフロアをこのフレームのゲインに連動させるため保存しておく
     // (ゲイン補正は信号もノイズも一緒に増幅するため、フロアも追従させないと
     // 静かな曲全体では強すぎ、逆に静かな減衰末尾では弱すぎるちぐはぐが生じる)。
@@ -954,7 +931,7 @@ namespace
     //   - こちらは「棄却ラインのすぐ近く(僅差)で生き残ったか」だけを見る予備検知
     // 明確に独立している音(下の潜在基音がほとんど鳴っていない)は対象外となり、
     // 実際にゴーストが観測された「閾値をまたいで一瞬だけ通過する」ケースだけを狙う。
-    bool IsMarginalFundamentalPass(const float* blend, int candidate, int count, float marginRatio)
+    bool IsMarginalFund(const float* blend, int candidate, int count, float marginRatio)
     {
         if (!blend || candidate < 0 || candidate >= count) return false;
         const float sc = blend[candidate];
@@ -982,7 +959,7 @@ namespace
     // 近い(marginRatio以内)場合は、前フレームの鍵を優先して復活させ、
     // 隣の鍵は降ろすことでホッピングを抑える。
     // NoteFundamentalPick.h 側の判定式自体には一切手を入れない、後付けの安定化。
-    void StabilizeAdjacentBinHopping(const float* blend, bool* picked,
+    void StabilizeBinHop(const float* blend, bool* picked,
         const bool* prevActive, int count, float marginRatio)
     {
         if (!blend || !picked || !prevActive || count <= 0) return;
@@ -1084,7 +1061,7 @@ void CPianoRoll::UpdateNoteStates()
     // 前フレームでアクティブだった鍵(m_activeKeys、この時点ではまだ前フレームの値)を
     // 基準に、僅差で入れ替わっただけの隣接ピックを元に戻す。
     static constexpr float kAdjacentHoppingMarginRatio = 0.85f;
-    StabilizeAdjacentBinHopping(blend, picked, m_activeKeys, KEY_COUNT, kAdjacentHoppingMarginRatio);
+    StabilizeBinHop(blend, picked, m_activeKeys, KEY_COUNT, kAdjacentHoppingMarginRatio);
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         const float sigStrength = blend[i];
@@ -1135,7 +1112,7 @@ void CPianoRoll::UpdateNoteStates()
 
         const bool onsetBoost = picked[i] &&
             PianoRoll108::OnsetSupportsPick(m_onsetStrengths, m_prevOnsetStrengths, i, pickScale);
-        // 再アタック判定(UpdateEnvelopeAndReattack)は本関数の後段で呼ばれるため、
+        // 再アタック判定(UpdateEnvelope)は本関数の後段で呼ばれるため、
         // ここで計算済みのオンセット判定結果を保存しておいて使い回す。
         m_onsetBoostThisFrame[i] = onsetBoost;
         if (onsetBoost) {
@@ -1151,7 +1128,7 @@ void CPianoRoll::UpdateNoteStates()
             if (effective && m_consecActive[i] >= attackNeed) {
                 bool allowOn = true;
                 if (m_harmonicGhostGuardEnabled) {
-                    const bool suspect = IsMarginalFundamentalPass(
+                    const bool suspect = IsMarginalFund(
                         blend, i, KEY_COUNT, kHarmonicGhostMarginRatio);
                     if (suspect) {
                         // [特性ベース判定] 振幅のしきい値では「本物の小さい音」と
@@ -1278,7 +1255,7 @@ void CPianoRoll::UpdateNoteStates()
 
     // 音色エンベロープ更新 + 再アタック(ゲート連結中の同鍵連打)検出。
     // DetectExpressions() の後で呼ぶこと(exprFlags をリセットせず ACCENT を追加するため)。
-    UpdateEnvelopeAndReattack();
+    UpdateEnvelope();
 
     memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
 }
@@ -1294,7 +1271,7 @@ void CPianoRoll::UpdateNoteStates()
 //      打撃/ノイズ的な減衰形状(LooksImpulsive)と判定された鍵をオフに戻す。
 //      既定は無効(opt-in)。誤検出で弱いスタッカートまで消す可能性があるため、
 //      効果を確認しながら有効化すること。
-void CPianoRoll::UpdateEnvelopeAndReattack()
+void CPianoRoll::UpdateEnvelope()
 {
     const float nowMs = (float)GetTickCount();
 
@@ -1435,7 +1412,7 @@ void CPianoRoll::MarkKeyVisualDirty()
     memcpy(m_keySnapExpr, m_exprFlags, sizeof(m_keySnapExpr));
 }
 
-void CPianoRoll::InvalidatePianoRollRegions(bool roll, bool key)
+void CPianoRoll::InvalidateRegions(bool roll, bool key)
 {
     if (m_paintDisabled || !::IsWindow(m_hWnd)) return;
     CRect cr;
@@ -1516,7 +1493,7 @@ void CPianoRoll::PushFrame(bool requestUiInvalidate)
     }
 
     if (requestUiInvalidate)
-        InvalidatePianoRollRegions(true, false);
+        InvalidateRegions(true, false);
 }
 
 int CPianoRoll::HistoryCountLocked() const
@@ -1993,10 +1970,8 @@ void CPianoRoll::DrawChannelDbBars(CDC& dc, const CRect& rc, const float* chFill
             else if (n > 2) col = RGB(90 + c * 12, 140, 180 - c * 8);
             dc.FillSolidRect(CRect(track.left, track.top, track.left + barW, track.bottom), col);
         }
-        if (labelW > 0 && row.Height() >= 4) {
-            CFont f; f.CreateFont(-max(7, min(11, row.Height() - 1)), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-            CFont* pOld = dc.SelectObject(&f);
+        if (labelW > 0 && row.Height() >= 4 && m_fontMeterTag.GetSafeHandle()) {
+            CFont* pOld = dc.SelectObject(const_cast<CFont*>(&m_fontMeterTag));
             dc.SetBkMode(TRANSPARENT); dc.SetTextColor(RGB(230, 230, 235));
             CRect lr(row.left, row.top, barLeft, row.bottom);
             const wchar_t* tag = (n == 1) ? L"M" : ((c == 0) ? L"L" : L"R");
@@ -2236,6 +2211,14 @@ void CPianoRoll::ReleaseExprLegendCache() const
     m_legendW = m_legendH = 0;
     m_legendReady = false;
     m_legendCacheRollW = m_legendCacheRollH = -1;
+
+    if (m_legendBgDC.GetSafeHdc()) {
+        if (m_legendBgOldBmp) m_legendBgDC.SelectObject(m_legendBgOldBmp);
+        m_legendBgDC.DeleteDC();
+    }
+    m_legendBgBmp.DeleteObject();
+    m_legendBgOldBmp = nullptr;
+    m_legendBgW = m_legendBgH = 0;
 }
 
 bool CPianoRoll::EnsureExprLegendCache(CDC& refDC, int rollW, int rollH) const
@@ -2678,9 +2661,7 @@ LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
 LRESULT CPianoRoll::OnAnalysisDone(WPARAM, LPARAM)
 {
     if (m_paintDisabled || !::IsWindow(m_hWnd)) return 0;
-    // V-Sync には縛らず、解析が出来たフレームからどんどん描画する(自由走行)。
-    // V-Sync 同期にするとかえってカクついたため、解析完了ごとに再描画して
-    // 流れるようにスクロールさせる。
+    // 解析完了ごとに再描画（自由走行）。V-Sync 待ちにするとカクつく。
     ApplySyncInvalidate();
     return 0;
 }
@@ -2857,7 +2838,7 @@ bool CPianoRoll::ProcessAnalysisJob()
         const double* mono = m_workerMonoScratch.data();
         EnterCriticalSection(&m_cs);
         __try {
-            ok = ProcessAnalysisJobBody(mono, frameCount, sampleRate, epochAtStart);
+            ok = RunAnalysisJob(mono, frameCount, sampleRate, epochAtStart);
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {
             ok = false;
@@ -2869,7 +2850,7 @@ bool CPianoRoll::ProcessAnalysisJob()
     return ok;
 }
 
-bool CPianoRoll::ProcessAnalysisJobBody(const double* mono, int frameCount, int sampleRate, LONG epochAtStart)
+bool CPianoRoll::RunAnalysisJob(const double* mono, int frameCount, int sampleRate, LONG epochAtStart)
 {
     if (!mono) return false;
     if (!m_feedEnabled ||
@@ -3124,16 +3105,28 @@ void CPianoRoll::OnPaint()
     CRect lgPanel;
     GetExprLegendPanelRect(w, rollH, lgPanel);
     const bool haveLegend = m_rollReady && !lgPanel.IsRectEmpty() && m_rollDC.GetSafeHdc();
-    CDC   lgBgDC;
-    CBitmap lgBgBmp;
-    CBitmap* lgBgOld = nullptr;
     bool legendBaked = false;
     if (haveLegend) {
         const int pw = lgPanel.Width(), ph = lgPanel.Height();
-        if (lgBgDC.CreateCompatibleDC(&dc) && lgBgBmp.CreateCompatibleBitmap(&dc, pw, ph)) {
-            lgBgOld = lgBgDC.SelectObject(&lgBgBmp);
-            lgBgDC.BitBlt(0, 0, pw, ph, &m_rollDC, lgPanel.left, lgPanel.top, SRCCOPY); // 下地退避
-            DrawExprLegendContent(m_rollDC, w, rollH, lgPanel);                          // 焼き込み(α合成)
+        bool bgOk = (m_legendBgDC.GetSafeHdc() && m_legendBgW == pw && m_legendBgH == ph);
+        if (!bgOk) {
+            if (m_legendBgDC.GetSafeHdc()) {
+                if (m_legendBgOldBmp) m_legendBgDC.SelectObject(m_legendBgOldBmp);
+                m_legendBgDC.DeleteDC();
+            }
+            m_legendBgBmp.DeleteObject();
+            m_legendBgOldBmp = nullptr;
+            m_legendBgW = m_legendBgH = 0;
+            if (m_legendBgDC.CreateCompatibleDC(&dc) && m_legendBgBmp.CreateCompatibleBitmap(&dc, pw, ph)) {
+                m_legendBgOldBmp = m_legendBgDC.SelectObject(&m_legendBgBmp);
+                m_legendBgW = pw;
+                m_legendBgH = ph;
+                bgOk = true;
+            }
+        }
+        if (bgOk) {
+            m_legendBgDC.BitBlt(0, 0, pw, ph, &m_rollDC, lgPanel.left, lgPanel.top, SRCCOPY);
+            DrawExprLegendContent(m_rollDC, w, rollH, lgPanel);
             legendBaked = true;
         }
     }
@@ -3192,10 +3185,9 @@ void CPianoRoll::OnPaint()
     }
 
     // 提示が終わったら m_rollDC の凡例領域を下地バーへ戻す(次スクロールへの混入防止)。
-    if (legendBaked) {
+    if (legendBaked && m_legendBgDC.GetSafeHdc()) {
         m_rollDC.BitBlt(lgPanel.left, lgPanel.top, lgPanel.Width(), lgPanel.Height(),
-            &lgBgDC, 0, 0, SRCCOPY);
-        if (lgBgOld) lgBgDC.SelectObject(lgBgOld);
+            &m_legendBgDC, 0, 0, SRCCOPY);
     }
 
     if (didRollUpdate)
@@ -3256,7 +3248,7 @@ void CPianoRoll::OnSize(UINT nType, int cx, int cy)
 #if CCUSTOM_AERO_SUPPORT
     // Finalize の再実行はしない。DWM 属性の軽い再適用のみ。
     if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
-        CCC_RefreshDialogDwmBlur(m_hWnd);
+        CCC_RefreshDwmBlur(m_hWnd);
 #endif
     Invalidate(FALSE);
 }

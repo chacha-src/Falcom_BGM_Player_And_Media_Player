@@ -212,11 +212,17 @@ BOOL CEqualizer::OnInitDialog()
 	m_delay.SetMode(2);
 
 
-	ReapplyDecorativeTitleFont();
+	ApplyTitleFont();
 
 	m_t.SetPreferWideMode(TRUE);
 	m_t.SetGradation(COLOR_GRAD_DARK_GREEN, COLOR_RANGE_SELECTION, 135, TRUE); // 135 左上から右下
 	m_t.SetDropShadow(RGB(0, 0, 0), 45, 18, 7, TRUE);
+
+	// コード表示は頻繁更新のため親ぼかし Invalidate を抑える（時間がたつと UI が死ぬ対策）
+	m_keyLow.SetNoParentInvalidate(TRUE);
+	m_keyMid.SetNoParentInvalidate(TRUE);
+	m_keyHigh.SetNoParentInvalidate(TRUE);
+	m_keyAll.SetNoParentInvalidate(TRUE);
 
 	m_s0.SetRange(0, 200);
 	m_s1.SetRange(0, 200);
@@ -560,7 +566,7 @@ BOOL CEqualizer::OnInitDialog()
 	return TRUE;
 }
 
-void CEqualizer::ReapplyDecorativeTitleFont()
+void CEqualizer::ApplyTitleFont()
 {
 	if (!m_t.GetSafeHwnd())
 		return;
@@ -621,11 +627,13 @@ void CEqualizer::OnCbnSelchangeCombo5()
 	SetTimer(1, 50, NULL);
 }
 
-extern CString KeyCodeLow, KeyCodeMid, KeyCodeHigh, KeyCodeAll;
+void SnapshotEqKeyCodes(CString& lo, CString& mid, CString& hi, CString& all);
 int backms = 0;
 void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 {
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
+	// コード解析(Goertzel)は専用ワーカー。OnTimer は表示更新のみ。
+
 	if (mod != savedata.eqsoundeq) {
 		if (savedata.eqsoundeq != 9) {
 			m_s0.SetPos(200 - savedata.eq[0]);
@@ -767,30 +775,32 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	savedata.eqy = rect.top;
 
 
-	// キーコード表示
+	// キーコード表示（ワーカー結果のスナップショットのみ。解析はしない）
 	extern int playf;
+	CString keyLow, keyMid, keyHigh, keyAll;
 	if (playf == 0) {
-		KeyCodeLow  = L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
-		KeyCodeMid  = L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
-		KeyCodeHigh = L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
-		KeyCodeAll  = L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
+		keyLow = keyMid = keyHigh = keyAll =
+			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
+	}
+	else {
+		SnapshotEqKeyCodes(keyLow, keyMid, keyHigh, keyAll);
 	}
 
-	if (m_cachedKeyLow != KeyCodeLow) {
-		m_keyLow.SetWindowText(CString(LL14(L"低音域：", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ")) + KeyCodeLow);
-		m_cachedKeyLow = KeyCodeLow;
+	if (m_cachedKeyLow != keyLow) {
+		m_keyLow.SetWindowText(CString(LL14(L"低音域：", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ")) + keyLow);
+		m_cachedKeyLow = keyLow;
 	}
-	if (m_cachedKeyMid != KeyCodeMid) {
-		m_keyMid.SetWindowText(CString(LL14(L"中音域：", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ")) + KeyCodeMid);
-		m_cachedKeyMid = KeyCodeMid;
+	if (m_cachedKeyMid != keyMid) {
+		m_keyMid.SetWindowText(CString(LL14(L"中音域：", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ")) + keyMid);
+		m_cachedKeyMid = keyMid;
 	}
-	if (m_cachedKeyHigh != KeyCodeHigh) {
-		m_keyHigh.SetWindowText(CString(LL14(L"高音域：", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ")) + KeyCodeHigh);
-		m_cachedKeyHigh = KeyCodeHigh;
+	if (m_cachedKeyHigh != keyHigh) {
+		m_keyHigh.SetWindowText(CString(LL14(L"高音域：", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ")) + keyHigh);
+		m_cachedKeyHigh = keyHigh;
 	}
-	if (m_cachedKeyAll != KeyCodeAll) {
-		m_keyAll.SetWindowText(CString(LL14(L"全音域：", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ")) + KeyCodeAll);
-		m_cachedKeyAll = KeyCodeAll;
+	if (m_cachedKeyAll != keyAll) {
+		m_keyAll.SetWindowText(CString(LL14(L"全音域：", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ")) + keyAll);
+		m_cachedKeyAll = keyAll;
 	}
 
 

@@ -3,6 +3,7 @@
 // を記述します。
 
 // uni_avx2_vs2026|x86(oggのみ)でビルドすること。
+// 関数名命名規則：分かりやすい短い関数とすること。
 #pragma once
 #pragma warning( disable : 4142 4091 )
 #ifndef VC_EXTRALEAN

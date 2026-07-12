@@ -96,7 +96,7 @@ namespace SpndCfg
             values[i] *= scale;
     }
 
-    inline void SuppressFalseSubharmonicPicks(const float* st, bool* picked,
+    inline void SuppressSubharmonics(const float* st, bool* picked,
         int bandStart, int bandEnd, bool polyMix)
     {
         if (!st || !picked || bandStart >= bandEnd) return;
@@ -143,7 +143,7 @@ namespace SpndCfg
         int bandStart, int bandEnd, bool polyMix)
     {
         if (!st || !picked || bandStart >= bandEnd) return;
-        SuppressFalseSubharmonicPicks(st, picked, bandStart, bandEnd, polyMix);
+        SuppressSubharmonics(st, picked, bandStart, bandEnd, polyMix);
         SnapPicksToLocalMaxima(st, picked, bandStart, bandEnd, 2);
         CollapseNearbyPicks(st, picked, bandStart, bandEnd, 2, false);
     }
@@ -185,7 +185,7 @@ namespace SpndCfg
         return (db0 < db1) ? db0 : db1;
     }
 
-    inline float Bufwav3LevelDbForDynamics(const double* winLow, int nLow,
+    inline float LevelDbForDynamics(const double* winLow, int nLow,
         const double* winBass, int nBass)
     {
         const float peakFull = PeakDbFsWindows(winLow, nLow, winBass, nBass);
@@ -197,7 +197,7 @@ namespace SpndCfg
         return (peakQuiet < peakFull) ? peakQuiet : peakFull;
     }
 
-    inline float MakeupGainDbForBufwav3(float peakDbFs)
+    inline float MakeupGainDb(float peakDbFs)
     {
         if (peakDbFs >= BUFWAV3_GAIN_ZERO_DB) return 0.0f;
         float g = BUFWAV3_TARGET_PEAK_DB - peakDbFs;
@@ -325,7 +325,7 @@ namespace SpndCfg
         return liveBands >= 2 || (midPeaks >= 5 && (bassPeaks + trePeaks) >= 3);
     }
 
-    inline bool FrameLooksLikeSingleSource(const bool* picked, int lo, int hi)
+    inline bool LooksMonoSource(const bool* picked, int lo, int hi)
     {
         if (!picked || lo >= hi) return true;
         int picks[32];
@@ -377,7 +377,7 @@ namespace SpndCfg
         return bestS >= sum * 0.38f;
     }
 
-    inline void ApplyBandFundamentalPick(const float* st, bool* picked,
+    inline void PickBandFunds(const float* st, bool* picked,
         int bandStart, int bandEnd, float relThresh, bool polyFrame)
     {
         if (!st || !picked || bandStart >= bandEnd) return;
@@ -387,14 +387,14 @@ namespace SpndCfg
         memset(bandPick, 0, sizeof(bandPick));
         PickFundamentalNotesToBand(st, bandPick, 88,
             bandStart, bandEnd, bandSpan, relThresh);
-        SuppressSubharmonicPicksInBand(st, bandPick, 88, bandStart, bandEnd);
+        SuppressBandSubharm(st, bandPick, 88, bandStart, bandEnd);
         const int peakRadius = (bandStart == 0) ? 2 : 1;
         RefineToLocalPeaksInBand(st, bandPick, 88, bandStart, bandEnd, peakRadius);
         if (bandStart == 0)
             StabilizeBassBandPicks(st, bandPick, bandStart, bandEnd, polyFrame);
         PruneBandPicks(st, bandPick, bandStart, bandEnd,
             bandSpan, PRUNE_BAND_RATIO, PRUNE_TOP_RATIO);
-        SuppressSubharmonicPicksInBand(st, bandPick, 88, bandStart, bandEnd);
+        SuppressBandSubharm(st, bandPick, 88, bandStart, bandEnd);
         if (bandStart == 0)
             StabilizeBassBandPicks(st, bandPick, bandStart, bandEnd, polyFrame);
 
@@ -597,10 +597,10 @@ public:
             for (int i = 0; i < WIN_BASS; ++i) m_bass[i] = bassSrc[i];
         }
 
-        const float levelDb = Bufwav3LevelDbForDynamics(
+        const float levelDb = LevelDbForDynamics(
             m_low.data(), WIN_LOW, hasBass ? m_bass.data() : nullptr, hasBass ? WIN_BASS : 0);
         m_levelDb = levelDb;
-        const float gainDb = MakeupGainDbForBufwav3(levelDb);
+        const float gainDb = MakeupGainDb(levelDb);
         ApplyGainDbInPlace(m_low.data(), WIN_LOW, gainDb);
         if (hasBass) ApplyGainDbInPlace(m_bass.data(), WIN_BASS, gainDb);
 
@@ -724,9 +724,9 @@ private:
             bassMax >= midMax * 0.72f;
         if (polyFrame && (bassOnsetFrame || bassDominantFrame))
             SupplementPolyBassPeak(pickStrength, picked, 0, BAND_BASS_END);
-        ApplyBandFundamentalPick(pickStrength, picked, BAND_BASS_END, BAND_MID_END,
+        PickBandFunds(pickStrength, picked, BAND_BASS_END, BAND_MID_END,
             MID_PICK_THRESH * pickScale * (polyFrame ? 0.93f : 1.0f), polyFrame);
-        ApplyBandFundamentalPick(pickStrength, picked, BAND_MID_END, KEY_COUNT,
+        PickBandFunds(pickStrength, picked, BAND_MID_END, KEY_COUNT,
             TRE_PICK_THRESH * pickScale, polyFrame);
 
         for (int i = 0; i < KEY_COUNT; ++i) {
@@ -743,16 +743,16 @@ private:
             picked[i] = bassPick[i] || midPick[i] || treblePick[i];
 
         const bool singleSource = !polyFrame && (
-            FrameLooksLikeSingleSource(picked, 0, KEY_COUNT)
+            LooksMonoSource(picked, 0, KEY_COUNT)
             || FrameLooksSparseDominant(pickStrength, picked, 0, KEY_COUNT));
         if (singleSource) {
             ResolveHarmonicPicks(pickStrength, picked, BAND_BASS_END, KEY_COUNT);
-            FilterWeakIsolatedOutliers(pickStrength, picked, BAND_BASS_END, KEY_COUNT, 0.21f);
-            ResolveHarmonicPicksLight(pickStrength, picked, 0, BAND_BASS_END);
+            FilterWeakOutliers(pickStrength, picked, BAND_BASS_END, KEY_COUNT, 0.21f);
+            ResolveHarmonicsLight(pickStrength, picked, 0, BAND_BASS_END);
         }
         else {
-            ResolveHarmonicPicksLight(pickStrength, picked, BAND_BASS_END, KEY_COUNT);
-            ResolveHarmonicPicksLight(pickStrength, picked, 0, BAND_BASS_END);
+            ResolveHarmonicsLight(pickStrength, picked, BAND_BASS_END, KEY_COUNT);
+            ResolveHarmonicsLight(pickStrength, picked, 0, BAND_BASS_END);
         }
 
         SnapPicksToLocalMaxima(pickStrength, picked, 0, BAND_BASS_END, 2);

@@ -3312,7 +3312,7 @@ void COggDlg::OnPaint()
 				if (Ms2DrawDue(ms2))
 				{
 					dcc.SelectClipRgn(NULL);
-					CCC_BlitStretchChromaNoFlicker(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
+					CCC_BlitStretchNF(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
 					ms2 = 0;
 					InterlockedExchange(&g_gdiPaintPending, 0);
 				}
@@ -3326,7 +3326,7 @@ void COggDlg::OnPaint()
 			{
 				dcc.SelectClipRgn(NULL);
 				const RECT gdiPreserve = { 0, 0, destW, destH };
-				CCC_PaintDialogAeroGaps(dcc, this, &gdiPreserve);
+				CCC_PaintAeroGaps(dcc, this, &gdiPreserve);
 			}
 		}
 		else
@@ -3335,7 +3335,7 @@ void COggDlg::OnPaint()
 #if CCUSTOM_AERO_SUPPORT
 			if (savedata.aero == 1 && CCC_IsWin11())
 			{
-				CCC_SelectClipExcludeChildren(dcc, this);
+				CCC_ClipNoChildren(dcc, this);
 				CCC_BlitStretchChroma(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
 			}
 			else
@@ -16373,12 +16373,12 @@ void COggDlg::timerp()
 	}
 
 
+	// Speana / ピアノ / アナライザは各 HWND へ Post して timerp 内で直列実行しない
+	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) Speana();
 	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
 		m_PianoRollDlg->RequestSyncFromMainUi();
-	// アナライザーは decode 先行ではなく Speana と同じ PlayCursor 時間軸
-	if (plf == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
-		SyncAnalyzerFromPlayCursor();
-	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) Speana();
+	if (plf == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
+		m_AnalyzerDlg->RequestSyncFromMainUi();
 	s = L""; ss = L"";
 	s = "name:";
 	moji(s, 1, 0, 0xffffff);
@@ -19817,7 +19817,7 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->RelayPreTranslateMessage(pMsg))
 			return TRUE;
 	}
-	if (CCC_ProcessInwomanHotkey(pMsg, this))
+	if (CCC_InwomanHotkey(pMsg, this))
 		return TRUE; // 隠し: F12を5回で淫女モード切替
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
@@ -20121,6 +20121,7 @@ void AnalyzeMusicKey(
 	const std::vector<double>& bufChordL, const std::vector<double>& bufChordR,
 	int sampleRate)
 	;
+void PublishEqKeyPcm(const std::vector<double>& bufferL, const std::vector<double>& bufferR, int sampleRate);
 void GetCurrentNoteStrengths(float* output108);
 
 namespace {
@@ -20205,6 +20206,12 @@ void COggDlg_SyncPianoRollFast()
 {
 	if (!og) return;
 	og->SyncPianoRollFast();
+}
+
+void COggDlg_SyncAnalyzerFast()
+{
+	if (!og) return;
+	og->SyncAnalyzerFromPlayCursor();
 }
 
 void COggDlg::SyncPianoRollFast()
@@ -20429,8 +20436,14 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	const int meterCh = (channels < 1) ? 1 : ((channels > CPianoRoll::PIANO_METER_CH_MAX) ? CPianoRoll::PIANO_METER_CH_MAX : channels);
 	const int meterFrames = CPianoRoll::ScaleWinSamples(2048, srInt);
 	const int meterBytes = meterFrames * bytesPerFrame;
-	std::vector<double> chPeak((size_t)meterCh, 0.0);
-	std::vector<double> chSumSq((size_t)meterCh, 0.0);
+	static std::vector<double> chPeak;
+	static std::vector<double> chSumSq;
+	if ((int)chPeak.size() < meterCh) chPeak.resize((size_t)meterCh);
+	if ((int)chSumSq.size() < meterCh) chSumSq.resize((size_t)meterCh);
+	for (int ch = 0; ch < meterCh; ++ch) {
+		chPeak[ch] = 0.0;
+		chSumSq[ch] = 0.0;
+	}
 	int meterN = 0;
 	if (meterBytes > 0) {
 		if (meterRaw.size() < (size_t)meterBytes) meterRaw.resize(meterBytes);
@@ -20715,10 +20728,15 @@ void COggDlg::Speana()
 	ResampleDouble(bufR.data(), framesToRead, bufResampledR.data(), fftSize);
 	for (int k = 0; k < fftSize; k++) bufM[k] = (bufResampled[k] + bufResampledR[k]) * 0.5;
 
-	// ===== 音楽キー分析 (スペアナ描画とは独立。隔フレームで十分) =====
-	static UINT s_keyAnalyzeTick = 0;
-	if ((++s_keyAnalyzeTick & 1u) == 0u)
-		AnalyzeMusicKey(bufL, bufR, (int)sampleRate);
+	// EQ コード用 PCM を載せるだけ。解析は EQ SetTimer(1,50) 側（200ms 間引きなし）
+	{
+		CEqualizer* pEq = this->m_EqualizerDlg;
+		const bool eqVisible = pEq
+			&& ::IsWindow(pEq->GetSafeHwnd())
+			&& ::IsWindowVisible(pEq->GetSafeHwnd());
+		if (eqVisible)
+			PublishEqKeyPcm(bufL, bufR, (int)sampleRate);
+	}
 
 	auto ValToBarHeight = [&](double amplitude) -> int {
 		if (amplitude < 0.0001) return 0;
@@ -21712,7 +21730,7 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 	// Finalize 再実行はしない。リサイズ時は DWM 属性の軽い再適用 + 再描画のみ。
 	if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
 	{
-		CCC_RefreshDialogDwmBlur(m_hWnd);
+		CCC_RefreshDwmBlur(m_hWnd);
 		Invalidate(FALSE);
 	}
 #endif
@@ -22696,7 +22714,7 @@ void COggDlg::OnMoving(UINT fwSide, LPRECT pRect)
 	CCustomBlurDialogBase::OnMoving(fwSide, pRect);
 #if CCUSTOM_AERO_SUPPORT
 	if (CCC_IsAeroEnabled())
-		CCC_RefreshDialogDwmBlur(m_hWnd);
+		CCC_RefreshDwmBlur(m_hWnd);
 #endif
 	CRect r;
 	GetWindowRect(&r);

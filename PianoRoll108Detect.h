@@ -169,7 +169,7 @@ namespace PianoRoll108
         }
     }
 
-    inline void ConsolidateToIndependentFundamentals(const float* blend, bool* picked,
+    inline void KeepFundamentals(const float* blend, bool* picked,
         int count, float scoreRatio = 0.28f)
     {
         if (!blend || !picked || count <= 0) return;
@@ -217,7 +217,7 @@ namespace PianoRoll108
 
     // 帯域をまたぐ倍音漏れを落とす。
     // ベース上の弱い主旋律は「親より小さいオクターブ」でも自帯域で目立っていれば残す。
-    inline void PruneCrossBandHarmonicGhosts(const float* blend, bool* picked, int count)
+    inline void PruneCrossBandGhosts(const float* blend, bool* picked, int count)
     {
         if (!blend || !picked || count <= 0) return;
         for (int hi = count - 1; hi >= BASS_END; --hi) {
@@ -289,7 +289,7 @@ namespace PianoRoll108
     inline void PruneWeakRelativePerBand(const float* blend, bool* picked, int count)
     {
         if (!blend || !picked || count <= 0) return;
-        // [検証のため元値へ復帰] 隣接ホッピング対策(StabilizeAdjacentBinHopping)を
+        // [検証のため元値へ復帰] 隣接ホッピング対策(StabilizeBinHop)を
         // 単独の変数として切り分けて検証するため、しきい値は元の値に戻した。
         const struct BandFloor { int lo, hi; float relFloor; } bands[] = {
             { 0, BASS_END, 0.32f },
@@ -465,7 +465,7 @@ namespace PianoRoll108
 
     // 高音ゴースト抑制: オンセットが無く、帯域内でも弱い／ゴースト形のピックを落とす。
     // 主旋律帯(O5)はオンセット無しでも帯域トップ級なら残す（サスティン中の弱い保持）。
-    inline void PruneTrebleGhostsWithoutOnset(const float* blend, const float* onset,
+    inline void PruneTrebleGhosts(const float* blend, const float* onset,
         const float* prevOnset, bool* picked, int count, float levelScale)
     {
         if (!blend || !onset || !prevOnset || !picked) return;
@@ -549,7 +549,7 @@ namespace PianoRoll108
         RefineToLocalPeaksInBand(blend, outPicked, count, BASS_END, MID_END, 1);
         RefineToLocalPeaksInBand(blend, outPicked, count, MID_END, COUNT, 1);
 
-        ConsolidateToIndependentFundamentals(blend, outPicked, count, 0.28f);
+        KeepFundamentals(blend, outPicked, count, 0.28f);
 
         for (int i = 0; i < BASS_END; ++i) {
             if (!outPicked[i]) continue;
@@ -576,7 +576,7 @@ namespace PianoRoll108
 
         PruneBassSubharmonics(blend, outPicked, count);
         PruneLowMidAgainstBass(blend, outPicked, count);
-        PruneCrossBandHarmonicGhosts(blend, outPicked, count);
+        PruneCrossBandGhosts(blend, outPicked, count);
         PruneUltraTrebleHarmonics(blend, outPicked, count);
 
         // オンセット軸: 弱い O5 主旋律を拾い、オンセット無しの高音ゴーストを落とす
@@ -585,7 +585,7 @@ namespace PianoRoll108
                 O5_LO, O5_HI, melodyScale, 0.14f);
             PromoteOnsetMelodyInBand(blend, onset, prevOnset, outPicked, count,
                 C4_KEY, O5_LO, melodyScale, 0.18f);
-            PruneTrebleGhostsWithoutOnset(blend, onset, prevOnset, outPicked, count, scale);
+            PruneTrebleGhosts(blend, onset, prevOnset, outPicked, count, scale);
         }
 
         PruneWeakRelativePerBand(blend, outPicked, count);

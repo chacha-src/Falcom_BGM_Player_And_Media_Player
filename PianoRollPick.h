@@ -248,7 +248,7 @@ inline bool BandContainsPeakNear(const float* st, int lo, int hi, int key, int r
 }
 
 // 複音: 偽サブハーモニックと上倍音ゴーストのみ除去（和音の3度/5度は残す）
-inline void ResolveHarmonicPicksLight(const float* st, bool* active, int lo, int hi,
+inline void ResolveHarmonicsLight(const float* st, bool* active, int lo, int hi,
     const bool* lockKeys = nullptr)
 {
     if (!st || !active || lo >= hi) return;
@@ -393,7 +393,7 @@ inline void StabilizeOctavePicks(const float* st, bool* picked,
     }
 }
 
-inline void FilterWeakIsolatedOutliers(const float* st, bool* active, int lo, int hi,
+inline void FilterWeakOutliers(const float* st, bool* active, int lo, int hi,
     float relToBandMax = 0.20f)
 {
     if (!st || !active || lo >= hi) return;

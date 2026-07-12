@@ -44,6 +44,7 @@ public:
 	void PauseFeed();
 	void ResetPlaybackState();
 	void DetachForDestroy();
+	void RequestSyncFromMainUi();
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -74,6 +75,7 @@ protected:
 	afx_msg void OnResetPeakHold();
 	afx_msg LRESULT OnSpecAnalysisDone(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPresentRequest(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnSyncRequest(WPARAM wParam, LPARAM lParam);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 private:
@@ -175,6 +177,7 @@ private:
 
 	// UI 提示要求(音声/ワーカーは Invalidate せず PostMessage 合流 — ピアノロールと同じ自由走行)
 	volatile LONG m_presentPosted = 0;
+	volatile LONG m_syncPosted = 0;
 
 	CFont m_font;
 

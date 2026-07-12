@@ -57,21 +57,21 @@ struct CCC_ChromaBlitCache {
     BOOL BlitFull(HDC hdcDest, int x, int y, int w, int h);
 };
 
-void CCC_SelectClipExcludeChildren(CDC& dc, CWnd* pWnd);
+void CCC_ClipNoChildren(CDC& dc, CWnd* pWnd);
 void CCC_BlitStretchOpaque(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH);
 void CCC_BlitStretchChroma(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey);
-void CCC_BlitStretchChromaNoFlicker(HDC hdcDest, int x, int y, int destW, int destH,
+void CCC_BlitStretchNF(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey);
 void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
-void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
-BOOL CCC_BlitChromaNoFlickerCached(HDC hdcDest, int x, int y, int w, int h,
+void CCC_BlitChromaNF(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
+BOOL CCC_BlitChromaCached(HDC hdcDest, int x, int y, int w, int h,
     HDC hdcSrc, int srcX, int srcY, COLORREF clrKey, CCC_ChromaBlitCache& cache);
 void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey);
-void CCC_InvalidateBlurParent(HWND hWnd, BOOL bAeroMode);
-void CCC_RefreshDialogDwmBlur(HWND hWnd);
-void CCC_PaintDialogAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr);
+void CCC_InvalidateParent(HWND hWnd, BOOL bAeroMode);
+void CCC_RefreshDwmBlur(HWND hWnd);
+void CCC_PaintAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr);
 void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey);
 #endif
 
@@ -85,9 +85,9 @@ static inline BOOL CCC_IsInwoman()
     return savedata.inwoman == 1;
 }
 // F12連打を監視してトグル。各メインダイアログの PreTranslateMessage から呼ぶ。
-BOOL CCC_ProcessInwomanHotkey(MSG* pMsg, CWnd* pWnd);
+BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd);
 // 淫女モードのアニメ用に全ウィンドウを定期再描画するタイマーを用意(冪等)
-void CCC_EnsureInwomanTimer();
+void CCC_StartInwomanTimer();
 
 // モーダルダイアログを親の背後に隠さず前面へ出す(メディアプレイヤー等)
 inline void CCC_BringDialogToForeground(CWnd* dlg)
@@ -101,8 +101,8 @@ inline void CCC_BringDialogToForeground(CWnd* dlg)
 
 // 最小化復帰・再表示時: オーナードロー子が親 Invalidate だけでは再描画されないため明示的に更新
 void CCC_ForceRepaintHwnd(HWND hWnd);
-void CCC_RefreshChildrenAfterShow(HWND hWnd);
-void CCC_SendGroupBoxesToBack(HWND hDlg);
+void CCC_RefreshKids(HWND hWnd);
+void CCC_GroupBoxesBack(HWND hDlg);
 
 // ============================================================================
 // 色定義
@@ -266,13 +266,13 @@ static inline void CCC_ClearChildDwmBackdrop(HWND hParent)
 }
 
 // スライダー等に付いた WS_EX_TRANSPARENT を全て解除
-static inline void CCC_ClearChildTransparentFlags(HWND hParent)
+static inline void CCC_ClearChildTrans(HWND hParent)
 {
     if (!hParent || !::IsWindow(hParent)) return;
     for (HWND hChild = ::GetWindow(hParent, GW_CHILD); hChild; hChild = ::GetWindow(hChild, GW_HWNDNEXT))
     {
         CCC_SetChildTransparent(hChild, FALSE);
-        CCC_ClearChildTransparentFlags(hChild);
+        CCC_ClearChildTrans(hChild);
     }
 }
 
@@ -301,7 +301,7 @@ static inline BOOL CCC_ApplyAero(HWND hWnd, BOOL bAero)
     if (!bAero)
     {
         CCC_ClearChildDwmBackdrop(hWnd);
-        CCC_ClearChildTransparentFlags(hWnd);
+        CCC_ClearChildTrans(hWnd);
         ::SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
         return FALSE;
     }
@@ -338,7 +338,7 @@ static inline BOOL CCC_ApplyAero(HWND hWnd, BOOL bAero)
     }
 
     CCC_ClearChildDwmBackdrop(hWnd);
-    CCC_ClearChildTransparentFlags(hWnd);
+    CCC_ClearChildTrans(hWnd);
     ::SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     return bApplied;
 }
@@ -389,7 +389,7 @@ public:
     static void SetControlBackgroundColor(CWnd* p, COLORREF bg, COLORREF text = RGB(0, 0, 0))
     {
         if (!p || !p->GetSafeHwnd()) return;
-
+        PruneCCMap();
         GetCCMap()[p->GetSafeHwnd()] = { bg, text };
         p->Invalidate();
         p->UpdateWindow();
@@ -425,6 +425,19 @@ private:
     {
         static std::map<HWND, CC> s;
         return s;
+    }
+
+    // 破棄済み HWND を掃除（ダイアログ再生成でマップが肥大化しないように）
+    static void PruneCCMap()
+    {
+        auto& m = GetCCMap();
+        for (auto it = m.begin(); it != m.end(); )
+        {
+            if (!::IsWindow(it->first))
+                it = m.erase(it);
+            else
+                ++it;
+        }
     }
 
     // 背景色とブラシの対応マップ（シングルトン）
@@ -539,6 +552,9 @@ public:
         if (GetSafeHwnd()) Invalidate();
     }
 
+    // 頻繁更新ラベル用: 親ぼかし Invalidate を抑えて UI 詰まりを防ぐ
+    void SetNoParentInvalidate(BOOL b) { m_bNoParentInvalidate = b; }
+
 protected:
     virtual void PreSubclassWindow();
     virtual void PostNcDestroy();
@@ -590,6 +606,7 @@ private:
     int m_backstoreW, m_backstoreH;        // バックバッファの寸法
 
     BOOL m_bAeroMode;                      // アクリルモードが有効かどうか
+    BOOL m_bNoParentInvalidate;            // TRUE なら SetText 時に親 Invalidate しない
 };
 
 // ============================================================================

@@ -180,7 +180,7 @@ private:
     NoteEnvelope::NoteEnvelopeState m_envModel[KEY_COUNT];
     bool m_reattackMark[KEY_COUNT];   // このフレームで再アタックと判定された鍵(表示用)
     // このフレーム、短窓Goertzelのオンセット検出が「本物のアタックらしい」と
-    // 判定したか(UpdateNoteStates 内で計算し、UpdateEnvelopeAndReattack へ引き渡す)。
+    // 判定したか(UpdateNoteStates 内で計算し、UpdateEnvelope へ引き渡す)。
     bool m_onsetBoostThisFrame[KEY_COUNT];
     // m_onsetBoostThisFrame が連続で true だったフレーム数。
     // 生のピック判定(picked[])は音の終わり際や、密なミックス中では他の楽器の
@@ -203,7 +203,7 @@ private:
     // 継続音が途切れて見える「漏れ」を引き起こしていた。
     // そこで、実際の基音判定式(PianoKeyTable.h の PassesFundamentalTest 系、
     // 閾値0.78)が「ギリギリで通過したか」だけを見る方式に変更した
-    // (IsMarginalFundamentalPass、CPianoRoll.cpp 側に実装)。
+    // (IsMarginalFund、CPianoRoll.cpp 側に実装)。
     // marginRatio: 0.78の閾値に対し、この比率以上に接近していたら「際どい通過」とみなす。
     // [調整] 0.85 → 0.75: 疑わしいと見なす範囲を少し広げ、悲しみ2L実測で
     // 残っていた微小なゴーストをできる範囲で追い込む。
@@ -292,7 +292,7 @@ private:
     // 音色エンベロープモデルを更新し、再アタック(タイ分割)を判定する。
     // 「谷からのリバウンド量」と「短窓オンセット判定」の両方が揃った時のみ発火するため、
     // 持続音の自然な揺らぎだけでは連鎖的に誤発火しない(v1の既知不具合の修正版)。
-    void UpdateEnvelopeAndReattack();
+    void UpdateEnvelope();
     void PushFrame(bool requestUiInvalidate);  // 確定フレームを履歴リングバッファへ追加
     void StartAnalysisWorker();
     void StopAnalysisWorker();
@@ -300,7 +300,7 @@ private:
     bool EnsureAnalysisWorkerAlive();
     DWORD AnalysisWorkerLoop();
     bool ProcessAnalysisJob();  // ワーカースレッド内。ジョブバッファの Goertzel 解析を実行
-    bool ProcessAnalysisJobBody(const double* mono, int frameCount, int sampleRate, LONG epochAtStart);
+    bool RunAnalysisJob(const double* mono, int frameCount, int sampleRate, LONG epochAtStart);
     static DWORD WINAPI AnalysisWorkerThreadEntry(LPVOID param);
     int  HistoryCountLocked() const;
     void CopyHistorySnapshot(NoteFrame* out, int maxOut, int& outCount) const;
@@ -338,6 +338,12 @@ private:
     mutable bool     m_legendReady = false;
     mutable int      m_legendCacheRollW = -1;
     mutable int      m_legendCacheRollH = -1;
+    // 凡例焼き込み前の下地退避（毎フレーム CreateCompatibleBitmap しない）
+    mutable CDC      m_legendBgDC;
+    mutable CBitmap  m_legendBgBmp;
+    mutable CBitmap* m_legendBgOldBmp = nullptr;
+    mutable int      m_legendBgW = 0;
+    mutable int      m_legendBgH = 0;
     int     m_rollW = 0;
     int     m_rollH = 0;
     bool    m_rollReady = false;
@@ -382,7 +388,7 @@ private:
     bool EnsureKeyBuffer(CDC& refDC, int width, int keySectionH);
     void MarkKeyVisualDirty();
     void ApplySyncInvalidate();
-    void InvalidatePianoRollRegions(bool roll, bool key);
+    void InvalidateRegions(bool roll, bool key);
     void EnsurePaintFonts(int clientW, int keyH, int rollH);
     void DrawExprLegend(CDC& dc, int rollW, int rollH) const;
     void DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRect& panel) const;

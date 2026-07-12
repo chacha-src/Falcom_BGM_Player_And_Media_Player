@@ -5447,6 +5447,110 @@ static WCHAR g_currentVowel = L' ';
 
 CString KeyCodeLow, KeyCodeMid, KeyCodeHigh, KeyCodeAll;
 
+void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<double>& bufferR, int sampleRate);
+
+// Speana が PCM を載せ、専用ワーカーが Goertzel 解析（UI/OnTimer を塞がない）
+static CRITICAL_SECTION g_eqKeyCs;
+static CRITICAL_SECTION g_keyCodeCs;
+static bool g_eqKeyCsReady = false;
+static HANDLE g_eqKeyWake = nullptr;
+static HANDLE g_eqKeyThread = nullptr;
+static volatile LONG g_eqKeyStop = 0;
+static volatile LONG g_eqKeyNeed = 0;
+static std::vector<double> g_eqKeyL, g_eqKeyR;
+static int g_eqKeyRate = 44100;
+static LONG g_eqKeySeq = 0;
+
+static void EnsureEqKeyCs()
+{
+	if (g_eqKeyCsReady) return;
+	InitializeCriticalSection(&g_eqKeyCs);
+	InitializeCriticalSection(&g_keyCodeCs);
+	g_eqKeyCsReady = true;
+}
+
+static void SetKeyCodesLocked(const CString& lo, const CString& mid, const CString& hi, const CString& all)
+{
+	EnsureEqKeyCs();
+	EnterCriticalSection(&g_keyCodeCs);
+	KeyCodeLow = lo;
+	KeyCodeMid = mid;
+	KeyCodeHigh = hi;
+	KeyCodeAll = all;
+	LeaveCriticalSection(&g_keyCodeCs);
+}
+
+void SnapshotEqKeyCodes(CString& lo, CString& mid, CString& hi, CString& all)
+{
+	EnsureEqKeyCs();
+	EnterCriticalSection(&g_keyCodeCs);
+	lo = KeyCodeLow;
+	mid = KeyCodeMid;
+	hi = KeyCodeHigh;
+	all = KeyCodeAll;
+	LeaveCriticalSection(&g_keyCodeCs);
+}
+
+static DWORD WINAPI EqKeyWorkerEntry(LPVOID)
+{
+	std::vector<double> workL, workR;
+	int workRate = 44100;
+	for (;;) {
+		if (g_eqKeyWake)
+			WaitForSingleObject(g_eqKeyWake, 50);
+		if (InterlockedCompareExchange(&g_eqKeyStop, 0, 0) != 0)
+			break;
+		if (InterlockedExchange(&g_eqKeyNeed, 0) == 0)
+			continue;
+		EnsureEqKeyCs();
+		EnterCriticalSection(&g_eqKeyCs);
+		workL = g_eqKeyL;
+		workR = g_eqKeyR;
+		workRate = g_eqKeyRate;
+		LeaveCriticalSection(&g_eqKeyCs);
+		if (workL.empty())
+			continue;
+		AnalyzeMusicKey(workL, workR, workRate);
+	}
+	return 0;
+}
+
+static void EnsureEqKeyWorker()
+{
+	EnsureEqKeyCs();
+	if (g_eqKeyThread) return;
+	InterlockedExchange(&g_eqKeyStop, 0);
+	if (!g_eqKeyWake) {
+		g_eqKeyWake = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+		if (!g_eqKeyWake) return;
+	}
+	g_eqKeyThread = CreateThread(nullptr, 0, EqKeyWorkerEntry, nullptr, 0, nullptr);
+	if (!g_eqKeyThread) {
+		CloseHandle(g_eqKeyWake);
+		g_eqKeyWake = nullptr;
+	}
+}
+
+void PublishEqKeyPcm(const std::vector<double>& bufferL, const std::vector<double>& bufferR, int sampleRate)
+{
+	if (bufferL.empty()) return;
+	EnsureEqKeyWorker();
+	EnterCriticalSection(&g_eqKeyCs);
+	g_eqKeyL = bufferL;
+	g_eqKeyR = bufferR;
+	g_eqKeyRate = (sampleRate > 0) ? sampleRate : 44100;
+	++g_eqKeySeq;
+	LeaveCriticalSection(&g_eqKeyCs);
+	InterlockedExchange(&g_eqKeyNeed, 1);
+	if (g_eqKeyWake)
+		SetEvent(g_eqKeyWake);
+}
+
+// 互換: 解析はワーカー側。UI からは呼ばない（残して no-op）
+void TickEqKeyAnalysis()
+{
+}
+
 // 12音名 (C〜B)
 static const WCHAR* NOTE_NAMES[12] = {
 	L"C ", L"C#", L"D ", L"D#", L"E ", L"F ",
@@ -5500,17 +5604,33 @@ static double GoertzelMagnitude(const double* samples, int numSamples, double co
 	return sqrt(power > 0.0 ? power : 0.0) * 2.5 / numSamples;
 }
 
-// 再帰 Cooley-Tukey FFT (Radix-2 Decimation In Time)
-// 入力サイズは2のべき乗を想定
+// 反復 Cooley-Tukey FFT (Radix-2)。再帰版は毎呼出で even/odd を大量 new し、
+// 長時間再生でヒープが断片化してコード解析が徐々に重くなる。
 static void FFT(std::vector<Complex>& x) {
 	const size_t N = x.size();
 	if (N <= 1) return;
-	std::vector<Complex> even(N / 2), odd(N / 2);
-	for (size_t i = 0; i < N / 2; ++i) { even[i] = x[2 * i]; odd[i] = x[2 * i + 1]; }
-	FFT(even); FFT(odd);
-	for (size_t k = 0; k < N / 2; ++k) {
-		Complex t = std::polar(1.0, -2.0 * M_PI * k / N) * odd[k];
-		x[k] = even[k] + t; x[k + N / 2] = even[k] - t;
+	// bit-reversal permutation
+	for (size_t i = 1, j = 0; i < N; ++i) {
+		size_t bit = N >> 1;
+		for (; j & bit; bit >>= 1)
+			j ^= bit;
+		j ^= bit;
+		if (i < j)
+			std::swap(x[i], x[j]);
+	}
+	for (size_t len = 2; len <= N; len <<= 1) {
+		const double ang = -2.0 * M_PI / (double)len;
+		const Complex wlen(std::cos(ang), std::sin(ang));
+		for (size_t i = 0; i < N; i += len) {
+			Complex w(1.0, 0.0);
+			for (size_t j = 0; j < len / 2; ++j) {
+				const Complex u = x[i + j];
+				const Complex v = x[i + j + len / 2] * w;
+				x[i + j] = u + v;
+				x[i + j + len / 2] = u - v;
+				w *= wlen;
+			}
+		}
 	}
 }
 
@@ -6144,8 +6264,11 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 
 	// 無音時は空白表示して減衰（ゴーストノート防止）
 	if (isSilent) {
-		KeyCodeLow = KeyCodeMid = KeyCodeAll = KeyCodeHigh =
-			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
+		SetKeyCodesLocked(
+			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B",
+			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B",
+			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B",
+			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B");
 		for (int i = 0; i < 108; i++) {
 			g_noteStrength[i] *= 0.4f;
 			g_noteStrengthPrev[i] *= 0.4f;
@@ -6206,39 +6329,15 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 	g_prevChordLow = rawBass; g_prevChordMid = rawMid;
 	g_prevChordAll = rawAll;  g_prevChordHigh = rawHigh;
 
-	// ===== Viterbi メロディ追跡 =====
-	// 直近4096点でFFTサリエンス計算 → Viterbi に渡す
-	int fftStart = totalSamples - 4096; if (fftStart < 0) fftStart = 0;
-	std::vector<double> bLP(bufferL.begin() + fftStart, bufferL.end());
-	std::vector<double> bRP;
-	if (stereo) bRP.assign(bufferR.begin() + fftStart, bufferR.end());
-	else        bRP = bLP;
-
-	int midi = UpdateViterbi(CalculateSalience(bLP, bRP, (double)sampleRate));
-
-	// メロディ音名フォーマット: "[C4 ]" "[C#4]" 等、母音が検出されていれば差し込む
+	// メロディ Viterbi/FFT は表示が #if 0 で無効なため実行しない。
+	// 毎 Speana で 4096点×2 FFT + ヒープ確保すると UI が分単位で死ぬ。
 	CString rawMelody = L"[   ]";
-#if 0
-	if (midi != -1) {
-		int oct = (midi / 12) - 1;
-		CString nn = NOTE_NAMES[midi % 12]; nn.Trim();
-		if (g_currentVowel != L' ') {
-//			if (nn.GetLength() == 1) rawMelody.Format(L"[%s%d%c]", nn, oct, g_currentVowel);
-//			else                     rawMelody.Format(L"[%s%d%c]", nn, oct, g_currentVowel);
-			if (nn.GetLength() == 1) rawMelody.Format(L"[%s%d ]", nn, oct);
-			else                     rawMelody.Format(L"[%s%d]", nn, oct);
-		} else {
-			if (nn.GetLength() == 1) rawMelody.Format(L"[%s%d ]", nn, oct);
-			else                     rawMelody.Format(L"[%s%d]", nn, oct);
-		}
-	} else {
-		g_currentVowel = L' '; // メロディ検出がなければ母音表示もリセット
-	}
-#endif
+
 	// 出力コード文字列生成
-	KeyCodeLow = FormatChord(rawBass);
-	KeyCodeMid = FormatChord(rawMid);
-	KeyCodeAll = FormatChordAll(rawAll, rawMelody);
+	CString outLow = FormatChord(rawBass);
+	CString outMid = FormatChord(rawMid);
+	CString outAll = FormatChordAll(rawAll, rawMelody);
+	CString outHigh;
 
 	// 高域コードが空のときはメロディ音名で補完
 	if (rawHigh.IsEmpty() && rawMelody != L"[   ]") {
@@ -6246,11 +6345,12 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 		rawHigh = (t.Find(L'#') >= 0) ? t.Left(2) : t.Left(1);
 	}
 	if (rawMelody == L"[   ]" && rawHigh.IsEmpty())
-		KeyCodeHigh = L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
+		outHigh = L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
 	else {
 		CString hp = FormatChord(rawHigh);
-		KeyCodeHigh = hp.IsEmpty() ? rawMelody : hp;
+		outHigh = hp.IsEmpty() ? rawMelody : hp;
 	}
+	SetKeyCodesLocked(outLow, outMid, outHigh, outAll);
 }
 
 // 外部から現在のノート強度配列を取得する (簡易ピアノロール表示等に使用)

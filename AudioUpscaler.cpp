@@ -607,6 +607,16 @@ void AudioUpscaler::PushInterleaved(const uint8_t* pcm, int byteCount)
 	const size_t old = m_fifo.size();
 	m_fifo.resize(old + block.size());
 	memcpy(m_fifo.data() + old, block.data(), block.size() * sizeof(float));
+	// 上限超過分を先頭から破棄（滞留防止）。2秒分を超えたら古い入力を捨てる。
+	const size_t maxFifo = (size_t)m_srcCh * (size_t)(std::max)(m_srcRate, 1) * 2u;
+	if (m_fifo.size() > maxFifo) {
+		size_t excess = m_fifo.size() - maxFifo;
+		excess -= excess % (size_t)m_srcCh;
+		if (excess > 0) {
+			m_fifo.erase(m_fifo.begin(), m_fifo.begin() + (std::ptrdiff_t)excess);
+			m_readPos = (std::max)(0.0, m_readPos - (double)(excess / (size_t)m_srcCh));
+		}
+	}
 }
 
 bool AudioUpscaler::NeedsMoreInput() const
@@ -651,10 +661,14 @@ int AudioUpscaler::PullInterleaved(uint8_t* dst, int dstCapacity)
 		produced++;
 	}
 
-	// 消費済み入力を FIFO から捨てる（readPos が 1 フレーム分以上進んだら）
-	while (m_readPos >= 1.0 && m_fifo.size() >= (size_t)m_srcCh) {
-		m_fifo.erase(m_fifo.begin(), m_fifo.begin() + m_srcCh);
-		m_readPos -= 1.0;
+	// 消費済み入力を FIFO からまとめて捨てる（1フレームずつの erase は O(n^2) で滞留する）
+	const int64_t dropFrames = (int64_t)m_readPos;
+	if (dropFrames > 0 && m_srcCh > 0) {
+		const size_t dropSamp = (size_t)dropFrames * (size_t)m_srcCh;
+		if (dropSamp <= m_fifo.size()) {
+			m_fifo.erase(m_fifo.begin(), m_fifo.begin() + (std::ptrdiff_t)dropSamp);
+			m_readPos -= (double)dropFrames;
+		}
 	}
 
 	if (produced == 0) return 0;

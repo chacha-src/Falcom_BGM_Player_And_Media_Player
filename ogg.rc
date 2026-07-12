@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -677,7 +677,7 @@ BEGIN
     LTEXT           "主音量",IDC_MP_VOL_L,326,150,28,8
     CONTROL         "",IDC_MP_VOL,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,344,148,90,12
     RTEXT           "100.0",IDC_MP_VOLVAL,430,150,44,8
-	PUSHBUTTON      "EQ",IDC_MP_EQ,326,160,24,12
+    PUSHBUTTON      "EQ",IDC_MP_EQ,326,160,24,12
     PUSHBUTTON      "ピアノ",IDC_MP_PIANO,352,160,34,12
     PUSHBUTTON      "設定",IDC_MP_SETTINGS,7,168,40,12
     LTEXT           "DS音量",IDC_MP_DSVOL_L,52,168,48,9,SS_NOTIFY
@@ -1017,7 +1017,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,508
+ FILEVERSION 0,8,7,509
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1035,10 +1035,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.07.11"
-            VALUE "FileVersion", "0.8.7.508"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.07.12"
+            VALUE "FileVersion", "0.8.7.509"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.07.11"
+            VALUE "LegalCopyright", "Copyright (C) 2026.07.12"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

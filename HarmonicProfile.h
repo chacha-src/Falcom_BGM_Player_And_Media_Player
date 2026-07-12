@@ -211,7 +211,7 @@ namespace HarmonicProfile
     //
     // [限界] 実音の整数倍音ゴーストは観測ベクトルが Piano/Saw に近く、ここだけでは
     // ほぼ弾けない。漏れ込みタワーの除去は PianoKey::IsPartialOfStrongerLower /
-    // PianoRoll108::PruneCrossBandHarmonicGhosts 側が本体。
+    // PianoRoll108::PruneCrossBandGhosts 側が本体。
     inline bool LooksLikeNoiseProfile(const float* blend, int candidate, int count,
         float minConfidence = 0.75f)
     {

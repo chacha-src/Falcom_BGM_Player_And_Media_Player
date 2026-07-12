@@ -11,7 +11,7 @@ class CEqualizer : public CCustomBlurDialogExBase
 public:
 	CEqualizer(CWnd* pParent = nullptr);   // 標準コンストラクター
 	virtual ~CEqualizer();
-	void ReapplyDecorativeTitleFont();
+	void ApplyTitleFont();
 
 // ダイアログ データ
 #ifdef AFX_DESIGN_TIME
@@ -82,7 +82,7 @@ public:
 	afx_msg void OnBnClickedOk4();
 	CCustomStandardButton sdasdsdadsd;
 	CCustomStatic m_t;
-	CFont m_titleFont; // ReapplyDecorativeTitleFont 用(SetFont 寿命に合わせメンバ保持)
+	CFont m_titleFont; // ApplyTitleFont 用(SetFont 寿命に合わせメンバ保持)
 	CCustomStatic m_keyLow;
 	CCustomStatic m_keyMid;
 	CCustomStatic m_keyHigh;

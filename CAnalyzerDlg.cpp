@@ -120,7 +120,8 @@ namespace
 		IDM_FREEZE = 42022,
 		IDM_RESET_PEAK = 42023,
 		WM_ANALYZER_SPEC_DONE = WM_APP + 510,
-		WM_ANALYZER_PRESENT = WM_APP + 511
+		WM_ANALYZER_PRESENT = WM_APP + 511,
+		WM_ANALYZER_SYNC = WM_APP + 512
 	};
 
 	// oggDlg_ds.cpp の EQ_FREQS と同じ帯域(オーバーレイ用ローカル複製)
@@ -195,6 +196,7 @@ BEGIN_MESSAGE_MAP(CAnalyzerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(IDM_RESET_PEAK, &CAnalyzerDlg::OnResetPeakHold)
 	ON_MESSAGE(WM_ANALYZER_SPEC_DONE, &CAnalyzerDlg::OnSpecAnalysisDone)
 	ON_MESSAGE(WM_ANALYZER_PRESENT, &CAnalyzerDlg::OnPresentRequest)
+	ON_MESSAGE(WM_ANALYZER_SYNC, &CAnalyzerDlg::OnSyncRequest)
 END_MESSAGE_MAP()
 
 BOOL CAnalyzerDlg::OnInitDialog()
@@ -281,10 +283,12 @@ void CAnalyzerDlg::DetachForDestroy()
 	KillTimer(1);
 	StopSpecWorker();
 	InterlockedExchange(&m_presentPosted, 0);
+	InterlockedExchange(&m_syncPosted, 0);
 	if (::IsWindow(m_hWnd)) {
 		MSG msg;
 		while (PeekMessage(&msg, m_hWnd, WM_ANALYZER_SPEC_DONE, WM_ANALYZER_SPEC_DONE, PM_REMOVE)) {}
 		while (PeekMessage(&msg, m_hWnd, WM_ANALYZER_PRESENT, WM_ANALYZER_PRESENT, PM_REMOVE)) {}
+		while (PeekMessage(&msg, m_hWnd, WM_ANALYZER_SYNC, WM_ANALYZER_SYNC, PM_REMOVE)) {}
 	}
 	ReleaseBuffers();
 }
@@ -358,6 +362,24 @@ LRESULT CAnalyzerDlg::OnPresentRequest(WPARAM, LPARAM)
 	InterlockedExchange(&m_presentPosted, 0);
 	if (::IsWindow(m_hWnd) && IsWindowVisible() && !IsIconic())
 		Invalidate(FALSE);
+	return 0;
+}
+
+void COggDlg_SyncAnalyzerFast();
+
+void CAnalyzerDlg::RequestSyncFromMainUi()
+{
+	if (!::IsWindow(m_hWnd)) return;
+	if (InterlockedCompareExchange(&m_syncPosted, 1, 0) != 0) return;
+	PostMessage(WM_ANALYZER_SYNC, 0, 0);
+}
+
+LRESULT CAnalyzerDlg::OnSyncRequest(WPARAM, LPARAM)
+{
+	InterlockedExchange(&m_syncPosted, 0);
+	if (!::IsWindow(m_hWnd) || !IsWindowVisible() || IsIconic())
+		return 0;
+	COggDlg_SyncAnalyzerFast();
 	return 0;
 }
 
@@ -591,6 +613,8 @@ void CAnalyzerDlg::FeedPCM(const void* pData, int frames, int sampleRate, int bi
 	if (m_pendingScroll > cap)
 		m_pendingScroll = cap;
 	LeaveCriticalSection(&m_cs);
+	// Spec はワーカーが ~20ms 周期。Feed 毎 Kick は m_presentPosted で合流するが、
+	// Spec 要求は常時立てて最新 FFT を拾う。
 	RequestSpecAnalysis();
 	KickUiPresent();
 }
@@ -1596,7 +1620,8 @@ void CAnalyzerDlg::OnPaint()
 	LeaveCriticalSection(&m_cs);
 
 	// 1フレームで大きく飛ぶとカクつく。ピアノロールの framesPending 上限に相当。
-	const int scrollCap = (std::max)(2, (std::min)(8, m_waveW > 0 ? m_waveW / 64 : 8));
+	// ただし追いつき連鎖を短くするため、1回あたりの消化量は少し大きめ。
+	const int scrollCap = (std::max)(4, (std::min)(24, m_waveW > 0 ? m_waveW / 40 : 16));
 
 	bool didWaveFull = false;
 	bool didWaveScroll = false;
@@ -1773,7 +1798,7 @@ void CAnalyzerDlg::OnSize(UINT nType, int cx, int cy)
 #if CCUSTOM_AERO_SUPPORT
 	// Finalize の再実行はしない。DWM 属性の軽い再適用のみ。
 	if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
-		CCC_RefreshDialogDwmBlur(m_hWnd);
+		CCC_RefreshDwmBlur(m_hWnd);
 #endif
 	Invalidate(FALSE);
 }

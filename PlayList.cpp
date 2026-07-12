@@ -5201,7 +5201,7 @@ HBRUSH CPlayList::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 void CPlayList::RefreshNavControls()
 {
 	if (GetSafeHwnd()) {
-		CCC_SendGroupBoxesToBack(m_hWnd);
+		CCC_GroupBoxesBack(m_hWnd);
 		const HWND topCtrls[] = {
 			m_finddown.GetSafeHwnd(),
 			m_findup.GetSafeHwnd(),

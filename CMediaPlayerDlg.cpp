@@ -771,7 +771,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_find.SetFont(&m_fontList, TRUE);
 
 	DoLayout();
-	CCC_SendGroupBoxesToBack(GetSafeHwnd());   // 区分け枠を最背面へ(兄弟コントロールを覆わない)
+	CCC_GroupBoxesBack(GetSafeHwnd());   // 区分け枠を最背面へ(兄弟コントロールを覆わない)
 	ReloadPlaylistCombo();
 	RefreshList(TRUE);
 	SyncFromMain();
@@ -847,7 +847,7 @@ BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 {
 	if (RelayPreTranslateMessage(pMsg))
 		return TRUE;
-	if (CCC_ProcessInwomanHotkey(pMsg, this))
+	if (CCC_InwomanHotkey(pMsg, this))
 		return TRUE; // 隠し: F12を5回で淫女モード切替
 	// リスト行ツールチップ (CListCtrlA 実装): ツールチップ表示ON時のみリレー
 	if (m_list.GetSafeHwnd() && m_tip.GetCheck())
@@ -1323,7 +1323,7 @@ void CMediaPlayerDlg::DoLayout()
 	int exW = (int)(80 * s);
 	MoveCtl(&m_exit, W - M - exW, botY, exW, swH);
 
-	CCC_SendGroupBoxesToBack(GetSafeHwnd());   // 枠は最背面(子コントロールを覆わない)
+	CCC_GroupBoxesBack(GetSafeHwnd());   // 枠は最背面(子コントロールを覆わない)
 	Invalidate();
 }
 
@@ -1729,7 +1729,7 @@ void CMediaPlayerDlg::SyncFromMain()
 		if (s_lastLyricsMode != lyricsMode) {
 			s_lastLyricsMode = lyricsMode;
 			DoLayout();
-			CCC_SendGroupBoxesToBack(GetSafeHwnd());
+			CCC_GroupBoxesBack(GetSafeHwnd());
 			RefreshListAfterLayout();
 			RedrawWindow(NULL, NULL,
 				RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
@@ -2088,7 +2088,7 @@ void CMediaPlayerDlg::BlitVisualizer(CDC* pDC)
 	if (savedata.aero == 1 && CCC_IsWin11()) {
 		// アクリル(Win11ガラス)時: 通常Blitはアルファ0で透明になってしまうため、
 		// og と同じ専用ヘルパで黒透過＋実体ピクセルを不透明合成する。
-		CCC_BlitStretchChromaNoFlicker(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, dw, dh,
+		CCC_BlitStretchNF(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, dw, dh,
 			dc.GetSafeHdc(), 0, 0, MP_SRCW, MP_SRCH, RGB(0, 0, 0));
 		return;
 	}
@@ -2170,7 +2170,7 @@ BOOL CMediaPlayerDlg::OnNcActivate(BOOL bActive)
 	BOOL r = CCustomBlurDialogExBase::OnNcActivate(bActive);
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1 && CCC_IsWin11())
-		CCC_RefreshDialogDwmBlur(m_hWnd);   // backdrop=acrylic + フレーム拡張を再適用
+		CCC_RefreshDwmBlur(m_hWnd);   // backdrop=acrylic + フレーム拡張を再適用
 #endif
 	return r;
 }
@@ -2373,7 +2373,7 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 				::DrawIconEx(mem.GetSafeHdc(), (w - isz) / 2, (h - isz) / 2, m_hIcon, isz, isz, 0, NULL, DI_NORMAL);
 			}
 			if (aero)
-				CCC_BlitStretchChromaNoFlicker(pDC->m_hDC, m_jacketRect.left, m_jacketRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);
+				CCC_BlitStretchNF(pDC->m_hDC, m_jacketRect.left, m_jacketRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);
 			else
 				pDC->BitBlt(m_jacketRect.left, m_jacketRect.top, w, h, &mem, 0, 0, SRCCOPY);
 			mem.SelectObject(ob);
@@ -2460,7 +2460,7 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			}
 
 			if (aero)
-				CCC_BlitStretchChromaNoFlicker(pDC->m_hDC, m_infoPanelRect.left, m_infoPanelRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);
+				CCC_BlitStretchNF(pDC->m_hDC, m_infoPanelRect.left, m_infoPanelRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);
 			else
 				pDC->BitBlt(m_infoPanelRect.left, m_infoPanelRect.top, w, h, &mem, 0, 0, SRCCOPY);
 			mem.SelectObject(ob);
@@ -2479,9 +2479,9 @@ void CMediaPlayerDlg::OnPaint()
 	extern void COgg_ClearGdiPaintPending();
 #if CCUSTOM_AERO_SUPPORT
 	// アクリル(Win11) パス
-	// CCC_PaintDialogAeroGaps は SelectClipRgn を書き換えるため SaveDC/RestoreDC で挟む。
+	// CCC_PaintAeroGaps は SelectClipRgn を書き換えるため SaveDC/RestoreDC で挟む。
 	// preserve=&m_bannerRect でバナーを保護(毎フレームのクリアを防いで点滅なし)。
-	// グループボックスは CCC_SelectClipExcludeChildren で除外されて白くなるため、
+	// グループボックスは CCC_ClipNoChildren で除外されて白くなるため、
 	// RestoreDC 後に個別で CCC_ClearRectChroma を呼んで明示的にクロマクリアする。
 	if (savedata.aero == 1 && CCC_IsWin11()) {
 		CPaintDC dc(this);
@@ -2497,7 +2497,7 @@ void CMediaPlayerDlg::OnPaint()
 		bool hitBanner = !m_bannerRect.IsRectEmpty() && CRect().IntersectRect(&clipBox, &m_bannerRect);
 		if (!sidePanelOnly) {
 			int saved = dc.SaveDC();
-			CCC_PaintDialogAeroGaps(dc, this, &m_bannerRect);
+			CCC_PaintAeroGaps(dc, this, &m_bannerRect);
 			dc.RestoreDC(saved);
 		}
 		if (hitBanner) BlitVisualizer(&dc);
@@ -3380,11 +3380,11 @@ void EnterFalcomMode()
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
 		::ShowWindow(og->m_hWnd, SW_SHOW);
 		::SetForegroundWindow(og->m_hWnd);
-		CCC_SendGroupBoxesToBack(og->m_hWnd);   // 枠を最背面へ(チェックボックスを覆わない)
+		CCC_GroupBoxesBack(og->m_hWnd);   // 枠を最背面へ(チェックボックスを覆わない)
 #if CCUSTOM_AERO_SUPPORT
 		og->RefreshAeroMode();                   // アクリル/非アクリルを再適用
 #endif
-		CCC_RefreshChildrenAfterShow(og->m_hWnd);   // 再表示時の子コントロール再描画
+		CCC_RefreshKids(og->m_hWnd);   // 再表示時の子コントロール再描画
 		og->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
 		og->PostRefreshAllAeroWindows();         // EQ/ピアノ/プレイリスト等も再反映
 	}
