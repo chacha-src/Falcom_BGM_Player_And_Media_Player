@@ -81,6 +81,7 @@ public:
 	void NotifyPlayIconChanged();          // SIconTimer 直後に♪点滅を即反映(250ms待ちしない)
 	void InitListScrollPosition();          // 起動/表示確定時にリスト位置を復元
 	void SyncFromMain();         // og/pl の状態をUIへ反映
+	void ApplyPauseButtonLabel(); // m_mpBtnShort と ps に応じた一時停止/再開ラベル
 	void MirrorSeekVol();        // 再生位置(playb追従)/時間/音量を高速ミラー
 	void SavePos();              // 座標を savedata に保存
 	void EnforceFalcomHidden();  // メディアモード中に裏画面が出ていたら隠す(監視)
@@ -181,7 +182,7 @@ public:
 	int  m_lastTogglePiano;
 	int  m_lastToggleAnalyzer;
 	int  m_dsvolSlW;         // DS音量スライダー幅(DoLayout)。ラベル省略判定に使用
-	int  m_mpBtnShort;       // 0=フル 1=EQ/ロール/アナ短縮 2=さらにフェード/JK等短縮
+	int  m_mpBtnShort;       // 0=フル 1=EQ系短縮 2=フェード/JK等短縮 3=最小幅用の超短縮
 
 	// og のオフスクリーン合成 DC(スペアナ+ジャケ+時間)を m_bannerRect へ StretchBlit する。
 	// アクリル(Win11)時は黒透過合成、非アクリル時は永続メモリ DC でキャッシュ Blit。

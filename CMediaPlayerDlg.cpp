@@ -42,6 +42,7 @@ extern int wavsam_depth;     // ビット深度 (oggDlg.cpp)
 extern int mode;         // 再生モード(タイトル解決に使用, oggDlg.cpp)
 extern int playy;   // 再生中フラグ(oggDlg.cpp)
 extern int plf;          // 再生中(1=再生中。oggDlg.cpp)
+extern int ps;           // 一時停止中(1=再開表示。oggDlg.cpp)
 extern ITaskbarList3* ptl;   // タスクバー進捗(oggDlg.cpp で初期化)
 extern void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName);
 extern void MpTaskbarReplay();
@@ -1127,49 +1128,66 @@ void CMediaPlayerDlg::DoLayout()
 	int volLblX = volSlX - volLblW;
 	const int freeEnd = volLblX - gap;
 
-	// 幅に応じて 0=フル / 1=EQ系短縮 / 2=フェード・JK等も短縮
+	// 幅に応じて 0=フル / 1=EQ系短縮 / 2=フェード・JK等も短縮 / 3=最小幅用の超短縮
+	// 各段階は「その段階の幅でもまだ主音量に食い込むか」で次へ進む(同条件で2と3が同時発火しないこと)。
 	const int prevW = max(1, (int)(40 * s));
 	const int playW = max(1, (int)(48 * s));
 	const int stopW = max(1, (int)(44 * s));
 	const int nextW = max(1, (int)(40 * s));
-	const int pauseFull = max(1, (int)(68 * s)), pauseShort = max(1, (int)(40 * s));
-	const int fadeFull = max(1, (int)(92 * s)), fadeShort = max(1, (int)(52 * s));
-	const int jkFull = max(1, (int)(62 * s)), jkShort = max(1, (int)(32 * s));
+	const int pauseFull = max(1, (int)(68 * s)), pauseShort = max(1, (int)(40 * s)), pauseTiny = max(1, (int)(28 * s));
+	const int fadeFull = max(1, (int)(92 * s)), fadeShort = max(1, (int)(52 * s)), fadeTiny = max(1, (int)(28 * s));
+	const int jkFull = max(1, (int)(62 * s)), jkShort = max(1, (int)(32 * s)), jkTiny = max(1, (int)(28 * s));
 	const int ebwFull = max(1, (int)(84 * s)), pbwFull = max(1, (int)(128 * s)), abwFull = max(1, (int)(88 * s));
 	const int ebwShort = max(1, (int)(42 * s)), pbwShort = max(1, (int)(56 * s)), abwShort = max(1, (int)(48 * s));
+	const int ebwTiny = max(1, (int)(30 * s)), pbwTiny = max(1, (int)(28 * s)), abwTiny = max(1, (int)(28 * s));
 
 	const int baseLeft = M + prevW + gap + playW + gap + stopW + gap + nextW + (int)(8 * s);
-	const int needOptFull = ebwFull + pbwFull + abwFull + gap * 2;
-	const int needOptShort = ebwShort + pbwShort + abwShort + gap * 2;
-	const int roomAfterTransportFull = freeEnd - (baseLeft + pauseFull + gap + fadeFull + gap + jkFull + gap);
-	const int roomAfterTransportShort = freeEnd - (baseLeft + pauseShort + gap + fadeShort + gap + jkShort + gap);
+	// 各候補レイアウトの右端(アナライザー右端)。freeEnd を超えたら一段短い段階へ。
+	const int endLv0 = baseLeft + pauseFull + gap + fadeFull + gap + jkFull + gap
+		+ ebwFull + gap + pbwFull + gap + abwFull;
+	const int endLv1 = baseLeft + pauseFull + gap + fadeFull + gap + jkFull + gap
+		+ ebwShort + gap + pbwShort + gap + abwShort;
+	const int endLv2 = baseLeft + pauseShort + gap + fadeShort + gap + jkShort + gap
+		+ ebwShort + gap + pbwShort + gap + abwShort;
 
 	int shortLv = 0;
-	if (roomAfterTransportFull < needOptFull)
+	if (endLv0 > freeEnd)
 		shortLv = 1;
-	if (roomAfterTransportShort < needOptShort)
+	if (endLv1 > freeEnd)
 		shortLv = 2;
+	if (endLv2 > freeEnd)
+		shortLv = 3;
 
-	const int pauseW = (shortLv >= 2) ? pauseShort : pauseFull;
-	const int fadeW = (shortLv >= 2) ? fadeShort : fadeFull;
-	const int jkw = (shortLv >= 2) ? jkShort : jkFull;
-	const int ebw = (shortLv >= 1) ? ebwShort : ebwFull;
-	const int pbw = (shortLv >= 1) ? pbwShort : pbwFull;
-	const int abw = (shortLv >= 1) ? abwShort : abwFull;
+	const int pauseW = (shortLv >= 3) ? pauseTiny : (shortLv >= 2) ? pauseShort : pauseFull;
+	const int fadeW = (shortLv >= 3) ? fadeTiny : (shortLv >= 2) ? fadeShort : fadeFull;
+	const int jkw = (shortLv >= 3) ? jkTiny : (shortLv >= 2) ? jkShort : jkFull;
+	const int ebw = (shortLv >= 3) ? ebwTiny : (shortLv >= 1) ? ebwShort : ebwFull;
+	const int pbw = (shortLv >= 3) ? pbwTiny : (shortLv >= 1) ? pbwShort : pbwFull;
+	const int abw = (shortLv >= 3) ? abwTiny : (shortLv >= 1) ? abwShort : abwFull;
 
 	if (shortLv != m_mpBtnShort) {
 		m_mpBtnShort = shortLv;
-		if (shortLv >= 2) {
-			m_pause.SetWindowText(LL14(L"一時停", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정", L"暂停", L"إيقاف", L"Пауза", L"Pause", L"Pausa", L"Pauze", L"Pauza", L"Duraklat"));
+		if (shortLv >= 3) {
+			m_fadeout.SetWindowText(LL14(L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO"));
+			m_jacket.SetWindowText(LL14(L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK"));
+		}
+		else if (shortLv >= 2) {
 			m_fadeout.SetWindowText(LL14(L"フェード", L"Fade", L"Fondu", L"Fade", L"Fade", L"페이드", L"淡出", L"تلاشي", L"Затухание", L"Fade", L"Fade", L"Fade", L"Fade", L"Fade"));
 			m_jacket.SetWindowText(LL14(L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK"));
 		}
 		else {
-			m_pause.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat"));
-			m_fadeout.SetWindowText(LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Fade out", L"Zanikanie", L"Solukla?t?r"));
-			m_jacket.SetWindowText(LL14(L"ジャケット", L"Jacket", L"Pochette", L"Copertina", L"Caratula", L"자켓", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Ok?adka", L"Kapak"));
+			m_fadeout.SetWindowText(LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Fade out", L"Zanikanie", L"Soluklaştır"));
+			m_jacket.SetWindowText(LL14(L"ジャケット", L"Jacket", L"Pochette", L"Copertina", L"Caratula", L"자켓", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Okładka", L"Kapak"));
 		}
-		if (shortLv >= 1) {
+		if (shortLv >= 3) {
+			if (m_eq.GetSafeHwnd())
+				m_eq.SetWindowText(LL14(L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ"));
+			if (m_piano.GetSafeHwnd())
+				m_piano.SetWindowText(LL14(L"ロ", L"PR", L"PR", L"PR", L"PR", L"롤", L"卷", L"رول", L"Рл", L"PR", L"PR", L"PR", L"PR", L"PR"));
+			if (m_analyzer.GetSafeHwnd())
+				m_analyzer.SetWindowText(LL14(L"ア", L"A", L"A", L"A", L"A", L"아", L"析", L"أ", L"А", L"A", L"A", L"A", L"A", L"A"));
+		}
+		else if (shortLv >= 1) {
 			if (m_eq.GetSafeHwnd())
 				m_eq.SetWindowText(LL14(L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ"));
 			if (m_piano.GetSafeHwnd())
@@ -1185,6 +1203,7 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_analyzer.GetSafeHwnd())
 				m_analyzer.SetWindowText(LL14(L"アナライザー", L"Analyzer", L"Analyseur", L"Analizzatore", L"Analizador", L"분석기", L"分析器", L"المحلل", L"Анализатор", L"Analysator", L"Analisador", L"Analyser", L"Analizator", L"Analizor"));
 		}
+		ApplyPauseButtonLabel();
 	}
 
 	int bx = M;
@@ -1651,6 +1670,35 @@ void CMediaPlayerDlg::FollowPlayingRow()
 	m_lastScroll = play;
 }
 
+// m_mpBtnShort と ps に応じて一時停止/再開ラベルを設定する。
+// og->m_ps のフル文言をそのままミラーすると短縮段階が潰れるため、こちらで段階別文言を選ぶ。
+void CMediaPlayerDlg::ApplyPauseButtonLabel()
+{
+	if (!::IsWindow(m_pause.GetSafeHwnd())) return;
+	CString text;
+	if (ps == 1) {
+		if (m_mpBtnShort >= 3)
+			text = LL14(L"再", L">", L">", L">", L">", L"재", L"继", L">", L">", L">", L">", L">", L">", L">");
+		else
+			text = LL14(L"再開", L"Resume", L"Reprendre", L"Riprendi", L"Reanudar", L"재개", L"恢复", L"استئناف", L"Продолжить", L"Fortsetzen", L"Retomar", L"Hervatten", L"Wznów", L"Sürdür");
+	}
+	else if (m_mpBtnShort >= 3) {
+		text = LL14(L"停", L"||", L"||", L"||", L"||", L"정", L"停", L"||", L"||", L"||", L"||", L"||", L"||", L"||");
+	}
+	else if (m_mpBtnShort >= 2) {
+		text = LL14(L"一時停", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정", L"暂停", L"إيقاف", L"Пауза", L"Pause", L"Pausa", L"Pauze", L"Pauza", L"Duraklat");
+	}
+	else {
+		text = LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat");
+	}
+	CString cur;
+	m_pause.GetWindowText(cur);
+	if (cur != text) {
+		m_pause.SetWindowText(text);
+		m_pause.RepaintClient();
+	}
+}
+
 // og/pl の UI 状態(歌詞・スライダー位置・チェック状態・コンボ選択)をこの画面へ反映する。
 // 差分のみ SetWindowText / SetCheck するのはちらつき防止のため。
 // Timer1(250ms)から定期呼び出しされるほか、コントロール操作直後にも都度呼ぶ。
@@ -1729,11 +1777,8 @@ void CMediaPlayerDlg::SyncFromMain()
 		if (m_jacket.IsWindowEnabled() != hasJacket)
 			m_jacket.EnableWindow(hasJacket);
 
-		// 一時停止/再開ボタン表記(og->m_ps と同期)
-		if (::IsWindow(og->m_ps.GetSafeHwnd()) && ::IsWindow(m_pause.GetSafeHwnd())) {
-			og->m_ps.GetWindowText(s); m_pause.GetWindowText(s2);
-			if (s != s2) { m_pause.SetWindowText(s); m_pause.RepaintClient(); }
-		}
+		// 一時停止/再開ボタン表記(短縮段階を維持)
+		ApplyPauseButtonLabel();
 
 		v1 = og->m_c2.GetCheck() ? 1 : 0;
 		if (m_savewav.GetCheck() != v1) m_savewav.SetCheck(v1);

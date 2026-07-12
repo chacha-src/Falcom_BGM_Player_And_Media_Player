@@ -15274,18 +15274,11 @@ void COggDlg::SyncPauseButtonUi()
 		return;
 	m_ps.EnableWindow(TRUE);
 	m_ps.RepaintClient();
-	// メディアプレイヤーモード: 裏側 og の一時停止ボタン表記を mp へミラー
+	// メディアプレイヤーモード: 裏側 og の一時停止状態を mp へ反映(短縮ラベル維持)
 	if (savedata.playerMode == 1) {
 		extern CMediaPlayerDlg* mp;
-		if (mp && ::IsWindow(mp->GetSafeHwnd()) && ::IsWindow(mp->m_pause.GetSafeHwnd())) {
-			CString s, s2;
-			m_ps.GetWindowText(s);
-			mp->m_pause.GetWindowText(s2);
-			if (s != s2) {
-				mp->m_pause.SetWindowText(s);
-				mp->m_pause.RepaintClient();
-			}
-		}
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->ApplyPauseButtonLabel();
 	}
 }
 
