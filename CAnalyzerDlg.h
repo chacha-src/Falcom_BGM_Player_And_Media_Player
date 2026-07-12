@@ -34,9 +34,18 @@ public:
 	};
 
 	enum SpecStyle {
-		StyleFill = 0, // 塗+線(Ozone風)
-		StyleLine = 1, // 線のみ
-		StyleBars = 2  // バー
+		StyleFill = 0,      // 塗+線(Ozone風)
+		StyleLine = 1,      // 線のみ
+		StyleBars = 2,      // バー(汎用)
+		StyleCubase = 3,    // Cubase Frequency 風
+		StyleSpan = 4,      // Voxengo SPAN 風(密バー)
+		StyleAbleton = 5,   // Ableton Spectrum 風
+		StyleFabFilter = 6  // FabFilter Pro-Q 風
+	};
+
+	static constexpr int WAVE_SPEED_COUNT = 8;
+	static constexpr int kWaveSpeedPct[WAVE_SPEED_COUNT] = {
+		25, 50, 75, 100, 125, 150, 175, 200
 	};
 
 	void FeedPCM(const void* pData, int frames, int sampleRate, int bits, int channels);
@@ -69,6 +78,11 @@ protected:
 	afx_msg void OnSpecStyleFill();
 	afx_msg void OnSpecStyleLine();
 	afx_msg void OnSpecStyleBars();
+	afx_msg void OnSpecStyleCubase();
+	afx_msg void OnSpecStyleSpan();
+	afx_msg void OnSpecStyleAbleton();
+	afx_msg void OnSpecStyleFabFilter();
+	afx_msg void OnWaveSpeedCmd(UINT nID);
 	afx_msg void OnTogglePeakHold();
 	afx_msg void OnToggleEqOverlay();
 	afx_msg void OnToggleFreeze();
@@ -99,7 +113,9 @@ private:
 	static LPCTSTR ChannelLabel(int ch, int channels);
 	void SetSpecLayout(int layout);
 	void SetSpecStyle(int style);
+	void SetWaveSpeedPct(int pct);
 	void ResetPeakHold();
+	int WaveSpeedIndex() const;
 	bool UpdateHoverFromPoint(CPoint ptClient); // true=表示内容が変わった
 	void StartSpecWorker();
 	void StopSpecWorker();
@@ -113,6 +129,7 @@ private:
 	int m_channels = 2;
 	int m_specLayout = SpecOverlay;
 	int m_specStyle = StyleFill;
+	int m_waveSpeedPct = 100; // 波形スクロール速度(%)
 	bool m_peakHold = true;
 	bool m_eqOverlay = true;
 	bool m_frozen = false;

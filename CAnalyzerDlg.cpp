@@ -115,10 +115,15 @@ namespace
 		IDM_STYLE_FILL = 42010,
 		IDM_STYLE_LINE = 42011,
 		IDM_STYLE_BARS = 42012,
+		IDM_STYLE_CUBASE = 42013,
+		IDM_STYLE_SPAN = 42014,
+		IDM_STYLE_ABLETON = 42015,
+		IDM_STYLE_FABFILTER = 42016,
 		IDM_PEAK_HOLD = 42020,
 		IDM_EQ_OVERLAY = 42021,
 		IDM_FREEZE = 42022,
 		IDM_RESET_PEAK = 42023,
+		IDM_WAVE_SPEED_BASE = 42100, // +0..WAVE_SPEED_COUNT-1
 		WM_ANALYZER_SPEC_DONE = WM_APP + 510,
 		WM_ANALYZER_PRESENT = WM_APP + 511,
 		WM_ANALYZER_SYNC = WM_APP + 512
@@ -190,6 +195,11 @@ BEGIN_MESSAGE_MAP(CAnalyzerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(IDM_STYLE_FILL, &CAnalyzerDlg::OnSpecStyleFill)
 	ON_COMMAND(IDM_STYLE_LINE, &CAnalyzerDlg::OnSpecStyleLine)
 	ON_COMMAND(IDM_STYLE_BARS, &CAnalyzerDlg::OnSpecStyleBars)
+	ON_COMMAND(IDM_STYLE_CUBASE, &CAnalyzerDlg::OnSpecStyleCubase)
+	ON_COMMAND(IDM_STYLE_SPAN, &CAnalyzerDlg::OnSpecStyleSpan)
+	ON_COMMAND(IDM_STYLE_ABLETON, &CAnalyzerDlg::OnSpecStyleAbleton)
+	ON_COMMAND(IDM_STYLE_FABFILTER, &CAnalyzerDlg::OnSpecStyleFabFilter)
+	ON_COMMAND_RANGE(IDM_WAVE_SPEED_BASE, IDM_WAVE_SPEED_BASE + CAnalyzerDlg::WAVE_SPEED_COUNT - 1, &CAnalyzerDlg::OnWaveSpeedCmd)
 	ON_COMMAND(IDM_PEAK_HOLD, &CAnalyzerDlg::OnTogglePeakHold)
 	ON_COMMAND(IDM_EQ_OVERLAY, &CAnalyzerDlg::OnToggleEqOverlay)
 	ON_COMMAND(IDM_FREEZE, &CAnalyzerDlg::OnToggleFreeze)
@@ -232,8 +242,11 @@ BOOL CAnalyzerDlg::OnInitDialog()
 	if (m_specLayout < SpecOverlay || m_specLayout > SpecGrid8)
 		m_specLayout = SpecOverlay;
 	m_specStyle = savedata.analyzerspecstyle;
-	if (m_specStyle < StyleFill || m_specStyle > StyleBars)
+	if (m_specStyle < StyleFill || m_specStyle > StyleFabFilter)
 		m_specStyle = StyleFill;
+	m_waveSpeedPct = savedata.analyzerwavespeed;
+	if (m_waveSpeedPct < 25 || m_waveSpeedPct > 200)
+		m_waveSpeedPct = 100;
 	m_peakHold = (savedata.analyzerpeakhold != 0);
 	m_eqOverlay = (savedata.analyzereqoverlay != 0);
 	m_frozen = false;
@@ -403,12 +416,39 @@ void CAnalyzerDlg::SetSpecLayout(int layout)
 
 void CAnalyzerDlg::SetSpecStyle(int style)
 {
-	if (style < StyleFill || style > StyleBars) return;
+	if (style < StyleFill || style > StyleFabFilter) return;
 	if (m_specStyle == style) return;
 	m_specStyle = style;
 	savedata.analyzerspecstyle = style;
 	m_specDirty = true;
 	Invalidate(FALSE);
+}
+
+void CAnalyzerDlg::SetWaveSpeedPct(int pct)
+{
+	int nearest = 100;
+	int best = 100000;
+	for (int i = 0; i < WAVE_SPEED_COUNT; ++i) {
+		const int d = abs(kWaveSpeedPct[i] - pct);
+		if (d < best) { best = d; nearest = kWaveSpeedPct[i]; }
+	}
+	if (m_waveSpeedPct == nearest) return;
+	m_waveSpeedPct = nearest;
+	savedata.analyzerwavespeed = nearest;
+	EnterCriticalSection(&m_cs);
+	if (m_sampleRate > 0) {
+		const int targetW = (m_waveW > 40) ? m_waveW : 640;
+		const int baseSpc = (std::max)(4, m_sampleRate * 6 / 5 / targetW);
+		m_samplesPerCol = (std::max)(2, (baseSpc * 100 + m_waveSpeedPct / 2) / m_waveSpeedPct);
+	}
+	LeaveCriticalSection(&m_cs);
+}
+
+int CAnalyzerDlg::WaveSpeedIndex() const
+{
+	for (int i = 0; i < WAVE_SPEED_COUNT; ++i)
+		if (kWaveSpeedPct[i] == m_waveSpeedPct) return i;
+	return 3; // x1.0
 }
 
 void CAnalyzerDlg::ResetPeakHold()
@@ -433,6 +473,17 @@ void CAnalyzerDlg::OnSpecLayoutGrid8() { SetSpecLayout(SpecGrid8); }
 void CAnalyzerDlg::OnSpecStyleFill() { SetSpecStyle(StyleFill); }
 void CAnalyzerDlg::OnSpecStyleLine() { SetSpecStyle(StyleLine); }
 void CAnalyzerDlg::OnSpecStyleBars() { SetSpecStyle(StyleBars); }
+void CAnalyzerDlg::OnSpecStyleCubase() { SetSpecStyle(StyleCubase); }
+void CAnalyzerDlg::OnSpecStyleSpan() { SetSpecStyle(StyleSpan); }
+void CAnalyzerDlg::OnSpecStyleAbleton() { SetSpecStyle(StyleAbleton); }
+void CAnalyzerDlg::OnSpecStyleFabFilter() { SetSpecStyle(StyleFabFilter); }
+
+void CAnalyzerDlg::OnWaveSpeedCmd(UINT nID)
+{
+	const int idx = (int)nID - IDM_WAVE_SPEED_BASE;
+	if (idx < 0 || idx >= WAVE_SPEED_COUNT) return;
+	SetWaveSpeedPct(kWaveSpeedPct[idx]);
+}
 
 void CAnalyzerDlg::OnTogglePeakHold()
 {
@@ -490,13 +541,33 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	CMenu subStyle;
 	subStyle.CreatePopupMenu();
 	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleFill ? MF_CHECKED : 0),
-		IDM_STYLE_FILL, LL14(L"塗+線 (Ozone風)", L"Fill + line (Ozone)", L"Remplissage + ligne", L"Riempimento + linea", L"Relleno + linea", L"채움+선", L"填充+线", L"تعبئة+خط", L"Заливка+линия", L"Fullung + Linie", L"Preenchimento + linha", L"Vulling + lijn", L"Wypelnienie + linia", L"Dolgu + cizgi"));
+		IDM_STYLE_FILL, LL14(L"Ozone 風 (塗+線)", L"Ozone (fill+line)", L"Ozone (rempl.+ligne)", L"Ozone (riemp.+linea)", L"Ozone (relleno+linea)", L"Ozone (채움+선)", L"Ozone(填充+线)", L"Ozone (تعبئة+خط)", L"Ozone (заливка+линия)", L"Ozone (Fullung+Linie)", L"Ozone (preench.+linha)", L"Ozone (vulling+lijn)", L"Ozone (wypeln.+linia)", L"Ozone (dolgu+cizgi)"));
+	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleCubase ? MF_CHECKED : 0),
+		IDM_STYLE_CUBASE, LL14(L"Cubase Frequency 風", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency"));
+	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleSpan ? MF_CHECKED : 0),
+		IDM_STYLE_SPAN, LL14(L"Voxengo SPAN 風", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN"));
+	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleAbleton ? MF_CHECKED : 0),
+		IDM_STYLE_ABLETON, LL14(L"Ableton Spectrum 風", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum"));
+	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleFabFilter ? MF_CHECKED : 0),
+		IDM_STYLE_FABFILTER, LL14(L"FabFilter Pro-Q 風", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q"));
+	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleBars ? MF_CHECKED : 0),
+		IDM_STYLE_BARS, LL14(L"バー (汎用)", L"Bars (generic)", L"Barres", L"Barre", L"Barras", L"막대", L"柱状", L"أشرطة", L"Столбцы", L"Balken", L"Barras", L"Balken", L"Slupki", L"Cubuk"));
 	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleLine ? MF_CHECKED : 0),
 		IDM_STYLE_LINE, LL14(L"線のみ", L"Line only", L"Ligne seule", L"Solo linea", L"Solo linea", L"선만", L"仅线", L"خط فقط", L"Только линия", L"Nur Linie", L"Somente linha", L"Alleen lijn", L"Tylko linia", L"Sadece cizgi"));
-	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleBars ? MF_CHECKED : 0),
-		IDM_STYLE_BARS, LL14(L"バー", L"Bars", L"Barres", L"Barre", L"Barras", L"막대", L"柱状", L"أشرطة", L"Столбцы", L"Balken", L"Barras", L"Balken", L"Slupki", L"Cubuk"));
 	menu.AppendMenu(MF_POPUP, (UINT_PTR)subStyle.Detach(),
-		LL14(L"描画スタイル", L"Draw style", L"Style de dessin", L"Stile disegno", L"Estilo de dibujo", L"그리기 스타일", L"绘制样式", L"نمط الرسم", L"Стиль отрисовки", L"Zeichenstil", L"Estilo de desenho", L"Tekenstijl", L"Styl rysowania", L"Cizim stili"));
+		LL14(L"周波数の表示モード", L"Frequency display mode", L"Mode d'affichage frequence", L"Modalita visualizzazione", L"Modo de visualizacion", L"주파수 표시 모드", L"频率显示模式", L"وضع عرض التردد", L"Режим АЧХ", L"Frequenz-Anzeigemodus", L"Modo de frequencia", L"Frequentieweergavemodus", L"Tryb wyswietlania czest.", L"Frekans gorunum modu"));
+
+	CMenu subSpeed;
+	subSpeed.CreatePopupMenu();
+	const int speedIdx = WaveSpeedIndex();
+	for (int i = 0; i < WAVE_SPEED_COUNT; ++i) {
+		CString lab;
+		lab.Format(_T("x%.2f"), (double)kWaveSpeedPct[i] / 100.0);
+		subSpeed.AppendMenu(MF_STRING | (i == speedIdx ? MF_CHECKED : 0),
+			IDM_WAVE_SPEED_BASE + i, lab);
+	}
+	menu.AppendMenu(MF_POPUP, (UINT_PTR)subSpeed.Detach(),
+		LL14(L"波形の流れる速度", L"Wave scroll speed", L"Vitesse de defilement", L"Velocita scorrimento", L"Velocidad de desplazamiento", L"파형 스크롤 속도", L"波形滚动速度", L"سرعة تمرير الموجة", L"Скорость прокрутки волны", L"Wellen-Scrollgeschwindigkeit", L"Velocidade de rolagem", L"Golf-scrolsnelheid", L"Predkosc przewijania fali", L"Dalga kaydirma hizi"));
 
 	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING | (m_peakHold ? MF_CHECKED : 0),
@@ -543,9 +614,11 @@ void CAnalyzerDlg::FeedPCM(const void* pData, int frames, int sampleRate, int bi
 	if (channels > CH_MAX) channels = CH_MAX;
 	if (sampleRate > 0) {
 		m_sampleRate = sampleRate;
-		// ~1.2 秒分が見える密度。細かすぎると負荷、粗すぎるとカクつく
+		// ~1.2 秒分が見える密度 × 速度倍率。細かすぎると負荷、粗すぎるとカクつく
 		const int targetW = (m_waveW > 40) ? m_waveW : 640;
-		m_samplesPerCol = (std::max)(4, sampleRate * 6 / 5 / targetW);
+		const int baseSpc = (std::max)(4, sampleRate * 6 / 5 / targetW);
+		const int speedPct = (std::max)(25, (std::min)(200, m_waveSpeedPct));
+		m_samplesPerCol = (std::max)(2, (baseSpc * 100 + speedPct / 2) / speedPct);
 	}
 
 	float framePeak[2] = { 0.0f, 0.0f };
@@ -1208,19 +1281,59 @@ void CAnalyzerDlg::DrawSpecPanel(CDC& dc, const CRect& plot, int chBegin, int ch
 			(GetRValue(col) * 2 + 18) / 5,
 			(GetGValue(col) * 2 + 20) / 5,
 			(GetBValue(col) * 2 + 28) / 5);
+		const COLORREF fillSoft = RGB(
+			(GetRValue(col) + 18 * 3) / 4,
+			(GetGValue(col) + 20 * 3) / 4,
+			(GetBValue(col) + 28 * 3) / 4);
+		const COLORREF fillCubase = RGB(
+			(GetRValue(col) + 40) / 3,
+			(GetGValue(col) + 90) / 3,
+			(GetBValue(col) + 110) / 3);
 
-		if (style == StyleBars) {
-			const int barW = (std::max)(1, plot.Width() / SPEC_BINS - 1);
+		const bool isBars = (style == StyleBars || style == StyleSpan || style == StyleAbleton);
+		const bool isFill = (style == StyleFill || style == StyleCubase || style == StyleFabFilter);
+		const bool isLine = (style == StyleLine || style == StyleFill || style == StyleCubase
+			|| style == StyleFabFilter);
+
+		if (isBars) {
+			int barW;
+			if (style == StyleSpan)
+				barW = (std::max)(1, plot.Width() / SPEC_BINS); // 密着
+			else if (style == StyleAbleton)
+				barW = (std::max)(2, plot.Width() / (SPEC_BINS / 2) - 2); // やや太い
+			else
+				barW = (std::max)(1, plot.Width() / SPEC_BINS - 1);
+
 			for (int b = 0; b < SPEC_BINS; ++b) {
+				if (style == StyleAbleton && (b & 1)) continue; // 間引いてAbleton風の区切り
 				const int x = linePts[b].x;
 				const int y = linePts[b].y;
-				CRect bar(x - barW / 2, y, x - barW / 2 + barW, plot.bottom - 1);
-				dc.FillSolidRect(bar, fill);
-				dc.FillSolidRect(x - barW / 2, y, barW, 2, col);
+				const int hw = barW / 2;
+				CRect bar(x - hw, y, x - hw + barW, plot.bottom - 1);
+				if (bar.Width() < 1) bar.right = bar.left + 1;
+				dc.FillSolidRect(bar, (style == StyleSpan) ? fill : fillSoft);
+				dc.FillSolidRect(x - hw, y, barW, (style == StyleSpan) ? 1 : 2, col);
+				if (drawPeak && style == StyleSpan) {
+					dc.FillSolidRect(peakPts[b].x - 1, peakPts[b].y, 3, 2,
+						RGB((GetRValue(col) + 255) / 2, (GetGValue(col) + 255) / 2, (GetBValue(col) + 255) / 2));
+				}
+			}
+			if (drawPeak && style == StyleAbleton) {
+				for (int b = 0; b < SPEC_BINS; b += 2) {
+					dc.FillSolidRect(peakPts[b].x - 1, peakPts[b].y, 3, 2,
+						RGB((GetRValue(col) + 255) / 2, (GetGValue(col) + 255) / 2, (GetBValue(col) + 255) / 2));
+				}
+			}
+			else if (drawPeak && style == StyleBars) {
+				for (int b = 0; b < SPEC_BINS; ++b) {
+					dc.FillSolidRect(peakPts[b].x - 1, peakPts[b].y, 3, 2,
+						RGB((GetRValue(col) + 255) / 2, (GetGValue(col) + 255) / 2, (GetBValue(col) + 255) / 2));
+				}
 			}
 		}
-		else if (style == StyleFill) {
-			CBrush br(fill);
+		else if (isFill) {
+			CBrush br((style == StyleCubase) ? fillCubase
+				: (style == StyleFabFilter) ? fillSoft : fill);
 			CBrush* oldBr = dc.SelectObject(&br);
 			dc.SelectStockObject(NULL_PEN);
 			dc.SetPolyFillMode(WINDING);
@@ -1228,7 +1341,7 @@ void CAnalyzerDlg::DrawSpecPanel(CDC& dc, const CRect& plot, int chBegin, int ch
 			dc.SelectObject(oldBr);
 		}
 
-		if (drawPeak && style != StyleBars) {
+		if (drawPeak && !isBars) {
 			CPen peakPen(PS_SOLID, 1, RGB(
 				(GetRValue(col) * 2 + 255) / 3,
 				(GetGValue(col) * 2 + 255) / 3,
@@ -1236,15 +1349,11 @@ void CAnalyzerDlg::DrawSpecPanel(CDC& dc, const CRect& plot, int chBegin, int ch
 			dc.SelectObject(&peakPen);
 			dc.Polyline(peakPts, SPEC_BINS);
 		}
-		else if (drawPeak && style == StyleBars) {
-			for (int b = 0; b < SPEC_BINS; ++b) {
-				dc.FillSolidRect(peakPts[b].x - 1, peakPts[b].y, 3, 2,
-					RGB((GetRValue(col) + 255) / 2, (GetGValue(col) + 255) / 2, (GetBValue(col) + 255) / 2));
-			}
-		}
 
-		if (style != StyleBars) {
-			CPen curve(PS_SOLID, 2, col);
+		if (isLine) {
+			const int penW = (style == StyleFabFilter) ? 1
+				: (style == StyleCubase) ? 2 : 2;
+			CPen curve(PS_SOLID, penW, col);
 			dc.SelectObject(&curve);
 			dc.Polyline(linePts, SPEC_BINS);
 		}

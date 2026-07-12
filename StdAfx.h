@@ -265,9 +265,13 @@ struct save{
 	int analyzerw;
 	int analyzerh;
 	int analyzerspeclayout; // 0=重ね 1=上下 2=左右 3=2x2 4=2x4
-	int analyzerspecstyle;  // 0=塗+線(Ozone風) 1=線のみ 2=バー
+	// 周波数表示モード(CAnalyzerDlg::SpecStyle と同じ)
+	// 0=Ozone(塗+線) 1=線のみ 2=バー 3=Cubase Frequency 4=Voxengo SPAN
+	// 5=Ableton Spectrum 6=FabFilter Pro-Q
+	int analyzerspecstyle;
 	int analyzerpeakhold;   // 1=ピークホールド ON
 	int analyzereqoverlay;  // 1=EQ帯域/ゲイン曲線オーバーレイ
+	int analyzerwavespeed;  // 波形スクロール速度(%) 25..200 (100=等倍)
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */

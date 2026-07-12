@@ -228,6 +228,7 @@ BOOL COggApp::InitInstance()
 	savedata.analyzerspecstyle = 0;
 	savedata.analyzerpeakhold = 1;
 	savedata.analyzereqoverlay = 1;
+	savedata.analyzerwavespeed = 100;
 	savedata.saveversion = 2;
 
 	savedata.playerMode = 0;   // 既定はファルコム特化型
@@ -318,7 +319,7 @@ BOOL COggApp::InitInstance()
 		|| savedata.analyzerspeclayout < 0 || savedata.analyzerspeclayout > 4)
 		savedata.analyzerspeclayout = 0;
 	if (datFileSize < (int)(offsetof(save, analyzerspecstyle) + sizeof(savedata.analyzerspecstyle))
-		|| savedata.analyzerspecstyle < 0 || savedata.analyzerspecstyle > 2)
+		|| savedata.analyzerspecstyle < 0 || savedata.analyzerspecstyle > 6)
 		savedata.analyzerspecstyle = 0;
 	if (datFileSize < (int)(offsetof(save, analyzerpeakhold) + sizeof(savedata.analyzerpeakhold)))
 		savedata.analyzerpeakhold = 1;
@@ -328,6 +329,9 @@ BOOL COggApp::InitInstance()
 		savedata.analyzereqoverlay = 1;
 	else if (savedata.analyzereqoverlay != 0)
 		savedata.analyzereqoverlay = 1;
+	if (datFileSize < (int)(offsetof(save, analyzerwavespeed) + sizeof(savedata.analyzerwavespeed))
+		|| savedata.analyzerwavespeed < 25 || savedata.analyzerwavespeed > 200)
+		savedata.analyzerwavespeed = 100;
 	// ジャンプリスト履歴: 途中フィールド挿入で .dat がずれた場合などは破棄する
 	{
 		auto clearMpHist = []() {

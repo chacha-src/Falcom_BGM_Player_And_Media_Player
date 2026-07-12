@@ -30,8 +30,10 @@
 ### 波形・周波数アナライザー
 Ozone風のリアルタイムアナライザーを追加しました。
 
-- **上部:** 多チャンネルPCM波形（横スクロール）と L/R レベルメーター
-- **下部:** 対数軸の周波数特性（塗+線 / 線のみ / バー、ピークホールド）
+- **上部:** 多チャンネルPCM波形（横スクロール）と L/R レベルメーター（RMS＋RMSピークホールド）
+- **下部:** 対数軸の周波数特性（複数の表示モード、ピークホールド）
+- **表示モード:** Ozone / Cubase Frequency / Voxengo SPAN / Ableton Spectrum / FabFilter Pro-Q / バー / 線のみ（右クリック）
+- **波形速度:** x0.25〜x2.0（右クリック）
 - **レイアウト:** 重ね描き / 上下分割 / 左右分割 / 2x2 / 2x4（右クリックメニュー）
 - **EQオーバーレイ:** 既存15バンドEQ（`eq[0..14]`）の帯域とゲイン曲線をスペクトラム上に表示
 - **マウス読取:** ホバーで周波数・dB・チャンネル（分割時はカーソル下のパネル）を表示
@@ -151,8 +153,10 @@ A simplified piano roll has been implemented.
 ### Waveform & Spectrum Analyzer
 An Ozone-inspired real-time analyzer has been added.
 
-- **Top:** Multi-channel scrolling PCM waveform with L/R level meters
-- **Bottom:** Log-frequency spectrum (fill+line / line / bars, with peak hold)
+- **Top:** Multi-channel scrolling PCM waveform with L/R level meters (RMS + RMS peak hold)
+- **Bottom:** Log-frequency spectrum (multiple display modes, with peak hold)
+- **Display modes:** Ozone / Cubase Frequency / Voxengo SPAN / Ableton Spectrum / FabFilter Pro-Q / Bars / Line only (right-click)
+- **Wave speed:** x0.25–x2.0 (right-click)
 - **Layouts:** Overlay / split vertical / split horizontal / 2x2 / 2x4 (right-click menu)
 - **EQ overlay:** Shows the existing 15-band EQ (`eq[0..14]`) band markers and gain curve on the spectrum
 - **Mouse readout:** Hover to read Hz, dB, and channel (on split layouts, the panel under the cursor)
