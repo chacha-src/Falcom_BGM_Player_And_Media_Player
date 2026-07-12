@@ -370,7 +370,14 @@ void COggDlg_SyncAnalyzerFast();
 void CAnalyzerDlg::RequestSyncFromMainUi()
 {
 	if (!::IsWindow(m_hWnd)) return;
+	int minMs = savedata.ms2;
+	if (minMs < 16) minMs = 16;
+	if (minMs > 960) minMs = 960;
+	const DWORD now = GetTickCount();
+	if (m_lastSyncPostTick != 0 && (now - m_lastSyncPostTick) < (DWORD)minMs)
+		return;
 	if (InterlockedCompareExchange(&m_syncPosted, 1, 0) != 0) return;
+	m_lastSyncPostTick = now;
 	PostMessage(WM_ANALYZER_SYNC, 0, 0);
 }
 
@@ -603,18 +610,20 @@ void CAnalyzerDlg::FeedPCM(const void* pData, int frames, int sampleRate, int bi
 
 	const int spc = (std::max)(4, m_samplesPerCol);
 	int pushed = 0;
-	const int pushCap = (m_waveW > 0) ? m_waveW : 120;
-	while (m_accSamples >= spc && pushed < pushCap) {
+	// 1 present で消化できる量までに抑える。waveW まで溜めると KickUiPresent
+	// 追いつき連鎖が分単位で UI を占有し EQ が死ぬ。
+	const int scrollCap = (std::max)(4, (std::min)(24, m_waveW > 0 ? m_waveW / 40 : 16));
+	while (m_accSamples >= spc && pushed < scrollCap) {
 		m_accSamples -= spc;
 		++m_pendingScroll;
 		++pushed;
 	}
-	const int cap = (m_waveW > 0) ? m_waveW : 640;
-	if (m_pendingScroll > cap)
-		m_pendingScroll = cap;
+	// 余剰サンプルは捨てて最新へ寄せる（可視化の時間跳びは許容）
+	if (m_accSamples >= spc)
+		m_accSamples %= spc;
+	if (m_pendingScroll > scrollCap)
+		m_pendingScroll = scrollCap;
 	LeaveCriticalSection(&m_cs);
-	// Spec はワーカーが ~20ms 周期。Feed 毎 Kick は m_presentPosted で合流するが、
-	// Spec 要求は常時立てて最新 FFT を拾う。
 	RequestSpecAnalysis();
 	KickUiPresent();
 }
@@ -911,13 +920,12 @@ void CAnalyzerDlg::FullRedrawWave(COLORREF bg)
 		const int mid = (y0 + y1) / 2;
 		const int amp = (std::max)(2, (y1 - y0) / 2 - 2);
 
-		CPen grid(PS_SOLID, 1, RGB(40, 44, 58));
-		CPen* op = m_waveDC.SelectObject(&grid);
+		HGDIOBJ oldPen = m_waveDC.SelectObject(::GetStockObject(DC_PEN));
+		::SetDCPenColor(m_waveDC.GetSafeHdc(), RGB(40, 44, 58));
 		m_waveDC.MoveTo(0, mid);
 		m_waveDC.LineTo(m_waveW, mid);
 
-		CPen pen(PS_SOLID, 1, kChColor[c % CH_MAX]);
-		m_waveDC.SelectObject(&pen);
+		::SetDCPenColor(m_waveDC.GetSafeHdc(), kChColor[c % CH_MAX]);
 
 		for (int x = 0; x < m_waveW; ++x) {
 			const int ageCols = m_waveW - 1 - x;
@@ -947,7 +955,7 @@ void CAnalyzerDlg::FullRedrawWave(COLORREF bg)
 		m_waveDC.FillSolidRect(0, y0, 28, (std::min)(14, y1 - y0), ANALYZER_LABEL_PLATE);
 		m_waveDC.SetTextColor(kChColor[c % CH_MAX]);
 		m_waveDC.TextOut(4, y0 + 2, ChannelLabel(c, channels));
-		m_waveDC.SelectObject(op);
+		m_waveDC.SelectObject(oldPen);
 	}
 	m_waveDC.SelectObject(oldFont);
 	m_waveReady = true;
@@ -1004,13 +1012,12 @@ int CAnalyzerDlg::ScrollWaveAndDrawNew(COLORREF bg, int maxScroll)
 		const int mid = (y0 + y1) / 2;
 		const int amp = (std::max)(2, (y1 - y0) / 2 - 2);
 
-		CPen grid(PS_SOLID, 1, RGB(40, 44, 58));
-		CPen* op = m_waveDC.SelectObject(&grid);
+		HGDIOBJ oldPen = m_waveDC.SelectObject(::GetStockObject(DC_PEN));
+		::SetDCPenColor(m_waveDC.GetSafeHdc(), RGB(40, 44, 58));
 		m_waveDC.MoveTo(keep, mid);
 		m_waveDC.LineTo(m_waveW, mid);
 
-		CPen pen(PS_SOLID, 1, kChColor[c % CH_MAX]);
-		m_waveDC.SelectObject(&pen);
+		::SetDCPenColor(m_waveDC.GetSafeHdc(), kChColor[c % CH_MAX]);
 
 		for (int x = keep; x < m_waveW; ++x) {
 			const int ageCols = m_waveW - 1 - x;
@@ -1040,7 +1047,7 @@ int CAnalyzerDlg::ScrollWaveAndDrawNew(COLORREF bg, int maxScroll)
 		m_waveDC.FillSolidRect(0, y0, 28, (std::min)(14, y1 - y0), ANALYZER_LABEL_PLATE);
 		m_waveDC.SetTextColor(kChColor[c % CH_MAX]);
 		m_waveDC.TextOut(4, y0 + 2, ChannelLabel(c, channels));
-		m_waveDC.SelectObject(op);
+		m_waveDC.SelectObject(oldPen);
 	}
 	m_waveDC.SelectObject(oldFont);
 	m_waveReady = true;
@@ -1661,13 +1668,8 @@ void CAnalyzerDlg::OnPaint()
 	}
 	m_hoverChanged = false;
 
-	// 未消化の波形スクロールがあれば次フレームへ(追い付き用の自己 Invalidate は
-	// ピアノロール同様 PostMessage 合流で UI 占有を避ける)
-	EnterCriticalSection(&m_cs);
-	const bool moreScroll = (m_pendingScroll > 0);
-	LeaveCriticalSection(&m_cs);
-	if (moreScroll)
-		KickUiPresent();
+	// 未消化があっても自己 Kick しない。pending は Feed 側で 1 present 分に制限済み。
+	// ここで Kick すると追いつき連鎖→分単位で EQ が死ぬ。
 
 #if CCUSTOM_AERO_SUPPORT
 	if (bAero) {

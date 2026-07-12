@@ -283,7 +283,7 @@ private:
     float m_chMeterFill[PIANO_METER_CH_MAX];      // 表示用 IIR 平滑フィル値(0.0〜1.0)
     float m_chMeterAutoPeak[PIANO_METER_CH_MAX];  // 自動ピーク(棒グラフ上端の目印)
     int   m_chMeterCount = 0;
-    static constexpr DWORD ANALYZE_MIN_MS = 3;    // 連続分析の最短間隔(16分音符対応)
+    static constexpr DWORD ANALYZE_MIN_MS = 16;   // UI 占有防止。3ms だと Invalidate 嵐で EQ が死ぬ
 
     void EnsureAnalysisTables(int sampleRate, int capCaptureFrames = 0);   // Goertzel 係数と窓関数を再計算
     void RunGoertzelFromBuffer(const double* winLow, const double* winBass, int bassWinLen);
@@ -372,6 +372,8 @@ private:
     int     m_fontCacheRollH = 0;
     bool    m_paintFontsReady = false;
     volatile LONG m_syncPosted = 0;   // RequestSyncFromMainUi の多重ポスト防止フラグ
+    DWORD m_lastSyncPostTick = 0;
+    DWORD m_lastPaintInvalidateTick = 0;
 
 #if CCUSTOM_AERO_SUPPORT
     CCC_ChromaBlitCache m_chromaCache;

@@ -2637,7 +2637,15 @@ void CPianoRoll::UpdatePianoRollTimer()
 void CPianoRoll::RequestSyncFromMainUi()
 {
     if (!::IsWindow(m_hWnd)) return;
+    // 実時間スロットル（paint 遅延で ms2 が伸びても 60Hz 同期にしない）
+    int minMs = savedata.ms2;
+    if (minMs < 16) minMs = 16;
+    if (minMs > 960) minMs = 960;
+    const DWORD now = GetTickCount();
+    if (m_lastSyncPostTick != 0 && (now - m_lastSyncPostTick) < (DWORD)minMs)
+        return;
     if (InterlockedCompareExchange(&m_syncPosted, 1, 0) != 0) return;
+    m_lastSyncPostTick = now;
     PostMessage(WM_PIANOROLL_SYNC, 0, 0);
 }
 
@@ -2661,7 +2669,11 @@ LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
 LRESULT CPianoRoll::OnAnalysisDone(WPARAM, LPARAM)
 {
     if (m_paintDisabled || !::IsWindow(m_hWnd)) return 0;
-    // 解析完了ごとに再描画（自由走行）。V-Sync 待ちにするとカクつく。
+    // 解析完了ごとの自由走行は維持しつつ、Invalidate は表示レート以上に重ねない
+    const DWORD now = GetTickCount();
+    if (m_lastPaintInvalidateTick != 0 && (now - m_lastPaintInvalidateTick) < ANALYZE_MIN_MS)
+        return 0;
+    m_lastPaintInvalidateTick = now;
     ApplySyncInvalidate();
     return 0;
 }

@@ -178,6 +178,7 @@ private:
 	// UI 提示要求(音声/ワーカーは Invalidate せず PostMessage 合流 — ピアノロールと同じ自由走行)
 	volatile LONG m_presentPosted = 0;
 	volatile LONG m_syncPosted = 0;
+	DWORD m_lastSyncPostTick = 0;
 
 	CFont m_font;
 
