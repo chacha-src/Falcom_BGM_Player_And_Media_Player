@@ -259,6 +259,8 @@ void CAnalyzerDlg::ResetPlaybackState()
 	m_pendingScroll = 0;
 	m_meterPeak[0] = m_meterPeak[1] = 0.0f;
 	m_meterHold[0] = m_meterHold[1] = 0.0f;
+	m_meterRms[0] = m_meterRms[1] = 0.0f;
+	m_waveDispPeak = 0.25f;
 	for (int c = 0; c < CH_MAX; ++c) {
 		for (int b = 0; b < SPEC_BINS; ++b) {
 			m_specDb[c][b] = -96.0f;
@@ -387,7 +389,7 @@ void CAnalyzerDlg::ResetPeakHold()
 		for (int b = 0; b < SPEC_BINS; ++b)
 			m_specPeakDb[c][b] = m_specDb[c][b];
 		if (c < 2)
-			m_meterHold[c] = m_meterPeak[c];
+			m_meterHold[c] = m_meterRms[c];
 	}
 	LeaveCriticalSection(&m_cs);
 	m_specDirty = true;
@@ -518,6 +520,8 @@ void CAnalyzerDlg::FeedPCM(const void* pData, int frames, int sampleRate, int bi
 	}
 
 	float framePeak[2] = { 0.0f, 0.0f };
+	double frameSumSq[2] = { 0.0, 0.0 };
+	int frameN[2] = { 0, 0 };
 	EnterCriticalSection(&m_cs);
 	if (m_channels != channels) {
 		m_channels = channels;
@@ -532,6 +536,8 @@ void CAnalyzerDlg::FeedPCM(const void* pData, int frames, int sampleRate, int bi
 			if (c < 2) {
 				const float a = fabsf(v);
 				if (a > framePeak[c]) framePeak[c] = a;
+				frameSumSq[c] += (double)a * (double)a;
+				++frameN[c];
 			}
 		}
 		for (int c = channels; c < CH_MAX; ++c)
@@ -541,16 +547,37 @@ void CAnalyzerDlg::FeedPCM(const void* pData, int frames, int sampleRate, int bi
 	}
 	m_accSamples += frames;
 
+	float maxPk = 0.0f;
 	for (int c = 0; c < 2; ++c) {
+		float rms = 0.0f;
+		if (frameN[c] > 0)
+			rms = (float)sqrt(frameSumSq[c] / (double)frameN[c]);
+		if (rms > m_meterRms[c])
+			m_meterRms[c] = m_meterRms[c] * 0.55f + rms * 0.45f;
+		else
+			m_meterRms[c] = m_meterRms[c] * 0.92f + rms * 0.08f;
+
+		// ピークホールドも RMS の最大値を保持(サンプルピークではない)
+		if (m_meterRms[c] >= m_meterHold[c])
+			m_meterHold[c] = m_meterRms[c];
+		else
+			m_meterHold[c] = m_meterHold[c] * 0.997f;
+
+		// 参考用にサンプルピークも残す(描画では使わない)
 		if (framePeak[c] > m_meterPeak[c])
 			m_meterPeak[c] = framePeak[c];
 		else
 			m_meterPeak[c] = m_meterPeak[c] * 0.92f + framePeak[c] * 0.08f;
-		if (framePeak[c] >= m_meterHold[c])
-			m_meterHold[c] = framePeak[c];
-		else
-			m_meterHold[c] = m_meterHold[c] * 0.997f;
+
+		if (framePeak[c] > maxPk) maxPk = framePeak[c];
 	}
+	// 波形オートレンジはサンプルピーク基準(min/max描画用)
+	if (maxPk > m_waveDispPeak)
+		m_waveDispPeak = m_waveDispPeak * 0.70f + maxPk * 0.30f;
+	else
+		m_waveDispPeak = m_waveDispPeak * 0.997f + maxPk * 0.003f;
+	if (m_waveDispPeak < 0.06f) m_waveDispPeak = 0.06f;
+	if (m_waveDispPeak > 1.0f) m_waveDispPeak = 1.0f;
 
 	const int spc = (std::max)(4, m_samplesPerCol);
 	int pushed = 0;
@@ -600,6 +627,7 @@ void CAnalyzerDlg::UpdateSpectrumFromRing()
 	while (start < 0) start += RING_SAMPLES;
 
 	const float nyquist = (float)sr * 0.5f;
+	// |X|*2/N。Hann 時は正弦≈-6dBFS 読み(窓補正なし)。過大表示を避けるため窓補正はしない。
 	const float norm = 2.0f / (float)FFT_SIZE;
 	const int kNyq = FFT_SIZE / 2;
 	float magLin[FFT_SIZE / 2 + 1];
@@ -844,6 +872,14 @@ void CAnalyzerDlg::FullRedrawWave(COLORREF bg)
 	const int bandH = m_waveH / vis;
 	CFont* oldFont = m_waveDC.SelectObject(&m_font);
 	m_waveDC.SetBkMode(TRANSPARENT);
+	float dispPeak = 0.25f;
+	EnterCriticalSection(&m_cs);
+	dispPeak = m_waveDispPeak;
+	LeaveCriticalSection(&m_cs);
+	// 直近ピークを帯の ~72% に合わせる(常時フル振りを避ける)。静音は拡大しすぎない。
+	float waveGain = 0.70f / (std::max)(0.08f, dispPeak);
+	if (waveGain > 2.2f) waveGain = 2.2f;
+	if (waveGain < 0.55f) waveGain = 0.55f;
 
 	for (int c = 0; c < vis; ++c) {
 		const int y0 = c * bandH;
@@ -863,16 +899,23 @@ void CAnalyzerDlg::FullRedrawWave(COLORREF bg)
 			const int ageCols = m_waveW - 1 - x;
 			const int sampleBack = ageCols * spc + spc;
 			float mn = 1.0f, mx = -1.0f;
+			bool any = false;
 			for (int s = 0; s < spc; ++s) {
 				int idx = write - sampleBack + s;
 				while (idx < 0) idx += RING_SAMPLES;
 				idx %= RING_SAMPLES;
 				if (filled < RING_SAMPLES && idx >= filled) continue;
-				const float v = m_ringSnap[c][idx];
-				if (v < mn) mn = v;
-				if (v > mx) mx = v;
+				float v = m_ringSnap[c][idx];
+				if (v > 1.0f) v = 1.0f;
+				if (v < -1.0f) v = -1.0f;
+				if (!any || v < mn) mn = v;
+				if (!any || v > mx) mx = v;
+				any = true;
 			}
-			if (mn > mx) { mn = 0; mx = 0; }
+			if (!any) continue;
+			mn *= waveGain; mx *= waveGain;
+			if (mn < -1.0f) mn = -1.0f;
+			if (mx > 1.0f) mx = 1.0f;
 			m_waveDC.MoveTo(x, mid - (int)(mx * amp));
 			m_waveDC.LineTo(x, mid - (int)(mn * amp));
 		}
@@ -923,6 +966,13 @@ int CAnalyzerDlg::ScrollWaveAndDrawNew(COLORREF bg, int maxScroll)
 	const int bandH = m_waveH / vis;
 	CFont* oldFont = m_waveDC.SelectObject(&m_font);
 	m_waveDC.SetBkMode(TRANSPARENT);
+	float dispPeak = 0.25f;
+	EnterCriticalSection(&m_cs);
+	dispPeak = m_waveDispPeak;
+	LeaveCriticalSection(&m_cs);
+	float waveGain = 0.70f / (std::max)(0.08f, dispPeak);
+	if (waveGain > 2.2f) waveGain = 2.2f;
+	if (waveGain < 0.55f) waveGain = 0.55f;
 
 	for (int c = 0; c < vis; ++c) {
 		const int y0 = c * bandH;
@@ -942,16 +992,23 @@ int CAnalyzerDlg::ScrollWaveAndDrawNew(COLORREF bg, int maxScroll)
 			const int ageCols = m_waveW - 1 - x;
 			const int sampleBack = ageCols * spc + spc;
 			float mn = 1.0f, mx = -1.0f;
+			bool any = false;
 			for (int s = 0; s < spc; ++s) {
 				int idx = write - sampleBack + s;
 				while (idx < 0) idx += RING_SAMPLES;
 				idx %= RING_SAMPLES;
 				if (filled < RING_SAMPLES && idx >= filled) continue;
-				const float v = m_ringSnap[c][idx];
-				if (v < mn) mn = v;
-				if (v > mx) mx = v;
+				float v = m_ringSnap[c][idx];
+				if (v > 1.0f) v = 1.0f;
+				if (v < -1.0f) v = -1.0f;
+				if (!any || v < mn) mn = v;
+				if (!any || v > mx) mx = v;
+				any = true;
 			}
-			if (mn > mx) { mn = 0; mx = 0; }
+			if (!any) continue;
+			mn *= waveGain; mx *= waveGain;
+			if (mn < -1.0f) mn = -1.0f;
+			if (mx > 1.0f) mx = 1.0f;
 			m_waveDC.MoveTo(x, mid - (int)(mx * amp));
 			m_waveDC.LineTo(x, mid - (int)(mn * amp));
 		}
@@ -1268,11 +1325,11 @@ void CAnalyzerDlg::DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg)
 	// アクリル用ストリップは ~39px。40 未満で return するとバーごと消える。
 	if (waveRc.Width() < 28 || waveRc.Height() < 40) return;
 
-	float peak[2] = { 0, 0 }, hold[2] = { 0, 0 };
+	float hold[2] = { 0, 0 }, rms[2] = { 0, 0 };
 	int channels = 2;
 	EnterCriticalSection(&m_cs);
-	peak[0] = m_meterPeak[0]; peak[1] = m_meterPeak[1];
 	hold[0] = m_meterHold[0]; hold[1] = m_meterHold[1];
+	rms[0] = m_meterRms[0]; rms[1] = m_meterRms[1];
 	channels = m_channels;
 	LeaveCriticalSection(&m_cs);
 
@@ -1285,24 +1342,43 @@ void CAnalyzerDlg::DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg)
 
 	auto ampToY = [&](float a) -> int {
 		float db = AmpToDb(a);
-		float t = (db + 60.0f) / 60.0f; // -60..0 dB
+		float t = (db + 72.0f) / 72.0f;
 		if (t < 0.0f) t = 0.0f;
 		if (t > 1.0f) t = 1.0f;
 		return area.bottom - (int)(t * area.Height());
 	};
 
+	// すべて RMS 基準: バー=現在RMS、白線=RMSピークホールド、黄/赤=RMS閾値
+	const float ampYellow = powf(10.0f, -9.0f / 20.0f);
+	const float ampRed = powf(10.0f, -3.0f / 20.0f);
+	const int yYellow = ampToY(ampYellow);
+	const int yRed = ampToY(ampRed);
+
 	for (int c = 0; c < n; ++c) {
 		const int x0 = area.left + 4 + c * (meterW + gap);
 		CRect track(x0, area.top + 2, x0 + meterW, area.bottom - 2);
 		dc.FillSolidRect(track, RGB(36, 42, 56));
-		const int y = ampToY(peak[c]);
-		const int yh = ampToY(hold[c]);
-		CRect fill(track.left, y, track.right, track.bottom);
-		COLORREF col = (peak[c] > 0.89f) ? RGB(255, 80, 80)
-			: (peak[c] > 0.7f) ? RGB(255, 200, 80) : kChColor[c];
-		dc.FillSolidRect(fill, col);
-		if (yh >= track.top && yh < track.bottom)
-			dc.FillSolidRect(track.left, yh, track.Width(), 2, RGB(220, 230, 245));
+
+		const float aRms = (std::min)(1.0f, (std::max)(0.0f, rms[c]));
+		const float aHold = (std::min)(1.0f, (std::max)(0.0f, hold[c]));
+		const int yFill = ampToY(aRms);
+		const int yHold = ampToY(aHold);
+
+		if (yFill < track.bottom) {
+			const int ySafeTop = (std::max)(yFill, yYellow);
+			if (ySafeTop < track.bottom)
+				dc.FillSolidRect(CRect(track.left, ySafeTop, track.right, track.bottom), kChColor[c]);
+			if (yFill < yYellow) {
+				const int yY0 = (std::max)(yFill, yRed);
+				if (yY0 < yYellow)
+					dc.FillSolidRect(CRect(track.left, yY0, track.right, yYellow), RGB(255, 200, 80));
+			}
+			if (yFill < yRed)
+				dc.FillSolidRect(CRect(track.left, yFill, track.right, yRed), RGB(255, 80, 80));
+		}
+		if (yHold >= track.top && yHold < track.bottom)
+			dc.FillSolidRect(track.left, yHold, track.Width(), 2, RGB(220, 230, 245));
+
 		dc.SetTextColor(kChColor[c]);
 		dc.SetBkMode(TRANSPARENT);
 		CFont* of = dc.SelectObject(&m_font);

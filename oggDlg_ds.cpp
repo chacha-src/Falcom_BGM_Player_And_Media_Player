@@ -4187,10 +4187,19 @@ static void FxApplyUserEffects(float* L, float* R, int n, int rate) {
 // 全チャンネル状態のクリア、ディレイバッファのゼロ埋め、
 // リミッター係数の再計算を行う
 static void InitEngine(int rate) {
+	// memset 前に山彦バッファを退避して解放する。
+	// 先に memset するとポインタが消え、毎回 malloc 分がリークする。
+	float* oldYamabiko[MAX_CH];
+	for (int i = 0; i < MAX_CH; i++)
+		oldYamabiko[i] = g_channels[i].yamabikoBuf;
+
 	memset(g_channels, 0, sizeof(g_channels));
 	memset(g_delayMemory, 0, sizeof(g_delayMemory));
 
 	for (int i = 0; i < MAX_CH; i++) {
+		if (oldYamabiko[i] != NULL)
+			free(oldYamabiko[i]);
+
 		g_channels[i].delayBuffer = g_delayMemory[i];
 		g_channels[i].lfo.phase = 0.0f;
 		g_channels[i].flutterPhase = 0.0f;
@@ -4213,11 +4222,6 @@ static void InitEngine(int rate) {
 		// 山彦バッファ: rate×2秒分 (最大遅延 2秒)
 		g_channels[i].yamabikoBufSize = rate * 2;
 		g_channels[i].yamabikoPos = 0;
-
-		if (g_channels[i].yamabikoBuf != NULL) {
-			free(g_channels[i].yamabikoBuf);
-			g_channels[i].yamabikoBuf = NULL;
-		}
 		g_channels[i].yamabikoBuf = (float*)malloc(sizeof(float) * g_channels[i].yamabikoBufSize);
 		if (g_channels[i].yamabikoBuf != NULL)
 			memset(g_channels[i].yamabikoBuf, 0, sizeof(float) * g_channels[i].yamabikoBufSize);

@@ -560,7 +560,12 @@ void CCC_BlitStretchChroma(HDC hdcDest, int x, int y, int destW, int destH,
 void CCC_BlitStretchChromaNoFlicker(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey)
 {
+    // UI スレッド想定。DIB を再利用して毎フレーム CreateDIBSection を避ける。
+    static CCC_ChromaBlitCache s_nfCache;
     RECT rect = { x, y, x + destW, y + destH };
+    if (destW > 0 && destH > 0 &&
+        CCC_BlitToRectChromaNoFlickerCached(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, s_nfCache))
+        return;
     if (!CCC_BlitToRectChromaNoFlicker(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE))
         CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE);
 }
@@ -573,7 +578,12 @@ void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int src
 
 void CCC_BlitChromaNoFlicker(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
+    // UI スレッド想定。DIB を再利用して毎フレーム CreateDIBSection を避ける。
+    static CCC_ChromaBlitCache s_nfCache;
     RECT rect = { x, y, x + w, y + h };
+    if (w > 0 && h > 0 &&
+        CCC_BlitToRectChromaNoFlickerCached(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, s_nfCache))
+        return;
     if (!CCC_BlitToRectChromaNoFlicker(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE))
         CCC_BlitChroma(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
 }
@@ -585,7 +595,9 @@ BOOL CCC_BlitChromaNoFlickerCached(HDC hdcDest, int x, int y, int w, int h,
     RECT rect = { x, y, x + w, y + h };
     if (CCC_BlitToRectChromaNoFlickerCached(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, cache))
         return TRUE;
-    CCC_BlitChromaNoFlicker(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
+    // 呼び出し側キャッシュ失敗時は一時 DIB 経路(再帰しないよう NoFlicker の静的キャッシュは使わない)
+    if (!CCC_BlitToRectChromaNoFlicker(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE))
+        CCC_BlitChroma(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
     return TRUE;
 }
 
@@ -776,9 +788,36 @@ static void DrawDecorativeTextShadowLayers(CDC* pDC, const CRect& rect, const CS
     const int bh = textH + abs(oy) + pad * 2;
     if (bw <= 0 || bh <= 0) return;
 
-    void* pBits = nullptr;
-    HBITMAP hDib = CCC_CreateShadowDib32(pDC->GetSafeHdc(), bw, bh, &pBits);
-    if (!hDib || !pBits) return;
+    // 影 DIB は必要サイズまで拡張して再利用(毎描画の CreateDIBSection を抑制)
+    struct ShadowDibCache {
+        HBITMAP hDib = NULL;
+        void* pBits = nullptr;
+        int capW = 0;
+        int capH = 0;
+        void Release()
+        {
+            if (hDib) { ::DeleteObject(hDib); hDib = NULL; }
+            pBits = nullptr;
+            capW = capH = 0;
+        }
+        BOOL Ensure(HDC hdcRef, int w, int h)
+        {
+            if (w <= 0 || h <= 0) return FALSE;
+            if (hDib && pBits && capW >= w && capH >= h) return TRUE;
+            Release();
+            hDib = CCC_CreateShadowDib32(hdcRef, w, h, &pBits);
+            if (!hDib || !pBits) { Release(); return FALSE; }
+            capW = w;
+            capH = h;
+            return TRUE;
+        }
+    };
+    static ShadowDibCache s_shadowCache;
+    if (!s_shadowCache.Ensure(pDC->GetSafeHdc(), bw, bh))
+        return;
+
+    HBITMAP hDib = s_shadowCache.hDib;
+    void* pBits = s_shadowCache.pBits;
 
     CDC dcShadow;
     dcShadow.CreateCompatibleDC(pDC);
@@ -786,8 +825,12 @@ static void DrawDecorativeTextShadowLayers(CDC* pDC, const CRect& rect, const CS
 
     UINT32* px = (UINT32*)pBits;
     const int nPx = bw * bh;
-    for (int i = 0; i < nPx; ++i)
-        px[i] = 0x00FFFFFFu;
+    // キャッシュは cap より大きいことがあるので使用矩形だけクリア
+    for (int y = 0; y < bh; ++y) {
+        UINT32* row = px + y * s_shadowCache.capW;
+        for (int x = 0; x < bw; ++x)
+            row[x] = 0x00FFFFFFu;
+    }
 
     CFont* pOldFont = dcShadow.SelectObject(pDC->GetCurrentFont());
     dcShadow.SetBkMode(TRANSPARENT);
@@ -797,14 +840,17 @@ static void DrawDecorativeTextShadowLayers(CDC* pDC, const CRect& rect, const CS
         pad + max(0, ox) + textW, pad + max(0, oy) + textH);
     dcShadow.DrawText(str, &tr, fmt);
 
-    std::vector<BYTE> alpha(nPx);
-    for (int i = 0; i < nPx; ++i)
-    {
-        const UINT32 rgb = px[i] & 0x00FFFFFFu;
-        if (rgb >= 0x00FEFEFEu)
-            alpha[i] = 0;
-        else
-            alpha[i] = (BYTE)max(0, min(255, 255 - (int)GetRValue(rgb)));
+    std::vector<BYTE> alpha((size_t)nPx);
+    for (int y = 0; y < bh; ++y) {
+        UINT32* row = px + y * s_shadowCache.capW;
+        BYTE* arow = alpha.data() + y * bw;
+        for (int x = 0; x < bw; ++x) {
+            const UINT32 rgb = row[x] & 0x00FFFFFFu;
+            if (rgb >= 0x00FEFEFEu)
+                arow[x] = 0;
+            else
+                arow[x] = (BYTE)max(0, min(255, 255 - (int)GetRValue(rgb)));
+        }
     }
 
     const int blurR = max(1, (nBlur + 1) / 2);
@@ -817,21 +863,26 @@ static void DrawDecorativeTextShadowLayers(CDC* pDC, const CRect& rect, const CS
     const int tintB = (GetBValue(clrS) * 3 + 40) / 4;
     const int peakA = bAeroTrans ? 88 : 112;
 
-    for (int i = 0; i < nPx; ++i)
-    {
-        if (alpha[i] == 0) { px[i] = 0; continue; }
-        const BYTE a = (BYTE)((alpha[i] * peakA) / 255);
-        if (a < 2) { px[i] = 0; continue; }
-        px[i] = ((UINT32)a << 24) | ((UINT32)tintB << 16) | ((UINT32)tintG << 8) | (UINT32)tintR;
+    for (int y = 0; y < bh; ++y) {
+        UINT32* row = px + y * s_shadowCache.capW;
+        BYTE* arow = alpha.data() + y * bw;
+        for (int x = 0; x < bw; ++x) {
+            if (arow[x] == 0) { row[x] = 0; continue; }
+            const BYTE a = (BYTE)((arow[x] * peakA) / 255);
+            if (a < 2) { row[x] = 0; continue; }
+            row[x] = ((UINT32)a << 24) | ((UINT32)tintB << 16) | ((UINT32)tintG << 8) | (UINT32)tintR;
+        }
     }
 
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    // ストライドが bw と異なる場合があるので、行単位ではなく CompatibleDC 経由で
+    // 左上 bw×bh をブレンド(DIB は top-down、先頭が (0,0))
     ::GdiAlphaBlend(pDC->GetSafeHdc(), rect.left - pad, rect.top - pad, bw, bh,
         dcShadow.GetSafeHdc(), 0, 0, bw, bh, bf);
 
     dcShadow.SelectObject(pOldFont);
     ::SelectObject(dcShadow.GetSafeHdc(), hOldBmp);
-    ::DeleteObject(hDib);
+    // hDib はキャッシュ保持のため Delete しない
 }
 
 static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& str, UINT fmt, COLORREF clrT, COLORREF clrS, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bAeroTrans = FALSE)
@@ -1582,17 +1633,17 @@ static void DrawSmartText2(CDC* pDC, CRect rect, CString str, UINT fmt, BOOL bDi
 
 static void FillRectAlpha(CDC* pDC, const CRect& rc, COLORREF clr, BYTE alpha)
 {
-    if (rc.Width() <= 0 || rc.Height() <= 0) return;
+    // 単色塗りは 1x1 を引き伸ばして AlphaBlend する(見た目同一・GDI 生成圧を大幅削減)。
+    if (!pDC || rc.Width() <= 0 || rc.Height() <= 0) return;
     CDC mDC;
+    if (!mDC.CreateCompatibleDC(pDC)) return;
     CBitmap mB;
-    mDC.CreateCompatibleDC(pDC);
-    mB.CreateCompatibleBitmap(pDC, rc.Width(), rc.Height());
+    if (!mB.CreateCompatibleBitmap(pDC, 1, 1)) { mDC.DeleteDC(); return; }
     CBitmap* ob = mDC.SelectObject(&mB);
-
-    mDC.FillSolidRect(0, 0, rc.Width(), rc.Height(), clr);
+    mDC.SetPixelV(0, 0, clr);
     BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, 0 };
-    ::AlphaBlend(pDC->GetSafeHdc(), rc.left, rc.top, rc.Width(), rc.Height(), mDC.GetSafeHdc(), 0, 0, rc.Width(), rc.Height(), bf);
-
+    ::AlphaBlend(pDC->GetSafeHdc(), rc.left, rc.top, rc.Width(), rc.Height(),
+        mDC.GetSafeHdc(), 0, 0, 1, 1, bf);
     mDC.SelectObject(ob);
     mB.DeleteObject();
     mDC.DeleteDC();

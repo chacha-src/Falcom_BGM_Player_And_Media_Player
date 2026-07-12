@@ -573,11 +573,11 @@ void CEqualizer::ReapplyDecorativeTitleFont()
 	LOGFONT lf;
 	memset(&lf, 0, sizeof(lf));
 	lf.lfHeight = -MulDiv(12 * 4, (int)dpi, 96);
-	const int li = (savedata.lang < 0) ? 0 : (savedata.lang > 13 ? 13 : savedata.lang);
 	lf.lfItalic = TRUE;
-	CFont fn;
-	if (fn.CreateFontIndirect(&lf))
-		m_t.SetFont(&fn);
+	if (m_titleFont.GetSafeHandle())
+		m_titleFont.DeleteObject();
+	if (m_titleFont.CreateFontIndirect(&lf))
+		m_t.SetFont(&m_titleFont);
 }
 
 extern BOOL reset;

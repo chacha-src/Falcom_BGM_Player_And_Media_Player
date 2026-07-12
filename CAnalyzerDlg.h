@@ -167,9 +167,11 @@ private:
 	int m_hoverCh = 0;
 	int m_hoverBin = -1;
 
-	// レベルメーター(L/Rピーク)
-	float m_meterPeak[2] = { 0.0f, 0.0f };
+	// レベルメーター: すべて RMS 基準(バー=現在 / 白線=RMSピークホールド)
+	float m_meterPeak[2] = { 0.0f, 0.0f }; // 参考用サンプルピーク(描画未使用)
 	float m_meterHold[2] = { 0.0f, 0.0f };
+	float m_meterRms[2] = { 0.0f, 0.0f };
+	float m_waveDispPeak = 0.25f; // 波形表示用の追従ピーク(小さいほど拡大)
 
 	// UI 提示要求(音声/ワーカーは Invalidate せず PostMessage 合流 — ピアノロールと同じ自由走行)
 	volatile LONG m_presentPosted = 0;

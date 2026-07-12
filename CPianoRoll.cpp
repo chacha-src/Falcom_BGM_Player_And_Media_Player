@@ -2484,16 +2484,16 @@ void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const 
     // 再アタック(タイ連結中の同鍵連打)が起きた鍵は、バーの左端に細い白線を
     // 一本引いて「ここでノートが切り替わった」ことを見た目でも分かるようにする。
     // ゲート100で沈黙区間がなくても、この線でO6L4CCCCCCのような連打を区別できる。
+    CPen sepPen(PS_SOLID, 1, RGB(255, 255, 255));
+    CPen* pOldPen = dc.SelectObject(&sepPen);
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (!frame.active[i] || !frame.reattack[i]) continue;
         int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
         if (xR - xL < 2) continue;
-        CPen sepPen(PS_SOLID, 1, RGB(255, 255, 255));
-        CPen* pOldPen = dc.SelectObject(&sepPen);
         dc.MoveTo(xL + 1, yTop);
         dc.LineTo(xL + 1, yBot);
-        dc.SelectObject(pOldPen);
     }
+    dc.SelectObject(pOldPen);
 
     if (!m_paintFontsReady || !m_fontExprSymbol.GetSafeHandle()) return;
     CFont* pSymFont = CFont::FromHandle((HFONT)m_fontExprSymbol.GetSafeHandle());
@@ -2538,6 +2538,8 @@ void CPianoRoll::DrawPitchTransitions(CDC& dc, int width, int rollH, int histCou
     const int maxR = (histCount < (int)MAX_HISTORY) ? histCount : (int)MAX_HISTORY;
     const uint8_t kTransMask = PianoExpr::SLIDE | PianoExpr::FALL | PianoExpr::SCOOP;
 
+    CGdiObject* pOldBrush = dc.SelectStockObject(DC_BRUSH);
+    CGdiObject* pOldPen = dc.SelectStockObject(DC_PEN);
     for (int r = 1; r + 1 < maxR; ++r) {
         const NoteFrame& fNew = hist[r - 1]; // 下(新しい)行 = row r
         const NoteFrame& fOld = hist[r];     // 上(古い)行 = row r+1
@@ -2563,19 +2565,18 @@ void CPianoRoll::DrawPitchTransitions(CDC& dc, int width, int rollH, int histCou
             if (xRs <= xLs || xRd <= xLd) continue;
 
             const COLORREF col = PianoDraw::LocalKeyColor(j, fNew.strength[j], false);
-            CBrush br(col);
-            CBrush* pOld = dc.SelectObject(&br);
-            CPen pen(PS_SOLID, 1, col);
-            CPen* pOldPen = dc.SelectObject(&pen);
+            // DC_PEN/DC_BRUSH で色だけ差し替え(ループ内 CreatePen/Brush を避ける)
+            ::SetDCBrushColor(dc.GetSafeHdc(), col);
+            ::SetDCPenColor(dc.GetSafeHdc(), col);
             POINT pts[4] = {
                 { xLs + 1, midOld }, { xRs - 1, midOld },
                 { xRd - 1, midNew }, { xLd + 1, midNew }
             };
             dc.Polygon(pts, 4);
-            dc.SelectObject(pOld);
-            dc.SelectObject(pOldPen);
         }
     }
+    if (pOldBrush) dc.SelectObject(pOldBrush);
+    if (pOldPen) dc.SelectObject(pOldPen);
 }
 
 void CPianoRoll::ComposeRollBuffer(CDC& dc, int width, int rollH,
