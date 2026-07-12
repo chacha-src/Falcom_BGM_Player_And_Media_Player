@@ -5504,8 +5504,12 @@ static DWORD WINAPI EqKeyWorkerEntry(LPVOID)
 			continue;
 		EnsureEqKeyCs();
 		EnterCriticalSection(&g_eqKeyCs);
-		workL = g_eqKeyL;
-		workR = g_eqKeyR;
+		const size_t nL = g_eqKeyL.size();
+		const size_t nR = g_eqKeyR.size();
+		if (workL.size() != nL) workL.resize(nL);
+		if (workR.size() != nR) workR.resize(nR);
+		if (nL) memcpy(workL.data(), g_eqKeyL.data(), nL * sizeof(double));
+		if (nR) memcpy(workR.data(), g_eqKeyR.data(), nR * sizeof(double));
 		workRate = g_eqKeyRate;
 		LeaveCriticalSection(&g_eqKeyCs);
 		if (workL.empty())
@@ -5536,8 +5540,12 @@ void PublishEqKeyPcm(const std::vector<double>& bufferL, const std::vector<doubl
 	if (bufferL.empty()) return;
 	EnsureEqKeyWorker();
 	EnterCriticalSection(&g_eqKeyCs);
-	g_eqKeyL = bufferL;
-	g_eqKeyR = bufferR;
+	const size_t nL = bufferL.size();
+	const size_t nR = bufferR.size();
+	if (g_eqKeyL.size() != nL) g_eqKeyL.resize(nL);
+	if (g_eqKeyR.size() != nR) g_eqKeyR.resize(nR);
+	memcpy(g_eqKeyL.data(), bufferL.data(), nL * sizeof(double));
+	if (nR) memcpy(g_eqKeyR.data(), bufferR.data(), nR * sizeof(double));
 	g_eqKeyRate = (sampleRate > 0) ? sampleRate : 44100;
 	++g_eqKeySeq;
 	LeaveCriticalSection(&g_eqKeyCs);

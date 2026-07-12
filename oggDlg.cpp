@@ -1075,6 +1075,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_APP + 1, dp1)
 	ON_MESSAGE(WM_APP + 2, dp2)
 	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
+	ON_MESSAGE(WM_SPEANA_TICK, &COggDlg::OnSpeanaTick)
 	ON_MESSAGE(WM_REFRESH_AERO_ALL, &COggDlg::OnRefreshAeroAll)
 	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
 	ON_MESSAGE(WM_OGG_DEFERRED_HEAVY_INIT, OnDeferredHeavyStartup)
@@ -2765,6 +2766,8 @@ LARGE_INTEGER freq;
 DWORD g_oggUiThreadId = 0;
 static volatile LONG g_timerpPosted = 0;
 static volatile LONG g_gdiPaintPending = 0;
+static volatile LONG g_speanaPosted = 0;
+static DWORD g_gdiPaintPendingSince = 0;
 
 // メディアプレイヤーモードでメイン画面(og)が非表示の間は OnPaint が呼ばれず
 // g_gdiPaintPending が下がらないため timerp の GDI 合成(bGdiFrame)が止まる。
@@ -2772,6 +2775,7 @@ static volatile LONG g_gdiPaintPending = 0;
 void COgg_ClearGdiPaintPending()
 {
 	InterlockedExchange(&g_gdiPaintPending, 0);
+	g_gdiPaintPendingSince = 0;
 }
 
 static void COgg_RequestTimerp(COggDlg* dlg)
@@ -16191,6 +16195,23 @@ void COggDlg::timerp()
 		}
 	}
 	ms2++;
+	// ピアノ/アナライザの重い OnPaint で pending が長時間残ると Speana/EQ 供給が止まり
+	// 分単位でコード表示がぎこちなくなる。一定時間で強制解除する。
+	{
+		const LONG pend = InterlockedCompareExchange(&g_gdiPaintPending, 0, 0);
+		const DWORD nowPend = GetTickCount();
+		if (pend != 0) {
+			if (g_gdiPaintPendingSince == 0)
+				g_gdiPaintPendingSince = nowPend;
+			else if ((nowPend - g_gdiPaintPendingSince) >= 150u) {
+				InterlockedExchange(&g_gdiPaintPending, 0);
+				g_gdiPaintPendingSince = 0;
+			}
+		}
+		else {
+			g_gdiPaintPendingSince = 0;
+		}
+	}
 	const BOOL bGdiFrame = Ms2DrawDue(ms2)
 		&& (InterlockedCompareExchange(&g_gdiPaintPending, 0, 0) == 0);
 	CString s, ss, sss;
@@ -16373,8 +16394,11 @@ void COggDlg::timerp()
 	}
 
 
-	// Speana / ピアノ / アナライザは各 HWND へ Post して timerp 内で直列実行しない
-	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) Speana();
+	// Speana は Post して timerp を早く返す（ピアノ/アナライザと同じ隔離）
+	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) {
+		if (InterlockedCompareExchange(&g_speanaPosted, 1, 0) == 0)
+			PostMessage(WM_SPEANA_TICK, 0, 0);
+	}
 	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
 		m_PianoRollDlg->RequestSyncFromMainUi();
 	if (plf == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
@@ -17582,6 +17606,16 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 	if (!IsWindow(GetSafeHwnd()))
 		return 0;
 	timerp();
+	return 0;
+}
+
+LRESULT COggDlg::OnSpeanaTick(WPARAM, LPARAM)
+{
+	InterlockedExchange(&g_speanaPosted, 0);
+	if (!IsWindow(GetSafeHwnd()))
+		return 0;
+	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg))
+		Speana();
 	return 0;
 }
 

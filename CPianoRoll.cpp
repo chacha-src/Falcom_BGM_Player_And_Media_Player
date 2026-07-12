@@ -1633,13 +1633,12 @@ namespace PianoDraw
         dc.FillSolidRect(&rc, fill);
         const COLORREF topLeft = pressed ? RGB(45, 45, 50) : RGB(255, 255, 255);
         const COLORREF botRight = pressed ? RGB(190, 190, 195) : RGB(110, 110, 115);
-        CPen penTL(PS_SOLID, 1, topLeft);
-        CPen penBR(PS_SOLID, 1, botRight);
-        CPen* pOld = dc.SelectObject(&penTL);
+        HGDIOBJ oldPen = dc.SelectObject(::GetStockObject(DC_PEN));
+        ::SetDCPenColor(dc.GetSafeHdc(), topLeft);
         dc.MoveTo(rc.left, rc.bottom - 1); dc.LineTo(rc.left, rc.top); dc.LineTo(rc.right - 1, rc.top);
-        dc.SelectObject(&penBR);
+        ::SetDCPenColor(dc.GetSafeHdc(), botRight);
         dc.MoveTo(rc.left, rc.bottom - 1); dc.LineTo(rc.right - 1, rc.bottom - 1); dc.LineTo(rc.right - 1, rc.top);
-        dc.SelectObject(pOld);
+        dc.SelectObject(oldPen);
     }
 
     static COLORREF LocalKeyColor(int keyIndex, float strength, bool blackKey)
@@ -1901,10 +1900,10 @@ namespace PianoDraw
             if (nPts == 1) dc.SetPixel(pts[0].x, pts[0].y, col);
             return;
         }
-        CPen pen(PS_SOLID, 1, col);
-        CPen* pOld = dc.SelectObject(&pen);
+        HGDIOBJ oldPen = dc.SelectObject(::GetStockObject(DC_PEN));
+        ::SetDCPenColor(dc.GetSafeHdc(), col);
         dc.Polyline(pts, nPts);
-        dc.SelectObject(pOld);
+        dc.SelectObject(oldPen);
     }
 
     static void DrawHistoryNote(CDC& dc, CRect rc, uint8_t bandMask, const float* laneStr,
@@ -2258,20 +2257,28 @@ bool CPianoRoll::EnsureExprLegendCache(CDC& refDC, int rollW, int rollH) const
 }
 
 // 凡例パネル背景を半透明で塗る(下のバーを透かす)。1x1のソースを引き伸ばして
-// AlphaBlend する軽量実装(msimg32 の AlphaBlend を CDC 経由で使用)。
+// AlphaBlend する軽量実装。DC/ビットマップは再利用して分単位の GDI 断片化を防ぐ。
 static void PianoFillRectAlpha(CDC& dc, const CRect& rc, COLORREF clr, BYTE alpha)
 {
     if (rc.Width() <= 0 || rc.Height() <= 0) return;
-    CDC mem;
-    if (!mem.CreateCompatibleDC(&dc)) return;
-    CBitmap bmp;
-    if (!bmp.CreateCompatibleBitmap(&dc, 1, 1)) { mem.DeleteDC(); return; }
-    CBitmap* ob = mem.SelectObject(&bmp);
-    mem.SetPixelV(0, 0, clr);
+    static CDC s_mem;
+    static CBitmap s_bmp;
+    static CBitmap* s_old = nullptr;
+    static bool s_ready = false;
+    static COLORREF s_clr = (COLORREF)-1;
+    if (!s_ready) {
+        if (!s_mem.CreateCompatibleDC(&dc)) return;
+        if (!s_bmp.CreateCompatibleBitmap(&dc, 1, 1)) { s_mem.DeleteDC(); return; }
+        s_old = s_mem.SelectObject(&s_bmp);
+        s_ready = true;
+        s_clr = (COLORREF)-1;
+    }
+    if (s_clr != clr) {
+        s_mem.SetPixelV(0, 0, clr);
+        s_clr = clr;
+    }
     BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, 0 };
-    dc.AlphaBlend(rc.left, rc.top, rc.Width(), rc.Height(), &mem, 0, 0, 1, 1, bf);
-    mem.SelectObject(ob);
-    mem.DeleteDC();
+    dc.AlphaBlend(rc.left, rc.top, rc.Width(), rc.Height(), &s_mem, 0, 0, 1, 1, bf);
 }
 
 void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH) const
