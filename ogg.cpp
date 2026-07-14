@@ -229,6 +229,17 @@ BOOL COggApp::InitInstance()
 	savedata.analyzerpeakhold = 1;
 	savedata.analyzereqoverlay = 1;
 	savedata.analyzerwavespeed = 100;
+	savedata.pianorollscrollspeed = 100;
+	savedata.pianorollexprlegend = 1;
+	savedata.pianorollexprmarks = 1;
+	savedata.pianorolllevelmeter = 1;
+	savedata.pianorolltopmost = 0;
+	savedata.pianorollreattack = 0;
+	savedata.pianorollimpulse = 0;
+	savedata.pianorollharmghost = 1;
+	savedata.pianorollharmprof = 1;
+	savedata.analyzerlevelmeter = 1;
+	savedata.analyzertopmost = 0;
 	savedata.saveversion = 2;
 
 	savedata.playerMode = 0;   // 既定はファルコム特化型
@@ -332,6 +343,49 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, analyzerwavespeed) + sizeof(savedata.analyzerwavespeed))
 		|| savedata.analyzerwavespeed < 25 || savedata.analyzerwavespeed > 200)
 		savedata.analyzerwavespeed = 100;
+	if (datFileSize < (int)(offsetof(save, pianorollscrollspeed) + sizeof(savedata.pianorollscrollspeed))
+		|| savedata.pianorollscrollspeed < 25 || savedata.pianorollscrollspeed > 200)
+		savedata.pianorollscrollspeed = 100;
+	if (datFileSize < (int)(offsetof(save, pianorollexprlegend) + sizeof(savedata.pianorollexprlegend)))
+		savedata.pianorollexprlegend = 1;
+	else if (savedata.pianorollexprlegend != 0)
+		savedata.pianorollexprlegend = 1;
+	if (datFileSize < (int)(offsetof(save, pianorollexprmarks) + sizeof(savedata.pianorollexprmarks)))
+		savedata.pianorollexprmarks = 1;
+	else if (savedata.pianorollexprmarks != 0)
+		savedata.pianorollexprmarks = 1;
+	if (datFileSize < (int)(offsetof(save, pianorolllevelmeter) + sizeof(savedata.pianorolllevelmeter)))
+		savedata.pianorolllevelmeter = 1;
+	else if (savedata.pianorolllevelmeter != 0)
+		savedata.pianorolllevelmeter = 1;
+	if (datFileSize < (int)(offsetof(save, pianorolltopmost) + sizeof(savedata.pianorolltopmost)))
+		savedata.pianorolltopmost = 0;
+	else if (savedata.pianorolltopmost != 0)
+		savedata.pianorolltopmost = 1;
+	if (datFileSize < (int)(offsetof(save, pianorollreattack) + sizeof(savedata.pianorollreattack)))
+		savedata.pianorollreattack = 0;
+	else if (savedata.pianorollreattack != 0)
+		savedata.pianorollreattack = 1;
+	if (datFileSize < (int)(offsetof(save, pianorollimpulse) + sizeof(savedata.pianorollimpulse)))
+		savedata.pianorollimpulse = 0;
+	else if (savedata.pianorollimpulse != 0)
+		savedata.pianorollimpulse = 1;
+	if (datFileSize < (int)(offsetof(save, pianorollharmghost) + sizeof(savedata.pianorollharmghost)))
+		savedata.pianorollharmghost = 1;
+	else if (savedata.pianorollharmghost != 0)
+		savedata.pianorollharmghost = 1;
+	if (datFileSize < (int)(offsetof(save, pianorollharmprof) + sizeof(savedata.pianorollharmprof)))
+		savedata.pianorollharmprof = 1;
+	else if (savedata.pianorollharmprof != 0)
+		savedata.pianorollharmprof = 1;
+	if (datFileSize < (int)(offsetof(save, analyzerlevelmeter) + sizeof(savedata.analyzerlevelmeter)))
+		savedata.analyzerlevelmeter = 1;
+	else if (savedata.analyzerlevelmeter != 0)
+		savedata.analyzerlevelmeter = 1;
+	if (datFileSize < (int)(offsetof(save, analyzertopmost) + sizeof(savedata.analyzertopmost)))
+		savedata.analyzertopmost = 0;
+	else if (savedata.analyzertopmost != 0)
+		savedata.analyzertopmost = 1;
 	// ジャンプリスト履歴: 途中フィールド挿入で .dat がずれた場合などは破棄する
 	{
 		auto clearMpHist = []() {

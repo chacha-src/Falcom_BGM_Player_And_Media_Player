@@ -272,6 +272,19 @@ struct save{
 	int analyzerpeakhold;   // 1=ピークホールド ON
 	int analyzereqoverlay;  // 1=EQ帯域/ゲイン曲線オーバーレイ
 	int analyzerwavespeed;  // 波形スクロール速度(%) 25..200 (100=等倍)
+	int pianorollscrollspeed; // 簡易ピアノロール表示速度(%) 25..200 (100=等倍)
+	// --- 簡易ピアノロール右クリック設定(末尾追記) ---
+	int pianorollexprlegend; // 1=記号凡例表示
+	int pianorollexprmarks;  // 1=表現記号表示
+	int pianorolllevelmeter; // 1=レベルメーター表示
+	int pianorolltopmost;    // 1=常に手前
+	int pianorollreattack;   // 1=再アタック検出
+	int pianorollimpulse;    // 1=打撃音ゴースト抑制
+	int pianorollharmghost;  // 1=倍音ゴースト抑制
+	int pianorollharmprof;   // 1=音色プロファイル判定
+	// --- アナライザー右クリック設定(末尾追記) ---
+	int analyzerlevelmeter;  // 1=レベルメーター表示
+	int analyzertopmost;     // 1=常に手前
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */

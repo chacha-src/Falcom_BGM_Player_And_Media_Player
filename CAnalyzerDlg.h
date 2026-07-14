@@ -3,6 +3,7 @@
 // 上部: PCM 波形(横スクロール・バックバッファ) / 下部: 周波数特性
 // ステレオ〜7.1ch(最大8)対応。周波数特性は右クリックで分割レイアウト切替。
 // Ozone 風: 塗/線/バー、ピークホールド、EQオーバーレイ、ホバー読取、レベルメーター、フリーズ。
+// 右クリック: レイアウト/表示モード/速度、コピー、クリア、常に手前に表示。
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include <vector>
@@ -87,6 +88,12 @@ protected:
 	afx_msg void OnToggleEqOverlay();
 	afx_msg void OnToggleFreeze();
 	afx_msg void OnResetPeakHold();
+	afx_msg void OnToggleLevelMeter();
+	afx_msg void OnToggleAlwaysOnTop();
+	afx_msg void OnClearDisplay();
+	afx_msg void OnCopyHoverReadout();
+	afx_msg void OnCopyPeakFreq();
+	afx_msg void OnCopyLevels();
 	afx_msg LRESULT OnSpecAnalysisDone(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPresentRequest(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnSyncRequest(WPARAM wParam, LPARAM lParam);
@@ -133,6 +140,8 @@ private:
 	bool m_peakHold = true;
 	bool m_eqOverlay = true;
 	bool m_frozen = false;
+	bool m_showLevelMeter = true;
+	bool m_alwaysOnTop = false;
 
 	std::vector<float> m_ring[CH_MAX];
 	std::vector<float> m_ringSnap[CH_MAX];
@@ -196,6 +205,7 @@ private:
 	volatile LONG m_presentPosted = 0;
 	volatile LONG m_syncPosted = 0;
 	DWORD m_lastSyncPostTick = 0;
+	DWORD m_lastPresentKickTick = 0;
 
 	CFont m_font;
 

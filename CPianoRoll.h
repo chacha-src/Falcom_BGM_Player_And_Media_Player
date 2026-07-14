@@ -54,9 +54,12 @@ public:
     static constexpr int PIANO_METER_CH_MAX = 8;       // レベルメーターの最大チャンネル数
 
     // 44100 Hz 基準の Goertzel 窓(サンプル数)。実際の窓長は ScaleWinSamples でレートに比例。
+    // 低音だけ 16384 にすると窓中心が ~185ms 遅れ、中高(8192/4096)とタイミングがずれて
+    // 「低音だけノートに乗らない」原因になる。低音も 8192 に揃え時間軸を一致させる。
+    // 周波数分解能は F2 付近でなお半音未満を分離可能。
     static constexpr int REF_SAMPLE_RATE = 44100;
     static constexpr int WIN_LOW_REF = 8192;
-    static constexpr int WIN_BASS_REF = 16384;
+    static constexpr int WIN_BASS_REF = 8192;
     static constexpr int WIN_HIGH_REF = 4096;
     static constexpr int WIN_ONSET_REF = 1024;
     static int ScaleWinSamples(int refSamples, int sampleRate, int capSamples = 0);
@@ -107,6 +110,18 @@ protected:
     afx_msg void OnClose();
     afx_msg LRESULT OnSyncRequest(WPARAM wParam, LPARAM lParam);
     afx_msg LRESULT OnAnalysisDone(WPARAM wParam, LPARAM lParam);
+    afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
+    afx_msg void OnRollSpeedCmd(UINT nID);
+    afx_msg void OnToggleFreeze();
+    afx_msg void OnClearDisplay();
+    afx_msg void OnToggleExprLegend();
+    afx_msg void OnToggleExprMarks();
+    afx_msg void OnToggleLevelMeter();
+    afx_msg void OnToggleAlwaysOnTop();
+    afx_msg void OnToggleReattackDetect();
+    afx_msg void OnToggleImpulsiveGhost();
+    afx_msg void OnToggleHarmonicGhost();
+    afx_msg void OnToggleHarmonicProfile();
     virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 private:
@@ -151,9 +166,27 @@ private:
     static constexpr int   BASS_ANALYSIS_END = 67; // PianoKey::BASS_BAND_END(ヘッダ依存回避)
     static constexpr int   DETECT_KEYS = KEY_COUNT;
 
+    // 表示速度(アナライザーの波形速度と同系)。解析そのものは固定ホップで維持し、
+    // 履歴行の投入だけを倍率で間引く/増やす。
+    static constexpr int ROLL_SPEED_COUNT = 8;
+    static constexpr int kRollSpeedPct[ROLL_SPEED_COUNT] = {
+        25, 50, 75, 100, 125, 150, 175, 200
+    };
+
     // ---- カスタムウィンドウメッセージ ----
     static constexpr UINT  WM_PIANOROLL_SYNC = WM_APP + 420;           // UI 同期要求(RequestSyncFromMainUi)
     static constexpr UINT  WM_PIANOROLL_ANALYSIS_DONE = WM_APP + 421;  // ワーカーからの分析完了通知
+    static constexpr UINT  IDM_ROLL_SPEED_BASE = 42200;               // +0..ROLL_SPEED_COUNT-1
+    static constexpr UINT  IDM_ROLL_FREEZE = 42210;
+    static constexpr UINT  IDM_ROLL_CLEAR = 42211;
+    static constexpr UINT  IDM_ROLL_LEGEND = 42212;
+    static constexpr UINT  IDM_ROLL_EXPR = 42213;
+    static constexpr UINT  IDM_ROLL_METER = 42214;
+    static constexpr UINT  IDM_ROLL_TOPMOST = 42215;
+    static constexpr UINT  IDM_ROLL_REATTACK = 42216;
+    static constexpr UINT  IDM_ROLL_IMPULSE = 42217;
+    static constexpr UINT  IDM_ROLL_HARM_GHOST = 42218;
+    static constexpr UINT  IDM_ROLL_HARM_PROF = 42219;
 
     // ---- フレーム履歴リングバッファ(UI スレッドのみ読み書き) ----
     NoteFrame m_historyRing[MAX_HISTORY];  // 確定済みフレームの環状配列
@@ -163,8 +196,10 @@ private:
     // ---- ノート状態(UI スレッド / m_cs 保護なし。OnAnalysisDone からのみ更新) ----
     bool  m_activeKeys[KEY_COUNT];
     float m_noteStrength[KEY_COUNT];
-    float m_rawStrengths[KEY_COUNT];
-    float m_smoothedStrengths[KEY_COUNT];
+    float m_rawStrengths[KEY_COUNT];          // 検出用（平坦スケール）
+    float m_smoothedStrengths[KEY_COUNT];     // 検出用 IIR
+    float m_displayStrengths[KEY_COUNT];      // 描画用（ApplyDisplayScale）
+    float m_displaySmoothed[KEY_COUNT];       // 描画用 IIR
     int   m_consecActive[KEY_COUNT];
     int   m_consecSilent[KEY_COUNT];
     uint8_t m_segmentId[KEY_COUNT];
@@ -283,7 +318,7 @@ private:
     float m_chMeterFill[PIANO_METER_CH_MAX];      // 表示用 IIR 平滑フィル値(0.0〜1.0)
     float m_chMeterAutoPeak[PIANO_METER_CH_MAX];  // 自動ピーク(棒グラフ上端の目印)
     int   m_chMeterCount = 0;
-    static constexpr DWORD ANALYZE_MIN_MS = 16;   // UI 占有防止。3ms だと Invalidate 嵐で EQ が死ぬ
+    static constexpr DWORD ANALYZE_MIN_MS = 3;    // 連続分析の最短間隔(16分音符対応)
 
     void EnsureAnalysisTables(int sampleRate, int capCaptureFrames = 0);   // Goertzel 係数と窓関数を再計算
     void RunGoertzelFromBuffer(const double* winLow, const double* winBass, int bassWinLen);
@@ -310,6 +345,8 @@ private:
     static double GoertzelMagnitude(const double* samples, int numSamples,
         double coefficient, const double* window);
     static float  ApplyDisplayScale(float rawAmp, int keyIndex, int winSamples, int refWinSamples);
+    // 検出専用: 窓正規化 + 平坦圧縮のみ（鍵EQなし）。部分音が基音より強く見えるのを防ぐ。
+    static float  ApplyDetectScale(float rawAmp, int winSamples, int refWinSamples);
     static float  MidiToFreq(int midi);
     static int      KeyBandIndex(int keyIndex);
 
@@ -373,7 +410,13 @@ private:
     bool    m_paintFontsReady = false;
     volatile LONG m_syncPosted = 0;   // RequestSyncFromMainUi の多重ポスト防止フラグ
     DWORD m_lastSyncPostTick = 0;
-    DWORD m_lastPaintInvalidateTick = 0;
+    int   m_rollSpeedPct = 100;       // 表示スクロール速度(%) 25..200
+    int   m_rollSpeedCredit = 0;      // PushFrame 用アキュムレータ(×100 基準)
+    bool  m_frozen = false;           // 表示スクロール停止(解析は継続、ライブ行は更新)
+    bool  m_showExprLegend = true;    // 記号凡例パネル
+    bool  m_showExprMarks = true;     // 表現記号グリフ/音階移行/バー装飾
+    bool  m_showLevelMeter = true;    // 鍵盤上のレベルメーター
+    bool  m_alwaysOnTop = false;      // WS_EX_TOPMOST
 
 #if CCUSTOM_AERO_SUPPORT
     CCC_ChromaBlitCache m_chromaCache;
@@ -413,4 +456,9 @@ private:
         const bool* activesCopy, const uint8_t* bandMaskCopy, const float laneStrengthCopy[KEY_COUNT][3],
         const float* chFillCopy, int chCountCopy, const uint8_t* exprCopy) const;
     void UpdatePianoRollTimer();
+    void SetRollSpeedPct(int pct);
+    int  RollSpeedIndex() const;
+    void PushDisplayFrames();
+    void ClearRollHistory();
+    void RequestFullRollRedraw();
 };

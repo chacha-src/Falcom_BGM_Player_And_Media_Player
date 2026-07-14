@@ -123,11 +123,45 @@ namespace
 		IDM_EQ_OVERLAY = 42021,
 		IDM_FREEZE = 42022,
 		IDM_RESET_PEAK = 42023,
+		IDM_LEVEL_METER = 42024,
+		IDM_ALWAYS_ON_TOP = 42025,
+		IDM_CLEAR_DISPLAY = 42026,
+		IDM_COPY_HOVER = 42027,
+		IDM_COPY_PEAK = 42028,
+		IDM_COPY_LEVELS = 42029,
 		IDM_WAVE_SPEED_BASE = 42100, // +0..WAVE_SPEED_COUNT-1
 		WM_ANALYZER_SPEC_DONE = WM_APP + 510,
 		WM_ANALYZER_PRESENT = WM_APP + 511,
 		WM_ANALYZER_SYNC = WM_APP + 512
 	};
+
+	bool CopyUnicodeToClipboard(HWND hwnd, const CString& text)
+	{
+		if (!hwnd || !::OpenClipboard(hwnd))
+			return false;
+		::EmptyClipboard();
+		const SIZE_T bytes = (SIZE_T)(text.GetLength() + 1) * sizeof(WCHAR);
+		HGLOBAL hMem = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
+		if (!hMem) {
+			::CloseClipboard();
+			return false;
+		}
+		void* p = ::GlobalLock(hMem);
+		if (!p) {
+			::GlobalFree(hMem);
+			::CloseClipboard();
+			return false;
+		}
+		memcpy(p, (LPCWSTR)text, (size_t)bytes);
+		::GlobalUnlock(hMem);
+		if (!::SetClipboardData(CF_UNICODETEXT, hMem)) {
+			::GlobalFree(hMem);
+			::CloseClipboard();
+			return false;
+		}
+		::CloseClipboard();
+		return true;
+	}
 
 	// oggDlg_ds.cpp の EQ_FREQS と同じ帯域(オーバーレイ用ローカル複製)
 	static const float kEqFreqs[CAnalyzerDlg::EQ_OVERLAY_BANDS] = {
@@ -204,6 +238,12 @@ BEGIN_MESSAGE_MAP(CAnalyzerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(IDM_EQ_OVERLAY, &CAnalyzerDlg::OnToggleEqOverlay)
 	ON_COMMAND(IDM_FREEZE, &CAnalyzerDlg::OnToggleFreeze)
 	ON_COMMAND(IDM_RESET_PEAK, &CAnalyzerDlg::OnResetPeakHold)
+	ON_COMMAND(IDM_LEVEL_METER, &CAnalyzerDlg::OnToggleLevelMeter)
+	ON_COMMAND(IDM_ALWAYS_ON_TOP, &CAnalyzerDlg::OnToggleAlwaysOnTop)
+	ON_COMMAND(IDM_CLEAR_DISPLAY, &CAnalyzerDlg::OnClearDisplay)
+	ON_COMMAND(IDM_COPY_HOVER, &CAnalyzerDlg::OnCopyHoverReadout)
+	ON_COMMAND(IDM_COPY_PEAK, &CAnalyzerDlg::OnCopyPeakFreq)
+	ON_COMMAND(IDM_COPY_LEVELS, &CAnalyzerDlg::OnCopyLevels)
 	ON_MESSAGE(WM_ANALYZER_SPEC_DONE, &CAnalyzerDlg::OnSpecAnalysisDone)
 	ON_MESSAGE(WM_ANALYZER_PRESENT, &CAnalyzerDlg::OnPresentRequest)
 	ON_MESSAGE(WM_ANALYZER_SYNC, &CAnalyzerDlg::OnSyncRequest)
@@ -249,9 +289,17 @@ BOOL CAnalyzerDlg::OnInitDialog()
 		m_waveSpeedPct = 100;
 	m_peakHold = (savedata.analyzerpeakhold != 0);
 	m_eqOverlay = (savedata.analyzereqoverlay != 0);
+	m_showLevelMeter = (savedata.analyzerlevelmeter != 0);
+	m_alwaysOnTop = (savedata.analyzertopmost != 0);
 	m_frozen = false;
 	m_hoverPlot.SetRectEmpty();
 	m_hoverPlotCount = 0;
+
+	// 座標は先に載せ、最前面なら Z 順だけ差し替え(ピアノロールと同様)
+	if (m_alwaysOnTop && ::IsWindow(m_hWnd)) {
+		SetWindowPos(&CWnd::wndTopMost, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+	}
 
 	m_feedEnabled = true;
 	StartSpecWorker();
@@ -383,6 +431,7 @@ void COggDlg_SyncAnalyzerFast();
 void CAnalyzerDlg::RequestSyncFromMainUi()
 {
 	if (!::IsWindow(m_hWnd)) return;
+	// 可視化頻度は savedata.ms2（EQ 表示でも間引かない）
 	int minMs = savedata.ms2;
 	if (minMs < 16) minMs = 16;
 	if (minMs > 960) minMs = 960;
@@ -516,6 +565,99 @@ void CAnalyzerDlg::OnResetPeakHold()
 	ResetPeakHold();
 }
 
+void CAnalyzerDlg::OnToggleLevelMeter()
+{
+	m_showLevelMeter = !m_showLevelMeter;
+	savedata.analyzerlevelmeter = m_showLevelMeter ? 1 : 0;
+#if CCUSTOM_AERO_SUPPORT
+	m_chromaReady = false; // 右端ストリップ残像を避ける
+#endif
+	Invalidate(FALSE);
+}
+
+void CAnalyzerDlg::OnToggleAlwaysOnTop()
+{
+	m_alwaysOnTop = !m_alwaysOnTop;
+	savedata.analyzertopmost = m_alwaysOnTop ? 1 : 0;
+	if (::IsWindow(m_hWnd)) {
+		SetWindowPos(m_alwaysOnTop ? &CWnd::wndTopMost : &CWnd::wndNoTopMost,
+			0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	}
+}
+
+void CAnalyzerDlg::OnClearDisplay()
+{
+	ResetPlaybackState();
+}
+
+void CAnalyzerDlg::OnCopyHoverReadout()
+{
+	if (!m_hoverValid)
+		return;
+	const int channels = (std::max)(1, (std::min)(m_channels, CH_MAX));
+	CString s;
+	if (m_hoverHz >= 1000.0f)
+		s.Format(_T("%s\t%.3f kHz\t%.1f dB"), ChannelLabel(m_hoverCh, channels), m_hoverHz / 1000.0f, m_hoverDb);
+	else
+		s.Format(_T("%s\t%.1f Hz\t%.1f dB"), ChannelLabel(m_hoverCh, channels), m_hoverHz, m_hoverDb);
+	CopyUnicodeToClipboard(m_hWnd, s);
+}
+
+void CAnalyzerDlg::OnCopyPeakFreq()
+{
+	float bestDb = -96.0f;
+	int bestCh = 0;
+	int bestBin = 0;
+	int channels = 2;
+	int sr = 44100;
+	EnterCriticalSection(&m_cs);
+	channels = (std::max)(1, (std::min)(m_channels, CH_MAX));
+	sr = (m_sampleRate > 0) ? m_sampleRate : 44100;
+	const float (*bins)[SPEC_BINS] = m_peakHold ? m_specPeakDb : m_specDb;
+	for (int c = 0; c < channels; ++c) {
+		for (int b = 0; b < SPEC_BINS; ++b) {
+			if (bins[c][b] > bestDb) {
+				bestDb = bins[c][b];
+				bestCh = c;
+				bestBin = b;
+			}
+		}
+	}
+	LeaveCriticalSection(&m_cs);
+
+	const float nyquist = (float)sr * 0.5f;
+	const float hz = SpecCenterHz(bestBin, SPEC_BINS, nyquist);
+	CString s;
+	if (hz >= 1000.0f)
+		s.Format(_T("%s\t%.3f kHz\t%.1f dB\tSR %d"), ChannelLabel(bestCh, channels), hz / 1000.0f, bestDb, sr);
+	else
+		s.Format(_T("%s\t%.1f Hz\t%.1f dB\tSR %d"), ChannelLabel(bestCh, channels), hz, bestDb, sr);
+	CopyUnicodeToClipboard(m_hWnd, s);
+}
+
+void CAnalyzerDlg::OnCopyLevels()
+{
+	float hold[2] = { 0.0f, 0.0f };
+	float rms[2] = { 0.0f, 0.0f };
+	int channels = 2;
+	EnterCriticalSection(&m_cs);
+	hold[0] = m_meterHold[0]; hold[1] = m_meterHold[1];
+	rms[0] = m_meterRms[0]; rms[1] = m_meterRms[1];
+	channels = m_channels;
+	LeaveCriticalSection(&m_cs);
+
+	CString s;
+	if (channels >= 2) {
+		s.Format(_T("L\t%.1f dB\thold %.1f dB\tR\t%.1f dB\thold %.1f dB"),
+			AmpToDb(rms[0]), AmpToDb(hold[0]), AmpToDb(rms[1]), AmpToDb(hold[1]));
+	}
+	else {
+		s.Format(_T("%s\t%.1f dB\thold %.1f dB"),
+			ChannelLabel(0, 1), AmpToDb(rms[0]), AmpToDb(hold[0]));
+	}
+	CopyUnicodeToClipboard(m_hWnd, s);
+}
+
 void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
 	CMenu menu;
@@ -574,10 +716,26 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		IDM_PEAK_HOLD, LL14(L"ピークホールド", L"Peak hold", L"Maintien de crete", L"Picco trattenuto", L"Retencion de pico", L"피크 홀드", L"峰值保持", L"الاحتفاظ بالذروة", L"Удержание пика", L"Peak Hold", L"Retencao de pico", L"Piekvasthouden", L"Przytrzymanie szczytu", L"Tepe tutma"));
 	menu.AppendMenu(MF_STRING | (m_eqOverlay ? MF_CHECKED : 0),
 		IDM_EQ_OVERLAY, LL14(L"EQオーバーレイ", L"EQ overlay", L"Superposition EQ", L"Sovrapposizione EQ", L"Superposicion EQ", L"EQ 오버레이", L"EQ叠加", L"تراكب EQ", L"Оверлей EQ", L"EQ-Overlay", L"Sobreposicao EQ", L"EQ-overlay", L"Nakladka EQ", L"EQ kaplama"));
+	menu.AppendMenu(MF_STRING | (m_showLevelMeter ? MF_CHECKED : 0),
+		IDM_LEVEL_METER, LL14(L"レベルメーター", L"Level meter", L"Indicateur de niveau", L"Misuratore di livello", L"Medidor de nivel", L"레벨 미터", L"电平表", L"مقياس المستوى", L"Уровень сигнала", L"Pegelanzeige", L"Medidor de nivel", L"Niveaumeter", L"Miernik poziomu", L"Seviye olcer"));
 	menu.AppendMenu(MF_STRING | (m_frozen ? MF_CHECKED : 0),
 		IDM_FREEZE, LL14(L"フリーズ", L"Freeze", L"Gel", L"Congela", L"Congelar", L"정지", L"冻结", L"تجميد", L"Заморозка", L"Einfrieren", L"Congelar", L"Bevriezen", L"Zamroz", L"Dondur"));
 	menu.AppendMenu(MF_STRING, IDM_RESET_PEAK,
 		LL14(L"ピークをリセット (ダブルクリック)", L"Reset peaks (double-click)", L"Reinit. cretes (double-clic)", L"Reset picchi (doppio clic)", L"Restablecer picos (doble clic)", L"피크 리셋(더블클릭)", L"重置峰值(双击)", L"إعادة الذروة (نقر مزدوج)", L"Сброс пиков (двойной клик)", L"Peaks zurucksetzen (Doppelklick)", L"Redefinir picos (duplo clique)", L"Piekreset (dubbelklik)", L"Reset szczytow (dwuklik)", L"Tepe sifirla (cift tik)"));
+
+	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING | (m_hoverValid ? 0 : MF_GRAYED), IDM_COPY_HOVER,
+		LL14(L"ホバー値をコピー", L"Copy hover readout", L"Copier la lecture au survol", L"Copia lettura hover", L"Copiar lectura al pasar", L"호버 값 복사", L"复制悬停读数", L"نسخ قراءة التمرير", L"Копировать наведение", L"Hover-Wert kopieren", L"Copiar leitura ao pairar", L"Hoverwaarde kopieren", L"Kopiuj odczyt hover", L"Hover degerini kopyala"));
+	menu.AppendMenu(MF_STRING, IDM_COPY_PEAK,
+		LL14(L"最大ピークをコピー", L"Copy loudest peak", L"Copier le pic max", L"Copia picco massimo", L"Copiar pico maximo", L"최대 피크 복사", L"复制最大峰值", L"نسخ أعلى قمة", L"Копировать макс. пик", L"Lautesten Peak kopieren", L"Copiar pico mais alto", L"Luidste piek kopieren", L"Kopiuj najglosniejszy szczyt", L"En yuksek tepeyi kopyala"));
+	menu.AppendMenu(MF_STRING, IDM_COPY_LEVELS,
+		LL14(L"レベルをコピー", L"Copy levels", L"Copier les niveaux", L"Copia livelli", L"Copiar niveles", L"레벨 복사", L"复制电平", L"نسخ المستويات", L"Копировать уровни", L"Pegel kopieren", L"Copiar niveis", L"Niveaus kopieren", L"Kopiuj poziomy", L"Seviyeleri kopyala"));
+
+	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING, IDM_CLEAR_DISPLAY,
+		LL14(L"表示をクリア", L"Clear display", L"Effacer l'affichage", L"Cancella visualizzazione", L"Borrar pantalla", L"표시 지우기", L"清除显示", L"مسح العرض", L"Очистить экран", L"Anzeige leeren", L"Limpar exibicao", L"Weergave wissen", L"Wyczysc wyswietlacz", L"Goruntuyu temizle"));
+	menu.AppendMenu(MF_STRING | (m_alwaysOnTop ? MF_CHECKED : 0),
+		IDM_ALWAYS_ON_TOP, LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위에 표시", L"始终置顶", L"دائما في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd op voorgrond", L"Zawsze na wierzchu", L"Her zaman ustte"));
 
 	if (point.x == -1 && point.y == -1) {
 		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
@@ -683,19 +841,15 @@ void CAnalyzerDlg::FeedPCM(const void* pData, int frames, int sampleRate, int bi
 
 	const int spc = (std::max)(4, m_samplesPerCol);
 	int pushed = 0;
-	// 1 present で消化できる量までに抑える。waveW まで溜めると KickUiPresent
-	// 追いつき連鎖が分単位で UI を占有し EQ が死ぬ。
-	const int scrollCap = (std::max)(4, (std::min)(24, m_waveW > 0 ? m_waveW / 40 : 16));
-	while (m_accSamples >= spc && pushed < scrollCap) {
+	const int pushCap = (m_waveW > 0) ? m_waveW : 120;
+	while (m_accSamples >= spc && pushed < pushCap) {
 		m_accSamples -= spc;
 		++m_pendingScroll;
 		++pushed;
 	}
-	// 余剰サンプルは捨てて最新へ寄せる（可視化の時間跳びは許容）
-	if (m_accSamples >= spc)
-		m_accSamples %= spc;
-	if (m_pendingScroll > scrollCap)
-		m_pendingScroll = scrollCap;
+	const int cap = (m_waveW > 0) ? m_waveW : 640;
+	if (m_pendingScroll > cap)
+		m_pendingScroll = cap;
 	LeaveCriticalSection(&m_cs);
 	RequestSpecAnalysis();
 	KickUiPresent();
@@ -947,9 +1101,14 @@ bool CAnalyzerDlg::EnsureFrameBuffer(CDC& refDC, int w, int h)
 
 void CAnalyzerDlg::KickUiPresent()
 {
-	// 多重 Post を防ぐ(ピアノロール RequestSyncFromMainUi と同じ)
+	// 多重 Post を防ぐ。追いつき自己 Kick の自由走行は最短 8ms に制限
+	// （pending/頻度は落とさず、EQ を食う超高頻度ペイントだけ抑える）
 	if (!::IsWindow(m_hWnd)) return;
+	const DWORD now = GetTickCount();
+	if (m_lastPresentKickTick != 0 && (now - m_lastPresentKickTick) < 8u)
+		return;
 	if (InterlockedCompareExchange(&m_presentPosted, 1, 0) != 0) return;
+	m_lastPresentKickTick = now;
 	PostMessage(WM_ANALYZER_PRESENT, 0, 0);
 }
 
@@ -1680,7 +1839,8 @@ void CAnalyzerDlg::Present(CDC& dc, const CRect& rc, BOOL bAero)
 	else
 		pDst->FillSolidRect(0, 0, clientW, waveH, ANALYZER_BG);
 
-	DrawLevelMeters(*pDst, CRect(0, 0, m_waveW > 0 ? m_waveW : clientW, waveH), ANALYZER_BG);
+	if (m_showLevelMeter)
+		DrawLevelMeters(*pDst, CRect(0, 0, m_waveW > 0 ? m_waveW : clientW, waveH), ANALYZER_BG);
 
 	if (m_specReady && m_specDC.GetSafeHdc())
 		pDst->BitBlt(0, split, m_specW, specH, &m_specDC, 0, 0, SRCCOPY);
@@ -1735,9 +1895,8 @@ void CAnalyzerDlg::OnPaint()
 	pending = m_pendingScroll;
 	LeaveCriticalSection(&m_cs);
 
-	// 1フレームで大きく飛ぶとカクつく。ピアノロールの framesPending 上限に相当。
-	// ただし追いつき連鎖を短くするため、1回あたりの消化量は少し大きめ。
-	const int scrollCap = (std::max)(4, (std::min)(24, m_waveW > 0 ? m_waveW / 40 : 16));
+	// 1フレームで大きく飛ぶとカクつくが、追いつき不足も精度を落とす。
+	const int scrollCap = (std::max)(8, (std::min)(48, m_waveW > 0 ? m_waveW / 20 : 24));
 
 	bool didWaveFull = false;
 	bool didWaveScroll = false;
@@ -1777,8 +1936,12 @@ void CAnalyzerDlg::OnPaint()
 	}
 	m_hoverChanged = false;
 
-	// 未消化があっても自己 Kick しない。pending は Feed 側で 1 present 分に制限済み。
-	// ここで Kick すると追いつき連鎖→分単位で EQ が死ぬ。
+	// 未消化の波形スクロールがあれば次フレームへ（Kick は 8ms 合流）
+	EnterCriticalSection(&m_cs);
+	const bool moreScroll = (m_pendingScroll > 0);
+	LeaveCriticalSection(&m_cs);
+	if (moreScroll)
+		KickUiPresent();
 
 #if CCUSTOM_AERO_SUPPORT
 	if (bAero) {
@@ -1791,7 +1954,9 @@ void CAnalyzerDlg::OnPaint()
 		if (m_chromaCache.Ensure(dc.GetSafeHdc(), clientW, clientH)) {
 			const COLORREF key = ANALYZER_CHROMA_KEY;
 			if (m_waveReady && m_waveDC.GetSafeHdc()) {
-				const int stripW = (std::min)(waveW, AnalyzerMeterStripWidth(m_channels));
+				const int stripW = m_showLevelMeter
+					? (std::min)(waveW, AnalyzerMeterStripWidth(m_channels))
+					: 0;
 				const int stripX = (std::max)(0, waveW - stripW);
 
 				if (didWaveScroll && m_lastWaveScroll > 0 && m_chromaReady) {
@@ -1988,6 +2153,25 @@ BOOL CAnalyzerDlg::PreTranslateMessage(MSG* pMsg)
 		}
 		if (pMsg->wParam == 'E' || pMsg->wParam == 'e') {
 			OnToggleEqOverlay();
+			return TRUE;
+		}
+		if (pMsg->wParam == 'M' || pMsg->wParam == 'm') {
+			OnToggleLevelMeter();
+			return TRUE;
+		}
+		if (pMsg->wParam == 'T' || pMsg->wParam == 't') {
+			OnToggleAlwaysOnTop();
+			return TRUE;
+		}
+		if (pMsg->wParam == 'C' || pMsg->wParam == 'c') {
+			if (::GetKeyState(VK_CONTROL) & 0x8000) {
+				if (m_hoverValid)
+					OnCopyHoverReadout();
+				else
+					OnCopyPeakFreq();
+				return TRUE;
+			}
+			OnClearDisplay();
 			return TRUE;
 		}
 		if (pMsg->wParam == VK_SPACE) {

@@ -20242,6 +20242,13 @@ void COggDlg_SyncPianoRollFast()
 	og->SyncPianoRollFast();
 }
 
+BOOL COgg_IsEqualizerVisible()
+{
+	if (!og || !og->m_EqualizerDlg) return FALSE;
+	HWND h = og->m_EqualizerDlg->GetSafeHwnd();
+	return h && ::IsWindow(h) && ::IsWindowVisible(h);
+}
+
 void COggDlg_SyncAnalyzerFast()
 {
 	if (!og) return;
@@ -20768,8 +20775,14 @@ void COggDlg::Speana()
 		const bool eqVisible = pEq
 			&& ::IsWindow(pEq->GetSafeHwnd())
 			&& ::IsWindowVisible(pEq->GetSafeHwnd());
-		if (eqVisible)
-			PublishEqKeyPcm(bufL, bufR, (int)sampleRate);
+		if (eqVisible) {
+			static DWORD s_lastPubMs = 0;
+			const DWORD nowPub = GetTickCount();
+			if (s_lastPubMs == 0 || (nowPub - s_lastPubMs) >= 50u) {
+				s_lastPubMs = nowPub;
+				PublishEqKeyPcm(bufL, bufR, (int)sampleRate);
+			}
+		}
 	}
 
 	auto ValToBarHeight = [&](double amplitude) -> int {
@@ -20882,16 +20895,16 @@ void COggDlg::Speana()
 		auto DrawDetected = [&](const SpeanaNoteDetector& det, int offset_idx, bool isRight) {
 			const bool* act = det.Active();
 			const float* st = det.Strength();
-			std::vector<double> displayAmp(DISP_KEYS, 0.0);
+			static double s_displayAmp[88];
 			for (int i = 0; i < DISP_KEYS; ++i)
-				displayAmp[i] = act[i] ? (double)st[i] : 0.0;
+				s_displayAmp[i] = act[i] ? (double)st[i] : 0.0;
 
-			NormalizeDisplayPeakD(displayAmp.data(), DISP_KEYS, 5.0);
+			NormalizeDisplayPeakD(s_displayAmp, DISP_KEYS, 5.0);
 
 			const int bank = (offset_idx == 0) ? 0 : (offset_idx == 100 ? 1 : 2);
 			const int FALL_PER_FRAME = 9; // 高さ(0..96)単位。約150ms(@16ms)で消える
 			for (int i = 0; i < DISP_KEYS; i++) {
-				int target = ValToBarHeight(displayAmp[i] * savedata.wup);
+				int target = ValToBarHeight(s_displayAmp[i] * savedata.wup);
 				int held = s_barHold[bank][i];
 				if (target >= held) held = target;               // 立ち上がりは即時
 				else { held -= FALL_PER_FRAME; if (held < target) held = target; } // 下降は緩やか

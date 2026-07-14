@@ -33,12 +33,14 @@ namespace Cfg
     static constexpr float BAND_SILENCE_TRE = 0.0012f;
     static constexpr int   ATTACK_FRAMES = 1;
     static constexpr int   ATTACK_FRAMES_EDGE = 2;
-    static constexpr int   RELEASE_FRAMES = 5;
+    // T130 の 16分(~115ms)/32分(~58ms)を分離できるようリリースを短く。
+    // 旧5だと中域 TemporalFrames で最大20F(≈460ms)まで伸びて連打が1本に見える。
+    static constexpr int   RELEASE_FRAMES = 3;
     static constexpr int   VIS_GAP_FRAMES = 2;
     static constexpr int   VIS_GAP_FRAMES_BASS = 3;
     static constexpr int   VIS_GAP_FRAMES_MID = 1;
-    static constexpr int   VIS_GAP_FRAMES_TRE = 2;
-    static constexpr int   VIS_GAP_SUSTAIN_BONUS = 2;
+    static constexpr int   VIS_GAP_FRAMES_TRE = 1;
+    static constexpr int   VIS_GAP_SUSTAIN_BONUS = 1;
     static constexpr int   ATTACK_MISS_GRACE = 2;
     static constexpr float RETRIGGER_RATIO = 0.28f;
     static constexpr int   BAND_BASS_END = PianoRoll108::BASS_END;
@@ -54,10 +56,10 @@ namespace Cfg
     static constexpr float PEAK_REGION_REL = 0.055f;  // legacy pick helpers (unused path)
     // [検証のため元値へ復帰] 隣接ホッピング対策を単独の変数として切り分けて検証する。
     static constexpr float HOLD_ENV_BASS = 0.28f;
-    static constexpr float HOLD_ENV_MID = 0.14f;
-    static constexpr float HOLD_ENV_TRE = 0.16f;
+    static constexpr float HOLD_ENV_MID = 0.22f;  // 短音分離: 旧0.14は減衰残響で隙間を埋める
+    static constexpr float HOLD_ENV_TRE = 0.24f;
     static constexpr float DISPLAY_PEAK_CAP = 5.0f;
-    static constexpr int   ANALYZE_INTERVAL = 1024;
+    static constexpr int   ANALYZE_INTERVAL = 1024; // FeedPCM未使用。実ホップは SyncPianoRoll + ANALYZE_MIN_MS
     static constexpr int   ONSET_KEY_START = 62;  // D4（旧 index 41 + MIDI base 21）
     static constexpr float ONSET_DELTA_THRESH = 0.012f;
     static constexpr float ONSET_MIN_STRENGTH = 0.018f;
@@ -169,7 +171,7 @@ namespace Cfg
         int f = (int)(baseFrames * scale + bell * 2.0f + 0.5f);
         if (keyIndex >= BAND_MID_END) {
             if (f < 2) f = 2;
-            if (f > 12) f = 12;
+            if (f > 5) f = 5;   // 高音リリース上限: 旧12F→5F (≈115ms@1024hop ≈16分)
         }
         else {
             if (keyIndex < BAND_BASS_END) {
@@ -178,7 +180,7 @@ namespace Cfg
             }
             else {
                 if (f < 2) f = 2;
-                if (f > 20) f = 20;
+                if (f > 6) f = 6; // 中音上限: 旧20F→6F (≈140ms、16分連打を分離)
             }
         }
         return f;
@@ -251,6 +253,8 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     memset(m_noteStrength, 0, sizeof(m_noteStrength));
     memset(m_rawStrengths, 0, sizeof(m_rawStrengths));
     memset(m_smoothedStrengths, 0, sizeof(m_smoothedStrengths));
+    memset(m_displayStrengths, 0, sizeof(m_displayStrengths));
+    memset(m_displaySmoothed, 0, sizeof(m_displaySmoothed));
     memset(m_consecActive, 0, sizeof(m_consecActive));
     memset(m_consecSilent, 0, sizeof(m_consecSilent));
     memset(m_segmentId, 0, sizeof(m_segmentId));
@@ -288,6 +292,7 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     }
     m_historyCount = 0;
     m_historyHead = 0;
+    m_rollSpeedCredit = 0;
     for (int hi = 0; hi < (int)MAX_HISTORY; ++hi) {
         auto& f = m_historyRing[hi];
         memset(f.active, 0, sizeof(f.active));
@@ -375,6 +380,8 @@ void CPianoRoll::ResetPlaybackState()
         memset(m_vibHist, 0, sizeof(m_vibHist));
         memset(m_vibHistCount, 0, sizeof(m_vibHistCount));
         memset(m_smoothedStrengths, 0, sizeof(m_smoothedStrengths));
+        memset(m_displayStrengths, 0, sizeof(m_displayStrengths));
+        memset(m_displaySmoothed, 0, sizeof(m_displaySmoothed));
         memset(m_consecActive, 0, sizeof(m_consecActive));
         memset(m_consecSilent, 0, sizeof(m_consecSilent));
         memset(m_segmentId, 0, sizeof(m_segmentId));
@@ -398,6 +405,7 @@ void CPianoRoll::ResetPlaybackState()
         m_historyCount = 0;
         m_historyHead = 0;
         m_framesPending = 0;
+        m_rollSpeedCredit = 0;
         m_rollScrollValid = false;
         m_rollReady = false;
         m_bufwav3LevelDb = -60.0f;
@@ -508,6 +516,18 @@ BEGIN_MESSAGE_MAP(CPianoRoll, CCustomBlurDialogExBase)
     ON_WM_MOVE()
     ON_WM_SHOWWINDOW()
     ON_WM_CLOSE()
+    ON_WM_CONTEXTMENU()
+    ON_COMMAND_RANGE(IDM_ROLL_SPEED_BASE, IDM_ROLL_SPEED_BASE + ROLL_SPEED_COUNT - 1, &CPianoRoll::OnRollSpeedCmd)
+    ON_COMMAND(IDM_ROLL_FREEZE, &CPianoRoll::OnToggleFreeze)
+    ON_COMMAND(IDM_ROLL_CLEAR, &CPianoRoll::OnClearDisplay)
+    ON_COMMAND(IDM_ROLL_LEGEND, &CPianoRoll::OnToggleExprLegend)
+    ON_COMMAND(IDM_ROLL_EXPR, &CPianoRoll::OnToggleExprMarks)
+    ON_COMMAND(IDM_ROLL_METER, &CPianoRoll::OnToggleLevelMeter)
+    ON_COMMAND(IDM_ROLL_TOPMOST, &CPianoRoll::OnToggleAlwaysOnTop)
+    ON_COMMAND(IDM_ROLL_REATTACK, &CPianoRoll::OnToggleReattackDetect)
+    ON_COMMAND(IDM_ROLL_IMPULSE, &CPianoRoll::OnToggleImpulsiveGhost)
+    ON_COMMAND(IDM_ROLL_HARM_GHOST, &CPianoRoll::OnToggleHarmonicGhost)
+    ON_COMMAND(IDM_ROLL_HARM_PROF, &CPianoRoll::OnToggleHarmonicProfile)
     ON_MESSAGE(WM_PIANOROLL_SYNC, &CPianoRoll::OnSyncRequest)
     ON_MESSAGE(WM_PIANOROLL_ANALYSIS_DONE, &CPianoRoll::OnAnalysisDone)
 END_MESSAGE_MAP()
@@ -540,14 +560,31 @@ BOOL CPianoRoll::OnInitDialog()
 #endif
         ModifyStyleEx(0, WS_EX_DLGMODALFRAME);
 
+    {
+        int sp = savedata.pianorollscrollspeed;
+        if (sp < 25 || sp > 200) sp = 100;
+        m_rollSpeedPct = sp;
+        m_rollSpeedCredit = 0;
+    }
+    m_showExprLegend = (savedata.pianorollexprlegend != 0);
+    m_showExprMarks = (savedata.pianorollexprmarks != 0);
+    m_showLevelMeter = (savedata.pianorolllevelmeter != 0);
+    m_alwaysOnTop = (savedata.pianorolltopmost != 0);
+    m_reattackDetectEnabled = (savedata.pianorollreattack != 0);
+    m_impulsiveGhostSuppressEnabled = (savedata.pianorollimpulse != 0);
+    m_harmonicGhostGuardEnabled = (savedata.pianorollharmghost != 0);
+    m_harmonicProfileGuardEnabled = (savedata.pianorollharmprof != 0);
+    m_frozen = false;
+
     if (savedata.pianorollx != -1)
-        SetWindowPos(&CWnd::wndTop,
+        SetWindowPos(m_alwaysOnTop ? &CWnd::wndTopMost : &CWnd::wndTop,
             savedata.pianorollx, savedata.pianorolly,
             savedata.pianorollw, savedata.pianorollh,
-            SWP_NOZORDER | SWP_NOOWNERZORDER);
+            SWP_NOOWNERZORDER | (m_alwaysOnTop ? 0 : SWP_NOZORDER));
     else
-        SetWindowPos(&CWnd::wndTop, 100, 150, 800, 450,
-            SWP_NOZORDER | SWP_NOOWNERZORDER);
+        SetWindowPos(m_alwaysOnTop ? &CWnd::wndTopMost : &CWnd::wndTop,
+            100, 150, 800, 450,
+            SWP_NOOWNERZORDER | (m_alwaysOnTop ? 0 : SWP_NOZORDER));
 
     EnsureAnalysisTables(m_inputSampleRate);
     StartAnalysisWorker();
@@ -708,6 +745,15 @@ float CPianoRoll::ApplyDisplayScale(float rawAmp, int keyIndex, int winSamples, 
     return (float)out;
 }
 
+float CPianoRoll::ApplyDetectScale(float rawAmp, int winSamples, int refWinSamples)
+{
+    if (rawAmp <= 1e-10f) return 0.0f;
+    if (winSamples <= 0) winSamples = refWinSamples;
+    if (refWinSamples <= 0) refWinSamples = WIN_LOW_REF;
+    const float amp = (float)rawAmp * ((float)winSamples / (float)refWinSamples);
+    return ScaleGoertzelAmpFlat(amp);
+}
+
 
 
 
@@ -803,7 +849,7 @@ void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
 }
 
 // 窓掛け済みバッファから Goertzel 解析を実行し m_rawStrengths を更新する。
-// 108鍵3窓: [0,60) 16384 / [60,84) 8192 / [84,108) 4096
+// 108鍵: 低〜中は 8192、高は 4096（低音だけ長窓にすると時間軸がずれるため統一）
 void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     const double* winBass, int bassWinLen)
 {
@@ -839,8 +885,10 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_activeKeys[i] = false;
             m_noteStrength[i] = 0.0f;
             m_rawStrengths[i] = 0.0f;
+            m_displayStrengths[i] = 0.0f;
             m_onsetStrengths[i] = 0.0f;
             m_smoothedStrengths[i] *= 0.5f;
+            m_displaySmoothed[i] *= 0.5f;
             m_consecActive[i] = 0;
             m_consecSilent[i] = 0;
             m_unpickedFrames[i] = 0;
@@ -871,6 +919,11 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     const int splitLo = PianoRoll108::WIN_LONG_END;
     const int splitHi = PianoRoll108::WIN_MID_END;
 
+    auto storeKey = [this](int i, float goertzel, int winSamples, int refWin) {
+        m_rawStrengths[i] = ApplyDetectScale(goertzel, winSamples, refWin);
+        m_displayStrengths[i] = ApplyDisplayScale(goertzel, i, winSamples, refWin);
+    };
+
     if (hasBass) {
         for (int i = 0; i < m_winBass; ++i)
             m_windowedBass[i] = m_bassAnalysisBuf[i] * m_hannBass[i];
@@ -878,47 +931,45 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_windowedBass.data(), m_winBass, m_goertzelCoeffs.data(),
             0, splitLo, m_goertzelRawScratch);
         for (int i = 0; i < splitLo; ++i)
-            m_rawStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i], i,
-                m_winBass, WIN_BASS_REF);
+            storeKey(i, (float)m_goertzelRawScratch[i], m_winBass, WIN_BASS_REF);
     }
     else {
         PianoRollGoertzelBatchAvx2(
             m_windowedLow.data(), m_winLow, m_goertzelCoeffs.data(),
             0, splitLo, m_goertzelRawScratch);
         for (int i = 0; i < splitLo; ++i)
-            m_rawStrengths[i] = ApplyDisplayScale((float)m_goertzelRawScratch[i], i,
-                m_winLow, WIN_BASS_REF);
+            storeKey(i, (float)m_goertzelRawScratch[i], m_winLow, WIN_BASS_REF);
     }
 
     PianoRollGoertzelBatchAvx2(
         m_windowedLow.data(), m_winLow, m_goertzelCoeffs.data(),
         splitLo, splitHi, m_goertzelRawScratch);
     for (int i = splitLo; i < splitHi; ++i)
-        m_rawStrengths[i] = ApplyDisplayScale(
-            (float)m_goertzelRawScratch[i - splitLo], i, m_winLow, WIN_LOW_REF);
+        storeKey(i, (float)m_goertzelRawScratch[i - splitLo], m_winLow, WIN_LOW_REF);
 
     PianoRollGoertzelBatchAvx2(
         m_windowedHigh.data(), m_winHigh, m_goertzelCoeffs.data(),
         splitHi, KEY_COUNT, m_goertzelRawScratch);
     for (int i = splitHi; i < KEY_COUNT; ++i)
-        m_rawStrengths[i] = ApplyDisplayScale(
-            (float)m_goertzelRawScratch[i - splitHi], i, m_winHigh, WIN_HIGH_REF);
+        storeKey(i, (float)m_goertzelRawScratch[i - splitHi], m_winHigh, WIN_HIGH_REF);
 
     PianoRollGoertzelBatchAvx2(
         m_windowedOnset.data(), m_winOnset, m_goertzelCoeffs.data(),
         0, KEY_COUNT, m_goertzelRawScratch);
     for (int i = 0; i < KEY_COUNT; ++i)
-        m_onsetStrengths[i] = ApplyDisplayScale(
-            (float)m_goertzelRawScratch[i], i, m_winOnset, WIN_ONSET_REF);
+        m_onsetStrengths[i] = ApplyDetectScale(
+            (float)m_goertzelRawScratch[i], m_winOnset, WIN_ONSET_REF);
 
     for (int i = 0; i < KEY_COUNT; ++i) {
         const float alpha = PianoRoll108::IirAlphaForKey(i);
         m_smoothedStrengths[i] =
             m_smoothedStrengths[i] * (1.0f - alpha) + m_rawStrengths[i] * alpha;
+        m_displaySmoothed[i] =
+            m_displaySmoothed[i] * (1.0f - alpha) + m_displayStrengths[i] * alpha;
     }
 
     UpdateNoteStates();
-    PushFrame(false);
+    PushDisplayFrames();
 }
 
 namespace
@@ -1016,6 +1067,7 @@ void CPianoRoll::UpdateNoteStates()
             m_bandMask[i] = 0;
             memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
             m_smoothedStrengths[i] *= 0.4f;
+            m_displaySmoothed[i] *= 0.4f;
             // 無音区間は音色エンベロープモデルもオフへ戻す
             m_envModel[i].ResetOff();
             m_reattackMark[i] = false;
@@ -1077,9 +1129,11 @@ void CPianoRoll::UpdateNoteStates()
             }
         }
 
-        // ホールドで倍音ゴーストが無限に伸びるのを防ぐ。
-        // オクターブ上の独立メロディは IsHarmonicGhostPartial で保護される。
-        if (effective && i >= PianoRoll108::BASS_END &&
+        // ホールド延長でもパッシブ倍音を残さない。
+        // ただし C4〜C6 のメロディー帯は、ピック側の FinishPicks に任せ、
+        // ここでの二次剪定でピアノを再キルしない（パッチ連鎖の主因だった）。
+        if (effective &&
+            (i < PianoRoll108::C4_KEY || i >= PianoRoll108::O5_HI) &&
             PianoKey::IsHarmonicGhostPartial(blend, i, KEY_COUNT, PianoRoll108::BASS_END)) {
             effective = false;
         }
@@ -1148,18 +1202,18 @@ void CPianoRoll::UpdateNoteStates()
                     }
                 }
                 if (allowOn && m_harmonicProfileGuardEnabled) {
-                    // 倍音比率プロファイル(HarmonicProfile.h)による追加判断。
-                    // 「ノイズ系」プロファイルに高い確信度で一致した場合のみ、
-                    // 他の判定結果に関係なく不採用にする(過剰検出を避けるため、
-                    // 確信度が低い/該当なしの場合はここでは何も判断しない)。
-                    if (HarmonicProfile::LooksLikeNoiseProfile(
-                        blend, i, KEY_COUNT, kHarmonicProfileNoiseMinConfidence)) {
-                        allowOn = false;
-                    }
-                    // 楽器形のまま残る整数倍音ゴーストはプロファイルでは弾けないので、
-                    // 構造判定(親ピークの partial)を併用する。
-                    else if (HarmonicProfile::LooksLikePartialGhost(blend, i, KEY_COUNT)) {
-                        allowOn = false;
+                    // メロディー帯(C4-C6)はプロファイル追加判定を掛けない。
+                    // 未較正テンプレがピアノをノイズ/部分音と誤認し、拾えない主因になっていた。
+                    const bool melodyBand =
+                        (i >= PianoRoll108::C4_KEY && i < PianoRoll108::O5_HI);
+                    if (!melodyBand) {
+                        if (HarmonicProfile::LooksLikeNoiseProfile(
+                            blend, i, KEY_COUNT, kHarmonicProfileNoiseMinConfidence)) {
+                            allowOn = false;
+                        }
+                        else if (HarmonicProfile::LooksLikePartialGhost(blend, i, KEY_COUNT)) {
+                            allowOn = false;
+                        }
                     }
                 }
                 if (allowOn) {
@@ -1235,7 +1289,9 @@ void CPianoRoll::UpdateNoteStates()
             m_noteStrength[i] = 0.0f;
             continue;
         }
-        float disp = m_envPeak[i];
+        // 描画強度は display 経路。検出 envPeak はホールド判定専用。
+        float disp = m_displaySmoothed[i];
+        if (disp <= 0.0f) disp = m_displayStrengths[i];
         if (disp <= 0.0f) disp = m_smoothedStrengths[i];
         if (disp <= 0.0f) disp = m_rawStrengths[i];
         if (disp > 10.0f) disp = 10.0f;
@@ -1472,7 +1528,7 @@ void CPianoRoll::BuildLiveNoteFrame(NoteFrame& frame) const
 
 void CPianoRoll::PushFrame(bool requestUiInvalidate)
 {
-    if (!m_feedEnabled || m_paintDisabled) return;
+    if (!m_feedEnabled || m_paintDisabled || m_frozen) return;
     m_historyHead = (m_historyHead + (int)MAX_HISTORY - 1) % (int)MAX_HISTORY;
     BuildLiveNoteFrame(m_historyRing[m_historyHead]);
     if (m_historyCount < (int)MAX_HISTORY)
@@ -1494,6 +1550,216 @@ void CPianoRoll::PushFrame(bool requestUiInvalidate)
 
     if (requestUiInvalidate)
         InvalidateRegions(true, false);
+}
+
+void CPianoRoll::PushDisplayFrames()
+{
+    // フリーズ中は履歴スクロールを止め、鍵盤/ライブ行だけ最新化する。
+    if (m_frozen) {
+        for (int i = 0; i < KEY_COUNT; ++i) {
+            if (m_activeKeys[i] != m_keySnapActive[i] ||
+                m_bandMask[i] != m_keySnapBand[i] ||
+                m_exprFlags[i] != m_keySnapExpr[i]) {
+                MarkKeyVisualDirty();
+                break;
+            }
+        }
+        return;
+    }
+    // 解析は毎ホップ実行済み。表示速度だけ変える:
+    //   100% → 1行/解析、200% → 2行、50% → 2解析に1行。
+    int pct = m_rollSpeedPct;
+    if (pct < 25) pct = 25;
+    if (pct > 200) pct = 200;
+    m_rollSpeedCredit += pct;
+    int pushed = 0;
+    while (m_rollSpeedCredit >= 100 && pushed < 4) {
+        m_rollSpeedCredit -= 100;
+        PushFrame(false);
+        ++pushed;
+    }
+}
+
+void CPianoRoll::SetRollSpeedPct(int pct)
+{
+    int nearest = 100;
+    int best = 100000;
+    for (int i = 0; i < ROLL_SPEED_COUNT; ++i) {
+        const int d = abs(kRollSpeedPct[i] - pct);
+        if (d < best) { best = d; nearest = kRollSpeedPct[i]; }
+    }
+    if (m_rollSpeedPct == nearest) return;
+    m_rollSpeedPct = nearest;
+    savedata.pianorollscrollspeed = nearest;
+    m_rollSpeedCredit = 0;
+}
+
+int CPianoRoll::RollSpeedIndex() const
+{
+    for (int i = 0; i < ROLL_SPEED_COUNT; ++i) {
+        if (kRollSpeedPct[i] == m_rollSpeedPct) return i;
+    }
+    return 3; // 100%
+}
+
+void CPianoRoll::OnRollSpeedCmd(UINT nID)
+{
+    const int idx = (int)nID - (int)IDM_ROLL_SPEED_BASE;
+    if (idx < 0 || idx >= ROLL_SPEED_COUNT) return;
+    SetRollSpeedPct(kRollSpeedPct[idx]);
+}
+
+void CPianoRoll::RequestFullRollRedraw()
+{
+    m_historyDirty = true;
+    m_rollScrollValid = false;
+    m_framesPending = 0;
+    m_keyDirty = true;
+    if (::IsWindow(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CPianoRoll::ClearRollHistory()
+{
+    m_historyCount = 0;
+    m_historyHead = 0;
+    m_rollSpeedCredit = 0;
+    m_framesPending = 0;
+    for (int hi = 0; hi < (int)MAX_HISTORY; ++hi) {
+        auto& f = m_historyRing[hi];
+        memset(f.active, 0, sizeof(f.active));
+        memset(f.strength, 0, sizeof(f.strength));
+        memset(f.segment, 0, sizeof(f.segment));
+        memset(f.bandMask, 0, sizeof(f.bandMask));
+        memset(f.laneStrength, 0, sizeof(f.laneStrength));
+        memset(f.expr, 0, sizeof(f.expr));
+        memset(f.dynLevel, 0, sizeof(f.dynLevel));
+        memset(f.reattack, 0, sizeof(f.reattack));
+    }
+    RequestFullRollRedraw();
+}
+
+void CPianoRoll::OnToggleFreeze()
+{
+    m_frozen = !m_frozen;
+    if (::IsWindow(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CPianoRoll::OnClearDisplay()
+{
+    ClearRollHistory();
+}
+
+void CPianoRoll::OnToggleExprLegend()
+{
+    m_showExprLegend = !m_showExprLegend;
+    savedata.pianorollexprlegend = m_showExprLegend ? 1 : 0;
+    if (::IsWindow(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CPianoRoll::OnToggleExprMarks()
+{
+    m_showExprMarks = !m_showExprMarks;
+    savedata.pianorollexprmarks = m_showExprMarks ? 1 : 0;
+    RequestFullRollRedraw();
+}
+
+void CPianoRoll::OnToggleLevelMeter()
+{
+    m_showLevelMeter = !m_showLevelMeter;
+    savedata.pianorolllevelmeter = m_showLevelMeter ? 1 : 0;
+    m_keyDirty = true;
+    if (::IsWindow(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CPianoRoll::OnToggleAlwaysOnTop()
+{
+    m_alwaysOnTop = !m_alwaysOnTop;
+    savedata.pianorolltopmost = m_alwaysOnTop ? 1 : 0;
+    if (::IsWindow(m_hWnd)) {
+        SetWindowPos(m_alwaysOnTop ? &CWnd::wndTopMost : &CWnd::wndNoTopMost,
+            0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+void CPianoRoll::OnToggleReattackDetect()
+{
+    m_reattackDetectEnabled = !m_reattackDetectEnabled;
+    savedata.pianorollreattack = m_reattackDetectEnabled ? 1 : 0;
+}
+
+void CPianoRoll::OnToggleImpulsiveGhost()
+{
+    m_impulsiveGhostSuppressEnabled = !m_impulsiveGhostSuppressEnabled;
+    savedata.pianorollimpulse = m_impulsiveGhostSuppressEnabled ? 1 : 0;
+}
+
+void CPianoRoll::OnToggleHarmonicGhost()
+{
+    m_harmonicGhostGuardEnabled = !m_harmonicGhostGuardEnabled;
+    savedata.pianorollharmghost = m_harmonicGhostGuardEnabled ? 1 : 0;
+}
+
+void CPianoRoll::OnToggleHarmonicProfile()
+{
+    m_harmonicProfileGuardEnabled = !m_harmonicProfileGuardEnabled;
+    savedata.pianorollharmprof = m_harmonicProfileGuardEnabled ? 1 : 0;
+}
+
+void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
+{
+    CMenu menu;
+    menu.CreatePopupMenu();
+
+    CMenu subSpeed;
+    subSpeed.CreatePopupMenu();
+    const int speedIdx = RollSpeedIndex();
+    for (int i = 0; i < ROLL_SPEED_COUNT; ++i) {
+        CString lab;
+        lab.Format(_T("x%.2f"), (double)kRollSpeedPct[i] / 100.0);
+        subSpeed.AppendMenu(MF_STRING | (i == speedIdx ? MF_CHECKED : 0),
+            IDM_ROLL_SPEED_BASE + i, lab);
+    }
+    menu.AppendMenu(MF_POPUP, (UINT_PTR)subSpeed.Detach(),
+        LL14(L"表示の流れる速度", L"Display scroll speed", L"Vitesse de defilement", L"Velocita scorrimento", L"Velocidad de desplazamiento", L"표시 스크롤 속도", L"显示滚动速度", L"سرعة التمرير", L"Скорость прокрутки", L"Anzeigegeschwindigkeit", L"Velocidade de rolagem", L"Weergavesnelheid", L"Predkosc przewijania", L"Goruntuleme hizi"));
+
+    menu.AppendMenu(MF_SEPARATOR);
+    menu.AppendMenu(MF_STRING | (m_showExprLegend ? MF_CHECKED : 0), IDM_ROLL_LEGEND,
+        LL14(L"記号の凡例", L"Symbol legend", L"Legende des symboles", L"Legenda simboli", L"Leyenda de simbolos", L"기호 범례", L"符号图例", L"دليل الرموز", L"Легенда символов", L"Symbollegende", L"Legenda de simbolos", L"Symbollegenda", L"Legenda symboli", L"Sembol aciklamasi"));
+    menu.AppendMenu(MF_STRING | (m_showExprMarks ? MF_CHECKED : 0), IDM_ROLL_EXPR,
+        LL14(L"表現記号を表示", L"Show expression marks", L"Afficher les symboles d'expression", L"Mostra simboli espressivi", L"Mostrar simbolos de expresion", L"표현 기호 표시", L"显示奏法记号", L"إظهار رموز التعبير", L"Показывать знаки экспрессии", L"Ausdruckszeichen anzeigen", L"Mostrar simbolos de expressao", L"Expressietekens tonen", L"Pokazuj znaki ekspresji", L"Ifade isaretlerini goster"));
+    menu.AppendMenu(MF_STRING | (m_showLevelMeter ? MF_CHECKED : 0), IDM_ROLL_METER,
+        LL14(L"レベルメーター", L"Level meter", L"Indicateur de niveau", L"Misuratore di livello", L"Medidor de nivel", L"레벨 미터", L"电平表", L"مقياس المستوى", L"Уровень сигнала", L"Pegelanzeige", L"Medidor de nivel", L"Niveaumeter", L"Miernik poziomu", L"Seviye olcer"));
+    menu.AppendMenu(MF_STRING | (m_alwaysOnTop ? MF_CHECKED : 0), IDM_ROLL_TOPMOST,
+        LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위에 표시", L"始终置顶", L"دائما في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd op voorgrond", L"Zawsze na wierzchu", L"Her zaman ustte"));
+
+    CMenu subDetect;
+    subDetect.CreatePopupMenu();
+    subDetect.AppendMenu(MF_STRING | (m_reattackDetectEnabled ? MF_CHECKED : 0), IDM_ROLL_REATTACK,
+        LL14(L"再アタック検出", L"Re-attack detect", L"Detection de reattaque", L"Rilevamento riattacco", L"Deteccion de reataque", L"리어택 검출", L"再起音检测", L"كشف الهجوم المتكرر", L"Обнаружение реатаки", L"Re-Attack-Erkennung", L"Detectar reataque", L"Her-aanval detectie", L"Wykrywanie reataku", L"Yeniden saldiri algilama"));
+    subDetect.AppendMenu(MF_STRING | (m_impulsiveGhostSuppressEnabled ? MF_CHECKED : 0), IDM_ROLL_IMPULSE,
+        LL14(L"打撃音ゴースト抑制", L"Impulsive ghost suppress", L"Suppression fantomes impulsifs", L"Soppressione fantasmi impulsivi", L"Supresion de fantasmas impulsivos", L"타격음 고스트 억제", L"打击音幽灵抑制", L"كبح أشباح الإيقاع", L"Подавление импульсных призраков", L"Impulsiv-Geister unterdrucken", L"Suprimir fantasmas impulsivos", L"Impulsieve spoken dempen", L"Tlumienie duchow impulsywnych", L"Vurus hayaletini bastir"));
+    subDetect.AppendMenu(MF_STRING | (m_harmonicGhostGuardEnabled ? MF_CHECKED : 0), IDM_ROLL_HARM_GHOST,
+        LL14(L"倍音ゴースト抑制", L"Harmonic ghost suppress", L"Suppression fantomes harmoniques", L"Soppressione fantasmi armonici", L"Supresion de fantasmas armonicos", L"배음 고스트 억제", L"泛音幽灵抑制", L"كبح أشباح التوافقيات", L"Подавление гармонических призраков", L"Oberton-Geister unterdrucken", L"Suprimir fantasmas harmonicos", L"Harmonische spoken dempen", L"Tlumienie duchow harmonicznych", L"Armonik hayaletini bastir"));
+    subDetect.AppendMenu(MF_STRING | (m_harmonicProfileGuardEnabled ? MF_CHECKED : 0), IDM_ROLL_HARM_PROF,
+        LL14(L"音色プロファイル判定", L"Timbre profile guard", L"Garde profil de timbre", L"Protezione profilo timbrico", L"Guardia de perfil timbrico", L"음색 프로파일 판정", L"音色轮廓判定", L"حارس ملف الطابع", L"Профиль тембра", L"Klangprofil-Schutz", L"Guarda de perfil timbrico", L"Timbreprofiel-bewaking", L"Ochrona profilu barwy", L"Timbre profil korumasi"));
+    menu.AppendMenu(MF_POPUP, (UINT_PTR)subDetect.Detach(),
+        LL14(L"検出オプション", L"Detection options", L"Options de detection", L"Opzioni di rilevamento", L"Opciones de deteccion", L"검출 옵션", L"检测选项", L"خيارات الكشف", L"Параметры обнаружения", L"Erkennungsoptionen", L"Opcoes de deteccao", L"Detectie-opties", L"Opcje wykrywania", L"Algilama secenekleri"));
+
+    menu.AppendMenu(MF_SEPARATOR);
+    menu.AppendMenu(MF_STRING | (m_frozen ? MF_CHECKED : 0), IDM_ROLL_FREEZE,
+        LL14(L"フリーズ", L"Freeze", L"Gel", L"Congela", L"Congelar", L"정지", L"冻结", L"تجميد", L"Заморозка", L"Einfrieren", L"Congelar", L"Bevriezen", L"Zamroz", L"Dondur"));
+    menu.AppendMenu(MF_STRING, IDM_ROLL_CLEAR,
+        LL14(L"表示をクリア", L"Clear display", L"Effacer l'affichage", L"Cancella visualizzazione", L"Borrar pantalla", L"표시 지우기", L"清除显示", L"مسح العرض", L"Очистить экран", L"Anzeige leeren", L"Limpar exibicao", L"Weergave wissen", L"Wyczysc wyswietlacz", L"Goruntuyu temizle"));
+
+    if (point.x == -1 && point.y == -1) {
+        CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
+        point = CPoint(rc.left + 8, rc.top + 8);
+    }
+    menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y, this);
 }
 
 int CPianoRoll::HistoryCountLocked() const
@@ -1607,7 +1873,7 @@ namespace PianoDraw
 
     static COLORREF KeyNoteColorImpl(int keyIndex, float strength, bool blackKey)
     {
-        static constexpr int kKeys = 88;
+        static constexpr int kKeys = PianoKey::COUNT;
         if (keyIndex < 0) keyIndex = 0;
         if (keyIndex >= kKeys) keyIndex = kKeys - 1;
         const float t = (float)keyIndex / (float)(kKeys - 1);
@@ -2467,8 +2733,9 @@ void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const 
         const int midi = MIDI_BASE + i;
         int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
         const uint8_t bMask = frame.bandMask[i] ? frame.bandMask[i] : (uint8_t)(1u << KeyBandIndex(i));
+        const uint8_t drawExpr = m_showExprMarks ? frame.expr[i] : (uint8_t)0;
         DrawHistoryNote(dc, CRect(xL + 1, yTop, xR - 1, yBot), bMask, frame.laneStrength[i],
-            i, frame.strength[i], frame.dynLevel[i], frame.expr[i], IsBlackKey(midi));
+            i, frame.strength[i], frame.dynLevel[i], drawExpr, IsBlackKey(midi));
     }
 
     // 再アタック(タイ連結中の同鍵連打)が起きた鍵は、バーの左端に細い白線を
@@ -2485,7 +2752,7 @@ void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const 
     }
     dc.SelectObject(pOldPen);
 
-    if (!m_paintFontsReady || !m_fontExprSymbol.GetSafeHandle()) return;
+    if (!m_showExprMarks || !m_paintFontsReady || !m_fontExprSymbol.GetSafeHandle()) return;
     CFont* pSymFont = CFont::FromHandle((HFONT)m_fontExprSymbol.GetSafeHandle());
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (!frame.active[i] || !frame.expr[i]) continue;
@@ -2516,7 +2783,8 @@ void CPianoRoll::DrawHistoryArea(CDC& dc, int width, int rollH, int histCount, c
     for (int r = 1; r < histCount && r < (int)MAX_HISTORY; ++r)
         DrawHistoryRow(dc, width, rollH, r, hist[r - 1]);
 
-    DrawPitchTransitions(dc, width, rollH, histCount, hist);
+    if (m_showExprMarks)
+        DrawPitchTransitions(dc, width, rollH, histCount, hist);
 }
 
 // 音階移行(スライド/フォール/スクープ)の斜め描画:
@@ -2645,6 +2913,7 @@ void CPianoRoll::RequestSyncFromMainUi()
 {
     if (!::IsWindow(m_hWnd)) return;
     // 実時間スロットル（paint 遅延で ms2 が伸びても 60Hz 同期にしない）
+    // 可視化頻度は savedata.ms2 に合わせる（EQ 表示でも間引かない）
     int minMs = savedata.ms2;
     if (minMs < 16) minMs = 16;
     if (minMs > 960) minMs = 960;
@@ -2676,11 +2945,7 @@ LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
 LRESULT CPianoRoll::OnAnalysisDone(WPARAM, LPARAM)
 {
     if (m_paintDisabled || !::IsWindow(m_hWnd)) return 0;
-    // 解析完了ごとの自由走行は維持しつつ、Invalidate は表示レート以上に重ねない
-    const DWORD now = GetTickCount();
-    if (m_lastPaintInvalidateTick != 0 && (now - m_lastPaintInvalidateTick) < ANALYZE_MIN_MS)
-        return 0;
-    m_lastPaintInvalidateTick = now;
+    // V-Sync には縛らず、解析が出来たフレームから描画する
     ApplySyncInvalidate();
     return 0;
 }
@@ -2965,7 +3230,7 @@ void CPianoRoll::DrawKeyboardToBuffer(CDC& memDC, int width, int keySectionH, in
 
     // アクティブキーに表現記号を重ねる（履歴バーと同じグリフをキー側にも表示）。
     // クロマチックキー上部(keyTop付近)に主要フラグのグリフを1つ描く。
-    if (exprCopy && m_paintFontsReady && bkH >= 8) {
+    if (m_showExprMarks && exprCopy && m_paintFontsReady && bkH >= 8) {
         CFont* pSym = nullptr;
         if (m_fontExprSymbolCompact.GetSafeHandle())
             pSym = CFont::FromHandle((HFONT)m_fontExprSymbolCompact.GetSafeHandle());
@@ -2991,7 +3256,7 @@ void CPianoRoll::DrawKeyboardToBuffer(CDC& memDC, int width, int keySectionH, in
         }
     }
 
-    if (chCountCopy > 0 && labelH >= 4) {
+    if (m_showLevelMeter && chCountCopy > 0 && labelH >= 4) {
         CRect meterStrip(2, 1, width - 2, labelH + 1);
         DrawChannelDbBars(memDC, meterStrip, chFillCopy, chCountCopy);
     }
@@ -3123,7 +3388,7 @@ void CPianoRoll::OnPaint()
     // バーが透けて見える表現は維持される。
     CRect lgPanel;
     GetExprLegendPanelRect(w, rollH, lgPanel);
-    const bool haveLegend = m_rollReady && !lgPanel.IsRectEmpty() && m_rollDC.GetSafeHdc();
+    const bool haveLegend = m_showExprLegend && m_rollReady && !lgPanel.IsRectEmpty() && m_rollDC.GetSafeHdc();
     bool legendBaked = false;
     if (haveLegend) {
         const int pw = lgPanel.Width(), ph = lgPanel.Height();
@@ -3207,6 +3472,16 @@ void CPianoRoll::OnPaint()
     if (legendBaked && m_legendBgDC.GetSafeHdc()) {
         m_rollDC.BitBlt(lgPanel.left, lgPanel.top, lgPanel.Width(), lgPanel.Height(),
             &m_legendBgDC, 0, 0, SRCCOPY);
+    }
+
+    if (m_frozen) {
+        dc.SetBkMode(TRANSPARENT);
+        dc.SetTextColor(RGB(255, 180, 80));
+        CFont* of = nullptr;
+        if (m_fontMeterTag.GetSafeHandle())
+            of = dc.SelectObject(&m_fontMeterTag);
+        dc.TextOut(8, 4, LL14(L"フリーズ中", L"Frozen", L"Gele", L"Congelato", L"Congelado", L"정지됨", L"已冻结", L"مجمد", L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu"));
+        if (of) dc.SelectObject(of);
     }
 
     if (didRollUpdate)

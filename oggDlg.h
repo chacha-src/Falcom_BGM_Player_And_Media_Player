@@ -374,6 +374,7 @@ public:
 
 void COggDlg_SyncPianoRollFast();
 void COggDlg_SyncAnalyzerFast();
+BOOL COgg_IsEqualizerVisible();
 
 void SetupTaskbarThumbButtons(HWND hwnd, BOOL mediaPlayerMode);
 void RefreshTaskbarJumpList(BOOL mediaPlayerMode);

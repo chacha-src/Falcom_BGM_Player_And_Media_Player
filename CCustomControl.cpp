@@ -684,21 +684,100 @@ static BOOL CCC_IsChromaBg(COLORREF clrBg)
 
 // 透過クロマキー合成: 描画は COLOR_DIALOG_BG 上で行い、未描画領域だけ chroma に置換する。
 // 背景を直接 chroma で塗るとシャドウ等のアンチエイリアス縁が RGB(1,1,1) に溶けて消える。
+// GetPixel/SetPixel の二重ループは分単位で UI を殺すため DIB 一括置換にする。
 static void CCC_RemapSolidColorInDC(CDC& dc, const CRect& r, COLORREF clrFrom, COLORREF clrTo)
 {
-    if (r.Width() <= 0 || r.Height() <= 0) return;
-    for (int y = r.top; y < r.bottom; ++y)
-    {
-        for (int x = r.left; x < r.right; ++x)
-        {
-            if (dc.GetPixel(x, y) == clrFrom)
-                dc.SetPixel(x, y, clrTo);
+    const int w = r.Width();
+    const int h = r.Height();
+    if (w <= 0 || h <= 0) return;
+
+    static HBITMAP s_dib = nullptr;
+    static void* s_bits = nullptr;
+    static int s_w = 0, s_h = 0;
+    static CDC s_mem;
+    static bool s_memReady = false;
+
+    if (!s_memReady) {
+        if (!s_mem.CreateCompatibleDC(&dc)) return;
+        s_memReady = true;
+    }
+    if (w > s_w || h > s_h || !s_dib) {
+        if (s_dib) { ::DeleteObject(s_dib); s_dib = nullptr; s_bits = nullptr; }
+        BITMAPINFO bmi = {};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = w;
+        bmi.bmiHeader.biHeight = -h;
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        s_dib = ::CreateDIBSection(dc.GetSafeHdc(), &bmi, DIB_RGB_COLORS, &s_bits, nullptr, 0);
+        if (!s_dib || !s_bits) { s_dib = nullptr; s_bits = nullptr; s_w = s_h = 0; return; }
+        s_w = w; s_h = h;
+    }
+
+    HGDIOBJ old = s_mem.SelectObject(s_dib);
+    s_mem.BitBlt(0, 0, w, h, &dc, r.left, r.top, SRCCOPY);
+    const UINT32 from = ((UINT32)clrFrom) & 0x00FFFFFFu;
+    const UINT32 to = ((UINT32)clrTo) & 0x00FFFFFFu;
+    UINT32* p = (UINT32*)s_bits;
+    const int n = s_w * s_h; // may be larger than w*h; only touch used rect
+    for (int y = 0; y < h; ++y) {
+        UINT32* row = p + y * s_w;
+        for (int x = 0; x < w; ++x) {
+            if ((row[x] & 0x00FFFFFFu) == from)
+                row[x] = (row[x] & 0xFF000000u) | to;
         }
     }
+    dc.BitBlt(r.left, r.top, w, h, &s_mem, 0, 0, SRCCOPY);
+    s_mem.SelectObject(old);
 }
 #else
 static BOOL CCC_IsChromaBg(COLORREF) { return FALSE; }
 #endif
+
+// セグメント描画用フォントプール（CreateFont/Delete 嵐で分単位に UI が死ぬのを防ぐ）
+// アクリル有無に依存しない（EQ コードラベル等で常時使用）
+namespace {
+struct SegFontSlot {
+    LONG lfHeight = 0;
+    LONG lfWidth = 0;
+    LONG lfWeight = 0;
+    BYTE lfItalic = 0;
+    WCHAR face[LF_FACESIZE] = {};
+    CFont font;
+    bool alive = false;
+};
+constexpr int kSegFontPool = 48;
+SegFontSlot g_segFontPool[kSegFontPool];
+unsigned g_segFontRR = 0;
+
+CFont* CCC_GetPooledSegFont(const LOGFONT& lt)
+{
+    for (int i = 0; i < kSegFontPool; ++i) {
+        SegFontSlot& s = g_segFontPool[i];
+        if (!s.alive) continue;
+        if (s.lfHeight == lt.lfHeight && s.lfWidth == lt.lfWidth
+            && s.lfWeight == lt.lfWeight && s.lfItalic == lt.lfItalic
+            && wcscmp(s.face, lt.lfFaceName) == 0)
+            return &s.font;
+    }
+    const int i = (int)(g_segFontRR++ % (unsigned)kSegFontPool);
+    SegFontSlot& s = g_segFontPool[i];
+    if (s.alive && s.font.GetSafeHandle())
+        s.font.DeleteObject();
+    s.lfHeight = lt.lfHeight;
+    s.lfWidth = lt.lfWidth;
+    s.lfWeight = lt.lfWeight;
+    s.lfItalic = lt.lfItalic;
+    wcsncpy_s(s.face, lt.lfFaceName, _TRUNCATE);
+    if (!s.font.CreateFontIndirect(&lt)) {
+        s.alive = false;
+        return nullptr;
+    }
+    s.alive = true;
+    return &s.font;
+}
+} // namespace
 
 static HBITMAP CCC_CreateShadowDib32(HDC hdcRef, int w, int h, void** ppBits)
 {
@@ -2849,8 +2928,9 @@ void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const std::ve
         lt.lfWidth = w;
         if (segs[i].bBold) lt.lfWeight = FW_BOLD;
         if (segs[i].bItalic) lt.lfItalic = TRUE;
-        CFont ft; ft.CreateFontIndirect(&lt);
-        CFont* po = pDC->SelectObject(&ft);
+        CFont* pFont = CCC_GetPooledSegFont(lt);
+        if (!pFont) continue;
+        CFont* po = pDC->SelectObject(pFont);
         CSize sz = pDC->GetTextExtent(segs[i].text);
         CRect sr = { xP, rect.top, xP + sz.cx, rect.bottom };
         COLORREF tc = segs[i].bHasColor ? segs[i].clrText : RGB(0, 0, 0);
@@ -2860,7 +2940,7 @@ void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const std::ve
         else DrawTextWithShadow(pDC, sr, segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, tc, m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg, bTrans);
 
         xP += sz.cx;
-        pDC->SelectObject(po); ft.DeleteObject();
+        pDC->SelectObject(po);
     }
 }
 
@@ -3042,13 +3122,12 @@ void CCustomStatic::DrawClient(CDC& dc)
                 LOGFONT lfTry = lfB;
                 lfTry.lfHeight = -h;
                 lfTry.lfWidth = 0;
-                CFont fontTry;
-                fontTry.CreateFontIndirect(&lfTry);
-                CFont* pOld = memDC.SelectObject(&fontTry);
+                CFont* pTry = CCC_GetPooledSegFont(lfTry);
+                if (!pTry) continue;
+                CFont* pOld = memDC.SelectObject(pTry);
                 TEXTMETRIC tm;
                 memDC.GetTextMetrics(&tm);
                 memDC.SelectObject(pOld);
-                fontTry.DeleteObject();
 
                 CSize size = MeasureText(h, 0);
                 if (size.cx <= rectWithMargin.Width())
@@ -3319,11 +3398,6 @@ LRESULT CCustomStatic::OnGetTextLength(WPARAM, LPARAM)
     return m_strText.GetLength();
 }
 
-// ============================================================================
-// CCustomStatic クラスの描画計算と解析処理（全実装）
-// ============================================================================
-
-// セグメント化されたテキストの表示サイズを正確に測定する関数
 CSize CCustomStatic::MeasureSegmentedText(CDC* pDC, const std::vector<TextSegment>& segs, const LOGFONT& lf, int h, int w)
 {
     CSize tot(0, 0);
@@ -3335,16 +3409,15 @@ CSize CCustomStatic::MeasureSegmentedText(CDC* pDC, const std::vector<TextSegmen
         if (segs[i].bBold) lt.lfWeight = FW_BOLD;
         if (segs[i].bItalic) lt.lfItalic = TRUE;
 
-        CFont ft;
-        ft.CreateFontIndirect(&lt);
-        CFont* po = pDC->SelectObject(&ft);
+        CFont* pFont = CCC_GetPooledSegFont(lt);
+        if (!pFont) continue;
+        CFont* po = pDC->SelectObject(pFont);
 
         CSize sz = pDC->GetTextExtent(segs[i].text);
         tot.cx += sz.cx;
         if (sz.cy > tot.cy) tot.cy = sz.cy;
 
         pDC->SelectObject(po);
-        ft.DeleteObject();
     }
     return tot;
 }

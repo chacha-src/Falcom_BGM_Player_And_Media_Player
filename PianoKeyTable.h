@@ -202,7 +202,14 @@ namespace PianoKey
 
             if (octaveLike) {
                 if (parentInBass) {
-                    if (!bandProminent && sc < bandMax * 0.12f && sc < loSc * 0.40f)
+                    // ベースのオクターブ重ねは「帯域またがりゴースト」になりやすい。
+                    // 自帯域で十分目立ち、かつ親より明らかに強く自前倍音もあるときだけ独立音。
+                    if (bandProminent && sc >= loSc * 1.12f &&
+                        HasOwnOvertoneSupport(st, candidate, count, 0.14f))
+                        continue;
+                    if (sc <= loSc * 1.05f)
+                        return true;
+                    if (!bandProminent)
                         return true;
                     continue;
                 }
