@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -638,7 +638,7 @@ END
 IDD_MEDIAPLAYER DIALOGEX 0, 0, 480, 332
 STYLE DS_SETFONT | WS_MINIMIZEBOX | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 EXSTYLE WS_EX_ACCEPTFILES | WS_EX_APPWINDOW
-CAPTION "メディアプレイヤー"
+CAPTION "メディアプレイヤーささら"
 FONT 9, "メイリオ", 400, 0, 0x80
 BEGIN
     LTEXT           "タイトル",IDC_MP_TITLE,138,10,336,18,SS_NOTIFY | SS_ENDELLIPSIS

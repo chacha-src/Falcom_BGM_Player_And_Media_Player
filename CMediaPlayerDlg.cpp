@@ -471,7 +471,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	}
 	if (hD2 < 1.0f) hD2 = 1.0f;
 
-	SetWindowText(LL14(L"メディアプレイヤー", L"Media Player", L"Lecteur multimedia", L"Lettore multimediale", L"Reproductor multimedia", L"미디어 플레이어", L"媒体播放器", L"مشغل الوسائط", L"Медиаплеер", L"Media-Player", L"Reprodutor de midia", L"Mediaspeler", L"Odtwarzacz multimediow", L"Medya Oynat?c?"));
+	SetWindowText(LL14(L"メディアプレイヤーささら", L"Media Player Sasara", L"Lecteur multimedia Sasara", L"Lettore multimediale Sasara", L"Reproductor multimedia Sasara", L"미디어 플레이어 사사라", L"媒体播放器 Sasara", L"مشغل الوسائط Sasara", L"Медиаплеер Sasara", L"Media-Player Sasara", L"Reprodutor de midia Sasara", L"Mediaspeler Sasara", L"Odtwarzacz multimediow Sasara", L"Medya Oynatıcı Sasara"));
 
 	m_play.SetWindowText(LL14(L"再生", L"Play", L"Lire", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Играть", L"Wiedergabe", L"Reproduzir", L"Afspelen", L"Odtwarzaj", L"Oynat"));
 	m_pause.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat"));
