@@ -319,9 +319,11 @@ private:
     float m_chMeterAutoPeak[PIANO_METER_CH_MAX];  // 自動ピーク(棒グラフ上端の目印)
     int   m_chMeterCount = 0;
     static constexpr DWORD ANALYZE_MIN_MS = 3;    // 連続分析の最短間隔(16分音符対応)
+    bool  m_detectSilent = false;                // Goertzel 直後の無音フラグ(publish 側で反映)
 
     void EnsureAnalysisTables(int sampleRate, int capCaptureFrames = 0);   // Goertzel 係数と窓関数を再計算
     void RunGoertzelFromBuffer(const double* winLow, const double* winBass, int bassWinLen);
+    void PublishDetectResults(); // UpdateNoteStates/PushDisplayFrames または無音クリア（m_cs 下）
     void UpdateNoteStates();    // ピック結果からノートのオン/オフ・強度・セグメントを更新
     void DetectExpressions();   // UpdateNoteStates 後に表現記号(アクセント/ビブラート等)を付与
     // 音色エンベロープモデルを更新し、再アタック(タイ分割)を判定する。

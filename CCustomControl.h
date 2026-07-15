@@ -607,6 +607,10 @@ private:
 
     BOOL m_bAeroMode;                      // アクリルモードが有効かどうか
     BOOL m_bNoParentInvalidate;            // TRUE なら SetText 時に親 Invalidate しない
+#if CCUSTOM_AERO_SUPPORT
+    // 共有 s_nfCache のサイズ thrash を避ける（EQ コード行など固定サイズ静的ラベル向け）
+    CCC_ChromaBlitCache m_chromaCache;
+#endif
 };
 
 // ============================================================================

@@ -2812,6 +2812,9 @@ CCustomStatic::~CCustomStatic()
 {
     if (m_font.GetSafeHandle()) m_font.DeleteObject();
     if (m_memBackstore.GetSafeHandle()) m_memBackstore.DeleteObject();
+#if CCUSTOM_AERO_SUPPORT
+    m_chromaCache.Release();
+#endif
 }
 
 void CCustomStatic::PostNcDestroy()
@@ -3043,6 +3046,21 @@ void CCustomStatic::DrawClient(CDC& dc)
     if (rw <= 0 || rh <= 0) return;
     if (m_strText.IsEmpty()) CWnd::GetWindowText(m_strText);
 
+    auto blitTrans = [&](HDC hdcSrc) {
+#if CCUSTOM_AERO_SUPPORT
+        if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsAeroEnabled() && CCC_IsWin11()) {
+            CCC_BlitChromaCached(dc.GetSafeHdc(), 0, 0, rw, rh,
+                hdcSrc, 0, 0, CCC_AERO_CHROMA_KEY, m_chromaCache);
+            return;
+        }
+#endif
+#if CCUSTOM_AERO_SUPPORT
+        CCC_BlitChromaTrans(dc.GetSafeHdc(), 0, 0, rw, rh, hdcSrc, 0, 0, CCC_AERO_CHROMA_KEY);
+#else
+        (void)hdcSrc;
+#endif
+    };
+
     CDC memDC;
     memDC.CreateCompatibleDC(&dc);
     if (rw != m_backstoreW || rh != m_backstoreH || !m_memBackstore.GetSafeHandle())
@@ -3062,7 +3080,7 @@ void CCustomStatic::DrawClient(CDC& dc)
         if (bTrans)
         {
             CCC_RemapSolidColorInDC(memDC, rect, COLOR_DIALOG_BG, CCC_AERO_CHROMA_KEY);
-            CCC_BlitChromaTrans(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+            blitTrans(memDC.GetSafeHdc());
         }
         else
             dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
@@ -3338,7 +3356,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     if (bTrans)
     {
         CCC_RemapSolidColorInDC(memDC, rect, COLOR_DIALOG_BG, CCC_AERO_CHROMA_KEY);
-        CCC_BlitChromaTrans(dc.GetSafeHdc(), 0, 0, rw, rh, memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+        blitTrans(memDC.GetSafeHdc());
     }
     else
         dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);

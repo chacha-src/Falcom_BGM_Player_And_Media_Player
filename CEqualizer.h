@@ -2,6 +2,16 @@
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 
+// EqKey ワーカー解析完了 → UI スレッドでコード表示更新（WM_TIMER 飢餓回避）
+#ifndef WM_EQ_KEY_UPDATE
+#define WM_EQ_KEY_UPDATE (WM_APP + 430)
+#endif
+
+void SnapshotEqKeyCodes(CString& lo, CString& mid, CString& hi, CString& all);
+void RegisterEqKeyUiHwnd(HWND h);
+void UnregisterEqKeyUiHwnd(HWND h);
+void AckEqKeyUiNotify();
+
 // CEqualizer ダイアログ
 
 class CEqualizer : public CCustomBlurDialogExBase
@@ -118,6 +128,9 @@ public:
 	CString m_cachedKeyMid;
 	CString m_cachedKeyHigh;
 	CString m_cachedKeyAll;
+	void ApplyKeyCodesUi();
+	afx_msg LRESULT OnEqKeyUpdate(WPARAM wParam, LPARAM lParam);
+	afx_msg void OnDestroy();
 	CCustomSliderCtrl m_reverb;
 	CCustomSliderCtrl m_chorus;
 	CCustomSliderCtrl m_delay;

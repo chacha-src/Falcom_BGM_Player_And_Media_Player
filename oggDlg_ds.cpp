@@ -5414,6 +5414,10 @@ void equaliser(void* data, int len, BOOL reset) {
 #endif
 #include <deque>
 
+#ifndef WM_EQ_KEY_UPDATE
+#define WM_EQ_KEY_UPDATE (WM_APP + 430)
+#endif
+
 #ifndef OUTPUT_BUFFER_SIZE
 #define OUTPUT_BUFFER_SIZE 176400
 #endif
@@ -5460,6 +5464,8 @@ static volatile LONG g_eqKeyNeed = 0;
 static std::vector<double> g_eqKeyL, g_eqKeyR;
 static int g_eqKeyRate = 44100;
 static LONG g_eqKeySeq = 0;
+static HWND g_eqKeyUiHwnd = nullptr;
+static volatile LONG g_eqKeyUiPosted = 0;
 
 static void EnsureEqKeyCs()
 {
@@ -5467,6 +5473,34 @@ static void EnsureEqKeyCs()
 	InitializeCriticalSection(&g_eqKeyCs);
 	InitializeCriticalSection(&g_keyCodeCs);
 	g_eqKeyCsReady = true;
+}
+
+static void NotifyEqKeyUi()
+{
+	HWND h = g_eqKeyUiHwnd;
+	if (!h || !::IsWindow(h)) return;
+	if (InterlockedCompareExchange(&g_eqKeyUiPosted, 1, 0) != 0) return;
+	if (!::PostMessage(h, WM_EQ_KEY_UPDATE, 0, 0))
+		InterlockedExchange(&g_eqKeyUiPosted, 0);
+}
+
+void RegisterEqKeyUiHwnd(HWND h)
+{
+	g_eqKeyUiHwnd = h;
+	InterlockedExchange(&g_eqKeyUiPosted, 0);
+	NotifyEqKeyUi();
+}
+
+void UnregisterEqKeyUiHwnd(HWND h)
+{
+	if (g_eqKeyUiHwnd == h)
+		g_eqKeyUiHwnd = nullptr;
+	InterlockedExchange(&g_eqKeyUiPosted, 0);
+}
+
+void AckEqKeyUiNotify()
+{
+	InterlockedExchange(&g_eqKeyUiPosted, 0);
 }
 
 static void SetKeyCodesLocked(const CString& lo, const CString& mid, const CString& hi, const CString& all)
@@ -5478,6 +5512,7 @@ static void SetKeyCodesLocked(const CString& lo, const CString& mid, const CStri
 	KeyCodeHigh = hi;
 	KeyCodeAll = all;
 	LeaveCriticalSection(&g_keyCodeCs);
+	NotifyEqKeyUi();
 }
 
 void SnapshotEqKeyCodes(CString& lo, CString& mid, CString& hi, CString& all)

@@ -882,7 +882,6 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
 
     if (levelDb < -58.0f && gainDb < 3.0f) {
         for (int i = 0; i < KEY_COUNT; ++i) {
-            m_activeKeys[i] = false;
             m_noteStrength[i] = 0.0f;
             m_rawStrengths[i] = 0.0f;
             m_displayStrengths[i] = 0.0f;
@@ -895,8 +894,6 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_strengthDipFrames[i] = 0;
             m_transientHold[i] = 0;
             m_envPeak[i] = 0.0f;
-            m_bandMask[i] = 0;
-            memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
             // 無音区間は音色エンベロープモデルもオフへ戻す(次の音を新規オンセットとして扱う)
             m_envModel[i].ResetOff();
             m_reattackMark[i] = false;
@@ -904,9 +901,11 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_harmonicGhostStreak[i] = 0;
         }
         memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
-        PushFrame(false);
+        m_detectSilent = true;
         return;
     }
+
+    m_detectSilent = false;
 
     for (int i = 0; i < m_winLow; ++i)
         m_windowedLow[i] = m_analysisBuf[i] * m_hannLow[i];
@@ -967,9 +966,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
         m_displaySmoothed[i] =
             m_displaySmoothed[i] * (1.0f - alpha) + m_displayStrengths[i] * alpha;
     }
-
-    UpdateNoteStates();
-    PushDisplayFrames();
+    // UpdateNoteStates / PushDisplayFrames は m_cs 下の PublishDetectResults で行う
 }
 
 namespace
@@ -1495,13 +1492,15 @@ void CPianoRoll::InvalidateRegions(bool roll, bool key)
 
 void CPianoRoll::BuildLiveNoteFrame(NoteFrame& frame) const
 {
-    // 太さは帯域内の生強度比（低音支配時に中高音バーが消えないよう帯域別に正規化）
+    // 太さは帯域内の表示強度比（低音支配時に中高音バーが消えないよう帯域別に正規化）
+    // m_rawStrengths は Goertzel(ロック外)が書くため、ここでは m_cs 下で更新される
+    // m_noteStrength を使う（UI と publish のレースを避ける）。
     float bandRawMax[3] = { 0.0f, 0.0f, 0.0f };
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (!m_activeKeys[i]) continue;
         const int band = PianoRoll108::KeyBandIndex(i);
-        if (m_rawStrengths[i] > bandRawMax[band])
-            bandRawMax[band] = m_rawStrengths[i];
+        if (m_noteStrength[i] > bandRawMax[band])
+            bandRawMax[band] = m_noteStrength[i];
     }
 
     for (int i = 0; i < KEY_COUNT; ++i) {
@@ -1515,7 +1514,7 @@ void CPianoRoll::BuildLiveNoteFrame(NoteFrame& frame) const
         if (m_activeKeys[i]) {
             const int band = PianoRoll108::KeyBandIndex(i);
             const float ref = bandRawMax[band];
-            float dyn = (ref > 1e-6f) ? (m_rawStrengths[i] / ref) : 0.5f;
+            float dyn = (ref > 1e-6f) ? (m_noteStrength[i] / ref) : 0.5f;
             if (dyn < 0.06f) dyn = 0.0f;
             if (dyn > 1.0f) dyn = 1.0f;
             frame.dynLevel[i] = dyn;
@@ -3095,6 +3094,7 @@ DWORD CPianoRoll::AnalysisWorkerLoop()
 // ジョブバッファをローカルにコピーしてから m_jobCs を解放し、
 // 長い Goertzel 演算中はジョブバッファを解放しておく(再生スレッドが
 // 次のジョブを書き込める状態を保つ)。
+// Goertzel は m_cs 外。UI OnPaint が結果スナップショットだけ短時間待つようにする。
 // SEH で CS / busy を必ず解放し、例外でワーカーが死んでもロックを残さない。
 bool CPianoRoll::ProcessAnalysisJob()
 {
@@ -3120,18 +3120,44 @@ bool CPianoRoll::ProcessAnalysisJob()
         frameCount >= MinAnalyzeFrameCount(sampleRate, frameCount) &&
         sampleRate >= 8000) {
         const double* mono = m_workerMonoScratch.data();
-        EnterCriticalSection(&m_cs);
         __try {
             ok = RunAnalysisJob(mono, frameCount, sampleRate, epochAtStart);
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {
             ok = false;
         }
-        LeaveCriticalSection(&m_cs);
+        if (ok &&
+            m_feedEnabled &&
+            InterlockedCompareExchange(&m_analysisEpoch, 0, 0) == epochAtStart) {
+            EnterCriticalSection(&m_cs);
+            __try {
+                PublishDetectResults();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                ok = false;
+            }
+            LeaveCriticalSection(&m_cs);
+        }
     }
 
     InterlockedExchange(&m_analysisBusy, 0);
     return ok;
+}
+
+void CPianoRoll::PublishDetectResults()
+{
+    if (m_detectSilent) {
+        for (int i = 0; i < KEY_COUNT; ++i) {
+            m_activeKeys[i] = false;
+            m_bandMask[i] = 0;
+            memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
+            m_exprFlags[i] = 0;
+        }
+        PushFrame(false);
+        return;
+    }
+    UpdateNoteStates();
+    PushDisplayFrames();
 }
 
 bool CPianoRoll::RunAnalysisJob(const double* mono, int frameCount, int sampleRate, LONG epochAtStart)

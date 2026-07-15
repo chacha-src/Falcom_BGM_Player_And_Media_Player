@@ -98,6 +98,8 @@ BEGIN_MESSAGE_MAP(CEqualizer, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_COMBO1, &CEqualizer::OnCbnSelchangeCombo1)
 	ON_CBN_SELCHANGE(IDC_COMBO5, &CEqualizer::OnCbnSelchangeCombo5)
 	ON_WM_TIMER()
+	ON_WM_DESTROY()
+	ON_MESSAGE(WM_EQ_KEY_UPDATE, &CEqualizer::OnEqKeyUpdate)
 	ON_BN_CLICKED(IDOK3, &CEqualizer::OnBnClickedOk3)
 	ON_BN_CLICKED(IDOK, &CEqualizer::OnBnClickedOk)
 	ON_BN_CLICKED(IDOK4, &CEqualizer::OnBnClickedOk4)
@@ -562,6 +564,9 @@ BOOL CEqualizer::OnInitDialog()
 	m_cachedKeyHigh.Empty();
 	m_cachedKeyAll.Empty();
 
+	RegisterEqKeyUiHwnd(m_hWnd);
+	ApplyKeyCodesUi();
+
 	SetTimer(1, 50, NULL);
 	return TRUE;
 }
@@ -627,13 +632,71 @@ void CEqualizer::OnCbnSelchangeCombo5()
 	SetTimer(1, 50, NULL);
 }
 
-void SnapshotEqKeyCodes(CString& lo, CString& mid, CString& hi, CString& all);
+void CEqualizer::ApplyKeyCodesUi()
+{
+	extern int playf;
+	CString keyLow, keyMid, keyHigh, keyAll;
+	if (playf == 0) {
+		keyLow = keyMid = keyHigh = keyAll =
+			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
+	}
+	else {
+		SnapshotEqKeyCodes(keyLow, keyMid, keyHigh, keyAll);
+	}
+
+	if (m_cachedKeyLow != keyLow) {
+		m_keyLow.SetWindowText(CString(LL14(L"低音域：", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ")) + keyLow);
+		m_cachedKeyLow = keyLow;
+	}
+	if (m_cachedKeyMid != keyMid) {
+		m_keyMid.SetWindowText(CString(LL14(L"中音域：", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ")) + keyMid);
+		m_cachedKeyMid = keyMid;
+	}
+	if (m_cachedKeyHigh != keyHigh) {
+		m_keyHigh.SetWindowText(CString(LL14(L"高音域：", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ")) + keyHigh);
+		m_cachedKeyHigh = keyHigh;
+	}
+	if (m_cachedKeyAll != keyAll) {
+		m_keyAll.SetWindowText(CString(LL14(L"全音域：", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ")) + keyAll);
+		m_cachedKeyAll = keyAll;
+	}
+}
+
+LRESULT CEqualizer::OnEqKeyUpdate(WPARAM, LPARAM)
+{
+	AckEqKeyUiNotify();
+	if (::IsWindow(m_hWnd))
+		ApplyKeyCodesUi();
+#if 0
+	{
+		static DWORD s_last = 0, s_count = 0;
+		const DWORD now = GetTickCount();
+		++s_count;
+		if (s_last == 0) s_last = now;
+		if (now - s_last >= 1000) {
+			CString line;
+			line.Format(L"[EQ-KEY] updates/sec=%u\n", s_count);
+			OutputDebugString(line);
+			s_count = 0;
+			s_last = now;
+		}
+	}
+#endif
+	return 0;
+}
+
+void CEqualizer::OnDestroy()
+{
+	UnregisterEqKeyUiHwnd(m_hWnd);
+	KillTimer(1);
+	CCustomBlurDialogExBase::OnDestroy();
+}
+
 int backms = 0;
 void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 {
-	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
-	// コード解析(Goertzel)は専用ワーカー。OnTimer は表示更新のみ。
-	KillTimer(1);
+	// スライダー同期用。Kill/Set はしない（遅延が間隔に乗り WM_TIMER 飢餓を悪化させる）。
+	// コード表示は再生中 WM_EQ_KEY_UPDATE、停止中のみここで更新。
 	if (mod != savedata.eqsoundeq) {
 		if (savedata.eqsoundeq != 9) {
 			m_s0.SetPos(200 - savedata.eq[0]);
@@ -774,36 +837,10 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 	savedata.eqx = rect.left;
 	savedata.eqy = rect.top;
 
-
-	// キーコード表示（ワーカー結果のスナップショットのみ。解析はしない）
 	extern int playf;
-	CString keyLow, keyMid, keyHigh, keyAll;
-	if (playf == 0) {
-		keyLow = keyMid = keyHigh = keyAll =
-			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
-	}
-	else {
-		SnapshotEqKeyCodes(keyLow, keyMid, keyHigh, keyAll);
-	}
+	if (playf == 0)
+		ApplyKeyCodesUi();
 
-	if (m_cachedKeyLow != keyLow) {
-		m_keyLow.SetWindowText(CString(LL14(L"低音域：", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ", L"Low: ")) + keyLow);
-		m_cachedKeyLow = keyLow;
-	}
-	if (m_cachedKeyMid != keyMid) {
-		m_keyMid.SetWindowText(CString(LL14(L"中音域：", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ", L"Mid: ")) + keyMid);
-		m_cachedKeyMid = keyMid;
-	}
-	if (m_cachedKeyHigh != keyHigh) {
-		m_keyHigh.SetWindowText(CString(LL14(L"高音域：", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ", L"High: ")) + keyHigh);
-		m_cachedKeyHigh = keyHigh;
-	}
-	if (m_cachedKeyAll != keyAll) {
-		m_keyAll.SetWindowText(CString(LL14(L"全音域：", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ", L"All: ")) + keyAll);
-		m_cachedKeyAll = keyAll;
-	}
-
-	SetTimer(1, 50, NULL);
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
 

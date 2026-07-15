@@ -1104,6 +1104,11 @@ void CAnalyzerDlg::KickUiPresent()
 	// 多重 Post を防ぐ。追いつき自己 Kick の自由走行は最短 8ms に制限
 	// （pending/頻度は落とさず、EQ を食う超高頻度ペイントだけ抑える）
 	if (!::IsWindow(m_hWnd)) return;
+	// FullRedrawWave 中は Kick を溜め、完了後に1回だけ消化（曲変更スパイク短縮）
+	if (InterlockedCompareExchange(&m_fullRedrawBusy, 0, 0) != 0) {
+		InterlockedExchange(&m_presentDeferred, 1);
+		return;
+	}
 	const DWORD now = GetTickCount();
 	if (m_lastPresentKickTick != 0 && (now - m_lastPresentKickTick) < 8u)
 		return;
@@ -1115,6 +1120,10 @@ void CAnalyzerDlg::KickUiPresent()
 void CAnalyzerDlg::FullRedrawWave(COLORREF bg)
 {
 	if (!m_waveDC.GetSafeHdc() || m_waveW <= 0 || m_waveH <= 0) return;
+	// 全再描画なので溜まった scroll は無効（完了後の catch-up 嵐を防ぐ）
+	EnterCriticalSection(&m_cs);
+	m_pendingScroll = 0;
+	LeaveCriticalSection(&m_cs);
 	m_waveDC.FillSolidRect(0, 0, m_waveW, m_waveH, bg);
 
 	int channels = 0, filled = 0, write = 0;
@@ -1905,8 +1914,14 @@ void CAnalyzerDlg::OnPaint()
 #endif
 
 	if (!m_waveReady) {
+		InterlockedExchange(&m_fullRedrawBusy, 1);
 		FullRedrawWave(bg);
 		didWaveFull = true;
+		InterlockedExchange(&m_fullRedrawBusy, 0);
+		if (InterlockedExchange(&m_presentDeferred, 0) != 0) {
+			// 完了後の1回だけ再開（通常 8ms 間隔は KickUiPresent 側で維持）
+			KickUiPresent();
+		}
 	}
 	else if (pending > 0) {
 		const int scrolled = ScrollWaveAndDrawNew(bg, scrollCap);
@@ -1937,10 +1952,11 @@ void CAnalyzerDlg::OnPaint()
 	m_hoverChanged = false;
 
 	// 未消化の波形スクロールがあれば次フレームへ（Kick は 8ms 合流）
+	// FullRedraw 直後の追い付き Kick は上で1回だけ処理済み
 	EnterCriticalSection(&m_cs);
 	const bool moreScroll = (m_pendingScroll > 0);
 	LeaveCriticalSection(&m_cs);
-	if (moreScroll)
+	if (moreScroll && !didWaveFull)
 		KickUiPresent();
 
 #if CCUSTOM_AERO_SUPPORT
