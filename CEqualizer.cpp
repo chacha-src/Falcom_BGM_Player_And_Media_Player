@@ -633,7 +633,7 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 {
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
 	// コード解析(Goertzel)は専用ワーカー。OnTimer は表示更新のみ。
-
+	KillTimer(1);
 	if (mod != savedata.eqsoundeq) {
 		if (savedata.eqsoundeq != 9) {
 			m_s0.SetPos(200 - savedata.eq[0]);
@@ -803,7 +803,7 @@ void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 		m_cachedKeyAll = keyAll;
 	}
 
-
+	SetTimer(1, 50, NULL);
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
 
