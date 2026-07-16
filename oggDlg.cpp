@@ -1835,7 +1835,10 @@ void ShowOggAboutDialog(CWnd* pParent)
 	dlgAbout.DoModal();
 }
 
-#define MDC (88*2+170-8*5)*4
+// バナー値領域の総幅(4x px)。従来は固定ピッチ 5 文字ラベル(8*5)を差し引いて MDC としていた。
+#define MDC_TOTAL ((88*2+170)*4)
+#define MDC_LABEL_FIXED (8*5*4)
+#define MDC (MDC_TOTAL - MDC_LABEL_FIXED)
 #define MDCP (88*2+175)*4
 
 // もしダイアログボックスに最小化ボタンを追加するならば、アイコンを描画する
@@ -16221,6 +16224,63 @@ static const DWORD KPI_RENZOKU_LIMIT_MS = 120000;  // 2分
 // スクロールテキスト区切り装飾（定義は mojisub の後）
 static void DrawScrollSepDeco(CDC& dc, int x_px, int h_px, int w_px, COLORREF clr = RGB(255, 255, 255));
 
+// hFont での文字列ピクセル幅（描画なし）
+static int BannerTextWidthPx(CDC& cdc, LPCTSTR text)
+{
+	if (!text || !*text) return 0;
+	HFONT fo = (HFONT)SelectObject(cdc, hFont);
+	SIZE sz = {};
+	GetTextExtentPoint32(cdc, text, (int)_tcslen(text), &sz);
+	SelectObject(cdc, fo);
+	return sz.cx;
+}
+
+// ラベル実測幅から値の描画 X とスクロール枠幅を求める（固定ピッチ時は従来の 8*5*4 / MDC と一致）
+static void BannerValueLayout(int labelW_px, int& valueX_px, int& viewW_px)
+{
+	valueX_px = labelW_px;
+	if (valueX_px < 0) valueX_px = 0;
+	viewW_px = MDC_TOTAL - valueX_px;
+	if (viewW_px < 8 * 4) viewW_px = 8 * 4;
+}
+
+// フォント変更などで valueX/viewW が変わったらマーキー位置をリセット
+static void BannerScrollResetIfLayoutChanged(int rowId, int valueX_px, int viewW_px,
+	int& mcnt_scroll, int& mcnt_wrap)
+{
+	struct LayoutCache { int valueX; int viewW; };
+	static LayoutCache s_cache[3] = { {-1, -1}, {-1, -1}, {-1, -1} };
+	if (rowId < 0 || rowId >= 3) return;
+	if (s_cache[rowId].valueX != valueX_px || s_cache[rowId].viewW != viewW_px) {
+		s_cache[rowId].valueX = valueX_px;
+		s_cache[rowId].viewW = viewW_px;
+		mcnt_scroll = 0;
+		mcnt_wrap = 0;
+	}
+}
+
+// dcsub 上の値テキストをバナーへ BitBlt。はみ出し時は従来どおり 4px/frame でマーキー。
+static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_px,
+	int y_px, int blitH_px, int& mcnt_scroll, int& mcnt_wrap, int si_px)
+{
+	const int blitW = 88 * 2 * 4 + 1000;
+	if (si_px > viewW_px) {
+		dst.BitBlt(valueX_px, y_px, blitW, blitH_px, &src, mcnt_scroll, 0, SRCINVERT);
+		if (si_px - mcnt_scroll < viewW_px) {
+			mcnt_wrap += 4;
+			dst.BitBlt(viewW_px - mcnt_wrap + valueX_px, y_px, blitW, blitH_px, &src, 0, 0, SRCINVERT);
+			if (viewW_px - mcnt_wrap <= 0) { mcnt_wrap = 0; mcnt_scroll = 0; }
+		}
+		else {
+			mcnt_wrap = 0;
+		}
+		mcnt_scroll += 4;
+	}
+	else {
+		dst.BitBlt(valueX_px, y_px, blitW, blitH_px, &src, 0, 0, SRCINVERT);
+	}
+}
+
 // GDI バナー時間表示(timerp の t3)と同じ実再生位置(秒)。プロンプト実行の基準時刻。
 double OggGetGdiPlaybackTimeSec()
 {
@@ -16535,7 +16595,10 @@ void COggDlg::timerp()
 		m_AnalyzerDlg->RequestSyncFromMainUi();
 	s = L""; ss = L"";
 	s = "name:";
-	moji(s, 1, 0, 0xffffff);
+	int nameLabelW = moji(s, 1, 0, 0xffffff);
+	int nameValueX = 0, nameViewW = 0;
+	BannerValueLayout(nameLabelW, nameValueX, nameViewW);
+	BannerScrollResetIfLayoutChanged(0, nameValueX, nameViewW, mcnt, mcnt2);
 	if (fnn != L"")		sss = fnn;
 	if (mode == -10 || mode == -9 || mode == -8 || mode == -7) {
 		if (!tagfile.IsEmpty()) sss = tagfile;
@@ -16543,7 +16606,7 @@ void COggDlg::timerp()
 	if ((stitle != "" && mode == -1) || mode == 21 || mode == -6 || (mode == 999 && stitle != ""))
 		sss = stitle;
 	int si = mojisub(sss, 1, 0, 0xffffff);
-	if (si > MDC) {
+	if (si > nameViewW) {
 		int sss_w = si;   // 本文ピクセル幅（セパレータ開始位置の計算に使用）
 		ss = sss + _T("　　　");   // 全角スペース3文字でセパレータ幅を確保
 		si = mojisub(ss, 1, 0, 0xffffff);
@@ -16552,26 +16615,8 @@ void COggDlg::timerp()
 		if (Ms2DrawDue(ms2))
 			DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w);
 	}
-	//枠はみ出し時スクロール処理
-	if (si > MDC) {
-		dc.BitBlt(8 * 5 * 4, 0, 88 * 2 * 4 + 1000, (24 * 4) * 4, &dcsub, mcnt, 0, SRCINVERT);
-		if (si - mcnt < MDC) {
-			mcnt2++;
-			mcnt2++;
-			mcnt2++;
-			mcnt2++;
-			dc.BitBlt(MDC - mcnt2 + 8 * 5 * 4, 0, 88 * 2 * 4 + 1000, (24 * 4) * 4, &dcsub, 0, 0, SRCINVERT);
-			if (MDC - mcnt2 <= 0) { mcnt2 = 0; mcnt = 0; }
-		}
-		else mcnt2 = 0;
-		mcnt++;
-		mcnt++;
-		mcnt++;
-		mcnt++;
-	}
-	else {
-		dc.BitBlt(8 * 5 * 4, 0, 88 * 2 * 4 + 1000, (24 * 4) * 4, &dcsub, 0, 0, SRCINVERT);
-	}
+	//枠はみ出し時スクロール処理（値 X / 枠幅はラベル実測に追従）
+	BannerBlitScrollValue(dc, dcsub, nameValueX, nameViewW, 0, (24 * 4) * 4, mcnt, mcnt2, si);
 
 	//mcnt1++;
 	if (g_pActiveLoadingWnd != NULL) {
@@ -16823,9 +16868,12 @@ void COggDlg::timerp()
 		s = FormatBannerDataAudioLine();
 		moji(s, 1, 48, 0x7fffff);
 		s = "Arti:";
-		moji(s, 1, 64, 0x7fffff);
+		int artiLabelW = moji(s, 1, 64, 0x7fffff);
+		int artiValueX = 0, artiViewW = 0;
+		BannerValueLayout(artiLabelW, artiValueX, artiViewW);
+		BannerScrollResetIfLayoutChanged(1, artiValueX, artiViewW, mcnt4, mcnt3);
 		int si = mojisub(tagname, 1, 0, 0x7fffff);
-		if (si > MDC) {
+		if (si > artiViewW) {
 			int sss_w = si;
 			CString base = (mode == -8 || mode == -7) ? tagname : fnn;
 			ss = base + _T("　　　");
@@ -16833,26 +16881,7 @@ void COggDlg::timerp()
 			if (Ms2DrawDue(ms2))
 				DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w, RGB(200, 240, 255));
 		}
-		//枠はみ出し時スクロール処理
-		if (si > MDC) {
-			dc.BitBlt(8 * 5 * 4, 0 + 64 * 4, 88 * 2 * 4 + 1000, (16 + 64) * 4, &dcsub, mcnt4, 0, SRCINVERT);
-			if (si - mcnt4 < MDC) {
-				mcnt3++;
-				mcnt3++;
-				mcnt3++;
-				mcnt3++;
-				dc.BitBlt(MDC - mcnt3 + 8 * 5 * 4, 0 + 64 * 4, 88 * 2 * 4 + 1000, (16 + 64) * 4, &dcsub, 0, 0, SRCINVERT);
-				if (MDC - mcnt3 <= 0) { mcnt3 = 0; mcnt4 = 0; }
-			}
-			else mcnt3 = 0;
-			mcnt4++;
-			mcnt4++;
-			mcnt4++;
-			mcnt4++;
-		}
-		else {
-			dc.BitBlt(8 * 5 * 4, 0 + 64 * 4, 88 * 2 * 4 + 1000, (16 + 64) * 4, &dcsub, 0, 0, SRCINVERT);
-		}
+		BannerBlitScrollValue(dc, dcsub, artiValueX, artiViewW, 0 + 64 * 4, (16 + 64) * 4, mcnt4, mcnt3, si);
 	}
 	else if (mode == -10 || mode == -9) {
 		const CString hzPlay = g_pcm_upscale_active ? wavbit1_disp : wavb(si1.dwSamplesPerSec);
@@ -16871,82 +16900,53 @@ void COggDlg::timerp()
 				s.Format(_T("data:%3dk %sHz %dbit"), (kbps == 0) ? mkps : kbps, hzPlay, dispSam);
 		moji(s, 1, 48, 0x7fffff);
 		s = "Arti:";
-		moji(s, 1, 64, 0x7fffff);
+		int artiLabelW = moji(s, 1, 64, 0x7fffff);
+		int artiValueX = 0, artiViewW = 0;
+		BannerValueLayout(artiLabelW, artiValueX, artiViewW);
+		BannerScrollResetIfLayoutChanged(1, artiValueX, artiViewW, mcnt4, mcnt3);
 		//			dcsub.FillSolidRect(0,0,3000,30,RGB(1,1,1));
 		int si = mojisub(tagname, 1, 0, 0x7fffff);
-		if (si > MDC) {
+		if (si > artiViewW) {
 			int sss_w = si;
 			ss = tagname + _T("　　　");
 			si = mojisub(ss, 1, 0, 0x7fffff);
 			if (Ms2DrawDue(ms2))
 				DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w, RGB(200, 240, 255));
 		}
-		//枠はみ出し時スクロール処理
-		if (si > MDC) {
-			dc.BitBlt(8 * 5 * 4, 0 + 64 * 4, 88 * 2 * 4 + 1000, (16 + 64) * 4, &dcsub, mcnt4, 0, SRCINVERT);
-			if (si - mcnt4 < MDC) {
-				mcnt3++;
-				mcnt3++;
-				mcnt3++;
-				mcnt3++;
-				dc.BitBlt(MDC - mcnt3 + 8 * 5 * 4, 0 + 64 * 4, 88 * 2 * 4 + 1000, (16 + 64) * 4, &dcsub, 0, 0, SRCINVERT);
-				if (MDC - mcnt3 <= 0) { mcnt3 = 0; mcnt4 = 0; }
-			}
-			else mcnt3 = 0;
-			mcnt4++;
-			mcnt4++;
-			mcnt4++;
-			mcnt4++;
-		}
-		else {
-			dc.BitBlt(8 * 5 * 4, 0 + 64 * 4, 88 * 2 * 4 + 1000, (16 + 64) * 4, &dcsub, 0, 0, SRCINVERT);
-		}
+		BannerBlitScrollValue(dc, dcsub, artiValueX, artiViewW, 0 + 64 * 4, (16 + 64) * 4, mcnt4, mcnt3, si);
 	}
 	else {
 		s.Format(_T("Loop:%2d:%02d.%02d %2d:%02d.%02d"), tal1, tbl1, tcl1, tal2, tbl2, tcl2);
 		moji(s, 1, 48, 0x7fffff);
+		// 固定ピッチ時代の "    :" (Loop とコロン位置合わせ) を、"Loop" 実測幅で再現
+		const int loopPrefixW = BannerTextWidthPx(dc, _T("Loop"));
 		if (snap_loop1 < 10000000000)
-			s.Format(_T("    :%10d-%6d"), snap_loop1, snap_loop2);
+			s.Format(_T(":%10d-%6d"), snap_loop1, snap_loop2);
 		if (snap_loop1 < 1000000000)
-			s.Format(_T("    :%9d-%7d"), snap_loop1, snap_loop2);
+			s.Format(_T(":%9d-%7d"), snap_loop1, snap_loop2);
 		if (snap_loop1 < 100000000)
-			s.Format(_T("    :%8d-%8d"), snap_loop1, snap_loop2);
+			s.Format(_T(":%8d-%8d"), snap_loop1, snap_loop2);
 		if (snap_loop1 < 10000000)
-			s.Format(_T("    :%7d-%9d"), snap_loop1, snap_loop2);
-		moji(s, 1, 64, 0x7fefef);
+			s.Format(_T(":%7d-%9d"), snap_loop1, snap_loop2);
+		mojiPx(_T("Loop"), 1 * 4, 64, 0x7fefef);
+		mojiPx(s, 1 * 4 + loopPrefixW, 64, 0x7fefef);
 	}
 	if (mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == 999) {
 		s = "Albu:";
-		moji(s, 1, 80, 0x7fffff);
+		int albuLabelW = moji(s, 1, 80, 0x7fffff);
+		int albuValueX = 0, albuViewW = 0;
+		BannerValueLayout(albuLabelW, albuValueX, albuViewW);
+		BannerScrollResetIfLayoutChanged(2, albuValueX, albuViewW, mcnt6, mcnt5);
 		//			dcsub.FillSolidRect(0,0,3000,30,RGB(1,1,1));
 		int si = mojisub(tagalbum, 1, 0, 0x7fffff);
-		if (si > MDC) {
+		if (si > albuViewW) {
 			int sss_w = si;
 			ss = tagalbum + _T("　　　");
 			si = mojisub(ss, 1, 0, 0x7fffff);
 			if (Ms2DrawDue(ms2))
 				DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w, RGB(200, 240, 255));
 		}
-		//枠はみ出し時スクロール処理
-		if (si > MDC) {
-			dc.BitBlt(8 * 5 * 4, 0 + 80 * 4, 88 * 2 * 4 + 1000, (16 + 80) * 4, &dcsub, mcnt6, 0, SRCINVERT);
-			if (si - mcnt6 < MDC) {
-				mcnt5++;
-				mcnt5++;
-				mcnt5++;
-				mcnt5++;
-				dc.BitBlt(MDC - mcnt5 + 8 * 5 * 4, 0 + 80 * 4, 88 * 2 * 4 + 1000, (16 + 80) * 4, &dcsub, 0, 0, SRCINVERT);
-				if (MDC - mcnt5 <= 0) { mcnt5 = 0; mcnt6 = 0; }
-			}
-			else mcnt5 = 0;
-			mcnt6++;
-			mcnt6++;
-			mcnt6++;
-			mcnt6++;
-		}
-		else {
-			dc.BitBlt(8 * 5 * 4, 0 + 80 * 4, 88 * 2 * 4 + 1000, (16 + 80) * 4, &dcsub, 0, 0, SRCINVERT);
-		}
+		BannerBlitScrollValue(dc, dcsub, albuValueX, albuViewW, 0 + 80 * 4, (16 + 80) * 4, mcnt6, mcnt5, si);
 	}
 	else {
 		if (tcg < 50)
@@ -21146,9 +21146,13 @@ void COggDlg::OnButton5()
 }
 
 
-void COggDlg::moji(CString s, int x, int y, COLORREF rgb)
+int COggDlg::moji(CString s, int x, int y, COLORREF rgb)
 {
-	CRect rect;
+	return mojiPx(s, x * 4, y, rgb);
+}
+
+int COggDlg::mojiPx(CString s, int x_px, int y, COLORREF rgb)
+{
 	HFONT fo;
 	SIZE szinfo;
 	fo = (HFONT)SelectObject(dc, hFont);
@@ -21164,9 +21168,10 @@ void COggDlg::moji(CString s, int x, int y, COLORREF rgb)
 	dc.SetBkMode(TRANSPARENT);
 	GetTextExtentPoint32(dc, s, s.GetLength(), &szinfo);
 	if (Ms2DrawDue(ms2)) {
-		dc.TextOut(x * 4, y * 4, s, s.GetLength());
+		dc.TextOut(x_px, y * 4, s, s.GetLength());
 	}
 	SelectObject(dc, fo);
+	return szinfo.cx;
 }
 
 int COggDlg::mojisub(CString s, int x, int y, COLORREF rgb)

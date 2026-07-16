@@ -81,8 +81,11 @@ public:
 	void TogglePianoRoll();
 	void ToggleAnalyzer();
 	void FeedPianoRoll(const void* pData, int bytes);
-	void moji(CString s,int x,int y,COLORREF rgb);
-	int  mojisub(CString s,int x,int y,COLORREF rgb);
+	// x,y は論理座標(*4)。戻り値は描画文字列のピクセル幅(hFont / GetTextExtent)。
+	int  moji(CString s, int x, int y, COLORREF rgb);
+	// x_px は 4x スケール済みピクセル X。y は論理座標(*4)。
+	int  mojiPx(CString s, int x_px, int y, COLORREF rgb);
+	int  mojisub(CString s, int x, int y, COLORREF rgb);
 	CString UTF8toSJIS(const char* a);
 	CString UTF8toUNI(const TCHAR* a);
 	void Resize();
