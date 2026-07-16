@@ -689,14 +689,25 @@
 #define IDC_MP_KAISUU_L                 3489
 
 #define IDD_MP_M3U_IMPORT               201
+#define IDD_MP_PROMPT                   203
+
+#define IDC_MP_PROMPT                   3491
+#define IDC_MPP_TEXT                    3492
+#define IDC_MPP_LEGEND                  3493
+#define IDC_MPP_REMAIN                  3494
+#define IDC_MPP_RUN                     3495
+#define IDC_MPP_STOP                    3496
+#define IDC_MPP_RESET                   3497
+#define IDC_MPP_CLEAR                   3498
+#define IDC_MPP_CLOSE                   3499
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        203
+#define _APS_NEXT_RESOURCE_VALUE        204
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3491
+#define _APS_NEXT_CONTROL_VALUE         3500
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

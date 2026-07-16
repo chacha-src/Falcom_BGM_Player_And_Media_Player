@@ -285,6 +285,23 @@ struct save{
 	// --- アナライザー右クリック設定(末尾追記) ---
 	int analyzerlevelmeter;  // 1=レベルメーター表示
 	int analyzertopmost;     // 1=常に手前
+
+	// --- メディアプレイヤー プロンプト(演奏アレンジ) ---
+	TCHAR mpPromptText[2001];       // プロンプト本文(MAX2000文字+終端)
+	int mpPromptBackupValid;        // 1=バックアップ有効(実行時に保存)
+	int mpPromptBackupPitch;        // スライダー位置 0..400 (200=100%)
+	int mpPromptBackupTempo;
+	int mpPromptBackupDsvol;        // m_dsval と同じ -498..1
+	int mpPromptBackupEq[20];
+	int mpPromptBackupEqReverb;
+	int mpPromptBackupEqChorus;
+	int mpPromptBackupEqDelay;
+	// --- プロンプト窓 位置・サイズ(末尾追記) ---
+	int mpPromptHasPos;   // 1=保存座標あり
+	int mpPromptX;
+	int mpPromptY;
+	int mpPromptW;
+	int mpPromptH;
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */

@@ -27,6 +27,7 @@ int flacmode = 0;
 #include "CEqualizer.h"
 #include "CPianoRoll.h"
 #include "CAnalyzerDlg.h"
+#include "CPromptEngine.h"
 #include "CMediaPlayerDlg.h"
 #include "FileTagInfo.h"
 #include "NoteFundamentalPick.h"
@@ -16220,6 +16221,41 @@ static const DWORD KPI_RENZOKU_LIMIT_MS = 120000;  // 2分
 // スクロールテキスト区切り装飾（定義は mojisub の後）
 static void DrawScrollSepDeco(CDC& dc, int x_px, int h_px, int w_px, COLORREF clr = RGB(255, 255, 255));
 
+// GDI バナー時間表示(timerp の t3)と同じ実再生位置(秒)。プロンプト実行の基準時刻。
+double OggGetGdiPlaybackTimeSec()
+{
+	if (wavbit_sample_Hz <= 0) return 0.0;
+	static const double wavv2[] = { 0, 2.0, 1.0, 2.0 / 3.0, 2.0 / 4.0, 2.0 / 5.0, 2.0 / 6.0 };
+	int ch = wavchannel;
+	if (ch < 0 || ch > 6) ch = 2;
+	const double rateDiv = (double)wavbit_sample_Hz / wavv2[ch];
+	if (rateDiv <= 0.0) return 0.0;
+
+	__int64 pb = 0;
+	{
+		std::lock_guard<std::mutex> lk(cl2);
+		pb = playb;
+	}
+
+	static long s_lastQSamplesHeard = 0;
+	const int bpfHeardNow = PcmOutBytesPerFrame();
+	if (m_dsb && InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) == 0) {
+		ULONG hp = 0, hw = 0;
+		if (m_dsb->GetCurrentPosition(&hp, &hw) == DS_OK)
+			s_lastQSamplesHeard = DsQueuedSamples(hp, hw, bpfHeardNow);
+	}
+	const long qSamplesHeard = s_lastQSamplesHeard;
+	if (qSamplesHeard > 0 && pb > qSamplesHeard)
+		pb -= qSamplesHeard;
+	else if (qSamplesHeard > 0)
+		pb = 0;
+
+	double t3 = (double)pb / rateDiv;
+	if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
+	if (t3 < 0.0) t3 = 0.0;
+	return t3;
+}
+
 void COggDlg::timerp()
 {
 	if (g_oggUiThreadId != 0 && GetCurrentThreadId() != g_oggUiThreadId) {
@@ -16438,6 +16474,9 @@ void COggDlg::timerp()
 		tcg = tt % 100;
 	}
 	videocnt++;
+
+	if (plf == 1 && MpPromptIsActive())
+		MpPromptTick();
 
 	t3 = (double)snap_loop1 / (double)(wavbit_sample_Hz);
 	tt = (int)(t3 * 100.0);
@@ -17102,7 +17141,6 @@ void COggDlg::timerp()
 	s.Format(L"%3d%%", (int)pi);
 	m_pitch.SetWindowText(s);
 	pitch = m_pitch_sl.GetPos();
-
 
 	tt = 0;
 	//	}

@@ -111,7 +111,7 @@ public:
 	CCustomStandardButton m_folder;    // フォルダ設定(og IDC_BUTTON9 と同じ処理を委譲)
 	CCustomStandardButton m_plrename, m_pldelete, m_itemdel;
 	CCustomStandardButton m_m3uExport, m_m3uImport;
-	CCustomStandardButton m_supe, m_st;
+	CCustomStandardButton m_supe, m_st, m_prompt;
 	CButtonST m_lsup, m_up, m_down, m_lsdown;   // プレイリスト行移動(一番上/上/下/一番下)
 	CButtonST m_findup, m_finddown;              // あいまい検索 上/下
 	CCustomEdit m_find;
@@ -183,6 +183,7 @@ public:
 	int  m_lastToggleAnalyzer;
 	int  m_dsvolSlW;         // DS音量スライダー幅(DoLayout)。ラベル省略判定に使用
 	int  m_mpBtnShort;       // 0=フル 1=EQ系短縮 2=フェード/JK等短縮 3=最小幅用の超短縮
+	int  m_mpPromptShort;    // 0=プロンプト 1=プロ(幅不足時)
 
 	// og のオフスクリーン合成 DC(スペアナ+ジャケ+時間)を m_bannerRect へ StretchBlit する。
 	// アクリル(Win11)時は黒透過合成、非アクリル時は永続メモリ DC でキャッシュ Blit。
@@ -264,6 +265,7 @@ protected:
 	afx_msg void OnM3uImport();
 	afx_msg void OnSupe();
 	afx_msg void OnSt();
+	afx_msg void OnPrompt();
 	afx_msg void OnTip();
 	afx_msg void OnMini();
 	afx_msg void OnSaveMp3();

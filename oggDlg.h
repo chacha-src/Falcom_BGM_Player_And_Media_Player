@@ -387,6 +387,7 @@ void MpPersistSavedataQuick();
 void MpTaskbarReplay();
 void MpTaskbarNextTrack();
 void MpTaskbarPrevTrack();
+double OggGetGdiPlaybackTimeSec();
 void RequestPlaybackRestart(HWND hwnd = NULL);
 
 //{{AFX_INSERT_LOCATION}}

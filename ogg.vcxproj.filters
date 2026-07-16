@@ -426,6 +426,12 @@
     <ClCompile Include="CAnalyzerDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CPromptDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CPromptEngine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="PianoRollGoertzelAvx2.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -923,6 +929,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CAnalyzerDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CPromptDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CPromptEngine.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="NoteFundamentalPick.h">

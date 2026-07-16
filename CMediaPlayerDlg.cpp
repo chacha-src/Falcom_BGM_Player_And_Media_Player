@@ -16,6 +16,7 @@
 #include "AudioUpscaler.h"
 #include "CMpPlaylistIO.h"
 #include "CMpM3uImportDlg.h"
+#include "CPromptDlg.h"
 #include <direct.h>
 #include <shobjidl.h>
 
@@ -211,6 +212,7 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_lastToggleAnalyzer = -1;
 	m_dsvolSlW = 0;
 	m_mpBtnShort = -1;
+	m_mpPromptShort = -1;
 }
 
 CMediaPlayerDlg::~CMediaPlayerDlg()
@@ -353,6 +355,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_M3U_IMPORT, &CMediaPlayerDlg::OnM3uImport)
 	ON_BN_CLICKED(IDC_MP_SUPE, &CMediaPlayerDlg::OnSupe)
 	ON_BN_CLICKED(IDC_MP_ST, &CMediaPlayerDlg::OnSt)
+	ON_BN_CLICKED(IDC_MP_PROMPT, &CMediaPlayerDlg::OnPrompt)
 	ON_BN_CLICKED(IDC_MP_TIP, &CMediaPlayerDlg::OnTip)
 	ON_BN_CLICKED(IDC_MP_MINI, &CMediaPlayerDlg::OnMini)
 	ON_BN_CLICKED(IDC_MP_SAVEMP3, &CMediaPlayerDlg::OnSaveMp3)
@@ -442,6 +445,27 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			CFont* pFont = m_piano.GetFont();
 			if (pFont)
 				m_analyzer.SetFont(pFont);
+		}
+	}
+
+	// プロンプトボタン(スペアナの左)
+	if (!m_prompt.GetSafeHwnd() && m_supe.GetSafeHwnd()) {
+		CRect rc;
+		m_supe.GetWindowRect(&rc);
+		ScreenToClient(&rc);
+		if (rc.Width() < 1) rc.right = rc.left + 28;
+		if (rc.Height() < 1) rc.bottom = rc.top + 12;
+		const int gap = max(2, rc.Height() / 8);
+		rc.OffsetRect(-(rc.Width() + gap), 0);
+		if (!m_prompt.Create(LL14(L"プロンプト", L"Prompt", L"Prompt", L"Prompt", L"Prompte", L"프롬프트", L"提示", L"موجه", L"Промпт", L"Prompt", L"Prompt", L"Prompt", L"Prompt", L"Istem"),
+			WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_PROMPT))
+		{
+		}
+		else {
+			CFont* pFont = m_supe.GetFont();
+			if (pFont)
+				m_prompt.SetFont(pFont);
+			m_prompt.SetGradation(RGB(255, 225, 245), RGB(255, 180, 210), 0, TRUE);
 		}
 	}
 
@@ -753,7 +777,9 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_up, LL14(L"選択した曲を上へ移動します。", L"Move selected track up.", L"Monter la piste.", L"Sposta su.", L"Subir pista.", L"선택 곡을 위로.", L"上移所选曲目。", L"تحريك لأعلى.", L"Переместить вверх.", L"Nach oben.", L"Mover para cima.", L"Omhoog verplaatsen.", L"Przesu? w gore.", L"Yukar? ta??."));
 	addTip(m_down, LL14(L"選択した曲を下へ移動します。", L"Move selected track down.", L"Descendre la piste.", L"Sposta giu.", L"Bajar pista.", L"선택 곡을 아래로.", L"下移所选曲目。", L"تحريك لأسفل.", L"Переместить вниз.", L"Nach unten.", L"Mover para baixo.", L"Omlaag verplaatsen.", L"Przesu? w dol.", L"A?a?? ta??."));
 	addTip(m_itemdel, LL14(L"選択した曲をリストから削除します。", L"Remove selected track(s) from the list.", L"Retirer les pistes selectionnees.", L"Rimuovi le tracce selezionate.", L"Quitar pistas seleccionadas.", L"선택 곡을 목록에서 삭제.", L"从列表删除所选曲目。", L"حذف المقاطع المحددة.", L"Удалить выбранные треки.", L"Ausgewahlte Titel entfernen.", L"Remover faixas selecionadas.", L"Geselecteerde tracks verwijderen.", L"Usu? zaznaczone utwory.", L"Secili parcalar? sil."));
-	addTip(m_supe, LL14(L"スペアナ表示を切り替えます。", L"Toggle spectrum display.", L"Afficher le spectre.", L"Mostra spettro.", L"Mostrar espectro.", L"스펙트럼 표시 전환.", L"切换频谱显示。", L"تبديل عرض الطيف.", L"Спектр вкл/выкл.", L"Spektrum umschalten.", L"Alternar espectro.", L"Spectrum wisselen.", L"Prze??cz widmo.", L"Spektrumu de?i?tir."));
+	addTip(m_supe, LL14(L"スペアナ表示を切り替えます。", L"Toggle spectrum display.", L"Afficher le spectre.", L"Mostra spettro.", L"Mostrar espectro.", L"스펙트럼 표시 전환.", L"切换频谱显示。", L"تبديل عرض الطيف.", L"Спектр вкл/выкл.", L"Spektrum umschalten.", L"Alternar espectro.", L"Spectrum wisselen.", L"Przełącz widmo.", L"Spektrumu değiştir."));
+	if (m_prompt.GetSafeHwnd())
+		addTip(m_prompt, LL14(L"演奏アレンジ用プロンプトウィンドウを開きます。", L"Open the performance prompt window.", L"Ouvrir la fenetre de prompt.", L"Apri finestra prompt.", L"Abrir ventana de prompte.", L"연주 프롬프트 창을 엽니다.", L"打开演奏提示窗口。", L"فتح نافذة الموجه.", L"Открыть окно промпта.", L"Prompt-Fenster oeffnen.", L"Abrir janela de prompt.", L"Promptvenster openen.", L"Otworz okno promptu.", L"Istem penceresini ac."));
 	addTip(m_st, LL14(L"スペアナのステレオ(L/R)表示を切り替えます。", L"Toggle stereo (L/R) spectrum view.", L"Afficher le spectre stereo L/R.", L"Mostra spettro stereo L/R.", L"Mostrar espectro estereo L/R.", L"스테레오(L/R) 스펙트럼 표시 전환.", L"切换立体声(L/R)频谱显示。", L"تبديل عرض الطيف الستيريو.", L"Переключить стерео-спектр.", L"Stereo-Spektrum umschalten.", L"Alternar espectro stereo.", L"Stereo spectrum wisselen.", L"Przelacz widmo stereo.", L"Stereo spektrumu degistir."));
 	addTip(m_find, LL14(L"あいまい検索キーワード。▲▼で前後検索。", L"Fuzzy search keyword. Use up/down to find.", L"Mot-cle recherche floue.", L"Parola chiave ricerca fuzzy.", L"Palabra busqueda difusa.", L"퍼지 검색어. ▲▼로 검색.", L"模糊搜索关键字。▲▼查找。", L"كلمة بحث غامض.", L"Слово нечеткого поиска.", L"Fuzzy-Suchbegriff.", L"Palavra de busca fuzzy.", L"Fuzzy zoekterm.", L"S?owo wyszukiwania.", L"Bulan?k arama kelimesi."));
 	addTip(m_findup, LL14(L"下方向(リスト後方)に検索します。", L"Search downward in the list.", L"Chercher vers le bas.", L"Cerca in basso.", L"Buscar abajo.", L"아래로 검색.", L"向下搜索。", L"بحث للأسفل.", L"Искать вниз.", L"Abwarts suchen.", L"Buscar abaixo.", L"Omlaag zoeken.", L"Szukaj w dol.", L"Asagi ara."));
@@ -1240,12 +1266,29 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_kaisuu, cx, optY, (int)(36 * s), chkRowH); cx += (int)(40 * s);
 	MoveCtl(&m_random, cx, optY, (int)(98 * s), chkRowH);
 	int folW = (int)(54 * s), stW = (int)(72 * s), supeW = (int)(62 * s);
+	const int prWFull = max(1, (int)(76 * s));
+	const int prWShort = max(1, (int)(36 * s));
+	const int randomEndX = M + (int)(90 * s) + (int)(96 * s) + (int)(82 * s) + (int)(40 * s) + (int)(98 * s);
 	int btnRowH = (int)(24 * s);
 	int btnY1 = by2 + (ch - btnRowH) / 2;
 	int rcx = W - M - folW;
 	MoveCtl(&m_folder, rcx, by2, folW, ch); rcx -= (int)(4 * s) + stW;
 	MoveCtl(&m_st, rcx, btnY1, stW, btnRowH); rcx -= (int)(4 * s) + supeW;
 	MoveCtl(&m_supe, rcx, btnY1, supeW, btnRowH);
+	const int prGap = (int)(8 * s);
+	const bool prUseFull = (rcx - prGap - prWFull >= randomEndX);
+	const int prW = prUseFull ? prWFull : prWShort;
+	if (m_prompt.GetSafeHwnd()) {
+		const int prShortLv = prUseFull ? 0 : 1;
+		if (prShortLv != m_mpPromptShort) {
+			m_mpPromptShort = prShortLv;
+			m_prompt.SetWindowText(prUseFull
+				? LL14(L"プロンプト", L"Prompt", L"Prompt", L"Prompt", L"Prompte", L"프롬프트", L"提示", L"موجه", L"Промпт", L"Prompt", L"Prompt", L"Prompt", L"Prompt", L"Istem")
+				: LL14(L"プロ", L"Pr", L"Pr", L"Pr", L"Pr", L"프", L"示", L"مو", L"Пр", L"Pr", L"Pr", L"Pr", L"Pr", L"Pr"));
+		}
+		rcx -= (int)(4 * s) + prW;
+		MoveCtl(&m_prompt, rcx, btnY1, prW, btnRowH);
+	}
 
 	// ===== サウンドグループ: 設定 + DS/拡張/テンポ/ピッチ(1段で省スペース) =====
 	int sndTop = by2 + ch + (int)(5 * s);
@@ -3005,6 +3048,11 @@ void CMediaPlayerDlg::OnSt()
 		og->m_st.SetCheck(st);
 	}
 	SyncPushToggleButtons();
+}
+
+void CMediaPlayerDlg::OnPrompt()
+{
+	MpShowPromptDialog(this);
 }
 
 void CMediaPlayerDlg::OnM3uExport()

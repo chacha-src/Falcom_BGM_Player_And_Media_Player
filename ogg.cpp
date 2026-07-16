@@ -386,6 +386,24 @@ BOOL COggApp::InitInstance()
 		savedata.analyzertopmost = 0;
 	else if (savedata.analyzertopmost != 0)
 		savedata.analyzertopmost = 1;
+	// プロンプト窓 位置・サイズ(末尾追記)
+	if (datFileSize < (int)(offsetof(save, mpPromptHasPos) + sizeof(savedata.mpPromptHasPos))) {
+		savedata.mpPromptHasPos = 0;
+		savedata.mpPromptX = -10000;
+		savedata.mpPromptY = -10000;
+		savedata.mpPromptW = 375;
+		savedata.mpPromptH = 330;
+	}
+	else if (savedata.mpPromptHasPos) {
+		if (savedata.mpPromptW < 280 || savedata.mpPromptH < 240
+			|| savedata.mpPromptW > 10000 || savedata.mpPromptH > 10000) {
+			savedata.mpPromptHasPos = 0;
+			savedata.mpPromptX = -10000;
+			savedata.mpPromptY = -10000;
+			savedata.mpPromptW = 375;
+			savedata.mpPromptH = 330;
+		}
+	}
 	// ジャンプリスト履歴: 途中フィールド挿入で .dat がずれた場合などは破棄する
 	{
 		auto clearMpHist = []() {
