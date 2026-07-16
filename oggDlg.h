@@ -21,6 +21,9 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 #ifndef WM_SPEANA_TICK
 #define WM_SPEANA_TICK (WM_APP + 73)
 #endif
+#ifndef WM_ENDPOINT_VOLUME
+#define WM_ENDPOINT_VOLUME (WM_APP + 74)  // Windows 主音量変更 → スライダー同期
+#endif
 #ifndef WM_REFRESH_AERO_ALL
 #define WM_REFRESH_AERO_ALL (WM_APP + 71)
 #endif
@@ -365,6 +368,7 @@ public:
 	void StopTimerpVsyncThread();
 	afx_msg LRESULT OnTimerpVsyncTick(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnSpeanaTick(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnEndpointVolume(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnRefreshAeroAll(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPlaybackAutoStopped(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnEnterMpModeMsg(WPARAM wParam, LPARAM lParam);

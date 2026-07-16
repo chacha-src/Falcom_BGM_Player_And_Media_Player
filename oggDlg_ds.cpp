@@ -311,6 +311,8 @@ extern ULONG WAVDALen;
 void equaliser(void* data, int len, BOOL reset = FALSE);
 #include <mutex>
 std::mutex cl2;  // OnHScroll(シーク)とHandleNotifications(再生)の排他用。一本で統一。
+// DS Lock/Unlock 実行中(cl2 外)。UI の GetCurrentPosition が同一デバイスで固まるのを避ける。
+volatile LONG g_dsDeviceOpBusy = 0;
 BOOL syoriflg;
 extern int readme;
 
@@ -333,6 +335,7 @@ void SignalPlaybackNotifyThreadStop()
 	// OnHScroll が syukai2==1 を待っているとき stop で syukai=2 にすると
 	// 再生スレッドは syukai2 を立てずに終了するため、ここで必ず解放する。
 	syukai2 = 1;
+	InterlockedExchange(&g_dsDeviceOpBusy, 0);
 	if (og)
 		og->timer.SetEvent();
 }
@@ -515,64 +518,93 @@ UINT HandleNotifications(LPVOID)
 		// 終端位置を越えていれば、このサイクルはすべて無音で埋める（古いループ音の漏れ防止）。
 		const bool drainSilence = (g_endWrittenBytes != 0 && g_dsWrittenBytes >= g_endWrittenBytes);
 
+		// cl2 はデコード＋状態更新のみ。dsb->Lock はドライバ待ちで数秒固まることがあり、
+		// その間 UI(timerp) が同じ cl2 で止まるのを避けるため、PCM をステージしてから Lock する。
+		static std::vector<BYTE> s_dsStage;
+		int stageBytes = 0;
+		bool stageFade = false;
+		int readmeThisCycle = 0;
+		const int writtenThisCycle = len1 + len2;
+
 		{
 			std::lock_guard<std::mutex> guard(cl2);
 
-		// 3. 各種デコード処理（ロック内で実行）
-		if (og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
-			if (timeee > 900 && dougainit == 0) {
-				pMediaControl->Run();
-				dougainit = 1;
+			// 3. 各種デコード処理（ロック内で実行）
+			if (og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
+				if (timeee > 900 && dougainit == 0) {
+					pMediaControl->Run();
+					dougainit = 1;
+				}
 			}
-		}
-		timeee += savedata.ms;
+			timeee += savedata.ms;
 
-		if (thn1)
-			return stopPlaybackAndExit();
-		sflg = TRUE;
-		if(m_dsb)DispatchPlaywavFill(bufwav3, oldw, len1, len2);
-		// 曲最後まで行ったとき
-		const int readmeThisCycle = readme; // 終端確定に使うため reset 前に退避
-		if (readme) {
-			if (len1 > readme)
-				ZeroMemory(bufwav3 + readme, len2);
-			else
-				ZeroMemory(bufwav3 + oldw + readme, len1 - readme);
-		}
-		// DirectSoundバッファへの転送（UI 側 Closeds で m_dsb が NULL になるのを避けるためローカル参照）
-		if (thn1)
-			return stopPlaybackAndExit();
+			if (thn1)
+				return stopPlaybackAndExit();
+			sflg = TRUE;
+			if (m_dsb) DispatchPlaywavFill(bufwav3, oldw, len1, len2);
+			// 曲最後まで行ったとき
+			readmeThisCycle = readme; // 終端確定に使うため reset 前に退避
+			if (readme) {
+				if (len1 > readme)
+					ZeroMemory(bufwav3 + readme, len2);
+				else
+					ZeroMemory(bufwav3 + oldw + readme, len1 - readme);
+			}
+			if (thn1)
+				return stopPlaybackAndExit();
+
+			stageFade = (fade2 || drainSilence) ? true : false;
+			stageBytes = writtenThisCycle;
+			if (stageBytes > 0) {
+				if ((int)s_dsStage.size() < stageBytes)
+					s_dsStage.resize((size_t)stageBytes);
+				if (len1 > 0)
+					memcpy(s_dsStage.data(), bufwav3 + oldw, (size_t)len1);
+				if (len2 > 0)
+					memcpy(s_dsStage.data() + len1, bufwav3, (size_t)len2);
+			}
+
+			readme = 0;
+			fade2 = fade1;
+			if (flg3 != 0) flg3--;
+			sflg = FALSE;
+		} // guard(cl2) — Lock 前に必ず解放
+
+		// DirectSound 転送（cl2 外。UI 側 Closeds で m_dsb が NULL でもローカル参照で安全）
 		dsb = m_dsb;
-		if (isPlausibleDsb(dsb)) {
-			hr = dsb->Lock(oldw, len1 + len2, (LPVOID*)&pdsb1, &len3, (LPVOID*)&pdsb2, &len4, 0);
+		if (stageBytes > 0 && isPlausibleDsb(dsb) && !thn1 && !sek) {
+			InterlockedExchange(&g_dsDeviceOpBusy, 1);
+			hr = dsb->Lock(oldw, (DWORD)stageBytes, (LPVOID*)&pdsb1, &len3, (LPVOID*)&pdsb2, &len4, 0);
 			if (hr == DS_OK) {
 				thn = FALSE;
-				memcpy(pdsb1, bufwav3 + oldw, len3);
-				if (fade2 || drainSilence) ZeroMemory(pdsb1, len3);
-				if (len4 != 0) memcpy(pdsb2, bufwav3, len4);
-				if (len4 != 0 && (fade2 || drainSilence)) ZeroMemory(pdsb2, len4);
+				const int copy1 = (int)len3;
+				const int copy2 = (int)len4;
+				if (copy1 > 0 && copy1 <= stageBytes)
+					memcpy(pdsb1, s_dsStage.data(), (size_t)copy1);
+				if (stageFade && copy1 > 0) ZeroMemory(pdsb1, (SIZE_T)copy1);
+				if (copy2 > 0 && copy1 + copy2 <= stageBytes)
+					memcpy(pdsb2, s_dsStage.data() + copy1, (size_t)copy2);
+				if (stageFade && copy2 > 0) ZeroMemory(pdsb2, (SIZE_T)copy2);
 				dsb->Unlock(pdsb1, len3, pdsb2, len4);
 			}
+			InterlockedExchange(&g_dsDeviceOpBusy, 0);
 		}
-		// このサイクルで実際に DS バッファへ書き込んだバイト数を累積。
-		const int writtenThisCycle = len1 + len2;
-		const __int64 writtenBefore = g_dsWrittenBytes;
-		g_dsWrittenBytes += (writtenThisCycle > 0) ? writtenThisCycle : 0;
-		// EOF（fade1=停止 / endflg=連続）を最初に検出したサイクルで実音声の終端を確定。
-		// readme があれば最終チャンク内の実バイト境界が分かるのでそれを使う。無ければこのサイクル末尾。
-		if (g_endWrittenBytes == 0 && (fade1 || endflg)) {
-			if (readmeThisCycle > 0 && readmeThisCycle <= writtenThisCycle)
-				g_endWrittenBytes = writtenBefore + readmeThisCycle;
-			else
-				g_endWrittenBytes = g_dsWrittenBytes;
-		}
-		readme = 0;
-		fade2 = fade1;
-		oldw = WriteCursor;
-		if (flg3 != 0) flg3--;
-		sflg = FALSE;
 
-		} // guard(cl2) — 終了処理はロック外（OnPause と競合しない）
+		{
+			std::lock_guard<std::mutex> guard(cl2);
+			// 書込み累積は従来どおり Lock 成否に依存しない（再生位置進行の一貫性維持）。
+			const __int64 writtenBefore = g_dsWrittenBytes;
+			g_dsWrittenBytes += (writtenThisCycle > 0) ? writtenThisCycle : 0;
+			// EOF（fade1=停止 / endflg=連続）を最初に検出したサイクルで実音声の終端を確定。
+			// readme があれば最終チャンク内の実バイト境界が分かるのでそれを使う。無ければこのサイクル末尾。
+			if (g_endWrittenBytes == 0 && (fade1 || endflg)) {
+				if (readmeThisCycle > 0 && readmeThisCycle <= writtenThisCycle)
+					g_endWrittenBytes = writtenBefore + readmeThisCycle;
+				else
+					g_endWrittenBytes = g_dsWrittenBytes;
+			}
+			oldw = WriteCursor;
+		}
 
 		// 終端の短フェード＆ジャスト停止判定（ロックを外して終了処理へ）。
 		// playb(デコード先頭)ではなく DS 再生カーソルが実音声終端へ到達した瞬間を「曲終わり」とする。

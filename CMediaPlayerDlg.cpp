@@ -527,7 +527,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_finddown.SetIcon(IDR_UP); m_finddown.SetFlat(TRUE);
 
 	// サウンド調整スライダー(og の各スライダーと同じ範囲に合わせる)
-	m_dsvol.SetRange(-498, 1);  m_dsvol.SetMode(1);
+	m_dsvol.SetRange(-498, 1); 
 	m_kvol.SetRange(100, 900);
 	m_tempo.SetRange(0, 400);   m_tempo.SetMode(1);
 	m_pitch.SetRange(0, 400);   m_pitch.SetMode(1);
@@ -1060,7 +1060,10 @@ void CMediaPlayerDlg::DoLayout()
 	m_bannerRect.SetRect(bannerX, M, bannerX + bannerW, M + bannerH);
 
 	// og の timerp 側: ジャケットを左へ分離している間はバナー内蔵ジャケ描画を抑止
+	// （ホバー前面化アルファも不要なので、分離中はバナーホバーも落とす）
 	g_mpSideJacket = showJacket ? 1 : 0;
+	if (g_mpSideJacket)
+		g_mpBannerHover = 0;
 
 	const int gTitle = (int)(14 * s);   // グループ枠のタイトル分の高さ
 	const int gPad = (int)(5 * s);      // グループ内側の余白

@@ -114,6 +114,7 @@ extern std::vector<float> g_loopTailBuffer;
 extern size_t g_loopTailPos;
 
 extern std::mutex cl2;
+extern volatile LONG g_dsDeviceOpBusy;
 
 CImageBase* Games;
 
@@ -124,6 +125,57 @@ CImageBase* Games;
 #pragma warning(pop)
 #include <endpointvolume.h>
 #include <FunctionDiscoveryKeys_devpkey.h>
+
+// アプリ→Windows 主音量変更時のイベント文脈。OnNotify で自分自身の変更を無視する。
+static const GUID GUID_OggMasterVolCtx =
+{ 0xa3c81e42, 0x6b71, 0x4d2e, { 0x9c, 0x1a, 0x5e, 0x8f, 0x3b, 0x2d, 0x7a, 0x11 } };
+
+// timerp と Windows→UI 同期で共有（単位は deve 時: 0〜100、waveOut 時: 0〜1）
+static float s_lastAppliedVol = -1.0f;
+static bool s_lastUsedEndpoint = false;
+
+namespace {
+class CEndpointVolCallback : public IAudioEndpointVolumeCallback
+{
+	LONG m_cRef;
+	HWND m_hwnd;
+public:
+	explicit CEndpointVolCallback(HWND hwnd) : m_cRef(1), m_hwnd(hwnd) {}
+	STDMETHODIMP QueryInterface(REFIID riid, void** ppv)
+	{
+		if (!ppv) return E_POINTER;
+		if (riid == IID_IUnknown || riid == __uuidof(IAudioEndpointVolumeCallback)) {
+			*ppv = static_cast<IAudioEndpointVolumeCallback*>(this);
+			AddRef();
+			return S_OK;
+		}
+		*ppv = nullptr;
+		return E_NOINTERFACE;
+	}
+	STDMETHODIMP_(ULONG) AddRef() { return (ULONG)InterlockedIncrement(&m_cRef); }
+	STDMETHODIMP_(ULONG) Release()
+	{
+		const LONG c = InterlockedDecrement(&m_cRef);
+		if (c == 0) delete this;
+		return (ULONG)c;
+	}
+	STDMETHODIMP OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify)
+	{
+		if (!pNotify || !m_hwnd || !::IsWindow(m_hwnd)) return S_OK;
+		if (InlineIsEqualGUID(pNotify->guidEventContext, GUID_OggMasterVolCtx))
+			return S_OK;
+		float f = pNotify->fMasterVolume;
+		if (f < 0.0f) f = 0.0f;
+		if (f > 1.0f) f = 1.0f;
+		DWORD bits = 0;
+		memcpy(&bits, &f, sizeof(bits));
+		::PostMessage(m_hwnd, WM_ENDPOINT_VOLUME, (WPARAM)bits, 0);
+		return S_OK;
+	}
+};
+} // namespace
+
+static CEndpointVolCallback* g_epVolCb = nullptr;
 
 static mp3 mp3_;
 static m4a m4a_;
@@ -1076,6 +1128,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_APP + 2, dp2)
 	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
 	ON_MESSAGE(WM_SPEANA_TICK, &COggDlg::OnSpeanaTick)
+	ON_MESSAGE(WM_ENDPOINT_VOLUME, &COggDlg::OnEndpointVolume)
 	ON_MESSAGE(WM_REFRESH_AERO_ALL, &COggDlg::OnRefreshAeroAll)
 	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
 	ON_MESSAGE(WM_OGG_DEFERRED_HEAVY_INIT, OnDeferredHeavyStartup)
@@ -3085,15 +3138,30 @@ BOOL COggDlg::OnInitDialog()
 
 	//Windows7 / Vista用 ボリュームチェンジ
 	deve = NULL; dev = NULL; audio = NULL;
+	g_epVolCb = nullptr;
 	if (SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&deve))) {
-		deve->GetDefaultAudioEndpoint(eRender, eConsole, &dev);
-		dev->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, NULL, (void**)&audio);
-		float lv;
-		audio->GetMasterVolumeLevelScalar(&lv);
-		m_sl.SetRange(0, 100000);
-		m_sl.SetPos((int)((float)lv * 100000.0f));
+		if (FAILED(deve->GetDefaultAudioEndpoint(eRender, eConsole, &dev)) || !dev) {
+			deve->Release(); deve = NULL;
+		}
+		else if (FAILED(dev->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, NULL, (void**)&audio)) || !audio) {
+			dev->Release(); dev = NULL;
+			deve->Release(); deve = NULL;
+		}
+		else {
+			float lv = 0.0f;
+			audio->GetMasterVolumeLevelScalar(&lv);
+			m_sl.SetRange(0, 100000);
+			m_sl.SetPos((int)((float)lv * 100000.0f + 0.5f));
+			s_lastAppliedVol = lv * 100.0f;
+			s_lastUsedEndpoint = true;
+			g_epVolCb = new CEndpointVolCallback(m_hWnd);
+			if (FAILED(audio->RegisterControlChangeNotify(g_epVolCb))) {
+				g_epVolCb->Release();
+				g_epVolCb = nullptr;
+			}
+		}
 	}
-	else {
+	if (!deve) {
 		deve = NULL;
 		m_sl.SetRange(0, 1000);
 		m_sl.SetPos(600);
@@ -3107,6 +3175,7 @@ BOOL COggDlg::OnInitDialog()
 		float d = (float)c; d = d / 65535.0f;
 		d = 1000.0f * d + 1.0f;
 		m_sl.SetPos((int)d);
+		s_lastUsedEndpoint = false;
 	}
 
 	SetTimer(5211, 20, NULL);
@@ -15648,9 +15717,15 @@ BOOL COggDlg::DestroyWindow()
 	waveOutReset(hwo);
 	waveOutClose(hwo);
 	if (deve) {
-		audio->Release();
-		dev->Release();
+		if (audio && g_epVolCb) {
+			audio->UnregisterControlChangeNotify(g_epVolCb);
+			g_epVolCb->Release();
+			g_epVolCb = nullptr;
+		}
+		if (audio) audio->Release();
+		if (dev) dev->Release();
 		deve->Release();
+		audio = NULL; dev = NULL; deve = NULL;
 	}
 	// メディアプレイヤー画面(オーナー無しトップレベル)を後始末
 	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
@@ -16171,25 +16246,38 @@ void COggDlg::timerp()
 		if (dt > 0.1) dt = 0.1;
 
 		bool is_hovered = false;
-		HWND hWndActive = ::GetActiveWindow();
-		HWND hWndForeground = ::GetForegroundWindow();
-		if (hWndActive == GetSafeHwnd() || hWndForeground == GetSafeHwnd()) {
-			CPoint pt;
-			::GetCursorPos(&pt);
-			ScreenToClient(&pt);
-			CRect drawing_rect(0, 0, (int)(MDCP * hD), (int)((81 + 16) * hD * 4));
-			if (drawing_rect.PtInRect(pt)) {
-				is_hovered = true;
+		// メディアプレイヤーモード中は裏のファルコム特化型(og)のクライアント座標で
+		// Speana/GDI 帯を見ると、MP 上のカーソル位置が誤って「ホバー」扱いになる。
+		// MP ではバナーホバー(g_mpBannerHover)のみを使う。
+		extern int g_mpBannerHover;
+		extern int g_mpSideJacket;
+		if (savedata.playerMode != 1) {
+			HWND hWndActive = ::GetActiveWindow();
+			HWND hWndForeground = ::GetForegroundWindow();
+			if (hWndActive == GetSafeHwnd() || hWndForeground == GetSafeHwnd()) {
+				CPoint pt;
+				::GetCursorPos(&pt);
+				ScreenToClient(&pt);
+				CRect drawing_rect(0, 0, (int)(MDCP * hD), (int)((81 + 16) * hD * 4));
+				if (drawing_rect.PtInRect(pt)) {
+					is_hovered = true;
+				}
 			}
 		}
-		// メディアプレイヤーモード: バナー上のホバーも同じアニメ対象にする
-		extern int g_mpBannerHover;
-		if (g_mpBannerHover) is_hovered = true;
+		else if (g_mpSideJacket) {
+			// ミニジャケット分離時はバナー内蔵ジャケが無いのでホバー／前面化アニメは不要
+			is_hovered = false;
+			m_jacketFocus = 0.0;
+		}
+		else if (g_mpBannerHover) {
+			// バナー上のホバーでアルファ前面化(ジャケット内蔵時のみ)
+			is_hovered = true;
+		}
 
 		if (is_hovered) {
 			m_jacketFocus += dt / 2.0;
 			if (m_jacketFocus > 1.0) m_jacketFocus = 1.0;
-		} else {
+		} else if (!(savedata.playerMode == 1 && g_mpSideJacket)) {
 			m_jacketFocus -= dt / 2.0;
 			if (m_jacketFocus < 0.0) m_jacketFocus = 0.0;
 		}
@@ -16238,15 +16326,18 @@ void COggDlg::timerp()
 
 	// 実再生位置補正: playb はデコード先頭（先読み分だけ先）。DS 再生カーソルがまだ消化していない
 	// キュー分(qSamples)を差し引くと「実際に聴こえている位置」になる。時間表示・スライダーで共用。
+	// DS Lock 中は GetCurrentPosition もドライバで固まることがあるため、直前値を使う。
 	long qSamplesHeard = 0;
 	{
+		static long s_lastQSamplesHeard = 0;
 		const int bpfHeardNow = PcmOutBytesPerFrame();
 		g_outBytesPerFrame = bpfHeardNow; // DS スレッドの短フェード尺計算用に共有
-		if (m_dsb) {
+		if (m_dsb && InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) == 0) {
 			ULONG hp = 0, hw = 0;
 			if (m_dsb->GetCurrentPosition(&hp, &hw) == DS_OK)
-				qSamplesHeard = DsQueuedSamples(hp, hw, bpfHeardNow);
+				s_lastQSamplesHeard = DsQueuedSamples(hp, hw, bpfHeardNow);
 		}
+		qSamplesHeard = s_lastQSamplesHeard;
 	}
 
 	//時間
@@ -16921,14 +17012,23 @@ void COggDlg::timerp()
 	//	if(tt>=4){
 	float vol = (float)m_sl.GetPos();
 	vol /= 1000.0f;
+	// 毎 tick の waveOut/EndpointVolume 呼び出しは、他プレイヤと違い再生中 UI を独占しやすい。
+	// 値が変わったときだけ適用（ユーザー操作時の音量自体は同じ）。
 	if (plf == 1) {
-		if (deve == NULL) {
-			WORD leftv = (WORD)(0xFFFF * vol);
-			WORD rightv = (WORD)(0xFFFF * vol);
-			waveOutSetVolume(hwo, MAKELONG(leftv, rightv));
-		}
-		else {
-			audio->SetMasterVolumeLevelScalar(vol / 100.0f, &GUID_NULL);
+		const bool useEndpoint = (deve != NULL && audio != NULL);
+		if (s_lastAppliedVol < 0.0f || s_lastUsedEndpoint != useEndpoint
+			|| fabsf(vol - s_lastAppliedVol) > 1e-6f) {
+			if (!useEndpoint) {
+				WORD leftv = (WORD)(0xFFFF * vol);
+				WORD rightv = (WORD)(0xFFFF * vol);
+				waveOutSetVolume(hwo, MAKELONG(leftv, rightv));
+			}
+			else {
+				// GUID_OggMasterVolCtx: 自分の変更通知を OnNotify で無視
+				audio->SetMasterVolumeLevelScalar(vol / 100.0f, &GUID_OggMasterVolCtx);
+			}
+			s_lastAppliedVol = vol;
+			s_lastUsedEndpoint = useEndpoint;
 		}
 	}
 	if (deve)
@@ -17616,6 +17716,25 @@ LRESULT COggDlg::OnSpeanaTick(WPARAM, LPARAM)
 		return 0;
 	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg))
 		Speana();
+	return 0;
+}
+
+LRESULT COggDlg::OnEndpointVolume(WPARAM wParam, LPARAM)
+{
+	// Windows 側の主音量(エンドポイント)変更をスライダー／表示に反映。
+	if (!deve || !audio || !::IsWindow(m_hWnd)) return 0;
+	DWORD bits = (DWORD)wParam;
+	float lv = 0.0f;
+	memcpy(&lv, &bits, sizeof(lv));
+	if (lv < 0.0f) lv = 0.0f;
+	if (lv > 1.0f) lv = 1.0f;
+	m_sl.SetRange(0, 100000);
+	m_sl.SetPos((int)(lv * 100000.0f + 0.5f));
+	s_lastAppliedVol = lv * 100.0f; // timerp の deve 時単位(0〜100)に合わせ再適用を抑止
+	s_lastUsedEndpoint = true;
+	CString s;
+	s.Format(_T("%.1f%%"), lv * 100.0f);
+	m_vol.SetWindowText(s);
 	return 0;
 }
 
@@ -20296,6 +20415,8 @@ void COggDlg::SyncAnalyzerFromPlayCursor()
 	if (bytesPerFrame <= 0 || ringBytes <= (ULONG)bytesPerFrame) return;
 
 	ULONG playCur = 0, writeCur = 0;
+	if (InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0)
+		return;
 	if (m_dsb->GetCurrentPosition(&playCur, &writeCur) != DS_OK)
 		return;
 
@@ -20422,6 +20543,8 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	if (prBytes <= 0 || prBytes > TOTAL_BUF_BYTES) return;
 
 	ULONG playCur = 0, writeCur = 0;
+	if (InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0)
+		return;
 	if (m_dsb->GetCurrentPosition(&playCur, &writeCur) != DS_OK)
 		return;
 	PlayCursor2 = playCur;
@@ -20667,8 +20790,9 @@ void COggDlg::Speana()
 	// ---------------------------------------------------------
 	// データ読み込み (完全過去データ取得)
 	// ---------------------------------------------------------
-	HRESULT rett;
-	if (m_dsb) rett = m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
+	HRESULT rett = E_FAIL;
+	if (m_dsb && InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) == 0)
+		rett = m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
 	if (rett == DS_OK) { PlayCursor2 = PlayCursor; }
 	else { PlayCursor = PlayCursor2; }
 
