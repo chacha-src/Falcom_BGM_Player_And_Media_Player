@@ -2912,7 +2912,7 @@ BOOL COggDlg::OnInitDialog()
 	// ウィンドウがダイアログでない時は自動的に設定しません。
 	SetIcon(m_hIcon, TRUE);			// 大きいアイコンを設定
 	SetIcon(m_hIcon, FALSE);		// 小さいアイコンを設定
-	SetWindowText(LL14(L"mp3/m4a簡易プレイヤ Ver 0.8g", L"mp3/m4a Simple Player Ver 0.8g", L"mp3/m4a Lecteur simple Ver 0.8g", L"mp3/m4a Lettore semplice Ver 0.8g", L"mp3/m4a Reproductor simple Ver 0.8g", L"mp3/m4a 간이 플레이어 Ver 0.8g", L"mp3/m4a 简易播放器 Ver 0.8g", L"mp3/m4a مشغل بسيط Ver 0.8g", L"mp3/m4a Простой плеер Ver 0.8g", L"mp3/m4a Einfacher Player Ver 0.8g", L"mp3/m4a Player simples Ver 0.8g", L"mp3/m4a Eenvoudige speler Ver 0.8g", L"mp3/m4a Prosty odtwarzacz Ver 0.8g", L"mp3/m4a Basit oynat?c? Ver 0.8g"));
+	SetWindowText(LL14(L"mp3/m4a簡易プレイヤ Ver 0.9a", L"mp3/m4a Simple Player Ver 0.9a", L"mp3/m4a Lecteur simple Ver 0.9a", L"mp3/m4a Lettore semplice Ver 0.9a", L"mp3/m4a Reproductor simple Ver 0.9a", L"mp3/m4a 간이 플레이어 Ver 0.9a", L"mp3/m4a 简易播放器 Ver 0.9a", L"mp3/m4a مشغل بسيط Ver 0.9a", L"mp3/m4a Простой плеер Ver 0.9a", L"mp3/m4a Einfacher Player Ver 0.9a", L"mp3/m4a Player simples Ver 0.9a", L"mp3/m4a Eenvoudige speler Ver 0.9a", L"mp3/m4a Prosty odtwarzacz Ver 0.9a", L"mp3/m4a Basit oynat?c? Ver 0.9a"));
 	SetDlgItemText(IDC_BUTTON8, LL14(L"Ys6 ナピシュテム", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"이스6 나피쉬팀", L"伊苏6", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim", L"Ys6 Napishtim"));
 	SetDlgItemText(IDC_BUTTON7, LL14(L"Ys フェルガナ", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"이스 펠가나", L"伊苏菲尔盖纳", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana", L"Ys Felghana"));
 	SetDlgItemText(IDC_BUTTON15, LL14(L"Ys オリジン", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"이스 오리진", L"伊苏起源", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin"));
@@ -6713,6 +6713,8 @@ void COggDlg::play()
 		playf = 0;
 		return;
 	}
+	if (MpPromptIsActive() || MpPromptHasBackup())
+		MpPromptOnTrackChange();
 	stf = 0;
 	thn1 = FALSE;
 	thend1 = FALSE;
@@ -15402,6 +15404,7 @@ void COggDlg::stop()
 			m_PianoRollDlg->PauseAnalysis();
 		if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
 			m_AnalyzerDlg->PauseFeed();
+		MpPromptOnPlaybackStop();
 		return;
 	}
 	s_inStop1 = true;
@@ -15572,6 +15575,7 @@ void COggDlg::stop()
 	eqflg = TRUE;
 	if (pl && plw && pl->pnt >= 0 && pl->pnt < pl->playcnt)
 		ApplyPlaylistRowDisplay(pl->pc[pl->pnt]);
+	MpPromptOnPlaybackStop();
 }
 
 BOOL COggDlg::stop1()
@@ -15717,6 +15721,7 @@ BOOL COggDlg::DestroyWindow()
 {
 	// TODO: この位置に固有の処理を追加するか、または基本クラスを呼び出してください
 	//	ReleaseOggVorbis(&ogg);
+	MpPromptOnAppShutdown();
 	stop();
 	waveOutReset(hwo);
 	waveOutClose(hwo);
@@ -16316,6 +16321,14 @@ double OggGetGdiPlaybackTimeSec()
 	return t3;
 }
 
+void OggResetRubberBandStretcher()
+{
+	if (g_rubberBandStretcher) {
+		delete g_rubberBandStretcher;
+		g_rubberBandStretcher = NULL;
+	}
+}
+
 void COggDlg::timerp()
 {
 	if (g_oggUiThreadId != 0 && GetCurrentThreadId() != g_oggUiThreadId) {
@@ -16535,8 +16548,10 @@ void COggDlg::timerp()
 	}
 	videocnt++;
 
-	if (plf == 1 && MpPromptIsActive())
-		MpPromptTick();
+	if (MpPromptIsActive())
+		MpPromptNotifyPlayback(plf, (plf == 1) ? ((double)ttt / 100.0) : 0.0);
+	if (plf == 1 && ps == 0 && MpPromptIsActive())
+		MpPromptTickAtTime((double)ttt / 100.0);
 
 	t3 = (double)snap_loop1 / (double)(wavbit_sample_Hz);
 	tt = (int)(t3 * 100.0);

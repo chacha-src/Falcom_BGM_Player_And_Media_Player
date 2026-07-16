@@ -391,6 +391,7 @@ void MpTaskbarReplay();
 void MpTaskbarNextTrack();
 void MpTaskbarPrevTrack();
 double OggGetGdiPlaybackTimeSec();
+void OggResetRubberBandStretcher();
 void RequestPlaybackRestart(HWND hwnd = NULL);
 
 //{{AFX_INSERT_LOCATION}}

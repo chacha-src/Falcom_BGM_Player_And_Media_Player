@@ -108,6 +108,83 @@ END_MESSAGE_MAP()
 extern save savedata;
 extern int stflg;
 
+void CEqualizer::SyncSlidersFromSavedata()
+{
+	if (!GetSafeHwnd()) return;
+
+	CString s;
+	s.Format(L"%d", savedata.eq[0]);  m_v0.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[1]);  m_v1.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[2]);  m_v2.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[3]);  m_v3.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[4]);  m_v4.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[5]);  m_v5.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[6]);  m_v6.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[7]);  m_v7.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[8]);  m_v8.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[9]);  m_v9.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[10]); m_v10.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[11]); m_v11.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[12]); m_v12.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[13]); m_v13.SetWindowText(s);
+	s.Format(L"%d", savedata.eq[14]); m_v14.SetWindowText(s);
+
+	if (m_eff.GetSafeHwnd()) {
+		m_eff.SetPos(savedata.eqsoundeffect * 2);
+		s.Format(L"%d", savedata.eqsoundeffect * 2);
+		m_seff.SetWindowText(s);
+	}
+	if (m_smaster.GetSafeHwnd()) {
+		m_smaster.SetPos(200 - savedata.eq[15]);
+		s.Format(L"%d", savedata.eq[15]);
+		m_vmaster.SetWindowText(s);
+	}
+	if (m_ssenmei.GetSafeHwnd()) {
+		m_ssenmei.SetPos(200 - savedata.eq[16]);
+		s.Format(L"%d", savedata.eq[16]);
+		m_vsenmei.SetWindowText(s);
+	}
+	if (m_skoutei.GetSafeHwnd()) {
+		m_skoutei.SetPos(200 - savedata.eq[17]);
+		s.Format(L"%d", savedata.eq[17]);
+		m_vkoutei.SetWindowText(s);
+	}
+	if (m_smitsudo.GetSafeHwnd()) {
+		m_smitsudo.SetPos(200 - savedata.eq[18]);
+		s.Format(L"%d", savedata.eq[18]);
+		m_vmitsudo.SetWindowText(s);
+	}
+	if (m_srittai.GetSafeHwnd()) {
+		m_srittai.SetPos(200 - savedata.eq[19]);
+		s.Format(L"%d", savedata.eq[19]);
+		m_vrittai.SetWindowText(s);
+	}
+	if (m_reverb.GetSafeHwnd()) {
+		m_reverb.SetPos(200 - savedata.eq_reverb);
+		s.Format(L"%d", savedata.eq_reverb);
+		m_reverbi.SetWindowText(s);
+	}
+	if (m_chorus.GetSafeHwnd()) {
+		m_chorus.SetPos(200 - savedata.eq_chorus);
+		s.Format(L"%d", savedata.eq_chorus);
+		m_chorusi.SetWindowText(s);
+	}
+	if (m_delay.GetSafeHwnd()) {
+		m_delay.SetPos(200 - savedata.eq_delay);
+		s.Format(L"%d", savedata.eq_delay);
+		m_delayi.SetWindowText(s);
+	}
+
+	CCustomSliderCtrl* bands[] = {
+		&m_s0, &m_s1, &m_s2, &m_s3, &m_s4, &m_s5, &m_s6, &m_s7, &m_s8, &m_s9,
+		&m_s10, &m_s11, &m_s12, &m_s13, &m_s14
+	};
+	for (int i = 0; i < 15; ++i) {
+		if (bands[i]->GetSafeHwnd())
+			bands[i]->SetPos(200 - savedata.eq[i]);
+	}
+}
+
 // CEqualizer メッセージ ハンドラー
 BOOL CEqualizer::OnInitDialog()
 {
@@ -152,39 +229,6 @@ BOOL CEqualizer::OnInitDialog()
 	addTip(IDC_COMBO5, LL14(L"イコライザープリセットを選択します", L"Select equalizer preset", L"Choisir un preset d'egaliseur", L"Seleziona preset equalizzatore", L"Seleccionar preset del ecualizador", L"이퀄라이저 프리셋 선택", L"选择均衡器预设", L"اختر إعداد المعادل", L"Выбрать пресет эквалайзера", L"Equalizer-Voreinstellung wahlen", L"Selecionar preset do equalizador", L"Equalizerpreset kiezen", L"Wybierz preset korektora", L"Ekolayzer on ayarini sec"));
 	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
 	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
-
-
-	CString s;
-	s.Format(L"%d", savedata.eq[0]);
-	m_v0.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[1]);
-	m_v1.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[2]);
-	m_v2.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[3]);
-	m_v3.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[4]);
-	m_v4.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[5]);
-	m_v5.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[6]);
-	m_v6.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[7]);
-	m_v7.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[8]);
-	m_v8.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[9]);
-	m_v9.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[10]);
-	m_v10.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[11]);
-	m_v11.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[12]);
-	m_v12.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[13]);
-	m_v13.SetWindowText(s);
-	s.Format(L"%d", savedata.eq[14]);
-	m_v14.SetWindowText(s);
 
 	m_s0.SetMode(1);
 	m_s1.SetMode(1);
@@ -243,66 +287,17 @@ BOOL CEqualizer::OnInitDialog()
 	m_s14.SetRange(0, 200);
 
 	m_eff.SetRange(0, 200);
-	m_eff.SetPos(savedata.eqsoundeffect * 2);
-	s.Format(L"%d", savedata.eqsoundeffect * 2);
-	m_seff.SetWindowText(s);
 
 	m_smaster.SetRange(0, 200);
-	m_smaster.SetPos(200 - savedata.eq[15]);
-	s.Format(L"%d", savedata.eq[15]);
-	m_vmaster.SetWindowText(s);
-
 	m_ssenmei.SetRange(0, 200);
-	m_ssenmei.SetPos(200 - savedata.eq[16]);
-	s.Format(L"%d", savedata.eq[16]);
-	m_vsenmei.SetWindowText(s);
-
 	m_skoutei.SetRange(0, 200);
-	m_skoutei.SetPos(200 - savedata.eq[17]);
-	s.Format(L"%d", savedata.eq[17]);
-	m_vkoutei.SetWindowText(s);
-
 	m_smitsudo.SetRange(0, 200);
-	m_smitsudo.SetPos(200 - savedata.eq[18]);
-	s.Format(L"%d", savedata.eq[18]);
-	m_vmitsudo.SetWindowText(s);
-
 	m_srittai.SetRange(0, 200);
-	m_srittai.SetPos(200 - savedata.eq[19]);
-	s.Format(L"%d", savedata.eq[19]);
-	m_vrittai.SetWindowText(s);
-
 	m_reverb.SetRange(0, 200);
-	m_reverb.SetPos(200 - savedata.eq_reverb);
-	s.Format(L"%d", savedata.eq_reverb);
-	m_reverbi.SetWindowText(s);
-
 	m_chorus.SetRange(0, 200);
-	m_chorus.SetPos(200 - savedata.eq_chorus);
-	s.Format(L"%d", savedata.eq_chorus);
-	m_chorusi.SetWindowText(s);
-
 	m_delay.SetRange(0, 200);
-	m_delay.SetPos(200 - savedata.eq_delay);
-	s.Format(L"%d", savedata.eq_delay);
-	m_delayi.SetWindowText(s);
 
-
-	m_s0.SetPos(200 - savedata.eq[0]);
-	m_s1.SetPos(200 - savedata.eq[1]);
-	m_s2.SetPos(200 - savedata.eq[2]);
-	m_s3.SetPos(200 - savedata.eq[3]);
-	m_s4.SetPos(200 - savedata.eq[4]);
-	m_s5.SetPos(200 - savedata.eq[5]);
-	m_s6.SetPos(200 - savedata.eq[6]);
-	m_s7.SetPos(200 - savedata.eq[7]);
-	m_s8.SetPos(200 - savedata.eq[8]);
-	m_s9.SetPos(200 - savedata.eq[9]);
-	m_s10.SetPos(200 - savedata.eq[10]);
-	m_s11.SetPos(200 - savedata.eq[11]);
-	m_s12.SetPos(200 - savedata.eq[12]);
-	m_s13.SetPos(200 - savedata.eq[13]);
-	m_s14.SetPos(200 - savedata.eq[14]);
+	SyncSlidersFromSavedata();
 
 	// 環境音響プリセット101種
 	

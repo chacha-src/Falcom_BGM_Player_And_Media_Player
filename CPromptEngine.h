@@ -35,9 +35,17 @@ void MpPromptReset();
 // クリア: イベント消去→リセット
 void MpPromptClearAll();
 
+// 曲切替・再演奏時( play() 開始時)。実行中は次の再生開始まで待機し、値はバックアップへ戻す。
+void MpPromptOnTrackChange();
+// 演奏停止( stop() )時。値をバックアップへ戻し、実行中なら次の再生開始まで待機。
+void MpPromptOnPlaybackStop();
+// アプリ終了時。バックアップ復元して保存データを正常化。
+void MpPromptOnAppShutdown();
+// timerp から plf と GDI 時刻(ttt/100)を渡す(再生開始エッジ検出込み)
+void MpPromptNotifyPlayback(int plf, double tSec);
 // timerp 等から毎フレーム呼ぶ(演奏中のみ)。tSec は GDI バナー時間表示(t3)を渡す。
 void MpPromptTickAtTime(double tSec);
 void MpPromptTick();
 
-	// 演奏時間(秒): GDI バナー表示と同じ(曲頭からの実再生位置、DS 先読み補正済み)
+// 演奏時間(秒): GDI バナー表示と同じ(曲頭からの実再生位置、DS 先読み補正済み)
 double MpGetPerformanceTimeSec();

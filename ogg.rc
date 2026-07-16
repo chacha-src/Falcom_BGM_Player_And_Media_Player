@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -105,7 +105,7 @@ CAPTION "oggのﾊﾞｰｼﾞｮﾝ情報"
 FONT 9, "ＭＳ Ｐゴシック", 0, 0, 0x0
 BEGIN
     ICON            IDR_MAINFRAME,IDC_STATIC,11,10,20,48
-    LTEXT           "ogg Version Ver 0.8x Release series",IDC_ABOUT_VER,40,10,200,8,SS_NOPREFIX
+    LTEXT           "ogg Version Ver 0.9a Release series",IDC_ABOUT_VER,40,10,200,8,SS_NOPREFIX
     LTEXT           "Copyright (C) ちゃちゃ/ちゃー",IDC_ABOUT_COPY,40,22,200,8
     DEFPUSHBUTTON   "OK",IDOK,260,7,50,14,WS_GROUP
     LTEXT           "スタティック",IDC_STATICin,40,34,268,8
@@ -117,7 +117,7 @@ END
 IDD_OGG_DIALOG DIALOGEX 0, 0, 416, 329
 STYLE DS_SETFONT | DS_MODALFRAME | DS_3DLOOK | WS_MINIMIZEBOX | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_ACCEPTFILES | WS_EX_APPWINDOW
-CAPTION "mp3/m4a簡易プレイヤ Ver 0.8g"
+CAPTION "mp3/m4a簡易プレイヤ Ver 0.9a"
 FONT 9, "ＭＳ Ｐゴシック", 400, 0, 0x0
 BEGIN
     PUSHBUTTON      "Ys6 ナピシュテム",IDC_BUTTON8,7,106,64,14
@@ -732,8 +732,8 @@ STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 CAPTION "プロンプト"
 FONT 9, "メイリオ", 400, 0, 0x80
 BEGIN
-    EDITTEXT        IDC_MPP_TEXT,8,8,359,88,ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | WS_TABSTOP
-    EDITTEXT        IDC_MPP_LEGEND,8,100,359,150,ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | NOT WS_BORDER | NOT WS_TABSTOP
+    EDITTEXT        IDC_MPP_TEXT,8,8,359,88,ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL
+    EDITTEXT        IDC_MPP_LEGEND,8,100,359,150,ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | NOT WS_BORDER | WS_VSCROLL | NOT WS_TABSTOP
     LTEXT           "",IDC_MPP_REMAIN,8,254,359,14
     PUSHBUTTON      "実行",IDC_MPP_RUN,8,274,68,34
     PUSHBUTTON      "停止",IDC_MPP_STOP,78,274,68,34
@@ -1032,7 +1032,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,8,7,510
+ FILEVERSION 0,8,7,520
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1050,10 +1050,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.8g Rel.2026.07.14"
-            VALUE "FileVersion", "0.8.7.510"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.07.17"
+            VALUE "FileVersion", "0.8.7.520"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.07.14"
+            VALUE "LegalCopyright", "Copyright (C) 2026.07.17"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

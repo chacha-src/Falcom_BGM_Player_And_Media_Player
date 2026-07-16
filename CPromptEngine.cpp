@@ -1,5 +1,7 @@
 ﻿#include "stdafx.h"
 #include "CPromptEngine.h"
+#include "CMediaPlayerDlg.h"
+#include "CEqualizer.h"
 #include "oggDlg.h"
 #include <vector>
 #include <algorithm>
@@ -10,6 +12,7 @@ extern save savedata;
 extern COggDlg* og;
 extern __int64 playb;
 extern int loop1, loop2;
+extern int plf;
 extern int wavbit_sample_Hz, wavchannel;
 extern int tempo, pitch;
 extern std::mutex cl2;
@@ -49,6 +52,19 @@ static BOOL g_active = FALSE;
 static BOOL g_hasBackup = FALSE;
 static MpPromptBackup g_backup;
 static int g_lastPresetIdx = -1;
+static int g_lastPlf = 0;
+static BOOL g_promptAwaitPlayStart = FALSE;
+static BOOL g_promptExecuteBeforePlay = FALSE;
+static double g_promptEventCutoff = -1.0;
+static BOOL g_promptNewTrack = FALSE;
+
+static void MpPromptResetPlaybackState()
+{
+	g_lastPlf = 0;
+	g_promptAwaitPlayStart = FALSE;
+	g_promptExecuteBeforePlay = FALSE;
+	g_promptEventCutoff = -1.0;
+}
 
 static int DsVolFromPercent(int pct)
 {
@@ -316,6 +332,37 @@ static void ApplyEventValue(MpPromptCmd cmd, int val)
 	}
 }
 
+static void ApplyBackupForCmd(MpPromptCmd cmd)
+{
+	if (!g_hasBackup || !og) return;
+	switch (cmd) {
+	case CMD_PITCH:
+		og->m_pitch_sl.SetPos(g_backup.pitchSl);
+		pitch = g_backup.pitchSl;
+		break;
+	case CMD_TEMPO:
+		og->m_tempo_sl.SetPos(g_backup.tempoSl);
+		tempo = g_backup.tempoSl;
+		break;
+	case CMD_DSVOL:
+		og->m_dsval.SetPos(g_backup.dsvol);
+		savedata.dsvol = g_backup.dsvol;
+		break;
+	case CMD_EQ_MASTER: ApplyEqIndex(15, g_backup.eq[15]); break;
+	case CMD_EQ_SENMEI: ApplyEqIndex(16, g_backup.eq[16]); break;
+	case CMD_EQ_KOUTEI: ApplyEqIndex(17, g_backup.eq[17]); break;
+	case CMD_EQ_MITSUDO: ApplyEqIndex(18, g_backup.eq[18]); break;
+	case CMD_EQ_RITTAI: ApplyEqIndex(19, g_backup.eq[19]); break;
+	case CMD_EQ_REVERB: ApplyFx(0, g_backup.eqReverb); break;
+	case CMD_EQ_CHORUS: ApplyFx(1, g_backup.eqChorus); break;
+	case CMD_EQ_DELAY: ApplyFx(2, g_backup.eqDelay); break;
+	default:
+		if (cmd >= CMD_EQ_BAND0 && cmd < CMD_EQ_MASTER)
+			ApplyEqIndex(cmd - CMD_EQ_BAND0, g_backup.eq[cmd - CMD_EQ_BAND0]);
+		break;
+	}
+}
+
 static int FindLastEventIndex(MpPromptCmd cmd, double t)
 {
 	int best = -1;
@@ -323,6 +370,7 @@ static int FindLastEventIndex(MpPromptCmd cmd, double t)
 	for (int i = 0; i < (int)g_events.size(); ++i) {
 		const MpPromptEvent& ev = g_events[i];
 		if (ev.cmd != cmd) continue;
+		if (g_promptEventCutoff >= 0.0 && ev.t0 < g_promptEventCutoff - 0.05) continue;
 		if (ev.t0 > t + 0.001) continue;
 		if (ev.t0 > bestT) {
 			bestT = ev.t0;
@@ -343,6 +391,103 @@ double MpGetPerformanceTimeSec()
 void MpPromptTick()
 {
 	MpPromptTickAtTime(MpGetPerformanceTimeSec());
+}
+
+static void MpPromptSyncUi()
+{
+	if (!og) return;
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		if (mp->m_tempo.GetSafeHwnd())
+			mp->m_tempo.SetPos(og->m_tempo_sl.GetPos());
+		if (mp->m_pitch.GetSafeHwnd())
+			mp->m_pitch.SetPos(og->m_pitch_sl.GetPos());
+	}
+	if (og->m_EqualizerDlg && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
+		og->m_EqualizerDlg->SyncSlidersFromSavedata();
+	if (og->m_pitch.GetSafeHwnd()) {
+		CString s;
+		float pi = (float)og->m_pitch_sl.GetPos();
+		if (pi >= 200.0f) pi -= 100.0f;
+		else pi = pi / 3.0f + 33.3f;
+		s.Format(L"%3d%%", (int)pi);
+		og->m_pitch.SetWindowText(s);
+	}
+	if (og->m_temp_num.GetSafeHwnd()) {
+		CString s;
+		float te = (float)og->m_tempo_sl.GetPos();
+		if (te >= 200.0f) te -= 100.0f;
+		else te = te / 3.0f + 33.3f;
+		s.Format(L"%3d%%", (int)te);
+		og->m_temp_num.SetWindowText(s);
+	}
+}
+
+static void MpPromptPrepareForNextPlayback()
+{
+	if (!g_hasBackup && !g_active) return;
+
+	if (g_hasBackup)
+		MpPromptBackupRestore(g_backup);
+
+	g_lastPresetIdx = -1;
+	g_promptEventCutoff = -1.0;
+	g_promptExecuteBeforePlay = FALSE;
+	g_lastPlf = 0;
+	g_promptAwaitPlayStart = g_active ? TRUE : FALSE;
+	g_promptNewTrack = g_active ? TRUE : FALSE;
+
+	OggResetRubberBandStretcher();
+	MpPromptSyncUi();
+}
+
+void MpPromptOnTrackChange()
+{
+	MpPromptPrepareForNextPlayback();
+}
+
+void MpPromptOnPlaybackStop()
+{
+	MpPromptPrepareForNextPlayback();
+}
+
+void MpPromptOnAppShutdown()
+{
+	if (g_hasBackup)
+		MpPromptBackupRestore(g_backup);
+	g_active = FALSE;
+	g_lastPresetIdx = -1;
+	g_promptNewTrack = FALSE;
+	MpPromptResetPlaybackState();
+	OggResetRubberBandStretcher();
+	MpPromptSyncUi();
+}
+
+void MpPromptNotifyPlayback(int plfNow, double tSec)
+{
+	const int on = (plfNow != 0) ? 1 : 0;
+	if (!g_active) {
+		g_lastPlf = on;
+		return;
+	}
+	if (on && !g_lastPlf) {
+		g_promptAwaitPlayStart = FALSE;
+		if (g_promptNewTrack) {
+			g_promptNewTrack = FALSE;
+			g_promptEventCutoff = -1.0;
+			if (g_hasBackup)
+				MpPromptBackupRestore(g_backup);
+			OggResetRubberBandStretcher();
+			MpPromptSyncUi();
+		}
+		else if (g_promptExecuteBeforePlay) {
+			g_promptEventCutoff = (tSec < 0.0) ? 0.0 : tSec;
+			g_promptExecuteBeforePlay = FALSE;
+		}
+		g_lastPresetIdx = -1;
+	}
+	if (!on && g_lastPlf)
+		g_lastPresetIdx = -1;
+	g_lastPlf = on;
 }
 
 void MpPromptBackupCapture(MpPromptBackup& out)
@@ -443,12 +588,17 @@ BOOL MpPromptExecute(const CString& text, CString* errMsg)
 		return FALSE;
 	g_active = TRUE;
 	g_lastPresetIdx = -1;
+	g_promptExecuteBeforePlay = (plf != 1);
+	g_promptAwaitPlayStart = (plf != 1);
+	g_promptEventCutoff = -1.0;
+	g_lastPlf = (plf == 1) ? 1 : 0;
 	return TRUE;
 }
 
 void MpPromptStop()
 {
 	g_active = FALSE;
+	MpPromptResetPlaybackState();
 }
 
 void MpPromptReset()
@@ -457,6 +607,8 @@ void MpPromptReset()
 		MpPromptBackupRestore(g_backup);
 	g_active = FALSE;
 	g_lastPresetIdx = -1;
+	MpPromptResetPlaybackState();
+	MpPromptSyncUi();
 }
 
 void MpPromptClearAll()
@@ -468,19 +620,28 @@ void MpPromptClearAll()
 	g_hasBackup = FALSE;
 	savedata.mpPromptBackupValid = 0;
 	g_lastPresetIdx = -1;
+	MpPromptResetPlaybackState();
 }
 
 void MpPromptTickAtTime(double tSec)
 {
 	if (!g_active || g_events.empty() || !og) return;
+	if (g_promptAwaitPlayStart) return;
 	const double t = tSec;
+	if (t < 0.0) return;
 
 	for (int ci = CMD_PITCH; ci <= CMD_EQ_DELAY; ++ci) {
 		MpPromptCmd cmd = (MpPromptCmd)ci;
 		int idx = FindLastEventIndex(cmd, t);
-		if (idx < 0) continue;
+		if (idx < 0) {
+			ApplyBackupForCmd(cmd);
+			continue;
+		}
 		const MpPromptEvent& ev = g_events[idx];
-		if (t < ev.t0) continue;
+		if (t < ev.t0) {
+			ApplyBackupForCmd(cmd);
+			continue;
+		}
 		int val = InterpValue(ev, t);
 		ApplyEventValue(cmd, val);
 	}
@@ -488,6 +649,7 @@ void MpPromptTickAtTime(double tSec)
 	for (int i = 0; i < (int)g_events.size(); ++i) {
 		const MpPromptEvent& ev = g_events[i];
 		if (ev.cmd < CMD_PRESET_SB || ev.cmd > CMD_PRESET_FA) continue;
+		if (g_promptEventCutoff >= 0.0 && ev.t0 < g_promptEventCutoff - 0.05) continue;
 		if (t < ev.t0) continue;
 		if (t > ev.t1 + 0.5) continue;
 		if (i == g_lastPresetIdx) continue;

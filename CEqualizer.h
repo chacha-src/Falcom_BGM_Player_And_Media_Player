@@ -129,6 +129,7 @@ public:
 	CString m_cachedKeyHigh;
 	CString m_cachedKeyAll;
 	void ApplyKeyCodesUi();
+	void SyncSlidersFromSavedata();
 	afx_msg LRESULT OnEqKeyUpdate(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnDestroy();
 	CCustomSliderCtrl m_reverb;

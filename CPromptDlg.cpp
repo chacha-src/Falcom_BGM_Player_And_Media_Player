@@ -410,7 +410,10 @@ void CPromptDlg::OnExitSizeMove()
 {
 	m_inSizeMove = FALSE;
 	if (::IsWindow(m_hWnd) && !IsIconic()) {
-		SyncLayoutAndPaint(TRUE, TRUE);
+		LayoutControls();
+		RedrawWindow(NULL, NULL,
+			RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+		RefreshOpaqueFixers(FALSE);
 		if (m_posRestored)
 			SavePosToSavedata();
 	}
@@ -429,8 +432,15 @@ void CPromptDlg::OnSize(UINT nType, int cx, int cy)
 	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
 	if (nType == SIZE_MINIMIZED)
 		return;
-	// ドラッグ中は ERASE のみ、確定時は OnExitSizeMove で同期再描画
-	SyncLayoutAndPaint(!m_inSizeMove, TRUE);
+	LayoutControls();
+	if (m_inSizeMove) {
+		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+	}
+	else {
+		RedrawWindow(NULL, NULL,
+			RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+		RefreshOpaqueFixers(FALSE);
+	}
 	if (m_posRestored)
 		SavePosToSavedata();
 }
@@ -469,9 +479,7 @@ BOOL CPromptDlg::PreTranslateMessage(MSG* pMsg)
 #if CCUSTOM_AERO_SUPPORT
 LRESULT CPromptDlg::OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam)
 {
-	LRESULT r = CCustomBlurDialogExBase::OnReapplyOpaqueFixers(wParam, lParam);
-	RefreshAfterLayout(TRUE);
-	return r;
+	return CCustomBlurDialogExBase::OnReapplyOpaqueFixers(wParam, lParam);
 }
 #endif
 
