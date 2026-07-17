@@ -61,6 +61,13 @@ public:
 	CString GetModulePath();
 	void loadplaylistname();
 
+	int GetPlaylistFileCount();
+	CString GetPlaylistDisplayName(int idx);
+	int ShowTrackContextMenu(CPoint pt, CWnd* pOwner);
+	void HandleTrackContextCmd(int cmd);
+	void TransferSelectedToPlaylist(int targetIdx, bool moveNotCopy);
+	void RemoveMissingFiles();
+
 	CBrush m_brDlg;
 
 	HICON m_hIcon;
@@ -147,3 +154,14 @@ public:
 };
 
 CString NormalizePlaylistPath(LPCTSTR fol);
+
+enum {
+	PL_CTX_INFO = 1,
+	PL_CTX_WAV = 2,
+	PL_CTX_DEL = 3,
+	PL_CTX_REMOVE_MISSING = 4,
+	PL_CTX_MOVE_BASE = 42500,
+	PL_CTX_COPY_BASE = 43500,
+	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,
+	PL_CTX_COPY_MAX = PL_CTX_COPY_BASE + 999,
+};

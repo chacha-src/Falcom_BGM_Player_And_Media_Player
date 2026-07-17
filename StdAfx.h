@@ -302,6 +302,29 @@ struct save{
 	int mpPromptY;
 	int mpPromptW;
 	int mpPromptH;
+
+	// --- プロンプト履歴(末尾追記) 最大20件 ---
+	int mpPromptHistCnt;              // 0..20
+	TCHAR mpPromptHistText[20][2001]; // 新しい順 [0]=最新
+
+	// --- ピアノロール検出パラメータ調整(100=組込み既定値, 25..400) ---
+	int prTuneSilencePct;       // SILENCE_ABS
+	int prTuneBandSilBassPct;   // BAND_SILENCE_BASS
+	int prTuneBandSilMidPct;    // BAND_SILENCE_MID
+	int prTuneBandSilTrePct;    // BAND_SILENCE_TRE
+	int prTuneHoldBassPct;      // HOLD_ENV_BASS
+	int prTuneHoldMidPct;       // HOLD_ENV_MID
+	int prTuneHoldTrePct;       // HOLD_ENV_TRE
+	int prTuneRetrigPct;        // RETRIGGER_RATIO
+	int prTunePickBassPct;      // 低音帯ピック相対閾値
+	int prTunePickLowMidPct;    // 低中域
+	int prTunePickMelodyPct;    // メロディ帯 C4-C6
+	int prTunePickTrePct;       // 高音域
+	int prTuneHarmGhostPct;     // 倍音ゴースト margin
+	int prTuneHarmRejectPct;    // 倍音棄却比率(0.78)
+	int prTuneHarmProfPct;      // 音色プロファイル最低確信度
+	int prTuneAbsFloorPct;      // 絶対ノイズフロア基準
+	int prTuneOnsetDeltaPct;    // オンセット delta
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */

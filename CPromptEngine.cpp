@@ -657,3 +657,29 @@ void MpPromptTickAtTime(double tSec)
 		g_lastPresetIdx = i;
 	}
 }
+
+void MpPromptPushHistory(LPCTSTR text)
+{
+	if (!text || !*text) return;
+	CString s(text);
+	s.Trim();
+	if (s.IsEmpty()) return;
+	if (savedata.mpPromptHistCnt > 0
+		&& _tcscmp(savedata.mpPromptHistText[0], s) == 0)
+		return;
+	const int nMove = (savedata.mpPromptHistCnt < 20) ? savedata.mpPromptHistCnt : 19;
+	for (int j = nMove; j > 0; --j)
+		_tcscpy(savedata.mpPromptHistText[j], savedata.mpPromptHistText[j - 1]);
+	_tcsncpy(savedata.mpPromptHistText[0], s, _countof(savedata.mpPromptHistText[0]) - 1);
+	savedata.mpPromptHistText[0][_countof(savedata.mpPromptHistText[0]) - 1] = 0;
+	if (savedata.mpPromptHistCnt < 20)
+		savedata.mpPromptHistCnt++;
+	extern void MpPersistSavedataQuick();
+	MpPersistSavedataQuick();
+}
+
+void MpPromptFlushHistoryOnExit()
+{
+	if (savedata.mpPromptText[0])
+		MpPromptPushHistory(savedata.mpPromptText);
+}

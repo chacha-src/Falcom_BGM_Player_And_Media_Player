@@ -22899,6 +22899,7 @@ void COggDlg::LoadJacket(CString s)
 
 void COggDlg::OnDestroy()
 {
+	MpPromptFlushHistoryOnExit();
 	CCustomBlurDialogBase::OnDestroy();
 
 	// TODO: ここにメッセージ ハンドラー コードを追加します。

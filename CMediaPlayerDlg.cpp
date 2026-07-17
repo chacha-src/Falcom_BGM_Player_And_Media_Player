@@ -3153,22 +3153,16 @@ void CMediaPlayerDlg::OnKaisuuKillFocus()
 	MpPersistSavedataQuick();
 }
 
-// リスト右クリック: 詳細編集 / WAV保存 / 削除(pl の処理を流用)
+// リスト右クリック: 詳細編集 / WAV保存 / 削除 / 他リスト移動・コピー / 存在しないファイル削除
 void CMediaPlayerDlg::OnRclickList(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	*pResult = 0;
 	if (!pl) return;
 	SyncSelectionToPlaylist();
 	CPoint pt; ::GetCursorPos(&pt);
-	CMenu menu; menu.CreatePopupMenu();
-	menu.AppendMenu(MF_STRING, 1, LL14(L"詳細編集", L"Edit details", L"Editer details", L"Modifica dettagli", L"Editar detalles", L"상세 편집", L"详细编辑", L"تحرير التفاصيل", L"Изменить детали", L"Details bearbeiten", L"Editar detalhes", L"Details bewerken", L"Edytuj szczego?y", L"Detaylar? duzenle"));
-	menu.AppendMenu(MF_STRING, 2, LL14(L"WAVに保存", L"Save as WAV", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV로 저장", L"保存为WAV", L"حفظ كـ WAV", L"Сохранить как WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
-	menu.AppendMenu(MF_SEPARATOR, 0, (LPCTSTR)NULL);
-	menu.AppendMenu(MF_STRING, 3, LL14(L"削除", L"Delete", L"Supprimer", L"Elimina", L"Eliminar", L"삭제", L"删除", L"حذف", L"Удалить", L"Loschen", L"Excluir", L"Verwijderen", L"Usu?", L"Sil"));
-	int cmd = menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RETURNCMD, pt.x, pt.y, this);
-	if (cmd == 1) pl->OnList();
-	else if (cmd == 2) pl->OnPopWavExport();
-	else if (cmd == 3) { pl->Del(); RefreshList(TRUE); }
+	const int cmd = pl->ShowTrackContextMenu(pt, this);
+	if (cmd != 0)
+		pl->HandleTrackContextCmd(cmd);
 }
 
 // リストでの DELETE キー押下: 選択曲を削除（プレイリスト本体の Del を流用）

@@ -3,7 +3,9 @@
 #include "CPromptEngine.h"
 
 extern save savedata;
+extern void MpPersistSavedataQuick();
 static CPromptDlg* g_promptDlg = nullptr;
+static BOOL g_histSelChanging = FALSE;
 
 IMPLEMENT_DYNAMIC(CPromptDlg, CCustomBlurDialogExBase)
 
@@ -28,6 +30,8 @@ void CPromptDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_MPP_RESET, m_reset);
 	DDX_Control(pDX, IDC_MPP_CLEAR, m_clear);
 	DDX_Control(pDX, IDC_MPP_CLOSE, m_close);
+	DDX_Control(pDX, IDC_MPP_HIST, m_hist);
+	DDX_Control(pDX, IDC_MPP_SAVEHIST, m_saveHist);
 }
 
 BEGIN_MESSAGE_MAP(CPromptDlg, CCustomBlurDialogExBase)
@@ -36,6 +40,8 @@ BEGIN_MESSAGE_MAP(CPromptDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MPP_RESET, &CPromptDlg::OnReset)
 	ON_BN_CLICKED(IDC_MPP_CLEAR, &CPromptDlg::OnClear)
 	ON_BN_CLICKED(IDC_MPP_CLOSE, &CPromptDlg::OnCloseBtn)
+	ON_BN_CLICKED(IDC_MPP_SAVEHIST, &CPromptDlg::OnSaveHist)
+	ON_CBN_SELCHANGE(IDC_MPP_HIST, &CPromptDlg::OnHistSel)
 	ON_EN_CHANGE(IDC_MPP_TEXT, &CPromptDlg::OnTextChanged)
 	ON_WM_SIZE()
 	ON_WM_ENTERSIZEMOVE()
@@ -150,6 +156,7 @@ void CPromptDlg::StyleButtons()
 	m_reset.SetGradation(RGB(215, 235, 255), RGB(165, 205, 245), 0, TRUE);
 	m_clear.SetGradation(RGB(255, 235, 205), RGB(255, 205, 150), 0, TRUE);
 	m_close.SetGradation(RGB(235, 230, 240), RGB(205, 195, 215), 0, TRUE);
+	m_saveHist.SetGradation(RGB(215, 235, 255), RGB(165, 205, 245), 0, TRUE);
 }
 
 void CPromptDlg::SetupTooltips()
@@ -168,6 +175,8 @@ void CPromptDlg::SetupTooltips()
 	addTip(m_reset, LL14(L"実行前の設定に戻し、プロンプト実行を停止します。", L"Restore settings from before execution and stop.", L"Restaurer les reglages d'avant execution et arreter.", L"Ripristina le impostazioni precedenti e ferma.", L"Restaurar ajustes previos y detener.", L"실행 전 설정으로 되돌리고 중지합니다.", L"恢复到执行前设置并停止。", L"استعادة الإعدادات قبل التشغيل والإيقاف.", L"Восстановить настройки до запуска и остановить.", L"Einstellungen vor Ausfuehrung wiederherstellen.", L"Restaurar configuracoes anteriores e parar.", L"Instellingen voor uitvoering herstellen en stoppen.", L"Przywroc ustawienia sprzed uruchomienia i zatrzymaj.", L"Calistirmadan onceki ayarlara don ve durdur."));
 	addTip(m_clear, LL14(L"プロンプト本文を消去し、設定も初期状態に戻します。", L"Clear prompt text and restore initial settings.", L"Effacer le prompt et restaurer les reglages initiaux.", L"Cancella il prompt e ripristina le impostazioni.", L"Borrar el prompte y restaurar ajustes iniciales.", L"프롬프트 본문을 지우고 설정도 초기화합니다.", L"清除提示文本并恢复初始设置。", L"مسح نص الموجه واستعادة الإعدادات الأولية.", L"Очистить промпт и восстановить исходные настройки.", L"Prompt loeschen und Ausgangseinstellungen wiederherstellen.", L"Limpar prompt e restaurar configuracoes iniciais.", L"Prompt wissen en begininstellingen herstellen.", L"Wyczysc prompt i przywroc ustawienia poczatkowe.", L"Istem metnini temizle ve baslangic ayarlarina don."));
 	addTip(m_close, LL14(L"プロンプトウィンドウを閉じます(入力内容は保存)。", L"Close the prompt window (text is saved).", L"Fermer la fenetre de prompt (texte sauvegarde).", L"Chiudi la finestra prompt (testo salvato).", L"Cerrar la ventana de prompte (se guarda el texto).", L"프롬프트 창을 닫습니다(입력 내용 저장).", L"关闭提示窗口(保存输入内容)。", L"إغلاق نافذة الموجه (يُحفظ النص).", L"Закрыть окно промпта (текст сохраняется).", L"Prompt-Fenster schliessen (Text wird gespeichert).", L"Fechar janela de prompt (texto salvo).", L"Promptvenster sluiten (tekst wordt opgeslagen).", L"Zamknij okno promptu (tekst jest zapisywany).", L"Istem penceresini kapat (metin kaydedilir)."));
+	addTip(m_saveHist, LL14(L"現在のプロンプト本文を履歴に保存します。", L"Save current prompt text to history.", L"Enregistrer le prompt dans l'historique.", L"Salva il prompt nella cronologia.", L"Guardar el prompte en el historial.", L"현재 프롬프트를 기록에 저장합니다.", L"将当前提示保存到历史。", L"حفظ الموجه في السجل.", L"Сохранить промпт в историю.", L"Prompt in Verlauf speichern.", L"Salvar prompt no historico.", L"Prompt in geschiedenis opslaan.", L"Zapisz prompt w historii.", L"Promptu gecmise kaydet."));
+	addTip(m_hist, LL14(L"保存したプロンプト履歴から読み込みます。", L"Load a saved prompt from history.", L"Charger un prompt depuis l'historique.", L"Carica un prompt dalla cronologia.", L"Cargar un prompte del historial.", L"저장된 프롬프트 기록에서 불러옵니다.", L"从历史记录加载提示。", L"تحميل موجه من السجل.", L"Загрузить промпт из истории.", L"Prompt aus Verlauf laden.", L"Carregar prompt do historico.", L"Prompt uit geschiedenis laden.", L"Wczytaj prompt z historii.", L"Gecmisten prompt yukle."));
 }
 
 static void RaiseChildZOrder(CWnd* pWnd)
@@ -182,46 +191,65 @@ void CPromptDlg::LayoutControls()
 	CRect rc;
 	GetClientRect(&rc);
 	const int W = rc.Width(), H = rc.Height();
-	if (W < 200 || H < 220) return;
+	if (W < 200) return;
 
 	const int M = 8;
 	const int btnH = 36;
 	const int btnGap = 6;
 	const int remainH = 18;
+	const int histH = 24;
+	const int histGap = 10;
 	const int gapSm = 4;
 	const int gapMd = 6;
 	const int editMinH = 72;
-	const int legendMinH = 100;
+	const int legendMinH = 80;
 
 	const int iw = max(1, W - M * 2);
 	const int btnW = max(60, min(80, (iw - btnGap * 4) / 5));
 
-	// 下から順に確保(ボタン → 残り文字 → 説明 → 入力)
-	const int btnY = H - M - btnH;
-	const int remainY = btnY - gapSm - remainH;
+	// 下から順に確保(ボタン → 履歴 → 残り文字 → 説明 → 入力)
+	const int btnY = max(M, H - M - btnH);
+	const int histY = btnY - histGap - histH;
+	const int remainY = histY - gapSm - remainH;
 	const int legendBottom = remainY - gapMd;
 
 	int legendH = max(legendMinH, (H * 7) / 30);
 	int legendTop = legendBottom - legendH;
 	if (legendTop < M + editMinH + gapMd) {
 		legendTop = M + editMinH + gapMd;
-		legendH = max(legendMinH, legendBottom - legendTop);
+		legendH = legendBottom - legendTop;
 	}
+	if (legendH < 48)
+		legendH = max(48, legendBottom - legendTop);
+	if (legendTop + legendH > legendBottom)
+		legendH = max(48, legendBottom - legendTop);
 
 	const int editTop = M;
 	int editH = legendTop - gapMd - editTop;
 	if (editH < editMinH) {
 		editH = editMinH;
 		legendTop = editTop + editH + gapMd;
-		legendH = max(legendMinH, legendBottom - legendTop);
+		legendH = max(48, legendBottom - legendTop);
+		if (legendTop + legendH > legendBottom)
+			legendH = max(48, legendBottom - legendTop);
 	}
 
 	if (m_edit.GetSafeHwnd())
 		m_edit.MoveWindow(M, editTop, iw, editH);
 	if (m_legend.GetSafeHwnd())
-		m_legend.MoveWindow(M, legendTop, iw, legendH);
+		m_legend.MoveWindow(M, legendTop, iw, max(48, legendH));
 	if (CWnd* pRem = GetDlgItem(IDC_MPP_REMAIN))
 		pRem->MoveWindow(M, remainY, iw, remainH);
+	if (CWnd* pHistL = GetDlgItem(IDC_MPP_HIST_L))
+		pHistL->MoveWindow(M, histY + 3, 34, 18);
+	const int saveHistW = 68;
+	const int histComboW = max(120, min(220, iw - 36 - saveHistW - 8));
+	if (m_hist.GetSafeHwnd()) {
+		m_hist.MoveWindow(M + 36, histY, histComboW, histH);
+		m_hist.SetWindowPos(&CWnd::wndBottom, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	}
+	if (m_saveHist.GetSafeHwnd())
+		m_saveHist.MoveWindow(M + 36 + histComboW + 6, histY, saveHistW, histH);
 
 	int bx = M;
 	if (m_run.GetSafeHwnd()) { m_run.MoveWindow(bx, btnY, btnW, btnH); bx += btnW + btnGap; }
@@ -231,9 +259,13 @@ void CPromptDlg::LayoutControls()
 	if (m_close.GetSafeHwnd())
 		m_close.MoveWindow(max(bx, W - M - btnW), btnY, btnW, btnH);
 
+	// ボタンを最前面へ(履歴コンボと重ならないよう)
 	RaiseChildZOrder(&m_edit);
 	RaiseChildZOrder(&m_legend);
 	RaiseChildZOrder(GetDlgItem(IDC_MPP_REMAIN));
+	RaiseChildZOrder(GetDlgItem(IDC_MPP_HIST_L));
+	RaiseChildZOrder(&m_hist);
+	RaiseChildZOrder(&m_saveHist);
 	RaiseChildZOrder(&m_run);
 	RaiseChildZOrder(&m_stop);
 	RaiseChildZOrder(&m_reset);
@@ -311,9 +343,9 @@ void CPromptDlg::RestorePosFromSavedata()
 {
 	int x = savedata.mpPromptX, y = savedata.mpPromptY;
 	int w = savedata.mpPromptW, h = savedata.mpPromptH;
-	if (!savedata.mpPromptHasPos || w < 280 || h < 240 || w > 10000 || h > 10000) {
+	if (!savedata.mpPromptHasPos || w < 280 || h < 340 || w > 10000 || h > 10000) {
 		w = 375;
-		h = 330;
+		h = 368;
 		if (GetParent() && ::IsWindow(GetParent()->GetSafeHwnd())) {
 			CRect pr;
 			GetParent()->GetWindowRect(&pr);
@@ -346,12 +378,21 @@ BOOL CPromptDlg::OnInitDialog()
 	RestorePosFromSavedata();
 
 	SetWindowText(LL14(L"プロンプト", L"Prompt", L"Prompt", L"Prompt", L"Prompte", L"프롬프트", L"提示", L"موجه", L"Промпт", L"Prompt", L"Prompt", L"Prompt", L"Prompt", L"Istem"));
+	ModifyStyle(WS_MINIMIZEBOX, 0);
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+#if CCUSTOM_AERO_SUPPORT
+	if (!CCC_IsAeroEnabled())
+#endif
+		ModifyStyleEx(0, WS_EX_DLGMODALFRAME);
 	m_legend.SetWindowText(MpPromptLegendText());
 	SetDlgItemText(IDC_MPP_RUN, LL14(L"実行", L"Run", L"Executer", L"Esegui", L"Ejecutar", L"실행", L"执行", L"تشغيل", L"Запуск", L"Ausfuehren", L"Executar", L"Uitvoeren", L"Uruchom", L"Calistir"));
 	SetDlgItemText(IDC_MPP_STOP, LL14(L"停止", L"Stop", L"Arret", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stopp", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
 	SetDlgItemText(IDC_MPP_RESET, LL14(L"リセット", L"Reset", L"Reinit.", L"Ripristina", L"Restablecer", L"리셋", L"重置", L"إعادة ضبط", L"Сброс", L"Zuruecksetzen", L"Redefinir", L"Reset", L"Reset", L"Sifirla"));
 	SetDlgItemText(IDC_MPP_CLEAR, LL14(L"クリア", L"Clear", L"Effacer", L"Cancella", L"Borrar", L"지우기", L"清除", L"مسح", L"Очистить", L"Leeren", L"Limpar", L"Wissen", L"Wyczysc", L"Temizle"));
 	SetDlgItemText(IDC_MPP_CLOSE, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	SetDlgItemText(IDC_MPP_HIST_L, LL14(L"履歴:", L"History:", L"Historique:", L"Cronologia:", L"Historial:", L"기록:", L"历史:", L"السجل:", L"История:", L"Verlauf:", L"Historico:", L"Geschiedenis:", L"Historia:", L"Gecmis:"));
+	SetDlgItemText(IDC_MPP_SAVEHIST, LL14(L"履歴保存", L"Save history", L"Enregistrer", L"Salva", L"Guardar", L"기록 저장", L"保存历史", L"حفظ", L"Сохранить", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
 
 	if (m_legend.GetSafeHwnd()) {
 		m_legend.SetReadOnly(TRUE);
@@ -379,6 +420,7 @@ BOOL CPromptDlg::OnInitDialog()
 				m_reset.SetFont(&m_fontBtn);
 				m_clear.SetFont(&m_fontBtn);
 				m_close.SetFont(&m_fontBtn);
+				m_saveHist.SetFont(&m_fontBtn);
 			}
 		}
 	}
@@ -386,6 +428,7 @@ BOOL CPromptDlg::OnInitDialog()
 	StyleButtons();
 	SetupTooltips();
 	LoadTextFromSavedata();
+	ReloadHistoryCombo();
 	UpdateRemainLabel();
 	SyncLayoutAndPaint(TRUE, TRUE);
 	return TRUE;
@@ -395,7 +438,7 @@ void CPromptDlg::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
 {
 	if (lpMMI) {
 		lpMMI->ptMinTrackSize.x = 315;
-		lpMMI->ptMinTrackSize.y = 270;
+		lpMMI->ptMinTrackSize.y = 340;
 	}
 	CCustomBlurDialogExBase::OnGetMinMaxInfo(lpMMI);
 }
@@ -548,9 +591,67 @@ void CPromptDlg::OnReset()
 
 void CPromptDlg::OnClear()
 {
+	SaveCurrentToHistory();
 	SetDlgItemText(IDC_MPP_TEXT, _T(""));
 	SaveTextToSavedata();
 	MpPromptClearAll();
+	UpdateRemainLabel();
+}
+
+void CPromptDlg::SaveCurrentToHistory()
+{
+	CString s;
+	GetDlgItemText(IDC_MPP_TEXT, s);
+	s.Trim();
+	if (!s.IsEmpty())
+		MpPromptPushHistory(s);
+	ReloadHistoryCombo();
+}
+
+void CPromptDlg::ReloadHistoryCombo()
+{
+	if (!m_hist.GetSafeHwnd()) return;
+	g_histSelChanging = TRUE;
+	const int prev = m_hist.GetCurSel();
+	m_hist.ResetContent();
+	m_hist.AddString(LL14(L"(履歴なし)", L"(No history)", L"(Aucun historique)", L"(Nessuna cronologia)",
+		L"(Sin historial)", L"(기록 없음)", L"(无历史)", L"(لا سجل)", L"(Нет истории)", L"(Kein Verlauf)",
+		L"(Sem historico)", L"(Geen geschiedenis)", L"(Brak historii)", L"(Gecmis yok)"));
+	if (savedata.mpPromptHistCnt > 0) {
+		for (int i = 0; i < savedata.mpPromptHistCnt && i < 20; ++i) {
+			CString line = savedata.mpPromptHistText[i];
+			line.Replace(_T("\r\n"), _T(" "));
+			line.Replace(_T("\n"), _T(" "));
+			if (line.GetLength() > 80)
+				line = line.Left(80) + _T("...");
+			CString label;
+			label.Format(_T("%d: %s"), i + 1, (LPCTSTR)line);
+			m_hist.AddString(label);
+		}
+	}
+	if (prev >= 0 && prev < m_hist.GetCount())
+		m_hist.SetCurSel(prev);
+	else
+		m_hist.SetCurSel(0);
+	g_histSelChanging = FALSE;
+}
+
+void CPromptDlg::OnSaveHist()
+{
+	SaveCurrentToHistory();
+}
+
+void CPromptDlg::OnHistSel()
+{
+	if (g_histSelChanging) return;
+	const int sel = m_hist.GetCurSel();
+	if (sel <= 0) return;
+	const int idx = sel - 1;
+	if (idx < 0 || idx >= savedata.mpPromptHistCnt || idx >= 20) return;
+	g_histSelChanging = TRUE;
+	SetDlgItemText(IDC_MPP_TEXT, savedata.mpPromptHistText[idx]);
+	g_histSelChanging = FALSE;
+	SaveTextToSavedata();
 	UpdateRemainLabel();
 }
 

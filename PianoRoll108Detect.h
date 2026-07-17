@@ -62,7 +62,7 @@ namespace PianoRoll108
     }
 
     inline bool OnsetSupportsPick(const float* onset, const float* prevOnset,
-        int keyIndex, float levelScale)
+        int keyIndex, float levelScale, float onsetDeltaScale = 1.0f)
     {
         if (!onset || !prevOnset || keyIndex < 0 || keyIndex >= COUNT) return false;
         float oMax = 0.0f;
@@ -72,13 +72,16 @@ namespace PianoRoll108
         float scale = levelScale;
         if (scale < 0.70f) scale = 0.70f;
         if (scale > 1.10f) scale = 1.10f;
+        float od = onsetDeltaScale;
+        if (od < 0.25f) od = 0.25f;
+        if (od > 4.0f) od = 4.0f;
         const float delta = onset[keyIndex] - prevOnset[keyIndex];
         return onset[keyIndex] >= oMax * 0.20f * scale &&
-            delta >= oMax * 0.12f;
+            delta >= oMax * 0.12f * od;
     }
 
     inline bool OnsetSupportsPickInBand(const float* onset, const float* prevOnset,
-        int keyIndex, int bandLo, int bandHi, float levelScale)
+        int keyIndex, int bandLo, int bandHi, float levelScale, float onsetDeltaScale = 1.0f)
     {
         if (!onset || !prevOnset || keyIndex < bandLo || keyIndex >= bandHi) return false;
         float oMax = 0.0f;
@@ -88,9 +91,12 @@ namespace PianoRoll108
         float scale = levelScale;
         if (scale < 0.70f) scale = 0.70f;
         if (scale > 1.10f) scale = 1.10f;
+        float od = onsetDeltaScale;
+        if (od < 0.25f) od = 0.25f;
+        if (od > 4.0f) od = 4.0f;
         const float delta = onset[keyIndex] - prevOnset[keyIndex];
         return onset[keyIndex] >= oMax * 0.16f * scale &&
-            delta >= oMax * 0.09f;
+            delta >= oMax * 0.09f * od;
     }
 
     inline float AbsFloorForKey(int key, float baseFloor)
@@ -150,7 +156,10 @@ namespace PianoRoll108
 
     inline void BuildFramePicks(const float* blend, bool* outPicked, int count,
         float levelScale = 1.0f, float absNoiseFloor = 0.02f,
-        const float* onset = nullptr, const float* prevOnset = nullptr)
+        const float* onset = nullptr, const float* prevOnset = nullptr,
+        float pickBassRel = 0.28f, float pickLowMidRel = 0.20f,
+        float pickMelodyRel = 0.10f, float pickTreRel = 0.22f,
+        float onsetDeltaScale = 1.0f)
     {
         if (!blend || !outPicked || count != COUNT) return;
         memset(outPicked, 0, (size_t)count * sizeof(bool));
@@ -168,7 +177,7 @@ namespace PianoRoll108
         bool band[COUNT];
 
         // ---- 1) 低音: 枠2本、相対厳しめ。隣接は後で強制1本化 ----
-        PickFundamentalNotesRange(gated, band, count, EDGE_LO, BASS_END, 2, 0.28f / scale);
+        PickFundamentalNotesRange(gated, band, count, EDGE_LO, BASS_END, 2, pickBassRel / scale);
         for (int i = 0; i < EDGE_LO; ++i) band[i] = false;
         CollapseNearbyPicks(blend, band, EDGE_LO, BASS_END, 3, false); // 強い方優先
         ForceUniqueBassAdjacents(blend, band, EDGE_LO, BASS_END);
@@ -181,12 +190,12 @@ namespace PianoRoll108
         SoftAttenuateBassHarmonics(outPicked, upperSpec, count);
 
         // ---- 2) 低中 (C3–C4): 弦の支えなど ----
-        PickFundamentalNotesRange(upperSpec, band, count, BASS_END, C4_KEY, 2, 0.20f);
+        PickFundamentalNotesRange(upperSpec, band, count, BASS_END, C4_KEY, 2, pickLowMidRel);
         CollapseNearbyPicks(blend, band, BASS_END, C4_KEY, 3, false);
         MergeBandPicks(outPicked, band, BASS_END, C4_KEY);
 
         // ---- 3) メロディ帯 C4–C6: 枠を多め・閾値緩め（ピアノ本命）----
-        PickFundamentalNotesRange(upperSpec, band, count, C4_KEY, O5_HI, 5, 0.10f);
+        PickFundamentalNotesRange(upperSpec, band, count, C4_KEY, O5_HI, 5, pickMelodyRel);
         // 帯域内 salience で取れなかったアタックを onset で救出（ゴースト形は除外）
         if (onset && prevOnset) {
             for (int i = C4_KEY; i < O5_HI; ++i) {
@@ -194,7 +203,7 @@ namespace PianoRoll108
                 if (upperSpec[i] < AbsFloorForKey(i, absNoiseFloor) * 1.5f) continue;
                 if (!IsStrictLocalPeak(upperSpec, i, C4_KEY, O5_HI)) continue;
                 if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END)) continue;
-                if (OnsetSupportsPickInBand(onset, prevOnset, i, C4_KEY, O5_HI, scale))
+                if (OnsetSupportsPickInBand(onset, prevOnset, i, C4_KEY, O5_HI, scale, onsetDeltaScale))
                     band[i] = true;
             }
         }
@@ -202,7 +211,7 @@ namespace PianoRoll108
         MergeBandPicks(outPicked, band, C4_KEY, O5_HI);
 
         // ---- 4) 高音 C6–C7: 控えめ ----
-        PickFundamentalNotesRange(upperSpec, band, count, O5_HI, EDGE_HI, 2, 0.22f);
+        PickFundamentalNotesRange(upperSpec, band, count, O5_HI, EDGE_HI, 2, pickTreRel);
         for (int i = O5_HI; i < EDGE_HI; ++i) {
             if (!band[i]) continue;
             if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END) &&

@@ -2959,6 +2959,7 @@
     <ClCompile Include="CAnalyzerDlg.cpp" />
     <ClCompile Include="CPromptDlg.cpp" />
     <ClCompile Include="CPromptEngine.cpp" />
+    <ClCompile Include="CPianoRollTuneDlg.cpp" />
     <ClCompile Include="PianoRollGoertzelAvx2.cpp" />
     <ClCompile Include="KpiHostClient.cpp" />
     <ClCompile Include="Arc.cpp" />
@@ -3047,6 +3048,7 @@
     <ClInclude Include="CAnalyzerDlg.h" />
     <ClInclude Include="CPromptDlg.h" />
     <ClInclude Include="CPromptEngine.h" />
+    <ClInclude Include="CPianoRollTuneDlg.h" />
     <ClInclude Include="PianoRollGoertzelAvx2.h" />
     <ClInclude Include="KpiHostClient.h" />
     <ClInclude Include="kpi_host_ipc.h" />

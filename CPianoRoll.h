@@ -122,6 +122,7 @@ protected:
     afx_msg void OnToggleImpulsiveGhost();
     afx_msg void OnToggleHarmonicGhost();
     afx_msg void OnToggleHarmonicProfile();
+    afx_msg void OnOpenTuneDialog();
     virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 private:
@@ -187,6 +188,7 @@ private:
     static constexpr UINT  IDM_ROLL_IMPULSE = 42217;
     static constexpr UINT  IDM_ROLL_HARM_GHOST = 42218;
     static constexpr UINT  IDM_ROLL_HARM_PROF = 42219;
+    static constexpr UINT  IDM_ROLL_TUNE = 42220;
 
     // ---- フレーム履歴リングバッファ(UI スレッドのみ読み書き) ----
     NoteFrame m_historyRing[MAX_HISTORY];  // 確定済みフレームの環状配列

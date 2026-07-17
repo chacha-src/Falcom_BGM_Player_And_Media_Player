@@ -35,7 +35,9 @@ void MpPromptReset();
 // クリア: イベント消去→リセット
 void MpPromptClearAll();
 
-// 曲切替・再演奏時( play() 開始時)。実行中は次の再生開始まで待機し、値はバックアップへ戻す。
+void MpPromptPushHistory(LPCTSTR text);
+void MpPromptFlushHistoryOnExit();
+
 void MpPromptOnTrackChange();
 // 演奏停止( stop() )時。値をバックアップへ戻し、実行中なら次の再生開始まで待機。
 void MpPromptOnPlaybackStop();

@@ -404,6 +404,48 @@ BOOL COggApp::InitInstance()
 			savedata.mpPromptH = 330;
 		}
 	}
+	// プロンプト履歴(末尾追記)
+	if (datFileSize < (int)(offsetof(save, mpPromptHistCnt) + sizeof(savedata.mpPromptHistCnt))) {
+		savedata.mpPromptHistCnt = 0;
+		ZeroMemory(savedata.mpPromptHistText, sizeof(savedata.mpPromptHistText));
+	}
+	else if (savedata.mpPromptHistCnt < 0 || savedata.mpPromptHistCnt > 20) {
+		savedata.mpPromptHistCnt = 0;
+		ZeroMemory(savedata.mpPromptHistText, sizeof(savedata.mpPromptHistText));
+	}
+	// ピアノロール検出パラメータ(末尾追記)
+	if (datFileSize < (int)(offsetof(save, prTuneSilencePct) + sizeof(savedata.prTuneSilencePct))) {
+		savedata.prTuneSilencePct = 100;
+		savedata.prTuneBandSilBassPct = 100;
+		savedata.prTuneBandSilMidPct = 100;
+		savedata.prTuneBandSilTrePct = 100;
+		savedata.prTuneHoldBassPct = 100;
+		savedata.prTuneHoldMidPct = 100;
+		savedata.prTuneHoldTrePct = 100;
+		savedata.prTuneRetrigPct = 100;
+		savedata.prTunePickBassPct = 100;
+		savedata.prTunePickLowMidPct = 100;
+		savedata.prTunePickMelodyPct = 100;
+		savedata.prTunePickTrePct = 100;
+		savedata.prTuneHarmGhostPct = 100;
+		savedata.prTuneHarmRejectPct = 100;
+		savedata.prTuneHarmProfPct = 100;
+		savedata.prTuneAbsFloorPct = 100;
+		savedata.prTuneOnsetDeltaPct = 100;
+	}
+	else {
+		int* tuneFields[] = {
+			&savedata.prTuneSilencePct, &savedata.prTuneBandSilBassPct, &savedata.prTuneBandSilMidPct,
+			&savedata.prTuneBandSilTrePct, &savedata.prTuneHoldBassPct, &savedata.prTuneHoldMidPct,
+			&savedata.prTuneHoldTrePct, &savedata.prTuneRetrigPct, &savedata.prTunePickBassPct,
+			&savedata.prTunePickLowMidPct, &savedata.prTunePickMelodyPct, &savedata.prTunePickTrePct,
+			&savedata.prTuneHarmGhostPct, &savedata.prTuneHarmRejectPct, &savedata.prTuneHarmProfPct,
+			&savedata.prTuneAbsFloorPct, &savedata.prTuneOnsetDeltaPct,
+		};
+		for (int* p : tuneFields) {
+			if (*p < 25 || *p > 400) *p = 100;
+		}
+	}
 	// ジャンプリスト履歴: 途中フィールド挿入で .dat がずれた場合などは破棄する
 	{
 		auto clearMpHist = []() {

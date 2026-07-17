@@ -7,6 +7,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 #include "CPianoRoll.h"
+#include "CPianoRollTuneDlg.h"
 #include "resource.h"
 #include "NoteFundamentalPick.h"
 #include "PianoRollPick.h"
@@ -18,6 +19,20 @@
 
 extern save savedata;
 void COggDlg_SyncPianoRollFast();
+
+static int PrTuneClampPct(int v)
+{
+	if (v <= 0) return 100;
+	if (v < 25) return 25;
+	if (v > 400) return 400;
+	return v;
+}
+
+static float PrTuneF(int pct, float defVal)
+{
+	return defVal * (float)PrTuneClampPct(pct) / 100.0f;
+}
+
 IMPLEMENT_DYNAMIC(CPianoRoll, CCustomBlurDialogExBase)
 
 // pick fix 5 ベースを低音/中高音(一体)の2帯に整理。
@@ -528,6 +543,7 @@ BEGIN_MESSAGE_MAP(CPianoRoll, CCustomBlurDialogExBase)
     ON_COMMAND(IDM_ROLL_IMPULSE, &CPianoRoll::OnToggleImpulsiveGhost)
     ON_COMMAND(IDM_ROLL_HARM_GHOST, &CPianoRoll::OnToggleHarmonicGhost)
     ON_COMMAND(IDM_ROLL_HARM_PROF, &CPianoRoll::OnToggleHarmonicProfile)
+    ON_COMMAND(IDM_ROLL_TUNE, &CPianoRoll::OnOpenTuneDialog)
     ON_MESSAGE(WM_PIANOROLL_SYNC, &CPianoRoll::OnSyncRequest)
     ON_MESSAGE(WM_PIANOROLL_ANALYSIS_DONE, &CPianoRoll::OnAnalysisDone)
 END_MESSAGE_MAP()
@@ -979,7 +995,7 @@ namespace
     //   - こちらは「棄却ラインのすぐ近く(僅差)で生き残ったか」だけを見る予備検知
     // 明確に独立している音(下の潜在基音がほとんど鳴っていない)は対象外となり、
     // 実際にゴーストが観測された「閾値をまたいで一瞬だけ通過する」ケースだけを狙う。
-    bool IsMarginalFund(const float* blend, int candidate, int count, float marginRatio)
+    bool IsMarginalFund(const float* blend, int candidate, int count, float marginRatio, float rejectRatio)
     {
         if (!blend || candidate < 0 || candidate >= count) return false;
         const float sc = blend[candidate];
@@ -987,7 +1003,7 @@ namespace
         for (int n = PianoKey::HARMONIC_N_MIN; n <= PianoKey::HARMONIC_N_MAX; ++n) {
             const int lo = PianoKey::HarmonicDownKey(candidate, n);
             if (lo < 0 || lo >= count || lo >= candidate) continue;
-            const float rejectAt = sc * 0.78f;
+            const float rejectAt = sc * rejectRatio;
             const float marginAt = rejectAt * marginRatio;
             if (blend[lo] >= marginAt && blend[lo] < rejectAt)
                 return true;
@@ -1035,6 +1051,19 @@ void CPianoRoll::UpdateNoteStates()
     using namespace Cfg;
 
     const float pickScale = PickThreshScaleFromLevelDb(m_bufwav3LevelDb);
+    const float silenceAbs = PrTuneF(savedata.prTuneSilencePct, SILENCE_ABS);
+    const float bandSilBass = PrTuneF(savedata.prTuneBandSilBassPct, BAND_SILENCE_BASS);
+    const float bandSilMid = PrTuneF(savedata.prTuneBandSilMidPct, BAND_SILENCE_MID);
+    const float bandSilTre = PrTuneF(savedata.prTuneBandSilTrePct, BAND_SILENCE_TRE);
+    const float retriggerRatio = PrTuneF(savedata.prTuneRetrigPct, RETRIGGER_RATIO);
+    const float harmGhostMargin = PrTuneF(savedata.prTuneHarmGhostPct, kHarmonicGhostMarginRatio);
+    const float harmRejectRatio = PrTuneF(savedata.prTuneHarmRejectPct, 0.78f);
+    const float harmProfMin = PrTuneF(savedata.prTuneHarmProfPct, kHarmonicProfileNoiseMinConfidence);
+    const float pickBassRel = PrTuneF(savedata.prTunePickBassPct, 0.28f);
+    const float pickLowMidRel = PrTuneF(savedata.prTunePickLowMidPct, 0.20f);
+    const float pickMelodyRel = PrTuneF(savedata.prTunePickMelodyPct, 0.10f);
+    const float pickTreRel = PrTuneF(savedata.prTunePickTrePct, 0.22f);
+    const float onsetDeltaScale = PrTuneF(savedata.prTuneOnsetDeltaPct, 1.0f);
 
     float maxS = 0.0f;
     for (int i = 0; i < KEY_COUNT; ++i)
@@ -1047,11 +1076,11 @@ void CPianoRoll::UpdateNoteStates()
     const float midMax = BandMaxStrength(blend, PianoRoll108::BASS_END, PianoRoll108::MID_END);
     const float treMax = BandMaxStrength(blend, PianoRoll108::MID_END, KEY_COUNT);
     const bool anyBandLive =
-        bassMax >= BAND_SILENCE_BASS ||
-        midMax >= BAND_SILENCE_MID ||
-        treMax >= BAND_SILENCE_TRE;
+        bassMax >= bandSilBass ||
+        midMax >= bandSilMid ||
+        treMax >= bandSilTre;
 
-    if (!anyBandLive || maxS < SILENCE_ABS) {
+    if (!anyBandLive || maxS < silenceAbs) {
         for (int i = 0; i < KEY_COUNT; ++i) {
             m_activeKeys[i] = false;
             m_noteStrength[i] = 0.0f;
@@ -1079,11 +1108,12 @@ void CPianoRoll::UpdateNoteStates()
     // 基準値(ゲイン0dB時)は0.0015程度とし、メイクアップゲインがかかった分だけ
     // 線形にフロアも持ち上げる(信号もノイズも同じ倍率で増幅されるため)。
     const float gainLinear = powf(10.0f, m_lastGainDb / 20.0f);
-    const float absFloor = 0.0015f * gainLinear;
+    const float absFloor = PrTuneF(savedata.prTuneAbsFloorPct, 0.0015f) * gainLinear;
 
     bool picked[KEY_COUNT];
     PianoRoll108::BuildFramePicks(blend, picked, KEY_COUNT, pickScale, absFloor,
-        m_onsetStrengths, m_prevOnsetStrengths);
+        m_onsetStrengths, m_prevOnsetStrengths,
+        pickBassRel, pickLowMidRel, pickMelodyRel, pickTreRel, onsetDeltaScale);
 
 #ifdef _DEBUG
     // [診断用] BuildFramePicks直後、picked[]そのものが絶対値フロアで
@@ -1117,7 +1147,13 @@ void CPianoRoll::UpdateNoteStates()
         bool effective = picked[i];
 
         if (!effective && m_activeKeys[i]) {
-            const float holdRatio = HoldEnvRatio(i);
+            float holdRatio;
+            if (i < BAND_BASS_END)
+                holdRatio = PrTuneF(savedata.prTuneHoldBassPct, HOLD_ENV_BASS);
+            else if (i < BAND_MID_END)
+                holdRatio = PrTuneF(savedata.prTuneHoldMidPct, HOLD_ENV_MID);
+            else
+                holdRatio = PrTuneF(savedata.prTuneHoldTrePct, HOLD_ENV_TRE);
             if (holdRatio > 0.0f && m_envPeak[i] > 0.001f) {
                 if (sigStrength >= m_envPeak[i] * holdRatio)
                     effective = true;
@@ -1154,7 +1190,7 @@ void CPianoRoll::UpdateNoteStates()
             if (m_activeKeys[i]) {
                 ++m_unpickedFrames[i];
                 if (m_envPeak[i] > 0.001f &&
-                    sigStrength < m_envPeak[i] * RETRIGGER_RATIO)
+                    sigStrength < m_envPeak[i] * retriggerRatio)
                     ++m_strengthDipFrames[i];
                 else
                     m_strengthDipFrames[i] = 0;
@@ -1162,7 +1198,7 @@ void CPianoRoll::UpdateNoteStates()
         }
 
         const bool onsetBoost = picked[i] &&
-            PianoRoll108::OnsetSupportsPick(m_onsetStrengths, m_prevOnsetStrengths, i, pickScale);
+            PianoRoll108::OnsetSupportsPick(m_onsetStrengths, m_prevOnsetStrengths, i, pickScale, onsetDeltaScale);
         // 再アタック判定(UpdateEnvelope)は本関数の後段で呼ばれるため、
         // ここで計算済みのオンセット判定結果を保存しておいて使い回す。
         m_onsetBoostThisFrame[i] = onsetBoost;
@@ -1180,7 +1216,7 @@ void CPianoRoll::UpdateNoteStates()
                 bool allowOn = true;
                 if (m_harmonicGhostGuardEnabled) {
                     const bool suspect = IsMarginalFund(
-                        blend, i, KEY_COUNT, kHarmonicGhostMarginRatio);
+                        blend, i, KEY_COUNT, harmGhostMargin, harmRejectRatio);
                     if (suspect) {
                         // [特性ベース判定] 振幅のしきい値では「本物の小さい音」と
                         // 「ゴースト(親音への追従に過ぎない漏れ込み)」は区別できない。
@@ -1205,7 +1241,7 @@ void CPianoRoll::UpdateNoteStates()
                         (i >= PianoRoll108::C4_KEY && i < PianoRoll108::O5_HI);
                     if (!melodyBand) {
                         if (HarmonicProfile::LooksLikeNoiseProfile(
-                            blend, i, KEY_COUNT, kHarmonicProfileNoiseMinConfidence)) {
+                            blend, i, KEY_COUNT, harmProfMin)) {
                             allowOn = false;
                         }
                         else if (HarmonicProfile::LooksLikePartialGhost(blend, i, KEY_COUNT)) {
@@ -1423,18 +1459,24 @@ namespace PianoExpr {
 void CPianoRoll::DetectExpressions()
 {
     using namespace Cfg;
+    // C6 以上はスキャッターが多く、遷移記号を付けるとノイズになるので抑える。
+    static constexpr int kExprHiStart = PianoRoll108::O5_HI; // 84 = C6
 
-    // 記号だらけで簡易ピアノロールに見えないので、長い持続だけ SUSTAIN を付ける。
+    for (int i = 1; i < KEY_COUNT; ++i) {
+        if (m_scoopLatch[i] > 0) --m_scoopLatch[i];
+        if (m_activeKeys[i - 1] && i < kExprHiStart)
+            m_scoopLatch[i] = 5;
+    }
+
     for (int i = 0; i < KEY_COUNT; ++i) {
         m_exprFlags[i] = 0;
         const bool wasActive = m_prevActiveKeys[i];
         const bool nowActive = m_activeKeys[i];
+        const bool hiScatter = (i >= kExprHiStart);
 
         if (!nowActive) {
             m_noteAgeFrames[i] = 0;
             m_vibHistCount[i] = 0;
-            m_prevActiveKeys[i] = false;
-            m_prevNoteStrength[i] = 0.0f;
             continue;
         }
 
@@ -1443,8 +1485,55 @@ void CPianoRoll::DetectExpressions()
         else if (m_noteAgeFrames[i] < 255)
             ++m_noteAgeFrames[i];
 
-        if (m_noteAgeFrames[i] >= 10)
+        if (!wasActive && !hiScatter) {
+            if (i > 0 && m_scoopLatch[i] >= 2)
+                m_exprFlags[i] |= PianoExpr::SCOOP;
+            if (i > 0 && m_prevActiveKeys[i - 1])
+                m_exprFlags[i] |= PianoExpr::SLIDE;
+            if (i + 1 < KEY_COUNT && m_prevActiveKeys[i + 1]) {
+                m_exprFlags[i] |= PianoExpr::SLIDE;
+                m_exprFlags[i] |= PianoExpr::FALL;
+            }
+        }
+
+        if (nowActive && m_noteAgeFrames[i] >= 12)
             m_exprFlags[i] |= PianoExpr::SUSTAIN;
+
+        if (!hiScatter && m_noteAgeFrames[i] <= 3) {
+            const float prev = m_prevNoteStrength[i];
+            const float cur = m_noteStrength[i];
+            if (cur - prev > 0.18f || (prev > 0.03f && (cur - prev) / prev > 0.28f))
+                m_exprFlags[i] |= PianoExpr::ACCENT;
+        }
+
+        if (m_vibHistCount[i] < VIB_HIST_LEN)
+            ++m_vibHistCount[i];
+        for (int k = 0; k < VIB_HIST_LEN - 1; ++k)
+            m_vibHist[i][k] = m_vibHist[i][k + 1];
+        m_vibHist[i][VIB_HIST_LEN - 1] = m_noteStrength[i];
+
+        if (m_noteAgeFrames[i] >= 10 && m_vibHistCount[i] >= 12) {
+            const int n = min((int)m_vibHistCount[i], VIB_HIST_LEN);
+            if (HistDetectVibrato(m_vibHist[i] + (VIB_HIST_LEN - n), n,
+                m_envPeak[i] > 0.01f ? m_envPeak[i] : 1.0f))
+                m_exprFlags[i] |= PianoExpr::VIBRATO;
+        }
+
+        // クレッシェンド/デクレッシェンド: 持続(SUSTAIN)かつビブラートでないとき、
+        // 強度履歴の前半と後半の平均差から緩やかな増減を判定する。
+        if ((m_exprFlags[i] & PianoExpr::SUSTAIN) && !(m_exprFlags[i] & PianoExpr::VIBRATO)
+            && m_noteAgeFrames[i] >= 16 && m_vibHistCount[i] >= VIB_HIST_LEN) {
+            const float* h = m_vibHist[i];
+            const int half = VIB_HIST_LEN / 2;
+            float a = 0.0f, b = 0.0f;
+            for (int k = 0; k < half; ++k) a += h[k];
+            for (int k = half; k < VIB_HIST_LEN; ++k) b += h[k];
+            a /= (float)half; b /= (float)(VIB_HIST_LEN - half);
+            const float pk = m_envPeak[i] > 0.01f ? m_envPeak[i] : 1.0f;
+            const float diff = b - a;
+            if (diff > pk * 0.28f) m_exprFlags[i] |= PianoExpr::CRESC;
+            else if (diff < -pk * 0.28f && b > pk * 0.18f) m_exprFlags[i] |= PianoExpr::DECRESC;
+        }
     }
 
     memcpy(m_prevActiveKeys, m_activeKeys, sizeof(m_activeKeys));
@@ -1708,6 +1797,11 @@ void CPianoRoll::OnToggleHarmonicProfile()
     savedata.pianorollharmprof = m_harmonicProfileGuardEnabled ? 1 : 0;
 }
 
+void CPianoRoll::OnOpenTuneDialog()
+{
+    MpShowPianoRollTuneDialog(this);
+}
+
 void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
     CMenu menu;
@@ -1749,6 +1843,11 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
         LL14(L"検出オプション", L"Detection options", L"Options de detection", L"Opzioni di rilevamento", L"Opciones de deteccion", L"검출 옵션", L"检测选项", L"خيارات الكشف", L"Параметры обнаружения", L"Erkennungsoptionen", L"Opcoes de deteccao", L"Detectie-opties", L"Opcje wykrywania", L"Algilama secenekleri"));
 
     menu.AppendMenu(MF_SEPARATOR);
+    menu.AppendMenu(MF_STRING, IDM_ROLL_TUNE,
+        LL14(L"検出パラメータ調整...", L"Detection parameter tuning...", L"Regler les parametres...",
+            L"Regola parametri rilevamento...", L"Ajustar parametros de deteccion...", L"검출 파라미터 조정...",
+            L"检测参数调整...", L"ضبط معلمات الكشف...", L"Настройка параметров...", L"Erkennungsparameter...",
+            L"Ajustar parametros...", L"Detectieparameters...", L"Dostosuj parametry...", L"Algilama parametreleri..."));
     menu.AppendMenu(MF_STRING | (m_frozen ? MF_CHECKED : 0), IDM_ROLL_FREEZE,
         LL14(L"フリーズ", L"Freeze", L"Gel", L"Congela", L"Congelar", L"정지", L"冻结", L"تجميد", L"Заморозка", L"Einfrieren", L"Congelar", L"Bevriezen", L"Zamroz", L"Dondur"));
     menu.AppendMenu(MF_STRING, IDM_ROLL_CLEAR,
@@ -2732,9 +2831,8 @@ void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const 
         const int midi = MIDI_BASE + i;
         int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
         const uint8_t bMask = frame.bandMask[i] ? frame.bandMask[i] : (uint8_t)(1u << KeyBandIndex(i));
-        const uint8_t drawExpr = m_showExprMarks ? frame.expr[i] : (uint8_t)0;
         DrawHistoryNote(dc, CRect(xL + 1, yTop, xR - 1, yBot), bMask, frame.laneStrength[i],
-            i, frame.strength[i], frame.dynLevel[i], drawExpr, IsBlackKey(midi));
+            i, frame.strength[i], frame.dynLevel[i], frame.expr[i], IsBlackKey(midi));
     }
 
     // 再アタック(タイ連結中の同鍵連打)が起きた鍵は、バーの左端に細い白線を
@@ -2751,7 +2849,7 @@ void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const 
     }
     dc.SelectObject(pOldPen);
 
-    if (!m_showExprMarks || !m_paintFontsReady || !m_fontExprSymbol.GetSafeHandle()) return;
+    if (!m_paintFontsReady || !m_fontExprSymbol.GetSafeHandle()) return;
     CFont* pSymFont = CFont::FromHandle((HFONT)m_fontExprSymbol.GetSafeHandle());
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (!frame.active[i] || !frame.expr[i]) continue;
@@ -2782,8 +2880,7 @@ void CPianoRoll::DrawHistoryArea(CDC& dc, int width, int rollH, int histCount, c
     for (int r = 1; r < histCount && r < (int)MAX_HISTORY; ++r)
         DrawHistoryRow(dc, width, rollH, r, hist[r - 1]);
 
-    if (m_showExprMarks)
-        DrawPitchTransitions(dc, width, rollH, histCount, hist);
+    DrawPitchTransitions(dc, width, rollH, histCount, hist);
 }
 
 // 音階移行(スライド/フォール/スクープ)の斜め描画:

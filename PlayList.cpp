@@ -11,6 +11,7 @@
 #include "ListSyosai.h"
 #include "WavExport.h"
 #include <vector>
+#include <algorithm>
 #include "Douga.h"
 #include "mp3image.h"
 #include "CMediaPlayerDlg.h"
@@ -667,6 +668,369 @@ int CPlayList::FindByPath(LPCTSTR fol)
 			return j;
 	}
 	return -1;
+}
+
+static CString PlPlaylistFileName(int idx)
+{
+	if (idx == 0) return _T("playlistu.dat");
+	CString s; s.Format(_T("playlistu%d.dat"), idx);
+	return s;
+}
+
+static void PlPcFromPld(const playlistdata& pld, playlistdata0& out)
+{
+	ZeroMemory(&out, sizeof(out));
+	_tcscpy(out.alb, pld.alb);
+	_tcscpy(out.art, pld.art);
+	_tcscpy(out.fol, pld.fol);
+	_tcscpy(out.name, pld.name);
+	out.loop1 = pld.loop1;
+	out.loop2 = pld.loop2;
+	out.sub = pld.sub;
+	out.ret2 = pld.ret2;
+	out.time = pld.time;
+	out.icon = 1;
+}
+
+static bool PlReadPlaylistTracks(int plIdx, std::vector<playlistdata0>& tracks)
+{
+	tracks.clear();
+	TCHAR tmp[1024];
+	_tgetcwd(tmp, 1000);
+	_tchdir(karento2);
+	CString fname = PlPlaylistFileName(plIdx);
+	CFile f;
+	if (!f.Open(fname, CFile::modeRead | CFile::shareDenyWrite, NULL)) {
+		_tchdir(tmp);
+		return false;
+	}
+	int cnt = 0;
+	if (f.Read(&cnt, 4) != 4 || cnt < 0 || cnt > 100000) {
+		f.Close(); _tchdir(tmp); return false;
+	}
+	int skip[9];
+	for (int i = 0; i < 9; ++i)
+		if (f.Read(&skip[i], 4) != 4) { f.Close(); _tchdir(tmp); return false; }
+	tracks.reserve((size_t)cnt);
+	playlistdata pld;
+	for (int i = 0; i < cnt; ++i) {
+		if (f.Read(&pld, sizeof(pld)) != sizeof(pld)) { f.Close(); _tchdir(tmp); return false; }
+		playlistdata0 pc0;
+		PlPcFromPld(pld, pc0);
+		tracks.push_back(pc0);
+	}
+	for (int i = 0; i < 6; ++i) {
+		int c = 0;
+		if (f.Read(&c, 4) != 4) break;
+	}
+	f.Close();
+	_tchdir(tmp);
+	return true;
+}
+
+static bool PlWritePlaylistTracks(int plIdx, const std::vector<playlistdata0>& tracks)
+{
+	TCHAR tmp[1024];
+	_tgetcwd(tmp, 1000);
+	_tchdir(karento2);
+	CString fname = PlPlaylistFileName(plIdx);
+
+	int x = -10000, y = 0, cx = 800, cy = 600;
+	int col[7] = { 120, 80, 72, 80, 80, 80, 80 };
+	int loop = 0, renzoku = 0, tool = 1, saisyo = 1, pntSaved = -1;
+
+	CFile rf;
+	if (rf.Open(fname, CFile::modeRead | CFile::shareDenyWrite, NULL)) {
+		int cntOld = 0;
+		if (rf.Read(&cntOld, 4) == 4) {
+			rf.Read(&x, 4); rf.Read(&y, 4); rf.Read(&cx, 4); rf.Read(&cy, 4);
+			for (int i = 0; i < 5; ++i) rf.Read(&col[i], 4);
+			if (cntOld > 0 && cntOld < 100000) {
+				const ULONGLONG skipBytes = (ULONGLONG)cntOld * (ULONGLONG)sizeof(playlistdata);
+				rf.Seek(skipBytes, CFile::current);
+			}
+			rf.Read(&loop, 4);
+			rf.Read(&renzoku, 4);
+			rf.Read(&tool, 4);
+			rf.Read(&saisyo, 4);
+			rf.Read(&col[5], 4);
+			rf.Read(&col[6], 4);
+			rf.Read(&pntSaved, 4);
+		}
+		rf.Close();
+	}
+
+	const int cnt = (int)tracks.size();
+	CFile wf;
+	if (!wf.Open(fname, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL)) {
+		_tchdir(tmp);
+		return false;
+	}
+	wf.Write(&cnt, 4);
+	wf.Write(&x, 4); wf.Write(&y, 4); wf.Write(&cx, 4); wf.Write(&cy, 4);
+	for (int i = 0; i < 5; ++i) wf.Write(&col[i], 4);
+	playlistdata pld;
+	for (int i = 0; i < cnt; ++i) {
+		ZeroMemory(&pld, sizeof(pld));
+		_tcscpy(pld.alb, tracks[i].alb);
+		_tcscpy(pld.art, tracks[i].art);
+		_tcscpy(pld.fol, tracks[i].fol);
+		_tcscpy(pld.name, tracks[i].name);
+		pld.loop1 = tracks[i].loop1;
+		pld.loop2 = tracks[i].loop2;
+		pld.sub = tracks[i].sub;
+		pld.ret2 = tracks[i].ret2;
+		pld.time = tracks[i].time;
+		wf.Write(&pld, sizeof(pld));
+	}
+	wf.Write(&loop, 4);
+	wf.Write(&renzoku, 4);
+	wf.Write(&tool, 4);
+	wf.Write(&saisyo, 4);
+	wf.Write(&col[5], 4);
+	wf.Write(&col[6], 4);
+	wf.Write(&pntSaved, 4);
+	wf.Close();
+	_tchdir(tmp);
+	return true;
+}
+
+static int PlAdjustIndexAfterRemovals(int idx, const std::vector<int>& removedAsc)
+{
+	if (idx < 0) return idx;
+	for (int r : removedAsc) {
+		if (idx == r) return -1;
+	}
+	int delta = 0;
+	for (int r : removedAsc) {
+		if (idx > r) ++delta;
+	}
+	return idx - delta;
+}
+
+int CPlayList::GetPlaylistFileCount()
+{
+	int lcnt = 0;
+	for (;; ++lcnt) {
+		if (!PathFileExists(GetModulePath() + PlPlaylistFileName(lcnt)))
+			break;
+		if (lcnt >= 999) break;
+	}
+	return lcnt;
+}
+
+CString CPlayList::GetPlaylistDisplayName(int ii)
+{
+	if (ii < 0) return _T("");
+	CString ss = savedata.playlistname[ii];
+	if (ss == _T("")) {
+		ss.Format(LL14(
+			L"プレイリスト：%d", L"Playlist: %d", L"Liste de lecture : %d", L"Playlist: %d",
+			L"Lista de reproducción: %d", L"플레이리스트: %d", L"播放列表：%d", L"قائمة التشغيل: %d",
+			L"Плейлист: %d", L"Wiedergabeliste: %d", L"Lista de reprodução: %d", L"Afspeellijst: %d",
+			L"Lista odtwarzania: %d", L"Oynatma Listesi: %d"), ii + 1);
+	}
+	return ss;
+}
+
+int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
+{
+	int Lindex = -1;
+	Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED);
+	if (Lindex < 0) return 0;
+
+	CMenu menu;
+	menu.CreatePopupMenu();
+	menu.AppendMenu(MF_STRING, PL_CTX_INFO,
+		LL14(L"ファイル情報", L"File Info", L"Infos fichier", L"Info file",
+			L"Info. de archivo", L"파일 정보", L"文件信息", L"معلومات الملف",
+			L"Сведения о файле", L"Dateiinfo", L"Info. do arquivo", L"Bestandsinfo",
+			L"Informacje o pliku", L"Dosya bilgisi"));
+	menu.AppendMenu(MF_STRING, PL_CTX_WAV,
+		LL14(L"WAVへ出力", L"Export to WAV", L"Exporter en WAV", L"Esporta in WAV",
+			L"Exportar a WAV", L"WAV로 내보내기", L"导出到WAV", L"تصدير إلى WAV",
+			L"Экспорт в WAV", L"Als WAV exportieren", L"Exportar para WAV", L"Exporteren naar WAV",
+			L"Eksportuj do WAV", L"WAV'e aktar"));
+	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING, PL_CTX_REMOVE_MISSING,
+		LL14(L"存在しないファイルを一覧から削除", L"Remove missing files from list",
+			L"Supprimer les fichiers manquants", L"Rimuovi file mancanti", L"Eliminar archivos inexistentes",
+			L"없는 파일을 목록에서 삭제", L"从列表中删除不存在的文件", L"إزالة الملفات المفقودة",
+			L"Удалить отсутствующие файлы", L"Fehlende Dateien entfernen", L"Remover arquivos ausentes",
+			L"Ontbrekende bestanden verwijderen", L"Usuń brakujące pliki", L"Eksik dosyalari kaldir"));
+	menu.AppendMenu(MF_STRING, PL_CTX_DEL,
+		LL14(L"削除", L"Delete", L"Supprimer", L"Elimina",
+			L"Eliminar", L"삭제", L"删除", L"حذف",
+			L"Удалить", L"Löschen", L"Excluir", L"Verwijderen",
+			L"Usuń", L"Sil"));
+	menu.AppendMenu(MF_SEPARATOR);
+
+	const int plCnt = GetPlaylistFileCount();
+	if (plCnt > 1) {
+		CMenu subMove, subCopy;
+		subMove.CreatePopupMenu();
+		subCopy.CreatePopupMenu();
+		for (int i = 0; i < plCnt; ++i) {
+			if (i == savedata.playlistnum) continue;
+			CString name = GetPlaylistDisplayName(i);
+			subMove.AppendMenu(MF_STRING, PL_CTX_MOVE_BASE + i, name);
+			subCopy.AppendMenu(MF_STRING, PL_CTX_COPY_BASE + i, name);
+		}
+		if (subMove.GetMenuItemCount() > 0) {
+			menu.AppendMenu(MF_POPUP, (UINT_PTR)subMove.Detach(),
+				LL14(L"他のリストへ移動", L"Move to another playlist", L"Deplacer vers une autre liste",
+					L"Sposta in un'altra playlist", L"Mover a otra lista", L"다른 리스트로 이동", L"移动到其他列表",
+					L"نقل إلى قائمة أخرى", L"Переместить в другой плейлист", L"In andere Liste verschieben",
+					L"Mover para outra lista", L"Verplaatsen naar andere lijst", L"Przenieś do innej listy",
+					L"Baska listeye tasi"));
+			menu.AppendMenu(MF_POPUP, (UINT_PTR)subCopy.Detach(),
+				LL14(L"他のリストへコピー", L"Copy to another playlist", L"Copier vers une autre liste",
+					L"Copia in un'altra playlist", L"Copiar a otra lista", L"다른 리스트로 복사", L"复制到其他列表",
+					L"نسخ إلى قائمة أخرى", L"Копировать в другой плейлист", L"In andere Liste kopieren",
+					L"Copiar para outra lista", L"Kopiëren naar andere lijst", L"Kopiuj do innej listy",
+					L"Baska listeye kopyala"));
+		}
+	}
+
+	return (int)menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RETURNCMD, pt.x, pt.y, pOwner);
+}
+
+void CPlayList::HandleTrackContextCmd(int cmd)
+{
+	if (cmd == PL_CTX_INFO) OnList();
+	else if (cmd == PL_CTX_WAV) OnPopWavExport();
+	else if (cmd == PL_CTX_DEL) Del();
+	else if (cmd == PL_CTX_REMOVE_MISSING) RemoveMissingFiles();
+	else if (cmd >= PL_CTX_MOVE_BASE && cmd <= PL_CTX_MOVE_MAX)
+		TransferSelectedToPlaylist(cmd - PL_CTX_MOVE_BASE, true);
+	else if (cmd >= PL_CTX_COPY_BASE && cmd <= PL_CTX_COPY_MAX)
+		TransferSelectedToPlaylist(cmd - PL_CTX_COPY_BASE, false);
+
+	extern CMediaPlayerDlg* mp;
+	if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->RefreshList(TRUE);
+}
+
+void CPlayList::TransferSelectedToPlaylist(int targetIdx, bool moveNotCopy)
+{
+	if (targetIdx < 0 || targetIdx >= GetPlaylistFileCount()) return;
+
+	std::vector<int> sel;
+	int idx = -1;
+	while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		if (idx < playcnt) sel.push_back(idx);
+	}
+	if (sel.empty()) return;
+
+	std::vector<playlistdata0> toXfer;
+	toXfer.reserve(sel.size());
+	for (int i : sel)
+		toXfer.push_back(pc[i]);
+
+	std::vector<playlistdata0> targetTracks;
+	if (!PlReadPlaylistTracks(targetIdx, targetTracks)) {
+		targetTracks.clear();
+	}
+	for (const auto& t : toXfer)
+		targetTracks.push_back(t);
+
+	if (!PlWritePlaylistTracks(targetIdx, targetTracks)) {
+		MessageBox(LL14(L"プレイリストへの書き込みに失敗しました。", L"Failed to write playlist.",
+			L"Echec ecriture liste.", L"Scrittura playlist fallita.", L"Error al escribir lista.",
+			L"플레이리스트 쓰기 실패.", L"写入播放列表失败。", L"فشل كتابة القائمة.", L"Ошибка записи плейлиста.",
+			L"Schreiben fehlgeschlagen.", L"Falha ao gravar playlist.", L"Schrijven mislukt.",
+			L"Zapis playlisty nieudany.", L"Listeye yazma basarisiz."),
+			LL14(L"ogg簡易プレイヤ", L"ogg Simple Player", L"ogg Lecteur simple", L"ogg Lettore semplice",
+				L"ogg Reproductor simple", L"ogg 간이 플레이어", L"ogg简易播放器", L"ogg مشغل بسيط",
+				L"ogg Простой плеер", L"ogg Einfacher Player", L"ogg Player simples", L"ogg Eenvoudige speler",
+				L"ogg Prosty odtwarzacz", L"ogg Basit oynatıcı"), MB_ICONWARNING);
+		return;
+	}
+
+	if (moveNotCopy) {
+		std::sort(sel.begin(), sel.end(), std::greater<int>());
+		for (int i : sel) {
+			if (i < 0 || i >= playcnt) continue;
+			for (int j = i + 1; j < playcnt; ++j)
+				memcpy(&pc[j - 1], &pc[j], sizeof(playlistdata0));
+			playcnt--;
+		}
+		playlistdata0* newPc = (playlistdata0*)realloc(pc, (size_t)sizeof(playlistdata0) * (playcnt + 2));
+		if (newPc) pc = newPc;
+		extern int plcnt;
+		std::vector<int> selAsc = sel;
+		std::sort(selAsc.begin(), selAsc.end());
+		plcnt = PlAdjustIndexAfterRemovals(plcnt, selAsc);
+		pnt = PlAdjustIndexAfterRemovals(pnt, selAsc);
+		pnt1 = PlAdjustIndexAfterRemovals(pnt1, selAsc);
+		m_lc.SetItemCount(playcnt);
+		for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
+		m_lc.RedrawWindow();
+		Save();
+	}
+}
+
+void CPlayList::RemoveMissingFiles()
+{
+	if (!pc || playcnt <= 0) return;
+	std::vector<int> missing;
+	for (int i = 0; i < playcnt; ++i) {
+		if (!pc[i].fol[0]) { missing.push_back(i); continue; }
+		if (!PathFileExists(pc[i].fol))
+			missing.push_back(i);
+	}
+	if (missing.empty()) {
+		MessageBox(LL14(L"存在しないファイルはありません。", L"No missing files found.",
+			L"Aucun fichier manquant.", L"Nessun file mancante.", L"No hay archivos inexistentes.",
+			L"없는 파일이 없습니다.", L"没有不存在的文件。", L"لا توجد ملفات مفقودة.", L"Отсутствующих файлов нет.",
+			L"Keine fehlenden Dateien.", L"Nenhum arquivo ausente.", L"Geen ontbrekende bestanden.",
+			L"Brak brakujących plików.", L"Eksik dosya yok."),
+			LL14(L"ogg簡易プレイヤ", L"ogg Simple Player", L"ogg Lecteur simple", L"ogg Lettore semplice",
+				L"ogg Reproductor simple", L"ogg 간이 플레이어", L"ogg简易播放器", L"ogg مشغل بسيط",
+				L"ogg Простой плеер", L"ogg Einfacher Player", L"ogg Player simples", L"ogg Eenvoudige speler",
+				L"ogg Prosty odtwarzacz", L"ogg Basit oynatıcı"), MB_ICONINFORMATION);
+		return;
+	}
+	CString msg;
+	msg.Format(LL14(
+		L"%d 件の存在しないファイルを一覧から削除しますか？",
+		L"Remove %d missing file(s) from the list?",
+		L"Supprimer %d fichier(s) manquant(s) ?",
+		L"Rimuovere %d file mancanti?",
+		L"¿Eliminar %d archivo(s) inexistente(s)?",
+		L"없는 파일 %d개를 목록에서 삭제할까요?",
+		L"从列表中删除 %d 个不存在的文件吗？",
+		L"إزالة %d ملف(ات) مفقود(ة)؟",
+		L"Удалить %d отсутствующих файлов?",
+		L"%d fehlende Datei(en) entfernen?",
+		L"Remover %d arquivo(s) ausente(s)?",
+		L"%d ontbrekende bestand(en) verwijderen?",
+		L"Usunąć %d brakujących plików?",
+		L"%d eksik dosya listeden silinsin mi?"), (int)missing.size());
+	if (MessageBox(msg,
+		LL14(L"確認", L"Confirm", L"Confirmer", L"Conferma", L"Confirmar", L"확인", L"确认", L"تأكيد",
+			L"Подтверждение", L"Bestätigen", L"Confirmar", L"Bevestigen", L"Potwierdzenie", L"Onay"),
+		MB_YESNO | MB_ICONQUESTION) != IDYES)
+		return;
+	std::sort(missing.begin(), missing.end(), std::greater<int>());
+	for (int i : missing) {
+		if (i < 0 || i >= playcnt) continue;
+		for (int j = i + 1; j < playcnt; ++j)
+			memcpy(&pc[j - 1], &pc[j], sizeof(playlistdata0));
+		playcnt--;
+	}
+	playlistdata0* newPc = (playlistdata0*)realloc(pc, (size_t)sizeof(playlistdata0) * (playcnt + 2));
+	if (newPc) pc = newPc;
+	extern int plcnt;
+	std::vector<int> missAsc = missing;
+	std::sort(missAsc.begin(), missAsc.end());
+	plcnt = PlAdjustIndexAfterRemovals(plcnt, missAsc);
+	pnt = PlAdjustIndexAfterRemovals(pnt, missAsc);
+	pnt1 = PlAdjustIndexAfterRemovals(pnt1, missAsc);
+	m_lc.SetItemCount(playcnt);
+	for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
+	m_lc.RedrawWindow();
+	Save();
 }
 
 static bool PlIsFalcomGameBgmMode(int sub)
@@ -4976,34 +5340,13 @@ void CPlayList::OnNMRclickList1(NMHDR *pNMHDR, LRESULT *pResult)
 	CPoint point;
 	GetCursorPos(&point);
 
-	CMenu menu;
-	menu.CreatePopupMenu();
-	menu.AppendMenu(MF_STRING | MF_ENABLED, ID_POP_32776,
-		LL14(L"ファイル情報", L"File Info", L"Infos fichier", L"Info file",
-			L"Info. de archivo", L"파일 정보", L"文件信息", L"معلومات الملف",
-			L"Сведения о файле", L"Dateiinfo", L"Info. do arquivo", L"Bestandsinfo",
-			L"Informacje o pliku", L"Dosya bilgisi"));
-
-	menu.AppendMenu(MF_STRING | MF_ENABLED, ID_POP_WAVEXPORT,
-		LL14(L"WAVへ出力", L"Export to WAV", L"Exporter en WAV", L"Esporta in WAV",
-			L"Exportar a WAV", L"WAV로 내보내기", L"导出到WAV", L"تصدير إلى WAV",
-			L"Экспорт в WAV", L"Als WAV exportieren", L"Exportar para WAV", L"Exporteren naar WAV",
-			L"Eksportuj do WAV", L"WAV'e aktar"));
-
-	menu.AppendMenu(MF_SEPARATOR);
-
-	menu.AppendMenu(MF_STRING | MF_ENABLED, ID_POP_32777,
-		LL14(L"削除", L"Delete", L"Supprimer", L"Elimina",
-			L"Eliminar", L"삭제", L"删除", L"حذف",
-			L"Удалить", L"Löschen", L"Excluir", L"Verwijderen",
-			L"Usuń", L"Sil"));
-
 	CWnd* pWndPopupOwner = this;
 	while (pWndPopupOwner->GetStyle() & WS_CHILD)
 		pWndPopupOwner = pWndPopupOwner->GetParent();
 
-	menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y,
-		pWndPopupOwner);
+	const int cmd = ShowTrackContextMenu(point, pWndPopupOwner);
+	if (cmd != 0)
+		HandleTrackContextCmd(cmd);
 }
 
 void CPlayList::OnList()

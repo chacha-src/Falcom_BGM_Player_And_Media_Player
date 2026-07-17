@@ -14,11 +14,13 @@ public:
 	void SaveTextToSavedata();
 	void LoadTextFromSavedata();
 	void UpdateRemainLabel();
+	void SaveCurrentToHistory();
 
 protected:
 	CEdit m_edit;
 	CEdit m_legend;
-	CCustomStandardButton m_run, m_stop, m_reset, m_clear, m_close;
+	CCustomComboBox m_hist;
+	CCustomStandardButton m_run, m_stop, m_reset, m_clear, m_close, m_saveHist;
 	CToolTipCtrl m_tooltip;
 	CFont m_fontLegend;
 	CFont m_fontBtn;
@@ -35,6 +37,7 @@ protected:
 	void SyncLayoutAndPaint(BOOL bSyncRedraw, BOOL bReapplyOpaqueFixers);
 	void SavePosToSavedata();
 	void RestorePosFromSavedata();
+	void ReloadHistoryCombo();
 
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
@@ -46,6 +49,8 @@ protected:
 	afx_msg void OnReset();
 	afx_msg void OnClear();
 	afx_msg void OnCloseBtn();
+	afx_msg void OnSaveHist();
+	afx_msg void OnHistSel();
 	afx_msg void OnTextChanged();
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnEnterSizeMove();

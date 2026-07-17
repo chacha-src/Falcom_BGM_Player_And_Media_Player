@@ -700,14 +700,40 @@
 #define IDC_MPP_RESET                   3497
 #define IDC_MPP_CLEAR                   3498
 #define IDC_MPP_CLOSE                   3499
+#define IDC_MPP_HIST                    3500
+#define IDC_MPP_HIST_L                  3501
+#define IDC_MPP_SAVEHIST                3502
+
+#define IDD_PIANOROLL_TUNE              204
+
+#define IDC_PRT_SCROLL                  3510
+#define IDC_PRT_SILENCE                 3511
+#define IDC_PRT_BAND_BASS                 3512
+#define IDC_PRT_BAND_MID                  3513
+#define IDC_PRT_BAND_TRE                  3514
+#define IDC_PRT_HOLD_BASS                 3515
+#define IDC_PRT_HOLD_MID                  3516
+#define IDC_PRT_HOLD_TRE                  3517
+#define IDC_PRT_RETRIG                    3518
+#define IDC_PRT_PICK_BASS                 3519
+#define IDC_PRT_PICK_LOMID                3520
+#define IDC_PRT_PICK_MELODY               3521
+#define IDC_PRT_PICK_TRE                  3522
+#define IDC_PRT_HARM_GHOST                3523
+#define IDC_PRT_HARM_REJECT               3524
+#define IDC_PRT_HARM_PROF                 3525
+#define IDC_PRT_ABS_FLOOR                 3526
+#define IDC_PRT_ONSET_DELTA               3527
+#define IDC_PRT_RESET                     3528
+#define IDC_PRT_OK                        3529
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        204
+#define _APS_NEXT_RESOURCE_VALUE        205
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3500
+#define _APS_NEXT_CONTROL_VALUE         3530
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif
