@@ -678,8 +678,8 @@ void CTUKI::OnDblclkList1()
 BOOL CTUKI::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
-	SetWindowText(LL14(L"月影のデスティニー", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny"));
-	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+	SetWindowText(LL14(L"月影のデスティニー", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"月影 Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny", L"TSUKI no Destiny"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

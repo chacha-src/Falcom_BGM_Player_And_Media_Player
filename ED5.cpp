@@ -1499,7 +1499,7 @@ BOOL CED5::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"英雄伝説V 海の檻歌", L"Legend of Heroes V Cagesong of the Ocean", L"Légende des Héros V Chant des Profondeurs", L"Legend of Heroes V Canto dell'Oceano", L"Legend of Heroes V Cantico del Océano", L"영웅전설V 바다의 감옥곡", L"英雄传说V 海之槛歌", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Käfiglied des Ozeans", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean"));
-	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

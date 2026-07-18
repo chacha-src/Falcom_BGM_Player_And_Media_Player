@@ -7,7 +7,9 @@
 #define M_PI 3.14159265358979323846
 #endif
 #include "CPianoRoll.h"
-#include "CPianoRollTuneDlg.h"
+
+class COggDlg;
+extern COggDlg* og;
 #include "resource.h"
 #include "NoteFundamentalPick.h"
 #include "PianoRollPick.h"
@@ -19,6 +21,7 @@
 
 extern save savedata;
 void COggDlg_SyncPianoRollFast();
+void COggDlg_ShowPianoRollTune();
 
 static int PrTuneClampPct(int v)
 {
@@ -608,6 +611,7 @@ BOOL CPianoRoll::OnInitDialog()
     m_feedEnabled = true;
     m_paintDisabled = false;
     m_historyDirty = true;
+    EnableMainWindowLock(&savedata.pianorollMainLock, TRUE);
     return TRUE;
 }
 
@@ -1570,11 +1574,11 @@ void CPianoRoll::InvalidateRegions(bool roll, bool key)
     if (rollH <= 0) return;
 
     if (roll && key) {
-        InvalidateRect(&cr, FALSE);
+        CCC_InvalidateRectMinusOverlay(m_hWnd, cr);
         return;
     }
     if (roll)
-        InvalidateRect(CRect(0, 0, w, rollH), FALSE);
+        CCC_InvalidateRectMinusOverlay(m_hWnd, CRect(0, 0, w, rollH));
     if (key)
         InvalidateRect(CRect(0, rollH, w, h), FALSE);
 }
@@ -1704,7 +1708,7 @@ void CPianoRoll::RequestFullRollRedraw()
     m_framesPending = 0;
     m_keyDirty = true;
     if (::IsWindow(m_hWnd))
-        Invalidate(FALSE);
+        InvalidateRegions(true, true);
 }
 
 void CPianoRoll::ClearRollHistory()
@@ -1799,7 +1803,7 @@ void CPianoRoll::OnToggleHarmonicProfile()
 
 void CPianoRoll::OnOpenTuneDialog()
 {
-    MpShowPianoRollTuneDialog(this);
+    COggDlg_ShowPianoRollTune();
 }
 
 void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
@@ -3026,7 +3030,7 @@ void CPianoRoll::ApplySyncInvalidate()
     if (m_paintDisabled || !::IsWindow(m_hWnd)) return;
     if (m_meterDirty)
         m_keyDirty = true;
-    Invalidate(FALSE);
+    InvalidateRegions(true, m_keyDirty);
 }
 
 LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
@@ -3408,6 +3412,46 @@ void CPianoRoll::DrawKeyboardToBuffer(CDC& memDC, int width, int keySectionH, in
     }
 }
 
+void CPianoRoll::PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH, int keySectionH)
+{
+    UNREFERENCED_PARAMETER(h);
+#if CCUSTOM_AERO_SUPPORT
+    if (savedata.aero == 1 && CCC_IsWin11()) {
+        if (m_chromaReady) {
+            if (m_rollReady)
+                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
+            if (m_keyBufReady)
+                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH, w, keySectionH);
+        }
+        else {
+            if (m_rollReady)
+                dc.BitBlt(0, 0, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
+            if (m_keyBufReady)
+                dc.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
+        }
+    }
+    else
+#endif
+    {
+        if (m_rollReady)
+            dc.BitBlt(0, 0, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
+        if (m_keyBufReady)
+            dc.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
+    }
+
+    if (m_frozen) {
+        dc.SetBkMode(TRANSPARENT);
+        dc.SetTextColor(RGB(255, 180, 80));
+        CFont* of = nullptr;
+        if (m_fontMeterTag.GetSafeHandle())
+            of = dc.SelectObject(&m_fontMeterTag);
+        dc.TextOut(8, 4, LL14(L"フリーズ中", L"Frozen", L"Gele", L"Congelato", L"Congelado", L"정지됨", L"已冻结", L"مجمد", L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu"));
+        if (of) dc.SelectObject(of);
+    }
+
+    CCC_MainLockPaintClient(dc, m_hWnd);
+}
+
 void CPianoRoll::OnPaint()
 {
     CPaintDC dc(this);
@@ -3423,6 +3467,12 @@ void CPianoRoll::OnPaint()
     const int rollH = h - keyH;
     const int keySectionH = h - rollH;
     if (rollH <= 0 || keySectionH <= 0) return;
+
+    if (CCC_MainLockPreferQuickPresent() && m_rollReady && m_keyBufReady
+        && m_rollW == w && m_rollH == rollH && m_keyW == w && m_keyH == keySectionH) {
+        PresentClientFromBuffers(dc, w, h, rollH, keySectionH);
+        return;
+    }
 
     CRect clip;
     dc.GetClipBox(&clip);
@@ -3607,6 +3657,8 @@ void CPianoRoll::OnPaint()
         if (of) dc.SelectObject(of);
     }
 
+    CCC_MainLockPaintClient(dc, m_hWnd);
+
     if (didRollUpdate)
         m_historyDirty = false;
     if (clipKey || needKeyDraw) {
@@ -3667,7 +3719,7 @@ void CPianoRoll::OnSize(UINT nType, int cx, int cy)
     if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
         CCC_RefreshDwmBlur(m_hWnd);
 #endif
-    Invalidate(FALSE);
+    InvalidateRegions(true, true);
 }
 
 void CPianoRoll::OnMove(int x, int y)

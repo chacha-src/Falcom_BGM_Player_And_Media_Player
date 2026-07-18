@@ -198,6 +198,8 @@ BOOL CFolder::OnInitDialog()
 		pl->KillTimer(4923);
 		pl->KillTimer(4924);
 	}
+	EnableMainWindowLock(&savedata.folderMainLock);
+	CCC_MainLockBringToFront(m_hWnd);
 	return TRUE;  // コントロールにフォーカスを設定しないとき、戻り値は TRUE となります
 	              // 例外: OCX プロパティ ページの戻り値は FALSE となります
 }

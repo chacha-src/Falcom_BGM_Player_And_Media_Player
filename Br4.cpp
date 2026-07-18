@@ -714,7 +714,7 @@ BOOL CBr4::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"ブランディッシュ４ 眠れる神の塔", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tour du Dieu Dormant", L"Brandish4 Torre del Dio Dormiente", L"Brandish4 Torre del Dios Durmiente", L"브랜디시4 잠든 신의 탑", L"撼天神塔4", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Башня Спящего Бога", L"Brandish4 Turm des Schlafenden Gottes", L"Brandish4 Torre do Deus Adormecido", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Wieża Śpiącego Boga", L"Brandish4 Tower of the Sleeping God"));
-	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

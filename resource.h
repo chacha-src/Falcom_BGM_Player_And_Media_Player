@@ -11,6 +11,7 @@
 #define IDCANCEL4                       5
 #define IDCANCEL5                       6
 #define IDM_ABOUTBOX                    0x0010
+#define IDM_MAINWIN_LOCK                0x0020
 #define IDD_ABOUTBOX                    100
 #define IDS_ABOUTBOX                    101
 #define IDD_OGG_DIALOG                  102
@@ -703,6 +704,7 @@
 #define IDC_MPP_HIST                    3500
 #define IDC_MPP_HIST_L                  3501
 #define IDC_MPP_SAVEHIST                3502
+#define IDC_MPP_EDIT_L                  3503
 
 #define IDD_PIANOROLL_TUNE              204
 
@@ -726,6 +728,7 @@
 #define IDC_PRT_ONSET_DELTA               3527
 #define IDC_PRT_RESET                     3528
 #define IDC_PRT_OK                        3529
+#define IDC_MAINWIN_LOCK                  3530
 
 // Next default values for new objects
 // 
@@ -733,7 +736,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        205
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3530
+#define _APS_NEXT_CONTROL_VALUE         3531
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

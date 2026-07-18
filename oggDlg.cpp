@@ -26,6 +26,7 @@ int flacmode = 0;
 #include "oggDlg.h"
 #include "CEqualizer.h"
 #include "CPianoRoll.h"
+#include "CPianoRollTuneDlg.h"
 #include "CAnalyzerDlg.h"
 #include "CPromptEngine.h"
 #include "CMediaPlayerDlg.h"
@@ -978,6 +979,7 @@ COggDlg::COggDlg(CWnd* pParent /*=NULL*/)
 	m_lastTick = 0;
 	m_EqualizerDlg = new CEqualizer();
 	m_PianoRollDlg = new CPianoRoll();
+	m_PianoRollTuneDlg = new CPianoRollTuneDlg();
 	m_AnalyzerDlg = new CAnalyzerDlg();
 }
 
@@ -1485,6 +1487,19 @@ int timingf, timerf1;
 int uTimerId;
 void CALLBACK TimeCallback(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
 COggDlg* og;
+
+CWnd* CCC_GetActiveMainWindow()
+{
+	extern CMediaPlayerDlg* mp;
+	if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+		return mp;
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		return og;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		return mp;
+	return nullptr;
+}
+
 static char* adbuf, * adbuf2;
 BOOL thend1;
 BOOL videoonly;
@@ -2941,21 +2956,21 @@ BOOL COggDlg::OnInitDialog()
 	SetDlgItemText(IDC_CHECK6, LL14(L"順次再生", L"Sequential play", L"Lecture sequentielle", L"Riproduzione sequenziale", L"Reproduccion secuencial", L"순차 재생", L"顺序播放", L"تشغيل متسلسل", L"Последовательное воспроизведение", L"Sequentielle Wiedergabe", L"Reproducao sequencial", L"Sequentieel afspelen", L"Kolejne odtwarzanie", L"S?ral? calma"));
 	SetDlgItemText(IDC_BUTTON14, LL14(L"演奏開始", L"Play", L"Lecture", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Воспроизведение", L"Abspielen", L"Reproduzir", L"Afspelen", L"Odtworz", L"Cal"));
 
-	SetDlgItemText(IDC_CHECK7, LL14(L"YS6 ナピシュテムの匣", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako"));
-	SetDlgItemText(IDC_CHECK8, LL14(L"YS フェルガナの誓い", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai"));
+	SetDlgItemText(IDC_CHECK7, LL14(L"YS6 ナピシュテムの匣", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 纳比斯汀的方舟", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako"));
+	SetDlgItemText(IDC_CHECK8, LL14(L"YS フェルガナの誓い", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys 菲尔盖纳之誓", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai"));
 	SetDlgItemText(IDC_CHECK9, LL14(L"英雄伝説6空の軌跡FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legende des Heros VI Les Sentiers du Ciel FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"영웅전설6 하늘의 궤적 FC", L"英雄传说6 空之轨迹FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC", L"Legend of Heroes VI Trails in the Sky FC"));
 	SetDlgItemText(IDC_CHECK10, LL14(L"英雄伝説6空の軌跡SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legende des Heros VI Les Sentiers du Ciel SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"영웅전설6 하늘의 궤적 SC", L"英雄传说6 空之轨迹SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC", L"Legend of Heroes VI Trails in the Sky SC"));
-	SetDlgItemText(IDC_CHECK11, LL14(L"YS オリジン", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin"));
+	SetDlgItemText(IDC_CHECK11, LL14(L"イース・オリジン", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"이스 오리진", L"伊苏起源", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin"));
 	SetDlgItemText(IDC_CHECK12, LL14(L"英雄伝説6空の軌跡TC", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legende des Heros VI Les Sentiers du Ciel The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"영웅전설6 하늘의 궤적 The 3rd", L"英雄传说6 空之轨迹The3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd", L"Legend of Heroes VI Trails in the Sky The 3rd"));
 	SetDlgItemText(IDC_CHECK13, L"ZWEI II");
 	SetDlgItemText(IDC_CHECK14, L"Ys Chronicles Ys 1");
 	SetDlgItemText(IDC_CHECK15, L"Ys Chronicles Ys 2");
 	SetDlgItemText(IDC_CHECK16, L"XANADU NEXT");
-	SetDlgItemText(IDC_CHECK17, LL14(L"Ys 完全版 Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1"));
-	SetDlgItemText(IDC_CHECK18, LL14(L"Ys 完全版 Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2"));
+	SetDlgItemText(IDC_CHECK17, LL14(L"Ys 完全版 Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys 完全版 Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1", L"Ys Complete Ys 1"));
+	SetDlgItemText(IDC_CHECK18, LL14(L"Ys 完全版 Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys 完全版 Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2", L"Ys Complete Ys 2"));
 	SetDlgItemText(IDC_CHECK19, L"Sorcerian Original");
 	SetDlgItemText(IDC_CHECK20, L"Zwei!!");
-	SetDlgItemText(IDC_CHECK21, LL14(L"ぐるみん", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin"));
+	SetDlgItemText(IDC_CHECK21, LL14(L"ぐるみん", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"그루민", L"咕噜小天使", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin"));
 	SetDlgItemText(IDC_CHECK22, LL14(L"ダイナソア リザレクション", L"Dinosaur Resurrection", L"Resurrection Dinosaure", L"Resurrezione Dinosauro", L"Resurreccion Dinosaurio", L"공룡 부활", L"恐龙复活", L"ديناصور القيامة", L"Динозавр: Воскрешение", L"Dinosaurier Auferstehung", L"Ressurreicao Dinossauro", L"Dinosaurus Herrijzenis", L"Dinozaur Zmartwychwstanie", L"Dinozor Dirili?"));
 	SetDlgItemText(IDC_STATICaaad, LL14(L"ループ回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop", L"Cuenta de bucle", L"루프 횟수", L"循环次数", L"عدد الحلقات", L"Количество повторов", L"Schleifenzahler", L"Contagem de loop", L"Loopaantal", L"Liczba p?tli", L"Dongu say?s?"));
 	SetDlgItemText(IDC_CHECK2, LL14(L"WAVファイルへ保存", L"Save to WAV file", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV 파일로 저장", L"保存到WAV文件", L"حفظ كـ WAV", L"Сохранить в WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
@@ -2966,18 +2981,18 @@ BOOL COggDlg::OnInitDialog()
 	SetDlgItemText(IDC_STATIC_t, LL14(L"テンポ", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"템포", L"速度", L"الإيقاع", L"Темп", L"Tempo", L"Andamento", L"Tempo", L"Tempo", L"Tempo"));
 	SetDlgItemText(IDC_STATIC_p, LL14(L"ピッチ", L"Pitch", L"Hauteur", L"Tono", L"Tono", L"피치", L"音高", L"درجة الصوت", L"Высота тона", L"Tonhohe", L"Tom", L"Toonhoogte", L"Wysoko??", L"Perde"));
 	SetDlgItemText(IDC_BUTTON39, L"Brandish4");
-	SetDlgItemText(IDC_CHECK23, LL14(L"ブランディッシュ４", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4"));
+	SetDlgItemText(IDC_CHECK23, LL14(L"ブランディッシュ４", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish 4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4", L"Brandish4"));
 	SetDlgItemText(IDC_BUTTON44, LL14(L"白き魔女", L"White Witch", L"Sorciere Blanche", L"Strega Bianca", L"Bruja Blanca", L"흰 마녀", L"白之魔女", L"الساحرة البيضاء", L"Белая Ведьма", L"Weise Hexe", L"Bruxa Branca", L"Witte Heks", L"Bia?a Czarownica", L"Beyaz Cad?"));
 	SetDlgItemText(IDC_BUTTON45, LL14(L"朱紅い雫", L"Tear of Vermillion", L"Larme de Vermillon", L"Lacrima di Vermiglio", L"Lagrima de Bermellon", L"주홍의 눈물", L"朱红之泪", L"دمعة فيرميليون", L"Слеза Вермиллиона", L"Trane der Purpur", L"Lagrima de Vermelho", L"Traan van Vermiljoen", L"?za Vermillion", L"Vermilyon Gozya??"));
 	SetDlgItemText(IDC_BUTTON46, LL14(L"海の檻歌", L"Cagesong of the Ocean", L"Chant des Profondeurs", L"Canto dell'Oceano", L"Cantico del Oceano", L"바다의 감옥가", L"海之槛歌", L"أغنية محيط الأقفاص", L"Песнь Океана", L"Kafiglied des Ozeans", L"Cantico do Oceano", L"Kooi van de Oceaan", L"Pie?? Oceanu", L"Okyanus Kafes ?ark?s?"));
 	SetDlgItemText(IDC_CHECK24, LL14(L"英雄伝説III 白き魔女", L"Legend of Heroes III White Witch", L"Legende des Heros III Sorciere Blanche", L"Legend of Heroes III Strega Bianca", L"Legend of Heroes III Bruja Blanca", L"영웅전설III 흰 마녀", L"英雄传说III 白之魔女", L"Legend of Heroes III White Witch", L"Legend of Heroes III White Witch", L"Legend of Heroes III Weise Hexe", L"Legend of Heroes III Bruxa Branca", L"Legend of Heroes III White Witch", L"Legend of Heroes III Bia?a Czarownica", L"Legend of Heroes III White Witch"));
 	SetDlgItemText(IDC_CHECK25, LL14(L"英雄伝説IV 朱紅い雫", L"Legend of Heroes IV Tear of Vermillion", L"Legende des Heros IV Larme de Vermillon", L"Legend of Heroes IV Lacrima di Vermiglio", L"Legend of Heroes IV Lagrima de Bermellon", L"영웅전설IV 주홍의 눈물", L"英雄传说IV 朱红之泪", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Trane der Purpur", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion", L"Legend of Heroes IV Tear of Vermillion"));
 	SetDlgItemText(IDC_CHECK26, LL14(L"英雄伝説V 海の檻歌", L"Legend of Heroes V Cagesong of the Ocean", L"Legende des Heros V Chant des Profondeurs", L"Legend of Heroes V Canto dell'Oceano", L"Legend of Heroes V Cantico del Oceano", L"영웅전설V 바다의 감옥가", L"英雄传说V 海之槛歌", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Kafiglied des Ozeans", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean", L"Legend of Heroes V Cagesong of the Ocean"));
-	SetDlgItemText(IDC_BUTTON47, LL14(L"月影", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI"));
-	SetDlgItemText(IDC_BUTTON48, LL14(L"西風", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi"));
-	SetDlgItemText(IDC_BUTTON51, LL14(L"アーク", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc"));
-	SetDlgItemText(IDC_BUTTON53, LL14(L"三国志1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1"));
-	SetDlgItemText(IDC_BUTTON54, LL14(L"三国志2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2"));
+	SetDlgItemText(IDC_BUTTON47, LL14(L"月影", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"月影", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI", L"TSUKI"));
+	SetDlgItemText(IDC_BUTTON48, LL14(L"西風", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"西风", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi", L"Nishi"));
+	SetDlgItemText(IDC_BUTTON51, LL14(L"アーク", L"Arc", L"Arc", L"Arc", L"Arc", L"아크", L"弧", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc", L"Arc"));
+	SetDlgItemText(IDC_BUTTON53, LL14(L"三国志1", L"San1", L"San1", L"San1", L"San1", L"삼국지1", L"三国志1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1", L"San1"));
+	SetDlgItemText(IDC_BUTTON54, LL14(L"三国志2", L"San2", L"San2", L"San2", L"San2", L"삼국지2", L"三国志2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2", L"San2"));
 	SetDlgItemText(IDC_BUTTON57, LL14(L"プレイリスト", L"Playlist", L"Liste de lecture", L"Playlist", L"Lista de reproduccion", L"재생 목록", L"播放列表", L"قائمة التشغيل", L"Плейлист", L"Wiedergabeliste", L"Lista de reproducao", L"Afspeellijst", L"Lista odtwarzania", L"Calma listesi"));
 	SetDlgItemText(IDC_BUTTON58, LL14(L"ジャケ", L"Cover", L"Pochette", L"Copertina", L"Caratula", L"커버", L"封面", L"الغلاف", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Ok?adka", L"Kapak"));
 	SetDlgItemText(IDC_OGG_SWITCHMODE, LL14(L"MP画面", L"MP screen", L"Ecran MP", L"Schermo MP", L"Pantalla MP", L"MP화면", L"MP画面", L"شاشة MP", L"Экран MP", L"MP-Ansicht", L"Tela MP", L"MP-scherm", L"Ekran MP", L"MP ekran?"));
@@ -9306,7 +9321,7 @@ void COggDlg::play()
 				a = L"Limit Break";
 				break;
 			case 7525:
-				a = LL14(L"パラダイスミ☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆");
+				a = LL14(L"パラダイスミ☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"패러다임☆", L"帕拉迪gm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆");
 				break;
 			case 7526:
 				a = L"Gnosis";
@@ -12067,13 +12082,13 @@ void CWread::wavread()
 		data_size=oggsize=loop2*4;
 		loop3=loop2;loop2=0;
 		adbuf2=(char*)malloc(data_size+44100*10);
-		if(adbuf2==0){wavwait=1;thend=1; fnn=LL14(L"メモリの確保に失敗しました。", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.", L"Memory allocation failed.");return;}
+		if(adbuf2==0){wavwait=1;thend=1; fnn=LL14(L"メモリの確保に失敗しました。", L"Memory allocation failed.", L"Échec de l'allocation mémoire.", L"Allocazione memoria non riuscita.", L"Error al asignar memoria.", L"메모리 할당에 실패했습니다.", L"内存分配失败。", L"فشل تخصيص الذاكرة.", L"Не удалось выделить память.", L"Speicherzuweisung fehlgeschlagen.", L"Falha na alocação de memória.", L"Geheugentoewijzing mislukt.", L"Alokacja pamięci nie powiodła się.", L"Bellek ayırma başarısız.");return;}
 		og->m_time.SetRange(0,(data_size)/4,TRUE);
 		lenl= 0;
 		if(wav)free(wav);
 		wav_start();
 		Render();
-		}else{wavwait=1;thend=1; fnn=LL14(L"ファイルが開けませんでした。", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.", L"Could not open file.");return;}
+		}else{wavwait=1;thend=1; fnn=LL14(L"ファイルが開けませんでした。", L"Could not open file.", L"Impossible d'ouvrir le fichier.", L"Impossibile aprire il file.", L"No se pudo abrir el archivo.", L"파일을 열 수 없습니다.", L"无法打开文件。", L"تعذر فتح الملف.", L"Не удалось открыть файл.", L"Datei konnte nicht geöffnet werden.", L"Não foi possível abrir o ficheiro.", L"Kon bestand niet openen.", L"Nie można otworzyć pliku.", L"Dosya açılamadı.");return;}
 		*/
 	}
 	else if (mode == -11 || (mode == -14 && filen.Right(3) == "mp3") || mode == -15) {
@@ -15767,8 +15782,12 @@ BOOL COggDlg::DestroyWindow()
 		m_AnalyzerDlg->DetachForDestroy();
 		m_AnalyzerDlg->DestroyWindow();
 	}
+	if (::IsWindow(m_PianoRollTuneDlg->GetSafeHwnd())) {
+		m_PianoRollTuneDlg->DestroyWindow();
+	}
 	delete m_EqualizerDlg; m_EqualizerDlg = nullptr;
 	delete m_PianoRollDlg; m_PianoRollDlg = nullptr;
+	delete m_PianoRollTuneDlg; m_PianoRollTuneDlg = nullptr;
 	delete m_AnalyzerDlg; m_AnalyzerDlg = nullptr;
 	if (m_pDlgColor)delete m_pDlgColor;
 	if (ptl) ptl->Release();
@@ -16688,7 +16707,7 @@ void COggDlg::timerp()
 		if (g.Right(4) == L".dff") g = L"(DSD(dff))";
 		if (g.Right(4) == L".wsd") g = L"(DSD(wsd))";
 		if (g.Right(4) == L".wav") g = L"(wav)";
-		s.Format(LL14(L"file:音声ファイル%s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s"), g);
+		s.Format(LL14(L"file:音声ファイル%s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:Audio %s", L"file:오디오 %s", L"file:音频 %s", L"file:صوت %s", L"file:Аудио %s", L"file:Audio %s", L"file:Áudio %s", L"file:Audio %s", L"file:Audio %s", L"file:Ses %s"), g);
 	}
 	if (mode == -2 || mode == -3) sss = filen.Right(filen.GetLength() - filen.ReverseFind('.') - 1);
 	if (mode == -3) {
@@ -16696,52 +16715,10 @@ void COggDlg::timerp()
 		if (!archBits)
 			archBits = ResolveKpiArchBits(CString(kpi), filen);
 		const CString arch = KpiArchLabel(archBits);
-		s.Format(LL14(
-			L"file:kpiプラグイン(%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)",
-			L"file:kpi plugin (%s %s)"), sss, arch);
+		s.Format(LL14(L"file:kpiプラグイン(%s %s)", L"file:kpi plugin (%s %s)", L"file:Plugin kpi (%s %s)", L"file:Plugin kpi (%s %s)", L"file:Plugin kpi (%s %s)", L"file:kpi 플러그인(%s %s)", L"file:kpi 插件(%s %s)", L"file:إضافة kpi (%s %s)", L"file:Плагин kpi (%s %s)", L"file:kpi-Plugin (%s %s)", L"file:Plugin kpi (%s %s)", L"file:kpi-plugin (%s %s)", L"file:Wtyczka kpi (%s %s)", L"file:kpi eklentisi (%s %s)"), sss, arch);
 	}
-	if (mode == -1) s.Format(LL14(
-		L"file:oggファイル",
-		L"file:ogg",
-		L"file:ogg",
-		L"file:ogg",
-		L"file:ogg",
-		L"file:ogg",
-		L"file:ogg",
-		L"file:ogg",
-		L"file:ogg",
-		L"file:ogg",
-		L"file:ogg",
-		L"file:ogg",
-		L"file:ogg",
-		L"file:ogg"));
-	if (mode == -2 && rate == 0.0) s.Format(LL14(
-		L"file:音声ファイル(%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)",
-		L"file:Audio (%s)"), sss);
+	if (mode == -1) s.Format(LL14(L"file:oggファイル", L"file:ogg", L"file:ogg", L"file:ogg", L"file:ogg", L"file:ogg 파일", L"file:ogg文件", L"file:ogg", L"file:ogg", L"file:ogg-Datei", L"file:ogg", L"file:ogg", L"file:ogg", L"file:ogg"));
+	if (mode == -2 && rate == 0.0) s.Format(LL14(L"file:音声ファイル(%s)", L"file:Audio (%s)", L"file:Fichier audio (%s)", L"file:File audio (%s)", L"file:Archivo de audio (%s)", L"file:오디오 파일(%s)", L"file:音频文件(%s)", L"file:ملف صوت (%s)", L"file:Аудиофайл (%s)", L"file:Audiodatei (%s)", L"file:Arquivo de áudio (%s)", L"file:Audiobestand (%s)", L"file:Plik audio (%s)", L"file:Ses dosyası (%s)"), sss);
 	if (mode == -2 && rate != 0.0) s.Format(LL14(
 		L"file:動画ファイル(%s)",          /* 日本語: 厳格に維持いたします */
 		L"file:Panting Box (%s)",        /* 英語: 息を切らしている箱 */
@@ -16757,21 +16734,7 @@ void COggDlg::timerp()
 		L"file:Exploderende Doos (%s)",   /* オランダ語: 爆発寸前の箱 */
 		L"file:Wściekły Katalog (%s)",    /* ポーランド語: 激怒したカタログ */
 		L"file:Zıplayan Torba (%s)"), sss); /* トルコ語: 跳ねている袋 */
-	if (mode == 30) s = LL14(
-		L"file:空の軌跡 The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st",
-		L"file:Sora no Kiseki The 1st");
+	if (mode == 30) s = LL14(L"file:空の軌跡 The 1st", L"file:Trails in the Sky The 1st", L"file:Les Sentiers du Ciel The 1st", L"file:Trails in the Sky The 1st", L"file:Trails in the Sky The 1st", L"file:하늘의 궤적 The 1st", L"file:空之轨迹 The 1st", L"file:Trails in the Sky The 1st", L"file:Тропы в Небе The 1st", L"file:Himmelsleitern The 1st", L"file:Trails in the Sky The 1st", L"file:Trails in the Sky The 1st", L"file:Trails in the Sky The 1st", L"file:Trails in the Sky The 1st");
 	moji(s, 1, 16, 0xffffff);
 	if (tc1 < 50)
 		s.Format(_T("time:%2d:%02d.%02d/%2d:%02d.%02d"), ta1, tb1, tc1, ta, tb, tc);
@@ -16823,7 +16786,7 @@ void COggDlg::timerp()
 	else if ((mode == -2 || videoonly) && rcm.right > 1) {
 		s.Format(_T("size:%d x %d"), rcm.right, rcm.bottom);
 		moji(s, 1, 48, 0x7fffff);
-		s.Format(LL14(L"rate:算出中……", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating...", L"rate:Calculating..."));
+		s.Format(LL14(L"rate:算出中……", L"rate:Calculating...", L"rate:Calcul en cours...", L"rate:Calcolo in corso...", L"rate:Calculando...", L"rate:계산 중...", L"rate:计算中……", L"rate:جاري الحساب...", L"rate:Вычисление...", L"rate:Berechnung...", L"rate:A calcular...", L"rate:Berekenen...", L"rate:Obliczanie...", L"rate:Hesaplanıyor..."));
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -2 && wavbit_sample_Hz != 0) {
@@ -16965,9 +16928,9 @@ void COggDlg::timerp()
 	}
 	else {
 		if (tcg < 50)
-			s.Format(LL14(L"Loop数:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d"), loopcnt, tag, tbg, tcg);
+			s.Format(LL14(L"Loop数:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Boucle:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Bucle:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"循环:%3d G:%3d:%02d.%02d", L"حلقة:%3d G:%3d:%02d.%02d", L"Петля:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Loop:%3d G:%3d:%02d.%02d", L"Pętla:%3d G:%3d:%02d.%02d", L"Döngü:%3d G:%3d:%02d.%02d"), loopcnt, tag, tbg, tcg);
 		else
-			s.Format(LL14(L"Loop数:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d"), loopcnt, tag, tbg, tcg);
+			s.Format(LL14(L"Loop数:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Boucle:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Bucle:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"循环:%3d G:%3d:%02d %02d", L"حلقة:%3d G:%3d:%02d %02d", L"Петля:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Loop:%3d G:%3d:%02d %02d", L"Pętla:%3d G:%3d:%02d %02d", L"Döngü:%3d G:%3d:%02d %02d"), loopcnt, tag, tbg, tcg);
 		moji(s, 1, 80, 0xefefef);
 	}
 	if (ss != s)
@@ -17935,6 +17898,15 @@ void timerog1(UINT nIDEvent)
 			}
 
 			og->m_PianoRollDlg->ShowWindow(SW_SHOW);
+		}
+		if (savedata.prTunewindow == 1) {
+			if (!::IsWindow(og->m_PianoRollTuneDlg->GetSafeHwnd()))
+			{
+				if (!og->m_PianoRollTuneDlg->Create(IDD_PIANOROLL_TUNE, og))
+					savedata.prTunewindow = 0;
+			}
+			if (::IsWindow(og->m_PianoRollTuneDlg->GetSafeHwnd()))
+				og->m_PianoRollTuneDlg->ShowWindow(SW_SHOW);
 		}
 		if (savedata.analyzerwindow == 1) {
 			// 親作成直後の同期 Create は避ける(CreateDialog ネスト対策)。
@@ -22942,6 +22914,7 @@ int COggDlg::OnCreate(LPCREATESTRUCT lpCreateStruct)
 void COggDlg::OnMoving(UINT fwSide, LPRECT pRect)
 {
 	CCustomBlurDialogBase::OnMoving(fwSide, pRect);
+	CCC_MainLockOnMainMoving(pRect);
 #if CCUSTOM_AERO_SUPPORT
 	if (CCC_IsAeroEnabled())
 		CCC_RefreshDwmBlur(m_hWnd);
@@ -23150,6 +23123,28 @@ void COggDlg::ToggleAnalyzer()
 		m_AnalyzerDlg->ShowWindow(SW_SHOW);
 		m_AnalyzerDlg->SetFocus();
 	}
+}
+
+void COggDlg::ShowPianoRollTune()
+{
+	if (!m_PianoRollTuneDlg)
+		return;
+	if (!::IsWindow(m_PianoRollTuneDlg->GetSafeHwnd())) {
+		if (!m_PianoRollTuneDlg->Create(IDD_PIANOROLL_TUNE, this))
+			return;
+		savedata.prTunewindow = 1;
+	}
+	if (::IsWindow(m_PianoRollTuneDlg->GetSafeHwnd())) {
+		m_PianoRollTuneDlg->ShowWindow(SW_SHOW);
+		m_PianoRollTuneDlg->SetFocus();
+		savedata.prTunewindow = 1;
+	}
+}
+
+void COggDlg_ShowPianoRollTune()
+{
+	if (og)
+		og->ShowPianoRollTune();
 }
 
 void COggDlg::FeedPianoRoll(const void* pData, int bytes)

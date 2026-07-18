@@ -305,6 +305,7 @@ BOOL CAnalyzerDlg::OnInitDialog()
 	StartSpecWorker();
 	// タイマーは座標保存のみ。描画は解析/音声完了の PostMessage で自由走行(ピアノロール方式)。
 	SetTimer(1, 500, nullptr);
+	EnableMainWindowLock(&savedata.analyzerMainLock, TRUE);
 	return TRUE;
 }
 
@@ -418,11 +419,21 @@ LRESULT CAnalyzerDlg::OnSpecAnalysisDone(WPARAM, LPARAM)
 	return 0;
 }
 
+static void AnalyzerPresentInvalidate(HWND hWnd)
+{
+	if (!::IsWindow(hWnd))
+		return;
+	CRect cr;
+	::GetClientRect(hWnd, &cr);
+	if (!cr.IsRectEmpty())
+		CCC_InvalidateRectMinusOverlay(hWnd, cr);
+}
+
 LRESULT CAnalyzerDlg::OnPresentRequest(WPARAM, LPARAM)
 {
 	InterlockedExchange(&m_presentPosted, 0);
 	if (::IsWindow(m_hWnd) && IsWindowVisible() && !IsIconic())
-		Invalidate(FALSE);
+		AnalyzerPresentInvalidate(m_hWnd);
 	return 0;
 }
 
@@ -685,13 +696,13 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleFill ? MF_CHECKED : 0),
 		IDM_STYLE_FILL, LL14(L"Ozone 風 (塗+線)", L"Ozone (fill+line)", L"Ozone (rempl.+ligne)", L"Ozone (riemp.+linea)", L"Ozone (relleno+linea)", L"Ozone (채움+선)", L"Ozone(填充+线)", L"Ozone (تعبئة+خط)", L"Ozone (заливка+линия)", L"Ozone (Fullung+Linie)", L"Ozone (preench.+linha)", L"Ozone (vulling+lijn)", L"Ozone (wypeln.+linia)", L"Ozone (dolgu+cizgi)"));
 	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleCubase ? MF_CHECKED : 0),
-		IDM_STYLE_CUBASE, LL14(L"Cubase Frequency 風", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency", L"Cubase Frequency"));
+		IDM_STYLE_CUBASE, LL14(L"Cubase Frequency 風", L"Cubase Frequency style", L"Style Cubase Frequency", L"Stile Cubase Frequency", L"Estilo Cubase Frequency", L"Cubase Frequency 스타일", L"Cubase Frequency 风格", L"نمط Cubase Frequency", L"Стиль Cubase Frequency", L"Cubase Frequency-Stil", L"Estilo Cubase Frequency", L"Cubase Frequency-stijl", L"Styl Cubase Frequency", L"Cubase Frequency tarzı"));
 	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleSpan ? MF_CHECKED : 0),
-		IDM_STYLE_SPAN, LL14(L"Voxengo SPAN 風", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN", L"Voxengo SPAN"));
+		IDM_STYLE_SPAN, LL14(L"Voxengo SPAN 風", L"Voxengo SPAN style", L"Style Voxengo SPAN", L"Stile Voxengo SPAN", L"Estilo Voxengo SPAN", L"Voxengo SPAN 스타일", L"Voxengo SPAN 风格", L"نمط Voxengo SPAN", L"Стиль Voxengo SPAN", L"Voxengo SPAN-Stil", L"Estilo Voxengo SPAN", L"Voxengo SPAN-stijl", L"Styl Voxengo SPAN", L"Voxengo SPAN tarzı"));
 	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleAbleton ? MF_CHECKED : 0),
-		IDM_STYLE_ABLETON, LL14(L"Ableton Spectrum 風", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum", L"Ableton Spectrum"));
+		IDM_STYLE_ABLETON, LL14(L"Ableton Spectrum 風", L"Ableton Spectrum style", L"Style Ableton Spectrum", L"Stile Ableton Spectrum", L"Estilo Ableton Spectrum", L"Ableton Spectrum 스타일", L"Ableton Spectrum 风格", L"نمط Ableton Spectrum", L"Стиль Ableton Spectrum", L"Ableton Spectrum-Stil", L"Estilo Ableton Spectrum", L"Ableton Spectrum-stijl", L"Styl Ableton Spectrum", L"Ableton Spectrum tarzı"));
 	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleFabFilter ? MF_CHECKED : 0),
-		IDM_STYLE_FABFILTER, LL14(L"FabFilter Pro-Q 風", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q", L"FabFilter Pro-Q"));
+		IDM_STYLE_FABFILTER, LL14(L"FabFilter Pro-Q 風", L"FabFilter Pro-Q style", L"Style FabFilter Pro-Q", L"Stile FabFilter Pro-Q", L"Estilo FabFilter Pro-Q", L"FabFilter Pro-Q 스타일", L"FabFilter Pro-Q 风格", L"نمط FabFilter Pro-Q", L"Стиль FabFilter Pro-Q", L"FabFilter Pro-Q-Stil", L"Estilo FabFilter Pro-Q", L"FabFilter Pro-Q-stijl", L"Styl FabFilter Pro-Q", L"FabFilter Pro-Q tarzı"));
 	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleBars ? MF_CHECKED : 0),
 		IDM_STYLE_BARS, LL14(L"バー (汎用)", L"Bars (generic)", L"Barres", L"Barre", L"Barras", L"막대", L"柱状", L"أشرطة", L"Столбцы", L"Balken", L"Barras", L"Balken", L"Slupki", L"Cubuk"));
 	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleLine ? MF_CHECKED : 0),
@@ -2059,6 +2070,8 @@ void CAnalyzerDlg::OnPaint()
 	{
 		Present(dc, rc, FALSE);
 	}
+
+	CCC_MainLockPaintClient(dc, m_hWnd);
 }
 
 BOOL CAnalyzerDlg::OnEraseBkgnd(CDC* pDC)
@@ -2092,7 +2105,12 @@ void CAnalyzerDlg::OnSize(UINT nType, int cx, int cy)
 	if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
 		CCC_RefreshDwmBlur(m_hWnd);
 #endif
-	Invalidate(FALSE);
+	if (::IsWindow(m_hWnd)) {
+		CRect cr;
+		GetClientRect(&cr);
+		if (!cr.IsRectEmpty())
+			CCC_InvalidateRectMinusOverlay(m_hWnd, cr);
+	}
 }
 
 void CAnalyzerDlg::OnShowWindow(BOOL bShow, UINT nStatus)

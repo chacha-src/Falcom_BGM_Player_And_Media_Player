@@ -149,6 +149,44 @@ static CString MpPromptLegendText()
 		L"Orn: @p50-1:20[100-120] @p1:50[100] @sb1:30 @br2:00");
 }
 
+static CString MpPromptEditLabelText()
+{
+	return LL14(
+		L"プロンプト入力欄",
+		L"Prompt input",
+		L"Saisie du prompt",
+		L"Input prompt",
+		L"Entrada de prompte",
+		L"프롬프트 입력",
+		L"提示输入",
+		L"إدخال الموجه",
+		L"Ввод промпта",
+		L"Prompt-Eingabe",
+		L"Entrada de prompt",
+		L"Prompt invoer",
+		L"Pole promptu",
+		L"Istem girisi");
+}
+
+static void MpInitPromptStatic(CCustomStatic& st, CFont* pFont, BOOL bAero)
+{
+	if (pFont)
+		st.SetFont(pFont, FALSE);
+	st.SetGradation(0, 0, 0, FALSE);
+	st.SetDropShadow(0, 0, 0, 0, FALSE);
+	st.SetPreferWideMode(FALSE);
+	st.SetAeroMode(bAero);
+}
+
+static void MpSetPromptLabelText(CCustomStatic& st, LPCTSTR plain)
+{
+	if (!plain || !*plain)
+		return;
+	CString s;
+	s.Format(_T("!@C404858%s"), plain);
+	st.SetWindowText(s);
+}
+
 void CPromptDlg::StyleButtons()
 {
 	m_run.SetGradation(RGB(200, 240, 200), RGB(130, 205, 140), 0, TRUE);
@@ -161,11 +199,8 @@ void CPromptDlg::StyleButtons()
 
 void CPromptDlg::SetupTooltips()
 {
-	if (!m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_BALLOON))
+	if (!CCustomControlUtility::BeginDialogToolTip(m_tooltip, this))
 		return;
-	m_tooltip.Activate(TRUE);
-	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
-	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 360);
 	auto addTip = [this](CWnd& w, LPCTSTR text) {
 		if (!text || !w.GetSafeHwnd()) return;
 		m_tooltip.AddTool(&w, text);
@@ -177,6 +212,7 @@ void CPromptDlg::SetupTooltips()
 	addTip(m_close, LL14(L"プロンプトウィンドウを閉じます(入力内容は保存)。", L"Close the prompt window (text is saved).", L"Fermer la fenetre de prompt (texte sauvegarde).", L"Chiudi la finestra prompt (testo salvato).", L"Cerrar la ventana de prompte (se guarda el texto).", L"프롬프트 창을 닫습니다(입력 내용 저장).", L"关闭提示窗口(保存输入内容)。", L"إغلاق نافذة الموجه (يُحفظ النص).", L"Закрыть окно промпта (текст сохраняется).", L"Prompt-Fenster schliessen (Text wird gespeichert).", L"Fechar janela de prompt (texto salvo).", L"Promptvenster sluiten (tekst wordt opgeslagen).", L"Zamknij okno promptu (tekst jest zapisywany).", L"Istem penceresini kapat (metin kaydedilir)."));
 	addTip(m_saveHist, LL14(L"現在のプロンプト本文を履歴に保存します。", L"Save current prompt text to history.", L"Enregistrer le prompt dans l'historique.", L"Salva il prompt nella cronologia.", L"Guardar el prompte en el historial.", L"현재 프롬프트를 기록에 저장합니다.", L"将当前提示保存到历史。", L"حفظ الموجه في السجل.", L"Сохранить промпт в историю.", L"Prompt in Verlauf speichern.", L"Salvar prompt no historico.", L"Prompt in geschiedenis opslaan.", L"Zapisz prompt w historii.", L"Promptu gecmise kaydet."));
 	addTip(m_hist, LL14(L"保存したプロンプト履歴から読み込みます。", L"Load a saved prompt from history.", L"Charger un prompt depuis l'historique.", L"Carica un prompt dalla cronologia.", L"Cargar un prompte del historial.", L"저장된 프롬프트 기록에서 불러옵니다.", L"从历史记录加载提示。", L"تحميل موجه من السجل.", L"Загрузить промпт из истории.", L"Prompt aus Verlauf laden.", L"Carregar prompt do historico.", L"Prompt uit geschiedenis laden.", L"Wczytaj prompt z historii.", L"Gecmisten prompt yukle."));
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
 }
 
 static void RaiseChildZOrder(CWnd* pWnd)
@@ -203,9 +239,18 @@ void CPromptDlg::LayoutControls()
 	const int gapMd = 6;
 	const int editMinH = 72;
 	const int legendMinH = 80;
+	const int editLblH = 18;
 
 	const int iw = max(1, W - M * 2);
+	const int lockGap = 6;
 	const int btnW = max(60, min(80, (iw - btnGap * 4) / 5));
+
+	CCC_MainLockSetHeaderRow(m_hWnd, M, editLblH);
+	CRect lockRc;
+	CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
+	const int lblW = lockRc.IsRectEmpty()
+		? max(80, iw - CCC_MainLockGetReserveWidth(m_hWnd) - lockGap)
+		: max(80, lockRc.left - M - lockGap);
 
 	// 下から順に確保(ボタン → 履歴 → 残り文字 → 説明 → 入力)
 	const int btnY = max(M, H - M - btnH);
@@ -215,8 +260,8 @@ void CPromptDlg::LayoutControls()
 
 	int legendH = max(legendMinH, (H * 7) / 30);
 	int legendTop = legendBottom - legendH;
-	if (legendTop < M + editMinH + gapMd) {
-		legendTop = M + editMinH + gapMd;
+	if (legendTop < M + editLblH + gapSm + editMinH + gapMd) {
+		legendTop = M + editLblH + gapSm + editMinH + gapMd;
 		legendH = legendBottom - legendTop;
 	}
 	if (legendH < 48)
@@ -224,7 +269,7 @@ void CPromptDlg::LayoutControls()
 	if (legendTop + legendH > legendBottom)
 		legendH = max(48, legendBottom - legendTop);
 
-	const int editTop = M;
+	const int editTop = M + editLblH + gapSm;
 	int editH = legendTop - gapMd - editTop;
 	if (editH < editMinH) {
 		editH = editMinH;
@@ -234,6 +279,8 @@ void CPromptDlg::LayoutControls()
 			legendH = max(48, legendBottom - legendTop);
 	}
 
+	if (m_lblEdit.GetSafeHwnd())
+		m_lblEdit.MoveWindow(M, M, lblW, editLblH);
 	if (m_edit.GetSafeHwnd())
 		m_edit.MoveWindow(M, editTop, iw, editH);
 	if (m_legend.GetSafeHwnd())
@@ -260,6 +307,7 @@ void CPromptDlg::LayoutControls()
 		m_close.MoveWindow(max(bx, W - M - btnW), btnY, btnW, btnH);
 
 	// ボタンを最前面へ(履歴コンボと重ならないよう)
+	RaiseChildZOrder(&m_lblEdit);
 	RaiseChildZOrder(&m_edit);
 	RaiseChildZOrder(&m_legend);
 	RaiseChildZOrder(GetDlgItem(IDC_MPP_REMAIN));
@@ -271,6 +319,7 @@ void CPromptDlg::LayoutControls()
 	RaiseChildZOrder(&m_reset);
 	RaiseChildZOrder(&m_clear);
 	RaiseChildZOrder(&m_close);
+	CCC_MainLockBringToFront(m_hWnd);
 }
 
 void CPromptDlg::RefreshAfterLayout(BOOL bSyncRedraw)
@@ -288,6 +337,8 @@ void CPromptDlg::RefreshAfterLayout(BOOL bSyncRedraw)
 	m_clear.RepaintClient();
 	m_close.RepaintClient();
 
+	if (m_lblEdit.GetSafeHwnd())
+		m_lblEdit.Invalidate(TRUE);
 	if (m_edit.GetSafeHwnd())
 		m_edit.Invalidate(TRUE);
 	if (m_legend.GetSafeHwnd())
@@ -425,11 +476,36 @@ BOOL CPromptDlg::OnInitDialog()
 		}
 	}
 
+#if CCUSTOM_AERO_SUPPORT
+	const BOOL bAero = CCC_IsAeroEnabled();
+#else
+	const BOOL bAero = FALSE;
+#endif
+	if (!m_lblEdit.GetSafeHwnd()) {
+		m_lblEdit.Create(_T(""), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOTIFY,
+			CRect(0, 0, 1, 1), this, IDC_MPP_EDIT_L);
+		LOGFONT lfLbl{};
+		CFont* pDef = GetFont();
+		if (pDef && pDef->GetLogFont(&lfLbl)) {
+			lfLbl.lfWeight = FW_SEMIBOLD;
+			if (m_fontEditLbl.GetSafeHandle()) m_fontEditLbl.DeleteObject();
+			if (m_fontEditLbl.CreateFontIndirect(&lfLbl))
+				MpInitPromptStatic(m_lblEdit, &m_fontEditLbl, bAero);
+			else
+				MpInitPromptStatic(m_lblEdit, pDef, bAero);
+		}
+		else {
+			MpInitPromptStatic(m_lblEdit, pDef, bAero);
+		}
+		MpSetPromptLabelText(m_lblEdit, MpPromptEditLabelText());
+	}
+
 	StyleButtons();
 	SetupTooltips();
 	LoadTextFromSavedata();
 	ReloadHistoryCombo();
 	UpdateRemainLabel();
+	EnableMainWindowLock(&savedata.mpPromptMainLock);
 	SyncLayoutAndPaint(TRUE, TRUE);
 	return TRUE;
 }

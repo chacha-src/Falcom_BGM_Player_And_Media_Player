@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "CCustomControl.h"
+#include "resource.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -6639,6 +6640,572 @@ void CCC_RefreshKids(HWND hWnd)
 #endif
 
 // ============================================================================
+// メインウィンドウ位置ロック (サブウィンドウが COggDlg / CMediaPlayerDlg に追随)
+// 通常ダイアログ: 子 CCustomCheckBox / GDI全画面(ピアノロール等): オーバーレイ描画
+// ============================================================================
+struct CCC_MainLockOverlayCache {
+    CDC dc;
+    CBitmap bmp;
+    CBitmap* oldBmp = nullptr;
+    int w = 0;
+    int h = 0;
+    BOOL dirty = TRUE;
+};
+
+struct CCC_MainLockEntry {
+    HWND hWnd = NULL;
+    CCustomCheckBox* pLockBtn = nullptr;
+    int offsetX = 0;
+    int offsetY = 0;
+    int* pSaveFlag = nullptr;
+    BOOL locked = FALSE;
+    BOOL overlayPaint = FALSE;
+    int headerRowTop = -1;
+    int headerRowH = 0;
+    CCC_MainLockOverlayCache* pOverlay = nullptr;
+};
+
+static CCC_MainLockEntry g_mainLocks[16];
+static int g_mainLockCount = 0;
+static BOOL g_mainLockInternalMove = FALSE;
+static DWORD g_mainLockQuickPresentUntil = 0;
+
+static const int CCC_MAINLOCK_H = 20;
+static const int CCC_MAINLOCK_MIN_W = 112;
+static const int CCC_MAINLOCK_MARGIN = 10;
+
+static void CCC_MainLockLayoutBtn(HWND hDlg);
+static void CCC_MainLockInvalidateOverlay(HWND hDlg);
+
+static void CCC_MainLockReleaseOverlayCache(CCC_MainLockEntry* e)
+{
+    if (!e || !e->pOverlay)
+        return;
+    CCC_MainLockOverlayCache* p = e->pOverlay;
+    if (p->dc.GetSafeHdc()) {
+        if (p->oldBmp)
+            p->dc.SelectObject(p->oldBmp);
+        p->dc.DeleteDC();
+    }
+    p->bmp.DeleteObject();
+    delete p;
+    e->pOverlay = nullptr;
+}
+
+static CCC_MainLockOverlayCache* CCC_MainLockEnsureOverlayCachePtr(CCC_MainLockEntry* e)
+{
+    if (!e)
+        return nullptr;
+    if (!e->pOverlay)
+        e->pOverlay = new (std::nothrow) CCC_MainLockOverlayCache();
+    return e->pOverlay;
+}
+
+static void CCC_MainLockMarkOverlayDirty(CCC_MainLockEntry* e)
+{
+    if (e && e->pOverlay)
+        e->pOverlay->dirty = TRUE;
+}
+
+static CCC_MainLockEntry* CCC_FindMainLockEntry(HWND hWnd)
+{
+    for (int i = 0; i < g_mainLockCount; ++i) {
+        if (g_mainLocks[i].hWnd == hWnd)
+            return &g_mainLocks[i];
+    }
+    return nullptr;
+}
+
+static CCC_MainLockEntry* CCC_GetOrCreateMainLockEntry(HWND hWnd)
+{
+    if (CCC_MainLockEntry* e = CCC_FindMainLockEntry(hWnd))
+        return e;
+    if (g_mainLockCount >= (int)_countof(g_mainLocks))
+        return nullptr;
+    CCC_MainLockEntry* e = &g_mainLocks[g_mainLockCount++];
+    e->hWnd = hWnd;
+    return e;
+}
+
+static void CCC_ComputeMainLockOffset(HWND hWnd, int& outX, int& outY)
+{
+    outX = outY = 0;
+    CWnd* pMain = CCC_GetActiveMainWindow();
+    if (!pMain || !::IsWindow(hWnd))
+        return;
+    CRect mainRc, selfRc;
+    pMain->GetWindowRect(&mainRc);
+    ::GetWindowRect(hWnd, &selfRc);
+    outX = selfRc.left - mainRc.left;
+    outY = selfRc.top - mainRc.top;
+}
+
+static const CString& CCC_MainLockLabel()
+{
+    static const CString s = LL14(
+        L"メイン固定", L"Lock main", L"Fixer fenetre principale",
+        L"Blocca finestra principale", L"Fijar ventana principal", L"메인 고정",
+        L"固定主窗口", L"قفل النافذة الرئيسية", L"Фикс. главное окно",
+        L"Hauptfenster fix", L"Fixar janela principal", L"Hoofdvenster vast",
+        L"Przypnij do glownego okna", L"Ana pencereye sabitle");
+    return s;
+}
+
+static int CCC_MainLockMeasureWidth(CWnd* pDlg)
+{
+    if (!pDlg || !::IsWindow(pDlg->GetSafeHwnd()))
+        return CCC_MAINLOCK_MIN_W;
+    CClientDC dc(pDlg);
+    CFont* pFont = pDlg->GetFont();
+    CFont* pOld = pFont ? dc.SelectObject(pFont) : NULL;
+    const CString& label = CCC_MainLockLabel();
+    CSize sz(0, 0);
+    ::GetTextExtentPoint32W(dc.GetSafeHdc(), label, label.GetLength(), &sz);
+    if (pOld)
+        dc.SelectObject(pOld);
+    return max(CCC_MAINLOCK_MIN_W, 20 + sz.cx + 8);
+}
+
+static void CCC_MainLockGetClientRect(HWND hDlg, CRect& rc)
+{
+    rc.SetRectEmpty();
+    CWnd* pDlg = CWnd::FromHandlePermanent(hDlg);
+    if (!pDlg)
+        pDlg = CWnd::FromHandle(hDlg);
+    if (!pDlg || !::IsWindow(hDlg))
+        return;
+    CRect cr;
+    pDlg->GetClientRect(&cr);
+    const int w = CCC_MainLockMeasureWidth(pDlg);
+    int left = cr.right - w - CCC_MAINLOCK_MARGIN;
+    if (left < 4)
+        left = 4;
+    int right = left + w;
+    if (right > cr.right - 4) {
+        right = cr.right - 4;
+        left = max(4, right - w);
+    }
+    rc.left = left;
+    rc.right = right;
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (e && e->headerRowTop >= 0) {
+        rc.top = e->headerRowTop;
+        rc.bottom = rc.top + max(e->headerRowH, CCC_MAINLOCK_H);
+    }
+    else {
+        rc.top = 4;
+        rc.bottom = rc.top + CCC_MAINLOCK_H;
+    }
+}
+
+static void CCC_MainLockInvalidateOverlay(HWND hDlg)
+{
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (e)
+        CCC_MainLockMarkOverlayDirty(e);
+    CRect rc;
+    CCC_MainLockGetClientRect(hDlg, rc);
+    if (!rc.IsRectEmpty())
+        ::InvalidateRect(hDlg, rc, FALSE);
+}
+
+void CCC_MainLockSetHeaderRow(HWND hDlg, int top, int height)
+{
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (!e)
+        return;
+    e->headerRowTop = top;
+    e->headerRowH = max(height, CCC_MAINLOCK_H);
+    if (e->overlayPaint)
+        CCC_MainLockInvalidateOverlay(hDlg);
+    else
+        CCC_MainLockLayoutBtn(hDlg);
+}
+
+void CCC_MainLockClearHeaderRow(HWND hDlg)
+{
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (!e || e->headerRowTop < 0)
+        return;
+    e->headerRowTop = -1;
+    e->headerRowH = 0;
+    if (e->overlayPaint)
+        CCC_MainLockInvalidateOverlay(hDlg);
+    else
+        CCC_MainLockLayoutBtn(hDlg);
+}
+
+void CCC_MainLockGetOverlayRect(HWND hDlg, CRect& rc)
+{
+    CCC_MainLockGetClientRect(hDlg, rc);
+}
+
+static void CCC_InvalidateRectMinus(const CRect& area, const CRect& hole, HWND hWnd)
+{
+    if (!::IsWindow(hWnd) || area.IsRectEmpty())
+        return;
+    CRect overlap;
+    if (!overlap.IntersectRect(&area, &hole)) {
+        ::InvalidateRect(hWnd, area, FALSE);
+        return;
+    }
+    auto inv = [&](const CRect& r) {
+        CRect t;
+        if (!t.IntersectRect(&r, &area) || t.IsRectEmpty())
+            return;
+        ::InvalidateRect(hWnd, &t, FALSE);
+    };
+    inv(CRect(area.left, area.top, area.right, hole.top));
+    inv(CRect(area.left, hole.bottom, area.right, area.bottom));
+    inv(CRect(area.left, hole.top, hole.left, hole.bottom));
+    inv(CRect(hole.right, hole.top, area.right, hole.bottom));
+}
+
+void CCC_InvalidateRectMinusOverlay(HWND hDlg, const CRect& area)
+{
+    if (!::IsWindow(hDlg) || area.IsRectEmpty())
+        return;
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (!e || !e->pSaveFlag || !e->overlayPaint) {
+        ::InvalidateRect(hDlg, area, FALSE);
+        return;
+    }
+    CRect lockRc;
+    CCC_MainLockGetClientRect(hDlg, lockRc);
+    if (lockRc.IsRectEmpty()) {
+        ::InvalidateRect(hDlg, area, FALSE);
+        return;
+    }
+    lockRc.InflateRect(2, 2);
+    CCC_InvalidateRectMinus(area, lockRc, hDlg);
+}
+
+static void CCC_MainLockSyncBtnCheck(CCC_MainLockEntry* e)
+{
+    if (!e || e->overlayPaint || !e->pLockBtn || !::IsWindow(e->pLockBtn->GetSafeHwnd()))
+        return;
+    e->pLockBtn->SetCheck(e->locked ? BST_CHECKED : BST_UNCHECKED);
+}
+
+static void CCC_ApplyMainLockState(CCC_MainLockEntry* e, BOOL locked)
+{
+    if (!e)
+        return;
+    e->locked = locked;
+    if (e->pSaveFlag)
+        *e->pSaveFlag = locked ? 1 : 0;
+    if (locked)
+        CCC_ComputeMainLockOffset(e->hWnd, e->offsetX, e->offsetY);
+    if (e->overlayPaint)
+        CCC_MainLockInvalidateOverlay(e->hWnd);
+    else
+        CCC_MainLockSyncBtnCheck(e);
+}
+
+static void CCC_MainLockDestroyBtn(CCC_MainLockEntry* e)
+{
+    if (!e || !e->pLockBtn)
+        return;
+    if (::IsWindow(e->pLockBtn->GetSafeHwnd()))
+        e->pLockBtn->DestroyWindow();
+    e->pLockBtn = nullptr;
+}
+
+static void CCC_MainLockEnsureBtn(CWnd* pDlg, CCC_MainLockEntry* e)
+{
+    if (!pDlg || !e || !e->pSaveFlag || e->overlayPaint)
+        return;
+    if (e->pLockBtn && ::IsWindow(e->pLockBtn->GetSafeHwnd()))
+        return;
+
+    e->pLockBtn = new CCustomCheckBox();
+    e->pLockBtn->EnableAutoDelete(TRUE);
+    e->pLockBtn->SetAeroMode(FALSE);
+
+    const int w = CCC_MainLockMeasureWidth(pDlg);
+    CRect rc(0, 0, w, CCC_MAINLOCK_H);
+    if (!e->pLockBtn->Create(CCC_MainLockLabel(),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+            rc, pDlg, IDC_MAINWIN_LOCK))
+    {
+        delete e->pLockBtn;
+        e->pLockBtn = nullptr;
+        return;
+    }
+
+    if (CFont* pFont = pDlg->GetFont())
+        e->pLockBtn->SetFont(pFont);
+    CCC_MainLockSyncBtnCheck(e);
+}
+
+static void CCC_MainLockLayoutBtn(HWND hDlg)
+{
+    if (g_mainLockInternalMove)
+        return;
+
+    CWnd* pDlg = CWnd::FromHandlePermanent(hDlg);
+    if (!pDlg)
+        pDlg = CWnd::FromHandle(hDlg);
+    if (!pDlg || !::IsWindow(hDlg))
+        return;
+
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (!e || !e->pSaveFlag || e->overlayPaint)
+        return;
+
+    CCC_MainLockEnsureBtn(pDlg, e);
+    if (!e->pLockBtn || !::IsWindow(e->pLockBtn->GetSafeHwnd()))
+        return;
+
+    CRect rc;
+    CCC_MainLockGetClientRect(hDlg, rc);
+    e->pLockBtn->SetWindowPos(&CWnd::wndTop, rc.left, rc.top, rc.Width(), rc.Height(),
+        SWP_NOACTIVATE | SWP_NOCOPYBITS);
+    CCC_MainLockSyncBtnCheck(e);
+}
+
+static void CCC_MainLockShowBtn(HWND hDlg, BOOL bShow)
+{
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (!e || !e->pSaveFlag)
+        return;
+    if (e->overlayPaint) {
+        if (bShow)
+            CCC_MainLockInvalidateOverlay(hDlg);
+        return;
+    }
+    if (bShow)
+        CCC_MainLockLayoutBtn(hDlg);
+    else if (e->pLockBtn && ::IsWindow(e->pLockBtn->GetSafeHwnd()))
+        e->pLockBtn->ShowWindow(SW_HIDE);
+}
+
+static void CCC_MainLockDrawOverlay(CDC& dc, const CRect& rc, BOOL locked)
+{
+    dc.FillSolidRect(rc, RGB(52, 44, 68));
+
+    CRect chk(rc.left + 3, rc.top + 4, rc.left + 17, rc.top + 18);
+    dc.DrawEdge(chk, EDGE_SUNKEN, BF_RECT);
+    if (locked) {
+        CPen pen(PS_SOLID, 2, COLOR_CHECK);
+        CPen* pOldPen = dc.SelectObject(&pen);
+        dc.MoveTo(chk.left + 3, chk.top + 8);
+        dc.LineTo(chk.left + 6, chk.top + 12);
+        dc.LineTo(chk.right - 3, chk.top + 5);
+        dc.SelectObject(pOldPen);
+    }
+
+    dc.SetBkMode(TRANSPARENT);
+    dc.SetTextColor(RGB(255, 248, 252));
+    CRect textRc = rc;
+    textRc.left += 20;
+    dc.DrawText(CCC_MainLockLabel(), textRc, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
+}
+
+void CCC_MainLockPaintClient(CDC& dc, HWND hDlg)
+{
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (!e || !e->pSaveFlag || !e->overlayPaint)
+        return;
+    CRect rc;
+    CCC_MainLockGetClientRect(hDlg, rc);
+    if (rc.IsRectEmpty())
+        return;
+
+    CRect clip;
+    dc.GetClipBox(&clip);
+    CRect vis;
+    if (!vis.IntersectRect(&rc, &clip))
+        return;
+
+    const int w = rc.Width();
+    const int h = rc.Height();
+    if (w <= 0 || h <= 0)
+        return;
+    CCC_MainLockOverlayCache* pCache = CCC_MainLockEnsureOverlayCachePtr(e);
+    if (!pCache)
+        return;
+    if (pCache->w != w || pCache->h != h || !pCache->dc.GetSafeHdc()) {
+        if (pCache->dc.GetSafeHdc()) {
+            if (pCache->oldBmp)
+                pCache->dc.SelectObject(pCache->oldBmp);
+            pCache->dc.DeleteDC();
+        }
+        pCache->bmp.DeleteObject();
+        pCache->oldBmp = nullptr;
+        if (!pCache->dc.CreateCompatibleDC(&dc))
+            return;
+        if (!pCache->bmp.CreateCompatibleBitmap(&dc, w, h)) {
+            pCache->dc.DeleteDC();
+            return;
+        }
+        pCache->oldBmp = pCache->dc.SelectObject(&pCache->bmp);
+        pCache->w = w;
+        pCache->h = h;
+        pCache->dirty = TRUE;
+    }
+    if (pCache->dirty) {
+        CRect local(0, 0, w, h);
+        CCC_MainLockDrawOverlay(pCache->dc, local, e->locked);
+        pCache->dirty = FALSE;
+    }
+    dc.BitBlt(rc.left, rc.top, w, h, &pCache->dc, 0, 0, SRCCOPY);
+}
+
+BOOL CCC_MainLockOverlayHitTest(HWND hDlg, CPoint ptClient)
+{
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (!e || !e->pSaveFlag || !e->overlayPaint)
+        return FALSE;
+    CRect rc;
+    CCC_MainLockGetClientRect(hDlg, rc);
+    return rc.PtInRect(ptClient);
+}
+
+void CCC_MainLockOverlayToggle(HWND hDlg)
+{
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (!e || !e->pSaveFlag || !e->overlayPaint)
+        return;
+    CCC_ApplyMainLockState(e, !e->locked);
+}
+
+static void CCC_MainLockOnClicked(HWND hDlg)
+{
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (!e || !e->pLockBtn || e->overlayPaint)
+        return;
+    CCC_ApplyMainLockState(e, e->pLockBtn->GetCheck() == BST_CHECKED);
+}
+
+void CCC_MainLockBringToFront(HWND hDlg)
+{
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (!e || !e->pSaveFlag)
+        return;
+    if (e->overlayPaint) {
+        CCC_MainLockInvalidateOverlay(hDlg);
+        return;
+    }
+    CCC_MainLockLayoutBtn(hDlg);
+    if (e->pLockBtn && ::IsWindow(e->pLockBtn->GetSafeHwnd()))
+        e->pLockBtn->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+int CCC_MainLockGetReserveWidth(HWND hDlg)
+{
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
+    if (!e || !e->pSaveFlag || e->overlayPaint)
+        return 0;
+    CWnd* pDlg = CWnd::FromHandlePermanent(hDlg);
+    if (!pDlg)
+        pDlg = CWnd::FromHandle(hDlg);
+    return CCC_MainLockMeasureWidth(pDlg) + CCC_MAINLOCK_MARGIN;
+}
+
+void CCC_MainLockSetup(CWnd* pDlg, int* pSavedLockFlag, BOOL bOverlayPaint)
+{
+    if (!pDlg || !::IsWindow(pDlg->GetSafeHwnd()) || !pSavedLockFlag)
+        return;
+    CCC_MainLockEntry* e = CCC_GetOrCreateMainLockEntry(pDlg->GetSafeHwnd());
+    if (!e)
+        return;
+    e->pSaveFlag = pSavedLockFlag;
+    e->overlayPaint = bOverlayPaint;
+    if (e->overlayPaint)
+        CCC_MainLockDestroyBtn(e);
+    CCC_ApplyMainLockState(e, (*pSavedLockFlag != 0));
+    if (e->overlayPaint)
+        CCC_MainLockInvalidateOverlay(pDlg->GetSafeHwnd());
+    else
+        CCC_MainLockBringToFront(pDlg->GetSafeHwnd());
+}
+
+void CCC_MainLockUnregister(HWND hWnd)
+{
+    for (int i = 0; i < g_mainLockCount; ++i) {
+        if (g_mainLocks[i].hWnd != hWnd)
+            continue;
+        CCC_MainLockDestroyBtn(&g_mainLocks[i]);
+        CCC_MainLockReleaseOverlayCache(&g_mainLocks[i]);
+        for (int j = i + 1; j < g_mainLockCount; ++j)
+            g_mainLocks[j - 1] = g_mainLocks[j];
+        --g_mainLockCount;
+        g_mainLocks[g_mainLockCount].hWnd = NULL;
+        g_mainLocks[g_mainLockCount].pLockBtn = nullptr;
+        g_mainLocks[g_mainLockCount].pSaveFlag = nullptr;
+        g_mainLocks[g_mainLockCount].pOverlay = nullptr;
+        g_mainLocks[g_mainLockCount].locked = FALSE;
+        g_mainLocks[g_mainLockCount].overlayPaint = FALSE;
+        break;
+    }
+}
+
+void CCC_MainLockOnMainMoving(LPRECT pMainRect)
+{
+    if (!pMainRect || g_mainLockInternalMove)
+        return;
+    g_mainLockInternalMove = TRUE;
+    g_mainLockQuickPresentUntil = GetTickCount() + 200;
+    for (int i = 0; i < g_mainLockCount; ++i) {
+        CCC_MainLockEntry& e = g_mainLocks[i];
+        if (!e.locked || !::IsWindow(e.hWnd))
+            continue;
+        ::LockWindowUpdate(e.hWnd);
+        ::SetWindowPos(e.hWnd, NULL,
+            pMainRect->left + e.offsetX,
+            pMainRect->top + e.offsetY,
+            0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+        ::LockWindowUpdate(NULL);
+    }
+    g_mainLockInternalMove = FALSE;
+}
+
+BOOL CCC_MainLockPreferQuickPresent()
+{
+    return GetTickCount() < g_mainLockQuickPresentUntil;
+}
+
+void CCC_MainLockRefreshOffsetsFor(CWnd* pMain)
+{
+    if (!pMain || !::IsWindow(pMain->GetSafeHwnd()))
+        return;
+    CRect mainRc;
+    pMain->GetWindowRect(&mainRc);
+    for (int i = 0; i < g_mainLockCount; ++i) {
+        CCC_MainLockEntry& e = g_mainLocks[i];
+        if (!e.locked || !::IsWindow(e.hWnd))
+            continue;
+        CRect selfRc;
+        ::GetWindowRect(e.hWnd, &selfRc);
+        e.offsetX = selfRc.left - mainRc.left;
+        e.offsetY = selfRc.top - mainRc.top;
+    }
+}
+
+void CCC_MainLockRefreshOffsets()
+{
+    CCC_MainLockRefreshOffsetsFor(CCC_GetActiveMainWindow());
+}
+
+void CCC_MainLockOnChildMoving(CWnd* pDlg, LPRECT pRect)
+{
+    if (!pDlg || !pRect || g_mainLockInternalMove)
+        return;
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(pDlg->GetSafeHwnd());
+    if (!e || !e->locked)
+        return;
+    CWnd* pMain = CCC_GetActiveMainWindow();
+    if (!pMain)
+        return;
+    CRect mainRc;
+    pMain->GetWindowRect(&mainRc);
+    e->offsetX = pRect->left - mainRc.left;
+    e->offsetY = pRect->top - mainRc.top;
+}
+
+// ============================================================================
 // アクリルぼかし適用済みカスタムダイアログ (CDialog版)
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomBlurDialogBase, CCustomDialog)
@@ -6650,6 +7217,9 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
     ON_WM_WINDOWPOSCHANGED()
     ON_WM_DWMCOMPOSITIONCHANGED()
     ON_WM_DESTROY()
+    ON_WM_MOVING()
+    ON_COMMAND(IDC_MAINWIN_LOCK, OnMainLockClicked)
+    ON_WM_LBUTTONDOWN()
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
@@ -6716,6 +7286,8 @@ void CCustomBlurDialogBase::ApplyDwmBlurCore(BOOL bForce)
             return;
         m_bAeroEnabled = TRUE;
         CCC_FinishBlurDlg(this, TRUE, m_bBlurApplied, m_opaqueFixers);
+        if (m_pMainLockSave)
+            CCC_MainLockBringToFront(m_hWnd);
         return;
     }
 
@@ -6737,6 +7309,8 @@ void CCustomBlurDialogBase::ApplyDwmBlurCore(BOOL bForce)
 void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
 {
     CCustomDialog::OnShowWindow(bShow, nStatus);
+    if (m_pMainLockSave)
+        CCC_MainLockShowBtn(m_hWnd, bShow);
     if (!bShow)
         return;
 #if CCUSTOM_AERO_SUPPORT
@@ -6757,6 +7331,8 @@ void CCustomBlurDialogBase::OnPaint()
     {
         CPaintDC dc(this);
         CCC_PaintAeroGaps(dc, this, nullptr);
+        if (m_pMainLockSave)
+            CCC_MainLockPaintClient(dc, m_hWnd);
         return;
     }
 #endif
@@ -6765,6 +7341,7 @@ void CCustomBlurDialogBase::OnPaint()
 
 void CCustomBlurDialogBase::OnDestroy()
 {
+    CCC_MainLockUnregister(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
     CCC_ClearOpaqueFixerList(m_opaqueFixers);
 #endif
@@ -6774,6 +7351,8 @@ void CCustomBlurDialogBase::OnDestroy()
 void CCustomBlurDialogBase::OnSize(UINT nType, int cx, int cy)
 {
     CCustomDialog::OnSize(nType, cx, cy);
+    if (m_pMainLockSave)
+        CCC_MainLockBringToFront(m_hWnd);
 }
 
 void CCustomBlurDialogBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
@@ -6798,7 +7377,35 @@ LRESULT CCustomBlurDialogBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
     if (m_bAeroEnabled && CCC_IsWin11())
         CCC_ReapplyOpaqueFix(this, m_opaqueFixers);
 #endif
+    if (m_pMainLockSave)
+        CCC_MainLockBringToFront(m_hWnd);
     return 0;
+}
+
+void CCustomBlurDialogBase::EnableMainWindowLock(int* pSavedLockFlag, BOOL bOverlayPaint)
+{
+    m_pMainLockSave = pSavedLockFlag;
+    CCC_MainLockSetup(this, pSavedLockFlag, bOverlayPaint);
+}
+
+void CCustomBlurDialogBase::OnMainLockClicked()
+{
+    CCC_MainLockOnClicked(m_hWnd);
+}
+
+void CCustomBlurDialogBase::OnLButtonDown(UINT nFlags, CPoint point)
+{
+    if (m_pMainLockSave && CCC_MainLockOverlayHitTest(m_hWnd, point)) {
+        CCC_MainLockOverlayToggle(m_hWnd);
+        return;
+    }
+    CCustomDialog::OnLButtonDown(nFlags, point);
+}
+
+void CCustomBlurDialogBase::OnMoving(UINT fwSide, LPRECT pRect)
+{
+    CCustomDialog::OnMoving(fwSide, pRect);
+    CCC_MainLockOnChildMoving(this, pRect);
 }
 
 // ============================================================================
@@ -6894,6 +7501,9 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
     ON_WM_WINDOWPOSCHANGED()
     ON_WM_DWMCOMPOSITIONCHANGED()
     ON_WM_DESTROY()
+    ON_WM_MOVING()
+    ON_COMMAND(IDC_MAINWIN_LOCK, OnMainLockClicked)
+    ON_WM_LBUTTONDOWN()
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
@@ -6948,6 +7558,8 @@ void CCustomBlurDialogExBase::ApplyDwmBlurCore(BOOL bForce)
             return;
         m_bAeroEnabled = TRUE;
         CCC_FinishBlurDlg(this, TRUE, m_bBlurApplied, m_opaqueFixers);
+        if (m_pMainLockSave)
+            CCC_MainLockBringToFront(m_hWnd);
         return;
     }
 
@@ -6969,6 +7581,8 @@ void CCustomBlurDialogExBase::ApplyDwmBlurCore(BOOL bForce)
 void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
 {
     CCustomDialogEx::OnShowWindow(bShow, nStatus);
+    if (m_pMainLockSave)
+        CCC_MainLockShowBtn(m_hWnd, bShow);
     if (!bShow)
         return;
 #if CCUSTOM_AERO_SUPPORT
@@ -6989,6 +7603,8 @@ void CCustomBlurDialogExBase::OnPaint()
     {
         CPaintDC dc(this);
         CCC_PaintAeroGaps(dc, this, nullptr);
+        if (m_pMainLockSave)
+            CCC_MainLockPaintClient(dc, m_hWnd);
         return;
     }
 #endif
@@ -6997,6 +7613,7 @@ void CCustomBlurDialogExBase::OnPaint()
 
 void CCustomBlurDialogExBase::OnDestroy()
 {
+    CCC_MainLockUnregister(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
     CCC_ClearOpaqueFixerList(m_opaqueFixers);
 #endif
@@ -7006,6 +7623,8 @@ void CCustomBlurDialogExBase::OnDestroy()
 void CCustomBlurDialogExBase::OnSize(UINT nType, int cx, int cy)
 {
     CCustomDialogEx::OnSize(nType, cx, cy);
+    if (m_pMainLockSave)
+        CCC_MainLockBringToFront(m_hWnd);
 }
 
 void CCustomBlurDialogExBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
@@ -7030,5 +7649,33 @@ LRESULT CCustomBlurDialogExBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
     if (m_bAeroEnabled && CCC_IsWin11())
         CCC_ReapplyOpaqueFix(this, m_opaqueFixers);
 #endif
+    if (m_pMainLockSave)
+        CCC_MainLockBringToFront(m_hWnd);
     return 0;
+}
+
+void CCustomBlurDialogExBase::EnableMainWindowLock(int* pSavedLockFlag, BOOL bOverlayPaint)
+{
+    m_pMainLockSave = pSavedLockFlag;
+    CCC_MainLockSetup(this, pSavedLockFlag, bOverlayPaint);
+}
+
+void CCustomBlurDialogExBase::OnMainLockClicked()
+{
+    CCC_MainLockOnClicked(m_hWnd);
+}
+
+void CCustomBlurDialogExBase::OnLButtonDown(UINT nFlags, CPoint point)
+{
+    if (m_pMainLockSave && CCC_MainLockOverlayHitTest(m_hWnd, point)) {
+        CCC_MainLockOverlayToggle(m_hWnd);
+        return;
+    }
+    CCustomDialogEx::OnLButtonDown(nFlags, point);
+}
+
+void CCustomBlurDialogExBase::OnMoving(UINT fwSide, LPRECT pRect)
+{
+    CCustomDialogEx::OnMoving(fwSide, pRect);
+    CCC_MainLockOnChildMoving(this, pRect);
 }

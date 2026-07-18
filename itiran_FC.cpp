@@ -952,7 +952,7 @@ static inline CString FC_TRACK(int i) { switch (savedata.lang) { case 0: return 
 																		   CCustomBlurDialogBase::OnInitDialog();
 
 																		   SetWindowText(LL14(L"空の軌跡 First Chapter", L"Trails in the Sky First Chapter", L"Les Sentiers du Ciel Premier Chapitre", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"하늘의 궤적 First Chapter", L"空之轨迹 First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter", L"Trails in the Sky First Chapter"));
-																		   SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+																		   SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 
 																		   // TODO: この位置に初期化の補足処理を追加してください
 																		   int dx;
@@ -986,13 +986,13 @@ static inline CString FC_TRACK(int i) { switch (savedata.lang) { case 0: return 
 																			   */		dx = m_list.AddString(s);
 																			   m_list.SetItemData(dx, i);
 																		   }
-																		   dx = m_list.AddString(LL14(L"★FALCOMロゴ動画", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video"));
+																		   dx = m_list.AddString(LL14(L"★FALCOMロゴ動画", L"★FALCOM logo video", L"★Vidéo logo FALCOM", L"★Video logo FALCOM", L"★Vídeo logo FALCOM", L"★FALCOM 로고 동영상", L"★FALCOM 标志视频", L"★فيديو شعار FALCOM", L"★Видео логотипа FALCOM", L"★FALCOM-Logo-Video", L"★Vídeo logótipo FALCOM", L"★FALCOM-logovideo", L"★Wideo logo FALCOM", L"★FALCOM logo videosu"));
 																		   m_list.SetItemData(dx, 55);
-																		   dx = m_list.AddString(LL14(L"★オープニング動画", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video"));
+																		   dx = m_list.AddString(LL14(L"★オープニング動画", L"★Opening video", L"★Vidéo d'ouverture", L"★Video di apertura", L"★Vídeo de apertura", L"★오프닝 동영상", L"★开场视频", L"★فيديو الافتتاح", L"★Видео заставки", L"★Opening-Video", L"★Vídeo de abertura", L"★Openingvideo", L"★Wideo openingu", L"★Açılış videosu"));
 																		   m_list.SetItemData(dx, 56);
-																		   dx = m_list.AddString(LL14(L"★エンディング動画", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video"));
+																		   dx = m_list.AddString(LL14(L"★エンディング動画", L"★Ending video", L"★Vidéo de fin", L"★Video finale", L"★Vídeo final", L"★엔딩 동영상", L"★结尾视频", L"★فيديو النهاية", L"★Видео концовки", L"★Endvideo", L"★Vídeo final", L"★Eindvideo", L"★Wideo końcowe", L"★Bitiş videosu"));
 																		   m_list.SetItemData(dx, 57);
-																		   dx = m_list.AddString(LL14(L"★次作予告動画", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview", L"★Next game preview"));
+																		   dx = m_list.AddString(LL14(L"★次作予告動画", L"★Next game preview", L"★Aperçu du prochain jeu", L"★Anteprima prossimo gioco", L"★Avance del próximo juego", L"★차기작 예고 동영상", L"★续作预告视频", L"★معاينة اللعبة التالية", L"★Тизер следующей игры", L"★Vorschau nächstes Spiel", L"★Pré-visualização próximo jogo", L"★Preview volgend spel", L"★Zapowiedź następnej gry", L"★Sonraki oyun önizlemesi"));
 																		   m_list.SetItemData(dx, 58);
 
 																		   m_list.SetCurSel(0);

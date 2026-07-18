@@ -54,6 +54,7 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 #include "CCustomControl.h"
 class CEqualizer;
 class CPianoRoll;
+class CPianoRollTuneDlg;
 class CAnalyzerDlg;
 class CDouga;
 class CPlayList;
@@ -80,6 +81,7 @@ public:
 	void SyncAnalyzerFromPlayCursor();
 	void TogglePianoRoll();
 	void ToggleAnalyzer();
+	void ShowPianoRollTune();
 	void FeedPianoRoll(const void* pData, int bytes);
 	// x,y は論理座標(*4)。戻り値は描画文字列のピクセル幅(hFont / GetTextExtent)。
 	int  moji(CString s, int x, int y, COLORREF rgb);
@@ -125,6 +127,7 @@ public:
 	// ポインタ化: ヘッダ完結型不要 → PCH/依存TUがピアノロール変更で全再ビルドされない
 	CEqualizer* m_EqualizerDlg = nullptr;
 	CPianoRoll* m_PianoRollDlg = nullptr;
+	CPianoRollTuneDlg* m_PianoRollTuneDlg = nullptr;
 	CAnalyzerDlg* m_AnalyzerDlg = nullptr;
 	// SyncAnalyzerFromPlayCursor: bufwav3 上の前回終端バイト位置
 	BOOL m_analyzerSyncValid = FALSE;
@@ -380,6 +383,7 @@ public:
 };
 
 void COggDlg_SyncPianoRollFast();
+void COggDlg_ShowPianoRollTune();
 void COggDlg_SyncAnalyzerFast();
 BOOL COgg_IsEqualizerVisible();
 

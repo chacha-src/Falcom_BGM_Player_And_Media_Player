@@ -151,8 +151,8 @@ void Citiran_YS6::Gett(int a){
 BOOL Citiran_YS6::OnInitDialog() 
 {
 	CCustomBlurDialogBase::OnInitDialog();
-	SetWindowText(LL14(L"イースⅥ -ナピシュテムの匣-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-", L"Ys VI -Napishtim no Hako-"));
-	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+	SetWindowText(LL14(L"イースⅥ -ナピシュテムの匣-", L"Ys VI -Napishtim no Hako-", L"Ys VI - Le Coffre de Napishtim", L"Ys VI - L'Arca di Napishtim", L"Ys VI - El Arca de Napishtim", L"이스 VI - 나피슈테임의 함", L"伊苏VI - 纳比斯汀的方舟", L"Ys VI - صندوق نابشتيم", L"Ys VI - Ковчег Напиштима", L"Ys VI - Die Tribute von Napishtim", L"Ys VI - A Arca de Napishtim", L"Ys VI - De Ark van Napishtim", L"Ys VI - Arka Napishtim", L"Ys VI - Napishtim'in Sandığı"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

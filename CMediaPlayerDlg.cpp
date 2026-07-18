@@ -385,6 +385,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_MESSAGE(WM_MP_PLSEL_EXPAND, &CMediaPlayerDlg::OnPlselExpandPopup)
 	ON_WM_NCACTIVATE()
 	ON_WM_SYSCOMMAND()
+	ON_WM_MOVING()
 END_MESSAGE_MAP()
 
 static void MpMakePushToggle(CWnd* p)
@@ -732,12 +733,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		MoveWindow(x, y, w, h);
 	}
 
-	m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_BALLOON);
-	m_tooltip.Activate(TRUE);
-	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
-	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 360);
-	// AddTool(NULL/無効HWND) は ENSURE→CInvalidArgException（「引数が正しくありません」）。
-	// 例外を握りつぶすより先に HWND を検査して投げない。
+	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_BALLOON | TTS_NOPREFIX);
 	auto addTip = [this](CWnd& w, LPCTSTR text) {
 		if (!m_tooltip.GetSafeHwnd() || !text) return;
 		HWND hw = w.GetSafeHwnd();
@@ -794,6 +790,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_saveds, LL14(L"DirectShow(動画等)で途中保存を有効にします。", L"Enable resume save for DirectShow.", L"Reprise pour DirectShow.", L"Ripresa per DirectShow.", L"Reanudar para DirectShow.", L"DirectShow 위치 저장.", L"DirectShow续播保存。", L"حفظ موضع DirectShow.", L"Сохранение позиции DirectShow.", L"DirectShow-Position.", L"Retomar DirectShow.", L"DirectShow hervatten.", L"Wznawianie DirectShow.", L"DirectShow surdurme."));
 	addTip(m_savewav, LL14(L"再生中の音声をWAVファイルへ保存します。", L"Save playback audio to a WAV file.", L"Enregistrer l'audio en WAV.", L"Salva l'audio in WAV.", L"Guardar audio en WAV.", L"재생 음을 WAV로 저장.", L"将播放音频保存为WAV。", L"حفظ الصوت كـ WAV.", L"Сохранить звук в WAV.", L"Audio als WAV speichern.", L"Salvar audio em WAV.", L"Audio opslaan als WAV.", L"Zapis audio jako WAV.", L"Sesi WAV olarak kaydet."));
 	addTip(m_kaisuu, LL14(L"連続再生時、指定回数ループしたら次の曲へ進みます。", L"During continuous play, advance after this many loops.", L"En lecture continue, passer apres ce nombre de boucles.", L"In riproduzione continua, avanza dopo questo numero di loop.", L"En reproduccion continua, avanzar tras este numero de bucles.", L"연속 재생 시 지정 횟수만큼 반복 후 다음 곡.", L"连续播放时，循环指定次数后进入下一首。", L"في التشغيل المستمر، الانتقال بعد هذا العدد من الحلقات.", L"При непрерывном воспроизведении перейти после стольких повторов.", L"Bei Dauerwiedergabe nach so vielen Schleifen weiter.", L"Na reproducao continua, avancar apos este numero de loops.", L"Bij doorlopend afspelen na dit aantal loops verder.", L"Przy ciaglym odtwarzaniu przejdz po tylu petlach.", L"Surekli calmada bu dongu sayisindan sonra ilerle."));
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
 	m_find.SetFont(&m_fontList, TRUE);
 
 	DoLayout();
@@ -1197,12 +1194,12 @@ void CMediaPlayerDlg::DoLayout()
 	if (shortLv != m_mpBtnShort) {
 		m_mpBtnShort = shortLv;
 		if (shortLv >= 3) {
-			m_fadeout.SetWindowText(LL14(L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO", L"FO"));
-			m_jacket.SetWindowText(LL14(L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK"));
+			m_fadeout.SetWindowText(LL14(L"FO", L"FO", L"Fd", L"Fd", L"Fd", L"페", L"淡", L"تل", L"Зт", L"AO", L"Fd", L"Fo", L"Zan", L"So"));
+			m_jacket.SetWindowText(LL14(L"JK", L"JK", L"Poc", L"Cop", L"Car", L"JK", L"封", L"غل", L"Обл", L"Cov", L"Cap", L"Oms", L"Okł", L"Kap"));
 		}
 		else if (shortLv >= 2) {
 			m_fadeout.SetWindowText(LL14(L"フェード", L"Fade", L"Fondu", L"Fade", L"Fade", L"페이드", L"淡出", L"تلاشي", L"Затухание", L"Fade", L"Fade", L"Fade", L"Fade", L"Fade"));
-			m_jacket.SetWindowText(LL14(L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK", L"JK"));
+			m_jacket.SetWindowText(LL14(L"JK", L"JK", L"Poc", L"Cop", L"Car", L"JK", L"封", L"غل", L"Обл", L"Cov", L"Cap", L"Oms", L"Okł", L"Kap"));
 		}
 		else {
 			m_fadeout.SetWindowText(LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Fade out", L"Zanikanie", L"Soluklaştır"));
@@ -1210,7 +1207,7 @@ void CMediaPlayerDlg::DoLayout()
 		}
 		if (shortLv >= 3) {
 			if (m_eq.GetSafeHwnd())
-				m_eq.SetWindowText(LL14(L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ"));
+				m_eq.SetWindowText(LL14(L"EQ", L"EQ", L"Égal.", L"EQ", L"Ecual.", L"EQ", L"均衡", L"معادل", L"Экв.", L"EQ", L"Equal.", L"EQ", L"Kor.", L"Ekol."));
 			if (m_piano.GetSafeHwnd())
 				m_piano.SetWindowText(LL14(L"ロ", L"PR", L"PR", L"PR", L"PR", L"롤", L"卷", L"رول", L"Рл", L"PR", L"PR", L"PR", L"PR", L"PR"));
 			if (m_analyzer.GetSafeHwnd())
@@ -1218,7 +1215,7 @@ void CMediaPlayerDlg::DoLayout()
 		}
 		else if (shortLv >= 1) {
 			if (m_eq.GetSafeHwnd())
-				m_eq.SetWindowText(LL14(L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ", L"EQ"));
+				m_eq.SetWindowText(LL14(L"EQ", L"EQ", L"Égal.", L"EQ", L"Ecual.", L"EQ", L"均衡", L"معادل", L"Экв.", L"EQ", L"Equal.", L"EQ", L"Kor.", L"Ekol."));
 			if (m_piano.GetSafeHwnd())
 				m_piano.SetWindowText(LL14(L"ロール", L"Roll", L"Rouleau", L"Roll", L"Rollo", L"롤", L"卷帘", L"رول", L"Ролл", L"Rolle", L"Rolo", L"Rol", L"Rolka", L"Rulo"));
 			if (m_analyzer.GetSafeHwnd())
@@ -1620,7 +1617,7 @@ void CMediaPlayerDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 		case 2: {
 			CString s;
 			if (d.time == 0) s = _T("");
-			else if (d.time == -1) s = LL14(L"取得不能", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A", L"N/A");
+			else if (d.time == -1) s = LL14(L"取得不能", L"N/A", L"N/D", L"N/D", L"N/D", L"해당 없음", L"不可用", L"غ/م", L"Н/Д", L"k. A.", L"N/D", L"N.v.t.", L"Brak", L"Yok");
 			else if (d.time >= 3600) s.Format(_T("%d:%02d:%02d"), d.time / 3600, (d.time / 60) % 60, d.time % 60);
 			else s.Format(_T("%d:%02d"), d.time / 60, d.time % 60);
 			_tcsncpy_s(di->item.pszText, di->item.cchTextMax, s, _TRUNCATE);
@@ -2113,6 +2110,13 @@ void CMediaPlayerDlg::OnExitSizeMove()
 			m_list.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
 	}
 	Default();
+}
+
+void CMediaPlayerDlg::OnMoving(UINT fwSide, LPRECT pRect)
+{
+	CCustomBlurDialogExBase::OnMoving(fwSide, pRect);
+	CCC_MainLockOnMainMoving(pRect);
+	SavePos();
 }
 
 void CMediaPlayerDlg::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
@@ -3158,8 +3162,18 @@ void CMediaPlayerDlg::OnRclickList(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	*pResult = 0;
 	if (!pl) return;
+	CPoint pt;
+	::GetCursorPos(&pt);
+	CPoint clientPt = pt;
+	m_list.ScreenToClient(&clientPt);
+	const int hit = m_list.HitTest(clientPt, NULL);
+	if (hit >= 0 && !(m_list.GetItemState(hit, LVIS_SELECTED) & LVIS_SELECTED)) {
+		const int n = m_list.GetItemCount();
+		for (int i = 0; i < n; ++i)
+			m_list.SetItemState(i, 0, LVIS_SELECTED);
+		m_list.SetItemState(hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+	}
 	SyncSelectionToPlaylist();
-	CPoint pt; ::GetCursorPos(&pt);
 	const int cmd = pl->ShowTrackContextMenu(pt, this);
 	if (cmd != 0)
 		pl->HandleTrackContextCmd(cmd);
@@ -3394,6 +3408,8 @@ void EnterMediaPlayerMode()
 		if (savedata.aero == 1)
 			mp->RefreshAeroMode();   // 前面化後に再適用
 #endif
+		// mp 生成・配置後にオフセット再計算(早すぎると og 基準になり座標が狂う)
+		CCC_MainLockRefreshOffsetsFor(mp);
 	}
 }
 
@@ -3432,6 +3448,8 @@ void EnterFalcomMode()
 		CCC_RefreshKids(og->m_hWnd);   // 再表示時の子コントロール再描画
 		og->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
 		og->PostRefreshAllAeroWindows();         // EQ/ピアノ/プレイリスト等も再反映
+		// og 再表示後に mp 基準→og 基準へオフセットを付け替え
+		CCC_MainLockRefreshOffsetsFor(og);
 	}
 
 	// プレイリストは savedata.pl に従って表示/非表示

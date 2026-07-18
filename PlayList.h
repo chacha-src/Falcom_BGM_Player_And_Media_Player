@@ -154,6 +154,7 @@ public:
 };
 
 CString NormalizePlaylistPath(LPCTSTR fol);
+CString PlPhysicalMediaPath(LPCTSTR fol);
 
 enum {
 	PL_CTX_INFO = 1,

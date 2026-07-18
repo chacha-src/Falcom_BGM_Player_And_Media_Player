@@ -18,11 +18,13 @@ public:
 
 protected:
 	CEdit m_edit;
+	CCustomStatic m_lblEdit;
 	CEdit m_legend;
 	CCustomComboBox m_hist;
 	CCustomStandardButton m_run, m_stop, m_reset, m_clear, m_close, m_saveHist;
 	CToolTipCtrl m_tooltip;
 	CFont m_fontLegend;
+	CFont m_fontEditLbl;
 	CFont m_fontBtn;
 	CBrush m_brDlg;
 	BOOL m_posRestored = FALSE;

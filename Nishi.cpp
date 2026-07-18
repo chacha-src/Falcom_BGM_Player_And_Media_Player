@@ -716,7 +716,7 @@ BOOL CNishi::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"西風の狂詩曲(ラプソディー)", L"Rhapsody of the West Wind", L"Rhapsodie du Vent d'Ouest", L"Rapsodia del Vento d'Occidente", L"Rapsodia del Viento del Oeste", L"서풍의 광시곡", L"西风狂想曲", L"Rhapsody of the West Wind", L"Рапсодия Западного Ветра", L"Rhapsodie des Westwinds", L"Rapsódia do Vento Oeste", L"Rapsodie van de Westenwind", L"Rapsodia Zachodniego Wiatru", L"Batı Rüzgarı Rapsodisi"));
-	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

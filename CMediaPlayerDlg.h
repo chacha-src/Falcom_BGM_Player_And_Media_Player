@@ -220,6 +220,7 @@ protected:
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnEnterSizeMove();
 	afx_msg void OnExitSizeMove();
+	afx_msg void OnMoving(UINT fwSide, LPRECT pRect);
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
 #if WIN64
 	afx_msg void OnTimer(UINT_PTR nIDEvent);

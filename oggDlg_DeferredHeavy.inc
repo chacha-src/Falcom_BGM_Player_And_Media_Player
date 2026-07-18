@@ -16,8 +16,7 @@
 	cpus = CPUBrandString;
 	{
 		// ツールヒント コントロールを作成します
-		m_tooltip.Create(this);
-		m_tooltip.Activate(TRUE);
+		CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
 
 		auto addTip = [this](int id, LPCTSTR text) {
 			if (!m_tooltip.GetSafeHwnd() || !text) return;
@@ -922,10 +921,7 @@
 		addTip(IDC_STATIC_OS, s);
 		addTip(IDC_STATIC_OS2, s);
 	}
-	if (m_tooltip.GetSafeHwnd()) {
-		m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
-		m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
-	}
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 	// FFT三角関数テーブルの初期化
 	ipTab2[0] = 0;
 	int i;

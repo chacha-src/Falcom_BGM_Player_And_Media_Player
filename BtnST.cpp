@@ -206,8 +206,8 @@ UINT CButtonST::OnGetDlgCode()
 
 BOOL CButtonST::PreTranslateMessage(MSG* pMsg) 
 {
-	InitToolTip();
-	m_ToolTip.RelayEvent(pMsg);
+	if (m_ToolTip.GetSafeHwnd() && m_ToolTip.GetToolCount() > 0)
+		m_ToolTip.RelayEvent(pMsg);
 	
 	if (pMsg->message == WM_LBUTTONDBLCLK)
 		pMsg->message = WM_LBUTTONDOWN;

@@ -44,7 +44,8 @@ static CString MpResolvePath(const CString& entry, const CString& baseDir, BOOL 
 
 static BOOL MpFileExists(const CString& path)
 {
-	return path.GetLength() > 0 && ::PathFileExists(path);
+	const CString physical = PlPhysicalMediaPath(path);
+	return physical.GetLength() > 0 && ::PathFileExists(physical);
 }
 
 static CString MpTruncPlField(const CString& s)

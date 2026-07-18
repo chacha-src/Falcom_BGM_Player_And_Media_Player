@@ -434,6 +434,7 @@ private:
 
     void ReleasePaintBuffers();
     bool EnsureRollBuffer(CDC& refDC, int width, int rollH);
+    void PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH, int keySectionH);
     bool EnsureKeyBuffer(CDC& refDC, int width, int keySectionH);
     void MarkKeyVisualDirty();
     void ApplySyncInvalidate();

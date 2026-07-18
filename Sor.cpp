@@ -1191,8 +1191,8 @@ void CSor::OnDblclkList1()
 BOOL CSor::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
-	SetWindowText(LL14(L"ソーサリアン オリジナル", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original"));
-	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+	SetWindowText(LL14(L"ソーサリアン オリジナル", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"소서리안 오리지널", L"巫师系列 原版", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original", L"Sorcerian Original"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

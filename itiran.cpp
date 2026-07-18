@@ -432,7 +432,7 @@ BOOL itiran::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"空の軌跡 Second Chapter", L"Trails in the Sky Second Chapter", L"Les Sentiers du Ciel Second Chapitre", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"하늘의 궤적 Second Chapter", L"空之轨迹 Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter", L"Trails in the Sky Second Chapter"));
-	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
@@ -466,25 +466,25 @@ BOOL itiran::OnInitDialog()
 		*/		dx = m_list.AddString(s);
 		m_list.SetItemData(dx, i);
 	}
-	dx = m_list.AddString(LL14(L"★FALCOMロゴ動画", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video", L"★FALCOM logo video"));
+	dx = m_list.AddString(LL14(L"★FALCOMロゴ動画", L"★FALCOM logo video", L"★Vidéo logo FALCOM", L"★Video logo FALCOM", L"★Vídeo logo FALCOM", L"★FALCOM 로고 동영상", L"★FALCOM 标志视频", L"★فيديو شعار FALCOM", L"★Видео логотипа FALCOM", L"★FALCOM-Logo-Video", L"★Vídeo logótipo FALCOM", L"★FALCOM-logovideo", L"★Wideo logo FALCOM", L"★FALCOM logo videosu"));
 	m_list.SetItemData(dx, 98);
-	dx = m_list.AddString(LL14(L"★オープニング動画", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video", L"★Opening video"));
+	dx = m_list.AddString(LL14(L"★オープニング動画", L"★Opening video", L"★Vidéo d'ouverture", L"★Video di apertura", L"★Vídeo de apertura", L"★오프닝 동영상", L"★开场视频", L"★فيديو الافتتاح", L"★Видео заставки", L"★Opening-Video", L"★Vídeo de abertura", L"★Openingvideo", L"★Wideo openingu", L"★Açılış videosu"));
 	m_list.SetItemData(dx, 99);
-	dx = m_list.AddString(LL14(L"★エンディング動画", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video", L"★Ending video"));
+	dx = m_list.AddString(LL14(L"★エンディング動画", L"★Ending video", L"★Vidéo de fin", L"★Video finale", L"★Vídeo final", L"★엔딩 동영상", L"★结尾视频", L"★فيديو النهاية", L"★Видео концовки", L"★Endvideo", L"★Vídeo final", L"★Eindvideo", L"★Wideo końcowe", L"★Bitiş videosu"));
 	m_list.SetItemData(dx, 100);
-	dx = m_list.AddString(LL14(L"★動画1", L"★Video 1", L"★Video 1", L"★Video 1", L"★Video 1", L"★Video 1", L"★Video 1", L"★Video 1", L"★Video 1", L"★Video 1", L"★Video 1", L"★Video 1", L"★Video 1", L"★Video 1"));
+	dx = m_list.AddString(LL14(L"★動画1", L"★Video 1", L"★Vidéo 1", L"★Video 1", L"★Vídeo 1", L"★동영상 1", L"★视频1", L"★فيديو 1", L"★Видео 1", L"★Video 1", L"★Vídeo 1", L"★Video 1", L"★Wideo 1", L"★Video 1"));
 	m_list.SetItemData(dx, 101);
-	dx = m_list.AddString(LL14(L"★動画2", L"★Video 2", L"★Video 2", L"★Video 2", L"★Video 2", L"★Video 2", L"★Video 2", L"★Video 2", L"★Video 2", L"★Video 2", L"★Video 2", L"★Video 2", L"★Video 2", L"★Video 2"));
+	dx = m_list.AddString(LL14(L"★動画2", L"★Video 2", L"★Vidéo 2", L"★Video 2", L"★Vídeo 2", L"★동영상 2", L"★视频2", L"★فيديو 2", L"★Видео 2", L"★Video 2", L"★Vídeo 2", L"★Video 2", L"★Wideo 2", L"★Video 2"));
 	m_list.SetItemData(dx, 102);
-	dx = m_list.AddString(LL14(L"★動画3", L"★Video 3", L"★Video 3", L"★Video 3", L"★Video 3", L"★Video 3", L"★Video 3", L"★Video 3", L"★Video 3", L"★Video 3", L"★Video 3", L"★Video 3", L"★Video 3", L"★Video 3"));
+	dx = m_list.AddString(LL14(L"★動画3", L"★Video 3", L"★Vidéo 3", L"★Video 3", L"★Vídeo 3", L"★동영상 3", L"★视频3", L"★فيديو 3", L"★Видео 3", L"★Video 3", L"★Vídeo 3", L"★Video 3", L"★Wideo 3", L"★Video 3"));
 	m_list.SetItemData(dx, 103);
-	dx = m_list.AddString(LL14(L"★動画4", L"★Video 4", L"★Video 4", L"★Video 4", L"★Video 4", L"★Video 4", L"★Video 4", L"★Video 4", L"★Video 4", L"★Video 4", L"★Video 4", L"★Video 4", L"★Video 4", L"★Video 4"));
+	dx = m_list.AddString(LL14(L"★動画4", L"★Video 4", L"★Vidéo 4", L"★Video 4", L"★Vídeo 4", L"★동영상 4", L"★视频4", L"★فيديو 4", L"★Видео 4", L"★Video 4", L"★Vídeo 4", L"★Video 4", L"★Wideo 4", L"★Video 4"));
 	m_list.SetItemData(dx, 104);
-	dx = m_list.AddString(LL14(L"★動画5", L"★Video 5", L"★Video 5", L"★Video 5", L"★Video 5", L"★Video 5", L"★Video 5", L"★Video 5", L"★Video 5", L"★Video 5", L"★Video 5", L"★Video 5", L"★Video 5", L"★Video 5"));
+	dx = m_list.AddString(LL14(L"★動画5", L"★Video 5", L"★Vidéo 5", L"★Video 5", L"★Vídeo 5", L"★동영상 5", L"★视频5", L"★فيديو 5", L"★Видео 5", L"★Video 5", L"★Vídeo 5", L"★Video 5", L"★Wideo 5", L"★Video 5"));
 	m_list.SetItemData(dx, 105);
-	dx = m_list.AddString(LL14(L"★動画6", L"★Video 6", L"★Video 6", L"★Video 6", L"★Video 6", L"★Video 6", L"★Video 6", L"★Video 6", L"★Video 6", L"★Video 6", L"★Video 6", L"★Video 6", L"★Video 6", L"★Video 6"));
+	dx = m_list.AddString(LL14(L"★動画6", L"★Video 6", L"★Vidéo 6", L"★Video 6", L"★Vídeo 6", L"★동영상 6", L"★视频6", L"★فيديو 6", L"★Видео 6", L"★Video 6", L"★Vídeo 6", L"★Video 6", L"★Wideo 6", L"★Video 6"));
 	m_list.SetItemData(dx, 106);
-	dx = m_list.AddString(LL14(L"★動画7", L"★Video 7", L"★Video 7", L"★Video 7", L"★Video 7", L"★Video 7", L"★Video 7", L"★Video 7", L"★Video 7", L"★Video 7", L"★Video 7", L"★Video 7", L"★Video 7", L"★Video 7"));
+	dx = m_list.AddString(LL14(L"★動画7", L"★Video 7", L"★Vidéo 7", L"★Video 7", L"★Vídeo 7", L"★동영상 7", L"★视频7", L"★فيديو 7", L"★Видео 7", L"★Video 7", L"★Vídeo 7", L"★Video 7", L"★Wideo 7", L"★Video 7"));
 	m_list.SetItemData(dx, 107);
 
 	m_list.SetCurSel(0);

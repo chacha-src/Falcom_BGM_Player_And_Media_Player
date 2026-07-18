@@ -654,7 +654,7 @@ BOOL CDino::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"ダイナソア リザレクション", L"dinosaur Resurrection", L"Résurrection Dinosaure", L"Resurrezione Dinosauro", L"Resurrección Dinosaurio", L"공룡 부활", L"恐龙复活", L"dinosaur Resurrection", L"Динозавр: Воскрешение", L"dinosaurier Auferstehung", L"Ressurreição Dinossauro", L"dinosaur Resurrection", L"dinozaur Zmartwychwstanie", L"dinozor Diriliş"));
-	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

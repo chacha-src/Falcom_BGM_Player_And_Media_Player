@@ -376,8 +376,7 @@ BOOL CPlayList::OnInitDialog()
 	SetDlgItemText(IDC_BUTTON3, LL14(L"名前変更", L"Rename", L"Renommer", L"Rinomina", L"Cambiar nombre", L"이름 바꾸기", L"重命名", L"إعادة التسمية", L"Переименовать", L"Umbenennen", L"Renomear", L"Hernoemen", L"Zmie? nazw?", L"Yeniden adland?r"));
 	SetDlgItemText(IDC_PLAYDELETE, LL14(L"リスト削除", L"Delete list", L"Supprimer la liste", L"Elimina lista", L"Eliminar lista", L"목록 삭제", L"删除列表", L"حذف القائمة", L"Удалить список", L"Liste loschen", L"Excluir lista", L"Lijst verwijderen", L"Usu? list?", L"Listeyi sil"));
 	SetDlgItemText(IDC_PIANOROLL, LL14(L"簡易ピアノロール", L"Simple Piano Roll", L"Rouleau piano simple", L"Rotolo pianoforte semplice", L"Rollo de piano simple", L"간이 피아노 롤", L"简易钢琴卷帘", L"لوحة بيانو بسيطة", L"Простой пианоролл", L"Einfache Klavierrolle", L"Rolo de piano simples", L"Eenvoudige pianorol", L"Prosta rolka pianina", L"Basit piyano rulosu"));
-	m_tooltip.Create(this,TTS_ALWAYSTIP | TTS_BALLOON);
-	m_tooltip.Activate(TRUE);
+	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
 	auto addTip = [this](UINT id, LPCTSTR text) {
 		if (!m_tooltip.GetSafeHwnd() || !text) return;
 		CWnd* w = GetDlgItem(id);
@@ -404,8 +403,7 @@ BOOL CPlayList::OnInitDialog()
 	addTip(IDC_PLAYDELETE, LL14(L"表示されているプレイリストを削除します。\n※削除したものは復活できないので注意ください。", L"Delete the displayed playlist.\n*Deleted playlists cannot be recovered.", L"Supprimer la liste affichee.\n*Les listes supprimees ne peuvent pas etre recuperees.", L"Elimina la playlist visualizzata.\n*Le playlist eliminate non possono essere recuperate.", L"Eliminar la lista mostrada.\n*Las listas eliminadas no se pueden recuperar.", L"표시된 재생 목록 삭제.\n*삭제 후 복구 불가.", L"删除显示的播放列表。\n*删除后无法恢复。", L"حذف قائمة التشغيل المعروضة.\n*لا يمكن استرداد المحذوفة.", L"Удалить отображаемый плейлист.\n*Удалённые плейлисты восстановить нельзя.", L"Angezeigte Playlist loschen.\n*Geloschte Playlists konnen nicht wiederhergestellt werden.", L"Excluir lista exibida.\n*Listas excluidas nao podem ser recuperadas.", L"Getoonde playlist verwijderen.\n*Verwijderde playlists kunnen niet worden hersteld.", L"Usu? wy?wietlan? list?.\n*Usuni?tych list nie mo?na odzyska?.", L"Gosterilen listeyi sil.\n*Silinen listeler geri al?namaz."));
 	addTip(IDC_PIANOROLL, LL14(L"簡易ピアノロール表示を開きます。\n再生中の音程を鍵盤状に表示します。", L"Open simple piano roll view.\nShows pitch of playing audio on a keyboard layout.", L"Ouvrir le rouleau piano simple.\nAffiche la hauteur du son en cours sur un clavier.", L"Apri rotolo pianoforte semplice.\nMostra l'altezza dell'audio in riproduzione su tastiera.", L"Abrir rollo de piano simple.\nMuestra el tono del audio en reproduccion en un teclado.", L"간이 피아노 롤 창을 엽니다.\n재생 중 음정을 건반 형태로 표시합니다.", L"打开简易钢琴卷帘。\n以键盘形式显示正在播放的音频音高。", L"فتح لوحة البيانو البسيطة.\nيعرض طبقة الصوت على شكل لوحة مفاتيح.", L"Открыть простой пианоролл.\nПоказывает высоту звука на клавиатуре.", L"Einfache Klavierrolle offnen.\nZeigt Tonhohe als Tastatur.", L"Abrir rolo de piano simples.\nMostra altura do audio em teclado.", L"Eenvoudige pianorol openen.\nToont toonhoogte op een toetsenbord.", L"Otworz prosta rolke pianina.\nPokazuje wysokosc dzwieku na klawiaturze.", L"Basit piyano rulosunu ac.\nCalan sesin perdesini klavye duzeninde gosterir."));
 	addTip(IDC_EDIT2, LL14(L"あいまい検索のキーワードを入力します。\n上下の検索ボタンでリスト内を検索します。", L"Enter fuzzy search keyword.\nUse search buttons above/below to find in list.", L"Saisir le mot-cle de recherche floue.\nUtilisez les boutons pour chercher dans la liste.", L"Inserisci parola chiave ricerca fuzzy.\nUsa i pulsanti per cercare nella lista.", L"Introduzca palabra clave de busqueda difusa.\nUse los botones para buscar en la lista.", L"퍼지 검색 키워드를 입력합니다.\n위/아래 검색 버튼으로 목록을 검색합니다.", L"输入模糊搜索关键字。\n用上下搜索按钮在列表中查找。", L"أدخل كلمة البحث الغامض.\nاستخدم أزرار البحث للعثور في القائمة.", L"Введите ключевое слово нечеткого поиска.\nКнопками ищите в списке.", L"Suchbegriff fur Fuzzy-Suche eingeben.\nMit Suchtasten in der Liste suchen.", L"Digite palavra-chave de pesquisa fuzzy.\nUse os botoes para buscar na lista.", L"Voer fuzzy-zoekterm in.\nGebruik zoekknoppen in de lijst.", L"Wpisz slowo kluczowe wyszukiwania rozmytego.\nPrzyciskami szukaj na liscie.", L"Bulanik arama anahtar kelimesini girin.\nListede aramak icin arama dugmelerini kullanin."));
-	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
-	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 //	m_lc.SetMaxTipWidth(500)
 	DWORD dwExStyle = m_lc.GetExtendedStyle();
 	dwExStyle |= LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES;//|LVS_EX_INFOTIP;
@@ -517,6 +515,8 @@ BOOL CPlayList::OnInitDialog()
 	m_finddown.SetFlat(TRUE);
 	ScheduleRefreshNavControls();
 
+	EnableMainWindowLock(&savedata.playlistMainLock);
+	CCC_MainLockBringToFront(m_hWnd);
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
 	}
@@ -654,6 +654,48 @@ CString NormalizePlaylistPath(LPCTSTR fol)
 	CString s = (n > 0 && n < MAX_PATH) ? CString(full) : CString(fol);
 	s.Replace(_T('/'), _T('\\'));
 	return s;
+}
+
+CString PlPhysicalMediaPath(LPCTSTR fol)
+{
+	if (!fol || !*fol) return CString();
+	CString in(fol);
+	const int len = in.GetLength();
+	// KPI subsong: path::0001 (4-digit track number)
+	if (len >= 6 && in.GetAt(len - 5) == L':') {
+		const CString tail = in.Right(4);
+		bool allDigits = true;
+		for (int i = 0; i < 4; ++i) {
+			if (tail[i] < L'0' || tail[i] > L'9') { allDigits = false; break; }
+		}
+		if (allDigits)
+			return in.Left(len - 6);
+	}
+	// Other virtual paths (e.g. .pac::..., archive entries)
+	const int cor = in.Find(L':', 6);
+	if (cor != -1)
+		return in.Left(cor);
+	return in;
+}
+
+static bool PlIsFalcomGameBgmMode(int sub)
+{
+	return (sub >= 1 && sub <= 21) || sub == 30 ||
+		sub == -11 || sub == -12 || sub == -13 || sub == -14 || sub == -15;
+}
+
+static void PlSelectItemAtScreenPoint(CListCtrl& lc, CPoint screenPt)
+{
+	CPoint pt = screenPt;
+	lc.ScreenToClient(&pt);
+	const int hit = lc.HitTest(pt, NULL);
+	if (hit < 0) return;
+	if (!(lc.GetItemState(hit, LVIS_SELECTED) & LVIS_SELECTED)) {
+		const int n = lc.GetItemCount();
+		for (int i = 0; i < n; ++i)
+			lc.SetItemState(i, 0, LVIS_SELECTED);
+		lc.SetItemState(hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+	}
 }
 
 int CPlayList::FindByPath(LPCTSTR fol)
@@ -976,7 +1018,9 @@ void CPlayList::RemoveMissingFiles()
 	std::vector<int> missing;
 	for (int i = 0; i < playcnt; ++i) {
 		if (!pc[i].fol[0]) { missing.push_back(i); continue; }
-		if (!PathFileExists(pc[i].fol))
+		// Falcom game BGM: fol is basename only; play() resolves via savedata game path
+		if (PlIsFalcomGameBgmMode(pc[i].sub)) continue;
+		if (!PathFileExists(PlPhysicalMediaPath(pc[i].fol)))
 			missing.push_back(i);
 	}
 	if (missing.empty()) {
@@ -1031,12 +1075,6 @@ void CPlayList::RemoveMissingFiles()
 	for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
 	m_lc.RedrawWindow();
 	Save();
-}
-
-static bool PlIsFalcomGameBgmMode(int sub)
-{
-	return (sub >= 1 && sub <= 21) || sub == 30 ||
-		sub == -11 || sub == -12 || sub == -13 || sub == -14 || sub == -15;
 }
 
 static CString PlStorePlaylistFol(LPCTSTR fol, int sub)
@@ -1113,34 +1151,34 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 	int cnt1;
 	CString s,ss;
 	switch(sub){
-		case 1:s=LL14(L"空の軌跡SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC", L"Sora no Kiseki SC");break;
-		case 2:s=LL14(L"空の軌跡FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC", L"Sora no Kiseki FC");break;
-		case 3:s=LL14(L"イース フェルガナの誓い", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai");break;
-		case 4:s=LL14(L"Ys6 ナピシュテムの匣", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako");break;
-		case 5:s=LL14(L"イース オリジン", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin");break;
-		case 6:s=LL14(L"空の軌跡 The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd", L"Sora no Kiseki The3rd");break;
+		case 1:s=LL14(L"空の軌跡SC", L"Trails in the Sky SC", L"Les Sentiers du Ciel SC", L"Trails in the Sky SC", L"Trails in the Sky SC", L"하늘의 궤적 SC", L"空之轨迹SC", L"Trails in the Sky SC", L"Тропы в Небе SC", L"Himmelsleitern SC", L"Trails in the Sky SC", L"Trails in the Sky SC", L"Trails in the Sky SC", L"Trails in the Sky SC");break;
+		case 2:s=LL14(L"空の軌跡FC", L"Trails in the Sky FC", L"Les Sentiers du Ciel FC", L"Trails in the Sky FC", L"Trails in the Sky FC", L"하늘의 궤적 FC", L"空之轨迹FC", L"Trails in the Sky FC", L"Тропы в Небе FC", L"Himmelsleitern FC", L"Trails in the Sky FC", L"Trails in the Sky FC", L"Trails in the Sky FC", L"Trails in the Sky FC");break;
+		case 3:s=LL14(L"YS フェルガナの誓い", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys 菲尔盖纳之誓", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai", L"Ys Felghana no Chikai");break;
+		case 4:s=LL14(L"YS6 ナピシュテムの匣", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 纳比斯汀的方舟", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako", L"Ys6 Napishtim no Hako");break;
+		case 5:s=LL14(L"イース・オリジン", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"이스 오리진", L"伊苏起源", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin", L"Ys Origin");break;
+		case 6:s=LL14(L"空の軌跡 The3rd", L"Trails in the Sky The 3rd", L"Les Sentiers du Ciel The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"하늘의 궤적 The 3rd", L"空之轨迹 The3rd", L"Trails in the Sky The 3rd", L"Тропы в Небе The 3rd", L"Himmelsleitern The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd");break;
 		case 7:s="ZWEI II";break;
 		case 8:s="Ys I&II Chronicles 1";break;
 		case 9:s="Ys I&II Chronicles 2";break;
 		case 10:s="XANADU NEXT";break;
-		case 11:s=LL14(L"Ys I&II 完全版 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1");break;
-		case 12:s=LL14(L"Ys I&II 完全版 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2");break;
+		case 11:s=LL14(L"Ys I&II 完全版 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II 完全版 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1", L"Ys I&II Complete 1");break;
+		case 12:s=LL14(L"Ys I&II 完全版 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II 完全版 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2", L"Ys I&II Complete 2");break;
 		case 13:s="Sorcerian Original";break;
 		case 14:s="Zwei!!";break;
-		case 15:s=LL14(L"ぐるみん -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-");break;
-		case 16:s=LL14(L"ダイナソア リザレクション", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection");break;
-		case 17:s=LL14(L"Brandish4 眠れる神の塔", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tower of the Sleeping God");break;
-		case 18:s=LL14(L"白き魔女", L"White Witch", L"White Witch", L"White Witch", L"White Witch", L"White Witch", L"White Witch", L"White Witch", L"White Witch", L"White Witch", L"White Witch", L"White Witch", L"White Witch", L"White Witch");break;
-		case 19:s=LL14(L"朱紅い雫", L"Crimson Tears", L"Crimson Tears", L"Crimson Tears", L"Crimson Tears", L"Crimson Tears", L"Crimson Tears", L"Crimson Tears", L"Crimson Tears", L"Crimson Tears", L"Crimson Tears", L"Crimson Tears", L"Crimson Tears", L"Crimson Tears");break;
-		case 20:s=LL14(L"海の檻歌", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean");break;
-		case 21:s = LL14(_T("閃の軌跡Ⅰ,Ⅱ,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8"), _T("Trails of Cold Steel I,II,Ys8")); break;
-		case 30:s = LL14(_T("空の軌跡 The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st"), _T("Trails in the Sky The 1st")); break;
-		case -6:s = LL14(_T("閃Ⅲ,Ⅳ,創,零改,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX"), _T("CS III,IV,Reverie,Zero Kai,Ys9,YsX")); break;
-		case -11:s=LL14(L"月影のラプソディー", L"Lunacy of the Moon", L"Lunacy of the Moon", L"Lunacy of the Moon", L"Lunacy of the Moon", L"Lunacy of the Moon", L"Lunacy of the Moon", L"Lunacy of the Moon", L"Lunacy of the Moon", L"Lunacy of the Moon", L"Lunacy of the Moon", L"Lunacy of the Moon", L"Lunacy of the Moon", L"Lunacy of the Moon");break;
-		case -12:s=LL14(L"西風の狂詩曲", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind", L"Rhapsody of the West Wind");break;
-		case -13:s=LL14(L"アークトゥルス", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus");break;
-		case -14:s=LL14(L"幻想三国志1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1");break;
-		case -15:s=LL14(L"幻想三国志2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2");break;
+		case 15:s=LL14(L"ぐるみん -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"구루민 -GURUMIN-", L"咕噜小天使 -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-", L"Gurumin -GURUMIN-");break;
+		case 16:s=LL14(L"ダイナソア リザレクション", L"Dinosaur Resurrection", L"Dinosaur Résurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"恐龙复活", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Auferstehung", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection", L"Dinosaur Resurrection");break;
+		case 17:s=LL14(L"Brandish4 眠れる神の塔", L"Brandish4 Tower of the Sleeping God", L"Brandish4 Tour de Dieu endormi", L"Brandish4 Torre del Dio addormentato", L"Brandish4 Torre del Dios dormido", L"Brandish4 잠든 신의 탑", L"Brandish4 沉睡之神塔", L"Brandish4 برج الإله النائم", L"Brandish4 Башня спящего бога", L"Brandish4 Turm des schlafenden Gottes", L"Brandish4 Torre do Deus adormecido", L"Brandish4 Toren van de slapende god", L"Brandish4 Wieża śpiącego boga", L"Brandish4 Uyuyan Tanrı'nın Kulesi");break;
+		case 18:s=LL14(L"白き魔女", L"White Witch", L"Sorcière blanche", L"Strega bianca", L"Bruja blanca", L"하얀 마녀", L"白之魔女", L"الساحرة البيضاء", L"Белая ведьма", L"Weiße Hexe", L"Bruxa branca", L"Witte heks", L"Biała czarownica", L"Beyaz cadı");break;
+		case 19:s=LL14(L"朱紅い雫", L"Crimson Tears", L"Larmes cramoisies", L"Lacrime cremisi", L"Lágrimas carmesí", L"주홍빛 눈물", L"朱红之泪", L"دموع قرمزية", L"Багровые слёзы", L"Karmesinrote Tränen", L"Lágrimas carmesim", L"Karmozijnrode tranen", L"Karmazynowe łzy", L"Kızıl Gözyaşları");break;
+		case 20:s=LL14(L"海の檻歌", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"바다의 감옥 노래", L"海之槛歌", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean");break;
+		case 21:s = LL14(L"閃の軌跡Ⅰ,Ⅱ,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"섬의 궤적 I,II,Ys8", L"闪之轨迹I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8"); break;
+		case 30:s = LL14(L"空の軌跡 The 1st", L"Trails in the Sky The 1st", L"Les Sentiers du Ciel The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"하늘의 궤적 The 1st", L"空之轨迹 The 1st", L"Trails in the Sky The 1st", L"Тропы в Небе The 1st", L"Himmelsleitern The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st"); break;
+		case -6:s = LL14(L"閃Ⅲ,Ⅳ,創,零改,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"섬 III,IV,창,영改,Ys9,YsX", L"闪III,IV,创,零改,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX"); break;
+		case -11:s=LL14(L"月影のラプソディー", L"Lunacy of the Moon", L"Rhapsodie de l'ombre lunaire", L"Rapsodia dell'ombra lunare", L"Rapsodia de la sombra lunar", L"월영의 랩소디", L"月影狂想曲", L"رابسودي ظل القمر", L"Рапсодия лунной тени", L"Rhapsodie des Mondschatten", L"Rapsódia da sombra lunar", L"Rapsodie van de maanschaduw", L"Rapsodia księżycowego cienia", L"Ay gölgesinin rapsodisi");break;
+		case -12:s=LL14(L"西風の狂詩曲", L"Rhapsody of the West Wind", L"Rhapsodie du vent d'ouest", L"Rapsodia del vento d'ovest", L"Rapsodia del viento del oeste", L"서풍의 랩소디", L"西风狂想曲", L"نشيد الرياح الغربية", L"Рапсодия западного ветра", L"Rhapsodie des Westwinds", L"Rapsódia do vento oeste", L"Rapsodie van de westenwind", L"Rapsodia zachodniego wiatru", L"Batı rüzgarının rapsodisi");break;
+		case -13:s=LL14(L"アークトゥルス", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"아크투루스", L"阿尔克图斯", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus", L"Arcturus");break;
+		case -14:s=LL14(L"幻想三国志1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"환상삼국지 1", L"幻想三国志1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1", L"Fantasia Sango 1");break;
+		case -15:s=LL14(L"幻想三国志2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"환상삼국지 2", L"幻想三国志2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2", L"Fantasia Sango 2");break;
 		case -3:
 			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
 			s.Format(LL14(L"%sファイル", L"%s File", L"%s fichier", L"%s file", L"%s archivo", L"%s 파일", L"%s文件", L"ملف %s", L"файл %s", L"%s-Datei", L"arquivo %s", L"%s bestand", L"plik %s", L"%s dosyası"), ss);
@@ -1251,25 +1289,31 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 
 void CPlayList::Del()
 {
-	int Lindex=-1,j=0;
-	for(;;){//選択されているものをピックアップ
-		Lindex=m_lc.GetNextItem(Lindex,LVNI_ALL |LVNI_SELECTED);
-		if(Lindex==-1) break;
-		m_lc.SetItemState(Lindex,m_lc.GetItemState(Lindex,LVIS_SELECTED)&~LVIS_SELECTED,LVIS_SELECTED);
-		for(int i=Lindex+1+j;i<playcnt;i++){
-			memcpy(&pc[i-1],&pc[i],sizeof(playlistdata0));
-		}
-		playcnt--;j--;
+	if (!pc || playcnt <= 0) return;
+	std::vector<int> sel;
+	int Lindex = -1;
+	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		if (Lindex < playcnt) sel.push_back(Lindex);
 	}
-	playlistdata0 *tmp;	tmp=pc;
-	playlistdata0 *newPc = (playlistdata0*)realloc(tmp, (size_t)sizeof(playlistdata0) * (playcnt + 2));
-	if (newPc) {
-		pc = newPc;
-	} else {
-		pc = tmp;
-	}//余裕を持って解放
+	if (sel.empty()) return;
+
+	std::sort(sel.begin(), sel.end(), std::greater<int>());
+	for (int i : sel) {
+		if (i < 0 || i >= playcnt) continue;
+		for (int j = i + 1; j < playcnt; ++j)
+			memcpy(&pc[j - 1], &pc[j], sizeof(playlistdata0));
+		playcnt--;
+	}
+	playlistdata0* newPc = (playlistdata0*)realloc(pc, (size_t)sizeof(playlistdata0) * (playcnt + 2));
+	if (newPc) pc = newPc;
+	extern int plcnt;
+	std::vector<int> selAsc = sel;
+	std::sort(selAsc.begin(), selAsc.end());
+	plcnt = PlAdjustIndexAfterRemovals(plcnt, selAsc);
+	pnt = PlAdjustIndexAfterRemovals(pnt, selAsc);
+	pnt1 = PlAdjustIndexAfterRemovals(pnt1, selAsc);
 	m_lc.SetItemCount(playcnt);
-	for(j=0;j<playcnt;j++) pc[j].icon=1;
+	for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
 	m_lc.RedrawWindow();
 	Save();
 }
@@ -2201,7 +2245,7 @@ void CPlayList::Fol(CString fname)
 							a = L"Limit Break";
 							break;
 						case 7525:
-							a = LL14(L"パラダイスミ☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆");
+							a = LL14(L"パラダイスミ☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"패러다임☆", L"帕拉迪gm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆", L"Paradigm☆");
 							break;
 						case 7526:
 							a = L"Gnosis";
@@ -4850,8 +4894,10 @@ void CPlayList::OnSize(UINT nType, int cx, int cy)
 	RECT r;
 	GetClientRect(&r);
 	if( ::IsWindow( this->GetSafeHwnd()) == TRUE &&  this->IsWindowVisible() == TRUE){
-		if (!::IsWindow(m_lc.GetSafeHwnd()))
+		if (!::IsWindow(m_lc.GetSafeHwnd())) {
+			CCC_MainLockBringToFront(m_hWnd);
 			return;
+		}
 		m_lc.SetWindowPos(&wndNoTopMost, 0, 0, (int)(r.right - 20 * (hD2 )), (int)(r.bottom - 80 * (hD2 )), SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOZORDER);
 		// アルバム/コメント列(列4)をリスト右端へぴたりとフィットさせる。
 		// 後ろのフォルダ列(列5)は 0 幅にして余白(空列)を残さない。
@@ -4897,6 +4943,7 @@ void CPlayList::OnSize(UINT nType, int cx, int cy)
 //			SetTimer(4923, 100, NULL);
 		}
 	}
+	CCC_MainLockBringToFront(m_hWnd);
 	}
 	catch (CException* e)
 	{
@@ -5300,7 +5347,7 @@ void CPlayList::OnLvnGetdispinfoList1(NMHDR* pNMHDR, LRESULT* pResult)
 					s.Format(_T("%d:%02d"), pc[nTargetIndex].time / 60, pc[nTargetIndex].time % 60);
 
 				if (pc[nTargetIndex].time == 0) s = "";
-				if (pc[nTargetIndex].time == -1) s = LL14(L"取得不能", L"Unable to fetch", L"Unable to fetch", L"Unable to fetch", L"Unable to fetch", L"Unable to fetch", L"Unable to fetch", L"Unable to fetch", L"Unable to fetch", L"Unable to fetch", L"Unable to fetch", L"Unable to fetch", L"Unable to fetch", L"Unable to fetch");
+				if (pc[nTargetIndex].time == -1) s = LL14(L"取得不能", L"Unable to fetch", L"Impossible de récupérer", L"Impossibile recuperare", L"No se pudo obtener", L"가져올 수 없음", L"无法获取", L"تعذر الجلب", L"Не удалось получить", L"Abruf nicht möglich", L"Não foi possível obter", L"Ophalen mislukt", L"Nie można pobrać", L"Alınamadı");
 				_tcscpy(lpDInfo->item.pszText, s);
 			} break;
 			case 3:
@@ -5339,6 +5386,7 @@ void CPlayList::OnNMRclickList1(NMHDR *pNMHDR, LRESULT *pResult)
 
 	CPoint point;
 	GetCursorPos(&point);
+	PlSelectItemAtScreenPoint(m_lc, point);
 
 	CWnd* pWndPopupOwner = this;
 	while (pWndPopupOwner->GetStyle() & WS_CHILD)
@@ -5365,10 +5413,12 @@ void CPlayList::OnList()
 		_tcscpy(pc[Lindex].name, a->pc.name);
 		_tcscpy(pc[Lindex].art, a->pc.art);
 		_tcscpy(pc[Lindex].alb, a->pc.alb);
-		_tcscpy(pc[Lindex].fol, a->pc.fol);
+		const CString folStored = PlStorePlaylistFol(a->pc.fol, pc[Lindex].sub);
+		_tcscpy(pc[Lindex].fol, folStored);
 		RECT r;
 		m_lc.GetItemRect(Lindex, &r, LVIR_BOUNDS);
 		m_lc.RedrawWindow(&r);
+		Save();
 	}
 	w_flg = TRUE;
 	delete a;

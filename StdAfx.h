@@ -325,6 +325,19 @@ struct save{
 	int prTuneHarmProfPct;      // 音色プロファイル最低確信度
 	int prTuneAbsFloorPct;      // 絶対ノイズフロア基準
 	int prTuneOnsetDeltaPct;    // オンセット delta
+	int prTunewindow;           // 1=検出パラメータ調整画面表示
+	int prTunex;                // 左上X (-1=未設定)
+	int prTuney;                // 左上Y (-1=未設定)
+
+	// --- サブウィンドウ: メインウィンドウ位置ロック(1=追随) ---
+	int eqMainLock;
+	int pianorollMainLock;
+	int analyzerMainLock;
+	int playlistMainLock;
+	int renderMainLock;
+	int folderMainLock;
+	int mpPromptMainLock;
+	int prTuneMainLock;
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */
@@ -344,6 +357,25 @@ char *b64_decode(char *s, int size,int &len);
 #define LL L
 
 int b64_ctoi(char c);
+
+// サブウィンドウを表示中メイン(COggDlg/CMediaPlayerDlg)の移動に追随させる
+CWnd* CCC_GetActiveMainWindow();
+void CCC_MainLockSetup(CWnd* pDlg, int* pSavedLockFlag, BOOL bOverlayPaint = FALSE);
+void CCC_MainLockUnregister(HWND hWnd);
+void CCC_MainLockOnMainMoving(LPRECT pMainRect);
+void CCC_MainLockRefreshOffsets();
+void CCC_MainLockRefreshOffsetsFor(CWnd* pMain);
+void CCC_MainLockOnChildMoving(CWnd* pDlg, LPRECT pRect);
+void CCC_MainLockPaintClient(CDC& dc, HWND hDlg);
+BOOL CCC_MainLockOverlayHitTest(HWND hDlg, CPoint ptClient);
+void CCC_MainLockOverlayToggle(HWND hDlg);
+BOOL CCC_MainLockPreferQuickPresent();
+void CCC_MainLockBringToFront(HWND hDlg);
+int CCC_MainLockGetReserveWidth(HWND hDlg);
+void CCC_MainLockGetOverlayRect(HWND hDlg, CRect& rc);
+void CCC_MainLockSetHeaderRow(HWND hDlg, int top, int height);
+void CCC_MainLockClearHeaderRow(HWND hDlg);
+void CCC_InvalidateRectMinusOverlay(HWND hDlg, const CRect& area);
 
 #define cmnh() 	CBrush m_brDlg; \
 afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct); \

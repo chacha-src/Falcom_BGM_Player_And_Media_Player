@@ -147,22 +147,8 @@ bool CKpiV5ConfigDlg::ParseAndSave()
 void CKpiV5ConfigDlg::OnBnClickedOk()
 {
 	if (!ParseAndSave()) {
-		MessageBox(LL14(
-			L"設定形式が不正です。plugin.section.key=value 形式で入力してください。",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value.",
-			L"Invalid format. Use plugin.section.key=value."),
-			LL14(L"入力エラー", L"Input Error", L"Input Error", L"Input Error", L"Input Error", L"Input Error", L"Input Error", L"Input Error", L"Input Error", L"Input Error", L"Input Error", L"Input Error", L"Input Error", L"Input Error"));
+		MessageBox(LL14(L"設定形式が不正です。plugin.section.key=value 形式で入力してください。", L"Invalid format. Use plugin.section.key=value.", L"Format invalide. Utilisez plugin.section.key=value.", L"Formato non valido. Usare plugin.section.key=value.", L"Formato no válido. Use plugin.section.key=value.", L"형식이 올바르지 않습니다. plugin.section.key=value 형식으로 입력하세요.", L"格式无效。请使用 plugin.section.key=value 格式。", L"تنسيق غير صالح. استخدم plugin.section.key=value.", L"Неверный формат. Используйте plugin.section.key=value.", L"Ungültiges Format. Verwenden Sie plugin.section.key=value.", L"Formato inválido. Use plugin.section.key=value.", L"Ongeldig formaat. Gebruik plugin.section.key=value.", L"Nieprawidłowy format. Użyj plugin.section.key=value.", L"Geçersiz biçim. plugin.section.key=value kullanın."),
+			LL14(L"入力エラー", L"Input Error", L"Erreur de saisie", L"Errore di input", L"Error de entrada", L"입력 오류", L"输入错误", L"خطأ في الإدخال", L"Ошибка ввода", L"Eingabefehler", L"Erro de entrada", L"Invoerfout", L"Błąd wejścia", L"Giriş hatası"));
 		return;
 	}
 	OnOK();

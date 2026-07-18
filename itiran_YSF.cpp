@@ -159,8 +159,8 @@ void Citiran_YSF::Gett(int a){
 BOOL Citiran_YSF::OnInitDialog() 
 {
 	CCustomBlurDialogBase::OnInitDialog();
-	SetWindowText(LL14(L"イース -フェルガナの誓い-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-", L"Ys -Felghana no Chikai-"));
-	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+	SetWindowText(LL14(L"イース -フェルガナの誓い-", L"Ys - Oath in Felghana", L"Ys - Serment de Felghana", L"Ys - Giuramento a Felghana", L"Ys - Juramento en Felghana", L"이스 - 펠가나의 서약", L"伊苏 - 菲尔盖纳之誓", L"Ys - قسم فيلغانا", L"Ys - Клятва в Фельгане", L"Ys - Schwur von Felghana", L"Ys - Juramento de Felghana", L"Ys - Eed in Felghana", L"Ys - Przysięga Felghany", L"Ys - Felghana Yemini"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

@@ -241,6 +241,34 @@ BOOL COggApp::InitInstance()
 	savedata.analyzerlevelmeter = 1;
 	savedata.analyzertopmost = 0;
 	savedata.saveversion = 2;
+	savedata.prTuneSilencePct = 100;
+	savedata.prTuneBandSilBassPct = 100;
+	savedata.prTuneBandSilMidPct = 100;
+	savedata.prTuneBandSilTrePct = 100;
+	savedata.prTuneHoldBassPct = 100;
+	savedata.prTuneHoldMidPct = 100;
+	savedata.prTuneHoldTrePct = 100;
+	savedata.prTuneRetrigPct = 100;
+	savedata.prTunePickBassPct = 100;
+	savedata.prTunePickLowMidPct = 100;
+	savedata.prTunePickMelodyPct = 100;
+	savedata.prTunePickTrePct = 100;
+	savedata.prTuneHarmGhostPct = 100;
+	savedata.prTuneHarmRejectPct = 100;
+	savedata.prTuneHarmProfPct = 100;
+	savedata.prTuneAbsFloorPct = 100;
+	savedata.prTuneOnsetDeltaPct = 100;
+	savedata.prTunewindow = 0;
+	savedata.prTunex = -1;
+	savedata.prTuney = -1;
+	savedata.eqMainLock = 0;
+	savedata.pianorollMainLock = 0;
+	savedata.analyzerMainLock = 0;
+	savedata.playlistMainLock = 0;
+	savedata.renderMainLock = 0;
+	savedata.folderMainLock = 0;
+	savedata.mpPromptMainLock = 0;
+	savedata.prTuneMainLock = 0;
 
 	savedata.playerMode = 0;   // 既定はファルコム特化型
 	savedata.startupAsk = 1;   // 既定で起動時にモード選択ダイアログを表示
@@ -445,6 +473,40 @@ BOOL COggApp::InitInstance()
 		for (int* p : tuneFields) {
 			if (*p < 25 || *p > 400) *p = 100;
 		}
+	}
+	if (datFileSize < (int)(offsetof(save, prTunewindow) + sizeof(savedata.prTunewindow)))
+		savedata.prTunewindow = 0;
+	else if (savedata.prTunewindow != 0)
+		savedata.prTunewindow = 1;
+	if (datFileSize < (int)(offsetof(save, prTunex) + sizeof(savedata.prTunex))) {
+		savedata.prTunex = -1;
+		savedata.prTuney = -1;
+	}
+	if (datFileSize < (int)(offsetof(save, eqMainLock) + sizeof(savedata.eqMainLock))) {
+		savedata.eqMainLock = 0;
+		savedata.pianorollMainLock = 0;
+		savedata.analyzerMainLock = 0;
+		savedata.playlistMainLock = 0;
+		savedata.renderMainLock = 0;
+		savedata.folderMainLock = 0;
+		savedata.mpPromptMainLock = 0;
+		savedata.prTuneMainLock = 0;
+	}
+	else {
+		int* lockFields[] = {
+			&savedata.eqMainLock, &savedata.pianorollMainLock, &savedata.analyzerMainLock,
+			&savedata.playlistMainLock, &savedata.renderMainLock, &savedata.folderMainLock,
+			&savedata.mpPromptMainLock,
+		};
+		for (int* p : lockFields) {
+			if (*p != 0) *p = 1;
+		}
+	}
+	if (datFileSize < (int)(offsetof(save, prTuneMainLock) + sizeof(savedata.prTuneMainLock))) {
+		savedata.prTuneMainLock = 0;
+	}
+	else if (savedata.prTuneMainLock != 0) {
+		savedata.prTuneMainLock = 1;
 	}
 	// ジャンプリスト履歴: 途中フィールド挿入で .dat がずれた場合などは破棄する
 	{

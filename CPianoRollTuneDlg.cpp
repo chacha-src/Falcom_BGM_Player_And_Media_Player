@@ -27,6 +27,9 @@ void CPianoRollTuneDlg::DoDataExchange(CDataExchange* pDX)
 
 BEGIN_MESSAGE_MAP(CPianoRollTuneDlg, CCustomBlurDialogExBase)
 	ON_WM_HSCROLL()
+	ON_WM_CLOSE()
+	ON_WM_DESTROY()
+	ON_WM_MOVE()
 	ON_BN_CLICKED(IDC_PRT_RESET, &CPianoRollTuneDlg::OnReset)
 	ON_BN_CLICKED(IDC_PRT_OK, &CPianoRollTuneDlg::OnOk)
 END_MESSAGE_MAP()
@@ -419,11 +422,8 @@ static LPCTSTR PrTuneRowTip(int idx)
 
 void CPianoRollTuneDlg::SetupTooltips()
 {
-	if (!m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_BALLOON))
+	if (!CCustomControlUtility::BeginDialogToolTip(m_tooltip, this))
 		return;
-	m_tooltip.Activate(TRUE);
-	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 12000);
-	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 360);
 	for (int i = 0; i < m_rowCount; ++i) {
 		LPCTSTR tip = PrTuneRowTip(i);
 		if (!tip || !*tip) continue;
@@ -449,6 +449,7 @@ void CPianoRollTuneDlg::SetupTooltips()
 			L"Alle parameters resetten naar 100%.",
 			L"Przywroc wszystkie parametry do 100%.",
 			L"Tum algilama parametrelerini %100'e sifirla."));
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 480, 12000);
 }
 
 void CPianoRollTuneDlg::StyleRows()
@@ -470,6 +471,16 @@ void CPianoRollTuneDlg::StyleRows()
 	}
 }
 
+void CPianoRollTuneDlg::SaveWindowPos()
+{
+	if (!::IsWindow(GetSafeHwnd()) || IsIconic())
+		return;
+	CRect rc;
+	GetWindowRect(&rc);
+	savedata.prTunex = rc.left;
+	savedata.prTuney = rc.top;
+}
+
 void CPianoRollTuneDlg::ApplyDialogSize()
 {
 	if (!::IsWindow(GetSafeHwnd())) return;
@@ -478,9 +489,16 @@ void CPianoRollTuneDlg::ApplyDialogSize()
 	GetClientRect(&rcClient);
 	const int ncH = rcWin.Height() - rcClient.Height();
 	const int ncW = rcWin.Width() - rcClient.Width();
-	SetWindowPos(NULL, 0, 0, kDlgClientW + ncW, kDlgClientH + ncH,
-		SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-	CenterWindow();
+	const int w = kDlgClientW + ncW;
+	const int h = kDlgClientH + ncH;
+	const int x = savedata.prTunex;
+	const int y = savedata.prTuney;
+	if (x != -1 && x > -30000 && x < 30000 && y > -30000 && y < 30000)
+		SetWindowPos(NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+	else {
+		SetWindowPos(NULL, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+		CenterWindow();
+	}
 	LayoutRows();
 }
 
@@ -498,7 +516,10 @@ BOOL CPianoRollTuneDlg::OnInitDialog()
 		LOGFONT lf{};
 		if (CFont* pDef = GetFont()) {
 			pDef->GetLogFont(&lf);
-			lf.lfHeight = (lf.lfHeight < 0) ? (lf.lfHeight * 92 / 100) : -(abs(lf.lfHeight) * 92 / 100);
+			if (lf.lfHeight < 0)
+				lf.lfHeight = -(abs(lf.lfHeight) * 105 / 100);
+			else if (lf.lfHeight > 0)
+				lf.lfHeight = lf.lfHeight * 105 / 100;
 			if (m_fontRow.GetSafeHandle()) m_fontRow.DeleteObject();
 			m_fontRow.CreateFontIndirect(&lf);
 		}
@@ -525,6 +546,7 @@ BOOL CPianoRollTuneDlg::OnInitDialog()
 	SetDlgItemText(IDC_PRT_OK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	StyleRows();
 	SyncSlidersFromSavedata();
+	EnableMainWindowLock(&savedata.prTuneMainLock);
 	ApplyDialogSize();
 	SetupTooltips();
 	return TRUE;
@@ -535,16 +557,16 @@ void CPianoRollTuneDlg::LayoutRows()
 	if (!::IsWindow(GetSafeHwnd())) return;
 
 	// 固定設計座標(クライアントサイズは ApplyDialogSize で kDlgClientW/H に合わせる)
-	const int M = 12;
-	const int topBarH = 34;
-	const int btnW = 92;
-	const int rowH = 26;
-	const int lblW = 158;
-	const int slW = 114;
-	const int valW = 48;
-	const int gapLS = 6;
-	const int gapSV = 4;
-	const int colGap = 14;
+	const int M = 16;
+	const int topBarH = 44;
+	const int btnW = 116;
+	const int rowH = 36;
+	const int lblW = 224;
+	const int slW = 170;
+	const int valW = 62;
+	const int gapLS = 8;
+	const int gapSV = 6;
+	const int colGap = 18;
 	const int colW = lblW + gapLS + slW + gapSV + valW;
 	const int rowsPerCol = (m_rowCount + kCols - 1) / kCols;
 	const int totalW = colW * kCols + colGap;
@@ -553,8 +575,9 @@ void CPianoRollTuneDlg::LayoutRows()
 
 	if (m_reset.GetSafeHwnd())
 		m_reset.MoveWindow(M, M, btnW, topBarH);
+	const int lockReserve = CCC_MainLockGetReserveWidth(m_hWnd);
 	if (m_ok.GetSafeHwnd())
-		m_ok.MoveWindow(kDlgClientW - M - btnW, M, btnW, topBarH);
+		m_ok.MoveWindow(kDlgClientW - M - btnW - lockReserve, M, btnW, topBarH);
 
 	for (int i = 0; i < m_rowCount; ++i) {
 		const int col = i / rowsPerCol;
@@ -564,12 +587,13 @@ void CPianoRollTuneDlg::LayoutRows()
 		const int xSl = x0 + lblW + gapLS;
 		const int xVal = xSl + slW + gapSV;
 		if (m_lbl[i].GetSafeHwnd())
-			m_lbl[i].MoveWindow(x0, y + 4, lblW, 18);
+			m_lbl[i].MoveWindow(x0, y + 5, lblW, 24);
 		if (m_slider[i].GetSafeHwnd())
-			m_slider[i].MoveWindow(xSl, y + 2, slW, 22);
+			m_slider[i].MoveWindow(xSl, y + 3, slW, 28);
 		if (m_val[i].GetSafeHwnd())
-			m_val[i].MoveWindow(xVal, y + 4, valW, 18);
+			m_val[i].MoveWindow(xVal, y + 5, valW, 24);
 	}
+	CCC_MainLockBringToFront(m_hWnd);
 }
 
 void CPianoRollTuneDlg::SyncSlidersFromSavedata()
@@ -633,7 +657,29 @@ void CPianoRollTuneDlg::OnReset()
 void CPianoRollTuneDlg::OnOk()
 {
 	SyncSavedataFromSliders();
-	EndDialog(IDOK);
+	SaveWindowPos();
+	savedata.prTunewindow = 0;
+	DestroyWindow();
+}
+
+void CPianoRollTuneDlg::OnClose()
+{
+	SaveWindowPos();
+	savedata.prTunewindow = 0;
+	DestroyWindow();
+}
+
+void CPianoRollTuneDlg::OnDestroy()
+{
+	SaveWindowPos();
+	savedata.prTunewindow = 0;
+	CCustomBlurDialogExBase::OnDestroy();
+}
+
+void CPianoRollTuneDlg::OnMove(int x, int y)
+{
+	CCustomBlurDialogExBase::OnMove(x, y);
+	SaveWindowPos();
 }
 
 BOOL CPianoRollTuneDlg::PreTranslateMessage(MSG* pMsg)
@@ -641,10 +687,4 @@ BOOL CPianoRollTuneDlg::PreTranslateMessage(MSG* pMsg)
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 	return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
-}
-
-void MpShowPianoRollTuneDialog(CWnd* pParent)
-{
-	CPianoRollTuneDlg dlg(pParent);
-	dlg.DoModal();
 }

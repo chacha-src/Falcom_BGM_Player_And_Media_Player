@@ -416,6 +416,37 @@ public:
         return SetControlColor(pDC, pWnd, nCtlColor, it->second.bg, it->second.text);
     }
 
+    // ダイアログ用 CToolTipCtrl の作成。TTS_ALWAYSTIP は使わない（初期化中の誤表示防止）。
+    // AddTool 完了後に FinalizeDialogToolTip を呼ぶ。
+    static BOOL BeginDialogToolTip(CToolTipCtrl& tip, CWnd* pParent, DWORD style = TTS_BALLOON | TTS_NOPREFIX)
+    {
+        if (!pParent || !pParent->GetSafeHwnd()) return FALSE;
+        if (tip.GetSafeHwnd())
+        {
+            tip.Activate(FALSE);
+            return TRUE;
+        }
+        if (!tip.Create(pParent, style)) return FALSE;
+        tip.Activate(FALSE);
+        tip.SetDelayTime(TTDT_INITIAL, 500);
+        tip.SetDelayTime(TTDT_RESHOW, 100);
+        tip.SetDelayTime(TTDT_AUTOPOP, 10000);
+        tip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
+        return TRUE;
+    }
+
+    // 初期化完了後に有効化し、誤って出たツールチップを消す。
+    static void FinalizeDialogToolTip(CToolTipCtrl& tip, int maxTipWidth = 512, int autoPopMs = 10000)
+    {
+        if (!tip.GetSafeHwnd()) return;
+        if (maxTipWidth > 0)
+            tip.SendMessage(TTM_SETMAXTIPWIDTH, 0, maxTipWidth);
+        if (autoPopMs > 0)
+            tip.SetDelayTime(TTDT_AUTOPOP, autoPopMs);
+        tip.Activate(TRUE);
+        tip.SendMessage(TTM_POP, 0, 0);
+    }
+
 private:
     // 色情報を保持する構造体
     struct CC { COLORREF bg, text; };
@@ -1168,6 +1199,9 @@ public:
     // モード切替・子再配置後など、ぼかしを強制再適用する
     void RefreshAeroMode();
 
+    // ウィンドウ右上に「メイン固定」チェック。bOverlayPaint=TRUE で GDI 全画面描画向け
+    void EnableMainWindowLock(int* pSavedLockFlag, BOOL bOverlayPaint = FALSE);
+
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
     virtual BOOL OnInitDialog();
@@ -1181,6 +1215,9 @@ protected:
     afx_msg void OnCompositionChanged();
     afx_msg void OnDestroy();
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
+    afx_msg void OnMainLockClicked();
+    afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+    afx_msg void OnMoving(UINT fwSide, LPRECT pRect);
 
     DECLARE_MESSAGE_MAP()
 
@@ -1188,6 +1225,7 @@ private:
     void ApplyDwmBlurCore(BOOL bForce);
     BOOL m_bBlurApplied;
     CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers;
+    int* m_pMainLockSave = nullptr;
 };
 
 // ============================================================================
@@ -1243,6 +1281,9 @@ public:
     // モード切替・子再配置後など、ぼかしを強制再適用する
     void RefreshAeroMode();
 
+    // ウィンドウ右上に「メイン固定」チェック。bOverlayPaint=TRUE で GDI 全画面描画向け
+    void EnableMainWindowLock(int* pSavedLockFlag, BOOL bOverlayPaint = FALSE);
+
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
     virtual BOOL OnInitDialog();
@@ -1256,6 +1297,9 @@ protected:
     afx_msg void OnCompositionChanged();
     afx_msg void OnDestroy();
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
+    afx_msg void OnMainLockClicked();
+    afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+    afx_msg void OnMoving(UINT fwSide, LPRECT pRect);
 
     DECLARE_MESSAGE_MAP()
 
@@ -1263,4 +1307,5 @@ private:
     void ApplyDwmBlurCore(BOOL bForce);
     BOOL m_bBlurApplied;
     CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers;
+    int* m_pMainLockSave = nullptr;
 };

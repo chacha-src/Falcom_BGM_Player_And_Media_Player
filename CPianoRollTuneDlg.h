@@ -15,8 +15,8 @@ protected:
 	static const int kRowMax = 17;
 	static const int kCols = 2;
 	// 2列レイアウト固定サイズ(DLU換算前の設計ピクセル)
-	static const int kDlgClientW = 708;
-	static const int kDlgClientH = 304;
+	static const int kDlgClientW = 980;
+	static const int kDlgClientH = 440;
 
 	int m_rowCount = 0;
 	int* m_pPct[kRowMax];
@@ -36,6 +36,7 @@ protected:
 	void SyncSlidersFromSavedata();
 	void SyncSavedataFromSliders();
 	void UpdateValueLabels();
+	void SaveWindowPos();
 	static int ClampPct(int v);
 
 	virtual BOOL OnInitDialog();
@@ -44,7 +45,8 @@ protected:
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnReset();
 	afx_msg void OnOk();
+	afx_msg void OnClose();
+	afx_msg void OnDestroy();
+	afx_msg void OnMove(int x, int y);
 	DECLARE_MESSAGE_MAP()
 };
-
-void MpShowPianoRollTuneDialog(CWnd* pParent);

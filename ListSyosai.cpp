@@ -153,7 +153,7 @@ BOOL CListSyosai::OnInitDialog()
 	SetDlgItemText(IDC_SYOSAI_LBL_GAME, LL14(L"Game", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"اللعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"));
 	SetDlgItemText(IDC_SYOSAI_LBL_TIME, LL14(L"時間", L"Duration", L"Durée", L"Durata", L"Duración", L"재생 시간", L"时长", L"المدة", L"Длительность", L"Dauer", L"Duração", L"Duur", L"Czas", L"Süre"));
 	SetDlgItemText(IDC_SYOSAI_LBL_LOOP, LL14(L"ループ", L"Loop", L"Boucle", L"Loop", L"Bucle", L"루프", L"循环", L"التكرار", L"Петля", L"Schleife", L"Loop", L"Loop", L"Pętla", L"Döngü"));
-	SetDlgItemText(IDC_SYOSAI_LBL_RET2, LL14(L"Idx", L"Idx", L"Idx", L"Idx", L"Idx", L"Idx", L"Idx", L"Idx", L"Idx", L"Idx", L"Idx", L"Idx", L"Idx", L"Idx"));
+	SetDlgItemText(IDC_SYOSAI_LBL_RET2, LL14(L"Idx", L"Idx", L"N°", L"Ind", L"Idx", L"Idx", L"索引", L"فهر", L"Инд", L"Idx", L"Idx", L"Idx", L"Ind", L"Diz"));
 
 	TCHAR dy[256];
 	::SendMessage(m_fol.m_hWnd, EM_SETWORDBREAKPROC, 0, (LPARAM)EditWordBreakProc);
@@ -202,8 +202,7 @@ BOOL CListSyosai::OnInitDialog()
 		if (tags.comment.GetLength()) m_cmt.SetWindowText(tags.comment);
 	}
 
-	m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_BALLOON);
-	m_tooltip.Activate(TRUE);
+	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
 	m_tooltip.AddTool(GetDlgItem(IDC_EDIT1), LL14(L"プレイリストに表示される曲名です。\nOKで保存されます。", L"Track name shown in the playlist.\nSaved when you click OK.", L"Nom affiche dans la liste.\nEnregistre avec OK.", L"Nome mostrato nella playlist.\nSalvato con OK.", L"Nombre mostrado en la lista.\nSe guarda con OK.", L"재생 목록에 표시되는 곡명입니다.\nOK로 저장됩니다.", L"播放列表中显示的曲名。\n点击确定保存。", L"اسم المسار المعروض في القائمة.\nيُحفظ عند OK.", L"Название в плейлисте.\nСохраняется по OK.", L"Titel in der Wiedergabeliste.\nMit OK speichern.", L"Nome exibido na lista.\nSalvo com OK.", L"Naam in afspeellijst.\nOpslaan met OK.", L"Nazwa w playliście.\nZapis po OK.", L"Calma listesinde gorunen ad.\nTamam ile kaydedilir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_EDIT4), LL14(L"プレイリストに表示されるアーティスト名です。\nOKで保存されます。", L"Artist name shown in the playlist.\nSaved when you click OK.", L"Artiste affiche dans la liste.\nEnregistre avec OK.", L"Artista mostrato nella playlist.\nSalvato con OK.", L"Artista mostrado en la lista.\nSe guarda con OK.", L"재생 목록에 표시되는 아티스트명입니다.\nOK로 저장됩니다.", L"播放列表中显示的艺术家。\n点击确定保存。", L"اسم الفنان المعروض في القائمة.\nيُحفظ عند OK.", L"Исполнитель в плейлисте.\nСохраняется по OK.", L"Kunstler in der Wiedergabeliste.\nMit OK speichern.", L"Artista exibido na lista.\nSalvo com OK.", L"Artiest in afspeellijst.\nOpslaan met OK.", L"Artysta w playliście.\nZapis po OK.", L"Calma listesinde gorunen sanatci.\nTamam ile kaydedilir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_EDIT5), LL14(L"プレイリストに表示されるアルバム名です。\nOKで保存されます。", L"Album name shown in the playlist.\nSaved when you click OK.", L"Album affiche dans la liste.\nEnregistre avec OK.", L"Album mostrato nella playlist.\nSalvato con OK.", L"Album mostrado en la lista.\nSe guarda con OK.", L"재생 목록에 표시되는 앨범명입니다.\nOK로 저장됩니다.", L"播放列表中显示的专辑名。\n点击确定保存。", L"اسم الألبوم المعروض في القائمة.\nيُحفظ عند OK.", L"Альбом в плейлисте.\nСохраняется по OK.", L"Album in der Wiedergabeliste.\nMit OK speichern.", L"Album exibido na lista.\nSalvo com OK.", L"Album in afspeellijst.\nOpslaan met OK.", L"Album w playliście.\nZapis po OK.", L"Calma listesinde gorunen album.\nTamam ile kaydedilir."));
@@ -221,8 +220,7 @@ BOOL CListSyosai::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(ID_OK), LL14(L"プレイリスト表示の変更を保存して閉じます。", L"Save playlist display changes and close.", L"Enregistrer les modifications et fermer.", L"Salva le modifiche alla playlist e chiudi.", L"Guardar cambios de la lista y cerrar.", L"재생 목록 변경을 저장하고 닫습니다.", L"保存播放列表更改并关闭。", L"حفظ التغييرات وإغلاق النافذة.", L"Сохранить изменения и закрыть.", L"Anderungen speichern und schliessen.", L"Salvar alteracoes e fechar.", L"Wijzigingen opslaan en sluiten.", L"Zapisz zmiany i zamknij.", L"Degisiklikleri kaydet ve kapat."));
 	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL14(L"変更を保存せずに閉じます。", L"Close without saving changes.", L"Fermer sans enregistrer.", L"Chiudi senza salvare.", L"Cerrar sin guardar.", L"변경을 저장하지 않고 닫습니다.", L"不保存更改并关闭。", L"إغلاق دون حفظ التغييرات.", L"Закрыть без сохранения.", L"Ohne Speichern schliessen.", L"Fechar sem salvar.", L"Sluiten zonder opslaan.", L"Zamknij bez zapisywania.", L"Kaydetmeden kapat."));
 	m_tooltip.AddTool(GetDlgItem(IDOK999), LL14(L"曲ファイルが入っているフォルダをエクスプローラーで開きます。", L"Open the folder containing the track in Explorer.", L"Ouvrir le dossier du fichier dans l'explorateur.", L"Apri la cartella del file in Explorer.", L"Abrir la carpeta del archivo en el explorador.", L"곡 파일이 있는 폴더를 탐색기로 엽니다.", L"在资源管理器中打开曲目所在文件夹。", L"فتح مجلد الملف في المستكشف.", L"Открыть папку файла в проводнике.", L"Ordner der Datei im Explorer offnen.", L"Abrir pasta do arquivo no Explorer.", L"Map van bestand openen in Verkenner.", L"Otworz folder pliku w Eksploratorze.", L"Dosyanin klasorunu Gezgin'de ac."));
-	m_tooltip.SetDelayTime(TTDT_AUTOPOP, 10000);
-	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
 	return TRUE;
 }

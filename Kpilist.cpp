@@ -97,11 +97,9 @@ BOOL CKpilist::OnInitDialog()
 	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(L"kpi一覧", L"kpi list", L"Liste kpi", L"Elenco kpi", L"Lista kpi", L"kpi 목록", L"kpi 列表", L"قائمة kpi", L"Список kpi", L"kpi-Liste", L"Lista kpi", L"kpi-lijst", L"Lista kpi", L"kpi listesi"));
-	m_tooltip.Create(this);
-	m_tooltip.Activate(TRUE);
+	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
 	m_tooltip.AddTool(&m_okdummy, LL14(L"閉じます", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
-	m_tooltip.SetDelayTime( TTDT_AUTOPOP, 10000 );
-	m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 512);
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
 	Init();
 	if (m_lc.GetSafeHwnd())

@@ -2200,7 +2200,7 @@ BOOL CED63rd::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"空の軌跡 The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Les Sentiers du Ciel The 3rd -Chapitre Avancé-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"하늘의 궤적 The 3rd -Advanced Chapter-", L"空之轨迹 The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-", L"Trails in the Sky The 3rd -Advanced Chapter-"));
-	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;

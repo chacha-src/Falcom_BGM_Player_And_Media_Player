@@ -1065,7 +1065,7 @@ BOOL CED3::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	SetWindowText(LL14(L"英雄伝説III 新・白き魔女", L"Legend of Heroes III White Witch", L"Légende des Héros III Sorcière Blanche", L"Legend of Heroes III Strega Bianca", L"Legend of Heroes III Bruja Blanca", L"영웅전설III 백색 마녀", L"英雄传说III 白之魔女", L"Legend of Heroes III White Witch", L"Legend of Heroes III White Witch", L"Legend of Heroes III Weiße Hexe", L"Legend of Heroes III White Witch", L"Legend of Heroes III White Witch", L"Legend of Heroes III Biała Czarownica", L"Legend of Heroes III White Witch"));
-	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close", L"Close"));
+	SetDlgItemText(IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	
 	// TODO: この位置に初期化の補足処理を追加してください
 	int dx;
