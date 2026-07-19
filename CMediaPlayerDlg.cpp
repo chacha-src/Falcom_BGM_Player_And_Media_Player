@@ -1973,8 +1973,9 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		// 安全網: 通常は og の timerp が新フレーム時(ms2レート)に mp バナーを無効化し、
 		// mp の OnPaint が Blit + pending 解除を行う(=ファルコム特化型と同等の負荷)。
 		// 万一 WM_PAINT が取りこぼされて pending が固着し合成が止まるのを防ぐため、
-		// 低頻度でバナーの再描画だけ促す(60fpsの常時Blitはしない=簡易ピアノロール等の負荷源を排除)。
-		if (::IsWindowVisible(GetSafeHwnd()) && !IsIconic())
+		// pending 中だけバナー再描画を促す。無条件 Invalidate だと曲番号 GDI が点滅する。
+		extern LONG COgg_GetGdiPaintPending();
+		if (::IsWindowVisible(GetSafeHwnd()) && !IsIconic() && COgg_GetGdiPaintPending())
 			InvalidateRect(&m_bannerRect, FALSE);
 	}
 	else if (nIDEvent == 3) {
@@ -2547,6 +2548,12 @@ void CMediaPlayerDlg::OnPaint()
 		bool hitBanner = !m_bannerRect.IsRectEmpty() && CRect().IntersectRect(&clipBox, &m_bannerRect);
 		if (!sidePanelOnly) {
 			int saved = dc.SaveDC();
+			// ジャケット/曲情報パネルは直後の DrawSidePanels の Blit が全ピクセルを
+			// 書き直すため gap クリア不要。バナー無効化(毎フレーム)とパネル無効化
+			// (スクロール/曲変更)が同じ WM_PAINT に合流したとき、ここでクリアすると
+			// クリア→再描画の1フレーム空白が曲番号 GDI のちらつきになる。
+			if (!m_jacketRect.IsRectEmpty())    dc.ExcludeClipRect(&m_jacketRect);
+			if (!m_infoPanelRect.IsRectEmpty()) dc.ExcludeClipRect(&m_infoPanelRect);
 			CCC_PaintAeroGaps(dc, this, &m_bannerRect);
 			dc.RestoreDC(saved);
 		}

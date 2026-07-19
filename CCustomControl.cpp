@@ -501,13 +501,14 @@ static void CCC_BlitToRectOpaque(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (hdcBuf && hBP)
     {
-        RECT rcBuf = { 0, 0, destW, destH };
-        ::FillRect(hdcBuf, &rcBuf, (HBRUSH)::GetStockObject(BLACK_BRUSH));
+        // buffer DC はクライアント座標系を共有するため、(0,0) ではなく
+        // rect の左上から描画する。(0,0) に描くと rect が原点以外のとき
+        // バッファ範囲外に描かれ、BPPF_ERASE の黒だけが画面に残る。
         ::SetStretchBltMode(hdcBuf, COLORONCOLOR);
         if (bStretch)
-            ::StretchBlt(hdcBuf, 0, 0, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
+            ::StretchBlt(hdcBuf, rect.left, rect.top, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
         else
-            ::BitBlt(hdcBuf, 0, 0, destW, destH, hdcSrc, srcX, srcY, SRCCOPY);
+            ::BitBlt(hdcBuf, rect.left, rect.top, destW, destH, hdcSrc, srcX, srcY, SRCCOPY);
         ::BufferedPaintMakeOpaque(hBP, &rect);
         ::EndBufferedPaint(hBP, TRUE);
         return;
@@ -562,10 +563,25 @@ void CCC_BlitStretchNF(HDC hdcDest, int x, int y, int destW, int destH,
     HDC hdcSrc, int srcX, int srcY, int srcW, int srcH, COLORREF clrKey)
 {
     // UI スレッド想定。DIB を再利用して毎フレーム CreateDIBSection を避ける。
-    static CCC_ChromaBlitCache s_nfCache;
+    // バナー/ジャケット/曲情報パネルなど複数サイズの呼び出し元が共有するため、
+    // 1本だと Ensure の作り直しが毎フレーム交互に起きる。サイズ一致スロットを
+    // 使い、無ければラウンドロビンで置き換える小さなプールにする。
+    static CCC_ChromaBlitCache s_nfCaches[4];
+    static unsigned s_nfNext = 0;
+    CCC_ChromaBlitCache* pCache = nullptr;
+    for (auto& c : s_nfCaches) {
+        if (c.dibW == destW && c.dibH == destH) { pCache = &c; break; }
+    }
+    if (!pCache) {
+        for (auto& c : s_nfCaches) {
+            if (!c.hDib) { pCache = &c; break; } // 未使用スロット優先
+        }
+    }
+    if (!pCache)
+        pCache = &s_nfCaches[(s_nfNext++) % _countof(s_nfCaches)];
     RECT rect = { x, y, x + destW, y + destH };
     if (destW > 0 && destH > 0 &&
-        CCC_BlitChromaCachedRect(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, s_nfCache))
+        CCC_BlitChromaCachedRect(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, *pCache))
         return;
     if (!CCC_BlitChromaNFRect(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE))
         CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE);
@@ -967,7 +983,9 @@ static void DrawTextShadow(CDC* pDC, const CRect& rect, const CString& str, UINT
 
 static void DrawTextWithShadow(CDC* pDC, const CRect& rect, const CString& str, UINT fmt, COLORREF clrT, COLORREF clrS, int nSD, int nDist, int nBlur, BOOL bSE, COLORREF clrBg, BOOL bAeroTrans = FALSE)
 {
-    if (bSE)
+    // アクリル透過は最終段がクロマキー(α=0/255)のため、ソフトシャドウの
+    // 半透明を memDC に焼き込むと黒縁のジャギーになる。透過時は影を省略。
+    if (bSE && !bAeroTrans)
         DrawTextShadow(pDC, rect, str, fmt, clrS, nSD, nDist, nBlur, clrBg, bAeroTrans);
     pDC->SetTextColor(clrT);
     CRect rt = rect;
@@ -978,7 +996,8 @@ static void DrawTextWithGradient(CDC* pDC, const CRect& rect, const CString& str
 {
     if (str.IsEmpty()) return;
 
-    if (bSE)
+    // 透過時はソフトシャドウを省略(クロマキー段で半透明が黒縁になるため)
+    if (bSE && !bAeroTrans)
         DrawTextShadow(pDC, rect, str, fmt, clrSh, nSD, nDist, nBlur, clrBg, bAeroTrans);
 
     CSize sz = pDC->GetTextExtent(str);
@@ -1591,7 +1610,7 @@ static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT 
     const int rlH = max(1, (scaleY > 0.01f) ? (int)(rectDraw.Height() / scaleY + 0.5f) : rectDraw.Height());
     CRect rl(0, 0, sz.cx + (std::max)(16, mCW + 4), rlH);
     const UINT fitFmt = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
-    if (bSE)
+    if (bSE && !bAeroTrans)
         DrawTextShadow(&dc, rl, str, fitFmt, clrSh, nSD, nDist, nBlur, clrBg, bAeroTrans, scaleX, scaleY);
     if (bGrad) DrawTextWithGradient(&dc, rl, str, fitFmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, FALSE, clrBg, sz.cx, FALSE, bAeroTrans);
     else DrawTextWithShadow(&dc, rl, str, fitFmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, FALSE, clrBg, bAeroTrans);
@@ -2923,7 +2942,7 @@ void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const std::ve
     else if (fmt & DT_RIGHT) xP = rect.right - tot.cx;
 
     const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
-    const COLORREF clrBg = COLOR_DIALOG_BG;
+    const COLORREF clrBg = bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG;
 
     for (size_t i = 0; i < segs.size(); i++)
     {
@@ -3074,15 +3093,16 @@ void CCustomStatic::DrawClient(CDC& dc)
     CBitmap* ob = memDC.SelectObject(&m_memBackstore);
 
     const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
-    memDC.FillSolidRect(&rect, COLOR_DIALOG_BG);
+    // 透過時は最初からクロマキーで塗る(スライダー/チェックと同じ)。
+    // COLOR_DIALOG_BG→リマップは CreateCompatibleBitmap 経由で色が
+    // 量子化されると一致せず、不透明ピンクのまま残る。
+    const COLORREF clrFill = bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG;
+    memDC.FillSolidRect(&rect, clrFill);
 
     if (m_strText.IsEmpty())
     {
         if (bTrans)
-        {
-            CCC_RemapSolidColorInDC(memDC, rect, COLOR_DIALOG_BG, CCC_AERO_CHROMA_KEY);
             blitTrans(memDC.GetSafeHdc());
-        }
         else
             dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
         memDC.SelectObject(ob);
@@ -3307,7 +3327,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     else if (ds & SS_RIGHT) fmt |= DT_RIGHT;
     else fmt |= DT_LEFT;
 
-    const COLORREF clrBg = COLOR_DIALOG_BG;
+    const COLORREF clrBg = bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG;
 
     if (bHasFmt)
     {
@@ -3355,10 +3375,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     memDC.SelectObject(pOF);
 
     if (bTrans)
-    {
-        CCC_RemapSolidColorInDC(memDC, rect, COLOR_DIALOG_BG, CCC_AERO_CHROMA_KEY);
         blitTrans(memDC.GetSafeHdc());
-    }
     else
         dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
 
@@ -6840,44 +6857,15 @@ void CCC_MainLockGetOverlayRect(HWND hDlg, CRect& rc)
     CCC_MainLockGetClientRect(hDlg, rc);
 }
 
-static void CCC_InvalidateRectMinus(const CRect& area, const CRect& hole, HWND hWnd)
-{
-    if (!::IsWindow(hWnd) || area.IsRectEmpty())
-        return;
-    CRect overlap;
-    if (!overlap.IntersectRect(&area, &hole)) {
-        ::InvalidateRect(hWnd, area, FALSE);
-        return;
-    }
-    auto inv = [&](const CRect& r) {
-        CRect t;
-        if (!t.IntersectRect(&r, &area) || t.IsRectEmpty())
-            return;
-        ::InvalidateRect(hWnd, &t, FALSE);
-    };
-    inv(CRect(area.left, area.top, area.right, hole.top));
-    inv(CRect(area.left, hole.bottom, area.right, area.bottom));
-    inv(CRect(area.left, hole.top, hole.left, hole.bottom));
-    inv(CRect(hole.right, hole.top, area.right, hole.bottom));
-}
-
 void CCC_InvalidateRectMinusOverlay(HWND hDlg, const CRect& area)
 {
+    // かつてロック矩形を更新領域から除外していたが、WM_PAINT の clip から
+    // ロックが常に外れて再描画されず、アクリル面で「完全透過の穴」になる
+    // デグレを起こした。従来(0.9a)と同じ全域無効化に戻す。
+    // ロック自体は各 OnPaint 末尾の CCC_MainLockPaintClient が内容の上に描く。
     if (!::IsWindow(hDlg) || area.IsRectEmpty())
         return;
-    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
-    if (!e || !e->pSaveFlag || !e->overlayPaint) {
-        ::InvalidateRect(hDlg, area, FALSE);
-        return;
-    }
-    CRect lockRc;
-    CCC_MainLockGetClientRect(hDlg, lockRc);
-    if (lockRc.IsRectEmpty()) {
-        ::InvalidateRect(hDlg, area, FALSE);
-        return;
-    }
-    lockRc.InflateRect(2, 2);
-    CCC_InvalidateRectMinus(area, lockRc, hDlg);
+    ::InvalidateRect(hDlg, area, FALSE);
 }
 
 static void CCC_MainLockSyncBtnCheck(CCC_MainLockEntry* e)
@@ -6920,7 +6908,13 @@ static void CCC_MainLockEnsureBtn(CWnd* pDlg, CCC_MainLockEntry* e)
 
     e->pLockBtn = new CCustomCheckBox();
     e->pLockBtn->EnableAutoDelete(TRUE);
+    // 親がアクリルなら他のチェックボックスと同様に透過描画にする
+    // (FALSE 固定だと不透明ピンクの矩形がアクリル面に浮くデグレになる)
+#if CCUSTOM_AERO_SUPPORT
+    e->pLockBtn->SetAeroMode(CCC_IsAeroEnabled() && CCC_IsBlurDialogChild(pDlg->GetSafeHwnd()));
+#else
     e->pLockBtn->SetAeroMode(FALSE);
+#endif
 
     const int w = CCC_MainLockMeasureWidth(pDlg);
     CRect rc(0, 0, w, CCC_MAINLOCK_H);
@@ -7049,6 +7043,15 @@ void CCC_MainLockPaintClient(CDC& dc, HWND hDlg)
         CCC_MainLockDrawOverlay(pCache->dc, local, e->locked);
         pCache->dirty = FALSE;
     }
+#if CCUSTOM_AERO_SUPPORT
+    // アクリル(Win11)面では通常 BitBlt はアルファ0のまま書かれ DWM に
+    // ガラス扱いされて完全透過になる(mp バナーと同じ理由)。不透明合成で描く。
+    if (CCC_IsAeroEnabled() && CCC_IsWin11() && CCC_IsBlurDialogChild(hDlg)) {
+        CCC_BlitStretchOpaque(dc.GetSafeHdc(), rc.left, rc.top, w, h,
+            pCache->dc.GetSafeHdc(), 0, 0, w, h);
+        return;
+    }
+#endif
     dc.BitBlt(rc.left, rc.top, w, h, &pCache->dc, 0, 0, SRCCOPY);
 }
 
@@ -7151,13 +7154,13 @@ void CCC_MainLockOnMainMoving(LPRECT pMainRect)
         CCC_MainLockEntry& e = g_mainLocks[i];
         if (!e.locked || !::IsWindow(e.hWnd))
             continue;
-        ::LockWindowUpdate(e.hWnd);
+        // LockWindowUpdate はシステム全体で1つの排他ロックで、WM_MOVING の
+        // tick 毎に取得/解放すると画面全体(mp バナー含む)が点滅する。使わない。
         ::SetWindowPos(e.hWnd, NULL,
             pMainRect->left + e.offsetX,
             pMainRect->top + e.offsetY,
             0, 0,
             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
-        ::LockWindowUpdate(NULL);
     }
     g_mainLockInternalMove = FALSE;
 }

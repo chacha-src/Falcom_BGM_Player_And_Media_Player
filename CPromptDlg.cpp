@@ -432,10 +432,9 @@ BOOL CPromptDlg::OnInitDialog()
 	ModifyStyle(WS_MINIMIZEBOX, 0);
 	SetIcon(nullptr, TRUE);
 	SetIcon(nullptr, FALSE);
-#if CCUSTOM_AERO_SUPPORT
-	if (!CCC_IsAeroEnabled())
-#endif
-		ModifyStyleEx(0, WS_EX_DLGMODALFRAME);
+	// キャプションアイコンは付けない。Aero 有効時も WS_EX_DLGMODALFRAME を
+	// 立てないと既定アイコンが残る（イコライザーは rc の DS_MODALFRAME で消えている）。
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	m_legend.SetWindowText(MpPromptLegendText());
 	SetDlgItemText(IDC_MPP_RUN, LL14(L"実行", L"Run", L"Executer", L"Esegui", L"Ejecutar", L"실행", L"执行", L"تشغيل", L"Запуск", L"Ausfuehren", L"Executar", L"Uitvoeren", L"Uruchom", L"Calistir"));
 	SetDlgItemText(IDC_MPP_STOP, LL14(L"停止", L"Stop", L"Arret", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stopp", L"Parar", L"Stoppen", L"Stop", L"Durdur"));

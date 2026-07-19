@@ -2850,6 +2850,11 @@ void COgg_ClearGdiPaintPending()
 	g_gdiPaintPendingSince = 0;
 }
 
+LONG COgg_GetGdiPaintPending()
+{
+	return InterlockedCompareExchange(&g_gdiPaintPending, 0, 0);
+}
+
 static void COgg_RequestTimerp(COggDlg* dlg)
 {
 	if (!dlg)

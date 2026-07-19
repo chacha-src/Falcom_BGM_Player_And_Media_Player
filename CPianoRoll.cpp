@@ -574,10 +574,10 @@ BOOL CPianoRoll::OnInitDialog()
     ModifyStyle(WS_MINIMIZEBOX, 0);
     SetIcon(nullptr, TRUE);
     SetIcon(nullptr, FALSE);
-#if CCUSTOM_AERO_SUPPORT
-    if (!CCC_IsAeroEnabled())
-#endif
-        ModifyStyleEx(0, WS_EX_DLGMODALFRAME);
+    // キャプションアイコンは付けない。WM_SETICON(NULL) だけでは DWM が
+    // 既定アイコンへフォールバックするため、Aero 有効時も常に
+    // WS_EX_DLGMODALFRAME を立ててフレーム再計算する（イコライザーと同じ見た目）。
+    ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 
     {
         int sp = savedata.pianorollscrollspeed;
@@ -3030,7 +3030,9 @@ void CPianoRoll::ApplySyncInvalidate()
     if (m_paintDisabled || !::IsWindow(m_hWnd)) return;
     if (m_meterDirty)
         m_keyDirty = true;
-    InvalidateRegions(true, m_keyDirty);
+    // 0.9a と同じ全域無効化。部分無効化はロック矩形の描画漏れ等の
+    // デグレ源になったため戻した。
+    Invalidate(FALSE);
 }
 
 LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)

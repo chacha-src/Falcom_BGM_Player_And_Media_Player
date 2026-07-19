@@ -260,10 +260,9 @@ BOOL CAnalyzerDlg::OnInitDialog()
 	ModifyStyle(WS_MINIMIZEBOX, 0);
 	SetIcon(nullptr, TRUE);
 	SetIcon(nullptr, FALSE);
-#if CCUSTOM_AERO_SUPPORT
-	if (!CCC_IsAeroEnabled())
-#endif
-		ModifyStyleEx(0, WS_EX_DLGMODALFRAME);
+	// キャプションアイコンは付けない。Aero 有効時も WS_EX_DLGMODALFRAME を
+	// 立てないと既定アイコンが残る（イコライザーは rc の DS_MODALFRAME で消えている）。
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 
 	int ax = savedata.analyzerx;
 	int ay = savedata.analyzery;
