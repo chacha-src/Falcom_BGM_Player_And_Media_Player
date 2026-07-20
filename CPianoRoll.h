@@ -313,9 +313,9 @@ private:
     DWORD m_lastAnalyzeTick = 0;     // スロットリング用(ANALYZE_MIN_MS 未満は再分析しない)
 
     // ---- レベルメーター ----
-    float m_bufwav3LevelDb = -60.0f;          // 入力 dB(ピックの閾値スケーリングに利用)
-    float m_lastGainDb = 0.0f;                // 直近フレームのメイクアップゲイン(dB)。
-    // 絶対値ノイズフロアをこれに連動させるために保持。
+    float m_bufwav3LevelDb = -60.0f;          // AGC後の動作レベル dB(ピック閾値スケーリング)
+    float m_lastGainDb = 0.0f;                // 直近フレームの解析正規化ゲイン(dB, 正=ブースト/負=カット)
+    // 大きなブースト時のソースSNR悪化補正などに使用。
     float m_chMeterDb[PIANO_METER_CH_MAX];
     float m_chMeterFill[PIANO_METER_CH_MAX];      // 表示用 IIR 平滑フィル値(0.0〜1.0)
     float m_chMeterAutoPeak[PIANO_METER_CH_MAX];  // 自動ピーク(棒グラフ上端の目印)

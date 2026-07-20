@@ -359,6 +359,7 @@ char *b64_decode(char *s, int size,int &len);
 int b64_ctoi(char c);
 
 // サブウィンドウを表示中メイン(COggDlg/CMediaPlayerDlg)の移動に追随させる
+// （UI 表記は「メインに追従」）
 CWnd* CCC_GetActiveMainWindow();
 void CCC_MainLockSetup(CWnd* pDlg, int* pSavedLockFlag, BOOL bOverlayPaint = FALSE);
 void CCC_MainLockUnregister(HWND hWnd);

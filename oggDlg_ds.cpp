@@ -361,6 +361,8 @@ BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 		thn = TRUE;
 		syukai = 0;
 		syukai2 = 1;
+		// Signal 済みの thn1/stf は呼び出し側がデコーダ事情で維持したい場合もあるが、
+		// 「スレッド無し」なら停止待ちは完了しているのでここでは触らない。
 		return TRUE;
 	}
 
@@ -375,13 +377,25 @@ BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 		thn1 = TRUE;
 		stf = 1;
 		syukai = 2;
+		if (og)
+			og->timer.SetEvent();
+		// DS Lock 中は Stop でドライバ待ちを解く（固まりの主因の一つ）
+		if (InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0) {
+			if (m_dsb)
+				m_dsb->Stop();
+			if (pAudioClient)
+				pAudioClient->Stop();
+		}
 		const DWORD w = WaitForSingleObject(hThread, pollMs);
 		if (w == WAIT_OBJECT_0) {
 			exited = TRUE;
 			break;
 		}
-		if (og)
-			og->timer.SetEvent();
+		// 無効/閉じ済みハンドルで無限ループしない（ダングリング時の連続固まり防止）
+		if (w == WAIT_FAILED) {
+			exited = TRUE;
+			break;
+		}
 		if (timeoutMs != 0) {
 			elapsed += pollMs;
 			if (elapsed >= timeoutMs)
@@ -413,17 +427,28 @@ void BeginPlaybackNotifyThread()
 		return;
 	// この時点の mode が「実際に再生するデコーダ形式」（stop1 はこれを見て閉じる）
 	g_openDecoderMode = mode;
+	// Wait/Signal や play 中 DoEvent 再入で残った停止フラグを下ろす。
+	// 残ったままだと通知スレッドが即終了し、CWread(adbuf) 系が無音になる
+	// （HandleNotifications_export と同じ理由）。
+	thn1 = FALSE;
+	stf = 0;
+	syukai = 0;
+	syukai2 = 0;
 	// CREATE_SUSPENDED で起動し、スレッド本体が走り出す前に m_bAutoDelete を
 	// 落として寿命を自前管理する。これによりスレッドが自己終了しても
 	// CWinThread オブジェクトとスレッドハンドルは破棄されず、安全に Join できる。
+	// Resume 前に s_playNotifyThread へ登録し、起動直後の stop が「スレッド無し」と
+	// 誤認してデコーダを潰し、再生スレッドが Lock で永久待ち→連続固まりになるのを防ぐ。
 	CWinThread* t = AfxBeginThread((AFX_THREADPROC)HandleNotifications, NULL,
 		THREAD_PRIORITY_TIME_CRITICAL, 0, CREATE_SUSPENDED);
-	if (t) {
-		t->m_bAutoDelete = FALSE;
-		t->ResumeThread();
+	if (!t)
+		return;
+	t->m_bAutoDelete = FALSE;
+	{
+		CSingleLock lk(&s_playNotifyThreadCs, TRUE);
+		s_playNotifyThread = t;
 	}
-	CSingleLock lk(&s_playNotifyThreadCs, TRUE);
-	s_playNotifyThread = t;
+	t->ResumeThread();
 }
 
 UINT HandleNotifications(LPVOID)
@@ -432,9 +457,16 @@ UINT HandleNotifications(LPVOID)
 	int fade2 = 0;
 	syoriflg = FALSE;
 	DWORD hr = DS_OK;
-	thn = FALSE; thn1 = FALSE;
+	// stop1/Wait/Signal で残った停止フラグを必ず下ろす。
+	// stf!=0 のままだと IsPlaybackStopRequested() が真になり、
+	// DispatchPlaywavFill→readBuffwav が即 return して無音になる
+	// （HandleNotifications_export と同じ。CWread/adbuf 系で顕在化しやすい）。
+	thn = FALSE;
+	thn1 = FALSE;
+	stf = 0;
 	char* pdsb1; char* pdsb2;
 	syukai = 0;
+	syukai2 = 0;
 	int dougainit = 0;
 	int timeee = 0;
 	HANDLE ev[] = { (HANDLE)og->timer };

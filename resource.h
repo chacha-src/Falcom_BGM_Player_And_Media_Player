@@ -730,13 +730,27 @@
 #define IDC_PRT_OK                        3529
 #define IDC_MAINWIN_LOCK                  3530
 
+#define IDD_MISSING_FILES               205
+#define IDC_MF_LIST                     3531
+#define IDC_MF_GRP_LIST                 3532
+#define IDC_MF_GRP_PATH                 3533
+#define IDC_MF_PATH_L                   3534
+#define IDC_MF_PATH                     3535
+#define IDC_MF_BROWSE                   3536
+#define IDC_MF_APPLY                    3537
+#define IDC_MF_STATUS                   3538
+#define IDC_MF_HINT                     3539
+#define IDC_MF_DELETE                   3540
+#define IDC_MF_CLOSE                    3541
+#define IDC_MF_OPENFOL                  3542
+
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        205
+#define _APS_NEXT_RESOURCE_VALUE        206
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3531
+#define _APS_NEXT_CONTROL_VALUE         3543
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

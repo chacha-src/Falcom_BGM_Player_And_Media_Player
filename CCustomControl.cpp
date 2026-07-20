@@ -319,6 +319,18 @@ BOOL CCC_ChromaBlitCache::FillOpaqueRect(int x, int y, int rw, int rh, COLORREF 
     return TRUE;
 }
 
+void CCC_ChromaBlitCache::MakeRectOpaque(int x, int y, int rw, int rh)
+{
+    if (!pBits || rw <= 0 || rh <= 0 || dibW <= 0) return;
+    if (x < 0 || y < 0 || x + rw > dibW || y + rh > dibH) return;
+    UINT32* base = (UINT32*)pBits;
+    for (int row = 0; row < rh; ++row) {
+        UINT32* p = base + (size_t)(y + row) * (size_t)dibW + x;
+        for (int col = 0; col < rw; ++col)
+            p[col] |= 0xFF000000u;
+    }
+}
+
 BOOL CCC_ChromaBlitCache::BlitRect(HDC hdcDest, int x, int y, int w, int h)
 {
     if (!hdcDest || w <= 0 || h <= 0 || !pBits || !hdcDib || dibW <= 0 || dibH <= 0) return FALSE;
@@ -6688,7 +6700,7 @@ static BOOL g_mainLockInternalMove = FALSE;
 static DWORD g_mainLockQuickPresentUntil = 0;
 
 static const int CCC_MAINLOCK_H = 20;
-static const int CCC_MAINLOCK_MIN_W = 112;
+static const int CCC_MAINLOCK_MIN_W = 128;
 static const int CCC_MAINLOCK_MARGIN = 10;
 
 static void CCC_MainLockLayoutBtn(HWND hDlg);
@@ -6759,12 +6771,13 @@ static void CCC_ComputeMainLockOffset(HWND hWnd, int& outX, int& outY)
 
 static const CString& CCC_MainLockLabel()
 {
+    // 「メイン固定」だと何を固定するか不明瞭 → メイン窓への位置追従だと分かる文言へ
     static const CString s = LL14(
-        L"メイン固定", L"Lock main", L"Fixer fenetre principale",
-        L"Blocca finestra principale", L"Fijar ventana principal", L"메인 고정",
-        L"固定主窗口", L"قفل النافذة الرئيسية", L"Фикс. главное окно",
-        L"Hauptfenster fix", L"Fixar janela principal", L"Hoofdvenster vast",
-        L"Przypnij do glownego okna", L"Ana pencereye sabitle");
+        L"メインに追従", L"Follow main", L"Suivre la fenetre principale",
+        L"Segui finestra principale", L"Seguir ventana principal", L"메인 따라가기",
+        L"跟随主窗口", L"متابعة النافذة الرئيسية", L"Следовать за главным",
+        L"Hauptfenster folgen", L"Seguir janela principal", L"Volg hoofdvenster",
+        L"Podazaj za glownym", L"Ana pencereyi takip et");
     return s;
 }
 
@@ -6859,13 +6872,33 @@ void CCC_MainLockGetOverlayRect(HWND hDlg, CRect& rc)
 
 void CCC_InvalidateRectMinusOverlay(HWND hDlg, const CRect& area)
 {
-    // かつてロック矩形を更新領域から除外していたが、WM_PAINT の clip から
-    // ロックが常に外れて再描画されず、アクリル面で「完全透過の穴」になる
-    // デグレを起こした。従来(0.9a)と同じ全域無効化に戻す。
-    // ロック自体は各 OnPaint 末尾の CCC_MainLockPaintClient が内容の上に描く。
+    // ロック矩形を更新領域から除外する。毎フレームの content blit → ロック再描画が
+    // アクリル面で2段合成になり「メインに追従」がちらつくのを防ぐ。
+    // ロック自体は状態変更時の InvalidateOverlay、および OnPaint 末尾の焼き込みで描く。
     if (!::IsWindow(hDlg) || area.IsRectEmpty())
         return;
-    ::InvalidateRect(hDlg, area, FALSE);
+    CRect lockRc;
+    CCC_MainLockGetClientRect(hDlg, lockRc);
+    if (lockRc.IsRectEmpty()) {
+        ::InvalidateRect(hDlg, area, FALSE);
+        return;
+    }
+    CRect overlap;
+    if (!overlap.IntersectRect(&area, &lockRc)) {
+        ::InvalidateRect(hDlg, area, FALSE);
+        return;
+    }
+    HRGN rArea = ::CreateRectRgnIndirect(&area);
+    HRGN rLock = ::CreateRectRgnIndirect(&lockRc);
+    if (rArea && rLock) {
+        ::CombineRgn(rArea, rArea, rLock, RGN_DIFF);
+        ::InvalidateRgn(hDlg, rArea, FALSE);
+    }
+    else {
+        ::InvalidateRect(hDlg, area, FALSE);
+    }
+    if (rArea) ::DeleteObject(rArea);
+    if (rLock) ::DeleteObject(rLock);
 }
 
 static void CCC_MainLockSyncBtnCheck(CCC_MainLockEntry* e)

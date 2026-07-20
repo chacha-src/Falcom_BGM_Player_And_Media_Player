@@ -727,6 +727,25 @@ BEGIN
     PUSHBUTTON      "キャンセル",IDCANCEL,306,196,50,14
 END
 
+IDD_MISSING_FILES DIALOGEX 0, 0, 440, 268
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "存在しないファイル"
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    GROUPBOX        "存在しないファイル",IDC_MF_GRP_LIST,7,6,426,148
+    CONTROL         "",IDC_MF_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | LVS_ALIGNLEFT | LVS_SHAREIMAGELISTS | WS_BORDER | WS_TABSTOP,14,20,412,126
+    GROUPBOX        "パスの修正",IDC_MF_GRP_PATH,7,158,426,56
+    LTEXT           "パス:",IDC_MF_PATH_L,14,174,28,10
+    EDITTEXT        IDC_MF_PATH,44,172,286,12,ES_AUTOHSCROLL
+    PUSHBUTTON      "参照...",IDC_MF_BROWSE,336,171,50,14
+    PUSHBUTTON      "適用",IDC_MF_APPLY,390,171,36,14
+    LTEXT           "",IDC_MF_HINT,14,190,412,18
+    LTEXT           "",IDC_MF_STATUS,7,224,180,10
+    PUSHBUTTON      "フォルダを開く",IDC_MF_OPENFOL,196,220,72,14
+    PUSHBUTTON      "残件を削除",IDC_MF_DELETE,274,220,72,14
+    PUSHBUTTON      "閉じる",IDC_MF_CLOSE,352,220,50,14
+END
+
 IDD_MP_PROMPT DIALOGEX 0, 0, 375, 368
 STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 CAPTION "プロンプト"
@@ -1044,7 +1063,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,521
+ FILEVERSION 0,9,1,522
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1062,10 +1081,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.07.19"
-            VALUE "FileVersion", "0.9.1.521"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.07.20"
+            VALUE "FileVersion", "0.9.1.522"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.07.19"
+            VALUE "LegalCopyright", "Copyright (C) 2026.07.20"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -1341,6 +1360,14 @@ BEGIN
 
     IDD_MP_M3U_IMPORT, DIALOG
     BEGIN
+    END
+
+    IDD_MISSING_FILES, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 433
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 261
     END
 
     IDD_MP_PROMPT, DIALOG
@@ -1783,6 +1810,11 @@ BEGIN
 END
 
 IDD_MP_M3U_IMPORT AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_MISSING_FILES AFX_DIALOG_LAYOUT
 BEGIN
     0
 END

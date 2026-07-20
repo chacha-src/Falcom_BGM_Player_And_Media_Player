@@ -45,10 +45,12 @@ namespace Cfg
     // piano roll3: 基音ピック + NormalizeDisplayPeak + 包絡ホールド
     static constexpr float IIR_ALPHA = 0.40f;
     static constexpr float IIR_ALPHA_BASS = 0.28f;
-    static constexpr float SILENCE_ABS = 0.002f;
-    static constexpr float BAND_SILENCE_BASS = 0.0015f;
-    static constexpr float BAND_SILENCE_MID = 0.0012f;
-    static constexpr float BAND_SILENCE_TRE = 0.0012f;
+    // 絶対無音ゲート。解析AGCを -3dBFS 目標にしたあとでも、
+    // 弱い楽節(例: OST導入部)がここで全滅しないよう 0.002→0.0007 に下げた。
+    static constexpr float SILENCE_ABS = 0.0007f;
+    static constexpr float BAND_SILENCE_BASS = 0.00055f;
+    static constexpr float BAND_SILENCE_MID = 0.00045f;
+    static constexpr float BAND_SILENCE_TRE = 0.00045f;
     static constexpr int   ATTACK_FRAMES = 1;
     static constexpr int   ATTACK_FRAMES_EDGE = 2;
     // T130 の 16分(~115ms)/32分(~58ms)を分離できるようリリースを短く。
@@ -86,10 +88,19 @@ namespace Cfg
     static constexpr float UPPER_ONSET_DELTA_THRESH = 0.040f;
     static constexpr float UPPER_ONSET_MIN_STRENGTH = 0.065f;
 
-    static constexpr float BUFWAV3_TARGET_PEAK_DB = -11.0f;
-    static constexpr float BUFWAV3_GAIN_DB_MAX = 32.0f;
-    static constexpr float BUFWAV3_GAIN_ZERO_DB = -9.0f;
+    // 解析専用の双方向AGC。再生用EQマスターとは独立に、窓ピークを目標へ揃える。
+    // 旧: 上げのみ(+→-11dB、既に大きい入力は触らない) → 静かな曲は床に沈み、
+    //     マスター上げで初めて載る／その分ゴーストが増える非対称が起きていた。
+    // 新: 上げ下げとも -3dBFS 付近へ正規化し、音量スライダーに検出を依存させない。
+    static constexpr float BUFWAV3_TARGET_PEAK_DB = -3.0f;
+    static constexpr float BUFWAV3_GAIN_DB_MAX = 36.0f;   // 静かな曲への最大ブースト
+    static constexpr float BUFWAV3_GAIN_DB_MIN = -24.0f;  // 大きい入力／マスター上げのカット
     static constexpr float BUFWAV3_PEAK_FLOOR_DB = -60.0f;
+    // 絶対ノイズ床の基準(AGC後)。旧0.0015は -3dB 動作点では厳しすぎる。
+    static constexpr float ABS_NOISE_FLOOR_BASE = 0.00055f;
+    // スペクトル相対床: 下位パーセンタイル × 倍率 (マスター上げ時の砂粒ゴースト対策)
+    static constexpr float SPECTRAL_NOISE_PERCENTILE = 0.35f;
+    static constexpr float SPECTRAL_NOISE_FLOOR_MUL = 2.2f;
 
     static float PeakDbFs(const double* samples, int n)
     {
@@ -126,13 +137,35 @@ namespace Cfg
         return PeakDbFsWindows(winLow, nLow, winBass, nBass);
     }
 
+    // 解析窓を目標ピークへ双方向正規化するゲイン(dB)。再生音量には影響しない。
     static float MakeupGainDb(float peakDbFs)
     {
-        if (peakDbFs >= BUFWAV3_GAIN_ZERO_DB) return 0.0f;
+        if (peakDbFs <= BUFWAV3_PEAK_FLOOR_DB + 0.5f)
+            return 0.0f;
         float g = BUFWAV3_TARGET_PEAK_DB - peakDbFs;
         if (g > BUFWAV3_GAIN_DB_MAX) g = BUFWAV3_GAIN_DB_MAX;
-        if (g < 0.0f) g = 0.0f;
+        if (g < BUFWAV3_GAIN_DB_MIN) g = BUFWAV3_GAIN_DB_MIN;
         return g;
+    }
+
+    // blend スペクトルの下位パーセンタイルをノイズ床推定に使う。
+    // ノートが多いフレームでは相対床が上がり、砂粒ゴーストを押し下げる。
+    static float SpectralNoiseEstimate(const float* blend, int count)
+    {
+        if (!blend || count <= 0) return 0.0f;
+        float tmp[128];
+        int n = 0;
+        const int cap = (count < 128) ? count : 128;
+        for (int i = 0; i < count && n < cap; ++i) {
+            if (blend[i] > 1e-8f)
+                tmp[n++] = blend[i];
+        }
+        if (n < 8) return 0.0f;
+        int k = (int)((float)n * SPECTRAL_NOISE_PERCENTILE);
+        if (k < 0) k = 0;
+        if (k >= n) k = n - 1;
+        std::nth_element(tmp, tmp + k, tmp + n);
+        return tmp[k];
     }
 
     static float PickThreshScaleFromLevelDb(float levelDb)
@@ -148,7 +181,8 @@ namespace Cfg
 
     static void ApplyGainDbInPlace(double* samples, int n, float gainDb)
     {
-        if (!samples || n <= 0 || gainDb <= 0.001f) return;
+        if (!samples || n <= 0) return;
+        if (gainDb > -0.001f && gainDb < 0.001f) return;
         const double g = pow(10.0, (double)gainDb / 20.0);
         for (int i = 0; i < n; ++i) {
             double v = samples[i] * g;
@@ -889,18 +923,19 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
         m_analysisBuf.data(), m_winLow,
         hasBass ? m_bassAnalysisBuf.data() : nullptr,
         hasBass ? m_winBass : 0);
-    m_bufwav3LevelDb = levelDb;
 
     const float gainDb = Cfg::MakeupGainDb(levelDb);
-    // 絶対値ノイズフロアをこのフレームのゲインに連動させるため保存しておく
-    // (ゲイン補正は信号もノイズも一緒に増幅するため、フロアも追従させないと
-    // 静かな曲全体では強すぎ、逆に静かな減衰末尾では弱すぎるちぐはぐが生じる)。
+    // 絶対値ノイズフロア／ピック閾値は AGC「後」の動作点を基準にする。
+    // 旧: 入力生レベルをそのまま使う → 静かな曲だけ相対閾値が緩み、
+    //     マスター上げ後は床が下がってゴーストが増える非対称が残っていた。
     m_lastGainDb = gainDb;
+    m_bufwav3LevelDb = levelDb + gainDb;
     Cfg::ApplyGainDbInPlace(m_analysisBuf.data(), m_winLow, gainDb);
     if (hasBass)
         Cfg::ApplyGainDbInPlace(m_bassAnalysisBuf.data(), m_winBass, gainDb);
 
-    if (levelDb < -58.0f && gainDb < 3.0f) {
+    // 真の無音のみ早期リターン。AGC可能な静かな曲は通す。
+    if (levelDb < -58.0f) {
         for (int i = 0; i < KEY_COUNT; ++i) {
             m_noteStrength[i] = 0.0f;
             m_rawStrengths[i] = 0.0f;
@@ -1108,11 +1143,23 @@ void CPianoRoll::UpdateNoteStates()
         return;
     }
 
-    // ゲインに連動した絶対値ノイズフロア。
-    // 基準値(ゲイン0dB時)は0.0015程度とし、メイクアップゲインがかかった分だけ
-    // 線形にフロアも持ち上げる(信号もノイズも同じ倍率で増幅されるため)。
-    const float gainLinear = powf(10.0f, m_lastGainDb / 20.0f);
-    const float absFloor = PrTuneF(savedata.prTuneAbsFloorPct, 0.0015f) * gainLinear;
+    // ノイズ床: AGC後の固定基準 + スペクトル相対床。
+    // 旧: absFloor = base * gainLinear → ブーストで床が上がり静かな曲が載らず、
+    //     マスター上げ(gain≈0)で床が最低になりゴーストが増える。
+    // 新: 双方向AGCで動作点を揃えたうえで、相対床で砂粒を抑える。
+    // 大きなブースト時のみソースSNR悪化分を控えめに持ち上げる。
+    const float baseFloor = PrTuneF(savedata.prTuneAbsFloorPct, ABS_NOISE_FLOOR_BASE);
+    float absFloor = baseFloor;
+    const float noiseEst = SpectralNoiseEstimate(blend, KEY_COUNT);
+    if (noiseEst > 0.0f) {
+        const float relFloor = noiseEst * SPECTRAL_NOISE_FLOOR_MUL;
+        if (relFloor > absFloor) absFloor = relFloor;
+    }
+    if (m_lastGainDb > 8.0f) {
+        const float extra = powf(10.0f, (m_lastGainDb - 8.0f) * 0.25f / 20.0f);
+        const float boostFloor = baseFloor * extra;
+        if (boostFloor > absFloor) absFloor = boostFloor;
+    }
 
     bool picked[KEY_COUNT];
     PianoRoll108::BuildFramePicks(blend, picked, KEY_COUNT, pickScale, absFloor,
@@ -1128,10 +1175,10 @@ void CPianoRoll::UpdateNoteStates()
         const DWORD dbgNow2 = GetTickCount();
         if (dbgNow2 - s_dbgPickLogTick >= 500) {
             for (int i = 0; i < KEY_COUNT; ++i) {
-                if (picked[i] && blend[i] < 0.02f) {
+                if (picked[i] && blend[i] < absFloor * 0.5f) {
                     char buf[160];
-                    sprintf_s(buf, "[PianoRollDbg][FLOOR-LEAK] key=%d picked=1 blend=%.5f (floor=0.02 should have blocked this)\n",
-                        i, blend[i]);
+                    sprintf_s(buf, "[PianoRollDbg][FLOOR-LEAK] key=%d picked=1 blend=%.5f floor=%.5f\n",
+                        i, blend[i], absFloor);
                     OutputDebugStringA(buf);
                 }
             }

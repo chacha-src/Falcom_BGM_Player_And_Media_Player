@@ -444,6 +444,9 @@
     <ClCompile Include="CMpM3uImportDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CMissingFilesDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="CMpPlaylistIO.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -953,6 +956,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CMpM3uImportDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CMissingFilesDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CMpPlaylistIO.h">

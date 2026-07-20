@@ -6712,6 +6712,60 @@ static CString StripToBasename(const CString& path)
 	return s;
 }
 
+// mode 30: 旧プレイリストは basename のみ。直近成功ディレクトリと他行のフルパスから .pac を探す。
+static CString s_mode30LastPacDir;
+
+static void RememberMode30PacDir(const CString& pacPath)
+{
+	const int slash = pacPath.ReverseFind(_T('\\'));
+	if (slash >= 0)
+		s_mode30LastPacDir = pacPath.Left(slash);
+}
+
+void RememberMode30PacPath(LPCTSTR pacOrFol)
+{
+	if (!pacOrFol || !*pacOrFol)
+		return;
+	const CString phys = PlPhysicalMediaPath(pacOrFol);
+	if (!phys.IsEmpty() && (phys.Find(_T('\\')) >= 0 || phys.Find(_T('/')) >= 0))
+		RememberMode30PacDir(phys);
+}
+
+static CString ResolveMode30PacPath(const CString& pacPath)
+{
+	if (!pacPath.IsEmpty() && PathFileExists(pacPath)) {
+		RememberMode30PacDir(pacPath);
+		return pacPath;
+	}
+
+	CString base = StripToBasename(pacPath);
+	if (base.IsEmpty())
+		return pacPath;
+
+	if (!s_mode30LastPacDir.IsEmpty()) {
+		const CString cand = s_mode30LastPacDir + _T("\\") + base;
+		if (PathFileExists(cand))
+			return cand;
+	}
+
+	if (pl && pl->pc) {
+		for (int i = 0; i < pl->playcnt; ++i) {
+			if (pl->pc[i].sub != 30 || !pl->pc[i].fol[0])
+				continue;
+			const CString phys = PlPhysicalMediaPath(pl->pc[i].fol);
+			if (phys.IsEmpty())
+				continue;
+			if (StripToBasename(phys).CompareNoCase(base) != 0)
+				continue;
+			if (PathFileExists(phys)) {
+				RememberMode30PacDir(phys);
+				return phys;
+			}
+		}
+	}
+	return pacPath;
+}
+
 static CString NormalizeZweiPlaybackFol(const CString& fol, int listIndex)
 {
 	CString s = fol;
@@ -6738,7 +6792,7 @@ static CString NormalizeZweiPlaybackFol(const CString& fol, int listIndex)
 void COggDlg::play()
 {
 	// stop1/play 実行中の DoEvent 再入で形式切替が重なるとデコーダ UAF になる
-	if (s_inPlay || s_inStop1)
+	if (s_inPlay)
 		return;
 	s_inPlay = true;
 	struct ClearInPlay { ~ClearInPlay() { s_inPlay = false; } } _clearInPlay;
@@ -6746,15 +6800,16 @@ void COggDlg::play()
 	// 共有状態を触る前に旧再生を止める（Get() 後でも g_openDecoderMode で正しい形式を閉じる）
 	KillTimer(1250);
 	KillTimer(9000);
-	if (!stop1()) {
-		playf = 0;
-		return;
-	}
+	// stop1 失敗でも再生は続行する。ここで return すると CWread に入らず
+	// 0:00/古い loop1,2 のままになる（mode 30 で顕在化）。
+	(void)stop1();
+	// CWread が thend1 を見て即 return しないよう、開始前に必ず下ろす
+	thend1 = FALSE;
+	thend = 0;
+	thn1 = FALSE;
+	stf = 0;
 	if (MpPromptIsActive() || MpPromptHasBackup())
 		MpPromptOnTrackChange();
-	stf = 0;
-	thn1 = FALSE;
-	thend1 = FALSE;
 	eqflg = FALSE;
 	mode = modesub;
 
@@ -6853,7 +6908,8 @@ void COggDlg::play()
 		filen = NormalizeZweiPlaybackFol(filen, ret2);
 	// プレイリストにフルパスが入っていても chdir 先ではファイル名のみ参照する
 	// （例: mode16 の wavread は filen.Left(8) で dinow_XX と照合）
-	if (IsFalcomGameBgmMode(mode))
+	// mode 30 は chdir 無しで .pac をフルパス Open するため basename 化しない。
+	if (IsFalcomGameBgmMode(mode) && mode != 30)
 		filen = StripToBasename(filen);
 
 	CWaitCursor rrr1;
@@ -7402,6 +7458,9 @@ void COggDlg::play()
 		wavwait = 0;
 		if (mode == 30) wavbit_sample_Hz = 48000;
 		thend = 0;
+		// 初期 DispatchPlaywavFill は BeginPlaybackNotifyThread より前。
+		// g_openDecoderMode が INT_MIN のままだと ActiveDecodeMode が空振りして無音になる。
+		g_openDecoderMode = mode;
 		wav_start();
 		//		m_thread1 = ::AfxBeginThread((AFX_THREADPROC)wavread, (LPVOID)NULL,THREAD_PRIORITY_ABOVE_NORMAL,0,0,0);
 		//		::SetPriorityClass(m_thread1, HIGH_PRIORITY_CLASS);
@@ -7499,6 +7558,21 @@ void COggDlg::play()
 
 		}
 	}
+	// mode 30: CWread 完了を ys8/零軌 loop 上書きより先に待つ（0:00/古い loop1,2 のまま return するのを防ぐ）
+	if (mode == 30) {
+		const DWORD wavWaitT0 = GetTickCount();
+		for (; wavwait == 0;) {
+			Sleep(10);
+			if (GetTickCount() - wavWaitT0 >= 60000u)
+				break;
+		}
+		if (adbuf2 == NULL) {
+			thend1 = TRUE;
+			endflg = 0;
+			playf = 0;
+			return;
+		}
+	}
 	//ファイル保存用（wavExport時はcc1を後で設定するためここではリセットしない）
 	if (wavExportPath.GetLength() == 0) cc1 = 0;
 	playb = 0;
@@ -7518,7 +7592,8 @@ void COggDlg::play()
 	//Stereo 16bit 44kHz
 	loc = 0;
 
-	//ys8用
+	//ys8用（mode 30 は CWread が loop1/2 を設定済み。ここで上書きしない）
+	if (mode != 30) {
 	CStdioFile f;
 	char* buff;
 	int looping = 0;
@@ -7919,6 +7994,7 @@ void COggDlg::play()
 			}
 		}
 	}
+	} // mode != 30 (ys8/ysc/零軌 loop)
 	//-------------------------------------------------------------------
 	if (m_dsb != NULL) m_dsb->Release();
 	m_dsb = NULL;
@@ -7926,18 +8002,26 @@ void COggDlg::play()
 	ZeroMemory(bufwav3, sizeof(bufwav3));
 	DWORD  dwDataLen = WAVDALen / OUTPUT_BUFFER_NUM;
 	if (((mode >= 10 && mode <= 21) || mode <= -10) && mode != -10 || mode == -6 || mode == 30) {
-		{
-			// wavwait はデコード用ワーカースレッド(CWread)が完了時に立てる。
-			// 万一立たなくても UI が長時間固まらないよう短いタイムアウト(曲切替時は約2.5秒)
+		// mode 30 は ys8 ブロック前に CWread 完了済み
+		if (mode != 30) {
+			// wavwait はデコード用ワーカースレッド(CWread)が立てる。
 			const DWORD wavWaitT0 = GetTickCount();
-			const DWORD wavWaitLimitMs = g_interactiveTrackChange ? 2500u : 8000u;
+			DWORD wavWaitLimitMs = g_interactiveTrackChange ? 2500u : 8000u;
+			if (IsFalcomGameBgmMode(mode) && wavWaitLimitMs < 30000u)
+				wavWaitLimitMs = 30000u;
 			for (; wavwait == 0;) {
 				CWaitCursor rrr2;
 				DoEvent();
 				if (GetTickCount() - wavWaitT0 >= wavWaitLimitMs) break;
 			}
 		}
-		if (adbuf2 == NULL) { endflg = 0; return; }
+		if (adbuf2 == NULL) {
+			// 打ち切り時に孤児 CWread が後から loop1/2 を書き換えるのを止める
+			thend1 = TRUE;
+			endflg = 0;
+			playf = 0;
+			return;
+		}
 		//		if(mode!=-10)
 		//			playwavBuffwav(bufwav3,0,dwDataLen*4,0);
 		//		else
@@ -9966,10 +10050,14 @@ void COggDlg::play()
 	DWORD le = WAVDAStartLen;
 	ttt = WAVDAStartLen;
 
+	// stop1() は Join 前に stf=1 にする。CWread/adbuf の readBuffwav は
+	// IsPlaybackStopRequested() で即 return するため、再生開始直前に必ず戻す。
 	stf = 0;
 	thn1 = FALSE;
 	thn = TRUE;
-	plf = 1; fade1 = 0; fade = 1.0f; fadeadd = 0.0f;
+	plf = 1;
+	playf = 1;
+	fade1 = 0; fade = 1.0f; fadeadd = 0.0f;
 	poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
 	g_oggPcmDecodePos = 0;
 	g_oggRbPrimingNeed = OggRbLatencyReserveBytes();
@@ -10119,6 +10207,11 @@ void COggDlg::play()
 				}
 			}
 		}
+		// BeginPlayback 内 Wait が stf を立てる前に、再生中フラグを確定しておく
+		stf = 0;
+		thn1 = FALSE;
+		playf = 1;
+		plf = 1;
 		BeginPlaybackNotifyThread();
 	}
 	endflg = 0;
@@ -11604,12 +11697,55 @@ void CWread::wavread()
 		a aa1;
 		a aa2;
 		int st, cnt;
+		// 失敗時にプレイリスト由来の古い loop 値が残って「変な loop」に見えないようクリア
+		loop1 = 0;
+		loop2 = 0;
 		int fii = filen.Find(L":", 6);
 		CString fn = filen;
+		CString trackSuffix;
 		if (fii != -1) {
 			fn = filen.Left(fii);
+			trackSuffix = filen.Mid(fii);
+		}
+		fn = ResolveMode30PacPath(fn);
+		if (!PathFileExists(fn)) {
+			const CString phys = PlPhysicalMediaPath(filen);
+			if (!phys.IsEmpty() && phys.CompareNoCase(fn) != 0)
+				fn = ResolveMode30PacPath(phys);
 		}
 		adpcmf.Open(fn, CFile::modeRead | CFile::typeBinary | CFile::shareDenyWrite, NULL);
+		if (adpcmf.m_hFile == CFile::hFileNull) {
+			const CString phys = PlPhysicalMediaPath(filen);
+			if (!phys.IsEmpty() && phys.CompareNoCase(fn) != 0) {
+				fn = phys;
+				adpcmf.Open(fn, CFile::modeRead | CFile::typeBinary | CFile::shareDenyWrite, NULL);
+			}
+		}
+		if (adpcmf.m_hFile == CFile::hFileNull) {
+			thend = 1;
+			wavwait = 1;
+			return;
+		}
+		RememberMode30PacDir(fn);
+		// 解決できたフルパスを filen に戻し、次回以降も Open できるようにする
+		if (!trackSuffix.IsEmpty()) {
+			const CString prevPac = (fii >= 0) ? filen.Left(fii) : filen;
+			if (prevPac.CompareNoCase(fn) != 0) {
+				filen = fn + trackSuffix;
+				if (pl && pl->pc && plcnt >= 0 && plcnt < pl->playcnt && pl->pc[plcnt].sub == 30) {
+					const CString stored = PlStorePlaylistFol(filen, 30);
+					if (!stored.IsEmpty())
+						_tcsncpy_s(pl->pc[plcnt].fol, _countof(pl->pc[plcnt].fol), stored, _TRUNCATE);
+				}
+			}
+		}
+
+		// トラック照合は :: 以降だけ見る（フルパス中の数字で誤マッチして変な loop1/2 になるのを防ぐ）
+		CString trackKey = trackSuffix;
+		if (trackKey.IsEmpty() && fii >= 0)
+			trackKey = filen.Mid(fii);
+		if (trackKey.GetLength() >= 2 && trackKey[0] == _T(':') && trackKey[1] == _T(':'))
+			trackKey = trackKey.Mid(2);
 
 		char moj[300];
 		adpcmf.Seek(16, CFile::begin);
@@ -11617,7 +11753,9 @@ void CWread::wavread()
 		int ffff = 0;
 		for (int i = 0;; i++) {
 			ULONGLONG pos;
-			adpcmf.Read(&aa, 32);
+			const UINT nr = adpcmf.Read(&aa, 32);
+			if (nr < 32)
+				break;
 			pos = adpcmf.GetPosition();
 			adpcmf.Seek(aa.moji, 0);
 			adpcmf.Read(moj, 256);
@@ -11631,13 +11769,21 @@ void CWread::wavread()
 			s11 = s11.Mid(12, 4); s11.Replace(".", "");
 			CString s2 = CString(s1);
 			CString s21 = CString(s11);
-			if (filen.Find(s21) > 0) {
+			// 7/1 動作版: filen.Find(s21)>0。:: 以降(trackKey)と 3 桁(s2)も併用
+			if (filen.Find(s21) > 0 || filen.Find(s2) > 0 ||
+				(!trackKey.IsEmpty() && (trackKey.Find(s21) >= 0 || trackKey.Find(s2) >= 0))) {
 				ffff = 1;
 				break;
 			}
 			k++;
 			kk++;
 			adpcmf.Seek(pos, 0);
+		}
+		if (!ffff) {
+			thend = 1;
+			wavwait = 1;
+			adpcmf.Close();
+			return;
 		}
 
 		CString sss, sss1;
@@ -11689,8 +11835,8 @@ void CWread::wavread()
 		}
 		wavbit_sample_Hz = 48000;
 		free(bbuf);
-		wavwait = 1;
-		// wavread 先頭の dwDataLen=dl 初期値をそのまま使うと cnt の減算と実読み込み量が一致せず欠落するため、逐次オフセットで読む
+		// wavwait は全読み込み後に立てる。早いと play() が未完了バッファで進み
+		// 0:00/無音や途中打ち切りになることがある。
 		{
 			int remain = cnt;
 			int off = 0;
@@ -11701,11 +11847,12 @@ void CWread::wavread()
 					break;
 				off += (int)n;
 				remain -= (int)n;
-				if (thend1 == TRUE) { thend = 1; adpcmf.Close(); return; }
+				if (thend1 == TRUE) { thend = 1; wavwait = 1; adpcmf.Close(); return; }
 				og->m_time.SetSelection(loop1, loop2 + loop1);
 			}
 		}
 		adpcmf.Close();
+		wavwait = 1;
 	}
 	else if (mode == 16) {
 		CWaitCursor aaaa;
@@ -15439,7 +15586,7 @@ static inline bool PlaybackNotifyThreadMayBeActive()
 {
 	return plf != 0 || playf != 0 || ogg != NULL || adbuf2 != NULL || (og && og->mod != NULL)
 		|| wav != NULL || mode == 999 || mode == -10 || mode == -9 || mode == -8
-		|| mode == -7 || mode == -6 || mode == -3 || mode == -1
+		|| mode == -7 || mode == -6 || mode == -3 || mode == -1 || mode == 30
 		|| (mode > 0 && mode <= 21);
 }
 
@@ -15549,9 +15696,18 @@ void COggDlg::stop()
 		CCriticalLock _ccl(&cs);
 		stf = 1;
 		_ccl.Leave();
-		// Join 完了までデコーダ/DS を触らない（timeoutMs=0: 無限待ち、DoEvent なし）
-		if (!WaitForPlaybackNotifyThreadExit(0))
+		// 曲切替中は上限付き。無限 Join は DS Lock 固着で UI 永久停止の原因になる。
+		// Join 中は DoEvent しない（再入 UAF 防止）
+		const DWORD joinTimeout = g_interactiveTrackChange
+			? (g_playbackNotifyJoinTimeoutMs ? g_playbackNotifyJoinTimeoutMs : 2500u)
+			: 0u;
+		if (!WaitForPlaybackNotifyThreadExit(joinTimeout)) {
+			// タイムアウトでも停止フラグを残すと、続く play() の CWread/adbuf が
+			// IsPlaybackStopRequested で無音になる。デコーダは触らずフラグだけ戻す。
+			thn1 = FALSE;
+			stf = 0;
 			return;
+		}
 
 		Closeds();
 		//		FreeOutputBuffer();
@@ -15634,7 +15790,11 @@ BOOL COggDlg::stop1()
 	// 再入（Join 後の旧 DoEvent や play 中のメッセージ）ではデコーダを触らない
 	if (s_inStop1) {
 		SignalPlaybackNotifyThreadStop();
-		return FALSE;
+		// play() 側は戻り値を見ずに続行するため、再入でもフラグは下ろしておく
+		thn1 = FALSE;
+		stf = 0;
+		thend1 = FALSE;
+		return TRUE;
 	}
 	s_inStop1 = true;
 	struct ClearInStop1 { ~ClearInStop1() { s_inStop1 = false; } } _clearInStop1;
@@ -15655,22 +15815,20 @@ BOOL COggDlg::stop1()
 	KillTimer(1250);
 	KillTimer(9000);
 
-	// デコーダ解放後に停止フラグを落とす（play() がすぐ再開できる）
-	thn1 = FALSE;
-	stf = 0;
-
-	// Join/解放後は DoEvent しない。再入 play が別形式のデコーダを開き、
-	// この stop1 の続きが mode/kmp を壊して flac/m4a/dsd/wav の Render で UAF する。
+	// CWread 中断要求。完了後は必ず thend1 を下ろす（残すと次の CWread が即死する）
 	if (thend == FALSE) {
 		thend1 = TRUE;
 		for (int kk = 0; kk < 50; kk++) {
 			if (thend == 1) break;
+			SignalPlaybackNotifyThreadStop();
 			Sleep(1);
 		}
 	}
+	// CWread が thend1 を見て return してから AfxEndThread するまでの猶予。
 	Sleep(50);
 	playb = 0;
 	thend = 1;
+	thend1 = FALSE;
 
 	fade1 = 0;
 	endflg = 0;
@@ -15702,9 +15860,12 @@ BOOL COggDlg::stop1()
 		stf = 1;
 		_ccl.Leave();
 	}
-	// timeoutMs=0: 無限待ち。Join 中は DoEvent しない（再入 UAF 防止）
-	if (!WaitForPlaybackNotifyThreadExit(0))
-		return FALSE;
+	// play() 先頭の stop1 は Join 成否に関わらず続行する。
+	// FALSE で return すると CWread に入らず 0:00／古い loop のままになる。
+	(void)WaitForPlaybackNotifyThreadExit(0);
+	thn1 = FALSE;
+	stf = 0;
+	thend1 = FALSE;
 
 	Closeds();
 	//		FreeOutputBuffer();
@@ -15741,6 +15902,9 @@ BOOL COggDlg::stop1()
 	}
 
 	fadeadd = 0; fade = 1.0;
+	// 解放完了後に初めて停止フラグを下ろす（play() 先頭でも下ろすが、ここでも戻す）
+	thn1 = FALSE;
+	stf = 0;
 
 	if (pMainFrame1 != NULL)
 		pMainFrame1->stop();
@@ -20072,6 +20236,12 @@ void COggDlg::OnRestart()
 {
 	if (InterlockedCompareExchange(&s_onRestartBusy, 1, 0) != 0) {
 		InterlockedExchange(&s_restartWanted, 1);
+		return;
+	}
+	// play() 中の DoEvent 再入で stop() がフラグだけ立てると CWread/再生が壊れる。延期する。
+	if (s_inPlay || s_inStop1) {
+		InterlockedExchange(&s_onRestartBusy, 0);
+		RequestPlaybackRestart(GetSafeHwnd());
 		return;
 	}
 	struct RestartBusyGuard {

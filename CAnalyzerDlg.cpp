@@ -2057,20 +2057,51 @@ void CAnalyzerDlg::OnPaint()
 				}
 			}
 
+			// 「メインに追従」をクロマバッファへ焼いてから1回だけ BlitFull。
+			// 画面 DC への content → overlay の2段合成はアクリルでちらつく。
+			// ScrollCols でロック矩形に波形が流れ込むので、焼付け直前に下地を戻す。
+			{
+				CRect lockRc;
+				CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
+				if (!lockRc.IsRectEmpty() && m_chromaCache.hdcDib) {
+					CRect wavePart = lockRc;
+					if (wavePart.bottom > split)
+						wavePart.bottom = split;
+					if (wavePart.top < wavePart.bottom && m_waveReady && m_waveDC.GetSafeHdc()) {
+						m_chromaCache.UpdateRect(m_waveDC.GetSafeHdc(),
+							wavePart.left, wavePart.top, wavePart.left, wavePart.top,
+							wavePart.Width(), wavePart.Height(), key);
+					}
+					CRect specPart = lockRc;
+					if (specPart.top < split)
+						specPart.top = split;
+					if (specPart.top < specPart.bottom && m_specReady && m_specDC.GetSafeHdc()) {
+						m_chromaCache.UpdateRect(m_specDC.GetSafeHdc(),
+							specPart.left, specPart.top - split, specPart.left, specPart.top,
+							specPart.Width(), specPart.Height(), key);
+					}
+					CDC dcCache;
+					dcCache.Attach(m_chromaCache.hdcDib);
+					CCC_MainLockPaintClient(dcCache, m_hWnd);
+					dcCache.Detach();
+					m_chromaCache.MakeRectOpaque(lockRc.left, lockRc.top, lockRc.Width(), lockRc.Height());
+				}
+			}
+
 			m_chromaReady = true;
 			m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, 0, clientW, clientH);
 		}
 		else {
 			Present(dc, rc, FALSE);
+			CCC_MainLockPaintClient(dc, m_hWnd);
 		}
 	}
 	else
 #endif
 	{
 		Present(dc, rc, FALSE);
+		CCC_MainLockPaintClient(dc, m_hWnd);
 	}
-
-	CCC_MainLockPaintClient(dc, m_hWnd);
 }
 
 BOOL CAnalyzerDlg::OnEraseBkgnd(CDC* pDC)

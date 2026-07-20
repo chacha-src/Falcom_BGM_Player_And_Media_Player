@@ -19,6 +19,7 @@ struct playlistdata{
 
 #include "ListCtrlA.h"
 #include "CCustomControl.h"
+#include <vector>
 
 class CPlayList : public CCustomBlurDialogBase
 {
@@ -67,6 +68,9 @@ public:
 	void HandleTrackContextCmd(int cmd);
 	void TransferSelectedToPlaylist(int targetIdx, bool moveNotCopy);
 	void RemoveMissingFiles();
+	// パス更新。存在するなら TRUE。未存在でも fol は更新・保存する。
+	BOOL UpdateTrackPath(int index, LPCTSTR newPath);
+	void DeleteTracksByIndices(std::vector<int> indices);
 
 	CBrush m_brDlg;
 
@@ -155,6 +159,8 @@ public:
 
 CString NormalizePlaylistPath(LPCTSTR fol);
 CString PlPhysicalMediaPath(LPCTSTR fol);
+CString PlStorePlaylistFol(LPCTSTR fol, int sub);
+void RememberMode30PacPath(LPCTSTR pacOrFol);
 
 enum {
 	PL_CTX_INFO = 1,

@@ -155,7 +155,7 @@ namespace PianoRoll108
     }
 
     inline void BuildFramePicks(const float* blend, bool* outPicked, int count,
-        float levelScale = 1.0f, float absNoiseFloor = 0.02f,
+        float levelScale = 1.0f, float absNoiseFloor = 0.00055f,
         const float* onset = nullptr, const float* prevOnset = nullptr,
         float pickBassRel = 0.28f, float pickLowMidRel = 0.20f,
         float pickMelodyRel = 0.10f, float pickTreRel = 0.22f,

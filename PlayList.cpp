@@ -15,6 +15,7 @@
 #include "Douga.h"
 #include "mp3image.h"
 #include "CMediaPlayerDlg.h"
+#include "CMissingFilesDlg.h"
 
 static CWnd* GetPlaylistModalOwner(CPlayList* plDlg)
 {
@@ -1012,14 +1013,65 @@ void CPlayList::TransferSelectedToPlaylist(int targetIdx, bool moveNotCopy)
 	}
 }
 
+BOOL CPlayList::UpdateTrackPath(int index, LPCTSTR newPath)
+{
+	if (!pc || index < 0 || index >= playcnt)
+		return FALSE;
+	CString stored = PlStorePlaylistFol(newPath, pc[index].sub);
+	if (stored.IsEmpty() && newPath && *newPath)
+		stored = newPath;
+	_tcsncpy_s(pc[index].fol, _countof(pc[index].fol), stored, _TRUNCATE);
+	if (::IsWindow(m_lc.GetSafeHwnd())) {
+		m_lc.RedrawItems(index, index);
+		m_lc.UpdateWindow();
+	}
+	const BOOL exists = (pc[index].fol[0] != 0) &&
+		PathFileExists(PlPhysicalMediaPath(pc[index].fol));
+	Save();
+	extern CMediaPlayerDlg* mp;
+	if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->RefreshList(TRUE);
+	return exists;
+}
+
+void CPlayList::DeleteTracksByIndices(std::vector<int> indices)
+{
+	if (!pc || playcnt <= 0 || indices.empty())
+		return;
+	std::sort(indices.begin(), indices.end());
+	indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+	std::vector<int> desc = indices;
+	std::sort(desc.begin(), desc.end(), std::greater<int>());
+	for (int i : desc) {
+		if (i < 0 || i >= playcnt) continue;
+		for (int j = i + 1; j < playcnt; ++j)
+			memcpy(&pc[j - 1], &pc[j], sizeof(playlistdata0));
+		playcnt--;
+	}
+	playlistdata0* newPc = (playlistdata0*)realloc(pc, (size_t)sizeof(playlistdata0) * (playcnt + 2));
+	if (newPc) pc = newPc;
+	extern int plcnt;
+	plcnt = PlAdjustIndexAfterRemovals(plcnt, indices);
+	pnt = PlAdjustIndexAfterRemovals(pnt, indices);
+	pnt1 = PlAdjustIndexAfterRemovals(pnt1, indices);
+	m_lc.SetItemCount(playcnt);
+	for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
+	m_lc.RedrawWindow();
+	Save();
+	extern CMediaPlayerDlg* mp;
+	if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->RefreshList(TRUE);
+}
+
 void CPlayList::RemoveMissingFiles()
 {
 	if (!pc || playcnt <= 0) return;
 	std::vector<int> missing;
 	for (int i = 0; i < playcnt; ++i) {
 		if (!pc[i].fol[0]) { missing.push_back(i); continue; }
-		// Falcom game BGM: fol is basename only; play() resolves via savedata game path
-		if (PlIsFalcomGameBgmMode(pc[i].sub)) continue;
+		// Falcom game BGM (mode1-21等): fol は basename のみ。play() が savedata で解決する。
+		// mode 30 はフルパス保存なので存在チェックする。
+		if (PlIsFalcomGameBgmMode(pc[i].sub) && pc[i].sub != 30) continue;
 		if (!PathFileExists(PlPhysicalMediaPath(pc[i].fol)))
 			missing.push_back(i);
 	}
@@ -1035,53 +1087,21 @@ void CPlayList::RemoveMissingFiles()
 				L"ogg Prosty odtwarzacz", L"ogg Basit oynatıcı"), MB_ICONINFORMATION);
 		return;
 	}
-	CString msg;
-	msg.Format(LL14(
-		L"%d 件の存在しないファイルを一覧から削除しますか？",
-		L"Remove %d missing file(s) from the list?",
-		L"Supprimer %d fichier(s) manquant(s) ?",
-		L"Rimuovere %d file mancanti?",
-		L"¿Eliminar %d archivo(s) inexistente(s)?",
-		L"없는 파일 %d개를 목록에서 삭제할까요?",
-		L"从列表中删除 %d 个不存在的文件吗？",
-		L"إزالة %d ملف(ات) مفقود(ة)؟",
-		L"Удалить %d отсутствующих файлов?",
-		L"%d fehlende Datei(en) entfernen?",
-		L"Remover %d arquivo(s) ausente(s)?",
-		L"%d ontbrekende bestand(en) verwijderen?",
-		L"Usunąć %d brakujących plików?",
-		L"%d eksik dosya listeden silinsin mi?"), (int)missing.size());
-	if (MessageBox(msg,
-		LL14(L"確認", L"Confirm", L"Confirmer", L"Conferma", L"Confirmar", L"확인", L"确认", L"تأكيد",
-			L"Подтверждение", L"Bestätigen", L"Confirmar", L"Bevestigen", L"Potwierdzenie", L"Onay"),
-		MB_YESNO | MB_ICONQUESTION) != IDYES)
+
+	CMissingFilesDlg dlg(this, missing, this);
+	if (dlg.DoModal() != IDOK)
 		return;
-	std::sort(missing.begin(), missing.end(), std::greater<int>());
-	for (int i : missing) {
-		if (i < 0 || i >= playcnt) continue;
-		for (int j = i + 1; j < playcnt; ++j)
-			memcpy(&pc[j - 1], &pc[j], sizeof(playlistdata0));
-		playcnt--;
-	}
-	playlistdata0* newPc = (playlistdata0*)realloc(pc, (size_t)sizeof(playlistdata0) * (playcnt + 2));
-	if (newPc) pc = newPc;
-	extern int plcnt;
-	std::vector<int> missAsc = missing;
-	std::sort(missAsc.begin(), missAsc.end());
-	plcnt = PlAdjustIndexAfterRemovals(plcnt, missAsc);
-	pnt = PlAdjustIndexAfterRemovals(pnt, missAsc);
-	pnt1 = PlAdjustIndexAfterRemovals(pnt1, missAsc);
-	m_lc.SetItemCount(playcnt);
-	for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
-	m_lc.RedrawWindow();
-	Save();
+	if (!dlg.m_toDelete.empty())
+		DeleteTracksByIndices(dlg.m_toDelete);
 }
 
-static CString PlStorePlaylistFol(LPCTSTR fol, int sub)
+CString PlStorePlaylistFol(LPCTSTR fol, int sub)
 {
 	if (!fol || !*fol)
 		return CString();
-	if (PlIsFalcomGameBgmMode(sub)) {
+	// mode 30 (空の軌跡 The 1st) は savedata のゲームフォルダ chdir が無く、
+	// wavread が .pac をフルパスで Open する。basename 化すると Open 失敗→Seek で落ちる。
+	if (PlIsFalcomGameBgmMode(sub) && sub != 30) {
 		CString s = fol;
 		int slash = s.ReverseFind(_T('\\'));
 		if (slash >= 0)
@@ -1090,6 +1110,22 @@ static CString PlStorePlaylistFol(LPCTSTR fol, int sub)
 		if (slash >= 0)
 			s = s.Mid(slash + 1);
 		return s;
+	}
+	if (sub == 30) {
+		CString in(fol);
+		const int cor = in.Find(L':', 6);
+		const CString phys = (cor != -1) ? in.Left(cor) : in;
+		const CString suffix = (cor != -1) ? in.Mid(cor) : CString();
+		// 絶対パスだけ正規化。旧 basename 行を cwd 付き偽フルパスにしない。
+		const bool absPath = (phys.GetLength() >= 3 &&
+			((phys[1] == _T(':') && (phys[2] == _T('\\') || phys[2] == _T('/'))) ||
+				phys.Left(2) == _T("\\\\")));
+		if (absPath) {
+			const CString nf = NormalizePlaylistPath(phys);
+			if (!nf.IsEmpty())
+				return nf + suffix;
+		}
+		return in;
 	}
 	CString nf = NormalizePlaylistPath(fol);
 	return nf.IsEmpty() ? CString(fol) : nf;
@@ -3285,6 +3321,7 @@ void CPlayList::Fol(CString fname)
 								));
 							}
 							if (syo == 0) { syo = 1; syos = p.fol; modesub = p.sub;	fnn = p.name; syomode = 30; }
+							RememberMode30PacPath(fname);
 							Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, 0);
 						}
 

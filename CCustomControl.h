@@ -55,6 +55,8 @@ struct CCC_ChromaBlitCache {
     BOOL FillOpaqueRect(int x, int y, int rw, int rh, COLORREF color, COLORREF chromaKey);
     BOOL BlitRect(HDC hdcDest, int x, int y, int w, int h);
     BOOL BlitFull(HDC hdcDest, int x, int y, int w, int h);
+    // BlitFull 前にオーバーレイ等を焼き込んだ矩形のアルファを不透明にする
+    void MakeRectOpaque(int x, int y, int rw, int rh);
 };
 
 void CCC_ClipNoChildren(CDC& dc, CWnd* pWnd);
@@ -1199,7 +1201,7 @@ public:
     // モード切替・子再配置後など、ぼかしを強制再適用する
     void RefreshAeroMode();
 
-    // ウィンドウ右上に「メイン固定」チェック。bOverlayPaint=TRUE で GDI 全画面描画向け
+    // ウィンドウ右上に「メインに追従」チェック。bOverlayPaint=TRUE で GDI 全画面描画向け
     void EnableMainWindowLock(int* pSavedLockFlag, BOOL bOverlayPaint = FALSE);
 
 protected:
@@ -1281,7 +1283,7 @@ public:
     // モード切替・子再配置後など、ぼかしを強制再適用する
     void RefreshAeroMode();
 
-    // ウィンドウ右上に「メイン固定」チェック。bOverlayPaint=TRUE で GDI 全画面描画向け
+    // ウィンドウ右上に「メインに追従」チェック。bOverlayPaint=TRUE で GDI 全画面描画向け
     void EnableMainWindowLock(int* pSavedLockFlag, BOOL bOverlayPaint = FALSE);
 
 protected:
