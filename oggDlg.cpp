@@ -11697,55 +11697,19 @@ void CWread::wavread()
 		a aa1;
 		a aa2;
 		int st, cnt;
-		// 失敗時にプレイリスト由来の古い loop 値が残って「変な loop」に見えないようクリア
-		loop1 = 0;
-		loop2 = 0;
 		int fii = filen.Find(L":", 6);
 		CString fn = filen;
-		CString trackSuffix;
 		if (fii != -1) {
 			fn = filen.Left(fii);
-			trackSuffix = filen.Mid(fii);
 		}
+		// basename だけの旧プレイリスト向け。照合は 5e7628b の filen.Find(s21)>0 のまま
 		fn = ResolveMode30PacPath(fn);
-		if (!PathFileExists(fn)) {
-			const CString phys = PlPhysicalMediaPath(filen);
-			if (!phys.IsEmpty() && phys.CompareNoCase(fn) != 0)
-				fn = ResolveMode30PacPath(phys);
-		}
 		adpcmf.Open(fn, CFile::modeRead | CFile::typeBinary | CFile::shareDenyWrite, NULL);
-		if (adpcmf.m_hFile == CFile::hFileNull) {
-			const CString phys = PlPhysicalMediaPath(filen);
-			if (!phys.IsEmpty() && phys.CompareNoCase(fn) != 0) {
-				fn = phys;
-				adpcmf.Open(fn, CFile::modeRead | CFile::typeBinary | CFile::shareDenyWrite, NULL);
-			}
-		}
 		if (adpcmf.m_hFile == CFile::hFileNull) {
 			thend = 1;
 			wavwait = 1;
 			return;
 		}
-		RememberMode30PacDir(fn);
-		// 解決できたフルパスを filen に戻し、次回以降も Open できるようにする
-		if (!trackSuffix.IsEmpty()) {
-			const CString prevPac = (fii >= 0) ? filen.Left(fii) : filen;
-			if (prevPac.CompareNoCase(fn) != 0) {
-				filen = fn + trackSuffix;
-				if (pl && pl->pc && plcnt >= 0 && plcnt < pl->playcnt && pl->pc[plcnt].sub == 30) {
-					const CString stored = PlStorePlaylistFol(filen, 30);
-					if (!stored.IsEmpty())
-						_tcsncpy_s(pl->pc[plcnt].fol, _countof(pl->pc[plcnt].fol), stored, _TRUNCATE);
-				}
-			}
-		}
-
-		// トラック照合は :: 以降だけ見る（フルパス中の数字で誤マッチして変な loop1/2 になるのを防ぐ）
-		CString trackKey = trackSuffix;
-		if (trackKey.IsEmpty() && fii >= 0)
-			trackKey = filen.Mid(fii);
-		if (trackKey.GetLength() >= 2 && trackKey[0] == _T(':') && trackKey[1] == _T(':'))
-			trackKey = trackKey.Mid(2);
 
 		char moj[300];
 		adpcmf.Seek(16, CFile::begin);
@@ -11753,9 +11717,7 @@ void CWread::wavread()
 		int ffff = 0;
 		for (int i = 0;; i++) {
 			ULONGLONG pos;
-			const UINT nr = adpcmf.Read(&aa, 32);
-			if (nr < 32)
-				break;
+			adpcmf.Read(&aa, 32);
 			pos = adpcmf.GetPosition();
 			adpcmf.Seek(aa.moji, 0);
 			adpcmf.Read(moj, 256);
@@ -11764,26 +11726,19 @@ void CWread::wavread()
 			CStringA s = bbuf;
 
 			//10文字目から、ed6001.wav と入っているので、001だけ抜き出す
+			// Mid(12,4)+'.'除去で 100 / 108b / 501e。Find(s21) が独自照合
 			CStringA s1 = moj, s11 = moj;
 			s1 = s1.Mid(12, 3);
 			s11 = s11.Mid(12, 4); s11.Replace(".", "");
 			CString s2 = CString(s1);
 			CString s21 = CString(s11);
-			// 7/1 動作版: filen.Find(s21)>0。:: 以降(trackKey)と 3 桁(s2)も併用
-			if (filen.Find(s21) > 0 || filen.Find(s2) > 0 ||
-				(!trackKey.IsEmpty() && (trackKey.Find(s21) >= 0 || trackKey.Find(s2) >= 0))) {
+			if (filen.Find(s21) > 0) {
 				ffff = 1;
 				break;
 			}
 			k++;
 			kk++;
 			adpcmf.Seek(pos, 0);
-		}
-		if (!ffff) {
-			thend = 1;
-			wavwait = 1;
-			adpcmf.Close();
-			return;
 		}
 
 		CString sss, sss1;
@@ -11835,8 +11790,7 @@ void CWread::wavread()
 		}
 		wavbit_sample_Hz = 48000;
 		free(bbuf);
-		// wavwait は全読み込み後に立てる。早いと play() が未完了バッファで進み
-		// 0:00/無音や途中打ち切りになることがある。
+		// wavwait は全読み込み後。play() が先に進むと adbuf2 読み書き競合で落ちる
 		{
 			int remain = cnt;
 			int off = 0;
