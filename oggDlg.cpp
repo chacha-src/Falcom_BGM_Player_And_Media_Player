@@ -645,6 +645,9 @@ END_MESSAGE_MAP()
 class CKpiLoadingWnd;
 static CKpiLoadingWnd* g_pActiveLoadingWnd = NULL;
 static int g_nCurrentKpiIndex = 0;
+// KPI 読み込み中に二重起動インスタンスから WM_APP+1(再生要求)が届いた場合の遅延フラグ。
+// 読み込み中に play() をネスト実行させず、plug() 完了後に再ポストして処理する。
+static BOOL g_kpiLoadDeferredPlay = FALSE;
 
 static int CountKpiFiles(CString ff)
 {
@@ -798,12 +801,18 @@ public:
 			UpdateWindow();
 
 			// Pump messages to keep it responsive
+			// WM_TIMER は絶対にディスパッチしない（plugloop 側のポンプと同じ理由）。
+			// 親 COggDlg の WM_INITDIALOG 中にタイマー 9998(関連付け起動の dp(ndd) 再生)
+			// や 5211(プレイリスト Create)が発火すると、KPI 読み込み中に play() が
+			// ネスト実行され「読み込み中のまま固まる+裏で再生+メモリエラー」になる。
 			MSG msg;
 			while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 				if (msg.message == WM_QUIT) {
 					::PostQuitMessage((int)msg.wParam);
 					break;
 				}
+				if (msg.message == WM_TIMER)
+					continue;
 				::TranslateMessage(&msg);
 				::DispatchMessage(&msg);
 			}
@@ -816,13 +825,15 @@ public:
 			ShowWindow(SW_SHOW);
 			UpdateWindow();
 
-			// Pump messages once
+			// Pump messages once (WM_TIMER は SetPos と同じ理由で除外)
 			MSG msg;
 			while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 				if (msg.message == WM_QUIT) {
 					::PostQuitMessage((int)msg.wParam);
 					break;
 				}
+				if (msg.message == WM_TIMER)
+					continue;
 				::TranslateMessage(&msg);
 				::DispatchMessage(&msg);
 			}
@@ -3226,6 +3237,12 @@ BOOL COggDlg::OnInitDialog()
 	plug(karento2, NULL);
 	g_pActiveLoadingWnd = NULL;
 	loadingWnd.DestroyWindow();
+	// 読み込み中に届いた再生要求(WM_APP+1)を今から処理する。
+	// PostMessage なので OnInitDialog 完了後に通常のメッセージループで実行される。
+	if (g_kpiLoadDeferredPlay) {
+		g_kpiLoadDeferredPlay = FALSE;
+		PostMessage(WM_APP + 1, 0, 0);
+	}
 #endif
 	WAVEFORMATEX wfx1;
 	wfx1.wFormatTag = WAVE_FORMAT_PCM;
@@ -14965,6 +14982,12 @@ void playwav()
 }
 
 LRESULT COggDlg::dp1(WPARAM a, LPARAM b) {
+	// KPI 読み込み中(OnInitDialog 内)の再生開始は禁止。ネスト play() で
+	// 読み込みが固まり、初期化未完了のまま裏で再生が走る。完了後に再ポストする。
+	if (g_pActiveLoadingWnd != NULL) {
+		g_kpiLoadDeferredPlay = TRUE;
+		return 0;
+	}
 	dp(filen);
 	return 0;
 }
@@ -14977,6 +15000,13 @@ BOOL COggDlg::OnCopyData(CWnd* pWnd, COPYDATASTRUCT* pCopyDataStruct)
 	CString filen_;
 	TCHAR* aa = (TCHAR*)pCopyDataStruct->lpData;
 	filen_ = aa;
+	// KPI 読み込み中(OnInitDialog 内)は再生・画面操作系コマンドを実行しない。
+	// ファイルパスの受け取りだけ行い、再生は後続の WM_APP+1(dp1 で遅延)に任せる。
+	if (g_pActiveLoadingWnd != NULL) {
+		if (filen_.Left(1) != _T("*"))
+			filen = filen_;
+		return CCustomBlurDialogBase::OnCopyData(pWnd, pCopyDataStruct);
+	}
 	if (filen_ == "*1") OnRestart();
 	else if (filen_ == "*2") OnPause();
 	else if (filen_ == "*3") stop();
@@ -16675,6 +16705,22 @@ void COggDlg::timerp()
 			L"file:Ładowanie KPI…",
 			L"file:KPI yükleniyor…"));
 	}
+	else if (IsFalcomGameBgmMode(modesub)) {
+		CString fileName = filen;
+		const int slash = max(fileName.ReverseFind(_T('\\')), fileName.ReverseFind(_T('/')));
+		if (slash >= 0)
+			fileName = fileName.Mid(slash + 1);
+
+		CString gameName;
+		if (pl && plcnt >= 0 && plcnt < pl->playcnt &&
+			IsFalcomGameBgmMode(pl->pc[plcnt].sub))
+			gameName = pl->pc[plcnt].game;
+
+		if (!gameName.IsEmpty())
+			s.Format(_T("file:%s(%s)"), (LPCTSTR)fileName, (LPCTSTR)gameName);
+		else
+			s.Format(_T("file:%s"), (LPCTSTR)fileName);
+	}
 	else if (modesub == 5 || modesub == 7 || modesub == 8 || modesub == 9 || modesub == 10)	s.Format(_T("file:%s"), filen);
 	else if (mode == 21)
 		s.Format(_T("file:%s"), filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1));
@@ -18183,6 +18229,9 @@ LRESULT COggDlg::dp2(WPARAM, LPARAM)
 {
 	InterlockedExchange(&s_restartMsgQueued, 0);
 	InterlockedExchange(&s_restartWanted, 0);
+	// KPI 読み込み中は再生も始まっていないので再開要求は破棄してよい
+	if (g_pActiveLoadingWnd != NULL)
+		return 0;
 	OnRestart();
 	return 0;
 }

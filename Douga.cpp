@@ -384,7 +384,7 @@ BOOL CDouga::Create(HWND h)
     LoadIcon(AfxGetInstanceHandle(),
     MAKEINTRESOURCE(IDR_DOUGA)));
 
-    int ret=CreateEx(WS_EX_OVERLAPPEDWINDOW|WS_EX_ACCEPTFILES,sClassName, LL14(L"mp3/m4a簡易プレイヤ(動画画面)", L"mp3/m4a Simple Player (video)", L"mp3/m4a Lecteur simple (vidéo)", L"mp3/m4a Player semplice (video)", L"mp3/m4a Reproductor simple (video)", L"mp3/m4a 간단 플레이어(동영상)", L"mp3/m4a简易播放器(视频)", L"mp3/m4a مشغل بسيط (فيديو)", L"mp3/m4a Простой плеер (видео)", L"mp3/m4a Einfacher Player (Video)", L"mp3/m4a Player simples (vídeo)", L"mp3/m4a Eenvoudige speler (video)", L"mp3/m4a Prosty odtwarzacz (wideo)", L"mp3/m4a Basit oynatıcı (video)"),
+    int ret=CreateEx(WS_EX_OVERLAPPEDWINDOW|WS_EX_ACCEPTFILES,sClassName, LL14(L"メディアプレイヤーささら✡動画画面", L"Media Player Sasara ✡ Video Screen", L"Lecteur multimédia Sasara ✡ Écran vidéo", L"Lettore multimediale Sasara ✡ Schermata video", L"Reproductor multimedia Sasara ✡ Pantalla de vídeo", L"미디어 플레이어 사사라 ✡ 동영상 화면", L"媒体播放器萨萨拉 ✡ 视频画面", L"مشغل الوسائط ساسارا ✡ شاشة الفيديو", L"Медиаплеер Сасара ✡ Экран видео", L"Mediaplayer Sasara ✡ Videobildschirm", L"Reprodutor multimídia Sasara ✡ Tela de vídeo", L"Mediaspeler Sasara ✡ Videoscherm", L"Odtwarzacz multimedialny Sasara ✡ Ekran wideo", L"Medya Oynatıcı Sasara ✡ Video Ekranı"),
 	  ((WS_OVERLAPPEDWINDOW)& ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_SYSMENU),
 	0,0,640,360,NULL,NULL,NULL);
 	if(ret==0) MessageBox(LL14(L"作成", L"Create", L"Créer", L"Crea", L"Crear", L"생성", L"创建", L"إنشاء", L"Создать", L"Erstellen", L"Criar", L"Maken", L"Utwórz", L"Oluştur"));

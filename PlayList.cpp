@@ -1146,8 +1146,40 @@ CString CPlayList::UTF8toUNI(const TCHAR* a)
 //	return _T("");
 }
 
+// CDouga (DirectShow) で再生する動画形式。
+// KPI が同じ拡張子を表明していても、動画は KPI に渡さない。
+static bool IsDougaVideoFile(const CString& path)
+{
+	const int dot = path.ReverseFind(_T('.'));
+	if (dot < 0)
+		return false;
+
+	CString fileExt = path.Mid(dot);
+	fileExt.MakeLower();
+
+	static const LPCTSTR videoExts[] = {
+		_T(".avi"), _T(".mp4"), _T(".m4v"), _T(".mkv"),
+		_T(".wmv"), _T(".asf"), _T(".mov"), _T(".qt"),
+		_T(".mpg"), _T(".mpeg"), _T(".mpe"), _T(".m1v"),
+		_T(".m2v"), _T(".mpv"), _T(".vob"), _T(".ts"),
+		_T(".m2ts"), _T(".mts"), _T(".webm"), _T(".ogv"),
+		_T(".flv"), _T(".f4v"), _T(".3gp"), _T(".3g2"),
+		_T(".divx"), _T(".rm"), _T(".rmvb")
+	};
+
+	for (int i = 0; i < _countof(videoExts); ++i) {
+		if (fileExt == videoExts[i])
+			return true;
+	}
+	return false;
+}
+
 int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f,BOOL ff)
 {
+	// 旧プレイリストに KPI 再生として保存された動画も CDouga 再生へ移行する。
+	if (sub == -3 && IsDougaVideoFile(fol))
+		sub = -2;
+
 	int cnt1;
 	CString s,ss;
 	switch(sub){
@@ -4655,6 +4687,14 @@ void CPlayList::Fol(CString fname)
 
 void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 {
+	if (IsDougaVideoFile(fff)) {
+		if (kpi)
+			kpi[0] = 0;
+		if (p)
+			p->sub = -2;
+		return;
+	}
+
 	CString ss,ft;
 	int flg=0;
 	for(int i=0;i<kpicnt;i++){

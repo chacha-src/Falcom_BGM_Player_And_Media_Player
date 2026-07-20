@@ -215,6 +215,52 @@ static volatile LONG g_updatePromptOpen = 0;
 static volatile LONG g_updateMsgQueued = 0;
 static volatile __int64 g_updateDismissedVersion = 0;
 
+void RunStartupUpdateCheck()
+{
+	extern save savedata;
+
+	// オフライン時は待たずに通常起動を続ける
+	DWORD dwFlags = 0;
+	if (!InternetGetConnectedState(&dwFlags, 0))
+		return;
+
+	const time_t exeTime = GetExecutableModificationTimeUtc();
+	if (exeTime == 0)
+		return;
+
+	const time_t serverModified = HttpGetLastModified(UPDATE_URL);
+	if (serverModified == 0 ||
+		serverModified <= exeTime + 120 ||
+		(__int64)serverModified <= savedata.lastUpdateCheck)
+	{
+		return;
+	}
+
+	// 「いいえ」でも「はい」(失敗時)でも、この起動中は定期チェックから再通知しない。
+	// 保存データには書かないため、次回起動時には再度確認メッセージが出る。
+	UpdateCheckDismissVersion((__int64)serverModified);
+
+	const int ret = AfxMessageBox(LL14(
+		L"アップデートファイルがあります。\n今すぐ更新しますか？\n(いいえ = 次回起動時まで保留)",
+		L"An update file is available.\nWould you like to update now?\n(No = postpone until next launch)",
+		L"Un fichier de mise à jour est disponible.\nMettre à jour maintenant ?\n(Non = reporter au prochain démarrage)",
+		L"È disponibile un file di aggiornamento.\nAggiornare ora?\n(No = rimanda al prossimo avvio)",
+		L"Hay un archivo de actualización disponible.\n¿Actualizar ahora?\n(No = posponer hasta el próximo inicio)",
+		L"업데이트 파일이 있습니다.\n지금 업데이트하시겠습니까?\n(아니요 = 다음 실행 시까지 보류)",
+		L"有更新文件。\n是否立即更新？\n(否 = 推迟到下次启动)",
+		L"يتوفر ملف تحديث.\nهل تريد التحديث الآن؟\n(لا = التأجيل حتى التشغيل التالي)",
+		L"Доступен файл обновления.\nОбновить сейчас?\n(Нет = отложить до следующего запуска)",
+		L"Eine Aktualisierungsdatei ist verfügbar.\nJetzt aktualisieren?\n(Nein = bis zum nächsten Start aufschieben)",
+		L"Um arquivo de atualização está disponível.\nAtualizar agora?\n(Não = adiar até a próxima inicialização)",
+		L"Er is een updatebestand beschikbaar.\nNu bijwerken?\n(Nee = uitstellen tot volgende start)",
+		L"Dostępny jest plik aktualizacji.\nCzy zaktualizować teraz?\n(Nie = odłóż do następnego uruchomienia)",
+		L"Güncelleme dosyası mevcut.\nŞimdi güncellemek istiyor musunuz?\n(Hayır = sonraki başlatmaya ertele)"
+	), MB_YESNO);
+
+	if (ret == IDYES)
+		DoUpdateAndRestart();  // 成功時はプロセス終了、失敗時はそのまま通常起動を続ける
+}
+
 void UpdateCheckDismissVersion(__int64 serverModified)
 {
 	if (serverModified > 0)
@@ -412,6 +458,18 @@ bool DoUpdateAndRestart()
 		exeDirA = exeDirA.Left(slashPos);
 	}
 
+	// 引数付き起動（ファイル関連付け等）なら、更新後の再起動へ同じ引数を引き継ぐ。
+	// これで関連付けから開いたファイルが、アップデート後にそのまま演奏開始される。
+	// バッチでは % が特殊文字のため %% にエスケープしておく。
+	CStringA cmdArgsA;
+	{
+		CWinApp* pApp = AfxGetApp();
+		if (pApp && pApp->m_lpCmdLine && pApp->m_lpCmdLine[0])
+			cmdArgsA = CStringA(pApp->m_lpCmdLine);
+		cmdArgsA.Trim();
+		cmdArgsA.Replace("%", "%%");
+	}
+
 	// 命令書は二段構えでございます。
 	//   ランチャー部（常に通常権限）… プロセス終了待ち→書込可否を判定→
 	//                                 書込可なら worker を同じ権限で実行、
@@ -436,7 +494,7 @@ bool DoUpdateAndRestart()
 		"  powershell -NoProfile -Command \"Start-Process -FilePath '%%~f0' -ArgumentList 'worker' -Verb RunAs -Wait\" >nul 2>&1\r\n"
 		")\r\n"
 		"cd /d \"%s\"\r\n"
-		"start \"\" \"%s\"\r\n"
+		"start \"\" \"%s\" %s\r\n"
 		"del \"%%~f0\"\r\n"
 		"goto :eof\r\n"
 		":worker\r\n"
@@ -457,6 +515,7 @@ bool DoUpdateAndRestart()
 		(LPCSTR)exeDirA,                                              // 書込可否テスト先フォルダ
 		(LPCSTR)exeDirA,                                              // 再起動前の移動先
 		(LPCSTR)targetExePathA,                                       // 再起動する本体
+		(LPCSTR)cmdArgsA,                                             // 元の起動引数（関連付けファイル等）
 		(LPCSTR)targetHostExeA,                                       // worker内の停止（host）
 		(LPCSTR)extractDirA, (LPCSTR)targetHostExeA, (LPCSTR)targetHostExePathA, // host 上書き
 		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA          // 本体 上書き

@@ -6,6 +6,7 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CMediaPlayerDlg.h"
+#include "UpdateCheck.h"
 #include "direct.h"
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -649,6 +650,11 @@ BOOL COggApp::InitInstance()
 		ab.Write(&savedata, sizeof(save));
 		ab.Close();
 	}
+
+	// モード選択画面やメイン画面を開く前に更新を確認する。
+	// 更新があればそのまま適用・再起動し、なければ通常の起動を続ける。
+	RunStartupUpdateCheck();
+
 	// 起動時のモード選択(ファルコムbgm特化型画面 / メディアプレイヤー画面)
 	if (savedata.startupAsk) {
 		CModeSelectDlg msd;

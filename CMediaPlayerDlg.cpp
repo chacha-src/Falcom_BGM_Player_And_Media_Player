@@ -56,6 +56,66 @@ extern void ShowOggAboutDialog(CWnd* pParent);   // バージョン情報ダイ�
 static const int MP_SRCW = (88 * 2 + 175) * 4 + 5; // = 1409 (og の srcW と一致)
 static const int MP_SRCH = (81 + 16) * 4;          // = 388
 
+#pragma comment(lib, "version.lib")
+
+// 実行ファイルのバージョンリソースからキャプション末尾「 Ver 0.9a Rel.xxxx.xx.xx」を作る。
+// Ver は FILEVERSION(0,9,1,x)の第3要素を英字化(1='a')、Rel. は FileDescription から取得し、
+// 見つからなければ LegalCopyright の "Copyright (C) 日付" から組み立てる。
+static CString MpBuildVersionCaptionSuffix()
+{
+	TCHAR exePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, exePath, MAX_PATH);
+
+	DWORD handle = 0;
+	const DWORD size = GetFileVersionInfoSize(exePath, &handle);
+	if (size == 0) return L"";
+
+	BYTE* data = new BYTE[size];
+	if (!GetFileVersionInfo(exePath, 0, size, data)) {
+		delete[] data;
+		return L"";
+	}
+
+	CString ver;
+	VS_FIXEDFILEINFO* ffi = NULL;
+	UINT len = 0;
+	if (VerQueryValue(data, _T("\\"), (LPVOID*)&ffi, &len) && ffi && len >= sizeof(VS_FIXEDFILEINFO)) {
+		const int major = HIWORD(ffi->dwFileVersionMS);
+		const int minor = LOWORD(ffi->dwFileVersionMS);
+		const int rev = HIWORD(ffi->dwFileVersionLS);
+		if (rev >= 1 && rev <= 26)
+			ver.Format(L" Ver %d.%d%c", major, minor, (wchar_t)(L'a' + rev - 1));
+		else
+			ver.Format(L" Ver %d.%d", major, minor);
+	}
+
+	CString rel;
+	static const LPCTSTR strNames[] = { _T("FileDescription"), _T("LegalCopyright") };
+	for (int i = 0; i < _countof(strNames) && rel.IsEmpty(); ++i) {
+		CString query;
+		query.Format(_T("\\StringFileInfo\\041104b0\\%s"), strNames[i]);
+		LPVOID p = NULL;
+		UINT l = 0;
+		if (VerQueryValue(data, query, &p, &l) && p && l) {
+			CString s((LPCTSTR)p);
+			int pos = s.Find(L"Rel.");
+			if (pos >= 0) {
+				rel = L" " + s.Mid(pos);
+				rel.TrimRight();
+			}
+			else if ((pos = s.Find(L"(C)")) >= 0) {
+				CString d = s.Mid(pos + 3);
+				d.Trim();
+				if (!d.IsEmpty())
+					rel = L" Rel." + d;
+			}
+		}
+	}
+
+	delete[] data;
+	return ver + rel;
+}
+
 CMediaPlayerDlg* mp = NULL;
 int g_mpBannerHover = 0;   // バナー(GDI)上にマウスがあるか(og の timerp がジャケットアニメに使用)
 // 幅拡張時にジャケットを左余白へ分離表示しているか。1 の間は og の timerp が
@@ -496,7 +556,11 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	}
 	if (hD2 < 1.0f) hD2 = 1.0f;
 
-	SetWindowText(LL14(L"メディアプレイヤーささら", L"Media Player Sasara", L"Lecteur multimedia Sasara", L"Lettore multimediale Sasara", L"Reproductor multimedia Sasara", L"미디어 플레이어 사사라", L"媒体播放器 Sasara", L"مشغل الوسائط Sasara", L"Медиаплеер Sasara", L"Media-Player Sasara", L"Reprodutor de midia Sasara", L"Mediaspeler Sasara", L"Odtwarzacz multimediow Sasara", L"Medya Oynatıcı Sasara"));
+	{
+		CString cap = LL14(L"メディアプレイヤー「ささら」", L"Media Player \"Sasara\"", L"Lecteur multimedia « Sasara »", L"Lettore multimediale \"Sasara\"", L"Reproductor multimedia \"Sasara\"", L"미디어 플레이어 「사사라」", L"媒体播放器「Sasara」", L"مشغل الوسائط \"Sasara\"", L"Медиаплеер «Sasara»", L"Media-Player \"Sasara\"", L"Reprodutor de midia \"Sasara\"", L"Mediaspeler \"Sasara\"", L"Odtwarzacz multimediow \"Sasara\"", L"Medya Oynatıcı \"Sasara\"");
+		cap += MpBuildVersionCaptionSuffix();
+		SetWindowText(cap);
+	}
 
 	m_play.SetWindowText(LL14(L"再生", L"Play", L"Lire", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Играть", L"Wiedergabe", L"Reproduzir", L"Afspelen", L"Odtwarzaj", L"Oynat"));
 	m_pause.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat"));

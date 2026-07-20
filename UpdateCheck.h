@@ -3,7 +3,10 @@
 // 更新チェック用
 #define WM_APP_UPDATE_AVAILABLE  (WM_APP + 99)
 
-// 更新チェックスレッドを開始（OnInitDialog等から呼ぶ）
+// メイン画面を作る前に一度だけ同期確認し、更新があれば更新・再起動する
+void RunStartupUpdateCheck();
+
+// メイン画面表示後の定期更新チェックスレッドを開始
 void StartUpdateCheckThread(HWND hNotifyWnd);
 
 // 更新を実行（ダウンロード→展開→再起動）、成功時はプロセス終了
