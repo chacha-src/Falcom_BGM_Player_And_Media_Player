@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -733,7 +733,7 @@ CAPTION "存在しないファイル"
 FONT 9, "メイリオ", 400, 0, 0x80
 BEGIN
     GROUPBOX        "存在しないファイル",IDC_MF_GRP_LIST,7,6,426,148
-    CONTROL         "",IDC_MF_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | LVS_ALIGNLEFT | LVS_SHAREIMAGELISTS | WS_BORDER | WS_TABSTOP,14,20,412,126
+    CONTROL         "",IDC_MF_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SHAREIMAGELISTS | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,14,20,412,126
     GROUPBOX        "パスの修正",IDC_MF_GRP_PATH,7,158,426,56
     LTEXT           "パス:",IDC_MF_PATH_L,14,174,28,10
     EDITTEXT        IDC_MF_PATH,44,172,286,12,ES_AUTOHSCROLL
@@ -1063,7 +1063,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,522
+ FILEVERSION 0,9,1,523
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1081,10 +1081,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.07.20"
-            VALUE "FileVersion", "0.9.1.522"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.07.21"
+            VALUE "FileVersion", "0.9.1.523"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.07.20"
+            VALUE "LegalCopyright", "Copyright (C) 2026.07.21"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

@@ -16771,11 +16771,11 @@ void COggDlg::timerp()
 	}
 
 
-	// Speana は Post して timerp を早く返す（ピアノ/アナライザと同じ隔離）
-	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg)) {
-		if (InterlockedCompareExchange(&g_speanaPosted, 1, 0) == 0)
-			PostMessage(WM_SPEANA_TICK, 0, 0);
-	}
+	// スペアナは XOR バナー文字(name/arti/albu)より先に dc へ描く。
+	// 非同期(WM_SPEANA_TICK)化すると Speana() が文字の後に不透明の棒を上書きし、
+	// XOR 合成が棒に覆われて無効化される（バナー文字が見えなくなるデグレ）。
+	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg))
+		Speana();
 	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
 		m_PianoRollDlg->RequestSyncFromMainUi();
 	if (plf == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
@@ -17896,11 +17896,9 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 
 LRESULT COggDlg::OnSpeanaTick(WPARAM, LPARAM)
 {
+	// スペアナは timerp 内で XOR バナー文字より前に同期描画するようになった。
+	// ここで（OnPaint 後に）描くと棒が文字を上書きして XOR が無効化されるため描画しない。
 	InterlockedExchange(&g_speanaPosted, 0);
-	if (!IsWindow(GetSafeHwnd()))
-		return 0;
-	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg))
-		Speana();
 	return 0;
 }
 
