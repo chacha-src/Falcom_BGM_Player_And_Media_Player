@@ -2,6 +2,7 @@
 #include "NoteFundamentalPick.h"
 #include "ogg.h"
 #include "oggDlg.h"
+#include "SongParams.h"
 //#include <math.h>
 //#include <vorbis/codec.h>
 //#include <vorbis/vorbisfile.h>
@@ -49,6 +50,7 @@ extern LPDIRECTSOUND3DBUFFER m_lpDS3DBuffer;
 extern int	playf;
 extern void ReleaseOggVorbis(char**);
 extern char* ogg;
+extern CString filen;   // 現在再生中の曲フルパス(SongParams 用)
 extern DWORD hw;
 extern HANDLE hNotifyEvent[2];
 extern LPDIRECTSOUNDNOTIFY dsnf1;
@@ -509,6 +511,9 @@ UINT HandleNotifications(LPVOID)
 	for (;;) {
 		// Wait 中は cl2 を取らない（OnHScroll 等がシークできる）
 
+		// 曲ごとパラメータ: 曲頭で復元、再生中の変更をデバウンス保存
+		SongParams_Sync(false);
+
 		if (syukai == 2 || thn1) return stopPlaybackAndExit();
 		if (syukai == 1) { syukai2 = 1; Sleep(1); continue; }
 
@@ -692,6 +697,8 @@ UINT HandleNotifications(LPVOID)
 void HandleNotifications_export()
 {
 	if (wavExportPath.GetLength() == 0 || cc1 != 1) return;
+	// 曲ごとパラメータ: WAV 出力する曲のパラメータを復元(メインスレッド)
+	SongParams_Sync(true);
 	g_isWavExportRendering = true;
 	struct ExportModeGuard {
 		~ExportModeGuard() { g_isWavExportRendering = false; }

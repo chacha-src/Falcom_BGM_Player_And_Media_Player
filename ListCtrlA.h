@@ -19,6 +19,8 @@ public:
 	CListCtrlA(void);
 	~CListCtrlA(void);
 	playlistdata0 *pc;
+	// true のとき、プレイリストのツールチップに曲ごと保存パラメータの変更点を付記する
+	bool m_bSongParamTip = false;
 protected:
 	virtual BOOL OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult);
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);

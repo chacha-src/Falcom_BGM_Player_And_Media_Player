@@ -83,6 +83,7 @@ int g_kpiSourceBitsPerSample = 16;
 #include "mp3.h"
 #include "OSVersion.h"
 #include "UpdateCheck.h"
+#include "SongParams.h"
 #include "codec/neaacdec.h"
 #include "m4a.h"
 #include "flac.h"
@@ -1161,6 +1162,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_BUTTON57, &COggDlg::OnPlayList)
 	ON_BN_CLICKED(IDC_OGG_SWITCHMODE, &COggDlg::OnSwitchMode)
 	ON_MESSAGE(WM_MP_ENTER_FALCOM, &COggDlg::OnEnterFalcomMsg)
+	ON_MESSAGE(WM_APP_SONGPARAM_RESTORE, &COggDlg::OnSongParamRestore)
 	ON_WM_WINDOWPOSCHANGING()
 	ON_BN_CLICKED(IDC_BUTTON58, &COggDlg::OnBnmp3jake)
 	ON_WM_DESTROY()
@@ -22340,6 +22342,18 @@ LRESULT COggDlg::OnEnterMpModeMsg(WPARAM, LPARAM)
 {
 	// 親 DoModal/CreateDialogIndirectParam 完了後に MP を生成する
 	EnterMediaPlayerMode();
+	return 0;
+}
+
+// 再生スレッド(HandleNotifications)から曲開始時に投げられる。
+// lParam は new された SongParam*。適用後にここで delete する。
+LRESULT COggDlg::OnSongParamRestore(WPARAM, LPARAM lParam)
+{
+	SongParam* p = (SongParam*)lParam;
+	if (p) {
+		SongParams_ApplyEntryToMain(*p);
+		delete p;
+	}
 	return 0;
 }
 

@@ -7,6 +7,7 @@
 #include "oggDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "UpdateCheck.h"
+#include "SongParams.h"
 #include "direct.h"
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -509,6 +510,10 @@ BOOL COggApp::InitInstance()
 	else if (savedata.prTuneMainLock != 0) {
 		savedata.prTuneMainLock = 1;
 	}
+	// 曲ごとパラメータ保存フラグ(末尾追記): 旧 .dat には無いので既定 0(無効)
+	if (datFileSize < (int)(offsetof(save, saveSongParams) + sizeof(savedata.saveSongParams))) {
+		savedata.saveSongParams = 0;
+	}
 	// ジャンプリスト履歴: 途中フィールド挿入で .dat がずれた場合などは破棄する
 	{
 		auto clearMpHist = []() {
@@ -651,6 +656,9 @@ BOOL COggApp::InitInstance()
 		ab.Close();
 	}
 
+	// 曲ごとのオーディオ/DSP パラメータ(別ファイル)を読み込む
+	SongParams_LoadFile();
+
 	// モード選択画面やメイン画面を開く前に更新を確認する。
 	// 更新があればそのまま適用・再起動し、なければ通常の起動を続ける。
 	RunStartupUpdateCheck();
@@ -676,6 +684,8 @@ BOOL COggApp::InitInstance()
 	og=&dlg;
 	m_pMainWnd = &dlg;
 	int nResponse = dlg.DoModal();
+	// 曲ごとパラメータの未書き込み分を確定
+	SongParams_SaveFile();
 	_tchdir(karento2);
 #if _UNICODE
 		if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive,NULL)==TRUE){

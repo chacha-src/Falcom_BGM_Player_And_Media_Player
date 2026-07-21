@@ -671,6 +671,7 @@ BEGIN
     CONTROL         "mp3途中保存",IDC_MP_SAVEMP3,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,130,300,66,9
     CONTROL         "DShow途中保存",IDC_MP_SAVEDS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,198,300,72,9
     CONTROL         "WAV保存",IDC_MP_SAVEWAV,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,272,300,52,9
+    CONTROL         "曲別保存",IDC_MP_SAVEPARAM,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,326,300,60,9
     GROUPBOX        "情報",IDC_MP_GRP_INFO,2,58,476,68,WS_CLIPSIBLINGS
     GROUPBOX        "サウンド調整",IDC_MP_GRP_SND,2,164,476,26,WS_CLIPSIBLINGS
     GROUPBOX        "プレイリスト",IDC_MP_GRP_PL,2,190,476,124,WS_CLIPSIBLINGS
@@ -703,6 +704,7 @@ BEGIN
     PUSHBUTTON      "曲削除",IDC_MP_ITEMDEL,520,192,40,12
     CONTROL         "",IDC_MP_LIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | LVS_ALIGNLEFT | LVS_OWNERDATA | WS_BORDER | WS_TABSTOP,195,208,278,106
     PUSHBUTTON      "ファルコム特化型へ",IDC_MP_SWITCHMODE,7,318,90,12
+    PUSHBUTTON      "保存リセット",IDC_MP_RESETDATA,100,318,80,12
     PUSHBUTTON      "ジャケ",IDC_MP_JACK,360,318,50,12
     PUSHBUTTON      "終了",IDC_MP_EXIT,414,318,60,12
     PUSHBUTTON      "フェードアウト",IDC_MP_FADEOUT,221,146,46,18
@@ -1063,7 +1065,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,524
+ FILEVERSION 0,9,1,525
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1081,10 +1083,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.07.21"
-            VALUE "FileVersion", "0.9.1.524"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.07.22"
+            VALUE "FileVersion", "0.9.1.525"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.07.21"
+            VALUE "LegalCopyright", "Copyright (C) 2026.07.22"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

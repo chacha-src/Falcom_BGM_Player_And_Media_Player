@@ -55,6 +55,8 @@ public:
 	void ResetPlaybackState();
 	void DetachForDestroy();
 	void RequestSyncFromMainUi();
+	// 曲ごと保存パラメータからの周波数表示モード適用(外部から)
+	void ApplySpecStyleExternal(int style) { SetSpecStyle(style); }
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);

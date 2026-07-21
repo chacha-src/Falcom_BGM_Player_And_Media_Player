@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -547,6 +547,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Kpilist.cpp" />
+    <ClCompile Include="SongParams.cpp" />
     <ClCompile Include="kpi_decoder.cpp" />
     <ClCompile Include="kpi_device.cpp" />
     <ClCompile Include="kpi_player.cpp" />
@@ -663,6 +664,7 @@
     <ClInclude Include="KpiV5ConfigDlg.h" />
     <ClInclude Include="KpiV5ConfigStore.h" />
     <ClInclude Include="Kpilist.h" />
+    <ClInclude Include="SongParams.h" />
     <ClInclude Include="kpi_decoder.h" />
     <ClInclude Include="kpi_device.h" />
     <ClInclude Include="kpi_impl.h" />

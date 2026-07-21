@@ -11,6 +11,7 @@
 #include "CPianoRoll.h"
 #include "CAnalyzerDlg.h"
 #include "CMediaPlayerDlg.h"
+#include "SongParams.h"
 #include "CImageBase.h"
 #include "Mp3Image.h"
 #include "AudioUpscaler.h"
@@ -364,6 +365,8 @@ void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
 	MpDdxControl(pDX, IDC_MP_SAVEMP3, m_savemp3);
 	MpDdxControl(pDX, IDC_MP_SAVEDS, m_saveds);
 	MpDdxControl(pDX, IDC_MP_SAVEWAV, m_savewav);
+	MpDdxControl(pDX, IDC_MP_SAVEPARAM, m_saveparam);
+	MpDdxControl(pDX, IDC_MP_RESETDATA, m_resetdata);
 	MpDdxControl(pDX, IDC_MP_KAISUU_L, m_kaisuuL);
 	MpDdxControl(pDX, IDC_MP_KAISUU, m_kaisuu);
 	MpDdxControl(pDX, IDC_MP_GRP_INFO, m_grpInfo);
@@ -421,6 +424,8 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_SAVEMP3, &CMediaPlayerDlg::OnSaveMp3)
 	ON_BN_CLICKED(IDC_MP_SAVEDS, &CMediaPlayerDlg::OnSaveDs)
 	ON_BN_CLICKED(IDC_MP_SAVEWAV, &CMediaPlayerDlg::OnSaveWav)
+	ON_BN_CLICKED(IDC_MP_SAVEPARAM, &CMediaPlayerDlg::OnSaveParam)
+	ON_BN_CLICKED(IDC_MP_RESETDATA, &CMediaPlayerDlg::OnResetData)
 	ON_EN_KILLFOCUS(IDC_MP_KAISUU, &CMediaPlayerDlg::OnKaisuuKillFocus)
 	ON_BN_CLICKED(IDC_MP_FINDUP, &CMediaPlayerDlg::OnFindUp)
 	ON_BN_CLICKED(IDC_MP_FINDDOWN, &CMediaPlayerDlg::OnFindDown)
@@ -595,6 +600,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_savemp3.SetWindowText(LL14(L"mp3途中保存", L"mp3 resume", L"mp3 reprise", L"mp3 ripresa", L"mp3 reanudar", L"mp3 위치저장", L"mp3续播", L"حفظ mp3", L"mp3 позиция", L"mp3 Position", L"mp3 retomar", L"mp3 hervat", L"mp3 wznow", L"mp3 surdur"));
 	m_saveds.SetWindowText(LL14(L"DShow途中保存", L"DShow resume", L"DShow reprise", L"DShow ripresa", L"DShow reanudar", L"DShow 위치저장", L"DShow续播", L"حفظ DShow", L"DShow позиция", L"DShow Position", L"DShow retomar", L"DShow hervat", L"DShow wznow", L"DShow surdur"));
 	m_savewav.SetWindowText(LL14(L"WAVファイルへ保存", L"Save to WAV file", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV 파일로 저장", L"保存到WAV文件", L"حفظ كـ WAV", L"Сохранить в WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
+	m_saveparam.SetWindowText(LL14(L"曲ごとに設定保存", L"Save per-song", L"Reglages/morceau", L"Impost. per brano", L"Ajustes por pista", L"곡별 설정 저장", L"逐曲保存设置", L"حفظ لكل أغنية", L"Настройки на трек", L"Pro Titel speichern", L"Config. por faixa", L"Per nummer opslaan", L"Ustaw. na utwor", L"Parça başına kaydet"));
+	m_resetdata.SetWindowText(LL14(L"保存をリセット", L"Reset saved", L"Reinitialiser", L"Reimposta salvati", L"Restablecer", L"저장 초기화", L"重置已存", L"إعادة تعيين", L"Сброс сохран.", L"Zuruecksetzen", L"Redefinir", L"Reset opgeslagen", L"Resetuj zapis", L"Kayıtı sıfırla"));
 	m_kaisuuL.SetWindowText(LL14(L"ループ回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop", L"Cuenta de bucle", L"루프 횟수", L"循环次数", L"عدد الحلقات", L"Количество повторов", L"Schleifenzahler", L"Contagem de loop", L"Loopaantal", L"Liczba petli", L"Dongu sayisi"));
 	{
 		CString ks; ks.Format(_T("%d"), savedata.kaisuu > 0 ? savedata.kaisuu : 2);
@@ -680,6 +687,10 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_list.InsertColumn(3, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatc?"), LVCFMT_LEFT, (int)(160 * hD2));
 	m_list.InsertColumn(4, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Comm.", L"Album/Comm.", L"Album/Com.", L"앨범/댓글", L"专辑/注释", L"الألبوم/تعليق", L"Альбом/Комм.", L"Album/Komm.", L"Album/Coment.", L"Album/Opm.", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, (int)(160 * hD2));
 
+	// メディアプレイヤー側リストも pl->pc を参照してツールチップに保存パラメータを付記
+	if (pl) m_list.pc = pl->pc;
+	m_list.m_bSongParamTip = true;
+
 	// 保存済みの列幅を復元(0=未設定なら上で設定した既定値のまま)
 	// 最終列(4)は FitPlaylistLastColumn で右端フィットするため復元しない
 	savedata.mpcol[4] = 0;
@@ -737,6 +748,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_savemp3.SetFont(&m_fontChk, TRUE);
 	m_saveds.SetFont(&m_fontChk, TRUE);
 	m_savewav.SetFont(&m_fontChk, TRUE);
+	m_saveparam.SetFont(&m_fontChk, TRUE);
 	m_renzoku.SetFont(&m_fontChk, TRUE);
 	m_loop.SetFont(&m_fontChk, TRUE);
 	m_random.SetFont(&m_fontChk, TRUE);
@@ -853,6 +865,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_savemp3, LL14(L"mp3再生時に途中保存を有効にします。", L"Enable resume save for mp3.", L"Reprise pour mp3.", L"Ripresa per mp3.", L"Reanudar para mp3.", L"mp3 위치 저장.", L"mp3续播保存。", L"حفظ موضع mp3.", L"Сохранение позиции mp3.", L"mp3-Position speichern.", L"Retomar mp3.", L"mp3 hervatten.", L"Wznawianie mp3.", L"mp3 surdurme."));
 	addTip(m_saveds, LL14(L"DirectShow(動画等)で途中保存を有効にします。", L"Enable resume save for DirectShow.", L"Reprise pour DirectShow.", L"Ripresa per DirectShow.", L"Reanudar para DirectShow.", L"DirectShow 위치 저장.", L"DirectShow续播保存。", L"حفظ موضع DirectShow.", L"Сохранение позиции DirectShow.", L"DirectShow-Position.", L"Retomar DirectShow.", L"DirectShow hervatten.", L"Wznawianie DirectShow.", L"DirectShow surdurme."));
 	addTip(m_savewav, LL14(L"再生中の音声をWAVファイルへ保存します。", L"Save playback audio to a WAV file.", L"Enregistrer l'audio en WAV.", L"Salva l'audio in WAV.", L"Guardar audio en WAV.", L"재생 음을 WAV로 저장.", L"将播放音频保存为WAV。", L"حفظ الصوت كـ WAV.", L"Сохранить звук в WAV.", L"Audio als WAV speichern.", L"Salvar audio em WAV.", L"Audio opslaan als WAV.", L"Zapis audio jako WAV.", L"Sesi WAV olarak kaydet."));
+	addTip(m_saveparam, LL14(L"曲ごとに音量・EQ・テンポ等の全パラメータを記憶し、その曲を再生する度に自動で復元します。", L"Remember all parameters (volume, EQ, tempo, etc.) per song and auto-restore them each time the song plays.", L"Memoriser tous les parametres par morceau et les restaurer automatiquement.", L"Memorizza tutti i parametri per brano e li ripristina automaticamente.", L"Recuerda todos los parametros por pista y los restaura automaticamente.", L"곡별로 볼륨·EQ·템포 등 모든 파라미터를 기억하고 재생할 때마다 자동 복원합니다.", L"逐曲记忆音量、EQ、速度等所有参数，每次播放该曲时自动恢复。", L"تذكر كل المعلمات لكل أغنية واستعادتها تلقائيًا.", L"Запоминать все параметры для каждого трека и восстанавливать автоматически.", L"Alle Parameter pro Titel merken und automatisch wiederherstellen.", L"Memoriza todos os parametros por faixa e restaura automaticamente.", L"Onthoud alle parameters per nummer en herstel automatisch.", L"Zapamietaj wszystkie parametry na utwor i przywracaj automatycznie.", L"Her parca icin tum parametreleri hatirla ve otomatik geri yukle."));
+	addTip(m_resetdata, LL14(L"曲ごとに保存した設定を全削除し、音量50%・拡張100%・EQ等を初期状態へ戻します。", L"Delete all per-song saved settings and reset volume to 50%, ext to 100%, EQ etc. to defaults.", L"Supprimer tous les reglages par morceau et reinitialiser les parametres.", L"Elimina tutte le impostazioni per brano e ripristina i parametri.", L"Elimina todos los ajustes por pista y restablece los parametros.", L"곡별 저장 설정을 모두 삭제하고 볼륨 50%·확장 100%·EQ 등을 초기화합니다.", L"删除所有逐曲保存的设置，并将音量重置为50%、扩展100%、EQ等为默认。", L"حذف كل الإعدادات المحفوظة لكل أغنية وإعادة الضبط.", L"Удалить все сохранённые настройки треков и сбросить параметры.", L"Alle pro-Titel-Einstellungen loeschen und Parameter zuruecksetzen.", L"Excluir todas as configuracoes por faixa e redefinir os parametros.", L"Verwijder alle per-nummer-instellingen en reset de parameters.", L"Usun wszystkie ustawienia na utwor i zresetuj parametry.", L"Tum parca ayarlarini sil ve parametreleri sifirla."));
 	addTip(m_kaisuu, LL14(L"連続再生時、指定回数ループしたら次の曲へ進みます。", L"During continuous play, advance after this many loops.", L"En lecture continue, passer apres ce nombre de boucles.", L"In riproduzione continua, avanza dopo questo numero di loop.", L"En reproduccion continua, avanzar tras este numero de bucles.", L"연속 재생 시 지정 횟수만큼 반복 후 다음 곡.", L"连续播放时，循环指定次数后进入下一首。", L"في التشغيل المستمر، الانتقال بعد هذا العدد من الحلقات.", L"При непрерывном воспроизведении перейти после стольких повторов.", L"Bei Dauerwiedergabe nach so vielen Schleifen weiter.", L"Na reproducao continua, avancar apos este numero de loops.", L"Bij doorlopend afspelen na dit aantal loops verder.", L"Przy ciaglym odtwarzaniu przejdz po tylu petlach.", L"Surekli calmada bu dongu sayisindan sonra ilerle."));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
 	m_find.SetFont(&m_fontList, TRUE);
@@ -1411,22 +1425,26 @@ void CMediaPlayerDlg::DoLayout()
 	// アルバム/コメント列(最終列=4)をリスト右端へぴたりとフィットさせる
 	FitPlaylistLastColumn();
 
-	// 下部チェック(ツールチップ/最小化連動/mp3/DShow/WAV)は横いっぱいに均等配置
+	// 下部チェック(ツールチップ/最小化連動/mp3/DShow/WAV/曲別保存)は横いっぱいに均等配置
 	int availCk = W - (M + gPad) * 2;
 	int gapCk = (int)(5 * s);
-	int ckW = (availCk - gapCk * 4) / 5;
+	int ckW = (availCk - gapCk * 5) / 6;
 	if (ckW < (int)(52 * s)) ckW = (int)(52 * s);
 	int ckx = M + gPad;
 	MoveCtl(&m_tip, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
 	MoveCtl(&m_mini, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
 	MoveCtl(&m_savemp3, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
 	MoveCtl(&m_saveds, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
-	MoveCtl(&m_savewav, ckx, ckY, ckW, chkRowH);
+	MoveCtl(&m_savewav, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
+	MoveCtl(&m_saveparam, ckx, ckY, ckW, chkRowH);
 	int plBottom = ckY + chkRowH + gPad;
 	MoveCtl(&m_grpPl, M, plTop, W - M * 2, plBottom - plTop);
 
-	// 最下部: 切替(左) / 終了(右)  ※ジャケは操作行へ移動済み
-	MoveCtl(&m_switch, M, botY, (int)(140 * s), swH);
+	// 最下部: 切替(左) / 保存リセット(切替の右) / 終了(右)  ※ジャケは操作行へ移動済み
+	int swW = (int)(140 * s);
+	MoveCtl(&m_switch, M, botY, swW, swH);
+	int rsW = (int)(120 * s);
+	MoveCtl(&m_resetdata, M + swW + (int)(6 * s), botY, rsW, swH);
 	int exW = (int)(80 * s);
 	MoveCtl(&m_exit, W - M - exW, botY, exW, swH);
 
@@ -1889,6 +1907,9 @@ void CMediaPlayerDlg::SyncFromMain()
 
 		v1 = og->m_c2.GetCheck() ? 1 : 0;
 		if (m_savewav.GetCheck() != v1) m_savewav.SetCheck(v1);
+
+		v1 = savedata.saveSongParams ? 1 : 0;
+		if (m_saveparam.GetSafeHwnd() && m_saveparam.GetCheck() != v1) m_saveparam.SetCheck(v1);
 
 		if (GetFocus() != (CWnd*)&m_kaisuu) {
 			og->m_kaisuu.GetWindowText(s);
@@ -3292,6 +3313,52 @@ void CMediaPlayerDlg::OnSaveWav()
 {
 	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
 	og->m_c2.SetCheck(m_savewav.GetCheck() ? 1 : 0);
+}
+
+void CMediaPlayerDlg::OnSaveParam()
+{
+	savedata.saveSongParams = m_saveparam.GetCheck() ? 1 : 0;
+}
+
+void CMediaPlayerDlg::OnResetData()
+{
+	CString msg = LL14(
+		L"曲ごとに保存した設定をすべて削除し、音量・EQ など各種パラメータを初期状態に戻します。よろしいですか？",
+		L"Delete all per-song saved settings and reset volume, EQ and other parameters to defaults. Continue?",
+		L"Supprimer tous les reglages par morceau et reinitialiser les parametres ?",
+		L"Eliminare tutte le impostazioni per brano e ripristinare i parametri?",
+		L"?Eliminar todos los ajustes por pista y restablecer los parametros?",
+		L"곡별 저장 설정을 모두 삭제하고 볼륨·EQ 등 파라미터를 초기화합니다. 계속할까요?",
+		L"删除所有逐曲保存的设置，并将音量、EQ等参数重置为默认。是否继续？",
+		L"حذف كل الإعدادات المحفوظة لكل أغنية وإعادة الضبط؟",
+		L"Удалить все сохранённые настройки для треков и сбросить параметры?",
+		L"Alle pro-Titel-Einstellungen loeschen und Parameter zuruecksetzen?",
+		L"Excluir todas as configuracoes por faixa e redefinir os parametros?",
+		L"Alle per-nummer-instellingen verwijderen en parameters resetten?",
+		L"Usunac wszystkie ustawienia na utwor i zresetowac parametry?",
+		L"Tum parca ayarlarini silip parametreleri sifirlansin mi?");
+	if (AfxMessageBox(msg, MB_YESNO | MB_ICONQUESTION) != IDYES)
+		return;
+
+	// 保存ファイルとメモリ内テーブルを破棄
+	SongParams_ResetAll();
+
+	// ライブのパラメータを既定へ: DS音量50% / 拡張音量100% / その他デフォルト
+	SongParam d;
+	ZeroMemory(&d, sizeof(d));
+	d.dsvol = -249;       // 50%
+	d.kakuVol = 100;      // 100%
+	d.pitchPos = 200;     // 100%
+	d.tempoPos = 200;     // 100%
+	for (int i = 0; i < 20; i++) d.eq[i] = 100; // フラット/中立
+	d.eqsoundenv = 0;
+	d.eqsoundeq = 0;
+	d.eqsoundeffect = 50; // 環境のかかり具合 既定
+	d.eq_reverb = 0;
+	d.eq_chorus = 0;
+	d.eq_delay = 0;
+	d.analyzerspecstyle = 0;
+	SongParams_ApplyEntryToMain(d);
 }
 
 void CMediaPlayerDlg::OnKaisuuKillFocus()

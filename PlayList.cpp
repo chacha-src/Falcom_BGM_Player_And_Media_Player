@@ -8,6 +8,7 @@
 #include "oggDlg.h"
 #include "ListCtrlA.h"
 #include "PlayList.h"
+#include "SongParams.h"
 #include "ListSyosai.h"
 #include "WavExport.h"
 #include <vector>
@@ -430,6 +431,7 @@ BOOL CPlayList::OnInitDialog()
 	m_lc.InsertColumn ( 4, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Commentaire", L"Album/Commento", L"Album/Comentario", L"앨범/댓글", L"专辑/注释", L"الألبوم/التعليق", L"Альбом/Комментарий", L"Album/Kommentar", L"Album/Comentario", L"Album/Opmerking", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, 200, 0 );
 	m_lc.InsertColumn ( 5, LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"المجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"), LVCFMT_LEFT, 50, 0 );
 	m_lc.pc = pc;
+	m_lc.m_bSongParamTip = true; // 曲ごと保存パラメータをツールチップに付記
 //	pc=NULL;
 //	pc = (playlistdata0*)malloc(sizeof(playlistdata0)*50000);
 //	if(pc==NULL)
@@ -5944,7 +5946,11 @@ void CPlayList::OnBnClickedButton3()
 	pn.name = savedata.playlistname[savedata.playlistnum];
 	if (pn.name == L"") pn.name.Format(L"プレイリスト：%d", savedata.playlistnum + 1);
 	if (pn.DoModal() == IDOK) {
+		// 曲ごと保存パラメータのキー(リスト名)を旧名→新名へ移行
+		CString oldKey = SongParams_CurrentListName();
 		wcscpy(savedata.playlistname[savedata.playlistnum], pn.name);
+		CString newKey = SongParams_CurrentListName();
+		if (oldKey != newKey) SongParams_RenameList(oldKey, newKey);
 		loadplaylistname();
 	}
 
@@ -5987,6 +5993,8 @@ void CPlayList::OnBnClickedPlaydelete()
 		MB_YESNO) == IDNO) {
 		return;
 	}
+	// 削除するリストに紐づく曲ごと保存パラメータも破棄(名前でキー)
+	SongParams_DeleteList(SongParams_CurrentListName());
 	changeflg = TRUE;
 	Save();
 	CString s;

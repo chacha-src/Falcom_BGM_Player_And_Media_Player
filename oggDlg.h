@@ -378,6 +378,7 @@ public:
 	afx_msg LRESULT OnRefreshAeroAll(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPlaybackAutoStopped(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnEnterMpModeMsg(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnSongParamRestore(WPARAM wParam, LPARAM lParam); // 曲ごとパラメータ復元(再生スレッド→メイン)
 	HANDLE m_hTimerpVsyncThread;
 	HANDLE m_hTimerpVsyncStopEvent;
 };

@@ -129,6 +129,8 @@ public:
 
 	CCustomCheckBox m_renzoku, m_loop, m_random;
 	CCustomCheckBox m_tip, m_mini, m_savemp3, m_saveds, m_savewav;
+	CCustomCheckBox m_saveparam;   // 曲ごとオーディオ/DSP パラメータ保存
+	CCustomStandardButton m_resetdata; // 保存ファイル削除でリセット
 	CCustomStatic m_kaisuuL;
 	CCustomEdit m_kaisuu;
 	// グループ枠は WS_CLIPSIBLINGS + 最背面で、内側コントロールを塗り潰さない
@@ -272,6 +274,8 @@ protected:
 	afx_msg void OnSaveMp3();
 	afx_msg void OnSaveDs();
 	afx_msg void OnSaveWav();
+	afx_msg void OnSaveParam();
+	afx_msg void OnResetData();
 	afx_msg void OnKaisuuKillFocus();
 	afx_msg void OnFindUp();
 	afx_msg void OnFindDown();
