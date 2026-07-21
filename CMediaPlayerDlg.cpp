@@ -2441,6 +2441,88 @@ bool CMediaPlayerDlg::DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lin
 	return true;
 }
 
+// ジャケット無しのとき、素っ気ないアイコンの代わりに「Media Player ささら」の
+// タイトルと、ほんのり可愛いパステルの模様(縦グラデ + 水玉 + ハート)を描く。
+// dc は w×h のオフスクリーン。純黒(=アクリルのクロマキー)は使わない。
+static void Mp_DrawNoJacketPlaceholder(CDC& dc, int w, int h)
+{
+	if (w <= 0 || h <= 0) return;
+
+	// --- 背景: やわらかいピンク → ラベンダーの縦グラデ ---
+	for (int y = 0; y < h; y++) {
+		int t = (h > 1) ? (y * 100 / (h - 1)) : 0;
+		int r = 255 + (234 - 255) * t / 100;
+		int g = 226 + (223 - 226) * t / 100;
+		int b = 240 + (250 - 240) * t / 100;
+		dc.FillSolidRect(0, y, w, 1, RGB(r, g, b));
+	}
+
+	dc.SetBkMode(TRANSPARENT);
+	CGdiObject* opnNull = dc.SelectStockObject(NULL_PEN);
+
+	// --- 水玉模様(市松状にオフセット、ほんのり白でやさしく) ---
+	int step = max(12, h / 5);
+	int dot = max(2, step / 6);
+	{
+		CBrush brDot(RGB(255, 245, 250));
+		CBrush* ob = dc.SelectObject(&brDot);
+		for (int gy = 0, row = 0; gy <= h + step; gy += step, row++) {
+			int offx = (row & 1) ? step / 2 : 0;
+			for (int gx = -step; gx <= w + step; gx += step) {
+				int cx = gx + offx, cy = gy;
+				dc.Ellipse(cx - dot, cy - dot, cx + dot, cy + dot);
+			}
+		}
+		dc.SelectObject(ob);
+	}
+
+	// --- ちいさなハートを数個(アクセント) ---
+	auto heart = [&](int cx, int cy, int s, COLORREF c) {
+		if (s < 2) return;
+		CBrush br(c);
+		CBrush* ob = dc.SelectObject(&br);
+		dc.Ellipse(cx - s, cy - s / 2, cx, cy + s / 2);           // 左のふくらみ
+		dc.Ellipse(cx, cy - s / 2, cx + s, cy + s / 2);           // 右のふくらみ
+		POINT p[3] = { { cx - s, cy }, { cx + s, cy }, { cx, cy + s + s / 3 } };
+		dc.Polygon(p, 3);
+		dc.SelectObject(ob);
+	};
+	int hs = max(3, h / 12);
+	heart(w * 20 / 100, h * 24 / 100, hs, RGB(255, 190, 210));
+	heart(w * 82 / 100, h * 30 / 100, hs, RGB(255, 205, 220));
+	heart(w * 74 / 100, h * 80 / 100, hs, RGB(255, 200, 216));
+	heart(w * 24 / 100, h * 78 / 100, hs, RGB(255, 210, 224));
+
+	dc.SelectObject(opnNull);
+
+	// --- タイトル: "Media Player" / "ささら" を中央に(下地にやわらかい白影) ---
+	int hbig = max(11, h / 4);
+	int hsml = max(9, h / 9);
+	LOGFONT lf; ZeroMemory(&lf, sizeof(lf));
+	lstrcpyn(lf.lfFaceName, _T("Yu Gothic UI"), LF_FACESIZE);
+	lf.lfQuality = CLEARTYPE_QUALITY;
+	lf.lfWeight = FW_SEMIBOLD;
+
+	CFont fSml; lf.lfHeight = -hsml; fSml.CreateFontIndirect(&lf);
+	CFont fBig; lf.lfHeight = -hbig; lf.lfWeight = FW_BOLD; fBig.CreateFontIndirect(&lf);
+
+	int totalH = hsml + hbig + max(1, h / 40);
+	int y0 = (h - totalH) / 2; if (y0 < 0) y0 = 0;
+
+	auto shadowText = [&](CFont& f, int yy, int hh, LPCTSTR s, COLORREF fg) {
+		CFont* of = dc.SelectObject(&f);
+		CRect rt(0, yy, w, yy + hh);
+		CRect rs = rt; rs.OffsetRect(1, 1);
+		dc.SetTextColor(RGB(255, 255, 255));
+		dc.DrawText(s, -1, &rs, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		dc.SetTextColor(fg);
+		dc.DrawText(s, -1, &rt, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		dc.SelectObject(of);
+	};
+	shadowText(fSml, y0, hsml, _T("Media Player"), RGB(214, 108, 150));
+	shadowText(fBig, y0 + hsml + max(1, h / 40), hbig, _T("ささら"), RGB(200, 72, 128));
+}
+
 // 左ジャケット / 右曲情報 パネルを描画。バナーと同じ黒地に統一し、上部の帯全体が
 // ひとつのメディアバー(左:ジャケ / 中央:スペアナ / 右:曲情報)に見えるようにする。
 // 内容は曲変更/リサイズ時のみ再描画されるため(毎フレームではない)ちらつかない。
@@ -2483,9 +2565,8 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 				og->img.Draw(mem.GetSafeHdc(), dx, dy, dw, dh, 0, 0, og->jx, og->jy);
 				::SetStretchBltMode(mem.GetSafeHdc(), om);
 			}
-			else if (m_hIcon) {                     // ジャケ無し: アイコンを中央に(空白回避)
-				int isz = (w < h ? w : h) * 11 / 20;
-				::DrawIconEx(mem.GetSafeHdc(), (w - isz) / 2, (h - isz) / 2, m_hIcon, isz, isz, 0, NULL, DI_NORMAL);
+			else {                                  // ジャケ無し: 「Media Player ささら」+ 可愛い模様
+				Mp_DrawNoJacketPlaceholder(mem, w, h);
 			}
 			if (aero)
 				CCC_BlitStretchNF(pDC->m_hDC, m_jacketRect.left, m_jacketRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);

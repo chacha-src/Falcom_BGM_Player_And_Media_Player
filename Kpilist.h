@@ -40,6 +40,18 @@ public:
 	CKpiListCtrl m_lc;
 	afx_msg void OnLvnItemchangedList1(NMHDR *pNMHDR, LRESULT *pResult);
 	afx_msg void OnBnClickedOk();
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
+	afx_msg void OnDestroy();
 	CCustomStandardButton m_okdummy;
 	CCustomStatic m_desc;
+private:
+	// リサイズ時に子コントロールを再配置し、kpi/拡張子 列を自動フィットさせる
+	void LayoutControls();
+	void LayoutKpiColumns();
+	// savedata に記録したウィンドウのサイズ・位置を復元/保存する
+	void RestoreSavedPlacement();
+	void SaveSavedPlacement();
+	int m_minW = 0;   // 最小ウィンドウ幅(初期サイズ)
+	int m_minH = 0;   // 最小ウィンドウ高さ(初期サイズ)
 };

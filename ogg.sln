@@ -9,31 +9,23 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KpiHost64", "KpiHost64\KpiH
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		avx2_vs2026_debug|ARM = avx2_vs2026_debug|ARM
 		avx2_vs2026_debug|x64(KpiHost64のみ) = avx2_vs2026_debug|x64(KpiHost64のみ)
 		avx2_vs2026_debug|x86(oggのみ) = avx2_vs2026_debug|x86(oggのみ)
-		uni_avx2_vs2026|ARM = uni_avx2_vs2026|ARM
 		uni_avx2_vs2026|x64(KpiHost64のみ) = uni_avx2_vs2026|x64(KpiHost64のみ)
 		uni_avx2_vs2026|x86(oggのみ) = uni_avx2_vs2026|x86(oggのみ)
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{A09FBD07-606E-41CD-B055-88B68D6E8809}.avx2_vs2026_debug|ARM.ActiveCfg = uni_2026_de|ARM
-		{A09FBD07-606E-41CD-B055-88B68D6E8809}.avx2_vs2026_debug|ARM.Build.0 = uni_2026_de|ARM
 		{A09FBD07-606E-41CD-B055-88B68D6E8809}.avx2_vs2026_debug|x64(KpiHost64のみ).ActiveCfg = uni_2026_de|x64
 		{A09FBD07-606E-41CD-B055-88B68D6E8809}.avx2_vs2026_debug|x64(KpiHost64のみ).Build.0 = uni_2026_de|x64
 		{A09FBD07-606E-41CD-B055-88B68D6E8809}.avx2_vs2026_debug|x86(oggのみ).ActiveCfg = uni_2026_de|Win32
 		{A09FBD07-606E-41CD-B055-88B68D6E8809}.avx2_vs2026_debug|x86(oggのみ).Build.0 = uni_2026_de|Win32
-		{A09FBD07-606E-41CD-B055-88B68D6E8809}.uni_avx2_vs2026|ARM.ActiveCfg = uni_avx2_vs2026|ARM
-		{A09FBD07-606E-41CD-B055-88B68D6E8809}.uni_avx2_vs2026|ARM.Build.0 = uni_avx2_vs2026|ARM
 		{A09FBD07-606E-41CD-B055-88B68D6E8809}.uni_avx2_vs2026|x64(KpiHost64のみ).ActiveCfg = uni_avx2_vs2026|x64
 		{A09FBD07-606E-41CD-B055-88B68D6E8809}.uni_avx2_vs2026|x64(KpiHost64のみ).Build.0 = uni_avx2_vs2026|x64
 		{A09FBD07-606E-41CD-B055-88B68D6E8809}.uni_avx2_vs2026|x86(oggのみ).ActiveCfg = uni_avx2_vs2026|Win32
 		{A09FBD07-606E-41CD-B055-88B68D6E8809}.uni_avx2_vs2026|x86(oggのみ).Build.0 = uni_avx2_vs2026|Win32
-		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.avx2_vs2026_debug|ARM.ActiveCfg = uni_2026_de|x64
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.avx2_vs2026_debug|x64(KpiHost64のみ).ActiveCfg = uni_2026_de|x64
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.avx2_vs2026_debug|x64(KpiHost64のみ).Build.0 = uni_2026_de|x64
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.avx2_vs2026_debug|x86(oggのみ).ActiveCfg = uni_2026_de|x64
-		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|ARM.ActiveCfg = uni_avx2_vs2026|x64
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x64(KpiHost64のみ).ActiveCfg = uni_avx2_vs2026|x64
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x64(KpiHost64のみ).Build.0 = uni_avx2_vs2026|x64
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x86(oggのみ).ActiveCfg = uni_avx2_vs2026|x64

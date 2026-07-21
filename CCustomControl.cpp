@@ -1117,6 +1117,19 @@ static COLORREF CCC_Lighten(COLORREF c, int pct)
         GetBValue(c) + (255 - GetBValue(c)) * pct / 100);
 }
 
+// 彩度を落とす(無効表示用)。pct はグレー(輝度)へ寄せる割合(0..100)。
+// 色みをほのかに残したまま「無効」を伝えつつ、カスタム描画の質感は保つ。
+static COLORREF CCC_Desaturate(COLORREF c, int pct)
+{
+    if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+    int r = GetRValue(c), g = GetGValue(c), b = GetBValue(c);
+    int y = (r * 30 + g * 59 + b * 11) / 100;   // 知覚輝度
+    r += (y - r) * pct / 100;
+    g += (y - g) * pct / 100;
+    b += (y - b) * pct / 100;
+    return RGB(r, g, b);
+}
+
 // 不透明なシェイプの上にのせる白い濡れツヤのハイライト(べた塗りなのでクロマ透過でも安全)
 static void DrawShine(CDC* pDC, int cx, int cy, int rx, int ry, COLORREF c = RGB(255, 255, 255))
 {
@@ -4996,6 +5009,41 @@ LRESULT CCustomListCtrl::OnPrintClient(WPARAM wParam, LPARAM lParam)
     return DefWindowProc(WM_PRINTCLIENT, (WPARAM)wParam, (LPARAM)lParam);
 }
 
+// LVS_EX_CHECKBOXES 時、列0の状態イメージ領域へチェックボックスを自前描画する。
+// OnCustomDraw が CDRF_SKIPDEFAULT で全描画を奪うため、既定のチェックボックスが
+// 描かれずに消えてしまう問題への対処。GDI プリミティブで自己完結描画する。
+static void CCC_DrawListCheckBox(CDC* pDC, const CRect& rc, bool checked)
+{
+    if (!pDC || rc.Width() < 6 || rc.Height() < 6) return;
+
+    // 枠つきの白いボックス
+    CBrush brFill(RGB(255, 255, 255));
+    CPen penBorder(PS_SOLID, 1, RGB(96, 96, 100));
+    CBrush* ob = pDC->SelectObject(&brFill);
+    CPen* op = pDC->SelectObject(&penBorder);
+    pDC->Rectangle(rc);
+
+    if (checked)
+    {
+        // チェックマーク(レ点)
+        const int w = rc.Width();
+        const int h = rc.Height();
+        const int penW = (std::max)(2, w / 7);
+        CPen penChk(PS_SOLID, penW, RGB(0, 128, 32));
+        CPen* op2 = pDC->SelectObject(&penChk);
+        POINT pt[3] = {
+            { rc.left + w * 22 / 100, rc.top + h * 52 / 100 },
+            { rc.left + w * 42 / 100, rc.top + h * 72 / 100 },
+            { rc.left + w * 80 / 100, rc.top + h * 26 / 100 },
+        };
+        pDC->Polyline(pt, 3);
+        pDC->SelectObject(op2);
+    }
+
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
 void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 {
     NMLVCUSTOMDRAW* p = reinterpret_cast<NMLVCUSTOMDRAW*>(pNMHDR);
@@ -5059,10 +5107,31 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
         if (ns == 0)
         {
+            // LVS_EX_CHECKBOXES 指定リスト(kpi一覧)のみ、状態イメージ領域へ
+            // チェックボックスを描画する。クリックのトグル判定はコントロール側が
+            // 状態イメージ矩形で行うため、同じ左端位置へ描けば操作性も復活する。
+            if (GetExtendedStyle() & LVS_EX_CHECKBOXES)
+            {
+                int cbSize = 16;
+                if (CImageList* pStIL = GetImageList(LVSIL_STATE))
+                {
+                    int iw = 0, ih = 0;
+                    if (ImageList_GetIconSize(pStIL->GetSafeHandle(), &iw, &ih) && iw > 0)
+                        cbSize = iw;
+                }
+                const int rowH = (int)r.Height();
+                if (cbSize > rowH - 2) cbSize = (std::max)(8, rowH - 2);
+                CRect rcCb;
+                rcCb.left = r.left + 2;
+                rcCb.top = r.top + (rowH - cbSize) / 2;
+                rcCb.right = rcCb.left + cbSize;
+                rcCb.bottom = rcCb.top + cbSize;
+                CCC_DrawListCheckBox(pDC, rcCb, GetCheck(ni) != FALSE);
+            }
             // 再生アイコン: ImageList と pc[].icon の対応は
             //   0=♪A(IDI_ICON1) / 1=空(IDI_ICON2・透明) / 2=♪B(IDI_ICON3)
             // SIconTimer は 0↔2 で点滅。1 は非再生行。0 をスキップすると片方の♪が消える。
-            // ♡ は選択装飾なので ♪ の上(手前)に描く。
+            // ♡ は選択装飾だが ♪ を隠さないよう、♪ の下(奥)に先に描く。
             CRect ri;
             const BOOL hasIconRect = GetItemRect(ni, &ri, LVIR_ICON);
             LVITEM lvi = { 0 };
@@ -5070,6 +5139,8 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             lvi.iItem = ni;
             GetItem(&lvi);
             CImageList* pIL = GetImageList(LVSIL_SMALL);
+            if (bS)
+                DrawHeart(pDC, CRect(r.left + 2, r.top + 4, r.left + 16, r.top + 18), COLOR_HEART);
             if (hasIconRect && pIL && lvi.iImage >= 0 && lvi.iImage != 1)
             {
                 // ILC_MASK 付き ImageList は ILD_TRANSPARENT の方が塗り残しが少ない
@@ -5084,8 +5155,6 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 const int iy = ri.top + (ri.Height() - ih) / 2;
                 pIL->Draw(pDC, lvi.iImage, CPoint(ix, iy), ILD_TRANSPARENT);
             }
-            if (bS)
-                DrawHeart(pDC, CRect(r.left + 2, r.top + 4, r.left + 16, r.top + 18), COLOR_HEART);
             if (bH && !bS) DrawStar(pDC, r.left + 10, r.top + 10, 2, RGB(255, 215, 0));
         }
 
@@ -5277,16 +5346,18 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     if (bPushLike && (GetCheck() == BST_CHECKED)) bP = TRUE;
     const BOOL bShowFlow = m_bMouseOver;
 
-    COLORREF bg = bD ? RGB(200, 200, 200)
-        : (bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
-    if (m_bGradEnable && !bD)
-        DrawGradientBackground(&mDC, r, m_clrGradStart, m_clrGradEnd, m_nGradDirection);
-    else if (!bD)
-        DrawSatinFill(&mDC, r, bg);          // サテン/シルク質感
+    // 無効時もカスタムの質感(グラデ/サテン/ツヤ/装飾)は描く。ただし彩度を落とし、
+    // 最後にやわらかいグレーヴェールを重ねて「無効」であることを明確に伝える。
+    COLORREF bg = bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG);
+    if (bD) bg = CCC_Desaturate(bg, 68);
+    if (m_bGradEnable)
+        DrawGradientBackground(&mDC, r,
+            bD ? CCC_Desaturate(m_clrGradStart, 68) : m_clrGradStart,
+            bD ? CCC_Desaturate(m_clrGradEnd, 68) : m_clrGradEnd,
+            m_nGradDirection);
     else
-        mDC.FillSolidRect(&r, bg);
+        DrawSatinFill(&mDC, r, bg);          // サテン/シルク質感
 
-    if (!bD)
     {
         // ぷるんとした濡れツヤ + ジェリー感(リムライト&インナーシャドウ)
         CRect rg = r;
@@ -5345,6 +5416,10 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 10, r.bottom - 15, r.Width() / 2 + 10, r.bottom - 2), COLOR_BOW);
         }
     }
+
+    // 無効: 装飾の質感は残しつつ、やわらかいグレーのヴェールで沈めて「押せない」ことを明示。
+    if (bD)
+        FillRectAlpha(&mDC, r, RGB(232, 232, 232), 122);
 
     CPen pL(PS_SOLID, 2, RGB(255, 255, 255));
     CPen pD(PS_SOLID, 2, RGB(128, 128, 128));
@@ -5741,9 +5816,12 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
         if (m_bIsFlatStyle)
         {
             BOOL s = bC || bP;
-            COLORREF bg = bD ? RGB(200, 200, 200) : (s ? COLOR_BUTTON_PUSHED : (m_bIsHot ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
+            // 無効時も装飾は描く(彩度を落とす)。最後にグレーヴェールで沈める。
+            COLORREF bg = s ? COLOR_BUTTON_PUSHED : (m_bIsHot ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG);
+            if (bD) bg = CCC_Desaturate(bg, 68);
             dc.FillSolidRect(0, 0, rw, rh, bg);
-            if (!bD) DrawDecorations(&dc, CRect(0, 0, rw, rh), 0, s);
+            DrawDecorations(&dc, CRect(0, 0, rw, rh), 0, s);
+            if (bD) FillRectAlpha(&dc, CRect(0, 0, rw, rh), RGB(232, 232, 232), 122);
             dc.Draw3dRect(CRect(0, 0, rw, rh), s ? RGB(100, 100, 100) : RGB(255, 255, 255), s ? RGB(255, 255, 255) : RGB(100, 100, 100));
             CString t; GetWindowText(t);
             DrawSmartText(&dc, CRect(0, 0, rw, rh), t, bD, s);
@@ -5757,9 +5835,12 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             if (s < 14) s = 14;
             int cy2 = rh / 2;
             CRect rcB(0, cy2 - s / 2, s, cy2 + s / 2);
-            // チェック枠はやわらかいローズで
-            CPen p2(PS_SOLID, 2, bC ? RGB(255, 120, 165) : RGB(255, 156, 184));
-            CBrush b2(RGB(255, 249, 252));
+            // チェック枠はやわらかいローズで(無効時は彩度を落として「無効」を伝える)
+            COLORREF clrFrame = bC ? RGB(255, 120, 165) : RGB(255, 156, 184);
+            COLORREF clrBox = RGB(255, 249, 252);
+            if (bD) { clrFrame = CCC_Desaturate(clrFrame, 62); clrBox = CCC_Desaturate(clrBox, 62); }
+            CPen p2(PS_SOLID, 2, clrFrame);
+            CBrush b2(clrBox);
             dc.SelectObject(&p2); dc.SelectObject(&b2);
             dc.RoundRect(&rcB, CPoint(6, 6));
             DrawGlossHighlight(&dc, rcB, 4);
@@ -5797,7 +5878,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
                 if (rk.right > rw)   rk.right = rw;
                 if (rk.bottom > rh)  rk.bottom = rh;
 
-                DrawCheckMark(&dc, rk, COLOR_CHECK, max(3, s / 4));
+                DrawCheckMark(&dc, rk, bD ? CCC_Desaturate(COLOR_CHECK, 62) : COLOR_CHECK, max(3, s / 4));
                 DrawSparkle(&dc, rk.left + 2, rk.top + 1, 2, COLOR_SPARKLE);
                 if (rk.top >= 6)
                 {

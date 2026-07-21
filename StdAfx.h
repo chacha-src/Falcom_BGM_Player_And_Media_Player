@@ -338,6 +338,20 @@ struct save{
 	int folderMainLock;
 	int mpPromptMainLock;
 	int prTuneMainLock;
+
+	// --- KPIプラグイン チェック状態(末尾追記。旧 kpilist.dat から移行) ---
+	// kpi一覧でチェックを外したプラグインは再生に使用しない。
+	// 並び順が変わっても復元できるよう、プラグインのファイル名(ベース名)で突き合わせる。
+	int   kpiChkCnt;            // 保存済みエントリ数(0=未保存→旧 kpilist.dat から移行)
+	TCHAR kpiChkName[200][64];  // プラグインのファイル名(ベース名)
+	int   kpiChkState[200];     // 1=使用する 0=使用しない
+
+	// --- KPI一覧ウィンドウのサイズ・位置(末尾追記) ---
+	// kpiWndW==0 のときは未保存とみなし、既定位置で表示する。
+	int   kpiWndX;              // 左上 X(スクリーン座標)
+	int   kpiWndY;              // 左上 Y(スクリーン座標)
+	int   kpiWndW;              // 幅(0=未保存)
+	int   kpiWndH;              // 高さ
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */
