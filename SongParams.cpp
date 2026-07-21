@@ -13,9 +13,12 @@
 extern save savedata;
 extern COggDlg* og;
 extern CPlayList* pl;
-extern CString filen;   // 現在再生中の曲フルパス
+extern CString filen;   // 現在再生中の曲パス(ゲームモードでは play() 中に書き換えられることあり)
 extern int tempo;       // テンポ スライダー位置 0..400
 extern int pitch;       // ピッチ スライダー位置 0..400
+extern int modesub;     // 再生形式(= pc[].sub)
+extern int ret2;        // 曲内番号(= pc[].ret2)
+extern int plcnt;       // 再生中プレイリスト行
 
 extern TCHAR karento2[1024]; // 実行ファイルのディレクトリ(末尾 \)
 
@@ -25,7 +28,9 @@ extern TCHAR karento2[1024]; // 実行ファイルのディレクトリ(末尾 \
 #else
 #define SONGPARAM_DAT_NAME "oggYSEDbgm_AudioData.dat"
 #endif
-static const int SONGPARAM_FILE_VERSION = 1;
+static const int SONGPARAM_FILE_VERSION = 2;
+// ver1 レコード末尾(mode/ret2 無し)のサイズ
+static const size_t SONGPARAM_V1_SIZE = offsetof(SongParam, mode);
 
 // ---- メモリ内テーブル(g_cs で保護) ----
 static CCriticalSection g_cs;
@@ -36,8 +41,10 @@ static bool  g_dirty = false;
 static DWORD g_lastWriteTick = 0;
 
 // ---- 現在再生中の曲を追跡する状態 ----
-static CString  s_curPath;       // 正規化済み(曲識別=パスのみで判定)
+static CString  s_curPath;       // 曲開始時に確定したパスキー
 static CString  s_curList;       // 曲開始時に確定したリスト名
+static int      s_curMode = 0;   // 曲開始時の mode(sub)
+static int      s_curRet2 = 0;   // 曲開始時の ret2
 static bool     s_baselineValid = false;
 static SongParam s_lastSaved;    // 直近に保存/復元したパラメータ(変更検知の基準)
 
@@ -46,7 +53,7 @@ static SongParam s_lastSaved;    // 直近に保存/復元したパラメータ(
 // ============================================================================
 static int ClampI(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-// パラメータ部(listName/path を除く)だけを比較
+// パラメータ部(キー以外)だけを比較
 static bool ParamsEqual(const SongParam& a, const SongParam& b)
 {
 	if (a.dsvol != b.dsvol || a.kakuVol != b.kakuVol) return false;
@@ -76,16 +83,60 @@ static void SnapshotCurrent(SongParam& p)
 	p.analyzerspecstyle = savedata.analyzerspecstyle;
 }
 
-// g_cs を保持した状態で呼ぶこと。見つからなければ -1。
-static int FindIndexLocked(LPCTSTR listName, LPCTSTR path)
+// プレイリストの fol / filen をキー用に整える。
+// GetFullPathName は仮想パスで表記が揺れるため使わない。
+static CString SongParams_KeyPath(LPCTSTR fol)
 {
-	if (!listName || !path) return -1;
-	for (size_t i = 0; i < g_tbl.size(); i++) {
-		if (_tcsicmp(g_tbl[i].listName, listName) == 0 &&
-			_tcsicmp(g_tbl[i].path, path) == 0)
-			return (int)i;
+	if (!fol || !*fol) return CString();
+	CString s(fol);
+	s.Replace(_T('/'), _T('\\'));
+	return s;
+}
+
+static bool PathKeysMatch(LPCTSTR a, LPCTSTR b)
+{
+	if (!a || !b) return false;
+	if (_tcsicmp(a, b) == 0) return true;
+	CString na = NormalizePlaylistPath(a);
+	CString nb = NormalizePlaylistPath(b);
+	return !na.IsEmpty() && na.CompareNoCase(nb) == 0;
+}
+
+// g_cs 保持中。listName+path+mode+ret2 で検索。
+// 旧 ver1(mode/ret2==0) はパス一致で救済し、呼出側 Upsert がキーを昇格する。
+static int FindIndexFlexibleLocked(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val)
+{
+	CString key = SongParams_KeyPath(path);
+	if (key.IsEmpty()) return -1;
+
+	auto tryOne = [&](LPCTSTR ln, LPCTSTR pth, int md, int r2, bool allowLegacy, bool anyModeRet2) -> int {
+		for (size_t i = 0; i < g_tbl.size(); i++) {
+			if (ln && *ln && _tcsicmp(g_tbl[i].listName, ln) != 0) continue;
+			if (!PathKeysMatch(g_tbl[i].path, pth)) continue;
+			if (anyModeRet2) return (int)i;
+			if (g_tbl[i].mode == md && g_tbl[i].ret2 == r2) return (int)i;
+			// 旧データ: mode/ret2 未設定(0,0) → パス一致で仮マッチ
+			if (allowLegacy && g_tbl[i].mode == 0 && g_tbl[i].ret2 == 0) return (int)i;
+		}
+		return -1;
+	};
+
+	int idx = tryOne(listName, key, mode, ret2Val, true, false);
+	if (idx >= 0) return idx;
+	CString np = NormalizePlaylistPath(path);
+	if (!np.IsEmpty() && np.CompareNoCase(key) != 0) {
+		idx = tryOne(listName, np, mode, ret2Val, true, false);
+		if (idx >= 0) return idx;
 	}
-	return -1;
+	// リスト名ゆれ: パス+mode+ret2 だけで再検索
+	idx = tryOne(NULL, key, mode, ret2Val, false, false);
+	if (idx >= 0) return idx;
+	idx = tryOne(NULL, key, mode, ret2Val, true, false);
+	if (idx >= 0) return idx;
+	// 最後の手段(ツールチップ救済): パス一致なら mode/ret2 を無視
+	idx = tryOne(listName, key, mode, ret2Val, false, true);
+	if (idx >= 0) return idx;
+	return tryOne(NULL, key, mode, ret2Val, false, true);
 }
 
 CString SongParams_CurrentListName()
@@ -95,6 +146,28 @@ CString SongParams_CurrentListName()
 	CString s = savedata.playlistname[n];
 	if (s.IsEmpty()) s.Format(L"#%d", n); // 未命名でも安定するようにインデックス名で代替
 	return s;
+}
+
+// 再生中キーをプレイリスト行から取る(filen は play() で basename 化されるため)。
+static void ResolvePlayingKey(CString& outList, CString& outPath, int& outMode, int& outRet2)
+{
+	outList = SongParams_CurrentListName();
+	outMode = modesub;
+	outRet2 = ret2;
+	outPath = SongParams_KeyPath(filen);
+	if (!pl || !pl->pc || pl->playcnt <= 0)
+		return;
+	// ♪ 表示行(pnt)を最優先。plcnt が一時的にずれると保存キーとツールチップ行が食い違う。
+	int idx = -1;
+	if (pl->pnt >= 0 && pl->pnt < pl->playcnt)
+		idx = pl->pnt;
+	else if (plcnt >= 0 && plcnt < pl->playcnt)
+		idx = plcnt;
+	if (idx < 0)
+		return;
+	outPath = SongParams_KeyPath(pl->pc[idx].fol);
+	outMode = pl->pc[idx].sub;
+	outRet2 = pl->pc[idx].ret2;
 }
 
 // ============================================================================
@@ -113,12 +186,21 @@ void SongParams_LoadFile()
 		if (f.Read(&ver, sizeof(int)) != sizeof(int)) { f.Close(); return; }
 		if (f.Read(&cnt, sizeof(int)) != sizeof(int)) { f.Close(); return; }
 		if (cnt < 0) cnt = 0;
-		if (cnt > 100000) cnt = 100000; // 異常値ガード
+		if (cnt > 100000) cnt = 100000;
 		for (int i = 0; i < cnt; i++) {
 			SongParam e;
 			ZeroMemory(&e, sizeof(e));
-			UINT got = f.Read(&e, sizeof(SongParam));
-			if (got != sizeof(SongParam)) break; // 途中で切れていたら打ち切り
+			if (ver >= 2) {
+				UINT got = f.Read(&e, sizeof(SongParam));
+				if (got != sizeof(SongParam)) break;
+			}
+			else {
+				// ver1: mode/ret2 無し
+				UINT got = f.Read(&e, (UINT)SONGPARAM_V1_SIZE);
+				if (got != (UINT)SONGPARAM_V1_SIZE) break;
+				e.mode = 0;
+				e.ret2 = 0;
+			}
 			e.listName[255] = 0;
 			e.path[1023] = 0;
 			g_tbl.push_back(e);
@@ -152,6 +234,170 @@ void SongParams_SaveFile()
 	g_lastWriteTick = GetTickCount();
 }
 
+// savedata だけ書き戻す(audioDataVersion 更新用)
+static void SongParams_PersistSaveData()
+{
+	TCHAR tmp[1024];
+	_tgetcwd(tmp, 1000);
+	_tchdir(karento2);
+	CFile ab;
+#if _UNICODE
+	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#else
+	if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+#endif
+		ab.Write(&savedata, sizeof(save));
+		ab.Close();
+	}
+	_tchdir(tmp);
+}
+
+struct SpPlTrack {
+	CString listName;
+	CString path;
+	int mode;
+	int ret2;
+};
+
+static CString SpPlaylistFileName(int idx)
+{
+	if (idx == 0) return _T("playlistu.dat");
+	CString s; s.Format(_T("playlistu%d.dat"), idx);
+	return s;
+}
+
+static CString SpListNameForIndex(int idx)
+{
+	if (idx < 0 || idx >= 1000) idx = 0;
+	CString s = savedata.playlistname[idx];
+	if (s.IsEmpty()) s.Format(_T("#%d"), idx);
+	return s;
+}
+
+// playlistu*.dat から (listName, path, mode, ret2) を収集
+static void SpCollectAllPlaylistTracks(std::vector<SpPlTrack>& out)
+{
+	out.clear();
+	TCHAR tmp[1024];
+	_tgetcwd(tmp, 1000);
+	_tchdir(karento2);
+	for (int plIdx = 0; plIdx < 1000; plIdx++) {
+		CString fname = SpPlaylistFileName(plIdx);
+		CFile f;
+		if (!f.Open(fname, CFile::modeRead | CFile::shareDenyWrite, NULL))
+			continue;
+		int cnt = 0;
+		if (f.Read(&cnt, 4) != 4 || cnt < 0 || cnt > 100000) {
+			f.Close();
+			continue;
+		}
+		int skip = 0;
+		bool ok = true;
+		for (int i = 0; i < 9; ++i) {
+			if (f.Read(&skip, 4) != 4) { ok = false; break; }
+		}
+		if (!ok) { f.Close(); continue; }
+
+		CString listName = SpListNameForIndex(plIdx);
+		playlistdata pld;
+		for (int i = 0; i < cnt; ++i) {
+			if (f.Read(&pld, sizeof(pld)) != sizeof(pld)) break;
+			pld.fol[1023] = 0;
+			CString path = SongParams_KeyPath(pld.fol);
+			if (path.IsEmpty()) continue;
+			SpPlTrack t;
+			t.listName = listName;
+			t.path = path;
+			t.mode = pld.sub;
+			t.ret2 = pld.ret2;
+			out.push_back(t);
+		}
+		f.Close();
+	}
+	_tchdir(tmp);
+}
+
+void SongParams_ConvertKeysIfNeeded()
+{
+	// 1=mode+ret2 キーへ移行済み。新規も起動後に 1 にする。
+	if (savedata.audioDataVersion >= 1)
+		return;
+
+	std::vector<SpPlTrack> tracks;
+	SpCollectAllPlaylistTracks(tracks);
+
+	bool changed = false;
+	{
+		CSingleLock lk(&g_cs, TRUE);
+		if (g_tbl.empty()) {
+			// 移行対象なしでもフラグは立てる(毎回スキャンしない)
+		}
+		else {
+			std::vector<SongParam> neu;
+			neu.reserve(g_tbl.size());
+
+			for (size_t i = 0; i < g_tbl.size(); i++) {
+				SongParam e = g_tbl[i];
+				// 既に mode/ret2 付きならそのまま
+				if (e.mode != 0 || e.ret2 != 0) {
+					neu.push_back(e);
+					continue;
+				}
+
+				// listName+path で一致するプレイリスト行を集める
+				std::vector<std::pair<int, int> > keys; // (mode, ret2)
+				auto addUnique = [&](int md, int r2) {
+					for (size_t k = 0; k < keys.size(); k++)
+						if (keys[k].first == md && keys[k].second == r2) return;
+					keys.push_back(std::make_pair(md, r2));
+				};
+
+				for (size_t t = 0; t < tracks.size(); t++) {
+					if (_tcsicmp(tracks[t].listName, e.listName) != 0) continue;
+					if (!PathKeysMatch(tracks[t].path, e.path)) continue;
+					addUnique(tracks[t].mode, tracks[t].ret2);
+				}
+				// リスト名ゆれ: パスだけでも探す
+				if (keys.empty()) {
+					for (size_t t = 0; t < tracks.size(); t++) {
+						if (!PathKeysMatch(tracks[t].path, e.path)) continue;
+						addUnique(tracks[t].mode, tracks[t].ret2);
+					}
+				}
+
+				if (keys.empty()) {
+					// 孤児エントリ: 旧キーのまま残す(ソフトマッチ救済用)
+					neu.push_back(e);
+				}
+				else if (keys.size() == 1) {
+					if (e.mode != keys[0].first || e.ret2 != keys[0].second)
+						changed = true;
+					e.mode = keys[0].first;
+					e.ret2 = keys[0].second;
+					neu.push_back(e);
+				}
+				else {
+					// 同一 path に複数 mode/ret2 → パラメータを複製
+					changed = true;
+					for (size_t k = 0; k < keys.size(); k++) {
+						SongParam c = e;
+						c.mode = keys[k].first;
+						c.ret2 = keys[k].second;
+						neu.push_back(c);
+					}
+				}
+			}
+			g_tbl.swap(neu);
+		}
+	}
+
+	if (changed)
+		SongParams_SaveFile();
+
+	savedata.audioDataVersion = 1;
+	SongParams_PersistSaveData();
+}
+
 static void FlushIfDirty()
 {
 	bool dirty;
@@ -171,34 +417,36 @@ static void MarkDirtyAndMaybeWrite()
 // ============================================================================
 // 検索・更新・移行
 // ============================================================================
-bool SongParams_FindCopy(LPCTSTR listName, LPCTSTR path, SongParam& out)
+bool SongParams_FindCopy(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, SongParam& out)
 {
 	CSingleLock lk(&g_cs, TRUE);
-	int idx = FindIndexLocked(listName, path);
+	int idx = FindIndexFlexibleLocked(listName, path, mode, ret2Val);
 	if (idx < 0) return false;
 	out = g_tbl[idx];
 	return true;
 }
 
-static bool FindExists(LPCTSTR listName, LPCTSTR path)
+static void Upsert(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, const SongParam& params)
 {
+	CString key = SongParams_KeyPath(path);
+	if (key.IsEmpty() || !listName) return;
 	CSingleLock lk(&g_cs, TRUE);
-	return FindIndexLocked(listName, path) >= 0;
-}
-
-static void Upsert(LPCTSTR listName, LPCTSTR path, const SongParam& params)
-{
-	CSingleLock lk(&g_cs, TRUE);
-	int idx = FindIndexLocked(listName, path);
+	int idx = FindIndexFlexibleLocked(listName, key, mode, ret2Val);
 	if (idx < 0) {
 		SongParam e = params;
 		_tcsncpy(e.listName, listName, 255); e.listName[255] = 0;
-		_tcsncpy(e.path, path, 1023); e.path[1023] = 0;
+		_tcsncpy(e.path, key, 1023); e.path[1023] = 0;
+		e.mode = mode;
+		e.ret2 = ret2Val;
 		g_tbl.push_back(e);
 	}
 	else {
 		SongParam& e = g_tbl[idx];
-		// キーは保ちつつパラメータだけ更新
+		// キーは最新表記へ揃えつつパラメータだけ更新(旧 ver1 もここで mode/ret2 昇格)
+		_tcsncpy(e.listName, listName, 255); e.listName[255] = 0;
+		_tcsncpy(e.path, key, 1023); e.path[1023] = 0;
+		e.mode = mode;
+		e.ret2 = ret2Val;
 		e.dsvol = params.dsvol; e.kakuVol = params.kakuVol;
 		e.pitchPos = params.pitchPos; e.tempoPos = params.tempoPos;
 		for (int i = 0; i < 20; i++) e.eq[i] = params.eq[i];
@@ -220,6 +468,8 @@ void SongParams_ResetAll()
 	::DeleteFile(ss);
 	// 追跡状態もクリア(次の同一曲でも復元しない)
 	s_curPath.Empty();
+	s_curMode = 0;
+	s_curRet2 = 0;
 	s_baselineValid = false;
 }
 
@@ -308,41 +558,47 @@ void SongParams_ApplyEntryToMain(const SongParam& e)
 // ============================================================================
 void SongParams_Sync(bool exporting)
 {
-	CString path = NormalizePlaylistPath(filen);
+	CString list, path;
+	int md = 0, r2 = 0;
+	ResolvePlayingKey(list, path, md, r2);
 	if (path.IsEmpty()) return;
 
 	const bool feature = (savedata.saveSongParams != 0);
 
 	if (exporting) {
 		// WAV 出力: 曲頭で 1 回だけ呼ばれる(メインスレッド)。
-		// 再生用の追跡状態(s_curPath 等)とは独立に、エントリがあれば即適用する。
 		if (!feature) return;
 		SongParam e;
-		if (SongParams_FindCopy(SongParams_CurrentListName(), path, e))
+		if (SongParams_FindCopy(list, path, md, r2, e))
 			SongParams_ApplyEntryToMain(e);
 		return;
 	}
 
 	// 以降は再生(HandleNotifications ループ)から周期的に呼ばれる
-	if (path != s_curPath) {
+	const bool songChanged =
+		path.CompareNoCase(s_curPath) != 0 ||
+		md != s_curMode ||
+		r2 != s_curRet2 ||
+		list.CompareNoCase(s_curList) != 0;
+
+	if (songChanged) {
 		// --- 曲が変わった ---
-		FlushIfDirty(); // 前の曲の未書き込みを確定
+		FlushIfDirty();
 		s_curPath = path;
-		s_curList = SongParams_CurrentListName(); // 曲開始時のリスト名で固定
+		s_curList = list;
+		s_curMode = md;
+		s_curRet2 = r2;
 		s_baselineValid = false;
 
 		if (feature) {
 			SongParam e;
-			if (SongParams_FindCopy(s_curList, s_curPath, e)) {
-				// 再生はこの関数を別スレッドから呼ぶので、UI 操作はメインスレッドへ委譲。
-				// 復元が適用される前に「復元前の現在値」で保存し直してエントリを壊さない
-				// よう、ベースライン確定は復元適用後(同一曲ブランチ)まで遅延させる。
+			if (SongParams_FindCopy(s_curList, s_curPath, s_curMode, s_curRet2, e)) {
+				// 復元適用前に現状値で上書きしないようベースラインは遅延確定
 				s_baselineValid = false;
 				if (og && ::IsWindow(og->GetSafeHwnd()))
 					og->PostMessage(WM_APP_SONGPARAM_RESTORE, 0, (LPARAM)new SongParam(e));
 			}
 			else {
-				// エントリ無し: 設定は触らず、現状値を基準にしておく
 				SnapshotCurrent(s_lastSaved);
 				s_baselineValid = true;
 			}
@@ -354,7 +610,6 @@ void SongParams_Sync(bool exporting)
 	if (!feature) { s_baselineValid = false; return; }
 
 	if (!s_baselineValid) {
-		// 機能を途中で ON にした場合など: 現状値を基準化して今回は保存しない
 		SnapshotCurrent(s_lastSaved);
 		s_baselineValid = true;
 		return;
@@ -363,7 +618,7 @@ void SongParams_Sync(bool exporting)
 	SongParam cur;
 	SnapshotCurrent(cur);
 	if (!ParamsEqual(cur, s_lastSaved)) {
-		Upsert(s_curList, s_curPath, cur);
+		Upsert(s_curList, s_curPath, s_curMode, s_curRet2, cur);
 		s_lastSaved = cur;
 		MarkDirtyAndMaybeWrite();
 	}
@@ -386,11 +641,10 @@ static double PosToPercent(int pos)
 	return pos / 3.0 + 33.3;
 }
 
-CString SongParams_BuildTipExtra(LPCTSTR listName, LPCTSTR path)
+CString SongParams_BuildTipExtra(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val)
 {
 	SongParam e;
-	CString np = NormalizePlaylistPath(path);
-	if (!SongParams_FindCopy(listName, np, e))
+	if (!SongParams_FindCopy(listName, path, mode, ret2Val, e))
 		return CString();
 
 	CString body;
@@ -449,11 +703,40 @@ CString SongParams_BuildTipExtra(LPCTSTR listName, LPCTSTR path)
 		TipAppend(body, tmp);
 	}
 
-	if (body.IsEmpty())
-		return CString();
+	// エントリはあるが全部デフォルト扱い → それでも「保存あり」を示して空戻りにしない
+	if (body.IsEmpty()) {
+		body = LL14(L"(変更なし)", L"(no changes)", L"(aucun)", L"(nessuna)", L"(sin cambios)", L"(변경 없음)", L"(无变更)", L"(لا تغيير)", L"(без изменений)", L"(keine)", L"(sem alteracoes)", L"(geen)", L"(brak)", L"(degisiklik yok)");
+	}
 
 	CString head = LL14(L"保存パラメータ", L"Saved params", L"Params enreg", L"Param salv", L"Params guard", L"저장 파라미터", L"已存参数", L"معلمات محفوظة", L"Сохр.параметры", L"Gespeichert", L"Params salvos", L"Opgeslagen", L"Zapisane param", L"Kayıtlı param");
 	CString out;
 	out.Format(L"\n%s: %s", head, body);
 	return out;
+}
+
+CString SongParams_BuildTipExtraForRow(int row)
+{
+	// 有効フラグ判定はここで行う(ListCtrlA 側の PCH/オフセットずれ対策)
+	if (!savedata.saveSongParams)
+		return CString();
+	if (!pl || !pl->pc || row < 0 || row >= pl->playcnt)
+		return CString();
+
+	const playlistdata0& d = pl->pc[row];
+	CString tip = SongParams_BuildTipExtra(
+		SongParams_CurrentListName(),
+		d.fol,
+		d.sub,
+		d.ret2);
+	if (!tip.IsEmpty())
+		return tip;
+
+	// 再生中キー(ResolvePlayingKey)で保存された場合の救済
+	// filen 書き換えや plcnt ずれで tip 用キーと保存キーが食い違うことがある
+	if (row == plcnt && !s_curPath.IsEmpty()) {
+		tip = SongParams_BuildTipExtra(s_curList, s_curPath, s_curMode, s_curRet2);
+		if (!tip.IsEmpty())
+			return tip;
+	}
+	return CString();
 }

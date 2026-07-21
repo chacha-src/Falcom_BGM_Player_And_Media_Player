@@ -356,6 +356,11 @@ struct save{
 	// --- 曲ごとのオーディオ/DSP パラメータ保存 有効フラグ(末尾追記) ---
 	// 1=oggYSEDbgmu_AudioData.dat に曲ごとのパラメータを保存・復元する。0=無効。
 	int   saveSongParams;
+
+	// --- AudioData.dat キー形式の移行状態(末尾追記) ---
+	// 0=未移行(path のみキーの旧形式の可能性あり)
+	// 1=mode+ret2 付きキーへコンバート済み(または新規)
+	int   audioDataVersion;
 };
 extern save savedata;
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */

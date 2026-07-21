@@ -17814,6 +17814,12 @@ void COggDlg::timerp()
 	m_dsvols.GetWindowText(ss);
 	if (s != ss)
 		m_dsvols.SetWindowText(s);
+
+	// DirectShow(KPI mode==-2) など通知スレッド依存が弱い経路でも
+	// 曲ごとパラメータの保存/復元が動くよう、メインスレッドからも同期する。
+	if (savedata.saveSongParams && plf)
+		SongParams_Sync(false);
+
 	if (drawth == TRUE) return;
 	if (m_dsb && thn1 == FALSE) {
 		if (savedata.dsvol == -498)

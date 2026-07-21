@@ -833,7 +833,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		addTip(m_analyzer, LL14(L"アナライザーを開きます。", L"Open the analyzer.", L"Ouvrir l'analyseur.", L"Apri l'analizzatore.", L"Abrir el analizador.", L"분석기를 엽니다.", L"打开分析器。", L"فتح المحلل.", L"Открыть анализатор.", L"Analysator offnen.", L"Abrir o analisador.", L"Analyser openen.", L"Otworz analizator.", L"Analizoru ac."));
 	addTip(m_jacket, LL14(L"ジャケット画像を別窓で表示します。", L"Show cover art in a separate window.", L"Afficher la pochette.", L"Mostra la copertina.", L"Mostrar la caratula.", L"커버 이미지를 표시합니다.", L"在单独窗口显示封面。", L"عرض صورة الغلاف.", L"Показать обложку.", L"Cover anzeigen.", L"Mostrar a capa.", L"Toon hoes.", L"Poka? ok?adk?.", L"Kapak resmini goster."));
 	addTip(m_exit, LL14(L"アプリケーションを終了します。", L"Exit the application.", L"Quitter l'application.", L"Esci dall'applicazione.", L"Salir de la aplicacion.", L"앱을 종료합니다.", L"退出应用程序。", L"إنهاء التطبيق.", L"Выйти из приложения.", L"Anwendung beenden.", L"Sair do aplicativo.", L"Toepassing afsluiten.", L"Zamknij aplikacj?.", L"Uygulamadan c?k."));
-	addTip(m_list, LL14(L"ダブルクリックで再生。ファイルをドロップして追加できます。", L"Double-click to play. Drop files to add.", L"Double-clic pour lire. Glissez des fichiers.", L"Doppio clic per riprodurre. Trascina file.", L"Doble clic para reproducir. Suelta archivos.", L"더블 클릭으로 재생. 파일을 드롭해 추가.", L"双击播放。拖入文件添加。", L"انقر مزدوجاً للتشغيل. أفلت الملفات.", L"Двойной клик — воспроизведение. Перетащите файлы.", L"Doppelklick zum Abspielen. Dateien ablegen.", L"Clique duplo para tocar. Solte arquivos.", L"Dubbelklik om af te spelen. Sleep bestanden.", L"Kliknij dwukrotnie. Upu?? pliki.", L"Cift t?kla cal. Dosya b?rak."));
+	// m_list のバルーンは「ツールチップ」OFF時のみ。ON時は行詳細ツールチップへ切替(ApplyListTooltipState)。
 	addTip(m_settings, LL14(L"設定画面を開きます。", L"Open settings.", L"Ouvrir les reglages.", L"Apri le impostazioni.", L"Abrir ajustes.", L"설정 화면을 엽니다.", L"打开设置。", L"فتح الإعدادات.", L"Открыть настройки.", L"Einstellungen offnen.", L"Abrir configuracoes.", L"Instellingen openen.", L"Otworz ustawienia.", L"Ayarlar? ac."));
 	addTip(m_fadeout, LL14(L"再生中の曲をフェードアウトして停止します。", L"Fade out and stop the current track.", L"Fondu et arret du morceau.", L"Dissolvenza e stop del brano.", L"Desvanecer y detener la pista.", L"현재 곡을 페이드 아웃하여 정지합니다.", L"淡出并停止当前曲目。", L"تلاشي وإيقاف المقطع الحالي.", L"Затухание и остановка трека.", L"Aktuellen Titel ausblenden und stoppen.", L"Desvanecer e parar a faixa.", L"Huidige track uitfaden en stoppen.", L"Wycisz i zatrzymaj utwor.", L"Parcay? soluklast?r?p durdur."));
 	addTip(m_folder, LL14(L"フォルダ設定画面を開きます(フォルダの登録/追加)。", L"Open folder settings (register/add folders).", L"Ouvrir les parametres de dossier.", L"Apri impostazioni cartella.", L"Abrir config. de carpeta.", L"폴더 설정 화면을 엽니다.", L"打开文件夹设置。", L"فتح إعدادات المجلد.", L"Открыть настройки папки.", L"Ordnereinstellungen offnen.", L"Abrir config. de pasta.", L"Mapinstellingen openen.", L"Otworz ustawienia folderu.", L"Klasor ayarlar?n? ac."));
@@ -876,6 +876,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	ReloadPlaylistCombo();
 	RefreshList(TRUE);
 	SyncFromMain();
+	ApplyListTooltipState(); // 行詳細 ON/OFF とリスト・バルーン切替を初期確定
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1)
 		RefreshAeroMode();   // レイアウト確定後にアクリル/不透明化を再適用
@@ -1630,6 +1631,7 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 		if (m_list.GetItemCount() > 0) { m_list.SetItemCount(0); m_lastCount = 0; }
 		return;
 	}
+	m_list.pc = pl->pc; // Load/realloc 後の実体ポインタを再同期
 	int cnt = pl->playcnt;
 
 	// 件数変化 or 強制(並べ替え/タグ更新/追加削除)時に範囲を再設定。
@@ -2267,8 +2269,8 @@ void CMediaPlayerDlg::InvalidateSidePanels()
 }
 
 // m_tip チェックボックスの状態を m_list のツールチップ設定に反映。
-// CListCtrlA 実装のカスタムツールチップ(行詳細)を ON/OFF する。
-// PlayList の m_lc.EnableToolTips/SetExtendedStyle と同じ方式。
+// ON : 行詳細ツールチップ(CListCtrlA)のみ。ダイアログ側バルーンは外す。
+// OFF: 行詳細を止め、「ダブルクリックで再生…」バルーンを出す。
 void CMediaPlayerDlg::ApplyListTooltipState()
 {
 	if (!::IsWindow(m_list.GetSafeHwnd())) return;
@@ -2280,6 +2282,28 @@ void CMediaPlayerDlg::ApplyListTooltipState()
 	else
 		exStyle |= LVS_EX_INFOTIP;
 	m_list.SetExtendedStyle(exStyle);
+
+	if (m_tooltip.GetSafeHwnd()) {
+		const CString balloon = LL14(
+			L"ダブルクリックで再生。ファイルをドロップして追加できます。",
+			L"Double-click to play. Drop files to add.",
+			L"Double-clic pour lire. Glissez des fichiers.",
+			L"Doppio clic per riprodurre. Trascina file.",
+			L"Doble clic para reproducir. Suelta archivos.",
+			L"더블 클릭으로 재생. 파일을 드롭해 추가.",
+			L"双击播放。拖入文件添加。",
+			L"انقر مزدوجاً للتشغيل. أفلت الملفات.",
+			L"Двойной клик — воспроизведение. Перетащите файлы.",
+			L"Doppelklick zum Abspielen. Dateien ablegen.",
+			L"Clique duplo para tocar. Solte arquivos.",
+			L"Dubbelklik om af te spelen. Sleep bestanden.",
+			L"Kliknij dwukrotnie. Upuść pliki.",
+			L"Çift tıkla çal. Dosya bırak.");
+		// いったん外してから、OFF のときだけ付け直す(ON 時の二重表示防止)
+		m_tooltip.DelTool(&m_list);
+		if (!on)
+			m_tooltip.AddTool(&m_list, balloon);
+	}
 }
 
 // WM_MP_INFO_SCROLL ハンドラ。TheadLoop から ~30fps で PostMessage される。
@@ -3318,6 +3342,8 @@ void CMediaPlayerDlg::OnSaveWav()
 void CMediaPlayerDlg::OnSaveParam()
 {
 	savedata.saveSongParams = m_saveparam.GetCheck() ? 1 : 0;
+	// チェック状態はすぐ .dat へ(再起動でフラグが消えるとツールチップも出ない)
+	MpPersistSavedataQuick();
 }
 
 void CMediaPlayerDlg::OnResetData()

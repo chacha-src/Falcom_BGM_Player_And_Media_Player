@@ -272,6 +272,9 @@ BOOL COggApp::InitInstance()
 	savedata.mpPromptMainLock = 0;
 	savedata.prTuneMainLock = 0;
 
+	savedata.saveSongParams = 0;
+	savedata.audioDataVersion = 0;
+
 	savedata.playerMode = 0;   // 既定はファルコム特化型
 	savedata.startupAsk = 1;   // 既定で起動時にモード選択ダイアログを表示
 	savedata.mpHasPos = 0;     // メディアプレイヤー座標は未設定
@@ -514,6 +517,10 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, saveSongParams) + sizeof(savedata.saveSongParams))) {
 		savedata.saveSongParams = 0;
 	}
+	// AudioData.dat キー移行フラグ(末尾追記): 旧 .dat には無いので 0=未移行
+	if (datFileSize < (int)(offsetof(save, audioDataVersion) + sizeof(savedata.audioDataVersion))) {
+		savedata.audioDataVersion = 0;
+	}
 	// ジャンプリスト履歴: 途中フィールド挿入で .dat がずれた場合などは破棄する
 	{
 		auto clearMpHist = []() {
@@ -658,6 +665,9 @@ BOOL COggApp::InitInstance()
 
 	// 曲ごとのオーディオ/DSP パラメータ(別ファイル)を読み込む
 	SongParams_LoadFile();
+	// 配布済 AudioData.dat の旧キー(pathのみ)を mode+ret2 付きへ一度だけ移行
+	// (playlistu*.dat をディスクから走査。UI 未作成でも可)
+	SongParams_ConvertKeysIfNeeded();
 
 	// モード選択画面やメイン画面を開く前に更新を確認する。
 	// 更新があればそのまま適用・再起動し、なければ通常の起動を続ける。

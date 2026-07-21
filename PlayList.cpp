@@ -447,6 +447,8 @@ BOOL CPlayList::OnInitDialog()
 
 	Load();
 	loadplaylistname();
+	// 配布済 AudioData.dat の旧キー(pathのみ)を mode+ret2 付きへ一度だけ移行
+	SongParams_ConvertKeysIfNeeded();
 	if(pc==NULL){
 		pc = (playlistdata0*)malloc(sizeof(playlistdata0));
 	}
@@ -4902,6 +4904,8 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		GetClientRect(&r);
 	m_lc.SetWindowPos(&wndNoTopMost,0,0,(int)(r.right-20*(hD2)),(int)(r.bottom-80 * (hD2 )),SWP_NOMOVE|SWP_NOOWNERZORDER|SWP_NOZORDER);
 	}
+	// Load/realloc 後の実体ポインタをリストへ再同期(ツールチップ等が参照)
+	m_lc.pc = pc;
 }
 int SC=0;
 void CPlayList::SIcon(int i){

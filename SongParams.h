@@ -1,14 +1,18 @@
 ﻿#pragma once
 // ============================================================================
-// SongParams : 曲ごと(プレイリスト名 + フルパス)にオーディオ/DSP パラメータを
+// SongParams : 曲ごと(プレイリスト名 + パス + mode + ret2)にオーディオ/DSP パラメータを
 //              savedata とは別の struct・別ファイル(oggYSEDbgmu_AudioData.dat)へ
 //              保持し、再生/ WAV 出力時に復元する。
 //
-//   キー   : プレイリスト名(リスト削除でファイル番号が振り直されても安定)
-//            + NormalizePlaylistPath(フルパス)
+//   キー   : プレイリスト名 + パス(fol) + mode(sub) + ret2
+//            ※ファルコムゲームモードは同名 basename を ret2 で区別するため mode/ret2 必須
+//            ※mode 自体の「再生形式切替」はプレイリスト行(pc[].sub)が既に持つ。
+//              ここは DSP パラメータの衝突回避用キーであり、mode を書き戻すものではない。
 //   保存   : 再生中に各項目が変わったらその時点で反映(デバウンス書き込み)
-//   復元   : 曲が始まったら適用(再生=メインスレッドへ post、WAV出力=直接)
+//   復元   : 曲が始まったら DSP を適用(再生=メインスレッドへ post、WAV出力=直接)
 //   有効化 : savedata.saveSongParams (チェックボックス)が 1 のときだけ動作
+//   移行   : savedata.audioDataVersion (末尾追記)
+//            0→1 で旧キー(pathのみ)を playlistu*.dat 照合により mode+ret2 付きへ自動コンバート
 // ============================================================================
 
 // 再生スレッド(HandleNotifications)からメインスレッドへ復元を依頼するメッセージ
@@ -18,9 +22,10 @@
 #endif
 
 // 1 曲分のパラメータ(固定長レコード。ファイルへそのまま書き出す)
+// ※末尾にフィールド追加。旧 ver1 読込時は mode/ret2 = 0 扱い。
 struct SongParam {
 	TCHAR listName[256];   // プレイリスト名(キー)
-	TCHAR path[1024];      // 正規化済みフルパス(キー)
+	TCHAR path[1024];      // プレイリスト fol(キー)。ゲームモードは basename のことも多い
 	int dsvol;             // DirectSound 音量スライダー値 -498..1 (1=100%)
 	int kakuVol;           // 拡張音量 100..900 (100=100%)
 	int pitchPos;          // ピッチ スライダー位置 0..400 (200=100%)
@@ -33,6 +38,8 @@ struct SongParam {
 	int eq_chorus;         // コーラス 0..200 (0=off)
 	int eq_delay;          // ディレイ 0..200 (0=off)
 	int analyzerspecstyle; // アナライザー周波数表示モード 0..6
+	int mode;              // キー: pc[].sub / modesub (ゲームモード含む再生形式)
+	int ret2;              // キー: pc[].ret2 (同一ファイル内の曲番号など)
 };
 
 // 起動時に 1 度だけ読み込む
@@ -40,12 +47,17 @@ void SongParams_LoadFile();
 // メモリ内テーブルをファイルへ書き出す
 void SongParams_SaveFile();
 
+// 旧キー(pathのみ) → mode+ret2 付きキーへ自動コンバート。
+// 全プレイリスト .dat を走査して突き合わせる。savedata.audioDataVersion で一度きり。
+// プレイリスト Load 後に呼ぶこと。
+void SongParams_ConvertKeysIfNeeded();
+
 // HandleNotifications / HandleNotifications_export の先頭で呼ぶ共通処理。
 // exporting=true のとき WAV 出力(メインスレッド)。false のとき再生(別スレッド)。
 void SongParams_Sync(bool exporting);
 
 // 1 エントリをメイン画面(スライダー/コンボ/savedata/グローバル)へ適用する。
-// 必ずメインスレッドから呼ぶこと。
+// 必ずメインスレッドから呼ぶこと。DSP のみ。mode は触らない(プレイリスト側が保持)。
 void SongParams_ApplyEntryToMain(const SongParam& e);
 
 // すべてのエントリを破棄し、ファイルも削除する(リセット用)。
@@ -55,12 +67,14 @@ void SongParams_ResetAll();
 void SongParams_RenameList(LPCTSTR oldName, LPCTSTR newName);
 void SongParams_DeleteList(LPCTSTR name);
 
-// (listName, path) のエントリを探して out へコピー。見つかれば true。
-bool SongParams_FindCopy(LPCTSTR listName, LPCTSTR path, SongParam& out);
+// (listName, path, mode, ret2) のエントリを探して out へコピー。見つかれば true。
+bool SongParams_FindCopy(LPCTSTR listName, LPCTSTR path, int mode, int ret2, SongParam& out);
 
 // 現在表示中プレイリストの名前(空なら "#index" の安定名)。
 CString SongParams_CurrentListName();
 
 // ツールチップ用: そのエントリのうちデフォルトと異なる項目だけを整形した文字列。
-// エントリが無い/変更なしのときは空文字列。
-CString SongParams_BuildTipExtra(LPCTSTR listName, LPCTSTR path);
+CString SongParams_BuildTipExtra(LPCTSTR listName, LPCTSTR path, int mode, int ret2);
+
+// プレイリスト行番号から直接解決(常に pl->pc を参照)
+CString SongParams_BuildTipExtraForRow(int row);
