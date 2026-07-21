@@ -1967,6 +1967,39 @@ static bool SplitKpiSubsongPath(const CString& in, CString& outPath, uint32_t& o
 	return true;
 }
 
+// WAV 保存用の安全な出力パスを作る。
+// filen が "...\foo.kss::0001" 等のサブソング/仮想パスだと、そのまま ".wav" を付けても
+// '::' や ':' が Windows のファイル名に使えず Open 失敗→保存できない。
+// 物理パス + サニタイズしたトラック識別子 + ".wav" にして、曲ごとに別ファイルへ保存する。
+static CString BuildWavExportOutputPath(const CString& filen)
+{
+	CString base = filen;
+	CString subsong;
+	const int cor = filen.Find(_T(':'), 6); // ドライブの ':' (index1) は飛ばす
+	if (cor != -1) {
+		base = filen.Left(cor);
+		subsong = filen.Mid(cor);
+	}
+
+	CString tag;
+	if (!subsong.IsEmpty()) {
+		subsong.TrimLeft(_T(':'));
+		CString safe;
+		for (int i = 0; i < subsong.GetLength(); ++i) {
+			TCHAR c = subsong[i];
+			if (c == _T('\\') || c == _T('/') || c == _T(':') || c == _T('*') ||
+				c == _T('?') || c == _T('"') || c == _T('<') || c == _T('>') || c == _T('|'))
+				c = _T('_');
+			safe += c;
+		}
+		safe.Trim();
+		if (!safe.IsEmpty())
+			tag = _T("_") + safe;
+	}
+
+	return base + tag + _T(".wav");
+}
+
 static int KpiArchBitsFromIndex(int i)
 {
 	if (i < 0 || i >= kpicnt) return 0;
@@ -9599,7 +9632,7 @@ void COggDlg::play()
 	if (m_c2.GetCheck() == 1 && wavExportPath.GetLength() == 0)
 	{
 		cc1 = 1;
-		CString outPath = filen + _T(".wav");
+		CString outPath = BuildWavExportOutputPath(filen);
 		if (outPath.Right(4).MakeLower() != _T(".wav")) outPath += _T(".wav");
 		if (cc.Open(outPath, CFile::modeCreate | CFile::modeReadWrite | CFile::typeBinary | CFile::shareExclusive, NULL) != TRUE) {
 			m_saisai.EnableWindow(TRUE);
@@ -17014,7 +17047,7 @@ void COggDlg::timerp()
 	else if (mode == -8 || mode == -7 || mode == 999) {
 		s = FormatBannerDataAudioLine();
 		moji(s, 1, 48, 0x7fffff);
-		s = "Arti:";
+		s = "artist:";
 		int artiLabelW = moji(s, 1, 64, 0x7fffff);
 		int artiValueX = 0, artiViewW = 0;
 		BannerValueLayout(artiLabelW, artiValueX, artiViewW);
@@ -17046,7 +17079,7 @@ void COggDlg::timerp()
 			else
 				s.Format(_T("data:%3dk %sHz %dbit"), (kbps == 0) ? mkps : kbps, hzPlay, dispSam);
 		moji(s, 1, 48, 0x7fffff);
-		s = "Arti:";
+		s = "artist:";
 		int artiLabelW = moji(s, 1, 64, 0x7fffff);
 		int artiValueX = 0, artiViewW = 0;
 		BannerValueLayout(artiLabelW, artiValueX, artiViewW);
@@ -17075,11 +17108,10 @@ void COggDlg::timerp()
 			s.Format(_T(":%8d-%8d"), snap_loop1, snap_loop2);
 		if (snap_loop1 < 10000000)
 			s.Format(_T(":%7d-%9d"), snap_loop1, snap_loop2);
-		mojiPx(_T("Loop"), 1 * 4, 64, 0x7fefef);
 		mojiPx(s, 1 * 4 + loopPrefixW, 64, 0x7fefef);
 	}
 	if (mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == 999) {
-		s = "Albu:";
+		s = "album:";
 		int albuLabelW = moji(s, 1, 80, 0x7fffff);
 		int albuValueX = 0, albuViewW = 0;
 		BannerValueLayout(albuLabelW, albuValueX, albuViewW);

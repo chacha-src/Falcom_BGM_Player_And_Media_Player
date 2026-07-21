@@ -1063,7 +1063,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,523
+ FILEVERSION 0,9,1,524
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1082,7 +1082,7 @@ BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
             VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.07.21"
-            VALUE "FileVersion", "0.9.1.523"
+            VALUE "FileVersion", "0.9.1.524"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.07.21"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"

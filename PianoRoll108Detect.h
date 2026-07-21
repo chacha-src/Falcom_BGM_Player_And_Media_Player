@@ -30,6 +30,8 @@ namespace PianoRoll108
     static constexpr int O5_HI = 84;      // C6
     static constexpr int EDGE_LO = 12;
     static constexpr int EDGE_HI = 96;    // C7
+    // オクターブ0(C0–B0)は 185ms 窓で音程分解不能かつ A0 以下。ここ未満は検出しない。
+    static constexpr int MUSIC_LOW_FLOOR = 24; // C1
 
     inline int KeyBandIndex(int keyIndex)
     {
@@ -182,6 +184,24 @@ namespace PianoRoll108
         CollapseNearbyPicks(blend, band, EDGE_LO, BASS_END, 3, false); // 強い方優先
         ForceUniqueBassAdjacents(blend, band, EDGE_LO, BASS_END);
         RefineToLocalPeaksInBand(blend, band, count, EDGE_LO, BASS_END, 1);
+        // 低域DC/サブオーディオ裾の除去: 基音は「下隣の半音より強い」真の局所ピークで
+        // あること。すぐ下の鍵(EDGE_LO 未満のサブオーディオ帯を含む)が同等以上に強ければ、
+        // それは基音ではなく DC 方向へ単調増加する漏れ裾の縁にすぎない。裾は下ほど強いので
+        // 縁を落とすと1つ上へ連鎖し、真の局所ピーク(下より強い鍵)が現れた所で自然に止まる。
+        // RefineToLocalPeaksInBand は帯域下端より下を見ないため、この判定を別途行う。
+        // オクターブ0(C0–B0 = key12–23, 約16–31Hz)は 185ms 窓では半音間隔(<2Hz)が
+        // 分解能(約5.4Hz)を大きく下回り、原理的に音程を分離できない。PSG/ピアノの
+        // 最低音 A0 以下でもあり、実質 DC 漏れ裾の常時点灯源にしかならないため検出しない。
+        for (int i = EDGE_LO; i < MUSIC_LOW_FLOOR && i < BASS_END; ++i)
+            band[i] = false;
+        // それ以上(オクターブ1〜)は「下隣の半音より強い」真の局所ピークのみ採用する。
+        // すぐ下の鍵が同等以上に強ければ、それは基音でなく DC 方向へ単調増加する漏れ裾の
+        // 縁にすぎない。係数 0.98 は低音側の分解能不足で隣接鍵がほぼ同値になる分の許容。
+        for (int i = MUSIC_LOW_FLOOR; i < BASS_END; ++i) {
+            if (!band[i]) continue;
+            if (blend[i - 1] >= blend[i] * 0.98f)
+                band[i] = false;
+        }
         MergeBandPicks(outPicked, band, EDGE_LO, BASS_END);
 
         // ベース倍音をソフト減衰したスペクトルで上帯を採択（ゴースト抑制＋ピアノ枠確保）
@@ -220,9 +240,42 @@ namespace PianoRoll108
         }
         MergeBandPicks(outPicked, band, O5_HI, EDGE_HI);
 
-        // C7+ は残さない（残差ノイズ源）
-        for (int i = EDGE_HI; i < count; ++i)
-            outPicked[i] = false;
+        // ---- 5) 最高音 C7–B7: 通常曲の高音メロディ/装飾を拾う ----
+        // 以前はここを一律クリアしていたため、普通の曲で C7 以上の実音が消えていた。
+        // 倍音ゴーストは末尾の全域倍音ふるいが「より強い下位基音の整数倍」として除去するので、
+        // ここは控えめに採択し、独立した高音だけを残す。
+        if (EDGE_HI < count) {
+            PickFundamentalNotesRange(upperSpec, band, count, EDGE_HI, count, 2, pickTreRel);
+            for (int i = EDGE_HI; i < count; ++i) {
+                if (!band[i]) continue;
+                if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END) &&
+                    !PianoKey::HasOwnOvertoneSupport(blend, i, count, 0.18f))
+                    band[i] = false;
+            }
+            MergeBandPicks(outPicked, band, EDGE_HI, count);
+        }
+
+        // ---- 全域倍音ふるい（パルス波/矩形波対策）----
+        // PSG 等のパルス波は全整数次倍音を含むため、各倍音自身も倍音列(2f,3f…)を
+        // 持ち、HasOwnOvertoneSupport 等で「独立音」に誤判定されて残る。帯域別ピック
+        // では取り切れないので、最後に全域で「より強い確定音の整数倍音位置にある
+        // 弱いピック」を剪定する。高い方から見て、より強い下位ピック j の n:1 倍音に
+        // あたる i を落とす。独立音級(親に肉薄する強さ)は残す。
+        // メロディ帯(C4–C6)はピアノのオクターブ重ねを守るため、明確に弱い倍音のみ対象。
+        for (int i = count - 1; i > EDGE_LO; --i) {
+            if (!outPicked[i]) continue;
+            const bool inMelody = (i >= C4_KEY && i < O5_HI);
+            const float harmMaxRatio = inMelody ? 0.60f : 0.92f;
+            for (int j = i - 1; j >= EDGE_LO; --j) {
+                if (!outPicked[j]) continue;
+                if (blend[j] <= blend[i]) continue;                 // 親はより強い方のみ
+                if (blend[i] > blend[j] * harmMaxRatio) continue;   // 独立音級は残す
+                if (PianoKey::IsHarmonicPairExtended(i, j)) {       // i は j の n:1 倍音
+                    outPicked[i] = false;
+                    break;
+                }
+            }
+        }
 
         // 最後にもう一度低音隣接を潰す（帯域マージ後の漏れ）
         ForceUniqueBassAdjacents(blend, outPicked, EDGE_LO, BASS_END);
