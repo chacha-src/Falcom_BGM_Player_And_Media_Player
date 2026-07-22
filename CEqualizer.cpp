@@ -659,7 +659,8 @@ void CEqualizer::ApplyKeyCodesUi()
 
 LRESULT CEqualizer::OnEqKeyUpdate(WPARAM, LPARAM)
 {
-	// Ack は Apply 後（AckEqKeyUiNotify 内で dirty 再通知も行う）
+	// Ack は Apply 後。SETREDRAW は子コントロール全体の描画を止めて
+	// スライダー等が消えるデグレになるため使わない。
 	if (::IsWindow(m_hWnd))
 		ApplyKeyCodesUi();
 	AckEqKeyUiNotify();

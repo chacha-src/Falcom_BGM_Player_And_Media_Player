@@ -2674,8 +2674,8 @@ bool CPianoRoll::EnsureExprLegendCache(CDC& refDC, int rollW, int rollH) const
         return false;
     }
     m_legendOldBmp = m_legendDC.SelectObject(&m_legendBmp);
-    // マゼンタ下地 + fillPanelBg=false でオーバーレイのみキャッシュ（毎フレーム再描画しない）
-    m_legendDC.FillSolidRect(0, 0, pw, ph, RGB(255, 0, 255));
+    // 不透明ステッカーとして一回だけ描く（TransparentBlt+マゼンタはピンク文字を抜いてしまう）
+    m_legendDC.FillSolidRect(0, 0, pw, ph, RGB(14, 14, 20));
     DrawExprLegendContent(m_legendDC, rollW, rollH, CRect(0, 0, pw, ph), false);
 
     m_legendW = pw;
@@ -3021,16 +3021,11 @@ void CPianoRoll::DrawPlayheadRow(CDC& dc, int width, int rollH, const NoteFrame&
     DrawHistoryRowAt(dc, width, yTop, yBot, live);
 }
 
-// 1フレーム分だけロールバッファをスクロールアップして最新行を下端に描く。
-// スクロール処理: ロールバッファ全体を scrollPx 分 BitBlt で上へずらし、
-// 空いた下端に DrawPlayheadRow で最新フレームを描画する。
-// ComposeRollBuffer(全再描画)と異なり毎フレームの差分更新のみで済む。
+// pendingCount 行分を1回の BitBlt でスクロールし、空いた帯に履歴+live を描く。
+// 旧: pending 回フルバッファ転送 → 遅延時に O(n) で重くなり EQ を圧迫した。
 bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const NoteFrame* hist,
     int pendingCount, const NoteFrame& live)
 {
-    (void)pendingCount;
-    (void)histCount;
-    (void)hist;
     m_lastScrollPx = 0;
     m_lastScrollHealTop = 0;
     if (!m_rollReady || rollH <= 0)
@@ -3038,29 +3033,41 @@ bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const
     if (!m_rollDC.GetSafeHdc() || !m_rollScratchDC.GetSafeHdc())
         return false;
 
-    const int scrollPx = HistoryScrollPx(rollH, 1);
+    int n = pendingCount;
+    if (n < 1) n = 1;
+    if (n > 3) n = 3;
+
+    const int scrollPx = HistoryScrollPx(rollH, n);
     const int preserveH = rollH - scrollPx;
     if (scrollPx <= 0 || preserveH <= 0)
         return false;
 
-    int yTop0, yBot0;
-    GetHistoryRowBounds(rollH, 0, yTop0, yBot0);
-    if (yBot0 <= yTop0)
+    int yBandTop = 0, yBandBot = 0;
+    GetHistoryRowBounds(rollH, n - 1, yBandTop, yBandBot);
+    if (yBandTop < 0) yBandTop = 0;
+    if (rollH - yBandTop <= 0)
         return false;
 
-    // --- 差分スクロール ---
-    // A) 履歴ピクセル [0,preserveH) を scrollPx 分繰り上げ（グリッド・バーごと保持）
+    // A) 履歴ピクセルを scrollPx 分まとめて繰り上げ（n 回分を1回の BitBlt）
     m_rollScratchDC.BitBlt(0, 0, width, preserveH, &m_rollDC, 0, scrollPx, SRCCOPY);
 
-    // B) 空いた下端 [yTop0,rollH) のみクリア → live 行
-    m_rollScratchDC.FillSolidRect(0, yTop0, width, rollH - yTop0, RGB(20, 20, 20));
-    DrawHistoryGrid(m_rollScratchDC, width, yTop0, rollH);
+    // B) 空いた帯にグリッド + 各行
+    m_rollScratchDC.FillSolidRect(0, yBandTop, width, rollH - yBandTop, RGB(20, 20, 20));
+    DrawHistoryGrid(m_rollScratchDC, width, yBandTop, rollH);
+
+    // 連続 TryAdvance と同じ並び: row r(r>=1) ← hist[r], row0 ← live
+    for (int r = n - 1; r >= 1; --r) {
+        const NoteFrame& fr = (hist && histCount > r) ? hist[r] : live;
+        int yTop, yBot;
+        GetHistoryRowBounds(rollH, r, yTop, yBot);
+        if (yBot > yTop)
+            DrawHistoryRowAt(m_rollScratchDC, width, yTop, yBot, fr);
+    }
     DrawPlayheadRow(m_rollScratchDC, width, rollH, live);
 
     m_rollDC.BitBlt(0, 0, width, rollH, &m_rollScratchDC, 0, 0, SRCCOPY);
-    // 凡例はここでは焼き込まない(OnPaint で半透明オーバーレイ描画)。
     m_lastScrollPx = scrollPx;
-    m_lastScrollHealTop = 0;
+    m_lastScrollHealTop = yBandTop;
     return true;
 }
 
@@ -3076,8 +3083,10 @@ void CPianoRoll::UpdatePianoRollTimer()
 void CPianoRoll::RequestSyncFromMainUi()
 {
     if (!::IsWindow(m_hWnd)) return;
+    // 描画待ち中は追加 SYNC しない（OnSyncRequest の PCM コピー連鎖で時間とともに悪化する）
+    if (InterlockedCompareExchange(&m_analysisDonePosted, 0, 0) != 0) return;
+    if (InterlockedCompareExchange(&m_syncPosted, 0, 0) != 0) return;
     // 実時間スロットル（paint 遅延で ms2 が伸びても 60Hz 同期にしない）
-    // 可視化頻度は savedata.ms2 に合わせる（EQ 表示でも間引かない）
     int minMs = savedata.ms2;
     if (minMs < 16) minMs = 16;
     if (minMs > 960) minMs = 960;
@@ -3086,7 +3095,8 @@ void CPianoRoll::RequestSyncFromMainUi()
         return;
     if (InterlockedCompareExchange(&m_syncPosted, 1, 0) != 0) return;
     m_lastSyncPostTick = now;
-    PostMessage(WM_PIANOROLL_SYNC, 0, 0);
+    if (!PostMessage(WM_PIANOROLL_SYNC, 0, 0))
+        InterlockedExchange(&m_syncPosted, 0);
 }
 
 void CPianoRoll::ApplySyncInvalidate()
@@ -3101,8 +3111,12 @@ void CPianoRoll::ApplySyncInvalidate()
 
 LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
 {
-    InterlockedExchange(&m_syncPosted, 0);
-    if (m_paintDisabled || !::IsWindow(m_hWnd)) return 0;
+    // syncPosted は OnPaint 完了まで保持（ANALYSIS_DONE と同じ背圧）。
+    // ここで降ろすと SyncPianoRollFast がキューに積まれ UI が時間とともに死ぬ。
+    if (m_paintDisabled || !::IsWindow(m_hWnd)) {
+        InterlockedExchange(&m_syncPosted, 0);
+        return 0;
+    }
     COggDlg_SyncPianoRollFast();
     ApplySyncInvalidate();
     return 0;
@@ -3531,6 +3545,7 @@ void CPianoRoll::PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH,
 
     CCC_MainLockPaintClient(dc, m_hWnd);
     InterlockedExchange(&m_analysisDonePosted, 0);
+    InterlockedExchange(&m_syncPosted, 0);
 }
 
 void CPianoRoll::OnPaint()
@@ -3538,6 +3553,7 @@ void CPianoRoll::OnPaint()
     CPaintDC dc(this);
     if (m_paintDisabled) {
         InterlockedExchange(&m_analysisDonePosted, 0);
+        InterlockedExchange(&m_syncPosted, 0);
         return;
     }
     CRect rect;
@@ -3546,6 +3562,7 @@ void CPianoRoll::OnPaint()
     const int h = rect.Height();
     if (w <= 0 || h <= 0) {
         InterlockedExchange(&m_analysisDonePosted, 0);
+        InterlockedExchange(&m_syncPosted, 0);
         return;
     }
 
@@ -3555,6 +3572,7 @@ void CPianoRoll::OnPaint()
     const int keySectionH = h - rollH;
     if (rollH <= 0 || keySectionH <= 0) {
         InterlockedExchange(&m_analysisDonePosted, 0);
+        InterlockedExchange(&m_syncPosted, 0);
         return;
     }
 
@@ -3572,6 +3590,7 @@ void CPianoRoll::OnPaint()
     EnsurePaintFonts(w, keyH, rollH);
     if (!EnsureRollBuffer(dc, w, rollH) || !EnsureKeyBuffer(dc, w, keySectionH)) {
         InterlockedExchange(&m_analysisDonePosted, 0);
+        InterlockedExchange(&m_syncPosted, 0);
         return;
     }
 
@@ -3606,8 +3625,7 @@ void CPianoRoll::OnPaint()
     bool didRollScroll = false;
     bool needAnotherRollFrame = false;
 
-    // pending 分を1回の OnPaint で消化する（1枚ずつだと遅延時に見た目速度が落ちる）。
-    // 中間行は履歴、最後は live。スクロール経路は履歴のフルコピーを避ける。
+    // pending 分は1回の BitBlt スクロールで消化（n 回フル転送しない）。
     if (pending > 0 && m_rollReady) {
         int n = pending;
         if (n > 3) n = 3;
@@ -3621,22 +3639,12 @@ void CPianoRoll::OnPaint()
             histCount = avail;
             LeaveCriticalSection(&m_cs);
         }
-        bool ok = true;
-        int totalScrollPx = 0;
-        for (int i = 0; i < n && ok; ++i) {
-            const NoteFrame& row = (i == n - 1)
-                ? liveSnap
-                : ((histCount > (n - 1 - i)) ? histSnap[n - 1 - i] : liveSnap);
-            ok = TryAdvanceRollBuffer(w, rollH, 0, nullptr, 1, row);
-            if (ok) totalScrollPx += m_lastScrollPx;
-        }
-        if (ok) {
+        if (TryAdvanceRollBuffer(w, rollH, histCount, histSnap, n, liveSnap)) {
             EnterCriticalSection(&m_cs);
             m_framesPending -= n;
             if (m_framesPending < 0) m_framesPending = 0;
             needAnotherRollFrame = (m_framesPending > 0);
             LeaveCriticalSection(&m_cs);
-            m_lastScrollPx = totalScrollPx;
             m_rollScrollValid = true;
             m_rollReady = true;
             didRollUpdate = true;
@@ -3713,14 +3721,14 @@ void CPianoRoll::OnPaint()
             }
         }
         if (bgOk) {
+            // 下地バーを退避 → 事前描画した凡例ステッカーを貼る → 提示後に下地へ戻す
             m_legendBgDC.BitBlt(0, 0, pw, ph, &m_rollDC, lgPanel.left, lgPanel.top, SRCCOPY);
-            // 半透明下地は毎フレーム（下のバーを透かす）。文字・バッジはキャッシュ。
-            PianoFillRectAlpha(m_rollDC, lgPanel, RGB(14, 14, 20), 170);
             if (EnsureExprLegendCache(dc, w, rollH) && m_legendDC.GetSafeHdc()) {
-                m_rollDC.TransparentBlt(lgPanel.left, lgPanel.top, pw, ph,
-                    const_cast<CDC*>(&m_legendDC), 0, 0, pw, ph, RGB(255, 0, 255));
+                m_rollDC.BitBlt(lgPanel.left, lgPanel.top, pw, ph,
+                    const_cast<CDC*>(&m_legendDC), 0, 0, SRCCOPY);
             }
             else {
+                m_rollDC.FillSolidRect(&lgPanel, RGB(14, 14, 20));
                 DrawExprLegendContent(m_rollDC, w, rollH, lgPanel, false);
             }
             legendBaked = true;
@@ -3737,13 +3745,16 @@ void CPianoRoll::OnPaint()
         }
         if (m_chromaCache.Ensure(dc.GetSafeHdc(), w, h)) {
             if (m_rollReady && didRollUpdate) {
-                if (didRollScroll && m_lastScrollPx > 0 && m_chromaReady) {
+                if (didRollScroll && m_lastScrollPx > 0 && m_chromaReady
+                    && m_lastScrollPx < rollH) {
                     // スクロール時: キャッシュDIBを memmove で繰り上げ、
-                    // チャネルキー→アルファ変換は変化領域(下端の新ライブ行＋凡例)のみ。
-                    // ロール全域(O(w×rollH))の再変換を避けてアクリル時を大幅軽量化。
+                    // 変化帯のみ再変換。scrollPx>=rollH のときは下の else で全域更新。
                     m_chromaCache.ScrollRows(0, rollH, m_lastScrollPx);
-                    const int rowPitch = HistoryRowPitch(rollH);
-                    int bandTop = rollH - m_lastScrollPx - rowPitch - 2;
+                    int bandTop = m_lastScrollHealTop;
+                    if (bandTop <= 0) {
+                        const int rowPitch = HistoryRowPitch(rollH);
+                        bandTop = rollH - m_lastScrollPx - rowPitch - 2;
+                    }
                     if (bandTop < 0) bandTop = 0;
                     const int bandH = rollH - bandTop;
                     if (bandH > 0)
@@ -3809,8 +3820,10 @@ void CPianoRoll::OnPaint()
     // 残りの保留フレームは次の解析完了(OnAnalysisDone)/同期(OnSyncRequest)時に描く。
     (void)needAnotherRollFrame;
 
-    // 描画完了後に ANALYSIS_DONE を開放（背圧）。閉じると EQ が軽くなる現象と同系統。
+    // 描画完了後に ANALYSIS_DONE / SYNC を開放（背圧）。
+    // 閉じると軽くなる現象の主因だった「描画中の再 Post 連鎖」を断つ。
     InterlockedExchange(&m_analysisDonePosted, 0);
+    InterlockedExchange(&m_syncPosted, 0);
 
     // [デバッグ用] どの機能が有効な状態でビルド・実行されているかを画面に直接表示する。
     // これが表示されなければ、この CPianoRoll.cpp が実際には動いていない証拠になる。
