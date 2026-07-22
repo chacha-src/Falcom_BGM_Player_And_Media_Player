@@ -6,6 +6,7 @@
 #include "PlayList.h"
 #include "CEqualizer.h"
 #include "CAnalyzerDlg.h"
+#include "CPromptEngine.h"
 #include <afxmt.h>
 #include <vector>
 
@@ -564,6 +565,7 @@ void SongParams_Sync(bool exporting)
 	if (path.IsEmpty()) return;
 
 	const bool feature = (savedata.saveSongParams != 0);
+	const bool promptOn = (MpPromptIsActive() != FALSE);
 
 	if (exporting) {
 		// WAV 出力: 曲頭で 1 回だけ呼ばれる(メインスレッド)。
@@ -583,7 +585,11 @@ void SongParams_Sync(bool exporting)
 
 	if (songChanged) {
 		// --- 曲が変わった ---
-		FlushIfDirty();
+		// プロンプト実行中の改変値は曲ごと保存へ落とさない
+		if (promptOn)
+			g_dirty = false;
+		else
+			FlushIfDirty();
 		s_curPath = path;
 		s_curList = list;
 		s_curMode = md;
@@ -599,8 +605,10 @@ void SongParams_Sync(bool exporting)
 					og->PostMessage(WM_APP_SONGPARAM_RESTORE, 0, (LPARAM)new SongParam(e));
 			}
 			else {
-				SnapshotCurrent(s_lastSaved);
-				s_baselineValid = true;
+				if (!promptOn) {
+					SnapshotCurrent(s_lastSaved);
+					s_baselineValid = true;
+				}
 			}
 		}
 		return;
@@ -608,6 +616,9 @@ void SongParams_Sync(bool exporting)
 
 	// --- 同じ曲 ---
 	if (!feature) { s_baselineValid = false; return; }
+
+	// プロンプト実行中はピッチ/EQ等が時系列で動くため、曲ごと保存しない
+	if (promptOn) return;
 
 	if (!s_baselineValid) {
 		SnapshotCurrent(s_lastSaved);

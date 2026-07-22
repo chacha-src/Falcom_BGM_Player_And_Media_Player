@@ -63,90 +63,105 @@ static CString MpPromptLegendText()
 		L"2. [実行] で解析・有効化 → 演奏中、時刻になると自動適用\r\n"
 		L"3. [停止]=適用停止(値維持)  [リセット]=実行前に戻す  [クリア]=本文消去\r\n"
 		L"※ 時刻はメディアプレイヤー・バナー(GDI)の時計と同じ基準です\r\n"
+		L"※ 適用はDS先読み分を先取りするため、記載した秒で聴感上も切り替わります\r\n"
 		L"\r\n"
 		L"【形式】 @<cmd><時刻>[-<終了時刻>][<値>[-<終了値>]]\r\n"
 		L"【時刻】 秒(50) または 分:秒(1:20)。例: 1:20 = 80秒\r\n"
-		L"【値】 0〜200 (100=原曲)。[]内2値 = 開始〜終了を線形補間\r\n"
+		L"【値】 基本は0〜200 (100=原曲)。[]内2値 = 開始〜終了を線形補間\r\n"
 		L"【基本】 p=ピッチ  t=テンポ  d=DirectSound音量\r\n"
 		L"【EQ周波数帯】(小文字 a-o = イコライザー15帯)\r\n"
 		L"  a=25 b=40 c=63 d=100 e=160 f=250 g=400 h=630 i=1k\r\n"
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
-		L"【EQ項目】(大文字 M/N/K/I/S)\r\n"
+		L"【EQ項目】(大文字 M/N/K/I/S/E/F)\r\n"
 		L"  M=マスター N=鮮明 K=高低(バランス) I=密度 S=立体\r\n"
-		L"  (互換: 小文字 s も立体。sb/sl 演出は2文字)\r\n"
+		L"  E=環境番号(0〜100, 0=なし)  F=環境のかかり具合(0〜100%)\r\n"
+		L"  (互換: 小文字 s も立体。sb/sl 演出は2文字。小文字 e/f は周波数帯)\r\n"
 		L"【効果】 r=リバーブ  c=コーラス  y=ディレイ\r\n"
 		L"【演出】 sb=しょんぼり  br=明るめ  sl=スロー  fa=ファスト (値不要)\r\n"
 		L"【例1】 @p50-1:20[100-120]  … 50秒〜1:20でピッチ100→120%\r\n"
 		L"【例2】 @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
-		L"【例3】 @t0-30[100-80]  … 曲頭から30秒かけてテンポ100→80%",
+		L"【例3】 @t0-30[100-80]  … 曲頭から30秒かけてテンポ100→80%\r\n"
+		L"【例4】 @E30[12] @F30-1:00[0-80]  … 30秒で環境#12、かかり具合を30秒〜1:00で0→80%",
 		L"[Format] @<cmd><time>[-<end>][<val>[-<endVal>]]\r\n"
 		L"[Time] sec(50) or min:sec(1:20). Same as GDI banner clock.\r\n"
 		L"[Value] 0-200 (100=original). Two values in [] = linear ramp.\r\n"
 		L"[Basic] p=pitch t=tempo d=DirectSound volume\r\n"
 		L"[EQ Hz bands] lowercase a-o: a=25..h=630 i=1k j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k\r\n"
-		L"[EQ controls] uppercase M/N/K/I/S: master/clarity/balance/density/stereo\r\n"
+		L"[EQ controls] uppercase M/N/K/I/S/E/F: master/clarity/balance/density/stereo\r\n"
+		L"  E=env#(0-100,0=none) F=env amount(0-100%)\r\n"
 		L"[FX] r=reverb c=chorus y=delay\r\n"
 		L"[Presets] sb=melancholy br=bright sl=slow fa=fast (no value)\r\n"
-		L"[Ex1] @p50-1:20[100-120]  [Ex2] @p1:50[100] @d2:00[80] @sb1:30",
+		L"[Ex1] @p50-1:20[100-120]  [Ex2] @p1:50[100] @d2:00[80] @sb1:30\r\n"
+		L"[Ex3] @E30[12] @F30-60[0-80]  env#12 at 30s, amount 0→80% over 30-60s",
 		L"[Format] @<cmd><heure>[-<fin>][<val>[-<finVal>]]\r\n"
 		L"[Heure] sec(50) ou min:sec(1:20). Meme base que l'horloge GDI.\r\n"
 		L"[Valeur] 0-200 (100=original). Deux valeurs [] = rampe lineaire.\r\n"
 		L"[Base] p=hauteur t=tempo d=volume DS\r\n"
-		L"[EQ] a-o  m=master n=clarte k=tonalite i=densite s=stereo\r\n"
+		L"[EQ] a-o  M/N/K/I/S  E=env#(0-100) F=intensite env(0-100%)\r\n"
 		L"[FX] r=reverb c=chorus y=delay  [Presets] sb/br/sl/fa\r\n"
-		L"[Ex] @p50-1:20[100-120]  @p1:50[100]  @sb1:30  @br2:00",
+		L"[Ex] @p50-1:20[100-120]  @E30[12] @F30-60[0-80]",
 		L"[Formato] @<cmd><tempo>[-<fine>][<val>[-<fineVal>]]\r\n"
 		L"[Tempo] sec(50) o min:sec(1:20). Come l'orologio GDI del banner.\r\n"
 		L"[Valore] 0-200 (100=originale). Due valori [] = rampa lineare.\r\n"
 		L"[Base] p=intonazione t=tempo d=volume DS\r\n"
-		L"[EQ] a-o  m=master n=chiarezza k=tono i=densita s=stereo\r\n"
+		L"[EQ] a-o  M/N/K/I/S  E=env#(0-100) F=intensita env(0-100%)\r\n"
 		L"[FX] r=reverb c=chorus y=delay  [Preset] sb/br/sl/fa\r\n"
-		L"[Es] @p50-1:20[100-120]  @p1:50[100]  @sb1:30  @br2:00",
+		L"[Es] @p50-1:20[100-120]  @E30[12] @F30-60[0-80]",
 		L"[Formato] @<cmd><tiempo>[-<fin>][<val>[-<finVal>]]\r\n"
 		L"[Tiempo] seg(50) o min:seg(1:20). Igual que el reloj GDI del banner.\r\n"
 		L"[Valor] 0-200 (100=original). Dos valores [] = rampa lineal.\r\n"
 		L"[Base] p=tono t=tempo d=volumen DS\r\n"
-		L"[EQ] a-o  m=master n=claridad k=tono i=densidad s=estereo\r\n"
+		L"[EQ] a-o  M/N/K/I/S  E=env#(0-100) F=intensidad env(0-100%)\r\n"
 		L"[FX] r=reverb c=chorus y=delay  [Preset] sb/br/sl/fa\r\n"
-		L"[Ej] @p50-1:20[100-120]  @p1:50[100]  @sb1:30  @br2:00",
+		L"[Ej] @p50-1:20[100-120]  @E30[12] @F30-60[0-80]",
 		L"[형식] @<cmd><시각>[-<종료>][<값>[-<종료값>]]\r\n"
 		L"[시각] 초(50) 또는 분:초(1:20). GDI 배너 시계와 동일.\r\n"
 		L"[값] 0-200 (100=원곡). []에 2값 = 선형 보간.\r\n"
-		L"[기본] p=피치 t=템포 d=DS음량  [EQ] a-o m/n/k/i/s  [FX] r/c/y\r\n"
-		L"[연출] sb/br/sl/fa  [예] @p50-1:20[100-120] @p1:50[100] @sb1:30",
+		L"[기본] p=피치 t=템포 d=DS음량  [EQ] a-o M/N/K/I/S  E=환경#(0-100) F=강도(0-100%)\r\n"
+		L"[FX] r/c/y  [연출] sb/br/sl/fa\r\n"
+		L"[예] @p50-1:20[100-120] @E30[12] @F30-60[0-80]",
 		L"【格式】 @<cmd><时间>[-<结束>][<值>[-<结束值>]]\r\n"
 		L"【时间】 秒(50)或分:秒(1:20)。与GDI横幅时钟相同。\r\n"
 		L"【值】 0-200 (100=原曲)。[]内两值=线性插值。\r\n"
-		L"【基本】 p=音高 t=速度 d=DS音量  【EQ】 a-o m/n/k/i/s  【效果】 r/c/y\r\n"
-		L"【演出】 sb/br/sl/fa  【例】 @p50-1:20[100-120] @p1:50[100] @sb1:30",
+		L"【基本】 p=音高 t=速度 d=DS音量\r\n"
+		L"【EQ】 a-o  M/N/K/I/S  E=环境编号(0-100) F=环境强度(0-100%)\r\n"
+		L"【效果】 r/c/y  【演出】 sb/br/sl/fa\r\n"
+		L"【例】 @p50-1:20[100-120] @E30[12] @F30-60[0-80]",
 		L"[الصيغة] @<cmd><وقت>[-<نهاية>][<قيمة>[-<قيمة النهاية>]]\r\n"
 		L"[الوقت] كساعة GDI على اللافتة. [القيمة] 0-200، [] منحدر.\r\n"
-		L"p=طبقة t=إيقاع d=صوت DS  a-o EQ  r/c/y  sb/br/sl/fa\r\n"
-		L"مثال: @p50-1:20[100-120] @p1:50[100] @sb1:30 @br2:00",
+		L"p=طبقة t=إيقاع d=صوت DS  a-o EQ  E=بيئة#(0-100) F=شدة(0-100%)\r\n"
+		L"r/c/y  sb/br/sl/fa\r\n"
+		L"مثال: @p50-1:20[100-120] @E30[12] @F30-60[0-80]",
 		L"[Формат] @<cmd><время>[-<конец>][<знач>[-<конЗнач>]]\r\n"
 		L"[Время] Как часы GDI на баннере. [Знач] 0-200, [] рампа.\r\n"
-		L"p=высота t=темп d=DS  a-o EQ  r/c/y  sb/br/sl/fa\r\n"
-		L"Прим: @p50-1:20[100-120] @p1:50[100] @sb1:30 @br2:00",
+		L"p=высота t=темп d=DS  a-o EQ  E=среда#(0-100) F=сила(0-100%)\r\n"
+		L"r/c/y  sb/br/sl/fa\r\n"
+		L"Прим: @p50-1:20[100-120] @E30[12] @F30-60[0-80]",
 		L"[Format] @<cmd><zeit>[-<ende>][<wert>[-<endWert>]]\r\n"
 		L"[Zeit] Wie GDI-Banner. [Wert] 0-200, [] Rampe.\r\n"
-		L"p/Tonhoehe t/Tempo d/DS  a-o EQ  r/c/y FX  sb/br/sl/fa\r\n"
-		L"z.B.: @p50-1:20[100-120] @p1:50[100] @sb1:30 @br2:00",
+		L"p/Tonhoehe t/Tempo d/DS  a-o EQ  E=Umgebung#(0-100) F=Staerke(0-100%)\r\n"
+		L"r/c/y FX  sb/br/sl/fa\r\n"
+		L"z.B.: @p50-1:20[100-120] @E30[12] @F30-60[0-80]",
 		L"[Formato] @<cmd><tempo>[-<fim>][<val>[-<valFim>]]\r\n"
 		L"[Tempo] Igual ao GDI. [Valor] 0-200, [] rampa.\r\n"
-		L"p=tom t=andamento d=DS  a-o EQ  r/c/y  sb/br/sl/fa\r\n"
-		L"Ex: @p50-1:20[100-120] @p1:50[100] @sb1:30 @br2:00",
+		L"p=tom t=andamento d=DS  a-o EQ  E=amb#(0-100) F=intensidade(0-100%)\r\n"
+		L"r/c/y  sb/br/sl/fa\r\n"
+		L"Ex: @p50-1:20[100-120] @E30[12] @F30-60[0-80]",
 		L"[Format] @<cmd><tijd>[-<einde>][<waarde>[-<eindWaarde>]]\r\n"
 		L"[Tijd] Zelfde als GDI-banner. [Waarde] 0-200, [] ramp.\r\n"
-		L"p=toon t=tempo d=DS  a-o EQ  r/c/y  sb/br/sl/fa\r\n"
-		L"Vb: @p50-1:20[100-120] @p1:50[100] @sb1:30 @br2:00",
+		L"p=toon t=tempo d=DS  a-o EQ  E=omgeving#(0-100) F=sterkte(0-100%)\r\n"
+		L"r/c/y  sb/br/sl/fa\r\n"
+		L"Vb: @p50-1:20[100-120] @E30[12] @F30-60[0-80]",
 		L"[Format] @<cmd><czas>[-<koniec>][<wart>[-<wartKoniec>]]\r\n"
 		L"[Czas] Jak zegar GDI. [Wartosc] 0-200, [] rampa.\r\n"
-		L"p=wysokosc t=tempo d=DS  a-o EQ  r/c/y  sb/br/sl/fa\r\n"
-		L"Np.: @p50-1:20[100-120] @p1:50[100] @sb1:30 @br2:00",
+		L"p=wysokosc t=tempo d=DS  a-o EQ  E=srod#(0-100) F=sila(0-100%)\r\n"
+		L"r/c/y  sb/br/sl/fa\r\n"
+		L"Np.: @p50-1:20[100-120] @E30[12] @F30-60[0-80]",
 		L"[Format] @<cmd><zaman>[-<bitis>][<deger>[-<bitisDeger>]]\r\n"
 		L"[Zaman] GDI banner saati ile ayni. [Deger] 0-200, [] rampa.\r\n"
-		L"p=perde t=tempo d=DS  a-o EQ  r/c/y  sb/br/sl/fa\r\n"
-		L"Orn: @p50-1:20[100-120] @p1:50[100] @sb1:30 @br2:00");
+		L"p=perde t=tempo d=DS  a-o EQ  E=ortam#(0-100) F=siddet(0-100%)\r\n"
+		L"r/c/y  sb/br/sl/fa\r\n"
+		L"Orn: @p50-1:20[100-120] @E30[12] @F30-60[0-80]");
 }
 
 static CString MpPromptEditLabelText()

@@ -134,6 +134,8 @@ void CEqualizer::SyncSlidersFromSavedata()
 		s.Format(L"%d", savedata.eqsoundeffect * 2);
 		m_seff.SetWindowText(s);
 	}
+	if (m_env.GetSafeHwnd())
+		m_env.SetCurSel(savedata.eqsoundenv);
 	if (m_smaster.GetSafeHwnd()) {
 		m_smaster.SetPos(200 - savedata.eq[15]);
 		s.Format(L"%d", savedata.eq[15]);

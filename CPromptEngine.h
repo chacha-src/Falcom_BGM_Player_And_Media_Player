@@ -2,7 +2,7 @@
 
 // メディアプレイヤーモード専用: 演奏時間ベースのプロンプト実行エンジン
 // 形式: @<cmd><time>[-<endTime>][<val>[-<endVal>]]
-// 例: @p50-1:20[100-120]  @p1:50[100]  @sb1:30
+// 例: @p50-1:20[100-120]  @p1:50[100]  @sb1:30  @E30[12] @F30-60[0-80]
 
 struct MpPromptBackup {
 	int pitchSl;   // 0..400 (200=100%)
@@ -12,6 +12,8 @@ struct MpPromptBackup {
 	int eqReverb;
 	int eqChorus;
 	int eqDelay;
+	int eqEnv;     // eqsoundenv 0..100
+	int eqEffect;  // eqsoundeffect 0..100
 };
 
 void MpPromptBackupCapture(MpPromptBackup& out);

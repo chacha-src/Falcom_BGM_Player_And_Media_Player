@@ -33,6 +33,8 @@ enum MpPromptCmd {
 	CMD_EQ_REVERB,
 	CMD_EQ_CHORUS,
 	CMD_EQ_DELAY,
+	CMD_EQ_ENV,      // 環境番号 (eqsoundenv)
+	CMD_EQ_EFFECT,   // 環境のかかり具合 (eqsoundeffect)
 	CMD_PRESET_SB,
 	CMD_PRESET_BR,
 	CMD_PRESET_SL,
@@ -160,6 +162,8 @@ static MpPromptCmd CmdFromLetters(TCHAR c1, TCHAR c2, BOOL& used2)
 	if (c1 == 'K') return CMD_EQ_KOUTEI;
 	if (c1 == 'I') return CMD_EQ_MITSUDO;
 	if (c1 == 'S') return CMD_EQ_RITTAI;
+	if (c1 == 'E') return CMD_EQ_ENV;      // 環境番号 (小文字 e=160Hz帯と区別)
+	if (c1 == 'F') return CMD_EQ_EFFECT;   // かかり具合
 	if (l1 == 'p') return CMD_PITCH;
 	if (l1 == 't') return CMD_TEMPO;
 	if (l1 == 'd') return CMD_DSVOL;
@@ -273,6 +277,20 @@ static void ApplyFx(int which, int val)
 	else savedata.eq_delay = val;
 }
 
+static void ApplyEqEnv(int val)
+{
+	if (val < 0) val = 0;
+	if (val > 100) val = 100;
+	savedata.eqsoundenv = val;
+}
+
+static void ApplyEqEffect(int val)
+{
+	if (val < 0) val = 0;
+	if (val > 100) val = 100;
+	savedata.eqsoundeffect = val;
+}
+
 static void ApplyPreset(MpPromptCmd cmd)
 {
 	switch (cmd) {
@@ -325,6 +343,8 @@ static void ApplyEventValue(MpPromptCmd cmd, int val)
 	case CMD_EQ_REVERB: ApplyFx(0, val); break;
 	case CMD_EQ_CHORUS: ApplyFx(1, val); break;
 	case CMD_EQ_DELAY: ApplyFx(2, val); break;
+	case CMD_EQ_ENV: ApplyEqEnv(val); break;
+	case CMD_EQ_EFFECT: ApplyEqEffect(val); break;
 	default:
 		if (cmd >= CMD_EQ_BAND0 && cmd < CMD_EQ_MASTER)
 			ApplyEqIndex(cmd - CMD_EQ_BAND0, val);
@@ -356,6 +376,8 @@ static void ApplyBackupForCmd(MpPromptCmd cmd)
 	case CMD_EQ_REVERB: ApplyFx(0, g_backup.eqReverb); break;
 	case CMD_EQ_CHORUS: ApplyFx(1, g_backup.eqChorus); break;
 	case CMD_EQ_DELAY: ApplyFx(2, g_backup.eqDelay); break;
+	case CMD_EQ_ENV: ApplyEqEnv(g_backup.eqEnv); break;
+	case CMD_EQ_EFFECT: ApplyEqEffect(g_backup.eqEffect); break;
 	default:
 		if (cmd >= CMD_EQ_BAND0 && cmd < CMD_EQ_MASTER)
 			ApplyEqIndex(cmd - CMD_EQ_BAND0, g_backup.eq[cmd - CMD_EQ_BAND0]);
@@ -500,6 +522,8 @@ void MpPromptBackupCapture(MpPromptBackup& out)
 	out.eqReverb = savedata.eq_reverb;
 	out.eqChorus = savedata.eq_chorus;
 	out.eqDelay = savedata.eq_delay;
+	out.eqEnv = savedata.eqsoundenv;
+	out.eqEffect = savedata.eqsoundeffect;
 }
 
 void MpPromptBackupRestore(const MpPromptBackup& in)
@@ -515,6 +539,8 @@ void MpPromptBackupRestore(const MpPromptBackup& in)
 	savedata.eq_reverb = in.eqReverb;
 	savedata.eq_chorus = in.eqChorus;
 	savedata.eq_delay = in.eqDelay;
+	savedata.eqsoundenv = in.eqEnv;
+	savedata.eqsoundeffect = in.eqEffect;
 }
 
 void MpPromptBackupToSavedata(const MpPromptBackup& b)
@@ -527,6 +553,8 @@ void MpPromptBackupToSavedata(const MpPromptBackup& b)
 	savedata.mpPromptBackupEqReverb = b.eqReverb;
 	savedata.mpPromptBackupEqChorus = b.eqChorus;
 	savedata.mpPromptBackupEqDelay = b.eqDelay;
+	savedata.mpPromptBackupEqEnv = b.eqEnv;
+	savedata.mpPromptBackupEqEffect = b.eqEffect;
 }
 
 void MpPromptBackupFromSavedata(MpPromptBackup& b)
@@ -538,6 +566,8 @@ void MpPromptBackupFromSavedata(MpPromptBackup& b)
 	b.eqReverb = savedata.mpPromptBackupEqReverb;
 	b.eqChorus = savedata.mpPromptBackupEqChorus;
 	b.eqDelay = savedata.mpPromptBackupEqDelay;
+	b.eqEnv = savedata.mpPromptBackupEqEnv;
+	b.eqEffect = savedata.mpPromptBackupEqEffect;
 }
 
 BOOL MpPromptParse(const CString& text, CString* errMsg)
@@ -627,10 +657,33 @@ void MpPromptTickAtTime(double tSec)
 {
 	if (!g_active || g_events.empty() || !og) return;
 	if (g_promptAwaitPlayStart) return;
-	const double t = tSec;
-	if (t < 0.0) return;
+	if (tSec < 0.0) return;
 
-	for (int ci = CMD_PITCH; ci <= CMD_EQ_DELAY; ++ci) {
+	// tSec は GDI 聴感時刻。適用はデコード先頭(playb)基準で行い、
+	// DS キュー遅延(~1秒)ぶん先に書き込む → 記載時刻と聴感が一致する。
+	double t = tSec;
+	extern int mode;
+	extern BOOL videoonly;
+	if (!videoonly && mode != -2 && wavbit_sample_Hz > 0) {
+		static const double wavv2[] = { 0, 2.0, 1.0, 2.0 / 3.0, 2.0 / 4.0, 2.0 / 5.0, 2.0 / 6.0 };
+		int ch = wavchannel;
+		if (ch < 0 || ch > 6) ch = 2;
+		const double rateDiv = (double)wavbit_sample_Hz / wavv2[ch];
+		if (rateDiv > 0.0) {
+			__int64 pb = 0;
+			{
+				std::lock_guard<std::mutex> lk(cl2);
+				pb = playb;
+			}
+			double tDec = (double)pb / rateDiv;
+			if (mode == -9 && wavchannel > 2)
+				tDec *= (double)wavchannel / 2.0;
+			if (tDec > t)
+				t = tDec;
+		}
+	}
+
+	for (int ci = CMD_PITCH; ci <= CMD_EQ_EFFECT; ++ci) {
 		MpPromptCmd cmd = (MpPromptCmd)ci;
 		int idx = FindLastEventIndex(cmd, t);
 		if (idx < 0) {
@@ -656,6 +709,10 @@ void MpPromptTickAtTime(double tSec)
 		ApplyPreset(ev.cmd);
 		g_lastPresetIdx = i;
 	}
+
+	// EQ窓が開いていると OnTimer がスライダー→savedata 上書きするため、適用後に同期する
+	if (og->m_EqualizerDlg && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
+		og->m_EqualizerDlg->SyncSlidersFromSavedata();
 }
 
 void MpPromptPushHistory(LPCTSTR text)
