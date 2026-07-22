@@ -373,8 +373,9 @@ void CPianoRoll::PauseAnalysis()
     m_feedEnabled = false;
     InterlockedIncrement(&m_analysisEpoch);
     InterlockedExchange(&m_jobPending, 0);
-    // Peek で SYNC を捨てる前に落とす。残ると RequestSyncFromMainUi が永久に no-op になる。
+    // Peek で SYNC/ANALYSIS_DONE を捨てる前に落とす。残ると以降の Post が永久に no-op になる。
     InterlockedExchange(&m_syncPosted, 0);
+    InterlockedExchange(&m_analysisDonePosted, 0);
     EnterCriticalSection(&m_jobCs);
     m_jobFrameCount = 0;
     LeaveCriticalSection(&m_jobCs);
@@ -398,8 +399,9 @@ void CPianoRoll::ResetPlaybackState()
         while (PeekMessage(&msg, m_hWnd, WM_PIANOROLL_ANALYSIS_DONE, WM_PIANOROLL_ANALYSIS_DONE, PM_REMOVE)) {}
         while (PeekMessage(&msg, m_hWnd, WM_PIANOROLL_SYNC, WM_PIANOROLL_SYNC, PM_REMOVE)) {}
     }
-    // Peek 後も必ずクリア（捨てた SYNC のフラグが残ると2曲目以降スクロール停止）
+    // Peek 後も必ずクリア（捨てたメッセージのフラグが残ると2曲目以降描画停止）
     InterlockedExchange(&m_syncPosted, 0);
+    InterlockedExchange(&m_analysisDonePosted, 0);
 
     m_chMeterCount = 0;
     for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
@@ -2192,11 +2194,11 @@ namespace PianoDraw
         if (rc.Width() < 4 || rc.Height() < 4 || !pFont) return;
         const COLORREF fg = ExprColorForFlag(flag);
         dc.FillSolidRect(&rc, RGB(14, 14, 20));
-        CPen border(PS_SOLID, 1, fg);
-        CPen* pOldPen = dc.SelectObject(&border);
+        HGDIOBJ oldPen = dc.SelectObject(::GetStockObject(DC_PEN));
+        ::SetDCPenColor(dc.GetSafeHdc(), fg);
         dc.MoveTo(rc.left, rc.bottom - 1); dc.LineTo(rc.left, rc.top); dc.LineTo(rc.right - 1, rc.top);
         dc.LineTo(rc.right - 1, rc.bottom - 1); dc.LineTo(rc.left, rc.bottom - 1);
-        dc.SelectObject(pOldPen);
+        dc.SelectObject(oldPen);
 
         CFont* pOld = dc.SelectObject(pFont);
         dc.SetBkMode(TRANSPARENT);
@@ -2401,6 +2403,7 @@ void CPianoRoll::DetachForDestroy()
     m_feedEnabled = false;
     m_paintDisabled = true;
     InterlockedExchange(&m_syncPosted, 0);
+    InterlockedExchange(&m_analysisDonePosted, 0);
     StopAnalysisWorker();
     EnterCriticalSection(&m_cs);
     m_framesPending = 0;
@@ -2572,6 +2575,8 @@ void CPianoRoll::EnsurePaintFonts(int clientW, int keyH, int rollH)
     m_fontCacheKeyH = keyH;
     m_fontCacheRollH = rollH;
     m_paintFontsReady = true;
+    // フォント差し替え後は凡例キャッシュを作り直す
+    ReleaseExprLegendCache();
 }
 
 void CPianoRoll::GetExprLegendPanelRect(int rollW, int rollH, CRect& panel) const
@@ -2652,7 +2657,16 @@ bool CPianoRoll::EnsureExprLegendCache(CDC& refDC, int rollW, int rollH) const
         && m_legendW == pw && m_legendH == ph && m_legendDC.GetSafeHdc())
         return true;
 
-    ReleaseExprLegendCache();
+    // legendBg（焼き込み退避用）は消さない。オーバーレイキャッシュだけ作り直す。
+    if (m_legendDC.GetSafeHdc()) {
+        if (m_legendOldBmp) m_legendDC.SelectObject(m_legendOldBmp);
+        m_legendDC.DeleteDC();
+    }
+    m_legendBmp.DeleteObject();
+    m_legendOldBmp = nullptr;
+    m_legendW = m_legendH = 0;
+    m_legendReady = false;
+    m_legendCacheRollW = m_legendCacheRollH = -1;
 
     if (!m_legendDC.CreateCompatibleDC(&refDC)) return false;
     if (!m_legendBmp.CreateCompatibleBitmap(&refDC, pw, ph)) {
@@ -2660,8 +2674,9 @@ bool CPianoRoll::EnsureExprLegendCache(CDC& refDC, int rollW, int rollH) const
         return false;
     }
     m_legendOldBmp = m_legendDC.SelectObject(&m_legendBmp);
-
-    DrawExprLegendContent(m_legendDC, rollW, rollH, CRect(0, 0, pw, ph));
+    // マゼンタ下地 + fillPanelBg=false でオーバーレイのみキャッシュ（毎フレーム再描画しない）
+    m_legendDC.FillSolidRect(0, 0, pw, ph, RGB(255, 0, 255));
+    DrawExprLegendContent(m_legendDC, rollW, rollH, CRect(0, 0, pw, ph), false);
 
     m_legendW = pw;
     m_legendH = ph;
@@ -2729,7 +2744,7 @@ void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH) const
     mem.DeleteDC();
 }
 
-void CPianoRoll::DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRect& panel) const
+void CPianoRoll::DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRect& panel, bool fillPanelBg) const
 {
     using namespace PianoDraw;
     if (panel.IsRectEmpty()) return;
@@ -2763,13 +2778,14 @@ void CPianoRoll::DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRec
     const int rows = iconsOnly ? 1 : (n + cols - 1) / cols;
 
     // 背景は半透明で塗り、下を流れるバーがうっすら透ける(可読性は保つ濃さ)。
-    PianoFillRectAlpha(dc, panel, RGB(14, 14, 20), 170);
-    CPen border(PS_SOLID, 1, RGB(70, 70, 82));
-    CPen* pOldPen = dc.SelectObject(&border);
+    if (fillPanelBg)
+        PianoFillRectAlpha(dc, panel, RGB(14, 14, 20), 170);
+    HGDIOBJ oldPen = dc.SelectObject(::GetStockObject(DC_PEN));
+    ::SetDCPenColor(dc.GetSafeHdc(), RGB(70, 70, 82));
     dc.MoveTo(panel.left, panel.bottom - 1); dc.LineTo(panel.left, panel.top);
     dc.LineTo(panel.right - 1, panel.top); dc.LineTo(panel.right - 1, panel.bottom - 1);
     dc.LineTo(panel.left, panel.bottom - 1);
-    dc.SelectObject(pOldPen);
+    dc.SelectObject(oldPen);
 
     CFont* pLeg = CFont::FromHandle((HFONT)m_fontExprLegend.GetSafeHandle());
     CFont* pSym = CFont::FromHandle((HFONT)m_fontExprSymbol.GetSafeHandle());
@@ -2827,14 +2843,15 @@ void CPianoRoll::DrawHistoryGrid(CDC& dc, int width, int yFrom, int yTo) const
 {
     if (yFrom < 0) yFrom = 0;
     if (yFrom >= yTo) return;
-    CPen gridPen(PS_SOLID, 1, RGB(34, 34, 34));
-    CPen* pOldPen = dc.SelectObject(&gridPen);
+    // 毎フレーム CreatePen すると長時間で GDI が断片化し EQ 描画まで重くなる
+    HGDIOBJ oldPen = dc.SelectObject(::GetStockObject(DC_PEN));
+    ::SetDCPenColor(dc.GetSafeHdc(), RGB(34, 34, 34));
     for (int i = 1; i < KEY_COUNT; ++i) {
         int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
         dc.MoveTo(xL, yFrom);
         dc.LineTo(xL, yTo);
     }
-    dc.SelectObject(pOldPen);
+    dc.SelectObject(oldPen);
 }
 
 int CPianoRoll::HistoryRowPitch(int rollH) const
@@ -2889,8 +2906,8 @@ void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const 
     // 再アタック(タイ連結中の同鍵連打)が起きた鍵は、バーの左端に細い白線を
     // 一本引いて「ここでノートが切り替わった」ことを見た目でも分かるようにする。
     // ゲート100で沈黙区間がなくても、この線でO6L4CCCCCCのような連打を区別できる。
-    CPen sepPen(PS_SOLID, 1, RGB(255, 255, 255));
-    CPen* pOldPen = dc.SelectObject(&sepPen);
+    HGDIOBJ oldPen = dc.SelectObject(::GetStockObject(DC_PEN));
+    ::SetDCPenColor(dc.GetSafeHdc(), RGB(255, 255, 255));
     for (int i = 0; i < KEY_COUNT; ++i) {
         if (!frame.active[i] || !frame.reattack[i]) continue;
         int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
@@ -2898,7 +2915,7 @@ void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const 
         dc.MoveTo(xL + 1, yTop);
         dc.LineTo(xL + 1, yBot);
     }
-    dc.SelectObject(pOldPen);
+    dc.SelectObject(oldPen);
 
     if (!m_paintFontsReady || !m_fontExprSymbol.GetSafeHandle()) return;
     CFont* pSymFont = CFont::FromHandle((HFONT)m_fontExprSymbol.GetSafeHandle());
@@ -3093,8 +3110,12 @@ LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
 
 LRESULT CPianoRoll::OnAnalysisDone(WPARAM, LPARAM)
 {
-    if (m_paintDisabled || !::IsWindow(m_hWnd)) return 0;
-    // V-Sync には縛らず、解析が出来たフレームから描画する
+    // posted フラグは OnPaint 完了まで保持（描画背圧）。
+    // 先に降ろすと重い OnPaint 中に再 Post され、EQ コード更新が飢える。
+    if (m_paintDisabled || !::IsWindow(m_hWnd)) {
+        InterlockedExchange(&m_analysisDonePosted, 0);
+        return 0;
+    }
     ApplySyncInvalidate();
     return 0;
 }
@@ -3235,8 +3256,18 @@ DWORD CPianoRoll::AnalysisWorkerLoop()
                 didWork = true;
         }
 
-        if (didWork && ::IsWindow(m_hWnd))
-            PostMessage(WM_PIANOROLL_ANALYSIS_DONE, 0, 0);
+        // 多重 Post するとキューが空にならず WM_PAINT が飢餓する。
+        // coalesce + 最短 8ms（アナライザー KickUiPresent と同じ。ms2 にすると体感が重い）。
+        if (didWork && ::IsWindow(m_hWnd)) {
+            const DWORD now = GetTickCount();
+            if (m_lastAnalysisDonePostTick == 0 || (now - m_lastAnalysisDonePostTick) >= 8u) {
+                if (InterlockedCompareExchange(&m_analysisDonePosted, 1, 0) == 0) {
+                    m_lastAnalysisDonePostTick = now;
+                    if (!PostMessage(WM_PIANOROLL_ANALYSIS_DONE, 0, 0))
+                        InterlockedExchange(&m_analysisDonePosted, 0);
+                }
+            }
+        }
     }
     return 0;
 }
@@ -3397,11 +3428,11 @@ void CPianoRoll::DrawKeyboardToBuffer(CDC& memDC, int width, int keySectionH, in
     }
 
     {
-        CPen sepPen(PS_SOLID, 1, RGB(90, 90, 95));
-        CPen* pOldPen = memDC.SelectObject(&sepPen);
+        HGDIOBJ oldPen = memDC.SelectObject(::GetStockObject(DC_PEN));
+        ::SetDCPenColor(memDC.GetSafeHdc(), RGB(90, 90, 95));
         memDC.MoveTo(0, splitY); memDC.LineTo(width, splitY);
         memDC.MoveTo(0, 0); memDC.LineTo(width, 0);
-        memDC.SelectObject(pOldPen);
+        memDC.SelectObject(oldPen);
     }
 
     // アクティブキーに表現記号を重ねる（履歴バーと同じグリフをキー側にも表示）。
@@ -3499,23 +3530,33 @@ void CPianoRoll::PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH,
     }
 
     CCC_MainLockPaintClient(dc, m_hWnd);
+    InterlockedExchange(&m_analysisDonePosted, 0);
 }
 
 void CPianoRoll::OnPaint()
 {
     CPaintDC dc(this);
-    if (m_paintDisabled) return;
+    if (m_paintDisabled) {
+        InterlockedExchange(&m_analysisDonePosted, 0);
+        return;
+    }
     CRect rect;
     GetClientRect(&rect);
     const int w = rect.Width();
     const int h = rect.Height();
-    if (w <= 0 || h <= 0) return;
+    if (w <= 0 || h <= 0) {
+        InterlockedExchange(&m_analysisDonePosted, 0);
+        return;
+    }
 
     int keyH = h * 20 / 100;
     if (keyH < 50) keyH = 50; if (keyH > 100) keyH = 100;
     const int rollH = h - keyH;
     const int keySectionH = h - rollH;
-    if (rollH <= 0 || keySectionH <= 0) return;
+    if (rollH <= 0 || keySectionH <= 0) {
+        InterlockedExchange(&m_analysisDonePosted, 0);
+        return;
+    }
 
     if (CCC_MainLockPreferQuickPresent() && m_rollReady && m_keyBufReady
         && m_rollW == w && m_rollH == rollH && m_keyW == w && m_keyH == keySectionH) {
@@ -3529,8 +3570,10 @@ void CPianoRoll::OnPaint()
     const bool clipKey = clip.bottom > rollH;
 
     EnsurePaintFonts(w, keyH, rollH);
-    if (!EnsureRollBuffer(dc, w, rollH) || !EnsureKeyBuffer(dc, w, keySectionH))
+    if (!EnsureRollBuffer(dc, w, rollH) || !EnsureKeyBuffer(dc, w, keySectionH)) {
+        InterlockedExchange(&m_analysisDonePosted, 0);
         return;
+    }
 
     NoteFrame liveSnap;
     bool activesCopy[KEY_COUNT];
@@ -3563,20 +3606,59 @@ void CPianoRoll::OnPaint()
     bool didRollScroll = false;
     bool needAnotherRollFrame = false;
 
-    // スクロール経路は履歴フレームを使わない(TryAdvanceRollBufferはBitBltのみ)。
-    // 全描画(ComposeRollBuffer)が必要なときだけ履歴120フレーム(約253KB)をコピーする。
-    if (pending > 0 && m_rollReady
-        && TryAdvanceRollBuffer(w, rollH, 0, nullptr, pending, liveSnap)) {
-        EnterCriticalSection(&m_cs);
-        if (m_framesPending > 0) --m_framesPending;
-        needAnotherRollFrame = (m_framesPending > 0);
-        LeaveCriticalSection(&m_cs);
-        m_rollScrollValid = true;
-        m_rollReady = true;
-        didRollUpdate = true;
-        didRollScroll = true;
+    // pending 分を1回の OnPaint で消化する（1枚ずつだと遅延時に見た目速度が落ちる）。
+    // 中間行は履歴、最後は live。スクロール経路は履歴のフルコピーを避ける。
+    if (pending > 0 && m_rollReady) {
+        int n = pending;
+        if (n > 3) n = 3;
+        NoteFrame histSnap[3];
+        int histCount = 0;
+        if (n > 1) {
+            EnterCriticalSection(&m_cs);
+            const int avail = (m_historyCount < n) ? m_historyCount : n;
+            for (int i = 0; i < avail; ++i)
+                histSnap[i] = HistoryAt(i);
+            histCount = avail;
+            LeaveCriticalSection(&m_cs);
+        }
+        bool ok = true;
+        int totalScrollPx = 0;
+        for (int i = 0; i < n && ok; ++i) {
+            const NoteFrame& row = (i == n - 1)
+                ? liveSnap
+                : ((histCount > (n - 1 - i)) ? histSnap[n - 1 - i] : liveSnap);
+            ok = TryAdvanceRollBuffer(w, rollH, 0, nullptr, 1, row);
+            if (ok) totalScrollPx += m_lastScrollPx;
+        }
+        if (ok) {
+            EnterCriticalSection(&m_cs);
+            m_framesPending -= n;
+            if (m_framesPending < 0) m_framesPending = 0;
+            needAnotherRollFrame = (m_framesPending > 0);
+            LeaveCriticalSection(&m_cs);
+            m_lastScrollPx = totalScrollPx;
+            m_rollScrollValid = true;
+            m_rollReady = true;
+            didRollUpdate = true;
+            didRollScroll = true;
+        }
+        else {
+            NoteFrame histFull[MAX_HISTORY];
+            int histFullCount = 0;
+            EnterCriticalSection(&m_cs);
+            CopyHistorySnapshot(histFull, MAX_HISTORY, histFullCount);
+            LeaveCriticalSection(&m_cs);
+            ComposeRollBuffer(m_rollDC, w, rollH, histFullCount, histFull, liveSnap);
+            EnterCriticalSection(&m_cs);
+            m_framesPending = 0;
+            LeaveCriticalSection(&m_cs);
+            m_rollScrollValid = true;
+            m_rollReady = true;
+            didRollUpdate = true;
+            didRollScroll = false;
+        }
     }
-    else if (pending > 0 || rollDirty || !m_rollReady) {
+    else if (rollDirty || !m_rollReady) {
         NoteFrame histSnap[MAX_HISTORY];
         int histCount = 0;
         EnterCriticalSection(&m_cs);
@@ -3632,7 +3714,15 @@ void CPianoRoll::OnPaint()
         }
         if (bgOk) {
             m_legendBgDC.BitBlt(0, 0, pw, ph, &m_rollDC, lgPanel.left, lgPanel.top, SRCCOPY);
-            DrawExprLegendContent(m_rollDC, w, rollH, lgPanel);
+            // 半透明下地は毎フレーム（下のバーを透かす）。文字・バッジはキャッシュ。
+            PianoFillRectAlpha(m_rollDC, lgPanel, RGB(14, 14, 20), 170);
+            if (EnsureExprLegendCache(dc, w, rollH) && m_legendDC.GetSafeHdc()) {
+                m_rollDC.TransparentBlt(lgPanel.left, lgPanel.top, pw, ph,
+                    const_cast<CDC*>(&m_legendDC), 0, 0, pw, ph, RGB(255, 0, 255));
+            }
+            else {
+                DrawExprLegendContent(m_rollDC, w, rollH, lgPanel, false);
+            }
             legendBaked = true;
         }
     }
@@ -3718,6 +3808,9 @@ void CPianoRoll::OnPaint()
     // 連鎖し、アクリル時の重いペイントで UI スレッドを占有してしまう。
     // 残りの保留フレームは次の解析完了(OnAnalysisDone)/同期(OnSyncRequest)時に描く。
     (void)needAnotherRollFrame;
+
+    // 描画完了後に ANALYSIS_DONE を開放（背圧）。閉じると EQ が軽くなる現象と同系統。
+    InterlockedExchange(&m_analysisDonePosted, 0);
 
     // [デバッグ用] どの機能が有効な状態でビルド・実行されているかを画面に直接表示する。
     // これが表示されなければ、この CPianoRoll.cpp が実際には動いていない証拠になる。

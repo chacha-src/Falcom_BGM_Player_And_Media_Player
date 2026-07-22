@@ -413,7 +413,9 @@ private:
     int     m_fontCacheRollH = 0;
     bool    m_paintFontsReady = false;
     volatile LONG m_syncPosted = 0;   // RequestSyncFromMainUi の多重ポスト防止フラグ
+    volatile LONG m_analysisDonePosted = 0; // WM_PIANOROLL_ANALYSIS_DONE の多重ポスト防止
     DWORD m_lastSyncPostTick = 0;
+    DWORD m_lastAnalysisDonePostTick = 0;
     int   m_rollSpeedPct = 100;       // 表示スクロール速度(%) 25..200
     int   m_rollSpeedCredit = 0;      // PushFrame 用アキュムレータ(×100 基準)
     bool  m_frozen = false;           // 表示スクロール停止(解析は継続、ライブ行は更新)
@@ -441,7 +443,7 @@ private:
     void InvalidateRegions(bool roll, bool key);
     void EnsurePaintFonts(int clientW, int keyH, int rollH);
     void DrawExprLegend(CDC& dc, int rollW, int rollH) const;
-    void DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRect& panel) const;
+    void DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRect& panel, bool fillPanelBg = true) const;
     bool EnsureExprLegendCache(CDC& refDC, int rollW, int rollH) const;
     void ReleaseExprLegendCache() const;
     void GetExprLegendPanelRect(int rollW, int rollH, CRect& panel) const;

@@ -659,9 +659,10 @@ void CEqualizer::ApplyKeyCodesUi()
 
 LRESULT CEqualizer::OnEqKeyUpdate(WPARAM, LPARAM)
 {
-	AckEqKeyUiNotify();
+	// Ack は Apply 後（AckEqKeyUiNotify 内で dirty 再通知も行う）
 	if (::IsWindow(m_hWnd))
 		ApplyKeyCodesUi();
+	AckEqKeyUiNotify();
 #if 0
 	{
 		static DWORD s_last = 0, s_count = 0;

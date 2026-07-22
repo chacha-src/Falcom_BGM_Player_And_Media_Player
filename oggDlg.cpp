@@ -2668,7 +2668,8 @@ CSemaphore	m_Smp;
 
 PCMWAVEFORMAT    wfx;
 UINT ttt;
-int cc1, wl, t, oggsize, dd, loop1, loop2, loop1_2;//,oggsize1,oggsize2;
+int cc1, t, oggsize, dd, loop1, loop2, loop1_2;//,oggsize1,oggsize2;
+__int64 wl; // 書き出し累積バイト（G:合計時間）。2GB超WAV(RF64)対応のため64bit
 __int64 playb;
 // 曲終端のジャスト検出用（DirectSound 再生カーソル基準）。すべて「DS バッファへ書き込んだ総バイト数」の単位。
 //   g_dsWrittenBytes  : play() 開始以降に DS バッファへ書き込んだ累積バイト数（単調増加）
@@ -2779,8 +2780,7 @@ int ret2;
 // WAV出力（再生なし）用
 CString wavExportPath;
 int wavExportLoopCount = 0;
-// WAV書き出しの実データバイト数(64bit)。グローバル wl(int) は2GBで溢れるため、
-// ヘッダ確定/成否判定にはファイル実長から求めるこの値を用いる。
+// WAV書き出しの実データバイト数(64bit)。ヘッダ確定/成否判定はファイル実長から求める。
 __int64 g_wavExportDataBytes = 0;
 
 //#define OUTPUT_BUFFER_NUM  10
@@ -10390,7 +10390,7 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 	savedata.saveloop = 1;  // ループを有効にしてwavExportLoopCountで制御
 	g_wavExportDataBytes = 0;
 	play();
-	// wl(int)は2GBで溢れるため、実書き込みバイト数(64bit)で成否判定する
+	// 成否はファイル実長由来の g_wavExportDataBytes で判定（trim/fade後も正しい）
 	BOOL ok = (g_wavExportDataBytes > 0 && cc1 == 0);
 	if (ok && localOpts.trimLeadEnable)
 		ok = TrimLeadingSilenceWavFile(outputPath, localOpts.trimKeepSec);
@@ -12582,12 +12582,8 @@ int readBuffwav(char* bw, int cnt)
 	if (fade < 0.0001f) { fade = 0.0f; fadeadd = 0.0f; }
 	ApplyFadeCubedToInterleavedPcm(bw, cnt2);
 
-	if ((UINT)wl < (UINT)0x7fff0000) {
-		//				if (cc1 == 1)	cc.Write(bw, cnt);
-		if (cc1 == 1)	cc.Write(bw, cnt0);
-		//				if (cc1 == 1)	cc.Write(bufkpi, r);
-		wl += cnt0;
-	}
+	if (cc1 == 1)	cc.Write(bw, cnt0);
+	wl += cnt0;
 
 	{
 		float te = (float)tempo;
@@ -13549,10 +13545,8 @@ int readkpi(BYTE* bw, int cnt)
 			}
 		}
 
-		if ((UINT)wl < (UINT)0x7fff0000) {
-			if (cc1 == 1)	cc.Write(bw, cnt);
-			wl += cnt;
-		}
+		if (cc1 == 1)	cc.Write(bw, cnt);
+		wl += cnt;
 		lenl += cnt;
 	}
 	catch (SE_Exception e) {
@@ -13778,10 +13772,8 @@ int readm4a(BYTE* bw, int cnt)
 		else {
 			for (int i = 0; i < cnt / 2; i++) { c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c; }
 		}
-		if ((UINT)wl < (UINT)0x7fff0000) {
-			if (cc1 == 1)	cc.Write(bw, cnt);
-			wl += cnt;
-		}
+		if (cc1 == 1)	cc.Write(bw, cnt);
+		wl += cnt;
 		lenl += cnt;
 	}
 	return cnt;
@@ -14001,10 +13993,8 @@ int readflac(BYTE* bw, int cnt)
 		else {
 			for (int i = 0; i < lenl / 2; i++) { c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c; }
 		}
-		if ((UINT)wl < (UINT)0x7fff0000) {
-			if (cc1 == 1)	cc.Write(bw, lenl);
-			wl += lenl;
-		}
+		if (cc1 == 1)	cc.Write(bw, lenl);
+		wl += lenl;
 		//lenl += lenl;
 		//	playb+=lenl/4;
 	}
@@ -14105,12 +14095,8 @@ int readopus(BYTE* bw, int cnt)
 
 					int len2 = readtempo(bufkpi, r);
 					cnt4 = r;
-					if ((UINT)wl < (UINT)0x7fff0000) {
-						//				if (cc1 == 1)	cc.Write(bw, cnt);
-						if (cc1 == 1)	cc.Write(outputRawBytesData.data(), len2);
-						//				if (cc1 == 1)	cc.Write(bufkpi, r);
-						wl += len2;
-					}
+					if (cc1 == 1)	cc.Write(outputRawBytesData.data(), len2);
+					wl += len2;
 
 					if (len2 > 0) {
 						// 書き込み
@@ -14355,10 +14341,8 @@ int readdsd(BYTE* bw, int cnt)
 	og->FeedPianoRoll(bw, cnt2);
 	reset = FALSE;
 
-	if ((UINT)wl < (UINT)0x7fff0000) {
-		if (cc1 == 1)	cc.Write(bw, cnt2);
-		wl += cnt2;
-	}
+	if (cc1 == 1)	cc.Write(bw, cnt2);
+	wl += cnt2;
 
 
 	return cnt;
@@ -14647,10 +14631,8 @@ int readwav(BYTE* bw, int cnt)
 			c = (short)(((float)c) * fade * fade); b[i] = (short)c;
 		}
 	}
-	if ((UINT)wl < (UINT)0x7fff0000) {
-		if (cc1 == 1) cc.Write(bw, cnt2);
-		wl += cnt2;
-	}
+	if (cc1 == 1) cc.Write(bw, cnt2);
+	wl += cnt2;
 	lenl += cnt2;
 	return cnt2;
 }
@@ -14765,10 +14747,8 @@ int readmp3(BYTE* bw, int cnt)
 		}
 	}
 
-	if ((UINT)wl < (UINT)0x7fff0000) {
-		if (cc1 == 1)	cc.Write(bw, cnt2);
-		wl += cnt2;
-	}
+	if (cc1 == 1)	cc.Write(bw, cnt2);
+	wl += cnt2;
 
 	lenl += cnt2;
 	//	playb+=cnt;
@@ -16335,10 +16315,8 @@ int mcopy(char* a, int len)
 		}
 	}
 
-	if ((UINT)wl < (UINT)0x7fff0000) {
-		if (cc1 == 1 && !g_inWarmup && cnt2 > 0) cc.Write(a, cnt2);
-		if (cnt2 > 0) wl += cnt2;
-	}
+	if (cc1 == 1 && !g_inWarmup && cnt2 > 0) cc.Write(a, cnt2);
+	if (cnt2 > 0) wl += cnt2;
 
 	return cnt2;
 }
@@ -16628,7 +16606,8 @@ void COggDlg::timerp()
 	if (mode == -2) loop1 = loop2 = loopcnt = wl = 0;
 
 	__int64 snap_playb;
-	int snap_oggsize, snap_wl, snap_loop1, snap_loop2;
+	__int64 snap_wl;
+	int snap_oggsize, snap_loop1, snap_loop2;
 	double snap_oggsize2;
 	{
 		std::lock_guard<std::mutex> lk(cl2);
@@ -16773,6 +16752,24 @@ void COggDlg::timerp()
 	int tbl2 = t1 % 60;
 	int tcl2 = tt % 100;
 
+	// EQ コード用 PCM は bGdiFrame/g_gdiPaintPending に依存させない。
+	// pending 中 Speana 全体が止まるとコード更新が不規則になる（アナライザ/MP と差が出る主因）。
+	{
+		CEqualizer* pEq = m_EqualizerDlg;
+		const bool eqVis = pEq
+			&& ::IsWindow(pEq->GetSafeHwnd())
+			&& ::IsWindowVisible(pEq->GetSafeHwnd());
+		const bool speanaDraw = bGdiFrame && m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg);
+		if (plf == 1 && (wav || ogg) && eqVis && !speanaDraw) {
+			static DWORD s_eqFeedMs = 0;
+			const DWORD nowFeed = GetTickCount();
+			if (s_eqFeedMs == 0 || (nowFeed - s_eqFeedMs) >= 50u) {
+				s_eqFeedMs = nowFeed;
+				Speana(FALSE);
+			}
+		}
+	}
+
 	if (bGdiFrame)
 	{
 	extern int g_mpSideJacket;   // 1=ジャケットを mp 左余白へ分離表示中(内蔵ジャケ抑止)
@@ -16809,8 +16806,9 @@ void COggDlg::timerp()
 	// スペアナは XOR バナー文字(name/arti/albu)より先に dc へ描く。
 	// 非同期(WM_SPEANA_TICK)化すると Speana() が文字の後に不透明の棒を上書きし、
 	// XOR 合成が棒に覆われて無効化される（バナー文字が見えなくなるデグレ）。
+	// ここで TRUE 指定すると EQ 供給も同梱（上の Speana(FALSE) と二重にならない）。
 	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg))
-		Speana();
+		Speana(TRUE);
 	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
 		m_PianoRollDlg->RequestSyncFromMainUi();
 	if (plf == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
@@ -20925,7 +20923,7 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	m_PianoRollDlg->AnalyzePlayCursorMono(prMono.data(), prFrames, (int)(sampleRate + 0.5));
 }
 
-void COggDlg::Speana()
+void COggDlg::Speana(BOOL bPaintBars)
 {
 	int i, j, d;
 	double dt = 0.0, dta = 0.0;
@@ -20982,8 +20980,11 @@ void COggDlg::Speana()
 	// readPos+bytesTotalToRead = PlayCursor+latencyBytes なので、読み取り長を
 	// 伸ばしても末尾(同期点)はlatencySettingで決まり、表示タイミングは不変。
 	int analysisSize = 4096;
-	if (mode1_Low) analysisSize = 8192;
-	if (mode0_Note) analysisSize = 16384;
+	// EQ コード供給のみのときは長窓不要（読み取りコストと揺らぎを抑える）
+	if (bPaintBars) {
+		if (mode1_Low) analysisSize = 8192;
+		if (mode0_Note) analysisSize = 16384;
+	}
 
 	// タイミング調整 (Latency) — ユーザー調整値。低音長窓→-1600ms / 4096→-800ms
 	int latencySetting = (mode0_Note || analysisSize == 8192) ? -1600 : -800;
@@ -21134,7 +21135,7 @@ void COggDlg::Speana()
 	ResampleDouble(bufR.data(), framesToRead, bufResampledR.data(), fftSize);
 	for (int k = 0; k < fftSize; k++) bufM[k] = (bufResampled[k] + bufResampledR[k]) * 0.5;
 
-	// EQ コード用 PCM を載せるだけ。解析は EQ SetTimer(1,50) 側（200ms 間引きなし）
+	// EQ コード用 PCM。描画有無に関係なく供給（pending 中の不規則更新を防ぐ）
 	{
 		CEqualizer* pEq = this->m_EqualizerDlg;
 		const bool eqVisible = pEq
@@ -21149,6 +21150,8 @@ void COggDlg::Speana()
 			}
 		}
 	}
+	if (!bPaintBars)
+		return;
 
 	auto ValToBarHeight = [&](double amplitude) -> int {
 		if (amplitude < 0.0001) return 0;

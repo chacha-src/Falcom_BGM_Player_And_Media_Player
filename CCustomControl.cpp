@@ -3429,7 +3429,11 @@ LRESULT CCustomStatic::OnPrintClient(WPARAM wParam, LPARAM)
 LRESULT CCustomStatic::OnSetText(WPARAM, LPARAM lp)
 {
     LPCTSTR t = (LPCTSTR)lp;
-    m_strText = t ? t : _T("");
+    const CString neu = t ? t : _T("");
+    // 同一文字列の再設定は Invalidate/フィット計算を起こさない（EQ コードの無駄再描画防止）
+    if (neu == m_strText)
+        return TRUE;
+    m_strText = neu;
     m_strCachedText.Empty();
     if (GetSafeHwnd())
     {

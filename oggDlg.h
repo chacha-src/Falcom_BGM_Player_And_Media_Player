@@ -75,7 +75,8 @@ public:
 	void gamenkill();
 	void dougaplay(int uu, CString str = L"");
 	DWORD GetVol();
-	void Speana();
+	// bPaintBars=FALSE なら PCM→EQコード供給のみ（メイン GDI pending 中でも呼ぶ）
+	void Speana(BOOL bPaintBars = TRUE);
 	void SyncPianoRollFromPlayCursor();
 	void SyncPianoRollFast();
 	void SyncAnalyzerFromPlayCursor();

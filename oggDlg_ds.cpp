@@ -5537,6 +5537,8 @@ static int g_eqKeyRate = 44100;
 static LONG g_eqKeySeq = 0;
 static HWND g_eqKeyUiHwnd = nullptr;
 static volatile LONG g_eqKeyUiPosted = 0;
+static DWORD g_eqKeyUiLastPostTick = 0;
+static volatile LONG g_eqKeyUiDirty = 0;
 
 static void EnsureEqKeyCs()
 {
@@ -5550,15 +5552,27 @@ static void NotifyEqKeyUi()
 {
 	HWND h = g_eqKeyUiHwnd;
 	if (!h || !::IsWindow(h)) return;
-	if (InterlockedCompareExchange(&g_eqKeyUiPosted, 1, 0) != 0) return;
-	if (!::PostMessage(h, WM_EQ_KEY_UPDATE, 0, 0))
+	if (InterlockedCompareExchange(&g_eqKeyUiDirty, 0, 0) == 0) return;
+	// リアルタイム性優先。16ms は WM_PAINT を通すための下限（多重 Post 飢餓防止）。
+	const DWORD now = GetTickCount();
+	if (g_eqKeyUiLastPostTick != 0 && (now - g_eqKeyUiLastPostTick) < 16u)
+		return;
+	if (InterlockedCompareExchange(&g_eqKeyUiPosted, 1, 0) != 0)
+		return;
+	g_eqKeyUiLastPostTick = now;
+	InterlockedExchange(&g_eqKeyUiDirty, 0);
+	if (!::PostMessage(h, WM_EQ_KEY_UPDATE, 0, 0)) {
 		InterlockedExchange(&g_eqKeyUiPosted, 0);
+		InterlockedExchange(&g_eqKeyUiDirty, 1);
+	}
 }
 
 void RegisterEqKeyUiHwnd(HWND h)
 {
 	g_eqKeyUiHwnd = h;
 	InterlockedExchange(&g_eqKeyUiPosted, 0);
+	InterlockedExchange(&g_eqKeyUiDirty, 1);
+	g_eqKeyUiLastPostTick = 0;
 	NotifyEqKeyUi();
 }
 
@@ -5567,22 +5581,31 @@ void UnregisterEqKeyUiHwnd(HWND h)
 	if (g_eqKeyUiHwnd == h)
 		g_eqKeyUiHwnd = nullptr;
 	InterlockedExchange(&g_eqKeyUiPosted, 0);
+	InterlockedExchange(&g_eqKeyUiDirty, 0);
 }
 
 void AckEqKeyUiNotify()
 {
 	InterlockedExchange(&g_eqKeyUiPosted, 0);
+	// dirty 再 Post は SetKeyCodesLocked 側に任せる。
+	// ここで即 Notify すると Apply 直後に二重更新し、描画タイミングがさらに不規則になる。
 }
 
 static void SetKeyCodesLocked(const CString& lo, const CString& mid, const CString& hi, const CString& all)
 {
 	EnsureEqKeyCs();
 	EnterCriticalSection(&g_keyCodeCs);
-	KeyCodeLow = lo;
-	KeyCodeMid = mid;
-	KeyCodeHigh = hi;
-	KeyCodeAll = all;
+	const bool changed = (KeyCodeLow != lo) || (KeyCodeMid != mid)
+		|| (KeyCodeHigh != hi) || (KeyCodeAll != all);
+	if (changed) {
+		KeyCodeLow = lo;
+		KeyCodeMid = mid;
+		KeyCodeHigh = hi;
+		KeyCodeAll = all;
+		InterlockedExchange(&g_eqKeyUiDirty, 1);
+	}
 	LeaveCriticalSection(&g_keyCodeCs);
+	// 変更時だけでなく、throttle で残った dirty の flush もここで拾う
 	NotifyEqKeyUi();
 }
 
@@ -6406,7 +6429,6 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 		double aL = GoertzelMagnitude(bufferL.data() + LOW_S, LOW_N, g_goertzelCoeffs[k], win);
 		double aR = stereo ? GoertzelMagnitude(bufferR.data() + LOW_S, LOW_N, g_goertzelCoeffs[k], win) : aL;
 		float ns = (float)max(aL, aR) * (1.0f + k / 100.0f);  // 低域補正
-		// 指数平滑: prev*0.3 + current*0.7
 		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + ns * (1.0f - SMOOTHING_FACTOR);
 		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
