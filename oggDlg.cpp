@@ -6837,7 +6837,10 @@ void COggDlg::play()
 	KillTimer(9000);
 	// stop1 失敗でも再生は続行する。ここで return すると CWread に入らず
 	// 0:00/古い loop1,2 のままになる（mode 30 で顕在化）。
+	// 曲切替中は Join 上限付き(無限待ちだと通知スレッド固着で UI 永久停止)。
+	InterlockedExchange(&g_interactiveTrackChange, 1);
 	(void)stop1();
+	InterlockedExchange(&g_interactiveTrackChange, 0);
 	// CWread が thend1 を見て即 return しないよう、開始前に必ず下ろす
 	thend1 = FALSE;
 	thend = 0;
@@ -10328,6 +10331,8 @@ void COggDlg::play()
 			pl->SIcon(plc);
 		}
 	}
+	// plcnt/SIcon 確定後に曲ごとパラメータを復元(通知スレッド開始より後が正しい)
+	SongParams_OnSongStarted();
 	m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 	SetTimer(1250, 100, NULL);
 	fade1 = 0;
@@ -15400,6 +15405,7 @@ void COggDlg::dp(CString a)
 		_tchdir(tmp_savedir);
 
 		plf = 1;
+		SongParams_OnSongStarted();
 	}
 
 }
@@ -15675,8 +15681,10 @@ void COggDlg::stop()
 			// IsPlaybackStopRequested で無音になる。デコーダは触らずフラグだけ戻す。
 			thn1 = FALSE;
 			stf = 0;
+			SongParams_OnSongStopped();
 			return;
 		}
+		SongParams_OnSongStopped();
 
 		Closeds();
 		//		FreeOutputBuffer();
@@ -15774,6 +15782,7 @@ BOOL COggDlg::stop1()
 	// DoEvent 再入より先に解析を止める（形式違いの曲切替クラッシュ防止）
 	playf = 0;
 	plf = 0;
+	// SongParams_OnSongStopped は Join 後に呼ぶ(再生スレッドが Sync 中に UI/ロックを掴むため)
 	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
 		m_PianoRollDlg->PauseAnalysis();
 	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
@@ -15831,10 +15840,26 @@ BOOL COggDlg::stop1()
 	}
 	// play() 先頭の stop1 は Join 成否に関わらず続行する。
 	// FALSE で return すると CWread に入らず 0:00／古い loop のままになる。
-	(void)WaitForPlaybackNotifyThreadExit(0);
+	// ただし対話的な曲切替では無限 Join 禁止(DS Lock / 旧 SaveFile 固着で UI 永久停止)。
+	BOOL joined = TRUE;
+	{
+		const DWORD joinTimeout = g_interactiveTrackChange
+			? (g_playbackNotifyJoinTimeoutMs ? g_playbackNotifyJoinTimeoutMs : 2500u)
+			: 0u;
+		joined = WaitForPlaybackNotifyThreadExit(joinTimeout);
+	}
 	thn1 = FALSE;
 	stf = 0;
 	thend1 = FALSE;
+	SongParams_OnSongStopped();
+
+	// Join 失敗時はデコーダを触らない(生存スレッドの UAF 防止)。play() は続行するが
+	// PeekOpenDecoderMode が残っていれば次の Open 前に再停止がかかる。
+	if (!joined) {
+		playf = 0;
+		plf = 0;
+		return FALSE;
+	}
 
 	Closeds();
 	//		FreeOutputBuffer();
@@ -18039,13 +18064,18 @@ void timing1(WORD a, BOOL b, BOOL c)
 			j += timetb[timec]; timec++; if (timec > 2)timec = 0;
 		}
 		Timing64(fr2, FALSE);
-		if ((int)(fpstiming + j) - fr2 > 10) {
+		// DWORD 差分で比較(signed cast だと QPC ms 折り返しで永久スピンし得る)
+		const DWORD target = fpstiming + j;
+		if ((DWORD)(target - fr2) > 10 && (int)(target - fr2) > 0) {
 			Sleep(5);
 		}
+		// Sleep(0) の ABOVE_NORMAL ビジー待機は UI を飢餓させる。上限付き Sleep(1)。
+		const DWORD t0 = fr2;
 		for (;;) {
 			Timing64(fr2, FALSE);
-			if ((int)fr2 >= (int)(fpstiming + j)) break;
-			Sleep(0);
+			if ((int)(fr2 - target) >= 0) break;
+			if ((DWORD)(fr2 - t0) > j + 50) break; // 異常時でも抜けられるように
+			Sleep(1);
 		}
 }
 
@@ -22361,6 +22391,7 @@ LRESULT COggDlg::OnSongParamRestore(WPARAM, LPARAM lParam)
 	SongParam* p = (SongParam*)lParam;
 	if (p) {
 		SongParams_ApplyEntryToMain(*p);
+		SongParams_NoteRestored(*p);
 		delete p;
 	}
 	return 0;

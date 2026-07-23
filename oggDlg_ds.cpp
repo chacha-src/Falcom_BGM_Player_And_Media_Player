@@ -425,7 +425,10 @@ extern int g_openDecoderMode;
 void BeginPlaybackNotifyThread()
 {
 	// 旧スレッドが残っている間は新スレッドを立てない（ポインタ上書きで Join 不能になる）
-	if (!WaitForPlaybackNotifyThreadExit(0))
+	const DWORD joinTimeout = g_interactiveTrackChange
+		? (g_playbackNotifyJoinTimeoutMs ? g_playbackNotifyJoinTimeoutMs : 2500u)
+		: 0u;
+	if (!WaitForPlaybackNotifyThreadExit(joinTimeout))
 		return;
 	// この時点の mode が「実際に再生するデコーダ形式」（stop1 はこれを見て閉じる）
 	g_openDecoderMode = mode;
@@ -504,7 +507,8 @@ UINT HandleNotifications(LPVOID)
 		playf = 0;
 		thn = TRUE;
 		reset = TRUE;
-		AfxEndThread(0);
+		// AfxEndThread はスタックを巻き戻さない。cl2 の lock_guard 保持中に呼ぶと
+		// mutex が解放されず、以降 timerp / 次の HandleNotifications が永久待ちになる。
 		return 0;
 	};
 
@@ -562,6 +566,7 @@ UINT HandleNotifications(LPVOID)
 		bool stageFade = false;
 		int readmeThisCycle = 0;
 		const int writtenThisCycle = len1 + len2;
+		bool exitAfterCl2 = false;
 
 		{
 			std::lock_guard<std::mutex> guard(cl2);
@@ -575,37 +580,45 @@ UINT HandleNotifications(LPVOID)
 			}
 			timeee += savedata.ms;
 
-			if (thn1)
-				return stopPlaybackAndExit();
-			sflg = TRUE;
-			if (m_dsb) DispatchPlaywavFill(bufwav3, oldw, len1, len2);
-			// 曲最後まで行ったとき
-			readmeThisCycle = readme; // 終端確定に使うため reset 前に退避
-			if (readme) {
-				if (len1 > readme)
-					ZeroMemory(bufwav3 + readme, len2);
-				else
-					ZeroMemory(bufwav3 + oldw + readme, len1 - readme);
+			if (thn1) {
+				exitAfterCl2 = true;
 			}
-			if (thn1)
-				return stopPlaybackAndExit();
+			else {
+				sflg = TRUE;
+				if (m_dsb) DispatchPlaywavFill(bufwav3, oldw, len1, len2);
+				// 曲最後まで行ったとき
+				readmeThisCycle = readme; // 終端確定に使うため reset 前に退避
+				if (readme) {
+					if (len1 > readme)
+						ZeroMemory(bufwav3 + readme, len2);
+					else
+						ZeroMemory(bufwav3 + oldw + readme, len1 - readme);
+				}
+				if (thn1) {
+					exitAfterCl2 = true;
+					sflg = FALSE;
+				}
+				else {
+					stageFade = (fade2 || drainSilence) ? true : false;
+					stageBytes = writtenThisCycle;
+					if (stageBytes > 0) {
+						if ((int)s_dsStage.size() < stageBytes)
+							s_dsStage.resize((size_t)stageBytes);
+						if (len1 > 0)
+							memcpy(s_dsStage.data(), bufwav3 + oldw, (size_t)len1);
+						if (len2 > 0)
+							memcpy(s_dsStage.data() + len1, bufwav3, (size_t)len2);
+					}
 
-			stageFade = (fade2 || drainSilence) ? true : false;
-			stageBytes = writtenThisCycle;
-			if (stageBytes > 0) {
-				if ((int)s_dsStage.size() < stageBytes)
-					s_dsStage.resize((size_t)stageBytes);
-				if (len1 > 0)
-					memcpy(s_dsStage.data(), bufwav3 + oldw, (size_t)len1);
-				if (len2 > 0)
-					memcpy(s_dsStage.data() + len1, bufwav3, (size_t)len2);
+					readme = 0;
+					fade2 = fade1;
+					if (flg3 != 0) flg3--;
+					sflg = FALSE;
+				}
 			}
-
-			readme = 0;
-			fade2 = fade1;
-			if (flg3 != 0) flg3--;
-			sflg = FALSE;
 		} // guard(cl2) — Lock 前に必ず解放
+		if (exitAfterCl2)
+			return stopPlaybackAndExit();
 
 		// DirectSound 転送（cl2 外。UI 側 Closeds で m_dsb が NULL でもローカル参照で安全）
 		dsb = m_dsb;
@@ -685,7 +698,7 @@ UINT HandleNotifications(LPVOID)
 				}
 				if (og && ::IsWindow(og->GetSafeHwnd()))
 					og->PostMessage(WM_PLAYBACK_AUTO_STOPPED, 0, 0);
-				AfxEndThread(0);
+				// AfxEndThread 禁止（stopPlaybackAndExit と同じ理由）。通常 return でスレッド終了。
 				return 0;
 			}
 		}
@@ -5557,8 +5570,18 @@ static void NotifyEqKeyUi()
 	const DWORD now = GetTickCount();
 	if (g_eqKeyUiLastPostTick != 0 && (now - g_eqKeyUiLastPostTick) < 16u)
 		return;
-	if (InterlockedCompareExchange(&g_eqKeyUiPosted, 1, 0) != 0)
-		return;
+	if (InterlockedCompareExchange(&g_eqKeyUiPosted, 1, 0) != 0) {
+		// Ack 前に UI が長時間塞がると posted が掴みっぱなしになる → 強制開放
+		if (g_eqKeyUiLastPostTick != 0 && (now - g_eqKeyUiLastPostTick) >= 150u) {
+			InterlockedExchange(&g_eqKeyUiPosted, 0);
+			InterlockedExchange(&g_eqKeyUiDirty, 1);
+			if (InterlockedCompareExchange(&g_eqKeyUiPosted, 1, 0) != 0)
+				return;
+		}
+		else {
+			return;
+		}
+	}
 	g_eqKeyUiLastPostTick = now;
 	InterlockedExchange(&g_eqKeyUiDirty, 0);
 	if (!::PostMessage(h, WM_EQ_KEY_UPDATE, 0, 0)) {

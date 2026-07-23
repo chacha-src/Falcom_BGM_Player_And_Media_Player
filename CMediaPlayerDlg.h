@@ -186,6 +186,7 @@ public:
 	int  m_dsvolSlW;         // DS音量スライダー幅(DoLayout)。ラベル省略判定に使用
 	int  m_mpBtnShort;       // 0=フル 1=EQ系短縮 2=フェード/JK等短縮 3=最小幅用の超短縮
 	int  m_mpPromptShort;    // 0=プロンプト 1=プロ(幅不足時)
+	int  m_mpChkShort[6];    // 下部チェック tip..saveparam: 0=フル 1=中 2=短 (-1=未設定)
 
 	// og のオフスクリーン合成 DC(スペアナ+ジャケ+時間)を m_bannerRect へ StretchBlit する。
 	// アクリル(Win11)時は黒透過合成、非アクリル時は永続メモリ DC でキャッシュ Blit。

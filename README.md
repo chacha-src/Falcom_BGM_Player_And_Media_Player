@@ -1,6 +1,6 @@
 ﻿chachakotorinのgithubから移転です。
 
-# oggYSEDbgm
+# oggYSEDbgm メディアプレイヤー「ささら」
 日本ファルコム (Nihon Falcom) BGMプレイヤー / 高機能メディアプレイヤー
 
 **対応OS:** Windows 11 以降
@@ -25,7 +25,7 @@
 また環境モデルのかかり方の度合いの変更できるため、かなり自由度が高くなっています。
 
 ### ピアノロール機能
-簡易ピアノロールが実装されました。
+簡易ピアノロールが実装されました。再生中のコードやメロディの表示にも対応しています。
 
 ### 波形・周波数アナライザー
 Ozone風のリアルタイムアナライザーを追加しました。
@@ -43,7 +43,25 @@ Ozone風のリアルタイムアナライザーを追加しました。
 メディアプレイヤー画面モードの再生中アイコン（♪点滅2コマ）と選択♡の描画順も整備しました。
 
 ### メディアプレイヤー画面モード搭載
-普通のメディアプレイヤーのようなモード搭載。
+普通のメディアプレイヤーのようなモード「ささら」を搭載。起動時にファルコムBGM画面との切り替えもできます。
+
+### テンポ・ピッチ変更
+再生中のテンポとピッチを、それぞれ独立して変えられます。
+
+### 歌詞表示
+.lrc形式の歌詞表示に対応しています。ネットからの歌詞取得もできます。
+
+### ジャケット・プレイリスト
+アルバムジャケットの表示と、m3u対応のプレイリスト機能があります。曲ごとの音量やEQなどの設定も覚えます。
+
+### アクリル（ぼかし）UI
+Windows 11のアクリル風ぼかし表示に対応しています。
+
+### PCMアップスケール
+サンプリングレートやビット深度のアップスケール、マルチチャンネル出力に対応しています。
+
+### 演奏プロンプト
+再生中にピッチやテンポ、エフェクトなどを時間指定で動かすプロンプト機能があります。
 
 ![ファルコムプレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git6.png)
 
@@ -65,6 +83,7 @@ Ozone風のリアルタイムアナライザーを追加しました。
 ### 軌跡 (Trails) シリーズ
 - 英雄伝説6 空の軌跡 FC / SC / The 3rd (Steam版 The 1st含む) The 1stはプレイ中なのであと1曲曲名不明
 - 英雄伝説 零の軌跡
+- 英雄伝説 碧の軌跡
 - Steam版 閃の軌跡 I / II / III / IV
 - Steam版 創の軌跡
 
@@ -72,6 +91,7 @@ Ozone風のリアルタイムアナライザーを追加しました。
 - Zwei!! (CD版はADPCM、DVD版WAVはPCM処理)
 - Zwei II
 - XANADU NEXT
+- アークトゥルス
 - ぐるみん (※データ頭のRIFF検索によるADPCM対応)
 - ソーサリアン オリジナル
 - ダイナソア リザレクション
@@ -93,13 +113,13 @@ Ozone風のリアルタイムアナライザーを追加しました。
 
 ### 2. 一般オーディオ再生
 以下のフォーマットの再生に対応しています。
-- mp3, m4a, aac, alac, flac
+- mp3, m4a, aac, alac, flac, tta, ape
 - DSD (dsf, dff)
 - OggOpus (48k)
-- Kb Media Playerの旧kpiプラグインと新kpiの一部に対応 (Win32版のみ/Pluginsフォルダに入れて使用)
+- Kb Media Playerの旧kpiプラグインと新kpiの一部に対応 (Pluginsフォルダに入れて使用。64bit版はKpiHost64経由)
 
 ### 3. 動画再生 (DirectShow)
-avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以降ではEVRを使用し、高画質で再生します。
+avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以降ではEVRを使用し、高画質で再生します。映像・音声・字幕ストリームの切り替えにも対応しています。
 ※ avi等の再生にはコーデックパック（K-Lite Codec Pack等）が必要です。
 [解説サイト: ppp.oohara.jp/k-lite.html](http://ppp.oohara.jp/k-lite.html)
 
@@ -114,6 +134,18 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 | **↑ / ↓ キー** | 音量調整 |
 | **← / → キー** | シーク (早送り/巻き戻し) |
 
+### 補足
+- ランダム再生、連続再生、ループ回数の指定
+- ファイルのドラッグ＆ドロップ追加
+- mp3やDirectShow再生の途中位置の保存
+- WAV書き出し時の2GB超対応（RF64）
+- ピアノロールの検出パラメータ調整
+- レンダリング設定（デバイス、バッファ、ビット深度、フォント、ファイル関連付けなど）
+- タスクバーのジャンプリスト（再生／停止、EQ、ジャケット、プレイリストなど）
+- 起動時・定期の更新チェック
+- Windowsミキサーでアプリがミュートされているときの警告
+- メディアプレイヤー側の最小化連動やツールチップ表示など
+
 ## 注意事項
 - **Brandish4 および ガガーブトリロジー**については、WAVファイルをHDDへコピーする必要があります（フォルダ名は `WAVE`, `WAVEDV`, `WAVEDVD` などゲームにより異なります）。
 - ゲーム以外のWAVファイルはDirectShow扱いとなり、ループやフェードアウト機能は使用できません。
@@ -124,7 +156,7 @@ Copyright (C) PrePrayerPower Soft
 
 
 
-# oggYSEDbgm
+# oggYSEDbgm Media Player "Sasara"
 Nihon Falcom BGM Player / High-Performance Media Player
 
 **Compatible OS:** Windows 11 or later
@@ -148,7 +180,7 @@ These operate independently of the environmental models.
 Additionally, the intensity of the environmental effects can be adjusted, offering a high degree of acoustic freedom.
 
 ### Piano Roll Feature
-A simplified piano roll has been implemented.
+A simplified piano roll has been implemented. Chord and melody display during playback is also supported.
 
 ### Waveform & Spectrum Analyzer
 An Ozone-inspired real-time analyzer has been added.
@@ -166,7 +198,25 @@ An Ozone-inspired real-time analyzer has been added.
 Playback note icon blinking (two frames) and heart (♡) draw order on the media-player list were also fixed.
 
 ### Media Player Screen Mode Included
-Includes a mode similar to that of a standard media player.
+Includes a media-player mode called **Sasara**. You can choose between the Falcom BGM screen and this mode at startup.
+
+### Tempo & Pitch Control
+Tempo and pitch can be adjusted independently during playback.
+
+### Lyrics Display
+Supports .lrc lyrics display, including optional online lyric lookup.
+
+### Jacket Art & Playlist
+Album jacket display and m3u playlists are supported. Per-track settings such as volume and EQ are remembered.
+
+### Acrylic (Blur) UI
+Supports Windows 11 acrylic-style blur for the interface.
+
+### PCM Upscaling
+Supports sample-rate / bit-depth upscaling and multi-channel output.
+
+### Performance Prompt
+A timed prompt feature can change pitch, tempo, effects, and more during playback.
 
 ![Player Screen](https://ppp.oohara.jp/img/ysedplay2e_git6.png)
 
@@ -188,6 +238,7 @@ The player supports seamless BGM looping for the following titles:
 ### Trails Series
 - The Legend of Heroes: Trails in the Sky FC / SC / the 3rd (Including Steam 1st)
 - The Legend of Heroes: Trails from Zero
+- The Legend of Heroes: Trails to Azure
 - The Legend of Heroes: Trails of Cold Steel I / II / III / IV (Steam)
 - The Legend of Heroes: Trails into Reverie (Steam)
 
@@ -195,6 +246,7 @@ The player supports seamless BGM looping for the following titles:
 - Zwei!! (ADPCM for CD version / PCM for DVD version)
 - Zwei: The Ilvard Resurrection
 - Xanadu Next
+- Arcturus
 - Gurumin (ADPCM support via RIFF header search)
 - Sorcerian Original
 - Dinosaur Resurrection
@@ -216,13 +268,13 @@ The player supports seamless BGM looping for the following titles:
 
 ### 2. General Audio Playback
 Supports the following formats:
-- mp3, m4a, aac, alac, flac
+- mp3, m4a, aac, alac, flac, tta, ape
 - DSD (dsf, dff)
 - OggOpus (48k)
-- Legacy and modern **kpi plugins** (Kb Media Player) are supported (Win32 version only; place in the `Plugins` folder).
+- Legacy and modern **kpi plugins** (Kb Media Player) are supported (place in the `Plugins` folder; the 64-bit build uses KpiHost64).
 
 ### 3. Video Playback (DirectShow)
-Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and later, it utilizes **EVR (Enhanced Video Renderer)** for high-quality output.
+Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and later, it utilizes **EVR (Enhanced Video Renderer)** for high-quality output. Video, audio, and subtitle stream switching is also supported.
 *Note: Playback of certain formats may require codec packs (e.g., K-Lite Codec Pack).*
 [Instructional Site: ppp.oohara.jp/k-lite.html](http://ppp.oohara.jp/k-lite.html)
 
@@ -237,10 +289,22 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 | **Up / Down Arrow** | Volume Control |
 | **Left / Right Arrow** | Seek (Rewind / Fast Forward) |
 
+### Additional Notes
+- Random play, continuous play, and loop-count settings
+- Drag-and-drop file adding
+- Resume position for mp3 and DirectShow playback
+- WAV export larger than 2GB (RF64)
+- Piano-roll detection parameter tuning
+- Rendering options (device, buffer, bit depth, fonts, file associations, etc.)
+- Taskbar jump list (play/pause, EQ, jacket, playlist, and more)
+- Startup and periodic update checks
+- Warning when the app is muted in the Windows volume mixer
+- Media-player extras such as minimize sync and tooltips
+
 ## Important Notes
 - **For Brandish 4 and the Gagharv Trilogy:** WAV files must be copied to your HDD (Folder names like `WAVE`, `WAVEDV`, or `WAVEDVD` vary by game).
 - Standard WAV files (not from game data) are handled via DirectShow; therefore, loop and fade-out functions are not available for these files.
 
 ## License / Author
 Copyright (C) PrePrayerPower Soft
-[https://ppp.oohara.jp/] (https://ppp.oohara.jp/)
+[https://ppp.oohara.jp/](https://ppp.oohara.jp/)

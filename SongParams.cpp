@@ -20,9 +20,25 @@ extern int pitch;       // ピッチ スライダー位置 0..400
 extern int modesub;     // 再生形式(= pc[].sub)
 extern int ret2;        // 曲内番号(= pc[].ret2)
 extern int plcnt;       // 再生中プレイリスト行
+extern BOOL thn1;       // 再生通知スレッド停止要求
+extern int stf;         // 再生停止要求
+extern int playf;
+extern int plf;
 
 extern TCHAR karento2[1024]; // 実行ファイルのディレクトリ(末尾 \)
 
+static bool SongParams_IsMainThread()
+{
+	if (!og || !::IsWindow(og->GetSafeHwnd()))
+		return false;
+	const DWORD mainTid = ::GetWindowThreadProcessId(og->GetSafeHwnd(), NULL);
+	return mainTid != 0 && ::GetCurrentThreadId() == mainTid;
+}
+
+static bool SongParams_IsStopping()
+{
+	return thn1 || stf || playf == 0;
+}
 // ---- ファイル名 ----
 #if _UNICODE
 #define SONGPARAM_DAT_NAME L"oggYSEDbgmu_AudioData.dat"
@@ -47,6 +63,8 @@ static CString  s_curList;       // 曲開始時に確定したリスト名
 static int      s_curMode = 0;   // 曲開始時の mode(sub)
 static int      s_curRet2 = 0;   // 曲開始時の ret2
 static bool     s_baselineValid = false;
+static bool     s_songReady = false;   // OnSongStarted 後のみ保存・復元ポーリングを有効化
+static bool     s_restorePending = false; // PostMessage 復元待ち(その間は baseline を取らない)
 static SongParam s_lastSaved;    // 直近に保存/復元したパラメータ(変更検知の基準)
 
 // ============================================================================
@@ -67,9 +85,22 @@ static bool ParamsEqual(const SongParam& a, const SongParam& b)
 	return true;
 }
 
-// 現在のライブ値(savedata + グローバル)からパラメータ部を埋める
+// 現在のライブ値からパラメータ部を埋める。
+// ※再生スレッドから UI(GetPos) を触ると、stop1 の Join 待ちとデッドロックする。
 static void SnapshotCurrent(SongParam& p)
 {
+	if (SongParams_IsMainThread() && og && ::IsWindow(og->GetSafeHwnd())) {
+		if (og->m_dsval.GetSafeHwnd())
+			savedata.dsvol = og->m_dsval.GetPos();
+		if (og->m_kakuVol.GetSafeHwnd())
+			savedata.kakuVol = og->m_kakuVol.GetPos();
+		if (og->m_tempo_sl.GetSafeHwnd())
+			tempo = og->m_tempo_sl.GetPos();
+		if (og->m_pitch_sl.GetSafeHwnd())
+			pitch = og->m_pitch_sl.GetPos();
+	}
+	if (savedata.dsvol == 0) savedata.dsvol = 1;
+
 	p.dsvol = savedata.dsvol;
 	p.kakuVol = savedata.kakuVol;
 	p.pitchPos = pitch;
@@ -158,12 +189,12 @@ static void ResolvePlayingKey(CString& outList, CString& outPath, int& outMode, 
 	outPath = SongParams_KeyPath(filen);
 	if (!pl || !pl->pc || pl->playcnt <= 0)
 		return;
-	// ♪ 表示行(pnt)を最優先。plcnt が一時的にずれると保存キーとツールチップ行が食い違う。
+	// plcnt を最優先(再生対象)。pnt は表示用で更新が遅れることがある。
 	int idx = -1;
-	if (pl->pnt >= 0 && pl->pnt < pl->playcnt)
-		idx = pl->pnt;
-	else if (plcnt >= 0 && plcnt < pl->playcnt)
+	if (plcnt >= 0 && plcnt < pl->playcnt)
 		idx = plcnt;
+	else if (pl->pnt >= 0 && pl->pnt < pl->playcnt)
+		idx = pl->pnt;
 	if (idx < 0)
 		return;
 	outPath = SongParams_KeyPath(pl->pc[idx].fol);
@@ -215,24 +246,29 @@ void SongParams_LoadFile()
 
 void SongParams_SaveFile()
 {
-	CSingleLock lk(&g_cs, TRUE);
+	// ロック中はメモリコピーのみ。ファイル I/O はロック外(Join 待ちとの噛み合い防止)
+	int ver = SONGPARAM_FILE_VERSION;
+	std::vector<SongParam> copy;
+	{
+		CSingleLock lk(&g_cs, TRUE);
+		copy = g_tbl;
+		g_dirty = false;
+		g_lastWriteTick = GetTickCount();
+	}
 	CString ss = karento2; ss += SONGPARAM_DAT_NAME;
 	CFile f;
 	if (f.Open(ss, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) != TRUE)
 		return;
 	try {
-		int ver = SONGPARAM_FILE_VERSION;
-		int cnt = (int)g_tbl.size();
+		int cnt = (int)copy.size();
 		f.Write(&ver, sizeof(int));
 		f.Write(&cnt, sizeof(int));
 		for (int i = 0; i < cnt; i++)
-			f.Write(&g_tbl[i], sizeof(SongParam));
+			f.Write(&copy[i], sizeof(SongParam));
 	}
 	catch (...) {
 	}
 	f.Close();
-	g_dirty = false;
-	g_lastWriteTick = GetTickCount();
 }
 
 // savedata だけ書き戻す(audioDataVersion 更新用)
@@ -399,17 +435,25 @@ void SongParams_ConvertKeysIfNeeded()
 	SongParams_PersistSaveData();
 }
 
+// ファイル書き込みはメインスレッドだけ。再生通知スレッドで SaveFile すると
+// stop1 の無限 Join と噛み合い、曲切替で UI が永久に止まる。
 static void FlushIfDirty()
 {
 	bool dirty;
 	{ CSingleLock lk(&g_cs, TRUE); dirty = g_dirty; }
-	if (dirty) SongParams_SaveFile();
+	if (!dirty) return;
+	if (!SongParams_IsMainThread())
+		return;
+	SongParams_SaveFile();
 }
 
 static void MarkDirtyAndMaybeWrite()
 {
 	DWORD now = GetTickCount();
 	{ CSingleLock lk(&g_cs, TRUE); g_dirty = true; }
+	// 再生スレッド側は dirty にするだけ。実書き込みは timerp / OnSongStopped。
+	if (!SongParams_IsMainThread())
+		return;
 	// 連続変更(スライダードラッグ等)をまとめる。500ms ごとに書き出し。
 	if (now - g_lastWriteTick >= 500)
 		SongParams_SaveFile();
@@ -472,6 +516,8 @@ void SongParams_ResetAll()
 	s_curMode = 0;
 	s_curRet2 = 0;
 	s_baselineValid = false;
+	s_songReady = false;
+	s_restorePending = false;
 }
 
 void SongParams_RenameList(LPCTSTR oldName, LPCTSTR newName)
@@ -554,11 +600,82 @@ void SongParams_ApplyEntryToMain(const SongParam& e)
 		og->m_AnalyzerDlg->ApplySpecStyleExternal(savedata.analyzerspecstyle);
 }
 
+// play() 完了後に呼ぶ。復元をメインスレッドで同期実行する。
+void SongParams_OnSongStarted()
+{
+	CString list, path;
+	int md = 0, r2 = 0;
+	ResolvePlayingKey(list, path, md, r2);
+	if (path.IsEmpty()) {
+		s_songReady = false;
+		return;
+	}
+
+	const bool promptOn = (MpPromptIsActive() != FALSE);
+	if (promptOn)
+		g_dirty = false;
+	else
+		FlushIfDirty();
+
+	s_curPath = path;
+	s_curList = list;
+	s_curMode = md;
+	s_curRet2 = r2;
+	s_restorePending = false;
+	s_songReady = true;
+
+	if (!savedata.saveSongParams) {
+		s_baselineValid = false;
+		return;
+	}
+
+	SongParam e;
+	if (SongParams_FindCopy(s_curList, s_curPath, s_curMode, s_curRet2, e)) {
+		SongParams_ApplyEntryToMain(e);
+		s_lastSaved = e;
+		s_baselineValid = true;
+	}
+	else if (!promptOn) {
+		// エントリ無し → 現在の設定をその曲の初期値として自動保存
+		SnapshotCurrent(s_lastSaved);
+		Upsert(s_curList, s_curPath, s_curMode, s_curRet2, s_lastSaved);
+		MarkDirtyAndMaybeWrite();
+		s_baselineValid = true;
+	}
+	else {
+		s_baselineValid = false;
+	}
+}
+
+void SongParams_NoteRestored(const SongParam& e)
+{
+	s_lastSaved = e;
+	s_baselineValid = true;
+	s_restorePending = false;
+}
+
+void SongParams_OnSongStopped()
+{
+	if (!MpPromptIsActive())
+		FlushIfDirty();
+	s_songReady = false;
+	s_restorePending = false;
+	s_baselineValid = false;
+}
+
 // ============================================================================
-// 同期本体(HandleNotifications / _export の先頭で呼ぶ)
+// 同期本体(HandleNotifications / timerp / _export)
 // ============================================================================
 void SongParams_Sync(bool exporting)
 {
+	// 停止中/停止要求中は何もしない(Join 待ちメイン ↔ Sync のデッドロック防止)
+	if (!exporting && SongParams_IsStopping())
+		return;
+
+	// 再生スレッドが付けた dirty をメイン側で回収
+	if (!exporting && SongParams_IsMainThread())
+		FlushIfDirty();
+
 	CString list, path;
 	int md = 0, r2 = 0;
 	ResolvePlayingKey(list, path, md, r2);
@@ -568,7 +685,6 @@ void SongParams_Sync(bool exporting)
 	const bool promptOn = (MpPromptIsActive() != FALSE);
 
 	if (exporting) {
-		// WAV 出力: 曲頭で 1 回だけ呼ばれる(メインスレッド)。
 		if (!feature) return;
 		SongParam e;
 		if (SongParams_FindCopy(list, path, md, r2, e))
@@ -576,7 +692,10 @@ void SongParams_Sync(bool exporting)
 		return;
 	}
 
-	// 以降は再生(HandleNotifications ループ)から周期的に呼ばれる
+	// play() 完了前はキーが未確定。OnSongStarted 待ち。
+	if (!s_songReady)
+		return;
+
 	const bool songChanged =
 		path.CompareNoCase(s_curPath) != 0 ||
 		md != s_curMode ||
@@ -584,8 +703,6 @@ void SongParams_Sync(bool exporting)
 		list.CompareNoCase(s_curList) != 0;
 
 	if (songChanged) {
-		// --- 曲が変わった ---
-		// プロンプト実行中の改変値は曲ごと保存へ落とさない
 		if (promptOn)
 			g_dirty = false;
 		else
@@ -595,30 +712,38 @@ void SongParams_Sync(bool exporting)
 		s_curMode = md;
 		s_curRet2 = r2;
 		s_baselineValid = false;
+		s_restorePending = false;
 
 		if (feature) {
 			SongParam e;
 			if (SongParams_FindCopy(s_curList, s_curPath, s_curMode, s_curRet2, e)) {
-				// 復元適用前に現状値で上書きしないようベースラインは遅延確定
-				s_baselineValid = false;
+				DWORD mainTid = 0;
 				if (og && ::IsWindow(og->GetSafeHwnd()))
-					og->PostMessage(WM_APP_SONGPARAM_RESTORE, 0, (LPARAM)new SongParam(e));
-			}
-			else {
-				if (!promptOn) {
-					SnapshotCurrent(s_lastSaved);
+					mainTid = ::GetWindowThreadProcessId(og->GetSafeHwnd(), NULL);
+				if (mainTid != 0 && ::GetCurrentThreadId() == mainTid) {
+					SongParams_ApplyEntryToMain(e);
+					s_lastSaved = e;
 					s_baselineValid = true;
 				}
+				else if (og && ::IsWindow(og->GetSafeHwnd())) {
+					s_restorePending = true;
+					og->PostMessage(WM_APP_SONGPARAM_RESTORE, 0, (LPARAM)new SongParam(e));
+				}
+			}
+			else if (!promptOn) {
+				// エントリ無し → 現在の設定を自動保存
+				SnapshotCurrent(s_lastSaved);
+				Upsert(s_curList, s_curPath, s_curMode, s_curRet2, s_lastSaved);
+				MarkDirtyAndMaybeWrite();
+				s_baselineValid = true;
 			}
 		}
 		return;
 	}
 
-	// --- 同じ曲 ---
 	if (!feature) { s_baselineValid = false; return; }
-
-	// プロンプト実行中はピッチ/EQ等が時系列で動くため、曲ごと保存しない
 	if (promptOn) return;
+	if (s_restorePending) return;
 
 	if (!s_baselineValid) {
 		SnapshotCurrent(s_lastSaved);

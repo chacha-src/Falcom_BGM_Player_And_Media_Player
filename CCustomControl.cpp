@@ -357,6 +357,10 @@ BOOL CCC_ChromaBlitCache::BlitFull(HDC hdcDest, int x, int y, int w, int h)
 {
     if (!hdcDest || w <= 0 || h <= 0 || !pBits || !hdcDib || dibW != w || dibH != h) return FALSE;
 
+    static LONG s_bpInited = 0;
+    if (InterlockedCompareExchange(&s_bpInited, 1, 0) == 0)
+        ::BufferedPaintInit();
+
     RECT rect = { x, y, x + w, y + h };
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     HDC hdcBuf = NULL;

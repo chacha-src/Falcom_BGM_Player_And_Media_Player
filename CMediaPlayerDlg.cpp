@@ -274,6 +274,8 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_dsvolSlW = 0;
 	m_mpBtnShort = -1;
 	m_mpPromptShort = -1;
+	for (int i = 0; i < 6; ++i)
+		m_mpChkShort[i] = -1;
 }
 
 CMediaPlayerDlg::~CMediaPlayerDlg()
@@ -595,13 +597,13 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_m3uImport.SetWindowText(LL14(L"m3u入力", L"m3u import", L"Import m3u", L"Importa m3u", L"Importar m3u", L"m3u 가져오기", L"m3u导入", L"استيراد m3u", L"Импорт m3u", L"m3u import", L"Importar m3u", L"m3u import", L"Import m3u", L"m3u ice aktar"));
 	m_supe.SetWindowText(LL14(L"スペアナ", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"));
 	m_st.SetWindowText(LL14(L"ステレオ表示", L"Stereo view", L"Vue stereo", L"Vista stereo", L"Vista estereo", L"스테레오 표시", L"立体声显示", L"عرض ستيريو", L"Стерео", L"Stereo", L"Visao stereo", L"Stereo", L"Widok stereo", L"Stereo gosterim"));
-	m_tip.SetWindowText(LL14(L"ツールチップ", L"Tooltips", L"Info-bulles", L"Suggerimenti", L"Sugerencias", L"툴팁", L"工具提示", L"تلميحات", L"Подсказки", L"Tooltips", L"Dicas", L"Tooltips", L"Etykiety", L"?puclar?"));
-	m_mini.SetWindowText(LL14(L"最小化連動", L"Min. sync", L"Min. sync", L"Min. sync", L"Min. sync", L"최소화 연동", L"最小化联动", L"تزامن التصغير", L"Синхр. сверт.", L"Min.-Sync", L"Sinc. min.", L"Min. sync", L"Synch. min.", L"Min. e?itle"));
-	m_savemp3.SetWindowText(LL14(L"mp3途中保存", L"mp3 resume", L"mp3 reprise", L"mp3 ripresa", L"mp3 reanudar", L"mp3 위치저장", L"mp3续播", L"حفظ mp3", L"mp3 позиция", L"mp3 Position", L"mp3 retomar", L"mp3 hervat", L"mp3 wznow", L"mp3 surdur"));
-	m_saveds.SetWindowText(LL14(L"DShow途中保存", L"DShow resume", L"DShow reprise", L"DShow ripresa", L"DShow reanudar", L"DShow 위치저장", L"DShow续播", L"حفظ DShow", L"DShow позиция", L"DShow Position", L"DShow retomar", L"DShow hervat", L"DShow wznow", L"DShow surdur"));
+	m_tip.SetWindowText(LL14(L"ツールチップ", L"Tooltips", L"Info-bulles", L"Suggerimenti", L"Sugerencias", L"툴팁", L"工具提示", L"تلميحات", L"Подсказки", L"Tooltips", L"Dicas", L"Tooltips", L"Etykiety", L"İpuçları"));
+	m_mini.SetWindowText(LL14(L"最小化連動", L"Min. sync", L"Min. sync", L"Min. sync", L"Min. sync", L"최소화 연동", L"最小化联动", L"تزامن التصغير", L"Синхр. сверт.", L"Min.-Sync", L"Sinc. min.", L"Min. sync", L"Synch. min.", L"Min. eşitle"));
+	m_savemp3.SetWindowText(LL14(L"mp3途中保存", L"mp3 resume", L"mp3 reprise", L"mp3 ripresa", L"mp3 reanudar", L"mp3 위치저장", L"mp3续播", L"حفظ mp3", L"mp3 позиция", L"mp3 Position", L"mp3 retomar", L"mp3 hervat", L"mp3 wznow", L"mp3 sürdür"));
+	m_saveds.SetWindowText(LL14(L"DShow途中保存", L"DShow resume", L"DShow reprise", L"DShow ripresa", L"DShow reanudar", L"DShow 위치저장", L"DShow续播", L"حفظ DShow", L"DShow позиция", L"DShow Position", L"DShow retomar", L"DShow hervat", L"DShow wznow", L"DShow sürdür"));
 	m_savewav.SetWindowText(LL14(L"WAVファイルへ保存", L"Save to WAV file", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV 파일로 저장", L"保存到WAV文件", L"حفظ كـ WAV", L"Сохранить в WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
-	m_saveparam.SetWindowText(LL14(L"曲ごとに設定保存", L"Save per-song", L"Reglages/morceau", L"Impost. per brano", L"Ajustes por pista", L"곡별 설정 저장", L"逐曲保存设置", L"حفظ لكل أغنية", L"Настройки на трек", L"Pro Titel speichern", L"Config. por faixa", L"Per nummer opslaan", L"Ustaw. na utwor", L"Parça başına kaydet"));
-	m_resetdata.SetWindowText(LL14(L"保存をリセット", L"Reset saved", L"Reinitialiser", L"Reimposta salvati", L"Restablecer", L"저장 초기화", L"重置已存", L"إعادة تعيين", L"Сброс сохран.", L"Zuruecksetzen", L"Redefinir", L"Reset opgeslagen", L"Resetuj zapis", L"Kayıtı sıfırla"));
+	m_saveparam.SetWindowText(LL14(L"曲ごとに設定保存", L"Save per-song", L"Réglages/morceau", L"Impost. per brano", L"Ajustes por pista", L"곡별 설정 저장", L"逐曲保存设置", L"حفظ لكل أغنية", L"Настройки на трек", L"Pro Titel speichern", L"Config. por faixa", L"Per nummer opslaan", L"Ustaw. na utwor", L"Parça başına kaydet"));
+	m_resetdata.SetWindowText(LL14(L"保存をリセット", L"Reset saved", L"Réinitialiser", L"Reimposta salvati", L"Restablecer", L"저장 초기화", L"重置已存", L"إعادة تعيين", L"Сброс сохран.", L"Zurücksetzen", L"Redefinir", L"Reset opgeslagen", L"Resetuj zapis", L"Kayıtı sıfırla"));
 	m_kaisuuL.SetWindowText(LL14(L"ループ回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop", L"Cuenta de bucle", L"루프 횟수", L"循环次数", L"عدد الحلقات", L"Количество повторов", L"Schleifenzahler", L"Contagem de loop", L"Loopaantal", L"Liczba petli", L"Dongu sayisi"));
 	{
 		CString ks; ks.Format(_T("%d"), savedata.kaisuu > 0 ? savedata.kaisuu : 2);
@@ -1426,11 +1428,70 @@ void CMediaPlayerDlg::DoLayout()
 	// アルバム/コメント列(最終列=4)をリスト右端へぴたりとフィットさせる
 	FitPlaylistLastColumn();
 
-	// 下部チェック(ツールチップ/最小化連動/mp3/DShow/WAV/曲別保存)は横いっぱいに均等配置
+	// 下部チェック(ツールチップ〜曲保存): 均等スロット幅に収まる最長ラベルを実測で選ぶ
+	// CCustomCheckBox::OnDrawLayer と同じ箱サイズ/余白で必要幅 = 箱 + 8 + 文字幅 + 右余白
 	int availCk = W - (M + gPad) * 2;
 	int gapCk = (int)(5 * s);
 	int ckW = (availCk - gapCk * 5) / 6;
-	if (ckW < (int)(52 * s)) ckW = (int)(52 * s);
+	if (ckW < 1) ckW = 1;
+	int boxS = chkRowH - 4;
+	if (boxS > 18) boxS = 18;
+	if (boxS < 14) boxS = 14;
+	const int ckExtra = boxS + 8 + 4;
+
+	CClientDC cdc(this);
+	CFont* pOldChkF = nullptr;
+	if (m_fontChk.GetSafeHandle())
+		pOldChkF = cdc.SelectObject(&m_fontChk);
+	auto ckNeed = [&](LPCTSTR t) -> int {
+		if (!t || !*t) return ckExtra;
+		return ckExtra + cdc.GetTextExtent(t).cx;
+	};
+	auto ckApply = [&](CCustomCheckBox& ctl, int idx, LPCTSTR full, LPCTSTR mid, LPCTSTR sh) {
+		LPCTSTR use = sh;
+		int lv = 2;
+		if (ckNeed(full) <= ckW) { use = full; lv = 0; }
+		else if (ckNeed(mid) <= ckW) { use = mid; lv = 1; }
+		if (m_mpChkShort[idx] != lv) {
+			m_mpChkShort[idx] = lv;
+			ctl.SetWindowText(use);
+		}
+	};
+
+	// tip: ツールチップ → チップ → チ
+	ckApply(m_tip, 0,
+		LL14(L"ツールチップ", L"Tooltips", L"Info-bulles", L"Suggerimenti", L"Sugerencias", L"툴팁", L"工具提示", L"تلميحات", L"Подсказки", L"Tooltips", L"Dicas", L"Tooltips", L"Etykiety", L"İpuçları"),
+		LL14(L"チップ", L"Tips", L"Bulles", L"Sugger.", L"Tips", L"팁", L"提示", L"تلميح", L"Подск.", L"Tips", L"Dicas", L"Tips", L"Etyk.", L"İpucu"),
+		LL14(L"チ", L"Tip", L"Tip", L"Tip", L"Tip", L"팁", L"提", L"تل", L"Пд", L"Tip", L"Dic", L"Tip", L"Et", L"İp"));
+	// mini: 最小化連動 → 最小化 → 最小
+	ckApply(m_mini, 1,
+		LL14(L"最小化連動", L"Min. sync", L"Min. sync", L"Min. sync", L"Min. sync", L"최소화 연동", L"最小化联动", L"تزامن التصغير", L"Синхр. сверт.", L"Min.-Sync", L"Sinc. min.", L"Min. sync", L"Synch. min.", L"Min. eşitle"),
+		LL14(L"最小化", L"Minimize", L"Réduire", L"Riduci", L"Minimizar", L"최소화", L"最小化", L"تصغير", L"Свернуть", L"Minimieren", L"Minimizar", L"Minimaliseren", L"Minimalizuj", L"Küçült"),
+		LL14(L"最小", L"Min", L"Min", L"Min", L"Min", L"최소", L"最小", L"تص", L"Свр", L"Min", L"Min", L"Min", L"Min", L"Min"));
+	// mp3途中保存 → mp3保存 → mp3
+	ckApply(m_savemp3, 2,
+		LL14(L"mp3途中保存", L"mp3 resume", L"mp3 reprise", L"mp3 ripresa", L"mp3 reanudar", L"mp3 위치저장", L"mp3续播", L"حفظ mp3", L"mp3 позиция", L"mp3 Position", L"mp3 retomar", L"mp3 hervat", L"mp3 wznow", L"mp3 sürdür"),
+		LL14(L"mp3保存", L"mp3 save", L"mp3 sauver", L"mp3 salva", L"mp3 guardar", L"mp3 저장", L"mp3保存", L"حفظ mp3", L"mp3 сохр.", L"mp3 speichern", L"mp3 salvar", L"mp3 opslaan", L"mp3 zapis", L"mp3 kaydet"),
+		LL14(L"mp3", L"mp3", L"mp3", L"mp3", L"mp3", L"mp3", L"mp3", L"mp3", L"mp3", L"mp3", L"mp3", L"mp3", L"mp3", L"mp3"));
+	// DShow途中保存 → DShow保存 → DS
+	ckApply(m_saveds, 3,
+		LL14(L"DShow途中保存", L"DShow resume", L"DShow reprise", L"DShow ripresa", L"DShow reanudar", L"DShow 위치저장", L"DShow续播", L"حفظ DShow", L"DShow позиция", L"DShow Position", L"DShow retomar", L"DShow hervat", L"DShow wznow", L"DShow sürdür"),
+		LL14(L"DShow保存", L"DShow save", L"DShow sauver", L"DShow salva", L"DShow guardar", L"DShow 저장", L"DShow保存", L"حفظ DS", L"DShow сохр.", L"DShow speichern", L"DShow salvar", L"DShow opslaan", L"DShow zapis", L"DShow kaydet"),
+		LL14(L"DS", L"DS", L"DS", L"DS", L"DS", L"DS", L"DS", L"DS", L"DS", L"DS", L"DS", L"DS", L"DS", L"DS"));
+	// WAVファイルへ保存 → WAV保存 → WAV
+	ckApply(m_savewav, 4,
+		LL14(L"WAVファイルへ保存", L"Save to WAV file", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV 파일로 저장", L"保存到WAV文件", L"حفظ كـ WAV", L"Сохранить в WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"),
+		LL14(L"WAV保存", L"Save WAV", L"Sauver WAV", L"Salva WAV", L"Guardar WAV", L"WAV 저장", L"WAV保存", L"حفظ WAV", L"WAV сохр.", L"WAV speichern", L"Salvar WAV", L"WAV opslaan", L"Zapis WAV", L"WAV kaydet"),
+		LL14(L"WAV", L"WAV", L"WAV", L"WAV", L"WAV", L"WAV", L"WAV", L"WAV", L"WAV", L"WAV", L"WAV", L"WAV", L"WAV", L"WAV"));
+	// 曲ごとに設定保存 → 曲ごと保存 → 曲保存
+	ckApply(m_saveparam, 5,
+		LL14(L"曲ごとに設定保存", L"Save per-song", L"Réglages/morceau", L"Impost. per brano", L"Ajustes por pista", L"곡별 설정 저장", L"逐曲保存设置", L"حفظ لكل أغنية", L"Настройки на трек", L"Pro Titel speichern", L"Config. por faixa", L"Per nummer opslaan", L"Ustaw. na utwor", L"Parça başına kaydet"),
+		LL14(L"曲ごと保存", L"Per-song", L"Par morceau", L"Per brano", L"Por pista", L"곡별 저장", L"逐曲保存", L"لكل أغنية", L"На трек", L"Pro Titel", L"Por faixa", L"Per nummer", L"Na utwor", L"Parça kaydet"),
+		LL14(L"曲保存", L"Song save", L"Mém. piste", L"Salva brano", L"Guarda pista", L"곡저장", L"曲保存", L"أغنية", L"Трек", L"Titel", L"Faixa", L"Nummer", L"Utwór", L"Parça"));
+
+	if (pOldChkF)
+		cdc.SelectObject(pOldChkF);
+
 	int ckx = M + gPad;
 	MoveCtl(&m_tip, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
 	MoveCtl(&m_mini, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;

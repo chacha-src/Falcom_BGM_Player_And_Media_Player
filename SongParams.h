@@ -9,8 +9,9 @@
 //            ※mode 自体の「再生形式切替」はプレイリスト行(pc[].sub)が既に持つ。
 //              ここは DSP パラメータの衝突回避用キーであり、mode を書き戻すものではない。
 //   保存   : 再生中に各項目が変わったらその時点で反映(デバウンス書き込み)
+//            エントリが無い曲を再生開始したときも、その時点の設定を自動で新規保存する
 //            ※プロンプト実行中(MpPromptIsActive)は保存しない(時系列改変の汚染防止)
-//   復元   : 曲が始まったら DSP を適用(再生=メインスレッドへ post、WAV出力=直接)
+//   復元   : エントリがある曲は開始時に DSP を適用(再生=メインスレッド、WAV出力=直接)
 //   有効化 : savedata.saveSongParams (チェックボックス)が 1 のときだけ動作
 //   移行   : savedata.audioDataVersion (末尾追記)
 //            0→1 で旧キー(pathのみ)を playlistu*.dat 照合により mode+ret2 付きへ自動コンバート
@@ -54,8 +55,18 @@ void SongParams_SaveFile();
 void SongParams_ConvertKeysIfNeeded();
 
 // HandleNotifications / HandleNotifications_export の先頭で呼ぶ共通処理。
-// exporting=true のとき WAV 出力(メインスレッド)。false のとき再生(別スレッド)。
+// exporting=true のとき WAV 出力(メインスレッド)。false のとき再生(別スレッド可)。
 void SongParams_Sync(bool exporting);
+
+// play() 完了直後(plcnt/SIcon 確定後)にメインスレッドから呼ぶ。
+// 曲ごとパラメータの復元をここで確実に行う(ポーリング任せにしない)。
+void SongParams_OnSongStarted();
+
+// 停止時: 未書き込みを flush し、保存ポーリングを止める。
+void SongParams_OnSongStopped();
+
+// PostMessage 復元完了時に baseline を確定する(メインスレッド)。
+void SongParams_NoteRestored(const SongParam& e);
 
 // 1 エントリをメイン画面(スライダー/コンボ/savedata/グローバル)へ適用する。
 // 必ずメインスレッドから呼ぶこと。DSP のみ。mode は触らない(プレイリスト側が保持)。

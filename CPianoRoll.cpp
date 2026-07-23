@@ -3084,14 +3084,26 @@ void CPianoRoll::UpdatePianoRollTimer()
 void CPianoRoll::RequestSyncFromMainUi()
 {
     if (!::IsWindow(m_hWnd)) return;
-    // 描画待ち中は追加 SYNC しない（OnSyncRequest の PCM コピー連鎖で時間とともに悪化する）
-    if (InterlockedCompareExchange(&m_analysisDonePosted, 0, 0) != 0) return;
+    const DWORD now = GetTickCount();
+    // 描画中は PCM 供給も止める。ただし Invalidate 待ちで posted が固まったら
+    // ここで Peek 破棄＋開放（timerp 洪水で WM_PAINT が来ないケースの回復）。
+    if (InterlockedCompareExchange(&m_analysisDonePosted, 0, 0) != 0) {
+        if (m_lastAnalysisDonePostTick != 0 && (now - m_lastAnalysisDonePostTick) >= 150u) {
+            MSG msg;
+            while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_ANALYSIS_DONE, WM_PIANOROLL_ANALYSIS_DONE, PM_REMOVE)) {}
+            while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_SYNC, WM_PIANOROLL_SYNC, PM_REMOVE)) {}
+            InterlockedExchange(&m_analysisDonePosted, 0);
+            InterlockedExchange(&m_syncPosted, 0);
+        }
+        else {
+            return;
+        }
+    }
     if (InterlockedCompareExchange(&m_syncPosted, 0, 0) != 0) return;
     // 実時間スロットル（paint 遅延で ms2 が伸びても 60Hz 同期にしない）
     int minMs = savedata.ms2;
     if (minMs < 16) minMs = 16;
     if (minMs > 960) minMs = 960;
-    const DWORD now = GetTickCount();
     if (m_lastSyncPostTick != 0 && (now - m_lastSyncPostTick) < (DWORD)minMs)
         return;
     if (InterlockedCompareExchange(&m_syncPosted, 1, 0) != 0) return;
@@ -3112,26 +3124,33 @@ void CPianoRoll::ApplySyncInvalidate()
 
 LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
 {
-    // syncPosted は OnPaint 完了まで保持（ANALYSIS_DONE と同じ背圧）。
-    // ここで降ろすと SyncPianoRollFast がキューに積まれ UI が時間とともに死ぬ。
+    // アナライザと同じ: Sync は PCM 供給のみ。ここで Invalidate すると
+    // AnalysisDone と二重に全面 OnPaint し、UI/EQ が数秒で飢える。
+    // syncPosted は供給完了で解放（描画背圧は analysisDonePosted が担う）。
     if (m_paintDisabled || !::IsWindow(m_hWnd)) {
         InterlockedExchange(&m_syncPosted, 0);
         return 0;
     }
     COggDlg_SyncPianoRollFast();
-    ApplySyncInvalidate();
+    InterlockedExchange(&m_syncPosted, 0);
     return 0;
 }
 
 LRESULT CPianoRoll::OnAnalysisDone(WPARAM, LPARAM)
 {
-    // posted フラグは OnPaint 完了まで保持（描画背圧）。
-    // 先に降ろすと重い OnPaint 中に再 Post され、EQ コード更新が飢える。
+    // ロール描画の唯一の起動点。
+    // Invalidate だけだと他の PostMessage（timerp 等）が残る間 WM_PAINT が来ず、
+    // analysisDonePosted が掴みっぱなしで Sync/EQ が死ぬ。
+    // UpdateWindow でこのターンに描画まで終わらせ、背圧を一気に開放する。
     if (m_paintDisabled || !::IsWindow(m_hWnd)) {
         InterlockedExchange(&m_analysisDonePosted, 0);
         return 0;
     }
     ApplySyncInvalidate();
+    UpdateWindow();
+    // 非表示等で OnPaint が走らなかった場合の保険
+    InterlockedExchange(&m_analysisDonePosted, 0);
+    InterlockedExchange(&m_syncPosted, 0);
     return 0;
 }
 
@@ -3512,7 +3531,11 @@ void CPianoRoll::PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH,
     UNREFERENCED_PARAMETER(h);
 #if CCUSTOM_AERO_SUPPORT
     if (savedata.aero == 1 && CCC_IsWin11()) {
-        if (m_chromaReady) {
+        if (m_chromaReady && m_rollReady && m_keyBufReady) {
+            // ロール+鍵盤を1回の BufferedPaint で出す（毎フレーム×2 が UI を食う）
+            m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, 0, w, h);
+        }
+        else if (m_chromaReady) {
             if (m_rollReady)
                 m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
             if (m_keyBufReady)
@@ -3771,10 +3794,14 @@ void CPianoRoll::OnPaint()
             if (needKeyDraw || !m_chromaReady)
                 m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, keySectionH, PIANO_CHROMA_KEY);
             m_chromaReady = true;
-            if (m_rollReady)
-                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
-            if (m_keyBufReady)
-                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH, w, keySectionH);
+            if (m_rollReady && m_keyBufReady)
+                m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, 0, w, h);
+            else {
+                if (m_rollReady)
+                    m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
+                if (m_keyBufReady)
+                    m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH, w, keySectionH);
+            }
         }
         else {
             if (m_rollReady)
@@ -3822,7 +3849,12 @@ void CPianoRoll::OnPaint()
     (void)needAnotherRollFrame;
 
     // 描画完了後に ANALYSIS_DONE / SYNC を開放（背圧）。
-    // 閉じると軽くなる現象の主因だった「描画中の再 Post 連鎖」を断つ。
+    // 滞留メッセージがあれば破棄してポンプを空ける（次の EQ/timerp を通す）。
+    if (::IsWindow(m_hWnd)) {
+        MSG msg;
+        while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_ANALYSIS_DONE, WM_PIANOROLL_ANALYSIS_DONE, PM_REMOVE)) {}
+        while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_SYNC, WM_PIANOROLL_SYNC, PM_REMOVE)) {}
+    }
     InterlockedExchange(&m_analysisDonePosted, 0);
     InterlockedExchange(&m_syncPosted, 0);
 
