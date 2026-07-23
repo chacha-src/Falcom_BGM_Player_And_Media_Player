@@ -564,7 +564,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (hD2 < 1.0f) hD2 = 1.0f;
 
 	{
-		CString cap = LL14(L"メディアプレイヤー「ささら」", L"Media Player \"Sasara\"", L"Lecteur multimedia « Sasara »", L"Lettore multimediale \"Sasara\"", L"Reproductor multimedia \"Sasara\"", L"미디어 플레이어 「사사라」", L"媒体播放器「Sasara」", L"مشغل الوسائط \"Sasara\"", L"Медиаплеер «Sasara»", L"Media-Player \"Sasara\"", L"Reprodutor de midia \"Sasara\"", L"Mediaspeler \"Sasara\"", L"Odtwarzacz multimediow \"Sasara\"", L"Medya Oynatıcı \"Sasara\"");
+		CString cap = LL14(L"メディアプレイヤー「らいら」", L"Media Player \"Raira\"", L"Lecteur multimedia « Raira »", L"Lettore multimediale \"Raira\"", L"Reproductor multimedia \"Raira\"", L"미디어 플레이어 「라이라」", L"媒体播放器「莱拉」", L"مشغل الوسائط \"رايرا\"", L"Медиаплеер «Райра»", L"Media-Player \"Raira\"", L"Reprodutor de midia \"Raira\"", L"Mediaspeler \"Raira\"", L"Odtwarzacz multimediow \"Raira\"", L"Medya Oynatıcı \"Raira\"");
 		cap += MpBuildVersionCaptionSuffix();
 		SetWindowText(cap);
 	}
@@ -2547,7 +2547,7 @@ bool CMediaPlayerDlg::DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lin
 	return true;
 }
 
-// ジャケット無しのとき、素っ気ないアイコンの代わりに「Media Player ささら」の
+// ジャケット無しのとき、素っ気ないアイコンの代わりに「Media Player らいら」の
 // タイトルと、ほんのり可愛いパステルの模様(縦グラデ + 水玉 + ハート)を描く。
 // dc は w×h のオフスクリーン。純黒(=アクリルのクロマキー)は使わない。
 static void Mp_DrawNoJacketPlaceholder(CDC& dc, int w, int h)
@@ -2601,7 +2601,7 @@ static void Mp_DrawNoJacketPlaceholder(CDC& dc, int w, int h)
 
 	dc.SelectObject(opnNull);
 
-	// --- タイトル: "Media Player" / "ささら" を中央に(下地にやわらかい白影) ---
+	// --- タイトル: "Media Player" / "らいら" を中央に(下地にやわらかい白影) ---
 	int hbig = max(11, h / 4);
 	int hsml = max(9, h / 9);
 	LOGFONT lf; ZeroMemory(&lf, sizeof(lf));
@@ -2626,7 +2626,7 @@ static void Mp_DrawNoJacketPlaceholder(CDC& dc, int w, int h)
 		dc.SelectObject(of);
 	};
 	shadowText(fSml, y0, hsml, _T("Media Player"), RGB(214, 108, 150));
-	shadowText(fBig, y0 + hsml + max(1, h / 40), hbig, _T("ささら"), RGB(200, 72, 128));
+	shadowText(fBig, y0 + hsml + max(1, h / 40), hbig, _T("らいら"), RGB(200, 72, 128));
 }
 
 // 左ジャケット / 右曲情報 パネルを描画。バナーと同じ黒地に統一し、上部の帯全体が
@@ -2671,7 +2671,7 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 				og->img.Draw(mem.GetSafeHdc(), dx, dy, dw, dh, 0, 0, og->jx, og->jy);
 				::SetStretchBltMode(mem.GetSafeHdc(), om);
 			}
-			else {                                  // ジャケ無し: 「Media Player ささら」+ 可愛い模様
+			else {                                  // ジャケ無し: 「Media Player らいら」+ 可愛い模様
 				Mp_DrawNoJacketPlaceholder(mem, w, h);
 			}
 			if (aero)

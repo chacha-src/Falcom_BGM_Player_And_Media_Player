@@ -1,6 +1,6 @@
 ﻿chachakotorinのgithubから移転です。
 
-# oggYSEDbgm メディアプレイヤー「ささら」
+# oggYSEDbgm メディアプレイヤー「らいら」
 日本ファルコム (Nihon Falcom) BGMプレイヤー / 高機能メディアプレイヤー
 
 **対応OS:** Windows 11 以降
@@ -43,7 +43,7 @@ Ozone風のリアルタイムアナライザーを追加しました。
 メディアプレイヤー画面モードの再生中アイコン（♪点滅2コマ）と選択♡の描画順も整備しました。
 
 ### メディアプレイヤー画面モード搭載
-普通のメディアプレイヤーのようなモード「ささら」を搭載。起動時にファルコムBGM画面との切り替えもできます。
+普通のメディアプレイヤーのようなモード「らいら」を搭載。起動時にファルコムBGM画面との切り替えもできます。
 
 ### テンポ・ピッチ変更
 再生中のテンポとピッチを、それぞれ独立して変えられます。
@@ -156,7 +156,7 @@ Copyright (C) PrePrayerPower Soft
 
 
 
-# oggYSEDbgm Media Player "Sasara"
+# oggYSEDbgm Media Player "Raira"
 Nihon Falcom BGM Player / High-Performance Media Player
 
 **Compatible OS:** Windows 11 or later
@@ -198,7 +198,7 @@ An Ozone-inspired real-time analyzer has been added.
 Playback note icon blinking (two frames) and heart (♡) draw order on the media-player list were also fixed.
 
 ### Media Player Screen Mode Included
-Includes a media-player mode called **Sasara**. You can choose between the Falcom BGM screen and this mode at startup.
+Includes a media-player mode called **Raira**. You can choose between the Falcom BGM screen and this mode at startup.
 
 ### Tempo & Pitch Control
 Tempo and pitch can be adjusted independently during playback.

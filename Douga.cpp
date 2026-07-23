@@ -384,7 +384,7 @@ BOOL CDouga::Create(HWND h)
     LoadIcon(AfxGetInstanceHandle(),
     MAKEINTRESOURCE(IDR_DOUGA)));
 
-    int ret=CreateEx(WS_EX_OVERLAPPEDWINDOW|WS_EX_ACCEPTFILES,sClassName, LL14(L"メディアプレイヤーささら✡動画画面", L"Media Player Sasara ✡ Video Screen", L"Lecteur multimédia Sasara ✡ Écran vidéo", L"Lettore multimediale Sasara ✡ Schermata video", L"Reproductor multimedia Sasara ✡ Pantalla de vídeo", L"미디어 플레이어 사사라 ✡ 동영상 화면", L"媒体播放器萨萨拉 ✡ 视频画面", L"مشغل الوسائط ساسارا ✡ شاشة الفيديو", L"Медиаплеер Сасара ✡ Экран видео", L"Mediaplayer Sasara ✡ Videobildschirm", L"Reprodutor multimídia Sasara ✡ Tela de vídeo", L"Mediaspeler Sasara ✡ Videoscherm", L"Odtwarzacz multimedialny Sasara ✡ Ekran wideo", L"Medya Oynatıcı Sasara ✡ Video Ekranı"),
+    int ret=CreateEx(WS_EX_OVERLAPPEDWINDOW|WS_EX_ACCEPTFILES,sClassName, LL14(L"メディアプレイヤーらいら✡動画画面", L"Media Player Raira ✡ Video Screen", L"Lecteur multimédia Raira ✡ Écran vidéo", L"Lettore multimediale Raira ✡ Schermata video", L"Reproductor multimedia Raira ✡ Pantalla de vídeo", L"미디어 플레이어 라이라 ✡ 동영상 화면", L"媒体播放器莱拉 ✡ 视频画面", L"مشغل الوسائط رايرا ✡ شاشة الفيديو", L"Медиаплеер Райра ✡ Экран видео", L"Mediaplayer Raira ✡ Videobildschirm", L"Reprodutor multimídia Raira ✡ Tela de vídeo", L"Mediaspeler Raira ✡ Videoscherm", L"Odtwarzacz multimedialny Raira ✡ Ekran wideo", L"Medya Oynatıcı Raira ✡ Video Ekranı"),
 	  ((WS_OVERLAPPEDWINDOW)& ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_SYSMENU),
 	0,0,640,360,NULL,NULL,NULL);
 	if(ret==0) MessageBox(LL14(L"作成", L"Create", L"Créer", L"Crea", L"Crear", L"생성", L"创建", L"إنشاء", L"Создать", L"Erstellen", L"Criar", L"Maken", L"Utwórz", L"Oluştur"));
