@@ -81,7 +81,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 - Steam版 Ys X (Ys10)
 
 ### 軌跡 (Trails) シリーズ
-- 英雄伝説6 空の軌跡 FC / SC / The 3rd (Steam版 The 1st含む) The 1stはプレイ中なのであと1曲曲名不明
+- 英雄伝説6 空の軌跡 FC / SC / The 3rd (Steam版 The 1st含む)
 - 英雄伝説 零の軌跡
 - 英雄伝説 碧の軌跡
 - Steam版 閃の軌跡 I / II / III / IV
