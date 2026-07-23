@@ -176,7 +176,23 @@ public:
 	int  m_isc[kInfoRows];   // 各行の現在スクロールオフセット(px)。0=静止
 	int  m_iscW[kInfoRows];  // テキスト+セパレータの全幅(0=行が収まるため不要)
 	bool m_iscActive;        // 少なくとも1行がスクロール中。次の WM_MP_INFO_SCROLL 発行を判定
+	volatile LONG m_iscScrollPosted; // WM_MP_INFO_SCROLL 多重ポスト防止
 	int  m_lastInfoPanelW;   // 曲情報パネル幅(リサイズ検出→marquee リセット)
+	// marquee 行のワイドビットマップキャッシュ（毎フレーム CreateCompatible しない）
+	CDC      m_iscRowDC[kInfoRows];
+	CBitmap  m_iscRowBmp[kInfoRows];
+	CBitmap* m_iscRowOldBmp[kInfoRows];
+	int      m_iscRowCacheW[kInfoRows];
+	int      m_iscRowCacheH[kInfoRows];
+	CString  m_iscRowCacheText[kInfoRows];
+	COLORREF m_iscRowCacheClr[kInfoRows];
+	COLORREF m_iscRowCacheBg[kInfoRows];
+	// 右曲情報パネル用オフスクリーン（毎フレーム CreateCompatible しない）
+	CDC      m_infoMemDC;
+	CBitmap  m_infoMemBmp;
+	CBitmap* m_infoMemOldBmp = nullptr;
+	int      m_infoMemW = 0;
+	int      m_infoMemH = 0;
 	int  m_listHdrDragCol;   // 列幅ドラッグ中の列(-1=なし)。HDN_TRACK 追随用
 	int  m_lastToggleSupe;   // 押下トグル見た目の変化検出用(-1=未同期)
 	int  m_lastToggleSt;
@@ -205,7 +221,7 @@ public:
 	// mode 値により tagfile / stitle / fnn のどれを使うかが変わる。
 	CString CurrentTrackTitle() const;
 	// 1行分のテキストを mem DC へ描画する。収まれば静止描画(false)、はみ出せば
-	// 2コピーのワイド DC を作り marquee オフセットで切り出して BitBlt する(true)。
+	// 行キャッシュのワイド DC から marquee オフセットで BitBlt する(true)。
 	bool DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lineH,
 		const CString& text, COLORREF clr, int rowIdx, COLORREF kBg, CFont* font);
 

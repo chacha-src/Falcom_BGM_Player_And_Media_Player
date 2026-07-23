@@ -405,8 +405,10 @@ DWORD CAnalyzerDlg::SpecWorkerLoop()
 		if (InterlockedExchange(&m_specNeed, 0) == 0)
 			continue;
 		UpdateSpectrumFromRing();
+		// SPEC_DONE を無制限 Post するとポンプを埋め、ピアノ/EQ を飢餓させる。
+		// 提示は KickUiPresent の合流・ms2 スロットルに任せる。
 		if (::IsWindow(m_hWnd))
-			PostMessage(WM_ANALYZER_SPEC_DONE, 0, 0);
+			KickUiPresent();
 	}
 	return 0;
 }
@@ -430,9 +432,15 @@ static void AnalyzerPresentInvalidate(HWND hWnd)
 
 LRESULT CAnalyzerDlg::OnPresentRequest(WPARAM, LPARAM)
 {
-	InterlockedExchange(&m_presentPosted, 0);
-	if (::IsWindow(m_hWnd) && IsWindowVisible() && !IsIconic())
+	// presentPosted は OnPaint 完了まで保持（先に降ろすと Kick が連射し UI/EQ を食う）
+	if (::IsWindow(m_hWnd) && IsWindowVisible() && !IsIconic()) {
 		AnalyzerPresentInvalidate(m_hWnd);
+		UpdateWindow();
+		// OnPaint 末尾で解放。ここでクリアすると追い付き Kick の posted を潰す。
+	}
+	else {
+		InterlockedExchange(&m_presentPosted, 0);
+	}
 	return 0;
 }
 
@@ -1111,16 +1119,18 @@ bool CAnalyzerDlg::EnsureFrameBuffer(CDC& refDC, int w, int h)
 
 void CAnalyzerDlg::KickUiPresent()
 {
-	// 多重 Post を防ぐ。追いつき自己 Kick の自由走行は最短 8ms に制限
-	// （pending/頻度は落とさず、EQ を食う超高頻度ペイントだけ抑える）
+	// 多重 Post を防ぐ。表示キックは ms2（ピアノ/EQ と帯域を分け合う）
 	if (!::IsWindow(m_hWnd)) return;
-	// FullRedrawWave 中は Kick を溜め、完了後に1回だけ消化（曲変更スパイク短縮）
+	// FullRedrawWave 中は Kick を溜め、完了後に1回だけ消化
 	if (InterlockedCompareExchange(&m_fullRedrawBusy, 0, 0) != 0) {
 		InterlockedExchange(&m_presentDeferred, 1);
 		return;
 	}
+	int minMs = savedata.ms2;
+	if (minMs < 16) minMs = 16;
+	if (minMs > 960) minMs = 960;
 	const DWORD now = GetTickCount();
-	if (m_lastPresentKickTick != 0 && (now - m_lastPresentKickTick) < 8u)
+	if (m_lastPresentKickTick != 0 && (now - m_lastPresentKickTick) < (DWORD)minMs)
 		return;
 	if (InterlockedCompareExchange(&m_presentPosted, 1, 0) != 0) return;
 	m_lastPresentKickTick = now;
@@ -1886,7 +1896,10 @@ void CAnalyzerDlg::OnPaint()
 	CPaintDC dc(this);
 	CRect rc;
 	GetClientRect(&rc);
-	if (rc.IsRectEmpty()) return;
+	if (rc.IsRectEmpty()) {
+		InterlockedExchange(&m_presentPosted, 0);
+		return;
+	}
 
 	const int split = rc.top + (int)(rc.Height() * 0.65);
 	const int waveW = rc.Width();
@@ -1906,6 +1919,7 @@ void CAnalyzerDlg::OnPaint()
 
 	if (!EnsureWaveBuffer(dc, waveW, waveH) || !EnsureSpecBuffer(dc, specW, specH)) {
 		dc.FillSolidRect(rc, ANALYZER_BG);
+		InterlockedExchange(&m_presentPosted, 0);
 		return;
 	}
 
@@ -1919,6 +1933,7 @@ void CAnalyzerDlg::OnPaint()
 
 	bool didWaveFull = false;
 	bool didWaveScroll = false;
+	bool needDeferredKick = false;
 #if CCUSTOM_AERO_SUPPORT
 	m_lastWaveScroll = 0;
 #endif
@@ -1928,10 +1943,8 @@ void CAnalyzerDlg::OnPaint()
 		FullRedrawWave(bg);
 		didWaveFull = true;
 		InterlockedExchange(&m_fullRedrawBusy, 0);
-		if (InterlockedExchange(&m_presentDeferred, 0) != 0) {
-			// 完了後の1回だけ再開（通常 8ms 間隔は KickUiPresent 側で維持）
-			KickUiPresent();
-		}
+		if (InterlockedExchange(&m_presentDeferred, 0) != 0)
+			needDeferredKick = true;
 	}
 	else if (pending > 0) {
 		const int scrolled = ScrollWaveAndDrawNew(bg, scrollCap);
@@ -1961,13 +1974,10 @@ void CAnalyzerDlg::OnPaint()
 	}
 	m_hoverChanged = false;
 
-	// 未消化の波形スクロールがあれば次フレームへ（Kick は 8ms 合流）
-	// FullRedraw 直後の追い付き Kick は上で1回だけ処理済み
+	// 未消化スクロールの追い付き Kick は提示後に行う（presentPosted 解放後）
 	EnterCriticalSection(&m_cs);
 	const bool moreScroll = (m_pendingScroll > 0);
 	LeaveCriticalSection(&m_cs);
-	if (moreScroll && !didWaveFull)
-		KickUiPresent();
 
 #if CCUSTOM_AERO_SUPPORT
 	if (bAero) {
@@ -2102,6 +2112,11 @@ void CAnalyzerDlg::OnPaint()
 		Present(dc, rc, FALSE);
 		CCC_MainLockPaintClient(dc, m_hWnd);
 	}
+
+	// 描画完了後に提示フラグを開放し、未消化スクロール/遅延 Kick があれば1回だけ
+	InterlockedExchange(&m_presentPosted, 0);
+	if ((moreScroll && !didWaveFull) || needDeferredKick)
+		KickUiPresent();
 }
 
 BOOL CAnalyzerDlg::OnEraseBkgnd(CDC* pDC)

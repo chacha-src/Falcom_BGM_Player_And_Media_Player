@@ -18090,14 +18090,17 @@ UINT TheadLoop(LPVOID)
 		COgg_RequestTimerp(og);
 
 		// info パネルスクロール: TheadLoop の 60fps をそのまま使い、1フレームおきに
-		// PostMessage することで ~30fps を実現。Timer3 より精度が高く V-Sync に同期する。
+		// PostMessage することで ~30fps を実現。多重 Post は CAS で合流。
 		if (++infoScrollDiv >= 2) {
 			infoScrollDiv = 0;
 			extern CMediaPlayerDlg* mp;
 			if (mp) {
 				HWND hmp = mp->GetSafeHwnd();
-				if (::IsWindow(hmp) && mp->m_iscActive)
-					::PostMessage(hmp, WM_MP_INFO_SCROLL, 0, 0);
+				if (::IsWindow(hmp) && mp->m_iscActive
+					&& InterlockedCompareExchange(&mp->m_iscScrollPosted, 1, 0) == 0) {
+					if (!::PostMessage(hmp, WM_MP_INFO_SCROLL, 0, 0))
+						InterlockedExchange(&mp->m_iscScrollPosted, 0);
+				}
 			}
 		}
 

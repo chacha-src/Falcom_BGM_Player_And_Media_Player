@@ -401,6 +401,13 @@ private:
     int     m_keyH = 0;
     bool    m_keyBufReady = false;
 
+    // 最終提示用フレームバッファ（ロール+鍵盤+追従を合成 → 画面へ1回 BitBlt）
+    CDC     m_frameDC;
+    CBitmap m_frameBmp;
+    CBitmap* m_frameOldBmp = nullptr;
+    int     m_frameW = 0;
+    int     m_frameH = 0;
+
     // ---- フォントキャッシュ(ウィンドウサイズ変化時のみ再生成) ----
     CFont   m_fontKeyNote;            // 鍵盤上のノート名(C3, A4 等)
     CFont   m_fontKeyOct;             // オクターブ表示
@@ -436,7 +443,14 @@ private:
 
     void ReleasePaintBuffers();
     bool EnsureRollBuffer(CDC& refDC, int width, int rollH);
+    bool EnsureFrameBuffer(CDC& refDC, int w, int h);
     void PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH, int keySectionH);
+    // ロール+鍵盤+追従UI をオフスクリーンへ合成し、画面へは1回だけ出す
+    void PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySectionH);
+#if CCUSTOM_AERO_SUPPORT
+    // 「メインに追従」をクロマへ焼付けてから1回 Blit（画面2段合成のちらつき防止）
+    void BakeMainFollowOverlayIntoChroma(int w, int h, int rollH, int keySectionH);
+#endif
     bool EnsureKeyBuffer(CDC& refDC, int width, int keySectionH);
     void MarkKeyVisualDirty();
     void ApplySyncInvalidate();

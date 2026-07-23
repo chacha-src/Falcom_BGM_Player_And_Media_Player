@@ -2441,6 +2441,15 @@ void CPianoRoll::ReleasePaintBuffers()
     m_keyH = 0;
     m_keyBufReady = false;
 
+    if (m_frameDC.GetSafeHdc()) {
+        if (m_frameOldBmp) m_frameDC.SelectObject(m_frameOldBmp);
+        m_frameDC.DeleteDC();
+    }
+    m_frameBmp.DeleteObject();
+    m_frameOldBmp = nullptr;
+    m_frameW = 0;
+    m_frameH = 0;
+
 #if CCUSTOM_AERO_SUPPORT
     m_chromaCache.Release();
     m_chromaReady = false;
@@ -3117,9 +3126,14 @@ void CPianoRoll::ApplySyncInvalidate()
     if (m_paintDisabled || !::IsWindow(m_hWnd)) return;
     if (m_meterDirty)
         m_keyDirty = true;
-    // 0.9a と同じ全域無効化。部分無効化はロック矩形の描画漏れ等の
-    // デグレ源になったため戻した。
-    Invalidate(FALSE);
+    // アナライザと同じ: ロック矩形を更新領域から除外する。
+    // 全面 Invalidate だと BeginPaint 時点でアクリル面が透け、
+    // その後 Blit するまでの間「メインに追従」がちらつく。
+    // BlitFull/フレーム BitBlt はクリップを無視して追従も更新する。
+    CRect cr;
+    GetClientRect(&cr);
+    if (!cr.IsRectEmpty())
+        CCC_InvalidateRectMinusOverlay(m_hWnd, cr);
 }
 
 LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
@@ -3290,11 +3304,15 @@ DWORD CPianoRoll::AnalysisWorkerLoop()
                 didWork = true;
         }
 
-        // 多重 Post するとキューが空にならず WM_PAINT が飢餓する。
-        // coalesce + 最短 8ms（アナライザー KickUiPresent と同じ。ms2 にすると体感が重い）。
+        // 多重 Post するとキューが空にならず WM_PAINT / EQ が飢餓する。
+        // 表示キックは ms2（描画周期）に合わせる。解析自体は ANALYZE_MIN_MS のまま。
+        // （旧 8ms + UpdateWindow だとピアノが UI を占有し EQ が秒数回になる）
         if (didWork && ::IsWindow(m_hWnd)) {
+            int minMs = savedata.ms2;
+            if (minMs < 16) minMs = 16;
+            if (minMs > 960) minMs = 960;
             const DWORD now = GetTickCount();
-            if (m_lastAnalysisDonePostTick == 0 || (now - m_lastAnalysisDonePostTick) >= 8u) {
+            if (m_lastAnalysisDonePostTick == 0 || (now - m_lastAnalysisDonePostTick) >= (DWORD)minMs) {
                 if (InterlockedCompareExchange(&m_analysisDonePosted, 1, 0) == 0) {
                     m_lastAnalysisDonePostTick = now;
                     if (!PostMessage(WM_PIANOROLL_ANALYSIS_DONE, 0, 0))
@@ -3526,51 +3544,166 @@ void CPianoRoll::DrawKeyboardToBuffer(CDC& memDC, int width, int keySectionH, in
     }
 }
 
-void CPianoRoll::PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH, int keySectionH)
+bool CPianoRoll::EnsureFrameBuffer(CDC& refDC, int w, int h)
 {
-    UNREFERENCED_PARAMETER(h);
-#if CCUSTOM_AERO_SUPPORT
-    if (savedata.aero == 1 && CCC_IsWin11()) {
-        if (m_chromaReady && m_rollReady && m_keyBufReady) {
-            // ロール+鍵盤を1回の BufferedPaint で出す（毎フレーム×2 が UI を食う）
-            m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, 0, w, h);
-        }
-        else if (m_chromaReady) {
-            if (m_rollReady)
-                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
-            if (m_keyBufReady)
-                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH, w, keySectionH);
-        }
-        else {
-            if (m_rollReady)
-                dc.BitBlt(0, 0, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
-            if (m_keyBufReady)
-                dc.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
-        }
+    if (w <= 0 || h <= 0) return false;
+    if (m_frameDC.GetSafeHdc() && m_frameW == w && m_frameH == h)
+        return true;
+    if (m_frameDC.GetSafeHdc()) {
+        if (m_frameOldBmp) m_frameDC.SelectObject(m_frameOldBmp);
+        m_frameOldBmp = nullptr;
+        m_frameBmp.DeleteObject();
+        m_frameDC.DeleteDC();
     }
-    else
+    if (!m_frameDC.CreateCompatibleDC(&refDC)) return false;
+    if (!m_frameBmp.CreateCompatibleBitmap(&refDC, w, h)) {
+        m_frameDC.DeleteDC();
+        return false;
+    }
+    m_frameOldBmp = m_frameDC.SelectObject(&m_frameBmp);
+    m_frameW = w;
+    m_frameH = h;
+    return true;
+}
+
+void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySectionH)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (savedata.aero == 1 && CCC_IsWin11() && m_chromaReady && m_chromaCache.hdcDib) {
+        BakeMainFollowOverlayIntoChroma(w, h, rollH, keySectionH);
+        if (m_rollReady && m_keyBufReady) {
+            m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, 0, w, h);
+            return;
+        }
+        if (m_rollReady)
+            m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
+        if (m_keyBufReady)
+            m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH, w, keySectionH);
+        return;
+    }
 #endif
-    {
+    // 非アクリル / クロマ失敗: フレームバッファへ完全合成 → 画面へ1回 BitBlt
+    if (!EnsureFrameBuffer(dc, w, h) || !m_frameDC.GetSafeHdc()) {
         if (m_rollReady)
             dc.BitBlt(0, 0, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
         if (m_keyBufReady)
             dc.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
+        if (m_frozen) {
+            dc.SetBkMode(TRANSPARENT);
+            dc.SetTextColor(RGB(255, 180, 80));
+            CFont* of = nullptr;
+            if (m_fontMeterTag.GetSafeHandle())
+                of = dc.SelectObject(&m_fontMeterTag);
+            dc.TextOut(8, 4, LL14(L"フリーズ中", L"Frozen", L"Gele", L"Congelato", L"Congelado", L"정지됨", L"已冻结", L"مجمد", L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu"));
+            if (of) dc.SelectObject(of);
+        }
+        CCC_MainLockPaintClient(dc, m_hWnd);
+        return;
     }
+
+    if (m_rollReady)
+        m_frameDC.BitBlt(0, 0, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
+    else
+        m_frameDC.FillSolidRect(0, 0, w, rollH, RGB(18, 18, 22));
+    if (m_keyBufReady)
+        m_frameDC.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
+    else
+        m_frameDC.FillSolidRect(0, rollH, w, keySectionH, RGB(28, 28, 32));
 
     if (m_frozen) {
-        dc.SetBkMode(TRANSPARENT);
-        dc.SetTextColor(RGB(255, 180, 80));
+        m_frameDC.SetBkMode(TRANSPARENT);
+        m_frameDC.SetTextColor(RGB(255, 180, 80));
         CFont* of = nullptr;
         if (m_fontMeterTag.GetSafeHandle())
-            of = dc.SelectObject(&m_fontMeterTag);
-        dc.TextOut(8, 4, LL14(L"フリーズ中", L"Frozen", L"Gele", L"Congelato", L"Congelado", L"정지됨", L"已冻结", L"مجمد", L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu"));
-        if (of) dc.SelectObject(of);
+            of = m_frameDC.SelectObject(&m_fontMeterTag);
+        m_frameDC.TextOut(8, 4, LL14(L"フリーズ中", L"Frozen", L"Gele", L"Congelato", L"Congelado", L"정지됨", L"已冻结", L"مجمد", L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu"));
+        if (of) m_frameDC.SelectObject(of);
     }
+    CCC_MainLockPaintClient(m_frameDC, m_hWnd);
+    dc.BitBlt(0, 0, w, h, &m_frameDC, 0, 0, SRCCOPY);
+}
 
-    CCC_MainLockPaintClient(dc, m_hWnd);
+void CPianoRoll::PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH, int keySectionH)
+{
+    PresentFinalFrame(dc, w, h, rollH, keySectionH);
     InterlockedExchange(&m_analysisDonePosted, 0);
     InterlockedExchange(&m_syncPosted, 0);
 }
+
+#if CCUSTOM_AERO_SUPPORT
+void CPianoRoll::BakeMainFollowOverlayIntoChroma(int w, int h, int rollH, int keySectionH)
+{
+    if (!m_chromaCache.hdcDib || !m_chromaReady)
+        return;
+
+    // ScrollRows でロック矩形にロール内容が流れ込むので、焼付け直前に下地を戻す。
+    CRect lockRc;
+    CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
+    if (!lockRc.IsRectEmpty()) {
+        CRect rollPart = lockRc;
+        if (rollPart.bottom > rollH)
+            rollPart.bottom = rollH;
+        if (rollPart.top < 0)
+            rollPart.top = 0;
+        if (rollPart.left < 0)
+            rollPart.left = 0;
+        if (rollPart.right > w)
+            rollPart.right = w;
+        if (rollPart.top < rollPart.bottom && m_rollReady && m_rollDC.GetSafeHdc()) {
+            m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(),
+                rollPart.left, rollPart.top, rollPart.left, rollPart.top,
+                rollPart.Width(), rollPart.Height(), PIANO_CHROMA_KEY);
+        }
+        CRect keyPart = lockRc;
+        if (keyPart.top < rollH)
+            keyPart.top = rollH;
+        if (keyPart.bottom > rollH + keySectionH)
+            keyPart.bottom = rollH + keySectionH;
+        if (keyPart.left < 0)
+            keyPart.left = 0;
+        if (keyPart.right > w)
+            keyPart.right = w;
+        if (keyPart.top < keyPart.bottom && m_keyBufReady && m_keyDC.GetSafeHdc()) {
+            m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(),
+                keyPart.left, keyPart.top - rollH, keyPart.left, keyPart.top,
+                keyPart.Width(), keyPart.Height(), PIANO_CHROMA_KEY);
+        }
+    }
+
+    CDC dcCache;
+    dcCache.Attach(m_chromaCache.hdcDib);
+    // メモリDCの GetClipBox が空/不正だと MainLockPaint が即 return するため、
+    // 明示的に全面クリップを張る。
+    CRgn fullRgn;
+    fullRgn.CreateRectRgn(0, 0, w, h);
+    dcCache.SelectClipRgn(&fullRgn);
+
+    CRect frozenOpaque;
+    if (m_frozen) {
+        CString fr = LL14(L"フリーズ中", L"Frozen", L"Gele", L"Congelato", L"Congelado", L"정지됨", L"已冻结", L"مجمد", L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu");
+        CFont* of = nullptr;
+        if (m_fontMeterTag.GetSafeHandle())
+            of = dcCache.SelectObject(&m_fontMeterTag);
+        CSize sz = dcCache.GetTextExtent(fr);
+        const int bw = sz.cx + 12;
+        const int bh = sz.cy + 8;
+        frozenOpaque.SetRect(4, 2, 4 + bw, 2 + bh);
+        dcCache.FillSolidRect(frozenOpaque, RGB(40, 32, 16));
+        dcCache.SetBkMode(TRANSPARENT);
+        dcCache.SetTextColor(RGB(255, 180, 80));
+        dcCache.TextOut(8, 4, fr);
+        if (of) dcCache.SelectObject(of);
+    }
+    CCC_MainLockPaintClient(dcCache, m_hWnd);
+    dcCache.SelectClipRgn(NULL);
+    dcCache.Detach();
+
+    if (!lockRc.IsRectEmpty())
+        m_chromaCache.MakeRectOpaque(lockRc.left, lockRc.top, lockRc.Width(), lockRc.Height());
+    if (!frozenOpaque.IsRectEmpty())
+        m_chromaCache.MakeRectOpaque(frozenOpaque.left, frozenOpaque.top, frozenOpaque.Width(), frozenOpaque.Height());
+}
+#endif
 
 void CPianoRoll::OnPaint()
 {
@@ -3794,48 +3927,18 @@ void CPianoRoll::OnPaint()
             if (needKeyDraw || !m_chromaReady)
                 m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, keySectionH, PIANO_CHROMA_KEY);
             m_chromaReady = true;
-            if (m_rollReady && m_keyBufReady)
-                m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, 0, w, h);
-            else {
-                if (m_rollReady)
-                    m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
-                if (m_keyBufReady)
-                    m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH, w, keySectionH);
-            }
-        }
-        else {
-            if (m_rollReady)
-                dc.BitBlt(0, 0, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
-            if (m_keyBufReady)
-                dc.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
         }
     }
-    else
 #endif
-    {
-        if (m_rollReady)
-            dc.BitBlt(0, 0, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
-        if (m_keyBufReady)
-            dc.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
-    }
 
-    // 提示が終わったら m_rollDC の凡例領域を下地バーへ戻す(次スクロールへの混入防止)。
+    // 追従UI込みでオフスクリーン合成 → 画面へ1回だけ出す
+    PresentFinalFrame(dc, w, h, rollH, keySectionH);
+
+    // 提示後に m_rollDC の凡例領域を下地へ戻す(次スクロールへの混入防止)
     if (legendBaked && m_legendBgDC.GetSafeHdc()) {
         m_rollDC.BitBlt(lgPanel.left, lgPanel.top, lgPanel.Width(), lgPanel.Height(),
             &m_legendBgDC, 0, 0, SRCCOPY);
     }
-
-    if (m_frozen) {
-        dc.SetBkMode(TRANSPARENT);
-        dc.SetTextColor(RGB(255, 180, 80));
-        CFont* of = nullptr;
-        if (m_fontMeterTag.GetSafeHandle())
-            of = dc.SelectObject(&m_fontMeterTag);
-        dc.TextOut(8, 4, LL14(L"フリーズ中", L"Frozen", L"Gele", L"Congelato", L"Congelado", L"정지됨", L"已冻结", L"مجمد", L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu"));
-        if (of) dc.SelectObject(of);
-    }
-
-    CCC_MainLockPaintClient(dc, m_hWnd);
 
     if (didRollUpdate)
         m_historyDirty = false;

@@ -262,9 +262,19 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_infoPanelRect.SetRectEmpty();
 	m_bannerCacheW = 0;
 	m_bannerCacheH = 0;
-	for (int i = 0; i < kInfoRows; i++) { m_isc[i] = 0; m_iscW[i] = 0; }
+	for (int i = 0; i < kInfoRows; i++) {
+		m_isc[i] = 0; m_iscW[i] = 0;
+		m_iscRowOldBmp[i] = nullptr;
+		m_iscRowCacheW[i] = 0;
+		m_iscRowCacheH[i] = 0;
+		m_iscRowCacheClr[i] = 0;
+		m_iscRowCacheBg[i] = 0;
+	}
 	m_iscActive    = false;
+	m_iscScrollPosted = 0;
 	m_lastInfoPanelW = 0;
+	m_infoMemOldBmp = nullptr;
+	m_infoMemW = m_infoMemH = 0;
 	m_listHdrDragCol = -1;
 	m_lastToggleSupe = -1;
 	m_lastToggleSt = -1;
@@ -984,6 +994,24 @@ BOOL CMediaPlayerDlg::DestroyWindow()
 		RemoveWindowSubclass(m_list.GetSafeHwnd(), ListHeaderNotifySubclassProc, kMpListHdrSubclassId);
 	if (m_bmpBanner.GetSafeHandle()) m_bmpBanner.DeleteObject();
 	if (m_memBanner.GetSafeHdc()) m_memBanner.DeleteDC();
+	for (int i = 0; i < kInfoRows; i++) {
+		if (m_iscRowDC[i].GetSafeHdc()) {
+			if (m_iscRowOldBmp[i]) m_iscRowDC[i].SelectObject(m_iscRowOldBmp[i]);
+			m_iscRowDC[i].DeleteDC();
+		}
+		m_iscRowBmp[i].DeleteObject();
+		m_iscRowOldBmp[i] = nullptr;
+		m_iscRowCacheW[i] = m_iscRowCacheH[i] = 0;
+		m_iscRowCacheText[i].Empty();
+	}
+	InterlockedExchange(&m_iscScrollPosted, 0);
+	if (m_infoMemDC.GetSafeHdc()) {
+		if (m_infoMemOldBmp) m_infoMemDC.SelectObject(m_infoMemOldBmp);
+		m_infoMemDC.DeleteDC();
+	}
+	m_infoMemBmp.DeleteObject();
+	m_infoMemOldBmp = nullptr;
+	m_infoMemW = m_infoMemH = 0;
 	return CCustomBlurDialogExBase::DestroyWindow();
 }
 
@@ -2374,9 +2402,13 @@ void CMediaPlayerDlg::ApplyListTooltipState()
 // false のままで再描画は発生しない。
 LRESULT CMediaPlayerDlg::OnInfoScrollTick(WPARAM, LPARAM)
 {
+	// posted は OnPaint(DrawSidePanels) 完了まで保持。先に降ろすと TheadLoop が連投する。
 	if (m_iscActive && !m_infoPanelRect.IsRectEmpty()) {
 		m_iscActive = false;   // DrawSidePanels が再セット(スクロール継続中なら true に戻す)
 		InvalidateRect(&m_infoPanelRect, FALSE);
+	}
+	else {
+		InterlockedExchange(&m_iscScrollPosted, 0);
 	}
 	return 0;
 }
@@ -2413,31 +2445,41 @@ void CMediaPlayerDlg::OnSysCommand(UINT nID, LPARAM lParam)
 
 void CMediaPlayerDlg::ResetInfoScroll()
 {
-	for (int i = 0; i < kInfoRows; i++) { m_isc[i] = 0; m_iscW[i] = 0; }
+	for (int i = 0; i < kInfoRows; i++) {
+		m_isc[i] = 0; m_iscW[i] = 0;
+		if (m_iscRowDC[i].GetSafeHdc()) {
+			if (m_iscRowOldBmp[i]) m_iscRowDC[i].SelectObject(m_iscRowOldBmp[i]);
+			m_iscRowDC[i].DeleteDC();
+		}
+		m_iscRowBmp[i].DeleteObject();
+		m_iscRowOldBmp[i] = nullptr;
+		m_iscRowCacheW[i] = m_iscRowCacheH[i] = 0;
+		m_iscRowCacheText[i].Empty();
+	}
 	m_iscActive = false;
+	InterlockedExchange(&m_iscScrollPosted, 0);
 }
 
 // 1行のテキストをスクロール対応で mem DC へ描画する。
 //
 // 収まる場合: DrawText で静止描画して false を返す(スクロール不要)。
 //
-// はみ出す場合: 「テキスト + セパレータ」を2回並べたワイド DC を作り、
-// m_isc[rowIdx] をオフセットとして可視幅(tw)分だけ切り出して BitBlt する。
-// オフセットは 2px/呼び出し 進むため ~30fps で呼べば ~60px/sec になる。
-// セパレータ部には左右ドット + 中央ダイヤの GDI 装飾を描く(視覚的な区切り)。
+// はみ出す場合: 「テキスト + セパレータ」2連続のワイド DC を行キャッシュし、
+// m_isc[rowIdx] オフセットで可視幅(tw)分だけ BitBlt する。
+// （旧実装は毎フレーム CreateCompatibleBitmap/CreatePen → 長時間で GDI が死ぬ）
 //
 // rowIdx: m_isc/m_iscW のインデックス(0=タイトル行, 1〜5=サブ行)
 bool CMediaPlayerDlg::DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lineH,
 	const CString& text, COLORREF clr, int rowIdx, COLORREF kBg, CFont* font)
 {
 	if (text.IsEmpty() || tw <= 0 || lineH <= 0) return false;
+	if (rowIdx < 0 || rowIdx >= kInfoRows) return false;
 
 	CFont* oldFont = mem.SelectObject(font);
 	CSize szText = mem.GetTextExtent(text);
 	mem.SelectObject(oldFont);
 
 	if (szText.cx <= tw) {
-		// テキストが収まる場合: 通常描画、カウンタリセット
 		m_isc[rowIdx]  = 0;
 		m_iscW[rowIdx] = 0;
 		mem.SelectObject(font);
@@ -2448,8 +2490,7 @@ bool CMediaPlayerDlg::DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lin
 		return false;
 	}
 
-	// テキストが収まらない場合: セパレータ付き marquee スクロール
-	const CString kSep = _T("　　 ");   // 全角2+半角1スペース（自然な間隔）
+	const CString kSep = _T("　　 ");
 	CString scrollText = text + kSep;
 	mem.SelectObject(font);
 	CSize szFull = mem.GetTextExtent(scrollText);
@@ -2458,89 +2499,107 @@ bool CMediaPlayerDlg::DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lin
 	if (szFull.cx <= 0) return false;
 	m_iscW[rowIdx] = szFull.cx;
 
-	// スクロール用ワイド一時 DC を作成（テキスト2連続 = シームレスループ）
-	int wideW = szFull.cx * 2 + 4;
-	CDC wdc; wdc.CreateCompatibleDC(&mem);
-	CBitmap wbm; wbm.CreateCompatibleBitmap(&mem, wideW, lineH);
-	CBitmap* ob = wdc.SelectObject(&wbm);
-	wdc.FillSolidRect(0, 0, wideW, lineH, kBg);
-	wdc.SetBkMode(TRANSPARENT);
-	wdc.SetTextColor(clr);
+	const int wideW = szFull.cx * 2 + 4;
+	const bool needRebuild =
+		!m_iscRowDC[rowIdx].GetSafeHdc()
+		|| m_iscRowCacheW[rowIdx] != wideW
+		|| m_iscRowCacheH[rowIdx] != lineH
+		|| m_iscRowCacheClr[rowIdx] != clr
+		|| m_iscRowCacheBg[rowIdx] != kBg
+		|| m_iscRowCacheText[rowIdx] != scrollText;
 
-	// テキストを2回描画（シームレスループ用）
-	CFont* wf = wdc.SelectObject(font);
-	CRect wr1(0, 0, szFull.cx + 4, lineH);
-	wdc.DrawText(scrollText, &wr1, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-	CRect wr2(szFull.cx, 0, szFull.cx * 2 + 4, lineH);
-	wdc.DrawText(scrollText, &wr2, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+	if (needRebuild) {
+		if (m_iscRowDC[rowIdx].GetSafeHdc()) {
+			if (m_iscRowOldBmp[rowIdx]) m_iscRowDC[rowIdx].SelectObject(m_iscRowOldBmp[rowIdx]);
+			m_iscRowDC[rowIdx].DeleteDC();
+		}
+		m_iscRowBmp[rowIdx].DeleteObject();
+		m_iscRowOldBmp[rowIdx] = nullptr;
+		m_iscRowCacheW[rowIdx] = m_iscRowCacheH[rowIdx] = 0;
 
-	// セパレータ部に GDI 装飾を描画（左右ドット + 細線）
-	CSize szTextOnly = wdc.GetTextExtent(text);
-	int sx = szTextOnly.cx;           // セパレータ開始X
-	int sw = szFull.cx - szTextOnly.cx; // セパレータ幅
-	if (sw > 8) {
-		int cy = lineH / 2;
-		int dr = max(2, lineH / 10);
-		CPen nullPen(PS_NULL, 0, RGB(0, 0, 0));
-		CBrush brDeco(clr);
-		CPen* opDeco  = wdc.SelectObject(&nullPen);
-		CBrush* obDeco = wdc.SelectObject(&brDeco);
+		if (!m_iscRowDC[rowIdx].CreateCompatibleDC(&mem))
+			return false;
+		if (!m_iscRowBmp[rowIdx].CreateCompatibleBitmap(&mem, wideW, lineH)) {
+			m_iscRowDC[rowIdx].DeleteDC();
+			return false;
+		}
+		m_iscRowOldBmp[rowIdx] = m_iscRowDC[rowIdx].SelectObject(&m_iscRowBmp[rowIdx]);
+		CDC& wdc = m_iscRowDC[rowIdx];
+		wdc.FillSolidRect(0, 0, wideW, lineH, kBg);
+		wdc.SetBkMode(TRANSPARENT);
+		wdc.SetTextColor(clr);
 
-		// 左ドット
-		int lx = sx + sw / 3;
-		wdc.Ellipse(lx - dr, cy - dr, lx + dr, cy + dr);
-		// 右ドット
-		int rx = sx + sw * 2 / 3;
-		wdc.Ellipse(rx - dr, cy - dr, rx + dr, cy + dr);
-		// 中央小ダイヤ
-		int mx = sx + sw / 2;
-		int mr = max(2, lineH / 8);
-		POINT diaPts[4] = { {mx, cy - mr}, {mx + mr, cy}, {mx, cy + mr}, {mx - mr, cy} };
-		wdc.Polygon(diaPts, 4);
+		CFont* wf = wdc.SelectObject(font);
+		CRect wr1(0, 0, szFull.cx + 4, lineH);
+		wdc.DrawText(scrollText, &wr1, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+		CRect wr2(szFull.cx, 0, szFull.cx * 2 + 4, lineH);
+		wdc.DrawText(scrollText, &wr2, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
 
-		// 細線（左端〜左ドット, 右ドット〜右端）
-		CPen linePen(PS_SOLID, 1, clr);
-		wdc.SelectObject(&linePen);
-		wdc.SelectStockObject(NULL_BRUSH);
-		wdc.MoveTo(sx + 2,  cy); wdc.LineTo(lx - dr - 1, cy);
-		wdc.MoveTo(rx + dr + 1, cy); wdc.LineTo(sx + sw - 2, cy);
+		CSize szTextOnly = wdc.GetTextExtent(text);
+		int sx = szTextOnly.cx;
+		int sw = szFull.cx - szTextOnly.cx;
+		if (sw > 8) {
+			int cy = lineH / 2;
+			int dr = max(2, lineH / 10);
+			HDC hdc = wdc.GetSafeHdc();
+			HGDIOBJ oldPen = ::SelectObject(hdc, ::GetStockObject(NULL_PEN));
+			HGDIOBJ oldBrush = ::SelectObject(hdc, ::GetStockObject(DC_BRUSH));
+			::SetDCBrushColor(hdc, clr);
 
-		// 2コピー目にも同じ装飾
-		int sx2 = sx + szFull.cx;
-		int lx2 = sx2 + sw / 3, rx2 = sx2 + sw * 2 / 3, mx2 = sx2 + sw / 2;
-		wdc.SelectObject(&nullPen);
-		wdc.SelectObject(&brDeco);
-		wdc.Ellipse(lx2 - dr, cy - dr, lx2 + dr, cy + dr);
-		wdc.Ellipse(rx2 - dr, cy - dr, rx2 + dr, cy + dr);
-		POINT diaPts2[4] = { {mx2, cy - mr}, {mx2 + mr, cy}, {mx2, cy + mr}, {mx2 - mr, cy} };
-		wdc.Polygon(diaPts2, 4);
-		wdc.SelectObject(&linePen);
-		wdc.SelectStockObject(NULL_BRUSH);
-		wdc.MoveTo(sx2 + 2,     cy); wdc.LineTo(lx2 - dr - 1, cy);
-		wdc.MoveTo(rx2 + dr + 1, cy); wdc.LineTo(sx2 + sw - 2, cy);
+			int lx = sx + sw / 3;
+			wdc.Ellipse(lx - dr, cy - dr, lx + dr, cy + dr);
+			int rx = sx + sw * 2 / 3;
+			wdc.Ellipse(rx - dr, cy - dr, rx + dr, cy + dr);
+			int mx = sx + sw / 2;
+			int mr = max(2, lineH / 8);
+			POINT diaPts[4] = { {mx, cy - mr}, {mx + mr, cy}, {mx, cy + mr}, {mx - mr, cy} };
+			wdc.Polygon(diaPts, 4);
 
-		wdc.SelectObject(obDeco);
-		wdc.SelectObject(opDeco);
+			::SelectObject(hdc, ::GetStockObject(DC_PEN));
+			::SetDCPenColor(hdc, clr);
+			::SelectObject(hdc, ::GetStockObject(NULL_BRUSH));
+			wdc.MoveTo(sx + 2, cy); wdc.LineTo(lx - dr - 1, cy);
+			wdc.MoveTo(rx + dr + 1, cy); wdc.LineTo(sx + sw - 2, cy);
+
+			int sx2 = sx + szFull.cx;
+			int lx2 = sx2 + sw / 3, rx2 = sx2 + sw * 2 / 3, mx2 = sx2 + sw / 2;
+			::SelectObject(hdc, ::GetStockObject(NULL_PEN));
+			::SelectObject(hdc, ::GetStockObject(DC_BRUSH));
+			::SetDCBrushColor(hdc, clr);
+			wdc.Ellipse(lx2 - dr, cy - dr, lx2 + dr, cy + dr);
+			wdc.Ellipse(rx2 - dr, cy - dr, rx2 + dr, cy + dr);
+			POINT diaPts2[4] = { {mx2, cy - mr}, {mx2 + mr, cy}, {mx2, cy + mr}, {mx2 - mr, cy} };
+			wdc.Polygon(diaPts2, 4);
+			::SelectObject(hdc, ::GetStockObject(DC_PEN));
+			::SetDCPenColor(hdc, clr);
+			::SelectObject(hdc, ::GetStockObject(NULL_BRUSH));
+			wdc.MoveTo(sx2 + 2, cy); wdc.LineTo(lx2 - dr - 1, cy);
+			wdc.MoveTo(rx2 + dr + 1, cy); wdc.LineTo(sx2 + sw - 2, cy);
+
+			::SelectObject(hdc, oldBrush);
+			::SelectObject(hdc, oldPen);
+		}
+		wdc.SelectObject(wf);
+
+		m_iscRowCacheW[rowIdx] = wideW;
+		m_iscRowCacheH[rowIdx] = lineH;
+		m_iscRowCacheClr[rowIdx] = clr;
+		m_iscRowCacheBg[rowIdx] = kBg;
+		m_iscRowCacheText[rowIdx] = scrollText;
 	}
-	wdc.SelectObject(wf);
 
-	// 現在のオフセット位置から tw 幅分だけ切り出して Blit する。
-	// ワイド DC には「A〜Z + sep + A〜Z + sep」と2周分描画してあるため、
-	// off が szFull.cx を超えてもシームレスにラップアラウンドする。
+	CDC& wdc = m_iscRowDC[rowIdx];
+	if (!wdc.GetSafeHdc()) return false;
+
 	int off = m_isc[rowIdx] % szFull.cx;
 	if (off < 0) off = 0;
 
 	int saved = mem.SaveDC();
 	mem.IntersectClipRect(tx, y, tx + tw, y + lineH);
-	// 1コピー目: left = tx - off (off=0 のとき先頭と一致)
 	mem.BitBlt(tx - off, y, szFull.cx, lineH, &wdc, 0, 0, SRCCOPY);
-	// 2コピー目: 1コピー目が左へずれた分の右端を埋めるラップアラウンド
 	mem.BitBlt(tx + szFull.cx - off, y, tw, lineH, &wdc, szFull.cx, 0, SRCCOPY);
 	mem.RestoreDC(saved);
 
-	wdc.SelectObject(ob);
-
-	// スクロールカウンタを進める（2px/呼び出し ≈ 60px/sec @30fps）
 	m_isc[rowIdx] += 2;
 	if (m_isc[rowIdx] >= szFull.cx) m_isc[rowIdx] -= szFull.cx;
 
@@ -2626,7 +2685,10 @@ static void Mp_DrawNoJacketPlaceholder(CDC& dc, int w, int h)
 		dc.SelectObject(of);
 	};
 	shadowText(fSml, y0, hsml, _T("Media Player"), RGB(214, 108, 150));
-	shadowText(fBig, y0 + hsml + max(1, h / 40), hbig, _T("らいら"), RGB(200, 72, 128));
+	// ブランド名はウィンドウタイトルと同じ LL14 表記(英語は Raira。らいら固定は翻訳漏れ)
+	shadowText(fBig, y0 + hsml + max(1, h / 40), hbig,
+		LL14(L"らいら", L"Raira", L"Raira", L"Raira", L"Raira", L"라이라", L"莱拉", L"رايرا", L"Райра", L"Raira", L"Raira", L"Raira", L"Raira", L"Raira"),
+		RGB(200, 72, 128));
 }
 
 // 左ジャケット / 右曲情報 パネルを描画。バナーと同じ黒地に統一し、上部の帯全体が
@@ -2690,9 +2752,29 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 		if (w != m_lastInfoPanelW) { ResetInfoScroll(); m_lastInfoPanelW = w; }
 
 		if (w > 0 && h > 0) {
-			CDC mem; mem.CreateCompatibleDC(pDC);
-			CBitmap bm; bm.CreateCompatibleBitmap(pDC, w, h);
-			CBitmap* ob = mem.SelectObject(&bm);
+			bool memOk = (m_infoMemDC.GetSafeHdc() && m_infoMemW == w && m_infoMemH == h);
+			if (!memOk) {
+				if (m_infoMemDC.GetSafeHdc()) {
+					if (m_infoMemOldBmp) m_infoMemDC.SelectObject(m_infoMemOldBmp);
+					m_infoMemDC.DeleteDC();
+				}
+				m_infoMemBmp.DeleteObject();
+				m_infoMemOldBmp = nullptr;
+				m_infoMemW = m_infoMemH = 0;
+				if (m_infoMemDC.CreateCompatibleDC(pDC)
+					&& m_infoMemBmp.CreateCompatibleBitmap(pDC, w, h)) {
+					m_infoMemOldBmp = m_infoMemDC.SelectObject(&m_infoMemBmp);
+					m_infoMemW = w;
+					m_infoMemH = h;
+					memOk = true;
+				}
+				else {
+					if (m_infoMemDC.GetSafeHdc()) m_infoMemDC.DeleteDC();
+					m_infoMemBmp.DeleteObject();
+				}
+			}
+			if (memOk) {
+			CDC& mem = m_infoMemDC;
 			mem.FillSolidRect(0, 0, w, h, kBg);
 			mem.SetBkMode(TRANSPARENT);
 
@@ -2765,8 +2847,10 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 				CCC_BlitStretchNF(pDC->m_hDC, m_infoPanelRect.left, m_infoPanelRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);
 			else
 				pDC->BitBlt(m_infoPanelRect.left, m_infoPanelRect.top, w, h, &mem, 0, 0, SRCCOPY);
-			mem.SelectObject(ob);
+			} // memOk
 		}
+		// スクロール tick の背圧を解放（描画完了後に次の Post を許可）
+		InterlockedExchange(&m_iscScrollPosted, 0);
 	}
 }
 
