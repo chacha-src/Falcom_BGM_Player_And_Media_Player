@@ -2674,7 +2674,8 @@ bool CPianoRoll::EnsureExprLegendCache(CDC& refDC, int rollW, int rollH) const
         return false;
     }
     m_legendOldBmp = m_legendDC.SelectObject(&m_legendBmp);
-    // 不透明ステッカーとして一回だけ描く（TransparentBlt+マゼンタはピンク文字を抜いてしまう）
+    // 文字・バッジ・枠線のみキャッシュ。下地はパネル色キーで抜き、毎フレームの半透明塗りと合成する。
+    // （旧マゼンタキーはピンク文字・ClearType縁を抜いて穴が開いていた）
     m_legendDC.FillSolidRect(0, 0, pw, ph, RGB(14, 14, 20));
     DrawExprLegendContent(m_legendDC, rollW, rollH, CRect(0, 0, pw, ph), false);
 
@@ -3721,14 +3722,14 @@ void CPianoRoll::OnPaint()
             }
         }
         if (bgOk) {
-            // 下地バーを退避 → 事前描画した凡例ステッカーを貼る → 提示後に下地へ戻す
+            // 下地バー退避 → 半透明枠 → 文字ステッカー貼付 → 提示後に下地へ戻す
             m_legendBgDC.BitBlt(0, 0, pw, ph, &m_rollDC, lgPanel.left, lgPanel.top, SRCCOPY);
+            PianoFillRectAlpha(m_rollDC, lgPanel, RGB(14, 14, 20), 170);
             if (EnsureExprLegendCache(dc, w, rollH) && m_legendDC.GetSafeHdc()) {
-                m_rollDC.BitBlt(lgPanel.left, lgPanel.top, pw, ph,
-                    const_cast<CDC*>(&m_legendDC), 0, 0, SRCCOPY);
+                m_rollDC.TransparentBlt(lgPanel.left, lgPanel.top, pw, ph,
+                    const_cast<CDC*>(&m_legendDC), 0, 0, pw, ph, RGB(14, 14, 20));
             }
             else {
-                m_rollDC.FillSolidRect(&lgPanel, RGB(14, 14, 20));
                 DrawExprLegendContent(m_rollDC, w, rollH, lgPanel, false);
             }
             legendBaked = true;

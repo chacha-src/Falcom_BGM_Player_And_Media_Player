@@ -450,6 +450,12 @@
     <ClCompile Include="CMpPlaylistIO.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CPianoRollTuneDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SongParams.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ogg.rc">
@@ -971,6 +977,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="HarmonicProfile.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CPianoRollTuneDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SongParams.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
