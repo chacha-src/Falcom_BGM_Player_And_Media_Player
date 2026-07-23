@@ -432,11 +432,10 @@ static void AnalyzerPresentInvalidate(HWND hWnd)
 
 LRESULT CAnalyzerDlg::OnPresentRequest(WPARAM, LPARAM)
 {
-	// presentPosted は OnPaint 完了まで保持（先に降ろすと Kick が連射し UI/EQ を食う）
+	// presentPosted は OnPaint 完了まで保持。
+	// UpdateWindow 定常化はピアノと同様に MP スクロールを飢餓させるため使わない。
 	if (::IsWindow(m_hWnd) && IsWindowVisible() && !IsIconic()) {
 		AnalyzerPresentInvalidate(m_hWnd);
-		UpdateWindow();
-		// OnPaint 末尾で解放。ここでクリアすると追い付き Kick の posted を潰す。
 	}
 	else {
 		InterlockedExchange(&m_presentPosted, 0);
@@ -1119,22 +1118,35 @@ bool CAnalyzerDlg::EnsureFrameBuffer(CDC& refDC, int w, int h)
 
 void CAnalyzerDlg::KickUiPresent()
 {
-	// 多重 Post を防ぐ。表示キックは ms2（ピアノ/EQ と帯域を分け合う）
+	// 多重 Post を防ぐ。表示キックは ms2（ピアノ/EQ/MP と帯域を分け合う）
 	if (!::IsWindow(m_hWnd)) return;
-	// FullRedrawWave 中は Kick を溜め、完了後に1回だけ消化
 	if (InterlockedCompareExchange(&m_fullRedrawBusy, 0, 0) != 0) {
 		InterlockedExchange(&m_presentDeferred, 1);
 		return;
 	}
+	const DWORD now = GetTickCount();
+	if (InterlockedCompareExchange(&m_presentPosted, 0, 0) != 0) {
+		// Invalidate 待ち固着時のみ強制描画して開放
+		if (m_lastPresentKickTick != 0 && (now - m_lastPresentKickTick) >= 150u) {
+			MSG msg;
+			while (::PeekMessage(&msg, m_hWnd, WM_ANALYZER_PRESENT, WM_ANALYZER_PRESENT, PM_REMOVE)) {}
+			AnalyzerPresentInvalidate(m_hWnd);
+			UpdateWindow();
+			InterlockedExchange(&m_presentPosted, 0);
+		}
+		else {
+			return;
+		}
+	}
 	int minMs = savedata.ms2;
 	if (minMs < 16) minMs = 16;
 	if (minMs > 960) minMs = 960;
-	const DWORD now = GetTickCount();
 	if (m_lastPresentKickTick != 0 && (now - m_lastPresentKickTick) < (DWORD)minMs)
 		return;
 	if (InterlockedCompareExchange(&m_presentPosted, 1, 0) != 0) return;
 	m_lastPresentKickTick = now;
-	PostMessage(WM_ANALYZER_PRESENT, 0, 0);
+	if (!PostMessage(WM_ANALYZER_PRESENT, 0, 0))
+		InterlockedExchange(&m_presentPosted, 0);
 }
 
 void CAnalyzerDlg::FullRedrawWave(COLORREF bg)

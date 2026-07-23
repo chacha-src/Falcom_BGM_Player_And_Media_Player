@@ -3101,6 +3101,9 @@ void CPianoRoll::RequestSyncFromMainUi()
             MSG msg;
             while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_ANALYSIS_DONE, WM_PIANOROLL_ANALYSIS_DONE, PM_REMOVE)) {}
             while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_SYNC, WM_PIANOROLL_SYNC, PM_REMOVE)) {}
+            // 固着時だけ強制描画して開放（定常の UpdateWindow 占有はしない）
+            ApplySyncInvalidate();
+            UpdateWindow();
             InterlockedExchange(&m_analysisDonePosted, 0);
             InterlockedExchange(&m_syncPosted, 0);
         }
@@ -3153,18 +3156,14 @@ LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
 LRESULT CPianoRoll::OnAnalysisDone(WPARAM, LPARAM)
 {
     // ロール描画の唯一の起動点。
-    // Invalidate だけだと他の PostMessage（timerp 等）が残る間 WM_PAINT が来ず、
-    // analysisDonePosted が掴みっぱなしで Sync/EQ が死ぬ。
-    // UpdateWindow でこのターンに描画まで終わらせ、背圧を一気に開放する。
+    // UpdateWindow を毎回来すとピアノ/アナライザが UI を占有し、
+    // MP の GDI スクロール(Invalidate のみ)が余波で飢える。
+    // 通常は Invalidate のみ。固着時は RequestSync 側 150ms 監視で UpdateWindow 回復。
     if (m_paintDisabled || !::IsWindow(m_hWnd)) {
         InterlockedExchange(&m_analysisDonePosted, 0);
         return 0;
     }
     ApplySyncInvalidate();
-    UpdateWindow();
-    // 非表示等で OnPaint が走らなかった場合の保険
-    InterlockedExchange(&m_analysisDonePosted, 0);
-    InterlockedExchange(&m_syncPosted, 0);
     return 0;
 }
 

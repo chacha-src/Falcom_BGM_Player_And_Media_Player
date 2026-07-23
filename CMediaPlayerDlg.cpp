@@ -2402,10 +2402,13 @@ void CMediaPlayerDlg::ApplyListTooltipState()
 // false のままで再描画は発生しない。
 LRESULT CMediaPlayerDlg::OnInfoScrollTick(WPARAM, LPARAM)
 {
-	// posted は OnPaint(DrawSidePanels) 完了まで保持。先に降ろすと TheadLoop が連投する。
+	// posted は描画完了まで保持。先に降ろすと TheadLoop が連投する。
+	// ピアノ/アナライザが開いていると Invalidate だけの WM_PAINT は後回しになるため、
+	// 情報パネルだけ UPDATENOW でこのターンに描画してスクロールを守る。
 	if (m_iscActive && !m_infoPanelRect.IsRectEmpty()) {
-		m_iscActive = false;   // DrawSidePanels が再セット(スクロール継続中なら true に戻す)
-		InvalidateRect(&m_infoPanelRect, FALSE);
+		m_iscActive = false;
+		RedrawWindow(&m_infoPanelRect, NULL,
+			RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 	}
 	else {
 		InterlockedExchange(&m_iscScrollPosted, 0);
