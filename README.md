@@ -21,11 +21,12 @@
 
 グローバルパラメータとして、鮮明さ、低音域高音域バランス、音の密度、音の立体感、リバーブ、コーラス、ディレイも用意してあります。
 これらは環境モデルとは別で動作します。
+リバーブ／コーラス／ディレイは、スライダー後半でパンリバーブ、コーラスディストーション、マルチディレイ側にも振り分けられます。
 
 また環境モデルのかかり方の度合いの変更できるため、かなり自由度が高くなっています。
 
 ### ピアノロール機能
-簡易ピアノロールが実装されました。再生中のコードやメロディの表示にも対応しています。
+108鍵盤の簡易ピアノロールが実装されました。右クリックメニューから操作でき、検出パラメータの微調整や、再生中のコード・メロディ表示にも対応しています。
 
 ### 波形・周波数アナライザー
 Ozone風のリアルタイムアナライザーを追加しました。
@@ -145,10 +146,18 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 - 起動時・定期の更新チェック
 - Windowsミキサーでアプリがミュートされているときの警告
 - メディアプレイヤー側の最小化連動やツールチップ表示など
+- メイン画面を動かすと関連ウィンドウが追随
+- リンク切れファイルの一括削除
 
 ## 注意事項
 - **Brandish4 および ガガーブトリロジー**については、WAVファイルをHDDへコピーする必要があります（フォルダ名は `WAVE`, `WAVEDV`, `WAVEDVD` などゲームにより異なります）。
 - ゲーム以外のWAVファイルはDirectShow扱いとなり、ループやフェードアウト機能は使用できません。
+
+## クレジット
+- スペアナ用FFT: Copyright Takuya OOURA, 1996-2001  
+  http://www.kurims.kyoto-u.ac.jp/~ooura/fft-j.html
+- ぐるみん BGM ループテーブル: ぽかん's Home Page（Falcom データアーカイブ 変換ツール Ver.0.16b）より拝借  
+  http://www.geocities.jp/pokan_chan/#FALCNVRT
 
 ## ライセンス / 作者
 Copyright (C) PrePrayerPower Soft
@@ -176,11 +185,12 @@ To prevent audio clipping when using environmental models, a **Dynamic Compresso
 
 Global parameters such as **Sharpness**, **Low/High Balance**, **Sound Density**, **Stereo Depth**, **Reverb**, **Chorus**, and **Delay** are also available.
 These operate independently of the environmental models.
+For Reverb / Chorus / Delay, the upper half of each slider switches to pan reverb, chorus distortion, and multi delay.
 
 Additionally, the intensity of the environmental effects can be adjusted, offering a high degree of acoustic freedom.
 
 ### Piano Roll Feature
-A simplified piano roll has been implemented. Chord and melody display during playback is also supported.
+A simplified **108-key** piano roll has been implemented. Use the right-click menu for controls, detection tuning, and chord/melody display during playback.
 
 ### Waveform & Spectrum Analyzer
 An Ozone-inspired real-time analyzer has been added.
@@ -300,10 +310,18 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 - Startup and periodic update checks
 - Warning when the app is muted in the Windows volume mixer
 - Media-player extras such as minimize sync and tooltips
+- Related windows follow when the main window is moved
+- Batch removal of broken-link files
 
 ## Important Notes
 - **For Brandish 4 and the Gagharv Trilogy:** WAV files must be copied to your HDD (Folder names like `WAVE`, `WAVEDV`, or `WAVEDVD` vary by game).
 - Standard WAV files (not from game data) are handled via DirectShow; therefore, loop and fade-out functions are not available for these files.
+
+## Credits
+- Spectrum FFT: Copyright Takuya OOURA, 1996-2001  
+  http://www.kurims.kyoto-u.ac.jp/~ooura/fft-j.html
+- Gurumin BGM loop table: courtesy of pokan's Home Page (Falcom data-archive converter Ver.0.16b)  
+  http://www.geocities.jp/pokan_chan/#FALCNVRT
 
 ## License / Author
 Copyright (C) PrePrayerPower Soft
