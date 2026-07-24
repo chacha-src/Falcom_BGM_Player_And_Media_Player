@@ -14,7 +14,9 @@
 #include "minizip/iowin32.h"
 #endif
 
-static const TCHAR* UPDATE_URL = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.zip");
+// 09a があれば優先。なければ 08g。08g 適用後に 09a が公開されれば、次回チェックで 09a へ進む。
+static const TCHAR* UPDATE_URL_PRIMARY = _T("https://ppp.oohara.jp/download/oggYSEDbgm09a_uni_avx2_VC2026.zip");
+static const TCHAR* UPDATE_URL_FALLBACK = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.zip");
 static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 static const TCHAR* TARGET_HOST_EXE_NAME = _T("KpiHost64.exe");
 
@@ -97,6 +99,31 @@ static time_t HttpGetLastModified(const CString& url)
 	InternetCloseHandle(hConnect);
 	InternetCloseHandle(hInternet);
 	return result;
+}
+
+// 利用可能な更新 ZIP を決定する（09a 優先、なければ 08g）。見つからなければ空文字、*outModified は 0。
+static CString ResolveUpdateUrl(time_t* outModified)
+{
+	if (outModified)
+		*outModified = 0;
+
+	const time_t primaryModified = HttpGetLastModified(UPDATE_URL_PRIMARY);
+	if (primaryModified != 0)
+	{
+		if (outModified)
+			*outModified = primaryModified;
+		return UPDATE_URL_PRIMARY;
+	}
+
+	const time_t fallbackModified = HttpGetLastModified(UPDATE_URL_FALLBACK);
+	if (fallbackModified != 0)
+	{
+		if (outModified)
+			*outModified = fallbackModified;
+		return UPDATE_URL_FALLBACK;
+	}
+
+	return CString();
 }
 
 // ZIP をダウンロード、成功時はパスを返す
@@ -228,8 +255,10 @@ void RunStartupUpdateCheck()
 	if (exeTime == 0)
 		return;
 
-	const time_t serverModified = HttpGetLastModified(UPDATE_URL);
-	if (serverModified == 0 ||
+	time_t serverModified = 0;
+	const CString updateUrl = ResolveUpdateUrl(&serverModified);
+	if (updateUrl.IsEmpty() ||
+		serverModified == 0 ||
 		serverModified <= exeTime + 120 ||
 		(__int64)serverModified <= savedata.lastUpdateCheck)
 	{
@@ -309,12 +338,14 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 			continue;
 		}
 
-		time_t serverModified = HttpGetLastModified(UPDATE_URL);
+		time_t serverModified = 0;
+		const CString updateUrl = ResolveUpdateUrl(&serverModified);
 
 		// サーバーの時間が「プログラム更新時間＋指定時間」より新しく、かつ、
 		// 「保存データに記録された前回の更新時間」よりも新しい場合のみ更新通知を出しますわ
+		// 09a 優先・なければ 08g。08g 適用後に 09a が出れば、その Last-Modified で再通知する。
 		const __int64 dismissed = InterlockedCompareExchange64(&g_updateDismissedVersion, 0, 0);
-		if (serverModified != 0 && serverModified > threshold &&
+		if (!updateUrl.IsEmpty() && serverModified != 0 && serverModified > threshold &&
 			(__int64)serverModified > savedata.lastUpdateCheck &&
 			(__int64)serverModified > dismissed &&
 			InterlockedCompareExchange(&g_updatePromptOpen, 0, 0) == 0 &&
@@ -385,7 +416,10 @@ bool DoUpdateAndRestart()
 
 	CreateDirectory(extractDir, NULL);
 
-	if (!HttpDownloadToFile(UPDATE_URL, zipPath))
+	// ダウンロード直前にも再解決（09a 優先）。チェック時は 08g だけでも、この時点で 09a があれば 09a を取る。
+	time_t serverTime = 0;
+	const CString updateUrl = ResolveUpdateUrl(&serverTime);
+	if (updateUrl.IsEmpty() || !HttpDownloadToFile(updateUrl, zipPath))
 	{
 		AfxMessageBox(LL14(L"ダウンロードに失敗しました。\nネットワーク接続を確認してください。", L"Download failed.\nPlease check your network connection.", L"Telechargement echoue.\nVerifiez votre connexion reseau.", L"Download fallito.\nControlla la connessione di rete.", L"Descarga fallida.\nCompruebe su conexion de red.", L"??? ????. ??? ??? ??? ???.", L"下载失败。\n请检查网络连接。", L"????? ???????. ????? ???????.", L"?????? ?????????. ??????? ?????????? ? ?????.", L"Download fehlgeschlagen.\nBitte Netzwerkverbindung prufen.", L"Download falhou.\nVerifique sua conexao de rede.", L"Download mislukt.\nControleer uw netwerkverbinding.", L"Pobieranie nie powiodlo sie.\nSprawdz polaczenie sieciowe.", L"Indirme basarisiz.\nAg baglantisini kontrol edin."));
 		return false;
@@ -410,7 +444,7 @@ bool DoUpdateAndRestart()
 	// copy コマンドは元ファイルの時刻を引き継ぐため、上書きが「実際に成功したファイルだけ」が
 	// サーバー時刻になり、失敗したファイルは古いままとなります。
 	// これにより、権限不足などで上書きに失敗した場合は次回に再検知される仕組みですわ。
-	time_t serverTime = HttpGetLastModified(UPDATE_URL);
+	// （serverTime は上で ResolveUpdateUrl 済み。08g 適用後に 09a が出れば、その時刻で再検知される）
 	if (serverTime > 0)
 	{
 		time_t newTime = serverTime + 1;
