@@ -64,9 +64,11 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 ### 演奏プロンプト
 再生中にピッチやテンポ、エフェクトなどを時間指定で動かすプロンプト機能があります。
 
-![ファルコムプレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git6.png)
+![ファルコムプレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git7.png)
 
-![メディアプレイヤー画面](https://ppp.oohara.jp/img/mp2.png)
+![メディアプレイヤー画面](https://ppp.oohara.jp/img/mp3.png)
+
+![メディアプレイヤー画面](https://ppp.oohara.jp/img/mpe3.png)
 
 ## 対応ゲームタイトル
 以下のゲームのBGMループ再生に対応しています。
@@ -228,10 +230,11 @@ Supports sample-rate / bit-depth upscaling and multi-channel output.
 ### Performance Prompt
 A timed prompt feature can change pitch, tempo, effects, and more during playback.
 
-![Player Screen](https://ppp.oohara.jp/img/ysedplay2e_git6.png)
+![Player Screen](https://ppp.oohara.jp/img/ysedplay2e_git7.png)
 
-![Player Screen](https://ppp.oohara.jp/img/mp2e.png)
+![Player Screen](https://ppp.oohara.jp/img/mp3e.png)
 
+![Player Screen](https://ppp.oohara.jp/img/mpe3e.png)
 ## Supported Game Titles
 The player supports seamless BGM looping for the following titles:
 
