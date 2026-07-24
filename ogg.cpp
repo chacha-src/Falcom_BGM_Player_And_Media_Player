@@ -51,8 +51,30 @@ TCHAR* nd;
 BOOL CALLBACK ew(HWND hwnd , LPARAM lp);
 BOOL CALLBACK ew(HWND hwnd,LPARAM lParam) {
 	TCHAR a[1024];CString s;
-	::GetWindowText(hwnd,a,sizeof(a));s=a; 
-	if(s.Find(_T("mp3/m4a簡易プレイヤ"))==-1) return TRUE;
+	::GetWindowText(hwnd,a,_countof(a));s=a;
+	// 既存インスタンスのタイトルは言語依存。ここは mutex 直後で savedata 未読込のため
+	// LL14(現在言語)ではなく、SetWindowText 側と同じ14言語タイトルをすべて照合する。
+	static const TCHAR* const kMainTitles[] = {
+		_T("mp3/m4a簡易プレイヤ"),
+		_T("mp3/m4a Simple Player"),
+		_T("mp3/m4a Lecteur simple"),
+		_T("mp3/m4a Lettore semplice"),
+		_T("mp3/m4a Reproductor simple"),
+		_T("mp3/m4a 간이 플레이어"),
+		_T("mp3/m4a 简易播放器"),
+		_T("mp3/m4a مشغل بسيط"),
+		_T("mp3/m4a Простой плеер"),
+		_T("mp3/m4a Einfacher Player"),
+		_T("mp3/m4a Player simples"),
+		_T("mp3/m4a Eenvoudige speler"),
+		_T("mp3/m4a Prosty odtwarzacz"),
+		_T("mp3/m4a Basit oynat"),
+	};
+	BOOL hit = FALSE;
+	for (int i = 0; i < (int)_countof(kMainTitles); ++i) {
+		if (s.Find(kMainTitles[i]) != -1) { hit = TRUE; break; }
+	}
+	if (!hit) return TRUE;
 	COPYDATASTRUCT cd;
 	cd.cbData=ndd.GetLength()*sizeof(TCHAR)+sizeof(TCHAR);
 	cd.dwData=0;
@@ -289,9 +311,9 @@ BOOL COggApp::InitInstance()
 
 #if _UNICODE
 	if(GetKeyState(VK_CONTROL) < 0){
-		if(AfxMessageBox(LL14(L"ANSI版からのコンバートを行いますか？", L"Convert from ANSI version?", L"Convertir depuis la version ANSI ?", L"Convertire dalla versione ANSI?", L"?Convertir desde version ANSI?", L"ANSI ???? ?????????", L"从ANSI版本??？", L"??????? ?? ????? ANSI?", L"Конвертировать из версии ANSI?", L"Von ANSI-Version konvertieren?", L"Converter da versao ANSI?", L"Converteren van ANSI-versie?", L"Konwertowa? z wersji ANSI?", L"ANSI surumunden donu?turulsun mu?"),MB_YESNO)==IDYES){
+		if(AfxMessageBox(LL14(L"ANSI版からのコンバートを行いますか？", L"Convert from ANSI version?", L"Convertir depuis la version ANSI ?", L"Convertire dalla versione ANSI?", L"Convertir desde version ANSI?", L"ANSI 버전에서 변환하시겠습니까?", L"从ANSI版本转换吗？", L"هل تريد التحويل من إصدار ANSI؟", L"Конвертировать из версии ANSI?", L"Von ANSI-Version konvertieren?", L"Converter da versao ANSI?", L"Converteren van ANSI-versie?", L"Konwertowac z wersji ANSI?", L"ANSI surumunden donusturulsun mu?"),MB_YESNO)==IDYES){
 			convert();
-			AfxMessageBox(LL14(L"コンバートが完了しました。", L"Conversion completed.", L"Conversion terminee.", L"Conversione completata.", L"Conversion completada.", L"??? ???????.", L"??完成。", L"????? ???????.", L"Конвертация завершена.", L"Konvertierung abgeschlossen.", L"Conversao concluida.", L"Conversie voltooid.", L"Konwersja zako?czona.", L"Donu?um tamamland?."));
+			AfxMessageBox(LL14(L"コンバートが完了しました。", L"Conversion completed.", L"Conversion terminee.", L"Conversione completata.", L"Conversion completada.", L"변환이 완료되었습니다.", L"转换完成。", L"اكتمل التحويل.", L"Конвертация завершена.", L"Konvertierung abgeschlossen.", L"Conversao concluida.", L"Conversie voltooid.", L"Konwersja zakonczona.", L"Donusum tamamlandi."));
 			ReleaseMutex(Mutex);
 			exit(0);
 		}
@@ -303,9 +325,9 @@ BOOL COggApp::InitInstance()
 	int datFileSize = 0;
 	if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeRead | CFile::shareDenyWrite,NULL)!=TRUE && ac.Open(L"oggYSEDbgm.dat",CFile::modeRead | CFile::shareDenyWrite,NULL)==TRUE){
 		ac.Close();
-		AfxMessageBox(LL14(L"ANSI版からのコンバートを行います。", L"Converting from ANSI version.", L"Conversion depuis la version ANSI en cours.", L"Conversione dalla versione ANSI in corso.", L"Convirtiendo desde version ANSI.", L"ANSI ???? ?? ????.", L"正在从ANSI版本??。", L"???? ??????? ?? ????? ANSI.", L"Конвертация из версии ANSI.", L"Konvertierung von ANSI-Version.", L"Convertendo da versao ANSI.", L"Converteren van ANSI-versie.", L"Konwertowanie z wersji ANSI.", L"ANSI surumunden donu?turuluyor."));
+		AfxMessageBox(LL14(L"ANSI版からのコンバートを行います。", L"Converting from ANSI version.", L"Conversion depuis la version ANSI en cours.", L"Conversione dalla versione ANSI in corso.", L"Convirtiendo desde version ANSI.", L"ANSI 버전에서 변환합니다.", L"正在从ANSI版本转换。", L"جاري التحويل من إصدار ANSI.", L"Конвертация из версии ANSI.", L"Konvertierung von ANSI-Version.", L"Convertendo da versao ANSI.", L"Converteren van ANSI-versie.", L"Konwertowanie z wersji ANSI.", L"ANSI surumunden donusturuluyor."));
 		convert();
-		AfxMessageBox(LL14(L"コンバートが完了しました。", L"Conversion completed.", L"Conversion terminee.", L"Conversione completata.", L"Conversion completada.", L"??? ???????.", L"??完成。", L"????? ???????.", L"Конвертация завершена.", L"Konvertierung abgeschlossen.", L"Conversao concluida.", L"Conversie voltooid.", L"Konwersja zako?czona.", L"Donu?um tamamland?."));
+		AfxMessageBox(LL14(L"コンバートが完了しました。", L"Conversion completed.", L"Conversion terminee.", L"Conversione completata.", L"Conversion completada.", L"변환이 완료되었습니다.", L"转换完成。", L"اكتمل التحويل.", L"Конвертация завершена.", L"Konvertierung abgeschlossen.", L"Conversao concluida.", L"Conversie voltooid.", L"Konwersja zakonczona.", L"Donusum tamamlandi."));
 		ReleaseMutex(Mutex);
 		exit(0);
 #else
@@ -643,7 +665,22 @@ BOOL COggApp::InitInstance()
 	if (savedata.ms2 < 16) savedata.ms2 = 16;
 	if (savedata.ms2 > 960) savedata.ms2 = 960;
 	if (savedata.aerocheck == 99) {
-		int abc = AfxMessageBox(LL14(L"エアロ(透過処理)がメイン画面等に実装されました。是非試してみて貰えれば。\n有効にしますか？(少し不安定な部分あります)\n(このメッセージは一回しか表示されません)\nWindows11以降では、有効にしないで下さい。", L"Aero (transparency) has been implemented on the main window, etc. Please try it.\nEnable it? (Some instability may occur)\n(This message will only be shown once)\nDo not enable on Windows 11 or later.", L"Aero (transparence) a ete implemente. Souhaitez-vous l'activer ?", L"Aero (trasparenza) implementato. Abilitare?", L"Aero (transparencia) implementado. ?Activar?", L"Aero(??)? ???????. ??????????", L"已??Aero(透明)功能。是否?用？", L"?? ????? Aero. ?? ??????", L"Aero реализован. Включить?", L"Aero implementiert. Aktivieren?", L"Aero implementado. Ativar?", L"Aero geimplementeerd. Inschakelen?", L"Aero zaimplementowano. W??czy??", L"Aero uyguland?. Etkinle?tirilsin mi?"), MB_YESNO);
+		int abc = AfxMessageBox(LL14(
+			L"Win10/11アクリルぼかしが実装されました。\n有効にしますか？\n(このメッセージは一回しか表示されません)",
+			L"Acrylic blur for Windows 10/11 has been implemented.\nDo you want to enable it?\n(This message will only appear once.)",
+			L"Le flou acrylique pour Windows 10/11 a ete implemente.\nVoulez-vous l'activer ?\n(Ce message ne s'affichera qu'une seule fois.)",
+			L"La sfocatura acrilica per Windows 10/11 e stata implementata.\nVuoi abilitarla?\n(Questo messaggio apparira solo una volta.)",
+			L"El desenfoque acrilico para Windows 10/11 ha sido implementado.\nDesea activarlo?\n(Este mensaje solo aparecera una vez.)",
+			L"Windows 10/11 아크릴 블러가 구현되었습니다.\n활성화하시겠습니까?\n(이 메시지는 한 번만 표시됩니다.)",
+			L"已实现 Windows 10/11 亚克力模糊效果。\n是否启用？\n（此消息仅显示一次。）",
+			L"تم تنفيذ ضبابية الأكريليك لنظام Windows 10/11.\nهل تريد تفعيله؟\n(ستظهر هذه الرسالة مرة واحدة فقط.)",
+			L"Реализовано акриловое размытие для Windows 10/11.\nВключить?\n(Это сообщение отобразится только один раз.)",
+			L"Acryl-Unschaerfe fuer Windows 10/11 wurde implementiert.\nMoechten Sie sie aktivieren?\n(Diese Meldung wird nur einmal angezeigt.)",
+			L"O desfoque acrilico para Windows 10/11 foi implementado.\nDeseja ativa-lo?\n(Esta mensagem sera exibida apenas uma vez.)",
+			L"Acrylvervaging voor Windows 10/11 is geimplementeerd.\nWilt u dit inschakelen?\n(Dit bericht wordt slechts eenmaal weergegeven.)",
+			L"Zaimplementowano rozmycie akrylowe dla Windows 10/11.\nCzy chcesz je wlaczyc?\n(Ten komunikat pojawi sie tylko raz.)",
+			L"Windows 10/11 icin akrilik bulaniklik uygulandi.\nEtkinlestirilsin mi?\n(Bu mesaj yalnizca bir kez goruntulenir.)"
+			), MB_YESNO);
 		if (abc == IDYES) {
 			savedata.aero = 1;
 			savedata.aerocheck = 1;
