@@ -199,6 +199,7 @@ BOOL COggApp::InitInstance()
 	savedata.kakuVal = 100;
 	savedata.ms = 30;
 	savedata.ms2 = 16;
+	savedata.eqCodeMs = 25;
 	savedata.soundguid = { 0,0,0,0 };
 	savedata.soundcur=0;
 	savedata.samples = 192000;
@@ -664,6 +665,8 @@ BOOL COggApp::InitInstance()
 	}
 	if (savedata.ms2 < 16) savedata.ms2 = 16;
 	if (savedata.ms2 > 960) savedata.ms2 = 960;
+	if (savedata.eqCodeMs < 16 || savedata.eqCodeMs > 500)
+		savedata.eqCodeMs = 25;
 	if (savedata.aerocheck == 99) {
 		int abc = AfxMessageBox(LL14(
 			L"Win10/11アクリルぼかしが実装されました。\n有効にしますか？\n(このメッセージは一回しか表示されません)",

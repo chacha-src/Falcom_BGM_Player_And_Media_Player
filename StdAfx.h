@@ -365,8 +365,18 @@ struct save{
 	// --- プロンプトバックアップ: 環境/かかり具合(末尾追記) ---
 	int mpPromptBackupEqEnv;     // eqsoundenv 0..100
 	int mpPromptBackupEqEffect;  // eqsoundeffect 0..100
+
+	// --- EQコード表示更新間隔(ms)。レンダリング画面で設定。16..500、既定25 ---
+	int eqCodeMs;
 };
 extern save savedata;
+/* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
+inline int EqCodeIntervalMs()
+{
+	int ms = savedata.eqCodeMs;
+	if (ms < 16 || ms > 500) ms = 25;
+	return ms;
+}
 /* lang: 0=ja 1=en 2=fr 3=it 4=es 5=ko 6=zh 7=ar 8=ru 9=de 10=pt 11=nl 12=pl 13=tr */
 const wchar_t* LangPick14(
 	const wchar_t* s0, const wchar_t* s1, const wchar_t* s2, const wchar_t* s3,

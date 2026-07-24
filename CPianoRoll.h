@@ -40,6 +40,8 @@ public:
         int playbackDelaySamples = 0);
     // bufwav3 経路(再生バッファ直後)から呼ぶ。ワーカーに分析ジョブをキューイング
     void AnalyzePlayCursorMono(const double* mono, int frameCount, int sampleRate);
+    // Sync 側の重い PCM 変換を、解析受付可能時だけに限定するための判定
+    bool ShouldCaptureAnalyzeJob();
     // チャンネル別 dB を受け取りメーターバーへ反映(レベルメーターは Goertzel 非依存)
     void SetChannelMeterDb(const float* dbPerChannel, int channelCount);
     // stop/曲切替の先頭で呼ぶ。DoEvent より前に解析を止める

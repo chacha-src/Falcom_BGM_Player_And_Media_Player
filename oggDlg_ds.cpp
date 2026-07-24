@@ -5566,9 +5566,9 @@ static void NotifyEqKeyUi()
 	HWND h = g_eqKeyUiHwnd;
 	if (!h || !::IsWindow(h)) return;
 	if (InterlockedCompareExchange(&g_eqKeyUiDirty, 0, 0) == 0) return;
-	// リアルタイム性優先。16ms は WM_PAINT を通すための下限（多重 Post 飢餓防止）。
+	// リアルタイム性優先。多重 Post 飢餓防止の下限（供給 25ms に対し UI はそれ以下で通す）
 	const DWORD now = GetTickCount();
-	if (g_eqKeyUiLastPostTick != 0 && (now - g_eqKeyUiLastPostTick) < 16u)
+	if (g_eqKeyUiLastPostTick != 0 && (now - g_eqKeyUiLastPostTick) < (DWORD)(EqCodeIntervalMs() / 2))
 		return;
 	if (InterlockedCompareExchange(&g_eqKeyUiPosted, 1, 0) != 0) {
 		// Ack 前に UI が長時間塞がると posted が掴みっぱなしになる → 強制開放

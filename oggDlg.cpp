@@ -16788,7 +16788,7 @@ void COggDlg::timerp()
 		if (plf == 1 && (wav || ogg) && eqVis && !speanaDraw) {
 			static DWORD s_eqFeedMs = 0;
 			const DWORD nowFeed = GetTickCount();
-			if (s_eqFeedMs == 0 || (nowFeed - s_eqFeedMs) >= 50u) {
+			if (s_eqFeedMs == 0 || (nowFeed - s_eqFeedMs) >= (DWORD)EqCodeIntervalMs()) {
 				s_eqFeedMs = nowFeed;
 				Speana(FALSE);
 			}
@@ -20791,28 +20791,6 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	if (bytesPerFrame <= 0 || TOTAL_BUF_BYTES <= bytesPerFrame) return;
 
 	m_PianoRollDlg->ResumePlaybackFeed();
-	const int ringFrames = TOTAL_BUF_BYTES / bytesPerFrame;
-	const int srInt = (int)(sampleRate + 0.5);
-	// スペアナ窓分を空けたいが、192k/多ch で speana>=ring になると maxPrFrames<=0 になり
-	// 解析が永久スキップされてロールが止まる。最低限 MinAnalyze 分は必ず確保する。
-	int speanaFramesRef = 4096;
-	if (savedata.speanamode == 1 && (savedata.speananum == 0 || savedata.speananum == 1))
-		speanaFramesRef = 8192;
-	const int speanaFrames = CPianoRoll::ScaleWinSamples(speanaFramesRef, srInt);
-	const int capMargin = 128;
-	const int ringUsable = ringFrames - capMargin;
-	if (ringUsable <= 0) return;
-	const int minNeed = CPianoRoll::MinAnalyzeFrameCount(srInt, ringUsable);
-	if (ringUsable < minNeed) return;
-	int maxPrFrames = ringUsable;
-	if (speanaFrames > 0 && ringUsable > speanaFrames + minNeed)
-		maxPrFrames = ringUsable - speanaFrames;
-	if (maxPrFrames < minNeed)
-		maxPrFrames = ringUsable;
-	const int prFrames = CPianoRoll::CaptureFrameCount(srInt, maxPrFrames);
-	if (prFrames < minNeed) return;
-	const int prBytes = prFrames * bytesPerFrame;
-	if (prBytes <= 0 || prBytes > TOTAL_BUF_BYTES) return;
 
 	ULONG playCur = 0, writeCur = 0;
 	if (InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0)
@@ -20823,18 +20801,13 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	WriteCursor = writeCur;
 
 	const ULONG ringBytes = Bufwav3RingBytes();
-	// 窓末尾は Speana と同じ readPos（-800/-1600ms レイテンシ込み）。
-	// メーターとロールは同じ extra に揃える（ロールだけ小さいと音より先にバーが出る）。
 	const int kMeterExtraLatencyMs = 700;
 	const int kPianoRollExtraLatencyMs = 700;
-	const int speanaBytes = speanaFrames * bytesPerFrame;
-	long prPos = PianoRollWideReadPos(playCur, prBytes, speanaBytes, bytesPerFrame, (int)ringBytes, sampleRate, kPianoRollExtraLatencyMs);
+	const int srInt = (int)(sampleRate + 0.5);
 
 	static std::vector<char> prRaw;
 	static std::vector<char> meterRaw;
 	static std::vector<double> prMono;
-	if (prRaw.size() < (size_t)prBytes) prRaw.resize(prBytes);
-	if (prMono.size() < (size_t)prFrames) prMono.resize(prFrames);
 
 	const char* srcBufBase = (const char*)bufwav3;
 	auto ReadRingPcm = [&](long bytePos, int byteCount, char* dst) -> bool {
@@ -20851,10 +20824,6 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 		return true;
 		};
 
-	char* prDst = prRaw.data();
-	if (!ReadRingPcm(prPos, prBytes, prDst))
-		return;
-
 	auto GetSampleValueFrom = [&](const char* pcmBase, int sampleIndex, int chIndex) -> double {
 		const int offset = sampleIndex * bytesPerFrame + chIndex * bytesPerSample;
 		if (bitDepth == 16) return (double)(*(const short*)(pcmBase + offset)) / 32768.0;
@@ -20869,6 +20838,7 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 		return 0.0;
 		};
 
+	// メーターは軽量窓のみ。解析ジョブ受付不可時でも UI メーターは更新する。
 	const int meterCh = (channels < 1) ? 1 : ((channels > CPianoRoll::PIANO_METER_CH_MAX) ? CPianoRoll::PIANO_METER_CH_MAX : channels);
 	const int meterFrames = CPianoRoll::ScaleWinSamples(2048, srInt);
 	const int meterBytes = meterFrames * bytesPerFrame;
@@ -20896,6 +20866,53 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 			}
 		}
 	}
+
+	float chDb[CPianoRoll::PIANO_METER_CH_MAX];
+	for (int ch = 0; ch < meterCh; ++ch) {
+		double level = chPeak[ch];
+		if (meterN > 0) {
+			const double rms = sqrt(chSumSq[ch] / (double)meterN);
+			if (rms * 4.0 > level) level = rms * 4.0;
+		}
+		if (level < 1e-9) chDb[ch] = -60.0f;
+		else chDb[ch] = (float)(20.0 * log10(level));
+	}
+	m_PianoRollDlg->SetChannelMeterDb(chDb, meterCh);
+
+	// 解析ビジー/スロットル中に ~8192ch 変換すると EQ/MP の UI が飢える。
+	// 受付可能時だけ重いキャプチャ＋モノラル化を行う。
+	if (!m_PianoRollDlg->ShouldCaptureAnalyzeJob())
+		return;
+
+	const int ringFrames = TOTAL_BUF_BYTES / bytesPerFrame;
+	int speanaFramesRef = 4096;
+	if (savedata.speanamode == 1 && (savedata.speananum == 0 || savedata.speananum == 1))
+		speanaFramesRef = 8192;
+	const int speanaFrames = CPianoRoll::ScaleWinSamples(speanaFramesRef, srInt);
+	const int capMargin = 128;
+	const int ringUsable = ringFrames - capMargin;
+	if (ringUsable <= 0) return;
+	const int minNeed = CPianoRoll::MinAnalyzeFrameCount(srInt, ringUsable);
+	if (ringUsable < minNeed) return;
+	int maxPrFrames = ringUsable;
+	if (speanaFrames > 0 && ringUsable > speanaFrames + minNeed)
+		maxPrFrames = ringUsable - speanaFrames;
+	if (maxPrFrames < minNeed)
+		maxPrFrames = ringUsable;
+	const int prFrames = CPianoRoll::CaptureFrameCount(srInt, maxPrFrames);
+	if (prFrames < minNeed) return;
+	const int prBytes = prFrames * bytesPerFrame;
+	if (prBytes <= 0 || prBytes > TOTAL_BUF_BYTES) return;
+
+	const int speanaBytes = speanaFrames * bytesPerFrame;
+	long prPos = PianoRollWideReadPos(playCur, prBytes, speanaBytes, bytesPerFrame, (int)ringBytes, sampleRate, kPianoRollExtraLatencyMs);
+
+	if (prRaw.size() < (size_t)prBytes) prRaw.resize(prBytes);
+	if (prMono.size() < (size_t)prFrames) prMono.resize(prFrames);
+
+	char* prDst = prRaw.data();
+	if (!ReadRingPcm(prPos, prBytes, prDst))
+		return;
 
 	auto GetSampleValue = [&](int sampleIndex, int chIndex) -> double {
 		return GetSampleValueFrom(prDst, sampleIndex, chIndex);
@@ -20942,17 +20959,6 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 		prMono[i] = (smpL + smpR) * 0.5;
 	}
 
-	float chDb[CPianoRoll::PIANO_METER_CH_MAX];
-	for (int ch = 0; ch < meterCh; ++ch) {
-		double level = chPeak[ch];
-		if (meterN > 0) {
-			const double rms = sqrt(chSumSq[ch] / (double)meterN);
-			if (rms * 4.0 > level) level = rms * 4.0;
-		}
-		if (level < 1e-9) chDb[ch] = -60.0f;
-		else chDb[ch] = (float)(20.0 * log10(level));
-	}
-	m_PianoRollDlg->SetChannelMeterDb(chDb, meterCh);
 	m_PianoRollDlg->AnalyzePlayCursorMono(prMono.data(), prFrames, (int)(sampleRate + 0.5));
 }
 
@@ -21164,27 +21170,24 @@ void COggDlg::Speana(BOOL bPaintBars)
 		std::fill(bufR.begin(), bufR.end(), 0.0);
 	}
 
-	ResampleDouble(bufL.data(), framesToRead, bufResampled.data(), fftSize);
-	ResampleDouble(bufR.data(), framesToRead, bufResampledR.data(), fftSize);
-	for (int k = 0; k < fftSize; k++) bufM[k] = (bufResampled[k] + bufResampledR[k]) * 0.5;
-
 	// EQ コード用 PCM。描画有無に関係なく供給（pending 中の不規則更新を防ぐ）
 	{
-		CEqualizer* pEq = this->m_EqualizerDlg;
-		const bool eqVisible = pEq
-			&& ::IsWindow(pEq->GetSafeHwnd())
-			&& ::IsWindowVisible(pEq->GetSafeHwnd());
-		if (eqVisible) {
+		if (COgg_IsEqualizerVisible()) {
 			static DWORD s_lastPubMs = 0;
 			const DWORD nowPub = GetTickCount();
-			if (s_lastPubMs == 0 || (nowPub - s_lastPubMs) >= 50u) {
+			if (s_lastPubMs == 0 || (nowPub - s_lastPubMs) >= (DWORD)EqCodeIntervalMs()) {
 				s_lastPubMs = nowPub;
 				PublishEqKeyPcm(bufL, bufR, (int)sampleRate);
 			}
 		}
 	}
+	// EQ 供給のみのとき FFT 用リサンプルは不要（UI スレッドコスト削減）
 	if (!bPaintBars)
 		return;
+
+	ResampleDouble(bufL.data(), framesToRead, bufResampled.data(), fftSize);
+	ResampleDouble(bufR.data(), framesToRead, bufResampledR.data(), fftSize);
+	for (int k = 0; k < fftSize; k++) bufM[k] = (bufResampled[k] + bufResampledR[k]) * 0.5;
 
 	auto ValToBarHeight = [&](double amplitude) -> int {
 		if (amplitude < 0.0001) return 0;

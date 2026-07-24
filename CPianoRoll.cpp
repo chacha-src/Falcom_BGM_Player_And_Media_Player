@@ -856,6 +856,19 @@ void CPianoRoll::AnalyzePlayCursorMono(const double* mono, int frameCount, int s
     SetEvent(m_hAnalysisWake);
 }
 
+bool CPianoRoll::ShouldCaptureAnalyzeJob()
+{
+    if (!m_feedEnabled) return false;
+    if (InterlockedCompareExchange(&m_analysisBusy, 0, 0) != 0) return false;
+    if (InterlockedCompareExchange(&m_jobPending, 0, 0) != 0) return false;
+    if (m_lastAnalyzeTick != 0) {
+        const DWORD now = GetTickCount();
+        if ((now - m_lastAnalyzeTick) < ANALYZE_MIN_MS)
+            return false;
+    }
+    return true;
+}
+
 void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
 {
     // UI スレッド専用。m_cs(Goertzel)を取ると解析中にメーターが遅延する。

@@ -255,6 +255,8 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATIC9, m_ms2);
 	DDX_Control(pDX, IDC_SLIDER5, m_hyouji2);
 	DDX_Control(pDX, IDC_STATIC10, m_hyouji3);
+	DDX_Control(pDX, IDC_SLIDER_EQCODE, m_eqCode);
+	DDX_Control(pDX, IDC_STATIC_EQCODE_MS, m_eqCodeMs);
 	DDX_Control(pDX, IDC_COMBO2, m_soundlist);
 	DDX_Control(pDX, IDC_BUTTON1, m_ao);
 	DDX_Control(pDX, IDC_COMBO3, m_Hz);
@@ -367,6 +369,7 @@ BOOL CRender::OnInitDialog()
 	SetDlgItemText(IDC_STATIC_R_MP3, LL14(L"mp3音量", L"mp3 volume", L"Volume mp3", L"Volume mp3", L"Volumen mp3", L"mp3 볼륨", L"mp3 音量", L"حجم mp3", L"Громкость mp3", L"MP3-Lautstärke", L"Volume mp3", L"mp3-volume", L"Głośność mp3", L"mp3 sesi"));
 	SetDlgItemText(IDC_STATIC_R_KPI, LL14(L"その他のkpi", L"Other kpi", L"Autres kpi", L"Altri kpi", L"Otros kpi", L"기타 kpi", L"其他 kpi", L"kpi أخرى", L"Другие kpi", L"Andere kpi", L"Outros kpi", L"Andere kpi", L"Inne kpi", L"Diğer kpi"));
 	SetDlgItemText(IDC_STATIC_R_DISP, LL14(L"表示間隔", L"Display interval", L"Intervalle d'affichage", L"Intervallo display", L"Intervalo de pantalla", L"표시 간격", L"显示间隔", L"فاصل العرض", L"Интервал отображения", L"Anzeigeintervall", L"Intervalo de exibição", L"Weergave-interval", L"Interwał wyświetlania", L"Görüntüleme aralığı"));
+	SetDlgItemText(IDC_STATIC_R_CODE, LL14(L"コード間隔", L"Chord interval", L"Intervalle accords", L"Intervallo accordi", L"Intervalo de acordes", L"코드 간격", L"和弦间隔", L"فاصل الأكورد", L"Интервал аккордов", L"Akkordintervall", L"Intervalo de acordes", L"Akkoordinterval", L"Interwał akordów", L"Akor aralığı"));
 	SetDlgItemText(IDC_STATIC_R_DEV, LL14(L"再生デバイス", L"Playback device", L"Périphérique lecture", L"Dispositivo riproduzione", L"Dispositivo reproducción", L"재생 장치", L"播放设备", L"جهاز التشغيل", L"Устройство воспроизведения", L"Wiedergabegerät", L"Dispositivo reprodução", L"Afspeelapparaat", L"Urządzenie odtwarzania", L"Oynatma cihazı"));
 	SetDlgItemText(IDC_STATIC_R_SAMP, LL14(L"MAXサンプルレート：", L"MAX sample rate:", L"Freq. échantillonnage max:", L"Freq. campionamento max:", L"Frec. muestreo máx.:", L"최대 샘플레이트:", L"最大采样率：", L"معدل العينات الأقصى:", L"Макс. частота дискретизации:", L"Max. Abtastrate:", L"Taxa amostragem máx.:", L"Max. samplefrequentie:", L"Maks. częstotliwość:", L"Maks. örnekleme oranı:"));
 	SetDlgItemText(IDC_STATIC_R_SPEANA, LL14(L"スペアナ倍率", L"Spectrum scale", L"Échelle spectre", L"Scala spettro", L"Escala espectro", L"스펙트럼 배율", L"频谱倍率", L"مقياس الطيف", L"Масштаб спектра", L"Spektrumskala", L"Escala espectro", L"Spectrumschaal", L"Skala widma", L"Spektrum ölçeği"));
@@ -506,11 +509,13 @@ BOOL CRender::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_lrc), LL14(L"歌詞情報をネットから参照するようにします。\n数パターン試すため少し再生までに時間かかります。", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Recuperer les paroles sur le reseau.\nPeut retarder le demarrage de la lecture.", L"Recupera testi dalla rete.\nPuo ritardare l'avvio della riproduzione.", L"Obtener letras de la red.\nPuede tardar mas en iniciar la reproduccion.", L"가사 정보를 네트워크에서 조회.\n시도가 여러 번이라 재생 시작이 다소 지연될 수 있음.", L"从网络获取歌词。\n需尝试多种来源，播放可能稍慢。", L"جلب كلمات الأغاني من الشبكة.\nقد يتأخر بدء التشغيل.", L"Загружать текст песен из сети.\nСтарт воспроизведения может занять больше времени.", L"Texte aus dem Netz laden.\nWiedergabestart kann langer dauern.", L"Buscar letras na rede.\nPode demorar para iniciar reproducao.", L"Teksten ophalen via netwerk.\nAfspelen kan langer op starten.", L"Pobieraj teksty z sieci.\nStart odtwarzania moze trwac dluzej.", L"Sozleri agdan al.\nCalma baslangici biraz gecikebilir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER3), LL14(L"演奏のバッファ処理での割り込み時間を設定します。\n少なすぎると音飛びする可能性があります。", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Regler le temps d'interruption du tampon.\nTrop bas peut provoquer des saccades audio.", L"Imposta tempo di interruzione buffer.\nTroppo basso puo causare salti audio.", L"Ajustar tiempo de interrupcion del buffer.\nMuy bajo puede causar cortes de audio.", L"버퍼 처리 인터럽트 시간 설정.\n너무 낮으면 끊김 가능.", L"设置播放缓冲中断时间。\n过低可能导致跳音。", L"ضبط وقت مقاطعة المخزن المؤقت.\nالمنخفض جداً قد يسبب تقطيعاً.", L"Задать время прерывания буфера.\nСлишком мало — возможны сбои звука.", L"Puffer-Unterbrechungszeit einstellen.\nZu niedrig kann Knackser verursachen.", L"Definir tempo de interrupcao do buffer.\nMuito baixo pode causar falhas de audio.", L"Buffer-onderbrekingstijd instellen.\nTe laag kan haperingen geven.", L"Ustaw czas przerwania bufora.\nZa niski moze powodowac przeskakiwanie.", L"Tampon kesme suresini ayarla.\nCok dusuk ses atlatabilir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER5), LL14(L"描画の間隔時間を設定します。\nCPU使用が高いときに上げます。", L"Set render interval.\nIncrease when CPU usage is high.", L"Regler l'intervalle de rendu.\nAugmentez si le CPU est charge.", L"Imposta intervallo di rendering.\nAumenta se il CPU e sotto carico.", L"Ajustar intervalo de renderizado.\nSube si el CPU esta alto.", L"그리기 간격 설정.\nCPU 사용률이 높을 때 늘리세요.", L"设置绘制间隔。\nCPU 占用高时可增大。", L"ضبط فترة الرسم.\nزِدها عند ارتفاع استخدام المعالج.", L"Задать интервал отрисовки.\nУвеличьте при высокой нагрузке на CPU.", L"Render-Intervall einstellen.\nBei hoher CPU-Last erhohen.", L"Definir intervalo de renderizacao.\nAumente se a CPU estiver alta.", L"Renderinterval instellen.\nVerhoog bij hoge CPU-belasting.", L"Ustaw odstep renderowania.\nZwieksz przy wysokim obciazeniu CPU.", L"Cizim araligini ayarla.\nCPU yuksekken artir."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER_EQCODE), LL14(L"EQコード表示の更新間隔を設定します。\n短くすると追従が速く、長くすると負荷が下がります。", L"Set EQ chord display update interval.\nShorter = faster tracking; longer = lower load.", L"Intervalle de maj des accords EQ.\nPlus court = plus reactif; plus long = moins de charge.", L"Intervallo aggiornamento accordi EQ.\nPiu corto = piu reattivo; piu lungo = meno carico.", L"Intervalo de actualizacion de acordes EQ.\nMas corto = mas reactivo; mas largo = menos carga.", L"EQ 코드 표시 갱신 간격.\n짧을수록 빠른 추종, 길수록 부하 감소.", L"设置 EQ 和弦显示更新间隔。\n越短跟随越快，越长负载越低。", L"ضبط فاصل تحديث أكورد EQ.\nأقصر=تتبع أسرع؛ أطول=حمل أقل.", L"Интервал обновления аккордов EQ.\nКороче — быстрее; дольше — меньше нагрузка.", L"Update-Intervall der EQ-Akkorde.\nKuerzer = schneller; laenger = weniger Last.", L"Intervalo de atualizacao dos acordes EQ.\nMais curto = mais rapido; mais longo = menos carga.", L"Update-interval EQ-akkoorden.\nKorter = sneller; langer = minder belasting.", L"Interwal odswiezania akordow EQ.\nKrotszy = szybciej; dluzszy = mniejsze obciazenie.", L"EQ akor guncelleme araligi.\nKisa = daha hizli; uzun = daha az yuk."));
 	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER6), LL14(L"スペアナの表示倍率を設定します。", L"Set spectrum display scale.", L"Regler l'echelle d'affichage du spectre.", L"Imposta scala visualizzazione spettro.", L"Ajustar escala de visualizacion del espectro.", L"스펙트럼 표시 배율 설정.", L"设置频谱显示倍率。", L"ضبط مقياس عرض الطيف.", L"Задать масштаб отображения спектра.", L"Spektrum-Anzeigeskala einstellen.", L"Definir escala de exibicao do espectro.", L"Spectrumweergaveschaal instellen.", L"Ustaw skale wyswietlania spektrum.", L"Spektrum gosterim olcegini ayarla."));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
 	m_ms.SetMode(1);
 	m_hyouji2.SetMode(1);
+	m_eqCode.SetMode(1);
 	w_wups.SetMode(1);
 	m_evr.SetCheck(savedata.evr);
 	m_con.SetCheck(savedata.con);
@@ -547,12 +552,18 @@ BOOL CRender::OnInitDialog()
 	if (ms2Pos < 1) ms2Pos = 1;
 	if (ms2Pos > 60) ms2Pos = 60;
 	m_hyouji2.SetPos(ms2Pos);
+	m_eqCode.SetRange(16, 200);
+	if (savedata.eqCodeMs < 16) savedata.eqCodeMs = 25;
+	if (savedata.eqCodeMs > 200) savedata.eqCodeMs = 200;
+	m_eqCode.SetPos(savedata.eqCodeMs);
 	{
 		const wchar_t* msUnit = LL14(L"ms", L"ms", L"ms", L"ms", L"ms", L"ms", L"毫秒", L"ms", L"мс", L"ms", L"ms", L"ms", L"ms", L"ms");
 		CString s; s.Format(L"%d%s", savedata.ms, msUnit);
 		m_ms2.SetWindowText(s);
 		CString s2; s2.Format(L"%d%s", ms2Pos * 16, msUnit);
 		m_hyouji3.SetWindowText(s2);
+		CString s3; s3.Format(L"%d%s", savedata.eqCodeMs, msUnit);
+		m_eqCodeMs.SetWindowText(s3);
 	}
 	SetTimer(11, 100, NULL);
 	w_wups.SetRange(100, 1000);
@@ -655,6 +666,9 @@ void CRender::OnOK()
 	savedata.m4a = m_m4a.GetCheck();
 	savedata.ms = m_ms.GetPos();
 	savedata.ms2 = m_hyouji2.GetPos() * 16;
+	savedata.eqCodeMs = m_eqCode.GetPos();
+	if (savedata.eqCodeMs < 16) savedata.eqCodeMs = 16;
+	if (savedata.eqCodeMs > 500) savedata.eqCodeMs = 500;
 	savedata.samples = samp[m_Hz.GetCurSel()];
 	savedata.speanamode = m_speana.GetCheck();
 	savedata.speananum = m_speana_num.GetCurSel();
@@ -986,6 +1000,9 @@ void CRender::OnBnClickedOk()
 	savedata.lrc_net = m_netlrc.GetCheck();
 	savedata.ms = m_ms.GetPos();
 	savedata.ms2 = m_hyouji2.GetPos() * 16;
+	savedata.eqCodeMs = m_eqCode.GetPos();
+	if (savedata.eqCodeMs < 16) savedata.eqCodeMs = 16;
+	if (savedata.eqCodeMs > 500) savedata.eqCodeMs = 500;
 	savedata.speanamode = m_speana.GetCheck();
 	savedata.speananum = m_speana_num.GetCurSel();
 	savedata.lang = m_comboLang.GetCurSel();
@@ -1108,6 +1125,14 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 		const wchar_t* msUnit = LL14(L"ms", L"ms", L"ms", L"ms", L"ms", L"ms", L"毫秒", L"ms", L"мс", L"ms", L"ms", L"ms", L"ms", L"ms");
 		CString s2; s2.Format(L"%d%s", savedata.ms2, msUnit);
 		m_hyouji3.SetWindowText(s2);
+	}
+	savedata.eqCodeMs = m_eqCode.GetPos();
+	if (savedata.eqCodeMs < 16) savedata.eqCodeMs = 16;
+	if (savedata.eqCodeMs > 500) savedata.eqCodeMs = 500;
+	{
+		const wchar_t* msUnit = LL14(L"ms", L"ms", L"ms", L"ms", L"ms", L"ms", L"毫秒", L"ms", L"мс", L"ms", L"ms", L"ms", L"ms", L"ms");
+		CString s3; s3.Format(L"%d%s", savedata.eqCodeMs, msUnit);
+		m_eqCodeMs.SetWindowText(s3);
 	}
 	savedata.wup = w_wups.GetPos()/ 100.0;
 	CString s;

@@ -745,6 +745,9 @@
 #define IDC_MF_OPENFOL                  3542
 #define IDC_MP_SAVEPARAM                3543
 #define IDC_MP_RESETDATA                3544
+#define IDC_STATIC_R_CODE               3545
+#define IDC_SLIDER_EQCODE               3546
+#define IDC_STATIC_EQCODE_MS            3547
 
 // Next default values for new objects
 // 
@@ -752,7 +755,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        206
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3545
+#define _APS_NEXT_CONTROL_VALUE         3548
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

@@ -108,6 +108,8 @@ public:
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	CCustomSliderCtrl m_hyouji2;
 	CCustomStatic m_hyouji3;
+	CCustomSliderCtrl m_eqCode;
+	CCustomStatic m_eqCodeMs;
 	CCustomComboBox m_soundlist;
 	afx_msg void OnCbnSelchangeCombo2();
 	CCustomStandardButton m_ao;
