@@ -20908,10 +20908,9 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	WriteCursor = writeCur;
 
 	const ULONG ringBytes = Bufwav3RingBytes();
-	// アナライザ(extra=0)より音に対して先行しやすいため、さらに過去を読む。
-	// 700ms でも 0.1〜0.3s 早い報告あり → 950ms。精度(窓長/ホップ)は変えない。
-	const int kMeterExtraLatencyMs = 950;
-	const int kPianoRollExtraLatencyMs = 950;
+	// 簡易ピアノロールが音より早いときの補正（アナライザ extra=0 基準で過去側へ）
+	const int kMeterExtraLatencyMs = 700;
+	const int kPianoRollExtraLatencyMs = 700;
 	const int srInt = (int)(sampleRate + 0.5);
 
 	static std::vector<char> prRaw;

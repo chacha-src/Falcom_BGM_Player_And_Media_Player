@@ -1354,6 +1354,28 @@ void CPianoRoll::UpdateNoteStates()
         m_activeKeys[i] = cur;
     }
 
+    // ホールド延長だけで隣半音が同時残った場合だけ落とす。
+    // 両方とも本フレームのピックなら CollapseNearby 済みの正当な近接なので触らない
+    // （全域 ForceUnique は和音・装飾を潰して昨日より悪化した）。
+    for (int i = 0; i + 1 < KEY_COUNT; ++i) {
+        if (!m_activeKeys[i] || !m_activeKeys[i + 1]) continue;
+        const bool pi = picked[i];
+        const bool pj = picked[i + 1];
+        if (pi && pj) continue;
+        int drop = -1;
+        if (pi && !pj) drop = i + 1;
+        else if (!pi && pj) drop = i;
+        else drop = (blend[i] >= blend[i + 1]) ? (i + 1) : i;
+        m_activeKeys[drop] = false;
+        m_consecActive[drop] = 0;
+        m_envPeak[drop] = 0.0f;
+        m_unpickedFrames[drop] = 0;
+        m_strengthDipFrames[drop] = 0;
+        m_noteStrength[drop] = 0.0f;
+        m_bandMask[drop] = 0;
+        memset(m_laneStrength[drop], 0, sizeof(m_laneStrength[drop]));
+    }
+
 #ifdef _DEBUG
     // [診断用] 表示(スクロール描画)ではなく、検出(m_activeKeys)そのものが
     // 実際にどれだけ高頻度で点滅しているかを直接確認するためのログ。
@@ -3081,9 +3103,11 @@ bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const
     m_rollScratchDC.FillSolidRect(0, yBandTop, width, rollH - yBandTop, RGB(20, 20, 20));
     DrawHistoryGrid(m_rollScratchDC, width, yBandTop, rollH);
 
-    // 連続 TryAdvance と同じ並び: row r(r>=1) ← hist[r], row0 ← live
+    // 連続 TryAdvance と同じ並び: row r(r>=1) ← hist[r-1]、row0 ← live
+    // （ComposeRollBuffer/DrawHistoryArea と同一。hist[r] だと1フレーム古く、
+    //  hist 不足時は live を複数行に描いて縦に太く見える）
     for (int r = n - 1; r >= 1; --r) {
-        const NoteFrame& fr = (hist && histCount > r) ? hist[r] : live;
+        const NoteFrame& fr = (hist && histCount >= r) ? hist[r - 1] : live;
         int yTop, yBot;
         GetHistoryRowBounds(rollH, r, yTop, yBot);
         if (yBot > yTop)
