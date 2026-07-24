@@ -4,6 +4,7 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "PlayList.h"
+#include "CMediaPlayerDlg.h"
 #include "CEqualizer.h"
 #include "CAnalyzerDlg.h"
 #include "CPromptEngine.h"
@@ -16,6 +17,7 @@
 extern save savedata;
 extern COggDlg* og;
 extern CPlayList* pl;
+extern CMediaPlayerDlg* mp;
 extern CString filen;   // 現在再生中の曲パス(ゲームモードでは play() 中に書き換えられることあり)
 extern int tempo;       // テンポ スライダー位置 0..400
 extern int pitch;       // ピッチ スライダー位置 0..400
@@ -580,10 +582,17 @@ bool SongParams_FindCopy(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, 
 	return true;
 }
 
-static void Upsert(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, const SongParam& params)
+bool SongParams_HasEntry(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val)
+{
+	CSingleLock lk(&g_cs, TRUE);
+	return FindIndexFlexibleLocked(listName, path, mode, ret2Val) >= 0;
+}
+
+// true=新規追加(★が付く変化)。false=更新のみ/何もしない。
+static bool Upsert(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, const SongParam& params)
 {
 	CString key = SongParams_KeyPath(path);
-	if (key.IsEmpty() || !listName) return;
+	if (key.IsEmpty() || !listName) return false;
 	CSingleLock lk(&g_cs, TRUE);
 	int idx = FindIndexFlexibleLocked(listName, key, mode, ret2Val);
 	if (idx < 0) {
@@ -594,6 +603,7 @@ static void Upsert(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, const 
 		e.ret2 = ret2Val;
 		g_prim[SpMakePrim(e.listName, e.path, e.mode, e.ret2)] = g_tbl.size();
 		g_tbl.push_back(e);
+		return true;
 	}
 	else {
 		SongParam& e = g_tbl[idx];
@@ -611,7 +621,21 @@ static void Upsert(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, const 
 		e.eq_reverb = params.eq_reverb; e.eq_chorus = params.eq_chorus; e.eq_delay = params.eq_delay;
 		e.analyzerspecstyle = params.analyzerspecstyle;
 		SpReindexRowLocked((size_t)idx, oldKey);
+		return false;
 	}
+}
+
+void SongParams_NotifyListMarksChanged()
+{
+	if (!SongParams_IsMainThread()) {
+		if (og && ::IsWindow(og->GetSafeHwnd()))
+			og->PostMessage(WM_APP_SONGPARAM_MARKS, 0, 0);
+		return;
+	}
+	if (pl && ::IsWindow(pl->m_lc.GetSafeHwnd()))
+		pl->m_lc.Invalidate(FALSE);
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && ::IsWindow(mp->m_list.GetSafeHwnd()))
+		mp->m_list.Invalidate(FALSE);
 }
 
 void SongParams_ResetAll()
@@ -631,6 +655,7 @@ void SongParams_ResetAll()
 	s_baselineValid = false;
 	s_songReady = false;
 	s_restorePending = false;
+	SongParams_NotifyListMarksChanged();
 }
 
 // 未命名キー "#N" のとき、表示名で保存された旧エントリも同一リストとみなす。
@@ -775,7 +800,10 @@ void SongParams_DeleteList(LPCTSTR name)
 			SpRebuildIndexLocked();
 		}
 	}
-	if (changed) SongParams_SaveFile();
+	if (changed) {
+		SongParams_SaveFile();
+		SongParams_NotifyListMarksChanged();
+	}
 }
 
 void SongParams_RebindEntries(LPCTSTR listName, LPCTSTR newListName, const playlistdata0* items, int n, bool copy)
@@ -858,7 +886,10 @@ void SongParams_RebindEntries(LPCTSTR listName, LPCTSTR newListName, const playl
 			changed = true;
 		}
 	}
-	if (changed) SongParams_SaveFile();
+	if (changed) {
+		SongParams_SaveFile();
+		SongParams_NotifyListMarksChanged();
+	}
 }
 
 // ============================================================================
@@ -943,7 +974,8 @@ void SongParams_OnSongStarted()
 	else if (!promptOn) {
 		// エントリ無し → 現在の設定をその曲の初期値として自動保存
 		SnapshotCurrent(s_lastSaved);
-		Upsert(s_curList, s_curPath, s_curMode, s_curRet2, s_lastSaved);
+		if (Upsert(s_curList, s_curPath, s_curMode, s_curRet2, s_lastSaved))
+			SongParams_NotifyListMarksChanged();
 		MarkDirtyAndMaybeWrite();
 		s_baselineValid = true;
 	}
@@ -1038,7 +1070,8 @@ void SongParams_Sync(bool exporting)
 			else if (!promptOn) {
 				// エントリ無し → 現在の設定を自動保存
 				SnapshotCurrent(s_lastSaved);
-				Upsert(s_curList, s_curPath, s_curMode, s_curRet2, s_lastSaved);
+				if (Upsert(s_curList, s_curPath, s_curMode, s_curRet2, s_lastSaved))
+					SongParams_NotifyListMarksChanged();
 				MarkDirtyAndMaybeWrite();
 				s_baselineValid = true;
 			}
@@ -1180,4 +1213,19 @@ CString SongParams_BuildTipExtraForRow(int row)
 			return tip;
 	}
 	return CString();
+}
+
+bool SongParams_HasEntryForRow(int row)
+{
+	if (!pl || !pl->pc || row < 0 || row >= pl->playcnt)
+		return false;
+
+	const playlistdata0& d = pl->pc[row];
+	if (SongParams_HasEntry(SongParams_CurrentListName(), d.fol, d.sub, d.ret2))
+		return true;
+
+	// BuildTipExtraForRow と同じ再生中キー救済
+	if (row == plcnt && !s_curPath.IsEmpty())
+		return SongParams_HasEntry(s_curList, s_curPath, s_curMode, s_curRet2);
+	return false;
 }

@@ -694,27 +694,41 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_list.SetImageList(&il, LVSIL_SMALL);
 	}
 	m_list.InsertColumn(0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, (int)(220 * hD2));
-	m_list.InsertColumn(1, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, (int)(60 * hD2));
-	m_list.InsertColumn(2, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, (int)(72 * hD2));
-	m_list.InsertColumn(3, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatc?"), LVCFMT_LEFT, (int)(160 * hD2));
-	m_list.InsertColumn(4, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Comm.", L"Album/Comm.", L"Album/Com.", L"앨범/댓글", L"专辑/注释", L"الألبوم/تعليق", L"Альбом/Комм.", L"Album/Komm.", L"Album/Coment.", L"Album/Opm.", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, (int)(160 * hD2));
+	m_list.InsertColumn(1, L"★", LVCFMT_CENTER, (int)(22 * hD2)); // 曲ごと設定の有無
+	m_list.InsertColumn(2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, (int)(60 * hD2));
+	m_list.InsertColumn(3, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, (int)(72 * hD2));
+	m_list.InsertColumn(4, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatc?"), LVCFMT_LEFT, (int)(160 * hD2));
+	m_list.InsertColumn(5, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Comm.", L"Album/Comm.", L"Album/Com.", L"앨범/댓글", L"专辑/注释", L"الألبوم/تعليق", L"Альбом/Комм.", L"Album/Komm.", L"Album/Coment.", L"Album/Opm.", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, (int)(160 * hD2));
 
 	// メディアプレイヤー側リストも pl->pc を参照してツールチップに保存パラメータを付記
 	if (pl) m_list.pc = pl->pc;
 	m_list.m_bSongParamTip = true;
 
 	// 保存済みの列幅を復元(0=未設定なら上で設定した既定値のまま)
-	// 最終列(4)は FitPlaylistLastColumn で右端フィットするため復元しない
+	// mpcol の意味スロットは ★挿入前と同じ: [0]=名前 [1]=ゲーム [2]=時間 [3]=アーティスト [4]=未使用
+	// ★列は狭固定のため永続化しない。最終列(5=アルバム)は FitPlaylistLastColumn で右端フィット。
 	savedata.mpcol[4] = 0;
-	for (int ci = 0; ci < 4; ++ci) {
-		if (savedata.mpcol[ci] > 0) {
-			int w = savedata.mpcol[ci];
-			// 構造体ずれで巨大値が入ると SetColumnWidth が不正引数になり得る
-			if (w > (int)(2000 * hD2)) w = (int)(2000 * hD2);
-			if (ci == 2 && w < (int)(72 * hD2))
-				w = (int)(72 * hD2);   // 「取得不能」等が切れない最小幅
-			m_list.SetColumnWidth(ci, w);
-		}
+	if (savedata.mpcol[0] > 0) {
+		int w = savedata.mpcol[0];
+		if (w > (int)(2000 * hD2)) w = (int)(2000 * hD2);
+		m_list.SetColumnWidth(0, w); // 名前
+	}
+	if (savedata.mpcol[1] > 0) {
+		int w = savedata.mpcol[1];
+		if (w > (int)(2000 * hD2)) w = (int)(2000 * hD2);
+		m_list.SetColumnWidth(2, w); // ゲーム
+	}
+	if (savedata.mpcol[2] > 0) {
+		int w = savedata.mpcol[2];
+		if (w > (int)(2000 * hD2)) w = (int)(2000 * hD2);
+		if (w < (int)(72 * hD2))
+			w = (int)(72 * hD2);   // 「取得不能」等が切れない最小幅
+		m_list.SetColumnWidth(3, w); // 時間
+	}
+	if (savedata.mpcol[3] > 0) {
+		int w = savedata.mpcol[3];
+		if (w > (int)(2000 * hD2)) w = (int)(2000 * hD2);
+		m_list.SetColumnWidth(4, w); // アーティスト
 	}
 	FitPlaylistLastColumn();
 	// 列ドラッグ中も幅をライブ反映(HDN_TRACK + ヘッダー幅ポーリング)
@@ -1550,10 +1564,11 @@ void CMediaPlayerDlg::FitPlaylistLastColumn(int dragCol, int dragWidth)
 	const int clientW = lcr.Width();
 	if (clientW <= 0) return;
 
-	const BOOL bDragOther = (dragCol >= 0 && dragCol < 4 && dragWidth > 0);
+	// 最終列(5=アルバム)以外の幅合計。ドラッグ中の列は仮幅を使う。
+	const BOOL bDragOther = (dragCol >= 0 && dragCol < 5 && dragWidth > 0);
 
 	int used = 0;
-	for (int ci = 0; ci < 4; ++ci) {
+	for (int ci = 0; ci < 5; ++ci) {
 		if (bDragOther && ci == dragCol)
 			used += dragWidth;
 		else
@@ -1570,8 +1585,8 @@ void CMediaPlayerDlg::FitPlaylistLastColumn(int dragCol, int dragWidth)
 			m_list.SetColumnWidth(dragCol, dragWidth);
 	}
 
-	if (m_list.GetColumnWidth(4) != last)
-		m_list.SetColumnWidth(4, last);
+	if (m_list.GetColumnWidth(5) != last)
+		m_list.SetColumnWidth(5, last);
 
 	if (CHeaderCtrl* pHdr = m_list.GetHeaderCtrl())
 		pHdr->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
@@ -1581,7 +1596,7 @@ void CMediaPlayerDlg::FitPlaylistLastColumn(int dragCol, int dragWidth)
 
 void CMediaPlayerDlg::TickListHdrDragFit()
 {
-	if (m_listHdrDragCol < 0 || m_listHdrDragCol >= 4) return;
+	if (m_listHdrDragCol < 0 || m_listHdrDragCol >= 5) return;
 	CHeaderCtrl* pHdr = m_list.GetHeaderCtrl();
 	if (!pHdr) return;
 	HDITEM hi = {};
@@ -1602,7 +1617,7 @@ void CMediaPlayerDlg::OnPlaylistHeaderNotify(NMHDR* pNMHDR, LRESULT* pResult)
 	const UINT code = pNMHDR->code;
 	int dragCol = -1;
 	int dragCx = -1;
-	if (phd && phd->iItem >= 0 && phd->iItem < 4) {
+	if (phd && phd->iItem >= 0 && phd->iItem < 5) {
 		dragCol = phd->iItem;
 		if (phd->pitem)
 			dragCx = phd->pitem->cxy;
@@ -1613,13 +1628,13 @@ void CMediaPlayerDlg::OnPlaylistHeaderNotify(NMHDR* pNMHDR, LRESULT* pResult)
 	case HDN_BEGINTRACKW:
 		if (phd) {
 			m_listHdrDragCol = phd->iItem;
-			if (phd->iItem >= 0 && phd->iItem < 4)
+			if (phd->iItem >= 0 && phd->iItem < 5)
 				SetTimer(kTimerListHdrDrag, 16, NULL);
 		}
 		return;
 	case HDN_TRACKA:
 	case HDN_TRACKW:
-		if (phd && phd->iItem == 4)
+		if (phd && phd->iItem == 5)
 			return;
 		if (dragCol >= 0 && dragCx > 0)
 			FitPlaylistLastColumn(dragCol, dragCx);
@@ -1786,8 +1801,9 @@ void CMediaPlayerDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 	if (di->item.mask & LVIF_TEXT) {
 		switch (di->item.iSubItem) {
 		case 0: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.name); break;
-		case 1: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.game); break;
-		case 2: {
+		case 1: _tcscpy_s(di->item.pszText, di->item.cchTextMax, SongParams_HasEntryForRow(i) ? _T("★") : _T("")); break;
+		case 2: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.game); break;
+		case 3: {
 			CString s;
 			if (d.time == 0) s = _T("");
 			else if (d.time == -1) s = LL14(L"取得不能", L"N/A", L"N/D", L"N/D", L"N/D", L"해당 없음", L"不可用", L"غ/م", L"Н/Д", L"k. A.", L"N/D", L"N.v.t.", L"Brak", L"Yok");
@@ -1795,8 +1811,8 @@ void CMediaPlayerDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 			else s.Format(_T("%d:%02d"), d.time / 60, d.time % 60);
 			_tcsncpy_s(di->item.pszText, di->item.cchTextMax, s, _TRUNCATE);
 		} break;
-		case 3: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.art); break;
-		case 4: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.alb); break;
+		case 4: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.art); break;
+		case 5: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.alb); break;
 		default: break;
 		}
 	}
@@ -2120,13 +2136,17 @@ void CMediaPlayerDlg::SavePos()
 	savedata.mpw = r.right - r.left;
 	savedata.mph = r.bottom - r.top;
 	savedata.mpHasPos = 1;
-	// リストの列幅も保存(最終列は起動時に自動フィットするため 0..3 のみ)
+	// リストの列幅も保存(最終列と★は起動時フィット/既定のため意味スロット 0..3 のみ)
+	// mpcol: [0]=名前 [1]=ゲーム [2]=時間 [3]=アーティスト (列index 0,2,3,4)
 	if (::IsWindow(m_list.GetSafeHwnd())) {
-		for (int ci = 0; ci < 4; ++ci) {
-			int w = m_list.GetColumnWidth(ci);
-			if (w > 0)
-				savedata.mpcol[ci] = w;
-		}
+		int w = m_list.GetColumnWidth(0);
+		if (w > 0) savedata.mpcol[0] = w;
+		w = m_list.GetColumnWidth(2);
+		if (w > 0) savedata.mpcol[1] = w;
+		w = m_list.GetColumnWidth(3);
+		if (w > 0) savedata.mpcol[2] = w;
+		w = m_list.GetColumnWidth(4);
+		if (w > 0) savedata.mpcol[3] = w;
 	}
 }
 
@@ -2610,7 +2630,7 @@ bool CMediaPlayerDlg::DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lin
 }
 
 // ジャケット無しのとき、素っ気ないアイコンの代わりに「Media Player らいら」の
-// タイトルと、ほんのり可愛いパステルの模様(縦グラデ + 水玉 + ハート)を描く。
+// タイトルと、ほんのり可愛いパステルの模様(縦グラデ + 水玉 + キラキラ/お花)を描く。
 // dc は w×h のオフスクリーン。純黒(=アクリルのクロマキー)は使わない。
 static void Mp_DrawNoJacketPlaceholder(CDC& dc, int w, int h)
 {
@@ -2644,22 +2664,41 @@ static void Mp_DrawNoJacketPlaceholder(CDC& dc, int w, int h)
 		dc.SelectObject(ob);
 	}
 
-	// --- ちいさなハートを数個(アクセント) ---
-	auto heart = [&](int cx, int cy, int s, COLORREF c) {
+	// --- ちいさなキラキラ(4尖)とお花(アクセント・ハートは使わない) ---
+	auto sparkle = [&](int cx, int cy, int s, COLORREF c) {
 		if (s < 2) return;
 		CBrush br(c);
 		CBrush* ob = dc.SelectObject(&br);
-		dc.Ellipse(cx - s, cy - s / 2, cx, cy + s / 2);           // 左のふくらみ
-		dc.Ellipse(cx, cy - s / 2, cx + s, cy + s / 2);           // 右のふくらみ
-		POINT p[3] = { { cx - s, cy }, { cx + s, cy }, { cx, cy + s + s / 3 } };
-		dc.Polygon(p, 3);
+		// 縦横のひし形クロス
+		POINT v[4] = { { cx, cy - s }, { cx + max(1, s / 4), cy }, { cx, cy + s }, { cx - max(1, s / 4), cy } };
+		POINT hz[4] = { { cx - s, cy }, { cx, cy - max(1, s / 4) }, { cx + s, cy }, { cx, cy + max(1, s / 4) } };
+		dc.Polygon(v, 4);
+		dc.Polygon(hz, 4);
+		dc.SelectObject(ob);
+	};
+	auto flower = [&](int cx, int cy, int s, COLORREF petal, COLORREF core) {
+		if (s < 2) return;
+		CBrush brP(petal);
+		CBrush* ob = dc.SelectObject(&brP);
+		int pr = max(2, s * 2 / 3);
+		dc.Ellipse(cx - pr, cy - s - pr / 3, cx + pr, cy - s / 4);           // 上
+		dc.Ellipse(cx - pr, cy + s / 4, cx + pr, cy + s + pr / 3);           // 下
+		dc.Ellipse(cx - s - pr / 3, cy - pr, cx - s / 4, cy + pr);           // 左
+		dc.Ellipse(cx + s / 4, cy - pr, cx + s + pr / 3, cy + pr);           // 右
+		CBrush brC(core);
+		dc.SelectObject(&brC);
+		int cr = max(1, s / 3);
+		dc.Ellipse(cx - cr, cy - cr, cx + cr, cy + cr);
 		dc.SelectObject(ob);
 	};
 	int hs = max(3, h / 12);
-	heart(w * 20 / 100, h * 24 / 100, hs, RGB(255, 190, 210));
-	heart(w * 82 / 100, h * 30 / 100, hs, RGB(255, 205, 220));
-	heart(w * 74 / 100, h * 80 / 100, hs, RGB(255, 200, 216));
-	heart(w * 24 / 100, h * 78 / 100, hs, RGB(255, 210, 224));
+	int fs = max(3, h / 14);
+	sparkle(w * 18 / 100, h * 22 / 100, hs, RGB(255, 198, 220));
+	flower(w * 80 / 100, h * 28 / 100, fs, RGB(255, 210, 228), RGB(255, 236, 180));
+	flower(w * 22 / 100, h * 78 / 100, fs, RGB(255, 204, 222), RGB(255, 240, 190));
+	sparkle(w * 78 / 100, h * 82 / 100, hs, RGB(255, 205, 224));
+	// 中央寄りに小さなキラを1つ(タイトル周りをふんわり)
+	sparkle(w * 88 / 100, h * 58 / 100, max(2, hs * 2 / 3), RGB(255, 220, 232));
 
 	dc.SelectObject(opnNull);
 

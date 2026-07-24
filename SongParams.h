@@ -21,9 +21,12 @@
 // ============================================================================
 
 // 再生スレッド(HandleNotifications)からメインスレッドへ復元を依頼するメッセージ
-// 注意: COggDlg では WM_APP+70〜74/+99〜101 が使用済み。+75 は未使用。
+// 注意: COggDlg では WM_APP+70〜74/+99〜101 が使用済み。+75/+76 は SongParams 用。
 #ifndef WM_APP_SONGPARAM_RESTORE
 #define WM_APP_SONGPARAM_RESTORE (WM_APP + 75)
+#endif
+#ifndef WM_APP_SONGPARAM_MARKS
+#define WM_APP_SONGPARAM_MARKS (WM_APP + 76) // ★列の再描画依頼(再生スレッド→メイン可)
 #endif
 
 // 1 曲分のパラメータ(固定長レコード。ファイルへそのまま書き出す)
@@ -91,6 +94,9 @@ void SongParams_RebindEntries(LPCTSTR listName, LPCTSTR newListName, const playl
 // (listName, path, mode, ret2) のエントリを探して out へコピー。見つかれば true。
 bool SongParams_FindCopy(LPCTSTR listName, LPCTSTR path, int mode, int ret2, SongParam& out);
 
+// エントリの有無だけ(リスト★列用。パラメータ本体は要らない)。
+bool SongParams_HasEntry(LPCTSTR listName, LPCTSTR path, int mode, int ret2);
+
 // 現在表示中プレイリストの名前(空なら "#index" の安定名)。
 CString SongParams_CurrentListName();
 
@@ -99,3 +105,9 @@ CString SongParams_BuildTipExtra(LPCTSTR listName, LPCTSTR path, int mode, int r
 
 // プレイリスト行番号から直接解決(常に pl->pc を参照)
 CString SongParams_BuildTipExtraForRow(int row);
+
+// 行に記憶パラメータがあるか(★列用。BuildTipExtraForRow と同じキー解決)。
+bool SongParams_HasEntryForRow(int row);
+
+// PL/MP リストの★列を再描画。別スレッドからは PostMessage 経由。
+void SongParams_NotifyListMarksChanged();

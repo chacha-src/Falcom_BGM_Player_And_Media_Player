@@ -425,11 +425,12 @@ BOOL CPlayList::OnInitDialog()
 	m_lc.DragAcceptFiles(TRUE);
 	m_lc.ModifyStyle ( 0, LVS_REPORT );
 	m_lc.InsertColumn ( 0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, 200, 0 );
-	m_lc.InsertColumn ( 1, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, 50, 0 );
-	m_lc.InsertColumn ( 2, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, 72, 0 );
-	m_lc.InsertColumn ( 3, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatc?"), LVCFMT_LEFT, 200, 0 );
-	m_lc.InsertColumn ( 4, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Commentaire", L"Album/Commento", L"Album/Comentario", L"앨범/댓글", L"专辑/注释", L"الألبوم/التعليق", L"Альбом/Комментарий", L"Album/Kommentar", L"Album/Comentario", L"Album/Opmerking", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, 200, 0 );
-	m_lc.InsertColumn ( 5, LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"المجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"), LVCFMT_LEFT, 50, 0 );
+	m_lc.InsertColumn ( 1, L"★", LVCFMT_CENTER, (int)(22 * hD2), 0 ); // 曲ごと設定の有無
+	m_lc.InsertColumn ( 2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, 50, 0 );
+	m_lc.InsertColumn ( 3, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, 72, 0 );
+	m_lc.InsertColumn ( 4, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatc?"), LVCFMT_LEFT, 200, 0 );
+	m_lc.InsertColumn ( 5, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Commentaire", L"Album/Commento", L"Album/Comentario", L"앨범/댓글", L"专辑/注释", L"الألبوم/التعليق", L"Альбом/Комментарий", L"Album/Kommentar", L"Album/Comentario", L"Album/Opmerking", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, 200, 0 );
+	m_lc.InsertColumn ( 6, LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"المجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"), LVCFMT_LEFT, 50, 0 );
 	m_lc.pc = pc;
 	m_lc.m_bSongParamTip = true; // 曲ごと保存パラメータをツールチップに付記
 //	pc=NULL;
@@ -4839,11 +4840,11 @@ void CPlayList::Save()
 		f.Write(&y,4);
 		f.Write(&cx,4);
 		f.Write(&cy,4);
-		c=m_lc.GetColumnWidth(0);f.Write(&c,4);
-		c=m_lc.GetColumnWidth(1);f.Write(&c,4);
-		c=m_lc.GetColumnWidth(3);f.Write(&c,4);
-		c=m_lc.GetColumnWidth(4);f.Write(&c,4);
-		c=m_lc.GetColumnWidth(7);f.Write(&c,4);
+		c=m_lc.GetColumnWidth(0);f.Write(&c,4); // 名前
+		c=m_lc.GetColumnWidth(2);f.Write(&c,4); // ゲーム(旧 col1 スロット互換)
+		c=m_lc.GetColumnWidth(4);f.Write(&c,4); // アーティスト(旧 col3)
+		c=m_lc.GetColumnWidth(5);f.Write(&c,4); // アルバム(旧 col4)
+		c=m_lc.GetColumnWidth(1);f.Write(&c,4); // ★(旧未使用 col7 スロットへ)
 		playlistdata pld;
 		for(int i=0;i<cnt;i++){ZeroMemory(&pld,sizeof(pld));
 			_tcscpy(pld.alb,pc[i].alb);
@@ -4861,8 +4862,8 @@ void CPlayList::Save()
 		c=m_renzoku.GetCheck();f.Write(&c,4);
 		c=m_tool.GetCheck();f.Write(&c,4);
 		c=m_saisyo.GetCheck();f.Write(&c,4);
-		c=m_lc.GetColumnWidth(2);f.Write(&c,4);
-		c=m_lc.GetColumnWidth(5);f.Write(&c,4);
+		c=m_lc.GetColumnWidth(3);f.Write(&c,4); // 時間(旧 col2)
+		c=m_lc.GetColumnWidth(6);f.Write(&c,4); // フォルダ(旧 col5)
 		f.Write(&pnt,4);
 		f.Close();
 
@@ -4914,11 +4915,12 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		f.Read(&y,4);
 		f.Read(&cx,4);
 		f.Read(&cy,4);
-		f.Read(&c,4);m_lc.SetColumnWidth(0,c);
-		f.Read(&c,4);m_lc.SetColumnWidth(1,c);
-		f.Read(&c,4);m_lc.SetColumnWidth(3,c);
-		f.Read(&c,4);m_lc.SetColumnWidth(4,c);
-		f.Read(&c,4);
+		f.Read(&c,4);m_lc.SetColumnWidth(0,c); // 名前
+		f.Read(&c,4);m_lc.SetColumnWidth(2,c); // ゲーム
+		f.Read(&c,4);m_lc.SetColumnWidth(4,c); // アーティスト
+		f.Read(&c,4);m_lc.SetColumnWidth(5,c); // アルバム
+		f.Read(&c,4); // ★(旧未使用スロット。0 や異常値なら既定幅のまま)
+		if (c > 0 && c <= 200) m_lc.SetColumnWidth(1, c);
 		playlistdata pld;
 		m_lc.SetItemCount(cnt);
 		for(int i=0;i<cnt;i++){
@@ -4929,8 +4931,8 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		c=0;f.Read(&c,4);m_renzoku.SetCheck(c);
 		c=1;f.Read(&c,4);m_tool.SetCheck(c);
 		c=1;f.Read(&c,4);m_saisyo.SetCheck(c);
-		c=-1;f.Read(&c,4);if(c!=-1){ if(c<72) c=72; m_lc.SetColumnWidth(2,c); }
-		c=-1;f.Read(&c,4);if(c!=-1)m_lc.SetColumnWidth(5,c);
+		c=-1;f.Read(&c,4);if(c!=-1){ if(c<72) c=72; m_lc.SetColumnWidth(3,c); } // 時間
+		c=-1;f.Read(&c,4);if(c!=-1)m_lc.SetColumnWidth(6,c); // フォルダ
 		pnt = -1;
 		pnt1 = -1;
 		f.Read(&pnt, 4);
@@ -5027,22 +5029,23 @@ void CPlayList::OnSize(UINT nType, int cx, int cy)
 			return;
 		}
 		m_lc.SetWindowPos(&wndNoTopMost, 0, 0, (int)(r.right - 20 * (hD2 )), (int)(r.bottom - 80 * (hD2 )), SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOZORDER);
-		// アルバム/コメント列(列4)をリスト右端へぴたりとフィットさせる。
-		// 後ろのフォルダ列(列5)は 0 幅にして余白(空列)を残さない。
+		// アルバム/コメント列(列5)をリスト右端へぴたりとフィットさせる。
+		// 後ろのフォルダ列(列6)は 0 幅にして余白(空列)を残さない。
 		// 他列の合計を引いた残り幅を割り当て、最低幅を下回る狭い窓では
 		// 最低幅に固定して横スクロールバーが出るに任せる。
 		if (::IsWindow(m_lc.GetSafeHwnd())) {
-			m_lc.SetColumnWidth(5, 0);
+			m_lc.SetColumnWidth(6, 0);
 			CRect lcr; m_lc.GetClientRect(&lcr);   // 縦スクロールバー分を除いた可視幅
 			int used = 0;
-			used += m_lc.GetColumnWidth(0);
-			used += m_lc.GetColumnWidth(1);
-			used += m_lc.GetColumnWidth(2);
-			used += m_lc.GetColumnWidth(3);
+			used += m_lc.GetColumnWidth(0); // 名前
+			used += m_lc.GetColumnWidth(1); // ★
+			used += m_lc.GetColumnWidth(2); // ゲーム
+			used += m_lc.GetColumnWidth(3); // 時間
+			used += m_lc.GetColumnWidth(4); // アーティスト
 			int minLast = (int)(80 * hD2);
 			int last = lcr.Width() - used;
 			if (last < minLast) last = minLast;
-			if (m_lc.GetColumnWidth(4) != last) m_lc.SetColumnWidth(4, last);
+			if (m_lc.GetColumnWidth(5) != last) m_lc.SetColumnWidth(5, last);
 		}
 	}
 	if(pl){
@@ -5465,9 +5468,12 @@ void CPlayList::OnLvnGetdispinfoList1(NMHDR* pNMHDR, LRESULT* pResult)
 				_tcscpy(lpDInfo->item.pszText, pc[nTargetIndex].name);
 				break;
 			case 1:
+				_tcscpy(lpDInfo->item.pszText, SongParams_HasEntryForRow(nTargetIndex) ? _T("★") : _T(""));
+				break;
+			case 2:
 				_tcscpy(lpDInfo->item.pszText, pc[nTargetIndex].game);
 				break;
-			case 2: {
+			case 3: {
 				CString s;
 				if (pc[nTargetIndex].time >= 3600)
 					s.Format(_T("%d:%02d:%02d"), pc[nTargetIndex].time / 3600, (pc[nTargetIndex].time / 60) % 60, pc[nTargetIndex].time % 60);
@@ -5478,13 +5484,13 @@ void CPlayList::OnLvnGetdispinfoList1(NMHDR* pNMHDR, LRESULT* pResult)
 				if (pc[nTargetIndex].time == -1) s = LL14(L"取得不能", L"Unable to fetch", L"Impossible de récupérer", L"Impossibile recuperare", L"No se pudo obtener", L"가져올 수 없음", L"无法获取", L"تعذر الجلب", L"Не удалось получить", L"Abruf nicht möglich", L"Não foi possível obter", L"Ophalen mislukt", L"Nie można pobrać", L"Alınamadı");
 				_tcscpy(lpDInfo->item.pszText, s);
 			} break;
-			case 3:
+			case 4:
 				_tcscpy(lpDInfo->item.pszText, pc[nTargetIndex].art);
 				break;
-			case 4:
+			case 5:
 				_tcscpy(lpDInfo->item.pszText, pc[nTargetIndex].alb);
 				break;
-			case 5:
+			case 6:
 				_tcscpy(lpDInfo->item.pszText, pc[nTargetIndex].fol);
 				break;
 			default:

@@ -1163,6 +1163,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_OGG_SWITCHMODE, &COggDlg::OnSwitchMode)
 	ON_MESSAGE(WM_MP_ENTER_FALCOM, &COggDlg::OnEnterFalcomMsg)
 	ON_MESSAGE(WM_APP_SONGPARAM_RESTORE, &COggDlg::OnSongParamRestore)
+	ON_MESSAGE(WM_APP_SONGPARAM_MARKS, &COggDlg::OnSongParamMarks)
 	ON_WM_WINDOWPOSCHANGING()
 	ON_BN_CLICKED(IDC_BUTTON58, &COggDlg::OnBnmp3jake)
 	ON_WM_DESTROY()
@@ -22400,6 +22401,12 @@ LRESULT COggDlg::OnSongParamRestore(WPARAM, LPARAM lParam)
 		SongParams_NoteRestored(*p);
 		delete p;
 	}
+	return 0;
+}
+
+LRESULT COggDlg::OnSongParamMarks(WPARAM, LPARAM)
+{
+	SongParams_NotifyListMarksChanged();
 	return 0;
 }
 
