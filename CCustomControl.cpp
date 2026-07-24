@@ -5191,14 +5191,20 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             }
             tl = (std::min)(tl, (int)r.right - 4);
             rt.left = (std::max)(tl, (int)r.left + 4);
+            rt.DeflateRect(2, 0);
         }
         else if (uColFmt == DT_RIGHT) {
-            rt.left += 4;
-            rt.right -= 4;
+            rt.DeflateRect(4, 0);
         }
-        else
+        else if (uColFmt == DT_CENTER) {
+            // 左右対称のみ。左だけ +6 すると中央寄せが右へ寄り、狭い★列が潰れて見える
+            rt.DeflateRect(1, 0);
+        }
+        else {
+            // 左寄せ: 左に少し余白
             rt.left += 6;
-        rt.DeflateRect(2, 0);
+            rt.DeflateRect(2, 0);
+        }
 
         CFont* po = pDC->SelectObject(GetFont());
         DrawListSubitemCellText(pDC, st, rt, uColFmt);

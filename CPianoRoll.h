@@ -423,6 +423,7 @@ private:
     bool    m_paintFontsReady = false;
     volatile LONG m_syncPosted = 0;   // RequestSyncFromMainUi の多重ポスト防止フラグ
     volatile LONG m_analysisDonePosted = 0; // WM_PIANOROLL_ANALYSIS_DONE の多重ポスト防止
+    volatile LONG m_analysisPresentDirty = 0; // 解析済だが提示キック未消化
     DWORD m_lastSyncPostTick = 0;
     DWORD m_lastAnalysisDonePostTick = 0;
     int   m_rollSpeedPct = 100;       // 表示スクロール速度(%) 25..200

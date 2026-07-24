@@ -376,6 +376,7 @@ void CPianoRoll::PauseAnalysis()
     // Peek で SYNC/ANALYSIS_DONE を捨てる前に落とす。残ると以降の Post が永久に no-op になる。
     InterlockedExchange(&m_syncPosted, 0);
     InterlockedExchange(&m_analysisDonePosted, 0);
+    InterlockedExchange(&m_analysisPresentDirty, 0);
     EnterCriticalSection(&m_jobCs);
     m_jobFrameCount = 0;
     LeaveCriticalSection(&m_jobCs);
@@ -402,6 +403,7 @@ void CPianoRoll::ResetPlaybackState()
     // Peek 後も必ずクリア（捨てたメッセージのフラグが残ると2曲目以降描画停止）
     InterlockedExchange(&m_syncPosted, 0);
     InterlockedExchange(&m_analysisDonePosted, 0);
+    InterlockedExchange(&m_analysisPresentDirty, 0);
 
     m_chMeterCount = 0;
     for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
@@ -2417,6 +2419,7 @@ void CPianoRoll::DetachForDestroy()
     m_paintDisabled = true;
     InterlockedExchange(&m_syncPosted, 0);
     InterlockedExchange(&m_analysisDonePosted, 0);
+    InterlockedExchange(&m_analysisPresentDirty, 0);
     StopAnalysisWorker();
     EnterCriticalSection(&m_cs);
     m_framesPending = 0;
@@ -3107,21 +3110,16 @@ void CPianoRoll::RequestSyncFromMainUi()
 {
     if (!::IsWindow(m_hWnd)) return;
     const DWORD now = GetTickCount();
-    // 描画中は PCM 供給も止める。ただし Invalidate 待ちで posted が固まったら
-    // ここで Peek 破棄＋開放（timerp 洪水で WM_PAINT が来ないケースの回復）。
+    // 提示フラグ固着の回復のみ。PCM/メーター同期は止めない（アナライザと同じ分離）。
+    // 旧実装は analysisDonePosted 中に Sync 全体を return し、描画が重いほど
+    // 供給が止まり、長時間後に 150ms UpdateWindow 回復サイクルで体感が落ちた。
     if (InterlockedCompareExchange(&m_analysisDonePosted, 0, 0) != 0) {
         if (m_lastAnalysisDonePostTick != 0 && (now - m_lastAnalysisDonePostTick) >= 150u) {
             MSG msg;
             while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_ANALYSIS_DONE, WM_PIANOROLL_ANALYSIS_DONE, PM_REMOVE)) {}
-            while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_SYNC, WM_PIANOROLL_SYNC, PM_REMOVE)) {}
-            // 固着時だけ強制描画して開放（定常の UpdateWindow 占有はしない）
-            ApplySyncInvalidate();
-            UpdateWindow();
             InterlockedExchange(&m_analysisDonePosted, 0);
-            InterlockedExchange(&m_syncPosted, 0);
-        }
-        else {
-            return;
+            InterlockedExchange(&m_analysisPresentDirty, 1);
+            ApplySyncInvalidate();
         }
     }
     if (InterlockedCompareExchange(&m_syncPosted, 0, 0) != 0) return;
@@ -3318,8 +3316,9 @@ DWORD CPianoRoll::AnalysisWorkerLoop()
 
         // 多重 Post するとキューが空にならず WM_PAINT / EQ が飢餓する。
         // 表示キックは ms2（描画周期）に合わせる。解析自体は ANALYZE_MIN_MS のまま。
-        // （旧 8ms + UpdateWindow だとピアノが UI を占有し EQ が秒数回になる）
+        // キックできない分は dirty に残し、OnPaint 完了後に1回だけ追い付き提示する。
         if (didWork && ::IsWindow(m_hWnd)) {
+            InterlockedExchange(&m_analysisPresentDirty, 1);
             int minMs = savedata.ms2;
             if (minMs < 16) minMs = 16;
             if (minMs > 960) minMs = 960;
@@ -3638,6 +3637,11 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
 void CPianoRoll::PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH, int keySectionH)
 {
     PresentFinalFrame(dc, w, h, rollH, keySectionH);
+    if (::IsWindow(m_hWnd)) {
+        MSG msg;
+        while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_ANALYSIS_DONE, WM_PIANOROLL_ANALYSIS_DONE, PM_REMOVE)) {}
+        while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_SYNC, WM_PIANOROLL_SYNC, PM_REMOVE)) {}
+    }
     InterlockedExchange(&m_analysisDonePosted, 0);
     InterlockedExchange(&m_syncPosted, 0);
 }
@@ -3745,10 +3749,19 @@ void CPianoRoll::OnPaint()
         return;
     }
 
-    if (CCC_MainLockPreferQuickPresent() && m_rollReady && m_keyBufReady
-        && m_rollW == w && m_rollH == rollH && m_keyW == w && m_keyH == keySectionH) {
-        PresentClientFromBuffers(dc, w, h, rollH, keySectionH);
-        return;
+    // 追従ドラッグ中の軽量提示。保留フレーム/ダーティがあるときは通常経路で消化する。
+    {
+        int pendingQuick = 0;
+        EnterCriticalSection(&m_cs);
+        pendingQuick = m_framesPending;
+        LeaveCriticalSection(&m_cs);
+        const bool needBufUpdate = (pendingQuick > 0) || m_historyDirty || m_keyDirty || m_meterDirty
+            || (InterlockedCompareExchange(&m_analysisPresentDirty, 0, 0) != 0);
+        if (!needBufUpdate && CCC_MainLockPreferQuickPresent() && m_rollReady && m_keyBufReady
+            && m_rollW == w && m_rollH == rollH && m_keyW == w && m_keyH == keySectionH) {
+            PresentClientFromBuffers(dc, w, h, rollH, keySectionH);
+            return;
+        }
     }
 
     CRect clip;
@@ -3958,11 +3971,6 @@ void CPianoRoll::OnPaint()
         m_keyDirty = false;
         m_meterDirty = false;
     }
-    // 追い付き用の即時自己再描画はしない。ここで Invalidate すると WM_PAINT が
-    // 連鎖し、アクリル時の重いペイントで UI スレッドを占有してしまう。
-    // 残りの保留フレームは次の解析完了(OnAnalysisDone)/同期(OnSyncRequest)時に描く。
-    (void)needAnotherRollFrame;
-
     // 描画完了後に ANALYSIS_DONE / SYNC を開放（背圧）。
     // 滞留メッセージがあれば破棄してポンプを空ける（次の EQ/timerp を通す）。
     if (::IsWindow(m_hWnd)) {
@@ -3972,6 +3980,30 @@ void CPianoRoll::OnPaint()
     }
     InterlockedExchange(&m_analysisDonePosted, 0);
     InterlockedExchange(&m_syncPosted, 0);
+
+    // アナライザと同様: 未消化の提示/保留があれば ms2 間隔で1回追い付きキック
+    const bool presentDirty = (InterlockedExchange(&m_analysisPresentDirty, 0) != 0);
+    if ((needAnotherRollFrame || presentDirty) && ::IsWindow(m_hWnd) && !m_paintDisabled) {
+        const DWORD now = GetTickCount();
+        int minMs = savedata.ms2;
+        if (minMs < 16) minMs = 16;
+        if (minMs > 960) minMs = 960;
+        if (m_lastAnalysisDonePostTick == 0 || (now - m_lastAnalysisDonePostTick) >= (DWORD)minMs) {
+            if (InterlockedCompareExchange(&m_analysisDonePosted, 1, 0) == 0) {
+                m_lastAnalysisDonePostTick = now;
+                if (!PostMessage(WM_PIANOROLL_ANALYSIS_DONE, 0, 0)) {
+                    InterlockedExchange(&m_analysisDonePosted, 0);
+                    InterlockedExchange(&m_analysisPresentDirty, 1);
+                }
+            }
+            else {
+                InterlockedExchange(&m_analysisPresentDirty, 1);
+            }
+        }
+        else {
+            InterlockedExchange(&m_analysisPresentDirty, 1);
+        }
+    }
 
     // [デバッグ用] どの機能が有効な状態でビルド・実行されているかを画面に直接表示する。
     // これが表示されなければ、この CPianoRoll.cpp が実際には動いていない証拠になる。

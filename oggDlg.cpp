@@ -286,6 +286,109 @@ BOOL plw, miw;
 extern TCHAR karento2[1024];
 char kare[256];
 extern COggDlg* og;
+
+// ============================================================================
+// 途中再生 .save: メディア隣ではなく %LOCALAPPDATA%\oggYSED\resume\ へ。
+// 管理者権限不要・再起動後も残りやすい(TEMPより耐性)。パス衝突回避にフルパスハッシュを使う。
+// 旧仕様(メディア隣の *.save)は読込時のみフォールバックし、書込成功時に掃除。
+// ============================================================================
+static ULONGLONG ResumeSaveHashPath(LPCTSTR path)
+{
+	ULONGLONG h = 14695981039346656037ULL;
+	if (!path) return h;
+	for (const TCHAR* p = path; *p; ++p) {
+		TCHAR c = *p;
+		if (c >= _T('A') && c <= _T('Z')) c = (TCHAR)(c - _T('A') + _T('a'));
+		if (c == _T('/')) c = _T('\\');
+		h ^= (ULONGLONG)(unsigned)(TCHAR)c;
+		h *= 1099511628211ULL;
+	}
+	return h;
+}
+
+static CString ResumeSaveDir()
+{
+	TCHAR base[MAX_PATH] = {};
+	DWORD n = ::GetEnvironmentVariable(_T("LOCALAPPDATA"), base, MAX_PATH);
+	CString root;
+	if (n > 0 && n < MAX_PATH)
+		root = base;
+	else {
+		// LOCALAPPDATA が取れない稀な環境: TEMP 配下へ(消されやすいが書込はできる)
+		TCHAR tmp[MAX_PATH] = {};
+		if (::GetTempPath(MAX_PATH, tmp) == 0 || tmp[0] == 0)
+			return CString();
+		root = tmp;
+		// GetTempPath は末尾 \ 付き
+		while (!root.IsEmpty() && (root[root.GetLength() - 1] == _T('\\') || root[root.GetLength() - 1] == _T('/')))
+			root = root.Left(root.GetLength() - 1);
+	}
+	CString app = root + _T("\\oggYSED");
+	CString dir = app + _T("\\resume");
+	::CreateDirectory(app, NULL);
+	::CreateDirectory(dir, NULL);
+	return dir;
+}
+
+// 新規保存先(常に LocalAppData 側)
+static CString ResumeSavePathNew(LPCTSTR mediaPath)
+{
+	if (!mediaPath || !*mediaPath) return CString();
+	CString dir = ResumeSaveDir();
+	if (dir.IsEmpty()) return CString();
+	CString path;
+	path.Format(_T("%s\\%016I64X.save"), (LPCTSTR)dir, ResumeSaveHashPath(mediaPath));
+	return path;
+}
+
+static CString ResumeSavePathLegacy(LPCTSTR mediaPath)
+{
+	if (!mediaPath || !*mediaPath) return CString();
+	return CString(mediaPath) + _T(".save");
+}
+
+static BOOL ResumeSaveFileExists(LPCTSTR path)
+{
+	if (!path || !*path) return FALSE;
+	const DWORD a = ::GetFileAttributes(path);
+	return (a != INVALID_FILE_ATTRIBUTES) && !(a & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+// 読込用: 新場所優先、無ければ旧サイドカー
+static CString ResumeSavePathRead(LPCTSTR mediaPath)
+{
+	CString neu = ResumeSavePathNew(mediaPath);
+	if (ResumeSaveFileExists(neu))
+		return neu;
+	CString leg = ResumeSavePathLegacy(mediaPath);
+	if (ResumeSaveFileExists(leg))
+		return leg;
+	return neu; // どちらも無い → Open は失敗(存在チェック用途)
+}
+
+static void ResumeSaveRemove(LPCTSTR mediaPath)
+{
+	CString neu = ResumeSavePathNew(mediaPath);
+	if (!neu.IsEmpty() && ResumeSaveFileExists(neu)) {
+		try { CFile::Remove(neu); }
+		catch (...) {}
+	}
+	CString leg = ResumeSavePathLegacy(mediaPath);
+	if (!leg.IsEmpty() && ResumeSaveFileExists(leg)) {
+		try { CFile::Remove(leg); }
+		catch (...) {}
+	}
+}
+
+static void ResumeSaveRemoveLegacyOnly(LPCTSTR mediaPath)
+{
+	CString leg = ResumeSavePathLegacy(mediaPath);
+	if (!leg.IsEmpty() && ResumeSaveFileExists(leg)) {
+		try { CFile::Remove(leg); }
+		catch (...) {}
+	}
+}
+
 char cm[10000];
 CCriticalSection2 cs;
 CString fnn, stitle;
@@ -10142,7 +10245,7 @@ void COggDlg::play()
 		CFile f123;
 		int flggg = 0;
 		if (mode != -1) {
-			if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+			if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 				f123.Close();
 				if (IDYES == MessageBox(LL14(
 					L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", /* 日本語 */
@@ -10178,15 +10281,15 @@ void COggDlg::play()
 					flggg = 1;
 				}
 				else {
-					CFile::Remove(filen + _T(".save"));
+					ResumeSaveRemove(filen);
 				}
 			}
-			if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
+			if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
 				f123.Close();
 				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 				if (mode == -10) {
-					if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 						f123.Read(&playb, sizeof(__int64));
 						// 旧保存は「フレーム×4」で playb > 総フレーム になり得る
 						if (oggsize > 0 && playb > (__int64)oggsize)
@@ -10201,7 +10304,7 @@ void COggDlg::play()
 					}
 				}
 				if (mode == 999) {
-					if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 						f123.Read(&playb, sizeof(__int64));
 						if (wav999_use_adbuf)
 							seekadpcm((int)playb);
@@ -10211,7 +10314,7 @@ void COggDlg::play()
 					}
 				}
 				if (mode == -2) {
-					if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 						f123.Read(&aa1_, sizeof(double));
 						pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
 						f123.Close();
@@ -15295,7 +15398,7 @@ void COggDlg::dp(CString a)
 		pMainFrame1->play(0);
 		CFile f123;
 		int flggg = 0;
-		if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+		if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 			f123.Close();
 			if (IDYES == MessageBox(LL14(
 				L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", /* 日本語 */
@@ -15331,15 +15434,15 @@ void COggDlg::dp(CString a)
 				flggg = 1;
 			}
 			else {
-				CFile::Remove(filen + _T(".save"));
+				ResumeSaveRemove(filen);
 			}
 		}
-		if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
+		if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
 			f123.Close();
 			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 			if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 			if (mode == -10) {
-				if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 					f123.Read(&playb, sizeof(__int64));
 					if (oggsize > 0 && playb > (__int64)oggsize)
 						playb /= 4;
@@ -15353,7 +15456,7 @@ void COggDlg::dp(CString a)
 				}
 			}
 			if (mode == -2) {
-				if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 					f123.Read(&aa1_, sizeof(double));
 					pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
 					f123.Close();
@@ -15611,7 +15714,7 @@ void COggDlg::stop()
 			if (mode == -10) {
 				if (oggsize <= playb && oggsize != 0) {
 					try {
-						CFile::Remove(filen + _T(".save"));
+						ResumeSaveRemove(filen);
 					}
 					catch (...) {
 					}
@@ -15623,7 +15726,7 @@ void COggDlg::stop()
 			if (mode == -2) {
 				if (oggsize2 <= aa1_ && oggsize2 != 0.0) {
 					try {
-						CFile::Remove(filen + _T(".save"));
+						ResumeSaveRemove(filen);
 					}
 					catch (...) {
 					}
@@ -15636,12 +15739,15 @@ void COggDlg::stop()
 			if (flg == 0) {
 				if ((savedata.savecheck_mp3 == 1 && mode == -10) || (savedata.savecheck_dshow == 1 && mode == -2)) {
 					CFile f;
-					if (f.Open(filen + _T(".save"), CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
+					const CString savePath = ResumeSavePathNew(filen);
+					if (!savePath.IsEmpty() && f.Open(savePath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 						if (mode == -10)
 							f.Write(&playb, sizeof(__int64));
 						if (mode == -2)
 							f.Write(&aa1_, sizeof(double));
 						f.Close();
+						// 旧・メディア隣サイドカーは残さない
+						ResumeSaveRemoveLegacyOnly(filen);
 					}
 				}
 			}
@@ -20368,7 +20474,7 @@ void COggDlg::OnRestart()
 			pMainFrame1->play(0);
 			CFile f123;
 			int flggg = 0;
-			if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+			if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 				f123.Close();
 				if (IDYES == MessageBox(LL14(
 					L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", /* 日本語 */
@@ -20404,10 +20510,10 @@ void COggDlg::OnRestart()
 					flggg = 1;
 				}
 				else {
-					CFile::Remove(filen + _T(".save"));
+					ResumeSaveRemove(filen);
 				}
 			}
-			if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
+			if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
 				f123.Close();
 				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 				if (pMediaControl) {
@@ -20420,7 +20526,7 @@ void COggDlg::OnRestart()
 					}
 				}
 				if (mode == -10) {
-					if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 						f123.Read(&playb, sizeof(__int64));
 						if (oggsize > 0 && playb > (__int64)oggsize)
 							playb /= 4;
@@ -20434,7 +20540,7 @@ void COggDlg::OnRestart()
 					}
 				}
 				if (mode == -2) {
-					if (f123.Open(filen + _T(".save"), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 						f123.Read(&aa1_, sizeof(double));
 						pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
 						f123.Close();
@@ -20802,8 +20908,10 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	WriteCursor = writeCur;
 
 	const ULONG ringBytes = Bufwav3RingBytes();
-	const int kMeterExtraLatencyMs = 700;
-	const int kPianoRollExtraLatencyMs = 700;
+	// アナライザ(extra=0)より音に対して先行しやすいため、さらに過去を読む。
+	// 700ms でも 0.1〜0.3s 早い報告あり → 950ms。精度(窓長/ホップ)は変えない。
+	const int kMeterExtraLatencyMs = 950;
+	const int kPianoRollExtraLatencyMs = 950;
 	const int srInt = (int)(sampleRate + 0.5);
 
 	static std::vector<char> prRaw;
