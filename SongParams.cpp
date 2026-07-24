@@ -9,6 +9,8 @@
 #include "CPromptEngine.h"
 #include <afxmt.h>
 #include <vector>
+#include <string>
+#include <unordered_map>
 
 // ---- 参照するグローバル ----
 extern save savedata;
@@ -50,8 +52,96 @@ static const int SONGPARAM_FILE_VERSION = 2;
 static const size_t SONGPARAM_V1_SIZE = offsetof(SongParam, mode);
 
 // ---- メモリ内テーブル(g_cs で保護) ----
+// g_tbl: レコード本体(ファイルI/O用)。順序は問わない。
+// g_prim: (listName+path+mode+ret2) → g_tbl index の主キー索引(大小無視)。
 static CCriticalSection g_cs;
 static std::vector<SongParam> g_tbl;
+
+struct SpPrimKey {
+	std::wstring list;
+	std::wstring path;
+	int mode;
+	int ret2;
+	bool operator==(const SpPrimKey& o) const
+	{
+		return mode == o.mode && ret2 == o.ret2 && list == o.list && path == o.path;
+	}
+};
+struct SpPrimKeyHash {
+	size_t operator()(const SpPrimKey& k) const
+	{
+		size_t h = std::hash<std::wstring>()(k.list);
+		h ^= std::hash<std::wstring>()(k.path) + 0x9e3779b9u + (h << 6) + (h >> 2);
+		h ^= std::hash<int>()(k.mode) + 0x9e3779b9u + (h << 6) + (h >> 2);
+		h ^= std::hash<int>()(k.ret2) + 0x9e3779b9u + (h << 6) + (h >> 2);
+		return h;
+	}
+};
+static std::unordered_map<SpPrimKey, size_t, SpPrimKeyHash> g_prim;
+
+static std::wstring SpFoldW(LPCTSTR s)
+{
+	if (!s) return std::wstring();
+	CString t(s);
+	t.MakeLower();
+#if defined(UNICODE) || defined(_UNICODE)
+	return std::wstring(t.GetString());
+#else
+	CStringW w(t);
+	return std::wstring(w.GetString());
+#endif
+}
+
+static SpPrimKey SpMakePrim(LPCTSTR list, LPCTSTR path, int mode, int ret2)
+{
+	SpPrimKey k;
+	k.list = SpFoldW(list);
+	CString p(path ? path : _T(""));
+	p.Replace(_T('/'), _T('\\'));
+	k.path = SpFoldW(p);
+	k.mode = mode;
+	k.ret2 = ret2;
+	return k;
+}
+
+static void SpRebuildIndexLocked()
+{
+	g_prim.clear();
+	g_prim.reserve(g_tbl.size() * 2 + 8);
+	for (size_t i = 0; i < g_tbl.size(); i++) {
+		g_prim[SpMakePrim(g_tbl[i].listName, g_tbl[i].path, g_tbl[i].mode, g_tbl[i].ret2)] = i;
+	}
+}
+
+// 主キー完全一致。見つかれば index、なければ -1。
+static int SpFindExactLocked(LPCTSTR list, LPCTSTR path, int mode, int ret2)
+{
+	if (!list || !*list || !path || !*path) return -1;
+	auto it = g_prim.find(SpMakePrim(list, path, mode, ret2));
+	if (it == g_prim.end()) return -1;
+	if (it->second >= g_tbl.size()) return -1;
+	return (int)it->second;
+}
+
+// 順序不問のため末尾と入れ替えて O(1) 削除。索引も更新。
+static void SpEraseAtLocked(size_t i)
+{
+	if (i >= g_tbl.size()) return;
+	g_prim.erase(SpMakePrim(g_tbl[i].listName, g_tbl[i].path, g_tbl[i].mode, g_tbl[i].ret2));
+	const size_t last = g_tbl.size() - 1;
+	if (i != last) {
+		g_tbl[i] = g_tbl[last];
+		g_prim[SpMakePrim(g_tbl[i].listName, g_tbl[i].path, g_tbl[i].mode, g_tbl[i].ret2)] = i;
+	}
+	g_tbl.pop_back();
+}
+
+static void SpReindexRowLocked(size_t i, const SpPrimKey& oldKey)
+{
+	g_prim.erase(oldKey);
+	if (i < g_tbl.size())
+		g_prim[SpMakePrim(g_tbl[i].listName, g_tbl[i].path, g_tbl[i].mode, g_tbl[i].ret2)] = i;
+}
 
 // ---- 保存デバウンス ----
 static bool  g_dirty = false;
@@ -136,10 +226,29 @@ static bool PathKeysMatch(LPCTSTR a, LPCTSTR b)
 
 // g_cs 保持中。listName+path+mode+ret2 で検索。
 // 旧 ver1(mode/ret2==0) はパス一致で救済し、呼出側 Upsert がキーを昇格する。
+// 通常系は主キー索引、ゆれ・救済だけ線形走査。
 static int FindIndexFlexibleLocked(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val)
 {
 	CString key = SongParams_KeyPath(path);
 	if (key.IsEmpty()) return -1;
+
+	auto tryExact = [&](LPCTSTR ln, LPCTSTR pth, int md, int r2) -> int {
+		if (!ln || !*ln) return -1;
+		return SpFindExactLocked(ln, pth, md, r2);
+	};
+
+	int idx = tryExact(listName, key, mode, ret2Val);
+	if (idx >= 0) return idx;
+	idx = tryExact(listName, key, 0, 0); // legacy
+	if (idx >= 0) return idx;
+
+	CString np = NormalizePlaylistPath(path);
+	if (!np.IsEmpty() && np.CompareNoCase(key) != 0) {
+		idx = tryExact(listName, np, mode, ret2Val);
+		if (idx >= 0) return idx;
+		idx = tryExact(listName, np, 0, 0);
+		if (idx >= 0) return idx;
+	}
 
 	auto tryOne = [&](LPCTSTR ln, LPCTSTR pth, int md, int r2, bool allowLegacy, bool anyModeRet2) -> int {
 		for (size_t i = 0; i < g_tbl.size(); i++) {
@@ -147,24 +256,20 @@ static int FindIndexFlexibleLocked(LPCTSTR listName, LPCTSTR path, int mode, int
 			if (!PathKeysMatch(g_tbl[i].path, pth)) continue;
 			if (anyModeRet2) return (int)i;
 			if (g_tbl[i].mode == md && g_tbl[i].ret2 == r2) return (int)i;
-			// 旧データ: mode/ret2 未設定(0,0) → パス一致で仮マッチ
 			if (allowLegacy && g_tbl[i].mode == 0 && g_tbl[i].ret2 == 0) return (int)i;
 		}
 		return -1;
 	};
 
-	int idx = tryOne(listName, key, mode, ret2Val, true, false);
-	if (idx >= 0) return idx;
-	CString np = NormalizePlaylistPath(path);
-	if (!np.IsEmpty() && np.CompareNoCase(key) != 0) {
-		idx = tryOne(listName, np, mode, ret2Val, true, false);
-		if (idx >= 0) return idx;
-	}
 	// リスト名ゆれ: パス+mode+ret2 だけで再検索
 	idx = tryOne(NULL, key, mode, ret2Val, false, false);
 	if (idx >= 0) return idx;
 	idx = tryOne(NULL, key, mode, ret2Val, true, false);
 	if (idx >= 0) return idx;
+	if (!np.IsEmpty() && np.CompareNoCase(key) != 0) {
+		idx = tryOne(NULL, np, mode, ret2Val, true, false);
+		if (idx >= 0) return idx;
+	}
 	// 最後の手段(ツールチップ救済): パス一致なら mode/ret2 を無視
 	idx = tryOne(listName, key, mode, ret2Val, false, true);
 	if (idx >= 0) return idx;
@@ -209,6 +314,7 @@ void SongParams_LoadFile()
 {
 	CSingleLock lk(&g_cs, TRUE);
 	g_tbl.clear();
+	g_prim.clear();
 	CString ss = karento2; ss += SONGPARAM_DAT_NAME;
 	CFile f;
 	if (f.Open(ss, CFile::modeRead | CFile::shareDenyWrite, NULL) != TRUE)
@@ -219,6 +325,7 @@ void SongParams_LoadFile()
 		if (f.Read(&cnt, sizeof(int)) != sizeof(int)) { f.Close(); return; }
 		if (cnt < 0) cnt = 0;
 		if (cnt > 100000) cnt = 100000;
+		g_tbl.reserve((size_t)cnt);
 		for (int i = 0; i < cnt; i++) {
 			SongParam e;
 			ZeroMemory(&e, sizeof(e));
@@ -241,6 +348,7 @@ void SongParams_LoadFile()
 	catch (...) {
 	}
 	f.Close();
+	SpRebuildIndexLocked();
 	g_dirty = false;
 }
 
@@ -425,6 +533,7 @@ void SongParams_ConvertKeysIfNeeded()
 				}
 			}
 			g_tbl.swap(neu);
+			SpRebuildIndexLocked();
 		}
 	}
 
@@ -483,10 +592,12 @@ static void Upsert(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, const 
 		_tcsncpy(e.path, key, 1023); e.path[1023] = 0;
 		e.mode = mode;
 		e.ret2 = ret2Val;
+		g_prim[SpMakePrim(e.listName, e.path, e.mode, e.ret2)] = g_tbl.size();
 		g_tbl.push_back(e);
 	}
 	else {
 		SongParam& e = g_tbl[idx];
+		SpPrimKey oldKey = SpMakePrim(e.listName, e.path, e.mode, e.ret2);
 		// キーは最新表記へ揃えつつパラメータだけ更新(旧 ver1 もここで mode/ret2 昇格)
 		_tcsncpy(e.listName, listName, 255); e.listName[255] = 0;
 		_tcsncpy(e.path, key, 1023); e.path[1023] = 0;
@@ -499,6 +610,7 @@ static void Upsert(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, const 
 		e.eqsoundeffect = params.eqsoundeffect;
 		e.eq_reverb = params.eq_reverb; e.eq_chorus = params.eq_chorus; e.eq_delay = params.eq_delay;
 		e.analyzerspecstyle = params.analyzerspecstyle;
+		SpReindexRowLocked((size_t)idx, oldKey);
 	}
 }
 
@@ -507,6 +619,7 @@ void SongParams_ResetAll()
 	{
 		CSingleLock lk(&g_cs, TRUE);
 		g_tbl.clear();
+		g_prim.clear();
 		g_dirty = false;
 	}
 	CString ss = karento2; ss += SONGPARAM_DAT_NAME;
@@ -520,37 +633,229 @@ void SongParams_ResetAll()
 	s_restorePending = false;
 }
 
+// 未命名キー "#N" のとき、表示名で保存された旧エントリも同一リストとみなす。
+// 他リストの実名と衝突する表示名はエイリアスに入れない。
+static void SpCollectListNameAliases(LPCTSTR name, std::vector<CString>& out)
+{
+	out.clear();
+	if (!name || !*name) return;
+	out.push_back(name);
+	int idx = -1;
+	if (_stscanf(name, _T("#%d"), &idx) != 1 || idx < 0)
+		return;
+	const int disp = idx + 1;
+	CString cands[13];
+	cands[0].Format(L"プレイリスト：%d", disp);
+	cands[1].Format(L"Playlist: %d", disp);
+	cands[2].Format(L"Liste de lecture : %d", disp);
+	cands[3].Format(L"Lista de reproducción: %d", disp);
+	cands[4].Format(L"플레이리스트: %d", disp);
+	cands[5].Format(L"播放列表：%d", disp);
+	cands[6].Format(L"قائمة التشغيل: %d", disp);
+	cands[7].Format(L"Плейлист: %d", disp);
+	cands[8].Format(L"Wiedergabeliste: %d", disp);
+	cands[9].Format(L"Lista de reprodução: %d", disp);
+	cands[10].Format(L"Afspeellijst: %d", disp);
+	cands[11].Format(L"Lista odtwarzania: %d", disp);
+	cands[12].Format(L"Oynatma Listesi: %d", disp);
+	for (int a = 0; a < 13; a++) {
+		bool clash = false;
+		for (int k = 0; k < 1000; k++) {
+			if (k == idx) continue;
+			if (savedata.playlistname[k][0] == 0) continue;
+			if (_tcsicmp(savedata.playlistname[k], cands[a]) == 0) {
+				clash = true;
+				break;
+			}
+		}
+		if (!clash)
+			out.push_back(cands[a]);
+	}
+}
+
+static bool SpListNameMatchesAny(LPCTSTR listName, const std::vector<CString>& aliases)
+{
+	if (!listName) return false;
+	for (size_t i = 0; i < aliases.size(); i++) {
+		if (_tcsicmp(listName, aliases[i]) == 0)
+			return true;
+	}
+	return false;
+}
+
+static int SpFindEntryLocked(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, const std::vector<CString>* aliases)
+{
+	CString key = SongParams_KeyPath(path);
+	if (key.IsEmpty()) return -1;
+
+	auto tryNames = [&](int md, int r2) -> int {
+		if (aliases && !aliases->empty()) {
+			for (size_t a = 0; a < aliases->size(); a++) {
+				int idx = SpFindExactLocked((*aliases)[a], key, md, r2);
+				if (idx >= 0) return idx;
+			}
+			return -1;
+		}
+		return SpFindExactLocked(listName, key, md, r2);
+	};
+
+	int idx = tryNames(mode, ret2Val);
+	if (idx >= 0) return idx;
+	idx = tryNames(0, 0); // legacy
+	if (idx >= 0) return idx;
+
+	// パス正規化ゆれ・索引ミス時の線形フォールバック
+	for (size_t i = 0; i < g_tbl.size(); i++) {
+		bool listOk = false;
+		if (aliases && !aliases->empty())
+			listOk = SpListNameMatchesAny(g_tbl[i].listName, *aliases);
+		else if (listName && *listName)
+			listOk = (_tcsicmp(g_tbl[i].listName, listName) == 0);
+		if (!listOk) continue;
+		if (!PathKeysMatch(g_tbl[i].path, key)) continue;
+		if (g_tbl[i].mode == mode && g_tbl[i].ret2 == ret2Val) return (int)i;
+		if (g_tbl[i].mode == 0 && g_tbl[i].ret2 == 0) return (int)i;
+	}
+	return -1;
+}
+
 void SongParams_RenameList(LPCTSTR oldName, LPCTSTR newName)
 {
 	if (!oldName || !newName || !*newName) return;
+	if (_tcsicmp(oldName, newName) == 0) return;
+	std::vector<CString> aliases;
+	SpCollectListNameAliases(oldName, aliases);
 	bool changed = false;
 	{
 		CSingleLock lk(&g_cs, TRUE);
 		for (size_t i = 0; i < g_tbl.size(); i++) {
-			if (_tcsicmp(g_tbl[i].listName, oldName) == 0) {
-				_tcsncpy(g_tbl[i].listName, newName, 255);
-				g_tbl[i].listName[255] = 0;
-				changed = true;
-			}
+			if (!SpListNameMatchesAny(g_tbl[i].listName, aliases)) continue;
+			_tcsncpy(g_tbl[i].listName, newName, 255);
+			g_tbl[i].listName[255] = 0;
+			changed = true;
 		}
+		if (changed)
+			SpRebuildIndexLocked();
 	}
 	if (changed) SongParams_SaveFile();
-	// 追跡中リスト名も追従
-	if (s_curList.CompareNoCase(oldName) == 0) s_curList = newName;
+	// 追跡中リスト名も追従(エイリアス含む)
+	if (SpListNameMatchesAny(s_curList, aliases))
+		s_curList = newName;
 }
 
 void SongParams_DeleteList(LPCTSTR name)
 {
 	if (!name) return;
+	std::vector<CString> aliases;
+	SpCollectListNameAliases(name, aliases);
 	bool changed = false;
 	{
 		CSingleLock lk(&g_cs, TRUE);
-		for (size_t i = 0; i < g_tbl.size(); ) {
-			if (_tcsicmp(g_tbl[i].listName, name) == 0) {
-				g_tbl.erase(g_tbl.begin() + i);
+		std::vector<SongParam> neu;
+		neu.reserve(g_tbl.size());
+		for (size_t i = 0; i < g_tbl.size(); i++) {
+			if (SpListNameMatchesAny(g_tbl[i].listName, aliases)) {
+				if (SpListNameMatchesAny(s_curList, aliases) && PathKeysMatch(s_curPath, g_tbl[i].path)
+					&& s_curMode == g_tbl[i].mode && s_curRet2 == g_tbl[i].ret2) {
+					s_curPath.Empty();
+					s_curList.Empty();
+					s_curMode = 0;
+					s_curRet2 = 0;
+					s_baselineValid = false;
+					s_songReady = false;
+					s_restorePending = false;
+				}
 				changed = true;
+				continue;
 			}
-			else i++;
+			neu.push_back(g_tbl[i]);
+		}
+		if (changed) {
+			g_tbl.swap(neu);
+			SpRebuildIndexLocked();
+		}
+	}
+	if (changed) SongParams_SaveFile();
+}
+
+void SongParams_RebindEntries(LPCTSTR listName, LPCTSTR newListName, const playlistdata0* items, int n, bool copy)
+{
+	if (!listName || !*listName || !items || n <= 0) return;
+	if (copy && (!newListName || !*newListName)) return;
+	std::vector<CString> aliases;
+	SpCollectListNameAliases(listName, aliases);
+	bool changed = false;
+	{
+		CSingleLock lk(&g_cs, TRUE);
+		for (int k = 0; k < n; k++) {
+			const playlistdata0& it = items[k];
+			CString key = SongParams_KeyPath(it.fol);
+			if (key.IsEmpty()) continue;
+			const int mode = it.sub;
+			const int r2 = it.ret2;
+			int idx = SpFindEntryLocked(listName, key, mode, r2, &aliases);
+			if (idx < 0) continue;
+
+			if (!newListName) {
+				// 削除
+				if (SpListNameMatchesAny(s_curList, aliases) && PathKeysMatch(s_curPath, key)
+					&& ((s_curMode == mode && s_curRet2 == r2) || (s_curMode == 0 && s_curRet2 == 0))) {
+					s_curPath.Empty();
+					s_curList.Empty();
+					s_curMode = 0;
+					s_curRet2 = 0;
+					s_baselineValid = false;
+					s_songReady = false;
+					s_restorePending = false;
+				}
+				SpEraseAtLocked((size_t)idx);
+				changed = true;
+				continue;
+			}
+
+			if (copy) {
+				// 複製: 先に同一キーがあれば上書き
+				int dest = SpFindEntryLocked(newListName, key, mode, r2, NULL);
+				SongParam e = g_tbl[idx];
+				_tcsncpy(e.listName, newListName, 255);
+				e.listName[255] = 0;
+				_tcsncpy(e.path, key, 1023);
+				e.path[1023] = 0;
+				e.mode = mode;
+				e.ret2 = r2;
+				if (dest >= 0) {
+					SpPrimKey oldDest = SpMakePrim(g_tbl[dest].listName, g_tbl[dest].path, g_tbl[dest].mode, g_tbl[dest].ret2);
+					g_tbl[dest] = e;
+					SpReindexRowLocked((size_t)dest, oldDest);
+				}
+				else {
+					g_prim[SpMakePrim(e.listName, e.path, e.mode, e.ret2)] = g_tbl.size();
+					g_tbl.push_back(e);
+				}
+				changed = true;
+				continue;
+			}
+
+			// 付け替え(移動): 先に移動先の衝突を消す
+			int dest = SpFindEntryLocked(newListName, key, mode, r2, NULL);
+			if (dest >= 0 && dest != idx) {
+				SpEraseAtLocked((size_t)dest);
+				// erase で idx が動く可能性(末尾入れ替え)
+				idx = SpFindEntryLocked(listName, key, mode, r2, &aliases);
+				if (idx < 0) continue;
+			}
+			SpPrimKey oldKey = SpMakePrim(g_tbl[idx].listName, g_tbl[idx].path, g_tbl[idx].mode, g_tbl[idx].ret2);
+			_tcsncpy(g_tbl[idx].listName, newListName, 255);
+			g_tbl[idx].listName[255] = 0;
+			_tcsncpy(g_tbl[idx].path, key, 1023);
+			g_tbl[idx].path[1023] = 0;
+			g_tbl[idx].mode = mode;
+			g_tbl[idx].ret2 = r2;
+			SpReindexRowLocked((size_t)idx, oldKey);
+			if (SpListNameMatchesAny(s_curList, aliases) && PathKeysMatch(s_curPath, key)
+				&& s_curMode == mode && s_curRet2 == r2)
+				s_curList = newListName;
+			changed = true;
 		}
 	}
 	if (changed) SongParams_SaveFile();

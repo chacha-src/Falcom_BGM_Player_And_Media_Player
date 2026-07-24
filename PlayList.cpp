@@ -910,6 +910,14 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Eliminar", L"삭제", L"删除", L"حذف",
 			L"Удалить", L"Löschen", L"Excluir", L"Verwijderen",
 			L"Usuń", L"Sil"));
+	menu.AppendMenu(MF_STRING, PL_CTX_CLEAR_SONGPARAM,
+		LL14(L"選択曲の記憶パラメータを削除", L"Clear saved params for selection",
+			L"Effacer les parametres enregistres de la selection", L"Cancella parametri salvati della selezione",
+			L"Borrar parametros guardados de la seleccion", L"선택 곡의 저장 파라미터 삭제",
+			L"删除所选曲目的已存参数", L"مسح المعلمات المحفوظة للتحديد",
+			L"Удалить сохранённые параметры выбранного", L"Gespeicherte Parameter der Auswahl loeschen",
+			L"Limpar parametros salvos da selecao", L"Opgeslagen parameters van selectie wissen",
+			L"Usun zapisane parametry zaznaczenia", L"Secimin kayitli parametrelerini sil"));
 	menu.AppendMenu(MF_SEPARATOR);
 
 	const int plCnt = GetPlaylistFileCount();
@@ -948,6 +956,35 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd == PL_CTX_WAV) OnPopWavExport();
 	else if (cmd == PL_CTX_DEL) Del();
 	else if (cmd == PL_CTX_REMOVE_MISSING) RemoveMissingFiles();
+	else if (cmd == PL_CTX_CLEAR_SONGPARAM) {
+		std::vector<playlistdata0> items;
+		int idx = -1;
+		while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+			if (idx >= 0 && idx < playcnt && pc)
+				items.push_back(pc[idx]);
+		}
+		if (!items.empty()) {
+			CString msg = LL14(
+				L"選択した曲の記憶パラメータ(音量・EQ等)を削除します。よろしいですか？",
+				L"Clear saved parameters (volume, EQ, etc.) for the selected tracks?",
+				L"Effacer les parametres enregistres (volume, EQ, etc.) des morceaux selectionnes ?",
+				L"Cancellare i parametri salvati (volume, EQ, ecc.) dei brani selezionati?",
+				L"Borrar los parametros guardados (volumen, EQ, etc.) de las pistas seleccionadas?",
+				L"선택한 곡의 저장 파라미터(볼륨·EQ 등)를 삭제할까요?",
+				L"删除所选曲目的已存参数（音量、EQ等）？",
+				L"مسح المعلمات المحفوظة (الصوت، EQ، إلخ) للمسارات المحددة؟",
+				L"Удалить сохранённые параметры (громкость, EQ и т.д.) выбранных треков?",
+				L"Gespeicherte Parameter (Lautstaerke, EQ usw.) der Auswahl loeschen?",
+				L"Limpar parametros salvos (volume, EQ etc.) das faixas selecionadas?",
+				L"Opgeslagen parameters (volume, EQ enz.) van selectie wissen?",
+				L"Usunac zapisane parametry (glosnosc, EQ itd.) zaznaczonych utworow?",
+				L"Secili parcalarin kayitli parametreleri (ses, EQ vb.) silinsin mi?");
+			if (AfxMessageBox(msg, MB_YESNO | MB_ICONQUESTION) == IDYES) {
+				CString listKey = SongParams_CurrentListName();
+				SongParams_RebindEntries(listKey, NULL, items.data(), (int)items.size(), false);
+			}
+		}
+	}
 	else if (cmd >= PL_CTX_MOVE_BASE && cmd <= PL_CTX_MOVE_MAX)
 		TransferSelectedToPlaylist(cmd - PL_CTX_MOVE_BASE, true);
 	else if (cmd >= PL_CTX_COPY_BASE && cmd <= PL_CTX_COPY_MAX)
@@ -992,6 +1029,14 @@ void CPlayList::TransferSelectedToPlaylist(int targetIdx, bool moveNotCopy)
 				L"ogg Простой плеер", L"ogg Einfacher Player", L"ogg Player simples", L"ogg Eenvoudige speler",
 				L"ogg Prosty odtwarzacz", L"ogg Basit oynatıcı"), MB_ICONWARNING);
 		return;
+	}
+
+	// AudioData.dat の listName キーも移動/コピーに追従
+	{
+		CString srcList = SongParams_CurrentListName();
+		CString dstList = savedata.playlistname[targetIdx];
+		if (dstList.IsEmpty()) dstList.Format(L"#%d", targetIdx);
+		SongParams_RebindEntries(srcList, dstList, toXfer.data(), (int)toXfer.size(), !moveNotCopy);
 	}
 
 	if (moveNotCopy) {
@@ -5948,13 +5993,51 @@ void CPlayList::OnBnClickedButton3()
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	CPlayListNew pn;
 	pn.name = savedata.playlistname[savedata.playlistnum];
-	if (pn.name == L"") pn.name.Format(L"プレイリスト：%d", savedata.playlistnum + 1);
+	if (pn.name == L"") pn.name = GetPlaylistDisplayName(savedata.playlistnum);
 	if (pn.DoModal() == IDOK) {
+		CString newName = pn.name;
+		newName.Trim();
+		// 他プレイリスト名(および未命名の表示名 / #N)と重複なら拒否
+		if (!newName.IsEmpty()) {
+			const int plCnt = GetPlaylistFileCount();
+			const int cur = savedata.playlistnum;
+			for (int i = 0; i < plCnt; i++) {
+				if (i == cur) continue;
+				CString other = savedata.playlistname[i];
+				CString otherKey = other;
+				if (otherKey.IsEmpty())
+					otherKey.Format(L"#%d", i);
+				CString otherDisp = GetPlaylistDisplayName(i);
+				if (other.CompareNoCase(newName) == 0
+					|| otherKey.CompareNoCase(newName) == 0
+					|| otherDisp.CompareNoCase(newName) == 0) {
+					AfxMessageBox(LL14(
+						L"同じ名前のプレイリストが既にあります。",
+						L"A playlist with the same name already exists.",
+						L"Une liste portant le meme nom existe deja.",
+						L"Esiste gia una playlist con lo stesso nome.",
+						L"Ya existe una lista con el mismo nombre.",
+						L"같은 이름의 플레이리스트가 이미 있습니다.",
+						L"已存在同名播放列表。",
+						L"توجد بالفعل قائمة بنفس الاسم.",
+						L"Плейлист с таким именем уже существует.",
+						L"Eine Playlist mit diesem Namen existiert bereits.",
+						L"Ja existe uma playlist com o mesmo nome.",
+						L"Er bestaat al een playlist met dezelfde naam.",
+						L"Playlist o tej nazwie juz istnieje.",
+						L"Ayni isimde bir calma listesi zaten var."),
+						MB_ICONWARNING | MB_OK);
+					return;
+				}
+			}
+		}
 		// 曲ごと保存パラメータのキー(リスト名)を旧名→新名へ移行
+		// (未命名 "#N" や旧表示名エイリアスも SongParams_RenameList 側で走査)
 		CString oldKey = SongParams_CurrentListName();
-		wcscpy(savedata.playlistname[savedata.playlistnum], pn.name);
+		wcscpy(savedata.playlistname[savedata.playlistnum], newName);
 		CString newKey = SongParams_CurrentListName();
-		if (oldKey != newKey) SongParams_RenameList(oldKey, newKey);
+		if (oldKey.CompareNoCase(newKey) != 0)
+			SongParams_RenameList(oldKey, newKey);
 		loadplaylistname();
 	}
 
@@ -5998,11 +6081,13 @@ void CPlayList::OnBnClickedPlaydelete()
 		return;
 	}
 	// 削除するリストに紐づく曲ごと保存パラメータも破棄(名前でキー)
-	SongParams_DeleteList(SongParams_CurrentListName());
+	const int numDel = m_listchange.GetCurSel();
+	CString deletedKey = SongParams_CurrentListName();
+	SongParams_DeleteList(deletedKey);
 	changeflg = TRUE;
 	Save();
 	CString s;
-	int num = m_listchange.GetCurSel();
+	int num = numDel;
 
 	int lcnt = 0;
 	for (lcnt = 0;; lcnt++) {
@@ -6015,6 +6100,20 @@ void CPlayList::OnBnClickedPlaydelete()
 			break;
 	}
 	if (lcnt >= 999) lcnt = 999;
+
+	// インデックス繰り上げに伴い、未命名キー "#N" を詰め直す
+	// (カスタム名のリストは名前キーのままなので不要)
+	if (lcnt > 1 && numDel >= 0 && numDel < lcnt) {
+		for (int j = numDel; j < lcnt - 1; j++) {
+			const int jj = j + 1;
+			if (savedata.playlistname[jj][0] != 0)
+				continue;
+			CString oldK, newK;
+			oldK.Format(L"#%d", jj);
+			newK.Format(L"#%d", j);
+			SongParams_RenameList(oldK, newK);
+		}
+	}
 
 	if (lcnt == 0 && num == 0) {//まだ追加してなくて、一番最初のを削除されたとき、
 		m_listchange.ResetContent();

@@ -3550,7 +3550,7 @@ void CMediaPlayerDlg::OnKaisuuKillFocus()
 	MpPersistSavedataQuick();
 }
 
-// リスト右クリック: 詳細編集 / WAV保存 / 削除 / 他リスト移動・コピー / 存在しないファイル削除
+// リスト右クリック: 詳細編集 / WAV保存 / 削除 / 記憶パラメータ削除 / 他リスト移動・コピー / 存在しないファイル削除
 void CMediaPlayerDlg::OnRclickList(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	*pResult = 0;

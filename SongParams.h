@@ -15,6 +15,9 @@
 //   有効化 : savedata.saveSongParams (チェックボックス)が 1 のときだけ動作
 //   移行   : savedata.audioDataVersion (末尾追記)
 //            0→1 で旧キー(pathのみ)を playlistu*.dat 照合により mode+ret2 付きへ自動コンバート
+//   リスト : 名前変更/削除/曲の他リスト移動・コピー時に listName キーを追従
+//            コンテキストメニューから選択曲の記憶パラメータだけ削除も可
+//   索引   : メモリ上は主キー(list+path+mode+ret2)ハッシュで検索。削除は末尾入替。
 // ============================================================================
 
 // 再生スレッド(HandleNotifications)からメインスレッドへ復元を依頼するメッセージ
@@ -78,6 +81,12 @@ void SongParams_ResetAll();
 // リスト名の変更・削除に追従してキーを移行/削除する。
 void SongParams_RenameList(LPCTSTR oldName, LPCTSTR newName);
 void SongParams_DeleteList(LPCTSTR name);
+
+// 曲エントリの listName 付け替え / 複製 / 削除(一括・1回の SaveFile)。
+// newListName == NULL        → 削除
+// newListName != NULL && !copy → listName を付け替え(他リストへ移動)
+// newListName != NULL && copy  → newListName 向けに複製(他リストへコピー)
+void SongParams_RebindEntries(LPCTSTR listName, LPCTSTR newListName, const playlistdata0* items, int n, bool copy);
 
 // (listName, path, mode, ret2) のエントリを探して out へコピー。見つかれば true。
 bool SongParams_FindCopy(LPCTSTR listName, LPCTSTR path, int mode, int ret2, SongParam& out);
