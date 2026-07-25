@@ -345,8 +345,8 @@ void CWavExport::OnBnClickedWavExportExec()
 				L"Geef bestandsnaam op", L"Podaj nazwę pliku", L"Dosya adini belirtin"));
 		return;
 	}
-	m_status.SetWindowText(LL14(L"出力中...", L"Exporting...", L"Export en cours...", L"Esportazione...",
-		L"Exportando...", L"내보내는 중...", L"导出中...", L"导出中...",
+	m_status.SetWindowText(LL14(L"出力中...", L"Exporting...", L"Export en cours...", L"Esportazione in corso...",
+		L"Exportando...", L"내보내는 중...", L"导出中...", L"جاري التصدير...",
 		L"Экспорт...", L"Exportiere...", L"Exportando...", L"Exporteren...",
 		L"Eksportowanie...", L"Dışa aktarılıyor..."));
 	m_exec.EnableWindow(FALSE);

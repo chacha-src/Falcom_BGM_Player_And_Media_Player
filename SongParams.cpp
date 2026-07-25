@@ -1156,7 +1156,7 @@ CString SongParams_BuildTipExtra(LPCTSTR listName, LPCTSTR path, int mode, int r
 	}
 	if (e.eq[15] != 100) { tmp.Format(L"%s=%d", LL14(L"マスター", L"Master", L"Maître", L"Master", L"Máster", L"마스터", L"主控", L"رئيسي", L"Мастер", L"Master", L"Mestre", L"Master", L"Master", L"Ana"), e.eq[15]); TipAppend(body, tmp); }
 	if (e.eq[16] != 100) { tmp.Format(L"%s=%d", LL14(L"明瞭", L"Clarity", L"Clarté", L"Chiarezza", L"Claridad", L"명료", L"清晰", L"وضوح", L"Чёткость", L"Klarheit", L"Clareza", L"Helderheid", L"Klarość", L"Netlik"), e.eq[16]); TipAppend(body, tmp); }
-	if (e.eq[17] != 100) { tmp.Format(L"%s=%d", LL14(L"バランス", L"Balance", L"Balance", L"Bilanciam", L"Balance", L"밸런스", L"平衡", L"توازن", L"Баланс", L"Balance", L"Balanço", L"Balans", L"Balans", L"Denge"), e.eq[17]); TipAppend(body, tmp); }
+	if (e.eq[17] != 100) { tmp.Format(L"%s=%d", LL14(L"バランス", L"Balance", L"Balance", L"Bilancio", L"Balance", L"밸런스", L"平衡", L"توازن", L"Баланс", L"Balance", L"Balanço", L"Balans", L"Balans", L"Denge"), e.eq[17]); TipAppend(body, tmp); }
 	if (e.eq[18] != 100) { tmp.Format(L"%s=%d", LL14(L"密度", L"Density", L"Densité", L"Densità", L"Densidad", L"밀도", L"密度", L"كثافة", L"Плотность", L"Dichte", L"Densidade", L"Dichtheid", L"Gęstość", L"Yoğunluk"), e.eq[18]); TipAppend(body, tmp); }
 	if (e.eq[19] != 100) { tmp.Format(L"%s=%d", LL14(L"立体", L"3D", L"3D", L"3D", L"3D", L"입체", L"立体", L"مجسم", L"3D", L"3D", L"3D", L"3D", L"3D", L"3D"), e.eq[19]); TipAppend(body, tmp); }
 

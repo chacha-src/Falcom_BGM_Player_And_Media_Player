@@ -685,9 +685,9 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	subLayout.AppendMenu(MF_STRING | (m_specLayout == SpecOverlay ? MF_CHECKED : 0),
 		IDM_SPEC_OVERLAY, LL14(L"重ね描き", L"Overlay", L"Superpose", L"Sovrapposto", L"Superpuesto", L"겹침", L"叠加", L"تراكب", L"Наложение", L"Uberlagert", L"Sobreposto", L"Overlay", L"Nakladanie", L"Ustuste"));
 	subLayout.AppendMenu(MF_STRING | (m_specLayout == SpecSplitV ? MF_CHECKED : 0),
-		IDM_SPEC_SPLIT_V, LL14(L"上下分割", L"Split vertical", L"Split vertical", L"Divisione verticale", L"Division vertical", L"상하 분할", L"上下分割", L"تقسيم رأسي", L"Вертикально", L"Vertikal teilen", L"Dividir vertical", L"Verticaal", L"Pionowo", L"Dikey bol"));
+		IDM_SPEC_SPLIT_V, LL14(L"上下分割", L"Split vertical", L"Division verticale", L"Divisione verticale", L"Division vertical", L"상하 분할", L"上下分割", L"تقسيم رأسي", L"Вертикально", L"Vertikal teilen", L"Dividir vertical", L"Verticaal", L"Pionowo", L"Dikey bol"));
 	subLayout.AppendMenu(MF_STRING | (m_specLayout == SpecSplitH ? MF_CHECKED : 0),
-		IDM_SPEC_SPLIT_H, LL14(L"左右分割", L"Split horizontal", L"Split horizontal", L"Divisione orizzontale", L"Division horizontal", L"좌우 분할", L"左右分割", L"تقسيم أفقي", L"Горизонтально", L"Horizontal teilen", L"Dividir horizontal", L"Horizontaal", L"Poziomo", L"Yatay bol"));
+		IDM_SPEC_SPLIT_H, LL14(L"左右分割", L"Split horizontal", L"Division horizontale", L"Divisione orizzontale", L"Division horizontal", L"좌우 분할", L"左右分割", L"تقسيم أفقي", L"Горизонтально", L"Horizontal teilen", L"Dividir horizontal", L"Horizontaal", L"Poziomo", L"Yatay bol"));
 	subLayout.AppendMenu(MF_STRING | (m_specLayout == SpecGrid4 ? MF_CHECKED : 0)
 		| (m_channels < 4 ? MF_GRAYED : 0),
 		IDM_SPEC_GRID4, LL14(L"4分割 (2x2)", L"4-way (2x2)", L"4 voies (2x2)", L"4 vie (2x2)", L"4 vias (2x2)", L"4분할 (2x2)", L"四分割(2x2)", L"4 اتجاهات", L"4 панели", L"4-fach (2x2)", L"4 vias (2x2)", L"4-weg (2x2)", L"4 panele (2x2)", L"4 bolum (2x2)"));

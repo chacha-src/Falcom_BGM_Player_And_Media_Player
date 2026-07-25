@@ -376,10 +376,10 @@ void CKpilist::Init()
 	dwExStyle |= LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_INFOTIP | LVS_EX_CHECKBOXES;
 	m_lc.SetExtendedStyle(dwExStyle);
 	m_lc.ModifyStyle(0, LVS_REPORT);
-	m_lc.InsertColumn(0, LL14(L"kpi", L"kpi", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L""), LVCFMT_LEFT, 100, 0);
+	m_lc.InsertColumn(0, LL14(L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi", L"kpi"), LVCFMT_LEFT, 100, 0);
 	m_lc.InsertColumn(1, L"Ver", LVCFMT_CENTER, 50, 0);
 	m_lc.InsertColumn(2, L"Arch", LVCFMT_CENTER, 60, 0);
-	m_lc.InsertColumn(3, LL14(L"拡張子", L"Extensions", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L"", L""), LVCFMT_LEFT, 340, 0);
+	m_lc.InsertColumn(3, LL14(L"拡張子", L"Extensions", L"Extensions", L"Estensioni", L"Extensiones", L"확장자", L"扩展名", L"الامتدادات", L"Расширения", L"Erweiterungen", L"Extensões", L"Extensies", L"Rozszerzenia", L"Uzantılar"), LVCFMT_LEFT, 340, 0);
 
 	TCHAR *buf;
 	buf = (TCHAR*)calloc(10000, 2);

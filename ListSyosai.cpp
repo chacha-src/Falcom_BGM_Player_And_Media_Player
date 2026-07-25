@@ -138,7 +138,7 @@ BOOL CListSyosai::OnInitDialog()
 	SetDlgItemText(ID_OK, LL14(L"OK", L"OK", L"OK", L"OK", L"OK", L"OK", L"确定", L"موافق", L"ОК", L"OK", L"OK", L"OK", L"OK", L"Tamam"));
 	SetDlgItemText(IDCANCEL, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	SetDlgItemText(IDOK999, LL14(L"フォルダを開く", L"Open folder", L"Ouvrir le dossier", L"Apri cartella", L"Abrir carpeta", L"폴더 열기", L"打开文件夹", L"فتح المجلد", L"Открыть папку", L"Ordner öffnen", L"Abrir pasta", L"Map openen", L"Otwórz folder", L"Klasörü aç"));
-	SetDlgItemText(IDC_SYOSAI_GRP_EDIT, LL14(L"プレイリスト", L"Playlist", L"Liste de lecture", L"Playlist", L"Lista", L"재생 목록", L"播放列表", L"قائمة التشغيل", L"Плейлист", L"Wiedergabeliste", L"Lista", L"Afspeellijst", L"Playlista", L"Çalma listesi"));
+	SetDlgItemText(IDC_SYOSAI_GRP_EDIT, LL14(L"プレイリスト", L"Playlist", L"Liste de lecture", L"Playlist", L"Lista de reproducción", L"재생 목록", L"播放列表", L"قائمة التشغيل", L"Плейлист", L"Wiedergabeliste", L"Lista de reprodução", L"Afspeellijst", L"Playlista", L"Çalma listesi"));
 	SetDlgItemText(IDC_SYOSAI_GRP_TAG, LL14(L"タグ情報", L"Tag info", L"Infos balises", L"Info tag", L"Info. de etiquetas", L"태그 정보", L"标签信息", L"معلومات الوسم", L"Теги", L"Tag-Info", L"Info. de tags", L"Taginfo", L"Info. o tagach", L"Etiket bilgisi"));
 	SetDlgItemText(IDC_SYOSAI_GRP_INTERNAL, LL14(L"内部情報", L"Internal info", L"Infos internes", L"Info interne", L"Info. interna", L"내부 정보", L"内部信息", L"معلومات داخلية", L"Служебная информация", L"Interne Info", L"Info. interna", L"Interne info", L"Info. wewnętrzne", L"Dahili bilgi"));
 	SetDlgItemText(IDC_SYOSAI_LBL_NAME, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"));
@@ -152,7 +152,7 @@ BOOL CListSyosai::OnInitDialog()
 	SetDlgItemText(IDC_SYOSAI_LBL_ID, LL14(L"内部ID", L"Internal ID", L"ID interne", L"ID interno", L"ID interno", L"내부 ID", L"内部 ID", L"المعرّف الداخلي", L"Внутр. ID", L"Interne ID", L"ID interno", L"Intern ID", L"ID wewn.", L"Dahili ID"));
 	SetDlgItemText(IDC_SYOSAI_LBL_GAME, LL14(L"Game", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"اللعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"));
 	SetDlgItemText(IDC_SYOSAI_LBL_TIME, LL14(L"時間", L"Duration", L"Durée", L"Durata", L"Duración", L"재생 시간", L"时长", L"المدة", L"Длительность", L"Dauer", L"Duração", L"Duur", L"Czas", L"Süre"));
-	SetDlgItemText(IDC_SYOSAI_LBL_LOOP, LL14(L"ループ", L"Loop", L"Boucle", L"Loop", L"Bucle", L"루프", L"循环", L"التكرار", L"Петля", L"Schleife", L"Loop", L"Loop", L"Pętla", L"Döngü"));
+	SetDlgItemText(IDC_SYOSAI_LBL_LOOP, LL14(L"ループ", L"Loop", L"Boucle", L"Loop", L"Bucle", L"루프", L"循环", L"التكرار", L"Цикл", L"Schleife", L"Loop", L"Loop", L"Pętla", L"Döngü"));
 	SetDlgItemText(IDC_SYOSAI_LBL_RET2, LL14(L"Idx", L"Idx", L"N°", L"Ind", L"Idx", L"Idx", L"索引", L"فهر", L"Инд", L"Idx", L"Idx", L"Idx", L"Ind", L"Diz"));
 
 	TCHAR dy[256];

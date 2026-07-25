@@ -1872,7 +1872,7 @@ void RefreshTaskbarJumpList(BOOL mediaPlayerMode)
 			if (histAdded > 0) {
 				IObjectArray* poaHist = NULL;
 				if (SUCCEEDED(pocHist->QueryInterface(IID_PPV_ARGS(&poaHist)))) {
-					pcdl->AppendCategory(LL14(L"最近再生した曲", L"Recently played", L"Recemment ecoute", L"Riprodotti di recente", L"Reproducido recientemente", L"최근 재생", L"最近播放", L"المشغل مؤخرا", L"Недавно проиграно", L"Zuletzt gespielt", L"Reproduzido recentemente", L"Recent afgespeeld", L"Ostatnio odtwarzane", L"Son calinanlar"), poaHist);
+					pcdl->AppendCategory(LL14(L"最近再生した曲", L"Recently played", L"Recemment ecoute", L"Riprodotti di recente", L"Reproducido recientemente", L"최근 재생", L"最近播放", L"التشغيلات الأخيرة", L"Недавно проигранные", L"Zuletzt gespielt", L"Reproduzido recentemente", L"Recent afgespeeld", L"Ostatnio odtwarzane", L"Son calinanlar"), poaHist);
 					poaHist->Release();
 				}
 			}
@@ -1987,6 +1987,9 @@ HCURSOR COggDlg::OnQueryDragIcon()
 
 void COggDlg::Resize()
 {
+	// 折りたたみ時は ▲▼ / MP画面の下に十分な余白を残す(端すぎて押しにくい対策)
+	const int kBottomPad = 12;
+	const int kRightPad = 5;
 	CString s;
 	m_ue.GetWindowText(s);
 	if (s == L"▼") {
@@ -1994,8 +1997,8 @@ void COggDlg::Resize()
 		CRect rect_1, rect_2;
 		GetWindowRect(&rect_1);
 		m_ue.GetWindowRect(&rect_2);
-		rect_1.bottom = rect_2.bottom + 3;
-		rect_1.right = rect_2.right + 5;
+		rect_1.bottom = rect_2.bottom + kBottomPad;
+		rect_1.right = rect_2.right + kRightPad;
 		MoveWindow(&rect_1);
 		if (maini)
 			maini->MoveWindow(&rect_1);
@@ -2005,8 +2008,8 @@ void COggDlg::Resize()
 		CRect rect_1, rect_2;
 		GetWindowRect(&rect_1);
 		m_sita.GetWindowRect(&rect_2);
-		rect_1.bottom = rect_2.bottom + 3;
-		rect_1.right = rect_2.right + 5;
+		rect_1.bottom = rect_2.bottom + kBottomPad;
+		rect_1.right = rect_2.right + kRightPad;
 		MoveWindow(&rect_1);
 		if (maini)
 			maini->MoveWindow(&rect_1);
@@ -3099,14 +3102,14 @@ BOOL COggDlg::OnInitDialog()
 	SetDlgItemText(IDC_BUTTON33, L"Zwei!!");
 	SetDlgItemText(IDC_BUTTON35, LL14(L"ぐるみん", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"그루민", L"咕噜小天使", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin", L"Gurumin"));
 	SetDlgItemText(IDC_BUTTON37, LL14(L"ダイナソア", L"Dinosaur", L"Dinosaure", L"Dinosauro", L"Dinosaurio", L"공룡", L"恐龙", L"ديناصور", L"Динозавр", L"Dinosaurier", L"Dinossauro", L"Dinosaurus", L"Dinozaur", L"Dinozor"));
-	SetDlgItemText(IDC_BUTTON4, LL14(L"再演奏", L"Replay", L"Relecture", L"Ripeti", L"Repetir", L"다시 재생", L"重新播放", L"إعادة التشغيل", L"Повтор", L"Erneut abspielen", L"Repetir", L"Opnieuw afspelen", L"Odtworz ponownie", L"Tekrar cal"));
+	SetDlgItemText(IDC_BUTTON4, LL14(L"再演奏", L"Replay", L"Rejouer", L"Ripeti", L"Repetir", L"다시 재생", L"重新播放", L"إعادة التشغيل", L"Повтор", L"Erneut abspielen", L"Repetir", L"Opnieuw afspelen", L"Odtworz ponownie", L"Tekrar cal"));
 	SetDlgItemText(IDC_BUTTON3, LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
 	SetDlgItemText(IDC_BUTTON1, LL14(L"停止", L"Stop", L"Arret", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
 	SetDlgItemText(IDC_CHECK1, LL14(L"スペアナ", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"طيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"));
 	SetDlgItemText(IDC_BUTTON5, LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Fade out", L"Zanikanie", L"Solukla?t?r"));
 	SetDlgItemText(IDC_BUTTON21, LL14(L"設定", L"Settings", L"Parametres", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"الإعدادات", L"Настройки", L"Einstellungen", L"Configuracoes", L"Instellingen", L"Ustawienia", L"Ayarlar"));
 	SetDlgItemText(IDC_BUTTON9, LL14(L"フォルダ設定", L"Folder settings", L"Parametres dossier", L"Impostazioni cartella", L"Configuracion carpeta", L"폴더 설정", L"文件夹设置", L"إعدادات المجلد", L"Настройки папки", L"Ordnereinstellungen", L"Config. pasta", L"Mapinstellingen", L"Ustawienia folderu", L"Klasor ayarlar?"));
-	SetDlgItemText(IDOK, LL14(L"終了", L"Exit", L"Quitter", L"Esci", L"Salir", L"종료", L"退出", L"خروج", L"Выход", L"Beenden", L"Sair", L"Afsluiten", L"Zako?cz", L"C?k??"));
+	SetDlgItemText(IDOK, LL14(L"終了", L"Exit", L"Quitter", L"Esci", L"Salir", L"종료", L"退出", L"خروج", L"Выход", L"Beenden", L"Sair", L"Afsluiten", L"Zakończ", L"Çıkış"));
 	SetDlgItemText(IDC_CHECK5, LL14(L"ランダム再生", L"Random play", L"Lecture aleatoire", L"Riproduzione casuale", L"Reproduccion aleatoria", L"랜덤 재생", L"随机播放", L"تشغيل عشوائي", L"Случайное воспроизведение", L"Zufallswiedergabe", L"Reproducao aleatoria", L"Willekeurig afspelen", L"Losowe odtwarzanie", L"Rastgele calma"));
 	SetDlgItemText(IDC_CHECK6, LL14(L"順次再生", L"Sequential play", L"Lecture sequentielle", L"Riproduzione sequenziale", L"Reproduccion secuencial", L"순차 재생", L"顺序播放", L"تشغيل متسلسل", L"Последовательное воспроизведение", L"Sequentielle Wiedergabe", L"Reproducao sequencial", L"Sequentieel afspelen", L"Kolejne odtwarzanie", L"S?ral? calma"));
 	SetDlgItemText(IDC_BUTTON14, LL14(L"演奏開始", L"Play", L"Lecture", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Воспроизведение", L"Abspielen", L"Reproduzir", L"Afspelen", L"Odtworz", L"Cal"));
@@ -3130,7 +3133,7 @@ BOOL COggDlg::OnInitDialog()
 	SetDlgItemText(IDC_STATICaaad, LL14(L"ループ回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop", L"Cuenta de bucle", L"루프 횟수", L"循环次数", L"عدد الحلقات", L"Количество повторов", L"Schleifenzahler", L"Contagem de loop", L"Loopaantal", L"Liczba p?tli", L"Dongu say?s?"));
 	SetDlgItemText(IDC_CHECK2, LL14(L"WAVファイルへ保存", L"Save to WAV file", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV 파일로 저장", L"保存到WAV文件", L"حفظ كـ WAV", L"Сохранить в WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
 	SetDlgItemText(IDC_CHECK3, LL14(L"動画も表示する", L"Show video", L"Afficher video", L"Mostra video", L"Mostrar video", L"동영상 표시", L"显示视频", L"عرض الفيديو", L"Показывать видео", L"Video anzeigen", L"Mostrar video", L"Video tonen", L"Poka? wideo", L"Videoyu goster"));
-	SetDlgItemText(IDC_STATICaaab, LL14(L"主音量", L"Master volume", L"Volume principal", L"Volume master", L"Volumen maestro", L"마스터 볼륨", L"主音量", L"مستوى الصوت الرئيسي", L"Общая громкость", L"Hauptlautstarke", L"Volume mestre", L"Hoofdvolume", L"G?o?no?? g?owna", L"Ana ses"));
+	SetDlgItemText(IDC_STATICaaab, LL14(L"主音量", L"Master volume", L"Volume principal", L"Volume master", L"Volumen maestro", L"마스터 볼륨", L"主音量", L"مستوى الصوت الرئيسي", L"Общая громкость", L"Hauptlautstarke", L"Volume mestre", L"Hoofdvolume", L"Głośność główna", L"Ana ses"));
 	SetDlgItemText(IDC_STATICaaa, LL14(L"DirectSound音量", L"DirectSound volume", L"Volume DirectSound", L"Volume DirectSound", L"Volumen DirectSound", L"DirectSound 볼륨", L"DirectSound音量", L"مستوى DirectSound", L"Громкость DirectSound", L"DirectSound-Lautstarke", L"Volume DirectSound", L"DirectSound-volume", L"G?o?no?? DirectSound", L"DirectSound sesi"));
 	SetDlgItemText(IDC_STATICaaac, LL14(L"拡張音量", L"Extended volume", L"Volume etendu", L"Volume esteso", L"Volumen extendido", L"확장 볼륨", L"扩展音量", L"مستوى الصوت الممتد", L"Доп. громкость", L"Erweiterte Lautstarke", L"Volume estendido", L"Uitgebreid volume", L"G?o?no?? rozszerzona", L"Geni?letilmi? ses"));
 	SetDlgItemText(IDC_STATIC_t, LL14(L"テンポ", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"템포", L"速度", L"الإيقاع", L"Темп", L"Tempo", L"Andamento", L"Tempo", L"Tempo", L"Tempo"));
@@ -7913,7 +7916,7 @@ void COggDlg::play()
 	if (ss == "yc_d401.ogg") {
 		loop1 = 93865;
 		loop2 = 4349569;
-		stitle = LL14(L"導きの塔〜エルディールにくちづけを", L"Tower of Guidance -Kiss for Eldeel-", L"Tour de la Guidance -Un baiser pour Eldeel-", L"Torre della Guida -Un bacio per Eldeel-", L"Torre de la Guia -Un beso para Eldeel-", L"??? ? ~????? ????~", L"引?之塔〜献?埃?迪?的吻", L"??? ??????? -???? ??????-", L"Башня Наставления -Поцелуй для Элдила-", L"Turm der Fuhrung -Kuss fur Eldeel-", L"Torre da Orientacao -Um beijo para Eldeel-", L"Toren van Geleiding -Kus voor Eldeel-", L"Wie?a Przewodnictwa -Poca?unek dla Eldeel-", L"Rehberlik Kulesi -Eldeel icin Opucuk-");
+		stitle = LL14(L"導きの塔〜エルディールにくちづけを", L"Tower of Guidance -Kiss for Eldeel-", L"Tour de la Guidance -Un baiser pour Eldeel-", L"Torre della Guida -Un bacio per Eldeel-", L"Torre de la Guia -Un beso para Eldeel-", L"인도의 탑 ~ Eldeel에게 입맞춤을", L"引导之塔〜给 Eldeel 的吻", L"برج الإرشاد - قبلة لـ Eldeel", L"Башня Наставления -Поцелуй для Элдила-", L"Turm der Fuhrung -Kuss fur Eldeel-", L"Torre da Orientacao -Um beijo para Eldeel-", L"Toren van Geleiding -Kus voor Eldeel-", L"Wieża Przewodnictwa -Pocałunek dla Eldeel-", L"Rehberlik Kulesi -Eldeel icin Opucuk-");
 	}
 	if (ss == "yc_d501.ogg") {
 		loop1 = 832720;
@@ -9353,7 +9356,7 @@ void COggDlg::play()
 				a = LL14(L"アルモリカ村", L"Armorica Village", L"Village d'Armorica", L"Villaggio Armorica", L"Aldea Armorica", L"아르모리카 마을", L"阿莫利卡村", L"قرية أرموريكا", L"Деревня Арморика", L"Armorica-Dorf", L"Vila Armorica", L"Armorica-dorp", L"Wieś Armorica", L"Armorica Köyü");
 				break;
 			case 7121:
-				a = LL14(L"鉱山町マインツ", L"Mines Town Mainz", L"Ville minière Mainz", L"Città mineraria Mainz", L"Ciudad minera Mainz", L"광산마을 마인츠", L"矿山镇マインツ", L"بلدة المناجم ماينز", L"Город Шахт Майнц", L"Bergarbeiterstadt Mainz", L"Cidade das Minas Mainz", L"Mijnstad Mainz", L"Miasto Kopalni Mainz", L"Mainz Maden Kasabası");
+				a = LL14(L"鉱山町マインツ", L"Mines Town Mainz", L"Ville minière Mainz", L"Città mineraria Mainz", L"Ciudad minera Mainz", L"광산마을 마인츠", L"矿山镇美因茨", L"بلدة المناجم ماينز", L"Город Шахт Майнц", L"Bergarbeiterstadt Mainz", L"Cidade das Minas Mainz", L"Mijnstad Mainz", L"Miasto Kopalni Mainz", L"Mainz Maden Kasabası");
 				break;
 			case 7122:
 				a = L"Killing Bear";
@@ -11036,7 +11039,7 @@ void CWread::wavread()
 			fff = 1;
 		}
 		else if (ft == L"y_b210_s1.opus") {
-			a = LL14(L"高鳴る鼓動(重低音)", L"Pounding Heartbeat (Bass Boost)", L"Pounding Heartbeat (Renfort graves)", L"Pounding Heartbeat (Rinforzo bassi)", L"Pounding Heartbeat (Refuerzo graves)", L"Pounding Heartbeat (저음 강조)", L"高鳴る鼓動 (重低音)", L"Pounding Heartbeat (تعزيز الجهير)", L"Pounding Heartbeat (Усиление низких)", L"Pounding Heartbeat (Bassverstärkung)", L"Pounding Heartbeat (Reforço graves)", L"Pounding Heartbeat (Basversterking)", L"Pounding Heartbeat (Wzmocnienie basów)", L"Pounding Heartbeat (Bas güçlendirme)");
+			a = LL14(L"高鳴る鼓動(重低音)", L"Pounding Heartbeat (Bass Boost)", L"Pounding Heartbeat (Renfort graves)", L"Pounding Heartbeat (Rinforzo bassi)", L"Pounding Heartbeat (Refuerzo graves)", L"Pounding Heartbeat (저음 강조)", L"剧烈的心跳 (重低音)", L"Pounding Heartbeat (تعزيز الجهير)", L"Pounding Heartbeat (Усиление низких)", L"Pounding Heartbeat (Bassverstärkung)", L"Pounding Heartbeat (Reforço graves)", L"Pounding Heartbeat (Basversterking)", L"Pounding Heartbeat (Wzmocnienie basów)", L"Pounding Heartbeat (Bas güçlendirme)");
 			fff = 1;
 		}
 		else if (ft == L"y_b300.opus") {
@@ -11044,7 +11047,7 @@ void CWread::wavread()
 			fff = 1;
 		}
 		else if (ft == L"y_b300_s1.opus") {
-			a = LL14(L"石火の如く(重低音)", L"Like Flint (Bass Boost)", L"Like Flint (Renfort graves)", L"Like Flint (Rinforzo bassi)", L"Like Flint (Refuerzo graves)", L"Like Flint (저음 강조)", L"石火の如く (重低音)", L"Like Flint (تعزيز الجهير)", L"Like Flint (Усиление низких)", L"Like Flint (Bassverstärkung)", L"Like Flint (Reforço graves)", L"Like Flint (Basversterking)", L"Like Flint (Wzmocnienie basów)", L"Like Flint (Bas güçlendirme)");
+			a = LL14(L"石火の如く(重低音)", L"Like Flint (Bass Boost)", L"Like Flint (Renfort graves)", L"Like Flint (Rinforzo bassi)", L"Like Flint (Refuerzo graves)", L"Like Flint (저음 강조)", L"如同火石 (重低音)", L"Like Flint (تعزيز الجهير)", L"Like Flint (Усиление низких)", L"Like Flint (Bassverstärkung)", L"Like Flint (Reforço graves)", L"Like Flint (Basversterking)", L"Like Flint (Wzmocnienie basów)", L"Like Flint (Bas güçlendirme)");
 			fff = 1;
 		}
 		else if (ft == L"y_b400.opus") {
@@ -11059,7 +11062,7 @@ void CWread::wavread()
 			fff = 1;
 		}
 		else if (ft == L"y_b500_s1.opus") {
-			a = LL14(L"BERSERK -戦斧の咆哮-(重低音)", L"BERSERK -Roar of the Battle Axe- (Bass Boost)", L"BERSERK -Roar of the Battle Axe- (Renfort graves)", L"BERSERK -Roar of the Battle Axe- (Rinforzo bassi)", L"BERSERK -Roar of the Battle Axe- (Refuerzo graves)", L"BERSERK -Roar of the Battle Axe- (저음 강조)", L"BERSERK -戦斧の咆哮- (重低音)", L"BERSERK -Roar of the Battle Axe- (تعزيز الجهير)", L"BERSERK -Roar of the Battle Axe- (Усиление низких)", L"BERSERK -Roar of the Battle Axe- (Bassverstärkung)", L"BERSERK -Roar of the Battle Axe- (Reforço graves)", L"BERSERK -Roar of the Battle Axe- (Basversterking)", L"BERSERK -Roar of the Battle Axe- (Wzmocnienie basów)", L"BERSERK -Roar of the Battle Axe- (Bas güçlendirme)");
+			a = LL14(L"BERSERK -戦斧の咆哮-(重低音)", L"BERSERK -Roar of the Battle Axe- (Bass Boost)", L"BERSERK -Roar of the Battle Axe- (Renfort graves)", L"BERSERK -Roar of the Battle Axe- (Rinforzo bassi)", L"BERSERK -Roar of the Battle Axe- (Refuerzo graves)", L"BERSERK -Roar of the Battle Axe- (저음 강조)", L"BERSERK -战斧的咆哮- (重低音)", L"BERSERK -Roar of the Battle Axe- (تعزيز الجهير)", L"BERSERK -Roar of the Battle Axe- (Усиление низких)", L"BERSERK -Roar of the Battle Axe- (Bassverstärkung)", L"BERSERK -Roar of the Battle Axe- (Reforço graves)", L"BERSERK -Roar of the Battle Axe- (Basversterking)", L"BERSERK -Roar of the Battle Axe- (Wzmocnienie basów)", L"BERSERK -Roar of the Battle Axe- (Bas güçlendirme)");
 			fff = 1;
 		}
 		else if (ft == L"y_b510.opus") {
@@ -11067,7 +11070,7 @@ void CWread::wavread()
 			fff = 1;
 		}
 		else if (ft == L"y_b510_s1.opus") {
-			a = LL14(L"悪意の洗礼(重低音)", L"Baptism of Malice (Bass Boost)", L"Baptism of Malice (Renfort graves)", L"Baptism of Malice (Rinforzo bassi)", L"Baptism of Malice (Refuerzo graves)", L"Baptism of Malice (저음 강조)", L"悪意の洗礼 (重低音)", L"Baptism of Malice (تعزيز الجهير)", L"Baptism of Malice (Усиление низких)", L"Baptism of Malice (Bassverstärkung)", L"Baptism of Malice (Reforço graves)", L"Baptism of Malice (Basversterking)", L"Baptism of Malice (Wzmocnienie basów)", L"Baptism of Malice (Bas güçlendirme)");
+			a = LL14(L"悪意の洗礼(重低音)", L"Baptism of Malice (Bass Boost)", L"Baptism of Malice (Renfort graves)", L"Baptism of Malice (Rinforzo bassi)", L"Baptism of Malice (Refuerzo graves)", L"Baptism of Malice (저음 강조)", L"恶意的洗礼 (重低音)", L"Baptism of Malice (تعزيز الجهير)", L"Baptism of Malice (Усиление низких)", L"Baptism of Malice (Bassverstärkung)", L"Baptism of Malice (Reforço graves)", L"Baptism of Malice (Basversterking)", L"Baptism of Malice (Wzmocnienie basów)", L"Baptism of Malice (Bas güçlendirme)");
 			fff = 1;
 		}
 		else if (ft == L"y_b520.opus") {
@@ -11082,7 +11085,7 @@ void CWread::wavread()
 			fff = 1;
 		}
 		else if (ft == L"y_b610_s1.opus") {
-			a = LL14(L"辿り着いた極光の下で(重低音)", L"Under the Northern Lights (Bass Boost)", L"Under the Northern Lights (Renfort graves)", L"Under the Northern Lights (Rinforzo bassi)", L"Under the Northern Lights (Refuerzo graves)", L"Under the Northern Lights (저음 강조)", L"辿り着いた極光の下で (重低音)", L"Under the Northern Lights (تعزيز الجهير)", L"Under the Northern Lights (Усиление низких)", L"Under the Northern Lights (Bassverstärkung)", L"Under the Northern Lights (Reforço graves)", L"Under the Northern Lights (Basversterking)", L"Under the Northern Lights (Wzmocnienie basów)", L"Under the Northern Lights (Bas güçlendirme)");
+			a = LL14(L"辿り着いた極光の下で(重低音)", L"Under the Northern Lights (Bass Boost)", L"Under the Northern Lights (Renfort graves)", L"Under the Northern Lights (Rinforzo bassi)", L"Under the Northern Lights (Refuerzo graves)", L"Under the Northern Lights (저음 강조)", L"抵达极光之下 (重低音)", L"Under the Northern Lights (تعزيز الجهير)", L"Under the Northern Lights (Усиление низких)", L"Under the Northern Lights (Bassverstärkung)", L"Under the Northern Lights (Reforço graves)", L"Under the Northern Lights (Basversterking)", L"Under the Northern Lights (Wzmocnienie basów)", L"Under the Northern Lights (Bas güçlendirme)");
 			fff = 1;
 		}
 		else if (ft == L"y_b620.opus") {
@@ -11122,7 +11125,7 @@ void CWread::wavread()
 			fff = 1;
 		}
 		else if (ft == L"y_d100_s1.opus") {
-			a = LL14(L"光届かぬその奥に(重低音)", L"In the Depths (Bass Boost)", L"In the Depths (Renfort graves)", L"In the Depths (Rinforzo bassi)", L"In the Depths (Refuerzo graves)", L"In the Depths (저음 강조)", L"光届かぬその奥に (重低音)", L"In the Depths (تعزيز الجهير)", L"In the Depths (Усиление низких)", L"In the Depths (Bassverstärkung)", L"In the Depths (Reforço graves)", L"In the Depths (Basversterking)", L"In the Depths (Wzmocnienie basów)", L"In the Depths (Bas güçlendirme)");
+			a = LL14(L"光届かぬその奥に(重低音)", L"In the Depths (Bass Boost)", L"In the Depths (Renfort graves)", L"In the Depths (Rinforzo bassi)", L"In the Depths (Refuerzo graves)", L"In the Depths (저음 강조)", L"光线无法到达的深处 (重低音)", L"In the Depths (تعزيز الجهير)", L"In the Depths (Усиление низких)", L"In the Depths (Bassverstärkung)", L"In the Depths (Reforço graves)", L"In the Depths (Basversterking)", L"In the Depths (Wzmocnienie basów)", L"In the Depths (Bas güçlendirme)");
 			fff = 1;
 		}
 		else if (ft == L"y_d200.opus") {
@@ -11143,7 +11146,7 @@ void CWread::wavread()
 			fff = 1;
 		}
 		else if (ft == L"y_d710.opus") {
-			a = LL14(L"甲鉄戦艦ナグルファ", L"Ironclad Battleship Naglfar", L"Cuirassé Naglfar", L"Corazzata Naglfar", L"Acorazado Naglfar", L"갑철전함 나글파ル", L"甲铁战舰 Naglfar", L"البارجة الحديدية ناجلفار", L"Броненосец Нагльфар", L"Panzerschiff Naglfar", L"Encouraçado Naglfar", L"Slagschip Naglfar", L"Pancernik Naglfar", L"Zırhlı Savaş Gemisi Naglfar");
+			a = LL14(L"甲鉄戦艦ナグルファ", L"Ironclad Battleship Naglfar", L"Cuirassé Naglfar", L"Corazzata Naglfar", L"Acorazado Naglfar", L"갑철전함 나글파르", L"甲铁战舰 Naglfar", L"البارجة الحديدية ناجلفار", L"Броненосец Нагльфар", L"Panzerschiff Naglfar", L"Encouraçado Naglfar", L"Slagschip Naglfar", L"Pancernik Naglfar", L"Zırhlı Savaş Gemisi Naglfar");
 			fff = 1;
 		}
 		else if (ft == L"y_d800.opus") {
@@ -15581,7 +15584,7 @@ void COggDlg::OnDropFiles(HDROP hDropInfo)
 			L"لا يمكن فتح الملف لأنه قيد الاستخدام من قبل برنامج آخر.", /* アラビア語 */
 			L"Невозможно открыть файл, так как он используется другой программой.", /* ロシア語 */
 			L"Datei kann nicht geöffnet werden, da sie von einem anderen Programm verwendet wird.", /* ドイツ語 */
-			L"Não é possibile abrir o arquivo pois outro programa o está usando.", /* ポルトガル語 */
+			L"Não é possível abrir o arquivo pois outro programa o está usando.", /* ポルトガル語 */
 			L"Kan het bestand niet openen omdat een ander programma het in gebruik heeft.", /* オランダ語 */
 			L"Nie można otworzyć pliku, ponieważ jest używany przez inny program.", /* ポーランド語 */
 			L"Dosya başka bir program tarafından kullanıldığı için açılamıyor."), /* トルコ語 */
@@ -17137,36 +17140,36 @@ void COggDlg::timerp()
 	}
 	else if (mode == -2 && wavbit_sample_Hz == 0) {
 		s.Format(LL14(
-			L"sample:不明",                   /* 日本語: 厳格に維持 */
-			L"sample:Vanished in Clouds",    /* 英語: 雲の中に消えた */
-			L"sample:Perdu en Mer",          /* フランス語: 海で遭難した */
-			L"sample:Pasta Invisibile",      /* イタリア語: 見えないパスタ */
-			L"sample:Memoria Fugada",        /* スペイン語: 逃亡した記憶 */
-			L"sample:안개 속의 만두",           /* 韓国語: 霧の中の肉まん */
-			L"sample:被外星人抓走",            /* 中国語: 宇宙人に連れ去られた */
-			L"sample:ضائع في الصحراء",       /* アラビア語: 砂漠で迷子 */
-			L"sample:Украдено медведями",    /* ロシア語: クマに盗まれた */
-			L"sample:Verschollene Wurst",    /* ドイツ語: 行方不明のソーセージ */
-			L"sample:Segredo do Peixe",      /* ポルトガル語: 魚の秘密 */
-			L"sample:Verdwaalde Kaas",       /* オランダ語: 迷子のチーズ */
-			L"sample:Zjedzone przez Mole",   /* ポーランド語: 蛾に食べられた */
-			L"sample:Kayıp Terlik"));         /* トルコ語: 失踪したスリッパ */
+			L"sample:不明",
+			L"sample:Unknown",
+			L"sample:Inconnu",
+			L"sample:Sconosciuto",
+			L"sample:Desconocido",
+			L"sample:알 수 없음",
+			L"sample:未知",
+			L"sample:غير معروف",
+			L"sample:Неизвестно",
+			L"sample:Unbekannt",
+			L"sample:Desconhecido",
+			L"sample:Onbekend",
+			L"sample:Nieznany",
+			L"sample:Bilinmiyor"));
 		moji(s, 1, 48, 0x7fffff);
 		s.Format(LL14(
-			L"sample:不明",                   /* 日本語: 二度目も維持 */
-			L"sample:Whistling Ghost",       /* 英語: 口笛を吹く幽霊 */
-			L"sample:Oignon Mystère",        /* フランス語: 謎の玉ねぎ */
-			L"sample:Enigma del Gelato",     /* イタリア語: ジェラートの謎 */
-			L"sample:Sombra con Sombrero",   /* スペイン語: 帽子をかぶった影 */
-			L"sample:꿈속의 오징어",            /* 韓国語: 夢の中のイカ */
-			L"sample:找不到の炒飯",            /* 中国語: 見つからないチャーハン */
-			L"sample:لغز الباذنجان",         /* アラビア語: ナスの謎 */
-			L"sample:Шёпот водки",           /* ロシア語: ウォッカの囁き */
-			L"sample:Rätselhafte Brezel",    /* ドイツ語: 謎めいたプレッツェル */
-			L"sample:Fantasma de Bacalhau",  /* ポルトガル語: 干し鱈の幽霊 */
-			L"sample:Fluisterende Tulp",     /* オランダ語: 囁くチューリップ */
-			L"sample:Zagadka Pieroga",       /* ポーランド語: ピエロギの謎 */
-			L"sample:Sırrı Çözülmemiş Çay"));  /* トルコ語: 謎が解けない茶 */
+			L"sample:不明",
+			L"sample:Unknown",
+			L"sample:Inconnu",
+			L"sample:Sconosciuto",
+			L"sample:Desconocido",
+			L"sample:알 수 없음",
+			L"sample:未知",
+			L"sample:غير معروف",
+			L"sample:Неизвестно",
+			L"sample:Unbekannt",
+			L"sample:Desconhecido",
+			L"sample:Onbekend",
+			L"sample:Nieznany",
+			L"sample:Bilinmiyor"));
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -3) {
@@ -19738,20 +19741,20 @@ void COggDlg::OnBnClickedButton35()
 	ret += _chdir("bgm");
 	if (ret != 0) {
 		fnn = LL14(
-			L"ファイル又はフォルダがありません",      /* 日本語: 厳格に維持 */
-			L"Steak was eaten by the mouse",        /* 英語: ステーキはマウス（鼠）に食べられました */
-			L"Le vin s'est transformé en eau",     /* フランス語: ワインが水に変わってしまいました */
-			L"Pizza rapita dagli alieni",          /* イタリア語: ピザが宇宙人に誘拐されました */
-			L"Paella enterrada en la playa",       /* スペイン語: パエリアは砂浜に埋められました */
-			L"김밥이 투명해졌습니다",                /* 韓国語: キンパ（海苔巻き）が透明になりました */
-			L"餃子飛向了月球",                      /* 中国語: 餃子は月へ飛んでいきました */
-			L"الكباب غرق في القهوة",               /* アラビア語: ケバブがコーヒーに沈没しました */
-			L"Медведь съел жесткий диск",          /* ロシア語: クマがハードディスクを食べました */
-			L"Wurst ist im Weltraum verloren",     /* ドイツ語: ソーセージは宇宙迷子になりました */
-			L"Bacalhau viajou para o futuro",      /* ポルトガル語: 干し鱈は未来へ旅立ちました */
-			L"De kaas is gesmolten in de zon",      /* オランダ語: チーズは太陽で溶けました */
-			L"Pierogi wpadły do wulkanu",          /* ポーランド語: ピエロギが火山に落ちました */
-			L"Kebap bulutların üstünde");           /* トルコ語: ケバブは雲の上にあります */
+			L"ファイル又はフォルダがありません",
+			L"File or folder not found",
+			L"Fichier ou dossier introuvable",
+			L"File o cartella non trovati",
+			L"Archivo o carpeta no encontrados",
+			L"파일 또는 폴더가 없습니다",
+			L"找不到文件或文件夹",
+			L"الملف أو المجلد غير موجود",
+			L"Файл или папка не найдены",
+			L"Datei oder Ordner nicht gefunden",
+			L"Arquivo ou pasta não encontrados",
+			L"Bestand of map niet gevonden",
+			L"Nie znaleziono pliku ani folderu",
+			L"Dosya veya klasör bulunamadı");
 		return;
 	}
 	CGurumin* a = new CGurumin(CWnd::FromHandle(GetSafeHwnd()));
