@@ -2081,12 +2081,19 @@ void CAnalyzerDlg::OnPaint()
 
 			// 「メインに追従」をクロマバッファへ焼いてから1回だけ BlitFull。
 			// 画面 DC への content → overlay の2段合成はアクリルでちらつく。
-			// ScrollCols でロック矩形に波形が流れ込むので、焼付け直前に下地を戻す。
+			// ScrollCols で前フレームのロック表示が左へ流れるため、現在の矩形だけでなく
+			// ヘッダー行全幅を下地へ戻してから焼き直す。
 			{
 				CRect lockRc;
 				CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
 				if (!lockRc.IsRectEmpty() && m_chromaCache.hdcDib) {
-					CRect wavePart = lockRc;
+					CRect headerRow(0, lockRc.top, clientW, lockRc.bottom);
+					if (headerRow.top < 0)
+						headerRow.top = 0;
+					if (headerRow.bottom > clientH)
+						headerRow.bottom = clientH;
+
+					CRect wavePart = headerRow;
 					if (wavePart.bottom > split)
 						wavePart.bottom = split;
 					if (wavePart.top < wavePart.bottom && m_waveReady && m_waveDC.GetSafeHdc()) {
@@ -2094,7 +2101,7 @@ void CAnalyzerDlg::OnPaint()
 							wavePart.left, wavePart.top, wavePart.left, wavePart.top,
 							wavePart.Width(), wavePart.Height(), key);
 					}
-					CRect specPart = lockRc;
+					CRect specPart = headerRow;
 					if (specPart.top < split)
 						specPart.top = split;
 					if (specPart.top < specPart.bottom && m_specReady && m_specDC.GetSafeHdc()) {

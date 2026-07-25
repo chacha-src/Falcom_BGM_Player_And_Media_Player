@@ -3676,33 +3676,30 @@ void CPianoRoll::BakeMainFollowOverlayIntoChroma(int w, int h, int rollH, int ke
     if (!m_chromaCache.hdcDib || !m_chromaReady)
         return;
 
-    // ScrollRows でロック矩形にロール内容が流れ込むので、焼付け直前に下地を戻す。
+    // ScrollRows で前フレームのロック表示が上へ流れるため、現在の矩形だけでなく
+    // ヘッダー行全幅を下地へ戻してから焼き直す（アナライザと同方針）。
     CRect lockRc;
     CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
     if (!lockRc.IsRectEmpty()) {
-        CRect rollPart = lockRc;
+        CRect headerRow(0, lockRc.top, w, lockRc.bottom);
+        if (headerRow.top < 0)
+            headerRow.top = 0;
+        if (headerRow.bottom > h)
+            headerRow.bottom = h;
+
+        CRect rollPart = headerRow;
         if (rollPart.bottom > rollH)
             rollPart.bottom = rollH;
-        if (rollPart.top < 0)
-            rollPart.top = 0;
-        if (rollPart.left < 0)
-            rollPart.left = 0;
-        if (rollPart.right > w)
-            rollPart.right = w;
         if (rollPart.top < rollPart.bottom && m_rollReady && m_rollDC.GetSafeHdc()) {
             m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(),
                 rollPart.left, rollPart.top, rollPart.left, rollPart.top,
                 rollPart.Width(), rollPart.Height(), PIANO_CHROMA_KEY);
         }
-        CRect keyPart = lockRc;
+        CRect keyPart = headerRow;
         if (keyPart.top < rollH)
             keyPart.top = rollH;
         if (keyPart.bottom > rollH + keySectionH)
             keyPart.bottom = rollH + keySectionH;
-        if (keyPart.left < 0)
-            keyPart.left = 0;
-        if (keyPart.right > w)
-            keyPart.right = w;
         if (keyPart.top < keyPart.bottom && m_keyBufReady && m_keyDC.GetSafeHdc()) {
             m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(),
                 keyPart.left, keyPart.top - rollH, keyPart.left, keyPart.top,
@@ -3955,6 +3952,31 @@ void CPianoRoll::OnPaint()
                     && m_lastScrollPx < rollH) {
                     // スクロール時: キャッシュDIBを memmove で繰り上げ、
                     // 変化帯のみ再変換。scrollPx>=rollH のときは下の else で全域更新。
+                    // 凡例／「メインに追従」を焼いたまま ScrollRows すると上へ流れて残像になる。
+                    // 追従行と凡例は一部重なるため、追従行を先、凡例下地を最後に戻す。
+                    // 逆順だと全幅復元が m_rollDC 内の凡例を再び焼き、上へ流してしまう。
+                    {
+                        CRect lockRc;
+                        CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
+                        if (!lockRc.IsRectEmpty() && m_rollDC.GetSafeHdc()) {
+                            CRect headerRow(0, lockRc.top, w, lockRc.bottom);
+                            if (headerRow.top < 0)
+                                headerRow.top = 0;
+                            if (headerRow.bottom > rollH)
+                                headerRow.bottom = rollH;
+                            if (headerRow.top < headerRow.bottom) {
+                                m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(),
+                                    headerRow.left, headerRow.top, headerRow.left, headerRow.top,
+                                    headerRow.Width(), headerRow.Height(), PIANO_CHROMA_KEY);
+                            }
+                        }
+                    }
+                    if (legendBaked && m_legendBgDC.GetSafeHdc()
+                        && lgPanel.Width() > 0 && lgPanel.Height() > 0) {
+                        m_chromaCache.UpdateRect(m_legendBgDC.GetSafeHdc(),
+                            0, 0, lgPanel.left, lgPanel.top,
+                            lgPanel.Width(), lgPanel.Height(), PIANO_CHROMA_KEY);
+                    }
                     m_chromaCache.ScrollRows(0, rollH, m_lastScrollPx);
                     int bandTop = m_lastScrollHealTop;
                     if (bandTop <= 0) {
