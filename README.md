@@ -1,4 +1,4 @@
-chachakotorinのgithubから移転です。
+﻿chachakotorinのgithubから移転です。
 
 # oggYSEDbgm メディアプレイヤー「らいら」
 日本ファルコム (Nihon Falcom) BGMプレイヤー / 高機能メディアプレイヤー
@@ -54,6 +54,7 @@ Ozone風のリアルタイムアナライザーを追加しました。
 
 ### ジャケット・プレイリスト
 アルバムジャケットの表示と、m3u対応のプレイリスト機能があります。曲ごとの音量やEQなどの設定も覚えます。
+「曲ごとに設定保存」のチェックを入れると、★付きの曲は保存済みパラメータを読み直して反映します。チェックを外すときは、その時点の設定をその曲へ保存してから無効化します。
 
 ### アクリル（ぼかし）UI
 Windows 11のアクリル風ぼかし表示に対応しています。
@@ -66,6 +67,16 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 
 ### 再生詳細
 ギャップレス、ReplayGain、Mid/Side、相関メーター、書き出しリミッター、ループ区間、キュー、タグ書き込みなどをまとめた設定です。メディアプレイヤー画面の「詳細」ボタン、またはプレイリストの右クリックから開けます。
+タグ書き込みは **MP3 / FLAC / WAV / M4A / Ogg Vorbis** に対応しています（暗号化FLACやOpus書き込みは非対応）。
+
+### ファイル情報
+プレイリストやメディアプレイヤーの右クリック「ファイル情報」から、曲の表示名・アーティスト・アルバム・パス、タグ、ループなどを確認・編集できます。
+
+- タグ→プレイリスト反映、タグ再読込、タグ書き込み（上記フォーマット）
+- パス参照／Explorerで選択表示／パスコピー／ファイル名コピー
+- ファイルの有無・拡張子・サイズ表示、曲ごと設定（★）の表示と削除
+- 再生詳細へのジャンプ、ループの編集（OKでプレイリストへ保存）
+- 複数選択時はアーティスト／アルバムの一括編集
 
 ### mp3 / FLAC 書き出し
 プレイリストの右クリックから、選択曲を mp3 または FLAC に書き出せます。いったん WAV と同じ経路でレンダリングしたあと変換します。ビットレート（mp3）や圧縮レベル（FLAC）、ループ回数、フェードアウト、先頭無音カットを指定できます。
@@ -126,6 +137,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 - DSD (dsf, dff)
 - OggOpus (48k)
 - Kb Media Playerの旧kpiプラグインと新kpiの一部に対応 (Pluginsフォルダに入れて使用。64bit版はKpiHost64経由)
+  - kpi一覧では拡張子テキストで絞り込みできます（入力すると即座に反映。チェック状態は曲単位で保持）
 
 ### 3. 動画再生 (DirectShow)
 avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以降ではEVRを使用し、高画質で再生します。映像・音声・字幕ストリームの切り替えにも対応しています。
@@ -157,6 +169,9 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 - メディアプレイヤー側の最小化連動やツールチップ表示など
 - メイン画面を動かすと関連ウィンドウが追随
 - リンク切れファイルの一括削除
+- 曲ごと設定のON/OFF時の復元・保存、ファイル情報画面のタグ／パス／★操作
+- タグ書き込み（MP3 / FLAC / WAV / M4A / Ogg Vorbis）
+- kpi一覧の拡張子絞り込み
 
 ## 注意事項
 - **Brandish4 および ガガーブトリロジー**については、WAVファイルをHDDへコピーする必要があります（フォルダ名は `WAVE`, `WAVEDV`, `WAVEDVD` などゲームにより異なります）。
@@ -227,6 +242,7 @@ Supports .lrc lyrics display, including optional online lyric lookup.
 
 ### Jacket Art & Playlist
 Album jacket display and m3u playlists are supported. Per-track settings such as volume and EQ are remembered.
+Turning **Save per-song** on reloads and applies saved parameters for tracks marked with ★. Turning it off saves the current settings for that track before disabling the feature.
 
 ### Acrylic (Blur) UI
 Supports Windows 11 acrylic-style blur for the interface.
@@ -238,7 +254,17 @@ Supports sample-rate / bit-depth upscaling and multi-channel output.
 A timed prompt feature can change pitch, tempo, effects, and more during playback.
 
 ### Playback Details
-Gapless playback, ReplayGain, Mid/Side, correlation meter, export limiter, loop points, cues, and tag writing are grouped in one window. Open it from the media player **Extra** button or the playlist context menu. 
+Gapless playback, ReplayGain, Mid/Side, correlation meter, export limiter, loop points, cues, and tag writing are grouped in one window. Open it from the media player **Extra** button or the playlist context menu.
+Tag writing supports **MP3 / FLAC / WAV / M4A / Ogg Vorbis** (encrypted FLAC and Opus writing are not supported).
+
+### File Info
+From the playlist or media-player context menu (**File Info**), you can view and edit display name, artist, album, path, tags, loops, and more.
+
+- Apply tags → playlist fields, reload tags, write tags (formats above)
+- Browse path / select in Explorer / copy path / copy file name
+- Missing-file / extension / size status, and per-song settings (★) summary with clear
+- Jump to Playback Details; edit loop points (saved to the playlist on OK)
+- With multiple tracks selected, batch-edit artist / album
 
 ### mp3 / FLAC Export
 From the playlist context menu, selected tracks can be written as mp3 or FLAC. Audio is rendered through the same path as WAV export, then encoded. You can set mp3 bitrate or FLAC compression level, loop count, fade-out, and leading-silence trim.
@@ -298,6 +324,7 @@ Supports the following formats:
 - DSD (dsf, dff)
 - OggOpus (48k)
 - Legacy and modern **kpi plugins** (Kb Media Player) are supported (place in the `Plugins` folder; the 64-bit build uses KpiHost64).
+  - The kpi list can be filtered by extension text (updates as you type; checkbox state is kept per plugin)
 
 ### 3. Video Playback (DirectShow)
 Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and later, it utilizes **EVR (Enhanced Video Renderer)** for high-quality output. Video, audio, and subtitle stream switching is also supported.
@@ -329,6 +356,9 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 - Media-player extras such as minimize sync and tooltips
 - Related windows follow when the main window is moved
 - Batch removal of broken-link files
+- Per-song settings restore/save on feature toggle; File Info tag / path / ★ tools
+- Tag writing (MP3 / FLAC / WAV / M4A / Ogg Vorbis)
+- kpi list extension filter
 
 ## Important Notes
 - **For Brandish 4 and the Gagharv Trilogy:** WAV files must be copied to your HDD (Folder names like `WAVE`, `WAVEDV`, or `WAVEDVD` vary by game).
