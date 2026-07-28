@@ -159,6 +159,7 @@ static bool     s_baselineValid = false;
 static bool     s_songReady = false;   // OnSongStarted 後のみ保存・復元ポーリングを有効化
 static bool     s_restorePending = false; // PostMessage 復元待ち(その間は baseline を取らない)
 static SongParam s_lastSaved;    // 直近に保存/復元したパラメータ(変更検知の基準)
+static int      s_featLatch = -1; // savedata.saveSongParams の前回値(チェックON/OFF遷移検出用)
 
 // ============================================================================
 // 小物
@@ -320,12 +321,14 @@ void SongParams_LoadFile()
 	g_prim.clear();
 	CString ss = karento2; ss += SONGPARAM_DAT_NAME;
 	CFile f;
-	if (f.Open(ss, CFile::modeRead | CFile::shareDenyWrite, NULL) != TRUE)
+	if (f.Open(ss, CFile::modeRead | CFile::shareDenyWrite, NULL) != TRUE) {
+		s_featLatch = savedata.saveSongParams ? 1 : 0;
 		return;
+	}
 	try {
 		int ver = 0, cnt = 0;
-		if (f.Read(&ver, sizeof(int)) != sizeof(int)) { f.Close(); return; }
-		if (f.Read(&cnt, sizeof(int)) != sizeof(int)) { f.Close(); return; }
+		if (f.Read(&ver, sizeof(int)) != sizeof(int)) { f.Close(); s_featLatch = savedata.saveSongParams ? 1 : 0; return; }
+		if (f.Read(&cnt, sizeof(int)) != sizeof(int)) { f.Close(); s_featLatch = savedata.saveSongParams ? 1 : 0; return; }
 		if (cnt < 0) cnt = 0;
 		if (cnt > 100000) cnt = 100000;
 		g_tbl.reserve((size_t)cnt);
@@ -353,6 +356,7 @@ void SongParams_LoadFile()
 	f.Close();
 	SpRebuildIndexLocked();
 	g_dirty = false;
+	s_featLatch = savedata.saveSongParams ? 1 : 0;
 }
 
 void SongParams_SaveFile()
@@ -1010,6 +1014,70 @@ void SongParams_OnSongStopped()
 // ============================================================================
 void SongParams_Sync(bool exporting)
 {
+	const bool feature = (savedata.saveSongParams != 0);
+	const int featNow = feature ? 1 : 0;
+	if (s_featLatch < 0)
+		s_featLatch = featNow;
+
+	// チェックON/OFFは停止中でも即反映(IsStopping より先)。新規関数は作らずここで処理。
+	if (!exporting && s_featLatch != featNow) {
+		CString list, path;
+		int md = 0, r2 = 0;
+		if (s_songReady && !s_curPath.IsEmpty()) {
+			list = s_curList;
+			path = s_curPath;
+			md = s_curMode;
+			r2 = s_curRet2;
+		}
+		else {
+			ResolvePlayingKey(list, path, md, r2);
+		}
+		const bool promptOn = (MpPromptIsActive() != FALSE);
+
+		if (featNow && !path.IsEmpty()) {
+			// OFF→ON: ★付きなら保存値を読んで反映。無ければ現行値でシード(OnSongStarted と同趣旨)
+			s_curList = list;
+			s_curPath = path;
+			s_curMode = md;
+			s_curRet2 = r2;
+			SongParam e;
+			if (SongParams_FindCopy(list, path, md, r2, e)) {
+				if (SongParams_IsMainThread()) {
+					SongParams_ApplyEntryToMain(e);
+					SongParams_NoteRestored(e);
+				}
+				else if (og && ::IsWindow(og->GetSafeHwnd())) {
+					s_restorePending = true;
+					og->PostMessage(WM_APP_SONGPARAM_RESTORE, 0, (LPARAM)new SongParam(e));
+				}
+			}
+			else if (!promptOn) {
+				SnapshotCurrent(s_lastSaved);
+				if (Upsert(list, path, md, r2, s_lastSaved))
+					SongParams_NotifyListMarksChanged();
+				MarkDirtyAndMaybeWrite();
+				FlushIfDirty();
+				s_baselineValid = true;
+			}
+			else {
+				s_baselineValid = false;
+			}
+		}
+		else if (!featNow && s_featLatch) {
+			// ON→OFF: 現行の音量/EQ等をその曲のエントリへ保存してから無効化
+			if (!path.IsEmpty() && !promptOn) {
+				SnapshotCurrent(s_lastSaved);
+				if (Upsert(list, path, md, r2, s_lastSaved))
+					SongParams_NotifyListMarksChanged();
+				MarkDirtyAndMaybeWrite();
+				FlushIfDirty();
+			}
+			s_baselineValid = false;
+			s_restorePending = false;
+		}
+		s_featLatch = featNow;
+	}
+
 	// 停止中/停止要求中は何もしない(Join 待ちメイン ↔ Sync のデッドロック防止)
 	if (!exporting && SongParams_IsStopping())
 		return;
@@ -1023,7 +1091,6 @@ void SongParams_Sync(bool exporting)
 	ResolvePlayingKey(list, path, md, r2);
 	if (path.IsEmpty()) return;
 
-	const bool feature = (savedata.saveSongParams != 0);
 	const bool promptOn = (MpPromptIsActive() != FALSE);
 
 	if (exporting) {
@@ -1089,8 +1156,23 @@ void SongParams_Sync(bool exporting)
 	if (s_restorePending) return;
 
 	if (!s_baselineValid) {
-		SnapshotCurrent(s_lastSaved);
-		s_baselineValid = true;
+		// 有効化直後などで baseline 未確定: エントリがあれば復元、無ければ現行値を基準に
+		SongParam e;
+		if (SongParams_FindCopy(s_curList, s_curPath, s_curMode, s_curRet2, e)) {
+			if (SongParams_IsMainThread()) {
+				SongParams_ApplyEntryToMain(e);
+				s_lastSaved = e;
+				s_baselineValid = true;
+			}
+			else if (og && ::IsWindow(og->GetSafeHwnd())) {
+				s_restorePending = true;
+				og->PostMessage(WM_APP_SONGPARAM_RESTORE, 0, (LPARAM)new SongParam(e));
+			}
+		}
+		else {
+			SnapshotCurrent(s_lastSaved);
+			s_baselineValid = true;
+		}
 		return;
 	}
 

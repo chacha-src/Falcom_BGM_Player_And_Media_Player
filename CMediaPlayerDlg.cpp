@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -3589,6 +3589,8 @@ void CMediaPlayerDlg::OnSaveParam()
 	savedata.saveSongParams = m_saveparam.GetCheck() ? 1 : 0;
 	// チェック状態はすぐ .dat へ(再起動でフラグが消えるとツールチップも出ない)
 	MpPersistSavedataQuick();
+	// ON: ★付きなら保存パラメータを読んで反映 / OFF: 現行値をその曲へ保存反映
+	SongParams_Sync(false);
 }
 
 void CMediaPlayerDlg::OnResetData()
