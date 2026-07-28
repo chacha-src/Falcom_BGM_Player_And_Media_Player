@@ -198,13 +198,11 @@ int readadpcmzwei(CFile& adpcmf, char* bw, int len);
 int readadpcmgurumin(CFile& adpcmf, char* bw, int len);
 int readadpcmarc(CFile& adpcmf, char* bw, int len);
 int seekadpcm(int pos);
-// adbuf2 全量読み込み形式(mode 10-21, -6, 30, -11〜 等)は seekadpcm。OGG/KPI 等と混同しないこと。
-static inline bool ModeUsesSeekAdpcm(int m)
-{
-	return ((m >= 10 && m <= 21) || m <= -10 || m == 999 || m == -6 || m == 30);
-}
 static BOOL decode_msadpcm_wav(CFile& f, const wavinfo& wi, char** outBuf, int* outSize);
 BOOL wavwait, thend;
+// CWread 世代。stop/再起動で進め、孤児が loop1/2・adbuf2・wavwait を汚さない。
+static volatile LONG g_cwreadEpoch = 0;
+static volatile LONG g_cwreadWorkerEpoch = 0;
 int wavchannel = 2;
 // MP3 デコード出力のビット深度（mp3_.m_dwBitsPerSample と一致させる。wavsam_depth との不一致で playb が 16/24=1.5 倍ずれるのを防ぐ）
 int g_mp3_decoder_bps = 16;
@@ -257,7 +255,15 @@ BEGIN_MESSAGE_MAP(CWread, CWinThread)
 	ON_THREAD_MESSAGE(WM_APP + 100, wavread1)
 END_MESSAGE_MAP()
 void CWread::wavread1(WPARAM a, LPARAM b) {
-	wavread(); thend = 1; wavwait = 1; AfxEndThread(0); return;
+	const LONG myEpoch = InterlockedCompareExchange(&g_cwreadWorkerEpoch, 0, 0);
+	wavread();
+	// 孤児は完了シグナルを出さない（新 CWread の wavwait 待ちを誤って解除しない）
+	if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) == myEpoch) {
+		thend = 1;
+		wavwait = 1;
+	}
+	AfxEndThread(0);
+	return;
 }
 
 #define ID_HOTKEY0 8000
@@ -6956,101 +6962,6 @@ CString GetLrcFromAPI(const CString& trackName, const CString& albumName,
 
 extern BOOL reset;
 
-static bool IsFalcomGameBgmMode(int m)
-{
-	return (m >= 1 && m <= 21) || m == 30 ||
-		m == -11 || m == -12 || m == -13 || m == -14 || m == -15;
-}
-
-static CString StripToBasename(const CString& path)
-{
-	CString s = path;
-	int slash = s.ReverseFind(_T('\\'));
-	if (slash >= 0)
-		s = s.Mid(slash + 1);
-	slash = s.ReverseFind(_T('/'));
-	if (slash >= 0)
-		s = s.Mid(slash + 1);
-	return s;
-}
-
-// mode 30: 旧プレイリストは basename のみ。直近成功ディレクトリと他行のフルパスから .pac を探す。
-static CString s_mode30LastPacDir;
-
-static void RememberMode30PacDir(const CString& pacPath)
-{
-	const int slash = pacPath.ReverseFind(_T('\\'));
-	if (slash >= 0)
-		s_mode30LastPacDir = pacPath.Left(slash);
-}
-
-void RememberMode30PacPath(LPCTSTR pacOrFol)
-{
-	if (!pacOrFol || !*pacOrFol)
-		return;
-	const CString phys = PlPhysicalMediaPath(pacOrFol);
-	if (!phys.IsEmpty() && (phys.Find(_T('\\')) >= 0 || phys.Find(_T('/')) >= 0))
-		RememberMode30PacDir(phys);
-}
-
-static CString ResolveMode30PacPath(const CString& pacPath)
-{
-	if (!pacPath.IsEmpty() && PathFileExists(pacPath)) {
-		RememberMode30PacDir(pacPath);
-		return pacPath;
-	}
-
-	CString base = StripToBasename(pacPath);
-	if (base.IsEmpty())
-		return pacPath;
-
-	if (!s_mode30LastPacDir.IsEmpty()) {
-		const CString cand = s_mode30LastPacDir + _T("\\") + base;
-		if (PathFileExists(cand))
-			return cand;
-	}
-
-	if (pl && pl->pc) {
-		for (int i = 0; i < pl->playcnt; ++i) {
-			if (pl->pc[i].sub != 30 || !pl->pc[i].fol[0])
-				continue;
-			const CString phys = PlPhysicalMediaPath(pl->pc[i].fol);
-			if (phys.IsEmpty())
-				continue;
-			if (StripToBasename(phys).CompareNoCase(base) != 0)
-				continue;
-			if (PathFileExists(phys)) {
-				RememberMode30PacDir(phys);
-				return phys;
-			}
-		}
-	}
-	return pacPath;
-}
-
-static CString NormalizeZweiPlaybackFol(const CString& fol, int listIndex)
-{
-	CString s = fol;
-	const int slash = s.ReverseFind(_T('\\'));
-	if (slash >= 0)
-		s = s.Mid(slash + 1);
-	if (s.Find(L"(wav.dat)") >= 0)
-		return s;
-	if (listIndex >= 0 && listIndex < 36) {
-		const CString fixed = ZweiFolFromIndex(listIndex);
-		if (!fixed.IsEmpty())
-			return fixed;
-	}
-	if (s.GetLength() >= 5 && s.Left(3).CompareNoCase(_T("bgm")) == 0) {
-		CString id = s.Left(5);
-		id.TrimRight();
-		CString out;
-		out.Format(_T("%s(wav.dat)"), (LPCTSTR)id);
-		return out;
-	}
-	return fol;
-}
-
 void COggDlg::play()
 {
 	// stop1/play 実行中の DoEvent 再入で形式切替が重なるとデコーダ UAF になる
@@ -7197,13 +7108,41 @@ void COggDlg::play()
 	// stop1 は先頭で済み。CWread 用に停止フラグは下ろしておく。
 	stf = 0;
 	thn1 = FALSE;
-	if (mode == 14)
-		filen = NormalizeZweiPlaybackFol(filen, ret2);
+	if (mode == 14) {
+		// Zwei: フルパスや旧名を bgmXX(wav.dat) に揃える
+		CString s = filen;
+		int slash = s.ReverseFind(_T('\\'));
+		if (slash >= 0)
+			s = s.Mid(slash + 1);
+		if (s.Find(L"(wav.dat)") >= 0)
+			filen = s;
+		else if (ret2 >= 0 && ret2 < 36) {
+			CString fixed = ZweiFolFromIndex(ret2);
+			if (!fixed.IsEmpty())
+				filen = fixed;
+			else if (s.GetLength() >= 5 && s.Left(3).CompareNoCase(_T("bgm")) == 0) {
+				CString id = s.Left(5);
+				id.TrimRight();
+				filen.Format(_T("%s(wav.dat)"), (LPCTSTR)id);
+			}
+		}
+		else if (s.GetLength() >= 5 && s.Left(3).CompareNoCase(_T("bgm")) == 0) {
+			CString id = s.Left(5);
+			id.TrimRight();
+			filen.Format(_T("%s(wav.dat)"), (LPCTSTR)id);
+		}
+	}
 	// プレイリストにフルパスが入っていても chdir 先ではファイル名のみ参照する
 	// （例: mode16 の wavread は filen.Left(8) で dinow_XX と照合）
 	// mode 30 は chdir 無しで .pac をフルパス Open するため basename 化しない。
-	if (IsFalcomGameBgmMode(mode) && mode != 30)
-		filen = StripToBasename(filen);
+	if (((mode >= 1 && mode <= 21) || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15) && mode != 30) {
+		int slash = filen.ReverseFind(_T('\\'));
+		if (slash >= 0)
+			filen = filen.Mid(slash + 1);
+		slash = filen.ReverseFind(_T('/'));
+		if (slash >= 0)
+			filen = filen.Mid(slash + 1);
+	}
 
 	CWaitCursor rrr1;
 	wavwait = 0; thend = 1; stitle = "";
@@ -7749,7 +7688,12 @@ void COggDlg::play()
 	if (((mode >= 10 && mode <= 21) || mode <= -10) && mode != -10 || mode == -6 || mode == 30) {
 		thend1 = FALSE;
 		wavwait = 0;
-		if (mode == 30) wavbit_sample_Hz = 48000;
+		if (mode == 30) {
+			wavbit_sample_Hz = 48000;
+			// 旧PLの誤ループ値が CWread 失敗時に残らないよう一旦クリア（smpl で上書き）
+			loop1 = 0;
+			loop2 = 0;
+		}
 		thend = 0;
 		// 初期 DispatchPlaywavFill は BeginPlaybackNotifyThread より前。
 		// g_openDecoderMode が INT_MIN のままだと ActiveDecodeMode が空振りして無音になる。
@@ -7760,6 +7704,9 @@ void COggDlg::play()
 		//CRuntimeClass *pRuntime = RUNTIME_CLASS(CWread);
 		CWread* g_pThread;// = (CWread*)pRuntime->CreateObject();
 		//g_pThread->CreateThread(0, 0, NULL);
+		// 新世代を発行してから起動（孤児と完了シグナルが衝突しない）
+		const LONG newEpoch = InterlockedIncrement(&g_cwreadEpoch);
+		InterlockedExchange(&g_cwreadWorkerEpoch, newEpoch);
 		g_pThread = (CWread*)AfxBeginThread(RUNTIME_CLASS(CWread), THREAD_PRIORITY_ABOVE_NORMAL, NULL, 0, NULL);
 		if (g_pThread) {
 			::SetPriorityClass(g_pThread, HIGH_PRIORITY_CLASS);
@@ -7855,15 +7802,29 @@ void COggDlg::play()
 	if (mode == 30) {
 		const DWORD wavWaitT0 = GetTickCount();
 		for (; wavwait == 0;) {
+			DoEvent();
 			Sleep(10);
 			if (GetTickCount() - wavWaitT0 >= 60000u)
 				break;
 		}
-		if (adbuf2 == NULL) {
-			thend1 = TRUE;
-			endflg = 0;
-			playf = 0;
-			return;
+		// CWread の loop/adbuf 書き込みと同期（wavwait だけ見ると loop がまだ 0 のことがある）
+		{
+			std::lock_guard<std::mutex> lk(cl2);
+			if (adbuf2 == NULL) {
+				thend1 = TRUE;
+				endflg = 0;
+				playf = 0;
+				return;
+			}
+			if (loop1 != 0 || loop2 != 0) {
+				const int ts = (data_size > 0) ? (data_size / 4) : ((oggsize > 0) ? (oggsize / 4) : 0);
+				const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
+				if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
+					|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
+					loop1 = 0;
+					loop2 = 0;
+				}
+			}
 		}
 	}
 	//ファイル保存用（wavExport時はcc1を後で設定するためここではリセットしない）
@@ -8311,7 +8272,7 @@ void COggDlg::play()
 			// wavwait はデコード用ワーカースレッド(CWread)が立てる。
 			const DWORD wavWaitT0 = GetTickCount();
 			DWORD wavWaitLimitMs = g_interactiveTrackChange ? 2500u : 8000u;
-			if (IsFalcomGameBgmMode(mode) && wavWaitLimitMs < 30000u)
+			if (((mode >= 1 && mode <= 21) || mode == 30 || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15) && wavWaitLimitMs < 30000u)
 				wavWaitLimitMs = 30000u;
 			for (; wavwait == 0;) {
 				CWaitCursor rrr2;
@@ -10027,12 +9988,21 @@ void COggDlg::play()
 		WriteWavStreamHeaderRF64(cc);
 		endflg = 0;
 		SetTimer(9000, 10, NULL);
-		endf = 0;
-		if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
-		if (loop2 == 0) endf = 1;
-		if (mode == -3 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
-		loopcnt = 0;
-		HandleNotifications_export();
+	endf = 0;
+	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
+	if (loop2 == 0) endf = 1;
+	// mode 30: 曲長外 / loop1==loop2 は画面に出さず破棄（CWread 代入漏れ・孤児上書きの最終防衛）
+	if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
+		const int ts = (data_size > 0) ? (data_size / 4) : ((oggsize > 0) ? (oggsize / 4) : 0);
+		const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
+		if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
+			|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
+			loop1 = 0; loop2 = 0; endf = 1;
+		}
+	}
+	if (mode == -3 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
+	loopcnt = 0;
+	HandleNotifications_export();
 		// WAV出力時はm_douに関係なくccを閉じる（2回目以降のエクスポートでcc.Openが成功するため）
 		if (cc1 == 1) {
 			// ファイル実長から64bitでサイズ確定。2GB超なら自動的にRF64へ書き換える。
@@ -10795,6 +10765,14 @@ void COggDlg::play()
 	endf = 0;
 	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
 	if (loop2 == 0) endf = 1;
+	if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
+		const int ts = (data_size > 0) ? (data_size / 4) : ((oggsize > 0) ? (oggsize / 4) : 0);
+		const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
+		if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
+			|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
+			loop1 = 0; loop2 = 0; endf = 1;
+		}
+	}
 	if (mode == -3 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
 	loopcnt = 0;
 	if (pl && plw) {
@@ -12267,9 +12245,10 @@ void CWread::wavread()
 		adpcmf.Close();
 	}
 	else if (mode == 30) {
+		// 空の軌跡 The 1st: .pac 内 WAV + smpl。処理はここに直書き（ヘルパー増やさない）
 		CWaitCursor aaaa;
+		const LONG myEpoch = InterlockedCompareExchange(&g_cwreadWorkerEpoch, 0, 0);
 		CFile adpcmf;
-		char aaa[9];
 		struct a {
 			int jump;
 			int d4;
@@ -12280,120 +12259,323 @@ void CWread::wavread()
 			int seekpoint;
 			int d3;
 		};
-		a aa;
-		a aa1;
-		a aa2;
-		int st, cnt;
+		a aa = {};
+		a bestAa = {};
+		int cnt = 0;
 		int fii = filen.Find(L":", 6);
 		CString fn = filen;
-		if (fii != -1) {
+		if (fii != -1)
 			fn = filen.Left(fii);
+		// 旧PLで basename だけのとき: 直近成功 dir / 他行のフルパスから .pac を探す
+		static CString lastPacDir;
+		if (!fn.IsEmpty() && PathFileExists(fn)) {
+			int slash = fn.ReverseFind(_T('\\'));
+			if (slash >= 0)
+				lastPacDir = fn.Left(slash);
 		}
-		// basename だけの旧プレイリスト向け。照合は 5e7628b の filen.Find(s21)>0 のまま
-		fn = ResolveMode30PacPath(fn);
+		else {
+			CString base = fn;
+			int slash = base.ReverseFind(_T('\\'));
+			if (slash >= 0) base = base.Mid(slash + 1);
+			slash = base.ReverseFind(_T('/'));
+			if (slash >= 0) base = base.Mid(slash + 1);
+			if (!base.IsEmpty() && !lastPacDir.IsEmpty()) {
+				CString cand = lastPacDir + _T("\\") + base;
+				if (PathFileExists(cand))
+					fn = cand;
+			}
+			if (!base.IsEmpty() && !PathFileExists(fn) && pl && pl->pc) {
+				for (int i = 0; i < pl->playcnt; ++i) {
+					if (pl->pc[i].sub != 30 || !pl->pc[i].fol[0])
+						continue;
+					CString phys = PlPhysicalMediaPath(pl->pc[i].fol);
+					if (phys.IsEmpty())
+						continue;
+					CString pb = phys;
+					slash = pb.ReverseFind(_T('\\'));
+					if (slash >= 0) pb = pb.Mid(slash + 1);
+					slash = pb.ReverseFind(_T('/'));
+					if (slash >= 0) pb = pb.Mid(slash + 1);
+					if (pb.CompareNoCase(base) != 0)
+						continue;
+					if (PathFileExists(phys)) {
+						fn = phys;
+						break;
+					}
+				}
+			}
+		}
+		if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) != myEpoch || thend1 == TRUE)
+			return;
 		adpcmf.Open(fn, CFile::modeRead | CFile::typeBinary | CFile::shareDenyWrite, NULL);
 		if (adpcmf.m_hFile == CFile::hFileNull) {
-			thend = 1;
-			wavwait = 1;
+			if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) == myEpoch) { thend = 1; wavwait = 1; }
 			return;
+		}
+		{
+			int slash = fn.ReverseFind(_T('\\'));
+			if (slash >= 0)
+				lastPacDir = fn.Left(slash);
+		}
+
+		// "::" 以降を ID+曲名として最長前方一致。無ければ basename（旧PL）
+		CString idRest;
+		{
+			const int sep = filen.Find(L"::");
+			if (sep >= 0)
+				idRest = filen.Mid(sep + 2);
+			else {
+				idRest = filen;
+				int slash = idRest.ReverseFind(_T('\\'));
+				if (slash >= 0) idRest = idRest.Mid(slash + 1);
+				slash = idRest.ReverseFind(_T('/'));
+				if (slash >= 0) idRest = idRest.Mid(slash + 1);
+				const int dot = idRest.ReverseFind(_T('.'));
+				if (dot > 0)
+					idRest = idRest.Left(dot);
+			}
 		}
 
 		char moj[300];
 		adpcmf.Seek(16, CFile::begin);
-		int k = 0, kk = 0;
-		int ffff = 0;
-		for (int i = 0;; i++) {
+		int found = 0, bestIdLen = -1;
+		for (;;) {
+			if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) != myEpoch || thend1 == TRUE) {
+				adpcmf.Close();
+				return;
+			}
 			ULONGLONG pos;
-			adpcmf.Read(&aa, 32);
-			pos = adpcmf.GetPosition();
-			adpcmf.Seek(aa.moji, 0);
-			adpcmf.Read(moj, 256);
-			CStringA a = moj;
-			if (ffff) break;
-			CStringA s = bbuf;
-
-			//10文字目から、ed6001.wav と入っているので、001だけ抜き出す
-			// Mid(12,4)+'.'除去で 100 / 108b / 501e。Find(s21) が独自照合
-			CStringA s1 = moj, s11 = moj;
-			s1 = s1.Mid(12, 3);
-			s11 = s11.Mid(12, 4); s11.Replace(".", "");
-			CString s2 = CString(s1);
-			CString s21 = CString(s11);
-			if (filen.Find(s21) > 0) {
-				ffff = 1;
+			if (adpcmf.Read(&aa, 32) != 32)
 				break;
+			pos = adpcmf.GetPosition();
+			if (aa.moji < 0)
+				break;
+			adpcmf.Seek(aa.moji, CFile::begin);
+			ZeroMemory(moj, sizeof(moj));
+			adpcmf.Read(moj, 256);
+			// Mid(12,4)+'.'除去 → 100 / 108b / 501e
+			CStringA s11 = moj;
+			s11 = s11.Mid(12, 4);
+			s11.Replace(".", "");
+			CString entryId = CString(s11);
+			int idLen = entryId.GetLength();
+			int match = 0;
+			if (idLen > 0 && idRest.GetLength() >= idLen && idRest.Left(idLen).CompareNoCase(entryId) == 0) {
+				// タイトルが数字始まりのとき "100"+"1.." → "1001" 誤爆を防ぐ。
+				// ID直後が 0-9 なら、より長い ID 候補だけが正当（最長一致で拾う）。
+				TCHAR next = (idRest.GetLength() > idLen) ? idRest[idLen] : 0;
+				if (next == 0 || next < _T('0') || next > _T('9') || idLen >= 4)
+					match = 1;
 			}
-			k++;
-			kk++;
-			adpcmf.Seek(pos, 0);
-		}
-
-		CString sss, sss1;
-		char* bbuf = (char*)malloc(0x1000); //多めに確保
-		// RIFF dataのところを取りたいので多めの0x80分読む
-		adpcmf.SeekToBegin();
-		adpcmf.Seek(aa.seekpoint, 1);
-		adpcmf.Read(bbuf, 0x80);
-		for (st = 0;; st++)
-			if (bbuf[st] == 'd' && bbuf[st + 1] == 'a' && bbuf[st + 2] == 't' && bbuf[st + 3] == 'a') { st += 4; break; }
-		cnt = (int)(BYTE)bbuf[st] + (int)(BYTE)bbuf[st + 1] * 256 + (int)(BYTE)bbuf[st + 2] * 65536 + (int)(BYTE)bbuf[st + 3] * 256 * 65536;
-		int st2 = st;
-		// dataの次のsmplがほしいので、data分最後〜wavファイル最後までの間で検索(時短)
-		adpcmf.SeekToBegin();
-		adpcmf.Seek(aa.seekpoint, 1); // RIFF
-		adpcmf.Seek(st2 + cnt + 4, 1); // dataの最後
-		adpcmf.Read(bbuf, aa.datasize - cnt); //dataの最後〜wavの最後まで読む
-		for (st = 0; st < aa.datasize - cnt - 4; st++) {
-			if (bbuf[st] == 's' && bbuf[st + 1] == 'm' && bbuf[st + 2] == 'p' && bbuf[st + 3] == 'l')
-			{
-				st += 4; break;
+			else if (idRest.IsEmpty() && idLen > 0) {
+				for (int p = 0;;) {
+					p = filen.Find(entryId, p);
+					if (p < 0) break;
+					TCHAR before = (p > 0) ? filen[p - 1] : 0;
+					int ap = p + idLen;
+					TCHAR after = (ap < filen.GetLength()) ? filen[ap] : 0;
+					int bh = (before >= _T('0') && before <= _T('9')) || (before >= _T('a') && before <= _T('f')) || (before >= _T('A') && before <= _T('F'));
+					int ah = (after >= _T('0') && after <= _T('9')) || (after >= _T('a') && after <= _T('f')) || (after >= _T('A') && after <= _T('F'));
+					if (p > 0 && !bh && !ah) { match = 1; break; }
+					p++;
+				}
 			}
-			if (bbuf[st] == 'R' && bbuf[st + 1] == 'I' && bbuf[st + 2] == 'F' && bbuf[st + 3] == 'F')
-			{
-				st = -1; break;
+			if (match && idLen > bestIdLen) {
+				bestIdLen = idLen;
+				bestAa = aa;
+				found = 1;
 			}
+			adpcmf.Seek(pos, CFile::begin);
 		}
-		if (st == aa.datasize - 4 || st == -1) {
-			loop1 = 0;
-			loop2 = cnt / 4;
-		}
-		else {
-			loop1 = (int)(BYTE)bbuf[st + 0x30] + (int)(BYTE)bbuf[st + 0x31] * 256 + (int)(BYTE)bbuf[st + 0x32] * 65536 + (int)(BYTE)bbuf[st + 0x33] * 256 * 65536;
-			int loop2_end = (int)(BYTE)bbuf[st + 0x34] + (int)(BYTE)bbuf[st + 0x35] * 256 + (int)(BYTE)bbuf[st + 0x36] * 65536 + (int)(BYTE)bbuf[st + 0x37] * 256 * 65536;
-			loop2 = loop2_end - loop1;  // smplのstart/endはバッファのサンプル索引と同一。変換不要
-		}
-
-		data_size = oggsize = cnt;
-		adpcmf.Seek(aa.seekpoint + st2 + 4, CFile::begin);
-		og->m_time.SetRange(0, (data_size) / 4, TRUE);
-		og->m_time.SetSelection(loop1, loop2 + loop1);
-		lenl = 0;
-		adbuf2 = (char*)calloc((size_t)cnt, 1);
-		if (!adbuf2) {
-			thend = 1;
-			free(bbuf);
+		if (!found) {
 			adpcmf.Close();
+			if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) == myEpoch) { thend = 1; wavwait = 1; }
 			return;
 		}
-		wavbit_sample_Hz = 48000;
-		free(bbuf);
-		// wavwait は全読み込み後。play() が先に進むと adbuf2 読み書き競合で落ちる
+		aa = bestAa;
+
+		// data は先頭ヘッダ内で探す。PCM を先に読み、その後 data 直後 trail から smpl を取る。
+		// （smpl を先に読むと初回だけゴミ→0,0、再演奏で直る、という冷えキャッシュ症状になる）
+		int newLoop1 = 0, newLoop2 = 0;
+		int dataPayloadOff = -1; // seekpoint からの data ペイロード先頭
+		cnt = 0;
 		{
-			int remain = cnt;
-			int off = 0;
-			while (remain > 0) {
-				const UINT chunk = (UINT)min((DWORD)remain, dl * 2);
-				const UINT n = adpcmf.Read(adbuf2 + off, chunk);
-				if (n == 0)
+			char hdr[0x100];
+			ZeroMemory(hdr, sizeof(hdr));
+			adpcmf.Seek(aa.seekpoint, CFile::begin);
+			UINT hdrGot = adpcmf.Read(hdr, sizeof(hdr));
+			int st = -1;
+			for (int i = 0; i + 8 <= (int)hdrGot; i++) {
+				if (hdr[i] == 'd' && hdr[i + 1] == 'a' && hdr[i + 2] == 't' && hdr[i + 3] == 'a') {
+					st = i;
 					break;
+				}
+			}
+			if (st >= 0) {
+				cnt = (int)(BYTE)hdr[st + 4] | ((int)(BYTE)hdr[st + 5] << 8)
+					| ((int)(BYTE)hdr[st + 6] << 16) | ((int)(BYTE)hdr[st + 7] << 24);
+				dataPayloadOff = st + 8;
+			}
+			if (cnt < 4 || dataPayloadOff < 0
+				|| (aa.datasize > 0 && dataPayloadOff + cnt > aa.datasize + 0x10000)) {
+				cnt = 0;
+				dataPayloadOff = -1;
+			}
+		}
+		if (cnt < 4 || dataPayloadOff < 0) {
+			adpcmf.Close();
+			if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) == myEpoch) { thend = 1; wavwait = 1; }
+			return;
+		}
+		const int totalSamples = cnt / 4;
+		lenl = 0;
+		char* newBuf = (char*)calloc((size_t)cnt, 1);
+		if (!newBuf) {
+			adpcmf.Close();
+			if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) == myEpoch) { thend = 1; wavwait = 1; }
+			return;
+		}
+		adpcmf.Seek((ULONGLONG)aa.seekpoint + (ULONGLONG)dataPayloadOff, CFile::begin);
+		{
+			int remain = cnt, off = 0;
+			while (remain > 0) {
+				if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) != myEpoch || thend1 == TRUE) {
+					free(newBuf);
+					adpcmf.Close();
+					return;
+				}
+				UINT chunk = (UINT)min((DWORD)remain, dl * 2);
+				UINT n = adpcmf.Read(newBuf + off, chunk);
+				if (n == 0) break;
 				off += (int)n;
 				remain -= (int)n;
-				if (thend1 == TRUE) { thend = 1; wavwait = 1; adpcmf.Close(); return; }
-				og->m_time.SetSelection(loop1, loop2 + loop1);
+			}
+		}
+
+		// PCM 読了後に trail をまとめて読み、チャンク境界だけで smpl を取る。
+		// 0,0 / 未検出 / 曲長外はすべて「まだ確定しない」→ 代入せずリトライ。
+		{
+			const ULONGLONG dataEnd = (ULONGLONG)aa.seekpoint + (ULONGLONG)dataPayloadOff + (ULONGLONG)cnt;
+			int trailMax = 0x10000;
+			if (aa.datasize > 0) {
+				const __int64 left = (__int64)aa.datasize - (__int64)(dataEnd - (ULONGLONG)aa.seekpoint);
+				// datasize に smpl 分が入っていないことがあるので、0 以下でも最低限は読む
+				if (left > 0 && left < trailMax) trailMax = (int)left;
+				if (left <= 0) trailMax = 0x2000;
+			}
+			int loopOk = 0;
+			for (int retry = 0; retry < 8 && !loopOk; ++retry) {
+				if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) != myEpoch || thend1 == TRUE) {
+					free(newBuf);
+					adpcmf.Close();
+					return;
+				}
+				int try1 = 0, try2 = 0;
+				int foundSmpl = 0;
+				// 偶数回: data word-pad あり / 奇数回: pad なし（アライメント揺れ対策）
+				const ULONGLONG afterData0 = dataEnd + (((cnt & 1) && (retry % 2 == 0)) ? 1ULL : 0ULL);
+				char* trail = NULL;
+				UINT trailGot = 0;
+				if (trailMax >= 8) {
+					trail = (char*)malloc((size_t)trailMax);
+					if (trail) {
+						adpcmf.Seek(afterData0, CFile::begin);
+						trailGot = adpcmf.Read(trail, (UINT)trailMax);
+					}
+				}
+				UINT cpos = 0;
+				for (int nchunk = 0; trail && nchunk < 32 && cpos + 8 <= trailGot && !foundSmpl; ++nchunk) {
+					char* cid = trail + cpos;
+					DWORD csz = (DWORD)(BYTE)trail[cpos + 4] | ((DWORD)(BYTE)trail[cpos + 5] << 8)
+						| ((DWORD)(BYTE)trail[cpos + 6] << 16) | ((DWORD)(BYTE)trail[cpos + 7] << 24);
+					if (cid[0] == 'R' && cid[1] == 'I' && cid[2] == 'F' && cid[3] == 'F')
+						break;
+					if (cid[0] == 's' && cid[1] == 'm' && cid[2] == 'p' && cid[3] == 'l'
+						&& csz >= 0x3C && csz < 0x100000 && cpos + 8 + 0x3C <= trailGot) {
+						unsigned char* body = (unsigned char*)(trail + cpos + 8);
+						int nLoops = (int)body[0x1C] | ((int)body[0x1D] << 8) | ((int)body[0x1E] << 16) | ((int)body[0x1F] << 24);
+						if (nLoops >= 1) {
+							try1 = (int)body[0x2C] | ((int)body[0x2D] << 8) | ((int)body[0x2E] << 16) | ((int)body[0x2F] << 24);
+							int loopEnd = (int)body[0x30] | ((int)body[0x31] << 8) | ((int)body[0x32] << 16) | ((int)body[0x33] << 24);
+							try2 = loopEnd - try1;
+						}
+						foundSmpl = 1;
+						break;
+					}
+					if (csz == 0 || csz > 0x100000)
+						break;
+					UINT next = cpos + 8 + (UINT)csz;
+					if (csz & 1) next++;
+					if (next <= cpos) break;
+					cpos = next;
+				}
+				if (trail) { free(trail); trail = NULL; }
+
+				const __int64 endSamp = (__int64)try1 + (__int64)try2;
+				const int valid = (foundSmpl && try2 > 0 && try1 >= 0
+					&& try1 < totalSamples && try2 < totalSamples
+					&& endSamp < (__int64)totalSamples + 8 && endSamp != 0 && try2 != 0
+					&& try1 != try2);
+				if (valid) {
+					newLoop1 = try1;
+					newLoop2 = try2;
+					loopOk = 1;
+				}
+				else if (retry == 7) {
+					// 尽きて初めて 0,0 を確定（途中の 0,0 は捨ててリトライ）
+					newLoop1 = 0;
+					newLoop2 = 0;
+					loopOk = 1;
+				}
+				else {
+					Sleep(20 * (retry + 1));
+				}
 			}
 		}
 		adpcmf.Close();
-		wavwait = 1;
+
+		// loop/adbuf/wavwait は最後に一括コミット（確認後書き込みの TOCTOU で旧曲が loop を上書きするのを防ぐ）
+		if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) != myEpoch || thend1 == TRUE) {
+			free(newBuf);
+			return;
+		}
+		{
+			const __int64 endSamp = (__int64)newLoop1 + (__int64)newLoop2;
+			if (newLoop1 != 0 || newLoop2 != 0) {
+				if (newLoop1 < 0 || newLoop2 <= 0
+					|| newLoop1 >= totalSamples || newLoop2 > totalSamples
+					|| endSamp > (__int64)totalSamples + 8
+					|| newLoop1 == newLoop2) {
+					newLoop1 = 0;
+					newLoop2 = 0;
+				}
+			}
+		}
+		if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) != myEpoch || thend1 == TRUE) {
+			free(newBuf);
+			return;
+		}
+		{
+			std::lock_guard<std::mutex> lk(cl2);
+			if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) != myEpoch) {
+				free(newBuf);
+				return;
+			}
+			// 先に PCM / サイズを載せ、loop を書いてから wavwait。
+			// 読側も cl2 を取らないと loop が 0 のまま見えることがある。
+			if (adbuf2) { free(adbuf2); adbuf2 = NULL; }
+			adbuf2 = newBuf;
+			data_size = oggsize = cnt;
+			wavbit_sample_Hz = 48000;
+			loop1 = newLoop1;
+			loop2 = newLoop2;
+			og->m_time.SetRange(0, totalSamples > 0 ? totalSamples : 1, TRUE);
+			if (loop1 == 0 && loop2 == 0)
+				og->m_time.SetSelection(0, totalSamples > 0 ? totalSamples : 1);
+			else
+				og->m_time.SetSelection(loop1, loop1 + loop2);
+			wavwait = 1;
+		}
 	}
 	else if (mode == 16) {
 		CWaitCursor aaaa;
@@ -12961,13 +13143,25 @@ BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2)
 				endflg = 1;
 		}
 		else {
+			// 壊れた loop 点で 0 バイト→seek(loop1)→また 0 の永久回りを止める
+			// （曲長を超えた loop1 / 長さ0 / 誤読の loop1==loop2）
+			if (rrr == 0 && (loop2 <= 0 || loop1 == loop2
+				|| (data_size > 0 && (__int64)loop1 * 4 >= (__int64)data_size))) {
+				endf = 1;
+				if (savedata.saverenzoku == 0) fade1 = 1; else endflg = 1;
+				return FALSE;
+			}
 			loopcnt++;
 			playb = loop1;
 			poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = loop1 * PcmOutBytesPerFrame(); poss6 = 0;
 			seekadpcm(loop1);
 			RubberBand_DestroyBank(0);
 			reset = TRUE;
-			readBuffwav((char*)bw + old + rrr, (int)l1 - rrr);
+			int r2 = readBuffwav((char*)bw + old + rrr, (int)l1 - rrr);
+			if (r2 <= 0 && rrr == 0) {
+				endf = 1;
+				if (savedata.saverenzoku == 0) fade1 = 1; else endflg = 1;
+			}
 		}
 	}
 	if (l2) {
@@ -12981,13 +13175,23 @@ BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2)
 					endflg = 1;
 			}
 			else {
+				if (rrr == 0 && (loop2 <= 0 || loop1 == loop2
+					|| (data_size > 0 && (__int64)loop1 * 4 >= (__int64)data_size))) {
+					endf = 1;
+					if (savedata.saverenzoku == 0) fade1 = 1; else endflg = 1;
+					return FALSE;
+				}
 				loopcnt++;
 				playb = loop1;
 				poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = loop1 * PcmOutBytesPerFrame(); poss6 = 0;
 				seekadpcm(loop1);
 				RubberBand_DestroyBank(0);
 				reset = TRUE;
-				readBuffwav((char*)bw + rrr, (int)l2 - rrr);
+				int r2 = readBuffwav((char*)bw + rrr, (int)l2 - rrr);
+				if (r2 <= 0 && rrr == 0) {
+					endf = 1;
+					if (savedata.saverenzoku == 0) fade1 = 1; else endflg = 1;
+				}
 			}
 		}
 	}
@@ -13095,15 +13299,19 @@ int readBuffwav(char* bw, int cnt)
 	{
 		const int bpfLoop = PcmOutBytesPerFrame();
 		// play() 側と同じ: loop1==0 && loop2==0 は「ループ情報なし」で全長再生(data_size バイトまで)
-		int loopEndBytes;
+		__int64 loopEndBytes = 0;
 		if (loop1 == 0 && loop2 == 0) {
-			loopEndBytes = (bpfLoop > 0) ? (int)data_size : 0;
+			loopEndBytes = (bpfLoop > 0) ? (__int64)data_size : 0;
 		}
-		else {
-			loopEndBytes = (loop1 + loop2) * bpfLoop;
+		else if (loop2 > 0 && loop1 != loop2 && bpfLoop > 0) {
+			loopEndBytes = ((__int64)loop1 + (__int64)loop2) * (__int64)bpfLoop;
 		}
-		if (loopEndBytes > 0 && loopEndBytes < poss5 + cnt0 && endf == 0) {
-			cnt0 = loopEndBytes - poss5;
+		else if (loop1 != 0 && loop1 == loop2) {
+			// 不正値: ループしない（下で短く切らず EOF 扱いに寄せる）
+			loopEndBytes = (bpfLoop > 0) ? (__int64)data_size : 0;
+		}
+		if (loopEndBytes > 0 && loopEndBytes < (__int64)poss5 + cnt0 && endf == 0) {
+			cnt0 = (int)(loopEndBytes - poss5);
 			if (cnt0 < 0)
 				cnt0 = 0;
 		}
@@ -16311,13 +16519,19 @@ BOOL COggDlg::stop1()
 	KillTimer(9000);
 
 	// CWread 中断要求。完了後は必ず thend1 を下ろす（残すと次の CWread が即死する）
+	// 世代を先に進め、孤児が loop1/2・adbuf2・wavwait を書き換えられないようにする。
 	if (thend == FALSE) {
+		InterlockedIncrement(&g_cwreadEpoch);
 		thend1 = TRUE;
-		for (int kk = 0; kk < 50; kk++) {
+		const int waitMs = g_interactiveTrackChange ? 500 : 3000;
+		for (int kk = 0; kk < waitMs; kk++) {
 			if (thend == 1) break;
 			SignalPlaybackNotifyThreadStop();
 			Sleep(1);
 		}
+	}
+	else {
+		InterlockedIncrement(&g_cwreadEpoch);
 	}
 	// CWread が thend1 を見て return してから AfxEndThread するまでの猶予。
 	// 二重DS昇格中は B 再生を維持したいので余分な Sleep を入れない。
@@ -17187,6 +17401,16 @@ void COggDlg::timerp()
 		snap_loop1 = loop1;
 		snap_loop2 = loop2;
 	}
+	// mode 30: 曲長外の loop は表示だけ 0 に（孤児上書きで変な数字が残るのを防ぐ）
+	if (mode == 30 && (snap_loop1 != 0 || snap_loop2 != 0)) {
+		const int ts = (snap_oggsize > 0) ? (snap_oggsize / 4) : 0;
+		const __int64 endSamp = (__int64)snap_loop1 + (__int64)snap_loop2;
+		if (ts <= 0 || snap_loop1 < 0 || snap_loop2 <= 0 || snap_loop1 >= ts || snap_loop2 > ts
+			|| endSamp > (__int64)ts + 8 || snap_loop1 == snap_loop2) {
+			snap_loop1 = 0;
+			snap_loop2 = 0;
+		}
+	}
 
 	// 実再生位置補正: playb はデコード先頭（先読み分だけ先）。DS 再生カーソルがまだ消化していない
 	// キュー分(qSamples)を差し引くと「実際に聴こえている位置」になる。時間表示・スライダーで共用。
@@ -17425,16 +17649,20 @@ void COggDlg::timerp()
 			L"file:Ładowanie KPI…",
 			L"file:KPI yükleniyor…"));
 	}
-	else if (IsFalcomGameBgmMode(modesub)) {
+	else if ((modesub >= 1 && modesub <= 21) || modesub == 30 ||
+		modesub == -11 || modesub == -12 || modesub == -13 || modesub == -14 || modesub == -15) {
 		CString fileName = filen;
 		const int slash = max(fileName.ReverseFind(_T('\\')), fileName.ReverseFind(_T('/')));
 		if (slash >= 0)
 			fileName = fileName.Mid(slash + 1);
 
 		CString gameName;
-		if (pl && plcnt >= 0 && plcnt < pl->playcnt &&
-			IsFalcomGameBgmMode(pl->pc[plcnt].sub))
-			gameName = pl->pc[plcnt].game;
+		if (pl && plcnt >= 0 && plcnt < pl->playcnt) {
+			int sub = pl->pc[plcnt].sub;
+			if ((sub >= 1 && sub <= 21) || sub == 30 ||
+				sub == -11 || sub == -12 || sub == -13 || sub == -14 || sub == -15)
+				gameName = pl->pc[plcnt].game;
+		}
 
 		if (!gameName.IsEmpty())
 			s.Format(_T("file:%s(%s)"), (LPCTSTR)fileName, (LPCTSTR)gameName);
@@ -22556,7 +22784,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			ZeroMemory(bufkpi4, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 			poss = 0;
 
-			if (ModeUsesSeekAdpcm(mode)) {
+			// adbuf2 全量読み込み形式(mode 10-21, -6, 30, -11〜 等)は seekadpcm
+			if (((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999 || mode == -6 || mode == 30)) {
 				if (mode == -10) {
 					hsc = 2;
 					// m_time レンジは (総フレーム F)/100 程度なので、フレーム位置 = curpos×100
@@ -22869,7 +23098,7 @@ void COggDlg::rl(int a)
 	if (pMainFrame1) {
 		pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
 	}
-	if (ModeUsesSeekAdpcm(mode)) {
+	if (((mode >= 10 && mode <= 21) || mode <= -10 || mode == 999 || mode == -6 || mode == 30)) {
 		if (mode != -10)
 			seekadpcm((int)playb);
 		sek = TRUE;

@@ -3164,53 +3164,18 @@ void CPlayList::Fol(CString fname)
 						default: return CString(ti1_en[j]);
 						}
 					};
-					struct a {
-						int start;
-						int d1;
-						int size;
-						int d2;
-						int loop1;
-						int d3;
-						int loop2;
-						int d4;
-					};
-					//データ数は分からないので多く取っておく
-					struct dd {
-						int loop1;
-						int loop2;
-						char wav[6];
-					};
+					// TOC 先頭の 32byte レコードはループ表ではなく索引。誤解釈した
+					// loop1/2 を入れると初回再生で変な数字になり、再演奏(smpl再読込)で直る。
+					// ループは再生時に WAV smpl から取るので、ここでは 0 のままにする。
 
-					dd ddata[1000];
-
-					a ldata = {};
 					char data[33] = { 0 };
 					char data0;
-					int id = 0;
 
 					CFile f;
 					if (f.Open(fname, CFile::modeRead | CFile::shareDenyWrite)) {
 						//空の軌跡 The 1st
-						//最初の8バイトは飛ばす
-						f.Read(data, 8);
-						for (;;) {
-							//データ取得
-							f.Read(data, 32);
-							//ループデータにも入れる
-							memcpy(&ldata, data, 32);
-							//bgmで始まるまで。
-							CStringA s;
-							s = data;
-							if (s.Left(3) == "bgm") break;
-							//bgmで無い場合は、データとして保持
-							ddata[id].loop1 = ldata.loop2;
-							ddata[id].loop2 = ldata.loop1;
-							id++;
-							//16バイト飛ばす
-							f.Read(data, 16);
-						}
 						f.SeekToBegin();
-						f.Seek(0x770, 1);//現在位置から16バイト戻る
+						f.Seek(0x770, CFile::begin);
 						ZeroMemory(data, 21);
 						//bgmのファイル名は20文字
 						//bgmファイル名取得
@@ -3227,8 +3192,8 @@ void CPlayList::Fol(CString fname)
 							CString s1 = s.Mid(12, 4); s1.Replace(L".", L""); 
 							a = CString(s1) + L" ";
 							CString aa1a = L"";
-							p.loop1 = ddata[i].loop1;
-							p.loop2 = ddata[i].loop2;
+							p.loop1 = 0;
+							p.loop2 = 0;
 							for (int j = 0;; j++) {
 								CString s2 = ti1[j];
 								if (s2 == "") {
@@ -3388,7 +3353,6 @@ void CPlayList::Fol(CString fname)
 								));
 							}
 							if (syo == 0) { syo = 1; syos = p.fol; modesub = p.sub;	fnn = p.name; syomode = 30; }
-							RememberMode30PacPath(fname);
 							Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, 0);
 						}
 

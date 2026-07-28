@@ -161,7 +161,6 @@ public:
 CString NormalizePlaylistPath(LPCTSTR fol);
 CString PlPhysicalMediaPath(LPCTSTR fol);
 CString PlStorePlaylistFol(LPCTSTR fol, int sub);
-void RememberMode30PacPath(LPCTSTR pacOrFol);
 
 enum {
 	PL_CTX_INFO = 1,
