@@ -605,14 +605,14 @@ protected:
     void DrawClient(CDC& dc);
 
 private:
-    // 装飾タグを含むテキストを解析してセグメントに分割します
-    std::vector<TextSegment> ParseFormattedText(const CString& str);
+    // 装飾タグを含むテキストを解析して m_segs に格納（std::vector 禁止・長時間断片化防止）
+    void ParseFormattedText(const CString& str);
 
     // 分割されたテキストセグメントの描画サイズを計算します
-    CSize MeasureSegmentedText(CDC* pDC, const std::vector<TextSegment>& segs, const LOGFONT& lf, int h, int w);
+    CSize MeasureSegmentedText(CDC* pDC, const LOGFONT& lf, int h, int w);
 
     // 分割されたテキストセグメントを実際に描画します
-    void DrawSegmentedText(CDC* pDC, const CRect& rect, const std::vector<TextSegment>& segs, const LOGFONT& lf, int h, int w, UINT fmt);
+    void DrawSegmentedText(CDC* pDC, const CRect& rect, const LOGFONT& lf, int h, int w, UINT fmt);
 
     // プロパティ保持用メンバ変数
     COLORREF m_clrGradStart, m_clrGradEnd; // グラデーションの開始色と終了色
@@ -637,6 +637,12 @@ private:
 
     CBitmap m_memBackstore;                // ちらつき防止のダブルバッファリング用バックバッファ
     int m_backstoreW, m_backstoreH;        // バックバッファの寸法
+
+    // 装飾テキストの解析結果キャッシュ（毎描画の vector/CString 積みを防ぐ）
+    static constexpr int kMaxTextSegs = 64;
+    TextSegment m_segs[kMaxTextSegs];
+    int m_segCount;
+    CString m_strSegSource;                // m_segs の元文字列（一致時は再解析しない）
 
     BOOL m_bAeroMode;                      // アクリルモードが有効かどうか
     BOOL m_bNoParentInvalidate;            // TRUE なら SetText 時に親 Invalidate しない
@@ -941,6 +947,12 @@ protected:
 private:
     UINT m_nShimmer; // 流れるシマー用カウンタ
     BOOL m_bHover;   // マウスがスライダー上にあるか
+    CBitmap m_memBackstore; // 毎描画 CreateCompatibleBitmap を避ける
+    int m_backstoreW;
+    int m_backstoreH;
+#if CCUSTOM_AERO_SUPPORT
+    CCC_ChromaBlitCache m_chromaCache; // 共有 s_nfCache のサイズ thrash 回避
+#endif
 
     // 描画モードごとの実際の描画処理
     void DrawSlider(CDC* pDC);

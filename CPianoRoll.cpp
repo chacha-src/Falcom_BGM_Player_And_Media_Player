@@ -3153,8 +3153,7 @@ void CPianoRoll::RequestSyncFromMainUi()
 void CPianoRoll::ApplySyncInvalidate()
 {
     if (m_paintDisabled || !::IsWindow(m_hWnd)) return;
-    if (m_meterDirty)
-        m_keyDirty = true;
+    // meterDirty→keyDirty はしない。OnPaint がメーター帯だけの差分更新に回す。
     // アナライザと同じ: ロック矩形を更新領域から除外する。
     // 全面 Invalidate だと BeginPaint 時点でアクリル面が透け、
     // その後 Blit するまでの間「メインに追従」がちらつく。
@@ -3804,8 +3803,9 @@ void CPianoRoll::OnPaint()
     memcpy(exprCopy, m_exprFlags, sizeof(m_exprFlags));
     LeaveCriticalSection(&m_cs);
 
-    if (m_meterDirty)
-        m_keyDirty = true;
+    // メーター変化だけで 108 鍵フル再描画すると UI スレッドを食いつぶし EQ が数秒に1回になる。
+    // 鍵盤状態が汚れていないときはメーター帯だけ更新する。
+    const bool meterOnlyDirty = m_meterDirty && !m_keyDirty && m_keyBufReady;
 
     int pending = 0;
     EnterCriticalSection(&m_cs);
@@ -3817,6 +3817,7 @@ void CPianoRoll::OnPaint()
     bool didRollUpdate = false;
     bool didRollScroll = false;
     bool needAnotherRollFrame = false;
+    bool didMeterOnly = false;
 
     // pending 分は1回の BitBlt スクロールで消化（n 回フル転送しない）。
     if (pending > 0 && m_rollReady) {
@@ -3882,6 +3883,18 @@ void CPianoRoll::OnPaint()
     if (needKeyDraw) {
         DrawKeyboardToBuffer(m_keyDC, w, keySectionH, keyH, activesCopy, bandMaskCopy, laneStrengthCopy, chFillCopy, chCountCopy, exprCopy);
         m_keyBufReady = true;
+    }
+    else if (meterOnlyDirty && m_keyDC.GetSafeHdc()) {
+        // 鍵盤全体は触らず、上部メーター帯だけ差し替える（表示OFF時もダーティは落とす）
+        if (m_showLevelMeter) {
+            const int labelH = min(16, keyH / 4);
+            if (labelH >= 4) {
+                CRect meterStrip(2, 1, w - 2, labelH + 1);
+                m_keyDC.FillSolidRect(meterStrip, RGB(150, 150, 155));
+                DrawChannelDbBars(m_keyDC, meterStrip, chFillCopy, chCountCopy);
+            }
+        }
+        didMeterOnly = true;
     }
 
     // 凡例(記号の意味)は m_rollDC に「半透明で焼き込み」してから提示する。
@@ -3987,6 +4000,12 @@ void CPianoRoll::OnPaint()
             }
             if (needKeyDraw || !m_chromaReady)
                 m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, keySectionH, PIANO_CHROMA_KEY);
+            else if (didMeterOnly) {
+                const int labelH = min(16, keyH / 4);
+                const int meterH = labelH + 2;
+                if (meterH > 0)
+                    m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, meterH, PIANO_CHROMA_KEY);
+            }
             m_chromaReady = true;
         }
     }
@@ -4003,7 +4022,7 @@ void CPianoRoll::OnPaint()
 
     if (didRollUpdate)
         m_historyDirty = false;
-    if (clipKey || needKeyDraw) {
+    if (clipKey || needKeyDraw || didMeterOnly) {
         m_keyDirty = false;
         m_meterDirty = false;
     }

@@ -841,11 +841,9 @@ static HBITMAP CCC_CreateShadowDib32(HDC hdcRef, int w, int h, void** ppBits)
     return hBmp;
 }
 
-static void CCC_BoxBlurAlpha(std::vector<BYTE>& alpha, int w, int h, int radius)
+static void CCC_BoxBlurAlpha(BYTE* alpha, BYTE* tmp, int w, int h, int radius)
 {
-    if (radius <= 0 || w <= 0 || h <= 0) return;
-    const int n = w * h;
-    std::vector<BYTE> tmp(n);
+    if (!alpha || !tmp || radius <= 0 || w <= 0 || h <= 0) return;
 
     for (int y = 0; y < h; ++y)
     {
@@ -956,10 +954,35 @@ static void DrawTextShadow(CDC* pDC, const CRect& rect, const CString& str, UINT
         pad + max(0, ox) + textW, pad + max(0, oy) + textH);
     dcShadow.DrawText(str, &tr, fmt);
 
-    std::vector<BYTE> alpha((size_t)nPx);
+    // alpha/tmp は容量拡張して再利用（毎描画 std::vector new/delete で断片化しない）
+    static BYTE* s_alpha = nullptr;
+    static BYTE* s_tmp = nullptr;
+    static int s_cap = 0;
+    if (nPx > s_cap || !s_alpha || !s_tmp) {
+        int cap = (s_cap > 0) ? s_cap : 4096;
+        while (cap < nPx) {
+            if (cap > (INT_MAX / 2)) { cap = nPx; break; }
+            cap *= 2;
+        }
+        BYTE* na = (BYTE*)malloc((size_t)cap);
+        BYTE* nt = (BYTE*)malloc((size_t)cap);
+        if (!na || !nt) {
+            free(na);
+            free(nt);
+            dcShadow.SelectObject(pOldFont);
+            ::SelectObject(dcShadow.GetSafeHdc(), hOldBmp);
+            return;
+        }
+        free(s_alpha);
+        free(s_tmp);
+        s_alpha = na;
+        s_tmp = nt;
+        s_cap = cap;
+    }
+    BYTE* alpha = s_alpha;
     for (int y = 0; y < bh; ++y) {
         UINT32* row = px + y * s_shadowCache.capW;
-        BYTE* arow = alpha.data() + y * bw;
+        BYTE* arow = alpha + y * bw;
         for (int x = 0; x < bw; ++x) {
             const UINT32 rgb = row[x] & 0x00FFFFFFu;
             if (rgb >= 0x00FEFEFEu)
@@ -970,9 +993,9 @@ static void DrawTextShadow(CDC* pDC, const CRect& rect, const CString& str, UINT
     }
 
     const int blurR = max(1, (nBlur + 1) / 2);
-    CCC_BoxBlurAlpha(alpha, bw, bh, blurR);
+    CCC_BoxBlurAlpha(alpha, s_tmp, bw, bh, blurR);
     if (nBlur >= 5)
-        CCC_BoxBlurAlpha(alpha, bw, bh, max(1, blurR / 2));
+        CCC_BoxBlurAlpha(alpha, s_tmp, bw, bh, max(1, blurR / 2));
 
     const int tintR = (GetRValue(clrS) * 3 + 32) / 4;
     const int tintG = (GetGValue(clrS) * 3 + 28) / 4;
@@ -981,7 +1004,7 @@ static void DrawTextShadow(CDC* pDC, const CRect& rect, const CString& str, UINT
 
     for (int y = 0; y < bh; ++y) {
         UINT32* row = px + y * s_shadowCache.capW;
-        BYTE* arow = alpha.data() + y * bw;
+        BYTE* arow = alpha + y * bw;
         for (int x = 0; x < bw; ++x) {
             if (arow[x] == 0) { row[x] = 0; continue; }
             const BYTE a = (BYTE)((arow[x] * peakA) / 255);
@@ -1467,21 +1490,25 @@ static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPA, BOOL bPushed)
     rect.DeflateRect(2, 2);
 
     struct C { int x, y, dx, dy; };
-    std::vector<C> corners;
+    C corners[2];
+    int nCorners = 0;
 
     if (bPA)
     {
-        corners.push_back({ rect.left + ofs, rect.top + ofs, 1, 1 });
-        corners.push_back({ rect.right - 1 + ofs, rect.bottom - 1 + ofs, -1, -1 });
+        corners[0] = { rect.left + ofs, rect.top + ofs, 1, 1 };
+        corners[1] = { rect.right - 1 + ofs, rect.bottom - 1 + ofs, -1, -1 };
+        nCorners = 2;
     }
     else
     {
-        corners.push_back({ rect.right - 1 + ofs, rect.top + ofs, -1, 1 });
-        corners.push_back({ rect.left + ofs, rect.bottom - 1 + ofs, 1, -1 });
+        corners[0] = { rect.right - 1 + ofs, rect.top + ofs, -1, 1 };
+        corners[1] = { rect.left + ofs, rect.bottom - 1 + ofs, 1, -1 };
+        nCorners = 2;
     }
 
-    for (auto& c : corners)
+    for (int ci = 0; ci < nCorners; ++ci)
     {
+        C& c = corners[ci];
         CPoint pts[4] = {
             {c.x, c.y + 12 * c.dy},
             {c.x + 4 * c.dx, c.y + 4 * c.dy},
@@ -2858,7 +2885,8 @@ CCustomStatic::CCustomStatic()
     m_nShadowDistance(2), m_nShadowBlur(3), m_bShadowEnable(FALSE),
     m_bPreferWideMode(FALSE), m_nCachedHeight(0), m_nCachedWidth(0), m_fCachedScaleX(1.0f),
     m_strCachedText(_T("")), m_strText(_T("")), m_nCachedDpi(0),
-    m_backstoreW(0), m_backstoreH(0), m_bAeroMode(FALSE), m_bNoParentInvalidate(FALSE)
+    m_backstoreW(0), m_backstoreH(0), m_segCount(0), m_strSegSource(_T("")),
+    m_bAeroMode(FALSE), m_bNoParentInvalidate(FALSE)
 {}
 
 CCustomStatic::~CCustomStatic()
@@ -2876,65 +2904,66 @@ void CCustomStatic::PostNcDestroy()
     if (m_bAutoDelete) delete this;
 }
 
-std::vector<TextSegment> CCustomStatic::ParseFormattedText(const CString& str)
+void CCustomStatic::ParseFormattedText(const CString& str)
 {
-    std::vector<TextSegment> segs;
+    // Mid で一括コピー。文字単位 cur+= は CString 再確保が積み、長時間で断片化する。
+    m_segCount = 0;
+    m_strSegSource = str;
     BOOL bB = FALSE, bI = FALSE, bHC = FALSE;
     COLORREF cc = RGB(0, 0, 0);
     int nFO = 0;
-    CString cur;
+    int runStart = 0;
+    const int len = str.GetLength();
 
-    for (int i = 0; i < str.GetLength(); i++)
+    auto FlushTo = [&](int end)
     {
-        if (i + 1 < str.GetLength() && str[i] == _T('!') && str[i + 1] == _T('@') && i + 2 < str.GetLength())
+        if (end <= runStart || m_segCount >= kMaxTextSegs)
+            return;
+        TextSegment& s = m_segs[m_segCount++];
+        s.text = str.Mid(runStart, end - runStart);
+        s.bBold = bB;
+        s.bItalic = bI;
+        s.bHasColor = bHC;
+        s.clrText = cc;
+        s.nFontSizeOffset = nFO;
+    };
+
+    for (int i = 0; i < len; )
+    {
+        if (i + 1 < len && str[i] == _T('!') && str[i + 1] == _T('@') && i + 2 < len)
         {
             TCHAR cmd = str[i + 2];
-            // 現在のセグメントを確定してプッシュ
-            auto Flush = [&]()
-            {
-                if (!cur.IsEmpty())
-                {
-                    TextSegment s;
-                    s.text = cur;
-                    s.bBold = bB;
-                    s.bItalic = bI;
-                    s.bHasColor = bHC;
-                    s.clrText = cc;
-                    s.nFontSizeOffset = nFO;
-                    segs.push_back(s);
-                    cur.Empty();
-                }
-            };
-
-            // !@B / !@I / !@Cxxxxxx / !@F+NN 形式の装飾タグ
             if (cmd == _T('B'))
             {
-                Flush();
+                FlushTo(i);
                 bB = !bB;
-                i += 2;
+                i += 3;
+                runStart = i;
                 continue;
             }
             else if (cmd == _T('I'))
             {
-                Flush();
+                FlushTo(i);
                 bI = !bI;
-                i += 2;
+                i += 3;
+                runStart = i;
                 continue;
             }
-            else if (cmd == _T('C') && i + 8 < str.GetLength())
+            else if (cmd == _T('C') && i + 8 < len)
             {
                 CString hx = str.Mid(i + 3, 6);
                 int r, g, b;
                 if (_stscanf_s(hx, _T("%2x%2x%2x"), &r, &g, &b) == 3)
                 {
-                    Flush();
+                    FlushTo(i);
                     bHC = TRUE;
                     cc = RGB(r, g, b);
-                    i += 8;
+                    i += 9;
+                    runStart = i;
                     continue;
                 }
             }
-            else if (cmd == _T('F') && i + 5 < str.GetLength())
+            else if (cmd == _T('F') && i + 5 < len)
             {
                 TCHAR sg = str[i + 3];
                 CString nm = str.Mid(i + 4, 2);
@@ -2943,33 +2972,22 @@ std::vector<TextSegment> CCustomStatic::ParseFormattedText(const CString& str)
                 {
                     int off = _ttoi(nm);
                     if (sg == _T('-')) off = -off;
-                    Flush();
+                    FlushTo(i);
                     nFO += off;
-                    i += 5;
+                    i += 6;
+                    runStart = i;
                     continue;
                 }
             }
         }
-        cur += str[i];
+        ++i;
     }
-
-    if (!cur.IsEmpty())
-    {
-        TextSegment s;
-        s.text = cur;
-        s.bBold = bB;
-        s.bItalic = bI;
-        s.bHasColor = bHC;
-        s.clrText = cc;
-        s.nFontSizeOffset = nFO;
-        segs.push_back(s);
-    }
-    return segs;
+    FlushTo(len);
 }
 
-void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const std::vector<TextSegment>& segs, const LOGFONT& lf, int h, int w, UINT fmt)
+void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const LOGFONT& lf, int h, int w, UINT fmt)
 {
-    CSize tot = MeasureSegmentedText(pDC, segs, lf, h, w);
+    CSize tot = MeasureSegmentedText(pDC, lf, h, w);
     int xP = rect.left;
     if (fmt & DT_CENTER) xP = rect.left + (rect.Width() - tot.cx) / 2;
     else if (fmt & DT_RIGHT) xP = rect.right - tot.cx;
@@ -2977,23 +2995,23 @@ void CCustomStatic::DrawSegmentedText(CDC* pDC, const CRect& rect, const std::ve
     const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
     const COLORREF clrBg = bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG;
 
-    for (size_t i = 0; i < segs.size(); i++)
+    for (int i = 0; i < m_segCount; i++)
     {
         LOGFONT lt = lf;
-        lt.lfHeight = -max(6, h + segs[i].nFontSizeOffset);
+        lt.lfHeight = -max(6, h + m_segs[i].nFontSizeOffset);
         lt.lfWidth = w;
-        if (segs[i].bBold) lt.lfWeight = FW_BOLD;
-        if (segs[i].bItalic) lt.lfItalic = TRUE;
+        if (m_segs[i].bBold) lt.lfWeight = FW_BOLD;
+        if (m_segs[i].bItalic) lt.lfItalic = TRUE;
         CFont* pFont = CCC_GetPooledSegFont(lt);
         if (!pFont) continue;
         CFont* po = pDC->SelectObject(pFont);
-        CSize sz = pDC->GetTextExtent(segs[i].text);
+        CSize sz = pDC->GetTextExtent(m_segs[i].text);
         CRect sr = { xP, rect.top, xP + sz.cx, rect.bottom };
-        COLORREF tc = segs[i].bHasColor ? segs[i].clrText : RGB(0, 0, 0);
+        COLORREF tc = m_segs[i].bHasColor ? m_segs[i].clrText : RGB(0, 0, 0);
         if (bTrans && tc == RGB(0, 0, 0)) tc = RGB(2, 2, 2);
 
-        if (m_bGradEnable) DrawTextWithGradient(pDC, sr, segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, m_clrGradStart, m_clrGradEnd, m_nGradDirection, m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg, sz.cx, FALSE, bTrans);
-        else DrawTextWithShadow(pDC, sr, segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, tc, m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg, bTrans);
+        if (m_bGradEnable) DrawTextWithGradient(pDC, sr, m_segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, m_clrGradStart, m_clrGradEnd, m_nGradDirection, m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg, sz.cx, FALSE, bTrans);
+        else DrawTextWithShadow(pDC, sr, m_segs[i].text, DT_VCENTER | DT_SINGLELINE | DT_LEFT, tc, m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur, m_bShadowEnable, clrBg, bTrans);
 
         xP += sz.cx;
         pDC->SelectObject(po);
@@ -3145,8 +3163,14 @@ void CCustomStatic::DrawClient(CDC& dc)
 
     CString strText = m_strText;
     const BOOL bHasFmt = (strText.Find(_T("!@")) >= 0);
-    std::vector<TextSegment> segs;
-    if (bHasFmt) segs = ParseFormattedText(strText);
+    if (bHasFmt) {
+        if (strText != m_strSegSource)
+            ParseFormattedText(strText);
+    }
+    else {
+        m_segCount = 0;
+        m_strSegSource.Empty();
+    }
 
     CRect rectWithMargin = rect;
     const UINT dpi = CCC_GetControlDpi(m_hWnd);
@@ -3182,7 +3206,7 @@ void CCustomStatic::DrawClient(CDC& dc)
         if (bHasFmt)
         {
             auto MeasureText = [&](int height, int width) -> CSize {
-                return MeasureSegmentedText(&memDC, segs, lfB, height, width);
+                return MeasureSegmentedText(&memDC, lfB, height, width);
             };
 
             int fitHeight = kMinHeight;
@@ -3364,7 +3388,7 @@ void CCustomStatic::DrawClient(CDC& dc)
 
     if (bHasFmt)
     {
-        DrawSegmentedText(&memDC, rect, segs, lfB, finalHeight, finalWidth, fmt);
+        DrawSegmentedText(&memDC, rect, lfB, finalHeight, finalWidth, fmt);
     }
     else
     {
@@ -3443,6 +3467,8 @@ LRESULT CCustomStatic::OnSetText(WPARAM, LPARAM lp)
         return TRUE;
     m_strText = neu;
     m_strCachedText.Empty();
+    m_segCount = 0;
+    m_strSegSource.Empty();
     if (GetSafeHwnd())
     {
 #if CCUSTOM_AERO_SUPPORT
@@ -3471,22 +3497,22 @@ LRESULT CCustomStatic::OnGetTextLength(WPARAM, LPARAM)
     return m_strText.GetLength();
 }
 
-CSize CCustomStatic::MeasureSegmentedText(CDC* pDC, const std::vector<TextSegment>& segs, const LOGFONT& lf, int h, int w)
+CSize CCustomStatic::MeasureSegmentedText(CDC* pDC, const LOGFONT& lf, int h, int w)
 {
     CSize tot(0, 0);
-    for (size_t i = 0; i < segs.size(); i++)
+    for (int i = 0; i < m_segCount; i++)
     {
         LOGFONT lt = lf;
-        lt.lfHeight = -max(6, h + segs[i].nFontSizeOffset);
+        lt.lfHeight = -max(6, h + m_segs[i].nFontSizeOffset);
         lt.lfWidth = w;
-        if (segs[i].bBold) lt.lfWeight = FW_BOLD;
-        if (segs[i].bItalic) lt.lfItalic = TRUE;
+        if (m_segs[i].bBold) lt.lfWeight = FW_BOLD;
+        if (m_segs[i].bItalic) lt.lfItalic = TRUE;
 
         CFont* pFont = CCC_GetPooledSegFont(lt);
         if (!pFont) continue;
         CFont* po = pDC->SelectObject(pFont);
 
-        CSize sz = pDC->GetTextExtent(segs[i].text);
+        CSize sz = pDC->GetTextExtent(m_segs[i].text);
         tot.cx += sz.cx;
         if (sz.cy > tot.cy) tot.cy = sz.cy;
 
@@ -4001,8 +4027,14 @@ BEGIN_MESSAGE_MAP(CCustomSliderCtrl, CSliderCtrl)
 END_MESSAGE_MAP()
 
 CCustomSliderCtrl::CCustomSliderCtrl() : m_bAutoDelete(FALSE), m_nMode(0), m_bAeroMode(FALSE),
-    m_nShimmer(0), m_bHover(FALSE) {}
-CCustomSliderCtrl::~CCustomSliderCtrl() {}
+    m_nShimmer(0), m_bHover(FALSE), m_backstoreW(0), m_backstoreH(0) {}
+CCustomSliderCtrl::~CCustomSliderCtrl()
+{
+    if (m_memBackstore.GetSafeHandle()) m_memBackstore.DeleteObject();
+#if CCUSTOM_AERO_SUPPORT
+    m_chromaCache.Release();
+#endif
+}
 
 LRESULT CCustomSliderCtrl::OnMouseLeaveMsg(WPARAM, LPARAM)
 {
@@ -4066,11 +4098,23 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
 {
     CRect r;
     GetClientRect(&r);
+    const int rw = r.Width();
+    const int rh = r.Height();
+    if (rw <= 0 || rh <= 0) return;
+
     CDC mDC;
-    CBitmap mB;
     mDC.CreateCompatibleDC(&dc);
-    mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
-    CBitmap* ob = mDC.SelectObject(&mB);
+    if (rw != m_backstoreW || rh != m_backstoreH || !m_memBackstore.GetSafeHandle())
+    {
+        if (m_memBackstore.GetSafeHandle()) m_memBackstore.DeleteObject();
+        if (!m_memBackstore.CreateCompatibleBitmap(&dc, rw, rh)) {
+            mDC.DeleteDC();
+            return;
+        }
+        m_backstoreW = rw;
+        m_backstoreH = rh;
+    }
+    CBitmap* ob = mDC.SelectObject(&m_memBackstore);
 
     const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
     if (bTrans)
@@ -4078,17 +4122,22 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
         DrawSlider(&mDC);
         CCC_DrawInwoman(&mDC, r, TRUE);
-        CCC_BlitChromaTrans(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+#if CCUSTOM_AERO_SUPPORT
+        if (CCC_IsAeroEnabled() && CCC_IsWin11())
+            CCC_BlitChromaCached(dc.GetSafeHdc(), 0, 0, rw, rh,
+                mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY, m_chromaCache);
+        else
+#endif
+            CCC_BlitChromaTrans(dc.GetSafeHdc(), 0, 0, rw, rh, mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     }
     else
     {
         mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
         DrawSlider(&mDC);
         CCC_DrawInwoman(&mDC, r, FALSE);
-        dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+        dc.BitBlt(0, 0, rw, rh, &mDC, 0, 0, SRCCOPY);
     }
     mDC.SelectObject(ob);
-    mB.DeleteObject();
     mDC.DeleteDC();
 }
 

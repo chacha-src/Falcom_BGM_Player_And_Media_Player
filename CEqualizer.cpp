@@ -664,20 +664,30 @@ void CEqualizer::ApplyKeyCodesUi()
 		s_pfxInit = true;
 	}
 
+	// 接頭辞結合は1本の再利用バッファへ（operator+ の一時 CString を出さない）
+	static CString s_line;
 	if (m_cachedKeyLow != keyLow) {
-		m_keyLow.SetWindowText(s_pfxLow + keyLow);
+		s_line = s_pfxLow;
+		s_line += keyLow;
+		m_keyLow.SetWindowText(s_line);
 		m_cachedKeyLow = keyLow;
 	}
 	if (m_cachedKeyMid != keyMid) {
-		m_keyMid.SetWindowText(s_pfxMid + keyMid);
+		s_line = s_pfxMid;
+		s_line += keyMid;
+		m_keyMid.SetWindowText(s_line);
 		m_cachedKeyMid = keyMid;
 	}
 	if (m_cachedKeyHigh != keyHigh) {
-		m_keyHigh.SetWindowText(s_pfxHigh + keyHigh);
+		s_line = s_pfxHigh;
+		s_line += keyHigh;
+		m_keyHigh.SetWindowText(s_line);
 		m_cachedKeyHigh = keyHigh;
 	}
 	if (m_cachedKeyAll != keyAll) {
-		m_keyAll.SetWindowText(s_pfxAll + keyAll);
+		s_line = s_pfxAll;
+		s_line += keyAll;
+		m_keyAll.SetWindowText(s_line);
 		m_cachedKeyAll = keyAll;
 	}
 }
