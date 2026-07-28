@@ -38,7 +38,10 @@ public:
 	virtual BOOL OnInitDialog();
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	CKpiListCtrl m_lc;
+	CCustomEdit m_extFilter;
+	CCustomStatic m_extFilterLbl;
 	afx_msg void OnLvnItemchangedList1(NMHDR *pNMHDR, LRESULT *pResult);
+	afx_msg void OnEnChangeExtFilter();
 	afx_msg void OnBnClickedOk();
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
@@ -52,6 +55,11 @@ private:
 	// savedata に記録したウィンドウのサイズ・位置を復元/保存する
 	void RestoreSavedPlacement();
 	void SaveSavedPlacement();
+	// 表示中行のチェック → kpichk[実index] へ吸い上げ(フィルタ再構築前に必須)
+	void SyncChecksFromList();
+	// 拡張子フィルタに合う行だけリストへ載せ直す。ItemData に実 KPI index を持つ。
+	void FillKpiList();
 	int m_minW = 0;   // 最小ウィンドウ幅(初期サイズ)
 	int m_minH = 0;   // 最小ウィンドウ高さ(初期サイズ)
+	BOOL m_bFillingList = FALSE; // Fill 中の LVN_ITEMCHANGED を無視
 };

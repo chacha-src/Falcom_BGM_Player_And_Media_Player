@@ -817,6 +817,18 @@
 #define IDC_TC_EXEC                     3609
 #define IDC_TC_CLOSE                    3610
 #define IDC_TC_STATUS                   3611
+#define IDC_KPI_EXTFILTER_L             3612
+#define IDC_KPI_EXTFILTER               3613
+#define IDC_SYOSAI_BTN_BROWSE           3614
+#define IDC_SYOSAI_BTN_TAG2PL           3615
+#define IDC_SYOSAI_BTN_RELOADTAG        3616
+#define IDC_SYOSAI_BTN_WRITETAG         3617
+#define IDC_SYOSAI_BTN_COPYPATH         3618
+#define IDC_SYOSAI_BTN_COPYNAME         3619
+#define IDC_SYOSAI_BTN_PROTOOLS         3620
+#define IDC_SYOSAI_BTN_CLEARPARAM       3621
+#define IDC_SYOSAI_LBL_STATUS           3622
+#define IDC_SYOSAI_LBL_PARAM            3623
 
 // Next default values for new objects
 // 
@@ -824,7 +836,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        208
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3612
+#define _APS_NEXT_CONTROL_VALUE         3624
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

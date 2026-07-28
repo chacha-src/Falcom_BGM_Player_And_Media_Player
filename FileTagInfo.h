@@ -31,5 +31,6 @@ struct FileTagFields {
 };
 
 void ReadFileTagFields(LPCTSTR path, FileTagFields& out);
-// MP3 ID3v2 書き込み。成功で true。非対応拡張子は false。
+// 対応: MP3 ID3v2 / FLAC VorbisComment / WAV RIFF INFO / M4A(AAC) iTunes meta / Ogg Vorbis comment
+// 非対応例: 暗号化 flac(.qull3h), Opus 書き込み など。成功で true。
 bool WriteFileTagFields(LPCTSTR path, const FileTagFields& in);

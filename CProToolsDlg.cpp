@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CProToolsDlg.h"
@@ -655,20 +655,20 @@ void CProToolsDlg::OnBnClickedWriteTag()
 	tags.loop2 = m_loopOut > 0 ? m_loopOut : 0;
 	if (!WriteFileTagFields(pc.fol, tags)) {
 		AfxMessageBox(LL14(
-			L"タグの書き込みに失敗しました(対応: MP3 ID3v2)。",
-			L"Failed to write tags (supported: MP3 ID3v2).",
-			L"Echec ecriture tags (MP3 ID3v2).",
-			L"Scrittura tag non riuscita (MP3 ID3v2).",
-			L"Error al escribir etiquetas (MP3 ID3v2).",
-			L"태그 쓰기 실패(MP3 ID3v2).",
-			L"写入标签失败（支持 MP3 ID3v2）。",
-			L"فشل كتابة الوسوم (MP3 ID3v2).",
-			L"Не удалось записать теги (MP3 ID3v2).",
-			L"Tag schreiben fehlgeschlagen (MP3 ID3v2).",
-			L"Falha ao gravar tags (MP3 ID3v2).",
-			L"Tags schrijven mislukt (MP3 ID3v2).",
-			L"Nie udało się zapisać tagów (MP3 ID3v2).",
-			L"Etiket yazılamadı (MP3 ID3v2)."), MB_ICONWARNING);
+			L"タグの書き込みに失敗しました。\n対応: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Failed to write tags.\nSupported: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Echec ecriture tags.\nPris en charge: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Scrittura tag non riuscita.\nSupportati: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Error al escribir etiquetas.\nCompatible: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"태그 쓰기 실패.\n지원: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"写入标签失败。\n支持: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"فشل كتابة الوسوم.\nالمدعوم: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Не удалось записать теги.\nПоддержка: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Tag schreiben fehlgeschlagen.\nUnterstuetzt: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Falha ao gravar tags.\nSuportado: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Tags schrijven mislukt.\nOndersteund: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Nie udało się zapisać tagów.\nObsługa: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Etiket yazılamadı.\nDestek: MP3 / FLAC / WAV / M4A / Ogg Vorbis"), MB_ICONWARNING);
 		return;
 	}
 	{

@@ -7,7 +7,14 @@
 #include "PlayList.h"
 #include "ListSyosai.h"
 #include "FileTagInfo.h"
+#include "SongParams.h"
+#include <shlwapi.h>
+#include <algorithm>
 
+#pragma comment(lib, "shlwapi.lib")
+
+// ワードラップ解除コールバック(前方宣言)
+static int CALLBACK EditWordBreakProc(LPTSTR lpch, int ichCurrent, int cch, int code);
 
 // CListSyosai ダイアログ
 
@@ -16,7 +23,7 @@ IMPLEMENT_DYNAMIC(CListSyosai, CCustomBlurDialogBase)
 CListSyosai::CListSyosai(CWnd* pParent /*=NULL*/)
 	: CCustomBlurDialogBase(CListSyosai::IDD, pParent)
 {
-
+	ZeroMemory(&pc, sizeof(pc));
 }
 
 CListSyosai::~CListSyosai()
@@ -58,45 +65,35 @@ void CListSyosai::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SYOSAI_LBL_TIME, m_lblTime);
 	DDX_Control(pDX, IDC_SYOSAI_LBL_LOOP, m_lblLoop);
 	DDX_Control(pDX, IDC_SYOSAI_LBL_RET2, m_lblRet2);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_STATUS, m_lblStatus);
+	DDX_Control(pDX, IDC_SYOSAI_LBL_PARAM, m_lblParam);
+	DDX_Control(pDX, IDC_SYOSAI_BTN_BROWSE, m_btnBrowse);
+	DDX_Control(pDX, IDC_SYOSAI_BTN_TAG2PL, m_btnTag2Pl);
+	DDX_Control(pDX, IDC_SYOSAI_BTN_RELOADTAG, m_btnReloadTag);
+	DDX_Control(pDX, IDC_SYOSAI_BTN_WRITETAG, m_btnWriteTag);
+	DDX_Control(pDX, IDC_SYOSAI_BTN_COPYPATH, m_btnCopyPath);
+	DDX_Control(pDX, IDC_SYOSAI_BTN_COPYNAME, m_btnCopyName);
+	DDX_Control(pDX, IDC_SYOSAI_BTN_PROTOOLS, m_btnProTools);
+	DDX_Control(pDX, IDC_SYOSAI_BTN_CLEARPARAM, m_btnClearParam);
 }
 
 #include "CImageBase.h"
 BEGIN_MESSAGE_MAP(CListSyosai, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDOK999, &CListSyosai::OnBnClickedOk2)
+	ON_BN_CLICKED(IDOK999, &CListSyosai::OnBnClickedExplorer)
 	ON_BN_CLICKED(ID_OK, &CListSyosai::OnBnClickedOk)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_BROWSE, &CListSyosai::OnBnClickedBrowse)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_TAG2PL, &CListSyosai::OnBnClickedTag2Pl)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_RELOADTAG, &CListSyosai::OnBnClickedReloadTag)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_WRITETAG, &CListSyosai::OnBnClickedWriteTag)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_COPYPATH, &CListSyosai::OnBnClickedCopyPath)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_COPYNAME, &CListSyosai::OnBnClickedCopyName)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_PROTOOLS, &CListSyosai::OnBnClickedProTools)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_CLEARPARAM, &CListSyosai::OnBnClickedClearParam)
 	ON_WM_CLOSE()
 	cmn(CListSyosai);
 
 
 // CListSyosai メッセージ ハンドラ
-void CListSyosai::OnClose()
-{
-	EndDialog(0);
-}
-
-void CListSyosai::OnBnClickedOk2()
-{
-	CString s, ss;
-	s = pc.fol;
-	ss = s.Left(s.ReverseFind('\\'));
-	ShellExecute(NULL, _T("open"), ss, _T(""), NULL, SW_SHOWNORMAL);
-}
-
-void CListSyosai::OnBnClickedOk()
-{
-	CString s;
-	m_name.GetWindowText(s);
-	_tcscpy(pc.name, s);
-	m_art.GetWindowText(s);
-	_tcscpy(pc.art, s);
-	m_alb.GetWindowText(s);
-	_tcscpy(pc.alb, s);
-	m_fol.GetWindowText(s);
-	_tcscpy(pc.fol, s);
-	OnOK();
-}
-
-int CALLBACK EditWordBreakProc(LPTSTR lpch, int ichCurrent, int cch, int code);
 
 extern CPlayList* pl;
 extern int plcnt;
@@ -129,15 +126,426 @@ static void RefreshPcDetails(playlistdata0& pc)
 	}
 }
 
+static void CopyTextToClipboard(HWND hwnd, const CString& text)
+{
+	if (!::OpenClipboard(hwnd))
+		return;
+	::EmptyClipboard();
+	const SIZE_T bytes = (SIZE_T)(text.GetLength() + 1) * sizeof(TCHAR);
+	HGLOBAL h = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
+	if (h) {
+		void* p = ::GlobalLock(h);
+		if (p) {
+			memcpy(p, (LPCTSTR)text, bytes);
+			::GlobalUnlock(h);
+#if defined(UNICODE) || defined(_UNICODE)
+			::SetClipboardData(CF_UNICODETEXT, h);
+#else
+			::SetClipboardData(CF_TEXT, h);
+#endif
+		}
+		else {
+			::GlobalFree(h);
+		}
+	}
+	::CloseClipboard();
+}
+
+static CString FormatFileSize(ULONGLONG bytes)
+{
+	CString s;
+	if (bytes < 1024ull)
+		s.Format(_T("%llu B"), bytes);
+	else if (bytes < 1024ull * 1024ull)
+		s.Format(_T("%.1f KB"), bytes / 1024.0);
+	else if (bytes < 1024ull * 1024ull * 1024ull)
+		s.Format(_T("%.2f MB"), bytes / (1024.0 * 1024.0));
+	else
+		s.Format(_T("%.2f GB"), bytes / (1024.0 * 1024.0 * 1024.0));
+	return s;
+}
+
+CString CListSyosai::CurrentPathText() const
+{
+	CString s;
+	if (m_fol.GetSafeHwnd())
+		m_fol.GetWindowText(s);
+	else
+		s = pc.fol;
+	s.Trim();
+	return s;
+}
+
+void CListSyosai::CollectPlaylistFields()
+{
+	CString s;
+	m_name.GetWindowText(s);
+	_tcsncpy(pc.name, s, _countof(pc.name) - 1);
+	pc.name[_countof(pc.name) - 1] = 0;
+	m_art.GetWindowText(s);
+	_tcsncpy(pc.art, s, _countof(pc.art) - 1);
+	pc.art[_countof(pc.art) - 1] = 0;
+	m_alb.GetWindowText(s);
+	_tcsncpy(pc.alb, s, _countof(pc.alb) - 1);
+	pc.alb[_countof(pc.alb) - 1] = 0;
+	m_fol.GetWindowText(s);
+	_tcsncpy(pc.fol, s, _countof(pc.fol) - 1);
+	pc.fol[_countof(pc.fol) - 1] = 0;
+
+	m_loop1.GetWindowText(s);
+	pc.loop1 = _tstoi(s);
+	m_loop2.GetWindowText(s);
+	pc.loop2 = _tstoi(s);
+}
+
+void CListSyosai::CollectTagAndLoopFields(FileTagFields& tags, int& loopStart, int& loopEnd)
+{
+	tags.Clear();
+	m_name.GetWindowText(tags.title);
+	m_art.GetWindowText(tags.artist);
+	m_alb.GetWindowText(tags.album);
+	m_year.GetWindowText(tags.year);
+	m_track.GetWindowText(tags.track);
+	m_j.GetWindowText(tags.genre);
+	m_cmt.GetWindowText(tags.comment);
+	CString s;
+	m_loop1.GetWindowText(s);
+	loopStart = _tstoi(s);
+	m_loop2.GetWindowText(s);
+	loopEnd = _tstoi(s);
+	tags.loop1 = loopStart > 0 ? loopStart : 0;
+	tags.loop2 = loopEnd > 0 ? loopEnd : 0;
+}
+
+void CListSyosai::ApplyTagsToControls(const FileTagFields& tags, bool forceEmpty)
+{
+	if (forceEmpty || tags.year.GetLength()) m_year.SetWindowText(tags.year);
+	if (forceEmpty || tags.track.GetLength()) m_track.SetWindowText(tags.track);
+	if (forceEmpty || tags.genre.GetLength()) m_j.SetWindowText(tags.genre);
+	if (forceEmpty || tags.comment.GetLength()) m_cmt.SetWindowText(tags.comment);
+	if (tags.loop1 || tags.loop2) {
+		CString s;
+		s.Format(_T("%d"), tags.loop1);
+		m_loop1.SetWindowText(s);
+		s.Format(_T("%d"), tags.loop2);
+		m_loop2.SetWindowText(s);
+		pc.loop1 = tags.loop1;
+		pc.loop2 = tags.loop2;
+	}
+}
+
+void CListSyosai::RefreshStatusLines()
+{
+	if (IsBatchMode()) {
+		CString s;
+		s.Format(LL14(
+			L"選択 %d 曲のアーティスト/アルバムを一括変更します。",
+			L"Batch-edit artist/album for %d selected tracks.",
+			L"Modification groupée artiste/album pour %d morceaux.",
+			L"Modifica artist/album per %d brani selezionati.",
+			L"Editar artista/álbum de %d pistas seleccionadas.",
+			L"선택 %d곡의 아티스트/앨범을 일괄 변경합니다.",
+			L"批量修改所选 %d 首的艺术家/专辑。",
+			L"تعديل الفنان/الألبوم لـ %d مسارات.",
+			L"Пакетное изменение исполнителя/альбома для %d треков.",
+			L"Artist/Album für %d Titel gemeinsam ändern.",
+			L"Editar artista/álbum de %d faixas selecionadas.",
+			L"Artiest/album voor %d nummers wijzigen.",
+			L"Zmiana artysty/albumu dla %d utworów.",
+			L"%d seçili parçanın sanatçı/albümünü toplu değiştir."),
+			(int)m_batchIndices.size());
+		m_lblStatus.SetWindowText(s);
+		m_lblParam.SetWindowText(_T(""));
+		return;
+	}
+
+	CString path = CurrentPathText();
+	CString phys = PlPhysicalMediaPath(path);
+	if (phys.IsEmpty())
+		phys = path;
+
+	const BOOL exists = (!phys.IsEmpty() && PathFileExists(phys));
+	CString ext;
+	if (!phys.IsEmpty()) {
+		ext = PathFindExtension(phys);
+		ext.MakeLower();
+	}
+	CString sizeStr = _T("-");
+	if (exists) {
+		WIN32_FILE_ATTRIBUTE_DATA fad = {};
+		if (::GetFileAttributesEx(phys, GetFileExInfoStandard, &fad)) {
+			ULARGE_INTEGER ul;
+			ul.HighPart = fad.nFileSizeHigh;
+			ul.LowPart = fad.nFileSizeLow;
+			sizeStr = FormatFileSize(ul.QuadPart);
+		}
+	}
+
+	CString existLabel = exists
+		? LL14(L"存在する", L"Exists", L"Existe", L"Esiste", L"Existe", L"존재", L"存在", L"موجود", L"Есть", L"Vorhanden", L"Existe", L"Bestaat", L"Istnieje", L"Var")
+		: LL14(L"欠損", L"Missing", L"Manquant", L"Mancante", L"Falta", L"없음", L"缺失", L"مفقود", L"Нет", L"Fehlt", L"Ausente", L"Ontbreekt", L"Brak", L"Yok");
+
+	CString status;
+	status.Format(_T("%s | %s | %s"),
+		(LPCTSTR)existLabel,
+		ext.IsEmpty() ? _T("?") : (LPCTSTR)ext,
+		(LPCTSTR)sizeStr);
+	m_lblStatus.SetWindowText(status);
+
+	CString list = SongParams_CurrentListName();
+	CString tip = SongParams_BuildTipExtra(list, path.IsEmpty() ? pc.fol : path, pc.sub, pc.ret2);
+	const bool has = SongParams_HasEntry(list, path.IsEmpty() ? pc.fol : path, pc.sub, pc.ret2);
+	CString param;
+	if (has) {
+		param = LL14(L"★ 曲ごと設定あり", L"★ Per-song settings saved", L"★ Réglages/morceau", L"★ Impost. per brano",
+			L"★ Ajustes por pista", L"★ 곡별 설정 있음", L"★ 有逐曲设置", L"★ إعدادات لكل أغنية",
+			L"★ Есть настройки трека", L"★ Pro-Titel-Einstellungen", L"★ Config. por faixa",
+			L"★ Per-nummer-instellingen", L"★ Ustawienia utworu", L"★ Parça ayarları var");
+		if (!tip.IsEmpty()) {
+			param += _T(": ");
+			param += tip;
+		}
+	}
+	else {
+		param = LL14(L"★ 曲ごと設定なし", L"★ No per-song settings", L"★ Pas de réglages/morceau", L"★ Nessuna impost. per brano",
+			L"★ Sin ajustes por pista", L"★ 곡별 설정 없음", L"★ 无逐曲设置", L"★ لا إعدادات لكل أغنية",
+			L"★ Нет настроек трека", L"★ Keine Pro-Titel-Einstellungen", L"★ Sem config. por faixa",
+			L"★ Geen per-nummer-instellingen", L"★ Brak ustawień utworu", L"★ Parça ayarı yok");
+	}
+	m_lblParam.SetWindowText(param);
+
+	if (m_btnClearParam.GetSafeHwnd())
+		m_btnClearParam.EnableWindow(has ? TRUE : FALSE);
+	if (m_ok2.GetSafeHwnd()) {
+		const bool canExplore = (phys.Find(_T('\\')) >= 0 || phys.Find(_T('/')) >= 0);
+		m_ok2.EnableWindow(canExplore ? TRUE : FALSE);
+	}
+}
+
+void CListSyosai::ApplyBatchUi()
+{
+	if (!IsBatchMode())
+		return;
+
+	SetWindowText(LL14(L"一括編集", L"Batch edit", L"Edition groupée", L"Modifica multipla", L"Edición por lotes",
+		L"일괄 편집", L"批量编辑", L"تحرير جماعي", L"Пакетное прав.", L"Stapelbearbeitung",
+		L"Edição em lote", L"Batchbewerking", L"Edycja zbiorcza", L"Toplu düzenleme"));
+
+	// 一括は art/alb のみ。他は無効化。
+	m_name.EnableWindow(FALSE);
+	m_fol.EnableWindow(FALSE);
+	m_year.EnableWindow(FALSE);
+	m_track.EnableWindow(FALSE);
+	m_j.EnableWindow(FALSE);
+	m_cmt.EnableWindow(FALSE);
+	m_loop1.EnableWindow(FALSE);
+	m_loop2.EnableWindow(FALSE);
+	m_btnBrowse.EnableWindow(FALSE);
+	m_btnTag2Pl.EnableWindow(FALSE);
+	m_btnReloadTag.EnableWindow(FALSE);
+	m_btnWriteTag.EnableWindow(FALSE);
+	m_btnCopyPath.EnableWindow(FALSE);
+	m_btnCopyName.EnableWindow(FALSE);
+	m_btnProTools.EnableWindow(FALSE);
+	m_btnClearParam.EnableWindow(FALSE);
+	m_ok2.EnableWindow(FALSE);
+
+	if (pl && pl->pc) {
+		CString commonArt = pl->pc[m_batchIndices[0]].art;
+		CString commonAlb = pl->pc[m_batchIndices[0]].alb;
+		bool artSame = true, albSame = true;
+		for (size_t i = 1; i < m_batchIndices.size(); ++i) {
+			const int idx = m_batchIndices[i];
+			if (idx < 0 || idx >= pl->playcnt) continue;
+			if (commonArt.Compare(pl->pc[idx].art) != 0) artSame = false;
+			if (commonAlb.Compare(pl->pc[idx].alb) != 0) albSame = false;
+		}
+		m_art.SetWindowText(artSame ? commonArt : _T(""));
+		m_alb.SetWindowText(albSame ? commonAlb : _T(""));
+	}
+}
+
+void CListSyosai::OnClose()
+{
+	EndDialog(IDCANCEL);
+}
+
+void CListSyosai::OnBnClickedExplorer()
+{
+	CString path = CurrentPathText();
+	CString phys = PlPhysicalMediaPath(path);
+	if (phys.IsEmpty())
+		phys = path;
+	if (phys.IsEmpty())
+		return;
+
+	if (PathFileExists(phys)) {
+		CString params;
+		params.Format(_T("/select,\"%s\""), (LPCTSTR)phys);
+		ShellExecute(NULL, _T("open"), _T("explorer.exe"), params, NULL, SW_SHOWNORMAL);
+		return;
+	}
+
+	CString folder = phys;
+	const int slash = (std::max)(folder.ReverseFind(_T('\\')), folder.ReverseFind(_T('/')));
+	if (slash >= 0)
+		folder = folder.Left(slash);
+	if (!folder.IsEmpty())
+		ShellExecute(NULL, _T("open"), folder, _T(""), NULL, SW_SHOWNORMAL);
+}
+
+void CListSyosai::OnBnClickedOk()
+{
+	CollectPlaylistFields();
+	OnOK();
+}
+
+void CListSyosai::OnBnClickedBrowse()
+{
+	CString cur = CurrentPathText();
+	CString phys = PlPhysicalMediaPath(cur);
+	if (phys.IsEmpty())
+		phys = cur;
+
+	CFileDialog dlg(TRUE, NULL, phys.IsEmpty() ? NULL : (LPCTSTR)phys,
+		OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_EXPLORER,
+		_T("All Files (*.*)|*.*||"), this);
+	if (dlg.DoModal() != IDOK)
+		return;
+
+	CString chosen = dlg.GetPathName();
+	const CString stored = PlStorePlaylistFol(chosen, pc.sub);
+	m_fol.SetWindowText(stored);
+	_tcsncpy(pc.fol, stored, _countof(pc.fol) - 1);
+	pc.fol[_countof(pc.fol) - 1] = 0;
+	RefreshStatusLines();
+}
+
+void CListSyosai::OnBnClickedTag2Pl()
+{
+	FileTagFields tags;
+	ReadFileTagFields(CurrentPathText(), tags);
+	if (!tags.title.IsEmpty())
+		m_name.SetWindowText(tags.title);
+	if (!tags.artist.IsEmpty())
+		m_art.SetWindowText(tags.artist);
+	if (!tags.album.IsEmpty())
+		m_alb.SetWindowText(tags.album);
+	ApplyTagsToControls(tags, false);
+}
+
+void CListSyosai::OnBnClickedReloadTag()
+{
+	FileTagFields tags;
+	ReadFileTagFields(CurrentPathText(), tags);
+	ApplyTagsToControls(tags, true);
+	if (tags.loop1 == 0 && tags.loop2 == 0) {
+		// ループはタグに無ければ現状維持
+	}
+	RefreshStatusLines();
+}
+
+void CListSyosai::OnBnClickedWriteTag()
+{
+	FileTagFields tags;
+	int loopStart = 0, loopEnd = 0;
+	CollectTagAndLoopFields(tags, loopStart, loopEnd);
+	CString path = CurrentPathText();
+	if (!WriteFileTagFields(path, tags)) {
+		AfxMessageBox(LL14(
+			L"タグの書き込みに失敗しました。\n対応: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Failed to write tags.\nSupported: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Echec ecriture tags.\nPris en charge: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Scrittura tag non riuscita.\nSupportati: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Error al escribir etiquetas.\nCompatible: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"태그 쓰기 실패.\n지원: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"写入标签失败。\n支持: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"فشل كتابة الوسوم.\nالمدعوم: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Не удалось записать теги.\nПоддержка: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Tag schreiben fehlgeschlagen.\nUnterstuetzt: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Falha ao gravar tags.\nSuportado: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Tags schrijven mislukt.\nOndersteund: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Nie udało się zapisać tagów.\nObsługa: MP3 / FLAC / WAV / M4A / Ogg Vorbis",
+			L"Etiket yazılamadı.\nDestek: MP3 / FLAC / WAV / M4A / Ogg Vorbis"), MB_ICONWARNING);
+		return;
+	}
+	pc.loop1 = loopStart;
+	pc.loop2 = loopEnd;
+	AfxMessageBox(LL14(L"タグを書き込みました。", L"Tags written.", L"Tags ecrits.", L"Tag scritti.",
+		L"Etiquetas escritas.", L"태그 저장됨.", L"标签已写入。", L"تمت الكتابة.",
+		L"Теги записаны.", L"Tags geschrieben.", L"Tags gravadas.", L"Tags geschreven.",
+		L"Tagi zapisane.", L"Etiketler yazıldı."), MB_ICONINFORMATION);
+}
+
+void CListSyosai::OnBnClickedCopyPath()
+{
+	CopyTextToClipboard(GetSafeHwnd(), CurrentPathText());
+}
+
+void CListSyosai::OnBnClickedCopyName()
+{
+	CString path = CurrentPathText();
+	CString name = path;
+	const int slash = (std::max)(name.ReverseFind(_T('\\')), name.ReverseFind(_T('/')));
+	if (slash >= 0)
+		name = name.Mid(slash + 1);
+	CopyTextToClipboard(GetSafeHwnd(), name);
+}
+
+void CListSyosai::OnBnClickedProTools()
+{
+	CollectPlaylistFields();
+	EndDialog(IDC_SYOSAI_BTN_PROTOOLS);
+}
+
+void CListSyosai::OnBnClickedClearParam()
+{
+	CString msg = LL14(
+		L"この曲の記憶パラメータ(音量・EQ等)を削除します。よろしいですか？",
+		L"Clear saved parameters (volume, EQ, etc.) for this track?",
+		L"Effacer les parametres enregistres de ce morceau ?",
+		L"Cancellare i parametri salvati di questo brano?",
+		L"Borrar los parametros guardados de esta pista?",
+		L"이 곡의 저장 파라미터를 삭제할까요?",
+		L"删除此曲的已存参数？",
+		L"مسح المعلمات المحفوظة لهذا المسار؟",
+		L"Удалить сохранённые параметры этого трека?",
+		L"Gespeicherte Parameter dieses Titels loeschen?",
+		L"Limpar parametros salvos desta faixa?",
+		L"Opgeslagen parameters van dit nummer wissen?",
+		L"Usunąć zapisane parametry tego utworu?",
+		L"Bu parçanın kayıtlı parametreleri silinsin mi?");
+	if (AfxMessageBox(msg, MB_YESNO | MB_ICONQUESTION) != IDYES)
+		return;
+
+	playlistdata0 item = pc;
+	CString path = CurrentPathText();
+	_tcsncpy(item.fol, path, _countof(item.fol) - 1);
+	item.fol[_countof(item.fol) - 1] = 0;
+	CString listKey = SongParams_CurrentListName();
+	SongParams_RebindEntries(listKey, NULL, &item, 1, false);
+	RefreshStatusLines();
+}
+
 BOOL CListSyosai::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	CCC_BringDialogToForeground(this);
-	RefreshPcDetails(pc);
+	if (!IsBatchMode())
+		RefreshPcDetails(pc);
+
 	SetWindowText(LL14(L"ファイル情報", L"File Info", L"Infos fichier", L"Info file", L"Info. de archivo", L"파일 정보", L"文件信息", L"معلومات الملف", L"Сведения о файле", L"Dateiinfo", L"Info. do arquivo", L"Bestandsinfo", L"Informacje o pliku", L"Dosya bilgisi"));
 	SetDlgItemText(ID_OK, LL14(L"OK", L"OK", L"OK", L"OK", L"OK", L"OK", L"确定", L"موافق", L"ОК", L"OK", L"OK", L"OK", L"OK", L"Tamam"));
 	SetDlgItemText(IDCANCEL, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
-	SetDlgItemText(IDOK999, LL14(L"フォルダを開く", L"Open folder", L"Ouvrir le dossier", L"Apri cartella", L"Abrir carpeta", L"폴더 열기", L"打开文件夹", L"فتح المجلد", L"Открыть папку", L"Ordner öffnen", L"Abrir pasta", L"Map openen", L"Otwórz folder", L"Klasörü aç"));
+	SetDlgItemText(IDOK999, LL14(L"Explorer", L"Explorer", L"Explorateur", L"Esplora", L"Explorador", L"탐색기", L"资源管理器", L"المستكشف", L"Проводник", L"Explorer", L"Explorer", L"Verkenner", L"Eksplorator", L"Gezgin"));
+	SetDlgItemText(IDC_SYOSAI_BTN_BROWSE, LL14(L"参照", L"Browse", L"Parcourir", L"Sfoglia", L"Examinar", L"찾아보기", L"浏览", L"استعراض", L"Обзор", L"Durchsuchen", L"Procurar", L"Bladeren", L"Przeglądaj", L"Gözat"));
+	SetDlgItemText(IDC_SYOSAI_BTN_TAG2PL, LL14(L"タグ→PL", L"Tag→PL", L"Tag→PL", L"Tag→PL", L"Tag→PL", L"태그→PL", L"标签→列表", L"وسم→قائمة", L"Тег→PL", L"Tag→PL", L"Tag→PL", L"Tag→PL", L"Tag→PL", L"Etiket→PL"));
+	SetDlgItemText(IDC_SYOSAI_BTN_RELOADTAG, LL14(L"再読込", L"Reload", L"Recharger", L"Ricarica", L"Recargar", L"다시 읽기", L"重新加载", L"إعادة تحميل", L"Обновить", L"Neu laden", L"Recarregar", L"Herladen", L"Wczytaj", L"Yenile"));
+	SetDlgItemText(IDC_SYOSAI_BTN_WRITETAG, LL14(L"タグ書込", L"Write tag", L"Ecrire tag", L"Scrivi tag", L"Escribir tag", L"태그 쓰기", L"写入标签", L"كتابة وسم", L"Записать тег", L"Tag schreiben", L"Gravar tag", L"Tag schrijven", L"Zapisz tag", L"Etiket yaz"));
+	SetDlgItemText(IDC_SYOSAI_BTN_COPYPATH, LL14(L"パスコピー", L"Copy path", L"Copier chemin", L"Copia percorso", L"Copiar ruta", L"경로 복사", L"复制路径", L"نسخ المسار", L"Копировать путь", L"Pfad kopieren", L"Copiar caminho", L"Pad kopiëren", L"Kopiuj ścieżkę", L"Yolu kopyala"));
+	SetDlgItemText(IDC_SYOSAI_BTN_COPYNAME, LL14(L"名コピー", L"Copy name", L"Copier nom", L"Copia nome", L"Copiar nombre", L"이름 복사", L"复制文件名", L"نسخ الاسم", L"Копировать имя", L"Name kopieren", L"Copiar nome", L"Naam kopiëren", L"Kopiuj nazwę", L"Adı kopyala"));
+	SetDlgItemText(IDC_SYOSAI_BTN_PROTOOLS, LL14(L"再生詳細", L"Playback details", L"Details lecture", L"Dettagli riproduzione", L"Detalles reproducción", L"재생 상세", L"播放详情", L"تفاصيل التشغيل", L"Детали воспроизведения", L"Wiedergabedetails", L"Detalhes de reprodução", L"Afspeeldetails", L"Szczegóły odtwarzania", L"Oynatma ayrıntıları"));
+	SetDlgItemText(IDC_SYOSAI_BTN_CLEARPARAM, LL14(L"★削除", L"Clear ★", L"Effacer ★", L"Cancella ★", L"Borrar ★", L"★ 삭제", L"删除★", L"مسح ★", L"Удалить ★", L"★ löschen", L"Limpar ★", L"★ wissen", L"Usuń ★", L"★ sil"));
 	SetDlgItemText(IDC_SYOSAI_GRP_EDIT, LL14(L"プレイリスト", L"Playlist", L"Liste de lecture", L"Playlist", L"Lista de reproducción", L"재생 목록", L"播放列表", L"قائمة التشغيل", L"Плейлист", L"Wiedergabeliste", L"Lista de reprodução", L"Afspeellijst", L"Playlista", L"Çalma listesi"));
 	SetDlgItemText(IDC_SYOSAI_GRP_TAG, LL14(L"タグ情報", L"Tag info", L"Infos balises", L"Info tag", L"Info. de etiquetas", L"태그 정보", L"标签信息", L"معلومات الوسم", L"Теги", L"Tag-Info", L"Info. de tags", L"Taginfo", L"Info. o tagach", L"Etiket bilgisi"));
 	SetDlgItemText(IDC_SYOSAI_GRP_INTERNAL, LL14(L"内部情報", L"Internal info", L"Infos internes", L"Info interne", L"Info. interna", L"내부 정보", L"内部信息", L"معلومات داخلية", L"Служебная информация", L"Interne Info", L"Info. interna", L"Interne info", L"Info. wewnętrzne", L"Dahili bilgi"));
@@ -182,10 +590,7 @@ BOOL CListSyosai::OnInitDialog()
 	s.Format(_T("%d"), pc.ret2);
 	m_ret2.SetWindowText(s);
 
-	s = pc.fol;
-	if (s.Find('\\', 0) == -1 && s.Find('/', 0) == -1)
-		m_ok2.EnableWindow(FALSE);
-	{
+	if (!IsBatchMode()) {
 		FileTagFields tags;
 		ReadFileTagFields(pc.fol, tags);
 		if (pc.loop1 == 0 && pc.loop2 == 0 && (tags.loop1 || tags.loop2)) {
@@ -196,30 +601,40 @@ BOOL CListSyosai::OnInitDialog()
 			s.Format(_T("%d"), pc.loop2);
 			m_loop2.SetWindowText(s);
 		}
-		if (tags.year.GetLength()) m_year.SetWindowText(tags.year);
-		if (tags.track.GetLength()) m_track.SetWindowText(tags.track);
-		if (tags.genre.GetLength()) m_j.SetWindowText(tags.genre);
-		if (tags.comment.GetLength()) m_cmt.SetWindowText(tags.comment);
+		ApplyTagsToControls(tags);
 	}
+
+	ApplyBatchUi();
+	RefreshStatusLines();
 
 	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
 	m_tooltip.AddTool(GetDlgItem(IDC_EDIT1), LL14(L"プレイリストに表示される曲名です。\nOKで保存されます。", L"Track name shown in the playlist.\nSaved when you click OK.", L"Nom affiche dans la liste.\nEnregistre avec OK.", L"Nome mostrato nella playlist.\nSalvato con OK.", L"Nombre mostrado en la lista.\nSe guarda con OK.", L"재생 목록에 표시되는 곡명입니다.\nOK로 저장됩니다.", L"播放列表中显示的曲名。\n点击确定保存。", L"اسم المسار المعروض في القائمة.\nيُحفظ عند OK.", L"Название в плейлисте.\nСохраняется по OK.", L"Titel in der Wiedergabeliste.\nMit OK speichern.", L"Nome exibido na lista.\nSalvo com OK.", L"Naam in afspeellijst.\nOpslaan met OK.", L"Nazwa w playliście.\nZapis po OK.", L"Calma listesinde gorunen ad.\nTamam ile kaydedilir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_EDIT4), LL14(L"プレイリストに表示されるアーティスト名です。\nOKで保存されます。", L"Artist name shown in the playlist.\nSaved when you click OK.", L"Artiste affiche dans la liste.\nEnregistre avec OK.", L"Artista mostrato nella playlist.\nSalvato con OK.", L"Artista mostrado en la lista.\nSe guarda con OK.", L"재생 목록에 표시되는 아티스트명입니다.\nOK로 저장됩니다.", L"播放列表中显示的艺术家。\n点击确定保存。", L"اسم الفنان المعروض في القائمة.\nيُحفظ عند OK.", L"Исполнитель в плейлисте.\nСохраняется по OK.", L"Kunstler in der Wiedergabeliste.\nMit OK speichern.", L"Artista exibido na lista.\nSalvo com OK.", L"Artiest in afspeellijst.\nOpslaan met OK.", L"Artysta w playliście.\nZapis po OK.", L"Calma listesinde gorunen sanatci.\nTamam ile kaydedilir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_EDIT5), LL14(L"プレイリストに表示されるアルバム名です。\nOKで保存されます。", L"Album name shown in the playlist.\nSaved when you click OK.", L"Album affiche dans la liste.\nEnregistre avec OK.", L"Album mostrato nella playlist.\nSalvato con OK.", L"Album mostrado en la lista.\nSe guarda con OK.", L"재생 목록에 표시되는 앨범명입니다.\nOK로 저장됩니다.", L"播放列表中显示的专辑名。\n点击确定保存。", L"اسم الألبوم المعروض في القائمة.\nيُحفظ عند OK.", L"Альбом в плейлисте.\nСохраняется по OK.", L"Album in der Wiedergabeliste.\nMit OK speichern.", L"Album exibido na lista.\nSalvo com OK.", L"Album in afspeellijst.\nOpslaan met OK.", L"Album w playliście.\nZapis po OK.", L"Calma listesinde gorunen album.\nTamam ile kaydedilir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_EDIT6), LL14(L"曲ファイルのパスです。\n変更するとプレイリストの参照先が変わります。\nOKで保存されます。", L"Path to the track file.\nChanging it updates the playlist reference.\nSaved when you click OK.", L"Chemin du fichier.\nLa modification change la reference dans la liste.\nEnregistre avec OK.", L"Percorso del file.\nModificarlo cambia il riferimento nella playlist.\nSalvato con OK.", L"Ruta del archivo.\nCambiarla actualiza la referencia en la lista.\nSe guarda con OK.", L"곡 파일 경로입니다.\n변경하면 재생 목록 참조가 바뀝니다.\nOK로 저장됩니다.", L"曲文件路径。\n更改后会更新播放列表引用。\n点击确定保存。", L"مسار ملف المسار.\nتغييره يحدّث المرجع في القائمة.\nيُحفظ عند OK.", L"Путь к файлу.\nИзменение обновляет ссылку в плейлисте.\nСохраняется по OK.", L"Pfad zur Datei.\nAnderung aktualisiert den Verweis.\nMit OK speichern.", L"Caminho do arquivo.\nAlterar atualiza a referencia na lista.\nSalvo com OK.", L"Pad naar bestand.\nWijzigen past referentie aan.\nOpslaan met OK.", L"Sciezka pliku.\nZmiana aktualizuje odniesienie.\nZapis po OK.", L"Dosya yolu.\nDegistirmek listedeki referansi gunceller.\nTamam ile kaydedilir."));
-	m_tooltip.AddTool(GetDlgItem(IDC_EDIT7), LL14(L"ファイルのタグから読み取った年です。\n読取専用です。", L"Year from the file tags.\nRead-only.", L"Annee lue depuis les balises du fichier.\nLecture seule.", L"Anno dai tag del file.\nSola lettura.", L"Ano de las etiquetas del archivo.\nSolo lectura.", L"파일 태그에서 읽은 연도입니다.\n읽기 전용.", L"从文件标签读取的年份。\n只读。", L"السنة من وسوم الملف.\nللقراءة فقط.", L"Год из тегов файла.\nТолько чтение.", L"Jahr aus Datei-Tags.\nNur Lesen.", L"Ano das tags do arquivo.\nSomente leitura.", L"Jaar uit bestandstags.\nAlleen lezen.", L"Rok z tagow pliku.\nTylko odczyt.", L"Dosya etiketinden yil.\nSalt okunur."));
-	m_tooltip.AddTool(GetDlgItem(IDC_EDIT9), LL14(L"ファイルのタグから読み取ったトラック番号です。\n読取専用です。", L"Track number from the file tags.\nRead-only.", L"Numero de piste depuis les balises du fichier.\nLecture seule.", L"Numero traccia dai tag del file.\nSola lettura.", L"Numero de pista de las etiquetas.\nSolo lectura.", L"파일 태그의 트랙 번호입니다.\n읽기 전용.", L"从文件标签读取的曲目编号。\n只读。", L"رقم المسار من وسوم الملف.\nللقراءة فقط.", L"Номер трека из тегов файла.\nТолько чтение.", L"Titelnummer aus Datei-Tags.\nNur Lesen.", L"Numero da faixa das tags.\nSomente leitura.", L"Tracknummer uit bestandstags.\nAlleen lezen.", L"Numer utworu z tagow.\nTylko odczyt.", L"Dosya etiketindeki parca numarasi.\nSalt okunur."));
-	m_tooltip.AddTool(GetDlgItem(IDC_EDIT10), LL14(L"ファイルのタグから読み取ったジャンルです。\n読取専用です。", L"Genre from the file tags.\nRead-only.", L"Genre depuis les balises du fichier.\nLecture seule.", L"Genere dai tag del file.\nSola lettura.", L"Genero de las etiquetas.\nSolo lectura.", L"파일 태그의 장르입니다.\n읽기 전용.", L"从文件标签读取的流派。\n只读。", L"النوع من وسوم الملف.\nللقراءة فقط.", L"Жанр из тегов файла.\nТолько чтение.", L"Genre aus Datei-Tags.\nNur Lesen.", L"Genero das tags.\nSomente leitura.", L"Genre uit bestandstags.\nAlleen lezen.", L"Gatunek z tagow.\nTylko odczyt.", L"Dosya etiketindeki tur.\nSalt okunur."));
-	m_tooltip.AddTool(GetDlgItem(IDC_EDIT11), LL14(L"ファイルのタグから読み取ったコメントです。\n読取専用です。", L"Comment from the file tags.\nRead-only.", L"Commentaire depuis les balises du fichier.\nLecture seule.", L"Commento dai tag del file.\nSola lettura.", L"Comentario de las etiquetas.\nSolo lectura.", L"파일 태그의 코멘트입니다.\n읽기 전용.", L"从文件标签读取的注释。\n只读。", L"تعليق من وسوم الملف.\nللقراءة فقط.", L"Комментарий из тегов файла.\nТолько чтение.", L"Kommentar aus Datei-Tags.\nNur Lesen.", L"Comentario das tags.\nSomente leitura.", L"Opmerking uit bestandstags.\nAlleen lezen.", L"Komentarz z tagow.\nTylko odczyt.", L"Dosya etiketindeki yorum.\nSalt okunur."));
+	m_tooltip.AddTool(GetDlgItem(IDC_EDIT7), LL14(L"ファイルタグの年。編集可。タグ書込でファイルへ反映(MP3/FLAC/WAV/M4A/Ogg等)。", L"Year from file tags. Editable. Write tag saves to file (MP3/FLAC/WAV/M4A/Ogg etc.).", L"Annee des tags. Editable.", L"Anno dai tag. Modificabile.", L"Ano de etiquetas. Editable.", L"파일 태그 연도. 편집 가능.", L"文件标签年份。可编辑。", L"سنة الوسوم. قابلة للتحرير.", L"Год из тегов. Редактируемо.", L"Jahr aus Tags. Editierbar.", L"Ano das tags. Editavel.", L"Jaar uit tags. Bewerkbaar.", L"Rok z tagow. Edytowalny.", L"Etiket yili. Duzenlenebilir."));
+	m_tooltip.AddTool(GetDlgItem(IDC_EDIT9), LL14(L"ファイルタグのトラック番号。編集可。", L"Track number from file tags. Editable.", L"Numero de piste. Editable.", L"Numero traccia. Modificabile.", L"Numero de pista. Editable.", L"트랙 번호. 편집 가능.", L"曲目编号。可编辑。", L"رقم المسار. قابل للتحرير.", L"Номер трека. Редактируемо.", L"Titelnummer. Editierbar.", L"Numero da faixa. Editavel.", L"Tracknummer. Bewerkbaar.", L"Numer utworu. Edytowalny.", L"Parca no. Duzenlenebilir."));
+	m_tooltip.AddTool(GetDlgItem(IDC_EDIT10), LL14(L"ファイルタグのジャンル。編集可。", L"Genre from file tags. Editable.", L"Genre. Editable.", L"Genere. Modificabile.", L"Genero. Editable.", L"장르. 편집 가능.", L"流派。可编辑。", L"النوع. قابل للتحرير.", L"Жанр. Редактируемо.", L"Genre. Editierbar.", L"Genero. Editavel.", L"Genre. Bewerkbaar.", L"Gatunek. Edytowalny.", L"Tur. Duzenlenebilir."));
+	m_tooltip.AddTool(GetDlgItem(IDC_EDIT11), LL14(L"ファイルタグのコメント。編集可。", L"Comment from file tags. Editable.", L"Commentaire. Editable.", L"Commento. Modificabile.", L"Comentario. Editable.", L"코멘트. 편집 가능.", L"注释。可编辑。", L"تعليق. قابل للتحرير.", L"Комментарий. Редактируемо.", L"Kommentar. Editierbar.", L"Comentario. Editavel.", L"Opmerking. Bewerkbaar.", L"Komentarz. Edytowalny.", L"Yorum. Duzenlenebilir."));
+	m_tooltip.AddTool(GetDlgItem(IDC_EDIT13), LL14(L"ループ開始(サンプル)。OKでプレイリストへ保存。", L"Loop start (samples). Saved to playlist on OK.", L"Debut de boucle. Enregistre avec OK.", L"Inizio loop. Salvato con OK.", L"Inicio de bucle. Se guarda con OK.", L"루프 시작(샘플). OK로 저장.", L"循环起始。确定保存。", L"بداية التكرار. يُحفظ مع OK.", L"Начало петли. Сохраняется по OK.", L"Schleifenstart. Mit OK speichern.", L"Inicio do loop. Salvo com OK.", L"Loopstart. Opslaan met OK.", L"Poczatek petli. Zapis po OK.", L"Dongu baslangici. Tamam ile kaydet."));
+	m_tooltip.AddTool(GetDlgItem(IDC_EDIT14), LL14(L"ループ終了(サンプル)。OKでプレイリストへ保存。", L"Loop end (samples). Saved to playlist on OK.", L"Fin de boucle. Enregistre avec OK.", L"Fine loop. Salvato con OK.", L"Fin de bucle. Se guarda con OK.", L"루프 종료(샘플). OK로 저장.", L"循环结束。确定保存。", L"نهاية التكرار. يُحفظ مع OK.", L"Конец петли. Сохраняется по OK.", L"Schleifenende. Mit OK speichern.", L"Fim do loop. Salvo com OK.", L"Loopeinde. Opslaan met OK.", L"Koniec petli. Zapis po OK.", L"Dongu bitisi. Tamam ile kaydet."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SYOSAI_BTN_TAG2PL), LL14(L"ファイルタグのタイトル/アーティスト/アルバムをプレイリスト欄へコピーします。", L"Copy tag title/artist/album into playlist fields.", L"Copier titre/artiste/album des tags vers la playlist.", L"Copia titolo/artista/album dai tag.", L"Copiar titulo/artista/album de etiquetas.", L"태그 제목/아티스트/앨범을 재생 목록란으로 복사.", L"将标签的标题/艺术家/专辑复制到播放列表字段。", L"نسخ العنوان/الفنان/الألبوم من الوسوم.", L"Копировать название/исполнителя/альбом из тегов.", L"Titel/Artist/Album aus Tags in Playlist kopieren.", L"Copiar titulo/artista/album das tags.", L"Titel/artiest/album uit tags kopieren.", L"Kopiuj tytul/artyste/album z tagow.", L"Etiket baslik/sanatci/albumu listeye kopyala."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SYOSAI_BTN_RELOADTAG), LL14(L"ファイルからタグ情報を再読み込みします。", L"Reload tag info from the file.", L"Recharger les tags depuis le fichier.", L"Ricarica i tag dal file.", L"Recargar etiquetas del archivo.", L"파일에서 태그 정보를 다시 읽습니다.", L"从文件重新加载标签信息。", L"إعادة تحميل معلومات الوسوم من الملف.", L"Перечитать теги из файла.", L"Tags aus der Datei neu laden.", L"Recarregar tags do arquivo.", L"Tags opnieuw laden uit bestand.", L"Wczytaj ponownie tagi z pliku.", L"Dosyadan etiket bilgisini yeniden yükle."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SYOSAI_BTN_WRITETAG), LL14(L"表示中のメタデータをファイルタグへ書き込みます。\n対応: MP3 / FLAC / WAV / M4A / Ogg Vorbis", L"Write displayed metadata to file tags.\nSupported: MP3 / FLAC / WAV / M4A / Ogg Vorbis", L"Ecrire les metadonnees dans les tags.\nMP3 / FLAC / WAV / M4A / Ogg Vorbis", L"Scrivi metadati nei tag.\nMP3 / FLAC / WAV / M4A / Ogg Vorbis", L"Escribir metadatos en etiquetas.\nMP3 / FLAC / WAV / M4A / Ogg Vorbis", L"표시 메타데이터를 파일 태그에 씁니다.\n지원: MP3 / FLAC / WAV / M4A / Ogg Vorbis", L"将显示的元数据写入文件标签。\n支持: MP3 / FLAC / WAV / M4A / Ogg Vorbis", L"كتابة البيانات إلى الوسوم.\nMP3 / FLAC / WAV / M4A / Ogg Vorbis", L"Записать метаданные в теги.\nMP3 / FLAC / WAV / M4A / Ogg Vorbis", L"Metadaten in Tags schreiben.\nMP3 / FLAC / WAV / M4A / Ogg Vorbis", L"Gravar metadados nas tags.\nMP3 / FLAC / WAV / M4A / Ogg Vorbis", L"Metadata naar tags schrijven.\nMP3 / FLAC / WAV / M4A / Ogg Vorbis", L"Zapisz metadane do tagow.\nMP3 / FLAC / WAV / M4A / Ogg Vorbis", L"Metadata etiketlere yaz.\nMP3 / FLAC / WAV / M4A / Ogg Vorbis"));
+	m_tooltip.AddTool(GetDlgItem(IDC_SYOSAI_BTN_BROWSE), LL14(L"ファイルを選んでパスを差し替えます。\nOKでプレイリストへ保存されます。", L"Pick a file to replace the path.\nSaved to the playlist on OK.", L"Choisir un fichier pour remplacer le chemin.\nEnregistre avec OK.", L"Scegli un file per sostituire il percorso.\nSalvato con OK.", L"Elegir un archivo para cambiar la ruta.\nSe guarda con OK.", L"파일을 골라 경로를 바꿉니다.\nOK로 재생 목록에 저장.", L"选择文件以替换路径。\n确定后保存到播放列表。", L"اختر ملفاً لاستبدال المسار.\nيُحفظ مع OK.", L"Выбрать файл для замены пути.\nСохраняется по OK.", L"Datei waehlen und Pfad ersetzen.\nMit OK speichern.", L"Escolher arquivo para trocar o caminho.\nSalvo com OK.", L"Kies een bestand om het pad te vervangen.\nOpslaan met OK.", L"Wybierz plik, aby zmienic sciezke.\nZapis po OK.", L"Dosya secerek yolu degistirir.\nTamam ile kaydedilir."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SYOSAI_BTN_COPYPATH), LL14(L"パスをクリップボードへコピーします。", L"Copy the path to the clipboard.", L"Copier le chemin dans le presse-papiers.", L"Copia il percorso negli appunti.", L"Copiar la ruta al portapapeles.", L"경로를 클립보드에 복사합니다.", L"将路径复制到剪贴板。", L"نسخ المسار إلى الحافظة.", L"Копировать путь в буфер обмена.", L"Pfad in die Zwischenablage kopieren.", L"Copiar o caminho para a area de transferencia.", L"Pad naar klembord kopieren.", L"Kopiuj sciezke do schowka.", L"Yolu panoya kopyalar."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SYOSAI_BTN_COPYNAME), LL14(L"ファイル名(パス末尾)をクリップボードへコピーします。", L"Copy the file name (end of path) to the clipboard.", L"Copier le nom de fichier dans le presse-papiers.", L"Copia il nome file negli appunti.", L"Copiar el nombre de archivo al portapapeles.", L"파일 이름(경로 끝)을 클립보드에 복사합니다.", L"将文件名（路径末尾）复制到剪贴板。", L"نسخ اسم الملف إلى الحافظة.", L"Копировать имя файла в буфер обмена.", L"Dateinamen in die Zwischenablage kopieren.", L"Copiar o nome do arquivo para a area de transferencia.", L"Bestandsnaam naar klembord kopieren.", L"Kopiuj nazwe pliku do schowka.", L"Dosya adini (yol sonu) panoya kopyalar."));
+	m_tooltip.AddTool(GetDlgItem(IDOK999), LL14(L"エクスプローラーでファイルを選択表示します。無い場合はフォルダを開きます。", L"Select the file in Explorer. Opens the folder if missing.", L"Selectionner le fichier dans l'explorateur.", L"Seleziona il file in Esplora risorse.", L"Seleccionar el archivo en el explorador.", L"탐색기에서 파일을 선택 표시합니다.", L"在资源管理器中选中文件。", L"تحديد الملف في المستكشف.", L"Выделить файл в проводнике.", L"Datei im Explorer auswaehlen.", L"Selecionar arquivo no Explorer.", L"Bestand selecteren in Verkenner.", L"Zaznacz plik w Eksploratorze.", L"Gezgin'de dosyayi sec."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SYOSAI_BTN_PROTOOLS), LL14(L"再生詳細ダイアログを開きます(ループ/キュー/タグ等)。", L"Open playback details (loop/cues/tags).", L"Ouvrir les details de lecture.", L"Apri dettagli riproduzione.", L"Abrir detalles de reproduccion.", L"재생 상세를 엽니다.", L"打开播放详情。", L"فتح تفاصيل التشغيل.", L"Открыть детали воспроизведения.", L"Wiedergabedetails oeffnen.", L"Abrir detalhes de reproducao.", L"Afspeeldetails openen.", L"Otworz szczegoly odtwarzania.", L"Oynatma ayrintilarini ac."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SYOSAI_BTN_CLEARPARAM), LL14(L"この曲の記憶パラメータ(音量・EQ等)を削除します。", L"Clear saved parameters (volume, EQ, etc.) for this track.", L"Effacer les parametres enregistres de ce morceau.", L"Cancella i parametri salvati di questo brano.", L"Borrar los parametros guardados de esta pista.", L"이 곡의 저장 파라미터(볼륨·EQ 등)를 삭제합니다.", L"删除此曲的已存参数（音量、EQ等）。", L"مسح المعلمات المحفوظة لهذا المسار.", L"Удалить сохранённые параметры этого трека.", L"Gespeicherte Parameter dieses Titels loeschen.", L"Limpar parametros salvos desta faixa.", L"Opgeslagen parameters van dit nummer wissen.", L"Usun zapisane parametry tego utworu.", L"Bu parçanın kayıtlı parametrelerini siler."));
 	m_tooltip.AddTool(GetDlgItem(IDC_EDIT2), LL14(L"曲の内部識別ID（ゲーム/形式ごとの番号）です。\n読取専用です。", L"Internal track ID (number per game/format).\nRead-only.", L"ID interne de la piste.\nLecture seule.", L"ID interno della traccia.\nSola lettura.", L"ID interno de la pista.\nSolo lectura.", L"곡의 내부 식별 ID입니다.\n읽기 전용.", L"曲目的内部识别 ID。\n只读。", L"المعرّف الداخلي للمسار.\nللقراءة فقط.", L"Внутренний ID трека.\nТолько чтение.", L"Interne Titel-ID.\nNur Lesen.", L"ID interno da faixa.\nSomente leitura.", L"Intern track-ID.\nAlleen lezen.", L"Wewnetrzne ID utworu.\nTylko odczyt.", L"Parcanin dahili kimligi.\nSalt okunur."));
 	m_tooltip.AddTool(GetDlgItem(IDC_EDIT3), LL14(L"曲が属するゲーム名です。\n読取専用です。", L"Game this track belongs to.\nRead-only.", L"Jeu auquel appartient la piste.\nLecture seule.", L"Gioco di appartenenza.\nSola lettura.", L"Juego al que pertenece la pista.\nSolo lectura.", L"곡이 속한 게임 이름입니다.\n읽기 전용.", L"曲目所属的游戏名。\n只读。", L"اللعبة التي ينتمي إليها المسار.\nللقراءة فقط.", L"Игра, к которой относится трек.\nТолько чтение.", L"Spiel, zu dem der Titel gehort.\nNur Lesen.", L"Jogo ao qual a faixa pertence.\nSomente leitura.", L"Spel waartoe het nummer behoort.\nAlleen lezen.", L"Gra, do ktorej nalezy utwor.\nTylko odczyt.", L"Parcanin ait oldugu oyun.\nSalt okunur."));
 	m_tooltip.AddTool(GetDlgItem(IDC_EDIT12), LL14(L"曲の再生時間です。\n読取専用です。", L"Track duration.\nRead-only.", L"Duree de la piste.\nLecture seule.", L"Durata della traccia.\nSola lettura.", L"Duracion de la pista.\nSolo lectura.", L"곡 재생 시간입니다.\n읽기 전용.", L"曲目时长。\n只读。", L"مدة المسار.\nللقراءة فقط.", L"Длительность трека.\nТолько чтение.", L"Titeldauer.\nNur Lesen.", L"Duracao da faixa.\nSomente leitura.", L"Duur van het nummer.\nAlleen lezen.", L"Czas trwania utworu.\nTylko odczyt.", L"Parca suresi.\nSalt okunur."));
-	m_tooltip.AddTool(GetDlgItem(IDC_EDIT13), LL14(L"ループ開始位置（サンプル）です。\n左が開始、右が終了です。\n読取専用です。", L"Loop start position (samples).\nLeft = start, right = end.\nRead-only.", L"Debut de boucle (echantillons).\nGauche = debut, droite = fin.\nLecture seule.", L"Inizio loop (campioni).\nSinistra = inizio, destra = fine.\nSola lettura.", L"Inicio de bucle (muestras).\nIzquierda = inicio, derecha = fin.\nSolo lectura.", L"루프 시작 위치(샘플)입니다.\n왼쪽=시작, 오른쪽=종료.\n읽기 전용.", L"循环起始位置（采样）。\n左=开始，右=结束。\n只读。", L"بداية التكرار (عينات).\nاليسار=البداية، اليمين=النهاية.\nللقراءة فقط.", L"Начало петли (сэмплы).\nСлева — начало, справа — конец.\nТолько чтение.", L"Schleifenstart (Samples).\nLinks = Start, rechts = Ende.\nNur Lesen.", L"Inicio do loop (amostras).\nEsquerda = inicio, direita = fim.\nSomente leitura.", L"Loopstart (samples).\nLinks = start, rechts = einde.\nAlleen lezen.", L"Poczatek petli (probki).\nLewo = start, prawo = koniec.\nTylko odczyt.", L"Dongu baslangici (ornek).\nSol=baslangic, sag=bitis.\nSalt okunur."));
-	m_tooltip.AddTool(GetDlgItem(IDC_EDIT14), LL14(L"ループ終了位置（サンプル）です。\n左が開始、右が終了です。\n読取専用です。", L"Loop end position (samples).\nLeft = start, right = end.\nRead-only.", L"Fin de boucle (echantillons).\nGauche = debut, droite = fin.\nLecture seule.", L"Fine loop (campioni).\nSinistra = inizio, destra = fine.\nSola lettura.", L"Fin de bucle (muestras).\nIzquierda = inicio, derecha = fin.\nSolo lectura.", L"루프 종료 위치(샘플)입니다.\n왼쪽=시작, 오른쪽=종료.\n읽기 전용.", L"循环结束位置（采样）。\n左=开始，右=结束。\n只读。", L"نهاية التكرار (عينات).\nاليسار=البداية، اليمين=النهاية.\nللقراءة فقط.", L"Конец петли (сэмплы).\nСлева — начало, справа — конец.\nТолько чтение.", L"Schleifenende (Samples).\nLinks = Start, rechts = Ende.\nNur Lesen.", L"Fim do loop (amostras).\nEsquerda = inicio, direita = fim.\nSomente leitura.", L"Loopeinde (samples).\nLinks = start, rechts = einde.\nAlleen lezen.", L"Koniec petli (probki).\nLewo = start, prawo = koniec.\nTylko odczyt.", L"Dongu bitisi (ornek).\nSol=baslangic, sag=bitis.\nSalt okunur."));
 	m_tooltip.AddTool(GetDlgItem(IDC_EDIT15), LL14(L"同一ファイル内の曲インデックスです。\n読取専用です。", L"Track index within the same file.\nRead-only.", L"Index de piste dans le meme fichier.\nLecture seule.", L"Indice traccia nello stesso file.\nSola lettura.", L"Indice de pista en el mismo archivo.\nSolo lectura.", L"동일 파일 내 곡 인덱스입니다.\n읽기 전용.", L"同一文件内的曲目索引。\n只读。", L"فهرس المسار داخل نفس الملف.\nللقراءة فقط.", L"Индекс трека внутри файла.\nТолько чтение.", L"Titelindex in derselben Datei.\nNur Lesen.", L"Indice da faixa no mesmo arquivo.\nSomente leitura.", L"Trackindex in hetzelfde bestand.\nAlleen lezen.", L"Indeks utworu w tym samym pliku.\nTylko odczyt.", L"Ayni dosyadaki parca indeksi.\nSalt okunur."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SYOSAI_LBL_STATUS), LL14(L"ファイルの有無・拡張子・サイズです。", L"File existence, extension and size.", L"Existence, extension et taille du fichier.", L"Esistenza, estensione e dimensione del file.", L"Existencia, extension y tamano del archivo.", L"파일 존재 여부·확장자·크기입니다.", L"文件是否存在、扩展名与大小。", L"وجود الملف والامتداد والحجم.", L"Наличие, расширение и размер файла.", L"Vorhandensein, Erweiterung und Groesse.", L"Existencia, extensao e tamanho.", L"Bestaan, extensie en grootte.", L"Istnienie, rozszerzenie i rozmiar.", L"Dosya varligi, uzanti ve boyut."));
+	m_tooltip.AddTool(GetDlgItem(IDC_SYOSAI_LBL_PARAM), LL14(L"曲ごとに保存した音量・EQ等の有無と内容です。", L"Whether per-song volume/EQ settings exist, and a summary.", L"Presence et resume des reglages par morceau.", L"Presenza e riepilogo impostazioni per brano.", L"Presencia y resumen de ajustes por pista.", L"곡별 볼륨·EQ 설정 유무와 요약입니다.", L"逐曲音量/EQ 等设置的有无与摘要。", L"وجود ملخص إعدادات الصوت/EQ لكل أغنية.", L"Наличие и сводка настроек трека.", L"Vorhandensein und Kurzinfo der Pro-Titel-Einstellungen.", L"Presenca e resumo das config. por faixa.", L"Aanwezigheid en samenvatting per-nummer-instellingen.", L"Obecnosc i skrot ustawien utworu.", L"Parça ayarlarinin varligi ve ozeti."));
 	m_tooltip.AddTool(GetDlgItem(ID_OK), LL14(L"プレイリスト表示の変更を保存して閉じます。", L"Save playlist display changes and close.", L"Enregistrer les modifications et fermer.", L"Salva le modifiche alla playlist e chiudi.", L"Guardar cambios de la lista y cerrar.", L"재생 목록 변경을 저장하고 닫습니다.", L"保存播放列表更改并关闭。", L"حفظ التغييرات وإغلاق النافذة.", L"Сохранить изменения и закрыть.", L"Anderungen speichern und schliessen.", L"Salvar alteracoes e fechar.", L"Wijzigingen opslaan en sluiten.", L"Zapisz zmiany i zamknij.", L"Degisiklikleri kaydet ve kapat."));
 	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL14(L"変更を保存せずに閉じます。", L"Close without saving changes.", L"Fermer sans enregistrer.", L"Chiudi senza salvare.", L"Cerrar sin guardar.", L"변경을 저장하지 않고 닫습니다.", L"不保存更改并关闭。", L"إغلاق دون حفظ التغييرات.", L"Закрыть без сохранения.", L"Ohne Speichern schliessen.", L"Fechar sem salvar.", L"Sluiten zonder opslaan.", L"Zamknij bez zapisywania.", L"Kaydetmeden kapat."));
-	m_tooltip.AddTool(GetDlgItem(IDOK999), LL14(L"曲ファイルが入っているフォルダをエクスプローラーで開きます。", L"Open the folder containing the track in Explorer.", L"Ouvrir le dossier du fichier dans l'explorateur.", L"Apri la cartella del file in Explorer.", L"Abrir la carpeta del archivo en el explorador.", L"곡 파일이 있는 폴더를 탐색기로 엽니다.", L"在资源管理器中打开曲目所在文件夹。", L"فتح مجلد الملف في المستكشف.", L"Открыть папку файла в проводнике.", L"Ordner der Datei im Explorer offnen.", L"Abrir pasta do arquivo no Explorer.", L"Map van bestand openen in Verkenner.", L"Otworz folder pliku w Eksploratorze.", L"Dosyanin klasorunu Gezgin'de ac."));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
 	return TRUE;
@@ -233,7 +648,7 @@ BOOL CListSyosai::PreTranslateMessage(MSG* pMsg)
 }
 
 //ワードラップを解除するためのコールバック関数
-int CALLBACK EditWordBreakProc(LPTSTR lpch, int ichCurrent, int cch, int code)
+static int CALLBACK EditWordBreakProc(LPTSTR lpch, int ichCurrent, int cch, int code)
 {
 	return (WB_ISDELIMITER == code) ? 0 : ichCurrent;
 }

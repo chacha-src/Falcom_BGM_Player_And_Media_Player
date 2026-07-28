@@ -30,11 +30,14 @@ void CKpilist::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_LIST1, m_lc);
 	DDX_Control(pDX, IDOK, m_okdummy);
 	DDX_Control(pDX, IDC_STATIC, m_desc);
+	DDX_Control(pDX, IDC_KPI_EXTFILTER, m_extFilter);
+	DDX_Control(pDX, IDC_KPI_EXTFILTER_L, m_extFilterLbl);
 }
 
 #include "CImageBase.h"
 BEGIN_MESSAGE_MAP(CKpilist, CCustomBlurDialogBase)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST1, &CKpilist::OnLvnItemchangedList1)
+	ON_EN_CHANGE(IDC_KPI_EXTFILTER, &CKpilist::OnEnChangeExtFilter)
 	ON_BN_CLICKED(IDOK, &CKpilist::OnBnClickedOk)
 	ON_WM_SIZE()
 	ON_WM_GETMINMAXINFO()
@@ -60,25 +63,29 @@ void CKpiListCtrl::BuildToolTipText(int row, int col, CString& out)
 {
 	UNREFERENCED_PARAMETER(col);
 	out.Empty();
-	if (row < 0 || row >= GetItemCount() || row >= kpicnt)
+	if (row < 0 || row >= GetItemCount())
+		return;
+	// 表示行 ≠ KPI 配列 index(拡張子フィルタ時)。ItemData が実 index。
+	const int kpiIdx = (int)GetItemData(row);
+	if (kpiIdx < 0 || kpiIdx >= kpicnt)
 		return;
 
 	CString exts;
 	for (int i = 0; ; ++i)
 	{
-		if (ext[row][i].IsEmpty())
+		if (ext[kpiIdx][i].IsEmpty())
 			break;
 		if (!exts.IsEmpty())
 			exts += L'/';
-		exts += ext[row][i];
+		exts += ext[kpiIdx][i];
 	}
 
 	CString ver;
-	ver.Format(L"%u", (unsigned)kvar[row][0]);
+	ver.Format(L"%u", (unsigned)kvar[kpiIdx][0]);
 	CString arch = L"?";
-	if (kpiarch[row] == 32)
+	if (kpiarch[kpiIdx] == 32)
 		arch = L"x86";
-	else if (kpiarch[row] == 64)
+	else if (kpiarch[kpiIdx] == 64)
 		arch = L"x64";
 
 	out.Format(LL14(
@@ -96,7 +103,7 @@ void CKpiListCtrl::BuildToolTipText(int row, int col, CString& out)
 		L"Pad: %s\nVersie: %s\nCPU: %s\nExtensies: %s",
 		L"Ścieżka: %s\nWersja: %s\nCPU: %s\nRozszerzenia: %s",
 		L"Yol: %s\nSürüm: %s\nCPU: %s\nUzantılar: %s"),
-		(LPCTSTR)kpif[row], (LPCTSTR)ver, (LPCTSTR)arch, (LPCTSTR)exts);
+		(LPCTSTR)kpif[kpiIdx], (LPCTSTR)ver, (LPCTSTR)arch, (LPCTSTR)exts);
 }
 
 BOOL CKpilist::OnInitDialog()
@@ -104,8 +111,27 @@ BOOL CKpilist::OnInitDialog()
 	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(L"kpi一覧", L"kpi list", L"Liste kpi", L"Elenco kpi", L"Lista kpi", L"kpi 목록", L"kpi 列表", L"قائمة kpi", L"Список kpi", L"kpi-Liste", L"Lista kpi", L"kpi-lijst", L"Lista kpi", L"kpi listesi"));
+	if (m_extFilterLbl.GetSafeHwnd())
+		m_extFilterLbl.SetWindowText(LL14(L"拡張子", L"Ext", L"Ext", L"Est", L"Ext", L"확장자", L"扩展名", L"امتداد", L"Расш", L"Erw", L"Ext", L"Ext", L"Rozsz", L"Uzantı"));
 	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
 	m_tooltip.AddTool(&m_okdummy, LL14(L"閉じます", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	if (m_extFilter.GetSafeHwnd()) {
+		m_tooltip.AddTool(&m_extFilter, LL14(
+			L"拡張子で一覧を絞り込みます。入力すると即座に反映。空欄で全表示。. の有無は問いません。複数は空白や , / で区切れます。",
+			L"Filter the list by extension. Updates as you type. Empty shows all. Dot optional. Separate multiple with space, comma or /.",
+			L"Filtrer par extension. Mise a jour pendant la saisie.",
+			L"Filtra per estensione. Aggiorna mentre digiti.",
+			L"Filtrar por extension. Se actualiza al escribir.",
+			L"확장자로 목록을 필터. 입력 즉시 반영. 비우면 전체.",
+			L"按扩展名筛选列表。输入即更新。空则显示全部。",
+			L"تصفية حسب الامتداد. يتحدث أثناء الكتابة.",
+			L"Фильтр по расширению. Обновляется при вводе.",
+			L"Nach Erweiterung filtern. Sofort bei Eingabe.",
+			L"Filtrar por extensao. Atualiza ao digitar.",
+			L"Filter op extensie. Direct bij typen.",
+			L"Filtruj po rozszerzeniu. Od razu przy wpisywaniu.",
+			L"Uzantiya gore filtrele. Yazarken aninda guncellenir."));
+	}
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
 	Init();
@@ -135,7 +161,7 @@ BOOL CKpilist::OnInitDialog()
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
 }
 
-// リサイズ時に子コントロール(説明/リスト/OK)を再配置する。
+// リサイズ時に子コントロール(説明/フィルタ/リスト/OK)を再配置する。
 // 位置・サイズはダイアログテンプレート(DLU)の比率を MapDialogRect で px 換算して再現。
 void CKpilist::LayoutControls()
 {
@@ -158,7 +184,10 @@ void CKpilist::LayoutControls()
 	const int bh = PX(14 * dy);             // OK ボタン高さ
 	const int descTop = PX(11 * dy);
 	const int descH = PX(9 * dy);
-	const int listTop = PX(25 * dy);
+	const int filtTop = PX(24 * dy);
+	const int filtH = PX(14 * dy);
+	const int filtLblW = PX(36 * dx);
+	const int listTop = PX(43 * dy);
 
 	// OK ボタン: 下端中央
 	const int by = cy - PX(7 * dy) - bh;
@@ -169,7 +198,15 @@ void CKpilist::LayoutControls()
 	if (m_desc.GetSafeHwnd())
 		m_desc.MoveWindow(mx, descTop, (std::max)(0, cx - 2 * mx), descH);
 
-	// リスト: 説明の下〜ボタンの上
+	// 拡張子フィルタ: 説明の下
+	const int filtEditX = mx + filtLblW + PX(3 * dx);
+	const int filtEditW = (std::max)(0, cx - filtEditX - mx);
+	if (m_extFilterLbl.GetSafeHwnd())
+		m_extFilterLbl.MoveWindow(mx, filtTop + PX(2 * dy), filtLblW, PX(10 * dy));
+	if (m_extFilter.GetSafeHwnd())
+		m_extFilter.MoveWindow(filtEditX, filtTop, filtEditW, filtH);
+
+	// リスト: フィルタの下〜ボタンの上
 	const int listBottom = by - PX(6 * dy);
 	const int listH = (std::max)(0, listBottom - listTop);
 	m_lc.MoveWindow(mx, listTop, (std::max)(0, cx - 2 * mx), listH);
@@ -291,6 +328,58 @@ static CString KpiBaseName(const CString& path)
 	return path.Right(path.GetLength() - path.ReverseFind('\\') - 1);
 }
 
+// 拡張子トークンの先頭 '.' を除いた比較用キー
+static CString KpiExtKey(CString e)
+{
+	e.Trim();
+	e.MakeLower();
+	if (!e.IsEmpty() && e[0] == _T('.'))
+		e = e.Mid(1);
+	return e;
+}
+
+// フィルタ文字列に合う KPI か。空欄=全表示。空白/,/; 区切りは OR。
+static bool KpiExtMatchesFilter(int kpiIdx, const CString& filterRaw)
+{
+	CString raw = filterRaw;
+	raw.Trim();
+	if (raw.IsEmpty())
+		return true;
+
+	raw.MakeLower();
+	raw.Replace(_T(','), _T(' '));
+	raw.Replace(_T(';'), _T(' '));
+	raw.Replace(_T('/'), _T(' '));
+
+	CStringArray tokens;
+	for (int p = 0; p < raw.GetLength(); ) {
+		while (p < raw.GetLength() && raw[p] == _T(' ')) ++p;
+		if (p >= raw.GetLength()) break;
+		const int start = p;
+		while (p < raw.GetLength() && raw[p] != _T(' ')) ++p;
+		CString t = KpiExtKey(raw.Mid(start, p - start));
+		if (!t.IsEmpty())
+			tokens.Add(t);
+	}
+	if (tokens.GetCount() == 0)
+		return true;
+
+	for (INT_PTR t = 0; t < tokens.GetCount(); ++t) {
+		const CString& want = tokens[t];
+		for (int i = 0; ; ++i) {
+			if (ext[kpiIdx][i].IsEmpty())
+				break;
+			const CString have = KpiExtKey(ext[kpiIdx][i]);
+			if (have.IsEmpty())
+				continue;
+			// 部分一致(例: "sp" → spc)。先頭一致も許容。
+			if (have.Find(want) >= 0 || want.Find(have) >= 0)
+				return true;
+		}
+	}
+	return false;
+}
+
 // 旧 kpilist.dat は廃止。残っていれば savedata へ一度だけ移植し、そのうえで削除する。
 // savedata 側に既にエントリがあれば移植済みとみなし、残骸ファイルがあれば掃除する。
 static void KpiMigrateLegacyToSavedata()
@@ -348,6 +437,103 @@ static void KpiPersistSavedata()
 	}
 }
 
+// 表示中行のチェック状態を kpichk[実KPI index] へ吸い上げる。
+// フィルタ再構築で行が消える前に呼ぶこと(非表示行のチェックを壊さない)。
+void CKpilist::SyncChecksFromList()
+{
+	if (!m_lc.GetSafeHwnd()) return;
+	const int n = m_lc.GetItemCount();
+	for (int row = 0; row < n; ++row) {
+		const int idx = (int)m_lc.GetItemData(row);
+		if (idx < 0 || idx >= kpicnt || idx >= 200) continue;
+		kpichk[idx] = m_lc.GetCheck(row) ? TRUE : FALSE;
+	}
+}
+
+void CKpilist::FillKpiList()
+{
+	if (!m_lc.GetSafeHwnd()) return;
+
+	// 再構築前に表示中のチェックを本体配列へ退避
+	SyncChecksFromList();
+
+	CString filter;
+	if (m_extFilter.GetSafeHwnd())
+		m_extFilter.GetWindowText(filter);
+
+	m_bFillingList = TRUE;
+	m_lc.SetRedraw(FALSE);
+	m_lc.DeleteAllItems();
+
+	TCHAR* buf = (TCHAR*)calloc(10000, sizeof(TCHAR));
+	if (!buf) {
+		m_lc.SetRedraw(TRUE);
+		m_bFillingList = FALSE;
+		return;
+	}
+
+	LV_ITEM LvItem;
+	ZeroMemory(&LvItem, sizeof(LvItem));
+
+	for (int j = 0; j < kpicnt; j++) {
+		if (!KpiExtMatchesFilter(j, filter))
+			continue;
+		try {
+			CString s;
+			for (int i = 0; ; i++) {
+				if (ext[j][i] == "") break;
+				s += ext[j][i]; s += "/";
+			}
+			if (!s.IsEmpty())
+				s = s.Left(s.GetLength() - 1);
+
+			const int a2 = kpif[j].ReverseFind(L'\\');
+			_tcscpy(buf, kpif[j].Right(kpif[j].GetLength() - a2 - 1));
+			LvItem.pszText = buf;
+			LvItem.iItem = m_lc.GetItemCount();
+			LvItem.mask = LVIF_TEXT | LVIF_PARAM;
+			LvItem.iSubItem = 0;
+			LvItem.lParam = j; // 実 KPI index(チェック保存の正)
+			LvItem.cchTextMax = (int)_tcslen(LvItem.pszText);
+			const int idItem = m_lc.InsertItem(&LvItem);
+			if (idItem < 0) continue;
+			m_lc.SetItemData(idItem, (DWORD_PTR)j);
+
+			LvItem.mask = LVIF_TEXT;
+			LvItem.iItem = idItem;
+			CString sss; sss.Format(L"%d", kvar[j][0]);
+			_tcscpy(buf, sss);
+			LvItem.iSubItem = 1;
+			LvItem.pszText = buf;
+			m_lc.SetItem(&LvItem);
+
+			CString arch = L"?";
+			if (kpiarch[j] == 32) arch = L"x86";
+			else if (kpiarch[j] == 64) arch = L"x64";
+			_tcscpy(buf, arch);
+			LvItem.iSubItem = 2;
+			LvItem.pszText = buf;
+			m_lc.SetItem(&LvItem);
+
+			_tcscpy(buf, s);
+			LvItem.iSubItem = 3;
+			LvItem.pszText = buf;
+			m_lc.SetItem(&LvItem);
+
+			// チェックは常に kpichk[実index] から(行番号ではない)
+			m_lc.SetCheck(idItem, kpichk[j] ? TRUE : FALSE);
+		}
+		catch (...) {
+			break;
+		}
+	}
+	free(buf);
+	m_lc.SetRedraw(TRUE);
+	m_lc.Invalidate(FALSE);
+	m_bFillingList = FALSE;
+	LayoutKpiColumns();
+}
+
 void CKpilist::Init()
 {
 	// 保存済みチェック状態を savedata から取得(初回は旧 kpilist.dat から移行)
@@ -381,55 +567,8 @@ void CKpilist::Init()
 	m_lc.InsertColumn(2, L"Arch", LVCFMT_CENTER, 60, 0);
 	m_lc.InsertColumn(3, LL14(L"拡張子", L"Extensions", L"Extensions", L"Estensioni", L"Extensiones", L"확장자", L"扩展名", L"الامتدادات", L"Расширения", L"Erweiterungen", L"Extensões", L"Extensies", L"Rozszerzenia", L"Uzantılar"), LVCFMT_LEFT, 340, 0);
 
-	TCHAR *buf;
-	buf = (TCHAR*)calloc(10000, 2);
-	LV_ITEM LvItem;
-	int      idItem;
-	m_lc.DeleteAllItems();
-	for (int j = 0; j<kpicnt; j++) {
-		CString s; s = "";
-		try {
-			for (int i = 0;; i++) {
-				if (ext[j][i] == "") break;
-				s += ext[j][i]; s += "/";
-			}
-			s = s.Left(s.GetLength() - 1);
-			int a1, a2, a3;
-			a1 = kpif[j].GetLength() * 2;
-			a2 = kpif[j].ReverseFind(L'\\');
-			a3 = a1 - a2;
-			_tcscpy(buf, kpif[j].Right(a3));	LvItem.pszText = buf;
+	FillKpiList();
 
-			LvItem.iItem = m_lc.GetItemCount();
-			LvItem.mask = LVIF_TEXT | LVIF_STATE;
-			LvItem.stateMask = LVIS_FOCUSED | LVIS_SELECTED;
-			LvItem.state = 0;
-			LvItem.iSubItem = 0;
-			LvItem.cchTextMax = _tcslen(LvItem.pszText);
-			idItem = m_lc.InsertItem(&LvItem);
-			// InsertItem() によって item ID (行番号) が返される
-			LvItem.iItem = idItem;
-			CString sss; sss.Format(L"%d", kvar[j][0]);	LvItem.iSubItem = 1;
-			_tcscpy(buf, sss);
-			LvItem.pszText = buf;
-			m_lc.SetItem(&LvItem);
-			CString arch = L"?";
-			if (kpiarch[j] == 32) arch = L"x86";
-			else if (kpiarch[j] == 64) arch = L"x64";
-			_tcscpy(buf, arch); LvItem.iSubItem = 2;
-			LvItem.pszText = buf;
-			m_lc.SetItem(&LvItem);
-			_tcscpy(buf, s);	LvItem.iSubItem = 3;
-			LvItem.pszText = buf;
-			m_lc.SetItem(&LvItem);
-			// 各行のチェックは runtime で確定済みの kpichk[] を反映(独立トグル)
-			m_lc.SetCheck(j, kpichk[j] ? TRUE : FALSE);
-		}
-		catch (...) {
-			break;
-		}
-	}
-	free(buf);
 	RECT r;
 	GetWindowRect(&r);
 	r.top += 600;
@@ -442,12 +581,12 @@ void CKpilist::Save()
 	int n = kpicnt;
 	if (n > 200) n = 200;
 
-	for (int i = 0; i < n; i++) {
-		// status==0(ダイアログ)はリストのチェックを、status==1(起動時)は
-		// Init() で確定済みの kpichk[] をそのまま採用する。
-		if (status == 0)
-			kpichk[i] = m_lc.GetCheck(i);
+	// ダイアログ表示中は、まず表示中チェックを kpichk へ反映。
+	// フィルタで隠れた行は既に Sync/ITEMCHANGED で kpichk に残っている。
+	if (status == 0)
+		SyncChecksFromList();
 
+	for (int i = 0; i < n; i++) {
 		savedata.kpiChkState[i] = kpichk[i] ? 1 : 0;
 		CString bn = KpiBaseName(kpif[i]);
 		_tcsncpy(savedata.kpiChkName[i], bn, 63);
@@ -462,8 +601,24 @@ void CKpilist::Save()
 void CKpilist::OnLvnItemchangedList1(NMHDR *pNMHDR, LRESULT *pResult)
 {
 	LPNMLISTVIEW pNMLV = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
-	// TODO: ここにコントロール通知ハンドラ コードを追加します。
 	*pResult = 0;
+	if (m_bFillingList || !pNMLV) return;
+	// チェックボックス(状態イメージ)の変化だけを kpichk[実index] へ即反映
+	if ((pNMLV->uChanged & LVIF_STATE) == 0) return;
+	const UINT oldImg = (pNMLV->uOldState & LVIS_STATEIMAGEMASK);
+	const UINT newImg = (pNMLV->uNewState & LVIS_STATEIMAGEMASK);
+	if (oldImg == newImg) return;
+	const int row = pNMLV->iItem;
+	if (row < 0) return;
+	const int idx = (int)m_lc.GetItemData(row);
+	if (idx < 0 || idx >= kpicnt || idx >= 200) return;
+	kpichk[idx] = m_lc.GetCheck(row) ? TRUE : FALSE;
+}
+
+void CKpilist::OnEnChangeExtFilter()
+{
+	if (m_bFillingList) return;
+	FillKpiList();
 }
 
 BOOL CKpilist::PreTranslateMessage(MSG* pMsg)

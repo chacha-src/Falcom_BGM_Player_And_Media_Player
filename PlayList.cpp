@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -5518,29 +5518,57 @@ void CPlayList::OnNMRclickList1(NMHDR *pNMHDR, LRESULT *pResult)
 
 void CPlayList::OnList()
 {
+	std::vector<int> sel;
 	int Lindex = -1;
-	Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED);
-	if (Lindex < 0) return;
-	CListSyosai *a = new CListSyosai(GetPlaylistModalOwner(this));
+	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		if (Lindex >= 0 && Lindex < playcnt)
+			sel.push_back(Lindex);
+	}
+	if (sel.empty())
+		return;
+
+	CListSyosai* a = new CListSyosai(GetPlaylistModalOwner(this));
 	w_flg = FALSE;
 	CWnd::PostMessage(0x118);
-	memcpy(&a->pc, &pc[Lindex], sizeof(playlistdata0));
-	int ret = a->DoModal();
-	pc[Lindex].loop1 = a->pc.loop1;
-	pc[Lindex].loop2 = a->pc.loop2;
-	if (ret == IDOK) {
-		_tcscpy(pc[Lindex].name, a->pc.name);
-		_tcscpy(pc[Lindex].art, a->pc.art);
-		_tcscpy(pc[Lindex].alb, a->pc.alb);
-		const CString folStored = PlStorePlaylistFol(a->pc.fol, pc[Lindex].sub);
-		_tcscpy(pc[Lindex].fol, folStored);
-		RECT r;
-		m_lc.GetItemRect(Lindex, &r, LVIR_BOUNDS);
-		m_lc.RedrawWindow(&r);
+	memcpy(&a->pc, &pc[sel[0]], sizeof(playlistdata0));
+	if (sel.size() > 1)
+		a->m_batchIndices = sel;
+
+	const int ret = a->DoModal();
+	const bool apply = (ret == IDOK || ret == IDC_SYOSAI_BTN_PROTOOLS);
+	if (apply) {
+		if (a->m_batchIndices.size() > 1) {
+			for (int idx : a->m_batchIndices) {
+				if (idx < 0 || idx >= playcnt) continue;
+				_tcscpy(pc[idx].art, a->pc.art);
+				_tcscpy(pc[idx].alb, a->pc.alb);
+				RECT r;
+				m_lc.GetItemRect(idx, &r, LVIR_BOUNDS);
+				m_lc.RedrawWindow(&r);
+			}
+		}
+		else {
+			const int idx = sel[0];
+			_tcscpy(pc[idx].name, a->pc.name);
+			_tcscpy(pc[idx].art, a->pc.art);
+			_tcscpy(pc[idx].alb, a->pc.alb);
+			pc[idx].loop1 = a->pc.loop1;
+			pc[idx].loop2 = a->pc.loop2;
+			const CString folStored = PlStorePlaylistFol(a->pc.fol, pc[idx].sub);
+			_tcscpy(pc[idx].fol, folStored);
+			RECT r;
+			m_lc.GetItemRect(idx, &r, LVIR_BOUNDS);
+			m_lc.RedrawWindow(&r);
+		}
 		Save();
 	}
 	w_flg = TRUE;
 	delete a;
+
+	if (ret == IDC_SYOSAI_BTN_PROTOOLS) {
+		extern void OpenProToolsForSelection();
+		OpenProToolsForSelection();
+	}
 }
 #define ID_HOTKEY0 8000
 #define ID_HOTKEY1 8001
