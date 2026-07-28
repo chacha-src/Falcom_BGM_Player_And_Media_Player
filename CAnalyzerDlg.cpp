@@ -1,7 +1,8 @@
-﻿// CAnalyzerDlg.cpp : 簡易波形アナライザー(スクロールBB・多ch・周波数特性)
+// CAnalyzerDlg.cpp : 簡易波形アナライザー(スクロールBB・多ch・周波数特性)
 #include "stdafx.h"
 #include "ogg.h"
 #include "CAnalyzerDlg.h"
+#include "ProAudio.h"
 #include <cmath>
 #include <algorithm>
 
@@ -1725,13 +1726,48 @@ void CAnalyzerDlg::DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg)
 		dc.TextOut(x0, area.top - 2, ChannelLabel(c, channels));
 		dc.SelectObject(of);
 	}
+
+	// 位相相関メーター(-1..+1)と L/R バランス
+	// メータ帯の左隣に固定幅で描く(波形領域が狭くても strip 更新で見える)
+	if (savedata.pro_corr_meter && n >= 2) {
+		const float corr = ProAudio_CorrValue();
+		const float bal = ProAudio_CorrBalance();
+		const int corrW = 22;
+		CRect corrRc(area.left - corrW - 4, area.top + 2, area.left - 4, area.bottom - 2);
+		if (corrRc.left < waveRc.left + 2)
+			corrRc.OffsetRect(waveRc.left + 2 - corrRc.left, 0);
+		if (corrRc.Width() >= 12 && corrRc.right <= waveRc.right) {
+			dc.FillSolidRect(corrRc, RGB(28, 32, 44));
+			dc.Draw3dRect(corrRc, RGB(70, 80, 100), RGB(40, 45, 60));
+			const int midY = (corrRc.top + corrRc.bottom) / 2;
+			dc.FillSolidRect(corrRc.left + 2, midY, corrRc.Width() - 4, 1, RGB(90, 100, 120));
+			// 相関: 上=+1(同相) 下=-1(逆相)。緑バー
+			int y = midY - (int)(corr * ((corrRc.Height() / 2) - 5));
+			if (y < corrRc.top + 3) y = corrRc.top + 3;
+			if (y > corrRc.bottom - 4) y = corrRc.bottom - 4;
+			dc.FillSolidRect(corrRc.left + 3, y - 2, corrRc.Width() - 6, 5, RGB(100, 230, 150));
+			// バランス: 下端の横位置
+			int bx = corrRc.left + corrRc.Width() / 2 + (int)(bal * (corrRc.Width() / 2 - 3));
+			if (bx < corrRc.left + 2) bx = corrRc.left + 2;
+			if (bx > corrRc.right - 3) bx = corrRc.right - 3;
+			dc.FillSolidRect(bx - 1, corrRc.bottom - 5, 3, 4, RGB(255, 180, 80));
+			dc.SetTextColor(RGB(170, 200, 190));
+			dc.SetBkMode(TRANSPARENT);
+			CFont* of2 = dc.SelectObject(&m_font);
+			dc.TextOut(corrRc.left + 2, corrRc.top, _T("φ"));
+			dc.SelectObject(of2);
+		}
+	}
 }
 
 // 波形右端のレベルメーター帯幅(クロマ更新用)。DrawLevelMeters の早期 return 下限以上にすること。
 static int AnalyzerMeterStripWidth(int channels)
 {
 	const int n = (channels >= 2) ? 2 : 1;
-	return n * 10 + (n - 1) * 3 + 8 + 16; // 余白多め(>=44)
+	int w = n * 10 + (n - 1) * 3 + 8 + 16; // 余白多め(>=44)
+	if (savedata.pro_corr_meter && n >= 2)
+		w += 28; // φ 相関帯
+	return w;
 }
 
 void CAnalyzerDlg::DrawHoverReadout(CDC& dc, const CRect& clientRc)

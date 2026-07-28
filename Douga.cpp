@@ -1,4 +1,4 @@
-﻿// Douga.cpp : インプリメンテーション ファイル
+// Douga.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
@@ -4583,8 +4583,8 @@ void CDouga::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
 	// TODO: ここにメッセージ ハンドラ コードを追加するか、既定の処理を呼び出します。
 	const BOOL videoMode = (mode == -2 || (mode > 0 && videoonly == TRUE));
-	// 動画の左右はメイン窓のホットキー(8002/8003)と同一（スライダー＋pMainFrame1->seek）
-	if (videoMode && og && (nChar == VK_RIGHT || nChar == VK_LEFT)) {
+	// 左右シークは常にメインの OnHotKey（二重スロット対応）。rl() は昇格後に音が動かない。
+	if (og && (nChar == VK_RIGHT || nChar == VK_LEFT)) {
 		const WPARAM hotId = (nChar == VK_RIGHT) ? (WPARAM)8002 : (WPARAM)8003;
 		og->SendMessage(WM_HOTKEY, hotId, 0);
 		CFrameWnd::OnKeyDown(nChar, nRepCnt, nFlags);
@@ -4602,12 +4602,6 @@ void CDouga::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		}
 	}
 	else {
-		if (nChar == VK_RIGHT) {
-			og->rl(1);
-		}
-		if (nChar == VK_LEFT) {
-			og->rl(-1);
-		}
 		if (nChar == VK_UP) {
 			og->m_dsval.SetPos(og->m_dsval.GetPos() + 5);
 		}

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 struct FileTagFields {
 	CString title;
@@ -31,3 +31,5 @@ struct FileTagFields {
 };
 
 void ReadFileTagFields(LPCTSTR path, FileTagFields& out);
+// MP3 ID3v2 書き込み。成功で true。非対応拡張子は false。
+bool WriteFileTagFields(LPCTSTR path, const FileTagFields& in);

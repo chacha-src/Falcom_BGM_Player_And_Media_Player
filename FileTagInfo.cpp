@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "FileTagInfo.h"
 #include "Id3tagv1.h"
 #include "Id3tagv2.h"
@@ -100,8 +100,15 @@ static void ApplyVorbisCommentLine(const CString& cc, FileTagFields& out)
 		SetIfEmpty(out.comment, val);
 	else if (key == _T("LOOPSTART"))
 		out.loop1 = _tstoi(val);
-	else if (key == _T("LOOPLENGTH"))
+	else if (key == _T("LOOPEND"))
 		out.loop2 = _tstoi(val);
+	else if (key == _T("LOOPLENGTH")) {
+		int len = _tstoi(val);
+		if (out.loop1 > 0 && len > 0)
+			out.loop2 = out.loop1 + len;
+		else if (len > 0)
+			out.loop2 = len;
+	}
 }
 
 static void ReadId3Tags(LPCTSTR path, FileTagFields& out)
@@ -132,6 +139,18 @@ static void ReadId3Tags(LPCTSTR path, FileTagFields& out)
 	SetIfEmpty(out.comment, ta2.GetComment());
 	if (b == -1)
 		SetIfEmpty(out.comment, ta1.GetComment());
+	// コメント内の LOOPSTART/LOOPLENGTH を拾う(書き込み側と対)
+	if (!out.comment.IsEmpty()) {
+		CString c = out.comment;
+		int pos = 0;
+		while (pos < c.GetLength()) {
+			int nl = c.Find(_T('\n'), pos);
+			CString line = (nl < 0) ? c.Mid(pos) : c.Mid(pos, nl - pos);
+			pos = (nl < 0) ? c.GetLength() : nl + 1;
+			line.TrimRight(_T('\r'));
+			ApplyVorbisCommentLine(line, out);
+		}
+	}
 }
 
 static DWORD ExtractId3v2Size(const BYTE* sizeField)
@@ -1144,4 +1163,61 @@ void ReadFileTagFields(LPCTSTR path, FileTagFields& out)
 		ScanId3v2FramesInFile(path, scanned);
 		MergeFields(out, scanned);
 	}
+}
+
+bool WriteFileTagFields(LPCTSTR path, const FileTagFields& in)
+{
+	if (!path || !*path) return false;
+	CString ext;
+	{
+		CString p(path);
+		int dot = p.ReverseFind(_T('.'));
+		if (dot >= 0) ext = p.Mid(dot);
+		ext.MakeLower();
+	}
+	if (ext != _T(".mp3") && ext != _T(".mp2") && ext != _T(".mp1"))
+		return false;
+
+	CId3tagv2 tag;
+	tag.Load(path);
+	if (!in.title.IsEmpty()) tag.SetTitle(in.title);
+	if (!in.artist.IsEmpty()) tag.SetArtist(in.artist);
+	if (!in.album.IsEmpty()) tag.SetAlbum(in.album);
+	if (!in.year.IsEmpty()) tag.SetYear(in.year);
+	if (!in.track.IsEmpty()) tag.SetTrackNo(in.track);
+	if (!in.genre.IsEmpty()) tag.SetGenre(in.genre);
+
+	CString comment = in.comment;
+	// ID3v2 に TXXX が無いので、LOOPSTART/LOOPLENGTH をコメントへ機械可読で残す
+	{
+		CString cleaned;
+		int pos = 0;
+		while (pos < comment.GetLength()) {
+			int nl = comment.Find(_T('\n'), pos);
+			CString line = (nl < 0) ? comment.Mid(pos) : comment.Mid(pos, nl - pos);
+			pos = (nl < 0) ? comment.GetLength() : nl + 1;
+			line.TrimRight(_T('\r'));
+			CString u = line;
+			u.MakeUpper();
+			if (u.Left(10) == _T("LOOPSTART=") || u.Left(11) == _T("LOOPLENGTH=") || u.Left(8) == _T("LOOPEND="))
+				continue;
+			if (!cleaned.IsEmpty()) cleaned += _T("\r\n");
+			cleaned += line;
+		}
+		comment = cleaned;
+		if (in.loop1 > 0 || in.loop2 > 0) {
+			CString loopLines;
+			const int start = in.loop1 > 0 ? in.loop1 : 0;
+			const int end = in.loop2 > 0 ? in.loop2 : 0;
+			const int len = (end > start) ? (end - start) : 0;
+			loopLines.Format(_T("LOOPSTART=%d\r\nLOOPEND=%d\r\nLOOPLENGTH=%d"), start, end, len);
+			if (!comment.IsEmpty()) comment += _T("\r\n");
+			comment += loopLines;
+		}
+	}
+	if (!comment.IsEmpty() || !in.comment.IsEmpty() || in.loop1 > 0 || in.loop2 > 0)
+		tag.SetComment(comment);
+
+	DWORD err = tag.Save(path);
+	return err == 0;
 }

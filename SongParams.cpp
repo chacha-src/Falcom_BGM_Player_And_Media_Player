@@ -1,6 +1,7 @@
-﻿// SongParams.cpp : 曲ごとのオーディオ/DSP パラメータ 保持・復元
+// SongParams.cpp : 曲ごとのオーディオ/DSP パラメータ 保持・復元
 #include "stdafx.h"
 #include "SongParams.h"
+#include "ProAudio.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "PlayList.h"
@@ -946,6 +947,10 @@ void SongParams_OnSongStarted()
 		s_songReady = false;
 		return;
 	}
+
+	ProAudio_SetCurrentSongKey(list, path, md, r2);
+	ProAudio_ResetXfadeIn();
+	ProAudio_ApplyLoopOverrideToGlobals();
 
 	const bool promptOn = (MpPromptIsActive() != FALSE);
 	if (promptOn)

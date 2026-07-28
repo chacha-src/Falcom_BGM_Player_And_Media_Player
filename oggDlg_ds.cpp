@@ -2,7 +2,16 @@
 #include "NoteFundamentalPick.h"
 #include "ogg.h"
 #include "oggDlg.h"
+#include "ProAudio.h"
+#include "ProXfadeDual.h"
+#include "PlaySlot.h"
 #include "SongParams.h"
+#include "SongHeardClock.h"
+#include "XfDebugLog.h"
+
+void Ogg_PostXfadePromote();
+void PlaybackCcWriteForced(const void* p, UINT n);
+#include "PlayList.h"
 //#include <math.h>
 //#include <vorbis/codec.h>
 //#include <vorbis/vorbisfile.h>
@@ -28,6 +37,7 @@
 
 #include "rubberband/RubberBandStretcher.h"
 #include "AudioUpscaler.h"
+#include "ProAudio.h"
 #if _MSC_VER >= 1950
 #pragma comment(lib,"rubberband-library_2026")
 #else
@@ -39,10 +49,13 @@ extern int endflg;
 extern __int64 g_dsWrittenBytes;
 extern __int64 g_endWrittenBytes;
 extern __int64 g_heardBytes;
+extern __int64 g_expectedDsBytes;
 extern int g_outBytesPerFrame;
 extern 	LPDIRECTSOUND8 m_ds;
 extern 	LPDIRECTSOUNDBUFFER m_dsb1;
 extern 	LPDIRECTSOUNDBUFFER8 m_dsb;
+extern 	LPDIRECTSOUNDBUFFER m_dsbXfade1;
+extern 	LPDIRECTSOUNDBUFFER8 m_dsbXfade;
 extern 	LPDIRECTSOUND3DBUFFER m_dsb3d;
 extern	LPDIRECTSOUNDBUFFER m_p;
 extern LPDIRECTSOUND3DBUFFER m_lpDS3DBuffer;
@@ -73,12 +86,25 @@ extern void playwavds(BYTE* bw);
 extern void playwavds2(BYTE* bw, int len);
 extern BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2);
 extern int mode;
+extern int oggsize;
+extern int loop2;
+extern __int64 playb;
+extern CPlayList* pl;
+extern int plcnt;
 extern int Mp3GetDecoderBitsForRubberBand(void);
 extern int wav999_use_adbuf;
 extern save savedata;
 extern bool g_isWavExportRendering;
 LPDIRECTSOUND3DLISTENER m_listener = NULL;
-extern RubberBand::RubberBandStretcher* g_rubberBandStretcher;
+extern RubberBand::RubberBandStretcher* g_rubberBandStretcher[2];
+void RubberBand_DestroyBank(int bank);
+void RubberBand_DestroyAll();
+bool InitializeRubberBandStretcher(int bank);
+bool InitializeRubberBandStretcher();
+bool ProcessAudioWithRubberBand(float tempoRate, bool t = false);
+bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
+	const uint8_t* inData, int inBytes, int bits, int ch, int rate,
+	std::vector<float>& outFloat);
 BOOL reset = TRUE;
 
 #define REFTIMES_PER_SEC  10000000
@@ -205,49 +231,54 @@ void COggDlg::Vol(int vol)
 
 void COggDlg::Closeds()
 {
-	//	fade1=1;
+	if (m_dsbXfade) {
+		m_dsbXfade->Stop();
+		m_dsbXfade->Release();
+		m_dsbXfade = NULL;
+	}
+	if (m_dsbXfade1) {
+		m_dsbXfade1->Release();
+		m_dsbXfade1 = NULL;
+	}
 	if (m_dsb) {
 		m_dsb->Stop();
-		if (m_dsb3d != NULL) { m_dsb3d->Release(); m_dsb3d = NULL; }
-		if (m_dsb != NULL) { m_dsb->Release(); m_dsb = NULL; }
+		m_dsb->Release();
+		m_dsb = NULL;
+	}
+	if (m_dsb3d) {
+		m_dsb3d->Release();
+		m_dsb3d = NULL;
+	}
+	if (m_dsb1) {
+		m_dsb1->Release();
+		m_dsb1 = NULL;
 	}
 	if (pAudioClient) {
 		pAudioClient->Stop();
-		pRenderClient->Release(); pRenderClient = NULL;
+		if (pRenderClient) { pRenderClient->Release(); pRenderClient = NULL; }
 		pAudioClient->Release(); pAudioClient = NULL;
 	}
 }
 
 BOOL COggDlg::ReleaseDXSound(void)
 {
+	// 二重解放防止: Closeds でバッファ系はすべて落とす
+	Closeds();
+	if (m_lpDS3DBuffer != NULL) { m_lpDS3DBuffer->Release(); m_lpDS3DBuffer = NULL; }
+	if (m_p != NULL) { m_p->Release(); m_p = NULL; }
 	if (m_ds) {
-		Closeds();
-		if (m_dsb3d != NULL) { m_dsb3d->Release(); m_dsb3d = NULL; }
-		if (m_dsb != NULL) { m_dsb->Release(); m_dsb = NULL; }
-		if (m_dsb1 != NULL) { m_dsb1->Release(); m_dsb1 = NULL; }
-		if (m_lpDS3DBuffer != NULL) { m_lpDS3DBuffer->Release(); }
-		m_dsb = NULL;
-		m_lpDS3DBuffer = NULL;
-		if (m_p != NULL) { m_p->Release(); m_p = NULL; }
-
-		if (m_ds) {
-			m_ds->Release();
-			m_ds = NULL;
-		}
+		m_ds->Release();
+		m_ds = NULL;
 	}
 	if (pAudioClient) {
 		pAudioClient->Stop();
 		if (pRenderClient) { pRenderClient->Release(); pRenderClient = NULL; }
 		pAudioClient->Release(); pAudioClient = NULL;
-		pDevice->Release(); pDevice = NULL;
-
+		if (pDevice) { pDevice->Release(); pDevice = NULL; }
 	}
 
 	// RubberBandストレッチャーのクリーンアップ
-	if (g_rubberBandStretcher) {
-		delete g_rubberBandStretcher;
-		g_rubberBandStretcher = NULL;
-	}
+	RubberBand_DestroyAll();
 
 	return TRUE;
 }
@@ -287,7 +318,7 @@ extern std::vector<float> m_convertedPcmFloatData;
 extern std::vector<uint8_t> outputRawBytesData;
 
 //bool ProcessAudioWithSoundTouch(float tempoRate);
-bool ProcessAudioWithRubberBand(float tempoRate, bool t = false);
+bool ProcessAudioWithRubberBand(float tempoRate, bool t);
 void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
 	uint16_t bits_per_sample, uint16_t channels,
 	std::vector<float>& out_float_data);
@@ -311,6 +342,9 @@ extern ULONG WAVDALen;
 #define OUTPUT_BUFFER_NUM_DS 5
 
 void equaliser(void* data, int len, BOOL reset = FALSE);
+void equaliserBank(int bank, void* data, int len, BOOL reset);
+void equaliserBank(int bank, void* data, int len, BOOL reset, int bitsOverride, int chOverride, int rateOverride);
+void equaliserResetBank(int bank);
 #include <mutex>
 std::mutex cl2;  // OnHScroll(シーク)とHandleNotifications(再生)の排他用。一本で統一。
 // DS Lock/Unlock 実行中(cl2 外)。UI の GetCurrentPosition が同一デバイスで固まるのを避ける。
@@ -382,10 +416,12 @@ BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 		if (og)
 			og->timer.SetEvent();
 		// DS Lock 中は Stop でドライバ待ちを解く（固まりの主因の一つ）
+		// ただし二重DS昇格中の B は止めない（keep 中 Stop が「数秒で無音」になる）
 		if (InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0) {
-			if (m_dsb)
+			const bool keep = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
+			if (!keep && m_dsb)
 				m_dsb->Stop();
-			if (pAudioClient)
+			if (!keep && pAudioClient)
 				pAudioClient->Stop();
 		}
 		const DWORD w = WaitForSingleObject(hThread, pollMs);
@@ -439,6 +475,7 @@ void BeginPlaybackNotifyThread()
 	stf = 0;
 	syukai = 0;
 	syukai2 = 0;
+	InterlockedExchange(&g_xfadeNoWrite, 0);
 	// CREATE_SUSPENDED で起動し、スレッド本体が走り出す前に m_bAutoDelete を
 	// 落として寿命を自前管理する。これによりスレッドが自己終了しても
 	// CWinThread オブジェクトとスレッドハンドルは破棄されず、安全に Join できる。
@@ -485,13 +522,31 @@ UINT HandleNotifications(LPVOID)
 		return v >= 0x10000 && (v % sizeof(void*)) == 0;
 	};
 
-	oldw = 0;
-	if (isPlausibleDsb(m_dsb))
-		m_dsb->SetCurrentPosition(0);
-	// mode ではなく Open 中の形式（曲切替で mode が先に変わる）
-	if (g_openDecoderMode == -10 || g_openDecoderMode == 999) {
-		oldw = OUTPUT_BUFFER_SIZE * 2;
-		og->timer.SetEvent();
+	// 二重DS昇格継続時は再生カーソルを維持（0 に戻すとタイル導入→無音穴→頭出しになる）
+	const bool xfadeReuse = (InterlockedExchange(&g_xfadeReuseContinue, 0) != 0);
+	if (!xfadeReuse) {
+		oldw = 0;
+		if (isPlausibleDsb(m_dsb))
+			m_dsb->SetCurrentPosition(0);
+		// mode ではなく Open 中の形式（曲切替で mode が先に変わる）
+		if (g_openDecoderMode == -10 || g_openDecoderMode == 999) {
+			oldw = OUTPUT_BUFFER_SIZE * 2;
+			og->timer.SetEvent();
+		}
+	}
+	else if (isPlausibleDsb(m_dsb)) {
+		ULONG pc = 0, wc = 0;
+		if (m_dsb->GetCurrentPosition(&pc, &wc) == DS_OK) {
+			// play() 側 prefill が oldw を進めていればそれを優先
+			if (oldw == 0)
+				oldw = wc;
+		}
+		LONG v = (savedata.dsvol - 1) * 10;
+		if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
+		if (v > 0) v = 0;
+		if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
+		m_dsb->SetVolume(v);
+		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
 	}
 	fade1 = 0;
 	sek4 = FALSE;
@@ -499,8 +554,10 @@ UINT HandleNotifications(LPVOID)
 	auto stopPlaybackAndExit = [&]() -> UINT {
 		playf = 1;
 		thn = FALSE;
+		// 二重DS昇格中は B を鳴らしたまま（ここで Mute/Stop すると切替「間」になる）
+		const bool keep = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
 		LPDIRECTSOUNDBUFFER8 dsbStop = m_dsb;
-		if (isPlausibleDsb(dsbStop)) {
+		if (!keep && isPlausibleDsb(dsbStop)) {
 			dsbStop->SetVolume(DSBVOLUME_MIN);
 			dsbStop->Stop();
 		}
@@ -539,21 +596,33 @@ UINT HandleNotifications(LPVOID)
 		if (thn1) return stopPlaybackAndExit();
 		if (ps == 1) continue;
 
+		// 昇格後は B に曲1 PCM を書かない
+		if (InterlockedCompareExchange(&g_xfadeNoWrite, 0, 0) != 0) {
+			::WaitForMultipleObjects(1, ev, FALSE, 10);
+			continue;
+		}
+
 		LPDIRECTSOUNDBUFFER8 dsb = m_dsb;
 		if (!isPlausibleDsb(dsb))
 			continue;
 
-		// 書き込み位置の計算
+		// 書き込み位置の計算（通常再生と同じ WriteCursor ギャップ。
+		// play+lead 先行書きは ~100ms 周期で Sleep→欠乏し、time:/音が同時に止まる）
 		dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
 		const ULONG ringBytes = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
-		int len1 = (int)WriteCursor - (int)oldw;
-		int len2 = 0;
+		const int phXf = ProXfade_Phase();
+		const bool inXfWrite = (phXf == PRO_XF_OVERLAP || phXf == PRO_XF_PROMOTE);
+		int len1 = 0, len2 = 0;
+		int gapToWriteCursor = 0;
 
+		len1 = (int)WriteCursor - (int)oldw;
+		len2 = 0;
 		if (len1 == 0) continue;
 		if (len1 < 0) {
 			len1 = (int)ringBytes - (int)oldw;
 			len2 = (int)WriteCursor;
 		}
+		gapToWriteCursor = len1 + len2;
 
 		// 終端ドレイン中か（実音声が終わった後の純無音サイクル）。終端確定後、書込みヘッドが
 		// 終端位置を越えていれば、このサイクルはすべて無音で埋める（古いループ音の漏れ防止）。
@@ -564,8 +633,9 @@ UINT HandleNotifications(LPVOID)
 		static std::vector<BYTE> s_dsStage;
 		int stageBytes = 0;
 		bool stageFade = false;
+		bool dsHasMix = false;
 		int readmeThisCycle = 0;
-		const int writtenThisCycle = len1 + len2;
+		int writtenThisCycle = len1 + len2;
 		bool exitAfterCl2 = false;
 
 		{
@@ -583,11 +653,10 @@ UINT HandleNotifications(LPVOID)
 			if (thn1) {
 				exitAfterCl2 = true;
 			}
-			else {
+			else if (m_dsb) {
 				sflg = TRUE;
-				if (m_dsb) DispatchPlaywavFill(bufwav3, oldw, len1, len2);
-				// 曲最後まで行ったとき
-				readmeThisCycle = readme; // 終端確定に使うため reset 前に退避
+				DispatchPlaywavFill(bufwav3, oldw, len1, len2);
+				readmeThisCycle = readme;
 				if (readme) {
 					if (len1 > readme)
 						ZeroMemory(bufwav3 + readme, len2);
@@ -601,6 +670,7 @@ UINT HandleNotifications(LPVOID)
 				else {
 					stageFade = (fade2 || drainSilence) ? true : false;
 					stageBytes = writtenThisCycle;
+					dsHasMix = false;
 					if (stageBytes > 0) {
 						if ((int)s_dsStage.size() < stageBytes)
 							s_dsStage.resize((size_t)stageBytes);
@@ -608,21 +678,58 @@ UINT HandleNotifications(LPVOID)
 							memcpy(s_dsStage.data(), bufwav3 + oldw, (size_t)len1);
 						if (len2 > 0)
 							memcpy(s_dsStage.data() + len1, bufwav3, (size_t)len2);
+						/* Mix は cl2 の外（Sleep/待ちや B リング待ちで UI timerp を止めない） */
 					}
-
 					readme = 0;
 					fade2 = fade1;
 					if (flg3 != 0) flg3--;
 					sflg = FALSE;
 				}
 			}
-		} // guard(cl2) — Lock 前に必ず解放
+		} // guard(cl2) — Lock / Mix 前に必ず解放
 		if (exitAfterCl2)
 			return stopPlaybackAndExit();
+
+		if (inXfWrite && stageBytes > 0) {
+			const int bits = (g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32) ? g_ds_pcm_bits : 16;
+			const int ch = (g_ds_pcm_ch > 0) ? g_ds_pcm_ch : 2;
+			int mixed = 0;
+			if (PlaySlot_MixIncomingEx(s_dsStage.data(), stageBytes, bits, ch, &mixed) && mixed > 0) {
+				dsHasMix = true;
+				stageBytes = mixed;
+				writtenThisCycle = mixed;
+				if (mixed <= len1) { len1 = mixed; len2 = 0; }
+				else { len2 = mixed - len1; }
+				{
+					std::lock_guard<std::mutex> guard(cl2);
+					if (len1 > 0)
+						memcpy(bufwav3 + oldw, s_dsStage.data(), (size_t)len1);
+					if (len2 > 0)
+						memcpy(bufwav3, s_dsStage.data() + len1, (size_t)len2);
+				}
+				PlaybackCcWriteForced(s_dsStage.data(), (UINT)mixed);
+			}
+			else {
+				/* B 不足: A を現在ゲインで書いて穴を防ぐ。フェード進行は進めない
+				   （A-only で done を進めると B 無しのまま昇格→曲2へ飛ぶ） */
+				float g0 = 1.f, g1 = 1.f;
+				if (ProXfade_PrepChunkGain(0, false, g0, g1))
+					ProXfade_ApplyPcmGainRamp(s_dsStage.data(), stageBytes, bits, g0, g1);
+				dsHasMix = true;
+			}
+		}
 
 		// DirectSound 転送（cl2 外。UI 側 Closeds で m_dsb が NULL でもローカル参照で安全）
 		dsb = m_dsb;
 		if (stageBytes > 0 && isPlausibleDsb(dsb) && !thn1 && !sek) {
+			/* Mix 済みなら追加の A ゲインは不要（二重減衰になる） */
+			if (!dsHasMix) {
+				float g0 = 1.f, g1 = 1.f;
+				if (ProXfade_PrepChunkGain(stageBytes, false, g0, g1)) {
+					const int bits = (g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32) ? g_ds_pcm_bits : 16;
+					ProXfade_ApplyPcmGainRamp(s_dsStage.data(), stageBytes, bits, g0, g1);
+				}
+			}
 			InterlockedExchange(&g_dsDeviceOpBusy, 1);
 			hr = dsb->Lock(oldw, (DWORD)stageBytes, (LPVOID*)&pdsb1, &len3, (LPVOID*)&pdsb2, &len4, 0);
 			if (hr == DS_OK) {
@@ -645,61 +752,257 @@ UINT HandleNotifications(LPVOID)
 			// 書込み累積は従来どおり Lock 成否に依存しない（再生位置進行の一貫性維持）。
 			const __int64 writtenBefore = g_dsWrittenBytes;
 			g_dsWrittenBytes += (writtenThisCycle > 0) ? writtenThisCycle : 0;
+
 			// EOF（fade1=停止 / endflg=連続）を最初に検出したサイクルで実音声の終端を確定。
-			// readme があれば最終チャンク内の実バイト境界が分かるのでそれを使う。無ければこのサイクル末尾。
+			// 二重DS対象形式では xf 早期カットしない（2000ms前切断→無音→疑似In の元凶）。
 			if (g_endWrittenBytes == 0 && (fade1 || endflg)) {
-				if (readmeThisCycle > 0 && readmeThisCycle <= writtenThisCycle)
-					g_endWrittenBytes = writtenBefore + readmeThisCycle;
-				else
-					g_endWrittenBytes = g_dsWrittenBytes;
+				const int xmsEof = ProAudio_XfadeMs();
+				const int eofMode = (g_openDecoderMode != INT_MIN) ? g_openDecoderMode : mode;
+				const bool dualMaybe = (endflg && !fade1 && savedata.saverenzoku == 1 && xmsEof > 0
+					&& ProXfade_IsSupportedMode(eofMode)
+					&& !ProXfade_HasFailed() && pl && pl->playcnt > 0);
+				// 二重DS対応の連続再生ではレガシー end バイトを立てない
+				// （偽 endflg や phase=IDLE 直後の g_endWrittenBytes で timer9000 連鎖する）
+				if (!dualMaybe) {
+					__int64 endPos;
+					if (readmeThisCycle > 0 && readmeThisCycle <= writtenThisCycle)
+						endPos = writtenBefore + readmeThisCycle;
+					else
+						endPos = g_dsWrittenBytes;
+					// 非対応形式のみレガシー「xf ms 手前で終端」
+					if (endflg && !fade1 && savedata.saverenzoku == 1
+						&& xmsEof > 0 && !ProXfade_IsSupportedMode(eofMode)
+						&& g_outBytesPerFrame > 0 && wavbit_sample_Hz > 0) {
+						__int64 cut = (__int64)g_outBytesPerFrame * (__int64)wavbit_sample_Hz * (__int64)xmsEof / 1000;
+						if (cut < g_outBytesPerFrame) cut = g_outBytesPerFrame;
+						if (endPos > cut)
+							endPos -= cut;
+					}
+					g_endWrittenBytes = endPos;
+				}
 			}
-			oldw = WriteCursor;
+			if (stageBytes > 0) {
+				if (stageBytes < gapToWriteCursor && ringBytes > 0)
+					oldw = (oldw + (ULONG)stageBytes) % ringBytes;
+				else
+					oldw = WriteCursor;
+			}
 		}
 
-		// 終端の短フェード＆ジャスト停止判定（ロックを外して終了処理へ）。
-		// playb(デコード先頭)ではなく DS 再生カーソルが実音声終端へ到達した瞬間を「曲終わり」とする。
-		// 実再生バイト数 = 累積書込み − 未再生キュー(我々の書込みヘッド oldw と再生カーソル pc の差)。
-		// oldw はリング上の実書込み位置。g_dsWrittenBytes%ring とは初期オフセット分ずれるため oldw を使う。
-		if (g_endWrittenBytes != 0) {
+		// 実再生バイト数 = 累積書込み − 未再生キュー(oldw と再生カーソルの差)。
+		{
 			LPDIRECTSOUNDBUFFER8 dsbb = m_dsb;
-			__int64 heard = g_endWrittenBytes; // 既定: 終端到達扱い（dsb 取得失敗時の保険）
-			if (isPlausibleDsb(dsbb)) {
+			__int64 queued = 0;
+			__int64 heard = g_dsWrittenBytes;
+			if (isPlausibleDsb(dsbb) && ringBytes > 0) {
 				ULONG pc = 0, wc = 0;
-				if (dsbb->GetCurrentPosition(&pc, &wc) == DS_OK && ringBytes > 0) {
-					const __int64 queued = (__int64)(((ULONG)oldw + ringBytes - pc) % ringBytes);
+				if (dsbb->GetCurrentPosition(&pc, &wc) == DS_OK) {
+					queued = (__int64)(((ULONG)oldw + ringBytes - pc) % ringBytes);
 					heard = g_dsWrittenBytes - queued;
 				}
-				g_heardBytes = heard; // 連続再生のタイマー 9000 などが参照
-				// 終端直前の残り実音声に短いフェードをかけてクリック/プツ音を防ぐ。
-				const __int64 remain = g_endWrittenBytes - heard;
-				const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
-				const __int64 fadeBytes = (__int64)bpf * (__int64)wavbit_sample_Hz * 35 / 1000; // 約35ms
-				if (remain > 0 && remain < fadeBytes && fadeBytes > 0) {
-					LONG vol = (LONG)((double)DSBVOLUME_MIN * (1.0 - (double)remain / (double)fadeBytes));
-					if (vol > 0) vol = 0;
-					if (vol < DSBVOLUME_MIN) vol = DSBVOLUME_MIN;
-					dsbb->SetVolume(vol);
-				}
 			}
-			else {
-				g_heardBytes = heard;
+			g_heardBytes = heard;
+
+			// ---- 連続再生 / レガシー早期終端（二重DSクロスフェードは撤去） ----
+			{
+				const int xms = 0; /* ProAudio_XfadeMs() 常時0 */
+				const bool songLoop = (endf == 0 && loop2 > 0);
+				const int curMode = (g_openDecoderMode != INT_MIN) ? g_openDecoderMode : mode;
+				const bool dualWant = false; /* クロスフェード撤去 */
+
+				// timerp() の ttt と同じ時計（SongHeardClock）。oldw キューや expectedDs は使わない。
+				__int64 remainMs = 0;
+				double totalSec = 0.0;
+				double heardSec = 0.0;
+				{
+					const int rate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+					const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
+					long qSamplesHeard = 0;
+					if (isPlausibleDsb(m_dsb) && ringBytes > 0 && bpf > 0) {
+						ULONG pcQ = 0, wcQ = 0;
+						if (m_dsb->GetCurrentPosition(&pcQ, &wcQ) == DS_OK)
+							qSamplesHeard = (long)((((ULONG)wcQ + ringBytes - (ULONG)pcQ) % ringBytes) / (ULONG)bpf);
+					}
+					SongHeardSec_FromGlobals(
+						curMode, playb, oggsize, loop2,
+						rate, wavchannel, wavsam_depth,
+						qSamplesHeard, totalSec, heardSec);
+					remainMs = SongRemainMs_FromSecs(totalSec, heardSec);
+				}
+
+				// endflg 単独では次曲クロスしない（昇格直後の偽 EOF 連鎖防止）。
+				// 残時間か、十分再生した上での EOF だけを曲末とみなす。
+				const bool playedEnough = (heardSec >= 5.0)
+					|| (totalSec > 1.0 && heardSec >= totalSec * 0.5);
+				// DS 未再生キュー（デコーダ EOF 後もバッファに残る尺）— fallback 用
+				__int64 queuedMs = 0;
+				if (g_ds_pcm_rate > 0) {
+					const int qBpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame
+						: (((g_ds_pcm_ch > 0) ? g_ds_pcm_ch : 2) * (((g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16) / 8));
+					if (qBpf > 0)
+						queuedMs = queued * 1000 / ((__int64)qBpf * (__int64)g_ds_pcm_rate);
+				}
+				const bool nearEndPrefetch = (remainMs > 0 && remainMs <= xms + PRO_XF_PREPARE_MS)
+					|| (endflg && !fade1 && playedEnough
+						&& (remainMs == 0 || remainMs <= xms + PRO_XF_PREPARE_MS + 2000));
+				if (remainMs <= 0 && endflg && !fade1 && playedEnough && queuedMs > 0)
+					remainMs = queuedMs;
+				/* 可聴の最後 xms をフェードにする → 書込み開始はキュー分だけ早く */
+				const __int64 overlapArmAt = (__int64)xms + queuedMs;
+				const bool nearEndOverlap = (remainMs > 0 && remainMs <= (overlapArmAt > 0 ? overlapArmAt : 1));
+				const bool timeToPrefetch = ProXfade_DualArmOk(xms) && nearEndPrefetch;
+				const bool timeToOverlap = ProXfade_DualArmOk(xms) && nearEndOverlap;
+
+				// 昇格直後の偽 EOF は捨てる（残った endflg で即次曲クロスになる）
+				if (!ProXfade_DualArmOk(xms) && endflg && !fade1)
+					endflg = 0;
+
+				bool dualRunning = false;
+				if (dualWant) {
+					// 二重スロット: 空きスロットに次曲デコーダを Open してフィード開始
+					if (ProXfade_Phase() == PRO_XF_IDLE && timeToPrefetch) {
+						int next = plcnt + 1;
+						if (next >= pl->playcnt) next = 0;
+						if (next >= 0 && next < pl->playcnt) {
+							const int nm = ProXfade_ModeFromPath(pl->pc[next].fol);
+							const int bSlot = PlaySlot_IdleSlot();
+							if (!ProXfade_IsSupportedMode(nm)) {
+								ProXfade_MarkFailed();
+							}
+							else if (g_playSlots[bSlot].openMode == INT_MIN && m_ds) {
+								// prepare: Open+バッファのみ。頭出し再生は overlap で StartFromHead
+								if (PlaySlot_OpenFile(bSlot, pl->pc[next].fol, nm)
+									&& PlaySlot_CreateBuffer(bSlot, m_ds, g_ds_buffer_bytes)) {
+									ProXfade_ArmSlotReady(next, nm, pl->pc[next].fol, bSlot);
+								}
+								else {
+									PlaySlot_StopFeedAndClose(bSlot, 2000);
+									PlaySlot_ReleaseBuffer(bSlot);
+									ProXfade_MarkFailed();
+								}
+							}
+						}
+					}
+					const int bSlot = (int)InterlockedCompareExchange(&g_xfadeBSlot, 0, 0);
+					LPDIRECTSOUNDBUFFER8 dsbB = (bSlot >= 0 && bSlot < PLAY_SLOT_COUNT)
+						? g_playSlots[bSlot].dsb : NULL;
+					// 残り xf+lead: B 頭出し。オーバーラップ尺は起動直後の実残りに合わせてクランプ
+					// （壁時計だけ xms 進むと A 途切れ後も B が進み「クロス途中終わり→2曲目はクロス終了位置」になる）
+					if (ProXfade_Phase() == PRO_XF_READY && timeToOverlap && dsbB) {
+						/* B 頭出しは1回。リング準備中も A への書込みを止めない
+						   （旧: StartFromHead 後に Sleep 最大400ms → DS 枯渇で先頭が二重に聞こえる） */
+						const int outR = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate
+							: ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
+						const int outBpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame
+							: (((g_ds_pcm_ch > 0) ? g_ds_pcm_ch : 2)
+								* (((g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16) / 8));
+						if (!ProXfade_EnsureBFromHead(bSlot)) {
+							ProXfade_MarkFailed();
+						}
+						else if (ProXfade_BRingReadyForOverlap(outR, outBpf)) {
+							/* B 待ち後に残り・キューを再計測してから曲線を決める */
+							__int64 qNow = queuedMs;
+							__int64 remNow = remainMs;
+							if (isPlausibleDsb(m_dsb) && ringBytes > 0 && g_ds_pcm_rate > 0 && outBpf > 0) {
+								ULONG pc2 = 0, wc2 = 0;
+								if (m_dsb->GetCurrentPosition(&pc2, &wc2) == DS_OK) {
+									const __int64 qb = (__int64)(((ULONG)oldw + ringBytes - pc2) % ringBytes);
+									qNow = qb * 1000 / ((__int64)outBpf * (__int64)g_ds_pcm_rate);
+								}
+							}
+							{
+								const int rate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+								const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
+								long qSamplesHeard = 0;
+								if (isPlausibleDsb(m_dsb) && ringBytes > 0 && bpf > 0) {
+									ULONG pcQ = 0, wcQ = 0;
+									if (m_dsb->GetCurrentPosition(&pcQ, &wcQ) == DS_OK)
+										qSamplesHeard = (long)((((ULONG)wcQ + ringBytes - (ULONG)pcQ) % ringBytes) / (ULONG)bpf);
+								}
+								double totalSec2 = 0.0, heardSec2 = 0.0;
+								SongHeardSec_FromGlobals(
+									curMode, playb, oggsize, loop2,
+									rate, wavchannel, wavsam_depth,
+									qSamplesHeard, totalSec2, heardSec2);
+								remNow = SongRemainMs_FromSecs(totalSec2, heardSec2);
+							}
+							if (qNow < 0) qNow = 0;
+							if (qNow > 5000) qNow = 5000;
+							int curveMs = (xms > 0) ? xms : 1;
+							if (remNow > 0 && remNow < (__int64)curveMs + qNow) {
+								int avail = (int)remNow - (int)qNow;
+								if (avail < 1) avail = (int)remNow;
+								if (avail > 0 && avail < curveMs) curveMs = avail;
+							}
+							if (curveMs < 1) curveMs = 1;
+							ProXfade_BeginOverlapEx(curveMs, outR, outBpf, (int)qNow);
+							XfDbgF("legacy arm(after B) rem=%lld qNow=%lld curve=%d ring=%d",
+								(long long)remNow, (long long)qNow, curveMs, PlaySlot_MixRingBytes());
+							ProXfade_TickOverlapVolumes(m_dsb, dsbB);
+						}
+					}
+					if (ProXfade_Phase() == PRO_XF_OVERLAP && dsbB) {
+						dualRunning = true;
+						ProXfade_TickOverlapVolumes(m_dsb, dsbB);
+						/* 可聴完了（done - queued ≈ target）で昇格 */
+						if (ProXfade_ReadyToPromote(queued)) {
+							InterlockedExchange(&g_xfadeNoWrite, 1);
+							ProXfade_RequestPromote(0);
+							Ogg_PostXfadePromote();
+						}
+					}
+					else if (ProXfade_Phase() == PRO_XF_READY || ProXfade_Phase() == PRO_XF_PROMOTE
+						|| ProXfade_Phase() == PRO_XF_PREFETCHING) {
+						dualRunning = true;
+					}
+				}
+
+				// レガシー早期終端は「二重DS非対応」だけ。
+				// 対応形式で g_endWrittenBytes=heard すると「1を2000ms前切断→無音→2疑似In」になる。
+				if (!dualRunning && !ProXfade_IsSupportedMode(curMode)
+					&& g_endWrittenBytes == 0 && !fade1 && savedata.saverenzoku == 1
+					&& xms > 0 && !songLoop
+					&& ProXfade_DualArmOk(xms)) {
+					if ((remainMs > 0 && remainMs <= xms) || endflg) {
+						g_endWrittenBytes = (heard > 0) ? heard : 1;
+					}
+					else if (g_expectedDsBytes > 0 && g_ds_pcm_rate > 0) {
+						const int dsBpf = ((g_ds_pcm_ch > 0) ? g_ds_pcm_ch : 2) * (((g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16) / 8);
+						__int64 cutBytes = (__int64)dsBpf * (__int64)g_ds_pcm_rate * (__int64)xms / 1000;
+						if (cutBytes < dsBpf) cutBytes = dsBpf;
+						if (g_expectedDsBytes > cutBytes && heard >= g_expectedDsBytes - cutBytes)
+							g_endWrittenBytes = (heard > 0) ? heard : 1;
+					}
+				}
 			}
 
-			// fade1(=停止 / 連続でない) のときだけ DS スレッドで停止する。
-			// 連続再生(endflg)の次曲遷移は UI 側タイマー 9000 が同じ終端到達判定で行う。
-			if (fade1 && heard >= g_endWrittenBytes) {
-				if (thn1 || stf != 0 || syukai == 2)
-					return stopPlaybackAndExit();
-				playf = 0; thn = TRUE; reset = TRUE;
-				LPDIRECTSOUNDBUFFER8 dsbFade = m_dsb;
-				if (isPlausibleDsb(dsbFade)) {
-					dsbFade->SetVolume(DSBVOLUME_MIN);
-					dsbFade->Stop();
+			if (g_endWrittenBytes != 0 && ProXfade_Phase() != PRO_XF_OVERLAP && ProXfade_Phase() != PRO_XF_PROMOTE) {
+				if (isPlausibleDsb(dsbb)) {
+					const __int64 remain = g_endWrittenBytes - heard;
+					const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
+					const __int64 fadeBytes = (__int64)bpf * (__int64)wavbit_sample_Hz * 35 / 1000;
+					if (remain > 0 && remain < fadeBytes && fadeBytes > 0) {
+						LONG vol = (LONG)((double)DSBVOLUME_MIN * (1.0 - (double)remain / (double)fadeBytes));
+						if (vol > 0) vol = 0;
+						if (vol < DSBVOLUME_MIN) vol = DSBVOLUME_MIN;
+						dsbb->SetVolume(vol);
+					}
 				}
-				if (og && ::IsWindow(og->GetSafeHwnd()))
-					og->PostMessage(WM_PLAYBACK_AUTO_STOPPED, 0, 0);
-				// AfxEndThread 禁止（stopPlaybackAndExit と同じ理由）。通常 return でスレッド終了。
-				return 0;
+
+				// fade1 のときだけ DS スレッドで停止。連続再生の次曲はタイマ 9000。
+				if (fade1 && heard >= g_endWrittenBytes) {
+					if (thn1 || stf != 0 || syukai == 2)
+						return stopPlaybackAndExit();
+					playf = 0; thn = TRUE; reset = TRUE;
+					LPDIRECTSOUNDBUFFER8 dsbFade = m_dsb;
+					if (isPlausibleDsb(dsbFade)) {
+						dsbFade->SetVolume(DSBVOLUME_MIN);
+						dsbFade->Stop();
+					}
+					if (og && ::IsWindow(og->GetSafeHwnd()))
+						og->PostMessage(WM_PLAYBACK_AUTO_STOPPED, 0, 0);
+					return 0;
+				}
 			}
 		}
 	}
@@ -727,10 +1030,7 @@ void HandleNotifications_export()
 	const ULONG bufSize = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM_DS;
 	const int chunkSize = (int)(WAVDALen / 10);
 	if (chunkSize <= 0) return;
-	if (g_rubberBandStretcher) {
-		delete g_rubberBandStretcher;
-		g_rubberBandStretcher = NULL;
-	}
+	RubberBand_DestroyAll();
 	for (;;) {
 		DoEvent();
 		if (syukai == 2) break;
@@ -767,22 +1067,57 @@ extern int pitch;
 extern float tempoRate2;
 std::vector<float> g_loopTailBuffer;
 size_t g_loopTailPos = 0;
-static bool g_rubberBandFinalFlushed = false;
+enum { RB_BANKS = 2 };
+static bool g_rubberBandFinalFlushed[RB_BANKS] = { false, false };
+static int g_rbInitRate[RB_BANKS] = { 0, 0 };
+static int g_rbInitCh[RB_BANKS] = { 0, 0 };
+static std::mutex g_rbMu[RB_BANKS];
 
-// 初期化関数（これは最初の一度、または設定変更時のみ呼び出す）
-bool InitializeRubberBandStretcher()
+void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
+	uint16_t bits_per_sample, uint16_t channels,
+	std::vector<float>& out_float_data);
+void ConvertFloatToRawBytes(const std::vector<float>& float_data,
+	uint16_t target_bits_per_sample, uint16_t channels,
+	std::vector<uint8_t>& out_raw_data);
+
+static void RubberBand_DestroyBankUnlocked(int bank)
 {
-	if (g_rubberBandStretcher) {
-		delete g_rubberBandStretcher;
-		g_rubberBandStretcher = NULL;
+	if (bank < 0 || bank >= RB_BANKS) return;
+	if (g_rubberBandStretcher[bank]) {
+		delete g_rubberBandStretcher[bank];
+		g_rubberBandStretcher[bank] = NULL;
 	}
-	g_rubberBandFinalFlushed = false;
+	g_rubberBandFinalFlushed[bank] = false;
+	g_rbInitRate[bank] = 0;
+	g_rbInitCh[bank] = 0;
+}
+
+void RubberBand_DestroyBank(int bank)
+{
+	if (bank < 0 || bank >= RB_BANKS) return;
+	std::lock_guard<std::mutex> lk(g_rbMu[bank]);
+	RubberBand_DestroyBankUnlocked(bank);
+}
+
+void RubberBand_DestroyAll()
+{
+	for (int b = 0; b < RB_BANKS; ++b)
+		RubberBand_DestroyBank(b);
+}
+
+/* rate/ch を明示。グローバル wavchannel を触ると A/B 並行でヒープ破壊する */
+static bool InitializeRubberBandStretcherExUnlocked(int bank, int rate, int ch)
+{
+	if (bank < 0 || bank >= RB_BANKS) bank = 0;
+	if (rate < 8000) rate = 44100;
+	if (ch < 1) ch = 2;
+	RubberBand_DestroyBankUnlocked(bank);
 
 	try {
 		double pitchRatio = pitch / 100.0;
-		g_rubberBandStretcher = new RubberBand::RubberBandStretcher(
-			wavbit_sample_Hz,
-			wavchannel,
+		g_rubberBandStretcher[bank] = new RubberBand::RubberBandStretcher(
+			rate,
+			ch,
 			RubberBand::RubberBandStretcher::OptionProcessRealTime |
 			RubberBand::RubberBandStretcher::OptionEngineFaster |
 			RubberBand::RubberBandStretcher::OptionTransientsCrisp |
@@ -790,7 +1125,10 @@ bool InitializeRubberBandStretcher()
 			tempoRate2,
 			pitchRatio
 		);
-		g_rubberBandStretcher->setDebugLevel(0);
+		g_rubberBandStretcher[bank]->setDebugLevel(0);
+		g_rbInitRate[bank] = rate;
+		g_rbInitCh[bank] = ch;
+		g_rubberBandFinalFlushed[bank] = false;
 		return true;
 	}
 	catch (...) {
@@ -798,24 +1136,62 @@ bool InitializeRubberBandStretcher()
 	}
 }
 
-// ストリーミング用：データを投入し、現在取り出せる全データを回収する
-bool ProcessAudioWithRubberBand(float tempoRate, bool t)
+bool InitializeRubberBandStretcher(int bank)
+{
+	if (bank < 0 || bank >= RB_BANKS) bank = 0;
+	std::lock_guard<std::mutex> lk(g_rbMu[bank]);
+	int rate = wavbit_sample_Hz;
+	int ch = wavchannel;
+	if (rate < 8000) rate = 44100;
+	if (ch < 1) ch = 2;
+	return InitializeRubberBandStretcherExUnlocked(bank, rate, ch);
+}
+
+bool InitializeRubberBandStretcherForFormat(int bank, int rate, int ch)
+{
+	if (bank < 0 || bank >= RB_BANKS) bank = 0;
+	if (rate < 8000) rate = 44100;
+	if (ch < 1) ch = 2;
+	std::lock_guard<std::mutex> lk(g_rbMu[bank]);
+	if (g_rubberBandStretcher[bank]
+		&& g_rbInitRate[bank] == rate
+		&& g_rbInitCh[bank] == ch) {
+		return true;
+	}
+	return InitializeRubberBandStretcherExUnlocked(bank, rate, ch);
+}
+
+bool InitializeRubberBandStretcher()
+{
+	return InitializeRubberBandStretcher(0);
+}
+
+bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
+	const uint8_t* inData, int inBytes, int bits, int ch, int rate,
+	std::vector<float>& outFloat)
 {
 	try {
-		if (m_bufwav3_1.empty() && !t) return false;
+		if (bank < 0 || bank >= RB_BANKS) bank = 0;
+		if (ch < 1) ch = 2;
+		if (rate < 8000) rate = 44100;
+		if (bits <= 0 || bits > 32) bits = 16;
 
-		// 1. ストレッチャーの準備
-		if (!g_rubberBandStretcher) {
+		if ((!inData || inBytes <= 0) && !t) return false;
+
+		std::lock_guard<std::mutex> lk(g_rbMu[bank]);
+
+		if (!g_rubberBandStretcher[bank]
+			|| g_rbInitRate[bank] != rate
+			|| g_rbInitCh[bank] != ch) {
 			if (t) return false;
 			tempoRate2 = tempoRate;
-			if (!InitializeRubberBandStretcher()) return false;
+			if (!InitializeRubberBandStretcherExUnlocked(bank, rate, ch)) return false;
 		}
-		else if (t && g_rubberBandFinalFlushed) {
-			m_convertedPcmFloatData.clear();
+		else if (t && g_rubberBandFinalFlushed[bank]) {
+			outFloat.clear();
 			return true;
 		}
 
-		// 2. パラメータの更新
 		float semitones = (float)pitch;
 		if (semitones >= 200.0f) {
 			semitones -= 100.0f;
@@ -825,84 +1201,63 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t)
 		}
 		semitones /= 100.0f;
 
-		g_rubberBandStretcher->setTimeRatio(tempoRate);
-		g_rubberBandStretcher->setPitchScale(static_cast<float>(semitones));
+		g_rubberBandStretcher[bank]->setTimeRatio(tempoRate);
+		g_rubberBandStretcher[bank]->setPitchScale(static_cast<float>(semitones));
 
-		std::vector<float*> channelPointers;
-		size_t samplesIn = 0;
 		if (!t) {
-			// 3. データ変換（MP3 は MAD 出力＝m_dwBitsPerSample。g_mp3_decoder_bps だけだと 24bit 時に 16 のまま残り 1.5 倍ずれる）
-			uint16_t bps;
-			if (mode == -10) {
-				int bits = Mp3GetDecoderBitsForRubberBand();
-				bps = (uint16_t)bits;
-			}
-			else {
-				bps = (uint16_t)((wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth));
-			}
-			ConvertRawBytesToFloat(m_bufwav3_1, bps, wavchannel, inputFloatData);
-			if (inputFloatData.empty()) return false;
+			std::vector<uint8_t> raw((size_t)inBytes);
+			memcpy(raw.data(), inData, (size_t)inBytes);
+			std::vector<float> inputFloat;
+			ConvertRawBytesToFloat(raw, (uint16_t)bits, (uint16_t)ch, inputFloat);
+			if (inputFloat.empty()) return false;
 
-			samplesIn = inputFloatData.size() / wavchannel;
-			std::vector<std::vector<float>> channelData(wavchannel, std::vector<float>(samplesIn));
+			const size_t samplesIn = inputFloat.size() / (size_t)ch;
+			if (samplesIn == 0) return false;
+			std::vector<std::vector<float>> channelData(ch, std::vector<float>(samplesIn));
 			for (size_t i = 0; i < samplesIn; ++i) {
-				for (int ch = 0; ch < wavchannel; ++ch) {
-					channelData[ch][i] = inputFloatData[i * wavchannel + ch];
-				}
+				for (int c = 0; c < ch; ++c)
+					channelData[c][i] = inputFloat[i * (size_t)ch + (size_t)c];
 			}
-			channelPointers.resize(wavchannel);
-			for (int ch = 0; ch < wavchannel; ++ch) {
-				channelPointers[ch] = channelData[ch].data();
-			}
+			std::vector<float*> channelPointers(ch);
+			for (int c = 0; c < ch; ++c)
+				channelPointers[c] = channelData[c].data();
 
-			// 4. データの投入
-			g_rubberBandStretcher->process(channelPointers.data(), samplesIn, false);
-			g_rubberBandFinalFlushed = false;
+			g_rubberBandStretcher[bank]->process(channelPointers.data(), samplesIn, false);
+			g_rubberBandFinalFlushed[bank] = false;
 		}
 		else {
-			// EOF 時は入力なしで final=true を1回だけ送って内部キューを吐き切る
-			// 実装によっては samples==0 でも input ポインタ配列の NULL を嫌うため、
-			// ダミーの無音1サンプルを各chに用意して安全に呼ぶ。
-			std::vector<std::vector<float>> dummyData(wavchannel, std::vector<float>(1, 0.0f));
-			std::vector<float*> dummyPointers(wavchannel);
-			for (int ch = 0; ch < wavchannel; ++ch) {
-				dummyPointers[ch] = dummyData[ch].data();
-			}
-			g_rubberBandStretcher->process(dummyPointers.data(), 0, true);
-			g_rubberBandFinalFlushed = true;
+			std::vector<std::vector<float>> dummyData(ch, std::vector<float>(1, 0.0f));
+			std::vector<float*> dummyPointers(ch);
+			for (int c = 0; c < ch; ++c)
+				dummyPointers[c] = dummyData[c].data();
+			g_rubberBandStretcher[bank]->process(dummyPointers.data(), 0, true);
+			g_rubberBandFinalFlushed[bank] = true;
 		}
 
-		// 5. 現在のバッファから取り出せる分をすべて回収
-		m_convertedPcmFloatData.clear();
-
+		outFloat.clear();
 		const size_t pullSize = 4096;
-		std::vector<std::vector<float>> outputChannelData(wavchannel, std::vector<float>(pullSize));
-		std::vector<float*> outputPointers(wavchannel);
-		for (int ch = 0; ch < wavchannel; ++ch) {
-			outputPointers[ch] = outputChannelData[ch].data();
-		}
+		std::vector<std::vector<float>> outputChannelData(ch, std::vector<float>(pullSize));
+		std::vector<float*> outputPointers(ch);
+		for (int c = 0; c < ch; ++c)
+			outputPointers[c] = outputChannelData[c].data();
 
-		while (g_rubberBandStretcher->available() > 0) {
-			size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
-			size_t retrieved = g_rubberBandStretcher->retrieve(outputPointers.data(), toGet);
+		while (g_rubberBandStretcher[bank]->available() > 0) {
+			size_t toGet = (std::min)((size_t)g_rubberBandStretcher[bank]->available(), pullSize);
+			size_t retrieved = g_rubberBandStretcher[bank]->retrieve(outputPointers.data(), toGet);
 			if (retrieved == 0) break;
-
 			for (size_t i = 0; i < retrieved; ++i) {
-				for (int ch = 0; ch < wavchannel; ++ch) {
-					m_convertedPcmFloatData.push_back(outputChannelData[ch][i]);
-				}
+				for (int c = 0; c < ch; ++c)
+					outFloat.push_back(outputChannelData[c][i]);
 			}
 		}
 
-		// ループ終端の残骸データを滑らかに加算する処理（既存コードの改善版）
-		if (g_loopTailPos < g_loopTailBuffer.size()) {
-			// フェードアウトをリニアではなくイーズアウト（二乗）にして自然に消す
+		if (bank == 0 && g_loopTailPos < g_loopTailBuffer.size()) {
 			size_t tailTotal = g_loopTailBuffer.size();
-			for (size_t i = 0; i < m_convertedPcmFloatData.size(); ++i) {
+			for (size_t i = 0; i < outFloat.size(); ++i) {
 				if (g_loopTailPos >= tailTotal) break;
 				float ratio = 1.0f - ((float)g_loopTailPos / (float)tailTotal);
-				float fadeFactor = ratio * ratio; // イーズアウト
-				m_convertedPcmFloatData[i] += g_loopTailBuffer[g_loopTailPos] * fadeFactor;
+				float fadeFactor = ratio * ratio;
+				outFloat[i] += g_loopTailBuffer[g_loopTailPos] * fadeFactor;
 				g_loopTailPos++;
 			}
 			if (g_loopTailPos >= tailTotal) {
@@ -917,6 +1272,30 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t)
 		return false;
 	}
 }
+
+bool ProcessAudioWithRubberBand(float tempoRate, bool t)
+{
+	try {
+		if (m_bufwav3_1.empty() && !t) return false;
+
+		int bits;
+		if (mode == -10)
+			bits = Mp3GetDecoderBitsForRubberBand();
+		else
+			bits = (wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth);
+
+		const uint8_t* p = m_bufwav3_1.empty() ? NULL : m_bufwav3_1.data();
+		const int n = (int)m_bufwav3_1.size();
+		const int ch = (wavchannel > 0) ? wavchannel : 2;
+		const int rate = (wavbit_sample_Hz >= 8000) ? wavbit_sample_Hz : 44100;
+		return ProcessAudioWithRubberBandBank(0, tempoRate, t, p, n, bits, ch, rate,
+			m_convertedPcmFloatData);
+	}
+	catch (...) {
+		return false;
+	}
+}
+
 
 #include <cmath>
 // rawバイトデータからfloatデータへの変換
@@ -1612,14 +1991,17 @@ typedef struct {
 } ChannelState;
 
 // ===== Global State =====
-static ChannelState g_channels[MAX_CH];
-static float g_delayMemory[MAX_CH][MAX_DELAY_SAMPLES];
-static int g_lastRate = 0;
-static int g_lastEqPreset = -1;
-static int g_lastEnvPreset = -1;
-static int g_lastEqValues[15];
-static int g_lastExtendedParams[5];
-static int g_lastEffectAmount = 50;
+enum { EQ_BANKS = 2 };
+static int g_eqCur = 0;
+static std::mutex g_eqMu;
+static ChannelState g_channels[EQ_BANKS][MAX_CH];
+static float g_delayMemory[EQ_BANKS][MAX_CH][MAX_DELAY_SAMPLES];
+static int g_lastRate[EQ_BANKS] = { 0, 0 };
+static int g_lastEqPreset[EQ_BANKS] = { -1, -1 };
+static int g_lastEnvPreset[EQ_BANKS] = { -1, -1 };
+static int g_lastEqValues[EQ_BANKS][15];
+static int g_lastExtendedParams[EQ_BANKS][5];
+static int g_lastEffectAmount[EQ_BANKS] = { 50, 50 };
 
 // ===== 追加エフェクトパラメータ (リバーブ/コーラス/ディレイ) =====
 // equaliser() で savedata から取り込む。
@@ -1632,7 +2014,7 @@ static int g_lastEffectAmount = 50;
 static int g_eqReverb = 0;
 static int g_eqChorus = 0;
 static int g_eqDelay = 0;
-static BOOL g_initialized = FALSE;
+static BOOL g_initialized[EQ_BANKS] = { FALSE, FALSE };
 
 /*
 ■ リミッターの動作を調整したい場合
@@ -1656,12 +2038,12 @@ static BOOL g_initialized = FALSE;
 ■ 調整例
 
 // より安全重視の設定
-g_limiter[ch].threshold = 0.92f;
+g_limiter[g_eqCur][ch].threshold = 0.92f;
 attackTime = 0.0005f;  // 超高速反応
 releaseTime = 0.150f;  // やや遅めの戻り
 
 // ダイナミックレンジ優先の設定
-g_limiter[ch].threshold = 0.97f;
+g_limiter[g_eqCur][ch].threshold = 0.97f;
 attackTime = 0.002f;   // 少しゆったり
 releaseTime = 0.200f;  // 自然な戻り
 
@@ -1688,15 +2070,8 @@ typedef struct {
 	float releaseCoeff;  // リリース係数（プリ計算済み）
 } DynamicLimiter;
 
-static DynamicLimiter g_limiter[2] = {
-	{ 1.0f, 0.95f, 0.0f, 0.0f },  // L ch
-	{ 1.0f, 0.95f, 0.0f, 0.0f }   // R ch
-};
-
-static DynamicLimiter g_extBoostLimiter[2] = {
-	{ 1.0f, 0.95f, 0.0f, 0.0f },
-	{ 1.0f, 0.95f, 0.0f, 0.0f }
-};
+static DynamicLimiter g_limiter[EQ_BANKS][2];
+static DynamicLimiter g_extBoostLimiter[EQ_BANKS][2];
 
 // ===== EQ Frequencies =====
 static const float EQ_FREQS[EQ_BANDS] = {
@@ -3986,7 +4361,11 @@ static BlockAnalysis AnalyzeBlock(
 // InitEngine でリセット。attack/release 非対称で自然な圧縮感を実現。
 // attack =0.08: 1ブロックで最大8%圧縮 → 急激な大音量でも緩やかに追従
 // release=0.30: 3〜4ブロックで元のゲインに復帰 → 不自然な揺り戻しなし
-static float g_stagingGainSmooth = 1.0f;
+static float g_stagingGainSmooth[EQ_BANKS] = { 1.0f, 1.0f };
+static float g_laLimEnv[EQ_BANKS] = { 1.0f, 1.0f };
+static float g_eqLeftSamples[EQ_BANKS][8192 * 40];
+static float g_eqRightSamples[EQ_BANKS][8192 * 40];
+
 
 
 // ============================================================
@@ -4021,10 +4400,10 @@ typedef struct {
 	float panPhase;                     // パンリバーブ用 自動パン LFO 位相
 	int   rate;
 } FxReverb;
-static FxReverb g_fxReverb;
+static FxReverb g_fxReverb[EQ_BANKS];
 
 static void FxReverbReset(int rate) {
-	memset(&g_fxReverb, 0, sizeof(g_fxReverb));
+	memset(&g_fxReverb[g_eqCur], 0, sizeof(g_fxReverb));
 	// Freeverb の標準チューニング (44100Hz 基準のサンプル数)
 	static const int combTune[FX_REV_COMBS] = { 1116,1188,1277,1356,1422,1491,1557,1617 };
 	static const int allpTune[FX_REV_ALLPS] = { 556,441,341,225 };
@@ -4034,21 +4413,21 @@ static void FxReverbReset(int rate) {
 			int len = (int)((long long)combTune[c] * rate / 44100) + (ch ? spread : 0);
 			if (len < 8) len = 8;
 			if (len >= FX_REV_MAXCOMB) len = FX_REV_MAXCOMB - 1;
-			g_fxReverb.combLen[ch][c] = len;
+			g_fxReverb[g_eqCur].combLen[ch][c] = len;
 		}
 		for (int a = 0; a < FX_REV_ALLPS; a++) {
 			int len = (int)((long long)allpTune[a] * rate / 44100) + (ch ? spread : 0);
 			if (len < 8) len = 8;
 			if (len >= FX_REV_MAXALL) len = FX_REV_MAXALL - 1;
-			g_fxReverb.allpLen[ch][a] = len;
+			g_fxReverb[g_eqCur].allpLen[ch][a] = len;
 		}
 	}
-	g_fxReverb.rate = rate;
+	g_fxReverb[g_eqCur].rate = rate;
 }
 
 static void FxProcessReverb(float* L, float* R, int n, int rate, float amount, BOOL panMode) {
 	if (amount <= 0.0f || n <= 0) return;
-	if (g_fxReverb.rate != rate) FxReverbReset(rate);
+	if (g_fxReverb[g_eqCur].rate != rate) FxReverbReset(rate);
 	if (amount > 1.0f) amount = 1.0f;
 
 	const float roomSize = 0.74f + amount * 0.245f;   // フィードバック 0.74..~0.985 (残響を長く)
@@ -4066,22 +4445,22 @@ static void FxProcessReverb(float* L, float* R, int n, int rate, float amount, B
 			float acc = 0.0f;
 			// 並列コムフィルタ (各々ダンピング付きフィードバック)
 			for (int c = 0; c < FX_REV_COMBS; c++) {
-				int p = g_fxReverb.combPos[ch][c];
-				float y = g_fxReverb.comb[ch][c][p];
-				g_fxReverb.combLP[ch][c] = y * damp2 + g_fxReverb.combLP[ch][c] * damp1;
-				g_fxReverb.comb[ch][c][p] = inMono + g_fxReverb.combLP[ch][c] * roomSize;
-				if (++p >= g_fxReverb.combLen[ch][c]) p = 0;
-				g_fxReverb.combPos[ch][c] = p;
+				int p = g_fxReverb[g_eqCur].combPos[ch][c];
+				float y = g_fxReverb[g_eqCur].comb[ch][c][p];
+				g_fxReverb[g_eqCur].combLP[ch][c] = y * damp2 + g_fxReverb[g_eqCur].combLP[ch][c] * damp1;
+				g_fxReverb[g_eqCur].comb[ch][c][p] = inMono + g_fxReverb[g_eqCur].combLP[ch][c] * roomSize;
+				if (++p >= g_fxReverb[g_eqCur].combLen[ch][c]) p = 0;
+				g_fxReverb[g_eqCur].combPos[ch][c] = p;
 				acc += y;
 			}
 			// 直列オールパス (拡散)
 			for (int a = 0; a < FX_REV_ALLPS; a++) {
-				int p = g_fxReverb.allpPos[ch][a];
-				float bufout = g_fxReverb.allp[ch][a][p];
+				int p = g_fxReverb[g_eqCur].allpPos[ch][a];
+				float bufout = g_fxReverb[g_eqCur].allp[ch][a][p];
 				float y = -acc + bufout;
-				g_fxReverb.allp[ch][a][p] = acc + bufout * 0.5f;
-				if (++p >= g_fxReverb.allpLen[ch][a]) p = 0;
-				g_fxReverb.allpPos[ch][a] = p;
+				g_fxReverb[g_eqCur].allp[ch][a][p] = acc + bufout * 0.5f;
+				if (++p >= g_fxReverb[g_eqCur].allpLen[ch][a]) p = 0;
+				g_fxReverb[g_eqCur].allpPos[ch][a] = p;
 				acc = y;
 			}
 			outCh[ch] = acc;
@@ -4090,9 +4469,9 @@ static void FxProcessReverb(float* L, float* R, int n, int rate, float amount, B
 		float wetR = outCh[1];
 		if (panMode) {
 			// パンリバーブ: 残響を左右にゆっくり回す
-			g_fxReverb.panPhase += panRate / (float)rate;
-			if (g_fxReverb.panPhase >= 1.0f) g_fxReverb.panPhase -= 1.0f;
-			float lfo = sinf(g_fxReverb.panPhase * 2.0f * (float)M_PI);
+			g_fxReverb[g_eqCur].panPhase += panRate / (float)rate;
+			if (g_fxReverb[g_eqCur].panPhase >= 1.0f) g_fxReverb[g_eqCur].panPhase -= 1.0f;
+			float lfo = sinf(g_fxReverb[g_eqCur].panPhase * 2.0f * (float)M_PI);
 			float gL = 0.5f + 0.5f * lfo;
 			float gR = 1.0f - gL;
 			float mixL = wetL * gL + wetR * gR;
@@ -4126,16 +4505,16 @@ typedef struct {
 	float lfoPhase;
 	int   rate;
 } FxChorus;
-static FxChorus g_fxChorus;
+static FxChorus g_fxChorus[EQ_BANKS];
 
 static void FxChorusReset(int rate) {
-	memset(&g_fxChorus, 0, sizeof(g_fxChorus));
-	g_fxChorus.rate = rate;
+	memset(&g_fxChorus[g_eqCur], 0, sizeof(g_fxChorus));
+	g_fxChorus[g_eqCur].rate = rate;
 }
 
 static void FxProcessChorus(float* L, float* R, int n, int rate, float amount, BOOL distMode) {
 	if (amount <= 0.0f || n <= 0) return;
-	if (g_fxChorus.rate != rate) FxChorusReset(rate);
+	if (g_fxChorus[g_eqCur].rate != rate) FxChorusReset(rate);
 	if (amount > 1.0f) amount = 1.0f;
 
 	const float baseSamp = 16.0f * rate / 1000.0f;          // 基準遅延 16ms
@@ -4146,16 +4525,16 @@ static void FxProcessChorus(float* L, float* R, int n, int rate, float amount, B
 	const float driveNorm = 1.0f / tanhf(drive);
 
 	for (int i = 0; i < n; i++) {
-		g_fxChorus.lfoPhase += lfoHz / (float)rate;
-		if (g_fxChorus.lfoPhase >= 1.0f) g_fxChorus.lfoPhase -= 1.0f;
+		g_fxChorus[g_eqCur].lfoPhase += lfoHz / (float)rate;
+		if (g_fxChorus[g_eqCur].lfoPhase >= 1.0f) g_fxChorus[g_eqCur].lfoPhase -= 1.0f;
 		for (int ch = 0; ch < 2; ch++) {
-			float* buf = g_fxChorus.buf[ch];
-			int wp = g_fxChorus.wpos[ch];
+			float* buf = g_fxChorus[g_eqCur].buf[ch];
+			int wp = g_fxChorus[g_eqCur].wpos[ch];
 			float dry = (ch == 0) ? L[i] : R[i];
 			buf[wp] = dry;
 			float wet = 0.0f;
 			for (int v = 0; v < 3; v++) {
-				float ph = g_fxChorus.lfoPhase + (float)v / 3.0f + (ch ? 0.25f : 0.0f);
+				float ph = g_fxChorus[g_eqCur].lfoPhase + (float)v / 3.0f + (ch ? 0.25f : 0.0f);
 				float lfo = sinf(ph * 2.0f * (float)M_PI);
 				float d = baseSamp + depthSamp * (0.5f + 0.5f * lfo);
 				wet += FxReadFrac(buf, wp, d, FX_CHO_MAX);
@@ -4164,7 +4543,7 @@ static void FxProcessChorus(float* L, float* R, int n, int rate, float amount, B
 			if (distMode) wet = tanhf(wet * drive) * driveNorm;  // コーラスディストーション
 			float out = dry * (1.0f - wetMix * 0.45f) + wet * wetMix;
 			if (++wp >= FX_CHO_MAX) wp = 0;
-			g_fxChorus.wpos[ch] = wp;
+			g_fxChorus[g_eqCur].wpos[ch] = wp;
 			if (ch == 0) L[i] = isfinite(out) ? out : 0.0f;
 			else         R[i] = isfinite(out) ? out : 0.0f;
 		}
@@ -4178,16 +4557,16 @@ typedef struct {
 	int   wpos[2];
 	int   rate;
 } FxDelay;
-static FxDelay g_fxDelay;
+static FxDelay g_fxDelay[EQ_BANKS];
 
 static void FxDelayReset(int rate) {
-	memset(&g_fxDelay, 0, sizeof(g_fxDelay));
-	g_fxDelay.rate = rate;
+	memset(&g_fxDelay[g_eqCur], 0, sizeof(g_fxDelay));
+	g_fxDelay[g_eqCur].rate = rate;
 }
 
 static void FxProcessDelay(float* L, float* R, int n, int rate, float amount, BOOL multiMode) {
 	if (amount <= 0.0f || n <= 0) return;
-	if (g_fxDelay.rate != rate) FxDelayReset(rate);
+	if (g_fxDelay[g_eqCur].rate != rate) FxDelayReset(rate);
 	if (amount > 1.0f) amount = 1.0f;
 
 	int d1 = (int)(0.250f * rate);   // 250ms 主ディレイ
@@ -4197,12 +4576,12 @@ static void FxProcessDelay(float* L, float* R, int n, int rate, float amount, BO
 	const float feedback = 0.30f + amount * 0.55f;   // 0.30..0.85 (反復を増やし効きを強化)
 	const float wetMix = 0.6f * amount;              // 最大 60% wet (やや強めに)
 
-	float* bL = g_fxDelay.buf[0];
-	float* bR = g_fxDelay.buf[1];
+	float* bL = g_fxDelay[g_eqCur].buf[0];
+	float* bR = g_fxDelay[g_eqCur].buf[1];
 
 	for (int i = 0; i < n; i++) {
-		int wpL = g_fxDelay.wpos[0];
-		int wpR = g_fxDelay.wpos[1];
+		int wpL = g_fxDelay[g_eqCur].wpos[0];
+		int wpR = g_fxDelay[g_eqCur].wpos[1];
 
 		int rL = wpL - d1; if (rL < 0) rL += FX_DLY_MAX;
 		int rR = wpR - d1; if (rR < 0) rR += FX_DLY_MAX;
@@ -4238,8 +4617,8 @@ static void FxProcessDelay(float* L, float* R, int n, int rate, float amount, BO
 
 		if (++wpL >= FX_DLY_MAX) wpL = 0;
 		if (++wpR >= FX_DLY_MAX) wpR = 0;
-		g_fxDelay.wpos[0] = wpL;
-		g_fxDelay.wpos[1] = wpR;
+		g_fxDelay[g_eqCur].wpos[0] = wpL;
+		g_fxDelay[g_eqCur].wpos[1] = wpR;
 	}
 }
 
@@ -4270,68 +4649,71 @@ static void FxApplyUserEffects(float* L, float* R, int n, int rate) {
 // サンプルレート変更または reset==1 時に呼ばれる
 // 全チャンネル状態のクリア、ディレイバッファのゼロ埋め、
 // リミッター係数の再計算を行う
-static void InitEngine(int rate) {
+static void InitEngine(int rate, int bank = 0) {
+	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
+	const int prevBank = g_eqCur;
+	g_eqCur = bank;
 	// memset 前に山彦バッファを退避して解放する。
 	// 先に memset するとポインタが消え、毎回 malloc 分がリークする。
 	float* oldYamabiko[MAX_CH];
 	for (int i = 0; i < MAX_CH; i++)
-		oldYamabiko[i] = g_channels[i].yamabikoBuf;
+		oldYamabiko[i] = g_channels[g_eqCur][i].yamabikoBuf;
 
-	memset(g_channels, 0, sizeof(g_channels));
-	memset(g_delayMemory, 0, sizeof(g_delayMemory));
+	memset(g_channels[g_eqCur], 0, sizeof(g_channels[g_eqCur]));
+	memset(g_delayMemory[g_eqCur], 0, sizeof(g_delayMemory[g_eqCur]));
 
 	for (int i = 0; i < MAX_CH; i++) {
 		if (oldYamabiko[i] != NULL)
 			free(oldYamabiko[i]);
 
-		g_channels[i].delayBuffer = g_delayMemory[i];
-		g_channels[i].lfo.phase = 0.0f;
-		g_channels[i].flutterPhase = 0.0f;
-		g_channels[i].dopplerPhase = 0.0f;
-		g_channels[i].phasingPhase = 0.0f;
+		g_channels[g_eqCur][i].delayBuffer = g_delayMemory[g_eqCur][i];
+		g_channels[g_eqCur][i].lfo.phase = 0.0f;
+		g_channels[g_eqCur][i].flutterPhase = 0.0f;
+		g_channels[g_eqCur][i].dopplerPhase = 0.0f;
+		g_channels[g_eqCur][i].phasingPhase = 0.0f;
 
 		for (int j = 0; j < 8; j++) {
-			g_channels[i].diffusionPos1[j] = 0;
-			g_channels[i].diffusionPos2[j] = 0;
-			g_channels[i].diffusionPos3[j] = 0;
+			g_channels[g_eqCur][i].diffusionPos1[j] = 0;
+			g_channels[g_eqCur][i].diffusionPos2[j] = 0;
+			g_channels[g_eqCur][i].diffusionPos3[j] = 0;
 		}
 
-		g_channels[i].harmonicState = 0.0f;
-		g_channels[i].earlyEnvelope = 0.0f;
-		g_channels[i].lateEnvelope = 0.0f;
-		g_channels[i].warmthState = 0.0f;
-		g_channels[i].brightnessState = 0.0f;
-		g_channels[i].shimmerState = 0.0f;
+		g_channels[g_eqCur][i].harmonicState = 0.0f;
+		g_channels[g_eqCur][i].earlyEnvelope = 0.0f;
+		g_channels[g_eqCur][i].lateEnvelope = 0.0f;
+		g_channels[g_eqCur][i].warmthState = 0.0f;
+		g_channels[g_eqCur][i].brightnessState = 0.0f;
+		g_channels[g_eqCur][i].shimmerState = 0.0f;
 
 		// 山彦バッファ: rate×2秒分 (最大遅延 2秒)
-		g_channels[i].yamabikoBufSize = rate * 2;
-		g_channels[i].yamabikoPos = 0;
-		g_channels[i].yamabikoBuf = (float*)malloc(sizeof(float) * g_channels[i].yamabikoBufSize);
-		if (g_channels[i].yamabikoBuf != NULL)
-			memset(g_channels[i].yamabikoBuf, 0, sizeof(float) * g_channels[i].yamabikoBufSize);
+		g_channels[g_eqCur][i].yamabikoBufSize = rate * 2;
+		g_channels[g_eqCur][i].yamabikoPos = 0;
+		g_channels[g_eqCur][i].yamabikoBuf = (float*)malloc(sizeof(float) * g_channels[g_eqCur][i].yamabikoBufSize);
+		if (g_channels[g_eqCur][i].yamabikoBuf != NULL)
+			memset(g_channels[g_eqCur][i].yamabikoBuf, 0, sizeof(float) * g_channels[g_eqCur][i].yamabikoBufSize);
 	}
 
-	g_lastRate = rate;
-	g_lastEqPreset = -1;
-	g_lastEnvPreset = -1;
+	g_lastRate[g_eqCur] = rate;
+	g_lastEqPreset[g_eqCur] = -1;
+	g_lastEnvPreset[g_eqCur] = -1;
 
-	for (int i = 0; i < 15; i++) g_lastEqValues[i] = 100;
-	for (int i = 0; i < 5; i++) g_lastExtendedParams[i] = 100;
+	for (int i = 0; i < 15; i++) g_lastEqValues[g_eqCur][i] = 100;
+	for (int i = 0; i < 5; i++) g_lastExtendedParams[g_eqCur][i] = 100;
 
 	// リミッター係数: attack=1ms, release=100ms
 	for (int ch = 0; ch < 2; ch++) {
-		g_limiter[ch].envelope = 1.0f;
-		g_limiter[ch].threshold = 0.95f;
-		g_limiter[ch].attackCoeff = expf(-1.0f / (0.001f * rate));
-		g_limiter[ch].releaseCoeff = expf(-1.0f / (0.100f * rate));
-		g_extBoostLimiter[ch].envelope = 1.0f;
-		g_extBoostLimiter[ch].threshold = 0.95f;
-		g_extBoostLimiter[ch].attackCoeff = g_limiter[ch].attackCoeff;
-		g_extBoostLimiter[ch].releaseCoeff = g_limiter[ch].releaseCoeff;
+		g_limiter[g_eqCur][ch].envelope = 1.0f;
+		g_limiter[g_eqCur][ch].threshold = 0.95f;
+		g_limiter[g_eqCur][ch].attackCoeff = expf(-1.0f / (0.001f * rate));
+		g_limiter[g_eqCur][ch].releaseCoeff = expf(-1.0f / (0.100f * rate));
+		g_extBoostLimiter[g_eqCur][ch].envelope = 1.0f;
+		g_extBoostLimiter[g_eqCur][ch].threshold = 0.95f;
+		g_extBoostLimiter[g_eqCur][ch].attackCoeff = g_limiter[g_eqCur][ch].attackCoeff;
+		g_extBoostLimiter[g_eqCur][ch].releaseCoeff = g_limiter[g_eqCur][ch].releaseCoeff;
 	}
 
-	g_lastEffectAmount = 50;
-	g_initialized = TRUE;
+	g_lastEffectAmount[g_eqCur] = 50;
+	g_initialized[g_eqCur] = TRUE;
 
 	// 追加エフェクトパラメータ (0 = オフ)
 	g_eqReverb = 0;
@@ -4344,18 +4726,22 @@ static void InitEngine(int rate) {
 	FxDelayReset(rate);
 
 	// [FIX-COMP] ブロック間平滑ゲインをリセット
-	g_stagingGainSmooth = 1.0f;
+	g_stagingGainSmooth[g_eqCur] = 1.0f;
+	g_laLimEnv[g_eqCur] = 1.0f;
+	g_eqCur = prevBank;
 }
 
 // ===== 山彦バッファ解放 =====
 // アプリ終了時またはエンジン破棄時に呼ぶ
 void FreeEngine(void) {
-	for (int i = 0; i < MAX_CH; i++) {
-		if (g_channels[i].yamabikoBuf != NULL) {
-			free(g_channels[i].yamabikoBuf);
-			g_channels[i].yamabikoBuf = NULL;
-			g_channels[i].yamabikoBufSize = 0;
-			g_channels[i].yamabikoPos = 0;
+	for (int b = 0; b < EQ_BANKS; b++) {
+		for (int i = 0; i < MAX_CH; i++) {
+			if (g_channels[b][i].yamabikoBuf != NULL) {
+				free(g_channels[b][i].yamabikoBuf);
+				g_channels[b][i].yamabikoBuf = NULL;
+				g_channels[b][i].yamabikoBufSize = 0;
+				g_channels[b][i].yamabikoPos = 0;
+			}
 		}
 	}
 }
@@ -4418,7 +4804,6 @@ static float ProcessDynamicLimiter(DynamicLimiter* lim, float input) {
 //    0.78〜0.97 域の高調波歪み(音割れ感/濁り)が乗らない。
 //  → 静部は無処理・ピークのみ動的減衰なので音量(ラウドネス)は維持。
 //  L/R 同一ゲインで処理しステレオ像を保つ。遅延はバッファ内先読みのため0。
-static float g_laLimEnv = 1.0f; // リリース包絡（ブロック間で継続）
 
 static void ApplyLookaheadLimiterStereo(float* L, float* R, int n, int rate, float ceiling)
 {
@@ -4454,13 +4839,13 @@ static void ApplyLookaheadLimiterStereo(float* L, float* R, int n, int rate, flo
 		if (add < n) pushBack(add);
 		if (dq[dqHead] == i) ++dqHead;
 
-		const float coeff = (laMin < g_laLimEnv) ? atkCoeff : relCoeff;
-		g_laLimEnv = laMin + coeff * (g_laLimEnv - laMin);
-		if (g_laLimEnv > 1.0f) g_laLimEnv = 1.0f;
-		if (g_laLimEnv < 0.0f) g_laLimEnv = 0.0f;
+		const float coeff = (laMin < g_laLimEnv[g_eqCur]) ? atkCoeff : relCoeff;
+		g_laLimEnv[g_eqCur] = laMin + coeff * (g_laLimEnv[g_eqCur] - laMin);
+		if (g_laLimEnv[g_eqCur] > 1.0f) g_laLimEnv[g_eqCur] = 1.0f;
+		if (g_laLimEnv[g_eqCur] < 0.0f) g_laLimEnv[g_eqCur] = 0.0f;
 
-		L[i] *= g_laLimEnv;
-		R[i] *= g_laLimEnv;
+		L[i] *= g_laLimEnv[g_eqCur];
+		R[i] *= g_laLimEnv[g_eqCur];
 	}
 }
 
@@ -4553,7 +4938,7 @@ static float GetFormatVolumeGain(void)
 static float GetExternalBoostGain(void)
 {
 	const float kakuGain = ClampFloat((float)savedata.kakuVal / 100.0f, 1.0f, 9.0f);
-	return kakuGain * GetFormatVolumeGain();
+	return kakuGain * GetFormatVolumeGain() * ProAudio_ReplayGainLinear();
 }
 
 static inline float PcmSampleToFloat(const unsigned char* pRaw, int offset, int wavsam)
@@ -4596,7 +4981,7 @@ static float ApplyExternalBoostSample(float sample, int ch, float extGain)
 {
 	const int limCh = (ch < 2) ? ch : (ch & 1);
 	sample *= extGain;
-	sample = ProcessDynamicLimiter(&g_extBoostLimiter[limCh], sample);
+	sample = ProcessDynamicLimiter(&g_extBoostLimiter[g_eqCur][limCh], sample);
 	return ProfessionalSoftSaturate(sample);
 }
 
@@ -4877,14 +5262,51 @@ void ResampleDown(void* srcData, int srcLen, void* dstData, int dstLen,
 //   len   : バッファバイト長
 //   reset : 0=通常, 1=強制初期化, 2=EQプリセット再読み込みのみ
 // ============================================================
+static void equaliserBankUnlocked(void* data, int len, BOOL reset);
+
+void equaliserResetBank(int bank) {
+	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
+	std::lock_guard<std::mutex> lk(g_eqMu);
+	int rate = wavbit_sample_Hz;
+	if (rate < 8000) rate = 44100;
+	InitEngine(rate, bank);
+}
+
+void equaliserBank(int bank, void* data, int len, BOOL reset,
+	int bitsOverride, int chOverride, int rateOverride) {
+	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
+	std::lock_guard<std::mutex> lk(g_eqMu);
+	const int prevBank = g_eqCur;
+	g_eqCur = bank;
+	const int oldDepth = wavsam_depth;
+	const int oldCh = wavchannel;
+	const int oldRate = wavbit_sample_Hz;
+	if (bitsOverride > 0) wavsam_depth = bitsOverride;
+	if (chOverride > 0) wavchannel = chOverride;
+	if (rateOverride > 0) wavbit_sample_Hz = rateOverride;
+	equaliserBankUnlocked(data, len, reset);
+	wavsam_depth = oldDepth;
+	wavchannel = oldCh;
+	wavbit_sample_Hz = oldRate;
+	g_eqCur = prevBank;
+}
+
+void equaliserBank(int bank, void* data, int len, BOOL reset) {
+	equaliserBank(bank, data, len, reset, 0, 0, 0);
+}
+
 void equaliser(void* data, int len, BOOL reset) {
+	equaliserBank(0, data, len, reset);
+}
+
+static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 
 	// reset==2: EQプリセット値を savedata.eq に再ロードして即返す
 	if (reset == 2) {
 		int currentEqPre = savedata.eqsoundeq;
 		if (currentEqPre >= 0 && currentEqPre < EQ_PRESET_COUNT && currentEqPre != 9) {
 			memcpy(savedata.eq, EQ_PRESETS[currentEqPre], sizeof(int) * 15);
-			g_lastEqPreset = currentEqPre;
+			g_lastEqPreset[g_eqCur] = currentEqPre;
 		}
 		return;
 	}
@@ -4929,8 +5351,8 @@ void equaliser(void* data, int len, BOOL reset) {
 	// 初期化・パラメータ取得
 	// ========================================
 	BOOL forceUpdate = FALSE;
-	if (reset == 1 || !g_initialized || g_lastRate != wavbitbackup) {
-		InitEngine(wavbitbackup);
+	if (reset == 1 || !g_initialized[g_eqCur] || g_lastRate[g_eqCur] != wavbitbackup) {
+		InitEngine(wavbitbackup, g_eqCur);
 		forceUpdate = TRUE;
 	}
 
@@ -4983,7 +5405,8 @@ void equaliser(void* data, int len, BOOL reset) {
 	if (currentEnvPre == 0 &&
 		masterVolume == 100 && clarity == 100 &&
 		balance == 100 && density == 100 && spatial == 100 &&
-		g_eqReverb == 0 && g_eqChorus == 0 && g_eqDelay == 0)
+		g_eqReverb == 0 && g_eqChorus == 0 && g_eqDelay == 0 &&
+		savedata.pro_ms_width == 100 && !savedata.pro_ms_mono)
 	{
 		bool allFlat = true;
 		for (int i = 0; i < 15; i++) {
@@ -4991,8 +5414,35 @@ void equaliser(void* data, int len, BOOL reset) {
 		}
 		if (allFlat) {
 			const float extBoostGain = GetExternalBoostGain();
+			auto finishOutNoMeter = [&]() {
+				void* outPtr = data;
+				int outLen = originalLen;
+				if (needsResampling) {
+					ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavchannel, wavsam_depth);
+					free(tempBuffer);
+				}
+				else {
+					outPtr = processData;
+					outLen = processLen;
+				}
+				ProAudio_ApplyXfadeIn(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
+				ProAudio_PushTailPcm(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
+			};
+			// 計測は RG/拡張ブースト前(EQ経路と同じ位置)
+			ProAudio_FeedMetersFromInterleaved(
+				needsResampling ? processData : data,
+				needsResampling ? processLen : originalLen,
+				needsResampling ? 44100 : originalRate,
+				wavsam_depth, wavchannel);
 			if (extBoostGain <= 1.0001f) {
-				if (needsResampling && tempBuffer) free(tempBuffer);
+				if (needsResampling && tempBuffer) {
+					free(tempBuffer);
+					ProAudio_ApplyXfadeIn(data, originalLen, originalRate, wavsam_depth, wavchannel);
+					ProAudio_PushTailPcm(data, originalLen, originalRate, wavsam_depth, wavchannel);
+					return;
+				}
+				ProAudio_ApplyXfadeIn(data, originalLen, originalRate, wavsam_depth, wavchannel);
+				ProAudio_PushTailPcm(data, originalLen, originalRate, wavsam_depth, wavchannel);
 				return;
 			}
 			{
@@ -5001,10 +5451,7 @@ void equaliser(void* data, int len, BOOL reset) {
 				ApplyExternalBoostOnlyToBuffer(
 					(unsigned char*)processData, numSamples, wavchannel, wavsam_depth, bytesPerSample);
 			}
-			if (needsResampling) {
-				ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavchannel, wavsam_depth);
-				free(tempBuffer);
-			}
+			finishOutNoMeter();
 			return;
 		}
 	}
@@ -5019,10 +5466,10 @@ void equaliser(void* data, int len, BOOL reset) {
 	float reflectionScale = 0.50f + (effectAmount / 100.0f) * 0.50f;  // [0.50, 1.00]
 
 	// EQプリセット切り替え検出
-	if (currentEqPre != g_lastEqPreset) {
+	if (currentEqPre != g_lastEqPreset[g_eqCur]) {
 		if (currentEqPre >= 0 && currentEqPre < EQ_PRESET_COUNT && currentEqPre != 9)
 			memcpy(savedata.eq, EQ_PRESETS[currentEqPre], sizeof(int) * 15);
-		g_lastEqPreset = currentEqPre;
+		g_lastEqPreset[g_eqCur] = currentEqPre;
 		forceUpdate = TRUE;
 	}
 
@@ -5030,18 +5477,18 @@ void equaliser(void* data, int len, BOOL reset) {
 	BOOL eqChanged = forceUpdate;
 	if (!eqChanged) {
 		for (int i = 0; i < 15; i++)
-			if (savedata.eq[i] != g_lastEqValues[i]) { eqChanged = TRUE; break; }
+			if (savedata.eq[i] != g_lastEqValues[g_eqCur][i]) { eqChanged = TRUE; break; }
 	}
 
 	// 拡張パラメータ変化検出
 	BOOL extendedChanged = FALSE;
-	if (masterVolume != g_lastExtendedParams[0] || clarity != g_lastExtendedParams[1] ||
-		balance != g_lastExtendedParams[2] || density != g_lastExtendedParams[3] ||
-		spatial != g_lastExtendedParams[4]) {
+	if (masterVolume != g_lastExtendedParams[g_eqCur][0] || clarity != g_lastExtendedParams[g_eqCur][1] ||
+		balance != g_lastExtendedParams[g_eqCur][2] || density != g_lastExtendedParams[g_eqCur][3] ||
+		spatial != g_lastExtendedParams[g_eqCur][4]) {
 		extendedChanged = TRUE;
-		g_lastExtendedParams[0] = masterVolume; g_lastExtendedParams[1] = clarity;
-		g_lastExtendedParams[2] = balance;      g_lastExtendedParams[3] = density;
-		g_lastExtendedParams[4] = spatial;
+		g_lastExtendedParams[g_eqCur][0] = masterVolume; g_lastExtendedParams[g_eqCur][1] = clarity;
+		g_lastExtendedParams[g_eqCur][2] = balance;      g_lastExtendedParams[g_eqCur][3] = density;
+		g_lastExtendedParams[g_eqCur][4] = spatial;
 	}
 
 	// EQ/拡張パラメータが変化したときのみフィルタ係数を再計算 (CPU節約)
@@ -5051,65 +5498,65 @@ void equaliser(void* data, int len, BOOL reset) {
 			// 15バンドEQ: 帯域10以降はQ=1.0に変更 (高域帯域をやや広めに)
 			for (int b = 0; b < EQ_BANDS; b++) {
 				float qVal = (b >= 10) ? 1.0f : 1.414f;
-				CalcPeakingEQ(&g_channels[ch].eqFilters[b], EQ_FREQS[b], qVal, (float)savedata.eq[b], wavbitbackup);
+				CalcPeakingEQ(&g_channels[g_eqCur][ch].eqFilters[b], EQ_FREQS[b], qVal, (float)savedata.eq[b], wavbitbackup);
 			}
 			// クラリティ: 5kHz 前後のプレゼンス調整 (感度2倍)
 			float clarityDb = (clarity - 100.0f) * 0.36f;
-			CalcPeakingEQ(&g_channels[ch].clarityFilter, 5000.0f, 1.5f, 100.0f + clarityDb / 0.12f, wavbitbackup);
+			CalcPeakingEQ(&g_channels[g_eqCur][ch].clarityFilter, 5000.0f, 1.5f, 100.0f + clarityDb / 0.12f, wavbitbackup);
 
 			// バランス: 低域/高域のシェルフで輪郭/温もりのバランスを調整 (感度2倍)
 			float balanceDb = (balance - 100.0f) * 0.24f;
-			CalcShelvingEQ(&g_channels[ch].bassBalanceFilter, 0, 250.0f, -balanceDb, wavbitbackup);
-			CalcShelvingEQ(&g_channels[ch].trebleBalanceFilter, 1, 4000.0f, balanceDb, wavbitbackup);
+			CalcShelvingEQ(&g_channels[g_eqCur][ch].bassBalanceFilter, 0, 250.0f, -balanceDb, wavbitbackup);
+			CalcShelvingEQ(&g_channels[g_eqCur][ch].trebleBalanceFilter, 1, 4000.0f, balanceDb, wavbitbackup);
 
 			// デンシティ: 600Hz/1400Hz 近傍の中域密度を調整 (感度2倍)
 			float densityDb = (density - 100.0f) * 0.30f;
-			CalcPeakingEQ(&g_channels[ch].densityFilter1, 600.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
-			CalcPeakingEQ(&g_channels[ch].densityFilter2, 1400.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
+			CalcPeakingEQ(&g_channels[g_eqCur][ch].densityFilter1, 600.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
+			CalcPeakingEQ(&g_channels[g_eqCur][ch].densityFilter2, 1400.0f, 1.2f, 100.0f + densityDb / 0.12f, wavbitbackup);
 		}
 	}
 
 	// 環境プリセット/エフェクト量が変化したときのみフィルタ係数を再計算
-	if (currentEnvPre != g_lastEnvPreset || effectAmount != g_lastEffectAmount || forceUpdate) {
+	if (currentEnvPre != g_lastEnvPreset[g_eqCur] || effectAmount != g_lastEffectAmount[g_eqCur] || forceUpdate) {
 		if (currentEnvPre < 0 || currentEnvPre >= ENV_PRESET_COUNT) currentEnvPre = 0;
 
 		const EnvParams* ep = &ENV_PRESETS[currentEnvPre];
 		for (int ch = 0; ch < MAX_CH; ch++) {
-			CalcFilter(&g_channels[ch].envLpf, 0, ep->lpfFreq, 0.707f, wavbitbackup);
-			CalcFilter(&g_channels[ch].envHpf, 1, ep->hpfFreq, 0.707f, wavbitbackup);
-			CalcFilter(&g_channels[ch].exciterFilter, 1, 6000.0f, 0.707f, wavbitbackup);
+			CalcFilter(&g_channels[g_eqCur][ch].envLpf, 0, ep->lpfFreq, 0.707f, wavbitbackup);
+			CalcFilter(&g_channels[g_eqCur][ch].envHpf, 1, ep->hpfFreq, 0.707f, wavbitbackup);
+			CalcFilter(&g_channels[g_eqCur][ch].exciterFilter, 1, 6000.0f, 0.707f, wavbitbackup);
 
 			// ダンピングフィルタ: damping値に応じてカットオフ周波数を変化
 			float dampFreq = 4000.0f + (ep->damping * extraScale * 8000.0f);
-			CalcFilter(&g_channels[ch].dampingFilter, 0, dampFreq, 0.5f, wavbitbackup);
+			CalcFilter(&g_channels[g_eqCur][ch].dampingFilter, 0, dampFreq, 0.5f, wavbitbackup);
 
 			// 帯域別リバーブ特性フィルタ
-			CalcFilter(&g_channels[ch].bassReverbFilter, 0, fminf(500.0f, 250.0f * ep->bassReverbTime), 0.707f, wavbitbackup);
-			CalcPeakingEQ(&g_channels[ch].midReverbFilter, fminf(3000.0f, 1500.0f * ep->midReverbTime), 1.0f, 100.0f, wavbitbackup);
-			CalcFilter(&g_channels[ch].trebleReverbFilter, 1, fminf(12000.0f, 6000.0f * ep->trebleReverbTime), 0.707f, wavbitbackup);
+			CalcFilter(&g_channels[g_eqCur][ch].bassReverbFilter, 0, fminf(500.0f, 250.0f * ep->bassReverbTime), 0.707f, wavbitbackup);
+			CalcPeakingEQ(&g_channels[g_eqCur][ch].midReverbFilter, fminf(3000.0f, 1500.0f * ep->midReverbTime), 1.0f, 100.0f, wavbitbackup);
+			CalcFilter(&g_channels[g_eqCur][ch].trebleReverbFilter, 1, fminf(12000.0f, 6000.0f * ep->trebleReverbTime), 0.707f, wavbitbackup);
 
 			// 材質・ウォームス関連フィルタ
-			CalcFilter(&g_channels[ch].materialFilter, 0, 2000.0f - (ep->materialAbsorption * 1500.0f), 0.707f, wavbitbackup);
-			CalcShelvingEQ(&g_channels[ch].warmthFilter, 0, 300.0f, (ep->warmth - 0.5f) * 6.0f, wavbitbackup);
+			CalcFilter(&g_channels[g_eqCur][ch].materialFilter, 0, 2000.0f - (ep->materialAbsorption * 1500.0f), 0.707f, wavbitbackup);
+			CalcShelvingEQ(&g_channels[g_eqCur][ch].warmthFilter, 0, 300.0f, (ep->warmth - 0.5f) * 6.0f, wavbitbackup);
 
 			if (ep->flutterEcho > 0.0f)
-				CalcFilter(&g_channels[ch].flutterFilter, 1, 1200.0f, 2.0f, wavbitbackup);
+				CalcFilter(&g_channels[g_eqCur][ch].flutterFilter, 1, 1200.0f, 2.0f, wavbitbackup);
 			if (ep->resonanceFreq > 0.0f && ep->resonanceQ > 0.0f)
-				CalcPeakingEQ(&g_channels[ch].resonanceFilter, ep->resonanceFreq, ep->resonanceQ, 100.0f, wavbitbackup);
+				CalcPeakingEQ(&g_channels[g_eqCur][ch].resonanceFilter, ep->resonanceFreq, ep->resonanceQ, 100.0f, wavbitbackup);
 			if (ep->metallic > 0.0f)
-				CalcFilter(&g_channels[ch].metallicFilter, 1, 4500.0f, 3.5f, wavbitbackup);
+				CalcFilter(&g_channels[g_eqCur][ch].metallicFilter, 1, 4500.0f, 3.5f, wavbitbackup);
 			if (ep->glassiness > 0.0f)
-				CalcFilter(&g_channels[ch].glassFilter, 1, 8000.0f, 4.0f, wavbitbackup);
+				CalcFilter(&g_channels[g_eqCur][ch].glassFilter, 1, 8000.0f, 4.0f, wavbitbackup);
 
 			// LFO設定
-			g_channels[ch].lfo.frequency = ep->modSpeed * extraScale;
-			g_channels[ch].lfo.depth = ep->modDepth * extraScale * 10.0f;
+			g_channels[g_eqCur][ch].lfo.frequency = ep->modSpeed * extraScale;
+			g_channels[g_eqCur][ch].lfo.depth = ep->modDepth * extraScale * 10.0f;
 		}
-		g_lastEnvPreset = currentEnvPre;
-		g_lastEffectAmount = effectAmount;
+		g_lastEnvPreset[g_eqCur] = currentEnvPre;
+		g_lastEffectAmount[g_eqCur] = effectAmount;
 	}
 
-	const EnvParams* env = &ENV_PRESETS[g_lastEnvPreset];
+	const EnvParams* env = &ENV_PRESETS[g_lastEnvPreset[g_eqCur]];
 	BOOL isYamabiko = (env->type == TYPE_MOUNTAIN_ECHO || env->type == TYPE_CANYON_ECHO);
 
 	// プリディレイ・メインディレイ サンプル数計算
@@ -5168,18 +5615,18 @@ void equaliser(void* data, int len, BOOL reset) {
 		const float kAttack = 0.08f;   // 1ブロック最大8%圧縮
 		const float kRelease = 0.30f;   // 3〜4ブロックで復帰
 
-		if (ba.stagingGain < g_stagingGainSmooth)
+		if (ba.stagingGain < g_stagingGainSmooth[g_eqCur])
 			// 大音量側: 緩やかに追従 (attack)
-			g_stagingGainSmooth += (ba.stagingGain - g_stagingGainSmooth) * kAttack;
+			g_stagingGainSmooth[g_eqCur] += (ba.stagingGain - g_stagingGainSmooth[g_eqCur]) * kAttack;
 		else
 			// 静音側: 素早く復帰 (release)
-			g_stagingGainSmooth += (ba.stagingGain - g_stagingGainSmooth) * kRelease;
+			g_stagingGainSmooth[g_eqCur] += (ba.stagingGain - g_stagingGainSmooth[g_eqCur]) * kRelease;
 
-		g_stagingGainSmooth = ClampFloat(g_stagingGainSmooth, 0.10f, 1.0f);
+		g_stagingGainSmooth[g_eqCur] = ClampFloat(g_stagingGainSmooth[g_eqCur], 0.10f, 1.0f);
 	}
 
 	// 実効マスターゲイン = ユーザー設定 × 平滑化済みstagingGain
-	float effectiveMasterGain = masterGain * g_stagingGainSmooth;
+	float effectiveMasterGain = masterGain * g_stagingGainSmooth[g_eqCur];
 
 	// [FIX-4 改] チップチューン/FM音源検出時のスケーリング係数
 	//
@@ -5196,7 +5643,8 @@ void equaliser(void* data, int len, BOOL reset) {
 	float diffusionScale = ba.isChiptune ? 0.55f : 1.0f;
 
 	// 出力用サンプルバッファ (最大約40ブロック分)
-	static float leftSamples[8192 * 40], rightSamples[8192 * 40];
+	float* leftSamples = g_eqLeftSamples[g_eqCur];
+	float* rightSamples = g_eqRightSamples[g_eqCur];
 	int bufferIndex = 0;
 
 	float harmonicAmount = (density - 100.0f) / 100.0f;
@@ -5223,7 +5671,7 @@ void equaliser(void* data, int len, BOOL reset) {
 				inSample = (pRaw[offset] - 128) / 128.0f;
 
 			float signal = inSample;
-			ChannelState* cs = &g_channels[ch];
+			ChannelState* cs = &g_channels[g_eqCur][ch];
 
 			// [FIX-3] 平滑化済みゲインを適用
 			signal *= (effectiveMasterGain * eqHeadroomGain);
@@ -5411,12 +5859,25 @@ void equaliser(void* data, int len, BOOL reset) {
 	// ===================================================
 	FxApplyUserEffects(leftSamples, rightSamples, bufferIndex, wavbitbackup);
 
+	// ProAudio: Mid/Side 幅 / モノ互換（環境ステレオ幅の後段で明示制御）
+	if (wavchannel >= 2 && bufferIndex > 0) {
+		ProAudio_ApplyMS(leftSamples, rightSamples, bufferIndex,
+			savedata.pro_ms_width, savedata.pro_ms_mono);
+	}
+
 	// ===================================================
 	// 【最終段前】メイクアップゲインの適用
 	// ===================================================
 	for (int i = 0; i < bufferIndex; i++) {
 		leftSamples[i] *= eqMakeupGain;
 		rightSamples[i] *= eqMakeupGain;
+	}
+
+	// ラウドネス計測 / 相関（リミッター前の実聴感に近い信号）
+	if (bufferIndex > 0) {
+		ProAudio_LoudnessFeed(leftSamples, rightSamples, bufferIndex, wavbitbackup);
+		if (savedata.pro_corr_meter)
+			ProAudio_CorrFeed(leftSamples, rightSamples, bufferIndex);
 	}
 
 	// ===================================================
@@ -5477,6 +5938,18 @@ void equaliser(void* data, int len, BOOL reset) {
 		ResampleDown(processData, processLen, data, originalLen, 44100, originalRate, wavchannel, wavsam_depth);
 		free(tempBuffer);
 	}
+
+	// クロスフェードイン(曲頭) + テール蓄積(曲末用)。リサンプリング後の実出力に適用。
+	{
+		void* outPtr = data;
+		int outLen = originalLen;
+		if (!needsResampling) {
+			outPtr = processData;
+			outLen = processLen;
+		}
+		ProAudio_ApplyXfadeIn(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
+		ProAudio_PushTailPcm(outPtr, outLen, originalRate, wavsam_depth, wavchannel);
+	}
 }
 
 
@@ -5491,12 +5964,9 @@ void equaliser(void* data, int len, BOOL reset) {
 #include <vector>
 #include <algorithm>
 #include <cstring>
-#include <complex>
-#include <map>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
-#include <deque>
 
 #ifndef WM_EQ_KEY_UPDATE
 #define WM_EQ_KEY_UPDATE (WM_APP + 430)
@@ -5515,10 +5985,11 @@ void equaliser(void* data, int len, BOOL reset) {
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 #endif
 
-using Complex = std::complex<double>;
-
-// ノート毎の強度・Goertzel係数・Blackman窓
-struct MelodyCandidate { int midiNote; float salience; float totalScore; int fromIdx; };
+// EQコード解析: 固定バッファのみ（std::vector/map/deque 禁止・長時間ヒープ断片化防止）
+// Goertzel 低域は最大4096点。PCM供給もここに揃える。
+static const int EQKEY_PCM_MAX = 4096;
+static const int EQKEY_HIST_MAX = 4;
+static const int EQKEY_CHORD_CAND_MAX = 32;
 
 static float  g_noteStrength[108];        // MIDI 0-107 の強度
 static float  g_noteStrengthPrev[108];    // 指数平滑用
@@ -5527,25 +5998,24 @@ static double g_hannWindow4096[4096];   // 低域 Goertzel 用 Hann 窓
 static double g_blackmanWindow2048[2048]; // 高域 Goertzel 用 Blackman 窓
 static bool   g_analysisInitialized = false;
 static double g_analysisSampleRate = 0.0; // 係数計算に使ったサンプルレート
-static std::vector<std::vector<MelodyCandidate>> g_viterbiPath;
-static const int MAX_VITERBI_FRAMES = 8;  // Viterbi追跡フレーム数
-static const int CANDIDATE_NUM = 5;       // フレームあたり候補数
 
 static WCHAR g_currentVowel = L' ';
 
 CString KeyCodeLow, KeyCodeMid, KeyCodeHigh, KeyCodeAll;
 
-void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<double>& bufferR, int sampleRate);
+void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCount, int sampleRate);
 
 // Speana が PCM を載せ、専用ワーカーが Goertzel 解析（UI/OnTimer を塞がない）
 static CRITICAL_SECTION g_eqKeyCs;
 static CRITICAL_SECTION g_keyCodeCs;
-static bool g_eqKeyCsReady = false;
+static volatile LONG g_eqKeyCsInitState = 0; /* 0=未, 1=初期化中, 2=完了 */
 static HANDLE g_eqKeyWake = nullptr;
 static HANDLE g_eqKeyThread = nullptr;
 static volatile LONG g_eqKeyStop = 0;
 static volatile LONG g_eqKeyNeed = 0;
-static std::vector<double> g_eqKeyL, g_eqKeyR;
+static double g_eqKeyL[EQKEY_PCM_MAX];
+static double g_eqKeyR[EQKEY_PCM_MAX];
+static int g_eqKeyCount = 0;
 static int g_eqKeyRate = 44100;
 static LONG g_eqKeySeq = 0;
 static HWND g_eqKeyUiHwnd = nullptr;
@@ -5555,10 +6025,19 @@ static volatile LONG g_eqKeyUiDirty = 0;
 
 static void EnsureEqKeyCs()
 {
-	if (g_eqKeyCsReady) return;
-	InitializeCriticalSection(&g_eqKeyCs);
-	InitializeCriticalSection(&g_keyCodeCs);
-	g_eqKeyCsReady = true;
+	/* Speana(UI) と再生スレッドが同時に来る。二重 InitializeCriticalSection は
+	   CS を壊し、Enter 時に ntdll が 0x00000014 へ書いて AV する。 */
+	const LONG st = InterlockedCompareExchange(&g_eqKeyCsInitState, 1, 0);
+	if (st == 0) {
+		InitializeCriticalSection(&g_eqKeyCs);
+		InitializeCriticalSection(&g_keyCodeCs);
+		InterlockedExchange(&g_eqKeyCsInitState, 2);
+		return;
+	}
+	if (st == 2)
+		return;
+	while (InterlockedCompareExchange(&g_eqKeyCsInitState, 0, 0) != 2)
+		Sleep(0);
 }
 
 static void NotifyEqKeyUi()
@@ -5566,12 +6045,10 @@ static void NotifyEqKeyUi()
 	HWND h = g_eqKeyUiHwnd;
 	if (!h || !::IsWindow(h)) return;
 	if (InterlockedCompareExchange(&g_eqKeyUiDirty, 0, 0) == 0) return;
-	// リアルタイム性優先。多重 Post 飢餓防止の下限（供給 25ms に対し UI はそれ以下で通す）
 	const DWORD now = GetTickCount();
 	if (g_eqKeyUiLastPostTick != 0 && (now - g_eqKeyUiLastPostTick) < (DWORD)(EqCodeIntervalMs() / 2))
 		return;
 	if (InterlockedCompareExchange(&g_eqKeyUiPosted, 1, 0) != 0) {
-		// Ack 前に UI が長時間塞がると posted が掴みっぱなしになる → 強制開放
 		if (g_eqKeyUiLastPostTick != 0 && (now - g_eqKeyUiLastPostTick) >= 150u) {
 			InterlockedExchange(&g_eqKeyUiPosted, 0);
 			InterlockedExchange(&g_eqKeyUiDirty, 1);
@@ -5610,8 +6087,6 @@ void UnregisterEqKeyUiHwnd(HWND h)
 void AckEqKeyUiNotify()
 {
 	InterlockedExchange(&g_eqKeyUiPosted, 0);
-	// dirty 再 Post は SetKeyCodesLocked 側に任せる。
-	// ここで即 Notify すると Apply 直後に二重更新し、描画タイミングがさらに不規則になる。
 }
 
 static void SetKeyCodesLocked(const CString& lo, const CString& mid, const CString& hi, const CString& all)
@@ -5628,7 +6103,6 @@ static void SetKeyCodesLocked(const CString& lo, const CString& mid, const CStri
 		InterlockedExchange(&g_eqKeyUiDirty, 1);
 	}
 	LeaveCriticalSection(&g_keyCodeCs);
-	// 変更時だけでなく、throttle で残った dirty の flush もここで拾う
 	NotifyEqKeyUi();
 }
 
@@ -5645,7 +6119,9 @@ void SnapshotEqKeyCodes(CString& lo, CString& mid, CString& hi, CString& all)
 
 static DWORD WINAPI EqKeyWorkerEntry(LPVOID)
 {
-	std::vector<double> workL, workR;
+	double workL[EQKEY_PCM_MAX];
+	double workR[EQKEY_PCM_MAX];
+	int workN = 0;
 	int workRate = 44100;
 	for (;;) {
 		if (g_eqKeyWake)
@@ -5656,17 +6132,17 @@ static DWORD WINAPI EqKeyWorkerEntry(LPVOID)
 			continue;
 		EnsureEqKeyCs();
 		EnterCriticalSection(&g_eqKeyCs);
-		const size_t nL = g_eqKeyL.size();
-		const size_t nR = g_eqKeyR.size();
-		if (workL.size() != nL) workL.resize(nL);
-		if (workR.size() != nR) workR.resize(nR);
-		if (nL) memcpy(workL.data(), g_eqKeyL.data(), nL * sizeof(double));
-		if (nR) memcpy(workR.data(), g_eqKeyR.data(), nR * sizeof(double));
+		workN = g_eqKeyCount;
+		if (workN > EQKEY_PCM_MAX) workN = EQKEY_PCM_MAX;
+		if (workN > 0) {
+			memcpy(workL, g_eqKeyL, (size_t)workN * sizeof(double));
+			memcpy(workR, g_eqKeyR, (size_t)workN * sizeof(double));
+		}
 		workRate = g_eqKeyRate;
 		LeaveCriticalSection(&g_eqKeyCs);
-		if (workL.empty())
+		if (workN <= 0)
 			continue;
-		AnalyzeMusicKey(workL, workR, workRate);
+		AnalyzeMusicKey(workL, workR, workN, workRate);
 	}
 	return 0;
 }
@@ -5687,17 +6163,26 @@ static void EnsureEqKeyWorker()
 	}
 }
 
-void PublishEqKeyPcm(const std::vector<double>& bufferL, const std::vector<double>& bufferR, int sampleRate)
+void PublishEqKeyPcm(const double* bufferL, const double* bufferR, int sampleCount, int sampleRate)
 {
-	if (bufferL.empty()) return;
+	if (!bufferL || sampleCount <= 0) return;
+	int n = sampleCount;
+	if (n > EQKEY_PCM_MAX) {
+		bufferL += (n - EQKEY_PCM_MAX);
+		if (bufferR) bufferR += (n - EQKEY_PCM_MAX);
+		n = EQKEY_PCM_MAX;
+	}
+	EnsureEqKeyCs();
 	EnsureEqKeyWorker();
+	if (InterlockedCompareExchange(&g_eqKeyCsInitState, 0, 0) != 2)
+		return;
 	EnterCriticalSection(&g_eqKeyCs);
-	const size_t nL = bufferL.size();
-	const size_t nR = bufferR.size();
-	if (g_eqKeyL.size() != nL) g_eqKeyL.resize(nL);
-	if (g_eqKeyR.size() != nR) g_eqKeyR.resize(nR);
-	memcpy(g_eqKeyL.data(), bufferL.data(), nL * sizeof(double));
-	if (nR) memcpy(g_eqKeyR.data(), bufferR.data(), nR * sizeof(double));
+	memcpy(g_eqKeyL, bufferL, (size_t)n * sizeof(double));
+	if (bufferR)
+		memcpy(g_eqKeyR, bufferR, (size_t)n * sizeof(double));
+	else
+		memcpy(g_eqKeyR, bufferL, (size_t)n * sizeof(double));
+	g_eqKeyCount = n;
 	g_eqKeyRate = (sampleRate > 0) ? sampleRate : 44100;
 	++g_eqKeySeq;
 	LeaveCriticalSection(&g_eqKeyCs);
@@ -5706,19 +6191,15 @@ void PublishEqKeyPcm(const std::vector<double>& bufferL, const std::vector<doubl
 		SetEvent(g_eqKeyWake);
 }
 
-// 互換: 解析はワーカー側。UI からは呼ばない（残して no-op）
 void TickEqKeyAnalysis()
 {
 }
 
-// 12音名 (C〜B)
 static const WCHAR* NOTE_NAMES[12] = {
 	L"C ", L"C#", L"D ", L"D#", L"E ", L"F ",
 	L"F#", L"G ", L"G#", L"A ", L"A#", L"B "
 };
 
-// Goertzel係数・窓関数・ノート強度の初期化
-// サンプルレートが変わったら係数を再計算する
 static void InitializeAnalysis(double sampleRate) {
 	if (sampleRate < 8000.0) sampleRate = 44100.0;
 	const bool firstInit = !g_analysisInitialized;
@@ -5727,12 +6208,10 @@ static void InitializeAnalysis(double sampleRate) {
 	if (!firstInit && !rateChanged) return;
 
 	g_analysisSampleRate = sampleRate;
-	// MIDI 0-107: 440Hz を基準にした等温律周波数
 	for (int k = 0; k < 108; ++k) {
 		double freq = 440.0 * pow(2.0, ((12 + k) - 69.0) / 12.0);
 		g_goertzelCoeffs[k] = 2.0 * cos(2.0 * M_PI * freq / sampleRate);
 	}
-	// 低域: Hann、高域: Blackman（mode0_Note と同系統）
 	for (int n = 0; n < 4096; ++n)
 		g_hannWindow4096[n] = 0.5 - 0.5 * cos(2.0 * M_PI * n / 4095.0);
 	for (int n = 0; n < 2048; ++n)
@@ -5743,14 +6222,10 @@ static void InitializeAnalysis(double sampleRate) {
 	if (firstInit || rateChanged) {
 		memset(g_noteStrength, 0, sizeof(g_noteStrength));
 		memset(g_noteStrengthPrev, 0, sizeof(g_noteStrengthPrev));
-		g_viterbiPath.clear();
 	}
 	g_analysisInitialized = true;
 }
 
-// Goertzel アルゴリズム: 指定周波数のスペクトル強度を計算
-// FFT全体を計算せず単一周波数だけ効率よく求める
-// 戻り値: 正規化振幅 (×2.5/N)
 static double GoertzelMagnitude(const double* samples, int numSamples, double coefficient,
 	const double* window)
 {
@@ -5762,246 +6237,6 @@ static double GoertzelMagnitude(const double* samples, int numSamples, double co
 	}
 	double power = s_prev2 * s_prev2 + s_prev * s_prev - coefficient * s_prev * s_prev2;
 	return sqrt(power > 0.0 ? power : 0.0) * 2.5 / numSamples;
-}
-
-// 反復 Cooley-Tukey FFT (Radix-2)。再帰版は毎呼出で even/odd を大量 new し、
-// 長時間再生でヒープが断片化してコード解析が徐々に重くなる。
-static void FFT(std::vector<Complex>& x) {
-	const size_t N = x.size();
-	if (N <= 1) return;
-	// bit-reversal permutation
-	for (size_t i = 1, j = 0; i < N; ++i) {
-		size_t bit = N >> 1;
-		for (; j & bit; bit >>= 1)
-			j ^= bit;
-		j ^= bit;
-		if (i < j)
-			std::swap(x[i], x[j]);
-	}
-	for (size_t len = 2; len <= N; len <<= 1) {
-		const double ang = -2.0 * M_PI / (double)len;
-		const Complex wlen(std::cos(ang), std::sin(ang));
-		for (size_t i = 0; i < N; i += len) {
-			Complex w(1.0, 0.0);
-			for (size_t j = 0; j < len / 2; ++j) {
-				const Complex u = x[i + j];
-				const Complex v = x[i + j + len / 2] * w;
-				x[i + j] = u + v;
-				x[i + j + len / 2] = u - v;
-				w *= wlen;
-			}
-		}
-	}
-}
-
-// メロディ顕著性 (Salience) 計算
-// L/RバッファをBlackman窓FFTでスペクトル分析し、
-// 基音+第2倍音+第3倍音の積で各MIDIノートのスコアを算出
-// ハーモニック積スペクトル法 (HPS) の2倍音バリアント
-static std::vector<MelodyCandidate> CalculateSalience(
-	const std::vector<double>& bufL, const std::vector<double>& bufR, double sampleRate)
-{
-	int N = (int)bufL.size();
-	std::vector<Complex> cL(N), cR(N);
-	// [IMPROVEMENT] 固定長8192の窓関数から、実際のN（4096など）に完全にフィッティングした
-	// 対称窓関数に変更し、窓が途中で途切れることによる巨大なスペクトルリーク（ノイズ）を完全に除去。
-	for (int i = 0; i < N; ++i) {
-		double w = 0.355768 - 0.487396 * cos(2.0 * M_PI * i / (N - 1))
-			+ 0.144232 * cos(4.0 * M_PI * i / (N - 1))
-			- 0.012604 * cos(6.0 * M_PI * i / (N - 1));
-		cL[i] = bufL[i] * w;
-		cR[i] = bufR[i] * w;
-	}
-	FFT(cL); FFT(cR);
-	int specSize = N / 2;
-	// センターチャンネル強調: 左右平均 - 差分 (センター抽出的な処理)
-	// [IMPROVEMENT] 差分ペナルティを0.8に設定。ステレオリバーブ等によるボーカル消失を防ぎつつ、
-	// 左右に振られた伴奏（ギター、キーボード等）を強力に抑制する黄金比。
-	std::vector<float> mag(specSize, 0.0f);
-	for (int i = 0; i < specSize; ++i) {
-		double center = (std::abs(cL[i]) + std::abs(cR[i])) * 0.5
-			- std::abs(std::abs(cL[i]) - std::abs(cR[i])) * 0.8;
-		mag[i] = (float)(center > 0.0 ? center : 0.0);
-	}
-
-	// ===== 日本語母音（あ、い、う、え、お、ん）検出ロジック =====
-	{
-		static std::deque<WCHAR> s_vowelHistory;
-
-		float e1 = 0.0f; // 200 - 450 Hz   (F1 of /i/, /u/, /n/)
-		float e2 = 0.0f; // 450 - 750 Hz   (F1 of /e/, /o/)
-		float e3 = 0.0f; // 750 - 1100 Hz  (F1 of /a/)
-		float e4 = 0.0f; // 1100 - 1700 Hz (F2 of /a/, /o/, /u/)
-		float e5 = 0.0f; // 1700 - 2400 Hz (F2 of /e/)
-		float e6 = 0.0f; // 2400 - 3500 Hz (F2 of /i/)
-
-		// 安全な範囲でエネルギー集計 (binFreq は約10.77 Hz)
-		double binFreq = sampleRate / N;
-		for (int b = 18; b <= 41 && b < specSize; ++b)  e1 += mag[b];
-		for (int b = 42; b <= 69 && b < specSize; ++b)  e2 += mag[b];
-		for (int b = 70; b <= 102 && b < specSize; ++b) e3 += mag[b];
-		for (int b = 103; b <= 157 && b < specSize; ++b) e4 += mag[b];
-		for (int b = 158; b <= 222 && b < specSize; ++b) e5 += mag[b];
-		for (int b = 223; b <= 325 && b < specSize; ++b) e6 += mag[b];
-
-		float sum_e = e1 + e2 + e3 + e4 + e5 + e6;
-		if (sum_e > 0.005f) {
-			float r1 = e1 / sum_e;
-			float r2 = e2 / sum_e;
-			float r3 = e3 / sum_e;
-			float r4 = e4 / sum_e;
-			float r5 = e5 / sum_e;
-			float r6 = e6 / sum_e;
-
-			float score_a = r3 * 2.0f + r4 * 1.5f - r1 * 1.0f - r6 * 1.5f;
-			float score_i = r1 * 1.0f + r6 * 2.5f - r3 * 1.5f - r4 * 1.0f;
-			float score_u = r1 * 1.5f + r4 * 1.2f - r3 * 1.0f - r5 * 1.5f - r6 * 1.5f;
-			float score_e = r2 * 1.5f + r5 * 2.0f - r1 * 0.8f - r6 * 1.0f;
-			float score_o = r2 * 2.0f + r4 * 1.2f - r5 * 1.5f - r6 * 1.5f;
-			float score_n = r1 * 3.0f - r2 * 1.0f - r3 * 1.0f - r4 * 1.0f - r5 * 1.0f - r6 * 1.0f;
-
-			WCHAR bestVowel = L' ';
-			float maxScore = -999.0f;
-
-			if (score_a > maxScore) { maxScore = score_a; bestVowel = L'あ'; }
-			if (score_i > maxScore) { maxScore = score_i; bestVowel = L'い'; }
-			if (score_u > maxScore) { maxScore = score_u; bestVowel = L'う'; }
-			if (score_e > maxScore) { maxScore = score_e; bestVowel = L'え'; }
-			if (score_o > maxScore) { maxScore = score_o; bestVowel = L'お'; }
-			if (score_n > maxScore) { maxScore = score_n; bestVowel = L'ん'; }
-
-			if (maxScore < 0.1f) bestVowel = L' ';
-			s_vowelHistory.push_back(bestVowel);
-		} else {
-			s_vowelHistory.push_back(L' ');
-		}
-
-		if (s_vowelHistory.size() > 5) s_vowelHistory.pop_front();
-
-		// 多数決でチャタリングを防止
-		std::map<WCHAR, int> counts;
-		for (WCHAR v : s_vowelHistory) counts[v]++;
-		int mc = 0;
-		WCHAR finalVowel = L' ';
-		for (auto& pair : counts) {
-			if (pair.second > mc && pair.first != L' ') {
-				mc = pair.second;
-				finalVowel = pair.first;
-			}
-		}
-		g_currentVowel = finalVowel;
-	}
-
-	// MIDI 41(F2)〜76(E5) の範囲でサリエンス計算
-	std::vector<float> salienceMap(108, 0.0f);
-	double binFreq = sampleRate / N;
-	for (int k = 41; k <= 76; ++k) {
-		// [IMPROVEMENT] 切り捨て(int)から四捨五入(+0.5)に変更し、周波数のズレを補正
-		int bin = (int)(440.0 * pow(2.0, (k - 69.0) / 12.0) / binFreq + 0.5);
-		if (bin <= 0 || bin * 3 >= specSize) continue;
-		// ピーク検出 (隣接ビン含む)
-		auto getPeak = [&](int cb) -> float {
-			float mx = mag[cb];
-			if (cb > 0 && mag[cb - 1] > mx) mx = mag[cb - 1];
-			if (cb < specSize - 1 && mag[cb + 1] > mx) mx = mag[cb + 1];
-			return mx;
-			};
-		float s1 = getPeak(bin), s2 = getPeak(bin * 2), s3 = getPeak(bin * 3);
-		// [IMPROVEMENT] 伴奏（ベースやドラムなどの倍音を持たない純音・打楽器音）を完全に除去し、
-		// 倍音豊かな人間の「歌声（ボーカル）」に最適化。
-		// 倍音（s2, s3）のいずれも持たない信号はスコア0となり、伴奏への誤反応を極限まで低減します。
-		float score = s1 * (s2 * 1.0f + s3 * 0.5f);
-		// 第3倍音が基音の80%超 → 打楽器等の可能性でスコア半減
-		if (s3 > s1 * 0.8f) score *= 0.5f;
-
-		// [IMPROVEMENT] ボーカル（歌声）のピッチ特性（130Hz〜500Hz付近が最も強い）に合わせた感度補正。
-		// 伴奏の低音（ベース・ドラム）を強力にカットし、歌声を浮き上がらせる。
-		float vocalWeight = 1.0f;
-		if (k < 48) {
-			// MIDI 41〜47: 87Hz〜123Hz (伴奏のベース・ドラム帯域。急激に減衰させて歌声への被りを防ぐ)
-			vocalWeight = 0.15f + 0.85f * (float)(k - 41) / 7.0f;
-			vocalWeight *= vocalWeight; // 二乗でさらに低域を強力カット
-		} else if (k > 72) {
-			// MIDI 73〜76: 554Hz〜659Hz (少し減衰)
-			vocalWeight = 1.0f - 0.3f * (float)(k - 72) / 4.0f;
-		}
-		score *= vocalWeight;
-
-		salienceMap[k] = score;
-	}
-	// 候補リスト生成
-	std::vector<MelodyCandidate> candidates;
-	// 非メロディ候補 (ノイズフロア相当)
-	double nf = 0.0;
-	for (float s : salienceMap) nf += s;
-	nf /= 36.0;
-	candidates.push_back({ -1, (float)(nf * 2.0), 0.0f, -1 });
-	// スコア上位 CANDIDATE_NUM-1 件を候補に追加
-	std::vector<std::pair<int, float>> si;
-	for (int k = 41; k <= 76; ++k)
-		if (salienceMap[k] > 0.0f) si.push_back({ k, salienceMap[k] });
-	std::sort(si.begin(), si.end(),
-		[](const std::pair<int, float>& a, const std::pair<int, float>& b) { return a.second > b.second; });
-	for (int i = 0; i < (int)si.size() && i < CANDIDATE_NUM - 1; ++i)
-		candidates.push_back({ si[i].first, si[i].second, 0.0f, -1 });
-	return candidates;
-}
-
-// Viterbi アルゴリズムによるメロディ追跡
-// フレーム間遷移コスト (音程変化ペナルティ) を考慮して
-// 最も自然なメロディラインを推定する
-// 戻り値: 確定したMIDIノート番号 (-1: 未確定または無音)
-static int UpdateViterbi(const std::vector<MelodyCandidate>& current) {
-	g_viterbiPath.push_back(current);
-	if (g_viterbiPath.size() == 1) return -1;
-
-	auto& prev = g_viterbiPath[g_viterbiPath.size() - 2];
-	auto& curr = g_viterbiPath[g_viterbiPath.size() - 1];
-
-	// DP: 各候補の最大スコアパスを計算
-	for (int i = 0; i < (int)curr.size(); ++i) {
-		float maxS = -1.0f; int bestJ = -1;
-		for (int j = 0; j < (int)prev.size(); ++j) {
-			float pen = 0.0f;
-			if (prev[j].midiNote == -1 || curr[i].midiNote == -1) {
-				// 非メロディ候補間の遷移はペナルティ小
-				if (prev[j].midiNote != curr[i].midiNote) pen = 0.5f;
-			}
-			else {
-				// 音程変化量に応じたペナルティ
-				int d = std::abs(prev[j].midiNote - curr[i].midiNote);
-				if (d == 0)       pen = 0.0f;  // 同音: ペナルティなし
-				else if (d <= 2)  pen = 0.2f;  // 半音〜全音: 小ペナルティ
-				else if (d <= 7)  pen = 1.0f;  // 3度〜5度: 中ペナルティ
-				else              pen = 5.0f;  // 6度以上: 大ペナルティ (大跳躍を抑制)
-			}
-			float s = prev[j].totalScore + curr[i].salience - (pen * (curr[i].salience + 0.05f) * 0.5f);
-			if (s > maxS) { maxS = s; bestJ = j; }
-		}
-		curr[i].totalScore = maxS; curr[i].fromIdx = bestJ;
-	}
-
-	// MAX_VITERBI_FRAMES フレーム蓄積後にバックトラック
-	if (g_viterbiPath.size() >= MAX_VITERBI_FRAMES) {
-		int bestIdx = 0; float maxT = -1.0f;
-		for (int i = 0; i < (int)curr.size(); ++i)
-			if (curr[i].totalScore > maxT) { maxT = curr[i].totalScore; bestIdx = i; }
-
-		std::vector<int> path; int t = bestIdx;
-		for (int f = (int)g_viterbiPath.size() - 1; f >= 0; --f) {
-			path.push_back(t);
-			t = g_viterbiPath[f][t].fromIdx;
-			if (t == -1) break;
-		}
-		// 4フレーム前のノートを確定出力 (因果性遅延)
-		int tf = (int)g_viterbiPath.size() - 4; if (tf < 0) tf = 0;
-		int pp = (int)g_viterbiPath.size() - 1 - tf;
-		if (pp >= (int)path.size()) return -1;
-		int note = g_viterbiPath[tf][path[pp]].midiNote;
-		g_viterbiPath.erase(g_viterbiPath.begin());
-		return note;
-	}
-	return -1;
 }
 
 // ノート強度を低域/中域/高域/全体のピッチクラスに集約
@@ -6089,7 +6324,8 @@ static CString EstimateChordRaw(float* noteClass, float threshold) {
 	if (fifth > 0.3f && third < 0.15f && active <= 3)
 		return root + L"!@B[!@Cff0000Power!@Cffffff]!@B";
 
-	std::vector<ChordCandidate> cands;
+	ChordCandidate cands[EQKEY_CHORD_CAND_MAX];
+	int candCount = 0;
 	int np = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
 	for (int c = 0; c < np; c++) {
 		float sc = 0.0f; int matched = 0, req = 0;
@@ -6127,18 +6363,25 @@ static CString EstimateChordRaw(float* noteClass, float threshold) {
 		sc -= (active - matched) * 1.0f;
 		sc += CHORD_PATTERNS[c].bonus;
 		if (req == 3) sc += 1.2f; if (req == 4) sc += 0.5f; if (req >= 5) sc -= 1.0f;
-		if (sc > (is9 ? 3.5f : 0.8f)) {
-			ChordCandidate cd; cd.name = root + CHORD_PATTERNS[c].name;
-			cd.score = sc; cd.complexity = req; cands.push_back(cd);
+		if (sc > (is9 ? 3.5f : 0.8f) && candCount < EQKEY_CHORD_CAND_MAX) {
+			cands[candCount].name = root + CHORD_PATTERNS[c].name;
+			cands[candCount].score = sc; cands[candCount].complexity = req; candCount++;
 		}
 	}
-	if (cands.empty()) return root;
-	std::sort(cands.begin(), cands.end(), [](const ChordCandidate& a, const ChordCandidate& b) {
-		if (abs(a.score - b.score) < 0.3f) return a.complexity < b.complexity;
-		return a.score > b.score; });
+	if (candCount <= 0) return root;
+	for (int i = 0; i < candCount; ++i) {
+		int best = i;
+		for (int j = i + 1; j < candCount; ++j) {
+			const bool jBetter = (abs(cands[j].score - cands[best].score) < 0.3f)
+				? (cands[j].complexity < cands[best].complexity)
+				: (cands[j].score > cands[best].score);
+			if (jBetter) best = j;
+		}
+		if (best != i) { ChordCandidate tmp = cands[i]; cands[i] = cands[best]; cands[best] = tmp; }
+	}
 	// 上位3候補を ", " で連結して返す
 	CString result = cands[0].name; int count = 1;
-	for (size_t i = 1; i < cands.size() && count < 3; i++) {
+	for (int i = 1; i < candCount && count < 3; i++) {
 		if (cands[0].score - cands[i].score > 2.0f) break;
 		if (cands[i].score < cands[0].score * 0.55f) continue;
 		if (cands[i].name == result) continue;
@@ -6156,8 +6399,12 @@ static CString EstimateOverallRaw(float* b, float* m, float* h, float* a) {
 
 // ヒストリー付きコード推定: 前フレームのコードをスコアに加味して安定性を向上
 static CString g_prevChordLow = L"", g_prevChordMid = L"", g_prevChordHigh = L"", g_prevChordAll = L"";
-static std::deque<CString> g_historyLow, g_historyMid, g_historyHigh, g_historyAll;
-const int HISTORY_SIZE = 4;  // 直近4フレームで多数決
+// 直近 HISTORY_SIZE フレームのリング（deque/map 禁止）
+static CString g_historyLow[EQKEY_HIST_MAX], g_historyMid[EQKEY_HIST_MAX];
+static CString g_historyHigh[EQKEY_HIST_MAX], g_historyAll[EQKEY_HIST_MAX];
+static int g_historyLowN = 0, g_historyMidN = 0, g_historyHighN = 0, g_historyAllN = 0;
+static int g_historyLowHead = 0, g_historyMidHead = 0, g_historyHighHead = 0, g_historyAllHead = 0;
+const int HISTORY_SIZE = EQKEY_HIST_MAX;  // 直近4フレームで多数決
 const float SMOOTHING_FACTOR = 0.3f;  // ノート強度の指数平滑係数
 static float g_prevRMS = 0.0f, g_peakRMS = 0.0f;
 static bool  g_isPlaying = false;
@@ -6170,63 +6417,89 @@ const float PLAYING_THRESHOLD = 0.01f;     // 再生中判定閾値
 const int   SILENCE_FRAMES_FOR_CLEAR = 10;     // このフレーム数無音でヒストリーをクリア
 static int  g_soundFrameCount = 0;
 
-// RMS計算 (モノラル・ステレオ兼用)
-static float CalculateRMS(const std::vector<double>& bL, const std::vector<double>& bR, bool stereo) {
-	if (bL.empty()) return 0.0f;
-	double sL = 0.0, sR = 0.0; int c = (int)bL.size();
-	for (int i = 0; i < c; i++) sL += bL[i] * bL[i];
-	if (stereo && (int)bR.size() == c) {
-		for (int i = 0; i < c; i++) sR += bR[i] * bR[i];
-		return (float)sqrt((sL + sR) / (c * 2));
-	}
-	return (float)sqrt(sL / c);
+static void HistoryClear(CString* ring, int& n, int& head)
+{
+	for (int i = 0; i < EQKEY_HIST_MAX; ++i) ring[i].Empty();
+	n = 0; head = 0;
 }
 
-// ヒストリー内で最頻出のコード名を返す (多数決安定化)
-static CString GetMostFrequent(const std::deque<CString>& h) {
-	if (h.empty()) return L"";
-	std::map<CString, int> cnt;
-	for (const auto& s : h) {
+static void HistoryPush(CString* ring, int& n, int& head, const CString& v)
+{
+	if (n < EQKEY_HIST_MAX) {
+		ring[(head + n) % EQKEY_HIST_MAX] = v;
+		++n;
+	} else {
+		ring[head] = v;
+		head = (head + 1) % EQKEY_HIST_MAX;
+	}
+}
+
+// RMS計算 (モノラル・ステレオ兼用)
+static float CalculateRMS(const double* bL, const double* bR, int count, bool stereo) {
+	if (!bL || count <= 0) return 0.0f;
+	double sL = 0.0, sR = 0.0;
+	for (int i = 0; i < count; i++) sL += bL[i] * bL[i];
+	if (stereo && bR) {
+		for (int i = 0; i < count; i++) sR += bR[i] * bR[i];
+		return (float)sqrt((sL + sR) / (count * 2));
+	}
+	return (float)sqrt(sL / count);
+}
+
+// ヒストリー内で最頻出のコード名を返す (多数決安定化・固定配列)
+static CString GetMostFrequent(const CString* ring, int n, int head) {
+	if (!ring || n <= 0) return L"";
+	CString names[EQKEY_HIST_MAX * 3];
+	int votes[EQKEY_HIST_MAX * 3];
+	int nameCount = 0;
+	for (int i = 0; i < n; ++i) {
+		const CString& s = ring[(head + i) % EQKEY_HIST_MAX];
 		if (s.IsEmpty()) continue;
 		int start = 0;
 		while (start < s.GetLength()) {
 			int end = s.Find(L", ", start);
-			if (end == -1) {
-				end = s.GetLength();
-			}
+			if (end == -1) end = s.GetLength();
 			CString item = s.Mid(start, end - start);
 			item.Trim();
 			if (!item.IsEmpty()) {
-				cnt[item]++;
+				int found = -1;
+				for (int k = 0; k < nameCount; ++k) {
+					if (names[k] == item) { found = k; break; }
+				}
+				if (found >= 0) votes[found]++;
+				else if (nameCount < EQKEY_HIST_MAX * 3) {
+					names[nameCount] = item;
+					votes[nameCount] = 1;
+					nameCount++;
+				}
 			}
 			start = end + 2;
 		}
 	}
-	if (cnt.empty()) return L"";
+	if (nameCount <= 0) return L"";
 
-	struct ChordVote { CString name; int votes; };
-	std::vector<ChordVote> votesList;
-	for (const auto& p : cnt) {
-		ChordVote cv;
-		cv.name = p.first;
-		cv.votes = p.second;
-		votesList.push_back(cv);
+	// 単純選択ソート（要素数極小）
+	for (int i = 0; i < nameCount; ++i) {
+		int best = i;
+		for (int j = i + 1; j < nameCount; ++j)
+			if (votes[j] > votes[best]) best = j;
+		if (best != i) {
+			CString tn = names[i]; names[i] = names[best]; names[best] = tn;
+			int tv = votes[i]; votes[i] = votes[best]; votes[best] = tv;
+		}
 	}
-	std::sort(votesList.begin(), votesList.end(), [](const ChordVote& a, const ChordVote& b) {
-		return a.votes > b.votes;
-	});
 
-	CString result = votesList[0].name;
+	CString result = names[0];
 	int count = 1;
-	const int topVotes = votesList[0].votes;
+	const int topVotes = votes[0];
 	CString bestRoot = (result.GetLength() > 1 && (result[1] == L'#' || result[1] == L'b')) ? result.Left(2) : result.Left(1);
 
-	for (size_t i = 1; i < votesList.size() && count < 3; i++) {
-		if (votesList[i].votes < 2) continue;
-		if (topVotes > 0 && votesList[i].votes < (topVotes + 1) / 2) continue;
-		CString root = (votesList[i].name.GetLength() > 1 && (votesList[i].name[1] == L'#' || votesList[i].name[1] == L'b')) ? votesList[i].name.Left(2) : votesList[i].name.Left(1);
+	for (int i = 1; i < nameCount && count < 3; i++) {
+		if (votes[i] < 2) continue;
+		if (topVotes > 0 && votes[i] < (topVotes + 1) / 2) continue;
+		CString root = (names[i].GetLength() > 1 && (names[i][1] == L'#' || names[i][1] == L'b')) ? names[i].Left(2) : names[i].Left(1);
 		if (root == bestRoot) {
-			result += L", " + votesList[i].name;
+			result += L", " + names[i];
 			count++;
 		}
 	}
@@ -6272,7 +6545,8 @@ static CString EstimateChordRawWithHistory(float* nc, float threshold, const CSt
 	if (fifth > 0.3f && third < 0.15f && active <= 3)
 		return root + L"!@B!@I[Power]!@B!@I";
 
-	std::vector<ChordCandidate> cands;
+	ChordCandidate cands[EQKEY_CHORD_CAND_MAX];
+	int candCount = 0;
 	int np = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
 	for (int c = 0; c < np; c++) {
 		float sc = 0.0f; int matched = 0, req = 0;
@@ -6313,17 +6587,24 @@ static CString EstimateChordRawWithHistory(float* nc, float threshold, const CSt
 		CString cur = root + CHORD_PATTERNS[c].name;
 		// 前フレームと同じコードにボーナス (時間的連続性)
 		if (!prev.IsEmpty() && IsChordInList(cur, prev)) sc += 1.5f;
-		if (sc > (is9 ? 3.5f : 0.8f)) {
-			ChordCandidate cd; cd.name = cur; cd.score = sc; cd.complexity = req; cands.push_back(cd);
+		if (sc > (is9 ? 3.5f : 0.8f) && candCount < EQKEY_CHORD_CAND_MAX) {
+			cands[candCount].name = cur; cands[candCount].score = sc; cands[candCount].complexity = req; candCount++;
 		}
 	}
-	if (cands.empty()) return root;
-	std::sort(cands.begin(), cands.end(), [](const ChordCandidate& a, const ChordCandidate& b) {
-		if (abs(a.score - b.score) < 0.3f) return a.complexity < b.complexity;
-		return a.score > b.score; });
+	if (candCount <= 0) return root;
+	for (int i = 0; i < candCount; ++i) {
+		int best = i;
+		for (int j = i + 1; j < candCount; ++j) {
+			const bool jBetter = (abs(cands[j].score - cands[best].score) < 0.3f)
+				? (cands[j].complexity < cands[best].complexity)
+				: (cands[j].score > cands[best].score);
+			if (jBetter) best = j;
+		}
+		if (best != i) { ChordCandidate tmp = cands[i]; cands[i] = cands[best]; cands[best] = tmp; }
+	}
 
 	CString result = cands[0].name; int count = 1;
-	for (size_t i = 1; i < cands.size() && count < 3; i++) {
+	for (int i = 1; i < candCount && count < 3; i++) {
 		if (cands[0].score - cands[i].score > 2.0f) break;
 		if (cands[i].score < cands[0].score * 0.55f) continue;
 		if (cands[i].name == result) continue;
@@ -6352,10 +6633,11 @@ static CString EstimateChordRawWithHistory(float* b, float* m, float* h, float* 
 //   5. FFT + Viterbi でメロディ音を推定
 //   6. KeyCodeLow/Mid/High/All に結果を格納
 // ============================================================
-void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<double>& bufferR, int sampleRate) {
+void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCount, int sampleRate) {
 	InitializeAnalysis((double)sampleRate);
-	int totalSamples = (int)bufferL.size();
-	bool stereo = ((int)bufferR.size() == totalSamples);
+	if (!bufferL || sampleCount <= 0) return;
+	int totalSamples = sampleCount;
+	bool stereo = (bufferR != nullptr);
 
 	// 表示用フォーマット: "ルート, <コード名>" の形式
 	auto FormatChord = [](CString s) -> CString {
@@ -6391,7 +6673,7 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 		return r;
 	};
 
-	float currentRMS = CalculateRMS(bufferL, bufferR, stereo);
+	float currentRMS = CalculateRMS(bufferL, bufferR, totalSamples, stereo);
 
 	// 再生検出 & ピークRMS追跡
 	if (currentRMS > PLAYING_THRESHOLD) {
@@ -6415,8 +6697,10 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 	// 無音が続いた場合はヒストリーをリセット
 	if (g_silenceFrameCount >= SILENCE_FRAMES_FOR_CLEAR) {
 		g_isPlaying = false; g_peakRMS = 0.0f; g_soundFrameCount = 0;
-		g_historyLow.clear(); g_historyMid.clear();
-		g_historyHigh.clear(); g_historyAll.clear();
+		HistoryClear(g_historyLow, g_historyLowN, g_historyLowHead);
+		HistoryClear(g_historyMid, g_historyMidN, g_historyMidHead);
+		HistoryClear(g_historyHigh, g_historyHighN, g_historyHighHead);
+		HistoryClear(g_historyAll, g_historyAllN, g_historyAllHead);
 		g_prevChordLow = g_prevChordMid = g_prevChordAll = g_prevChordHigh = L"";
 		memset(g_noteStrength, 0, sizeof(g_noteStrength));
 		memset(g_noteStrengthPrev, 0, sizeof(g_noteStrengthPrev));
@@ -6449,16 +6733,16 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 
 	for (int k = 0; k < LOW_LIMIT; k++) {
 		const double* win = (LOW_N == 4096) ? g_hannWindow4096 : nullptr;
-		double aL = GoertzelMagnitude(bufferL.data() + LOW_S, LOW_N, g_goertzelCoeffs[k], win);
-		double aR = stereo ? GoertzelMagnitude(bufferR.data() + LOW_S, LOW_N, g_goertzelCoeffs[k], win) : aL;
+		double aL = GoertzelMagnitude(bufferL + LOW_S, LOW_N, g_goertzelCoeffs[k], win);
+		double aR = stereo ? GoertzelMagnitude(bufferR + LOW_S, LOW_N, g_goertzelCoeffs[k], win) : aL;
 		float ns = (float)max(aL, aR) * (1.0f + k / 100.0f);  // 低域補正
 		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + ns * (1.0f - SMOOTHING_FACTOR);
 		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
 	for (int k = LOW_LIMIT; k < 108; k++) {
 		const double* win = (HI_N == 2048) ? g_blackmanWindow2048 : nullptr;
-		double aL = GoertzelMagnitude(bufferL.data() + HI_S, HI_N, g_goertzelCoeffs[k], win);
-		double aR = stereo ? GoertzelMagnitude(bufferR.data() + HI_S, HI_N, g_goertzelCoeffs[k], win) : aL;
+		double aL = GoertzelMagnitude(bufferL + HI_S, HI_N, g_goertzelCoeffs[k], win);
+		double aR = stereo ? GoertzelMagnitude(bufferR + HI_S, HI_N, g_goertzelCoeffs[k], win) : aL;
 		float ns = (float)max(aL, aR) * (1.0f + k / 50.0f);   // 高域補正
 		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + ns * (1.0f - SMOOTHING_FACTOR);
 		g_noteStrengthPrev[k] = g_noteStrength[k];
@@ -6473,17 +6757,17 @@ void AnalyzeMusicKey(const std::vector<double>& bufferL, const std::vector<doubl
 	CString rawAll = EstimateChordRawWithHistory(bC, mC, hC, aC, g_prevChordAll);
 	CString rawHigh = EstimateChordRawWithHistory(hC, 0.03f, g_prevChordHigh);
 
-	// ヒストリーキュー更新 (HISTORY_SIZE 超過分は pop_front)
-	auto push = [](std::deque<CString>& h, const CString& v) {
-		h.push_back(v);
-		if ((int)h.size() > HISTORY_SIZE) h.pop_front();
-		};
-	push(g_historyLow, rawBass); push(g_historyMid, rawMid);
-	push(g_historyHigh, rawHigh); push(g_historyAll, rawAll);
+	// ヒストリーリング更新
+	HistoryPush(g_historyLow, g_historyLowN, g_historyLowHead, rawBass);
+	HistoryPush(g_historyMid, g_historyMidN, g_historyMidHead, rawMid);
+	HistoryPush(g_historyHigh, g_historyHighN, g_historyHighHead, rawHigh);
+	HistoryPush(g_historyAll, g_historyAllN, g_historyAllHead, rawAll);
 
 	// 多数決安定化
-	rawBass = GetMostFrequent(g_historyLow); rawMid = GetMostFrequent(g_historyMid);
-	rawAll = GetMostFrequent(g_historyAll); rawHigh = GetMostFrequent(g_historyHigh);
+	rawBass = GetMostFrequent(g_historyLow, g_historyLowN, g_historyLowHead);
+	rawMid = GetMostFrequent(g_historyMid, g_historyMidN, g_historyMidHead);
+	rawAll = GetMostFrequent(g_historyAll, g_historyAllN, g_historyAllHead);
+	rawHigh = GetMostFrequent(g_historyHigh, g_historyHighN, g_historyHighHead);
 
 	g_prevChordLow = rawBass; g_prevChordMid = rawMid;
 	g_prevChordAll = rawAll;  g_prevChordHigh = rawHigh;

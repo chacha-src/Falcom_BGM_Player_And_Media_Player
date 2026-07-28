@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 
@@ -138,4 +138,10 @@ public:
 	CCustomStatic m_reverbi;
 	CCustomStatic m_chorusi;
 	CCustomStatic m_delayi;
+	CCustomStandardButton m_abA;
+	CCustomStandardButton m_abB;
+	CCustomStandardButton m_abTog;
+	afx_msg void OnBnClickedAbA();
+	afx_msg void OnBnClickedAbB();
+	afx_msg void OnBnClickedAbTog();
 };

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -46,11 +46,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseOfMfc>Static</UseOfMfc>
+    <CharacterSet>Unicode</CharacterSet>
     <PlatformToolset>v145</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseOfMfc>Static</UseOfMfc>
+    <CharacterSet>Unicode</CharacterSet>
     <PlatformToolset>v145</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -158,7 +160,7 @@
       <Culture>0x0411</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>opusfile_avx2_2026.lib;opus_avx2_2026.lib;Strmbase.lib;comctl32.lib;mfuuid.lib;User32.lib;uafxcw.lib;libogg_static_avx2_2026.lib;libvorbis_static_avx2_2026.lib;libvorbisfile_static_avx2_2026.lib;winmm.lib;dxguid.lib;dsound.lib;strmiids.lib;libmad_avx2_2026.lib;libFLAC_static_avx2_2026.lib;libsoxr_avx2_2026.lib;dwmapi.lib;libz-static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opusfile_avx2_2026.lib;opus_avx2_2026.lib;Strmbase.lib;comctl32.lib;mfuuid.lib;mfplat.lib;mfreadwrite.lib;User32.lib;uafxcw.lib;libogg_static_avx2_2026.lib;libvorbis_static_avx2_2026.lib;libvorbisfile_static_avx2_2026.lib;winmm.lib;dxguid.lib;dsound.lib;strmiids.lib;libmad_avx2_2026.lib;libFLAC_static_avx2_2026.lib;libsoxr_avx2_2026.lib;dwmapi.lib;libz-static.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_avx2.exe</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <ProgramDatabaseFile>uni/oggYSEDbgm.pdb</ProgramDatabaseFile>
@@ -236,7 +238,7 @@
       <Culture>0x0411</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>opusfile_avx2_2026.lib;opus_avx2_2026.lib;Strmbase.lib;comctl32.lib;mfuuid.lib;User32.lib;uafxcw.lib;libogg_static_avx2_2026.lib;libvorbis_static_avx2_2026.lib;libvorbisfile_static_avx2_2026.lib;winmm.lib;dxguid.lib;dsound.lib;strmiids.lib;libmad_avx2_2026.lib;libFLAC_static_avx2_2026.lib;libsoxr_avx2_2026.lib;dwmapi.lib;libz-static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opusfile_avx2_2026.lib;opus_avx2_2026.lib;Strmbase.lib;comctl32.lib;mfuuid.lib;mfplat.lib;mfreadwrite.lib;User32.lib;uafxcw.lib;libogg_static_avx2_2026.lib;libvorbis_static_avx2_2026.lib;libvorbisfile_static_avx2_2026.lib;winmm.lib;dxguid.lib;dsound.lib;strmiids.lib;libmad_avx2_2026.lib;libFLAC_static_avx2_2026.lib;libsoxr_avx2_2026.lib;dwmapi.lib;libz-static.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_avx2.exe</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <ProgramDatabaseFile>$(IntDir)oggYSEDbgm_uni_2026_de.pdb</ProgramDatabaseFile>
@@ -533,6 +535,7 @@
     <ClCompile Include="ED5.cpp" />
     <ClCompile Include="ED63rd.cpp" />
     <ClCompile Include="WavExport.cpp" />
+    <ClCompile Include="TranscodeExport.cpp" />
     <ClCompile Include="Folder.cpp" />
     <ClCompile Include="Graph.cpp" />
     <ClCompile Include="Gurumin.cpp" />
@@ -548,6 +551,10 @@
     </ClCompile>
     <ClCompile Include="Kpilist.cpp" />
     <ClCompile Include="SongParams.cpp" />
+    <ClCompile Include="ProAudio.cpp" />
+    <ClCompile Include="ProXfadeDual.cpp" />
+    <ClCompile Include="PlaySlot.cpp" />
+    <ClCompile Include="CProToolsDlg.cpp" />
     <ClCompile Include="kpi_decoder.cpp" />
     <ClCompile Include="kpi_device.cpp" />
     <ClCompile Include="kpi_player.cpp" />
@@ -651,6 +658,7 @@
     <ClInclude Include="ED63rd.h" />
     <ClInclude Include="PianoRollPick.h" />
     <ClInclude Include="WavExport.h" />
+    <ClInclude Include="TranscodeExport.h" />
     <ClInclude Include="flac.h" />
     <ClInclude Include="Folder.h" />
     <ClInclude Include="Graph.h" />
@@ -665,6 +673,10 @@
     <ClInclude Include="KpiV5ConfigStore.h" />
     <ClInclude Include="Kpilist.h" />
     <ClInclude Include="SongParams.h" />
+    <ClInclude Include="ProAudio.h" />
+    <ClInclude Include="ProXfadeDual.h" />
+    <ClInclude Include="PlaySlot.h" />
+    <ClInclude Include="CProToolsDlg.h" />
     <ClInclude Include="kpi_decoder.h" />
     <ClInclude Include="kpi_device.h" />
     <ClInclude Include="kpi_impl.h" />

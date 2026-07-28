@@ -17,7 +17,6 @@ extern COggDlg* og;
 #include "PianoKeyTable.h"
 #include "HarmonicProfile.h"
 #include "PianoRollGoertzelAvx2.h"
-#include <algorithm>
 
 extern save savedata;
 void COggDlg_SyncPianoRollFast();
@@ -164,7 +163,13 @@ namespace Cfg
         int k = (int)((float)n * SPECTRAL_NOISE_PERCENTILE);
         if (k < 0) k = 0;
         if (k >= n) k = n - 1;
-        std::nth_element(tmp, tmp + k, tmp + n);
+        // 部分選択（std::nth_element 禁止）
+        for (int i = 0; i <= k; ++i) {
+            int best = i;
+            for (int j = i + 1; j < n; ++j)
+                if (tmp[j] < tmp[best]) best = j;
+            if (best != i) { float t = tmp[i]; tmp[i] = tmp[best]; tmp[best] = t; }
+        }
         return tmp[k];
     }
 
@@ -298,7 +303,8 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
 {
     InitializeCriticalSection(&m_cs);
     InitializeCriticalSection(&m_jobCs);
-    m_ring.assign(RING_SIZE, 0.0);
+    memset(m_jobMono, 0, sizeof(m_jobMono));
+    m_analysisTablesReady = false;
     EnsureAnalysisTables(REF_SAMPLE_RATE);
 
     memset(m_activeKeys, 0, sizeof(m_activeKeys));
@@ -414,7 +420,6 @@ void CPianoRoll::ResetPlaybackState()
     m_meterDirty = true;
 
     if (TryEnterCriticalSection(&m_jobCs)) {
-        m_jobMono.clear();
         m_jobFrameCount = 0;
         m_jobSampleRate = 44100;
         LeaveCriticalSection(&m_jobCs);
@@ -524,21 +529,8 @@ void CPianoRoll::ResetPlaybackState()
         m_lastAnalyzeTick = 0;
         m_inputSampleRate = 0;
         m_winLow = m_winBass = m_winHigh = m_winOnset = 0;
-        m_goertzelCoeffs.clear();
-        m_hannLow.clear();
-        m_hannBass.clear();
-        m_hannOnset.clear();
-        m_blackmanHigh.clear();
-        m_windowedLow.clear();
-        m_windowedBass.clear();
-        m_windowedHigh.clear();
-        m_windowedOnset.clear();
-        m_analysisBuf.clear();
-        m_bassAnalysisBuf.clear();
-        m_workerMonoScratch.clear();
+        m_analysisTablesReady = false;
         m_analysisHasBass = false;
-        if (!m_ring.empty())
-            std::fill(m_ring.begin(), m_ring.end(), 0.0);
         LeaveCriticalSection(&m_cs);
     }
     else {
@@ -696,17 +688,21 @@ void CPianoRoll::EnsureAnalysisTables(int sampleRate, int capCaptureFrames)
 {
     if (sampleRate < 8000) sampleRate = 44100;
     const int cap = (capCaptureFrames > 0) ? capCaptureFrames : 0;
-    const int winLow = ScaleWinSamples(WIN_LOW_REF, sampleRate, cap);
+    int winLow = ScaleWinSamples(WIN_LOW_REF, sampleRate, cap);
     int winBass = ScaleWinSamples(WIN_BASS_REF, sampleRate, cap);
     int winHigh = ScaleWinSamples(WIN_HIGH_REF, sampleRate, cap);
     int winOnset = ScaleWinSamples(WIN_ONSET_REF, sampleRate, cap);
     if (winBass < winLow) winBass = winLow;
     if (winHigh > winLow) winHigh = winLow;
     if (winOnset > winLow) winOnset = winLow;
+    if (winLow > WIN_SAMPLES_MAX) winLow = WIN_SAMPLES_MAX;
+    if (winBass > WIN_SAMPLES_MAX) winBass = WIN_SAMPLES_MAX;
+    if (winHigh > WIN_SAMPLES_MAX) winHigh = WIN_SAMPLES_MAX;
+    if (winOnset > WIN_SAMPLES_MAX) winOnset = WIN_SAMPLES_MAX;
     if (sampleRate == m_inputSampleRate &&
         winLow == m_winLow && winBass == m_winBass &&
         winHigh == m_winHigh && winOnset == m_winOnset &&
-        !m_goertzelCoeffs.empty())
+        m_analysisTablesReady)
         return;
 
     m_inputSampleRate = sampleRate;
@@ -714,44 +710,40 @@ void CPianoRoll::EnsureAnalysisTables(int sampleRate, int capCaptureFrames)
     m_winBass = winBass;
     m_winHigh = winHigh;
     m_winOnset = winOnset;
-    m_goertzelCoeffs.resize(KEY_COUNT);
     for (int i = 0; i < KEY_COUNT; ++i) {
         const int midi = MIDI_BASE + i;
         const double freq = MidiToFreq(midi);
         m_goertzelCoeffs[i] = 2.0 * cos(2.0 * M_PI * freq / sampleRate);
     }
 
-    m_hannLow.resize(m_winLow);
     for (int n = 0; n < m_winLow; ++n) {
         const double denom = (m_winLow > 1) ? (double)(m_winLow - 1) : 1.0;
         m_hannLow[n] = 0.5 - 0.5 * cos(2.0 * M_PI * n / denom);
     }
 
-    m_hannOnset.resize(m_winOnset);
     for (int n = 0; n < m_winOnset; ++n) {
         const double denom = (m_winOnset > 1) ? (double)(m_winOnset - 1) : 1.0;
         m_hannOnset[n] = 0.5 - 0.5 * cos(2.0 * M_PI * n / denom);
     }
 
-    m_hannBass.resize(m_winBass);
     for (int n = 0; n < m_winBass; ++n) {
         const double denom = (m_winBass > 1) ? (double)(m_winBass - 1) : 1.0;
         m_hannBass[n] = 0.5 - 0.5 * cos(2.0 * M_PI * n / denom);
     }
 
-    m_blackmanHigh.resize(m_winHigh);
     for (int n = 0; n < m_winHigh; ++n) {
         const double denom = (m_winHigh > 1) ? (double)(m_winHigh - 1) : 1.0;
         m_blackmanHigh[n] = 0.42 - 0.5 * cos(2.0 * M_PI * n / denom)
             + 0.08 * cos(4.0 * M_PI * n / denom);
     }
 
-    m_windowedLow.assign(m_winLow, 0.0);
-    m_windowedBass.assign(m_winBass, 0.0);
-    m_windowedHigh.assign(m_winHigh, 0.0);
-    m_windowedOnset.assign(m_winOnset, 0.0);
-    m_analysisBuf.assign(m_winLow, 0.0);
-    m_bassAnalysisBuf.assign(m_winBass, 0.0);
+    memset(m_windowedLow, 0, (size_t)m_winLow * sizeof(double));
+    memset(m_windowedBass, 0, (size_t)m_winBass * sizeof(double));
+    memset(m_windowedHigh, 0, (size_t)m_winHigh * sizeof(double));
+    memset(m_windowedOnset, 0, (size_t)m_winOnset * sizeof(double));
+    memset(m_analysisBuf, 0, (size_t)m_winLow * sizeof(double));
+    memset(m_bassAnalysisBuf, 0, (size_t)m_winBass * sizeof(double));
+    m_analysisTablesReady = true;
 }
 
 // Goertzel アルゴリズムで単一周波数の振幅(magnitude)を計算する。
@@ -847,10 +839,9 @@ void CPianoRoll::AnalyzePlayCursorMono(const double* mono, int frameCount, int s
     m_lastAnalyzeTick = now;
 
     EnterCriticalSection(&m_jobCs);
-    const int copyFrames = frameCount;
-    if ((int)m_jobMono.size() < copyFrames)
-        m_jobMono.resize((size_t)copyFrames);
-    memcpy(m_jobMono.data(), mono, (size_t)copyFrames * sizeof(double));
+    int copyFrames = frameCount;
+    if (copyFrames > WIN_SAMPLES_MAX) copyFrames = WIN_SAMPLES_MAX;
+    memcpy(m_jobMono, mono, (size_t)copyFrames * sizeof(double));
     m_jobFrameCount = copyFrames;
     m_jobSampleRate = sampleRate;
     InterlockedExchange(&m_jobPending, 1);
@@ -937,8 +928,8 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     }
 
     const float levelDb = Cfg::LevelDbForDynamics(
-        m_analysisBuf.data(), m_winLow,
-        hasBass ? m_bassAnalysisBuf.data() : nullptr,
+        m_analysisBuf, m_winLow,
+        hasBass ? m_bassAnalysisBuf : nullptr,
         hasBass ? m_winBass : 0);
 
     const float gainDb = Cfg::MakeupGainDb(levelDb);
@@ -947,9 +938,9 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     //     マスター上げ後は床が下がってゴーストが増える非対称が残っていた。
     m_lastGainDb = gainDb;
     m_bufwav3LevelDb = levelDb + gainDb;
-    Cfg::ApplyGainDbInPlace(m_analysisBuf.data(), m_winLow, gainDb);
+    Cfg::ApplyGainDbInPlace(m_analysisBuf, m_winLow, gainDb);
     if (hasBass)
-        Cfg::ApplyGainDbInPlace(m_bassAnalysisBuf.data(), m_winBass, gainDb);
+        Cfg::ApplyGainDbInPlace(m_bassAnalysisBuf, m_winBass, gainDb);
 
     // 真の無音のみ早期リターン。AGC可能な静かな曲は通す。
     if (levelDb < -58.0f) {
@@ -983,7 +974,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
         m_windowedLow[i] = m_analysisBuf[i] * m_hannLow[i];
     for (int i = 0; i < m_winHigh; ++i)
         m_windowedHigh[i] = m_analysisBuf[i + (m_winLow - m_winHigh)] * m_blackmanHigh[i];
-    const double* onsetSrc = m_analysisBuf.data() + (m_winLow - m_winOnset);
+    const double* onsetSrc = m_analysisBuf + (m_winLow - m_winOnset);
     for (int i = 0; i < m_winOnset; ++i)
         m_windowedOnset[i] = onsetSrc[i] * m_hannOnset[i];
 
@@ -999,33 +990,33 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
         for (int i = 0; i < m_winBass; ++i)
             m_windowedBass[i] = m_bassAnalysisBuf[i] * m_hannBass[i];
         PianoRollGoertzelBatchAvx2(
-            m_windowedBass.data(), m_winBass, m_goertzelCoeffs.data(),
+            m_windowedBass, m_winBass, m_goertzelCoeffs,
             0, splitLo, m_goertzelRawScratch);
         for (int i = 0; i < splitLo; ++i)
             storeKey(i, (float)m_goertzelRawScratch[i], m_winBass, WIN_BASS_REF);
     }
     else {
         PianoRollGoertzelBatchAvx2(
-            m_windowedLow.data(), m_winLow, m_goertzelCoeffs.data(),
+            m_windowedLow, m_winLow, m_goertzelCoeffs,
             0, splitLo, m_goertzelRawScratch);
         for (int i = 0; i < splitLo; ++i)
             storeKey(i, (float)m_goertzelRawScratch[i], m_winLow, WIN_BASS_REF);
     }
 
     PianoRollGoertzelBatchAvx2(
-        m_windowedLow.data(), m_winLow, m_goertzelCoeffs.data(),
+        m_windowedLow, m_winLow, m_goertzelCoeffs,
         splitLo, splitHi, m_goertzelRawScratch);
     for (int i = splitLo; i < splitHi; ++i)
         storeKey(i, (float)m_goertzelRawScratch[i - splitLo], m_winLow, WIN_LOW_REF);
 
     PianoRollGoertzelBatchAvx2(
-        m_windowedHigh.data(), m_winHigh, m_goertzelCoeffs.data(),
+        m_windowedHigh, m_winHigh, m_goertzelCoeffs,
         splitHi, KEY_COUNT, m_goertzelRawScratch);
     for (int i = splitHi; i < KEY_COUNT; ++i)
         storeKey(i, (float)m_goertzelRawScratch[i - splitHi], m_winHigh, WIN_HIGH_REF);
 
     PianoRollGoertzelBatchAvx2(
-        m_windowedOnset.data(), m_winOnset, m_goertzelCoeffs.data(),
+        m_windowedOnset, m_winOnset, m_goertzelCoeffs,
         0, KEY_COUNT, m_goertzelRawScratch);
     for (int i = 0; i < KEY_COUNT; ++i)
         m_onsetStrengths[i] = ApplyDetectScale(
@@ -3376,9 +3367,8 @@ bool CPianoRoll::ProcessAnalysisJob()
     frameCount = m_jobFrameCount;
     sampleRate = m_jobSampleRate;
     if (frameCount > 0) {
-        if ((int)m_workerMonoScratch.size() < frameCount)
-            m_workerMonoScratch.resize((size_t)frameCount);
-        memcpy(m_workerMonoScratch.data(), m_jobMono.data(), (size_t)frameCount * sizeof(double));
+        if (frameCount > WIN_SAMPLES_MAX) frameCount = WIN_SAMPLES_MAX;
+        memcpy(m_workerMonoScratch, m_jobMono, (size_t)frameCount * sizeof(double));
     }
     LeaveCriticalSection(&m_jobCs);
 
@@ -3387,7 +3377,7 @@ bool CPianoRoll::ProcessAnalysisJob()
         InterlockedCompareExchange(&m_analysisEpoch, 0, 0) == epochAtStart &&
         frameCount >= MinAnalyzeFrameCount(sampleRate, frameCount) &&
         sampleRate >= 8000) {
-        const double* mono = m_workerMonoScratch.data();
+        const double* mono = m_workerMonoScratch;
         __try {
             ok = RunAnalysisJob(mono, frameCount, sampleRate, epochAtStart);
         }
@@ -3438,8 +3428,8 @@ bool CPianoRoll::RunAnalysisJob(const double* mono, int frameCount, int sampleRa
     try {
         EnsureAnalysisTables(sampleRate);
         if (frameCount < m_winLow || m_winLow <= 0 ||
-            (int)m_goertzelCoeffs.size() < KEY_COUNT ||
-            (int)m_windowedLow.size() < m_winLow)
+            !m_analysisTablesReady ||
+            m_winLow <= 0)
             return false;
         const double* lowWin = mono + (frameCount - m_winLow);
         const int bassLen = (frameCount >= m_winBass) ? m_winBass : m_winLow;

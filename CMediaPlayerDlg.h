@@ -1,4 +1,4 @@
-﻿// CMediaPlayerDlg.h : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+// CMediaPlayerDlg.h : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // このソフトは元々ファルコム特化型再生ソフトだが、メディアプレイヤーの側面も持つ。
 // CMediaPlayerDlg は「張りぼて(ファサード)」であり、実体は COggDlg(og->) と
@@ -106,7 +106,7 @@ public:
 	CCustomStatic m_dsvolL, m_kvolL, m_tempoL, m_pitchL;
 
 	// ---- 操作ボタン ----
-	CCustomStandardButton m_prev, m_play, m_pause, m_stop, m_next, m_eq, m_piano, m_analyzer, m_switch, m_settings, m_exit, m_jacket;
+	CCustomStandardButton m_prev, m_play, m_pause, m_stop, m_next, m_eq, m_piano, m_analyzer, m_pro, m_switch, m_settings, m_exit, m_jacket;
 	CCustomStandardButton m_fadeout;   // フェードアウト(og IDC_BUTTON5 と同じ処理を委譲)
 	CCustomStandardButton m_folder;    // フォルダ設定(og IDC_BUTTON9 と同じ処理を委譲)
 	CCustomStandardButton m_plrename, m_pldelete, m_itemdel;
@@ -201,7 +201,7 @@ public:
 	int  m_lastToggleAnalyzer;
 	int  m_dsvolSlW;         // DS音量スライダー幅(DoLayout)。ラベル省略判定に使用
 	int  m_mpBtnShort;       // 0=フル 1=EQ系短縮 2=フェード/JK等短縮 3=最小幅用の超短縮
-	int  m_mpPromptShort;    // 0=プロンプト 1=プロ(幅不足時)
+	int  m_mpPromptShort;    // 0=プロンプト 1=指示(幅不足時)
 	int  m_mpChkShort[6];    // 下部チェック tip..saveparam: 0=フル 1=中 2=短 (-1=未設定)
 
 	// og のオフスクリーン合成 DC(スペアナ+ジャケ+時間)を m_bannerRect へ StretchBlit する。
@@ -261,6 +261,7 @@ protected:
 	afx_msg void OnEq();
 	afx_msg void OnPiano();
 	afx_msg void OnAnalyzer();
+	afx_msg void OnProTools();
 	afx_msg void OnFadeout();
 	afx_msg void OnFolder();
 	afx_msg void OnExit();

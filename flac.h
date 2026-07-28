@@ -15,6 +15,7 @@ private:
 	BYTE   m_temp_buf[FLAC__MAX_BLOCK_SIZE * 2 * 3];//2=maxchannel, 3=24/8
 	DWORD  m_temp_buf_size;
 	DWORD  m_temp_buf_remain;
+	int    m_flacPosMode; // 1=SetPosition がサンプル直指定（0xBF）。グローバル flacmode に依存しない
 	//
 	static FLAC__StreamDecoderReadStatus read_callback(const FLAC__StreamDecoder* decoder,
 		FLAC__byte buffer[],
@@ -71,6 +72,7 @@ KbFlacDecoder::KbFlacDecoder(void)
 	m_direct_buf_copied = 0;
 	m_temp_buf_size = 0;
 	m_temp_buf_remain = 0;
+	m_flacPosMode = 0;
 }
 /////////////////////////////////////////////////////////////////////////////
 KbFlacDecoder::~KbFlacDecoder(void)
@@ -91,6 +93,15 @@ BOOL __fastcall KbFlacDecoder::Open(const _TCHAR* cszFileName, SOUNDINFO* pInfo)
 #endif
 	if (hFile == INVALID_HANDLE_VALUE) {
 		return FALSE;
+	}
+	/* 先頭 0xBF はインスタンスに記録（スロット/曲1でグローバル flacmode を共有しない） */
+	m_flacPosMode = 0;
+	{
+		BYTE a = 0;
+		DWORD nr = 0;
+		if (ReadFile(hFile, &a, 1, &nr, NULL) && nr == 1 && a == 0xBF)
+			m_flacPosMode = 1;
+		SetFilePointer(hFile, 0, NULL, FILE_BEGIN);
 	}
 	FLAC__StreamDecoder* decoder = FLAC__stream_decoder_new();
 
@@ -174,8 +185,10 @@ DWORD __fastcall KbFlacDecoder::SetPosition(LONGLONG dwPos)
 	m_direct_buf_size = m_direct_buf_copied = 0;//write_callback が呼ばれるので必ず必要
 	m_temp_buf_size = m_temp_buf_remain = 0;    //write_callback が呼ばれるので必ず必要
 	try {
+		/* インスタンス mode 優先。未設定時のみレガシー互換でグローバル flacmode */
+		const int posMode = (m_flacPosMode != 0) ? m_flacPosMode : flacmode;
 		LONGLONG dwPosSample = (dwPos * (LONGLONG)m_stream_info.sample_rate) / (LONGLONG)1000;
-		if (flacmode == 1) {
+		if (posMode == 1) {
 			if (FLAC__stream_decoder_seek_absolute(m_decoder, dwPos)) {
 				return dwPos;
 			}
@@ -357,7 +370,7 @@ FLAC__StreamDecoderReadStatus KbFlacDecoder::read_callback(const FLAC__StreamDec
 			offcont = j;
 			offcont %= 7;
 			*bytes = dwRead;
-			if (flacmode == 1) {
+			if (((KbFlacDecoder*)client_data)->m_flacPosMode == 1 || flacmode == 1) {
 				BYTE* b = (BYTE*)buffer;
 				for (unsigned i = 0; i < *bytes; i++) {
 					b[i] ^= offenc[offcont];

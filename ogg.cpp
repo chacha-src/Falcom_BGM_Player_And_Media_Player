@@ -1,4 +1,4 @@
-﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
+// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -8,6 +8,7 @@
 #include "CMediaPlayerDlg.h"
 #include "UpdateCheck.h"
 #include "SongParams.h"
+#include "ProAudio.h"
 #include "direct.h"
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -200,6 +201,19 @@ BOOL COggApp::InitInstance()
 	savedata.ms = 30;
 	savedata.ms2 = 16;
 	savedata.eqCodeMs = 25;
+	savedata.pro_gapless = 0;
+	savedata.pro_xfade_ms = 0; /* クロスフェード撤去 */
+	savedata.pro_rg_mode = 0;
+	savedata.pro_rg_target = -18;
+	savedata.pro_ms_width = 100;
+	savedata.pro_ms_mono = 0;
+	savedata.pro_export_limit = 1;
+	savedata.pro_export_ceiling = 99;
+	savedata.pro_export_tp = 1;
+	savedata.pro_corr_meter = 1;
+	savedata.tc_format = 0;
+	savedata.tc_mp3_kbps = 192;
+	savedata.tc_flac_level = 5;
 	savedata.soundguid = { 0,0,0,0 };
 	savedata.soundcur=0;
 	savedata.samples = 192000;
@@ -667,6 +681,23 @@ BOOL COggApp::InitInstance()
 	if (savedata.ms2 > 960) savedata.ms2 = 960;
 	if (savedata.eqCodeMs < 16 || savedata.eqCodeMs > 500)
 		savedata.eqCodeMs = 25;
+	// ProAudio: 旧.dat は 0 埋め。初回だけ妥当な既定へ。
+	savedata.pro_xfade_ms = 0; /* クロスフェード撤去（旧設定を無視） */
+	if (savedata.pro_rg_mode < 0 || savedata.pro_rg_mode > 2)
+		savedata.pro_rg_mode = 0;
+	if (savedata.pro_rg_target > -1 || savedata.pro_rg_target < -30)
+		savedata.pro_rg_target = -18;
+	// 旧.dat の 0 埋めは「未設定」扱い（幅0でモノ化する事故を防ぐ）
+	if (savedata.pro_ms_width < 0 || savedata.pro_ms_width > 200)
+		savedata.pro_ms_width = 100;
+	if (savedata.pro_export_ceiling < 50 || savedata.pro_export_ceiling > 100)
+		savedata.pro_export_ceiling = 99;
+	if (savedata.tc_format != 0 && savedata.tc_format != 1)
+		savedata.tc_format = 0;
+	if (savedata.tc_mp3_kbps < 64 || savedata.tc_mp3_kbps > 320)
+		savedata.tc_mp3_kbps = 192;
+	if (savedata.tc_flac_level < 0 || savedata.tc_flac_level > 8)
+		savedata.tc_flac_level = 5;
 	if (savedata.aerocheck == 99) {
 		int abc = AfxMessageBox(LL14(
 			L"Win10/11アクリルぼかしが実装されました。\n有効にしますか？\n(このメッセージは一回しか表示されません)",
@@ -705,6 +736,7 @@ BOOL COggApp::InitInstance()
 
 	// 曲ごとのオーディオ/DSP パラメータ(別ファイル)を読み込む
 	SongParams_LoadFile();
+	ProAudio_Init();
 	// 配布済 AudioData.dat の旧キー(pathのみ)を mode+ret2 付きへ一度だけ移行
 	// (playlistu*.dat をディスクから走査。UI 未作成でも可)
 	SongParams_ConvertKeysIfNeeded();
@@ -1033,8 +1065,8 @@ void COggApp::convert()
 }
 #endif
 
-// RubberBand関連のグローバル変数の定義
-RubberBand::RubberBandStretcher* g_rubberBandStretcher = NULL;
+// RubberBand関連のグローバル変数の定義（0=レガシー/スロット0、1=スロット1）
+RubberBand::RubberBandStretcher* g_rubberBandStretcher[2] = { NULL, NULL };
 std::vector<float> m_convertedPcmFloatData;
 std::vector<uint8_t> m_bufwav3_1;
 std::vector<float> inputFloatData;

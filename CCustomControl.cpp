@@ -7138,12 +7138,6 @@ void CCC_MainLockPaintClient(CDC& dc, HWND hDlg)
     if (rc.IsRectEmpty())
         return;
 
-    CRect clip;
-    dc.GetClipBox(&clip);
-    CRect vis;
-    if (!vis.IntersectRect(&rc, &clip))
-        return;
-
     const int w = rc.Width();
     const int h = rc.Height();
     if (w <= 0 || h <= 0)
@@ -7175,16 +7169,24 @@ void CCC_MainLockPaintClient(CDC& dc, HWND hDlg)
         CCC_MainLockDrawOverlay(pCache->dc, local, e->locked);
         pCache->dirty = FALSE;
     }
+
+    // PaintAeroGaps の ClipNoChildren 等でクリップが削られていても、
+    // ロック矩形は必ず描く（子スタティックと重なるダイアログ対策）。
+    const int saved = dc.SaveDC();
+    dc.SelectClipRgn(NULL);
+    dc.IntersectClipRect(&rc);
 #if CCUSTOM_AERO_SUPPORT
     // アクリル(Win11)面では通常 BitBlt はアルファ0のまま書かれ DWM に
     // ガラス扱いされて完全透過になる(mp バナーと同じ理由)。不透明合成で描く。
-    if (CCC_IsAeroEnabled() && CCC_IsWin11() && CCC_IsBlurDialogChild(hDlg)) {
+    if (CCC_IsAeroEnabled() && CCC_IsWin11()) {
         CCC_BlitStretchOpaque(dc.GetSafeHdc(), rc.left, rc.top, w, h,
             pCache->dc.GetSafeHdc(), 0, 0, w, h);
+        dc.RestoreDC(saved);
         return;
     }
 #endif
     dc.BitBlt(rc.left, rc.top, w, h, &pCache->dc, 0, 0, SRCCOPY);
+    dc.RestoreDC(saved);
 }
 
 BOOL CCC_MainLockOverlayHitTest(HWND hDlg, CPoint ptClient)
@@ -7461,17 +7463,26 @@ void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
 
 void CCustomBlurDialogBase::OnPaint()
 {
+    CPaintDC dc(this);
 #if CCUSTOM_AERO_SUPPORT
     if (m_bAeroEnabled && CCC_IsWin11())
     {
-        CPaintDC dc(this);
         CCC_PaintAeroGaps(dc, this, nullptr);
         if (m_pMainLockSave)
             CCC_MainLockPaintClient(dc, m_hWnd);
         return;
     }
+    if (m_bAeroEnabled)
+    {
+        CRect rect;
+        GetClientRect(&rect);
+        dc.FillSolidRect(&rect, RGB(250, 250, 250));
+    }
 #endif
-    CCustomDialog::OnPaint();
+    // オーバーレイ方式の「メインに追従」はアクリル有無に関わらずここで描く。
+    // (FALSE=子チェック方式のときは PaintClient が no-op)
+    if (m_pMainLockSave)
+        CCC_MainLockPaintClient(dc, m_hWnd);
 }
 
 void CCustomBlurDialogBase::OnDestroy()
@@ -7733,17 +7744,26 @@ void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
 
 void CCustomBlurDialogExBase::OnPaint()
 {
+    CPaintDC dc(this);
 #if CCUSTOM_AERO_SUPPORT
     if (m_bAeroEnabled && CCC_IsWin11())
     {
-        CPaintDC dc(this);
         CCC_PaintAeroGaps(dc, this, nullptr);
         if (m_pMainLockSave)
             CCC_MainLockPaintClient(dc, m_hWnd);
         return;
     }
+    if (m_bAeroEnabled)
+    {
+        CRect rect;
+        GetClientRect(&rect);
+        dc.FillSolidRect(&rect, RGB(250, 250, 250));
+    }
 #endif
-    CCustomDialogEx::OnPaint();
+    // オーバーレイ方式の「メインに追従」はアクリル有無に関わらずここで描く。
+    // (FALSE=子チェック方式のときは PaintClient が no-op)
+    if (m_pMainLockSave)
+        CCC_MainLockPaintClient(dc, m_hWnd);
 }
 
 void CCustomBlurDialogExBase::OnDestroy()

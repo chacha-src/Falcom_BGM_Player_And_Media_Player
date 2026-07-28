@@ -1,4 +1,4 @@
-﻿chachakotorinのgithubから移転です。
+chachakotorinのgithubから移転です。
 
 # oggYSEDbgm メディアプレイヤー「らいら」
 日本ファルコム (Nihon Falcom) BGMプレイヤー / 高機能メディアプレイヤー
@@ -63,6 +63,12 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 
 ### 演奏プロンプト
 再生中にピッチやテンポ、エフェクトなどを時間指定で動かすプロンプト機能があります。
+
+### 再生詳細
+ギャップレス、ReplayGain、Mid/Side、相関メーター、書き出しリミッター、ループ区間、キュー、タグ書き込みなどをまとめた設定です。メディアプレイヤー画面の「詳細」ボタン、またはプレイリストの右クリックから開けます。
+
+### mp3 / FLAC 書き出し
+プレイリストの右クリックから、選択曲を mp3 または FLAC に書き出せます。いったん WAV と同じ経路でレンダリングしたあと変換します。ビットレート（mp3）や圧縮レベル（FLAC）、ループ回数、フェードアウト、先頭無音カットを指定できます。
 
 ![ファルコムプレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git7.png)
 
@@ -142,6 +148,7 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 - ファイルのドラッグ＆ドロップ追加
 - mp3やDirectShow再生の途中位置の保存
 - WAV書き出し時の2GB超対応（RF64）
+- mp3 / FLAC への書き出し（プレイリスト右クリック。ループ／フェード／先頭無音カット対応）
 - ピアノロールの検出パラメータ調整
 - レンダリング設定（デバイス、バッファ、ビット深度、フォント、ファイル関連付けなど）
 - タスクバーのジャンプリスト（再生／停止、EQ、ジャケット、プレイリストなど）
@@ -230,6 +237,12 @@ Supports sample-rate / bit-depth upscaling and multi-channel output.
 ### Performance Prompt
 A timed prompt feature can change pitch, tempo, effects, and more during playback.
 
+### Playback Details
+Gapless playback, ReplayGain, Mid/Side, correlation meter, export limiter, loop points, cues, and tag writing are grouped in one window. Open it from the media player **Extra** button or the playlist context menu. 
+
+### mp3 / FLAC Export
+From the playlist context menu, selected tracks can be written as mp3 or FLAC. Audio is rendered through the same path as WAV export, then encoded. You can set mp3 bitrate or FLAC compression level, loop count, fade-out, and leading-silence trim.
+
 ![Player Screen](https://ppp.oohara.jp/img/ysedplay2e_git7.png)
 
 ![Player Screen](https://ppp.oohara.jp/img/mp3e.png)
@@ -307,6 +320,7 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 - Drag-and-drop file adding
 - Resume position for mp3 and DirectShow playback
 - WAV export larger than 2GB (RF64)
+- mp3 / FLAC export (playlist context menu; loop / fade / leading-silence trim)
 - Piano-roll detection parameter tuning
 - Rendering options (device, buffer, bit depth, fonts, file associations, etc.)
 - Taskbar jump list (play/pause, EQ, jacket, playlist, and more)

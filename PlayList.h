@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxwin.h"
 #include "BtnST.h"
 #include "afxcmn.h"
@@ -130,6 +130,7 @@ public:
 	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
 	afx_msg void OnPop32787();
 	afx_msg void OnPopWavExport();
+	afx_msg void OnPopTranscode();
 	CCustomEdit m_find;
 	afx_msg void OnFindUp();
 	afx_msg void OnFindDown();
@@ -168,6 +169,8 @@ enum {
 	PL_CTX_DEL = 3,
 	PL_CTX_REMOVE_MISSING = 4,
 	PL_CTX_CLEAR_SONGPARAM = 5,
+	PL_CTX_PROTOOLS = 6,
+	PL_CTX_TRANSCODE = 7,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

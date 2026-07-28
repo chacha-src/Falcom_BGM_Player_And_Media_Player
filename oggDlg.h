@@ -1,4 +1,4 @@
-﻿// oggDlg.h : ヘッダー ファイル
+// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -100,6 +100,8 @@ public:
 	LRESULT dp2(WPARAM, LPARAM);
 	void SetAdd(CString fnn,int mode,int loop1,int loop2,CString filen,int ret2,REFTIME time);
 	BOOL ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts = NULL);
+	// format: 0=mp3 1=FLAC。一旦WAV書き出ししてから変換。
+	BOOL ExportToTranscode(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts, int format, int mp3Kbps, int flacLevel);
 	double goertzel(const float* data, int N, double target_freq, double sample_rate);
 	double hanWindow(int value, int index, int offset, int size);
 	void LoadJacket(CString s);
@@ -381,6 +383,9 @@ public:
 	afx_msg LRESULT OnEnterMpModeMsg(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnSongParamRestore(WPARAM wParam, LPARAM lParam); // 曲ごとパラメータ復元(再生スレッド→メイン)
 	afx_msg LRESULT OnSongParamMarks(WPARAM wParam, LPARAM lParam);   // ★列再描画
+	afx_msg LRESULT OnProAudioCueSeek(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnXfadePrefetch(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnXfadePromote(WPARAM wParam, LPARAM lParam);
 	HANDLE m_hTimerpVsyncThread;
 	HANDLE m_hTimerpVsyncStopEvent;
 };

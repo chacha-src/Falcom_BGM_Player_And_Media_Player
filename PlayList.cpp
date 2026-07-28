@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -8,9 +8,11 @@
 #include "oggDlg.h"
 #include "ListCtrlA.h"
 #include "PlayList.h"
+#include "CProToolsDlg.h"
 #include "SongParams.h"
 #include "ListSyosai.h"
 #include "WavExport.h"
+#include "TranscodeExport.h"
 #include <vector>
 #include <algorithm>
 #include "Douga.h"
@@ -899,6 +901,11 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Exportar a WAV", L"WAV로 내보내기", L"导出到WAV", L"تصدير إلى WAV",
 			L"Экспорт в WAV", L"Als WAV exportieren", L"Exportar para WAV", L"Exporteren naar WAV",
 			L"Eksportuj do WAV", L"WAV'e aktar"));
+	menu.AppendMenu(MF_STRING, PL_CTX_TRANSCODE,
+		LL14(L"mp3/FLACへ出力", L"Export to mp3/FLAC", L"Exporter en mp3/FLAC", L"Esporta in mp3/FLAC",
+			L"Exportar a mp3/FLAC", L"mp3/FLAC로 내보내기", L"导出到 mp3/FLAC", L"تصدير إلى mp3/FLAC",
+			L"Экспорт в mp3/FLAC", L"Als mp3/FLAC exportieren", L"Exportar para mp3/FLAC", L"Exporteren naar mp3/FLAC",
+			L"Eksportuj do mp3/FLAC", L"mp3/FLAC'e aktar"));
 	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING, PL_CTX_REMOVE_MISSING,
 		LL14(L"存在しないファイルを一覧から削除", L"Remove missing files from list",
@@ -919,6 +926,11 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Удалить сохранённые параметры выбранного", L"Gespeicherte Parameter der Auswahl loeschen",
 			L"Limpar parametros salvos da selecao", L"Opgeslagen parameters van selectie wissen",
 			L"Usun zapisane parametry zaznaczenia", L"Secimin kayitli parametrelerini sil"));
+	menu.AppendMenu(MF_STRING, PL_CTX_PROTOOLS,
+		LL14(L"再生詳細...", L"Playback details...", L"Details lecture...", L"Dettagli riproduzione...",
+			L"Detalles de reproduccion...", L"재생 상세...", L"播放详情...", L"تفاصيل التشغيل...",
+			L"Параметры воспроизведения...", L"Wiedergabedetails...", L"Detalhes de reproducao...", L"Afspeeldetails...",
+			L"Szczegoly odtwarzania...", L"Oynatma ayrintilari..."));
 	menu.AppendMenu(MF_SEPARATOR);
 
 	const int plCnt = GetPlaylistFileCount();
@@ -955,8 +967,13 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 {
 	if (cmd == PL_CTX_INFO) OnList();
 	else if (cmd == PL_CTX_WAV) OnPopWavExport();
+	else if (cmd == PL_CTX_TRANSCODE) OnPopTranscode();
 	else if (cmd == PL_CTX_DEL) Del();
 	else if (cmd == PL_CTX_REMOVE_MISSING) RemoveMissingFiles();
+	else if (cmd == PL_CTX_PROTOOLS) {
+		extern void OpenProToolsForSelection();
+		OpenProToolsForSelection();
+	}
 	else if (cmd == PL_CTX_CLEAR_SONGPARAM) {
 		std::vector<playlistdata0> items;
 		int idx = -1;
@@ -5608,6 +5625,34 @@ void CPlayList::OnPopWavExport()
 	}
 	if (indices.empty()) return;
 	CWavExport* a = new CWavExport(GetPlaylistModalOwner(this));
+	w_flg = FALSE;
+	if (indices.size() == 1) {
+		a->multiFile = false;
+		memcpy(&a->pc, &pc[indices[0]], sizeof(playlistdata0));
+	}
+	else {
+		a->multiFile = true;
+		a->pcs.reserve(indices.size());
+		for (size_t i = 0; i < indices.size(); ++i) {
+			a->pcs.push_back(pc[indices[i]]);
+		}
+		memcpy(&a->pc, &pc[indices[0]], sizeof(playlistdata0));
+	}
+	CWnd::PostMessage(0x118);
+	a->DoModal();
+	w_flg = TRUE;
+	delete a;
+}
+
+void CPlayList::OnPopTranscode()
+{
+	std::vector<int> indices;
+	int Lindex = -1;
+	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		if (Lindex < playcnt) indices.push_back(Lindex);
+	}
+	if (indices.empty()) return;
+	CTranscodeExport* a = new CTranscodeExport(GetPlaylistModalOwner(this));
 	w_flg = FALSE;
 	if (indices.size() == 1) {
 		a->multiFile = false;

@@ -632,7 +632,8 @@ BOOL CRender::OnInitDialog()
 	if(renderbase)
 		::SetWindowPos(renderbase->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-	EnableMainWindowLock(&savedata.renderMainLock);
+	EnableMainWindowLock(&savedata.renderMainLock, TRUE);
+	CCC_MainLockSetHeaderRow(m_hWnd, 0, 18);
 	CCC_MainLockBringToFront(m_hWnd);
 	return TRUE;  // コントロールにフォーカスを設定しないとき、戻り値は TRUE となります
 	              // 例外: OCX プロパティ ページの戻り値は FALSE となります
@@ -1026,6 +1027,108 @@ void CRender::OnBnClickedOk()
 
 
 
+static BOOL RenderRegReadDefaultString(HKEY hKey, CString& out)
+{
+	out.Empty();
+	DWORD type = 0;
+	DWORD cb = 0;
+	LONG r = RegQueryValueEx(hKey, NULL, NULL, &type, NULL, &cb);
+	if (r != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ) || cb < sizeof(TCHAR))
+		return FALSE;
+	LPTSTR buf = out.GetBuffer((int)(cb / sizeof(TCHAR) + 1));
+	r = RegQueryValueEx(hKey, NULL, NULL, &type, (LPBYTE)buf, &cb);
+	out.ReleaseBuffer();
+	return r == ERROR_SUCCESS;
+}
+
+static BOOL RenderCmdReferencesOurPlayer(const CString& cmd)
+{
+	if (cmd.IsEmpty())
+		return FALSE;
+	CString s(cmd);
+	s.MakeLower();
+	return s.Find(_T("oggysebgm")) >= 0;
+}
+
+static void RenderUpdateProgIdOpenCommand(HKEY hRoot, const CString& subKey, LPCTSTR szExePath)
+{
+	CString openKey = subKey + _T("\\shell\\open\\command");
+	HKEY hOpen = NULL;
+	if (RegOpenKeyEx(hRoot, openKey, 0, KEY_READ | KEY_WRITE, &hOpen) != ERROR_SUCCESS)
+		return;
+	CString cur;
+	if (!RenderRegReadDefaultString(hOpen, cur) || !RenderCmdReferencesOurPlayer(cur)) {
+		RegCloseKey(hOpen);
+		return;
+	}
+	CString strCommand;
+	strCommand.Format(_T("\"%s\" \"%%1\""), szExePath);
+	RegSetValueEx(hOpen, NULL, 0, REG_SZ, (const BYTE*)(LPCTSTR)strCommand,
+		(DWORD)((strCommand.GetLength() + 1) * sizeof(TCHAR)));
+	RegCloseKey(hOpen);
+
+	CString iconKey = subKey + _T("\\DefaultIcon");
+	HKEY hIcon = NULL;
+	if (RegCreateKeyEx(hRoot, iconKey, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hIcon, NULL) == ERROR_SUCCESS) {
+		CString strIcon;
+		strIcon.Format(_T("%s,0"), szExePath);
+		RegSetValueEx(hIcon, NULL, 0, REG_SZ, (const BYTE*)(LPCTSTR)strIcon,
+			(DWORD)((strIcon.GetLength() + 1) * sizeof(TCHAR)));
+		RegCloseKey(hIcon);
+	}
+}
+
+static void RenderMigrateLegacyFileAssociations(LPCTSTR szExePath, LPCTSTR pszNewProgID, const TCHAR* const* extensions, int extCount)
+{
+	HKEY hClasses = NULL;
+	if (RegOpenKeyEx(HKEY_CURRENT_USER, _T("Software\\Classes"), 0, KEY_READ, &hClasses) == ERROR_SUCCESS) {
+		for (DWORD idx = 0;; ++idx) {
+			TCHAR name[256];
+			DWORD nameLen = _countof(name);
+			FILETIME ft;
+			if (RegEnumKeyEx(hClasses, idx, name, &nameLen, NULL, NULL, NULL, &ft) != ERROR_SUCCESS)
+				break;
+			CString sub(name);
+			if (sub.Find(_T("oggYSEDbgm")) < 0)
+				continue;
+			RenderUpdateProgIdOpenCommand(hClasses, sub, szExePath);
+		}
+		RegCloseKey(hClasses);
+	}
+
+	for (int i = 0; i < extCount; ++i) {
+		CString extKey = CString(_T("Software\\Classes\\")) + extensions[i];
+		TCHAR progid[512] = {};
+		DWORD cb = sizeof(progid);
+		if (RegGetValue(HKEY_CURRENT_USER, extKey, NULL, RRF_RT_REG_SZ, NULL, progid, &cb) != ERROR_SUCCESS)
+			continue;
+
+		CString pid(progid);
+		CString cmdKey = CString(_T("Software\\Classes\\")) + pid + _T("\\shell\\open\\command");
+		TCHAR cmdBuf[1024] = {};
+		cb = sizeof(cmdBuf);
+		BOOL hadOurCmd = FALSE;
+		if (RegGetValue(HKEY_CURRENT_USER, cmdKey, NULL, RRF_RT_REG_SZ, NULL, cmdBuf, &cb) == ERROR_SUCCESS
+			&& RenderCmdReferencesOurPlayer(cmdBuf))
+		{
+			hadOurCmd = TRUE;
+			CString strCommand;
+			strCommand.Format(_T("\"%s\" \"%%1\""), szExePath);
+			HKEY hCmd = NULL;
+			if (RegCreateKeyEx(HKEY_CURRENT_USER, cmdKey, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hCmd, NULL) == ERROR_SUCCESS) {
+				RegSetValueEx(hCmd, NULL, 0, REG_SZ, (const BYTE*)(LPCTSTR)strCommand,
+					(DWORD)((strCommand.GetLength() + 1) * sizeof(TCHAR)));
+				RegCloseKey(hCmd);
+			}
+		}
+
+		if (hadOurCmd && (pid.Find(_T("oggYSEDbgm")) >= 0 || _tcsicmp(pid, pszNewProgID) == 0)) {
+			RegSetKeyValue(HKEY_CURRENT_USER, extKey, NULL, REG_SZ, pszNewProgID,
+				(DWORD)((_tcslen(pszNewProgID) + 1) * sizeof(TCHAR)));
+		}
+	}
+}
+
 
 BOOL CRender::MySetFileType(LPCTSTR lpExt, LPCTSTR lpDocName, LPCTSTR lpDocType, LPCTSTR lpPath, LPCTSTR lpPath1)
 {
@@ -1084,6 +1187,11 @@ void CRender::OnBnClickedCancel4()
 	s += "oggYSEDbgm_uni.exe\" \"%1\"";
 	ss = karento2;
 	ss += "oggYSEDbgm_uni.exe";
+	const TCHAR* legacyExt[] = {
+		_T(".mp3"), _T(".mp2"), _T(".mp1"), _T(".rmp"), _T(".flac"), _T(".m4a"), _T(".aac"),
+		_T(".avi"), _T(".mp4"), _T(".mkv"), _T(".wmv"), _T(".mpg")
+	};
+	RenderMigrateLegacyFileAssociations(ss, _T("falcombgm.mediaplayer"), legacyExt, _countof(legacyExt));
 	MySetFileType(_T(".mp3"), _T("oggYSEDbgm_uni.exe.mp3"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
 	MySetFileType(_T(".mp2"), _T("oggYSEDbgm_uni.exe.mp2"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
 	MySetFileType(_T(".mp1"), _T("oggYSEDbgm_uni.exe.mp1"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
@@ -1482,6 +1590,8 @@ void CRender::OnBnClickedCancel5()
 		_T(".ogg"), _T(".flac"), _T(".m4a"), _T(".aac"),
 		_T(".dsf"), _T(".dff"), _T(".mp4"), _T(".mkv"), _T(".avi")
 	};
+
+	RenderMigrateLegacyFileAssociations(szExePath, strProgID, extensions, _countof(extensions));
 
 	HKEY hKey;
 	LONG result;

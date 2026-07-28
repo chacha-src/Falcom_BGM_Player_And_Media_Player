@@ -28,6 +28,8 @@ int flacmode = 0;
 #include "CPianoRoll.h"
 #include "CPianoRollTuneDlg.h"
 #include "CAnalyzerDlg.h"
+#include "CProToolsDlg.h"
+#include "TranscodeExport.h"
 #include "CPromptEngine.h"
 #include "CMediaPlayerDlg.h"
 #include "FileTagInfo.h"
@@ -84,6 +86,10 @@ int g_kpiSourceBitsPerSample = 16;
 #include "OSVersion.h"
 #include "UpdateCheck.h"
 #include "SongParams.h"
+#include "ProAudio.h"
+#include "ProXfadeDual.h"
+#include "PlaySlot.h"
+#include "XfDebugLog.h"
 #include "codec/neaacdec.h"
 #include "m4a.h"
 #include "flac.h"
@@ -447,6 +453,8 @@ static inline int ActiveDecodeMode()
 LPDIRECTSOUND8 m_ds;
 LPDIRECTSOUNDBUFFER m_dsb1 = NULL;
 LPDIRECTSOUNDBUFFER8 m_dsb = NULL;
+LPDIRECTSOUNDBUFFER m_dsbXfade1 = NULL;
+LPDIRECTSOUNDBUFFER8 m_dsbXfade = NULL;
 LPDIRECTSOUND3DBUFFER m_dsb3d = NULL;
 
 LPDIRECTSOUNDBUFFER m_p;
@@ -1244,6 +1252,8 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 
 	ON_MESSAGE(WM_APP + 1, dp1)
 	ON_MESSAGE(WM_APP + 2, dp2)
+	ON_MESSAGE(WM_OGG_XFADE_PREFETCH, &COggDlg::OnXfadePrefetch)
+	ON_MESSAGE(WM_OGG_XFADE_PROMOTE, &COggDlg::OnXfadePromote)
 	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
 	ON_MESSAGE(WM_SPEANA_TICK, &COggDlg::OnSpeanaTick)
 	ON_MESSAGE(WM_ENDPOINT_VOLUME, &COggDlg::OnEndpointVolume)
@@ -1267,6 +1277,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_MP_ENTER_FALCOM, &COggDlg::OnEnterFalcomMsg)
 	ON_MESSAGE(WM_APP_SONGPARAM_RESTORE, &COggDlg::OnSongParamRestore)
 	ON_MESSAGE(WM_APP_SONGPARAM_MARKS, &COggDlg::OnSongParamMarks)
+	ON_MESSAGE(WM_APP_PROAUDIO_CUESEEK, &COggDlg::OnProAudioCueSeek)
 	ON_WM_WINDOWPOSCHANGING()
 	ON_BN_CLICKED(IDC_BUTTON58, &COggDlg::OnBnmp3jake)
 	ON_WM_DESTROY()
@@ -1711,6 +1722,10 @@ void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
 
 static volatile LONG s_restartMsgQueued = 0;
 static volatile LONG s_restartWanted = 0;
+// 二重DS昇格の soft play() 実行中。この間の Restart 再キューは頭出しデグレの原因なので捨てる。
+static volatile LONG s_xfadeSoftPlay = 0;
+// Promote で確定したスキップ。atomic が消えても play() で頭出ししない。
+static volatile LONG s_xfadeStickySkipFrames = 0;
 
 // WM_APP+2(再演奏)を 1 件にまとめる。リストで曲を連打しても stop/play が直列に
 // 何十回も走らないようにする(キュー溜めによる UI 固まり対策)。
@@ -1721,6 +1736,9 @@ void RequestPlaybackRestart(HWND hwnd)
 			hwnd = og->GetSafeHwnd();
 	}
 	if (!hwnd || !::IsWindow(hwnd))
+		return;
+	// soft play() 実行中の重複だけ捨てる。keep 中は OnXfadePromote からの正規 Restart を通す。
+	if (InterlockedCompareExchange(&s_xfadeSoftPlay, 0, 0) != 0)
 		return;
 	InterlockedExchange(&s_restartWanted, 1);
 	if (InterlockedCompareExchange(&s_restartMsgQueued, 1, 0) == 0)
@@ -2780,11 +2798,14 @@ __int64 wl; // 書き出し累積バイト（G:合計時間）。2GB超WAV(RF64)
 __int64 playb;
 // 曲終端のジャスト検出用（DirectSound 再生カーソル基準）。すべて「DS バッファへ書き込んだ総バイト数」の単位。
 //   g_dsWrittenBytes  : play() 開始以降に DS バッファへ書き込んだ累積バイト数（単調増加）
-//   g_endWrittenBytes : 0=未終端 / >0=実音声が終わる絶対書込みバイト位置（EOF 検出時に確定）
+//   g_endWrittenBytes : 0=未終端 / >0=実音声が終わる絶対書込みバイト位置
+//                       (クロスフェード時は総長−xf ms を曲の途中で先行確定。EOF 待ちだと再生が既に過ぎて無効)
+//   g_expectedDsBytes : この曲の想定 DS 総バイト(0=不明)。クロスフェード早期終端用
 //   g_outBytesPerFrame: 出力 1 フレームのバイト数（短フェード尺の計算用に UI 側から共有）
 __int64 g_dsWrittenBytes = 0;
 __int64 g_endWrittenBytes = 0;
 __int64 g_heardBytes = 0;       // 実際に再生カーソルが消化した累積バイト数（DS スレッドが毎サイクル更新）
+__int64 g_expectedDsBytes = 0;
 int g_outBytesPerFrame = 4;
 int ru2 = 0, ru;
 int lo, loc, endf, ps = 0, locs;
@@ -3058,6 +3079,7 @@ BOOL COggDlg::OnInitDialog()
 	aa1_ = 0.0;
 	hDLLk = NULL;
 	mp3_.mp3init();
+	PlaySlot_InitAll();
 
 
 	m_tempo_sl.SetMode(1);
@@ -4020,6 +4042,102 @@ static BOOL ApplyTailFadeOutWavFile(const CString& path, int fadeSec)
 	return TRUE;
 }
 
+static BOOL ApplyExportLimiterWavFile(const CString& path)
+{
+	if (!savedata.pro_export_limit) return TRUE;
+	CFile f;
+	if (!f.Open(path, CFile::modeReadWrite | CFile::shareExclusive, NULL))
+		return FALSE;
+	WavPcmStreamInfo info = {};
+	if (!WavExportReadPcmStreamInfo(f, info) || info.ch < 1) {
+		f.Close();
+		return FALSE;
+	}
+	float ceiling = (float)savedata.pro_export_ceiling / 100.0f;
+	if (ceiling < 0.5f) ceiling = 0.5f;
+	if (ceiling > 1.0f) ceiling = 1.0f;
+	ProAudio_ExportLimitReset();
+
+	const int bpf = info.blockAlign;
+	const int ch = info.ch;
+	const int bits = info.bits;
+	const int bps = bits / 8;
+	if (bpf <= 0 || bps <= 0) { f.Close(); return FALSE; }
+
+	const int chunkFrames = 4096;
+	std::vector<BYTE> buf((size_t)chunkFrames * bpf);
+	float L[4096], R[4096];
+	for (__int64 fi = 0; fi < info.totalFrames; ) {
+		int n = chunkFrames;
+		if ((__int64)n > info.totalFrames - fi) n = (int)(info.totalFrames - fi);
+		const __int64 pos = info.dataOffset + fi * bpf;
+		f.Seek(pos, CFile::begin);
+		UINT got = f.Read(buf.data(), n * bpf);
+		int frames = (int)(got / bpf);
+		if (frames <= 0) break;
+		for (int i = 0; i < frames; ++i) {
+			const BYTE* p = buf.data() + i * bpf;
+			if (bits == 16) {
+				const short* s = (const short*)p;
+				L[i] = s[0] / 32768.0f;
+				R[i] = (ch > 1) ? s[1] / 32768.0f : L[i];
+			}
+			else if (bits == 24) {
+				int v0 = p[0] | (p[1] << 8) | ((signed char)p[2] << 16);
+				L[i] = v0 / 8388608.0f;
+				if (ch > 1) {
+					int v1 = p[3] | (p[4] << 8) | ((signed char)p[5] << 16);
+					R[i] = v1 / 8388608.0f;
+				}
+				else R[i] = L[i];
+			}
+			else if (bits == 32) {
+				const int* s = (const int*)p;
+				L[i] = s[0] / 2147483648.0f;
+				R[i] = (ch > 1) ? s[1] / 2147483648.0f : L[i];
+			}
+			else {
+				L[i] = (p[0] - 128) / 128.0f;
+				R[i] = (ch > 1) ? (p[1] - 128) / 128.0f : L[i];
+			}
+		}
+		ProAudio_ExportLimitProcess(L, R, frames, info.hz, ceiling, savedata.pro_export_tp);
+		for (int i = 0; i < frames; ++i) {
+			BYTE* p = buf.data() + i * bpf;
+			float l = L[i], r = R[i];
+			if (l > 1.f) l = 1.f; if (l < -1.f) l = -1.f;
+			if (r > 1.f) r = 1.f; if (r < -1.f) r = -1.f;
+			if (bits == 16) {
+				short* s = (short*)p;
+				s[0] = (short)(l * 32767.0f);
+				if (ch > 1) s[1] = (short)(r * 32767.0f);
+			}
+			else if (bits == 24) {
+				int v = (int)(l * 8388607.0f);
+				p[0] = (BYTE)(v & 0xFF); p[1] = (BYTE)((v >> 8) & 0xFF); p[2] = (BYTE)((v >> 16) & 0xFF);
+				if (ch > 1) {
+					v = (int)(r * 8388607.0f);
+					p[3] = (BYTE)(v & 0xFF); p[4] = (BYTE)((v >> 8) & 0xFF); p[5] = (BYTE)((v >> 16) & 0xFF);
+				}
+			}
+			else if (bits == 32) {
+				int* s = (int*)p;
+				s[0] = (int)(l * 2147483647.0f);
+				if (ch > 1) s[1] = (int)(r * 2147483647.0f);
+			}
+			else {
+				p[0] = (BYTE)(l * 127.f + 128.f);
+				if (ch > 1) p[1] = (BYTE)(r * 127.f + 128.f);
+			}
+		}
+		f.Seek(pos, CFile::begin);
+		f.Write(buf.data(), frames * bpf);
+		fi += frames;
+	}
+	f.Close();
+	return TRUE;
+}
+
 static bool WavExportFrameIsSilent(const BYTE* frame, int blockAlign, int bits, int threshold)
 {
 	if (!frame || blockAlign <= 0) return true;
@@ -4463,7 +4581,9 @@ int rrr;
 int flg0 = 0;
 int gameon = 1;
 extern CImageBase* playbase;
-extern RubberBand::RubberBandStretcher* g_rubberBandStretcher;
+extern RubberBand::RubberBandStretcher* g_rubberBandStretcher[2];
+void RubberBand_DestroyBank(int bank);
+void RubberBand_DestroyAll();
 BYTE bufkpi[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3];
 BYTE bufkpi_[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3];
 BYTE bufkpi2[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3];
@@ -6939,6 +7059,34 @@ void COggDlg::play()
 	s_inPlay = true;
 	struct ClearInPlay { ~ClearInPlay() { s_inPlay = false; } } _clearInPlay;
 
+	// DoEvent で keep/skip が消されても昇格を完遂できるよう、入口でスナップショット
+	const bool xfadeKeepSnap = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
+	const int xfadeSkipSnap = (int)InterlockedCompareExchange(&g_xfadeSkipFrames, 0, 0);
+
+	// 昇格 soft play 中は二重 Restart を抑止。終了時に wanted も捨てる。
+	struct XfadeSoftPlayGuard {
+		bool on;
+		XfadeSoftPlayGuard(bool v) : on(v) {
+			if (on) InterlockedExchange(&s_xfadeSoftPlay, 1);
+		}
+		~XfadeSoftPlayGuard() {
+			if (on) {
+				InterlockedExchange(&s_xfadeSoftPlay, 0);
+				InterlockedExchange(&s_restartWanted, 0);
+			}
+		}
+	} _xfadeSoftPlay(xfadeKeepSnap);
+
+	// 二重DS昇格: Open 中の無音を防ぐため、最初に B を再生し直す
+	if (xfadeKeepSnap && m_dsb) {
+		LONG v = (savedata.dsvol - 1) * 10;
+		if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
+		if (v > 0) v = 0;
+		if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
+		m_dsb->SetVolume(v);
+		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+	}
+
 	// 共有状態を触る前に旧再生を止める（Get() 後でも g_openDecoderMode で正しい形式を閉じる）
 	KillTimer(1250);
 	KillTimer(9000);
@@ -8141,8 +8289,19 @@ void COggDlg::play()
 	}
 	} // mode != 30 (ys8/ysc/零軌 loop)
 	//-------------------------------------------------------------------
-	if (m_dsb != NULL) m_dsb->Release();
-	m_dsb = NULL;
+	// 二重DS昇格中は B を破棄しない（ここで Release すると切替無音＋曲2頭出しになる）
+	if (!xfadeKeepSnap) {
+		if (m_dsb != NULL) m_dsb->Release();
+		m_dsb = NULL;
+	}
+	else if (m_dsb) {
+		LONG v = (savedata.dsvol - 1) * 10;
+		if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
+		if (v > 0) v = 0;
+		if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
+		m_dsb->SetVolume(v);
+		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+	}
 	//	char bufdmy[10000];
 	ZeroMemory(bufwav3, sizeof(bufwav3));
 	DWORD  dwDataLen = WAVDALen / OUTPUT_BUFFER_NUM;
@@ -9741,7 +9900,11 @@ void COggDlg::play()
 		}
 	}
 	// wavExportPath時はエクスポートパス内でcc.Openするためここではスキップ
-	if (m_c2.GetCheck() == 1 && wavExportPath.GetLength() == 0)
+	// 連続クロスフェード中は song1 で開いたファイルへ追記（閉じない）
+	// ヘッダ形式は ConfigurePlaybackOutputAndUpscaler 後に確定して書き込む
+	bool ccOpenedThisPlay = false;
+	if (m_c2.GetCheck() == 1 && wavExportPath.GetLength() == 0
+		&& !(cc1 == 1 && InterlockedCompareExchange(&g_xfadeHoldCcFile, 0, 0) != 0))
 	{
 		cc1 = 1;
 		CString outPath = BuildWavExportOutputPath(filen);
@@ -9751,14 +9914,27 @@ void COggDlg::play()
 			endflg = 0;
 			return;
 		}
-		// 2GB超対応(RF64)ヘッダ。確定はstop()/stop1()のFinalizeWavStreamHeaderRF64で行う。
-		WriteWavStreamHeaderRF64(cc);
+		ccOpenedThisPlay = true;
 	}
 	if (mode == 30) { wavbit_sample_Hz = 48000; wavsam_depth = 16; wavchannel = 2; }
 	NormalizePlaybackWaveFormat();
 
 	ConfigurePlaybackOutputAndUpscaler();
 	g_audioUpscaler.Reset();
+
+	if (ccOpenedThisPlay && cc1 == 1) {
+		wh.WaveFmt.wf.wFormatTag = WAVE_FORMAT_PCM;
+		wh.WaveFmt.wf.nChannels = (WORD)((g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : wavchannel);
+		wh.WaveFmt.wf.nSamplesPerSec = (DWORD)((g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : wavbit_sample_Hz);
+		wh.WaveFmt.wBitsPerSample = (WORD)((g_ds_pcm_bits == 16 || g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32)
+			? g_ds_pcm_bits : abs(wavsam_depth));
+		if (!(wh.WaveFmt.wBitsPerSample == 16 || wh.WaveFmt.wBitsPerSample == 24 || wh.WaveFmt.wBitsPerSample == 32))
+			wh.WaveFmt.wBitsPerSample = 16;
+		wh.WaveFmt.wf.nBlockAlign = (WORD)(wh.WaveFmt.wf.nChannels * wh.WaveFmt.wBitsPerSample / 8);
+		wh.WaveFmt.wf.nAvgBytesPerSec = wh.WaveFmt.wf.nSamplesPerSec * wh.WaveFmt.wf.nBlockAlign;
+		WriteWavStreamHeaderRF64(cc);
+		PlaybackCcLockFormat((int)wh.WaveFmt.wf.nSamplesPerSec, (int)wh.WaveFmt.wf.nChannels, (int)wh.WaveFmt.wBitsPerSample);
+	}
 
 	int dsTryRate = g_ds_pcm_rate;
 	static const GUID GUID_SUBTYPE_PCM = { 0x00000001, 0x0000, 0x0010,{ 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 } };
@@ -9830,7 +10006,7 @@ void COggDlg::play()
 	// WAV出力専用: DirectSoundをスキップしHandleNotifications_exportへ
 	if (wavExportPath.GetLength() > 0) {
 		// 2回目以降のため前回のccを確実に閉じる
-		if (cc1 == 1) { cc.Close(); cc1 = 0; }
+		if (cc1 == 1) { cc.Close(); cc1 = 0; PlaybackCcClearFormat(); }
 		// エクスポート用にcc.Openとヘッダ書き込みをここで実行（8131に依存しない）
 		cc1 = 1;
 		wl = 0;
@@ -9863,6 +10039,7 @@ void COggDlg::play()
 			FinalizeWavStreamHeaderRF64(cc);
 			cc.Close();
 			cc1 = 0;
+			PlaybackCcClearFormat();
 		}
 		stop1();
 		m_saisai.EnableWindow(TRUE);
@@ -9870,6 +10047,10 @@ void COggDlg::play()
 		return;
 	}
 	//if (pAudioClient == NULL) {
+	// keep は入口スナップショット。Exchange で消えても昇格経路を維持する。
+	// ※ keep フラグ自体は BeginPlayback 後まで残す（Open 中の誤 Stop/timer9000 防止）
+	const bool xfadeReuseDsb = xfadeKeepSnap && (m_dsb != NULL);
+	if (!xfadeReuseDsb) {
 	DSBUFFERDESC dsbd;
 	flg0 = 0;
 	for (;;) {
@@ -10183,6 +10364,7 @@ void COggDlg::play()
 			break;
 		}
 	}
+	} // !xfadeReuseDsb
 	//}
 	//else {
 	//		if (wavchannel > 2)
@@ -10224,7 +10406,235 @@ void COggDlg::play()
 	}
 
 	int len1, len2, len3;
-	if (true) {
+	g_outBytesPerFrame = PcmOutBytesPerFrame();
+	// クロスフェード早期終端用: 曲長→想定 DS バイト（実際の DS 出力フォーマット基準）。
+	g_expectedDsBytes = 0;
+	if (wavbit_sample_Hz > 0 && oggsize > 0) {
+		double sec = 0.0;
+		if (mode == -10) {
+			sec = (double)oggsize / (double)wavbit_sample_Hz;
+		}
+		else {
+			double wavv[] = { 0, 1.0, 2.0, 3.0 / 0.75, 4.0 / 0.75, 5.0 / 0.75, 6.0 / 0.75 };
+			int ch = wavchannel;
+			if (ch < 1) ch = 1;
+			if (ch > 6) ch = 6;
+			double depth = (wavsam_depth > 0) ? (double)wavsam_depth / 16.0 : 1.0;
+			if (depth < 0.25) depth = 0.25;
+			sec = (double)oggsize / ((double)wavbit_sample_Hz * 2.0 * wavv[ch] * depth);
+			if (mode == -9 && wavchannel > 2)
+				sec *= (double)wavchannel / 2.0;
+		}
+		const int dsRate = (g_ds_pcm_rate > 0) ? g_ds_pcm_rate : wavbit_sample_Hz;
+		const int dsCh = (g_ds_pcm_ch > 0) ? g_ds_pcm_ch : ((wavchannel > 0) ? wavchannel : 2);
+		const int dsBits = (g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16;
+		const int dsBpf = dsCh * (dsBits / 8);
+		if (sec > 0.05 && sec < 86400.0 && dsRate > 0 && dsBpf > 0) {
+			g_expectedDsBytes = (__int64)(sec * (double)dsRate + 0.5) * (__int64)dsBpf;
+		}
+	}
+	if (xfadeReuseDsb && m_dsb) {
+		// 二重DS昇格: バッファBを維持し、先読み分をシークしてフィード継続
+		// B の実フォーマットに合わせて g_ds_pcm_* を同期（曲1のまま書くと間・ノイズの原因）
+		{
+			WAVEFORMATEX bfx;
+			ZeroMemory(&bfx, sizeof(bfx));
+			DWORD bfxSz = 0;
+			if (SUCCEEDED(m_dsb->GetFormat(&bfx, sizeof(bfx), &bfxSz)) && bfx.nSamplesPerSec > 0) {
+				g_ds_pcm_rate = (int)bfx.nSamplesPerSec;
+				g_ds_pcm_ch = (int)((bfx.nChannels > 0) ? bfx.nChannels : 2);
+				g_ds_pcm_bits = (int)((bfx.wBitsPerSample >= 8) ? bfx.wBitsPerSample : 16);
+			}
+			int srcBits = abs(wavsam_depth);
+			if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
+				srcBits = 16;
+			g_audioUpscaler.Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
+			g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
+			g_audioUpscaler.Reset();
+		}
+		// 先読み長だけの短い B を主リングにすると ~6s でバッファ外書き→クラッシュ
+		{
+			extern ULONG g_ds_buffer_bytes;
+			DSBCAPS caps;
+			ZeroMemory(&caps, sizeof(caps));
+			caps.dwSize = sizeof(caps);
+			const ULONG need = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
+			if (SUCCEEDED(m_dsb->GetCaps(&caps)) && caps.dwBufferBytes + 1024 < need && m_ds) {
+				WAVEFORMATEX wfx;
+				ZeroMemory(&wfx, sizeof(wfx));
+				DWORD wsz = 0;
+				m_dsb->GetFormat(&wfx, sizeof(wfx), &wsz);
+				ULONG pcKeep = 0, wcKeep = 0;
+				m_dsb->GetCurrentPosition(&pcKeep, &wcKeep);
+				LONG vol = (savedata.dsvol - 1) * 10;
+				DSBUFFERDESC dsbd;
+				ZeroMemory(&dsbd, sizeof(dsbd));
+				dsbd.dwSize = sizeof(dsbd);
+				dsbd.dwFlags = DSBCAPS_CTRLPOSITIONNOTIFY | DSBCAPS_LOCSOFTWARE | DSBCAPS_GLOBALFOCUS
+					| DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_CTRLVOLUME;
+				dsbd.dwBufferBytes = need;
+				dsbd.lpwfxFormat = &wfx;
+				LPDIRECTSOUNDBUFFER nb1 = NULL;
+				if (SUCCEEDED(m_ds->CreateSoundBuffer(&dsbd, &nb1, NULL)) && nb1) {
+					LPDIRECTSOUNDBUFFER8 nb8 = NULL;
+					if (SUCCEEDED(nb1->QueryInterface(IID_IDirectSoundBuffer8, (void**)&nb8)) && nb8) {
+						LPVOID op1 = NULL, op2 = NULL, np1 = NULL, np2 = NULL;
+						DWORD ol1 = 0, ol2 = 0, nl1 = 0, nl2 = 0;
+						const ULONG oldBytes = caps.dwBufferBytes;
+						if (SUCCEEDED(m_dsb->Lock(0, oldBytes, &op1, &ol1, &op2, &ol2, 0))
+							&& SUCCEEDED(nb8->Lock(0, need, &np1, &nl1, &np2, &nl2, 0))) {
+							// 旧Bの内容を新リングへタイル（無音ゼロ埋めにしない）
+							BYTE* srcA = (BYTE*)op1;
+							DWORD srcAN = ol1;
+							BYTE* srcB = (BYTE*)op2;
+							DWORD srcBN = ol2;
+							auto put = [&](BYTE* dst, DWORD dstLen) {
+								DWORD off = 0;
+								while (off < dstLen) {
+									if (srcAN > 0) {
+										DWORD n = srcAN;
+										if (n > dstLen - off) n = dstLen - off;
+										memcpy(dst + off, srcA, n);
+										off += n;
+										continue;
+									}
+									if (srcBN > 0) {
+										DWORD n = srcBN;
+										if (n > dstLen - off) n = dstLen - off;
+										memcpy(dst + off, srcB, n);
+										off += n;
+										continue;
+									}
+									break;
+								}
+								if (off < dstLen && srcAN > 0) {
+									while (off < dstLen) {
+										DWORD n = srcAN;
+										if (n > dstLen - off) n = dstLen - off;
+										memcpy(dst + off, srcA, n);
+										off += n;
+									}
+								}
+							};
+							if (np1 && nl1) put((BYTE*)np1, nl1);
+							if (np2 && nl2) put((BYTE*)np2, nl2);
+							nb8->Unlock(np1, nl1, np2, nl2);
+							m_dsb->Unlock(op1, ol1, op2, ol2);
+						}
+						else {
+							if (op1 || op2) m_dsb->Unlock(op1, ol1, op2, ol2);
+							if (np1 || np2) nb8->Unlock(np1, nl1, np2, nl2);
+						}
+						// 先に新Bを鳴らしてから旧を止める（載せ替え瞬間の無音を避ける）
+						nb8->SetCurrentPosition(pcKeep % need);
+						nb8->SetVolume(vol);
+						nb8->Play(0, 0, DSBPLAY_LOOPING);
+						LPDIRECTSOUNDBUFFER8 old8 = m_dsb;
+						LPDIRECTSOUNDBUFFER old1 = m_dsb1;
+						m_dsb = nb8;
+						m_dsb1 = nb1;
+						if (old8) { old8->Stop(); old8->Release(); }
+						if (old1) { old1->Release(); }
+					}
+					else {
+						nb1->Release();
+					}
+				}
+			}
+		}
+		extern ULONG oldw;
+		// Promote 時に渡した skip を優先（CurrentSkipFrames は Consume 後に 0 になり得る）
+		int skipF = (int)InterlockedExchange(&g_xfadeSkipFrames, 0);
+		if (skipF <= 0)
+			skipF = xfadeSkipSnap;
+		if (skipF <= 0)
+			skipF = (int)InterlockedExchange(&s_xfadeStickySkipFrames, 0);
+		else
+			InterlockedExchange(&s_xfadeStickySkipFrames, 0);
+		if (skipF <= 0)
+			skipF = ProXfade_CurrentSkipFrames();
+		if (skipF < 1) {
+			// 最後の手段: xfade ms × 出力レート（頭出し防止）
+			const int rate = (g_ds_pcm_rate > 0) ? g_ds_pcm_rate : ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
+			const int ms = ProAudio_XfadeMs();
+			skipF = (int)((__int64)rate * (__int64)((ms > 0) ? ms : 2000) / 1000);
+		}
+		if (skipF < 1) skipF = 1;
+		InterlockedExchange(&g_xfadeSkipMs, 0);
+		playb = skipF;
+		g_oggPcmDecodePos = playb;
+		if (mode == -10) {
+			if (savedata.mp3orig)
+				mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
+			else
+				mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
+		}
+		else if (mode == -8 && kmp)
+			flac_.SetPosition(kmp, playb);
+		else if (mode == -9 && kmp)
+			m4a_.SetPosition(kmp, playb);
+		else if (mode == -1)
+			ov_pcm_seek_lap(&vf, (ogg_int64_t)playb);
+		else if (mode == -6) {
+			// Opus: 既存のシーク経路があればここに足す。無ければ playb のみ立ててフィード継続。
+		}
+		else if (mode == 999) {
+			if (wav999_use_adbuf)
+				seekadpcm((int)playb);
+			else
+				wav_.Seek(playb / (wavchannel * (wavsam_depth / 8)));
+		}
+		// スキップ後PCMでリングを先頭から敷き直し → 再生位置0。
+		// （タイル導入のまま継続するとループで「また頭から」に聞こえる）
+		{
+			extern ULONG g_ds_buffer_bytes;
+			if (g_openDecoderMode == INT_MIN)
+				g_openDecoderMode = mode;
+			const ULONG ring = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
+			const int bpf = (g_ds_pcm_ch > 0 && g_ds_pcm_bits >= 8) ? (g_ds_pcm_ch * (g_ds_pcm_bits / 8)) : 4;
+			int fill = (g_ds_pcm_rate > 0 && bpf > 0) ? (g_ds_pcm_rate * bpf / 2) : (int)(ring / 2);
+			if (fill < bpf * 64) fill = bpf * 64;
+			if (fill > (int)(ring / 2)) fill = (int)(ring / 2);
+			if (fill < 0) fill = 0;
+			m_dsb->Stop();
+			oldw = 0;
+			m_dsb->SetCurrentPosition(0);
+			if (fill > 0 && ActiveDecodeMode() != INT_MIN) {
+				ZeroMemory(bufwav3, (size_t)fill + 64);
+				DispatchPlaywavFill(bufwav3, 0, fill, 0);
+				bool any = false;
+				const int checkN = (fill < 64) ? fill : 64;
+				for (int i = 0; i < checkN; ++i) {
+					if (bufwav3[i] != 0) { any = true; break; }
+				}
+				if (any) {
+					LPVOID p1 = NULL, p2 = NULL;
+					DWORD l1 = 0, l2 = 0;
+					if (SUCCEEDED(m_dsb->Lock(0, (DWORD)fill, &p1, &l1, &p2, &l2, 0))) {
+						if (p1 && l1) memcpy(p1, bufwav3, l1);
+						if (p2 && l2) memcpy(p2, bufwav3 + l1, l2);
+						m_dsb->Unlock(p1, l1, p2, l2);
+					}
+					oldw = (ULONG)fill % ring;
+					g_dsWrittenBytes = (ULONG)fill;
+				}
+			}
+			m_dsb->SetVolume((savedata.dsvol - 1) * 10);
+			m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+		}
+		g_endWrittenBytes = 0;
+		g_heardBytes = 0;
+		endflg = 0;
+		fade1 = 0;
+		playf = 1;
+		plf = 1;
+		InterlockedExchange(&g_xfadeReuseContinue, 1);
+		BeginPlaybackNotifyThread();
+		InterlockedExchange(&g_xfadeKeepDsb, 0);
+		if (m_dsbXfade) { m_dsbXfade->Stop(); m_dsbXfade->Release(); m_dsbXfade = NULL; }
+		if (m_dsbXfade1) { m_dsbXfade1->Release(); m_dsbXfade1 = NULL; }
+	}
+	else if (true) {
 		ULONG PlayCursor, WriteCursor = 0;
 		playb = 0;
 		g_oggPcmDecodePos = 0;
@@ -10360,10 +10770,12 @@ void COggDlg::play()
 		BeginPlaybackNotifyThread();
 	}
 	endflg = 0;
-	g_dsWrittenBytes = 0;
+	// 昇格再利用時は prefill で立てた書込み累積を消さない（heard 破綻→即曲末扱いの元）
+	if (!xfadeReuseDsb)
+		g_dsWrittenBytes = 0;
 	g_endWrittenBytes = 0;
 	g_heardBytes = 0;
-	g_outBytesPerFrame = PcmOutBytesPerFrame();
+	ProXfade_OnSongPlaybackStarted();
 
 	// 全ての音声形式で、タイトル/アーティスト/アルバム/曲番号をファイルのタグから補完する。
 	// ogg は従来タイトル(stitle)のみ、wav 等はプレイリスト由来のみだったため、空欄を埋める。
@@ -10379,7 +10791,7 @@ void COggDlg::play()
 	}
 
 	SetTimer(9000, 10, NULL);
-	//	::SetPriorityClass(m_thread, HIGH_PRIORITY_CLASS);
+	// 二重スロット経路では先読み PCM / 早期 Open はしない（近傍で空きスロットに本 Open）
 	endf = 0;
 	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
 	if (loop2 == 0) endf = 1;
@@ -10482,7 +10894,7 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 		localOpts.trimKeepSec = savedata.wav_export_trim_keep_sec > 0 ? savedata.wav_export_trim_keep_sec : 1;
 	}
 	// 2回目以降：初回と同じ状態へリセット（前回のエクスポートで変更されたグローバルを戻す）
-	if (cc1 == 1) { cc.Close(); cc1 = 0; }
+	if (cc1 == 1) { cc.Close(); cc1 = 0; PlaybackCcClearFormat(); }
 	wl = 0;
 	poss = poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 	playb = 0;
@@ -10495,6 +10907,14 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 	mode = modesub = pc->sub;
 	loop1 = pc->loop1;
 	loop2 = pc->loop2;
+	{
+		int oIn = -1, oOut = -1, oFade = 0;
+		ProAudio_SetCurrentSongKey(SongParams_CurrentListName(), pc->fol, pc->sub, pc->ret2);
+		ProAudio_GetLoopOverride(oIn, oOut, oFade);
+		if (oIn >= 0) loop1 = oIn;
+		if (oOut >= 0) loop2 = oOut;
+		(void)oFade;
+	}
 	ret2 = pc->ret2;
 	wavExportPath = outputPath;
 	wavExportLoopCount = loopCount;
@@ -10510,9 +10930,29 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 		const int fadeSec = localOpts.fadeSec > 0 ? localOpts.fadeSec : 15;
 		ok = ApplyTailFadeOutWavFile(outputPath, fadeSec);
 	}
+	if (ok)
+		ok = ApplyExportLimiterWavFile(outputPath);
 	wavExportPath.Empty();
 	wavExportLoopCount = 0;
 	savedata.saveloop = saveloop_bak;
+	return ok;
+}
+
+BOOL COggDlg::ExportToTranscode(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts, int format, int mp3Kbps, int flacLevel)
+{
+	if (!pc || outputPath.IsEmpty() || loopCount < 1) return FALSE;
+	wchar_t dir[MAX_PATH] = {};
+	GetTempPath(MAX_PATH, dir);
+	CString tempWav;
+	tempWav.Format(L"%sogg_tc_%u_%u.wav", dir, GetCurrentProcessId(), GetTickCount());
+	BOOL ok = ExportToWav(pc, tempWav, loopCount, opts);
+	if (ok) {
+		if (format == 1)
+			ok = EncodeWavToFlac(tempWav, outputPath, flacLevel);
+		else
+			ok = EncodeWavToMp3(tempWav, outputPath, mp3Kbps);
+	}
+	DeleteFile(tempWav);
 	return ok;
 }
 
@@ -12525,10 +12965,7 @@ BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2)
 			playb = loop1;
 			poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = loop1 * PcmOutBytesPerFrame(); poss6 = 0;
 			seekadpcm(loop1);
-			if (g_rubberBandStretcher) {
-				delete g_rubberBandStretcher;
-				g_rubberBandStretcher = NULL;
-			}
+			RubberBand_DestroyBank(0);
 			reset = TRUE;
 			readBuffwav((char*)bw + old + rrr, (int)l1 - rrr);
 		}
@@ -12548,10 +12985,7 @@ BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2)
 				playb = loop1;
 				poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = loop1 * PcmOutBytesPerFrame(); poss6 = 0;
 				seekadpcm(loop1);
-				if (g_rubberBandStretcher) {
-					delete g_rubberBandStretcher;
-					g_rubberBandStretcher = NULL;
-				}
+				RubberBand_DestroyBank(0);
 				reset = TRUE;
 				readBuffwav((char*)bw + rrr, (int)l2 - rrr);
 			}
@@ -12694,7 +13128,7 @@ int readBuffwav(char* bw, int cnt)
 	if (fade < 0.0001f) { fade = 0.0f; fadeadd = 0.0f; }
 	ApplyFadeCubedToInterleavedPcm(bw, cnt2);
 
-	if (cc1 == 1)	cc.Write(bw, cnt0);
+	PlaybackCcWrite(bw, cnt0);
 	wl += cnt0;
 
 	{
@@ -12719,10 +13153,7 @@ int seekadpcm(int pos)
 	playb = pos;
 	poss5 = lenl;
 	poss = 0;
-	if (g_rubberBandStretcher) {
-		delete g_rubberBandStretcher;
-		g_rubberBandStretcher = NULL;
-	}
+	RubberBand_DestroyBank(0);
 	return 0;
 }
 
@@ -13215,10 +13646,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			}
 			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 			cnt3 = 0;
-			if (g_rubberBandStretcher) {
-				delete g_rubberBandStretcher;
-				g_rubberBandStretcher = NULL;
-			}
+			RubberBand_DestroyBank(0);
 			reset = TRUE;
 			readkpi(bw + old + rrr, l1 - rrr);
 		}
@@ -13250,10 +13678,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				}
 				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
 				cnt3 = 0;
-				if (g_rubberBandStretcher) {
-					delete g_rubberBandStretcher;
-					g_rubberBandStretcher = NULL;
-				}
+				RubberBand_DestroyBank(0);
 				reset = TRUE;
 				readkpi(bw + rrr, (int)l2 - rrr);
 			}
@@ -13657,7 +14082,7 @@ int readkpi(BYTE* bw, int cnt)
 			}
 		}
 
-		if (cc1 == 1)	cc.Write(bw, cnt);
+		PlaybackCcWrite(bw, cnt);
 		wl += cnt;
 		lenl += cnt;
 	}
@@ -13704,10 +14129,7 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 			playb = loop1;
 			m4a_.SetPosition(og->kmp, 0);
 			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-			if (g_rubberBandStretcher) {
-				delete g_rubberBandStretcher;
-				g_rubberBandStretcher = NULL;
-			}
+			RubberBand_DestroyBank(0);
 			reset = TRUE;
 			readm4a(bw + old + rrr, l1 - rrr);
 		}
@@ -13727,10 +14149,7 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 				playb = loop1;
 				m4a_.SetPosition(og->kmp, 0);
 				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-				if (g_rubberBandStretcher) {
-					delete g_rubberBandStretcher;
-					g_rubberBandStretcher = NULL;
-				}
+				RubberBand_DestroyBank(0);
 				reset = TRUE;
 				readm4a(bw + rrr, (int)l2 - rrr);
 			}
@@ -13884,7 +14303,7 @@ int readm4a(BYTE* bw, int cnt)
 		else {
 			for (int i = 0; i < cnt / 2; i++) { c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c; }
 		}
-		if (cc1 == 1)	cc.Write(bw, cnt);
+		PlaybackCcWrite(bw, cnt);
 		wl += cnt;
 		lenl += cnt;
 	}
@@ -13916,10 +14335,7 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 				flac_.SetPosition(og->kmp, loop1);
 			::rrr = 1;  // シーク後は Render を再開（グローバル）
 			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-			if (g_rubberBandStretcher) {
-				delete g_rubberBandStretcher;
-				g_rubberBandStretcher = NULL;
-			}
+			RubberBand_DestroyBank(0);
 			reset = TRUE;
 			readflac(bw + old + rrr, l1req - rrr);
 			l1 = l1req;
@@ -13947,10 +14363,7 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 					flac_.SetPosition(og->kmp, loop1);
 				::rrr = 1;  // シーク後は Render を再開（グローバル）
 				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-				if (g_rubberBandStretcher) {
-					delete g_rubberBandStretcher;
-					g_rubberBandStretcher = NULL;
-				}
+				RubberBand_DestroyBank(0);
 				reset = TRUE;
 				readflac(bw + rrr, (int)l2req - rrr);
 				l2out = l2req;
@@ -14105,7 +14518,7 @@ int readflac(BYTE* bw, int cnt)
 		else {
 			for (int i = 0; i < lenl / 2; i++) { c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c; }
 		}
-		if (cc1 == 1)	cc.Write(bw, lenl);
+		PlaybackCcWrite(bw, lenl);
 		wl += lenl;
 		//lenl += lenl;
 		//	playb+=lenl/4;
@@ -14141,10 +14554,7 @@ int playwavopus(BYTE* bw, int old, int l1, int l2)
 			playb = loop1;
 			opus_.SetPosition(og->kmp, (DWORD)loop1);
 			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-			if (g_rubberBandStretcher) {
-				delete g_rubberBandStretcher;
-				g_rubberBandStretcher = NULL;
-			}
+			RubberBand_DestroyBank(0);
 			reset = TRUE;
 			readopus(bw + old + rrr, l1 - rrr);
 		}
@@ -14164,10 +14574,7 @@ int playwavopus(BYTE* bw, int old, int l1, int l2)
 				playb = loop1;
 				opus_.SetPosition(og->kmp, (DWORD)loop1);
 				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-				if (g_rubberBandStretcher) {
-					delete g_rubberBandStretcher;
-					g_rubberBandStretcher = NULL;
-				}
+				RubberBand_DestroyBank(0);
 				reset = TRUE;
 				readopus(bw + rrr, (int)l2 - rrr);
 			}
@@ -14207,7 +14614,7 @@ int readopus(BYTE* bw, int cnt)
 
 					int len2 = readtempo(bufkpi, r);
 					cnt4 = r;
-					if (cc1 == 1)	cc.Write(outputRawBytesData.data(), len2);
+					PlaybackCcWrite(outputRawBytesData.data(), len2);
 					wl += len2;
 
 					if (len2 > 0) {
@@ -14284,7 +14691,7 @@ int readopus(BYTE* bw, int cnt)
 			for (int i = 0; i < cnt / 2; i++) { c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c; }
 		}
 		//		if ((UINT)wl < (UINT)0x7fff0000) {
-		//			if (cc1 == 1)	cc.Write(bw, cnt);
+		//			PlaybackCcWrite(bw, cnt);
 		//			wl += cnt;
 		//		}
 		lenl += cnt;
@@ -14332,10 +14739,7 @@ int playwavdsd(BYTE* bw, int old, int l1, int l2)
 			playb = loop1;
 			dsd_.kpiSetPosition(og->kmp, 0);
 			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-			if (g_rubberBandStretcher) {
-				delete g_rubberBandStretcher;
-				g_rubberBandStretcher = NULL;
-			}
+			RubberBand_DestroyBank(0);
 			reset = TRUE;
 			readdsd(bw + old + rrr, l1 - rrr);
 		}
@@ -14358,10 +14762,7 @@ int playwavdsd(BYTE* bw, int old, int l1, int l2)
 				playb = loop1;
 				dsd_.kpiSetPosition(og->kmp, 0);
 				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-				if (g_rubberBandStretcher) {
-					delete g_rubberBandStretcher;
-					g_rubberBandStretcher = NULL;
-				}
+				RubberBand_DestroyBank(0);
 				reset = TRUE;
 				readdsd(bw + rrr, (int)l2 - rrr);
 			}
@@ -14453,7 +14854,7 @@ int readdsd(BYTE* bw, int cnt)
 	og->FeedPianoRoll(bw, cnt2);
 	reset = FALSE;
 
-	if (cc1 == 1)	cc.Write(bw, cnt2);
+	PlaybackCcWrite(bw, cnt2);
 	wl += cnt2;
 
 
@@ -14497,10 +14898,7 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 			loopcnt++;
 			playb = loop1;
 			mp3_.seek(10, wavchannel); poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-			if (g_rubberBandStretcher) {
-				delete g_rubberBandStretcher;
-				g_rubberBandStretcher = NULL;
-			}
+			RubberBand_DestroyBank(0);
 			ReadMp3Accumulate(bw + old + rrr, l1 - rrr);
 		}
 	}
@@ -14518,10 +14916,7 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 				loopcnt++;
 				playb = loop1;
 				mp3_.seek(10, wavchannel); poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-				if (g_rubberBandStretcher) {
-					delete g_rubberBandStretcher;
-					g_rubberBandStretcher = NULL;
-				}
+				RubberBand_DestroyBank(0);
 				ReadMp3Accumulate(bw + rrr2, (int)l2 - rrr2);
 			}
 		}
@@ -14544,10 +14939,7 @@ int playwavwav(BYTE* bw, int old, int l1, int l2)
 			playb = loop1;
 			wav_.Seek(loop1);
 			poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-			if (g_rubberBandStretcher) {
-				delete g_rubberBandStretcher;
-				g_rubberBandStretcher = NULL;
-			}
+			RubberBand_DestroyBank(0);
 			reset = TRUE;
 			readwav(bw + old + rrr, l1 - rrr);
 		}
@@ -14565,10 +14957,7 @@ int playwavwav(BYTE* bw, int old, int l1, int l2)
 				playb = loop1;
 				wav_.Seek(loop1);
 				poss2 = poss3 = poss4 = poss5 = poss6 = 0;
-				if (g_rubberBandStretcher) {
-					delete g_rubberBandStretcher;
-					g_rubberBandStretcher = NULL;
-				}
+				RubberBand_DestroyBank(0);
 				reset = TRUE;
 				readwav(bw + rrr, (int)l2 - rrr);
 			}
@@ -14743,7 +15132,7 @@ int readwav(BYTE* bw, int cnt)
 			c = (short)(((float)c) * fade * fade); b[i] = (short)c;
 		}
 	}
-	if (cc1 == 1) cc.Write(bw, cnt2);
+	PlaybackCcWrite(bw, cnt2);
 	wl += cnt2;
 	lenl += cnt2;
 	return cnt2;
@@ -14859,7 +15248,7 @@ int readmp3(BYTE* bw, int cnt)
 		}
 	}
 
-	if (cc1 == 1)	cc.Write(bw, cnt2);
+	PlaybackCcWrite(bw, cnt2);
 	wl += cnt2;
 
 	lenl += cnt2;
@@ -14917,11 +15306,11 @@ void SeekAndWarmupRubberBand(int targetPos, bool loopJump)
 	else te = te / 3.0f + 33.3f;
 	tempoRate2 = te / 100.0f;
 
-	if (!g_rubberBandStretcher) {
+	if (!g_rubberBandStretcher[0]) {
 		if (!InitializeRubberBandStretcher()) return;
 	}
 	else {
-		g_rubberBandStretcher->reset();
+		g_rubberBandStretcher[0]->reset();
 	}
 
 	// 助走長はサンプルレートに比例（32k でも 44.1k と同じ約 186ms）
@@ -14986,14 +15375,14 @@ void SeekAndWarmupRubberBand(int targetPos, bool loopJump)
 		for (int ch = 0; ch < wavchannel; ++ch)
 			chPtrs[ch] = chData[ch].data();
 
-		g_rubberBandStretcher->process(chPtrs.data(), (size_t)samplesRead, false);
+		g_rubberBandStretcher[0]->process(chPtrs.data(), (size_t)samplesRead, false);
 		inputFed += samplesRead;
 
-		while (g_rubberBandStretcher->available() > 0) {
+		while (g_rubberBandStretcher[0]->available() > 0) {
 			if (IsPlaybackStopRequested())
 				break;
-			size_t toGet = (std::min)((size_t)g_rubberBandStretcher->available(), pullSize);
-			if (g_rubberBandStretcher->retrieve(outPtrs.data(), toGet) == 0)
+			size_t toGet = (std::min)((size_t)g_rubberBandStretcher[0]->available(), pullSize);
+			if (g_rubberBandStretcher[0]->retrieve(outPtrs.data(), toGet) == 0)
 				break;
 		}
 	}
@@ -15764,12 +16153,15 @@ void COggDlg::stop()
 	playb = 0;
 	if (ptl)ptl->SetProgressValue(m_hWnd, (LONGLONG)0, (LONGLONG)1);
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
+	const bool xfadeKeepDsb = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
+	if (!xfadeKeepDsb)
+		ProXfade_Reset();
 	if (PlaybackNotifyThreadMayBeActive())
 	{
 		SignalPlaybackNotifyThreadStop();
-		if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
+		if (m_dsb && !xfadeKeepDsb)m_dsb->SetVolume(DSBVOLUME_MIN);
 		ps = 0;
-		if (m_dsb)m_dsb->Stop();
+		if (m_dsb && !xfadeKeepDsb)m_dsb->Stop();
 		if (pAudioClient) pAudioClient->Stop();
 		if (m_dou.GetCheck() == 1)
 			if (cc1 == 1) {
@@ -15777,6 +16169,7 @@ void COggDlg::stop()
 				FinalizeWavStreamHeaderRF64(cc);
 				cc.Close();
 				cc1 = 0;
+				PlaybackCcClearFormat();
 			}
 		CCriticalLock _ccl(&cs);
 		stf = 1;
@@ -15796,7 +16189,21 @@ void COggDlg::stop()
 		}
 		SongParams_OnSongStopped();
 
-		Closeds();
+		if (!xfadeKeepDsb) {
+			PlaySlot_StopAll();
+			Closeds();
+		}
+		else {
+			// 退避中の旧 A (m_dsbXfade) は play() 昇格完了まで残す。ここでは B を再確認のみ。
+			if (m_dsb) {
+				LONG v = (savedata.dsvol - 1) * 10;
+				if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
+				if (v > 0) v = 0;
+				if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
+				m_dsb->SetVolume(v);
+				m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+			}
+		}
 		//		FreeOutputBuffer();
 		plf = 0;
 
@@ -15913,7 +16320,10 @@ BOOL COggDlg::stop1()
 		}
 	}
 	// CWread が thend1 を見て return してから AfxEndThread するまでの猶予。
-	Sleep(50);
+	// 二重DS昇格中は B 再生を維持したいので余分な Sleep を入れない。
+	const bool xfadeKeepDsbEarly = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
+	if (!xfadeKeepDsbEarly)
+		Sleep(50);
 	playb = 0;
 	thend = 1;
 	thend1 = FALSE;
@@ -15928,34 +16338,43 @@ BOOL COggDlg::stop1()
 	lrc_backup = L"";
 	loop1_2 = -1;
 
-	//	for(int i=0;i<10;i++){DoEvent();Sleep(10);}
 	if (ptl)ptl->SetProgressValue(m_hWnd, (LONGLONG)0, (LONGLONG)1);
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
 
-	if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
-	ps = 0;
-	if (m_dsb)m_dsb->Stop();
-	if (pAudioClient) pAudioClient->Stop();
+	// 二重DS昇格中は再生中バッファを止めない / 破棄しない（play() が継続利用）
+	const bool xfadeKeepDsb = xfadeKeepDsbEarly || (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
+	if (!xfadeKeepDsb) {
+		if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
+		ps = 0;
+		if (m_dsb)m_dsb->Stop();
+	}
+	else if (m_dsb) {
+		LONG v = (savedata.dsvol - 1) * 10;
+		if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
+		if (v > 0) v = 0;
+		if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
+		m_dsb->SetVolume(v);
+		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+	}
+	if (pAudioClient && !xfadeKeepDsb) pAudioClient->Stop();
 	if (m_dou.GetCheck() == 1)
 		if (cc1 == 1) {
-			// 2GB超対応(RF64): ファイル実長から64bitでサイズ確定
 			FinalizeWavStreamHeaderRF64(cc);
 			cc.Close();
 			cc1 = 0;
+			PlaybackCcClearFormat();
 		}
 	{
 		CCriticalLock _ccl(&cs);
 		stf = 1;
 		_ccl.Leave();
 	}
-	// play() 先頭の stop1 は Join 成否に関わらず続行する。
-	// FALSE で return すると CWread に入らず 0:00／古い loop のままになる。
-	// ただし対話的な曲切替では無限 Join 禁止(DS Lock / 旧 SaveFile 固着で UI 永久停止)。
 	BOOL joined = TRUE;
 	{
-		const DWORD joinTimeout = g_interactiveTrackChange
-			? (g_playbackNotifyJoinTimeoutMs ? g_playbackNotifyJoinTimeoutMs : 2500u)
-			: 0u;
+		// keep 中はタイムアウトでゾンビ化させない（短時間失敗→playf=0→数秒停止の主因）
+		DWORD joinTimeout = 0u; // 無限
+		if (g_interactiveTrackChange && !xfadeKeepDsb)
+			joinTimeout = g_playbackNotifyJoinTimeoutMs ? g_playbackNotifyJoinTimeoutMs : 2500u;
 		joined = WaitForPlaybackNotifyThreadExit(joinTimeout);
 	}
 	thn1 = FALSE;
@@ -15963,15 +16382,27 @@ BOOL COggDlg::stop1()
 	thend1 = FALSE;
 	SongParams_OnSongStopped();
 
-	// Join 失敗時はデコーダを触らない(生存スレッドの UAF 防止)。play() は続行するが
-	// PeekOpenDecoderMode が残っていれば次の Open 前に再停止がかかる。
 	if (!joined) {
 		playf = 0;
 		plf = 0;
 		return FALSE;
 	}
 
-	Closeds();
+	if (!xfadeKeepDsb) {
+		PlaySlot_StopAll();
+		Closeds();
+	}
+	else {
+		// 退避中の旧 A は play() 側で解放。B の再生だけ維持。
+		if (m_dsb) {
+			LONG v = (savedata.dsvol - 1) * 10;
+			if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
+			if (v > 0) v = 0;
+			if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
+			m_dsb->SetVolume(v);
+			m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+		}
+	}
 	//		FreeOutputBuffer();
 	plf = 0;
 	if (ogg)ReleaseOggVorbis(&ogg);
@@ -16040,6 +16471,10 @@ BOOL COggDlg::DestroyWindow()
 	// TODO: この位置に固有の処理を追加するか、または基本クラスを呼び出してください
 	//	ReleaseOggVorbis(&ogg);
 	MpPromptOnAppShutdown();
+	// 昇格中 keep が残ると Closeds をスキップして終了時にセカンダリ二重解放→クラッシュし得る
+	InterlockedExchange(&g_xfadeKeepDsb, 0);
+	InterlockedExchange(&g_xfadeNoWrite, 0);
+	ProXfade_Reset();
 	stop();
 	waveOutReset(hwo);
 	waveOutClose(hwo);
@@ -16054,6 +16489,8 @@ BOOL COggDlg::DestroyWindow()
 		deve->Release();
 		audio = NULL; dev = NULL; deve = NULL;
 	}
+	// 再生詳細はモードレス。親(mp/og)破棄より先に閉じる
+	CloseProToolsIfOpen();
 	// メディアプレイヤー画面(オーナー無しトップレベル)を後始末
 	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
 		mp->SavePos();
@@ -16450,7 +16887,7 @@ int mcopy(char* a, int len)
 		}
 	}
 
-	if (cc1 == 1 && !g_inWarmup && cnt2 > 0) cc.Write(a, cnt2);
+	if (!g_inWarmup && cnt2 > 0) PlaybackCcWrite(a, cnt2);
 	if (cnt2 > 0) wl += cnt2;
 
 	return cnt2;
@@ -16643,10 +17080,7 @@ double OggGetGdiPlaybackTimeSec()
 
 void OggResetRubberBandStretcher()
 {
-	if (g_rubberBandStretcher) {
-		delete g_rubberBandStretcher;
-		g_rubberBandStretcher = NULL;
-	}
+	RubberBand_DestroyBank(0);
 }
 
 void COggDlg::timerp()
@@ -16894,8 +17328,8 @@ void COggDlg::timerp()
 		const bool eqVis = pEq
 			&& ::IsWindow(pEq->GetSafeHwnd())
 			&& ::IsWindowVisible(pEq->GetSafeHwnd());
-		const bool speanaDraw = bGdiFrame && m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg);
-		if (plf == 1 && (wav || ogg) && eqVis && !speanaDraw) {
+		const bool speanaDraw = bGdiFrame && m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg || m_dsb);
+		if (plf == 1 && (wav || ogg || m_dsb) && eqVis && !speanaDraw) {
 			static DWORD s_eqFeedMs = 0;
 			const DWORD nowFeed = GetTickCount();
 			if (s_eqFeedMs == 0 || (nowFeed - s_eqFeedMs) >= (DWORD)EqCodeIntervalMs()) {
@@ -16942,7 +17376,7 @@ void COggDlg::timerp()
 	// 非同期(WM_SPEANA_TICK)化すると Speana() が文字の後に不透明の棒を上書きし、
 	// XOR 合成が棒に覆われて無効化される（バナー文字が見えなくなるデグレ）。
 	// ここで TRUE 指定すると EQ 供給も同梱（上の Speana(FALSE) と二重にならない）。
-	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg))
+	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg || m_dsb))
 		Speana(TRUE);
 	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
 		m_PianoRollDlg->RequestSyncFromMainUi();
@@ -17410,9 +17844,23 @@ void COggDlg::timerp()
 			ogs = oggsize;
 		}
 		// スライダーも時間表示と同じく実再生位置（DS 先読み分を除去）に揃える。
-		if (qSamplesHeard > 0 && pb > qSamplesHeard) pb -= qSamplesHeard;
-		else if (qSamplesHeard > 0) pb = 0;
-		if (mode == -10) {
+		// Seek 直後はキュー値が旧バッファのままで 0/旧位置に引き戻すので無視する。
+		{
+			const DWORD fresh = (DWORD)InterlockedCompareExchange(&g_seekUiFreshTick, 0, 0);
+			const bool ignoreLead = (fresh != 0 && (GetTickCount() - fresh) < 2000u);
+			if (!ignoreLead) {
+				if (qSamplesHeard > 0 && pb > qSamplesHeard) pb -= qSamplesHeard;
+				else if (qSamplesHeard > 0) pb = 0;
+			}
+		}
+		/* 昇格後は mode よりスロット openMode を優先（単位 /100 の取り違えでバー不动） */
+		int posMode = mode;
+		if (InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0) {
+			const int as = (int)InterlockedCompareExchange(&g_activeSlot, 0, 0);
+			if (as >= 0 && as < PLAY_SLOT_COUNT && g_playSlots[as].openMode != INT_MIN)
+				posMode = g_playSlots[as].openMode;
+		}
+		if (posMode == -10) {
 			m_time.SetPos((int)(pb / 100));
 			if (ptl) {
 				ptl->SetProgressState(m_hWnd, TBPF_NORMAL);
@@ -18334,14 +18782,24 @@ void timerog1(UINT nIDEvent)
 		}
 	}
 	if (nIDEvent == 9000) {
-		// 連続再生: 曲末で次曲へ。固定待ち(旧 ≒500ms)ではなく、DS 再生カーソルが実音声の
-		// 終端(g_endWrittenBytes)へジャストに到達してから OnRestart する。
-		// 曲末の RubberBand 尻尾は各 read* が readtempo(len==0) で吐き切る（g_rubberBandFinalFlushed で二重 final は抑止）。
-		if (savedata.saverenzoku == 1 && endflg == 1) {
-			// 終端が未確定、または実再生カーソルが終端へ到達するまで次曲へ進めない。
-			// g_heardBytes は DS スレッドが毎サイクル更新する実再生位置（バイト）。
+		// 二重 DS / スロット運用中はレガシー次曲 Restart を起こさない
+		if (ProXfade_IsDualActive() || ProXfade_Phase() == PRO_XF_PROMOTE
+			|| InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0)
+			return;
+		if (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0)
+			return;
+		if (ProXfade_ShouldSuppressApplyIn())
+			return;
+		if (!ProXfade_DualArmOk(ProAudio_XfadeMs()))
+			return;
+		// 連続再生: 曲末で次曲へ（レガシー単一ストリーム）
+		if (savedata.saverenzoku == 1) {
+			const int xms = ProAudio_XfadeMs();
 			if (g_endWrittenBytes == 0 || g_heardBytes < g_endWrittenBytes)
-				return; // まだ実音声が鳴り切っていない。次のティックで再判定。
+				return;
+			if (xms <= 0 && endflg != 1)
+				return;
+			ProAudio_OnSongBoundary();
 			plcnt++;
 			if (pl && plcnt >= pl->m_lc.GetItemCount()) plcnt = 0;
 			endflg = 0;
@@ -18542,6 +19000,9 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	// play/stop1 実行中は触らない（曲切替中の自動停止メッセージでデコーダを潰さない）
 	if (s_inPlay || s_inStop1)
 		return 0;
+	// 二重DS昇格中は B を止めない
+	if (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0)
+		return 0;
 	// スレッドは PostMessage 前に終了済み想定だが、念のため Join（DoEvent なし）
 	SignalPlaybackNotifyThreadStop();
 	if (!WaitForPlaybackNotifyThreadExit(0))
@@ -18555,6 +19016,7 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	g_endWrittenBytes = 0;
 	g_dsWrittenBytes = 0;
 	g_heardBytes = 0;
+	g_expectedDsBytes = 0;
 	eqflg = TRUE;
 	KillTimer(1250);
 	if (m_dsb) {
@@ -18563,6 +19025,7 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	}
 	if (pAudioClient)
 		pAudioClient->Stop();
+	PlaySlot_StopAll();
 	Closeds();
 	if (ogg) {
 		ReleaseOggVorbis(&ogg);
@@ -20365,22 +20828,271 @@ void COggDlg::OnOK()
 extern IMediaEvent* pMediaEvent;
 static volatile LONG s_onRestartBusy = 0;
 
+LRESULT COggDlg::OnXfadePrefetch(WPARAM, LPARAM)
+{
+	// 互換用。先読みは ProXfade_RequestPrefetchAsync（専用スレッド）に移した。
+	// UI で MF デコードすると timerp / GDI バナー / シークが止まる。
+	InterlockedExchange(&g_xfadePrefetchPosted, 0);
+	return 0;
+}
+
+void Ogg_PostXfadePromote()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_OGG_XFADE_PROMOTE, 0, 0);
+}
+
+static int g_ccFmtRate = 0;
+static int g_ccFmtCh = 0;
+static int g_ccFmtBits = 0;
+static volatile LONG g_ccFmtLocked = 0;
+static AudioUpscaler s_ccUpscaler;
+
+void PlaybackCcClearFormat()
+{
+	InterlockedExchange(&g_ccFmtLocked, 0);
+	g_ccFmtRate = 0;
+	g_ccFmtCh = 0;
+	g_ccFmtBits = 0;
+	s_ccUpscaler.Reset();
+}
+
+void PlaybackCcLockFormat(int rate, int ch, int bits)
+{
+	if (InterlockedCompareExchange(&g_ccFmtLocked, 0, 0) != 0)
+		return;
+	if (rate < 8000) rate = 44100;
+	if (ch < 1) ch = 2;
+	if (!(bits == 16 || bits == 24 || bits == 32)) bits = 16;
+	g_ccFmtRate = rate;
+	g_ccFmtCh = ch;
+	g_ccFmtBits = bits;
+	InterlockedExchange(&g_ccFmtLocked, 1);
+}
+
+bool PlaybackCcFormatLocked()
+{
+	return InterlockedCompareExchange(&g_ccFmtLocked, 0, 0) != 0;
+}
+
+void PlaybackCcGetFormat(int& rate, int& ch, int& bits)
+{
+	rate = g_ccFmtRate;
+	ch = g_ccFmtCh;
+	bits = g_ccFmtBits;
+}
+
+void PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, int srcBits, bool forced)
+{
+	if (cc1 != 1 || !p || n == 0) return;
+	if (!forced && InterlockedCompareExchange(&g_xfadeDeferCcWrite, 0, 0) != 0)
+		return;
+	if (!PlaybackCcFormatLocked()) {
+		PlaybackCcLockFormat(srcRate, srcCh, srcBits);
+		cc.Write(p, n);
+		return;
+	}
+	if (srcRate == g_ccFmtRate && srcCh == g_ccFmtCh && srcBits == g_ccFmtBits) {
+		cc.Write(p, n);
+		return;
+	}
+	s_ccUpscaler.Configure(srcRate, srcCh, srcBits, g_ccFmtRate, g_ccFmtCh, g_ccFmtBits);
+	s_ccUpscaler.PushInterleaved((const uint8_t*)p, (int)n);
+	std::vector<uint8_t> out;
+	out.resize((size_t)n * 4 + 65536);
+	int got = 0;
+	int guard = 0;
+	while (guard < 64) {
+		++guard;
+		if ((int)out.size() - got < 8192)
+			out.resize(out.size() * 2);
+		int pulled = s_ccUpscaler.PullInterleaved(out.data() + got, (int)out.size() - got);
+		if (pulled <= 0) break;
+		got += pulled;
+	}
+	if (got > 0)
+		cc.Write(out.data(), (UINT)got);
+}
+
+void PlaybackCcWrite(const void* p, UINT n)
+{
+	const int rate = (g_pcm_upscale_active && g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : wavbit_sample_Hz;
+	const int ch = (g_pcm_upscale_active && g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : wavchannel;
+	int bits = (g_pcm_upscale_active && g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : abs(wavsam_depth);
+	if (!(bits == 16 || bits == 24 || bits == 32)) bits = 16;
+	PlaybackCcWriteFromFormat(p, n, rate, ch, bits, false);
+}
+
+void PlaybackCcWriteForced(const void* p, UINT n)
+{
+	const int rate = (g_pcm_upscale_active && g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : wavbit_sample_Hz;
+	const int ch = (g_pcm_upscale_active && g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : wavchannel;
+	int bits = (g_pcm_upscale_active && g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : abs(wavsam_depth);
+	if (!(bits == 16 || bits == 24 || bits == 32)) bits = 16;
+	PlaybackCcWriteFromFormat(p, n, rate, ch, bits, true);
+}
+
+void Ogg_FeedPianoRoll(const void* p, int n)
+{
+	if (og) og->FeedPianoRoll(p, n);
+}
+
+// PlaySlot.cpp は flac.h/m4a.h を include しない（ヘッダ内実装の二重定義回避）
+HKMP PlaySlot_FlacOpen(LPCTSTR path, SOUNDINFO* si) { return flac_.Open(path, si); }
+void PlaySlot_FlacClose(HKMP h) { if (h) flac_.Close(h); }
+DWORD PlaySlot_FlacRender(HKMP h, BYTE* buf, DWORD n) { return flac_.Render(h, buf, n); }
+DWORD PlaySlot_FlacSetPosition(HKMP h, LONGLONG pos) { return flac_.SetPosition(h, pos); }
+HKMP PlaySlot_M4aOpen(LPCTSTR path, SOUNDINFO* si) { return m4a::Open(path, si); }
+void PlaySlot_M4aClose(HKMP h) { m4a::Close(h); }
+DWORD PlaySlot_M4aRender(HKMP h, BYTE* buf, DWORD n) { return m4a::Render(h, buf, n); }
+DWORD PlaySlot_M4aSetPosition(HKMP h, DWORD pos) { return m4a::SetPosition(h, pos); }
+
+LRESULT COggDlg::OnXfadePromote(WPARAM, LPARAM)
+{
+	// 二重スロット handoff。昇格後も B スロットで再生継続（Detach→レガシー再Open は隙間・停止の元）
+	int nPl = -1, nMode = 0, skipF = 0, skipMs = 0;
+	CString nPath;
+	if (!ProXfade_ConsumePromote(nPl, nMode, nPath, skipF, skipMs))
+		return 0;
+	XfDbgF("OnXfadePromote pl=%d mode=%d skipF=%d skipMs=%d dualEn=%ld",
+		nPl, nMode, skipF, skipMs,
+		(long)InterlockedCompareExchange(&g_slotDualEnabled, 0, 0));
+	KillTimer(9000);
+	ProAudio_ClearXfadeIn();
+
+	const int bSlot = (int)InterlockedCompareExchange(&g_xfadeBSlot, 0, 0);
+	if (bSlot < 0 || bSlot >= PLAY_SLOT_COUNT || !g_playSlots[bSlot].dsb) {
+		ProXfade_MarkFailed();
+		InterlockedExchange(&g_xfadeKeepDsb, 0);
+		InterlockedExchange(&g_xfadeNoWrite, 0);
+		return 0;
+	}
+
+	if (pl && nPl >= 0 && nPl < pl->playcnt) {
+		plcnt = nPl;
+		pl->Get(plcnt);
+		pl->SIcon(plcnt);
+	}
+	fade1 = 0; lenl = 0;
+	fade = 1.0f;
+	endflg = 0;
+	g_endWrittenBytes = 0;
+	/* クロス昇格では EQ をリセットしない（Mix 末尾と単独 B のつなぎ目クリック／音量跳び防止） */
+	InterlockedExchange(&g_eqResetNext, 0);
+
+	if (nMode != 0) { mode = nMode; modesub = nMode; }
+	else if (g_playSlots[bSlot].openMode != INT_MIN) {
+		mode = g_playSlots[bSlot].openMode;
+		modesub = mode;
+	}
+	if (!nPath.IsEmpty()) filen = nPath;
+	else if (g_playSlots[bSlot].path[0]) filen = g_playSlots[bSlot].path;
+
+	const bool alreadyDual = (InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0);
+	if (alreadyDual) {
+		const int oldSlot = (int)InterlockedCompareExchange(&g_activeSlot, 0, 0);
+		if (oldSlot != bSlot)
+			PlaySlot_Handoff(oldSlot, bSlot);
+		else {
+			PlaySlot_ApplyPromotePosition(bSlot);
+			InterlockedExchange(&g_xfadeBSlot, -1);
+			InterlockedExchange(&g_xfadeKeepDsb, 0);
+			InterlockedExchange(&g_xfadeNoWrite, 0);
+			ProXfade_OnSongPlaybackStarted();
+		}
+	}
+	else {
+		// 曲1 = レガシー HandleNotifications → B スロットへ。以降はスロット再生のまま。
+		InterlockedExchange(&g_xfadeKeepDsb, 1);
+		InterlockedExchange(&g_xfadeNoWrite, 1);
+		SignalPlaybackNotifyThreadStop();
+		WaitForPlaybackNotifyThreadExit(8000);
+
+		const int stoppingMode = PeekOpenDecoderMode(mode);
+		if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
+		if (stoppingMode == -8 && kmp) { flac_.Close(kmp); kmp = NULL; }
+		if (stoppingMode == -9 && kmp) { m4a_.Close(kmp); kmp = NULL; }
+		if (stoppingMode == 999) wav_.Close();
+		if (stoppingMode == -1) {
+			ov_clear(&vf);
+		}
+		if (ogg) { ReleaseOggVorbis(&ogg); ogg = NULL; }
+		ClearOpenDecoderMode();
+
+		LPDIRECTSOUNDBUFFER8 old8 = m_dsb;
+		LPDIRECTSOUNDBUFFER old1 = m_dsb1;
+		m_dsb = NULL;
+		m_dsb1 = NULL;
+		PlaySlot_HandoffFromLegacy(bSlot, old8, old1);
+	}
+
+	{
+		PlaySlot& bs = g_playSlots[bSlot];
+		g_dsWrittenBytes = bs.dsWritten;
+		g_heardBytes = bs.heard;
+		playb = bs.playb;
+		playf = 1; plf = 1; thn = TRUE; thn1 = FALSE; stf = 0;
+		ProAudio_ClearXfadeIn();
+	}
+
+	if (mode == -10) {
+		int m = (oggsize > 0) ? (oggsize / 100) : 1;
+		if (m < 1) m = 1;
+		m_time.SetRange(0, m, TRUE);
+		m_time.SetSelection(0, m);
+		{
+			int pos = (int)(playb / 100);
+			if (pos < 0) pos = 0;
+			if (pos > m) pos = m;
+			m_time.SetPos(pos);
+		}
+		m_time.Invalidate();
+	}
+	else {
+		const int m = (loop2 > 0) ? loop2 : 1;
+		m_time.SetRange(0, m, TRUE);
+		m_time.SetSelection(0, m);
+		{
+			__int64 pb = playb;
+			if (pb < 0) pb = 0;
+			if (pb > m) pb = m;
+			m_time.SetPos((int)pb);
+		}
+		m_time.Invalidate();
+	}
+	InterlockedExchange(&g_xfadeKeepDsb, 0);
+	InterlockedExchange(&g_xfadeNoWrite, 0);
+	InterlockedExchange(&g_xfadeSkipFrames, 0);
+	InterlockedExchange(&g_xfadeSkipMs, 0);
+	InterlockedExchange(&s_xfadeStickySkipFrames, 0);
+	InterlockedExchange(&s_restartWanted, 0);
+	return 0;
+}
+
 void COggDlg::OnRestart()
 {
+	const bool softBusy = (InterlockedCompareExchange(&s_xfadeSoftPlay, 0, 0) != 0)
+		|| (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
 	if (InterlockedCompareExchange(&s_onRestartBusy, 1, 0) != 0) {
-		InterlockedExchange(&s_restartWanted, 1);
+		// 昇格中の重複は wanted にも積まない（終わった後の keep 無し再Restart防止）
+		if (!softBusy)
+			InterlockedExchange(&s_restartWanted, 1);
 		return;
 	}
 	// play() 中の DoEvent 再入で stop() がフラグだけ立てると CWread/再生が壊れる。延期する。
 	if (s_inPlay || s_inStop1) {
 		InterlockedExchange(&s_onRestartBusy, 0);
-		RequestPlaybackRestart(GetSafeHwnd());
+		if (!softBusy)
+			RequestPlaybackRestart(GetSafeHwnd());
 		return;
 	}
 	struct RestartBusyGuard {
 		COggDlg* dlg;
 		~RestartBusyGuard() {
 			InterlockedExchange(&s_onRestartBusy, 0);
+			// soft play 直後に残った wanted は捨て済み想定。念のため soft 中は再投入しない。
+			if (InterlockedCompareExchange(&s_xfadeSoftPlay, 0, 0) != 0)
+				return;
 			if (InterlockedExchange(&s_restartWanted, 0) != 0 && dlg && ::IsWindow(dlg->GetSafeHwnd()))
 				RequestPlaybackRestart(dlg->GetSafeHwnd());
 		}
@@ -20392,7 +21104,18 @@ void COggDlg::OnRestart()
 
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	CString ti;
-	stop();
+	// 二重DS昇格中は stop() しない（B を止める経路を減らし、play()/stop1 だけにする）
+	const bool xfadeSoft = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0) && (m_dsb != NULL);
+	if (!xfadeSoft)
+		stop();
+	else if (m_dsb) {
+		LONG v = (savedata.dsvol - 1) * 10;
+		if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
+		if (v > 0) v = 0;
+		if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
+		m_dsb->SetVolume(v);
+		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+	}
 	if (filen == _T("") && pl && pl->playcnt > 0)
 		pl->RestoreSavedPlaybackRow();
 	if (filen != "") {
@@ -20656,7 +21379,7 @@ void AnalyzeMusicKey(
 	const std::vector<double>& bufChordL, const std::vector<double>& bufChordR,
 	int sampleRate)
 	;
-void PublishEqKeyPcm(const std::vector<double>& bufferL, const std::vector<double>& bufferR, int sampleRate);
+void PublishEqKeyPcm(const double* bufferL, const double* bufferR, int sampleCount, int sampleRate);
 void GetCurrentNoteStrengths(float* output108);
 
 namespace {
@@ -20845,25 +21568,27 @@ void COggDlg::SyncAnalyzerFromPlayCursor()
 	}
 
 	const ULONG startPos = (endPos + ringBytes - advance) % ringBytes;
-	static std::vector<char> anaRaw;
-	if (anaRaw.size() < (size_t)advance)
-		anaRaw.resize(advance);
+	enum { kAnaRawMax = 192000 }; // 50ms@192k stereo 32bit でも余裕
+	static char anaRaw[kAnaRawMax];
+	if (advance > (ULONG)kAnaRawMax)
+		advance = (ULONG)kAnaRawMax - ((ULONG)kAnaRawMax % (ULONG)bytesPerFrame);
+	if (advance < (ULONG)bytesPerFrame) return;
 
 	const char* src = (const char*)bufwav3;
 	if (startPos + advance <= ringBytes) {
-		memcpy(anaRaw.data(), src + startPos, advance);
+		memcpy(anaRaw, src + startPos, advance);
 	}
 	else {
 		const ULONG first = ringBytes - startPos;
-		memcpy(anaRaw.data(), src + startPos, first);
-		memcpy(anaRaw.data() + first, src, advance - first);
+		memcpy(anaRaw, src + startPos, first);
+		memcpy(anaRaw + first, src, advance - first);
 	}
 
 	m_analyzerSyncEndPos = endPos;
 	m_AnalyzerDlg->ResumePlaybackFeed();
 	const int frames = (int)(advance / (ULONG)bytesPerFrame);
 	if (frames > 0)
-		m_AnalyzerDlg->FeedPCM(anaRaw.data(), frames, (int)(sampleRate + 0.5), bitDepth, channels);
+		m_AnalyzerDlg->FeedPCM(anaRaw, frames, (int)(sampleRate + 0.5), bitDepth, channels);
 }
 
 void COggDlg::SyncPianoRollFromPlayCursor()
@@ -20916,9 +21641,11 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	const int kPianoRollExtraLatencyMs = 700;
 	const int srInt = (int)(sampleRate + 0.5);
 
-	static std::vector<char> prRaw;
-	static std::vector<char> meterRaw;
-	static std::vector<double> prMono;
+	static char prRaw[CPianoRoll::RING_SIZE * 8 * 4];
+	static char meterRaw[16384 * 8 * 4];
+	static double prMono[CPianoRoll::RING_SIZE];
+	static double chPeak[CPianoRoll::PIANO_METER_CH_MAX];
+	static double chSumSq[CPianoRoll::PIANO_METER_CH_MAX];
 
 	const char* srcBufBase = (const char*)bufwav3;
 	auto ReadRingPcm = [&](long bytePos, int byteCount, char* dst) -> bool {
@@ -20953,20 +21680,15 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	const int meterCh = (channels < 1) ? 1 : ((channels > CPianoRoll::PIANO_METER_CH_MAX) ? CPianoRoll::PIANO_METER_CH_MAX : channels);
 	const int meterFrames = CPianoRoll::ScaleWinSamples(2048, srInt);
 	const int meterBytes = meterFrames * bytesPerFrame;
-	static std::vector<double> chPeak;
-	static std::vector<double> chSumSq;
-	if ((int)chPeak.size() < meterCh) chPeak.resize((size_t)meterCh);
-	if ((int)chSumSq.size() < meterCh) chSumSq.resize((size_t)meterCh);
 	for (int ch = 0; ch < meterCh; ++ch) {
 		chPeak[ch] = 0.0;
 		chSumSq[ch] = 0.0;
 	}
 	int meterN = 0;
-	if (meterBytes > 0) {
-		if (meterRaw.size() < (size_t)meterBytes) meterRaw.resize(meterBytes);
+	if (meterBytes > 0 && meterBytes <= (int)sizeof(meterRaw)) {
 		const long meterPos = SpeanaAnalysisReadPos(playCur, meterBytes, bytesPerFrame, (int)ringBytes, sampleRate, kMeterExtraLatencyMs);
-		if (ReadRingPcm(meterPos, meterBytes, meterRaw.data())) {
-			const char* mDst = meterRaw.data();
+		if (ReadRingPcm(meterPos, meterBytes, meterRaw)) {
+			const char* mDst = meterRaw;
 			meterN = meterFrames;
 			for (int i = 0; i < meterFrames; ++i) {
 				for (int ch = 0; ch < meterCh; ++ch) {
@@ -21014,14 +21736,12 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	if (prFrames < minNeed) return;
 	const int prBytes = prFrames * bytesPerFrame;
 	if (prBytes <= 0 || prBytes > TOTAL_BUF_BYTES) return;
+	if (prFrames > CPianoRoll::RING_SIZE || prBytes > (int)sizeof(prRaw)) return;
 
 	const int speanaBytes = speanaFrames * bytesPerFrame;
 	long prPos = PianoRollWideReadPos(playCur, prBytes, speanaBytes, bytesPerFrame, (int)ringBytes, sampleRate, kPianoRollExtraLatencyMs);
 
-	if (prRaw.size() < (size_t)prBytes) prRaw.resize(prBytes);
-	if (prMono.size() < (size_t)prFrames) prMono.resize(prFrames);
-
-	char* prDst = prRaw.data();
+	char* prDst = prRaw;
 	if (!ReadRingPcm(prPos, prBytes, prDst))
 		return;
 
@@ -21070,7 +21790,7 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 		prMono[i] = (smpL + smpR) * 0.5;
 	}
 
-	m_PianoRollDlg->AnalyzePlayCursorMono(prMono.data(), prFrames, (int)(sampleRate + 0.5));
+	m_PianoRollDlg->AnalyzePlayCursorMono(prMono, prFrames, (int)(sampleRate + 0.5));
 }
 
 void COggDlg::Speana(BOOL bPaintBars)
@@ -21164,20 +21884,15 @@ void COggDlg::Speana(BOOL bPaintBars)
 		latencyBytes = 0;
 
 	// ---------------------------------------------------------
-	// メモリ確保
+	// メモリ確保（固定バッファ。std::vector の伸長/断片化を避ける）
+	// analysisSize は 4096/8192/16384 のみ。
 	// ---------------------------------------------------------
-	static std::vector<double> bufL, bufR, bufM, bufResampled, bufResampledR;
-	static std::vector<char> rawBuf;
-
-	if (bufL.size() < (size_t)framesToRead) {
-		bufL.resize(framesToRead); bufR.resize(framesToRead); bufM.resize(framesToRead);
-	}
-	if (bufResampled.size() < (size_t)fftSize) {
-		bufResampled.resize(fftSize); bufResampledR.resize(fftSize);
-	}
-	if (rawBuf.size() < (size_t)bytesTotalToRead) {
-		rawBuf.resize(bytesTotalToRead);
-	}
+	enum { kSpeanaMaxFrames = 16384, kSpeanaMaxRaw = 16384 * 8 * 4 };
+	static double bufL[kSpeanaMaxFrames], bufR[kSpeanaMaxFrames], bufM[kSpeanaMaxFrames];
+	static double bufResampled[kSpeanaMaxFrames], bufResampledR[kSpeanaMaxFrames];
+	static char rawBuf[kSpeanaMaxRaw];
+	if (framesToRead > kSpeanaMaxFrames || fftSize > kSpeanaMaxFrames || bytesTotalToRead > kSpeanaMaxRaw)
+		return;
 
 	// ---------------------------------------------------------
 	// データ読み込み (完全過去データ取得)
@@ -21195,7 +21910,7 @@ void COggDlg::Speana(BOOL bPaintBars)
 	readPos -= (readPos % bytesPerFrame);
 
 	const char* srcBufBase = (const char*)bufwav3;
-	char* dstRaw = rawBuf.data();
+	char* dstRaw = rawBuf;
 	bool readSuccess = true;
 
 	if (readPos + bytesTotalToRead <= TOTAL_BUF_BYTES) {
@@ -21277,8 +21992,8 @@ void COggDlg::Speana(BOOL bPaintBars)
 		}
 	}
 	else {
-		std::fill(bufL.begin(), bufL.end(), 0.0);
-		std::fill(bufR.begin(), bufR.end(), 0.0);
+		memset(bufL, 0, (size_t)framesToRead * sizeof(double));
+		memset(bufR, 0, (size_t)framesToRead * sizeof(double));
 	}
 
 	// EQ コード用 PCM。描画有無に関係なく供給（pending 中の不規則更新を防ぐ）
@@ -21288,7 +22003,7 @@ void COggDlg::Speana(BOOL bPaintBars)
 			const DWORD nowPub = GetTickCount();
 			if (s_lastPubMs == 0 || (nowPub - s_lastPubMs) >= (DWORD)EqCodeIntervalMs()) {
 				s_lastPubMs = nowPub;
-				PublishEqKeyPcm(bufL, bufR, (int)sampleRate);
+				PublishEqKeyPcm(bufL, bufR, framesToRead, (int)sampleRate);
 			}
 		}
 	}
@@ -21296,8 +22011,8 @@ void COggDlg::Speana(BOOL bPaintBars)
 	if (!bPaintBars)
 		return;
 
-	ResampleDouble(bufL.data(), framesToRead, bufResampled.data(), fftSize);
-	ResampleDouble(bufR.data(), framesToRead, bufResampledR.data(), fftSize);
+	ResampleDouble(bufL, framesToRead, bufResampled, fftSize);
+	ResampleDouble(bufR, framesToRead, bufResampledR, fftSize);
 	for (int k = 0; k < fftSize; k++) bufM[k] = (bufResampled[k] + bufResampledR[k]) * 0.5;
 
 	auto ValToBarHeight = [&](double amplitude) -> int {
@@ -21313,13 +22028,13 @@ void COggDlg::Speana(BOOL bPaintBars)
 	if (useFFT) {
 		const int N = fftSize;
 		if (!stereoSpeana) {
-			SpeanaApplyHann(bufM.data(), aFFT2, N);
+			SpeanaApplyHann(bufM, aFFT2, N);
 			ipTab2[0] = 0; ddst(N, -1, aFFT2, ipTab2, wTab2);
 		}
 		else {
-			SpeanaApplyHann(bufResampled.data(), aFFT2, N);
+			SpeanaApplyHann(bufResampled, aFFT2, N);
 			ipTab2[0] = 0; ddst(N, -1, aFFT2, ipTab2, wTab2);
-			SpeanaApplyHann(bufResampledR.data(), aFFT2a, N);
+			SpeanaApplyHann(bufResampledR, aFFT2a, N);
 			ipTab2[0] = 0; ddst(N, -1, aFFT2a, ipTab2, wTab2);
 		}
 		aFFT2[0] = 0; aFFT2a[0] = 0; // DCカット
@@ -21435,15 +22150,14 @@ void COggDlg::Speana(BOOL bPaintBars)
 			};
 
 		if (!stereoSpeana) {
-			static std::vector<double> monoInput;
-			if ((int)monoInput.size() < framesToRead) monoInput.resize(framesToRead);
+			static double monoInput[kSpeanaMaxFrames];
 			for (int k = 0; k < framesToRead; k++) monoInput[k] = (bufL[k] + bufR[k]) * 0.5;
-			s_detMono.Process(monoInput.data(), framesToRead);
+			s_detMono.Process(monoInput, framesToRead);
 			DrawDetected(s_detMono, 0, false);
 		}
 		else {
-			s_detL.Process(bufL.data(), framesToRead);
-			s_detR.Process(bufR.data(), framesToRead);
+			s_detL.Process(bufL, framesToRead);
+			s_detR.Process(bufR, framesToRead);
 			DrawDetected(s_detL, 100, false);
 			DrawDetected(s_detR, 200, true);
 			dc.FillSolidRect((21 * 8 + 88) * 4, 20, 4, 368, RGB(0, 255, 255));
@@ -21699,9 +22413,8 @@ extern BOOL	syoriflg;
 
 void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
-	// スライダーの特定（ここは共通処理なのでロック外）
-	CSliderCtrl* r = (CSliderCtrl*)pScrollBar;
-	if (!r || r->GetDlgCtrlID() != IDC_SLIDER2) return;
+	// HWND で判定（一時 CWnd* でも IDC が取れる）。カスタム GetPos は m_time を直接使う
+	if (!pScrollBar || pScrollBar->GetSafeHwnd() != m_time.GetSafeHwnd()) return;
 
 	int minpos;
 	int maxpos;
@@ -21725,38 +22438,102 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		// ★排他制御開始：再生スレッドとの競合を防ぐ
 		std::unique_lock<std::mutex> hscroll_lock(cl2);
 
-		ResetAudioUpscalerPipeline();
+		// 二重スロット中はグローバルデコーダ/アップスケーラを触らない（閉じ済み kmp でクラッシュする）
+		int dualSlot = -1;
+		bool slotSeek = PlaySlot_IsDualSeekTarget(&dualSlot);
+		if (!slotSeek && InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0) {
+			dualSlot = (int)InterlockedCompareExchange(&g_activeSlot, 0, 0);
+			if (dualSlot >= 0 && dualSlot < PLAY_SLOT_COUNT
+				&& g_playSlots[dualSlot].dsb
+				&& g_playSlots[dualSlot].openMode != INT_MIN) {
+				slotSeek = true;
+				m_dsb = g_playSlots[dualSlot].dsb;
+			}
+		}
 
-		r->GetRange(minpos, maxpos);
-		curpos = r->GetPos();
+		if (!slotSeek) {
+			ResetAudioUpscalerPipeline();
+			RubberBand_DestroyBank(0);
+		}
+
+		m_time.GetRange(minpos, maxpos);
+		curpos = m_time.GetPos();
 
 		// ページ移動の計算
 		if (nSBCode == SB_PAGELEFT) {
-			int info = r->GetLineSize();
+			int info = m_time.GetLineSize();
 			if (curpos > minpos) curpos = max(minpos, curpos - info);
 		}
 		else if (nSBCode == SB_PAGERIGHT) {
-			int info = r->GetLineSize();
+			int info = m_time.GetLineSize();
 			if (curpos < maxpos) curpos = min(maxpos, curpos + info);
 			else { hsc = 2; sflg = FALSE; return; }
 		}
 		// SB_ENDSCROLL / SB_THUMBPOSITION の場合はこの時点の GetPos() が最終位置
 
-		// ゴムバンドの破棄（シーク時は作り直し）
-		if (g_rubberBandStretcher) {
-			delete g_rubberBandStretcher;
-			g_rubberBandStretcher = NULL;
-		}
-
 		// 位置の補正（mode==-2 では timerp が loop1=loop2=0 にするため、音声用クランプを掛けると常に先頭へ落ちる）
+		// 二重スロット中も loop2==0（MP3）だと loop1+loop2 クランプで常に 0 になるので maxpos を使う
 		if (pMediaPosition && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
+			if (curpos < minpos) curpos = minpos;
+			if (curpos > maxpos) curpos = maxpos;
+		}
+		else if (slotSeek) {
 			if (curpos < minpos) curpos = minpos;
 			if (curpos > maxpos) curpos = maxpos;
 		}
 		else {
 			if ((loop1 + loop2) < curpos && endf == 0) curpos = (loop1 + loop2);
 		}
-		r->SetPos(curpos);
+
+		// 二重スロット運用中は active スロットのデコーダへシーク（グローバル mp3_/flac_ は閉じ済み）
+		if (slotSeek) {
+			const int slotMode = g_playSlots[dualSlot].openMode;
+			const __int64 oldPlayb = g_playSlots[dualSlot].playb;
+			const int oldUiPos = m_time.GetPos();
+			__int64 seekFrames;
+			/* mode ではなく slotMode のみ（昇格後に mode がずれてもフレーム換算を誤らない） */
+			if (slotMode == -10) {
+				seekFrames = (__int64)curpos * 100;
+				if (seekFrames < 0) seekFrames = 0;
+			}
+			else {
+				seekFrames = (__int64)curpos;
+			}
+			XfDbgF("OnHScroll dual cur=%d seek=%lld oldPlayb=%lld", curpos, (long long)seekFrames, (long long)oldPlayb);
+			m_time.SetPos(curpos);
+			ZeroMemory(bufwav3, sizeof(bufwav3));
+			hsc = 2; /* Seek 中に timerp が playb でバーを戻すのを防ぐ */
+			hscroll_lock.unlock();
+			const bool ok = PlaySlot_Seek(dualSlot, seekFrames);
+			if (ok) {
+				playb = seekFrames;
+				g_playSlots[dualSlot].playb = seekFrames;
+				int uiPos = (slotMode == -10) ? (int)(seekFrames / 100) : (int)seekFrames;
+				int mn = m_time.GetMinValue();
+				int mx = m_time.GetMaxValue();
+				if (uiPos < mn) uiPos = mn;
+				if (mx > mn && uiPos > mx) uiPos = mx;
+				m_time.SetPos(uiPos);
+			}
+			else {
+				/* 失敗時は UI/playb を戻す（「動いたように見えるが音が変わらない」を防ぐ） */
+				playb = oldPlayb;
+				g_playSlots[dualSlot].playb = oldPlayb;
+				m_time.SetPos(oldUiPos);
+			}
+			if (savedata.playerMode == 1) {
+				extern CMediaPlayerDlg* mp;
+				if (mp && ::IsWindow(mp->GetSafeHwnd()))
+					mp->MirrorSeekVol();
+			}
+			cnt3 = 0;
+			timer.SetEvent();
+			hsc = 0;
+			sflg = FALSE;
+			return;
+		}
+
+		m_time.SetPos(curpos);
 		playb = (__int64)curpos;
 
 		// 1. 動画・メディアポジションのシーク
@@ -21843,21 +22620,25 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				dsd_.kpiSetPosition(kmp, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
 			}
 			else if (mode == -8) { // FLAC
-				sek4 = TRUE;
-				if (flacmode == 1) flac_.SetPosition(kmp, playb);
-				else               flac_.SetPosition(kmp, (LONGLONG)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / aa)));
-				::rrr = 1;  // シーク後は Render を再開
-				sek4 = FALSE;
+				if (kmp) {
+					sek4 = TRUE;
+					if (flacmode == 1) flac_.SetPosition(kmp, playb);
+					else               flac_.SetPosition(kmp, (LONGLONG)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / aa)));
+					::rrr = 1;  // シーク後は Render を再開
+					sek4 = FALSE;
+				}
 			}
 			else if (mode == -9) { // M4A
-				double wavv2[] = { 0, 2.0, 1.0, 1.0 / 2.0, 1.0 / 2.0, 1.0 / 2.0, 1.0 / 2.0 };
-				DWORD pla = (DWORD)((double)playb / (((double)(wavbit2 / wavv2[wavchannel])) / ((wavchannel > 2) ? (1069.1 * wavchannel) : 1000.0)));
-				pla = (pla / (wavchannel * 2) * (wavchannel * 2));
-				m4a_.SetPosition(kmp, pla);
+				if (kmp) {
+					double wavv2[] = { 0, 2.0, 1.0, 1.0 / 2.0, 1.0 / 2.0, 1.0 / 2.0, 1.0 / 2.0 };
+					DWORD pla = (DWORD)((double)playb / (((double)(wavbit2 / wavv2[wavchannel])) / ((wavchannel > 2) ? (1069.1 * wavchannel) : 1000.0)));
+					pla = (pla / (wavchannel * 2) * (wavchannel * 2));
+					m4a_.SetPosition(kmp, pla);
+				}
 			}
 			else { // OGG / Others
 				SeekAndWarmupRubberBand((int)curpos, false);
-				r->SetPos(curpos);
+				m_time.SetPos(curpos);
 			}
 
 			sek = TRUE;
@@ -21940,192 +22721,130 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 		m_dsval.SetPos(m_dsval.GetPos() - 5);
 		break;
 	case 8002:
-		if (!((ogg || adbuf2 || mod || wav || mode == 999) || mode == -2)) break;
-		playb = m_time.GetPos();
-		if (pMediaPosition && ((mode == -2 && hsc == 0) || ((mode > 0 || mode < -10) && videoonly == TRUE && hsc == 0))) {
-			playb += 10 * 100;
-			m_time.SetPos((int)playb);
-			if (aa2 == 0) {
-				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 100000.0f)));
-			}
-			else {
-				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * (100000.0f))));
-			}
-			hsc = 0;
-		}
-		else {
-			if (mode == -10) {
-				__int64 fb = (__int64)m_time.GetPos() * 100;
-				fb += (__int64)wavbit_sample_Hz * (wavchannel == 2 ? 10 : 5);
-				if (oggsize > 0 && fb > (__int64)oggsize) fb = (__int64)oggsize;
-				if (fb < 0) fb = 0;
-				playb = fb;
-				m_time.SetPos((int)(playb / 100));
-				if (pMainFrame1) {
-					pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
-				}
-				ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-				ZeroMemory(bufkpi_, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-				ZeroMemory(bufkpi2, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-				ZeroMemory(bufkpi3, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-				ZeroMemory(bufkpi4, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-				poss = 0;
-				if (ps == 0) {
-					OnPause();
-					ZeroMemory(bufwav3, sizeof(bufwav3));
-					syukai = 1; syukai2 = 0;
-					if (thn == FALSE) { hscroll_lock.unlock(); WaitForSyukai2OrPlaybackStop(); hscroll_lock.lock(); }
-					if (savedata.mp3orig) {
-						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
-					}
-					else {
-						if (mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
-					}
-					poss = 0; sek = TRUE;
-					timer.SetEvent();
-					syukai = 0;
-					OnPause();
-				}
-				else {
-					if (savedata.mp3orig) {
-						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { return 0; }
-					}
-					else {
-						if (mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { return 0; }
-					}
-				}
-				poss = 0;
-				break;
-			}
-			playb += wavbit_sample_Hz * (wavchannel == 2 ? 10 : 5);
-			if ((loop1 + loop2) < (int)playb && endf == 0) playb = (loop1 + loop2);
-			if (mode != -10)m_time.SetPos((int)playb);
-			if (pMainFrame1) {
-				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
-			}
-			if (ModeUsesSeekAdpcm(mode)) {
-				seekadpcm((int)playb);
-				sek = TRUE;
-				timer.SetEvent();
-			}
-			else if (mode == -3) {
-				if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-					uint64_t np = 0;
-					g_kpiHost.Seek(g_kpiSession.sessionId, (uint64_t)playb, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
-					ResetKpiRemoteCache();
-					sek = TRUE;
-					timer.SetEvent();
-				}
-				else if (mod) {
-					if (mod->SetPosition && sikpi.dwSeekable) mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
-					sek = TRUE;
-					timer.SetEvent();
-				}
-			}
-			else {
-				ov_pcm_seek_lap(&vf, (ogg_int64_t)playb);
-				sek = TRUE;
-				timer.SetEvent();
-			}
-			poss = 0;
-		}
-		break;
 	case 8003:
-		if (!((ogg || adbuf2 || mod || wav || mode == 999) || mode == -2)) break;
-		playb = m_time.GetPos();
-		if (pMediaPosition && ((mode == -2 && hsc == 0) || ((mode > 0 || mode < -10) && videoonly == TRUE && hsc == 0))) {
-			playb -= 10 * 100;
-			m_time.SetPos((int)playb);
-			if (aa2 == 0) {
-				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 100000.0f)));
+	{
+		const int dir = (wp == 8002) ? 1 : -1;
+		int minpos = m_time.GetMinValue();
+		int maxpos = m_time.GetMaxValue();
+		if (maxpos <= minpos) maxpos = minpos + 1;
+
+		int dualSlot = -1;
+		bool slotSeek = PlaySlot_IsDualSeekTarget(&dualSlot);
+		if (!slotSeek && InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0) {
+			dualSlot = (int)InterlockedCompareExchange(&g_activeSlot, 0, 0);
+			if (dualSlot >= 0 && dualSlot < PLAY_SLOT_COUNT
+				&& g_playSlots[dualSlot].dsb
+				&& g_playSlots[dualSlot].openMode != INT_MIN) {
+				slotSeek = true;
+				m_dsb = g_playSlots[dualSlot].dsb;
 			}
-			else {
-				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * (100000.0f))));
+		}
+
+		XfDbgF("OnHotKey id=%d slotSeek=%d dual=%d dualEn=%ld active=%ld mode=%d",
+			(int)wp, slotSeek ? 1 : 0, dualSlot,
+			(long)InterlockedCompareExchange(&g_slotDualEnabled, 0, 0),
+			(long)InterlockedCompareExchange(&g_activeSlot, 0, 0), mode);
+
+		if (pMediaPosition && ((mode == -2 && hsc == 0) || ((mode > 0 || mode < -10) && videoonly == TRUE && hsc == 0))) {
+			int curpos = m_time.GetPos() + dir * 10 * 100;
+			if (curpos < minpos) curpos = minpos;
+			if (curpos > maxpos) curpos = maxpos;
+			m_time.SetPos(curpos);
+			hscroll_lock.unlock();
+			SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, 0), (LPARAM)m_time.GetSafeHwnd());
+			break;
+		}
+
+		if (slotSeek) {
+			PlaySlot& ss = g_playSlots[dualSlot];
+			const int slotMode = ss.openMode;
+			const int rate = (ss.rate > 0) ? ss.rate : ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
+			const __int64 oldPlayb = ss.playb;
+			const int oldUi = m_time.GetPos();
+			__int64 seekFrames = oldPlayb + (__int64)dir * (__int64)rate * 10;
+			if (ss.oggsize > 0 && seekFrames > (__int64)ss.oggsize) seekFrames = (__int64)ss.oggsize;
+			if (seekFrames < 0) seekFrames = 0;
+			int uiPos = (slotMode == -10) ? (int)(seekFrames / 100) : (int)seekFrames;
+			if (uiPos < minpos) uiPos = minpos;
+			if (uiPos > maxpos) uiPos = maxpos;
+			XfDbgF("OnHotKey dual oldPlayb=%lld seek=%lld oldUi=%d ui=%d rate=%d",
+				(long long)oldPlayb, (long long)seekFrames, oldUi, uiPos, rate);
+			hsc = 2;
+			InterlockedExchange(&g_seekUiFreshTick, (LONG)GetTickCount());
+			hscroll_lock.unlock();
+			const bool ok = PlaySlot_Seek(dualSlot, seekFrames);
+			if (ok) {
+				playb = seekFrames;
+				ss.playb = seekFrames;
+				m_time.SetPos(uiPos);
+				if (savedata.playerMode == 1) {
+					extern CMediaPlayerDlg* mp;
+					if (mp && ::IsWindow(mp->GetSafeHwnd()))
+						mp->MirrorSeekVol();
+				}
 			}
 			hsc = 0;
+			sflg = FALSE;
+			break;
+		}
+
+		/* 曲1レガシー */
+		int curpos = m_time.GetPos();
+		const int rate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+		if (mode == -10) {
+			__int64 frames = (__int64)curpos * 100 + (__int64)dir * (__int64)rate * 10;
+			if (oggsize > 0 && frames > (__int64)oggsize) frames = (__int64)oggsize;
+			if (frames < 0) frames = 0;
+			curpos = (int)(frames / 100);
 		}
 		else {
-			if (mode == -10) {
-				__int64 fb = (__int64)m_time.GetPos() * 100;
-				fb -= (__int64)wavbit_sample_Hz * (wavchannel == 2 ? 10 : 5);
-				if (fb < 0) fb = 0;
-				playb = fb;
-				m_time.SetPos((int)(playb / 100));
-				if (pMainFrame1) {
-					pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
-				}
-				ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-				ZeroMemory(bufkpi_, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-				ZeroMemory(bufkpi2, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-				ZeroMemory(bufkpi3, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-				ZeroMemory(bufkpi4, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
-				poss = 0;
-				if (ps == 0) {
-					OnPause();
-					ZeroMemory(bufwav3, sizeof(bufwav3));
-					syukai = 1; syukai2 = 0;
-					if (thn == FALSE) { hscroll_lock.unlock(); WaitForSyukai2OrPlaybackStop(); hscroll_lock.lock(); }
-					if (savedata.mp3orig) {
-						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
-					}
-					else {
-						if (mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { fade1 = 1; if (thn == FALSE) { if (m_dsb)m_dsb->Stop(); }return 0; }
-					}
-					poss = 0; sek = TRUE;
-					timer.SetEvent();
-					syukai = 0;
-					OnPause();
-				}
-				else {
-					if (savedata.mp3orig) {
-						if (mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { return 0; }
-					}
-					else {
-						if (mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel) == FALSE) { return 0; }
-					}
-				}
-				poss = 0;
-				break;
-			}
-			playb -= wavbit_sample_Hz * (wavchannel == 2 ? 10 : 5);
-			if ((loop1 + loop2) < (int)playb && endf == 0) playb = (loop1 + loop2);
-			if (mode != -10)m_time.SetPos((int)playb);
-			if (pMainFrame1) {
-				pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
-			}
-			if (ModeUsesSeekAdpcm(mode)) {
-				seekadpcm((int)playb);
-				sek = TRUE;
-				timer.SetEvent();
-			}
-			else if (mode == -3) {
-				if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-					uint64_t np = 0;
-					g_kpiHost.Seek(g_kpiSession.sessionId, (uint64_t)playb, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
-					ResetKpiRemoteCache();
-					sek = TRUE;
-					timer.SetEvent();
-				}
-				else if (mod) {
-					if (mod->SetPosition && sikpi.dwSeekable) mod->SetPosition(kmp1, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
-					sek = TRUE;
-					timer.SetEvent();
-				}
-			}
-			else {
-				ov_pcm_seek_lap(&vf, (ogg_int64_t)playb);
-				sek = TRUE;
-				timer.SetEvent();
-			}
-			poss = 0;
+			__int64 pos = (__int64)curpos + (__int64)dir * (__int64)rate * 10;
+			if (pos < 0) pos = 0;
+			curpos = (int)pos;
 		}
+		if (curpos < minpos) curpos = minpos;
+		if (curpos > maxpos) curpos = maxpos;
+		XfDbgF("OnHotKey legacy SetPos %d -> HSCROLL", curpos);
+		m_time.SetPos(curpos);
+		hscroll_lock.unlock();
+		SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, 0), (LPARAM)m_time.GetSafeHwnd());
 		break;
+	}
 	}
 	return 0;
 }
 
 void COggDlg::rl(int a)
 {
+	/* 昇格後はグローバルデコーダ閉鎖済み → PlaySlot へ。旧経路は UI だけ動いて音が変わらない */
+	int dualSlot = -1;
+	bool slotSeek = PlaySlot_IsDualSeekTarget(&dualSlot);
+	if (!slotSeek && InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0) {
+		dualSlot = (int)InterlockedCompareExchange(&g_activeSlot, 0, 0);
+		if (dualSlot >= 0 && dualSlot < PLAY_SLOT_COUNT
+			&& g_playSlots[dualSlot].dsb
+			&& g_playSlots[dualSlot].openMode != INT_MIN)
+			slotSeek = true;
+	}
+	if (slotSeek) {
+		PlaySlot& ss = g_playSlots[dualSlot];
+		const int rate = (ss.rate > 0) ? ss.rate : ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
+		__int64 seekFrames = ss.playb + (__int64)a * (__int64)rate * 10;
+		if (ss.oggsize > 0 && seekFrames > (__int64)ss.oggsize) seekFrames = (__int64)ss.oggsize;
+		if (seekFrames < 0) seekFrames = 0;
+		XfDbgF("rl dual a=%d seek=%lld", a, (long long)seekFrames);
+		hsc = 2;
+		if (PlaySlot_Seek(dualSlot, seekFrames)) {
+			playb = seekFrames;
+			ss.playb = seekFrames;
+			int ui = (ss.openMode == -10) ? (int)(seekFrames / 100) : (int)seekFrames;
+			m_time.SetPos(ui);
+		}
+		hsc = 0;
+		poss = 0;
+		return;
+	}
+
 	if (pMediaPosition && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
 		int minp = 0, maxp = 0;
 		m_time.GetRange(minp, maxp);
@@ -22517,6 +23236,30 @@ LRESULT COggDlg::OnSongParamRestore(WPARAM, LPARAM lParam)
 LRESULT COggDlg::OnSongParamMarks(WPARAM, LPARAM)
 {
 	SongParams_NotifyListMarksChanged();
+	return 0;
+}
+
+LRESULT COggDlg::OnProAudioCueSeek(WPARAM, LPARAM lParam)
+{
+	const int frame = (int)lParam;
+	if (frame < 0) return 0;
+	if (!m_time.GetSafeHwnd()) return 0;
+	int mn = 0, mx = 0;
+	m_time.GetRange(mn, mx);
+	if (mx <= mn) return 0;
+	int pos = frame;
+	if (pos > mx) {
+		// スライダーが /100 縮尺、または loop2 全体との比率縮尺
+		const int scaled100 = frame / 100;
+		if (scaled100 >= mn && scaled100 <= mx)
+			pos = scaled100;
+		else if (loop2 > 0)
+			pos = (int)((__int64)frame * (__int64)(mx - mn) / (__int64)loop2) + mn;
+	}
+	if (pos < mn) pos = mn;
+	if (pos > mx) pos = mx;
+	m_time.SetPos(pos);
+	OnHScroll(SB_ENDSCROLL, 0, (CScrollBar*)&m_time);
 	return 0;
 }
 

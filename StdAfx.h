@@ -368,6 +368,23 @@ struct save{
 
 	// --- EQコード表示更新間隔(ms)。レンダリング画面で設定。16..500、既定25 ---
 	int eqCodeMs;
+
+	// --- 再生詳細 / ProAudio モジュール設定(末尾追記。旧.datは0初期化→起動時に妥当値へ正規化) ---
+	int pro_gapless;       // 1=ギャップレス経路を使う
+	int pro_xfade_ms;      // 撤去済み（常に0。互換のためフィールドのみ残す）
+	int pro_rg_mode;       // 0=Off 1=Track 2=Album
+	int pro_rg_target;     // 目標ラウドネス(負値 dB、既定-18)
+	int pro_ms_width;      // Mid/Side 幅 0..200 (100=中立)
+	int pro_ms_mono;       // 1=モノ互換チェック(Side=0)
+	int pro_export_limit;  // 1=WAV書き出しでリミッター
+	int pro_export_ceiling;// 天井% 50..100 (既定99)
+	int pro_export_tp;     // 1=True Peak 判定
+	int pro_corr_meter;    // 1=アナライザーに相関メーター
+
+	// --- mp3/FLAC 書き出し(末尾追記) ---
+	int tc_format;         // 0=mp3 1=FLAC
+	int tc_mp3_kbps;       // 128..320
+	int tc_flac_level;     // 0..8
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

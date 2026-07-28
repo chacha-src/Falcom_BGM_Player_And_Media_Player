@@ -1,4 +1,4 @@
-﻿//{{NO_DEPENDENCIES}}
+//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ で生成されたインクルード ファイル。
 // ogg.rc で使用
 //
@@ -73,6 +73,7 @@
 #define IDD_IMAGE                       191
 #define IDD_EQUALIZER                   194
 #define IDD_WAVEXPORT                   195
+#define IDD_TRANSCODE                   207
 #define IDD_KPI5CFG                     196
 #define IDD_PIANOROLL                   198
 #define IDD_ANALYZER                    202
@@ -693,6 +694,7 @@
 #define IDD_MP_PROMPT                   203
 
 #define IDC_MP_PROMPT                   3491
+#define IDC_MP_PRO                      3492
 #define IDC_MPP_TEXT                    3492
 #define IDC_MPP_LEGEND                  3493
 #define IDC_MPP_REMAIN                  3494
@@ -749,13 +751,80 @@
 #define IDC_SLIDER_EQCODE               3546
 #define IDC_STATIC_EQCODE_MS            3547
 
+#define IDD_PROTOOLS                    206
+#define IDC_PRO_GAPLESS                 3548
+#define IDC_PRO_XFADE                   3549
+#define IDC_PRO_XFADE_L                 3550
+#define IDC_PRO_RGMODE                  3551
+#define IDC_PRO_RGMODE_L                3552
+#define IDC_PRO_RGTARGET                3553
+#define IDC_PRO_RGTARGET_L              3554
+#define IDC_PRO_MSWIDTH                 3555
+#define IDC_PRO_MSVAL                   3556
+#define IDC_PRO_MSMONO                  3557
+#define IDC_PRO_EXPLIMIT                3558
+#define IDC_PRO_EXPCEIL                 3559
+#define IDC_PRO_EXPTP                   3560
+#define IDC_PRO_CORR                    3561
+#define IDC_PRO_CUES                    3562
+#define IDC_PRO_CUEADD                  3563
+#define IDC_PRO_CUEDEL                  3564
+#define IDC_PRO_CUEJUMP                 3565
+#define IDC_PRO_LOOPIN                  3566
+#define IDC_PRO_LOOPOUT                 3567
+#define IDC_PRO_LOOPFADE                3568
+#define IDC_PRO_LOOPIN_L                3569
+#define IDC_PRO_LOOPOUT_L               3570
+#define IDC_PRO_LOOPFADE_L              3571
+#define IDC_PRO_LOOPIN_BTN              3572
+#define IDC_PRO_LOOPOUT_BTN             3573
+#define IDC_PRO_WAVE                    3574
+#define IDC_PRO_APPLY                   3575
+#define IDC_PRO_WRITETAG                3576
+#define IDC_PRO_TAG_TITLE               3577
+#define IDC_PRO_TAG_ARTIST              3578
+#define IDC_PRO_TAG_ALBUM               3579
+#define IDC_PRO_TAG_YEAR                3580
+#define IDC_PRO_TAG_TRACK               3581
+#define IDC_PRO_TAG_GENRE               3582
+#define IDC_PRO_TAG_COMMENT             3583
+#define IDC_PRO_TAG_TITLE_L             3584
+#define IDC_PRO_TAG_ARTIST_L            3585
+#define IDC_PRO_TAG_ALBUM_L             3586
+#define IDC_PRO_GRP_PLAY                3587
+#define IDC_PRO_GRP_LOOP                3588
+#define IDC_PRO_GRP_TAG                 3589
+#define IDC_PRO_MSWIDTH_L               3590
+#define IDC_EQ_ABA                      3591
+#define IDC_EQ_ABB                      3592
+#define IDC_EQ_ABTOG                    3593
+
+#define IDC_TC_FORMAT_L                 3594
+#define IDC_TC_FORMAT                   3595
+#define IDC_TC_QUALITY_L                3596
+#define IDC_TC_QUALITY                  3597
+#define IDC_TC_LOOP_L                   3598
+#define IDC_TC_LOOP                     3599
+#define IDC_TC_PATH_L                   3600
+#define IDC_TC_PATH                     3601
+#define IDC_TC_BROWSE                   3602
+#define IDC_TC_FADE                     3603
+#define IDC_TC_FADE_SEC                 3604
+#define IDC_TC_FADE_L                   3605
+#define IDC_TC_TRIM                     3606
+#define IDC_TC_TRIM_SEC                 3607
+#define IDC_TC_TRIM_L                   3608
+#define IDC_TC_EXEC                     3609
+#define IDC_TC_CLOSE                    3610
+#define IDC_TC_STATUS                   3611
+
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        206
+#define _APS_NEXT_RESOURCE_VALUE        208
 #define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3548
+#define _APS_NEXT_CONTROL_VALUE         3612
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

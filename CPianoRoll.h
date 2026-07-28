@@ -19,7 +19,6 @@
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include "NoteEnvelopeModel.h"
-#include <vector>
 
 class CPianoRoll : public CCustomBlurDialogExBase
 {
@@ -54,6 +53,7 @@ public:
     void DetachForDestroy();
 
     static constexpr int PIANO_METER_CH_MAX = 8;       // レベルメーターの最大チャンネル数
+    static constexpr int RING_SIZE = 131072;           // 解析キャプチャ上限サンプル数
 
     // 44100 Hz 基準の Goertzel 窓(サンプル数)。実際の窓長は ScaleWinSamples でレートに比例。
     // 低音だけ 16384 にすると窓中心が ~185ms 遅れ、中高(8192/4096)とタイミングがずれて
@@ -157,7 +157,6 @@ private:
 
     // ---- 分析バッファ / 履歴 ----
     static constexpr size_t MAX_HISTORY = 120;       // ロール上に表示するフレーム行数(上限)
-    static constexpr int   RING_SIZE = 131072;    // PCM インプットのリングバッファサイズ(サンプル数)
 
     // ---- Goertzel 窓サイズ(サンプル数・実行時) ----
     // 44100 Hz 基準長を REF_SAMPLE_RATE に比例スケール(EnsureAnalysisTables で設定)
@@ -253,20 +252,22 @@ private:
     // は自分自身のアタックを持たないため、これを要求するだけで振幅に関係なく弾ける。
     static constexpr uint8_t kHarmonicGhostConfirmFrames = 3;
 
-    // ---- PCM インプット / リングバッファ(m_cs で保護) ----
-    std::vector<double> m_ring;
+    // ---- PCM インプット（FeedPCM は現状 no-op。リングは廃止）----
     int                 m_ringWrite = 0;
     int                 m_ringCount = 0;
     int                 m_inputSampleRate = 44100;
     int                 m_samplesSinceAnalyze = 0;   // 前回分析からのサンプル数(ANALYZE_INTERVAL トリガー用)
     int                 m_playbackDelaySamples = 0;  // 再生バッファ遅延の補正値(IIR 平均)
+    bool                m_analysisTablesReady = false;
 
     // ---- Goertzel 係数 / 窓関数(サンプルレート変化時に再計算) ----
-    std::vector<double> m_goertzelCoeffs;   // 2*cos(2π*f/sr) の事前計算値
-    std::vector<double> m_hannLow;
-    std::vector<double> m_hannOnset;
-    std::vector<double> m_hannBass;
-    std::vector<double> m_blackmanHigh;     // 高域はサイドローブ抑制のため Blackman 窓
+    // ScaleWinSamples の絶対上限 = RING_SIZE。std::vector 禁止（長時間断片化防止）
+    static constexpr int WIN_SAMPLES_MAX = RING_SIZE;
+    double m_goertzelCoeffs[KEY_COUNT];   // 2*cos(2π*f/sr) の事前計算値
+    double m_hannLow[WIN_SAMPLES_MAX];
+    double m_hannOnset[WIN_SAMPLES_MAX];
+    double m_hannBass[WIN_SAMPLES_MAX];
+    double m_blackmanHigh[WIN_SAMPLES_MAX];     // 高域はサイドローブ抑制のため Blackman 窓
 
     // ---- 前フレーム値 / 表現記号検出用 ----
     float m_prevRawStrengths[KEY_COUNT];
@@ -281,12 +282,12 @@ private:
     uint8_t m_vibHistCount[KEY_COUNT];
     static constexpr int VIB_HIST_LEN = 16;
     bool  m_analysisHasBass = false;
-    std::vector<double> m_analysisBuf;
-    std::vector<double> m_bassAnalysisBuf;
-    std::vector<double> m_windowedLow;
-    std::vector<double> m_windowedBass;
-    std::vector<double> m_windowedHigh;
-    std::vector<double> m_windowedOnset;
+    double m_analysisBuf[WIN_SAMPLES_MAX];
+    double m_bassAnalysisBuf[WIN_SAMPLES_MAX];
+    double m_windowedLow[WIN_SAMPLES_MAX];
+    double m_windowedBass[WIN_SAMPLES_MAX];
+    double m_windowedHigh[WIN_SAMPLES_MAX];
+    double m_windowedOnset[WIN_SAMPLES_MAX];
 
     // ---- 分析ワーカースレッド ----
     // 再生スレッドからのジョブを受け取り Goertzel 解析を行う専用スレッド。
@@ -299,8 +300,8 @@ private:
     volatile LONG    m_jobPending = 0;    // InterlockedExchange で管理するジョブ有無フラグ
     volatile LONG    m_analysisBusy = 0;  // ProcessAnalysisJob 実行中
     volatile LONG    m_analysisEpoch = 0; // Reset ごとに加算。古いジョブを破棄
-    std::vector<double> m_jobMono;  // m_jobCs 保護下でコピーされる入力バッファ
-    std::vector<double> m_workerMonoScratch;
+    double           m_jobMono[WIN_SAMPLES_MAX];  // m_jobCs 保護下でコピーされる入力バッファ
+    double           m_workerMonoScratch[WIN_SAMPLES_MAX];
     int              m_jobFrameCount = 0;
     int              m_jobSampleRate = 44100;
     double           m_goertzelRawScratch[KEY_COUNT];

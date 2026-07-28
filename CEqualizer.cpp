@@ -5,6 +5,7 @@
 #include "ogg.h"
 #include "afxdialogex.h"
 #include "CEqualizer.h"
+#include "ProAudio.h"
 
 
 // CEqualizer ダイアログ
@@ -91,6 +92,9 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 	bind(pDX, IDC_STATIC_e20, m_reverbi);
 	bind(pDX, IDC_STATIC_e21, m_chorusi);
 	bind(pDX, IDC_STATIC_e22, m_delayi);
+	bind(pDX, IDC_EQ_ABA, m_abA);
+	bind(pDX, IDC_EQ_ABB, m_abB);
+	bind(pDX, IDC_EQ_ABTOG, m_abTog);
 }
 
 
@@ -103,6 +107,9 @@ BEGIN_MESSAGE_MAP(CEqualizer, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDOK3, &CEqualizer::OnBnClickedOk3)
 	ON_BN_CLICKED(IDOK, &CEqualizer::OnBnClickedOk)
 	ON_BN_CLICKED(IDOK4, &CEqualizer::OnBnClickedOk4)
+	ON_BN_CLICKED(IDC_EQ_ABA, &CEqualizer::OnBnClickedAbA)
+	ON_BN_CLICKED(IDC_EQ_ABB, &CEqualizer::OnBnClickedAbB)
+	ON_BN_CLICKED(IDC_EQ_ABTOG, &CEqualizer::OnBnClickedAbTog)
 END_MESSAGE_MAP()
 
 extern save savedata;
@@ -229,6 +236,9 @@ BOOL CEqualizer::OnInitDialog()
 	addTip(IDC_SLIDER27, LL14(L"立体感（空間感）を調整します（左の数値が現在値）", L"Adjust spatial width (number at left is current value)", L"Ajuster l'espace stereo (nombre a gauche = valeur actuelle)", L"Regola spazialita (numero a sinistra = valore attuale)", L"Ajustar amplitud espacial (numero a la izquierda = valor actual)", L"입체감 조정(왼쪽 숫자가 현재값)", L"调整立体感（左侧数字为当前值）", L"ضبط العرض المكاني (الرقم على اليسار = القيمة الحالية)", L"Настроить пространственность (число слева — текущее значение)", L"Raumlichkeit einstellen (Zahl links = aktueller Wert)", L"Ajustar espacialidade (numero a esquerda = valor atual)", L"Ruimtelijkheid instellen (getal links = huidige waarde)", L"Reguluj przestrzennosc (liczba po lewej = biezaca wartosc)", L"Mekansal genisligi ayarla (soldaki sayi guncel deger)"));
 	addTip(IDC_COMBO1, LL14(L"再生環境（部屋の響き）プリセットを選択します", L"Select acoustic environment preset", L"Choisir le preset d'environnement acoustique", L"Seleziona preset ambiente acustico", L"Seleccionar preset de entorno acustico", L"재생 환경(음향) 프리셋 선택", L"选择播放环境（混响）预设", L"اختر إعداد البيئة الصوتية", L"Выбрать пресет акустической среды", L"Akustische Umgebungsvoreinstellung wahlen", L"Selecionar preset de ambiente acustico", L"Akoestische omgevingspreset kiezen", L"Wybierz preset srodowiska akustycznego", L"Akustik ortam on ayarini sec"));
 	addTip(IDC_COMBO5, LL14(L"イコライザープリセットを選択します", L"Select equalizer preset", L"Choisir un preset d'egaliseur", L"Seleziona preset equalizzatore", L"Seleccionar preset del ecualizador", L"이퀄라이저 프리셋 선택", L"选择均衡器预设", L"اختر إعداد المعادل", L"Выбрать пресет эквалайзера", L"Equalizer-Voreinstellung wahlen", L"Selecionar preset do equalizador", L"Equalizerpreset kiezen", L"Wybierz preset korektora", L"Ekolayzer on ayarini sec"));
+	addTip(IDC_EQ_ABA, LL14(L"現在のEQ/グローバル値をスロットAに保存", L"Store current EQ/global values to slot A", L"Enregistrer EQ/global dans A", L"Salva EQ/global in A", L"Guardar EQ/global en A", L"현재 EQ/전역을 A에 저장", L"将当前EQ/全局存到A", L"حفظ EQ/العام في A", L"Сохранить EQ/глобальные в A", L"EQ/Global in A speichern", L"Salvar EQ/global em A", L"EQ/globaal in A opslaan", L"Zapisz EQ/globalne w A", L"EQ/global degerleri A'ya kaydet"));
+	addTip(IDC_EQ_ABB, LL14(L"現在のEQ/グローバル値をスロットBに保存", L"Store current EQ/global values to slot B", L"Enregistrer EQ/global dans B", L"Salva EQ/global in B", L"Guardar EQ/global en B", L"현재 EQ/전역을 B에 저장", L"将当前EQ/全局存到B", L"حفظ EQ/العام في B", L"Сохранить EQ/глобальные в B", L"EQ/Global in B speichern", L"Salvar EQ/global em B", L"EQ/globaal in B opslaan", L"Zapisz EQ/globalne w B", L"EQ/global degerleri B'ye kaydet"));
+	addTip(IDC_EQ_ABTOG, LL14(L"スロットA/Bを切り替え", L"Toggle between slots A and B", L"Basculer entre A et B", L"Alterna tra A e B", L"Alternar entre A y B", L"A/B 슬롯 전환", L"在A/B槽间切换", L"التبديل بين A و B", L"Переключить A/B", L"Zwischen A und B umschalten", L"Alternar entre A e B", L"Wissel tussen A en B", L"Przelacz A/B", L"A/B arasinda gec"));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
 	m_s0.SetMode(1);
@@ -564,7 +574,8 @@ BOOL CEqualizer::OnInitDialog()
 	ApplyKeyCodesUi();
 
 	SetTimer(1, 50, NULL);
-	EnableMainWindowLock(&savedata.eqMainLock, FALSE);
+	EnableMainWindowLock(&savedata.eqMainLock, TRUE);
+	CCC_MainLockSetHeaderRow(m_hWnd, 0, 18);
 	CCC_MainLockBringToFront(m_hWnd);
 	return TRUE;
 }
@@ -642,20 +653,31 @@ void CEqualizer::ApplyKeyCodesUi()
 		SnapshotEqKeyCodes(keyLow, keyMid, keyHigh, keyAll);
 	}
 
+	// 接頭辞は固定。毎回 LL14+一時 CString を作ると長時間でヒープを汚す。
+	static CString s_pfxLow, s_pfxMid, s_pfxHigh, s_pfxAll;
+	static bool s_pfxInit = false;
+	if (!s_pfxInit) {
+		s_pfxLow = LL14(L"低音域：", L"Low: ", L"Graves : ", L"Bassi: ", L"Graves: ", L"저음: ", L"低音：", L"المنخفضة: ", L"Низкие: ", L"Bässe: ", L"Graves: ", L"Lage: ", L"Niskie: ", L"Bas: ");
+		s_pfxMid = LL14(L"中音域：", L"Mid: ", L"Médiums : ", L"Medi: ", L"Medios: ", L"중음: ", L"中音：", L"المتوسطة: ", L"Средние: ", L"Mitten: ", L"Médios: ", L"Midden: ", L"Średnie: ", L"Orta: ");
+		s_pfxHigh = LL14(L"高音域：", L"High: ", L"Aigus : ", L"Alti: ", L"Agudos: ", L"고음: ", L"高音：", L"العالية: ", L"Высокие: ", L"Höhen: ", L"Agudos: ", L"Hoge: ", L"Wysokie: ", L"Tiz: ");
+		s_pfxAll = LL14(L"全音域：", L"All: ", L"Toutes : ", L"Tutte: ", L"Todas: ", L"전체: ", L"全频段：", L"الكل: ", L"Все: ", L"Alle: ", L"Todas: ", L"Alles: ", L"Wszystkie: ", L"Tümü: ");
+		s_pfxInit = true;
+	}
+
 	if (m_cachedKeyLow != keyLow) {
-		m_keyLow.SetWindowText(CString(LL14(L"低音域：", L"Low: ", L"Graves : ", L"Bassi: ", L"Graves: ", L"저음: ", L"低音：", L"المنخفضة: ", L"Низкие: ", L"Bässe: ", L"Graves: ", L"Lage: ", L"Niskie: ", L"Bas: ")) + keyLow);
+		m_keyLow.SetWindowText(s_pfxLow + keyLow);
 		m_cachedKeyLow = keyLow;
 	}
 	if (m_cachedKeyMid != keyMid) {
-		m_keyMid.SetWindowText(CString(LL14(L"中音域：", L"Mid: ", L"Médiums : ", L"Medi: ", L"Medios: ", L"중음: ", L"中音：", L"المتوسطة: ", L"Средние: ", L"Mitten: ", L"Médios: ", L"Midden: ", L"Średnie: ", L"Orta: ")) + keyMid);
+		m_keyMid.SetWindowText(s_pfxMid + keyMid);
 		m_cachedKeyMid = keyMid;
 	}
 	if (m_cachedKeyHigh != keyHigh) {
-		m_keyHigh.SetWindowText(CString(LL14(L"高音域：", L"High: ", L"Aigus : ", L"Alti: ", L"Agudos: ", L"고음: ", L"高音：", L"العالية: ", L"Высокие: ", L"Höhen: ", L"Agudos: ", L"Hoge: ", L"Wysokie: ", L"Tiz: ")) + keyHigh);
+		m_keyHigh.SetWindowText(s_pfxHigh + keyHigh);
 		m_cachedKeyHigh = keyHigh;
 	}
 	if (m_cachedKeyAll != keyAll) {
-		m_keyAll.SetWindowText(CString(LL14(L"全音域：", L"All: ", L"Toutes : ", L"Tutte: ", L"Todas: ", L"전체: ", L"全频段：", L"الكل: ", L"Все: ", L"Alle: ", L"Todas: ", L"Alles: ", L"Wszystkie: ", L"Tümü: ")) + keyAll);
+		m_keyAll.SetWindowText(s_pfxAll + keyAll);
 		m_cachedKeyAll = keyAll;
 	}
 }
@@ -964,3 +986,21 @@ void CEqualizer::OnBnClickedOk4()
 	m_delayi.SetWindowText(s);
 }
 
+
+void CEqualizer::OnBnClickedAbA()
+{
+	ProAudio_AbCapture(0);
+}
+
+void CEqualizer::OnBnClickedAbB()
+{
+	ProAudio_AbCapture(1);
+}
+
+void CEqualizer::OnBnClickedAbTog()
+{
+	ProAudio_AbToggle();
+	SyncSlidersFromSavedata();
+	if (m_pre.GetSafeHwnd()) m_pre.SetCurSel(savedata.eqsoundeq);
+	if (m_env.GetSafeHwnd()) m_env.SetCurSel(savedata.eqsoundenv);
+}
