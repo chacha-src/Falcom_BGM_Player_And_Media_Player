@@ -384,8 +384,6 @@ public:
 	afx_msg LRESULT OnSongParamRestore(WPARAM wParam, LPARAM lParam); // 曲ごとパラメータ復元(再生スレッド→メイン)
 	afx_msg LRESULT OnSongParamMarks(WPARAM wParam, LPARAM lParam);   // ★列再描画
 	afx_msg LRESULT OnProAudioCueSeek(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnXfadePrefetch(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnXfadePromote(WPARAM wParam, LPARAM lParam);
 	HANDLE m_hTimerpVsyncThread;
 	HANDLE m_hTimerpVsyncStopEvent;
 };

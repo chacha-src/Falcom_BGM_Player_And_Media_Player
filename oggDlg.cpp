@@ -87,9 +87,14 @@ int g_kpiSourceBitsPerSample = 16;
 #include "UpdateCheck.h"
 #include "SongParams.h"
 #include "ProAudio.h"
-#include "ProXfadeDual.h"
-#include "PlaySlot.h"
-#include "XfDebugLog.h"
+
+void PlaybackCcClearFormat();
+void PlaybackCcLockFormat(int rate, int ch, int bits);
+bool PlaybackCcFormatLocked();
+void PlaybackCcGetFormat(int& rate, int& ch, int& bits);
+void PlaybackCcWrite(const void* p, UINT n);
+void PlaybackCcWriteForced(const void* p, UINT n);
+
 #include "codec/neaacdec.h"
 #include "m4a.h"
 #include "flac.h"
@@ -459,8 +464,6 @@ static inline int ActiveDecodeMode()
 LPDIRECTSOUND8 m_ds;
 LPDIRECTSOUNDBUFFER m_dsb1 = NULL;
 LPDIRECTSOUNDBUFFER8 m_dsb = NULL;
-LPDIRECTSOUNDBUFFER m_dsbXfade1 = NULL;
-LPDIRECTSOUNDBUFFER8 m_dsbXfade = NULL;
 LPDIRECTSOUND3DBUFFER m_dsb3d = NULL;
 
 LPDIRECTSOUNDBUFFER m_p;
@@ -1258,8 +1261,6 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 
 	ON_MESSAGE(WM_APP + 1, dp1)
 	ON_MESSAGE(WM_APP + 2, dp2)
-	ON_MESSAGE(WM_OGG_XFADE_PREFETCH, &COggDlg::OnXfadePrefetch)
-	ON_MESSAGE(WM_OGG_XFADE_PROMOTE, &COggDlg::OnXfadePromote)
 	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
 	ON_MESSAGE(WM_SPEANA_TICK, &COggDlg::OnSpeanaTick)
 	ON_MESSAGE(WM_ENDPOINT_VOLUME, &COggDlg::OnEndpointVolume)
@@ -1729,9 +1730,7 @@ void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
 static volatile LONG s_restartMsgQueued = 0;
 static volatile LONG s_restartWanted = 0;
 // 二重DS昇格の soft play() 実行中。この間の Restart 再キューは頭出しデグレの原因なので捨てる。
-static volatile LONG s_xfadeSoftPlay = 0;
 // Promote で確定したスキップ。atomic が消えても play() で頭出ししない。
-static volatile LONG s_xfadeStickySkipFrames = 0;
 
 // WM_APP+2(再演奏)を 1 件にまとめる。リストで曲を連打しても stop/play が直列に
 // 何十回も走らないようにする(キュー溜めによる UI 固まり対策)。
@@ -1742,9 +1741,6 @@ void RequestPlaybackRestart(HWND hwnd)
 			hwnd = og->GetSafeHwnd();
 	}
 	if (!hwnd || !::IsWindow(hwnd))
-		return;
-	// soft play() 実行中の重複だけ捨てる。keep 中は OnXfadePromote からの正規 Restart を通す。
-	if (InterlockedCompareExchange(&s_xfadeSoftPlay, 0, 0) != 0)
 		return;
 	InterlockedExchange(&s_restartWanted, 1);
 	if (InterlockedCompareExchange(&s_restartMsgQueued, 1, 0) == 0)
@@ -3085,7 +3081,6 @@ BOOL COggDlg::OnInitDialog()
 	aa1_ = 0.0;
 	hDLLk = NULL;
 	mp3_.mp3init();
-	PlaySlot_InitAll();
 
 
 	m_tempo_sl.SetMode(1);
@@ -6969,80 +6964,7 @@ void COggDlg::play()
 		return;
 	s_inPlay = true;
 	struct ClearInPlay { ~ClearInPlay() { s_inPlay = false; } } _clearInPlay;
-
-	// DoEvent で keep/skip が消されても昇格を完遂できるよう、入口でスナップショット
-	const bool xfadeKeepSnap = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
-	const int xfadeSkipSnap = (int)InterlockedCompareExchange(&g_xfadeSkipFrames, 0, 0);
-
-	// 昇格 soft play 中は二重 Restart を抑止。終了時に wanted も捨てる。
-	struct XfadeSoftPlayGuard {
-		bool on;
-		XfadeSoftPlayGuard(bool v) : on(v) {
-			if (on) InterlockedExchange(&s_xfadeSoftPlay, 1);
-		}
-		~XfadeSoftPlayGuard() {
-			if (on) {
-				InterlockedExchange(&s_xfadeSoftPlay, 0);
-				InterlockedExchange(&s_restartWanted, 0);
-			}
-		}
-	} _xfadeSoftPlay(xfadeKeepSnap);
-
 	// 二重DS昇格: Open 中の無音を防ぐため、最初に B を再生し直す
-	if (xfadeKeepSnap && m_dsb) {
-		LONG v = (savedata.dsvol - 1) * 10;
-		if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
-		if (v > 0) v = 0;
-		if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
-		m_dsb->SetVolume(v);
-		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
-	}
-
-	// 共有状態を触る前に旧再生を止める（Get() 後でも g_openDecoderMode で正しい形式を閉じる）
-	KillTimer(1250);
-	KillTimer(9000);
-	// stop1 失敗でも再生は続行する。ここで return すると CWread に入らず
-	// 0:00/古い loop1,2 のままになる（mode 30 で顕在化）。
-	// 曲切替中は Join 上限付き(無限待ちだと通知スレッド固着で UI 永久停止)。
-	InterlockedExchange(&g_interactiveTrackChange, 1);
-	(void)stop1();
-	InterlockedExchange(&g_interactiveTrackChange, 0);
-	// CWread が thend1 を見て即 return しないよう、開始前に必ず下ろす
-	thend1 = FALSE;
-	thend = 0;
-	thn1 = FALSE;
-	stf = 0;
-	if (MpPromptIsActive() || MpPromptHasBackup())
-		MpPromptOnTrackChange();
-	eqflg = FALSE;
-	mode = modesub;
-
-	reset = TRUE;
-	stflg = FALSE;
-	CheckMixerMuteOnPlayModal();
-	//	if (((modesub > 0 && modesub < 22) || (modesub > -16 && modesub < -10))) {
-#if 0
-	if (gameon == 1) {
-		if (playbase)
-			::SetWindowPos(playbase->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		if (pl)
-			::SetWindowPos(pl->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		if (maini)
-			::SetWindowPos(maini->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-	}
-	else {
-		if (maini)
-			::SetWindowPos(maini->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		::SetWindowPos(og->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		if (playbase)
-			::SetWindowPos(playbase->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		if (pl)
-			::SetWindowPos(pl->m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-	}
-	gameon = 1;
-#endif
-	//	}
 	muon = MUON;
 	kpi_silence_bytes = 0;
 	rrr = 1;
@@ -8250,19 +8172,8 @@ void COggDlg::play()
 	}
 	} // mode != 30 (ys8/ysc/零軌 loop)
 	//-------------------------------------------------------------------
-	// 二重DS昇格中は B を破棄しない（ここで Release すると切替無音＋曲2頭出しになる）
-	if (!xfadeKeepSnap) {
-		if (m_dsb != NULL) m_dsb->Release();
-		m_dsb = NULL;
-	}
-	else if (m_dsb) {
-		LONG v = (savedata.dsvol - 1) * 10;
-		if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
-		if (v > 0) v = 0;
-		if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
-		m_dsb->SetVolume(v);
-		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
-	}
+	if (m_dsb != NULL) m_dsb->Release();
+	m_dsb = NULL;
 	//	char bufdmy[10000];
 	ZeroMemory(bufwav3, sizeof(bufwav3));
 	DWORD  dwDataLen = WAVDALen / OUTPUT_BUFFER_NUM;
@@ -9864,8 +9775,7 @@ void COggDlg::play()
 	// 連続クロスフェード中は song1 で開いたファイルへ追記（閉じない）
 	// ヘッダ形式は ConfigurePlaybackOutputAndUpscaler 後に確定して書き込む
 	bool ccOpenedThisPlay = false;
-	if (m_c2.GetCheck() == 1 && wavExportPath.GetLength() == 0
-		&& !(cc1 == 1 && InterlockedCompareExchange(&g_xfadeHoldCcFile, 0, 0) != 0))
+	if (m_c2.GetCheck() == 1 && wavExportPath.GetLength() == 0)
 	{
 		cc1 = 1;
 		CString outPath = BuildWavExportOutputPath(filen);
@@ -10017,10 +9927,6 @@ void COggDlg::play()
 		return;
 	}
 	//if (pAudioClient == NULL) {
-	// keep は入口スナップショット。Exchange で消えても昇格経路を維持する。
-	// ※ keep フラグ自体は BeginPlayback 後まで残す（Open 中の誤 Stop/timer9000 防止）
-	const bool xfadeReuseDsb = xfadeKeepSnap && (m_dsb != NULL);
-	if (!xfadeReuseDsb) {
 	DSBUFFERDESC dsbd;
 	flg0 = 0;
 	for (;;) {
@@ -10333,9 +10239,7 @@ void COggDlg::play()
 			}
 			break;
 		}
-	}
-	} // !xfadeReuseDsb
-	//}
+	}	//}
 	//else {
 	//		if (wavchannel > 2)
 	//		WASAPIChange((LPWAVEFORMATEX)&wfx);
@@ -10403,349 +10307,145 @@ void COggDlg::play()
 			g_expectedDsBytes = (__int64)(sec * (double)dsRate + 0.5) * (__int64)dsBpf;
 		}
 	}
-	if (xfadeReuseDsb && m_dsb) {
-		// 二重DS昇格: バッファBを維持し、先読み分をシークしてフィード継続
-		// B の実フォーマットに合わせて g_ds_pcm_* を同期（曲1のまま書くと間・ノイズの原因）
-		{
-			WAVEFORMATEX bfx;
-			ZeroMemory(&bfx, sizeof(bfx));
-			DWORD bfxSz = 0;
-			if (SUCCEEDED(m_dsb->GetFormat(&bfx, sizeof(bfx), &bfxSz)) && bfx.nSamplesPerSec > 0) {
-				g_ds_pcm_rate = (int)bfx.nSamplesPerSec;
-				g_ds_pcm_ch = (int)((bfx.nChannels > 0) ? bfx.nChannels : 2);
-				g_ds_pcm_bits = (int)((bfx.wBitsPerSample >= 8) ? bfx.wBitsPerSample : 16);
-			}
-			int srcBits = abs(wavsam_depth);
-			if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
-				srcBits = 16;
-			g_audioUpscaler.Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
-			g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
-			g_audioUpscaler.Reset();
-		}
-		// 先読み長だけの短い B を主リングにすると ~6s でバッファ外書き→クラッシュ
-		{
-			extern ULONG g_ds_buffer_bytes;
-			DSBCAPS caps;
-			ZeroMemory(&caps, sizeof(caps));
-			caps.dwSize = sizeof(caps);
-			const ULONG need = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
-			if (SUCCEEDED(m_dsb->GetCaps(&caps)) && caps.dwBufferBytes + 1024 < need && m_ds) {
-				WAVEFORMATEX wfx;
-				ZeroMemory(&wfx, sizeof(wfx));
-				DWORD wsz = 0;
-				m_dsb->GetFormat(&wfx, sizeof(wfx), &wsz);
-				ULONG pcKeep = 0, wcKeep = 0;
-				m_dsb->GetCurrentPosition(&pcKeep, &wcKeep);
-				LONG vol = (savedata.dsvol - 1) * 10;
-				DSBUFFERDESC dsbd;
-				ZeroMemory(&dsbd, sizeof(dsbd));
-				dsbd.dwSize = sizeof(dsbd);
-				dsbd.dwFlags = DSBCAPS_CTRLPOSITIONNOTIFY | DSBCAPS_LOCSOFTWARE | DSBCAPS_GLOBALFOCUS
-					| DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_CTRLVOLUME;
-				dsbd.dwBufferBytes = need;
-				dsbd.lpwfxFormat = &wfx;
-				LPDIRECTSOUNDBUFFER nb1 = NULL;
-				if (SUCCEEDED(m_ds->CreateSoundBuffer(&dsbd, &nb1, NULL)) && nb1) {
-					LPDIRECTSOUNDBUFFER8 nb8 = NULL;
-					if (SUCCEEDED(nb1->QueryInterface(IID_IDirectSoundBuffer8, (void**)&nb8)) && nb8) {
-						LPVOID op1 = NULL, op2 = NULL, np1 = NULL, np2 = NULL;
-						DWORD ol1 = 0, ol2 = 0, nl1 = 0, nl2 = 0;
-						const ULONG oldBytes = caps.dwBufferBytes;
-						if (SUCCEEDED(m_dsb->Lock(0, oldBytes, &op1, &ol1, &op2, &ol2, 0))
-							&& SUCCEEDED(nb8->Lock(0, need, &np1, &nl1, &np2, &nl2, 0))) {
-							// 旧Bの内容を新リングへタイル（無音ゼロ埋めにしない）
-							BYTE* srcA = (BYTE*)op1;
-							DWORD srcAN = ol1;
-							BYTE* srcB = (BYTE*)op2;
-							DWORD srcBN = ol2;
-							auto put = [&](BYTE* dst, DWORD dstLen) {
-								DWORD off = 0;
-								while (off < dstLen) {
-									if (srcAN > 0) {
-										DWORD n = srcAN;
-										if (n > dstLen - off) n = dstLen - off;
-										memcpy(dst + off, srcA, n);
-										off += n;
-										continue;
-									}
-									if (srcBN > 0) {
-										DWORD n = srcBN;
-										if (n > dstLen - off) n = dstLen - off;
-										memcpy(dst + off, srcB, n);
-										off += n;
-										continue;
-									}
-									break;
-								}
-								if (off < dstLen && srcAN > 0) {
-									while (off < dstLen) {
-										DWORD n = srcAN;
-										if (n > dstLen - off) n = dstLen - off;
-										memcpy(dst + off, srcA, n);
-										off += n;
-									}
-								}
-							};
-							if (np1 && nl1) put((BYTE*)np1, nl1);
-							if (np2 && nl2) put((BYTE*)np2, nl2);
-							nb8->Unlock(np1, nl1, np2, nl2);
-							m_dsb->Unlock(op1, ol1, op2, ol2);
-						}
-						else {
-							if (op1 || op2) m_dsb->Unlock(op1, ol1, op2, ol2);
-							if (np1 || np2) nb8->Unlock(np1, nl1, np2, nl2);
-						}
-						// 先に新Bを鳴らしてから旧を止める（載せ替え瞬間の無音を避ける）
-						nb8->SetCurrentPosition(pcKeep % need);
-						nb8->SetVolume(vol);
-						nb8->Play(0, 0, DSBPLAY_LOOPING);
-						LPDIRECTSOUNDBUFFER8 old8 = m_dsb;
-						LPDIRECTSOUNDBUFFER old1 = m_dsb1;
-						m_dsb = nb8;
-						m_dsb1 = nb1;
-						if (old8) { old8->Stop(); old8->Release(); }
-						if (old1) { old1->Release(); }
-					}
-					else {
-						nb1->Release();
-					}
-				}
-			}
-		}
-		extern ULONG oldw;
-		// Promote 時に渡した skip を優先（CurrentSkipFrames は Consume 後に 0 になり得る）
-		int skipF = (int)InterlockedExchange(&g_xfadeSkipFrames, 0);
-		if (skipF <= 0)
-			skipF = xfadeSkipSnap;
-		if (skipF <= 0)
-			skipF = (int)InterlockedExchange(&s_xfadeStickySkipFrames, 0);
-		else
-			InterlockedExchange(&s_xfadeStickySkipFrames, 0);
-		if (skipF <= 0)
-			skipF = ProXfade_CurrentSkipFrames();
-		if (skipF < 1) {
-			// 最後の手段: xfade ms × 出力レート（頭出し防止）
-			const int rate = (g_ds_pcm_rate > 0) ? g_ds_pcm_rate : ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
-			const int ms = ProAudio_XfadeMs();
-			skipF = (int)((__int64)rate * (__int64)((ms > 0) ? ms : 2000) / 1000);
-		}
-		if (skipF < 1) skipF = 1;
-		InterlockedExchange(&g_xfadeSkipMs, 0);
-		playb = skipF;
-		g_oggPcmDecodePos = playb;
-		if (mode == -10) {
-			if (savedata.mp3orig)
-				mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
-			else
-				mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
-		}
-		else if (mode == -8 && kmp)
-			flac_.SetPosition(kmp, playb);
-		else if (mode == -9 && kmp)
-			m4a_.SetPosition(kmp, playb);
-		else if (mode == -1)
-			ov_pcm_seek_lap(&vf, (ogg_int64_t)playb);
-		else if (mode == -6) {
-			// Opus: 既存のシーク経路があればここに足す。無ければ playb のみ立ててフィード継続。
-		}
-		else if (mode == 999) {
-			if (wav999_use_adbuf)
-				seekadpcm((int)playb);
-			else
-				wav_.Seek(playb / (wavchannel * (wavsam_depth / 8)));
-		}
-		// スキップ後PCMでリングを先頭から敷き直し → 再生位置0。
-		// （タイル導入のまま継続するとループで「また頭から」に聞こえる）
-		{
-			extern ULONG g_ds_buffer_bytes;
-			if (g_openDecoderMode == INT_MIN)
-				g_openDecoderMode = mode;
-			const ULONG ring = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
-			const int bpf = (g_ds_pcm_ch > 0 && g_ds_pcm_bits >= 8) ? (g_ds_pcm_ch * (g_ds_pcm_bits / 8)) : 4;
-			int fill = (g_ds_pcm_rate > 0 && bpf > 0) ? (g_ds_pcm_rate * bpf / 2) : (int)(ring / 2);
-			if (fill < bpf * 64) fill = bpf * 64;
-			if (fill > (int)(ring / 2)) fill = (int)(ring / 2);
-			if (fill < 0) fill = 0;
-			m_dsb->Stop();
-			oldw = 0;
-			m_dsb->SetCurrentPosition(0);
-			if (fill > 0 && ActiveDecodeMode() != INT_MIN) {
-				ZeroMemory(bufwav3, (size_t)fill + 64);
-				DispatchPlaywavFill(bufwav3, 0, fill, 0);
-				bool any = false;
-				const int checkN = (fill < 64) ? fill : 64;
-				for (int i = 0; i < checkN; ++i) {
-					if (bufwav3[i] != 0) { any = true; break; }
-				}
-				if (any) {
-					LPVOID p1 = NULL, p2 = NULL;
-					DWORD l1 = 0, l2 = 0;
-					if (SUCCEEDED(m_dsb->Lock(0, (DWORD)fill, &p1, &l1, &p2, &l2, 0))) {
-						if (p1 && l1) memcpy(p1, bufwav3, l1);
-						if (p2 && l2) memcpy(p2, bufwav3 + l1, l2);
-						m_dsb->Unlock(p1, l1, p2, l2);
-					}
-					oldw = (ULONG)fill % ring;
-					g_dsWrittenBytes = (ULONG)fill;
-				}
-			}
-			m_dsb->SetVolume((savedata.dsvol - 1) * 10);
-			m_dsb->Play(0, 0, DSBPLAY_LOOPING);
-		}
-		g_endWrittenBytes = 0;
-		g_heardBytes = 0;
-		endflg = 0;
-		fade1 = 0;
-		playf = 1;
-		plf = 1;
-		InterlockedExchange(&g_xfadeReuseContinue, 1);
-		BeginPlaybackNotifyThread();
-		InterlockedExchange(&g_xfadeKeepDsb, 0);
-		if (m_dsbXfade) { m_dsbXfade->Stop(); m_dsbXfade->Release(); m_dsbXfade = NULL; }
-		if (m_dsbXfade1) { m_dsbXfade1->Release(); m_dsbXfade1 = NULL; }
+
+	ULONG PlayCursor, WriteCursor = 0;
+	playb = 0;
+	g_oggPcmDecodePos = 0;
+	if (m_dsb)m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);//再生位置取得
+	len1 = (int)WriteCursor;//書き込み範囲取得
+	len2 = 0;
+	if (len1 < 0) {
+		const int bpf = (g_ds_pcm_ch > 0 && g_ds_pcm_bits >= 8) ? (g_ds_pcm_ch * (g_ds_pcm_bits / 8)) : 4;
+		len1 = (int)(g_ds_buffer_bytes / (ULONG)((bpf > 0) ? bpf : 4));
+		len2 = WriteCursor;
 	}
-	else if (true) {
-		ULONG PlayCursor, WriteCursor = 0;
-		playb = 0;
-		g_oggPcmDecodePos = 0;
-		if (m_dsb)m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);//再生位置取得
-		len1 = (int)WriteCursor;//書き込み範囲取得
+	if (len2 < 0)
 		len2 = 0;
-		if (len1 < 0) {
-			const int bpf = (g_ds_pcm_ch > 0 && g_ds_pcm_bits >= 8) ? (g_ds_pcm_ch * (g_ds_pcm_bits / 8)) : 4;
-			len1 = (int)(g_ds_buffer_bytes / (ULONG)((bpf > 0) ? bpf : 4));
-			len2 = WriteCursor;
-		}
-		if (len2 < 0)
-			len2 = 0;
-		DispatchPlaywavFill(bufwav3, 0, len1, len2);
-		if (m_dsb) {
-			m_dsb->Lock(0, len1 + len2, (LPVOID*)&pdsb, (DWORD*)&len3, NULL, 0, 0);
-			memcpy(pdsb, bufwav3, len3);
-			m_dsb->Unlock(pdsb, len3, NULL, 0);
-			m_dsb->SetVolume((savedata.dsvol - 1) * 10);
-		}
-		CFile f123;
-		int flggg = 0;
-		if (mode != -1) {
-			if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-				f123.Close();
-				if (IDYES == MessageBox(LL14(
-					L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", /* 日本語 */
-					L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start", /* 英語 */
-					L"Des données de reprise existent.\nReprendre là où vous vous êtes arrêté ?\nOui = Reprendre\nNon = Jouer depuis le début", /* フランス語 */
-					L"Esistono dati di ripresa.\nRiprendere da dove ci si è fermati?\nSì = Riprendi\nNo = Riproduci dall'inizio", /* イタリア語 */
-					L"Existen datos de reanudación.\n¿Reanudar desde donde lo dejó?\nSí = Reanudar\nNo = Reproducir desde el inicio", /* スペイン語 */
-					L"중간 재생 데이터가 존재합니다.\n지난번 중단한 부분부터 재생하시겠습니까?\n예 = 중간부터 재생\n아니요 = 처음부터 재생", /* 韓国語 */
-					L"存在中途播放数据。\n是否从上次中断处播放？\n是 = 从中途播放\n否 = 从头播放", /* 中国語 */
-					L"بيانات الاستئناف موجودة.\nهل تريد الاستئناف من حيث توقفت؟\nنعم = استئناف\nلا = تشغيل من البداية", /* アラビア語 */
-					L"Данные возобновления существуют.\nПродолжить с места остановки?\nДа = Продолжить\nНет = Играть с начала", /* ロシア語 */
-					L"Fortsetzungsdaten vorhanden.\nVon der Unterbrechungsstelle fortfahren?\nJa = Fortsetzen\nNein = Von Anfang abspielen", /* ドイツ語 */
-					L"Dados de retomada existem.\nRetomar de onde parou?\nSim = Retomar\nNão = Reproduzir do início", /* ポルトガル語 */
-					L"Hervatgegevens aanwezig.\nHervatten waar u gebleven was?\nJa = Hervatten\nNee = Afspelen vanaf het begin", /* オランダ語 */
-					L"Istnieją dane wznowienia.\nWznowić od miejsca przerwania?\nTak = Wznów\nNie = Odtwórz od początku", /* ポーランド語 */
-					L"Devam verisi mevcut.\nKaldığınız yerden devam edilsin mi?\nEvet = Devam et\nHayır = Baştan oynat"), /* トルコ語 */
-					LL14(
-						L"再生確認", /* 日本語タイトル */
-						L"Playback confirmation",
-						L"Confirmation de lecture",
-						L"Conferma riproduzione",
-						L"Confirmación de reproducción",
-						L"재생 확인",
-						L"播放确认",
-						L"تأكيد التشغيل",
-						L"Подтверждение воспроизведения",
-						L"Wiedergabebestätigung",
-						L"Confirmação de reprodução",
-						L"Afspeelbevestiging",
-						L"Potwierdzenie odtwarzania",
-						L"Oynatma onayı"), /* トルコ語タイトル */
-					MB_YESNO)) {
-					flggg = 1;
-				}
-				else {
-					ResumeSaveRemove(filen);
-				}
-			}
-			if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
-				f123.Close();
-				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
-				//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
-				if (mode == -10) {
-					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-						f123.Read(&playb, sizeof(__int64));
-						// 旧保存は「フレーム×4」で playb > 総フレーム になり得る
-						if (oggsize > 0 && playb > (__int64)oggsize)
-							playb /= 4;
-						if (savedata.mp3orig) {
-							mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
-						}
-						else {
-							mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
-						}
-						f123.Close();
-					}
-				}
-				if (mode == 999) {
-					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-						f123.Read(&playb, sizeof(__int64));
-						if (wav999_use_adbuf)
-							seekadpcm((int)playb);
-						else
-							wav_.Seek(playb / (wavchannel * (wavsam_depth / 8)));
-						f123.Close();
-					}
-				}
-				if (mode == -2) {
-					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-						f123.Read(&aa1_, sizeof(double));
-						pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
-						f123.Close();
-					}
-				}
+	DispatchPlaywavFill(bufwav3, 0, len1, len2);
+	if (m_dsb) {
+		m_dsb->Lock(0, len1 + len2, (LPVOID*)&pdsb, (DWORD*)&len3, NULL, 0, 0);
+		memcpy(pdsb, bufwav3, len3);
+		m_dsb->Unlock(pdsb, len3, NULL, 0);
+		m_dsb->SetVolume((savedata.dsvol - 1) * 10);
+	}
+	CFile f123;
+	int flggg = 0;
+	if (mode != -1) {
+		if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+			f123.Close();
+			if (IDYES == MessageBox(LL14(
+				L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", /* 日本語 */
+				L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start", /* 英語 */
+				L"Des données de reprise existent.\nReprendre là où vous vous êtes arrêté ?\nOui = Reprendre\nNon = Jouer depuis le début", /* フランス語 */
+				L"Esistono dati di ripresa.\nRiprendere da dove ci si è fermati?\nSì = Riprendi\nNo = Riproduci dall'inizio", /* イタリア語 */
+				L"Existen datos de reanudación.\n¿Reanudar desde donde lo dejó?\nSí = Reanudar\nNo = Reproducir desde el inicio", /* スペイン語 */
+				L"중간 재생 데이터가 존재합니다.\n지난번 중단한 부분부터 재생하시겠습니까?\n예 = 중간부터 재생\n아니요 = 처음부터 재생", /* 韓国語 */
+				L"存在中途播放数据。\n是否从上次中断处播放？\n是 = 从中途播放\n否 = 从头播放", /* 中国語 */
+				L"بيانات الاستئناف موجودة.\nهل تريد الاستئناف من حيث توقفت؟\nنعم = استئناف\nلا = تشغيل من البداية", /* アラビア語 */
+				L"Данные возобновления существуют.\nПродолжить с места остановки?\nДа = Продолжить\nНет = Играть с начала", /* ロシア語 */
+				L"Fortsetzungsdaten vorhanden.\nVon der Unterbrechungsstelle fortfahren?\nJa = Fortsetzen\nNein = Von Anfang abspielen", /* ドイツ語 */
+				L"Dados de retomada existem.\nRetomar de onde parou?\nSim = Retomar\nNão = Reproduzir do início", /* ポルトガル語 */
+				L"Hervatgegevens aanwezig.\nHervatten waar u gebleven was?\nJa = Hervatten\nNee = Afspelen vanaf het begin", /* オランダ語 */
+				L"Istnieją dane wznowienia.\nWznowić od miejsca przerwania?\nTak = Wznów\nNie = Odtwórz od początku", /* ポーランド語 */
+				L"Devam verisi mevcut.\nKaldığınız yerden devam edilsin mi?\nEvet = Devam et\nHayır = Baştan oynat"), /* トルコ語 */
+				LL14(
+					L"再生確認", /* 日本語タイトル */
+					L"Playback confirmation",
+					L"Confirmation de lecture",
+					L"Conferma riproduzione",
+					L"Confirmación de reproducción",
+					L"재생 확인",
+					L"播放确认",
+					L"تأكيد التشغيل",
+					L"Подтверждение воспроизведения",
+					L"Wiedergabebestätigung",
+					L"Confirmação de reprodução",
+					L"Afspeelbevestiging",
+					L"Potwierdzenie odtwarzania",
+					L"Oynatma onayı"), /* トルコ語タイトル */
+				MB_YESNO)) {
+				flggg = 1;
 			}
 			else {
-				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
-				//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
-				if (pMainFrame1) { pMainFrame1->seek(0); }
+				ResumeSaveRemove(filen);
+			}
+		}
+		if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
+			f123.Close();
+			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
+			//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
+			if (mode == -10) {
+				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+					f123.Read(&playb, sizeof(__int64));
+					// 旧保存は「フレーム×4」で playb > 総フレーム になり得る
+					if (oggsize > 0 && playb > (__int64)oggsize)
+						playb /= 4;
+					if (savedata.mp3orig) {
+						mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
+					}
+					else {
+						mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
+					}
+					f123.Close();
+				}
+			}
+			if (mode == 999) {
+				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+					f123.Read(&playb, sizeof(__int64));
+					if (wav999_use_adbuf)
+						seekadpcm((int)playb);
+					else
+						wav_.Seek(playb / (wavchannel * (wavsam_depth / 8)));
+					f123.Close();
+				}
+			}
+			if (mode == -2) {
+				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
+					f123.Read(&aa1_, sizeof(double));
+					pMainFrame1->seek((LONGLONG)(((float)((float)aa1_ * 100.0f * 100000.0f))));
+					f123.Close();
+				}
 			}
 		}
 		else {
-			if (pMainFrame1) pMainFrame1->plays2();
+			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 			//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 			if (pMainFrame1) { pMainFrame1->seek(0); }
 		}
-		syukai = 0;
-		if (m_dsb) {
-			m_dsb->Play(0, 0, DSBPLAY_LOOPING);
-		}
-		fade1 = 0;
-		sflg = FALSE;
-		// 通知スレッド起動直前は DoEvent しない（再入 play が旧デコーダを潰す）
-		{
-			const DWORD sflgWaitStart = GetTickCount();
-			while (sflg != FALSE) {
-				Sleep(1);
-				if (GetTickCount() - sflgWaitStart >= 3000) {
-					sflg = FALSE;
-					break;
-				}
+	}
+	else {
+		if (pMainFrame1) pMainFrame1->plays2();
+		//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
+		if (pMainFrame1) { pMainFrame1->seek(0); }
+	}
+	syukai = 0;
+	if (m_dsb) {
+		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+	}
+	fade1 = 0;
+	sflg = FALSE;
+	// 通知スレッド起動直前は DoEvent しない（再入 play が旧デコーダを潰す）
+	{
+		const DWORD sflgWaitStart = GetTickCount();
+		while (sflg != FALSE) {
+			Sleep(1);
+			if (GetTickCount() - sflgWaitStart >= 3000) {
+				sflg = FALSE;
+				break;
 			}
 		}
-		// BeginPlayback 内 Wait が stf を立てる前に、再生中フラグを確定しておく
-		stf = 0;
-		thn1 = FALSE;
-		playf = 1;
-		plf = 1;
-		BeginPlaybackNotifyThread();
 	}
+	// BeginPlayback 内 Wait が stf を立てる前に、再生中フラグを確定しておく
+	stf = 0;
+	thn1 = FALSE;
+	playf = 1;
+	plf = 1;
+	BeginPlaybackNotifyThread();
+
 	endflg = 0;
-	// 昇格再利用時は prefill で立てた書込み累積を消さない（heard 破綻→即曲末扱いの元）
-	if (!xfadeReuseDsb)
-		g_dsWrittenBytes = 0;
+	g_dsWrittenBytes = 0;
 	g_endWrittenBytes = 0;
 	g_heardBytes = 0;
-	ProXfade_OnSongPlaybackStarted();
 
 	// 全ての音声形式で、タイトル/アーティスト/アルバム/曲番号をファイルのタグから補完する。
 	// ogg は従来タイトル(stitle)のみ、wav 等はプレイリスト由来のみだったため、空欄を埋める。
@@ -10761,7 +10461,6 @@ void COggDlg::play()
 	}
 
 	SetTimer(9000, 10, NULL);
-	// 二重スロット経路では先読み PCM / 早期 Open はしない（近傍で空きスロットに本 Open）
 	endf = 0;
 	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
 	if (loop2 == 0) endf = 1;
@@ -16361,15 +16060,12 @@ void COggDlg::stop()
 	playb = 0;
 	if (ptl)ptl->SetProgressValue(m_hWnd, (LONGLONG)0, (LONGLONG)1);
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
-	const bool xfadeKeepDsb = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
-	if (!xfadeKeepDsb)
-		ProXfade_Reset();
 	if (PlaybackNotifyThreadMayBeActive())
 	{
 		SignalPlaybackNotifyThreadStop();
-		if (m_dsb && !xfadeKeepDsb)m_dsb->SetVolume(DSBVOLUME_MIN);
+		if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
 		ps = 0;
-		if (m_dsb && !xfadeKeepDsb)m_dsb->Stop();
+		if (m_dsb)m_dsb->Stop();
 		if (pAudioClient) pAudioClient->Stop();
 		if (m_dou.GetCheck() == 1)
 			if (cc1 == 1) {
@@ -16397,21 +16093,7 @@ void COggDlg::stop()
 		}
 		SongParams_OnSongStopped();
 
-		if (!xfadeKeepDsb) {
-			PlaySlot_StopAll();
-			Closeds();
-		}
-		else {
-			// 退避中の旧 A (m_dsbXfade) は play() 昇格完了まで残す。ここでは B を再確認のみ。
-			if (m_dsb) {
-				LONG v = (savedata.dsvol - 1) * 10;
-				if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
-				if (v > 0) v = 0;
-				if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
-				m_dsb->SetVolume(v);
-				m_dsb->Play(0, 0, DSBPLAY_LOOPING);
-			}
-		}
+		Closeds();
 		//		FreeOutputBuffer();
 		plf = 0;
 
@@ -16519,25 +16201,16 @@ BOOL COggDlg::stop1()
 	KillTimer(9000);
 
 	// CWread 中断要求。完了後は必ず thend1 を下ろす（残すと次の CWread が即死する）
-	// 世代を先に進め、孤児が loop1/2・adbuf2・wavwait を書き換えられないようにする。
 	if (thend == FALSE) {
-		InterlockedIncrement(&g_cwreadEpoch);
 		thend1 = TRUE;
-		const int waitMs = g_interactiveTrackChange ? 500 : 3000;
-		for (int kk = 0; kk < waitMs; kk++) {
+		for (int kk = 0; kk < 50; kk++) {
 			if (thend == 1) break;
 			SignalPlaybackNotifyThreadStop();
 			Sleep(1);
 		}
 	}
-	else {
-		InterlockedIncrement(&g_cwreadEpoch);
-	}
 	// CWread が thend1 を見て return してから AfxEndThread するまでの猶予。
-	// 二重DS昇格中は B 再生を維持したいので余分な Sleep を入れない。
-	const bool xfadeKeepDsbEarly = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
-	if (!xfadeKeepDsbEarly)
-		Sleep(50);
+	Sleep(50);
 	playb = 0;
 	thend = 1;
 	thend1 = FALSE;
@@ -16552,27 +16225,17 @@ BOOL COggDlg::stop1()
 	lrc_backup = L"";
 	loop1_2 = -1;
 
+	//	for(int i=0;i<10;i++){DoEvent();Sleep(10);}
 	if (ptl)ptl->SetProgressValue(m_hWnd, (LONGLONG)0, (LONGLONG)1);
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
 
-	// 二重DS昇格中は再生中バッファを止めない / 破棄しない（play() が継続利用）
-	const bool xfadeKeepDsb = xfadeKeepDsbEarly || (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
-	if (!xfadeKeepDsb) {
-		if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
-		ps = 0;
-		if (m_dsb)m_dsb->Stop();
-	}
-	else if (m_dsb) {
-		LONG v = (savedata.dsvol - 1) * 10;
-		if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
-		if (v > 0) v = 0;
-		if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
-		m_dsb->SetVolume(v);
-		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
-	}
-	if (pAudioClient && !xfadeKeepDsb) pAudioClient->Stop();
+	if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
+	ps = 0;
+	if (m_dsb)m_dsb->Stop();
+	if (pAudioClient) pAudioClient->Stop();
 	if (m_dou.GetCheck() == 1)
 		if (cc1 == 1) {
+			// 2GB超対応(RF64): ファイル実長から64bitでサイズ確定
 			FinalizeWavStreamHeaderRF64(cc);
 			cc.Close();
 			cc1 = 0;
@@ -16583,12 +16246,14 @@ BOOL COggDlg::stop1()
 		stf = 1;
 		_ccl.Leave();
 	}
+	// play() 先頭の stop1 は Join 成否に関わらず続行する。
+	// FALSE で return すると CWread に入らず 0:00／古い loop のままになる。
+	// ただし対話的な曲切替では無限 Join 禁止(DS Lock / 旧 SaveFile 固着で UI 永久停止)。
 	BOOL joined = TRUE;
 	{
-		// keep 中はタイムアウトでゾンビ化させない（短時間失敗→playf=0→数秒停止の主因）
-		DWORD joinTimeout = 0u; // 無限
-		if (g_interactiveTrackChange && !xfadeKeepDsb)
-			joinTimeout = g_playbackNotifyJoinTimeoutMs ? g_playbackNotifyJoinTimeoutMs : 2500u;
+		const DWORD joinTimeout = g_interactiveTrackChange
+			? (g_playbackNotifyJoinTimeoutMs ? g_playbackNotifyJoinTimeoutMs : 2500u)
+			: 0u;
 		joined = WaitForPlaybackNotifyThreadExit(joinTimeout);
 	}
 	thn1 = FALSE;
@@ -16596,27 +16261,15 @@ BOOL COggDlg::stop1()
 	thend1 = FALSE;
 	SongParams_OnSongStopped();
 
+	// Join 失敗時はデコーダを触らない(生存スレッドの UAF 防止)。play() は続行するが
+	// PeekOpenDecoderMode が残っていれば次の Open 前に再停止がかかる。
 	if (!joined) {
 		playf = 0;
 		plf = 0;
 		return FALSE;
 	}
 
-	if (!xfadeKeepDsb) {
-		PlaySlot_StopAll();
-		Closeds();
-	}
-	else {
-		// 退避中の旧 A は play() 側で解放。B の再生だけ維持。
-		if (m_dsb) {
-			LONG v = (savedata.dsvol - 1) * 10;
-			if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
-			if (v > 0) v = 0;
-			if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
-			m_dsb->SetVolume(v);
-			m_dsb->Play(0, 0, DSBPLAY_LOOPING);
-		}
-	}
+	Closeds();
 	//		FreeOutputBuffer();
 	plf = 0;
 	if (ogg)ReleaseOggVorbis(&ogg);
@@ -16679,16 +16332,11 @@ BOOL COggDlg::stop1()
 	return TRUE;
 }
 
-
 BOOL COggDlg::DestroyWindow()
 {
 	// TODO: この位置に固有の処理を追加するか、または基本クラスを呼び出してください
 	//	ReleaseOggVorbis(&ogg);
 	MpPromptOnAppShutdown();
-	// 昇格中 keep が残ると Closeds をスキップして終了時にセカンダリ二重解放→クラッシュし得る
-	InterlockedExchange(&g_xfadeKeepDsb, 0);
-	InterlockedExchange(&g_xfadeNoWrite, 0);
-	ProXfade_Reset();
 	stop();
 	waveOutReset(hwo);
 	waveOutClose(hwo);
@@ -18072,22 +17720,9 @@ void COggDlg::timerp()
 			ogs = oggsize;
 		}
 		// スライダーも時間表示と同じく実再生位置（DS 先読み分を除去）に揃える。
-		// Seek 直後はキュー値が旧バッファのままで 0/旧位置に引き戻すので無視する。
-		{
-			const DWORD fresh = (DWORD)InterlockedCompareExchange(&g_seekUiFreshTick, 0, 0);
-			const bool ignoreLead = (fresh != 0 && (GetTickCount() - fresh) < 2000u);
-			if (!ignoreLead) {
-				if (qSamplesHeard > 0 && pb > qSamplesHeard) pb -= qSamplesHeard;
-				else if (qSamplesHeard > 0) pb = 0;
-			}
-		}
-		/* 昇格後は mode よりスロット openMode を優先（単位 /100 の取り違えでバー不动） */
+		if (qSamplesHeard > 0 && pb > qSamplesHeard) pb -= qSamplesHeard;
+		else if (qSamplesHeard > 0) pb = 0;
 		int posMode = mode;
-		if (InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0) {
-			const int as = (int)InterlockedCompareExchange(&g_activeSlot, 0, 0);
-			if (as >= 0 && as < PLAY_SLOT_COUNT && g_playSlots[as].openMode != INT_MIN)
-				posMode = g_playSlots[as].openMode;
-		}
 		if (posMode == -10) {
 			m_time.SetPos((int)(pb / 100));
 			if (ptl) {
@@ -19011,15 +18646,6 @@ void timerog1(UINT nIDEvent)
 	}
 	if (nIDEvent == 9000) {
 		// 二重 DS / スロット運用中はレガシー次曲 Restart を起こさない
-		if (ProXfade_IsDualActive() || ProXfade_Phase() == PRO_XF_PROMOTE
-			|| InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0)
-			return;
-		if (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0)
-			return;
-		if (ProXfade_ShouldSuppressApplyIn())
-			return;
-		if (!ProXfade_DualArmOk(ProAudio_XfadeMs()))
-			return;
 		// 連続再生: 曲末で次曲へ（レガシー単一ストリーム）
 		if (savedata.saverenzoku == 1) {
 			const int xms = ProAudio_XfadeMs();
@@ -19229,8 +18855,6 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	if (s_inPlay || s_inStop1)
 		return 0;
 	// 二重DS昇格中は B を止めない
-	if (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0)
-		return 0;
 	// スレッドは PostMessage 前に終了済み想定だが、念のため Join（DoEvent なし）
 	SignalPlaybackNotifyThreadStop();
 	if (!WaitForPlaybackNotifyThreadExit(0))
@@ -19253,7 +18877,6 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	}
 	if (pAudioClient)
 		pAudioClient->Stop();
-	PlaySlot_StopAll();
 	Closeds();
 	if (ogg) {
 		ReleaseOggVorbis(&ogg);
@@ -21056,19 +20679,6 @@ void COggDlg::OnOK()
 extern IMediaEvent* pMediaEvent;
 static volatile LONG s_onRestartBusy = 0;
 
-LRESULT COggDlg::OnXfadePrefetch(WPARAM, LPARAM)
-{
-	// 互換用。先読みは ProXfade_RequestPrefetchAsync（専用スレッド）に移した。
-	// UI で MF デコードすると timerp / GDI バナー / シークが止まる。
-	InterlockedExchange(&g_xfadePrefetchPosted, 0);
-	return 0;
-}
-
-void Ogg_PostXfadePromote()
-{
-	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->PostMessage(WM_OGG_XFADE_PROMOTE, 0, 0);
-}
 
 static int g_ccFmtRate = 0;
 static int g_ccFmtCh = 0;
@@ -21113,8 +20723,6 @@ void PlaybackCcGetFormat(int& rate, int& ch, int& bits)
 void PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, int srcBits, bool forced)
 {
 	if (cc1 != 1 || !p || n == 0) return;
-	if (!forced && InterlockedCompareExchange(&g_xfadeDeferCcWrite, 0, 0) != 0)
-		return;
 	if (!PlaybackCcFormatLocked()) {
 		PlaybackCcLockFormat(srcRate, srcCh, srcBits);
 		cc.Write(p, n);
@@ -21165,142 +20773,10 @@ void Ogg_FeedPianoRoll(const void* p, int n)
 	if (og) og->FeedPianoRoll(p, n);
 }
 
-// PlaySlot.cpp は flac.h/m4a.h を include しない（ヘッダ内実装の二重定義回避）
-HKMP PlaySlot_FlacOpen(LPCTSTR path, SOUNDINFO* si) { return flac_.Open(path, si); }
-void PlaySlot_FlacClose(HKMP h) { if (h) flac_.Close(h); }
-DWORD PlaySlot_FlacRender(HKMP h, BYTE* buf, DWORD n) { return flac_.Render(h, buf, n); }
-DWORD PlaySlot_FlacSetPosition(HKMP h, LONGLONG pos) { return flac_.SetPosition(h, pos); }
-HKMP PlaySlot_M4aOpen(LPCTSTR path, SOUNDINFO* si) { return m4a::Open(path, si); }
-void PlaySlot_M4aClose(HKMP h) { m4a::Close(h); }
-DWORD PlaySlot_M4aRender(HKMP h, BYTE* buf, DWORD n) { return m4a::Render(h, buf, n); }
-DWORD PlaySlot_M4aSetPosition(HKMP h, DWORD pos) { return m4a::SetPosition(h, pos); }
-
-LRESULT COggDlg::OnXfadePromote(WPARAM, LPARAM)
-{
-	// 二重スロット handoff。昇格後も B スロットで再生継続（Detach→レガシー再Open は隙間・停止の元）
-	int nPl = -1, nMode = 0, skipF = 0, skipMs = 0;
-	CString nPath;
-	if (!ProXfade_ConsumePromote(nPl, nMode, nPath, skipF, skipMs))
-		return 0;
-	XfDbgF("OnXfadePromote pl=%d mode=%d skipF=%d skipMs=%d dualEn=%ld",
-		nPl, nMode, skipF, skipMs,
-		(long)InterlockedCompareExchange(&g_slotDualEnabled, 0, 0));
-	KillTimer(9000);
-	ProAudio_ClearXfadeIn();
-
-	const int bSlot = (int)InterlockedCompareExchange(&g_xfadeBSlot, 0, 0);
-	if (bSlot < 0 || bSlot >= PLAY_SLOT_COUNT || !g_playSlots[bSlot].dsb) {
-		ProXfade_MarkFailed();
-		InterlockedExchange(&g_xfadeKeepDsb, 0);
-		InterlockedExchange(&g_xfadeNoWrite, 0);
-		return 0;
-	}
-
-	if (pl && nPl >= 0 && nPl < pl->playcnt) {
-		plcnt = nPl;
-		pl->Get(plcnt);
-		pl->SIcon(plcnt);
-	}
-	fade1 = 0; lenl = 0;
-	fade = 1.0f;
-	endflg = 0;
-	g_endWrittenBytes = 0;
-	/* クロス昇格では EQ をリセットしない（Mix 末尾と単独 B のつなぎ目クリック／音量跳び防止） */
-	InterlockedExchange(&g_eqResetNext, 0);
-
-	if (nMode != 0) { mode = nMode; modesub = nMode; }
-	else if (g_playSlots[bSlot].openMode != INT_MIN) {
-		mode = g_playSlots[bSlot].openMode;
-		modesub = mode;
-	}
-	if (!nPath.IsEmpty()) filen = nPath;
-	else if (g_playSlots[bSlot].path[0]) filen = g_playSlots[bSlot].path;
-
-	const bool alreadyDual = (InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0);
-	if (alreadyDual) {
-		const int oldSlot = (int)InterlockedCompareExchange(&g_activeSlot, 0, 0);
-		if (oldSlot != bSlot)
-			PlaySlot_Handoff(oldSlot, bSlot);
-		else {
-			PlaySlot_ApplyPromotePosition(bSlot);
-			InterlockedExchange(&g_xfadeBSlot, -1);
-			InterlockedExchange(&g_xfadeKeepDsb, 0);
-			InterlockedExchange(&g_xfadeNoWrite, 0);
-			ProXfade_OnSongPlaybackStarted();
-		}
-	}
-	else {
-		// 曲1 = レガシー HandleNotifications → B スロットへ。以降はスロット再生のまま。
-		InterlockedExchange(&g_xfadeKeepDsb, 1);
-		InterlockedExchange(&g_xfadeNoWrite, 1);
-		SignalPlaybackNotifyThreadStop();
-		WaitForPlaybackNotifyThreadExit(8000);
-
-		const int stoppingMode = PeekOpenDecoderMode(mode);
-		if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
-		if (stoppingMode == -8 && kmp) { flac_.Close(kmp); kmp = NULL; }
-		if (stoppingMode == -9 && kmp) { m4a_.Close(kmp); kmp = NULL; }
-		if (stoppingMode == 999) wav_.Close();
-		if (stoppingMode == -1) {
-			ov_clear(&vf);
-		}
-		if (ogg) { ReleaseOggVorbis(&ogg); ogg = NULL; }
-		ClearOpenDecoderMode();
-
-		LPDIRECTSOUNDBUFFER8 old8 = m_dsb;
-		LPDIRECTSOUNDBUFFER old1 = m_dsb1;
-		m_dsb = NULL;
-		m_dsb1 = NULL;
-		PlaySlot_HandoffFromLegacy(bSlot, old8, old1);
-	}
-
-	{
-		PlaySlot& bs = g_playSlots[bSlot];
-		g_dsWrittenBytes = bs.dsWritten;
-		g_heardBytes = bs.heard;
-		playb = bs.playb;
-		playf = 1; plf = 1; thn = TRUE; thn1 = FALSE; stf = 0;
-		ProAudio_ClearXfadeIn();
-	}
-
-	if (mode == -10) {
-		int m = (oggsize > 0) ? (oggsize / 100) : 1;
-		if (m < 1) m = 1;
-		m_time.SetRange(0, m, TRUE);
-		m_time.SetSelection(0, m);
-		{
-			int pos = (int)(playb / 100);
-			if (pos < 0) pos = 0;
-			if (pos > m) pos = m;
-			m_time.SetPos(pos);
-		}
-		m_time.Invalidate();
-	}
-	else {
-		const int m = (loop2 > 0) ? loop2 : 1;
-		m_time.SetRange(0, m, TRUE);
-		m_time.SetSelection(0, m);
-		{
-			__int64 pb = playb;
-			if (pb < 0) pb = 0;
-			if (pb > m) pb = m;
-			m_time.SetPos((int)pb);
-		}
-		m_time.Invalidate();
-	}
-	InterlockedExchange(&g_xfadeKeepDsb, 0);
-	InterlockedExchange(&g_xfadeNoWrite, 0);
-	InterlockedExchange(&g_xfadeSkipFrames, 0);
-	InterlockedExchange(&g_xfadeSkipMs, 0);
-	InterlockedExchange(&s_xfadeStickySkipFrames, 0);
-	InterlockedExchange(&s_restartWanted, 0);
-	return 0;
-}
 
 void COggDlg::OnRestart()
 {
-	const bool softBusy = (InterlockedCompareExchange(&s_xfadeSoftPlay, 0, 0) != 0)
-		|| (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
+	const bool softBusy = false;
 	if (InterlockedCompareExchange(&s_onRestartBusy, 1, 0) != 0) {
 		// 昇格中の重複は wanted にも積まない（終わった後の keep 無し再Restart防止）
 		if (!softBusy)
@@ -21319,8 +20795,6 @@ void COggDlg::OnRestart()
 		~RestartBusyGuard() {
 			InterlockedExchange(&s_onRestartBusy, 0);
 			// soft play 直後に残った wanted は捨て済み想定。念のため soft 中は再投入しない。
-			if (InterlockedCompareExchange(&s_xfadeSoftPlay, 0, 0) != 0)
-				return;
 			if (InterlockedExchange(&s_restartWanted, 0) != 0 && dlg && ::IsWindow(dlg->GetSafeHwnd()))
 				RequestPlaybackRestart(dlg->GetSafeHwnd());
 		}
@@ -21333,8 +20807,7 @@ void COggDlg::OnRestart()
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
 	CString ti;
 	// 二重DS昇格中は stop() しない（B を止める経路を減らし、play()/stop1 だけにする）
-	const bool xfadeSoft = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0) && (m_dsb != NULL);
-	if (!xfadeSoft)
+	if (true)
 		stop();
 	else if (m_dsb) {
 		LONG v = (savedata.dsvol - 1) * 10;
@@ -22668,16 +22141,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 
 		// 二重スロット中はグローバルデコーダ/アップスケーラを触らない（閉じ済み kmp でクラッシュする）
 		int dualSlot = -1;
-		bool slotSeek = PlaySlot_IsDualSeekTarget(&dualSlot);
-		if (!slotSeek && InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0) {
-			dualSlot = (int)InterlockedCompareExchange(&g_activeSlot, 0, 0);
-			if (dualSlot >= 0 && dualSlot < PLAY_SLOT_COUNT
-				&& g_playSlots[dualSlot].dsb
-				&& g_playSlots[dualSlot].openMode != INT_MIN) {
-				slotSeek = true;
-				m_dsb = g_playSlots[dualSlot].dsb;
-			}
-		}
+		bool slotSeek = false;
 
 		if (!slotSeek) {
 			ResetAudioUpscalerPipeline();
@@ -22714,54 +22178,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		}
 
 		// 二重スロット運用中は active スロットのデコーダへシーク（グローバル mp3_/flac_ は閉じ済み）
-		if (slotSeek) {
-			const int slotMode = g_playSlots[dualSlot].openMode;
-			const __int64 oldPlayb = g_playSlots[dualSlot].playb;
-			const int oldUiPos = m_time.GetPos();
-			__int64 seekFrames;
-			/* mode ではなく slotMode のみ（昇格後に mode がずれてもフレーム換算を誤らない） */
-			if (slotMode == -10) {
-				seekFrames = (__int64)curpos * 100;
-				if (seekFrames < 0) seekFrames = 0;
-			}
-			else {
-				seekFrames = (__int64)curpos;
-			}
-			XfDbgF("OnHScroll dual cur=%d seek=%lld oldPlayb=%lld", curpos, (long long)seekFrames, (long long)oldPlayb);
 			m_time.SetPos(curpos);
-			ZeroMemory(bufwav3, sizeof(bufwav3));
-			hsc = 2; /* Seek 中に timerp が playb でバーを戻すのを防ぐ */
-			hscroll_lock.unlock();
-			const bool ok = PlaySlot_Seek(dualSlot, seekFrames);
-			if (ok) {
-				playb = seekFrames;
-				g_playSlots[dualSlot].playb = seekFrames;
-				int uiPos = (slotMode == -10) ? (int)(seekFrames / 100) : (int)seekFrames;
-				int mn = m_time.GetMinValue();
-				int mx = m_time.GetMaxValue();
-				if (uiPos < mn) uiPos = mn;
-				if (mx > mn && uiPos > mx) uiPos = mx;
-				m_time.SetPos(uiPos);
-			}
-			else {
-				/* 失敗時は UI/playb を戻す（「動いたように見えるが音が変わらない」を防ぐ） */
-				playb = oldPlayb;
-				g_playSlots[dualSlot].playb = oldPlayb;
-				m_time.SetPos(oldUiPos);
-			}
-			if (savedata.playerMode == 1) {
-				extern CMediaPlayerDlg* mp;
-				if (mp && ::IsWindow(mp->GetSafeHwnd()))
-					mp->MirrorSeekVol();
-			}
-			cnt3 = 0;
-			timer.SetEvent();
-			hsc = 0;
-			sflg = FALSE;
-			return;
-		}
-
-		m_time.SetPos(curpos);
 		playb = (__int64)curpos;
 
 		// 1. 動画・メディアポジションのシーク
@@ -22958,21 +22375,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 		if (maxpos <= minpos) maxpos = minpos + 1;
 
 		int dualSlot = -1;
-		bool slotSeek = PlaySlot_IsDualSeekTarget(&dualSlot);
-		if (!slotSeek && InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0) {
-			dualSlot = (int)InterlockedCompareExchange(&g_activeSlot, 0, 0);
-			if (dualSlot >= 0 && dualSlot < PLAY_SLOT_COUNT
-				&& g_playSlots[dualSlot].dsb
-				&& g_playSlots[dualSlot].openMode != INT_MIN) {
-				slotSeek = true;
-				m_dsb = g_playSlots[dualSlot].dsb;
-			}
-		}
-
-		XfDbgF("OnHotKey id=%d slotSeek=%d dual=%d dualEn=%ld active=%ld mode=%d",
-			(int)wp, slotSeek ? 1 : 0, dualSlot,
-			(long)InterlockedCompareExchange(&g_slotDualEnabled, 0, 0),
-			(long)InterlockedCompareExchange(&g_activeSlot, 0, 0), mode);
+		bool slotSeek = false;
 
 		if (pMediaPosition && ((mode == -2 && hsc == 0) || ((mode > 0 || mode < -10) && videoonly == TRUE && hsc == 0))) {
 			int curpos = m_time.GetPos() + dir * 10 * 100;
@@ -22984,40 +22387,7 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 			break;
 		}
 
-		if (slotSeek) {
-			PlaySlot& ss = g_playSlots[dualSlot];
-			const int slotMode = ss.openMode;
-			const int rate = (ss.rate > 0) ? ss.rate : ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
-			const __int64 oldPlayb = ss.playb;
-			const int oldUi = m_time.GetPos();
-			__int64 seekFrames = oldPlayb + (__int64)dir * (__int64)rate * 10;
-			if (ss.oggsize > 0 && seekFrames > (__int64)ss.oggsize) seekFrames = (__int64)ss.oggsize;
-			if (seekFrames < 0) seekFrames = 0;
-			int uiPos = (slotMode == -10) ? (int)(seekFrames / 100) : (int)seekFrames;
-			if (uiPos < minpos) uiPos = minpos;
-			if (uiPos > maxpos) uiPos = maxpos;
-			XfDbgF("OnHotKey dual oldPlayb=%lld seek=%lld oldUi=%d ui=%d rate=%d",
-				(long long)oldPlayb, (long long)seekFrames, oldUi, uiPos, rate);
-			hsc = 2;
-			InterlockedExchange(&g_seekUiFreshTick, (LONG)GetTickCount());
-			hscroll_lock.unlock();
-			const bool ok = PlaySlot_Seek(dualSlot, seekFrames);
-			if (ok) {
-				playb = seekFrames;
-				ss.playb = seekFrames;
-				m_time.SetPos(uiPos);
-				if (savedata.playerMode == 1) {
-					extern CMediaPlayerDlg* mp;
-					if (mp && ::IsWindow(mp->GetSafeHwnd()))
-						mp->MirrorSeekVol();
-				}
-			}
-			hsc = 0;
-			sflg = FALSE;
-			break;
-		}
-
-		/* 曲1レガシー */
+			/* 曲1レガシー */
 		int curpos = m_time.GetPos();
 		const int rate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
 		if (mode == -10) {
@@ -23033,7 +22403,6 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 		}
 		if (curpos < minpos) curpos = minpos;
 		if (curpos > maxpos) curpos = maxpos;
-		XfDbgF("OnHotKey legacy SetPos %d -> HSCROLL", curpos);
 		m_time.SetPos(curpos);
 		hscroll_lock.unlock();
 		SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, 0), (LPARAM)m_time.GetSafeHwnd());
@@ -23045,35 +22414,8 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 
 void COggDlg::rl(int a)
 {
-	/* 昇格後はグローバルデコーダ閉鎖済み → PlaySlot へ。旧経路は UI だけ動いて音が変わらない */
 	int dualSlot = -1;
-	bool slotSeek = PlaySlot_IsDualSeekTarget(&dualSlot);
-	if (!slotSeek && InterlockedCompareExchange(&g_slotDualEnabled, 0, 0) != 0) {
-		dualSlot = (int)InterlockedCompareExchange(&g_activeSlot, 0, 0);
-		if (dualSlot >= 0 && dualSlot < PLAY_SLOT_COUNT
-			&& g_playSlots[dualSlot].dsb
-			&& g_playSlots[dualSlot].openMode != INT_MIN)
-			slotSeek = true;
-	}
-	if (slotSeek) {
-		PlaySlot& ss = g_playSlots[dualSlot];
-		const int rate = (ss.rate > 0) ? ss.rate : ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
-		__int64 seekFrames = ss.playb + (__int64)a * (__int64)rate * 10;
-		if (ss.oggsize > 0 && seekFrames > (__int64)ss.oggsize) seekFrames = (__int64)ss.oggsize;
-		if (seekFrames < 0) seekFrames = 0;
-		XfDbgF("rl dual a=%d seek=%lld", a, (long long)seekFrames);
-		hsc = 2;
-		if (PlaySlot_Seek(dualSlot, seekFrames)) {
-			playb = seekFrames;
-			ss.playb = seekFrames;
-			int ui = (ss.openMode == -10) ? (int)(seekFrames / 100) : (int)seekFrames;
-			m_time.SetPos(ui);
-		}
-		hsc = 0;
-		poss = 0;
-		return;
-	}
-
+	bool slotSeek = false;
 	if (pMediaPosition && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
 		int minp = 0, maxp = 0;
 		m_time.GetRange(minp, maxp);

@@ -1,6 +1,5 @@
 #include "stdafx.h"
 #include "ProAudio.h"
-#include "ProXfadeDual.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CEqualizer.h"
@@ -122,7 +121,6 @@ void ProAudio_Init()
 	g_xfadeHoldOnce = 0;
 	g_cueCount = 0;
 	ProAudio_LoadExtras();
-	ProXfade_Reset();
 }
 
 void ProAudio_LoadExtras()
@@ -451,7 +449,6 @@ static bool ResampleXfadeInToRate(int newRate)
 
 int ProAudio_ApplyXfadeIn(void* interleaved, int byteLen, int sampleRate, int bits, int channels)
 {
-	if (ProXfade_ShouldSuppressApplyIn()) return 0;
 	if (g_xfadeInLeft <= 0 || !interleaved || byteLen <= 0) return 0;
 	// 拡張子・デコーダが変わって SR が違っても、リサンプルしてから混ぜる
 	if (g_xfadeInRate > 0 && sampleRate > 0 && g_xfadeInRate != sampleRate) {

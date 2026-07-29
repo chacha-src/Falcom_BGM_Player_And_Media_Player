@@ -552,8 +552,6 @@
     <ClCompile Include="Kpilist.cpp" />
     <ClCompile Include="SongParams.cpp" />
     <ClCompile Include="ProAudio.cpp" />
-    <ClCompile Include="ProXfadeDual.cpp" />
-    <ClCompile Include="PlaySlot.cpp" />
     <ClCompile Include="CProToolsDlg.cpp" />
     <ClCompile Include="kpi_decoder.cpp" />
     <ClCompile Include="kpi_device.cpp" />
@@ -674,8 +672,6 @@
     <ClInclude Include="Kpilist.h" />
     <ClInclude Include="SongParams.h" />
     <ClInclude Include="ProAudio.h" />
-    <ClInclude Include="ProXfadeDual.h" />
-    <ClInclude Include="PlaySlot.h" />
     <ClInclude Include="CProToolsDlg.h" />
     <ClInclude Include="kpi_decoder.h" />
     <ClInclude Include="kpi_device.h" />

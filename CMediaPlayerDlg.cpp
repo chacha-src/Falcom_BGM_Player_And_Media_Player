@@ -1828,13 +1828,26 @@ void CMediaPlayerDlg::NotifyPlayIconChanged()
 	if (pnt < 0 || pnt >= cnt) return;
 	const int ic = pl->pc[pnt].icon;
 	if (pnt != m_lastPlcnt) {
-		if (m_lastPlcnt >= 0 && m_lastPlcnt < cnt)
-			m_list.RedrawItems(m_lastPlcnt, m_lastPlcnt);
+		if (m_lastPlcnt >= 0 && m_lastPlcnt < cnt) {
+			CRect rOld;
+			if (m_list.GetItemRect(m_lastPlcnt, &rOld, LVIR_ICON))
+				m_list.RedrawWindow(&rOld, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+			else
+				m_list.RedrawItems(m_lastPlcnt, m_lastPlcnt);
+		}
 		m_lastPlcnt = pnt;
 		m_lastPlayIcon = -999;
 	}
 	if (ic != m_lastPlayIcon) {
-		m_list.RedrawItems(pnt, pnt);
+		// Invalidate だけだとピアノ/アナライザの WM_PAINT に後回しされ ♪ がカクつく。
+		// 情報パネルスクロールと同じく UPDATENOW でこのターンに描く。
+		CRect rIcon;
+		if (m_list.GetItemRect(pnt, &rIcon, LVIR_ICON))
+			m_list.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+		else {
+			m_list.RedrawItems(pnt, pnt);
+			m_list.UpdateWindow();
+		}
 		m_lastPlayIcon = ic;
 	}
 }

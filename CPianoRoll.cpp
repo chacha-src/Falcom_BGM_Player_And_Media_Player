@@ -2750,7 +2750,7 @@ static void PianoFillRectAlpha(CDC& dc, const CRect& rc, COLORREF clr, BYTE alph
     dc.AlphaBlend(rc.left, rc.top, rc.Width(), rc.Height(), &s_mem, 0, 0, 1, 1, bf);
 }
 
-void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH) const
+void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH, bool blitToDest) const
 {
     CRect panel;
     GetExprLegendPanelRect(rollW, rollH, panel);
@@ -2758,29 +2758,45 @@ void CPianoRoll::DrawExprLegend(CDC& dc, int rollW, int rollH) const
     const int pw = panel.Width(), ph = panel.Height();
     if (pw <= 0 || ph <= 0) return;
 
-    // ちらつき(点滅)対策: 画面 dc へ「バー描画 → α重ね」を直接2段で行うと、
-    // GDI は可視サーフェスへ直接描くため一瞬バーが見えて点滅する。
-    // パネルサイズのオフスクリーン DC で合成し、1回の BitBlt で提示する。
-    // 下地のバーは凡例を焼き込んでいない m_rollDC の該当領域から取得するため、
-    // フレーム蓄積(α重ねの濃化)も起きない。
-    CDC mem;
-    if (!mem.CreateCompatibleDC(&dc)) { DrawExprLegendContent(dc, rollW, rollH, panel); return; }
-    CBitmap bmp;
-    if (!bmp.CreateCompatibleBitmap(&dc, pw, ph)) { mem.DeleteDC(); DrawExprLegendContent(dc, rollW, rollH, panel); return; }
-    CBitmap* ob = mem.SelectObject(&bmp);
+    // 毎呼び出し CreateCompatibleBitmap すると長時間で GDI が断片化する。
+    // 退避用 m_legendBgDC を合成バッファとして再利用し、最終面へ1回 BitBlt する。
+    bool bgOk = (m_legendBgDC.GetSafeHdc() && m_legendBgW == pw && m_legendBgH == ph);
+    if (!bgOk) {
+        if (m_legendBgDC.GetSafeHdc()) {
+            if (m_legendBgOldBmp) m_legendBgDC.SelectObject(m_legendBgOldBmp);
+            m_legendBgDC.DeleteDC();
+        }
+        m_legendBgBmp.DeleteObject();
+        m_legendBgOldBmp = nullptr;
+        m_legendBgW = m_legendBgH = 0;
+        if (m_legendBgDC.CreateCompatibleDC(&dc) && m_legendBgBmp.CreateCompatibleBitmap(&dc, pw, ph)) {
+            m_legendBgOldBmp = m_legendBgDC.SelectObject(&m_legendBgBmp);
+            m_legendBgW = pw;
+            m_legendBgH = ph;
+            bgOk = true;
+        }
+    }
+    if (!bgOk) {
+        if (blitToDest)
+            DrawExprLegendContent(dc, rollW, rollH, panel);
+        return;
+    }
 
-    // 下地(流れるバー)を m_rollDC から取り込む。未準備なら背景色で埋める。
     if (m_rollDC.GetSafeHdc())
-        mem.BitBlt(0, 0, pw, ph, const_cast<CDC*>(&m_rollDC), panel.left, panel.top, SRCCOPY);
+        m_legendBgDC.BitBlt(0, 0, pw, ph, const_cast<CDC*>(&m_rollDC), panel.left, panel.top, SRCCOPY);
     else
-        mem.FillSolidRect(0, 0, pw, ph, RGB(20, 20, 20));
+        m_legendBgDC.FillSolidRect(0, 0, pw, ph, RGB(20, 20, 20));
 
-    // 凡例本体を (0,0) 原点で合成(背景はα、その上に枠・バッジ・文字)。
-    DrawExprLegendContent(mem, rollW, rollH, CRect(0, 0, pw, ph));
-
-    dc.BitBlt(panel.left, panel.top, pw, ph, &mem, 0, 0, SRCCOPY);
-    mem.SelectObject(ob);
-    mem.DeleteDC();
+    PianoFillRectAlpha(m_legendBgDC, CRect(0, 0, pw, ph), RGB(14, 14, 20), 170);
+    if (EnsureExprLegendCache(dc, rollW, rollH) && m_legendDC.GetSafeHdc()) {
+        m_legendBgDC.TransparentBlt(0, 0, pw, ph,
+            const_cast<CDC*>(&m_legendDC), 0, 0, pw, ph, RGB(14, 14, 20));
+    }
+    else {
+        DrawExprLegendContent(m_legendBgDC, rollW, rollH, CRect(0, 0, pw, ph), false);
+    }
+    if (blitToDest)
+        dc.BitBlt(panel.left, panel.top, pw, ph, const_cast<CDC*>(&m_legendBgDC), 0, 0, SRCCOPY);
 }
 
 void CPianoRoll::DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRect& panel, bool fillPanelBg) const
@@ -3592,8 +3608,25 @@ bool CPianoRoll::EnsureFrameBuffer(CDC& refDC, int w, int h)
 
 void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySectionH)
 {
+    // 凡例はスクロール用 m_rollDC に焼かない。最終面へだけ合成する。
+    // （旧: 毎フレーム TransparentBlt→提示→書き戻しで GDI/DWM が分単位に劣化し EQ が飢える）
+    CRect lgPanel;
+    const bool wantLegend = m_showExprLegend && m_rollReady && m_rollDC.GetSafeHdc();
+    if (wantLegend)
+        GetExprLegendPanelRect(w, rollH, lgPanel);
+    const bool haveLegend = wantLegend && !lgPanel.IsRectEmpty();
+
 #if CCUSTOM_AERO_SUPPORT
     if (savedata.aero == 1 && CCC_IsWin11() && m_chromaReady && m_chromaCache.hdcDib) {
+        if (haveLegend) {
+            // 合成は m_legendBgDC のみ（画面へ出さない）。UpdateRect で α を確定する。
+            DrawExprLegend(dc, w, rollH, false);
+            if (m_legendBgDC.GetSafeHdc() && lgPanel.Width() > 0 && lgPanel.Height() > 0) {
+                m_chromaCache.UpdateRect(m_legendBgDC.GetSafeHdc(),
+                    0, 0, lgPanel.left, lgPanel.top,
+                    lgPanel.Width(), lgPanel.Height(), PIANO_CHROMA_KEY);
+            }
+        }
         BakeMainFollowOverlayIntoChroma(w, h, rollH, keySectionH);
         if (m_rollReady && m_keyBufReady) {
             m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, 0, w, h);
@@ -3612,6 +3645,8 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
             dc.BitBlt(0, 0, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
         if (m_keyBufReady)
             dc.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
+        if (haveLegend)
+            DrawExprLegend(dc, w, rollH);
         if (m_frozen) {
             dc.SetBkMode(TRANSPARENT);
             dc.SetTextColor(RGB(255, 180, 80));
@@ -3633,6 +3668,9 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
         m_frameDC.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
     else
         m_frameDC.FillSolidRect(0, rollH, w, keySectionH, RGB(28, 28, 32));
+
+    if (haveLegend)
+        DrawExprLegend(m_frameDC, w, rollH);
 
     if (m_frozen) {
         m_frameDC.SetBkMode(TRANSPARENT);
@@ -3734,6 +3772,7 @@ void CPianoRoll::BakeMainFollowOverlayIntoChroma(int w, int h, int rollH, int ke
 void CPianoRoll::OnPaint()
 {
     CPaintDC dc(this);
+    const DWORD paintStart = GetTickCount();
     if (m_paintDisabled) {
         InterlockedExchange(&m_analysisDonePosted, 0);
         InterlockedExchange(&m_syncPosted, 0);
@@ -3773,11 +3812,6 @@ void CPianoRoll::OnPaint()
             return;
         }
     }
-
-    CRect clip;
-    dc.GetClipBox(&clip);
-    const bool clipRoll = clip.top < rollH;
-    const bool clipKey = clip.bottom > rollH;
 
     EnsurePaintFonts(w, keyH, rollH);
     if (!EnsureRollBuffer(dc, w, rollH) || !EnsureKeyBuffer(dc, w, keySectionH)) {
@@ -3913,49 +3947,8 @@ void CPianoRoll::OnPaint()
         didMeterOnly = true;
     }
 
-    // 凡例(記号の意味)は m_rollDC に「半透明で焼き込み」してから提示する。
-    // アクリル時の最終面はアルファ前提(クロマキャッシュ)で、GDI で直接重ねると
-    // アルファ0=完全透過になり文字すら出なくなる。そこで一旦 m_rollDC に焼き込み、
-    // 通常Blit/クロマ変換の両方で正しく不透明に提示されるようにする。
-    // 焼き込み前の下地バーを退避し、提示後に書き戻すことで、次のスクロールに
-    // 凡例が混入(α重ねの蓄積)するのを防ぐ。下地バーは毎フレーム新鮮なので
-    // バーが透けて見える表現は維持される。
-    CRect lgPanel;
-    GetExprLegendPanelRect(w, rollH, lgPanel);
-    const bool haveLegend = m_showExprLegend && m_rollReady && !lgPanel.IsRectEmpty() && m_rollDC.GetSafeHdc();
-    bool legendBaked = false;
-    if (haveLegend) {
-        const int pw = lgPanel.Width(), ph = lgPanel.Height();
-        bool bgOk = (m_legendBgDC.GetSafeHdc() && m_legendBgW == pw && m_legendBgH == ph);
-        if (!bgOk) {
-            if (m_legendBgDC.GetSafeHdc()) {
-                if (m_legendBgOldBmp) m_legendBgDC.SelectObject(m_legendBgOldBmp);
-                m_legendBgDC.DeleteDC();
-            }
-            m_legendBgBmp.DeleteObject();
-            m_legendBgOldBmp = nullptr;
-            m_legendBgW = m_legendBgH = 0;
-            if (m_legendBgDC.CreateCompatibleDC(&dc) && m_legendBgBmp.CreateCompatibleBitmap(&dc, pw, ph)) {
-                m_legendBgOldBmp = m_legendBgDC.SelectObject(&m_legendBgBmp);
-                m_legendBgW = pw;
-                m_legendBgH = ph;
-                bgOk = true;
-            }
-        }
-        if (bgOk) {
-            // 下地バー退避 → 半透明枠 → 文字ステッカー貼付 → 提示後に下地へ戻す
-            m_legendBgDC.BitBlt(0, 0, pw, ph, &m_rollDC, lgPanel.left, lgPanel.top, SRCCOPY);
-            PianoFillRectAlpha(m_rollDC, lgPanel, RGB(14, 14, 20), 170);
-            if (EnsureExprLegendCache(dc, w, rollH) && m_legendDC.GetSafeHdc()) {
-                m_rollDC.TransparentBlt(lgPanel.left, lgPanel.top, pw, ph,
-                    const_cast<CDC*>(&m_legendDC), 0, 0, pw, ph, RGB(14, 14, 20));
-            }
-            else {
-                DrawExprLegendContent(m_rollDC, w, rollH, lgPanel, false);
-            }
-            legendBaked = true;
-        }
-    }
+    // 凡例は m_rollDC に焼かない（PresentFinalFrame で最終面へ合成）。
+    // 旧: 毎フレーム AlphaBlend+TransparentBlt+書き戻し → 長時間で GDI 劣化し EQ 飢餓。
 
 #if CCUSTOM_AERO_SUPPORT
     if (savedata.aero == 1 && CCC_IsWin11()) {
@@ -3969,11 +3962,7 @@ void CPianoRoll::OnPaint()
             if (m_rollReady && didRollUpdate) {
                 if (didRollScroll && m_lastScrollPx > 0 && m_chromaReady
                     && m_lastScrollPx < rollH) {
-                    // スクロール時: キャッシュDIBを memmove で繰り上げ、
-                    // 変化帯のみ再変換。scrollPx>=rollH のときは下の else で全域更新。
-                    // 凡例／「メインに追従」を焼いたまま ScrollRows すると上へ流れて残像になる。
-                    // 追従行と凡例は一部重なるため、追従行を先、凡例下地を最後に戻す。
-                    // 逆順だと全幅復元が m_rollDC 内の凡例を再び焼き、上へ流してしまう。
+                    // m_rollDC は凡例非含み。ScrollRows 前の凡例下地戻しは不要。
                     {
                         CRect lockRc;
                         CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
@@ -3990,12 +3979,6 @@ void CPianoRoll::OnPaint()
                             }
                         }
                     }
-                    if (legendBaked && m_legendBgDC.GetSafeHdc()
-                        && lgPanel.Width() > 0 && lgPanel.Height() > 0) {
-                        m_chromaCache.UpdateRect(m_legendBgDC.GetSafeHdc(),
-                            0, 0, lgPanel.left, lgPanel.top,
-                            lgPanel.Width(), lgPanel.Height(), PIANO_CHROMA_KEY);
-                    }
                     m_chromaCache.ScrollRows(0, rollH, m_lastScrollPx);
                     int bandTop = m_lastScrollHealTop;
                     if (bandTop <= 0) {
@@ -4006,9 +3989,6 @@ void CPianoRoll::OnPaint()
                     const int bandH = rollH - bandTop;
                     if (bandH > 0)
                         m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(), 0, bandTop, 0, bandTop, w, bandH, PIANO_CHROMA_KEY);
-                    CRect lg; GetExprLegendPanelRect(w, rollH, lg);
-                    if (lg.Width() > 0 && lg.Height() > 0)
-                        m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(), lg.left, lg.top, lg.left, lg.top, lg.Width(), lg.Height(), PIANO_CHROMA_KEY);
                 }
                 else {
                     m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(), 0, 0, 0, 0, w, rollH, PIANO_CHROMA_KEY);
@@ -4027,18 +4007,12 @@ void CPianoRoll::OnPaint()
     }
 #endif
 
-    // 追従UI込みでオフスクリーン合成 → 画面へ1回だけ出す
+    // 追従UI込みでオフスクリーン合成 → 画面へ1回だけ出す（凡例もここで最終面へ）
     PresentFinalFrame(dc, w, h, rollH, keySectionH);
-
-    // 提示後に m_rollDC の凡例領域を下地へ戻す(次スクロールへの混入防止)
-    if (legendBaked && m_legendBgDC.GetSafeHdc()) {
-        m_rollDC.BitBlt(lgPanel.left, lgPanel.top, lgPanel.Width(), lgPanel.Height(),
-            &m_legendBgDC, 0, 0, SRCCOPY);
-    }
 
     if (didRollUpdate)
         m_historyDirty = false;
-    if (clipKey || needKeyDraw || didMeterOnly) {
+    if (needKeyDraw || didMeterOnly) {
         m_keyDirty = false;
         m_meterDirty = false;
     }
@@ -4052,14 +4026,32 @@ void CPianoRoll::OnPaint()
     InterlockedExchange(&m_analysisDonePosted, 0);
     InterlockedExchange(&m_syncPosted, 0);
 
-    // アナライザと同様: 未消化の提示/保留があれば ms2 間隔で1回追い付きキック
+    // EQ コード更新を1件だけ先に捌く（ピアノ OnPaint 独占で g_eqKeyUiPosted が固まるのを防ぐ）
+#ifndef WM_EQ_KEY_UPDATE
+#define WM_EQ_KEY_UPDATE (WM_APP + 430)
+#endif
+    {
+        MSG eqMsg;
+        if (::PeekMessage(&eqMsg, NULL, WM_EQ_KEY_UPDATE, WM_EQ_KEY_UPDATE, PM_REMOVE)) {
+            ::TranslateMessage(&eqMsg);
+            ::DispatchMessage(&eqMsg);
+        }
+    }
+
+    // 追い付き Post は「この OnPaint が軽かったとき」だけ。重い描画の直後に再キックすると
+    // UI がピアノで埋まり、30分後に EQ が数回/秒・ロールがガクガクになる。
+    const DWORD paintMs = GetTickCount() - paintStart;
     const bool presentDirty = (InterlockedExchange(&m_analysisPresentDirty, 0) != 0);
     if ((needAnotherRollFrame || presentDirty) && ::IsWindow(m_hWnd) && !m_paintDisabled) {
         const DWORD now = GetTickCount();
         int minMs = savedata.ms2;
         if (minMs < 16) minMs = 16;
         if (minMs > 960) minMs = 960;
-        if (m_lastAnalysisDonePostTick == 0 || (now - m_lastAnalysisDonePostTick) >= (DWORD)minMs) {
+        // 描画が周期以上かかった場合は dirty を残して次の解析/Sync に譲る
+        const bool yieldUi = (paintMs >= (DWORD)minMs);
+        const bool timingOk = (m_lastAnalysisDonePostTick == 0
+            || (now - m_lastAnalysisDonePostTick) >= (DWORD)minMs);
+        if (!yieldUi && timingOk) {
             if (InterlockedCompareExchange(&m_analysisDonePosted, 1, 0) == 0) {
                 m_lastAnalysisDonePostTick = now;
                 if (!PostMessage(WM_PIANOROLL_ANALYSIS_DONE, 0, 0)) {
@@ -4073,6 +4065,9 @@ void CPianoRoll::OnPaint()
         }
         else {
             InterlockedExchange(&m_analysisPresentDirty, 1);
+            // 重い直後だけ時刻を進め、ワーカーの直後 Post を抑止する
+            if (yieldUi)
+                m_lastAnalysisDonePostTick = now;
         }
     }
 

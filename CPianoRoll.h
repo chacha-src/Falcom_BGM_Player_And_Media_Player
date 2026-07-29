@@ -460,7 +460,7 @@ private:
     void ApplySyncInvalidate();
     void InvalidateRegions(bool roll, bool key);
     void EnsurePaintFonts(int clientW, int keyH, int rollH);
-    void DrawExprLegend(CDC& dc, int rollW, int rollH) const;
+    void DrawExprLegend(CDC& dc, int rollW, int rollH, bool blitToDest = true) const;
     void DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRect& panel, bool fillPanelBg = true) const;
     bool EnsureExprLegendCache(CDC& refDC, int rollW, int rollH) const;
     void ReleaseExprLegendCache() const;

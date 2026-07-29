@@ -3,14 +3,8 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "ProAudio.h"
-#include "ProXfadeDual.h"
-#include "PlaySlot.h"
 #include "SongParams.h"
-#include "SongHeardClock.h"
-#include "XfDebugLog.h"
 
-void Ogg_PostXfadePromote();
-void PlaybackCcWriteForced(const void* p, UINT n);
 #include "PlayList.h"
 //#include <math.h>
 //#include <vorbis/codec.h>
@@ -54,8 +48,6 @@ extern int g_outBytesPerFrame;
 extern 	LPDIRECTSOUND8 m_ds;
 extern 	LPDIRECTSOUNDBUFFER m_dsb1;
 extern 	LPDIRECTSOUNDBUFFER8 m_dsb;
-extern 	LPDIRECTSOUNDBUFFER m_dsbXfade1;
-extern 	LPDIRECTSOUNDBUFFER8 m_dsbXfade;
 extern 	LPDIRECTSOUND3DBUFFER m_dsb3d;
 extern	LPDIRECTSOUNDBUFFER m_p;
 extern LPDIRECTSOUND3DBUFFER m_lpDS3DBuffer;
@@ -231,15 +223,6 @@ void COggDlg::Vol(int vol)
 
 void COggDlg::Closeds()
 {
-	if (m_dsbXfade) {
-		m_dsbXfade->Stop();
-		m_dsbXfade->Release();
-		m_dsbXfade = NULL;
-	}
-	if (m_dsbXfade1) {
-		m_dsbXfade1->Release();
-		m_dsbXfade1 = NULL;
-	}
 	if (m_dsb) {
 		m_dsb->Stop();
 		m_dsb->Release();
@@ -418,10 +401,9 @@ BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 		// DS Lock 中は Stop でドライバ待ちを解く（固まりの主因の一つ）
 		// ただし二重DS昇格中の B は止めない（keep 中 Stop が「数秒で無音」になる）
 		if (InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0) {
-			const bool keep = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
-			if (!keep && m_dsb)
+			if (m_dsb)
 				m_dsb->Stop();
-			if (!keep && pAudioClient)
+			if (pAudioClient)
 				pAudioClient->Stop();
 		}
 		const DWORD w = WaitForSingleObject(hThread, pollMs);
@@ -475,7 +457,6 @@ void BeginPlaybackNotifyThread()
 	stf = 0;
 	syukai = 0;
 	syukai2 = 0;
-	InterlockedExchange(&g_xfadeNoWrite, 0);
 	// CREATE_SUSPENDED で起動し、スレッド本体が走り出す前に m_bAutoDelete を
 	// 落として寿命を自前管理する。これによりスレッドが自己終了しても
 	// CWinThread オブジェクトとスレッドハンドルは破棄されず、安全に Join できる。
@@ -522,31 +503,13 @@ UINT HandleNotifications(LPVOID)
 		return v >= 0x10000 && (v % sizeof(void*)) == 0;
 	};
 
-	// 二重DS昇格継続時は再生カーソルを維持（0 に戻すとタイル導入→無音穴→頭出しになる）
-	const bool xfadeReuse = (InterlockedExchange(&g_xfadeReuseContinue, 0) != 0);
-	if (!xfadeReuse) {
-		oldw = 0;
-		if (isPlausibleDsb(m_dsb))
-			m_dsb->SetCurrentPosition(0);
-		// mode ではなく Open 中の形式（曲切替で mode が先に変わる）
-		if (g_openDecoderMode == -10 || g_openDecoderMode == 999) {
-			oldw = OUTPUT_BUFFER_SIZE * 2;
-			og->timer.SetEvent();
-		}
-	}
-	else if (isPlausibleDsb(m_dsb)) {
-		ULONG pc = 0, wc = 0;
-		if (m_dsb->GetCurrentPosition(&pc, &wc) == DS_OK) {
-			// play() 側 prefill が oldw を進めていればそれを優先
-			if (oldw == 0)
-				oldw = wc;
-		}
-		LONG v = (savedata.dsvol - 1) * 10;
-		if (savedata.dsvol == -498) v = (savedata.dsvol - 1) * 7;
-		if (v > 0) v = 0;
-		if (v < DSBVOLUME_MIN) v = DSBVOLUME_MIN;
-		m_dsb->SetVolume(v);
-		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+	oldw = 0;
+	if (isPlausibleDsb(m_dsb))
+		m_dsb->SetCurrentPosition(0);
+	// mode ではなく Open 中の形式（曲切替で mode が先に変わる）
+	if (g_openDecoderMode == -10 || g_openDecoderMode == 999) {
+		oldw = OUTPUT_BUFFER_SIZE * 2;
+		og->timer.SetEvent();
 	}
 	fade1 = 0;
 	sek4 = FALSE;
@@ -554,10 +517,8 @@ UINT HandleNotifications(LPVOID)
 	auto stopPlaybackAndExit = [&]() -> UINT {
 		playf = 1;
 		thn = FALSE;
-		// 二重DS昇格中は B を鳴らしたまま（ここで Mute/Stop すると切替「間」になる）
-		const bool keep = (InterlockedCompareExchange(&g_xfadeKeepDsb, 0, 0) != 0);
 		LPDIRECTSOUNDBUFFER8 dsbStop = m_dsb;
-		if (!keep && isPlausibleDsb(dsbStop)) {
+		if (isPlausibleDsb(dsbStop)) {
 			dsbStop->SetVolume(DSBVOLUME_MIN);
 			dsbStop->Stop();
 		}
@@ -596,33 +557,21 @@ UINT HandleNotifications(LPVOID)
 		if (thn1) return stopPlaybackAndExit();
 		if (ps == 1) continue;
 
-		// 昇格後は B に曲1 PCM を書かない
-		if (InterlockedCompareExchange(&g_xfadeNoWrite, 0, 0) != 0) {
-			::WaitForMultipleObjects(1, ev, FALSE, 10);
-			continue;
-		}
-
 		LPDIRECTSOUNDBUFFER8 dsb = m_dsb;
 		if (!isPlausibleDsb(dsb))
 			continue;
 
-		// 書き込み位置の計算（通常再生と同じ WriteCursor ギャップ。
-		// play+lead 先行書きは ~100ms 周期で Sleep→欠乏し、time:/音が同時に止まる）
+		// 書き込み位置の計算
 		dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
 		const ULONG ringBytes = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
-		const int phXf = ProXfade_Phase();
-		const bool inXfWrite = (phXf == PRO_XF_OVERLAP || phXf == PRO_XF_PROMOTE);
-		int len1 = 0, len2 = 0;
-		int gapToWriteCursor = 0;
+		int len1 = (int)WriteCursor - (int)oldw;
+		int len2 = 0;
 
-		len1 = (int)WriteCursor - (int)oldw;
-		len2 = 0;
 		if (len1 == 0) continue;
 		if (len1 < 0) {
 			len1 = (int)ringBytes - (int)oldw;
 			len2 = (int)WriteCursor;
 		}
-		gapToWriteCursor = len1 + len2;
 
 		// 終端ドレイン中か（実音声が終わった後の純無音サイクル）。終端確定後、書込みヘッドが
 		// 終端位置を越えていれば、このサイクルはすべて無音で埋める（古いループ音の漏れ防止）。
@@ -633,9 +582,8 @@ UINT HandleNotifications(LPVOID)
 		static std::vector<BYTE> s_dsStage;
 		int stageBytes = 0;
 		bool stageFade = false;
-		bool dsHasMix = false;
 		int readmeThisCycle = 0;
-		int writtenThisCycle = len1 + len2;
+		const int writtenThisCycle = len1 + len2;
 		bool exitAfterCl2 = false;
 
 		{
@@ -653,10 +601,11 @@ UINT HandleNotifications(LPVOID)
 			if (thn1) {
 				exitAfterCl2 = true;
 			}
-			else if (m_dsb) {
+			else {
 				sflg = TRUE;
-				DispatchPlaywavFill(bufwav3, oldw, len1, len2);
-				readmeThisCycle = readme;
+				if (m_dsb) DispatchPlaywavFill(bufwav3, oldw, len1, len2);
+				// 曲最後まで行ったとき
+				readmeThisCycle = readme; // 終端確定に使うため reset 前に退避
 				if (readme) {
 					if (len1 > readme)
 						ZeroMemory(bufwav3 + readme, len2);
@@ -670,7 +619,6 @@ UINT HandleNotifications(LPVOID)
 				else {
 					stageFade = (fade2 || drainSilence) ? true : false;
 					stageBytes = writtenThisCycle;
-					dsHasMix = false;
 					if (stageBytes > 0) {
 						if ((int)s_dsStage.size() < stageBytes)
 							s_dsStage.resize((size_t)stageBytes);
@@ -678,58 +626,21 @@ UINT HandleNotifications(LPVOID)
 							memcpy(s_dsStage.data(), bufwav3 + oldw, (size_t)len1);
 						if (len2 > 0)
 							memcpy(s_dsStage.data() + len1, bufwav3, (size_t)len2);
-						/* Mix は cl2 の外（Sleep/待ちや B リング待ちで UI timerp を止めない） */
 					}
+
 					readme = 0;
 					fade2 = fade1;
 					if (flg3 != 0) flg3--;
 					sflg = FALSE;
 				}
 			}
-		} // guard(cl2) — Lock / Mix 前に必ず解放
+		} // guard(cl2) — Lock 前に必ず解放
 		if (exitAfterCl2)
 			return stopPlaybackAndExit();
-
-		if (inXfWrite && stageBytes > 0) {
-			const int bits = (g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32) ? g_ds_pcm_bits : 16;
-			const int ch = (g_ds_pcm_ch > 0) ? g_ds_pcm_ch : 2;
-			int mixed = 0;
-			if (PlaySlot_MixIncomingEx(s_dsStage.data(), stageBytes, bits, ch, &mixed) && mixed > 0) {
-				dsHasMix = true;
-				stageBytes = mixed;
-				writtenThisCycle = mixed;
-				if (mixed <= len1) { len1 = mixed; len2 = 0; }
-				else { len2 = mixed - len1; }
-				{
-					std::lock_guard<std::mutex> guard(cl2);
-					if (len1 > 0)
-						memcpy(bufwav3 + oldw, s_dsStage.data(), (size_t)len1);
-					if (len2 > 0)
-						memcpy(bufwav3, s_dsStage.data() + len1, (size_t)len2);
-				}
-				PlaybackCcWriteForced(s_dsStage.data(), (UINT)mixed);
-			}
-			else {
-				/* B 不足: A を現在ゲインで書いて穴を防ぐ。フェード進行は進めない
-				   （A-only で done を進めると B 無しのまま昇格→曲2へ飛ぶ） */
-				float g0 = 1.f, g1 = 1.f;
-				if (ProXfade_PrepChunkGain(0, false, g0, g1))
-					ProXfade_ApplyPcmGainRamp(s_dsStage.data(), stageBytes, bits, g0, g1);
-				dsHasMix = true;
-			}
-		}
 
 		// DirectSound 転送（cl2 外。UI 側 Closeds で m_dsb が NULL でもローカル参照で安全）
 		dsb = m_dsb;
 		if (stageBytes > 0 && isPlausibleDsb(dsb) && !thn1 && !sek) {
-			/* Mix 済みなら追加の A ゲインは不要（二重減衰になる） */
-			if (!dsHasMix) {
-				float g0 = 1.f, g1 = 1.f;
-				if (ProXfade_PrepChunkGain(stageBytes, false, g0, g1)) {
-					const int bits = (g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32) ? g_ds_pcm_bits : 16;
-					ProXfade_ApplyPcmGainRamp(s_dsStage.data(), stageBytes, bits, g0, g1);
-				}
-			}
 			InterlockedExchange(&g_dsDeviceOpBusy, 1);
 			hr = dsb->Lock(oldw, (DWORD)stageBytes, (LPVOID*)&pdsb1, &len3, (LPVOID*)&pdsb2, &len4, 0);
 			if (hr == DS_OK) {
@@ -752,257 +663,61 @@ UINT HandleNotifications(LPVOID)
 			// 書込み累積は従来どおり Lock 成否に依存しない（再生位置進行の一貫性維持）。
 			const __int64 writtenBefore = g_dsWrittenBytes;
 			g_dsWrittenBytes += (writtenThisCycle > 0) ? writtenThisCycle : 0;
-
 			// EOF（fade1=停止 / endflg=連続）を最初に検出したサイクルで実音声の終端を確定。
-			// 二重DS対象形式では xf 早期カットしない（2000ms前切断→無音→疑似In の元凶）。
+			// readme があれば最終チャンク内の実バイト境界が分かるのでそれを使う。無ければこのサイクル末尾。
 			if (g_endWrittenBytes == 0 && (fade1 || endflg)) {
-				const int xmsEof = ProAudio_XfadeMs();
-				const int eofMode = (g_openDecoderMode != INT_MIN) ? g_openDecoderMode : mode;
-				const bool dualMaybe = (endflg && !fade1 && savedata.saverenzoku == 1 && xmsEof > 0
-					&& ProXfade_IsSupportedMode(eofMode)
-					&& !ProXfade_HasFailed() && pl && pl->playcnt > 0);
-				// 二重DS対応の連続再生ではレガシー end バイトを立てない
-				// （偽 endflg や phase=IDLE 直後の g_endWrittenBytes で timer9000 連鎖する）
-				if (!dualMaybe) {
-					__int64 endPos;
-					if (readmeThisCycle > 0 && readmeThisCycle <= writtenThisCycle)
-						endPos = writtenBefore + readmeThisCycle;
-					else
-						endPos = g_dsWrittenBytes;
-					// 非対応形式のみレガシー「xf ms 手前で終端」
-					if (endflg && !fade1 && savedata.saverenzoku == 1
-						&& xmsEof > 0 && !ProXfade_IsSupportedMode(eofMode)
-						&& g_outBytesPerFrame > 0 && wavbit_sample_Hz > 0) {
-						__int64 cut = (__int64)g_outBytesPerFrame * (__int64)wavbit_sample_Hz * (__int64)xmsEof / 1000;
-						if (cut < g_outBytesPerFrame) cut = g_outBytesPerFrame;
-						if (endPos > cut)
-							endPos -= cut;
-					}
-					g_endWrittenBytes = endPos;
-				}
-			}
-			if (stageBytes > 0) {
-				if (stageBytes < gapToWriteCursor && ringBytes > 0)
-					oldw = (oldw + (ULONG)stageBytes) % ringBytes;
+				if (readmeThisCycle > 0 && readmeThisCycle <= writtenThisCycle)
+					g_endWrittenBytes = writtenBefore + readmeThisCycle;
 				else
-					oldw = WriteCursor;
+					g_endWrittenBytes = g_dsWrittenBytes;
 			}
+			oldw = WriteCursor;
 		}
 
-		// 実再生バイト数 = 累積書込み − 未再生キュー(oldw と再生カーソルの差)。
-		{
+		// 終端の短フェード＆ジャスト停止判定（ロックを外して終了処理へ）。
+		// playb(デコード先頭)ではなく DS 再生カーソルが実音声終端へ到達した瞬間を「曲終わり」とする。
+		// 実再生バイト数 = 累積書込み − 未再生キュー(我々の書込みヘッド oldw と再生カーソル pc の差)。
+		// oldw はリング上の実書込み位置。g_dsWrittenBytes%ring とは初期オフセット分ずれるため oldw を使う。
+		if (g_endWrittenBytes != 0) {
 			LPDIRECTSOUNDBUFFER8 dsbb = m_dsb;
-			__int64 queued = 0;
-			__int64 heard = g_dsWrittenBytes;
-			if (isPlausibleDsb(dsbb) && ringBytes > 0) {
+			__int64 heard = g_endWrittenBytes; // 既定: 終端到達扱い（dsb 取得失敗時の保険）
+			if (isPlausibleDsb(dsbb)) {
 				ULONG pc = 0, wc = 0;
-				if (dsbb->GetCurrentPosition(&pc, &wc) == DS_OK) {
-					queued = (__int64)(((ULONG)oldw + ringBytes - pc) % ringBytes);
+				if (dsbb->GetCurrentPosition(&pc, &wc) == DS_OK && ringBytes > 0) {
+					const __int64 queued = (__int64)(((ULONG)oldw + ringBytes - pc) % ringBytes);
 					heard = g_dsWrittenBytes - queued;
 				}
-			}
-			g_heardBytes = heard;
-
-			// ---- 連続再生 / レガシー早期終端（二重DSクロスフェードは撤去） ----
-			{
-				const int xms = 0; /* ProAudio_XfadeMs() 常時0 */
-				const bool songLoop = (endf == 0 && loop2 > 0);
-				const int curMode = (g_openDecoderMode != INT_MIN) ? g_openDecoderMode : mode;
-				const bool dualWant = false; /* クロスフェード撤去 */
-
-				// timerp() の ttt と同じ時計（SongHeardClock）。oldw キューや expectedDs は使わない。
-				__int64 remainMs = 0;
-				double totalSec = 0.0;
-				double heardSec = 0.0;
-				{
-					const int rate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
-					const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
-					long qSamplesHeard = 0;
-					if (isPlausibleDsb(m_dsb) && ringBytes > 0 && bpf > 0) {
-						ULONG pcQ = 0, wcQ = 0;
-						if (m_dsb->GetCurrentPosition(&pcQ, &wcQ) == DS_OK)
-							qSamplesHeard = (long)((((ULONG)wcQ + ringBytes - (ULONG)pcQ) % ringBytes) / (ULONG)bpf);
-					}
-					SongHeardSec_FromGlobals(
-						curMode, playb, oggsize, loop2,
-						rate, wavchannel, wavsam_depth,
-						qSamplesHeard, totalSec, heardSec);
-					remainMs = SongRemainMs_FromSecs(totalSec, heardSec);
-				}
-
-				// endflg 単独では次曲クロスしない（昇格直後の偽 EOF 連鎖防止）。
-				// 残時間か、十分再生した上での EOF だけを曲末とみなす。
-				const bool playedEnough = (heardSec >= 5.0)
-					|| (totalSec > 1.0 && heardSec >= totalSec * 0.5);
-				// DS 未再生キュー（デコーダ EOF 後もバッファに残る尺）— fallback 用
-				__int64 queuedMs = 0;
-				if (g_ds_pcm_rate > 0) {
-					const int qBpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame
-						: (((g_ds_pcm_ch > 0) ? g_ds_pcm_ch : 2) * (((g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16) / 8));
-					if (qBpf > 0)
-						queuedMs = queued * 1000 / ((__int64)qBpf * (__int64)g_ds_pcm_rate);
-				}
-				const bool nearEndPrefetch = (remainMs > 0 && remainMs <= xms + PRO_XF_PREPARE_MS)
-					|| (endflg && !fade1 && playedEnough
-						&& (remainMs == 0 || remainMs <= xms + PRO_XF_PREPARE_MS + 2000));
-				if (remainMs <= 0 && endflg && !fade1 && playedEnough && queuedMs > 0)
-					remainMs = queuedMs;
-				/* 可聴の最後 xms をフェードにする → 書込み開始はキュー分だけ早く */
-				const __int64 overlapArmAt = (__int64)xms + queuedMs;
-				const bool nearEndOverlap = (remainMs > 0 && remainMs <= (overlapArmAt > 0 ? overlapArmAt : 1));
-				const bool timeToPrefetch = ProXfade_DualArmOk(xms) && nearEndPrefetch;
-				const bool timeToOverlap = ProXfade_DualArmOk(xms) && nearEndOverlap;
-
-				// 昇格直後の偽 EOF は捨てる（残った endflg で即次曲クロスになる）
-				if (!ProXfade_DualArmOk(xms) && endflg && !fade1)
-					endflg = 0;
-
-				bool dualRunning = false;
-				if (dualWant) {
-					// 二重スロット: 空きスロットに次曲デコーダを Open してフィード開始
-					if (ProXfade_Phase() == PRO_XF_IDLE && timeToPrefetch) {
-						int next = plcnt + 1;
-						if (next >= pl->playcnt) next = 0;
-						if (next >= 0 && next < pl->playcnt) {
-							const int nm = ProXfade_ModeFromPath(pl->pc[next].fol);
-							const int bSlot = PlaySlot_IdleSlot();
-							if (!ProXfade_IsSupportedMode(nm)) {
-								ProXfade_MarkFailed();
-							}
-							else if (g_playSlots[bSlot].openMode == INT_MIN && m_ds) {
-								// prepare: Open+バッファのみ。頭出し再生は overlap で StartFromHead
-								if (PlaySlot_OpenFile(bSlot, pl->pc[next].fol, nm)
-									&& PlaySlot_CreateBuffer(bSlot, m_ds, g_ds_buffer_bytes)) {
-									ProXfade_ArmSlotReady(next, nm, pl->pc[next].fol, bSlot);
-								}
-								else {
-									PlaySlot_StopFeedAndClose(bSlot, 2000);
-									PlaySlot_ReleaseBuffer(bSlot);
-									ProXfade_MarkFailed();
-								}
-							}
-						}
-					}
-					const int bSlot = (int)InterlockedCompareExchange(&g_xfadeBSlot, 0, 0);
-					LPDIRECTSOUNDBUFFER8 dsbB = (bSlot >= 0 && bSlot < PLAY_SLOT_COUNT)
-						? g_playSlots[bSlot].dsb : NULL;
-					// 残り xf+lead: B 頭出し。オーバーラップ尺は起動直後の実残りに合わせてクランプ
-					// （壁時計だけ xms 進むと A 途切れ後も B が進み「クロス途中終わり→2曲目はクロス終了位置」になる）
-					if (ProXfade_Phase() == PRO_XF_READY && timeToOverlap && dsbB) {
-						/* B 頭出しは1回。リング準備中も A への書込みを止めない
-						   （旧: StartFromHead 後に Sleep 最大400ms → DS 枯渇で先頭が二重に聞こえる） */
-						const int outR = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate
-							: ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
-						const int outBpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame
-							: (((g_ds_pcm_ch > 0) ? g_ds_pcm_ch : 2)
-								* (((g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16) / 8));
-						if (!ProXfade_EnsureBFromHead(bSlot)) {
-							ProXfade_MarkFailed();
-						}
-						else if (ProXfade_BRingReadyForOverlap(outR, outBpf)) {
-							/* B 待ち後に残り・キューを再計測してから曲線を決める */
-							__int64 qNow = queuedMs;
-							__int64 remNow = remainMs;
-							if (isPlausibleDsb(m_dsb) && ringBytes > 0 && g_ds_pcm_rate > 0 && outBpf > 0) {
-								ULONG pc2 = 0, wc2 = 0;
-								if (m_dsb->GetCurrentPosition(&pc2, &wc2) == DS_OK) {
-									const __int64 qb = (__int64)(((ULONG)oldw + ringBytes - pc2) % ringBytes);
-									qNow = qb * 1000 / ((__int64)outBpf * (__int64)g_ds_pcm_rate);
-								}
-							}
-							{
-								const int rate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
-								const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
-								long qSamplesHeard = 0;
-								if (isPlausibleDsb(m_dsb) && ringBytes > 0 && bpf > 0) {
-									ULONG pcQ = 0, wcQ = 0;
-									if (m_dsb->GetCurrentPosition(&pcQ, &wcQ) == DS_OK)
-										qSamplesHeard = (long)((((ULONG)wcQ + ringBytes - (ULONG)pcQ) % ringBytes) / (ULONG)bpf);
-								}
-								double totalSec2 = 0.0, heardSec2 = 0.0;
-								SongHeardSec_FromGlobals(
-									curMode, playb, oggsize, loop2,
-									rate, wavchannel, wavsam_depth,
-									qSamplesHeard, totalSec2, heardSec2);
-								remNow = SongRemainMs_FromSecs(totalSec2, heardSec2);
-							}
-							if (qNow < 0) qNow = 0;
-							if (qNow > 5000) qNow = 5000;
-							int curveMs = (xms > 0) ? xms : 1;
-							if (remNow > 0 && remNow < (__int64)curveMs + qNow) {
-								int avail = (int)remNow - (int)qNow;
-								if (avail < 1) avail = (int)remNow;
-								if (avail > 0 && avail < curveMs) curveMs = avail;
-							}
-							if (curveMs < 1) curveMs = 1;
-							ProXfade_BeginOverlapEx(curveMs, outR, outBpf, (int)qNow);
-							XfDbgF("legacy arm(after B) rem=%lld qNow=%lld curve=%d ring=%d",
-								(long long)remNow, (long long)qNow, curveMs, PlaySlot_MixRingBytes());
-							ProXfade_TickOverlapVolumes(m_dsb, dsbB);
-						}
-					}
-					if (ProXfade_Phase() == PRO_XF_OVERLAP && dsbB) {
-						dualRunning = true;
-						ProXfade_TickOverlapVolumes(m_dsb, dsbB);
-						/* 可聴完了（done - queued ≈ target）で昇格 */
-						if (ProXfade_ReadyToPromote(queued)) {
-							InterlockedExchange(&g_xfadeNoWrite, 1);
-							ProXfade_RequestPromote(0);
-							Ogg_PostXfadePromote();
-						}
-					}
-					else if (ProXfade_Phase() == PRO_XF_READY || ProXfade_Phase() == PRO_XF_PROMOTE
-						|| ProXfade_Phase() == PRO_XF_PREFETCHING) {
-						dualRunning = true;
-					}
-				}
-
-				// レガシー早期終端は「二重DS非対応」だけ。
-				// 対応形式で g_endWrittenBytes=heard すると「1を2000ms前切断→無音→2疑似In」になる。
-				if (!dualRunning && !ProXfade_IsSupportedMode(curMode)
-					&& g_endWrittenBytes == 0 && !fade1 && savedata.saverenzoku == 1
-					&& xms > 0 && !songLoop
-					&& ProXfade_DualArmOk(xms)) {
-					if ((remainMs > 0 && remainMs <= xms) || endflg) {
-						g_endWrittenBytes = (heard > 0) ? heard : 1;
-					}
-					else if (g_expectedDsBytes > 0 && g_ds_pcm_rate > 0) {
-						const int dsBpf = ((g_ds_pcm_ch > 0) ? g_ds_pcm_ch : 2) * (((g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16) / 8);
-						__int64 cutBytes = (__int64)dsBpf * (__int64)g_ds_pcm_rate * (__int64)xms / 1000;
-						if (cutBytes < dsBpf) cutBytes = dsBpf;
-						if (g_expectedDsBytes > cutBytes && heard >= g_expectedDsBytes - cutBytes)
-							g_endWrittenBytes = (heard > 0) ? heard : 1;
-					}
+				g_heardBytes = heard; // 連続再生のタイマー 9000 などが参照
+				// 終端直前の残り実音声に短いフェードをかけてクリック/プツ音を防ぐ。
+				const __int64 remain = g_endWrittenBytes - heard;
+				const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
+				const __int64 fadeBytes = (__int64)bpf * (__int64)wavbit_sample_Hz * 35 / 1000; // 約35ms
+				if (remain > 0 && remain < fadeBytes && fadeBytes > 0) {
+					LONG vol = (LONG)((double)DSBVOLUME_MIN * (1.0 - (double)remain / (double)fadeBytes));
+					if (vol > 0) vol = 0;
+					if (vol < DSBVOLUME_MIN) vol = DSBVOLUME_MIN;
+					dsbb->SetVolume(vol);
 				}
 			}
+			else {
+				g_heardBytes = heard;
+			}
 
-			if (g_endWrittenBytes != 0 && ProXfade_Phase() != PRO_XF_OVERLAP && ProXfade_Phase() != PRO_XF_PROMOTE) {
-				if (isPlausibleDsb(dsbb)) {
-					const __int64 remain = g_endWrittenBytes - heard;
-					const int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
-					const __int64 fadeBytes = (__int64)bpf * (__int64)wavbit_sample_Hz * 35 / 1000;
-					if (remain > 0 && remain < fadeBytes && fadeBytes > 0) {
-						LONG vol = (LONG)((double)DSBVOLUME_MIN * (1.0 - (double)remain / (double)fadeBytes));
-						if (vol > 0) vol = 0;
-						if (vol < DSBVOLUME_MIN) vol = DSBVOLUME_MIN;
-						dsbb->SetVolume(vol);
-					}
+			// fade1(=停止 / 連続でない) のときだけ DS スレッドで停止する。
+			// 連続再生(endflg)の次曲遷移は UI 側タイマー 9000 が同じ終端到達判定で行う。
+			if (fade1 && heard >= g_endWrittenBytes) {
+				if (thn1 || stf != 0 || syukai == 2)
+					return stopPlaybackAndExit();
+				playf = 0; thn = TRUE; reset = TRUE;
+				LPDIRECTSOUNDBUFFER8 dsbFade = m_dsb;
+				if (isPlausibleDsb(dsbFade)) {
+					dsbFade->SetVolume(DSBVOLUME_MIN);
+					dsbFade->Stop();
 				}
-
-				// fade1 のときだけ DS スレッドで停止。連続再生の次曲はタイマ 9000。
-				if (fade1 && heard >= g_endWrittenBytes) {
-					if (thn1 || stf != 0 || syukai == 2)
-						return stopPlaybackAndExit();
-					playf = 0; thn = TRUE; reset = TRUE;
-					LPDIRECTSOUNDBUFFER8 dsbFade = m_dsb;
-					if (isPlausibleDsb(dsbFade)) {
-						dsbFade->SetVolume(DSBVOLUME_MIN);
-						dsbFade->Stop();
-					}
-					if (og && ::IsWindow(og->GetSafeHwnd()))
-						og->PostMessage(WM_PLAYBACK_AUTO_STOPPED, 0, 0);
-					return 0;
-				}
+				if (og && ::IsWindow(og->GetSafeHwnd()))
+					og->PostMessage(WM_PLAYBACK_AUTO_STOPPED, 0, 0);
+				// AfxEndThread 禁止（stopPlaybackAndExit と同じ理由）。通常 return でスレッド終了。
+				return 0;
 			}
 		}
 	}

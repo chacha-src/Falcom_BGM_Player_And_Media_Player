@@ -462,9 +462,6 @@
     <ClCompile Include="ProAudio.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ProXfadeDual.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="CProToolsDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
