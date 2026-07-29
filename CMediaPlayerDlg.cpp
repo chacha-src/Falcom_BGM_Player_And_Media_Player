@@ -483,6 +483,8 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_miss = NULL;
 	m_missCap = 0;
 	m_missScan = 0;
+	m_missGen = 0;
+	m_missBusy = 0;
 	ZeroMemory(m_jakBmp, sizeof(m_jakBmp));
 	ZeroMemory(m_jakKey, sizeof(m_jakKey));
 	ZeroMemory(m_jakTick, sizeof(m_jakTick));
@@ -682,6 +684,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_NOTIFY(HDN_TRACKW, IDC_MP_LIST, &CMediaPlayerDlg::OnListHeaderEndTrack)
 	ON_MESSAGE(WM_MP_INFO_SCROLL, &CMediaPlayerDlg::OnInfoScrollTick)
 	ON_MESSAGE(WM_MP_PLSEL_EXPAND, &CMediaPlayerDlg::OnPlselExpandPopup)
+	ON_MESSAGE(WM_MP_MISS_DONE, &CMediaPlayerDlg::OnMissScanDone)
 	ON_WM_NCACTIVATE()
 	ON_WM_SYSCOMMAND()
 	ON_WM_MOVING()
@@ -1346,6 +1349,7 @@ void CMediaPlayerDlg::RequestAppShutdown()
 
 BOOL CMediaPlayerDlg::DestroyWindow()
 {
+	StopMissScan();
 	SavePos();
 	// バナー内蔵ジャケ(ファルコム特化型のミニジャケ)抑止フラグを必ず解除する。
 	// これを残すと、ファルコム特化型へ戻した後もミニジャケが表示されなくなる。
@@ -2186,6 +2190,11 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 
 	// 件数変化 or 強制(並べ替え/タグ更新/追加削除)時に範囲を再設定。
 	if (bForce || cnt != m_lastCount) {
+		if (bForce || (pl->playcnt != m_missCap)) {
+			// 実体 PL が変わったら欠損フラグを再走査
+			StopMissScan();
+			m_missScan = 0;
+		}
 		int anchor = GetListScrollAnchor();
 		m_list.SetItemCount(cnt);   // 仮想リスト: スクロール範囲を確定(pl と同じ仕組み)
 		m_lastCount = cnt;
@@ -2674,6 +2683,119 @@ void CMediaPlayerDlg::SavePos()
 	}
 }
 
+// 欠損走査スナップショット(UIスレッドで確保→ワーカが解放/結果ごと Post)
+struct MpMissJob {
+	HWND hwnd;
+	LONG gen;
+	int count;
+	int* subs;
+	TCHAR* fols; // count * 1024
+	char* result;
+};
+
+static UINT AFX_CDECL MpMissScanThread(LPVOID p)
+{
+	MpMissJob* job = (MpMissJob*)p;
+	if (!job) return 0;
+	for (int i = 0; i < job->count; ++i) {
+		const TCHAR* fol = job->fols + (size_t)i * 1024;
+		job->result[i] = PlTrackLooksMissing(job->subs[i], fol) ? 1 : 0;
+	}
+	if (job->hwnd && ::IsWindow(job->hwnd))
+		::PostMessage(job->hwnd, WM_MP_MISS_DONE, (WPARAM)job->gen, (LPARAM)job);
+	else {
+		free(job->subs);
+		free(job->fols);
+		free(job->result);
+		free(job);
+	}
+	return 0;
+}
+
+void CMediaPlayerDlg::StopMissScan()
+{
+	InterlockedIncrement(&m_missGen);
+	// 稼働中スレッドは古い gen の結果を OnMissScanDone で破棄する
+}
+
+void CMediaPlayerDlg::KickMissScan()
+{
+	if (!::IsWindow(GetSafeHwnd()) || !pl || !pl->pc || pl->playcnt <= 0)
+		return;
+
+	const int n = pl->playcnt;
+	if (m_missCap < n) {
+		char* np = (char*)realloc(m_miss, (size_t)n);
+		if (!np) return;
+		if (m_missCap > 0)
+			memset(np + m_missCap, 0, (size_t)(n - m_missCap));
+		else
+			memset(np, 0, (size_t)n);
+		m_miss = np;
+		m_missCap = n;
+		m_missScan = 0; // 未完了
+	}
+	else if (m_missCap > n) {
+		m_missCap = n;
+		m_missScan = 0;
+	}
+
+	// 既に完了済み、または走査中なら何もしない
+	if (m_missScan >= n) return;
+	if (InterlockedCompareExchange(&m_missBusy, 1, 0) != 0) return;
+
+	MpMissJob* job = (MpMissJob*)malloc(sizeof(MpMissJob));
+	if (!job) {
+		InterlockedExchange(&m_missBusy, 0);
+		return;
+	}
+	ZeroMemory(job, sizeof(*job));
+	job->hwnd = m_hWnd;
+	job->gen = InterlockedIncrement(&m_missGen);
+	job->count = n;
+	job->subs = (int*)malloc(sizeof(int) * (size_t)n);
+	job->fols = (TCHAR*)malloc(sizeof(TCHAR) * 1024 * (size_t)n);
+	job->result = (char*)malloc((size_t)n);
+	if (!job->subs || !job->fols || !job->result) {
+		free(job->subs); free(job->fols); free(job->result); free(job);
+		InterlockedExchange(&m_missBusy, 0);
+		return;
+	}
+	for (int i = 0; i < n; ++i) {
+		job->subs[i] = pl->pc[i].sub;
+		_tcsncpy_s(job->fols + (size_t)i * 1024, 1024, pl->pc[i].fol, _TRUNCATE);
+	}
+	if (!AfxBeginThread(MpMissScanThread, job, THREAD_PRIORITY_BELOW_NORMAL)) {
+		free(job->subs); free(job->fols); free(job->result); free(job);
+		InterlockedExchange(&m_missBusy, 0);
+	}
+}
+
+LRESULT CMediaPlayerDlg::OnMissScanDone(WPARAM wParam, LPARAM lParam)
+{
+	MpMissJob* job = (MpMissJob*)lParam;
+	InterlockedExchange(&m_missBusy, 0);
+	if (!job) return 0;
+	const LONG gen = (LONG)wParam;
+	const BOOL accept = (gen == m_missGen) && m_miss && job->count > 0
+		&& job->count <= m_missCap && pl && pl->playcnt == job->count;
+	if (accept && job->result) {
+		memcpy(m_miss, job->result, (size_t)job->count);
+		m_missScan = job->count;
+		if (::IsWindow(m_list.GetSafeHwnd()))
+			m_list.Invalidate(FALSE);
+	}
+	else {
+		// PL が変わっていたら次の Kick でやり直す
+		m_missScan = 0;
+	}
+	free(job->subs);
+	free(job->fols);
+	free(job->result);
+	free(job);
+	return 0;
+}
+
 #if WIN64
 void CMediaPlayerDlg::OnTimer(UINT_PTR nIDEvent)
 #else
@@ -2684,33 +2806,8 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		// 低速: テキスト/リスト/シーク/音量を同期(変化時のみ更新)
 		SyncFromMain();
 		RefreshList(FALSE);
-		// 欠損フラグを少しずつ走査(UIを止めない)
-		if (pl && pl->pc && pl->playcnt > 0) {
-			if (m_missCap < pl->playcnt) {
-				char* np = (char*)realloc(m_miss, (size_t)pl->playcnt);
-				if (np) {
-					if (m_missCap > 0)
-						memset(np + m_missCap, 0, (size_t)(pl->playcnt - m_missCap));
-					else
-						memset(np, 0, (size_t)pl->playcnt);
-					m_miss = np; m_missCap = pl->playcnt;
-				}
-			}
-			if (m_miss && m_missCap >= pl->playcnt) {
-				const int chunk = 24;
-				int start = m_missScan;
-				if (start < 0 || start >= pl->playcnt) start = 0;
-				int changed = 0;
-				for (int n = 0; n < chunk; ++n) {
-					int i = (start + n) % pl->playcnt;
-					char miss = PlTrackLooksMissing(pl->pc[i].sub, pl->pc[i].fol) ? 1 : 0;
-					if (m_miss[i] != miss) { m_miss[i] = miss; changed = 1; }
-				}
-				m_missScan = (start + chunk) % pl->playcnt;
-				if (changed)
-					m_list.Invalidate(FALSE);
-			}
-		}
+		// 欠損判定はワーカスレッド(KickMissScan)。UI で PathFileExists しない。
+		KickMissScan();
 		// ジャケットは描画外で1件ずつ遅延読込(CustomDraw内LoadJacketがクラッシュ原因)
 		MpJacketLoadVisibleOne(this);
 		// 起動直後に裏画面が残る対策: メディアプレイヤーモード中は必ず隠す(監視)

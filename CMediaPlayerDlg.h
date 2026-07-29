@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.h : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.h : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // このソフトは元々ファルコム特化型再生ソフトだが、メディアプレイヤーの側面も持つ。
 // CMediaPlayerDlg は「張りぼて(ファサード)」であり、実体は COggDlg(og->) と
@@ -30,6 +30,11 @@ class CPlayList;
 // ドロップダウン展開直後にリストボックス(hwndList)の高さを再設定する(環境差対策)
 #ifndef WM_MP_PLSEL_EXPAND
 #define WM_MP_PLSEL_EXPAND  (WM_APP + 62)
+#endif
+
+// 欠損フラグ走査スレッド完了(UI を止めない PathFileExists)
+#ifndef WM_MP_MISS_DONE
+#define WM_MP_MISS_DONE (WM_APP + 63)
 #endif
 
 /////////////////////////////////////////////////////////////////////////////
@@ -223,10 +228,14 @@ public:
 	int  m_fcnt;             // フィルタ後件数(フィルタOFF時は playcnt と同値扱いしない: m_filtOn で判定)
 	int  m_filtOn;           // 1=絞り込み中
 
-	// ---- 欠損フラグ(pc インデックス、1=欠損)。遅延走査 ----
-	char* m_miss;            // malloc
+	// ---- 欠損フラグ(pc インデックス、1=欠損)。ワーカスレッド走査 ----
+	char* m_miss;            // malloc(表示用)
 	int   m_missCap;
-	int   m_missScan;        // 次回走査開始位置
+	int   m_missScan;        // 互換: 走査完了位置(>=playcnt で完了)
+	volatile LONG m_missGen; // 世代。PL変更で上げ、古いスレッド結果を破棄
+	volatile LONG m_missBusy;// 1=走査スレッド稼働中
+	void KickMissScan();     // playcnt 変化時に非同期走査を起動
+	void StopMissScan();     // 破棄前に世代を上げて結果を無視
 
 	// ---- ジャケットサムネキャッシュ(LRU・固定スロット) ----
 	enum { kMpJakN = 64, kMpJakPx = 24 };
@@ -355,6 +364,7 @@ protected:
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg LRESULT OnInfoScrollTick(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPlselExpandPopup(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnMissScanDone(WPARAM wParam, LPARAM lParam);
 	afx_msg BOOL OnNcActivate(BOOL bActive);
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	DECLARE_MESSAGE_MAP()
