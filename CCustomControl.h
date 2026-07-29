@@ -1033,6 +1033,9 @@ private:
     int m_nLogicalPos;          // 確定された論理位置
     BOOL m_bDragging;           // ドラッグ中かどうか
     int m_nVisualPos;           // ドラッグ中の見た目上の位置
+    CBitmap m_memBackstore;     // 毎描画 CreateCompatibleBitmap を避ける
+    int m_backstoreW;
+    int m_backstoreH;
 };
 
 // ============================================================================

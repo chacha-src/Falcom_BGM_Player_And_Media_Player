@@ -22062,10 +22062,10 @@ static void DrawScrollSepDeco(CDC& dc, int x_px, int h_px, int w_px, COLORREF cl
 	if (w_px < 32) return;
 	const int cy = h_px / 2;
 
-	CPen nullPen(PS_NULL, 0, RGB(0, 0, 0));
-	CBrush br(clr);
-	CBrush* ob = dc.SelectObject(&br);
-	CPen* op = dc.SelectObject(&nullPen);
+	// 毎フレーム CreatePen/Brush すると長時間で GDI が断片化する → stock で色だけ差し替え
+	HGDIOBJ oldPen = dc.SelectStockObject(NULL_PEN);
+	HGDIOBJ oldBrush = dc.SelectStockObject(DC_BRUSH);
+	::SetDCBrushColor(dc.GetSafeHdc(), clr);
 
 	// 中央ダイヤモンド
 	const int cr = h_px / 10; // ダイヤモンドの半径（高さの 1/10）
@@ -22088,15 +22088,15 @@ static void DrawScrollSepDeco(CDC& dc, int x_px, int h_px, int w_px, COLORREF cl
 	dc.Ellipse(rx - dr, cy - dr, rx + dr, cy + dr);
 
 	// 細線（ドット〜ダイヤモンド間）
-	CPen linePen(PS_SOLID, 2, clr);
-	dc.SelectObject(&linePen);
+	dc.SelectStockObject(DC_PEN);
 	dc.SelectStockObject(NULL_BRUSH);
+	::SetDCPenColor(dc.GetSafeHdc(), clr);
 	int mid_cx = x_px + w_px / 2;
 	dc.MoveTo(lx + dr,       cy); dc.LineTo(mid_cx - cr - 1, cy);
 	dc.MoveTo(mid_cx + cr + 1, cy); dc.LineTo(rx - dr,       cy);
 
-	dc.SelectObject(ob);
-	dc.SelectObject(op);
+	if (oldBrush) dc.SelectObject(oldBrush);
+	if (oldPen) dc.SelectObject(oldPen);
 }
 
 void COggDlg::OnButton9_Folder()

@@ -814,6 +814,70 @@ CFont* CCC_GetPooledSegFont(const LOGFONT& lt)
     s.alive = true;
     return &s.font;
 }
+
+// 太線ペンプール（スライダー描画の毎フレーム CreatePen 嵐を止める）
+struct SegPenSlot {
+    int width = 0;
+    COLORREF color = 0;
+    CPen pen;
+    bool alive = false;
+};
+constexpr int kSegPenPool = 64;
+SegPenSlot g_segPenPool[kSegPenPool];
+unsigned g_segPenRR = 0;
+
+CPen* CCC_GetPooledPen(int width, COLORREF color)
+{
+    if (width < 1) width = 1;
+    for (int i = 0; i < kSegPenPool; ++i) {
+        SegPenSlot& s = g_segPenPool[i];
+        if (!s.alive) continue;
+        if (s.width == width && s.color == color)
+            return &s.pen;
+    }
+    const int i = (int)(g_segPenRR++ % (unsigned)kSegPenPool);
+    SegPenSlot& s = g_segPenPool[i];
+    if (s.alive && s.pen.GetSafeHandle())
+        s.pen.DeleteObject();
+    s.width = width;
+    s.color = color;
+    if (!s.pen.CreatePen(PS_SOLID, width, color)) {
+        s.alive = false;
+        return nullptr;
+    }
+    s.alive = true;
+    return &s.pen;
+}
+
+struct SegBrushSlot {
+    COLORREF color = 0;
+    CBrush brush;
+    bool alive = false;
+};
+constexpr int kSegBrushPool = 32;
+SegBrushSlot g_segBrushPool[kSegBrushPool];
+unsigned g_segBrushRR = 0;
+
+CBrush* CCC_GetPooledBrush(COLORREF color)
+{
+    for (int i = 0; i < kSegBrushPool; ++i) {
+        SegBrushSlot& s = g_segBrushPool[i];
+        if (!s.alive) continue;
+        if (s.color == color)
+            return &s.brush;
+    }
+    const int i = (int)(g_segBrushRR++ % (unsigned)kSegBrushPool);
+    SegBrushSlot& s = g_segBrushPool[i];
+    if (s.alive && s.brush.GetSafeHandle())
+        s.brush.DeleteObject();
+    s.color = color;
+    if (!s.brush.CreateSolidBrush(color)) {
+        s.alive = false;
+        return nullptr;
+    }
+    s.alive = true;
+    return &s.brush;
+}
 } // namespace
 
 static HBITMAP CCC_CreateShadowDib32(HDC hdcRef, int w, int h, void** ppBits)
@@ -1792,20 +1856,39 @@ static void DrawSmartText2(CDC* pDC, CRect rect, CString str, UINT fmt, BOOL bDi
 
 static void FillRectAlpha(CDC* pDC, const CRect& rc, COLORREF clr, BYTE alpha)
 {
-    // 単色塗りは 1x1 を引き伸ばして AlphaBlend する(見た目同一・GDI 生成圧を大幅削減)。
+    // 単色塗りは 1x1 を引き伸ばして AlphaBlend する。
+    // 毎呼び出し CreateCompatibleBitmap すると長時間で GDI ヒープが断片化し、
+    // EQ スライダー群の再描画が数倍〜数十倍遅くなる。
     if (!pDC || rc.Width() <= 0 || rc.Height() <= 0) return;
-    CDC mDC;
-    if (!mDC.CreateCompatibleDC(pDC)) return;
-    CBitmap mB;
-    if (!mB.CreateCompatibleBitmap(pDC, 1, 1)) { mDC.DeleteDC(); return; }
-    CBitmap* ob = mDC.SelectObject(&mB);
-    mDC.SetPixelV(0, 0, clr);
+
+    struct Pixel1x1Cache {
+        CDC dc;
+        CBitmap bmp;
+        CBitmap* oldBmp = nullptr;
+        COLORREF lastClr = (COLORREF)0xFFFFFFFF;
+        bool ready = false;
+        void Ensure(HDC hdcRef)
+        {
+            if (ready) return;
+            if (!dc.CreateCompatibleDC(CDC::FromHandle(hdcRef))) return;
+            if (!bmp.CreateCompatibleBitmap(CDC::FromHandle(hdcRef), 1, 1)) {
+                dc.DeleteDC();
+                return;
+            }
+            oldBmp = dc.SelectObject(&bmp);
+            ready = true;
+        }
+    };
+    static Pixel1x1Cache s_px;
+    s_px.Ensure(pDC->GetSafeHdc());
+    if (!s_px.ready) return;
+    if (s_px.lastClr != clr) {
+        s_px.dc.SetPixelV(0, 0, clr);
+        s_px.lastClr = clr;
+    }
     BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, 0 };
     ::AlphaBlend(pDC->GetSafeHdc(), rc.left, rc.top, rc.Width(), rc.Height(),
-        mDC.GetSafeHdc(), 0, 0, 1, 1, bf);
-    mDC.SelectObject(ob);
-    mB.DeleteObject();
-    mDC.DeleteDC();
+        s_px.dc.GetSafeHdc(), 0, 0, 1, 1, bf);
 }
 
 // ============================================================================
@@ -3287,12 +3370,11 @@ void CCustomStatic::DrawClient(CDC& dc)
                 LOGFONT lfTry = lfB;
                 lfTry.lfHeight = -height;
                 lfTry.lfWidth = width;
-                CFont fontTry;
-                fontTry.CreateFontIndirect(&lfTry);
-                CFont* pOld = memDC.SelectObject(&fontTry);
+                CFont* pTry = CCC_GetPooledSegFont(lfTry);
+                if (!pTry) return CSize(0, 0);
+                CFont* pOld = memDC.SelectObject(pTry);
                 CSize size = memDC.GetTextExtent(strText);
                 memDC.SelectObject(pOld);
-                fontTry.DeleteObject();
                 return size;
             };
 
@@ -3333,13 +3415,13 @@ void CCustomStatic::DrawClient(CDC& dc)
                 LOGFONT lfTry = lfB;
                 lfTry.lfHeight = -finalHeight;
                 lfTry.lfWidth = 0;
-                CFont fontTry;
-                fontTry.CreateFontIndirect(&lfTry);
-                CFont* pOld = memDC.SelectObject(&fontTry);
+                CFont* pTry = CCC_GetPooledSegFont(lfTry);
                 TEXTMETRIC tm = {};
-                memDC.GetTextMetrics(&tm);
-                memDC.SelectObject(pOld);
-                fontTry.DeleteObject();
+                if (pTry) {
+                    CFont* pOld = memDC.SelectObject(pTry);
+                    memDC.GetTextMetrics(&tm);
+                    memDC.SelectObject(pOld);
+                }
 
                 const int baseWidth = tm.tmAveCharWidth;
                 const int maxWidth = baseWidth * 3;
@@ -3392,12 +3474,14 @@ void CCustomStatic::DrawClient(CDC& dc)
     }
     else
     {
-        CFont fontFinal;
-        LOGFONT lfFinal = lfB;
-        lfFinal.lfHeight = -finalHeight;
-        lfFinal.lfWidth = finalWidth;
-        fontFinal.CreateFontIndirect(&lfFinal);
-        CFont* pOIF = memDC.SelectObject(&fontFinal);
+        CFont* pFontFinal = nullptr;
+        {
+            LOGFONT lfFinal = lfB;
+            lfFinal.lfHeight = -finalHeight;
+            lfFinal.lfWidth = finalWidth;
+            pFontFinal = CCC_GetPooledSegFont(lfFinal);
+        }
+        CFont* pOIF = pFontFinal ? memDC.SelectObject(pFontFinal) : nullptr;
 
         if (m_fCachedScaleX < 0.98f)
         {
@@ -3425,8 +3509,7 @@ void CCustomStatic::DrawClient(CDC& dc)
             }
         }
 
-        memDC.SelectObject(pOIF);
-        fontFinal.DeleteObject();
+        if (pOIF) memDC.SelectObject(pOIF);
     }
 
     memDC.SelectObject(pOF);
@@ -4322,6 +4405,15 @@ void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMa
 {
     int nR = nMax - nMin;
     BOOL bV = (GetStyle() & TBS_VERT);
+    auto selPen = [&](int w, COLORREF c) {
+        CPen* p = CCC_GetPooledPen(w, c);
+        if (p) pDC->SelectObject(p);
+    };
+    auto selBrush = [&](COLORREF c) -> CBrush* {
+        CBrush* b = CCC_GetPooledBrush(c);
+        if (b) { pDC->SelectObject(b); return b; }
+        return nullptr;
+    };
     if (!bV)
     {
         int cY = rect.Height() / 2;
@@ -4330,15 +4422,14 @@ void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMa
         int tW = tR - tL;
         if (tW <= 0) return;
         int tP = tL + (int)((double)(nPos - nMin) * tW / nR);
-        CPen pA(PS_SOLID, 5, RGB(200, 150, 255));
-        pDC->SelectObject(&pA);
+        CPen* oldPen = pDC->GetCurrentPen();
+        CBrush* oldBrush = pDC->GetCurrentBrush();
+        selPen(5, RGB(200, 150, 255));
         pDC->MoveTo(tL, cY);
         pDC->LineTo(tP, cY);
-        CPen pI(PS_SOLID, 3, RGB(220, 220, 230));
-        pDC->SelectObject(&pI);
+        selPen(3, RGB(220, 220, 230));
         pDC->LineTo(tR, cY);
-        CPen pT(PS_SOLID, 2, RGB(150, 100, 200));
-        pDC->SelectObject(&pT);
+        selPen(2, RGB(150, 100, 200));
         for (int i = 0; i <= 10; i++)
         {
             int nx = tL + tW * i / 10;
@@ -4347,23 +4438,22 @@ void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMa
             pDC->LineTo(nx, cY + nh);
             if (i % 5 == 0)
             {
-                CBrush b(RGB(200, 180, 255));
-                CBrush* ob = pDC->SelectObject(&b);
+                selBrush(RGB(200, 180, 255));
                 pDC->Ellipse(nx - 3, cY - nh - 5, nx + 3, cY - nh + 1);
-                pDC->SelectObject(ob);
             }
         }
         CRect rD(tP - 9, cY - 12, tP + 9, cY + 12);
         DrawDiamond(pDC, rD, RGB(200, 180, 255));
         DrawSparkle(pDC, tP, cY - 16, 3, COLOR_SPARKLE);
-        CPen pL(PS_SOLID, 1, RGB(255, 240, 200));
-        pDC->SelectObject(&pL);
+        selPen(1, RGB(255, 240, 200));
         for (int a = 0; a < 360; a += 45)
         {
             double r = a * 3.14159 / 180.0;
             pDC->MoveTo(tP + (int)(12 * cos(r)), cY + (int)(12 * sin(r)));
             pDC->LineTo(tP + (int)(18 * cos(r)), cY + (int)(18 * sin(r)));
         }
+        if (oldPen) pDC->SelectObject(oldPen);
+        if (oldBrush) pDC->SelectObject(oldBrush);
     }
     else
     {
@@ -4373,16 +4463,15 @@ void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMa
         int tH = tB - tT;
         if (tH <= 0) return;
         int tP = tT + (int)((double)(nPos - nMin) * tH / nR);
-        CPen pA(PS_SOLID, 5, RGB(200, 150, 255));
-        pDC->SelectObject(&pA);
+        CPen* oldPen = pDC->GetCurrentPen();
+        CBrush* oldBrush = pDC->GetCurrentBrush();
+        selPen(5, RGB(200, 150, 255));
         pDC->MoveTo(cX, tP);
         pDC->LineTo(cX, tB);
-        CPen pI(PS_SOLID, 3, RGB(220, 220, 230));
-        pDC->SelectObject(&pI);
+        selPen(3, RGB(220, 220, 230));
         pDC->MoveTo(cX, tT);
         pDC->LineTo(cX, tP);
-        CPen pT(PS_SOLID, 2, RGB(150, 100, 200));
-        pDC->SelectObject(&pT);
+        selPen(2, RGB(150, 100, 200));
         for (int i = 0; i <= 10; i++)
         {
             int ny = tT + tH * i / 10;
@@ -4391,14 +4480,14 @@ void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMa
             pDC->LineTo(cX + nw, ny);
             if (i % 5 == 0)
             {
-                CBrush b(RGB(200, 180, 255));
-                CBrush* ob = pDC->SelectObject(&b);
+                selBrush(RGB(200, 180, 255));
                 pDC->Ellipse(cX + nw + 1, ny - 3, cX + nw + 7, ny + 3);
-                pDC->SelectObject(ob);
             }
         }
         CRect rD(cX - 9, tP - 12, cX + 9, tP + 12);
         DrawDiamond(pDC, rD, RGB(200, 180, 255));
+        if (oldPen) pDC->SelectObject(oldPen);
+        if (oldBrush) pDC->SelectObject(oldBrush);
     }
 }
 
@@ -4407,6 +4496,15 @@ void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMa
 {
     int nR = nMax - nMin;
     BOOL bV = (GetStyle() & TBS_VERT);
+    auto selPen = [&](int w, COLORREF c) {
+        CPen* p = CCC_GetPooledPen(w, c);
+        if (p) pDC->SelectObject(p);
+    };
+    auto selBrush = [&](COLORREF c) -> CBrush* {
+        CBrush* b = CCC_GetPooledBrush(c);
+        if (b) { pDC->SelectObject(b); return b; }
+        return nullptr;
+    };
     if (!bV)
     {
         int cY = rect.Height() / 2;
@@ -4415,15 +4513,14 @@ void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMa
         int tW = tR - tL;
         if (tW <= 0) return;
         int tP = tL + (int)((double)(nPos - nMin) * tW / nR);
-        CPen pA(PS_SOLID, 5, RGB(100, 200, 150));
-        pDC->SelectObject(&pA);
+        CPen* oldPen = pDC->GetCurrentPen();
+        CBrush* oldBrush = pDC->GetCurrentBrush();
+        selPen(5, RGB(100, 200, 150));
         pDC->MoveTo(tL, cY);
         pDC->LineTo(tP, cY);
-        CPen pI(PS_SOLID, 3, RGB(220, 220, 230));
-        pDC->SelectObject(&pI);
+        selPen(3, RGB(220, 220, 230));
         pDC->LineTo(tR, cY);
-        CPen pT(PS_SOLID, 2, RGB(80, 160, 120));
-        pDC->SelectObject(&pT);
+        selPen(2, RGB(80, 160, 120));
         for (int i = 0; i <= 10; i++)
         {
             int nx = tL + tW * i / 10;
@@ -4432,23 +4529,22 @@ void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMa
             pDC->LineTo(nx, cY + nh);
             if (i % 5 == 0)
             {
-                CBrush b(RGB(150, 220, 180));
-                CBrush* ob = pDC->SelectObject(&b);
+                selBrush(RGB(150, 220, 180));
                 pDC->Ellipse(nx - 3, cY - nh - 5, nx + 3, cY - nh + 1);
-                pDC->SelectObject(ob);
             }
         }
         CRect rD(tP - 9, cY - 12, tP + 9, cY + 12);
         DrawDiamond(pDC, rD, RGB(100, 220, 160));
         DrawSparkle(pDC, tP, cY - 16, 3, COLOR_SPARKLE);
-        CPen pL(PS_SOLID, 1, RGB(200, 255, 220));
-        pDC->SelectObject(&pL);
+        selPen(1, RGB(200, 255, 220));
         for (int a = 0; a < 360; a += 45)
         {
             double r = a * 3.14159 / 180.0;
             pDC->MoveTo(tP + (int)(12 * cos(r)), cY + (int)(12 * sin(r)));
             pDC->LineTo(tP + (int)(18 * cos(r)), cY + (int)(18 * sin(r)));
         }
+        if (oldPen) pDC->SelectObject(oldPen);
+        if (oldBrush) pDC->SelectObject(oldBrush);
     }
     else
     {
@@ -4458,16 +4554,15 @@ void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMa
         int tH = tB - tT;
         if (tH <= 0) return;
         int tP = tT + (int)((double)(nPos - nMin) * tH / nR);
-        CPen pA(PS_SOLID, 5, RGB(100, 200, 150));
-        pDC->SelectObject(&pA);
+        CPen* oldPen = pDC->GetCurrentPen();
+        CBrush* oldBrush = pDC->GetCurrentBrush();
+        selPen(5, RGB(100, 200, 150));
         pDC->MoveTo(cX, tP);
         pDC->LineTo(cX, tB);
-        CPen pI(PS_SOLID, 3, RGB(220, 220, 230));
-        pDC->SelectObject(&pI);
+        selPen(3, RGB(220, 220, 230));
         pDC->MoveTo(cX, tT);
         pDC->LineTo(cX, tP);
-        CPen pT(PS_SOLID, 2, RGB(80, 160, 120));
-        pDC->SelectObject(&pT);
+        selPen(2, RGB(80, 160, 120));
         for (int i = 0; i <= 10; i++)
         {
             int ny = tT + tH * i / 10;
@@ -4476,14 +4571,14 @@ void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMa
             pDC->LineTo(cX + nw, ny);
             if (i % 5 == 0)
             {
-                CBrush b(RGB(150, 220, 180));
-                CBrush* ob = pDC->SelectObject(&b);
+                selBrush(RGB(150, 220, 180));
                 pDC->Ellipse(cX + nw + 1, ny - 3, cX + nw + 7, ny + 3);
-                pDC->SelectObject(ob);
             }
         }
         CRect rD(cX - 9, tP - 12, cX + 9, tP + 12);
         DrawDiamond(pDC, rD, RGB(100, 220, 160));
+        if (oldPen) pDC->SelectObject(oldPen);
+        if (oldBrush) pDC->SelectObject(oldBrush);
     }
 }
 
@@ -4503,7 +4598,8 @@ END_MESSAGE_MAP()
 
 CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
     : m_bAutoDelete(FALSE), m_nMin(0), m_nMax(100), m_nSelMin(0), m_nSelMax(100),
-    m_nDragTarget(0), m_bDragging(FALSE), m_nVisualPos(0), m_nLogicalPos(0), m_bAeroMode(FALSE) {}
+    m_nDragTarget(0), m_bDragging(FALSE), m_nVisualPos(0), m_nLogicalPos(0), m_bAeroMode(FALSE),
+    m_backstoreW(0), m_backstoreH(0) {}
 CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl() {}
 
 void CCustomRangeSliderCtrl::PostNcDestroy()
@@ -4638,11 +4734,23 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
 {
     CRect r;
     GetClientRect(&r);
+    const int rw = r.Width();
+    const int rh = r.Height();
+    if (rw <= 0 || rh <= 0) return;
+
     CDC mDC;
-    CBitmap mB;
     mDC.CreateCompatibleDC(&dc);
-    mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
-    CBitmap* ob = mDC.SelectObject(&mB);
+    if (rw != m_backstoreW || rh != m_backstoreH || !m_memBackstore.GetSafeHandle())
+    {
+        if (m_memBackstore.GetSafeHandle()) m_memBackstore.DeleteObject();
+        if (!m_memBackstore.CreateCompatibleBitmap(&dc, rw, rh)) {
+            mDC.DeleteDC();
+            return;
+        }
+        m_backstoreW = rw;
+        m_backstoreH = rh;
+    }
+    CBitmap* ob = mDC.SelectObject(&m_memBackstore);
 
     const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
     if (bTrans)
@@ -4652,11 +4760,11 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
         CCC_DrawInwoman(&mDC, r, TRUE);
 #if CCUSTOM_AERO_SUPPORT
         if (CCC_IsAeroEnabled() && CCC_IsWin11())
-            CCC_BlitChromaNF(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
+            CCC_BlitChromaNF(dc.GetSafeHdc(), 0, 0, rw, rh,
                 mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
         else
 #endif
-            CCC_ClearDestBlt(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
+            CCC_ClearDestBlt(dc.GetSafeHdc(), 0, 0, rw, rh,
                 mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     }
     else
@@ -4664,10 +4772,9 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
         mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
         DrawRangeSlider(&mDC);
         CCC_DrawInwoman(&mDC, r, FALSE);
-        dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+        dc.BitBlt(0, 0, rw, rh, &mDC, 0, 0, SRCCOPY);
     }
     mDC.SelectObject(ob);
-    mB.DeleteObject();
     mDC.DeleteDC();
 }
 
@@ -4715,9 +4822,10 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
     int xMx = ValueToPixel(m_nSelMax);
     int xP = ValueToPixel(cur);
 
-    // トラック（バー）
-    CPen pT(PS_SOLID, 4, RGB(200, 200, 200));
-    pDC->SelectObject(&pT);
+    CPen* oldPen = pDC->GetCurrentPen();
+    // トラック（バー）— プール済みペン（毎描画 CreatePen 禁止）
+    if (CPen* pT = CCC_GetPooledPen(4, RGB(200, 200, 200)))
+        pDC->SelectObject(pT);
     pDC->MoveTo(14, cy);
     pDC->LineTo(r.Width() - 14, cy);
     if (xMx > xMn)
@@ -4725,8 +4833,8 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
 
     // 最小・最大つまみ
     COLORREF penC = m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0);
-    CPen pB(PS_SOLID, 1, penC);
-    pDC->SelectObject(&pB);
+    if (CPen* pB = CCC_GetPooledPen(1, penC))
+        pDC->SelectObject(pB);
     pDC->FillSolidRect(CRect(xMn - 5, cy - 8, xMn + 5, cy + 8), COLOR_RANGE_SLIDER_THUMB);
     pDC->SelectObject(GetStockObject(NULL_BRUSH));
     pDC->Rectangle(CRect(xMn - 5, cy - 8, xMn + 5, cy + 8));
@@ -4736,6 +4844,7 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
     // 現在位置（ハート + きらめき）
     DrawHeart(pDC, CRect(xP - 9, cy - 12, xP + 9, cy + 6), COLOR_SLIDER_THUMB);
     DrawSparkle(pDC, xP + 7, cy - 12, 3, COLOR_SPARKLE);
+    if (oldPen) pDC->SelectObject(oldPen);
 }
 
 int CCustomRangeSliderCtrl::ValueToPixel(int v) const

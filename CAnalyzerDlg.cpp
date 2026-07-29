@@ -1359,7 +1359,7 @@ void CAnalyzerDlg::DrawEqOverlay(CDC& dc, const CRect& plot, float nyquist)
 
 	const int y0 = gainToY(0.0f);
 	CPen zeroPen(PS_SOLID, 1, RGB(120, 160, 90));
-	dc.SelectObject(&zeroPen);
+	CPen* prev = dc.SelectObject(&zeroPen);
 	dc.MoveTo(plot.left, y0);
 	dc.LineTo(plot.right, y0);
 
@@ -1376,11 +1376,12 @@ void CAnalyzerDlg::DrawEqOverlay(CDC& dc, const CRect& plot, float nyquist)
 	}
 	if (nPts >= 2) {
 		CPen eqPen(PS_SOLID, 2, RGB(200, 255, 120));
-		dc.SelectObject(&eqPen);
+		CPen* prev2 = dc.SelectObject(&eqPen);
 		dc.Polyline(pts, nPts);
 		for (int i = 0; i < nPts; ++i) {
 			dc.FillSolidRect(pts[i].x - 2, pts[i].y - 2, 5, 5, RGB(220, 255, 160));
 		}
+		dc.SelectObject(prev2 ? prev2 : prev);
 	}
 	dc.SetTextColor(RGB(180, 220, 120));
 	dc.TextOut(plot.left + 4, plot.top + 2, _T("EQ"));
@@ -1399,6 +1400,7 @@ void CAnalyzerDlg::DrawSpecPanel(CDC& dc, const CRect& plot, int chBegin, int ch
 	CPen* oldPen = dc.SelectObject(&frame);
 	dc.SelectStockObject(NULL_BRUSH);
 	dc.Rectangle(plot);
+	dc.SelectObject(oldPen); // frame 破棄前に復元
 
 	if (drawTitle) {
 		dc.SetTextColor(RGB(180, 190, 210));
@@ -1410,7 +1412,7 @@ void CAnalyzerDlg::DrawSpecPanel(CDC& dc, const CRect& plot, int chBegin, int ch
 	}
 
 	CPen grid(PS_DOT, 1, RGB(45, 50, 65));
-	dc.SelectObject(&grid);
+	oldPen = dc.SelectObject(&grid);
 	dc.SetTextColor(RGB(120, 130, 150));
 	for (int db = 0; db >= -80; db -= 20) {
 		const float t = (0.0f - (float)db) / 96.0f;
@@ -1547,16 +1549,18 @@ void CAnalyzerDlg::DrawSpecPanel(CDC& dc, const CRect& plot, int chBegin, int ch
 				(GetRValue(col) * 2 + 255) / 3,
 				(GetGValue(col) * 2 + 255) / 3,
 				(GetBValue(col) * 2 + 255) / 3));
-			dc.SelectObject(&peakPen);
+			CPen* prev = dc.SelectObject(&peakPen);
 			dc.Polyline(peakPts, SPEC_BINS);
+			dc.SelectObject(prev ? prev : oldPen);
 		}
 
 		if (isLine) {
 			const int penW = (style == StyleFabFilter) ? 1
 				: (style == StyleCubase) ? 2 : 2;
 			CPen curve(PS_SOLID, penW, col);
-			dc.SelectObject(&curve);
+			CPen* prev = dc.SelectObject(&curve);
 			dc.Polyline(linePts, SPEC_BINS);
+			dc.SelectObject(prev ? prev : oldPen);
 		}
 
 		dc.SetTextColor(col);

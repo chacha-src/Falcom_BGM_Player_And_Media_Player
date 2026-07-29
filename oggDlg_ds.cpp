@@ -787,6 +787,17 @@ static bool g_rubberBandFinalFlushed[RB_BANKS] = { false, false };
 static int g_rbInitRate[RB_BANKS] = { 0, 0 };
 static int g_rbInitCh[RB_BANKS] = { 0, 0 };
 static std::mutex g_rbMu[RB_BANKS];
+// 毎バッファ vector 新規確保を避け、容量は伸ばすのみ（断片化抑制）
+struct RbProcessScratch {
+	std::vector<uint8_t> raw;
+	std::vector<float> inputFloat;
+	std::vector<float> channelFlat;
+	std::vector<float*> channelPointers;
+	std::vector<float> outputFlat;
+	std::vector<float*> outputPointers;
+	float dummyZero = 0.0f;
+};
+static RbProcessScratch g_rbScratch[RB_BANKS];
 
 void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
 	uint16_t bits_per_sample, uint16_t channels,
@@ -894,6 +905,7 @@ bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
 		if ((!inData || inBytes <= 0) && !t) return false;
 
 		std::lock_guard<std::mutex> lk(g_rbMu[bank]);
+		RbProcessScratch& scr = g_rbScratch[bank];
 
 		if (!g_rubberBandStretcher[bank]
 			|| g_rbInitRate[bank] != rate
@@ -920,49 +932,49 @@ bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
 		g_rubberBandStretcher[bank]->setPitchScale(static_cast<float>(semitones));
 
 		if (!t) {
-			std::vector<uint8_t> raw((size_t)inBytes);
-			memcpy(raw.data(), inData, (size_t)inBytes);
-			std::vector<float> inputFloat;
-			ConvertRawBytesToFloat(raw, (uint16_t)bits, (uint16_t)ch, inputFloat);
-			if (inputFloat.empty()) return false;
+			scr.raw.resize((size_t)inBytes);
+			memcpy(scr.raw.data(), inData, (size_t)inBytes);
+			ConvertRawBytesToFloat(scr.raw, (uint16_t)bits, (uint16_t)ch, scr.inputFloat);
+			if (scr.inputFloat.empty()) return false;
 
-			const size_t samplesIn = inputFloat.size() / (size_t)ch;
+			const size_t samplesIn = scr.inputFloat.size() / (size_t)ch;
 			if (samplesIn == 0) return false;
-			std::vector<std::vector<float>> channelData(ch, std::vector<float>(samplesIn));
+			scr.channelFlat.resize(samplesIn * (size_t)ch);
+			scr.channelPointers.resize((size_t)ch);
+			for (int c = 0; c < ch; ++c)
+				scr.channelPointers[c] = scr.channelFlat.data() + (size_t)c * samplesIn;
 			for (size_t i = 0; i < samplesIn; ++i) {
 				for (int c = 0; c < ch; ++c)
-					channelData[c][i] = inputFloat[i * (size_t)ch + (size_t)c];
+					scr.channelPointers[c][i] = scr.inputFloat[i * (size_t)ch + (size_t)c];
 			}
-			std::vector<float*> channelPointers(ch);
-			for (int c = 0; c < ch; ++c)
-				channelPointers[c] = channelData[c].data();
 
-			g_rubberBandStretcher[bank]->process(channelPointers.data(), samplesIn, false);
+			g_rubberBandStretcher[bank]->process(scr.channelPointers.data(), samplesIn, false);
 			g_rubberBandFinalFlushed[bank] = false;
 		}
 		else {
-			std::vector<std::vector<float>> dummyData(ch, std::vector<float>(1, 0.0f));
-			std::vector<float*> dummyPointers(ch);
+			scr.channelPointers.resize((size_t)ch);
 			for (int c = 0; c < ch; ++c)
-				dummyPointers[c] = dummyData[c].data();
-			g_rubberBandStretcher[bank]->process(dummyPointers.data(), 0, true);
+				scr.channelPointers[c] = &scr.dummyZero;
+			g_rubberBandStretcher[bank]->process(scr.channelPointers.data(), 0, true);
 			g_rubberBandFinalFlushed[bank] = true;
 		}
 
 		outFloat.clear();
 		const size_t pullSize = 4096;
-		std::vector<std::vector<float>> outputChannelData(ch, std::vector<float>(pullSize));
-		std::vector<float*> outputPointers(ch);
+		scr.outputFlat.resize(pullSize * (size_t)ch);
+		scr.outputPointers.resize((size_t)ch);
 		for (int c = 0; c < ch; ++c)
-			outputPointers[c] = outputChannelData[c].data();
+			scr.outputPointers[c] = scr.outputFlat.data() + (size_t)c * pullSize;
 
 		while (g_rubberBandStretcher[bank]->available() > 0) {
 			size_t toGet = (std::min)((size_t)g_rubberBandStretcher[bank]->available(), pullSize);
-			size_t retrieved = g_rubberBandStretcher[bank]->retrieve(outputPointers.data(), toGet);
+			size_t retrieved = g_rubberBandStretcher[bank]->retrieve(scr.outputPointers.data(), toGet);
 			if (retrieved == 0) break;
+			const size_t base = outFloat.size();
+			outFloat.resize(base + retrieved * (size_t)ch);
 			for (size_t i = 0; i < retrieved; ++i) {
 				for (int c = 0; c < ch; ++c)
-					outFloat.push_back(outputChannelData[c][i]);
+					outFloat[base + i * (size_t)ch + (size_t)c] = scr.outputPointers[c][i];
 			}
 		}
 
@@ -6014,30 +6026,64 @@ static const ChordPattern CHORD_PATTERNS[] = {
 	{L"!@C0066bbm!@Cff55009!@C000000",       {3,0,2,2,0,0,0,1,0,0,2,0}, -0.5f}   // マイナー9th
 };
 
-struct ChordCandidate { CString name; float score; int complexity; };
+static const int EQKEY_NAME_MAX = 160;
+
+struct ChordCandidate { WCHAR name[EQKEY_NAME_MAX]; float score; int complexity; };
+
+static void EqKeyCopy(WCHAR* dst, int cap, const WCHAR* src)
+{
+	if (!dst || cap <= 0) return;
+	wcsncpy_s(dst, cap, src ? src : L"", _TRUNCATE);
+}
+
+static void EqKeyCat2(WCHAR* dst, int cap, const WCHAR* a, const WCHAR* b)
+{
+	EqKeyCopy(dst, cap, a);
+	wcsncat_s(dst, cap, b ? b : L"", _TRUNCATE);
+}
+
+static void EqKeyTrimInPlace(WCHAR* s)
+{
+	if (!s || !*s) return;
+	WCHAR* p = s;
+	while (*p == L' ') ++p;
+	if (p != s) memmove(s, p, (wcslen(p) + 1) * sizeof(WCHAR));
+	size_t n = wcslen(s);
+	while (n > 0 && s[n - 1] == L' ') s[--n] = 0;
+}
+
+static void EqKeyRootName(WCHAR* dst, int cap, int rootIdx)
+{
+	EqKeyCopy(dst, cap, NOTE_NAMES[rootIdx]);
+	EqKeyTrimInPlace(dst);
+}
 
 // コード推定 (ヒストリーなし版)
 // 各コードパターンとピッチクラス強度のマッチングスコアで最適コードを選ぶ
-static CString EstimateChordRaw(float* noteClass, float threshold) {
+static void EstimateChordRawInto(WCHAR* out, int outCap, float* noteClass, float threshold) {
+	out[0] = 0;
 	float maxVal = 0.0f;
 	for (int i = 0; i < 12; i++) if (noteClass[i] > maxVal) maxVal = noteClass[i];
-	if (maxVal < 0.001f) return L"";
+	if (maxVal < 0.001f) return;
 	float n[12];
 	for (int i = 0; i < 12; i++) { n[i] = noteClass[i] / maxVal; if (n[i] < 0.08f) n[i] = 0.0f; }
 	int bestRoot = 0;
 	for (int i = 1; i < 12; i++) if (n[i] > n[bestRoot]) bestRoot = i;
-	if (n[bestRoot] < threshold) return L"";
+	if (n[bestRoot] < threshold) return;
 
 	int active = 0;
 	for (int i = 0; i < 12; i++) if (n[i] > 0.08f) active++;
-	CString root = NOTE_NAMES[bestRoot]; root.Trim();
-	if (active <= 1) return root;
+	WCHAR root[8];
+	EqKeyRootName(root, _countof(root), bestRoot);
+	if (active <= 1) { EqKeyCopy(out, outCap, root); return; }
 
 	float third = max(n[(bestRoot + 3) % 12], n[(bestRoot + 4) % 12]);
 	float fifth = n[(bestRoot + 7) % 12];
 	// パワーコード判定 (5度音のみ、3度なし)
-	if (fifth > 0.3f && third < 0.15f && active <= 3)
-		return root + L"!@B[!@Cff0000Power!@Cffffff]!@B";
+	if (fifth > 0.3f && third < 0.15f && active <= 3) {
+		EqKeyCat2(out, outCap, root, L"!@B[!@Cff0000Power!@Cffffff]!@B");
+		return;
+	}
 
 	ChordCandidate cands[EQKEY_CHORD_CAND_MAX];
 	int candCount = 0;
@@ -6079,11 +6125,11 @@ static CString EstimateChordRaw(float* noteClass, float threshold) {
 		sc += CHORD_PATTERNS[c].bonus;
 		if (req == 3) sc += 1.2f; if (req == 4) sc += 0.5f; if (req >= 5) sc -= 1.0f;
 		if (sc > (is9 ? 3.5f : 0.8f) && candCount < EQKEY_CHORD_CAND_MAX) {
-			cands[candCount].name = root + CHORD_PATTERNS[c].name;
+			EqKeyCat2(cands[candCount].name, EQKEY_NAME_MAX, root, CHORD_PATTERNS[c].name);
 			cands[candCount].score = sc; cands[candCount].complexity = req; candCount++;
 		}
 	}
-	if (candCount <= 0) return root;
+	if (candCount <= 0) { EqKeyCopy(out, outCap, root); return; }
 	for (int i = 0; i < candCount; ++i) {
 		int best = i;
 		for (int j = i + 1; j < candCount; ++j) {
@@ -6095,15 +6141,22 @@ static CString EstimateChordRaw(float* noteClass, float threshold) {
 		if (best != i) { ChordCandidate tmp = cands[i]; cands[i] = cands[best]; cands[best] = tmp; }
 	}
 	// 上位3候補を ", " で連結して返す
-	CString result = cands[0].name; int count = 1;
+	EqKeyCopy(out, outCap, cands[0].name); int count = 1;
 	for (int i = 1; i < candCount && count < 3; i++) {
 		if (cands[0].score - cands[i].score > 2.0f) break;
 		if (cands[i].score < cands[0].score * 0.55f) continue;
-		if (cands[i].name == result) continue;
-		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.2f) continue;
-		result += L", " + cands[i].name; count++;
+		if (wcscmp(cands[i].name, out) == 0) continue;
+		if (wcsstr(cands[i].name, L"9") && cands[0].score - cands[i].score > 1.2f) continue;
+		wcsncat_s(out, outCap, L", ", _TRUNCATE);
+		wcsncat_s(out, outCap, cands[i].name, _TRUNCATE);
+		count++;
 	}
-	return result;
+}
+
+static CString EstimateChordRaw(float* noteClass, float threshold) {
+	WCHAR buf[EQKEY_NAME_MAX * 3];
+	EstimateChordRawInto(buf, _countof(buf), noteClass, threshold);
+	return buf;
 }
 
 static CString EstimateOverallRaw(float* b, float* m, float* h, float* a) {
@@ -6113,10 +6166,15 @@ static CString EstimateOverallRaw(float* b, float* m, float* h, float* a) {
 }
 
 // ヒストリー付きコード推定: 前フレームのコードをスコアに加味して安定性を向上
-static CString g_prevChordLow = L"", g_prevChordMid = L"", g_prevChordHigh = L"", g_prevChordAll = L"";
-// 直近 HISTORY_SIZE フレームのリング（deque/map 禁止）
-static CString g_historyLow[EQKEY_HIST_MAX], g_historyMid[EQKEY_HIST_MAX];
-static CString g_historyHigh[EQKEY_HIST_MAX], g_historyAll[EQKEY_HIST_MAX];
+static WCHAR g_prevChordLow[EQKEY_NAME_MAX] = L"";
+static WCHAR g_prevChordMid[EQKEY_NAME_MAX] = L"";
+static WCHAR g_prevChordHigh[EQKEY_NAME_MAX] = L"";
+static WCHAR g_prevChordAll[EQKEY_NAME_MAX] = L"";
+// 直近 HISTORY_SIZE フレームのリング（deque/map/CString 禁止）
+static WCHAR g_historyLow[EQKEY_HIST_MAX][EQKEY_NAME_MAX];
+static WCHAR g_historyMid[EQKEY_HIST_MAX][EQKEY_NAME_MAX];
+static WCHAR g_historyHigh[EQKEY_HIST_MAX][EQKEY_NAME_MAX];
+static WCHAR g_historyAll[EQKEY_HIST_MAX][EQKEY_NAME_MAX];
 static int g_historyLowN = 0, g_historyMidN = 0, g_historyHighN = 0, g_historyAllN = 0;
 static int g_historyLowHead = 0, g_historyMidHead = 0, g_historyHighHead = 0, g_historyAllHead = 0;
 const int HISTORY_SIZE = EQKEY_HIST_MAX;  // 直近4フレームで多数決
@@ -6132,19 +6190,19 @@ const float PLAYING_THRESHOLD = 0.01f;     // 再生中判定閾値
 const int   SILENCE_FRAMES_FOR_CLEAR = 10;     // このフレーム数無音でヒストリーをクリア
 static int  g_soundFrameCount = 0;
 
-static void HistoryClear(CString* ring, int& n, int& head)
+static void HistoryClear(WCHAR ring[][EQKEY_NAME_MAX], int& n, int& head)
 {
-	for (int i = 0; i < EQKEY_HIST_MAX; ++i) ring[i].Empty();
+	for (int i = 0; i < EQKEY_HIST_MAX; ++i) ring[i][0] = 0;
 	n = 0; head = 0;
 }
 
-static void HistoryPush(CString* ring, int& n, int& head, const CString& v)
+static void HistoryPush(WCHAR ring[][EQKEY_NAME_MAX], int& n, int& head, const WCHAR* v)
 {
 	if (n < EQKEY_HIST_MAX) {
-		ring[(head + n) % EQKEY_HIST_MAX] = v;
+		EqKeyCopy(ring[(head + n) % EQKEY_HIST_MAX], EQKEY_NAME_MAX, v);
 		++n;
 	} else {
-		ring[head] = v;
+		EqKeyCopy(ring[head], EQKEY_NAME_MAX, v);
 		head = (head + 1) % EQKEY_HIST_MAX;
 	}
 }
@@ -6162,103 +6220,119 @@ static float CalculateRMS(const double* bL, const double* bR, int count, bool st
 }
 
 // ヒストリー内で最頻出のコード名を返す (多数決安定化・固定配列)
-static CString GetMostFrequent(const CString* ring, int n, int head) {
-	if (!ring || n <= 0) return L"";
-	CString names[EQKEY_HIST_MAX * 3];
+static void GetMostFrequentInto(WCHAR* out, int outCap, const WCHAR ring[][EQKEY_NAME_MAX], int n, int head) {
+	out[0] = 0;
+	if (!ring || n <= 0) return;
+	WCHAR names[EQKEY_HIST_MAX * 3][EQKEY_NAME_MAX];
 	int votes[EQKEY_HIST_MAX * 3];
 	int nameCount = 0;
 	for (int i = 0; i < n; ++i) {
-		const CString& s = ring[(head + i) % EQKEY_HIST_MAX];
-		if (s.IsEmpty()) continue;
-		int start = 0;
-		while (start < s.GetLength()) {
-			int end = s.Find(L", ", start);
-			if (end == -1) end = s.GetLength();
-			CString item = s.Mid(start, end - start);
-			item.Trim();
-			if (!item.IsEmpty()) {
+		const WCHAR* s = ring[(head + i) % EQKEY_HIST_MAX];
+		if (!s || !s[0]) continue;
+		const WCHAR* p = s;
+		while (*p) {
+			const WCHAR* comma = wcsstr(p, L", ");
+			size_t len = comma ? (size_t)(comma - p) : wcslen(p);
+			WCHAR item[EQKEY_NAME_MAX];
+			if (len >= EQKEY_NAME_MAX) len = EQKEY_NAME_MAX - 1;
+			wcsncpy_s(item, EQKEY_NAME_MAX, p, len);
+			item[len] = 0;
+			EqKeyTrimInPlace(item);
+			if (item[0]) {
 				int found = -1;
 				for (int k = 0; k < nameCount; ++k) {
-					if (names[k] == item) { found = k; break; }
+					if (wcscmp(names[k], item) == 0) { found = k; break; }
 				}
 				if (found >= 0) votes[found]++;
 				else if (nameCount < EQKEY_HIST_MAX * 3) {
-					names[nameCount] = item;
+					EqKeyCopy(names[nameCount], EQKEY_NAME_MAX, item);
 					votes[nameCount] = 1;
 					nameCount++;
 				}
 			}
-			start = end + 2;
+			if (!comma) break;
+			p = comma + 2;
 		}
 	}
-	if (nameCount <= 0) return L"";
+	if (nameCount <= 0) return;
 
-	// 単純選択ソート（要素数極小）
 	for (int i = 0; i < nameCount; ++i) {
 		int best = i;
 		for (int j = i + 1; j < nameCount; ++j)
 			if (votes[j] > votes[best]) best = j;
 		if (best != i) {
-			CString tn = names[i]; names[i] = names[best]; names[best] = tn;
+			WCHAR tn[EQKEY_NAME_MAX];
+			EqKeyCopy(tn, EQKEY_NAME_MAX, names[i]);
+			EqKeyCopy(names[i], EQKEY_NAME_MAX, names[best]);
+			EqKeyCopy(names[best], EQKEY_NAME_MAX, tn);
 			int tv = votes[i]; votes[i] = votes[best]; votes[best] = tv;
 		}
 	}
 
-	CString result = names[0];
+	EqKeyCopy(out, outCap, names[0]);
 	int count = 1;
 	const int topVotes = votes[0];
-	CString bestRoot = (result.GetLength() > 1 && (result[1] == L'#' || result[1] == L'b')) ? result.Left(2) : result.Left(1);
+	WCHAR bestRoot[8];
+	if (names[0][0] && (names[0][1] == L'#' || names[0][1] == L'b'))
+		{ bestRoot[0] = names[0][0]; bestRoot[1] = names[0][1]; bestRoot[2] = 0; }
+	else
+		{ bestRoot[0] = names[0][0]; bestRoot[1] = 0; }
 
 	for (int i = 1; i < nameCount && count < 3; i++) {
 		if (votes[i] < 2) continue;
 		if (topVotes > 0 && votes[i] < (topVotes + 1) / 2) continue;
-		CString root = (names[i].GetLength() > 1 && (names[i][1] == L'#' || names[i][1] == L'b')) ? names[i].Left(2) : names[i].Left(1);
-		if (root == bestRoot) {
-			result += L", " + names[i];
+		WCHAR root[8];
+		if (names[i][0] && (names[i][1] == L'#' || names[i][1] == L'b'))
+			{ root[0] = names[i][0]; root[1] = names[i][1]; root[2] = 0; }
+		else
+			{ root[0] = names[i][0]; root[1] = 0; }
+		if (wcscmp(root, bestRoot) == 0) {
+			wcsncat_s(out, outCap, L", ", _TRUNCATE);
+			wcsncat_s(out, outCap, names[i], _TRUNCATE);
 			count++;
 		}
 	}
-	return result;
 }
 
-static bool IsChordInList(const CString& chord, const CString& list) {
-	if (list.IsEmpty() || chord.IsEmpty()) return false;
-	int start = 0;
-	while (start < list.GetLength()) {
-		int end = list.Find(L", ", start);
-		if (end == -1) {
-			end = list.GetLength();
-		}
-		CString item = list.Mid(start, end - start);
-		if (item == chord) {
+static bool IsChordInListW(const WCHAR* chord, const WCHAR* list) {
+	if (!list || !list[0] || !chord || !chord[0]) return false;
+	const WCHAR* p = list;
+	while (*p) {
+		const WCHAR* comma = wcsstr(p, L", ");
+		size_t len = comma ? (size_t)(comma - p) : wcslen(p);
+		if (wcsncmp(p, chord, len) == 0 && chord[len] == 0)
 			return true;
-		}
-		start = end + 2; // skip L", "
+		if (!comma) break;
+		p = comma + 2;
 	}
 	return false;
 }
 
 // ヒストリー付きコード推定 (単一帯域版)
 // prev と一致するコードにボーナスを与え、フレーム間の揺れを抑制
-static CString EstimateChordRawWithHistory(float* nc, float threshold, const CString& prev) {
+static void EstimateChordRawWithHistoryInto(WCHAR* out, int outCap, float* nc, float threshold, const WCHAR* prev) {
+	out[0] = 0;
 	float maxVal = 0.0f;
 	for (int i = 0; i < 12; i++) if (nc[i] > maxVal) maxVal = nc[i];
-	if (maxVal < 0.001f) return L"";
+	if (maxVal < 0.001f) return;
 	float n[12];
 	for (int i = 0; i < 12; i++) { n[i] = nc[i] / maxVal; if (n[i] < 0.08f) n[i] = 0.0f; }
 	int bestRoot = 0;
 	for (int i = 1; i < 12; i++) if (n[i] > n[bestRoot]) bestRoot = i;
-	if (n[bestRoot] < threshold) return L"";
+	if (n[bestRoot] < threshold) return;
 
 	int active = 0;
 	for (int i = 0; i < 12; i++) if (n[i] > 0.08f) active++;
-	CString root = NOTE_NAMES[bestRoot]; root.Trim();
-	if (active <= 1) return root;
+	WCHAR root[8];
+	EqKeyRootName(root, _countof(root), bestRoot);
+	if (active <= 1) { EqKeyCopy(out, outCap, root); return; }
 
 	float third = max(n[(bestRoot + 3) % 12], n[(bestRoot + 4) % 12]);
 	float fifth = n[(bestRoot + 7) % 12];
-	if (fifth > 0.3f && third < 0.15f && active <= 3)
-		return root + L"!@B!@I[Power]!@B!@I";
+	if (fifth > 0.3f && third < 0.15f && active <= 3) {
+		EqKeyCat2(out, outCap, root, L"!@B!@I[Power]!@B!@I");
+		return;
+	}
 
 	ChordCandidate cands[EQKEY_CHORD_CAND_MAX];
 	int candCount = 0;
@@ -6299,14 +6373,15 @@ static CString EstimateChordRawWithHistory(float* nc, float threshold, const CSt
 		sc -= (active - matched) * 1.0f;
 		sc += CHORD_PATTERNS[c].bonus;
 		if (req == 3) sc += 1.2f; if (req == 4) sc += 0.5f; if (req >= 5) sc -= 1.0f;
-		CString cur = root + CHORD_PATTERNS[c].name;
-		// 前フレームと同じコードにボーナス (時間的連続性)
-		if (!prev.IsEmpty() && IsChordInList(cur, prev)) sc += 1.5f;
+		WCHAR cur[EQKEY_NAME_MAX];
+		EqKeyCat2(cur, EQKEY_NAME_MAX, root, CHORD_PATTERNS[c].name);
+		if (prev && prev[0] && IsChordInListW(cur, prev)) sc += 1.5f;
 		if (sc > (is9 ? 3.5f : 0.8f) && candCount < EQKEY_CHORD_CAND_MAX) {
-			cands[candCount].name = cur; cands[candCount].score = sc; cands[candCount].complexity = req; candCount++;
+			EqKeyCopy(cands[candCount].name, EQKEY_NAME_MAX, cur);
+			cands[candCount].score = sc; cands[candCount].complexity = req; candCount++;
 		}
 	}
-	if (candCount <= 0) return root;
+	if (candCount <= 0) { EqKeyCopy(out, outCap, root); return; }
 	for (int i = 0; i < candCount; ++i) {
 		int best = i;
 		for (int j = i + 1; j < candCount; ++j) {
@@ -6318,23 +6393,23 @@ static CString EstimateChordRawWithHistory(float* nc, float threshold, const CSt
 		if (best != i) { ChordCandidate tmp = cands[i]; cands[i] = cands[best]; cands[best] = tmp; }
 	}
 
-	CString result = cands[0].name; int count = 1;
+	EqKeyCopy(out, outCap, cands[0].name); int count = 1;
 	for (int i = 1; i < candCount && count < 3; i++) {
 		if (cands[0].score - cands[i].score > 2.0f) break;
 		if (cands[i].score < cands[0].score * 0.55f) continue;
-		if (cands[i].name == result) continue;
-		if (cands[i].name.Find(L"9") >= 0 && cands[0].score - cands[i].score > 1.2f) continue;
-		result += L", " + cands[i].name; count++;
+		if (wcscmp(cands[i].name, out) == 0) continue;
+		if (wcsstr(cands[i].name, L"9") && cands[0].score - cands[i].score > 1.2f) continue;
+		wcsncat_s(out, outCap, L", ", _TRUNCATE);
+		wcsncat_s(out, outCap, cands[i].name, _TRUNCATE);
+		count++;
 	}
-	return result;
 }
 
 // ヒストリー付きコード推定 (全帯域統合版)
-// 全帯域 → 低域 の順でフォールバック
-static CString EstimateChordRawWithHistory(float* b, float* m, float* h, float* a, const CString& prev) {
-	CString c = EstimateChordRawWithHistory(a, 0.03f, prev); if (!c.IsEmpty()) return c;
-	c = EstimateChordRawWithHistory(b, 0.02f, prev);         if (!c.IsEmpty()) return c;
-	return L"";
+static void EstimateChordRawWithHistoryIntoAll(WCHAR* out, int outCap, float* b, float* m, float* h, float* a, const WCHAR* prev) {
+	EstimateChordRawWithHistoryInto(out, outCap, a, 0.03f, prev);
+	if (out[0]) return;
+	EstimateChordRawWithHistoryInto(out, outCap, b, 0.02f, prev);
 }
 
 // ============================================================
@@ -6354,38 +6429,44 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 	int totalSamples = sampleCount;
 	bool stereo = (bufferR != nullptr);
 
-	// 表示用フォーマット: "ルート, <コード名>" の形式
-	auto FormatChord = [](CString s) -> CString {
-		if (s.IsEmpty()) return L"!@B  , <  >!@B";
-		CString root = (s.GetLength() > 1 && (s[1] == L'#' || s[1] == L'b')) ? s.Left(2) : s.Left(1);
-		if (root.GetLength() == 1) root += L" ";
-		CString r;
-		r.Format(L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, s);
-		return r;
-		};
+	// 表示用フォーマット: "ルート, <コード名>" の形式（固定バッファ・CString 嵐禁止）
+	auto FormatChordInto = [](WCHAR* out, int outCap, const WCHAR* s) {
+		if (!s || !s[0]) {
+			EqKeyCopy(out, outCap, L"!@B  , <  >!@B");
+			return;
+		}
+		WCHAR root[8];
+		if (s[0] && (s[1] == L'#' || s[1] == L'b'))
+			{ root[0] = s[0]; root[1] = s[1]; root[2] = 0; }
+		else
+			{ root[0] = s[0]; root[1] = L' '; root[2] = 0; }
+		swprintf_s(out, outCap, L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, s);
+	};
 
-	// 表示用フォーマット (全音域専用、メロディを左側に差し込む)
-	auto FormatChordAll = [](CString s, CString melody) -> CString {
-		if (melody == L"[   ]") {
-			// メロディがない場合は、元の FormatChord と全く同じ動作
-			if (s.IsEmpty()) return L"!@B  , <  >!@B";
-			CString root = (s.GetLength() > 1 && (s[1] == L'#' || s[1] == L'b')) ? s.Left(2) : s.Left(1);
-			if (root.GetLength() == 1) root += L" ";
-			CString r;
-			r.Format(L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, s);
-			return r;
+	auto FormatChordAllInto = [](WCHAR* out, int outCap, const WCHAR* s, const WCHAR* melody) {
+		if (wcscmp(melody, L"[   ]") == 0) {
+			if (!s || !s[0]) {
+				EqKeyCopy(out, outCap, L"!@B  , <  >!@B");
+				return;
+			}
+			WCHAR root[8];
+			if (s[0] && (s[1] == L'#' || s[1] == L'b'))
+				{ root[0] = s[0]; root[1] = s[1]; root[2] = 0; }
+			else
+				{ root[0] = s[0]; root[1] = L' '; root[2] = 0; }
+			swprintf_s(out, outCap, L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, s);
+			return;
 		}
-		// メロディがある場合
-		if (s.IsEmpty()) {
-			CString r;
-			r.Format(L"!@B   %s, !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B", melody);
-			return r;
+		if (!s || !s[0]) {
+			swprintf_s(out, outCap, L"!@B   %s, !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B", melody);
+			return;
 		}
-		CString root = (s.GetLength() > 1 && (s[1] == L'#' || s[1] == L'b')) ? s.Left(2) : s.Left(1);
-		if (root.GetLength() == 1) root += L" ";
-		CString r;
-		r.Format(L"!@B%s %s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, melody, s);
-		return r;
+		WCHAR root[8];
+		if (s[0] && (s[1] == L'#' || s[1] == L'b'))
+			{ root[0] = s[0]; root[1] = s[1]; root[2] = 0; }
+		else
+			{ root[0] = s[0]; root[1] = L' '; root[2] = 0; }
+		swprintf_s(out, outCap, L"!@B%s %s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, melody, s);
 	};
 
 	float currentRMS = CalculateRMS(bufferL, bufferR, totalSamples, stereo);
@@ -6416,7 +6497,7 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 		HistoryClear(g_historyMid, g_historyMidN, g_historyMidHead);
 		HistoryClear(g_historyHigh, g_historyHighN, g_historyHighHead);
 		HistoryClear(g_historyAll, g_historyAllN, g_historyAllHead);
-		g_prevChordLow = g_prevChordMid = g_prevChordAll = g_prevChordHigh = L"";
+		g_prevChordLow[0] = g_prevChordMid[0] = g_prevChordAll[0] = g_prevChordHigh[0] = 0;
 		memset(g_noteStrength, 0, sizeof(g_noteStrength));
 		memset(g_noteStrengthPrev, 0, sizeof(g_noteStrengthPrev));
 	}
@@ -6467,10 +6548,14 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 	float bC[12], mC[12], hC[12], aC[12];
 	AggregateNoteClasses(bC, mC, hC, aC);
 
-	CString rawBass = EstimateChordRawWithHistory(bC, 0.02f, g_prevChordLow);
-	CString rawMid = EstimateChordRawWithHistory(mC, 0.03f, g_prevChordMid);
-	CString rawAll = EstimateChordRawWithHistory(bC, mC, hC, aC, g_prevChordAll);
-	CString rawHigh = EstimateChordRawWithHistory(hC, 0.03f, g_prevChordHigh);
+	WCHAR rawBass[EQKEY_NAME_MAX * 3];
+	WCHAR rawMid[EQKEY_NAME_MAX * 3];
+	WCHAR rawAll[EQKEY_NAME_MAX * 3];
+	WCHAR rawHigh[EQKEY_NAME_MAX * 3];
+	EstimateChordRawWithHistoryInto(rawBass, _countof(rawBass), bC, 0.02f, g_prevChordLow);
+	EstimateChordRawWithHistoryInto(rawMid, _countof(rawMid), mC, 0.03f, g_prevChordMid);
+	EstimateChordRawWithHistoryIntoAll(rawAll, _countof(rawAll), bC, mC, hC, aC, g_prevChordAll);
+	EstimateChordRawWithHistoryInto(rawHigh, _countof(rawHigh), hC, 0.03f, g_prevChordHigh);
 
 	// ヒストリーリング更新
 	HistoryPush(g_historyLow, g_historyLowN, g_historyLowHead, rawBass);
@@ -6479,36 +6564,39 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 	HistoryPush(g_historyAll, g_historyAllN, g_historyAllHead, rawAll);
 
 	// 多数決安定化
-	rawBass = GetMostFrequent(g_historyLow, g_historyLowN, g_historyLowHead);
-	rawMid = GetMostFrequent(g_historyMid, g_historyMidN, g_historyMidHead);
-	rawAll = GetMostFrequent(g_historyAll, g_historyAllN, g_historyAllHead);
-	rawHigh = GetMostFrequent(g_historyHigh, g_historyHighN, g_historyHighHead);
+	GetMostFrequentInto(rawBass, _countof(rawBass), g_historyLow, g_historyLowN, g_historyLowHead);
+	GetMostFrequentInto(rawMid, _countof(rawMid), g_historyMid, g_historyMidN, g_historyMidHead);
+	GetMostFrequentInto(rawAll, _countof(rawAll), g_historyAll, g_historyAllN, g_historyAllHead);
+	GetMostFrequentInto(rawHigh, _countof(rawHigh), g_historyHigh, g_historyHighN, g_historyHighHead);
 
-	g_prevChordLow = rawBass; g_prevChordMid = rawMid;
-	g_prevChordAll = rawAll;  g_prevChordHigh = rawHigh;
+	EqKeyCopy(g_prevChordLow, EQKEY_NAME_MAX, rawBass);
+	EqKeyCopy(g_prevChordMid, EQKEY_NAME_MAX, rawMid);
+	EqKeyCopy(g_prevChordAll, EQKEY_NAME_MAX, rawAll);
+	EqKeyCopy(g_prevChordHigh, EQKEY_NAME_MAX, rawHigh);
 
 	// メロディ Viterbi/FFT は表示が #if 0 で無効なため実行しない。
 	// 毎 Speana で 4096点×2 FFT + ヒープ確保すると UI が分単位で死ぬ。
-	CString rawMelody = L"[   ]";
+	const WCHAR* rawMelody = L"[   ]";
 
-	// 出力コード文字列生成
-	CString outLow = FormatChord(rawBass);
-	CString outMid = FormatChord(rawMid);
-	CString outAll = FormatChordAll(rawAll, rawMelody);
-	CString outHigh;
+	// 出力コード文字列生成（ここだけで CString 化）
+	WCHAR outLowW[256], outMidW[256], outAllW[256], outHighW[256];
+	FormatChordInto(outLowW, _countof(outLowW), rawBass);
+	FormatChordInto(outMidW, _countof(outMidW), rawMid);
+	FormatChordAllInto(outAllW, _countof(outAllW), rawAll, rawMelody);
 
 	// 高域コードが空のときはメロディ音名で補完
-	if (rawHigh.IsEmpty() && rawMelody != L"[   ]") {
-		CString t = rawMelody.Mid(1);
-		rawHigh = (t.Find(L'#') >= 0) ? t.Left(2) : t.Left(1);
+	if (!rawHigh[0] && wcscmp(rawMelody, L"[   ]") != 0) {
+		const WCHAR* t = rawMelody + 1;
+		if (t[0] && t[1] == L'#')
+			{ rawHigh[0] = t[0]; rawHigh[1] = t[1]; rawHigh[2] = 0; }
+		else
+			{ rawHigh[0] = t[0]; rawHigh[1] = 0; }
 	}
-	if (rawMelody == L"[   ]" && rawHigh.IsEmpty())
-		outHigh = L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
-	else {
-		CString hp = FormatChord(rawHigh);
-		outHigh = hp.IsEmpty() ? rawMelody : hp;
-	}
-	SetKeyCodesLocked(outLow, outMid, outHigh, outAll);
+	if (wcscmp(rawMelody, L"[   ]") == 0 && !rawHigh[0])
+		EqKeyCopy(outHighW, _countof(outHighW), L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B");
+	else
+		FormatChordInto(outHighW, _countof(outHighW), rawHigh);
+	SetKeyCodesLocked(outLowW, outMidW, outHighW, outAllW);
 }
 
 // 外部から現在のノート強度配列を取得する (簡易ピアノロール表示等に使用)
