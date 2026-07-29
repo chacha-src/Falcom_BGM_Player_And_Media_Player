@@ -3885,13 +3885,29 @@ void CPianoRoll::OnPaint()
         m_keyBufReady = true;
     }
     else if (meterOnlyDirty && m_keyDC.GetSafeHdc()) {
-        // 鍵盤全体は触らず、上部メーター帯だけ差し替える（表示OFF時もダーティは落とす）
-        if (m_showLevelMeter) {
-            const int labelH = min(16, keyH / 4);
-            if (labelH >= 4) {
-                CRect meterStrip(2, 1, w - 2, labelH + 1);
-                m_keyDC.FillSolidRect(meterStrip, RGB(150, 150, 155));
+        // 鍵盤全体は触らず、上部メーター帯だけ差し替える（表示OFF時もダーティは落とす）。
+        // オクターブ数字はメーターと同じ帯(y=1..labelH+1)に載るため、塗りつぶし後に必ず描き直す。
+        // 描き忘れるとメーター更新のたびに数字が消え、点滅する。
+        const int labelH = min(16, keyH / 4);
+        if (labelH >= 4) {
+            CRect meterStrip(2, 1, w - 2, labelH + 1);
+            m_keyDC.FillSolidRect(meterStrip, RGB(150, 150, 155));
+            if (m_showLevelMeter)
                 DrawChannelDbBars(m_keyDC, meterStrip, chFillCopy, chCountCopy);
+            if (m_paintFontsReady && m_fontKeyOct.GetSafeHandle()) {
+                m_keyDC.SetBkMode(TRANSPARENT);
+                CFont* pOldFont = m_keyDC.SelectObject(
+                    CFont::FromHandle((HFONT)m_fontKeyOct.GetSafeHandle()));
+                m_keyDC.SetTextColor(RGB(100, 100, 110));
+                for (int i = 0; i < KEY_COUNT; ++i) {
+                    const int midi = MIDI_BASE + i;
+                    if (midi % 12 != 0) continue;
+                    int xL, xR; GetWhiteKeyRect52(midi, w, xL, xR);
+                    CString oct; oct.Format(L"%d", PianoDraw::MidiOctaveNumber(midi));
+                    CRect tr(xL + 2, 1, xR - 2, labelH + 1);
+                    m_keyDC.DrawText(oct, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                }
+                m_keyDC.SelectObject(pOldFont);
             }
         }
         didMeterOnly = true;
