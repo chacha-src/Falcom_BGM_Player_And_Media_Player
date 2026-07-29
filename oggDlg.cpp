@@ -1783,6 +1783,15 @@ void MpTaskbarNextTrack()
 void MpTaskbarPrevTrack()
 {
 	if (!pl || pl->playcnt <= 0) return;
+	// 一般メディアプレイヤー準拠: 再生中かつ曲頭から3秒未満なら前曲ではなく頭出し。
+	// ttt は 1/100 秒。一時停止中(ps==1)は常に前曲へ。
+	extern UINT ttt;
+	extern int plf;
+	extern int ps;
+	if (plf && ps != 1 && ttt < 300) {
+		MpTaskbarReplay();
+		return;
+	}
 	int idx = MpCurrentPlayIndex();
 	if (idx < 0) idx = 0;
 	else {
@@ -3695,6 +3704,13 @@ int Callback_Seek(
 
 int Callback_Close(void* datasource) {
 	oggf = 0;
+	return 0;
+}
+
+// リストサムネ用: グローバル oggf を壊さず FILE だけ閉じる
+static int JacketCallback_Close(void* datasource) {
+	FILE* fp = (FILE*)datasource;
+	if (fp) fclose(fp);
 	return 0;
 }
 
@@ -22565,6 +22581,7 @@ void COggDlg::RefreshAllAeroWindows()
 	if (mi) refreshMode(mi);
 	if (pMainFrame1 && pMainFrame1->GetSafeHwnd() && ::IsWindowVisible(pMainFrame1->m_hWnd)) {
 		CCC_ApplyAero(pMainFrame1->m_hWnd, CCC_IsAeroEnabled() ? TRUE : FALSE);
+		pMainFrame1->RefreshBarAero();
 		pMainFrame1->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
 #endif
@@ -23276,18 +23293,59 @@ void COggDlg::OnBnmp3jake()
 }
 
 
-void COggDlg::LoadJacket(CString s)
+void COggDlg::LoadJacket(CString s, CImage* dest)
 {
-	if (!img.IsNull()) {
-		img.Destroy();
+	// dest 指定時はメイン再生用 img/jx を触らない(リストサムネ用)。
+	CImage& target = dest ? *dest : img;
+	if (!target.IsNull()) {
+		target.Destroy();
 	}
-	jx = -1;
+	if (!dest)
+		jx = -1;
 
 	if (s.IsEmpty()) {
 		return;
 	}
 
 	const CString origPath = s;
+	// リスト用: 埋め込み失敗時に同名・folder.jpg 等へフォールバック
+	auto trySidecars = [&]() -> bool {
+		static const TCHAR* kNear[] = {
+			_T(".jpg"), _T(".jpeg"), _T(".png"), _T(".bmp"), _T(".gif")
+		};
+		int dot = origPath.ReverseFind(_T('.'));
+		if (dot > 0) {
+			CString base = origPath.Left(dot);
+			for (int ei = 0; ei < 5; ei++) {
+				CString sidecar = base + kNear[ei];
+				if (::GetFileAttributes(sidecar) == INVALID_FILE_ATTRIBUTES)
+					continue;
+				if (target.Load(sidecar) != E_FAIL && !target.IsNull() && target.GetWidth() > 0)
+					return true;
+				if (!target.IsNull()) target.Destroy();
+			}
+		}
+		int slash = origPath.ReverseFind(_T('\\'));
+		if (slash < 0) slash = origPath.ReverseFind(_T('/'));
+		if (slash > 0) {
+			CString dir = origPath.Left(slash + 1);
+			static const TCHAR* kFolder[] = {
+				_T("folder.jpg"), _T("Folder.jpg"), _T("cover.jpg"), _T("Cover.jpg"),
+				_T("folder.png"), _T("cover.png"), _T("AlbumArtSmall.jpg"),
+				_T("AlbumArt.jpg"), _T("front.jpg"), _T("Front.jpg")
+			};
+			for (int fi = 0; fi < 10; fi++) {
+				CString sidecar = dir + kFolder[fi];
+				if (::GetFileAttributes(sidecar) == INVALID_FILE_ATTRIBUTES)
+					continue;
+				if (target.Load(sidecar) != E_FAIL && !target.IsNull() && target.GetWidth() > 0)
+					return true;
+				if (!target.IsNull()) target.Destroy();
+			}
+		}
+		return false;
+	};
+
 	CString s1, s2;
 	TCHAR env[256];
 	GetEnvironmentVariable(_T("temp"), env, sizeof(env));
@@ -23301,6 +23359,8 @@ void COggDlg::LoadJacket(CString s)
 
 	CFile ff;
 	if (ff.Open(s, CFile::modeRead | CFile::shareDenyWrite, NULL) == FALSE) {
+		if (dest)
+			trySidecars();
 		return;
 	}
 	UINT size = 0;
@@ -23316,6 +23376,8 @@ void COggDlg::LoadJacket(CString s)
 			}
 		}
 		if (i == 2000) {
+			ff.Close();
+			if (dest) trySidecars();
 			return;
 		}
 		size = (UINT)bufimage[i + 4];
@@ -23371,6 +23433,8 @@ void COggDlg::LoadJacket(CString s)
 			}
 		}
 		if (i == 0x300000) {
+			ff.Close();
+			if (dest) trySidecars();
 			return;
 		}
 		i += 4;
@@ -23395,21 +23459,56 @@ void COggDlg::LoadJacket(CString s)
 	else if (s.Right(3) == "ogg" || s.Right(6) == ".qull3") {
 		CString cc;
 		int vfiii = FALSE;
-		for (int iii = 0; iii < vf.vc->comments; iii++) {
+		// dest(リストサムネ)は再生中のグローバル vf を触らず、ローカルで開く
+		OggVorbis_File* pVf = &vf;
+		OggVorbis_File vfLocal;
+		FILE* fpLocal = NULL;
+		BOOL localOk = FALSE;
+		ZeroMemory(&vfLocal, sizeof(vfLocal));
+		if (dest) {
+			ff.Close();
+			fpLocal = _tfopen(origPath, _T("rb"));
+			if (!fpLocal) {
+				trySidecars();
+				return;
+			}
+			// 再生中コールバックの Close(oggf=0) を使わない
+			ov_callbacks jacketCb = {
+				Callback_Read,
+				Callback_Seek,
+				JacketCallback_Close,
+				Callback_Tell
+			};
+			if (ov_open_callbacks(fpLocal, &vfLocal, NULL, 0, jacketCb) < 0) {
+				fclose(fpLocal);
+				trySidecars();
+				return;
+			}
+			localOk = TRUE;
+			pVf = &vfLocal;
+			fpLocal = NULL; // close は JacketCallback_Close に委譲
+		}
+		if (!pVf->vc) {
+			if (localOk) ov_clear(&vfLocal);
+			if (dest) trySidecars();
+			return;
+		}
+		for (int iii = 0; iii < pVf->vc->comments; iii++) {
 #if _UNICODE
 			WCHAR* f; f = new WCHAR[0x300000];
-			MultiByteToWideChar(CP_UTF8, 0, vf.vc->user_comments[iii], -1, f, 0x300000);
+			MultiByteToWideChar(CP_UTF8, 0, pVf->vc->user_comments[iii], -1, f, 0x300000);
 			cc = f;
 			delete[] f;
 #else
-			cc = vf.vc->user_comments[iii];
+			cc = pVf->vc->user_comments[iii];
 #endif
 			if (cc.Left(23) == "METADATA_BLOCK_PICTURE=") {
 				vfiii = TRUE;
-				char* buf = vf.vc->user_comments[iii];
+				char* buf = pVf->vc->user_comments[iii];
 				buf += 23;//Base64
 				int len;
 				char* decode = b64_decode(buf, (int)strlen(buf), len);
+				char* decodeFree = decode;
 				if (decode[16 + 16 + 10] == 0x50 && decode[1 + 16 + 16 + 10] == 0x4e && decode[2 + 16 + 16 + 10] == 0x47) {
 					s1 += _T("111.png");
 				}
@@ -23427,11 +23526,15 @@ void COggDlg::LoadJacket(CString s)
 				hG = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, len);
 				memcpy(hG, decode + 16 + 16 + 9, len);
 				CreateStreamOnHGlobal(hG, TRUE, &stream);
-				free(decode);
+				free(decodeFree);
 				break;
 			}
 		}
+		if (localOk) {
+			ov_clear(&vfLocal);
+		}
 		if (vfiii == FALSE) {
+			if (dest) trySidecars();
 			return;
 		}
 	}
@@ -23458,6 +23561,8 @@ void COggDlg::LoadJacket(CString s)
 			}
 		}
 		if (i == 0x300000) {
+			ff.Close();
+			if (dest) trySidecars();
 			return;
 		}
 		i += 29;
@@ -23508,16 +23613,18 @@ void COggDlg::LoadJacket(CString s)
 					CString sidecar = base + kSidecarExts[ei];
 					if (::GetFileAttributes(sidecar) == INVALID_FILE_ATTRIBUTES)
 						continue;
-					if (img.Load(sidecar) != E_FAIL && !img.IsNull() && img.GetWidth() > 0) {
-						jx = img.GetWidth();
-						jy = img.GetHeight();
-						jxy = (double)jx / (double)jy;
-						if (jx > 0 && ::IsWindow(m_mp3jake.GetSafeHwnd()))
-							m_mp3jake.EnableWindow(TRUE);
+					if (target.Load(sidecar) != E_FAIL && !target.IsNull() && target.GetWidth() > 0) {
+						if (!dest) {
+							jx = target.GetWidth();
+							jy = target.GetHeight();
+							jxy = (double)jx / (double)jy;
+							if (jx > 0 && ::IsWindow(m_mp3jake.GetSafeHwnd()))
+								m_mp3jake.EnableWindow(TRUE);
+						}
 						return;
 					}
-					if (!img.IsNull())
-						img.Destroy();
+					if (!target.IsNull())
+						target.Destroy();
 				}
 			}
 			return;
@@ -23528,18 +23635,37 @@ void COggDlg::LoadJacket(CString s)
 	else if (s.Right(3) == "dsf" || s.Right(3) == "dff" || s.Right(3) == "wsd") {
 		extern ULONGLONG po;
 		ULONGLONG imgPos = 0;
-		if (!TryId3ApicRegions(ff, bufimage, po, imgPos, size))
+		if (!TryId3ApicRegions(ff, bufimage, po, imgPos, size)) {
+			ff.Close();
+			if (dest) trySidecars();
 			return;
+		}
 		i = imgPos;
 		s2 += _T("111.bmp");
 	}
 
 	if (!(s.Right(3) == "ogg" || s.Right(6) == ".qull3")) {
+		// 壊れたAPICサイズでの巨大確保を防ぐ
+		if (size == 0 || size > 0x1000000) { // 16MB超は不正扱い
+			ff.Close();
+			if (dest) trySidecars();
+			return;
+		}
 		hG = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, size);
-		if (hG == NULL) return;
+		if (hG == NULL) {
+			ff.Close();
+			if (dest) trySidecars();
+			return;
+		}
 		ff.SeekToBegin();
 		ff.Seek(i, CFile::begin);
-		char* cBit = new char[size];
+		char* cBit = (char*)malloc((size_t)size);
+		if (!cBit) {
+			GlobalFree(hG);
+			ff.Close();
+			if (dest) trySidecars();
+			return;
+		}
 		ff.Read(cBit, size);
 		ff.Close();
 		if (s.Right(6).MakeLower() == L"qull3h" && flacmode == 1) {
@@ -23551,19 +23677,28 @@ void COggDlg::LoadJacket(CString s)
 			}
 		}
 		memcpy(hG, cBit, size);
-		delete[] cBit;
+		free(cBit);
 		CreateStreamOnHGlobal(hG, TRUE, &stream);
 	}
 
 	if (stream != NULL) {
-		if (img.Load(stream) != E_FAIL) {
-			jx = img.GetWidth();
-			jy = img.GetHeight();
-			jxy = (double)jx / (double)jy;
-			if (jx > 0 && ::IsWindow(m_mp3jake.GetSafeHwnd()))
-				m_mp3jake.EnableWindow(TRUE);
+		if (target.Load(stream) != E_FAIL) {
+			if (!dest) {
+				jx = target.GetWidth();
+				jy = target.GetHeight();
+				jxy = (double)jx / (double)jy;
+				if (jx > 0 && ::IsWindow(m_mp3jake.GetSafeHwnd()))
+					m_mp3jake.EnableWindow(TRUE);
+			}
+		}
+		else if (dest) {
+			if (!target.IsNull()) target.Destroy();
+			trySidecars();
 		}
 		stream->Release();
+	}
+	else if (dest) {
+		trySidecars();
 	}
 }
 

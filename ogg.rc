@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -1593,10 +1593,6 @@ CG_IDR_POPUP_DOUGA MENU
 BEGIN
     POPUP "_ポップアップ_"
     BEGIN
-        MENUITEM SEPARATOR
-        MENUITEM SEPARATOR
-        MENUITEM SEPARATOR
-        MENUITEM SEPARATOR
         MENUITEM "一時停止/再開 (&C)",                32775
         MENUITEM SEPARATOR
         POPUP "映像ストリーム"
@@ -1698,6 +1694,16 @@ BEGIN
             MENUITEM "39",                          ID_ETC39
             MENUITEM "40",                          ID_ETC40
         END
+        MENUITEM SEPARATOR
+        MENUITEM "再生",                            ID_DOUGA_PLAY
+        MENUITEM "停止",                            ID_DOUGA_STOP
+        MENUITEM "前へ",                            ID_DOUGA_PREV
+        MENUITEM "次へ",                            ID_DOUGA_NEXT
+        MENUITEM "戻す",                            ID_DOUGA_REW
+        MENUITEM "進める",                           ID_DOUGA_FF
+        MENUITEM "消音",                            ID_DOUGA_MUTE
+        MENUITEM "フルスクリーン",                      ID_DOUGA_FS
+        MENUITEM "フェードアウト",                      ID_DOUGA_FADE
         MENUITEM SEPARATOR
         MENUITEM "上下左右キー音量とシークが出来ます。",          ID__32783
         MENUITEM "ダブルクリックでフルスクリーンです。",          ID__32784
@@ -1823,6 +1829,16 @@ BEGIN
             MENUITEM "39",                          ID_ETC39
             MENUITEM "40",                          ID_ETC40
         END
+        MENUITEM SEPARATOR
+        MENUITEM "再生",                            ID_DOUGA_PLAY
+        MENUITEM "停止",                            ID_DOUGA_STOP
+        MENUITEM "前へ",                            ID_DOUGA_PREV
+        MENUITEM "次へ",                            ID_DOUGA_NEXT
+        MENUITEM "戻す",                            ID_DOUGA_REW
+        MENUITEM "進める",                           ID_DOUGA_FF
+        MENUITEM "消音",                            ID_DOUGA_MUTE
+        MENUITEM "フルスクリーン",                      ID_DOUGA_FS
+        MENUITEM "フェードアウト",                      ID_DOUGA_FADE
         MENUITEM SEPARATOR
         MENUITEM "上下左右キー音量とシークが出来ます。",          ID__32783
         MENUITEM "ダブルクリックでフルスクリーンです。",          ID__32784

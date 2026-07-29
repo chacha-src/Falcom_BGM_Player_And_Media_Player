@@ -7,6 +7,8 @@
 // Douga.h : ヘッダー ファイル
 //
 
+#include "CCustomControl.h"
+
 /////////////////////////////////////////////////////////////////////////////
 // CDouga フレーム
 struct StreamInfo
@@ -17,6 +19,66 @@ struct StreamInfo
 	CString language;
 };
 
+class CDouga;
+
+// EVR/VideoWindow の描画先。マウスは親(CDouga)へ転送して既存のドラッグ等を維持
+class CDougaVideoSite : public CWnd
+{
+protected:
+	virtual LRESULT WindowProc(UINT message, WPARAM wParam, LPARAM lParam);
+};
+
+// 下部操作バー専用ホスト(動画HWNDと兄弟。重ね順競合を避ける)
+class CDougaBarHost : public CWnd
+{
+public:
+	CDougaBarHost();
+	BOOL CreateBar(CDouga* owner);
+	void LayoutBar();
+	void ShowBar(BOOL show);
+	void SyncSeekVol();
+	void RefreshAero();
+	int  BarHeight() const { return m_barH; }
+	BOOL IsBarReady() const { return m_ready; }
+	BOOL PtInBarClient(CPoint ptClientOfDouga) const;
+
+	CCustomRangeSliderCtrl m_seek;
+	CCustomSliderCtrl m_vol;
+	CCustomStatic m_time, m_volL, m_volVal;
+	CCustomStandardButton m_prev, m_rew, m_play, m_pause, m_stop, m_ff, m_next;
+	CCustomStandardButton m_fade, m_mute, m_fs, m_sz1, m_sz15, m_sz2;
+	CToolTipCtrl m_tip;
+
+	void OnBnPrev();
+	void OnBnRew();
+	void OnBnPlay();
+	void OnBnPause();
+	void OnBnStop();
+	void OnBnFf();
+	void OnBnNext();
+	void OnBnFade();
+	void OnBnMute();
+	void OnBnFs();
+	void OnBnSz1();
+	void OnBnSz15();
+	void OnBnSz2();
+
+protected:
+	CDouga* m_owner;
+	float m_dpi;
+	int m_barH;
+	int m_ready;
+	int m_short;
+	int m_laidShort; // 直前に適用した短縮ラベル状態(-1=未)
+	int m_seekDrag;
+	int m_muted;
+	int m_mutePos;
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	DECLARE_MESSAGE_MAP()
+};
+
 class CDouga : public CFrameWnd
 {
 	DECLARE_DYNCREATE(CDouga)
@@ -25,6 +87,14 @@ protected:
 public:
 	CDouga();           // 動的生成に使用されるプロテクト コンストラクタ。
 	BOOL Create(HWND);
+	// 動画サイトとバーの配置。再入防止あり。描画系からは呼ばない。
+	void ApplyVideoDest();
+	void RefreshBarAero();
+	void ToggleFullScreen();
+	void RestoreDougaCursor();
+	HWND GetVideoSiteHwnd() const { return m_videoSite.GetSafeHwnd(); }
+	int  GetBarHeight() const;
+	CDougaBarHost& GetBar() { return m_bar; }
 	DWORD CntPin2(IAMStreamSelect* pFilter);
 	BOOL SwitchStream(int streamType, int index);
 
@@ -70,6 +140,8 @@ public:
 	void UpdateStreamMenu(CMenu* pMenu, CString* streamNames, int maxCount, LPCWSTR prefix);
 	void LocalizeDougaMenu(CMenu* pPopup);
 	void LocalizeDougaMenu1(CMenu* pPopup);
+	void ShowDougaContextMenu(CPoint point);
+	int  FindDougaStreamSubMenu(CMenu* pPopup, UINT firstItemId);
 
 	void DumpFilterGraph();
 
@@ -79,11 +151,18 @@ public:
 	CDC *cdc0,dc;
 	CBitmap bmp;
 	int pcnt;
+
+	CDougaVideoSite m_videoSite; // DirectShow/EVR の描画先(バーと兄弟)
+	CDougaBarHost m_bar;
+	int m_applyBusy;       // ApplyVideoDest 再入防止
+	int m_inSizeMove;      // リサイズドラッグ中(バー子の再配置を遅延)
+
 // オーバーライド
 	// ClassWizard は仮想関数のオーバーライドを生成します。
 	//{{AFX_VIRTUAL(CDouga)
 	public:
 	virtual BOOL DestroyWindow();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	protected:
 	virtual void PostNcDestroy();
 	virtual LRESULT DefWindowProc(UINT message, WPARAM wParam, LPARAM lParam);
@@ -97,6 +176,8 @@ public:
 	//{{AFX_MSG(CDouga)
 	afx_msg void OnSizing(UINT fwSide, LPRECT pRect);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnEnterSizeMove();
+	afx_msg void OnExitSizeMove();
 	afx_msg void OnClose();
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg void OnMenuitem32771();
@@ -227,6 +308,15 @@ public:
 	afx_msg void OnNcDestroy();
 	afx_msg void OnNcRButtonUp(UINT nHitTest, CPoint point);
 	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
+	afx_msg void OnDougaMenuPlay();
+	afx_msg void OnDougaMenuStop();
+	afx_msg void OnDougaMenuPrev();
+	afx_msg void OnDougaMenuNext();
+	afx_msg void OnDougaMenuRew();
+	afx_msg void OnDougaMenuFf();
+	afx_msg void OnDougaMenuMute();
+	afx_msg void OnDougaMenuFs();
+	afx_msg void OnDougaMenuFade();
 };
 
 /////////////////////////////////////////////////////////////////////////////

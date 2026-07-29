@@ -21,6 +21,10 @@ public:
 	playlistdata0 *pc;
 	// true のとき、プレイリストのツールチップに曲ごと保存パラメータの変更点を付記する
 	bool m_bSongParamTip = false;
+	// メディアプレイヤー: 行左にジャケットサムネを描く(0=無効)。HBITMAP は呼び出し側が所有。
+	int m_mpJacketPx = 0;
+	HBITMAP (*m_mpJacketGet)(void* ctx, int row) = nullptr;
+	void* m_mpJacketCtx = nullptr;
 protected:
 	virtual BOOL OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult);
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);

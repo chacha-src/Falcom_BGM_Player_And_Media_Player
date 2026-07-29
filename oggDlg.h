@@ -104,7 +104,8 @@ public:
 	BOOL ExportToTranscode(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts, int format, int mp3Kbps, int flacLevel);
 	double goertzel(const float* data, int N, double target_freq, double sample_rate);
 	double hanWindow(int value, int index, int offset, int size);
-	void LoadJacket(CString s);
+	// dest!=NULL のとき og->img を汚さず dest へ読み込む(リスト用サムネ等)。
+	void LoadJacket(CString s, CImage* dest = NULL);
 	CString mp3file;
 	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
 

@@ -385,6 +385,13 @@ struct save{
 	int tc_format;         // 0=mp3 1=FLAC
 	int tc_mp3_kbps;       // 128..320
 	int tc_flac_level;     // 0..8
+
+	// --- メディアプレイヤー画面 UI(末尾追記。旧.datは0初期化) ---
+	int mpLrcExpand;       // 1=歌詞パネル拡大
+	int mpFindFilter;      // 1=検索語でリストを絞り込み(0=ジャンプのみ)
+	int mpToolsOpen;       // 1=並べ替え/フォルダ追加の折りたたみ帯を開く
+	int mpSortKey;         // 0=なし 1=名前 2=アーティスト 3=アルバム 4=時間
+	int mpSortAsc;         // 1=昇順 0=降順
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

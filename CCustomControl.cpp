@@ -4792,14 +4792,21 @@ void CCustomRangeSliderCtrl::OnLButtonUp(UINT f, CPoint p)
 {
     if (m_bDragging)
     {
+        const int dragTarget = m_nDragTarget;
         m_bDragging = FALSE;
         ReleaseCapture();
-        if (m_nDragTarget == 3)
+        if (dragTarget == 3)
         {
             m_nLogicalPos = m_nVisualPos;
             CSliderCtrl::SetPos(m_nLogicalPos);
             GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, m_nLogicalPos), (LPARAM)m_hWnd);
             GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_ENDSCROLL, m_nLogicalPos), (LPARAM)m_hWnd);
+        }
+        else if (dragTarget == 1 || dragTarget == 2)
+        {
+            // 選択範囲つまみ(A-B)を確定。親が GetSelection で読み取る。
+            // SB_THUMBPOSITION は位置シークと衝突しないよう LOWORD に TB_ENDTRACK を使う。
+            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, 0), (LPARAM)m_hWnd);
         }
 #if CCUSTOM_AERO_SUPPORT
         CCC_InvalidateParent(m_hWnd, m_bAeroMode);
@@ -5200,23 +5207,61 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             lvi.iItem = ni;
             GetItem(&lvi);
             CImageList* pIL = GetImageList(LVSIL_SMALL);
-            if (bS)
-                DrawHeart(pDC, CRect(r.left + 2, r.top + 4, r.left + 16, r.top + 18), COLOR_HEART);
-            if (hasIconRect && pIL && lvi.iImage >= 0 && lvi.iImage != 1)
-            {
-                // ILC_MASK 付き ImageList は ILD_TRANSPARENT の方が塗り残しが少ない
-                IMAGEINFO ii = {};
-                int iw = 16, ih = 16;
-                if (pIL->GetImageInfo(lvi.iImage, &ii))
-                {
-                    iw = CRect(ii.rcImage).Width();
-                    ih = CRect(ii.rcImage).Height();
+            // ジャケット(左) → ♪(その右)。♡ は ♪ の下(奥)に先に描く。
+            int jacketRight = r.left;
+            if (ns == 0 && m_mpJacketPx > 0 && m_mpJacketGet) {
+                HBITMAP hb = m_mpJacketGet(m_mpJacketCtx, ni);
+                const int jsz = m_mpJacketPx;
+                const int rowHJak = (int)r.Height();
+                CRect rj;
+                rj.left = r.left + 2;
+                rj.top = r.top + (rowHJak - jsz) / 2;
+                if (rj.top < r.top + 1) rj.top = r.top + 1;
+                rj.right = rj.left + jsz;
+                rj.bottom = rj.top + jsz;
+                jacketRight = rj.right;
+                if (hb) {
+                    CDC src;
+                    src.CreateCompatibleDC(pDC);
+                    HGDIOBJ old = src.SelectObject(hb);
+                    pDC->SetStretchBltMode(COLORONCOLOR);
+                    BITMAP bm; ZeroMemory(&bm, sizeof(bm));
+                    ::GetObject(hb, sizeof(bm), &bm);
+                    if (bm.bmWidth > 0 && bm.bmHeight > 0)
+                        pDC->StretchBlt(rj.left, rj.top, jsz, jsz, &src, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+                    src.SelectObject(old);
+                    src.DeleteDC();
                 }
-                const int ix = ri.left + (ri.Width() - iw) / 2;
-                const int iy = ri.top + (ri.Height() - ih) / 2;
-                pIL->Draw(pDC, lvi.iImage, CPoint(ix, iy), ILD_TRANSPARENT);
+                else {
+                    pDC->FillSolidRect(&rj, RGB(230, 230, 238));
+                    CPen pn(PS_SOLID, 1, RGB(190, 190, 200));
+                    CPen* op = pDC->SelectObject(&pn);
+                    pDC->SelectStockObject(NULL_BRUSH);
+                    pDC->Rectangle(&rj);
+                    pDC->SelectObject(op);
+                }
             }
-            if (bH && !bS) DrawStar(pDC, r.left + 10, r.top + 10, 2, RGB(255, 215, 0));
+            // ♪描画位置(ジャケ有無で切替)。♡ は従来どおり ♪ と同位置・奥に重ねる。
+            const int iw = 16, ih = 16;
+            int noteX;
+            int noteY = r.top + ((int)r.Height() - ih) / 2;
+            if (m_mpJacketPx > 0)
+                noteX = jacketRight + 3;
+            else if (hasIconRect)
+                noteX = ri.left + (ri.Width() - iw) / 2;
+            else
+                noteX = r.left + 2;
+            if (bS)
+                DrawHeart(pDC, CRect(noteX, noteY + 2, noteX + 14, noteY + 16), COLOR_HEART);
+            if (pIL && lvi.iImage >= 0 && lvi.iImage != 1) {
+                // ImageList は行高確保で 24px。♪自体は従来どおり 16x16。
+                HICON hNote = ImageList_GetIcon(pIL->GetSafeHandle(), lvi.iImage, ILD_TRANSPARENT);
+                if (hNote) {
+                    ::DrawIconEx(pDC->GetSafeHdc(), noteX, noteY, hNote, 16, 16, 0, NULL, DI_NORMAL);
+                    ::DestroyIcon(hNote);
+                }
+            }
+            if (bH && !bS) DrawStar(pDC, noteX + 8, noteY + 8, 2, RGB(255, 215, 0));
         }
 
         CString st = GetItemText(ni, ns);
@@ -5227,16 +5272,21 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         if (ns == 0)
         {
             int tl = r.left + 36;
-            CRect ri;
-            if (GetItemRect(ni, &ri, LVIR_ICON))
+            if (m_mpJacketPx > 0)
+                tl = r.left + m_mpJacketPx + 24;
+            CRect ri2;
+            if (GetItemRect(ni, &ri2, LVIR_ICON))
             {
-                LVITEM lvi = { 0 };
-                lvi.mask = LVIF_IMAGE;
-                lvi.iItem = ni;
-                GetItem(&lvi);
-                // ♪表示中(0/2)のみテキストをアイコン右へ。空(1)は無視
-                if (lvi.iImage >= 0 && lvi.iImage != 1 && ri.Width() > 0)
-                    tl = (std::max)(tl, (int)ri.right + 4);
+                LVITEM lvi2 = { 0 };
+                lvi2.mask = LVIF_IMAGE;
+                lvi2.iItem = ni;
+                GetItem(&lvi2);
+                if (lvi2.iImage >= 0 && lvi2.iImage != 1) {
+                    if (m_mpJacketPx > 0)
+                        tl = (std::max)(tl, (int)r.left + m_mpJacketPx + 3 + 16 + 4);
+                    else if (ri2.Width() > 0)
+                        tl = (std::max)(tl, (int)ri2.right + 4);
+                }
             }
             tl = (std::min)(tl, (int)r.right - 4);
             rt.left = (std::max)(tl, (int)r.left + 4);

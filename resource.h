@@ -1,4 +1,4 @@
-//{{NO_DEPENDENCIES}}
+﻿//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ で生成されたインクルード ファイル。
 // ogg.rc で使用
 //
@@ -830,13 +830,58 @@
 #define IDC_SYOSAI_LBL_STATUS           3622
 #define IDC_SYOSAI_LBL_PARAM            3623
 
+#define IDC_MP_ABA                      3624
+#define IDC_MP_ABB                      3625
+#define IDC_MP_ABCLR                    3626
+#define IDC_MP_LRCEXPAND                3627
+#define IDC_MP_LRCBADGE                 3628
+#define IDC_MP_TOOLSTOGGLE              3629
+#define IDC_MP_SORTNAME                 3630
+#define IDC_MP_SORTART                  3631
+#define IDC_MP_SORTALB                  3632
+#define IDC_MP_SORTTIME                 3633
+#define IDC_MP_ADDFOLDER                3634
+#define IDC_MP_FINDFILTER               3635
+
+// CDouga 動画サイト / コントロールバー
+#define IDC_DOUGA_VIDEOSITE             3636
+#define IDC_DOUGA_BARHOST               3637
+#define IDC_DOUGA_SEEK                  3638
+#define IDC_DOUGA_TIME                  3639
+#define IDC_DOUGA_PREV                  3640
+#define IDC_DOUGA_REW                   3641
+#define IDC_DOUGA_PLAY                  3642
+#define IDC_DOUGA_PAUSE                 3643
+#define IDC_DOUGA_STOP                  3644
+#define IDC_DOUGA_FF                    3645
+#define IDC_DOUGA_NEXT                  3646
+#define IDC_DOUGA_FADE                  3647
+#define IDC_DOUGA_MUTE                  3648
+#define IDC_DOUGA_FS                    3649
+#define IDC_DOUGA_SZ1                   3650
+#define IDC_DOUGA_SZ15                  3651
+#define IDC_DOUGA_SZ2                   3652
+#define IDC_DOUGA_VOL_L                 3653
+#define IDC_DOUGA_VOL                   3654
+#define IDC_DOUGA_VOLVAL                3655
+
+#define ID_DOUGA_PLAY                   32948
+#define ID_DOUGA_STOP                   32949
+#define ID_DOUGA_PREV                   32950
+#define ID_DOUGA_NEXT                   32951
+#define ID_DOUGA_REW                    32952
+#define ID_DOUGA_FF                     32953
+#define ID_DOUGA_MUTE                   32954
+#define ID_DOUGA_FS                     32955
+#define ID_DOUGA_FADE                   32956
+
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        208
-#define _APS_NEXT_COMMAND_VALUE         32948
-#define _APS_NEXT_CONTROL_VALUE         3624
+#define _APS_NEXT_COMMAND_VALUE         32957
+#define _APS_NEXT_CONTROL_VALUE         3656
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

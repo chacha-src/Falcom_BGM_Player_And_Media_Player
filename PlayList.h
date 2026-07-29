@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxwin.h"
 #include "BtnST.h"
 #include "afxcmn.h"
@@ -161,6 +161,10 @@ public:
 CString NormalizePlaylistPath(LPCTSTR fol);
 CString PlPhysicalMediaPath(LPCTSTR fol);
 CString PlStorePlaylistFol(LPCTSTR fol, int sub);
+// Falcom ゲームBGM等: fol は basename のみで play() 時に解決するため、パス存在では欠損判定しない。
+BOOL PlIsFalcomGameBgmMode(int sub);
+// リスト欠損バッジ用。TRUE=実ファイルとして欠落していると判断できる場合のみ。
+BOOL PlTrackLooksMissing(int sub, LPCTSTR fol);
 
 enum {
 	PL_CTX_INFO = 1,
@@ -170,6 +174,15 @@ enum {
 	PL_CTX_CLEAR_SONGPARAM = 5,
 	PL_CTX_PROTOOLS = 6,
 	PL_CTX_TRANSCODE = 7,
+	PL_CTX_SORT_NAME = 8,
+	PL_CTX_SORT_ART = 9,
+	PL_CTX_SORT_ALB = 10,
+	PL_CTX_SORT_TIME = 11,
+	PL_CTX_ADD_FOLDER = 12,
+	PL_CTX_AB_SET_A = 13,
+	PL_CTX_AB_SET_B = 14,
+	PL_CTX_AB_CLEAR = 15,
+	PL_CTX_COPY_TITLEART = 16,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

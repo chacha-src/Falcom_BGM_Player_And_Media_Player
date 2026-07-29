@@ -686,10 +686,20 @@ CString PlPhysicalMediaPath(LPCTSTR fol)
 	return in;
 }
 
-static bool PlIsFalcomGameBgmMode(int sub)
+BOOL PlIsFalcomGameBgmMode(int sub)
 {
 	return (sub >= 1 && sub <= 21) || sub == 30 ||
 		sub == -11 || sub == -12 || sub == -13 || sub == -14 || sub == -15;
+}
+
+BOOL PlTrackLooksMissing(int sub, LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return TRUE;
+	// Falcom game BGM (mode1-21等): fol は basename のみ。play() が savedata で解決する。
+	// mode 30 はフルパス保存なので存在チェックする。
+	if (PlIsFalcomGameBgmMode(sub) && sub != 30)
+		return FALSE;
+	return !PathFileExists(PlPhysicalMediaPath(fol));
 }
 
 static void PlSelectItemAtScreenPoint(CListCtrl& lc, CPoint screenPt)
@@ -932,6 +942,38 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Параметры воспроизведения...", L"Wiedergabedetails...", L"Detalhes de reproducao...", L"Afspeeldetails...",
 			L"Szczegoly odtwarzania...", L"Oynatma ayrintilari..."));
 	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING, PL_CTX_COPY_TITLEART,
+		LL14(L"タイトル - アーティストをコピー", L"Copy Title - Artist", L"Copier Titre - Artiste", L"Copia Titolo - Artista",
+			L"Copiar Titulo - Artista", L"제목 - 아티스트 복사", L"复制 标题 - 艺术家", L"نسخ العنوان - الفنان",
+			L"Копировать Название - Исполнитель", L"Titel - Interpret kopieren", L"Copiar Titulo - Artista", L"Kopieer Titel - Artiest",
+			L"Kopiuj Tytul - Artysta", L"Baslik - Sanatciyi kopyala"));
+	menu.AppendMenu(MF_STRING, PL_CTX_ADD_FOLDER,
+		LL14(L"フォルダから追加...", L"Add from folder...", L"Ajouter depuis un dossier...", L"Aggiungi da cartella...",
+			L"Anadir desde carpeta...", L"폴더에서 추가...", L"从文件夹添加...", L"إضافة من مجلد...",
+			L"Добавить из папки...", L"Aus Ordner hinzufugen...", L"Adicionar da pasta...", L"Toevoegen uit map...",
+			L"Dodaj z folderu...", L"Klasorden ekle..."));
+	{
+		CMenu subSort;
+		subSort.CreatePopupMenu();
+		subSort.AppendMenu(MF_STRING, PL_CTX_SORT_NAME,
+			LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"));
+		subSort.AppendMenu(MF_STRING, PL_CTX_SORT_ART,
+			LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Interpret", L"Artista", L"Artiest", L"Artysta", L"Sanatci"));
+		subSort.AppendMenu(MF_STRING, PL_CTX_SORT_ALB,
+			LL14(L"アルバム", L"Album", L"Album", L"Album", L"Album", L"앨범", L"专辑", L"الألبوم", L"Альбом", L"Album", L"Album", L"Album", L"Album", L"Album"));
+		subSort.AppendMenu(MF_STRING, PL_CTX_SORT_TIME,
+			LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"));
+		menu.AppendMenu(MF_POPUP, (UINT_PTR)subSort.Detach(),
+			LL14(L"並べ替え", L"Sort", L"Trier", L"Ordina", L"Ordenar", L"정렬", L"排序", L"ترتيب", L"Сортировка", L"Sortieren", L"Ordenar", L"Sorteren", L"Sortuj", L"Sirala"));
+	}
+	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING, PL_CTX_AB_SET_A,
+		LL14(L"A-B: 現在位置をAに", L"A-B: Set A at position", L"A-B: Definir A", L"A-B: Imposta A", L"A-B: Fijar A", L"A-B: 현재 위치를 A로", L"A-B: 将当前位置设为A", L"A-B: تعيين A", L"A-B: Задать A", L"A-B: A setzen", L"A-B: Definir A", L"A-B: Stel A in", L"A-B: Ustaw A", L"A-B: A ayarla"));
+	menu.AppendMenu(MF_STRING, PL_CTX_AB_SET_B,
+		LL14(L"A-B: 現在位置をBに", L"A-B: Set B at position", L"A-B: Definir B", L"A-B: Imposta B", L"A-B: Fijar B", L"A-B: 현재 위치를 B로", L"A-B: 将当前位置设为B", L"A-B: تعيين B", L"A-B: Задать B", L"A-B: B setzen", L"A-B: Definir B", L"A-B: Stel B in", L"A-B: Ustaw B", L"A-B: B ayarla"));
+	menu.AppendMenu(MF_STRING, PL_CTX_AB_CLEAR,
+		LL14(L"A-Bリピート解除", L"Clear A-B repeat", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 반복 해제", L"清除A-B重复", L"مسح تكرار A-B", L"Сбросить A-B", L"A-B aufheben", L"Limpar A-B", L"A-B wissen", L"Wyczysc A-B", L"A-B temizle"));
+	menu.AppendMenu(MF_SEPARATOR);
 
 	const int plCnt = GetPlaylistFileCount();
 	if (plCnt > 1) {
@@ -1135,11 +1177,7 @@ void CPlayList::RemoveMissingFiles()
 	if (!pc || playcnt <= 0) return;
 	std::vector<int> missing;
 	for (int i = 0; i < playcnt; ++i) {
-		if (!pc[i].fol[0]) { missing.push_back(i); continue; }
-		// Falcom game BGM (mode1-21等): fol は basename のみ。play() が savedata で解決する。
-		// mode 30 はフルパス保存なので存在チェックする。
-		if (PlIsFalcomGameBgmMode(pc[i].sub) && pc[i].sub != 30) continue;
-		if (!PathFileExists(PlPhysicalMediaPath(pc[i].fol)))
+		if (PlTrackLooksMissing(pc[i].sub, pc[i].fol))
 			missing.push_back(i);
 	}
 	if (missing.empty()) {

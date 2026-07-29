@@ -112,6 +112,13 @@ public:
 	CCustomStandardButton m_plrename, m_pldelete, m_itemdel;
 	CCustomStandardButton m_m3uExport, m_m3uImport;
 	CCustomStandardButton m_supe, m_st, m_prompt;
+	CCustomStandardButton m_abA, m_abB, m_abClr; // A-Bリピート
+	CCustomStandardButton m_lrcExpand; // 歌詞パネル拡大/縮小
+	CCustomStandardButton m_toolsToggle; // 並べ替え/フォルダ帯の折りたたみ
+	CCustomStandardButton m_sortName, m_sortArt, m_sortAlb, m_sortTime;
+	CCustomStandardButton m_addFolder; // フォルダから追加(ライブラリ)
+	CCustomCheckBox m_findFilter;      // 検索=絞り込み
+	CCustomStatic m_lrcBadge;          // LRC状態バッジ
 	CButtonST m_lsup, m_up, m_down, m_lsdown;   // プレイリスト行移動(一番上/上/下/一番下)
 	CButtonST m_findup, m_finddown;              // あいまい検索 上/下
 	CCustomEdit m_find;
@@ -145,6 +152,7 @@ public:
 	int  m_lastCount;    // 前回描画時の pl->playcnt(差分更新用)
 	int  m_lastPlcnt;
 	int  m_lastScroll;   // 前回 EnsureVisible した再生行(同一なら再スクロール不要)
+	int  m_lastFollowPnt; // FollowPlayingRow: 前回追従した pl->pnt(曲変化時だけ追従)
 	int  m_lastMs2;      // savedata.ms2 の変化検出用(タイマー間隔の変更を反映するため)
 	int  m_seekDragging; // ユーザーがシークをドラッグ中なら 1(ミラー更新をスキップ)
 	int  m_lastPlayIcon; // 再生行(♪)の前回アイコン値。変化時のみ再描画して点滅をなめらかに
@@ -203,6 +211,29 @@ public:
 	int  m_mpBtnShort;       // 0=フル 1=EQ系短縮 2=フェード/JK等短縮 3=最小幅用の超短縮
 	int  m_mpPromptShort;    // 0=プロンプト 1=指示(幅不足時)
 	int  m_mpChkShort[6];    // 下部チェック tip..saveparam: 0=フル 1=中 2=短 (-1=未設定)
+
+	// ---- A-Bリピート(PCMフレーム。両方>=0で有効) ----
+	int  m_abApos;           // -1=未設定
+	int  m_abBpos;
+	int  m_abWrapBusy;       // シーク往復の再入防止
+
+	// ---- 検索フィルタ(表示行→pc インデックス)。std 禁止のため素の配列 ----
+	int* m_fmap;             // malloc。件数 m_fmapCap
+	int  m_fmapCap;
+	int  m_fcnt;             // フィルタ後件数(フィルタOFF時は playcnt と同値扱いしない: m_filtOn で判定)
+	int  m_filtOn;           // 1=絞り込み中
+
+	// ---- 欠損フラグ(pc インデックス、1=欠損)。遅延走査 ----
+	char* m_miss;            // malloc
+	int   m_missCap;
+	int   m_missScan;        // 次回走査開始位置
+
+	// ---- ジャケットサムネキャッシュ(LRU・固定スロット) ----
+	enum { kMpJakN = 64, kMpJakPx = 24 };
+	HBITMAP m_jakBmp[kMpJakN];
+	TCHAR   m_jakKey[kMpJakN][1024];
+	DWORD   m_jakTick[kMpJakN];
+	int     m_jakRow[kMpJakN]; // 最後に紐付けた pc 行(-1=なし)
 
 	// og のオフスクリーン合成 DC(スペアナ+ジャケ+時間)を m_bannerRect へ StretchBlit する。
 	// アクリル(Win11)時は黒透過合成、非アクリル時は永続メモリ DC でキャッシュ Blit。
@@ -297,6 +328,17 @@ protected:
 	afx_msg void OnKaisuuKillFocus();
 	afx_msg void OnFindUp();
 	afx_msg void OnFindDown();
+	afx_msg void OnAbSetA();
+	afx_msg void OnAbSetB();
+	afx_msg void OnAbClear();
+	afx_msg void OnLrcExpand();
+	afx_msg void OnToolsToggle();
+	afx_msg void OnSortName();
+	afx_msg void OnSortArt();
+	afx_msg void OnSortAlb();
+	afx_msg void OnSortTime();
+	afx_msg void OnAddFolder();
+	afx_msg void OnFindFilter();
 	afx_msg void OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult);

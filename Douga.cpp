@@ -1,4 +1,4 @@
-// Douga.cpp : インプリメンテーション ファイル
+﻿// Douga.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
@@ -162,6 +162,8 @@ extern save savedata;
 IMPLEMENT_DYNCREATE(CDouga, CFrameWnd)
 
 CDouga::CDouga()
+	: m_applyBusy(0)
+	, m_inSizeMove(0)
 {
 }
 
@@ -171,6 +173,534 @@ CDouga::~CDouga()
 
 }
 
+/////////////////////////////////////////////////////////////////////////////
+// CDougaVideoSite — マウスを親へ転送(座標は親クライアントへ変換)
+
+LRESULT CDougaVideoSite::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
+{
+	switch (message) {
+	case WM_CONTEXTMENU:
+	{
+		CWnd* p = GetParent();
+		if (p && p->GetSafeHwnd())
+			return p->SendMessage(message, wParam, lParam);
+		break;
+	}
+	case WM_MOUSEWHEEL:
+	case WM_MOUSEHWHEEL:
+	{
+		CWnd* p = GetParent();
+		if (p && p->GetSafeHwnd())
+			return p->SendMessage(message, wParam, lParam);
+		break;
+	}
+	case WM_LBUTTONDOWN:
+	case WM_LBUTTONUP:
+	case WM_LBUTTONDBLCLK:
+	case WM_RBUTTONDOWN:
+	case WM_RBUTTONUP:
+	case WM_MBUTTONDOWN:
+	case WM_MBUTTONUP:
+	case WM_MOUSEMOVE:
+	{
+		CWnd* p = GetParent();
+		if (p && p->GetSafeHwnd()) {
+			CPoint pt(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+			MapWindowPoints(p, &pt, 1);
+			return p->SendMessage(message, wParam, MAKELPARAM(pt.x, pt.y));
+		}
+		break;
+	}
+	default:
+		break;
+	}
+	return CWnd::WindowProc(message, wParam, lParam);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// CDougaBarHost
+
+static int DougaDpiScale(HWND hwnd, int px)
+{
+	int dpi = 96;
+	if (hwnd) {
+		HDC hdc = ::GetDC(hwnd);
+		if (hdc) {
+			dpi = ::GetDeviceCaps(hdc, LOGPIXELSX);
+			::ReleaseDC(hwnd, hdc);
+		}
+	}
+	if (dpi < 96) dpi = 96;
+	return MulDiv(px, dpi, 96);
+}
+
+CDougaBarHost::CDougaBarHost()
+	: m_owner(NULL)
+	, m_dpi(1.f)
+	, m_barH(56)
+	, m_ready(0)
+	, m_short(0)
+	, m_laidShort(-1)
+	, m_seekDrag(0)
+	, m_muted(0)
+	, m_mutePos(0)
+{
+}
+
+BEGIN_MESSAGE_MAP(CDougaBarHost, CWnd)
+	ON_WM_ERASEBKGND()
+	ON_WM_HSCROLL()
+	ON_BN_CLICKED(IDC_DOUGA_PREV, OnBnPrev)
+	ON_BN_CLICKED(IDC_DOUGA_REW, OnBnRew)
+	ON_BN_CLICKED(IDC_DOUGA_PLAY, OnBnPlay)
+	ON_BN_CLICKED(IDC_DOUGA_PAUSE, OnBnPause)
+	ON_BN_CLICKED(IDC_DOUGA_STOP, OnBnStop)
+	ON_BN_CLICKED(IDC_DOUGA_FF, OnBnFf)
+	ON_BN_CLICKED(IDC_DOUGA_NEXT, OnBnNext)
+	ON_BN_CLICKED(IDC_DOUGA_FADE, OnBnFade)
+	ON_BN_CLICKED(IDC_DOUGA_MUTE, OnBnMute)
+	ON_BN_CLICKED(IDC_DOUGA_FS, OnBnFs)
+	ON_BN_CLICKED(IDC_DOUGA_SZ1, OnBnSz1)
+	ON_BN_CLICKED(IDC_DOUGA_SZ15, OnBnSz15)
+	ON_BN_CLICKED(IDC_DOUGA_SZ2, OnBnSz2)
+END_MESSAGE_MAP()
+
+// ファイル後方で定義されるグローバルへの前方参照
+extern COggDlg* og;
+extern BOOL ev;
+extern IMFVideoDisplayControl* Vdc;
+extern IVideoWindow* pVideoWindow;
+extern IBasicVideo* pBasicVideo;
+extern void MpTaskbarReplay();
+extern void MpTaskbarNextTrack();
+extern void MpTaskbarPrevTrack();
+
+BOOL CDougaBarHost::OnEraseBkgnd(CDC* pDC)
+{
+	if (!pDC) return TRUE;
+	CRect rc;
+	GetClientRect(&rc);
+	pDC->FillSolidRect(&rc, RGB(32, 32, 36));
+	return TRUE;
+}
+
+BOOL CDougaBarHost::PtInBarClient(CPoint ptClientOfDouga) const
+{
+	if (!m_ready || !GetSafeHwnd()) return FALSE;
+	CRect r;
+	GetWindowRect(&r);
+	if (m_owner && m_owner->GetSafeHwnd())
+		m_owner->ScreenToClient(&r);
+	return r.PtInRect(ptClientOfDouga);
+}
+
+void CDougaBarHost::ShowBar(BOOL show)
+{
+	if (!GetSafeHwnd()) return;
+	ShowWindow(show ? SW_SHOW : SW_HIDE);
+}
+
+BOOL CDougaBarHost::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tip.GetSafeHwnd())
+		m_tip.RelayEvent(pMsg);
+	return CWnd::PreTranslateMessage(pMsg);
+}
+
+static void DougaAddTip(CToolTipCtrl& tip, CWnd& w, LPCWSTR text)
+{
+	if (!tip.GetSafeHwnd() || !w.GetSafeHwnd() || !text) return;
+	tip.AddTool(&w, text);
+}
+
+BOOL CDougaBarHost::CreateBar(CDouga* owner)
+{
+	if (!owner || !owner->GetSafeHwnd()) return FALSE;
+	m_owner = owner;
+	m_dpi = (float)DougaDpiScale(owner->m_hWnd, 100) / 100.f;
+	m_barH = DougaDpiScale(owner->m_hWnd, 56);
+
+	CString cls = AfxRegisterWndClass(CS_DBLCLKS,
+		::LoadCursor(NULL, IDC_ARROW),
+		(HBRUSH)::GetStockObject(NULL_BRUSH),
+		NULL);
+	CRect rc(0, 0, 10, m_barH);
+	if (!Create(cls, _T(""), WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+		rc, owner, IDC_DOUGA_BARHOST))
+		return FALSE;
+
+	CRect z(0, 0, 1, 1);
+	const DWORD btnStyle = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP;
+	const DWORD stStyle = WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS;
+	const DWORD slStyle = WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS | TBS_BOTH;
+
+	m_seek.Create(slStyle | TBS_ENABLESELRANGE, z, this, IDC_DOUGA_SEEK);
+	m_time.Create(_T(""), stStyle, z, this, IDC_DOUGA_TIME);
+	m_prev.Create(_T(""), btnStyle, z, this, IDC_DOUGA_PREV);
+	m_rew.Create(_T(""), btnStyle, z, this, IDC_DOUGA_REW);
+	m_play.Create(_T(""), btnStyle, z, this, IDC_DOUGA_PLAY);
+	m_pause.Create(_T(""), btnStyle, z, this, IDC_DOUGA_PAUSE);
+	m_stop.Create(_T(""), btnStyle, z, this, IDC_DOUGA_STOP);
+	m_ff.Create(_T(""), btnStyle, z, this, IDC_DOUGA_FF);
+	m_next.Create(_T(""), btnStyle, z, this, IDC_DOUGA_NEXT);
+	m_fade.Create(_T(""), btnStyle, z, this, IDC_DOUGA_FADE);
+	m_mute.Create(_T(""), btnStyle, z, this, IDC_DOUGA_MUTE);
+	m_fs.Create(_T(""), btnStyle, z, this, IDC_DOUGA_FS);
+	m_sz1.Create(_T(""), btnStyle, z, this, IDC_DOUGA_SZ1);
+	m_sz15.Create(_T(""), btnStyle, z, this, IDC_DOUGA_SZ15);
+	m_sz2.Create(_T(""), btnStyle, z, this, IDC_DOUGA_SZ2);
+	m_volL.Create(_T(""), stStyle, z, this, IDC_DOUGA_VOL_L);
+	m_vol.Create(slStyle, z, this, IDC_DOUGA_VOL);
+	m_volVal.Create(_T(""), stStyle, z, this, IDC_DOUGA_VOLVAL);
+
+	m_vol.SetRange(-498, 1);
+	m_seek.ModifyStyle(0, TBS_ENABLESELRANGE);
+	m_time.SetNoParentInvalidate(TRUE);
+	m_volVal.SetNoParentInvalidate(TRUE);
+
+	m_prev.SetWindowText(LL14(L"前へ", L"Prev", L"Prec", L"Prec", L"Ant", L"이전", L"上一首", L"السابق", L"Пред", L"Zurück", L"Ant", L"Vorige", L"Poprz", L"Onceki"));
+	m_rew.SetWindowText(LL14(L"戻す", L"Rew", L"Recul", L"Ind", L"Retr", L"되감기", L"快退", L"ترجيع", L"Назад", L"Zurück", L"Voltar", L"Terug", L"Wstecz", L"Geri"));
+	m_play.SetWindowText(LL14(L"再生", L"Play", L"Lect", L"Play", L"Play", L"재생", L"播放", L"تشغيل", L"Играть", L"Play", L"Play", L"Play", L"Odtw", L"Cal"));
+	m_pause.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف", L"Пауза", L"Pause", L"Pausa", L"Pauze", L"Pauza", L"Duraklat"));
+	m_stop.SetWindowText(LL14(L"停止", L"Stop", L"Stop", L"Stop", L"Stop", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stop", L"Stop", L"Durdur"));
+	m_ff.SetWindowText(LL14(L"進める", L"FF", L"Avance", L"Avanti", L"Avanz", L"빨리감기", L"快进", L"تقديم", L"Вперёд", L"Vor", L"Avançar", L"Vooruit", L"Naprz", L"Ileri"));
+	m_next.SetWindowText(LL14(L"次へ", L"Next", L"Suiv", L"Succ", L"Sig", L"다음", L"下一首", L"التالي", L"След", L"Weiter", L"Prox", L"Volgende", L"Nast", L"Sonraki"));
+	m_fade.SetWindowText(LL14(L"フェード", L"Fade", L"Fondu", L"Fade", L"Fade", L"페이드", L"淡出", L"تلاشي", L"Затух", L"Fade", L"Fade", L"Fade", L"Fade", L"Fade"));
+	m_mute.SetWindowText(LL14(L"消音", L"Mute", L"Muet", L"Mute", L"Silenc", L"음소거", L"静音", L"كتم", L"Без зв.", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz"));
+	m_fs.SetWindowText(LL14(L"全画面", L"Full", L"Plein", L"Intero", L"Completa", L"전체", L"全屏", L"ملء", L"Полн.", L"Voll", L"Cheia", L"Volledig", L"Pełny", L"Tam"));
+	m_sz1.SetWindowText(L"1x");
+	m_sz15.SetWindowText(L"1.5x");
+	m_sz2.SetWindowText(L"2x");
+	m_volL.SetWindowText(LL14(L"音量", L"Vol", L"Vol", L"Vol", L"Vol", L"음량", L"音量", L"صوت", L"Громк.", L"Laut", L"Vol", L"Vol", L"Głośn.", L"Ses"));
+	m_time.SetWindowText(L"00:00 / 00:00");
+	m_volVal.SetWindowText(L"0");
+
+	if (m_tip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX)) {
+		m_tip.Activate(TRUE);
+		DougaAddTip(m_tip, m_prev, LL14(L"前の曲へ", L"Previous track", L"Piste précédente", L"Brano precedente", L"Pista anterior", L"이전 곡", L"上一曲", L"المقطع السابق", L"Предыдущий трек", L"Vorheriger Titel", L"Faixa anterior", L"Vorige track", L"Poprzedni utwór", L"Önceki parça"));
+		DougaAddTip(m_tip, m_rew, LL14(L"少し戻す", L"Rewind a bit", L"Reculer un peu", L"Indietro un po'", L"Retroceder un poco", L"조금 되감기", L"快退一点", L"ترجيع قليلاً", L"Немного назад", L"Etwas zurück", L"Voltar um pouco", L"Iets terug", L"Cofnij trochę", L"Biraz geri"));
+		DougaAddTip(m_tip, m_play, LL14(L"再生/最初から", L"Play / restart", L"Lecture / recommencer", L"Riproduci / riavvia", L"Reproducir / reiniciar", L"재생/처음부터", L"播放/重头", L"تشغيل/إعادة", L"Играть/сначала", L"Abspielen/neu", L"Reproduzir/reiniciar", L"Afspelen/herstart", L"Odtwórz/od nowa", L"Çal/baştan"));
+		DougaAddTip(m_tip, m_pause, LL14(L"一時停止/再開", L"Pause / resume", L"Pause / reprendre", L"Pausa / riprendi", L"Pausa / reanudar", L"일시정지/재개", L"暂停/继续", L"إيقاف/استئناف", L"Пауза/продолжить", L"Pause/fortsetzen", L"Pausar/retomar", L"Pauzeren/hervatten", L"Pauza/wznów", L"Duraklat/devam"));
+		DougaAddTip(m_tip, m_stop, LL14(L"停止", L"Stop", L"Arrêt", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
+		DougaAddTip(m_tip, m_ff, LL14(L"少し進める", L"Fast-forward a bit", L"Avancer un peu", L"Avanti un po'", L"Avanzar un poco", L"조금 빨리감기", L"快进一点", L"تقديم قليلاً", L"Немного вперёд", L"Etwas vor", L"Avançar um pouco", L"Iets vooruit", L"Przewiń trochę", L"Biraz ileri"));
+		DougaAddTip(m_tip, m_next, LL14(L"次の曲へ", L"Next track", L"Piste suivante", L"Brano successivo", L"Pista siguiente", L"다음 곡", L"下一曲", L"المقطع التالي", L"Следующий трек", L"Nächster Titel", L"Próxima faixa", L"Volgende track", L"Następny utwór", L"Sonraki parça"));
+		DougaAddTip(m_tip, m_fade, LL14(L"フェードアウトして停止", L"Fade out and stop", L"Fondu puis arrêt", L"Dissolvenza e stop", L"Desvanecer y detener", L"페이드 아웃 후 정지", L"淡出并停止", L"تلاشي ثم إيقاف", L"Затухание и стоп", L"Ausblenden und stoppen", L"Desvanecer e parar", L"Uitfaden en stoppen", L"Wycisz i zatrzymaj", L"Soluklaştırıp durdur"));
+		DougaAddTip(m_tip, m_mute, LL14(L"消音の切替", L"Toggle mute", L"Couper/rétablir le son", L"Attiva/disattiva mute", L"Silenciar/activar", L"음소거 전환", L"切换静音", L"تبديل الكتم", L"Переключить звук", L"Stummschaltung", L"Alternar mudo", L"Dempen wisselen", L"Przełącz wyciszenie", L"Sessize al/aç"));
+		DougaAddTip(m_tip, m_fs, LL14(L"フルスクリーン切替", L"Toggle fullscreen", L"Plein écran", L"Schermo intero", L"Pantalla completa", L"전체화면 전환", L"切换全屏", L"تبديل ملء الشاشة", L"Полный экран", L"Vollbild umschalten", L"Tela cheia", L"Volledig scherm", L"Pełny ekran", L"Tam ekran"));
+		DougaAddTip(m_tip, m_sz1, LL14(L"通常サイズ (1x)", L"Normal size (1x)", L"Taille normale (1x)", L"Dimensione normale (1x)", L"Tamaño normal (1x)", L"표준 크기 (1x)", L"标准尺寸 (1x)", L"الحجم العادي (1x)", L"Обычный размер (1x)", L"Normalgröße (1x)", L"Tamanho normal (1x)", L"Normale grootte (1x)", L"Normalny rozmiar (1x)", L"Normal boyut (1x)"));
+		DougaAddTip(m_tip, m_sz15, LL14(L"中間サイズ (1.5x)", L"Medium size (1.5x)", L"Taille moyenne (1,5x)", L"Dimensione media (1.5x)", L"Tamaño medio (1.5x)", L"중간 크기 (1.5x)", L"中等尺寸 (1.5x)", L"الحجم المتوسط (1.5x)", L"Средний размер (1.5x)", L"Mittlere Größe (1,5x)", L"Tamanho médio (1.5x)", L"Middelgroot (1.5x)", L"Średni rozmiar (1.5x)", L"Orta boyut (1.5x)"));
+		DougaAddTip(m_tip, m_sz2, LL14(L"倍サイズ (2x)", L"Large size (2x)", L"Grande taille (2x)", L"Dimensione grande (2x)", L"Tamaño grande (2x)", L"2배 크기 (2x)", L"双倍尺寸 (2x)", L"الحجم الكبير (2x)", L"Двойной размер (2x)", L"Doppelte Größe (2x)", L"Tamanho grande (2x)", L"Grote maat (2x)", L"Duży rozmiar (2x)", L"Büyük boyut (2x)"));
+		DougaAddTip(m_tip, m_vol, LL14(L"DirectShow 音量", L"DirectShow volume", L"Volume DirectShow", L"Volume DirectShow", L"Volumen DirectShow", L"DirectShow 음량", L"DirectShow 音量", L"صوت DirectShow", L"Громкость DirectShow", L"DirectShow-Lautstärke", L"Volume DirectShow", L"DirectShow-volume", L"Głośność DirectShow", L"DirectShow sesi"));
+		DougaAddTip(m_tip, m_seek, LL14(L"シーク", L"Seek", L"Position", L"Posizione", L"Posición", L"탐색", L"定位", L"تقديم", L"Перемотка", L"Suche", L"Busca", L"Zoeken", L"Przewijanie", L"Sar"));
+	}
+
+	m_ready = 1;
+	LayoutBar();
+	SyncSeekVol();
+	return TRUE;
+}
+
+void CDougaBarHost::LayoutBar()
+{
+	if (!m_ready || !GetSafeHwnd()) return;
+	CRect rc;
+	GetClientRect(&rc);
+	const int W = rc.Width();
+	const int H = rc.Height();
+	if (W < 8 || H < 8) return;
+
+	const int pad = DougaDpiScale(m_hWnd, 4);
+	const int gap = DougaDpiScale(m_hWnd, 3);
+	const int row1 = DougaDpiScale(m_hWnd, 18);
+	const int row2 = DougaDpiScale(m_hWnd, 26);
+	const int y1 = pad;
+	const int y2 = y1 + row1 + pad;
+	m_short = (W < DougaDpiScale(m_hWnd, 520)) ? 1 : 0;
+
+	auto move = [](CWnd& w, int x, int y, int ww, int hh) {
+		if (w.GetSafeHwnd())
+			w.SetWindowPos(NULL, x, y, ww, hh,
+				SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
+	};
+
+	int timeW = DougaDpiScale(m_hWnd, m_short ? 90 : 110);
+	int seekW = W - pad * 2 - timeW - gap;
+	if (seekW < 10) seekW = 10;
+	move(m_seek, pad, y1, seekW, row1);
+	move(m_time, W - pad - timeW, y1, timeW, row1);
+
+	int x = pad;
+	int bh = H - y2 - pad;
+	if (bh > row2) bh = row2;
+	if (bh < 8) bh = 8;
+	auto btnW = [&](int wide, int mid, int nar) {
+		return DougaDpiScale(m_hWnd, m_short ? nar : (W < DougaDpiScale(m_hWnd, 700) ? mid : wide));
+	};
+
+	struct { CWnd* w; int ww; } btns[] = {
+		{ &m_prev, btnW(48, 40, 28) },
+		{ &m_rew,  btnW(48, 40, 28) },
+		{ &m_play, btnW(52, 44, 32) },
+		{ &m_pause,btnW(64, 52, 36) },
+		{ &m_stop, btnW(48, 40, 28) },
+		{ &m_ff,   btnW(52, 44, 32) },
+		{ &m_next, btnW(48, 40, 28) },
+		{ &m_fade, btnW(56, 44, 28) },
+		{ &m_mute, btnW(48, 40, 28) },
+		{ &m_fs,   btnW(56, 44, 28) },
+		{ &m_sz1,  btnW(36, 32, 26) },
+		{ &m_sz15, btnW(44, 36, 30) },
+		{ &m_sz2,  btnW(36, 32, 26) },
+	};
+	for (size_t i = 0; i < sizeof(btns) / sizeof(btns[0]); ++i) {
+		move(*btns[i].w, x, y2, btns[i].ww, bh);
+		x += btns[i].ww + gap;
+	}
+
+	int volLW = DougaDpiScale(m_hWnd, m_short ? 28 : 36);
+	int volVW = DougaDpiScale(m_hWnd, m_short ? 28 : 36);
+	int volW = DougaDpiScale(m_hWnd, m_short ? 70 : 100);
+	int need = volLW + gap + volW + gap + volVW;
+	if (x + need > W - pad) {
+		volW = W - pad - x - volLW - volVW - gap * 2;
+		if (volW < 40) volW = 40;
+	}
+	move(m_volL, x, y2, volLW, bh); x += volLW + gap;
+	move(m_vol, x, y2, volW, bh); x += volW + gap;
+	move(m_volVal, x, y2, volVW, bh);
+
+	if (m_laidShort != m_short) {
+		m_laidShort = m_short;
+		if (m_short) {
+			m_prev.SetWindowText(L"|<");
+			m_rew.SetWindowText(L"<<");
+			m_play.SetWindowText(L">");
+			m_pause.SetWindowText(L"||");
+			m_stop.SetWindowText(L"[]");
+			m_ff.SetWindowText(L">>");
+			m_next.SetWindowText(L">|");
+			m_fade.SetWindowText(L"FO");
+			m_mute.SetWindowText(L"M");
+			m_fs.SetWindowText(L"FS");
+		} else {
+			m_prev.SetWindowText(LL14(L"前へ", L"Prev", L"Prec", L"Prec", L"Ant", L"이전", L"上一首", L"السابق", L"Пред", L"Zurück", L"Ant", L"Vorige", L"Poprz", L"Onceki"));
+			m_rew.SetWindowText(LL14(L"戻す", L"Rew", L"Recul", L"Ind", L"Retr", L"되감기", L"快退", L"ترجيع", L"Назад", L"Zurück", L"Voltar", L"Terug", L"Wstecz", L"Geri"));
+			m_play.SetWindowText(LL14(L"再生", L"Play", L"Lect", L"Play", L"Play", L"재생", L"播放", L"تشغيل", L"Играть", L"Play", L"Play", L"Play", L"Odtw", L"Cal"));
+			m_pause.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف", L"Пауза", L"Pause", L"Pausa", L"Pauze", L"Pauza", L"Duraklat"));
+			m_stop.SetWindowText(LL14(L"停止", L"Stop", L"Stop", L"Stop", L"Stop", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stop", L"Stop", L"Durdur"));
+			m_ff.SetWindowText(LL14(L"進める", L"FF", L"Avance", L"Avanti", L"Avanz", L"빨리감기", L"快进", L"تقديم", L"Вперёд", L"Vor", L"Avançar", L"Vooruit", L"Naprz", L"Ileri"));
+			m_next.SetWindowText(LL14(L"次へ", L"Next", L"Suiv", L"Succ", L"Sig", L"다음", L"下一首", L"التالي", L"След", L"Weiter", L"Prox", L"Volgende", L"Nast", L"Sonraki"));
+			m_fade.SetWindowText(LL14(L"フェード", L"Fade", L"Fondu", L"Fade", L"Fade", L"페이드", L"淡出", L"تلاشي", L"Затух", L"Fade", L"Fade", L"Fade", L"Fade", L"Fade"));
+			m_mute.SetWindowText(LL14(L"消音", L"Mute", L"Muet", L"Mute", L"Silenc", L"음소거", L"静音", L"كتم", L"Без зв.", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz"));
+			m_fs.SetWindowText(LL14(L"全画面", L"Full", L"Plein", L"Intero", L"Completa", L"전체", L"全屏", L"ملء", L"Полн.", L"Voll", L"Cheia", L"Volledig", L"Pełny", L"Tam"));
+		}
+	}
+	// 移動後の残像を消す
+	Invalidate(TRUE);
+}
+
+void CDougaBarHost::SyncSeekVol()
+{
+	if (!m_ready || !og || !::IsWindow(og->GetSafeHwnd())) return;
+
+	if (!m_seekDrag && m_seek.GetSafeHwnd()) {
+		int mn = 0, mx = 1;
+		og->m_time.GetRange(mn, mx);
+		if (mx <= mn) mx = mn + 1;
+		int selMn = 0, selMx = 0;
+		og->m_time.GetSelection(selMn, selMx);
+		int psPos = og->m_time.GetPos();
+		m_seek.SetPlaybackMirror(psPos, selMn, selMx, mn, mx);
+		if (::IsWindowVisible(m_seek.GetSafeHwnd()))
+			m_seek.Invalidate(FALSE);
+
+		int cur = psPos, tot = mx;
+		if (tot < 1) tot = 1;
+		auto fmt = [](int cs, WCHAR* buf, size_t n) {
+			if (cs < 0) cs = 0;
+			int s = cs / 100;
+			int m = s / 60; s %= 60;
+			int h = m / 60; m %= 60;
+			if (h > 0) swprintf_s(buf, n, L"%d:%02d:%02d", h, m, s);
+			else swprintf_s(buf, n, L"%02d:%02d", m, s);
+		};
+		WCHAR a[32], b[32], t[80];
+		fmt(cur, a, 32); fmt(tot, b, 32);
+		swprintf_s(t, L"%s / %s", a, b);
+		m_time.SetWindowText(t);
+	}
+
+	if (m_vol.GetSafeHwnd()) {
+		HWND hf = ::GetFocus();
+		if (hf != m_vol.GetSafeHwnd()) {
+			int v = og->m_dsval.GetPos();
+			m_vol.SetPos(v);
+			WCHAR vs[32];
+			swprintf_s(vs, L"%d", v);
+			m_volVal.SetWindowText(vs);
+		}
+	}
+}
+
+void CDougaBarHost::RefreshAero()
+{
+	if (!GetSafeHwnd()) return;
+	// 動画窓のバーは不透明固定(透過とEVRの競合を避ける)
+	PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
+}
+
+void CDougaBarHost::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	if (!og || !pScrollBar) {
+		CWnd::OnHScroll(nSBCode, nPos, pScrollBar);
+		return;
+	}
+	HWND h = pScrollBar->GetSafeHwnd();
+	if (h == m_seek.GetSafeHwnd()) {
+		if (nSBCode == TB_THUMBTRACK || nSBCode == TB_THUMBPOSITION)
+			m_seekDrag = 1;
+		if (nSBCode == TB_ENDTRACK || nSBCode == TB_THUMBPOSITION) {
+			int p = m_seek.GetPos();
+			og->m_time.SetPos(p);
+			m_seekDrag = 0;
+		} else if (nSBCode == TB_THUMBTRACK) {
+			int p = m_seek.GetPos();
+			og->m_time.SetPos(p);
+		}
+	} else if (h == m_vol.GetSafeHwnd()) {
+		int v = m_vol.GetPos();
+		og->m_dsval.SetPos(v);
+		m_muted = 0;
+		WCHAR vs[32];
+		swprintf_s(vs, L"%d", v);
+		m_volVal.SetWindowText(vs);
+	}
+	CWnd::OnHScroll(nSBCode, nPos, pScrollBar);
+}
+
+void CDougaBarHost::OnBnPrev() { if (og) MpTaskbarPrevTrack(); }
+void CDougaBarHost::OnBnNext() { if (og) MpTaskbarNextTrack(); }
+void CDougaBarHost::OnBnPlay() { if (og) MpTaskbarReplay(); }
+void CDougaBarHost::OnBnPause() { if (m_owner) m_owner->On32775(); }
+void CDougaBarHost::OnBnStop()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON1, BN_CLICKED), 0);
+}
+void CDougaBarHost::OnBnRew()
+{
+	if (og) og->SendMessage(WM_HOTKEY, (WPARAM)8003, 0);
+}
+void CDougaBarHost::OnBnFf()
+{
+	if (og) og->SendMessage(WM_HOTKEY, (WPARAM)8002, 0);
+}
+void CDougaBarHost::OnBnFade()
+{
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON5, BN_CLICKED), 0);
+}
+void CDougaBarHost::OnBnMute()
+{
+	if (!og) return;
+	if (!m_muted) {
+		m_mutePos = og->m_dsval.GetPos();
+		og->m_dsval.SetPos(-498);
+		m_muted = 1;
+	} else {
+		og->m_dsval.SetPos(m_mutePos);
+		m_muted = 0;
+	}
+	SyncSeekVol();
+}
+void CDougaBarHost::OnBnFs()
+{
+	if (m_owner)
+		m_owner->ToggleFullScreen();
+}
+void CDougaBarHost::OnBnSz1() { if (m_owner) m_owner->OnMenuitem32771(); }
+void CDougaBarHost::OnBnSz15() { if (m_owner) m_owner->OnMenuitem32773(); }
+void CDougaBarHost::OnBnSz2() { if (m_owner) m_owner->OnMenuitem32772(); }
+
+/////////////////////////////////////////////////////////////////////////////
+// CDouga — 動画配置(バーと競合しないよう videoSite に限定)
+
+int CDouga::GetBarHeight() const
+{
+	if (!m_bar.IsBarReady() || savedata.fs) return 0;
+	return m_bar.BarHeight();
+}
+
+void CDouga::RefreshBarAero()
+{
+	m_bar.RefreshAero();
+}
+
+BOOL CDouga::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_bar.IsBarReady() && m_bar.m_tip.GetSafeHwnd())
+		m_bar.m_tip.RelayEvent(pMsg);
+	return CFrameWnd::PreTranslateMessage(pMsg);
+}
+
+void CDouga::ApplyVideoDest()
+{
+	if (!GetSafeHwnd() || m_applyBusy) return;
+	m_applyBusy = 1;
+
+	CRect client;
+	GetClientRect(&client);
+	const int barH = GetBarHeight();
+	const int vw = client.Width();
+	int vh = client.Height() - barH;
+	if (vh < 1) vh = 1;
+	if (vw < 1) {
+		m_applyBusy = 0;
+		return;
+	}
+
+	// 動画は NOREDRAW 可。バーは NOCOPYBITS で旧ピクセルを引きずらない
+	HDWP hdwp = ::BeginDeferWindowPos(2);
+	if (hdwp && m_videoSite.GetSafeHwnd()) {
+		hdwp = ::DeferWindowPos(hdwp, m_videoSite.m_hWnd, HWND_BOTTOM,
+			0, 0, vw, vh, SWP_NOACTIVATE | SWP_NOREDRAW);
+	}
+	if (hdwp && m_bar.IsBarReady() && m_bar.GetSafeHwnd()) {
+		if (savedata.fs) {
+			::ShowWindow(m_bar.m_hWnd, SW_HIDE);
+		} else {
+			hdwp = ::DeferWindowPos(hdwp, m_bar.m_hWnd, HWND_TOP,
+				0, vh, vw, barH,
+				SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOCOPYBITS);
+		}
+	}
+	if (hdwp)
+		::EndDeferWindowPos(hdwp);
+
+	// ドラッグ中は子コントロール再配置しない(残像の主因)。枠だけ追従。
+	if (!savedata.fs && m_bar.IsBarReady() && !m_inSizeMove)
+		m_bar.LayoutBar();
+
+	CRect vr(0, 0, vw, vh);
+	if (ev && Vdc) {
+		MFVideoNormalizedRect mvnr = { 0, 0, 1, 1 };
+		Vdc->SetVideoPosition(&mvnr, &vr);
+	} else if (!savedata.fs) {
+		if (pBasicVideo) {
+			pBasicVideo->put_DestinationWidth(vw);
+			pBasicVideo->put_DestinationHeight(vh);
+		}
+		if (pVideoWindow) {
+			pVideoWindow->put_Top(0);
+			pVideoWindow->put_Left(0);
+			pVideoWindow->put_Height(vh);
+			pVideoWindow->put_Width(vw);
+		}
+	}
+
+	m_applyBusy = 0;
+}
+
 
 BEGIN_MESSAGE_MAP(CDouga, CFrameWnd)
 	ON_WM_TIMER()
@@ -178,6 +708,8 @@ BEGIN_MESSAGE_MAP(CDouga, CFrameWnd)
 	//{{AFX_MSG_MAP(CDouga)
 	ON_WM_SIZING()
 	ON_WM_SIZE()
+	ON_WM_ENTERSIZEMOVE()
+	ON_WM_EXITSIZEMOVE()
 	ON_WM_CLOSE()
 	ON_WM_SHOWWINDOW()
 	ON_COMMAND(ID_MENUITEM32771, OnMenuitem32771)
@@ -298,6 +830,15 @@ BEGIN_MESSAGE_MAP(CDouga, CFrameWnd)
 	ON_WM_NCDESTROY()
 	ON_WM_NCRBUTTONUP()
 	ON_WM_RBUTTONUP()
+	ON_COMMAND(ID_DOUGA_PLAY, OnDougaMenuPlay)
+	ON_COMMAND(ID_DOUGA_STOP, OnDougaMenuStop)
+	ON_COMMAND(ID_DOUGA_PREV, OnDougaMenuPrev)
+	ON_COMMAND(ID_DOUGA_NEXT, OnDougaMenuNext)
+	ON_COMMAND(ID_DOUGA_REW, OnDougaMenuRew)
+	ON_COMMAND(ID_DOUGA_FF, OnDougaMenuFf)
+	ON_COMMAND(ID_DOUGA_MUTE, OnDougaMenuMute)
+	ON_COMMAND(ID_DOUGA_FS, OnDougaMenuFs)
+	ON_COMMAND(ID_DOUGA_FADE, OnDougaMenuFade)
 END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
@@ -374,6 +915,9 @@ extern save savedata;
 extern int mode;
 
 extern COggDlg *og;
+extern void MpTaskbarReplay();
+extern void MpTaskbarNextTrack();
+extern void MpTaskbarPrevTrack();
 
 BOOL CDouga::Create(HWND h)
 {
@@ -426,6 +970,19 @@ BOOL CDouga::Create(HWND h)
 	::FreeLibrary(hDLL);
 
 	st12=0;
+
+	// 動画サイト(EVR/VideoWindow用)と下部バー — 兄弟HWNDで重ね順競合を避ける
+	{
+		CString vcls = AfxRegisterWndClass(CS_DBLCLKS,
+			::LoadCursor(NULL, IDC_ARROW),
+			(HBRUSH)::GetStockObject(BLACK_BRUSH),
+			NULL);
+		m_videoSite.Create(vcls, _T(""),
+			WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+			CRect(0, 0, 1, 1), this, IDC_DOUGA_VIDEOSITE);
+		m_bar.CreateBar(this);
+		ApplyVideoDest();
+	}
 	return TRUE;
 }
 long DeviceID=-1;
@@ -1749,7 +2306,7 @@ void CDouga::plays(TCHAR* s)
 						hr = pMoniker->BindToObject(NULL, NULL, IID_IBaseFilter, (void**)&prend);
 						prend->QueryInterface(IID_IMFGetService,(LPVOID *)&service);
 						hr=service->GetService(MR_VIDEO_RENDER_SERVICE, IID_IMFVideoDisplayControl, (void**)&Vdc);
-						hr=Vdc->SetVideoWindow(m_hWnd);
+						hr=Vdc->SetVideoWindow(m_videoSite.GetSafeHwnd() ? m_videoSite.m_hWnd : m_hWnd);
 					}
 					VariantClear(&varName);
 					RELEASE(pPropBag);
@@ -3143,7 +3700,8 @@ void CDouga::plays2()
 	height = 0; width = 0;
 
 	if (pGraphBuilder)EnumFilters(pGraphBuilder, 0);
-	if (pVideoWindow)pVideoWindow->put_Owner((OAHWND)m_hWnd);
+	HWND hwndVideo = m_videoSite.GetSafeHwnd() ? m_videoSite.m_hWnd : m_hWnd;
+	if (pVideoWindow)pVideoWindow->put_Owner((OAHWND)hwndVideo);
 	if (pVideoWindow)pVideoWindow->put_WindowStyle(WS_CHILD | WS_CLIPSIBLINGS);
 	if (pVideoWindow)pVideoWindow->put_MessageDrain((OAHWND)m_hWnd);
 	if (pGraphBuilder)pGraphBuilder->QueryInterface(IID_IBasicVideo, (LPVOID*)&pBasicVideo);
@@ -3212,32 +3770,31 @@ void CDouga::plays2()
 		rcm.bottom = 396;
 	}
 
-	AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-	if (rc.left < 0) rc.left = 0;
-	if (rc.top < 0) rc.top = 0;
-	MoveWindow(rc.left + 10, rc.top + 10, rc.right - rc.left + 10, rc.bottom - rc.top + 10, TRUE);
-
+	// 表示は最終サイズ確定後に一度だけ。
+	// (旧: Show → 100x100 に縮める → 倍率適用 で「出て消えてまた出る」ように見えた)
 	if (width == 0) {
 		ShowWindow(SW_HIDE);
 	}
 	else {
 		if (pVideoWindow)pVideoWindow->put_Visible(OATRUE);
+
+		if (savedata.gx != -10000) {
+			// 位置だけ先に合わせる(まだ非表示のまま、再描画しない)
+			SetWindowPos(NULL, savedata.gx, savedata.gy, 0, 0,
+				SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+		}
+
+		switch (savedata.douga) {
+		case 0:OnMenuitem32771(); break;
+		case 1:OnMenuitem32772(); break;
+		case 2:OnMenuitem32773(); break;
+		case 3:OnMenuitem32774(); break;
+		}
+
 		ShowWindow(SW_SHOWNORMAL);
+		ApplyVideoDest();
 		UpdateWindow();
 		SetTimer(155, 200, NULL);
-	}
-
-	if (savedata.gx == -10000) {
-	}
-	else {
-		MoveWindow(savedata.gx, savedata.gy, 100, 100);
-	}
-
-	switch (savedata.douga) {
-	case 0:OnMenuitem32771(); break;
-	case 1:OnMenuitem32772(); break;
-	case 2:OnMenuitem32773(); break;
-	case 3:OnMenuitem32774(); break;
 	}
 
 	SetTimer(1255, 200, NULL);
@@ -3635,6 +4192,8 @@ void CDouga::OnTimer(UINT nIDEvent)
 				savedata.p.right+=rr.left;
 			}
 		}
+		if (m_bar.IsBarReady())
+			m_bar.SyncSeekVol();
 	}
 	if(nIDEvent==155){
 		KillTimer(155);
@@ -3642,11 +4201,15 @@ void CDouga::OnTimer(UINT nIDEvent)
 		SetFocus();
 	}
 	if(nIDEvent==3366){
-		mousecnt++;if(mousecnt1==0 && mousecnt>3){
-			mousecnt1=1;
-			int j;
-			for(;;){
-				j=ShowCursor(FALSE);if(j<0) break;
+		if (!savedata.fs) {
+			RestoreDougaCursor();
+		} else {
+			mousecnt++;if(mousecnt1==0 && mousecnt>3){
+				mousecnt1=1;
+				int j;
+				for(;;){
+					j=ShowCursor(FALSE);if(j<0) break;
+				}
 			}
 		}
 	}
@@ -3672,8 +4235,7 @@ void CDouga::OnTimer(UINT nIDEvent)
 void CDouga::OnSizing(UINT fwSide, LPRECT pRect) 
 {
 	CFrameWnd::OnSizing(fwSide, pRect);
-//	if(lu==1){lu=0; return;}
-	RECT r,rr;
+	RECT r;
 	// TODO: この位置にメッセージ ハンドラ用のコードを追加してください
 	 //左右比を保つ
 	r.bottom=rcm.bottom;r.top=rcm.top;
@@ -3688,6 +4250,7 @@ void CDouga::OnSizing(UINT fwSide, LPRECT pRect)
 	x1=r.bottom - r.top; y1_=r.right - r.left;xx1=(double)y1_; yy1_=(double)x1;//現在のサイズ獲得
 	_x1=xx1/xx;
 	_y1=yy1_/yy;
+	const int barChrome = GetBarHeight();
 	switch(fwSide){
 		case WMSZ_TOP:
 		case WMSZ_BOTTOM:
@@ -3695,31 +4258,31 @@ void CDouga::OnSizing(UINT fwSide, LPRECT pRect)
 			break;
 		case WMSZ_LEFT:
         case WMSZ_RIGHT:
-			pRect->bottom=pRect->top+(int)(height*_x1)+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION));
+			pRect->bottom=pRect->top+(int)(height*_x1)+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION))+barChrome;
 			break;
 		case WMSZ_BOTTOMRIGHT:
 			if(((double)width<(double)height))
 				pRect->right=pRect->left+(int)(width*_y1);
 			else
-				pRect->bottom=pRect->top+(int)(height*_x1);
+				pRect->bottom=pRect->top+(int)(height*_x1)+barChrome;
 			break;
 		case    WMSZ_TOPLEFT:
 			if(((double)width<(double)height))
                 pRect->left=pRect->right-(int)(width*_y1);
             else
-                pRect->top=pRect->bottom-(int)(height*_x1);
+                pRect->top=pRect->bottom-(int)(height*_x1)-barChrome;
 			break;
  		case    WMSZ_TOPRIGHT:
 			if(((double)width<(double)height))
 				pRect->right=pRect->left+(int)(width*_y1);
             else
-                pRect->top=pRect->bottom-(int)(height*_x1);
+                pRect->top=pRect->bottom-(int)(height*_x1)-barChrome;
 			break;
 		case    WMSZ_BOTTOMLEFT:
 			if(((double)width<(double)height))
                 pRect->left=pRect->right-(int)(width*_y1);
             else
-				pRect->bottom=pRect->top+(int)(height*_x1);
+				pRect->bottom=pRect->top+(int)(height*_x1)+barChrome;
 			break;
 	}
 	savedata.p.top=pRect->top;
@@ -3727,26 +4290,7 @@ void CDouga::OnSizing(UINT fwSide, LPRECT pRect)
 	savedata.p.bottom=pRect->bottom;
 	savedata.p.right=pRect->right;
 	savedata.douga=3;
-//    SetWindowPos(NULL, 0,0,(int)yy1_, (int)xx1,   SWP_NOMOVE|SWP_NOOWNERZORDER);
-//	RY=xx1; RX=yy1_;
-//	CheckSize(fwSide,(LPARAM)pRect);
-	GetClientRect(&rr);
-	GetWindowRect(&r);
-	MoveWindow(&r);
-	if(ev){
-		MFVideoNormalizedRect mvnr={0, 0, 1, 1};
-		Vdc->SetVideoPosition(&mvnr, &rr);
-	}else{
-		pBasicVideo->put_DestinationWidth(rr.right);
-		pBasicVideo->put_DestinationHeight(rr.bottom);
-		pVideoWindow->put_Top(0);
-		pVideoWindow->put_Left(0);
-		pVideoWindow->put_Height(rr.bottom);
-		pVideoWindow->put_Width(rr.right);
-	}
-	si=1;
-//	SetTimer(1597,30,NULL);
-	/**/
+	// 実サイズ反映は WM_SIZE → ApplyVideoDest。ここではアスペクト調整のみ。
 }
 
 
@@ -3756,8 +4300,25 @@ void CDouga::OnSize(UINT nType, int cx, int cy)
 	CFrameWnd::OnSize(nType, cx, cy);
 	if(si==1){
 		si=0;
-		OnMenuitem32774();
+		ApplyVideoDest();
+	} else if (!m_applyBusy) {
+		ApplyVideoDest();
 	}
+}
+
+void CDouga::OnEnterSizeMove()
+{
+	m_inSizeMove = 1;
+	CFrameWnd::OnEnterSizeMove();
+}
+
+void CDouga::OnExitSizeMove()
+{
+	m_inSizeMove = 0;
+	ApplyVideoDest(); // ここで LayoutBar を一回だけ
+	if (m_bar.IsBarReady())
+		m_bar.Invalidate(TRUE);
+	CFrameWnd::OnExitSizeMove();
 }
 
 void CDouga::OnClose() 
@@ -3785,88 +4346,116 @@ void CDouga::OnNcRButtonDown(UINT nHitTest, CPoint point)
 {
 	if (ev)
 	{
-		if (point.x == -1 && point.y == -1) {
-			// キーストロークの発動
-			CRect rect;
-			GetClientRect(rect);
-			ClientToScreen(rect);
-			point = rect.TopLeft();
-			point.Offset(5, 5);
-		}
+		ShowDougaContextMenu(point);
+		return;
+	}
+	CFrameWnd::OnNcRButtonDown(nHitTest, point);
+}
 
-		CMenu menu, * sub1, * sub2;
-		if (savedata.fs)
-			VERIFY(menu.LoadMenu(CG_IDR_POPUP_DOUGA));
-		else
-			VERIFY(menu.LoadMenu(CG_IDR_POPUP_DOUGA1));
+int CDouga::FindDougaStreamSubMenu(CMenu* pPopup, UINT firstItemId)
+{
+	if (!pPopup) return -1;
+	const int n = pPopup->GetMenuItemCount();
+	for (int i = 0; i < n; i++) {
+		CMenu* sub = pPopup->GetSubMenu(i);
+		if (!sub || sub->GetMenuItemCount() <= 0) continue;
+		if (sub->GetMenuItemID(0) == firstItemId)
+			return i;
+	}
+	return -1;
+}
 
-		sub1 = menu.GetSubMenu(0);
+void CDouga::ShowDougaContextMenu(CPoint point)
+{
+	if (point.x == -1 && point.y == -1) {
+		CRect rect;
+		GetClientRect(rect);
+		ClientToScreen(rect);
+		point = rect.TopLeft();
+		point.Offset(5, 5);
+	}
 
-		// ========== 映像ストリーム (インデックス6) ==========
-		sub2 = sub1->GetSubMenu(6);
+	CMenu menu;
+	// ウィンドウ時は倍率付き(DOUGA1)、FS時は DOUGA
+	VERIFY(menu.LoadMenu(savedata.fs ? CG_IDR_POPUP_DOUGA : CG_IDR_POPUP_DOUGA1));
+	CMenu* pPopup = menu.GetSubMenu(0);
+	if (!pPopup) return;
+
+	// 先頭に残った空セパレータを除去
+	while (pPopup->GetMenuItemCount() > 0) {
+		MENUITEMINFO mii = { sizeof(mii) };
+		mii.fMask = MIIM_FTYPE;
+		if (!pPopup->GetMenuItemInfo(0, &mii, TRUE))
+			break;
+		if ((mii.fType & MFT_SEPARATOR) == 0)
+			break;
+		pPopup->DeleteMenu(0, MF_BYPOSITION);
+	}
+
+	const int idxVideo = FindDougaStreamSubMenu(pPopup, ID_MV1);
+	const int idxAudio = FindDougaStreamSubMenu(pPopup, ID_ST1);
+	const int idxSub = FindDougaStreamSubMenu(pPopup, ID_ETC1);
+
+	if (idxVideo >= 0) {
+		CMenu* sub2 = pPopup->GetSubMenu(idxVideo);
 		UpdateStreamMenu(sub2, streamname1, 10,
 			LL14(L"映像", L"Video", L"Vidéo", L"Video",
 				L"Vídeo", L"비디오", L"视频", L"فيديو",
 				L"Видео", L"Video", L"Vídeo", L"Video",
 				L"Wideo", L"Video"));
 		DeleteEmptyMenuItems(menu, streamname1, 10, ID_MV1);
-
-		// ========== 音声ストリーム (インデックス7) ==========
-		sub2 = sub1->GetSubMenu(7);
+	}
+	if (idxAudio >= 0) {
+		CMenu* sub2 = pPopup->GetSubMenu(idxAudio);
 		UpdateStreamMenu(sub2, streamname, 40,
 			LL14(L"音声", L"Audio", L"Audio", L"Audio",
 				L"Audio", L"오디오", L"音频", L"صوت",
 				L"Аудио", L"Audio", L"Áudio", L"Audio",
 				L"Audio", L"Ses"));
 		DeleteAudioMenuItems(menu);
-
-		// ========== 字幕/その他ストリーム (インデックス8) ==========
-		sub2 = sub1->GetSubMenu(8);
+	}
+	if (idxSub >= 0) {
+		CMenu* sub2 = pPopup->GetSubMenu(idxSub);
 		UpdateStreamMenu(sub2, streamname2, 40, L"");
 		DeleteEmptyMenuItems(menu, streamname2, 40, ID_ETC1);
-
-		// メニュー表示
-		CMenu* pPopup = menu.GetSubMenu(0);
-		ASSERT(pPopup != NULL);
-		if (savedata.fs)
-			LocalizeDougaMenu(pPopup);
-		else
-			LocalizeDougaMenu1(pPopup);
-		CWnd* pWndPopupOwner = this;
-
-		while (pWndPopupOwner->GetStyle() & WS_CHILD)
-			pWndPopupOwner = pWndPopupOwner->GetParent();
-
-		pPopup->TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y,
-			pWndPopupOwner);
 	}
-	CFrameWnd::OnNcRButtonDown(nHitTest, point);
+
+	if (savedata.fs)
+		LocalizeDougaMenu(pPopup);
+	else
+		LocalizeDougaMenu1(pPopup);
+
+	CWnd* pWndPopupOwner = this;
+	while (pWndPopupOwner->GetStyle() & WS_CHILD)
+		pWndPopupOwner = pWndPopupOwner->GetParent();
+
+	pPopup->TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y,
+		pWndPopupOwner);
 }
 
 void CDouga::UpdateStreamMenu(CMenu* pMenu, CString* streamNames, int maxCount, LPCWSTR prefix)
 {
+	if (!pMenu || !streamNames) return;
 	MENUITEMINFO mii = { sizeof(mii) };
 	mii.fMask = MIIM_STRING;
 
 	for (int i = 0; i < maxCount; i++)
 	{
 		CString buf;
-		if (wcslen(prefix) > 0)
+		if (prefix && wcslen(prefix) > 0)
 		{
 			// 映像・音声の場合はプレフィックス付き
-			if (i < 9)
-				buf.Format(L"%s %d:%s", prefix, i + 1, streamNames[i]);
-			else
-				buf.Format(L"%s %d:%s", prefix, i + 1, streamNames[i]);
+			buf.Format(L"%s %d:%s", prefix, i + 1, (LPCWSTR)streamNames[i]);
 		}
 		else
 		{
 			// 字幕の場合はストリーム名のみ
-			buf.Format(L"%s", streamNames[i]);
+			buf = streamNames[i];
 		}
 
 		mii.dwTypeData = buf.GetBuffer();
 		pMenu->SetMenuItemInfo(i, &mii, TRUE);
+		buf.ReleaseBuffer();
 	}
 }
 
@@ -3900,29 +4489,41 @@ void CDouga::LocalizeDougaMenu(CMenu* pPopup)
 			L"Пауза/Возобновить (&C)", L"Pause/Fortsetzen (&C)", L"Pausar/Retomar (&C)", L"Pauzeren/Hervatten (&C)",
 			L"Pauza/Wznów (&C)", L"Duraklat/Devam Et (&C)"));
 
-	// 映像ストリーム サブメニュータイトル (位置インデックス 6)
-	if (CMenu* pSub = pPopup->GetSubMenu(6))
-		pPopup->ModifyMenu(6, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
-			LL14(L"映像ストリーム", L"Video Stream", L"Flux vidéo", L"Flusso video",
-				L"Flujo de vídeo", L"비디오 스트림", L"视频流", L"تدفق الفيديو",
-				L"Видеопоток", L"Videostream", L"Fluxo de vídeo", L"Videostream",
-				L"Strumień wideo", L"Video Akışı"));
+	// 映像ストリーム サブメニュータイトル
+	{
+		const int idx = FindDougaStreamSubMenu(pPopup, ID_MV1);
+		if (idx >= 0)
+			if (CMenu* pSub = pPopup->GetSubMenu(idx))
+				pPopup->ModifyMenu(idx, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
+					LL14(L"映像ストリーム", L"Video Stream", L"Flux vidéo", L"Flusso video",
+						L"Flujo de vídeo", L"비디오 스트림", L"视频流", L"تدفق الفيديو",
+						L"Видеопоток", L"Videostream", L"Fluxo de vídeo", L"Videostream",
+						L"Strumień wideo", L"Video Akışı"));
+	}
 
-	// 音声ストリーム サブメニュータイトル (位置インデックス 7)
-	if (CMenu* pSub = pPopup->GetSubMenu(7))
-		pPopup->ModifyMenu(7, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
-			LL14(L"音声ストリーム", L"Audio Stream", L"Flux audio", L"Flusso audio",
-				L"Flujo de audio", L"오디오 스트림", L"音频流", L"تدفق الصوت",
-				L"Аудиопоток", L"Audiostream", L"Fluxo de áudio", L"Audiostream",
-				L"Strumień audio", L"Ses Akışı"));
+	// 音声ストリーム サブメニュータイトル
+	{
+		const int idx = FindDougaStreamSubMenu(pPopup, ID_ST1);
+		if (idx >= 0)
+			if (CMenu* pSub = pPopup->GetSubMenu(idx))
+				pPopup->ModifyMenu(idx, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
+					LL14(L"音声ストリーム", L"Audio Stream", L"Flux audio", L"Flusso audio",
+						L"Flujo de audio", L"오디오 스트림", L"音频流", L"تدفق الصوت",
+						L"Аудиопоток", L"Audiostream", L"Fluxo de áudio", L"Audiostream",
+						L"Strumień audio", L"Ses Akışı"));
+	}
 
-	// 字幕ストリーム サブメニュータイトル (位置インデックス 8)
-	if (CMenu* pSub = pPopup->GetSubMenu(8))
-		pPopup->ModifyMenu(8, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
-			LL14(L"字幕ストリーム", L"Subtitle Stream", L"Flux de sous-titres", L"Flusso sottotitoli",
-				L"Flujo de subtítulos", L"자막 스트림", L"字幕流", L"تدفق الترجمة",
-				L"Поток субтитров", L"Untertitelstream", L"Fluxo de legendas", L"Ondertitelstream",
-				L"Strumień napisów", L"Altyazı Akışı"));
+	// 字幕ストリーム サブメニュータイトル
+	{
+		const int idx = FindDougaStreamSubMenu(pPopup, ID_ETC1);
+		if (idx >= 0)
+			if (CMenu* pSub = pPopup->GetSubMenu(idx))
+				pPopup->ModifyMenu(idx, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
+					LL14(L"字幕ストリーム", L"Subtitle Stream", L"Flux de sous-titres", L"Flusso sottotitoli",
+						L"Flujo de subtítulos", L"자막 스트림", L"字幕流", L"تدفق الترجمة",
+						L"Поток субтитров", L"Untertitelstream", L"Fluxo de legendas", L"Ondertitelstream",
+						L"Strumień napisów", L"Altyazı Akışı"));
+	}
 
 	// 操作ヒント: 上下左右キー
 	pPopup->ModifyMenu(ID__32783, MF_BYCOMMAND | MF_STRING, ID__32783,
@@ -3943,6 +4544,25 @@ void CDouga::LocalizeDougaMenu(CMenu* pPopup)
 			L"Двойной щелчок — полный экран.", L"Doppelklick für Vollbild.",
 			L"Clique duplo para tela cheia.", L"Dubbelklik voor volledig scherm.",
 			L"Dwuklik dla pełnego ekranu.", L"Tam ekran için çift tıklayın."));
+
+	pPopup->ModifyMenu(ID_DOUGA_PLAY, MF_BYCOMMAND | MF_STRING, ID_DOUGA_PLAY,
+		LL14(L"再生", L"Play", L"Lecture", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Воспроизведение", L"Abspielen", L"Reproduzir", L"Afspelen", L"Odtwórz", L"Çal"));
+	pPopup->ModifyMenu(ID_DOUGA_STOP, MF_BYCOMMAND | MF_STRING, ID_DOUGA_STOP,
+		LL14(L"停止", L"Stop", L"Arrêt", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
+	pPopup->ModifyMenu(ID_DOUGA_PREV, MF_BYCOMMAND | MF_STRING, ID_DOUGA_PREV,
+		LL14(L"前へ", L"Previous", L"Précédent", L"Precedente", L"Anterior", L"이전", L"上一首", L"السابق", L"Предыдущий", L"Zurück", L"Anterior", L"Vorige", L"Poprzedni", L"Önceki"));
+	pPopup->ModifyMenu(ID_DOUGA_NEXT, MF_BYCOMMAND | MF_STRING, ID_DOUGA_NEXT,
+		LL14(L"次へ", L"Next", L"Suivant", L"Successivo", L"Siguiente", L"다음", L"下一首", L"التالي", L"Следующий", L"Weiter", L"Próximo", L"Volgende", L"Następny", L"Sonraki"));
+	pPopup->ModifyMenu(ID_DOUGA_REW, MF_BYCOMMAND | MF_STRING, ID_DOUGA_REW,
+		LL14(L"戻す", L"Rewind", L"Reculer", L"Indietro", L"Retroceder", L"되감기", L"快退", L"ترجيع", L"Назад", L"Zurückspulen", L"Voltar", L"Terugspoelen", L"Przewiń wstecz", L"Geri sar"));
+	pPopup->ModifyMenu(ID_DOUGA_FF, MF_BYCOMMAND | MF_STRING, ID_DOUGA_FF,
+		LL14(L"進める", L"Fast forward", L"Avancer", L"Avanti", L"Avanzar", L"빨리감기", L"快进", L"تقديم", L"Вперёд", L"Vorspulen", L"Avançar", L"Vooruitspoelen", L"Przewiń naprzód", L"İleri sar"));
+	pPopup->ModifyMenu(ID_DOUGA_MUTE, MF_BYCOMMAND | MF_STRING, ID_DOUGA_MUTE,
+		LL14(L"消音", L"Mute", L"Muet", L"Mute", L"Silencio", L"음소거", L"静音", L"كتم", L"Без звука", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz"));
+	pPopup->ModifyMenu(ID_DOUGA_FS, MF_BYCOMMAND | MF_STRING, ID_DOUGA_FS,
+		LL14(L"フルスクリーン", L"Fullscreen", L"Plein écran", L"Schermo intero", L"Pantalla completa", L"전체화면", L"全屏", L"ملء الشاشة", L"Полный экран", L"Vollbild", L"Tela cheia", L"Volledig scherm", L"Pełny ekran", L"Tam ekran"));
+	pPopup->ModifyMenu(ID_DOUGA_FADE, MF_BYCOMMAND | MF_STRING, ID_DOUGA_FADE,
+		LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Uitfaden", L"Zanikanie", L"Soluklaştır"));
 }
 
 // CG_IDR_POPUP_DOUGA1 メニュー（ウィンドウモード専用項目＋共通項目）を多言語化する
@@ -3982,50 +4602,8 @@ void CDouga::LocalizeDougaMenu1(CMenu* pPopup)
 
 void CDouga::OnContextMenu(CWnd*, CPoint point)
 {
-	if(savedata.fs)return;
-	// CG: このブロックはポップアップ メニュー コンポーネントによって追加されました
-	{
-		if (point.x == -1 && point.y == -1){
-			//キーストロークの発動
-			CRect rect;
-			GetClientRect(rect);
-			ClientToScreen(rect);
-
-			point = rect.TopLeft();
-			point.Offset(5, 5);
-		}
-
-		CMenu menu;
-		VERIFY(menu.LoadMenu(CG_IDR_POPUP_DOUGA));
-		if(audionum<=9)
-			menu.DeleteMenu(ID_ST10,MF_BYCOMMAND);
-		if(audionum<=8)
-			menu.DeleteMenu(ID_ST9,MF_BYCOMMAND);
-		if(audionum<=7)
-			menu.DeleteMenu(ID_ST8,MF_BYCOMMAND);
-		if(audionum<=6)
-			menu.DeleteMenu(ID_ST7,MF_BYCOMMAND);
-		if(audionum<=5)
-			menu.DeleteMenu(ID_ST6,MF_BYCOMMAND);
-		if(audionum<=4)
-			menu.DeleteMenu(ID_ST5,MF_BYCOMMAND);
-		if(audionum<=3)
-			menu.DeleteMenu(ID_ST4,MF_BYCOMMAND);
-		if(audionum<=2)
-			menu.DeleteMenu(ID_ST3,MF_BYCOMMAND);
-		if(audionum<=1)
-			menu.DeleteMenu(ID_ST2,MF_BYCOMMAND);
-		CMenu* pPopup = menu.GetSubMenu(0);
-		ASSERT(pPopup != NULL);
-		LocalizeDougaMenu(pPopup);
-		CWnd* pWndPopupOwner = this;
-
-		while (pWndPopupOwner->GetStyle() & WS_CHILD)
-			pWndPopupOwner = pWndPopupOwner->GetParent();
-
-		pPopup->TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y,
-			pWndPopupOwner);
-	}
+	// 動画サイト経由の右クリックもここに来る。ストリーム絞り込み付きの共通処理へ。
+	ShowDougaContextMenu(point);
 }
 
 // 汎用的なストリーム切替関数
@@ -4193,32 +4771,15 @@ void CDouga::OnMenuitem32771()
 	r.top=rcm.top;
 	r.right=rcm.right;
 	r.left=rcm.left;
-//	AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
 	y=r.bottom-r.top; x=r.right-r.left;
 	y1_=rcm.bottom-rcm.top; x1=rcm.right-rcm.left;
-//	x+=GetSystemMetrics(SM_CXSIZEFRAME)*2;
-//	y=y+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION));
 	si=0;
 	SetWindowPos(NULL,
-				0,0,x, y+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION)),   SWP_NOMOVE|SWP_NOOWNERZORDER);
+				0,0,x, y+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION))+GetBarHeight(),   SWP_NOMOVE|SWP_NOOWNERZORDER);
 	GetClientRect(&rr);
 	GetWindowRect(&r);
 	MoveWindow(&r);
-	if(ev){
-		MFVideoNormalizedRect mvnr={0, 0, 1, 1};
-		Vdc->SetVideoPosition(&mvnr, &rr);
-	}else{
-		if(pBasicVideo){
-			pBasicVideo->put_DestinationWidth(rr.right);
-			pBasicVideo->put_DestinationHeight(rr.bottom);
-		}
-		if(pVideoWindow){
-			pVideoWindow->put_Top(0);
-			pVideoWindow->put_Left(0);
-			pVideoWindow->put_Height(rr.bottom);
-			pVideoWindow->put_Width(rr.right);
-		}
-	}
+	ApplyVideoDest();
 	savedata.douga=0;
 
 	savedata.p.top=r.top;
@@ -4237,31 +4798,14 @@ void CDouga::OnMenuitem32772()
 	r.top=rcm.top;
 	r.right=rcm.right;
 	r.left=rcm.left;
-//	AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
 	y=r.bottom-r.top; x=r.right-r.left;
-//	x+=GetSystemMetrics(SM_CXSIZEFRAME)*2;
-//	y=y+(GetSystemMetrics(SM_CYSIZEFRAME)*2+::GetSystemMetrics(SM_CYCAPTION));
 	si=0;
 	SetWindowPos(NULL,
-				0,0,x*2, y*2+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION)),   SWP_NOMOVE|SWP_NOOWNERZORDER);
+				0,0,x*2, y*2+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION))+GetBarHeight(),   SWP_NOMOVE|SWP_NOOWNERZORDER);
 	GetClientRect(&rr);
 	GetWindowRect(&r);
 	MoveWindow(&r);
-	if(ev){
-		MFVideoNormalizedRect mvnr={0, 0, 1, 1};
-		Vdc->SetVideoPosition(&mvnr, &rr);
-	}else{
-		if(pBasicVideo){
-			pBasicVideo->put_DestinationWidth(rr.right);
-			pBasicVideo->put_DestinationHeight(rr.bottom);
-		}
-		if(pVideoWindow){
-			pVideoWindow->put_Top(0);
-			pVideoWindow->put_Left(0);
-			pVideoWindow->put_Height(rr.bottom);
-			pVideoWindow->put_Width(rr.right);
-		}
-	}
+	ApplyVideoDest();
 	savedata.douga=1;	
 	savedata.p.top=r.top;
 	savedata.p.left=r.left;
@@ -4280,31 +4824,14 @@ void CDouga::OnMenuitem32773()
 	r.top=rcm.top;
 	r.right=rcm.right;
 	r.left=rcm.left;
-//	AdjustWindowRect(&r, (WS_OVERLAPPEDWINDOW)& ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_SYSMENU, FALSE);
 	y=r.bottom-r.top; x=r.right-r.left;
-//	x-=GetSystemMetrics(SM_CXSIZEFRAME)*2;
-//	y=y-(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION));
 	si=0;
 	SetWindowPos(NULL,
-				0,0,(int)((double)x*1.5), (int)((double)y*1.5)+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION)),   SWP_NOMOVE|SWP_NOOWNERZORDER);
+				0,0,(int)((double)x*1.5), (int)((double)y*1.5)+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION))+GetBarHeight(),   SWP_NOMOVE|SWP_NOOWNERZORDER);
 	GetClientRect(&rr);
 	GetWindowRect(&r);
 	MoveWindow(&r);
-	if(ev){
-		MFVideoNormalizedRect mvnr={0, 0, 1, 1};
-		Vdc->SetVideoPosition(&mvnr, &rr);
-	}else{
-		if(pBasicVideo){
-			pBasicVideo->put_DestinationWidth(rr.right);
-			pBasicVideo->put_DestinationHeight(rr.bottom);
-		}
-		if(pVideoWindow){
-			pVideoWindow->put_Top(0);
-			pVideoWindow->put_Left(0);
-			pVideoWindow->put_Height(rr.bottom);
-			pVideoWindow->put_Width(rr.right);
-		}
-	}
+	ApplyVideoDest();
 	savedata.douga=2;	
 	savedata.p.top=r.top;
 	savedata.p.left=r.left;
@@ -4316,7 +4843,7 @@ void CDouga::OnMenuitem32773()
 
 void CDouga::OnMenuitem32774() 
 {
-	if(pBasicVideo==NULL) return;
+	if (pBasicVideo == NULL && !(ev && Vdc)) return;
 	RECT r,rr;
 	double i;
 	// TODO: この位置にコマンド ハンドラ用のコードを追加してください
@@ -4324,28 +4851,15 @@ void CDouga::OnMenuitem32774()
 	r.top=rcm.top;
 	r.right=rcm.right;
 	r.left=rcm.left;
+	if (rcm.right <= 0) return;
 	i=(double)(savedata.p.right-savedata.p.left)/(double)rcm.right;
 	SetWindowPos(NULL,
 				savedata.p.left,savedata.p.top,(int)(i*(double)(rcm.right-rcm.left)),
-				(int)(i*(double)(rcm.bottom-rcm.top)+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION))),  SWP_NOOWNERZORDER);
+				(int)(i*(double)(rcm.bottom-rcm.top)+(GetSystemMetrics(SM_CYSIZEFRAME)+::GetSystemMetrics(SM_CYCAPTION))+GetBarHeight()),  SWP_NOOWNERZORDER);
 	GetClientRect(&rr);
 	GetWindowRect(&r);
 	MoveWindow(&r);
-	if(ev){
-		MFVideoNormalizedRect mvnr={0, 0, 1, 1};
-		Vdc->SetVideoPosition(&mvnr, &rr);
-	}else{
-		if(pBasicVideo){
-			pBasicVideo->put_DestinationWidth(rr.right);
-			pBasicVideo->put_DestinationHeight(rr.bottom);
-		}
-		if(pVideoWindow){
-			pVideoWindow->put_Top(0);
-			pVideoWindow->put_Left(0);
-			pVideoWindow->put_Height(rr.bottom);
-			pVideoWindow->put_Width(rr.right);
-		}
-	}
+	ApplyVideoDest();
 //	savedata.douga=3;	
 }
 
@@ -4390,12 +4904,14 @@ LRESULT CDouga::OnNcHitTest(CPoint point)
 	
 //	return CFrameWnd::OnNcHitTest(point);
 	if(savedata.fs==0){
+		CPoint pt = point;
+		ScreenToClient(&pt);
+		if (m_bar.IsBarReady() && m_bar.PtInBarClient(pt))
+			return HTCLIENT; // バーは操作対象(ドラッグにしない)
 		UINT nHit = CFrameWnd::OnNcHitTest(point);
 		return (nHit == HTCLIENT)? HTCAPTION : nHit;
 	}else{
-		int cx=GetSystemMetrics(SM_CXSCREEN);
-		int cy=GetSystemMetrics(SM_CYSCREEN);
-		SetWindowPos(NULL,0,0,cx,cy,SWP_NOOWNERZORDER);
+		// ヒットテストで毎回 SetWindowPos しない(ちらつき・カーソル不調の元)
 		return HTBORDER ;
 	}
 //	return HTCAPTION;
@@ -4415,9 +4931,7 @@ void CDouga::OnGetMinMaxInfo(MINMAXINFO FAR* lpMMI)
 
 int CDouga::OnMouseActivate(CWnd* pDesktopWnd, UINT nHitTest, UINT message) 
 {
-	// TODO: この位置にメッセージ ハンドラ用のコードを追加するかまたはデフォルトの処理を呼び出してください
-	if(savedata.fs==0)
-		nHitTest =(nHitTest == HTCLIENT)? HTCAPTION : nHitTest;
+	// OnNcHitTest が動画領域を HTCAPTION、バーを HTCLIENT に振り分け済み
 	return CFrameWnd::OnMouseActivate(pDesktopWnd, nHitTest, message);
 }
 
@@ -4448,6 +4962,10 @@ void CDouga::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	// TODO: この位置にメッセージ ハンドラ用のコードを追加するかまたはデフォルトの処理を呼び出してください
 	if(savedata.fs) return;
+	if (m_bar.IsBarReady() && m_bar.PtInBarClient(point)) {
+		CFrameWnd::OnLButtonDown(nFlags, point);
+		return;
+	}
    m_bMoving = TRUE;
 	SetCapture();
 	m_pointOld = point;
@@ -4627,102 +5145,98 @@ BOOL CDouga::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	return CFrameWnd::OnMouseWheel(nFlags, zDelta, pt);
 }
 
-void CDouga::OnLButtonDblClk(UINT nFlags, CPoint point)
+void CDouga::RestoreDougaCursor()
 {
-	// TODO: ここにメッセージ ハンドラ コードを追加するか、既定の処理を呼び出します。
-	RECT rr;
-	if(ev){	CFrameWnd::OnLButtonDblClk(nFlags, point);return;}
-	if(savedata.fs){
-		savedata.fs=0;
-		SetWindowLong(m_hWnd,GWL_EXSTYLE,WS_EX_OVERLAPPEDWINDOW|WS_EX_ACCEPTFILES);
-		int i=GetWindowLong(m_hWnd,GWL_STYLE);
-		SetWindowLong(m_hWnd,GWL_STYLE,((i | WS_OVERLAPPEDWINDOW)& ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_SYSMENU));
+	KillTimer(3366);
+	mousecnt = mousecnt1 = 0;
+	for (;;) {
+		int j = ShowCursor(TRUE);
+		if (j >= 0) break;
+	}
+}
+
+void CDouga::ToggleFullScreen()
+{
+	// クライアント/NC の二重配信で即トグルバックするのを防ぐ
+	static DWORD s_lastToggle = 0;
+	DWORD now = GetTickCount();
+	if (now - s_lastToggle < 250)
+		return;
+	s_lastToggle = now;
+
+	RECT rr = {};
+	if (savedata.fs) {
+		savedata.fs = 0;
+		SetWindowLong(m_hWnd, GWL_EXSTYLE, WS_EX_OVERLAPPEDWINDOW | WS_EX_ACCEPTFILES);
+		int i = GetWindowLong(m_hWnd, GWL_STYLE);
+		SetWindowLong(m_hWnd, GWL_STYLE, ((i | WS_OVERLAPPEDWINDOW) & ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_SYSMENU));
 		OnMenuitem32774();
-		KillTimer(3366);
-		int j;
-		for(;;){
-			j=ShowCursor(TRUE);if(j>=0) break;
+		RestoreDougaCursor();
+	} else {
+		savedata.fs = 1;
+		int cx = GetSystemMetrics(SM_CXSCREEN);
+		int cy = GetSystemMetrics(SM_CYSCREEN);
+		int i = GetWindowLong(m_hWnd, GWL_STYLE);
+		SetWindowLong(m_hWnd, GWL_EXSTYLE, 0);
+		SetWindowLong(m_hWnd, GWL_STYLE, i & ~WS_CAPTION & ~WS_BORDER & ~WS_THICKFRAME);
+		SetWindowPos(NULL, 0, 0, cx, cy, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+		ApplyVideoDest();
+		if (ev && Vdc) {
+			MFVideoNormalizedRect mvnr = { 0, 0, 1, 1 };
+			if (m_videoSite.GetSafeHwnd()) m_videoSite.GetClientRect(&rr);
+			else GetClientRect(&rr);
+			Vdc->SetVideoPosition(&mvnr, &rr);
+		} else if (pBasicVideo && pVideoWindow) {
+			double ii; int cyy, cxx;
+			if (rcm.bottom < rcm.right) {
+				ii = (double)(cx) / (double)rcm.right;
+				cyy = cy / 2 - (int)(((double)rcm.bottom * ii) / 2);
+				cxx = cx;
+				rr.top = cyy; rr.bottom = cyy + (int)((double)rcm.bottom * ii); rr.left = 0; rr.right = cxx;
+			} else {
+				ii = (double)(cy) / (double)rcm.bottom;
+				cxx = cx / 2 - (int)(((double)rcm.right * ii) / 2);
+				cyy = cy;
+				rr.top = 0; rr.bottom = cyy; rr.left = cxx; rr.right = cxx + (int)((double)rcm.right * ii);
+			}
+			if (savedata.render == 0) {
+				pBasicVideo->put_DestinationWidth(rr.right - rr.left);
+				pBasicVideo->put_DestinationHeight(rr.bottom - rr.top);
+				pVideoWindow->put_Top(rr.top);
+				pVideoWindow->put_Left(rr.left);
+				pVideoWindow->put_Height(rr.bottom);
+				pVideoWindow->put_Width(rr.right);
+			} else {
+				CRect vs;
+				if (m_videoSite.GetSafeHwnd()) m_videoSite.GetClientRect(&vs);
+				else GetClientRect(&vs);
+				rr = vs;
+				pBasicVideo->put_DestinationWidth(rr.right - rr.left);
+				pBasicVideo->put_DestinationHeight(rr.bottom - rr.top);
+				pVideoWindow->put_Top(rr.top);
+				pVideoWindow->put_Left(rr.left);
+				pVideoWindow->put_Height(rr.bottom);
+				pVideoWindow->put_Width(rr.right);
+			}
 		}
-	}else{
-		savedata.fs=1;
-		int cx=GetSystemMetrics(SM_CXSCREEN);
-		int cy=GetSystemMetrics(SM_CYSCREEN);
-		int i=GetWindowLong(m_hWnd,GWL_STYLE);
-		SetWindowLong(m_hWnd,GWL_EXSTYLE,0);
-		SetWindowLong(m_hWnd,GWL_STYLE,i & ~WS_CAPTION & ~WS_BORDER & ~WS_THICKFRAME);
-		SetWindowPos(NULL,0,0,cx,cy,SWP_NOOWNERZORDER);
-		double ii;int cyy,cxx;
-		if(rcm.bottom<rcm.right){
-			ii=(double)(cx)/(double)rcm.right;
-			cyy=cy/2-(int)(((double)rcm.bottom*ii)/2);
-			cxx=cx;
-			rr.top=cyy;rr.bottom=cyy+(int)((double)rcm.bottom*ii); rr.left=0;rr.right=cxx;
-		}else{
-			ii=(double)(cy)/(double)rcm.bottom;
-			cxx=cx/2-(int)(((double)rcm.right*ii)/2);
-			cyy=cy;
-			rr.top=0;rr.bottom=cyy; rr.left=cxx;rr.right=cxx+(int)((double)rcm.right*ii);
-		}
-		if(savedata.render==0){
-			pBasicVideo->put_DestinationWidth(rr.right-rr.left);
-			pBasicVideo->put_DestinationHeight(rr.bottom-rr.top);
-			pVideoWindow->put_Top(rr.top);
-			pVideoWindow->put_Left(rr.left);
-			pVideoWindow->put_Height(rr.bottom);
-			pVideoWindow->put_Width(rr.right);
-		}else{
-			GetClientRect(&rr);
-			pBasicVideo->put_DestinationWidth(rr.right-rr.left);
-			pBasicVideo->put_DestinationHeight(rr.bottom-rr.top);
-			pVideoWindow->put_Top(rr.top);
-			pVideoWindow->put_Left(rr.left);
-			pVideoWindow->put_Height(rr.bottom);
-			pVideoWindow->put_Width(rr.right);
-		}
-		mousecnt=mousecnt1=0;
-		SetTimer(3366,500,NULL);
+		mousecnt = mousecnt1 = 0;
+		SetTimer(3366, 500, NULL);
 	}
 	GetClientRect(&rr);
-	InvalidateRect(&rr,TRUE);
-	dd2=1;
+	InvalidateRect(&rr, FALSE);
+	dd2 = 1;
+}
+
+void CDouga::OnLButtonDblClk(UINT nFlags, CPoint point)
+{
+	// 動画サイトから転送されるクライアントDblClkでも FS を切替(EVR含む)
+	ToggleFullScreen();
 	CFrameWnd::OnLButtonDblClk(nFlags, point);
 }
-extern void DoEvent();
+
 void CDouga::OnNcLButtonDblClk(UINT nHitTest, CPoint point)
 {
-	// TODO: ここにメッセージ ハンドラ コードを追加するか、既定の処理を呼び出します。
-	//if(ev){CFrameWnd::OnNcLButtonDblClk(nHitTest, point);return;}
-	if(savedata.fs){
-		savedata.fs=0;
-		SetWindowLong(m_hWnd,GWL_EXSTYLE,WS_EX_OVERLAPPEDWINDOW|WS_EX_ACCEPTFILES);
-		int i=GetWindowLong(m_hWnd,GWL_STYLE);
-		SetWindowLong(m_hWnd,GWL_STYLE,((i | WS_OVERLAPPEDWINDOW)& ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_SYSMENU));
-		OnMenuitem32774();
-		KillTimer(3366);
-		int j;
-		for(;;){
-			j=ShowCursor(TRUE);if(j>=0) break;
-		}
-	}else{
-		savedata.fs=1;
-		int cx=GetSystemMetrics(SM_CXSCREEN);
-		int cy=GetSystemMetrics(SM_CYSCREEN);
-		int i=GetWindowLong(m_hWnd,GWL_STYLE);
-		SetWindowLong(m_hWnd,GWL_EXSTYLE,0);
-		SetWindowLong(m_hWnd,GWL_STYLE,i & ~WS_CAPTION & ~WS_BORDER & ~WS_THICKFRAME);
-		SetWindowPos(NULL,0,0,cx,cy,SWP_NOOWNERZORDER);
-		pcnt=0;
-		double ii=(double)(cx)/(double)rcm.right;
-		int cyy=cy/2-(int)(((double)rcm.bottom*ii)/2);
-		int cxx=cx;
-		RECT rr;
-		MFVideoNormalizedRect mvnr={0, 0, 1, 1};
-		GetClientRect(&rr);
-		Vdc->SetVideoPosition(&mvnr, &rr);
-		mousecnt=mousecnt1=0;
-		SetTimer(3366,500,NULL);
-	}
-	
+	ToggleFullScreen();
 	CFrameWnd::OnNcLButtonDblClk(nHitTest, point);
 }
 
@@ -4765,3 +5279,13 @@ void CDouga::OnRButtonUp(UINT nFlags, CPoint point)
 
 	CFrameWnd::OnRButtonUp(nFlags, point);
 }
+
+void CDouga::OnDougaMenuPlay() { m_bar.OnBnPlay(); }
+void CDouga::OnDougaMenuStop() { m_bar.OnBnStop(); }
+void CDouga::OnDougaMenuPrev() { m_bar.OnBnPrev(); }
+void CDouga::OnDougaMenuNext() { m_bar.OnBnNext(); }
+void CDouga::OnDougaMenuRew() { m_bar.OnBnRew(); }
+void CDouga::OnDougaMenuFf() { m_bar.OnBnFf(); }
+void CDouga::OnDougaMenuMute() { m_bar.OnBnMute(); }
+void CDouga::OnDougaMenuFs() { m_bar.OnBnFs(); }
+void CDouga::OnDougaMenuFade() { m_bar.OnBnFade(); }
