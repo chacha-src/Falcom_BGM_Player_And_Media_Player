@@ -406,6 +406,27 @@ static void ResumeSaveRemoveLegacyOnly(LPCTSTR mediaPath)
 	}
 }
 
+// playb(__int64) で途中位置を持つ形式(動画DShow以外の内蔵再生)
+static BOOL ResumeModeUsesPlayb(int m)
+{
+	if (m == -10 || m == -9 || m == -8 || m == -7 || m == -6 || m == -1 || m == 999 || m == -3 || m == 30)
+		return TRUE;
+	if (m >= 1 && m <= 21) return TRUE;
+	if (m == -11 || m == -12 || m == -13 || m == -14 || m == -15) return TRUE;
+	return FALSE;
+}
+
+static void ResumeApplyPlaybSeek(__int64 pb);
+
+static BOOL ResumePlaybAtEndOrStart()
+{
+	extern __int64 playb;
+	extern int oggsize;
+	if (playb == 0) return TRUE;
+	if (oggsize > 0 && playb >= (__int64)oggsize) return TRUE;
+	return FALSE;
+}
+
 char cm[10000];
 CCriticalSection2 cs;
 CString fnn, stitle;
@@ -10346,7 +10367,7 @@ void COggDlg::play()
 	}
 	CFile f123;
 	int flggg = 0;
-	if (mode != -1) {
+	if (ResumeModeUsesPlayb(mode) || mode == -2) {
 		if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 			f123.Close();
 			if (IDYES == MessageBox(LL14(
@@ -10389,30 +10410,12 @@ void COggDlg::play()
 		if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
 			f123.Close();
 			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
-			//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
-			if (mode == -10) {
+			if (ResumeModeUsesPlayb(mode)) {
 				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-					f123.Read(&playb, sizeof(__int64));
-					// 旧保存は「フレーム×4」で playb > 総フレーム になり得る
-					if (oggsize > 0 && playb > (__int64)oggsize)
-						playb /= 4;
-					if (savedata.mp3orig) {
-						mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
-					}
-					else {
-						mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
-					}
+					__int64 pb = 0;
+					f123.Read(&pb, sizeof(__int64));
 					f123.Close();
-				}
-			}
-			if (mode == 999) {
-				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-					f123.Read(&playb, sizeof(__int64));
-					if (wav999_use_adbuf)
-						seekadpcm((int)playb);
-					else
-						wav_.Seek(playb / (wavchannel * (wavsam_depth / 8)));
-					f123.Close();
+					ResumeApplyPlaybSeek(pb);
 				}
 			}
 			if (mode == -2) {
@@ -10425,13 +10428,11 @@ void COggDlg::play()
 		}
 		else {
 			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
-			//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 			if (pMainFrame1) { pMainFrame1->seek(0); }
 		}
 	}
 	else {
 		if (pMainFrame1) pMainFrame1->plays2();
-		//if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
 		if (pMainFrame1) { pMainFrame1->seek(0); }
 	}
 	syukai = 0;
@@ -15975,6 +15976,71 @@ void COggDlg::ResetPauseButtonUi()
 	SyncPauseButtonUi();
 }
 
+// stop() で保存した playb を再生開始時にデコーダへ反映(OnHScroll と同系統)
+static void ResumeApplyPlaybSeek(__int64 pb)
+{
+	playb = pb;
+	if (mode == -10) {
+		if (oggsize > 0 && playb > (__int64)oggsize)
+			playb /= 4;
+		if (savedata.mp3orig)
+			mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
+		else
+			mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
+		return;
+	}
+	if (mode == 999) {
+		if (wav999_use_adbuf)
+			seekadpcm((int)playb);
+		else
+			wav_.Seek(playb);
+		return;
+	}
+	if (!og) return;
+	if (mode == -8) {
+		if (og->kmp) {
+			const double aa = 2000.0;
+			if (flacmode == 1) flac_.SetPosition(og->kmp, playb);
+			else flac_.SetPosition(og->kmp, (LONGLONG)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / aa)));
+		}
+		return;
+	}
+	if (mode == -9) {
+		if (og->kmp) {
+			double wavv2[] = { 0, 2.0, 1.0, 1.0 / 2.0, 1.0 / 2.0, 1.0 / 2.0, 1.0 / 2.0 };
+			DWORD pla = (DWORD)((double)playb / (((double)(wavbit2 / wavv2[wavchannel])) / ((wavchannel > 2) ? (1069.1 * wavchannel) : 1000.0)));
+			if (wavchannel > 0)
+				pla = (pla / (wavchannel * 2) * (wavchannel * 2));
+			m4a_.SetPosition(og->kmp, pla);
+		}
+		return;
+	}
+	if (mode == -7) {
+		dsd_.kpiSetPosition(og->kmp, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
+		return;
+	}
+	if (mode == -3) {
+		if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+			uint64_t np = 0;
+			g_kpiHost.Seek(g_kpiSession.sessionId, (uint64_t)playb, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
+			ResetKpiRemoteCache();
+		}
+		else if (og->mod && og->mod->SetPosition && og->sikpi.dwSeekable) {
+			og->mod->SetPosition(og->kmp1, (DWORD)((double)playb / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
+		}
+		return;
+	}
+	if (mode == -1) {
+		SeekAndWarmupRubberBand((int)playb, false);
+		return;
+	}
+	// opus / ゲームBGM / adbuf 系
+	if (((mode >= 1 && mode <= 21) || mode <= -10 || mode == -6 || mode == 30) && mode != -10) {
+		seekadpcm((int)playb);
+		return;
+	}
+}
+
 // 再生通知スレッドが動いている／動いていた可能性があるか（形式を問わず）
 static inline bool PlaybackNotifyThreadMayBeActive()
 {
@@ -16023,11 +16089,11 @@ void COggDlg::stop()
 	loop1_2 = -1;
 	stflg = TRUE;
 	KillTimer(1250);
-	if (savedata.savecheck == 1 && (mode == -10 || mode == -2) && filenback == filen) {
+	if (savedata.savecheck == 1 && (ResumeModeUsesPlayb(mode) || mode == -2) && filenback == filen) {
 		try {
 			int flg = 0;
-			if (mode == -10) {
-				if (oggsize <= playb && oggsize != 0) {
+			if (ResumeModeUsesPlayb(mode)) {
+				if (ResumePlaybAtEndOrStart()) {
 					try {
 						ResumeSaveRemove(filen);
 					}
@@ -16035,8 +16101,6 @@ void COggDlg::stop()
 					}
 					flg = 1;
 				}
-				if (playb == 0)
-					flg = 1;
 			}
 			if (mode == -2) {
 				if (oggsize2 <= aa1_ && oggsize2 != 0.0) {
@@ -16052,11 +16116,12 @@ void COggDlg::stop()
 				}
 			}
 			if (flg == 0) {
-				if ((savedata.savecheck_mp3 == 1 && mode == -10) || (savedata.savecheck_dshow == 1 && mode == -2)) {
+				// savecheck_mp3: 内蔵音源全形式 / savecheck_dshow: 動画等
+				if ((savedata.savecheck_mp3 == 1 && ResumeModeUsesPlayb(mode)) || (savedata.savecheck_dshow == 1 && mode == -2)) {
 					CFile f;
 					const CString savePath = ResumeSavePathNew(filen);
 					if (!savePath.IsEmpty() && f.Open(savePath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
-						if (mode == -10)
+						if (ResumeModeUsesPlayb(mode))
 							f.Write(&playb, sizeof(__int64));
 						if (mode == -2)
 							f.Write(&aa1_, sizeof(double));
