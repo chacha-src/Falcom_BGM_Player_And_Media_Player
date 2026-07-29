@@ -271,6 +271,8 @@ extern BOOL ev;
 extern IMFVideoDisplayControl* Vdc;
 extern IVideoWindow* pVideoWindow;
 extern IBasicVideo* pBasicVideo;
+extern IGraphBuilder* pGraphBuilder;
+extern long width, height;
 extern void MpTaskbarReplay();
 extern void MpTaskbarNextTrack();
 extern void MpTaskbarPrevTrack();
@@ -352,11 +354,13 @@ BOOL CDougaBarHost::CreateBar(CDouga* owner)
 	m_volL.Create(_T(""), stStyle, z, this, IDC_DOUGA_VOL_L);
 	m_vol.Create(slStyle, z, this, IDC_DOUGA_VOL);
 	m_volVal.Create(_T(""), stStyle, z, this, IDC_DOUGA_VOLVAL);
+	m_info.Create(_T(""), stStyle | SS_ENDELLIPSIS, z, this, IDC_DOUGA_INFO);
 
 	m_vol.SetRange(-498, 1);
 	m_seek.ModifyStyle(0, TBS_ENABLESELRANGE);
 	m_time.SetNoParentInvalidate(TRUE);
 	m_volVal.SetNoParentInvalidate(TRUE);
+	m_info.SetNoParentInvalidate(TRUE);
 
 	m_prev.SetWindowText(LL14(L"前へ", L"Prev", L"Prec", L"Prec", L"Ant", L"이전", L"上一首", L"السابق", L"Пред", L"Zurück", L"Ant", L"Vorige", L"Poprz", L"Onceki"));
 	m_rew.SetWindowText(LL14(L"戻す", L"Rew", L"Recul", L"Ind", L"Retr", L"되감기", L"快退", L"ترجيع", L"Назад", L"Zurück", L"Voltar", L"Terug", L"Wstecz", L"Geri"));
@@ -457,17 +461,29 @@ void CDougaBarHost::LayoutBar()
 		x += btns[i].ww + gap;
 	}
 
+	// 音量は右端固定。ボタンとの間の空きにメディア情報
 	int volLW = DougaDpiScale(m_hWnd, m_short ? 28 : 36);
 	int volVW = DougaDpiScale(m_hWnd, m_short ? 28 : 36);
 	int volW = DougaDpiScale(m_hWnd, m_short ? 70 : 100);
-	int need = volLW + gap + volW + gap + volVW;
-	if (x + need > W - pad) {
-		volW = W - pad - x - volLW - volVW - gap * 2;
+	int volArea = volLW + gap + volW + gap + volVW;
+	int volX = W - pad - volArea;
+	if (volX < x + DougaDpiScale(m_hWnd, 8)) {
+		volW = W - pad - x - volLW - volVW - gap * 3;
 		if (volW < 40) volW = 40;
+		volArea = volLW + gap + volW + gap + volVW;
+		volX = W - pad - volArea;
 	}
-	move(m_volL, x, y2, volLW, bh); x += volLW + gap;
-	move(m_vol, x, y2, volW, bh); x += volW + gap;
-	move(m_volVal, x, y2, volVW, bh);
+	int infoX = x + gap;
+	int infoW = volX - gap - infoX;
+	if (infoW >= DougaDpiScale(m_hWnd, 40) && m_info.GetSafeHwnd()) {
+		move(m_info, infoX, y2, infoW, bh);
+		m_info.ShowWindow(SW_SHOWNA);
+	} else if (m_info.GetSafeHwnd()) {
+		m_info.ShowWindow(SW_HIDE);
+	}
+	move(m_volL, volX, y2, volLW, bh); volX += volLW + gap;
+	move(m_vol, volX, y2, volW, bh); volX += volW + gap;
+	move(m_volVal, volX, y2, volVW, bh);
 
 	if (m_laidShort != m_short) {
 		m_laidShort = m_short;
@@ -540,6 +556,12 @@ void CDougaBarHost::SyncSeekVol()
 			m_volVal.SetWindowText(vs);
 		}
 	}
+}
+
+void CDougaBarHost::SetMediaInfoText(LPCWSTR text)
+{
+	if (!m_info.GetSafeHwnd()) return;
+	m_info.SetWindowText(text ? text : L"");
 }
 
 void CDougaBarHost::RefreshAero()
@@ -629,6 +651,235 @@ int CDouga::GetBarHeight() const
 {
 	if (!m_bar.IsBarReady() || savedata.fs) return 0;
 	return m_bar.BarHeight();
+}
+
+static CString DougaFourCCName(DWORD fcc)
+{
+	WCHAR s[8] = {};
+	char c[4] = {
+		(char)(fcc & 0xff),
+		(char)((fcc >> 8) & 0xff),
+		(char)((fcc >> 16) & 0xff),
+		(char)((fcc >> 24) & 0xff)
+	};
+	for (int i = 0; i < 4; i++) {
+		if (c[i] < 32 || c[i] > 126) return L"";
+		s[i] = (WCHAR)c[i];
+	}
+	// よく使う FourCC を見やすい表記に
+	if (_wcsicmp(s, L"H264") == 0 || _wcsicmp(s, L"AVC1") == 0 || _wcsicmp(s, L"X264") == 0) return L"H264";
+	if (_wcsicmp(s, L"HEVC") == 0 || _wcsicmp(s, L"HVC1") == 0 || _wcsicmp(s, L"HEV1") == 0) return L"HEVC";
+	if (_wcsicmp(s, L"VP90") == 0 || _wcsicmp(s, L"VP09") == 0) return L"VP9";
+	if (_wcsicmp(s, L"VP80") == 0 || _wcsicmp(s, L"VP08") == 0) return L"VP8";
+	if (_wcsicmp(s, L"AV01") == 0) return L"AV1";
+	if (_wcsicmp(s, L"WMV3") == 0) return L"WMV3";
+	if (_wcsicmp(s, L"WVC1") == 0) return L"VC1";
+	if (_wcsicmp(s, L"MP4V") == 0 || _wcsicmp(s, L"XVID") == 0 || _wcsicmp(s, L"DIVX") == 0) return s;
+	if (_wcsicmp(s, L"MP4A") == 0) return L"AAC";
+	_wcsupr_s(s, 8);
+	return s;
+}
+
+static CString DougaSubtypeLabel(const GUID& sub, BOOL isAudio)
+{
+	if (sub == MEDIASUBTYPE_MPEG2_VIDEO) return L"MPEG2";
+	if (sub == MEDIASUBTYPE_MPEG1Payload) return L"MPEG1";
+	if (isAudio) {
+		if (sub == MEDIASUBTYPE_PCM) return L"PCM";
+		if (sub == MEDIASUBTYPE_IEEE_FLOAT) return L"Float";
+		if (sub == MEDIASUBTYPE_MPEG1AudioPayload) return L"MP1";
+	}
+	CString fcc = DougaFourCCName(sub.Data1);
+	if (!fcc.IsEmpty()) {
+		// 非圧縮YUV FourCCはコーデック表示から除外
+		if (fcc == L"YV12" || fcc == L"NV12" || fcc == L"YUY2" || fcc == L"UYVY" || fcc == L"P010")
+			return L"";
+		return fcc;
+	}
+	return L"";
+}
+
+static CString DougaChannelLabel(int ch)
+{
+	switch (ch) {
+	case 1: return L"1.0";
+	case 2: return L"2.0";
+	case 6: return L"5.1";
+	case 8: return L"7.1";
+	default: {
+		CString s;
+		s.Format(L"%d.0", ch);
+		return s;
+	}
+	}
+}
+
+static BOOL DougaIsRawVideoSubtype(const GUID& sub)
+{
+	CString fcc = DougaFourCCName(sub.Data1);
+	return (fcc == L"YV12" || fcc == L"NV12" || fcc == L"YUY2" || fcc == L"UYVY" || fcc == L"P010");
+}
+
+static BOOL DougaIsUncompressedAudioType(const AM_MEDIA_TYPE& mt)
+{
+	if (!(mt.formattype == FORMAT_WaveFormatEx && mt.pbFormat && mt.cbFormat >= sizeof(WAVEFORMATEX)))
+		return FALSE;
+	const WAVEFORMATEX* wfx = (const WAVEFORMATEX*)mt.pbFormat;
+	if (wfx->wFormatTag == WAVE_FORMAT_PCM || wfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT)
+		return TRUE;
+	if (wfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE && mt.cbFormat >= sizeof(WAVEFORMATEXTENSIBLE)) {
+		const WAVEFORMATEXTENSIBLE* wfex = (const WAVEFORMATEXTENSIBLE*)mt.pbFormat;
+		if (wfex->SubFormat == MEDIASUBTYPE_PCM || wfex->SubFormat == MEDIASUBTYPE_IEEE_FLOAT)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static BOOL DougaFindConnectedType(IGraphBuilder* pGraph, const GUID& major, AM_MEDIA_TYPE* pmtOut)
+{
+	if (!pGraph || !pmtOut) return FALSE;
+	ZeroMemory(pmtOut, sizeof(*pmtOut));
+	IEnumFilters* pEnum = NULL;
+	if (FAILED(pGraph->EnumFilters(&pEnum)) || !pEnum) return FALSE;
+	IBaseFilter* pFilter = NULL;
+	ULONG fetched = 0;
+	BOOL found = FALSE;
+	int bestScore = -1;
+	AM_MEDIA_TYPE bestMt = {};
+
+	while (pEnum->Next(1, &pFilter, &fetched) == S_OK) {
+		IEnumPins* pPins = NULL;
+		if (SUCCEEDED(pFilter->EnumPins(&pPins)) && pPins) {
+			IPin* pPin = NULL;
+			while (pPins->Next(1, &pPin, NULL) == S_OK) {
+				PIN_DIRECTION dir = PINDIR_INPUT;
+				pPin->QueryDirection(&dir);
+				if (dir == PINDIR_OUTPUT) {
+					AM_MEDIA_TYPE mt = {};
+					if (SUCCEEDED(pPin->ConnectionMediaType(&mt))) {
+						if (mt.majortype == major) {
+							int score = 1;
+							if (major == MEDIATYPE_Video) {
+								CString codec = DougaSubtypeLabel(mt.subtype, FALSE);
+								if (!codec.IsEmpty())
+									score = 3;
+								else if (DougaIsRawVideoSubtype(mt.subtype))
+									score = 0;
+							}
+							else if (major == MEDIATYPE_Audio) {
+								CString codec = DougaSubtypeLabel(mt.subtype, TRUE);
+								if (!codec.IsEmpty() && codec != L"PCM" && codec != L"Float")
+									score = 3;
+								else if (!DougaIsUncompressedAudioType(mt))
+									score = 2;
+								else
+									score = 0;
+							}
+
+							if (score > bestScore) {
+								if (found)
+									FreeMediaType(bestMt);
+								CopyMediaType(&bestMt, &mt);
+								bestScore = score;
+								found = TRUE;
+							}
+							FreeMediaType(mt);
+						} else {
+							FreeMediaType(mt);
+						}
+					}
+				}
+				pPin->Release();
+			}
+			pPins->Release();
+		}
+		pFilter->Release();
+	}
+	pEnum->Release();
+	if (found)
+		*pmtOut = bestMt;
+	return found;
+}
+
+void CDouga::RefreshBarMediaInfo()
+{
+	if (!m_bar.IsBarReady()) return;
+	CString videoPart, audioPart;
+
+	AM_MEDIA_TYPE mt = {};
+	if (pGraphBuilder && DougaFindConnectedType(pGraphBuilder, MEDIATYPE_Video, &mt)) {
+		CString codec = DougaSubtypeLabel(mt.subtype, FALSE);
+		long w = width, h = height;
+		if (w <= 0 || h <= 0) {
+			if (mt.formattype == FORMAT_VideoInfo && mt.pbFormat) {
+				VIDEOINFOHEADER* vih = (VIDEOINFOHEADER*)mt.pbFormat;
+				w = vih->bmiHeader.biWidth;
+				h = abs(vih->bmiHeader.biHeight);
+			} else if (mt.formattype == FORMAT_VideoInfo2 && mt.pbFormat) {
+				VIDEOINFOHEADER2* vih = (VIDEOINFOHEADER2*)mt.pbFormat;
+				w = vih->bmiHeader.biWidth;
+				h = abs(vih->bmiHeader.biHeight);
+			}
+		}
+		if (codec.IsEmpty() && mt.subtype.Data1)
+			codec = DougaFourCCName(mt.subtype.Data1);
+		if (w > 0 && h > 0) {
+			if (!codec.IsEmpty())
+				videoPart.Format(L"[%s %ldx%ld]", (LPCWSTR)codec, w, h);
+			else
+				videoPart.Format(L"[%ldx%ld]", w, h);
+		} else if (!codec.IsEmpty()) {
+			videoPart.Format(L"[%s]", (LPCWSTR)codec);
+		}
+		FreeMediaType(mt);
+	} else if (width > 0 && height > 0) {
+		videoPart.Format(L"[%ldx%ld]", width, height);
+	}
+
+	ZeroMemory(&mt, sizeof(mt));
+	if (pGraphBuilder && DougaFindConnectedType(pGraphBuilder, MEDIATYPE_Audio, &mt)) {
+		CString codec = DougaSubtypeLabel(mt.subtype, TRUE);
+		int ch = 0;
+		if (mt.formattype == FORMAT_WaveFormatEx && mt.pbFormat && mt.cbFormat >= sizeof(WAVEFORMATEX)) {
+			WAVEFORMATEX* wfx = (WAVEFORMATEX*)mt.pbFormat;
+			ch = wfx->nChannels;
+			if (codec.IsEmpty()) {
+				switch (wfx->wFormatTag) {
+				case WAVE_FORMAT_PCM: codec = L"PCM"; break;
+				case WAVE_FORMAT_IEEE_FLOAT: codec = L"Float"; break;
+				case 0x0161: codec = L"WMA"; break; // WAVE_FORMAT_WMAUDIO2
+				case 0x0162: codec = L"WMA"; break;
+				case 0x0163: codec = L"WMA"; break;
+				case 0x00FF: case 0x706D: codec = L"AAC"; break; // raw AAC tags
+				case WAVE_FORMAT_MPEGLAYER3: codec = L"MP3"; break;
+				case WAVE_FORMAT_MPEG: codec = L"MPEG"; break;
+				default: {
+					CString fcc = DougaFourCCName(mt.subtype.Data1);
+					if (!fcc.IsEmpty()) codec = fcc;
+					break;
+				}
+				}
+			}
+		}
+		if (codec.IsEmpty())
+			codec = DougaFourCCName(mt.subtype.Data1);
+		if (!codec.IsEmpty() && ch > 0)
+			audioPart.Format(L"[%s %s]", (LPCWSTR)codec, (LPCWSTR)DougaChannelLabel(ch));
+		else if (!codec.IsEmpty())
+			audioPart.Format(L"[%s]", (LPCWSTR)codec);
+		else if (ch > 0)
+			audioPart.Format(L"[%s]", (LPCWSTR)DougaChannelLabel(ch));
+		FreeMediaType(mt);
+	}
+
+	CString all;
+	if (!videoPart.IsEmpty() && !audioPart.IsEmpty())
+		all = videoPart + L" " + audioPart;
+	else if (!videoPart.IsEmpty())
+		all = videoPart;
+	else
+		all = audioPart;
+	m_bar.SetMediaInfoText(all);
 }
 
 void CDouga::RefreshBarAero()
@@ -3774,6 +4025,8 @@ void CDouga::plays2()
 	// (旧: Show → 100x100 に縮める → 倍率適用 で「出て消えてまた出る」ように見えた)
 	if (width == 0) {
 		ShowWindow(SW_HIDE);
+		if (m_bar.IsBarReady())
+			m_bar.SetMediaInfoText(L"");
 	}
 	else {
 		if (pVideoWindow)pVideoWindow->put_Visible(OATRUE);
@@ -3793,6 +4046,7 @@ void CDouga::plays2()
 
 		ShowWindow(SW_SHOWNORMAL);
 		ApplyVideoDest();
+		RefreshBarMediaInfo();
 		UpdateWindow();
 		SetTimer(155, 200, NULL);
 	}

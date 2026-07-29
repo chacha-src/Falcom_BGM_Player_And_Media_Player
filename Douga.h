@@ -38,13 +38,14 @@ public:
 	void ShowBar(BOOL show);
 	void SyncSeekVol();
 	void RefreshAero();
+	void SetMediaInfoText(LPCWSTR text);
 	int  BarHeight() const { return m_barH; }
 	BOOL IsBarReady() const { return m_ready; }
 	BOOL PtInBarClient(CPoint ptClientOfDouga) const;
 
 	CCustomRangeSliderCtrl m_seek;
 	CCustomSliderCtrl m_vol;
-	CCustomStatic m_time, m_volL, m_volVal;
+	CCustomStatic m_time, m_volL, m_volVal, m_info;
 	CCustomStandardButton m_prev, m_rew, m_play, m_pause, m_stop, m_ff, m_next;
 	CCustomStandardButton m_fade, m_mute, m_fs, m_sz1, m_sz15, m_sz2;
 	CToolTipCtrl m_tip;
@@ -92,6 +93,7 @@ public:
 	void RefreshBarAero();
 	void ToggleFullScreen();
 	void RestoreDougaCursor();
+	void RefreshBarMediaInfo();
 	HWND GetVideoSiteHwnd() const { return m_videoSite.GetSafeHwnd(); }
 	int  GetBarHeight() const;
 	CDougaBarHost& GetBar() { return m_bar; }

@@ -864,6 +864,7 @@
 #define IDC_DOUGA_VOL_L                 3653
 #define IDC_DOUGA_VOL                   3654
 #define IDC_DOUGA_VOLVAL                3655
+#define IDC_DOUGA_INFO                  3656
 
 #define ID_DOUGA_PLAY                   32948
 #define ID_DOUGA_STOP                   32949
@@ -881,7 +882,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        208
 #define _APS_NEXT_COMMAND_VALUE         32957
-#define _APS_NEXT_CONTROL_VALUE         3656
+#define _APS_NEXT_CONTROL_VALUE         3657
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif
