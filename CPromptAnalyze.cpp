@@ -179,6 +179,36 @@ static CString CmdAt(LPCTSTR letters, double t0, double t1, int v0, int v1, BOOL
 	return s;
 }
 
+// 解析時点の DS 音量(%)。パターン内の d 値は「この値=100」相対で書く。
+// 例: 基準40%なら rel115 → 絶対46%（いきなり90%等に飛ばない）
+static int g_dsBasePct = 100;
+
+static int CurrentDsPercent()
+{
+	int ds = savedata.dsvol;
+	if (og && ::IsWindow(og->m_dsval.GetSafeHwnd()))
+		ds = og->m_dsval.GetPos();
+	if (ds == 0) ds = 1;
+	int pct = (int)(((double)ds + 499.0) * 2.0 / 10.0 + 0.5);
+	if (pct < 1) pct = 1;
+	if (pct > 100) pct = 100;
+	return pct;
+}
+
+// rel: 100=現在のDS基準、115≈+15%（基準40なら約46）。絶対0..100に丸め。
+static int ScaleDsRel(int rel)
+{
+	int v = (int)((double)g_dsBasePct * (double)rel / 100.0 + 0.5);
+	if (v < 0) v = 0;
+	if (v > 100) v = 100;
+	return v;
+}
+
+static CString CmdDs(double t0, double t1, int rel0, int rel1)
+{
+	return CmdAt(L"d", t0, t1, ScaleDsRel(rel0), ScaleDsRel(rel1), TRUE);
+}
+
 static BOOL AppendCmd(CString& out, const CString& cmd)
 {
 	if (cmd.IsEmpty()) return TRUE;
@@ -210,7 +240,7 @@ static float Percentile(std::vector<float> v, float p)
 }
 
 // ---- パターン群 (順次追加前提) ----
-// P01: イントロが弱い → DS音量フェードイン
+// P01: イントロが弱い → DS音量フェードイン（値は現在DS=100相対 → CmdDsで絶対化）
 static void PatSoftIntro(CString& out, const AnaState& a, float med)
 {
 	if (a.rms.size() < 20) return;
@@ -219,7 +249,7 @@ static void PatSoftIntro(CString& out, const AnaState& a, float med)
 	const float m = MeanRange(a.rms, 0, head);
 	if (m < med * 0.55f && med > 0.01f) {
 		const double t1 = head * kHopSec;
-		AppendCmd(out, CmdAt(L"d", 0, t1, 55, 100, TRUE));
+		AppendCmd(out, CmdDs(0, t1, 55, 100));
 	}
 }
 
@@ -233,7 +263,7 @@ static void PatSoftOutro(CString& out, const AnaState& a, float med)
 	if (m < med * 0.6f && med > 0.01f) {
 		const double t0 = (n - tail) * kHopSec;
 		const double t1 = (n - 1) * kHopSec;
-		AppendCmd(out, CmdAt(L"d", t0, t1, 100, 45, TRUE));
+		AppendCmd(out, CmdDs(t0, t1, 100, 45));
 	}
 }
 
@@ -402,7 +432,7 @@ static void PatSilenceGapReverb(CString& out, const AnaState& a, float med)
 	const double t0 = (bestEnd - bestLen / 2) * kHopSec;
 	const double t1 = (bestEnd + 1) * kHopSec;
 	AppendCmd(out, CmdAt(L"r", t0, t1, 100, 145, TRUE));
-	AppendCmd(out, CmdAt(L"d", t1, t1 + 2.0, 70, 100, TRUE));
+	AppendCmd(out, CmdDs(t1, t1 + 2.0, 70, 100));
 }
 
 // P13: 中盤が窪む → ピッチ/音量で持ち上げ
@@ -421,7 +451,7 @@ static void PatMidrangeScoop(CString& out, const AnaState& a, float med)
 	mid /= mc; sides /= sc;
 	if (mid >= sides * 0.92f || mid >= med) return;
 	AppendCmd(out, CmdAt(L"p", q1 * kHopSec, q3 * kHopSec, 100, 106, TRUE));
-	AppendCmd(out, CmdAt(L"d", q1 * kHopSec, q3 * kHopSec, 100, 108, TRUE));
+	AppendCmd(out, CmdDs(q1 * kHopSec, q3 * kHopSec, 100, 108));
 }
 
 // P14: 高域エネルギー帯 → ステレオ感
@@ -547,7 +577,7 @@ static void PatModeFlavor(CString& out, const AnaState& a, float med, float p90,
 		AppendCmd(out, CmdAt(L"r", 0, mid, 100, 135, TRUE));
 		AppendCmd(out, CmdAt(L"t", 0, q1, 100, 92, TRUE));
 		AppendCmd(out, CmdAt(L"c", mid, q3, 100, 118, TRUE));
-		AppendCmd(out, CmdAt(L"d", q3, n * kHopSec, 100, 70, TRUE));
+		AppendCmd(out, CmdDs(q3, n * kHopSec, 100, 70));
 		break;
 	case MP_ANA_ROMANTIC:
 		AppendCmd(out, CmdAt(L"c", q1, q3, 100, 125, TRUE));
@@ -558,7 +588,8 @@ static void PatModeFlavor(CString& out, const AnaState& a, float med, float p90,
 		break;
 	case MP_ANA_INTENSE:
 		AppendCmd(out, CmdAt(L"fa", mid, mid, 0, 0, FALSE));
-		AppendCmd(out, CmdAt(L"d", q1, mid, 100, 115, TRUE));
+		// 相対112 ≈ 基準の+12%（基準40%なら約45%）
+		AppendCmd(out, CmdDs(q1, mid, 100, 112));
 		AppendCmd(out, CmdAt(L"N", mid, q3, 100, 120, TRUE));
 		AppendCmd(out, CmdAt(L"y", mid, mid + 1.2, 100, 150, TRUE));
 		AppendCmd(out, CmdAt(L"a", mid, q3, 100, 112, TRUE));
@@ -566,7 +597,7 @@ static void PatModeFlavor(CString& out, const AnaState& a, float med, float p90,
 	case MP_ANA_CHILL:
 		AppendCmd(out, CmdAt(L"sl", q1, q1, 0, 0, FALSE));
 		AppendCmd(out, CmdAt(L"r", 0, n * kHopSec, 100, 120, TRUE));
-		AppendCmd(out, CmdAt(L"d", 0, q1, 70, 100, TRUE));
+		AppendCmd(out, CmdDs(0, q1, 70, 100));
 		AppendCmd(out, CmdAt(L"F", mid, q3, 0, 40, TRUE));
 		AppendCmd(out, CmdAt(L"t", 0, mid, 100, 96, TRUE));
 		break;
@@ -582,7 +613,7 @@ static void PatModeFlavor(CString& out, const AnaState& a, float med, float p90,
 		AppendCmd(out, CmdAt(L"I", mid, q3, 100, 118, TRUE));
 		AppendCmd(out, CmdAt(L"S", mid, q3, 100, 120, TRUE));
 		AppendCmd(out, CmdAt(L"c", q1, q3, 100, 115, TRUE));
-		AppendCmd(out, CmdAt(L"d", 0, q1, 80, 100, TRUE));
+		AppendCmd(out, CmdDs(0, q1, 80, 100));
 		break;
 	case MP_ANA_RETRO:
 		AppendCmd(out, CmdAt(L"c", q1, q3, 100, 130, TRUE));
@@ -595,7 +626,7 @@ static void PatModeFlavor(CString& out, const AnaState& a, float med, float p90,
 		AppendCmd(out, CmdAt(L"t", 0, mid, 95, 108, TRUE));
 		AppendCmd(out, CmdAt(L"E", mid, mid, 18, 18, TRUE));
 		AppendCmd(out, CmdAt(L"F", mid, q3, 0, 70, TRUE));
-		AppendCmd(out, CmdAt(L"d", q3, n * kHopSec, 100, 55, TRUE));
+		AppendCmd(out, CmdDs(q3, n * kHopSec, 100, 55));
 		AppendCmd(out, CmdAt(L"r", q1, q3, 100, 135, TRUE));
 		AppendCmd(out, CmdAt(L"I", mid, q3, 100, 112, TRUE));
 		break;
@@ -618,11 +649,13 @@ static CString BuildFromPatterns(int mode)
 	const float medBass = Percentile(g_ana.bass, 0.5f);
 	const float medTre = Percentile(g_ana.tre, 0.5f);
 
+	g_dsBasePct = CurrentDsPercent();
+
 	// コメント行はパーサが無視するので先頭に解析メモ
 	{
 		CString note;
-		note.Format(L"# auto-analyze mode=%d %.1fs frames=%d\r\n",
-			mode, g_ana.rms.size() * kHopSec, (int)g_ana.rms.size());
+		note.Format(L"# auto-analyze mode=%d %.1fs frames=%d dsBase=%d%%\r\n",
+			mode, g_ana.rms.size() * kHopSec, (int)g_ana.rms.size(), g_dsBasePct);
 		if (note.GetLength() < kMaxOutChars)
 			out = note;
 	}
