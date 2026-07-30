@@ -179,7 +179,7 @@ public:
 	CCustomGroupBox m_grpInfo, m_grpSnd, m_grpPl;
 	CCustomListCtrl m_list;
 	CImageList il;
-	CFont m_fontList, m_fontTitle, m_fontInfo, m_fontChk;
+	CFont m_fontList, m_fontTitle, m_fontInfo, m_fontTech, m_fontChk;
 	CBrush m_brDlg;
 	HICON m_hIcon;
 

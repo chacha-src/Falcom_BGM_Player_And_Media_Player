@@ -1123,6 +1123,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		};
 		makeFont(m_fontTitle, 20, FW_BOLD);
 		makeFont(m_fontInfo, 13, FW_NORMAL);
+		// 技術行(OS/ビット/RG/アップスケール)は長いので一段小さくして横スクロールを抑える
+		makeFont(m_fontTech, 10, FW_NORMAL);
 		// リスト・連続/ループ/回数/下部チェックは同一サイズ(拡大・縮小描画で差が出ないよう)
 		makeFont(m_fontList, 12, FW_NORMAL);
 		makeFont(m_fontChk, 12, FW_NORMAL);
@@ -3736,13 +3738,15 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			int titleH  = (int)(24 * hD2);
 			int lineH   = (int)(17 * hD2);
 			if (lineH < 12) lineH = 12;
+			// 技術行は文字が多いので行高も一段低く
+			int techH   = (int)(13 * hD2);
+			if (techH < 10) techH = 10;
 			int ruleGap = (int)(6 * hD2);
-			int rows = 1; // タイトル
-			if (!artist.IsEmpty())    rows++;
-			if (!album.IsEmpty())     rows++;
-			if (!trackLine.IsEmpty()) rows++;
-			if (!techLine.IsEmpty())  rows++;
-			int totalH = titleH + ruleGap + (rows - 1) * lineH;
+			int totalH = titleH + ruleGap;
+			if (!artist.IsEmpty())    totalH += lineH;
+			if (!album.IsEmpty())     totalH += lineH;
+			if (!trackLine.IsEmpty()) totalH += lineH;
+			if (!techLine.IsEmpty())  totalH += techH;
 			int y = (h - totalH) / 2; if (y < 0) y = 0;
 
 			// ---- タイトル行(スクロール対応) ----
@@ -3760,19 +3764,19 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			y += ruleGap;
 
 			// ---- サブ行（アーティスト/アルバム/曲番号/技術情報、各スクロール対応） ----
-			struct SubRow { CString s; COLORREF c; int idx; };
+			struct SubRow { CString s; COLORREF c; int idx; int h; CFont* font; };
 			SubRow items[4]; int n = 0;
-			if (!artist.IsEmpty())    { items[n] = { artist,    RGB(225, 225, 225), 1 }; n++; }
-			if (!album.IsEmpty())     { items[n] = { album,     RGB(190, 190, 190), 2 }; n++; }
-			if (!trackLine.IsEmpty()) { items[n] = { trackLine, RGB(180, 180, 210), 3 }; n++; }
-			if (!techLine.IsEmpty())  { items[n] = { techLine,  RGB(130, 210, 230), 4 }; n++; }
+			if (!artist.IsEmpty())    { items[n] = { artist,    RGB(225, 225, 225), 1, lineH, &m_fontInfo }; n++; }
+			if (!album.IsEmpty())     { items[n] = { album,     RGB(190, 190, 190), 2, lineH, &m_fontInfo }; n++; }
+			if (!trackLine.IsEmpty()) { items[n] = { trackLine, RGB(180, 180, 210), 3, lineH, &m_fontInfo }; n++; }
+			if (!techLine.IsEmpty())  { items[n] = { techLine,  RGB(130, 210, 230), 4, techH, &m_fontTech }; n++; }
 
 			mem.SetBkMode(TRANSPARENT);
 			for (int i = 0; i < n; i++) {
-				bool scrolled = DrawInfoScrollRow(mem, tx, y, tw, lineH,
-					items[i].s, items[i].c, items[i].idx, kBg, &m_fontInfo);
+				bool scrolled = DrawInfoScrollRow(mem, tx, y, tw, items[i].h,
+					items[i].s, items[i].c, items[i].idx, kBg, items[i].font);
 				if (scrolled) m_iscActive = true;
-				y += lineH;
+				y += items[i].h;
 			}
 
 			if (aero)
