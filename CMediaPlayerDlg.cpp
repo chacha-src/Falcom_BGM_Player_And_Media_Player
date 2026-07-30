@@ -1375,6 +1375,19 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 			}
 		}
 	}
+	// Space = 再生/一時停止。og(非表示)の IsDialogMessage がフォーカスボタン(Ys6等)を押すのを防ぐ
+	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_SPACE) {
+		CWnd* pFocus = GetFocus();
+		const BOOL inEdit = (pFocus && (pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()
+			|| pFocus->IsKindOf(RUNTIME_CLASS(CEdit))));
+		if (!inEdit) {
+			if (plf)
+				OnPauseBtn();
+			else
+				OnPlay();
+			return TRUE;
+		}
+	}
 	/* メディアプレイヤー前面時は og の RegisterHotKey が Unregister されている。
 	   ←→ を og のホットキーと同じ経路へ渡す（昇格後シークが死ぬのを防ぐ） */
 	if (pMsg->message == WM_KEYDOWN
