@@ -1,6 +1,7 @@
 ﻿#include "stdafx.h"
 #include "CPromptDlg.h"
 #include "CPromptEngine.h"
+#include "CPromptAnalyze.h"
 
 extern save savedata;
 extern void MpPersistSavedataQuick();
@@ -26,22 +27,26 @@ void CPromptDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_MPP_TEXT, m_edit);
 	DDX_Control(pDX, IDC_MPP_LEGEND, m_legend);
 	DDX_Control(pDX, IDC_MPP_RUN, m_run);
+	DDX_Control(pDX, IDC_MPP_ANALYZE, m_analyze);
 	DDX_Control(pDX, IDC_MPP_STOP, m_stop);
 	DDX_Control(pDX, IDC_MPP_RESET, m_reset);
 	DDX_Control(pDX, IDC_MPP_CLEAR, m_clear);
 	DDX_Control(pDX, IDC_MPP_CLOSE, m_close);
 	DDX_Control(pDX, IDC_MPP_HIST, m_hist);
+	DDX_Control(pDX, IDC_MPP_MODE, m_mode);
 	DDX_Control(pDX, IDC_MPP_SAVEHIST, m_saveHist);
 }
 
 BEGIN_MESSAGE_MAP(CPromptDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MPP_RUN, &CPromptDlg::OnRun)
+	ON_BN_CLICKED(IDC_MPP_ANALYZE, &CPromptDlg::OnAnalyze)
 	ON_BN_CLICKED(IDC_MPP_STOP, &CPromptDlg::OnStop)
 	ON_BN_CLICKED(IDC_MPP_RESET, &CPromptDlg::OnReset)
 	ON_BN_CLICKED(IDC_MPP_CLEAR, &CPromptDlg::OnClear)
 	ON_BN_CLICKED(IDC_MPP_CLOSE, &CPromptDlg::OnCloseBtn)
 	ON_BN_CLICKED(IDC_MPP_SAVEHIST, &CPromptDlg::OnSaveHist)
 	ON_CBN_SELCHANGE(IDC_MPP_HIST, &CPromptDlg::OnHistSel)
+	ON_CBN_SELCHANGE(IDC_MPP_MODE, &CPromptDlg::OnModeSel)
 	ON_EN_CHANGE(IDC_MPP_TEXT, &CPromptDlg::OnTextChanged)
 	ON_WM_SIZE()
 	ON_WM_ENTERSIZEMOVE()
@@ -62,6 +67,7 @@ static CString MpPromptLegendText()
 		L"1. 上の入力欄にコマンドを書く (複数行可、1行に複数 @ も可)\r\n"
 		L"2. [実行] で解析・有効化 → 演奏中、時刻になると自動適用\r\n"
 		L"3. [停止]=適用停止(値維持)  [リセット]=実行前に戻す  [クリア]=本文消去\r\n"
+		L"※ [解析]=選択曲を読込しながら解析し、時間/効果コマンドを自動生成(パターンベース)\r\n"
 		L"※ 時刻はメディアプレイヤー・バナー(GDI)の時計と同じ基準です\r\n"
 		L"※ 適用はDS先読み分を先取りするため、記載した秒で聴感上も切り替わります\r\n"
 		L"\r\n"
@@ -436,6 +442,7 @@ static void MpSetPromptLabelText(CCustomStatic& st, LPCTSTR plain)
 
 void CPromptDlg::StyleButtons()
 {
+	m_analyze.SetGradation(RGB(255, 230, 200), RGB(255, 180, 120), 0, TRUE);
 	m_run.SetGradation(RGB(200, 240, 200), RGB(130, 205, 140), 0, TRUE);
 	m_stop.SetGradation(RGB(255, 215, 220), RGB(255, 165, 180), 0, TRUE);
 	m_reset.SetGradation(RGB(215, 235, 255), RGB(165, 205, 245), 0, TRUE);
@@ -453,11 +460,13 @@ void CPromptDlg::SetupTooltips()
 		m_tooltip.AddTool(&w, text);
 	};
 	addTip(m_run, LL14(L"プロンプトを解析し、演奏中にパラメータを自動変更します。", L"Parse the prompt and apply parameter changes during playback.", L"Analyser le prompt et appliquer les changements pendant la lecture.", L"Analizza il prompt e applica le modifiche durante l'esecuzione.", L"Analizar el prompt y aplicar cambios durante la reproduccion.", L"프롬프트를 해석해 연주 중 파라미터를 자동 변경합니다.", L"解析提示并在播放中自动更改参数。", L"تحليل الموجه وتطبيق التغييرات أثناء التشغيل.", L"Разобрать промпт и применять изменения при воспроизведении.", L"Prompt parsen und waehrend der Wiedergabe anwenden.", L"Analisar o prompt e aplicar alteracoes durante a reproducao.", L"Prompt parseren en tijdens afspelen toepassen.", L"Parsuj prompt i stosuj zmiany podczas odtwarzania.", L"Istemi ayristirip calma sirasinda uygula."));
+	addTip(m_analyze, LL14(L"選択曲を読込しながら解析し、時間と効果のコマンドを自動生成します(再生は一時停止します)。", L"Load and analyze the selected track, then auto-generate timed effect commands (playback pauses).", L"Charger et analyser la piste selectionnee, puis generer des commandes.", L"Carica e analizza la traccia selezionata e genera comandi.", L"Cargar y analizar la pista seleccionada y generar comandos.", L"선택 곡을 읽어 분석해 시간·효과 명령을 자동 생성합니다(재생 일시중단).", L"读取并分析所选曲目，自动生成时间与效果命令(播放会暂停)。", L"تحميل وتحليل المقطع وإنشاء أوامر.", L"Загрузить и проанализировать трек, затем создать команды.", L"Titel laden/analysieren und Befehle erzeugen (Wiedergabe pausiert).", L"Carregar e analisar a faixa e gerar comandos.", L"Track laden/analyseren en opdrachten genereren.", L"Wczytaj i przeanalizuj utwor, wygeneruj komendy.", L"Secili parcayi okuyup analiz ederek komut uret (calma durur)."));
 	addTip(m_stop, LL14(L"プロンプト実行を停止します(設定値は維持)。", L"Stop prompt execution (keep current settings).", L"Arreter l'execution du prompt (conserver les reglages).", L"Ferma l'esecuzione del prompt (mantieni i valori).", L"Detener la ejecucion del prompt (mantener ajustes).", L"프롬프트 실행을 중지합니다(설정값 유지).", L"停止提示执行(保留当前设置)。", L"إيقاف تنفيذ الموجه (الإبقاء على الإعدادات).", L"Остановить промпт (настройки сохраняются).", L"Prompt-Ausfuehrung stoppen (Einstellungen behalten).", L"Parar execucao do prompt (manter configuracoes).", L"Prompt uitvoering stoppen (instellingen behouden).", L"Zatrzymaj prompt (zachowaj ustawienia).", L"Istem calistirmasini durdur (ayarlari koru)."));
 	addTip(m_reset, LL14(L"実行前の設定に戻し、プロンプト実行を停止します。", L"Restore settings from before execution and stop.", L"Restaurer les reglages d'avant execution et arreter.", L"Ripristina le impostazioni precedenti e ferma.", L"Restaurar ajustes previos y detener.", L"실행 전 설정으로 되돌리고 중지합니다.", L"恢复到执行前设置并停止。", L"استعادة الإعدادات قبل التشغيل والإيقاف.", L"Восстановить настройки до запуска и остановить.", L"Einstellungen vor Ausfuehrung wiederherstellen und stoppen.", L"Restaurar configuracoes anteriores e parar.", L"Instellingen voor uitvoering herstellen en stoppen.", L"Przywroc ustawienia sprzed uruchomienia i zatrzymaj.", L"Calistirmadan onceki ayarlara don ve durdur."));
 	addTip(m_clear, LL14(L"プロンプト本文を消去し、設定も初期状態に戻します。", L"Clear prompt text and restore initial settings.", L"Effacer le prompt et restaurer les reglages initiaux.", L"Cancella il prompt e ripristina le impostazioni.", L"Borrar el prompt y restaurar ajustes iniciales.", L"프롬프트 본문을 지우고 설정도 초기화합니다.", L"清除提示文本并恢复初始设置。", L"مسح نص الموجه واستعادة الإعدادات الأولية.", L"Очистить промпт и восстановить исходные настройки.", L"Prompt loeschen und Ausgangseinstellungen wiederherstellen.", L"Limpar prompt e restaurar configuracoes iniciais.", L"Prompt wissen en begininstellingen herstellen.", L"Wyczysc prompt i przywroc ustawienia poczatkowe.", L"Istem metnini temizle ve baslangic ayarlarina don."));
 	addTip(m_close, LL14(L"プロンプトウィンドウを閉じます(入力内容は保存)。", L"Close the prompt window (text is saved).", L"Fermer la fenetre de prompt (texte sauvegarde).", L"Chiudi la finestra prompt (testo salvato).", L"Cerrar la ventana de prompt (se guarda el texto).", L"프롬프트 창을 닫습니다(입력 내용 저장).", L"关闭提示窗口(保存输入内容)。", L"إغلاق نافذة الموجه (يُحفظ النص).", L"Закрыть окно промпта (текст сохраняется).", L"Prompt-Fenster schliessen (Text wird gespeichert).", L"Fechar janela de prompt (texto salvo).", L"Promptvenster sluiten (tekst wordt opgeslagen).", L"Zamknij okno promptu (tekst jest zapisywany).", L"Istem penceresini kapat (metin kaydedilir)."));
 	addTip(m_saveHist, LL14(L"現在のプロンプト本文を履歴に保存します。", L"Save current prompt text to history.", L"Enregistrer le prompt dans l'historique.", L"Salva il prompt nella cronologia.", L"Guardar el prompt en el historial.", L"현재 프롬프트를 기록에 저장합니다.", L"将当前提示保存到历史。", L"حفظ الموجه في السجل.", L"Сохранить промпт в историю.", L"Prompt in Verlauf speichern.", L"Salvar prompt no historico.", L"Prompt in geschiedenis opslaan.", L"Zapisz prompt w historii.", L"Promptu gecmise kaydet."));
+	addTip(m_mode, LL14(L"解析の雰囲気モード。選択に応じて自動生成コマンドの傾向が変わります。", L"Analyze mood mode. Changes the style of generated commands.", L"Mode d ambiance.", L"Modalita atmosfera.", L"Modo de ambiente.", L"분석 분위기 모드.", L"分析氛围模式。", L"Mode.", L"Режим.", L"Stimmungsmodus.", L"Modo.", L"Sfeermodus.", L"Tryb nastroju.", L"Mod."));
 	addTip(m_hist, LL14(L"保存したプロンプト履歴から読み込みます。", L"Load a saved prompt from history.", L"Charger un prompt depuis l'historique.", L"Carica un prompt dalla cronologia.", L"Cargar un prompt del historial.", L"저장된 프롬프트 기록에서 불러옵니다.", L"从历史记录加载提示。", L"تحميل موجه من السجل.", L"Загрузить промпт из истории.", L"Prompt aus Verlauf laden.", L"Carregar prompt do historico.", L"Prompt uit geschiedenis laden.", L"Wczytaj prompt z historii.", L"Gecmisten prompt yukle."));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
 }
@@ -479,9 +488,12 @@ void CPromptDlg::LayoutControls()
 	const int M = 8;
 	const int btnH = 36;
 	const int btnGap = 6;
-	const int remainH = 18;
+	const int remainH = 16;
+	const int modeH = 24;
+	const int progH = 16;
+	const int progLabelH = 14;
 	const int histH = 24;
-	const int histGap = 10;
+	const int histGap = 8;
 	const int gapSm = 4;
 	const int gapMd = 6;
 	const int editMinH = 72;
@@ -490,7 +502,7 @@ void CPromptDlg::LayoutControls()
 
 	const int iw = max(1, W - M * 2);
 	const int lockGap = 6;
-	const int btnW = max(60, min(80, (iw - btnGap * 4) / 5));
+	const int btnW = max(52, min(72, (iw - btnGap * 5) / 6));
 
 	CCC_MainLockSetHeaderRow(m_hWnd, M, editLblH);
 	CRect lockRc;
@@ -499,10 +511,13 @@ void CPromptDlg::LayoutControls()
 		? max(80, iw - CCC_MainLockGetReserveWidth(m_hWnd) - lockGap)
 		: max(80, lockRc.left - M - lockGap);
 
-	// 下から順に確保(ボタン → 履歴 → 残り文字 → 説明 → 入力)
+	// 下から順に確保(ボタン → 履歴 → 進捗 → モード → 残り文字 → 説明 → 入力)
 	const int btnY = max(M, H - M - btnH);
 	const int histY = btnY - histGap - histH;
-	const int remainY = histY - gapSm - remainH;
+	const int progY = histY - gapSm - progH;
+	const int progLblY = progY - gapSm - progLabelH;
+	const int modeY = progLblY - gapSm - modeH;
+	const int remainY = modeY - gapSm - remainH;
 	const int legendBottom = remainY - gapMd;
 
 	int legendH = max(legendMinH, (H * 7) / 30);
@@ -534,6 +549,16 @@ void CPromptDlg::LayoutControls()
 		m_legend.MoveWindow(M, legendTop, iw, max(48, legendH));
 	if (CWnd* pRem = GetDlgItem(IDC_MPP_REMAIN))
 		pRem->MoveWindow(M, remainY, iw, remainH);
+	if (CWnd* pModeL = GetDlgItem(IDC_MPP_MODE_L))
+		pModeL->MoveWindow(M, modeY + 4, 44, 16);
+	if (m_mode.GetSafeHwnd()) {
+		m_mode.MoveWindow(M + 48, modeY, max(140, min(220, iw / 2)), modeH);
+		m_mode.SetWindowPos(&CWnd::wndBottom, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	}
+	if (CWnd* pProgL = GetDlgItem(IDC_MPP_PROG_L))
+		pProgL->MoveWindow(M, progLblY, iw, progLabelH);
+	if (m_progress.GetSafeHwnd())
+		m_progress.MoveWindow(M, progY, iw, progH);
 	if (CWnd* pHistL = GetDlgItem(IDC_MPP_HIST_L))
 		pHistL->MoveWindow(M, histY + 3, 34, 18);
 	const int saveHistW = 68;
@@ -546,6 +571,7 @@ void CPromptDlg::LayoutControls()
 		m_saveHist.MoveWindow(M + 36 + histComboW + 6, histY, saveHistW, histH);
 
 	int bx = M;
+	if (m_analyze.GetSafeHwnd()) { m_analyze.MoveWindow(bx, btnY, btnW, btnH); bx += btnW + btnGap; }
 	if (m_run.GetSafeHwnd()) { m_run.MoveWindow(bx, btnY, btnW, btnH); bx += btnW + btnGap; }
 	if (m_stop.GetSafeHwnd()) { m_stop.MoveWindow(bx, btnY, btnW, btnH); bx += btnW + btnGap; }
 	if (m_reset.GetSafeHwnd()) { m_reset.MoveWindow(bx, btnY, btnW, btnH); bx += btnW + btnGap; }
@@ -558,9 +584,14 @@ void CPromptDlg::LayoutControls()
 	RaiseChildZOrder(&m_edit);
 	RaiseChildZOrder(&m_legend);
 	RaiseChildZOrder(GetDlgItem(IDC_MPP_REMAIN));
+	RaiseChildZOrder(GetDlgItem(IDC_MPP_MODE_L));
+	RaiseChildZOrder(&m_mode);
+	RaiseChildZOrder(GetDlgItem(IDC_MPP_PROG_L));
+	RaiseChildZOrder(&m_progress);
 	RaiseChildZOrder(GetDlgItem(IDC_MPP_HIST_L));
 	RaiseChildZOrder(&m_hist);
 	RaiseChildZOrder(&m_saveHist);
+	RaiseChildZOrder(&m_analyze);
 	RaiseChildZOrder(&m_run);
 	RaiseChildZOrder(&m_stop);
 	RaiseChildZOrder(&m_reset);
@@ -579,6 +610,7 @@ void CPromptDlg::RefreshAfterLayout(BOOL bSyncRedraw)
 #endif
 
 	m_run.RepaintClient();
+	m_analyze.RepaintClient();
 	m_stop.RepaintClient();
 	m_reset.RepaintClient();
 	m_clear.RepaintClient();
@@ -683,6 +715,7 @@ BOOL CPromptDlg::OnInitDialog()
 	// 立てないと既定アイコンが残る（イコライザーは rc の DS_MODALFRAME で消えている）。
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	m_legend.SetWindowText(MpPromptLegendText());
+	SetDlgItemText(IDC_MPP_ANALYZE, LL14(L"解析", L"Analyze", L"Analyser", L"Analizza", L"Analizar", L"분석", L"分析", L"تحليل", L"Анализ", L"Analysieren", L"Analisar", L"Analyseren", L"Analizuj", L"Analiz"));
 	SetDlgItemText(IDC_MPP_RUN, LL14(L"実行", L"Run", L"Executer", L"Esegui", L"Ejecutar", L"실행", L"执行", L"تشغيل", L"Запуск", L"Ausfuehren", L"Executar", L"Uitvoeren", L"Uruchom", L"Calistir"));
 	SetDlgItemText(IDC_MPP_STOP, LL14(L"停止", L"Stop", L"Arret", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stopp", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
 	SetDlgItemText(IDC_MPP_RESET, LL14(L"リセット", L"Reset", L"Reinit.", L"Ripristina", L"Restablecer", L"리셋", L"重置", L"إعادة ضبط", L"Сброс", L"Zuruecksetzen", L"Redefinir", L"Reset", L"Reset", L"Sifirla"));
@@ -690,6 +723,20 @@ BOOL CPromptDlg::OnInitDialog()
 	SetDlgItemText(IDC_MPP_CLOSE, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	SetDlgItemText(IDC_MPP_HIST_L, LL14(L"履歴:", L"History:", L"Historique:", L"Cronologia:", L"Historial:", L"기록:", L"历史:", L"السجل:", L"История:", L"Verlauf:", L"Historico:", L"Geschiedenis:", L"Historia:", L"Gecmis:"));
 	SetDlgItemText(IDC_MPP_SAVEHIST, LL14(L"履歴保存", L"Save history", L"Enregistrer", L"Salva", L"Guardar", L"기록 저장", L"保存历史", L"حفظ", L"Сохранить", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
+
+	SetDlgItemText(IDC_MPP_MODE_L, LL14(L"モード:", L"Mode:", L"Mode:", L"Modalita:", L"Modo:", L"모드:", L"模式:", L"الوضع:", L"Режим:", L"Modus:", L"Modo:", L"Modus:", L"Tryb:", L"Mod:"));
+	FillModeCombo();
+	if (CWnd* pPh = GetDlgItem(IDC_MPP_PROGRESS)) {
+		CRect rc; pPh->GetWindowRect(&rc); ScreenToClient(&rc);
+		pPh->DestroyWindow();
+		m_progress.Create(WS_CHILD | WS_VISIBLE, rc, this, IDC_MPP_PROGRESS);
+		m_progress.SetRange(0, 100);
+		m_progress.SetPos(0);
+		m_progress.SetShowPercent(TRUE);
+		m_progress.SetColors(RGB(255, 236, 246), RGB(255, 170, 200), RGB(200, 120, 220));
+	}
+	if (CWnd* pProgL = GetDlgItem(IDC_MPP_PROG_L))
+		pProgL->SetWindowText(LL14(L"解析の進捗", L"Analyze progress", L"Progression", L"Avanzamento", L"Progreso", L"분석 진행", L"分析进度", L"Progress", L"Прогресс", L"Fortschritt", L"Progresso", L"Voortgang", L"Postep", L"Ilerleme"));
 
 	if (m_legend.GetSafeHwnd()) {
 		m_legend.SetReadOnly(TRUE);
@@ -712,6 +759,7 @@ BOOL CPromptDlg::OnInitDialog()
 			if (m_fontBtn.GetSafeHandle()) m_fontBtn.DeleteObject();
 			if (m_fontBtn.CreateFontIndirect(&lf))
 			{
+				m_analyze.SetFont(&m_fontBtn);
 				m_run.SetFont(&m_fontBtn);
 				m_stop.SetFont(&m_fontBtn);
 				m_reset.SetFont(&m_fontBtn);
@@ -899,6 +947,118 @@ void CPromptDlg::OnRun()
 			: err);
 		return;
 	}
+}
+
+void CPromptDlg::FillModeCombo()
+{
+	if (!m_mode.GetSafeHwnd()) return;
+	m_mode.ResetContent();
+	for (int i = 0; i < MP_ANA_MODE_COUNT; ++i)
+		m_mode.AddString(MpPromptAnalyzeModeName(i));
+	int cur = MpPromptAnalyzeModeClamp(savedata.mpPromptAnalyzeMode);
+	m_mode.SetCurSel(cur);
+}
+
+int CPromptDlg::GetSelectedAnalyzeMode() const
+{
+	if (!m_mode.GetSafeHwnd()) return MpPromptAnalyzeModeClamp(savedata.mpPromptAnalyzeMode);
+	const int sel = m_mode.GetCurSel();
+	return MpPromptAnalyzeModeClamp(sel);
+}
+
+void CPromptDlg::OnModeSel()
+{
+	savedata.mpPromptAnalyzeMode = GetSelectedAnalyzeMode();
+	MpPersistSavedataQuick();
+}
+
+void CPromptDlg::SetAnalyzeUiBusy(BOOL busy)
+{
+	m_analyzing = busy;
+	if (m_analyze.GetSafeHwnd()) m_analyze.EnableWindow(!busy);
+	if (m_mode.GetSafeHwnd()) m_mode.EnableWindow(!busy);
+	if (m_run.GetSafeHwnd()) m_run.EnableWindow(!busy);
+	if (m_progress.GetSafeHwnd()) {
+		m_progress.ShowWindow(SW_SHOW);
+		if (!busy) {
+			// keep last percent briefly
+		}
+	}
+}
+
+void CPromptDlg::AnalyzeProgressThunk(int percent, LPCTSTR status, void* user)
+{
+	CPromptDlg* self = reinterpret_cast<CPromptDlg*>(user);
+	if (!self || !::IsWindow(self->GetSafeHwnd())) return;
+	if (self->m_progress.GetSafeHwnd())
+		self->m_progress.SetPos(percent);
+	if (CWnd* p = self->GetDlgItem(IDC_MPP_PROG_L)) {
+		CString s;
+		if (status && status[0])
+			s.Format(L"%s  (%d%%)", status, percent);
+		else
+			s.Format(L"%d%%", percent);
+		p->SetWindowText(s);
+	}
+	// export 経路の DoEvent と合わせて描画を進める
+	MSG msg;
+	while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+		if (!self->IsDialogMessage(&msg)) {
+			::TranslateMessage(&msg);
+			::DispatchMessage(&msg);
+		}
+	}
+}
+
+void CPromptDlg::OnAnalyze()
+{
+	if (m_analyzing) return;
+	if (AfxMessageBox(
+		LL14(L"選択中の曲を読込しながら解析します。\r\n再生中の曲は一時停止されます。よろしいですか？",
+			L"Analyze the selected track while loading.\r\nCurrent playback will pause. Continue?",
+			L"Analyser la piste selectionnee.\r\nLa lecture en cours sera interrompue. Continuer ?",
+			L"Analizzare la traccia selezionata.\r\nLa riproduzione verra interrotta. Continuare?",
+			L"Analizar la pista seleccionada.\r\nLa reproduccion se pausara. Continuar?",
+			L"선택 곡을 읽어 분석합니다.\r\n재생 중인 곡은 일시중단됩니다. 계속할까요?",
+			L"将读取并分析所选曲目。\r\n当前播放会暂停。是否继续？",
+			L"Analyze selected track. Playback will pause. Continue?",
+			L"Анализ выбранного трека. Воспроизведение будет прервано. Продолжить?",
+			L"Gewaehlten Titel analysieren.\r\nWiedergabe wird pausiert. Fortfahren?",
+			L"Analisar a faixa selecionada.\r\nA reproducao sera pausada. Continuar?",
+			L"Geselecteerde track analyseren.\r\nAfspelen wordt gepauzeerd. Doorgaan?",
+			L"Analiza wybranego utworu.\r\nOdtwarzanie zostanie wstrzymane. Kontynuowac?",
+			L"Secili parcayi analiz et.\r\nCalma duraklar. Devam?"),
+		MB_YESNO | MB_ICONQUESTION) != IDYES)
+		return;
+
+	const int mode = GetSelectedAnalyzeMode();
+	savedata.mpPromptAnalyzeMode = mode;
+	MpPersistSavedataQuick();
+
+	SetAnalyzeUiBusy(TRUE);
+	if (m_progress.GetSafeHwnd()) {
+		m_progress.SetPos(0);
+		m_progress.ShowWindow(SW_SHOW);
+	}
+	MpPromptAnalyzeSetProgressCb(&CPromptDlg::AnalyzeProgressThunk, this);
+
+	CString text, err;
+	const BOOL ok = MpPromptAnalyzeSelected(text, mode, &err);
+
+	MpPromptAnalyzeSetProgressCb(nullptr, nullptr);
+	SetAnalyzeUiBusy(FALSE);
+
+	if (!ok) {
+		AfxMessageBox(err.IsEmpty()
+			? LL14(L"解析に失敗しました。", L"Analysis failed.", L"Echec analyse.", L"Analisi fallita.", L"Error de analisis.", L"분석 실패.", L"分析失败。", L"فشل التحليل.", L"Ошибка анализа.", L"Analyse fehlgeschlagen.", L"Falha na analise.", L"Analyse mislukt.", L"Blad analizy.", L"Analiz basarisiz.")
+			: err);
+		return;
+	}
+	if (text.GetLength() > kMaxChars)
+		text = text.Left(kMaxChars);
+	SetDlgItemText(IDC_MPP_TEXT, text);
+	UpdateRemainLabel();
+	SaveTextToSavedata();
 }
 
 void CPromptDlg::OnStop()

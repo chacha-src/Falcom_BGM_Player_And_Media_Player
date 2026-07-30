@@ -402,6 +402,26 @@ struct save{
 	int analyzerspecdiff;     // 1=スペクトラム差分表示
 	int analyzerfreqzoom;     // 0=全帯域 1=低域 2=中域 3=高域
 	int analyzermarkers[4];   // 固定周波数マーカー(Hz)。0=未使用
+
+	// --- 書き出し時のタグ/ジャケット引き継ぎ(末尾追記。旧.datは1へ正規化) ---
+	int wav_export_copy_tags; // 1=タグとジャケットを出力ファイルへコピー
+
+	// --- プロンプト解析モード(末尾追記。0..9 = MpPromptAnalyzeMode) ---
+	int mpPromptAnalyzeMode;
+
+	// --- 簡易ピアノロール 表示拡張(末尾追記。旧.datは0初期化→起動時に既定へ正規化) ---
+	int pianorollviewmode;   // 0=通常(2D) 1=簡易3D
+	int pianorollkeyrange;   // 表示する鍵数 88 または 108(表示のみ。解析は常に108鍵)
+	int pianorollnotename;   // 1=白鍵にノート名(C/D/E…)を表示
+	int pianoroll3dyaw;      // 簡易3D 水平回転角(度×10, -1800..1800)
+	int pianoroll3dpitch;    // 簡易3D 仰角(度×10, -850..850)
+
+	// --- 動画画面(末尾追記。旧.datは0初期化=従来動作) ---
+	int dougatopmost;        // 1=動画ウィンドウを常に手前に表示
+	int dougaaspect;         // 1=アスペクト比を維持(レターボックス表示)
+
+	// --- 簡易ピアノロール 3Dズーム(末尾追記) ---
+	int pianoroll3dzoom;     // 簡易3D ズーム(×100, 35..400, 100=等倍)
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

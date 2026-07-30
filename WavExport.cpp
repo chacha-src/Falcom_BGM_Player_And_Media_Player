@@ -6,6 +6,8 @@
 #include "oggDlg.h"
 #include "PlayList.h"
 #include "WavExport.h"
+#include "DecodeProgress.h"
+#include "ExportTagUi.h"
 #include <ShlObj.h>
 
 extern COggDlg* og;
@@ -178,11 +180,16 @@ IMPLEMENT_DYNAMIC(CWavExport, CCustomBlurDialogBase)
 CWavExport::CWavExport(CWnd* pParent)
 	: CCustomBlurDialogBase(CWavExport::IDD, pParent)
 	, multiFile(false)
+	, m_coverBmp(NULL)
 {
 }
 
 CWavExport::~CWavExport()
 {
+	if (m_coverBmp) {
+		::DeleteObject(m_coverBmp);
+		m_coverBmp = NULL;
+	}
 }
 
 void CWavExport::DoDataExchange(CDataExchange* pDX)
@@ -202,12 +209,25 @@ void CWavExport::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_WAVEXPORT_TRIM, m_trimCheck);
 	DDX_Control(pDX, IDC_WAVEXPORT_TRIM_SEC, m_trimSec);
 	DDX_Control(pDX, IDC_WAVEXPORT_TRIM_LABEL, m_trimLabel);
+	DDX_Control(pDX, IDC_WAVEXPORT_COPY_TAGS, m_copyTags);
+	DDX_Control(pDX, IDC_WAVEXPORT_TITLE_L, m_titleL);
+	DDX_Control(pDX, IDC_WAVEXPORT_TITLE, m_title);
+	DDX_Control(pDX, IDC_WAVEXPORT_ARTIST_L, m_artistL);
+	DDX_Control(pDX, IDC_WAVEXPORT_ARTIST, m_artist);
+	DDX_Control(pDX, IDC_WAVEXPORT_ALBUM_L, m_albumL);
+	DDX_Control(pDX, IDC_WAVEXPORT_ALBUM, m_album);
+	DDX_Control(pDX, IDC_WAVEXPORT_COVER_L, m_coverL);
+	DDX_Control(pDX, IDC_WAVEXPORT_COVER_PIC, m_coverPic);
+	DDX_Control(pDX, IDC_WAVEXPORT_COVER, m_cover);
+	DDX_Control(pDX, IDC_WAVEXPORT_COVER_CLEAR, m_coverClear);
 }
 
 BEGIN_MESSAGE_MAP(CWavExport, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_WAVEXPORT_EXEC, &CWavExport::OnBnClickedWavExportExec)
 	ON_BN_CLICKED(IDC_WAVEXPORT_BROWSE, &CWavExport::OnBnClickedWavExportBrowse)
 	ON_BN_CLICKED(IDC_WAVEXPORT_CLOSE, &CWavExport::OnBnClickedWavExportClose)
+	ON_BN_CLICKED(IDC_WAVEXPORT_COVER_CLEAR, &CWavExport::OnBnClickedCoverClear)
+	ON_WM_DROPFILES()
 END_MESSAGE_MAP()
 
 BOOL CWavExport::OnInitDialog()
@@ -250,6 +270,10 @@ BOOL CWavExport::OnInitDialog()
 		L"Mantener seg", L"유지 초", L"保留秒", L"احتفظ ث",
 		L"Оставить сек", L"Behalten Sek", L"Manter seg", L"Bewaar sec",
 		L"Zostaw sek", L"Tut sn"));
+	m_copyTags.SetWindowText(LL14(L"タグとジャケットをコピー", L"Copy tags and cover art", L"Copier les tags et la pochette", L"Copia tag e copertina",
+		L"Copiar etiquetas y portada", L"태그와 재킷 복사", L"复制标签和封面", L"نسخ الوسوم والغلاف",
+		L"Копировать теги и обложку", L"Tags und Cover kopieren", L"Copiar tags e capa", L"Tags en hoes kopiëren",
+		L"Kopiuj tagi i okładkę", L"Etiketleri ve kapağı kopyala"));
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi",
 		L"Cerrar", L"닫기", L"关闭", L"إغلاق",
 		L"Закрыть", L"Schließen", L"Fechar", L"Sluiten",
@@ -270,6 +294,7 @@ BOOL CWavExport::OnInitDialog()
 	m_trimSec.SetWindowText(s);
 	m_fadeCheck.SetCheck(savedata.wav_export_fade ? BST_CHECKED : BST_UNCHECKED);
 	m_trimCheck.SetCheck(savedata.wav_export_trim_lead ? BST_CHECKED : BST_UNCHECKED);
+	m_copyTags.SetCheck(savedata.wav_export_copy_tags ? BST_CHECKED : BST_UNCHECKED);
 	if (multiFile) {
 		m_path.SetWindowText(WavExportDefaultFolderFromPc(pc));
 	}
@@ -277,7 +302,53 @@ BOOL CWavExport::OnInitDialog()
 		m_path.SetWindowText(WavExportDefaultOutputPath(pc));
 	}
 	m_status.SetWindowText(L"");
+	if (CWnd* pPh = GetDlgItem(IDC_WAVEXPORT_PROGRESS)) {
+		CRect rc; pPh->GetWindowRect(&rc); ScreenToClient(&rc);
+		pPh->DestroyWindow();
+		m_progress.Create(WS_CHILD | WS_VISIBLE, rc, this, IDC_WAVEXPORT_PROGRESS);
+		m_progress.SetRange(0, 100);
+		m_progress.SetPos(0);
+		m_progress.SetShowPercent(TRUE);
+		m_progress.SetColors(RGB(255, 236, 246), RGB(255, 170, 200), RGB(200, 120, 220));
+	}
+	if (CWnd* pProgL = GetDlgItem(IDC_WAVEXPORT_PROG_L))
+		pProgL->SetWindowText(LL14(L"進捗", L"Progress", L"Progression", L"Avanzamento", L"Progreso", L"진행", L"进度", L"Progress", L"Прогресс", L"Fortschritt", L"Progresso", L"Voortgang", L"Postep", L"Ilerleme"));
+	ExportTagUi_InitFields(multiFile, pc, m_title, m_artist, m_album,
+		m_titleL, m_artistL, m_albumL, m_coverL, m_coverPic, m_cover, m_coverClear, m_coverPath, m_coverBmp);
+	DragAcceptFiles(TRUE);
 	return TRUE;
+}
+
+void CWavExport::OnBnClickedCoverClear()
+{
+	ExportTagUi_ClearCover(m_coverPic, m_cover, m_coverPath, m_coverBmp);
+}
+
+void CWavExport::OnDropFiles(HDROP hDropInfo)
+{
+	ExportTagUi_OnDropFiles(hDropInfo, m_coverPic, m_cover, m_coverPath, m_coverBmp);
+}
+
+void CWavExport::ExportProgressThunk(int percent, LPCTSTR status, void* user)
+{
+	CWavExport* self = reinterpret_cast<CWavExport*>(user);
+	if (!self || !::IsWindow(self->GetSafeHwnd())) return;
+	if (self->m_progress.GetSafeHwnd()) {
+		self->m_progress.SetPos(percent);
+		self->m_progress.Invalidate(FALSE);
+		self->m_progress.UpdateWindow();
+	}
+	if (status && status[0])
+		self->m_status.SetWindowText(status);
+	else if (CWnd* p = self->GetDlgItem(IDC_WAVEXPORT_PROG_L)) {
+		CString s;
+		s.Format(L"%d%%", percent);
+		p->SetWindowText(s);
+	}
+	// 全メッセージを汲み出すと timer/Restart 再入で export が壊れる。描画だけ通す。
+	MSG msg;
+	while (::PeekMessage(&msg, self->GetSafeHwnd(), WM_PAINT, WM_PAINT, PM_REMOVE))
+		::DispatchMessage(&msg);
 }
 
 void CWavExport::OnBnClickedWavExportBrowse()
@@ -332,6 +403,8 @@ void CWavExport::OnBnClickedWavExportExec()
 	savedata.wav_export_fade_sec = opts.fadeSec;
 	savedata.wav_export_trim_lead = opts.trimLeadEnable;
 	savedata.wav_export_trim_keep_sec = opts.trimKeepSec;
+	savedata.wav_export_copy_tags = m_copyTags.GetCheck() ? 1 : 0;
+	ExportTagUi_Collect(multiFile, savedata.wav_export_copy_tags, m_title, m_artist, m_album, m_coverPath, opts);
 
 	if (pathStr.IsEmpty()) {
 		m_status.SetWindowText(multiFile
@@ -345,11 +418,20 @@ void CWavExport::OnBnClickedWavExportExec()
 				L"Geef bestandsnaam op", L"Podaj nazwę pliku", L"Dosya adini belirtin"));
 		return;
 	}
+	// 再生中の状態が書き出しに混ざらないよう、先に停止する
+	if (og) og->stop1();
 	m_status.SetWindowText(LL14(L"出力中...", L"Exporting...", L"Export en cours...", L"Esportazione in corso...",
 		L"Exportando...", L"내보내는 중...", L"导出中...", L"جاري التصدير...",
 		L"Экспорт...", L"Exportiere...", L"Exportando...", L"Exporteren...",
 		L"Eksportowanie...", L"Dışa aktarılıyor..."));
 	m_exec.EnableWindow(FALSE);
+	if (m_progress.GetSafeHwnd()) {
+		m_progress.SetPos(0);
+		m_progress.ShowWindow(SW_SHOW);
+	}
+	MpDecodeProgressReset();
+	MpDecodeProgressSetPcmCap(95);
+	MpDecodeProgressSetCb(&CWavExport::ExportProgressThunk, this);
 	UpdateWindow();
 
 	BOOL ok = TRUE;
@@ -364,6 +446,10 @@ void CWavExport::OnBnClickedWavExportExec()
 		const size_t total = pcs.size();
 		for (size_t i = 0; i < total; ++i) {
 			CString outPath = WavExportOutputPathForItem(folder, pcs[i]);
+			const int base = (int)((i * 100) / total);
+			const int span = (int)(((i + 1) * 100) / total) - base;
+			MpDecodeProgressSetSegment(base, span > 0 ? span : 1);
+			MpDecodeProgressSetPcmCap(95);
 			CString st;
 			st.Format(LL14(L"出力中... (%d/%d)", L"Exporting... (%d/%d)", L"Export en cours... (%d/%d)", L"Esportazione... (%d/%d)",
 				L"Exportando... (%d/%d)", L"내보내는 중... (%d/%d)", L"导出中... (%d/%d)", L"جاري التصدير... (%d/%d)",
@@ -383,9 +469,14 @@ void CWavExport::OnBnClickedWavExportExec()
 			pathForCompare += L".wav";
 		if (path != pathForCompare)
 			m_path.SetWindowText(path);
+		MpDecodeProgressSetSegment(0, 100);
+		MpDecodeProgressSetPcmCap(95);
 		ok = og->ExportToWav(&pc, path, loopCount, &opts);
 	}
 
+	if (ok && m_progress.GetSafeHwnd())
+		m_progress.SetPos(100);
+	MpDecodeProgressClearCb();
 	m_exec.EnableWindow(TRUE);
 	if (ok) {
 		CString msg = LL14(L"完了", L"Complete", L"Termine", L"Completato",

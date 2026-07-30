@@ -707,6 +707,11 @@
 #define IDC_MPP_HIST_L                  3501
 #define IDC_MPP_SAVEHIST                3502
 #define IDC_MPP_EDIT_L                  3503
+#define IDC_MPP_ANALYZE                 3504
+#define IDC_MPP_MODE_L                  3505
+#define IDC_MPP_MODE                    3506
+#define IDC_MPP_PROGRESS                3507
+#define IDC_MPP_PROG_L                  3508
 
 #define IDD_PIANOROLL_TUNE              204
 
@@ -880,6 +885,34 @@
 #define IDC_MP_CHEAT_TEXT               3667
 #define IDC_MP_CHEATBTN                 3668
 
+// 書き出しダイアログ: タグ/ジャケットのコピー
+#define IDC_WAVEXPORT_COPY_TAGS         3669
+#define IDC_TC_COPY_TAGS                3670
+#define IDC_WAVEXPORT_PROGRESS          3671
+#define IDC_WAVEXPORT_PROG_L            3672
+#define IDC_TC_PROGRESS                 3673
+#define IDC_TC_PROG_L                   3674
+#define IDC_WAVEXPORT_TITLE_L           3675
+#define IDC_WAVEXPORT_TITLE             3676
+#define IDC_WAVEXPORT_ARTIST_L          3677
+#define IDC_WAVEXPORT_ARTIST            3678
+#define IDC_WAVEXPORT_ALBUM_L           3679
+#define IDC_WAVEXPORT_ALBUM             3680
+#define IDC_WAVEXPORT_COVER_L           3681
+#define IDC_WAVEXPORT_COVER             3682
+#define IDC_WAVEXPORT_COVER_CLEAR       3683
+#define IDC_TC_TITLE_L                  3684
+#define IDC_TC_TITLE                    3685
+#define IDC_TC_ARTIST_L                 3686
+#define IDC_TC_ARTIST                   3687
+#define IDC_TC_ALBUM_L                  3688
+#define IDC_TC_ALBUM                    3689
+#define IDC_TC_COVER_L                  3690
+#define IDC_TC_COVER                    3691
+#define IDC_TC_COVER_CLEAR              3692
+#define IDC_WAVEXPORT_COVER_PIC         3693
+#define IDC_TC_COVER_PIC                3694
+
 #define ID_MP_SPEANA_BAR                32960
 #define ID_MP_SPEANA_MIRROR             32961
 #define ID_MP_SPEANA_WAVE               32962
@@ -896,13 +929,24 @@
 #define ID_DOUGA_FS                     32955
 #define ID_DOUGA_FADE                   32956
 
+// 動画画面 右クリック追加項目(コード生成メニュー)
+#define ID_DOUGA_TOPMOST                32963
+#define ID_DOUGA_ASPECT                 32964
+// 再生速度 0.5 / 0.75 / 1.0 / 1.25 / 1.5 / 2.0 の6連番。順序を崩さないこと。
+#define ID_DOUGA_SPEED_FIRST            32965
+#define ID_DOUGA_SPEED_LAST             32970
+
+// メディアプレイヤー バナー右クリック追加項目
+#define ID_MP_OPEN_ANALYZER             32971
+#define ID_MP_OPEN_PIANOROLL            32972
+
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        209
-#define _APS_NEXT_COMMAND_VALUE         32963
-#define _APS_NEXT_CONTROL_VALUE         3669
+#define _APS_NEXT_COMMAND_VALUE         32973
+#define _APS_NEXT_CONTROL_VALUE         3695
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

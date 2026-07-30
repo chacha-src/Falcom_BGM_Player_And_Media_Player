@@ -1,20 +1,19 @@
-﻿#pragma once
+#pragma once
 #include "afxwin.h"
 #include "CCustomControl.h"
 #include "oggDlg.h"
 #include <vector>
 
-// WavExportOptions は oggDlg.h で定義
-
-class CWavExport : public CCustomBlurDialogBase
+// mp3 / FLAC 書き出し。WAV書き出しと同じく一旦PCM化し、形式だけ変換する。
+class CTranscodeExport : public CCustomBlurDialogBase
 {
-	DECLARE_DYNAMIC(CWavExport)
+	DECLARE_DYNAMIC(CTranscodeExport)
 
 public:
-	CWavExport(CWnd* pParent = NULL);
-	virtual ~CWavExport();
+	CTranscodeExport(CWnd* pParent = NULL);
+	virtual ~CTranscodeExport();
 
-	enum { IDD = IDD_WAVEXPORT };
+	enum { IDD = IDD_TRANSCODE };
 	playlistdata0 pc;
 	std::vector<playlistdata0> pcs;
 	bool multiFile;
@@ -23,14 +22,25 @@ protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
 	DECLARE_MESSAGE_MAP()
 
+	void RefreshQualityLabels();
+	CString ExtForFormat(int fmt) const;
+	CString FilterForFormat(int fmt) const;
+	CString NormalizeOutPath(const CString& pathIn, int fmt) const;
+	CString OutputPathForItem(const CString& folderIn, const playlistdata0& item, int fmt) const;
+
 public:
 	virtual BOOL OnInitDialog();
-	afx_msg void OnBnClickedWavExportExec();
-	afx_msg void OnBnClickedWavExportBrowse();
-	afx_msg void OnBnClickedWavExportClose();
+	afx_msg void OnBnClickedExec();
+	afx_msg void OnBnClickedBrowse();
+	afx_msg void OnBnClickedClose();
+	afx_msg void OnCbnSelchangeFormat();
 	afx_msg void OnBnClickedCoverClear();
 	afx_msg void OnDropFiles(HDROP hDropInfo);
 
+	CCustomComboBox m_format;
+	CCustomStatic m_formatLabel;
+	CCustomComboBox m_quality;
+	CCustomStatic m_qualityLabel;
 	CCustomEdit m_loop;
 	CCustomEdit m_path;
 	CCustomStatic m_status;
@@ -62,3 +72,7 @@ public:
 
 	static void ExportProgressThunk(int percent, LPCTSTR status, void* user);
 };
+
+// wavPath: 本アプリの書き出しWAV(80byteヘッダ)。outPath: .mp3 / .flac
+BOOL EncodeWavToMp3(const CString& wavPath, const CString& outPath, int bitrateKbps);
+BOOL EncodeWavToFlac(const CString& wavPath, const CString& outPath, int compressionLevel);

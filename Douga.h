@@ -319,6 +319,10 @@ public:
 	afx_msg void OnDougaMenuMute();
 	afx_msg void OnDougaMenuFs();
 	afx_msg void OnDougaMenuFade();
+	afx_msg void OnDougaMenuTopmost();
+	afx_msg void OnDougaMenuAspect();
+	afx_msg void OnDougaMenuSpeed(UINT nID);
+	void ApplyDougaTopmost();
 };
 
 /////////////////////////////////////////////////////////////////////////////

@@ -577,6 +577,13 @@ BEGIN_MESSAGE_MAP(CPianoRoll, CCustomBlurDialogExBase)
     ON_COMMAND(IDM_ROLL_HARM_GHOST, &CPianoRoll::OnToggleHarmonicGhost)
     ON_COMMAND(IDM_ROLL_HARM_PROF, &CPianoRoll::OnToggleHarmonicProfile)
     ON_COMMAND(IDM_ROLL_TUNE, &CPianoRoll::OnOpenTuneDialog)
+    ON_COMMAND_RANGE(IDM_ROLL_VIEW_BASE, IDM_ROLL_VIEW_BASE + IDM_ROLL_VIEW_COUNT - 1, &CPianoRoll::OnViewModeCmd)
+    ON_COMMAND_RANGE(IDM_ROLL_KEYS_BASE, IDM_ROLL_KEYS_BASE + IDM_ROLL_KEYS_COUNT - 1, &CPianoRoll::OnKeyRangeCmd)
+    ON_COMMAND(IDM_ROLL_NOTENAME, &CPianoRoll::OnToggleNoteNames)
+    ON_WM_LBUTTONDOWN()
+    ON_WM_MOUSEMOVE()
+    ON_WM_LBUTTONUP()
+    ON_WM_MOUSEWHEEL()
     ON_MESSAGE(WM_PIANOROLL_SYNC, &CPianoRoll::OnSyncRequest)
     ON_MESSAGE(WM_PIANOROLL_ANALYSIS_DONE, &CPianoRoll::OnAnalysisDone)
 END_MESSAGE_MAP()
@@ -623,6 +630,25 @@ BOOL CPianoRoll::OnInitDialog()
     m_impulsiveGhostSuppressEnabled = (savedata.pianorollimpulse != 0);
     m_harmonicGhostGuardEnabled = (savedata.pianorollharmghost != 0);
     m_harmonicProfileGuardEnabled = (savedata.pianorollharmprof != 0);
+    m_viewMode = (savedata.pianorollviewmode == 1) ? 1 : 0;
+    m_keyRange = (savedata.pianorollkeyrange == 88) ? 88 : 108;
+    m_showNoteNames = (savedata.pianorollnotename != 0);
+    {
+        float yaw = (float)savedata.pianoroll3dyaw / 10.0f;
+        float pitch = (float)savedata.pianoroll3dpitch / 10.0f;
+        while (yaw > 180.0f) yaw -= 360.0f;
+        while (yaw < -180.0f) yaw += 360.0f;
+        if (pitch < kView3dPitchMin) pitch = kView3dPitchMin;
+        if (pitch > kView3dPitchMax) pitch = kView3dPitchMax;
+        m_view3dYawDeg = yaw;
+        m_view3dPitchDeg = pitch;
+        float zoom = (float)savedata.pianoroll3dzoom / 100.0f;
+        if (zoom < kView3dZoomMin) zoom = kView3dZoomMin;
+        if (zoom > kView3dZoomMax) zoom = kView3dZoomMax;
+        m_view3dZoom = zoom;
+    }
+    memset(m_wall3D, 0, sizeof(m_wall3D));
+    m_wall3DRows = 0;
     m_frozen = false;
 
     if (savedata.pianorollx != -1)
@@ -1638,6 +1664,7 @@ void CPianoRoll::MarkKeyVisualDirty()
 void CPianoRoll::InvalidateRegions(bool roll, bool key)
 {
     if (m_paintDisabled || !::IsWindow(m_hWnd)) return;
+    if (!roll && !key) return;
     CRect cr;
     GetClientRect(&cr);
     const int w = cr.Width();
@@ -1647,10 +1674,11 @@ void CPianoRoll::InvalidateRegions(bool roll, bool key)
     int keyH = h * 20 / 100;
     if (keyH < 50) keyH = 50;
     if (keyH > 100) keyH = 100;
-    const int rollH = h - keyH;
+    // 簡易3D はクライアント全面が1枚のシーン(鍵盤帯を分けない)
+    const int rollH = IsView3D() ? h : (h - keyH);
     if (rollH <= 0) return;
 
-    if (roll && key) {
+    if ((roll && key) || IsView3D()) {
         CCC_InvalidateRectMinusOverlay(m_hWnd, cr);
         return;
     }
@@ -1883,10 +1911,105 @@ void CPianoRoll::OnOpenTuneDialog()
     COggDlg_ShowPianoRollTune();
 }
 
+// 表示モード/鍵盤レンジ/ノート名の切替は、レイアウトが変わるためバッファを
+// 作り直す必要がある。アクリル(クロマキー)経路も下地が変わるので m_chromaReady を
+// 落として次の OnPaint で全面を貼り直させる(アナライザーと同じ手順)。
+void CPianoRoll::ApplyViewChangeRedraw()
+{
+    ReleasePaintBuffers();   // クロマキャッシュ/フォントもここで解放される
+    RequestFullRollRedraw();
+    if (::IsWindow(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CPianoRoll::SetViewMode(int mode)
+{
+    const int m = (mode == 1) ? 1 : 0;
+    if (m == m_viewMode) return;
+    m_viewMode = m;
+    savedata.pianorollviewmode = m;
+    if (m_rotDragging) {
+        m_rotDragging = false;
+        if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+    }
+    ApplyViewChangeRedraw();
+}
+
+void CPianoRoll::SetKeyRange(int keys)
+{
+    const int k = (keys == 88) ? 88 : 108;
+    if (k == m_keyRange) return;
+    m_keyRange = k;
+    savedata.pianorollkeyrange = k;
+    ApplyViewChangeRedraw();
+}
+
+void CPianoRoll::ToggleNoteNames()
+{
+    m_showNoteNames = !m_showNoteNames;
+    savedata.pianorollnotename = m_showNoteNames ? 1 : 0;
+    m_keyDirty = true;
+    if (IsView3D())
+        m_historyDirty = true;
+    if (::IsWindow(m_hWnd))
+        InvalidateRegions(IsView3D(), true);
+}
+
+void CPianoRoll::Save3DAngles()
+{
+    float yaw = m_view3dYawDeg;
+    while (yaw > 180.0f) yaw -= 360.0f;
+    while (yaw < -180.0f) yaw += 360.0f;
+    m_view3dYawDeg = yaw;
+    savedata.pianoroll3dyaw = (int)(yaw * 10.0f);
+    savedata.pianoroll3dpitch = (int)(m_view3dPitchDeg * 10.0f);
+    int z = (int)(m_view3dZoom * 100.0f + 0.5f);
+    if (z < 35) z = 35;
+    if (z > 400) z = 400;
+    savedata.pianoroll3dzoom = z;
+}
+
+void CPianoRoll::OnViewModeCmd(UINT nID)
+{
+    SetViewMode((int)(nID - IDM_ROLL_VIEW_BASE));
+}
+
+void CPianoRoll::OnKeyRangeCmd(UINT nID)
+{
+    SetKeyRange((nID == IDM_ROLL_KEYS_BASE) ? 88 : 108);
+}
+
+void CPianoRoll::OnToggleNoteNames()
+{
+    ToggleNoteNames();
+}
+
 void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
     CMenu menu;
     menu.CreatePopupMenu();
+
+    CMenu subView;
+    subView.CreatePopupMenu();
+    subView.AppendMenu(MF_STRING | (m_viewMode == 0 ? MF_CHECKED : 0), IDM_ROLL_VIEW_BASE + 0,
+        LL14(L"通常 (2D)", L"Normal (2D)", L"Normal (2D)", L"Normale (2D)", L"Normal (2D)", L"일반 (2D)", L"普通 (2D)", L"عادي (2D)", L"Обычный (2D)", L"Normal (2D)", L"Normal (2D)", L"Normaal (2D)", L"Zwykly (2D)", L"Normal (2D)"));
+    subView.AppendMenu(MF_STRING | (m_viewMode == 1 ? MF_CHECKED : 0), IDM_ROLL_VIEW_BASE + 1,
+        LL14(L"簡易3D", L"Soft 3D", L"3D simplifie", L"3D semplificato", L"3D simple", L"간이 3D", L"简易3D", L"ثلاثي الأبعاد مبسط", L"Простой 3D", L"Einfaches 3D", L"3D simples", L"Eenvoudig 3D", L"Uproszczone 3D", L"Basit 3B"));
+    menu.AppendMenu(MF_POPUP, (UINT_PTR)subView.Detach(),
+        LL14(L"表示モード", L"View mode", L"Mode d'affichage", L"Modalita di visualizzazione", L"Modo de visualizacion", L"표시 모드", L"显示模式", L"وضع العرض", L"Режим отображения", L"Anzeigemodus", L"Modo de exibicao", L"Weergavemodus", L"Tryb wyswietlania", L"Goruntuleme modu"));
+
+    CMenu subKeys;
+    subKeys.CreatePopupMenu();
+    subKeys.AppendMenu(MF_STRING | (m_keyRange == 88 ? MF_CHECKED : 0), IDM_ROLL_KEYS_BASE + 0,
+        LL14(L"88鍵 (A0～)", L"88 keys (A0-)", L"88 touches (A0-)", L"88 tasti (A0-)", L"88 teclas (A0-)", L"88건반 (A0-)", L"88键 (A0-)", L"88 مفتاحا (A0-)", L"88 клавиш (A0-)", L"88 Tasten (A0-)", L"88 teclas (A0-)", L"88 toetsen (A0-)", L"88 klawiszy (A0-)", L"88 tus (A0-)"));
+    subKeys.AppendMenu(MF_STRING | (m_keyRange != 88 ? MF_CHECKED : 0), IDM_ROLL_KEYS_BASE + 1,
+        LL14(L"108鍵 (全域)", L"108 keys (full)", L"108 touches (complet)", L"108 tasti (completo)", L"108 teclas (completo)", L"108건반 (전체)", L"108键 (全域)", L"108 مفتاحا (كامل)", L"108 клавиш (полный)", L"108 Tasten (voll)", L"108 teclas (completo)", L"108 toetsen (volledig)", L"108 klawiszy (pelny)", L"108 tus (tam)"));
+    menu.AppendMenu(MF_POPUP, (UINT_PTR)subKeys.Detach(),
+        LL14(L"鍵盤レンジ", L"Keyboard range", L"Etendue du clavier", L"Estensione tastiera", L"Rango del teclado", L"건반 범위", L"键盘范围", L"مدى لوحة المفاتيح", L"Диапазон клавиатуры", L"Tastaturumfang", L"Faixa do teclado", L"Toetsenbereik", L"Zakres klawiatury", L"Klavye araligi"));
+
+    menu.AppendMenu(MF_STRING | (m_showNoteNames ? MF_CHECKED : 0), IDM_ROLL_NOTENAME,
+        LL14(L"ノート名を表示", L"Show note names", L"Afficher les noms de notes", L"Mostra nomi delle note", L"Mostrar nombres de notas", L"음이름 표시", L"显示音名", L"إظهار أسماء النغمات", L"Показывать названия нот", L"Notennamen anzeigen", L"Mostrar nomes das notas", L"Notennamen tonen", L"Pokazuj nazwy nut", L"Nota adlarini goster"));
+    menu.AppendMenu(MF_SEPARATOR);
 
     CMenu subSpeed;
     subSpeed.CreatePopupMenu();
@@ -1976,13 +2099,60 @@ bool CPianoRoll::IsBlackKey(int midiNote) const
     return (r == 1 || r == 3 || r == 6 || r == 8 || r == 10);
 }
 
+// 表示する鍵の範囲 [lo, hi)。
+// 88鍵表示は「表示だけ」を A0(MIDI 21) 以上に絞る。Goertzel の解析鍵数は
+// 常に KEY_COUNT(108) のままで、検出処理には一切影響しない。
+void CPianoRoll::GetDisplayKeyRange(int& lo, int& hi) const
+{
+    if (m_keyRange == 88) {
+        lo = 21;            // A0
+        hi = KEY_COUNT;     // B7 まで(MIDI 108=C8 は解析範囲外)
+    }
+    else {
+        lo = 0;
+        hi = KEY_COUNT;
+    }
+}
+
+// 描画ループから 1 鍵ごとに数え直すと UI スレッドを無駄に食うのでキャッシュする
+void CPianoRoll::EnsureDisplayKeyCache() const
+{
+    if (m_dispWhiteTotal > 0 && m_dispCacheRange == m_keyRange) return;
+    int lo, hi; GetDisplayKeyRange(lo, hi);
+    int w = 0;
+    for (int i = 0; i < KEY_COUNT; ++i) {
+        if (i < lo || i >= hi || IsBlackKey(MIDI_BASE + i)) {
+            m_dispWhiteIdx[i] = -1;
+            continue;
+        }
+        m_dispWhiteIdx[i] = w++;
+    }
+    m_dispWhiteTotal = (w > 0) ? w : 1;
+    m_dispCacheRange = m_keyRange;
+}
+
+int CPianoRoll::DisplayWhiteKeyCount() const
+{
+    EnsureDisplayKeyCache();
+    return m_dispWhiteTotal;
+}
+
+int CPianoRoll::DisplayWhiteKeyIndex(int midiNote) const
+{
+    const int idx = midiNote - MIDI_BASE;
+    if (idx < 0 || idx >= KEY_COUNT) return -1;
+    EnsureDisplayKeyCache();
+    return m_dispWhiteIdx[idx];
+}
+
 void CPianoRoll::GetChromaticKeyRect(int keyIndex, int width, int& xL, int& xR) const
 {
-    if (keyIndex < 0) keyIndex = 0;
-    if (keyIndex >= KEY_COUNT) keyIndex = KEY_COUNT - 1;
     if (width <= 0) { xL = xR = 0; return; }
-    xL = (int)((keyIndex * (float)width) / (float)KEY_COUNT);
-    xR = (int)(((keyIndex + 1) * (float)width) / (float)KEY_COUNT);
+    int lo, hi; GetDisplayKeyRange(lo, hi);
+    if (keyIndex < lo || keyIndex >= hi) { xL = xR = 0; return; }  // 表示範囲外は描かせない
+    const int span = hi - lo;
+    xL = (int)(((keyIndex - lo) * (float)width) / (float)span);
+    xR = (int)(((keyIndex - lo + 1) * (float)width) / (float)span);
     if (xR <= xL) xR = xL + 1;
 }
 
@@ -1997,9 +2167,11 @@ int CPianoRoll::GetWhiteKeyIndex(int midiNote) const
 void CPianoRoll::GetWhiteKeyRect52(int midi, int width, int& xL, int& xR) const
 {
     if (width <= 0 || IsBlackKey(midi)) { xL = xR = 0; return; }
-    const int w = GetWhiteKeyIndex(midi);
-    xL = (int)(w * (float)width / (float)WHITE_KEY_COUNT);
-    xR = (int)((w + 1) * (float)width / (float)WHITE_KEY_COUNT);
+    const int w = DisplayWhiteKeyIndex(midi);
+    if (w < 0) { xL = xR = 0; return; }
+    const int total = DisplayWhiteKeyCount();
+    xL = (int)(w * (float)width / (float)total);
+    xR = (int)((w + 1) * (float)width / (float)total);
     if (xR <= xL) xR = xL + 1;
 }
 
@@ -2903,6 +3075,7 @@ void CPianoRoll::DrawHistoryGrid(CDC& dc, int width, int yFrom, int yTo) const
     ::SetDCPenColor(dc.GetSafeHdc(), RGB(34, 34, 34));
     for (int i = 1; i < KEY_COUNT; ++i) {
         int xL, xR; GetChromaticKeyRect(i, width, xL, xR);
+        if (xR <= xL) continue;   // 表示範囲外(88鍵表示時の下端など)
         dc.MoveTo(xL, yFrom);
         dc.LineTo(xL, yTo);
     }
@@ -3460,6 +3633,351 @@ bool CPianoRoll::RunAnalysisJob(const double* mono, int frameCount, int sampleRa
     }
 }
 
+// ============================================================================
+// 簡易3D 表示 (GDI のみ。OpenGL/Direct3D は使わない)
+//   ワールド座標: x=鍵盤の左右(-1..+1) / y=高さ(0=鍵盤面) / z=奥行き(0=手前)
+//   ヨー(Y軸) → ピッチ(X軸) → 透視除算 の順で画面座標へ落とす。
+//   Z バッファは持たず、奥の面から順に描く画家アルゴリズムで前後関係を作る。
+//   描画先は従来どおりオフスクリーン(m_rollDC)なので、ちらつきは出ない。
+// ============================================================================
+namespace PianoDraw3D
+{
+    static constexpr float KEY_FRONT_Z = 0.00f;    // 白鍵の手前端
+    static constexpr float KEY_BACK_Z = 0.55f;    // 鍵盤の奥端
+    static constexpr float BLACK_FRONT_Z = 0.24f;    // 黒鍵の手前端
+    static constexpr float BLACK_TOP_Y = 0.055f;   // 黒鍵の高さ
+    static constexpr float BODY_Y = -0.07f;   // 鍵盤の手前側面(ボディ)
+    static constexpr float WALL_GAP = 0.10f;    // 鍵盤奥端 〜 履歴ウォール先頭
+    static constexpr float ROW_DEPTH = 0.09f;    // 履歴1行あたりの奥行き
+    static constexpr float ROW_FILL = 0.80f;    // 行内でバーが占める割合
+    static constexpr float BAR_MAX_Y = 0.42f;    // ノートバーの最大高さ
+    static constexpr float METER_X0 = 1.06f;    // レベルメーターの開始位置(鍵盤の外側)
+    static constexpr float METER_W = 0.11f;
+    static constexpr float METER_MAX_Y = 0.80f;
+
+    static COLORREF Shade(COLORREF c, float f)
+    {
+        int r = (int)(GetRValue(c) * f + 0.5f);
+        int g = (int)(GetGValue(c) * f + 0.5f);
+        int b = (int)(GetBValue(c) * f + 0.5f);
+        if (r < 0) r = 0; else if (r > 255) r = 255;
+        if (g < 0) g = 0; else if (g > 255) g = 255;
+        if (b < 0) b = 0; else if (b > 255) b = 255;
+        // 背景と同じ RGB(20,20,20) はアクリル時に透過キーとして抜けてしまう
+        if (r == 20 && g == 20 && b == 20) b = 23;
+        return RGB(r, g, b);
+    }
+
+    // ループ内で CreatePen/CreateSolidBrush はしない(長時間再生で GDI が痩せ、
+    // EQ 描画まで巻き込んで重くなるため)。DC_BRUSH/DC_PEN の色差し替えで塗る。
+    static void FillQuad(CDC& dc, POINT* pts, COLORREF fill)
+    {
+        ::SetDCBrushColor(dc.GetSafeHdc(), fill);
+        ::SetDCPenColor(dc.GetSafeHdc(), fill);
+        dc.Polygon(pts, 4);
+    }
+}
+
+void CPianoRoll::ProjectView3D(const View3D& v, float x, float y, float z, POINT& out)
+{
+    const float rx = x * v.cosYaw - z * v.sinYaw;
+    const float rz = x * v.sinYaw + z * v.cosYaw;
+    const float ry2 = y * v.cosPitch + rz * v.sinPitch;
+    const float rz2 = rz * v.cosPitch - y * v.sinPitch;
+    float denom = v.camD + rz2;
+    if (denom < 0.30f) denom = 0.30f;   // カメラ背後へ回り込ませない
+    const float p = v.camD / denom;
+    out.x = (long)floorf(v.originX + rx * p * v.scale + 0.5f);
+    out.y = (long)floorf(v.originY - ry2 * p * v.scale + 0.5f);
+}
+
+void CPianoRoll::BuildView3D(int width, int height, View3D& v) const
+{
+    using namespace PianoDraw3D;
+    const float yaw = m_view3dYawDeg * (float)(M_PI / 180.0);
+    const float pit = m_view3dPitchDeg * (float)(M_PI / 180.0);
+    v.cosYaw = cosf(yaw);
+    v.sinYaw = sinf(yaw);
+    v.cosPitch = cosf(pit);
+    v.sinPitch = sinf(pit);
+    v.camD = 3.2f;
+
+    // 回すほどシーンの画面上の広がりが変わるので、固定倍率だと端が切れる。
+    // シーンを内包する2つの直方体の頂点を基準倍率で投影し、その外接矩形が
+    // クライアントに収まる倍率と原点を毎フレーム求める(自動フレーミング)。
+    const float kProbeScale = 1024.0f;
+    v.scale = kProbeScale;
+    v.originX = 0.0f;
+    v.originY = 0.0f;
+    const float farZ = KEY_BACK_Z + WALL_GAP + ROW_DEPTH * (float)VIEW3D_DEPTH;
+    int meterCh = m_showLevelMeter ? m_chMeterCount : 0;
+    if (meterCh > PIANO_METER_CH_MAX) meterCh = PIANO_METER_CH_MAX;
+    const int meterSlots = (meterCh + 1) / 2;
+    const float meterX = (meterSlots > 0) ? (METER_X0 + METER_W * (float)meterSlots) : 1.0f;
+    const float boxes[2][6] = {
+        // { xMin, xMax, yMin, yMax, zMin, zMax }
+        { -meterX, meterX, BODY_Y, METER_MAX_Y, KEY_FRONT_Z, KEY_BACK_Z },  // 鍵盤 + メーター
+        { -1.0f,   1.0f,   0.0f,   BAR_MAX_Y,   KEY_BACK_Z + WALL_GAP, farZ },  // 履歴ウォール
+    };
+    float minX = 1e9f, maxX = -1e9f, minY = 1e9f, maxY = -1e9f;
+    for (int b = 0; b < 2; ++b) {
+        for (int c = 0; c < 8; ++c) {
+            POINT p;
+            ProjectView3D(v,
+                (c & 1) ? boxes[b][1] : boxes[b][0],
+                (c & 2) ? boxes[b][3] : boxes[b][2],
+                (c & 4) ? boxes[b][5] : boxes[b][4], p);
+            const float fx = (float)p.x, fy = (float)p.y;
+            if (fx < minX) minX = fx;
+            if (fx > maxX) maxX = fx;
+            if (fy < minY) minY = fy;
+            if (fy > maxY) maxY = fy;
+        }
+    }
+    float bw = maxX - minX; if (bw < 1.0f) bw = 1.0f;
+    float bh = maxY - minY; if (bh < 1.0f) bh = 1.0f;
+    float s = (float)width * 0.96f * kProbeScale / bw;
+    const float sH = (float)height * 0.94f * kProbeScale / bh;
+    if (sH < s) s = sH;
+    if (s < 8.0f) s = 8.0f;
+    float zoom = m_view3dZoom;
+    if (zoom < kView3dZoomMin) zoom = kView3dZoomMin;
+    if (zoom > kView3dZoomMax) zoom = kView3dZoomMax;
+    s *= zoom;
+    v.scale = s;
+    v.originX = (float)width * 0.5f - (minX + maxX) * 0.5f / kProbeScale * s;
+    v.originY = (float)height * 0.5f - (minY + maxY) * 0.5f / kProbeScale * s;
+}
+
+// 直方体を「天面 + 手前の面」の2枚で描く。側面は省略(見た目の情報量に対して高い)。
+void CPianoRoll::DrawBox3D(CDC& dc, const View3D& v, float xL, float xR, float topY,
+    float z0, float z1, COLORREF col, float frontShade, float baseY)
+{
+    POINT q[4];
+    ProjectView3D(v, xL, topY, z0, q[0]);
+    ProjectView3D(v, xR, topY, z0, q[1]);
+    ProjectView3D(v, xR, topY, z1, q[2]);
+    ProjectView3D(v, xL, topY, z1, q[3]);
+    PianoDraw3D::FillQuad(dc, q, col);
+    if (topY > baseY) {
+        ProjectView3D(v, xL, baseY, z0, q[0]);
+        ProjectView3D(v, xR, baseY, z0, q[1]);
+        ProjectView3D(v, xR, topY, z0, q[2]);
+        ProjectView3D(v, xL, topY, z0, q[3]);
+        PianoDraw3D::FillQuad(dc, q, PianoDraw3D::Shade(col, frontShade));
+    }
+}
+
+// 3D 空間での鍵の左右端。白鍵は等幅、黒鍵は左隣の白鍵の境界へ寄せる。
+void CPianoRoll::KeyXSpan3D(int keyIndex, float& xL, float& xR) const
+{
+    xL = xR = 0.0f;
+    int lo, hi; GetDisplayKeyRange(lo, hi);
+    if (keyIndex < lo || keyIndex >= hi) return;
+    const int midi = MIDI_BASE + keyIndex;
+    const float wKey = 2.0f / (float)DisplayWhiteKeyCount();
+    if (!IsBlackKey(midi)) {
+        const int w = DisplayWhiteKeyIndex(midi);
+        if (w < 0) return;
+        xL = -1.0f + wKey * (float)w;
+        xR = xL + wKey;
+        return;
+    }
+    const int leftWhite = DisplayWhiteKeyIndex(midi - 1);   // 黒鍵の左隣は必ず白鍵
+    if (leftWhite < 0) return;
+    const float center = -1.0f + wKey * (float)(leftWhite + 1);
+    xL = center - wKey * 0.30f;
+    xR = center + wKey * 0.30f;
+}
+
+// 履歴リングから奥行き方向のサンプルを作る(固定長。可変長コンテナは使わない)
+void CPianoRoll::Capture3DWalls()
+{
+    EnterCriticalSection(&m_cs);
+    const int avail = m_historyCount;
+    int rows = 0;
+    for (int r = 0; r < VIEW3D_DEPTH; ++r) {
+        Wall3DRow& row = m_wall3D[r];
+        const int idx = r * VIEW3D_STRIDE;
+        if (idx >= avail) {
+            memset(row.level, 0, sizeof(row.level));
+            memset(row.band, 0, sizeof(row.band));
+            continue;
+        }
+        const NoteFrame& f = HistoryAt(idx);
+        for (int i = 0; i < KEY_COUNT; ++i) {
+            if (!f.active[i]) {
+                row.level[i] = 0;
+                row.band[i] = 0;
+                continue;
+            }
+            float dyn = f.dynLevel[i];
+            if (dyn <= 0.0f) dyn = 0.45f;
+            else if (dyn > 1.0f) dyn = 1.0f;
+            int lv = (int)(dyn * 254.0f) + 1;
+            if (lv > 255) lv = 255;
+            row.level[i] = (uint8_t)lv;
+            row.band[i] = f.bandMask[i] ? f.bandMask[i] : (uint8_t)(1u << KeyBandIndex(i));
+        }
+        rows = r + 1;
+    }
+    m_wall3DRows = rows;
+    LeaveCriticalSection(&m_cs);
+}
+
+void CPianoRoll::Draw3DWalls(CDC& dc, const View3D& v) const
+{
+    using namespace PianoDraw3D;
+    int lo, hi; GetDisplayKeyRange(lo, hi);
+    const float wallZ0 = KEY_BACK_Z + WALL_GAP;
+    const float farZ = wallZ0 + ROW_DEPTH * (float)VIEW3D_DEPTH;
+
+    // 奥行きの手掛かりに床のガイド線(C音のレーン + 一定間隔の横線)を引く
+    {
+        HGDIOBJ oldPen = dc.SelectObject(::GetStockObject(DC_PEN));
+        ::SetDCPenColor(dc.GetSafeHdc(), RGB(48, 48, 56));
+        for (int i = lo; i < hi; ++i) {
+            if ((MIDI_BASE + i) % 12 != 0) continue;
+            float xL, xR; KeyXSpan3D(i, xL, xR);
+            if (xR <= xL) continue;
+            POINT a, b;
+            ProjectView3D(v, xL, 0.0f, wallZ0, a);
+            ProjectView3D(v, xL, 0.0f, farZ, b);
+            dc.MoveTo(a); dc.LineTo(b);
+        }
+        ::SetDCPenColor(dc.GetSafeHdc(), RGB(38, 38, 46));
+        for (int r = 0; r <= VIEW3D_DEPTH; r += 8) {
+            const float z = wallZ0 + ROW_DEPTH * (float)r;
+            POINT a, b;
+            ProjectView3D(v, -1.0f, 0.0f, z, a);
+            ProjectView3D(v, 1.0f, 0.0f, z, b);
+            dc.MoveTo(a); dc.LineTo(b);
+        }
+        dc.SelectObject(oldPen);
+    }
+
+    // 奥の行から手前へ。行内も奥の鍵から描いて前後関係を保つ。
+    const bool descend = (v.sinYaw > 0.0f);
+    const int rows = (m_wall3DRows > VIEW3D_DEPTH) ? VIEW3D_DEPTH : m_wall3DRows;
+    const int span = hi - lo;
+    for (int r = rows - 1; r >= 0; --r) {
+        const Wall3DRow& row = m_wall3D[r];
+        const float z0 = wallZ0 + ROW_DEPTH * (float)r;
+        const float z1 = z0 + ROW_DEPTH * ROW_FILL;
+        const float fade = 1.0f - 0.55f * ((float)r / (float)(VIEW3D_DEPTH - 1));
+        for (int k = 0; k < span; ++k) {
+            const int i = descend ? (hi - 1 - k) : (lo + k);
+            const uint8_t lv = row.level[i];
+            if (!lv) continue;
+            float xL, xR; KeyXSpan3D(i, xL, xR);
+            if (xR <= xL) continue;
+            const float st = (float)lv / 255.0f;
+            const COLORREF base = PianoDraw::LocalKeyColor(i, st * 3.0f, IsBlackKey(MIDI_BASE + i));
+            DrawBox3D(dc, v, xL, xR, 0.015f + st * BAR_MAX_Y, z0, z1, Shade(base, fade), 0.60f);
+        }
+    }
+}
+
+void CPianoRoll::Draw3DKeyboard(CDC& dc, const View3D& v, const bool* actives) const
+{
+    using namespace PianoDraw3D;
+    int lo, hi; GetDisplayKeyRange(lo, hi);
+    const int span = hi - lo;
+    const bool descend = (v.sinYaw > 0.0f);
+
+    for (int k = 0; k < span; ++k) {
+        const int i = descend ? (hi - 1 - k) : (lo + k);
+        const int midi = MIDI_BASE + i;
+        if (IsBlackKey(midi)) continue;
+        float xL, xR; KeyXSpan3D(i, xL, xR);
+        if (xR <= xL) continue;
+        const bool on = (actives && actives[i]);
+        const float gap = (xR - xL) * 0.06f;
+        const float topY = on ? -0.012f : 0.0f;   // 押下時はわずかに沈ませる
+        const COLORREF top = on ? PianoDraw::LocalKeyColor(i, 2.5f, false) : RGB(232, 232, 236);
+        DrawBox3D(dc, v, xL + gap, xR - gap, topY, KEY_FRONT_Z, KEY_BACK_Z, top, 0.72f, BODY_Y);
+    }
+    // 黒鍵は白鍵より高い位置にあるので後から重ねる
+    for (int k = 0; k < span; ++k) {
+        const int i = descend ? (hi - 1 - k) : (lo + k);
+        const int midi = MIDI_BASE + i;
+        if (!IsBlackKey(midi)) continue;
+        float xL, xR; KeyXSpan3D(i, xL, xR);
+        if (xR <= xL) continue;
+        const bool on = (actives && actives[i]);
+        const float topY = on ? (BLACK_TOP_Y - 0.012f) : BLACK_TOP_Y;
+        const COLORREF top = on ? PianoDraw::LocalKeyColor(i, 2.5f, true) : RGB(40, 40, 48);
+        DrawBox3D(dc, v, xL, xR, topY, BLACK_FRONT_Z, KEY_BACK_Z, top, 0.55f);
+    }
+
+    // ノート名は白鍵の手前側へ。文字が潰れる幅では描かない。
+    if (!m_showNoteNames || !m_paintFontsReady || !m_fontKeyNote.GetSafeHandle()) return;
+    CFont* pOld = dc.SelectObject(CFont::FromHandle((HFONT)m_fontKeyNote.GetSafeHandle()));
+    dc.SetBkMode(TRANSPARENT);
+    dc.SetTextColor(RGB(70, 70, 78));
+    for (int i = lo; i < hi; ++i) {
+        const int midi = MIDI_BASE + i;
+        const wchar_t* name = PianoDraw::WhiteKeyLabel(midi);
+        if (!name) continue;
+        float xL, xR; KeyXSpan3D(i, xL, xR);
+        if (xR <= xL) continue;
+        POINT a, b;
+        ProjectView3D(v, xL, 0.0f, KEY_FRONT_Z + 0.10f, a);
+        ProjectView3D(v, xR, 0.0f, KEY_FRONT_Z + 0.10f, b);
+        int x0 = (int)a.x, x1 = (int)b.x;
+        if (x1 < x0) { const int t = x0; x0 = x1; x1 = t; }
+        if (x1 - x0 < 9) continue;
+        CRect tr(x0, (int)a.y - 18, x1, (int)a.y + 2);
+        dc.DrawText(name, -1, &tr, DT_CENTER | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
+    }
+    dc.SelectObject(pOld);
+}
+
+void CPianoRoll::Draw3DMeters(CDC& dc, const View3D& v, const float* chFill, int chCount) const
+{
+    using namespace PianoDraw3D;
+    if (!m_showLevelMeter || !chFill || chCount <= 0) return;
+    const int n = (chCount > PIANO_METER_CH_MAX) ? PIANO_METER_CH_MAX : chCount;
+    for (int c = 0; c < n; ++c) {
+        const bool right = ((c & 1) != 0);          // 偶数ch=左 / 奇数ch=右
+        const int slot = c / 2;
+        const float x0 = METER_X0 + METER_W * (float)slot;
+        const float x1 = x0 + METER_W * 0.78f;
+        const float xa = right ? x0 : -x1;
+        const float xb = right ? x1 : -x0;
+        float fill = chFill[c];
+        if (fill < 0.0f) fill = 0.0f; else if (fill > 1.0f) fill = 1.0f;
+        COLORREF col = RGB(70, 175, 95);
+        if (n == 2 && c == 1) col = RGB(175, 120, 70);
+        else if (n > 2) col = RGB(90 + c * 12, 140, 180 - c * 8);
+        DrawBox3D(dc, v, xa, xb, METER_MAX_Y, KEY_FRONT_Z, KEY_BACK_Z, RGB(50, 50, 58), 0.62f);
+        DrawBox3D(dc, v, xa, xb, 0.02f + fill * (METER_MAX_Y - 0.02f),
+            KEY_FRONT_Z, KEY_BACK_Z, col, 0.62f);
+    }
+}
+
+void CPianoRoll::Draw3DSceneToBuffer(CDC& dc, int width, int height,
+    const bool* activesCopy, const float* chFillCopy, int chCountCopy) const
+{
+    // 背景はロールと同じ色。アクリル時のクロマキー(PIANO_CHROMA_KEY)と一致させ、
+    // アナライザーと同様に下地(ぼかし)が透ける状態を保つ。
+    dc.FillSolidRect(0, 0, width, height, PIANO_CHROMA_KEY);
+    if (width < 48 || height < 48) return;
+
+    View3D v;
+    BuildView3D(width, height, v);
+
+    CGdiObject* pOldBrush = dc.SelectStockObject(DC_BRUSH);
+    CGdiObject* pOldPen = dc.SelectStockObject(DC_PEN);
+
+    Draw3DWalls(dc, v);                                  // 奥(履歴)
+    Draw3DMeters(dc, v, chFillCopy, chCountCopy);        // 鍵盤の左右
+    Draw3DKeyboard(dc, v, activesCopy);                  // 手前(鍵盤)
+
+    if (pOldBrush) dc.SelectObject(pOldBrush);
+    if (pOldPen) dc.SelectObject(pOldPen);
+}
+
 void CPianoRoll::DrawKeyboardToBuffer(CDC& memDC, int width, int keySectionH, int keyH,
     const bool* activesCopy, const uint8_t* bandMaskCopy, const float laneStrengthCopy[KEY_COUNT][3],
     const float* chFillCopy, int chCountCopy, const uint8_t* exprCopy) const
@@ -3564,18 +4082,22 @@ void CPianoRoll::DrawKeyboardToBuffer(CDC& memDC, int width, int keySectionH, in
         memDC.SetBkMode(TRANSPARENT);
         CFont* pOldFont = memDC.SelectObject(CFont::FromHandle((HFONT)m_fontKeyNote.GetSafeHandle()));
         memDC.SetTextColor(RGB(70, 70, 75));
-        for (int i = 0; i < KEY_COUNT; ++i) {
-            const int midi = MIDI_BASE + i;
-            const wchar_t* name = WhiteKeyLabel(midi); if (!name) continue;
-            int xL, xR; GetWhiteKeyRect52(midi, width, xL, xR);
-            CRect tr(xL + 2, keySectionH - labelH - 2, xR - 2, keySectionH - 2);
-            memDC.DrawText(name, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if (m_showNoteNames) {
+            for (int i = 0; i < KEY_COUNT; ++i) {
+                const int midi = MIDI_BASE + i;
+                const wchar_t* name = WhiteKeyLabel(midi); if (!name) continue;
+                int xL, xR; GetWhiteKeyRect52(midi, width, xL, xR);
+                if (xR <= xL) continue;
+                CRect tr(xL + 2, keySectionH - labelH - 2, xR - 2, keySectionH - 2);
+                memDC.DrawText(name, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            }
         }
         memDC.SelectObject(CFont::FromHandle((HFONT)m_fontKeyOct.GetSafeHandle()));
         memDC.SetTextColor(RGB(100, 100, 110));
         for (int i = 0; i < KEY_COUNT; ++i) {
             const int midi = MIDI_BASE + i; if (midi % 12 != 0) continue;
             int xL, xR; GetWhiteKeyRect52(midi, width, xL, xR);
+            if (xR <= xL) continue;
             CString oct; oct.Format(L"%d", MidiOctaveNumber(midi));
             CRect tr(xL + 2, 1, xR - 2, labelH + 1);
             memDC.DrawText(oct, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -3618,17 +4140,19 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
 
 #if CCUSTOM_AERO_SUPPORT
     if (savedata.aero == 1 && CCC_IsWin11() && m_chromaReady && m_chromaCache.hdcDib) {
+        // 追従オーバーレイのヘッダー復元が凡例矩形を潰すため、凡例は Bake の後に載せる。
+        BakeMainFollowOverlayIntoChroma(w, h, rollH, keySectionH);
         if (haveLegend) {
-            // 合成は m_legendBgDC のみ（画面へ出さない）。UpdateRect で α を確定する。
             DrawExprLegend(dc, w, rollH, false);
             if (m_legendBgDC.GetSafeHdc() && lgPanel.Width() > 0 && lgPanel.Height() > 0) {
                 m_chromaCache.UpdateRect(m_legendBgDC.GetSafeHdc(),
                     0, 0, lgPanel.left, lgPanel.top,
                     lgPanel.Width(), lgPanel.Height(), PIANO_CHROMA_KEY);
+                m_chromaCache.MakeRectOpaque(lgPanel.left, lgPanel.top, lgPanel.Width(), lgPanel.Height());
             }
         }
-        BakeMainFollowOverlayIntoChroma(w, h, rollH, keySectionH);
-        if (m_rollReady && m_keyBufReady) {
+        // 簡易3Dは鍵盤帯が無いので全面 Blit。2Dはロール+鍵盤が揃っていれば全面。
+        if (m_rollReady && (m_keyBufReady || keySectionH <= 0)) {
             m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, 0, w, h);
             return;
         }
@@ -3788,11 +4312,14 @@ void CPianoRoll::OnPaint()
         return;
     }
 
+    // 簡易3D はクライアント全面を1枚のシーンとして扱う(鍵盤帯を分けない)。
+    // 2D(既定)のときの分割・スクロール経路は従来のまま。
+    const bool view3D = IsView3D();
     int keyH = h * 20 / 100;
     if (keyH < 50) keyH = 50; if (keyH > 100) keyH = 100;
-    const int rollH = h - keyH;
+    const int rollH = view3D ? h : (h - keyH);
     const int keySectionH = h - rollH;
-    if (rollH <= 0 || keySectionH <= 0) {
+    if (rollH <= 0 || (!view3D && keySectionH <= 0)) {
         InterlockedExchange(&m_analysisDonePosted, 0);
         InterlockedExchange(&m_syncPosted, 0);
         return;
@@ -3806,15 +4333,16 @@ void CPianoRoll::OnPaint()
         LeaveCriticalSection(&m_cs);
         const bool needBufUpdate = (pendingQuick > 0) || m_historyDirty || m_keyDirty || m_meterDirty
             || (InterlockedCompareExchange(&m_analysisPresentDirty, 0, 0) != 0);
-        if (!needBufUpdate && CCC_MainLockPreferQuickPresent() && m_rollReady && m_keyBufReady
-            && m_rollW == w && m_rollH == rollH && m_keyW == w && m_keyH == keySectionH) {
+        const bool keyBufOk = view3D || (m_keyBufReady && m_keyW == w && m_keyH == keySectionH);
+        if (!needBufUpdate && CCC_MainLockPreferQuickPresent() && m_rollReady && keyBufOk
+            && m_rollW == w && m_rollH == rollH) {
             PresentClientFromBuffers(dc, w, h, rollH, keySectionH);
             return;
         }
     }
 
     EnsurePaintFonts(w, keyH, rollH);
-    if (!EnsureRollBuffer(dc, w, rollH) || !EnsureKeyBuffer(dc, w, keySectionH)) {
+    if (!EnsureRollBuffer(dc, w, rollH) || (!view3D && !EnsureKeyBuffer(dc, w, keySectionH))) {
         InterlockedExchange(&m_analysisDonePosted, 0);
         InterlockedExchange(&m_syncPosted, 0);
         return;
@@ -3847,14 +4375,27 @@ void CPianoRoll::OnPaint()
     LeaveCriticalSection(&m_cs);
 
     const bool rollDirty = m_historyDirty;
-    const bool needKeyDraw = m_keyDirty || !m_keyBufReady;
+    const bool needKeyDraw = !view3D && (m_keyDirty || !m_keyBufReady);
     bool didRollUpdate = false;
     bool didRollScroll = false;
     bool needAnotherRollFrame = false;
     bool didMeterOnly = false;
 
+    // 簡易3D は差分スクロールを持たない。毎フレーム、シーンを丸ごと描き直す。
+    if (view3D) {
+        Capture3DWalls();
+        Draw3DSceneToBuffer(m_rollDC, w, rollH, activesCopy, chFillCopy, chCountCopy);
+        EnterCriticalSection(&m_cs);
+        m_framesPending = 0;
+        LeaveCriticalSection(&m_cs);
+        m_rollScrollValid = false;
+        m_rollReady = true;
+        m_keyBufReady = false;
+        didRollUpdate = true;
+        didRollScroll = false;
+    }
     // pending 分は1回の BitBlt スクロールで消化（n 回フル転送しない）。
-    if (pending > 0 && m_rollReady) {
+    else if (pending > 0 && m_rollReady) {
         int n = pending;
         if (n > 3) n = 3;
         NoteFrame histSnap[3];
@@ -3937,6 +4478,7 @@ void CPianoRoll::OnPaint()
                     const int midi = MIDI_BASE + i;
                     if (midi % 12 != 0) continue;
                     int xL, xR; GetWhiteKeyRect52(midi, w, xL, xR);
+                    if (xR <= xL) continue;
                     CString oct; oct.Format(L"%d", PianoDraw::MidiOctaveNumber(midi));
                     CRect tr(xL + 2, 1, xR - 2, labelH + 1);
                     m_keyDC.DrawText(oct, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -3994,7 +4536,10 @@ void CPianoRoll::OnPaint()
                     m_chromaCache.UpdateRect(m_rollDC.GetSafeHdc(), 0, 0, 0, 0, w, rollH, PIANO_CHROMA_KEY);
                 }
             }
-            if (needKeyDraw || !m_chromaReady)
+            if (keySectionH <= 0) {
+                // 簡易3D: 鍵盤帯を持たないので更新するのはロール面(=全面)だけ
+            }
+            else if (needKeyDraw || !m_chromaReady)
                 m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, keySectionH, PIANO_CHROMA_KEY);
             else if (didMeterOnly) {
                 const int labelH = min(16, keyH / 4);
@@ -4012,7 +4557,8 @@ void CPianoRoll::OnPaint()
 
     if (didRollUpdate)
         m_historyDirty = false;
-    if (needKeyDraw || didMeterOnly) {
+    if (needKeyDraw || didMeterOnly || view3D) {
+        // 簡易3D は鍵盤もメーターも同じシーンへ描いているのでここで落とす
         m_keyDirty = false;
         m_meterDirty = false;
     }
@@ -4156,7 +4702,111 @@ void CPianoRoll::OnClose()
     DestroyWindow();
 }
 
+// 簡易3D 表示中のドラッグで視点を回す。2D 表示中は何もせず基底へ渡すので、
+// 従来のウィンドウドラッグ/「メインに追従」チェックの挙動は変わらない。
+void CPianoRoll::OnLButtonDown(UINT nFlags, CPoint point)
+{
+    if (IsView3D() && !CCC_MainLockOverlayHitTest(m_hWnd, point)) {
+        m_rotDragging = true;
+        m_rotDragOrigin = point;
+        m_rotDragYaw0 = m_view3dYawDeg;
+        m_rotDragPitch0 = m_view3dPitchDeg;
+        SetCapture();
+        return;   // 基底のウィンドウドラッグへは渡さない
+    }
+    CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
+}
+
+void CPianoRoll::OnMouseMove(UINT nFlags, CPoint point)
+{
+    if (m_rotDragging) {
+        if (!(nFlags & MK_LBUTTON)) {
+            m_rotDragging = false;
+            if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+            Save3DAngles();
+            return;
+        }
+        float yaw = m_rotDragYaw0 + (float)(point.x - m_rotDragOrigin.x) * 0.35f;
+        float pitch = m_rotDragPitch0 - (float)(point.y - m_rotDragOrigin.y) * 0.30f;
+        while (yaw > 180.0f) yaw -= 360.0f;
+        while (yaw < -180.0f) yaw += 360.0f;
+        if (pitch < kView3dPitchMin) pitch = kView3dPitchMin;
+        if (pitch > kView3dPitchMax) pitch = kView3dPitchMax;
+        if (yaw != m_view3dYawDeg || pitch != m_view3dPitchDeg) {
+            m_view3dYawDeg = yaw;
+            m_view3dPitchDeg = pitch;
+            m_historyDirty = true;
+#if CCUSTOM_AERO_SUPPORT
+            m_chromaReady = false;   // 下地が全面変わるのでクロマを貼り直す
+#endif
+            if (::IsWindow(m_hWnd))
+                Invalidate(FALSE);
+        }
+        return;
+    }
+    CCustomBlurDialogExBase::OnMouseMove(nFlags, point);
+}
+
+void CPianoRoll::OnLButtonUp(UINT nFlags, CPoint point)
+{
+    if (m_rotDragging) {
+        m_rotDragging = false;
+        if (::GetCapture() == m_hWnd) ::ReleaseCapture();
+        Save3DAngles();
+        return;
+    }
+    CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
+}
+
+BOOL CPianoRoll::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
+{
+    UNREFERENCED_PARAMETER(nFlags);
+    UNREFERENCED_PARAMETER(pt);
+    if (!IsView3D())
+        return CCustomBlurDialogExBase::OnMouseWheel(nFlags, zDelta, pt);
+
+    // 上へ回す=拡大。1ノッチあたり約10%。
+    float zoom = m_view3dZoom;
+    if (zDelta > 0)
+        zoom *= 1.10f;
+    else if (zDelta < 0)
+        zoom /= 1.10f;
+    if (zoom < kView3dZoomMin) zoom = kView3dZoomMin;
+    if (zoom > kView3dZoomMax) zoom = kView3dZoomMax;
+    if (zoom != m_view3dZoom) {
+        m_view3dZoom = zoom;
+        Save3DAngles();
+        m_historyDirty = true;
+#if CCUSTOM_AERO_SUPPORT
+        m_chromaReady = false;
+#endif
+        if (::IsWindow(m_hWnd))
+            Invalidate(FALSE);
+    }
+    return TRUE;
+}
+
 BOOL CPianoRoll::PreTranslateMessage(MSG* pMsg)
 {
+    // V=表示モード切替 / N=ノート名。修飾キー併用時と入力コントロール上では既定処理へ。
+    bool textFocus = false;
+    if (pMsg->message == WM_KEYDOWN) {
+        wchar_t cls[32] = { 0 };
+        HWND hFocus = ::GetFocus();
+        if (hFocus && ::GetClassName(hFocus, cls, 32) > 0)
+            textFocus = (_wcsicmp(cls, L"Edit") == 0 || _wcsicmp(cls, L"ComboBox") == 0);
+    }
+    if (pMsg->message == WM_KEYDOWN && !textFocus
+        && !(::GetKeyState(VK_CONTROL) & 0x8000)
+        && !(::GetKeyState(VK_MENU) & 0x8000)) {
+        if (pMsg->wParam == 'V') {
+            SetViewMode(IsView3D() ? 0 : 1);
+            return TRUE;
+        }
+        if (pMsg->wParam == 'N') {
+            ToggleNoteNames();
+            return TRUE;
+        }
+    }
     return CCustomBlurDialogExBase::PreTranslateMessage(pMsg);
 }

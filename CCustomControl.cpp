@@ -6703,6 +6703,370 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
 // ============================================================================
 // カスタムグループボックスコントロール
 // ============================================================================
+// ============================================================================
+// CCustomProgressCtrl
+// ============================================================================
+IMPLEMENT_DYNAMIC(CCustomProgressCtrl, CWnd)
+
+BEGIN_MESSAGE_MAP(CCustomProgressCtrl, CWnd)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+END_MESSAGE_MAP()
+
+namespace {
+COLORREF ProgLerp(COLORREF a, COLORREF b, double t)
+{
+	if (t < 0) t = 0;
+	if (t > 1) t = 1;
+	return RGB(
+		(int)(GetRValue(a) + (GetRValue(b) - GetRValue(a)) * t + 0.5),
+		(int)(GetGValue(a) + (GetGValue(b) - GetGValue(a)) * t + 0.5),
+		(int)(GetBValue(a) + (GetBValue(b) - GetBValue(a)) * t + 0.5));
+}
+
+COLORREF ProgLighten(COLORREF c, int add)
+{
+	return RGB(
+		(std::min)(255, GetRValue(c) + add),
+		(std::min)(255, GetGValue(c) + add),
+		(std::min)(255, GetBValue(c) + add));
+}
+
+COLORREF ProgDarken(COLORREF c, int sub)
+{
+	return RGB(
+		(std::max)(0, GetRValue(c) - sub),
+		(std::max)(0, GetGValue(c) - sub),
+		(std::max)(0, GetBValue(c) - sub));
+}
+} // namespace
+
+CCustomProgressCtrl::CCustomProgressCtrl()
+	: m_bAutoDelete(FALSE)
+	, m_nMin(0), m_nMax(100), m_nPos(0)
+	, m_bShowPercent(TRUE)
+	, m_bAeroMode(FALSE)
+	, m_clrTrack(RGB(255, 236, 246))
+	, m_clrFill0(RGB(255, 170, 200))
+	, m_clrFill1(RGB(200, 120, 220))
+{
+	m_brBackground.CreateSolidBrush(COLOR_DIALOG_BG);
+}
+
+CCustomProgressCtrl::~CCustomProgressCtrl()
+{
+	if (m_brBackground.GetSafeHandle())
+		m_brBackground.DeleteObject();
+	if (m_fontPct.GetSafeHandle())
+		m_fontPct.DeleteObject();
+}
+
+BOOL CCustomProgressCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID)
+{
+	// CS_HREDRAW|VREDRAW は部分更新時に重ね描きしやすいので外す
+	CString cls = AfxRegisterWndClass(CS_DBLCLKS,
+		::LoadCursor(NULL, IDC_ARROW), (HBRUSH)(COLOR_BTNFACE + 1), NULL);
+	return CWnd::Create(cls, _T(""), dwStyle | WS_CHILD, rect, pParentWnd, nID);
+}
+
+void CCustomProgressCtrl::PostNcDestroy()
+{
+	CWnd::PostNcDestroy();
+	if (m_bAutoDelete) delete this;
+}
+
+void CCustomProgressCtrl::SetRange(int nLower, int nUpper)
+{
+	if (nUpper < nLower) { int t = nLower; nLower = nUpper; nUpper = t; }
+	m_nMin = nLower;
+	m_nMax = nUpper;
+	if (m_nPos < m_nMin) m_nPos = m_nMin;
+	if (m_nPos > m_nMax) m_nPos = m_nMax;
+	if (GetSafeHwnd()) Invalidate(FALSE);
+}
+
+void CCustomProgressCtrl::GetRange(int& nLower, int& nUpper) const
+{
+	nLower = m_nMin;
+	nUpper = m_nMax;
+}
+
+int CCustomProgressCtrl::SetPos(int nPos)
+{
+	const int old = m_nPos;
+	if (nPos < m_nMin) nPos = m_nMin;
+	if (nPos > m_nMax) nPos = m_nMax;
+	if (nPos != m_nPos) {
+		m_nPos = nPos;
+		// UpdateWindow は呼び出し側の PeekMessage と競合してちらつくので Invalidate のみ
+		if (GetSafeHwnd())
+			Invalidate(FALSE);
+	}
+	return old;
+}
+
+void CCustomProgressCtrl::SetColors(COLORREF track, COLORREF fillStart, COLORREF fillEnd)
+{
+	m_clrTrack = track;
+	m_clrFill0 = fillStart;
+	m_clrFill1 = fillEnd;
+	if (GetSafeHwnd()) Invalidate(FALSE);
+}
+
+void CCustomProgressCtrl::PaintClient(CDC& dc, const CRect& r)
+{
+	if (r.Width() <= 0 || r.Height() <= 0) return;
+	dc.FillSolidRect(&r, COLOR_DIALOG_BG);
+
+	CRect track = r;
+	track.DeflateRect(2, 3);
+	if (track.Width() < 4 || track.Height() < 4) return;
+	const int rr = (std::max)(4, track.Height() / 2);
+
+	// うっすら影
+	{
+		CRect sh = track;
+		sh.OffsetRect(0, 1);
+		CBrush brSh(RGB(230, 200, 214));
+		CPen penNull(PS_NULL, 0, RGB(0, 0, 0));
+		CPen* op = dc.SelectObject(&penNull);
+		CBrush* ob = dc.SelectObject(&brSh);
+		dc.RoundRect(&sh, CPoint(rr, rr));
+		dc.SelectObject(op);
+		dc.SelectObject(ob);
+	}
+
+	CPen penEdge(PS_SOLID, 1, RGB(232, 170, 198));
+	CBrush brTrack(m_clrTrack);
+	CPen* oldPen = dc.SelectObject(&penEdge);
+	CBrush* oldBr = dc.SelectObject(&brTrack);
+	dc.RoundRect(&track, CPoint(rr, rr));
+
+	const int span = (std::max)(1, m_nMax - m_nMin);
+	const double ratio = (double)(m_nPos - m_nMin) / (double)span;
+	const int pct = (int)(ratio * 100.0 + 0.5);
+	int fillW = (int)(track.Width() * ratio + 0.5);
+	if (m_nPos > m_nMin && fillW < (std::min)(track.Width(), track.Height()))
+		fillW = (std::min)(track.Width(), track.Height());
+	if (fillW > track.Width()) fillW = track.Width();
+
+	if (fillW > 0) {
+		CRect fill = track;
+		fill.right = fill.left + fillW;
+
+		CRgn clip;
+		clip.CreateRoundRectRgn(track.left, track.top, track.right + 1, track.bottom + 1, rr * 2, rr * 2);
+		const int oldClip = dc.SelectClipRgn(&clip);
+
+		// 3色キャンディグラデ (peach → pink → lilac) + 縦方向の陰影 + 斜め縞
+		const COLORREF midCol = ProgLerp(m_clrFill0, m_clrFill1, 0.45);
+		const COLORREF peach = ProgLighten(m_clrFill0, 18);
+		const int h = fill.Height();
+		const int yTop = fill.top;
+		const int yMid1 = fill.top + (std::max)(1, h / 3);
+		const int yMid2 = fill.top + (std::max)(2, h * 2 / 3);
+		const int yBot = fill.bottom;
+		for (int x = fill.left; x < fill.right; ++x) {
+			const double tx = (fill.Width() <= 1) ? 1.0
+				: (double)(x - fill.left) / (double)(fill.Width() - 1);
+			COLORREF base;
+			if (tx < 0.5)
+				base = ProgLerp(peach, midCol, tx * 2.0);
+			else
+				base = ProgLerp(midCol, m_clrFill1, (tx - 0.5) * 2.0);
+			if ((((x - fill.left) + (fill.top)) / 7) & 1)
+				base = ProgLighten(base, 12);
+			dc.FillSolidRect(x, yTop, 1, yMid1 - yTop, ProgLighten(base, 28));
+			dc.FillSolidRect(x, yMid1, 1, yMid2 - yMid1, base);
+			dc.FillSolidRect(x, yMid2, 1, yBot - yMid2, ProgDarken(base, 22));
+		}
+
+		// 大きめツヤ（上半分の楕円ハイライト）
+		{
+			CRect gloss = fill;
+			gloss.DeflateRect(2, 1);
+			gloss.bottom = gloss.top + (std::max)(3, gloss.Height() * 2 / 5);
+			CBrush brGloss(RGB(255, 255, 255));
+			CPen penNull(PS_NULL, 0, RGB(0, 0, 0));
+			CPen* op = dc.SelectObject(&penNull);
+			CBrush* ob = dc.SelectObject(&brGloss);
+			// 半透明風: 白を薄く重ねる代わりに明るいピンクで楕円
+			CBrush brGloss2(RGB(255, 230, 242));
+			dc.SelectObject(&brGloss2);
+			dc.Ellipse(&gloss);
+			dc.SelectObject(op);
+			dc.SelectObject(ob);
+		}
+
+		// 先端のキャンディ玉
+		if (fillW >= track.Height()) {
+			const int rad = track.Height() / 2;
+			const int cx = fill.right - rad;
+			const int cy = track.top + rad;
+			CRect orb(cx - rad + 1, cy - rad + 1, cx + rad, cy + rad);
+			CBrush brOrb(ProgLighten(m_clrFill1, 25));
+			CPen penOrb(PS_SOLID, 1, ProgDarken(m_clrFill1, 20));
+			CPen* op = dc.SelectObject(&penOrb);
+			CBrush* ob = dc.SelectObject(&brOrb);
+			dc.Ellipse(&orb);
+			CRect hi = orb;
+			hi.DeflateRect(rad / 2, rad / 2);
+			hi.OffsetRect(-1, -1);
+			CBrush brHi(RGB(255, 255, 255));
+			dc.SelectObject(&brHi);
+			dc.SelectStockObject(NULL_PEN);
+			if (hi.Width() > 1 && hi.Height() > 1)
+				dc.Ellipse(&hi);
+			dc.SelectObject(op);
+			dc.SelectObject(ob);
+		}
+
+		(void)oldClip;
+		dc.SelectClipRgn(NULL);
+
+		// 枠を描き直し
+		dc.SelectObject(&penEdge);
+		dc.SelectStockObject(NULL_BRUSH);
+		dc.RoundRect(&track, CPoint(rr, rr));
+		// 内側の白い縁取り
+		CRect inner = track;
+		inner.DeflateRect(1, 1);
+		CPen penIn(PS_SOLID, 1, RGB(255, 245, 250));
+		dc.SelectObject(&penIn);
+		dc.RoundRect(&inner, CPoint((std::max)(2, rr - 1), (std::max)(2, rr - 1)));
+	}
+
+	if (m_bShowPercent) {
+		CString s;
+		s.Format(_T("%d%%"), pct);
+		const int fh = (std::max)(9, track.Height() - 5);
+		LOGFONT lf = {};
+		lf.lfHeight = -fh;
+		lf.lfWeight = FW_BOLD;
+		lf.lfQuality = ANTIALIASED_QUALITY;
+		lf.lfCharSet = DEFAULT_CHARSET;
+		_tcsncpy_s(lf.lfFaceName, _T("Segoe UI"), _TRUNCATE);
+		if (m_fontPct.GetSafeHandle())
+			m_fontPct.DeleteObject();
+		m_fontPct.CreateFontIndirect(&lf);
+
+		CFont* oldFont = dc.SelectObject(&m_fontPct);
+		dc.SetBkMode(TRANSPARENT);
+		CRect textRc = track;
+		textRc.DeflateRect(4, 0);
+		// はみ出し防止: クリップ
+		CRgn textClip;
+		textClip.CreateRoundRectRgn(track.left, track.top, track.right + 1, track.bottom + 1, rr * 2, rr * 2);
+		dc.SelectClipRgn(&textClip);
+		const UINT dt = DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
+		// 薄い縁取り → 白文字 (グラデ上でも読める)
+		dc.SetTextColor(RGB(170, 80, 120));
+		for (int dy = -1; dy <= 1; ++dy) {
+			for (int dx = -1; dx <= 1; ++dx) {
+				if (dx == 0 && dy == 0) continue;
+				CRect o = textRc;
+				o.OffsetRect(dx, dy);
+				dc.DrawText(s, &o, dt);
+			}
+		}
+		dc.SetTextColor(RGB(255, 255, 255));
+		dc.DrawText(s, &textRc, dt);
+		dc.SelectClipRgn(NULL);
+		dc.SelectObject(oldFont);
+	}
+
+	dc.SelectObject(oldPen);
+	dc.SelectObject(oldBr);
+}
+
+void CCustomProgressCtrl::PaintOpaqueClient(CDC& dc)
+{
+	CRect r;
+	GetClientRect(&r);
+	if (r.Width() <= 0 || r.Height() <= 0) return;
+	BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+	params.dwFlags = BPPF_ERASE;
+	HDC hdcBuf = NULL;
+	HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+	if (!hdcBuf || !hBP) {
+		// フォールバックも必ずメモリ経由
+		CDC mem;
+		CBitmap bmp;
+		mem.CreateCompatibleDC(&dc);
+		bmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
+		CBitmap* old = mem.SelectObject(&bmp);
+		PaintClient(mem, CRect(0, 0, r.Width(), r.Height()));
+		dc.BitBlt(0, 0, r.Width(), r.Height(), &mem, 0, 0, SRCCOPY);
+		mem.SelectObject(old);
+		return;
+	}
+	CDC mem;
+	mem.Attach(hdcBuf);
+	PaintClient(mem, r);
+	mem.Detach();
+	::BufferedPaintMakeOpaque(hBP, &r);
+	::EndBufferedPaint(hBP, TRUE);
+}
+
+void CCustomProgressCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
+{
+	if (!hdcBuf || !m_hWnd) return;
+	CRect r;
+	GetClientRect(&r);
+	CDC mem;
+	mem.Attach(hdcBuf);
+	PaintClient(mem, r);
+	mem.Detach();
+}
+
+void CCustomProgressCtrl::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect r;
+	GetClientRect(&r);
+	if (r.Width() <= 0 || r.Height() <= 0) return;
+
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11()) {
+		PaintOpaqueClient(dc);
+		return;
+	}
+#endif
+	// 常にダブルバッファ: 部分 WM_PAINT でも全体を載せ替え、文字の残像を防ぐ
+	CDC mem;
+	CBitmap bmp;
+	if (!mem.CreateCompatibleDC(&dc)) {
+		PaintClient(dc, r);
+		return;
+	}
+	if (!bmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height())) {
+		PaintClient(dc, r);
+		return;
+	}
+	CBitmap* oldBmp = mem.SelectObject(&bmp);
+	PaintClient(mem, CRect(0, 0, r.Width(), r.Height()));
+	dc.BitBlt(0, 0, r.Width(), r.Height(), &mem, 0, 0, SRCCOPY);
+	mem.SelectObject(oldBmp);
+}
+
+BOOL CCustomProgressCtrl::OnEraseBkgnd(CDC*)
+{
+	return TRUE;
+}
+
+LRESULT CCustomProgressCtrl::OnPrintClient(WPARAM wParam, LPARAM)
+{
+	CDC* pDC = CDC::FromHandle((HDC)wParam);
+	if (pDC) {
+		CRect r;
+		GetClientRect(&r);
+		PaintClient(*pDC, r);
+	}
+	return 0;
+}
+
+// ============================================================================
 IMPLEMENT_DYNAMIC(CCustomGroupBox, CButton)
 
 BEGIN_MESSAGE_MAP(CCustomGroupBox, CButton)
@@ -7185,6 +7549,7 @@ static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
         if (dynamic_cast<CCustomListBox*>(pw) || dynamic_cast<CCustomListCtrl*>(pw) || dynamic_cast<CCustomTreeCtrl*>(pw)) return COLOR_LIST_BG;
         if (dynamic_cast<CCustomComboBox*>(pw)) return COLOR_COMBO_BG;
         if (dynamic_cast<CCustomStandardButton*>(pw) || dynamic_cast<CButtonST*>(pw)) return COLOR_BUTTON_BG;
+        if (dynamic_cast<CCustomProgressCtrl*>(pw)) return COLOR_DIALOG_BG;
         if (dynamic_cast<CCustomEdit*>(pw)) return COLOR_EDIT_BG;
     }
     TCHAR cls[64] = {};
@@ -7208,6 +7573,7 @@ static BOOL CCC_IsBlurControl(HWND hWnd)
         if (dynamic_cast<CCustomRangeSliderCtrl*>(pw)) return TRUE;
         if (dynamic_cast<CCustomGroupBox*>(pw)) return TRUE;
         if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomProgressCtrl*>(pw)) return TRUE;
     }
     TCHAR cls[64] = {};
     ::GetClassName(hWnd, cls, 63);
@@ -7279,6 +7645,12 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     else if (auto* pTree = dynamic_cast<CCustomTreeCtrl*>(pw))
     {
         pTree->PaintOpaqueIntoBuffer(hdcBuf);
+        dc.Detach();
+        return TRUE;
+    }
+    else if (auto* pProg = dynamic_cast<CCustomProgressCtrl*>(pw))
+    {
+        pProg->PaintOpaqueIntoBuffer(hdcBuf);
         dc.Detach();
         return TRUE;
     }

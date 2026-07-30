@@ -277,6 +277,9 @@ public:
 	void SetEncoder(LPCTSTR encoder);
 	CString GetEncodest();
 	void SetEncodest(LPCTSTR encoder);
+	// APIC(front cover)を差し替える。mime は "image/jpeg" 等の ASCII 文字列。
+	// 画像は生バイナリのまま格納するので、Save 前に SetUnSynchronization(FALSE) 推奨。
+	void SetPicture(const BYTE *pImage,DWORD dwSize,const char *szMime);
 
 	DWORD Load(LPCTSTR szFileName);
 	DWORD Save(LPCTSTR szFileName);

@@ -125,6 +125,15 @@ protected:
     afx_msg void OnToggleHarmonicGhost();
     afx_msg void OnToggleHarmonicProfile();
     afx_msg void OnOpenTuneDialog();
+    afx_msg void OnViewModeCmd(UINT nID);
+    afx_msg void OnKeyRangeCmd(UINT nID);
+    afx_msg void OnToggleNoteNames();
+    // 簡易3D 表示時のみ、クライアント領域のドラッグで視点(ヨー/ピッチ)を回す。
+    // 2D 表示時は一切介入せず基底(ウィンドウドラッグ/追従チェック)へ素通しする。
+    afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+    afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+    afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
+    afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
     virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 private:
@@ -190,6 +199,11 @@ private:
     static constexpr UINT  IDM_ROLL_HARM_GHOST = 42218;
     static constexpr UINT  IDM_ROLL_HARM_PROF = 42219;
     static constexpr UINT  IDM_ROLL_TUNE = 42220;
+    static constexpr UINT  IDM_ROLL_VIEW_BASE = 42221;   // +0=2D +1=簡易3D
+    static constexpr UINT  IDM_ROLL_VIEW_COUNT = 2;
+    static constexpr UINT  IDM_ROLL_KEYS_BASE = 42224;   // +0=88鍵 +1=108鍵
+    static constexpr UINT  IDM_ROLL_KEYS_COUNT = 2;
+    static constexpr UINT  IDM_ROLL_NOTENAME = 42227;
 
     // ---- フレーム履歴リングバッファ(UI スレッドのみ読み書き) ----
     NoteFrame m_historyRing[MAX_HISTORY];  // 確定済みフレームの環状配列
@@ -435,6 +449,50 @@ private:
     bool  m_showLevelMeter = true;    // 鍵盤上のレベルメーター
     bool  m_alwaysOnTop = false;      // WS_EX_TOPMOST
 
+    // ---- 表示モード / 鍵盤レンジ / ノート名 ----
+    // m_viewMode==0(既定) のときは従来の 2D 経路をそのまま使う(描画・スクロールとも無改変)。
+    // m_viewMode==1 のときだけロールバッファ全面へ簡易3D シーンを描く。
+    int   m_viewMode = 0;             // 0=通常(2D) 1=簡易3D
+    int   m_keyRange = 108;           // 表示鍵数(88/108)。解析は常に 108 鍵で不変
+    bool  m_showNoteNames = true;     // 白鍵のノート名(C/D/E…)
+    float m_view3dYawDeg = -22.0f;    // 簡易3D 水平回転角(-180..180、ドラッグで360度)
+    float m_view3dPitchDeg = 26.0f;   // 簡易3D 仰角(負=下から / 正=上から)
+    float m_view3dZoom = 1.0f;        // ホイール拡大縮小(1=自動フレーミング基準)
+    bool  m_rotDragging = false;      // 視点ドラッグ中
+    CPoint m_rotDragOrigin = CPoint(0, 0);
+    float m_rotDragYaw0 = 0.0f;
+    float m_rotDragPitch0 = 0.0f;
+    // 上からも下からも見えるよう縦は広い。ヨーはラップで実質360度。
+    static constexpr float kView3dPitchMin = -85.0f;
+    static constexpr float kView3dPitchMax = 85.0f;
+    static constexpr float kView3dZoomMin = 0.35f;
+    static constexpr float kView3dZoomMax = 4.0f;
+
+    // ---- 簡易3D 用の履歴サンプル(固定長。std::vector は使わない) ----
+    static constexpr int VIEW3D_DEPTH = 48;     // 奥行き方向の行数
+    static constexpr int VIEW3D_STRIDE = 2;     // 何フレームごとに1行サンプルするか
+    struct Wall3DRow {
+        uint8_t level[KEY_COUNT];   // 0=消音 / 1..255=表示強度
+        uint8_t band[KEY_COUNT];    // 帯域マスク(色分け用)
+    };
+    Wall3DRow m_wall3D[VIEW3D_DEPTH];
+    int       m_wall3DRows = 0;     // 実際に埋まっている行数
+
+    // 表示範囲の白鍵番号キャッシュ(描画ループから毎回数え直さないため)
+    mutable int m_dispWhiteIdx[KEY_COUNT];
+    mutable int m_dispWhiteTotal = 0;
+    mutable int m_dispCacheRange = 0;
+
+    // 簡易3D の視点パラメータ(1フレーム分の事前計算値)
+    struct View3D {
+        float cosYaw, sinYaw;
+        float cosPitch, sinPitch;
+        float camD;       // 視点距離
+        float scale;      // ワールド→ピクセル
+        float originX;    // 画面上の投影原点
+        float originY;
+    };
+
 #if CCUSTOM_AERO_SUPPORT
     CCC_ChromaBlitCache m_chromaCache;
     bool    m_chromaReady = false;
@@ -481,6 +539,33 @@ private:
         const bool* activesCopy, const uint8_t* bandMaskCopy, const float laneStrengthCopy[KEY_COUNT][3],
         const float* chFillCopy, int chCountCopy, const uint8_t* exprCopy) const;
     void UpdatePianoRollTimer();
+
+    // ---- 表示モード / 鍵盤レンジ / ノート名 ----
+    void SetViewMode(int mode);
+    void SetKeyRange(int keys);
+    void ToggleNoteNames();
+    bool IsView3D() const { return m_viewMode == 1; }
+    // 表示する鍵の範囲 [lo, hi)。解析は常に 0..KEY_COUNT で不変。
+    void GetDisplayKeyRange(int& lo, int& hi) const;
+    void EnsureDisplayKeyCache() const;
+    int  DisplayWhiteKeyCount() const;
+    int  DisplayWhiteKeyIndex(int midiNote) const;   // 表示範囲内での白鍵番号(範囲外は -1)
+    void Save3DAngles();
+    void ApplyViewChangeRedraw();
+
+    // ---- 簡易3D ----
+    void BuildView3D(int width, int height, View3D& v) const;
+    static void ProjectView3D(const View3D& v, float x, float y, float z, POINT& out);
+    static void DrawBox3D(CDC& dc, const View3D& v, float xL, float xR, float topY,
+        float z0, float z1, COLORREF col, float frontShade, float baseY = 0.0f);
+    void Capture3DWalls();   // 履歴リングから m_wall3D を作る(m_cs 下)
+    void KeyXSpan3D(int keyIndex, float& xL, float& xR) const;   // 3D 空間での鍵の左右端
+    void Draw3DSceneToBuffer(CDC& dc, int width, int height,
+        const bool* activesCopy, const float* chFillCopy, int chCountCopy) const;
+    void Draw3DKeyboard(CDC& dc, const View3D& v, const bool* activesCopy) const;
+    void Draw3DWalls(CDC& dc, const View3D& v) const;
+    void Draw3DMeters(CDC& dc, const View3D& v, const float* chFillCopy, int chCountCopy) const;
+
     void SetRollSpeedPct(int pct);
     int  RollSpeedIndex() const;
     void PushDisplayFrames();

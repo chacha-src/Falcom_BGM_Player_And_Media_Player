@@ -32,6 +32,7 @@
 #include "rubberband/RubberBandStretcher.h"
 #include "AudioUpscaler.h"
 #include "ProAudio.h"
+#include "DecodeProgress.h"
 #if _MSC_VER >= 1950
 #pragma comment(lib,"rubberband-library_2026")
 #else
@@ -727,7 +728,10 @@ UINT HandleNotifications(LPVOID)
 // WAV出力専用：DirectSoundを使わずデコード→ファイル書き込みのみ。m_c2チェックに関係なくcc1で出力。
 void HandleNotifications_export()
 {
-	if (wavExportPath.GetLength() == 0 || cc1 != 1) return;
+	extern volatile LONG g_mpPromptAnalyzeOnly;
+	extern __int64 wl;
+	if (wavExportPath.GetLength() == 0 && !g_mpPromptAnalyzeOnly) return;
+	if (cc1 != 1) return;
 	// 曲ごとパラメータ: WAV 出力する曲のパラメータを復元(メインスレッド)
 	SongParams_Sync(true);
 	g_isWavExportRendering = true;
@@ -742,10 +746,26 @@ void HandleNotifications_export()
 	syukai2 = 0;
 	oldw = 0;
 	fade1 = 0;
+	// 連続再生タイマーが DoEvent 経由で次曲 Restart すると export が壊れる
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->KillTimer(9000);
 	const ULONG bufSize = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM_DS;
 	const int chunkSize = (int)(WAVDALen / 10);
 	if (chunkSize <= 0) return;
 	RubberBand_DestroyAll();
+	// 通常再生は BeginPlaybackNotifyThread で g_openDecoderMode を載せるが、
+	// export はその経路を通らない。OGG(mode==0) 等だと INT_MIN のまま
+	// DispatchPlaywavFill が即 return → PCM 無しで永久ループ（進捗1%固定）になる。
+	g_openDecoderMode = mode;
+
+	MpDecodeProgressReport(2, LL14(
+		L"デコード中…", L"Decoding...", L"Decodage...", L"Decodifica...", L"Decodificando...",
+		L"디코딩 중…", L"解码中…", L"Decoding...", L"Декодирование...", L"Dekodiere...",
+		L"Decodificando...", L"Decoderen...", L"Dekodowanie...", L"Kod cozuluyor..."));
+
+	__int64 lastWl = wl;
+	int idleIters = 0;
+	int iter = 0;
 	for (;;) {
 		DoEvent();
 		if (syukai == 2) break;
@@ -772,6 +792,26 @@ void HandleNotifications_export()
 		sflg = FALSE;
 		if (fade1) break;
 		if (wavExportLoopCount > 0 && loopcnt >= wavExportLoopCount) break;
+
+		++iter;
+		if (wl != lastWl) {
+			lastWl = wl;
+			idleIters = 0;
+		}
+		else {
+			++idleIters;
+		}
+		// RB プライミング中など wl==0 が続くとき、止まっていないことを示す
+		if (wl == 0 && (iter % 16) == 0) {
+			MpDecodeProgressReport(2 + (iter / 16) % 3, LL14(
+				L"デコード準備中…", L"Preparing decode...", L"Prep. decode...", L"Prep. decode...", L"Prep. decode...",
+				L"디코드 준비…", L"解码准备中…", L"Preparing...", L"Подготовка...", L"Vorbereitung...",
+				L"Preparando...", L"Voorbereiden...", L"Przygotowanie...", L"Hazirlaniyor..."));
+		}
+		if (idleIters > 50000) {
+			// PCM が進まない永久ループ防止（デコーダ未設定の再発など）
+			break;
+		}
 		Sleep(0);
 	}
 }

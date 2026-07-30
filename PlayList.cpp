@@ -942,6 +942,16 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Detalles de reproduccion...", L"재생 상세...", L"播放详情...", L"تفاصيل التشغيل...",
 			L"Параметры воспроизведения...", L"Wiedergabedetails...", L"Detalhes de reproducao...", L"Afspeeldetails...",
 			L"Szczegoly odtwarzania...", L"Oynatma ayrintilari..."));
+	menu.AppendMenu(MF_STRING | (savedata.analyzerwindow ? MF_CHECKED : 0), PL_CTX_ANALYZER,
+		LL14(L"アナライザーを開く", L"Open Analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore",
+			L"Abrir analizador", L"애널라이저 열기", L"打开分析器", L"فتح المحلل",
+			L"Открыть анализатор", L"Analyzer offnen", L"Abrir analisador", L"Analyser openen",
+			L"Otworz analizator", L"Analizoru ac"));
+	menu.AppendMenu(MF_STRING | (savedata.pianorollwindow ? MF_CHECKED : 0), PL_CTX_PIANOROLL,
+		LL14(L"ピアノロールを開く", L"Open Piano Roll", L"Ouvrir le piano roll", L"Apri piano roll",
+			L"Abrir piano roll", L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفة البيانو",
+			L"Открыть пианоролл", L"Piano Roll offnen", L"Abrir piano roll", L"Piano roll openen",
+			L"Otworz piano roll", L"Piano roll'u ac"));
 	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING, PL_CTX_COPY_TITLEART,
 		LL14(L"タイトル - アーティストをコピー", L"Copy Title - Artist", L"Copier Titre - Artiste", L"Copia Titolo - Artista",
@@ -953,6 +963,20 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Anadir desde carpeta...", L"폴더에서 추가...", L"从文件夹添加...", L"إضافة من مجلد...",
 			L"Добавить из папки...", L"Aus Ordner hinzufugen...", L"Adicionar da pasta...", L"Toevoegen uit map...",
 			L"Dodaj z folderu...", L"Klasorden ekle..."));
+	menu.AppendMenu(MF_STRING, PL_CTX_ADD_SAME_FOLDER,
+		LL14(L"同じフォルダの曲を追加", L"Add tracks from same folder", L"Ajouter les pistes du meme dossier",
+			L"Aggiungi brani dalla stessa cartella", L"Anadir pistas de la misma carpeta",
+			L"같은 폴더의 곡 추가", L"添加同一文件夹的曲目", L"إضافة مقاطع من نفس المجلد",
+			L"Добавить треки из этой же папки", L"Titel aus demselben Ordner hinzufugen",
+			L"Adicionar faixas da mesma pasta", L"Nummers uit dezelfde map toevoegen",
+			L"Dodaj utwory z tego samego folderu", L"Ayni klasordeki parcalari ekle"));
+	menu.AppendMenu(MF_STRING, PL_CTX_OPEN_FOLDER,
+		LL14(L"エクスプローラーで開く", L"Open containing folder", L"Ouvrir le dossier du fichier",
+			L"Apri cartella del file", L"Abrir la carpeta del archivo",
+			L"파일 위치 열기", L"打开所在文件夹", L"فتح المجلد الحاوي",
+			L"Открыть папку с файлом", L"Ordner im Explorer offnen",
+			L"Abrir a pasta do arquivo", L"Map van bestand openen",
+			L"Otworz folder pliku", L"Dosya klasorunu ac"));
 	{
 		CMenu subSort;
 		subSort.CreatePopupMenu();
@@ -1043,6 +1067,39 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 			if (AfxMessageBox(msg, MB_YESNO | MB_ICONQUESTION) == IDYES) {
 				CString listKey = SongParams_CurrentListName();
 				SongParams_RebindEntries(listKey, NULL, items.data(), (int)items.size(), false);
+			}
+		}
+	}
+	else if (cmd == PL_CTX_ANALYZER) {
+		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleAnalyzer();
+	}
+	else if (cmd == PL_CTX_PIANOROLL) {
+		if (og && ::IsWindow(og->GetSafeHwnd())) og->TogglePianoRoll();
+	}
+	else if (cmd == PL_CTX_OPEN_FOLDER || cmd == PL_CTX_ADD_SAME_FOLDER) {
+		const int idx = m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+		CString path;
+		if (pc && idx >= 0 && idx < playcnt)
+			path = PlPhysicalMediaPath(pc[idx].fol);
+		const int sep = path.ReverseFind(_T('\\'));
+		if (!path.IsEmpty() && sep > 0 && PathFileExists(path)) {
+			if (cmd == PL_CTX_OPEN_FOLDER) {
+				CString arg;
+				arg.Format(_T("/select,\"%s\""), (LPCTSTR)path);
+				ShellExecute(NULL, _T("open"), _T("explorer.exe"), arg, NULL, SW_SHOWNORMAL);
+			}
+			else {
+				// Fol() は _tchdir するので OnDropFiles と同じくカレントを退避・復元する
+				TCHAR cwd[1024];
+				_tgetcwd(cwd, 1000);
+				syo = 0; syos = _T(""); syomode = 0;
+				m_lc.SetRedraw(FALSE);
+				Fol(path.Left(sep));
+				m_lc.SetRedraw(TRUE);
+				m_lc.Invalidate();
+				m_lc.UpdateWindow();
+				_tchdir(cwd);
+				Save();
 			}
 		}
 	}

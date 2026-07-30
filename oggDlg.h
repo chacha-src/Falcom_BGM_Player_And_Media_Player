@@ -5,13 +5,6 @@
 #if !defined(AFX_OGGDLG_H__6E748E56_5CF6_4ADE_8B4F_7FE83E42DCFA__INCLUDED_)
 #define AFX_OGGDLG_H__6E748E56_5CF6_4ADE_8B4F_7FE83E42DCFA__INCLUDED_
 
-struct WavExportOptions {
-	int fadeEnable;
-	int fadeSec;
-	int trimLeadEnable;
-	int trimKeepSec;
-};
-
 // プレイリスト行の表示用メタデータを og 側へ反映(未再生時のバナー/情報パネル用)
 void ApplyPlaylistRowDisplay(const playlistdata0& row);
 
@@ -52,6 +45,21 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 #include <cstddef>
 #include "resource.h"
 #include "CCustomControl.h"
+
+struct WavExportOptions {
+	int fadeEnable;
+	int fadeSec;
+	int trimLeadEnable;
+	int trimKeepSec;
+	// タグ上書き(空欄は触らない)。copyTags=1 なら元ファイルからコピーしたうえで欠損のみ埋める
+	int copyTags;
+	int multiFile; // 1=タイトルは適用しない
+	CString tagTitle;
+	CString tagArtist;
+	CString tagAlbum;
+	CString coverImagePath; // jpg/png。指定時はジャケットをこれに差し替え
+};
+
 class CEqualizer;
 class CPianoRoll;
 class CPianoRollTuneDlg;
@@ -99,9 +107,11 @@ public:
 	LRESULT dp1(WPARAM, LPARAM);
 	LRESULT dp2(WPARAM, LPARAM);
 	void SetAdd(CString fnn,int mode,int loop1,int loop2,CString filen,int ret2,REFTIME time);
-	BOOL ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts = NULL);
+	// applyTags=false は中間WAV用(タグ/ジャケットのコピーを行わない)。
+	BOOL ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts = NULL, bool applyTags = true);
 	// format: 0=mp3 1=FLAC。一旦WAV書き出ししてから変換。
 	BOOL ExportToTranscode(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts, int format, int mp3Kbps, int flacLevel);
+	BOOL AnalyzeTrackForPrompt(playlistdata0* pc);
 	double goertzel(const float* data, int N, double target_freq, double sample_rate);
 	double hanWindow(int value, int index, int offset, int size);
 	// dest!=NULL のとき og->img を汚さず dest へ読み込む(リスト用サムネ等)。

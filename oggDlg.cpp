@@ -31,6 +31,8 @@ int flacmode = 0;
 #include "CProToolsDlg.h"
 #include "TranscodeExport.h"
 #include "CPromptEngine.h"
+#include "CPromptAnalyze.h"
+#include "DecodeProgress.h"
 #include "CMediaPlayerDlg.h"
 #include "FileTagInfo.h"
 #include "NoteFundamentalPick.h"
@@ -7721,6 +7723,8 @@ void COggDlg::play()
 				endflg = 0;
 				return;
 			}
+			// BeginPlaybackNotifyThread 前の初回 Fill / WAV書き出しでも ActiveDecodeMode が必要
+			g_openDecoderMode = mode;
 			loop1 = loop2 = 0; stitle = "";
 			if (vf.vc->comments >= 2)
 			{
@@ -9918,7 +9922,42 @@ void COggDlg::play()
 	fade1 = 0;
 	//-------------------------------------------------------------------
 	// WAV出力専用: DirectSoundをスキップしHandleNotifications_exportへ
-	if (wavExportPath.GetLength() > 0) {
+	// プロンプト解析モードも同じ読込経路(ファイルは書かない)
+	extern volatile LONG g_mpPromptAnalyzeOnly;
+	if (wavExportPath.GetLength() > 0 || g_mpPromptAnalyzeOnly) {
+		if (g_mpPromptAnalyzeOnly) {
+			if (cc1 == 1) { cc.Close(); cc1 = 0; PlaybackCcClearFormat(); }
+			cc1 = 1; // PlaybackCcWrite 経路を通す(中身は解析フィードのみ)
+			wl = 0;
+			poss = poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+			playb = 0;
+			lenl = 0;
+			fade = 1.0f; fadeadd = 0.0f; fade1 = 0;
+			reset = TRUE;
+			endflg = 0;
+			endf = 0;
+			if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
+			if (loop2 == 0) endf = 1;
+			if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
+				const int ts = (data_size > 0) ? (data_size / 4) : ((oggsize > 0) ? (oggsize / 4) : 0);
+				const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
+				if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
+					|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
+					loop1 = 0; loop2 = 0; endf = 1;
+				}
+			}
+			if (mode == -3 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
+			loopcnt = 0;
+			if (g_openDecoderMode == INT_MIN)
+				g_openDecoderMode = mode;
+			HandleNotifications_export();
+			cc1 = 0;
+			PlaybackCcClearFormat();
+			stop1();
+			m_saisai.EnableWindow(TRUE);
+			endflg = 0;
+			return;
+		}
 		// 2回目以降のため前回のccを確実に閉じる
 		if (cc1 == 1) { cc.Close(); cc1 = 0; PlaybackCcClearFormat(); }
 		// エクスポート用にcc.Openとヘッダ書き込みをここで実行（8131に依存しない）
@@ -9940,7 +9979,7 @@ void COggDlg::play()
 		// 2GB超対応(RF64)ヘッダを書き込み。確定は出力完了後に行う。
 		WriteWavStreamHeaderRF64(cc);
 		endflg = 0;
-		SetTimer(9000, 10, NULL);
+		// 連続再生用 timer 9000 は export 中に立てない（DoEvent 再入で次曲 Restart）
 	endf = 0;
 	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = oggsize / 4; } }
 	if (loop2 == 0) endf = 1;
@@ -9955,6 +9994,8 @@ void COggDlg::play()
 	}
 	if (mode == -3 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
 	loopcnt = 0;
+	if (g_openDecoderMode == INT_MIN)
+		g_openDecoderMode = mode;
 	HandleNotifications_export();
 		// WAV出力時はm_douに関係なくccを閉じる（2回目以降のエクスポートでcc.Openが成功するため）
 		if (cc1 == 1) {
@@ -10582,9 +10623,11 @@ void COggDlg::SetAdd(CString fnn, int mode, int loop1, int loop2, CString filen,
 	}
 }
 
-BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts)
+BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts, bool applyTags)
 {
 	if (!pc || outputPath.IsEmpty() || loopCount < 1) return FALSE;
+	// 再生中のままだと書き出し用のグローバルが競合する。停止済みでも安全。
+	stop1();
 	WavExportOptions localOpts = {};
 	if (opts) localOpts = *opts;
 	else {
@@ -10592,6 +10635,7 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 		localOpts.fadeSec = savedata.wav_export_fade_sec > 0 ? savedata.wav_export_fade_sec : 15;
 		localOpts.trimLeadEnable = savedata.wav_export_trim_lead;
 		localOpts.trimKeepSec = savedata.wav_export_trim_keep_sec > 0 ? savedata.wav_export_trim_keep_sec : 1;
+		localOpts.copyTags = savedata.wav_export_copy_tags ? 1 : 0;
 	}
 	// 2回目以降：初回と同じ状態へリセット（前回のエクスポートで変更されたグローバルを戻す）
 	if (cc1 == 1) { cc.Close(); cc1 = 0; PlaybackCcClearFormat(); }
@@ -10621,9 +10665,24 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 	int saveloop_bak = savedata.saveloop;
 	savedata.saveloop = 1;  // ループを有効にしてwavExportLoopCountで制御
 	g_wavExportDataBytes = 0;
+	{
+		double expect = (pc->time > 0) ? (double)pc->time : 180.0;
+		expect *= (double)loopCount;
+		MpDecodeProgressSetExpectedSec(expect);
+		MpDecodeProgressReport(1, LL14(
+			L"読込開始…", L"Loading...", L"Chargement...", L"Caricamento...", L"Cargando...",
+			L"로딩…", L"加载中…", L"Loading...", L"Загрузка...", L"Laden...",
+			L"Carregando...", L"Laden...", L"Wczytywanie...", L"Yukleniyor..."));
+	}
 	play();
 	// 成否はファイル実長由来の g_wavExportDataBytes で判定（trim/fade後も正しい）
 	BOOL ok = (g_wavExportDataBytes > 0 && cc1 == 0);
+	if (ok) {
+		MpDecodeProgressBumpAfterPcm(LL14(
+			L"後処理中…", L"Post-processing...", L"Post-traitement...", L"Post-elaborazione...", L"Postproceso...",
+			L"후처리 중…", L"后处理中…", L"Post-processing...", L"Постобработка...", L"Nachbearbeitung...",
+			L"Pos-processamento...", L"Nabewerking...", L"Przetwarzanie...", L"Son islem..."));
+	}
 	if (ok && localOpts.trimLeadEnable)
 		ok = TrimLeadingSilenceWavFile(outputPath, localOpts.trimKeepSec);
 	if (ok && localOpts.fadeEnable) {
@@ -10635,7 +10694,56 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 	wavExportPath.Empty();
 	wavExportLoopCount = 0;
 	savedata.saveloop = saveloop_bak;
+	if (ok && applyTags && pc->fol[0] != 0) {
+		const int copyTags = localOpts.copyTags ? 1 : 0;
+		FileTagFields fill;
+		if (!localOpts.multiFile)
+			fill.title = localOpts.tagTitle;
+		fill.artist = localOpts.tagArtist;
+		fill.album = localOpts.tagAlbum;
+		const bool needMeta = copyTags
+			|| !fill.title.IsEmpty() || !fill.artist.IsEmpty() || !fill.album.IsEmpty()
+			|| !localOpts.coverImagePath.IsEmpty();
+		if (needMeta)
+			ApplyExportTagsAndCover(pc->fol, outputPath, copyTags, &fill, localOpts.coverImagePath);
+	}
 	return ok;
+}
+
+BOOL COggDlg::AnalyzeTrackForPrompt(playlistdata0* pc)
+{
+	if (!pc || pc->fol[0] == 0) return FALSE;
+	// export と同様、再生中グローバルと競合しないよう停止してから読込
+	stop1();
+	if (cc1 == 1) { cc.Close(); cc1 = 0; PlaybackCcClearFormat(); }
+	wl = 0;
+	poss = poss2 = poss3 = poss4 = poss5 = poss6 = 0;
+	playb = 0;
+	lenl = 0;
+	fade = 1.0f; fadeadd = 0.0f; fade1 = 0;
+	reset = TRUE;
+	filen = pc->fol;
+	fnn = pc->name;
+	mode = modesub = pc->sub;
+	loop1 = pc->loop1;
+	loop2 = pc->loop2;
+	{
+		int oIn = -1, oOut = -1, oFade = 0;
+		ProAudio_SetCurrentSongKey(SongParams_CurrentListName(), pc->fol, pc->sub, pc->ret2);
+		ProAudio_GetLoopOverride(oIn, oOut, oFade);
+		if (oIn >= 0) loop1 = oIn;
+		if (oOut >= 0) loop2 = oOut;
+		(void)oFade;
+	}
+	ret2 = pc->ret2;
+	wavExportPath.Empty();
+	wavExportLoopCount = 1;
+	int saveloop_bak = savedata.saveloop;
+	savedata.saveloop = 1;
+	play();
+	wavExportLoopCount = 0;
+	savedata.saveloop = saveloop_bak;
+	return TRUE;
 }
 
 BOOL COggDlg::ExportToTranscode(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts, int format, int mp3Kbps, int flacLevel)
@@ -10645,14 +10753,36 @@ BOOL COggDlg::ExportToTranscode(playlistdata0* pc, CString outputPath, int loopC
 	GetTempPath(MAX_PATH, dir);
 	CString tempWav;
 	tempWav.Format(L"%sogg_tc_%u_%u.wav", dir, GetCurrentProcessId(), GetTickCount());
-	BOOL ok = ExportToWav(pc, tempWav, loopCount, opts);
+	// 中間WAVは削除するのでタグは付けない。最終出力にだけ写す。
+	MpDecodeProgressSetPcmCap(78);
+	BOOL ok = ExportToWav(pc, tempWav, loopCount, opts, false);
 	if (ok) {
+		MpDecodeProgressReport(82, LL14(
+			L"エンコード中…", L"Encoding...", L"Encodage...", L"Codifica...", L"Codificando...",
+			L"인코딩 중…", L"编码中…", L"Encoding...", L"Кодирование...", L"Kodiere...",
+			L"Codificando...", L"Coderen...", L"Kodowanie...", L"Kodlaniyor..."));
 		if (format == 1)
 			ok = EncodeWavToFlac(tempWav, outputPath, flacLevel);
 		else
 			ok = EncodeWavToMp3(tempWav, outputPath, mp3Kbps);
 	}
 	DeleteFile(tempWav);
+	if (ok && pc->fol[0] != 0) {
+		WavExportOptions localOpts = {};
+		if (opts) localOpts = *opts;
+		else localOpts.copyTags = savedata.wav_export_copy_tags ? 1 : 0;
+		FileTagFields fill;
+		if (!localOpts.multiFile)
+			fill.title = localOpts.tagTitle;
+		fill.artist = localOpts.tagArtist;
+		fill.album = localOpts.tagAlbum;
+		const int copyTags = localOpts.copyTags ? 1 : 0;
+		const bool needMeta = copyTags
+			|| !fill.title.IsEmpty() || !fill.artist.IsEmpty() || !fill.album.IsEmpty()
+			|| !localOpts.coverImagePath.IsEmpty();
+		if (needMeta)
+			ApplyExportTagsAndCover(pc->fol, outputPath, copyTags, &fill, localOpts.coverImagePath);
+	}
 	return ok;
 }
 
@@ -18735,6 +18865,12 @@ void timerog1(UINT nIDEvent)
 		}
 	}
 	if (nIDEvent == 9000) {
+		// WAV/解析書き出し中は次曲 Restart しない（DoEvent 再入対策）
+		if (wavExportPath.GetLength() > 0 || g_isWavExportRendering)
+			return;
+		extern volatile LONG g_mpPromptAnalyzeOnly;
+		if (g_mpPromptAnalyzeOnly)
+			return;
 		// 二重 DS / スロット運用中はレガシー次曲 Restart を起こさない
 		// 連続再生: 曲末で次曲へ（レガシー単一ストリーム）
 		if (savedata.saverenzoku == 1) {
@@ -20812,14 +20948,24 @@ void PlaybackCcGetFormat(int& rate, int& ch, int& bits)
 
 void PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, int srcBits, bool forced)
 {
+	if (g_mpPromptAnalyzeOnly && p && n > 0) {
+		MpPromptAnalyzeFeed(p, n, srcRate, srcCh, srcBits);
+		if (!PlaybackCcFormatLocked())
+			PlaybackCcLockFormat(srcRate, srcCh, srcBits);
+		return; // 解析専用: ファイルへは書かない
+	}
 	if (cc1 != 1 || !p || n == 0) return;
 	if (!PlaybackCcFormatLocked()) {
 		PlaybackCcLockFormat(srcRate, srcCh, srcBits);
 		cc.Write(p, n);
+		if (g_isWavExportRendering)
+			MpDecodeProgressOnPcm(n, srcRate, srcCh, srcBits);
 		return;
 	}
 	if (srcRate == g_ccFmtRate && srcCh == g_ccFmtCh && srcBits == g_ccFmtBits) {
 		cc.Write(p, n);
+		if (g_isWavExportRendering)
+			MpDecodeProgressOnPcm(n, srcRate, srcCh, srcBits);
 		return;
 	}
 	s_ccUpscaler.Configure(srcRate, srcCh, srcBits, g_ccFmtRate, g_ccFmtCh, g_ccFmtBits);
@@ -20838,6 +20984,8 @@ void PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, in
 	}
 	if (got > 0)
 		cc.Write(out.data(), (UINT)got);
+	if (g_isWavExportRendering)
+		MpDecodeProgressOnPcm(n, srcRate, srcCh, srcBits);
 }
 
 void PlaybackCcWrite(const void* p, UINT n)

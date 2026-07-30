@@ -286,6 +286,7 @@ public:
 	// LVS_EX_INFOTIP はカスタム実装と競合するため、ON 時は除去・OFF 時は付与する。
 	void ApplyListTooltipState();
 	int  GetListScrollAnchor() const;
+	int  GetSelectedPcIndex() const;
 	void RestoreListScrollAnchor(int anchor);
 	// og の timerp で使う sss 決定ロジックと同じ規則でタイトルを解決する。
 	// mode 値により tagfile / stitle / fnn のどれを使うかが変わる。

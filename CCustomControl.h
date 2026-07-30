@@ -1158,6 +1158,48 @@ private:
 };
 
 // ============================================================================
+// カスタムプログレスバー (オーナー描画・不透明)
+// CCustomProgressCtrl
+// ============================================================================
+class CCustomProgressCtrl : public CWnd
+{
+	DECLARE_DYNAMIC(CCustomProgressCtrl)
+public:
+	CCustomProgressCtrl();
+	virtual ~CCustomProgressCtrl();
+	void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+	BOOL m_bAutoDelete;
+
+	BOOL Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID);
+	void SetRange(int nLower, int nUpper);
+	void GetRange(int& nLower, int& nUpper) const;
+	int  SetPos(int nPos);
+	int  GetPos() const { return m_nPos; }
+	void SetShowPercent(BOOL b) { m_bShowPercent = b; if (GetSafeHwnd()) Invalidate(FALSE); }
+	void SetColors(COLORREF track, COLORREF fillStart, COLORREF fillEnd);
+	void SetAeroMode(BOOL b) { m_bAeroMode = b; if (GetSafeHwnd()) Invalidate(FALSE); }
+	void PaintOpaqueIntoBuffer(HDC hdcBuf);
+
+protected:
+	virtual void PostNcDestroy();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
+	DECLARE_MESSAGE_MAP()
+
+private:
+	void PaintClient(CDC& dc, const CRect& r);
+	void PaintOpaqueClient(CDC& dc);
+
+	int m_nMin, m_nMax, m_nPos;
+	BOOL m_bShowPercent;
+	BOOL m_bAeroMode;
+	COLORREF m_clrTrack, m_clrFill0, m_clrFill1;
+	CBrush m_brBackground;
+	CFont m_fontPct;
+};
+
+// ============================================================================
 // カスタムグループボックスコントロール
 // CCustomGroupBox
 // ============================================================================
@@ -1216,6 +1258,7 @@ do {                                                                            
             else if (auto* p = dynamic_cast<CCustomListCtrl*>(_pw))        p->SetAeroMode(FALSE); \
             else if (auto* p = dynamic_cast<CCustomTreeCtrl*>(_pw))        p->SetAeroMode(FALSE); \
             else if (auto* p = dynamic_cast<CCustomCheckBox*>(_pw))        p->SetAeroMode(_bA); \
+            else if (auto* p = dynamic_cast<CCustomProgressCtrl*>(_pw))    p->SetAeroMode(FALSE); \
             CCC_SetChildTransparent(_hc, FALSE);                                       \
             _pw->Invalidate();                                                         \
         }                                                                              \

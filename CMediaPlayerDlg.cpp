@@ -687,6 +687,8 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_SPEANA_BAR, &CMediaPlayerDlg::OnSpeanaStyleBar)
 	ON_COMMAND(ID_MP_SPEANA_MIRROR, &CMediaPlayerDlg::OnSpeanaStyleMirror)
 	ON_COMMAND(ID_MP_SPEANA_WAVE, &CMediaPlayerDlg::OnSpeanaStyleWave)
+	ON_COMMAND(ID_MP_OPEN_ANALYZER, &CMediaPlayerDlg::OnAnalyzer)
+	ON_COMMAND(ID_MP_OPEN_PIANOROLL, &CMediaPlayerDlg::OnPiano)
 	ON_NOTIFY(TVN_SELCHANGED, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeSel)
 	ON_NOTIFY(TVN_ITEMEXPANDING, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeExpanding)
 	ON_NOTIFY(TVN_BEGINDRAG, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeBeginDrag)
@@ -2581,6 +2583,22 @@ int CMediaPlayerDlg::GetListScrollAnchor() const
 		int top = pl->m_lc.GetTopIndex();
 		if (top >= 0 && top < pl->playcnt) return top;
 	}
+	if (pl->pnt >= 0 && pl->pnt < pl->playcnt) return pl->pnt;
+	return 0;
+}
+
+int CMediaPlayerDlg::GetSelectedPcIndex() const
+{
+	if (!pl || pl->playcnt <= 0) return -1;
+	if (::IsWindow(m_list.GetSafeHwnd())) {
+		const int sel = m_list.GetNextItem(-1, LVNI_SELECTED);
+		if (sel >= 0) {
+			const int pc = MpDispToPc(const_cast<CMediaPlayerDlg*>(this), sel);
+			if (pc >= 0 && pc < pl->playcnt) return pc;
+		}
+	}
+	if (pl->pnt1 >= 0 && pl->pnt1 < pl->playcnt) return pl->pnt1;
+	if (plcnt >= 0 && plcnt < pl->playcnt) return plcnt;
 	if (pl->pnt >= 0 && pl->pnt < pl->playcnt) return pl->pnt;
 	return 0;
 }
@@ -5507,6 +5525,11 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 				LL14(L"スペアナ: ミラー", L"Spectrum: Mirror", L"Spectre: Miroir", L"Spettro: Specchio", L"Espectro: Espejo", L"스펙트럼: 미러", L"频谱: 镜像", L"الطيف: مرآة", L"Спектр: Зеркало", L"Spektrum: Spiegel", L"Espectro: Espelho", L"Spectrum: Spiegel", L"Widmo: Lustro", L"Spektrum: Ayna"));
 			menu.AppendMenu(MF_STRING | f2, ID_MP_SPEANA_WAVE,
 				LL14(L"スペアナ: 波形", L"Spectrum: Waveform", L"Spectre: Forme d'onde", L"Spettro: Forma d'onda", L"Espectro: Forma de onda", L"스펙트럼: 파형", L"频谱: 波形", L"الطيف: موجة", L"Спектр: Волна", L"Spektrum: Wellenform", L"Espectro: Forma de onda", L"Spectrum: Golfvorm", L"Widmo: Fala", L"Spektrum: Dalga"));
+			menu.AppendMenu(MF_SEPARATOR);
+			menu.AppendMenu(MF_STRING | (savedata.analyzerwindow ? MF_CHECKED : 0), ID_MP_OPEN_ANALYZER,
+				LL14(L"アナライザー...", L"Analyzer...", L"Analyseur...", L"Analizzatore...", L"Analizador...", L"애널라이저...", L"分析器...", L"المحلل...", L"Анализатор...", L"Analyzer...", L"Analisador...", L"Analyser...", L"Analizator...", L"Analizor..."));
+			menu.AppendMenu(MF_STRING | (savedata.pianorollwindow ? MF_CHECKED : 0), ID_MP_OPEN_PIANOROLL,
+				LL14(L"ピアノロール...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"피아노 롤...", L"钢琴卷帘...", L"لفة البيانو...", L"Пианоролл...", L"Piano Roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll..."));
 			CPoint sp = point;
 			ClientToScreen(&sp);
 			menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, sp.x, sp.y, this);

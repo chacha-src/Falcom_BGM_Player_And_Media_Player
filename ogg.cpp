@@ -328,6 +328,15 @@ BOOL COggApp::InitInstance()
 	savedata.wav_export_fade_sec = 15;
 	savedata.wav_export_trim_lead = 0;
 	savedata.wav_export_trim_keep_sec = 1;
+	savedata.wav_export_copy_tags = 1;
+	savedata.pianorollviewmode = 0;
+	savedata.pianorollkeyrange = 108;
+	savedata.pianorollnotename = 1;
+	savedata.pianoroll3dyaw = -220;   // -22.0 度
+	savedata.pianoroll3dpitch = 260;  //  26.0 度
+	savedata.pianoroll3dzoom = 100;   // 1.00x
+	savedata.dougatopmost = 0;
+	savedata.dougaaspect = 0;
 
 #if _UNICODE
 	if(GetKeyState(VK_CONTROL) < 0){
@@ -758,6 +767,45 @@ BOOL COggApp::InitInstance()
 		savedata.tc_mp3_kbps = 192;
 	if (savedata.tc_flac_level < 0 || savedata.tc_flac_level > 8)
 		savedata.tc_flac_level = 5;
+	// 旧.dat は 0 埋めのため、フィールドが無ければ既定の「コピーする」にする
+	if (datFileSize < (int)(offsetof(save, wav_export_copy_tags) + sizeof(savedata.wav_export_copy_tags)))
+		savedata.wav_export_copy_tags = 1;
+	else if (savedata.wav_export_copy_tags != 0)
+		savedata.wav_export_copy_tags = 1;
+	// 簡易ピアノロール 表示拡張(末尾追記): 旧.dat には無いので既定値へ
+	if (datFileSize < (int)(offsetof(save, pianorollviewmode) + sizeof(savedata.pianorollviewmode)))
+		savedata.pianorollviewmode = 0;
+	else if (savedata.pianorollviewmode != 1)
+		savedata.pianorollviewmode = 0;
+	if (datFileSize < (int)(offsetof(save, pianorollkeyrange) + sizeof(savedata.pianorollkeyrange)))
+		savedata.pianorollkeyrange = 108;
+	else if (savedata.pianorollkeyrange != 88)
+		savedata.pianorollkeyrange = 108;
+	if (datFileSize < (int)(offsetof(save, pianorollnotename) + sizeof(savedata.pianorollnotename)))
+		savedata.pianorollnotename = 1;
+	else if (savedata.pianorollnotename != 0)
+		savedata.pianorollnotename = 1;
+	if (datFileSize < (int)(offsetof(save, pianoroll3dyaw) + sizeof(savedata.pianoroll3dyaw))
+		|| savedata.pianoroll3dyaw < -1800 || savedata.pianoroll3dyaw > 1800)
+		savedata.pianoroll3dyaw = -220;
+	if (datFileSize < (int)(offsetof(save, pianoroll3dpitch) + sizeof(savedata.pianoroll3dpitch))
+		|| savedata.pianoroll3dpitch < -850 || savedata.pianoroll3dpitch > 850)
+		savedata.pianoroll3dpitch = 260;
+	if (datFileSize < (int)(offsetof(save, dougatopmost) + sizeof(savedata.dougatopmost)))
+		savedata.dougatopmost = 0;
+	else if (savedata.dougatopmost != 0)
+		savedata.dougatopmost = 1;
+	if (datFileSize < (int)(offsetof(save, dougaaspect) + sizeof(savedata.dougaaspect)))
+		savedata.dougaaspect = 0;
+	else if (savedata.dougaaspect != 0)
+		savedata.dougaaspect = 1;
+	if (datFileSize < (int)(offsetof(save, pianoroll3dzoom) + sizeof(savedata.pianoroll3dzoom))
+		|| savedata.pianoroll3dzoom < 35 || savedata.pianoroll3dzoom > 400)
+		savedata.pianoroll3dzoom = 100;
+	if (datFileSize < (int)(offsetof(save, mpPromptAnalyzeMode) + sizeof(savedata.mpPromptAnalyzeMode)))
+		savedata.mpPromptAnalyzeMode = 0;
+	else if (savedata.mpPromptAnalyzeMode < 0 || savedata.mpPromptAnalyzeMode > 9)
+		savedata.mpPromptAnalyzeMode = 0;
 	if (savedata.aerocheck == 99) {
 		int abc = AfxMessageBox(LL14(
 			L"Win10/11アクリルぼかしが実装されました。\n有効にしますか？\n(このメッセージは一回しか表示されません)",

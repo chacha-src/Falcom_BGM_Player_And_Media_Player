@@ -21,7 +21,9 @@ protected:
 	CCustomStatic m_lblEdit;
 	CEdit m_legend;
 	CCustomComboBox m_hist;
-	CCustomStandardButton m_run, m_stop, m_reset, m_clear, m_close, m_saveHist;
+	CCustomComboBox m_mode;
+	CCustomProgressCtrl m_progress;
+	CCustomStandardButton m_run, m_stop, m_reset, m_clear, m_close, m_saveHist, m_analyze;
 	CToolTipCtrl m_tooltip;
 	CFont m_fontLegend;
 	CFont m_fontEditLbl;
@@ -29,6 +31,7 @@ protected:
 	CBrush m_brDlg;
 	BOOL m_posRestored = FALSE;
 	BOOL m_inSizeMove = FALSE;
+	BOOL m_analyzing = FALSE;
 	static const int kMaxChars = 2000;
 
 	void LayoutControls();
@@ -40,6 +43,10 @@ protected:
 	void SavePosToSavedata();
 	void RestorePosFromSavedata();
 	void ReloadHistoryCombo();
+	void FillModeCombo();
+	int  GetSelectedAnalyzeMode() const;
+	void SetAnalyzeUiBusy(BOOL busy);
+	static void AnalyzeProgressThunk(int percent, LPCTSTR status, void* user);
 
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
@@ -47,6 +54,8 @@ protected:
 	virtual void PostNcDestroy();
 	virtual void OnClose();
 	afx_msg void OnRun();
+	afx_msg void OnAnalyze();
+	afx_msg void OnModeSel();
 	afx_msg void OnStop();
 	afx_msg void OnReset();
 	afx_msg void OnClear();

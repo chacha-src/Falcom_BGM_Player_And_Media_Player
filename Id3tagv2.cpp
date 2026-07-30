@@ -688,6 +688,44 @@ void CId3tagv2::SetTitle(LPCTSTR title)
 	SetId3String("TIT2",title);
 }
 
+void CId3tagv2::SetPicture(const BYTE *pImage,DWORD dwSize,const char *szMime)
+{
+	DWORD dwId;
+	memcpy(&dwId,"APIC",sizeof(dwId));
+	m_frames.erase(dwId);	//既存のジャケットは捨てる
+	if(!pImage || !dwSize)
+	{
+		return;
+	}
+	if(!szMime || !*szMime)
+	{
+		szMime = "image/jpeg";
+	}
+	const DWORD dwMimeLen = (DWORD )strlen(szMime);
+	// [encoding][mime+NUL][picture type][description NUL][image]
+	const DWORD dwFrameSize = 1 + dwMimeLen + 1 + 1 + 1 + dwSize;
+	unsigned char *data = (unsigned char *)malloc(dwFrameSize);
+	if(!data)
+	{
+		return;
+	}
+	DWORD ptr = 0;
+	data[ptr++] = 0;						//encoding = ISO-8859-1
+	memcpy(&data[ptr],szMime,dwMimeLen);
+	ptr += dwMimeLen;
+	data[ptr++] = 0;						//mimeの終端
+	data[ptr++] = 3;						//picture type = front cover
+	data[ptr++] = 0;						//description(空)
+	memcpy(&data[ptr],pImage,dwSize);
+
+	CId3Frame frame;
+	frame.SetId(dwId);
+	frame.SetFlags(0);
+	frame.SetData(data,dwFrameSize);
+	m_frames.insert(pair<DWORD,CId3Frame>(frame.GetId(),frame));
+	free(data);
+}
+
 CString CId3tagv2::GetTrackNo()
 {
 	//トラック番号

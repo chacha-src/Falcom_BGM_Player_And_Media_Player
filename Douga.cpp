@@ -271,6 +271,7 @@ extern BOOL ev;
 extern IMFVideoDisplayControl* Vdc;
 extern IVideoWindow* pVideoWindow;
 extern IBasicVideo* pBasicVideo;
+extern RECT rcm; // 再生中動画の元サイズ(アスペクト比維持で使用)
 extern IGraphBuilder* pGraphBuilder;
 extern IAMStreamSelect* iam;
 extern CString streamname[40];
@@ -1089,6 +1090,26 @@ BOOL CDouga::PreTranslateMessage(MSG* pMsg)
 	return CFrameWnd::PreTranslateMessage(pMsg);
 }
 
+// アスペクト比維持がONなら、元サイズ(rcm)比で dest 矩形をレターボックス化する。
+// OFF や元サイズ不明なら矩形は触らず従来どおり引き伸ばす。調整したときだけ TRUE。
+static BOOL DougaLetterbox(CRect& dest)
+{
+	if (!savedata.dougaaspect || rcm.right <= 0 || rcm.bottom <= 0) return FALSE;
+	const int dw = dest.Width(), dh = dest.Height();
+	if (dw < 1 || dh < 1) return FALSE;
+	const double sx = (double)dw / (double)rcm.right;
+	const double sy = (double)dh / (double)rcm.bottom;
+	const double s = (sx < sy) ? sx : sy;
+	int w = (int)(rcm.right * s + 0.5);
+	int h = (int)(rcm.bottom * s + 0.5);
+	if (w < 1) w = 1;
+	if (h < 1) h = 1;
+	const int x = dest.left + (dw - w) / 2;
+	const int y = dest.top + (dh - h) / 2;
+	dest.SetRect(x, y, x + w, y + h);
+	return TRUE;
+}
+
 void CDouga::ApplyVideoDest()
 {
 	if (!GetSafeHwnd() || m_applyBusy) return;
@@ -1128,19 +1149,21 @@ void CDouga::ApplyVideoDest()
 		m_bar.LayoutBar();
 
 	CRect vr(0, 0, vw, vh);
+	if (DougaLetterbox(vr) && m_videoSite.GetSafeHwnd())
+		m_videoSite.Invalidate(TRUE); // 帯に旧フレームを残さない
 	if (ev && Vdc) {
 		MFVideoNormalizedRect mvnr = { 0, 0, 1, 1 };
 		Vdc->SetVideoPosition(&mvnr, &vr);
 	} else if (!savedata.fs) {
 		if (pBasicVideo) {
-			pBasicVideo->put_DestinationWidth(vw);
-			pBasicVideo->put_DestinationHeight(vh);
+			pBasicVideo->put_DestinationWidth(vr.Width());
+			pBasicVideo->put_DestinationHeight(vr.Height());
 		}
 		if (pVideoWindow) {
-			pVideoWindow->put_Top(0);
-			pVideoWindow->put_Left(0);
-			pVideoWindow->put_Height(vh);
-			pVideoWindow->put_Width(vw);
+			pVideoWindow->put_Top(vr.top);
+			pVideoWindow->put_Left(vr.left);
+			pVideoWindow->put_Height(vr.Height());
+			pVideoWindow->put_Width(vr.Width());
 		}
 	}
 
@@ -1285,6 +1308,9 @@ BEGIN_MESSAGE_MAP(CDouga, CFrameWnd)
 	ON_COMMAND(ID_DOUGA_MUTE, OnDougaMenuMute)
 	ON_COMMAND(ID_DOUGA_FS, OnDougaMenuFs)
 	ON_COMMAND(ID_DOUGA_FADE, OnDougaMenuFade)
+	ON_COMMAND(ID_DOUGA_TOPMOST, OnDougaMenuTopmost)
+	ON_COMMAND(ID_DOUGA_ASPECT, OnDougaMenuAspect)
+	ON_COMMAND_RANGE(ID_DOUGA_SPEED_FIRST, ID_DOUGA_SPEED_LAST, OnDougaMenuSpeed)
 END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1429,6 +1455,7 @@ BOOL CDouga::Create(HWND h)
 		m_bar.CreateBar(this);
 		ApplyVideoDest();
 	}
+	ApplyDougaTopmost();
 	return TRUE;
 }
 long DeviceID=-1;
@@ -4874,6 +4901,45 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 	else
 		LocalizeDougaMenu1(pPopup);
 
+	// 表示系の追加項目(リソースではなくコード生成)。フェードアウトの直後に差し込む。
+	{
+		int at = pPopup->GetMenuItemCount();
+		for (int i = 0; i < pPopup->GetMenuItemCount(); i++) {
+			if (pPopup->GetMenuItemID(i) == ID_DOUGA_FADE) { at = i + 1; break; }
+		}
+		pPopup->InsertMenu(at++, MF_BYPOSITION | MF_SEPARATOR);
+		pPopup->InsertMenu(at++, MF_BYPOSITION | MF_STRING | (savedata.dougatopmost ? MF_CHECKED : 0), ID_DOUGA_TOPMOST,
+			LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano",
+				L"Siempre visible", L"항상 위에 표시", L"总在最前面", L"دائمًا في المقدمة",
+				L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre visivel", L"Altijd op voorgrond",
+				L"Zawsze na wierzchu", L"Her zaman ustte"));
+		pPopup->InsertMenu(at++, MF_BYPOSITION | MF_STRING | (savedata.dougaaspect ? MF_CHECKED : 0), ID_DOUGA_ASPECT,
+			LL14(L"アスペクト比を維持", L"Keep aspect ratio", L"Conserver les proportions", L"Mantieni proporzioni",
+				L"Mantener proporcion", L"화면 비율 유지", L"保持宽高比", L"الحفاظ على نسبة العرض",
+				L"Сохранять пропорции", L"Seitenverhaltnis beibehalten", L"Manter proporcao", L"Beeldverhouding behouden",
+				L"Zachowaj proporcje", L"En-boy oranini koru"));
+
+		// 再生速度は IMediaSeeking がレートを返せるグラフのときだけ出す(未対応なら項目を作らない)
+		double cur = 1.0;
+		if (pMediaSeeking && SUCCEEDED(pMediaSeeking->GetRate(&cur))) {
+			static const double kRates[6] = { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
+			if (cur <= 0.0) cur = 1.0;
+			CMenu subSpeed;
+			subSpeed.CreatePopupMenu();
+			for (int i = 0; i < 6; i++) {
+				CString s;
+				s.Format(L"%gx", kRates[i]);
+				subSpeed.AppendMenu(MF_STRING | ((fabs(cur - kRates[i]) < 0.01) ? MF_CHECKED : 0),
+					ID_DOUGA_SPEED_FIRST + i, s);
+			}
+			pPopup->InsertMenu(at++, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)subSpeed.Detach(),
+				LL14(L"再生速度", L"Playback speed", L"Vitesse de lecture", L"Velocita di riproduzione",
+					L"Velocidad de reproduccion", L"재생 속도", L"播放速度", L"سرعة التشغيل",
+					L"Скорость воспроизведения", L"Wiedergabegeschwindigkeit", L"Velocidade de reproducao",
+					L"Afspeelsnelheid", L"Predkosc odtwarzania", L"Oynatma hizi"));
+		}
+	}
+
 	CWnd* pWndPopupOwner = this;
 	while (pWndPopupOwner->GetStyle() & WS_CHILD)
 		pWndPopupOwner = pWndPopupOwner->GetParent();
@@ -5621,6 +5687,7 @@ void CDouga::ToggleFullScreen()
 		SetWindowLong(m_hWnd, GWL_STYLE, ((i | WS_OVERLAPPEDWINDOW) & ~WS_MAXIMIZEBOX & ~WS_MINIMIZEBOX & ~WS_SYSMENU));
 		OnMenuitem32774();
 		RestoreDougaCursor();
+		ApplyDougaTopmost(); // 拡張スタイル入れ替えで TOPMOST が落ちるため戻す
 	} else {
 		savedata.fs = 1;
 		int cx = GetSystemMetrics(SM_CXSCREEN);
@@ -5629,11 +5696,15 @@ void CDouga::ToggleFullScreen()
 		SetWindowLong(m_hWnd, GWL_EXSTYLE, 0);
 		SetWindowLong(m_hWnd, GWL_STYLE, i & ~WS_CAPTION & ~WS_BORDER & ~WS_THICKFRAME);
 		SetWindowPos(NULL, 0, 0, cx, cy, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+		ApplyDougaTopmost(); // 拡張スタイル入れ替えで TOPMOST が落ちるため戻す
 		ApplyVideoDest();
 		if (ev && Vdc) {
 			MFVideoNormalizedRect mvnr = { 0, 0, 1, 1 };
-			if (m_videoSite.GetSafeHwnd()) m_videoSite.GetClientRect(&rr);
-			else GetClientRect(&rr);
+			CRect fsr;
+			if (m_videoSite.GetSafeHwnd()) m_videoSite.GetClientRect(&fsr);
+			else GetClientRect(&fsr);
+			DougaLetterbox(fsr);
+			rr = fsr;
 			Vdc->SetVideoPosition(&mvnr, &rr);
 		} else if (pBasicVideo && pVideoWindow) {
 			double ii; int cyy, cxx;
@@ -5738,3 +5809,31 @@ void CDouga::OnDougaMenuFf() { m_bar.OnBnFf(); }
 void CDouga::OnDougaMenuMute() { m_bar.OnBnMute(); }
 void CDouga::OnDougaMenuFs() { m_bar.OnBnFs(); }
 void CDouga::OnDougaMenuFade() { m_bar.OnBnFade(); }
+
+void CDouga::OnDougaMenuTopmost()
+{
+	savedata.dougatopmost = savedata.dougatopmost ? 0 : 1;
+	ApplyDougaTopmost();
+}
+
+void CDouga::OnDougaMenuAspect()
+{
+	savedata.dougaaspect = savedata.dougaaspect ? 0 : 1;
+	ApplyVideoDest();
+}
+
+void CDouga::OnDougaMenuSpeed(UINT nID)
+{
+	static const double kRates[6] = { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
+	const int i = (int)nID - ID_DOUGA_SPEED_FIRST;
+	if (i < 0 || i >= 6 || !pMediaSeeking) return;
+	pMediaSeeking->SetRate(kRates[i]);
+}
+
+// 常に手前の適用。ウィンドウ生成時とメニュー切替の両方から呼ぶ。
+void CDouga::ApplyDougaTopmost()
+{
+	if (!GetSafeHwnd()) return;
+	SetWindowPos(savedata.dougatopmost ? &wndTopMost : &wndNoTopMost, 0, 0, 0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
