@@ -1,8 +1,10 @@
 ﻿#pragma once
 // CAnalyzerDlg.h : 簡易波形アナライザー
-// 上部: PCM 波形(横スクロール・バックバッファ) / 下部: 周波数特性
+// 上部: PCM 波形(横スクロール・バックバッファ) / トリガー式オシロ
+// 下部: 周波数特性 / スペクトログラム / 位相スコープ
 // ステレオ〜7.1ch(最大8)対応。周波数特性は右クリックで分割レイアウト切替。
-// Ozone 風: 塗/線/バー、ピークホールド、EQオーバーレイ、ホバー読取、レベルメーター、フリーズ。
+// Ozone 風: 塗/線/バー、ピークホールド、EQオーバーレイ(全パネル・編集可)、
+// ホバー読取、レベルメーター(全ch)、フリーズ、差分、ズーム、マーカー、TP/LUFS。
 // 右クリック: レイアウト/表示モード/速度、コピー、クリア、常に手前に表示。
 #include "afxdialogex.h"
 #include "CCustomControl.h"
@@ -25,6 +27,8 @@ public:
 	static constexpr int FFT_SIZE = 2048;
 	static constexpr int SPEC_BINS = 120;
 	static constexpr int EQ_OVERLAY_BANDS = 15;
+	static constexpr int MARKER_MAX = 4;
+	static constexpr int WF_ROWS = 96;
 
 	enum SpecLayout {
 		SpecOverlay = 0, // 全ch重ね描き
@@ -42,6 +46,24 @@ public:
 		StyleSpan = 4,      // Voxengo SPAN 風(密バー)
 		StyleAbleton = 5,   // Ableton Spectrum 風
 		StyleFabFilter = 6  // FabFilter Pro-Q 風
+	};
+
+	enum WaveMode {
+		WaveScroll = 0,
+		WaveTrigger = 1
+	};
+
+	enum LowerMode {
+		LowerSpectrum = 0,
+		LowerWaterfall = 1,
+		LowerPhase = 2
+	};
+
+	enum FreqZoom {
+		ZoomFull = 0,
+		ZoomLow = 1,
+		ZoomMid = 2,
+		ZoomHigh = 3
 	};
 
 	static constexpr int WAVE_SPEED_COUNT = 8;
@@ -72,6 +94,8 @@ protected:
 	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnMouseLeave();
+	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
 	afx_msg void OnSpecLayoutOverlay();
 	afx_msg void OnSpecLayoutSplitV();
@@ -96,6 +120,22 @@ protected:
 	afx_msg void OnCopyHoverReadout();
 	afx_msg void OnCopyPeakFreq();
 	afx_msg void OnCopyLevels();
+	afx_msg void OnWaveModeScroll();
+	afx_msg void OnWaveModeTrigger();
+	afx_msg void OnLowerModeSpectrum();
+	afx_msg void OnLowerModeWaterfall();
+	afx_msg void OnLowerModePhase();
+	afx_msg void OnToggleSpecDiff();
+	afx_msg void OnCaptureSpecSnap();
+	afx_msg void OnClearSpecSnap();
+	afx_msg void OnFreqZoomFull();
+	afx_msg void OnFreqZoomLow();
+	afx_msg void OnFreqZoomMid();
+	afx_msg void OnFreqZoomHigh();
+	afx_msg void OnMarkerAdd();
+	afx_msg void OnMarkerRemoveNearest();
+	afx_msg void OnMarkerClearAll();
+	afx_msg void OnToggleCorrMeter();
 	afx_msg LRESULT OnSpecAnalysisDone(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPresentRequest(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnSyncRequest(WPARAM wParam, LPARAM lParam);
@@ -111,6 +151,8 @@ private:
 	void DrawEqOverlay(CDC& dc, const CRect& plot, float nyquist);
 	void DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg);
 	void DrawHoverReadout(CDC& dc, const CRect& clientRc);
+	void DrawFreqMarkers(CDC& dc, const CRect& plot, float nyquist);
+	void DrawTpLufsReadout(CDC& dc, const CRect& waveRc);
 	void Present(CDC& dc, const CRect& rc, BOOL bAero);
 	void ReleaseBuffers();
 	bool EnsureWaveBuffer(CDC& refDC, int w, int h);
@@ -123,6 +165,9 @@ private:
 	void SetSpecLayout(int layout);
 	void SetSpecStyle(int style);
 	void SetWaveSpeedPct(int pct);
+	void SetWaveMode(int mode);
+	void SetLowerMode(int mode);
+	void SetFreqZoom(int zoom);
 	void ResetPeakHold();
 	int WaveSpeedIndex() const;
 	bool UpdateHoverFromPoint(CPoint ptClient); // true=表示内容が変わった
@@ -131,6 +176,10 @@ private:
 	void RequestSpecAnalysis();
 	static DWORD WINAPI SpecWorkerEntry(LPVOID param);
 	DWORD SpecWorkerLoop();
+	void PushWaterfallRow();
+	void SyncEqUiFromSavedata();
+	bool HitEqBand(CPoint ptClient, int& outBand, CRect& outPlot);
+	void ApplyEqBandFromY(int band, const CRect& plot, int yClient);
 
 	CRITICAL_SECTION m_cs;
 	bool m_feedEnabled = false;
@@ -139,11 +188,16 @@ private:
 	int m_specLayout = SpecOverlay;
 	int m_specStyle = StyleFill;
 	int m_waveSpeedPct = 100; // 波形スクロール速度(%)
+	int m_waveMode = WaveScroll;
+	int m_lowerMode = LowerSpectrum;
+	int m_freqZoom = ZoomFull;
 	bool m_peakHold = true;
 	bool m_eqOverlay = true;
 	bool m_frozen = false;
 	bool m_showLevelMeter = true;
 	bool m_alwaysOnTop = false;
+	bool m_specDiff = false;
+	bool m_specSnapValid = false;
 
 	std::vector<float> m_ring[CH_MAX];
 	std::vector<float> m_ringSnap[CH_MAX];
@@ -165,6 +219,10 @@ private:
 
 	float m_specDb[CH_MAX][SPEC_BINS];
 	float m_specPeakDb[CH_MAX][SPEC_BINS];
+	float m_specSnapDb[CH_MAX][SPEC_BINS];
+	float m_wfHist[CH_MAX][WF_ROWS][SPEC_BINS];
+	int m_wfWrite = 0;
+	int m_wfFilled = 0;
 	std::vector<float> m_fftRe;
 	std::vector<float> m_fftIm;
 	std::vector<float> m_fftWindow;
@@ -198,10 +256,25 @@ private:
 	int m_hoverBin = -1;
 
 	// レベルメーター: すべて RMS 基準(バー=現在 / 白線=RMSピークホールド)
-	float m_meterPeak[2] = { 0.0f, 0.0f }; // 参考用サンプルピーク(描画未使用)
-	float m_meterHold[2] = { 0.0f, 0.0f };
-	float m_meterRms[2] = { 0.0f, 0.0f };
+	float m_meterPeak[CH_MAX];
+	float m_meterHold[CH_MAX];
+	float m_meterRms[CH_MAX];
 	float m_waveDispPeak = 0.25f; // 波形表示用の追従ピーク(小さいほど拡大)
+
+	// 簡易 True Peak / LUFS(アナライザ内ローカル。ProAudio RG とは独立)
+	float m_tpLin = 0.0f;
+	float m_tpHold = 0.0f;
+	float m_lufsMom = -70.0f;
+	double m_lufsSum = 0.0;
+	double m_lufsCount = 0.0;
+
+	// EQ オーバーレイ編集
+	bool m_eqDrag = false;
+	int m_eqDragBand = -1;
+	CRect m_eqDragPlot;
+
+	CToolTipCtrl m_tooltip;
+	CRect m_tpLufsTipRc;
 
 	// UI 提示要求(音声/ワーカーは Invalidate せず PostMessage 合流 — ピアノロールと同じ自由走行)
 	volatile LONG m_presentPosted = 0;

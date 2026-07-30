@@ -395,6 +395,13 @@ struct save{
 	int mpLibOpen;         // 1=ライブラリ(フォルダツリー+アルバム)ドロワーを開く
 	int mpHistOpen;        // 1=再生履歴ドロワーを開く
 	int mpSpeanaStyle;     // 0=バー 1=ミラー 2=波形(バナー右クリック切替)
+
+	// --- アナライザー Pro 拡張(末尾追記。旧.datは0初期化→起動時に妥当値へ正規化) ---
+	int analyzerwavemode;     // 0=スクロール波形 1=トリガー式オシロ
+	int analyzerlowermode;    // 0=スペクトラム 1=スペクトログラム 2=位相スコープ
+	int analyzerspecdiff;     // 1=スペクトラム差分表示
+	int analyzerfreqzoom;     // 0=全帯域 1=低域 2=中域 3=高域
+	int analyzermarkers[4];   // 固定周波数マーカー(Hz)。0=未使用
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

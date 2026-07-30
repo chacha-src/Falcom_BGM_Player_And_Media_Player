@@ -279,6 +279,11 @@ BOOL COggApp::InitInstance()
 	savedata.pianorollharmprof = 1;
 	savedata.analyzerlevelmeter = 1;
 	savedata.analyzertopmost = 0;
+	savedata.analyzerwavemode = 0;
+	savedata.analyzerlowermode = 0;
+	savedata.analyzerspecdiff = 0;
+	savedata.analyzerfreqzoom = 0;
+	ZeroMemory(savedata.analyzermarkers, sizeof(savedata.analyzermarkers));
 	savedata.saveversion = 2;
 	savedata.prTuneSilencePct = 100;
 	savedata.prTuneBandSilBassPct = 100;
@@ -621,6 +626,31 @@ BOOL COggApp::InitInstance()
 		savedata.mpSpeanaStyle = 0;
 	else if (savedata.mpSpeanaStyle < 0 || savedata.mpSpeanaStyle > 2)
 		savedata.mpSpeanaStyle = 0;
+	if (datFileSize < (int)(offsetof(save, analyzerwavemode) + sizeof(savedata.analyzerwavemode)))
+		savedata.analyzerwavemode = 0;
+	else if (savedata.analyzerwavemode != 0)
+		savedata.analyzerwavemode = 1;
+	if (datFileSize < (int)(offsetof(save, analyzerlowermode) + sizeof(savedata.analyzerlowermode)))
+		savedata.analyzerlowermode = 0;
+	else if (savedata.analyzerlowermode < 0 || savedata.analyzerlowermode > 2)
+		savedata.analyzerlowermode = 0;
+	if (datFileSize < (int)(offsetof(save, analyzerspecdiff) + sizeof(savedata.analyzerspecdiff)))
+		savedata.analyzerspecdiff = 0;
+	else if (savedata.analyzerspecdiff != 0)
+		savedata.analyzerspecdiff = 1;
+	if (datFileSize < (int)(offsetof(save, analyzerfreqzoom) + sizeof(savedata.analyzerfreqzoom)))
+		savedata.analyzerfreqzoom = 0;
+	else if (savedata.analyzerfreqzoom < 0 || savedata.analyzerfreqzoom > 3)
+		savedata.analyzerfreqzoom = 0;
+	if (datFileSize < (int)(offsetof(save, analyzermarkers) + sizeof(savedata.analyzermarkers))) {
+		ZeroMemory(savedata.analyzermarkers, sizeof(savedata.analyzermarkers));
+	}
+	else {
+		for (int mi = 0; mi < 4; ++mi) {
+			if (savedata.analyzermarkers[mi] < 0 || savedata.analyzermarkers[mi] > 96000)
+				savedata.analyzermarkers[mi] = 0;
+		}
+	}
 	if (savedata.mpLibOpen && savedata.mpHistOpen)
 		savedata.mpHistOpen = 0; // 左ドロワーは排他
 	// MP窓座標もずれ破損しやすいので、明らかに不正なら未設定扱いにする
