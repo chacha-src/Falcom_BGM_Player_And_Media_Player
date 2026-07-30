@@ -272,6 +272,9 @@ extern IMFVideoDisplayControl* Vdc;
 extern IVideoWindow* pVideoWindow;
 extern IBasicVideo* pBasicVideo;
 extern IGraphBuilder* pGraphBuilder;
+extern IAMStreamSelect* iam;
+extern CString streamname[40];
+extern int audionum;
 extern long width, height;
 extern void MpTaskbarReplay();
 extern void MpTaskbarNextTrack();
@@ -675,9 +678,91 @@ static CString DougaFourCCName(DWORD fcc)
 	if (_wcsicmp(s, L"WMV3") == 0) return L"WMV3";
 	if (_wcsicmp(s, L"WVC1") == 0) return L"VC1";
 	if (_wcsicmp(s, L"MP4V") == 0 || _wcsicmp(s, L"XVID") == 0 || _wcsicmp(s, L"DIVX") == 0) return s;
-	if (_wcsicmp(s, L"MP4A") == 0) return L"AAC";
+	if (_wcsicmp(s, L"MP4A") == 0 || _wcsicmp(s, L"AAC ") == 0 || _wcsicmp(s, L"AAC\0") == 0 ||
+		_wcsicmp(s, L"ADTS") == 0 || _wcsicmp(s, L"LATM") == 0 || _wcsicmp(s, L"AACL") == 0) return L"AAC";
+	if (_wcsicmp(s, L"AC-3") == 0 || _wcsicmp(s, L"AC3 ") == 0 || _wcsicmp(s, L"DAC3") == 0) return L"AC3";
+	if (_wcsicmp(s, L"EAC3") == 0 || _wcsicmp(s, L"EC-3") == 0 || _wcsicmp(s, L"DEC3") == 0) return L"EAC3";
+	if (_wcsicmp(s, L"DTS ") == 0 || _wcsicmp(s, L"DTS\0") == 0 || _wcsicmp(s, L"DTSB") == 0) return L"DTS";
+	if (_wcsicmp(s, L"DTSH") == 0 || _wcsicmp(s, L"DTSL") == 0) return L"DTS-HD";
+	if (_wcsicmp(s, L"TRUE") == 0 || _wcsicmp(s, L"MLPA") == 0) return L"TrueHD";
+	if (_wcsicmp(s, L"OPUS") == 0) return L"Opus";
+	if (_wcsicmp(s, L"FLAC") == 0 || _wcsicmp(s, L"fLaC") == 0) return L"FLAC";
+	if (_wcsicmp(s, L"VORB") == 0 || _wcsicmp(s, L"VOR1") == 0) return L"Vorbis";
+	if (_wcsicmp(s, L"ALAC") == 0) return L"ALAC";
+	if (_wcsicmp(s, L"APE ") == 0) return L"APE";
+	if (_wcsicmp(s, L"TTA1") == 0) return L"TTA";
+	if (_wcsicmp(s, L"WAVP") == 0 || _wcsicmp(s, L"WVPK") == 0) return L"WavPack";
+	if (_wcsicmp(s, L"SPEX") == 0) return L"Speex";
+	if (_wcsicmp(s, L"SAMR") == 0 || _wcsicmp(s, L"SAWB") == 0) return L"AMR";
+	if (_wcsicmp(s, L"QDM2") == 0 || _wcsicmp(s, L"QDMC") == 0) return L"QDesign";
 	_wcsupr_s(s, 8);
 	return s;
+}
+
+static CString DougaGuessCodecFromText(LPCWSTR text)
+{
+	if (!text || !text[0]) return L"";
+	CString t(text);
+	t.MakeUpper();
+	// 長い／具体的な名前を先に
+	if (t.Find(L"TRUEHD") >= 0 || t.Find(L"TRUE-HD") >= 0 || t.Find(L"MLP") >= 0) return L"TrueHD";
+	if (t.Find(L"DTS-HD") >= 0 || t.Find(L"DTSHD") >= 0 || t.Find(L"DTS MA") >= 0) return L"DTS-HD";
+	if (t.Find(L"E-AC-3") >= 0 || t.Find(L"EAC3") >= 0 || t.Find(L"E-AC3") >= 0 || t.Find(L"DD+") >= 0 || t.Find(L"DOLBY DIGITAL PLUS") >= 0) return L"EAC3";
+	if (t.Find(L"AC-3") >= 0 || t.Find(L"AC3") >= 0 || t.Find(L"DOLBY DIGITAL") >= 0 || t.Find(L"A52") >= 0) return L"AC3";
+	if (t.Find(L"DTS") >= 0) return L"DTS";
+	if (t.Find(L"HE-AAC") >= 0 || t.Find(L"HEAAC") >= 0) return L"HE-AAC";
+	if (t.Find(L"AAC") >= 0 || t.Find(L"MP4A") >= 0 || t.Find(L"ADTS") >= 0 || t.Find(L"LATM") >= 0) return L"AAC";
+	if (t.Find(L"MP3") >= 0 || t.Find(L"MPEG LAYER-3") >= 0 || t.Find(L"MPEG-1 LAYER 3") >= 0) return L"MP3";
+	if (t.Find(L"FLAC") >= 0) return L"FLAC";
+	if (t.Find(L"OPUS") >= 0) return L"Opus";
+	if (t.Find(L"VORBIS") >= 0 || t.Find(L"OGG") >= 0) return L"Vorbis";
+	if (t.Find(L"ALAC") >= 0 || t.Find(L"APPLE LOSSLESS") >= 0) return L"ALAC";
+	if (t.Find(L"WMA") >= 0) return L"WMA";
+	if (t.Find(L"PCM") >= 0 || t.Find(L"LPCM") >= 0) return L"PCM";
+	if (t.Find(L"FLOAT") >= 0) return L"Float";
+	if (t.Find(L"AMR") >= 0) return L"AMR";
+	if (t.Find(L"SPEEX") >= 0) return L"Speex";
+	if (t.Find(L"APE") >= 0 || t.Find(L"MONKEY") >= 0) return L"APE";
+	if (t.Find(L"WAVPACK") >= 0) return L"WavPack";
+	if (t.Find(L"TTA") >= 0) return L"TTA";
+	if (t.Find(L"HEVC") >= 0 || t.Find(L"H.265") >= 0 || t.Find(L"H265") >= 0) return L"HEVC";
+	if (t.Find(L"AVC") >= 0 || t.Find(L"H.264") >= 0 || t.Find(L"H264") >= 0) return L"H264";
+	if (t.Find(L"AV1") >= 0) return L"AV1";
+	if (t.Find(L"VP9") >= 0) return L"VP9";
+	if (t.Find(L"VP8") >= 0) return L"VP8";
+	if (t.Find(L"MPEG-2") >= 0 || t.Find(L"MPEG2") >= 0) return L"MPEG2";
+	if (t.Find(L"MPEG-4") >= 0 || t.Find(L"MPEG4") >= 0 || t.Find(L"XVID") >= 0 || t.Find(L"DIVX") >= 0) return L"MPEG4";
+	if (t.Find(L"VC-1") >= 0 || t.Find(L"VC1") >= 0 || t.Find(L"WMV3") >= 0) return L"VC1";
+	return L"";
+}
+
+static CString DougaWaveFormatTagLabel(WORD tag)
+{
+	switch (tag) {
+	case WAVE_FORMAT_PCM: return L"PCM";
+	case WAVE_FORMAT_IEEE_FLOAT: return L"Float";
+	case WAVE_FORMAT_ALAW: return L"A-law";
+	case WAVE_FORMAT_MULAW: return L"μ-law";
+	case WAVE_FORMAT_ADPCM: return L"ADPCM";
+	case WAVE_FORMAT_IMA_ADPCM: return L"IMA-ADPCM";
+	case WAVE_FORMAT_MPEGLAYER3: return L"MP3";
+	case WAVE_FORMAT_MPEG: return L"MPEG";
+	case 0x0160: case 0x0161: case 0x0162: case 0x0163: return L"WMA";
+	case 0x00FF: // WAVE_FORMAT_RAW_AAC1
+	case 0x1600: // AAC ADTS-ish
+	case 0x1610: // WAVE_FORMAT_MPEG_HEAAC
+	case 0x706D: // 'mp'
+		return L"AAC";
+	case 0x2000: return L"AC3";      // WAVE_FORMAT_DOLBY_AC3
+	case 0x0092: return L"AC3";      // WAVE_FORMAT_DOLBY_AC3_SPDIF
+	case 0x2001: return L"DTS";
+	case 0x2002: return L"AAC";      // sometimes MPEG4 AAC
+	case 0xF1AC: return L"FLAC";
+	case 0x704F: return L"Opus";     // 'Op'
+	case 0x674F: return L"Opus";
+	case 0x566F: return L"Vorbis";   // 'oV'
+	default: return L"";
+	}
 }
 
 static CString DougaSubtypeLabel(const GUID& sub, BOOL isAudio)
@@ -688,6 +773,8 @@ static CString DougaSubtypeLabel(const GUID& sub, BOOL isAudio)
 		if (sub == MEDIASUBTYPE_PCM) return L"PCM";
 		if (sub == MEDIASUBTYPE_IEEE_FLOAT) return L"Float";
 		if (sub == MEDIASUBTYPE_MPEG1AudioPayload) return L"MP1";
+		if (sub == MEDIASUBTYPE_DOLBY_AC3) return L"AC3";
+		if (sub == MEDIASUBTYPE_DTS) return L"DTS";
 	}
 	CString fcc = DougaFourCCName(sub.Data1);
 	if (!fcc.IsEmpty()) {
@@ -699,12 +786,61 @@ static CString DougaSubtypeLabel(const GUID& sub, BOOL isAudio)
 	return L"";
 }
 
+static BOOL DougaIsCompressedCodecName(const CString& codec)
+{
+	if (codec.IsEmpty()) return FALSE;
+	if (codec == L"PCM" || codec == L"Float" || codec == L"A-law" || codec == L"μ-law")
+		return FALSE;
+	return TRUE;
+}
+
+static CString DougaCodecFromMediaType(const AM_MEDIA_TYPE& mt, BOOL isAudio)
+{
+	CString codec = DougaSubtypeLabel(mt.subtype, isAudio);
+	if (DougaIsCompressedCodecName(codec))
+		return codec;
+
+	if (mt.formattype == FORMAT_WaveFormatEx && mt.pbFormat && mt.cbFormat >= sizeof(WAVEFORMATEX)) {
+		const WAVEFORMATEX* wfx = (const WAVEFORMATEX*)mt.pbFormat;
+		WORD tag = wfx->wFormatTag;
+		if (tag == WAVE_FORMAT_EXTENSIBLE && mt.cbFormat >= sizeof(WAVEFORMATEXTENSIBLE)) {
+			const WAVEFORMATEXTENSIBLE* wfex = (const WAVEFORMATEXTENSIBLE*)mt.pbFormat;
+			CString sub = DougaSubtypeLabel(wfex->SubFormat, TRUE);
+			if (DougaIsCompressedCodecName(sub))
+				return sub;
+			// extensible の SubFormat.Data1 が FourCC のこともある
+			sub = DougaFourCCName(wfex->SubFormat.Data1);
+			if (DougaIsCompressedCodecName(sub))
+				return sub;
+		}
+		CString fromTag = DougaWaveFormatTagLabel(tag);
+		if (DougaIsCompressedCodecName(fromTag))
+			return fromTag;
+		if (codec.IsEmpty())
+			codec = fromTag;
+	}
+	return codec;
+}
+
+static int DougaChannelsFromMediaType(const AM_MEDIA_TYPE& mt)
+{
+	if (mt.formattype == FORMAT_WaveFormatEx && mt.pbFormat && mt.cbFormat >= sizeof(WAVEFORMATEX)) {
+		const WAVEFORMATEX* wfx = (const WAVEFORMATEX*)mt.pbFormat;
+		return wfx->nChannels;
+	}
+	return 0;
+}
+
 static CString DougaChannelLabel(int ch)
 {
 	switch (ch) {
 	case 1: return L"1.0";
 	case 2: return L"2.0";
+	case 3: return L"2.1";
+	case 4: return L"4.0";
+	case 5: return L"4.1";
 	case 6: return L"5.1";
+	case 7: return L"6.1";
 	case 8: return L"7.1";
 	default: {
 		CString s;
@@ -720,74 +856,113 @@ static BOOL DougaIsRawVideoSubtype(const GUID& sub)
 	return (fcc == L"YV12" || fcc == L"NV12" || fcc == L"YUY2" || fcc == L"UYVY" || fcc == L"P010");
 }
 
-static BOOL DougaIsUncompressedAudioType(const AM_MEDIA_TYPE& mt)
+static void DougaConsiderMediaType(const AM_MEDIA_TYPE& mt,
+	CString& bestVideoCodec, int& bestVideoScore, long& bestW, long& bestH,
+	CString& bestAudioCodec, int& bestAudioScore, int& bestCh)
 {
-	if (!(mt.formattype == FORMAT_WaveFormatEx && mt.pbFormat && mt.cbFormat >= sizeof(WAVEFORMATEX)))
-		return FALSE;
-	const WAVEFORMATEX* wfx = (const WAVEFORMATEX*)mt.pbFormat;
-	if (wfx->wFormatTag == WAVE_FORMAT_PCM || wfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT)
-		return TRUE;
-	if (wfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE && mt.cbFormat >= sizeof(WAVEFORMATEXTENSIBLE)) {
-		const WAVEFORMATEXTENSIBLE* wfex = (const WAVEFORMATEXTENSIBLE*)mt.pbFormat;
-		if (wfex->SubFormat == MEDIASUBTYPE_PCM || wfex->SubFormat == MEDIASUBTYPE_IEEE_FLOAT)
-			return TRUE;
+	if (mt.majortype == MEDIATYPE_Video) {
+		CString codec = DougaCodecFromMediaType(mt, FALSE);
+		int score = 0;
+		if (DougaIsCompressedCodecName(codec)) score = 3;
+		else if (!DougaIsRawVideoSubtype(mt.subtype) && !codec.IsEmpty()) score = 1;
+		if (score > bestVideoScore) {
+			bestVideoScore = score;
+			bestVideoCodec = codec;
+		}
+		long w = 0, h = 0;
+		if (mt.formattype == FORMAT_VideoInfo && mt.pbFormat) {
+			VIDEOINFOHEADER* vih = (VIDEOINFOHEADER*)mt.pbFormat;
+			w = vih->bmiHeader.biWidth;
+			h = abs(vih->bmiHeader.biHeight);
+		} else if (mt.formattype == FORMAT_VideoInfo2 && mt.pbFormat) {
+			VIDEOINFOHEADER2* vih = (VIDEOINFOHEADER2*)mt.pbFormat;
+			w = vih->bmiHeader.biWidth;
+			h = abs(vih->bmiHeader.biHeight);
+		}
+		if (w > 0 && h > 0) {
+			bestW = w;
+			bestH = h;
+		}
 	}
-	return FALSE;
+	else if (mt.majortype == MEDIATYPE_Audio) {
+		CString codec = DougaCodecFromMediaType(mt, TRUE);
+		int score = 0;
+		if (DougaIsCompressedCodecName(codec)) score = 3;
+		else if (!codec.IsEmpty()) score = 1;
+		if (score > bestAudioScore) {
+			bestAudioScore = score;
+			bestAudioCodec = codec;
+		}
+		int ch = DougaChannelsFromMediaType(mt);
+		if (ch > bestCh)
+			bestCh = ch;
+	}
 }
 
-static BOOL DougaFindConnectedType(IGraphBuilder* pGraph, const GUID& major, AM_MEDIA_TYPE* pmtOut)
+static void DougaScanGraphMediaInfo(IGraphBuilder* pGraph,
+	CString& bestVideoCodec, long& bestW, long& bestH,
+	CString& bestAudioCodec, int& bestCh)
 {
-	if (!pGraph || !pmtOut) return FALSE;
-	ZeroMemory(pmtOut, sizeof(*pmtOut));
+	bestVideoCodec.Empty();
+	bestAudioCodec.Empty();
+	bestW = bestH = 0;
+	bestCh = 0;
+	if (!pGraph) return;
+
+	int bestVideoScore = -1;
+	int bestAudioScore = -1;
+
 	IEnumFilters* pEnum = NULL;
-	if (FAILED(pGraph->EnumFilters(&pEnum)) || !pEnum) return FALSE;
+	if (FAILED(pGraph->EnumFilters(&pEnum)) || !pEnum) return;
 	IBaseFilter* pFilter = NULL;
 	ULONG fetched = 0;
-	BOOL found = FALSE;
-	int bestScore = -1;
-	AM_MEDIA_TYPE bestMt = {};
-
 	while (pEnum->Next(1, &pFilter, &fetched) == S_OK) {
+		FILTER_INFO fi = {};
+		if (SUCCEEDED(pFilter->QueryFilterInfo(&fi))) {
+			CString guess = DougaGuessCodecFromText(fi.achName);
+			// デコーダ名から推測(弱い手がかり)
+			if (DougaIsCompressedCodecName(guess) && bestAudioScore < 2) {
+				CString name(fi.achName);
+				name.MakeUpper();
+				if (name.Find(L"AUDIO") >= 0 || name.Find(L"AAC") >= 0 || name.Find(L"AC3") >= 0 ||
+					name.Find(L"DTS") >= 0 || name.Find(L"FLAC") >= 0 || name.Find(L"OPUS") >= 0) {
+					bestAudioCodec = guess;
+					bestAudioScore = 2;
+				}
+			}
+			if (fi.pGraph) fi.pGraph->Release();
+		}
+
 		IEnumPins* pPins = NULL;
 		if (SUCCEEDED(pFilter->EnumPins(&pPins)) && pPins) {
 			IPin* pPin = NULL;
 			while (pPins->Next(1, &pPin, NULL) == S_OK) {
-				PIN_DIRECTION dir = PINDIR_INPUT;
-				pPin->QueryDirection(&dir);
-				if (dir == PINDIR_OUTPUT) {
-					AM_MEDIA_TYPE mt = {};
-					if (SUCCEEDED(pPin->ConnectionMediaType(&mt))) {
-						if (mt.majortype == major) {
-							int score = 1;
-							if (major == MEDIATYPE_Video) {
-								CString codec = DougaSubtypeLabel(mt.subtype, FALSE);
-								if (!codec.IsEmpty())
-									score = 3;
-								else if (DougaIsRawVideoSubtype(mt.subtype))
-									score = 0;
-							}
-							else if (major == MEDIATYPE_Audio) {
-								CString codec = DougaSubtypeLabel(mt.subtype, TRUE);
-								if (!codec.IsEmpty() && codec != L"PCM" && codec != L"Float")
-									score = 3;
-								else if (!DougaIsUncompressedAudioType(mt))
-									score = 2;
-								else
-									score = 0;
-							}
-
-							if (score > bestScore) {
-								if (found)
-									FreeMediaType(bestMt);
-								CopyMediaType(&bestMt, &mt);
-								bestScore = score;
-								found = TRUE;
-							}
-							FreeMediaType(mt);
-						} else {
-							FreeMediaType(mt);
+				// 接続済みタイプ(デコーダ入力=圧縮、出力=PCM の両方を見る)
+				AM_MEDIA_TYPE mt = {};
+				if (SUCCEEDED(pPin->ConnectionMediaType(&mt))) {
+					DougaConsiderMediaType(mt, bestVideoCodec, bestVideoScore, bestW, bestH,
+						bestAudioCodec, bestAudioScore, bestCh);
+					FreeMediaType(mt);
+				}
+				// 未接続／候補タイプも列挙(スプリッタ側の圧縮型)
+				IEnumMediaTypes* pEnumMt = NULL;
+				if (SUCCEEDED(pPin->EnumMediaTypes(&pEnumMt)) && pEnumMt) {
+					AM_MEDIA_TYPE* pmt = NULL;
+					while (pEnumMt->Next(1, &pmt, NULL) == S_OK) {
+						if (pmt) {
+							DougaConsiderMediaType(*pmt, bestVideoCodec, bestVideoScore, bestW, bestH,
+								bestAudioCodec, bestAudioScore, bestCh);
+							DeleteMediaType(pmt);
 						}
 					}
+					pEnumMt->Release();
+				}
+				PIN_INFO pi = {};
+				if (SUCCEEDED(pPin->QueryPinInfo(&pi))) {
+					CString guess = DougaGuessCodecFromText(pi.achName);
+					if (DougaIsCompressedCodecName(guess) && bestAudioScore < 2)
+						{ bestAudioCodec = guess; bestAudioScore = 2; }
+					if (pi.pFilter) pi.pFilter->Release();
 				}
 				pPin->Release();
 			}
@@ -796,80 +971,100 @@ static BOOL DougaFindConnectedType(IGraphBuilder* pGraph, const GUID& major, AM_
 		pFilter->Release();
 	}
 	pEnum->Release();
-	if (found)
-		*pmtOut = bestMt;
-	return found;
 }
 
 void CDouga::RefreshBarMediaInfo()
 {
 	if (!m_bar.IsBarReady()) return;
-	CString videoPart, audioPart;
 
-	AM_MEDIA_TYPE mt = {};
-	if (pGraphBuilder && DougaFindConnectedType(pGraphBuilder, MEDIATYPE_Video, &mt)) {
-		CString codec = DougaSubtypeLabel(mt.subtype, FALSE);
-		long w = width, h = height;
-		if (w <= 0 || h <= 0) {
-			if (mt.formattype == FORMAT_VideoInfo && mt.pbFormat) {
-				VIDEOINFOHEADER* vih = (VIDEOINFOHEADER*)mt.pbFormat;
-				w = vih->bmiHeader.biWidth;
-				h = abs(vih->bmiHeader.biHeight);
-			} else if (mt.formattype == FORMAT_VideoInfo2 && mt.pbFormat) {
-				VIDEOINFOHEADER2* vih = (VIDEOINFOHEADER2*)mt.pbFormat;
-				w = vih->bmiHeader.biWidth;
-				h = abs(vih->bmiHeader.biHeight);
+	CString videoCodec, audioCodec;
+	long w = width, h = height;
+	int ch = 0;
+	DougaScanGraphMediaInfo(pGraphBuilder, videoCodec, w, h, audioCodec, ch);
+
+	// IAMStreamSelect の元ストリーム情報(圧縮AAC/AC3等が残っていることが多い)
+	if (iam) {
+		DWORD total = 0;
+		if (SUCCEEDED(iam->Count(&total))) {
+			for (DWORD i = 0; i < total; ++i) {
+				AM_MEDIA_TYPE* am = NULL;
+				LPWSTR pname = NULL;
+				DWORD flags = 0;
+				if (FAILED(iam->Info(i, &am, &flags, NULL, NULL, &pname, NULL, NULL)))
+					continue;
+				if (am) {
+					if (am->majortype == MEDIATYPE_Audio) {
+						CString c = DougaCodecFromMediaType(*am, TRUE);
+						if (!DougaIsCompressedCodecName(c) && pname)
+							c = DougaGuessCodecFromText(pname);
+						if (DougaIsCompressedCodecName(c))
+							audioCodec = c;
+						int cch = DougaChannelsFromMediaType(*am);
+						if (cch > ch) ch = cch;
+					}
+					else if (am->majortype == MEDIATYPE_Video) {
+						CString c = DougaCodecFromMediaType(*am, FALSE);
+						if (DougaIsCompressedCodecName(c))
+							videoCodec = c;
+						if (am->formattype == FORMAT_VideoInfo && am->pbFormat) {
+							VIDEOINFOHEADER* vih = (VIDEOINFOHEADER*)am->pbFormat;
+							if (vih->bmiHeader.biWidth > 0) {
+								w = vih->bmiHeader.biWidth;
+								h = abs(vih->bmiHeader.biHeight);
+							}
+						}
+					}
+					DeleteMediaType(am);
+				}
+				if (pname) {
+					if (!DougaIsCompressedCodecName(audioCodec)) {
+						CString g = DougaGuessCodecFromText(pname);
+						if (DougaIsCompressedCodecName(g))
+							audioCodec = g;
+					}
+					CoTaskMemFree(pname);
+				}
 			}
 		}
-		if (codec.IsEmpty() && mt.subtype.Data1)
-			codec = DougaFourCCName(mt.subtype.Data1);
-		if (w > 0 && h > 0) {
-			if (!codec.IsEmpty())
-				videoPart.Format(L"[%s %ldx%ld]", (LPCWSTR)codec, w, h);
-			else
-				videoPart.Format(L"[%ldx%ld]", w, h);
-		} else if (!codec.IsEmpty()) {
-			videoPart.Format(L"[%s]", (LPCWSTR)codec);
-		}
-		FreeMediaType(mt);
-	} else if (width > 0 && height > 0) {
-		videoPart.Format(L"[%ldx%ld]", width, height);
 	}
 
-	ZeroMemory(&mt, sizeof(mt));
-	if (pGraphBuilder && DougaFindConnectedType(pGraphBuilder, MEDIATYPE_Audio, &mt)) {
-		CString codec = DougaSubtypeLabel(mt.subtype, TRUE);
-		int ch = 0;
-		if (mt.formattype == FORMAT_WaveFormatEx && mt.pbFormat && mt.cbFormat >= sizeof(WAVEFORMATEX)) {
-			WAVEFORMATEX* wfx = (WAVEFORMATEX*)mt.pbFormat;
-			ch = wfx->nChannels;
-			if (codec.IsEmpty()) {
-				switch (wfx->wFormatTag) {
-				case WAVE_FORMAT_PCM: codec = L"PCM"; break;
-				case WAVE_FORMAT_IEEE_FLOAT: codec = L"Float"; break;
-				case 0x0161: codec = L"WMA"; break; // WAVE_FORMAT_WMAUDIO2
-				case 0x0162: codec = L"WMA"; break;
-				case 0x0163: codec = L"WMA"; break;
-				case 0x00FF: case 0x706D: codec = L"AAC"; break; // raw AAC tags
-				case WAVE_FORMAT_MPEGLAYER3: codec = L"MP3"; break;
-				case WAVE_FORMAT_MPEG: codec = L"MPEG"; break;
-				default: {
-					CString fcc = DougaFourCCName(mt.subtype.Data1);
-					if (!fcc.IsEmpty()) codec = fcc;
-					break;
-				}
-				}
+	// streamname[] フォールバック
+	if (!DougaIsCompressedCodecName(audioCodec)) {
+		for (int i = 0; i < audionum && i < 40; ++i) {
+			CString g = DougaGuessCodecFromText(streamname[i]);
+			if (DougaIsCompressedCodecName(g)) {
+				audioCodec = g;
+				break;
 			}
 		}
-		if (codec.IsEmpty())
-			codec = DougaFourCCName(mt.subtype.Data1);
-		if (!codec.IsEmpty() && ch > 0)
-			audioPart.Format(L"[%s %s]", (LPCWSTR)codec, (LPCWSTR)DougaChannelLabel(ch));
-		else if (!codec.IsEmpty())
-			audioPart.Format(L"[%s]", (LPCWSTR)codec);
-		else if (ch > 0)
+	}
+
+	if (w <= 0 || h <= 0) {
+		w = width;
+		h = height;
+	}
+
+	CString videoPart, audioPart;
+	if (w > 0 && h > 0) {
+		if (DougaIsCompressedCodecName(videoCodec) || !videoCodec.IsEmpty())
+			videoPart.Format(L"[%s %ldx%ld]", (LPCWSTR)videoCodec, w, h);
+		else
+			videoPart.Format(L"[%ldx%ld]", w, h);
+	} else if (!videoCodec.IsEmpty()) {
+		videoPart.Format(L"[%s]", (LPCWSTR)videoCodec);
+	}
+
+	if (DougaIsCompressedCodecName(audioCodec) || (!audioCodec.IsEmpty() && audioCodec != L"PCM" && audioCodec != L"Float")) {
+		if (ch > 0)
+			audioPart.Format(L"[%s %s]", (LPCWSTR)audioCodec, (LPCWSTR)DougaChannelLabel(ch));
+		else
+			audioPart.Format(L"[%s]", (LPCWSTR)audioCodec);
+	} else if (ch > 0) {
+		// 圧縮名が取れないときだけ PCM/Float を出す。チャンネルだけは避ける
+		if (!audioCodec.IsEmpty())
+			audioPart.Format(L"[%s %s]", (LPCWSTR)audioCodec, (LPCWSTR)DougaChannelLabel(ch));
+		else
 			audioPart.Format(L"[%s]", (LPCWSTR)DougaChannelLabel(ch));
-		FreeMediaType(mt);
 	}
 
 	CString all;

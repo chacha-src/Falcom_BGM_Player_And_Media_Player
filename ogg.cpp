@@ -1,4 +1,4 @@
-// ogg.cpp : アプリケーション用クラスの定義を行います。
+﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -593,6 +593,36 @@ BOOL COggApp::InitInstance()
 				clearMpHist();
 		}
 	}
+	// MP UI フラグ(末尾追記): 旧.dat は未所持
+	if (datFileSize < (int)(offsetof(save, mpLrcExpand) + sizeof(savedata.mpLrcExpand)))
+		savedata.mpLrcExpand = 0;
+	else if (savedata.mpLrcExpand) savedata.mpLrcExpand = 1;
+	if (datFileSize < (int)(offsetof(save, mpFindFilter) + sizeof(savedata.mpFindFilter)))
+		savedata.mpFindFilter = 0;
+	else if (savedata.mpFindFilter) savedata.mpFindFilter = 1;
+	if (datFileSize < (int)(offsetof(save, mpToolsOpen) + sizeof(savedata.mpToolsOpen)))
+		savedata.mpToolsOpen = 0;
+	else if (savedata.mpToolsOpen) savedata.mpToolsOpen = 1;
+	if (datFileSize < (int)(offsetof(save, mpSortKey) + sizeof(savedata.mpSortKey)))
+		savedata.mpSortKey = 0;
+	else if (savedata.mpSortKey < 0 || savedata.mpSortKey > 4)
+		savedata.mpSortKey = 0;
+	if (datFileSize < (int)(offsetof(save, mpSortAsc) + sizeof(savedata.mpSortAsc)))
+		savedata.mpSortAsc = 1;
+	else if (savedata.mpSortAsc) savedata.mpSortAsc = 1;
+	else savedata.mpSortAsc = 0;
+	if (datFileSize < (int)(offsetof(save, mpLibOpen) + sizeof(savedata.mpLibOpen)))
+		savedata.mpLibOpen = 0;
+	else if (savedata.mpLibOpen) savedata.mpLibOpen = 1;
+	if (datFileSize < (int)(offsetof(save, mpHistOpen) + sizeof(savedata.mpHistOpen)))
+		savedata.mpHistOpen = 0;
+	else if (savedata.mpHistOpen) savedata.mpHistOpen = 1;
+	if (datFileSize < (int)(offsetof(save, mpSpeanaStyle) + sizeof(savedata.mpSpeanaStyle)))
+		savedata.mpSpeanaStyle = 0;
+	else if (savedata.mpSpeanaStyle < 0 || savedata.mpSpeanaStyle > 2)
+		savedata.mpSpeanaStyle = 0;
+	if (savedata.mpLibOpen && savedata.mpHistOpen)
+		savedata.mpHistOpen = 0; // 左ドロワーは排他
 	// MP窓座標もずれ破損しやすいので、明らかに不正なら未設定扱いにする
 	if (savedata.mpHasPos) {
 		if (savedata.mpw < 100 || savedata.mph < 100

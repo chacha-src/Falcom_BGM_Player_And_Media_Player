@@ -392,6 +392,9 @@ struct save{
 	int mpToolsOpen;       // 1=並べ替え/フォルダ追加の折りたたみ帯を開く
 	int mpSortKey;         // 0=なし 1=名前 2=アーティスト 3=アルバム 4=時間
 	int mpSortAsc;         // 1=昇順 0=降順
+	int mpLibOpen;         // 1=ライブラリ(フォルダツリー+アルバム)ドロワーを開く
+	int mpHistOpen;        // 1=再生履歴ドロワーを開く
+	int mpSpeanaStyle;     // 0=バー 1=ミラー 2=波形(バナー右クリック切替)
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

@@ -1,4 +1,4 @@
-// oggDlg.h : ヘッダー ファイル
+﻿// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -140,6 +140,7 @@ public:
 	CString lrc[300];
 	DWORD lrctm[300];
 	int lrcnum=0;
+	int lrccur = 0; // 現在ハイライト中の歌詞行
 	CString lrc_backup;
 
 	KMPMODULE *mod;

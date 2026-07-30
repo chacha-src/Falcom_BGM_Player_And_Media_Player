@@ -835,7 +835,7 @@
 #define IDC_MP_ABCLR                    3626
 #define IDC_MP_LRCEXPAND                3627
 #define IDC_MP_LRCBADGE                 3628
-#define IDC_MP_TOOLSTOGGLE              3629
+#define IDC_MP_LRCVIEW                  3629
 #define IDC_MP_SORTNAME                 3630
 #define IDC_MP_SORTART                  3631
 #define IDC_MP_SORTALB                  3632
@@ -866,6 +866,26 @@
 #define IDC_DOUGA_VOLVAL                3655
 #define IDC_DOUGA_INFO                  3656
 
+// メディアプレイヤー: ツール帯 / ライブラリドロワー (IDC_MP_LRCVIEW=3629 との衝突を解消)
+#define IDC_MP_TOOLSTOGGLE              3657
+#define IDC_MP_LIBTOGGLE                3658
+#define IDC_MP_LIBTREE                  3659
+#define IDC_MP_LIBALBUMS                3660
+#define IDC_MP_LIBADDROOT               3661
+#define IDC_MP_LIBADDPL                 3662
+#define IDC_MP_HISTTOGGLE               3663
+#define IDC_MP_HISTLIST                 3664
+#define IDC_MP_EMPTYFOLDER              3665
+#define IDC_MP_EMPTYM3U                 3666
+#define IDC_MP_CHEAT_TEXT               3667
+#define IDC_MP_CHEATBTN                 3668
+
+#define ID_MP_SPEANA_BAR                32960
+#define ID_MP_SPEANA_MIRROR             32961
+#define ID_MP_SPEANA_WAVE               32962
+
+#define IDD_MP_CHEATSHEET               208
+
 #define ID_DOUGA_PLAY                   32948
 #define ID_DOUGA_STOP                   32949
 #define ID_DOUGA_PREV                   32950
@@ -880,9 +900,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        208
-#define _APS_NEXT_COMMAND_VALUE         32957
-#define _APS_NEXT_CONTROL_VALUE         3657
+#define _APS_NEXT_RESOURCE_VALUE        209
+#define _APS_NEXT_COMMAND_VALUE         32963
+#define _APS_NEXT_CONTROL_VALUE         3669
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

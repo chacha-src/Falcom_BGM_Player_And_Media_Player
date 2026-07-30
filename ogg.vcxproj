@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -559,7 +559,8 @@
     <ClCompile Include="kpi_unarc.cpp" />
     <ClCompile Include="ListSyosai.cpp" />
     <ClCompile Include="FileTagInfo.cpp" />
-    <ClCompile Include="LyricsProgressWnd.cpp" />
+	<ClCompile Include="LyricsProgressWnd.cpp" />
+    <ClCompile Include="CLyricsViewWnd.cpp" />
     <ClCompile Include="Mp3Image.cpp" />
     <ClCompile Include="Nishi.cpp" />
     <ClCompile Include="AppMixerMuteCheck.cpp" />
@@ -681,7 +682,8 @@
     <ClInclude Include="libmad\fixed.h" />
     <ClInclude Include="ListSyosai.h" />
     <ClInclude Include="FileTagInfo.h" />
-    <ClInclude Include="LyricsProgressWnd.h" />
+	<ClInclude Include="LyricsProgressWnd.h" />
+    <ClInclude Include="CLyricsViewWnd.h" />
     <ClInclude Include="m4a.h" />
     <ClInclude Include="Mp3Image.h" />
     <ClInclude Include="Nishi.h" />

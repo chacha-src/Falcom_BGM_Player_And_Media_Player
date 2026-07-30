@@ -9,6 +9,7 @@
 #pragma once
 
 #include "CCustomControl.h"
+#include "CLyricsViewWnd.h"
 #include "resource.h"
 #include <atlimage.h>
 
@@ -35,6 +36,11 @@ class CPlayList;
 // 欠損フラグ走査スレッド完了(UI を止めない PathFileExists)
 #ifndef WM_MP_MISS_DONE
 #define WM_MP_MISS_DONE (WM_APP + 63)
+#endif
+
+// ライブラリツリー遅延構築(起動をブロックしない)
+#ifndef WM_MP_LIB_BUILD
+#define WM_MP_LIB_BUILD (WM_APP + 64)
 #endif
 
 /////////////////////////////////////////////////////////////////////////////
@@ -83,6 +89,7 @@ public:
 	void RefreshListAfterLayout(); // レイアウト変更後に仮想リストの描画範囲を再確定
 	void RefreshList(BOOL bForce = FALSE);  // pl->pc をそのまま反映
 	void FollowPlayingRow();                // 再生中(♪)の行へカーソル追従(項目挿入後に呼ぶ)
+	void HistRebuildList();                 // 再生履歴リストを再構築(og からも呼ぶ)
 	void NotifyPlayIconChanged();          // SIconTimer 直後に♪点滅を即反映(250ms待ちしない)
 	void InitListScrollPosition();          // 起動/表示確定時にリスト位置を復元
 	void SyncFromMain();         // og/pl の状態をUIへ反映
@@ -102,6 +109,7 @@ public:
 
 	// ---- 情報表示スタティック(バナー GDI に隠れているものは SW_HIDE してある) ----
 	CCustomStatic m_title, m_artist, m_album, m_lrc, m_lrc2, m_lrc3, m_lrc4, m_lrc5, m_os, m_cpu, m_os3, m_time, m_volval, m_vollabel;
+	CLyricsViewWnd m_lrcView; // 拡大時のカラオケ風歌詞ビュー
 
 	// シークバー: og->m_time と同じ CCustomRangeSliderCtrl(ループ範囲表示付き)
 	CCustomRangeSliderCtrl m_seek;
@@ -120,10 +128,29 @@ public:
 	CCustomStandardButton m_abA, m_abB, m_abClr; // A-Bリピート
 	CCustomStandardButton m_lrcExpand; // 歌詞パネル拡大/縮小
 	CCustomStandardButton m_toolsToggle; // 並べ替え/フォルダ帯の折りたたみ
+	CCustomStandardButton m_cheatBtn;    // ショートカット一覧(?)
 	CCustomStandardButton m_sortName, m_sortArt, m_sortAlb, m_sortTime;
 	CCustomStandardButton m_addFolder; // フォルダから追加(ライブラリ)
 	CCustomCheckBox m_findFilter;      // 検索=絞り込み
 	CCustomStatic m_lrcBadge;          // LRC状態バッジ
+	// ライブラリ左ドロワー(フォルダツリー＋アルバム一覧)
+	CCustomStandardButton m_libToggle;
+	CCustomStandardButton m_libAddRoot, m_libAddPl;
+	CCustomTreeCtrl m_libTree;
+	CCustomListCtrl m_libAlbums;
+	CCustomStandardButton m_histToggle;
+	CCustomListCtrl m_histList;
+	CCustomStandardButton m_emptyFolder, m_emptyM3u;
+	int m_histBuilt;
+	enum { kLibPathMax = 512, kLibAlbumMax = 256 };
+	CString m_libPathBag[kLibPathMax];
+	int m_libPathN;
+	CString m_albumPathBag[kLibAlbumMax];
+	int m_albumN;
+	BYTE m_albumIsFile[kLibAlbumMax]; // 1=file 0=folder
+	CString m_libSelFolder;
+	int m_libTreeBuilt;
+	int m_libBuildPosted; // 1=WM_MP_LIB_BUILD 投稿済み
 	CButtonST m_lsup, m_up, m_down, m_lsdown;   // プレイリスト行移動(一番上/上/下/一番下)
 	CButtonST m_findup, m_finddown;              // あいまい検索 上/下
 	CCustomEdit m_find;
@@ -135,9 +162,12 @@ public:
 	float m_plselLayoutDpi;      // 上記を設定したときの hD2(DPI 変化時に再初期化)
 
 	// ---- プレイリストのドラッグ&ドロップ移動 ----
-	int m_dragging;              // ドラッグ操作中(0/1)
+	int m_dragging;              // ドラッグ操作中(0/1) プレイリスト行
 	int m_dragSrc;               // ドラッグ元の行インデックス
 	HIMAGELIST m_hDragImage;     // DragMove に使うゴースト画像
+	int m_libDrag;               // ライブラリ→PL ドラッグ中
+	HIMAGELIST m_hLibDragImage;  // Lib→PL ドラッグゴースト
+	CString m_libDragFolder;     // ドロップ中のパス(フォルダ or ファイル)
 
 	CCustomCheckBox m_renzoku, m_loop, m_random;
 	CCustomCheckBox m_tip, m_mini, m_savemp3, m_saveds, m_savewav;
@@ -342,12 +372,47 @@ protected:
 	afx_msg void OnAbClear();
 	afx_msg void OnLrcExpand();
 	afx_msg void OnToolsToggle();
+	afx_msg void OnCheatSheetBtn();
 	afx_msg void OnSortName();
 	afx_msg void OnSortArt();
 	afx_msg void OnSortAlb();
 	afx_msg void OnSortTime();
 	afx_msg void OnAddFolder();
 	afx_msg void OnFindFilter();
+	afx_msg void OnLibToggle();
+	afx_msg void OnHistToggle();
+	afx_msg void OnLibAddRoot();
+	afx_msg void OnLibAddPl();
+	afx_msg void OnLibTreeSel(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnLibTreeExpanding(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnLibTreeBeginDrag(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnLibAlbumDblClk(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnLibAlbumBeginDrag(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnHistDblClk(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnEmptyAddFolder();
+	afx_msg void OnEmptyM3u();
+	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
+	afx_msg void OnSpeanaStyleBar();
+	afx_msg void OnSpeanaStyleMirror();
+	afx_msg void OnSpeanaStyleWave();
+	void LibStartFolderDrag(LPCTSTR path, CPoint ptClient);
+	void LibAddPath(LPCTSTR path, BOOL playAfter);
+	BOOL LibDropHitTestPlaylist(CPoint ptClient) const;
+	void EnsureLibControls();
+	void HistPlayIndex(int histIdx);
+	void ShowCheatSheet();
+	void UpdateEmptyStateUi();
+	CString MpTechFormatLine() const;
+	void LibRebuildTree();
+	void LibFitNoHScroll(CWnd* pList);
+	void LibFillChildren(HTREEITEM hParent);
+	void LibFillAlbums(LPCTSTR folder);
+	int  LibAllocPath(LPCTSTR path);
+	CString LibItemPath(HTREEITEM h) const;
+	CString LibRootsFilePath() const;
+	void LibLoadUserRoots(CString* outs, int maxN, int& outN);
+	void LibSaveUserRoots(const CString* roots, int n);
+	void LibAddToPlaylist(LPCTSTR folder);
 	afx_msg void OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult);
@@ -365,8 +430,21 @@ protected:
 	afx_msg LRESULT OnInfoScrollTick(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPlselExpandPopup(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnMissScanDone(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnLibBuildLazy(WPARAM wParam, LPARAM lParam);
 	afx_msg BOOL OnNcActivate(BOOL bActive);
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
+	DECLARE_MESSAGE_MAP()
+};
+
+// キーボードショートカット一覧(?キー)
+class CMpCheatSheetDlg : public CDialog
+{
+	DECLARE_DYNAMIC(CMpCheatSheetDlg)
+public:
+	CMpCheatSheetDlg(CWnd* pParent = NULL);
+	enum { IDD = IDD_MP_CHEATSHEET };
+protected:
+	virtual BOOL OnInitDialog();
 	DECLARE_MESSAGE_MAP()
 };
 

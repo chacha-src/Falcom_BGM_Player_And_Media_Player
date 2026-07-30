@@ -1730,6 +1730,8 @@ void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
 			MpPersistSavedataQuick();
 			if (savedata.playerMode == 1)
 				RefreshTaskbarJumpList(TRUE);
+			if (mp && ::IsWindow(mp->GetSafeHwnd()) && savedata.mpHistOpen)
+				mp->HistRebuildList();
 			return;
 		}
 	}
@@ -1746,6 +1748,8 @@ void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
 	MpPersistSavedataQuick();
 	if (savedata.playerMode == 1)
 		RefreshTaskbarJumpList(TRUE);
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && savedata.mpHistOpen)
+		mp->HistRebuildList();
 }
 
 static volatile LONG s_restartMsgQueued = 0;
@@ -3554,6 +3558,7 @@ BOOL COggDlg::OnInitDialog()
 	m_lrc4.SetWindowText(L"");
 	m_lrc5.SetWindowText(L"");
 	lrc_backup = L"";
+	lrccur = 0;
 
 	stflg = TRUE;
 
@@ -9189,6 +9194,7 @@ void COggDlg::play()
 
 	//lrc
 	lrcnum = 0;
+	lrccur = 0;
 	for (int m = 0; m < 300; m++) {
 		lrc[m] = L"";
 		lrctm[m] = 0;
@@ -16086,6 +16092,7 @@ void COggDlg::stop()
 	}
 	jx = -1;
 	lrc_backup = L"";
+	lrccur = 0;
 	loop1_2 = -1;
 	stflg = TRUE;
 	KillTimer(1250);
@@ -16304,6 +16311,7 @@ BOOL COggDlg::stop1()
 	}
 	jx = -1;
 	lrc_backup = L"";
+	lrccur = 0;
 	loop1_2 = -1;
 
 	//	for(int i=0;i<10;i++){DoEvent();Sleep(10);}
@@ -17321,6 +17329,7 @@ void COggDlg::timerp()
 			m_lrc4.SetWindowText(lrc[lp + 1]);
 			m_lrc5.SetWindowText((lp + 2 < lrcnum - 1) ? lrc[lp + 2] : L"");
 			lrc_backup = lrc[lp];
+			lrccur = lp;
 		}
 	}
 
@@ -21233,12 +21242,29 @@ void SpeanaEnsureBandCache(int cacheKey, bool mode1_Low, bool mode3_High, int ff
 
 inline void SpeanaDrawBar(CDC& dc, int x, int bar_w, int idx, int d)
 {
+	if (savedata.mpSpeanaStyle == 2)
+		return; // 波形モードは別経路
 	if (spelv[idx] < d) { spelv[idx] = d; spetm[idx] = 0; }
-	if (spelv[idx] > 0 || d > 0) {
-		dc.FillSolidRect(x, (96 - spelv[idx]) * 4, bar_w, (spelv[idx] + 1) * 4, RGB(0, 128, 0));
-		dc.FillSolidRect(x, (96 - d) * 4, bar_w, (d + 1) * 4, RGB(0, 255, 0));
-		dc.FillSolidRect(x, (96 - spelv[idx]) * 4, bar_w, 4, RGB(255, 255, 0));
+	if (spelv[idx] <= 0 && d <= 0) return;
+
+	if (savedata.mpSpeanaStyle == 1) {
+		// ミラー: 中央から上下に伸びる
+		const int midY = 96 * 2; // スペアナ領域の垂直中央(px)
+		const int hPeak = (spelv[idx] + 1) * 2;
+		const int hNow = (d + 1) * 2;
+		if (hPeak > 0)
+			dc.FillSolidRect(x, midY - hPeak, bar_w, hPeak * 2, RGB(0, 100, 0));
+		if (hNow > 0)
+			dc.FillSolidRect(x, midY - hNow, bar_w, hNow * 2, RGB(0, 255, 0));
+		dc.FillSolidRect(x, midY - hPeak, bar_w, 2, RGB(255, 255, 0));
+		dc.FillSolidRect(x, midY + hPeak - 2, bar_w, 2, RGB(255, 255, 0));
+		return;
 	}
+
+	// 通常バー
+	dc.FillSolidRect(x, (96 - spelv[idx]) * 4, bar_w, (spelv[idx] + 1) * 4, RGB(0, 128, 0));
+	dc.FillSolidRect(x, (96 - d) * 4, bar_w, (d + 1) * 4, RGB(0, 255, 0));
+	dc.FillSolidRect(x, (96 - spelv[idx]) * 4, bar_w, 4, RGB(255, 255, 0));
 }
 } // namespace
 
@@ -21792,6 +21818,39 @@ void COggDlg::Speana(BOOL bPaintBars)
 	// EQ 供給のみのとき FFT 用リサンプルは不要（UI スレッドコスト削減）
 	if (!bPaintBars)
 		return;
+
+	// 波形モード: FFTせず振幅タイムラインを描画
+	if (savedata.mpSpeanaStyle == 2) {
+		const int x0 = (21 * 8) * 4;
+		const int wPx = stereoSpeana ? (178 * 4) : (176 * 4);
+		const int y0 = 20;
+		const int hPx = 368;
+		const int mid = y0 + hPx / 2;
+		dc.FillSolidRect(x0, y0, wPx, hPx, RGB(0, 0, 0));
+		CPen penL(PS_SOLID, 1, RGB(0, 255, 80));
+		CPen penR(PS_SOLID, 1, RGB(80, 180, 255));
+		CPen* old = dc.SelectObject(&penL);
+		auto plot = [&](const double* buf, CPen& pen) {
+			dc.SelectObject(&pen);
+			BOOL first = TRUE;
+			for (int px = 0; px < wPx; ++px) {
+				const int si = (int)((__int64)px * framesToRead / (wPx > 1 ? wPx : 1));
+				double v = 0.0;
+				if (si >= 0 && si < framesToRead) v = buf[si];
+				int yy = mid - (int)(v * (hPx * 0.45));
+				if (yy < y0) yy = y0;
+				if (yy > y0 + hPx - 1) yy = y0 + hPx - 1;
+				if (first) { dc.MoveTo(x0 + px, yy); first = FALSE; }
+				else dc.LineTo(x0 + px, yy);
+			}
+		};
+		plot(bufL, penL);
+		if (stereoSpeana)
+			plot(bufR, penR);
+		dc.SelectObject(old);
+		dc.FillSolidRect(x0, mid, wPx, 1, RGB(0, 180, 180));
+		return;
+	}
 
 	ResampleDouble(bufL, framesToRead, bufResampled, fftSize);
 	ResampleDouble(bufR, framesToRead, bufResampledR, fftSize);

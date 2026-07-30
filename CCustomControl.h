@@ -833,6 +833,68 @@ private:
 };
 
 // ============================================================================
+// カスタムツリーコントロール (KotoriClient CCustomTreeCtrl 移植)
+// CCustomTreeCtrl — リスト同様にアクリル下では不透明バッファ描画
+// ============================================================================
+#ifndef TVS_EX_FULLROWSELECT
+#define TVS_EX_FULLROWSELECT 0x00000020
+#endif
+
+class CCustomTreeCtrl : public CTreeCtrl
+{
+	DECLARE_DYNAMIC(CCustomTreeCtrl)
+public:
+	CCustomTreeCtrl();
+	virtual ~CCustomTreeCtrl();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
+
+	COLORREF SetBkColor(COLORREF clr);
+	COLORREF GetBkColor() const { return m_clrBk; }
+	HTREEITEM HitTest(CPoint pt, UINT* pFlags = NULL);
+
+	void SetAeroMode(BOOL b)
+	{
+		m_bAeroMode = b;
+		if (GetSafeHwnd()) Invalidate();
+	}
+	void PaintOpaqueIntoBuffer(HDC hdcBuf);
+	void ScheduleOpaqueRepaint();
+
+protected:
+	BOOL m_bAeroMode;
+	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
+	afx_msg void  OnPaint();
+	afx_msg BOOL  OnEraseBkgnd(CDC* pDC);
+	afx_msg void  OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void  OnLButtonDown(UINT nFlags, CPoint point);
+	afx_msg void  OnMouseMove(UINT nFlags, CPoint point);
+	afx_msg void  OnMouseLeave();
+	afx_msg void  OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+	afx_msg BOOL  OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
+	afx_msg void  OnWindowPosChanged(WINDOWPOS* lpwndpos);
+	afx_msg void  OnTimer(UINT_PTR nIDEvent);
+	afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+	afx_msg LRESULT OnPostOpaquePaint(WPARAM, LPARAM);
+
+	DECLARE_MESSAGE_MAP()
+
+private:
+	int  GetItemLevel(HTREEITEM hItem) const;
+	void InvalidateItemRow(HTREEITEM hItem);
+	HTREEITEM HitTestRowAtPoint(CPoint pt, UINT* pFlags);
+	void NotifySelChangedByMouse(HTREEITEM hNew, HTREEITEM hOld);
+	void NotifyBeginDrag(HTREEITEM hItem, CPoint pt);
+	void PaintOpaqueClient(CDC& dc);
+
+	HTREEITEM m_hHotItem;
+	int       m_nItemDrawIndex;
+	COLORREF  m_clrBk;
+	CBrush    m_brBackground;
+};
+
+// ============================================================================
 // カスタム標準ボタンコントロール
 // CCustomStandardButton (常に不透明で描画されます)
 // ============================================================================
@@ -1152,6 +1214,7 @@ do {                                                                            
             else if (auto* p = dynamic_cast<CCustomListBox*>(_pw))         p->SetAeroMode(FALSE); \
             else if (auto* p = dynamic_cast<CCustomComboBox*>(_pw))        p->SetAeroMode(FALSE); \
             else if (auto* p = dynamic_cast<CCustomListCtrl*>(_pw))        p->SetAeroMode(FALSE); \
+            else if (auto* p = dynamic_cast<CCustomTreeCtrl*>(_pw))        p->SetAeroMode(FALSE); \
             else if (auto* p = dynamic_cast<CCustomCheckBox*>(_pw))        p->SetAeroMode(_bA); \
             CCC_SetChildTransparent(_hc, FALSE);                                       \
             _pw->Invalidate();                                                         \

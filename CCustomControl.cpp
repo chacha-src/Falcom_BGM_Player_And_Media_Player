@@ -2513,14 +2513,21 @@ static void DoSubclassChildControls(DlgBase* pDlg)
             p->SetAeroMode(FALSE);
             p->SubclassWindow(hc);
         }
-        else if (_tcsicmp(cls, WC_LISTVIEW) == 0)
-        {
-            CCustomListCtrl* p = new CCustomListCtrl();
-            p->EnableAutoDelete();
-            p->SetAeroMode(FALSE);
-            p->SubclassWindow(hc);
-        }
-        else if (_tcsicmp(cls, _T("Button")) == 0)
+		else if (_tcsicmp(cls, WC_LISTVIEW) == 0)
+		{
+			CCustomListCtrl* p = new CCustomListCtrl();
+			p->EnableAutoDelete();
+			p->SetAeroMode(FALSE);
+			p->SubclassWindow(hc);
+		}
+		else if (_tcsicmp(cls, WC_TREEVIEW) == 0)
+		{
+			CCustomTreeCtrl* p = new CCustomTreeCtrl();
+			p->EnableAutoDelete();
+			p->SetAeroMode(FALSE);
+			p->SubclassWindow(hc);
+		}
+		else if (_tcsicmp(cls, _T("Button")) == 0)
         {
             LONG ls = ::GetWindowLong(hc, GWL_STYLE);
             UINT nt = ls & BS_TYPEMASK;
@@ -5179,6 +5186,25 @@ void CCustomListCtrl::PaintOpaqueClient(CDC& dc)
 void CCustomListCtrl::OnPaint()
 {
     Default();
+    // 最終行より下の余白を背景色で塗り、横スクロールゴミや「幽霊行」を消す
+    const int n = GetItemCount();
+    CRect rcClient;
+    GetClientRect(&rcClient);
+    if (rcClient.IsRectEmpty()) return;
+    CClientDC dc(this);
+    if (n <= 0) {
+        dc.FillSolidRect(&rcClient, GetBkColor());
+    }
+    else {
+        CRect rcLast;
+        if (GetItemRect(n - 1, &rcLast, LVIR_BOUNDS)) {
+            CRect rcGap = rcClient;
+            rcGap.top = (std::max)(rcGap.top, rcLast.bottom);
+            if (rcGap.top < rcGap.bottom)
+                dc.FillSolidRect(&rcGap, GetBkColor());
+        }
+    }
+    ShowScrollBar(SB_HORZ, FALSE);
 }
 
 LRESULT CCustomListCtrl::OnPrintClient(WPARAM wParam, LPARAM lParam)
@@ -5432,6 +5458,557 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         break;
     }
     }
+}
+
+// ============================================================================
+// CCustomTreeCtrl (KotoriClient 移植 + アクリル不透明対応)
+// ============================================================================
+#ifndef TVS_EX_DOUBLEBUFFER
+#define TVS_EX_DOUBLEBUFFER 0x00000004
+#endif
+
+IMPLEMENT_DYNAMIC(CCustomTreeCtrl, CTreeCtrl)
+
+static const UINT_PTR kTreeScrollOpaqueTimerId = 4109;
+
+BEGIN_MESSAGE_MAP(CCustomTreeCtrl, CTreeCtrl)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_NOTIFY_REFLECT(NM_CUSTOMDRAW, OnCustomDraw)
+	ON_WM_LBUTTONDOWN()
+	ON_WM_MOUSEMOVE()
+	ON_WM_MOUSELEAVE()
+	ON_WM_VSCROLL()
+	ON_WM_MOUSEWHEEL()
+	ON_WM_WINDOWPOSCHANGED()
+	ON_WM_TIMER()
+	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+	ON_MESSAGE(CCC_WM_POST_OPAQUE_PAINT, OnPostOpaquePaint)
+END_MESSAGE_MAP()
+
+CCustomTreeCtrl::CCustomTreeCtrl()
+	: m_bAutoDelete(FALSE), m_hHotItem(NULL), m_nItemDrawIndex(0)
+	, m_clrBk(COLOR_LIST_BG), m_bAeroMode(FALSE)
+{
+	m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
+}
+
+CCustomTreeCtrl::~CCustomTreeCtrl()
+{
+	if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
+}
+
+COLORREF CCustomTreeCtrl::SetBkColor(COLORREF clr)
+{
+	COLORREF clrOld = m_clrBk;
+	m_clrBk = clr;
+	if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
+	m_brBackground.CreateSolidBrush(m_clrBk);
+	if (GetSafeHwnd())
+		TreeView_SetBkColor(m_hWnd, clr);
+	Invalidate(FALSE);
+	return clrOld;
+}
+
+void CCustomTreeCtrl::PostNcDestroy()
+{
+	CTreeCtrl::PostNcDestroy();
+	if (m_bAutoDelete) delete this;
+}
+
+void CCustomTreeCtrl::PreSubclassWindow()
+{
+	CTreeCtrl::PreSubclassWindow();
+	SetBkColor(COLOR_LIST_BG);
+	DWORD dwEx = (DWORD)SendMessage(TVM_GETEXTENDEDSTYLE, 0, 0);
+	SendMessage(TVM_SETEXTENDEDSTYLE, TVS_EX_DOUBLEBUFFER | TVS_EX_FULLROWSELECT,
+		dwEx | TVS_EX_DOUBLEBUFFER | TVS_EX_FULLROWSELECT);
+}
+
+BOOL CCustomTreeCtrl::OnEraseBkgnd(CDC*) { return FALSE; }
+
+void CCustomTreeCtrl::ScheduleOpaqueRepaint()
+{
+	if (GetSafeHwnd())
+		PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+}
+
+LRESULT CCustomTreeCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
+{
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+	{
+		CClientDC dc(this);
+		PaintOpaqueClient(dc);
+	}
+#endif
+	return 0;
+}
+
+LRESULT CCustomTreeCtrl::OnPrintClient(WPARAM wParam, LPARAM lParam)
+{
+	return DefWindowProc(WM_PRINTCLIENT, wParam, lParam);
+}
+
+void CCustomTreeCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
+{
+	if (!hdcBuf || !m_hWnd) return;
+	CRect r;
+	GetClientRect(&r);
+	if (r.Width() <= 0 || r.Height() <= 0) return;
+	::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
+	::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+}
+
+void CCustomTreeCtrl::PaintOpaqueClient(CDC& dc)
+{
+	CRect r;
+	GetClientRect(&r);
+	if (r.Width() <= 0 || r.Height() <= 0) return;
+	BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+	params.dwFlags = BPPF_ERASE;
+	HDC hdcBuf = NULL;
+	HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+	if (!hdcBuf || !hBP) { Default(); return; }
+	::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
+	::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+	::BufferedPaintMakeOpaque(hBP, &r);
+	::EndBufferedPaint(hBP, TRUE);
+}
+
+void CCustomTreeCtrl::OnPaint()
+{
+	if (GetCount() == 0)
+	{
+		CPaintDC dc(this);
+		CRect rc;
+		GetClientRect(&rc);
+		dc.FillSolidRect(&rc, GetBkColor());
+		return;
+	}
+
+	Default();
+
+	// 最終可視行より下だけ塗る。GetNextVisibleItem が追いついていない直後は
+	// 実在する行を塗り潰しやすいので、HitTest で行が無いか確認してから塗る。
+	int maxBottom = 0;
+	HTREEITEM hVis = GetFirstVisibleItem();
+	while (hVis) {
+		CRect rcItem;
+		if (GetItemRect(hVis, &rcItem, FALSE) && rcItem.bottom > maxBottom)
+			maxBottom = rcItem.bottom;
+		hVis = GetNextVisibleItem(hVis);
+	}
+	CRect rcClient;
+	GetClientRect(&rcClient);
+	if (maxBottom > 0 && maxBottom < rcClient.bottom)
+	{
+		CRect rcGap = rcClient;
+		rcGap.top = maxBottom;
+		UINT htFlags = 0;
+		CPoint probe(rcClient.left + 4, rcGap.top + 1);
+		HTREEITEM hUnder = CTreeCtrl::HitTest(probe, &htFlags);
+		if (!hUnder && rcGap.top < rcGap.bottom)
+		{
+			CClientDC dc(this);
+			dc.FillSolidRect(&rcGap, GetBkColor());
+		}
+	}
+}
+
+void CCustomTreeCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
+{
+	CTreeCtrl::OnWindowPosChanged(lpwndpos);
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+		ScheduleOpaqueRepaint();
+#endif
+}
+
+void CCustomTreeCtrl::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == kTreeScrollOpaqueTimerId)
+	{
+		KillTimer(kTreeScrollOpaqueTimerId);
+#if CCUSTOM_AERO_SUPPORT
+		if (CCC_IsAeroEnabled() && CCC_IsWin11())
+		{
+			CClientDC dc(this);
+			PaintOpaqueClient(dc);
+		}
+#endif
+		return;
+	}
+	CTreeCtrl::OnTimer(nIDEvent);
+}
+
+int CCustomTreeCtrl::GetItemLevel(HTREEITEM hItem) const
+{
+	int nLevel = 0;
+	HTREEITEM hParent = GetParentItem(hItem);
+	while (hParent != NULL)
+	{
+		nLevel++;
+		hParent = GetParentItem(hParent);
+	}
+	return nLevel;
+}
+
+void CCustomTreeCtrl::InvalidateItemRow(HTREEITEM hItem)
+{
+	if (!hItem || !GetSafeHwnd()) return;
+	CRect rc;
+	if (GetItemRect(hItem, &rc, FALSE))
+	{
+		CRect rcClient;
+		GetClientRect(&rcClient);
+		rc.left = rcClient.left;
+		rc.right = rcClient.right;
+		InvalidateRect(&rc, FALSE);
+	}
+}
+
+HTREEITEM CCustomTreeCtrl::HitTestRowAtPoint(CPoint pt, UINT* pFlags)
+{
+	CRect rcClient;
+	GetClientRect(&rcClient);
+	if (!rcClient.PtInRect(pt))
+		return NULL;
+
+	HTREEITEM hVis = GetFirstVisibleItem();
+	while (hVis != NULL) {
+		CRect rcRow;
+		if (GetItemRect(hVis, &rcRow, FALSE)) {
+			rcRow.left = rcClient.left;
+			rcRow.right = rcClient.right;
+			if (pt.y >= rcRow.top && pt.y < rcRow.bottom) {
+				if (pFlags)
+					*pFlags = TVHT_ONITEM | TVHT_ONITEMINDENT | TVHT_ONITEMLABEL;
+				return hVis;
+			}
+		}
+		hVis = GetNextVisibleItem(hVis);
+	}
+	return NULL;
+}
+
+void CCustomTreeCtrl::NotifySelChangedByMouse(HTREEITEM hNew, HTREEITEM hOld)
+{
+	NM_TREEVIEW nmtv = {};
+	nmtv.hdr.hwndFrom = m_hWnd;
+	nmtv.hdr.idFrom = (UINT_PTR)GetDlgCtrlID();
+	nmtv.hdr.code = TVN_SELCHANGED;
+	nmtv.action = TVC_BYMOUSE;
+
+	nmtv.itemNew.mask = TVIF_HANDLE | TVIF_STATE;
+	nmtv.itemNew.hItem = hNew;
+	nmtv.itemNew.stateMask = TVIS_SELECTED;
+	nmtv.itemNew.state = GetItemState(hNew, TVIS_SELECTED);
+
+	if (hOld) {
+		nmtv.itemOld.mask = TVIF_HANDLE | TVIF_STATE;
+		nmtv.itemOld.hItem = hOld;
+		nmtv.itemOld.stateMask = TVIS_SELECTED;
+		nmtv.itemOld.state = GetItemState(hOld, TVIS_SELECTED);
+	}
+
+	GetParent()->SendMessage(WM_NOTIFY, (WPARAM)nmtv.hdr.idFrom, (LPARAM)&nmtv);
+}
+
+void CCustomTreeCtrl::NotifyBeginDrag(HTREEITEM hItem, CPoint pt)
+{
+	if (!hItem || !GetParent()) return;
+	NMTREEVIEW nmtv = {};
+	nmtv.hdr.hwndFrom = m_hWnd;
+	nmtv.hdr.idFrom = (UINT_PTR)GetDlgCtrlID();
+	nmtv.hdr.code = TVN_BEGINDRAG;
+	nmtv.action = TVC_BYMOUSE;
+	nmtv.itemNew.mask = TVIF_HANDLE | TVIF_STATE | TVIF_PARAM;
+	nmtv.itemNew.hItem = hItem;
+	nmtv.itemNew.lParam = GetItemData(hItem);
+	nmtv.itemNew.stateMask = TVIS_SELECTED;
+	nmtv.itemNew.state = GetItemState(hItem, TVIS_SELECTED);
+	nmtv.ptDrag = pt;
+	GetParent()->SendMessage(WM_NOTIFY, (WPARAM)nmtv.hdr.idFrom, (LPARAM)&nmtv);
+}
+
+HTREEITEM CCustomTreeCtrl::HitTest(CPoint pt, UINT* pFlags)
+{
+	UINT flags = 0;
+	HTREEITEM hItem = CTreeCtrl::HitTest(pt, &flags);
+	if (hItem != NULL && (flags & TVHT_ONITEMBUTTON)) {
+		if (pFlags) *pFlags = flags;
+		return hItem;
+	}
+	if (hItem != NULL && (flags & TVHT_ONITEMLABEL)) {
+		if (pFlags) *pFlags = flags;
+		return hItem;
+	}
+
+	HTREEITEM hRow = HitTestRowAtPoint(pt, pFlags);
+	if (hRow != NULL)
+		return hRow;
+
+	if (hItem != NULL) {
+		if (pFlags) *pFlags = flags;
+		return hItem;
+	}
+	if (pFlags) *pFlags = TVHT_NOWHERE;
+	return NULL;
+}
+
+void CCustomTreeCtrl::OnLButtonDown(UINT nFlags, CPoint point)
+{
+	UINT uFlags = 0;
+	HTREEITEM hItem = HitTest(point, &uFlags);
+
+	if (hItem != NULL && (uFlags & TVHT_ONITEMBUTTON)) {
+		CTreeCtrl::OnLButtonDown(nFlags, point);
+		return;
+	}
+
+	if (hItem != NULL) {
+		HTREEITEM hOld = GetSelectedItem();
+		SelectItem(hItem);
+		SetFocus();
+		if (hItem != hOld)
+			NotifySelChangedByMouse(hItem, hOld);
+		// ドラッグ開始(親へ TVN_BEGINDRAG)
+		if (::DragDetect(m_hWnd, point))
+			NotifyBeginDrag(hItem, point);
+		return;
+	}
+
+	CTreeCtrl::OnLButtonDown(nFlags, point);
+}
+
+void CCustomTreeCtrl::OnMouseMove(UINT nFlags, CPoint point)
+{
+	UINT      uFlags = 0;
+	HTREEITEM hItem = HitTest(point, &uFlags);
+
+	if (m_hHotItem != hItem)
+	{
+		HTREEITEM hOld = m_hHotItem;
+		m_hHotItem = hItem;
+		InvalidateItemRow(hOld);
+		InvalidateItemRow(m_hHotItem);
+		UpdateWindow();
+	}
+
+	TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, m_hWnd, 0 };
+	TrackMouseEvent(&tme);
+
+	CTreeCtrl::OnMouseMove(nFlags, point);
+}
+
+void CCustomTreeCtrl::OnMouseLeave()
+{
+	if (m_hHotItem)
+	{
+		HTREEITEM hOld = m_hHotItem;
+		m_hHotItem = NULL;
+		InvalidateItemRow(hOld);
+		UpdateWindow();
+	}
+}
+
+void CCustomTreeCtrl::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	CTreeCtrl::OnVScroll(nSBCode, nPos, pScrollBar);
+	if (GetSafeHwnd())
+	{
+		CPoint pt;
+		if (GetCursorPos(&pt)) { ScreenToClient(&pt); UINT f = 0; m_hHotItem = HitTest(pt, &f); }
+	}
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+		ScheduleOpaqueRepaint();
+#endif
+	Invalidate(FALSE);
+}
+
+BOOL CCustomTreeCtrl::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
+{
+	BOOL r = CTreeCtrl::OnMouseWheel(nFlags, zDelta, pt);
+	if (GetSafeHwnd())
+	{
+		CPoint ptC = pt;
+		ScreenToClient(&ptC);
+		UINT f = 0;
+		m_hHotItem = HitTest(ptC, &f);
+	}
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+	{
+		ScheduleOpaqueRepaint();
+		SetTimer(kTreeScrollOpaqueTimerId, 33, NULL);
+	}
+#endif
+	Invalidate(FALSE);
+	return r;
+}
+
+void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	NMTVCUSTOMDRAW* pTVCD = reinterpret_cast<NMTVCUSTOMDRAW*>(pNMHDR);
+	*pResult = CDRF_DODEFAULT;
+
+	switch (pTVCD->nmcd.dwDrawStage)
+	{
+	case CDDS_PREPAINT:
+		m_nItemDrawIndex = 0;
+		*pResult = CDRF_NOTIFYITEMDRAW;
+		break;
+
+	case CDDS_ITEMPREPAINT:
+	{
+		CDC* pDC = CDC::FromHandle(pTVCD->nmcd.hdc);
+		HTREEITEM hItem = (HTREEITEM)pTVCD->nmcd.dwItemSpec;
+		if (!hItem) { *pResult = CDRF_DODEFAULT; break; }
+
+		CRect rcRow;
+		GetItemRect(hItem, &rcRow, FALSE);
+		CRect rcClient;
+		GetClientRect(&rcClient);
+		rcRow.left = rcClient.left;
+		rcRow.right = rcClient.right;
+
+		BOOL bSel = (GetItemState(hItem, TVIS_SELECTED) & TVIS_SELECTED) != 0;
+		BOOL bHot = (hItem == m_hHotItem);
+		BOOL bFocused = (GetFocus() == this) && bSel;
+
+		COLORREF clrBg;
+		if (bSel)                           clrBg = COLOR_SEL_BG;
+		else if (bHot)                      clrBg = RGB(255, 210, 230);
+		else if (m_nItemDrawIndex % 2 == 0) clrBg = COLOR_LIST_BG;
+		else                                clrBg = RGB(255, 236, 246);
+
+		pDC->FillSolidRect(&rcRow, clrBg);
+
+		int nLevel = GetItemLevel(hItem);
+		int nIndent = GetIndent();
+		if (nIndent <= 0) nIndent = 19;
+		int nConnX = rcClient.left + nIndent * nLevel + nIndent / 2;
+		int nCenterY = rcRow.CenterPoint().y;
+		BOOL bHasLines = (GetStyle() & TVS_HASLINES) != 0;
+
+		if (bHasLines && nLevel > 0)
+		{
+			DrawLaceLine(pDC,
+				rcClient.left + nIndent * nLevel - nIndent / 2, nCenterY,
+				nConnX - 2, nCenterY,
+				RGB(180, 150, 200));
+			DrawFlower(pDC, nConnX - 2, nCenterY, 3, RGB(255, 200, 220));
+		}
+
+		BOOL bHasChild = ItemHasChildren(hItem) != FALSE;
+		if (bHasChild)
+		{
+			BOOL bExpanded = (GetItemState(hItem, TVIS_EXPANDED) & TVIS_EXPANDED) != 0;
+			int  bx = nConnX, by = nCenterY;
+			int  btnR = 7;
+			CRect rcBtn(bx - btnR, by - btnR, bx + btnR, by + btnR);
+
+			CPen   penBtn(PS_SOLID, 1, RGB(200, 150, 200));
+			CBrush brBtn(bExpanded ? RGB(255, 230, 240) : RGB(240, 230, 255));
+			CPen* pOldPen = pDC->SelectObject(&penBtn);
+			CBrush* pOldBr = pDC->SelectObject(&brBtn);
+			pDC->RoundRect(&rcBtn, CPoint(4, 4));
+			pDC->SelectObject(pOldPen);
+			pDC->SelectObject(pOldBr);
+
+			if (bExpanded)
+			{
+				DrawStar(pDC, bx, by, 4, RGB(255, 100, 150));
+				DrawFlower(pDC, bx, by, 3, RGB(255, 200, 220));
+				CPen penMinus(PS_SOLID, 2, RGB(180, 60, 130));
+				CPen* pOP = pDC->SelectObject(&penMinus);
+				pDC->MoveTo(bx - 3, by); pDC->LineTo(bx + 4, by);
+				pDC->SelectObject(pOP);
+			}
+			else
+			{
+				DrawFlower(pDC, bx, by, 3, RGB(180, 130, 230));
+				CRect rcDiamond(bx - 5, by - 5, bx + 5, by + 5);
+				DrawDiamond(pDC, rcDiamond, RGB(200, 180, 255));
+				CPen penPlus(PS_SOLID, 2, RGB(120, 60, 200));
+				CPen* pOP = pDC->SelectObject(&penPlus);
+				pDC->MoveTo(bx - 3, by); pDC->LineTo(bx + 4, by);
+				pDC->MoveTo(bx, by - 3); pDC->LineTo(bx, by + 4);
+				pDC->SelectObject(pOP);
+			}
+		}
+
+		int nIconRight = nConnX + 14;
+		CImageList* pImgList = GetImageList(TVSIL_NORMAL);
+		if (pImgList)
+		{
+			TVITEM tvi = {};
+			tvi.mask = TVIF_IMAGE | TVIF_SELECTEDIMAGE;
+			tvi.hItem = hItem;
+			GetItem(&tvi);
+			int nImg = (bSel && tvi.iSelectedImage >= 0) ? tvi.iSelectedImage : tvi.iImage;
+			int nIconLeft = nConnX + 12;
+			nIconRight = nIconLeft + 18;
+			CRect rcIcon(nIconLeft, rcRow.top + 1, nIconRight, rcRow.bottom - 1);
+			DrawTransparentIcon(pDC, pImgList, nImg, rcIcon, RGB(255, 255, 255));
+		}
+
+		CString strText = GetItemText(hItem);
+		CRect   rcText(nIconRight + 4, rcRow.top, rcRow.right - 22, rcRow.bottom);
+
+		if (bSel && !strText.IsEmpty())
+		{
+			CFont* pFontMeasure = pDC->SelectObject(GetFont());
+			CSize  szT = pDC->GetTextExtent(strText);
+			pDC->SelectObject(pFontMeasure);
+
+			CRect rcLbl(rcText.left - 2, rcRow.top + 1,
+				(std::min)(rcText.left + szT.cx + 4, rcText.right),
+				rcRow.bottom - 1);
+			pDC->FillSolidRect(&rcLbl, RGB(200, 170, 235));
+		}
+
+		pDC->SetBkMode(TRANSPARENT);
+		pDC->SetTextColor(RGB(0, 0, 0));
+		{
+			CFont* pOldFont = pDC->SelectObject(GetFont());
+			pDC->DrawText(strText, &rcText,
+				DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+			pDC->SelectObject(pOldFont);
+		}
+
+		if (bSel)
+		{
+			CRect rcH(rcRow.left + 2, nCenterY - 7, rcRow.left + 16, nCenterY + 7);
+			DrawHeart(pDC, rcH, COLOR_HEART);
+			DrawStar(pDC, rcRow.right - 12, nCenterY, 3, RGB(255, 215, 0));
+		}
+		else if (bHot)
+		{
+			DrawStar(pDC, rcRow.right - 12, nCenterY, 2, RGB(255, 215, 0));
+		}
+
+		if (bFocused)
+		{
+			CPen  penFoc(PS_DOT, 1, RGB(138, 43, 226));
+			CPen* pOldPen = pDC->SelectObject(&penFoc);
+			pDC->SelectStockObject(NULL_BRUSH);
+			pDC->Rectangle(&rcRow);
+			pDC->SelectObject(pOldPen);
+		}
+
+		DrawLaceLine(pDC,
+			rcRow.left + 10, rcRow.bottom - 1,
+			rcRow.right - 10, rcRow.bottom - 1,
+			RGB(200, 180, 220));
+
+		m_nItemDrawIndex++;
+		*pResult = CDRF_SKIPDEFAULT;
+		break;
+	}
+	}
 }
 
 // ============================================================================
@@ -6605,7 +7182,7 @@ static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
 {
     if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
     {
-        if (dynamic_cast<CCustomListBox*>(pw) || dynamic_cast<CCustomListCtrl*>(pw)) return COLOR_LIST_BG;
+        if (dynamic_cast<CCustomListBox*>(pw) || dynamic_cast<CCustomListCtrl*>(pw) || dynamic_cast<CCustomTreeCtrl*>(pw)) return COLOR_LIST_BG;
         if (dynamic_cast<CCustomComboBox*>(pw)) return COLOR_COMBO_BG;
         if (dynamic_cast<CCustomStandardButton*>(pw) || dynamic_cast<CButtonST*>(pw)) return COLOR_BUTTON_BG;
         if (dynamic_cast<CCustomEdit*>(pw)) return COLOR_EDIT_BG;
@@ -6617,6 +7194,7 @@ static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
     if (c.Find(_T("EDIT")) >= 0) return COLOR_EDIT_BG;
     if (c.Find(_T("LISTBOX")) >= 0) return COLOR_LIST_BG;
     if (c.Find(_T("SYSLISTVIEW32")) >= 0) return COLOR_LIST_BG;
+    if (c.Find(_T("SYSTREEVIEW32")) >= 0) return COLOR_LIST_BG;
     if (c.Find(_T("COMBOBOX")) >= 0) return COLOR_COMBO_BG;
     return COLOR_DIALOG_BG;
 }
@@ -6648,6 +7226,7 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
     {
         if (dynamic_cast<CCustomListBox*>(pw)) return TRUE;
         if (dynamic_cast<CCustomListCtrl*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomTreeCtrl*>(pw)) return TRUE;
         if (dynamic_cast<CCustomComboBox*>(pw)) return TRUE;
         if (dynamic_cast<CButtonST*>(pw)) return TRUE;
         if (dynamic_cast<CCustomEdit*>(pw)) return TRUE;
@@ -6660,6 +7239,7 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
     if (c.Find(_T("BUTTON")) >= 0) return TRUE;
     if (c.Find(_T("LISTBOX")) >= 0) return TRUE;
     if (c.Find(_T("SYSLISTVIEW32")) >= 0) return TRUE;
+    if (c.Find(_T("SYSTREEVIEW32")) >= 0) return TRUE;
     if (c.Find(_T("COMBOBOX")) >= 0) return TRUE;
     if (c.Find(_T("EDIT")) >= 0) return TRUE;
     if (c.Find(_T("SYSHEADER32")) >= 0) return TRUE;
@@ -6693,6 +7273,12 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     else if (auto* pList = dynamic_cast<CCustomListCtrl*>(pw))
     {
         pList->PaintOpaqueIntoBuffer(hdcBuf);
+        dc.Detach();
+        return TRUE;
+    }
+    else if (auto* pTree = dynamic_cast<CCustomTreeCtrl*>(pw))
+    {
+        pTree->PaintOpaqueIntoBuffer(hdcBuf);
         dc.Detach();
         return TRUE;
     }

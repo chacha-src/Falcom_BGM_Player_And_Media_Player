@@ -443,6 +443,8 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_dragging = 0;
 	m_dragSrc = -1;
 	m_hDragImage = NULL;
+	m_libDrag = 0;
+	m_libDragFolder.Empty();
 	hD2 = 1.0f;
 	m_bannerRect.SetRectEmpty();
 	m_jacketRect.SetRectEmpty();
@@ -476,6 +478,12 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_abApos = -1;
 	m_abBpos = -1;
 	m_abWrapBusy = 0;
+	m_libPathN = 0;
+	m_albumN = 0;
+	m_libTreeBuilt = 0;
+	m_libBuildPosted = 0;
+	m_hLibDragImage = NULL;
+	m_histBuilt = 0;
 	m_fmap = NULL;
 	m_fmapCap = 0;
 	m_fcnt = 0;
@@ -494,6 +502,10 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 
 CMediaPlayerDlg::~CMediaPlayerDlg()
 {
+	if (m_hLibDragImage) {
+		ImageList_Destroy(m_hLibDragImage);
+		m_hLibDragImage = NULL;
+	}
 	if (m_fmap) { free(m_fmap); m_fmap = NULL; }
 	if (m_miss) { free(m_miss); m_miss = NULL; }
 	for (int i = 0; i < kMpJakN; ++i) {
@@ -659,12 +671,29 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_ABCLR, &CMediaPlayerDlg::OnAbClear)
 	ON_BN_CLICKED(IDC_MP_LRCEXPAND, &CMediaPlayerDlg::OnLrcExpand)
 	ON_BN_CLICKED(IDC_MP_TOOLSTOGGLE, &CMediaPlayerDlg::OnToolsToggle)
+	ON_BN_CLICKED(IDC_MP_CHEATBTN, &CMediaPlayerDlg::OnCheatSheetBtn)
 	ON_BN_CLICKED(IDC_MP_SORTNAME, &CMediaPlayerDlg::OnSortName)
 	ON_BN_CLICKED(IDC_MP_SORTART, &CMediaPlayerDlg::OnSortArt)
 	ON_BN_CLICKED(IDC_MP_SORTALB, &CMediaPlayerDlg::OnSortAlb)
 	ON_BN_CLICKED(IDC_MP_SORTTIME, &CMediaPlayerDlg::OnSortTime)
 	ON_BN_CLICKED(IDC_MP_ADDFOLDER, &CMediaPlayerDlg::OnAddFolder)
 	ON_BN_CLICKED(IDC_MP_FINDFILTER, &CMediaPlayerDlg::OnFindFilter)
+	ON_BN_CLICKED(IDC_MP_LIBTOGGLE, &CMediaPlayerDlg::OnLibToggle)
+	ON_BN_CLICKED(IDC_MP_HISTTOGGLE, &CMediaPlayerDlg::OnHistToggle)
+	ON_BN_CLICKED(IDC_MP_LIBADDROOT, &CMediaPlayerDlg::OnLibAddRoot)
+	ON_BN_CLICKED(IDC_MP_LIBADDPL, &CMediaPlayerDlg::OnLibAddPl)
+	ON_BN_CLICKED(IDC_MP_EMPTYFOLDER, &CMediaPlayerDlg::OnEmptyAddFolder)
+	ON_BN_CLICKED(IDC_MP_EMPTYM3U, &CMediaPlayerDlg::OnEmptyM3u)
+	ON_COMMAND(ID_MP_SPEANA_BAR, &CMediaPlayerDlg::OnSpeanaStyleBar)
+	ON_COMMAND(ID_MP_SPEANA_MIRROR, &CMediaPlayerDlg::OnSpeanaStyleMirror)
+	ON_COMMAND(ID_MP_SPEANA_WAVE, &CMediaPlayerDlg::OnSpeanaStyleWave)
+	ON_NOTIFY(TVN_SELCHANGED, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeSel)
+	ON_NOTIFY(TVN_ITEMEXPANDING, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeExpanding)
+	ON_NOTIFY(TVN_BEGINDRAG, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeBeginDrag)
+	ON_NOTIFY(NM_DBLCLK, IDC_MP_LIBALBUMS, &CMediaPlayerDlg::OnLibAlbumDblClk)
+	ON_NOTIFY(LVN_BEGINDRAG, IDC_MP_LIBALBUMS, &CMediaPlayerDlg::OnLibAlbumBeginDrag)
+	ON_NOTIFY(NM_DBLCLK, IDC_MP_HISTLIST, &CMediaPlayerDlg::OnHistDblClk)
+	ON_WM_RBUTTONUP()
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONDOWN()
 	ON_WM_LBUTTONUP()
@@ -685,6 +714,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_MESSAGE(WM_MP_INFO_SCROLL, &CMediaPlayerDlg::OnInfoScrollTick)
 	ON_MESSAGE(WM_MP_PLSEL_EXPAND, &CMediaPlayerDlg::OnPlselExpandPopup)
 	ON_MESSAGE(WM_MP_MISS_DONE, &CMediaPlayerDlg::OnMissScanDone)
+	ON_MESSAGE(WM_MP_LIB_BUILD, &CMediaPlayerDlg::OnLibBuildLazy)
 	ON_WM_NCACTIVATE()
 	ON_WM_SYSCOMMAND()
 	ON_WM_MOVING()
@@ -807,6 +837,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_lrcExpand.Create(_T("▾"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_LRCEXPAND);
 		if (!m_toolsToggle.GetSafeHwnd())
 			m_toolsToggle.Create(_T("▾"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_TOOLSTOGGLE);
+		if (!m_cheatBtn.GetSafeHwnd())
+			m_cheatBtn.Create(_T("?"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_CHEATBTN);
 		if (!m_sortName.GetSafeHwnd())
 			m_sortName.Create(_T("Name"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_SORTNAME);
 		if (!m_sortArt.GetSafeHwnd())
@@ -821,11 +853,16 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_findFilter.Create(_T("Filter"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP, rc, this, IDC_MP_FINDFILTER);
 		if (!m_lrcBadge.GetSafeHwnd())
 			m_lrcBadge.Create(_T(""), WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS, rc, this, IDC_MP_LRCBADGE);
+		if (!m_lrcView.GetSafeHwnd())
+			m_lrcView.Create(this, IDC_MP_LRCVIEW);
+		EnsureLibControls();
 		m_abA.SetGradation(RGB(220, 245, 255), RGB(160, 210, 240), 0, TRUE);
 		m_abB.SetGradation(RGB(220, 245, 255), RGB(160, 210, 240), 0, TRUE);
 		m_abClr.SetGradation(RGB(255, 230, 230), RGB(255, 180, 180), 0, TRUE);
 		m_lrcExpand.SetGradation(RGB(240, 235, 255), RGB(210, 200, 245), 0, TRUE);
 		m_toolsToggle.SetGradation(RGB(240, 235, 255), RGB(210, 200, 245), 0, TRUE);
+		if (m_cheatBtn.GetSafeHwnd())
+			m_cheatBtn.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
 		m_sortName.SetGradation(RGB(230, 245, 255), RGB(190, 220, 245), 0, TRUE);
 		m_sortArt.SetGradation(RGB(230, 245, 255), RGB(190, 220, 245), 0, TRUE);
 		m_sortAlb.SetGradation(RGB(230, 245, 255), RGB(190, 220, 245), 0, TRUE);
@@ -882,6 +919,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_lrcExpand.SetWindowText(savedata.mpLrcExpand ? L"▴" : L"▾");
 	if (m_toolsToggle.GetSafeHwnd())
 		m_toolsToggle.SetWindowText(savedata.mpToolsOpen ? L"▴" : L"▾");
+	if (m_libToggle.GetSafeHwnd())
+		m_libToggle.SetWindowText(savedata.mpLibOpen ? L"≪" : L"Lib");
 	if (m_sortName.GetSafeHwnd())
 		m_sortName.SetWindowText(LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"));
 	if (m_sortArt.GetSafeHwnd())
@@ -1210,13 +1249,23 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_findFilter.GetSafeHwnd())
 		addTip(m_findFilter, LL14(L"ONで検索語に一致する曲だけ表示します。OFFはジャンプ検索のみ。", L"ON: show only matching tracks. OFF: jump search only.", L"ON: filtrer. OFF: recherche seule.", L"ON: filtra. OFF: solo salto.", L"ON: filtrar. OFF: solo saltar.", L"ON: 일치 곡만. OFF: 점프만.", L"ON:仅显示匹配。OFF:仅跳转。", L"ON: تصفية. OFF: قفز فقط.", L"ON: фильтр. OFF: только переход.", L"ON: filtern. OFF: nur springen.", L"ON: filtrar. OFF: so saltar.", L"ON: filteren. OFF: alleen springen.", L"ON: filtruj. OFF: tylko skok.", L"ON: filtrele. OFF: sadece atla."));
 	if (m_lrcExpand.GetSafeHwnd())
-		addTip(m_lrcExpand, LL14(L"歌詞パネルの高さを切り替えます。", L"Toggle lyrics panel height.", L"Basculer la hauteur des paroles.", L"Altera altezza testi.", L"Alternar altura de letra.", L"가사 패널 높이 전환.", L"切换歌词面板高度。", L"تبديل ارتفاع الكلمات.", L"Высота текста песни.", L"Liedtexthoehe umschalten.", L"Alternar altura da letra.", L"Hoogte songtekst wisselen.", L"Wysokosc tekstu.", L"Sarki sozu yuksekligi."));
+		addTip(m_lrcExpand, LL14(L"歌詞パネルを拡大し、カラオケ風スクロール表示に切り替えます。", L"Expand lyrics into a karaoke-style scrolling view.", L"Agrandir les paroles en defilement karaoke.", L"Espandi i testi in stile karaoke.", L"Expandir letra con desplazamiento karaoke.", L"가사를 가라오케풍 스크롤로 확대.", L"展开为卡拉OK风格滚动歌词。", L"توسيع الكلمات بأسلوب كاريوكي.", L"Развернуть текст в стиле караоке.", L"Liedtext karaokeartig erweitern.", L"Expandir letra estilo karaoke.", L"Songtekst karaoke-achtig uitklappen.", L"Rozwiń tekst w stylu karaoke.", L"Sarkı sozunu karaoke kaydırmaya genislet."));
 	if (m_toolsToggle.GetSafeHwnd())
 		addTip(m_toolsToggle, LL14(L"並べ替え・フォルダ追加パネルの表示を切り替えます。", L"Toggle sort / add-folder panel.", L"Afficher tri / dossier.", L"Mostra ordina / cartella.", L"Mostrar ordenar / carpeta.", L"정렬/폴더 추가 패널 전환.", L"切换排序/添加文件夹面板。", L"تبديل لوحة الترتيب/المجلد.", L"Панель сортировки/папки.", L"Sortier-/Ordnerpanel.", L"Painel ordenar/pasta.", L"Sorteer-/mappaneel.", L"Panel sortowania/folderu.", L"Sirala/klasor paneli."));
+	if (m_cheatBtn.GetSafeHwnd())
+		addTip(m_cheatBtn, LL14(L"キーボードショートカット一覧(?キーでも表示)。", L"Keyboard shortcut list (also ? key).", L"Liste des raccourcis.", L"Elenco scorciatoie.", L"Lista de atajos.", L"단축키 목록.", L"快捷键一览。", L"Shortcuts.", L"Список.", L"Tastenkuerzel.", L"Atalhos.", L"Sneltoetsen.", L"Skroty.", L"Kisayollar."));
 	if (m_lrcBadge.GetSafeHwnd())
 		addTip(m_lrcBadge, LL14(L"歌詞の有無。LRC●=ローカル、net=取得、—=なし。", L"Lyrics status. LRC●=local, net=fetched, —=none.", L"Paroles: LRC●/net/—.", L"Testi: LRC●/net/—.", L"Letra: LRC●/net/—.", L"가사: LRC●/net/—.", L"歌词: LRC●/net/—.", L"كلمات: LRC●/net/—.", L"Текст: LRC●/net/—.", L"Text: LRC●/net/—.", L"Letra: LRC●/net/—.", L"Tekst: LRC●/net/—.", L"Tekst: LRC●/net/—.", L"Soz: LRC●/net/—."));
 	if (m_addFolder.GetSafeHwnd())
 		addTip(m_addFolder, LL14(L"フォルダを選んで配下の音源をプレイリストへ追加します。", L"Browse a folder and add audio files under it.", L"Ajouter les fichiers audio d'un dossier.", L"Aggiungi audio da cartella.", L"Anadir audio de una carpeta.", L"폴더의 음원을 목록에 추가.", L"选择文件夹并添加其下音频。", L"إضافة ملفات الصوت من مجلد.", L"Добавить аудио из папки.", L"Audio aus Ordner hinzufugen.", L"Adicionar audio de pasta.", L"Audio uit map toevoegen.", L"Dodaj audio z folderu.", L"Klasorden ses ekle."));
+	if (m_libToggle.GetSafeHwnd())
+		addTip(m_libToggle, LL14(L"ライブラリ(フォルダツリー＋アルバム)を開閉します。", L"Toggle library (folder tree + albums).", L"Afficher/masquer la bibliotheque.", L"Apri/chiudi libreria.", L"Abrir/cerrar biblioteca.", L"라이브러리 열기/닫기.", L"打开/关闭库。", L"فتح/إغلاق المكتبة.", L"Открыть/закрыть библиотеку.", L"Bibliothek ein-/ausblenden.", L"Abrir/fechar biblioteca.", L"Bibliotheek openen/sluiten.", L"Otwórz/zamknij bibliotekę.", L"Kitapligi ac/kapat."));
+	if (m_histToggle.GetSafeHwnd())
+		addTip(m_histToggle, LL14(L"再生履歴を開閉します。ダブルクリックで再生。", L"Toggle play history. Double-click to play.", L"Historique de lecture.", L"Cronologia di riproduzione.", L"Historial de reproduccion.", L"재생 기록 열기/닫기.", L"打开/关闭播放历史。", L"فتح/إغلاق سجل التشغيل.", L"История воспроизведения.", L"Wiedergabehistorie.", L"Historico de reproducao.", L"Afspeelgeschiedenis.", L"Historia odtwarzania.", L"Calma gecmisi."));
+	if (m_libAddRoot.GetSafeHwnd())
+		addTip(m_libAddRoot, LL14(L"ライブラリのルートフォルダを追加します。", L"Add a library root folder.", L"Ajouter une racine.", L"Aggiungi radice.", L"Anadir raiz.", L"라이브러리 루트 추가.", L"添加库根文件夹。", L"إضافة جذر المكتبة.", L"Добавить корень библиотеки.", L"Bibliothekswurzel hinzufugen.", L"Adicionar raiz.", L"Wortel toevoegen.", L"Dodaj korzen.", L"Kok klasor ekle."));
+	if (m_libAddPl.GetSafeHwnd())
+		addTip(m_libAddPl, LL14(L"選択中のアルバム/フォルダをプレイリストへ追加します。", L"Add selected album/folder to the playlist.", L"Ajouter l album/dossier a la liste.", L"Aggiungi album/cartella alla playlist.", L"Anadir album/carpeta a la lista.", L"선택 앨범/폴더를 목록에 추가.", L"将所选专辑/文件夹加入播放列表。", L"إضافة الألبوم/المجلد للقائمة.", L"Добавить альбом/папку в плейлист.", L"Album/Ordner zur Playlist.", L"Adicionar album/pasta a lista.", L"Album/map aan playlist.", L"Dodaj album/folder do listy.", L"Secili album/klasoru listeye ekle."));
 	if (m_sortName.GetSafeHwnd())
 		addTip(m_sortName, LL14(L"名前で並べ替え(再クリックで昇順/降順)。", L"Sort by name (click again to toggle asc/desc).", L"Trier par nom.", L"Ordina per nome.", L"Ordenar por nombre.", L"이름으로 정렬.", L"按名称排序。", L"ترتيب حسب الاسم.", L"Сортировка по имени.", L"Nach Name sortieren.", L"Ordenar por nome.", L"Sorteren op naam.", L"Sortuj wg nazwy.", L"Ada gore sirala."));
 	if (m_sortArt.GetSafeHwnd())
@@ -1311,6 +1360,19 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 		if (pFocus && pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()) {
 			OnFindUp();  // Enter = 次の候補へ(og の IDOK/終了へ流さない)
 			return TRUE;
+		}
+	}
+	// ? / でショートカット一覧(入力欄フォーカス時は文字入力を優先)
+	if (pMsg->message == WM_KEYDOWN && (pMsg->wParam == '?' || pMsg->wParam == VK_OEM_2)) {
+		CWnd* pFocus = GetFocus();
+		const BOOL inEdit = (pFocus && (pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()
+			|| pFocus->IsKindOf(RUNTIME_CLASS(CEdit))));
+		if (!inEdit) {
+			const BOOL shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+			if (pMsg->wParam == '?' || (pMsg->wParam == VK_OEM_2 && shift)) {
+				ShowCheatSheet();
+				return TRUE;
+			}
 		}
 	}
 	/* メディアプレイヤー前面時は og の RegisterHotKey が Unregister されている。
@@ -1569,7 +1631,7 @@ void CMediaPlayerDlg::DoLayout()
 	const int gTitle = (int)(14 * s);   // グループ枠のタイトル分の高さ
 	const int gPad = (int)(5 * s);      // グループ内側の余白
 
-	// ===== 情報グループ(歌詞5行 or 歌詞3行+OS/CPU) + 拡大時は追加行高 =====
+	// ===== 情報グループ(歌詞5行 or 歌詞3行+OS/CPU) + 拡大時はカラオケ風ビュー =====
 	// 歌詞有無で中身は切替えるが、枠の高さは固定(5行分)＋拡大分にしてプレイリスト位置が暴れないようにする。
 	int infoTop = M + bannerH + (int)(2 * s);
 	int ix = M + gPad, iw = W - M * 2 - gPad * 2;
@@ -1577,9 +1639,10 @@ void CMediaPlayerDlg::DoLayout()
 	int y = infoTop + gTitle;
 	int lh = (int)(17 * s);   // 情報フォント13px が収まる行高
 	const int osH = (int)(15 * s);
-	const int lrcExtra = (savedata.mpLrcExpand ? 3 : 0); // 拡大時 +3行分の高さ
+	const int lrcExtra = (savedata.mpLrcExpand ? 5 : 0); // 拡大時 +5行分の高さ
 	const int infoInnerH = lh * (5 + lrcExtra) + (int)(1 * s);
 	const bool hasLyrics = (og && og->lrcnum >= 2);
+	const bool lrcScroll = (hasLyrics && savedata.mpLrcExpand && m_lrcView.GetSafeHwnd());
 	// バッジ + 拡大ボタンをグループ右上へ
 	{
 		const int badgeW = (int)(90 * s);
@@ -1588,17 +1651,43 @@ void CMediaPlayerDlg::DoLayout()
 		MoveCtl(&m_lrcExpand, M + W - M * 2 - expW - (int)(2 * s), infoTop + (int)(1 * s), expW, (int)(14 * s));
 	}
 	if (hasLyrics) {
-		MoveCtl(&m_lrc, ix, y, iw, lh); y += lh;
-		MoveCtl(&m_lrc2, ix, y, iw, lh); y += lh;
-		MoveCtl(&m_lrc3, ix, y, iw, lh); y += lh;
-		MoveCtl(&m_lrc4, ix, y, iw, lh); y += lh;
-		MoveCtl(&m_lrc5, ix, y, iw, lh); y += lh;
-		if (savedata.mpLrcExpand) {
-			// 拡大: 同じ5行を大きめ行間で再配置済み。余白は枠だけ伸ばす。
-			y += lh * lrcExtra;
+		if (lrcScroll) {
+			const int viewTop = y + (int)(2 * s);
+			const int viewH = infoInnerH - (int)(4 * s);
+			MoveCtl(&m_lrcView, ix, viewTop, iw, viewH > 1 ? viewH : 1);
+			m_lrcView.ShowWindow(SW_SHOW);
+			m_lrcView.EnsureFonts((int)(90 * s), _T("Segoe UI"));
+			// 5行スタティックは隠す（空欄化防止）
+			MoveCtl(&m_lrc, ix, infoTop, 0, 0);
+			MoveCtl(&m_lrc2, ix, infoTop, 0, 0);
+			MoveCtl(&m_lrc3, ix, infoTop, 0, 0);
+			MoveCtl(&m_lrc4, ix, infoTop, 0, 0);
+			MoveCtl(&m_lrc5, ix, infoTop, 0, 0);
+			m_lrc.ShowWindow(SW_HIDE);
+			m_lrc2.ShowWindow(SW_HIDE);
+			m_lrc3.ShowWindow(SW_HIDE);
+			m_lrc4.ShowWindow(SW_HIDE);
+			m_lrc5.ShowWindow(SW_HIDE);
+			y = infoTop + gTitle + infoInnerH;
 		}
-		m_lrc4.ShowWindow(SW_SHOW);
-		m_lrc5.ShowWindow(SW_SHOW);
+		else {
+			if (m_lrcView.GetSafeHwnd()) {
+				MoveCtl(&m_lrcView, ix, infoTop, 0, 0);
+				m_lrcView.ShowWindow(SW_HIDE);
+			}
+			MoveCtl(&m_lrc, ix, y, iw, lh); y += lh;
+			MoveCtl(&m_lrc2, ix, y, iw, lh); y += lh;
+			MoveCtl(&m_lrc3, ix, y, iw, lh); y += lh;
+			MoveCtl(&m_lrc4, ix, y, iw, lh); y += lh;
+			MoveCtl(&m_lrc5, ix, y, iw, lh); y += lh;
+			m_lrc.ShowWindow(SW_SHOW);
+			m_lrc2.ShowWindow(SW_SHOW);
+			m_lrc3.ShowWindow(SW_SHOW);
+			m_lrc4.ShowWindow(SW_SHOW);
+			m_lrc5.ShowWindow(SW_SHOW);
+			if (savedata.mpLrcExpand)
+				y += lh * lrcExtra;
+		}
 		MoveCtl(&m_os, ix, infoTop, 0, 0);
 		MoveCtl(&m_cpu, ix, infoTop, 0, 0);
 		MoveCtl(&m_os3, ix, infoTop, 0, 0);
@@ -1607,6 +1696,10 @@ void CMediaPlayerDlg::DoLayout()
 		m_os3.ShowWindow(SW_HIDE);
 	}
 	else {
+		if (m_lrcView.GetSafeHwnd()) {
+			MoveCtl(&m_lrcView, ix, infoTop, 0, 0);
+			m_lrcView.ShowWindow(SW_HIDE);
+		}
 		MoveCtl(&m_lrc, ix, y, iw, lh); y += lh;
 		MoveCtl(&m_lrc2, ix, y, iw, lh); y += lh;
 		MoveCtl(&m_lrc3, ix, y, iw, lh); y += lh + (int)(1 * s);
@@ -1615,6 +1708,9 @@ void CMediaPlayerDlg::DoLayout()
 		MoveCtl(&m_os3, ix, y, iw, osH);
 		MoveCtl(&m_lrc4, ix, infoTop, 0, 0);
 		MoveCtl(&m_lrc5, ix, infoTop, 0, 0);
+		m_lrc.ShowWindow(SW_SHOW);
+		m_lrc2.ShowWindow(SW_SHOW);
+		m_lrc3.ShowWindow(SW_SHOW);
 		m_lrc4.ShowWindow(SW_HIDE);
 		m_lrc5.ShowWindow(SW_HIDE);
 		m_os.ShowWindow(SW_SHOW);
@@ -1853,9 +1949,13 @@ void CMediaPlayerDlg::DoLayout()
 	{
 		const int togW = (int)(22 * s);
 		MoveCtl(&m_toolsToggle, M + gPad, byTools, togW, tbH);
+		if (m_cheatBtn.GetSafeHwnd()) {
+			MoveCtl(&m_cheatBtn, M + gPad + togW + (int)(2 * s), byTools, togW, tbH);
+			m_cheatBtn.ShowWindow(SW_SHOW);
+		}
 		if (savedata.mpToolsOpen) {
 			toolsH = tbH + (int)(2 * s);
-			int sx = M + gPad + togW + (int)(4 * s);
+			int sx = M + gPad + togW + togW + (int)(6 * s);
 			int sw = (int)(48 * s);
 			MoveCtl(&m_sortName, sx, byTools, sw, tbH); sx += sw + (int)(2 * s);
 			MoveCtl(&m_sortArt, sx, byTools, sw, tbH); sx += sw + (int)(2 * s);
@@ -1884,7 +1984,125 @@ void CMediaPlayerDlg::DoLayout()
 	const int ckY = botY - (int)(8 * s) - chkRowH;
 	int listH = ckY - (int)(3 * s) - listY;
 	if (listH < (int)(50 * s)) listH = (int)(50 * s);
-	MoveCtl(&m_list, M + gPad, listY, W - M * 2 - gPad * 2, listH);
+
+	// ===== ライブラリ/履歴 左ドロワー(排他) =====
+	// 閉: 縦に Lib/Hist。開: ヘッダ1行に横並び(被り防止) + その下に本体。
+	EnsureLibControls();
+	const int libRail = (int)(26 * s);
+	const int libPanel = (int)(280 * s);
+	const int libGap = (int)(4 * s);
+	const BOOL libOpen = (savedata.mpLibOpen != 0);
+	const BOOL histOpen = (savedata.mpHistOpen != 0);
+	const int libW = (libOpen || histOpen) ? libPanel : libRail;
+	const int listX = M + gPad + libW + libGap;
+	int listW = W - M - gPad - listX;
+	if (listW < (int)(80 * s)) listW = (int)(80 * s);
+
+	const int togH = (int)(22 * s);
+	const int headerH = (libOpen || histOpen) ? (togH + (int)(4 * s)) : (togH * 2 + (int)(4 * s));
+	if (libOpen || histOpen) {
+		const int half = (libPanel - (int)(4 * s)) / 2;
+		if (m_libToggle.GetSafeHwnd()) {
+			MoveCtl(&m_libToggle, M + gPad, listY, half, togH);
+			m_libToggle.ShowWindow(SW_SHOW);
+			m_libToggle.SetWindowText(libOpen ? L"≪ Lib" : L"Lib");
+		}
+		if (m_histToggle.GetSafeHwnd()) {
+			MoveCtl(&m_histToggle, M + gPad + half + (int)(4 * s), listY, half, togH);
+			m_histToggle.ShowWindow(SW_SHOW);
+			m_histToggle.SetWindowText(histOpen ? L"≪ Hist" : L"Hist");
+		}
+	}
+	else {
+		if (m_libToggle.GetSafeHwnd()) {
+			MoveCtl(&m_libToggle, M + gPad, listY, libRail, togH);
+			m_libToggle.ShowWindow(SW_SHOW);
+			m_libToggle.SetWindowText(L"Lib");
+		}
+		if (m_histToggle.GetSafeHwnd()) {
+			MoveCtl(&m_histToggle, M + gPad, listY + togH + (int)(2 * s), libRail, togH);
+			m_histToggle.ShowWindow(SW_SHOW);
+			m_histToggle.SetWindowText(L"Hist");
+		}
+	}
+
+	const int bodyTop = listY + headerH;
+	if (libOpen) {
+		const int btnH = (int)(20 * s);
+		const int bodyH = listH - headerH - btnH - (int)(4 * s);
+		const int treeW = (int)(libPanel * 0.46);
+		const int albX = M + gPad + treeW + (int)(3 * s);
+		const int albW = libPanel - treeW - (int)(3 * s);
+		if (bodyH > 10) {
+			MoveCtl(&m_libTree, M + gPad, bodyTop, treeW, bodyH);
+			MoveCtl(&m_libAlbums, albX, bodyTop, albW, bodyH);
+			if (m_libAlbums.GetSafeHwnd() && m_libAlbums.GetHeaderCtrl()) {
+				CRect arc; m_libAlbums.GetClientRect(&arc);
+				m_libAlbums.SetColumnWidth(0, max(40, arc.Width() - 4));
+			}
+		}
+		const int btnY = listY + listH - btnH;
+		const int half = (libPanel - (int)(4 * s)) / 2;
+		MoveCtl(&m_libAddRoot, M + gPad, btnY, half, btnH);
+		MoveCtl(&m_libAddPl, M + gPad + half + (int)(4 * s), btnY, half, btnH);
+		if (m_libTree.GetSafeHwnd()) m_libTree.ShowWindow(SW_SHOW);
+		if (m_libAlbums.GetSafeHwnd()) m_libAlbums.ShowWindow(SW_SHOW);
+		if (m_libAddRoot.GetSafeHwnd()) m_libAddRoot.ShowWindow(SW_SHOW);
+		if (m_libAddPl.GetSafeHwnd()) m_libAddPl.ShowWindow(SW_SHOW);
+		if (m_libAlbums.GetSafeHwnd())
+			LibFitNoHScroll(&m_libAlbums);
+		if (!m_libTreeBuilt && !m_libBuildPosted) {
+			m_libBuildPosted = 1;
+			if (m_libTree.GetSafeHwnd() && m_libTree.GetCount() == 0) {
+				m_libTree.InsertItem(LL14(L"読み込み中…", L"Loading...", L"Chargement...", L"Caricamento...", L"Cargando...", L"로딩 중...", L"加载中…", L"Loading...", L"Загрузка...", L"Laden...", L"Carregando...", L"Laden...", L"Wczytywanie...", L"Yukleniyor..."), TVI_ROOT, TVI_LAST);
+			}
+			PostMessage(WM_MP_LIB_BUILD, 0, 0);
+		}
+		if (m_histList.GetSafeHwnd()) { MoveCtl(&m_histList, M + gPad, listY, 0, 0); m_histList.ShowWindow(SW_HIDE); }
+	}
+	else if (histOpen) {
+		const int bodyH = listH - headerH;
+		if (bodyH > 10)
+			MoveCtl(&m_histList, M + gPad, bodyTop, libPanel, bodyH);
+		if (m_histList.GetSafeHwnd()) {
+			m_histList.ShowWindow(SW_SHOW);
+			LibFitNoHScroll(&m_histList);
+		}
+		if (!m_histBuilt)
+			HistRebuildList();
+		if (m_libTree.GetSafeHwnd()) { MoveCtl(&m_libTree, M + gPad, listY, 0, 0); m_libTree.ShowWindow(SW_HIDE); }
+		if (m_libAlbums.GetSafeHwnd()) { MoveCtl(&m_libAlbums, M + gPad, listY, 0, 0); m_libAlbums.ShowWindow(SW_HIDE); }
+		if (m_libAddRoot.GetSafeHwnd()) { MoveCtl(&m_libAddRoot, M + gPad, listY, 0, 0); m_libAddRoot.ShowWindow(SW_HIDE); }
+		if (m_libAddPl.GetSafeHwnd()) { MoveCtl(&m_libAddPl, M + gPad, listY, 0, 0); m_libAddPl.ShowWindow(SW_HIDE); }
+	}
+	else {
+		if (m_libTree.GetSafeHwnd()) { MoveCtl(&m_libTree, M + gPad, listY, 0, 0); m_libTree.ShowWindow(SW_HIDE); }
+		if (m_libAlbums.GetSafeHwnd()) { MoveCtl(&m_libAlbums, M + gPad, listY, 0, 0); m_libAlbums.ShowWindow(SW_HIDE); }
+		if (m_libAddRoot.GetSafeHwnd()) { MoveCtl(&m_libAddRoot, M + gPad, listY, 0, 0); m_libAddRoot.ShowWindow(SW_HIDE); }
+		if (m_libAddPl.GetSafeHwnd()) { MoveCtl(&m_libAddPl, M + gPad, listY, 0, 0); m_libAddPl.ShowWindow(SW_HIDE); }
+		if (m_histList.GetSafeHwnd()) { MoveCtl(&m_histList, M + gPad, listY, 0, 0); m_histList.ShowWindow(SW_HIDE); }
+	}
+
+	MoveCtl(&m_list, listX, listY, listW, listH);
+
+	// 空PL案内(本当に0曲のときだけ)
+	{
+		const BOOL emptyPl = (pl == NULL || pl->pc == NULL || pl->playcnt <= 0);
+		const int btnW = (int)(200 * s);
+		const int btnH = (int)(40 * s);
+		const int gap = (int)(12 * s);
+		const int totalH = btnH * 2 + gap;
+		const int ex = listX + (listW - btnW) / 2;
+		const int ey = listY + (listH - totalH) / 2;
+		if (m_emptyFolder.GetSafeHwnd()) {
+			MoveCtl(&m_emptyFolder, ex, ey, btnW, btnH);
+			m_emptyFolder.ShowWindow(emptyPl ? SW_SHOW : SW_HIDE);
+		}
+		if (m_emptyM3u.GetSafeHwnd()) {
+			MoveCtl(&m_emptyM3u, ex, ey + btnH + gap, btnW, btnH);
+			m_emptyM3u.ShowWindow(emptyPl ? SW_SHOW : SW_HIDE);
+		}
+	}
 
 	// アルバム/コメント列(最終列=4)をリスト右端へぴたりとフィットさせる
 	FitPlaylistLastColumn();
@@ -2155,6 +2373,7 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 	if (!pl || pl->pc == NULL) {
 		if (m_list.GetItemCount() > 0) { m_list.SetItemCount(0); m_lastCount = 0; }
 		m_filtOn = 0; m_fcnt = 0;
+		UpdateEmptyStateUi();
 		return;
 	}
 	m_list.pc = pl->pc; // Load/realloc 後の実体ポインタを再同期
@@ -2238,6 +2457,7 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 	}
 
 	FollowPlayingRow();   // ♪ 行へカーソル追従(曲変化時のみ)
+	UpdateEmptyStateUi();
 }
 
 void CMediaPlayerDlg::NotifyPlayIconChanged()
@@ -2446,16 +2666,24 @@ void CMediaPlayerDlg::SyncFromMain()
 
 	// タイトル/アーティスト/アルバムはバナーGDIに表示されるためここでは更新しない。
 
-	// 歌詞(5行) / OS / CPU (og からそのまま引き継ぐ)
+	// 歌詞(5行) / 拡大時カラオケビュー / OS / CPU
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
 		CString s, s2;
 		const bool hasLyrics = (og->lrcnum >= 2);
-		og->m_lrc.GetWindowText(s); m_lrc.GetWindowText(s2); if (s != s2) m_lrc.SetWindowText(s);
-		og->m_lrc2.GetWindowText(s); m_lrc2.GetWindowText(s2); if (s != s2) m_lrc2.SetWindowText(s);
-		og->m_lrc3.GetWindowText(s); m_lrc3.GetWindowText(s2); if (s != s2) m_lrc3.SetWindowText(s);
-		if (hasLyrics) {
-			og->m_lrc4.GetWindowText(s); m_lrc4.GetWindowText(s2); if (s != s2) m_lrc4.SetWindowText(s);
-			og->m_lrc5.GetWindowText(s); m_lrc5.GetWindowText(s2); if (s != s2) m_lrc5.SetWindowText(s);
+		const bool lrcScroll = (hasLyrics && savedata.mpLrcExpand && m_lrcView.GetSafeHwnd());
+		if (lrcScroll) {
+			const int n = (og->lrcnum > 1) ? (og->lrcnum - 1) : 0;
+			m_lrcView.SetLines(og->lrc, n);
+			m_lrcView.SetCurrent(og->lrccur);
+		}
+		else {
+			og->m_lrc.GetWindowText(s); m_lrc.GetWindowText(s2); if (s != s2) m_lrc.SetWindowText(s);
+			og->m_lrc2.GetWindowText(s); m_lrc2.GetWindowText(s2); if (s != s2) m_lrc2.SetWindowText(s);
+			og->m_lrc3.GetWindowText(s); m_lrc3.GetWindowText(s2); if (s != s2) m_lrc3.SetWindowText(s);
+			if (hasLyrics) {
+				og->m_lrc4.GetWindowText(s); m_lrc4.GetWindowText(s2); if (s != s2) m_lrc4.SetWindowText(s);
+				og->m_lrc5.GetWindowText(s); m_lrc5.GetWindowText(s2); if (s != s2) m_lrc5.SetWindowText(s);
+			}
 		}
 		if (!hasLyrics) {
 			og->m_OS.GetWindowText(s); m_os.GetWindowText(s2); if (s != s2) m_os.SetWindowText(s);
@@ -2464,8 +2692,10 @@ void CMediaPlayerDlg::SyncFromMain()
 		}
 		static int s_lastLyricsMode = -1;
 		const int lyricsMode = hasLyrics ? 1 : 0;
-		if (s_lastLyricsMode != lyricsMode) {
+		static int s_lastLrcExpand = -1;
+		if (s_lastLyricsMode != lyricsMode || s_lastLrcExpand != savedata.mpLrcExpand) {
 			s_lastLyricsMode = lyricsMode;
+			s_lastLrcExpand = savedata.mpLrcExpand;
 			DoLayout();
 			CCC_GroupBoxesBack(GetSafeHwnd());
 			RefreshListAfterLayout();
@@ -3480,15 +3710,14 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			CString track = tagtrack;
 			if (mode == -3)
 				track.Empty();
-			CString fmt; if (::IsWindow(m_os.GetSafeHwnd())) m_os.GetWindowText(fmt);
 
 			// 曲番号行
 			CString trackLine;
 			if (!track.IsEmpty())
 				trackLine.Format(LL14(L"曲番号 %s", L"Track %s", L"Piste %s", L"Traccia %s", L"Pista %s", L"곡번호 %s", L"曲号 %s", L"المقطع %s", L"Трек %s", L"Titel %s", L"Faixa %s", L"Track %s", L"Utwór %s", L"Parça %s"), (LPCTSTR)track);
 
-			// Hz / チャンネル / ビット深度行（アップスケール時は src ✦ dst）
-			CString audioLine = FormatAudioPlaybackDisplay(wavbit_sample_Hz, wavchannel, wavsam_depth);
+			// 形式・Hz・ch・ビット・RG を1行に統合(アップスケール時は ✦)
+			CString techLine = MpTechFormatLine();
 
 			// ---- 行高・縦中央寄せ ----
 			int titleH  = (int)(24 * hD2);
@@ -3499,8 +3728,7 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			if (!artist.IsEmpty())    rows++;
 			if (!album.IsEmpty())     rows++;
 			if (!trackLine.IsEmpty()) rows++;
-			if (!audioLine.IsEmpty()) rows++;
-			if (!fmt.IsEmpty())       rows++;
+			if (!techLine.IsEmpty())  rows++;
 			int totalH = titleH + ruleGap + (rows - 1) * lineH;
 			int y = (h - totalH) / 2; if (y < 0) y = 0;
 
@@ -3518,14 +3746,13 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			mem.FillSolidRect(tx, y + ruleGap / 2, tw, max(1, (int)(1 * hD2 + 0.5)), RGB(0, 160, 0));
 			y += ruleGap;
 
-			// ---- サブ行（アーティスト/アルバム/曲番号/オーディオ/フォーマット、各スクロール対応） ----
+			// ---- サブ行（アーティスト/アルバム/曲番号/技術情報、各スクロール対応） ----
 			struct SubRow { CString s; COLORREF c; int idx; };
-			SubRow items[5]; int n = 0;
+			SubRow items[4]; int n = 0;
 			if (!artist.IsEmpty())    { items[n] = { artist,    RGB(225, 225, 225), 1 }; n++; }
 			if (!album.IsEmpty())     { items[n] = { album,     RGB(190, 190, 190), 2 }; n++; }
 			if (!trackLine.IsEmpty()) { items[n] = { trackLine, RGB(180, 180, 210), 3 }; n++; }
-			if (!audioLine.IsEmpty()) { items[n] = { audioLine, RGB(130, 210, 230), 4 }; n++; }
-			if (!fmt.IsEmpty())       { items[n] = { fmt,       RGB(150, 200, 150), 5 }; n++; }
+			if (!techLine.IsEmpty())  { items[n] = { techLine,  RGB(130, 210, 230), 4 }; n++; }
 
 			mem.SetBkMode(TRANSPARENT);
 			for (int i = 0; i < n; i++) {
@@ -4409,6 +4636,11 @@ void CMediaPlayerDlg::OnLrcExpand()
 	if (m_lrcExpand.GetSafeHwnd())
 		m_lrcExpand.SetWindowText(savedata.mpLrcExpand ? L"▴" : L"▾");
 	DoLayout();
+	if (savedata.mpLrcExpand && og && og->lrcnum >= 2 && m_lrcView.GetSafeHwnd()) {
+		const int n = og->lrcnum - 1;
+		m_lrcView.SetLines(og->lrc, n > 0 ? n : 0);
+		m_lrcView.SetCurrent(og->lrccur);
+	}
 	CCC_GroupBoxesBack(GetSafeHwnd());
 	RefreshListAfterLayout();
 	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
@@ -4487,6 +4719,969 @@ void CMediaPlayerDlg::OnAddFolder()
 	RefreshList(TRUE);
 }
 
+void CMediaPlayerDlg::EnsureLibControls()
+{
+	CRect rc(0, 0, 40, 20);
+	if (!m_libToggle.GetSafeHwnd()) {
+		m_libToggle.Create(_T("Lib"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_LIBTOGGLE);
+		m_libToggle.SetGradation(RGB(230, 240, 255), RGB(190, 210, 240), 0, TRUE);
+	}
+	if (!m_histToggle.GetSafeHwnd()) {
+		m_histToggle.Create(_T("Hist"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_HISTTOGGLE);
+		m_histToggle.SetGradation(RGB(255, 240, 230), RGB(240, 200, 170), 0, TRUE);
+	}
+	if (!m_libAddRoot.GetSafeHwnd()) {
+		m_libAddRoot.Create(LL14(L"ルート追加", L"Add root", L"Aj. racine", L"Agg. radice", L"Anadir raiz", L"루트 추가", L"添加根", L"إضافة جذر", L"Добавить корень", L"Wurzel +", L"Add raiz", L"Wortel +", L"Dodaj korzen", L"Kok +"),
+			WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_LIBADDROOT);
+		m_libAddRoot.SetGradation(RGB(220, 240, 230), RGB(180, 220, 200), 0, TRUE);
+	}
+	if (!m_libAddPl.GetSafeHwnd()) {
+		m_libAddPl.Create(LL14(L"PLへ追加", L"Add to PL", L"Aj. a liste", L"Agg. a PL", L"Aadir a PL", L"목록에 추가", L"加入列表", L"إضافة للقائمة", L"В плейлист", L"Zur PL", L"Para PL", L"Naar PL", L"Do listy", L"Listeye"),
+			WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_LIBADDPL);
+		m_libAddPl.SetGradation(RGB(255, 240, 220), RGB(240, 200, 160), 0, TRUE);
+	}
+	if (!m_libTree.GetSafeHwnd()) {
+#ifndef TVS_NOHSCROLL
+#define TVS_NOHSCROLL 0x8000
+#endif
+		m_libTree.Create(WS_CHILD | WS_BORDER | TVS_HASLINES | TVS_LINESATROOT | TVS_HASBUTTONS | TVS_SHOWSELALWAYS | TVS_INFOTIP | TVS_NOHSCROLL,
+			rc, this, IDC_MP_LIBTREE);
+		m_libTree.SetAeroMode(FALSE);
+	}
+	if (!m_libAlbums.GetSafeHwnd()) {
+		m_libAlbums.Create(WS_CHILD | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER,
+			rc, this, IDC_MP_LIBALBUMS);
+		m_libAlbums.SetExtendedStyle(LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP);
+		m_libAlbums.InsertColumn(0, _T("Album"), LVCFMT_LEFT, 120);
+		m_libAlbums.SetAeroMode(FALSE);
+		m_libAlbums.DragAcceptFiles(TRUE);
+	}
+	if (!m_histList.GetSafeHwnd()) {
+		m_histList.Create(WS_CHILD | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER,
+			rc, this, IDC_MP_HISTLIST);
+		m_histList.SetExtendedStyle(LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP);
+		m_histList.InsertColumn(0, _T("History"), LVCFMT_LEFT, 200);
+		m_histList.SetAeroMode(FALSE);
+	}
+	if (!m_emptyFolder.GetSafeHwnd()) {
+		m_emptyFolder.Create(LL14(L"フォルダをドロップ / 開く", L"Drop or open a folder", L"Deposer/ouvrir un dossier", L"Trascina/apri cartella", L"Soltar/abrir carpeta", L"폴더 드롭 / 열기", L"拖放/打开文件夹", L"إسقاط/فتح مجلد", L"Перетащите/откройте папку", L"Ordner ablegen/offnen", L"Soltar/abrir pasta", L"Map neerzetten/openen", L"Upuść/otwórz folder", L"Klasor birak/ac"),
+			WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EMPTYFOLDER);
+		m_emptyFolder.SetGradation(RGB(220, 245, 230), RGB(170, 220, 190), 0, TRUE);
+	}
+	if (!m_emptyM3u.GetSafeHwnd()) {
+		m_emptyM3u.Create(LL14(L"m3u を開く", L"Open m3u", L"Ouvrir m3u", L"Apri m3u", L"Abrir m3u", L"m3u 열기", L"打开 m3u", L"فتح m3u", L"Открыть m3u", L"m3u offnen", L"Abrir m3u", L"m3u openen", L"Otwórz m3u", L"m3u ac"),
+			WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EMPTYM3U);
+		m_emptyM3u.SetGradation(RGB(230, 240, 255), RGB(180, 205, 240), 0, TRUE);
+	}
+	if (m_fontList.GetSafeHandle()) {
+		if (m_libTree.GetSafeHwnd()) m_libTree.SetFont(&m_fontList);
+		if (m_libAlbums.GetSafeHwnd()) m_libAlbums.SetFont(&m_fontList);
+		if (m_histList.GetSafeHwnd()) m_histList.SetFont(&m_fontList);
+	}
+}
+
+CString CMediaPlayerDlg::LibRootsFilePath() const
+{
+	TCHAR base[MAX_PATH] = { 0 };
+	if (FAILED(SHGetFolderPath(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, base)))
+		return CString();
+	CString dir = base;
+	dir += _T("\\oggYSED");
+	CreateDirectory(dir, NULL);
+	return dir + _T("\\libroots.txt");
+}
+
+void CMediaPlayerDlg::LibLoadUserRoots(CString* outs, int maxN, int& outN)
+{
+	outN = 0;
+	if (!outs || maxN <= 0) return;
+	const CString fp = LibRootsFilePath();
+	if (fp.IsEmpty()) return;
+	CStdioFile f;
+	if (!f.Open(fp, CFile::modeRead | CFile::typeText | CFile::shareDenyWrite))
+		return;
+	CString line;
+	while (f.ReadString(line) && outN < maxN) {
+		line.Trim();
+		if (line.IsEmpty()) continue;
+		if (PathIsDirectory(line))
+			outs[outN++] = line;
+	}
+	f.Close();
+}
+
+void CMediaPlayerDlg::LibSaveUserRoots(const CString* roots, int n)
+{
+	const CString fp = LibRootsFilePath();
+	if (fp.IsEmpty() || !roots) return;
+	CStdioFile f;
+	if (!f.Open(fp, CFile::modeCreate | CFile::modeWrite | CFile::typeText | CFile::shareExclusive))
+		return;
+	for (int i = 0; i < n; i++) {
+		if (!roots[i].IsEmpty())
+			f.WriteString(roots[i] + _T("\n"));
+	}
+	f.Close();
+}
+
+int CMediaPlayerDlg::LibAllocPath(LPCTSTR path)
+{
+	if (!path || !path[0]) return -1;
+	if (m_libPathN >= kLibPathMax) return -1;
+	m_libPathBag[m_libPathN] = path;
+	return m_libPathN++;
+}
+
+CString CMediaPlayerDlg::LibItemPath(HTREEITEM h) const
+{
+	if (!h || !m_libTree.GetSafeHwnd()) return CString();
+	const LPARAM lp = m_libTree.GetItemData(h);
+	const int idx = (int)lp - 1;
+	if (idx < 0 || idx >= m_libPathN) return CString();
+	return m_libPathBag[idx];
+}
+
+static BOOL LibDirHasSubdir(LPCTSTR folder)
+{
+	if (!folder || !folder[0]) return FALSE;
+	CString pat = folder;
+	if (pat.Right(1) != _T("\\")) pat += _T("\\");
+	pat += _T("*.*");
+	CFileFind ff;
+	BOOL b = ff.FindFile(pat);
+	while (b) {
+		b = ff.FindNextFile();
+		if (ff.IsDots()) continue;
+		if (ff.IsDirectory()) { ff.Close(); return TRUE; }
+	}
+	ff.Close();
+	return FALSE;
+}
+
+static int LibCountAudioFiles(LPCTSTR folder)
+{
+	if (!folder || !folder[0]) return 0;
+	static const TCHAR* exts[] = {
+		_T(".mp3"), _T(".ogg"), _T(".flac"), _T(".wav"), _T(".m4a"), _T(".aac"),
+		_T(".opus"), _T(".wma"), _T(".aif"), _T(".aiff"), _T(".dsf"), _T(".dff"),
+		_T(".tta"), NULL
+	};
+	CString pat = folder;
+	if (pat.Right(1) != _T("\\")) pat += _T("\\");
+	pat += _T("*.*");
+	int n = 0;
+	CFileFind ff;
+	BOOL b = ff.FindFile(pat);
+	while (b) {
+		b = ff.FindNextFile();
+		if (ff.IsDots() || ff.IsDirectory()) continue;
+		CString name = ff.GetFileName();
+		name.MakeLower();
+		for (int i = 0; exts[i]; i++) {
+			const int el = (int)_tcslen(exts[i]);
+			if (name.GetLength() >= el && name.Right(el) == exts[i]) { n++; break; }
+		}
+	}
+	ff.Close();
+	return n;
+}
+
+void CMediaPlayerDlg::LibFitNoHScroll(CWnd* pList)
+{
+	if (!pList || !pList->GetSafeHwnd()) return;
+	HWND h = pList->GetSafeHwnd();
+	CRect rc; ::GetClientRect(h, &rc);
+	int w = rc.Width() - 4;
+	if (w < 40) w = 40;
+	ListView_SetColumnWidth(h, 0, w);
+	::ShowScrollBar(h, SB_HORZ, FALSE);
+}
+
+LRESULT CMediaPlayerDlg::OnLibBuildLazy(WPARAM, LPARAM)
+{
+	if (!::IsWindow(GetSafeHwnd())) return 0;
+	if (!savedata.mpLibOpen) { m_libBuildPosted = 0; return 0; }
+	if (!m_libTreeBuilt)
+		LibRebuildTree();
+	else
+		m_libBuildPosted = 0;
+	return 0;
+}
+
+void CMediaPlayerDlg::LibRebuildTree()
+{
+	EnsureLibControls();
+	if (!m_libTree.GetSafeHwnd()) return;
+	m_libTree.SetRedraw(FALSE);
+	m_libTree.DeleteAllItems();
+	m_libPathN = 0;
+	m_libSelFolder.Empty();
+	m_albumN = 0;
+	if (m_libAlbums.GetSafeHwnd())
+		m_libAlbums.DeleteAllItems();
+
+	auto insertNode = [&](HTREEITEM parent, LPCTSTR title, LPCTSTR path, BOOL lazy) -> HTREEITEM {
+		const int idx = path ? LibAllocPath(path) : -1;
+		HTREEITEM h = m_libTree.InsertItem(title, parent, TVI_LAST);
+		m_libTree.SetItemData(h, (idx >= 0) ? (LPARAM)(idx + 1) : 0);
+		if (lazy && path)
+			m_libTree.InsertItem(_T("…"), h, TVI_LAST);
+		return h;
+	};
+
+	HTREEITEM hLib = m_libTree.InsertItem(
+		LL14(L"ライブラリ", L"Library", L"Bibliotheque", L"Libreria", L"Biblioteca", L"라이브러리", L"库", L"المكتبة", L"Библиотека", L"Bibliothek", L"Biblioteca", L"Bibliotheek", L"Biblioteka", L"Kitaplik"),
+		TVI_ROOT, TVI_LAST);
+	m_libTree.SetItemData(hLib, 0);
+	CString roots[64];
+	int rootN = 0;
+	LibLoadUserRoots(roots, 64, rootN);
+	if (rootN == 0) {
+		HTREEITEM hHint = m_libTree.InsertItem(
+			LL14(L"(ルート追加で登録)", L"(Add roots)", L"(Ajoutez des racines)", L"(Aggiungi radici)", L"(Anada raices)", L"(루트 추가)", L"(请添加根)", L"(أضف جذوراً)", L"(Добавьте корни)", L"(Wurzeln hinzufugen)", L"(Adicione raizes)", L"(Voeg wortels toe)", L"(Dodaj korzenie)", L"(Kok ekle)"),
+			hLib, TVI_LAST);
+		m_libTree.SetItemData(hHint, 0);
+	}
+	else {
+		for (int i = 0; i < rootN; i++) {
+			CString leaf = roots[i];
+			const int slash = max(leaf.ReverseFind(_T('\\')), leaf.ReverseFind(_T('/')));
+			if (slash >= 0 && slash + 1 < leaf.GetLength())
+				leaf = leaf.Mid(slash + 1);
+			if (leaf.IsEmpty()) leaf = roots[i];
+			insertNode(hLib, leaf, roots[i], TRUE);
+		}
+	}
+	m_libTree.Expand(hLib, TVE_EXPAND);
+
+	HTREEITEM hPc = m_libTree.InsertItem(
+		LL14(L"PC", L"This PC", L"Ce PC", L"Questo PC", L"Este PC", L"내 PC", L"此电脑", L"هذا الكمبيوتر", L"Этот ПК", L"Dieser PC", L"Este PC", L"Deze pc", L"Ten komputer", L"Bu PC"),
+		TVI_ROOT, TVI_LAST);
+	m_libTree.SetItemData(hPc, 0);
+	TCHAR drives[256] = { 0 };
+	GetLogicalDriveStrings(255, drives);
+	for (TCHAR* p = drives; *p; p += _tcslen(p) + 1) {
+		const UINT dtype = GetDriveType(p);
+		if (dtype != DRIVE_FIXED && dtype != DRIVE_REMOVABLE && dtype != DRIVE_REMOTE && dtype != DRIVE_CDROM)
+			continue;
+		CString label = p;
+		if (label.Right(1) == _T("\\")) label = label.Left(label.GetLength() - 1);
+		insertNode(hPc, label, p, TRUE);
+	}
+	// ドライブ列挙は済んでいるので PC 展開は軽い。展開直後の再描画不足を防ぐ。
+	m_libTree.Expand(hPc, TVE_EXPAND);
+	m_libTree.SetRedraw(TRUE);
+	m_libTree.Invalidate(FALSE);
+	m_libTree.UpdateWindow();
+	m_libTree.ScheduleOpaqueRepaint();
+	m_libTreeBuilt = 1;
+	m_libBuildPosted = 0;
+}
+
+void CMediaPlayerDlg::LibFillChildren(HTREEITEM hParent)
+{
+	if (!hParent || !m_libTree.GetSafeHwnd()) return;
+	const CString folder = LibItemPath(hParent);
+	if (folder.IsEmpty()) return;
+
+	BOOL hasDummy = FALSE;
+	BOOL hasReal = FALSE;
+	HTREEITEM hChild = m_libTree.GetChildItem(hParent);
+	while (hChild) {
+		const CString t = m_libTree.GetItemText(hChild);
+		if (t == _T("…")) hasDummy = TRUE;
+		else if (!LibItemPath(hChild).IsEmpty()) hasReal = TRUE;
+		hChild = m_libTree.GetNextSiblingItem(hChild);
+	}
+	if (hasReal && !hasDummy) return;
+
+	m_libTree.SetRedraw(FALSE);
+	// 子を全削除して再構築
+	hChild = m_libTree.GetChildItem(hParent);
+	while (hChild) {
+		HTREEITEM hNext = m_libTree.GetNextSiblingItem(hChild);
+		m_libTree.DeleteItem(hChild);
+		hChild = hNext;
+	}
+
+	CString pat = folder;
+	if (pat.Right(1) != _T("\\")) pat += _T("\\");
+	pat += _T("*.*");
+	CFileFind ff;
+	BOOL b = ff.FindFile(pat);
+	CString names[256];
+	CString paths[256];
+	int n = 0;
+	while (b && n < 256) {
+		b = ff.FindNextFile();
+		if (ff.IsDots() || !ff.IsDirectory()) continue;
+		names[n] = ff.GetFileName();
+		paths[n] = ff.GetFilePath();
+		n++;
+	}
+	ff.Close();
+	for (int i = 0; i < n; i++) {
+		for (int j = i + 1; j < n; j++) {
+			if (names[j].CompareNoCase(names[i]) < 0) {
+				CString tn = names[i]; names[i] = names[j]; names[j] = tn;
+				CString tp = paths[i]; paths[i] = paths[j]; paths[j] = tp;
+			}
+		}
+	}
+	for (int i = 0; i < n; i++) {
+		const int idx = LibAllocPath(paths[i]);
+		HTREEITEM h = m_libTree.InsertItem(names[i], hParent, TVI_LAST);
+		m_libTree.SetItemData(h, (idx >= 0) ? (LPARAM)(idx + 1) : 0);
+		m_libTree.InsertItem(_T("…"), h, TVI_LAST);
+	}
+	m_libTree.SetRedraw(TRUE);
+	m_libTree.Invalidate(FALSE);
+	m_libTree.UpdateWindow();
+	m_libTree.ScheduleOpaqueRepaint();
+}
+
+void CMediaPlayerDlg::LibFillAlbums(LPCTSTR folder)
+{
+	EnsureLibControls();
+	if (!m_libAlbums.GetSafeHwnd()) return;
+	m_libAlbums.SetRedraw(FALSE);
+	m_libAlbums.DeleteAllItems();
+	m_albumN = 0;
+	ZeroMemory(m_albumIsFile, sizeof(m_albumIsFile));
+	m_libSelFolder = folder ? folder : _T("");
+	if (m_libSelFolder.IsEmpty() || !PathIsDirectory(m_libSelFolder)) {
+		m_libAlbums.SetRedraw(TRUE);
+		return;
+	}
+
+	static const TCHAR* exts[] = {
+		_T(".mp3"), _T(".ogg"), _T(".flac"), _T(".wav"), _T(".m4a"), _T(".aac"),
+		_T(".opus"), _T(".wma"), _T(".aif"), _T(".aiff"), _T(".dsf"), _T(".dff"),
+		_T(".tta"), _T(".mp4"), _T(".mkv"), _T(".avi"), _T(".wmv"), NULL
+	};
+	auto isAudio = [&](CString name) -> BOOL {
+		name.MakeLower();
+		for (int i = 0; exts[i]; i++) {
+			const int el = (int)_tcslen(exts[i]);
+			if (name.GetLength() >= el && name.Right(el) == exts[i]) return TRUE;
+		}
+		return FALSE;
+	};
+
+	CString pat = m_libSelFolder;
+	if (pat.Right(1) != _T("\\")) pat += _T("\\");
+	pat += _T("*.*");
+	CFileFind ff;
+	BOOL b = ff.FindFile(pat);
+	while (b && m_albumN < kLibAlbumMax) {
+		b = ff.FindNextFile();
+		if (ff.IsDots() || !ff.IsDirectory()) continue;
+		m_albumPathBag[m_albumN] = ff.GetFilePath();
+		m_albumIsFile[m_albumN] = 0;
+		CString title = ff.GetFileName();
+		const int row = m_libAlbums.InsertItem(m_albumN, title);
+		m_libAlbums.SetItemData(row, (DWORD_PTR)m_albumN);
+		m_albumN++;
+	}
+	ff.Close();
+
+	b = ff.FindFile(pat);
+	while (b && m_albumN < kLibAlbumMax) {
+		b = ff.FindNextFile();
+		if (ff.IsDots() || ff.IsDirectory()) continue;
+		CString name = ff.GetFileName();
+		if (!isAudio(name)) continue;
+		m_albumPathBag[m_albumN] = ff.GetFilePath();
+		m_albumIsFile[m_albumN] = 1;
+		CString title = CString(_T("♪ ")) + name;
+		const int row = m_libAlbums.InsertItem(m_albumN, title);
+		m_libAlbums.SetItemData(row, (DWORD_PTR)m_albumN);
+		m_albumN++;
+	}
+	ff.Close();
+
+	if (m_albumN == 0) {
+		m_albumPathBag[m_albumN] = m_libSelFolder;
+		m_albumIsFile[m_albumN] = 0;
+		CString title = LL14(L"このフォルダを追加", L"Add this folder", L"Ajouter ce dossier", L"Aggiungi cartella", L"Anadir carpeta", L"이 폴더 추가", L"添加此文件夹", L"إضافة هذا المجلد", L"Добавить папку", L"Diesen Ordner", L"Adicionar pasta", L"Deze map", L"Dodaj folder", L"Bu klasoru ekle");
+		const int row = m_libAlbums.InsertItem(0, title);
+		m_libAlbums.SetItemData(row, (DWORD_PTR)m_albumN);
+		m_albumN++;
+	}
+	m_libAlbums.SetRedraw(TRUE);
+	m_libAlbums.Invalidate(FALSE);
+	LibFitNoHScroll(&m_libAlbums);
+}
+
+void CMediaPlayerDlg::LibAddToPlaylist(LPCTSTR folder)
+{
+	LibAddPath(folder, FALSE);
+}
+
+void CMediaPlayerDlg::LibAddPath(LPCTSTR path, BOOL playAfter)
+{
+	if (!pl || !path || !path[0]) return;
+	CWaitCursor wc;
+	const int before = pl->playcnt;
+	const CString want = NormalizePlaylistPath(path);
+	pl->Fol(path);
+	RefreshList(TRUE);
+	UpdateEmptyStateUi();
+	if (!playAfter) return;
+	int idx = pl->FindByPath(path);
+	if (idx < 0 && !want.IsEmpty())
+		idx = pl->FindByPath(want);
+	if (idx < 0 && pl->playcnt > before)
+		idx = before;
+	if (idx >= 0)
+		MP_PlayIndex(idx);
+}
+
+BOOL CMediaPlayerDlg::LibDropHitTestPlaylist(CPoint ptClient) const
+{
+	if (!m_list.GetSafeHwnd()) return FALSE;
+	CPoint sp = ptClient;
+	const_cast<CMediaPlayerDlg*>(this)->ClientToScreen(&sp);
+	HWND h = ::WindowFromPoint(sp);
+	while (h) {
+		if (h == m_list.GetSafeHwnd()) return TRUE;
+		h = ::GetParent(h);
+	}
+	return FALSE;
+}
+
+void CMediaPlayerDlg::OnLibToggle()
+{
+	if (savedata.mpLibOpen) {
+		savedata.mpLibOpen = 0;
+	}
+	else {
+		savedata.mpLibOpen = 1;
+		savedata.mpHistOpen = 0;
+		m_libTreeBuilt = 0;
+		m_libBuildPosted = 0;
+	}
+	if (m_libToggle.GetSafeHwnd())
+		m_libToggle.SetWindowText(savedata.mpLibOpen ? L"≪" : L"Lib");
+	if (m_histToggle.GetSafeHwnd())
+		m_histToggle.SetWindowText(savedata.mpHistOpen ? L"≪" : L"Hist");
+	DoLayout();
+	CCC_GroupBoxesBack(GetSafeHwnd());
+	RefreshListAfterLayout();
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+	MpPersistSavedataQuick();
+}
+
+void CMediaPlayerDlg::OnLibAddRoot()
+{
+	BROWSEINFO bi; ZeroMemory(&bi, sizeof(bi));
+	TCHAR path[MAX_PATH] = { 0 };
+	bi.hwndOwner = GetSafeHwnd();
+	bi.pszDisplayName = path;
+	bi.lpszTitle = LL14(L"ライブラリのルートフォルダを選んでください", L"Select a library root folder", L"Choisir une racine", L"Scegli una radice", L"Elija una raiz", L"라이브러리 루트 선택", L"选择库根文件夹", L"اختر جذر المكتبة", L"Выберите корень библиотеки", L"Bibliothekswurzel wahlen", L"Selecione a raiz", L"Selecteer een wortel", L"Wybierz korzen", L"Kok klasoru secin");
+	bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+	LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
+	if (!pidl) return;
+	if (SHGetPathFromIDList(pidl, path)) {
+		CString roots[64];
+		int n = 0;
+		LibLoadUserRoots(roots, 64, n);
+		BOOL dup = FALSE;
+		for (int i = 0; i < n; i++) {
+			if (roots[i].CompareNoCase(path) == 0) { dup = TRUE; break; }
+		}
+		if (!dup && n < 64) {
+			roots[n++] = path;
+			LibSaveUserRoots(roots, n);
+		}
+		m_libTreeBuilt = 0;
+		LibRebuildTree();
+	}
+	CoTaskMemFree(pidl);
+}
+
+void CMediaPlayerDlg::OnLibAddPl()
+{
+	CString folder;
+	if (m_libAlbums.GetSafeHwnd()) {
+		POSITION pos = m_libAlbums.GetFirstSelectedItemPosition();
+		if (pos) {
+			const int row = m_libAlbums.GetNextSelectedItem(pos);
+			const int idx = (int)m_libAlbums.GetItemData(row);
+			if (idx >= 0 && idx < m_albumN)
+				folder = m_albumPathBag[idx];
+		}
+	}
+	if (folder.IsEmpty())
+		folder = m_libSelFolder;
+	LibAddToPlaylist(folder);
+}
+
+void CMediaPlayerDlg::OnLibTreeSel(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	LPNMTREEVIEW p = reinterpret_cast<LPNMTREEVIEW>(pNMHDR);
+	if (!p) return;
+	const CString path = LibItemPath(p->itemNew.hItem);
+	LibFillAlbums(path);
+}
+
+void CMediaPlayerDlg::OnLibTreeExpanding(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	LPNMTREEVIEW p = reinterpret_cast<LPNMTREEVIEW>(pNMHDR);
+	if (!p) return;
+	if ((p->action & TVE_EXPAND) == 0) return;
+	LibFillChildren(p->itemNew.hItem);
+	if (m_libTree.GetSafeHwnd()) {
+		m_libTree.Invalidate(FALSE);
+		m_libTree.ScheduleOpaqueRepaint();
+	}
+}
+
+void CMediaPlayerDlg::OnLibAlbumDblClk(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	LPNMITEMACTIVATE p = reinterpret_cast<LPNMITEMACTIVATE>(pNMHDR);
+	if (!p || p->iItem < 0) return;
+	const int idx = (int)m_libAlbums.GetItemData(p->iItem);
+	if (idx < 0 || idx >= m_albumN) return;
+	LibAddPath(m_albumPathBag[idx], TRUE);
+}
+
+void CMediaPlayerDlg::LibStartFolderDrag(LPCTSTR path, CPoint ptClient)
+{
+	if (!path || !path[0]) return;
+	if (!PathFileExists(path) && !PathIsDirectory(path)) return;
+	m_libDragFolder = path;
+	m_libDrag = 1;
+	if (m_hLibDragImage) {
+		ImageList_Destroy(m_hLibDragImage);
+		m_hLibDragImage = NULL;
+	}
+	CString leaf = path;
+	const int slash = max(leaf.ReverseFind(_T('\\')), leaf.ReverseFind(_T('/')));
+	if (slash >= 0 && slash + 1 < leaf.GetLength())
+		leaf = leaf.Mid(slash + 1);
+	if (leaf.GetLength() > 28)
+		leaf = leaf.Left(25) + _T("...");
+	CClientDC dc(this);
+	CFont* oldF = NULL;
+	if (m_fontList.GetSafeHandle())
+		oldF = dc.SelectObject(&m_fontList);
+	CSize sz = dc.GetTextExtent(leaf);
+	if (oldF) dc.SelectObject(oldF);
+	int bw = sz.cx + 24;
+	int bh = max(22, sz.cy + 8);
+	if (bw > 220) bw = 220;
+	CBitmap bmp;
+	bmp.CreateCompatibleBitmap(&dc, bw, bh);
+	CDC mem; mem.CreateCompatibleDC(&dc);
+	CBitmap* ob = mem.SelectObject(&bmp);
+	mem.FillSolidRect(0, 0, bw, bh, RGB(255, 245, 230));
+	mem.Draw3dRect(0, 0, bw, bh, RGB(200, 140, 80), RGB(160, 100, 40));
+	if (m_fontList.GetSafeHandle())
+		mem.SelectObject(&m_fontList);
+	mem.SetBkMode(TRANSPARENT);
+	mem.SetTextColor(RGB(40, 40, 40));
+	mem.TextOut(8, (bh - sz.cy) / 2, leaf);
+	mem.SelectObject(ob);
+	mem.DeleteDC();
+	m_hLibDragImage = ImageList_Create(bw, bh, ILC_COLOR24, 1, 1);
+	if (m_hLibDragImage) {
+		ImageList_Add(m_hLibDragImage, (HBITMAP)bmp.GetSafeHandle(), NULL);
+		CPoint sp = ptClient;
+		ClientToScreen(&sp);
+		ImageList_BeginDrag(m_hLibDragImage, 0, 8, 8);
+		ImageList_DragEnter(::GetDesktopWindow(), sp.x, sp.y);
+	}
+	SetCapture();
+	SetCursor(::LoadCursor(NULL, IDC_HAND));
+}
+
+void CMediaPlayerDlg::OnLibTreeBeginDrag(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	LPNMTREEVIEW p = reinterpret_cast<LPNMTREEVIEW>(pNMHDR);
+	if (!p || !p->itemNew.hItem) return;
+	const CString path = LibItemPath(p->itemNew.hItem);
+	if (path.IsEmpty()) return;
+	LibStartFolderDrag(path, p->ptDrag);
+}
+
+void CMediaPlayerDlg::OnLibAlbumBeginDrag(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	LPNMLISTVIEW p = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
+	if (!p || p->iItem < 0) return;
+	const int idx = (int)m_libAlbums.GetItemData(p->iItem);
+	if (idx < 0 || idx >= m_albumN) return;
+	LibStartFolderDrag(m_albumPathBag[idx], p->ptAction);
+}
+
+void CMediaPlayerDlg::OnHistToggle()
+{
+	if (savedata.mpHistOpen) {
+		savedata.mpHistOpen = 0;
+	}
+	else {
+		savedata.mpHistOpen = 1;
+		savedata.mpLibOpen = 0;
+		m_histBuilt = 0;
+	}
+	if (m_libToggle.GetSafeHwnd())
+		m_libToggle.SetWindowText(savedata.mpLibOpen ? L"≪" : L"Lib");
+	if (m_histToggle.GetSafeHwnd())
+		m_histToggle.SetWindowText(savedata.mpHistOpen ? L"≪" : L"Hist");
+	DoLayout();
+	CCC_GroupBoxesBack(GetSafeHwnd());
+	RefreshListAfterLayout();
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+	MpPersistSavedataQuick();
+}
+
+void CMediaPlayerDlg::HistRebuildList()
+{
+	EnsureLibControls();
+	if (!m_histList.GetSafeHwnd()) return;
+	m_histList.DeleteAllItems();
+	const int n = (savedata.mpHistCnt < 0) ? 0 : ((savedata.mpHistCnt > 8) ? 8 : savedata.mpHistCnt);
+	for (int i = 0; i < n; ++i) {
+		CString title = savedata.mpHistName[i];
+		if (title.IsEmpty())
+			title = savedata.mpHistPath[i];
+		const int row = m_histList.InsertItem(i, title);
+		m_histList.SetItemData(row, (DWORD_PTR)i);
+	}
+	LibFitNoHScroll(&m_histList);
+	m_histList.Invalidate(FALSE);
+	m_histBuilt = 1;
+}
+
+static int MpFindTrackInPlaylistDat(int plIdx, LPCTSTR wantPath)
+{
+	if (!wantPath || !wantPath[0]) return -1;
+	const CString want = NormalizePlaylistPath(wantPath);
+	if (want.IsEmpty()) return -1;
+	TCHAR tmp[1024] = { 0 };
+	_tgetcwd(tmp, 1000);
+	_tchdir(karento2);
+	CString fname;
+	if (plIdx == 0) fname = _T("playlistu.dat");
+	else fname.Format(_T("playlistu%d.dat"), plIdx);
+	CFile f;
+	if (!f.Open(fname, CFile::modeRead | CFile::shareDenyWrite, NULL)) {
+		_tchdir(tmp);
+		return -1;
+	}
+	int cnt = 0;
+	if (f.Read(&cnt, 4) != 4 || cnt < 0 || cnt > 100000) {
+		f.Close(); _tchdir(tmp); return -1;
+	}
+	int skip = 0;
+	for (int i = 0; i < 9; ++i) {
+		if (f.Read(&skip, 4) != 4) { f.Close(); _tchdir(tmp); return -1; }
+	}
+	playlistdata pld;
+	int found = -1;
+	for (int i = 0; i < cnt; ++i) {
+		if (f.Read(&pld, sizeof(pld)) != sizeof(pld)) break;
+		if (NormalizePlaylistPath(pld.fol).CompareNoCase(want) == 0) {
+			found = i;
+			break;
+		}
+	}
+	f.Close();
+	_tchdir(tmp);
+	return found;
+}
+
+void CMediaPlayerDlg::HistPlayIndex(int histIdx)
+{
+	if (histIdx < 0 || histIdx >= 8 || histIdx >= savedata.mpHistCnt) return;
+	const CString path = savedata.mpHistPath[histIdx];
+	if (path.IsEmpty() || !pl) return;
+
+	// 1) current playlist
+	int idx = pl->FindByPath(path);
+	if (idx >= 0) {
+		MP_PlayIndex(idx);
+		return;
+	}
+
+	// 2) scan all playlist files; switch + play when found
+	const int plCnt = pl->GetPlaylistFileCount();
+	for (int pi = 0; pi < plCnt; ++pi) {
+		if (pi == savedata.playlistnum) continue;
+		const int ti = MpFindTrackInPlaylistDat(pi, path);
+		if (ti < 0) continue;
+		if (::IsWindow(m_plsel.GetSafeHwnd()))
+			m_plsel.SetCurSel(pi);
+		OnPlSel();
+		idx = pl->FindByPath(path);
+		if (idx >= 0) {
+			MP_PlayIndex(idx);
+			return;
+		}
+		break;
+	}
+
+	// 3) not in any PL -> append to current PL end and play
+	CString leaf = path;
+	const int slash = max(leaf.ReverseFind(_T('\\')), leaf.ReverseFind(_T('/')));
+	if (slash >= 0 && slash + 1 < leaf.GetLength())
+		leaf = leaf.Mid(slash + 1);
+	CString disp = savedata.mpHistName[histIdx];
+	if (disp.IsEmpty()) disp = leaf;
+	pl->Fol(path);
+	idx = pl->FindByPath(path);
+	if (idx < 0) {
+		pl->Add(disp, 0, 0, 0, _T(""), _T(""), path, 0, 0);
+		idx = pl->FindByPath(path);
+		if (idx < 0 && pl->playcnt > 0)
+			idx = pl->playcnt - 1;
+	}
+	RefreshList(TRUE);
+	UpdateEmptyStateUi();
+	if (idx >= 0)
+		MP_PlayIndex(idx);
+}
+
+void CMediaPlayerDlg::OnHistDblClk(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	LPNMITEMACTIVATE p = reinterpret_cast<LPNMITEMACTIVATE>(pNMHDR);
+	if (!p || p->iItem < 0) return;
+	HistPlayIndex((int)m_histList.GetItemData(p->iItem));
+}
+
+void CMediaPlayerDlg::OnEmptyAddFolder()
+{
+	OnAddFolder();
+	UpdateEmptyStateUi();
+}
+
+void CMediaPlayerDlg::OnEmptyM3u()
+{
+	OnM3uImport();
+	UpdateEmptyStateUi();
+}
+
+void CMediaPlayerDlg::UpdateEmptyStateUi()
+{
+	const BOOL emptyPl = (pl == NULL || pl->pc == NULL || pl->playcnt <= 0);
+	if (m_emptyFolder.GetSafeHwnd())
+		m_emptyFolder.ShowWindow(emptyPl ? SW_SHOW : SW_HIDE);
+	if (m_emptyM3u.GetSafeHwnd())
+		m_emptyM3u.ShowWindow(emptyPl ? SW_SHOW : SW_HIDE);
+}
+
+void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
+{
+	if (m_bannerRect.PtInRect(point)) {
+		CMenu menu;
+		if (menu.CreatePopupMenu()) {
+			const UINT f0 = (savedata.mpSpeanaStyle == 0) ? MF_CHECKED : 0;
+			const UINT f1 = (savedata.mpSpeanaStyle == 1) ? MF_CHECKED : 0;
+			const UINT f2 = (savedata.mpSpeanaStyle == 2) ? MF_CHECKED : 0;
+			menu.AppendMenu(MF_STRING | f0, ID_MP_SPEANA_BAR,
+				LL14(L"スペアナ: バー", L"Spectrum: Bars", L"Spectre: Barres", L"Spettro: Barre", L"Espectro: Barras", L"스펙트럼: 막대", L"频谱: 柱状", L"الطيف: أشرطة", L"Спектр: Столбцы", L"Spektrum: Balken", L"Espectro: Barras", L"Spectrum: Balken", L"Widmo: Slupki", L"Spektrum: Cubuk"));
+			menu.AppendMenu(MF_STRING | f1, ID_MP_SPEANA_MIRROR,
+				LL14(L"スペアナ: ミラー", L"Spectrum: Mirror", L"Spectre: Miroir", L"Spettro: Specchio", L"Espectro: Espejo", L"스펙트럼: 미러", L"频谱: 镜像", L"الطيف: مرآة", L"Спектр: Зеркало", L"Spektrum: Spiegel", L"Espectro: Espelho", L"Spectrum: Spiegel", L"Widmo: Lustro", L"Spektrum: Ayna"));
+			menu.AppendMenu(MF_STRING | f2, ID_MP_SPEANA_WAVE,
+				LL14(L"スペアナ: 波形", L"Spectrum: Waveform", L"Spectre: Forme d'onde", L"Spettro: Forma d'onda", L"Espectro: Forma de onda", L"스펙트럼: 파형", L"频谱: 波形", L"الطيف: موجة", L"Спектр: Волна", L"Spektrum: Wellenform", L"Espectro: Forma de onda", L"Spectrum: Golfvorm", L"Widmo: Fala", L"Spektrum: Dalga"));
+			CPoint sp = point;
+			ClientToScreen(&sp);
+			menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, sp.x, sp.y, this);
+		}
+		return;
+	}
+	CDialog::OnRButtonUp(nFlags, point);
+}
+
+void CMediaPlayerDlg::OnSpeanaStyleBar()
+{
+	savedata.mpSpeanaStyle = 0;
+	MpPersistSavedataQuick();
+	InvalidateRect(&m_bannerRect, FALSE);
+}
+
+void CMediaPlayerDlg::OnSpeanaStyleMirror()
+{
+	savedata.mpSpeanaStyle = 1;
+	MpPersistSavedataQuick();
+	InvalidateRect(&m_bannerRect, FALSE);
+}
+
+void CMediaPlayerDlg::OnSpeanaStyleWave()
+{
+	savedata.mpSpeanaStyle = 2;
+	MpPersistSavedataQuick();
+	InvalidateRect(&m_bannerRect, FALSE);
+}
+
+static CString MpCompactRate(int hz)
+{
+	CString s;
+	if (hz <= 0) return s;
+	if (hz % 1000 == 0)
+		s.Format(L"%dkHz", hz / 1000);
+	else if (hz % 100 == 0)
+		s.Format(L"%.1fkHz", hz / 1000.0);
+	else
+		s.Format(L"%dHz", hz);
+	return s;
+}
+
+static CString MpCompactAudioPiece(int rate, int ch, int bits)
+{
+	CString out;
+	const int b = abs(bits);
+	const CString rateS = MpCompactRate(rate);
+	const CString chS = ChannelLayoutLabel(ch);
+	if (b > 0 && !rateS.IsEmpty())
+		out.Format(L"%dbit · %s · %s", b, (LPCTSTR)rateS, (LPCTSTR)chS);
+	else if (!rateS.IsEmpty())
+		out.Format(L"%s · %s", (LPCTSTR)rateS, (LPCTSTR)chS);
+	return out;
+}
+
+CString CMediaPlayerDlg::MpTechFormatLine() const
+{
+	CString fmt;
+	if (::IsWindow(m_os.GetSafeHwnd()))
+		m_os.GetWindowText(fmt);
+	fmt.Trim();
+
+	CString audio = MpCompactAudioPiece(wavbit_sample_Hz, wavchannel, wavsam_depth);
+	if (g_pcm_upscale_active) {
+		const CString dst = MpCompactAudioPiece(g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
+		if (!dst.IsEmpty() && dst.CompareNoCase(audio) != 0) {
+			CString both;
+			both.Format(L"%s  %s  %s", (LPCTSTR)audio, AudioUpscaleFlowSymbol(), (LPCTSTR)dst);
+			audio = both;
+		}
+	}
+
+	CString rg;
+	if (savedata.pro_rg_mode == 1)
+		rg = LL14(L"音量補正:曲", L"ReplayGain:Track", L"ReplayGain:Piste", L"ReplayGain:Traccia", L"ReplayGain:Pista", L"재생볼륨:곡", L"音量补偿:曲", L"ReplayGain:Track", L"ReplayGain:Трек", L"ReplayGain:Titel", L"ReplayGain:Faixa", L"ReplayGain:Track", L"ReplayGain:Utwor", L"ReplayGain:Parca");
+	else if (savedata.pro_rg_mode == 2)
+		rg = LL14(L"音量補正:アルバム", L"ReplayGain:Album", L"ReplayGain:Album", L"ReplayGain:Album", L"ReplayGain:Album", L"재생볼륨:앨범", L"音量补偿:专辑", L"ReplayGain:Album", L"ReplayGain:Альбом", L"ReplayGain:Album", L"ReplayGain:Album", L"ReplayGain:Album", L"ReplayGain:Album", L"ReplayGain:Album");
+	else
+		rg = LL14(L"音量補正:オフ", L"ReplayGain:Off", L"ReplayGain:Off", L"ReplayGain:Off", L"ReplayGain:Off", L"재생볼륨:끔", L"音量补偿:关", L"ReplayGain:Off", L"ReplayGain:Выкл", L"ReplayGain:Aus", L"ReplayGain:Off", L"ReplayGain:Uit", L"ReplayGain:Wyl", L"ReplayGain:Kapali");
+
+	CString line;
+	if (!fmt.IsEmpty() && !audio.IsEmpty())
+		line.Format(L"%s · %s · %s", (LPCTSTR)fmt, (LPCTSTR)audio, (LPCTSTR)rg);
+	else if (!fmt.IsEmpty())
+		line.Format(L"%s · %s", (LPCTSTR)fmt, (LPCTSTR)rg);
+	else if (!audio.IsEmpty())
+		line.Format(L"%s · %s", (LPCTSTR)audio, (LPCTSTR)rg);
+	else
+		line = rg;
+
+	extern int kbps;
+	if (kbps > 0) {
+		CString bp;
+		bp.Format(L"%dkbps", kbps);
+		line += L" · ";
+		line += bp;
+	}
+	return line;
+}
+
+void CMediaPlayerDlg::OnCheatSheetBtn()
+{
+	ShowCheatSheet();
+}
+
+void CMediaPlayerDlg::ShowCheatSheet()
+{
+	CMpCheatSheetDlg dlg(this);
+	dlg.DoModal();
+}
+
+IMPLEMENT_DYNAMIC(CMpCheatSheetDlg, CDialog)
+
+CMpCheatSheetDlg::CMpCheatSheetDlg(CWnd* pParent)
+	: CDialog(CMpCheatSheetDlg::IDD, pParent)
+{
+}
+
+BEGIN_MESSAGE_MAP(CMpCheatSheetDlg, CDialog)
+END_MESSAGE_MAP()
+
+BOOL CMpCheatSheetDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetWindowText(LL14(L"キーボードショートカット", L"Keyboard shortcuts", L"Raccourcis clavier", L"Scorciatoie da tastiera", L"Atajos de teclado", L"키보드 단축키", L"键盘快捷键", L"اختصارات لوحة المفاتيح", L"Горячие клавиши", L"Tastenkuerzel", L"Atalhos de teclado", L"Sneltoetsen", L"Skroty klawiszowe", L"Klavye kisayollari"));
+	CString body = LL14(
+		L"Space      Play / Pause\r\n"
+		L"Left/Right Seek\r\n"
+		L"Home/End   Track start / near end\r\n"
+		L"PgUp/PgDn  Prev / Next track\r\n"
+		L"Enter      Next find hit (search box)\r\n"
+		L"?          This cheat sheet\r\n"
+		L"\r\n"
+		L"Right-click on banner\r\n"
+		L"  -> Spectrum style (bars / mirror / wave)\r\n"
+		L"\r\n"
+		L"Lib / Hist on the left\r\n"
+		L"  -> Library / play-history drawer\r\n"
+		L"Double-click history to play\r\n"
+		L"(switches playlist when found)",
+		L"Space      Play / Pause\r\n"
+		L"Left/Right Seek\r\n"
+		L"Home/End   Track start / near end\r\n"
+		L"PgUp/PgDn  Prev / Next track\r\n"
+		L"Enter      Next find hit (search box)\r\n"
+		L"?          This cheat sheet\r\n"
+		L"\r\n"
+		L"Right-click on banner\r\n"
+		L"  -> Spectrum style (bars / mirror / wave)\r\n"
+		L"\r\n"
+		L"Lib / Hist on the left\r\n"
+		L"  -> Library / play-history drawer\r\n"
+		L"Double-click history to play\r\n"
+		L"(switches playlist when found)",
+		L"Space      Lecture / Pause\r\nLeft/Right Seek\r\n?          Cette aide",
+		L"Space      Play / Pausa\r\nLeft/Right Seek\r\n?          Questa guida",
+		L"Space      Reproducir / Pausa\r\nLeft/Right Seek\r\n?          Esta guia",
+		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
+		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
+		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
+		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
+		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
+		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
+		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
+		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
+		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list");
+	// Prefer Japanese body when lang=0; rebuild JA strings (LL14 arg0)
+	if (savedata.lang == 0) {
+		body =
+			L"Space      再生 / 一時停止\r\n"
+			L"← / →     シーク\r\n"
+			L"Home/End   曲頭 / 曲末付近\r\n"
+			L"PgUp/PgDn  前の曲 / 次の曲\r\n"
+			L"Enter      検索欄で次候補\r\n"
+			L"?          この一覧\r\n"
+			L"\r\n"
+			L"バナー上で右クリック\r\n"
+			L"  → スペアナ表示(バー / ミラー / 波形)\r\n"
+			L"\r\n"
+			L"左の Lib / Hist\r\n"
+			L"  → ライブラリ / 再生履歴ドロワー\r\n"
+			L"履歴をダブルクリックで再生\r\n"
+			L"（見つかれば該当PLへ切替）";
+	}
+	if (CWnd* p = GetDlgItem(IDC_MP_CHEAT_TEXT))
+		p->SetWindowText(body);
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(L"OK");
+	return TRUE;
+}
+
 // pc[] を src→dst へ移動(リスト内ドラッグ移動)。再生インデックスも追従。
 static void MP_MovePlaylistItem(int src, int dst)
 {
@@ -4553,7 +5748,7 @@ void CMediaPlayerDlg::OnMouseMove(UINT nFlags, CPoint point)
 	// バナー上ホバーで og と同じジャケットアニメを発火(ジャケ分離中は無効)
 	g_mpBannerHover = (!g_mpSideJacket && m_bannerRect.PtInRect(point)) ? 1 : 0;
 	// ジャケ拡大できる領域(ミニジャケ or バナー内蔵ジャケ)では手のひらカーソル
-	if (!m_dragging) {
+	if (!m_dragging && !m_libDrag) {
 		BOOL hasJacket = (og && og->jx > 0 && !og->img.IsNull());
 		const bool overJacket = hasJacket && (
 			(g_mpSideJacket && !m_jacketRect.IsRectEmpty() && m_jacketRect.PtInRect(point)) ||
@@ -4567,11 +5762,34 @@ void CMediaPlayerDlg::OnMouseMove(UINT nFlags, CPoint point)
 			ImageList_DragMove(point.x, point.y);
 		}
 	}
+	if (m_libDrag) {
+		CPoint sp = point; ClientToScreen(&sp);
+		if (m_hLibDragImage)
+			ImageList_DragMove(sp.x, sp.y);
+		const BOOL overPl = LibDropHitTestPlaylist(point);
+		::SetCursor(::LoadCursor(NULL, overPl ? IDC_HAND : IDC_NO));
+	}
 	CCustomBlurDialogExBase::OnMouseMove(nFlags, point);
 }
 
 void CMediaPlayerDlg::OnLButtonUp(UINT nFlags, CPoint point)
 {
+	if (m_libDrag) {
+		m_libDrag = 0;
+		ReleaseCapture();
+		if (m_hLibDragImage) {
+			ImageList_DragLeave(::GetDesktopWindow());
+			ImageList_EndDrag();
+			ImageList_Destroy(m_hLibDragImage);
+			m_hLibDragImage = NULL;
+		}
+		const CString path = m_libDragFolder;
+		m_libDragFolder.Empty();
+		if (!path.IsEmpty() && LibDropHitTestPlaylist(point))
+			LibAddPath(path, TRUE);
+		CDialog::OnLButtonUp(nFlags, point);
+		return;
+	}
 	if (m_dragging) {
 		m_dragging = 0;
 		ReleaseCapture();

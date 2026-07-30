@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -769,6 +769,15 @@ BEGIN
     PUSHBUTTON      "閉じる",IDC_MPP_CLOSE,299,284,68,34
 END
 
+IDD_MP_CHEATSHEET DIALOGEX 0, 0, 258, 181
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "キーボードショートカット"
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    EDITTEXT        IDC_MP_CHEAT_TEXT,8,8,249,155,ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | NOT WS_TABSTOP
+    DEFPUSHBUTTON   "OK",IDOK,208,166,50,14
+END
+
 IDD_PIANOROLL_TUNE DIALOGEX 0, 0, 980, 440
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "検出パラメータ"
@@ -1161,7 +1170,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,536
+ FILEVERSION 0,9,1,541
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1179,10 +1188,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.07.29"
-            VALUE "FileVersion", "0.9.1.536"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.07.30"
+            VALUE "FileVersion", "0.9.1.541"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.07.29"
+            VALUE "LegalCopyright", "Copyright (C) 2026.07.30"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -1472,6 +1481,10 @@ BEGIN
     BEGIN
     END
 
+    IDD_MP_CHEATSHEET, DIALOG
+    BEGIN
+    END
+
     IDD_SYOSAI, DIALOG
     BEGIN
         LEFTMARGIN, 7
@@ -1578,6 +1591,10 @@ BEGIN
     END
 
     IDD_ANALYZER, DIALOG
+    BEGIN
+    END
+
+    IDD_PROTOOLS, DIALOG
     BEGIN
     END
 END
@@ -1695,15 +1712,15 @@ BEGIN
             MENUITEM "40",                          ID_ETC40
         END
         MENUITEM SEPARATOR
-        MENUITEM "再生",                            ID_DOUGA_PLAY
-        MENUITEM "停止",                            ID_DOUGA_STOP
-        MENUITEM "前へ",                            ID_DOUGA_PREV
-        MENUITEM "次へ",                            ID_DOUGA_NEXT
-        MENUITEM "戻す",                            ID_DOUGA_REW
-        MENUITEM "進める",                           ID_DOUGA_FF
-        MENUITEM "消音",                            ID_DOUGA_MUTE
-        MENUITEM "フルスクリーン",                      ID_DOUGA_FS
-        MENUITEM "フェードアウト",                      ID_DOUGA_FADE
+        MENUITEM "再生",                          ID_DOUGA_PLAY
+        MENUITEM "停止",                          ID_DOUGA_STOP
+        MENUITEM "前へ",                          ID_DOUGA_PREV
+        MENUITEM "次へ",                          ID_DOUGA_NEXT
+        MENUITEM "戻す",                          ID_DOUGA_REW
+        MENUITEM "進める",                         ID_DOUGA_FF
+        MENUITEM "消音",                          ID_DOUGA_MUTE
+        MENUITEM "フルスクリーン",                     ID_DOUGA_FS
+        MENUITEM "フェードアウト",                     ID_DOUGA_FADE
         MENUITEM SEPARATOR
         MENUITEM "上下左右キー音量とシークが出来ます。",          ID__32783
         MENUITEM "ダブルクリックでフルスクリーンです。",          ID__32784
@@ -1830,15 +1847,15 @@ BEGIN
             MENUITEM "40",                          ID_ETC40
         END
         MENUITEM SEPARATOR
-        MENUITEM "再生",                            ID_DOUGA_PLAY
-        MENUITEM "停止",                            ID_DOUGA_STOP
-        MENUITEM "前へ",                            ID_DOUGA_PREV
-        MENUITEM "次へ",                            ID_DOUGA_NEXT
-        MENUITEM "戻す",                            ID_DOUGA_REW
-        MENUITEM "進める",                           ID_DOUGA_FF
-        MENUITEM "消音",                            ID_DOUGA_MUTE
-        MENUITEM "フルスクリーン",                      ID_DOUGA_FS
-        MENUITEM "フェードアウト",                      ID_DOUGA_FADE
+        MENUITEM "再生",                          ID_DOUGA_PLAY
+        MENUITEM "停止",                          ID_DOUGA_STOP
+        MENUITEM "前へ",                          ID_DOUGA_PREV
+        MENUITEM "次へ",                          ID_DOUGA_NEXT
+        MENUITEM "戻す",                          ID_DOUGA_REW
+        MENUITEM "進める",                         ID_DOUGA_FF
+        MENUITEM "消音",                          ID_DOUGA_MUTE
+        MENUITEM "フルスクリーン",                     ID_DOUGA_FS
+        MENUITEM "フェードアウト",                     ID_DOUGA_FADE
         MENUITEM SEPARATOR
         MENUITEM "上下左右キー音量とシークが出来ます。",          ID__32783
         MENUITEM "ダブルクリックでフルスクリーンです。",          ID__32784
@@ -1947,6 +1964,11 @@ BEGIN
 END
 
 IDD_MEDIAPLAYER AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_MP_CHEATSHEET AFX_DIALOG_LAYOUT
 BEGIN
     0
 END
