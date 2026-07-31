@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // メディアプレイヤーモード専用: 演奏時間ベースのプロンプト実行エンジン
 // 形式: @<cmd><time>[-<endTime>][<val>[-<endVal>]]
@@ -14,6 +14,7 @@ struct MpPromptBackup {
 	int eqDelay;
 	int eqEnv;     // eqsoundenv 0..100
 	int eqEffect;  // eqsoundeffect 0..100
+	int eqSoundEq; // eqsoundeq プリセット番号
 };
 
 void MpPromptBackupCapture(MpPromptBackup& out);

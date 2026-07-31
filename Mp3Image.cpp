@@ -375,6 +375,12 @@ void CMp3Image::Load(CString s)
 	GetEnvironmentVariable(_T("temp"), env, sizeof(env));
 	s1 = env; s1 += "\\";
 	s2 = s1;
+	static volatile LONG s_miJacketTempSeq = 0;
+	const LONG jkSeq = InterlockedIncrement(&s_miJacketTempSeq);
+	CString jPng, jJpg, jBmp;
+	jPng.Format(_T("jk%x_%lx.png"), (unsigned)::GetCurrentProcessId(), (long)jkSeq);
+	jJpg.Format(_T("jk%x_%lx.jpg"), (unsigned)::GetCurrentProcessId(), (long)jkSeq);
+	jBmp.Format(_T("jk%x_%lx.bmp"), (unsigned)::GetCurrentProcessId(), (long)jkSeq);
 
 	char* cBit;
 	HGLOBAL hG = NULL;
@@ -412,9 +418,9 @@ void CMp3Image::Load(CString s)
 		enc = bufimage[i + 10];
 		i += (4 + 4 + 3 + 6);
 		int flg = 0;
-		if (bufimage[i] == 'p') { s1 += _T("111.png"); }
-		else { s1 += _T("111.jpg"); }
-		s2 += _T("111.bmp");
+		if (bufimage[i] == 'p') { s1 += jPng; }
+		else { s1 += jJpg; }
+		s2 += jBmp;
 		for (; i < 2000; i++) {
 			if (bufimage[i] == 0)
 				break;
@@ -471,12 +477,12 @@ void CMp3Image::Load(CString s)
 
 		i += 16;
 		if (bufimage[i + 1] == 0x50 && bufimage[i + 2] == 0x4e && bufimage[i + 3] == 0x47) {
-			s1 += _T("111.png");
+			s1 += jPng;
 		}
 		else {
-			s1 += _T("111.jpg");
+			s1 += jJpg;
 		}
-		s2 += _T("111.bmp");
+		s2 += jBmp;
 	}
 	else if (s.Right(3) == "ogg" || s.Right(6) == ".qull3") {
 		CString cc;
@@ -495,29 +501,42 @@ void CMp3Image::Load(CString s)
 				char* buf = vf.vc->user_comments[iii];
 				buf += 23;//Base64
 				int len;
-				char* decode = b64_decode(buf, strlen(buf), len);
+				char* decode = b64_decode(buf, (int)strlen(buf), len);
+				char* decodeFree = decode;
+				const int picHdr = 16 + 16 + 9;
+				if (!decode || len <= picHdr + 3) {
+					if (decodeFree) free(decodeFree);
+					continue;
+				}
 				if (decode[16 + 16 + 10] == 0x50 && decode[1 + 16 + 16 + 10] == 0x4e && decode[2 + 16 + 16 + 10] == 0x47) {
-					s1 += _T("111.png");
+					s1 += jPng;
 				}
 				else {
-					s1 += _T("111.jpg");
+					s1 += jJpg;
 					decode += 1;
+					len -= 1;
 				}
-				s2 += _T("111.bmp");
-				for (int j = 0; j < len; j++) {
+				s2 += jBmp;
+				if (len <= picHdr) {
+					free(decodeFree);
+					continue;
+				}
+				int payload = len - picHdr;
+				for (int j = 0; j < payload; j++) {
 					if (*(decode + len - j - 1) != 0) {
-						len -= j;
+						payload -= j;
 						break;
 					}
 				}
-				hG = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, len);
-				memcpy(hG, decode + 16 + 16 + 9, len);
+				if (payload <= 0) {
+					free(decodeFree);
+					continue;
+				}
+				hG = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, payload);
+				if (!hG) { free(decodeFree); continue; }
+				memcpy(hG, decode + picHdr, payload);
 				CreateStreamOnHGlobal(hG, TRUE, &stream);
-				//CFile fff; if (fff.Open(s1, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
-				//	fff.Write(decode + 16 + 16 + 9, len-16-16-10);
-				//	fff.Close();
-				//}
-				free(decode);
+				free(decodeFree);
 				break;
 			}
 		}
@@ -539,12 +558,12 @@ void CMp3Image::Load(CString s)
 		}
 		for (i = 0; i < 0x300000; i++) {// 00 06 5D 6A 64 61 74 61
 			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'j' && bufimage[i + 7] == 'p' && bufimage[i + 8] == 'e' && bufimage[i + 9] == 'g') {
-				s1 += _T("111.jpg");
+				s1 += jJpg;
 				i++;
 				break;
 			}
 			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'p' && bufimage[i + 7] == 'n' && bufimage[i + 8] == 'g') {
-				s1 += _T("111.png");
+				s1 += jPng;
 				break;
 			}
 		}
@@ -562,7 +581,7 @@ void CMp3Image::Load(CString s)
 		size |= (UINT)bufimage[i + 3];
 
 		i += 4;
-		s2 += _T("111.bmp");
+		s2 += jBmp;
 	}
 	else if (s.Right(3) == "wav") {
 		const int kScan = 512 * 1024;
@@ -582,7 +601,7 @@ void CMp3Image::Load(CString s)
 			if (!FindId3ApicInBuffer(bufimage, regionLen, off, imgPos, size))
 				return false;
 			i = imgPos;
-			s2 += _T("111.bmp");
+			s2 += jBmp;
 			return true;
 		};
 		ok = tryRegion(0);
@@ -614,7 +633,7 @@ void CMp3Image::Load(CString s)
 			}
 		}
 		else if (s2.IsEmpty()) {
-			s2 += _T("111.bmp");
+			s2 += jBmp;
 		}
 	}
 	else if (s.Right(3) == "dsf" || s.Right(3) == "dff" || s.Right(3) == "wsd") {
@@ -637,7 +656,7 @@ void CMp3Image::Load(CString s)
 			if (!FindId3ApicInBuffer(bufimage, scanLen, off, imgPos, size))
 				return false;
 			i = imgPos;
-			s2 += _T("111.bmp");
+			s2 += jBmp;
 			return true;
 		};
 		if (po > 0 && po < fLen)

@@ -1291,6 +1291,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
 	ON_MESSAGE(WM_OGG_DEFERRED_HEAVY_INIT, OnDeferredHeavyStartup)
 	ON_MESSAGE(WM_OGG_ENTER_MP_MODE, &COggDlg::OnEnterMpModeMsg)
+	ON_MESSAGE(WM_OGG_TOGGLE_SUBUI, &COggDlg::OnToggleSubUiMsg)
 	ON_MESSAGE(WM_PLAYBACK_AUTO_STOPPED, OnPlaybackAutoStopped)
 	ON_WM_COPYDATA()
 	ON_WM_KEYDOWN()
@@ -16573,11 +16574,17 @@ BOOL COggDlg::DestroyWindow()
 	// 再生詳細はモードレス。親(mp/og)破棄より先に閉じる
 	CloseProToolsIfOpen();
 	// メディアプレイヤー画面(オーナー無しトップレベル)を後始末
-	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
-		mp->SavePos();
-		mp->DestroyWindow();
+	{
+		CMediaPlayerDlg* dyingMp = mp;
+		mp = NULL;
+		if (dyingMp) {
+			if (::IsWindow(dyingMp->GetSafeHwnd())) {
+				dyingMp->SavePos();
+				dyingMp->DestroyWindow();
+			}
+			delete dyingMp;
+		}
 	}
-	if (mp) { delete mp; mp = NULL; }
 	if (pl && plw) {
 		killw1 = 0;
 		pl->DestroyWindow();
@@ -17887,7 +17894,8 @@ void COggDlg::timerp()
 			// 新フレームができた時(=ms2レート)だけ mp のバナーを再描画させる。
 			// mp の OnPaint が dc を Blit し pending を解除する。これで mp 側の Blit も
 			// ms2 レートになり(60fps常時 Blit を避け)ファルコム特化型と同等の負荷になる。
-			if (mp) mp->InvalidateRect(&mp->m_bannerRect, FALSE);
+			if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->InvalidateRect(&mp->m_bannerRect, FALSE);
 		}
 		InterlockedExchange(&g_gdiPaintPending, 1);
 	}
@@ -18735,12 +18743,14 @@ UINT TheadLoop(LPVOID)
 		if (++infoScrollDiv >= 2) {
 			infoScrollDiv = 0;
 			extern CMediaPlayerDlg* mp;
-			if (mp) {
-				HWND hmp = mp->GetSafeHwnd();
-				if (::IsWindow(hmp) && mp->m_iscActive
-					&& InterlockedCompareExchange(&mp->m_iscScrollPosted, 1, 0) == 0) {
+			// mp 破棄と競合しうるため、ポインタをスナップショットしてから HWND のみ検証する
+			CMediaPlayerDlg* pMp = mp;
+			if (pMp) {
+				HWND hmp = pMp->GetSafeHwnd();
+				if (::IsWindow(hmp) && pMp->m_iscActive
+					&& InterlockedCompareExchange(&pMp->m_iscScrollPosted, 1, 0) == 0) {
 					if (!::PostMessage(hmp, WM_MP_INFO_SCROLL, 0, 0))
-						InterlockedExchange(&mp->m_iscScrollPosted, 0);
+						InterlockedExchange(&pMp->m_iscScrollPosted, 0);
 				}
 			}
 		}
@@ -23080,6 +23090,16 @@ LRESULT COggDlg::OnEnterMpModeMsg(WPARAM, LPARAM)
 	return 0;
 }
 
+LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
+{
+	// MP ボタンから PostMessage 経由。Create/Destroy をネストさせない。
+	if (wParam == 1)
+		TogglePianoRoll();
+	else if (wParam == 2)
+		ToggleAnalyzer();
+	return 0;
+}
+
 // 再生スレッド(HandleNotifications)から曲開始時に投げられる。
 // lParam は new された SongParam*。適用後にここで delete する。
 LRESULT COggDlg::OnSongParamRestore(WPARAM, LPARAM lParam)
@@ -23623,6 +23643,13 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 	GetEnvironmentVariable(_T("temp"), env, sizeof(env));
 	s1 = env; s1 += "\\";
 	s2 = s1;
+	// 呼び出しごとに一意な一時名(%TEMP%\\111.* の MPサムネ↔ジャケ窓競合を避ける)
+	static volatile LONG s_jacketTempSeq = 0;
+	const LONG jkSeq = InterlockedIncrement(&s_jacketTempSeq);
+	CString jPng, jJpg, jBmp;
+	jPng.Format(_T("jk%x_%lx.png"), (unsigned)::GetCurrentProcessId(), (long)jkSeq);
+	jJpg.Format(_T("jk%x_%lx.jpg"), (unsigned)::GetCurrentProcessId(), (long)jkSeq);
+	jBmp.Format(_T("jk%x_%lx.bmp"), (unsigned)::GetCurrentProcessId(), (long)jkSeq);
 
 	std::vector<BYTE> bufimage_vec(0x300010, 0);
 	BYTE* bufimage = bufimage_vec.data();
@@ -23662,9 +23689,9 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		enc = bufimage[i + 10];
 		i += (4 + 4 + 3 + 6);
 		int flg = 0;
-		if (bufimage[i] == 'p') { s1 += _T("111.png"); }
-		else { s1 += _T("111.jpg"); }
-		s2 += _T("111.bmp");
+		if (bufimage[i] == 'p') { s1 += jPng; }
+		else { s1 += jJpg; }
+		s2 += jBmp;
 		for (; i < 2000; i++) {
 			if (bufimage[i] == 0)
 				break;
@@ -23721,12 +23748,12 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 
 		i += 16;
 		if (bufimage[i + 1] == 0x50 && bufimage[i + 2] == 0x4e && bufimage[i + 3] == 0x47) {
-			s1 += _T("111.png");
+			s1 += jPng;
 		}
 		else {
-			s1 += _T("111.jpg");
+			s1 += jJpg;
 		}
-		s2 += _T("111.bmp");
+		s2 += jBmp;
 	}
 	else if (s.Right(3) == "ogg" || s.Right(6) == ".qull3") {
 		CString cc;
@@ -23781,22 +23808,38 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 				int len;
 				char* decode = b64_decode(buf, (int)strlen(buf), len);
 				char* decodeFree = decode;
+				const int picHdr = 16 + 16 + 9;
+				if (!decode || len <= picHdr + 3) {
+					if (decodeFree) free(decodeFree);
+					continue;
+				}
 				if (decode[16 + 16 + 10] == 0x50 && decode[1 + 16 + 16 + 10] == 0x4e && decode[2 + 16 + 16 + 10] == 0x47) {
-					s1 += _T("111.png");
+					s1 += jPng;
 				}
 				else {
-					s1 += _T("111.jpg");
+					s1 += jJpg;
 					decode += 1;
+					len -= 1;
 				}
-				s2 += _T("111.bmp");
-				for (int j = 0; j < len; j++) {
+				s2 += jBmp;
+				if (len <= picHdr) {
+					free(decodeFree);
+					continue;
+				}
+				int payload = len - picHdr;
+				for (int j = 0; j < payload; j++) {
 					if (*(decode + len - j - 1) != 0) {
-						len -= j;
+						payload -= j;
 						break;
 					}
 				}
-				hG = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, len);
-				memcpy(hG, decode + 16 + 16 + 9, len);
+				if (payload <= 0) {
+					free(decodeFree);
+					continue;
+				}
+				hG = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, payload);
+				if (!hG) { free(decodeFree); continue; }
+				memcpy(hG, decode + picHdr, payload);
 				CreateStreamOnHGlobal(hG, TRUE, &stream);
 				free(decodeFree);
 				break;
@@ -23823,12 +23866,12 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		}
 		for (i = 0; i < 0x300000; i++) {// 00 06 5D 6A 64 61 74 61
 			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'j' && bufimage[i + 7] == 'p' && bufimage[i + 8] == 'e' && bufimage[i + 9] == 'g') {
-				s1 += _T("111.jpg");
+				s1 += jJpg;
 				i++;
 				break;
 			}
 			if (bufimage[i] == 'i' && bufimage[i + 1] == 'm' && bufimage[i + 2] == 'a' && bufimage[i + 3] == 'g' && bufimage[i + 4] == 'e' && bufimage[i + 5] == '/' && bufimage[i + 6] == 'p' && bufimage[i + 7] == 'n' && bufimage[i + 8] == 'g') {
-				s1 += _T("111.png");
+				s1 += jPng;
 				break;
 			}
 		}
@@ -23847,7 +23890,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		size |= (UINT)bufimage[i + 3];
 
 		i += 4;
-		s2 += _T("111.bmp");
+		s2 += jBmp;
 	}
 	else if (s.Right(3) == "wav") {
 		const int kScan = 512 * 1024;
@@ -23867,7 +23910,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 			if (!FindId3ApicInBuffer(bufimage, regionLen, off, imgPos, size))
 				return false;
 			i = imgPos;
-			s2 += _T("111.bmp");
+			s2 += jBmp;
 			return true;
 		};
 		ok = tryRegion(0);
@@ -23902,7 +23945,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 			return;
 		}
 		if (s2.IsEmpty())
-			s2 += _T("111.bmp");
+			s2 += jBmp;
 	}
 	else if (s.Right(3) == "dsf" || s.Right(3) == "dff" || s.Right(3) == "wsd") {
 		extern ULONGLONG po;
@@ -23913,7 +23956,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 			return;
 		}
 		i = imgPos;
-		s2 += _T("111.bmp");
+		s2 += jBmp;
 	}
 
 	if (!(s.Right(3) == "ogg" || s.Right(6) == ".qull3")) {
@@ -24177,9 +24220,14 @@ void COggDlg::OnStnDblclickStatict()
 }
 void COggDlg::OnBnClickedButton59()
 {
+	if (!m_EqualizerDlg)
+		return;
 	if (!::IsWindow(m_EqualizerDlg->GetSafeHwnd()))
 	{
-		m_EqualizerDlg->Create(IDD_EQUALIZER, this);
+		if (!m_EqualizerDlg->Create(IDD_EQUALIZER, this)) {
+			savedata.eqwindow = 0;
+			return;
+		}
 		savedata.eqwindow = 1;
 		m_EqualizerDlg->ShowWindow(SW_SHOW);
 		m_EqualizerDlg->SetFocus();
@@ -24192,9 +24240,14 @@ void COggDlg::OnBnClickedButton59()
 
 void COggDlg::TogglePianoRoll()
 {
+	if (!m_PianoRollDlg)
+		return;
 	if (!::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
 	{
-		m_PianoRollDlg->Create(IDD_PIANOROLL, this);
+		if (!m_PianoRollDlg->Create(IDD_PIANOROLL, this)) {
+			savedata.pianorollwindow = 0;
+			return;
+		}
 		savedata.pianorollwindow = 1;
 	}
 	else {
@@ -24211,6 +24264,8 @@ void COggDlg::TogglePianoRoll()
 
 void COggDlg::ToggleAnalyzer()
 {
+	if (!m_AnalyzerDlg)
+		return;
 	if (!::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
 	{
 		if (!m_AnalyzerDlg->Create(IDD_ANALYZER, this)) {
@@ -24259,6 +24314,7 @@ void COggDlg::FeedPianoRoll(const void* pData, int bytes)
 		return;
 	if (!m_dsb)
 		return;
+	if (!m_PianoRollDlg) return;
 	const bool pianoOpen = ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) != FALSE;
 	if (!pianoOpen)
 		return;

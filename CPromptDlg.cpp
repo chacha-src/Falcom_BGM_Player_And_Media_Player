@@ -83,6 +83,10 @@ static CString MpPromptLegendText()
 		L"  E=環境番号(0〜100, 0=なし)  F=環境のかかり具合(0〜100%)\r\n"
 		L"  (互換: 小文字 s も立体。sb/sl 演出は2文字。小文字 e/f は周波数帯)\r\n"
 		L"【効果】 r=リバーブ  c=コーラス  y=ディレイ\r\n"
+		L"  ※0=オフ / 1〜100=通常(強さ) / 101〜200=別モード(強さ=値-100)\r\n"
+		L"    r:通常リバーブ / パンリバーブ\r\n"
+		L"    c:通常コーラス / コーラスディストーション\r\n"
+		L"    y:通常ディレイ / マルチディレイ(ピンポン)\r\n"
 		L"【演出】 sb=しょんぼり  br=明るめ  sl=スロー  fa=ファスト (値不要)\r\n"
 		L"【例1】 @p50-1:20[100-120]  … 50秒〜1:20でピッチ100→120%\r\n"
 		L"【例2】 @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
@@ -107,6 +111,10 @@ static CString MpPromptLegendText()
 		L"  E=Environment no.(0-100, 0=none)  F=Environment amount(0-100%)\r\n"
 		L"  (compat: lowercase s is also Stereo. sb/sl presets are 2 letters. lowercase e/f are bands)\r\n"
 		L"[FX] r=Reverb  c=Chorus  y=Delay\r\n"
+		L"  *0=off / 1-100=normal(amount) / 101-200=alt mode(amount=value-100)\r\n"
+		L"    r:reverb / pan-reverb\r\n"
+		L"    c:chorus / chorus-distortion\r\n"
+		L"    y:delay / multi-delay(ping-pong)\r\n"
 		L"[Presets] sb=melancholy  br=bright  sl=slow  fa=fast (no value)\r\n"
 		L"[Ex1] @p50-1:20[100-120]  … pitch 100→120% from 50s to 1:20\r\n"
 		L"[Ex2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
@@ -715,6 +723,8 @@ BOOL CPromptDlg::OnInitDialog()
 	// 立てないと既定アイコンが残る（イコライザーは rc の DS_MODALFRAME で消えている）。
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 	m_legend.SetWindowText(MpPromptLegendText());
+	if (m_edit.GetSafeHwnd())
+		m_edit.SetLimitText((UINT)kMaxChars);
 	SetDlgItemText(IDC_MPP_ANALYZE, LL14(L"解析", L"Analyze", L"Analyser", L"Analizza", L"Analizar", L"분석", L"分析", L"تحليل", L"Анализ", L"Analysieren", L"Analisar", L"Analyseren", L"Analizuj", L"Analiz"));
 	SetDlgItemText(IDC_MPP_RUN, LL14(L"実行", L"Run", L"Executer", L"Esegui", L"Ejecutar", L"실행", L"执行", L"تشغيل", L"Запуск", L"Ausfuehren", L"Executar", L"Uitvoeren", L"Uruchom", L"Calistir"));
 	SetDlgItemText(IDC_MPP_STOP, LL14(L"停止", L"Stop", L"Arret", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stopp", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
@@ -898,7 +908,9 @@ LRESULT CPromptDlg::OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam)
 
 void CPromptDlg::LoadTextFromSavedata()
 {
-	if (savedata.mpPromptText[0])
+	if (savedata.mpPromptTextLong[0])
+		SetDlgItemText(IDC_MPP_TEXT, savedata.mpPromptTextLong);
+	else if (savedata.mpPromptText[0])
 		SetDlgItemText(IDC_MPP_TEXT, savedata.mpPromptText);
 }
 
@@ -908,6 +920,9 @@ void CPromptDlg::SaveTextToSavedata()
 	GetDlgItemText(IDC_MPP_TEXT, s);
 	if (s.GetLength() > kMaxChars)
 		s = s.Left(kMaxChars);
+	_tcsncpy(savedata.mpPromptTextLong, s, _countof(savedata.mpPromptTextLong) - 1);
+	savedata.mpPromptTextLong[_countof(savedata.mpPromptTextLong) - 1] = 0;
+	// 互換: 先頭2000文字を旧バッファにも残す
 	_tcsncpy(savedata.mpPromptText, s, _countof(savedata.mpPromptText) - 1);
 	savedata.mpPromptText[_countof(savedata.mpPromptText) - 1] = 0;
 }
@@ -1181,6 +1196,9 @@ void MpShowPromptDialog(CWnd* pParent)
 		g_promptDlg->SetForegroundWindow();
 		return;
 	}
+	// 破棄中の残骸ポインタをクリアしてから新規生成
+	if (g_promptDlg && !::IsWindow(g_promptDlg->GetSafeHwnd()))
+		g_promptDlg = nullptr;
 	CPromptDlg* dlg = new CPromptDlg(pParent);
 	if (!dlg->Create(IDD_MP_PROMPT, pParent)) {
 		delete dlg;

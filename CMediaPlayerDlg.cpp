@@ -1437,6 +1437,7 @@ BOOL CMediaPlayerDlg::DestroyWindow()
 	KillTimer(2);
 	KillTimer(3);
 	KillTimer(4);
+	KillTimer(6);
 	KillTimer(7);
 	if (::IsWindow(m_list.GetSafeHwnd()))
 		RemoveWindowSubclass(m_list.GetSafeHwnd(), ListHeaderNotifySubclassProc, kMpListHdrSubclassId);
@@ -2314,9 +2315,16 @@ void CMediaPlayerDlg::SyncPushToggleButtons()
 	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
 	const int supeOn = og->m_supe.GetCheck() ? 1 : 0;
 	const int stOn = og->m_st.GetCheck() ? 1 : 0;
-	const int eqOpen = (::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()) && ::IsWindowVisible(og->m_EqualizerDlg->m_hWnd)) ? 1 : 0;
-	const int pianoOpen = (::IsWindow(og->m_PianoRollDlg->GetSafeHwnd()) && ::IsWindowVisible(og->m_PianoRollDlg->m_hWnd)) ? 1 : 0;
-	const int analyzerOpen = (::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()) && ::IsWindowVisible(og->m_AnalyzerDlg->m_hWnd)) ? 1 : 0;
+	// 破棄途中・未生成でもタイマーから呼ばれるためポインタを必ず確認する
+	const int eqOpen = (og->m_EqualizerDlg
+		&& ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd())
+		&& ::IsWindowVisible(og->m_EqualizerDlg->m_hWnd)) ? 1 : 0;
+	const int pianoOpen = (og->m_PianoRollDlg
+		&& ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd())
+		&& ::IsWindowVisible(og->m_PianoRollDlg->m_hWnd)) ? 1 : 0;
+	const int analyzerOpen = (og->m_AnalyzerDlg
+		&& ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd())
+		&& ::IsWindowVisible(og->m_AnalyzerDlg->m_hWnd)) ? 1 : 0;
 	if (supeOn != m_lastToggleSupe) {
 		MpSetPushToggle(m_supe, supeOn, RGB(140, 220, 160), RGB(80, 180, 110), RGB(215, 240, 220), RGB(175, 215, 190));
 		m_lastToggleSupe = supeOn;
@@ -3156,15 +3164,15 @@ void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 	try {
 	if (nType == SIZE_MINIMIZED) {
 		if (m_mini.GetSafeHwnd() && m_mini.GetCheck() && og && ::IsWindow(og->GetSafeHwnd())) {
-			if (::IsWindow(og->m_EqualizerDlg->GetSafeHwnd())) {
+			if (og->m_EqualizerDlg && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd())) {
 				m_savedEqVisible = ::IsWindowVisible(og->m_EqualizerDlg->m_hWnd) ? 1 : 0;
 				if (m_savedEqVisible) ::ShowWindow(og->m_EqualizerDlg->m_hWnd, SW_HIDE);
 			}
-			if (::IsWindow(og->m_PianoRollDlg->GetSafeHwnd())) {
+			if (og->m_PianoRollDlg && ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd())) {
 				m_savedPianoVisible = ::IsWindowVisible(og->m_PianoRollDlg->m_hWnd) ? 1 : 0;
 				if (m_savedPianoVisible) ::ShowWindow(og->m_PianoRollDlg->m_hWnd, SW_HIDE);
 			}
-			if (::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd())) {
+			if (og->m_AnalyzerDlg && ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd())) {
 				m_savedAnalyzerVisible = ::IsWindowVisible(og->m_AnalyzerDlg->m_hWnd) ? 1 : 0;
 				if (m_savedAnalyzerVisible) ::ShowWindow(og->m_AnalyzerDlg->m_hWnd, SW_HIDE);
 			}
@@ -3173,11 +3181,11 @@ void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 	}
 	if (::IsWindow(m_hWnd)) {
 		if (nType == SIZE_RESTORED && m_mini.GetSafeHwnd() && m_mini.GetCheck() && og && ::IsWindow(og->GetSafeHwnd())) {
-			if (m_savedEqVisible && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
+			if (m_savedEqVisible && og->m_EqualizerDlg && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
 				::ShowWindow(og->m_EqualizerDlg->m_hWnd, SW_SHOW);
-			if (m_savedPianoVisible && ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd()))
+			if (m_savedPianoVisible && og->m_PianoRollDlg && ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd()))
 				::ShowWindow(og->m_PianoRollDlg->m_hWnd, SW_SHOW);
-			if (m_savedAnalyzerVisible && ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
+			if (m_savedAnalyzerVisible && og->m_AnalyzerDlg && ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
 				::ShowWindow(og->m_AnalyzerDlg->m_hWnd, SW_SHOW);
 			m_savedEqVisible = 0;
 			m_savedPianoVisible = 0;
@@ -3941,6 +3949,10 @@ void CMediaPlayerDlg::OnDestroy()
 {
 	SavePos();
 	KillTimer(1);
+	KillTimer(2);
+	KillTimer(3);
+	KillTimer(4);
+	KillTimer(6);
 	KillTimer(7);
 	if (::IsWindow(m_list.GetSafeHwnd()))
 		RemoveWindowSubclass(m_list.GetSafeHwnd(), ListHeaderNotifySubclassProc, kMpListHdrSubclassId);
@@ -4053,23 +4065,21 @@ void CMediaPlayerDlg::OnStopBtn()
 
 void CMediaPlayerDlg::OnEq()
 {
+	// Create/Destroy をボタンハンドラ＋Timer3 にネストさせない(稀なクラッシュ対策)
 	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON59, BN_CLICKED), 0);
-	SyncPushToggleButtons();
+		og->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON59, BN_CLICKED), 0);
 }
 
 void CMediaPlayerDlg::OnPiano()
 {
 	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->TogglePianoRoll();
-	SyncPushToggleButtons();
+		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 1, 0);  // 1=piano
 }
 
 void CMediaPlayerDlg::OnAnalyzer()
 {
 	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->ToggleAnalyzer();
-	SyncPushToggleButtons();
+		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 2, 0);  // 2=analyzer
 }
 
 void CMediaPlayerDlg::OnProTools()
@@ -5946,12 +5956,17 @@ void EnterFalcomMode()
 	// ファルコム特化型では内蔵(ミニ)ジャケを必ず表示するため抑止フラグを解除。
 	g_mpSideJacket = 0;
 
-	// メディアプレイヤー画面を破棄
-	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
-		mp->SavePos();
-		mp->DestroyWindow();
+	// メディアプレイヤー画面を破棄。
+	// TheadLoop が mp-> を触るため、先にグローバルを NULL にしてから破棄する。
+	CMediaPlayerDlg* dying = mp;
+	mp = NULL;
+	if (dying) {
+		if (::IsWindow(dying->GetSafeHwnd())) {
+			dying->SavePos();
+			dying->DestroyWindow();
+		}
+		delete dying;
 	}
-	if (mp) { delete mp; mp = NULL; }
 
 	// ファルコム特化型: タスクバーを og 用に戻す
 	if (og && ::IsWindow(og->m_hWnd)) {

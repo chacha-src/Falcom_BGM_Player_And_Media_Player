@@ -1,4 +1,4 @@
-﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
+// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -806,6 +806,18 @@ BOOL COggApp::InitInstance()
 		savedata.mpPromptAnalyzeMode = 0;
 	else if (savedata.mpPromptAnalyzeMode < 0 || savedata.mpPromptAnalyzeMode > 9)
 		savedata.mpPromptAnalyzeMode = 0;
+	// 拡張プロンプト本文: 旧.dat では未領域→短文バッファをコピー
+	if (datFileSize < (int)(offsetof(save, mpPromptTextLong) + sizeof(TCHAR))) {
+		savedata.mpPromptTextLong[0] = 0;
+		if (savedata.mpPromptText[0])
+			_tcsncpy(savedata.mpPromptTextLong, savedata.mpPromptText, _countof(savedata.mpPromptTextLong) - 1);
+	}
+	else if (!savedata.mpPromptTextLong[0] && savedata.mpPromptText[0]) {
+		_tcsncpy(savedata.mpPromptTextLong, savedata.mpPromptText, _countof(savedata.mpPromptTextLong) - 1);
+	}
+	savedata.mpPromptTextLong[_countof(savedata.mpPromptTextLong) - 1] = 0;
+	if (datFileSize < (int)(offsetof(save, mpPromptBackupEqSoundEq) + sizeof(savedata.mpPromptBackupEqSoundEq)))
+		savedata.mpPromptBackupEqSoundEq = 0;
 	if (savedata.aerocheck == 99) {
 		int abc = AfxMessageBox(LL14(
 			L"Win10/11アクリルぼかしが実装されました。\n有効にしますか？\n(このメッセージは一回しか表示されません)",

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CCustomControl.h"
 #include "resource.h"
@@ -32,7 +32,7 @@ protected:
 	BOOL m_posRestored = FALSE;
 	BOOL m_inSizeMove = FALSE;
 	BOOL m_analyzing = FALSE;
-	static const int kMaxChars = 2000;
+	static const int kMaxChars = 14000;
 
 	void LayoutControls();
 	void RefreshAfterLayout(BOOL bSyncRedraw);

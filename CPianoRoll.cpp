@@ -2606,6 +2606,15 @@ void CPianoRoll::DetachForDestroy()
     InterlockedExchange(&m_analysisDonePosted, 0);
     InterlockedExchange(&m_analysisPresentDirty, 0);
     StopAnalysisWorker();
+    // 破棄前に投稿済みメッセージを捨てる(アナライザと同様。閉じてすぐ開き直すと稀に落ちる)
+    if (::IsWindow(m_hWnd)) {
+        MSG msg;
+        while (PeekMessage(&msg, m_hWnd, WM_PIANOROLL_ANALYSIS_DONE, WM_PIANOROLL_ANALYSIS_DONE, PM_REMOVE)) {}
+        while (PeekMessage(&msg, m_hWnd, WM_PIANOROLL_SYNC, WM_PIANOROLL_SYNC, PM_REMOVE)) {}
+    }
+    InterlockedExchange(&m_syncPosted, 0);
+    InterlockedExchange(&m_analysisDonePosted, 0);
+    InterlockedExchange(&m_analysisPresentDirty, 0);
     EnterCriticalSection(&m_cs);
     m_framesPending = 0;
     LeaveCriticalSection(&m_cs);

@@ -1,4 +1,4 @@
-﻿// CEqualizer.cpp : 実装ファイル
+// CEqualizer.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -6,6 +6,7 @@
 #include "afxdialogex.h"
 #include "CEqualizer.h"
 #include "ProAudio.h"
+#include "CPromptEngine.h"
 
 
 // CEqualizer ダイアログ
@@ -183,6 +184,9 @@ void CEqualizer::SyncSlidersFromSavedata()
 		s.Format(L"%d", savedata.eq_delay);
 		m_delayi.SetWindowText(s);
 	}
+	if (m_pre.GetSafeHwnd())
+		m_pre.SetCurSel(savedata.eqsoundeq);
+	mod = savedata.eqsoundeq;
 
 	CCustomSliderCtrl* bands[] = {
 		&m_s0, &m_s1, &m_s2, &m_s3, &m_s4, &m_s5, &m_s6, &m_s7, &m_s8, &m_s9,
@@ -727,6 +731,22 @@ void CEqualizer::OnDestroy()
 int backms = 0;
 void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 {
+	// プロンプト実行中はスライダー→savedata の上書きをしない（実行側がオーナー）。
+	// 表示だけ時々同期する。
+	extern BOOL MpPromptIsActive();
+	if (MpPromptIsActive()) {
+		static DWORD s_lastPromptSync = 0;
+		const DWORD now = GetTickCount();
+		if (s_lastPromptSync == 0 || now - s_lastPromptSync >= 250) {
+			s_lastPromptSync = now;
+			SyncSlidersFromSavedata();
+		}
+		extern int playf;
+		if (playf == 0)
+			ApplyKeyCodesUi();
+		CCustomBlurDialogExBase::OnTimer(nIDEvent);
+		return;
+	}
 	// スライダー同期用。Kill/Set はしない（遅延が間隔に乗り WM_TIMER 飢餓を悪化させる）。
 	// コード表示は再生中 WM_EQ_KEY_UPDATE、停止中のみここで更新。
 	if (mod != savedata.eqsoundeq) {

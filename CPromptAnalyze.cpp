@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CPromptAnalyze.h"
 #include "CPromptEngine.h"
 #include "CMediaPlayerDlg.h"
@@ -21,7 +21,7 @@ namespace {
 
 const double kHopSec = 0.05;       // 50ms
 const int    kMaxFrames = 12000;   // ~10分
-const int    kMaxOutChars = 2000;
+const int    kMaxOutChars = 14000; // 4分×200-400コマンド想定
 
 struct AnaState {
 	std::vector<float> rms;
@@ -239,403 +239,113 @@ static float Percentile(std::vector<float> v, float p)
 	return v[(std::max)(0, (std::min)((int)v.size() - 1, i))];
 }
 
-// ---- パターン群 (順次追加前提) ----
-// P01: イントロが弱い → DS音量フェードイン（値は現在DS=100相対 → CmdDsで絶対化）
-static void PatSoftIntro(CString& out, const AnaState& a, float med)
+// ---- 密な自動アレンジ生成 (4分で概ね200-400コマンド) ----
+// DS: CmdDs（現在DS=100相対）
+// EQ帯/拡張(N/K/I/S等): 100=中立
+// FX r/c/y (oggDlg_ds / StdAfx コメント準拠):
+//   0=オフ / 1-100=モードA(通常) / 101-200=モードB(別アルゴリズム)
+//   r:A=リバーブ B=パンリバーブ
+//   c:A=コーラス B=コーラスディストーション
+//   y:A=ディレイ B=マルチディレイ(ピンポン)
+// 環境 E/F: 空間プリセットは音色を大きく変えるので区間を絞って使う(常用しない)
+
+static int ClampI(int v, int lo, int hi)
 {
-	if (a.rms.size() < 20) return;
-	const int n = (int)a.rms.size();
-	const int head = (std::min)(n / 8, (int)(4.0 / kHopSec)); // ~先頭4秒 or 1/8
-	const float m = MeanRange(a.rms, 0, head);
-	if (m < med * 0.55f && med > 0.01f) {
-		const double t1 = head * kHopSec;
-		AppendCmd(out, CmdDs(0, t1, 55, 100));
+	if (v < lo) return lo;
+	if (v > hi) return hi;
+	return v;
+}
+
+static int ModeBias(int mode, int base, int comedy, int serious, int romantic, int intense, int chill, int electro, int orch, int retro, int cine)
+{
+	switch (mode) {
+	case MP_ANA_COMEDY: return base + comedy;
+	case MP_ANA_SERIOUS: return base + serious;
+	case MP_ANA_ROMANTIC: return base + romantic;
+	case MP_ANA_INTENSE: return base + intense;
+	case MP_ANA_CHILL: return base + chill;
+	case MP_ANA_ELECTRO: return base + electro;
+	case MP_ANA_ORCHESTRAL: return base + orch;
+	case MP_ANA_RETRO: return base + retro;
+	case MP_ANA_CINEMATIC: return base + cine;
+	default: return base; // BALANCED
 	}
 }
 
-// P02: 終盤が落ちる → フェードアウト気味
-static void PatSoftOutro(CString& out, const AnaState& a, float med)
+// FX モードA: 1-100 (0=オフ)。strengthPct=0..100
+static int FxA(int strengthPct)
 {
-	if (a.rms.size() < 30) return;
-	const int n = (int)a.rms.size();
-	const int tail = (std::min)(n / 6, (int)(8.0 / kHopSec));
-	const float m = MeanRange(a.rms, n - tail, n - 1);
-	if (m < med * 0.6f && med > 0.01f) {
-		const double t0 = (n - tail) * kHopSec;
-		const double t1 = (n - 1) * kHopSec;
-		AppendCmd(out, CmdDs(t0, t1, 100, 45));
-	}
+	if (strengthPct <= 0) return 0;
+	return ClampI(strengthPct, 1, 100);
+}
+// FX モードB: 101-200。strengthPct=1..100 → 101..200
+static int FxB(int strengthPct)
+{
+	if (strengthPct <= 0) return 0;
+	return 100 + ClampI(strengthPct, 1, 100);
 }
 
-// P03: 大きな盛り上がり → br 明るめ
-static void PatBrightChorus(CString& out, const AnaState& a, float p90)
+// 同じ系統(両方A / 両方B / 片方0)なら補間OK。A↔B跨ぎは瞬時切替。
+static BOOL FxSameFamily(int a, int b)
 {
-	if (a.rms.size() < 40) return;
-	const int n = (int)a.rms.size();
-	const int win = (int)(3.0 / kHopSec);
-	int best = -1;
-	float bestM = 0;
-	for (int i = 0; i + win < n; i += win / 2) {
-		const float m = MeanRange(a.rms, i, i + win);
-		if (m > bestM) { bestM = m; best = i; }
-	}
-	if (best >= 0 && bestM > p90 * 0.95f && p90 > 0.02f) {
-		AppendCmd(out, CmdAt(L"br", best * kHopSec, best * kHopSec, 0, 0, FALSE));
-		AppendCmd(out, CmdAt(L"N", best * kHopSec, (best + win) * kHopSec, 100, 118, TRUE));
-	}
+	if (a == 0 || b == 0) return TRUE;
+	const BOOL aB = (a > 100);
+	const BOOL bB = (b > 100);
+	return aB == bB;
 }
 
-// P04: 静かな中盤 → sb しょんぼり
-static void PatQuietMelancholy(CString& out, const AnaState& a, float med)
-{
-	if (a.rms.size() < 50) return;
-	const int n = (int)a.rms.size();
-	const int win = (int)(5.0 / kHopSec);
-	int best = -1;
-	float bestM = 1e9f;
-	const int lo = n / 5;
-	const int hi = n - n / 5;
-	for (int i = lo; i + win < hi; i += win / 2) {
-		const float m = MeanRange(a.rms, i, i + win);
-		if (m < bestM) { bestM = m; best = i; }
-	}
-	if (best >= 0 && bestM < med * 0.7f && med > 0.01f) {
-		AppendCmd(out, CmdAt(L"sb", best * kHopSec, best * kHopSec, 0, 0, FALSE));
-		AppendCmd(out, CmdAt(L"r", best * kHopSec, (best + win) * kHopSec, 100, 125, TRUE));
-	}
-}
+struct ModeFxPref {
+	int envId;       // E: 0=使わない
+	int envAmt;      // F: かかり 0-100
+	int revA;        // 静かな所の通常リバーブ目安
+	int revB;        // 特殊区間のパンリバーブ強さ(0=使わない)
+	int choA;
+	int choB;        // コーラスディスト
+	int dlyA;
+	int dlyB;        // マルチディレイ
+	int clarity;     // N オフセット
+	int density;     // I
+	int spatial;     // S
+	int balHi;       // K (100中立、大=高域寄り)
+};
 
-// P05: 急な立ち上がり(ビルド) → テンポ微増
-static void PatBuildUp(CString& out, const AnaState& a, float med)
+static ModeFxPref ModePrefs(int mode)
 {
-	if (a.rms.size() < 40) return;
-	const int n = (int)a.rms.size();
-	const int win = (int)(4.0 / kHopSec);
-	for (int i = 0; i + win < n; i += win) {
-		const float a0 = MeanRange(a.rms, i, i + win / 3);
-		const float a1 = MeanRange(a.rms, i + win * 2 / 3, i + win);
-		if (a0 > 0.01f && a1 > a0 * 1.55f && a1 > med) {
-			AppendCmd(out, CmdAt(L"t", i * kHopSec, (i + win) * kHopSec, 100, 110, TRUE));
-			return;
-		}
-	}
-}
-
-// P06: 急落(ドロップ後) → ディレイ短フラッシュ
-static void PatDropDelay(CString& out, const AnaState& a, float med)
-{
-	if (a.rms.size() < 40) return;
-	const int n = (int)a.rms.size();
-	const int win = (int)(2.5 / kHopSec);
-	for (int i = win; i + win < n; i += win / 2) {
-		const float a0 = MeanRange(a.rms, i - win, i);
-		const float a1 = MeanRange(a.rms, i, i + win);
-		if (a0 > med * 1.2f && a1 < a0 * 0.55f) {
-			AppendCmd(out, CmdAt(L"y", i * kHopSec, (i + win / 2) * kHopSec, 100, 130, TRUE));
-			AppendCmd(out, CmdAt(L"y", (i + win / 2) * kHopSec, (i + win) * kHopSec, 130, 100, TRUE));
-			return;
-		}
-	}
-}
-
-// P07: 低域寄り区間 → a/b 帯ブースト
-static void PatBassBoost(CString& out, const AnaState& a, float medBass)
-{
-	if (a.bass.size() < 40) return;
-	const int n = (int)a.bass.size();
-	const int win = (int)(4.0 / kHopSec);
-	int best = -1;
-	float bestM = 0;
-	for (int i = 0; i + win < n; i += win) {
-		const float m = MeanRange(a.bass, i, i + win);
-		const float e = MeanRange(a.rms, i, i + win);
-		if (e > 0.02f && m > bestM) { bestM = m; best = i; }
-	}
-	if (best >= 0 && bestM > medBass * 1.25f) {
-		AppendCmd(out, CmdAt(L"a", best * kHopSec, (best + win) * kHopSec, 100, 112, TRUE));
-		AppendCmd(out, CmdAt(L"b", best * kHopSec, (best + win) * kHopSec, 100, 110, TRUE));
-	}
-}
-
-// P08: 高域寄り区間 → 高域EQ + 鮮明
-static void PatTrebleLift(CString& out, const AnaState& a, float medTre)
-{
-	if (a.tre.size() < 40) return;
-	const int n = (int)a.tre.size();
-	const int win = (int)(4.0 / kHopSec);
-	int best = -1;
-	float bestM = 0;
-	for (int i = 0; i + win < n; i += win) {
-		const float m = MeanRange(a.tre, i, i + win);
-		if (m > bestM) { bestM = m; best = i; }
-	}
-	if (best >= 0 && bestM > medTre * 1.3f) {
-		AppendCmd(out, CmdAt(L"n", best * kHopSec, (best + win) * kHopSec, 100, 114, TRUE));
-		AppendCmd(out, CmdAt(L"o", best * kHopSec, (best + win) * kHopSec, 100, 112, TRUE));
-		AppendCmd(out, CmdAt(L"N", best * kHopSec, (best + win) * kHopSec, 100, 115, TRUE));
-	}
-}
-
-// P09: 長尺で平均的に激しい → fa ファストを中盤に
-static void PatOverallFast(CString& out, const AnaState& a, float med, float p75)
-{
-	if (a.rms.size() < 80) return;
-	if (med > 0.04f && p75 > med * 1.15f) {
-		const double t = (a.rms.size() / 2) * kHopSec;
-		AppendCmd(out, CmdAt(L"fa", t, t, 0, 0, FALSE));
-	}
-}
-
-// P10: 全体が静かめ → sl スローを序盤に
-static void PatOverallSlow(CString& out, const AnaState& a, float med, float p90)
-{
-	if (a.rms.size() < 60) return;
-	if (med > 0.005f && p90 < med * 1.35f && med < 0.06f) {
-		const double t = (a.rms.size() / 5) * kHopSec;
-		AppendCmd(out, CmdAt(L"sl", t, t, 0, 0, FALSE));
-	}
-}
-
-// P11: 2番目の山 → サブコーラスを明るく
-static void PatSecondChorus(CString& out, const AnaState& a, float p90)
-{
-	if (a.rms.size() < 80) return;
-	const int n = (int)a.rms.size();
-	const int win = (std::max)(8, n / 20);
-	int best = -1, second = -1;
-	float bestV = -1.f, secondV = -1.f;
-	for (int i = 0; i + win < n; i += win / 2) {
-		float s = 0;
-		for (int j = 0; j < win; ++j) s += a.rms[i + j];
-		s /= win;
-		if (s > bestV) { secondV = bestV; second = best; bestV = s; best = i; }
-		else if (s > secondV) { secondV = s; second = i; }
-	}
-	if (second < 0 || secondV < p90 * 0.85f) return;
-	if (best >= 0 && (second > best ? second - best : best - second) < win) return;
-	AppendCmd(out, CmdAt(L"br", second * kHopSec, second * kHopSec, 0, 0, FALSE));
-	AppendCmd(out, CmdAt(L"N", second * kHopSec, (second + win) * kHopSec, 100, 112, TRUE));
-}
-
-// P12: 長い静かな谷のあと → リバーブで復帰
-static void PatSilenceGapReverb(CString& out, const AnaState& a, float med)
-{
-	if (a.rms.size() < 100) return;
-	const int n = (int)a.rms.size();
-	const float thr = med * 0.45f;
-	int bestLen = 0, bestEnd = -1, run = 0;
-	for (int i = 0; i < n; ++i) {
-		if (a.rms[i] < thr) { ++run; if (run > bestLen) { bestLen = run; bestEnd = i; } }
-		else run = 0;
-	}
-	if (bestLen < 20 || bestEnd < 0) return;
-	const double t0 = (bestEnd - bestLen / 2) * kHopSec;
-	const double t1 = (bestEnd + 1) * kHopSec;
-	AppendCmd(out, CmdAt(L"r", t0, t1, 100, 145, TRUE));
-	AppendCmd(out, CmdDs(t1, t1 + 2.0, 70, 100));
-}
-
-// P13: 中盤が窪む → ピッチ/音量で持ち上げ
-static void PatMidrangeScoop(CString& out, const AnaState& a, float med)
-{
-	if (a.rms.size() < 60) return;
-	const int n = (int)a.rms.size();
-	const int q1 = n / 4, q3 = n * 3 / 4;
-	float mid = 0, sides = 0;
-	int mc = 0, sc = 0;
-	for (int i = 0; i < n; ++i) {
-		if (i >= q1 && i < q3) { mid += a.rms[i]; ++mc; }
-		else { sides += a.rms[i]; ++sc; }
-	}
-	if (mc < 8 || sc < 8) return;
-	mid /= mc; sides /= sc;
-	if (mid >= sides * 0.92f || mid >= med) return;
-	AppendCmd(out, CmdAt(L"p", q1 * kHopSec, q3 * kHopSec, 100, 106, TRUE));
-	AppendCmd(out, CmdDs(q1 * kHopSec, q3 * kHopSec, 100, 108));
-}
-
-// P14: 高域エネルギー帯 → ステレオ感
-static void PatStereoWiden(CString& out, const AnaState& a, float medTre)
-{
-	if (a.tre.size() < 40 || a.rms.size() < 40) return;
-	const int n = (int)a.rms.size();
-	const int win = (std::max)(6, n / 16);
-	int best = -1;
-	float bestV = -1.f;
-	for (int i = 0; i + win < n; ++i) {
-		float s = 0;
-		for (int j = 0; j < win; ++j) s += a.tre[i + j];
-		s /= win;
-		if (s > bestV) { bestV = s; best = i; }
-	}
-	if (best < 0 || bestV < medTre * 1.2f) return;
-	AppendCmd(out, CmdAt(L"S", best * kHopSec, (best + win) * kHopSec, 100, 125, TRUE));
-}
-
-// P15: 終盤テンポを少し落とす
-static void PatLateTempoDip(CString& out, const AnaState& a, float med)
-{
-	if (a.rms.size() < 80) return;
-	const int n = (int)a.rms.size();
-	const int t0 = n * 3 / 4;
-	float late = 0;
-	for (int i = t0; i < n; ++i) late += a.rms[i];
-	late /= (std::max)(1, n - t0);
-	if (late > med * 1.05f) return;
-	AppendCmd(out, CmdAt(L"t", t0 * kHopSec, n * kHopSec, 100, 94, TRUE));
-	AppendCmd(out, CmdAt(L"sl", t0 * kHopSec, t0 * kHopSec, 0, 0, FALSE));
-}
-
-// P16: 序盤の抜け感 → 鮮明
-static void PatEarlyClarity(CString& out, const AnaState& a, float medTre)
-{
-	if (a.tre.size() < 40) return;
-	const int n = (int)a.tre.size();
-	const int end = n / 4;
-	float early = 0;
-	for (int i = 0; i < end; ++i) early += a.tre[i];
-	early /= (std::max)(1, end);
-	if (early < medTre * 1.1f) return;
-	AppendCmd(out, CmdAt(L"N", 0, end * kHopSec, 100, 118, TRUE));
-	AppendCmd(out, CmdAt(L"o", 0, end * kHopSec, 100, 110, TRUE));
-}
-
-// P17: 長い静かな持続 → 環境音パッド
-static void PatEnvPad(CString& out, const AnaState& a, float med)
-{
-	if (a.rms.size() < 100) return;
-	const int n = (int)a.rms.size();
-	int quiet = 0;
-	for (int i = 0; i < n; ++i)
-		if (a.rms[i] < med * 0.7f) ++quiet;
-	if (quiet < n / 3) return;
-	const double mid = (n / 2) * kHopSec;
-	AppendCmd(out, CmdAt(L"E", mid, mid, 16, 16, TRUE));
-	AppendCmd(out, CmdAt(L"F", mid, n * kHopSec, 0, 55, TRUE));
-}
-
-// P18: トランジェント強め → ディレイパンチ
-static void PatPunchyTransients(CString& out, const AnaState& a, float med, float p90)
-{
-	if (a.rms.size() < 50) return;
-	if (med < 0.01f || p90 < med * 1.8f) return;
-	const int n = (int)a.rms.size();
-	const float thr = med + (p90 - med) * 0.7f;
-	int hits = 0;
-	for (int i = 2; i + 2 < n && hits < 3; ++i) {
-		if (a.rms[i] > thr && a.rms[i] > a.rms[i - 1] * 1.25f) {
-			AppendCmd(out, CmdAt(L"y", i * kHopSec, (i + 4) * kHopSec, 100, 135, TRUE));
-			++hits;
-			i += 8;
-		}
-	}
-}
-
-// P19: 終盤の低域寄り → ベース温め
-static void PatWarmBassEnd(CString& out, const AnaState& a, float medBass)
-{
-	if (a.bass.size() < 60) return;
-	const int n = (int)a.bass.size();
-	const int t0 = n * 2 / 3;
-	float late = 0, early = 0;
-	for (int i = 0; i < n / 3; ++i) early += a.bass[i];
-	for (int i = t0; i < n; ++i) late += a.bass[i];
-	early /= (std::max)(1, n / 3);
-	late /= (std::max)(1, n - t0);
-	if (late < early * 1.08f || late < medBass) return;
-	AppendCmd(out, CmdAt(L"a", t0 * kHopSec, n * kHopSec, 100, 114, TRUE));
-	AppendCmd(out, CmdAt(L"b", t0 * kHopSec, n * kHopSec, 100, 108, TRUE));
-}
-
-// P20: ダイナミクス広い → 空間と圧縮バランス
-static void PatBreathRoom(CString& out, const AnaState& a, float med, float p90)
-{
-	if (a.rms.size() < 60) return;
-	if (med < 0.008f || p90 < med * 2.2f) return;
-	const int n = (int)a.rms.size();
-	AppendCmd(out, CmdAt(L"r", 0, n * kHopSec, 100, 118, TRUE));
-	AppendCmd(out, CmdAt(L"c", (n / 4) * kHopSec, (n * 3 / 4) * kHopSec, 100, 112, TRUE));
-}
-
-static void PatModeFlavor(CString& out, const AnaState& a, float med, float p90, int mode)
-{
-	if (a.rms.size() < 20) return;
-	const int n = (int)a.rms.size();
-	const double mid = (n / 2) * kHopSec;
-	const double q1 = (n / 4) * kHopSec;
-	const double q3 = (n * 3 / 4) * kHopSec;
+	// 環境番号は oggDlg_ds.cpp の環境音響コメントに合わせる
+	ModeFxPref p = {};
 	switch (mode) {
 	case MP_ANA_COMEDY:
-		AppendCmd(out, CmdAt(L"br", q1, q1, 0, 0, FALSE));
-		AppendCmd(out, CmdAt(L"p", mid, q3, 100, 108, TRUE));
-		AppendCmd(out, CmdAt(L"y", mid, mid + 2.0, 100, 140, TRUE));
-		AppendCmd(out, CmdAt(L"N", q1, mid, 100, 110, TRUE));
-		AppendCmd(out, CmdAt(L"t", mid, q3, 100, 106, TRUE));
+		p = { 33, 35, 25, 0, 40, 0, 35, 45, 6, 2, 4, 4 }; // カラオケ、マルチディレイ多め
 		break;
 	case MP_ANA_SERIOUS:
-		AppendCmd(out, CmdAt(L"sb", q1, q1, 0, 0, FALSE));
-		AppendCmd(out, CmdAt(L"r", 0, mid, 100, 135, TRUE));
-		AppendCmd(out, CmdAt(L"t", 0, q1, 100, 92, TRUE));
-		AppendCmd(out, CmdAt(L"c", mid, q3, 100, 118, TRUE));
-		AppendCmd(out, CmdDs(q3, n * kHopSec, 100, 70));
+		p = { 3, 55, 55, 25, 15, 0, 10, 0, -2, 6, 2, -4 }; // 教会、残響厚め・低域寄り
 		break;
 	case MP_ANA_ROMANTIC:
-		AppendCmd(out, CmdAt(L"c", q1, q3, 100, 125, TRUE));
-		AppendCmd(out, CmdAt(L"p", mid, q3, 100, 104, TRUE));
-		AppendCmd(out, CmdAt(L"S", mid, q3, 100, 115, TRUE));
-		AppendCmd(out, CmdAt(L"r", 0, n * kHopSec, 100, 128, TRUE));
-		AppendCmd(out, CmdAt(L"E", mid, mid, 14, 14, TRUE));
+		p = { 32, 45, 50, 20, 45, 0, 15, 0, 4, 4, 8, 2 }; // ジャズクラブ、コーラスA+立体
 		break;
 	case MP_ANA_INTENSE:
-		AppendCmd(out, CmdAt(L"fa", mid, mid, 0, 0, FALSE));
-		// 相対112 ≈ 基準の+12%（基準40%なら約45%）
-		AppendCmd(out, CmdDs(q1, mid, 100, 112));
-		AppendCmd(out, CmdAt(L"N", mid, q3, 100, 120, TRUE));
-		AppendCmd(out, CmdAt(L"y", mid, mid + 1.2, 100, 150, TRUE));
-		AppendCmd(out, CmdAt(L"a", mid, q3, 100, 112, TRUE));
+		p = { 6, 40, 20, 0, 25, 40, 30, 35, 8, 8, 4, 4 }; // ライブハウス、ディスト+マルチ
 		break;
 	case MP_ANA_CHILL:
-		AppendCmd(out, CmdAt(L"sl", q1, q1, 0, 0, FALSE));
-		AppendCmd(out, CmdAt(L"r", 0, n * kHopSec, 100, 120, TRUE));
-		AppendCmd(out, CmdDs(0, q1, 70, 100));
-		AppendCmd(out, CmdAt(L"F", mid, q3, 0, 40, TRUE));
-		AppendCmd(out, CmdAt(L"t", 0, mid, 100, 96, TRUE));
+		p = { 7, 40, 45, 15, 30, 0, 10, 0, -2, 0, 4, -2 }; // 森、穏やかリバーブ
 		break;
 	case MP_ANA_ELECTRO:
-		AppendCmd(out, CmdAt(L"y", mid, mid + 1.5, 100, 145, TRUE));
-		AppendCmd(out, CmdAt(L"t", q1, mid, 100, 112, TRUE));
-		AppendCmd(out, CmdAt(L"o", mid, q3, 100, 118, TRUE));
-		AppendCmd(out, CmdAt(L"fa", q1, q1, 0, 0, FALSE));
-		AppendCmd(out, CmdAt(L"S", mid, q3, 100, 122, TRUE));
+		p = { 81, 50, 15, 30, 20, 45, 25, 55, 6, 4, 10, 6 }; // サイバーパンク、B系多め
 		break;
 	case MP_ANA_ORCHESTRAL:
-		AppendCmd(out, CmdAt(L"r", 0, n * kHopSec, 100, 140, TRUE));
-		AppendCmd(out, CmdAt(L"I", mid, q3, 100, 118, TRUE));
-		AppendCmd(out, CmdAt(L"S", mid, q3, 100, 120, TRUE));
-		AppendCmd(out, CmdAt(L"c", q1, q3, 100, 115, TRUE));
-		AppendCmd(out, CmdDs(0, q1, 80, 100));
+		p = { 31, 60, 65, 30, 10, 0, 8, 0, 0, 8, 10, 0 }; // コンサートホール、パンリバーブ可
 		break;
 	case MP_ANA_RETRO:
-		AppendCmd(out, CmdAt(L"c", q1, q3, 100, 130, TRUE));
-		AppendCmd(out, CmdAt(L"p", mid, mid + 3.0, 100, 96, TRUE));
-		AppendCmd(out, CmdAt(L"a", mid, q3, 100, 115, TRUE));
-		AppendCmd(out, CmdAt(L"n", q1, mid, 100, 108, TRUE));
-		AppendCmd(out, CmdAt(L"y", mid, mid + 2.0, 100, 125, TRUE));
+		p = { 62, 40, 35, 0, 50, 25, 20, 0, -2, 2, 2, -2 }; // 古い劇場、コーラス系
 		break;
 	case MP_ANA_CINEMATIC:
-		AppendCmd(out, CmdAt(L"t", 0, mid, 95, 108, TRUE));
-		AppendCmd(out, CmdAt(L"E", mid, mid, 18, 18, TRUE));
-		AppendCmd(out, CmdAt(L"F", mid, q3, 0, 70, TRUE));
-		AppendCmd(out, CmdDs(q3, n * kHopSec, 100, 55));
-		AppendCmd(out, CmdAt(L"r", q1, q3, 100, 135, TRUE));
-		AppendCmd(out, CmdAt(L"I", mid, q3, 100, 112, TRUE));
+		p = { 34, 55, 45, 40, 20, 0, 15, 20, 2, 6, 8, 0 }; // 映画館、パンリバーブ活用
 		break;
-	default:
-		AppendCmd(out, CmdAt(L"N", mid, q3, 100, 108, TRUE));
-		AppendCmd(out, CmdAt(L"r", q1, q3, 100, 110, TRUE));
+	default: // BALANCED: 環境は基本使わず、FXも控えめ(常用しすぎない)
+		p = { 0, 0, 30, 0, 20, 0, 18, 0, 0, 0, 2, 0 };
 		break;
 	}
-	(void)med; (void)p90;
+	return p;
 }
 
 static CString BuildFromPatterns(int mode)
@@ -643,44 +353,270 @@ static CString BuildFromPatterns(int mode)
 	CString out;
 	if (g_ana.rms.size() < 10) return out;
 
+	const int n = (int)g_ana.rms.size();
+	const double dur = n * kHopSec;
 	const float med = Percentile(g_ana.rms, 0.5f);
 	const float p75 = Percentile(g_ana.rms, 0.75f);
 	const float p90 = Percentile(g_ana.rms, 0.90f);
 	const float medBass = Percentile(g_ana.bass, 0.5f);
 	const float medTre = Percentile(g_ana.tre, 0.5f);
-
 	g_dsBasePct = CurrentDsPercent();
+	const ModeFxPref pref = ModePrefs(mode);
 
-	// コメント行はパーサが無視するので先頭に解析メモ
 	{
 		CString note;
-		note.Format(L"# auto-analyze mode=%d %.1fs frames=%d dsBase=%d%%\r\n",
-			mode, g_ana.rms.size() * kHopSec, (int)g_ana.rms.size(), g_dsBasePct);
-		if (note.GetLength() < kMaxOutChars)
-			out = note;
+		note.Format(L"# auto-analyze mode=%d %.1fs frames=%d dsBase=%d%% dense fxAB\r\n",
+			mode, dur, n, g_dsBasePct);
+		out = note;
 	}
 
-	PatSoftIntro(out, g_ana, med);
-	PatSoftOutro(out, g_ana, med);
-	PatBrightChorus(out, g_ana, p90);
-	PatQuietMelancholy(out, g_ana, med);
-	PatBuildUp(out, g_ana, med);
-	PatDropDelay(out, g_ana, med);
-	PatBassBoost(out, g_ana, medBass);
-	PatTrebleLift(out, g_ana, medTre);
-	PatOverallFast(out, g_ana, med, p75);
-	PatOverallSlow(out, g_ana, med, p90);
-	PatSecondChorus(out, g_ana, p90);
-	PatSilenceGapReverb(out, g_ana, med);
-	PatMidrangeScoop(out, g_ana, med);
-	PatStereoWiden(out, g_ana, medTre);
-	PatLateTempoDip(out, g_ana, med);
-	PatEarlyClarity(out, g_ana, medTre);
-	PatEnvPad(out, g_ana, med);
-	PatPunchyTransients(out, g_ana, med, p90);
-	PatWarmBassEnd(out, g_ana, medBass);
-	PatBreathRoom(out, g_ana, med, p90);
-	PatModeFlavor(out, g_ana, med, p90, mode);
+	double stepSec = 0.75;
+	if (dur > 30.0) {
+		const double targetSeg = (std::max)(180.0, (std::min)(380.0, dur * 1.15));
+		stepSec = dur / targetSeg;
+		if (stepSec < 0.55) stepSec = 0.55;
+		if (stepSec > 1.05) stepSec = 1.05;
+	}
+	const int hop = (std::max)(6, (int)(stepSec / kHopSec + 0.5));
+
+	// イントロ/アウトロ (DSのみ)
+	{
+		const int head = (std::min)(n / 8, (int)(4.0 / kHopSec));
+		if (head > 4 && MeanRange(g_ana.rms, 0, head) < med * 0.7f)
+			AppendCmd(out, CmdDs(0, head * kHopSec, 60, 100));
+		const int tail = (std::min)(n / 6, (int)(8.0 / kHopSec));
+		if (tail > 4 && MeanRange(g_ana.rms, n - tail, n - 1) < med * 0.75f)
+			AppendCmd(out, CmdDs((n - tail) * kHopSec, (n - 1) * kHopSec, 100, 50));
+	}
+
+	// セクション演出 + 環境(E/Fはここだけ。常用しない)
+	{
+		const int q1 = n / 4, mid = n / 2, q3 = n * 3 / 4;
+		auto loud = [&](int a, int b) { return MeanRange(g_ana.rms, a, b); };
+		if (loud(mid, (std::min)(n - 1, mid + hop)) > p75)
+			AppendCmd(out, CmdAt(L"br", mid * kHopSec, mid * kHopSec, 0, 0, FALSE));
+		else if (loud(q1, q1 + hop) < med * 0.85f)
+			AppendCmd(out, CmdAt(L"sb", q1 * kHopSec, q1 * kHopSec, 0, 0, FALSE));
+		if (mode == MP_ANA_INTENSE || mode == MP_ANA_ELECTRO || (p75 > med * 1.2f && med > 0.03f))
+			AppendCmd(out, CmdAt(L"fa", mid * kHopSec, mid * kHopSec, 0, 0, FALSE));
+		else if (mode == MP_ANA_CHILL || mode == MP_ANA_SERIOUS || (med < 0.05f && p90 < med * 1.4f))
+			AppendCmd(out, CmdAt(L"sl", q1 * kHopSec, q1 * kHopSec, 0, 0, FALSE));
+
+		if (pref.envId > 0 && pref.envAmt > 0) {
+			const double te0 = q1 * kHopSec;
+			const double te1 = q3 * kHopSec;
+			AppendCmd(out, CmdAt(L"E", te0, te0, pref.envId, pref.envId, TRUE));
+			AppendCmd(out, CmdAt(L"F", te0, te0 + 2.0, 0, pref.envAmt, TRUE));
+			AppendCmd(out, CmdAt(L"F", te1 - 2.0, te1, pref.envAmt, 0, TRUE));
+			AppendCmd(out, CmdAt(L"E", te1, te1, 0, 0, TRUE));
+		}
+	}
+
+	// FX初期値は 0=オフ (EQの100中立とは別)
+	int prevN = 100, prevK = 100, prevI = 100, prevS = 100;
+	int prevR = 0, prevC = 0, prevY = 0;
+	int prevA = 100, prevO = 100, prevT = 100, prevP = 100;
+	int prevD = 100;
+	double tLaneN = 0, tLaneK = 0, tLaneI = 0, tLaneS = 0;
+	double tLaneR = 0, tLaneC = 0, tLaneY = 0;
+	double tLaneA = 0, tLaneO = 0, tLaneT = 0, tLaneP = 0, tLaneD = 0;
+	int punchBudget = (std::max)(6, (int)(dur / 10.0));
+
+	auto flushEq = [&](LPCTSTR letter, double& t0, int& lastV, double t1, int newV) {
+		if (newV == lastV) return;
+		if (t1 <= t0 + 0.2) { lastV = newV; return; }
+		AppendCmd(out, CmdAt(letter, t0, t1, lastV, newV, TRUE));
+		t0 = t1;
+		lastV = newV;
+	};
+	auto flushFx = [&](LPCTSTR letter, double& t0, int& lastV, double t1, int newV) {
+		if (newV == lastV) return;
+		if (t1 <= t0 + 0.15) {
+			// A↔B 跨ぎや短区間は点適用
+			AppendCmd(out, CmdAt(letter, t1, t1, newV, newV, TRUE));
+			t0 = t1;
+			lastV = newV;
+			return;
+		}
+		if (!FxSameFamily(lastV, newV)) {
+			AppendCmd(out, CmdAt(letter, t1, t1, newV, newV, TRUE));
+			t0 = t1;
+			lastV = newV;
+			return;
+		}
+		AppendCmd(out, CmdAt(letter, t0, t1, lastV, newV, TRUE));
+		t0 = t1;
+		lastV = newV;
+	};
+	auto flushDs = [&](double& t0, int& lastV, double t1, int newV) {
+		if (newV == lastV) return;
+		if (t1 <= t0 + 0.2) { lastV = newV; return; }
+		AppendCmd(out, CmdDs(t0, t1, lastV, newV));
+		t0 = t1;
+		lastV = newV;
+	};
+
+	for (int i = 0; i + hop <= n; i += hop) {
+		if (out.GetLength() > kMaxOutChars - 100) break;
+		const int i1 = (std::min)(n - 1, i + hop - 1);
+		const double t0 = i * kHopSec;
+		const double t1 = (i1 + 1) * kHopSec;
+		const float m = MeanRange(g_ana.rms, i, i1);
+		const float b = MeanRange(g_ana.bass, i, i1);
+		const float tr = MeanRange(g_ana.tre, i, i1);
+		const int seg = i / hop;
+		const BOOL quiet = (m < med * 0.7f);
+		const BOOL loud = (m > p75);
+		const BOOL peak = (m > p90 && p90 > 0.01f);
+
+		int wantN = 100 + pref.clarity;
+		int wantK = 100 + pref.balHi;
+		int wantI = 100 + pref.density;
+		int wantS = 100 + pref.spatial;
+		int wantA = 100, wantO = 100, wantT = 100, wantP = 100, wantD = 100;
+		int wantR = 0, wantC = 0, wantY = 0;
+
+		if (quiet) {
+			wantN = ClampI(wantN - 4, 88, 120);
+			wantI = ClampI(wantI + 2, 90, 125);
+			wantR = FxA(ModeBias(mode, pref.revA, -10, 10, 8, -8, 6, -10, 12, 0, 8));
+			wantC = FxA(ModeBias(mode, pref.choA, 0, -5, 10, -5, 4, -5, -8, 8, 0));
+			if (pref.revB > 0 && (mode == MP_ANA_ORCHESTRAL || mode == MP_ANA_CINEMATIC || mode == MP_ANA_SERIOUS))
+				wantR = FxB(ClampI(pref.revB - 5, 10, 50));
+		} else if (loud) {
+			wantN = ClampI(wantN + 6, 92, 128);
+			wantS = ClampI(wantS + 4, 95, 130);
+			wantY = FxA(ModeBias(mode, pref.dlyA + 10, 8, -5, -5, 10, -8, 12, -5, 0, 0));
+			wantC = FxA(ModeBias(mode, pref.choA / 2 + 10, 5, 0, 8, 5, 0, 5, 0, 10, 0));
+			if (pref.choB > 0 && (mode == MP_ANA_INTENSE || mode == MP_ANA_ELECTRO || mode == MP_ANA_RETRO))
+				wantC = FxB(ClampI(pref.choB, 15, 55));
+			if (pref.dlyB > 0 && (mode == MP_ANA_ELECTRO || mode == MP_ANA_COMEDY || mode == MP_ANA_INTENSE) && peak)
+				wantY = FxB(ClampI(pref.dlyB, 20, 60));
+			if (pref.revB > 0 && (mode == MP_ANA_CINEMATIC || mode == MP_ANA_ORCHESTRAL) && peak)
+				wantR = FxB(ClampI(pref.revB, 15, 55));
+			else if (!peak)
+				wantR = FxA(ModeBias(mode, pref.revA / 2, 0, 5, 5, 0, 5, 0, 8, 0, 5));
+		} else {
+			wantR = FxA(ClampI(pref.revA / 2, 0, 40));
+			wantC = FxA(ClampI(pref.choA / 2, 0, 35));
+		}
+
+		if (b > medBass * 1.15f) {
+			wantA = ModeBias(mode, 112, 0, 2, 0, 6, 0, 4, 4, 8, 2);
+			wantK = ClampI(wantK - 4, 88, 115);
+		}
+		if (tr > medTre * 1.15f) {
+			wantO = ModeBias(mode, 112, 2, 0, 2, 4, 0, 6, 2, 2, 4);
+			wantN = ClampI(wantN + 4, 90, 130);
+			wantS = ClampI(wantS + 4, 95, 135);
+			wantK = ClampI(wantK + 3, 90, 120);
+		}
+
+		if (loud && seg > 1) {
+			wantT = ModeBias(mode, 106, 4, -6, 0, 10, -8, 10, -2, 2, 4);
+			wantP = ModeBias(mode, 104, 6, -2, 2, 4, 0, 2, 0, -4, 2);
+		} else if (quiet) {
+			wantT = ModeBias(mode, 96, 0, -4, -2, 0, -6, 0, -2, 0, -2);
+		}
+
+		if (peak)
+			wantD = ModeBias(mode, 108, 2, -2, 0, 8, -4, 4, 0, 2, 0);
+		else if (quiet)
+			wantD = ModeBias(mode, 94, 0, -2, -2, 0, -4, 0, 0, 0, -2);
+
+		// バランスは変化を抑えめ、モード色は他モードより弱く
+		if (mode == MP_ANA_BALANCED) {
+			wantN = ClampI(100 + (wantN - 100) / 2, 94, 112);
+			wantK = ClampI(100 + (wantK - 100) / 2, 94, 108);
+			wantI = ClampI(100 + (wantI - 100) / 2, 94, 110);
+			wantS = ClampI(100 + (wantS - 100) / 2, 96, 112);
+			if (wantR > 100) wantR = FxA(30);
+			if (wantC > 100) wantC = FxA(25);
+			if (wantY > 100) wantY = FxA(25);
+			wantR = ClampI(wantR, 0, 45);
+			wantC = ClampI(wantC, 0, 35);
+			wantY = ClampI(wantY, 0, 40);
+		}
+
+		wantN = ClampI(wantN, 88, 130);
+		wantK = ClampI(wantK, 88, 120);
+		wantI = ClampI(wantI, 88, 128);
+		wantS = ClampI(wantS, 90, 135);
+		wantA = ClampI(wantA, 100, 120);
+		wantO = ClampI(wantO, 100, 120);
+		wantT = ClampI(wantT, 88, 118);
+		wantP = ClampI(wantP, 90, 112);
+		wantD = ClampI(wantD, 75, 112);
+		wantR = ClampI(wantR, 0, 200);
+		wantC = ClampI(wantC, 0, 200);
+		wantY = ClampI(wantY, 0, 200);
+
+		const int phase = seg % 6;
+		if (phase == 0 || abs(wantN - prevN) >= 4)
+			flushEq(L"N", tLaneN, prevN, t1, wantN);
+		if (phase == 1 || abs(wantK - prevK) >= 4)
+			flushEq(L"K", tLaneK, prevK, t1, wantK);
+		if (phase == 2 || abs(wantI - prevI) >= 4)
+			flushEq(L"I", tLaneI, prevI, t1, wantI);
+		if (phase == 3 || abs(wantS - prevS) >= 5)
+			flushEq(L"S", tLaneS, prevS, t1, wantS);
+		if (abs(wantR - prevR) >= 8)
+			flushFx(L"r", tLaneR, prevR, t1, wantR);
+		if (abs(wantC - prevC) >= 8)
+			flushFx(L"c", tLaneC, prevC, t1, wantC);
+		if (abs(wantY - prevY) >= 8)
+			flushFx(L"y", tLaneY, prevY, t1, wantY);
+		if (abs(wantA - prevA) >= 4)
+			flushEq(L"a", tLaneA, prevA, t1, wantA);
+		if (abs(wantO - prevO) >= 4)
+			flushEq(L"o", tLaneO, prevO, t1, wantO);
+		if (abs(wantT - prevT) >= 3)
+			flushEq(L"t", tLaneT, prevT, t1, wantT);
+		if (abs(wantP - prevP) >= 3)
+			flushEq(L"p", tLaneP, prevP, t1, wantP);
+		if (abs(wantD - prevD) >= 4)
+			flushDs(tLaneD, prevD, t1, wantD);
+
+		// トランジェント・パンチ: モードで A/B を使い分け、終わったら 0 へ
+		if (punchBudget > 0 && i > 2 && i + 2 < n) {
+			const float thr = med + (p90 - med) * 0.55f;
+			if (g_ana.rms[i] > thr && g_ana.rms[i] > g_ana.rms[i - 1] * 1.2f) {
+				int yPunch = 0;
+				if (mode == MP_ANA_ELECTRO || mode == MP_ANA_INTENSE || mode == MP_ANA_COMEDY)
+					yPunch = FxB(ModeBias(mode, 35, 10, 0, 0, 15, 0, 20, 0, 5, 5));
+				else
+					yPunch = FxA(ModeBias(mode, 45, 10, 0, 0, 15, -10, 10, 0, 5, 0));
+				AppendCmd(out, CmdAt(L"y", t0, t0 + 0.5, 0, yPunch, TRUE));
+				AppendCmd(out, CmdAt(L"y", t0 + 0.5, t0 + 1.1, yPunch, 0, TRUE));
+				prevY = 0;
+				tLaneY = t0 + 1.1;
+				--punchBudget;
+			}
+		}
+
+		if (hop >= 9) {
+			const float a0 = MeanRange(g_ana.rms, i, i + hop / 3);
+			const float a1 = MeanRange(g_ana.rms, i + hop * 2 / 3, i1);
+			if (a0 > 0.008f && a1 > a0 * 1.4f && a1 > med) {
+				AppendCmd(out, CmdAt(L"t", t0, t1, 100, ModeBias(mode, 108, 2, -2, 0, 12, -4, 10, 0, 2, 4), TRUE));
+				AppendCmd(out, CmdAt(L"N", t0, t1, 100, ModeBias(mode, 114, 2, 0, 2, 8, 0, 6, 2, 2, 4), TRUE));
+			}
+		}
+	}
+
+	const double tend = (n - 1) * kHopSec;
+	flushEq(L"N", tLaneN, prevN, tend, 100);
+	flushEq(L"K", tLaneK, prevK, tend, 100);
+	flushEq(L"I", tLaneI, prevI, tend, 100);
+	flushEq(L"S", tLaneS, prevS, tend, 100);
+	flushFx(L"r", tLaneR, prevR, tend, 0);
+	flushFx(L"c", tLaneC, prevC, tend, 0);
+	flushFx(L"y", tLaneY, prevY, tend, 0);
+	flushEq(L"a", tLaneA, prevA, tend, 100);
+	flushEq(L"o", tLaneO, prevO, tend, 100);
+	flushEq(L"t", tLaneT, prevT, tend, 100);
+	flushEq(L"p", tLaneP, prevP, tend, 100);
+	flushDs(tLaneD, prevD, tend, 100);
 
 	out.Trim();
 	return out;

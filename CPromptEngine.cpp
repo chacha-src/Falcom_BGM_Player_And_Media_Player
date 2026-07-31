@@ -50,6 +50,11 @@ struct MpPromptEvent {
 };
 
 static std::vector<MpPromptEvent> g_events;
+static std::vector<int> g_eventsByCmd[CMD_PRESET_FA + 1];
+static int g_lastAppliedVal[CMD_PRESET_FA + 1];
+static BOOL g_lastAppliedValid[CMD_PRESET_FA + 1];
+static DWORD g_lastUiSyncTick = 0;
+static BOOL g_uiDirty = FALSE;
 static BOOL g_active = FALSE;
 static BOOL g_hasBackup = FALSE;
 static MpPromptBackup g_backup;
@@ -300,7 +305,8 @@ static void ApplyPreset(MpPromptCmd cmd)
 		ApplyEqIndex(0, 108); ApplyEqIndex(1, 105); ApplyEqIndex(2, 102);
 		ApplyEqIndex(10, 96); ApplyEqIndex(11, 92); ApplyEqIndex(12, 88);
 		ApplyEqIndex(13, 86); ApplyEqIndex(14, 84);
-		ApplyFx(0, 108);
+		// FX: 0=off / 1-100=通常 / 101-200=別モード。しょんぼりは通常リバーブを軽く。
+		ApplyFx(0, 55);
 		break;
 	case CMD_PRESET_BR:
 		ApplyPitchPercent(104);
@@ -387,19 +393,53 @@ static void ApplyBackupForCmd(MpPromptCmd cmd)
 
 static int FindLastEventIndex(MpPromptCmd cmd, double t)
 {
+	if (cmd <= CMD_NONE || cmd > CMD_PRESET_FA) return -1;
+	const std::vector<int>& idxs = g_eventsByCmd[cmd];
 	int best = -1;
 	double bestT = -1.0;
-	for (int i = 0; i < (int)g_events.size(); ++i) {
+	// 時刻順に積んであるので末尾から探す
+	for (int k = (int)idxs.size() - 1; k >= 0; --k) {
+		const int i = idxs[k];
 		const MpPromptEvent& ev = g_events[i];
-		if (ev.cmd != cmd) continue;
 		if (g_promptEventCutoff >= 0.0 && ev.t0 < g_promptEventCutoff - 0.05) continue;
 		if (ev.t0 > t + 0.001) continue;
-		if (ev.t0 > bestT) {
-			bestT = ev.t0;
-			best = i;
-		}
+		best = i;
+		bestT = ev.t0;
+		break;
 	}
+	(void)bestT;
 	return best;
+}
+
+static void RebuildEventIndex()
+{
+	for (int c = 0; c <= CMD_PRESET_FA; ++c)
+		g_eventsByCmd[c].clear();
+	for (int i = 0; i < (int)g_events.size(); ++i) {
+		const int c = (int)g_events[i].cmd;
+		if (c > CMD_NONE && c <= CMD_PRESET_FA)
+			g_eventsByCmd[c].push_back(i);
+	}
+	for (int c = 0; c <= CMD_PRESET_FA; ++c) {
+		g_lastAppliedValid[c] = FALSE;
+		g_lastAppliedVal[c] = INT_MIN;
+	}
+	g_uiDirty = FALSE;
+	g_lastUiSyncTick = 0;
+}
+
+static void ApplyEventValueCached(MpPromptCmd cmd, int val)
+{
+	const int ci = (int)cmd;
+	if (ci > 0 && ci <= CMD_PRESET_FA
+		&& g_lastAppliedValid[ci] && g_lastAppliedVal[ci] == val)
+		return;
+	ApplyEventValue(cmd, val);
+	if (ci > 0 && ci <= CMD_PRESET_FA) {
+		g_lastAppliedValid[ci] = TRUE;
+		g_lastAppliedVal[ci] = val;
+	}
+	g_uiDirty = TRUE;
 }
 
 } // namespace
@@ -524,6 +564,7 @@ void MpPromptBackupCapture(MpPromptBackup& out)
 	out.eqDelay = savedata.eq_delay;
 	out.eqEnv = savedata.eqsoundenv;
 	out.eqEffect = savedata.eqsoundeffect;
+	out.eqSoundEq = savedata.eqsoundeq;
 }
 
 void MpPromptBackupRestore(const MpPromptBackup& in)
@@ -541,6 +582,12 @@ void MpPromptBackupRestore(const MpPromptBackup& in)
 	savedata.eq_delay = in.eqDelay;
 	savedata.eqsoundenv = in.eqEnv;
 	savedata.eqsoundeffect = in.eqEffect;
+	savedata.eqsoundeq = in.eqSoundEq;
+	for (int c = 0; c <= CMD_PRESET_FA; ++c) {
+		g_lastAppliedValid[c] = FALSE;
+		g_lastAppliedVal[c] = INT_MIN;
+	}
+	g_uiDirty = TRUE;
 }
 
 void MpPromptBackupToSavedata(const MpPromptBackup& b)
@@ -555,6 +602,7 @@ void MpPromptBackupToSavedata(const MpPromptBackup& b)
 	savedata.mpPromptBackupEqDelay = b.eqDelay;
 	savedata.mpPromptBackupEqEnv = b.eqEnv;
 	savedata.mpPromptBackupEqEffect = b.eqEffect;
+	savedata.mpPromptBackupEqSoundEq = b.eqSoundEq;
 }
 
 void MpPromptBackupFromSavedata(MpPromptBackup& b)
@@ -568,6 +616,7 @@ void MpPromptBackupFromSavedata(MpPromptBackup& b)
 	b.eqDelay = savedata.mpPromptBackupEqDelay;
 	b.eqEnv = savedata.mpPromptBackupEqEnv;
 	b.eqEffect = savedata.mpPromptBackupEqEffect;
+	b.eqSoundEq = savedata.mpPromptBackupEqSoundEq;
 }
 
 BOOL MpPromptParse(const CString& text, CString* errMsg)
@@ -596,6 +645,7 @@ BOOL MpPromptParse(const CString& text, CString* errMsg)
 		if (a.t0 != b.t0) return a.t0 < b.t0;
 		return (int)a.cmd < (int)b.cmd;
 	});
+	RebuildEventIndex();
 	return TRUE;
 }
 
@@ -644,6 +694,7 @@ void MpPromptReset()
 void MpPromptClearAll()
 {
 	g_events.clear();
+	RebuildEventIndex();
 	if (g_hasBackup)
 		MpPromptBackupRestore(g_backup);
 	g_active = FALSE;
@@ -651,6 +702,7 @@ void MpPromptClearAll()
 	savedata.mpPromptBackupValid = 0;
 	g_lastPresetIdx = -1;
 	MpPromptResetPlaybackState();
+	MpPromptSyncUi();
 }
 
 void MpPromptTickAtTime(double tSec)
@@ -686,17 +738,21 @@ void MpPromptTickAtTime(double tSec)
 	for (int ci = CMD_PITCH; ci <= CMD_EQ_EFFECT; ++ci) {
 		MpPromptCmd cmd = (MpPromptCmd)ci;
 		int idx = FindLastEventIndex(cmd, t);
-		if (idx < 0) {
-			ApplyBackupForCmd(cmd);
+		if (idx < 0 || t < g_events[idx].t0) {
+			// INT_MIN = バックアップ適用済み（値域0..200と衝突しない）
+			if (!(ci <= CMD_PRESET_FA && g_lastAppliedValid[ci] && g_lastAppliedVal[ci] == INT_MIN)) {
+				ApplyBackupForCmd(cmd);
+				if (ci <= CMD_PRESET_FA) {
+					g_lastAppliedValid[ci] = TRUE;
+					g_lastAppliedVal[ci] = INT_MIN;
+				}
+				g_uiDirty = TRUE;
+			}
 			continue;
 		}
 		const MpPromptEvent& ev = g_events[idx];
-		if (t < ev.t0) {
-			ApplyBackupForCmd(cmd);
-			continue;
-		}
 		int val = InterpValue(ev, t);
-		ApplyEventValue(cmd, val);
+		ApplyEventValueCached(cmd, val);
 	}
 
 	for (int i = 0; i < (int)g_events.size(); ++i) {
@@ -708,11 +764,26 @@ void MpPromptTickAtTime(double tSec)
 		if (i == g_lastPresetIdx) continue;
 		ApplyPreset(ev.cmd);
 		g_lastPresetIdx = i;
+		for (int c = 0; c <= CMD_PRESET_FA; ++c)
+			g_lastAppliedValid[c] = FALSE;
+		g_uiDirty = TRUE;
 	}
 
-	// EQ窓が開いていると OnTimer がスライダー→savedata 上書きするため、適用後に同期する
-	if (og->m_EqualizerDlg && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
-		og->m_EqualizerDlg->SyncSlidersFromSavedata();
+	// EQ窓 Sync は毎フレームやると全体が重くなる。変化時のみ・最短200ms間隔。
+	if (g_uiDirty) {
+		const DWORD now = GetTickCount();
+		if (g_lastUiSyncTick == 0 || now - g_lastUiSyncTick >= 200) {
+			g_lastUiSyncTick = now;
+			g_uiDirty = FALSE;
+			MpPromptSyncUi();
+			if (og->m_dsval.GetSafeHwnd() && og->m_dsvols.GetSafeHwnd()) {
+				CString s, ss;
+				s.Format(_T("%.1f%%"), (savedata.dsvol + 499) * 2.0 / 10.0);
+				og->m_dsvols.GetWindowText(ss);
+				if (s != ss) og->m_dsvols.SetWindowText(s);
+			}
+		}
+	}
 }
 
 void MpPromptPushHistory(LPCTSTR text)
