@@ -3,8 +3,6 @@
 #include "CMediaPlayerDlg.h"
 #include "CEqualizer.h"
 #include "oggDlg.h"
-#include <vector>
-#include <algorithm>
 #include <cmath>
 #include <mutex>
 
@@ -43,14 +41,18 @@ enum MpPromptCmd {
 
 struct MpPromptEvent {
 	MpPromptCmd cmd;
-	double t0;
-	double t1;
+	double t0;       // @: 開始秒 / %: 周期内オフセット開始
+	double t1;       // @: 終了秒 / %: 周期内オフセット終了
 	int v0;
 	int v1;
+	double period;   // 0=@ / >0=% 周期(秒)
 };
 
-static std::vector<MpPromptEvent> g_events;
-static std::vector<int> g_eventsByCmd[CMD_PRESET_FA + 1];
+const int kMaxPromptEvents = 2048;
+static MpPromptEvent g_events[kMaxPromptEvents];
+static int g_eventCount = 0;
+static int g_eventsByCmd[CMD_PRESET_FA + 1][kMaxPromptEvents];
+static int g_eventsByCmdN[CMD_PRESET_FA + 1];
 static int g_lastAppliedVal[CMD_PRESET_FA + 1];
 static BOOL g_lastAppliedValid[CMD_PRESET_FA + 1];
 static DWORD g_lastUiSyncTick = 0;
@@ -59,6 +61,7 @@ static BOOL g_active = FALSE;
 static BOOL g_hasBackup = FALSE;
 static MpPromptBackup g_backup;
 static int g_lastPresetIdx = -1;
+static int g_lastPresetCycle = -1;
 static int g_lastPlf = 0;
 static BOOL g_promptAwaitPlayStart = FALSE;
 static BOOL g_promptExecuteBeforePlay = FALSE;
@@ -186,8 +189,9 @@ static BOOL ParseOnePrompt(const CString& line, int startPos, CString* errMsg)
 {
 	const int n = line.GetLength();
 	int pos = startPos;
-	while (pos < n && line[pos] != '@') pos++;
-	if (pos >= n) return FALSE;
+	if (pos >= n || (line[pos] != '@' && line[pos] != '%'))
+		return FALSE;
+	const BOOL isPct = (line[pos] == '%') ? TRUE : FALSE;
 	pos++;
 	if (pos >= n) {
 		if (errMsg) *errMsg = LL14(L"コマンド文字がありません。", L"No command letter.", L"Pas de lettre de commande.", L"Nessuna lettera di comando.", L"Sin letra de comando.", L"명령 문자가 없습니다.", L"没有命令字母。", L"لا يوجد حرف أمر.", L"Нет буквы команды.", L"Kein Befehlsbuchstabe.", L"Sem letra de comando.", L"Geen opdrachtletter.", L"Brak litery polecenia.", L"Komut harfi yok.");
@@ -205,18 +209,58 @@ static BOOL ParseOnePrompt(const CString& line, int startPos, CString* errMsg)
 		if (errMsg) *errMsg = LL14(L"不明なコマンドです。", L"Unknown command.", L"Commande inconnue.", L"Comando sconosciuto.", L"Comando desconocido.", L"알 수 없는 명령입니다.", L"未知命令。", L"أمر غير معروف.", L"Неизвестная команда.", L"Unbekannter Befehl.", L"Comando desconhecido.", L"Onbekende opdracht.", L"Nieznane polecenie.", L"Bilinmeyen komut.");
 		return FALSE;
 	}
-	double t0 = 0, t1 = 0;
+	double t0 = 0, t1 = 0, period = 0;
 	if (!ParseTimeToken(line, pos, t0)) {
-		if (errMsg) *errMsg = LL14(L"時刻の解析に失敗しました。", L"Failed to parse time.", L"Echec analyse heure.", L"Analisi ora fallita.", L"Error al analizar tiempo.", L"시간 해석 실패.", L"时间解析失败。", L"فشل تحليل الوقت.", L"Ошибка разбора времени.", L"Zeit parsen fehlgeschlagen.", L"Falha ao analisar hora.", L"Tijd parseren mislukt.", L"Blad parsowania czasu.", L"Zaman ayrıştırılamadı.");
+		if (errMsg) *errMsg = isPct
+			? LL14(L"周期の解析に失敗しました。", L"Failed to parse period.", L"Echec analyse periode.", L"Analisi periodo fallita.", L"Error al analizar periodo.", L"주기 해석 실패.", L"周期解析失败。", L"فشل تحليل الدورة.", L"Ошибка разбора периода.", L"Periode parsen fehlgeschlagen.", L"Falha ao analisar periodo.", L"Periode parseren mislukt.", L"Blad parsowania okresu.", L"Donem ayrıştırılamadı.")
+			: LL14(L"時刻の解析に失敗しました。", L"Failed to parse time.", L"Echec analyse heure.", L"Analisi ora fallita.", L"Error al analizar tiempo.", L"시간 해석 실패.", L"时间解析失败。", L"فشل تحليل الوقت.", L"Ошибка разбора времени.", L"Zeit parsen fehlgeschlagen.", L"Falha ao analisar hora.", L"Tijd parseren mislukt.", L"Blad parsowania czasu.", L"Zaman ayrıştırılamadı.");
 		return FALSE;
 	}
-	t1 = t0;
-	while (pos < n && line[pos] == ' ') pos++;
-	if (pos < n && line[pos] == '-') {
-		pos++;
-		if (!ParseTimeToken(line, pos, t1)) {
-			if (errMsg) *errMsg = LL14(L"終了時刻の解析に失敗しました。", L"Failed to parse end time.", L"Echec heure de fin.", L"Fine ora fallita.", L"Error hora final.", L"종료 시각 해석 실패.", L"结束时间解析失败。", L"فشل وقت النهاية.", L"Ошибка конечного времени.", L"Endzeit parsen fehlgeschlagen.", L"Falha hora final.", L"Eindtijd mislukt.", L"Blad czasu końca.", L"Bitiş zamanı başarısız.");
+	if (isPct) {
+		period = t0;
+		if (period < 0.001) {
+			if (errMsg) *errMsg = LL14(L"周期は0より大きい必要があります。", L"Period must be greater than 0.", L"La periode doit etre > 0.", L"Il periodo deve essere > 0.", L"El periodo debe ser > 0.", L"주기는 0보다 커야 합니다.", L"周期必须大于0。", L"يجب أن تكون الدورة > 0.", L"Период должен быть > 0.", L"Periode muss > 0 sein.", L"Periodo deve ser > 0.", L"Periode moet > 0 zijn.", L"Okres musi byc > 0.", L"Donem 0'dan buyuk olmali.");
 			return FALSE;
+		}
+		while (pos < n && line[pos] == ' ') pos++;
+		if (pos >= n || line[pos] != '<') {
+			if (errMsg) *errMsg = LL14(L"周期オフセットの '<' がありません。", L"Missing '<' for period offset.", L"'<' manquant pour le decalage.", L"Manca '<' per l'offset.", L"Falta '<' del desplazamiento.", L"주기 오프셋 '<' 가 없습니다.", L"缺少周期偏移 '<'。", L"مفقود '<' للإزاحة.", L"Нет '<' для смещения.", L"'<' fuer Offset fehlt.", L"Falta '<' do deslocamento.", L"'<' voor offset ontbreekt.", L"Brak '<' dla offsetu.", L"Donem ofseti icin '<' yok.");
+			return FALSE;
+		}
+		pos++;
+		if (!ParseTimeToken(line, pos, t0)) {
+			if (errMsg) *errMsg = LL14(L"オフセットの解析に失敗しました。", L"Failed to parse offset.", L"Echec analyse decalage.", L"Analisi offset fallita.", L"Error al analizar desplazamiento.", L"오프셋 해석 실패.", L"偏移解析失败。", L"فشل تحليل الإزاحة.", L"Ошибка разбора смещения.", L"Offset parsen fehlgeschlagen.", L"Falha ao analisar deslocamento.", L"Offset parseren mislukt.", L"Blad parsowania offsetu.", L"Ofset ayrıştırılamadı.");
+			return FALSE;
+		}
+		t1 = t0;
+		while (pos < n && line[pos] == ' ') pos++;
+		if (pos < n && line[pos] == '-') {
+			pos++;
+			if (!ParseTimeToken(line, pos, t1)) {
+				if (errMsg) *errMsg = LL14(L"終了オフセットの解析に失敗しました。", L"Failed to parse end offset.", L"Echec decalage de fin.", L"Fine offset fallita.", L"Error desplazamiento final.", L"종료 오프셋 해석 실패.", L"结束偏移解析失败。", L"فشل إزاحة النهاية.", L"Ошибка конечного смещения.", L"End-Offset parsen fehlgeschlagen.", L"Falha deslocamento final.", L"Eind-offset mislukt.", L"Blad offsetu konca.", L"Bitis ofseti basarisiz.");
+				return FALSE;
+			}
+		}
+		while (pos < n && line[pos] == ' ') pos++;
+		if (pos >= n || line[pos] != '>') {
+			if (errMsg) *errMsg = LL14(L"周期オフセットの '>' がありません。", L"Missing '>' for period offset.", L"'>' manquant pour le decalage.", L"Manca '>' per l'offset.", L"Falta '>' del desplazamiento.", L"주기 오프셋 '>' 가 없습니다.", L"缺少周期偏移 '>'。", L"مفقود '>' للإزاحة.", L"Нет '>' для смещения.", L"'>' fuer Offset fehlt.", L"Falta '>' do deslocamento.", L"'>' voor offset ontbreekt.", L"Brak '>' dla offsetu.", L"Donem ofseti icin '>' yok.");
+			return FALSE;
+		}
+		pos++;
+		if (t0 < 0.0) t0 = 0.0;
+		if (t1 < 0.0) t1 = 0.0;
+		if (t0 >= period) t0 = period - 0.001;
+		if (t1 >= period) t1 = period - 0.001;
+	}
+	else {
+		t1 = t0;
+		while (pos < n && line[pos] == ' ') pos++;
+		if (pos < n && line[pos] == '-') {
+			pos++;
+			if (!ParseTimeToken(line, pos, t1)) {
+				if (errMsg) *errMsg = LL14(L"終了時刻の解析に失敗しました。", L"Failed to parse end time.", L"Echec heure de fin.", L"Fine ora fallita.", L"Error hora final.", L"종료 시각 해석 실패.", L"结束时间解析失败。", L"فشل وقت النهاية.", L"Ошибка конечного времени.", L"Endzeit parsen fehlgeschlagen.", L"Falha hora final.", L"Eindtijd mislukt.", L"Blad czasu końca.", L"Bitiş zamanı başarısız.");
+				return FALSE;
+			}
 		}
 	}
 	int v0 = 0, v1 = 0;
@@ -231,13 +275,17 @@ static BOOL ParseOnePrompt(const CString& line, int startPos, CString* errMsg)
 		double tmp = t0; t0 = t1; t1 = tmp;
 		int tv = v0; v0 = v1; v1 = tv;
 	}
-	MpPromptEvent ev{};
+	if (g_eventCount >= kMaxPromptEvents) {
+		if (errMsg) *errMsg = LL14(L"プロンプトイベントが上限を超えました。", L"Prompt event limit exceeded.", L"Limite d evenements depassee.", L"Limite eventi superato.", L"Limite de eventos superado.", L"프롬프트 이벤트 상한 초과.", L"提示事件超出上限。", L"تم تجاوز حد الأحداث.", L"Превышен лимит событий.", L"Ereignislimit ueberschritten.", L"Limite de eventos excedido.", L"Eventlimiet overschreden.", L"Przekroczono limit zdarzen.", L"Olay limiti asildi.");
+		return FALSE;
+	}
+	MpPromptEvent& ev = g_events[g_eventCount++];
 	ev.cmd = cmd;
 	ev.t0 = t0;
 	ev.t1 = t1;
 	ev.v0 = v0;
 	ev.v1 = v1;
-	g_events.push_back(ev);
+	ev.period = period;
 	return TRUE;
 }
 
@@ -327,12 +375,17 @@ static void ApplyPreset(MpPromptCmd cmd)
 	}
 }
 
+static int InterpValueAbs(double t, double abs0, double abs1, int v0, int v1)
+{
+	if (t <= abs0) return v0;
+	if (t >= abs1 || abs1 <= abs0) return v1;
+	double r = (t - abs0) / (abs1 - abs0);
+	return (int)(v0 + (v1 - v0) * r + 0.5);
+}
+
 static int InterpValue(const MpPromptEvent& ev, double t)
 {
-	if (t <= ev.t0) return ev.v0;
-	if (t >= ev.t1 || ev.t1 <= ev.t0) return ev.v1;
-	double r = (t - ev.t0) / (ev.t1 - ev.t0);
-	return (int)(ev.v0 + (ev.v1 - ev.v0) * r + 0.5);
+	return InterpValueAbs(t, ev.t0, ev.t1, ev.v0, ev.v1);
 }
 
 static void ApplyEventValue(MpPromptCmd cmd, int val)
@@ -391,34 +444,61 @@ static void ApplyBackupForCmd(MpPromptCmd cmd)
 	}
 }
 
-static int FindLastEventIndex(MpPromptCmd cmd, double t)
+static int FindLastEventIndex(MpPromptCmd cmd, double t, double* outAbs0, double* outAbs1)
 {
 	if (cmd <= CMD_NONE || cmd > CMD_PRESET_FA) return -1;
-	const std::vector<int>& idxs = g_eventsByCmd[cmd];
+	const int nIdx = g_eventsByCmdN[cmd];
 	int best = -1;
-	double bestT = -1.0;
-	// 時刻順に積んであるので末尾から探す
-	for (int k = (int)idxs.size() - 1; k >= 0; --k) {
-		const int i = idxs[k];
+	double bestAbs0 = -1.0;
+	double bestAbs1 = -1.0;
+	for (int k = 0; k < nIdx; ++k) {
+		const int i = g_eventsByCmd[cmd][k];
 		const MpPromptEvent& ev = g_events[i];
-		if (g_promptEventCutoff >= 0.0 && ev.t0 < g_promptEventCutoff - 0.05) continue;
-		if (ev.t0 > t + 0.001) continue;
-		best = i;
-		bestT = ev.t0;
-		break;
+		double abs0 = 0.0, abs1 = 0.0;
+		if (ev.period > 0.0) {
+			if (ev.period < 0.001) continue;
+			double ph = fmod(t, ev.period);
+			if (ph < 0.0) ph += ev.period;
+			if (ph + 0.001 < ev.t0 || ph > ev.t1 + 0.001)
+				continue;
+			const double cycle = floor(t / ev.period);
+			abs0 = cycle * ev.period + ev.t0;
+			abs1 = cycle * ev.period + ev.t1;
+			if (g_promptEventCutoff >= 0.0 && abs0 < g_promptEventCutoff - 0.05)
+				continue;
+		}
+		else {
+			if (g_promptEventCutoff >= 0.0 && ev.t0 < g_promptEventCutoff - 0.05)
+				continue;
+			if (ev.t0 > t + 0.001)
+				continue;
+			abs0 = ev.t0;
+			abs1 = ev.t1;
+		}
+		if (abs0 >= bestAbs0 - 0.0001) {
+			best = i;
+			bestAbs0 = abs0;
+			bestAbs1 = abs1;
+		}
 	}
-	(void)bestT;
+	if (outAbs0) *outAbs0 = bestAbs0;
+	if (outAbs1) *outAbs1 = bestAbs1;
 	return best;
 }
 
 static void RebuildEventIndex()
 {
 	for (int c = 0; c <= CMD_PRESET_FA; ++c)
-		g_eventsByCmd[c].clear();
-	for (int i = 0; i < (int)g_events.size(); ++i) {
+		g_eventsByCmdN[c] = 0;
+	for (int i = 0; i < g_eventCount; ++i) {
 		const int c = (int)g_events[i].cmd;
-		if (c > CMD_NONE && c <= CMD_PRESET_FA)
-			g_eventsByCmd[c].push_back(i);
+		if (c > CMD_NONE && c <= CMD_PRESET_FA) {
+			const int n = g_eventsByCmdN[c];
+			if (n < kMaxPromptEvents) {
+				g_eventsByCmd[c][n] = i;
+				g_eventsByCmdN[c] = n + 1;
+			}
+		}
 	}
 	for (int c = 0; c <= CMD_PRESET_FA; ++c) {
 		g_lastAppliedValid[c] = FALSE;
@@ -492,6 +572,7 @@ static void MpPromptPrepareForNextPlayback()
 		MpPromptBackupRestore(g_backup);
 
 	g_lastPresetIdx = -1;
+	g_lastPresetCycle = -1;
 	g_promptEventCutoff = -1.0;
 	g_promptExecuteBeforePlay = FALSE;
 	g_lastPlf = 0;
@@ -518,6 +599,7 @@ void MpPromptOnAppShutdown()
 		MpPromptBackupRestore(g_backup);
 	g_active = FALSE;
 	g_lastPresetIdx = -1;
+	g_lastPresetCycle = -1;
 	g_promptNewTrack = FALSE;
 	MpPromptResetPlaybackState();
 	OggResetRubberBandStretcher();
@@ -546,9 +628,12 @@ void MpPromptNotifyPlayback(int plfNow, double tSec)
 			g_promptExecuteBeforePlay = FALSE;
 		}
 		g_lastPresetIdx = -1;
+		g_lastPresetCycle = -1;
 	}
-	if (!on && g_lastPlf)
+	if (!on && g_lastPlf) {
 		g_lastPresetIdx = -1;
+		g_lastPresetCycle = -1;
+	}
 	g_lastPlf = on;
 }
 
@@ -621,7 +706,7 @@ void MpPromptBackupFromSavedata(MpPromptBackup& b)
 
 BOOL MpPromptParse(const CString& text, CString* errMsg)
 {
-	g_events.clear();
+	g_eventCount = 0;
 	CString src = text;
 	src.Replace(_T("\r\n"), _T("\n"));
 	int lineStart = 0;
@@ -630,29 +715,56 @@ BOOL MpPromptParse(const CString& text, CString* errMsg)
 		if (i == n || src[i] == '\n') {
 			CString line = src.Mid(lineStart, i - lineStart);
 			line.Trim();
+			// # から始まる行はコメント（dsBase=40% 等の % をコマンドと誤認しない）
+			if (!line.IsEmpty() && line[0] == '#') {
+				lineStart = i + 1;
+				continue;
+			}
 			int p = 0;
-			while (p < line.GetLength()) {
-				int at = line.Find('@', p);
-				if (at < 0) break;
-				if (!ParseOnePrompt(line, at, errMsg))
+			const int len = line.GetLength();
+			while (p < len) {
+				int at = -1, pct = -1;
+				for (int j = p; j < len; ++j) {
+					if (at < 0 && line[j] == '@') at = j;
+					// % は直後がコマンド文字のときだけ周期コマンド開始
+					if (pct < 0 && line[j] == '%' && j + 1 < len && _istalpha(line[j + 1]))
+						pct = j;
+					if (at >= 0 && pct >= 0) break;
+				}
+				int next = -1;
+				if (at >= 0 && pct >= 0) next = (at < pct) ? at : pct;
+				else if (at >= 0) next = at;
+				else if (pct >= 0) next = pct;
+				if (next < 0) break;
+				if (!ParseOnePrompt(line, next, errMsg))
 					return FALSE;
-				p = at + 1;
+				p = next + 1;
 			}
 			lineStart = i + 1;
 		}
 	}
-	std::sort(g_events.begin(), g_events.end(), [](const MpPromptEvent& a, const MpPromptEvent& b) {
-		if (a.t0 != b.t0) return a.t0 < b.t0;
-		return (int)a.cmd < (int)b.cmd;
-	});
+	// 挿入ソート (t0, cmd)。% はオフセット順でも索引構築用に整列
+	for (int i = 1; i < g_eventCount; ++i) {
+		MpPromptEvent key = g_events[i];
+		int j = i - 1;
+		while (j >= 0) {
+			const BOOL less = (g_events[j].t0 > key.t0)
+				|| (g_events[j].t0 == key.t0 && (int)g_events[j].cmd > (int)key.cmd);
+			if (!less) break;
+			g_events[j + 1] = g_events[j];
+			--j;
+		}
+		g_events[j + 1] = key;
+	}
 	RebuildEventIndex();
 	return TRUE;
 }
 
 void MpPromptClearEvents()
 {
-	g_events.clear();
+	g_eventCount = 0;
 	g_lastPresetIdx = -1;
+	g_lastPresetCycle = -1;
 }
 
 BOOL MpPromptIsActive() { return g_active; }
@@ -668,6 +780,7 @@ BOOL MpPromptExecute(const CString& text, CString* errMsg)
 		return FALSE;
 	g_active = TRUE;
 	g_lastPresetIdx = -1;
+	g_lastPresetCycle = -1;
 	g_promptExecuteBeforePlay = (plf != 1);
 	g_promptAwaitPlayStart = (plf != 1);
 	g_promptEventCutoff = -1.0;
@@ -687,13 +800,14 @@ void MpPromptReset()
 		MpPromptBackupRestore(g_backup);
 	g_active = FALSE;
 	g_lastPresetIdx = -1;
+	g_lastPresetCycle = -1;
 	MpPromptResetPlaybackState();
 	MpPromptSyncUi();
 }
 
 void MpPromptClearAll()
 {
-	g_events.clear();
+	g_eventCount = 0;
 	RebuildEventIndex();
 	if (g_hasBackup)
 		MpPromptBackupRestore(g_backup);
@@ -701,13 +815,14 @@ void MpPromptClearAll()
 	g_hasBackup = FALSE;
 	savedata.mpPromptBackupValid = 0;
 	g_lastPresetIdx = -1;
+	g_lastPresetCycle = -1;
 	MpPromptResetPlaybackState();
 	MpPromptSyncUi();
 }
 
 void MpPromptTickAtTime(double tSec)
 {
-	if (!g_active || g_events.empty() || !og) return;
+	if (!g_active || g_eventCount <= 0 || !og) return;
 	if (g_promptAwaitPlayStart) return;
 	if (tSec < 0.0) return;
 
@@ -737,9 +852,9 @@ void MpPromptTickAtTime(double tSec)
 
 	for (int ci = CMD_PITCH; ci <= CMD_EQ_EFFECT; ++ci) {
 		MpPromptCmd cmd = (MpPromptCmd)ci;
-		int idx = FindLastEventIndex(cmd, t);
-		if (idx < 0 || t < g_events[idx].t0) {
-			// INT_MIN = バックアップ適用済み（値域0..200と衝突しない）
+		double abs0 = -1.0, abs1 = -1.0;
+		int idx = FindLastEventIndex(cmd, t, &abs0, &abs1);
+		if (idx < 0) {
 			if (!(ci <= CMD_PRESET_FA && g_lastAppliedValid[ci] && g_lastAppliedVal[ci] == INT_MIN)) {
 				ApplyBackupForCmd(cmd);
 				if (ci <= CMD_PRESET_FA) {
@@ -751,22 +866,63 @@ void MpPromptTickAtTime(double tSec)
 			continue;
 		}
 		const MpPromptEvent& ev = g_events[idx];
-		int val = InterpValue(ev, t);
+		int val;
+		if (ev.period > 0.0) {
+			if (t <= abs0) val = ev.v0;
+			else if (t >= abs1 || abs1 <= abs0) val = ev.v1;
+			else {
+				double r = (t - abs0) / (abs1 - abs0);
+				val = (int)(ev.v0 + (ev.v1 - ev.v0) * r + 0.5);
+			}
+		}
+		else {
+			if (t < ev.t0) {
+				if (!(ci <= CMD_PRESET_FA && g_lastAppliedValid[ci] && g_lastAppliedVal[ci] == INT_MIN)) {
+					ApplyBackupForCmd(cmd);
+					if (ci <= CMD_PRESET_FA) {
+						g_lastAppliedValid[ci] = TRUE;
+						g_lastAppliedVal[ci] = INT_MIN;
+					}
+					g_uiDirty = TRUE;
+				}
+				continue;
+			}
+			val = InterpValue(ev, t);
+		}
 		ApplyEventValueCached(cmd, val);
 	}
 
-	for (int i = 0; i < (int)g_events.size(); ++i) {
+	for (int i = 0; i < g_eventCount; ++i) {
 		const MpPromptEvent& ev = g_events[i];
 		if (ev.cmd < CMD_PRESET_SB || ev.cmd > CMD_PRESET_FA) continue;
-		if (g_promptEventCutoff >= 0.0 && ev.t0 < g_promptEventCutoff - 0.05) continue;
-		if (t < ev.t0) continue;
-		if (t > ev.t1 + 0.5) continue;
-		if (i == g_lastPresetIdx) continue;
-		ApplyPreset(ev.cmd);
-		g_lastPresetIdx = i;
-		for (int c = 0; c <= CMD_PRESET_FA; ++c)
-			g_lastAppliedValid[c] = FALSE;
-		g_uiDirty = TRUE;
+		if (ev.period > 0.0) {
+			if (ev.period < 0.001) continue;
+			double ph = fmod(t, ev.period);
+			if (ph < 0.0) ph += ev.period;
+			if (ph + 0.001 < ev.t0 || ph > ev.t1 + 0.5) continue;
+			const int cycle = (int)floor(t / ev.period);
+			const double abs0 = (double)cycle * ev.period + ev.t0;
+			if (g_promptEventCutoff >= 0.0 && abs0 < g_promptEventCutoff - 0.05) continue;
+			if (i == g_lastPresetIdx && cycle == g_lastPresetCycle) continue;
+			ApplyPreset(ev.cmd);
+			g_lastPresetIdx = i;
+			g_lastPresetCycle = cycle;
+			for (int c = 0; c <= CMD_PRESET_FA; ++c)
+				g_lastAppliedValid[c] = FALSE;
+			g_uiDirty = TRUE;
+		}
+		else {
+			if (g_promptEventCutoff >= 0.0 && ev.t0 < g_promptEventCutoff - 0.05) continue;
+			if (t < ev.t0) continue;
+			if (t > ev.t1 + 0.5) continue;
+			if (i == g_lastPresetIdx) continue;
+			ApplyPreset(ev.cmd);
+			g_lastPresetIdx = i;
+			g_lastPresetCycle = -1;
+			for (int c = 0; c <= CMD_PRESET_FA; ++c)
+				g_lastAppliedValid[c] = FALSE;
+			g_uiDirty = TRUE;
+		}
 	}
 
 	// EQ窓 Sync は毎フレームやると全体が重くなる。変化時のみ・最短200ms間隔。

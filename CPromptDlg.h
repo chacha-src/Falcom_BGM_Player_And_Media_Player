@@ -63,6 +63,7 @@ protected:
 	afx_msg void OnSaveHist();
 	afx_msg void OnHistSel();
 	afx_msg void OnTextChanged();
+	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnEnterSizeMove();
 	afx_msg void OnExitSizeMove();

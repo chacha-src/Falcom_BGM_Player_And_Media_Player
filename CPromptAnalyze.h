@@ -14,7 +14,17 @@ enum MpPromptAnalyzeMode {
 	MP_ANA_ORCHESTRAL,     // オーケストラ風
 	MP_ANA_RETRO,          // レトロ
 	MP_ANA_CINEMATIC,      // シネマティック
-	MP_ANA_MODE_COUNT = 10
+	MP_ANA_ACOUSTIC,       // アコースティック
+	MP_ANA_VOCAL,          // ボーカルフォーカス
+	MP_ANA_CLUB,           // クラブ/ダンス
+	MP_ANA_AMBIENT,        // アンビエント
+	MP_ANA_LIVE,           // ライブステージ
+	MP_ANA_SOFTPOP,        // ソフトポップ
+	MP_ANA_HEALING,        // ヒーリング
+	MP_ANA_RELAX,          // リラックス
+	MP_ANA_SLEEP,          // スリープ
+	MP_ANA_YASURAGI,       // やすらぎ
+	MP_ANA_MODE_COUNT = 20
 };
 
 CString MpPromptAnalyzeModeName(int mode);

@@ -406,7 +406,7 @@ struct save{
 	// --- 書き出し時のタグ/ジャケット引き継ぎ(末尾追記。旧.datは1へ正規化) ---
 	int wav_export_copy_tags; // 1=タグとジャケットを出力ファイルへコピー
 
-	// --- プロンプト解析モード(末尾追記。0..9 = MpPromptAnalyzeMode) ---
+	// --- プロンプト解析モード(末尾追記。0..19 = MpPromptAnalyzeMode) ---
 	int mpPromptAnalyzeMode;
 
 	// --- 簡易ピアノロール 表示拡張(末尾追記。旧.datは0初期化→起動時に既定へ正規化) ---
