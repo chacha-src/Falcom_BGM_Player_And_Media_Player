@@ -31,8 +31,8 @@ struct FileTagFields {
 };
 
 void ReadFileTagFields(LPCTSTR path, FileTagFields& out);
-// 対応: MP3 ID3v2 / FLAC VorbisComment / WAV RIFF INFO / M4A(AAC) iTunes meta / Ogg Vorbis comment
-// 非対応例: 暗号化 flac(.qull3h), Opus 書き込み など。成功で true。
+// 対応: MP3 ID3v2 / FLAC VorbisComment / WAV RIFF INFO / M4A(AAC) iTunes meta / Ogg Vorbis comment / DSF(ID3v2追記)
+// 非対応例: 暗号化 flac(.qull3h), Opus 書き込み, DFF/WSD など。成功で true。
 bool WriteFileTagFields(LPCTSTR path, const FileTagFields& in);
 
 // ジャケット(カバーアート)の取り出しと埋め込み。
@@ -42,7 +42,7 @@ enum { FILETAG_COVER_MAX = 8 * 1024 * 1024 };
 // 戻り値は画像バイト数(0=見つからない)。mimeOut には "image/jpeg" 等が入る。
 int ExtractCoverArt(LPCTSTR path, BYTE* buf, int bufCap, char* mimeOut, int mimeCap);
 
-// 既存の mp3 / flac / wav へジャケットを埋め込む。成功で true。
+// 既存の mp3 / flac / wav / dsf へジャケットを埋め込む。成功で true。
 bool EmbedCoverArt(LPCTSTR path, const BYTE* data, int dataLen, const char* mime);
 
 // srcPath のテキストタグ(+copyCover ならジャケット)を、書き出し済みの dstPath へ写す。

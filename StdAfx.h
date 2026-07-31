@@ -428,6 +428,12 @@ struct save{
 
 	// --- プロンプトバックアップ: EQプリセット番号(末尾追記) ---
 	int mpPromptBackupEqSoundEq; // eqsoundeq
+
+	// --- KPI(mode==-3) 書き出し秒数(末尾追記。旧.datは0→起動時240=4分へ) ---
+	int wav_export_kpi_sec;
+
+	// --- 書き出しサンプリングレート(0=ソースのまま, 44100/48000/96000/192000) ---
+	int wav_export_sample_rate;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

@@ -703,7 +703,7 @@ void CPromptDlg::RestorePosFromSavedata()
 	m_posRestored = TRUE;
 }
 
-static void ScrollLegendEdit(CEdit& legend, short zDelta)
+static void ScrollLegendEdit(CCustomEdit& legend, short zDelta)
 {
 	if (!legend.GetSafeHwnd()) return;
 	const int lines = (zDelta > 0) ? -3 : 3;
@@ -744,6 +744,7 @@ BOOL CPromptDlg::OnInitDialog()
 		m_progress.SetPos(0);
 		m_progress.SetShowPercent(TRUE);
 		m_progress.SetColors(RGB(255, 236, 246), RGB(255, 170, 200), RGB(200, 120, 220));
+		m_progress.SetAeroMode(CCC_IsAeroEnabled());
 	}
 	if (CWnd* pProgL = GetDlgItem(IDC_MPP_PROG_L))
 		pProgL->SetWindowText(LL14(L"解析の進捗", L"Analyze progress", L"Progression", L"Avanzamento", L"Progreso", L"분석 진행", L"分析进度", L"Progress", L"Прогресс", L"Fortschritt", L"Progresso", L"Voortgang", L"Postep", L"Ilerleme"));
@@ -868,7 +869,7 @@ void CPromptDlg::OnSize(UINT nType, int cx, int cy)
 		SavePosToSavedata();
 }
 
-static BOOL LegendHitTestWheelPoint(const CEdit& legend, CPoint screenPt)
+static BOOL LegendHitTestWheelPoint(const CCustomEdit& legend, CPoint screenPt)
 {
 	if (!legend.GetSafeHwnd()) return FALSE;
 	CRect rc;

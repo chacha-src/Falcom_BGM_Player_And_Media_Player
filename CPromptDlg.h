@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CCustomControl.h"
 #include "resource.h"
@@ -17,9 +17,9 @@ public:
 	void SaveCurrentToHistory();
 
 protected:
-	CEdit m_edit;
+	CCustomEdit m_edit;
 	CCustomStatic m_lblEdit;
-	CEdit m_legend;
+	CCustomEdit m_legend;
 	CCustomComboBox m_hist;
 	CCustomComboBox m_mode;
 	CCustomProgressCtrl m_progress;

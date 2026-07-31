@@ -912,6 +912,34 @@
 #define IDC_TC_COVER_CLEAR              3692
 #define IDC_WAVEXPORT_COVER_PIC         3693
 #define IDC_TC_COVER_PIC                3694
+#define IDC_TC_TABS                     3695
+#define IDD_TAGEDIT                     209
+#define IDC_TAGEDIT_TITLE_L             3696
+#define IDC_TAGEDIT_TITLE               3697
+#define IDC_TAGEDIT_ARTIST_L            3698
+#define IDC_TAGEDIT_ARTIST              3699
+#define IDC_TAGEDIT_ALBUM_L             3700
+#define IDC_TAGEDIT_ALBUM               3701
+#define IDC_TAGEDIT_YEAR_L              3702
+#define IDC_TAGEDIT_YEAR                3703
+#define IDC_TAGEDIT_TRACK_L             3704
+#define IDC_TAGEDIT_TRACK               3705
+#define IDC_TAGEDIT_GENRE_L             3706
+#define IDC_TAGEDIT_GENRE               3707
+#define IDC_TAGEDIT_COMMENT_L           3708
+#define IDC_TAGEDIT_COMMENT             3709
+#define IDC_TAGEDIT_COVER_L             3710
+#define IDC_TAGEDIT_COVER_PIC           3711
+#define IDC_TAGEDIT_COVER               3712
+#define IDC_TAGEDIT_COVER_CLEAR         3713
+#define IDC_TAGEDIT_SAVE                3714
+#define IDC_TAGEDIT_CLOSE               3715
+#define IDC_TAGEDIT_HINT                3716
+#define IDC_TAGEDIT_STATUS              3717
+#define IDC_TC_KPI_SEC_L                3718
+#define IDC_TC_KPI_SEC                  3719
+#define IDC_TC_SRATE_L                  3720
+#define IDC_TC_SRATE                    3721
 
 #define ID_MP_SPEANA_BAR                32960
 #define ID_MP_SPEANA_MIRROR             32961
@@ -944,9 +972,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        209
+#define _APS_NEXT_RESOURCE_VALUE        210
 #define _APS_NEXT_COMMAND_VALUE         32973
-#define _APS_NEXT_CONTROL_VALUE         3695
+#define _APS_NEXT_CONTROL_VALUE         3722
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

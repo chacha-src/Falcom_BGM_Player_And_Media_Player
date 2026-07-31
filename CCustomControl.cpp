@@ -2149,7 +2149,10 @@ static BOOL CALLBACK CCC_InwomanInvalidateChild(HWND hChild, LPARAM)
          p->IsKindOf(RUNTIME_CLASS(CCustomCheckBox)) ||
          p->IsKindOf(RUNTIME_CLASS(CCustomSliderCtrl)) ||
          p->IsKindOf(RUNTIME_CLASS(CCustomRangeSliderCtrl)) ||
-         p->IsKindOf(RUNTIME_CLASS(CCustomComboBox))))
+         p->IsKindOf(RUNTIME_CLASS(CCustomComboBox)) ||
+         p->IsKindOf(RUNTIME_CLASS(CCustomProgressCtrl)) ||
+         p->IsKindOf(RUNTIME_CLASS(CCustomGroupBox)) ||
+         p->IsKindOf(RUNTIME_CLASS(CCustomStatic))))
     {
         ::InvalidateRect(hChild, NULL, FALSE); // 消去なし=ちらつかない
     }
@@ -2527,6 +2530,13 @@ static void DoSubclassChildControls(DlgBase* pDlg)
 			p->SetAeroMode(FALSE);
 			p->SubclassWindow(hc);
 		}
+		else if (_tcsicmp(cls, WC_TABCONTROL) == 0)
+		{
+			CCustomTabCtrl* p = new CCustomTabCtrl();
+			p->EnableAutoDelete();
+			p->SetAeroMode(FALSE);
+			p->SubclassWindow(hc);
+		}
 		else if (_tcsicmp(cls, _T("Button")) == 0)
         {
             LONG ls = ::GetWindowLong(hc, GWL_STYLE);
@@ -2804,6 +2814,7 @@ void CCustomEdit::PaintOpaqueClient(CDC& dc)
     {
         dc.FillSolidRect(&r, COLOR_EDIT_BG);
         DrawClientText(dc, r);
+        CCC_DrawInwoman(&dc, r, FALSE);
         return;
     }
     RECT rcBuf = { 0, 0, r.right, r.bottom };
@@ -2812,6 +2823,7 @@ void CCustomEdit::PaintOpaqueClient(CDC& dc)
         CDC dcBuf;
         dcBuf.Attach(hdcBuf);
         DrawClientText(dcBuf, r);
+        CCC_DrawInwoman(&dcBuf, r, FALSE);
         dcBuf.Detach();
     }
     ::BufferedPaintMakeOpaque(hBP, &r);
@@ -3521,6 +3533,10 @@ void CCustomStatic::DrawClient(CDC& dc)
 
     memDC.SelectObject(pOF);
 
+    // 淫女演出は文字描画の後。中央は塗らないので読みやすさは維持。
+    // (高さ20未満は CCC_DrawInwoman 側で主要デコをスキップ)
+    CCC_DrawInwoman(&memDC, rect, bTrans);
+
     if (bTrans)
         blitTrans(memDC.GetSafeHdc());
     else
@@ -3876,12 +3892,17 @@ void CCustomComboBox::PaintClient(CDC& dc)
 {
     CRect r;
     GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0)
+        return;
 
     CDC mDC;
     CBitmap mB;
     mDC.CreateCompatibleDC(&dc);
-    mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
+    if (!mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height()))
+        return;
     CBitmap* ob = mDC.SelectObject(&mB);
+    if (!ob)
+        return;
 
     const BOOL bTrans = m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd);
     if (bTrans)
@@ -3939,7 +3960,7 @@ void CCustomComboBox::PaintClient(CDC& dc)
     }
 
     mDC.SetBkMode(TRANSPARENT);
-    mDC.DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    mDC.DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     mDC.SelectObject(pOF);
 
     CCC_DrawInwoman(&mDC, r, bTrans);
@@ -4006,8 +4027,19 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     CFont* pOF = NULL;
     CFont fc;
     CFont* pF = GetFont();
-    LOGFONT lf;
-    pF->GetLogFont(&lf);
+    LOGFONT lf = {};
+    if (pF && pF->GetSafeHandle())
+        pF->GetLogFont(&lf);
+    else {
+        NONCLIENTMETRICS ncm = {};
+        ncm.cbSize = sizeof(ncm);
+        if (::SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0))
+            lf = ncm.lfMessageFont;
+        else {
+            lf.lfHeight = -12;
+            _tcscpy_s(lf.lfFaceName, LF_FACESIZE, _T("MS UI Gothic"));
+        }
+    }
 
     if (bD)
     {
@@ -5354,8 +5386,9 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 if (rj.top < r.top + 1) rj.top = r.top + 1;
                 rj.right = rj.left + jsz;
                 rj.bottom = rj.top + jsz;
-                jacketRight = rj.right;
+                // ジャケ無しは枠も塗らない(行背景のまま)。列位置は m_mpJacketPx で揃える。
                 if (hb) {
+                    jacketRight = rj.right;
                     CDC src;
                     src.CreateCompatibleDC(pDC);
                     HGDIOBJ old = src.SelectObject(hb);
@@ -5368,12 +5401,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                     src.DeleteDC();
                 }
                 else {
-                    pDC->FillSolidRect(&rj, RGB(230, 230, 238));
-                    CPen pn(PS_SOLID, 1, RGB(190, 190, 200));
-                    CPen* op = pDC->SelectObject(&pn);
-                    pDC->SelectStockObject(NULL_BRUSH);
-                    pDC->Rectangle(&rj);
-                    pDC->SelectObject(op);
+                    jacketRight = rj.right; // ♪位置はジャケ枠ぶん確保(テキスト列と揃える)
                 }
             }
             // ♪描画位置(ジャケ有無で切替)。♡ は従来どおり ♪ と同位置・奥に重ねる。
@@ -6012,6 +6040,506 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 }
 
 // ============================================================================
+// CCustomTabCtrl (listing4 準拠オーナードロー + アクリル不透明)
+// ============================================================================
+IMPLEMENT_DYNAMIC(CCustomTabCtrl, CTabCtrl)
+
+static const UINT_PTR kTabScrollOpaqueTimerId = 4110;
+
+BEGIN_MESSAGE_MAP(CCustomTabCtrl, CTabCtrl)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_SIZE()
+	ON_WM_MOUSEMOVE()
+	ON_WM_MOUSELEAVE()
+	ON_WM_WINDOWPOSCHANGED()
+	ON_WM_TIMER()
+	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+	ON_MESSAGE(CCC_WM_POST_OPAQUE_PAINT, OnPostOpaquePaint)
+	ON_NOTIFY_REFLECT_EX(TCN_SELCHANGE, OnSelChange)
+END_MESSAGE_MAP()
+
+CCustomTabCtrl::CCustomTabCtrl()
+	: m_bAutoDelete(FALSE), m_bAeroMode(FALSE), m_nHotItem(-1), m_bTracking(FALSE)
+{
+	m_brBackground.CreateSolidBrush(COLOR_DIALOG_BG);
+}
+
+CCustomTabCtrl::~CCustomTabCtrl()
+{
+	if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
+	if (m_fontTab.GetSafeHandle()) m_fontTab.DeleteObject();
+	if (m_fontTabSel.GetSafeHandle()) m_fontTabSel.DeleteObject();
+}
+
+void CCustomTabCtrl::PostNcDestroy()
+{
+	CTabCtrl::PostNcDestroy();
+	if (m_bAutoDelete) delete this;
+}
+
+BOOL CCustomTabCtrl::IsVertical() const
+{
+	if (!::IsWindow(m_hWnd)) return FALSE;
+	return (::GetWindowLong(m_hWnd, GWL_STYLE) & TCS_VERTICAL) ? TRUE : FALSE;
+}
+
+BOOL CCustomTabCtrl::IsRightSide() const
+{
+	if (!::IsWindow(m_hWnd)) return FALSE;
+	return (::GetWindowLong(m_hWnd, GWL_STYLE) & TCS_RIGHT) ? TRUE : FALSE;
+}
+
+void CCustomTabCtrl::RebuildFonts()
+{
+	LOGFONT lf = {};
+	CFont* pF = GetFont();
+	if (pF && pF->GetSafeHandle())
+		pF->GetLogFont(&lf);
+	else {
+		NONCLIENTMETRICS ncm = {};
+		ncm.cbSize = sizeof(ncm);
+		if (::SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0))
+			lf = ncm.lfMessageFont;
+		else
+			_tcscpy_s(lf.lfFaceName, LF_FACESIZE, _T("MS UI Gothic"));
+	}
+	if (lf.lfHeight == 0) lf.lfHeight = -13;
+	if (abs(lf.lfHeight) > 16) lf.lfHeight = (lf.lfHeight < 0) ? -14 : 14;
+	lf.lfEscapement = 0;
+	lf.lfOrientation = 0;
+	lf.lfQuality = CLEARTYPE_QUALITY;
+
+	if (m_fontTab.GetSafeHandle()) m_fontTab.DeleteObject();
+	if (m_fontTabSel.GetSafeHandle()) m_fontTabSel.DeleteObject();
+
+	LOGFONT lfNormal = lf;
+	lfNormal.lfWeight = FW_NORMAL;
+	m_fontTab.CreateFontIndirect(&lfNormal);
+
+	LOGFONT lfBold = lf;
+	lfBold.lfWeight = FW_BOLD;
+	m_fontTabSel.CreateFontIndirect(&lfBold);
+}
+
+void CCustomTabCtrl::LayoutEqualTabs(int nSlots)
+{
+	if (!::IsWindow(m_hWnd) || nSlots < 1) return;
+	ModifyStyle(TCS_MULTILINE, TCS_FIXEDWIDTH);
+
+	CRect rc;
+	GetClientRect(&rc);
+	if (rc.Height() < 8 || rc.Width() < 8) return;
+
+	if (IsVertical()) {
+		const int usable = max(24, rc.Height() - 6);
+		const int tabAlong = max(20, usable / nSlots);
+		SetItemSize(CSize(tabAlong, 40));
+	}
+	else {
+		const int usable = max(48, rc.Width() - 6);
+		const int tabW = max(48, usable / nSlots);
+		SetItemSize(CSize(tabW, 26));
+	}
+	Invalidate(FALSE);
+}
+
+void CCustomTabCtrl::PreSubclassWindow()
+{
+	CTabCtrl::PreSubclassWindow();
+	HMODULE h = LoadLibrary(_T("UxTheme.dll"));
+	if (h) {
+		typedef HRESULT(WINAPI* S)(HWND, LPCWSTR, LPCWSTR);
+		S p = (S)GetProcAddress(h, "SetWindowTheme");
+		if (p) p(m_hWnd, L"", L"");
+		FreeLibrary(h);
+	}
+	ModifyStyle(TCS_MULTILINE | TCS_OWNERDRAWFIXED, TCS_FIXEDWIDTH);
+	RebuildFonts();
+}
+
+BOOL CCustomTabCtrl::OnEraseBkgnd(CDC* pDC)
+{
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+		return TRUE;
+#endif
+	if (pDC) {
+		CRect r;
+		GetClientRect(&r);
+		pDC->FillSolidRect(&r, COLOR_DIALOG_BG);
+	}
+	return TRUE;
+}
+
+void CCustomTabCtrl::ScheduleOpaqueRepaint()
+{
+	if (GetSafeHwnd())
+		PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+}
+
+LRESULT CCustomTabCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
+{
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11()) {
+		CClientDC dc(this);
+		PaintOpaqueClient(dc);
+	}
+#endif
+	return 0;
+}
+
+LRESULT CCustomTabCtrl::OnPrintClient(WPARAM wParam, LPARAM lParam)
+{
+	HDC hdc = (HDC)wParam;
+	if (!hdc) return 0;
+	CRect rc;
+	GetClientRect(&rc);
+	CDC dc;
+	dc.Attach(hdc);
+	DrawToDC(&dc, rc, FALSE);
+	dc.Detach();
+	return 0;
+}
+
+void CCustomTabCtrl::DrawPagePanel(CDC* pDC, const CRect& rcClient)
+{
+	CRect rcDisp = rcClient;
+	AdjustRect(FALSE, &rcDisp);
+	// 見出し専用帯（ページ領域がほぼ無い）では枠を描かない
+	if (rcDisp.Height() < 12 || rcDisp.Width() < 12)
+		return;
+	CRect rcPanel = rcDisp;
+	rcPanel.InflateRect(2, 2);
+	CRect rcClip;
+	rcClip.IntersectRect(&rcPanel, &rcClient);
+	if (rcClip.IsRectEmpty()) return;
+	DrawGradientBackground(pDC, rcClip, CCC_Lighten(COLOR_DIALOG_BG, 25), COLOR_DIALOG_BG, 0);
+	CPen pen(PS_SOLID, 1, CCC_Darken(COLOR_DIALOG_BG, 30));
+	CPen* pOldPen = pDC->SelectObject(&pen);
+	CBrush* pOldBr = (CBrush*)pDC->SelectStockObject(NULL_BRUSH);
+	pDC->RoundRect(&rcClip, CPoint(6, 6));
+	pDC->SelectObject(pOldBr);
+	pDC->SelectObject(pOldPen);
+}
+
+void CCustomTabCtrl::DrawTabItem(CDC* pDC, int nItem, CRect rc, BOOL bSelected, BOOL bHot)
+{
+	if (rc.Width() <= 2 || rc.Height() <= 2) return;
+	if (bSelected) rc.InflateRect(1, 1);
+	else rc.DeflateRect(1, 1);
+
+	COLORREF clrTop, clrBottom, clrEdge, clrText;
+	if (bSelected) {
+		clrTop = CCC_Lighten(COLOR_BUTTON_BG, 45);
+		clrBottom = COLOR_BUTTON_BG;
+		clrEdge = CCC_Darken(COLOR_BUTTON_BG, 45);
+		clrText = RGB(20, 60, 20);
+	}
+	else if (bHot) {
+		clrTop = CCC_Lighten(COLOR_BUTTON_HOVER, 35);
+		clrBottom = COLOR_BUTTON_HOVER;
+		clrEdge = CCC_Darken(COLOR_BUTTON_HOVER, 35);
+		clrText = RGB(25, 55, 25);
+	}
+	else {
+		clrTop = RGB(255, 236, 244);
+		clrBottom = RGB(255, 210, 228);
+		clrEdge = RGB(220, 140, 170);
+		clrText = RGB(40, 40, 40);
+	}
+
+	CRgn rgn;
+	rgn.CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, 8, 8);
+	pDC->SelectClipRgn(&rgn);
+	DrawGradientBackground(pDC, rc, clrTop, clrBottom, IsVertical() ? 90 : 0);
+	if (bSelected && !IsVertical()) DrawGlossHighlight(pDC, rc, 6);
+	pDC->SelectClipRgn(NULL);
+
+	CPen pen(PS_SOLID, 1, clrEdge);
+	CPen* pOldPen = pDC->SelectObject(&pen);
+	CBrush* pOldBr = (CBrush*)pDC->SelectStockObject(NULL_BRUSH);
+	pDC->RoundRect(&rc, CPoint(8, 8));
+	pDC->SelectObject(pOldBr);
+	pDC->SelectObject(pOldPen);
+
+	TCHAR szText[256] = {};
+	TCITEM ti = {};
+	ti.mask = TCIF_TEXT;
+	ti.pszText = szText;
+	ti.cchTextMax = _countof(szText) - 1;
+	if (!GetItem(nItem, &ti)) return;
+	CString strText(szText);
+	if (strText.IsEmpty()) return;
+
+	const int nOldBk = pDC->SetBkMode(TRANSPARENT);
+	const COLORREF clrOldText = pDC->SetTextColor(clrText);
+
+	CFont* pBase = bSelected ? &m_fontTabSel : &m_fontTab;
+	LOGFONT lfBase = {};
+	if (pBase && pBase->GetSafeHandle())
+		pBase->GetLogFont(&lfBase);
+	else
+		lfBase.lfHeight = -12;
+	if (lfBase.lfHeight == 0) lfBase.lfHeight = -12;
+	lfBase.lfEscapement = 0;
+	lfBase.lfOrientation = 0;
+
+	const BOOL bVert = IsVertical();
+	const int escape = bVert ? (IsRightSide() ? 2700 : 900) : 0;
+	CRect rcInner = rc;
+	rcInner.DeflateRect(bVert ? 2 : 4, bVert ? 4 : 2);
+
+	long target = abs(lfBase.lfHeight);
+	if (target < 12) target = 12;
+	const long MIN_H = 10;
+	long maxH = 16;
+	if (bVert) {
+		maxH = 18;
+		const long cross = (long)max(10, rcInner.Width() - 2);
+		if (maxH > cross) maxH = cross;
+	}
+	if (target > maxH) target = maxH;
+
+	CFont fontFit;
+	SIZE sz = { 0, 0 };
+	while (target >= MIN_H) {
+		LOGFONT lf = lfBase;
+		lf.lfHeight = -target;
+		lf.lfEscapement = 0;
+		lf.lfOrientation = 0;
+		CFont fontTry;
+		if (!fontTry.CreateFontIndirect(&lf)) break;
+		CFont* pOld = pDC->SelectObject(&fontTry);
+		::GetTextExtentPoint32(pDC->GetSafeHdc(), strText, strText.GetLength(), &sz);
+		pDC->SelectObject(pOld);
+		fontTry.DeleteObject();
+
+		const int boxAlong = bVert ? rcInner.Height() : rcInner.Width();
+		const int boxCross = bVert ? rcInner.Width() : rcInner.Height();
+		if (sz.cx <= boxAlong && sz.cy <= boxCross) {
+			lf.lfEscapement = escape;
+			lf.lfOrientation = escape;
+			fontFit.CreateFontIndirect(&lf);
+			break;
+		}
+		target--;
+	}
+	if (!fontFit.GetSafeHandle()) {
+		LOGFONT lf = lfBase;
+		lf.lfHeight = -MIN_H;
+		lf.lfEscapement = escape;
+		lf.lfOrientation = escape;
+		fontFit.CreateFontIndirect(&lf);
+		LOGFONT lfM = lf;
+		lfM.lfEscapement = 0;
+		lfM.lfOrientation = 0;
+		CFont fontM;
+		fontM.CreateFontIndirect(&lfM);
+		CFont* pOld = pDC->SelectObject(&fontM);
+		::GetTextExtentPoint32(pDC->GetSafeHdc(), strText, strText.GetLength(), &sz);
+		pDC->SelectObject(pOld);
+	}
+
+	CFont* pOldFont = pDC->SelectObject(&fontFit);
+	const int oldMode = ::SetGraphicsMode(pDC->GetSafeHdc(), GM_ADVANCED);
+	if (bVert) {
+		int x, y;
+		if (escape == 900) {
+			x = rcInner.left + max(0, (rcInner.Width() - (int)sz.cy) / 2);
+			y = rcInner.bottom - max(0, (rcInner.Height() - (int)sz.cx) / 2);
+		}
+		else {
+			x = rcInner.right - max(0, (rcInner.Width() - (int)sz.cy) / 2);
+			y = rcInner.top + max(0, (rcInner.Height() - (int)sz.cx) / 2);
+		}
+		pDC->TextOut(x, y, strText);
+	}
+	else {
+		pDC->DrawText(strText, &rcInner, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+	}
+	if (oldMode) ::SetGraphicsMode(pDC->GetSafeHdc(), oldMode);
+	pDC->SelectObject(pOldFont);
+	fontFit.DeleteObject();
+	pDC->SetTextColor(clrOldText);
+	pDC->SetBkMode(nOldBk);
+}
+
+void CCustomTabCtrl::DrawToDC(CDC* pDC, const CRect& rcClient, BOOL bAeroChroma)
+{
+	if (!pDC || rcClient.IsRectEmpty()) return;
+#if CCUSTOM_AERO_SUPPORT
+	if (bAeroChroma)
+		pDC->FillSolidRect(&rcClient, CCC_AERO_CHROMA_KEY);
+	else
+#endif
+		pDC->FillSolidRect(&rcClient, COLOR_DIALOG_BG);
+	DrawPagePanel(pDC, rcClient);
+
+	const int nSel = GetCurSel();
+	const int nCount = GetItemCount();
+	for (int pass = 0; pass < 2; pass++) {
+		for (int i = 0; i < nCount; i++) {
+			const BOOL bSel = (i == nSel);
+			if ((pass == 0) == (bSel != FALSE)) continue;
+			CRect rc;
+			if (!GetItemRect(i, &rc)) continue;
+			DrawTabItem(pDC, i, rc, bSel, (i == m_nHotItem));
+		}
+	}
+}
+
+void CCustomTabCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
+{
+	if (!hdcBuf || !m_hWnd) return;
+	CRect r;
+	GetClientRect(&r);
+	if (r.Width() <= 0 || r.Height() <= 0) return;
+	CDC dc;
+	dc.Attach(hdcBuf);
+	DrawToDC(&dc, r, FALSE);
+	dc.Detach();
+}
+
+void CCustomTabCtrl::PaintOpaqueClient(CDC& dc)
+{
+	CRect r;
+	GetClientRect(&r);
+	if (r.Width() <= 0 || r.Height() <= 0) return;
+	BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+	params.dwFlags = BPPF_ERASE;
+	HDC hdcBuf = NULL;
+	HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+	if (!hdcBuf || !hBP) { Default(); return; }
+	CDC mem;
+	mem.Attach(hdcBuf);
+	DrawToDC(&mem, r, FALSE);
+	mem.Detach();
+	::BufferedPaintMakeOpaque(hBP, &r);
+	::EndBufferedPaint(hBP, TRUE);
+}
+
+void CCustomTabCtrl::OnPaint()
+{
+	CPaintDC dcPaint(this);
+	CRect rcClient;
+	GetClientRect(&rcClient);
+	if (rcClient.IsRectEmpty()) return;
+
+	CDC memDC;
+	memDC.CreateCompatibleDC(&dcPaint);
+	CBitmap memBmp;
+	memBmp.CreateCompatibleBitmap(&dcPaint, rcClient.Width(), rcClient.Height());
+	CBitmap* pOldBmp = memDC.SelectObject(&memBmp);
+
+#if CCUSTOM_AERO_SUPPORT
+	const BOOL bAero = CCC_IsAeroEnabled() && CCC_IsWin11();
+#else
+	const BOOL bAero = FALSE;
+#endif
+	DrawToDC(&memDC, rcClient, bAero);
+
+	CRect rcDisp = rcClient;
+	AdjustRect(FALSE, &rcDisp);
+	if (!rcDisp.IsRectEmpty())
+		dcPaint.ExcludeClipRect(&rcDisp);
+
+#if CCUSTOM_AERO_SUPPORT
+	if (bAero)
+		CCC_BlitChromaTrans(dcPaint.GetSafeHdc(), 0, 0, rcClient.Width(), rcClient.Height(),
+			memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+	else
+#endif
+		dcPaint.BitBlt(0, 0, rcClient.Width(), rcClient.Height(), &memDC, 0, 0, SRCCOPY);
+
+	memDC.SelectObject(pOldBmp);
+	memBmp.DeleteObject();
+	memDC.DeleteDC();
+}
+
+void CCustomTabCtrl::OnSize(UINT nType, int cx, int cy)
+{
+	CTabCtrl::OnSize(nType, cx, cy);
+	const int n = GetItemCount();
+	if (n > 0) LayoutEqualTabs(n);
+	Invalidate(FALSE);
+}
+
+void CCustomTabCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
+{
+	CTabCtrl::OnWindowPosChanged(lpwndpos);
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+		ScheduleOpaqueRepaint();
+#endif
+}
+
+void CCustomTabCtrl::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == kTabScrollOpaqueTimerId) {
+		KillTimer(kTabScrollOpaqueTimerId);
+#if CCUSTOM_AERO_SUPPORT
+		if (CCC_IsAeroEnabled() && CCC_IsWin11()) {
+			CClientDC dc(this);
+			PaintOpaqueClient(dc);
+		}
+#endif
+		return;
+	}
+	CTabCtrl::OnTimer(nIDEvent);
+}
+
+void CCustomTabCtrl::InvalidateTabItem(int nItem)
+{
+	if (nItem < 0 || !::IsWindow(m_hWnd)) return;
+	CRect rc;
+	if (!GetItemRect(nItem, &rc)) return;
+	rc.InflateRect(2, 2);
+	InvalidateRect(&rc, FALSE);
+}
+
+void CCustomTabCtrl::OnMouseMove(UINT nFlags, CPoint point)
+{
+	if (!m_bTracking) {
+		TRACKMOUSEEVENT tme = {};
+		tme.cbSize = sizeof(tme);
+		tme.dwFlags = TME_LEAVE;
+		tme.hwndTrack = m_hWnd;
+		if (::TrackMouseEvent(&tme)) m_bTracking = TRUE;
+	}
+	TCHITTESTINFO hti = {};
+	hti.pt = point;
+	const int nHit = HitTest(&hti);
+	if (nHit != m_nHotItem) {
+		InvalidateTabItem(m_nHotItem);
+		m_nHotItem = nHit;
+		InvalidateTabItem(m_nHotItem);
+	}
+	CTabCtrl::OnMouseMove(nFlags, point);
+}
+
+void CCustomTabCtrl::OnMouseLeave()
+{
+	m_bTracking = FALSE;
+	if (m_nHotItem != -1) {
+		InvalidateTabItem(m_nHotItem);
+		m_nHotItem = -1;
+	}
+	CTabCtrl::OnMouseLeave();
+}
+
+BOOL CCustomTabCtrl::OnSelChange(NMHDR*, LRESULT* pResult)
+{
+	Invalidate(FALSE);
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+		ScheduleOpaqueRepaint();
+#endif
+	if (pResult) *pResult = 0;
+	return FALSE; // 親の ON_NOTIFY(TCN_SELCHANGE) も通す
+}
+
+// ============================================================================
 // カスタム標準ボタンコントロール
 // ============================================================================
 IMPLEMENT_DYNAMIC(CCustomStandardButton, CButton)
@@ -6034,7 +6562,9 @@ CCustomStandardButton::CCustomStandardButton()
     m_clrGradStart(RGB(255, 255, 255)),
     m_clrGradEnd(RGB(255, 255, 255)), m_nGradDirection(0), m_bGradEnable(FALSE),
     m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135), m_nShadowDistance(2),
-    m_nShadowBlur(3), m_bShadowEnable(FALSE)
+    m_nShadowBlur(3), m_bShadowEnable(FALSE),
+    m_hIconIn(NULL), m_hIconOut(NULL), m_bFlat(FALSE),
+    m_bIconOwnedIn(FALSE), m_bIconOwnedOut(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_BUTTON_BG);
 }
@@ -6075,6 +6605,8 @@ void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
 CCustomStandardButton::~CCustomStandardButton()
 {
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
+    if (m_bIconOwnedIn && m_hIconIn) { ::DestroyIcon(m_hIconIn); m_hIconIn = NULL; }
+    if (m_bIconOwnedOut && m_hIconOut) { ::DestroyIcon(m_hIconOut); m_hIconOut = NULL; }
 }
 
 void CCustomStandardButton::PostNcDestroy()
@@ -6121,6 +6653,49 @@ void CCustomStandardButton::GetDropShadow(COLORREF* pc, int* pd, int* pdist, int
     if (pbe) *pbe = m_bShadowEnable;
 }
 
+DWORD CCustomStandardButton::SetIcon(int nIconIn, int nIconOut)
+{
+    HICON hIn = NULL;
+    HICON hOut = NULL;
+    if (nIconIn)
+        hIn = (HICON)::LoadImage(AfxGetResourceHandle(), MAKEINTRESOURCE(nIconIn),
+            IMAGE_ICON, 0, 0, LR_DEFAULTCOLOR);
+    if (nIconOut)
+        hOut = (HICON)::LoadImage(AfxGetResourceHandle(), MAKEINTRESOURCE(nIconOut),
+            IMAGE_ICON, 0, 0, LR_DEFAULTCOLOR);
+    if (m_bIconOwnedIn && m_hIconIn)
+        ::DestroyIcon(m_hIconIn);
+    if (m_bIconOwnedOut && m_hIconOut)
+        ::DestroyIcon(m_hIconOut);
+    m_hIconIn = hIn;
+    m_hIconOut = hOut;
+    m_bIconOwnedIn = (hIn != NULL);
+    m_bIconOwnedOut = (hOut != NULL);
+    if (GetSafeHwnd()) Invalidate(FALSE);
+    return 0;
+}
+
+DWORD CCustomStandardButton::SetIcon(HICON hIconIn, HICON hIconOut)
+{
+    if (m_bIconOwnedIn && m_hIconIn && m_hIconIn != hIconIn)
+        ::DestroyIcon(m_hIconIn);
+    if (m_bIconOwnedOut && m_hIconOut && m_hIconOut != hIconOut)
+        ::DestroyIcon(m_hIconOut);
+    m_hIconIn = hIconIn;
+    m_hIconOut = hIconOut;
+    // 呼び出し側が寿命管理(非所有)
+    m_bIconOwnedIn = FALSE;
+    m_bIconOwnedOut = FALSE;
+    if (GetSafeHwnd()) Invalidate(FALSE);
+    return 0;
+}
+
+void CCustomStandardButton::SetFlat(BOOL bFlat)
+{
+    m_bFlat = bFlat;
+    if (GetSafeHwnd()) Invalidate(FALSE);
+}
+
 void CCustomStandardButton::PreSubclassWindow()
 {
     CButton::PreSubclassWindow();
@@ -6165,15 +6740,16 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         // ぷるんとした濡れツヤ + ジェリー感(リムライト&インナーシャドウ)
         CRect rg = r;
         if (bP) rg.OffsetRect(1, 1);
-        DrawGlossHighlight(&mDC, rg, 8);
-        DrawJellyEdges(&mDC, rg, 8, RGB(120, 40, 80));
+        DrawGlossHighlight(&mDC, rg, m_bFlat ? 4 : 8);
+        if (!m_bFlat)
+            DrawJellyEdges(&mDC, rg, 8, RGB(120, 40, 80));
 
-        // 大きめのボタンは裾に透けレースの色気を
-        if (r.Width() >= 64 && r.Height() >= 26)
+        // 大きめのボタンは裾に透けレースの色気を(アイコン平坦ボタンは省略=はみ出し防止)
+        if (!m_bFlat && !m_hIconIn && r.Width() >= 64 && r.Height() >= 26)
             DrawLaceScallop(&mDC, r.left + 8, r.bottom - 6, r.right - 8, 3, COLOR_LACE);
 
         // ホバー時: とろみハイライトがスーッと流れる(押下トグル上でもホバー中は表示)
-        if (bShowFlow)
+        if (bShowFlow && !m_bFlat)
         {
             const int W = r.Width();
             const int bandW = max(10, W / 4);
@@ -6193,30 +6769,38 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             FillRectAlpha(&mDC, r, COLOR_BUTTON_HOVER, a);
         }
 
-        DrawDecorations(&mDC, r, 0, bP);
-        // 四隅にさりげないキラキラ
-        DrawSparkle(&mDC, r.left + 9, r.top + 9, 3, COLOR_SPARKLE);
-        DrawSparkle(&mDC, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
-        // ほんのり頬染めで色っぽく
+        if (!m_bFlat && !m_hIconIn)
         {
-            const int by = r.top + r.Height() * 64 / 100;
-            const int bx = max(10, r.Width() / 6);
-            DrawBlush(&mDC, r.left + bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
-            DrawBlush(&mDC, r.right - bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
+            DrawDecorations(&mDC, r, 0, bP);
+            // 四隅にさりげないキラキラ
+            DrawSparkle(&mDC, r.left + 9, r.top + 9, 3, COLOR_SPARKLE);
+            DrawSparkle(&mDC, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
+            // ほんのり頬染めで色っぽく
+            {
+                const int by = r.top + r.Height() * 64 / 100;
+                const int bx = max(10, r.Width() / 6);
+                DrawBlush(&mDC, r.left + bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
+                DrawBlush(&mDC, r.right - bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
+            }
+            if (m_bMouseOver && !bP)
+            {
+                // ほどけかけリボン + きらめきで色っぽく
+                DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 11, r.top + 2, r.Width() / 2 + 11, r.top + 16), COLOR_BOW);
+                DrawSparkle(&mDC, r.right - 10, r.top + 10, 4, COLOR_SPARKLE);
+                DrawSparkle(&mDC, r.left + 12, r.bottom - 10, 3, COLOR_SPARKLE);
+            }
+            if (bP)
+            {
+                DrawSparkle(&mDC, r.Width() / 2, r.top + 8, 4, COLOR_SPARKLE);
+                DrawStar(&mDC, r.left + 15, r.Height() / 2, 2, RGB(255, 240, 150));
+                DrawStar(&mDC, r.right - 15, r.Height() / 2, 2, RGB(255, 240, 150));
+                DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 10, r.bottom - 15, r.Width() / 2 + 10, r.bottom - 2), COLOR_BOW);
+            }
         }
-        if (m_bMouseOver && !bP)
+        else if (m_bMouseOver && m_hIconIn)
         {
-            // ほどけかけリボン + きらめきで色っぽく
-            DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 11, r.top + 2, r.Width() / 2 + 11, r.top + 16), COLOR_BOW);
-            DrawSparkle(&mDC, r.right - 10, r.top + 10, 4, COLOR_SPARKLE);
-            DrawSparkle(&mDC, r.left + 12, r.bottom - 10, 3, COLOR_SPARKLE);
-        }
-        if (bP)
-        {
-            DrawSparkle(&mDC, r.Width() / 2, r.top + 8, 4, COLOR_SPARKLE);
-            DrawStar(&mDC, r.left + 15, r.Height() / 2, 2, RGB(255, 240, 150));
-            DrawStar(&mDC, r.right - 15, r.Height() / 2, 2, RGB(255, 240, 150));
-            DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 10, r.bottom - 15, r.Width() / 2 + 10, r.bottom - 2), COLOR_BOW);
+            // アイコンボタンは控えめなハイライトだけ
+            FillRectAlpha(&mDC, r, RGB(255, 255, 255), 36);
         }
     }
 
@@ -6224,8 +6808,8 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     if (bD)
         FillRectAlpha(&mDC, r, RGB(232, 232, 232), 122);
 
-    CPen pL(PS_SOLID, 2, RGB(255, 255, 255));
-    CPen pD(PS_SOLID, 2, RGB(128, 128, 128));
+    CPen pL(PS_SOLID, m_bFlat ? 1 : 2, RGB(255, 255, 255));
+    CPen pD(PS_SOLID, m_bFlat ? 1 : 2, RGB(128, 128, 128));
     CPen* op;
     if (bP)
     {
@@ -6237,7 +6821,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         mDC.LineTo(r.right - 1, r.bottom - 1);
         mDC.LineTo(r.left, r.bottom - 1);
         CRect ri = r;
-        ri.DeflateRect(2, 2);
+        ri.DeflateRect(m_bFlat ? 1 : 2, m_bFlat ? 1 : 2);
         mDC.SelectObject(&pD);
         mDC.MoveTo(ri.left, ri.bottom - 1);
         mDC.LineTo(ri.left, ri.top);
@@ -6253,7 +6837,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         mDC.LineTo(r.right - 1, r.bottom - 1);
         mDC.LineTo(r.left, r.bottom - 1);
         CRect ri = r;
-        ri.DeflateRect(2, 2);
+        ri.DeflateRect(m_bFlat ? 1 : 2, m_bFlat ? 1 : 2);
         mDC.SelectObject(&pL);
         mDC.MoveTo(ri.left, ri.bottom - 1);
         mDC.LineTo(ri.left, ri.top);
@@ -6264,16 +6848,67 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     if (bF && !bD)
     {
         CRect rf = r;
-        rf.DeflateRect(4, 4);
+        rf.DeflateRect(m_bFlat ? 2 : 4, m_bFlat ? 2 : 4);
         mDC.DrawFocusRect(&rf);
+    }
+
+    // アイコン(中央)。ホバー時は Out があれば差し替え。押下で1pxずらす。
+    HICON hDraw = m_hIconIn;
+    if (m_bMouseOver && m_hIconOut)
+        hDraw = m_hIconOut;
+    if (hDraw)
+    {
+        ICONINFO ii = {};
+        int iw = 16, ih = 16;
+        if (::GetIconInfo(hDraw, &ii))
+        {
+            BITMAP bm = {};
+            if (ii.hbmColor && ::GetObject(ii.hbmColor, sizeof(bm), &bm))
+            {
+                iw = bm.bmWidth;
+                ih = bm.bmHeight;
+            }
+            else if (ii.hbmMask && ::GetObject(ii.hbmMask, sizeof(bm), &bm))
+            {
+                iw = bm.bmWidth;
+                ih = bm.bmHeight / 2;
+            }
+            if (ii.hbmColor) ::DeleteObject(ii.hbmColor);
+            if (ii.hbmMask) ::DeleteObject(ii.hbmMask);
+        }
+        // ボタン内に収める(はみ出し防止)
+        const int maxSz = (std::max)(8, (std::min)(r.Width(), r.Height()) - (m_bFlat ? 4 : 8));
+        if (iw > maxSz) { ih = MulDiv(ih, maxSz, iw); iw = maxSz; }
+        if (ih > maxSz) { iw = MulDiv(iw, maxSz, ih); ih = maxSz; }
+        int ix = r.left + (r.Width() - iw) / 2;
+        int iy = r.top + (r.Height() - ih) / 2;
+        if (bP) { ix += 1; iy += 1; }
+        ::DrawIconEx(mDC.GetSafeHdc(), ix, iy, hDraw, iw, ih, 0, NULL, DI_NORMAL);
     }
 
     CString s;
     GetWindowText(s);
-    CFont* pF = GetFont();
-    CFont* pOF = mDC.SelectObject(pF ? pF : (CFont*)mDC.SelectStockObject(DEFAULT_GUI_FONT));
-    DrawSmartText(&mDC, r, s, bD, bP);
-    mDC.SelectObject(pOF);
+    // アイコン専用ボタンは空キャプション想定。文字がある場合だけ描く(はみ出し注意)。
+    if (!s.IsEmpty() && !hDraw)
+    {
+        CFont* pF = GetFont();
+        CFont* pOF = mDC.SelectObject(pF ? pF : (CFont*)mDC.SelectStockObject(DEFAULT_GUI_FONT));
+        DrawSmartText(&mDC, r, s, bD, bP);
+        mDC.SelectObject(pOF);
+    }
+    else if (!s.IsEmpty() && hDraw)
+    {
+        // アイコン+文字: アイコン左、文字右(狭いときは省略)
+        CFont* pF = GetFont();
+        CFont* pOF = mDC.SelectObject(pF ? pF : (CFont*)mDC.SelectStockObject(DEFAULT_GUI_FONT));
+        CRect tr = r;
+        tr.left += (std::min)(r.Width() / 2, 22);
+        tr.DeflateRect(2, 1);
+        mDC.SetBkMode(TRANSPARENT);
+        mDC.SetTextColor(bD ? RGB(120, 120, 120) : RGB(0, 0, 0));
+        mDC.DrawText(s, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        mDC.SelectObject(pOF);
+    }
 
     if (!bD) CCC_DrawInwoman(&mDC, r, FALSE); // 淫女モード演出
 
@@ -6760,6 +7395,9 @@ CCustomProgressCtrl::~CCustomProgressCtrl()
 		m_brBackground.DeleteObject();
 	if (m_fontPct.GetSafeHandle())
 		m_fontPct.DeleteObject();
+#if CCUSTOM_AERO_SUPPORT
+	m_chromaCache.Release();
+#endif
 }
 
 BOOL CCustomProgressCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID)
@@ -6800,8 +7438,12 @@ int CCustomProgressCtrl::SetPos(int nPos)
 	if (nPos != m_nPos) {
 		m_nPos = nPos;
 		// UpdateWindow は呼び出し側の PeekMessage と競合してちらつくので Invalidate のみ
-		if (GetSafeHwnd())
+		if (GetSafeHwnd()) {
 			Invalidate(FALSE);
+#if CCUSTOM_AERO_SUPPORT
+			CCC_InvalidateParent(m_hWnd, m_bAeroMode);
+#endif
+		}
 	}
 	return old;
 }
@@ -6814,17 +7456,32 @@ void CCustomProgressCtrl::SetColors(COLORREF track, COLORREF fillStart, COLORREF
 	if (GetSafeHwnd()) Invalidate(FALSE);
 }
 
-void CCustomProgressCtrl::PaintClient(CDC& dc, const CRect& r)
+void CCustomProgressCtrl::SetAeroMode(BOOL b)
+{
+	m_bAeroMode = b;
+	if (GetSafeHwnd()) {
+#if CCUSTOM_AERO_SUPPORT
+		CCC_SetChildTransparent(m_hWnd, FALSE);
+		CCC_InvalidateParent(m_hWnd, m_bAeroMode);
+#endif
+		Invalidate(FALSE);
+	}
+}
+
+void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroTrans)
 {
 	if (r.Width() <= 0 || r.Height() <= 0) return;
-	dc.FillSolidRect(&r, COLOR_DIALOG_BG);
 
 	CRect track = r;
 	track.DeflateRect(2, 3);
-	if (track.Width() < 4 || track.Height() < 4) return;
+	if (track.Width() < 4 || track.Height() < 4) {
+		CCC_DrawInwoman(&dc, r, bAeroTrans);
+		return;
+	}
 	const int rr = (std::max)(4, track.Height() / 2);
 
-	// うっすら影
+	// うっすら影（透過時は半透明塗りを避けて枠の下だけ薄く）
+	if (!bAeroTrans)
 	{
 		CRect sh = track;
 		sh.OffsetRect(0, 1);
@@ -6887,13 +7544,10 @@ void CCustomProgressCtrl::PaintClient(CDC& dc, const CRect& r)
 			CRect gloss = fill;
 			gloss.DeflateRect(2, 1);
 			gloss.bottom = gloss.top + (std::max)(3, gloss.Height() * 2 / 5);
-			CBrush brGloss(RGB(255, 255, 255));
 			CPen penNull(PS_NULL, 0, RGB(0, 0, 0));
 			CPen* op = dc.SelectObject(&penNull);
-			CBrush* ob = dc.SelectObject(&brGloss);
-			// 半透明風: 白を薄く重ねる代わりに明るいピンクで楕円
 			CBrush brGloss2(RGB(255, 230, 242));
-			dc.SelectObject(&brGloss2);
+			CBrush* ob = dc.SelectObject(&brGloss2);
 			dc.Ellipse(&gloss);
 			dc.SelectObject(op);
 			dc.SelectObject(ob);
@@ -6978,6 +7632,64 @@ void CCustomProgressCtrl::PaintClient(CDC& dc, const CRect& r)
 
 	dc.SelectObject(oldPen);
 	dc.SelectObject(oldBr);
+
+	CCC_DrawInwoman(&dc, r, bAeroTrans);
+}
+
+void CCustomProgressCtrl::PaintClient(CDC& dc)
+{
+	CRect r;
+	GetClientRect(&r);
+	PaintClient(dc, r);
+}
+
+void CCustomProgressCtrl::PaintClient(CDC& dc, const CRect& r)
+{
+	const int rw = r.Width();
+	const int rh = r.Height();
+	if (rw <= 0 || rh <= 0) return;
+
+	CDC mDC;
+	if (!mDC.CreateCompatibleDC(&dc)) {
+		DrawProgressLayer(dc, r, FALSE);
+		return;
+	}
+	CBitmap bmp;
+	if (!bmp.CreateCompatibleBitmap(&dc, rw, rh)) {
+		mDC.DeleteDC();
+		DrawProgressLayer(dc, r, FALSE);
+		return;
+	}
+	CBitmap* ob = mDC.SelectObject(&bmp);
+	CRect local(0, 0, rw, rh);
+
+#if CCUSTOM_AERO_SUPPORT
+	const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+#else
+	const BOOL bTrans = FALSE;
+#endif
+	if (bTrans)
+	{
+#if CCUSTOM_AERO_SUPPORT
+		mDC.FillSolidRect(&local, CCC_AERO_CHROMA_KEY);
+		DrawProgressLayer(mDC, local, TRUE);
+		if (CCC_IsAeroEnabled() && CCC_IsWin11())
+			CCC_BlitChromaCached(dc.GetSafeHdc(), r.left, r.top, rw, rh,
+				mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY, m_chromaCache);
+		else
+			CCC_BlitChromaTrans(dc.GetSafeHdc(), r.left, r.top, rw, rh,
+				mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+#endif
+	}
+	else
+	{
+		mDC.FillSolidRect(&local, COLOR_DIALOG_BG);
+		DrawProgressLayer(mDC, local, FALSE);
+		dc.BitBlt(r.left, r.top, rw, rh, &mDC, 0, 0, SRCCOPY);
+	}
+
+	mDC.SelectObject(ob);
+	mDC.DeleteDC();
 }
 
 void CCustomProgressCtrl::PaintOpaqueClient(CDC& dc)
@@ -6990,20 +7702,22 @@ void CCustomProgressCtrl::PaintOpaqueClient(CDC& dc)
 	HDC hdcBuf = NULL;
 	HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
 	if (!hdcBuf || !hBP) {
-		// フォールバックも必ずメモリ経由
+		// フォールバックも必ずメモリ経由（不透明強制）
 		CDC mem;
 		CBitmap bmp;
 		mem.CreateCompatibleDC(&dc);
 		bmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
 		CBitmap* old = mem.SelectObject(&bmp);
-		PaintClient(mem, CRect(0, 0, r.Width(), r.Height()));
+		mem.FillSolidRect(0, 0, r.Width(), r.Height(), COLOR_DIALOG_BG);
+		DrawProgressLayer(mem, CRect(0, 0, r.Width(), r.Height()), FALSE);
 		dc.BitBlt(0, 0, r.Width(), r.Height(), &mem, 0, 0, SRCCOPY);
 		mem.SelectObject(old);
 		return;
 	}
 	CDC mem;
 	mem.Attach(hdcBuf);
-	PaintClient(mem, r);
+	mem.FillSolidRect(&r, COLOR_DIALOG_BG);
+	DrawProgressLayer(mem, r, FALSE);
 	mem.Detach();
 	::BufferedPaintMakeOpaque(hBP, &r);
 	::EndBufferedPaint(hBP, TRUE);
@@ -7016,53 +7730,36 @@ void CCustomProgressCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 	GetClientRect(&r);
 	CDC mem;
 	mem.Attach(hdcBuf);
-	PaintClient(mem, r);
+	mem.FillSolidRect(&r, COLOR_DIALOG_BG);
+	DrawProgressLayer(mem, r, FALSE);
 	mem.Detach();
 }
 
 void CCustomProgressCtrl::OnPaint()
 {
 	CPaintDC dc(this);
-	CRect r;
-	GetClientRect(&r);
-	if (r.Width() <= 0 || r.Height() <= 0) return;
-
-#if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled() && CCC_IsWin11()) {
-		PaintOpaqueClient(dc);
-		return;
-	}
-#endif
-	// 常にダブルバッファ: 部分 WM_PAINT でも全体を載せ替え、文字の残像を防ぐ
-	CDC mem;
-	CBitmap bmp;
-	if (!mem.CreateCompatibleDC(&dc)) {
-		PaintClient(dc, r);
-		return;
-	}
-	if (!bmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height())) {
-		PaintClient(dc, r);
-		return;
-	}
-	CBitmap* oldBmp = mem.SelectObject(&bmp);
-	PaintClient(mem, CRect(0, 0, r.Width(), r.Height()));
-	dc.BitBlt(0, 0, r.Width(), r.Height(), &mem, 0, 0, SRCCOPY);
-	mem.SelectObject(oldBmp);
+	PaintClient(dc);
 }
 
-BOOL CCustomProgressCtrl::OnEraseBkgnd(CDC*)
+BOOL CCustomProgressCtrl::OnEraseBkgnd(CDC* pDC)
 {
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_UseTransPaint(m_hWnd, m_bAeroMode)) return TRUE;
+#endif
+	if (pDC)
+	{
+		CRect r;
+		GetClientRect(&r);
+		pDC->FillSolidRect(&r, COLOR_DIALOG_BG);
+	}
 	return TRUE;
 }
 
 LRESULT CCustomProgressCtrl::OnPrintClient(WPARAM wParam, LPARAM)
 {
 	CDC* pDC = CDC::FromHandle((HDC)wParam);
-	if (pDC) {
-		CRect r;
-		GetClientRect(&r);
-		PaintClient(*pDC, r);
-	}
+	if (pDC)
+		PaintClient(*pDC);
 	return 0;
 }
 
@@ -7136,31 +7833,53 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
     CString t;
     GetWindowText(t);
 
-    if (!bTrans)
-    {
-        pDC->FillSolidRect(&rect, COLOR_DIALOG_BG);
-        CFont* pF = GetFont();
-        if (pF) pDC->SelectObject(pF);
-        CCC_DrawGroupBoxFrame(*pDC, CRect(0, 0, rw, rh), t, FALSE);
+    // 常にダブルバッファ: 淫女タイマーの Invalidate(FALSE) でもちらつかない
+    CDC memDC;
+    if (!memDC.CreateCompatibleDC(pDC)) {
+        if (!bTrans) {
+            pDC->FillSolidRect(&rect, COLOR_DIALOG_BG);
+            CFont* pF = GetFont();
+            if (pF) pDC->SelectObject(pF);
+            CCC_DrawGroupBoxFrame(*pDC, CRect(0, 0, rw, rh), t, FALSE);
+        }
         return;
     }
-
-    CDC memDC;
-    memDC.CreateCompatibleDC(pDC);
     CBitmap bmp;
-    bmp.CreateCompatibleBitmap(pDC, rw, rh);
+    if (!bmp.CreateCompatibleBitmap(pDC, rw, rh)) {
+        memDC.DeleteDC();
+        if (!bTrans) {
+            pDC->FillSolidRect(&rect, COLOR_DIALOG_BG);
+            CFont* pF = GetFont();
+            if (pF) pDC->SelectObject(pF);
+            CCC_DrawGroupBoxFrame(*pDC, CRect(0, 0, rw, rh), t, FALSE);
+        }
+        return;
+    }
     CBitmap* pOld = memDC.SelectObject(&bmp);
-    memDC.FillSolidRect(0, 0, rw, rh, CCC_AERO_CHROMA_KEY);
+#if CCUSTOM_AERO_SUPPORT
+    memDC.FillSolidRect(0, 0, rw, rh, bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG);
+#else
+    memDC.FillSolidRect(0, 0, rw, rh, COLOR_DIALOG_BG);
+#endif
     CFont* pF = GetFont();
     if (pF) memDC.SelectObject(pF);
-    CCC_DrawGroupBoxFrame(memDC, CRect(0, 0, rw, rh), t, TRUE);
+    CCC_DrawGroupBoxFrame(memDC, CRect(0, 0, rw, rh), t, bTrans);
+    CCC_DrawInwoman(&memDC, CRect(0, 0, rw, rh), bTrans);
 
-    // memDC は「クロマキー地に枠・デコ・ラベルを描画」したもの。
-    // 内側を除外せず全面をクロマ合成すると、クロマ部分=透過(アクリル)・
-    // 枠ピクセル=不透明 となり、内部透過と下辺を含む枠が一度に正しく出る。
-    // (内側除外方式だと内部が未処理=白のまま残り、下辺も欠ける)
-    CCC_BlitGroupFrame(pDC->GetSafeHdc(), rect.left, rect.top, rw, rh,
-        memDC.GetSafeHdc(), CCC_AERO_CHROMA_KEY, CRect(0, 0, 0, 0));
+    if (bTrans)
+    {
+#if CCUSTOM_AERO_SUPPORT
+        // memDC は「クロマキー地に枠・デコ・ラベルを描画」したもの。
+        // 内側を除外せず全面をクロマ合成すると、クロマ部分=透過(アクリル)・
+        // 枠ピクセル=不透明 となり、内部透過と下辺を含む枠が一度に正しく出る。
+        CCC_BlitGroupFrame(pDC->GetSafeHdc(), rect.left, rect.top, rw, rh,
+            memDC.GetSafeHdc(), CCC_AERO_CHROMA_KEY, CRect(0, 0, 0, 0));
+#endif
+    }
+    else
+    {
+        pDC->BitBlt(rect.left, rect.top, rw, rh, &memDC, 0, 0, SRCCOPY);
+    }
     memDC.SelectObject(pOld);
 }
 
@@ -7546,7 +8265,7 @@ static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
 {
     if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
     {
-        if (dynamic_cast<CCustomListBox*>(pw) || dynamic_cast<CCustomListCtrl*>(pw) || dynamic_cast<CCustomTreeCtrl*>(pw)) return COLOR_LIST_BG;
+        if (dynamic_cast<CCustomListBox*>(pw) || dynamic_cast<CCustomListCtrl*>(pw) || dynamic_cast<CCustomTreeCtrl*>(pw) || dynamic_cast<CCustomTabCtrl*>(pw)) return COLOR_LIST_BG;
         if (dynamic_cast<CCustomComboBox*>(pw)) return COLOR_COMBO_BG;
         if (dynamic_cast<CCustomStandardButton*>(pw) || dynamic_cast<CButtonST*>(pw)) return COLOR_BUTTON_BG;
         if (dynamic_cast<CCustomProgressCtrl*>(pw)) return COLOR_DIALOG_BG;
@@ -7560,6 +8279,7 @@ static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
     if (c.Find(_T("LISTBOX")) >= 0) return COLOR_LIST_BG;
     if (c.Find(_T("SYSLISTVIEW32")) >= 0) return COLOR_LIST_BG;
     if (c.Find(_T("SYSTREEVIEW32")) >= 0) return COLOR_LIST_BG;
+    if (c.Find(_T("SYSTABCONTROL32")) >= 0) return COLOR_LIST_BG;
     if (c.Find(_T("COMBOBOX")) >= 0) return COLOR_COMBO_BG;
     return COLOR_DIALOG_BG;
 }
@@ -7593,6 +8313,7 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
         if (dynamic_cast<CCustomListBox*>(pw)) return TRUE;
         if (dynamic_cast<CCustomListCtrl*>(pw)) return TRUE;
         if (dynamic_cast<CCustomTreeCtrl*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomTabCtrl*>(pw)) return TRUE;
         if (dynamic_cast<CCustomComboBox*>(pw)) return TRUE;
         if (dynamic_cast<CButtonST*>(pw)) return TRUE;
         if (dynamic_cast<CCustomEdit*>(pw)) return TRUE;
@@ -7606,6 +8327,7 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
     if (c.Find(_T("LISTBOX")) >= 0) return TRUE;
     if (c.Find(_T("SYSLISTVIEW32")) >= 0) return TRUE;
     if (c.Find(_T("SYSTREEVIEW32")) >= 0) return TRUE;
+    if (c.Find(_T("SYSTABCONTROL32")) >= 0) return TRUE;
     if (c.Find(_T("COMBOBOX")) >= 0) return TRUE;
     if (c.Find(_T("EDIT")) >= 0) return TRUE;
     if (c.Find(_T("SYSHEADER32")) >= 0) return TRUE;
@@ -7645,6 +8367,12 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     else if (auto* pTree = dynamic_cast<CCustomTreeCtrl*>(pw))
     {
         pTree->PaintOpaqueIntoBuffer(hdcBuf);
+        dc.Detach();
+        return TRUE;
+    }
+    else if (auto* pTab = dynamic_cast<CCustomTabCtrl*>(pw))
+    {
+        pTab->PaintOpaqueIntoBuffer(hdcBuf);
         dc.Detach();
         return TRUE;
     }
@@ -7724,7 +8452,44 @@ static void CCC_BlitGroupFrame(HDC hdcDest, int x, int y, int w, int h,
 static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOOL bTrans)
 {
     CFont* pOF = dc.SelectObject(dc.GetCurrentFont());
-    CSize s = t.IsEmpty() ? CSize(0, 0) : dc.GetTextExtent(t);
+
+    // タイトルが枠幅を食いつぶさないよう省略。右上リボン分(約24px)を確保。
+    CString title = t;
+    CSize s(0, 0);
+    if (!title.IsEmpty())
+    {
+        const int maxTitleW = (std::max)(8, r.Width() - 40);
+        s = dc.GetTextExtent(title);
+        if (s.cx > maxTitleW)
+        {
+            int fit = 0;
+            SIZE szFit = {};
+            if (::GetTextExtentExPoint(dc.GetSafeHdc(), title, title.GetLength(),
+                    maxTitleW, &fit, NULL, &szFit) && fit > 0 && fit < title.GetLength())
+            {
+                if (fit > 1)
+                    title = title.Left(fit - 1) + _T("…");
+                else
+                    title = _T("…");
+                s = dc.GetTextExtent(title);
+            }
+            else
+            {
+                // GetTextExtentExPoint 失敗時のフォールバック
+                while (title.GetLength() > 1 && dc.GetTextExtent(title).cx > maxTitleW)
+                    title = title.Left(title.GetLength() - 1);
+                if (title.GetLength() < t.GetLength())
+                {
+                    if (title.GetLength() > 1)
+                        title = title.Left(title.GetLength() - 1) + _T("…");
+                    else
+                        title = _T("…");
+                }
+                s = dc.GetTextExtent(title);
+            }
+        }
+    }
+
     int nT = r.top + (s.cy > 0 ? s.cy / 2 : 8);
 
     CPen pO(PS_SOLID, 2, RGB(255, 140, 180));
@@ -7760,7 +8525,7 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
 
     // 右上の角はしどけないリボンで色っぽく（左上はタイトルと重なるため省略）
     DrawLooseRibbon(&dc, CRect(r.right - 19, nT - 8, r.right - 1, nT + 8), COLOR_BOW);
-    if (t.IsEmpty())
+    if (title.IsEmpty())
         DrawLooseRibbon(&dc, CRect(r.left + 1, nT - 8, r.left + 19, nT + 8), COLOR_BOW);
     DrawSparkle(&dc, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
     DrawSparkle(&dc, r.left + 9, r.bottom - 9, 3, COLOR_SPARKLE);
@@ -7768,13 +8533,21 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
     DrawLaceLine(&dc, r.left + 18, r.bottom - 7, r.right - 18, r.bottom - 7, RGB(60, 40, 55));
     DrawLaceScallop(&dc, r.left + 16, r.bottom - 5, r.right - 16, 3, COLOR_LACE);
 
-    if (!t.IsEmpty())
+    if (!title.IsEmpty())
     {
         CRect rt(r.left + 8, nT - s.cy / 2, r.left + 8 + s.cx + 4, nT + s.cy / 2);
+        if (rt.right > r.right - 22)
+            rt.right = r.right - 22;
+#if CCUSTOM_AERO_SUPPORT
         dc.FillSolidRect(&rt, bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG);
+#else
+        dc.FillSolidRect(&rt, COLOR_DIALOG_BG);
+        UNREFERENCED_PARAMETER(bTrans);
+#endif
         dc.SetBkMode(TRANSPARENT);
-        dc.SetTextColor(RGB(0, 0, 0));
-        dc.DrawText(t, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        // クロマキー RGB(1,1,1) と区別するため、透過時の黒文字は 2,2,2 にずらす
+        dc.SetTextColor(bTrans ? RGB(2, 2, 2) : RGB(0, 0, 0));
+        dc.DrawText(title, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
     dc.SelectObject(pOF);
 }
@@ -7951,6 +8724,12 @@ struct CCC_MainLockEntry {
     CCustomCheckBox* pLockBtn = nullptr;
     int offsetX = 0;
     int offsetY = 0;
+    // 0=メイン左上相対 / 1=メイン右外側に密着 / 2=メイン左外側に密着
+    int dockH = 0;
+    // 0=メイン左上相対 / 1=メイン下外側に密着 / 2=メイン上外側に密着
+    int dockV = 0;
+    int gapX = 0;
+    int gapY = 0;
     int* pSaveFlag = nullptr;
     BOOL locked = FALSE;
     BOOL overlayPaint = FALSE;
@@ -8021,17 +8800,61 @@ static CCC_MainLockEntry* CCC_GetOrCreateMainLockEntry(HWND hWnd)
     return e;
 }
 
-static void CCC_ComputeMainLockOffset(HWND hWnd, int& outX, int& outY)
+// 子窓の位置から「横/上/下に並んでいるか」を見て密着モードを決める。
+// リサイズ時も隙間を保つため、単純な左上相対だけでは足りない。
+static void CCC_ComputeMainLockAttach(HWND hWnd, CCC_MainLockEntry* e)
 {
-    outX = outY = 0;
+    if (!e) return;
+    e->offsetX = e->offsetY = 0;
+    e->dockH = e->dockV = 0;
+    e->gapX = e->gapY = 0;
     CWnd* pMain = CCC_GetActiveMainWindow();
     if (!pMain || !::IsWindow(hWnd))
         return;
     CRect mainRc, selfRc;
     pMain->GetWindowRect(&mainRc);
     ::GetWindowRect(hWnd, &selfRc);
-    outX = selfRc.left - mainRc.left;
-    outY = selfRc.top - mainRc.top;
+    e->offsetX = selfRc.left - mainRc.left;
+    e->offsetY = selfRc.top - mainRc.top;
+    // ほぼ外側に出ている辺を密着とみなす(重なり8pxまでは許容)
+    if (selfRc.left >= mainRc.right - 8) {
+        e->dockH = 1;
+        e->gapX = selfRc.left - mainRc.right;
+    }
+    else if (selfRc.right <= mainRc.left + 8) {
+        e->dockH = 2;
+        e->gapX = mainRc.left - selfRc.right;
+    }
+    if (selfRc.top >= mainRc.bottom - 8) {
+        e->dockV = 1;
+        e->gapY = selfRc.top - mainRc.bottom;
+    }
+    else if (selfRc.bottom <= mainRc.top + 8) {
+        e->dockV = 2;
+        e->gapY = mainRc.top - selfRc.bottom;
+    }
+}
+
+static void CCC_MainLockPlaceChild(CCC_MainLockEntry& e, const RECT* pMainRect)
+{
+    if (!pMainRect || !::IsWindow(e.hWnd))
+        return;
+    CRect selfRc;
+    ::GetWindowRect(e.hWnd, &selfRc);
+    const int w = selfRc.Width();
+    const int h = selfRc.Height();
+    int x = pMainRect->left + e.offsetX;
+    int y = pMainRect->top + e.offsetY;
+    if (e.dockH == 1)
+        x = pMainRect->right + e.gapX;
+    else if (e.dockH == 2)
+        x = pMainRect->left - w - e.gapX;
+    if (e.dockV == 1)
+        y = pMainRect->bottom + e.gapY;
+    else if (e.dockV == 2)
+        y = pMainRect->top - h - e.gapY;
+    ::SetWindowPos(e.hWnd, NULL, x, y, 0, 0,
+        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 }
 
 static const CString& CCC_MainLockLabel()
@@ -8181,7 +9004,7 @@ static void CCC_ApplyMainLockState(CCC_MainLockEntry* e, BOOL locked)
     if (e->pSaveFlag)
         *e->pSaveFlag = locked ? 1 : 0;
     if (locked)
-        CCC_ComputeMainLockOffset(e->hWnd, e->offsetX, e->offsetY);
+        CCC_ComputeMainLockAttach(e->hWnd, e);
     if (e->overlayPaint)
         CCC_MainLockInvalidateOverlay(e->hWnd);
     else
@@ -8456,11 +9279,8 @@ void CCC_MainLockOnMainMoving(LPRECT pMainRect)
             continue;
         // LockWindowUpdate はシステム全体で1つの排他ロックで、WM_MOVING の
         // tick 毎に取得/解放すると画面全体(mp バナー含む)が点滅する。使わない。
-        ::SetWindowPos(e.hWnd, NULL,
-            pMainRect->left + e.offsetX,
-            pMainRect->top + e.offsetY,
-            0, 0,
-            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+        // 移動・リサイズとも密着辺(横/上/下)を保って追随する。
+        CCC_MainLockPlaceChild(e, pMainRect);
     }
     g_mainLockInternalMove = FALSE;
 }
@@ -8474,16 +9294,11 @@ void CCC_MainLockRefreshOffsetsFor(CWnd* pMain)
 {
     if (!pMain || !::IsWindow(pMain->GetSafeHwnd()))
         return;
-    CRect mainRc;
-    pMain->GetWindowRect(&mainRc);
     for (int i = 0; i < g_mainLockCount; ++i) {
         CCC_MainLockEntry& e = g_mainLocks[i];
         if (!e.locked || !::IsWindow(e.hWnd))
             continue;
-        CRect selfRc;
-        ::GetWindowRect(e.hWnd, &selfRc);
-        e.offsetX = selfRc.left - mainRc.left;
-        e.offsetY = selfRc.top - mainRc.top;
+        CCC_ComputeMainLockAttach(e.hWnd, &e);
     }
 }
 
@@ -8504,8 +9319,29 @@ void CCC_MainLockOnChildMoving(CWnd* pDlg, LPRECT pRect)
         return;
     CRect mainRc;
     pMain->GetWindowRect(&mainRc);
+    // 移動中の仮矩形で密着を再計算(GetWindowRect はまだ旧位置のことがある)
     e->offsetX = pRect->left - mainRc.left;
     e->offsetY = pRect->top - mainRc.top;
+    e->dockH = e->dockV = 0;
+    e->gapX = e->gapY = 0;
+    const int right = pRect->right;
+    const int bottom = pRect->bottom;
+    if (pRect->left >= mainRc.right - 8) {
+        e->dockH = 1;
+        e->gapX = pRect->left - mainRc.right;
+    }
+    else if (right <= mainRc.left + 8) {
+        e->dockH = 2;
+        e->gapX = mainRc.left - right;
+    }
+    if (pRect->top >= mainRc.bottom - 8) {
+        e->dockV = 1;
+        e->gapY = pRect->top - mainRc.bottom;
+    }
+    else if (bottom <= mainRc.top + 8) {
+        e->dockV = 2;
+        e->gapY = mainRc.top - bottom;
+    }
 }
 
 // ============================================================================

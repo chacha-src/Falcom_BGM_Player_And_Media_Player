@@ -4,7 +4,7 @@
 #include "oggDlg.h"
 #include <atlimage.h>
 
-// WAV / mp3/FLAC 書き出しダイアログ共用: タグ欄とジャケットD&D
+// WAV / mp3/FLAC 書き出し・タグ編集共用: タグ欄とジャケットD&D
 
 CString ExportTagUi_CoverHint();
 BOOL ExportTagUi_IsImagePath(const CString& path);
@@ -13,6 +13,9 @@ BOOL ExportTagUi_IsImagePath(const CString& path);
 void ExportTagUi_SetCover(CStatic& pic, CCustomStatic& hint, CString& coverPath, HBITMAP& coverBmp, const CString& path);
 void ExportTagUi_ClearCover(CStatic& pic, CCustomStatic& hint, CString& coverPath, HBITMAP& coverBmp);
 BOOL ExportTagUi_OnDropFiles(HDROP hDrop, CStatic& pic, CCustomStatic& hint, CString& coverPath, HBITMAP& coverBmp);
+
+// 埋め込み/サイドカーの既存ジャケをプレビュー表示。coverPath は触らない（未変更＝再埋め込みしない）
+BOOL ExportTagUi_ShowExistingCover(CStatic& pic, CCustomStatic& hint, HBITMAP& coverBmp, LPCTSTR mediaPath);
 
 void ExportTagUi_InitFields(bool multi, const playlistdata0& pc,
 	CCustomEdit& title, CCustomEdit& artist, CCustomEdit& album,

@@ -72,8 +72,9 @@ void MpDecodeProgressReport(int pct, LPCTSTR status)
 	if (out < 0) out = 0;
 	if (out > 100) out = 100;
 	if (out != 0 && out != 100 && out == g_lastPct) return;
-	if (out != 0 && out != 100 && g_lastPct >= 0 && out < g_lastPct + 2
-		&& (status == nullptr || !*status))
+	// ステータス無しの連続更新は2%刻み。ステータス付き(エンコード中など)は1%刻みを通す
+	const BOOL hasStatus = (status != nullptr && status[0] != 0);
+	if (!hasStatus && out != 0 && out != 100 && g_lastPct >= 0 && out < g_lastPct + 2)
 		return;
 	g_lastPct = out;
 	if (g_cb)

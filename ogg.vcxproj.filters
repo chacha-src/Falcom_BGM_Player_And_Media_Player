@@ -420,6 +420,9 @@
     <ClCompile Include="TranscodeExport.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="TagEditDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="KpiHostClient.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -952,6 +955,9 @@
     <ClInclude Include="TranscodeExport.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="TagEditDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="KpiHostClient.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1010,6 +1016,21 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SongParams.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CPromptAnalyze.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DecodeProgress.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ExportTagUi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ProAudio.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CProToolsDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

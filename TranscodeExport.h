@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxwin.h"
 #include "CCustomControl.h"
 #include "oggDlg.h"
@@ -17,12 +17,19 @@ public:
 	playlistdata0 pc;
 	std::vector<playlistdata0> pcs;
 	bool multiFile;
+	int m_initialTab; // 0=WAV 1=mp3 2=FLAC (-1=保存値から mp3/FLAC)
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
 	DECLARE_MESSAGE_MAP()
 
 	void RefreshQualityLabels();
+	void ApplyTabUi();
+	void ApplyKpiDurationUi();
+	BOOL SelectionHasKpi() const;
+	int  DefaultKpiDurationSec() const;
+	void PersistKpiDurationFromUi();
+	int  CurrentFormat() const; // -1=WAV, 0=mp3, 1=FLAC
 	CString ExtForFormat(int fmt) const;
 	CString FilterForFormat(int fmt) const;
 	CString NormalizeOutPath(const CString& pathIn, int fmt) const;
@@ -34,14 +41,21 @@ public:
 	afx_msg void OnBnClickedBrowse();
 	afx_msg void OnBnClickedClose();
 	afx_msg void OnCbnSelchangeFormat();
+	afx_msg void OnTcnSelchangeTabs(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnBnClickedCoverClear();
 	afx_msg void OnDropFiles(HDROP hDropInfo);
+	virtual BOOL OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult);
 
+	CCustomTabCtrl m_tabs;
 	CCustomComboBox m_format;
 	CCustomStatic m_formatLabel;
 	CCustomComboBox m_quality;
 	CCustomStatic m_qualityLabel;
 	CCustomEdit m_loop;
+	CCustomStatic m_kpiSecLabel;
+	CCustomEdit m_kpiSec;
+	CCustomStatic m_srateLabel;
+	CCustomComboBox m_srate;
 	CCustomEdit m_path;
 	CCustomStatic m_status;
 	CCustomStatic m_loopLabel;

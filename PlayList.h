@@ -1,6 +1,5 @@
 ﻿#pragma once
 #include "afxwin.h"
-#include "BtnST.h"
 #include "afxcmn.h"
 // CPlayList ダイアログ
 
@@ -91,10 +90,10 @@ public:
 	virtual BOOL OnInitDialog();
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
-	CButtonST m_lsup;
-	CButtonST m_lup;
-	CButtonST m_lsdown;
-	CButtonST m_ldown;
+	CCustomStandardButton m_lsup;
+	CCustomStandardButton m_lup;
+	CCustomStandardButton m_lsdown;
+	CCustomStandardButton m_ldown;
 	afx_msg void OnNcDestroy();
 	virtual BOOL DestroyWindow();
 	afx_msg int Create(CWnd *pWnd);
@@ -131,11 +130,12 @@ public:
 	afx_msg void OnPop32787();
 	afx_msg void OnPopWavExport();
 	afx_msg void OnPopTranscode();
+	afx_msg void OnPopTagEdit();
 	CCustomEdit m_find;
 	afx_msg void OnFindUp();
 	afx_msg void OnFindDown();
-	CButtonST m_findup;
-	CButtonST m_finddown;
+	CCustomStandardButton m_findup;
+	CCustomStandardButton m_finddown;
 	CCustomCheckBox m_savecheck;
 	CCustomCheckBox m_save_mp3;
 	CCustomCheckBox m_save_kpi;
@@ -165,6 +165,13 @@ CString PlStorePlaylistFol(LPCTSTR fol, int sub);
 BOOL PlIsFalcomGameBgmMode(int sub);
 // リスト欠損バッジ用。TRUE=実ファイルとして欠落していると判断できる場合のみ。
 BOOL PlTrackLooksMissing(int sub, LPCTSTR fol);
+// 欠損ディスクキャッシュ(%LOCALAPPDATA%\oggYSED\miss)。-1=未登録 / 0=存在 / 1=欠損
+int PlMissDiskGet(LPCTSTR fol);
+void PlMissDiskSet(LPCTSTR fol, int miss);
+void PlMissDiskForget(LPCTSTR fol);
+// ジャケットサムネディスクキャッシュ(%LOCALAPPDATA%\oggYSED\jak)
+CString PlJakDiskPath(LPCTSTR fol, BOOL noneSentinel);
+void PlJakDiskForget(LPCTSTR fol);
 
 enum {
 	PL_CTX_INFO = 1,
@@ -187,6 +194,9 @@ enum {
 	PL_CTX_PIANOROLL = 18,
 	PL_CTX_OPEN_FOLDER = 19,
 	PL_CTX_ADD_SAME_FOLDER = 20,
+	PL_CTX_RESCAN_MISS = 21,
+	PL_CTX_REFRESH_JAK = 22,
+	PL_CTX_TAG_EDIT = 23,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

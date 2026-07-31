@@ -94,8 +94,9 @@ void PlaybackCcClearFormat();
 void PlaybackCcLockFormat(int rate, int ch, int bits);
 bool PlaybackCcFormatLocked();
 void PlaybackCcGetFormat(int& rate, int& ch, int& bits);
-void PlaybackCcWrite(const void* p, UINT n);
-void PlaybackCcWriteForced(const void* p, UINT n);
+// 戻り値: ファイルへ実際に書いたバイト数（レート変換後。wl 加算に使う）
+UINT PlaybackCcWrite(const void* p, UINT n);
+UINT PlaybackCcWriteForced(const void* p, UINT n);
 
 #include "codec/neaacdec.h"
 #include "m4a.h"
@@ -754,10 +755,10 @@ protected:
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 public:
-	CStatic m_in;
+	CCustomStatic m_in;
 	virtual BOOL OnInitDialog();
 	CLinkStatic m_link;
-	CStatic m_cpu;
+	CCustomStatic m_cpu;
 	CCustomEdit m_os3;
 	CCustomStandardButton m_okdummy;
 };
@@ -843,9 +844,10 @@ static int CountKpiFiles(CString ff)
 class CKpiLoadingWnd : public CWnd
 {
 public:
-	CProgressCtrl m_progress;
+	CCustomProgressCtrl m_progress;
 
 	CKpiLoadingWnd()
+		: m_bAero(FALSE)
 	{
 		m_strText = LL14(
 			L"KPI読み込み中…\n（しばらく時間がかかる場合があります）",
@@ -874,11 +876,19 @@ public:
 
 	BOOL Create(CWnd* pParent = NULL)
 	{
-		// Register window class
+		// savedata は InitInstance で既に読込済み。ここでは aero/inwoman をそのまま参照できる。
+		CCC_StartInwomanTimer();
+#if CCUSTOM_AERO_SUPPORT
+		m_bAero = CCC_IsAeroEnabled();
+#else
+		m_bAero = FALSE;
+#endif
+
+		// Register window class (アクリル時は背景ブラシ無し=隙間を DWM に任せる)
 		CString strWndClass = AfxRegisterWndClass(
 			CS_HREDRAW | CS_VREDRAW,
 			::LoadCursor(NULL, IDC_WAIT), // hourglass cursor
-			(HBRUSH)(COLOR_WINDOW + 1),
+			m_bAero ? (HBRUSH)NULL : (HBRUSH)(COLOR_WINDOW + 1),
 			NULL
 		);
 
@@ -909,20 +919,30 @@ public:
 			WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
 			strWndClass,
 			_T(""),
-			WS_POPUP | WS_BORDER,
+			WS_POPUP | WS_BORDER | (m_bAero ? (WS_CLIPCHILDREN | WS_CLIPSIBLINGS) : 0),
 			rect.left, rect.top, rect.Width(), rect.Height(),
 			pParent ? pParent->GetSafeHwnd() : NULL,
 			NULL
 		);
 
 		if (result) {
+#if CCUSTOM_AERO_SUPPORT
+			if (m_bAero) {
+				::SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, 0);
+				CCC_ApplyAero(m_hWnd, TRUE);
+				CCC_PrepareDialogSurface(m_hWnd, TRUE);
+			}
+#endif
 			m_font.CreatePointFont(110, _T("MS UI Gothic"));
 
 			// Position progress bar near the bottom
-			CRect progressRect(Scale(20, dpi), Scale(85, dpi), rect.Width() - Scale(20, dpi), Scale(102, dpi));
-			m_progress.Create(WS_CHILD | WS_VISIBLE | PBS_SMOOTH, progressRect, this, 1);
+			CRect progressRect(Scale(20, dpi), Scale(82, dpi), rect.Width() - Scale(20, dpi), Scale(104, dpi));
+			m_progress.Create(WS_CHILD | WS_VISIBLE, progressRect, this, 1);
 			m_progress.SetRange(0, 100);
 			m_progress.SetPos(0);
+			m_progress.SetShowPercent(TRUE);
+			m_progress.SetColors(RGB(255, 236, 246), RGB(255, 170, 200), RGB(200, 120, 220));
+			m_progress.SetAeroMode(m_bAero);
 
 			SetWindowPos(&wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		}
@@ -933,7 +953,7 @@ public:
 	void SetRange(int nMin, int nMax)
 	{
 		if (m_progress.GetSafeHwnd()) {
-			m_progress.SetRange32(nMin, nMax);
+			m_progress.SetRange(nMin, nMax);
 		}
 	}
 
@@ -949,6 +969,7 @@ public:
 			// 親 COggDlg の WM_INITDIALOG 中にタイマー 9998(関連付け起動の dp(ndd) 再生)
 			// や 5211(プレイリスト Create)が発火すると、KPI 読み込み中に play() が
 			// ネスト実行され「読み込み中のまま固まる+裏で再生+メモリエラー」になる。
+			// (淫女タイマーもここで止まるが、SetPos ごとの再描画で GetTickCount 演出は進む)
 			MSG msg;
 			while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 				if (msg.message == WM_QUIT) {
@@ -966,6 +987,10 @@ public:
 	void Show()
 	{
 		if (m_hWnd != NULL) {
+#if CCUSTOM_AERO_SUPPORT
+			if (m_bAero)
+				CCC_RefreshDwmBlur(m_hWnd);
+#endif
 			ShowWindow(SW_SHOW);
 			UpdateWindow();
 
@@ -994,6 +1019,7 @@ public:
 protected:
 	CString m_strText;
 	CFont m_font;
+	BOOL m_bAero;
 
 	static int Scale(int value, UINT dpi)
 	{
@@ -1015,18 +1041,31 @@ protected:
 		CRect clientRect;
 		GetClientRect(&clientRect);
 
-		// Background: soft blue/grey theme matching LyricsProgressWnd
-		dc.FillSolidRect(&clientRect, RGB(230, 240, 255));
+#if CCUSTOM_AERO_SUPPORT
+		if (m_bAero && CCC_IsWin11()) {
+			// 子(進捗バー)以外の隙間だけクロマキーで空け、DWM アクリルを通す
+			CCC_PaintAeroGaps(dc, this, nullptr);
+		}
+		else if (m_bAero) {
+			dc.FillSolidRect(&clientRect, RGB(250, 250, 250));
+		}
+		else
+#endif
+		{
+			dc.FillSolidRect(&clientRect, COLOR_DIALOG_BG);
+		}
 
-		// Border
-		CPen pen(PS_SOLID, 2, RGB(100, 150, 200));
+		// Border (塗りつぶさず枠だけ — アクリルを潰さない)
+		CPen pen(PS_SOLID, 2, RGB(232, 170, 198));
 		CPen* pOldPen = dc.SelectObject(&pen);
+		CBrush* pOldBr = (CBrush*)dc.SelectStockObject(NULL_BRUSH);
 		dc.Rectangle(&clientRect);
+		dc.SelectObject(pOldBr);
 		dc.SelectObject(pOldPen);
 
 		CFont* pOldFont = dc.SelectObject(&m_font);
 		dc.SetBkMode(TRANSPARENT);
-		dc.SetTextColor(RGB(50, 50, 150));
+		dc.SetTextColor(RGB(140, 60, 100));
 
 		UINT dpi = GetDpi(m_hWnd);
 		const int hPad = Scale(16, dpi);
@@ -1071,6 +1110,18 @@ protected:
 
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC)
 	{
+#if CCUSTOM_AERO_SUPPORT
+		if (m_bAero && CCC_IsWin11())
+			return TRUE;
+		if (m_bAero && pDC) {
+			CRect r;
+			GetClientRect(&r);
+			pDC->FillSolidRect(&r, RGB(248, 248, 248));
+			return TRUE;
+		}
+#else
+		UNREFERENCED_PARAMETER(pDC);
+#endif
 		return TRUE; // anti-flicker
 	}
 
@@ -2947,6 +2998,8 @@ int ret2;
 // WAV出力（再生なし）用
 CString wavExportPath;
 int wavExportLoopCount = 0;
+int g_wavExportMaxSec = 0; // KPI等: 書き出し上限秒(0=無制限)
+int g_wavExportSampleRate = 0; // 書き出し先Hz(0=ソースのまま)
 // WAV書き出しの実データバイト数(64bit)。ヘッダ確定/成否判定はファイル実長から求める。
 __int64 g_wavExportDataBytes = 0;
 
@@ -8927,6 +8980,7 @@ void COggDlg::play()
 			m_time.SetRange(0, (data_size) / (wavsam_depth / 4), TRUE);
 			uint64_t np = 0;
 			g_kpiHost.Seek(g_kpiSession.sessionId, 0, 0, np);
+			g_openDecoderMode = mode;
 			wav_start();
 			// 以降の共通処理(UI更新/画像抽出など)も実行させる
 		}
@@ -9132,8 +9186,15 @@ void COggDlg::play()
 			if (sikpi.dwLength == (DWORD)-1) loop2 = 0;
 			data_size = oggsize = loop2 * (wavsam_depth / 4);
 			m_time.SetRange(0, (data_size) / (wavsam_depth / 4), TRUE);
-			if (kvver == 2 && mod->SetPosition) mod->SetPosition(kmp1, 0);
-			if (kvver == 5) kpidec->Seek(0, 0);
+			if (kvver == 2 && mod && mod->SetPosition) mod->SetPosition(kmp1, 0);
+			if (kvver == 5 && kpidec) kpidec->Seek(0, 0);
+			// Open 失敗なのに共通処理へ進むと playwavkpi が空振りし、書き出しが2〜3%で終わる
+			if ((kvver == 2 && (mod == NULL || kmp1 == NULL))
+				|| (kvver == 5 && !g_kpiRemote && kpidec == NULL)
+				|| (kvver != 2 && kvver != 5 && !g_kpiRemote)) {
+				m_saisai.EnableWindow(TRUE); endflg = 0; return;
+			}
+			g_openDecoderMode = mode;
 			wav_start();
 		}
 		CFile ff;
@@ -9839,6 +9900,23 @@ void COggDlg::play()
 	NormalizePlaybackWaveFormat();
 
 	ConfigurePlaybackOutputAndUpscaler();
+	// 書き出し専用: ユーザー指定レートへリサンプル（KPI等の192kを44.1/48kへ落とす）
+	if (wavExportPath.GetLength() > 0 && g_wavExportSampleRate >= 8000) {
+		int srcBits = abs(wavsam_depth);
+		if (wavsam_depth < 0) srcBits = 16;
+		if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32)) srcBits = 16;
+		g_ds_pcm_rate = g_wavExportSampleRate;
+		if (g_ds_pcm_ch < 1) g_ds_pcm_ch = (wavchannel > 0) ? wavchannel : 2;
+		if (!(g_ds_pcm_bits == 16 || g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32))
+			g_ds_pcm_bits = (srcBits == 24 || srcBits == 32) ? srcBits : 16;
+		g_audioUpscaler.Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
+		g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
+		wh.WaveFmt.wf.nChannels = (WORD)g_ds_pcm_ch;
+		wh.WaveFmt.wf.nSamplesPerSec = (DWORD)g_ds_pcm_rate;
+		wh.WaveFmt.wBitsPerSample = (WORD)g_ds_pcm_bits;
+		wh.WaveFmt.wf.nBlockAlign = (WORD)(wh.WaveFmt.wf.nChannels * wh.WaveFmt.wBitsPerSample / 8);
+		wh.WaveFmt.wf.nAvgBytesPerSec = wh.WaveFmt.wf.nSamplesPerSec * wh.WaveFmt.wf.nBlockAlign;
+	}
 	g_audioUpscaler.Reset();
 
 	if (ccOpenedThisPlay && cc1 == 1) {
@@ -9978,7 +10056,22 @@ void COggDlg::play()
 			return;
 		}
 		// 2GB超対応(RF64)ヘッダを書き込み。確定は出力完了後に行う。
-		WriteWavStreamHeaderRF64(cc);
+		// 書き出しレート指定時は Configure 済みの g_ds_pcm_* をヘッダへ反映
+		{
+			const int hz = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : wavbit_sample_Hz;
+			const int ch = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : ((wavchannel > 0) ? wavchannel : 2);
+			int bits = (g_ds_pcm_bits == 16 || g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32)
+				? g_ds_pcm_bits : abs(wavsam_depth);
+			if (!(bits == 16 || bits == 24 || bits == 32)) bits = 16;
+			wh.WaveFmt.wf.wFormatTag = WAVE_FORMAT_PCM;
+			wh.WaveFmt.wf.nChannels = (WORD)ch;
+			wh.WaveFmt.wf.nSamplesPerSec = (DWORD)hz;
+			wh.WaveFmt.wBitsPerSample = (WORD)bits;
+			wh.WaveFmt.wf.nBlockAlign = (WORD)(ch * bits / 8);
+			wh.WaveFmt.wf.nAvgBytesPerSec = (DWORD)hz * (DWORD)wh.WaveFmt.wf.nBlockAlign;
+			WriteWavStreamHeaderRF64(cc);
+			PlaybackCcLockFormat(hz, ch, bits);
+		}
 		endflg = 0;
 		// 連続再生用 timer 9000 は export 中に立てない（DoEvent 再入で次曲 Restart）
 	endf = 0;
@@ -10663,11 +10756,51 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 	ret2 = pc->ret2;
 	wavExportPath = outputPath;
 	wavExportLoopCount = loopCount;
+	g_wavExportMaxSec = 0;
+	g_wavExportSampleRate = 0;
+	{
+		int sr = localOpts.sampleRate;
+		if (sr < 1) sr = savedata.wav_export_sample_rate;
+		if (sr == 44100 || sr == 48000 || sr == 96000 || sr == 192000)
+			g_wavExportSampleRate = sr;
+		else
+			g_wavExportSampleRate = 0;
+	}
+	if (pc->sub == -3) {
+		// OnRestart と同様、書き出し前に KPI プラグインを解決する。
+		// 未再生のまま書き出すと kpi/kvver が空のまま Open できず、進捗2〜3%で失敗する。
+		if (pl && plw) {
+			playlistdata p = {};
+			CString media = filen;
+			CString bare;
+			uint32_t sel = 1;
+			SplitKpiSubsongPath(media, bare, sel);
+			if (!bare.IsEmpty()) media = bare;
+			kpi[0] = 0;
+			pl->plugs(media, &p, kpi, kvver);
+			if (kpi[0] != 0) {
+				CString kpiDir = kpi;
+				const int slash = kpiDir.ReverseFind(_T('\\'));
+				if (slash >= 0) {
+					kpiDir = kpiDir.Left(slash);
+					if (!kpiDir.IsEmpty())
+						_tchdir(kpiDir);
+				}
+			}
+		}
+		int sec = localOpts.kpiDurationSec;
+		if (sec < 1) sec = savedata.wav_export_kpi_sec;
+		if (sec < 1) sec = 240;
+		if (sec > 36000) sec = 36000;
+		g_wavExportMaxSec = sec;
+	}
 	int saveloop_bak = savedata.saveloop;
 	savedata.saveloop = 1;  // ループを有効にしてwavExportLoopCountで制御
 	g_wavExportDataBytes = 0;
 	{
 		double expect = (pc->time > 0) ? (double)pc->time : 180.0;
+		if (g_wavExportMaxSec > 0)
+			expect = (double)g_wavExportMaxSec;
 		expect *= (double)loopCount;
 		MpDecodeProgressSetExpectedSec(expect);
 		MpDecodeProgressReport(1, LL14(
@@ -10694,6 +10827,8 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 		ok = ApplyExportLimiterWavFile(outputPath);
 	wavExportPath.Empty();
 	wavExportLoopCount = 0;
+	g_wavExportMaxSec = 0;
+	g_wavExportSampleRate = 0;
 	savedata.saveloop = saveloop_bak;
 	if (ok && applyTags && pc->fol[0] != 0) {
 		const int copyTags = localOpts.copyTags ? 1 : 0;
@@ -10758,7 +10893,7 @@ BOOL COggDlg::ExportToTranscode(playlistdata0* pc, CString outputPath, int loopC
 	MpDecodeProgressSetPcmCap(78);
 	BOOL ok = ExportToWav(pc, tempWav, loopCount, opts, false);
 	if (ok) {
-		MpDecodeProgressReport(82, LL14(
+		MpDecodeProgressReport(80, LL14(
 			L"エンコード中…", L"Encoding...", L"Encodage...", L"Codifica...", L"Codificando...",
 			L"인코딩 중…", L"编码中…", L"Encoding...", L"Кодирование...", L"Kodiere...",
 			L"Codificando...", L"Coderen...", L"Kodowanie...", L"Kodlaniyor..."));
@@ -13189,8 +13324,7 @@ int readBuffwav(char* bw, int cnt)
 	if (fade < 0.0001f) { fade = 0.0f; fadeadd = 0.0f; }
 	ApplyFadeCubedToInterleavedPcm(bw, cnt2);
 
-	PlaybackCcWrite(bw, cnt0);
-	wl += cnt0;
+	wl += PlaybackCcWrite(bw, cnt0);
 
 	{
 		float te = (float)tempo;
@@ -13676,14 +13810,17 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 {
 	// x64 KPI は別プロセス経由でデコードするため、この時点で kpidec==NULL になり得る
 	if (!g_kpiRemote && og->mod == NULL && kpidec == NULL) return 0;
+	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
+	//データ読み込み（playb は実デコード後に進める。先に足すと秒数打ち切りだけ進んで空WAVになる）
+	int rrr = readkpi(bw + old, l1);
 	{
 		const int bpf = PcmOutBytesPerFrame();
-		playb += (l1 + l2) / bpf;
+		if (bpf > 0)
+			playb += rrr / bpf;
 	}
-	//データ読み込み
-	int rrr = readkpi(bw + old, l1);
 	if (l1 != rrr) {
-		if (endf == 1) {
+		// 書き出し中は秒数上限で止める。短い返却を即 EOF にすると RB プライミングで失敗する。
+		if (endf == 1 && !exporting) {
 			l1 = rrr;
 			if (savedata.saverenzoku == 0)
 				fade1 = 1;
@@ -13691,7 +13828,10 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				endflg = 1;
 
 		}
-		else {
+		else if (endf == 1 && exporting && rrr <= 0 && fade1) {
+			l1 = rrr;
+		}
+		else if (!(endf == 1 && exporting)) {
 			loopcnt++;
 			playb = loop1;
 			if (kvver == 2)
@@ -13701,7 +13841,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 					uint64_t np = 0;
 					g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
 				}
-				else {
+				else if (kpidec) {
 					kpidec->Seek(0, 1);
 				}
 			}
@@ -13709,13 +13849,28 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			cnt3 = 0;
 			RubberBand_DestroyBank(0);
 			reset = TRUE;
-			readkpi(bw + old + rrr, l1 - rrr);
+			const int got = readkpi(bw + old + rrr, l1 - rrr);
+			{
+				const int bpf = PcmOutBytesPerFrame();
+				if (bpf > 0)
+					playb += got / bpf;
+			}
+			rrr += got;
+			l1 = rrr;
+		}
+		else {
+			l1 = rrr;
 		}
 	}
 	if (l2) {
 		rrr = readkpi(bw, l2);
+		{
+			const int bpf = PcmOutBytesPerFrame();
+			if (bpf > 0)
+				playb += rrr / bpf;
+		}
 		if (l2 != rrr) {
-			if (endf == 1) {
+			if (endf == 1 && !exporting) {
 				l2 = rrr;
 				if (savedata.saverenzoku == 0)
 					fade1 = 1;
@@ -13723,7 +13878,10 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 					endflg = 1;
 
 			}
-			else {
+			else if (endf == 1 && exporting && rrr <= 0 && fade1) {
+				l2 = rrr;
+			}
+			else if (!(endf == 1 && exporting)) {
 				loopcnt++;
 				playb = loop1;
 				if (kvver == 2)
@@ -13733,7 +13891,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 						uint64_t np = 0;
 						g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
 					}
-					else {
+					else if (kpidec) {
 						kpidec->Seek(0, 1);
 					}
 				}
@@ -13741,7 +13899,17 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				cnt3 = 0;
 				RubberBand_DestroyBank(0);
 				reset = TRUE;
-				readkpi(bw + rrr, (int)l2 - rrr);
+				const int got = readkpi(bw + rrr, (int)l2 - rrr);
+				{
+					const int bpf = PcmOutBytesPerFrame();
+					if (bpf > 0)
+						playb += got / bpf;
+				}
+				rrr += got;
+				l2 = rrr;
+			}
+			else {
+				l2 = rrr;
 			}
 		}
 	}
@@ -14003,14 +14171,17 @@ int readkpi(BYTE* bw, int cnt)
 						}
 					}
 					if (r > 0 && fade1 != 1) {
-						if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
-							kpi_silence_bytes += r;
-						} else {
-							kpi_silence_bytes = 0;
-						}
-						int maxSilentBytes = (int)((double)wavbit_sample_Hz * (double)wavchannel * (double)(abs(wavsam_depth) / 8) * 4.0);
-						if (maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes) {
-							fade1 = 1;
+						// 書き出し中は無音打ち切りしない（KSS等は先頭無音や弱い音量が続きやすい）
+						if (!(wavExportPath.GetLength() > 0 || g_isWavExportRendering)) {
+							if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
+								kpi_silence_bytes += r;
+							} else {
+								kpi_silence_bytes = 0;
+							}
+							int maxSilentBytes = (int)((double)wavbit_sample_Hz * (double)wavchannel * (double)(abs(wavsam_depth) / 8) * 4.0);
+							if (maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes) {
+								fade1 = 1;
+							}
 						}
 					}
 					if (r == 0) fade1 = 1;
@@ -14048,8 +14219,8 @@ int readkpi(BYTE* bw, int cnt)
 				if (len2 > 0) {
 					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 					poss4 += len2;
-					if (cnt3 < cnt)
-						return cnt4;
+					// cnt3 < cnt のとき 0 を返すと playwavkpi が EOF 扱いし、
+					// 書き出しが PCM 未出力のまま終わる。リングに溜まった分は下で読む。
 					if (cnt2 <= cnt3) {
 						cnt3 -= cnt2;
 						if (cnt3 != 0)	memcpy(bufkpi, bufkpi + cnt2, cnt3);
@@ -14061,10 +14232,15 @@ int readkpi(BYTE* bw, int cnt)
 
 		cnt2 = cnt;
 
-		if (cnt2 > 0) {
+		if (cnt2 > 0 && poss4 > 0) {
 			int to_read = cnt;
+			if (to_read > poss4) to_read = poss4;
 			RingBufRead(bw, bufkpi3, max_buffer_size, poss3, to_read);
 			poss4 -= to_read;
+			cnt = to_read;
+		}
+		else if (r == 0 || poss4 <= 0) {
+			cnt = 0;
 		}
 
 		equaliser(bw, cnt, reset);
@@ -14072,7 +14248,6 @@ int readkpi(BYTE* bw, int cnt)
 		reset = FALSE;
 
 		cnt4 = cnt3;
-		if (r == 0) cnt = 0;
 		__int64 bfc = 0, bc2 = 0;
 
 		if (wavsam_depth == 32) {
@@ -14143,8 +14318,7 @@ int readkpi(BYTE* bw, int cnt)
 			}
 		}
 
-		PlaybackCcWrite(bw, cnt);
-		wl += cnt;
+		wl += PlaybackCcWrite(bw, cnt);
 		lenl += cnt;
 	}
 	catch (SE_Exception e) {
@@ -14364,8 +14538,7 @@ int readm4a(BYTE* bw, int cnt)
 		else {
 			for (int i = 0; i < cnt / 2; i++) { c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c; }
 		}
-		PlaybackCcWrite(bw, cnt);
-		wl += cnt;
+		wl += PlaybackCcWrite(bw, cnt);
 		lenl += cnt;
 	}
 	return cnt;
@@ -14579,8 +14752,7 @@ int readflac(BYTE* bw, int cnt)
 		else {
 			for (int i = 0; i < lenl / 2; i++) { c = b[i]; c = (short)(((float)c) * fade * fade); b[i] = c; }
 		}
-		PlaybackCcWrite(bw, lenl);
-		wl += lenl;
+		wl += PlaybackCcWrite(bw, lenl);
 		//lenl += lenl;
 		//	playb+=lenl/4;
 	}
@@ -14675,8 +14847,7 @@ int readopus(BYTE* bw, int cnt)
 
 					int len2 = readtempo(bufkpi, r);
 					cnt4 = r;
-					PlaybackCcWrite(outputRawBytesData.data(), len2);
-					wl += len2;
+					wl += PlaybackCcWrite(outputRawBytesData.data(), len2);
 
 					if (len2 > 0) {
 						// 書き込み
@@ -14915,8 +15086,7 @@ int readdsd(BYTE* bw, int cnt)
 	og->FeedPianoRoll(bw, cnt2);
 	reset = FALSE;
 
-	PlaybackCcWrite(bw, cnt2);
-	wl += cnt2;
+	wl += PlaybackCcWrite(bw, cnt2);
 
 
 	return cnt;
@@ -15193,8 +15363,7 @@ int readwav(BYTE* bw, int cnt)
 			c = (short)(((float)c) * fade * fade); b[i] = (short)c;
 		}
 	}
-	PlaybackCcWrite(bw, cnt2);
-	wl += cnt2;
+	wl += PlaybackCcWrite(bw, cnt2);
 	lenl += cnt2;
 	return cnt2;
 }
@@ -15309,8 +15478,7 @@ int readmp3(BYTE* bw, int cnt)
 		}
 	}
 
-	PlaybackCcWrite(bw, cnt2);
-	wl += cnt2;
+	wl += PlaybackCcWrite(bw, cnt2);
 
 	lenl += cnt2;
 	//	playb+=cnt;
@@ -16975,8 +17143,8 @@ int mcopy(char* a, int len)
 		}
 	}
 
-	if (!g_inWarmup && cnt2 > 0) PlaybackCcWrite(a, cnt2);
-	if (cnt2 > 0) wl += cnt2;
+	if (!g_inWarmup && cnt2 > 0) wl += PlaybackCcWrite(a, cnt2);
+	else if (cnt2 > 0) { /* warmup: ファイル未書込だが従来どおり wl は進める */ wl += cnt2; }
 
 	return cnt2;
 }
@@ -17825,7 +17993,7 @@ void COggDlg::timerp()
 	}
 
 	if (pl && plw) {
-		if (pl->m_renzoku.GetCheck()) {
+		if (pl->m_renzoku.GetSafeHwnd() && pl->m_renzoku.GetCheck()) {
 			if (plf == 1 && fade == 0.0f && playy == 1) {
 				thn = FALSE;
 				fade1 = 1;
@@ -17848,7 +18016,7 @@ void COggDlg::timerp()
 			OnButton5();
 	}
 	else if (pl && plw) {
-		if (pl->m_renzoku.GetCheck() == TRUE) {
+		if (pl->m_renzoku.GetSafeHwnd() && pl->m_renzoku.GetCheck() == TRUE) {
 			// KPI(kb media player)は mode==-3。無限ループで loopcnt が増えないため、
 			// 連続再生時のみ2分経過で次曲へ進める。
 			if (mode == -3) {
@@ -18743,11 +18911,12 @@ UINT TheadLoop(LPVOID)
 		if (++infoScrollDiv >= 2) {
 			infoScrollDiv = 0;
 			extern CMediaPlayerDlg* mp;
-			// mp 破棄と競合しうるため、ポインタをスナップショットしてから HWND のみ検証する
+			// mp 破棄と競合しうるため、ポインタをスナップショットしてから HWND のみ検証する。
+			// Create 完了前や破棄中にメンバを触らないよう、IsWindow 後も PostMessage だけにする。
 			CMediaPlayerDlg* pMp = mp;
-			if (pMp) {
-				HWND hmp = pMp->GetSafeHwnd();
-				if (::IsWindow(hmp) && pMp->m_iscActive
+			HWND hmp = (pMp ? pMp->GetSafeHwnd() : NULL);
+			if (hmp && ::IsWindow(hmp) && pMp == mp) {
+				if (pMp->m_iscActive
 					&& InterlockedCompareExchange(&pMp->m_iscScrollPosted, 1, 0) == 0) {
 					if (!::PostMessage(hmp, WM_MP_INFO_SCROLL, 0, 0))
 						InterlockedExchange(&pMp->m_iscScrollPosted, 0);
@@ -18772,40 +18941,43 @@ void timerog1(UINT nIDEvent)
 {
 	if (nIDEvent == 59877) {
 		og->KillTimer(59877);
+		if (!og) return;
 		if (savedata.eqwindow == 1) {
-			if (!::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
+			if (og->m_EqualizerDlg && !::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
 			{
 				og->m_EqualizerDlg->Create(IDD_EQUALIZER, og);
 			}
 
-			og->m_EqualizerDlg->ShowWindow(SW_SHOW);
+			if (og->m_EqualizerDlg && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
+				og->m_EqualizerDlg->ShowWindow(SW_SHOW);
 		}
 		if (savedata.pianorollwindow == 1) {
-			if (!::IsWindow(og->m_PianoRollDlg->GetSafeHwnd()))
+			if (og->m_PianoRollDlg && !::IsWindow(og->m_PianoRollDlg->GetSafeHwnd()))
 			{
 				og->m_PianoRollDlg->Create(IDD_PIANOROLL, og);
 			}
 
-			og->m_PianoRollDlg->ShowWindow(SW_SHOW);
+			if (og->m_PianoRollDlg && ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd()))
+				og->m_PianoRollDlg->ShowWindow(SW_SHOW);
 		}
 		if (savedata.prTunewindow == 1) {
-			if (!::IsWindow(og->m_PianoRollTuneDlg->GetSafeHwnd()))
+			if (og->m_PianoRollTuneDlg && !::IsWindow(og->m_PianoRollTuneDlg->GetSafeHwnd()))
 			{
 				if (!og->m_PianoRollTuneDlg->Create(IDD_PIANOROLL_TUNE, og))
 					savedata.prTunewindow = 0;
 			}
-			if (::IsWindow(og->m_PianoRollTuneDlg->GetSafeHwnd()))
+			if (og->m_PianoRollTuneDlg && ::IsWindow(og->m_PianoRollTuneDlg->GetSafeHwnd()))
 				og->m_PianoRollTuneDlg->ShowWindow(SW_SHOW);
 		}
 		if (savedata.analyzerwindow == 1) {
 			// 親作成直後の同期 Create は避ける(CreateDialog ネスト対策)。
 			// タイマー発火時点では親は既に生きているのでここは安全。
-			if (!::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
+			if (og->m_AnalyzerDlg && !::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
 			{
 				if (!og->m_AnalyzerDlg->Create(IDD_ANALYZER, og))
 					savedata.analyzerwindow = 0;
 			}
-			if (::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
+			if (og->m_AnalyzerDlg && ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
 				og->m_AnalyzerDlg->ShowWindow(SW_SHOW);
 		}
 
@@ -20921,6 +21093,8 @@ static int g_ccFmtCh = 0;
 static int g_ccFmtBits = 0;
 static volatile LONG g_ccFmtLocked = 0;
 static AudioUpscaler s_ccUpscaler;
+static int s_ccCfgSrcRate = 0, s_ccCfgSrcCh = 0, s_ccCfgSrcBits = 0;
+static int s_ccCfgDstRate = 0, s_ccCfgDstCh = 0, s_ccCfgDstBits = 0;
 
 void PlaybackCcClearFormat()
 {
@@ -20929,6 +21103,8 @@ void PlaybackCcClearFormat()
 	g_ccFmtCh = 0;
 	g_ccFmtBits = 0;
 	s_ccUpscaler.Reset();
+	s_ccCfgSrcRate = s_ccCfgSrcCh = s_ccCfgSrcBits = 0;
+	s_ccCfgDstRate = s_ccCfgDstCh = s_ccCfgDstBits = 0;
 }
 
 void PlaybackCcLockFormat(int rate, int ch, int bits)
@@ -20942,6 +21118,10 @@ void PlaybackCcLockFormat(int rate, int ch, int bits)
 	g_ccFmtCh = ch;
 	g_ccFmtBits = bits;
 	InterlockedExchange(&g_ccFmtLocked, 1);
+	// ロック形式が変わったら変換器も張り直す
+	s_ccCfgSrcRate = s_ccCfgSrcCh = s_ccCfgSrcBits = 0;
+	s_ccCfgDstRate = s_ccCfgDstCh = s_ccCfgDstBits = 0;
+	s_ccUpscaler.Reset();
 }
 
 bool PlaybackCcFormatLocked()
@@ -20956,35 +21136,47 @@ void PlaybackCcGetFormat(int& rate, int& ch, int& bits)
 	bits = g_ccFmtBits;
 }
 
-void PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, int srcBits, bool forced)
+UINT PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, int srcBits, bool forced)
 {
+	UNREFERENCED_PARAMETER(forced);
 	if (g_mpPromptAnalyzeOnly && p && n > 0) {
 		MpPromptAnalyzeFeed(p, n, srcRate, srcCh, srcBits);
 		if (!PlaybackCcFormatLocked())
 			PlaybackCcLockFormat(srcRate, srcCh, srcBits);
-		return; // 解析専用: ファイルへは書かない
+		return 0; // 解析専用: ファイルへは書かない
 	}
-	if (cc1 != 1 || !p || n == 0) return;
+	if (cc1 != 1 || !p || n == 0) return 0;
 	if (!PlaybackCcFormatLocked()) {
 		PlaybackCcLockFormat(srcRate, srcCh, srcBits);
 		cc.Write(p, n);
 		if (g_isWavExportRendering)
 			MpDecodeProgressOnPcm(n, srcRate, srcCh, srcBits);
-		return;
+		return n;
 	}
 	if (srcRate == g_ccFmtRate && srcCh == g_ccFmtCh && srcBits == g_ccFmtBits) {
 		cc.Write(p, n);
 		if (g_isWavExportRendering)
 			MpDecodeProgressOnPcm(n, srcRate, srcCh, srcBits);
-		return;
+		return n;
 	}
-	s_ccUpscaler.Configure(srcRate, srcCh, srcBits, g_ccFmtRate, g_ccFmtCh, g_ccFmtBits);
+	// 毎書き込み Configure/Reset すると FIFO が消え、ダウンサンプルが壊れる
+	if (srcRate != s_ccCfgSrcRate || srcCh != s_ccCfgSrcCh || srcBits != s_ccCfgSrcBits
+		|| g_ccFmtRate != s_ccCfgDstRate || g_ccFmtCh != s_ccCfgDstCh || g_ccFmtBits != s_ccCfgDstBits) {
+		s_ccUpscaler.Configure(srcRate, srcCh, srcBits, g_ccFmtRate, g_ccFmtCh, g_ccFmtBits);
+		s_ccCfgSrcRate = srcRate;
+		s_ccCfgSrcCh = srcCh;
+		s_ccCfgSrcBits = srcBits;
+		s_ccCfgDstRate = g_ccFmtRate;
+		s_ccCfgDstCh = g_ccFmtCh;
+		s_ccCfgDstBits = g_ccFmtBits;
+	}
 	s_ccUpscaler.PushInterleaved((const uint8_t*)p, (int)n);
 	std::vector<uint8_t> out;
+	// アップ時は増える。ダウン時は減るが余裕を持つ
 	out.resize((size_t)n * 4 + 65536);
 	int got = 0;
 	int guard = 0;
-	while (guard < 64) {
+	while (guard < 256) {
 		++guard;
 		if ((int)out.size() - got < 8192)
 			out.resize(out.size() * 2);
@@ -20992,28 +21184,39 @@ void PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, in
 		if (pulled <= 0) break;
 		got += pulled;
 	}
-	if (got > 0)
+	if (got > 0) {
 		cc.Write(out.data(), (UINT)got);
-	if (g_isWavExportRendering)
-		MpDecodeProgressOnPcm(n, srcRate, srcCh, srcBits);
+		if (g_isWavExportRendering)
+			MpDecodeProgressOnPcm((UINT)got, g_ccFmtRate, g_ccFmtCh, g_ccFmtBits);
+	}
+	return (UINT)got;
 }
 
-void PlaybackCcWrite(const void* p, UINT n)
+// playwav* が渡すのは常にソースPCM。出力(g_ds_*)形式を名乗ると
+// ヘッダだけ変換レート・中身は生ソースになり、192k→48k で再生が約4倍遅くなる。
+static void PlaybackCcSourceFormat(int& rate, int& ch, int& bits)
 {
-	const int rate = (g_pcm_upscale_active && g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : wavbit_sample_Hz;
-	const int ch = (g_pcm_upscale_active && g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : wavchannel;
-	int bits = (g_pcm_upscale_active && g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : abs(wavsam_depth);
-	if (!(bits == 16 || bits == 24 || bits == 32)) bits = 16;
-	PlaybackCcWriteFromFormat(p, n, rate, ch, bits, false);
+	rate = (wavbit_sample_Hz >= 8000) ? wavbit_sample_Hz : 44100;
+	ch = (wavchannel >= 1) ? wavchannel : 2;
+	bits = abs(wavsam_depth);
+	if (wavsam_depth < 0)
+		bits = 16; // float 系は Render 後 int16
+	if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32))
+		bits = 16;
 }
 
-void PlaybackCcWriteForced(const void* p, UINT n)
+UINT PlaybackCcWrite(const void* p, UINT n)
 {
-	const int rate = (g_pcm_upscale_active && g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : wavbit_sample_Hz;
-	const int ch = (g_pcm_upscale_active && g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : wavchannel;
-	int bits = (g_pcm_upscale_active && g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : abs(wavsam_depth);
-	if (!(bits == 16 || bits == 24 || bits == 32)) bits = 16;
-	PlaybackCcWriteFromFormat(p, n, rate, ch, bits, true);
+	int rate, ch, bits;
+	PlaybackCcSourceFormat(rate, ch, bits);
+	return PlaybackCcWriteFromFormat(p, n, rate, ch, bits, false);
+}
+
+UINT PlaybackCcWriteForced(const void* p, UINT n)
+{
+	int rate, ch, bits;
+	PlaybackCcSourceFormat(rate, ch, bits);
+	return PlaybackCcWriteFromFormat(p, n, rate, ch, bits, true);
 }
 
 void Ogg_FeedPianoRoll(const void* p, int n)
@@ -22931,6 +23134,11 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 		GetWindowRect(&r);
 		if (maini)
 			maini->ShowWindow(SW_RESTORE);
+	}
+	if (nType != SIZE_MINIMIZED && ::IsWindow(m_hWnd)) {
+		CRect wr;
+		GetWindowRect(&wr);
+		CCC_MainLockOnMainMoving(&wr);
 	}
 
 }

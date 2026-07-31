@@ -49,7 +49,7 @@ protected:
 	CBrush m_brDlg;
 	int m_selRow;
 	BOOL m_bInlineEdit;
-	CEdit m_inlineEdit;
+	CCustomEdit m_inlineEdit;
 	int m_inlineRow;
 
 	virtual void DoDataExchange(CDataExchange* pDX);

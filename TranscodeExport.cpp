@@ -1,4 +1,4 @@
-// TranscodeExport.cpp
+﻿// TranscodeExport.cpp
 // WAV書き出し結果を mp3 / FLAC に変換するUIとエンコード。
 
 #include "stdafx.h"
@@ -10,6 +10,7 @@
 #include "ExportTagUi.h"
 #include <ShlObj.h>
 #include <vector>
+#include <algorithm>
 
 #define FLAC__NO_DLL
 #include "flac/stream_encoder.h"
@@ -28,7 +29,8 @@ extern void DoEvent();
 
 namespace {
 
-enum { TC_FMT_MP3 = 0, TC_FMT_FLAC = 1 };
+enum { TC_FMT_MP3 = 0, TC_FMT_FLAC = 1, TC_FMT_WAV = -1 };
+enum { TC_TAB_WAV = 0, TC_TAB_MP3 = 1, TC_TAB_FLAC = 2 };
 enum { TC_WAV_HDR = 80 };
 
 struct TcWavInfo {
@@ -294,7 +296,7 @@ BOOL EncodeWavToFlac(const CString& wavPath, const CString& outPath, int compres
 	if (info.hz < 1 || info.hz > 655350)
 		return FALSE;
 
-	MpDecodeProgressReport(82, LL14(
+	MpDecodeProgressReport(80, LL14(
 		L"FLACエンコード準備…", L"Preparing FLAC...", L"Prep. FLAC...", L"Prep. FLAC...", L"Prep. FLAC...",
 		L"FLAC 준비…", L"准备FLAC…", L"Preparing FLAC...", L"Подготовка FLAC...", L"FLAC vorbereiten...",
 		L"Preparando FLAC...", L"FLAC voorbereiden...", L"Przygotowanie FLAC...", L"FLAC hazirlaniyor..."));
@@ -370,10 +372,12 @@ BOOL EncodeWavToFlac(const CString& wavPath, const CString& outPath, int compres
 		}
 		remain -= want;
 		done += want;
-		const int encPct = 84 + (int)((done * 14) / total);
-		if (encPct != lastEncPct && (encPct >= lastEncPct + 1 || encPct >= 98)) {
-			lastEncPct = encPct;
-			MpDecodeProgressReport(encPct > 98 ? 98 : encPct, LL14(
+		// 中間WAV(〜78%)の続きとして 80〜99% を埋める。1%ごと＋最低でも一定バイトごとにUI更新
+		const int encPct = 80 + (int)((done * 19) / total);
+		const int showPct = encPct > 99 ? 99 : encPct;
+		if (showPct != lastEncPct) {
+			lastEncPct = showPct;
+			MpDecodeProgressReport(showPct, LL14(
 				L"FLACエンコード中…", L"Encoding FLAC...", L"Encodage FLAC...", L"Codifica FLAC...", L"Codificando FLAC...",
 				L"FLAC 인코딩…", L"FLAC编码中…", L"Encoding FLAC...", L"Кодирование FLAC...", L"FLAC kodieren...",
 				L"Codificando FLAC...", L"FLAC coderen...", L"Kodowanie FLAC...", L"FLAC kodlaniyor..."));
@@ -513,10 +517,11 @@ BOOL EncodeWavToMp3(const CString& wavPath, const CString& outPath, int bitrateK
 			rt += (hnsPerSec * frames) / info.hz;
 			remain -= want;
 			done += want;
-			const int encPct = 84 + (int)((done * 14) / total);
-			if (encPct != lastEncPct && (encPct >= lastEncPct + 2 || encPct >= 98)) {
-				lastEncPct = encPct;
-				MpDecodeProgressReport(encPct > 98 ? 98 : encPct, LL14(
+			const int encPct = 80 + (int)((done * 19) / total);
+			const int showPct = encPct > 99 ? 99 : encPct;
+			if (showPct != lastEncPct) {
+				lastEncPct = showPct;
+				MpDecodeProgressReport(showPct, LL14(
 					L"MP3エンコード中…", L"Encoding MP3...", L"Encodage MP3...", L"Codifica MP3...", L"Codificando MP3...",
 					L"MP3 인코딩…", L"MP3编码中…", L"Encoding MP3...", L"Кодирование MP3...", L"MP3 kodieren...",
 					L"Codificando MP3...", L"MP3 coderen...", L"Kodowanie MP3...", L"MP3 kodlaniyor..."));
@@ -544,6 +549,7 @@ IMPLEMENT_DYNAMIC(CTranscodeExport, CCustomBlurDialogBase)
 CTranscodeExport::CTranscodeExport(CWnd* pParent)
 	: CCustomBlurDialogBase(CTranscodeExport::IDD, pParent)
 	, multiFile(false)
+	, m_initialTab(-1)
 	, m_coverBmp(NULL)
 {
 }
@@ -563,6 +569,8 @@ void CTranscodeExport::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_TC_FORMAT_L, m_formatLabel);
 	DDX_Control(pDX, IDC_TC_QUALITY, m_quality);
 	DDX_Control(pDX, IDC_TC_QUALITY_L, m_qualityLabel);
+	DDX_Control(pDX, IDC_TC_SRATE, m_srate);
+	DDX_Control(pDX, IDC_TC_SRATE_L, m_srateLabel);
 	DDX_Control(pDX, IDC_TC_LOOP, m_loop);
 	DDX_Control(pDX, IDC_TC_PATH, m_path);
 	DDX_Control(pDX, IDC_TC_STATUS, m_status);
@@ -596,16 +604,124 @@ BEGIN_MESSAGE_MAP(CTranscodeExport, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_TC_CLOSE, &CTranscodeExport::OnBnClickedClose)
 	ON_BN_CLICKED(IDC_TC_COVER_CLEAR, &CTranscodeExport::OnBnClickedCoverClear)
 	ON_CBN_SELCHANGE(IDC_TC_FORMAT, &CTranscodeExport::OnCbnSelchangeFormat)
+	ON_NOTIFY(TCN_SELCHANGE, IDC_TC_TABS, &CTranscodeExport::OnTcnSelchangeTabs)
 	ON_WM_DROPFILES()
 END_MESSAGE_MAP()
 
+int CTranscodeExport::CurrentFormat() const
+{
+	if (!m_tabs.GetSafeHwnd()) {
+		const int f = m_format.GetCurSel();
+		return (f == TC_FMT_FLAC) ? TC_FMT_FLAC : TC_FMT_MP3;
+	}
+	const int t = m_tabs.GetCurSel();
+	if (t == TC_TAB_WAV) return TC_FMT_WAV;
+	if (t == TC_TAB_FLAC) return TC_FMT_FLAC;
+	return TC_FMT_MP3;
+}
+
+void CTranscodeExport::ApplyTabUi()
+{
+	const int fmt = CurrentFormat();
+	const BOOL showQ = (fmt != TC_FMT_WAV);
+	if (m_quality.GetSafeHwnd()) {
+		m_quality.ShowWindow(showQ ? SW_SHOW : SW_HIDE);
+		m_quality.EnableWindow(showQ);
+	}
+	if (m_qualityLabel.GetSafeHwnd()) {
+		m_qualityLabel.ShowWindow(showQ ? SW_SHOW : SW_HIDE);
+		m_qualityLabel.EnableWindow(showQ);
+	}
+	if (fmt == TC_FMT_WAV) {
+		if (m_format.GetSafeHwnd()) m_format.SetCurSel(TC_FMT_MP3);
+	}
+	else if (m_format.GetSafeHwnd())
+		m_format.SetCurSel(fmt == TC_FMT_FLAC ? TC_FMT_FLAC : TC_FMT_MP3);
+	if (showQ)
+		RefreshQualityLabels();
+	if (!multiFile) {
+		CString path;
+		m_path.GetWindowText(path);
+		const int dot = path.ReverseFind(L'.');
+		if (dot >= 0) path = path.Left(dot);
+		m_path.SetWindowText(NormalizeOutPath(path + ExtForFormat(fmt), fmt));
+	}
+	if (m_tabs.GetSafeHwnd())
+		m_tabs.Invalidate(FALSE);
+	ApplyKpiDurationUi();
+}
+
+BOOL CTranscodeExport::SelectionHasKpi() const
+{
+	if (multiFile) {
+		for (size_t i = 0; i < pcs.size(); ++i) {
+			if (pcs[i].sub == -3)
+				return TRUE;
+		}
+		return FALSE;
+	}
+	return pc.sub == -3;
+}
+
+int CTranscodeExport::DefaultKpiDurationSec() const
+{
+	// プレイリストの time ではなく、ユーザーが保存した秒数を優先する
+	int sec = savedata.wav_export_kpi_sec;
+	if (sec < 1)
+		sec = 240; // 既定4分
+	if (sec > 36000)
+		sec = 36000;
+	return sec;
+}
+
+void CTranscodeExport::ApplyKpiDurationUi()
+{
+	const BOOL show = SelectionHasKpi();
+	if (m_kpiSec.GetSafeHwnd())
+		m_kpiSec.ShowWindow(show ? SW_SHOW : SW_HIDE);
+	if (m_kpiSecLabel.GetSafeHwnd())
+		m_kpiSecLabel.ShowWindow(show ? SW_SHOW : SW_HIDE);
+}
+
+void CTranscodeExport::PersistKpiDurationFromUi()
+{
+	if (!m_kpiSec.GetSafeHwnd())
+		return;
+	// KPI以外でも欄に値があれば保存（次回KPI書き出しの既定になる）
+	CString kpiStr;
+	m_kpiSec.GetWindowText(kpiStr);
+	int kpiSec = _tstoi(kpiStr);
+	if (kpiSec < 1)
+		kpiSec = DefaultKpiDurationSec();
+	if (kpiSec > 36000)
+		kpiSec = 36000;
+	savedata.wav_export_kpi_sec = kpiSec;
+}
+
 CString CTranscodeExport::ExtForFormat(int fmt) const
 {
+	if (fmt == TC_FMT_WAV) return L".wav";
 	return (fmt == TC_FMT_FLAC) ? L".flac" : L".mp3";
 }
 
 CString CTranscodeExport::FilterForFormat(int fmt) const
 {
+	if (fmt == TC_FMT_WAV) {
+		return LL14(L"WAVファイル (*.wav)|*.wav|すべてのファイル (*.*)|*.*||",
+			L"WAV files (*.wav)|*.wav|All files (*.*)|*.*||",
+			L"Fichiers WAV (*.wav)|*.wav|Tous les fichiers (*.*)|*.*||",
+			L"File WAV (*.wav)|*.wav|Tutti i file (*.*)|*.*||",
+			L"Archivos WAV (*.wav)|*.wav|Todos los archivos (*.*)|*.*||",
+			L"WAV 파일 (*.wav)|*.wav|모든 파일 (*.*)|*.*||",
+			L"WAV文件 (*.wav)|*.wav|所有文件 (*.*)|*.*||",
+			L"ملفات WAV (*.wav)|*.wav|جميع الملفات (*.*)|*.*||",
+			L"Файлы WAV (*.wav)|*.wav|Все файлы (*.*)|*.*||",
+			L"WAV-Dateien (*.wav)|*.wav|Alle Dateien (*.*)|*.*||",
+			L"Arquivos WAV (*.wav)|*.wav|Todos os arquivos (*.*)|*.*||",
+			L"WAV-bestanden (*.wav)|*.wav|Alle bestanden (*.*)|*.*||",
+			L"Pliki WAV (*.wav)|*.wav|Wszystkie pliki (*.*)|*.*||",
+			L"WAV dosyalari (*.wav)|*.wav|Tum dosyalar (*.*)|*.*||");
+	}
 	if (fmt == TC_FMT_FLAC) {
 		return LL14(L"FLACファイル (*.flac)|*.flac|すべてのファイル (*.*)|*.*||",
 			L"FLAC files (*.flac)|*.flac|All files (*.*)|*.*||",
@@ -659,7 +775,8 @@ CString CTranscodeExport::OutputPathForItem(const CString& folderIn, const playl
 
 void CTranscodeExport::RefreshQualityLabels()
 {
-	const int fmt = m_format.GetCurSel();
+	const int fmt = CurrentFormat();
+	if (fmt == TC_FMT_WAV) return;
 	m_quality.ResetContent();
 	if (fmt == TC_FMT_FLAC) {
 		m_qualityLabel.SetWindowText(LL14(L"圧縮レベル", L"Compression", L"Compression", L"Compressione",
@@ -697,21 +814,82 @@ BOOL CTranscodeExport::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	CCC_BringDialogToForeground(this);
-	SetWindowText(LL14(L"mp3/FLACへ出力", L"Export to mp3/FLAC", L"Exporter en mp3/FLAC", L"Esporta in mp3/FLAC",
-		L"Exportar a mp3/FLAC", L"mp3/FLAC로 내보내기", L"导出到 mp3/FLAC", L"تصدير إلى mp3/FLAC",
-		L"Экспорт в mp3/FLAC", L"Als mp3/FLAC exportieren", L"Exportar para mp3/FLAC", L"Exporteren naar mp3/FLAC",
-		L"Eksportuj do mp3/FLAC", L"mp3/FLAC'e aktar"));
+	SetWindowText(LL14(L"音声書き出し", L"Audio export", L"Export audio", L"Esporta audio",
+		L"Exportar audio", L"오디오 내보내기", L"音频导出", L"تصدير الصوت",
+		L"Экспорт аудио", L"Audio exportieren", L"Exportar audio", L"Audio exporteren",
+		L"Eksport audio", L"Ses disa aktar"));
 
-	m_formatLabel.SetWindowText(LL14(L"形式", L"Format", L"Format", L"Formato",
-		L"Formato", L"형식", L"格式", L"التنسيق",
-		L"Формат", L"Format", L"Formato", L"Formaat",
-		L"Format", L"Bicim"));
+	// 形式コンボを隠し、上部に横置きタブ帯。品質コンボは繰返し行へ寄せる
+	m_formatLabel.ShowWindow(SW_HIDE);
+	m_format.ShowWindow(SW_HIDE);
+	{
+		CRect rcClient;
+		GetClientRect(&rcClient);
+		CRect rLoopL, rLoop, rQL, rQ;
+		m_loopLabel.GetWindowRect(&rLoopL); ScreenToClient(&rLoopL);
+		m_loop.GetWindowRect(&rLoop); ScreenToClient(&rLoop);
+		m_qualityLabel.GetWindowRect(&rQL); ScreenToClient(&rQL);
+		m_quality.GetWindowRect(&rQ); ScreenToClient(&rQ);
+
+		int tabRight = rcClient.right - 7;
+		if (tabRight < 200) tabRight = 200;
+		// 見出し帯だけの高さ（ページ空き枠を出さない）
+		CRect rTabs(7, 4, tabRight, 4 + 32);
+		m_tabs.Create(WS_CHILD | WS_VISIBLE | WS_TABSTOP | TCS_TABS | TCS_SINGLELINE | TCS_FIXEDWIDTH,
+			rTabs, this, IDC_TC_TABS);
+		m_tabs.SetAeroMode(FALSE);
+		TCITEM ti = {};
+		ti.mask = TCIF_TEXT;
+		CString sWav = L"WAV";
+		CString sMp3 = L"mp3";
+		CString sFlac = L"FLAC";
+		ti.pszText = sWav.GetBuffer(); m_tabs.InsertItem(TC_TAB_WAV, &ti); sWav.ReleaseBuffer();
+		ti.pszText = sMp3.GetBuffer(); m_tabs.InsertItem(TC_TAB_MP3, &ti); sMp3.ReleaseBuffer();
+		ti.pszText = sFlac.GetBuffer(); m_tabs.InsertItem(TC_TAB_FLAC, &ti); sFlac.ReleaseBuffer();
+		m_tabs.LayoutEqualTabs(3);
+		{
+			CRect rcItem;
+			if (m_tabs.GetItemRect(0, &rcItem)) {
+				const int stripH = rcItem.Height() + 6;
+				m_tabs.SetWindowPos(NULL, 0, 0, rTabs.Width(), stripH, SWP_NOMOVE | SWP_NOZORDER);
+			}
+		}
+
+		// 品質コンボを繰返し行の右側へ（タブ帯と重ならない位置）
+		m_qualityLabel.SetWindowPos(NULL, rQL.left, rLoopL.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+		m_quality.SetWindowPos(NULL, rQ.left, rLoop.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+		// サンプリングは品質の下（リソース＋DDX。動的 Create はしない）
+		{
+			const int top = rLoop.bottom + 6;
+			const int rowH = 24;
+			m_srateLabel.SetWindowPos(NULL, rQL.left, top + 2, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+			m_srate.SetWindowPos(NULL, rQ.left, top, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+			CRect rPathL, rPath, rBr;
+			m_pathLabel.GetWindowRect(&rPathL); ScreenToClient(&rPathL);
+			m_path.GetWindowRect(&rPath); ScreenToClient(&rPath);
+			m_browse.GetWindowRect(&rBr); ScreenToClient(&rBr);
+			const int needTop = top + rowH + 6;
+			if (rPathL.top < needTop) {
+				const int dy = needTop - rPathL.top;
+				m_pathLabel.SetWindowPos(NULL, rPathL.left, rPathL.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+				m_path.SetWindowPos(NULL, rPath.left, rPath.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+				m_browse.SetWindowPos(NULL, rBr.left, rBr.top + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+			}
+		}
+
+		int tab = m_initialTab;
+		if (tab < TC_TAB_WAV || tab > TC_TAB_FLAC) {
+			// 既定は前回の mp3/FLAC（品質UIが見える状態から開始）
+			tab = (savedata.tc_format == TC_FMT_FLAC) ? TC_TAB_FLAC : TC_TAB_MP3;
+		}
+		m_tabs.SetCurSel(tab);
+	}
 	m_format.AddString(L"mp3");
 	m_format.AddString(L"FLAC");
-	int fmt = savedata.tc_format;
-	if (fmt != TC_FMT_FLAC) fmt = TC_FMT_MP3;
-	m_format.SetCurSel(fmt);
-	RefreshQualityLabels();
+	m_format.SetCurSel((savedata.tc_format == TC_FMT_FLAC) ? TC_FMT_FLAC : TC_FMT_MP3);
+	ApplyTabUi();
+	if (m_tabs.GetSafeHwnd())
+		m_tabs.Invalidate(FALSE);
 
 	m_loopLabel.SetWindowText(LL14(L"繰返し回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop",
 		L"Repeticiones", L"반복 횟수", L"循环次数", L"عدد التكرار",
@@ -759,6 +937,64 @@ BOOL CTranscodeExport::OnInitDialog()
 		L"Wykonaj", L"Çalıştır"));
 
 	m_loop.SetWindowText(L"1");
+	// KPI秒数はサンプリング行の左側へ（繰返し行の圧縮レベルと重ねない）
+	{
+		CRect rLoop, rLoopL, rSrateL, rSrate;
+		m_loop.GetWindowRect(&rLoop); ScreenToClient(&rLoop);
+		m_loopLabel.GetWindowRect(&rLoopL); ScreenToClient(&rLoopL);
+		m_srateLabel.GetWindowRect(&rSrateL); ScreenToClient(&rSrateL);
+		m_srate.GetWindowRect(&rSrate); ScreenToClient(&rSrate);
+		const int labW = 58;
+		const int edW = 72;
+		const int top = rSrate.top;
+		const int labTop = rSrateL.top;
+		CRect rLab(rLoopL.left, labTop, rLoopL.left + labW, labTop + (std::max)(14, rLoopL.Height()));
+		CRect rEd(rLoop.left, top, rLoop.left + edW, top + (std::max)(18, rLoop.Height()));
+		// サンプリングラベルと被るなら編集を左に収める
+		if (rEd.right > rSrateL.left - 8) {
+			rEd.right = rSrateL.left - 8;
+			rEd.left = (std::max)(rLoop.left, rEd.right - edW);
+			rLab.right = rEd.left - 4;
+			rLab.left = (std::max)(rLoopL.left, rLab.right - labW);
+		}
+		m_kpiSecLabel.Create(L"", WS_CHILD | SS_LEFT, rLab, this, IDC_TC_KPI_SEC_L);
+		m_kpiSec.Create(WS_CHILD | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER, rEd, this, IDC_TC_KPI_SEC);
+		m_kpiSecLabel.SetWindowText(LL14(L"長さ(秒)", L"Length (sec)", L"Duree (s)", L"Durata (s)",
+			L"Duracion (s)", L"길이(초)", L"长度(秒)", L"المدة (ث)",
+			L"Длина (сек)", L"Dauer (s)", L"Duracao (s)", L"Duur (s)",
+			L"Dlugosc (s)", L"Sure (sn)"));
+		CString sec;
+		sec.Format(L"%d", DefaultKpiDurationSec());
+		m_kpiSec.SetWindowText(sec);
+		ApplyKpiDurationUi();
+	}
+	// サンプリングレート（リソース＋DDX済み。動的 Create はハング原因のため使わない）
+	{
+		m_srateLabel.SetWindowText(LL14(L"サンプリング", L"Sample rate", L"Echantillonnage", L"Campionamento",
+			L"Muestreo", L"샘플링", L"采样率", L"معدل العينة",
+			L"Частота", L"Abtastrate", L"Amostragem", L"Samplefreq.",
+			L"Probkowanie", L"Ornekleme"));
+		m_srate.ResetContent();
+		m_srate.AddString(LL14(L"ソースのまま", L"Source", L"Source", L"Sorgente",
+			L"Fuente", L"원본", L"原始", L"المصدر",
+			L"Исходный", L"Quelle", L"Origem", L"Bron",
+			L"Zrodlo", L"Kaynak"));
+		m_srate.AddString(L"44100 Hz");
+		m_srate.AddString(L"48000 Hz");
+		m_srate.AddString(L"96000 Hz");
+		m_srate.AddString(L"192000 Hz");
+		int sel = 2; // 既定 48000
+		switch (savedata.wav_export_sample_rate) {
+		case 0: sel = 0; break;
+		case 44100: sel = 1; break;
+		case 48000: sel = 2; break;
+		case 96000: sel = 3; break;
+		case 192000: sel = 4; break;
+		default: sel = 2; break;
+		}
+		m_srate.SetCurSel(sel);
+		m_srate.SetAeroMode(FALSE);
+	}
 	int fadeSec = savedata.wav_export_fade_sec;
 	if (fadeSec <= 0) fadeSec = 15;
 	int trimKeep = savedata.wav_export_trim_keep_sec;
@@ -775,7 +1011,7 @@ BOOL CTranscodeExport::OnInitDialog()
 	if (multiFile)
 		m_path.SetWindowText(TcDefaultFolderFromPc(pc));
 	else
-		m_path.SetWindowText(OutputPathForItem(TcDefaultFolderFromPc(pc), pc, fmt));
+		m_path.SetWindowText(OutputPathForItem(TcDefaultFolderFromPc(pc), pc, CurrentFormat()));
 	m_status.SetWindowText(L"");
 	if (CWnd* pPh = GetDlgItem(IDC_TC_PROGRESS)) {
 		CRect rc; pPh->GetWindowRect(&rc); ScreenToClient(&rc);
@@ -785,12 +1021,121 @@ BOOL CTranscodeExport::OnInitDialog()
 		m_progress.SetPos(0);
 		m_progress.SetShowPercent(TRUE);
 		m_progress.SetColors(RGB(255, 236, 246), RGB(255, 170, 200), RGB(200, 120, 220));
+		// 書き出し中の進捗は不透明描画（Aero透過だとエンコード中に親が再描画されず止まる）
+		m_progress.SetAeroMode(FALSE);
 	}
 	if (CWnd* pProgL = GetDlgItem(IDC_TC_PROG_L))
 		pProgL->SetWindowText(LL14(L"進捗", L"Progress", L"Progression", L"Avanzamento", L"Progreso", L"진행", L"进度", L"Progress", L"Прогресс", L"Fortschritt", L"Progresso", L"Voortgang", L"Postep", L"Ilerleme"));
 	ExportTagUi_InitFields(multiFile, pc, m_title, m_artist, m_album,
 		m_titleL, m_artistL, m_albumL, m_coverL, m_coverPic, m_cover, m_coverClear, m_coverPath, m_coverBmp);
 	DragAcceptFiles(TRUE);
+
+	// パス行を下げたあと下段が食い込む／余白が空きすぎるのを整列し、ダイアログ高さを詰める
+	{
+		auto placeY = [this](CWnd& w, int y) {
+			if (!w.GetSafeHwnd()) return;
+			CRect r; w.GetWindowRect(&r); ScreenToClient(&r);
+			w.SetWindowPos(NULL, r.left, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+		};
+		auto placeXY = [this](CWnd& w, int x, int y) {
+			if (!w.GetSafeHwnd()) return;
+			w.SetWindowPos(NULL, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+		};
+		auto heightOf = [this](CWnd& w) -> int {
+			if (!w.GetSafeHwnd()) return 18;
+			CRect r; w.GetWindowRect(&r); return r.Height();
+		};
+
+		// 繰返し行: 左=繰返し、右=圧縮/ビットレート（長さ秒は置かない）
+		CRect rLoop, rLoopL, rQ, rQL;
+		m_loop.GetWindowRect(&rLoop); ScreenToClient(&rLoop);
+		m_loopLabel.GetWindowRect(&rLoopL); ScreenToClient(&rLoopL);
+		m_quality.GetWindowRect(&rQ); ScreenToClient(&rQ);
+		m_qualityLabel.GetWindowRect(&rQL); ScreenToClient(&rQL);
+		placeXY(m_qualityLabel, rQL.left, rLoopL.top);
+		placeXY(m_quality, rQ.left, rLoop.top);
+
+		// サンプリング行: 左=長さ(秒)、右=サンプリング
+		const int srateY = rLoop.bottom + 6;
+		const int labW = 58;
+		const int edW = 72;
+		placeXY(m_srateLabel, rQL.left, srateY + 2);
+		placeXY(m_srate, rQ.left, srateY);
+		if (m_kpiSec.GetSafeHwnd()) {
+			placeXY(m_kpiSecLabel, rLoopL.left, srateY + 2);
+			placeXY(m_kpiSec, rLoop.left, srateY);
+			// サンプリングと被る場合は幅を落とす
+			CRect rSrateL; m_srateLabel.GetWindowRect(&rSrateL); ScreenToClient(&rSrateL);
+			CRect rEd; m_kpiSec.GetWindowRect(&rEd); ScreenToClient(&rEd);
+			if (rEd.right > rSrateL.left - 8) {
+				const int newRight = rSrateL.left - 8;
+				const int newLeft = (std::max)((int)rLoop.left, newRight - edW);
+				m_kpiSec.SetWindowPos(NULL, newLeft, srateY, (std::max)(48, newRight - newLeft), rEd.Height(), SWP_NOZORDER);
+				m_kpiSecLabel.SetWindowPos(NULL, rLoopL.left, srateY + 2, labW, heightOf(m_kpiSecLabel), SWP_NOZORDER);
+			}
+		}
+
+		CRect rSrate;
+		m_srate.GetWindowRect(&rSrate); ScreenToClient(&rSrate);
+		int yPath = (std::max)(srateY + heightOf(m_srate), (int)rSrate.bottom) + 8;
+		CRect rPathL, rPath, rBr;
+		m_pathLabel.GetWindowRect(&rPathL); ScreenToClient(&rPathL);
+		m_path.GetWindowRect(&rPath); ScreenToClient(&rPath);
+		m_browse.GetWindowRect(&rBr); ScreenToClient(&rBr);
+		placeXY(m_pathLabel, rPathL.left, yPath);
+		placeXY(m_path, rPath.left, yPath + (rPathL.Height() + 2));
+		placeXY(m_browse, rBr.left, yPath + (rPathL.Height() + 1));
+		m_path.GetWindowRect(&rPath); ScreenToClient(&rPath);
+
+		int y = rPath.bottom + 14; // 出力パスとフェードの間隔
+		const int fadeY = y;
+		placeY(m_fadeCheck, fadeY);
+		placeY(m_fadeSec, fadeY - 2);
+		placeY(m_fadeLabel, fadeY + 1);
+		y = fadeY + (std::max)(heightOf(m_fadeCheck), heightOf(m_fadeSec)) + 8;
+		const int trimY = y;
+		placeY(m_trimCheck, trimY);
+		placeY(m_trimSec, trimY - 2);
+		placeY(m_trimLabel, trimY + 1);
+		placeY(m_copyTags, trimY);
+		y = trimY + (std::max)(heightOf(m_trimCheck), heightOf(m_trimSec)) + 10;
+		const int titleY = y;
+		placeY(m_titleL, titleY + 2);
+		placeY(m_title, titleY);
+		y = titleY + heightOf(m_title) + 6;
+		placeY(m_artistL, y + 2);
+		placeY(m_artist, y);
+		y += heightOf(m_artist) + 6;
+		placeY(m_albumL, y + 2);
+		placeY(m_album, y);
+		y += heightOf(m_album) + 8;
+		const int coverY = y;
+		placeY(m_coverL, coverY + 2);
+		placeY(m_coverPic, coverY);
+		placeY(m_cover, coverY + 8);
+		placeY(m_coverClear, coverY + 18);
+		y = coverY + (std::max)(heightOf(m_coverPic), 56) + 10;
+		const int btnY = y;
+		placeY(m_exec, btnY);
+		placeY(m_close, btnY);
+		y = btnY + heightOf(m_exec) + 8;
+		if (CWnd* pProgL = GetDlgItem(IDC_TC_PROG_L))
+			placeY(*pProgL, y);
+		y += 14;
+		if (m_progress.GetSafeHwnd())
+			placeY(m_progress, y);
+		else if (CWnd* pPh = GetDlgItem(IDC_TC_PROGRESS))
+			placeY(*pPh, y);
+		y += (std::max)(heightOf(m_progress), 16) + 6;
+		placeY(m_status, y);
+		y += heightOf(m_status) + 8;
+
+		CRect rcClient; GetClientRect(&rcClient);
+		CRect rcWin; GetWindowRect(&rcWin);
+		const int chrome = rcWin.Height() - rcClient.Height();
+		if (y + chrome > 120)
+			SetWindowPos(NULL, 0, 0, rcWin.Width(), y + chrome, SWP_NOMOVE | SWP_NOZORDER);
+	}
 	return TRUE;
 }
 
@@ -810,15 +1155,26 @@ void CTranscodeExport::ExportProgressThunk(int percent, LPCTSTR status, void* us
 	if (!self || !::IsWindow(self->GetSafeHwnd())) return;
 	if (self->m_progress.GetSafeHwnd()) {
 		self->m_progress.SetPos(percent);
-		self->m_progress.Invalidate(FALSE);
-		self->m_progress.UpdateWindow();
+		// Aero透過だと親再描画待ちでバーが進まない。強制不透明描画。
+		self->m_progress.SetAeroMode(FALSE);
+		self->m_progress.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
 	}
 	if (status && status[0])
 		self->m_status.SetWindowText(status);
-	// 全メッセージを汲み出すと timer/Restart 再入で export が壊れる。描画だけ通す。
+	// エンコード中は DoEvent 全通しすると危険なので、自ダイアログ配下の描画だけ通す
 	MSG msg;
-	while (::PeekMessage(&msg, self->GetSafeHwnd(), WM_PAINT, WM_PAINT, PM_REMOVE))
+	HWND hDlg = self->GetSafeHwnd();
+	while (::PeekMessage(&msg, hDlg, WM_PAINT, WM_PAINT, PM_REMOVE))
 		::DispatchMessage(&msg);
+	if (self->m_progress.GetSafeHwnd()) {
+		while (::PeekMessage(&msg, self->m_progress.GetSafeHwnd(), WM_PAINT, WM_PAINT, PM_REMOVE))
+			::DispatchMessage(&msg);
+	}
+	if (self->m_status.GetSafeHwnd()) {
+		while (::PeekMessage(&msg, self->m_status.GetSafeHwnd(), WM_PAINT, WM_PAINT, PM_REMOVE))
+			::DispatchMessage(&msg);
+	}
+	::SetCursor(::LoadCursor(NULL, IDC_ARROW));
 }
 
 void CTranscodeExport::OnCbnSelchangeFormat()
@@ -827,12 +1183,29 @@ void CTranscodeExport::OnCbnSelchangeFormat()
 	if (multiFile) return;
 	CString path;
 	m_path.GetWindowText(path);
-	const int fmt = m_format.GetCurSel();
-	// 拡張子だけ差し替え
+	const int fmt = CurrentFormat();
 	const int dot = path.ReverseFind(L'.');
 	if (dot >= 0)
 		path = path.Left(dot);
 	m_path.SetWindowText(NormalizeOutPath(path + ExtForFormat(fmt), fmt));
+}
+
+void CTranscodeExport::OnTcnSelchangeTabs(NMHDR*, LRESULT* pResult)
+{
+	ApplyTabUi();
+	if (pResult) *pResult = 0;
+}
+
+// タブクリック直後の保険（reflect 取りこぼし対策）
+BOOL CTranscodeExport::OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult)
+{
+	NMHDR* pNm = reinterpret_cast<NMHDR*>(lParam);
+	if (pNm && pNm->idFrom == IDC_TC_TABS &&
+		(pNm->code == TCN_SELCHANGE || pNm->code == TCN_SELCHANGING)) {
+		if (pNm->code == TCN_SELCHANGE)
+			ApplyTabUi();
+	}
+	return CCustomBlurDialogBase::OnNotify(wParam, lParam, pResult);
 }
 
 void CTranscodeExport::OnBnClickedBrowse()
@@ -844,7 +1217,7 @@ void CTranscodeExport::OnBnClickedBrowse()
 			m_path.SetWindowText(path);
 		return;
 	}
-	const int fmt = m_format.GetCurSel();
+	const int fmt = CurrentFormat();
 	CString ext = ExtForFormat(fmt);
 	ext = ext.Mid(1);
 	CFileDialog fd(FALSE, ext, path, OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT, FilterForFormat(fmt));
@@ -866,14 +1239,14 @@ void CTranscodeExport::OnBnClickedExec()
 	int trimKeepSec = _tstoi(trimStr);
 	if (trimKeepSec < 0) trimKeepSec = 1;
 
-	const int fmt = m_format.GetCurSel() == TC_FMT_FLAC ? TC_FMT_FLAC : TC_FMT_MP3;
+	const int fmt = CurrentFormat();
 	int mp3Kbps = 192;
 	int flacLevel = 5;
 	if (fmt == TC_FMT_FLAC) {
 		flacLevel = m_quality.GetCurSel();
 		if (flacLevel < 0) flacLevel = 5;
 	}
-	else {
+	else if (fmt == TC_FMT_MP3) {
 		static const int kbps[] = { 128, 160, 192, 224, 256, 320 };
 		int qi = m_quality.GetCurSel();
 		if (qi < 0 || qi > 5) qi = 2;
@@ -885,11 +1258,25 @@ void CTranscodeExport::OnBnClickedExec()
 	opts.fadeSec = fadeSec;
 	opts.trimLeadEnable = m_trimCheck.GetCheck() ? 1 : 0;
 	opts.trimKeepSec = trimKeepSec;
+	opts.kpiDurationSec = 0;
+	if (SelectionHasKpi() && m_kpiSec.GetSafeHwnd()) {
+		PersistKpiDurationFromUi();
+		opts.kpiDurationSec = savedata.wav_export_kpi_sec;
+	}
+	opts.sampleRate = 0;
+	if (m_srate.GetSafeHwnd()) {
+		static const int rates[] = { 0, 44100, 48000, 96000, 192000 };
+		int si = m_srate.GetCurSel();
+		if (si < 0 || si > 4) si = 2;
+		opts.sampleRate = rates[si];
+		savedata.wav_export_sample_rate = opts.sampleRate;
+	}
 	savedata.wav_export_fade = opts.fadeEnable;
 	savedata.wav_export_fade_sec = opts.fadeSec;
 	savedata.wav_export_trim_lead = opts.trimLeadEnable;
 	savedata.wav_export_trim_keep_sec = opts.trimKeepSec;
-	savedata.tc_format = fmt;
+	if (fmt == TC_FMT_MP3 || fmt == TC_FMT_FLAC)
+		savedata.tc_format = fmt;
 	savedata.tc_mp3_kbps = mp3Kbps;
 	savedata.tc_flac_level = flacLevel;
 	savedata.wav_export_copy_tags = m_copyTags.GetCheck() ? 1 : 0;
@@ -928,7 +1315,7 @@ void CTranscodeExport::OnBnClickedExec()
 		CString folder = pathStr;
 		CString lower = folder;
 		lower.MakeLower();
-		if (lower.Right(4) == L".mp3" || lower.Right(5) == L".flac") {
+		if (lower.Right(4) == L".mp3" || lower.Right(5) == L".flac" || lower.Right(4) == L".wav") {
 			int pos = folder.ReverseFind(L'\\');
 			if (pos >= 0) folder = folder.Left(pos + 1);
 		}
@@ -949,24 +1336,30 @@ void CTranscodeExport::OnBnClickedExec()
 			m_status.SetWindowText(st);
 			UpdateWindow();
 			DoEvent();
-			ok = og->ExportToTranscode(&pcs[i], outPath, loopCount, &opts, fmt, mp3Kbps, flacLevel) && ok;
+			if (fmt == TC_FMT_WAV)
+				ok = og->ExportToWav(&pcs[i], outPath, loopCount, &opts, true) && ok;
+			else
+				ok = og->ExportToTranscode(&pcs[i], outPath, loopCount, &opts, fmt, mp3Kbps, flacLevel) && ok;
 		}
 	}
 	else {
 		CString path = NormalizeOutPath(pathStr, fmt);
 		m_path.SetWindowText(path);
 		MpDecodeProgressSetSegment(0, 100);
-		ok = og->ExportToTranscode(&pc, path, loopCount, &opts, fmt, mp3Kbps, flacLevel);
+		if (fmt == TC_FMT_WAV)
+			ok = og->ExportToWav(&pc, path, loopCount, &opts, true);
+		else
+			ok = og->ExportToTranscode(&pc, path, loopCount, &opts, fmt, mp3Kbps, flacLevel);
 	}
 
 	if (ok && m_progress.GetSafeHwnd())
 		m_progress.SetPos(100);
 	MpDecodeProgressClearCb();
 	m_exec.EnableWindow(TRUE);
-	const CString title = LL14(L"mp3/FLACへ出力", L"Export to mp3/FLAC", L"Exporter en mp3/FLAC", L"Esporta in mp3/FLAC",
-		L"Exportar a mp3/FLAC", L"mp3/FLAC로 내보내기", L"导出到 mp3/FLAC", L"تصدير إلى mp3/FLAC",
-		L"Экспорт в mp3/FLAC", L"Als mp3/FLAC exportieren", L"Exportar para mp3/FLAC", L"Exporteren naar mp3/FLAC",
-		L"Eksportuj do mp3/FLAC", L"mp3/FLAC'e aktar");
+	const CString title = LL14(L"音声書き出し", L"Audio export", L"Export audio", L"Esporta audio",
+		L"Exportar audio", L"오디오 내보내기", L"音频导出", L"تصدير الصوت",
+		L"Экспорт аудио", L"Audio exportieren", L"Exportar audio", L"Audio exporteren",
+		L"Eksport audio", L"Ses disa aktar");
 	if (ok) {
 		CString msg = LL14(L"完了", L"Complete", L"Termine", L"Completato",
 			L"Completado", L"완료", L"完成", L"اكتمل",
@@ -987,5 +1380,6 @@ void CTranscodeExport::OnBnClickedExec()
 
 void CTranscodeExport::OnBnClickedClose()
 {
+	PersistKpiDurationFromUi();
 	EndDialog(IDCANCEL);
 }

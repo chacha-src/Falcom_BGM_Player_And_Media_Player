@@ -895,6 +895,63 @@ private:
 };
 
 // ============================================================================
+// カスタムタブコントロール
+// CCustomTabCtrl — listing4 準拠オーナードロー（横置き既定 / 縦置き対応）+ アクリル不透明
+// ============================================================================
+class CCustomTabCtrl : public CTabCtrl
+{
+	DECLARE_DYNAMIC(CCustomTabCtrl)
+public:
+	CCustomTabCtrl();
+	virtual ~CCustomTabCtrl();
+	void EnableAutoDelete(BOOL bEnable = TRUE) { m_bAutoDelete = bEnable; }
+	BOOL m_bAutoDelete;
+
+	BOOL IsVertical() const;
+	BOOL IsRightSide() const;
+	void RebuildFonts();
+	void LayoutEqualTabs(int nSlots = 3);
+
+	void SetAeroMode(BOOL b)
+	{
+		m_bAeroMode = b;
+		if (GetSafeHwnd()) Invalidate(FALSE);
+	}
+	void PaintOpaqueIntoBuffer(HDC hdcBuf);
+	void ScheduleOpaqueRepaint();
+
+protected:
+	BOOL m_bAeroMode;
+	virtual void PreSubclassWindow();
+	virtual void PostNcDestroy();
+	afx_msg void  OnPaint();
+	afx_msg BOOL  OnEraseBkgnd(CDC* pDC);
+	afx_msg void  OnSize(UINT nType, int cx, int cy);
+	afx_msg void  OnMouseMove(UINT nFlags, CPoint point);
+	afx_msg void  OnMouseLeave();
+	afx_msg void  OnWindowPosChanged(WINDOWPOS* lpwndpos);
+	afx_msg void  OnTimer(UINT_PTR nIDEvent);
+	afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+	afx_msg LRESULT OnPostOpaquePaint(WPARAM, LPARAM);
+	afx_msg BOOL  OnSelChange(NMHDR* pNMHDR, LRESULT* pResult);
+
+	DECLARE_MESSAGE_MAP()
+
+private:
+	void PaintOpaqueClient(CDC& dc);
+	void DrawToDC(CDC* pDC, const CRect& rcClient, BOOL bAeroChroma);
+	void DrawTabItem(CDC* pDC, int nItem, CRect rc, BOOL bSelected, BOOL bHot);
+	void DrawPagePanel(CDC* pDC, const CRect& rcClient);
+	void InvalidateTabItem(int nItem);
+
+	CBrush m_brBackground;
+	CFont  m_fontTab;
+	CFont  m_fontTabSel;
+	int    m_nHotItem;
+	BOOL   m_bTracking;
+};
+
+// ============================================================================
 // カスタム標準ボタンコントロール
 // CCustomStandardButton (常に不透明で描画されます)
 // ============================================================================
@@ -916,6 +973,11 @@ public:
     // テキストのドロップシャドウ（影）設定
     void SetDropShadow(COLORREF c, int d, int dist, int blur, BOOL en);
     void GetDropShadow(COLORREF* pc, int* pd, int* pdist, int* pblur, BOOL* pbe) const;
+
+    // CButtonST 互換: アイコンボタン(プレイリスト上下移動など)
+    DWORD SetIcon(int nIconIn, int nIconOut = 0);
+    DWORD SetIcon(HICON hIconIn, HICON hIconOut = NULL);
+    void SetFlat(BOOL bFlat);
 
     void PaintClient(CDC& dc, const CRect& r);
     void RepaintClient();
@@ -955,6 +1017,12 @@ private:
     COLORREF m_clrShadow;
     int m_nShadowDirection, m_nShadowDistance, m_nShadowBlur;
     BOOL m_bShadowEnable;
+
+    HICON m_hIconIn;       // 通常アイコン(所有)
+    HICON m_hIconOut;      // ホバー用(所有・無くても可)
+    BOOL m_bFlat;          // TRUE=薄い枠・装飾控えめ(アイコンボタン向け)
+    BOOL m_bIconOwnedIn;   // DestroyIcon が必要か
+    BOOL m_bIconOwnedOut;
 };
 
 // ============================================================================
@@ -1158,9 +1226,11 @@ private:
 };
 
 // ============================================================================
-// カスタムプログレスバー (オーナー描画・不透明)
+// カスタムプログレスバー (オーナー描画・アクリル透過 / 淫女モード対応)
 // CCustomProgressCtrl
 // ============================================================================
+// ぼかしダイアログ上では背景を透過(トラック/塗り/％は不透明)、通常時は
+// COLOR_DIALOG_BG で塗りつぶす。淫女モード時は CCC_DrawInwoman を重ねる。
 class CCustomProgressCtrl : public CWnd
 {
 	DECLARE_DYNAMIC(CCustomProgressCtrl)
@@ -1177,7 +1247,7 @@ public:
 	int  GetPos() const { return m_nPos; }
 	void SetShowPercent(BOOL b) { m_bShowPercent = b; if (GetSafeHwnd()) Invalidate(FALSE); }
 	void SetColors(COLORREF track, COLORREF fillStart, COLORREF fillEnd);
-	void SetAeroMode(BOOL b) { m_bAeroMode = b; if (GetSafeHwnd()) Invalidate(FALSE); }
+	void SetAeroMode(BOOL b);
 	void PaintOpaqueIntoBuffer(HDC hdcBuf);
 
 protected:
@@ -1188,7 +1258,9 @@ protected:
 	DECLARE_MESSAGE_MAP()
 
 private:
+	void PaintClient(CDC& dc);
 	void PaintClient(CDC& dc, const CRect& r);
+	void DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroTrans);
 	void PaintOpaqueClient(CDC& dc);
 
 	int m_nMin, m_nMax, m_nPos;
@@ -1197,6 +1269,9 @@ private:
 	COLORREF m_clrTrack, m_clrFill0, m_clrFill1;
 	CBrush m_brBackground;
 	CFont m_fontPct;
+#if CCUSTOM_AERO_SUPPORT
+	CCC_ChromaBlitCache m_chromaCache;
+#endif
 };
 
 // ============================================================================
@@ -1257,8 +1332,9 @@ do {                                                                            
             else if (auto* p = dynamic_cast<CCustomComboBox*>(_pw))        p->SetAeroMode(FALSE); \
             else if (auto* p = dynamic_cast<CCustomListCtrl*>(_pw))        p->SetAeroMode(FALSE); \
             else if (auto* p = dynamic_cast<CCustomTreeCtrl*>(_pw))        p->SetAeroMode(FALSE); \
+            else if (auto* p = dynamic_cast<CCustomTabCtrl*>(_pw))         p->SetAeroMode(FALSE); \
             else if (auto* p = dynamic_cast<CCustomCheckBox*>(_pw))        p->SetAeroMode(_bA); \
-            else if (auto* p = dynamic_cast<CCustomProgressCtrl*>(_pw))    p->SetAeroMode(FALSE); \
+            else if (auto* p = dynamic_cast<CCustomProgressCtrl*>(_pw))    p->SetAeroMode(_bA); \
             CCC_SetChildTransparent(_hc, FALSE);                                       \
             _pw->Invalidate();                                                         \
         }                                                                              \

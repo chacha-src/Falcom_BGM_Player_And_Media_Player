@@ -286,7 +286,7 @@ extern int endf;
 extern int lenl;
 extern int fade1;
 extern BOOL sek;
-extern int wavchannel, wavbit_sample_Hz;
+extern int wavchannel, wavbit_sample_Hz, wavsam_depth;
 //スレッド
 int syukai = 0, syukai2 = 0;
 extern BOOL sflg;
@@ -319,10 +319,14 @@ extern IMediaControl* pMediaControl;
 
 extern CString wavExportPath;
 extern int wavExportLoopCount;
+extern int g_wavExportMaxSec;
+extern int wavbit_sample_Hz;
 extern CFile cc;
 extern int cc1;
 extern int loopcnt;
 extern ULONG WAVDALen;
+bool PlaybackCcFormatLocked();
+void PlaybackCcGetFormat(int& rate, int& ch, int& bits);
 #define OUTPUT_BUFFER_NUM_DS 5
 
 void equaliser(void* data, int len, BOOL reset = FALSE);
@@ -768,10 +772,41 @@ void HandleNotifications_export()
 	int iter = 0;
 	for (;;) {
 		DoEvent();
+		// DoEvent 再入で stop 要求が立っても、書き出し本体は続行する
+		thn1 = FALSE;
+		stf = 0;
 		if (syukai == 2) break;
-		if (thn1) break;
 		if (fade1) break;
 		if (wavExportLoopCount > 0 && loopcnt >= wavExportLoopCount) break;
+		// KPI(mode==-3)等: 終端のないソースは秒数で打ち切る（実書き込み量優先）
+		// wl は変換後バイト。打ち切りもロック済み出力形式で数える（192k→48k で 1/4 短縮しない）
+		if (g_wavExportMaxSec > 0 && wavbit_sample_Hz > 0) {
+			extern int g_pcm_upscale_active;
+			extern int g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits;
+			int outRate = wavbit_sample_Hz;
+			int outCh = (wavchannel > 0) ? wavchannel : 2;
+			int outBits = abs(wavsam_depth);
+			if (PlaybackCcFormatLocked()) {
+				PlaybackCcGetFormat(outRate, outCh, outBits);
+			}
+			else if (g_pcm_upscale_active && g_ds_pcm_rate >= 8000) {
+				outRate = g_ds_pcm_rate;
+				outCh = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : outCh;
+				if (g_ds_pcm_bits == 16 || g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32)
+					outBits = g_ds_pcm_bits;
+			}
+			if (!(outBits == 16 || outBits == 24 || outBits == 32)) outBits = 16;
+			if (outRate < 8000) outRate = wavbit_sample_Hz;
+			if (outCh < 1) outCh = 2;
+			const int bpfOut = outCh * (outBits / 8);
+			const __int64 maxOut = (__int64)g_wavExportMaxSec * (__int64)outRate;
+			const __int64 maxSrc = (__int64)g_wavExportMaxSec * (__int64)wavbit_sample_Hz;
+			const __int64 writtenFrames = (bpfOut > 0) ? (wl / bpfOut) : 0;
+			if (writtenFrames >= maxOut || playb >= maxSrc) {
+				fade1 = 1;
+				break;
+			}
+		}
 		int len1 = chunkSize;
 		int len2 = 0;
 		if (len1 > (int)(bufSize - oldw)) {
@@ -784,14 +819,39 @@ void HandleNotifications_export()
 			len2 = 0;
 			oldw = 0;
 		}
-		if (thn1)
-			break;
 		sflg = TRUE;
 		DispatchPlaywavFill(bufwav3, oldw, len1, len2);
 		oldw = (oldw + len1 + len2) % bufSize;
 		sflg = FALSE;
 		if (fade1) break;
 		if (wavExportLoopCount > 0 && loopcnt >= wavExportLoopCount) break;
+		if (g_wavExportMaxSec > 0 && wavbit_sample_Hz > 0) {
+			extern int g_pcm_upscale_active;
+			extern int g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits;
+			int outRate = wavbit_sample_Hz;
+			int outCh = (wavchannel > 0) ? wavchannel : 2;
+			int outBits = abs(wavsam_depth);
+			if (PlaybackCcFormatLocked()) {
+				PlaybackCcGetFormat(outRate, outCh, outBits);
+			}
+			else if (g_pcm_upscale_active && g_ds_pcm_rate >= 8000) {
+				outRate = g_ds_pcm_rate;
+				outCh = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : outCh;
+				if (g_ds_pcm_bits == 16 || g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32)
+					outBits = g_ds_pcm_bits;
+			}
+			if (!(outBits == 16 || outBits == 24 || outBits == 32)) outBits = 16;
+			if (outRate < 8000) outRate = wavbit_sample_Hz;
+			if (outCh < 1) outCh = 2;
+			const int bpfOut = outCh * (outBits / 8);
+			const __int64 maxOut = (__int64)g_wavExportMaxSec * (__int64)outRate;
+			const __int64 maxSrc = (__int64)g_wavExportMaxSec * (__int64)wavbit_sample_Hz;
+			const __int64 writtenFrames = (bpfOut > 0) ? (wl / bpfOut) : 0;
+			if (writtenFrames >= maxOut || playb >= maxSrc) {
+				fade1 = 1;
+				break;
+			}
+		}
 
 		++iter;
 		if (wl != lastWl) {

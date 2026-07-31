@@ -310,6 +310,7 @@ BOOL CWavExport::OnInitDialog()
 		m_progress.SetPos(0);
 		m_progress.SetShowPercent(TRUE);
 		m_progress.SetColors(RGB(255, 236, 246), RGB(255, 170, 200), RGB(200, 120, 220));
+		m_progress.SetAeroMode(CCC_IsAeroEnabled());
 	}
 	if (CWnd* pProgL = GetDlgItem(IDC_WAVEXPORT_PROG_L))
 		pProgL->SetWindowText(LL14(L"進捗", L"Progress", L"Progression", L"Avanzamento", L"Progreso", L"진행", L"进度", L"Progress", L"Прогресс", L"Fortschritt", L"Progresso", L"Voortgang", L"Postep", L"Ilerleme"));

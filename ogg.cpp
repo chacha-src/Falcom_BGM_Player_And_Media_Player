@@ -1,4 +1,4 @@
-// ogg.cpp : アプリケーション用クラスの定義を行います。
+﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -329,6 +329,8 @@ BOOL COggApp::InitInstance()
 	savedata.wav_export_trim_lead = 0;
 	savedata.wav_export_trim_keep_sec = 1;
 	savedata.wav_export_copy_tags = 1;
+	savedata.wav_export_kpi_sec = 240;
+	savedata.wav_export_sample_rate = 48000;
 	savedata.pianorollviewmode = 0;
 	savedata.pianorollkeyrange = 108;
 	savedata.pianorollnotename = 1;
@@ -772,6 +774,16 @@ BOOL COggApp::InitInstance()
 		savedata.wav_export_copy_tags = 1;
 	else if (savedata.wav_export_copy_tags != 0)
 		savedata.wav_export_copy_tags = 1;
+	if (datFileSize < (int)(offsetof(save, wav_export_kpi_sec) + sizeof(savedata.wav_export_kpi_sec))
+		|| savedata.wav_export_kpi_sec < 1 || savedata.wav_export_kpi_sec > 36000)
+		savedata.wav_export_kpi_sec = 240;
+	if (datFileSize < (int)(offsetof(save, wav_export_sample_rate) + sizeof(savedata.wav_export_sample_rate)))
+		savedata.wav_export_sample_rate = 48000;
+	else {
+		const int sr = savedata.wav_export_sample_rate;
+		if (!(sr == 0 || sr == 44100 || sr == 48000 || sr == 96000 || sr == 192000))
+			savedata.wav_export_sample_rate = 48000;
+	}
 	// 簡易ピアノロール 表示拡張(末尾追記): 旧.dat には無いので既定値へ
 	if (datFileSize < (int)(offsetof(save, pianorollviewmode) + sizeof(savedata.pianorollviewmode)))
 		savedata.pianorollviewmode = 0;

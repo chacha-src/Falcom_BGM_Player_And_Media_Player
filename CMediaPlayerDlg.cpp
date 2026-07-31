@@ -79,6 +79,10 @@ static int MpPcToDisp(CMediaPlayerDlg* self, int pcIdx)
 	return -1;
 }
 
+// *.none 再抽出済み(起動セッション内)。GetCb / LoadVisible 共用。
+static TCHAR s_mpJakNoneDone[256][1024];
+static int s_mpJakNoneDoneN = 0;
+
 static HBITMAP MpJacketGetCb(void* ctx, int row)
 {
 	CMediaPlayerDlg* self = (CMediaPlayerDlg*)ctx;
@@ -88,8 +92,8 @@ static HBITMAP MpJacketGetCb(void* ctx, int row)
 	const TCHAR* path = pl->pc[pcIdx].fol;
 	if (!path || !path[0]) return NULL;
 
-	// 描画中はキャッシュ参照のみ。LoadJacket は重い(数MB確保+I/O)のでここでは絶対に呼ばない。
-	// キーあり・bmp==NULL は「読込失敗済み」(再試行しない)。
+	// 描画(custom-draw)中はメモリキャッシュのみ。mtime/DeleteFile/CImage::Load は
+	// MpJacketLoadVisible(Timer1/RefreshList)側で行う（起動直後の初回ペイント落ち防止）。
 	DWORD now = GetTickCount();
 	for (int i = 0; i < CMediaPlayerDlg::kMpJakN; ++i) {
 		if (self->m_jakKey[i][0] && _tcsicmp(self->m_jakKey[i], path) == 0) {
@@ -101,10 +105,12 @@ static HBITMAP MpJacketGetCb(void* ctx, int row)
 	return NULL;
 }
 
-// Timer1 から: 可視行のジャケットを最大1件だけ遅延読込(描画外)。
-static void MpJacketLoadVisibleOne(CMediaPlayerDlg* self)
+// 可視行のジャケット:
+//  - ディスクキャッシュ(.bmp / 確定済み.none)は一気にメモリへ(タイマー待ちしない)
+//  - 未キャッシュの LoadJacket だけ 1件/呼び出し(UIを重くしない)
+static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract)
 {
-	if (!self || !::IsWindow(self->m_list.GetSafeHwnd()) || !pl || !pl->pc || !og)
+	if (!self || !::IsWindow(self->m_list.GetSafeHwnd()) || !pl || !pl->pc)
 		return;
 	const int nDisp = self->m_list.GetItemCount();
 	if (nDisp <= 0) return;
@@ -112,6 +118,120 @@ static void MpJacketLoadVisibleOne(CMediaPlayerDlg* self)
 	if (top < 0) top = 0;
 	int page = self->m_list.GetCountPerPage() + 2;
 	if (page < 4) page = 4;
+	const int px = CMediaPlayerDlg::kMpJakPx;
+	const DWORD now = GetTickCount();
+	BOOL anyDisk = FALSE;
+
+	CDC* pDCBatch = self->GetDC();
+	for (int disp = top; disp < top + page && disp < nDisp; ++disp) {
+		const int pcIdx = MpDispToPc(self, disp);
+		if (pcIdx < 0 || pcIdx >= pl->playcnt) continue;
+		const TCHAR* path = pl->pc[pcIdx].fol;
+		if (!path || !path[0]) continue;
+
+		int hit = -1, freeSlot = -1, lruSlot = 0;
+		DWORD lruTick = 0xFFFFFFFF;
+		for (int i = 0; i < CMediaPlayerDlg::kMpJakN; ++i) {
+			if (self->m_jakKey[i][0] && _tcsicmp(self->m_jakKey[i], path) == 0) {
+				hit = i;
+				break;
+			}
+			if (!self->m_jakKey[i][0] && freeSlot < 0) freeSlot = i;
+			if (self->m_jakTick[i] < lruTick) { lruTick = self->m_jakTick[i]; lruSlot = i; }
+		}
+		if (hit >= 0) {
+			self->m_jakTick[hit] = now;
+			self->m_jakRow[hit] = pcIdx;
+			continue;
+		}
+
+		int slot = (freeSlot >= 0) ? freeSlot : lruSlot;
+		const CString diskBmp = PlJakDiskPath(path, FALSE);
+		const CString diskNone = PlJakDiskPath(path, TRUE);
+		{
+			WIN32_FILE_ATTRIBUTE_DATA fadM = {}, fadC = {};
+			const CString media = PlPhysicalMediaPath(path);
+			if (!media.IsEmpty() && ::PathFileExists(media)
+				&& ::GetFileAttributesEx(media, GetFileExInfoStandard, &fadM)) {
+				LPCTSTR cachePath = NULL;
+				if (!diskBmp.IsEmpty() && ::PathFileExists(diskBmp)) cachePath = diskBmp;
+				else if (!diskNone.IsEmpty() && ::PathFileExists(diskNone)) cachePath = diskNone;
+				if (cachePath && ::GetFileAttributesEx(cachePath, GetFileExInfoStandard, &fadC)) {
+					ULARGE_INTEGER um = {}, uc = {};
+					um.LowPart = fadM.ftLastWriteTime.dwLowDateTime; um.HighPart = fadM.ftLastWriteTime.dwHighDateTime;
+					uc.LowPart = fadC.ftLastWriteTime.dwLowDateTime; uc.HighPart = fadC.ftLastWriteTime.dwHighDateTime;
+					if (um.QuadPart > uc.QuadPart) {
+						PlJakDiskForget(path);
+						for (int ci = 0; ci < CMediaPlayerDlg::kMpJakN; ++ci) {
+							if (self->m_jakKey[ci][0] && _tcsicmp(self->m_jakKey[ci], path) == 0) {
+								if (self->m_jakBmp[ci]) { ::DeleteObject(self->m_jakBmp[ci]); self->m_jakBmp[ci] = NULL; }
+								self->m_jakKey[ci][0] = 0;
+								self->m_jakTick[ci] = 0;
+								self->m_jakRow[ci] = -1;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if (!diskBmp.IsEmpty() && ::PathFileExists(diskBmp) && pDCBatch) {
+			CImage disk;
+			if (disk.Load(diskBmp) == S_OK && !disk.IsNull() && disk.GetWidth() > 0) {
+				CDC mem0; mem0.CreateCompatibleDC(pDCBatch);
+				HBITMAP hbD = ::CreateCompatibleBitmap(pDCBatch->GetSafeHdc(), px, px);
+				if (hbD) {
+					if (self->m_jakBmp[slot]) { ::DeleteObject(self->m_jakBmp[slot]); self->m_jakBmp[slot] = NULL; }
+					HGDIOBJ oldD = mem0.SelectObject(hbD);
+					mem0.FillSolidRect(0, 0, px, px, RGB(240, 240, 245));
+					mem0.SetStretchBltMode(COLORONCOLOR);
+					disk.StretchBlt(mem0.GetSafeHdc(), 0, 0, px, px, SRCCOPY);
+					mem0.SelectObject(oldD);
+					mem0.DeleteDC();
+					_tcsncpy_s(self->m_jakKey[slot], path, _TRUNCATE);
+					self->m_jakBmp[slot] = hbD;
+					self->m_jakTick[slot] = now;
+					self->m_jakRow[slot] = pcIdx;
+					anyDisk = TRUE;
+					disk.Destroy();
+					continue;
+				}
+				mem0.DeleteDC();
+				disk.Destroy();
+			}
+		}
+
+		// 確定済み.none → 枠なしsentinelを即セット(再抽出は allowExtract 側)
+		if (!diskNone.IsEmpty() && ::PathFileExists(diskNone)) {
+			BOOL already = FALSE;
+			for (int ni = 0; ni < s_mpJakNoneDoneN; ++ni) {
+				if (_tcsicmp(s_mpJakNoneDone[ni], path) == 0) { already = TRUE; break; }
+			}
+			if (already) {
+				if (self->m_jakBmp[slot]) { ::DeleteObject(self->m_jakBmp[slot]); self->m_jakBmp[slot] = NULL; }
+				_tcsncpy_s(self->m_jakKey[slot], path, _TRUNCATE);
+				self->m_jakBmp[slot] = NULL;
+				self->m_jakTick[slot] = now;
+				self->m_jakRow[slot] = pcIdx;
+				continue;
+			}
+		}
+	}
+	if (pDCBatch) self->ReleaseDC(pDCBatch);
+
+	if (anyDisk) {
+		CRect r0, r1;
+		if (self->m_list.GetItemRect(top, &r0, LVIR_BOUNDS)) {
+			int last = top + page - 1;
+			if (last >= nDisp) last = nDisp - 1;
+			if (self->m_list.GetItemRect(last, &r1, LVIR_BOUNDS))
+				r0.bottom = r1.bottom;
+			r0.right = r0.left + px + 28;
+			self->m_list.RedrawWindow(&r0, NULL, RDW_INVALIDATE | RDW_NOERASE);
+		}
+	}
+
+	if (!allowExtract || !og) return;
 
 	for (int disp = top; disp < top + page && disp < nDisp; ++disp) {
 		const int pcIdx = MpDispToPc(self, disp);
@@ -129,7 +249,7 @@ static void MpJacketLoadVisibleOne(CMediaPlayerDlg* self)
 			if (!self->m_jakKey[i][0] && freeSlot < 0) freeSlot = i;
 			if (self->m_jakTick[i] < lruTick) { lruTick = self->m_jakTick[i]; lruSlot = i; }
 		}
-		if (hit >= 0) continue; // 成功/失敗どちらもキャッシュ済み
+		if (hit >= 0) continue;
 
 		int slot = (freeSlot >= 0) ? freeSlot : lruSlot;
 		if (self->m_jakBmp[slot]) {
@@ -138,30 +258,49 @@ static void MpJacketLoadVisibleOne(CMediaPlayerDlg* self)
 		}
 		self->m_jakKey[slot][0] = 0;
 
+		const CString diskBmp = PlJakDiskPath(path, FALSE);
+		const CString diskNone = PlJakDiskPath(path, TRUE);
+
+		if (!diskNone.IsEmpty() && ::PathFileExists(diskNone)) {
+			BOOL already = FALSE;
+			for (int ni = 0; ni < s_mpJakNoneDoneN; ++ni) {
+				if (_tcsicmp(s_mpJakNoneDone[ni], path) == 0) { already = TRUE; break; }
+			}
+			if (already) continue;
+			if (s_mpJakNoneDoneN < 256)
+				_tcsncpy_s(s_mpJakNoneDone[s_mpJakNoneDoneN++], path, _TRUNCATE);
+		}
+
 		CImage tmp;
-		// 再生中曲は既に og->img にあるのでファイル再読込しない(高速・全形式)
 		extern CString filen;
 		BOOL usedPlaying = FALSE;
 		if (!og->img.IsNull() && og->jx > 0 && filen.GetLength() > 0
 			&& _tcsicmp(path, filen) == 0) {
 			HDC screen = ::GetDC(NULL);
+			if (!screen) continue;
 			CDC mem; mem.CreateCompatibleDC(CDC::FromHandle(screen));
-			const int px0 = CMediaPlayerDlg::kMpJakPx;
-			HBITMAP hb0 = ::CreateCompatibleBitmap(screen, px0, px0);
+			HBITMAP hb0 = ::CreateCompatibleBitmap(screen, px, px);
 			if (hb0) {
 				HGDIOBJ old0 = mem.SelectObject(hb0);
-				mem.FillSolidRect(0, 0, px0, px0, RGB(240, 240, 245));
+				mem.FillSolidRect(0, 0, px, px, RGB(240, 240, 245));
 				mem.SetStretchBltMode(COLORONCOLOR);
-				og->img.StretchBlt(mem.GetSafeHdc(), 0, 0, px0, px0, SRCCOPY);
+				og->img.StretchBlt(mem.GetSafeHdc(), 0, 0, px, px, SRCCOPY);
 				mem.SelectObject(old0);
 				_tcsncpy_s(self->m_jakKey[slot], path, _TRUNCATE);
 				self->m_jakBmp[slot] = hb0;
 				self->m_jakTick[slot] = GetTickCount();
 				self->m_jakRow[slot] = pcIdx;
 				usedPlaying = TRUE;
+				if (!diskBmp.IsEmpty()) {
+					CImage sav;
+					sav.Attach(hb0);
+					sav.Save(diskBmp);
+					sav.Detach();
+					if (!diskNone.IsEmpty()) ::DeleteFile(diskNone);
+				}
 				CRect rIcon;
 				if (self->m_list.GetItemRect(disp, &rIcon, LVIR_BOUNDS)) {
-					rIcon.right = rIcon.left + px0 + 28;
+					rIcon.right = rIcon.left + px + 28;
 					self->m_list.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_NOERASE);
 				}
 			}
@@ -169,17 +308,28 @@ static void MpJacketLoadVisibleOne(CMediaPlayerDlg* self)
 			::ReleaseDC(NULL, screen);
 			if (usedPlaying) return;
 		}
+
 		og->LoadJacket(path, &tmp);
 		_tcsncpy_s(self->m_jakKey[slot], path, _TRUNCATE);
 		self->m_jakTick[slot] = GetTickCount();
 		self->m_jakRow[slot] = pcIdx;
 		if (tmp.IsNull() || tmp.GetWidth() <= 0 || tmp.GetHeight() <= 0) {
-			// 失敗sentinel(キーあり・bmp NULL)
 			self->m_jakBmp[slot] = NULL;
+			if (!diskNone.IsEmpty()) {
+				HANDLE hf = ::CreateFile(diskNone, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+					CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+				if (hf != INVALID_HANDLE_VALUE) ::CloseHandle(hf);
+			}
+			if (!diskBmp.IsEmpty()) ::DeleteFile(diskBmp);
+			BOOL marked = FALSE;
+			for (int ni = 0; ni < s_mpJakNoneDoneN; ++ni) {
+				if (_tcsicmp(s_mpJakNoneDone[ni], path) == 0) { marked = TRUE; break; }
+			}
+			if (!marked && s_mpJakNoneDoneN < 256)
+				_tcsncpy_s(s_mpJakNoneDone[s_mpJakNoneDoneN++], path, _TRUNCATE);
 			return;
 		}
 
-		const int px = CMediaPlayerDlg::kMpJakPx;
 		CDC* pDC = self->GetDC();
 		if (!pDC) {
 			tmp.Destroy();
@@ -204,10 +354,17 @@ static void MpJacketLoadVisibleOne(CMediaPlayerDlg* self)
 		tmp.Destroy();
 
 		self->m_jakBmp[slot] = hb;
+		if (!diskBmp.IsEmpty()) {
+			CImage sav;
+			sav.Attach(hb);
+			sav.Save(diskBmp);
+			sav.Detach();
+			if (!diskNone.IsEmpty()) ::DeleteFile(diskNone);
+		}
 		CRect rIcon;
 		if (self->m_list.GetItemRect(disp, &rIcon, LVIR_BOUNDS))
 			self->m_list.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_NOERASE);
-		return; // 1件/tick
+		return;
 	}
 }
 
@@ -2483,6 +2640,8 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 
 	FollowPlayingRow();   // ♪ 行へカーソル追従(曲変化時のみ)
 	UpdateEmptyStateUi();
+	// キャッシュ済みサムネはリスト更新の時点で可視分を載せる(250ms待ちしない)
+	MpJacketLoadVisible(this, FALSE);
 }
 
 void CMediaPlayerDlg::NotifyPlayIconChanged()
@@ -2958,9 +3117,10 @@ void CMediaPlayerDlg::SavePos()
 struct MpMissJob {
 	HWND hwnd;
 	LONG gen;
-	int count;
+	int count;       // 走査対象件数(全曲ではなく要チェック分)
+	int* indices;    // pc インデックス
 	int* subs;
-	TCHAR* fols; // count * 1024
+	TCHAR* fols;     // count * 1024
 	char* result;
 };
 
@@ -2971,10 +3131,12 @@ static UINT AFX_CDECL MpMissScanThread(LPVOID p)
 	for (int i = 0; i < job->count; ++i) {
 		const TCHAR* fol = job->fols + (size_t)i * 1024;
 		job->result[i] = PlTrackLooksMissing(job->subs[i], fol) ? 1 : 0;
+		PlMissDiskSet(fol, job->result[i] ? 1 : 0);
 	}
 	if (job->hwnd && ::IsWindow(job->hwnd))
 		::PostMessage(job->hwnd, WM_MP_MISS_DONE, (WPARAM)job->gen, (LPARAM)job);
 	else {
+		free(job->indices);
 		free(job->subs);
 		free(job->fols);
 		free(job->result);
@@ -3015,29 +3177,69 @@ void CMediaPlayerDlg::KickMissScan()
 	if (m_missScan >= n) return;
 	if (InterlockedCompareExchange(&m_missBusy, 1, 0) != 0) return;
 
+	// ディスクキャッシュを先に載せ、⚠(欠損)と未登録だけ実 PathFileExists する。
+	// 存在確定済みは毎回見ない。起動時は⚠だけ再走査して消す。
+	int* needIdx = (int*)malloc(sizeof(int) * (size_t)n);
+	int needN = 0;
+	if (!needIdx) {
+		InterlockedExchange(&m_missBusy, 0);
+		return;
+	}
+	for (int i = 0; i < n; ++i) {
+		const TCHAR* fol = pl->pc[i].fol;
+		const int cached = PlMissDiskGet(fol);
+		if (cached == 0) {
+			m_miss[i] = 0;
+			continue;
+		}
+		if (cached == 1) {
+			m_miss[i] = 1; // 仮。再走査で消えるかも
+			needIdx[needN++] = i;
+			continue;
+		}
+		// 未キャッシュ
+		m_miss[i] = 0;
+		needIdx[needN++] = i;
+	}
+	if (needN <= 0) {
+		free(needIdx);
+		m_missScan = n;
+		InterlockedExchange(&m_missBusy, 0);
+		if (::IsWindow(m_list.GetSafeHwnd()))
+			m_list.Invalidate(FALSE);
+		return;
+	}
+
+	// ディスクから載せた⚠/非⚠を先に出してから、要再走査分だけ裏で確認
+	if (::IsWindow(m_list.GetSafeHwnd()))
+		m_list.Invalidate(FALSE);
+
 	MpMissJob* job = (MpMissJob*)malloc(sizeof(MpMissJob));
 	if (!job) {
+		free(needIdx);
 		InterlockedExchange(&m_missBusy, 0);
 		return;
 	}
 	ZeroMemory(job, sizeof(*job));
 	job->hwnd = m_hWnd;
 	job->gen = InterlockedIncrement(&m_missGen);
-	job->count = n;
-	job->subs = (int*)malloc(sizeof(int) * (size_t)n);
-	job->fols = (TCHAR*)malloc(sizeof(TCHAR) * 1024 * (size_t)n);
-	job->result = (char*)malloc((size_t)n);
+	job->count = needN;
+	job->indices = needIdx;
+	job->subs = (int*)malloc(sizeof(int) * (size_t)needN);
+	job->fols = (TCHAR*)malloc(sizeof(TCHAR) * 1024 * (size_t)needN);
+	job->result = (char*)malloc((size_t)needN);
 	if (!job->subs || !job->fols || !job->result) {
-		free(job->subs); free(job->fols); free(job->result); free(job);
+		free(job->indices); free(job->subs); free(job->fols); free(job->result); free(job);
 		InterlockedExchange(&m_missBusy, 0);
 		return;
 	}
-	for (int i = 0; i < n; ++i) {
-		job->subs[i] = pl->pc[i].sub;
-		_tcsncpy_s(job->fols + (size_t)i * 1024, 1024, pl->pc[i].fol, _TRUNCATE);
+	for (int k = 0; k < needN; ++k) {
+		const int i = needIdx[k];
+		job->subs[k] = pl->pc[i].sub;
+		_tcsncpy_s(job->fols + (size_t)k * 1024, 1024, pl->pc[i].fol, _TRUNCATE);
 	}
 	if (!AfxBeginThread(MpMissScanThread, job, THREAD_PRIORITY_BELOW_NORMAL)) {
-		free(job->subs); free(job->fols); free(job->result); free(job);
+		free(job->indices); free(job->subs); free(job->fols); free(job->result); free(job);
 		InterlockedExchange(&m_missBusy, 0);
 	}
 }
@@ -3048,11 +3250,15 @@ LRESULT CMediaPlayerDlg::OnMissScanDone(WPARAM wParam, LPARAM lParam)
 	InterlockedExchange(&m_missBusy, 0);
 	if (!job) return 0;
 	const LONG gen = (LONG)wParam;
-	const BOOL accept = (gen == m_missGen) && m_miss && job->count > 0
-		&& job->count <= m_missCap && pl && pl->playcnt == job->count;
-	if (accept && job->result) {
-		memcpy(m_miss, job->result, (size_t)job->count);
-		m_missScan = job->count;
+	const BOOL accept = (gen == m_missGen) && m_miss && pl && pl->pc
+		&& job->count > 0 && job->indices && job->result;
+	if (accept) {
+		for (int k = 0; k < job->count; ++k) {
+			const int i = job->indices[k];
+			if (i >= 0 && i < m_missCap && i < pl->playcnt)
+				m_miss[i] = job->result[k] ? 1 : 0;
+		}
+		m_missScan = pl->playcnt;
 		if (::IsWindow(m_list.GetSafeHwnd()))
 			m_list.Invalidate(FALSE);
 	}
@@ -3060,6 +3266,7 @@ LRESULT CMediaPlayerDlg::OnMissScanDone(WPARAM wParam, LPARAM lParam)
 		// PL が変わっていたら次の Kick でやり直す
 		m_missScan = 0;
 	}
+	free(job->indices);
 	free(job->subs);
 	free(job->fols);
 	free(job->result);
@@ -3079,8 +3286,8 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		RefreshList(FALSE);
 		// 欠損判定はワーカスレッド(KickMissScan)。UI で PathFileExists しない。
 		KickMissScan();
-		// ジャケットは描画外で1件ずつ遅延読込(CustomDraw内LoadJacketがクラッシュ原因)
-		MpJacketLoadVisibleOne(this);
+		// ジャケット: ディスク済は即時一括、未抽出のみ1件/tick
+		MpJacketLoadVisible(this, TRUE);
 		// 起動直後に裏画面が残る対策: メディアプレイヤーモード中は必ず隠す(監視)
 		EnforceFalcomHidden();
 		// 描画タイマー(2)は 60fps 固定。更新頻度の律速は og 側(ms2カウンタ)が行うため、
@@ -3192,6 +3399,12 @@ void CMediaPlayerDlg::OnSize(UINT nType, int cx, int cy)
 			m_savedAnalyzerVisible = 0;
 		}
 		DoLayout();
+		// リサイズ中も「メインに追従」ON のサブ窓を密着辺に合わせて移動
+		{
+			CRect wr;
+			GetWindowRect(&wr);
+			CCC_MainLockOnMainMoving(&wr);
+		}
 		if (m_inSizeMove) {
 			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 		}
@@ -3221,6 +3434,11 @@ void CMediaPlayerDlg::OnExitSizeMove()
 	m_inSizeMove = false;
 	if (::IsWindow(m_hWnd) && !IsIconic()) {
 		DoLayout();
+		{
+			CRect wr;
+			GetWindowRect(&wr);
+			CCC_MainLockOnMainMoving(&wr);
+		}
 		// 確定時に一度だけ同期再描画して、ドラッグ中の簡易描画の崩れを整える。
 		RedrawWindow(NULL, NULL,
 			RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
@@ -5908,12 +6126,13 @@ void EnterMediaPlayerMode()
 	// 非アクティブ時もアクリルが維持されるようにする。トップレベル化(オーナー解除)は
 	// 孤立窓となり非アクティブでアクリルが落ちるため行わない。タスクバー単独表示は
 	// PreCreateWindow の WS_EX_APPWINDOW で確保する。
-	mp = new CMediaPlayerDlg;
-	if (!mp->Create(og) || !::IsWindow(mp->GetSafeHwnd())) {
-		delete mp;
-		mp = NULL;
+	// TheadLoop が mp メンバを触るため、Create 完了後に初めてグローバルへ載せる。
+	CMediaPlayerDlg* creating = new CMediaPlayerDlg;
+	if (!creating->Create(og) || !::IsWindow(creating->GetSafeHwnd())) {
+		delete creating;
 		return;
 	}
+	mp = creating;
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1)
 		mp->RefreshAeroMode();

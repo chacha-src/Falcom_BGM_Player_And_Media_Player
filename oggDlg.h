@@ -63,6 +63,8 @@ struct WavExportOptions {
 	CString tagArtist;
 	CString tagAlbum;
 	CString coverImagePath; // jpg/png。指定時はジャケットをこれに差し替え
+	int kpiDurationSec; // KPI(mode==-3)用の書き出し秒数。0以下は既定(240=4分)
+	int sampleRate; // 0=ソースのまま。44100/48000/96000/192000 でリサンプル
 };
 
 class CEqualizer;

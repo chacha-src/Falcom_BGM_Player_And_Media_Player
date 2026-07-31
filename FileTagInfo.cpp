@@ -1028,6 +1028,173 @@ static bool WriteMp3Id3Tags(LPCTSTR path, const FileTagFields& in)
 	return tag.Save(path) == 0;
 }
 
+#pragma pack(push, 1)
+struct DsfFileHeaderWrite {
+	uint32_t signature;
+	uint64_t chunkSize;
+	uint64_t fileSize;
+	uint64_t id3v2Pointer;
+};
+#pragma pack(pop)
+
+static bool BuildId3v2FileBlob(const FileTagFields& in, const BYTE* cover, int coverLen, const char* mime,
+	BYTE** outBlob, DWORD* outLen)
+{
+	if (!outBlob || !outLen)
+		return false;
+	*outBlob = NULL;
+	*outLen = 0;
+
+	TCHAR tmpDir[MAX_PATH] = {};
+	TCHAR tmpFile[MAX_PATH] = {};
+	if (!::GetTempPath(MAX_PATH, tmpDir) || !::GetTempFileName(tmpDir, _T("id3"), 0, tmpFile))
+		return false;
+	::DeleteFile(tmpFile);
+	{
+		CFile f;
+		if (!f.Open(tmpFile, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL))
+			return false;
+		f.Close();
+	}
+	{
+		CId3tagv2 tag;
+		if (tag.MakeTag(tmpFile) != ERROR_SUCCESS) {
+			::DeleteFile(tmpFile);
+			return false;
+		}
+	}
+	{
+		CId3tagv2 tag;
+		tag.Load(tmpFile);
+		if (!tag.IsEnable()) {
+			::DeleteFile(tmpFile);
+			return false;
+		}
+		if (tag.GetVer() < 0x0300)
+			tag.SetVer(0x0300);
+		tag.SetUnSynchronization(FALSE);
+		if (!in.title.IsEmpty()) tag.SetTitle(in.title);
+		if (!in.artist.IsEmpty()) tag.SetArtist(in.artist);
+		if (!in.album.IsEmpty()) tag.SetAlbum(in.album);
+		if (!in.year.IsEmpty()) tag.SetYear(in.year);
+		if (!in.track.IsEmpty()) tag.SetTrackNo(in.track);
+		if (!in.genre.IsEmpty()) tag.SetGenre(in.genre);
+		CString comment = BuildLoopAwareComment(in.comment, in.loop1, in.loop2);
+		if (!comment.IsEmpty() || !in.comment.IsEmpty() || in.loop1 > 0 || in.loop2 > 0)
+			tag.SetComment(comment);
+		if (cover && coverLen > 0)
+			tag.SetPicture(cover, (DWORD)coverLen, mime && mime[0] ? mime : "image/jpeg");
+		if (tag.Save(tmpFile) != ERROR_SUCCESS) {
+			::DeleteFile(tmpFile);
+			return false;
+		}
+	}
+
+	CFile f;
+	if (!f.Open(tmpFile, CFile::modeRead | CFile::shareDenyWrite, NULL)) {
+		::DeleteFile(tmpFile);
+		return false;
+	}
+	const ULONGLONG len64 = f.GetLength();
+	if (len64 < 10 || len64 > (ULONGLONG)(32 * 1024 * 1024)) {
+		f.Close();
+		::DeleteFile(tmpFile);
+		return false;
+	}
+	const DWORD len = (DWORD)len64;
+	BYTE* buf = (BYTE*)malloc(len);
+	if (!buf) {
+		f.Close();
+		::DeleteFile(tmpFile);
+		return false;
+	}
+	const UINT got = f.Read(buf, len);
+	f.Close();
+	::DeleteFile(tmpFile);
+	if (got != len || buf[0] != 'I' || buf[1] != 'D' || buf[2] != '3') {
+		free(buf);
+		return false;
+	}
+	*outBlob = buf;
+	*outLen = len;
+	return true;
+}
+
+static bool WriteDsfId3Blob(LPCTSTR path, const BYTE* id3, DWORD id3Len)
+{
+	if (!path || !*path || !id3 || id3Len < 10)
+		return false;
+	CFile f;
+	if (!f.Open(path, CFile::modeReadWrite | CFile::shareExclusive, NULL))
+		return false;
+	DsfFileHeaderWrite hdr;
+	if (f.Read(&hdr, sizeof(hdr)) != sizeof(hdr)) {
+		f.Close();
+		return false;
+	}
+	const uint32_t dsdSig = 0x20445344u; // 'DSD '
+	if (hdr.signature != dsdSig) {
+		f.Close();
+		return false;
+	}
+	const ULONGLONG fileLen = f.GetLength();
+	ULONGLONG id3Off = hdr.id3v2Pointer;
+	if (id3Off == 0 || id3Off > fileLen)
+		id3Off = fileLen;
+	try {
+		f.SetLength(id3Off);
+		f.Seek((LONGLONG)id3Off, CFile::begin);
+		f.Write(id3, id3Len);
+		hdr.id3v2Pointer = id3Off;
+		hdr.fileSize = id3Off + id3Len;
+		f.Seek(0, CFile::begin);
+		f.Write(&hdr, sizeof(hdr));
+	}
+	catch (CException* e) {
+		e->Delete();
+		f.Close();
+		return false;
+	}
+	f.Close();
+	return true;
+}
+
+static bool WriteDsfTags(LPCTSTR path, const FileTagFields& in)
+{
+	FileTagFields cur;
+	ReadFileTagFields(path, cur);
+	if (!in.title.IsEmpty()) cur.title = in.title;
+	if (!in.artist.IsEmpty()) cur.artist = in.artist;
+	if (!in.album.IsEmpty()) cur.album = in.album;
+	if (!in.year.IsEmpty()) cur.year = in.year;
+	if (!in.track.IsEmpty()) cur.track = in.track;
+	if (!in.genre.IsEmpty()) cur.genre = in.genre;
+	if (!in.comment.IsEmpty() || in.loop1 > 0 || in.loop2 > 0) {
+		cur.comment = in.comment;
+		cur.loop1 = in.loop1;
+		cur.loop2 = in.loop2;
+	}
+
+	BYTE* cover = (BYTE*)malloc(FILETAG_COVER_MAX);
+	char mime[64] = {};
+	int coverLen = 0;
+	if (cover)
+		coverLen = ExtractCoverArt(path, cover, FILETAG_COVER_MAX, mime, (int)sizeof(mime));
+	if (coverLen <= 0)
+		coverLen = 0;
+
+	BYTE* blob = NULL;
+	DWORD blobLen = 0;
+	const bool built = BuildId3v2FileBlob(cur, coverLen > 0 ? cover : NULL, coverLen,
+		mime[0] ? mime : NULL, &blob, &blobLen);
+	if (cover) free(cover);
+	if (!built)
+		return false;
+	const bool ok = WriteDsfId3Blob(path, blob, blobLen);
+	free(blob);
+	return ok;
+}
+
 static bool FlacSetVorbisField(FLAC__StreamMetadata* vc, const char* key, const CString& val)
 {
 	if (!vc || !key)
@@ -1575,6 +1742,8 @@ static bool WriteFileTagFieldsImpl(LPCTSTR path, const FileTagFields& in)
 		return WriteMp4Tags(path, in);
 	if (IsExt(ext, _T(".ogg")) || IsExt(ext, _T(".qull3")))
 		return WriteOggVorbisTags(path, in);
+	if (IsExt(ext, _T(".dsf")))
+		return WriteDsfTags(path, in);
 	return false;
 }
 
@@ -1734,6 +1903,21 @@ static void ReadDsdTags(LPCTSTR path, const CString& extLower, FileTagFields& ou
 		ScanId3v2FramesInFile(path, scanned);
 		MergeFields(out, scanned);
 	}
+}
+
+static bool FileTag_EmbedCoverDsf(LPCTSTR path, const BYTE* data, int dataLen, const char* mime)
+{
+	if (!path || !*path || !data || dataLen <= 0)
+		return false;
+	FileTagFields fields;
+	ReadFileTagFields(path, fields);
+	BYTE* blob = NULL;
+	DWORD blobLen = 0;
+	if (!BuildId3v2FileBlob(fields, data, dataLen, mime, &blob, &blobLen))
+		return false;
+	const bool ok = WriteDsfId3Blob(path, blob, blobLen);
+	free(blob);
+	return ok;
 }
 
 } // namespace
@@ -2980,6 +3164,8 @@ bool EmbedCoverArt(LPCTSTR path, const BYTE* data, int dataLen, const char* mime
 		return EmbedCoverFlac(path, data, dataLen, mime);
 	if (IsExt(ext, _T(".wav")))
 		return EmbedCoverWav(path, data, dataLen, mime);
+	if (IsExt(ext, _T(".dsf")))
+		return FileTag_EmbedCoverDsf(path, data, dataLen, mime);
 	return false;
 }
 
