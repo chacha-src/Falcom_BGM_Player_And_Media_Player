@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -766,12 +766,52 @@ BEGIN
     LTEXT           "履歴:",IDC_MPP_HIST_L,8,284,34,12
     COMBOBOX        IDC_MPP_HIST,44,282,200,80,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     PUSHBUTTON      "履歴保存",IDC_MPP_SAVEHIST,264,280,68,22
-    PUSHBUTTON      "解析",IDC_MPP_ANALYZE,8,312,52,34
-    PUSHBUTTON      "実行",IDC_MPP_RUN,62,312,52,34
-    PUSHBUTTON      "停止",IDC_MPP_STOP,116,312,52,34
-    PUSHBUTTON      "リセット",IDC_MPP_RESET,170,312,52,34
-    PUSHBUTTON      "クリア",IDC_MPP_CLEAR,224,312,52,34
-    PUSHBUTTON      "閉じる",IDC_MPP_CLOSE,299,312,68,34
+    PUSHBUTTON      "解析",IDC_MPP_ANALYZE,8,312,48,34
+    PUSHBUTTON      "ロール",IDC_MPP_ROLL,58,312,48,34
+    PUSHBUTTON      "実行",IDC_MPP_RUN,108,312,48,34
+    PUSHBUTTON      "停止",IDC_MPP_STOP,158,312,48,34
+    PUSHBUTTON      "リセット",IDC_MPP_RESET,208,312,48,34
+    PUSHBUTTON      "クリア",IDC_MPP_CLEAR,258,312,48,34
+    PUSHBUTTON      "閉じる",IDC_MPP_CLOSE,308,312,58,34
+END
+
+IDD_MP_CMDROLL DIALOGEX 0, 0, 640, 360
+STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "コマンドロール"
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    LTEXT           "",IDC_MCR_TIME,8,8,280,12
+    PUSHBUTTON      "-",IDC_MCR_ZOOMOUT,300,6,28,16
+    PUSHBUTTON      "+",IDC_MCR_ZOOMIN,332,6,28,16
+    PUSHBUTTON      "?",IDC_MCR_HELP,368,6,24,16
+    PUSHBUTTON      "閉じる",IDC_MCR_CLOSE,572,6,60,20
+    CONTROL         "",IDC_MCR_HOST,"Static",SS_BLACKFRAME,8,28,624,324
+END
+
+IDD_MP_CMDROLL_HELP DIALOGEX 0, 0, 430, 300
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "プロンプトロール操作ガイド"
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    DEFPUSHBUTTON   "閉じる",IDOK,372,278,50,14
+END
+
+IDD_MP_CMDPLACE DIALOGEX 0, 0, 260, 140
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "コマンド配置"
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    LTEXT           "コマンド:",IDC_MCP_CMD_L,12,12,230,12
+    LTEXT           "開始(秒):",IDC_MCP_T0_L,12,32,60,12
+    EDITTEXT        IDC_MCP_T0,80,30,60,14,ES_AUTOHSCROLL
+    LTEXT           "終了(秒):",IDC_MCP_T1_L,12,52,60,12
+    EDITTEXT        IDC_MCP_T1,80,50,60,14,ES_AUTOHSCROLL
+    LTEXT           "値0:",IDC_MCP_V0_L,12,72,60,12
+    EDITTEXT        IDC_MCP_V0,80,70,60,14,ES_AUTOHSCROLL
+    LTEXT           "値1:",IDC_MCP_V1_L,12,92,60,12
+    EDITTEXT        IDC_MCP_V1,80,90,60,14,ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "OK",IDOK,140,114,50,18
+    PUSHBUTTON      "キャンセル",IDCANCEL,198,114,50,18
 END
 
 IDD_MP_CHEATSHEET DIALOGEX 0, 0, 258, 181
@@ -1232,7 +1272,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,550
+ FILEVERSION 0,9,1,551
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1250,10 +1290,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.07.31"
-            VALUE "FileVersion", "0.9.1.550"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.01"
+            VALUE "FileVersion", "0.9.1.551"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.07.31"
+            VALUE "LegalCopyright", "Copyright (C) 2026.08.01"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -1540,6 +1580,18 @@ BEGIN
     END
 
     IDD_MP_PROMPT, DIALOG
+    BEGIN
+    END
+
+    IDD_MP_CMDROLL, DIALOG
+    BEGIN
+    END
+
+    IDD_MP_CMDROLL_HELP, DIALOG
+    BEGIN
+    END
+
+    IDD_MP_CMDPLACE, DIALOG
     BEGIN
     END
 

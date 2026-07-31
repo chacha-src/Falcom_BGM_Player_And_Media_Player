@@ -19,6 +19,7 @@
 #include "CMpPlaylistIO.h"
 #include "CMpM3uImportDlg.h"
 #include "CPromptDlg.h"
+#include "CCommandRollDlg.h"
 #include <direct.h>
 #include <shobjidl.h>
 #include <shlobj.h>
@@ -627,9 +628,12 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_lastToggleEq = -1;
 	m_lastTogglePiano = -1;
 	m_lastToggleAnalyzer = -1;
+	m_lastTogglePrompt = -1;
+	m_lastToggleCmdRoll = -1;
 	m_dsvolSlW = 0;
 	m_mpBtnShort = -1;
 	m_mpPromptShort = -1;
+	m_mpCmdRollShort = -1;
 	for (int i = 0; i < 6; ++i)
 		m_mpChkShort[i] = -1;
 	m_abApos = -1;
@@ -813,6 +817,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_SUPE, &CMediaPlayerDlg::OnSupe)
 	ON_BN_CLICKED(IDC_MP_ST, &CMediaPlayerDlg::OnSt)
 	ON_BN_CLICKED(IDC_MP_PROMPT, &CMediaPlayerDlg::OnPrompt)
+	ON_BN_CLICKED(IDC_MP_CMDROLL, &CMediaPlayerDlg::OnCmdRoll)
 	ON_BN_CLICKED(IDC_MP_TIP, &CMediaPlayerDlg::OnTip)
 	ON_BN_CLICKED(IDC_MP_MINI, &CMediaPlayerDlg::OnMini)
 	ON_BN_CLICKED(IDC_MP_SAVEMP3, &CMediaPlayerDlg::OnSaveMp3)
@@ -980,6 +985,27 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			if (pFont)
 				m_prompt.SetFont(pFont);
 			m_prompt.SetGradation(RGB(255, 225, 245), RGB(255, 180, 210), 0, TRUE);
+		}
+	}
+
+	// コマンドロール(プロンプトの左・沈むトグル)
+	if (!m_cmdroll.GetSafeHwnd() && m_prompt.GetSafeHwnd()) {
+		CRect rc;
+		m_prompt.GetWindowRect(&rc);
+		ScreenToClient(&rc);
+		if (rc.Width() < 1) rc.right = rc.left + 28;
+		if (rc.Height() < 1) rc.bottom = rc.top + 12;
+		const int gap = max(2, rc.Height() / 8);
+		rc.OffsetRect(-(rc.Width() + gap), 0);
+		if (!m_cmdroll.Create(LL14(L"ロール", L"Roll", L"Rouleau", L"Roll", L"Roll", L"롤", L"卷轴", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Rulo"),
+			WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_CMDROLL))
+		{
+		}
+		else {
+			CFont* pFont = m_prompt.GetFont();
+			if (pFont)
+				m_cmdroll.SetFont(pFont);
+			m_cmdroll.SetGradation(RGB(230, 220, 255), RGB(200, 185, 250), 0, TRUE);
 		}
 	}
 
@@ -1181,12 +1207,20 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	MpMakePushToggle(&m_piano);
 	if (m_analyzer.GetSafeHwnd())
 		MpMakePushToggle(&m_analyzer);
+	if (m_prompt.GetSafeHwnd())
+		MpMakePushToggle(&m_prompt);
+	if (m_cmdroll.GetSafeHwnd())
+		MpMakePushToggle(&m_cmdroll);
 	MpSetPushToggle(m_supe, FALSE, RGB(140, 220, 160), RGB(80, 180, 110), RGB(215, 240, 220), RGB(175, 215, 190));
 	MpSetPushToggle(m_st, FALSE, RGB(160, 200, 255), RGB(100, 150, 230), RGB(215, 230, 255), RGB(175, 200, 245));
 	MpSetPushToggle(m_eq, FALSE, RGB(200, 170, 255), RGB(160, 120, 240), RGB(230, 220, 255), RGB(200, 185, 250));
 	MpSetPushToggle(m_piano, FALSE, RGB(200, 170, 255), RGB(160, 120, 240), RGB(230, 220, 255), RGB(200, 185, 250));
 	if (m_analyzer.GetSafeHwnd())
 		MpSetPushToggle(m_analyzer, FALSE, RGB(200, 170, 255), RGB(160, 120, 240), RGB(230, 220, 255), RGB(200, 185, 250));
+	if (m_prompt.GetSafeHwnd())
+		MpSetPushToggle(m_prompt, FALSE, RGB(255, 180, 210), RGB(255, 120, 170), RGB(255, 225, 245), RGB(255, 180, 210));
+	if (m_cmdroll.GetSafeHwnd())
+		MpSetPushToggle(m_cmdroll, FALSE, RGB(200, 170, 255), RGB(160, 120, 240), RGB(230, 220, 255), RGB(200, 185, 250));
 	CCustomControlUtility::SetControlBackgroundColor(&m_plsel, COLOR_COMBO_BG);
 	// タイトルに淡いドロップシャドウで可愛く強調
 	m_title.SetDropShadow(RGB(255, 220, 235), 0, 1, 0, TRUE);
@@ -1404,7 +1438,9 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_itemdel, LL14(L"選択した曲をリストから削除します。", L"Remove selected track(s) from the list.", L"Retirer les pistes selectionnees.", L"Rimuovi le tracce selezionate.", L"Quitar pistas seleccionadas.", L"선택 곡을 목록에서 삭제.", L"从列表删除所选曲目。", L"حذف المقاطع المحددة.", L"Удалить выбранные треки.", L"Ausgewahlte Titel entfernen.", L"Remover faixas selecionadas.", L"Geselecteerde tracks verwijderen.", L"Usuń zaznaczone utwory.", L"Seçili parçaları sil."));
 	addTip(m_supe, LL14(L"スペアナ表示を切り替えます。", L"Toggle spectrum display.", L"Afficher le spectre.", L"Mostra spettro.", L"Mostrar espectro.", L"스펙트럼 표시 전환.", L"切换频谱显示。", L"تبديل عرض الطيف.", L"Спектр вкл/выкл.", L"Spektrum umschalten.", L"Alternar espectro.", L"Spectrum wisselen.", L"Przełącz widmo.", L"Spektrumu değiştir."));
 	if (m_prompt.GetSafeHwnd())
-		addTip(m_prompt, LL14(L"演奏アレンジ用プロンプトウィンドウを開きます。", L"Open the performance prompt window.", L"Ouvrir la fenetre de prompt.", L"Apri finestra prompt.", L"Abrir ventana de prompt.", L"연주 프롬프트 창을 엽니다.", L"打开演奏提示窗口。", L"فتح نافذة الموجه.", L"Открыть окно промпта.", L"Prompt-Fenster oeffnen.", L"Abrir janela de prompt.", L"Promptvenster openen.", L"Otworz okno promptu.", L"Istem penceresini ac."));
+		addTip(m_prompt, LL14(L"演奏アレンジ用プロンプト(テキスト編集)を開きます。", L"Open the performance prompt (text editor).", L"Ouvrir le prompt (edition texte).", L"Apri prompt (editor testo).", L"Abrir prompt (editor de texto).", L"연주 프롬프트(텍스트 편집)를 엽니다.", L"打开演奏提示(文本编辑)。", L"فتح الموجه (تحرير النص).", L"Открыть промпт (текст).", L"Prompt (Texteditor) oeffnen.", L"Abrir prompt (editor de texto).", L"Prompt (teksteditor) openen.", L"Otworz prompt (edytor tekstu).", L"Istem (metin duzenleyici) ac."));
+	if (m_cmdroll.GetSafeHwnd())
+		addTip(m_cmdroll, LL14(L"プロンプトロールを開きます。時間軸でコマンドを配置・編集します。", L"Open the prompt roll. Place and edit timed commands on a timeline.", L"Ouvrir le rouleau de prompt.", L"Apri il prompt roll.", L"Abrir el prompt roll.", L"프롬프트 롤을 엽니다. 시간축에서 명령을 배치·편집합니다.", L"打开提示卷轴。在时间轴上放置/编辑命令。", L"فتح لفة الموجه.", L"Открыть prompt roll.", L"Prompt-Roll oeffnen.", L"Abrir prompt roll.", L"Prompt-roll openen.", L"Otworz prompt roll.", L"Prompt rulosunu ac."));
 	addTip(m_st, LL14(L"スペアナのステレオ(L/R)表示を切り替えます。", L"Toggle stereo (L/R) spectrum view.", L"Afficher le spectre stereo L/R.", L"Mostra spettro stereo L/R.", L"Mostrar espectro estereo L/R.", L"스테레오(L/R) 스펙트럼 표시 전환.", L"切换立体声(L/R)频谱显示。", L"تبديل عرض الطيف الستيريو.", L"Переключить стерео-спектр.", L"Stereo-Spektrum umschalten.", L"Alternar espectro stereo.", L"Stereo spectrum wisselen.", L"Przelacz widmo stereo.", L"Stereo spektrumu degistir."));
 	addTip(m_find, LL14(L"検索キーワード。絞り込みONで一致曲のみ表示、OFF時は▲▼で前後検索。", L"Search keyword. With Filter ON, show matches; OFF uses up/down jump.", L"Mot-cle. Filtre ON = liste filtree.", L"Parola. Filtro ON = elenco filtrato.", L"Palabra. Filtro ON = lista filtrada.", L"검색어. 필터 ON이면 일치만.", L"关键字。筛选ON时仅显示匹配。", L"كلمة. التصفية ON تعرض المطابق.", L"Слово. Фильтр ON — только совпадения.", L"Suchbegriff. Filter ON = Treffer.", L"Palavra. Filtro ON = correspondencias.", L"Zoekterm. Filter ON = treffers.", L"Slowo. Filtr ON = trafienia.", L"Kelime. Filtre ON = eslesenler."));
 	if (m_findFilter.GetSafeHwnd())
@@ -2045,6 +2081,8 @@ void CMediaPlayerDlg::DoLayout()
 	int folW = (int)(54 * s), stW = (int)(72 * s), supeW = (int)(62 * s);
 	const int prWFull = max(1, (int)(76 * s));
 	const int prWShort = max(1, (int)(36 * s));
+	const int rollWFull = max(1, (int)(56 * s));
+	const int rollWShort = max(1, (int)(36 * s));
 	const int randomEndX = M + (int)(90 * s) + (int)(96 * s) + (int)(82 * s) + (int)(40 * s) + (int)(98 * s);
 	int btnRowH = (int)(24 * s);
 	int btnY1 = by2 + (ch - btnRowH) / 2;
@@ -2053,8 +2091,9 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_st, rcx, btnY1, stW, btnRowH); rcx -= (int)(4 * s) + supeW;
 	MoveCtl(&m_supe, rcx, btnY1, supeW, btnRowH);
 	const int prGap = (int)(8 * s);
-	const bool prUseFull = (rcx - prGap - prWFull >= randomEndX);
+	const bool prUseFull = (rcx - prGap - prWFull - (int)(4 * s) - rollWFull >= randomEndX);
 	const int prW = prUseFull ? prWFull : prWShort;
+	const int rollW = prUseFull ? rollWFull : rollWShort;
 	if (m_prompt.GetSafeHwnd()) {
 		const int prShortLv = prUseFull ? 0 : 1;
 		if (prShortLv != m_mpPromptShort) {
@@ -2065,6 +2104,17 @@ void CMediaPlayerDlg::DoLayout()
 		}
 		rcx -= (int)(4 * s) + prW;
 		MoveCtl(&m_prompt, rcx, btnY1, prW, btnRowH);
+	}
+	if (m_cmdroll.GetSafeHwnd()) {
+		const int rollShortLv = prUseFull ? 0 : 1;
+		if (rollShortLv != m_mpCmdRollShort) {
+			m_mpCmdRollShort = rollShortLv;
+			m_cmdroll.SetWindowText(prUseFull
+				? LL14(L"ロール", L"Roll", L"Rouleau", L"Roll", L"Roll", L"롤", L"卷轴", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Rulo")
+				: LL14(L"巻", L"Rol", L"Rol", L"Rol", L"Rol", L"롤", L"卷", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol", L"Rol"));
+		}
+		rcx -= (int)(4 * s) + rollW;
+		MoveCtl(&m_cmdroll, rcx, btnY1, rollW, btnRowH);
 	}
 
 	// ===== サウンドグループ: 設定 + DS/拡張/テンポ/ピッチ(1段で省スペース) =====
@@ -2482,6 +2532,8 @@ void CMediaPlayerDlg::SyncPushToggleButtons()
 	const int analyzerOpen = (og->m_AnalyzerDlg
 		&& ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd())
 		&& ::IsWindowVisible(og->m_AnalyzerDlg->m_hWnd)) ? 1 : 0;
+	const int promptOpen = MpIsPromptOpen() ? 1 : 0;
+	const int cmdRollOpen = MpIsCommandRollOpen() ? 1 : 0;
 	if (supeOn != m_lastToggleSupe) {
 		MpSetPushToggle(m_supe, supeOn, RGB(140, 220, 160), RGB(80, 180, 110), RGB(215, 240, 220), RGB(175, 215, 190));
 		m_lastToggleSupe = supeOn;
@@ -2501,6 +2553,14 @@ void CMediaPlayerDlg::SyncPushToggleButtons()
 	if (m_analyzer.GetSafeHwnd() && analyzerOpen != m_lastToggleAnalyzer) {
 		MpSetPushToggle(m_analyzer, analyzerOpen, RGB(200, 170, 255), RGB(160, 120, 240), RGB(230, 220, 255), RGB(200, 185, 250));
 		m_lastToggleAnalyzer = analyzerOpen;
+	}
+	if (m_prompt.GetSafeHwnd() && promptOpen != m_lastTogglePrompt) {
+		MpSetPushToggle(m_prompt, promptOpen, RGB(255, 180, 210), RGB(255, 120, 170), RGB(255, 225, 245), RGB(255, 180, 210));
+		m_lastTogglePrompt = promptOpen;
+	}
+	if (m_cmdroll.GetSafeHwnd() && cmdRollOpen != m_lastToggleCmdRoll) {
+		MpSetPushToggle(m_cmdroll, cmdRollOpen, RGB(200, 170, 255), RGB(160, 120, 240), RGB(230, 220, 255), RGB(200, 185, 250));
+		m_lastToggleCmdRoll = cmdRollOpen;
 	}
 }
 
@@ -4605,7 +4665,14 @@ void CMediaPlayerDlg::OnSt()
 
 void CMediaPlayerDlg::OnPrompt()
 {
-	MpShowPromptDialog(this);
+	MpTogglePromptDialog(this);
+	SyncPushToggleButtons();
+}
+
+void CMediaPlayerDlg::OnCmdRoll()
+{
+	MpToggleCommandRollDialog(this);
+	SyncPushToggleButtons();
 }
 
 void CMediaPlayerDlg::OnM3uExport()

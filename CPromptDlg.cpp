@@ -2,6 +2,7 @@
 #include "CPromptDlg.h"
 #include "CPromptEngine.h"
 #include "CPromptAnalyze.h"
+#include "CCommandRollDlg.h"
 
 extern save savedata;
 extern void MpPersistSavedataQuick();
@@ -28,6 +29,7 @@ void CPromptDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_MPP_LEGEND, m_legend);
 	DDX_Control(pDX, IDC_MPP_RUN, m_run);
 	DDX_Control(pDX, IDC_MPP_ANALYZE, m_analyze);
+	DDX_Control(pDX, IDC_MPP_ROLL, m_roll);
 	DDX_Control(pDX, IDC_MPP_STOP, m_stop);
 	DDX_Control(pDX, IDC_MPP_RESET, m_reset);
 	DDX_Control(pDX, IDC_MPP_CLEAR, m_clear);
@@ -40,6 +42,7 @@ void CPromptDlg::DoDataExchange(CDataExchange* pDX)
 BEGIN_MESSAGE_MAP(CPromptDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MPP_RUN, &CPromptDlg::OnRun)
 	ON_BN_CLICKED(IDC_MPP_ANALYZE, &CPromptDlg::OnAnalyze)
+	ON_BN_CLICKED(IDC_MPP_ROLL, &CPromptDlg::OnRoll)
 	ON_BN_CLICKED(IDC_MPP_STOP, &CPromptDlg::OnStop)
 	ON_BN_CLICKED(IDC_MPP_RESET, &CPromptDlg::OnReset)
 	ON_BN_CLICKED(IDC_MPP_CLEAR, &CPromptDlg::OnClear)
@@ -56,6 +59,7 @@ BEGIN_MESSAGE_MAP(CPromptDlg, CCustomBlurDialogExBase)
 	ON_WM_GETMINMAXINFO()
 	ON_WM_MOUSEWHEEL()
 	ON_WM_CTLCOLOR()
+	ON_WM_CLOSE()
 #if CCUSTOM_AERO_SUPPORT
 	ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
@@ -83,18 +87,19 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"【EQ項目】(大文字 M/N/K/I/S/E/F)\r\n"
 		L"  M=マスター N=鮮明 K=高低(バランス) I=密度 S=立体\r\n"
-		L"  E=環境番号(0〜100, 0=なし)  F=環境のかかり具合(0〜100%)\r\n"
+		L"  E=環境番号(0〜100, 0=なし)  F=環境のかかり具合(0〜200, EQスライダーと同じ)\r\n"
 		L"  (互換: 小文字 s も立体。sb/sl 演出は2文字。小文字 e/f は周波数帯)\r\n"
 		L"【効果】 r=リバーブ  c=コーラス  y=ディレイ\r\n"
 		L"  ※0=オフ / 1〜100=通常(強さ) / 101〜200=別モード(強さ=値-100)\r\n"
 		L"    r:通常リバーブ / パンリバーブ\r\n"
 		L"    c:通常コーラス / コーラスディストーション\r\n"
 		L"    y:通常ディレイ / マルチディレイ(ピンポン)\r\n"
-		L"【演出】 sb=しょんぼり  br=明るめ  sl=スロー  fa=ファスト (値不要)\r\n"
+		L"【演出】 sb=しょんぼり  br=明るめ  sl=スロー  fa=ファスト\r\n"
+		L"         wm=温か  cd=冷たく  dp=深め  wi=広がり  nr=寄り  gn=穏やか  pw=パワー  dr=夢うつつ (値不要)\r\n"
 		L"【例1】 @p50-1:20[100-120]  … 50秒〜1:20でピッチ100→120%\r\n"
 		L"【例2】 @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"【例3】 @t0-30[100-80]  … 曲頭から30秒かけてテンポ100→80%\r\n"
-		L"【例4】 @E30[12] @F30-1:00[0-80]  … 30秒で環境#12、かかり具合を30秒〜1:00で0→80%",
+		L"【例4】 @E30[12] @F30-1:00[0-160]  … 30秒で環境#12、かかり具合を30秒〜1:00で0→160",
 		L"━━ How to use ━━\r\n"
 		L"1. Type commands in the box above (multiple lines OK, several @ per line OK)\r\n"
 		L"2. [Run] to parse & enable → auto-applied at the set time during playback\r\n"
@@ -113,18 +118,19 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[EQ controls] (uppercase M/N/K/I/S/E/F)\r\n"
 		L"  M=Master N=Clarity K=Balance(hi/lo) I=Density S=Stereo\r\n"
-		L"  E=Environment no.(0-100, 0=none)  F=Environment amount(0-100%)\r\n"
+		L"  E=Environment no.(0-100, 0=none)  F=Environment amount(0-200, same as EQ slider)\r\n"
 		L"  (compat: lowercase s is also Stereo. sb/sl presets are 2 letters. lowercase e/f are bands)\r\n"
 		L"[FX] r=Reverb  c=Chorus  y=Delay\r\n"
 		L"  *0=off / 1-100=normal(amount) / 101-200=alt mode(amount=value-100)\r\n"
 		L"    r:reverb / pan-reverb\r\n"
 		L"    c:chorus / chorus-distortion\r\n"
 		L"    y:delay / multi-delay(ping-pong)\r\n"
-		L"[Presets] sb=melancholy  br=bright  sl=slow  fa=fast (no value)\r\n"
+		L"[Presets] sb=melancholy  br=bright  sl=slow  fa=fast\r\n"
+		L"  wm=warm  cd=cold  dp=deep  wi=wide  nr=near  gn=gentle  pw=power  dr=dreamy (no value)\r\n"
 		L"[Ex1] @p50-1:20[100-120]  … pitch 100→120% from 50s to 1:20\r\n"
 		L"[Ex2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[Ex3] @t0-30[100-80]  … tempo 100→80% over 30s from the start\r\n"
-		L"[Ex4] @E30[12] @F30-1:00[0-80]  … env #12 at 30s, amount 0→80% from 30s to 1:00",
+		L"[Ex4] @E30[12] @F30-1:00[0-160]  … env #12 at 30s, amount 0→160 from 30s to 1:00",
 		L"━━ Utilisation ━━\r\n"
 		L"1. Saisissez des commandes dans le champ ci-dessus (plusieurs lignes possibles, plusieurs @ par ligne)\r\n"
 		L"2. [Executer] pour analyser et activer → applique automatiquement a l'heure pendant la lecture\r\n"
@@ -142,14 +148,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[Controles EQ] (majuscules M/N/K/I/S/E/F)\r\n"
 		L"  M=Master N=Clarte K=Balance(aigu/grave) I=Densite S=Stereo\r\n"
-		L"  E=No d'environnement(0-100, 0=aucun)  F=Intensite d'environnement(0-100%)\r\n"
+		L"  E=No d'environnement(0-100, 0=aucun)  F=Intensite d'environnement(0-200, meme curseur EQ)\r\n"
 		L"  (compat : la minuscule s = aussi Stereo. Les presets sb/sl ont 2 lettres. Les minuscules e/f sont des bandes)\r\n"
 		L"[Effets] r=Reverb  c=Chorus  y=Delay\r\n"
 		L"[Presets] sb=melancolique  br=lumineux  sl=lent  fa=rapide (sans valeur)\r\n"
 		L"[Ex1] @p50-1:20[100-120]  … hauteur 100→120% de 50s a 1:20\r\n"
 		L"[Ex2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[Ex3] @t0-30[100-80]  … tempo 100→80% sur 30s depuis le debut\r\n"
-		L"[Ex4] @E30[12] @F30-1:00[0-80]  … env #12 a 30s, intensite 0→80% de 30s a 1:00",
+		L"[Ex4] @E30[12] @F30-1:00[0-160]  … env #12 a 30s, intensite 0→160 de 30s a 1:00",
 		L"━━ Uso ━━\r\n"
 		L"1. Scrivi i comandi nel campo sopra (piu righe consentite, piu @ per riga)\r\n"
 		L"2. [Esegui] per analizzare e attivare → applicato automaticamente all'orario durante la riproduzione\r\n"
@@ -167,14 +173,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[Controlli EQ] (maiuscole M/N/K/I/S/E/F)\r\n"
 		L"  M=Master N=Nitidezza K=Bilanciamento(alti/bassi) I=Densita S=Stereo\r\n"
-		L"  E=N. ambiente(0-100, 0=nessuno)  F=Intensita ambiente(0-100%)\r\n"
+		L"  E=N. ambiente(0-100, 0=nessuno)  F=Intensita ambiente(0-200, stesso slider EQ)\r\n"
 		L"  (compat: la minuscola s = anche Stereo. I preset sb/sl hanno 2 lettere. Le minuscole e/f sono bande)\r\n"
 		L"[Effetti] r=Riverbero  c=Chorus  y=Delay\r\n"
 		L"[Preset] sb=malinconico  br=luminoso  sl=lento  fa=veloce (senza valore)\r\n"
 		L"[Es1] @p50-1:20[100-120]  … intonazione 100→120% da 50s a 1:20\r\n"
 		L"[Es2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[Es3] @t0-30[100-80]  … tempo 100→80% in 30s dall'inizio\r\n"
-		L"[Es4] @E30[12] @F30-1:00[0-80]  … ambiente #12 a 30s, intensita 0→80% da 30s a 1:00",
+		L"[Es4] @E30[12] @F30-1:00[0-160]  … ambiente #12 a 30s, intensita 0→160 da 30s a 1:00",
 		L"━━ Uso ━━\r\n"
 		L"1. Escriba comandos en el campo de arriba (varias lineas posibles, varios @ por linea)\r\n"
 		L"2. [Ejecutar] para analizar y activar → se aplica automaticamente a la hora durante la reproduccion\r\n"
@@ -192,14 +198,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[Controles EQ] (mayusculas M/N/K/I/S/E/F)\r\n"
 		L"  M=Master N=Claridad K=Balance(agudos/graves) I=Densidad S=Estereo\r\n"
-		L"  E=N. de entorno(0-100, 0=ninguno)  F=Intensidad de entorno(0-100%)\r\n"
+		L"  E=N. de entorno(0-100, 0=ninguno)  F=Intensidad de entorno(0-200, mismo slider EQ)\r\n"
 		L"  (compat: la minuscula s = tambien Estereo. Los preajustes sb/sl tienen 2 letras. Las minusculas e/f son bandas)\r\n"
 		L"[Efectos] r=Reverb  c=Chorus  y=Delay\r\n"
 		L"[Preajustes] sb=melancolico  br=brillante  sl=lento  fa=rapido (sin valor)\r\n"
 		L"[Ej1] @p50-1:20[100-120]  … tono 100→120% de 50s a 1:20\r\n"
 		L"[Ej2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[Ej3] @t0-30[100-80]  … tempo 100→80% en 30s desde el inicio\r\n"
-		L"[Ej4] @E30[12] @F30-1:00[0-80]  … entorno #12 a 30s, intensidad 0→80% de 30s a 1:00",
+		L"[Ej4] @E30[12] @F30-1:00[0-160]  … entorno #12 a 30s, intensidad 0→160 de 30s a 1:00",
 		L"━━ 사용법 ━━\r\n"
 		L"1. 위 입력란에 명령을 씁니다 (여러 줄 가능, 한 줄에 여러 @ 가능)\r\n"
 		L"2. [실행]으로 해석·활성화 → 재생 중 시각이 되면 자동 적용\r\n"
@@ -217,14 +223,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[EQ 항목] (대문자 M/N/K/I/S/E/F)\r\n"
 		L"  M=마스터 N=선명 K=고저(밸런스) I=밀도 S=입체\r\n"
-		L"  E=환경 번호(0~100, 0=없음)  F=환경 적용량(0~100%)\r\n"
+		L"  E=환경 번호(0~100, 0=없음)  F=환경 적용량(0~200, EQ 슬라이더와 동일)\r\n"
 		L"  (호환: 소문자 s도 입체. sb/sl 연출은 2글자. 소문자 e/f는 주파수대)\r\n"
 		L"[효과] r=리버브  c=코러스  y=딜레이\r\n"
 		L"[연출] sb=시무룩  br=밝게  sl=슬로우  fa=패스트 (값 불필요)\r\n"
 		L"[예1] @p50-1:20[100-120]  … 50초~1:20에서 피치 100→120%\r\n"
 		L"[예2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[예3] @t0-30[100-80]  … 곡 시작부터 30초에 걸쳐 템포 100→80%\r\n"
-		L"[예4] @E30[12] @F30-1:00[0-80]  … 30초에 환경#12, 적용량을 30초~1:00에서 0→80%",
+		L"[예4] @E30[12] @F30-1:00[0-160]  … 30초에 환경#12, 적용량을 30초~1:00에서 0→160",
 		L"━━ 使用方法 ━━\r\n"
 		L"1. 在上方输入框中写入命令（可多行，一行可多个 @）\r\n"
 		L"2. [执行] 解析并启用 → 播放中到达时刻时自动应用\r\n"
@@ -242,14 +248,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"【EQ项目】(大写 M/N/K/I/S/E/F)\r\n"
 		L"  M=主控 N=清晰 K=高低(平衡) I=密度 S=立体\r\n"
-		L"  E=环境编号(0~100, 0=无)  F=环境强度(0~100%)\r\n"
+		L"  E=环境编号(0~100, 0=无)  F=环境强度(0~200, 与EQ滑块相同)\r\n"
 		L"  (兼容: 小写 s 也是立体。sb/sl 演出为2字母。小写 e/f 为频率带)\r\n"
 		L"【效果】 r=混响  c=合唱  y=延迟\r\n"
 		L"【演出】 sb=消沉  br=明亮  sl=慢速  fa=快速 (无需值)\r\n"
 		L"【例1】 @p50-1:20[100-120]  … 50秒~1:20内音高100→120%\r\n"
 		L"【例2】 @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"【例3】 @t0-30[100-80]  … 从曲首起30秒内速度100→80%\r\n"
-		L"【例4】 @E30[12] @F30-1:00[0-80]  … 30秒时环境#12，强度在30秒~1:00内0→80%",
+		L"【例4】 @E30[12] @F30-1:00[0-160]  … 30秒时环境#12，强度在30秒~1:00内0→160",
 		L"━━ طريقة الاستخدام ━━\r\n"
 		L"1. اكتب الأوامر في الحقل أعلاه (يُسمح بعدة أسطر، وعدة @ في السطر)\r\n"
 		L"2. [تشغيل] للتحليل والتفعيل → يُطبَّق تلقائياً عند الوقت أثناء التشغيل\r\n"
@@ -267,14 +273,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[عناصر EQ] (الأحرف الكبيرة M/N/K/I/S/E/F)\r\n"
 		L"  M=رئيسي N=وضوح K=توازن(حاد/غليظ) I=كثافة S=مجسم\r\n"
-		L"  E=رقم البيئة(0-100، 0=بلا)  F=شدة البيئة(0-100%)\r\n"
+		L"  E=رقم البيئة(0-100، 0=بلا)  F=شدة البيئة(0-200)\r\n"
 		L"  (توافق: الحرف الصغير s أيضاً مجسم. إعدادات sb/sl حرفان. الأحرف الصغيرة e/f نطاقات)\r\n"
 		L"[التأثيرات] r=صدى  c=كورس  y=تأخير\r\n"
 		L"[الإعدادات] sb=حزين  br=مشرق  sl=بطيء  fa=سريع (بلا قيمة)\r\n"
 		L"[مثال1] @p50-1:20[100-120]  … الطبقة من 100 إلى 120% بين 50ث و1:20\r\n"
 		L"[مثال2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[مثال3] @t0-30[100-80]  … الإيقاع من 100 إلى 80% خلال 30ث من البداية\r\n"
-		L"[مثال4] @E30[12] @F30-1:00[0-80]  … البيئة #12 عند 30ث، والشدة من 0 إلى 80% بين 30ث و1:00",
+		L"[مثال4] @E30[12] @F30-1:00[0-160]  … البيئة #12 عند 30ث، والشدة من 0 إلى 160 بين 30ث و1:00",
 		L"━━ Использование ━━\r\n"
 		L"1. Введите команды в поле выше (можно несколько строк, несколько @ в строке)\r\n"
 		L"2. [Выполнить] — разбор и активация → применяется автоматически по времени во время воспроизведения\r\n"
@@ -292,14 +298,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[Параметры EQ] (заглавные M/N/K/I/S/E/F)\r\n"
 		L"  M=Мастер N=Чёткость K=Баланс(верх/низ) I=Плотность S=Стерео\r\n"
-		L"  E=Номер среды(0-100, 0=нет)  F=Интенсивность среды(0-100%)\r\n"
+		L"  E=Номер среды(0-100, 0=нет)  F=Интенсивность среды(0-200, как слайдер EQ)\r\n"
 		L"  (совмест.: строчная s тоже Стерео. Пресеты sb/sl из 2 букв. Строчные e/f — полосы)\r\n"
 		L"[Эффекты] r=Реверб  c=Хорус  y=Дилей\r\n"
 		L"[Пресеты] sb=грустно  br=ярко  sl=медленно  fa=быстро (без значения)\r\n"
 		L"[Пример1] @p50-1:20[100-120]  … высота 100→120% с 50с до 1:20\r\n"
 		L"[Пример2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[Пример3] @t0-30[100-80]  … темп 100→80% за 30с от начала\r\n"
-		L"[Пример4] @E30[12] @F30-1:00[0-80]  … среда #12 на 30с, интенсивность 0→80% с 30с до 1:00",
+		L"[Пример4] @E30[12] @F30-1:00[0-160]  … среда #12 на 30с, интенсивность 0→160 с 30с до 1:00",
 		L"━━ Bedienung ━━\r\n"
 		L"1. Befehle in das Feld oben eingeben (mehrere Zeilen moglich, mehrere @ pro Zeile)\r\n"
 		L"2. [Ausfuhren] zum Parsen & Aktivieren → wird wahrend der Wiedergabe zur Zeit automatisch angewendet\r\n"
@@ -317,14 +323,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[EQ-Regler] (Grossbuchstaben M/N/K/I/S/E/F)\r\n"
 		L"  M=Master N=Klarheit K=Balance(hoch/tief) I=Dichte S=Stereo\r\n"
-		L"  E=Umgebungsnr.(0-100, 0=keine)  F=Umgebungsstarke(0-100%)\r\n"
+		L"  E=Umgebungsnr.(0-100, 0=keine)  F=Umgebungsstarke(0-200, wie EQ-Schieber)\r\n"
 		L"  (kompat.: Kleinbuchstabe s ist auch Stereo. sb/sl-Presets haben 2 Buchstaben. Kleinbuchstaben e/f sind Bander)\r\n"
 		L"[Effekte] r=Reverb  c=Chorus  y=Delay\r\n"
 		L"[Presets] sb=trube  br=hell  sl=langsam  fa=schnell (kein Wert)\r\n"
 		L"[Bsp1] @p50-1:20[100-120]  … Tonhohe 100→120% von 50s bis 1:20\r\n"
 		L"[Bsp2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[Bsp3] @t0-30[100-80]  … Tempo 100→80% uber 30s ab Beginn\r\n"
-		L"[Bsp4] @E30[12] @F30-1:00[0-80]  … Umgebung #12 bei 30s, Starke 0→80% von 30s bis 1:00",
+		L"[Bsp4] @E30[12] @F30-1:00[0-160]  … Umgebung #12 bei 30s, Starke 0→160 von 30s bis 1:00",
 		L"━━ Como usar ━━\r\n"
 		L"1. Escreva comandos no campo acima (varias linhas possiveis, varios @ por linha)\r\n"
 		L"2. [Executar] para analisar e ativar → aplicado automaticamente na hora durante a reproducao\r\n"
@@ -342,14 +348,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[Controles EQ] (maiusculas M/N/K/I/S/E/F)\r\n"
 		L"  M=Master N=Nitidez K=Balanco(agudo/grave) I=Densidade S=Estereo\r\n"
-		L"  E=N. de ambiente(0-100, 0=nenhum)  F=Intensidade de ambiente(0-100%)\r\n"
+		L"  E=N. de ambiente(0-100, 0=nenhum)  F=Intensidade de ambiente(0-200, mesmo slider EQ)\r\n"
 		L"  (compat: a minuscula s tambem e Estereo. Os presets sb/sl tem 2 letras. As minusculas e/f sao bandas)\r\n"
 		L"[Efeitos] r=Reverb  c=Chorus  y=Delay\r\n"
 		L"[Presets] sb=melancolico  br=brilhante  sl=lento  fa=rapido (sem valor)\r\n"
 		L"[Ex1] @p50-1:20[100-120]  … tom 100→120% de 50s a 1:20\r\n"
 		L"[Ex2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[Ex3] @t0-30[100-80]  … andamento 100→80% em 30s desde o inicio\r\n"
-		L"[Ex4] @E30[12] @F30-1:00[0-80]  … ambiente #12 aos 30s, intensidade 0→80% de 30s a 1:00",
+		L"[Ex4] @E30[12] @F30-1:00[0-160]  … ambiente #12 aos 30s, intensidade 0→160 de 30s a 1:00",
 		L"━━ Gebruik ━━\r\n"
 		L"1. Typ opdrachten in het veld hierboven (meerdere regels mogelijk, meerdere @ per regel)\r\n"
 		L"2. [Uitvoeren] om te parsen en activeren → automatisch toegepast op tijd tijdens afspelen\r\n"
@@ -367,14 +373,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[EQ-regelaars] (hoofdletters M/N/K/I/S/E/F)\r\n"
 		L"  M=Master N=Helderheid K=Balans(hoog/laag) I=Dichtheid S=Stereo\r\n"
-		L"  E=Omgevingsnr.(0-100, 0=geen)  F=Omgevingssterkte(0-100%)\r\n"
+		L"  E=Omgevingsnr.(0-100, 0=geen)  F=Omgevingssterkte(0-200, zelfde EQ-schuif)\r\n"
 		L"  (compat: kleine letter s is ook Stereo. sb/sl-presets zijn 2 letters. kleine letters e/f zijn banden)\r\n"
 		L"[Effecten] r=Reverb  c=Chorus  y=Delay\r\n"
 		L"[Presets] sb=somber  br=helder  sl=langzaam  fa=snel (geen waarde)\r\n"
 		L"[Vb1] @p50-1:20[100-120]  … toonhoogte 100→120% van 50s tot 1:20\r\n"
 		L"[Vb2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[Vb3] @t0-30[100-80]  … tempo 100→80% over 30s vanaf begin\r\n"
-		L"[Vb4] @E30[12] @F30-1:00[0-80]  … omgeving #12 op 30s, sterkte 0→80% van 30s tot 1:00",
+		L"[Vb4] @E30[12] @F30-1:00[0-160]  … omgeving #12 op 30s, sterkte 0→160 van 30s tot 1:00",
 		L"━━ Obsluga ━━\r\n"
 		L"1. Wpisz polecenia w polu powyzej (mozna wiele wierszy, wiele @ w wierszu)\r\n"
 		L"2. [Wykonaj] analizuje i wlacza → stosowane automatycznie o czasie podczas odtwarzania\r\n"
@@ -392,14 +398,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[Regulacje EQ] (wielkie litery M/N/K/I/S/E/F)\r\n"
 		L"  M=Master N=Wyrazistosc K=Balans(wysokie/niskie) I=Gestosc S=Stereo\r\n"
-		L"  E=Numer srodowiska(0-100, 0=brak)  F=Intensywnosc srodowiska(0-100%)\r\n"
+		L"  E=Numer srodowiska(0-100, 0=brak)  F=Intensywnosc srodowiska(0-200, jak suwak EQ)\r\n"
 		L"  (kompat.: mala litera s to tez Stereo. Presety sb/sl maja 2 litery. Male litery e/f to pasma)\r\n"
 		L"[Efekty] r=Reverb  c=Chorus  y=Delay\r\n"
 		L"[Presety] sb=smutno  br=jasno  sl=wolno  fa=szybko (bez wartosci)\r\n"
 		L"[Prz1] @p50-1:20[100-120]  … wysokosc 100→120% od 50s do 1:20\r\n"
 		L"[Prz2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[Prz3] @t0-30[100-80]  … tempo 100→80% w 30s od poczatku\r\n"
-		L"[Prz4] @E30[12] @F30-1:00[0-80]  … srodowisko #12 na 30s, intensywnosc 0→80% od 30s do 1:00",
+		L"[Prz4] @E30[12] @F30-1:00[0-160]  … srodowisko #12 na 30s, intensywnosc 0→160 od 30s do 1:00",
 		L"━━ Kullanim ━━\r\n"
 		L"1. Yukaridaki alana komut yazin (birden fazla satir olabilir, satirda birden fazla @ olabilir)\r\n"
 		L"2. [Calistir] ayristirir ve etkinlestirir → oynatma sirasinda zamani gelince otomatik uygulanir\r\n"
@@ -417,14 +423,14 @@ static CString MpPromptLegendText()
 		L"  j=1.6k k=2.5k l=4k m=6.3k n=10k o=16k (Hz)\r\n"
 		L"[EQ ogeleri] (buyuk harf M/N/K/I/S/E/F)\r\n"
 		L"  M=Master N=Netlik K=Denge(tiz/bas) I=Yogunluk S=Stereo\r\n"
-		L"  E=Ortam no(0-100, 0=yok)  F=Ortam miktari(0-100%)\r\n"
+		L"  E=Ortam no(0-100, 0=yok)  F=Ortam miktari(0-200, EQ kaydirici ile ayni)\r\n"
 		L"  (uyum: kucuk s de Stereo. sb/sl on ayarlari 2 harf. kucuk e/f bantlardir)\r\n"
 		L"[Efektler] r=Reverb  c=Chorus  y=Delay\r\n"
 		L"[On ayarlar] sb=huzunlu  br=parlak  sl=yavas  fa=hizli (deger gerekmez)\r\n"
 		L"[Or1] @p50-1:20[100-120]  … perde 100→120% 50sn-1:20 arasi\r\n"
 		L"[Or2] @p1:50[100]  @d2:00[80]  @sb1:30  @br2:00\r\n"
 		L"[Or3] @t0-30[100-80]  … basindan itibaren 30sn'de tempo 100→80%\r\n"
-		L"[Or4] @E30[12] @F30-1:00[0-80]  … 30sn'de ortam #12, miktar 30sn-1:00 arasi 0→80%");
+		L"[Or4] @E30[12] @F30-1:00[0-160]  … 30sn'de ortam #12, miktar 30sn-1:00 arasi 0→160");
 }
 
 static CString MpPromptEditLabelText()
@@ -468,6 +474,7 @@ static void MpSetPromptLabelText(CCustomStatic& st, LPCTSTR plain)
 void CPromptDlg::StyleButtons()
 {
 	m_analyze.SetGradation(RGB(255, 230, 200), RGB(255, 180, 120), 0, TRUE);
+	m_roll.SetGradation(RGB(220, 235, 255), RGB(160, 195, 240), 0, TRUE);
 	m_run.SetGradation(RGB(200, 240, 200), RGB(130, 205, 140), 0, TRUE);
 	m_stop.SetGradation(RGB(255, 215, 220), RGB(255, 165, 180), 0, TRUE);
 	m_reset.SetGradation(RGB(215, 235, 255), RGB(165, 205, 245), 0, TRUE);
@@ -486,6 +493,7 @@ void CPromptDlg::SetupTooltips()
 	};
 	addTip(m_run, LL14(L"プロンプトを解析し、演奏中にパラメータを自動変更します。", L"Parse the prompt and apply parameter changes during playback.", L"Analyser le prompt et appliquer les changements pendant la lecture.", L"Analizza il prompt e applica le modifiche durante l'esecuzione.", L"Analizar el prompt y aplicar cambios durante la reproduccion.", L"프롬프트를 해석해 연주 중 파라미터를 자동 변경합니다.", L"解析提示并在播放中自动更改参数。", L"تحليل الموجه وتطبيق التغييرات أثناء التشغيل.", L"Разобрать промпт и применять изменения при воспроизведении.", L"Prompt parsen und waehrend der Wiedergabe anwenden.", L"Analisar o prompt e aplicar alteracoes durante a reproducao.", L"Prompt parseren en tijdens afspelen toepassen.", L"Parsuj prompt i stosuj zmiany podczas odtwarzania.", L"Istemi ayristirip calma sirasinda uygula."));
 	addTip(m_analyze, LL14(L"選択曲を読込しながら解析し、@/% の時間・効果コマンドを自動生成します(再生は一時停止)。雰囲気モードで傾向が変わります。", L"Load and analyze the selected track, then auto-generate @/% timed effect commands (playback pauses). Mood mode changes the style.", L"Charger et analyser la piste, generer des commandes @/%.", L"Carica e analizza la traccia e genera comandi @/%.", L"Cargar y analizar la pista y generar comandos @/%.", L"선택 곡을 읽어 분석해 @/% 명령을 자동 생성합니다(재생 일시중단).", L"读取并分析所选曲目，自动生成 @/% 命令(播放会暂停)。", L"تحليل المقطع وإنشاء أوامر @/%.", L"Загрузить и проанализировать трек, создать команды @/%.", L"Titel laden/analysieren und @/%-Befehle erzeugen (Wiedergabe pausiert).", L"Carregar e analisar a faixa e gerar comandos @/%.", L"Track laden/analyseren en @/%-opdrachten genereren.", L"Wczytaj i przeanalizuj utwor, wygeneruj komendy @/%.", L"Secili parcayi okuyup analiz ederek @/% komut uret (calma durur)."));
+	addTip(m_roll, LL14(L"コマンドロールを開き、時間軸でコマンドの変化を確認・編集します。", L"Open the command roll to view/edit timed command changes.", L"Ouvrir le rouleau de commandes.", L"Apri il command roll.", L"Abrir el command roll.", L"커맨드 롤을 열어 시간축에서 명령을 확인/편집합니다.", L"打开命令卷轴以查看/编辑时间轴命令。", L"Open command roll.", L"Открыть command roll.", L"Command-Roll oeffnen.", L"Abrir command roll.", L"Command roll openen.", L"Otworz command roll.", L"Komut rulosunu ac."));
 	addTip(m_stop, LL14(L"プロンプト実行を停止します(設定値は維持)。", L"Stop prompt execution (keep current settings).", L"Arreter l'execution du prompt (conserver les reglages).", L"Ferma l'esecuzione del prompt (mantieni i valori).", L"Detener la ejecucion del prompt (mantener ajustes).", L"프롬프트 실행을 중지합니다(설정값 유지).", L"停止提示执行(保留当前设置)。", L"إيقاف تنفيذ الموجه (الإبقاء على الإعدادات).", L"Остановить промпт (настройки сохраняются).", L"Prompt-Ausfuehrung stoppen (Einstellungen behalten).", L"Parar execucao do prompt (manter configuracoes).", L"Prompt uitvoering stoppen (instellingen behouden).", L"Zatrzymaj prompt (zachowaj ustawienia).", L"Istem calistirmasini durdur (ayarlari koru)."));
 	addTip(m_reset, LL14(L"実行前の設定に戻し、プロンプト実行を停止します。", L"Restore settings from before execution and stop.", L"Restaurer les reglages d'avant execution et arreter.", L"Ripristina le impostazioni precedenti e ferma.", L"Restaurar ajustes previos y detener.", L"실행 전 설정으로 되돌리고 중지합니다.", L"恢复到执行前设置并停止。", L"استعادة الإعدادات قبل التشغيل والإيقاف.", L"Восстановить настройки до запуска и остановить.", L"Einstellungen vor Ausfuehrung wiederherstellen und stoppen.", L"Restaurar configuracoes anteriores e parar.", L"Instellingen voor uitvoering herstellen en stoppen.", L"Przywroc ustawienia sprzed uruchomienia i zatrzymaj.", L"Calistirmadan onceki ayarlara don ve durdur."));
 	addTip(m_clear, LL14(L"プロンプト本文を消去し、設定も初期状態に戻します。", L"Clear prompt text and restore initial settings.", L"Effacer le prompt et restaurer les reglages initiaux.", L"Cancella il prompt e ripristina le impostazioni.", L"Borrar el prompt y restaurar ajustes iniciales.", L"프롬프트 본문을 지우고 설정도 초기화합니다.", L"清除提示文本并恢复初始设置。", L"مسح نص الموجه واستعادة الإعدادات الأولية.", L"Очистить промпт и восстановить исходные настройки.", L"Prompt loeschen und Ausgangseinstellungen wiederherstellen.", L"Limpar prompt e restaurar configuracoes iniciais.", L"Prompt wissen en begininstellingen herstellen.", L"Wyczysc prompt i przywroc ustawienia poczatkowe.", L"Istem metnini temizle ve baslangic ayarlarina don."));
@@ -527,7 +535,7 @@ void CPromptDlg::LayoutControls()
 
 	const int iw = max(1, W - M * 2);
 	const int lockGap = 6;
-	const int btnW = max(52, min(72, (iw - btnGap * 5) / 6));
+	const int btnW = max(48, min(68, (iw - btnGap * 6) / 7));
 
 	CCC_MainLockSetHeaderRow(m_hWnd, M, editLblH);
 	CRect lockRc;
@@ -597,6 +605,7 @@ void CPromptDlg::LayoutControls()
 
 	int bx = M;
 	if (m_analyze.GetSafeHwnd()) { m_analyze.MoveWindow(bx, btnY, btnW, btnH); bx += btnW + btnGap; }
+	if (m_roll.GetSafeHwnd()) { m_roll.MoveWindow(bx, btnY, btnW, btnH); bx += btnW + btnGap; }
 	if (m_run.GetSafeHwnd()) { m_run.MoveWindow(bx, btnY, btnW, btnH); bx += btnW + btnGap; }
 	if (m_stop.GetSafeHwnd()) { m_stop.MoveWindow(bx, btnY, btnW, btnH); bx += btnW + btnGap; }
 	if (m_reset.GetSafeHwnd()) { m_reset.MoveWindow(bx, btnY, btnW, btnH); bx += btnW + btnGap; }
@@ -617,6 +626,7 @@ void CPromptDlg::LayoutControls()
 	RaiseChildZOrder(&m_hist);
 	RaiseChildZOrder(&m_saveHist);
 	RaiseChildZOrder(&m_analyze);
+	RaiseChildZOrder(&m_roll);
 	RaiseChildZOrder(&m_run);
 	RaiseChildZOrder(&m_stop);
 	RaiseChildZOrder(&m_reset);
@@ -636,6 +646,7 @@ void CPromptDlg::RefreshAfterLayout(BOOL bSyncRedraw)
 
 	m_run.RepaintClient();
 	m_analyze.RepaintClient();
+	m_roll.RepaintClient();
 	m_stop.RepaintClient();
 	m_reset.RepaintClient();
 	m_clear.RepaintClient();
@@ -743,6 +754,7 @@ BOOL CPromptDlg::OnInitDialog()
 	if (m_edit.GetSafeHwnd())
 		m_edit.SetLimitText((UINT)kMaxChars);
 	SetDlgItemText(IDC_MPP_ANALYZE, LL14(L"解析", L"Analyze", L"Analyser", L"Analizza", L"Analizar", L"분석", L"分析", L"تحليل", L"Анализ", L"Analysieren", L"Analisar", L"Analyseren", L"Analizuj", L"Analiz"));
+	SetDlgItemText(IDC_MPP_ROLL, LL14(L"ロール", L"Roll", L"Rouleau", L"Roll", L"Roll", L"롤", L"卷轴", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Roll", L"Rulo"));
 	SetDlgItemText(IDC_MPP_RUN, LL14(L"実行", L"Run", L"Executer", L"Esegui", L"Ejecutar", L"실행", L"执行", L"تشغيل", L"Запуск", L"Ausfuehren", L"Executar", L"Uitvoeren", L"Uruchom", L"Calistir"));
 	SetDlgItemText(IDC_MPP_STOP, LL14(L"停止", L"Stop", L"Arret", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stopp", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
 	SetDlgItemText(IDC_MPP_RESET, LL14(L"リセット", L"Reset", L"Reinit.", L"Ripristina", L"Restablecer", L"리셋", L"重置", L"إعادة ضبط", L"Сброс", L"Zuruecksetzen", L"Redefinir", L"Reset", L"Reset", L"Sifirla"));
@@ -788,6 +800,7 @@ BOOL CPromptDlg::OnInitDialog()
 			if (m_fontBtn.CreateFontIndirect(&lf))
 			{
 				m_analyze.SetFont(&m_fontBtn);
+				m_roll.SetFont(&m_fontBtn);
 				m_run.SetFont(&m_fontBtn);
 				m_stop.SetFont(&m_fontBtn);
 				m_reset.SetFont(&m_fontBtn);
@@ -930,6 +943,10 @@ void CPromptDlg::LoadTextFromSavedata()
 		SetDlgItemText(IDC_MPP_TEXT, savedata.mpPromptTextLong);
 	else if (savedata.mpPromptText[0])
 		SetDlgItemText(IDC_MPP_TEXT, savedata.mpPromptText);
+	// 起動時など、ロールが既に開いていれば本文を反映
+	const CString s = GetPromptText();
+	if (!s.IsEmpty())
+		MpCommandRollNotifyText(s, m_syncGen);
 }
 
 void CPromptDlg::SaveTextToSavedata()
@@ -967,6 +984,37 @@ void CPromptDlg::OnTextChanged()
 	}
 	UpdateRemainLabel();
 	SaveTextToSavedata();
+	if (!m_applyingFromRoll) {
+		++m_syncGen;
+		MpCommandRollNotifyText(s, m_syncGen);
+	}
+}
+
+CString CPromptDlg::GetPromptText() const
+{
+	CString s;
+	if (m_edit.GetSafeHwnd())
+		m_edit.GetWindowText(s);
+	if (s.IsEmpty() && GetSafeHwnd())
+		GetDlgItemText(IDC_MPP_TEXT, s);
+	return s;
+}
+
+void CPromptDlg::ApplyTextFromRoll(const CString& text, UINT syncGen)
+{
+	m_applyingFromRoll = TRUE;
+	m_syncGen = syncGen;
+	CString t = text;
+	if (t.GetLength() > kMaxChars) t = t.Left(kMaxChars);
+	SetDlgItemText(IDC_MPP_TEXT, t);
+	UpdateRemainLabel();
+	SaveTextToSavedata();
+	m_applyingFromRoll = FALSE;
+}
+
+void CPromptDlg::OnRoll()
+{
+	MpShowCommandRollDialog(CCC_GetActiveMainWindow());
 }
 
 void CPromptDlg::OnContextMenu(CWnd* pWnd, CPoint point)
@@ -985,7 +1033,7 @@ void CPromptDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 
 	enum {
 		IDM_CUT = 1, IDM_COPY, IDM_PASTE, IDM_SELALL,
-		IDM_INS_AT, IDM_INS_PCT, IDM_INS_SB,
+		IDM_INS_AT, IDM_INS_PCT, IDM_INS_SB, IDM_INS_WM, IDM_INS_PW, IDM_INS_DR,
 		IDM_SAVEHIST, IDM_CLEAR
 	};
 	CMenu menu;
@@ -1000,6 +1048,9 @@ void CPromptDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	sub.AppendMenu(MF_STRING, IDM_INS_AT, L"@p0-30[100-110]");
 	sub.AppendMenu(MF_STRING, IDM_INS_PCT, L"%N1:00<20-40>[100-120]");
 	sub.AppendMenu(MF_STRING, IDM_INS_SB, L"@sb1:00");
+	sub.AppendMenu(MF_STRING, IDM_INS_WM, L"@wm1:00");
+	sub.AppendMenu(MF_STRING, IDM_INS_PW, L"@pw1:30");
+	sub.AppendMenu(MF_STRING, IDM_INS_DR, L"@dr2:00");
 	menu.AppendMenu(MF_POPUP, (UINT_PTR)sub.Detach(),
 		LL14(L"サンプル挿入", L"Insert sample", L"Inserer exemple", L"Inserisci esempio", L"Insertar ejemplo", L"샘플 삽입", L"插入示例", L"Insert sample", L"Вставить пример", L"Beispiel einfuegen", L"Inserir exemplo", L"Voorbeeld invoegen", L"Wstaw przyklad", L"Ornek ekle"));
 	menu.AppendMenu(MF_SEPARATOR);
@@ -1015,10 +1066,16 @@ void CPromptDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	case IDM_SELALL: m_edit.SetSel(0, -1); break;
 	case IDM_INS_AT:
 	case IDM_INS_PCT:
-	case IDM_INS_SB: {
-		LPCTSTR ins = (cmd == IDM_INS_AT) ? L"@p0-30[100-110] "
-			: (cmd == IDM_INS_PCT) ? L"%N1:00<20-40>[100-120] "
-			: L"@sb1:00 ";
+	case IDM_INS_SB:
+	case IDM_INS_WM:
+	case IDM_INS_PW:
+	case IDM_INS_DR: {
+		LPCTSTR ins = L"@sb1:00 ";
+		if (cmd == IDM_INS_AT) ins = L"@p0-30[100-110] ";
+		else if (cmd == IDM_INS_PCT) ins = L"%N1:00<20-40>[100-120] ";
+		else if (cmd == IDM_INS_WM) ins = L"@wm1:00 ";
+		else if (cmd == IDM_INS_PW) ins = L"@pw1:30 ";
+		else if (cmd == IDM_INS_DR) ins = L"@dr2:00 ";
 		m_edit.ReplaceSel(ins, TRUE);
 		UpdateRemainLabel();
 		SaveTextToSavedata();
@@ -1070,6 +1127,7 @@ void CPromptDlg::SetAnalyzeUiBusy(BOOL busy)
 {
 	m_analyzing = busy;
 	if (m_analyze.GetSafeHwnd()) m_analyze.EnableWindow(!busy);
+	if (m_roll.GetSafeHwnd()) m_roll.EnableWindow(!busy);
 	if (m_mode.GetSafeHwnd()) m_mode.EnableWindow(!busy);
 	if (m_run.GetSafeHwnd()) m_run.EnableWindow(!busy);
 	if (m_progress.GetSafeHwnd()) {
@@ -1172,6 +1230,8 @@ void CPromptDlg::OnAnalyze()
 	SetDlgItemText(IDC_MPP_TEXT, text);
 	UpdateRemainLabel();
 	SaveTextToSavedata();
+	++m_syncGen;
+	MpCommandRollNotifyText(text, m_syncGen);
 
 	int nAt = 0, nPct = 0;
 	for (int i = 0; i < text.GetLength(); ++i) {
@@ -1267,6 +1327,7 @@ void CPromptDlg::OnCloseBtn()
 {
 	SaveTextToSavedata();
 	SavePosToSavedata();
+	savedata.mpPromptwindow = 0;
 	DestroyWindow();
 }
 
@@ -1274,6 +1335,7 @@ void CPromptDlg::OnClose()
 {
 	SaveTextToSavedata();
 	SavePosToSavedata();
+	savedata.mpPromptwindow = 0;
 	DestroyWindow();
 }
 
@@ -1300,21 +1362,77 @@ HBRUSH CPromptDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 	return CCustomBlurDialogExBase::OnCtlColor(pDC, pWnd, nCtlColor);
 }
 
-void MpShowPromptDialog(CWnd* pParent)
+void MpMakeIndependentZOrder(CWnd* w)
 {
+	if (!w || !::IsWindow(w->GetSafeHwnd())) return;
+	// オーナー付きだと常にメインの手前に張り付くので切り離す
+	::SetWindowLongPtr(w->GetSafeHwnd(), GWLP_HWNDPARENT, 0);
+	w->ModifyStyleEx(WS_EX_TOPMOST, WS_EX_DLGMODALFRAME);
+	w->SetIcon(nullptr, TRUE);
+	w->SetIcon(nullptr, FALSE);
+	::SetWindowPos(w->GetSafeHwnd(), HWND_NOTOPMOST, 0, 0, 0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+CString MpPromptSourceText()
+{
+	if (CPromptDlg* p = MpPromptDlgInstance()) {
+		CString s = p->GetPromptText();
+		if (!s.IsEmpty())
+			return s;
+	}
+	if (savedata.mpPromptTextLong[0])
+		return CString(savedata.mpPromptTextLong);
+	if (savedata.mpPromptText[0])
+		return CString(savedata.mpPromptText);
+	return CString();
+}
+
+void MpShowPromptDialog(CWnd* pParent, BOOL bActivate)
+{
+	UNREFERENCED_PARAMETER(pParent);
 	if (g_promptDlg && ::IsWindow(g_promptDlg->GetSafeHwnd())) {
-		g_promptDlg->ShowWindow(SW_SHOW);
-		g_promptDlg->SetForegroundWindow();
+		g_promptDlg->ShowWindow(bActivate ? SW_SHOW : SW_SHOWNOACTIVATE);
+		if (bActivate)
+			g_promptDlg->SetForegroundWindow();
+		MpMakeIndependentZOrder(g_promptDlg);
+		savedata.mpPromptwindow = 1;
 		return;
 	}
-	// 破棄中の残骸ポインタをクリアしてから新規生成
 	if (g_promptDlg && !::IsWindow(g_promptDlg->GetSafeHwnd()))
 		g_promptDlg = nullptr;
-	CPromptDlg* dlg = new CPromptDlg(pParent);
-	if (!dlg->Create(IDD_MP_PROMPT, pParent)) {
+	// オーナー無しで生成 → メインをクリックしたとき手前に出せる
+	CPromptDlg* dlg = new CPromptDlg(nullptr);
+	if (!dlg->Create(IDD_MP_PROMPT, nullptr)) {
 		delete dlg;
 		return;
 	}
-	dlg->ShowWindow(SW_SHOW);
+	MpMakeIndependentZOrder(dlg);
+	dlg->ShowWindow(bActivate ? SW_SHOW : SW_SHOWNOACTIVATE);
+	if (bActivate)
+		dlg->SetForegroundWindow();
 	g_promptDlg = dlg;
+	savedata.mpPromptwindow = 1;
 }
+
+void MpTogglePromptDialog(CWnd* pParent)
+{
+	if (g_promptDlg && ::IsWindow(g_promptDlg->GetSafeHwnd())) {
+		g_promptDlg->SendMessage(WM_CLOSE);
+		return;
+	}
+	MpShowPromptDialog(pParent, TRUE);
+}
+
+BOOL MpIsPromptOpen()
+{
+	return (g_promptDlg && ::IsWindow(g_promptDlg->GetSafeHwnd())) ? TRUE : FALSE;
+}
+
+CPromptDlg* MpPromptDlgInstance()
+{
+	if (g_promptDlg && ::IsWindow(g_promptDlg->GetSafeHwnd()))
+		return g_promptDlg;
+	return nullptr;
+}
+

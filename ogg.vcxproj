@@ -373,6 +373,7 @@
     <ClCompile Include="CPromptDlg.cpp" />
     <ClCompile Include="CPromptEngine.cpp" />
     <ClCompile Include="CPromptAnalyze.cpp" />
+    <ClCompile Include="CCommandRollDlg.cpp" />
     <ClCompile Include="DecodeProgress.cpp" />
     <ClCompile Include="ExportTagUi.cpp" />
     <ClCompile Include="CPianoRollTuneDlg.cpp" />
@@ -465,6 +466,7 @@
     <ClInclude Include="CPromptDlg.h" />
     <ClInclude Include="CPromptEngine.h" />
     <ClInclude Include="CPromptAnalyze.h" />
+    <ClInclude Include="CCommandRollDlg.h" />
     <ClInclude Include="DecodeProgress.h" />
     <ClInclude Include="ExportTagUi.h" />
     <ClInclude Include="CPianoRollTuneDlg.h" />

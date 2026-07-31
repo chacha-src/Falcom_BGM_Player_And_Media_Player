@@ -32,6 +32,8 @@ int flacmode = 0;
 #include "TranscodeExport.h"
 #include "CPromptEngine.h"
 #include "CPromptAnalyze.h"
+#include "CPromptDlg.h"
+#include "CCommandRollDlg.h"
 #include "DecodeProgress.h"
 #include "CMediaPlayerDlg.h"
 #include "FileTagInfo.h"
@@ -18979,6 +18981,15 @@ void timerog1(UINT nIDEvent)
 			}
 			if (og->m_AnalyzerDlg && ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
 				og->m_AnalyzerDlg->ShowWindow(SW_SHOW);
+		}
+		{
+			extern CMediaPlayerDlg* mp;
+			CWnd* pParent = (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+				? (CWnd*)mp : (CWnd*)og;
+			if (savedata.mpPromptwindow == 1)
+				MpShowPromptDialog(pParent, FALSE);
+			if (savedata.mpCmdRollwindow == 1)
+				MpShowCommandRollDialog(pParent, FALSE);
 		}
 
 	}

@@ -366,7 +366,7 @@ static BOOL FxSameFamily(int a, int b)
 
 struct ModeFxPref {
 	int envId;       // E: 0=使わない
-	int envAmt;      // F: かかり 0-100
+	int envAmt;      // F: かかり UIスケール 0-200 (内部は /2)
 	int revA;        // 静かな所の通常リバーブ目安
 	int revB;        // 特殊区間のパンリバーブ強さ(0=使わない)
 	int choA;
@@ -382,67 +382,68 @@ struct ModeFxPref {
 static ModeFxPref ModePrefs(int mode)
 {
 	// 環境番号は oggDlg_ds.cpp の環境音響コメントに合わせる
+	// revB/choB/dlyB>0 → 101-200系(パンリバーブ/コーラスディスト/マルチディレイ)を多用
 	ModeFxPref p = {};
 	switch (mode) {
 	case MP_ANA_COMEDY:
-		p = { 33, 35, 25, 0, 40, 0, 35, 45, 6, 2, 4, 4 }; // カラオケ、マルチディレイ多め
+		p = { 33, 90, 30, 20, 40, 30, 40, 55, 8, 4, 8, 6 };
 		break;
 	case MP_ANA_SERIOUS:
-		p = { 3, 55, 55, 25, 15, 0, 10, 0, -2, 6, 2, -4 }; // 教会、残響厚め・低域寄り
+		p = { 3, 130, 60, 45, 18, 0, 12, 0, 0, 8, 6, -6 };
 		break;
 	case MP_ANA_ROMANTIC:
-		p = { 32, 45, 50, 20, 45, 0, 15, 0, 4, 4, 8, 2 }; // ジャズクラブ、コーラスA+立体
+		p = { 32, 110, 55, 30, 50, 20, 20, 15, 6, 4, 12, 4 };
 		break;
 	case MP_ANA_INTENSE:
-		p = { 6, 40, 20, 0, 25, 40, 30, 35, 8, 8, 4, 4 }; // ライブハウス、ディスト+マルチ
+		p = { 6, 100, 25, 35, 30, 50, 35, 50, 12, 10, 10, 8 };
 		break;
 	case MP_ANA_CHILL:
-		p = { 7, 40, 45, 15, 30, 0, 10, 0, -2, 0, 4, -2 }; // 森、穏やかリバーブ
+		p = { 7, 100, 50, 25, 35, 0, 12, 10, 0, 2, 8, -4 };
 		break;
 	case MP_ANA_ELECTRO:
-		p = { 81, 50, 15, 30, 20, 45, 25, 55, 6, 4, 10, 6 }; // サイバーパンク、B系多め
+		p = { 81, 120, 20, 40, 25, 55, 30, 65, 10, 6, 14, 8 };
 		break;
 	case MP_ANA_ORCHESTRAL:
-		p = { 31, 60, 65, 30, 10, 0, 8, 0, 0, 8, 10, 0 }; // コンサートホール、パンリバーブ可
+		p = { 31, 140, 70, 50, 12, 0, 10, 15, 2, 10, 14, 0 };
 		break;
 	case MP_ANA_RETRO:
-		p = { 62, 40, 35, 0, 50, 25, 20, 0, -2, 2, 2, -2 }; // 古い劇場、コーラス系
+		p = { 62, 100, 40, 20, 55, 40, 25, 20, 0, 4, 6, -2 };
 		break;
 	case MP_ANA_CINEMATIC:
-		p = { 34, 55, 45, 40, 20, 0, 15, 20, 2, 6, 8, 0 }; // 映画館、パンリバーブ活用
+		p = { 34, 130, 50, 55, 25, 15, 20, 35, 4, 8, 12, 2 };
 		break;
 	case MP_ANA_ACOUSTIC:
-		p = { 7, 30, 40, 0, 15, 0, 8, 0, 2, 2, 4, -2 };
+		p = { 7, 80, 45, 20, 20, 0, 10, 0, 4, 4, 8, -4 };
 		break;
 	case MP_ANA_VOCAL:
-		p = { 32, 25, 35, 0, 25, 0, 12, 0, 8, 0, 2, 2 };
+		p = { 32, 70, 40, 15, 30, 15, 15, 10, 12, 2, 6, 4 };
 		break;
 	case MP_ANA_CLUB:
-		p = { 81, 40, 15, 20, 20, 35, 30, 50, 6, 6, 8, 4 };
+		p = { 81, 100, 18, 35, 25, 45, 35, 60, 10, 8, 12, 6 };
 		break;
 	case MP_ANA_AMBIENT:
-		p = { 7, 50, 55, 10, 20, 0, 5, 0, -4, 2, 6, -4 };
+		p = { 7, 120, 60, 30, 25, 0, 8, 15, -2, 4, 10, -6 };
 		break;
 	case MP_ANA_LIVE:
-		p = { 6, 45, 40, 25, 20, 0, 15, 0, 4, 4, 8, 2 };
+		p = { 6, 110, 45, 40, 25, 20, 20, 25, 6, 6, 12, 4 };
 		break;
 	case MP_ANA_SOFTPOP:
-		p = { 32, 30, 35, 0, 30, 0, 12, 0, 2, 2, 4, 0 };
+		p = { 32, 80, 40, 15, 35, 20, 15, 10, 4, 4, 8, 2 };
 		break;
 	case MP_ANA_HEALING:
-		p = { 7, 45, 50, 0, 20, 0, 5, 0, -2, 2, 4, -4 };
+		p = { 7, 110, 55, 0, 25, 0, 6, 0, 0, 4, 6, -4 };
 		break;
 	case MP_ANA_RELAX:
-		p = { 7, 35, 45, 0, 15, 0, 4, 0, -2, 0, 2, -2 };
+		p = { 7, 90, 50, 0, 18, 0, 5, 0, 0, 2, 4, -2 };
 		break;
 	case MP_ANA_SLEEP:
-		p = { 3, 40, 55, 0, 10, 0, 0, 0, -6, 0, 0, -6 };
+		p = { 3, 100, 60, 0, 12, 0, 0, 0, -4, 2, 2, -6 };
 		break;
 	case MP_ANA_YASURAGI:
-		p = { 7, 40, 50, 0, 18, 0, 4, 0, -2, 2, 4, -4 };
+		p = { 7, 100, 55, 0, 20, 0, 5, 0, 0, 4, 6, -4 };
 		break;
-	default: // BALANCED
-		p = { 0, 0, 30, 0, 20, 0, 18, 0, 0, 0, 2, 0 };
+	default: // BALANCED: FX B は控えめだがゼロにはしない
+		p = { 7, 50, 35, 15, 25, 10, 20, 12, 2, 2, 4, 0 };
 		break;
 	}
 	return p;
@@ -550,63 +551,130 @@ static CString BuildFromPatterns(int mode)
 			|| (med < 0.05f && p90 < med * 1.4f))
 			AppendCmd(out, CmdAt(L"sl", q1 * kHopSec, q1 * kHopSec, 0, 0, FALSE));
 
+		// 追加演出プリセット (モード別)
+		{
+			const double tA = (n / 6) * kHopSec;
+			const double tB = (n * 2 / 3) * kHopSec;
+			const double tC = (n * 5 / 6) * kHopSec;
+			if (heal) {
+				AppendCmd(out, CmdAt(L"gn", tA, tA, 0, 0, FALSE));
+				AppendCmd(out, CmdAt(L"wm", tB, tB, 0, 0, FALSE));
+			}
+			else if (mode == MP_ANA_INTENSE || mode == MP_ANA_ELECTRO || mode == MP_ANA_CLUB) {
+				AppendCmd(out, CmdAt(L"pw", mid * kHopSec, mid * kHopSec, 0, 0, FALSE));
+				AppendCmd(out, CmdAt(L"wi", tB, tB, 0, 0, FALSE));
+			}
+			else if (mode == MP_ANA_AMBIENT || mode == MP_ANA_CINEMATIC || mode == MP_ANA_ORCHESTRAL) {
+				AppendCmd(out, CmdAt(L"dr", tA, tA, 0, 0, FALSE));
+				AppendCmd(out, CmdAt(L"wm", tB, tB, 0, 0, FALSE));
+			}
+			else if (mode == MP_ANA_VOCAL || mode == MP_ANA_SOFTPOP || mode == MP_ANA_ROMANTIC) {
+				AppendCmd(out, CmdAt(L"nr", tA, tA, 0, 0, FALSE));
+				AppendCmd(out, CmdAt(L"wm", tC, tC, 0, 0, FALSE));
+			}
+			else if (mode == MP_ANA_RETRO || mode == MP_ANA_COMEDY) {
+				AppendCmd(out, CmdAt(L"cd", q1 * kHopSec, q1 * kHopSec, 0, 0, FALSE));
+				AppendCmd(out, CmdAt(L"pw", mid * kHopSec, mid * kHopSec, 0, 0, FALSE));
+			}
+			else if (mode == MP_ANA_ACOUSTIC || mode == MP_ANA_CHILL) {
+				AppendCmd(out, CmdAt(L"wm", tA, tA, 0, 0, FALSE));
+				AppendCmd(out, CmdAt(L"dp", tB, tB, 0, 0, FALSE));
+			}
+			else {
+				AppendCmd(out, CmdAt(L"wm", tA, tA, 0, 0, FALSE));
+				if (loudMid > p75)
+					AppendCmd(out, CmdAt(L"wi", tB, tB, 0, 0, FALSE));
+			}
+		}
+
 		if (pref.envId > 0 && pref.envAmt > 0) {
-			const double te0 = q1 * kHopSec;
+			// 複数区間で環境を動かす (導入→中盤ピーク→終盤フェード)
+			const double te0 = (n / 8) * kHopSec;
+			const double teM = mid * kHopSec;
 			const double te1 = q3 * kHopSec;
+			const double teEnd = ((n * 7) / 8) * kHopSec;
+			const int amtHi = ClampI(pref.envAmt, 40, 200);
+			const int amtLo = ClampI(pref.envAmt / 3, 10, 80);
 			AppendCmd(out, CmdAt(L"E", te0, te0, pref.envId, pref.envId, TRUE));
-			AppendCmd(out, CmdAt(L"F", te0, te0 + 2.0, 0, pref.envAmt, TRUE));
-			AppendCmd(out, CmdAt(L"F", te1 - 2.0, te1, pref.envAmt, 0, TRUE));
-			AppendCmd(out, CmdAt(L"E", te1, te1, 0, 0, TRUE));
+			AppendCmd(out, CmdAt(L"F", te0, te0 + 2.5, 0, amtLo, TRUE));
+			AppendCmd(out, CmdAt(L"F", teM - 1.5, teM + 1.5, amtLo, amtHi, TRUE));
+			if (!heal && pref.envId > 1) {
+				// 中盤で別環境へ一瞬寄せる（主環境と異なる番号）
+				int env2 = 7;
+				if (mode == MP_ANA_ELECTRO || mode == MP_ANA_CLUB) env2 = 6;
+				else if (mode == MP_ANA_ORCHESTRAL) env2 = 34;
+				else if (mode == MP_ANA_CINEMATIC) env2 = 31;
+				else if (mode == MP_ANA_SERIOUS || mode == MP_ANA_SLEEP) env2 = 7;
+				else if (mode == MP_ANA_COMEDY) env2 = 6;
+				else if (mode == MP_ANA_ROMANTIC || mode == MP_ANA_VOCAL || mode == MP_ANA_SOFTPOP) env2 = 7;
+				else if (pref.envId == 7) env2 = 32;
+				if (env2 != pref.envId) {
+					AppendCmd(out, CmdAt(L"E", teM, teM, env2, env2, TRUE));
+					AppendCmd(out, CmdAt(L"F", teM, teM + 1.0, amtHi, amtHi, TRUE));
+					AppendCmd(out, CmdAt(L"E", teM + 4.0, teM + 4.0, pref.envId, pref.envId, TRUE));
+				}
+			}
+			AppendCmd(out, CmdAt(L"F", te1 - 2.0, te1, amtHi, amtLo, TRUE));
+			AppendCmd(out, CmdAt(L"F", teEnd - 2.0, teEnd, amtLo, 0, TRUE));
+			AppendCmd(out, CmdAt(L"E", teEnd, teEnd, 0, 0, TRUE));
 		}
 	}
 
-	// 周期呼吸 % (本線の後でも文字が残っていれば追記。先頭付近に置く)
+	// 周期呼吸 % (振れ幅を広めに)
 	if (hasPct && out.GetLength() < kMaxOutChars - 200) {
 		const double per = breathPeriod;
-		double o0 = per * 0.30;
-		double o1 = per * 0.55;
+		double o0 = per * 0.25;
+		double o1 = per * 0.60;
 		if (heal) { o0 = per * 0.25; o1 = per * 0.55; }
-		int n0 = 100 + pref.clarity;
-		int n1 = n0 + (heal ? 4 : 8);
-		int s0 = 100 + pref.spatial;
-		int s1 = s0 + (heal ? 3 : 6);
-		n0 = ClampI(n0, 92, 118);
-		n1 = ClampI(n1, 94, 124);
-		s0 = ClampI(s0, 94, 120);
-		s1 = ClampI(s1, 96, 128);
+		int n0 = 100 + pref.clarity - (heal ? 2 : 8);
+		int n1 = 100 + pref.clarity + (heal ? 6 : 16);
+		int s0 = 100 + pref.spatial - (heal ? 2 : 10);
+		int s1 = 100 + pref.spatial + (heal ? 6 : 20);
+		n0 = ClampI(n0, heal ? 90 : 78, 120);
+		n1 = ClampI(n1, 95, heal ? 120 : 145);
+		s0 = ClampI(s0, heal ? 92 : 75, 120);
+		s1 = ClampI(s1, 98, heal ? 122 : 155);
 		AppendCmd(out, CmdAt(L"N", o0, o1, n0, n1, TRUE, per));
 		AppendCmd(out, CmdAt(L"S", o0 + 2.0, o1, s0, s1, TRUE, per));
-		if (!heal && pref.dlyA > 0)
-			AppendCmd(out, CmdAt(L"y", o0, o0 + 3.0, 0, FxA(ClampI(pref.dlyA / 2, 8, 35)), TRUE, per));
-		if (heal && pref.envAmt > 10)
-			AppendCmd(out, CmdAt(L"F", o0, o1, ClampI(pref.envAmt / 3, 5, 30),
-				ClampI(pref.envAmt * 2 / 3, 10, 45), TRUE, per));
+		if (!heal && pref.dlyB > 0)
+			AppendCmd(out, CmdAt(L"y", o0, o0 + 4.0, 0, FxB(ClampI(pref.dlyB / 2, 15, 50)), TRUE, per));
+		else if (!heal && pref.dlyA > 0)
+			AppendCmd(out, CmdAt(L"y", o0, o0 + 3.0, 0, FxA(ClampI(pref.dlyA / 2, 10, 45)), TRUE, per));
+		if (!heal && pref.revB > 0)
+			AppendCmd(out, CmdAt(L"r", o0 + 5.0, o1, FxA(20), FxB(ClampI(pref.revB, 15, 55)), TRUE, per));
+		if (heal && pref.envAmt > 20)
+			AppendCmd(out, CmdAt(L"F", o0, o1, ClampI(pref.envAmt / 3, 10, 60),
+				ClampI(pref.envAmt * 2 / 3, 20, 100), TRUE, per));
 	}
 
 	int prevN = 100, prevK = 100, prevI = 100, prevS = 100;
 	int prevR = 0, prevC = 0, prevY = 0;
 	int prevA = 100, prevO = 100, prevG = 100, prevIi = 100, prevL = 100;
+	int prevB = 100, prevE = 100, prevFf = 100, prevH = 100, prevJ = 100, prevKband = 100, prevM = 100;
 	int prevT = 100, prevP = 100;
 	int prevD = 100;
 	double tLaneN = 0, tLaneK = 0, tLaneI = 0, tLaneS = 0;
 	double tLaneR = 0, tLaneC = 0, tLaneY = 0;
 	double tLaneA = 0, tLaneO = 0, tLaneG = 0, tLaneIi = 0, tLaneL = 0;
+	double tLaneB = 0, tLaneE = 0, tLaneFf = 0, tLaneH = 0, tLaneJ = 0, tLaneKband = 0, tLaneM = 0;
 	double tLaneT = 0, tLaneP = 0, tLaneD = 0;
-	int punchBudget = (int)(dur / 10.0);
-	if (punchBudget < 6) punchBudget = 6;
-	if (heal) punchBudget = 0;
+	int punchBudget = (int)(dur / 7.0);
+	if (punchBudget < 8) punchBudget = 8;
+	if (heal) punchBudget = 1;
 	else if (mode == MP_ANA_SLEEP) punchBudget = 0;
+	int fxBBudget = heal ? 0 : (int)(dur / 8.0);
+	if (fxBBudget < 4) fxBBudget = 4;
 
 	auto flushEq = [&](LPCTSTR letter, double& t0, int& lastV, double t1, int newV) {
 		if (newV == lastV) return;
-		if (t1 <= t0 + 0.2) { lastV = newV; return; }
+		if (t1 <= t0 + 0.15) { lastV = newV; return; }
 		AppendCmd(out, CmdAt(letter, t0, t1, lastV, newV, TRUE));
 		t0 = t1;
 		lastV = newV;
 	};
 	auto flushFx = [&](LPCTSTR letter, double& t0, int& lastV, double t1, int newV) {
 		if (newV == lastV) return;
-		if (t1 <= t0 + 0.15) {
+		if (t1 <= t0 + 0.12) {
 			AppendCmd(out, CmdAt(letter, t1, t1, newV, newV, TRUE));
 			t0 = t1;
 			lastV = newV;
@@ -643,179 +711,238 @@ static CString BuildFromPatterns(int mode)
 		const BOOL quiet = (m < med * 0.7f);
 		const BOOL loud = (m > p75);
 		const BOOL peak = (m > p90 && p90 > 0.01f);
+		const int wave = (seg % 8) - 4;
 
-		int wantN = 100 + pref.clarity;
-		int wantK = 100 + pref.balHi;
-		int wantI = 100 + pref.density;
-		int wantS = 100 + pref.spatial;
+		int wantN = 100 + pref.clarity + wave * (heal ? 1 : 3);
+		int wantK = 100 + pref.balHi - wave;
+		int wantI = 100 + pref.density + (wave / 2);
+		int wantS = 100 + pref.spatial + wave * (heal ? 1 : 4);
 		int wantA = 100, wantO = 100, wantG = 100, wantIi = 100, wantL = 100;
+		int wantBb = 100, wantEe = 100, wantFband = 100, wantHh = 100, wantJj = 100, wantKk = 100, wantMm = 100;
 		int wantT = 100, wantP = 100, wantD = 100;
 		int wantR = 0, wantC = 0, wantY = 0;
 
 		if (quiet) {
-			wantN = ClampI(wantN - 4, 88, 120);
-			wantI = ClampI(wantI + 2, 90, 125);
+			wantN = ClampI(wantN - (heal ? 4 : 10), 75, 125);
+			wantI = ClampI(wantI + (heal ? 2 : 8), 85, 140);
+			wantS = ClampI(wantS - 4, 70, 130);
 			wantR = FxA(ModeBias(mode, pref.revA, -10, 10, 8, -8, 6, -10, 12, 0, 8));
 			wantC = FxA(ModeBias(mode, pref.choA, 0, -5, 10, -5, 4, -5, -8, 8, 0));
-			if (!heal && pref.revB > 0 && (mode == MP_ANA_ORCHESTRAL || mode == MP_ANA_CINEMATIC || mode == MP_ANA_SERIOUS || mode == MP_ANA_LIVE))
-				wantR = FxB(ClampI(pref.revB - 5, 10, 50));
+			if (!heal && pref.revB > 0 && (seg % 3 == 0 || mode == MP_ANA_ORCHESTRAL || mode == MP_ANA_CINEMATIC || mode == MP_ANA_SERIOUS || mode == MP_ANA_AMBIENT || mode == MP_ANA_LIVE))
+				wantR = FxB(ClampI(pref.revB - 5, 12, 55));
 		} else if (loud) {
-			wantN = ClampI(wantN + (heal ? 2 : 6), 92, 128);
-			wantS = ClampI(wantS + (heal ? 2 : 4), 95, 130);
-			wantY = heal ? 0 : FxA(ModeBias(mode, pref.dlyA + 10, 8, -5, -5, 10, -8, 12, -5, 0, 0));
-			wantC = FxA(ModeBias(mode, pref.choA / 2 + 10, 5, 0, 8, 5, 0, 5, 0, 10, 0));
-			if (!heal && pref.choB > 0 && (mode == MP_ANA_INTENSE || mode == MP_ANA_ELECTRO || mode == MP_ANA_RETRO || mode == MP_ANA_CLUB))
-				wantC = FxB(ClampI(pref.choB, 15, 55));
-			if (!heal && pref.dlyB > 0 && (mode == MP_ANA_ELECTRO || mode == MP_ANA_COMEDY || mode == MP_ANA_INTENSE || mode == MP_ANA_CLUB) && peak)
-				wantY = FxB(ClampI(pref.dlyB, 20, 60));
-			if (!heal && pref.revB > 0 && (mode == MP_ANA_CINEMATIC || mode == MP_ANA_ORCHESTRAL || mode == MP_ANA_LIVE) && peak)
-				wantR = FxB(ClampI(pref.revB, 15, 55));
+			wantN = ClampI(wantN + (heal ? 4 : 14), 85, 150);
+			wantS = ClampI(wantS + (heal ? 4 : 16), 90, 160);
+			wantI = ClampI(wantI + (heal ? 2 : 8), 90, 145);
+			wantY = heal ? 0 : FxA(ModeBias(mode, pref.dlyA + 12, 8, -5, -5, 10, -8, 12, -5, 0, 0));
+			wantC = FxA(ModeBias(mode, pref.choA / 2 + 12, 5, 0, 8, 5, 0, 5, 0, 10, 0));
+			if (!heal && fxBBudget > 0 && pref.choB > 0 && (seg % 2 == 0)) {
+				wantC = FxB(ClampI(pref.choB, 18, 60));
+				--fxBBudget;
+			}
+			if (!heal && fxBBudget > 0 && pref.dlyB > 0 && (peak || seg % 3 == 1)) {
+				wantY = FxB(ClampI(pref.dlyB, 20, 70));
+				--fxBBudget;
+			}
+			if (!heal && fxBBudget > 0 && pref.revB > 0 && (peak || seg % 4 == 2)) {
+				wantR = FxB(ClampI(pref.revB, 18, 60));
+				--fxBBudget;
+			}
 			else if (!peak)
-				wantR = FxA(ModeBias(mode, pref.revA / 2, 0, 5, 5, 0, 5, 0, 8, 0, 5));
+				wantR = FxA(ModeBias(mode, pref.revA / 2 + 5, 0, 5, 5, 0, 5, 0, 8, 0, 5));
 		} else {
-			wantR = FxA(ClampI(pref.revA / 2, 0, 40));
-			wantC = FxA(ClampI(pref.choA / 2, 0, 35));
+			wantR = FxA(ClampI(pref.revA / 2 + 5, 0, 55));
+			wantC = FxA(ClampI(pref.choA / 2 + 5, 0, 50));
+			wantN = ClampI(wantN + wave * 2, 80, 135);
+			wantS = ClampI(wantS + wave * 3, 80, 145);
+			if (!heal && fxBBudget > 0 && pref.revB > 0 && seg % 5 == 0) {
+				wantR = FxB(ClampI(pref.revB / 2, 12, 40));
+				--fxBBudget;
+			}
+			if (!heal && fxBBudget > 0 && pref.choB > 0 && seg % 6 == 3) {
+				wantC = FxB(ClampI(pref.choB / 2, 12, 40));
+				--fxBBudget;
+			}
 		}
 
-		if (b > medBass * 1.15f) {
-			wantA = ModeBias(mode, 112, 0, 2, 0, 6, 0, 4, 4, 8, 2);
-			wantG = ClampI(wantG + 4, 100, 116);
-			wantK = ClampI(wantK - 4, 88, 115);
+		if (b > medBass * 1.12f) {
+			wantA = ModeBias(mode, heal ? 110 : 122, 0, 4, 0, 10, 0, 8, 6, 10, 4);
+			wantBb = ClampI(wantBb + (heal ? 4 : 12), 100, 140);
+			wantEe = ClampI(wantEe + (heal ? 3 : 10), 100, 135);
+			wantG = ClampI(wantG + (heal ? 3 : 8), 100, 130);
+			wantK = ClampI(wantK - (heal ? 3 : 8), 78, 120);
 		}
-		if (tr > medTre * 1.15f) {
-			wantO = ModeBias(mode, heal ? 104 : 112, 2, 0, 2, 4, 0, 6, 2, 2, 4);
-			wantIi = ClampI(wantIi + 3, 100, 116);
-			wantL = ClampI(wantL + (heal ? 0 : 4), 100, 118);
-			wantN = ClampI(wantN + (heal ? 1 : 4), 90, 130);
-			wantS = ClampI(wantS + (heal ? 1 : 4), 95, 135);
-			wantK = ClampI(wantK + 3, 90, 120);
+		if (tr > medTre * 1.12f) {
+			wantO = ModeBias(mode, heal ? 108 : 124, 4, 0, 4, 8, 0, 10, 4, 4, 6);
+			wantIi = ClampI(wantIi + (heal ? 4 : 10), 100, 140);
+			wantL = ClampI(wantL + (heal ? 2 : 12), 100, 145);
+			wantJj = ClampI(wantJj + (heal ? 3 : 10), 100, 140);
+			wantKk = ClampI(wantKk + (heal ? 2 : 8), 100, 135);
+			wantMm = ClampI(wantMm + (heal ? 0 : 8), 100, 135);
+			wantHh = ClampI(wantHh + (heal ? 2 : 8), 100, 132);
+			wantFband = ClampI(wantFband + (heal ? 2 : 6), 100, 128);
+			wantN = ClampI(wantN + (heal ? 2 : 10), 85, 150);
+			wantS = ClampI(wantS + (heal ? 2 : 12), 90, 160);
+			wantK = ClampI(wantK + (heal ? 2 : 6), 85, 130);
 		}
 
 		if (loud && seg > 1) {
-			wantT = ModeBias(mode, heal ? 98 : 106, 4, -6, 0, 10, -8, 10, -2, 2, 4);
-			wantP = ModeBias(mode, heal ? 100 : 104, 6, -2, 2, 4, 0, 2, 0, -4, 2);
+			wantT = ModeBias(mode, heal ? 98 : 110, 6, -8, 0, 14, -10, 12, -2, 4, 6);
+			wantP = ModeBias(mode, heal ? 100 : 108, 8, -4, 4, 6, 0, 4, 0, -4, 4);
 		} else if (quiet) {
-			wantT = ModeBias(mode, heal ? 94 : 96, 0, -4, -2, 0, -6, 0, -2, 0, -2);
+			wantT = ModeBias(mode, heal ? 92 : 94, 0, -6, -4, 0, -8, 0, -4, 0, -4);
 		}
 
 		if (peak && !heal)
-			wantD = ModeBias(mode, 108, 2, -2, 0, 8, -4, 4, 0, 2, 0);
+			wantD = ModeBias(mode, 115, 4, -4, 0, 12, -6, 8, 0, 4, 2);
 		else if (quiet)
-			wantD = ModeBias(mode, heal ? 96 : 94, 0, -2, -2, 0, -4, 0, 0, 0, -2);
+			wantD = ModeBias(mode, heal ? 94 : 88, 0, -4, -4, 0, -8, 0, 0, 0, -4);
 
 		if (mode == MP_ANA_BALANCED) {
-			wantN = ClampI(100 + (wantN - 100) / 2, 94, 112);
-			wantK = ClampI(100 + (wantK - 100) / 2, 94, 108);
-			wantI = ClampI(100 + (wantI - 100) / 2, 94, 110);
-			wantS = ClampI(100 + (wantS - 100) / 2, 96, 112);
-			if (wantR > 100) wantR = FxA(30);
-			if (wantC > 100) wantC = FxA(25);
-			if (wantY > 100) wantY = FxA(25);
-			wantR = ClampI(wantR, 0, 45);
-			wantC = ClampI(wantC, 0, 35);
-			wantY = ClampI(wantY, 0, 40);
+			wantN = ClampI(100 + (wantN - 100) * 2 / 3, 88, 122);
+			wantK = ClampI(100 + (wantK - 100) * 2 / 3, 88, 118);
+			wantI = ClampI(100 + (wantI - 100) * 2 / 3, 90, 122);
+			wantS = ClampI(100 + (wantS - 100) * 2 / 3, 90, 128);
+			if (wantR > 100 && seg % 7 != 0) wantR = FxA(ClampI(wantR - 100, 15, 40));
+			if (wantC > 100 && seg % 7 != 1) wantC = FxA(ClampI(wantC - 100, 12, 35));
+			if (wantY > 100 && seg % 7 != 2) wantY = FxA(ClampI(wantY - 100, 12, 35));
 		}
 		if (heal) {
-			wantN = ClampI(wantN, 92, 112);
-			wantK = ClampI(wantK, 90, 108);
-			wantI = ClampI(wantI, 94, 112);
-			wantS = ClampI(wantS, 94, 114);
+			wantN = ClampI(wantN, 88, 118);
+			wantK = ClampI(wantK, 88, 112);
+			wantI = ClampI(wantI, 90, 118);
+			wantS = ClampI(wantS, 90, 120);
 			wantT = ClampI(wantT, 88, 100);
-			wantP = ClampI(wantP, 96, 104);
-			wantD = ClampI(wantD, 85, 105);
-			wantO = ClampI(wantO, 100, 108);
-			wantL = ClampI(wantL, 100, 108);
-			if (wantR > 100) wantR = FxA(40);
-			if (wantC > 100) wantC = FxA(20);
+			wantP = ClampI(wantP, 94, 106);
+			wantD = ClampI(wantD, 82, 108);
+			wantO = ClampI(wantO, 98, 114);
+			wantL = ClampI(wantL, 98, 114);
+			if (wantR > 100) wantR = FxA(45);
+			if (wantC > 100) wantC = FxA(25);
 			wantY = 0;
-			wantR = ClampI(wantR, 0, 60);
-			wantC = ClampI(wantC, 0, 30);
+			wantR = ClampI(wantR, 0, 70);
+			wantC = ClampI(wantC, 0, 35);
 		}
 		if (mode == MP_ANA_SLEEP) {
 			wantT = ClampI(wantT, 88, 96);
-			wantO = ClampI(wantO, 100, 104);
-			wantN = ClampI(wantN, 92, 106);
+			wantO = ClampI(wantO, 98, 108);
+			wantN = ClampI(wantN, 90, 110);
+			wantS = ClampI(wantS, 92, 112);
 		}
 		if (mode == MP_ANA_VOCAL) {
-			wantN = ClampI(wantN + 4, 96, 128);
-			wantIi = ClampI(wantIi + 4, 100, 120);
+			wantN = ClampI(wantN + 8, 95, 145);
+			wantIi = ClampI(wantIi + 8, 100, 145);
+			wantJj = ClampI(wantJj + 6, 100, 140);
 		}
 		if (mode == MP_ANA_RELAX) {
-			wantS = ClampI(wantS, 94, 108);
-			wantC = ClampI(wantC, 0, 22);
-			wantD = ClampI(100 + (wantD - 100) / 2, 90, 104);
+			wantS = ClampI(wantS, 90, 118);
+			wantC = ClampI(wantC > 100 ? FxA(22) : wantC, 0, 28);
+			wantD = ClampI(100 + (wantD - 100) / 2, 88, 108);
+		}
+		if (mode == MP_ANA_ELECTRO || mode == MP_ANA_CLUB) {
+			wantS = ClampI(wantS + 6, 95, 165);
+			wantEe = ClampI(wantEe + 6, 100, 140);
+		}
+		if (mode == MP_ANA_ORCHESTRAL || mode == MP_ANA_CINEMATIC) {
+			wantS = ClampI(wantS + 8, 95, 160);
+			if (wantR > 0 && wantR <= 100)
+				wantR = FxA(ClampI(wantR + 10, 20, 80));
 		}
 
-		wantN = ClampI(wantN, 88, 130);
-		wantK = ClampI(wantK, 88, 120);
-		wantI = ClampI(wantI, 88, 128);
-		wantS = ClampI(wantS, 90, 135);
-		wantA = ClampI(wantA, 100, 120);
-		wantO = ClampI(wantO, 100, 120);
-		wantG = ClampI(wantG, 100, 118);
-		wantIi = ClampI(wantIi, 100, 118);
-		wantL = ClampI(wantL, 100, 118);
-		wantT = ClampI(wantT, 88, 118);
-		wantP = ClampI(wantP, 90, 112);
-		wantD = ClampI(wantD, 75, 112);
+		wantN = ClampI(wantN, heal ? 88 : 75, heal ? 122 : 150);
+		wantK = ClampI(wantK, heal ? 88 : 75, heal ? 115 : 135);
+		wantI = ClampI(wantI, heal ? 88 : 78, heal ? 122 : 148);
+		wantS = ClampI(wantS, heal ? 90 : 70, heal ? 125 : 165);
+		wantA = ClampI(wantA, 90, heal ? 118 : 140);
+		wantO = ClampI(wantO, 95, heal ? 118 : 145);
+		wantG = ClampI(wantG, 95, heal ? 118 : 135);
+		wantIi = ClampI(wantIi, 95, heal ? 120 : 145);
+		wantL = ClampI(wantL, 95, heal ? 118 : 148);
+		wantBb = ClampI(wantBb, 95, 140);
+		wantEe = ClampI(wantEe, 95, 138);
+		wantFband = ClampI(wantFband, 95, 132);
+		wantHh = ClampI(wantHh, 95, 135);
+		wantJj = ClampI(wantJj, 95, 142);
+		wantKk = ClampI(wantKk, 95, 138);
+		wantMm = ClampI(wantMm, 95, 138);
+		wantT = ClampI(wantT, 85, heal ? 102 : 122);
+		wantP = ClampI(wantP, 88, heal ? 108 : 118);
+		wantD = ClampI(wantD, 70, 120);
 		wantR = ClampI(wantR, 0, 200);
 		wantC = ClampI(wantC, 0, 200);
 		wantY = ClampI(wantY, 0, 200);
 
-		const int phase = seg % 8;
-		if (phase == 0 || abs(wantN - prevN) >= 4)
+		const int phase = seg % 10;
+		if (phase == 0 || abs(wantN - prevN) >= 3)
 			flushEq(L"N", tLaneN, prevN, t1, wantN);
-		if (phase == 1 || abs(wantK - prevK) >= 4)
+		if (phase == 1 || abs(wantK - prevK) >= 3)
 			flushEq(L"K", tLaneK, prevK, t1, wantK);
-		if (phase == 2 || abs(wantI - prevI) >= 4)
+		if (phase == 2 || abs(wantI - prevI) >= 3)
 			flushEq(L"I", tLaneI, prevI, t1, wantI);
-		if (phase == 3 || abs(wantS - prevS) >= 5)
+		if (phase == 3 || abs(wantS - prevS) >= 3)
 			flushEq(L"S", tLaneS, prevS, t1, wantS);
-		if (abs(wantR - prevR) >= 8)
+		if (abs(wantR - prevR) >= 5)
 			flushFx(L"r", tLaneR, prevR, t1, wantR);
-		if (abs(wantC - prevC) >= 8)
+		if (abs(wantC - prevC) >= 5)
 			flushFx(L"c", tLaneC, prevC, t1, wantC);
-		if (abs(wantY - prevY) >= 8)
+		if (abs(wantY - prevY) >= 5)
 			flushFx(L"y", tLaneY, prevY, t1, wantY);
-		if (abs(wantA - prevA) >= 4)
+		if (abs(wantA - prevA) >= 3)
 			flushEq(L"a", tLaneA, prevA, t1, wantA);
-		if (abs(wantO - prevO) >= 4)
+		if (abs(wantO - prevO) >= 3)
 			flushEq(L"o", tLaneO, prevO, t1, wantO);
-		if (phase == 4 || abs(wantG - prevG) >= 4)
+		if (phase == 4 || abs(wantG - prevG) >= 3)
 			flushEq(L"g", tLaneG, prevG, t1, wantG);
-		if (phase == 5 || abs(wantIi - prevIi) >= 4)
+		if (phase == 5 || abs(wantIi - prevIi) >= 3)
 			flushEq(L"i", tLaneIi, prevIi, t1, wantIi);
-		if (phase == 6 || abs(wantL - prevL) >= 4)
+		if (phase == 6 || abs(wantL - prevL) >= 3)
 			flushEq(L"l", tLaneL, prevL, t1, wantL);
-		if (abs(wantT - prevT) >= 3)
+		if (phase == 7 || abs(wantBb - prevB) >= 3)
+			flushEq(L"b", tLaneB, prevB, t1, wantBb);
+		if (phase == 8 || abs(wantEe - prevE) >= 3)
+			flushEq(L"e", tLaneE, prevE, t1, wantEe);
+		if (phase == 9 || abs(wantFband - prevFf) >= 3)
+			flushEq(L"f", tLaneFf, prevFf, t1, wantFband);
+		if (abs(wantHh - prevH) >= 4)
+			flushEq(L"h", tLaneH, prevH, t1, wantHh);
+		if (abs(wantJj - prevJ) >= 4)
+			flushEq(L"j", tLaneJ, prevJ, t1, wantJj);
+		if (abs(wantKk - prevKband) >= 4)
+			flushEq(L"k", tLaneKband, prevKband, t1, wantKk);
+		if (abs(wantMm - prevM) >= 4)
+			flushEq(L"m", tLaneM, prevM, t1, wantMm);
+		if (abs(wantT - prevT) >= 2)
 			flushEq(L"t", tLaneT, prevT, t1, wantT);
-		if (abs(wantP - prevP) >= 3)
+		if (abs(wantP - prevP) >= 2)
 			flushEq(L"p", tLaneP, prevP, t1, wantP);
-		if (abs(wantD - prevD) >= 4)
+		if (abs(wantD - prevD) >= 3)
 			flushDs(tLaneD, prevD, t1, wantD);
 
 		if (punchBudget > 0 && i > 2 && i + 2 < n) {
-			const float thr = med + (p90 - med) * 0.55f;
-			if (g_ana.rms[i] > thr && g_ana.rms[i] > g_ana.rms[i - 1] * 1.2f) {
+			const float thr = med + (p90 - med) * 0.45f;
+			if (g_ana.rms[i] > thr && g_ana.rms[i] > g_ana.rms[i - 1] * 1.15f) {
 				int yPunch = 0;
-				if (mode == MP_ANA_ELECTRO || mode == MP_ANA_INTENSE || mode == MP_ANA_COMEDY || mode == MP_ANA_CLUB)
-					yPunch = FxB(ModeBias(mode, 35, 10, 0, 0, 15, 0, 20, 0, 5, 5));
-				else
-					yPunch = FxA(ModeBias(mode, 45, 10, 0, 0, 15, -10, 10, 0, 5, 0));
-				AppendCmd(out, CmdAt(L"y", t0, t0 + 0.5, 0, yPunch, TRUE));
-				AppendCmd(out, CmdAt(L"y", t0 + 0.5, t0 + 1.1, yPunch, 0, TRUE));
-				prevY = 0;
-				tLaneY = t0 + 1.1;
-				--punchBudget;
+				if (mode == MP_ANA_ELECTRO || mode == MP_ANA_INTENSE || mode == MP_ANA_COMEDY || mode == MP_ANA_CLUB || mode == MP_ANA_CINEMATIC)
+					yPunch = FxB(ModeBias(mode, 42, 12, 0, 0, 18, 0, 22, 5, 8, 10));
+				else if (!heal)
+					yPunch = FxA(ModeBias(mode, 50, 10, 0, 0, 15, -8, 12, 0, 5, 0));
+				if (yPunch > 0) {
+					AppendCmd(out, CmdAt(L"y", t0, t0 + 0.5, 0, yPunch, TRUE));
+					AppendCmd(out, CmdAt(L"y", t0 + 0.5, t0 + 1.2, yPunch, 0, TRUE));
+					prevY = 0;
+					tLaneY = t0 + 1.2;
+					--punchBudget;
+				}
 			}
 		}
 
-		if (hop >= 9 && !heal) {
+		if (hop >= 8 && !heal) {
 			const float a0 = MeanRange(g_ana.rms, n, i, i + hop / 3);
 			const float a1 = MeanRange(g_ana.rms, n, i + hop * 2 / 3, i1);
-			if (a0 > 0.008f && a1 > a0 * 1.4f && a1 > med) {
-				AppendCmd(out, CmdAt(L"t", t0, t1, 100, ModeBias(mode, 108, 2, -2, 0, 12, -4, 10, 0, 2, 4), TRUE));
-				AppendCmd(out, CmdAt(L"N", t0, t1, 100, ModeBias(mode, 114, 2, 0, 2, 8, 0, 6, 2, 2, 4), TRUE));
+			if (a0 > 0.008f && a1 > a0 * 1.3f && a1 > med) {
+				AppendCmd(out, CmdAt(L"t", t0, t1, 100, ModeBias(mode, 112, 4, -4, 0, 14, -6, 12, 0, 4, 6), TRUE));
+				AppendCmd(out, CmdAt(L"N", t0, t1, 100, ModeBias(mode, 122, 4, 0, 4, 12, 0, 10, 4, 4, 6), TRUE));
+				AppendCmd(out, CmdAt(L"S", t0, t1, 100, ModeBias(mode, 125, 4, 2, 6, 10, 2, 12, 8, 4, 8), TRUE));
 			}
 		}
 	}
@@ -833,6 +960,13 @@ static CString BuildFromPatterns(int mode)
 	flushEq(L"g", tLaneG, prevG, tend, 100);
 	flushEq(L"i", tLaneIi, prevIi, tend, 100);
 	flushEq(L"l", tLaneL, prevL, tend, 100);
+	flushEq(L"b", tLaneB, prevB, tend, 100);
+	flushEq(L"e", tLaneE, prevE, tend, 100);
+	flushEq(L"f", tLaneFf, prevFf, tend, 100);
+	flushEq(L"h", tLaneH, prevH, tend, 100);
+	flushEq(L"j", tLaneJ, prevJ, tend, 100);
+	flushEq(L"k", tLaneKband, prevKband, tend, 100);
+	flushEq(L"m", tLaneM, prevM, tend, 100);
 	flushEq(L"t", tLaneT, prevT, tend, 100);
 	flushEq(L"p", tLaneP, prevP, tend, 100);
 	flushDs(tLaneD, prevD, tend, 100);

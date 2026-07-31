@@ -444,6 +444,9 @@
     <ClCompile Include="CPromptAnalyze.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CCommandRollDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="DecodeProgress.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -974,6 +977,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CPromptDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CCommandRollDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CPromptEngine.h">

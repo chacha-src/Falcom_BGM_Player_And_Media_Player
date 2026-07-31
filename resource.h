@@ -692,9 +692,13 @@
 
 #define IDD_MP_M3U_IMPORT               201
 #define IDD_MP_PROMPT                   203
+#define IDD_MP_CMDROLL                  211
+#define IDD_MP_CMDPLACE                 212
+#define IDD_MP_CMDROLL_HELP             213
 
 #define IDC_MP_PROMPT                   3491
 #define IDC_MP_PRO                      3492
+#define IDC_MP_CMDROLL                  3736
 #define IDC_MPP_TEXT                    3492
 #define IDC_MPP_LEGEND                  3493
 #define IDC_MPP_REMAIN                  3494
@@ -712,6 +716,22 @@
 #define IDC_MPP_MODE                    3506
 #define IDC_MPP_PROGRESS                3507
 #define IDC_MPP_PROG_L                  3508
+#define IDC_MPP_ROLL                    3509
+#define IDC_MCR_CLOSE                   3722
+#define IDC_MCR_ZOOMIN                  3723
+#define IDC_MCR_ZOOMOUT                 3724
+#define IDC_MCR_TIME                    3725
+#define IDC_MCR_HOST                    3726
+#define IDC_MCR_HELP                    3727
+#define IDC_MCP_T0                      3727
+#define IDC_MCP_T1                      3728
+#define IDC_MCP_V0                      3729
+#define IDC_MCP_V1                      3730
+#define IDC_MCP_T0_L                    3731
+#define IDC_MCP_T1_L                    3732
+#define IDC_MCP_V0_L                    3733
+#define IDC_MCP_V1_L                    3734
+#define IDC_MCP_CMD_L                   3735
 
 #define IDD_PIANOROLL_TUNE              204
 
@@ -972,9 +992,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        210
+#define _APS_NEXT_RESOURCE_VALUE        214
 #define _APS_NEXT_COMMAND_VALUE         32973
-#define _APS_NEXT_CONTROL_VALUE         3722
+#define _APS_NEXT_CONTROL_VALUE         3738
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

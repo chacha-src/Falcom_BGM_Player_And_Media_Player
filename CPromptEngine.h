@@ -2,7 +2,7 @@
 
 // メディアプレイヤーモード専用: 演奏時間ベースのプロンプト実行エンジン
 // 形式: @<cmd><time>[-<endTime>][<val>[-<endVal>]]
-// 例: @p50-1:20[100-120]  @p1:50[100]  @sb1:30  @E30[12] @F30-60[0-80]
+// 例: @p50-1:20[100-120]  @p1:50[100]  @sb1:30  @E30[12] @F30-60[0-160]
 // 周期: %<cmd><period><o0[-o1]>[<val>[-<endVal>]]
 // 例: %N1:00<20-40>[100-120]  … 1分周期の20〜40秒で鮮明100→120%（窓外は非適用）
 
@@ -14,9 +14,22 @@ struct MpPromptBackup {
 	int eqReverb;
 	int eqChorus;
 	int eqDelay;
-	int eqEnv;     // eqsoundenv 0..100
-	int eqEffect;  // eqsoundeffect 0..100
+	int eqEnv;     // eqsoundenv 0..100 (環境番号)
+	int eqEffect;  // eqsoundeffect 内部 0..100 (=UIスライダー0..200の半分)
 	int eqSoundEq; // eqsoundeq プリセット番号
+};
+
+struct MpPromptSnapshotEvent {
+	TCHAR c1;
+	TCHAR c2;       // 0=1文字コマンド
+	BOOL isPreset;
+	BOOL hasVal;
+	double t0;
+	double t1;
+	int v0;
+	int v1;
+	double period;  // 0=@ / >0=%
+	int cmdId;      // エンジン内部ID(レーン分類用)
 };
 
 void MpPromptBackupCapture(MpPromptBackup& out);
@@ -26,6 +39,12 @@ void MpPromptBackupFromSavedata(MpPromptBackup& b);
 
 BOOL MpPromptParse(const CString& text, CString* errMsg = nullptr);
 void MpPromptClearEvents();
+
+int MpPromptGetParsedEventCount();
+BOOL MpPromptGetParsedEvent(int index, MpPromptSnapshotEvent* out);
+CString MpPromptFormatToken(const MpPromptSnapshotEvent& ev);
+// 先頭の # コメント行を prevText から残し、現在のパース結果を本文にする
+CString MpPromptEventsToTextKeepHeader(const CString& prevText);
 
 BOOL MpPromptIsActive();
 void MpPromptSetActive(BOOL active);

@@ -15,6 +15,9 @@ public:
 	void LoadTextFromSavedata();
 	void UpdateRemainLabel();
 	void SaveCurrentToHistory();
+	CString GetPromptText() const;
+	void ApplyTextFromRoll(const CString& text, UINT syncGen);
+	UINT GetSyncGen() const { return m_syncGen; }
 
 protected:
 	CCustomEdit m_edit;
@@ -23,7 +26,7 @@ protected:
 	CCustomComboBox m_hist;
 	CCustomComboBox m_mode;
 	CCustomProgressCtrl m_progress;
-	CCustomStandardButton m_run, m_stop, m_reset, m_clear, m_close, m_saveHist, m_analyze;
+	CCustomStandardButton m_run, m_stop, m_reset, m_clear, m_close, m_saveHist, m_analyze, m_roll;
 	CToolTipCtrl m_tooltip;
 	CFont m_fontLegend;
 	CFont m_fontEditLbl;
@@ -32,6 +35,8 @@ protected:
 	BOOL m_posRestored = FALSE;
 	BOOL m_inSizeMove = FALSE;
 	BOOL m_analyzing = FALSE;
+	UINT m_syncGen = 0;
+	BOOL m_applyingFromRoll = FALSE;
 	static const int kMaxChars = 14000;
 
 	void LayoutControls();
@@ -55,6 +60,7 @@ protected:
 	virtual void OnClose();
 	afx_msg void OnRun();
 	afx_msg void OnAnalyze();
+	afx_msg void OnRoll();
 	afx_msg void OnModeSel();
 	afx_msg void OnStop();
 	afx_msg void OnReset();
@@ -77,4 +83,9 @@ protected:
 	DECLARE_MESSAGE_MAP()
 };
 
-void MpShowPromptDialog(CWnd* pParent);
+void MpShowPromptDialog(CWnd* pParent, BOOL bActivate = TRUE);
+void MpTogglePromptDialog(CWnd* pParent);
+BOOL MpIsPromptOpen();
+CPromptDlg* MpPromptDlgInstance();
+CString MpPromptSourceText();
+void MpMakeIndependentZOrder(CWnd* w);

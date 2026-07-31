@@ -331,6 +331,14 @@ BOOL COggApp::InitInstance()
 	savedata.wav_export_copy_tags = 1;
 	savedata.wav_export_kpi_sec = 240;
 	savedata.wav_export_sample_rate = 48000;
+	savedata.mpPromptwindow = 0;
+	savedata.mpCmdRollwindow = 0;
+	savedata.mpCmdRollHasPos = 0;
+	savedata.mpCmdRollX = -10000;
+	savedata.mpCmdRollY = -10000;
+	savedata.mpCmdRollW = 900;
+	savedata.mpCmdRollH = 560;
+	savedata.mpCmdRollMainLock = 0;
 	savedata.pianorollviewmode = 0;
 	savedata.pianorollkeyrange = 108;
 	savedata.pianorollnotename = 1;
@@ -784,6 +792,36 @@ BOOL COggApp::InitInstance()
 		if (!(sr == 0 || sr == 44100 || sr == 48000 || sr == 96000 || sr == 192000))
 			savedata.wav_export_sample_rate = 48000;
 	}
+	// プロンプト/コマンドロール開閉・座標(末尾追記)
+	if (datFileSize < (int)(offsetof(save, mpPromptwindow) + sizeof(savedata.mpPromptwindow)))
+		savedata.mpPromptwindow = 0;
+	else if (savedata.mpPromptwindow != 0)
+		savedata.mpPromptwindow = 1;
+	if (datFileSize < (int)(offsetof(save, mpCmdRollwindow) + sizeof(savedata.mpCmdRollwindow)))
+		savedata.mpCmdRollwindow = 0;
+	else if (savedata.mpCmdRollwindow != 0)
+		savedata.mpCmdRollwindow = 1;
+	if (datFileSize < (int)(offsetof(save, mpCmdRollHasPos) + sizeof(savedata.mpCmdRollHasPos))) {
+		savedata.mpCmdRollHasPos = 0;
+		savedata.mpCmdRollX = -10000;
+		savedata.mpCmdRollY = -10000;
+		savedata.mpCmdRollW = 900;
+		savedata.mpCmdRollH = 560;
+	}
+	else if (savedata.mpCmdRollHasPos) {
+		if (savedata.mpCmdRollW < 400 || savedata.mpCmdRollH < 280
+			|| savedata.mpCmdRollW > 10000 || savedata.mpCmdRollH > 10000) {
+			savedata.mpCmdRollHasPos = 0;
+			savedata.mpCmdRollX = -10000;
+			savedata.mpCmdRollY = -10000;
+			savedata.mpCmdRollW = 900;
+			savedata.mpCmdRollH = 560;
+		}
+	}
+	if (datFileSize < (int)(offsetof(save, mpCmdRollMainLock) + sizeof(savedata.mpCmdRollMainLock)))
+		savedata.mpCmdRollMainLock = 0;
+	else if (savedata.mpCmdRollMainLock != 0)
+		savedata.mpCmdRollMainLock = 1;
 	// 簡易ピアノロール 表示拡張(末尾追記): 旧.dat には無いので既定値へ
 	if (datFileSize < (int)(offsetof(save, pianorollviewmode) + sizeof(savedata.pianorollviewmode)))
 		savedata.pianorollviewmode = 0;

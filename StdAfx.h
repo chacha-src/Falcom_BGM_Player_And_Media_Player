@@ -364,7 +364,7 @@ struct save{
 
 	// --- プロンプトバックアップ: 環境/かかり具合(末尾追記) ---
 	int mpPromptBackupEqEnv;     // eqsoundenv 0..100
-	int mpPromptBackupEqEffect;  // eqsoundeffect 0..100
+	int mpPromptBackupEqEffect;  // eqsoundeffect 内部0..100 (UIは0..200)
 
 	// --- EQコード表示更新間隔(ms)。レンダリング画面で設定。16..500、既定25 ---
 	int eqCodeMs;
@@ -434,6 +434,16 @@ struct save{
 
 	// --- 書き出しサンプリングレート(0=ソースのまま, 44100/48000/96000/192000) ---
 	int wav_export_sample_rate;
+
+	// --- プロンプト / コマンドロール 開閉・座標(末尾追記) ---
+	int mpPromptwindow;     // 1=プロンプト表示
+	int mpCmdRollwindow;    // 1=コマンドロール表示
+	int mpCmdRollHasPos;    // 1=保存座標あり
+	int mpCmdRollX;
+	int mpCmdRollY;
+	int mpCmdRollW;
+	int mpCmdRollH;
+	int mpCmdRollMainLock;  // 1=メインに追随
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
