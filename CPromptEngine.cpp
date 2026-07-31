@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CPromptEngine.h"
 #include "CMediaPlayerDlg.h"
 #include "CEqualizer.h"
@@ -117,24 +117,31 @@ static BOOL ParseTimeToken(const CString& s, int& pos, double& outSec)
 	int colon = -1;
 	for (int i = start; i < n; ++i) {
 		if (s[i] == ':') { colon = i; break; }
-		if (!_istdigit(s[i])) break;
+		if (!_istdigit(s[i]) && s[i] != '.') break;
 	}
 	if (colon >= 0) {
 		int min = _tstoi(s.Mid(start, colon - start));
 		int secStart = colon + 1;
 		int secEnd = secStart;
-		while (secEnd < n && _istdigit(s[secEnd])) secEnd++;
+		while (secEnd < n && (_istdigit(s[secEnd]) || s[secEnd] == '.')) secEnd++;
 		if (secEnd == secStart) return FALSE;
-		int sec = _tstoi(s.Mid(secStart, secEnd - secStart));
+		double sec = _tstof(s.Mid(secStart, secEnd - secStart));
 		if (min < 0) min = 0;
-		if (sec < 0) sec = 0;
-		outSec = (double)min * 60.0 + (double)sec;
+		if (sec < 0.0) sec = 0.0;
+		outSec = (double)min * 60.0 + sec;
 		pos = secEnd;
 		return TRUE;
 	}
-	while (pos < n && _istdigit(s[pos])) pos++;
-	if (pos == start) return FALSE;
-	outSec = (double)_tstoi(s.Mid(start, pos - start));
+	// 秒: 整数または小数 (87 / 87.4)
+	BOOL sawDigit = FALSE;
+	BOOL sawDot = FALSE;
+	while (pos < n) {
+		if (_istdigit(s[pos])) { sawDigit = TRUE; ++pos; continue; }
+		if (s[pos] == '.' && !sawDot) { sawDot = TRUE; ++pos; continue; }
+		break;
+	}
+	if (!sawDigit) return FALSE;
+	outSec = _tstof(s.Mid(start, pos - start));
 	return TRUE;
 }
 
@@ -211,7 +218,7 @@ static BOOL ParseOnePrompt(const CString& line, int startPos, CString* errMsg)
 	const BOOL isPct = (line[pos] == '%') ? TRUE : FALSE;
 	pos++;
 	if (pos >= n) {
-		if (errMsg) *errMsg = LL14(L"?R?}???h??????????????B", L"No command letter.", L"Pas de lettre de commande.", L"Nessuna lettera di comando.", L"Sin letra de comando.", L"?? ??? ????.", L"?v?L???????B", L"?? ???? ??? ???.", L"?N?u?? ?q???{?r?? ?{???}?p?~?t??.", L"Kein Befehlsbuchstabe.", L"Sem letra de comando.", L"Geen opdrachtletter.", L"Brak litery polecenia.", L"Komut harfi yok.");
+		if (errMsg) *errMsg = LL14(L"コマンド文字がありません。", L"No command letter.", L"Pas de lettre de commande.", L"Nessuna lettera di comando.", L"Sin letra de comando.", L"명령 문자가 없습니다.", L"没有命令字母。", L"No command letter.", L"Нет буквы команды.", L"Kein Befehlsbuchstabe.", L"Sem letra de comando.", L"Geen opdrachtletter.", L"Brak litery polecenia.", L"Komut harfi yok.");
 		return FALSE;
 	}
 	TCHAR c1 = line[pos++];
@@ -223,30 +230,30 @@ static BOOL ParseOnePrompt(const CString& line, int startPos, CString* errMsg)
 	MpPromptCmd cmd = CmdFromLetters(c1, c2, used2);
 	if (used2) pos++;
 	if (cmd == CMD_NONE) {
-		if (errMsg) *errMsg = LL14(L"?s????R?}???h????B", L"Unknown command.", L"Commande inconnue.", L"Comando sconosciuto.", L"Comando desconocido.", L"? ? ?? ?????.", L"???m????B", L"??? ??? ?????.", L"?N?u?y?x?r?u?????~?p?? ?{???}?p?~?t?p.", L"Unbekannter Befehl.", L"Comando desconhecido.", L"Onbekende opdracht.", L"Nieznane polecenie.", L"Bilinmeyen komut.");
+		if (errMsg) *errMsg = LL14(L"不明なコマンドです。", L"Unknown command.", L"Commande inconnue.", L"Comando sconosciuto.", L"Comando desconocido.", L"알 수 없는 명령.", L"未知命令。", L"Unknown command.", L"Неизвестная команда.", L"Unbekannter Befehl.", L"Comando desconhecido.", L"Onbekende opdracht.", L"Nieznane polecenie.", L"Bilinmeyen komut.");
 		return FALSE;
 	}
 	double t0 = 0, t1 = 0, period = 0;
 	if (!ParseTimeToken(line, pos, t0)) {
 		if (errMsg) *errMsg = isPct
-			? LL14(L"???????????s????????B", L"Failed to parse period.", L"Echec analyse periode.", L"Analisi periodo fallita.", L"Error al analizar periodo.", L"?? ?? ??.", L"??????????B", L"??? ????? ??????.", L"?O???y?q?{?p ???p?x?q?????p ???u???y???t?p.", L"Periode parsen fehlgeschlagen.", L"Falha ao analisar periodo.", L"Periode parseren mislukt.", L"Blad parsowania okresu.", L"Donem ayr??t?r?lamad?.")
-			: LL14(L"???????????s????????B", L"Failed to parse time.", L"Echec analyse heure.", L"Analisi ora fallita.", L"Error al analizar tiempo.", L"?? ?? ??.", L"????????B", L"??? ????? ?????.", L"?O???y?q?{?p ???p?x?q?????p ?r???u?}?u?~?y.", L"Zeit parsen fehlgeschlagen.", L"Falha ao analisar hora.", L"Tijd parseren mislukt.", L"Blad parsowania czasu.", L"Zaman ayr??t?r?lamad?.");
+			? LL14(L"周期の解析に失敗しました。", L"Failed to parse period.", L"Echec analyse periode.", L"Analisi periodo fallita.", L"Error al analizar periodo.", L"주기 해석 실패.", L"周期解析失败。", L"Failed to parse period.", L"Ошибка разбора периода.", L"Periode parsen fehlgeschlagen.", L"Falha ao analisar periodo.", L"Periode parseren mislukt.", L"Blad parsowania okresu.", L"Donem ayristirilamadi.")
+			: LL14(L"時刻の解析に失敗しました。", L"Failed to parse time.", L"Echec analyse heure.", L"Analisi ora fallita.", L"Error al analizar tiempo.", L"시각 해석 실패.", L"时间解析失败。", L"Failed to parse time.", L"Ошибка разбора времени.", L"Zeit parsen fehlgeschlagen.", L"Falha ao analisar hora.", L"Tijd parseren mislukt.", L"Blad parsowania czasu.", L"Zaman ayristirilamadi.");
 		return FALSE;
 	}
 	if (isPct) {
 		period = t0;
 		if (period < 0.001) {
-			if (errMsg) *errMsg = LL14(L"??????0???????K?v?????????B", L"Period must be greater than 0.", L"La periode doit etre > 0.", L"Il periodo deve essere > 0.", L"El periodo debe ser > 0.", L"??? 0?? ?? ???.", L"?????K???0?B", L"??? ?? ???? ?????? > 0.", L"?P?u???y???t ?t???|?w?u?~ ?q?????? > 0.", L"Periode muss > 0 sein.", L"Periodo deve ser > 0.", L"Periode moet > 0 zijn.", L"Okres musi byc > 0.", L"Donem 0'dan buyuk olmali.");
+			if (errMsg) *errMsg = LL14(L"周期は0より大きい必要があります。", L"Period must be greater than 0.", L"La periode doit etre > 0.", L"Il periodo deve essere > 0.", L"El periodo debe ser > 0.", L"주기는 0보다 커야 합니다.", L"周期必须大于0。", L"Period must be greater than 0.", L"Период должен быть > 0.", L"Periode muss > 0 sein.", L"Periodo deve ser > 0.", L"Periode moet > 0 zijn.", L"Okres musi byc > 0.", L"Donem 0'dan buyuk olmali.");
 			return FALSE;
 		}
 		while (pos < n && line[pos] == ' ') pos++;
 		if (pos >= n || line[pos] != '<') {
-			if (errMsg) *errMsg = LL14(L"?????I?t?Z?b?g?? '<' ??????????B", L"Missing '<' for period offset.", L"'<' manquant pour le decalage.", L"Manca '<' per l'offset.", L"Falta '<' del desplazamiento.", L"?? ??? '<' ? ????.", L"????????? '<'?B", L"????? '<' ???????.", L"?N?u?? '<' ?t?|?? ???}?u???u?~?y??.", L"'<' fuer Offset fehlt.", L"Falta '<' do deslocamento.", L"'<' voor offset ontbreekt.", L"Brak '<' dla offsetu.", L"Donem ofseti icin '<' yok.");
+			if (errMsg) *errMsg = LL14(L"周期オフセットの '<' がありません。", L"Missing '<' for period offset.", L"'<' manquant pour le decalage.", L"Manca '<' per l'offset.", L"Falta '<' del desplazamiento.", L"주기 오프셋 '<' 가 없습니다.", L"缺少周期偏移 '<'。", L"Missing '<' for period offset.", L"Нет '<' для смещения.", L"'<' fuer Offset fehlt.", L"Falta '<' do deslocamento.", L"'<' voor offset ontbreekt.", L"Brak '<' dla offsetu.", L"Donem ofseti icin '<' yok.");
 			return FALSE;
 		}
 		pos++;
 		if (!ParseTimeToken(line, pos, t0)) {
-			if (errMsg) *errMsg = LL14(L"?I?t?Z?b?g???????s????????B", L"Failed to parse offset.", L"Echec analyse decalage.", L"Analisi offset fallita.", L"Error al analizar desplazamiento.", L"??? ?? ??.", L"????????B", L"??? ????? ???????.", L"?O???y?q?{?p ???p?x?q?????p ???}?u???u?~?y??.", L"Offset parsen fehlgeschlagen.", L"Falha ao analisar deslocamento.", L"Offset parseren mislukt.", L"Blad parsowania offsetu.", L"Ofset ayr??t?r?lamad?.");
+			if (errMsg) *errMsg = LL14(L"オフセットの解析に失敗しました。", L"Failed to parse offset.", L"Echec analyse decalage.", L"Analisi offset fallita.", L"Error al analizar desplazamiento.", L"오프셋 해석 실패.", L"偏移解析失败。", L"Failed to parse offset.", L"Ошибка разбора смещения.", L"Offset parsen fehlgeschlagen.", L"Falha ao analisar deslocamento.", L"Offset parseren mislukt.", L"Blad parsowania offsetu.", L"Ofset ayristirilamadi.");
 			return FALSE;
 		}
 		t1 = t0;
@@ -254,13 +261,13 @@ static BOOL ParseOnePrompt(const CString& line, int startPos, CString* errMsg)
 		if (pos < n && line[pos] == '-') {
 			pos++;
 			if (!ParseTimeToken(line, pos, t1)) {
-				if (errMsg) *errMsg = LL14(L"?I???I?t?Z?b?g???????s????????B", L"Failed to parse end offset.", L"Echec decalage de fin.", L"Fine offset fallita.", L"Error desplazamiento final.", L"?? ??? ?? ??.", L"???????????B", L"??? ????? ???????.", L"?O???y?q?{?p ?{???~?u???~???s?? ???}?u???u?~?y??.", L"End-Offset parsen fehlgeschlagen.", L"Falha deslocamento final.", L"Eind-offset mislukt.", L"Blad offsetu konca.", L"Bitis ofseti basarisiz.");
+				if (errMsg) *errMsg = LL14(L"終了オフセットの解析に失敗しました。", L"Failed to parse end offset.", L"Echec decalage de fin.", L"Fine offset fallita.", L"Error desplazamiento final.", L"종료 오프셋 해석 실패.", L"结束偏移解析失败。", L"Failed to parse end offset.", L"Ошибка конечного смещения.", L"End-Offset parsen fehlgeschlagen.", L"Falha deslocamento final.", L"Eind-offset mislukt.", L"Blad offsetu konca.", L"Bitis ofseti basarisiz.");
 				return FALSE;
 			}
 		}
 		while (pos < n && line[pos] == ' ') pos++;
 		if (pos >= n || line[pos] != '>') {
-			if (errMsg) *errMsg = LL14(L"?????I?t?Z?b?g?? '>' ??????????B", L"Missing '>' for period offset.", L"'>' manquant pour le decalage.", L"Manca '>' per l'offset.", L"Falta '>' del desplazamiento.", L"?? ??? '>' ? ????.", L"????????? '>'?B", L"????? '>' ???????.", L"?N?u?? '>' ?t?|?? ???}?u???u?~?y??.", L"'>' fuer Offset fehlt.", L"Falta '>' do deslocamento.", L"'>' voor offset ontbreekt.", L"Brak '>' dla offsetu.", L"Donem ofseti icin '>' yok.");
+			if (errMsg) *errMsg = LL14(L"周期オフセットの '>' がありません。", L"Missing '>' for period offset.", L"'>' manquant pour le decalage.", L"Manca '>' per l'offset.", L"Falta '>' del desplazamiento.", L"주기 오프셋 '>' 가 없습니다.", L"缺少周期偏移 '>'。", L"Missing '>' for period offset.", L"Нет '>' для смещения.", L"'>' fuer Offset fehlt.", L"Falta '>' do deslocamento.", L"'>' voor offset ontbreekt.", L"Brak '>' dla offsetu.", L"Donem ofseti icin '>' yok.");
 			return FALSE;
 		}
 		pos++;
@@ -275,7 +282,7 @@ static BOOL ParseOnePrompt(const CString& line, int startPos, CString* errMsg)
 		if (pos < n && line[pos] == '-') {
 			pos++;
 			if (!ParseTimeToken(line, pos, t1)) {
-				if (errMsg) *errMsg = LL14(L"?I?????????????s????????B", L"Failed to parse end time.", L"Echec heure de fin.", L"Fine ora fallita.", L"Error hora final.", L"?? ?? ?? ??.", L"???????????B", L"??? ??? ???????.", L"?O???y?q?{?p ?{???~?u???~???s?? ?r???u?}?u?~?y.", L"Endzeit parsen fehlgeschlagen.", L"Falha hora final.", L"Eindtijd mislukt.", L"Blad czasu ko?ca.", L"Biti? zaman? ba?ar?s?z.");
+				if (errMsg) *errMsg = LL14(L"終了時刻の解析に失敗しました。", L"Failed to parse end time.", L"Echec heure de fin.", L"Fine ora fallita.", L"Error hora final.", L"종료 시각 해석 실패.", L"结束时间解析失败。", L"Failed to parse end time.", L"Ошибка конечного времени.", L"Endzeit parsen fehlgeschlagen.", L"Falha hora final.", L"Eindtijd mislukt.", L"Blad czasu konca.", L"Bitis zamani basarisiz.");
 				return FALSE;
 			}
 		}
@@ -284,7 +291,7 @@ static BOOL ParseOnePrompt(const CString& line, int startPos, CString* errMsg)
 	const bool isPreset = (cmd >= CMD_PRESET_SB && cmd <= CMD_PRESET_LAST);
 	if (!isPreset) {
 		if (!ParseValueRange(line, pos, v0, v1)) {
-			if (errMsg) *errMsg = LL14(L"?l???????s????????B", L"Failed to parse value.", L"Echec analyse valeur.", L"Valore non valido.", L"Error al analizar valor.", L"? ?? ??.", L"???????B", L"??? ????? ??????.", L"?O???y?q?{?p ???p?x?q?????p ?x?~?p???u?~?y??.", L"Wert parsen fehlgeschlagen.", L"Falha ao analisar valor.", L"Waarde parseren mislukt.", L"Blad warto?ci.", L"De?er ayr??t?r?lamad?.");
+			if (errMsg) *errMsg = LL14(L"値の解析に失敗しました。", L"Failed to parse value.", L"Echec analyse valeur.", L"Valore non valido.", L"Error al analizar valor.", L"값 해석 실패.", L"数值解析失败。", L"Failed to parse value.", L"Ошибка разбора значения.", L"Wert parsen fehlgeschlagen.", L"Falha ao analisar valor.", L"Waarde parseren mislukt.", L"Blad wartosci.", L"Deger ayristirilamadi.");
 			return FALSE;
 		}
 	}
@@ -293,7 +300,7 @@ static BOOL ParseOnePrompt(const CString& line, int startPos, CString* errMsg)
 		int tv = v0; v0 = v1; v1 = tv;
 	}
 	if (g_eventCount >= kMaxPromptEvents) {
-		if (errMsg) *errMsg = LL14(L"?v?????v?g?C?x???g???????????????B", L"Prompt event limit exceeded.", L"Limite d evenements depassee.", L"Limite eventi superato.", L"Limite de eventos superado.", L"???? ??? ?? ??.", L"?????????o????B", L"?? ????? ?? ???????.", L"?P???u?r?????u?~ ?|?y?}?y?? ?????q?????y?z.", L"Ereignislimit ueberschritten.", L"Limite de eventos excedido.", L"Eventlimiet overschreden.", L"Przekroczono limit zdarzen.", L"Olay limiti asildi.");
+		if (errMsg) *errMsg = LL14(L"プロンプトイベント数の上限を超えました。", L"Prompt event limit exceeded.", L"Limite d evenements depassee.", L"Limite eventi superato.", L"Limite de eventos superado.", L"이벤트 수 한도 초과.", L"事件数量超出上限。", L"Prompt event limit exceeded.", L"Превышен лимит событий.", L"Ereignislimit ueberschritten.", L"Limite de eventos excedido.", L"Eventlimiet overschreden.", L"Przekroczono limit zdarzen.", L"Olay limiti asildi.");
 		return FALSE;
 	}
 	MpPromptEvent& ev = g_events[g_eventCount++];

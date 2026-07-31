@@ -8,6 +8,7 @@
 #include "WavExport.h"
 #include "DecodeProgress.h"
 #include "ExportTagUi.h"
+#include "CPromptEngine.h"
 #include <ShlObj.h>
 
 extern COggDlg* og;
@@ -210,6 +211,7 @@ void CWavExport::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_WAVEXPORT_TRIM_SEC, m_trimSec);
 	DDX_Control(pDX, IDC_WAVEXPORT_TRIM_LABEL, m_trimLabel);
 	DDX_Control(pDX, IDC_WAVEXPORT_COPY_TAGS, m_copyTags);
+	DDX_Control(pDX, IDC_WAVEXPORT_PROMPT, m_promptCheck);
 	DDX_Control(pDX, IDC_WAVEXPORT_TITLE_L, m_titleL);
 	DDX_Control(pDX, IDC_WAVEXPORT_TITLE, m_title);
 	DDX_Control(pDX, IDC_WAVEXPORT_ARTIST_L, m_artistL);
@@ -274,6 +276,10 @@ BOOL CWavExport::OnInitDialog()
 		L"Copiar etiquetas y portada", L"태그와 재킷 복사", L"复制标签和封面", L"نسخ الوسوم والغلاف",
 		L"Копировать теги и обложку", L"Tags und Cover kopieren", L"Copiar tags e capa", L"Tags en hoes kopiëren",
 		L"Kopiuj tagi i okładkę", L"Etiketleri ve kapağı kopyala"));
+	m_promptCheck.SetWindowText(LL14(L"プロンプト実行を適用", L"Apply prompt execution", L"Appliquer le prompt", L"Applica esecuzione prompt",
+		L"Aplicar ejecucion del prompt", L"프롬프트 실행 적용", L"应用提示执行", L"Apply prompt",
+		L"Применить промпт", L"Prompt anwenden", L"Aplicar prompt", L"Prompt toepassen",
+		L"Zastosuj prompt", L"Prompt uygula"));
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi",
 		L"Cerrar", L"닫기", L"关闭", L"إغلاق",
 		L"Закрыть", L"Schließen", L"Fechar", L"Sluiten",
@@ -295,6 +301,7 @@ BOOL CWavExport::OnInitDialog()
 	m_fadeCheck.SetCheck(savedata.wav_export_fade ? BST_CHECKED : BST_UNCHECKED);
 	m_trimCheck.SetCheck(savedata.wav_export_trim_lead ? BST_CHECKED : BST_UNCHECKED);
 	m_copyTags.SetCheck(savedata.wav_export_copy_tags ? BST_CHECKED : BST_UNCHECKED);
+	m_promptCheck.SetCheck((savedata.wav_export_apply_prompt || MpPromptIsActive()) ? BST_CHECKED : BST_UNCHECKED);
 	if (multiFile) {
 		m_path.SetWindowText(WavExportDefaultFolderFromPc(pc));
 	}
@@ -400,11 +407,13 @@ void CWavExport::OnBnClickedWavExportExec()
 	opts.fadeSec = fadeSec;
 	opts.trimLeadEnable = m_trimCheck.GetCheck() ? 1 : 0;
 	opts.trimKeepSec = trimKeepSec;
+	opts.applyPrompt = m_promptCheck.GetCheck() ? 1 : 0;
 	savedata.wav_export_fade = opts.fadeEnable;
 	savedata.wav_export_fade_sec = opts.fadeSec;
 	savedata.wav_export_trim_lead = opts.trimLeadEnable;
 	savedata.wav_export_trim_keep_sec = opts.trimKeepSec;
 	savedata.wav_export_copy_tags = m_copyTags.GetCheck() ? 1 : 0;
+	savedata.wav_export_apply_prompt = opts.applyPrompt;
 	ExportTagUi_Collect(multiFile, savedata.wav_export_copy_tags, m_title, m_artist, m_album, m_coverPath, opts);
 
 	if (pathStr.IsEmpty()) {

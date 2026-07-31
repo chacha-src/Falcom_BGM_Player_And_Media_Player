@@ -130,6 +130,7 @@ public:
 	afx_msg void OnPop32787();
 	afx_msg void OnPopWavExport();
 	afx_msg void OnPopTranscode();
+	afx_msg void OnPopXfadeExport();
 	afx_msg void OnPopTagEdit();
 	CCustomEdit m_find;
 	afx_msg void OnFindUp();
@@ -197,6 +198,7 @@ enum {
 	PL_CTX_RESCAN_MISS = 21,
 	PL_CTX_REFRESH_JAK = 22,
 	PL_CTX_TAG_EDIT = 23,
+	PL_CTX_XFADE = 24,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

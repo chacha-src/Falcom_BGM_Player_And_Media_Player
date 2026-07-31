@@ -33,6 +33,7 @@
 #include "AudioUpscaler.h"
 #include "ProAudio.h"
 #include "DecodeProgress.h"
+#include "CPromptEngine.h"
 #if _MSC_VER >= 1950
 #pragma comment(lib,"rubberband-library_2026")
 #else
@@ -762,6 +763,13 @@ void HandleNotifications_export()
 	// DispatchPlaywavFill が即 return → PCM 無しで永久ループ（進捗1%固定）になる。
 	g_openDecoderMode = mode;
 
+	extern bool g_wavExportApplyPrompt;
+	if (g_wavExportApplyPrompt && MpPromptIsActive()) {
+		// 書き出しは再生タイマーを通らないので、ここで実行開始扱いにする
+		MpPromptNotifyPlayback(1, 0.0);
+		MpPromptTickAtTime(0.0);
+	}
+
 	MpDecodeProgressReport(2, LL14(
 		L"デコード中…", L"Decoding...", L"Decodage...", L"Decodifica...", L"Decodificando...",
 		L"디코딩 중…", L"解码中…", L"Decoding...", L"Декодирование...", L"Dekodiere...",
@@ -823,6 +831,8 @@ void HandleNotifications_export()
 		DispatchPlaywavFill(bufwav3, oldw, len1, len2);
 		oldw = (oldw + len1 + len2) % bufSize;
 		sflg = FALSE;
+		if (g_wavExportApplyPrompt && MpPromptIsActive())
+			MpPromptTickAtTime(0.0);
 		if (fade1) break;
 		if (wavExportLoopCount > 0 && loopcnt >= wavExportLoopCount) break;
 		if (g_wavExportMaxSec > 0 && wavbit_sample_Hz > 0) {

@@ -693,6 +693,7 @@ int g_warmupOutputBytes = 0;
 int  g_warmupRBOutputBytes = 0;
 bool g_inWarmup = false;
 bool g_isWavExportRendering = false;
+bool g_wavExportApplyPrompt = false;
 //スレッド
 UINT wavread(LPVOID);
 extern BYTE bufimage[0x30000f];
@@ -3002,6 +3003,8 @@ CString wavExportPath;
 int wavExportLoopCount = 0;
 int g_wavExportMaxSec = 0; // KPI等: 書き出し上限秒(0=無制限)
 int g_wavExportSampleRate = 0; // 書き出し先Hz(0=ソースのまま)
+int g_wavExportChannels = 0; // 書き出しch(0=ソース。クロスフェード追従)
+int g_wavExportBits = 0; // 書き出しbit(0=ソース。16/24/32)
 // WAV書き出しの実データバイト数(64bit)。ヘッダ確定/成否判定はファイル実長から求める。
 __int64 g_wavExportDataBytes = 0;
 
@@ -9902,14 +9905,21 @@ void COggDlg::play()
 	NormalizePlaybackWaveFormat();
 
 	ConfigurePlaybackOutputAndUpscaler();
-	// 書き出し専用: ユーザー指定レートへリサンプル（KPI等の192kを44.1/48kへ落とす）
-	if (wavExportPath.GetLength() > 0 && g_wavExportSampleRate >= 8000) {
+	// 書き出し専用: 指定Hz/ch/bitへリサンプル（KPI・クロスフェード先頭追従）
+	if (wavExportPath.GetLength() > 0 &&
+		(g_wavExportSampleRate >= 8000 || g_wavExportChannels >= 1 || g_wavExportBits > 0)) {
 		int srcBits = abs(wavsam_depth);
 		if (wavsam_depth < 0) srcBits = 16;
 		if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32)) srcBits = 16;
-		g_ds_pcm_rate = g_wavExportSampleRate;
-		if (g_ds_pcm_ch < 1) g_ds_pcm_ch = (wavchannel > 0) ? wavchannel : 2;
-		if (!(g_ds_pcm_bits == 16 || g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32))
+		if (g_wavExportSampleRate >= 8000)
+			g_ds_pcm_rate = g_wavExportSampleRate;
+		if (g_wavExportChannels >= 1 && g_wavExportChannels <= 8)
+			g_ds_pcm_ch = g_wavExportChannels;
+		else if (g_ds_pcm_ch < 1)
+			g_ds_pcm_ch = (wavchannel > 0) ? wavchannel : 2;
+		if (g_wavExportBits == 16 || g_wavExportBits == 24 || g_wavExportBits == 32)
+			g_ds_pcm_bits = g_wavExportBits;
+		else if (!(g_ds_pcm_bits == 16 || g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32))
 			g_ds_pcm_bits = (srcBits == 24 || srcBits == 32) ? srcBits : 16;
 		g_audioUpscaler.Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
 		g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
@@ -10732,6 +10742,14 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 		localOpts.trimLeadEnable = savedata.wav_export_trim_lead;
 		localOpts.trimKeepSec = savedata.wav_export_trim_keep_sec > 0 ? savedata.wav_export_trim_keep_sec : 1;
 		localOpts.copyTags = savedata.wav_export_copy_tags ? 1 : 0;
+		localOpts.applyPrompt = savedata.wav_export_apply_prompt ? 1 : 0;
+	}
+	g_wavExportApplyPrompt = (localOpts.applyPrompt != 0);
+	if (g_wavExportApplyPrompt) {
+		if (!MpPromptIsActive()) {
+			CString err;
+			MpPromptExecute(MpPromptSourceText(), &err);
+		}
 	}
 	// 2回目以降：初回と同じ状態へリセット（前回のエクスポートで変更されたグローバルを戻す）
 	if (cc1 == 1) { cc.Close(); cc1 = 0; PlaybackCcClearFormat(); }
@@ -10760,13 +10778,22 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 	wavExportLoopCount = loopCount;
 	g_wavExportMaxSec = 0;
 	g_wavExportSampleRate = 0;
+	g_wavExportChannels = 0;
+	g_wavExportBits = 0;
 	{
 		int sr = localOpts.sampleRate;
 		if (sr < 1) sr = savedata.wav_export_sample_rate;
+		// UIコンボ値は従来どおり。明示指定(クロスフェード先頭追従等)は任意レート可。
 		if (sr == 44100 || sr == 48000 || sr == 96000 || sr == 192000)
 			g_wavExportSampleRate = sr;
+		else if (localOpts.sampleRate >= 8000 && localOpts.sampleRate <= 384000)
+			g_wavExportSampleRate = localOpts.sampleRate;
 		else
 			g_wavExportSampleRate = 0;
+		if (localOpts.forceChannels >= 1 && localOpts.forceChannels <= 8)
+			g_wavExportChannels = localOpts.forceChannels;
+		if (localOpts.forceBits == 16 || localOpts.forceBits == 24 || localOpts.forceBits == 32)
+			g_wavExportBits = localOpts.forceBits;
 	}
 	if (pc->sub == -3) {
 		// OnRestart と同様、書き出し前に KPI プラグインを解決する。
@@ -10831,6 +10858,9 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 	wavExportLoopCount = 0;
 	g_wavExportMaxSec = 0;
 	g_wavExportSampleRate = 0;
+	g_wavExportChannels = 0;
+	g_wavExportBits = 0;
+	g_wavExportApplyPrompt = false;
 	savedata.saveloop = saveloop_bak;
 	if (ok && applyTags && pc->fol[0] != 0) {
 		const int copyTags = localOpts.copyTags ? 1 : 0;

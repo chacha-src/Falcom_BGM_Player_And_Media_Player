@@ -8,9 +8,12 @@
 #include "TranscodeExport.h"
 #include "DecodeProgress.h"
 #include "ExportTagUi.h"
+#include "FileTagInfo.h"
+#include "CPromptEngine.h"
 #include <ShlObj.h>
 #include <vector>
 #include <algorithm>
+#include <math.h>
 
 #define FLAC__NO_DLL
 #include "flac/stream_encoder.h"
@@ -269,9 +272,179 @@ CString TcMakeTempWavPath()
 {
 	wchar_t dir[MAX_PATH] = {};
 	GetTempPath(MAX_PATH, dir);
+	static LONG s_seq = 0;
+	const LONG n = InterlockedIncrement(&s_seq);
 	CString path;
-	path.Format(L"%sogg_tc_%u_%u.wav", dir, GetCurrentProcessId(), GetTickCount());
+	path.Format(L"%sogg_tc_%u_%u_%ld.wav", dir, GetCurrentProcessId(), GetTickCount(), (long)n);
 	return path;
+}
+
+// 本アプリ書き出しWAV(80byteヘッダ)のサイズ欄をファイル実長から確定
+void TcFinalizeWavHeader(CFile& f)
+{
+	const __int64 fileLen = (__int64)f.GetLength();
+	__int64 dataBytes = fileLen - TC_WAV_HDR;
+	if (dataBytes < 0) dataBytes = 0;
+	BYTE hdr[TC_WAV_HDR];
+	f.SeekToBegin();
+	if (f.Read(hdr, TC_WAV_HDR) != TC_WAV_HDR) return;
+	const WORD ch = *(WORD*)(hdr + 58);
+	const WORD bits = *(WORD*)(hdr + 70);
+	int blockAlign = (int)ch * (int)bits / 8;
+	if (blockAlign <= 0) blockAlign = 4;
+	f.SeekToBegin();
+	if (dataBytes <= (__int64)0x7FFFFFFF) {
+		BYTE riff[12];
+		memcpy(riff + 0, "RIFF", 4);
+		*(DWORD*)(riff + 4) = (DWORD)(fileLen - 8);
+		memcpy(riff + 8, "WAVE", 4);
+		f.Write(riff, 12);
+		f.Seek(76, CFile::begin);
+		DWORD ds = (DWORD)dataBytes;
+		f.Write(&ds, 4);
+	}
+	else {
+		BYTE rf[48];
+		memcpy(rf + 0, "RF64", 4);
+		*(DWORD*)(rf + 4) = 0xFFFFFFFF;
+		memcpy(rf + 8, "WAVE", 4);
+		memcpy(rf + 12, "ds64", 4);
+		*(DWORD*)(rf + 16) = 28;
+		*(__int64*)(rf + 20) = fileLen - 8;
+		*(__int64*)(rf + 28) = dataBytes;
+		*(__int64*)(rf + 36) = dataBytes / blockAlign;
+		*(DWORD*)(rf + 44) = 0;
+		f.Write(rf, 48);
+		f.Seek(76, CFile::begin);
+		DWORD ds = 0xFFFFFFFF;
+		f.Write(&ds, 4);
+	}
+}
+
+// accum 末尾 xfadeSec 秒へ戻し、next 先頭と等パワーで混ぜてから next 残りを追記
+BOOL TcAppendCrossfadeWav(const CString& accumPath, const CString& nextPath, int xfadeSec)
+{
+	if (xfadeSec < 1) xfadeSec = 1;
+	CFile fa, fn;
+	if (!fa.Open(accumPath, CFile::modeReadWrite | CFile::shareExclusive))
+		return FALSE;
+	if (!fn.Open(nextPath, CFile::modeRead | CFile::shareDenyWrite)) {
+		fa.Close();
+		return FALSE;
+	}
+	TcWavInfo ia = {}, in = {};
+	if (!TcReadWavInfo(fa, ia) || !TcReadWavInfo(fn, in)) {
+		fa.Close(); fn.Close();
+		return FALSE;
+	}
+	if (ia.ch != in.ch || ia.hz != in.hz || ia.bits != in.bits || ia.blockAlign != in.blockAlign) {
+		fa.Close(); fn.Close();
+		return FALSE;
+	}
+	const int bpf = ia.blockAlign;
+	const int ch = ia.ch;
+	const int bits = ia.bits;
+	if (bpf <= 0 || ch < 1) {
+		fa.Close(); fn.Close();
+		return FALSE;
+	}
+	const __int64 framesA = ia.dataBytes / bpf;
+	const __int64 framesN = in.dataBytes / bpf;
+	__int64 xfadeFrames = (__int64)xfadeSec * (__int64)ia.hz;
+	if (xfadeFrames > framesA) xfadeFrames = framesA;
+	if (xfadeFrames > framesN) xfadeFrames = framesN;
+	if (xfadeFrames < 1) {
+		// 重ねられないときは単純連結
+		xfadeFrames = 0;
+	}
+	const __int64 mixStart = framesA - xfadeFrames;
+	const int chunkFrames = 1024;
+	BYTE bufA[1024 * 32];
+	BYTE bufN[1024 * 32];
+	if (bpf > 32) {
+		fa.Close(); fn.Close();
+		return FALSE;
+	}
+
+	for (__int64 fi = 0; fi < xfadeFrames; ) {
+		int n = chunkFrames;
+		if ((__int64)n > xfadeFrames - fi) n = (int)(xfadeFrames - fi);
+		const __int64 posA = ia.dataOffset + (mixStart + fi) * bpf;
+		const __int64 posN = in.dataOffset + fi * bpf;
+		fa.Seek(posA, CFile::begin);
+		fn.Seek(posN, CFile::begin);
+		if (fa.Read(bufA, n * bpf) != (UINT)(n * bpf)) break;
+		if (fn.Read(bufN, n * bpf) != (UINT)(n * bpf)) break;
+		for (int i = 0; i < n; ++i) {
+			const float t = (xfadeFrames <= 1) ? 1.f : (float)(fi + i) / (float)(xfadeFrames - 1);
+			const float gOut = cosf(t * 1.5707963267948966f);
+			const float gIn = sinf(t * 1.5707963267948966f);
+			BYTE* pa = bufA + i * bpf;
+			BYTE* pn = bufN + i * bpf;
+			for (int c = 0; c < ch; ++c) {
+				float a = 0.f, b = 0.f;
+				if (bits == 16) {
+					a = ((short*)pa)[c] / 32768.f;
+					b = ((short*)pn)[c] / 32768.f;
+				}
+				else if (bits == 24) {
+					const int oa = c * 3, ob = c * 3;
+					int va = pa[oa] | (pa[oa + 1] << 8) | ((signed char)pa[oa + 2] << 16);
+					int vb = pn[ob] | (pn[ob + 1] << 8) | ((signed char)pn[ob + 2] << 16);
+					a = va / 8388608.f;
+					b = vb / 8388608.f;
+				}
+				else if (bits == 32) {
+					a = ((int*)pa)[c] / 2147483648.f;
+					b = ((int*)pn)[c] / 2147483648.f;
+				}
+				else {
+					a = (pa[c] - 128) / 128.f;
+					b = (pn[c] - 128) / 128.f;
+				}
+				float o = a * gOut + b * gIn;
+				if (o > 1.f) o = 1.f;
+				if (o < -1.f) o = -1.f;
+				if (bits == 16) {
+					((short*)pa)[c] = (short)(o * 32767.f);
+				}
+				else if (bits == 24) {
+					int v = (int)(o * 8388607.f);
+					const int oa = c * 3;
+					pa[oa] = (BYTE)(v & 0xFF);
+					pa[oa + 1] = (BYTE)((v >> 8) & 0xFF);
+					pa[oa + 2] = (BYTE)((v >> 16) & 0xFF);
+				}
+				else if (bits == 32) {
+					((int*)pa)[c] = (int)(o * 2147483647.f);
+				}
+				else {
+					pa[c] = (BYTE)(o * 127.f + 128.f);
+				}
+			}
+		}
+		fa.Seek(posA, CFile::begin);
+		fa.Write(bufA, n * bpf);
+		fi += n;
+	}
+
+	// next の残りを追記
+	__int64 remain = framesN - xfadeFrames;
+	fn.Seek(in.dataOffset + xfadeFrames * bpf, CFile::begin);
+	fa.SeekToEnd();
+	while (remain > 0) {
+		int n = chunkFrames;
+		if ((__int64)n > remain) n = (int)remain;
+		const UINT got = fn.Read(bufN, n * bpf);
+		const int frames = (int)(got / bpf);
+		if (frames <= 0) break;
+		fa.Write(bufN, frames * bpf);
+		remain -= frames;
+	}
+	TcFinalizeWavHeader(fa);
+	fa.Close();
+	fn.Close();
+	return TRUE;
 }
 
 } // namespace
@@ -550,6 +723,7 @@ CTranscodeExport::CTranscodeExport(CWnd* pParent)
 	: CCustomBlurDialogBase(CTranscodeExport::IDD, pParent)
 	, multiFile(false)
 	, m_initialTab(-1)
+	, m_preferXfade(false)
 	, m_coverBmp(NULL)
 {
 }
@@ -572,6 +746,8 @@ void CTranscodeExport::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_TC_SRATE, m_srate);
 	DDX_Control(pDX, IDC_TC_SRATE_L, m_srateLabel);
 	DDX_Control(pDX, IDC_TC_LOOP, m_loop);
+	DDX_Control(pDX, IDC_TC_KPI_SEC, m_kpiSec);
+	DDX_Control(pDX, IDC_TC_KPI_SEC_L, m_kpiSecLabel);
 	DDX_Control(pDX, IDC_TC_PATH, m_path);
 	DDX_Control(pDX, IDC_TC_STATUS, m_status);
 	DDX_Control(pDX, IDC_TC_LOOP_L, m_loopLabel);
@@ -582,10 +758,14 @@ void CTranscodeExport::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_TC_FADE, m_fadeCheck);
 	DDX_Control(pDX, IDC_TC_FADE_SEC, m_fadeSec);
 	DDX_Control(pDX, IDC_TC_FADE_L, m_fadeLabel);
+	DDX_Control(pDX, IDC_TC_XFADE, m_xfadeCheck);
+	DDX_Control(pDX, IDC_TC_XFADE_SEC, m_xfadeSec);
+	DDX_Control(pDX, IDC_TC_XFADE_L, m_xfadeLabel);
 	DDX_Control(pDX, IDC_TC_TRIM, m_trimCheck);
 	DDX_Control(pDX, IDC_TC_TRIM_SEC, m_trimSec);
 	DDX_Control(pDX, IDC_TC_TRIM_L, m_trimLabel);
 	DDX_Control(pDX, IDC_TC_COPY_TAGS, m_copyTags);
+	DDX_Control(pDX, IDC_TC_PROMPT, m_promptCheck);
 	DDX_Control(pDX, IDC_TC_TITLE_L, m_titleL);
 	DDX_Control(pDX, IDC_TC_TITLE, m_title);
 	DDX_Control(pDX, IDC_TC_ARTIST_L, m_artistL);
@@ -603,10 +783,66 @@ BEGIN_MESSAGE_MAP(CTranscodeExport, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_TC_BROWSE, &CTranscodeExport::OnBnClickedBrowse)
 	ON_BN_CLICKED(IDC_TC_CLOSE, &CTranscodeExport::OnBnClickedClose)
 	ON_BN_CLICKED(IDC_TC_COVER_CLEAR, &CTranscodeExport::OnBnClickedCoverClear)
+	ON_BN_CLICKED(IDC_TC_XFADE, &CTranscodeExport::OnBnClickedXfade)
 	ON_CBN_SELCHANGE(IDC_TC_FORMAT, &CTranscodeExport::OnCbnSelchangeFormat)
 	ON_NOTIFY(TCN_SELCHANGE, IDC_TC_TABS, &CTranscodeExport::OnTcnSelchangeTabs)
 	ON_WM_DROPFILES()
 END_MESSAGE_MAP()
+
+bool CTranscodeExport::IsXfadeMode()
+{
+	return multiFile && m_xfadeCheck.GetSafeHwnd() && m_xfadeCheck.GetCheck() == BST_CHECKED && pcs.size() >= 2;
+}
+
+void CTranscodeExport::ApplyPathModeUi(bool keepPathText)
+{
+	const bool xfade = IsXfadeMode();
+	const bool folderMode = multiFile && !xfade;
+	if (folderMode) {
+		m_pathLabel.SetWindowText(LL14(L"出力フォルダ", L"Output folder", L"Dossier de sortie", L"Cartella di output",
+			L"Carpeta de salida", L"출력 폴더", L"输出文件夹", L"مجلد الإخراج",
+			L"Папка вывода", L"Ausgabeordner", L"Pasta de saída", L"Uitvoermap",
+			L"Folder wyjściowy", L"Çıktı klasörü"));
+		if (!keepPathText)
+			m_path.SetWindowText(TcDefaultFolderFromPc(pc));
+	}
+	else {
+		m_pathLabel.SetWindowText(LL14(L"出力ファイル名", L"Output file", L"Fichier de sortie", L"File di output",
+			L"Archivo de salida", L"출력 파일", L"输出文件名", L"اسم الملف",
+			L"Выходной файл", L"Ausgabedatei", L"Arquivo de saída", L"Uitvoerbestand",
+			L"Plik wyjściowy", L"Çıktı dosyası"));
+		if (!keepPathText)
+			m_path.SetWindowText(OutputPathForItem(TcDefaultFolderFromPc(pc), pc, CurrentFormat()));
+	}
+	SyncTitleFieldForPathMode();
+}
+
+void CTranscodeExport::SyncTitleFieldForPathMode()
+{
+	if (!m_title.GetSafeHwnd()) return;
+	if (IsXfadeMode() || !multiFile) {
+		if (!m_title.IsWindowEnabled()) {
+			FileTagFields src;
+			if (pc.fol[0] != 0)
+				ReadFileTagFields(pc.fol, src);
+			CString t = src.title;
+			if (t.IsEmpty() && pc.name[0]) t = pc.name;
+			m_title.SetWindowText(t);
+			m_title.EnableWindow(TRUE);
+		}
+	}
+	else {
+		m_title.SetWindowText(LL14(L"(複数のため変更不可)", L"(locked for multi)", L"(verrouille)", L"(bloccato)", L"(bloqueado)",
+			L"(다중 선택 잠금)", L"(多选不可改)", L"(locked)", L"(заблокировано)", L"(gesperrt)",
+			L"(bloqueado)", L"(vergrendeld)", L"(zablokowane)", L"(kilitli)"));
+		m_title.EnableWindow(FALSE);
+	}
+}
+
+void CTranscodeExport::OnBnClickedXfade()
+{
+	ApplyPathModeUi(false);
+}
 
 int CTranscodeExport::CurrentFormat() const
 {
@@ -639,7 +875,7 @@ void CTranscodeExport::ApplyTabUi()
 		m_format.SetCurSel(fmt == TC_FMT_FLAC ? TC_FMT_FLAC : TC_FMT_MP3);
 	if (showQ)
 		RefreshQualityLabels();
-	if (!multiFile) {
+	if (!multiFile || IsXfadeMode()) {
 		CString path;
 		m_path.GetWindowText(path);
 		const int dot = path.ReverseFind(L'.');
@@ -895,23 +1131,19 @@ BOOL CTranscodeExport::OnInitDialog()
 		L"Repeticiones", L"반복 횟수", L"循环次数", L"عدد التكرار",
 		L"Количество повторов", L"Schleifenzahl", L"Repetições", L"Aantal herhalingen",
 		L"Liczba powtórzeń", L"Döngü sayısı"));
-	if (multiFile) {
-		m_pathLabel.SetWindowText(LL14(L"出力フォルダ", L"Output folder", L"Dossier de sortie", L"Cartella di output",
-			L"Carpeta de salida", L"출력 폴더", L"输出文件夹", L"مجلد الإخراج",
-			L"Папка вывода", L"Ausgabeordner", L"Pasta de saída", L"Uitvoermap",
-			L"Folder wyjściowy", L"Çıktı klasörü"));
-	}
-	else {
-		m_pathLabel.SetWindowText(LL14(L"出力ファイル名", L"Output file", L"Fichier de sortie", L"File di output",
-			L"Archivo de salida", L"출력 파일", L"输出文件名", L"اسم الملف",
-			L"Выходной файл", L"Ausgabedatei", L"Arquivo de saída", L"Uitvoerbestand",
-			L"Plik wyjściowy", L"Çıktı dosyası"));
-	}
 	m_fadeCheck.SetWindowText(LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza",
 		L"Fundido", L"페이드 아웃", L"淡出", L"تلاشي",
 		L"Затухание", L"Ausblenden", L"Fade out", L"Fade-out",
 		L"Wyciszanie", L"Solma"));
 	m_fadeLabel.SetWindowText(LL14(L"秒", L"sec", L"sec", L"sec",
+		L"seg", L"초", L"秒", L"ث",
+		L"сек", L"Sek", L"seg", L"sec",
+		L"sek", L"sn"));
+	m_xfadeCheck.SetWindowText(LL14(L"クロスフェード", L"Crossfade", L"Fondu enchainé", L"Crossfade",
+		L"Fundido cruzado", L"크로스페이드", L"交叉淡入淡出", L"تلاشي متقاطع",
+		L"Кроссфейд", L"Überblenden", L"Crossfade", L"Crossfade",
+		L"Przejscie", L"Capraz solma"));
+	m_xfadeLabel.SetWindowText(LL14(L"秒", L"sec", L"sec", L"sec",
 		L"seg", L"초", L"秒", L"ث",
 		L"сек", L"Sek", L"seg", L"sec",
 		L"sek", L"sn"));
@@ -927,6 +1159,11 @@ BOOL CTranscodeExport::OnInitDialog()
 		L"Copiar etiquetas y portada", L"태그와 재킷 복사", L"复制标签和封面", L"نسخ الوسوم والغلاف",
 		L"Копировать теги и обложку", L"Tags und Cover kopieren", L"Copiar tags e capa", L"Tags en hoes kopiëren",
 		L"Kopiuj tagi i okładkę", L"Etiketleri ve kapağı kopyala"));
+	if (m_promptCheck.GetSafeHwnd())
+		m_promptCheck.SetWindowText(LL14(L"プロンプト実行を適用", L"Apply prompt execution", L"Appliquer le prompt", L"Applica esecuzione prompt",
+			L"Aplicar ejecucion del prompt", L"프롬프트 실행 적용", L"应用提示执行", L"Apply prompt",
+			L"Применить промпт", L"Prompt anwenden", L"Aplicar prompt", L"Prompt toepassen",
+			L"Zastosuj prompt", L"Prompt uygula"));
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi",
 		L"Cerrar", L"닫기", L"关闭", L"إغلاق",
 		L"Закрыть", L"Schließen", L"Fechar", L"Sluiten",
@@ -937,28 +1174,8 @@ BOOL CTranscodeExport::OnInitDialog()
 		L"Wykonaj", L"Çalıştır"));
 
 	m_loop.SetWindowText(L"1");
-	// KPI秒数はサンプリング行の左側へ（繰返し行の圧縮レベルと重ねない）
+	// KPI秒数はリソース＋DDX（動的 Create だとアクリル下で白抜けする）
 	{
-		CRect rLoop, rLoopL, rSrateL, rSrate;
-		m_loop.GetWindowRect(&rLoop); ScreenToClient(&rLoop);
-		m_loopLabel.GetWindowRect(&rLoopL); ScreenToClient(&rLoopL);
-		m_srateLabel.GetWindowRect(&rSrateL); ScreenToClient(&rSrateL);
-		m_srate.GetWindowRect(&rSrate); ScreenToClient(&rSrate);
-		const int labW = 58;
-		const int edW = 72;
-		const int top = rSrate.top;
-		const int labTop = rSrateL.top;
-		CRect rLab(rLoopL.left, labTop, rLoopL.left + labW, labTop + (std::max)(14, rLoopL.Height()));
-		CRect rEd(rLoop.left, top, rLoop.left + edW, top + (std::max)(18, rLoop.Height()));
-		// サンプリングラベルと被るなら編集を左に収める
-		if (rEd.right > rSrateL.left - 8) {
-			rEd.right = rSrateL.left - 8;
-			rEd.left = (std::max)(rLoop.left, rEd.right - edW);
-			rLab.right = rEd.left - 4;
-			rLab.left = (std::max)(rLoopL.left, rLab.right - labW);
-		}
-		m_kpiSecLabel.Create(L"", WS_CHILD | SS_LEFT, rLab, this, IDC_TC_KPI_SEC_L);
-		m_kpiSec.Create(WS_CHILD | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER, rEd, this, IDC_TC_KPI_SEC);
 		m_kpiSecLabel.SetWindowText(LL14(L"長さ(秒)", L"Length (sec)", L"Duree (s)", L"Durata (s)",
 			L"Duracion (s)", L"길이(초)", L"长度(秒)", L"المدة (ث)",
 			L"Длина (сек)", L"Dauer (s)", L"Duracao (s)", L"Duur (s)",
@@ -999,19 +1216,38 @@ BOOL CTranscodeExport::OnInitDialog()
 	if (fadeSec <= 0) fadeSec = 15;
 	int trimKeep = savedata.wav_export_trim_keep_sec;
 	if (trimKeep <= 0) trimKeep = 1;
+	int xfadeSec = savedata.wav_export_xfade_sec;
+	if (xfadeSec < 1) xfadeSec = 5;
 	CString s;
 	s.Format(L"%d", fadeSec);
 	m_fadeSec.SetWindowText(s);
 	s.Format(L"%d", trimKeep);
 	m_trimSec.SetWindowText(s);
+	s.Format(L"%d", xfadeSec);
+	m_xfadeSec.SetWindowText(s);
 	m_fadeCheck.SetCheck(savedata.wav_export_fade ? BST_CHECKED : BST_UNCHECKED);
 	m_trimCheck.SetCheck(savedata.wav_export_trim_lead ? BST_CHECKED : BST_UNCHECKED);
 	m_copyTags.SetCheck(savedata.wav_export_copy_tags ? BST_CHECKED : BST_UNCHECKED);
+	if (m_promptCheck.GetSafeHwnd())
+		m_promptCheck.SetCheck((savedata.wav_export_apply_prompt || MpPromptIsActive()) ? BST_CHECKED : BST_UNCHECKED);
 
-	if (multiFile)
-		m_path.SetWindowText(TcDefaultFolderFromPc(pc));
-	else
-		m_path.SetWindowText(OutputPathForItem(TcDefaultFolderFromPc(pc), pc, CurrentFormat()));
+	// クロスフェードは複数選択時のみ。チェック時は単体ファイル名モード。
+	const BOOL showXfade = multiFile && pcs.size() >= 2;
+	m_xfadeCheck.ShowWindow(showXfade ? SW_SHOW : SW_HIDE);
+	m_xfadeSec.ShowWindow(showXfade ? SW_SHOW : SW_HIDE);
+	m_xfadeLabel.ShowWindow(showXfade ? SW_SHOW : SW_HIDE);
+	if (showXfade) {
+		const bool on = m_preferXfade || (savedata.wav_export_xfade != 0);
+		m_xfadeCheck.SetCheck(on ? BST_CHECKED : BST_UNCHECKED);
+	}
+	else {
+		m_xfadeCheck.SetCheck(BST_UNCHECKED);
+	}
+
+	const bool xfadeNow = IsXfadeMode();
+	ExportTagUi_InitFields(multiFile && !xfadeNow, pc, m_title, m_artist, m_album,
+		m_titleL, m_artistL, m_albumL, m_coverL, m_coverPic, m_cover, m_coverClear, m_coverPath, m_coverBmp);
+	ApplyPathModeUi(false);
 	m_status.SetWindowText(L"");
 	if (CWnd* pPh = GetDlgItem(IDC_TC_PROGRESS)) {
 		CRect rc; pPh->GetWindowRect(&rc); ScreenToClient(&rc);
@@ -1026,8 +1262,6 @@ BOOL CTranscodeExport::OnInitDialog()
 	}
 	if (CWnd* pProgL = GetDlgItem(IDC_TC_PROG_L))
 		pProgL->SetWindowText(LL14(L"進捗", L"Progress", L"Progression", L"Avanzamento", L"Progreso", L"진행", L"进度", L"Progress", L"Прогресс", L"Fortschritt", L"Progresso", L"Voortgang", L"Postep", L"Ilerleme"));
-	ExportTagUi_InitFields(multiFile, pc, m_title, m_artist, m_album,
-		m_titleL, m_artistL, m_albumL, m_coverL, m_coverPic, m_cover, m_coverClear, m_coverPath, m_coverBmp);
 	DragAcceptFiles(TRUE);
 
 	// パス行を下げたあと下段が食い込む／余白が空きすぎるのを整列し、ダイアログ高さを詰める
@@ -1092,13 +1326,34 @@ BOOL CTranscodeExport::OnInitDialog()
 		placeY(m_fadeCheck, fadeY);
 		placeY(m_fadeSec, fadeY - 2);
 		placeY(m_fadeLabel, fadeY + 1);
+		// 右列: クロスフェードとタグコピーを同じXに揃える
+		CRect rFadeLab;
+		m_fadeLabel.GetWindowRect(&rFadeLab); ScreenToClient(&rFadeLab);
+		const int rightColX = rFadeLab.right + 16;
+		placeXY(m_xfadeCheck, rightColX, fadeY);
+		{
+			CRect rXc;
+			m_xfadeCheck.GetWindowRect(&rXc); ScreenToClient(&rXc);
+			const int secX = rXc.right + 6;
+			placeXY(m_xfadeSec, secX, fadeY - 2);
+			CRect rXs;
+			m_xfadeSec.GetWindowRect(&rXs); ScreenToClient(&rXs);
+			placeXY(m_xfadeLabel, rXs.right + 4, fadeY + 1);
+		}
 		y = fadeY + (std::max)(heightOf(m_fadeCheck), heightOf(m_fadeSec)) + 8;
 		const int trimY = y;
 		placeY(m_trimCheck, trimY);
 		placeY(m_trimSec, trimY - 2);
 		placeY(m_trimLabel, trimY + 1);
-		placeY(m_copyTags, trimY);
-		y = trimY + (std::max)(heightOf(m_trimCheck), heightOf(m_trimSec)) + 10;
+		placeXY(m_copyTags, rightColX, trimY);
+		y = trimY + (std::max)(heightOf(m_trimCheck), heightOf(m_trimSec)) + 8;
+		if (m_promptCheck.GetSafeHwnd()) {
+			placeY(m_promptCheck, y);
+			y += heightOf(m_promptCheck) + 10;
+		}
+		else {
+			y += 2;
+		}
 		const int titleY = y;
 		placeY(m_titleL, titleY + 2);
 		placeY(m_title, titleY);
@@ -1118,17 +1373,21 @@ BOOL CTranscodeExport::OnInitDialog()
 		const int btnY = y;
 		placeY(m_exec, btnY);
 		placeY(m_close, btnY);
-		y = btnY + heightOf(m_exec) + 8;
-		if (CWnd* pProgL = GetDlgItem(IDC_TC_PROG_L))
+		y = btnY + heightOf(m_exec) + 10;
+		if (CWnd* pProgL = GetDlgItem(IDC_TC_PROG_L)) {
 			placeY(*pProgL, y);
-		y += 14;
+			y += heightOf(*pProgL) + 4;
+		}
+		else {
+			y += 14;
+		}
 		if (m_progress.GetSafeHwnd())
 			placeY(m_progress, y);
 		else if (CWnd* pPh = GetDlgItem(IDC_TC_PROGRESS))
 			placeY(*pPh, y);
-		y += (std::max)(heightOf(m_progress), 16) + 6;
+		y += (std::max)(heightOf(m_progress), 16) + 8;
 		placeY(m_status, y);
-		y += heightOf(m_status) + 8;
+		y += heightOf(m_status) + 10;
 
 		CRect rcClient; GetClientRect(&rcClient);
 		CRect rcWin; GetWindowRect(&rcWin);
@@ -1136,12 +1395,57 @@ BOOL CTranscodeExport::OnInitDialog()
 		if (y + chrome > 120)
 			SetWindowPos(NULL, 0, 0, rcWin.Width(), y + chrome, SWP_NOMOVE | SWP_NOZORDER);
 	}
+
+	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
+		auto addTip = [this](CWnd& w, LPCWSTR text) {
+			if (w.GetSafeHwnd() && text && text[0])
+				m_tooltip.AddTool(&w, text);
+		};
+		addTip(m_xfadeCheck, LL14(
+			L"複数曲を1ファイルに結合し、曲間を指定秒でクロスフェードします",
+			L"Join selected tracks into one file with a crossfade of the given seconds",
+			L"Fusionne les pistes en un fichier avec fondu enchaine",
+			L"Unisce le tracce in un file con crossfade",
+			L"Une las pistas en un archivo con fundido cruzado",
+			L"선택 곡을 한 파일로 합치고 지정 초로 크로스페이드합니다",
+			L"将所选曲目合并为一个文件，并按指定秒数交叉淡入淡出",
+			L"Join tracks into one file with crossfade",
+			L"Объединяет треки в один файл с кроссфейдом",
+			L"Fuegt Titel zu einer Datei mit Ueberblendung zusammen",
+			L"Une as faixas em um arquivo com crossfade",
+			L"Voegt nummers samen tot een bestand met crossfade",
+			L"Laczy utwory w jeden plik z przejściem",
+			L"Secilen parcalari capraz solma ile tek dosyada birlestirir"));
+		addTip(m_xfadeSec, LL14(
+			L"前曲末尾から戻して次曲と重ねる秒数",
+			L"Seconds to overlap the end of the previous track with the next",
+			L"Secondes de chevauchement entre les pistes",
+			L"Secondi di sovrapposizione tra le tracce",
+			L"Segundos de solapamiento entre pistas",
+			L"이전 곡 끝과 다음 곡을 겹칠 초",
+			L"与下一曲重叠的秒数（从前一曲末尾回退）",
+			L"Overlap seconds between tracks",
+			L"Секунды перекрытия между треками",
+			L"Sekunden der Ueberlappung zwischen Titeln",
+			L"Segundos de sobreposicao entre faixas",
+			L"Seconden overlap tussen nummers",
+			L"Sekundy nakładania między utworami",
+			L"Parcalar arasi capraz solma suresi (sn)"));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
+	}
 	return TRUE;
 }
 
 void CTranscodeExport::OnBnClickedCoverClear()
 {
 	ExportTagUi_ClearCover(m_coverPic, m_cover, m_coverPath, m_coverBmp);
+}
+
+BOOL CTranscodeExport::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
 void CTranscodeExport::OnDropFiles(HDROP hDropInfo)
@@ -1180,7 +1484,7 @@ void CTranscodeExport::ExportProgressThunk(int percent, LPCTSTR status, void* us
 void CTranscodeExport::OnCbnSelchangeFormat()
 {
 	RefreshQualityLabels();
-	if (multiFile) return;
+	if (multiFile && !IsXfadeMode()) return;
 	CString path;
 	m_path.GetWindowText(path);
 	const int fmt = CurrentFormat();
@@ -1212,7 +1516,7 @@ void CTranscodeExport::OnBnClickedBrowse()
 {
 	CString path;
 	m_path.GetWindowText(path);
-	if (multiFile) {
+	if (multiFile && !IsXfadeMode()) {
 		if (TcBrowseFolder(this, path))
 			m_path.SetWindowText(path);
 		return;
@@ -1227,17 +1531,21 @@ void CTranscodeExport::OnBnClickedBrowse()
 
 void CTranscodeExport::OnBnClickedExec()
 {
-	CString loopStr, pathStr, fadeStr, trimStr;
+	CString loopStr, pathStr, fadeStr, trimStr, xfadeStr;
 	m_loop.GetWindowText(loopStr);
 	m_path.GetWindowText(pathStr);
 	m_fadeSec.GetWindowText(fadeStr);
 	m_trimSec.GetWindowText(trimStr);
+	m_xfadeSec.GetWindowText(xfadeStr);
 	int loopCount = _tstoi(loopStr);
 	if (loopCount < 1) loopCount = 1;
 	int fadeSec = _tstoi(fadeStr);
 	if (fadeSec < 1) fadeSec = 15;
 	int trimKeepSec = _tstoi(trimStr);
 	if (trimKeepSec < 0) trimKeepSec = 1;
+	int xfadeSec = _tstoi(xfadeStr);
+	if (xfadeSec < 1) xfadeSec = 5;
+	if (xfadeSec > 120) xfadeSec = 120;
 
 	const int fmt = CurrentFormat();
 	int mp3Kbps = 192;
@@ -1253,11 +1561,13 @@ void CTranscodeExport::OnBnClickedExec()
 		mp3Kbps = kbps[qi];
 	}
 
+	const bool xfade = IsXfadeMode();
 	WavExportOptions opts = {};
 	opts.fadeEnable = m_fadeCheck.GetCheck() ? 1 : 0;
 	opts.fadeSec = fadeSec;
 	opts.trimLeadEnable = m_trimCheck.GetCheck() ? 1 : 0;
 	opts.trimKeepSec = trimKeepSec;
+	opts.applyPrompt = (m_promptCheck.GetSafeHwnd() && m_promptCheck.GetCheck()) ? 1 : 0;
 	opts.kpiDurationSec = 0;
 	if (SelectionHasKpi() && m_kpiSec.GetSafeHwnd()) {
 		PersistKpiDurationFromUi();
@@ -1275,15 +1585,19 @@ void CTranscodeExport::OnBnClickedExec()
 	savedata.wav_export_fade_sec = opts.fadeSec;
 	savedata.wav_export_trim_lead = opts.trimLeadEnable;
 	savedata.wav_export_trim_keep_sec = opts.trimKeepSec;
+	savedata.wav_export_apply_prompt = opts.applyPrompt;
+	savedata.wav_export_xfade = (multiFile && m_xfadeCheck.GetSafeHwnd() && m_xfadeCheck.GetCheck()) ? 1 : 0;
+	savedata.wav_export_xfade_sec = xfadeSec;
 	if (fmt == TC_FMT_MP3 || fmt == TC_FMT_FLAC)
 		savedata.tc_format = fmt;
 	savedata.tc_mp3_kbps = mp3Kbps;
 	savedata.tc_flac_level = flacLevel;
 	savedata.wav_export_copy_tags = m_copyTags.GetCheck() ? 1 : 0;
-	ExportTagUi_Collect(multiFile, savedata.wav_export_copy_tags, m_title, m_artist, m_album, m_coverPath, opts);
+	// クロスフェードは単体出力なのでタイトルも適用対象
+	ExportTagUi_Collect(multiFile && !xfade, savedata.wav_export_copy_tags, m_title, m_artist, m_album, m_coverPath, opts);
 
 	if (pathStr.IsEmpty()) {
-		m_status.SetWindowText(multiFile
+		m_status.SetWindowText((multiFile && !xfade)
 			? LL14(L"フォルダを指定してください", L"Please specify folder", L"Veuillez specifier le dossier", L"Specificare la cartella",
 				L"Especifique la carpeta", L"폴더를 지정하세요", L"请指定文件夹", L"يرجى تحديد المجلد",
 				L"Укажите папку", L"Bitte Ordner angeben", L"Especifique a pasta", L"Geef map op",
@@ -1311,7 +1625,90 @@ void CTranscodeExport::OnBnClickedExec()
 	UpdateWindow();
 
 	BOOL ok = TRUE;
-	if (multiFile) {
+	if (xfade) {
+		CString finalPath = NormalizeOutPath(pathStr, fmt);
+		m_path.SetWindowText(finalPath);
+		CString accumWav = (fmt == TC_FMT_WAV) ? finalPath : TcMakeTempWavPath();
+		const size_t total = pcs.size();
+		WavExportOptions pieceOpts = opts;
+		pieceOpts.copyTags = 0;
+		pieceOpts.multiFile = 0;
+		for (size_t i = 0; i < total && ok; ++i) {
+			const bool last = (i + 1 == total);
+			pieceOpts.fadeEnable = (last && opts.fadeEnable) ? 1 : 0;
+			CString piecePath;
+			if (i == 0)
+				piecePath = accumWav;
+			else
+				piecePath = TcMakeTempWavPath();
+			const int base = (int)((i * 100) / total);
+			const int span = (int)(((i + 1) * 100) / total) - base;
+			MpDecodeProgressSetSegment(base, span > 0 ? span : 1);
+			if (fmt != TC_FMT_WAV)
+				MpDecodeProgressSetPcmCap(78);
+			else
+				MpDecodeProgressSetPcmCap(95);
+			CString st;
+			st.Format(LL14(L"クロスフェード出力中... (%d/%d)", L"Crossfade export... (%d/%d)", L"Export fondu... (%d/%d)", L"Export crossfade... (%d/%d)",
+				L"Export fundido... (%d/%d)", L"크로스페이드 출력 중... (%d/%d)", L"交叉淡入淡出导出中... (%d/%d)", L"Crossfade export... (%d/%d)",
+				L"Кроссфейд... (%d/%d)", L"Ueberblend-Export... (%d/%d)", L"Export crossfade... (%d/%d)", L"Crossfade-export... (%d/%d)",
+				L"Eksport przejścia... (%d/%d)", L"Capraz solma... (%d/%d)"),
+				(int)(i + 1), (int)total);
+			m_status.SetWindowText(st);
+			UpdateWindow();
+			DoEvent();
+			ok = og->ExportToWav(&pcs[i], piecePath, loopCount, &pieceOpts, false);
+			// 2曲目以降を先頭WAVのHz/ch/bitへ揃える（ソースのままでも合成可能に）
+			if (ok && i == 0) {
+				CFile f;
+				if (f.Open(piecePath, CFile::modeRead | CFile::shareDenyWrite)) {
+					TcWavInfo wi = {};
+					if (TcReadWavInfo(f, wi) && wi.hz > 0 && wi.ch >= 1) {
+						if (opts.sampleRate == 0)
+							pieceOpts.sampleRate = (int)wi.hz;
+						pieceOpts.forceChannels = (int)wi.ch;
+						if (wi.bits == 16 || wi.bits == 24 || wi.bits == 32)
+							pieceOpts.forceBits = (int)wi.bits;
+					}
+					f.Close();
+				}
+			}
+			if (ok && i > 0) {
+				m_status.SetWindowText(LL14(L"クロスフェード合成中...", L"Mixing crossfade...", L"Mixage fondu...", L"Mix crossfade...",
+					L"Mezclando fundido...", L"크로스페이드 합성 중...", L"交叉淡入淡出合成中...", L"Mixing crossfade...",
+					L"Сведение кроссфейда...", L"Ueberblendung mischen...", L"Misturando crossfade...", L"Crossfade mixen...",
+					L"Mieszanie przejścia...", L"Capraz solma karistiriliyor..."));
+				UpdateWindow();
+				ok = TcAppendCrossfadeWav(accumWav, piecePath, xfadeSec);
+				DeleteFile(piecePath);
+			}
+		}
+		if (ok && fmt != TC_FMT_WAV) {
+			MpDecodeProgressReport(80, LL14(
+				L"エンコード中…", L"Encoding...", L"Encodage...", L"Codifica...", L"Codificando...",
+				L"인코딩 중…", L"编码中…", L"Encoding...", L"Кодирование...", L"Kodiere...",
+				L"Codificando...", L"Coderen...", L"Kodowanie...", L"Kodlaniyor..."));
+			if (fmt == TC_FMT_FLAC)
+				ok = EncodeWavToFlac(accumWav, finalPath, flacLevel);
+			else
+				ok = EncodeWavToMp3(accumWav, finalPath, mp3Kbps);
+		}
+		if (fmt != TC_FMT_WAV)
+			DeleteFile(accumWav);
+		if (ok && pcs[0].fol[0] != 0) {
+			FileTagFields fill;
+			fill.title = opts.tagTitle;
+			fill.artist = opts.tagArtist;
+			fill.album = opts.tagAlbum;
+			const int copyTags = opts.copyTags ? 1 : 0;
+			const bool needMeta = copyTags
+				|| !fill.title.IsEmpty() || !fill.artist.IsEmpty() || !fill.album.IsEmpty()
+				|| !opts.coverImagePath.IsEmpty();
+			if (needMeta)
+				ApplyExportTagsAndCover(pcs[0].fol, finalPath, copyTags, &fill, opts.coverImagePath);
+		}
+	}
+	else if (multiFile) {
 		CString folder = pathStr;
 		CString lower = folder;
 		lower.MakeLower();

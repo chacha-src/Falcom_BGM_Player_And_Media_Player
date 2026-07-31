@@ -1263,6 +1263,20 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Exportar audio...", L"오디오 내보내기...", L"音频导出…", L"تصدير الصوت...",
 			L"Экспорт аудио...", L"Audio exportieren...", L"Exportar audio...", L"Audio exporteren...",
 			L"Eksport audio...", L"Ses disa aktar..."));
+	{
+		int selCount = 0;
+		int idx = -1;
+		while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+			if (idx < playcnt) ++selCount;
+		}
+		if (selCount >= 2) {
+			menu.AppendMenu(MF_STRING, PL_CTX_XFADE,
+				LL14(L"クロスフェード書き出し…", L"Crossfade export...", L"Export fondu enchaine...", L"Esporta con crossfade...",
+					L"Exportar con fundido cruzado...", L"크로스페이드 내보내기...", L"交叉淡入淡出导出…", L"تصدير بتلاشي متقاطع...",
+					L"Экспорт с кроссфейдом...", L"Ueberblend-Export...", L"Exportar com crossfade...", L"Crossfade-export...",
+					L"Eksport z przejsciem...", L"Capraz solma disa aktar..."));
+		}
+	}
 	menu.AppendMenu(MF_STRING, PL_CTX_TAG_EDIT,
 		LL14(L"タグ編集…", L"Edit tags...", L"Modifier les tags...", L"Modifica tag...",
 			L"Editar etiquetas...", L"태그 편집...", L"编辑标签…", L"تحرير الوسوم...",
@@ -1395,6 +1409,7 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 {
 	if (cmd == PL_CTX_INFO) OnList();
 	else if (cmd == PL_CTX_WAV) OnPopWavExport();
+	else if (cmd == PL_CTX_XFADE) OnPopXfadeExport();
 	else if (cmd == PL_CTX_TRANSCODE) OnPopTranscode();
 	else if (cmd == PL_CTX_TAG_EDIT) OnPopTagEdit();
 	else if (cmd == PL_CTX_DEL) Del();
@@ -6140,6 +6155,7 @@ void CPlayList::OnPopWavExport()
 	if (indices.empty()) return;
 	CTranscodeExport* a = new CTranscodeExport(GetPlaylistModalOwner(this));
 	a->m_initialTab = -1; // 前回形式(mp3/FLAC)。WAVはタブで切替
+	a->m_preferXfade = false;
 	w_flg = FALSE;
 	if (indices.size() == 1) {
 		a->multiFile = false;
@@ -6159,6 +6175,29 @@ void CPlayList::OnPopWavExport()
 	delete a;
 }
 
+void CPlayList::OnPopXfadeExport()
+{
+	std::vector<int> indices;
+	int Lindex = -1;
+	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		if (Lindex < playcnt) indices.push_back(Lindex);
+	}
+	if (indices.size() < 2) return;
+	CTranscodeExport* a = new CTranscodeExport(GetPlaylistModalOwner(this));
+	a->m_initialTab = -1;
+	a->m_preferXfade = true;
+	w_flg = FALSE;
+	a->multiFile = true;
+	a->pcs.reserve(indices.size());
+	for (size_t i = 0; i < indices.size(); ++i)
+		a->pcs.push_back(pc[indices[i]]);
+	memcpy(&a->pc, &pc[indices[0]], sizeof(playlistdata0));
+	CWnd::PostMessage(0x118);
+	a->DoModal();
+	w_flg = TRUE;
+	delete a;
+}
+
 void CPlayList::OnPopTranscode()
 {
 	std::vector<int> indices;
@@ -6169,6 +6208,7 @@ void CPlayList::OnPopTranscode()
 	if (indices.empty()) return;
 	CTranscodeExport* a = new CTranscodeExport(GetPlaylistModalOwner(this));
 	a->m_initialTab = (savedata.tc_format == 1) ? 2 : 1; // FLAC or mp3
+	a->m_preferXfade = false;
 	w_flg = FALSE;
 	if (indices.size() == 1) {
 		a->multiFile = false;

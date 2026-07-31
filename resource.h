@@ -723,6 +723,16 @@
 #define IDC_MCR_TIME                    3725
 #define IDC_MCR_HOST                    3726
 #define IDC_MCR_HELP                    3727
+#define IDC_MCR_ANALYZE                 3728
+#define IDC_MCR_RUN                     3729
+#define IDC_MCR_STOP                    3730
+#define IDC_MCR_RESET                   3731
+#define IDC_MCR_CLEAR                   3732
+#define IDC_MCR_MODE                    3733
+#define IDC_MCR_MODE_L                  3734
+#define IDC_MCR_PROGRESS                3735
+#define IDC_WAVEXPORT_PROMPT            3736
+#define IDC_TC_PROMPT                   3737
 #define IDC_MCP_T0                      3727
 #define IDC_MCP_T1                      3728
 #define IDC_MCP_V0                      3729
@@ -960,6 +970,9 @@
 #define IDC_TC_KPI_SEC                  3719
 #define IDC_TC_SRATE_L                  3720
 #define IDC_TC_SRATE                    3721
+#define IDC_TC_XFADE                    3738
+#define IDC_TC_XFADE_SEC                3739
+#define IDC_TC_XFADE_L                  3740
 
 #define ID_MP_SPEANA_BAR                32960
 #define ID_MP_SPEANA_MIRROR             32961
@@ -994,7 +1007,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        214
 #define _APS_NEXT_COMMAND_VALUE         32973
-#define _APS_NEXT_CONTROL_VALUE         3738
+#define _APS_NEXT_CONTROL_VALUE         3741
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

@@ -64,7 +64,10 @@ struct WavExportOptions {
 	CString tagAlbum;
 	CString coverImagePath; // jpg/png。指定時はジャケットをこれに差し替え
 	int kpiDurationSec; // KPI(mode==-3)用の書き出し秒数。0以下は既定(240=4分)
-	int sampleRate; // 0=ソースのまま。44100/48000/96000/192000 でリサンプル
+	int sampleRate; // 0=ソースのまま。44100/48000/96000/192000 でリサンプル（明示8000..384000も可）
+	int forceChannels; // 0=ソース。クロスフェード追従用 1..8
+	int forceBits; // 0=ソース。クロスフェード追従用 16/24/32
+	int applyPrompt; // 1=プロンプト実行を書き出しPCMへ時間適用
 };
 
 class CEqualizer;

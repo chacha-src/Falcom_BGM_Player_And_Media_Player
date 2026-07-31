@@ -46,6 +46,7 @@ public:
 	CCustomEdit m_trimSec;
 	CCustomStatic m_trimLabel;
 	CCustomCheckBox m_copyTags;
+	CCustomCheckBox m_promptCheck;
 	CCustomProgressCtrl m_progress;
 	CCustomStatic m_titleL;
 	CCustomEdit m_title;

@@ -444,6 +444,11 @@ struct save{
 	int mpCmdRollW;
 	int mpCmdRollH;
 	int mpCmdRollMainLock;  // 1=メインに追随
+	int mpCmdRollPxPerSec10; // 拡大率: m_pxPerSec*10 (既定120=12px/s)
+	int wav_export_apply_prompt; // 1=書き出し時にプロンプト実行を適用
+	// --- 複数書き出しクロスフェード(末尾追記。旧.datは0/5へ) ---
+	int wav_export_xfade;     // 1=複数選択時に1ファイルへクロスフェード結合
+	int wav_export_xfade_sec; // クロスフェード秒(既定5)
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

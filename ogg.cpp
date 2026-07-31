@@ -339,6 +339,10 @@ BOOL COggApp::InitInstance()
 	savedata.mpCmdRollW = 900;
 	savedata.mpCmdRollH = 560;
 	savedata.mpCmdRollMainLock = 0;
+	savedata.mpCmdRollPxPerSec10 = 120; // 12.0 px/s
+	savedata.wav_export_apply_prompt = 0;
+	savedata.wav_export_xfade = 0;
+	savedata.wav_export_xfade_sec = 5;
 	savedata.pianorollviewmode = 0;
 	savedata.pianorollkeyrange = 108;
 	savedata.pianorollnotename = 1;
@@ -822,6 +826,20 @@ BOOL COggApp::InitInstance()
 		savedata.mpCmdRollMainLock = 0;
 	else if (savedata.mpCmdRollMainLock != 0)
 		savedata.mpCmdRollMainLock = 1;
+	if (datFileSize < (int)(offsetof(save, mpCmdRollPxPerSec10) + sizeof(savedata.mpCmdRollPxPerSec10))
+		|| savedata.mpCmdRollPxPerSec10 < 15 || savedata.mpCmdRollPxPerSec10 > 4800)
+		savedata.mpCmdRollPxPerSec10 = 120;
+	if (datFileSize < (int)(offsetof(save, wav_export_apply_prompt) + sizeof(savedata.wav_export_apply_prompt)))
+		savedata.wav_export_apply_prompt = 0;
+	else if (savedata.wav_export_apply_prompt != 0)
+		savedata.wav_export_apply_prompt = 1;
+	if (datFileSize < (int)(offsetof(save, wav_export_xfade) + sizeof(savedata.wav_export_xfade)))
+		savedata.wav_export_xfade = 0;
+	else if (savedata.wav_export_xfade != 0)
+		savedata.wav_export_xfade = 1;
+	if (datFileSize < (int)(offsetof(save, wav_export_xfade_sec) + sizeof(savedata.wav_export_xfade_sec))
+		|| savedata.wav_export_xfade_sec < 1 || savedata.wav_export_xfade_sec > 120)
+		savedata.wav_export_xfade_sec = 5;
 	// 簡易ピアノロール 表示拡張(末尾追記): 旧.dat には無いので既定値へ
 	if (datFileSize < (int)(offsetof(save, pianorollviewmode) + sizeof(savedata.pianorollviewmode)))
 		savedata.pianorollviewmode = 0;
