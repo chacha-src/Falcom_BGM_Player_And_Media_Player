@@ -27,7 +27,9 @@ void ApplyPlaylistRowDisplay(const playlistdata0& row);
 #define WM_OGG_ENTER_MP_MODE (WM_APP + 101)
 #endif
 // MP から EQ/ピアノ/アナの開閉を遅延実行(ボタンハンドラ内 Create/Destroy 回避)
-// wParam: 1=piano, 2=analyzer (EQ は IDC_BUTTON59 の PostMessage を使用)
+// wParam: 1=piano toggle, 2=analyzer toggle (EQ は IDC_BUTTON59 の PostMessage)
+//         10..15=起動時サブUI復元(1メッセージ=1 Create、次を PostMessage)
+//         10=EQ 11=ピアノ 12=Tune 13=アナライザ 14=プロンプト 15=ロール
 #ifndef WM_OGG_TOGGLE_SUBUI
 #define WM_OGG_TOGGLE_SUBUI (WM_APP + 102)
 #endif
@@ -393,7 +395,7 @@ public:
 
 	afx_msg void OnSwitchMode();   // メディアプレイヤーモードへ切替
 	afx_msg LRESULT OnEnterFalcomMsg(WPARAM, LPARAM);  // mp→ファルコム特化型 復帰(遅延実行)
-	afx_msg LRESULT OnToggleSubUiMsg(WPARAM wParam, LPARAM lParam);  // mp→ピアノ/アナ開閉(遅延)
+	afx_msg LRESULT OnToggleSubUiMsg(WPARAM wParam, LPARAM lParam);  // mp→ピアノ/アナ開閉・起動復元(遅延)
 	afx_msg void OnWindowPosChanging(WINDOWPOS* lpwndpos);
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	void StartTimerpVsyncThread();

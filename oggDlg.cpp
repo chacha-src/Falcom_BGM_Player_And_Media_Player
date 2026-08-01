@@ -796,6 +796,8 @@ static int g_nCurrentKpiIndex = 0;
 // KPI 読み込み中に二重起動インスタンスから WM_APP+1(再生要求)が届いた場合の遅延フラグ。
 // 読み込み中に play() をネスト実行させず、plug() 完了後に再ポストして処理する。
 static BOOL g_kpiLoadDeferredPlay = FALSE;
+// 起動時サブUI復元中(1メッセージ=1 Create)。MP Timer3 の SyncPushToggleButtons 再入を抑止。
+int g_oggSubUiRestoring = 0;
 
 static int CountKpiFiles(CString ff)
 {
@@ -3623,8 +3625,6 @@ BOOL COggDlg::OnInitDialog()
 
 	stflg = TRUE;
 
-	SetTimer(59877, 500, NULL); // eq
-
 	// ツールチップ・更新チェック・スペアナ窓関数テーブルなど、初回表示後でよい重い処理
 	PostMessage(WM_OGG_DEFERRED_HEAVY_INIT, 0, 0);
 
@@ -3643,6 +3643,8 @@ BOOL COggDlg::OnInitDialog()
 	// 後回しになり、KPI〜MP 間で CInvalidArgException が出る順序に変わっていた。
 	if (savedata.playerMode == 1)
 		EnterMediaPlayerMode();
+	// サブUI復元は MP Create 完了後に武装(Create 中の WM_TIMER ネストを避ける)
+	SetTimer(59877, 500, NULL);
 	return TRUE;  // TRUE を返すとコントロールに設定したフォーカスは失われません。
 }
 //////////////////////////////////////////////////////////////////////////////
@@ -19047,54 +19049,16 @@ void timerog1(UINT nIDEvent)
 	if (nIDEvent == 59877) {
 		og->KillTimer(59877);
 		if (!og) return;
-		if (savedata.eqwindow == 1) {
-			if (og->m_EqualizerDlg && !::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
-			{
-				og->m_EqualizerDlg->Create(IDD_EQUALIZER, og);
-			}
-
-			if (og->m_EqualizerDlg && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
-				og->m_EqualizerDlg->ShowWindow(SW_SHOW);
-		}
-		if (savedata.pianorollwindow == 1) {
-			if (og->m_PianoRollDlg && !::IsWindow(og->m_PianoRollDlg->GetSafeHwnd()))
-			{
-				og->m_PianoRollDlg->Create(IDD_PIANOROLL, og);
-			}
-
-			if (og->m_PianoRollDlg && ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd()))
-				og->m_PianoRollDlg->ShowWindow(SW_SHOW);
-		}
-		if (savedata.prTunewindow == 1) {
-			if (og->m_PianoRollTuneDlg && !::IsWindow(og->m_PianoRollTuneDlg->GetSafeHwnd()))
-			{
-				if (!og->m_PianoRollTuneDlg->Create(IDD_PIANOROLL_TUNE, og))
-					savedata.prTunewindow = 0;
-			}
-			if (og->m_PianoRollTuneDlg && ::IsWindow(og->m_PianoRollTuneDlg->GetSafeHwnd()))
-				og->m_PianoRollTuneDlg->ShowWindow(SW_SHOW);
-		}
-		if (savedata.analyzerwindow == 1) {
-			// 親作成直後の同期 Create は避ける(CreateDialog ネスト対策)。
-			// タイマー発火時点では親は既に生きているのでここは安全。
-			if (og->m_AnalyzerDlg && !::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
-			{
-				if (!og->m_AnalyzerDlg->Create(IDD_ANALYZER, og))
-					savedata.analyzerwindow = 0;
-			}
-			if (og->m_AnalyzerDlg && ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
-				og->m_AnalyzerDlg->ShowWindow(SW_SHOW);
-		}
-		{
+		// MP モードでは UI 準備完了まで待つ(Create 途中のネスト復元を避ける)
+		if (savedata.playerMode == 1) {
 			extern CMediaPlayerDlg* mp;
-			CWnd* pParent = (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
-				? (CWnd*)mp : (CWnd*)og;
-			if (savedata.mpPromptwindow == 1)
-				MpShowPromptDialog(pParent, FALSE);
-			if (savedata.mpCmdRollwindow == 1)
-				MpShowCommandRollDialog(pParent, FALSE);
+			if (!mp || !::IsWindow(mp->GetSafeHwnd()) || !mp->m_uiReady) {
+				og->SetTimer(59877, 100, NULL);
+				return;
+			}
 		}
-
+		// 同期一括 Create はしない。1窓ずつ WM_OGG_TOGGLE_SUBUI(10..15) で復元。
+		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 10, 0);
 	}
 
 	if (nIDEvent == 4923) {
@@ -23414,11 +23378,86 @@ LRESULT COggDlg::OnEnterMpModeMsg(WPARAM, LPARAM)
 
 LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 {
-	// MP ボタンから PostMessage 経由。Create/Destroy をネストさせない。
+	// MP ボタン / 起動復元から PostMessage 経由。Create/Destroy をネストさせない。
 	if (wParam == 1)
 		TogglePianoRoll();
 	else if (wParam == 2)
 		ToggleAnalyzer();
+	else if (wParam >= 10 && wParam <= 15) {
+		// 起動時サブUI復元: 開くだけ(トグルしない)。1メッセージ=最大1 Create。
+		// SW_SHOWNOACTIVATE でフォーカス奪取・ちらつきを抑える。
+		g_oggSubUiRestoring = 1;
+		try {
+		if (wParam == 10) {
+			if (savedata.eqwindow == 1 && m_EqualizerDlg) {
+				if (!::IsWindow(m_EqualizerDlg->GetSafeHwnd())) {
+					if (!m_EqualizerDlg->Create(IDD_EQUALIZER, this))
+						savedata.eqwindow = 0;
+				}
+				if (savedata.eqwindow == 1 && ::IsWindow(m_EqualizerDlg->GetSafeHwnd()))
+					m_EqualizerDlg->ShowWindow(SW_SHOWNOACTIVATE);
+			}
+		}
+		else if (wParam == 11) {
+			if (savedata.pianorollwindow == 1 && m_PianoRollDlg) {
+				if (!::IsWindow(m_PianoRollDlg->GetSafeHwnd())) {
+					if (!m_PianoRollDlg->Create(IDD_PIANOROLL, this))
+						savedata.pianorollwindow = 0;
+				}
+				if (savedata.pianorollwindow == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
+					m_PianoRollDlg->ShowWindow(SW_SHOWNOACTIVATE);
+			}
+		}
+		else if (wParam == 12) {
+			if (savedata.prTunewindow == 1 && m_PianoRollTuneDlg) {
+				if (!::IsWindow(m_PianoRollTuneDlg->GetSafeHwnd())) {
+					if (!m_PianoRollTuneDlg->Create(IDD_PIANOROLL_TUNE, this))
+						savedata.prTunewindow = 0;
+				}
+				if (savedata.prTunewindow == 1 && ::IsWindow(m_PianoRollTuneDlg->GetSafeHwnd()))
+					m_PianoRollTuneDlg->ShowWindow(SW_SHOWNOACTIVATE);
+			}
+		}
+		else if (wParam == 13) {
+			if (savedata.analyzerwindow == 1 && m_AnalyzerDlg) {
+				if (!::IsWindow(m_AnalyzerDlg->GetSafeHwnd())) {
+					if (!m_AnalyzerDlg->Create(IDD_ANALYZER, this))
+						savedata.analyzerwindow = 0;
+				}
+				if (savedata.analyzerwindow == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
+					m_AnalyzerDlg->ShowWindow(SW_SHOWNOACTIVATE);
+			}
+		}
+		else if (wParam == 14) {
+			if (savedata.mpPromptwindow == 1) {
+				extern CMediaPlayerDlg* mp;
+				CWnd* pParent = (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+					? (CWnd*)mp : (CWnd*)this;
+				MpShowPromptDialog(pParent, FALSE);
+			}
+		}
+		else if (wParam == 15) {
+			if (savedata.mpCmdRollwindow == 1) {
+				extern CMediaPlayerDlg* mp;
+				CWnd* pParent = (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+					? (CWnd*)mp : (CWnd*)this;
+				MpShowCommandRollDialog(pParent, FALSE);
+			}
+		}
+		}
+		catch (CException* e) {
+			e->Delete();
+		}
+		g_oggSubUiRestoring = 0;
+		if (wParam < 15)
+			PostMessage(WM_OGG_TOGGLE_SUBUI, wParam + 1, 0);
+		else {
+			// 復元完了: 押下見た目を一度だけ同期(復元中は抑止していた)
+			extern CMediaPlayerDlg* mp;
+			if (mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->SyncPushToggleButtons();
+		}
+	}
 	return 0;
 }
 

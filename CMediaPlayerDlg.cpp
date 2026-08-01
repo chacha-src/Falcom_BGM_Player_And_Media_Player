@@ -1492,6 +1492,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	CCC_GroupBoxesBack(GetSafeHwnd());   // 区分け枠を最背面へ(兄弟コントロールを覆わない)
 	ReloadPlaylistCombo();
 	RefreshList(TRUE);
+	// SyncFromMain / Timer の GetCheck 前に立てる。これより前の WM_SIZE は抑止のまま。
+	m_uiReady = true;
 	SyncFromMain();
 	ApplyListTooltipState(); // 行詳細 ON/OFF とリスト・バルーン切替を初期確定
 #if CCUSTOM_AERO_SUPPORT
@@ -1515,7 +1517,6 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	// 表示確定後にリストの非クライアント(枠/スクロールバー)を再描画して確実に表示
 	// (アクリル時は OpaqueFixer の WM_NCPAINT で不透明化される)。一回限り。
 	SetTimer(6, 120, NULL);
-	m_uiReady = true;
 	return TRUE;
 	}
 	catch (CException* e)
@@ -2519,6 +2520,10 @@ void CMediaPlayerDlg::OnListHeaderEndTrack(NMHDR* pNMHDR, LRESULT* pResult)
 
 void CMediaPlayerDlg::SyncPushToggleButtons()
 {
+	// OnInitDialog 完了前は GetCheck/Repaint しない(Create 途中の再入・例外防止)
+	if (!m_uiReady) return;
+	extern int g_oggSubUiRestoring;
+	if (g_oggSubUiRestoring) return;
 	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
 	const int supeOn = og->m_supe.GetCheck() ? 1 : 0;
 	const int stOn = og->m_st.GetCheck() ? 1 : 0;
