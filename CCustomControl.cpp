@@ -57,6 +57,17 @@ BOOL CCC_IsBlurDialogChild(HWND hWnd)
 static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd);
 static BOOL CCC_CaptionOnlyHostGlass(HWND hWnd);
 
+// キャプション常時アクリル(本文 aero=0)でも子は α=255 必須
+static BOOL CCC_HostNeedsChildOpaque(HWND hWnd)
+{
+#if CCUSTOM_AERO_SUPPORT
+    return CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(hWnd));
+#else
+    UNREFERENCED_PARAMETER(hWnd);
+    return FALSE;
+#endif
+}
+
 // キャプション帯コントロールは AcrylicCaption 時は常に透過（本文 aero と独立）
 static BOOL CCC_UseTransPaint(HWND hWnd, BOOL bAeroMode)
 {
@@ -184,6 +195,9 @@ static void DlgOnPaintAero(CWnd* pWnd, BOOL bAeroEnabled)
 #include <uxtheme.h>
 #pragma comment(lib, "msimg32.lib")
 #pragma comment(lib, "uxtheme.lib")
+#ifndef GCS_RESULTSTR
+#define GCS_RESULTSTR 0x0800
+#endif
 #ifndef DTT_COMPOSITED
 #define DTT_TEXTCOLOR  0x00000001
 #define DTT_GLOWSIZE   0x00000800
@@ -2895,10 +2909,11 @@ void CCustomEdit::RepaintClient()
     if (!GetSafeHwnd())
         return;
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
     {
-        ::RedrawWindow(m_hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
-        SetWindowPos(NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        // UPDATENOW|ERASE はアクリルが一瞬見えるちらつきの元。不透明塗りだけ同期実行。
+        CClientDC dc(this);
+        PaintOpaqueClient(dc);
         return;
     }
 #endif
@@ -2919,7 +2934,11 @@ void CCustomEdit::PaintOpaqueClient(CDC& dc)
     HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (!hdcBuf || !hBP)
     {
+#if CCUSTOM_AERO_SUPPORT
+        CCC_FillRectOpaqueBits(dc.GetSafeHdc(), r, COLOR_EDIT_BG);
+#else
         dc.FillSolidRect(&r, COLOR_EDIT_BG);
+#endif
         DrawClientText(dc, r);
         CCC_DrawInwoman(&dc, r, FALSE);
         return;
@@ -2946,7 +2965,7 @@ void CCustomEdit::ScheduleOpaqueRepaint()
 LRESULT CCustomEdit::OnPostOpaquePaint(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
     {
         CClientDC dc(this);
         PaintOpaqueClient(dc);
@@ -2958,7 +2977,7 @@ LRESULT CCustomEdit::OnPostOpaquePaint(WPARAM, LPARAM)
 void CCustomEdit::OnPaint()
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
     {
         CPaintDC dc(this);
         PaintOpaqueClient(dc);
@@ -2971,11 +2990,11 @@ void CCustomEdit::OnPaint()
 BOOL CCustomEdit::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11() && pDC)
+    if (CCC_HostNeedsChildOpaque(m_hWnd) && pDC)
     {
         CRect r;
         GetClientRect(&r);
-        pDC->FillSolidRect(&r, COLOR_EDIT_BG);
+        CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, COLOR_EDIT_BG);
         return TRUE;
     }
 #endif
@@ -3018,7 +3037,12 @@ LRESULT CCustomEdit::OnPrintClient(WPARAM wParam, LPARAM lParam)
         CRect r;
         GetClientRect(&r);
         CDC* pDC = CDC::FromHandle(hDC);
-        pDC->FillSolidRect(&r, COLOR_EDIT_BG);
+#if CCUSTOM_AERO_SUPPORT
+        if (CCC_HostNeedsChildOpaque(m_hWnd))
+            CCC_FillRectOpaqueBits(hDC, r, COLOR_EDIT_BG);
+        else
+#endif
+            pDC->FillSolidRect(&r, COLOR_EDIT_BG);
         DrawClientText(*pDC, r);
         return 1;
     }
@@ -3027,6 +3051,8 @@ LRESULT CCustomEdit::OnPrintClient(WPARAM wParam, LPARAM lParam)
 
 void CCustomEdit::OnEnUpdate()
 {
+    // OpaqueFixer が WM_CHAR 等で既に不透明描画する。ここでは Invalidate せず
+    // 同期 Opaque のみ(既定描画→アクリル一瞬を避ける)。
     ScheduleOpaqueRepaint();
 }
 
@@ -3056,7 +3082,8 @@ void CCustomEdit::OnSetFocus(CWnd* p)
     Invalidate(FALSE);
     ScheduleOpaqueRepaint();
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    // キャレット点滅が α=0 で穴を開けるので、キャプション常時アクリル時も再不透明化
+    if (CCC_HostNeedsChildOpaque(m_hWnd))
         SetTimer(kEditOpaqueTimerId, 50, NULL);
 #endif
 }
@@ -8499,6 +8526,80 @@ private:
             pThis->MakeWindowOpaque(hWnd);
             return lRes;
         }
+        // Edit: キー入力の既定描画が α=0 で先に載り一瞬アクリルが見える。
+        // 描画停止中に不透明を載せ、SETREDRAW TRUE の Invalidate はすぐ潰す。
+        case WM_CHAR:
+        case WM_DEADCHAR:
+        case WM_IME_CHAR:
+        case WM_PASTE:
+        case WM_CUT:
+        case WM_CLEAR:
+        case WM_UNDO:
+        {
+            wchar_t cls[32];
+            cls[0] = 0;
+            ::GetClassNameW(hWnd, cls, 32);
+            if (::_wcsicmp(cls, L"Edit") != 0)
+                break;
+            ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
+            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            HDC hDC = ::GetDC(hWnd);
+            if (hDC) {
+                pThis->PaintOpaque(hWnd, hDC);
+                ::ReleaseDC(hWnd, hDC);
+            }
+            ::ValidateRect(hWnd, NULL);
+            ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
+            ::ValidateRect(hWnd, NULL);
+            return lRes;
+        }
+        case WM_KEYDOWN:
+        {
+            wchar_t cls[32];
+            cls[0] = 0;
+            ::GetClassNameW(hWnd, cls, 32);
+            if (::_wcsicmp(cls, L"Edit") != 0)
+                break;
+            const WPARAM vk = wParam;
+            const BOOL ctrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            const BOOL mut = (vk == VK_BACK || vk == VK_DELETE
+                || (ctrl && (vk == 'V' || vk == 'X' || vk == 'Z' || vk == 'Y')));
+            if (!mut)
+                break;
+            ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
+            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            HDC hDC = ::GetDC(hWnd);
+            if (hDC) {
+                pThis->PaintOpaque(hWnd, hDC);
+                ::ReleaseDC(hWnd, hDC);
+            }
+            ::ValidateRect(hWnd, NULL);
+            ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
+            ::ValidateRect(hWnd, NULL);
+            return lRes;
+        }
+        case WM_IME_COMPOSITION:
+        {
+            wchar_t cls[32];
+            cls[0] = 0;
+            ::GetClassNameW(hWnd, cls, 32);
+            if (::_wcsicmp(cls, L"Edit") != 0)
+                break;
+            // 確定時だけ(変換中の毎描画は止めない)
+            if (!(lParam & GCS_RESULTSTR))
+                break;
+            ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
+            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            HDC hDC = ::GetDC(hWnd);
+            if (hDC) {
+                pThis->PaintOpaque(hWnd, hDC);
+                ::ReleaseDC(hWnd, hDC);
+            }
+            ::ValidateRect(hWnd, NULL);
+            ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
+            ::ValidateRect(hWnd, NULL);
+            return lRes;
+        }
         case WM_VSCROLL:
         case WM_HSCROLL:
         case WM_MOUSEWHEEL:
@@ -8800,8 +8901,15 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     }
     else if (auto* pEdit = dynamic_cast<CCustomEdit*>(pw))
     {
-        CBrush br(COLOR_EDIT_BG);
-        dc.FillRect(&r, &br);
+#if CCUSTOM_AERO_SUPPORT
+        if (CCC_HostNeedsChildOpaque(hWnd))
+            CCC_FillRectOpaqueBits(hdcBuf, r, COLOR_EDIT_BG);
+        else
+#endif
+        {
+            CBrush br(COLOR_EDIT_BG);
+            dc.FillRect(&r, &br);
+        }
         pEdit->DrawClientText(dc, r);
         dc.Detach();
         return TRUE;
