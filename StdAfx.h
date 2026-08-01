@@ -1,4 +1,4 @@
-// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -250,8 +250,8 @@ struct save{
 	// WAV出力オプション(末尾追記)
 	int wav_export_fade;           // 1=フェードアウト有効
 	int wav_export_fade_sec;       // フェード秒数(既定15)
-	int wav_export_trim_lead;      // 1=先頭無音カット有効
-	int wav_export_trim_keep_sec;  // 先頭に残す無音秒数(既定1)
+	int wav_export_trim_lead;      // 1=先頭無音を指定秒に揃える（長い→カット／短い→パッド）
+	int wav_export_trim_keep_sec;  // 先頭無音の目標秒数(既定1)
 
 	// 最近再生履歴(ジャンプリスト)。analyzer 等の新規フィールドはさらに末尾へ追記すること
 	int mpHistCnt;
@@ -449,6 +449,9 @@ struct save{
 	// --- 複数書き出しクロスフェード(末尾追記。旧.datは0/5へ) ---
 	int wav_export_xfade;     // 1=複数選択時に1ファイルへクロスフェード結合
 	int wav_export_xfade_sec; // クロスフェード秒(既定5)
+	// --- 同時ミックス書き出し(末尾追記) ---
+	int wav_export_mix;       // 1=同時ミックス＋クロスフェード補充
+	int wav_export_mix_n;     // 同時曲数(2..)
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

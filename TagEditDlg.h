@@ -24,6 +24,7 @@ protected:
 
 public:
 	virtual BOOL OnInitDialog();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	afx_msg void OnBnClickedSave();
 	afx_msg void OnBnClickedClose();
 	afx_msg void OnBnClickedCoverClear();
@@ -53,4 +54,5 @@ public:
 	CCustomStandardButton m_close;
 	CString m_coverPath;
 	HBITMAP m_coverBmp;
+	CToolTipCtrl m_tooltip;
 };

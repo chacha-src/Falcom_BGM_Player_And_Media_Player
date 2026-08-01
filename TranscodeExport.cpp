@@ -447,6 +447,347 @@ BOOL TcAppendCrossfadeWav(const CString& accumPath, const CString& nextPath, int
 	return TRUE;
 }
 
+// PCM 1フレームを float[-1,1] へ（最大8ch）
+void TcPcmFrameToFloat(const BYTE* p, int ch, int bits, float* out)
+{
+	for (int c = 0; c < ch; ++c) {
+		if (bits == 16)
+			out[c] = ((const short*)p)[c] / 32768.f;
+		else if (bits == 24) {
+			const int o = c * 3;
+			int iv = p[o] | (p[o + 1] << 8) | ((signed char)p[o + 2] << 16);
+			out[c] = iv / 8388608.f;
+		}
+		else if (bits == 32)
+			out[c] = ((const int*)p)[c] / 2147483648.f;
+		else
+			out[c] = (p[c] - 128) / 128.f;
+	}
+}
+
+// 同時K曲ミックス。終了枠は末尾 xfadeSec で次曲と等パワー交接（プツ切れ防止）。
+// gains[] は相対重み。再生中の重み合計で都度 1.0 に正規化する。
+BOOL TcConcurrentMixWav(const CString& outPath, const CString* paths, const float* gains, int n, int K, int xfadeSec)
+{
+	enum { MAXN = 64, CHUNK = 1024 };
+	if (outPath.IsEmpty() || !paths || !gains || n < 2 || n > MAXN) return FALSE;
+	if (K < 2) K = 2;
+	if (K > n) K = n;
+
+	CFile src[MAXN];
+	TcWavInfo infos[MAXN];
+	__int64 frames[MAXN];
+	TcWavInfo fmt = {};
+	for (int i = 0; i < n; ++i) {
+		if (!src[i].Open(paths[i], CFile::modeRead | CFile::shareDenyWrite)) {
+			for (int j = 0; j < i; ++j) src[j].Close();
+			return FALSE;
+		}
+		infos[i] = {};
+		if (!TcReadWavInfo(src[i], infos[i])) {
+			for (int j = 0; j <= i; ++j) src[j].Close();
+			return FALSE;
+		}
+		if (i == 0) {
+			fmt = infos[i];
+		}
+		else if (infos[i].ch != fmt.ch || infos[i].hz != fmt.hz || infos[i].bits != fmt.bits
+			|| infos[i].blockAlign != fmt.blockAlign) {
+			for (int j = 0; j <= i; ++j) src[j].Close();
+			return FALSE;
+		}
+		frames[i] = infos[i].dataBytes / infos[i].blockAlign;
+		if (frames[i] < 1) {
+			for (int j = 0; j <= i; ++j) src[j].Close();
+			return FALSE;
+		}
+	}
+
+	const int bpf = fmt.blockAlign;
+	const int ch = fmt.ch;
+	const int bits = fmt.bits;
+	if (bpf <= 0 || bpf > 32 || ch < 1 || ch > 8) {
+		for (int i = 0; i < n; ++i) src[i].Close();
+		return FALSE;
+	}
+
+	CFile fo;
+	if (!fo.Open(outPath, CFile::modeCreate | CFile::modeReadWrite | CFile::shareExclusive)) {
+		for (int i = 0; i < n; ++i) src[i].Close();
+		return FALSE;
+	}
+	BYTE hdr[TC_WAV_HDR];
+	src[0].SeekToBegin();
+	if (src[0].Read(hdr, TC_WAV_HDR) != TC_WAV_HDR) {
+		fo.Close();
+		for (int i = 0; i < n; ++i) src[i].Close();
+		return FALSE;
+	}
+	fo.Write(hdr, TC_WAV_HDR);
+
+	__int64 xfadeFramesWant = 0;
+	if (xfadeSec >= 1)
+		xfadeFramesWant = (__int64)xfadeSec * (__int64)fmt.hz;
+
+	// slot: 現曲。xfade中は next に次曲を重ね、旧曲はフェードアウト。
+	int slotTrack[MAXN];
+	__int64 slotPos[MAXN];
+	int slotNext[MAXN];
+	__int64 slotNextPos[MAXN];
+	__int64 slotXfTotal[MAXN];
+	__int64 slotXfPos[MAXN];
+	for (int s = 0; s < MAXN; ++s) {
+		slotTrack[s] = -1;
+		slotPos[s] = 0;
+		slotNext[s] = -1;
+		slotNextPos[s] = 0;
+		slotXfTotal[s] = 0;
+		slotXfPos[s] = 0;
+	}
+	int nextQ = 0;
+	bool wroteAny = false;
+
+	BYTE bufA[CHUNK * 32];
+	BYTE bufB[CHUNK * 32];
+	BYTE outBuf[CHUNK * 32];
+	float acc[CHUNK * 8];
+	float wSum[CHUNK];
+	float sampA[8];
+	float sampB[8];
+
+	for (;;) {
+		// 空きスロットへ即時配置（初回／交接後）。xfadeなし時の補充もここ。
+		for (int s = 0; s < K; ++s) {
+			if (slotTrack[s] >= 0) continue;
+			if (nextQ >= n) continue;
+			slotTrack[s] = nextQ++;
+			slotPos[s] = 0;
+			slotNext[s] = -1;
+			slotNextPos[s] = 0;
+			slotXfTotal[s] = 0;
+			slotXfPos[s] = 0;
+		}
+
+		// 終了が近いスロットへ、残量分だけ先に次曲を重ねて等パワー交接を開始
+		if (xfadeFramesWant >= 1) {
+			for (int s = 0; s < K; ++s) {
+				const int ti = slotTrack[s];
+				if (ti < 0 || slotNext[s] >= 0) continue;
+				if (nextQ >= n) continue;
+				const __int64 rem = frames[ti] - slotPos[s];
+				if (rem <= 0 || rem > xfadeFramesWant) continue;
+				const int ni = nextQ;
+				__int64 xf = rem;
+				if (xf > frames[ni]) xf = frames[ni];
+				if (xf < 1) continue;
+				slotNext[s] = nextQ++;
+				slotNextPos[s] = 0;
+				slotXfTotal[s] = xf;
+				slotXfPos[s] = 0;
+			}
+		}
+
+		__int64 minStep = 0x7FFFFFFFFFFFFFFFLL;
+		bool any = false;
+		for (int s = 0; s < K; ++s) {
+			const int ti = slotTrack[s];
+			if (ti < 0) continue;
+			__int64 rem = frames[ti] - slotPos[s];
+			if (rem <= 0) {
+				if (slotNext[s] >= 0) {
+					slotTrack[s] = slotNext[s];
+					slotPos[s] = slotNextPos[s];
+					slotNext[s] = -1;
+					slotXfTotal[s] = 0;
+					slotXfPos[s] = 0;
+					rem = frames[slotTrack[s]] - slotPos[s];
+					if (rem <= 0) { slotTrack[s] = -1; continue; }
+				}
+				else {
+					slotTrack[s] = -1;
+					continue;
+				}
+			}
+			any = true;
+			if (slotNext[s] >= 0) {
+				const int ni = slotNext[s];
+				__int64 xfRem = slotXfTotal[s] - slotXfPos[s];
+				__int64 nRem = frames[ni] - slotNextPos[s];
+				if (xfRem < rem) rem = xfRem;
+				if (nRem < rem) rem = nRem;
+			}
+			else if (xfadeFramesWant >= 1 && nextQ < n) {
+				// 交接開始点までで一度区切る（プツ切れ前に次曲を入れる）
+				const __int64 untilXf = (frames[ti] - slotPos[s]) - xfadeFramesWant;
+				if (untilXf > 0 && untilXf < rem) rem = untilXf;
+			}
+			if (rem < 1) rem = 1;
+			if (rem < minStep) minStep = rem;
+		}
+		if (!any) break;
+
+		int nFrames = CHUNK;
+		if ((__int64)nFrames > minStep) nFrames = (int)minStep;
+		memset(acc, 0, sizeof(float) * (size_t)nFrames * (size_t)ch);
+		for (int i = 0; i < nFrames; ++i) wSum[i] = 0.f;
+
+		for (int s = 0; s < K; ++s) {
+			const int ti = slotTrack[s];
+			if (ti < 0) continue;
+			const __int64 pos = slotPos[s];
+			src[ti].Seek(infos[ti].dataOffset + pos * bpf, CFile::begin);
+			if (src[ti].Read(bufA, nFrames * bpf) != (UINT)(nFrames * bpf)) {
+				slotTrack[s] = -1;
+				slotNext[s] = -1;
+				continue;
+			}
+			const bool xf = (slotNext[s] >= 0 && slotXfTotal[s] > 0);
+			if (xf) {
+				const int ni = slotNext[s];
+				src[ni].Seek(infos[ni].dataOffset + slotNextPos[s] * bpf, CFile::begin);
+				if (src[ni].Read(bufB, nFrames * bpf) != (UINT)(nFrames * bpf)) {
+					slotNext[s] = -1;
+					slotXfTotal[s] = 0;
+				}
+			}
+
+			for (int i = 0; i < nFrames; ++i) {
+				float gOut = 1.f, gIn = 0.f;
+				if (xf) {
+					const __int64 xi = slotXfPos[s] + i;
+					const float t = (slotXfTotal[s] <= 1)
+						? 1.f
+						: (float)xi / (float)(slotXfTotal[s] - 1);
+					gOut = cosf(t * 1.5707963267948966f);
+					gIn = sinf(t * 1.5707963267948966f);
+				}
+				// サンプルは等パワー(cos/sin)、正規化重みは電力(cos^2/sin^2)で交接中の揺れを抑える
+				TcPcmFrameToFloat(bufA + i * bpf, ch, bits, sampA);
+				for (int c = 0; c < ch; ++c)
+					acc[i * ch + c] += sampA[c] * (gains[ti] * gOut);
+				if (xf && slotNext[s] >= 0) {
+					TcPcmFrameToFloat(bufB + i * bpf, ch, bits, sampB);
+					for (int c = 0; c < ch; ++c)
+						acc[i * ch + c] += sampB[c] * (gains[slotNext[s]] * gIn);
+					wSum[i] += gains[ti] * (gOut * gOut) + gains[slotNext[s]] * (gIn * gIn);
+				}
+				else {
+					wSum[i] += gains[ti];
+				}
+			}
+
+			slotPos[s] = pos + nFrames;
+			if (xf && slotNext[s] >= 0) {
+				slotNextPos[s] += nFrames;
+				slotXfPos[s] += nFrames;
+				if (slotXfPos[s] >= slotXfTotal[s] || slotPos[s] >= frames[ti]) {
+					slotTrack[s] = slotNext[s];
+					slotPos[s] = slotNextPos[s];
+					slotNext[s] = -1;
+					slotXfTotal[s] = 0;
+					slotXfPos[s] = 0;
+				}
+			}
+			else if (slotPos[s] >= frames[ti]) {
+				slotTrack[s] = -1;
+			}
+		}
+
+		// 再生中重みの合計で 1.0 に揃える（25+25→実質50+50、2曲同時時の半分音量を防ぐ）
+		for (int i = 0; i < nFrames; ++i) {
+			const float inv = (wSum[i] > 1.0e-8f) ? (1.f / wSum[i]) : 0.f;
+			BYTE* po = outBuf + i * bpf;
+			for (int c = 0; c < ch; ++c) {
+				float o = acc[i * ch + c] * inv;
+				if (o > 1.f) o = 1.f;
+				if (o < -1.f) o = -1.f;
+				if (bits == 16)
+					((short*)po)[c] = (short)(o * 32767.f);
+				else if (bits == 24) {
+					int v = (int)(o * 8388607.f);
+					const int oa = c * 3;
+					po[oa] = (BYTE)(v & 0xFF);
+					po[oa + 1] = (BYTE)((v >> 8) & 0xFF);
+					po[oa + 2] = (BYTE)((v >> 16) & 0xFF);
+				}
+				else if (bits == 32)
+					((int*)po)[c] = (int)(o * 2147483647.f);
+				else
+					po[c] = (BYTE)(o * 127.f + 128.f);
+			}
+		}
+		fo.Write(outBuf, nFrames * bpf);
+		wroteAny = true;
+	}
+
+	TcFinalizeWavHeader(fo);
+	fo.Close();
+	for (int i = 0; i < n; ++i) src[i].Close();
+	return wroteAny ? TRUE : FALSE;
+}
+
+BOOL TcApplyTailFadeOutWav(const CString& path, int fadeSec)
+{
+	if (fadeSec <= 0) return TRUE;
+	CFile f;
+	if (!f.Open(path, CFile::modeReadWrite | CFile::shareExclusive))
+		return FALSE;
+	TcWavInfo info = {};
+	if (!TcReadWavInfo(f, info) || info.blockAlign <= 0) {
+		f.Close();
+		return FALSE;
+	}
+	const __int64 totalFrames = info.dataBytes / info.blockAlign;
+	__int64 fadeFrames = (__int64)fadeSec * (__int64)info.hz;
+	if (fadeFrames > totalFrames) fadeFrames = totalFrames;
+	if (fadeFrames <= 1) {
+		f.Close();
+		return TRUE;
+	}
+	const __int64 fadeStart = totalFrames - fadeFrames;
+	const int bpf = info.blockAlign;
+	const int bits = info.bits;
+	const int ch = info.ch;
+	BYTE frame[32];
+	if (bpf > 32) {
+		f.Close();
+		return FALSE;
+	}
+	for (__int64 fi = fadeStart; fi < totalFrames; ++fi) {
+		const float t = (float)(fi - fadeStart) / (float)(fadeFrames - 1);
+		const float g = (1.f - t) * (1.f - t);
+		const __int64 pos = info.dataOffset + fi * bpf;
+		f.Seek(pos, CFile::begin);
+		if (f.Read(frame, bpf) != (UINT)bpf) break;
+		for (int c = 0; c < ch; ++c) {
+			if (bits == 16) {
+				short* s = (short*)frame;
+				s[c] = (short)(s[c] * g);
+			}
+			else if (bits == 24) {
+				const int o = c * 3;
+				int v = frame[o] | (frame[o + 1] << 8) | ((signed char)frame[o + 2] << 16);
+				v = (int)(v * g);
+				frame[o] = (BYTE)(v & 0xFF);
+				frame[o + 1] = (BYTE)((v >> 8) & 0xFF);
+				frame[o + 2] = (BYTE)((v >> 16) & 0xFF);
+			}
+			else if (bits == 32) {
+				int* s = (int*)frame;
+				s[c] = (int)(s[c] * g);
+			}
+			else {
+				float v = (frame[c] - 128) * g;
+				frame[c] = (BYTE)(v + 128.f);
+			}
+		}
+		f.Seek(pos, CFile::begin);
+		f.Write(frame, bpf);
+	}
+	f.Close();
+	return TRUE;
+}
+
 } // namespace
 
 BOOL EncodeWavToFlac(const CString& wavPath, const CString& outPath, int compressionLevel)
@@ -725,7 +1066,10 @@ CTranscodeExport::CTranscodeExport(CWnd* pParent)
 	, m_initialTab(-1)
 	, m_preferXfade(false)
 	, m_coverBmp(NULL)
+	, m_mixPctCount(0)
+	, m_mixEditRow(-1)
 {
+	memset(m_mixPct, 0, sizeof(m_mixPct));
 }
 
 CTranscodeExport::~CTranscodeExport()
@@ -766,6 +1110,10 @@ void CTranscodeExport::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_TC_TRIM_L, m_trimLabel);
 	DDX_Control(pDX, IDC_TC_COPY_TAGS, m_copyTags);
 	DDX_Control(pDX, IDC_TC_PROMPT, m_promptCheck);
+	DDX_Control(pDX, IDC_TC_MIX, m_mixCheck);
+	DDX_Control(pDX, IDC_TC_MIX_N_L, m_mixNLabel);
+	DDX_Control(pDX, IDC_TC_MIX_N, m_mixN);
+	DDX_Control(pDX, IDC_TC_MIX_VOL, m_mixVol);
 	DDX_Control(pDX, IDC_TC_TITLE_L, m_titleL);
 	DDX_Control(pDX, IDC_TC_TITLE, m_title);
 	DDX_Control(pDX, IDC_TC_ARTIST_L, m_artistL);
@@ -784,7 +1132,9 @@ BEGIN_MESSAGE_MAP(CTranscodeExport, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_TC_CLOSE, &CTranscodeExport::OnBnClickedClose)
 	ON_BN_CLICKED(IDC_TC_COVER_CLEAR, &CTranscodeExport::OnBnClickedCoverClear)
 	ON_BN_CLICKED(IDC_TC_XFADE, &CTranscodeExport::OnBnClickedXfade)
+	ON_BN_CLICKED(IDC_TC_MIX, &CTranscodeExport::OnBnClickedMix)
 	ON_CBN_SELCHANGE(IDC_TC_FORMAT, &CTranscodeExport::OnCbnSelchangeFormat)
+	ON_CBN_SELCHANGE(IDC_TC_MIX_N, &CTranscodeExport::OnCbnSelchangeMixN)
 	ON_NOTIFY(TCN_SELCHANGE, IDC_TC_TABS, &CTranscodeExport::OnTcnSelchangeTabs)
 	ON_WM_DROPFILES()
 END_MESSAGE_MAP()
@@ -794,10 +1144,123 @@ bool CTranscodeExport::IsXfadeMode()
 	return multiFile && m_xfadeCheck.GetSafeHwnd() && m_xfadeCheck.GetCheck() == BST_CHECKED && pcs.size() >= 2;
 }
 
+bool CTranscodeExport::IsMixMode()
+{
+	return multiFile && m_mixCheck.GetSafeHwnd() && m_mixCheck.GetCheck() == BST_CHECKED && pcs.size() >= 2;
+}
+
+void CTranscodeExport::NormalizeMixPercents()
+{
+	int n = m_mixPctCount;
+	if (n < 1) return;
+	if (n > 64) n = 64;
+	int sum = 0;
+	for (int i = 0; i < n; ++i) {
+		if (m_mixPct[i] < 0) m_mixPct[i] = 0;
+		if (m_mixPct[i] > 1000) m_mixPct[i] = 1000;
+		sum += m_mixPct[i];
+	}
+	if (sum <= 0) {
+		const int each = 100 / n;
+		int rem = 100 - each * n;
+		for (int i = 0; i < n; ++i) {
+			m_mixPct[i] = each + ((i < rem) ? 1 : 0);
+		}
+		return;
+	}
+	if (sum == 100) return;
+	int acc = 0;
+	for (int i = 0; i < n; ++i) {
+		int v = (int)(((__int64)m_mixPct[i] * 100 + sum / 2) / sum);
+		m_mixPct[i] = v;
+		acc += v;
+	}
+	int diff = 100 - acc;
+	for (int i = 0; diff != 0 && i < n; ++i) {
+		if (diff > 0) { m_mixPct[i]++; --diff; }
+		else if (m_mixPct[i] > 0) { m_mixPct[i]--; ++diff; }
+	}
+}
+
+void CTranscodeExport::RebuildMixVolList()
+{
+	if (!m_mixVol.GetSafeHwnd()) return;
+	m_mixVol.DeleteAllItems();
+	const int n = (int)pcs.size();
+	m_mixPctCount = (n > 64) ? 64 : n;
+	if (m_mixPctCount < 1) return;
+	// 選択数が減ったときの古い％残りを消す
+	for (int i = m_mixPctCount; i < 64; ++i)
+		m_mixPct[i] = 0;
+	bool needInit = true;
+	for (int i = 0; i < m_mixPctCount; ++i) {
+		if (m_mixPct[i] != 0) { needInit = false; break; }
+	}
+	if (needInit) {
+		const int each = 100 / m_mixPctCount;
+		int rem = 100 - each * m_mixPctCount;
+		for (int i = 0; i < m_mixPctCount; ++i)
+			m_mixPct[i] = each + ((i < rem) ? 1 : 0);
+	}
+	// 25+25→50+50 など、相対比を保ったまま合計100へ
+	NormalizeMixPercents();
+	for (int i = 0; i < m_mixPctCount; ++i) {
+		CString pct;
+		pct.Format(L"%d", m_mixPct[i]);
+		const int row = m_mixVol.InsertItem(i, pct);
+		CString name = TcBaseNameFromItem(pcs[i]);
+		if (name.IsEmpty()) name.Format(L"#%d", i + 1);
+		m_mixVol.SetItemText(row, 1, name);
+	}
+}
+
+void CTranscodeExport::ApplyMixUi()
+{
+	const BOOL showMix = multiFile && pcs.size() >= 2;
+	if (m_mixCheck.GetSafeHwnd())
+		m_mixCheck.ShowWindow(showMix ? SW_SHOW : SW_HIDE);
+	if (m_mixNLabel.GetSafeHwnd())
+		m_mixNLabel.ShowWindow(showMix ? SW_SHOW : SW_HIDE);
+	if (m_mixN.GetSafeHwnd())
+		m_mixN.ShowWindow(showMix ? SW_SHOW : SW_HIDE);
+	if (m_mixVol.GetSafeHwnd())
+		m_mixVol.ShowWindow(showMix ? SW_SHOW : SW_HIDE);
+	if (!showMix) {
+		if (m_mixCheck.GetSafeHwnd())
+			m_mixCheck.SetCheck(BST_UNCHECKED);
+		return;
+	}
+	const bool mixOn = IsMixMode();
+	if (m_mixN.GetSafeHwnd()) {
+		m_mixN.EnableWindow(mixOn);
+		const int n = (int)pcs.size();
+		int want = m_mixN.GetCurSel() + 2;
+		m_mixN.ResetContent();
+		for (int k = 2; k <= n && k <= 64; ++k) {
+			CString s;
+			s.Format(L"%d", k);
+			m_mixN.AddString(s);
+		}
+		int maxK = n;
+		if (maxK > 64) maxK = 64;
+		if (want < 2) want = savedata.wav_export_mix_n;
+		if (want < 2) want = 2;
+		if (want > maxK) want = maxK;
+		m_mixN.SetCurSel(want - 2);
+	}
+	if (m_mixNLabel.GetSafeHwnd())
+		m_mixNLabel.EnableWindow(mixOn);
+	if (m_mixVol.GetSafeHwnd()) {
+		m_mixVol.EnableWindow(mixOn);
+		if (mixOn)
+			RebuildMixVolList();
+	}
+}
+
 void CTranscodeExport::ApplyPathModeUi(bool keepPathText)
 {
-	const bool xfade = IsXfadeMode();
-	const bool folderMode = multiFile && !xfade;
+	const bool singleOut = IsMixMode() || IsXfadeMode();
+	const bool folderMode = multiFile && !singleOut;
 	if (folderMode) {
 		m_pathLabel.SetWindowText(LL14(L"出力フォルダ", L"Output folder", L"Dossier de sortie", L"Cartella di output",
 			L"Carpeta de salida", L"출력 폴더", L"输出文件夹", L"مجلد الإخراج",
@@ -820,7 +1283,7 @@ void CTranscodeExport::ApplyPathModeUi(bool keepPathText)
 void CTranscodeExport::SyncTitleFieldForPathMode()
 {
 	if (!m_title.GetSafeHwnd()) return;
-	if (IsXfadeMode() || !multiFile) {
+	if (IsMixMode() || IsXfadeMode() || !multiFile) {
 		if (!m_title.IsWindowEnabled()) {
 			FileTagFields src;
 			if (pc.fol[0] != 0)
@@ -841,7 +1304,21 @@ void CTranscodeExport::SyncTitleFieldForPathMode()
 
 void CTranscodeExport::OnBnClickedXfade()
 {
+	// ミックスと併用可: ミックス時は補充クロスフェードのON/秒、非ミックス時は連結クロスフェード
+	ApplyMixUi();
 	ApplyPathModeUi(false);
+}
+
+void CTranscodeExport::OnBnClickedMix()
+{
+	// クロスフェードと併用可（同時ONなら同時ミックス＋補充クロスフェード）
+	ApplyMixUi();
+	ApplyPathModeUi(false);
+}
+
+void CTranscodeExport::OnCbnSelchangeMixN()
+{
+	// 同時曲数のみ保存。音量リストは曲数Nのまま。
 }
 
 int CTranscodeExport::CurrentFormat() const
@@ -875,7 +1352,7 @@ void CTranscodeExport::ApplyTabUi()
 		m_format.SetCurSel(fmt == TC_FMT_FLAC ? TC_FMT_FLAC : TC_FMT_MP3);
 	if (showQ)
 		RefreshQualityLabels();
-	if (!multiFile || IsXfadeMode()) {
+	if (!multiFile || IsXfadeMode() || IsMixMode()) {
 		CString path;
 		m_path.GetWindowText(path);
 		const int dot = path.ReverseFind(L'.');
@@ -1147,14 +1624,24 @@ BOOL CTranscodeExport::OnInitDialog()
 		L"seg", L"초", L"秒", L"ث",
 		L"сек", L"Sek", L"seg", L"sec",
 		L"sek", L"sn"));
-	m_trimCheck.SetWindowText(LL14(L"先頭無音カット", L"Trim leading silence", L"Couper silence initial", L"Taglia silenzio iniziale",
-		L"Cortar silencio inicial", L"앞 무음 제거", L"切除开头静音", L"قص الصمت الابتدائي",
-		L"Обрезать нач. тишину", L"Stille am Anfang kürzen", L"Cortar silêncio inicial", L"Stilte begin trimmen",
-		L"Przytnij ciszę na początku", L"Baştaki sessizliği kes"));
-	m_trimLabel.SetWindowText(LL14(L"保持秒", L"Keep sec", L"Garder sec", L"Mantieni sec",
-		L"Mantener seg", L"유지 초", L"保留秒", L"احتفظ ث",
-		L"Оставить сек", L"Behalten Sek", L"Manter seg", L"Bewaar sec",
-		L"Zostaw sek", L"Tut sn"));
+	if (m_mixCheck.GetSafeHwnd())
+		m_mixCheck.SetWindowText(LL14(L"ミックス", L"Mix", L"Mix", L"Mix",
+			L"Mezcla", L"믹스", L"混音", L"Mix",
+			L"Микс", L"Mix", L"Mix", L"Mix",
+			L"Mix", L"Mix"));
+	if (m_mixNLabel.GetSafeHwnd())
+		m_mixNLabel.SetWindowText(LL14(L"同時曲数", L"Concurrent", L"Simultane", L"Simultanee",
+			L"Simultaneas", L"동시 곡수", L"同时曲数", L"Concurrent",
+			L"Одновременно", L"Gleichzeitig", L"Simultaneas", L"Gelijktijdig",
+			L"Jednoczesne", L"Eszamanli"));
+	m_trimCheck.SetWindowText(LL14(L"先頭無音を揃える", L"Align leading silence", L"Aligner silence initial", L"Allinea silenzio iniziale",
+		L"Alinear silencio inicial", L"앞 무음 맞추기", L"对齐开头静音", L"مواءمة الصمت الابتدائي",
+		L"Выровнять нач. тишину", L"Anfangsstille angleichen", L"Alinhar silencio inicial", L"Beginstilte uitlijnen",
+		L"Wyrównaj ciszę na początku", L"Bastaki sessizligi hizala"));
+	m_trimLabel.SetWindowText(LL14(L"秒", L"sec", L"sec", L"sec",
+		L"seg", L"초", L"秒", L"ث",
+		L"сек", L"Sek", L"seg", L"sec",
+		L"sek", L"sn"));
 	m_copyTags.SetWindowText(LL14(L"タグとジャケットをコピー", L"Copy tags and cover art", L"Copier les tags et la pochette", L"Copia tag e copertina",
 		L"Copiar etiquetas y portada", L"태그와 재킷 복사", L"复制标签和封面", L"نسخ الوسوم والغلاف",
 		L"Копировать теги и обложку", L"Tags und Cover kopieren", L"Copiar tags e capa", L"Tags en hoes kopiëren",
@@ -1231,21 +1718,38 @@ BOOL CTranscodeExport::OnInitDialog()
 	if (m_promptCheck.GetSafeHwnd())
 		m_promptCheck.SetCheck((savedata.wav_export_apply_prompt || MpPromptIsActive()) ? BST_CHECKED : BST_UNCHECKED);
 
-	// クロスフェードは複数選択時のみ。チェック時は単体ファイル名モード。
+	// クロスフェード／ミックスは複数選択時のみ。チェック時は単体ファイル名モード。
 	const BOOL showXfade = multiFile && pcs.size() >= 2;
 	m_xfadeCheck.ShowWindow(showXfade ? SW_SHOW : SW_HIDE);
 	m_xfadeSec.ShowWindow(showXfade ? SW_SHOW : SW_HIDE);
 	m_xfadeLabel.ShowWindow(showXfade ? SW_SHOW : SW_HIDE);
 	if (showXfade) {
-		const bool on = m_preferXfade || (savedata.wav_export_xfade != 0);
-		m_xfadeCheck.SetCheck(on ? BST_CHECKED : BST_UNCHECKED);
+		const bool xfadeOn = m_preferXfade || (savedata.wav_export_xfade != 0);
+		m_xfadeCheck.SetCheck(xfadeOn ? BST_CHECKED : BST_UNCHECKED);
+		// ミックスとクロスフェードは併用可能（排他にしない）
+		if (m_mixCheck.GetSafeHwnd())
+			m_mixCheck.SetCheck((savedata.wav_export_mix != 0) ? BST_CHECKED : BST_UNCHECKED);
 	}
 	else {
 		m_xfadeCheck.SetCheck(BST_UNCHECKED);
+		if (m_mixCheck.GetSafeHwnd())
+			m_mixCheck.SetCheck(BST_UNCHECKED);
 	}
+	if (m_mixVol.GetSafeHwnd()) {
+		m_mixVol.SetAeroMode(FALSE);
+		m_mixVol.SetExtendedStyle(m_mixVol.GetExtendedStyle() | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+		m_mixVol.ModifyStyle(0, LVS_EDITLABELS);
+		while (m_mixVol.DeleteColumn(0)) {}
+		m_mixVol.InsertColumn(0, LL14(L"割合(%)", L"%", L"%", L"%", L"%", L"%", L"%", L"%", L"%", L"%", L"%", L"%", L"%", L"%"), LVCFMT_RIGHT, 56);
+		m_mixVol.InsertColumn(1, LL14(L"曲名", L"Track", L"Piste", L"Traccia", L"Pista", L"곡명", L"曲名", L"Track",
+			L"Трек", L"Titel", L"Faixa", L"Nummer", L"Utwor", L"Parca"), LVCFMT_LEFT, 170);
+	}
+	if (m_mixN.GetSafeHwnd())
+		m_mixN.SetAeroMode(FALSE);
+	ApplyMixUi();
 
-	const bool xfadeNow = IsXfadeMode();
-	ExportTagUi_InitFields(multiFile && !xfadeNow, pc, m_title, m_artist, m_album,
+	const bool singleOutNow = IsXfadeMode() || IsMixMode();
+	ExportTagUi_InitFields(multiFile && !singleOutNow, pc, m_title, m_artist, m_album,
 		m_titleL, m_artistL, m_albumL, m_coverL, m_coverPic, m_cover, m_coverClear, m_coverPath, m_coverBmp);
 	ApplyPathModeUi(false);
 	m_status.SetWindowText(L"");
@@ -1264,132 +1768,315 @@ BOOL CTranscodeExport::OnInitDialog()
 		pProgL->SetWindowText(LL14(L"進捗", L"Progress", L"Progression", L"Avanzamento", L"Progreso", L"진행", L"进度", L"Progress", L"Прогресс", L"Fortschritt", L"Progresso", L"Voortgang", L"Postep", L"Ilerleme"));
 	DragAcceptFiles(TRUE);
 
-	// パス行を下げたあと下段が食い込む／余白が空きすぎるのを整列し、ダイアログ高さを詰める
+	// カラム整列:
+	//  [✓箱] 左テキスト揃え | 左入力揃え |  [✓箱] 右テキスト揃え | 右入力揃え
 	{
-		auto placeY = [this](CWnd& w, int y) {
-			if (!w.GetSafeHwnd()) return;
-			CRect r; w.GetWindowRect(&r); ScreenToClient(&r);
-			w.SetWindowPos(NULL, r.left, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
-		};
-		auto placeXY = [this](CWnd& w, int x, int y) {
-			if (!w.GetSafeHwnd()) return;
-			w.SetWindowPos(NULL, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
-		};
+		UINT dpi = 96;
+		if (HDC hdcDpi = ::GetDC(GetSafeHwnd())) {
+			dpi = (UINT)GetDeviceCaps(hdcDpi, LOGPIXELSX);
+			::ReleaseDC(GetSafeHwnd(), hdcDpi);
+			if (dpi == 0) dpi = 96;
+		}
+		auto scale = [dpi](int v96) -> int { return MulDiv(v96, (int)dpi, 96); };
 		auto heightOf = [this](CWnd& w) -> int {
 			if (!w.GetSafeHwnd()) return 18;
 			CRect r; w.GetWindowRect(&r); return r.Height();
 		};
-
-		// 繰返し行: 左=繰返し、右=圧縮/ビットレート（長さ秒は置かない）
-		CRect rLoop, rLoopL, rQ, rQL;
-		m_loop.GetWindowRect(&rLoop); ScreenToClient(&rLoop);
-		m_loopLabel.GetWindowRect(&rLoopL); ScreenToClient(&rLoopL);
-		m_quality.GetWindowRect(&rQ); ScreenToClient(&rQ);
-		m_qualityLabel.GetWindowRect(&rQL); ScreenToClient(&rQL);
-		placeXY(m_qualityLabel, rQL.left, rLoopL.top);
-		placeXY(m_quality, rQ.left, rLoop.top);
-
-		// サンプリング行: 左=長さ(秒)、右=サンプリング
-		const int srateY = rLoop.bottom + 6;
-		const int labW = 58;
-		const int edW = 72;
-		placeXY(m_srateLabel, rQL.left, srateY + 2);
-		placeXY(m_srate, rQ.left, srateY);
-		if (m_kpiSec.GetSafeHwnd()) {
-			placeXY(m_kpiSecLabel, rLoopL.left, srateY + 2);
-			placeXY(m_kpiSec, rLoop.left, srateY);
-			// サンプリングと被る場合は幅を落とす
-			CRect rSrateL; m_srateLabel.GetWindowRect(&rSrateL); ScreenToClient(&rSrateL);
-			CRect rEd; m_kpiSec.GetWindowRect(&rEd); ScreenToClient(&rEd);
-			if (rEd.right > rSrateL.left - 8) {
-				const int newRight = rSrateL.left - 8;
-				const int newLeft = (std::max)((int)rLoop.left, newRight - edW);
-				m_kpiSec.SetWindowPos(NULL, newLeft, srateY, (std::max)(48, newRight - newLeft), rEd.Height(), SWP_NOZORDER);
-				m_kpiSecLabel.SetWindowPos(NULL, rLoopL.left, srateY + 2, labW, heightOf(m_kpiSecLabel), SWP_NOZORDER);
+		auto textW = [this](CWnd& w) -> int {
+			if (!w.GetSafeHwnd()) return 0;
+			CString t; w.GetWindowText(t);
+			if (t.IsEmpty()) t = L"W";
+			int cx = 0;
+			if (CDC* pDc = GetDC()) {
+				CFont* pFont = w.GetFont();
+				if (!pFont) pFont = GetFont();
+				CFont* pOld = pDc->SelectObject(pFont);
+				cx = pDc->GetTextExtent(t).cx;
+				if (pOld) pDc->SelectObject(pOld);
+				ReleaseDC(pDc);
 			}
-		}
-
-		CRect rSrate;
-		m_srate.GetWindowRect(&rSrate); ScreenToClient(&rSrate);
-		int yPath = (std::max)(srateY + heightOf(m_srate), (int)rSrate.bottom) + 8;
-		CRect rPathL, rPath, rBr;
-		m_pathLabel.GetWindowRect(&rPathL); ScreenToClient(&rPathL);
-		m_path.GetWindowRect(&rPath); ScreenToClient(&rPath);
-		m_browse.GetWindowRect(&rBr); ScreenToClient(&rBr);
-		placeXY(m_pathLabel, rPathL.left, yPath);
-		placeXY(m_path, rPath.left, yPath + (rPathL.Height() + 2));
-		placeXY(m_browse, rBr.left, yPath + (rPathL.Height() + 1));
-		m_path.GetWindowRect(&rPath); ScreenToClient(&rPath);
-
-		int y = rPath.bottom + 14; // 出力パスとフェードの間隔
-		const int fadeY = y;
-		placeY(m_fadeCheck, fadeY);
-		placeY(m_fadeSec, fadeY - 2);
-		placeY(m_fadeLabel, fadeY + 1);
-		// 右列: クロスフェードとタグコピーを同じXに揃える
-		CRect rFadeLab;
-		m_fadeLabel.GetWindowRect(&rFadeLab); ScreenToClient(&rFadeLab);
-		const int rightColX = rFadeLab.right + 16;
-		placeXY(m_xfadeCheck, rightColX, fadeY);
-		{
-			CRect rXc;
-			m_xfadeCheck.GetWindowRect(&rXc); ScreenToClient(&rXc);
-			const int secX = rXc.right + 6;
-			placeXY(m_xfadeSec, secX, fadeY - 2);
-			CRect rXs;
-			m_xfadeSec.GetWindowRect(&rXs); ScreenToClient(&rXs);
-			placeXY(m_xfadeLabel, rXs.right + 4, fadeY + 1);
-		}
-		y = fadeY + (std::max)(heightOf(m_fadeCheck), heightOf(m_fadeSec)) + 8;
-		const int trimY = y;
-		placeY(m_trimCheck, trimY);
-		placeY(m_trimSec, trimY - 2);
-		placeY(m_trimLabel, trimY + 1);
-		placeXY(m_copyTags, rightColX, trimY);
-		y = trimY + (std::max)(heightOf(m_trimCheck), heightOf(m_trimSec)) + 8;
-		if (m_promptCheck.GetSafeHwnd()) {
-			placeY(m_promptCheck, y);
-			y += heightOf(m_promptCheck) + 10;
-		}
-		else {
-			y += 2;
-		}
-		const int titleY = y;
-		placeY(m_titleL, titleY + 2);
-		placeY(m_title, titleY);
-		y = titleY + heightOf(m_title) + 6;
-		placeY(m_artistL, y + 2);
-		placeY(m_artist, y);
-		y += heightOf(m_artist) + 6;
-		placeY(m_albumL, y + 2);
-		placeY(m_album, y);
-		y += heightOf(m_album) + 8;
-		const int coverY = y;
-		placeY(m_coverL, coverY + 2);
-		placeY(m_coverPic, coverY);
-		placeY(m_cover, coverY + 8);
-		placeY(m_coverClear, coverY + 18);
-		y = coverY + (std::max)(heightOf(m_coverPic), 56) + 10;
-		const int btnY = y;
-		placeY(m_exec, btnY);
-		placeY(m_close, btnY);
-		y = btnY + heightOf(m_exec) + 10;
-		if (CWnd* pProgL = GetDlgItem(IDC_TC_PROG_L)) {
-			placeY(*pProgL, y);
-			y += heightOf(*pProgL) + 4;
-		}
-		else {
-			y += 14;
-		}
-		if (m_progress.GetSafeHwnd())
-			placeY(m_progress, y);
-		else if (CWnd* pPh = GetDlgItem(IDC_TC_PROGRESS))
-			placeY(*pPh, y);
-		y += (std::max)(heightOf(m_progress), 16) + 8;
-		placeY(m_status, y);
-		y += heightOf(m_status) + 10;
+			return cx;
+		};
+		auto placeSized = [this](CWnd& w, int x, int y, int width, int height) {
+			if (!w.GetSafeHwnd()) return;
+			w.SetWindowPos(NULL, x, y, width, height, SWP_NOZORDER);
+		};
+		auto ctlW = [](CWnd& w, int defW) -> int {
+			if (!w.GetSafeHwnd()) return defW;
+			CRect r; w.GetWindowRect(&r);
+			return r.Width() > 0 ? r.Width() : defW;
+		};
+		auto ctlH = [&](CWnd& w, int defH) -> int {
+			const int h = heightOf(w);
+			return h > 0 ? h : defH;
+		};
 
 		CRect rcClient; GetClientRect(&rcClient);
+		const int marginL = scale(7);
+		const int clientRight = rcClient.right - scale(7);
+		const int box = scale(18);          // チェック箱
+		const int boxGap = scale(8);        // 箱→文字
+		const int xCheckL = marginL;        // 左チェック箱の左端
+		const int xTextL = xCheckL + box + boxGap; // 左テキスト（静的もチェック文言もここ揃え）
+
+		// 左テキスト列の最大幅（繰返し／長さ／フェード／無音／ミックス）
+		int maxTextL = textW(m_loopLabel);
+		if (m_kpiSecLabel.GetSafeHwnd()) maxTextL = (std::max)(maxTextL, textW(m_kpiSecLabel));
+		maxTextL = (std::max)(maxTextL, textW(m_fadeCheck));
+		maxTextL = (std::max)(maxTextL, textW(m_trimCheck));
+		if (m_mixCheck.GetSafeHwnd()) maxTextL = (std::max)(maxTextL, textW(m_mixCheck));
+		maxTextL += scale(4);
+
+		int xValL = xTextL + maxTextL + scale(12); // 左入力（1 / 30 / 15 / 1）
+		const int secEditW = (std::max)(ctlW(m_fadeSec, scale(40)), scale(40));
+		const int unitW = (std::max)(textW(m_fadeLabel) + scale(4), scale(16));
+		const int leftValBlockW = (std::max)(ctlW(m_loop, scale(45)),
+			(std::max)(ctlW(m_kpiSec, scale(45)), secEditW + scale(4) + unitW));
+
+		// 右テキスト列（はみ出す場合は列間ギャップを詰める）
+		int maxTextR = textW(m_qualityLabel);
+		maxTextR = (std::max)(maxTextR, textW(m_srateLabel));
+		if (showXfade) maxTextR = (std::max)(maxTextR, textW(m_xfadeCheck));
+		maxTextR = (std::max)(maxTextR, textW(m_copyTags));
+		maxTextR += scale(4);
+		const int rightComboMin = scale(100);
+		int colGap = scale(24);
+		int xCheckR = xValL + leftValBlockW + colGap;
+		int xTextR = xCheckR + box + boxGap;
+		int xValR = xTextR + maxTextR + scale(12);
+		while (xValR + rightComboMin > clientRight && colGap > scale(8)) {
+			colGap -= scale(2);
+			xCheckR = xValL + leftValBlockW + colGap;
+			xTextR = xCheckR + box + boxGap;
+			xValR = xTextR + maxTextR + scale(12);
+		}
+		if (xValR + rightComboMin > clientRight) {
+			// それでも足りなければ右テキスト列幅をやや縮める（表示は省略なし・入力優先）
+			const int need = xValR + rightComboMin - clientRight;
+			maxTextR = (std::max)(scale(48), maxTextR - need);
+			xValR = xTextR + maxTextR + scale(12);
+		}
+
+		auto rowHOf = [&](int a, int b) { return (std::max)(a, b); };
+
+		// 静的ラベルを xTextL/R に、入力を xValL/R に（縦中央）
+		auto placeStaticVal = [&](CWnd& lab, CWnd& ed, int xText, int xVal, int yTop, int edW, int* outH) {
+			const int labH = (std::max)(ctlH(lab, scale(14)), scale(14));
+			const int edH = (std::max)(ctlH(ed, scale(22)), scale(22));
+			const int rh = rowHOf(labH, edH);
+			placeSized(lab, xText, yTop + (rh - labH) / 2, textW(lab) + scale(6), labH);
+			placeSized(ed, xVal, yTop + (rh - edH) / 2, edW, edH);
+			if (outH) *outH = rh;
+		};
+		// チェックを xCheck に置き、文言開始が xText になる幅にする + 秒欄
+		auto placeCheckSec = [&](CWnd& chk, CWnd& sec, CWnd& unit, int xCheck, int xText, int xVal, int yTop, int* outH) {
+			const int tw = textW(chk);
+			const int chkW = (xText - xCheck) + tw + scale(10);
+			const int chkH = (std::max)(ctlH(chk, scale(18)), scale(18));
+			const int secH = (std::max)(ctlH(sec, scale(22)), scale(22));
+			const int unitH = (std::max)(ctlH(unit, scale(14)), scale(14));
+			const int rh = (std::max)(chkH, (std::max)(secH, unitH));
+			placeSized(chk, xCheck, yTop + (rh - chkH) / 2, chkW, chkH);
+			placeSized(sec, xVal, yTop + (rh - secH) / 2, secEditW, secH);
+			placeSized(unit, xVal + secEditW + scale(4), yTop + (rh - unitH) / 2, unitW, unitH);
+			if (outH) *outH = rh;
+		};
+		auto placeCheckAt = [&](CWnd& chk, int xCheck, int xText, int yTop, int rowH) {
+			const int tw = textW(chk);
+			const int chkW = (xText - xCheck) + tw + scale(10);
+			const int chkH = (std::max)(ctlH(chk, scale(18)), scale(18));
+			placeSized(chk, xCheck, yTop + (rowH - chkH) / 2, chkW, chkH);
+		};
+
+		CRect rLoopL; m_loopLabel.GetWindowRect(&rLoopL); ScreenToClient(&rLoopL);
+		int y = rLoopL.top;
+
+		// 行: 繰返し | 品質
+		{
+			int hL = 0, hR = 0;
+			placeStaticVal(m_loopLabel, m_loop, xTextL, xValL, y, ctlW(m_loop, scale(45)), &hL);
+			placeStaticVal(m_qualityLabel, m_quality, xTextR, xValR, y, ctlW(m_quality, scale(90)), &hR);
+			y += rowHOf(hL, hR) + scale(6);
+		}
+		// 行: 長さ | サンプリング
+		{
+			int hL = 0, hR = 0;
+			if (m_kpiSec.GetSafeHwnd())
+				placeStaticVal(m_kpiSecLabel, m_kpiSec, xTextL, xValL, y, ctlW(m_kpiSec, scale(45)), &hL);
+			placeStaticVal(m_srateLabel, m_srate, xTextR, xValR, y, ctlW(m_srate, scale(110)), &hR);
+			y += rowHOf(hL, hR) + scale(8);
+		}
+
+		// 出力パス（全幅）
+		{
+			const int pathLabH = (std::max)(ctlH(m_pathLabel, scale(14)), scale(14));
+			placeSized(m_pathLabel, xCheckL, y, textW(m_pathLabel) + scale(6), pathLabH);
+			y += pathLabH + scale(2);
+			const int brW = ctlW(m_browse, scale(35));
+			const int brH = ctlH(m_browse, scale(22));
+			const int pathH = ctlH(m_path, scale(22));
+			const int pathW = (std::max)(scale(80), clientRight - brW - scale(6) - xCheckL);
+			const int rh = rowHOf(pathH, brH);
+			placeSized(m_path, xCheckL, y + (rh - pathH) / 2, pathW, pathH);
+			placeSized(m_browse, xCheckL + pathW + scale(6), y + (rh - brH) / 2, brW, brH);
+			y += rh + scale(12);
+		}
+
+		// 行: フェード | クロスフェード
+		{
+			int hL = 0, hR = 0;
+			placeCheckSec(m_fadeCheck, m_fadeSec, m_fadeLabel, xCheckL, xTextL, xValL, y, &hL);
+			if (showXfade && m_xfadeCheck.GetSafeHwnd())
+				placeCheckSec(m_xfadeCheck, m_xfadeSec, m_xfadeLabel, xCheckR, xTextR, xValR, y, &hR);
+			y += rowHOf(hL, hR) + scale(8);
+		}
+		// 行: 先頭無音 | タグコピー
+		{
+			int hL = 0;
+			placeCheckSec(m_trimCheck, m_trimSec, m_trimLabel, xCheckL, xTextL, xValL, y, &hL);
+			int hR = hL;
+			if (m_copyTags.GetSafeHwnd()) {
+				const int chkH = (std::max)(ctlH(m_copyTags, scale(18)), scale(18));
+				hR = (std::max)(hL, chkH);
+				placeCheckAt(m_copyTags, xCheckR, xTextR, y, hR);
+			}
+			y += rowHOf(hL, hR) + scale(8);
+		}
+
+		// ミックス（左テキスト列にチェック、同時曲数は左入力列付近）
+		const BOOL showMixRow = multiFile && pcs.size() >= 2;
+		if (showMixRow && m_mixCheck.GetSafeHwnd()) {
+			CRect rSrate; m_srate.GetWindowRect(&rSrate);
+			int comboH = rSrate.Height();
+			if (comboH < scale(22)) comboH = scale(22);
+			int textW88 = scale(18);
+			int fontH = scale(16);
+			if (CDC* pDc = GetDC()) {
+				CFont* pOldF = pDc->SelectObject(GetFont());
+				textW88 = pDc->GetTextExtent(L"88").cx;
+				TEXTMETRIC tm = {};
+				pDc->GetTextMetrics(&tm);
+				if (tm.tmHeight > 0) fontH = tm.tmHeight;
+				if (pOldF) pDc->SelectObject(pOldF);
+				ReleaseDC(pDc);
+			}
+			const int crown = (std::max)(scale(8), (comboH - scale(8)) / 2);
+			const int btnW = ::GetSystemMetrics(SM_CXVSCROLL) + scale(12);
+			int comboW = scale(12) + crown * 2 + scale(4) + textW88 + scale(8) + btnW;
+			if (comboW < scale(100)) comboW = scale(100);
+			if (comboW < rSrate.Width()) comboW = rSrate.Width();
+
+			const int nLabW = textW(m_mixNLabel) + scale(6);
+			const int nLabH = (std::max)(ctlH(m_mixNLabel, scale(14)), scale(14));
+			const int mixH = (std::max)(ctlH(m_mixCheck, scale(18)), scale(18));
+			const int rh = (std::max)(mixH, (std::max)(nLabH, comboH));
+			placeCheckAt(m_mixCheck, xCheckL, xTextL, y, rh);
+			// 同時曲数は左入力列から
+			placeSized(m_mixNLabel, xValL, y + (rh - nLabH) / 2, nLabW, nLabH);
+			placeSized(m_mixN, xValL + nLabW + scale(6), y + (rh - comboH) / 2, comboW, comboH);
+			y += rh + scale(6);
+
+			int rows = (int)pcs.size();
+			if (rows < 2) rows = 2;
+			if (rows > 10) rows = 10;
+			const int volW = (std::max)(scale(120), clientRight - xCheckL);
+			int guessRow = fontH + scale(12);
+			int guessHdr = fontH + scale(10);
+			int listH = guessHdr + guessRow * rows + scale(8);
+			m_mixVol.SetWindowPos(NULL, xCheckL, y, volW, listH, SWP_NOZORDER);
+			m_mixVol.SetColumnWidth(0, (std::max)(scale(64), textW88 + scale(28)));
+			m_mixVol.SetColumnWidth(1, (std::max)(scale(80), volW - m_mixVol.GetColumnWidth(0) - scale(4)));
+			int headerH = 0;
+			if (CHeaderCtrl* pHdr = m_mixVol.GetHeaderCtrl()) {
+				CRect rhdr; pHdr->GetWindowRect(&rhdr);
+				headerH = rhdr.Height();
+			}
+			int itemH = 0;
+			if (m_mixVol.GetItemCount() > 0) {
+				CRect ri;
+				if (m_mixVol.GetItemRect(0, &ri, LVIR_BOUNDS))
+					itemH = ri.Height();
+			}
+			if (headerH < scale(18)) headerH = (std::max)(guessHdr, fontH + scale(8));
+			if (itemH < scale(18)) itemH = (std::max)(guessRow, fontH + scale(12));
+			listH = headerH + itemH * rows + scale(6);
+			m_mixVol.SetWindowPos(NULL, xCheckL, y, volW, listH, SWP_NOZORDER);
+			y += listH + scale(8);
+		}
+		else if (m_mixCheck.GetSafeHwnd()) {
+			m_mixCheck.ShowWindow(SW_HIDE);
+			if (m_mixNLabel.GetSafeHwnd()) m_mixNLabel.ShowWindow(SW_HIDE);
+			if (m_mixN.GetSafeHwnd()) m_mixN.ShowWindow(SW_HIDE);
+			if (m_mixVol.GetSafeHwnd()) m_mixVol.ShowWindow(SW_HIDE);
+		}
+
+		if (m_promptCheck.GetSafeHwnd()) {
+			const int ph = (std::max)(ctlH(m_promptCheck, scale(18)), scale(18));
+			placeCheckAt(m_promptCheck, xCheckL, xTextL, y, ph);
+			y += ph + scale(10);
+		}
+
+		auto placeMetaRow = [&](CWnd& lab, CWnd& ed) {
+			const int labW = (std::max)(textW(lab) + scale(6), scale(50));
+			const int edH = (std::max)(ctlH(ed, scale(22)), scale(22));
+			const int labH = (std::max)(ctlH(lab, scale(14)), scale(14));
+			const int rh = rowHOf(labH, edH);
+			const int edX = xTextL + labW + scale(6);
+			const int edW = (std::max)(scale(80), clientRight - edX);
+			placeSized(lab, xTextL, y + (rh - labH) / 2, labW, labH);
+			placeSized(ed, edX, y + (rh - edH) / 2, edW, edH);
+			y += rh + scale(6);
+		};
+		placeMetaRow(m_titleL, m_title);
+		placeMetaRow(m_artistL, m_artist);
+		placeMetaRow(m_albumL, m_album);
+		y += scale(2);
+
+		{
+			const int coverY = y;
+			const int labW = textW(m_coverL) + scale(6);
+			const int labH = (std::max)(ctlH(m_coverL, scale(14)), scale(14));
+			placeSized(m_coverL, xTextL, coverY + scale(2), labW, labH);
+			const int picW = ctlW(m_coverPic, scale(56));
+			const int picH = ctlH(m_coverPic, scale(56));
+			const int picX = xTextL + labW + scale(6);
+			placeSized(m_coverPic, picX, coverY, picW, picH);
+			const int dropH = ctlH(m_cover, scale(40));
+			const int clrW = ctlW(m_coverClear, scale(58));
+			const int clrH = ctlH(m_coverClear, scale(16));
+			const int dropX = picX + picW + scale(6);
+			const int dropW = (std::max)(scale(80), clientRight - clrW - scale(6) - dropX);
+			placeSized(m_cover, dropX, coverY + scale(8), dropW, dropH);
+			placeSized(m_coverClear, dropX + dropW + scale(6), coverY + scale(18), clrW, clrH);
+			y = coverY + (std::max)(picH, dropH + scale(8)) + scale(10);
+		}
+
+		{
+			const int bw = ctlW(m_exec, scale(80));
+			const int bh = ctlH(m_exec, scale(22));
+			const int gap = scale(12);
+			const int total = bw * 2 + gap;
+			const int x0 = (std::max)(marginL, (rcClient.Width() - total) / 2);
+			placeSized(m_exec, x0, y, bw, bh);
+			placeSized(m_close, x0 + bw + gap, y, bw, bh);
+			y += bh + scale(10);
+		}
+		if (CWnd* pProgL = GetDlgItem(IDC_TC_PROG_L)) {
+			const int lh = (std::max)(heightOf(*pProgL), scale(14));
+			placeSized(*pProgL, xCheckL, y, textW(*pProgL) + scale(6), lh);
+			y += lh + scale(4);
+		}
+		{
+			const int ph = (std::max)(heightOf(m_progress), scale(16));
+			placeSized(m_progress, xCheckL, y, (std::max)(scale(80), clientRight - xCheckL), ph);
+			y += ph + scale(8);
+		}
+		{
+			const int sh = (std::max)(heightOf(m_status), scale(14));
+			placeSized(m_status, xCheckL, y, (std::max)(scale(80), clientRight - xCheckL), sh);
+			y += sh + scale(10);
+		}
+
 		CRect rcWin; GetWindowRect(&rcWin);
 		const int chrome = rcWin.Height() - rcClient.Height();
 		if (y + chrome > 120)
@@ -1401,36 +2088,219 @@ BOOL CTranscodeExport::OnInitDialog()
 			if (w.GetSafeHwnd() && text && text[0])
 				m_tooltip.AddTool(&w, text);
 		};
+		// チェックボックス
+		addTip(m_fadeCheck, LL14(
+			L"出力の末尾だけ指定秒でフェードアウトします（ミックス時も合成後の末尾に適用）",
+			L"Fade out only the end of the output for the given seconds (also after mix)",
+			L"Fondu sortant en fin de sortie uniquement",
+			L"Dissolvenza solo in coda all'uscita",
+			L"Fundido solo al final de la salida",
+			L"출력 끝만 지정 초로 페이드 아웃(믹스 후에도 적용)",
+			L"仅对输出末尾按指定秒淡出（混音后也适用）",
+			L"Fade out only the end of the output",
+			L"Затухание только в конце выхода",
+			L"Nur das Ende der Ausgabe ausblenden",
+			L"Fade out so no final da saida",
+			L"Alleen einde van uitvoer faden",
+			L"Wycisz tylko koniec wyjsciowego pliku",
+			L"Cikti sonunu verilen sn solutur"));
 		addTip(m_xfadeCheck, LL14(
-			L"複数曲を1ファイルに結合し、曲間を指定秒でクロスフェードします",
-			L"Join selected tracks into one file with a crossfade of the given seconds",
-			L"Fusionne les pistes en un fichier avec fondu enchaine",
-			L"Unisce le tracce in un file con crossfade",
-			L"Une las pistas en un archivo con fundido cruzado",
-			L"선택 곡을 한 파일로 합치고 지정 초로 크로스페이드합니다",
-			L"将所选曲目合并为一个文件，并按指定秒数交叉淡入淡出",
-			L"Join tracks into one file with crossfade",
-			L"Объединяет треки в один файл с кроссфейдом",
-			L"Fuegt Titel zu einer Datei mit Ueberblendung zusammen",
-			L"Une as faixas em um arquivo com crossfade",
-			L"Voegt nummers samen tot een bestand met crossfade",
-			L"Laczy utwory w jeden plik z przejściem",
-			L"Secilen parcalari capraz solma ile tek dosyada birlestirir"));
+			L"単独:曲を順に連結してクロスフェード。ミックス併用:終わった枠へ次曲を指定秒で等パワー投入",
+			L"Alone: join tracks with crossfade. With Mix: equal-power refill of ended slots",
+			L"Seul: enchaine avec fondu. Avec Mix: insertion a puissance egale",
+			L"Solo: unisce con crossfade. Con Mix: riempimento a potenza uguale",
+			L"Solo: une con fundido. Con Mix: relleno a potencia igual",
+			L"단독: 순차 연결 크로스페이드. 믹스 병용: 끝난 자리에 등파워 보충",
+			L"单独:顺序交叉淡入连接。与混音并用:等功率补充下一曲",
+			L"Alone: sequential crossfade. With Mix: equal-power refill",
+			L"Отдельно: склейка с кроссфейдом. С Mix: дозаполнение",
+			L"Allein: Ueberblend-Sequenz. Mit Mix: Auffuellen gleicher Leistung",
+			L"Sozinho: junta com crossfade. Com Mix: reposicao equal-power",
+			L"Alleen: crossfade-reeks. Met Mix: equal-power bijvullen",
+			L"Samodzielnie: przejscie kolejno. Z Mix: uzupelnianie equal-power",
+			L"Tek: sirayla capraz solma. Mix ile: es guc ekleme"));
+		addTip(m_trimCheck, LL14(
+			L"先頭の無音を指定秒に揃えます。長い場合はカット、短い場合は無音を足します",
+			L"Align leading silence to the given seconds (trim if longer, pad if shorter)",
+			L"Aligne le silence initial (coupe si trop long, complete si trop court)",
+			L"Allinea il silenzio iniziale (taglia se lungo, riempie se corto)",
+			L"Alinea el silencio inicial (corta si sobra, rellena si falta)",
+			L"앞 무음을 지정 초에 맞춥니다. 길면 자르고 짧으면 무음을 넣습니다",
+			L"将开头静音对齐到指定秒：过长则切除，过短则补静音",
+			L"Align leading silence to N sec (trim or pad)",
+			L"Выровнять начальную тишину: обрезать или дополнить",
+			L"Anfangsstille auf N Sek. (kuerzen oder auffuellen)",
+			L"Alinha silencio inicial (corta ou completa)",
+			L"Beginstilte op N sec (trim of pad)",
+			L"Wyrównaj ciszę początkową (przytnij lub uzupełnij)",
+			L"Bastaki sessizligi sn'ye hizalar (keser veya doldurur)"));
+		addTip(m_copyTags, LL14(
+			L"元ファイルのタグとジャケット画像を出力へコピーします",
+			L"Copy tags and cover art from the source to the output",
+			L"Copie tags et pochette de la source vers la sortie",
+			L"Copia tag e copertina dalla sorgente all'uscita",
+			L"Copia etiquetas y portada del origen a la salida",
+			L"원본 태그와 재킷을 출력으로 복사합니다",
+			L"将源文件的标签和封面复制到输出",
+			L"Copy tags and cover from source to output",
+			L"Копировать теги и обложку из источника",
+			L"Tags und Cover von der Quelle kopieren",
+			L"Copia tags e capa da origem para a saida",
+			L"Kopieer tags en hoes van bron naar uitvoer",
+			L"Kopiuj tagi i okladke ze zrodla",
+			L"Kaynaktan etiket ve kapagi kopyalar"));
+		addTip(m_promptCheck, LL14(
+			L"書き出し時にプロンプト実行（再生エフェクト等）を適用します",
+			L"Apply prompt execution (playback effects etc.) during export",
+			L"Appliquer l'execution du prompt a l'export",
+			L"Applica l'esecuzione del prompt in esportazione",
+			L"Aplicar la ejecucion del prompt al exportar",
+			L"내보내기 시 프롬프트 실행(재생 효과 등)을 적용합니다",
+			L"导出时应用提示执行（播放效果等）",
+			L"Apply prompt execution during export",
+			L"Применить выполнение промпта при экспорте",
+			L"Prompt-Ausfuehrung beim Export anwenden",
+			L"Aplicar execucao do prompt na exportacao",
+			L"Prompt-uitvoering toepassen bij export",
+			L"Zastosuj wykonanie promptu przy eksporcie",
+			L"Disa aktarimda prompt uygulamasini kullanir"));
+		addTip(m_mixCheck, LL14(
+			L"選択曲を同時に重ねて1ファイルにします。クロスフェードONなら終了枠へ次曲を指定秒で投入",
+			L"Layer selected tracks into one file; with Crossfade ON refill ended slots over given seconds",
+			L"Superpose les pistes en un fichier; avec Fondu, inserte sur la duree",
+			L"Sovrappone le tracce in un file; con Crossfade inserisce nella durata",
+			L"Superpone pistas en un archivo; con Fundido rellena en los segundos",
+			L"선택 곡을 동시 겹쳐 한 파일로. 크로스페이드 ON이면 지정 초로 보충",
+			L"同时叠加选曲为单文件；交叉淡入ON时按秒补充下一曲",
+			L"Layer tracks into one file; with Crossfade ON refill over seconds",
+			L"Накладывает треки в один файл; с кроссфейдом дозаполняет",
+			L"Mischt Titel in eine Datei; mit Ueberblendung nachfuellen",
+			L"Sobrepoe faixas num arquivo; com Crossfade repoe em segundos",
+			L"Laagt nummers in een bestand; met Crossfade bijvullen",
+			L"Naklada utwory do jednego pliku; z Crossfade uzupelnia",
+			L"Parcalari tek dosyada karistirir; Capraz solma ile ekler"));
+		// 秒数欄（関連UI）
+		addTip(m_fadeSec, LL14(
+			L"フェードアウトする秒数",
+			L"Fade-out duration in seconds",
+			L"Duree du fondu en secondes",
+			L"Durata dissolvenza in secondi",
+			L"Duracion del fundido en segundos",
+			L"페이드 아웃 초",
+			L"淡出秒数",
+			L"Fade-out seconds",
+			L"Секунды затухания",
+			L"Ausblend-Sekunden",
+			L"Segundos de fade out",
+			L"Fade-out-seconden",
+			L"Sekundy wyciszania",
+			L"Solma suresi (sn)"));
 		addTip(m_xfadeSec, LL14(
-			L"前曲末尾から戻して次曲と重ねる秒数",
-			L"Seconds to overlap the end of the previous track with the next",
-			L"Secondes de chevauchement entre les pistes",
-			L"Secondi di sovrapposizione tra le tracce",
-			L"Segundos de solapamiento entre pistas",
-			L"이전 곡 끝과 다음 곡을 겹칠 초",
-			L"与下一曲重叠的秒数（从前一曲末尾回退）",
-			L"Overlap seconds between tracks",
-			L"Секунды перекрытия между треками",
-			L"Sekunden der Ueberlappung zwischen Titeln",
-			L"Segundos de sobreposicao entre faixas",
-			L"Seconden overlap tussen nummers",
-			L"Sekundy nakładania między utworami",
-			L"Parcalar arasi capraz solma suresi (sn)"));
+			L"クロスフェード秒（順次連結の重ね／ミックス補充の交接）",
+			L"Crossfade seconds (sequential overlap or mix handoff)",
+			L"Secondes de fondu (enchaine ou insertion mix)",
+			L"Secondi di crossfade (sequenza o passaggio mix)",
+			L"Segundos de fundido (secuencia o relevo mix)",
+			L"크로스페이드 초(순차 겹침/믹스 교대)",
+			L"交叉淡入秒数（顺序重叠或混音交接）",
+			L"Crossfade seconds (sequence or mix handoff)",
+			L"Секунды кроссфейда (склейка или смена в миксе)",
+			L"Ueberblend-Sekunden (Sequenz oder Mix-Uebergabe)",
+			L"Segundos de crossfade (sequencia ou troca mix)",
+			L"Crossfade-seconden (reeks of mix-overdracht)",
+			L"Sekundy przejscia (sekwencja lub zmiana mix)",
+			L"Capraz solma sn (sira veya mix devir)"));
+		addTip(m_trimSec, LL14(
+			L"先頭に置く無音の目標秒数",
+			L"Target seconds of leading silence",
+			L"Secondes cibles de silence initial",
+			L"Secondi obiettivo di silenzio iniziale",
+			L"Segundos objetivo de silencio inicial",
+			L"앞 무음의 목표 초",
+			L"开头静音的目标秒数",
+			L"Target leading silence seconds",
+			L"Целевые секунды начальной тишины",
+			L"Ziel-Sekunden der Anfangsstille",
+			L"Segundos alvo de silencio inicial",
+			L"Doel-seconden beginstilte",
+			L"Docelowe sekundy ciszy poczatkowej",
+			L"Bastaki sessizlik hedef sn"));
+		addTip(m_mixN, LL14(
+			L"同時に重ねる曲数（2〜選択数）",
+			L"Number of tracks mixed at once (2 to selection count)",
+			L"Nombre de pistes superposees (2 a la selection)",
+			L"Tracce sovrapposte (da 2 al numero selezionato)",
+			L"Pistas simultaneas (2 al numero seleccionado)",
+			L"동시에 겹칠 곡 수(2~선택 수)",
+			L"同时叠加曲数（2至选择数）",
+			L"Concurrent tracks (2 to selection count)",
+			L"Число одновременных треков (2…число выбранных)",
+			L"Gleichzeitige Titel (2 bis Auswahlanzahl)",
+			L"Faixas simultaneas (2 ate a selecao)",
+			L"Gelijktijdige nummers (2 tot selectie)",
+			L"Jednoczesne utwory (2 do liczby wybranych)",
+			L"Eszamanli parca (2..secim sayisi)"));
+		// ボタン
+		addTip(m_browse, LL14(
+			L"出力ファイルまたはフォルダを選びます",
+			L"Choose the output file or folder",
+			L"Choisir le fichier ou dossier de sortie",
+			L"Scegli file o cartella di output",
+			L"Elegir archivo o carpeta de salida",
+			L"출력 파일 또는 폴더를 선택합니다",
+			L"选择输出文件或文件夹",
+			L"Choose output file or folder",
+			L"Выбрать выходной файл или папку",
+			L"Ausgabedatei oder -ordner waehlen",
+			L"Escolher arquivo ou pasta de saida",
+			L"Kies uitvoerbestand of map",
+			L"Wybierz plik lub folder wyjsciowy",
+			L"Cikti dosyasi veya klasoru sec"));
+		addTip(m_coverClear, LL14(
+			L"指定したジャケット画像を解除します",
+			L"Clear the selected cover image",
+			L"Effacer l'image de pochette",
+			L"Rimuovi l'immagine di copertina",
+			L"Quitar la imagen de portada",
+			L"지정한 재킷 이미지를 해제합니다",
+			L"清除已指定的封面图",
+			L"Clear the cover image",
+			L"Сбросить изображение обложки",
+			L"Cover-Bild entfernen",
+			L"Limpar a imagem de capa",
+			L"Omslag wissen",
+			L"Wyczysc obraz okladki",
+			L"Secilen kapak resmini kaldirir"));
+		addTip(m_exec, LL14(
+			L"現在の設定で書き出しを開始します",
+			L"Start export with the current settings",
+			L"Demarrer l'export avec les reglages actuels",
+			L"Avvia l'esportazione con le impostazioni attuali",
+			L"Iniciar la exportacion con la configuracion actual",
+			L"현재 설정으로 내보내기를 시작합니다",
+			L"按当前设置开始导出",
+			L"Start export with current settings",
+			L"Начать экспорт с текущими настройками",
+			L"Export mit aktuellen Einstellungen starten",
+			L"Iniciar exportacao com as configuracoes atuais",
+			L"Start export met huidige instellingen",
+			L"Rozpocznij eksport z biezacymi ustawieniami",
+			L"Gecerli ayarlarla disa aktarimi baslatir"));
+		addTip(m_close, LL14(
+			L"書き出さずにダイアログを閉じます",
+			L"Close the dialog without exporting",
+			L"Fermer sans exporter",
+			L"Chiudi senza esportare",
+			L"Cerrar sin exportar",
+			L"내보내지 않고 대화상자를 닫습니다",
+			L"不导出并关闭对话框",
+			L"Close without exporting",
+			L"Закрыть без экспорта",
+			L"Schliessen ohne Export",
+			L"Fechar sem exportar",
+			L"Sluiten zonder exporteren",
+			L"Zamknij bez eksportu",
+			L"Disa aktarmadan kapatir"));
 		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
 	}
 	return TRUE;
@@ -1484,7 +2354,7 @@ void CTranscodeExport::ExportProgressThunk(int percent, LPCTSTR status, void* us
 void CTranscodeExport::OnCbnSelchangeFormat()
 {
 	RefreshQualityLabels();
-	if (multiFile && !IsXfadeMode()) return;
+	if (multiFile && !IsXfadeMode() && !IsMixMode()) return;
 	CString path;
 	m_path.GetWindowText(path);
 	const int fmt = CurrentFormat();
@@ -1509,6 +2379,31 @@ BOOL CTranscodeExport::OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult)
 		if (pNm->code == TCN_SELCHANGE)
 			ApplyTabUi();
 	}
+	if (pNm && pNm->idFrom == IDC_TC_MIX_VOL && m_mixVol.GetSafeHwnd()) {
+		if (pNm->code == NM_DBLCLK) {
+			LPNMITEMACTIVATE pAct = reinterpret_cast<LPNMITEMACTIVATE>(lParam);
+			if (pAct && pAct->iItem >= 0) {
+				m_mixEditRow = pAct->iItem;
+				m_mixVol.EditLabel(pAct->iItem);
+				if (pResult) *pResult = 0;
+				return TRUE;
+			}
+		}
+		else if (pNm->code == LVN_ENDLABELEDIT) {
+			NMLVDISPINFO* pDi = reinterpret_cast<NMLVDISPINFO*>(lParam);
+			if (pDi && pDi->item.iItem >= 0 && pDi->item.pszText) {
+				int v = _tstoi(pDi->item.pszText);
+				if (v < 0) v = 0;
+				if (v > 1000) v = 1000;
+				if (pDi->item.iItem < m_mixPctCount)
+					m_mixPct[pDi->item.iItem] = v;
+				NormalizeMixPercents();
+				RebuildMixVolList();
+				if (pResult) *pResult = FALSE;
+				return TRUE;
+			}
+		}
+	}
 	return CCustomBlurDialogBase::OnNotify(wParam, lParam, pResult);
 }
 
@@ -1516,7 +2411,7 @@ void CTranscodeExport::OnBnClickedBrowse()
 {
 	CString path;
 	m_path.GetWindowText(path);
-	if (multiFile && !IsXfadeMode()) {
+	if (multiFile && !IsXfadeMode() && !IsMixMode()) {
 		if (TcBrowseFolder(this, path))
 			m_path.SetWindowText(path);
 		return;
@@ -1561,7 +2456,10 @@ void CTranscodeExport::OnBnClickedExec()
 		mp3Kbps = kbps[qi];
 	}
 
-	const bool xfade = IsXfadeMode();
+	const bool mix = IsMixMode();
+	const bool xfadeChecked = IsXfadeMode();
+	// ミックス優先。ミックスOFF時のみ順次クロスフェード連結。
+	const bool xfade = !mix && xfadeChecked;
 	WavExportOptions opts = {};
 	opts.fadeEnable = m_fadeCheck.GetCheck() ? 1 : 0;
 	opts.fadeSec = fadeSec;
@@ -1588,16 +2486,25 @@ void CTranscodeExport::OnBnClickedExec()
 	savedata.wav_export_apply_prompt = opts.applyPrompt;
 	savedata.wav_export_xfade = (multiFile && m_xfadeCheck.GetSafeHwnd() && m_xfadeCheck.GetCheck()) ? 1 : 0;
 	savedata.wav_export_xfade_sec = xfadeSec;
+	savedata.wav_export_mix = (multiFile && m_mixCheck.GetSafeHwnd() && m_mixCheck.GetCheck()) ? 1 : 0;
+	{
+		int mixN = 2;
+		if (m_mixN.GetSafeHwnd() && m_mixN.GetCount() > 0) {
+			mixN = m_mixN.GetCurSel() + 2;
+			if (mixN < 2) mixN = 2;
+		}
+		savedata.wav_export_mix_n = mixN;
+	}
 	if (fmt == TC_FMT_MP3 || fmt == TC_FMT_FLAC)
 		savedata.tc_format = fmt;
 	savedata.tc_mp3_kbps = mp3Kbps;
 	savedata.tc_flac_level = flacLevel;
 	savedata.wav_export_copy_tags = m_copyTags.GetCheck() ? 1 : 0;
-	// クロスフェードは単体出力なのでタイトルも適用対象
-	ExportTagUi_Collect(multiFile && !xfade, savedata.wav_export_copy_tags, m_title, m_artist, m_album, m_coverPath, opts);
+	// クロスフェード／ミックスは単体出力なのでタイトルも適用対象
+	ExportTagUi_Collect(multiFile && !xfade && !mix, savedata.wav_export_copy_tags, m_title, m_artist, m_album, m_coverPath, opts);
 
 	if (pathStr.IsEmpty()) {
-		m_status.SetWindowText((multiFile && !xfade)
+		m_status.SetWindowText((multiFile && !xfade && !mix)
 			? LL14(L"フォルダを指定してください", L"Please specify folder", L"Veuillez specifier le dossier", L"Specificare la cartella",
 				L"Especifique la carpeta", L"폴더를 지정하세요", L"请指定文件夹", L"يرجى تحديد المجلد",
 				L"Укажите папку", L"Bitte Ordner angeben", L"Especifique a pasta", L"Geef map op",
@@ -1625,7 +2532,120 @@ void CTranscodeExport::OnBnClickedExec()
 	UpdateWindow();
 
 	BOOL ok = TRUE;
-	if (xfade) {
+	if (mix) {
+		CString finalPath = NormalizeOutPath(pathStr, fmt);
+		m_path.SetWindowText(finalPath);
+		const int total = (int)pcs.size();
+		int n = total;
+		if (n > 64) n = 64;
+		int K = savedata.wav_export_mix_n;
+		if (m_mixN.GetSafeHwnd() && m_mixN.GetCount() > 0)
+			K = m_mixN.GetCurSel() + 2;
+		if (K < 2) K = 2;
+		if (K > n) K = n;
+		// リスト表示値を取り込み、選択曲数ぶんだけ合計100へ正規化（25,25→50,50）
+		m_mixPctCount = n;
+		for (int i = n; i < 64; ++i)
+			m_mixPct[i] = 0;
+		if (m_mixVol.GetSafeHwnd()) {
+			const int rows = m_mixVol.GetItemCount();
+			for (int i = 0; i < n && i < rows; ++i) {
+				int v = _tstoi(m_mixVol.GetItemText(i, 0));
+				if (v < 0) v = 0;
+				m_mixPct[i] = v;
+			}
+		}
+		NormalizeMixPercents();
+		if (m_mixVol.GetSafeHwnd()) {
+			for (int i = 0; i < n && i < m_mixVol.GetItemCount(); ++i) {
+				CString pct;
+				pct.Format(L"%d", m_mixPct[i]);
+				m_mixVol.SetItemText(i, 0, pct);
+			}
+		}
+		float gains[64];
+		for (int i = 0; i < n; ++i)
+			gains[i] = (float)m_mixPct[i]; // 相対重み（合成時に再生中合計で正規化）
+
+		CString temps[64];
+		WavExportOptions pieceOpts = opts;
+		pieceOpts.copyTags = 0;
+		pieceOpts.multiFile = 0;
+		pieceOpts.fadeEnable = 0; // 末尾フェードは合成後に一括
+		for (int i = 0; i < n && ok; ++i) {
+			temps[i] = TcMakeTempWavPath();
+			const int base = (int)((i * 70) / n);
+			const int span = (int)(((i + 1) * 70) / n) - base;
+			MpDecodeProgressSetSegment(base, span > 0 ? span : 1);
+			MpDecodeProgressSetPcmCap(95);
+			CString st;
+			st.Format(LL14(L"ミックス用PCM出力中... (%d/%d)", L"Mix PCM export... (%d/%d)", L"Export PCM mix... (%d/%d)", L"Export PCM mix... (%d/%d)",
+				L"Export PCM mix... (%d/%d)", L"믹스 PCM 출력 중... (%d/%d)", L"混音PCM导出中... (%d/%d)", L"Mix PCM export... (%d/%d)",
+				L"PCM для микса... (%d/%d)", L"Mix-PCM Export... (%d/%d)", L"Export PCM mix... (%d/%d)", L"Mix-PCM-export... (%d/%d)",
+				L"Eksport PCM mix... (%d/%d)", L"Mix PCM... (%d/%d)"),
+				i + 1, n);
+			m_status.SetWindowText(st);
+			UpdateWindow();
+			DoEvent();
+			ok = og->ExportToWav(&pcs[i], temps[i], loopCount, &pieceOpts, false);
+			if (ok && i == 0) {
+				CFile f;
+				if (f.Open(temps[i], CFile::modeRead | CFile::shareDenyWrite)) {
+					TcWavInfo wi = {};
+					if (TcReadWavInfo(f, wi) && wi.hz > 0 && wi.ch >= 1) {
+						if (opts.sampleRate == 0)
+							pieceOpts.sampleRate = (int)wi.hz;
+						pieceOpts.forceChannels = (int)wi.ch;
+						if (wi.bits == 16 || wi.bits == 24 || wi.bits == 32)
+							pieceOpts.forceBits = (int)wi.bits;
+					}
+					f.Close();
+				}
+			}
+		}
+		CString mixWav = (fmt == TC_FMT_WAV) ? finalPath : TcMakeTempWavPath();
+		if (ok) {
+			m_status.SetWindowText(LL14(L"同時ミックス合成中...", L"Mixing concurrent tracks...", L"Mixage simultane...", L"Mix simultaneo...",
+				L"Mezcla simultanea...", L"동시 믹스 중...", L"同时混音中...", L"Mixing...",
+				L"Сведение микса...", L"Gleichzeitiges Mischen...", L"Misturando...", L"Mixen...",
+				L"Mieszanie...", L"Karistiriliyor..."));
+			UpdateWindow();
+			MpDecodeProgressReport(75, NULL);
+			// クロスフェードONなら補充投入に秒数を使う。OFFなら即時投入。
+			const int mixXfadeSec = xfadeChecked ? xfadeSec : 0;
+			ok = TcConcurrentMixWav(mixWav, temps, gains, n, K, mixXfadeSec);
+		}
+		for (int i = 0; i < n; ++i) {
+			if (!temps[i].IsEmpty())
+				DeleteFile(temps[i]);
+		}
+		if (ok && opts.fadeEnable)
+			ok = TcApplyTailFadeOutWav(mixWav, opts.fadeSec);
+		if (ok && fmt != TC_FMT_WAV) {
+			MpDecodeProgressReport(85, LL14(
+				L"エンコード中…", L"Encoding...", L"Encodage...", L"Codifica...", L"Codificando...",
+				L"인코딩 중…", L"编码中…", L"Encoding...", L"Кодирование...", L"Kodiere...",
+				L"Codificando...", L"Coderen...", L"Kodowanie...", L"Kodlaniyor..."));
+			if (fmt == TC_FMT_FLAC)
+				ok = EncodeWavToFlac(mixWav, finalPath, flacLevel);
+			else
+				ok = EncodeWavToMp3(mixWav, finalPath, mp3Kbps);
+			DeleteFile(mixWav);
+		}
+		if (ok && pcs[0].fol[0] != 0) {
+			FileTagFields fill;
+			fill.title = opts.tagTitle;
+			fill.artist = opts.tagArtist;
+			fill.album = opts.tagAlbum;
+			const int copyTags = opts.copyTags ? 1 : 0;
+			const bool needMeta = copyTags
+				|| !fill.title.IsEmpty() || !fill.artist.IsEmpty() || !fill.album.IsEmpty()
+				|| !opts.coverImagePath.IsEmpty();
+			if (needMeta)
+				ApplyExportTagsAndCover(pcs[0].fol, finalPath, copyTags, &fill, opts.coverImagePath);
+		}
+	}
+	else if (xfade) {
 		CString finalPath = NormalizeOutPath(pathStr, fmt);
 		m_path.SetWindowText(finalPath);
 		CString accumWav = (fmt == TC_FMT_WAV) ? finalPath : TcMakeTempWavPath();

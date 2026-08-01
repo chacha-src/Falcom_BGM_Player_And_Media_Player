@@ -264,14 +264,14 @@ BOOL CWavExport::OnInitDialog()
 		L"seg", L"초", L"秒", L"ث",
 		L"сек", L"Sek", L"seg", L"sec",
 		L"sek", L"sn"));
-	m_trimCheck.SetWindowText(LL14(L"先頭無音カット", L"Trim leading silence", L"Couper silence initial", L"Taglia silenzio iniziale",
-		L"Cortar silencio inicial", L"앞 무음 제거", L"切除开头静音", L"قص الصمت الابتدائي",
-		L"Обрезать нач. тишину", L"Stille am Anfang kürzen", L"Cortar silêncio inicial", L"Stilte begin trimmen",
-		L"Przytnij ciszę na początku", L"Baştaki sessizliği kes"));
-	m_trimLabel.SetWindowText(LL14(L"保持秒", L"Keep sec", L"Garder sec", L"Mantieni sec",
-		L"Mantener seg", L"유지 초", L"保留秒", L"احتفظ ث",
-		L"Оставить сек", L"Behalten Sek", L"Manter seg", L"Bewaar sec",
-		L"Zostaw sek", L"Tut sn"));
+	m_trimCheck.SetWindowText(LL14(L"先頭無音を揃える", L"Align leading silence", L"Aligner silence initial", L"Allinea silenzio iniziale",
+		L"Alinear silencio inicial", L"앞 무음 맞추기", L"对齐开头静音", L"مواءمة الصمت الابتدائي",
+		L"Выровнять нач. тишину", L"Anfangsstille angleichen", L"Alinhar silencio inicial", L"Beginstilte uitlijnen",
+		L"Wyrównaj ciszę na początku", L"Bastaki sessizligi hizala"));
+	m_trimLabel.SetWindowText(LL14(L"秒", L"sec", L"sec", L"sec",
+		L"seg", L"초", L"秒", L"ث",
+		L"сек", L"Sek", L"seg", L"sec",
+		L"sek", L"sn"));
 	m_copyTags.SetWindowText(LL14(L"タグとジャケットをコピー", L"Copy tags and cover art", L"Copier les tags et la pochette", L"Copia tag e copertina",
 		L"Copiar etiquetas y portada", L"태그와 재킷 복사", L"复制标签和封面", L"نسخ الوسوم والغلاف",
 		L"Копировать теги и обложку", L"Tags und Cover kopieren", L"Copiar tags e capa", L"Tags en hoes kopiëren",
@@ -324,6 +324,98 @@ BOOL CWavExport::OnInitDialog()
 	ExportTagUi_InitFields(multiFile, pc, m_title, m_artist, m_album,
 		m_titleL, m_artistL, m_albumL, m_coverL, m_coverPic, m_cover, m_coverClear, m_coverPath, m_coverBmp);
 	DragAcceptFiles(TRUE);
+
+	// チェック／スタティック幅＋秒欄縦中央。右列は左列実幅の右から
+	{
+		UINT dpi = 96;
+		if (HDC hdcDpi = ::GetDC(GetSafeHwnd())) {
+			dpi = (UINT)GetDeviceCaps(hdcDpi, LOGPIXELSX);
+			::ReleaseDC(GetSafeHwnd(), hdcDpi);
+			if (dpi == 0) dpi = 96;
+		}
+		auto scale = [dpi](int v96) -> int { return MulDiv(v96, (int)dpi, 96); };
+		auto heightOf = [this](CWnd& w) -> int {
+			if (!w.GetSafeHwnd()) return 18;
+			CRect r; w.GetWindowRect(&r); return r.Height();
+		};
+		auto textW = [this](CWnd& w) -> int {
+			if (!w.GetSafeHwnd()) return 0;
+			CString t; w.GetWindowText(t);
+			if (t.IsEmpty()) t = L"W";
+			int cx = 0;
+			if (CDC* pDc = GetDC()) {
+				CFont* pFont = w.GetFont();
+				if (!pFont) pFont = GetFont();
+				CFont* pOld = pDc->SelectObject(pFont);
+				cx = pDc->GetTextExtent(t).cx;
+				if (pOld) pDc->SelectObject(pOld);
+				ReleaseDC(pDc);
+			}
+			return cx;
+		};
+		auto fitCheck = [&](CWnd& chk) -> int {
+			int w = textW(chk) + scale(18) + scale(8) + scale(16);
+			if (w < scale(72)) w = scale(72);
+			return w;
+		};
+		auto fitStatic = [&](CWnd& lab) -> int {
+			int w = textW(lab) + scale(6);
+			if (w < scale(24)) w = scale(24);
+			return w;
+		};
+		auto placeSized = [this](CWnd& w, int x, int y, int width, int height) {
+			if (!w.GetSafeHwnd()) return;
+			w.SetWindowPos(NULL, x, y, width, height, SWP_NOZORDER);
+		};
+		auto placeCheckSecAt = [&](CWnd& chk, CWnd& sec, CWnd& lab, int x, int yTop, int* outH) -> int {
+			const int chkW = fitCheck(chk);
+			const int labW = fitStatic(lab);
+			CRect rSec; sec.GetWindowRect(&rSec);
+			const int secW = rSec.Width() > 0 ? rSec.Width() : scale(40);
+			const int secH = rSec.Height() > 0 ? rSec.Height() : scale(22);
+			const int chkH = (std::max)(heightOf(chk), scale(18));
+			const int labH = (std::max)(heightOf(lab), scale(14));
+			const int rowH = (std::max)(chkH, (std::max)(secH, labH));
+			placeSized(chk, x, yTop + (rowH - chkH) / 2, chkW, chkH);
+			const int secX = x + chkW + scale(6);
+			placeSized(sec, secX, yTop + (rowH - secH) / 2, secW, secH);
+			placeSized(lab, secX + secW + scale(4), yTop + (rowH - labH) / 2, labW, labH);
+			if (outH) *outH = rowH;
+			return secX + secW + scale(4) + labW;
+		};
+
+		CRect rcClient; GetClientRect(&rcClient);
+		const int marginL = scale(7);
+		const int clientRight = rcClient.right - scale(7);
+		CRect rFade; m_fadeCheck.GetWindowRect(&rFade); ScreenToClient(&rFade);
+		CRect rTrim; m_trimCheck.GetWindowRect(&rTrim); ScreenToClient(&rTrim);
+		const int fadeY = rFade.top;
+		const int trimY = rTrim.top;
+
+		auto leftW = [&](CWnd& chk, CWnd& sec, CWnd& lab) {
+			CRect rs; sec.GetWindowRect(&rs);
+			const int sw = rs.Width() > 0 ? rs.Width() : scale(40);
+			return fitCheck(chk) + scale(6) + sw + scale(4) + fitStatic(lab);
+		};
+		int rightColX = marginL + (std::max)(leftW(m_fadeCheck, m_fadeSec, m_fadeLabel), leftW(m_trimCheck, m_trimSec, m_trimLabel)) + scale(16);
+
+		int fadeH = 0;
+		placeCheckSecAt(m_fadeCheck, m_fadeSec, m_fadeLabel, marginL, fadeY, &fadeH);
+		int trimH = 0;
+		const int trimEnd = placeCheckSecAt(m_trimCheck, m_trimSec, m_trimLabel, marginL, trimY, &trimH);
+		if (m_copyTags.GetSafeHwnd()) {
+			const int copyW = fitCheck(m_copyTags);
+			const int copyH = (std::max)(heightOf(m_copyTags), scale(18));
+			int copyX = (std::max)(rightColX, trimEnd + scale(12));
+			if (copyX + copyW > clientRight)
+				copyX = (std::max)(trimEnd + scale(8), clientRight - copyW);
+			placeSized(m_copyTags, copyX, trimY + (trimH - copyH) / 2, copyW, copyH);
+		}
+		if (m_promptCheck.GetSafeHwnd()) {
+			CRect rP; m_promptCheck.GetWindowRect(&rP); ScreenToClient(&rP);
+			placeSized(m_promptCheck, marginL, rP.top, fitCheck(m_promptCheck), (std::max)(rP.Height(), scale(18)));
+		}
+	}
 	return TRUE;
 }
 

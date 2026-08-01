@@ -973,6 +973,10 @@
 #define IDC_TC_XFADE                    3738
 #define IDC_TC_XFADE_SEC                3739
 #define IDC_TC_XFADE_L                  3740
+#define IDC_TC_MIX                      3741
+#define IDC_TC_MIX_N_L                  3742
+#define IDC_TC_MIX_N                    3743
+#define IDC_TC_MIX_VOL                  3744
 
 #define ID_MP_SPEANA_BAR                32960
 #define ID_MP_SPEANA_MIRROR             32961
@@ -1007,7 +1011,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        214
 #define _APS_NEXT_COMMAND_VALUE         32973
-#define _APS_NEXT_CONTROL_VALUE         3741
+#define _APS_NEXT_CONTROL_VALUE         3745
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

@@ -4297,6 +4297,11 @@ static void MP_PlayIndex(int idx)
 	pl->Get(idx);          // fnn/filen/modesub/loop1/loop2/ret2 をセット + 選択
 	plcnt = idx;
 	gameon = 0;
+	// 前曲の A-B / 緑帯を持ち越さない
+	if (mp) {
+		mp->m_abApos = -1;
+		mp->m_abBpos = -1;
+	}
 	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		RequestPlaybackRestart(og->GetSafeHwnd());  // 再生(再演奏)

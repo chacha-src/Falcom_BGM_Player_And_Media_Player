@@ -343,6 +343,8 @@ BOOL COggApp::InitInstance()
 	savedata.wav_export_apply_prompt = 0;
 	savedata.wav_export_xfade = 0;
 	savedata.wav_export_xfade_sec = 5;
+	savedata.wav_export_mix = 0;
+	savedata.wav_export_mix_n = 2;
 	savedata.pianorollviewmode = 0;
 	savedata.pianorollkeyrange = 108;
 	savedata.pianorollnotename = 1;
@@ -840,6 +842,13 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, wav_export_xfade_sec) + sizeof(savedata.wav_export_xfade_sec))
 		|| savedata.wav_export_xfade_sec < 1 || savedata.wav_export_xfade_sec > 120)
 		savedata.wav_export_xfade_sec = 5;
+	if (datFileSize < (int)(offsetof(save, wav_export_mix) + sizeof(savedata.wav_export_mix)))
+		savedata.wav_export_mix = 0;
+	else if (savedata.wav_export_mix != 0)
+		savedata.wav_export_mix = 1;
+	if (datFileSize < (int)(offsetof(save, wav_export_mix_n) + sizeof(savedata.wav_export_mix_n))
+		|| savedata.wav_export_mix_n < 2 || savedata.wav_export_mix_n > 64)
+		savedata.wav_export_mix_n = 2;
 	// 簡易ピアノロール 表示拡張(末尾追記): 旧.dat には無いので既定値へ
 	if (datFileSize < (int)(offsetof(save, pianorollviewmode) + sizeof(savedata.pianorollviewmode)))
 		savedata.pianorollviewmode = 0;

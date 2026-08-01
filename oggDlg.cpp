@@ -4277,6 +4277,7 @@ static bool WavExportFrameIsSilent(const BYTE* frame, int blockAlign, int bits, 
 	return false;
 }
 
+// 先頭無音を keepSec 秒に揃える（長い→カット、短い→無音パッド）
 static BOOL TrimLeadingSilenceWavFile(const CString& path, int keepSec)
 {
 	if (keepSec < 0) keepSec = 0;
@@ -4292,13 +4293,17 @@ static BOOL TrimLeadingSilenceWavFile(const CString& path, int keepSec)
 	const DWORD hz = info.hz;
 	const WORD bits = info.bits;
 	const __int64 dataBytes = info.dataBytes;
+	if (blockAlign <= 0 || hz == 0) {
+		f.Close();
+		return FALSE;
+	}
 
 	int threshold = 200;
 	if (bits == 8) threshold = 3;
 	else if (bits == 24) threshold = 8000;
 	else if (bits == 32) threshold = 8000;
 
-	std::vector<BYTE> frame(blockAlign);
+	std::vector<BYTE> frame((size_t)blockAlign);
 	__int64 leadingSilentFrames = 0;
 	f.Seek(info.dataOffset, CFile::begin);
 	while (leadingSilentFrames * blockAlign < dataBytes) {
@@ -4309,37 +4314,88 @@ static BOOL TrimLeadingSilenceWavFile(const CString& path, int keepSec)
 	}
 
 	const __int64 keepFrames = (__int64)keepSec * (__int64)hz;
-	__int64 trimFrames = leadingSilentFrames - keepFrames;
-	if (trimFrames <= 0) {
-		f.Close();
-		return TRUE;
-	}
-	const __int64 trimBytes = trimFrames * blockAlign;
-	if (trimBytes >= dataBytes) {
-		f.Close();
-		return FALSE;
-	}
-	const __int64 newDataBytes = dataBytes - trimBytes;
+	const __int64 deltaFrames = leadingSilentFrames - keepFrames;
 	const int bufSize = 65536;
 	std::vector<BYTE> buf(bufSize);
-	__int64 src = info.dataOffset + trimBytes;
-	__int64 dst = info.dataOffset;
-	__int64 remaining = newDataBytes;
-	while (remaining > 0) {
-		const int toMove = (int)((remaining > bufSize) ? bufSize : remaining);
-		f.Seek(src, CFile::begin);
-		if (f.Read(buf.data(), toMove) != (UINT)toMove) {
+
+	if (deltaFrames > 0) {
+		// 指定秒より長い先頭無音 → 余剰をカット
+		const __int64 trimBytes = deltaFrames * blockAlign;
+		if (trimBytes >= dataBytes) {
 			f.Close();
 			return FALSE;
 		}
-		f.Seek(dst, CFile::begin);
-		f.Write(buf.data(), toMove);
-		src += toMove;
-		dst += toMove;
-		remaining -= toMove;
+		const __int64 newDataBytes = dataBytes - trimBytes;
+		__int64 src = info.dataOffset + trimBytes;
+		__int64 dst = info.dataOffset;
+		__int64 remaining = newDataBytes;
+		while (remaining > 0) {
+			const int toMove = (int)((remaining > bufSize) ? bufSize : remaining);
+			f.Seek(src, CFile::begin);
+			if (f.Read(buf.data(), toMove) != (UINT)toMove) {
+				f.Close();
+				return FALSE;
+			}
+			f.Seek(dst, CFile::begin);
+			f.Write(buf.data(), toMove);
+			src += toMove;
+			dst += toMove;
+			remaining -= toMove;
+		}
+		f.SetLength(info.dataOffset + newDataBytes);
+		FinalizeWavStreamHeaderRF64(f);
+		f.Close();
+		return TRUE;
 	}
-	f.SetLength(info.dataOffset + newDataBytes);
-	FinalizeWavStreamHeaderRF64(f);
+
+	if (deltaFrames < 0) {
+		// 指定秒より短い（または無音なし）→ 不足分を先頭に無音挿入
+		const __int64 padFrames = -deltaFrames;
+		const __int64 padBytes = padFrames * blockAlign;
+		const __int64 newDataBytes = dataBytes + padBytes;
+		try {
+			f.SetLength(info.dataOffset + newDataBytes);
+		}
+		catch (CFileException* e) {
+			e->Delete();
+			f.Close();
+			return FALSE;
+		}
+		// 後方からコピーして上書きを避ける
+		__int64 remaining = dataBytes;
+		while (remaining > 0) {
+			const int toMove = (int)((remaining > bufSize) ? bufSize : remaining);
+			const __int64 src = info.dataOffset + remaining - toMove;
+			const __int64 dst = info.dataOffset + padBytes + remaining - toMove;
+			f.Seek(src, CFile::begin);
+			if (f.Read(buf.data(), toMove) != (UINT)toMove) {
+				f.Close();
+				return FALSE;
+			}
+			f.Seek(dst, CFile::begin);
+			f.Write(buf.data(), toMove);
+			remaining -= toMove;
+		}
+		// 先頭パッド（8bitは128、他は0）
+		if (bits == 8)
+			memset(buf.data(), 0x80, buf.size());
+		else
+			memset(buf.data(), 0, buf.size());
+		__int64 padLeft = padBytes;
+		__int64 dst = info.dataOffset;
+		while (padLeft > 0) {
+			const int toWrite = (int)((padLeft > bufSize) ? bufSize : padLeft);
+			f.Seek(dst, CFile::begin);
+			f.Write(buf.data(), toWrite);
+			dst += toWrite;
+			padLeft -= toWrite;
+		}
+		FinalizeWavStreamHeaderRF64(f);
+		f.Close();
+		return TRUE;
+	}
+
+	// すでに指定秒ちょうど
 	f.Close();
 	return TRUE;
 }
@@ -4477,6 +4533,8 @@ void COggDlg::dsdload(CString& filen, CString& tagfile, CString& tagname, CStrin
 	si1.dwChannels = wavchannel;
 	si1.dwBitsPerSample = wavsam_depth;
 	m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
+	// 長さを loop2 に載せただけなのでクリア（部分緑帯の原因になる）
+	loop3 = loop2; loop2 = 0;
 	dsd_.kpiSetPosition(kmp, 0);
 	kbps = 0;
 	wav_start();
@@ -7757,7 +7815,8 @@ void COggDlg::play()
 			DoEvent();
 	}
 	else if (mode == -3 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == 30 || mode == 999) {
-
+		// 孤児 CWread が古い loop1/2 で SetSelection しないよう世代を進める
+		InterlockedIncrement(&g_cwreadEpoch);
 	}
 	else {
 		if (mode != -6) { // ogg
@@ -8457,6 +8516,7 @@ void COggDlg::play()
 			if (wav) free(wav);
 			wav_start();
 			m_time.SetRange(0, loop2, TRUE);
+			loop3 = loop2; loop2 = 0;
 			if (pl && plw && plcnt >= 0 && plcnt < pl->playcnt) {
 				tagfile = pl->pc[plcnt].name;
 				tagname = pl->pc[plcnt].art;
@@ -8481,6 +8541,7 @@ void COggDlg::play()
 			loop2 = (int)wi.totalSamples;
 			data_size = oggsize = (int)(loop2 * (wavsam_depth / 8) * wavchannel);
 			m_time.SetRange(0, (int)loop2, TRUE);
+			loop3 = loop2; loop2 = 0;
 			if (pl && plw && plcnt >= 0 && plcnt < pl->playcnt) {
 				tagfile = pl->pc[plcnt].name;
 				tagname = pl->pc[plcnt].art;
@@ -8549,6 +8610,8 @@ void COggDlg::play()
 		si1.dwChannels = wavchannel;
 		si1.dwBitsPerSample = wavsam_depth;
 		m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
+		// MP3 と同様: 総長を loop2 に載せただけなのでクリア。0xBF トレイラがあれば下で再設定。
+		loop3 = loop2; loop2 = 0;
 		flac_.SetPosition(kmp, 0);
 		kbps = 0;
 		CFile ff;
@@ -8793,6 +8856,7 @@ void COggDlg::play()
 		if (sikpi.dwLength == (DWORD)-1) loop2 = 0;
 		data_size = oggsize = loop2 * (wavsam_depth / 4);
 		m_time.SetRange(0, (data_size) / (wavsam_depth / 4), TRUE);
+		loop3 = loop2; loop2 = 0;
 		m4a_.SetPosition(kmp, 0);
 		kbps = 0;
 		CFile ff;
@@ -10457,11 +10521,8 @@ void COggDlg::play()
 	lo = 0; loc = 0;
 
 	if (loop1 == 0 && loop2 == 0) {
-		{
-			const int bpfT = PcmOutBytesPerFrame();
-			const int fullLen = (bpfT > 0) ? (data_size / bpfT) : 0;
-			m_time.SetSelection(0, fullLen);
-		}
+		const int fullLen = m_time.GetMaxValue();
+		m_time.SetSelection(0, (fullLen > 0) ? fullLen : 1);
 		m_time.Invalidate();
 	}
 	else {
@@ -10699,6 +10760,15 @@ void COggDlg::play()
 	}
 	// plcnt/SIcon 確定後に曲ごとパラメータを復元(通知スレッド開始より後が正しい)
 	SongParams_OnSongStarted();
+	// ProAudio 上書き後に緑帯を合わせる（上書き無しなら全範囲）
+	if (loop1 == 0 && loop2 == 0) {
+		const int fullLen = m_time.GetMaxValue();
+		m_time.SetSelection(0, (fullLen > 0) ? fullLen : 1);
+	}
+	else {
+		m_time.SetSelection(loop1, loop1 + loop2);
+	}
+	m_time.Invalidate();
 	m_saisai.EnableWindow(TRUE); playy = 1; ResetPauseButtonUi();
 	SetTimer(1250, 100, NULL);
 	fade1 = 0;
@@ -16601,6 +16671,9 @@ BOOL COggDlg::stop1()
 	}
 	s_inStop1 = true;
 	struct ClearInStop1 { ~ClearInStop1() { s_inStop1 = false; } } _clearInStop1;
+
+	// 孤児 CWread の遅延 SetSelection を無効化
+	InterlockedIncrement(&g_cwreadEpoch);
 
 	// playlist Get() が mode を次曲形式に差し替えた後でも、Open 中の形式で閉じる
 	const int stoppingMode = PeekOpenDecoderMode(mode);

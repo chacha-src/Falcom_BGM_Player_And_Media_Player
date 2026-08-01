@@ -252,7 +252,67 @@ BOOL CTagEditDlg::OnInitDialog()
 		if (y + chrome > 120)
 			SetWindowPos(NULL, 0, 0, rcWin.Width(), y + chrome, SWP_NOMOVE | SWP_NOZORDER);
 	}
+
+	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
+		auto addTip = [this](CWnd& w, LPCWSTR text) {
+			if (w.GetSafeHwnd() && text && text[0])
+				m_tooltip.AddTool(&w, text);
+		};
+		addTip(m_coverClear, LL14(
+			L"ジャケット画像の指定を解除します",
+			L"Clear the cover image selection",
+			L"Effacer la pochette",
+			L"Rimuovi la copertina",
+			L"Quitar la portada",
+			L"재킷 이미지 지정을 해제합니다",
+			L"清除封面图指定",
+			L"Clear cover image",
+			L"Сбросить обложку",
+			L"Cover entfernen",
+			L"Limpar capa",
+			L"Omslag wissen",
+			L"Wyczysc okladke",
+			L"Kapak secimini kaldirir"));
+		addTip(m_save, LL14(
+			L"編集内容をファイルタグへ書き込みます",
+			L"Write the edited fields to file tags",
+			L"Ecrire les champs modifies dans les tags",
+			L"Scrivi i campi modificati nei tag",
+			L"Escribir los campos editados en etiquetas",
+			L"편집 내용을 파일 태그에 씁니다",
+			L"将编辑内容写入文件标签",
+			L"Write edits to file tags",
+			L"Записать изменения в теги файла",
+			L"Aenderungen in Datei-Tags schreiben",
+			L"Gravar edicoes nas tags do arquivo",
+			L"Bewerkingen naar bestandstags schrijven",
+			L"Zapisz edycje do tagow pliku",
+			L"Duzenlemeleri dosya etiketlerine yazar"));
+		addTip(m_close, LL14(
+			L"保存せずに閉じます",
+			L"Close without saving",
+			L"Fermer sans enregistrer",
+			L"Chiudi senza salvare",
+			L"Cerrar sin guardar",
+			L"저장하지 않고 닫습니다",
+			L"不保存并关闭",
+			L"Close without saving",
+			L"Закрыть без сохранения",
+			L"Schliessen ohne Speichern",
+			L"Fechar sem salvar",
+			L"Sluiten zonder opslaan",
+			L"Zamknij bez zapisu",
+			L"Kaydetmeden kapatir"));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
+	}
 	return TRUE;
+}
+
+BOOL CTagEditDlg::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
 void CTagEditDlg::OnBnClickedCoverClear()
