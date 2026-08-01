@@ -53,7 +53,7 @@ Ozone風のリアルタイムアナライザーを追加しました。
 .lrc形式の歌詞表示に対応しています。ネットからの歌詞取得もできます。
 
 ### ジャケット・プレイリスト
-アルバムジャケットの表示と、m3u対応のプレイリスト機能があります。曲ごとの音量やEQなどの設定も覚えます。
+アルバムジャケットの表示と、プレイリスト機能（m3u / m3u8 / pls / xspf の取り込みなど）があります。曲ごとの音量やEQなどの設定も覚えます。
 「曲ごとに設定保存」のチェックを入れると、★付きの曲は保存済みパラメータを読み直して反映します。チェックを外すときは、その時点の設定をその曲へ保存してから無効化します。
 
 ### アクリル（ぼかし）UI
@@ -63,10 +63,13 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 サンプリングレートやビット深度のアップスケール、マルチチャンネル出力に対応しています。
 
 ### 演奏プロンプト
-再生中にピッチやテンポ、エフェクトなどを時間指定で動かすプロンプト機能があります。
+再生中にピッチやテンポ、エフェクトなどを時間指定で動かすプロンプト機能があります。テキスト編集のほか、曲を読みながらの解析・履歴の保存／読込、雰囲気モードにも対応しています。
+
+### コマンドロール
+プロンプトを時間軸のロール上で編集・配置できます（複数レーン）。メディアプレイヤー側から開けます。メイン画面に追随するロックや表示倍率の保存にも対応しています。
 
 ### 再生詳細
-ギャップレス、ReplayGain、Mid/Side、相関メーター、書き出しリミッター、ループ区間、キュー、タグ書き込みなどをまとめた設定です。メディアプレイヤー画面の「詳細」ボタン、またはプレイリストの右クリックから開けます。
+ギャップレス、ReplayGain、Mid/Side、相関メーター、書き出しリミッター、ループ区間、ループ境界フェード、キュー、タグ書き込み、簡易波形プレビューなどをまとめた設定です。メディアプレイヤー画面の「詳細」ボタン、またはプレイリストの右クリックから開けます。
 タグ書き込みは **MP3 / FLAC / WAV / M4A / Ogg Vorbis** に対応しています（暗号化FLACやOpus書き込みは非対応）。
 
 ### ファイル情報
@@ -78,8 +81,20 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 - 再生詳細へのジャンプ、ループの編集（OKでプレイリストへ保存）
 - 複数選択時はアーティスト／アルバムの一括編集
 
-### mp3 / FLAC 書き出し
-プレイリストの右クリックから、選択曲を mp3 または FLAC に書き出せます。いったん WAV と同じ経路でレンダリングしたあと変換します。ビットレート（mp3）や圧縮レベル（FLAC）、ループ回数、フェードアウト、先頭無音カットを指定できます。
+### タグ編集
+プレイリストの右クリック「タグ編集」から、タイトル／アーティスト／アルバムに加え、年・トラック・ジャンル・コメントやジャケットを編集してファイルへ書き込めます。複数選択時は空欄の項目は変えず、入力した項目だけ一括適用します。
+
+### 音声書き出し（WAV / mp3 / FLAC）
+プレイリストの右クリック「音声書き出し」から、選択曲を **WAV / mp3 / FLAC** に書き出せます（タブで形式切替）。いったん PCM（WAV経路）へレンダリングしたあと、必要ならエンコードします。
+
+- **ループ回数**、**フェードアウト**、**先頭無音を揃える**（長い先頭無音はカット、短い場合は無音を足して指定秒に揃える）
+- **サンプリング**（ソースのまま／44.1〜192 kHz）、KPI曲向けの**長さ(秒)**
+- **タグとジャケットをコピー**、タイトル／アーティスト／アルバム／ジャケットの指定
+- **プロンプト実行を適用**（書き出しPCMに演奏プロンプトを反映）
+- **クロスフェード**（複数選択時）: 曲を1ファイルに順次連結し、曲間を指定秒で等パワー交差。コンテキストの「クロスフェード書き出し」からも起動可
+- **ミックス**（複数選択時）: 同時に重ねる曲数と曲ごとの音量割合(%)を指定して1ファイルへ。クロスフェードと併用すると、終わった枠へ次曲を指定秒で補充投入
+
+従来の WAV 書き出しと同様、2GB超は RF64 に対応しています。
 
 ![ファルコムプレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git7.png)
 
@@ -156,20 +171,23 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 | **← / → キー** | シーク (早送り/巻き戻し) |
 
 ### 補足
-- ランダム再生、連続再生、ループ回数の指定
+- ランダム再生、連続再生、ループ回数の指定、A-Bリピート
 - ファイルのドラッグ＆ドロップ追加
 - mp3やDirectShow再生の途中位置の保存
+- 音声書き出し（WAV / mp3 / FLAC。ループ／フェード／先頭無音揃え／クロスフェード／同時ミックス／サンプリング指定）
 - WAV書き出し時の2GB超対応（RF64）
-- mp3 / FLAC への書き出し（プレイリスト右クリック。ループ／フェード／先頭無音カット対応）
-- ピアノロールの検出パラメータ調整
+- ピアノロールの検出パラメータ調整ダイアログ（多数スライダー）
+- プレイリストからアナライザー／ピアノロールを直接開く
+- 並べ替え、他プレイリストへの移動・コピー、選択曲のジャケ再取得
+- 欠損ファイル確認（パス修正・適用・インライン編集）と欠損マークの再スキャン
+- プレイリスト取り込み（m3u / m3u8 / pls / xspf。UTF-8、相対パス、欠損／重複スキップなど）
 - レンダリング設定（デバイス、バッファ、ビット深度、フォント、ファイル関連付けなど）
 - タスクバーのジャンプリスト（再生／停止、EQ、ジャケット、プレイリストなど）
 - 起動時・定期の更新チェック
 - Windowsミキサーでアプリがミュートされているときの警告
 - メディアプレイヤー側の最小化連動やツールチップ表示など
 - メイン画面を動かすと関連ウィンドウが追随
-- リンク切れファイルの一括削除
-- 曲ごと設定のON/OFF時の復元・保存、ファイル情報画面のタグ／パス／★操作
+- 曲ごと設定のON/OFF時の復元・保存、ファイル情報／タグ編集画面の操作
 - タグ書き込み（MP3 / FLAC / WAV / M4A / Ogg Vorbis）
 - kpi一覧の拡張子絞り込み
 
@@ -241,7 +259,7 @@ Tempo and pitch can be adjusted independently during playback.
 Supports .lrc lyrics display, including optional online lyric lookup.
 
 ### Jacket Art & Playlist
-Album jacket display and m3u playlists are supported. Per-track settings such as volume and EQ are remembered.
+Album jacket display and playlists are supported (import m3u / m3u8 / pls / xspf, among other features). Per-track settings such as volume and EQ are remembered.
 Turning **Save per-song** on reloads and applies saved parameters for tracks marked with ★. Turning it off saves the current settings for that track before disabling the feature.
 
 ### Acrylic (Blur) UI
@@ -251,10 +269,13 @@ Supports Windows 11 acrylic-style blur for the interface.
 Supports sample-rate / bit-depth upscaling and multi-channel output.
 
 ### Performance Prompt
-A timed prompt feature can change pitch, tempo, effects, and more during playback.
+A timed prompt feature can change pitch, tempo, effects, and more during playback. Besides text editing, it supports analyze-while-listening, history save/load, and atmosphere modes.
+
+### Command Roll
+Edit and place prompt commands on a time-based roll (multiple lanes). Open it from the media player. Follow-main lock and zoom level can be remembered.
 
 ### Playback Details
-Gapless playback, ReplayGain, Mid/Side, correlation meter, export limiter, loop points, cues, and tag writing are grouped in one window. Open it from the media player **Extra** button or the playlist context menu.
+Gapless playback, ReplayGain, Mid/Side, correlation meter, export limiter, loop points, loop-boundary fade, cues, tag writing, and a simple waveform preview are grouped in one window. Open it from the media player **Extra** button or the playlist context menu.
 Tag writing supports **MP3 / FLAC / WAV / M4A / Ogg Vorbis** (encrypted FLAC and Opus writing are not supported).
 
 ### File Info
@@ -266,8 +287,20 @@ From the playlist or media-player context menu (**File Info**), you can view and
 - Jump to Playback Details; edit loop points (saved to the playlist on OK)
 - With multiple tracks selected, batch-edit artist / album
 
-### mp3 / FLAC Export
-From the playlist context menu, selected tracks can be written as mp3 or FLAC. Audio is rendered through the same path as WAV export, then encoded. You can set mp3 bitrate or FLAC compression level, loop count, fade-out, and leading-silence trim.
+### Tag Edit
+From the playlist context menu (**Edit tags**), edit title / artist / album plus year, track, genre, comment, and cover art, then write to the file. With multiple selection, blank fields are left unchanged and only filled fields are applied to all.
+
+### Audio Export (WAV / mp3 / FLAC)
+From the playlist context menu (**Audio export**), write selected tracks as **WAV / mp3 / FLAC** (format tabs). Audio is rendered through the PCM/WAV path, then encoded when needed.
+
+- **Loop count**, **fade-out**, and **align leading silence** (trim if longer than N seconds; pad silence if shorter)
+- **Sample rate** (source / 44.1–192 kHz) and KPI **length (sec)** when needed
+- **Copy tags and cover**, plus optional title / artist / album / cover override
+- **Apply prompt execution** (bake performance prompts into the exported PCM)
+- **Crossfade** (multi-select): join tracks into one file with equal-power overlaps; also available via **Crossfade export…**
+- **Mix** (multi-select): layer a chosen number of tracks at once with per-track volume % into one file; with Crossfade on, refill ended slots over the given seconds
+
+Exports larger than 2GB use RF64, same as the traditional WAV path.
 
 ![Player Screen](https://ppp.oohara.jp/img/ysedplay2e_git7.png)
 
@@ -343,20 +376,23 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 | **Left / Right Arrow** | Seek (Rewind / Fast Forward) |
 
 ### Additional Notes
-- Random play, continuous play, and loop-count settings
+- Random play, continuous play, loop-count settings, and A-B repeat
 - Drag-and-drop file adding
 - Resume position for mp3 and DirectShow playback
+- Audio export (WAV / mp3 / FLAC; loop / fade / leading-silence align / crossfade / concurrent mix / sample-rate)
 - WAV export larger than 2GB (RF64)
-- mp3 / FLAC export (playlist context menu; loop / fade / leading-silence trim)
-- Piano-roll detection parameter tuning
+- Piano-roll detection tuning dialog (many sliders)
+- Open analyzer / piano roll directly from the playlist
+- Sort, move/copy to another playlist, refresh jacket for selection
+- Missing-file review (path fix / apply / inline edit) and missing-mark rescan
+- Playlist import (m3u / m3u8 / pls / xspf; UTF-8, relative paths, skip missing/duplicates)
 - Rendering options (device, buffer, bit depth, fonts, file associations, etc.)
 - Taskbar jump list (play/pause, EQ, jacket, playlist, and more)
 - Startup and periodic update checks
 - Warning when the app is muted in the Windows volume mixer
 - Media-player extras such as minimize sync and tooltips
 - Related windows follow when the main window is moved
-- Batch removal of broken-link files
-- Per-song settings restore/save on feature toggle; File Info tag / path / ★ tools
+- Per-song settings restore/save on feature toggle; File Info / Tag Edit tools
 - Tag writing (MP3 / FLAC / WAV / M4A / Ogg Vorbis)
 - kpi list extension filter
 
