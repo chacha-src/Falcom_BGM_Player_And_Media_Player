@@ -743,9 +743,20 @@ void CCommandRollView::OnPaint()
 {
 	CPaintDC pdc(this);
 	CRect rc = ClientRoll();
-	EnsureMemDC(rc.Width(), rc.Height());
-	PaintRoll(m_memDC, CRect(0, 0, rc.Width(), rc.Height()));
-	pdc.BitBlt(0, 0, rc.Width(), rc.Height(), &m_memDC, 0, 0, SRCCOPY);
+	const int w = rc.Width();
+	const int h = rc.Height();
+	if (w <= 0 || h <= 0) return;
+	EnsureMemDC(w, h);
+	PaintRoll(m_memDC, CRect(0, 0, w, h));
+	// ホスト REDIRECTIONBITMAP_ALPHA 時は素 BitBlt が α=0 で全透明になる
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_AcrylicCaption(::GetParent(m_hWnd)) || CCC_IsAeroEnabled()) {
+		CCC_BlitStretchOpaque(pdc.GetSafeHdc(), 0, 0, w, h,
+			m_memDC.GetSafeHdc(), 0, 0, w, h);
+		return;
+	}
+#endif
+	pdc.BitBlt(0, 0, w, h, &m_memDC, 0, 0, SRCCOPY);
 }
 
 BOOL CCommandRollView::OnEraseBkgnd(CDC* /*pDC*/)
@@ -1052,11 +1063,15 @@ void CCommandRollDlg::LayoutControls()
 {
 	if (!::IsWindow(GetSafeHwnd())) return;
 	CRect rc; GetClientRect(&rc);
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	const int M = 8;
 	const int btnH = 24;
-	const int topY = M - 2;
-	CCC_MainLockSetHeaderRow(m_hWnd, topY, btnH);
-	const int lockReserve = CCC_MainLockGetReserveWidth(m_hWnd);
+	const int topY = capH + M - 2; // カスタム帯の下（被せるとアクリルが消える）
+	if (capH > 0)
+		CCC_MainLockClearHeaderRow(m_hWnd);
+	else
+		CCC_MainLockSetHeaderRow(m_hWnd, topY, btnH);
+	const int lockReserve = (capH > 0) ? 0 : CCC_MainLockGetReserveWidth(m_hWnd);
 	int rightEdge = rc.right - M - lockReserve;
 	if (rightEdge < M + 240)
 		rightEdge = rc.right - M;
@@ -1082,7 +1097,7 @@ void CCommandRollDlg::LayoutControls()
 	int timeRight = x - 8;
 	if (timeRight < M + 40) timeRight = M + 40;
 	if (m_timeLbl.GetSafeHwnd())
-		m_timeLbl.MoveWindow(M, M, max(40, timeRight - M), 18);
+		m_timeLbl.MoveWindow(M, topY, max(40, timeRight - M), 18);
 
 	const int bottomH = 30;
 	const int progH = 14;
@@ -1112,11 +1127,19 @@ void CCommandRollDlg::LayoutControls()
 		m_progress.MoveWindow(M, progY, max(40, rc.right - M - M), progH);
 
 	if (CWnd* host = GetDlgItem(IDC_MCR_HOST)) host->ShowWindow(SW_HIDE);
-	CRect viewRc(M, 28, rc.right - M, progY - 4);
-	if (viewRc.bottom < viewRc.top + 40)
-		viewRc.bottom = viewRc.top + 40;
+	const int viewTop = topY + btnH + 4;
+	CRect viewRc(M, viewTop, rc.right - M, progY - 4);
+	// 高さが潰れたら本文側を優先して最低高を確保（ボタン帯より上に収める）
+	if (viewRc.Height() < 40) {
+		viewRc.top = max(capH + 2, progY - 4 - 40);
+		viewRc.bottom = progY - 4;
+		if (viewRc.Height() < 20)
+			viewRc.bottom = viewRc.top + 20;
+	}
 	if (m_view.GetSafeHwnd())
 		m_view.MoveWindow(viewRc);
+	CCC_CaptionLayout(m_hWnd);
+	CCC_MainLockBringToFront(m_hWnd);
 }
 
 void CCommandRollDlg::SetupTooltips()
@@ -1217,9 +1240,8 @@ BOOL CCommandRollDlg::PreTranslateMessage(MSG* pMsg)
 
 BOOL CCommandRollDlg::OnEraseBkgnd(CDC* pDC)
 {
-	CRect rc; GetClientRect(&rc);
-	pDC->FillSolidRect(rc, RGB(240, 240, 245));
-	return TRUE;
+	// 帯は ClearRect 用に残す（全面 Fill するとキャプションアクリルが潰れる）
+	return CCustomBlurDialogExBase::OnEraseBkgnd(pDC);
 }
 
 void CCommandRollDlg::OnTimer(UINT_PTR nIDEvent)

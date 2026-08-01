@@ -279,6 +279,107 @@ CString TcMakeTempWavPath()
 	return path;
 }
 
+void TcFinalizeWavHeader(CFile& f);
+
+// MP3(MF)向けに 16bit PCM WAV を dstHz へリサンプルして書き出す
+BOOL TcResampleWavToRate(const CString& srcPath, const CString& dstPath, DWORD dstHz)
+{
+	CFile in;
+	if (!in.Open(srcPath, CFile::modeRead | CFile::shareDenyNone))
+		return FALSE;
+	TcWavInfo info = {};
+	if (!TcReadWavInfo(in, info) || info.ch < 1 || info.ch > 2 || info.hz == 0 || dstHz == 0)
+		return FALSE;
+
+	CFile out;
+	if (!out.Open(dstPath, CFile::modeCreate | CFile::modeReadWrite | CFile::shareExclusive))
+		return FALSE;
+
+	BYTE h[TC_WAV_HDR];
+	memset(h, 0, sizeof(h));
+	const WORD ch = info.ch;
+	const WORD bits = 16;
+	const WORD blockAlign = (WORD)(ch * bits / 8);
+	memcpy(h + 0, "RIFF", 4);
+	memcpy(h + 8, "WAVE", 4);
+	memcpy(h + 12, "JUNK", 4);
+	*(DWORD*)(h + 16) = 28;
+	memcpy(h + 48, "fmt ", 4);
+	*(DWORD*)(h + 52) = 16;
+	*(WORD*)(h + 56) = WAVE_FORMAT_PCM;
+	*(WORD*)(h + 58) = ch;
+	*(DWORD*)(h + 60) = dstHz;
+	*(DWORD*)(h + 64) = dstHz * blockAlign;
+	*(WORD*)(h + 68) = blockAlign;
+	*(WORD*)(h + 70) = bits;
+	memcpy(h + 72, "data", 4);
+	out.Write(h, TC_WAV_HDR);
+
+	const int inChunk = 8192;
+	std::vector<BYTE> raw((size_t)info.blockAlign * inChunk);
+	std::vector<short> inPcm((size_t)info.ch * inChunk);
+	std::vector<short> edge((size_t)info.ch, 0);
+	BOOL haveEdge = FALSE;
+	double pos = 0.0; // 入力フレーム位置(全体)
+	__int64 inFrameTotal = 0;
+	in.Seek(info.dataOffset, CFile::begin);
+	__int64 remain = info.dataBytes;
+	const double step = (double)info.hz / (double)dstHz;
+
+	std::vector<short> outPcm((size_t)info.ch * (inChunk * 4 + 16));
+	while (remain >= info.blockAlign) {
+		int frames = inChunk;
+		if ((__int64)frames * info.blockAlign > remain)
+			frames = (int)(remain / info.blockAlign);
+		const UINT want = (UINT)(frames * info.blockAlign);
+		if (in.Read(raw.data(), want) != want)
+			return FALSE;
+		for (int i = 0; i < frames; ++i)
+			TcPcmFrameToInt16(raw.data() + i * info.blockAlign, info.ch, info.bits, inPcm.data() + i * info.ch);
+
+		int outFrames = 0;
+		const int maxOut = (int)(outPcm.size() / (size_t)info.ch);
+		while (outFrames < maxOut) {
+			const double absPos = pos;
+			if (absPos >= (double)(inFrameTotal + frames))
+				break;
+			int local = (int)(absPos - (double)inFrameTotal);
+			if (local < 0) {
+				// 前チャンク末尾との補間
+				if (!haveEdge) { pos += step; continue; }
+				const double frac = absPos - floor(absPos);
+				for (int c = 0; c < info.ch; ++c) {
+					float a = (float)edge[c];
+					float b = (float)inPcm[c];
+					outPcm[(size_t)outFrames * info.ch + c] = (short)(a + (b - a) * (float)frac);
+				}
+			} else {
+				int local2 = local + 1;
+				if (local2 >= frames) local2 = frames - 1;
+				const double frac = absPos - (double)(inFrameTotal + local);
+				for (int c = 0; c < info.ch; ++c) {
+					float a = (float)inPcm[(size_t)local * info.ch + c];
+					float b = (float)inPcm[(size_t)local2 * info.ch + c];
+					outPcm[(size_t)outFrames * info.ch + c] = (short)(a + (b - a) * (float)frac);
+				}
+			}
+			++outFrames;
+			pos += step;
+		}
+		if (outFrames > 0)
+			out.Write(outPcm.data(), outFrames * info.ch * 2);
+
+		for (int c = 0; c < info.ch; ++c)
+			edge[c] = inPcm[(size_t)(frames - 1) * info.ch + c];
+		haveEdge = TRUE;
+		inFrameTotal += frames;
+		remain -= want;
+	}
+	TcFinalizeWavHeader(out);
+	out.Close();
+	return TRUE;
+}
+
 // 本アプリ書き出しWAV(80byteヘッダ)のサイズ欄をファイル実長から確定
 void TcFinalizeWavHeader(CFile& f)
 {
@@ -797,7 +898,8 @@ BOOL EncodeWavToFlac(const CString& wavPath, const CString& outPath, int compres
 	if (compressionLevel > 8) compressionLevel = 8;
 
 	CFile f;
-	if (!f.Open(wavPath, CFile::modeRead | CFile::shareDenyWrite))
+	// 直後に閉じた一時WAVでも開けるよう shareDenyNone
+	if (!f.Open(wavPath, CFile::modeRead | CFile::shareDenyNone))
 		return FALSE;
 	TcWavInfo info = {};
 	if (!TcReadWavInfo(f, info) || info.ch < 1 || info.ch > 8)
@@ -815,6 +917,7 @@ BOOL EncodeWavToFlac(const CString& wavPath, const CString& outPath, int compres
 		L"FLAC 준비…", L"准备FLAC…", L"Preparing FLAC...", L"Подготовка FLAC...", L"FLAC vorbereiten...",
 		L"Preparando FLAC...", L"FLAC voorbereiden...", L"Przygotowanie FLAC...", L"FLAC hazirlaniyor..."));
 
+	::DeleteFile(outPath);
 	FILE* fp = NULL;
 	if (_wfopen_s(&fp, outPath, L"w+b") != 0 || !fp)
 		return FALSE;
@@ -912,16 +1015,57 @@ BOOL EncodeWavToMp3(const CString& wavPath, const CString& outPath, int bitrateK
 	if (bitrateKbps < 64) bitrateKbps = 64;
 	if (bitrateKbps > 320) bitrateKbps = 320;
 
+	CString srcPath = wavPath;
+	CString tempResampled;
+	{
+		CFile probe;
+		if (!probe.Open(wavPath, CFile::modeRead | CFile::shareDenyNone))
+			return FALSE;
+		TcWavInfo info = {};
+		if (!TcReadWavInfo(probe, info) || info.ch < 1 || info.ch > 2)
+			return FALSE;
+		probe.Close();
+
+		DWORD encHz = info.hz;
+		static const DWORD kRates[] = { 16000, 22050, 24000, 32000, 44100, 48000 };
+		BOOL okRate = FALSE;
+		for (int i = 0; i < 6; ++i) {
+			if (encHz == kRates[i]) { okRate = TRUE; break; }
+		}
+		if (!okRate) {
+			if (encHz > 44100) encHz = 48000;
+			else if (encHz > 32000) encHz = 44100;
+			else if (encHz > 24000) encHz = 32000;
+			else if (encHz > 22050) encHz = 24000;
+			else if (encHz > 16000) encHz = 22050;
+			else encHz = 16000;
+			tempResampled = TcMakeTempWavPath();
+			if (!TcResampleWavToRate(wavPath, tempResampled, encHz)) {
+				DeleteFile(tempResampled);
+				return FALSE;
+			}
+			srcPath = tempResampled;
+		}
+	}
+
 	CFile f;
-	if (!f.Open(wavPath, CFile::modeRead | CFile::shareDenyWrite))
+	if (!f.Open(srcPath, CFile::modeRead | CFile::shareDenyNone)) {
+		if (!tempResampled.IsEmpty()) DeleteFile(tempResampled);
 		return FALSE;
+	}
 	TcWavInfo info = {};
-	if (!TcReadWavInfo(f, info) || info.ch < 1 || info.ch > 2)
+	if (!TcReadWavInfo(f, info) || info.ch < 1 || info.ch > 2) {
+		if (!tempResampled.IsEmpty()) DeleteFile(tempResampled);
 		return FALSE;
+	}
+
+	::DeleteFile(outPath);
 
 	HRESULT hr = MFStartup(MF_VERSION);
-	if (FAILED(hr))
+	if (FAILED(hr)) {
+		if (!tempResampled.IsEmpty()) DeleteFile(tempResampled);
 		return FALSE;
+	}
 
 	IMFSinkWriter* writer = NULL;
 	IMFMediaType* outType = NULL;
@@ -1053,6 +1197,9 @@ done:
 	if (outType) outType->Release();
 	if (writer) writer->Release();
 	MFShutdown();
+	f.Close();
+	if (!tempResampled.IsEmpty())
+		DeleteFile(tempResampled);
 	if (!ok)
 		DeleteFile(outPath);
 	return ok;

@@ -1,5 +1,8 @@
 ﻿#include "StdAfx.h"
 #include "CLyricsViewWnd.h"
+#include "CCustomControl.h"
+
+IMPLEMENT_DYNAMIC(CLyricsViewWnd, CWnd)
 
 namespace {
 	const UINT_PTR kAnimTimer = 61;
@@ -291,6 +294,15 @@ void CLyricsViewWnd::OnPaint()
 		mem.DrawText(empty, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 	}
 
-	pdc.BitBlt(0, 0, rc.Width(), rc.Height(), &mem, 0, 0, SRCCOPY);
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_AcrylicCaption(::GetParent(m_hWnd)) || CCC_IsAeroEnabled()) {
+		CCC_BlitStretchOpaque(pdc.GetSafeHdc(), 0, 0, rc.Width(), rc.Height(),
+			mem.GetSafeHdc(), 0, 0, rc.Width(), rc.Height());
+	}
+	else
+#endif
+	{
+		pdc.BitBlt(0, 0, rc.Width(), rc.Height(), &mem, 0, 0, SRCCOPY);
+	}
 	mem.SelectObject(oldBmp);
 }

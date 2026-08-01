@@ -277,9 +277,12 @@ void CMp3Image::OnPaint()
 
 	RECT r;
 	GetClientRect(&r);
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int contentTop = (capH > 0) ? capH : 0;
+	const int contentH = (r.bottom > contentTop) ? (r.bottom - contentTop) : r.bottom;
 #if 1
 	const int imgW = (int)((r.right - 100) * (xy));
-	const int imgH = r.bottom;
+	const int imgH = contentH;
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1 && CCC_IsWin11()) {
 		CDC memDC;
@@ -290,7 +293,7 @@ void CMp3Image::OnPaint()
 		memDC.FillSolidRect(0, 0, rect.Width(), rect.Height(), RGB(0, 0, 0));
 		SetStretchBltMode(memDC.m_hDC, HALFTONE);
 		SetBrushOrgEx(memDC.m_hDC, 0, 0, NULL);
-		memDC.StretchBlt(0, 0, imgW, imgH, &dc, 0, 0, x, y, SRCCOPY);
+		memDC.StretchBlt(0, contentTop, imgW, imgH, &dc, 0, 0, x, y, SRCCOPY);
 		CCC_BlitChromaNF(dcc.m_hDC, 0, 0, rect.Width(), rect.Height(),
 			memDC.GetSafeHdc(), 0, 0, RGB(0, 0, 0));
 		memDC.SelectObject(pOldMem);
@@ -299,10 +302,17 @@ void CMp3Image::OnPaint()
 #endif
 	{
 		CBrush brush(RGB(0, 0, 0));
-		dcc.FillRect(&rect, &brush);
+		if (contentTop > 0) {
+			CRect body = rect;
+			body.top = contentTop;
+			dcc.FillRect(&body, &brush);
+		}
+		else {
+			dcc.FillRect(&rect, &brush);
+		}
 		SetStretchBltMode(dcc.m_hDC, HALFTONE);
 		SetBrushOrgEx(dcc.m_hDC, 0, 0, NULL);
-		dcc.StretchBlt(0, 0, imgW, imgH, &dc, 0, 0, x, y, SRCCOPY);
+		dcc.StretchBlt(0, contentTop, imgW, imgH, &dc, 0, 0, x, y, SRCCOPY);
 	}
 #endif
 	//	m_x.MoveWindow((int)(rect.right - 50 * hD1), (int)(110 * hD1), (int)(50 * hD1), (int)(50 * hD1));
@@ -317,9 +327,10 @@ void CMp3Image::OnPaint()
 	}
 	SetBkMode(dcc, TRANSPARENT);
 	str.Format(L"X: %5d", x);
-	dcc.TextOut((int)(rect.right - 50 * hD1), (int)(110 * hD1), str);
+	dcc.TextOut((int)(rect.right - 50 * hD1), contentTop + (int)(110 * hD1), str);
 	str.Format(L"Y: %5d", y);
-	dcc.TextOut((int)(rect.right - 50 * hD1), (int)(140 * hD1), str);
+	dcc.TextOut((int)(rect.right - 50 * hD1), contentTop + (int)(140 * hD1), str);
+	CCC_CaptionPaint(dcc, m_hWnd);
 #if 0 
 	ULONG_PTR gdiplusToken;
 	Gdiplus::GdiplusStartupInput gdiplusStartupInput;

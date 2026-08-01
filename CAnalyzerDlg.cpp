@@ -615,6 +615,9 @@ static void AnalyzerPresentInvalidate(HWND hWnd)
 		return;
 	CRect cr;
 	::GetClientRect(hWnd, &cr);
+	const int capH = CCC_GetCustomCaptionHeight(hWnd);
+	if (capH > 0 && cr.Height() > capH)
+		cr.top = capH;
 	if (!cr.IsRectEmpty())
 		CCC_InvalidateRectMinusOverlay(hWnd, cr);
 }
@@ -2831,12 +2834,14 @@ void CAnalyzerDlg::ApplyEqBandFromY(int band, const CRect& plot, int yClient)
 void CAnalyzerDlg::Present(CDC& dc, const CRect& rc, BOOL bAero)
 {
 	UNREFERENCED_PARAMETER(bAero);
-	const int split = rc.top + (int)(rc.Height() * 0.65);
-	m_hoverSplitY = split;
-	const int waveH = split - rc.top;
-	const int specH = rc.bottom - split;
+	// rc はキャプション下の content 矩形（top は capH のことがある）
+	const int contentH = rc.Height();
+	const int splitLocal = (int)(contentH * 0.65);
+	m_hoverSplitY = rc.top + splitLocal;
+	const int waveH = splitLocal;
+	const int specH = contentH - splitLocal;
 	const int clientW = rc.Width();
-	const int clientH = rc.Height();
+	const int clientH = contentH;
 
 	CDC* pDst = &dc;
 	if (EnsureFrameBuffer(dc, clientW, clientH) && m_frameDC.GetSafeHdc())
@@ -2853,13 +2858,13 @@ void CAnalyzerDlg::Present(CDC& dc, const CRect& rc, BOOL bAero)
 		DrawLevelMeters(*pDst, CRect(0, 0, m_waveW > 0 ? m_waveW : clientW, waveH), ANALYZER_BG);
 
 	if (m_specReady && m_specDC.GetSafeHdc())
-		pDst->BitBlt(0, split, m_specW, specH, &m_specDC, 0, 0, SRCCOPY);
+		pDst->BitBlt(0, splitLocal, m_specW, specH, &m_specDC, 0, 0, SRCCOPY);
 	else
-		pDst->FillSolidRect(0, split, clientW, specH, ANALYZER_BG);
+		pDst->FillSolidRect(0, splitLocal, clientW, specH, ANALYZER_BG);
 
-	pDst->FillSolidRect(0, split - 1, clientW, 2, RGB(60, 65, 80));
+	pDst->FillSolidRect(0, splitLocal - 1, clientW, 2, RGB(60, 65, 80));
 	if (m_hoverValid)
-		DrawHoverReadout(*pDst, rc);
+		DrawHoverReadout(*pDst, CRect(0, 0, clientW, clientH));
 	if (m_frozen) {
 		pDst->SetBkMode(TRANSPARENT);
 		pDst->SetTextColor(RGB(255, 180, 80));
@@ -2868,27 +2873,40 @@ void CAnalyzerDlg::Present(CDC& dc, const CRect& rc, BOOL bAero)
 		pDst->SelectObject(of);
 	}
 
-	if (pDst != &dc)
-		dc.BitBlt(0, 0, clientW, clientH, pDst, 0, 0, SRCCOPY);
+	if (pDst != &dc) {
+#if CCUSTOM_AERO_SUPPORT
+		if (!CCC_IsAeroEnabled() && CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11())
+			CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, rc.top, clientW, clientH,
+				pDst->GetSafeHdc(), 0, 0, clientW, clientH);
+		else
+#endif
+			dc.BitBlt(0, rc.top, clientW, clientH, pDst, 0, 0, SRCCOPY);
+	}
 }
 
 void CAnalyzerDlg::OnPaint()
 {
 	CPaintDC dc(this);
-	CRect rc;
-	GetClientRect(&rc);
-	if (rc.IsRectEmpty()) {
+	CRect rcFull;
+	GetClientRect(&rcFull);
+	if (rcFull.IsRectEmpty()) {
 		InterlockedExchange(&m_presentPosted, 0);
 		return;
 	}
+	CRect rc = rcFull;
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	if (capH > 0 && rc.Height() > capH)
+		rc.top = capH;
 
-	const int split = rc.top + (int)(rc.Height() * 0.65);
+	const int contentH = rc.Height();
+	const int splitLocal = (int)(contentH * 0.65);
+	const int split = rc.top + splitLocal;
 	const int waveW = rc.Width();
-	const int waveH = split - rc.top;
+	const int waveH = splitLocal;
 	const int specW = rc.Width();
-	const int specH = rc.bottom - split;
+	const int specH = contentH - splitLocal;
 	const int clientW = rc.Width();
-	const int clientH = rc.Height();
+	const int clientH = contentH;
 
 #if CCUSTOM_AERO_SUPPORT
 	const BOOL bAero = (savedata.aero == 1 && CCC_IsAeroEnabled() && CCC_IsWin11());
@@ -3021,13 +3039,13 @@ void CAnalyzerDlg::OnPaint()
 				}
 			}
 			if (m_specReady && m_specDC.GetSafeHdc() && (didSpec || !m_chromaReady)) {
-				m_chromaCache.UpdateRect(m_specDC.GetSafeHdc(), 0, 0, 0, split, specW, specH, key);
+				m_chromaCache.UpdateRect(m_specDC.GetSafeHdc(), 0, 0, 0, splitLocal, specW, specH, key);
 			}
-			m_chromaCache.FillOpaqueRect(0, split - 1, clientW, 2, RGB(60, 65, 80), key);
+			m_chromaCache.FillOpaqueRect(0, splitLocal - 1, clientW, 2, RGB(60, 65, 80), key);
 
 			if (m_hoverValid) {
 				CRect plot = m_hoverPlot;
-				plot.OffsetRect(0, split);
+				plot.OffsetRect(0, splitLocal);
 				CString s;
 				const int channels = (std::max)(1, (std::min)(m_channels, CH_MAX));
 				if (m_hoverHz >= 1000.0f)
@@ -3070,9 +3088,8 @@ void CAnalyzerDlg::OnPaint()
 			}
 
 			// 「メインに追従」をクロマバッファへ焼いてから1回だけ BlitFull。
-			// 画面 DC への content → overlay の2段合成はアクリルでちらつく。
-			// ScrollCols で前フレームのロック表示が左へ流れるため、現在の矩形だけでなく
-			// ヘッダー行全幅を下地へ戻してから焼き直す。
+			// カスタムキャプション時は帯上の子チェックなので本文クロマへ焼かない。
+			if (capH <= 0)
 			{
 				CRect lockRc;
 				CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
@@ -3084,19 +3101,19 @@ void CAnalyzerDlg::OnPaint()
 						headerRow.bottom = clientH;
 
 					CRect wavePart = headerRow;
-					if (wavePart.bottom > split)
-						wavePart.bottom = split;
+					if (wavePart.bottom > splitLocal)
+						wavePart.bottom = splitLocal;
 					if (wavePart.top < wavePart.bottom && m_waveReady && m_waveDC.GetSafeHdc()) {
 						m_chromaCache.UpdateRect(m_waveDC.GetSafeHdc(),
 							wavePart.left, wavePart.top, wavePart.left, wavePart.top,
 							wavePart.Width(), wavePart.Height(), key);
 					}
 					CRect specPart = headerRow;
-					if (specPart.top < split)
-						specPart.top = split;
+					if (specPart.top < splitLocal)
+						specPart.top = splitLocal;
 					if (specPart.top < specPart.bottom && m_specReady && m_specDC.GetSafeHdc()) {
 						m_chromaCache.UpdateRect(m_specDC.GetSafeHdc(),
-							specPart.left, specPart.top - split, specPart.left, specPart.top,
+							specPart.left, specPart.top - splitLocal, specPart.left, specPart.top,
 							specPart.Width(), specPart.Height(), key);
 					}
 					CDC dcCache;
@@ -3108,7 +3125,7 @@ void CAnalyzerDlg::OnPaint()
 			}
 
 			m_chromaReady = true;
-			m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, 0, clientW, clientH);
+			m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, clientW, clientH);
 		}
 		else {
 			Present(dc, rc, FALSE);
@@ -3121,6 +3138,8 @@ void CAnalyzerDlg::OnPaint()
 		Present(dc, rc, FALSE);
 		CCC_MainLockPaintClient(dc, m_hWnd);
 	}
+
+	CCC_CaptionPaint(dc, m_hWnd);
 
 	// 描画完了後に提示フラグを開放し、未消化スクロール/遅延 Kick があれば1回だけ
 	InterlockedExchange(&m_presentPosted, 0);
@@ -3162,6 +3181,9 @@ void CAnalyzerDlg::OnSize(UINT nType, int cx, int cy)
 	if (::IsWindow(m_hWnd)) {
 		CRect cr;
 		GetClientRect(&cr);
+		const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+		if (capH > 0 && cr.Height() > capH)
+			cr.top = capH;
 		if (!cr.IsRectEmpty())
 			CCC_InvalidateRectMinusOverlay(m_hWnd, cr);
 	}

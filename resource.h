@@ -766,6 +766,12 @@
 #define IDC_PRT_RESET                     3528
 #define IDC_PRT_OK                        3529
 #define IDC_MAINWIN_LOCK                  3530
+// キャプション帯ボタン（MICMIX/MP 系 3745+ と衝突しないよう 3900 台へ）
+#define IDC_CAP_CLOSE                     3901
+#define IDC_CAP_MIN                       3902
+#define IDC_CAP_MAX                       3903
+#define IDC_CAP_SETTINGS                  3904
+#define IDC_CAP_PIN                       3905
 
 #define IDD_MISSING_FILES               205
 #define IDC_MF_LIST                     3531
@@ -978,6 +984,75 @@
 #define IDC_TC_MIX_N                    3743
 #define IDC_TC_MIX_VOL                  3744
 
+// WAV保存時マイクミックス
+#define IDC_CHECK_MICMIX                3745
+#define IDC_SLIDER_MICLEV               3746
+#define IDC_STATIC_MICLEV               3747
+#define IDC_COMBO_MICDEV                3748
+#define IDC_MP_MICMIX                   3749
+#define IDC_MP_MICLEV                   3750
+#define IDC_MP_MICLEV_L                 3751
+#define IDC_STATIC_R_MIC                3752
+#define IDC_MP_RECORD                   3753
+#define IDC_MP_CAPTURE                  3754
+
+// デバイス録音ダイアログ
+#define IDD_DEVICERECORD                214
+#define IDC_DR_DEV_L                    3755
+#define IDC_DR_DEV                      3756
+#define IDC_DR_FMT_L                    3757
+#define IDC_DR_FMT                      3758
+#define IDC_DR_QUAL_L                   3759
+#define IDC_DR_QUAL                     3760
+#define IDC_DR_PATH_L                   3761
+#define IDC_DR_PATH                     3762
+#define IDC_DR_BROWSE                   3763
+#define IDC_DR_MIXMIC                   3764
+#define IDC_DR_START                    3765
+#define IDC_DR_CLOSE                    3766
+#define IDC_DR_STATUS                   3767
+#define IDC_DR_TIME                     3768
+
+// 画面キャプチャダイアログ
+#define IDD_SCREENCAPTURE               215
+#define IDC_SC_PREVIEW                  3769
+#define IDC_SC_PATH_L                   3770
+#define IDC_SC_PATH                     3771
+#define IDC_SC_BROWSE                   3772
+#define IDC_SC_AUDIO                    3773
+#define IDC_SC_MIC                      3774
+#define IDC_SC_FPS_L                    3775
+#define IDC_SC_FPS                      3776
+#define IDC_SC_START                    3777
+#define IDC_SC_CLOSE                    3778
+#define IDC_SC_STATUS                   3779
+#define IDC_SC_TIME                     3780
+#define IDC_SC_MODE_L                   3781
+#define IDC_SC_MODE                     3782
+#define IDC_SC_CANVAS_L                 3783
+#define IDC_SC_CANVAS                   3784
+#define IDC_SC_AVAIL_L                  3785
+#define IDC_SC_AVAIL                    3786
+#define IDC_SC_LAYER_L                  3787
+#define IDC_SC_LAYER                    3788
+#define IDC_SC_REFRESH                  3789
+#define IDC_SC_ADD                      3790
+#define IDC_SC_REMOVE                   3791
+#define IDC_SC_ZUP                      3792
+#define IDC_SC_ZDOWN                    3793
+#define IDC_SC_PICK                     3794
+#define IDC_SC_GEO_L                    3795
+#define IDC_SC_X                        3796
+#define IDC_SC_Y                        3797
+#define IDC_SC_W                        3798
+#define IDC_SC_H                        3799
+#define IDC_SC_APPLYGEO                 3800
+#define IDC_SC_FIT                      3801
+#define IDC_SC_SCALE50                  3802
+#define IDC_SC_SCALE100                 3803
+#define IDC_SC_TILE                     3804
+#define IDC_SC_INCMP                    3805
+
 #define ID_MP_SPEANA_BAR                32960
 #define ID_MP_SPEANA_MIRROR             32961
 #define ID_MP_SPEANA_WAVE               32962
@@ -1004,14 +1079,15 @@
 // メディアプレイヤー バナー右クリック追加項目
 #define ID_MP_OPEN_ANALYZER             32971
 #define ID_MP_OPEN_PIANOROLL            32972
+#define ID_MP_REFRESH_JACKET            32973
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        214
-#define _APS_NEXT_COMMAND_VALUE         32973
-#define _APS_NEXT_CONTROL_VALUE         3745
+#define _APS_NEXT_RESOURCE_VALUE        216
+#define _APS_NEXT_COMMAND_VALUE         32974
+#define _APS_NEXT_CONTROL_VALUE         3806
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

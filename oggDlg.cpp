@@ -71,6 +71,7 @@ int flacmode = 0;
 #include "San2.h"
 //#include "vfw.h"
 #include "CImageBase.h"
+#include <shobjidl.h>
 
 #include <direct.h>
 #include "Folder.h"
@@ -96,6 +97,8 @@ void PlaybackCcClearFormat();
 void PlaybackCcLockFormat(int rate, int ch, int bits);
 bool PlaybackCcFormatLocked();
 void PlaybackCcGetFormat(int& rate, int& ch, int& bits);
+static void MicMixCaptureStop();
+static void MicMixCaptureStart();
 // 戻り値: ファイルへ実際に書いたバイト数（レート変換後。wl 加算に使う）
 UINT PlaybackCcWrite(const void* p, UINT n);
 UINT PlaybackCcWriteForced(const void* p, UINT n);
@@ -141,9 +144,14 @@ CImageBase* Games;
 #pragma warning(disable : 4201)
 #include <mmdeviceapi.h>
 #include <audiopolicy.h>
+#include <Audioclient.h>
 #pragma warning(pop)
 #include <endpointvolume.h>
 #include <FunctionDiscoveryKeys_devpkey.h>
+#include <process.h>
+
+static const GUID s_KSDATAFORMAT_SUBTYPE_IEEE_FLOAT =
+{ 0x00000003, 0x0000, 0x0010, { 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 } };
 
 // アプリ→Windows 主音量変更時のイベント文脈。OnNotify で自分自身の変更を無視する。
 static const GUID GUID_OggMasterVolCtx =
@@ -1222,6 +1230,9 @@ void COggDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SLIDER1, m_sl);
 	DDX_Control(pDX, IDC_CHECK3, m_dou);
 	DDX_Control(pDX, IDC_CHECK2, m_c2);
+	DDX_Control(pDX, IDC_CHECK_MICMIX, m_micmix);
+	DDX_Control(pDX, IDC_SLIDER_MICLEV, m_miclev);
+	DDX_Control(pDX, IDC_STATIC_MICLEV, m_miclevs);
 	DDX_Control(pDX, IDC_STATIC11, m_11);
 	//}}AFX_DATA_MAP
 	DDX_Control(pDX, IDC_CHECK16, m_xa);
@@ -1367,6 +1378,8 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_APP_PROAUDIO_CUESEEK, &COggDlg::OnProAudioCueSeek)
 	ON_WM_WINDOWPOSCHANGING()
 	ON_BN_CLICKED(IDC_BUTTON58, &COggDlg::OnBnmp3jake)
+	ON_BN_CLICKED(IDC_CHECK_MICMIX, &COggDlg::OnMicMixCheck)
+	ON_NOTIFY(NM_RELEASEDCAPTURE, IDC_SLIDER_MICLEV, &COggDlg::OnMicLevRelease)
 	ON_WM_DESTROY()
 	ON_WM_CREATE()
 	ON_WM_MOVING()
@@ -2106,7 +2119,12 @@ void COggDlg::Resize()
 	CString s;
 	m_ue.GetWindowText(s);
 	if (s == L"▼") {
+		// 折りたたみ: 右パネルのグループ枠がはみ出して見えないように隠す
 		m_ue.SetWindowText(_T("▲"));
+		if (CWnd* g = GetDlgItem(IDC_OGG_GRP_MULTI))
+			g->ShowWindow(SW_HIDE);
+		if (CWnd* g = GetDlgItem(IDC_OGG_GRP_GAME))
+			g->ShowWindow(SW_HIDE);
 		CRect rect_1, rect_2;
 		GetWindowRect(&rect_1);
 		m_ue.GetWindowRect(&rect_2);
@@ -2118,6 +2136,13 @@ void COggDlg::Resize()
 	}
 	else {
 		m_ue.SetWindowText(_T("▼"));
+		if (CWnd* g = GetDlgItem(IDC_OGG_GRP_MULTI))
+			g->ShowWindow(SW_SHOW);
+		if (CWnd* g = GetDlgItem(IDC_OGG_GRP_GAME))
+			g->ShowWindow(SW_SHOW);
+#if CCUSTOM_AERO_SUPPORT
+		CCC_GroupBoxesBack(m_hWnd);
+#endif
 		CRect rect_1, rect_2;
 		GetWindowRect(&rect_1);
 		m_sita.GetWindowRect(&rect_2);
@@ -3252,6 +3277,7 @@ BOOL COggDlg::OnInitDialog()
 	SetDlgItemText(IDC_CHECK22, LL14(L"ダイナソア リザレクション", L"Dinosaur Resurrection", L"Resurrection Dinosaure", L"Resurrezione Dinosauro", L"Resurreccion Dinosaurio", L"공룡 부활", L"恐龙复活", L"ديناصور القيامة", L"Динозавр: Воскрешение", L"Dinosaurier Auferstehung", L"Ressurreicao Dinossauro", L"Dinosaurus Herrijzenis", L"Dinozaur Zmartwychwstanie", L"Dinozor Dirili?"));
 	SetDlgItemText(IDC_STATICaaad, LL14(L"ループ回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop", L"Cuenta de bucle", L"루프 횟수", L"循环次数", L"عدد الحلقات", L"Количество повторов", L"Schleifenzahler", L"Contagem de loop", L"Loopaantal", L"Liczba p?tli", L"Dongu say?s?"));
 	SetDlgItemText(IDC_CHECK2, LL14(L"WAVファイルへ保存", L"Save to WAV file", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV 파일로 저장", L"保存到WAV文件", L"حفظ كـ WAV", L"Сохранить в WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
+	SetDlgItemText(IDC_CHECK_MICMIX, LL14(L"マイクミックス", L"Mic mix", L"Mix micro", L"Mix microfono", L"Mezcla micro", L"마이크 믹스", L"麦克风混音", L"مزج الميكروفون", L"Микс микрофона", L"Mikrofon-Mix", L"Mix microfone", L"Mic-mix", L"Mix mikrofonu", L"Mikrofon karışımı"));
 	SetDlgItemText(IDC_CHECK3, LL14(L"動画も表示する", L"Show video", L"Afficher video", L"Mostra video", L"Mostrar video", L"동영상 표시", L"显示视频", L"عرض الفيديو", L"Показывать видео", L"Video anzeigen", L"Mostrar video", L"Video tonen", L"Poka? wideo", L"Videoyu goster"));
 	SetDlgItemText(IDC_STATICaaab, LL14(L"主音量", L"Master volume", L"Volume principal", L"Volume master", L"Volumen maestro", L"마스터 볼륨", L"主音量", L"مستوى الصوت الرئيسي", L"Общая громкость", L"Hauptlautstarke", L"Volume mestre", L"Hoofdvolume", L"Głośność główna", L"Ana ses"));
 	SetDlgItemText(IDC_STATICaaa, LL14(L"DirectSound音量", L"DirectSound volume", L"Volume DirectSound", L"Volume DirectSound", L"Volumen DirectSound", L"DirectSound 볼륨", L"DirectSound音量", L"مستوى DirectSound", L"Громкость DirectSound", L"DirectSound-Lautstarke", L"Volume DirectSound", L"DirectSound-volume", L"G?o?no?? DirectSound", L"DirectSound sesi"));
@@ -3486,6 +3512,7 @@ BOOL COggDlg::OnInitDialog()
 	m_pitch_sl.SetPos(200);
 	tempo = 200;
 	pitch = 200;
+	SyncMicMixUiFromSavedata();
 
 	ttt_ = 5;
 	//	uTimerId = timeSetEvent(1, 0, TimeCallback, NULL, TIME_PERIODIC);
@@ -3669,40 +3696,43 @@ void COggDlg::OnPaint()
 	}
 	else
 	{
+		const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 		const int destW = (int)((MDCP) * hD);
 		const int destH = (int)((81 + 16) * hD * 4);
 		const int srcW = MDCP + 5;
 		const int srcH = (81 + 16) * 4;
+		const int gdiY = (capH > 0) ? capH : 0;
 		CRect clip;
 		dcc.GetClipBox(&clip);
-		CRect gdiRect(0, 0, destW, destH);
+		CRect gdiRect(0, gdiY, destW, gdiY + destH);
 		CRect gdiClip;
 		const BOOL bGdiIntersect = gdiClip.IntersectRect(&clip, &gdiRect);
 #if CCUSTOM_AERO_SUPPORT
 		if (CCC_IsAeroEnabled() && CCC_IsWin11())
 		{
 			const BOOL bSpectrumOnly = (Ms2DrawDue(ms2)
-				&& clip.bottom <= destH + 8
+				&& clip.bottom <= gdiY + destH + 8
+				&& clip.top >= gdiY
 				&& clip.Height() <= destH + 8);
 			if (savedata.aero == 1 && dc.m_hDC != NULL)
 			{
 				if (Ms2DrawDue(ms2))
 				{
 					dcc.SelectClipRgn(NULL);
-					CCC_BlitStretchNF(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
+					CCC_BlitStretchNF(dcc.m_hDC, 0, gdiY, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
 					ms2 = 0;
 					InterlockedExchange(&g_gdiPaintPending, 0);
 				}
 				else if (bGdiIntersect)
 				{
 					dcc.SelectClipRgn(NULL);
-					CCC_BlitStretchChroma(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
+					CCC_BlitStretchChroma(dcc.m_hDC, 0, gdiY, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
 				}
 			}
 			if (!bSpectrumOnly)
 			{
 				dcc.SelectClipRgn(NULL);
-				const RECT gdiPreserve = { 0, 0, destW, destH };
+				const RECT gdiPreserve = { 0, gdiY, destW, gdiY + destH };
 				CCC_PaintAeroGaps(dcc, this, &gdiPreserve);
 			}
 		}
@@ -3713,19 +3743,32 @@ void COggDlg::OnPaint()
 			if (savedata.aero == 1 && CCC_IsWin11())
 			{
 				CCC_ClipNoChildren(dcc, this);
-				CCC_BlitStretchChroma(dcc.m_hDC, 0, 0, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
+				CCC_BlitStretchChroma(dcc.m_hDC, 0, gdiY, destW, destH, dc.m_hDC, 0, 0, srcW, srcH, RGB(0, 0, 0));
 			}
 			else
 #endif
 			{
-				SetStretchBltMode(dcc.m_hDC, COLORONCOLOR);
-				SetBrushOrgEx(dcc.m_hDC, 0, 0, NULL);
-				dcc.StretchBlt(0, 0, destW, destH, &dc, 0, 0, srcW, srcH, SRCCOPY);
+#if CCUSTOM_AERO_SUPPORT
+				// キャプションのみアクリル時: 素 StretchBlt は α=0 で透過→毎フレーム MakeOpaque がちらつく
+				if (CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11() && !CCC_IsAeroEnabled())
+				{
+					CCC_BlitStretchOpaque(dcc.m_hDC, 0, gdiY, destW, destH,
+						dc.m_hDC, 0, 0, srcW, srcH);
+				}
+				else
+#endif
+				{
+					SetStretchBltMode(dcc.m_hDC, COLORONCOLOR);
+					SetBrushOrgEx(dcc.m_hDC, 0, 0, NULL);
+					dcc.StretchBlt(0, gdiY, destW, destH, &dc, 0, 0, srcW, srcH, SRCCOPY);
+				}
 			}
 			ms2 = 0;
 			InterlockedExchange(&g_gdiPaintPending, 0);
 		}
 	}
+	if (!IsIconic())
+		CCC_CaptionPaint(dcc, m_hWnd);
 }
 BYTE offenc[7] = { 0xd9,0x3F,0x86,0x7B,0xC7,0x61,0xaa };
 int oggf = 0;
@@ -10009,6 +10052,8 @@ void COggDlg::play()
 		wh.WaveFmt.wf.nAvgBytesPerSec = wh.WaveFmt.wf.nSamplesPerSec * wh.WaveFmt.wf.nBlockAlign;
 		WriteWavStreamHeaderRF64(cc);
 		PlaybackCcLockFormat((int)wh.WaveFmt.wf.nSamplesPerSec, (int)wh.WaveFmt.wf.nChannels, (int)wh.WaveFmt.wBitsPerSample);
+		if (savedata.mic_mix)
+			MicMixCaptureStart();
 	}
 
 	int dsTryRate = g_ds_pcm_rate;
@@ -10176,6 +10221,7 @@ void COggDlg::play()
 			cc.Close();
 			cc1 = 0;
 			PlaybackCcClearFormat();
+			MicMixCaptureStop();
 		}
 		stop1();
 		m_saisai.EnableWindow(TRUE);
@@ -16566,6 +16612,7 @@ void COggDlg::stop()
 				cc1 = 0;
 				PlaybackCcClearFormat();
 			}
+		MicMixCaptureStop();
 		CCriticalLock _ccl(&cs);
 		stf = 1;
 		_ccl.Leave();
@@ -16736,6 +16783,7 @@ BOOL COggDlg::stop1()
 			cc1 = 0;
 			PlaybackCcClearFormat();
 		}
+	MicMixCaptureStop();
 	{
 		CCriticalLock _ccl(&cs);
 		stf = 1;
@@ -17331,11 +17379,14 @@ static CString FormatBannerDataAudioLine()
 
 extern IBasicAudio* pBasicAudio;
 extern IBaseFilter* prend;
+extern IBasicVideo* pBasicVideo;
 extern double rate;
 extern int rateflg;
 extern RECT rcm;
 extern long height, width;
 DWORD videocnt = 0, videocnt2 = 0, videocnt3;
+// LoadJacket(メイン)後に再生中フレーム再試行を許可する
+static volatile LONG s_vidJakEpoch = 0;
 
 int pox, poy;
 
@@ -17484,7 +17535,9 @@ void COggDlg::timerp()
 				CPoint pt;
 				::GetCursorPos(&pt);
 				ScreenToClient(&pt);
-				CRect drawing_rect(0, 0, (int)(MDCP * hD), (int)((81 + 16) * hD * 4));
+				CRect drawing_rect(0, CCC_GetCustomCaptionHeight(m_hWnd),
+					(int)(MDCP * hD),
+					CCC_GetCustomCaptionHeight(m_hWnd) + (int)((81 + 16) * hD * 4));
 				if (drawing_rect.PtInRect(pt)) {
 					is_hovered = true;
 				}
@@ -17528,6 +17581,70 @@ void COggDlg::timerp()
 	}
 	const BOOL bGdiFrame = Ms2DrawDue(ms2)
 		&& (InterlockedCompareExchange(&g_gdiPaintPending, 0, 0) == 0);
+	// 動画再生中: 埋め込み/Shell が無いとき現フレームを1回だけジャケットへ(ちらつき防止で成功時のみ反映)
+	if (bGdiFrame && (mode == -2 || videoonly) && jx <= 0 && pBasicVideo && !filen.IsEmpty()) {
+		static TCHAR s_vidJakTried[1024];
+		static int s_vidJakTries = 0;
+		static LONG s_vidJakSeenEpoch = -1;
+		const LONG epoch = InterlockedCompareExchange(&s_vidJakEpoch, 0, 0);
+		if (s_vidJakSeenEpoch != epoch) {
+			s_vidJakSeenEpoch = epoch;
+			s_vidJakTried[0] = 0;
+			s_vidJakTries = 0;
+		}
+		if (_tcsicmp(s_vidJakTried, filen) != 0) {
+			_tcsncpy_s(s_vidJakTried, filen, _TRUNCATE);
+			s_vidJakTries = 0;
+		}
+		if (s_vidJakTries < 10 && (ms2 % 45) == 0) {
+			s_vidJakTries++;
+			long dibSize = 0;
+			if (SUCCEEDED(pBasicVideo->GetCurrentImage(&dibSize, NULL)) && dibSize > (long)sizeof(BITMAPINFOHEADER)) {
+				BYTE* dibBuf = (BYTE*)malloc((size_t)dibSize);
+				if (dibBuf) {
+					if (SUCCEEDED(pBasicVideo->GetCurrentImage(&dibSize, (long*)dibBuf))) {
+						BITMAPINFOHEADER* bih = (BITMAPINFOHEADER*)dibBuf;
+						const int bw = bih->biWidth;
+						const int bh = abs(bih->biHeight);
+						if (bih->biSize >= sizeof(BITMAPINFOHEADER) && bw > 8 && bh > 8) {
+							if (!img.IsNull()) img.Destroy();
+							if (img.Create(bw, bh, 24)) {
+								HDC hdcImg = img.GetDC();
+								::SetStretchBltMode(hdcImg, COLORONCOLOR);
+								::StretchDIBits(hdcImg, 0, 0, bw, bh, 0, 0, bw, bh,
+									dibBuf + bih->biSize, (BITMAPINFO*)bih, DIB_RGB_COLORS, SRCCOPY);
+								img.ReleaseDC();
+								jx = bw;
+								jy = bh;
+								jxy = (double)jx / (double)jy;
+								if (::IsWindow(m_mp3jake.GetSafeHwnd()))
+									m_mp3jake.EnableWindow(TRUE);
+								PlJakDiskForget(filen);
+								extern CMediaPlayerDlg* mp;
+								if (mp) {
+									for (int j = 0; j < CMediaPlayerDlg::kMpJakN; ++j) {
+										if (mp->m_jakKey[j][0] && _tcsicmp(mp->m_jakKey[j], filen) == 0) {
+											if (mp->m_jakBmp[j]) { ::DeleteObject(mp->m_jakBmp[j]); mp->m_jakBmp[j] = NULL; }
+											mp->m_jakKey[j][0] = 0;
+											mp->m_jakTick[j] = 0;
+											mp->m_jakRow[j] = -1;
+										}
+									}
+									if (::IsWindow(mp->GetSafeHwnd())) {
+										if (!mp->m_jacketRect.IsRectEmpty())
+											mp->InvalidateRect(&mp->m_jacketRect, FALSE);
+										mp->m_list.Invalidate(FALSE);
+									}
+								}
+								s_vidJakTries = 99;
+							}
+						}
+					}
+					free(dibBuf);
+				}
+			}
+		}
+	}
 	CString s, ss, sss;
 	if (voldsf) {
 		voldsf = 0;
@@ -18152,10 +18269,11 @@ void COggDlg::timerp()
 		// メディアプレイヤーモード(メイン非表示)では og を再描画しない。
 		// mp は自前タイマーで dc を Blit し pending を解除して合成を継続させる。
 		if (!mediaHidden) {
+			const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 			RECT rect;
-			rect.top = 0;
+			rect.top = capH;
 			rect.left = 0;
-			rect.bottom = (LONG)((101) * hD * 4);
+			rect.bottom = capH + (LONG)((101) * hD * 4);
 			rect.right = (LONG)((180 + 88 * 2 + 50) * hD * 4);
 			InvalidateRect(&rect, FALSE);
 			// この後 og の OnPaint が ms2=0 リセットと pending 解除を行う(通常モード)。
@@ -21174,6 +21292,303 @@ static AudioUpscaler s_ccUpscaler;
 static int s_ccCfgSrcRate = 0, s_ccCfgSrcCh = 0, s_ccCfgSrcBits = 0;
 static int s_ccCfgDstRate = 0, s_ccCfgDstCh = 0, s_ccCfgDstBits = 0;
 
+// --- WAV保存時マイクミックス (ライブ m_c2 のみ。オフライン ExportToWav には混ぜない) ---
+enum { MIC_RING_FRAMES = 16384, MIC_RING_CH = 2, MIC_MIX_SCRATCH = 512 * 1024 };
+static float g_micRing[MIC_RING_FRAMES * MIC_RING_CH];
+static volatile LONG g_micW = 0;
+static volatile LONG g_micR = 0;
+static int g_micCapRate = 0;
+static int g_micCapCh = 0;
+static volatile LONG g_micRun = 0;
+static volatile LONG g_micStop = 0;
+static HANDLE g_micThread = NULL;
+static CRITICAL_SECTION g_micCs;
+static volatile LONG g_micCsInit = 0;
+static BYTE g_micMixScratch[MIC_MIX_SCRATCH];
+
+static void MicMixEnsureCs()
+{
+	if (InterlockedCompareExchange(&g_micCsInit, 1, 0) == 0)
+		InitializeCriticalSection(&g_micCs);
+}
+
+static void MicMixRingWrite(const float* interleaved, int frames, int ch)
+{
+	if (!interleaved || frames <= 0) return;
+	if (ch < 1) ch = 1;
+	if (ch > MIC_RING_CH) ch = MIC_RING_CH;
+	EnterCriticalSection(&g_micCs);
+	LONG w = g_micW;
+	for (int i = 0; i < frames; ++i) {
+		const int wi = (int)(w % MIC_RING_FRAMES);
+		float L = interleaved[i * ch];
+		float R = (ch >= 2) ? interleaved[i * ch + 1] : L;
+		g_micRing[wi * MIC_RING_CH + 0] = L;
+		g_micRing[wi * MIC_RING_CH + 1] = R;
+		w++;
+	}
+	g_micW = w;
+	// 読取が遅れすぎたら追いつかせる(約リング半分)
+	LONG r = g_micR;
+	if ((LONG)(w - r) > (MIC_RING_FRAMES - 64))
+		g_micR = w - (MIC_RING_FRAMES / 2);
+	LeaveCriticalSection(&g_micCs);
+}
+
+static UINT __stdcall MicMixCaptureThread(void*)
+{
+	HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	IMMDeviceEnumerator* enumer = NULL;
+	IMMDevice* device = NULL;
+	IAudioClient* client = NULL;
+	IAudioCaptureClient* capture = NULL;
+	WAVEFORMATEX* mixFmt = NULL;
+	HANDLE hEvent = NULL;
+
+	hrCo; // CoInitialize 失敗でも続行を試行(既初期化の場合あり)
+	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+		__uuidof(IMMDeviceEnumerator), (void**)&enumer);
+	if (FAILED(hr) || !enumer) goto mic_done;
+
+	if (savedata.mic_device[0]) {
+		hr = enumer->GetDevice(savedata.mic_device, &device);
+		if (FAILED(hr) || !device) {
+			if (device) { device->Release(); device = NULL; }
+			hr = enumer->GetDefaultAudioEndpoint(eCapture, eConsole, &device);
+		}
+	} else {
+		hr = enumer->GetDefaultAudioEndpoint(eCapture, eConsole, &device);
+	}
+	if (FAILED(hr) || !device) goto mic_done;
+
+	hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void**)&client);
+	if (FAILED(hr) || !client) goto mic_done;
+
+	hr = client->GetMixFormat(&mixFmt);
+	if (FAILED(hr) || !mixFmt) goto mic_done;
+
+	hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+	if (hEvent) {
+		hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED,
+			AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
+			2000000, 0, mixFmt, NULL);
+		if (SUCCEEDED(hr))
+			hr = client->SetEventHandle(hEvent);
+		if (FAILED(hr)) {
+			// EVENTCALLBACK 失敗時はポーリングへ(IAudioClient は再 Activate が必要)
+			CloseHandle(hEvent); hEvent = NULL;
+			client->Release(); client = NULL;
+			CoTaskMemFree(mixFmt); mixFmt = NULL;
+			hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void**)&client);
+			if (FAILED(hr) || !client) goto mic_done;
+			hr = client->GetMixFormat(&mixFmt);
+			if (FAILED(hr) || !mixFmt) goto mic_done;
+			hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED,
+				AUDCLNT_STREAMFLAGS_NOPERSIST,
+				2000000, 0, mixFmt, NULL);
+		}
+	} else {
+		hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED,
+			AUDCLNT_STREAMFLAGS_NOPERSIST,
+			2000000, 0, mixFmt, NULL);
+	}
+	if (FAILED(hr)) goto mic_done;
+	hr = client->GetService(__uuidof(IAudioCaptureClient), (void**)&capture);
+	if (FAILED(hr) || !capture) goto mic_done;
+
+	g_micCapRate = (int)mixFmt->nSamplesPerSec;
+	g_micCapCh = (int)mixFmt->nChannels;
+	if (g_micCapRate < 8000) g_micCapRate = 48000;
+	if (g_micCapCh < 1) g_micCapCh = 1;
+	InterlockedExchange(&g_micW, 0);
+	InterlockedExchange(&g_micR, 0);
+	hr = client->Start();
+	if (FAILED(hr)) goto mic_done;
+	InterlockedExchange(&g_micRun, 1);
+
+	while (InterlockedCompareExchange(&g_micStop, 0, 0) == 0) {
+		if (hEvent) {
+			DWORD wr = WaitForSingleObject(hEvent, 50);
+			if (wr != WAIT_OBJECT_0 && wr != WAIT_TIMEOUT) break;
+		} else {
+			Sleep(10);
+		}
+		UINT32 packet = 0;
+		hr = capture->GetNextPacketSize(&packet);
+		while (SUCCEEDED(hr) && packet > 0 && InterlockedCompareExchange(&g_micStop, 0, 0) == 0) {
+			BYTE* data = NULL;
+			UINT32 frames = 0;
+			DWORD flags = 0;
+			hr = capture->GetBuffer(&data, &frames, &flags, NULL, NULL);
+			if (FAILED(hr)) break;
+			if (frames > 0 && data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT)) {
+				const WORD tag = mixFmt->wFormatTag;
+				const WORD bits = mixFmt->wBitsPerSample;
+				const int ch = (int)mixFmt->nChannels;
+				float conv[4096 * 2];
+				UINT32 done = 0;
+				while (done < frames) {
+					UINT32 n = frames - done;
+					if (n > 4096) n = 4096;
+					for (UINT32 i = 0; i < n; ++i) {
+						float L = 0.f, R = 0.f;
+						if (tag == WAVE_FORMAT_IEEE_FLOAT || (tag == WAVE_FORMAT_EXTENSIBLE && bits == 32
+							&& ((WAVEFORMATEXTENSIBLE*)mixFmt)->SubFormat == s_KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) {
+							const float* f = (const float*)(data + (done + i) * mixFmt->nBlockAlign);
+							L = f[0];
+							R = (ch >= 2) ? f[1] : L;
+						} else if (bits == 16) {
+							const short* s = (const short*)(data + (done + i) * mixFmt->nBlockAlign);
+							L = (float)s[0] / 32768.f;
+							R = (ch >= 2) ? ((float)s[1] / 32768.f) : L;
+						} else if (bits == 24) {
+							const BYTE* b = data + (done + i) * mixFmt->nBlockAlign;
+							int v = (int)(b[0] | (b[1] << 8) | (b[2] << 16));
+							if (v & 0x800000) v |= ~0xFFFFFF;
+							L = (float)v / 8388608.f;
+							if (ch >= 2) {
+								int v2 = (int)(b[3] | (b[4] << 8) | (b[5] << 16));
+								if (v2 & 0x800000) v2 |= ~0xFFFFFF;
+								R = (float)v2 / 8388608.f;
+							} else R = L;
+						} else if (bits == 32) {
+							const int* s = (const int*)(data + (done + i) * mixFmt->nBlockAlign);
+							L = (float)s[0] / 2147483648.f;
+							R = (ch >= 2) ? ((float)s[1] / 2147483648.f) : L;
+						}
+						conv[i * 2 + 0] = L;
+						conv[i * 2 + 1] = R;
+					}
+					MicMixRingWrite(conv, (int)n, 2);
+					done += n;
+				}
+			}
+			capture->ReleaseBuffer(frames);
+			hr = capture->GetNextPacketSize(&packet);
+		}
+	}
+	client->Stop();
+
+mic_done:
+	InterlockedExchange(&g_micRun, 0);
+	if (capture) capture->Release();
+	if (client) client->Release();
+	if (mixFmt) CoTaskMemFree(mixFmt);
+	if (device) device->Release();
+	if (enumer) enumer->Release();
+	if (hEvent) CloseHandle(hEvent);
+	if (SUCCEEDED(hrCo) || hrCo == S_FALSE) CoUninitialize();
+	return 0;
+}
+
+static void MicMixCaptureStop()
+{
+	InterlockedExchange(&g_micStop, 1);
+	if (g_micThread) {
+		WaitForSingleObject(g_micThread, 8000);
+		CloseHandle(g_micThread);
+		g_micThread = NULL;
+	}
+	InterlockedExchange(&g_micRun, 0);
+	InterlockedExchange(&g_micStop, 0);
+	g_micCapRate = 0;
+	g_micCapCh = 0;
+}
+
+static void MicMixCaptureStart()
+{
+	MicMixEnsureCs();
+	if (InterlockedCompareExchange(&g_micRun, 0, 0) != 0) return;
+	// 初期化失敗でスレッドが既に終了していると handle だけ残り再開始できない → 回収
+	if (g_micThread) {
+		DWORD code = 0;
+		if (GetExitCodeThread(g_micThread, &code) && code != STILL_ACTIVE) {
+			CloseHandle(g_micThread);
+			g_micThread = NULL;
+		} else {
+			return;
+		}
+	}
+	InterlockedExchange(&g_micStop, 0);
+	uintptr_t th = _beginthreadex(NULL, 0, MicMixCaptureThread, NULL, 0, NULL);
+	g_micThread = (th) ? (HANDLE)th : NULL;
+}
+
+void MpMicMixRestartIfRunning()
+{
+	if (!savedata.mic_mix) return;
+	MicMixCaptureStop();
+	if (cc1 == 1 && wavExportPath.GetLength() == 0 && !g_isWavExportRendering)
+		MicMixCaptureStart();
+}
+
+static void MicMixIntoPcm(BYTE* p, UINT n, int rate, int ch, int bits)
+{
+	if (!p || n == 0 || rate < 8000 || ch < 1) return;
+	if (InterlockedCompareExchange(&g_micRun, 0, 0) == 0) return;
+	if (g_micCapRate < 8000) return;
+	const int bpf = (bits / 8) * ch;
+	if (bpf <= 0 || (n % (UINT)bpf) != 0) return;
+	const int frames = (int)(n / (UINT)bpf);
+	if (frames <= 0) return;
+	float gain = (float)savedata.mic_mix_level / 100.f;
+	if (gain < 0.f) gain = 0.f;
+	if (gain > 2.f) gain = 2.f;
+
+	EnterCriticalSection(&g_micCs);
+	LONG r = g_micR;
+	const LONG w = g_micW;
+	const double step = (double)g_micCapRate / (double)rate;
+	double pos = 0.0;
+	for (int fi = 0; fi < frames; ++fi) {
+		LONG ri = r + (LONG)pos;
+		float mL = 0.f, mR = 0.f;
+		if (ri < w) {
+			const int idx = (int)(ri % MIC_RING_FRAMES);
+			mL = g_micRing[idx * MIC_RING_CH + 0] * gain;
+			mR = g_micRing[idx * MIC_RING_CH + 1] * gain;
+		}
+		pos += step;
+		BYTE* s = p + fi * bpf;
+		if (bits == 16) {
+			short* ps = (short*)s;
+			int vL = (int)ps[0] + (int)(mL * 32767.f);
+			int vR = (ch >= 2) ? ((int)ps[1] + (int)(mR * 32767.f)) : vL;
+			if (vL > 32767) vL = 32767; if (vL < -32768) vL = -32768;
+			if (vR > 32767) vR = 32767; if (vR < -32768) vR = -32768;
+			ps[0] = (short)vL;
+			if (ch >= 2) ps[1] = (short)vR;
+			for (int c = 2; c < ch; ++c) {
+				int v = (int)ps[c] + (int)(((c & 1) ? mR : mL) * 32767.f);
+				if (v > 32767) v = 32767; if (v < -32768) v = -32768;
+				ps[c] = (short)v;
+			}
+		} else if (bits == 24) {
+			for (int c = 0; c < ch; ++c) {
+				BYTE* b = s + c * 3;
+				int v = (int)(b[0] | (b[1] << 8) | (b[2] << 16));
+				if (v & 0x800000) v |= ~0xFFFFFF;
+				float m = (c & 1) ? mR : mL;
+				v += (int)(m * 8388607.f);
+				if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
+				b[0] = (BYTE)(v & 0xFF);
+				b[1] = (BYTE)((v >> 8) & 0xFF);
+				b[2] = (BYTE)((v >> 16) & 0xFF);
+			}
+		} else if (bits == 32) {
+			int* ps = (int*)s;
+			for (int c = 0; c < ch; ++c) {
+				double v = (double)ps[c] + (double)((c & 1) ? mR : mL) * 2147483647.0;
+				if (v > 2147483647.0) v = 2147483647.0;
+				if (v < -2147483648.0) v = -2147483648.0;
+				ps[c] = (int)v;
+			}
+		}
+	}
+	g_micR = r + (LONG)pos;
+	LeaveCriticalSection(&g_micCs);
+}
+
 void PlaybackCcClearFormat()
 {
 	InterlockedExchange(&g_ccFmtLocked, 0);
@@ -21224,15 +21639,42 @@ UINT PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, in
 		return 0; // 解析専用: ファイルへは書かない
 	}
 	if (cc1 != 1 || !p || n == 0) return 0;
+	const bool liveMic = (savedata.mic_mix != 0 && wavExportPath.GetLength() == 0 && !g_isWavExportRendering);
+	if (liveMic && InterlockedCompareExchange(&g_micRun, 0, 0) == 0)
+		MicMixCaptureStart();
 	if (!PlaybackCcFormatLocked()) {
 		PlaybackCcLockFormat(srcRate, srcCh, srcBits);
-		cc.Write(p, n);
+		if (liveMic) {
+			UINT off = 0;
+			while (off < n) {
+				UINT chunk = n - off;
+				if (chunk > MIC_MIX_SCRATCH) chunk = MIC_MIX_SCRATCH;
+				memcpy(g_micMixScratch, (const BYTE*)p + off, chunk);
+				MicMixIntoPcm(g_micMixScratch, chunk, srcRate, srcCh, srcBits);
+				cc.Write(g_micMixScratch, chunk);
+				off += chunk;
+			}
+		} else {
+			cc.Write(p, n);
+		}
 		if (g_isWavExportRendering)
 			MpDecodeProgressOnPcm(n, srcRate, srcCh, srcBits);
 		return n;
 	}
 	if (srcRate == g_ccFmtRate && srcCh == g_ccFmtCh && srcBits == g_ccFmtBits) {
-		cc.Write(p, n);
+		if (liveMic) {
+			UINT off = 0;
+			while (off < n) {
+				UINT chunk = n - off;
+				if (chunk > MIC_MIX_SCRATCH) chunk = MIC_MIX_SCRATCH;
+				memcpy(g_micMixScratch, (const BYTE*)p + off, chunk);
+				MicMixIntoPcm(g_micMixScratch, chunk, srcRate, srcCh, srcBits);
+				cc.Write(g_micMixScratch, chunk);
+				off += chunk;
+			}
+		} else {
+			cc.Write(p, n);
+		}
 		if (g_isWavExportRendering)
 			MpDecodeProgressOnPcm(n, srcRate, srcCh, srcBits);
 		return n;
@@ -21263,6 +21705,15 @@ UINT PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, in
 		got += pulled;
 	}
 	if (got > 0) {
+		if (liveMic) {
+			UINT off = 0;
+			while (off < (UINT)got) {
+				UINT chunk = (UINT)got - off;
+				if (chunk > MIC_MIX_SCRATCH) chunk = MIC_MIX_SCRATCH;
+				MicMixIntoPcm(out.data() + off, chunk, g_ccFmtRate, g_ccFmtCh, g_ccFmtBits);
+				off += chunk;
+			}
+		}
 		cc.Write(out.data(), (UINT)got);
 		if (g_isWavExportRendering)
 			MpDecodeProgressOnPcm((UINT)got, g_ccFmtRate, g_ccFmtCh, g_ccFmtBits);
@@ -22691,8 +23142,64 @@ extern int sek4;
 extern int syukai, syukai2;
 extern BOOL	syoriflg;
 
+void COggDlg::ApplyMicMixLevelLabel()
+{
+	if (!m_miclevs.GetSafeHwnd()) return;
+	CString s;
+	s.Format(_T("%d%%"), savedata.mic_mix_level);
+	m_miclevs.SetWindowText(s);
+}
+
+void COggDlg::SyncMicMixUiFromSavedata()
+{
+	if (m_micmix.GetSafeHwnd())
+		m_micmix.SetCheck(savedata.mic_mix ? BST_CHECKED : BST_UNCHECKED);
+	if (m_miclev.GetSafeHwnd()) {
+		m_miclev.SetRange(0, 200);
+		int lv = savedata.mic_mix_level;
+		if (lv < 0) lv = 0;
+		if (lv > 200) lv = 200;
+		m_miclev.SetPos(lv);
+	}
+	ApplyMicMixLevelLabel();
+}
+
+void COggDlg::OnMicMixCheck()
+{
+	savedata.mic_mix = (m_micmix.GetCheck() == BST_CHECKED) ? 1 : 0;
+	if (savedata.mic_mix && cc1 == 1 && wavExportPath.GetLength() == 0 && !g_isWavExportRendering)
+		MicMixCaptureStart();
+	else if (!savedata.mic_mix)
+		MicMixCaptureStop();
+	MpPersistSavedataQuick();
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_micmix.GetSafeHwnd())
+		mp->m_micmix.SetCheck(savedata.mic_mix ? BST_CHECKED : BST_UNCHECKED);
+}
+
+void COggDlg::OnMicLevRelease(NMHDR*, LRESULT* pResult)
+{
+	if (pResult) *pResult = 0;
+	int lv = m_miclev.GetPos();
+	if (lv < 0) lv = 0;
+	if (lv > 200) lv = 200;
+	savedata.mic_mix_level = lv;
+	ApplyMicMixLevelLabel();
+	MpPersistSavedataQuick();
+}
+
 void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
+	if (pScrollBar && m_miclev.GetSafeHwnd() && pScrollBar->GetSafeHwnd() == m_miclev.GetSafeHwnd()) {
+		int lv = m_miclev.GetPos();
+		if (lv < 0) lv = 0;
+		if (lv > 200) lv = 200;
+		savedata.mic_mix_level = lv;
+		ApplyMicMixLevelLabel();
+		if (nSBCode == SB_ENDSCROLL || nSBCode == SB_THUMBPOSITION)
+			MpPersistSavedataQuick();
+		return;
+	}
 	// HWND で判定（一時 CWnd* でも IDC が取れる）。カスタム GetPos は m_time を直接使う
 	if (!pScrollBar || pScrollBar->GetSafeHwnd() != m_time.GetSafeHwnd()) return;
 
@@ -23096,9 +23603,106 @@ void COggDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 		ShowWindow(SW_HIDE);
 		return;
 	}
+	if (bShow && GetSafeHwnd())
+		NudgeMicMixBelowGdi();
 	if (bShow && pl && plw)
 		pl->ScheduleRefreshNavControls();
 	UNREFERENCED_PARAMETER(nStatus);
+}
+
+void COggDlg::NudgeMicMixBelowGdi()
+{
+	// マイク行を GDI 下へ。その分 WAV/DS 音量などが重なれば左カラムだけ連鎖で下げる。
+	if (m_bMicRowNudged || !GetSafeHwnd())
+		return;
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	if (capH <= 0)
+		return;
+	const int gdiH = (int)((81 + 16) * hD * 4);
+	if (gdiH <= 8)
+		return;
+	const int gdiBottom = capH + gdiH;
+	const int gap = 4;
+
+	auto moveBy = [](CWnd* w, int dy) {
+		if (!w || !::IsWindow(w->GetSafeHwnd()) || dy == 0)
+			return;
+		CRect r;
+		w->GetWindowRect(&r);
+		w->GetParent()->ScreenToClient(&r);
+		w->SetWindowPos(NULL, r.left, r.top + dy, 0, 0,
+			SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	};
+
+	CWnd* micRow[] = {
+		GetDlgItem(IDC_CHECK_MICMIX),
+		GetDlgItem(IDC_SLIDER_MICLEV),
+		GetDlgItem(IDC_STATIC_MICLEV),
+	};
+	int micTop = INT_MAX;
+	for (CWnd* w : micRow) {
+		if (!w || !::IsWindow(w->GetSafeHwnd()))
+			continue;
+		CRect r;
+		w->GetWindowRect(&r);
+		ScreenToClient(&r);
+		if (r.top < micTop)
+			micTop = r.top;
+	}
+	int dyMic = 0;
+	if (micTop != INT_MAX && micTop < gdiBottom + gap)
+		dyMic = gdiBottom + gap - micTop;
+	// 異常値は無視（全面シフトの再発防止）
+	if (dyMic < 0 || dyMic > 64)
+		dyMic = 0;
+	for (CWnd* w : micRow)
+		moveBy(w, dyMic);
+
+	CWnd* pWav = GetDlgItem(IDC_CHECK2);
+	if (!pWav || !::IsWindow(pWav->GetSafeHwnd())) {
+		m_bMicRowNudged = TRUE;
+		return;
+	}
+	CRect micUnion(0, 0, 0, 0);
+	BOOL hasMic = FALSE;
+	for (CWnd* w : micRow) {
+		if (!w || !::IsWindow(w->GetSafeHwnd()))
+			continue;
+		CRect r;
+		w->GetWindowRect(&r);
+		ScreenToClient(&r);
+		if (!hasMic) {
+			micUnion = r;
+			hasMic = TRUE;
+		}
+		else
+			micUnion.UnionRect(&micUnion, &r);
+	}
+	CRect wavRc;
+	pWav->GetWindowRect(&wavRc);
+	ScreenToClient(&wavRc);
+	int need = 0;
+	if (hasMic)
+		need = (micUnion.bottom + gap) - wavRc.top;
+	if (need < 0)
+		need = 0;
+	if (need > 80)
+		need = 0;
+
+	if (need > 0) {
+		// WAV〜ピッチ行だけ下げる（ゲームボタン／右パネルは動かさない）
+		static const UINT kVolStack[] = {
+			IDC_CHECK2,
+			IDC_SLIDER3, IDC_STATICaaa, IDC_STATICds,
+			IDC_STATICaaab, IDC_STATIC2, IDC_SLIDER1,
+			IDC_STATICaaac, IDC_SLIDER4, IDC_STATICds2,
+			IDC_STATIC_t, IDC_SLIDER7, IDC_STATICds3,
+			IDC_STATIC_p, IDC_SLIDER8, IDC_STATICds4,
+		};
+		for (UINT id : kVolStack)
+			moveBy(GetDlgItem(id), need);
+	}
+	m_bMicRowNudged = TRUE;
 }
 
 void COggDlg::PostRefreshAllAeroWindows()
@@ -23327,6 +23931,8 @@ void COggDlg::OnPlayList()
 		}
 		else {
 			::ShowWindow(pl->m_hWnd, SW_SHOW);
+			pl->EnsureOnScreen();
+			::SetForegroundWindow(pl->m_hWnd);
 			plw = 1;
 		}
 	}
@@ -23955,13 +24561,24 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 	}
 	if (!dest)
 		jx = -1;
+	if (!dest)
+		InterlockedIncrement(&s_vidJakEpoch);
 
 	if (s.IsEmpty()) {
 		return;
 	}
 
 	const CString origPath = s;
-	// リスト用: 埋め込み失敗時に同名・folder.jpg 等へフォールバック
+	auto applyMainMeta = [&]() {
+		if (dest) return;
+		if (target.IsNull() || target.GetWidth() <= 0) return;
+		jx = target.GetWidth();
+		jy = target.GetHeight();
+		jxy = (double)jx / (double)jy;
+		if (::IsWindow(m_mp3jake.GetSafeHwnd()))
+			m_mp3jake.EnableWindow(TRUE);
+	};
+	// 埋め込み失敗時: 同名・folder.jpg/cover.jpg 等(再生中ジャケットも同じ)
 	auto trySidecars = [&]() -> bool {
 		static const TCHAR* kNear[] = {
 			_T(".jpg"), _T(".jpeg"), _T(".png"), _T(".bmp"), _T(".gif")
@@ -23998,6 +24615,51 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		}
 		return false;
 	};
+	// 動画: 埋め込み/サイドカー無しなら Shell サムネ(エクスプローラ相当。埋め込みPNGも拾えることが多い)
+	auto tryShellVideoThumb = [&]() -> bool {
+		CString low = origPath;
+		low.MakeLower();
+		const BOOL isVid =
+			(low.Right(3) == _T("mp4") || low.Right(3) == _T("m4v") || low.Right(3) == _T("mkv")
+			|| low.Right(3) == _T("avi") || low.Right(3) == _T("wmv") || low.Right(3) == _T("mov")
+			|| low.Right(3) == _T("mpg") || low.Right(3) == _T("flv") || low.Right(4) == _T("webm")
+			|| low.Right(4) == _T("mpeg") || low.Right(4) == _T("m2ts")
+			|| (low.GetLength() >= 3 && low.Right(3) == _T(".ts")));
+		if (!isVid) return false;
+		IShellItem* psi = NULL;
+		if (FAILED(::SHCreateItemFromParsingName(origPath, NULL, IID_PPV_ARGS(&psi))) || !psi)
+			return false;
+		IShellItemImageFactory* pif = NULL;
+		HBITMAP hb = NULL;
+		BOOL ok = FALSE;
+		if (SUCCEEDED(psi->QueryInterface(IID_PPV_ARGS(&pif))) && pif) {
+			SIZE sz = { 256, 256 };
+			// THUMBNAILONLY は付けない: 埋め込み無しでもフレーム生成サムネを使う
+			if (SUCCEEDED(pif->GetImage(sz, SIIGBF_BIGGERSIZEOK | SIIGBF_RESIZETOFIT, &hb)) && hb) {
+				if (!target.IsNull()) target.Destroy();
+				target.Attach(hb);
+				hb = NULL;
+				ok = (!target.IsNull() && target.GetWidth() > 0);
+				if (!ok && !target.IsNull()) target.Destroy();
+			}
+			if (hb) ::DeleteObject(hb);
+			pif->Release();
+		}
+		psi->Release();
+		return ok ? TRUE : FALSE;
+	};
+	auto tryFallbacks = [&]() {
+		if (!target.IsNull() && target.GetWidth() > 0) {
+			applyMainMeta();
+			return;
+		}
+		if (trySidecars()) {
+			applyMainMeta();
+			return;
+		}
+		if (tryShellVideoThumb())
+			applyMainMeta();
+	};
 
 	CString s1, s2;
 	TCHAR env[256];
@@ -24019,8 +24681,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 
 	CFile ff;
 	if (ff.Open(s, CFile::modeRead | CFile::shareDenyWrite, NULL) == FALSE) {
-		if (dest)
-			trySidecars();
+		tryFallbacks();
 		return;
 	}
 	UINT size = 0;
@@ -24037,7 +24698,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		}
 		if (i == 2000) {
 			ff.Close();
-			if (dest) trySidecars();
+			tryFallbacks();
 			return;
 		}
 		size = (UINT)bufimage[i + 4];
@@ -24083,38 +24744,76 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		}
 		else i++;
 	}
-	else if (s.Right(3) == "m4a") {
-		ZeroMemory(bufimage, 0x300000);
-		ff.Read(bufimage, 0x300000);
-		if (bufimage[0x14] == 0 || bufimage[0x14] == 3) enc = 0; else enc = 1;
-		for (i = 0; i < 0x300000; i++) {// 00 06 5D 6A 64 61 74 61
-			if (bufimage[i] == 0x63 && bufimage[i + 1] == 0x6f && bufimage[i + 2] == 0x76 && bufimage[i + 3] == 0x72 && bufimage[i + 8] == 0x64 && bufimage[i + 9] == 0x61 && bufimage[i + 10] == 0x74 && bufimage[i + 11] == 0x61) {
+	else if (s.Right(3) == "m4a" || s.Right(3) == "mp4" || s.Right(3) == "m4v") {
+		// covr(先頭/末尾) → 無ければ埋め込みPNGサンプル(先頭/末尾スキャン)
+		const ULONGLONG fLen = ff.GetLength();
+		const int kChunk = 0x300000;
+		BOOL found = FALSE;
+		ULONGLONG regions[2];
+		int regionCnt = 1;
+		regions[0] = 0;
+		if (fLen > (ULONGLONG)kChunk) {
+			regions[1] = fLen - (ULONGLONG)kChunk;
+			regionCnt = 2;
+		}
+		for (int ri = 0; ri < regionCnt && !found; ri++) {
+			const ULONGLONG remain = fLen - regions[ri];
+			const int toRead = (remain > (ULONGLONG)kChunk) ? kChunk : (int)remain;
+			if (toRead < 24) continue;
+			ZeroMemory(bufimage, toRead + 1);
+			ff.Seek((LONGLONG)regions[ri], CFile::begin);
+			if ((UINT)ff.Read(bufimage, toRead) != (UINT)toRead) continue;
+			for (ULONGLONG bi = 0; bi + 24 <= (ULONGLONG)toRead; bi++) {
+				if (bufimage[bi] != 0x63 || bufimage[bi + 1] != 0x6f || bufimage[bi + 2] != 0x76 || bufimage[bi + 3] != 0x72)
+					continue;
+				if (bufimage[bi + 8] != 0x64 || bufimage[bi + 9] != 0x61 || bufimage[bi + 10] != 0x74 || bufimage[bi + 11] != 0x61)
+					continue;
+				UINT dataSize = (UINT)bufimage[bi + 4];
+				dataSize <<= 8;
+				dataSize |= (UINT)bufimage[bi + 5];
+				dataSize <<= 8;
+				dataSize |= (UINT)bufimage[bi + 6];
+				dataSize <<= 8;
+				dataSize |= (UINT)bufimage[bi + 7];
+				if (dataSize <= 16) continue;
+				size = dataSize - 16;
+				const ULONGLONG imgBi = bi + 20;
+				if (imgBi + 4 > (ULONGLONG)toRead) continue;
+				if (bufimage[imgBi + 1] == 0x50 && bufimage[imgBi + 2] == 0x4e && bufimage[imgBi + 3] == 0x47)
+					s1 += jPng;
+				else
+					s1 += jJpg;
+				s2 += jBmp;
+				i = regions[ri] + imgBi;
+				found = TRUE;
 				break;
 			}
+			if (found) break;
+			// attached picture 等: 完全な PNG を拾う(小さめのみ。誤爆防止)
+			for (ULONGLONG bi = 0; bi + 24 <= (ULONGLONG)toRead; bi++) {
+				if (!(bufimage[bi] == 0x89 && bufimage[bi + 1] == 'P' && bufimage[bi + 2] == 'N' && bufimage[bi + 3] == 'G'
+					&& bufimage[bi + 4] == 0x0d && bufimage[bi + 5] == 0x0a && bufimage[bi + 6] == 0x1a && bufimage[bi + 7] == 0x0a))
+					continue;
+				for (ULONGLONG j = bi + 8; j + 12 <= (ULONGLONG)toRead; j++) {
+					if (bufimage[j] != 'I' || bufimage[j + 1] != 'E' || bufimage[j + 2] != 'N' || bufimage[j + 3] != 'D')
+						continue;
+					const UINT pngSize = (UINT)((j + 8) - bi);
+					if (pngSize < 128 || pngSize > 0x200000) break;
+					size = pngSize;
+					i = regions[ri] + bi;
+					s1 += jPng;
+					s2 += jBmp;
+					found = TRUE;
+					break;
+				}
+				if (found) break;
+			}
 		}
-		if (i == 0x300000) {
+		if (!found) {
 			ff.Close();
-			if (dest) trySidecars();
+			tryFallbacks();
 			return;
 		}
-		i += 4;
-		size = (UINT)bufimage[i];
-		size <<= 8;
-		size |= (UINT)bufimage[i + 1];
-		size <<= 8;
-		size |= (UINT)bufimage[i + 2];
-		size <<= 8;
-		size |= (UINT)bufimage[i + 3];
-		size -= 16;
-
-		i += 16;
-		if (bufimage[i + 1] == 0x50 && bufimage[i + 2] == 0x4e && bufimage[i + 3] == 0x47) {
-			s1 += jPng;
-		}
-		else {
-			s1 += jJpg;
-		}
-		s2 += jBmp;
 	}
 	else if (s.Right(3) == "ogg" || s.Right(6) == ".qull3") {
 		CString cc;
@@ -24129,7 +24828,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 			ff.Close();
 			fpLocal = _tfopen(origPath, _T("rb"));
 			if (!fpLocal) {
-				trySidecars();
+				tryFallbacks();
 				return;
 			}
 			// 再生中コールバックの Close(oggf=0) を使わない
@@ -24141,7 +24840,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 			};
 			if (ov_open_callbacks(fpLocal, &vfLocal, NULL, 0, jacketCb) < 0) {
 				fclose(fpLocal);
-				trySidecars();
+				tryFallbacks();
 				return;
 			}
 			localOk = TRUE;
@@ -24150,7 +24849,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		}
 		if (!pVf->vc) {
 			if (localOk) ov_clear(&vfLocal);
-			if (dest) trySidecars();
+			tryFallbacks();
 			return;
 		}
 		for (int iii = 0; iii < pVf->vc->comments; iii++) {
@@ -24210,7 +24909,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 			ov_clear(&vfLocal);
 		}
 		if (vfiii == FALSE) {
-			if (dest) trySidecars();
+			tryFallbacks();
 			return;
 		}
 	}
@@ -24238,7 +24937,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		}
 		if (i == 0x300000) {
 			ff.Close();
-			if (dest) trySidecars();
+			tryFallbacks();
 			return;
 		}
 		i += 29;
@@ -24281,28 +24980,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 			ok = TryWavRiffId3Apic(ff, bufimage, (int)bufimage_vec.size() - 16, i, size);
 		if (!ok) {
 			ff.Close();
-			static const TCHAR* kSidecarExts[] = { _T(".jpg"), _T(".jpeg"), _T(".png"), _T(".bmp") };
-			int dot = origPath.ReverseFind(_T('.'));
-			if (dot > 0) {
-				CString base = origPath.Left(dot);
-				for (int ei = 0; ei < 4; ei++) {
-					CString sidecar = base + kSidecarExts[ei];
-					if (::GetFileAttributes(sidecar) == INVALID_FILE_ATTRIBUTES)
-						continue;
-					if (target.Load(sidecar) != E_FAIL && !target.IsNull() && target.GetWidth() > 0) {
-						if (!dest) {
-							jx = target.GetWidth();
-							jy = target.GetHeight();
-							jxy = (double)jx / (double)jy;
-							if (jx > 0 && ::IsWindow(m_mp3jake.GetSafeHwnd()))
-								m_mp3jake.EnableWindow(TRUE);
-						}
-						return;
-					}
-					if (!target.IsNull())
-						target.Destroy();
-				}
-			}
+			tryFallbacks();
 			return;
 		}
 		if (s2.IsEmpty())
@@ -24313,7 +24991,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		ULONGLONG imgPos = 0;
 		if (!TryId3ApicRegions(ff, bufimage, po, imgPos, size)) {
 			ff.Close();
-			if (dest) trySidecars();
+			tryFallbacks();
 			return;
 		}
 		i = imgPos;
@@ -24324,13 +25002,13 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		// 壊れたAPICサイズでの巨大確保を防ぐ
 		if (size == 0 || size > 0x1000000) { // 16MB超は不正扱い
 			ff.Close();
-			if (dest) trySidecars();
+			tryFallbacks();
 			return;
 		}
 		hG = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, size);
 		if (hG == NULL) {
 			ff.Close();
-			if (dest) trySidecars();
+			tryFallbacks();
 			return;
 		}
 		ff.SeekToBegin();
@@ -24339,7 +25017,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		if (!cBit) {
 			GlobalFree(hG);
 			ff.Close();
-			if (dest) trySidecars();
+			tryFallbacks();
 			return;
 		}
 		ff.Read(cBit, size);
@@ -24359,22 +25037,16 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 
 	if (stream != NULL) {
 		if (target.Load(stream) != E_FAIL) {
-			if (!dest) {
-				jx = target.GetWidth();
-				jy = target.GetHeight();
-				jxy = (double)jx / (double)jy;
-				if (jx > 0 && ::IsWindow(m_mp3jake.GetSafeHwnd()))
-					m_mp3jake.EnableWindow(TRUE);
-			}
+			applyMainMeta();
 		}
-		else if (dest) {
+		else {
 			if (!target.IsNull()) target.Destroy();
-			trySidecars();
+			tryFallbacks();
 		}
 		stream->Release();
 	}
-	else if (dest) {
-		trySidecars();
+	else {
+		tryFallbacks();
 	}
 }
 

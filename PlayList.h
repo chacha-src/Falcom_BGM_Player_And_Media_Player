@@ -78,6 +78,8 @@ public:
 	void ScheduleRefreshNavControls();
 protected:
 	afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnPlMissDone(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnPlJakDone(WPARAM wParam, LPARAM lParam);
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV サポート
 	CToolTipCtrl m_tooltip;
 
@@ -97,6 +99,8 @@ public:
 	afx_msg void OnNcDestroy();
 	virtual BOOL DestroyWindow();
 	afx_msg int Create(CWnd *pWnd);
+	// MP裏生成で -32000 に置かれた窓を、ファルコム表示時に画面内へ戻す
+	void EnsureOnScreen();
 	afx_msg void OnClose();
 	afx_msg void OnBnClickedOk();
 	CCustomListCtrl m_lc;
@@ -199,6 +203,7 @@ enum {
 	PL_CTX_REFRESH_JAK = 22,
 	PL_CTX_TAG_EDIT = 23,
 	PL_CTX_XFADE = 24,
+	PL_CTX_MICMIX = 25,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

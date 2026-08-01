@@ -89,6 +89,7 @@ BEGIN_MESSAGE_MAP(CProToolsDlg, CCustomBlurDialogBase)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
+	ON_WM_SIZE()
 	ON_WM_CLOSE()
 END_MESSAGE_MAP()
 
@@ -210,6 +211,8 @@ BOOL CProToolsDlg::OnInitDialog()
 	if (GetDlgItem(IDC_PRO_WAVE))
 		GetDlgItem(IDC_PRO_WAVE)->GetWindowRect(&m_waveRc);
 	ScreenToClient(&m_waveRc);
+	// キャプション化は OnShowWindow。矩形は SyncWaveRect で再同期する
+	SyncWaveRect();
 
 	if (!hasTrack && pl && plcnt >= 0 && plcnt < pl->playcnt) {
 		pc = pl->pc[plcnt];
@@ -491,53 +494,100 @@ BOOL CProToolsDlg::PreTranslateMessage(MSG* pMsg)
 	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
+void CProToolsDlg::SyncWaveRect()
+{
+	CWnd* wave = GetDlgItem(IDC_PRO_WAVE);
+	if (!wave || !::IsWindow(wave->GetSafeHwnd()))
+		return;
+	wave->GetWindowRect(&m_waveRc);
+	ScreenToClient(&m_waveRc);
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	// キャプション帯に食い込まない（Install 前に取った座標の残骸対策）
+	if (capH > 0 && m_waveRc.top < capH)
+		m_waveRc.top = capH;
+	if (m_waveRc.bottom <= m_waveRc.top + 8)
+		m_waveRc.bottom = m_waveRc.top + 50;
+	// 親が描くので枠 Static は隠す（帯アクリルと二重にならない）
+	wave->ShowWindow(SW_HIDE);
+}
+
 void CProToolsDlg::DrawWave(CDC& dc, const CRect& rc)
 {
-	dc.FillSolidRect(rc, RGB(24, 24, 28));
-	if (m_peakCount <= 1) return;
-	const int mid = (rc.top + rc.bottom) / 2;
-	const int half = (rc.Height() / 2) - 2;
-	CPen penL(PS_SOLID, 1, RGB(80, 180, 255));
-	CPen penR(PS_SOLID, 1, RGB(255, 140, 80));
-	CPen* old = dc.SelectObject(&penL);
-	for (int i = 0; i < m_peakCount; ++i) {
-		int x = rc.left + i * rc.Width() / m_peakCount;
-		int h = (int)(m_peaksL[i] * half);
-		dc.MoveTo(x, mid);
-		dc.LineTo(x, mid - h);
+	if (rc.Width() <= 0 || rc.Height() <= 0) return;
+
+	CDC mem;
+	CBitmap bmp;
+	mem.CreateCompatibleDC(&dc);
+	bmp.CreateCompatibleBitmap(&dc, rc.Width(), rc.Height());
+	CBitmap* old = mem.SelectObject(&bmp);
+	CRect local(0, 0, rc.Width(), rc.Height());
+	mem.FillSolidRect(local, RGB(24, 24, 28));
+	if (m_peakCount > 1) {
+		const int mid = local.Height() / 2;
+		const int half = (local.Height() / 2) - 2;
+		CPen penL(PS_SOLID, 1, RGB(80, 180, 255));
+		CPen penR(PS_SOLID, 1, RGB(255, 140, 80));
+		CPen* oldPen = mem.SelectObject(&penL);
+		for (int i = 0; i < m_peakCount; ++i) {
+			int x = i * local.Width() / m_peakCount;
+			int h = (int)(m_peaksL[i] * half);
+			mem.MoveTo(x, mid);
+			mem.LineTo(x, mid - h);
+		}
+		mem.SelectObject(&penR);
+		for (int i = 0; i < m_peakCount; ++i) {
+			int x = i * local.Width() / m_peakCount;
+			int h = (int)(m_peaksR[i] * half);
+			mem.MoveTo(x, mid);
+			mem.LineTo(x, mid + h);
+		}
+		mem.SelectObject(oldPen);
+		if (m_totalFrames > 0) {
+			auto mark = [&](int frame, COLORREF col) {
+				if (frame < 0) return;
+				int x = (int)((__int64)frame * local.Width() / m_totalFrames);
+				CPen p(PS_SOLID, 2, col);
+				CPen* o = mem.SelectObject(&p);
+				mem.MoveTo(x, 0);
+				mem.LineTo(x, local.bottom);
+				mem.SelectObject(o);
+			};
+			mark(m_loopIn, RGB(80, 255, 120));
+			mark(m_loopOut, RGB(255, 80, 80));
+		}
 	}
-	dc.SelectObject(&penR);
-	for (int i = 0; i < m_peakCount; ++i) {
-		int x = rc.left + i * rc.Width() / m_peakCount;
-		int h = (int)(m_peaksR[i] * half);
-		dc.MoveTo(x, mid);
-		dc.LineTo(x, mid + h);
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_AcrylicCaption(m_hWnd) || CCC_IsAeroEnabled()) {
+		CCC_BlitStretchOpaque(dc.GetSafeHdc(), rc.left, rc.top, rc.Width(), rc.Height(),
+			mem.GetSafeHdc(), 0, 0, rc.Width(), rc.Height());
 	}
-	dc.SelectObject(old);
-	if (m_totalFrames > 0) {
-		auto mark = [&](int frame, COLORREF col) {
-			if (frame < 0) return;
-			int x = rc.left + (int)((__int64)frame * rc.Width() / m_totalFrames);
-			CPen p(PS_SOLID, 2, col);
-			CPen* o = dc.SelectObject(&p);
-			dc.MoveTo(x, rc.top);
-			dc.LineTo(x, rc.bottom);
-			dc.SelectObject(o);
-		};
-		mark(m_loopIn, RGB(80, 255, 120));
-		mark(m_loopOut, RGB(255, 80, 80));
+	else
+#endif
+	{
+		dc.BitBlt(rc.left, rc.top, rc.Width(), rc.Height(), &mem, 0, 0, SRCCOPY);
 	}
+	mem.SelectObject(old);
 }
 
 void CProToolsDlg::OnPaint()
 {
 	CPaintDC dc(this);
+	SyncWaveRect();
 	DrawWave(dc, m_waveRc);
+	CCC_CaptionPaint(dc, m_hWnd);
 }
 
 BOOL CProToolsDlg::OnEraseBkgnd(CDC* pDC)
 {
 	return CCustomBlurDialogBase::OnEraseBkgnd(pDC);
+}
+
+void CProToolsDlg::OnSize(UINT nType, int cx, int cy)
+{
+	CCustomBlurDialogBase::OnSize(nType, cx, cy);
+	if (nType == SIZE_MINIMIZED) return;
+	SyncWaveRect();
+	Invalidate(FALSE);
 }
 
 void CProToolsDlg::OnLButtonDown(UINT nFlags, CPoint point)

@@ -420,6 +420,12 @@
     <ClCompile Include="TranscodeExport.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DeviceRecordDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ScreenCaptureDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="TagEditDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -956,6 +962,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TranscodeExport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DeviceRecordDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ScreenCaptureDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TagEditDlg.h">

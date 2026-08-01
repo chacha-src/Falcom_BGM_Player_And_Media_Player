@@ -178,16 +178,17 @@ void CKpilist::LayoutControls()
 	GetClientRect(&rc);
 	const int cx = rc.Width();
 	const int cy = rc.Height();
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 
 	const int mx = PX(7 * dx);              // 左右マージン
 	const int bw = PX(50 * dx);             // OK ボタン幅
 	const int bh = PX(14 * dy);             // OK ボタン高さ
-	const int descTop = PX(11 * dy);
+	const int descTop = PX(11 * dy) + capH;
 	const int descH = PX(9 * dy);
-	const int filtTop = PX(24 * dy);
+	const int filtTop = PX(24 * dy) + capH;
 	const int filtH = PX(14 * dy);
 	const int filtLblW = PX(36 * dx);
-	const int listTop = PX(43 * dy);
+	const int listTop = PX(43 * dy) + capH;
 
 	// OK ボタン: 下端中央
 	const int by = cy - PX(7 * dy) - bh;

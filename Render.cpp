@@ -13,6 +13,12 @@
 #include "CImageBase.h"
 #include "AudioUpscaler.h"
 #include <mutex>
+#include <mmdeviceapi.h>
+#include <FunctionDiscoveryKeys_devpkey.h>
+
+enum { RENDER_MIC_DEV_MAX = 32 };
+static TCHAR s_renderMicIds[RENDER_MIC_DEV_MAX][256];
+static int s_renderMicCnt = 0;
 
 static void SerializeLogFont(const LOGFONT* lf, TCHAR* str, int maxLen)
 {
@@ -258,6 +264,8 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SLIDER_EQCODE, m_eqCode);
 	DDX_Control(pDX, IDC_STATIC_EQCODE_MS, m_eqCodeMs);
 	DDX_Control(pDX, IDC_COMBO2, m_soundlist);
+	DDX_Control(pDX, IDC_COMBO_MICDEV, m_miclist);
+	DDX_Control(pDX, IDC_STATIC_R_MIC, m_micLabel);
 	DDX_Control(pDX, IDC_BUTTON1, m_ao);
 	DDX_Control(pDX, IDC_COMBO3, m_Hz);
 	DDX_Control(pDX, IDC_STATIC12, m_wup);
@@ -302,6 +310,7 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDCANCEL4, &CRender::OnBnClickedCancel4)
 	ON_WM_TIMER()
 	ON_CBN_SELCHANGE(IDC_COMBO2, &CRender::OnCbnSelchangeCombo2)
+	ON_CBN_SELCHANGE(IDC_COMBO_MICDEV, &CRender::OnCbnSelchangeMic)
 	ON_BN_CLICKED(IDC_BUTTON1, &CRender::OnBnClickedButton1)
 	ON_CBN_SELCHANGE(IDC_COMBO3, &CRender::OnCbnSelchangeCombo3)
 	ON_CBN_SELCHANGE(IDC_COMBO_SPEAKER, &CRender::OnCbnSelchangeSpeaker)
@@ -371,6 +380,7 @@ BOOL CRender::OnInitDialog()
 	SetDlgItemText(IDC_STATIC_R_DISP, LL14(L"表示間隔", L"Display interval", L"Intervalle d'affichage", L"Intervallo display", L"Intervalo de pantalla", L"표시 간격", L"显示间隔", L"فاصل العرض", L"Интервал отображения", L"Anzeigeintervall", L"Intervalo de exibição", L"Weergave-interval", L"Interwał wyświetlania", L"Görüntüleme aralığı"));
 	SetDlgItemText(IDC_STATIC_R_CODE, LL14(L"コード間隔", L"Chord interval", L"Intervalle accords", L"Intervallo accordi", L"Intervalo de acordes", L"코드 간격", L"和弦间隔", L"فاصل الأكورد", L"Интервал аккордов", L"Akkordintervall", L"Intervalo de acordes", L"Akkoordinterval", L"Interwał akordów", L"Akor aralığı"));
 	SetDlgItemText(IDC_STATIC_R_DEV, LL14(L"再生デバイス", L"Playback device", L"Périphérique lecture", L"Dispositivo riproduzione", L"Dispositivo reproducción", L"재생 장치", L"播放设备", L"جهاز التشغيل", L"Устройство воспроизведения", L"Wiedergabegerät", L"Dispositivo reprodução", L"Afspeelapparaat", L"Urządzenie odtwarzania", L"Oynatma cihazı"));
+	SetDlgItemText(IDC_STATIC_R_MIC, LL14(L"マイク(録音)", L"Microphone (record)", L"Micro (enregistrement)", L"Microfono (registrazione)", L"Microfono (grabacion)", L"마이크(녹음)", L"麦克风(录音)", L"ميكروفون (تسجيل)", L"Микрофон (запись)", L"Mikrofon (Aufnahme)", L"Microfone (gravacao)", L"Microfoon (opname)", L"Mikrofon (nagrywanie)", L"Mikrofon (kayit)"));
 	SetDlgItemText(IDC_STATIC_R_SAMP, LL14(L"MAXサンプルレート：", L"MAX sample rate:", L"Freq. échantillonnage max:", L"Freq. campionamento max:", L"Frec. muestreo máx.:", L"최대 샘플레이트:", L"最大采样率：", L"معدل العينات الأقصى:", L"Макс. частота дискретизации:", L"Max. Abtastrate:", L"Taxa amostragem máx.:", L"Max. samplefrequentie:", L"Maks. częstotliwość:", L"Maks. örnekleme oranı:"));
 	SetDlgItemText(IDC_STATIC_R_SPEANA, LL14(L"スペアナ倍率", L"Spectrum scale", L"Échelle spectre", L"Scala spettro", L"Escala espectro", L"스펙트럼 배율", L"频谱倍率", L"مقياس الطيف", L"Масштаб спектра", L"Spektrumskala", L"Escala espectro", L"Spectrumschaal", L"Skala widma", L"Spektrum ölçeği"));
 	SetDlgItemText(IDC_STATIC_R_SPC, LL14(L".SPC,.HES音量(kpi)", L".SPC,.HES volume(kpi)", L"Volume .SPC,.HES (kpi)", L"Volume .SPC,.HES (kpi)", L"Volumen .SPC,.HES (kpi)", L".SPC,.HES 볼륨(kpi)", L".SPC,.HES 音量(kpi)", L"حجم .SPC,.HES (kpi)", L"Громкость .SPC,.HES (kpi)", L".SPC,.HES-Lautstärke (kpi)", L"Volume .SPC,.HES (kpi)", L".SPC,.HES-volume (kpi)", L"Głośność .SPC,.HES (kpi)", L".SPC,.HES sesi (kpi)"));
@@ -468,6 +478,7 @@ BOOL CRender::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"設定を保存して閉じます", L"Save settings and close", L"Enregistrer les parametres et fermer", L"Salva impostazioni e chiudi", L"Guardar ajustes y cerrar", L"설정 저장 후 닫기", L"保存设置并关闭", L"حفظ الإعدادات وإغلاق", L"Сохранить настройки и закрыть", L"Einstellungen speichern und schließen", L"Salvar configuracoes e fechar", L"Instellingen opslaan en sluiten", L"Zapisz ustawienia i zamknij", L"Ayarları kaydet ve kapat"));
 	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL14(L"保存せずに閉じます", L"Close without saving", L"Fermer sans enregistrer", L"Chiudi senza salvare", L"Cerrar sin guardar", L"저장하지 않고 닫기", L"不保存并关闭", L"إغلاق دون حفظ", L"Закрыть без сохранения", L"Ohne Speichern schließen", L"Fechar sem salvar", L"Sluiten zonder opslaan", L"Zamknij bez zapisywania", L"Kaydetmeden kapat"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO2), LL14(L"DirectSoundの出力デバイスを選択します", L"Select DirectSound output device", L"Choisir le peripherique de sortie DirectSound", L"Seleziona dispositivo di uscita DirectSound", L"Seleccionar dispositivo de salida DirectSound", L"DirectSound 출력 장치 선택", L"选择 DirectSound 输出设备", L"اختر جهاز إخراج DirectSound", L"Выбрать устройство вывода DirectSound", L"DirectSound-Ausgabegerat wahlen", L"Selecionar dispositivo de saida DirectSound", L"DirectSound-uitvoerapparaat kiezen", L"Wybierz urzadzenie wyjsciowe DirectSound", L"DirectSound cikis aygitini sec"));
+	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_MICDEV), LL14(L"WAV保存時のマイクミックス／録音に使うマイク端末を選びます", L"Select microphone for WAV mic-mix / recording", L"Choisir le micro pour le mix WAV / enregistrement", L"Scegli il microfono per mix WAV / registrazione", L"Elegir microfono para mix WAV / grabacion", L"WAV 마이크 믹스/녹음에 쓸 마이크 선택", L"选择用于WAV麦克风混音/录音的麦克风", L"اختر الميكروفون لمزج/تسجيل WAV", L"Выберите микрофон для микса/записи WAV", L"Mikrofon fur WAV-Mix / Aufnahme wahlen", L"Escolher microfone para mix WAV / gravacao", L"Kies microfoon voor WAV-mix / opname", L"Wybierz mikrofon do miksu/nagrania WAV", L"WAV miks/kayit icin mikrofon secin"));
 	m_tooltip.AddTool(GetDlgItem(IDC_FONT), LL14(L"メイン画面のフォントを設定します", L"Set main window font", L"Definir la police de la fenetre principale", L"Imposta carattere finestra principale", L"Establecer fuente de ventana principal", L"메인 화면 글꼴 설정", L"设置主窗口字体", L"تعيين خط النافذة الرئيسية", L"Задать шрифт главного окна", L"Schriftart des Hauptfensters festlegen", L"Definir fonte da janela principal", L"Lettertype hoofdvenster instellen", L"Ustaw czcionke okna glownego", L"Ana pencere yazi tipini ayarla"));
 	m_tooltip.AddTool(GetDlgItem(IDC_FONT2), LL14(L"リスト画面（プレイリスト等）のフォントを設定します", L"Set list view font (playlist, etc.)", L"Definir la police des vues liste (playlist, etc.)", L"Imposta carattere viste elenco (playlist, ecc.)", L"Establecer fuente de listas (playlist, etc.)", L"목록 화면(재생 목록 등) 글꼴 설정", L"设置列表界面（播放列表等）字体", L"تعيين خط عرض القائمة (قائمة التشغيل، إلخ)", L"Задать шрифт списков (плейлист и т.д.)", L"Schriftart fur Listenansichten festlegen", L"Definir fonte das listas (playlist etc.)", L"Lettertype lijstweergaven instellen", L"Ustaw czcionke widokow listy", L"Liste gorunumu yazi tipini ayarla"));
 	m_tooltip.AddTool(GetDlgItem(IDCANCEL2), LL14(L"再生中の使用DirectShowフィルタを表示します。", L"Show DirectShow filters in use during playback.", L"Afficher les filtres DirectShow utilises pendant la lecture.", L"Mostra filtri DirectShow in uso durante la riproduzione.", L"Mostrar filtros DirectShow en uso durante la reproduccion.", L"재생 중 사용 중인 DirectShow 필터 표시.", L"显示播放中使用的 DirectShow 过滤器。", L"إظهار مرشحات DirectShow المستخدمة أثناء التشغيل.", L"Показать фильтры DirectShow при воспроизведении.", L"DirectShow-Filter wahrend der Wiedergabe anzeigen.", L"Mostrar filtros DirectShow em uso durante reproducao.", L"DirectShow-filters tonen tijdens afspelen.", L"Pokaz filtry DirectShow uzywane podczas odtwarzania.", L"Calma sirasinda kullanilan DirectShow filtrelerini goster."));
@@ -577,6 +588,67 @@ BOOL CRender::OnInitDialog()
 		m_soundlist.AddString(sls[k]);
 	}
 	m_soundlist.SetCurSel(savedata.soundcur);
+
+	// マイク(録音)端末: WASAPI eCapture を列挙し savedata.mic_device へ保存
+	s_renderMicCnt = 0;
+	m_miclist.ResetContent();
+	m_miclist.AddString(LL14(L"(既定の録音デバイス)", L"(Default recording device)", L"(Périphérique d'enregistrement par défaut)", L"(Dispositivo di registrazione predefinito)", L"(Dispositivo de grabación predeterminado)", L"(기본 녹음 장치)", L"(默认录制设备)", L"(جهاز التسجيل الافتراضي)", L"(Устройство записи по умолчанию)", L"(Standardaufnahmegerät)", L"(Dispositivo de gravação padrão)", L"(Standaard opnameapparaat)", L"(Domyślne urządzenie nagrywania)", L"(Varsayılan kayıt aygıtı)"));
+	s_renderMicIds[0][0] = 0;
+	s_renderMicCnt = 1;
+	{
+		IMMDeviceEnumerator* enumer = NULL;
+		IMMDeviceCollection* coll = NULL;
+		HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+			__uuidof(IMMDeviceEnumerator), (void**)&enumer);
+		if (SUCCEEDED(hr) && enumer) {
+			hr = enumer->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &coll);
+			if (SUCCEEDED(hr) && coll) {
+				UINT cnt = 0;
+				coll->GetCount(&cnt);
+				for (UINT i = 0; i < cnt && s_renderMicCnt < RENDER_MIC_DEV_MAX; ++i) {
+					IMMDevice* dev = NULL;
+					if (FAILED(coll->Item(i, &dev)) || !dev) continue;
+					LPWSTR id = NULL;
+					if (FAILED(dev->GetId(&id)) || !id) { dev->Release(); continue; }
+					IPropertyStore* props = NULL;
+					CString name = id;
+					if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &props)) && props) {
+						PROPVARIANT var;
+						PropVariantInit(&var);
+						if (SUCCEEDED(props->GetValue(PKEY_Device_FriendlyName, &var)) && var.vt == VT_LPWSTR && var.pwszVal)
+							name = var.pwszVal;
+						PropVariantClear(&var);
+						props->Release();
+					}
+					_tcsncpy(s_renderMicIds[s_renderMicCnt], id, _countof(s_renderMicIds[0]) - 1);
+					s_renderMicIds[s_renderMicCnt][_countof(s_renderMicIds[0]) - 1] = 0;
+					m_miclist.AddString(name);
+					CoTaskMemFree(id);
+					dev->Release();
+					s_renderMicCnt++;
+				}
+				coll->Release();
+			}
+			enumer->Release();
+		}
+	}
+	{
+		int sel = 0;
+		if (savedata.mic_device[0]) {
+			for (int i = 1; i < s_renderMicCnt; ++i) {
+				if (_tcscmp(s_renderMicIds[i], savedata.mic_device) == 0) { sel = i; break; }
+			}
+		} else if (savedata.mic_device_cur > 0 && savedata.mic_device_cur < s_renderMicCnt) {
+			sel = savedata.mic_device_cur;
+		}
+		m_miclist.SetCurSelPhysical(sel);
+		savedata.mic_device_cur = sel;
+		if (sel >= 0 && sel < s_renderMicCnt) {
+			_tcsncpy(savedata.mic_device, s_renderMicIds[sel], _countof(savedata.mic_device) - 1);
+			savedata.mic_device[_countof(savedata.mic_device) - 1] = 0;
+		}
+	}
+
 	if (!pGraphBuilder)
 		m_l.EnableWindow(FALSE);
 	CString abc = savedata.zero;
@@ -1020,9 +1092,28 @@ void CRender::OnBnClickedOk()
 			savedata.soundguid = { 0,0,0,0 };
 		savedata.soundcur = dev;
 	}
+	{
+		int mic = m_miclist.GetCurSelPhysical();
+		if (mic < 0) mic = 0;
+		if (mic >= s_renderMicCnt) mic = 0;
+		savedata.mic_device_cur = mic;
+		_tcsncpy(savedata.mic_device, s_renderMicIds[mic], _countof(savedata.mic_device) - 1);
+		savedata.mic_device[_countof(savedata.mic_device) - 1] = 0;
+		MpMicMixRestartIfRunning();
+	}
 	extern int gameon;
 	ReleaseRenderGrassBackdrop();
 	CCustomBlurDialogExBase::OnOK();
+}
+
+void CRender::OnCbnSelchangeMic()
+{
+	int mic = m_miclist.GetCurSelPhysical();
+	if (mic < 0 || mic >= s_renderMicCnt) return;
+	savedata.mic_device_cur = mic;
+	_tcsncpy(savedata.mic_device, s_renderMicIds[mic], _countof(savedata.mic_device) - 1);
+	savedata.mic_device[_countof(savedata.mic_device) - 1] = 0;
+	MpMicMixRestartIfRunning();
 }
 
 

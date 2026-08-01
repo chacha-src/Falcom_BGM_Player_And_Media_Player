@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include "ProAudio.h"
@@ -29,6 +29,7 @@ protected:
 	void ApplyLiveFlags(); // チェック/M/S など即時反映(適用ボタン不要)
 	void RefreshCueList();
 	void DrawWave(CDC& dc, const CRect& rc);
+	void SyncWaveRect();
 	void ApplyLoopFromUi();
 	void CloseModeless();
 	void SetupToolTips();
@@ -59,6 +60,7 @@ public:
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnClose();
 
 	CCustomCheckBox m_gapless;

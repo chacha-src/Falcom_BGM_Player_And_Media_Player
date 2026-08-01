@@ -96,6 +96,21 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 
 従来の WAV 書き出しと同様、2GB超は RF64 に対応しています。
 
+### マイクミックス（再生中WAVへ）
+「WAVへ保存」がONのとき、再生PCMにマイク入力をミックスして書き込めます。マイク端末はレンダリング設定（CRender）側で選び、ミックス量は0〜200%です。メディアプレイヤーのプレイリスト右クリックからもON/OFFできます。
+
+### デバイス録音
+メディアプレイヤー下段の「録音」から、再生端末のループバックを **WAV / mp3 / FLAC** に録音できます。端末・形式・品質・保存先を指定でき、マイクの同時ミックスにも対応しています。mp3 / FLAC はいったんWAV経由で変換します。
+
+### 画面キャプチャ
+同じく下段の「キャプチャ」から、画面を **MP4（H.264 + AAC）** で録画できます。
+
+- **モード:** プライマリ画面 / 全モニタ（仮想デスクトップ） / ウィンドウ合成
+- **ウィンドウ合成:** 複数ウィンドウをレイヤとして配置。プレビュー上でドラッグ移動・四隅での拡大縮小、Z順の入れ替え
+- **システム音**（ループバック）と**マイク**の有無、FPS、出力解像度
+- **MPの曲を載せる:** 開いているメディアプレイヤー画面を合成に含め、配置・サイズを調整可能
+- プレビューは録画中も更新されます（枠やHUDは録画ファイルには入りません）
+
 ![ファルコムプレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git7.png)
 
 ![メディアプレイヤー画面](https://ppp.oohara.jp/img/mp3.png)
@@ -176,6 +191,7 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 - mp3やDirectShow再生の途中位置の保存
 - 音声書き出し（WAV / mp3 / FLAC。ループ／フェード／先頭無音揃え／クロスフェード／同時ミックス／サンプリング指定）
 - WAV書き出し時の2GB超対応（RF64）
+- マイクミックス（WAVへ保存時）、デバイス録音（ループバック→WAV/mp3/FLAC）、画面キャプチャ（MP4）
 - ピアノロールの検出パラメータ調整ダイアログ（多数スライダー）
 - プレイリストからアナライザー／ピアノロールを直接開く
 - 並べ替え、他プレイリストへの移動・コピー、選択曲のジャケ再取得
@@ -302,6 +318,21 @@ From the playlist context menu (**Audio export**), write selected tracks as **WA
 
 Exports larger than 2GB use RF64, same as the traditional WAV path.
 
+### Mic Mix (into live WAV save)
+When **Save to WAV** is on, microphone input can be mixed into the PCM being written. Pick the capture device in Rendering (CRender); mix level is 0–200%. You can also toggle it from the media-player playlist context menu.
+
+### Device Recording
+From the media player **Record** button, capture playback-device loopback to **WAV / mp3 / FLAC**. Choose device, format, quality, and path; optional mic mix is available. mp3 / FLAC go through a temporary WAV encode step.
+
+### Screen Capture
+From **Capture**, record the screen to **MP4 (H.264 + AAC)**.
+
+- **Modes:** primary monitor / all monitors (virtual desktop) / window composition
+- **Window composition:** place multiple windows as layers; drag to move, corner handles to resize, Z-order controls
+- Optional **system audio** (loopback) and **microphone**, FPS, and output resolution
+- **Include MP song:** composite the open media-player window and adjust its layout on the preview
+- Preview keeps updating while recording (HUD overlays are not written into the file)
+
 ![Player Screen](https://ppp.oohara.jp/img/ysedplay2e_git7.png)
 
 ![Player Screen](https://ppp.oohara.jp/img/mp3e.png)
@@ -381,6 +412,7 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 - Resume position for mp3 and DirectShow playback
 - Audio export (WAV / mp3 / FLAC; loop / fade / leading-silence align / crossfade / concurrent mix / sample-rate)
 - WAV export larger than 2GB (RF64)
+- Mic mix (with Save to WAV), device recording (loopback → WAV/mp3/FLAC), screen capture (MP4)
 - Piano-roll detection tuning dialog (many sliders)
 - Open analyzer / piano roll directly from the playlist
 - Sort, move/copy to another playlist, refresh jacket for selection

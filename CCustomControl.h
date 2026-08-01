@@ -33,6 +33,8 @@
 #define CCUSTOM_AERO_SUPPORT 0
 #endif
 
+#define CCC_MSG_INSTALL_CAPTION       (WM_APP + 314)
+
 #if CCUSTOM_AERO_SUPPORT
 #define CCC_MSG_REAPPLY_OPAQUE_FIXERS (WM_APP + 311)
 #define CCC_WM_POST_OPAQUE_PAINT      (WM_APP + 312)
@@ -285,6 +287,19 @@ static inline BOOL CCC_ApplyAero(HWND hWnd, BOOL bAero)
 
     const DWORD build = CCC_GetWindowsBuildNumber();
 
+#ifndef DWMWA_REDIRECTIONBITMAP_ALPHA
+#define DWMWA_REDIRECTIONBITMAP_ALPHA 39
+#endif
+#ifndef DWMWA_COLOR_NONE
+#define DWMWA_COLOR_NONE 0xFFFFFFFE
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#ifndef DWMWA_TEXT_COLOR
+#define DWMWA_TEXT_COLOR 36
+#endif
+
     int backdropNone = 1;
     ::DwmSetWindowAttribute(hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropNone, sizeof(backdropNone));
     MARGINS marginsZero = { 0, 0, 0, 0 };
@@ -304,7 +319,14 @@ static inline BOOL CCC_ApplyAero(HWND hWnd, BOOL bAero)
     {
         CCC_ClearChildDwmBackdrop(hWnd);
         CCC_ClearChildTrans(hWnd);
-        ::SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        // AcrylicCaption の再適用はここではしない（ApplyAero 内の FRAMECHANGED と
+        // EnsureBackdrop の二重化が aero 切替フリーズの原因）。呼び出し側で EnsureBackdrop。
+        if (build >= 26100)
+        {
+            BOOL useAlpha = FALSE;
+            ::DwmSetWindowAttribute(hWnd, DWMWA_REDIRECTIONBITMAP_ALPHA, &useAlpha, sizeof(useAlpha));
+        }
+        ::SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         return FALSE;
     }
 
@@ -320,6 +342,10 @@ static inline BOOL CCC_ApplyAero(HWND hWnd, BOOL bAero)
             if (SUCCEEDED(::DwmSetWindowAttribute(hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType))))
             {
                 ::EnableRoundedCorners(hWnd);
+                if (build >= 26100) {
+                    BOOL useAlpha = TRUE;
+                    ::DwmSetWindowAttribute(hWnd, DWMWA_REDIRECTIONBITMAP_ALPHA, &useAlpha, sizeof(useAlpha));
+                }
                 MARGINS margins = { -1, -1, -1, -1 };
                 ::DwmExtendFrameIntoClientArea(hWnd, &margins);
                 bApplied = TRUE;
@@ -351,10 +377,12 @@ static inline void CCC_PrepareDialogSurface(HWND hWnd, BOOL bAero)
     if (!hWnd || !::IsWindow(hWnd)) return;
     CWnd* pWnd = CWnd::FromHandlePermanent(hWnd);
     if (!pWnd) return;
-    if (bAero)
+    // キャプション帯(AcrylicCaption)がある窓も背景ブラシを外す
+    if (bAero || CCC_AcrylicCaption(hWnd))
     {
-        pWnd->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
         ::SetClassLongPtr(hWnd, GCLP_HBRBACKGROUND, 0);
+        // ホスト α 時は常に CLIPCHILDREN。外すと親の不透明塗りが子の NC(スクロールバー)を潰す
+        pWnd->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
     }
 }
 
@@ -830,6 +858,8 @@ private:
     void RedrawVisibleItems();
     void PaintOpaqueClient(CDC& dc);
     void ScheduleOpaqueRepaint();
+    // 可視最終行より下(とプレペイント時は行下地)を交互色・不透明で塗る
+    void FillEmptyBelowVisible(HDC hdc, BOOL belowItemsOnly = TRUE);
 };
 
 // ============================================================================
@@ -1399,7 +1429,10 @@ public:
     void RefreshAeroMode();
 
     // ウィンドウ右上に「メインに追従」チェック。bOverlayPaint=TRUE で GDI 全画面描画向け
+    // (カスタムキャプション有効時はキャプション帯へ配置。オーバーレイも子チェックへ切替)
     void EnableMainWindowLock(int* pSavedLockFlag, BOOL bOverlayPaint = FALSE);
+    int GetCustomCaptionHeight() const { return CCC_GetCustomCaptionHeight(m_hWnd); }
+    virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
@@ -1414,17 +1447,29 @@ protected:
     afx_msg void OnCompositionChanged();
     afx_msg void OnDestroy();
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
+    afx_msg LRESULT OnInstallCustomCaption(WPARAM wParam, LPARAM lParam);
+    afx_msg void OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp);
     afx_msg void OnMainLockClicked();
     afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+    afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
+    afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
     afx_msg void OnMoving(UINT fwSide, LPRECT pRect);
+    afx_msg void OnCapClose();
+    afx_msg void OnCapMin();
+    afx_msg void OnCapMax();
+    afx_msg void OnCapSettings();
+    afx_msg void OnCapPin();
+    afx_msg BOOL OnTtnNeedText(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
 
     DECLARE_MESSAGE_MAP()
 
 private:
     void ApplyDwmBlurCore(BOOL bForce);
     BOOL m_bBlurApplied;
+    BOOL m_bInApplyBlur = FALSE;
     CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers;
     int* m_pMainLockSave = nullptr;
+    CToolTipCtrl m_capTip;
 };
 
 // ============================================================================
@@ -1481,7 +1526,10 @@ public:
     void RefreshAeroMode();
 
     // ウィンドウ右上に「メインに追従」チェック。bOverlayPaint=TRUE で GDI 全画面描画向け
+    // (カスタムキャプション有効時はキャプション帯へ配置。オーバーレイも子チェックへ切替)
     void EnableMainWindowLock(int* pSavedLockFlag, BOOL bOverlayPaint = FALSE);
+    int GetCustomCaptionHeight() const { return CCC_GetCustomCaptionHeight(m_hWnd); }
+    virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 protected:
     virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
@@ -1496,15 +1544,27 @@ protected:
     afx_msg void OnCompositionChanged();
     afx_msg void OnDestroy();
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
+    afx_msg LRESULT OnInstallCustomCaption(WPARAM wParam, LPARAM lParam);
+    afx_msg void OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp);
     afx_msg void OnMainLockClicked();
     afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+    afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
+    afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
     afx_msg void OnMoving(UINT fwSide, LPRECT pRect);
+    afx_msg void OnCapClose();
+    afx_msg void OnCapMin();
+    afx_msg void OnCapMax();
+    afx_msg void OnCapSettings();
+    afx_msg void OnCapPin();
+    afx_msg BOOL OnTtnNeedText(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
 
     DECLARE_MESSAGE_MAP()
 
 private:
     void ApplyDwmBlurCore(BOOL bForce);
     BOOL m_bBlurApplied;
+    BOOL m_bInApplyBlur = FALSE;
     CTypedPtrList<CPtrList, CCustomOpaqueFixer*> m_opaqueFixers;
     int* m_pMainLockSave = nullptr;
+    CToolTipCtrl m_capTip;
 };

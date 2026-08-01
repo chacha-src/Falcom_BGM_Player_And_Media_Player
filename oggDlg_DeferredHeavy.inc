@@ -584,6 +584,36 @@
 			L"Afspelend nummer opslaan als wav",
 			L"Zapisz odtwarzany utwor jako wav",
 			L"Oynat?lan parcay? wav olarak kaydet"));
+		addTip(IDC_CHECK_MICMIX, LL14(
+			L"WAV保存ONのとき、マイクの音を再生PCMにミックスして書き出します。端末は設定の「マイク(録音)」で選択",
+			L"When Save WAV is on, mix mic into saved PCM. Choose device in Settings > Microphone",
+			L"Si Sauver WAV est ON, mixer le micro. Choisir le peripherique dans Parametres",
+			L"Con Salva WAV, mixa il microfono. Scegli il dispositivo in Impostazioni",
+			L"Con Guardar WAV, mezcla el micro. Elija el dispositivo en Ajustes",
+			L"WAV 저장 ON일 때 마이크를 PCM에 믹스. 장치는 설정의 마이크(녹음)에서 선택",
+			L"WAV保存开启时混入麦克风。设备在设置的「麦克风(录音)」中选择",
+			L"عند حفظ WAV امزج الميكروفون. اختر الجهاز من الإعدادات",
+			L"При сохранении WAV микшировать микрофон. Устройство — в настройках",
+			L"Bei WAV-Speichern Mikrofon mischen. Geraet unter Einstellungen waehlen",
+			L"Com Salvar WAV, misturar microfone. Escolha o dispositivo em Configuracoes",
+			L"Bij WAV-opslaan microfoon mixen. Apparaat kiezen in Instellingen",
+			L"Przy zapisie WAV zmiksuj mikrofon. Urzadzenie w Ustawieniach",
+			L"WAV kaydında mikrofonu karıştır. Aygıtı Ayarlar'dan seçin"));
+		addTip(IDC_SLIDER_MICLEV, LL14(
+			L"マイクのミックスレベル(0〜200%)",
+			L"Microphone mix level (0-200%)",
+			L"Niveau de mix micro (0-200%)",
+			L"Livello mix microfono (0-200%)",
+			L"Nivel de mezcla del micro (0-200%)",
+			L"마이크 믹스 레벨(0~200%)",
+			L"麦克风混音电平(0–200%)",
+			L"مستوى مزج الميكروفون (0-200%)",
+			L"Уровень микса микрофона (0–200%)",
+			L"Mikrofon-Mixpegel (0–200%)",
+			L"Nível de mix do microfone (0-200%)",
+			L"Microfoon-mixniveau (0-200%)",
+			L"Poziom miksu mikrofonu (0–200%)",
+			L"Mikrofon karışım seviyesi (0-200%)"));
 		addTip(IDC_CHECK3, LL14(
 			L"動画(OPやイベント)のoggの時に動画画面も表示します",
 			L"Show video window for video ogg (OP, events)",

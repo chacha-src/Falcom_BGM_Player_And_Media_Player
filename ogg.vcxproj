@@ -544,6 +544,8 @@
     <ClCompile Include="ED63rd.cpp" />
     <ClCompile Include="WavExport.cpp" />
     <ClCompile Include="TranscodeExport.cpp" />
+    <ClCompile Include="DeviceRecordDlg.cpp" />
+    <ClCompile Include="ScreenCaptureDlg.cpp" />
     <ClCompile Include="TagEditDlg.cpp" />
     <ClCompile Include="Folder.cpp" />
     <ClCompile Include="Graph.cpp" />
@@ -667,6 +669,8 @@
     <ClInclude Include="PianoRollPick.h" />
     <ClInclude Include="WavExport.h" />
     <ClInclude Include="TranscodeExport.h" />
+    <ClInclude Include="DeviceRecordDlg.h" />
+    <ClInclude Include="ScreenCaptureDlg.h" />
     <ClInclude Include="TagEditDlg.h" />
     <ClInclude Include="flac.h" />
     <ClInclude Include="Folder.h" />

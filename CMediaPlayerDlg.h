@@ -38,6 +38,11 @@ class CPlayList;
 #define WM_MP_MISS_DONE (WM_APP + 63)
 #endif
 
+// ジャケット抽出スレッド完了(LoadJacket を UI から外す)
+#ifndef WM_MP_JAK_DONE
+#define WM_MP_JAK_DONE (WM_APP + 65)
+#endif
+
 // ライブラリツリー遅延構築(起動をブロックしない)
 #ifndef WM_MP_LIB_BUILD
 #define WM_MP_LIB_BUILD (WM_APP + 64)
@@ -171,8 +176,13 @@ public:
 
 	CCustomCheckBox m_renzoku, m_loop, m_random;
 	CCustomCheckBox m_tip, m_mini, m_savemp3, m_saveds, m_savewav;
+	CCustomCheckBox m_micmix;
+	CCustomSliderCtrl m_miclev;
+	CCustomStatic m_miclevL;
 	CCustomCheckBox m_saveparam;   // 曲ごとオーディオ/DSP パラメータ保存
 	CCustomStandardButton m_resetdata; // 保存ファイル削除でリセット
+	CCustomStandardButton m_record;    // デバイス録音 UI
+	CCustomStandardButton m_capture;   // 画面キャプチャ UI
 	CCustomStatic m_kaisuuL;
 	CCustomEdit m_kaisuu;
 	// グループ枠は WS_CLIPSIBLINGS + 最背面で、内側コントロールを塗り潰さない
@@ -269,6 +279,9 @@ public:
 	volatile LONG m_missBusy;// 1=走査スレッド稼働中
 	void KickMissScan();     // playcnt 変化時に非同期走査を起動
 	void StopMissScan();     // 破棄前に世代を上げて結果を無視
+	volatile LONG m_jakGen;  // ジャケット抽出世代
+	volatile LONG m_jakBusy; // 1=ジャケット抽出スレッド稼働中
+	TCHAR m_jakPend[1024];   // 抽出中パス
 
 	// ---- ジャケットサムネキャッシュ(LRU・固定スロット) ----
 	enum { kMpJakN = 64, kMpJakPx = 24 };
@@ -367,6 +380,10 @@ protected:
 	afx_msg void OnSaveMp3();
 	afx_msg void OnSaveDs();
 	afx_msg void OnSaveWav();
+	afx_msg void OnMicMix();
+	afx_msg void OnMicLevRelease(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnRecord();
+	afx_msg void OnCapture();
 	afx_msg void OnSaveParam();
 	afx_msg void OnResetData();
 	afx_msg void OnKaisuuKillFocus();
@@ -400,6 +417,7 @@ protected:
 	afx_msg void OnSpeanaStyleBar();
 	afx_msg void OnSpeanaStyleMirror();
 	afx_msg void OnSpeanaStyleWave();
+	afx_msg void OnRefreshJacket();
 	void LibStartFolderDrag(LPCTSTR path, CPoint ptClient);
 	void LibAddPath(LPCTSTR path, BOOL playAfter);
 	BOOL LibDropHitTestPlaylist(CPoint ptClient) const;
@@ -435,6 +453,7 @@ protected:
 	afx_msg LRESULT OnInfoScrollTick(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPlselExpandPopup(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnMissScanDone(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnJakLoadDone(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnLibBuildLazy(WPARAM wParam, LPARAM lParam);
 	afx_msg BOOL OnNcActivate(BOOL bActive);
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);

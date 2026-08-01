@@ -1667,6 +1667,9 @@ void CPianoRoll::InvalidateRegions(bool roll, bool key)
     if (!roll && !key) return;
     CRect cr;
     GetClientRect(&cr);
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    if (capH > 0 && cr.Height() > capH)
+        cr.top = capH;
     const int w = cr.Width();
     const int h = cr.Height();
     if (w <= 0 || h <= 0) return;
@@ -1683,9 +1686,9 @@ void CPianoRoll::InvalidateRegions(bool roll, bool key)
         return;
     }
     if (roll)
-        CCC_InvalidateRectMinusOverlay(m_hWnd, CRect(0, 0, w, rollH));
+        CCC_InvalidateRectMinusOverlay(m_hWnd, CRect(cr.left, cr.top, cr.left + w, cr.top + rollH));
     if (key)
-        InvalidateRect(CRect(0, rollH, w, h), FALSE);
+        InvalidateRect(CRect(cr.left, cr.top + rollH, cr.left + w, cr.bottom), FALSE);
 }
 
 void CPianoRoll::BuildLiveNoteFrame(NoteFrame& frame) const
@@ -3358,6 +3361,9 @@ void CPianoRoll::ApplySyncInvalidate()
     // BlitFull/フレーム BitBlt はクリップを無視して追従も更新する。
     CRect cr;
     GetClientRect(&cr);
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    if (capH > 0 && cr.Height() > capH)
+        cr.top = capH;
     if (!cr.IsRectEmpty())
         CCC_InvalidateRectMinusOverlay(m_hWnd, cr);
 }
@@ -4160,24 +4166,39 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
                 m_chromaCache.MakeRectOpaque(lgPanel.left, lgPanel.top, lgPanel.Width(), lgPanel.Height());
             }
         }
+        const int yOff = CCC_GetCustomCaptionHeight(m_hWnd);
         // 簡易3Dは鍵盤帯が無いので全面 Blit。2Dはロール+鍵盤が揃っていれば全面。
         if (m_rollReady && (m_keyBufReady || keySectionH <= 0)) {
-            m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, 0, w, h);
+            m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, yOff, w, h);
+            CCC_CaptionPaint(dc, m_hWnd);
             return;
         }
-        if (m_rollReady)
-            m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
-        if (m_keyBufReady)
-            m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH, w, keySectionH);
+        // BlitRect は dest=src 座標前提のため、キャプションオフセット時は Opaque 転送
+        if (yOff <= 0) {
+            if (m_rollReady)
+                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
+            if (m_keyBufReady)
+                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH, w, keySectionH);
+        }
+        else if (m_chromaCache.hdcDib) {
+            if (m_rollReady)
+                CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, yOff, w, rollH,
+                    m_chromaCache.hdcDib, 0, 0, w, rollH);
+            if (m_keyBufReady)
+                CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, yOff + rollH, w, keySectionH,
+                    m_chromaCache.hdcDib, 0, rollH, w, keySectionH);
+        }
+        CCC_CaptionPaint(dc, m_hWnd);
         return;
     }
 #endif
     // 非アクリル / クロマ失敗: フレームバッファへ完全合成 → 画面へ1回 BitBlt
+    const int yOffFb = CCC_GetCustomCaptionHeight(m_hWnd);
     if (!EnsureFrameBuffer(dc, w, h) || !m_frameDC.GetSafeHdc()) {
         if (m_rollReady)
-            dc.BitBlt(0, 0, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
+            dc.BitBlt(0, yOffFb, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
         if (m_keyBufReady)
-            dc.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
+            dc.BitBlt(0, yOffFb + rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
         if (haveLegend)
             DrawExprLegend(dc, w, rollH);
         if (m_frozen) {
@@ -4186,10 +4207,11 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
             CFont* of = nullptr;
             if (m_fontMeterTag.GetSafeHandle())
                 of = dc.SelectObject(&m_fontMeterTag);
-            dc.TextOut(8, 4, LL14(L"フリーズ中", L"Frozen", L"Gele", L"Congelato", L"Congelado", L"정지됨", L"已冻结", L"مجمد", L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu"));
+            dc.TextOut(8, yOffFb + 4, LL14(L"フリーズ中", L"Frozen", L"Gele", L"Congelato", L"Congelado", L"정지됨", L"已冻结", L"مجمد", L"Заморожено", L"Eingefroren", L"Congelado", L"Bevroren", L"Zamrozone", L"Donduruldu"));
             if (of) dc.SelectObject(of);
         }
         CCC_MainLockPaintClient(dc, m_hWnd);
+        CCC_CaptionPaint(dc, m_hWnd);
         return;
     }
 
@@ -4215,7 +4237,14 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
         if (of) m_frameDC.SelectObject(of);
     }
     CCC_MainLockPaintClient(m_frameDC, m_hWnd);
-    dc.BitBlt(0, 0, w, h, &m_frameDC, 0, 0, SRCCOPY);
+    const int yOff = CCC_GetCustomCaptionHeight(m_hWnd);
+#if CCUSTOM_AERO_SUPPORT
+    if (!CCC_IsAeroEnabled() && CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11())
+        CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, yOff, w, h, m_frameDC.GetSafeHdc(), 0, 0, w, h);
+    else
+#endif
+        dc.BitBlt(0, yOff, w, h, &m_frameDC, 0, 0, SRCCOPY);
+    CCC_CaptionPaint(dc, m_hWnd);
 }
 
 void CPianoRoll::PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH, int keySectionH)
@@ -4314,7 +4343,8 @@ void CPianoRoll::OnPaint()
     CRect rect;
     GetClientRect(&rect);
     const int w = rect.Width();
-    const int h = rect.Height();
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    const int h = rect.Height() - capH;
     if (w <= 0 || h <= 0) {
         InterlockedExchange(&m_analysisDonePosted, 0);
         InterlockedExchange(&m_syncPosted, 0);
@@ -4323,6 +4353,7 @@ void CPianoRoll::OnPaint()
 
     // 簡易3D はクライアント全面を1枚のシーンとして扱う(鍵盤帯を分けない)。
     // 2D(既定)のときの分割・スクロール経路は従来のまま。
+    // キャプション帯は除外した content 高さでレイアウト（食い込み防止）
     const bool view3D = IsView3D();
     int keyH = h * 20 / 100;
     if (keyH < 50) keyH = 50; if (keyH > 100) keyH = 100;

@@ -158,6 +158,9 @@ public:
 	// SyncAnalyzerFromPlayCursor: bufwav3 上の前回終端バイト位置
 	BOOL m_analyzerSyncValid = FALSE;
 	ULONG m_analyzerSyncEndPos = 0;
+	// カスタム帯+GDI バナーにマイク行だけ少し被る分の補正済みか
+	BOOL m_bMicRowNudged = FALSE;
+	void NudgeMicMixBelowGdi();
 
 	CString lrc[300];
 	DWORD lrctm[300];
@@ -212,6 +215,13 @@ public:
 	CCustomSliderCtrl	m_sl;
 	CCustomCheckBox	m_dou;
 	CCustomCheckBox	m_c2;
+	CCustomCheckBox	m_micmix;
+	CCustomSliderCtrl	m_miclev;
+	CCustomStatic	m_miclevs;
+	afx_msg void OnMicMixCheck();
+	afx_msg void OnMicLevRelease(NMHDR* pNMHDR, LRESULT* pResult);
+	void SyncMicMixUiFromSavedata();
+	void ApplyMicMixLevelLabel();
 	CCustomStatic	m_11;
 	//}}AFX_DATA
 	void play();
@@ -422,6 +432,7 @@ void SetupTaskbarThumbButtons(HWND hwnd, BOOL mediaPlayerMode);
 void RefreshTaskbarJumpList(BOOL mediaPlayerMode);
 void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName);
 void MpPersistSavedataQuick();
+void MpMicMixRestartIfRunning();
 void MpTaskbarReplay();
 void MpTaskbarNextTrack();
 void MpTaskbarPrevTrack();

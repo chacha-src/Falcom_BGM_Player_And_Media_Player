@@ -20,6 +20,8 @@
 #include "CMpM3uImportDlg.h"
 #include "CPromptDlg.h"
 #include "CCommandRollDlg.h"
+#include "DeviceRecordDlg.h"
+#include "ScreenCaptureDlg.h"
 #include <direct.h>
 #include <shobjidl.h>
 #include <shlobj.h>
@@ -106,10 +108,123 @@ static HBITMAP MpJacketGetCb(void* ctx, int row)
 	return NULL;
 }
 
+static int MpNoteIconGetCb(void* ctx, int row)
+{
+	CMediaPlayerDlg* self = (CMediaPlayerDlg*)ctx;
+	if (!self || !pl || !pl->pc) return 1;
+	const int pcIdx = MpDispToPc(self, row);
+	if (pcIdx < 0 || pcIdx >= pl->playcnt) return 1;
+	return pl->pc[pcIdx].icon;
+}
+
 // 可視行のジャケット:
-//  - ディスクキャッシュ(.bmp / 確定済み.none)は一気にメモリへ(タイマー待ちしない)
-//  - 未キャッシュの LoadJacket だけ 1件/呼び出し(UIを重くしない)
-static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract)
+//  - ディスクキャッシュ(.b2 / 確定済み.n2)は一気にメモリへ
+//  - 未キャッシュの LoadJacket はワーカスレッド(1件ずつ、UIを止めない)
+static TCHAR s_mpJakNoDisk[96][1024];
+static int s_mpJakNoDiskN = 0;
+
+struct MpJakJob {
+	HWND hwnd;
+	LONG gen;
+	TCHAR path[1024];
+	int pcIdx;
+	int disp;
+	HBITMAP hb;
+	char noneFlag;
+};
+
+static UINT AFX_CDECL MpJakLoadThread(LPVOID p)
+{
+	MpJakJob* job = (MpJakJob*)p;
+	if (!job) return 0;
+	job->hb = NULL;
+	job->noneFlag = 1;
+	::CoInitialize(NULL);
+	extern COggDlg* og;
+	const int px = CMediaPlayerDlg::kMpJakPx;
+	CString diskBmp = PlJakDiskPath(job->path, FALSE);
+	CString diskNone = PlJakDiskPath(job->path, TRUE);
+	WIN32_FILE_ATTRIBUTE_DATA fad = {};
+	if (!diskBmp.IsEmpty() && ::GetFileAttributesEx(diskBmp, GetFileExInfoStandard, &fad)) {
+		CImage disk;
+		if (disk.Load(diskBmp) == S_OK && !disk.IsNull() && disk.GetWidth() > 0) {
+			HDC screen = ::GetDC(NULL);
+			if (screen) {
+				HDC mem = ::CreateCompatibleDC(screen);
+				HBITMAP hbD = ::CreateCompatibleBitmap(screen, px, px);
+				if (hbD && mem) {
+					HGDIOBJ old = ::SelectObject(mem, hbD);
+					RECT rc = { 0, 0, px, px };
+					HBRUSH br = ::CreateSolidBrush(RGB(240, 240, 245));
+					::FillRect(mem, &rc, br);
+					::DeleteObject(br);
+					::SetStretchBltMode(mem, COLORONCOLOR);
+					disk.StretchBlt(mem, 0, 0, px, px, SRCCOPY);
+					::SelectObject(mem, old);
+					job->hb = hbD;
+					job->noneFlag = 0;
+					hbD = NULL;
+				}
+				if (hbD) ::DeleteObject(hbD);
+				if (mem) ::DeleteDC(mem);
+				::ReleaseDC(NULL, screen);
+			}
+			disk.Destroy();
+		}
+	}
+	if (!job->hb && og) {
+		CImage tmp;
+		og->LoadJacket(job->path, &tmp);
+		if (!tmp.IsNull() && tmp.GetWidth() > 0 && tmp.GetHeight() > 0) {
+			HDC screen = ::GetDC(NULL);
+			if (screen) {
+				HDC mem = ::CreateCompatibleDC(screen);
+				HBITMAP hb = ::CreateCompatibleBitmap(screen, px, px);
+				if (hb && mem) {
+					HGDIOBJ old = ::SelectObject(mem, hb);
+					RECT rc = { 0, 0, px, px };
+					HBRUSH br = ::CreateSolidBrush(RGB(240, 240, 245));
+					::FillRect(mem, &rc, br);
+					::DeleteObject(br);
+					::SetStretchBltMode(mem, COLORONCOLOR);
+					tmp.StretchBlt(mem, 0, 0, px, px, SRCCOPY);
+					::SelectObject(mem, old);
+					job->hb = hb;
+					job->noneFlag = 0;
+					hb = NULL;
+					if (!diskBmp.IsEmpty()) {
+						CImage sav; sav.Attach(job->hb);
+						sav.Save(diskBmp, Gdiplus::ImageFormatBMP);
+						sav.Detach();
+						if (!diskNone.IsEmpty()) ::DeleteFile(diskNone);
+					}
+				}
+				if (hb) ::DeleteObject(hb);
+				if (mem) ::DeleteDC(mem);
+				::ReleaseDC(NULL, screen);
+			}
+		}
+		tmp.Destroy();
+	}
+	if (job->noneFlag) {
+		if (!diskNone.IsEmpty()) {
+			HANDLE hf = ::CreateFile(diskNone, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+				CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+			if (hf != INVALID_HANDLE_VALUE) ::CloseHandle(hf);
+		}
+		if (!diskBmp.IsEmpty()) ::DeleteFile(diskBmp);
+	}
+	::CoUninitialize();
+	if (job->hwnd && ::IsWindow(job->hwnd))
+		::PostMessage(job->hwnd, WM_MP_JAK_DONE, (WPARAM)job->gen, (LPARAM)job);
+	else {
+		if (job->hb) ::DeleteObject(job->hb);
+		free(job);
+	}
+	return 0;
+}
+
+static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract, BOOL bulkDisk = FALSE)
 {
 	if (!self || !::IsWindow(self->m_list.GetSafeHwnd()) || !pl || !pl->pc)
 		return;
@@ -123,43 +238,85 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract)
 	const DWORD now = GetTickCount();
 	BOOL anyDisk = FALSE;
 
-	CDC* pDCBatch = self->GetDC();
-	for (int disp = top; disp < top + page && disp < nDisp; ++disp) {
-		const int pcIdx = MpDispToPc(self, disp);
-		if (pcIdx < 0 || pcIdx >= pl->playcnt) continue;
-		const TCHAR* path = pl->pc[pcIdx].fol;
-		if (!path || !path[0]) continue;
-
-		int hit = -1, freeSlot = -1, lruSlot = 0;
-		DWORD lruTick = 0xFFFFFFFF;
+	// プレイリスト変更/初回: メモリスロットを空にしてディスク済を一気に載せる
+	// (可視だけ順々だと毎回ディスクを読んでるように見える)
+	if (bulkDisk) {
+		InterlockedIncrement(&self->m_jakGen);
+		self->m_jakPend[0] = 0;
+		InterlockedExchange(&self->m_jakBusy, 0);
+		s_mpJakNoDiskN = 0; // .b2誤認で毒されたセッション負キャッシュを捨てる
 		for (int i = 0; i < CMediaPlayerDlg::kMpJakN; ++i) {
-			if (self->m_jakKey[i][0] && _tcsicmp(self->m_jakKey[i], path) == 0) {
-				hit = i;
-				break;
-			}
-			if (!self->m_jakKey[i][0] && freeSlot < 0) freeSlot = i;
-			if (self->m_jakTick[i] < lruTick) { lruTick = self->m_jakTick[i]; lruSlot = i; }
+			if (self->m_jakBmp[i]) { ::DeleteObject(self->m_jakBmp[i]); self->m_jakBmp[i] = NULL; }
+			self->m_jakKey[i][0] = 0;
+			self->m_jakTick[i] = 0;
+			self->m_jakRow[i] = -1;
 		}
-		if (hit >= 0) {
-			self->m_jakTick[hit] = now;
-			self->m_jakRow[hit] = pcIdx;
-			continue;
-		}
+	}
 
-		int slot = (freeSlot >= 0) ? freeSlot : lruSlot;
-		const CString diskBmp = PlJakDiskPath(path, FALSE);
-		const CString diskNone = PlJakDiskPath(path, TRUE);
-		{
-			WIN32_FILE_ATTRIBUTE_DATA fadM = {}, fadC = {};
-			const CString media = PlPhysicalMediaPath(path);
-			if (!media.IsEmpty() && ::PathFileExists(media)
-				&& ::GetFileAttributesEx(media, GetFileExInfoStandard, &fadM)) {
-				LPCTSTR cachePath = NULL;
-				if (!diskBmp.IsEmpty() && ::PathFileExists(diskBmp)) cachePath = diskBmp;
-				else if (!diskNone.IsEmpty() && ::PathFileExists(diskNone)) cachePath = diskNone;
-				if (cachePath && ::GetFileAttributesEx(cachePath, GetFileExInfoStandard, &fadC)) {
+	CDC* pDCBatch = self->GetDC();
+	const int passN = bulkDisk ? 2 : 1;
+	for (int pass = 0; pass < passN; ++pass) {
+		int d0, d1;
+		BOOL allowLru;
+		if (!bulkDisk) {
+			d0 = top; d1 = top + page; allowLru = TRUE;
+		}
+		else if (pass == 0) {
+			d0 = top; d1 = top + page; allowLru = TRUE;
+		}
+		else {
+			d0 = 0; d1 = nDisp; allowLru = FALSE; // 空きスロットのみ(可視を追い出さない)
+		}
+		for (int disp = d0; disp < d1 && disp < nDisp; ++disp) {
+			const int pcIdx = MpDispToPc(self, disp);
+			if (pcIdx < 0 || pcIdx >= pl->playcnt) continue;
+			const TCHAR* path = pl->pc[pcIdx].fol;
+			if (!path || !path[0]) continue;
+
+			int hit = -1, freeSlot = -1, lruSlot = 0;
+			DWORD lruTick = 0xFFFFFFFF;
+			for (int i = 0; i < CMediaPlayerDlg::kMpJakN; ++i) {
+				if (self->m_jakKey[i][0] && _tcsicmp(self->m_jakKey[i], path) == 0) {
+					hit = i;
+					break;
+				}
+				if (!self->m_jakKey[i][0] && freeSlot < 0) freeSlot = i;
+				if (self->m_jakTick[i] < lruTick) { lruTick = self->m_jakTick[i]; lruSlot = i; }
+			}
+			if (hit >= 0) {
+				self->m_jakTick[hit] = now;
+				self->m_jakRow[hit] = pcIdx;
+				continue;
+			}
+			if (self->m_jakPend[0] && _tcsicmp(self->m_jakPend, path) == 0) continue;
+			BOOL knownNoDisk = FALSE;
+			for (int ni = 0; ni < s_mpJakNoDiskN; ++ni) {
+				if (_tcsicmp(s_mpJakNoDisk[ni], path) == 0) { knownNoDisk = TRUE; break; }
+			}
+			if (knownNoDisk) continue;
+
+			int slot = freeSlot;
+			if (slot < 0) {
+				if (!allowLru) continue;
+				slot = lruSlot;
+			}
+			const CString diskBmp = PlJakDiskPath(path, FALSE);
+			const CString diskNone = PlJakDiskPath(path, TRUE);
+			WIN32_FILE_ATTRIBUTE_DATA fadBmp = {}, fadNone = {};
+			const BOOL hasBmp = !diskBmp.IsEmpty() && ::GetFileAttributesEx(diskBmp, GetFileExInfoStandard, &fadBmp);
+			const BOOL hasNone = !diskNone.IsEmpty() && ::GetFileAttributesEx(diskNone, GetFileExInfoStandard, &fadNone);
+			if (!hasBmp && !hasNone) {
+				if (s_mpJakNoDiskN < 96)
+					_tcsncpy_s(s_mpJakNoDisk[s_mpJakNoDiskN++], path, _TRUNCATE);
+				continue;
+			}
+			{
+				WIN32_FILE_ATTRIBUTE_DATA fadM = {};
+				const CString media = PlPhysicalMediaPath(path);
+				if (!media.IsEmpty() && ::GetFileAttributesEx(media, GetFileExInfoStandard, &fadM)) {
 					ULARGE_INTEGER um = {}, uc = {};
 					um.LowPart = fadM.ftLastWriteTime.dwLowDateTime; um.HighPart = fadM.ftLastWriteTime.dwHighDateTime;
+					WIN32_FILE_ATTRIBUTE_DATA& fadC = hasBmp ? fadBmp : fadNone;
 					uc.LowPart = fadC.ftLastWriteTime.dwLowDateTime; uc.HighPart = fadC.ftLastWriteTime.dwHighDateTime;
 					if (um.QuadPart > uc.QuadPart) {
 						PlJakDiskForget(path);
@@ -171,50 +328,50 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract)
 								self->m_jakRow[ci] = -1;
 							}
 						}
+						continue;
 					}
 				}
 			}
-		}
 
-		if (!diskBmp.IsEmpty() && ::PathFileExists(diskBmp) && pDCBatch) {
-			CImage disk;
-			if (disk.Load(diskBmp) == S_OK && !disk.IsNull() && disk.GetWidth() > 0) {
-				CDC mem0; mem0.CreateCompatibleDC(pDCBatch);
-				HBITMAP hbD = ::CreateCompatibleBitmap(pDCBatch->GetSafeHdc(), px, px);
-				if (hbD) {
-					if (self->m_jakBmp[slot]) { ::DeleteObject(self->m_jakBmp[slot]); self->m_jakBmp[slot] = NULL; }
-					HGDIOBJ oldD = mem0.SelectObject(hbD);
-					mem0.FillSolidRect(0, 0, px, px, RGB(240, 240, 245));
-					mem0.SetStretchBltMode(COLORONCOLOR);
-					disk.StretchBlt(mem0.GetSafeHdc(), 0, 0, px, px, SRCCOPY);
-					mem0.SelectObject(oldD);
+			if (hasBmp && pDCBatch) {
+				CImage disk;
+				if (disk.Load(diskBmp) == S_OK && !disk.IsNull() && disk.GetWidth() > 0) {
+					CDC mem0; mem0.CreateCompatibleDC(pDCBatch);
+					HBITMAP hbD = ::CreateCompatibleBitmap(pDCBatch->GetSafeHdc(), px, px);
+					if (hbD) {
+						if (self->m_jakBmp[slot]) { ::DeleteObject(self->m_jakBmp[slot]); self->m_jakBmp[slot] = NULL; }
+						HGDIOBJ oldD = mem0.SelectObject(hbD);
+						mem0.FillSolidRect(0, 0, px, px, RGB(240, 240, 245));
+						mem0.SetStretchBltMode(COLORONCOLOR);
+						disk.StretchBlt(mem0.GetSafeHdc(), 0, 0, px, px, SRCCOPY);
+						mem0.SelectObject(oldD);
+						mem0.DeleteDC();
+						_tcsncpy_s(self->m_jakKey[slot], path, _TRUNCATE);
+						self->m_jakBmp[slot] = hbD;
+						self->m_jakTick[slot] = now;
+						self->m_jakRow[slot] = pcIdx;
+						anyDisk = TRUE;
+						disk.Destroy();
+						continue;
+					}
 					mem0.DeleteDC();
+					disk.Destroy();
+				}
+			}
+
+			if (hasNone) {
+				BOOL already = FALSE;
+				for (int ni = 0; ni < s_mpJakNoneDoneN; ++ni) {
+					if (_tcsicmp(s_mpJakNoneDone[ni], path) == 0) { already = TRUE; break; }
+				}
+				if (already) {
+					if (self->m_jakBmp[slot]) { ::DeleteObject(self->m_jakBmp[slot]); self->m_jakBmp[slot] = NULL; }
 					_tcsncpy_s(self->m_jakKey[slot], path, _TRUNCATE);
-					self->m_jakBmp[slot] = hbD;
+					self->m_jakBmp[slot] = NULL;
 					self->m_jakTick[slot] = now;
 					self->m_jakRow[slot] = pcIdx;
-					anyDisk = TRUE;
-					disk.Destroy();
 					continue;
 				}
-				mem0.DeleteDC();
-				disk.Destroy();
-			}
-		}
-
-		// 確定済み.none → 枠なしsentinelを即セット(再抽出は allowExtract 側)
-		if (!diskNone.IsEmpty() && ::PathFileExists(diskNone)) {
-			BOOL already = FALSE;
-			for (int ni = 0; ni < s_mpJakNoneDoneN; ++ni) {
-				if (_tcsicmp(s_mpJakNoneDone[ni], path) == 0) { already = TRUE; break; }
-			}
-			if (already) {
-				if (self->m_jakBmp[slot]) { ::DeleteObject(self->m_jakBmp[slot]); self->m_jakBmp[slot] = NULL; }
-				_tcsncpy_s(self->m_jakKey[slot], path, _TRUNCATE);
-				self->m_jakBmp[slot] = NULL;
-				self->m_jakTick[slot] = now;
-				self->m_jakRow[slot] = pcIdx;
-				continue;
 			}
 		}
 	}
@@ -233,6 +390,7 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract)
 	}
 
 	if (!allowExtract || !og) return;
+	if (InterlockedCompareExchange(&self->m_jakBusy, 1, 0) != 0) return;
 
 	for (int disp = top; disp < top + page && disp < nDisp; ++disp) {
 		const int pcIdx = MpDispToPc(self, disp);
@@ -240,29 +398,22 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract)
 		const TCHAR* path = pl->pc[pcIdx].fol;
 		if (!path || !path[0]) continue;
 
-		int hit = -1, freeSlot = -1, lruSlot = 0;
-		DWORD lruTick = 0xFFFFFFFF;
+		int hit = -1;
 		for (int i = 0; i < CMediaPlayerDlg::kMpJakN; ++i) {
 			if (self->m_jakKey[i][0] && _tcsicmp(self->m_jakKey[i], path) == 0) {
 				hit = i;
 				break;
 			}
-			if (!self->m_jakKey[i][0] && freeSlot < 0) freeSlot = i;
-			if (self->m_jakTick[i] < lruTick) { lruTick = self->m_jakTick[i]; lruSlot = i; }
 		}
 		if (hit >= 0) continue;
-
-		int slot = (freeSlot >= 0) ? freeSlot : lruSlot;
-		if (self->m_jakBmp[slot]) {
-			::DeleteObject(self->m_jakBmp[slot]);
-			self->m_jakBmp[slot] = NULL;
+		if (self->m_jakPend[0] && _tcsicmp(self->m_jakPend, path) == 0) {
+			InterlockedExchange(&self->m_jakBusy, 0);
+			return;
 		}
-		self->m_jakKey[slot][0] = 0;
 
-		const CString diskBmp = PlJakDiskPath(path, FALSE);
 		const CString diskNone = PlJakDiskPath(path, TRUE);
-
-		if (!diskNone.IsEmpty() && ::PathFileExists(diskNone)) {
+		WIN32_FILE_ATTRIBUTE_DATA fadNone = {};
+		if (!diskNone.IsEmpty() && ::GetFileAttributesEx(diskNone, GetFileExInfoStandard, &fadNone)) {
 			BOOL already = FALSE;
 			for (int ni = 0; ni < s_mpJakNoneDoneN; ++ni) {
 				if (_tcsicmp(s_mpJakNoneDone[ni], path) == 0) { already = TRUE; break; }
@@ -272,101 +423,131 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract)
 				_tcsncpy_s(s_mpJakNoneDone[s_mpJakNoneDoneN++], path, _TRUNCATE);
 		}
 
-		CImage tmp;
+		// 再生中ジャケットの流用は UI で軽いので先にやる
 		extern CString filen;
-		BOOL usedPlaying = FALSE;
 		if (!og->img.IsNull() && og->jx > 0 && filen.GetLength() > 0
 			&& _tcsicmp(path, filen) == 0) {
+			int freeSlot = -1, lruSlot = 0;
+			DWORD lruTick = 0xFFFFFFFF;
+			for (int i = 0; i < CMediaPlayerDlg::kMpJakN; ++i) {
+				if (!self->m_jakKey[i][0] && freeSlot < 0) freeSlot = i;
+				if (self->m_jakTick[i] < lruTick) { lruTick = self->m_jakTick[i]; lruSlot = i; }
+			}
+			int slot = (freeSlot >= 0) ? freeSlot : lruSlot;
 			HDC screen = ::GetDC(NULL);
-			if (!screen) continue;
-			CDC mem; mem.CreateCompatibleDC(CDC::FromHandle(screen));
-			HBITMAP hb0 = ::CreateCompatibleBitmap(screen, px, px);
-			if (hb0) {
-				HGDIOBJ old0 = mem.SelectObject(hb0);
-				mem.FillSolidRect(0, 0, px, px, RGB(240, 240, 245));
-				mem.SetStretchBltMode(COLORONCOLOR);
-				og->img.StretchBlt(mem.GetSafeHdc(), 0, 0, px, px, SRCCOPY);
-				mem.SelectObject(old0);
-				_tcsncpy_s(self->m_jakKey[slot], path, _TRUNCATE);
-				self->m_jakBmp[slot] = hb0;
-				self->m_jakTick[slot] = GetTickCount();
-				self->m_jakRow[slot] = pcIdx;
-				usedPlaying = TRUE;
-				if (!diskBmp.IsEmpty()) {
-					CImage sav;
-					sav.Attach(hb0);
-					sav.Save(diskBmp);
-					sav.Detach();
-					if (!diskNone.IsEmpty()) ::DeleteFile(diskNone);
+			if (screen) {
+				CDC mem; mem.CreateCompatibleDC(CDC::FromHandle(screen));
+				HBITMAP hb0 = ::CreateCompatibleBitmap(screen, px, px);
+				if (hb0) {
+					if (self->m_jakBmp[slot]) { ::DeleteObject(self->m_jakBmp[slot]); self->m_jakBmp[slot] = NULL; }
+					HGDIOBJ old0 = mem.SelectObject(hb0);
+					mem.FillSolidRect(0, 0, px, px, RGB(240, 240, 245));
+					mem.SetStretchBltMode(COLORONCOLOR);
+					og->img.StretchBlt(mem.GetSafeHdc(), 0, 0, px, px, SRCCOPY);
+					mem.SelectObject(old0);
+					_tcsncpy_s(self->m_jakKey[slot], path, _TRUNCATE);
+					self->m_jakBmp[slot] = hb0;
+					self->m_jakTick[slot] = GetTickCount();
+					self->m_jakRow[slot] = pcIdx;
+					const CString diskBmp = PlJakDiskPath(path, FALSE);
+					if (!diskBmp.IsEmpty()) {
+						CImage sav; sav.Attach(hb0);
+						sav.Save(diskBmp, Gdiplus::ImageFormatBMP);
+						sav.Detach();
+						if (!diskNone.IsEmpty()) ::DeleteFile(diskNone);
+					}
+					CRect rIcon;
+					if (self->m_list.GetItemRect(disp, &rIcon, LVIR_BOUNDS)) {
+						rIcon.right = rIcon.left + px + 28;
+						self->m_list.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_NOERASE);
+					}
+					mem.DeleteDC();
+					::ReleaseDC(NULL, screen);
+					InterlockedExchange(&self->m_jakBusy, 0);
+					return;
 				}
-				CRect rIcon;
-				if (self->m_list.GetItemRect(disp, &rIcon, LVIR_BOUNDS)) {
-					rIcon.right = rIcon.left + px + 28;
-					self->m_list.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_NOERASE);
-				}
+				mem.DeleteDC();
+				::ReleaseDC(NULL, screen);
 			}
-			mem.DeleteDC();
-			::ReleaseDC(NULL, screen);
-			if (usedPlaying) return;
 		}
 
-		og->LoadJacket(path, &tmp);
-		_tcsncpy_s(self->m_jakKey[slot], path, _TRUNCATE);
-		self->m_jakTick[slot] = GetTickCount();
-		self->m_jakRow[slot] = pcIdx;
-		if (tmp.IsNull() || tmp.GetWidth() <= 0 || tmp.GetHeight() <= 0) {
-			self->m_jakBmp[slot] = NULL;
-			if (!diskNone.IsEmpty()) {
-				HANDLE hf = ::CreateFile(diskNone, GENERIC_WRITE, FILE_SHARE_READ, NULL,
-					CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-				if (hf != INVALID_HANDLE_VALUE) ::CloseHandle(hf);
-			}
-			if (!diskBmp.IsEmpty()) ::DeleteFile(diskBmp);
-			BOOL marked = FALSE;
-			for (int ni = 0; ni < s_mpJakNoneDoneN; ++ni) {
-				if (_tcsicmp(s_mpJakNoneDone[ni], path) == 0) { marked = TRUE; break; }
-			}
-			if (!marked && s_mpJakNoneDoneN < 256)
-				_tcsncpy_s(s_mpJakNoneDone[s_mpJakNoneDoneN++], path, _TRUNCATE);
+		MpJakJob* job = (MpJakJob*)malloc(sizeof(MpJakJob));
+		if (!job) {
+			InterlockedExchange(&self->m_jakBusy, 0);
 			return;
 		}
-
-		CDC* pDC = self->GetDC();
-		if (!pDC) {
-			tmp.Destroy();
-			self->m_jakBmp[slot] = NULL;
-			return;
+		ZeroMemory(job, sizeof(*job));
+		job->hwnd = self->m_hWnd;
+		job->gen = InterlockedIncrement(&self->m_jakGen);
+		job->pcIdx = pcIdx;
+		job->disp = disp;
+		_tcsncpy_s(job->path, path, _TRUNCATE);
+		_tcsncpy_s(self->m_jakPend, path, _TRUNCATE);
+		if (!AfxBeginThread(MpJakLoadThread, job, THREAD_PRIORITY_BELOW_NORMAL)) {
+			self->m_jakPend[0] = 0;
+			free(job);
+			InterlockedExchange(&self->m_jakBusy, 0);
 		}
-		CDC mem; mem.CreateCompatibleDC(pDC);
-		HBITMAP hb = ::CreateCompatibleBitmap(pDC->GetSafeHdc(), px, px);
-		if (!hb) {
-			self->ReleaseDC(pDC);
-			tmp.Destroy();
-			self->m_jakBmp[slot] = NULL;
-			return;
-		}
-		HGDIOBJ old = mem.SelectObject(hb);
-		mem.FillSolidRect(0, 0, px, px, RGB(240, 240, 245));
-		mem.SetStretchBltMode(COLORONCOLOR);
-		tmp.StretchBlt(mem.GetSafeHdc(), 0, 0, px, px, SRCCOPY);
-		mem.SelectObject(old);
-		mem.DeleteDC();
-		self->ReleaseDC(pDC);
-		tmp.Destroy();
-
-		self->m_jakBmp[slot] = hb;
-		if (!diskBmp.IsEmpty()) {
-			CImage sav;
-			sav.Attach(hb);
-			sav.Save(diskBmp);
-			sav.Detach();
-			if (!diskNone.IsEmpty()) ::DeleteFile(diskNone);
-		}
-		CRect rIcon;
-		if (self->m_list.GetItemRect(disp, &rIcon, LVIR_BOUNDS))
-			self->m_list.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_NOERASE);
 		return;
 	}
+	InterlockedExchange(&self->m_jakBusy, 0);
+}
+
+LRESULT CMediaPlayerDlg::OnJakLoadDone(WPARAM wParam, LPARAM lParam)
+{
+	MpJakJob* job = (MpJakJob*)lParam;
+	m_jakPend[0] = 0;
+	InterlockedExchange(&m_jakBusy, 0);
+	if (!job) return 0;
+	const LONG gen = (LONG)wParam;
+	const BOOL accept = (gen == m_jakGen) && job->path[0];
+	if (accept) {
+		int freeSlot = -1, lruSlot = 0;
+		DWORD lruTick = 0xFFFFFFFF;
+		int hit = -1;
+		for (int i = 0; i < kMpJakN; ++i) {
+			if (m_jakKey[i][0] && _tcsicmp(m_jakKey[i], job->path) == 0) { hit = i; break; }
+			if (!m_jakKey[i][0] && freeSlot < 0) freeSlot = i;
+			if (m_jakTick[i] < lruTick) { lruTick = m_jakTick[i]; lruSlot = i; }
+		}
+		int slot = (hit >= 0) ? hit : ((freeSlot >= 0) ? freeSlot : lruSlot);
+		if (m_jakBmp[slot] && m_jakBmp[slot] != job->hb) {
+			::DeleteObject(m_jakBmp[slot]);
+			m_jakBmp[slot] = NULL;
+		}
+		_tcsncpy_s(m_jakKey[slot], job->path, _TRUNCATE);
+		m_jakBmp[slot] = job->hb;
+		job->hb = NULL;
+		m_jakTick[slot] = GetTickCount();
+		m_jakRow[slot] = job->pcIdx;
+		if (job->noneFlag) {
+			BOOL marked = FALSE;
+			for (int ni = 0; ni < s_mpJakNoneDoneN; ++ni) {
+				if (_tcsicmp(s_mpJakNoneDone[ni], job->path) == 0) { marked = TRUE; break; }
+			}
+			if (!marked && s_mpJakNoneDoneN < 256)
+				_tcsncpy_s(s_mpJakNoneDone[s_mpJakNoneDoneN++], job->path, _TRUNCATE);
+		}
+		for (int ni = 0; ni < s_mpJakNoDiskN; ++ni) {
+			if (_tcsicmp(s_mpJakNoDisk[ni], job->path) == 0) {
+				s_mpJakNoDisk[ni][0] = 0;
+				break;
+			}
+		}
+		if (::IsWindow(m_list.GetSafeHwnd()) && job->disp >= 0) {
+			CRect rIcon;
+			if (m_list.GetItemRect(job->disp, &rIcon, LVIR_BOUNDS)) {
+				rIcon.right = rIcon.left + kMpJakPx + 28;
+				m_list.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_NOERASE);
+			}
+		}
+	}
+	else if (job->hb) {
+		::DeleteObject(job->hb);
+		job->hb = NULL;
+	}
+	free(job);
+	return 0;
 }
 
 static int MpCmpNameAsc(const void* a, const void* b)
@@ -654,6 +835,9 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_missScan = 0;
 	m_missGen = 0;
 	m_missBusy = 0;
+	m_jakGen = 0;
+	m_jakBusy = 0;
+	m_jakPend[0] = 0;
 	ZeroMemory(m_jakBmp, sizeof(m_jakBmp));
 	ZeroMemory(m_jakKey, sizeof(m_jakKey));
 	ZeroMemory(m_jakTick, sizeof(m_jakTick));
@@ -762,7 +946,12 @@ void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
 	MpDdxControl(pDX, IDC_MP_SAVEMP3, m_savemp3);
 	MpDdxControl(pDX, IDC_MP_SAVEDS, m_saveds);
 	MpDdxControl(pDX, IDC_MP_SAVEWAV, m_savewav);
+	MpDdxControl(pDX, IDC_MP_MICMIX, m_micmix);
+	MpDdxControl(pDX, IDC_MP_MICLEV, m_miclev);
+	MpDdxControl(pDX, IDC_MP_MICLEV_L, m_miclevL);
 	MpDdxControl(pDX, IDC_MP_SAVEPARAM, m_saveparam);
+	MpDdxControl(pDX, IDC_MP_RECORD, m_record);
+	MpDdxControl(pDX, IDC_MP_CAPTURE, m_capture);
 	MpDdxControl(pDX, IDC_MP_RESETDATA, m_resetdata);
 	MpDdxControl(pDX, IDC_MP_KAISUU_L, m_kaisuuL);
 	MpDdxControl(pDX, IDC_MP_KAISUU, m_kaisuu);
@@ -823,6 +1012,10 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_SAVEMP3, &CMediaPlayerDlg::OnSaveMp3)
 	ON_BN_CLICKED(IDC_MP_SAVEDS, &CMediaPlayerDlg::OnSaveDs)
 	ON_BN_CLICKED(IDC_MP_SAVEWAV, &CMediaPlayerDlg::OnSaveWav)
+	ON_BN_CLICKED(IDC_MP_MICMIX, &CMediaPlayerDlg::OnMicMix)
+	ON_NOTIFY(NM_RELEASEDCAPTURE, IDC_MP_MICLEV, &CMediaPlayerDlg::OnMicLevRelease)
+	ON_BN_CLICKED(IDC_MP_RECORD, &CMediaPlayerDlg::OnRecord)
+	ON_BN_CLICKED(IDC_MP_CAPTURE, &CMediaPlayerDlg::OnCapture)
 	ON_BN_CLICKED(IDC_MP_SAVEPARAM, &CMediaPlayerDlg::OnSaveParam)
 	ON_BN_CLICKED(IDC_MP_RESETDATA, &CMediaPlayerDlg::OnResetData)
 	ON_EN_KILLFOCUS(IDC_MP_KAISUU, &CMediaPlayerDlg::OnKaisuuKillFocus)
@@ -851,6 +1044,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_SPEANA_WAVE, &CMediaPlayerDlg::OnSpeanaStyleWave)
 	ON_COMMAND(ID_MP_OPEN_ANALYZER, &CMediaPlayerDlg::OnAnalyzer)
 	ON_COMMAND(ID_MP_OPEN_PIANOROLL, &CMediaPlayerDlg::OnPiano)
+	ON_COMMAND(ID_MP_REFRESH_JACKET, &CMediaPlayerDlg::OnRefreshJacket)
 	ON_NOTIFY(TVN_SELCHANGED, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeSel)
 	ON_NOTIFY(TVN_ITEMEXPANDING, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeExpanding)
 	ON_NOTIFY(TVN_BEGINDRAG, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeBeginDrag)
@@ -878,6 +1072,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_MESSAGE(WM_MP_INFO_SCROLL, &CMediaPlayerDlg::OnInfoScrollTick)
 	ON_MESSAGE(WM_MP_PLSEL_EXPAND, &CMediaPlayerDlg::OnPlselExpandPopup)
 	ON_MESSAGE(WM_MP_MISS_DONE, &CMediaPlayerDlg::OnMissScanDone)
+	ON_MESSAGE(WM_MP_JAK_DONE, &CMediaPlayerDlg::OnJakLoadDone)
 	ON_MESSAGE(WM_MP_LIB_BUILD, &CMediaPlayerDlg::OnLibBuildLazy)
 	ON_WM_NCACTIVATE()
 	ON_WM_SYSCOMMAND()
@@ -1150,6 +1345,10 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_savemp3.SetWindowText(LL14(L"途中保存", L"Resume save", L"Reprise", L"Ripresa", L"Reanudar", L"위치저장", L"续播保存", L"حفظ الموضع", L"Позиция", L"Position", L"Retomar", L"Hervatten", L"Wznowienie", L"Konum kaydet"));
 	m_saveds.SetWindowText(LL14(L"DShow途中保存", L"DShow resume", L"DShow reprise", L"DShow ripresa", L"DShow reanudar", L"DShow 위치저장", L"DShow续播", L"حفظ موضع DShow", L"DShow позиция", L"DShow Position", L"DShow retomar", L"DShow hervat", L"DShow wznow", L"DShow sürdür"));
 	m_savewav.SetWindowText(LL14(L"WAVファイルへ保存", L"Save to WAV file", L"Enregistrer en WAV", L"Salva come WAV", L"Guardar como WAV", L"WAV 파일로 저장", L"保存到WAV文件", L"حفظ كـ WAV", L"Сохранить в WAV", L"Als WAV speichern", L"Salvar como WAV", L"Opslaan als WAV", L"Zapisz jako WAV", L"WAV olarak kaydet"));
+	m_micmix.SetWindowText(LL14(L"マイクミックス", L"Mic mix", L"Mix micro", L"Mix microfono", L"Mezcla micro", L"마이크 믹스", L"麦克风混音", L"مزج الميكروفون", L"Микс микрофона", L"Mikrofon-Mix", L"Mix microfone", L"Mic-mix", L"Mix mikrofonu", L"Mikrofon karışımı"));
+	m_miclevL.SetWindowText(LL14(L"マイク", L"Mic", L"Micro", L"Micro", L"Micro", L"마이크", L"麦克风", L"ميكروفون", L"Микрофон", L"Mikrofon", L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"));
+	m_record.SetWindowText(LL14(L"録音", L"Record", L"Enreg.", L"Registra", L"Grabar", L"녹음", L"录音", L"تسجيل", L"Запись", L"Aufnahme", L"Gravar", L"Opnemen", L"Nagraj", L"Kaydet"));
+	m_capture.SetWindowText(LL14(L"キャプチャ", L"Capture", L"Capture", L"Cattura", L"Captura", L"캡처", L"捕获", L"التقاط", L"Захват", L"Aufnahme", L"Captura", L"Opname", L"Przechwyt", L"Yakala"));
 	m_saveparam.SetWindowText(LL14(L"曲ごとに設定保存", L"Save per-song", L"Réglages/morceau", L"Impost. per brano", L"Ajustes por pista", L"곡별 설정 저장", L"逐曲保存设置", L"حفظ لكل أغنية", L"Настройки на трек", L"Pro Titel speichern", L"Config. por faixa", L"Per nummer opslaan", L"Ustaw. na utwor", L"Parça başına kaydet"));
 	m_resetdata.SetWindowText(LL14(L"保存をリセット", L"Reset saved", L"Réinitialiser", L"Reimposta salvati", L"Restablecer", L"저장 초기화", L"重置已存", L"إعادة تعيين", L"Сброс сохран.", L"Zurücksetzen", L"Redefinir", L"Reset opgeslagen", L"Resetuj zapis", L"Kayıtı sıfırla"));
 	m_kaisuuL.SetWindowText(LL14(L"ループ回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop", L"Cuenta de bucle", L"루프 횟수", L"循环次数", L"عدد الحلقات", L"Количество повторов", L"Schleifenzahler", L"Contagem de loop", L"Loopaantal", L"Liczba petli", L"Dongu sayisi"));
@@ -1244,6 +1443,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_list.m_mpJacketPx = kMpJakPx;
 	m_list.m_mpJacketGet = MpJacketGetCb;
 	m_list.m_mpJacketCtx = this;
+	m_list.m_mpNoteIconGet = MpNoteIconGetCb;
 	m_list.InsertColumn(0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, (int)(220 * hD2));
 	m_list.InsertColumn(1, L"★", LVCFMT_CENTER, (int)(20 * hD2)); // 曲ごと設定の有無(中央寄せ・余白最小)
 	m_list.InsertColumn(2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, (int)(60 * hD2));
@@ -1359,6 +1559,17 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 
 	m_vol.SetRange(0, 100);
 	m_vol.SetPos(100);
+	if (m_miclev.GetSafeHwnd()) {
+		m_miclev.SetRange(0, 200);
+		int lv = savedata.mic_mix_level;
+		if (lv < 0) lv = 0;
+		if (lv > 200) lv = 200;
+		m_miclev.SetPos(lv);
+	}
+	if (m_micmix.GetSafeHwnd())
+		m_micmix.SetCheck(savedata.mic_mix ? BST_CHECKED : BST_UNCHECKED);
+	if (m_micmix.GetSafeHwnd()) m_micmix.SetFont(&m_fontChk, TRUE);
+	if (m_miclevL.GetSafeHwnd()) m_miclevL.SetFont(&m_fontChk, TRUE);
 
 	// 初期座標: 保存座標があればそれ、なければファルコム画面の位置・プレイリストの大きさ
 	{
@@ -1482,6 +1693,10 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_savemp3, LL14(L"内蔵音源の再生時に途中保存を有効にします。", L"Enable resume save for built-in audio formats.", L"Reprise pour les formats audio integres.", L"Ripresa per i formati audio interni.", L"Reanudar para formatos de audio internos.", L"내장 음원 재생 시 위치 저장.", L"内置音源续播保存。", L"حفظ موضع للصيغ الصوتية المدمجة.", L"Сохранение позиции для встроенных форматов.", L"Position fur eingebaute Audioformate speichern.", L"Retomar formatos de audio internos.", L"Hervatten voor ingebouwde audio.", L"Wznawianie wbudowanych formatow.", L"Dahili ses formatlari icin konum kaydi."));
 	addTip(m_saveds, LL14(L"DirectShow(動画等)で途中保存を有効にします。", L"Enable resume save for DirectShow.", L"Reprise pour DirectShow.", L"Ripresa per DirectShow.", L"Reanudar para DirectShow.", L"DirectShow 위치 저장.", L"DirectShow续播保存。", L"حفظ موضع DirectShow.", L"Сохранение позиции DirectShow.", L"DirectShow-Position.", L"Retomar DirectShow.", L"DirectShow hervatten.", L"Wznawianie DirectShow.", L"DirectShow surdurme."));
 	addTip(m_savewav, LL14(L"再生中の音声をWAVファイルへ保存します。", L"Save playback audio to a WAV file.", L"Enregistrer l'audio en WAV.", L"Salva l'audio in WAV.", L"Guardar audio en WAV.", L"재생 음을 WAV로 저장.", L"将播放音频保存为WAV。", L"حفظ الصوت كـ WAV.", L"Сохранить звук в WAV.", L"Audio als WAV speichern.", L"Salvar audio em WAV.", L"Audio opslaan als WAV.", L"Zapis audio jako WAV.", L"Sesi WAV olarak kaydet."));
+	addTip(m_micmix, LL14(L"WAV保存ONのとき、マイクの音を再生PCMにミックスして書き出します。", L"When Save WAV is on, mix microphone into the saved PCM.", L"Si Sauver WAV est ON, mixer le micro dans le PCM.", L"Con Salva WAV attivo, mixa il microfono nel PCM.", L"Con Guardar WAV activo, mezcla el micro en el PCM.", L"WAV 저장 ON일 때 마이크를 PCM에 믹스합니다.", L"WAV保存开启时，将麦克风混入保存的PCM。", L"عند حفظ WAV، امزج الميكروفون في PCM.", L"При сохранении WAV микшировать микрофон в PCM.", L"Bei WAV-Speichern Mikrofon in PCM mischen.", L"Com Salvar WAV, misturar microfone no PCM.", L"Bij WAV-opslaan microfoon in PCM mixen.", L"Przy zapisie WAV zmiksuj mikrofon do PCM.", L"WAV kaydı açıkken mikrofonu PCM'e karıştır."));
+	addTip(m_miclev, LL14(L"マイクのミックスレベル(0〜200%)。端末は設定画面で選択。", L"Mic mix level (0-200%). Device is selected in Settings.", L"Niveau mix micro (0-200%). Périphérique dans Paramètres.", L"Livello mix micro (0-200%). Dispositivo in Impostazioni.", L"Nivel mix micro (0-200%). Dispositivo en Ajustes.", L"마이크 믹스 레벨(0~200%). 장치는 설정에서 선택.", L"麦克风混音电平(0–200%)。设备在设置中选择。", L"مستوى مزج الميكروفون (0-200%). الجهاز من الإعدادات.", L"Уровень микса (0–200%). Устройство — в настройках.", L"Mikrofon-Mixpegel (0–200%). Gerät in den Einstellungen.", L"Nível de mix (0-200%). Dispositivo em Configurações.", L"Microfoon-mixniveau (0-200%). Apparaat in Instellingen.", L"Poziom miksu (0–200%). Urządzenie w Ustawieniach.", L"Mikrofon karışım seviyesi (0-200%). Aygıt Ayarlar'da."));
+	addTip(m_record, LL14(L"他デバイスの音を録音して WAV/mp3/FLAC を作ります。", L"Record other device audio to WAV/mp3/FLAC.", L"Enregistrer l'audio d'un autre périphérique en WAV/mp3/FLAC.", L"Registra audio da altro dispositivo in WAV/mp3/FLAC.", L"Grabar audio de otro dispositivo a WAV/mp3/FLAC.", L"다른 장치 음을 WAV/mp3/FLAC로 녹음.", L"录制其他设备音频为 WAV/mp3/FLAC。", L"تسجيل صوت جهاز آخر إلى WAV/mp3/FLAC.", L"Запись звука другого устройства в WAV/mp3/FLAC.", L"Audio eines anderen Geräts als WAV/mp3/FLAC aufnehmen.", L"Gravar áudio de outro dispositivo em WAV/mp3/FLAC.", L"Audio van ander apparaat opnemen als WAV/mp3/FLAC.", L"Nagraj dźwięk innego urządzenia do WAV/mp3/FLAC.", L"Başka aygıt sesini WAV/mp3/FLAC olarak kaydet."));
+	addTip(m_capture, LL14(L"画面と音声をキャプチャします（プレビュー付き）。", L"Capture screen and audio (with preview).", L"Capturer l'écran et l'audio (avec aperçu).", L"Cattura schermo e audio (con anteprima).", L"Capturar pantalla y audio (con vista previa).", L"화면과 음성을 캡처합니다(미리보기 포함).", L"捕获画面与音频（含预览）。", L"التقاط الشاشة والصوت (مع معاينة).", L"Захват экрана и звука (с предпросмотром).", L"Bildschirm und Audio aufnehmen (mit Vorschau).", L"Capturar tela e áudio (com prévia).", L"Scherm en audio opnemen (met voorbeeld).", L"Przechwyć ekran i dźwięk (z podglądem).", L"Ekran ve sesi yakala (önizlemeli)."));
 	addTip(m_saveparam, LL14(L"曲ごとに音量・EQ・テンポ等の全パラメータを記憶し、その曲を再生する度に自動で復元します。", L"Remember all parameters (volume, EQ, tempo, etc.) per song and auto-restore them each time the song plays.", L"Memoriser tous les parametres par morceau et les restaurer automatiquement.", L"Memorizza tutti i parametri per brano e li ripristina automaticamente.", L"Recuerda todos los parametros por pista y los restaura automaticamente.", L"곡별로 볼륨·EQ·템포 등 모든 파라미터를 기억하고 재생할 때마다 자동 복원합니다.", L"逐曲记忆音量、EQ、速度等所有参数，每次播放该曲时自动恢复。", L"تذكر كل المعلمات لكل أغنية واستعادتها تلقائيًا.", L"Запоминать все параметры для каждого трека и восстанавливать автоматически.", L"Alle Parameter pro Titel merken und automatisch wiederherstellen.", L"Memoriza todos os parametros por faixa e restaura automaticamente.", L"Onthoud alle parameters per nummer en herstel automatisch.", L"Zapamietaj wszystkie parametry na utwor i przywracaj automatycznie.", L"Her parça için tüm parametreleri hatırla ve otomatik geri yükle."));
 	addTip(m_resetdata, LL14(L"曲ごとに保存した設定を全削除し、音量50%・拡張100%・EQ等を初期状態へ戻します。", L"Delete all per-song saved settings and reset volume to 50%, ext to 100%, EQ etc. to defaults.", L"Supprimer tous les reglages par morceau et reinitialiser les parametres.", L"Elimina tutte le impostazioni per brano e ripristina i parametri.", L"Elimina todos los ajustes por pista y restablece los parametros.", L"곡별 저장 설정을 모두 삭제하고 볼륨 50%·확장 100%·EQ 등을 초기화합니다.", L"删除所有逐曲保存的设置，并将音量重置为50%、扩展100%、EQ等为默认。", L"حذف كل الإعدادات المحفوظة لكل أغنية وإعادة الضبط.", L"Удалить все сохранённые настройки треков и сбросить параметры.", L"Alle pro-Titel-Einstellungen loeschen und Parameter zuruecksetzen.", L"Excluir todas as configuracoes por faixa e redefinir os parametros.", L"Verwijder alle per-nummer-instellingen en reset de parameters.", L"Usun wszystkie ustawienia na utwor i zresetuj parametry.", L"Tum parca ayarlarini sil ve parametreleri sifirla."));
 	addTip(m_kaisuu, LL14(L"連続再生時、指定回数ループしたら次の曲へ進みます。", L"During continuous play, advance after this many loops.", L"En lecture continue, passer apres ce nombre de boucles.", L"In riproduzione continua, avanza dopo questo numero di loop.", L"En reproduccion continua, avanzar tras este numero de bucles.", L"연속 재생 시 지정 횟수만큼 반복 후 다음 곡.", L"连续播放时，循环指定次数后进入下一首。", L"في التشغيل المستمر، الانتقال بعد هذا العدد من الحلقات.", L"При непрерывном воспроизведении перейти после стольких повторов.", L"Bei Dauerwiedergabe nach so vielen Schleifen weiter.", L"Na reproducao continua, avancar apos este numero de loops.", L"Bij doorlopend afspelen na dit aantal loops verder.", L"Przy ciaglym odtwarzaniu przejdz po tylu petlach.", L"Surekli calmada bu dongu sayisindan sonra ilerle."));
@@ -1783,6 +1998,7 @@ void CMediaPlayerDlg::DoLayout()
 	if (W < 32 || H < 32) return;   // 初期化途中の極小クライアントでは触らない
 	const float s = hD2;
 	const int M = (int)(10 * s);             // マージン
+	const int topM = M + CCC_GetCustomCaptionHeight(m_hWnd);
 
 	// 上部: ビジュアライザ(スペアナ+ジャケ+時間)の帯。
 	// アスペクト比(MP_SRCW:MP_SRCH)を保ったまま、高さを上限に抑えて幅を決める。
@@ -1821,18 +2037,18 @@ void CMediaPlayerDlg::DoLayout()
 		// ジャケ+バナーのみ: 左右に余白を均等配分して塊を中央寄せ(空白を最小化)
 		int pad = remainFree / 2;
 		int jacketX = M + pad;
-		m_jacketRect.SetRect(jacketX, M, jacketX + jacketSide, M + bannerH);
+		m_jacketRect.SetRect(jacketX, topM, jacketX + jacketSide, topM + bannerH);
 		bannerX = jacketX + leftZone;
 	}
 	else {
 		// ジャケ(左端)+ バナー + 情報パネル(右端まで)で余白を埋め切る
 		int jacketX = M;
-		m_jacketRect.SetRect(jacketX, M, jacketX + jacketSide, M + bannerH);
+		m_jacketRect.SetRect(jacketX, topM, jacketX + jacketSide, topM + bannerH);
 		bannerX = jacketX + leftZone;
 		int infoX = bannerX + bannerW + sideGap;
-		m_infoPanelRect.SetRect(infoX, M, M + avail, M + bannerH);
+		m_infoPanelRect.SetRect(infoX, topM, M + avail, topM + bannerH);
 	}
-	m_bannerRect.SetRect(bannerX, M, bannerX + bannerW, M + bannerH);
+	m_bannerRect.SetRect(bannerX, topM, bannerX + bannerW, topM + bannerH);
 
 	// og の timerp 側: ジャケットを左へ分離している間はバナー内蔵ジャケ描画を抑止
 	// （ホバー前面化アルファも不要なので、分離中はバナーホバーも落とす）
@@ -1845,7 +2061,7 @@ void CMediaPlayerDlg::DoLayout()
 
 	// ===== 情報グループ(歌詞5行 or 歌詞3行+OS/CPU) + 拡大時はカラオケ風ビュー =====
 	// 歌詞有無で中身は切替えるが、枠の高さは固定(5行分)＋拡大分にしてプレイリスト位置が暴れないようにする。
-	int infoTop = M + bannerH + (int)(2 * s);
+	int infoTop = topM + bannerH + (int)(2 * s);
 	int ix = M + gPad, iw = W - M * 2 - gPad * 2;
 	if (iw < 1) iw = 1;
 	int y = infoTop + gTitle;
@@ -2207,9 +2423,12 @@ void CMediaPlayerDlg::DoLayout()
 	int swH = (int)(22 * s);
 	int listY = by4 + tbH + toolsH + (int)(4 * s);
 	const int botY = H - swH - M + (int)(2 * s);
+	const int micRowH = chkRowH + (int)(2 * s);
 	const int ckY = botY - (int)(8 * s) - chkRowH;
-	int listH = ckY - (int)(3 * s) - listY;
-	if (listH < (int)(50 * s)) listH = (int)(50 * s);
+	const int micY = ckY - micRowH;
+	int listH = micY - (int)(3 * s) - listY;
+	// 下限で押し広げるとマイク行に食い込み末尾が黒く潰れるので、空きが足りないときは縮めるだけ
+	if (listH < 1) listH = 1;
 
 	// ===== ライブラリ/履歴 左ドロワー(排他) =====
 	// 閉: 縦に Lib/Hist。開: ヘッダ1行に横並び(被り防止) + その下に本体。
@@ -2398,6 +2617,16 @@ void CMediaPlayerDlg::DoLayout()
 		cdc.SelectObject(pOldChkF);
 
 	int ckx = M + gPad;
+	// マイクミックス行(チェック帯の直上)。端末選択は設定(CRender)
+	{
+		int mx = M + gPad;
+		const int micChkW = (int)(120 * s);
+		const int micLabW = (int)(40 * s);
+		const int micSlW = (int)(120 * s);
+		MoveCtl(&m_micmix, mx, micY, micChkW, chkRowH); mx += micChkW + gapCk;
+		MoveCtl(&m_miclevL, mx, micY, micLabW, chkRowH); mx += micLabW + (int)(2 * s);
+		MoveCtl(&m_miclev, mx, micY, micSlW, chkRowH);
+	}
 	MoveCtl(&m_tip, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
 	MoveCtl(&m_mini, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
 	MoveCtl(&m_savemp3, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
@@ -2407,11 +2636,16 @@ void CMediaPlayerDlg::DoLayout()
 	int plBottom = ckY + chkRowH + gPad;
 	MoveCtl(&m_grpPl, M, plTop, W - M * 2, plBottom - plTop);
 
-	// 最下部: 切替(左) / 保存リセット(切替の右) / 終了(右)  ※ジャケは操作行へ移動済み
-	int swW = (int)(140 * s);
+	// 最下部: 切替 / 保存リセット / 録音 / キャプチャ / 終了
+	int swW = (int)(120 * s);
 	MoveCtl(&m_switch, M, botY, swW, swH);
-	int rsW = (int)(120 * s);
-	MoveCtl(&m_resetdata, M + swW + (int)(6 * s), botY, rsW, swH);
+	int rsW = (int)(100 * s);
+	bx = M + swW + (int)(6 * s);
+	MoveCtl(&m_resetdata, bx, botY, rsW, swH); bx += rsW + (int)(6 * s);
+	int recW = (int)(64 * s);
+	MoveCtl(&m_record, bx, botY, recW, swH); bx += recW + (int)(6 * s);
+	int capW = (int)(80 * s);
+	MoveCtl(&m_capture, bx, botY, capW, swH);
 	int exW = (int)(80 * s);
 	MoveCtl(&m_exit, W - M - exW, botY, exW, swH);
 
@@ -2655,6 +2889,7 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 	int cnt = m_filtOn ? m_fcnt : pl->playcnt;
 
 	// 件数変化 or 強制(並べ替え/タグ更新/追加削除)時に範囲を再設定。
+	const int prevCount = m_lastCount;
 	if (bForce || cnt != m_lastCount) {
 		if (bForce || (pl->playcnt != m_missCap)) {
 			// 実体 PL が変わったら欠損フラグを再走査
@@ -2688,7 +2923,8 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 			return;
 		}
 		r.right = r.left + kMpJakPx + 42;
-		m_list.RedrawWindow(&r, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+		// UPDATENOW 禁止: スクロール中の Opaque 描画と競合し名前列だけ黒ちらつきする
+		m_list.RedrawWindow(&r, NULL, RDW_INVALIDATE | RDW_NOERASE);
 	};
 	if (pntDisp != m_lastPlcnt) {
 		if (m_lastPlcnt >= 0 && m_lastPlcnt < cnt) redrawNoteStrip(m_lastPlcnt);
@@ -2705,8 +2941,9 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 
 	FollowPlayingRow();   // ♪ 行へカーソル追従(曲変化時のみ)
 	UpdateEmptyStateUi();
-	// キャッシュ済みサムネはリスト更新の時点で可視分を載せる(250ms待ちしない)
-	MpJacketLoadVisible(this, FALSE);
+	// ディスク済ジャケは PL 変更/初回で一括メモリ化。未抽出のみ OnTimer で1件ずつ。
+	if (bForce || cnt != prevCount)
+		MpJacketLoadVisible(this, FALSE, TRUE);
 }
 
 void CMediaPlayerDlg::NotifyPlayIconChanged()
@@ -2729,7 +2966,8 @@ void CMediaPlayerDlg::NotifyPlayIconChanged()
 			return;
 		}
 		r.right = r.left + kMpJakPx + 42;
-		m_list.RedrawWindow(&r, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+		// UPDATENOW 禁止(名前列の Opaque 描画と競合してちらつく)
+		m_list.RedrawWindow(&r, NULL, RDW_INVALIDATE | RDW_NOERASE);
 	};
 	if (disp != m_lastPlcnt) {
 		if (m_lastPlcnt >= 0 && m_lastPlcnt < nDisp)
@@ -2779,7 +3017,7 @@ void CMediaPlayerDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 		}
 	}
 	if (di->item.mask & LVIF_IMAGE)
-		di->item.iImage = d.icon;
+		di->item.iImage = 1; // 空: 既定ILの♪先描きを抑止(自前CDで描く)
 }
 
 void CMediaPlayerDlg::OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult)
@@ -3028,6 +3266,15 @@ void CMediaPlayerDlg::SyncFromMain()
 		v1 = og->m_c2.GetCheck() ? 1 : 0;
 		if (m_savewav.GetCheck() != v1) m_savewav.SetCheck(v1);
 
+		v1 = savedata.mic_mix ? 1 : 0;
+		if (m_micmix.GetSafeHwnd() && m_micmix.GetCheck() != v1) m_micmix.SetCheck(v1);
+		if (m_miclev.GetSafeHwnd() && GetFocus() != (CWnd*)&m_miclev) {
+			int lv = savedata.mic_mix_level;
+			if (lv < 0) lv = 0;
+			if (lv > 200) lv = 200;
+			if (m_miclev.GetPos() != lv) m_miclev.SetPos(lv);
+		}
+
 		v1 = savedata.saveSongParams ? 1 : 0;
 		if (m_saveparam.GetSafeHwnd() && m_saveparam.GetCheck() != v1) m_saveparam.SetCheck(v1);
 
@@ -3195,6 +3442,12 @@ static UINT AFX_CDECL MpMissScanThread(LPVOID p)
 	if (!job) return 0;
 	for (int i = 0; i < job->count; ++i) {
 		const TCHAR* fol = job->fols + (size_t)i * 1024;
+		// ディスクキャッシュ読込もワーカ側(UIで全曲 CreateFile しない)
+		const int cached = PlMissDiskGet(fol);
+		if (cached == 0) {
+			job->result[i] = 0;
+			continue;
+		}
 		job->result[i] = PlTrackLooksMissing(job->subs[i], fol) ? 1 : 0;
 		PlMissDiskSet(fol, job->result[i] ? 1 : 0);
 	}
@@ -3213,7 +3466,9 @@ static UINT AFX_CDECL MpMissScanThread(LPVOID p)
 void CMediaPlayerDlg::StopMissScan()
 {
 	InterlockedIncrement(&m_missGen);
-	// 稼働中スレッドは古い gen の結果を OnMissScanDone で破棄する
+	InterlockedIncrement(&m_jakGen);
+	m_jakPend[0] = 0;
+	// 稼働中スレッドは古い gen の結果を OnMissScanDone / OnJakLoadDone で破棄する
 }
 
 void CMediaPlayerDlg::KickMissScan()
@@ -3242,66 +3497,29 @@ void CMediaPlayerDlg::KickMissScan()
 	if (m_missScan >= n) return;
 	if (InterlockedCompareExchange(&m_missBusy, 1, 0) != 0) return;
 
-	// ディスクキャッシュを先に載せ、⚠(欠損)と未登録だけ実 PathFileExists する。
-	// 存在確定済みは毎回見ない。起動時は⚠だけ再走査して消す。
-	int* needIdx = (int*)malloc(sizeof(int) * (size_t)n);
-	int needN = 0;
-	if (!needIdx) {
-		InterlockedExchange(&m_missBusy, 0);
-		return;
-	}
-	for (int i = 0; i < n; ++i) {
-		const TCHAR* fol = pl->pc[i].fol;
-		const int cached = PlMissDiskGet(fol);
-		if (cached == 0) {
-			m_miss[i] = 0;
-			continue;
-		}
-		if (cached == 1) {
-			m_miss[i] = 1; // 仮。再走査で消えるかも
-			needIdx[needN++] = i;
-			continue;
-		}
-		// 未キャッシュ
-		m_miss[i] = 0;
-		needIdx[needN++] = i;
-	}
-	if (needN <= 0) {
-		free(needIdx);
-		m_missScan = n;
-		InterlockedExchange(&m_missBusy, 0);
-		if (::IsWindow(m_list.GetSafeHwnd()))
-			m_list.Invalidate(FALSE);
-		return;
-	}
-
-	// ディスクから載せた⚠/非⚠を先に出してから、要再走査分だけ裏で確認
-	if (::IsWindow(m_list.GetSafeHwnd()))
-		m_list.Invalidate(FALSE);
-
+	// UI では PlMissDiskGet しない。全曲スナップショットをワーカへ渡す。
 	MpMissJob* job = (MpMissJob*)malloc(sizeof(MpMissJob));
 	if (!job) {
-		free(needIdx);
 		InterlockedExchange(&m_missBusy, 0);
 		return;
 	}
 	ZeroMemory(job, sizeof(*job));
 	job->hwnd = m_hWnd;
 	job->gen = InterlockedIncrement(&m_missGen);
-	job->count = needN;
-	job->indices = needIdx;
-	job->subs = (int*)malloc(sizeof(int) * (size_t)needN);
-	job->fols = (TCHAR*)malloc(sizeof(TCHAR) * 1024 * (size_t)needN);
-	job->result = (char*)malloc((size_t)needN);
-	if (!job->subs || !job->fols || !job->result) {
+	job->count = n;
+	job->indices = (int*)malloc(sizeof(int) * (size_t)n);
+	job->subs = (int*)malloc(sizeof(int) * (size_t)n);
+	job->fols = (TCHAR*)malloc(sizeof(TCHAR) * 1024 * (size_t)n);
+	job->result = (char*)malloc((size_t)n);
+	if (!job->indices || !job->subs || !job->fols || !job->result) {
 		free(job->indices); free(job->subs); free(job->fols); free(job->result); free(job);
 		InterlockedExchange(&m_missBusy, 0);
 		return;
 	}
-	for (int k = 0; k < needN; ++k) {
-		const int i = needIdx[k];
-		job->subs[k] = pl->pc[i].sub;
-		_tcsncpy_s(job->fols + (size_t)k * 1024, 1024, pl->pc[i].fol, _TRUNCATE);
+	for (int i = 0; i < n; ++i) {
+		job->indices[i] = i;
+		job->subs[i] = pl->pc[i].sub;
+		_tcsncpy_s(job->fols + (size_t)i * 1024, 1024, pl->pc[i].fol, _TRUNCATE);
 	}
 	if (!AfxBeginThread(MpMissScanThread, job, THREAD_PRIORITY_BELOW_NORMAL)) {
 		free(job->indices); free(job->subs); free(job->fols); free(job->result); free(job);
@@ -3326,6 +3544,9 @@ LRESULT CMediaPlayerDlg::OnMissScanDone(WPARAM wParam, LPARAM lParam)
 		m_missScan = pl->playcnt;
 		if (::IsWindow(m_list.GetSafeHwnd()))
 			m_list.Invalidate(FALSE);
+		// プレイリスト窓の⚠も同じ結果を参照するため再描画
+		if (pl && ::IsWindow(pl->m_lc.GetSafeHwnd()))
+			pl->m_lc.Invalidate(FALSE);
 	}
 	else {
 		// PL が変わっていたら次の Kick でやり直す
@@ -3351,8 +3572,8 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		RefreshList(FALSE);
 		// 欠損判定はワーカスレッド(KickMissScan)。UI で PathFileExists しない。
 		KickMissScan();
-		// ジャケット: ディスク済は即時一括、未抽出のみ1件/tick
-		MpJacketLoadVisible(this, TRUE);
+		// ジャケット: ディスク済は RefreshList で一括済。ここでは未抽出1件/tick + 可視の補充
+		MpJacketLoadVisible(this, TRUE, FALSE);
 		// 起動直後に裏画面が残る対策: メディアプレイヤーモード中は必ず隠す(監視)
 		EnforceFalcomHidden();
 		// 描画タイマー(2)は 60fps 固定。更新頻度の律速は og 側(ms2カウンタ)が行うため、
@@ -3416,7 +3637,7 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 				RestoreListScrollAnchor(anchor);    // SetItemCount で先頭へ戻るのを防ぐ
 			}
 			m_list.RedrawWindow(NULL, NULL,
-				RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
+				RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW | RDW_ERASE);
 		}
 		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
@@ -3557,7 +3778,17 @@ void CMediaPlayerDlg::BlitVisualizer(CDC* pDC)
 	::SetBrushOrgEx(m_memBanner.GetSafeHdc(), 0, 0, NULL);
 	::StretchBlt(m_memBanner.GetSafeHdc(), 0, 0, dw, dh, dc.GetSafeHdc(), 0, 0, MP_SRCW, MP_SRCH, SRCCOPY);
 	::SetStretchBltMode(m_memBanner.GetSafeHdc(), oldMode);
-	::BitBlt(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, dw, dh, m_memBanner.GetSafeHdc(), 0, 0, SRCCOPY);
+#if CCUSTOM_AERO_SUPPORT
+	// キャプションのみアクリル: ホスト α 上では素 BitBlt が全透過になる
+	if (CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11() && !CCC_IsAeroEnabled()) {
+		CCC_BlitStretchOpaque(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, dw, dh,
+			m_memBanner.GetSafeHdc(), 0, 0, dw, dh);
+	}
+	else
+#endif
+	{
+		::BitBlt(pDC->m_hDC, m_bannerRect.left, m_bannerRect.top, dw, dh, m_memBanner.GetSafeHdc(), 0, 0, SRCCOPY);
+	}
 	::SelectObject(m_memBanner.GetSafeHdc(), oldBmp);
 }
 
@@ -3984,6 +4215,10 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			}
 			if (aero)
 				CCC_BlitStretchNF(pDC->m_hDC, m_jacketRect.left, m_jacketRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);
+#if CCUSTOM_AERO_SUPPORT
+			else if (CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11() && !CCC_IsAeroEnabled())
+				CCC_BlitStretchOpaque(pDC->m_hDC, m_jacketRect.left, m_jacketRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h);
+#endif
 			else
 				pDC->BitBlt(m_jacketRect.left, m_jacketRect.top, w, h, &mem, 0, 0, SRCCOPY);
 			mem.SelectObject(ob);
@@ -4090,6 +4325,10 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 
 			if (aero)
 				CCC_BlitStretchNF(pDC->m_hDC, m_infoPanelRect.left, m_infoPanelRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h, kBg);
+#if CCUSTOM_AERO_SUPPORT
+			else if (CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11() && !CCC_IsAeroEnabled())
+				CCC_BlitStretchOpaque(pDC->m_hDC, m_infoPanelRect.left, m_infoPanelRect.top, w, h, mem.GetSafeHdc(), 0, 0, w, h);
+#endif
 			else
 				pDC->BitBlt(m_infoPanelRect.left, m_infoPanelRect.top, w, h, &mem, 0, 0, SRCCOPY);
 			} // memOk
@@ -4139,6 +4378,7 @@ void CMediaPlayerDlg::OnPaint()
 		}
 		if (hitBanner) BlitVisualizer(&dc);
 		DrawSidePanels(&dc);
+		CCC_CaptionPaint(dc, m_hWnd);
 		COgg_ClearGdiPaintPending();
 		return;
 	}
@@ -4154,12 +4394,39 @@ void CMediaPlayerDlg::OnPaint()
 		pdc.ExcludeClipRect(&m_bannerRect);
 		if (!m_jacketRect.IsRectEmpty())   pdc.ExcludeClipRect(&m_jacketRect);
 		if (!m_infoPanelRect.IsRectEmpty()) pdc.ExcludeClipRect(&m_infoPanelRect);
+		const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+		if (capH > 0) {
+			CRect cap(0, 0, rcc.right, capH);
+			pdc.ExcludeClipRect(&cap);
+		}
 		CBrush bg(COLOR_DIALOG_BG);
-		pdc.FillRect(&rcc, &bg);
+#if CCUSTOM_AERO_SUPPORT
+		if (capH > 0 && CCC_IsWin11()) {
+			CRect body = rcc;
+			body.top = capH;
+			RECT rc = body;
+			BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+			HDC hdcBuf = NULL;
+			HPAINTBUFFER hBP = ::BeginBufferedPaint(pdc.GetSafeHdc(), &rc, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+			if (hdcBuf && hBP) {
+				::FillRect(hdcBuf, &rc, (HBRUSH)bg.GetSafeHandle());
+				::BufferedPaintMakeOpaque(hBP, &rc);
+				::EndBufferedPaint(hBP, TRUE);
+			}
+			else {
+				pdc.FillRect(&rcc, &bg);
+			}
+		}
+		else
+#endif
+		{
+			pdc.FillRect(&rcc, &bg);
+		}
 		pdc.RestoreDC(saved);
 	}
 	if (hitBanner) BlitVisualizer(&pdc);
 	DrawSidePanels(&pdc);
+	CCC_CaptionPaint(pdc, m_hWnd);
 	COgg_ClearGdiPaintPending();
 }
 
@@ -4283,6 +4550,18 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		if (og && ::IsWindow(og->GetSafeHwnd()))
 			og->m_sl.SetPos(v * 1000);
 		CString vs; vs.Format(_T("!@C206830%.1f%%"), (double)v); m_volval.SetWindowText(vs);
+	}
+	else if (r && m_miclev.GetSafeHwnd() && r->GetSafeHwnd() == m_miclev.GetSafeHwnd()) {
+		int lv = m_miclev.GetPos();
+		if (lv < 0) lv = 0;
+		if (lv > 200) lv = 200;
+		savedata.mic_mix_level = lv;
+		if (og && ::IsWindow(og->GetSafeHwnd()) && og->m_miclev.GetSafeHwnd()) {
+			og->m_miclev.SetPos(lv);
+			og->ApplyMicMixLevelLabel();
+		}
+		if (nSBCode == SB_ENDSCROLL || nSBCode == SB_THUMBPOSITION)
+			MpPersistSavedataQuick();
 	}
 	else if (og && ::IsWindow(og->GetSafeHwnd()) && r) {
 		// サウンド調整スライダー → og の対応スライダーへ反映(timerp がライブ取得)
@@ -4768,6 +5047,44 @@ void CMediaPlayerDlg::OnSaveWav()
 	og->m_c2.SetCheck(m_savewav.GetCheck() ? 1 : 0);
 }
 
+void CMediaPlayerDlg::OnMicMix()
+{
+	savedata.mic_mix = (m_micmix.GetCheck() == BST_CHECKED) ? 1 : 0;
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		if (og->m_micmix.GetSafeHwnd())
+			og->m_micmix.SetCheck(savedata.mic_mix ? BST_CHECKED : BST_UNCHECKED);
+		og->OnMicMixCheck();
+	} else {
+		MpPersistSavedataQuick();
+	}
+}
+
+void CMediaPlayerDlg::OnMicLevRelease(NMHDR*, LRESULT* pResult)
+{
+	if (pResult) *pResult = 0;
+	int lv = m_miclev.GetPos();
+	if (lv < 0) lv = 0;
+	if (lv > 200) lv = 200;
+	savedata.mic_mix_level = lv;
+	if (og && ::IsWindow(og->GetSafeHwnd()) && og->m_miclev.GetSafeHwnd()) {
+		og->m_miclev.SetPos(lv);
+		og->ApplyMicMixLevelLabel();
+	}
+	MpPersistSavedataQuick();
+}
+
+void CMediaPlayerDlg::OnRecord()
+{
+	CDeviceRecordDlg dlg(this);
+	dlg.DoModal();
+}
+
+void CMediaPlayerDlg::OnCapture()
+{
+	CScreenCaptureDlg dlg(this);
+	dlg.DoModal();
+}
+
 void CMediaPlayerDlg::OnSaveParam()
 {
 	savedata.saveSongParams = m_saveparam.GetCheck() ? 1 : 0;
@@ -4852,6 +5169,13 @@ void CMediaPlayerDlg::OnRclickList(NMHDR* pNMHDR, LRESULT* pResult)
 	SyncSelectionToPlaylist();
 	const int cmd = pl->ShowTrackContextMenu(pt, this);
 	if (cmd == 0) return;
+	if (cmd == PL_CTX_MICMIX) {
+		savedata.mic_mix = savedata.mic_mix ? 0 : 1;
+		if (m_micmix.GetSafeHwnd())
+			m_micmix.SetCheck(savedata.mic_mix ? BST_CHECKED : BST_UNCHECKED);
+		OnMicMix();
+		return;
+	}
 	if (cmd == PL_CTX_AB_SET_A) { OnAbSetA(); return; }
 	if (cmd == PL_CTX_AB_SET_B) { OnAbSetB(); return; }
 	if (cmd == PL_CTX_AB_CLEAR) { OnAbClear(); return; }
@@ -5818,23 +6142,33 @@ void CMediaPlayerDlg::UpdateEmptyStateUi()
 
 void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 {
-	if (m_bannerRect.PtInRect(point)) {
+	const BOOL onBanner = m_bannerRect.PtInRect(point);
+	const BOOL onJacket = (g_mpSideJacket && !m_jacketRect.IsRectEmpty() && m_jacketRect.PtInRect(point));
+	if (onBanner || onJacket) {
 		CMenu menu;
 		if (menu.CreatePopupMenu()) {
-			const UINT f0 = (savedata.mpSpeanaStyle == 0) ? MF_CHECKED : 0;
-			const UINT f1 = (savedata.mpSpeanaStyle == 1) ? MF_CHECKED : 0;
-			const UINT f2 = (savedata.mpSpeanaStyle == 2) ? MF_CHECKED : 0;
-			menu.AppendMenu(MF_STRING | f0, ID_MP_SPEANA_BAR,
-				LL14(L"スペアナ: バー", L"Spectrum: Bars", L"Spectre: Barres", L"Spettro: Barre", L"Espectro: Barras", L"스펙트럼: 막대", L"频谱: 柱状", L"الطيف: أشرطة", L"Спектр: Столбцы", L"Spektrum: Balken", L"Espectro: Barras", L"Spectrum: Balken", L"Widmo: Slupki", L"Spektrum: Cubuk"));
-			menu.AppendMenu(MF_STRING | f1, ID_MP_SPEANA_MIRROR,
-				LL14(L"スペアナ: ミラー", L"Spectrum: Mirror", L"Spectre: Miroir", L"Spettro: Specchio", L"Espectro: Espejo", L"스펙트럼: 미러", L"频谱: 镜像", L"الطيف: مرآة", L"Спектр: Зеркало", L"Spektrum: Spiegel", L"Espectro: Espelho", L"Spectrum: Spiegel", L"Widmo: Lustro", L"Spektrum: Ayna"));
-			menu.AppendMenu(MF_STRING | f2, ID_MP_SPEANA_WAVE,
-				LL14(L"スペアナ: 波形", L"Spectrum: Waveform", L"Spectre: Forme d'onde", L"Spettro: Forma d'onda", L"Espectro: Forma de onda", L"스펙트럼: 파형", L"频谱: 波形", L"الطيف: موجة", L"Спектр: Волна", L"Spektrum: Wellenform", L"Espectro: Forma de onda", L"Spectrum: Golfvorm", L"Widmo: Fala", L"Spektrum: Dalga"));
-			menu.AppendMenu(MF_SEPARATOR);
-			menu.AppendMenu(MF_STRING | (savedata.analyzerwindow ? MF_CHECKED : 0), ID_MP_OPEN_ANALYZER,
-				LL14(L"アナライザー...", L"Analyzer...", L"Analyseur...", L"Analizzatore...", L"Analizador...", L"애널라이저...", L"分析器...", L"المحلل...", L"Анализатор...", L"Analyzer...", L"Analisador...", L"Analyser...", L"Analizator...", L"Analizor..."));
-			menu.AppendMenu(MF_STRING | (savedata.pianorollwindow ? MF_CHECKED : 0), ID_MP_OPEN_PIANOROLL,
-				LL14(L"ピアノロール...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"피아노 롤...", L"钢琴卷帘...", L"لفة البيانو...", L"Пианоролл...", L"Piano Roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll..."));
+			if (onBanner) {
+				const UINT f0 = (savedata.mpSpeanaStyle == 0) ? MF_CHECKED : 0;
+				const UINT f1 = (savedata.mpSpeanaStyle == 1) ? MF_CHECKED : 0;
+				const UINT f2 = (savedata.mpSpeanaStyle == 2) ? MF_CHECKED : 0;
+				menu.AppendMenu(MF_STRING | f0, ID_MP_SPEANA_BAR,
+					LL14(L"スペアナ: バー", L"Spectrum: Bars", L"Spectre: Barres", L"Spettro: Barre", L"Espectro: Barras", L"스펙트럼: 막대", L"频谱: 柱状", L"الطيف: أشرطة", L"Спектр: Столбцы", L"Spektrum: Balken", L"Espectro: Barras", L"Spectrum: Balken", L"Widmo: Slupki", L"Spektrum: Cubuk"));
+				menu.AppendMenu(MF_STRING | f1, ID_MP_SPEANA_MIRROR,
+					LL14(L"スペアナ: ミラー", L"Spectrum: Mirror", L"Spectre: Miroir", L"Spettro: Specchio", L"Espectro: Espejo", L"스펙트럼: 미러", L"频谱: 镜像", L"الطيف: مرآة", L"Спектр: Зеркало", L"Spektrum: Spiegel", L"Espectro: Espelho", L"Spectrum: Spiegel", L"Widmo: Lustro", L"Spektrum: Ayna"));
+				menu.AppendMenu(MF_STRING | f2, ID_MP_SPEANA_WAVE,
+					LL14(L"スペアナ: 波形", L"Spectrum: Waveform", L"Spectre: Forme d'onde", L"Spettro: Forma d'onda", L"Espectro: Forma de onda", L"스펙트럼: 파형", L"频谱: 波形", L"الطيف: موجة", L"Спектр: Волна", L"Spektrum: Wellenform", L"Espectro: Forma de onda", L"Spectrum: Golfvorm", L"Widmo: Fala", L"Spektrum: Dalga"));
+				menu.AppendMenu(MF_SEPARATOR);
+				menu.AppendMenu(MF_STRING | (savedata.analyzerwindow ? MF_CHECKED : 0), ID_MP_OPEN_ANALYZER,
+					LL14(L"アナライザー...", L"Analyzer...", L"Analyseur...", L"Analizzatore...", L"Analizador...", L"애널라이저...", L"分析器...", L"المحلل...", L"Анализатор...", L"Analyzer...", L"Analisador...", L"Analyser...", L"Analizator...", L"Analizor..."));
+				menu.AppendMenu(MF_STRING | (savedata.pianorollwindow ? MF_CHECKED : 0), ID_MP_OPEN_PIANOROLL,
+					LL14(L"ピアノロール...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"피아노 롤...", L"钢琴卷帘...", L"لفة البيانو...", L"Пианоролл...", L"Piano Roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll..."));
+				menu.AppendMenu(MF_SEPARATOR);
+			}
+			menu.AppendMenu(MF_STRING, ID_MP_REFRESH_JACKET,
+				LL14(L"再生中のジャケを再取得", L"Refresh playing jacket", L"Rafraichir la pochette en lecture", L"Aggiorna copertina in riproduzione",
+					L"Actualizar caratula en reproduccion", L"재생 중 재킷 다시 가져오기", L"重新获取正在播放的封面", L"تحديث غلاف التشغيل",
+					L"Обновить обложку текущего", L"Aktuelles Cover neu laden", L"Atualizar capa em reproducao",
+					L"Huidige hoes vernieuwen", L"Odswiez okladke odtwarzanego", L"Oynatilan kapagi yenile"));
 			CPoint sp = point;
 			ClientToScreen(&sp);
 			menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, sp.x, sp.y, this);
@@ -5863,6 +6197,26 @@ void CMediaPlayerDlg::OnSpeanaStyleWave()
 	savedata.mpSpeanaStyle = 2;
 	MpPersistSavedataQuick();
 	InvalidateRect(&m_bannerRect, FALSE);
+}
+
+void CMediaPlayerDlg::OnRefreshJacket()
+{
+	extern CString filen;
+	if (!og || filen.IsEmpty()) return;
+	PlJakDiskForget(filen);
+	for (int j = 0; j < kMpJakN; ++j) {
+		if (m_jakKey[j][0] && _tcsicmp(m_jakKey[j], filen) == 0) {
+			if (m_jakBmp[j]) { ::DeleteObject(m_jakBmp[j]); m_jakBmp[j] = NULL; }
+			m_jakKey[j][0] = 0;
+			m_jakTick[j] = 0;
+			m_jakRow[j] = -1;
+		}
+	}
+	og->LoadJacket(filen);
+	if (!m_jacketRect.IsRectEmpty())
+		InvalidateRect(&m_jacketRect, FALSE);
+	InvalidateRect(&m_bannerRect, FALSE);
+	m_list.Invalidate(FALSE);
 }
 
 static CString MpCompactRate(int hz)
@@ -6289,6 +6643,7 @@ void EnterFalcomMode()
 	if (pl && ::IsWindow(pl->GetSafeHwnd())) {
 		if (savedata.pl) {
 			::ShowWindow(pl->m_hWnd, SW_SHOW);
+			pl->EnsureOnScreen();
 			plw = 1;
 		}
 		else {

@@ -518,7 +518,9 @@ void CPromptDlg::LayoutControls()
 	const int W = rc.Width(), H = rc.Height();
 	if (W < 200) return;
 
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	const int M = 8;
+	const int topM = M + capH; // カスタム帯の下から本文
 	const int btnH = 36;
 	const int btnGap = 6;
 	const int remainH = 16;
@@ -537,7 +539,11 @@ void CPromptDlg::LayoutControls()
 	const int lockGap = 6;
 	const int btnW = max(48, min(68, (iw - btnGap * 6) / 7));
 
-	CCC_MainLockSetHeaderRow(m_hWnd, M, editLblH);
+	// キャプション有り時は帯内配置。無し時だけ本文ヘッダ行
+	if (capH > 0)
+		CCC_MainLockClearHeaderRow(m_hWnd);
+	else
+		CCC_MainLockSetHeaderRow(m_hWnd, topM, editLblH);
 	CRect lockRc;
 	CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
 	const int lblW = lockRc.IsRectEmpty()
@@ -545,7 +551,7 @@ void CPromptDlg::LayoutControls()
 		: max(80, lockRc.left - M - lockGap);
 
 	// 下から順に確保(ボタン → 履歴 → 進捗 → モード → 残り文字 → 説明 → 入力)
-	const int btnY = max(M, H - M - btnH);
+	const int btnY = max(topM, H - M - btnH);
 	const int histY = btnY - histGap - histH;
 	const int progY = histY - gapSm - progH;
 	const int progLblY = progY - gapSm - progLabelH;
@@ -555,8 +561,8 @@ void CPromptDlg::LayoutControls()
 
 	int legendH = max(legendMinH, (H * 7) / 30);
 	int legendTop = legendBottom - legendH;
-	if (legendTop < M + editLblH + gapSm + editMinH + gapMd) {
-		legendTop = M + editLblH + gapSm + editMinH + gapMd;
+	if (legendTop < topM + editLblH + gapSm + editMinH + gapMd) {
+		legendTop = topM + editLblH + gapSm + editMinH + gapMd;
 		legendH = legendBottom - legendTop;
 	}
 	if (legendH < 48)
@@ -564,7 +570,7 @@ void CPromptDlg::LayoutControls()
 	if (legendTop + legendH > legendBottom)
 		legendH = max(48, legendBottom - legendTop);
 
-	const int editTop = M + editLblH + gapSm;
+	const int editTop = topM + editLblH + gapSm;
 	int editH = legendTop - gapMd - editTop;
 	if (editH < editMinH) {
 		editH = editMinH;
@@ -575,7 +581,7 @@ void CPromptDlg::LayoutControls()
 	}
 
 	if (m_lblEdit.GetSafeHwnd())
-		m_lblEdit.MoveWindow(M, M, lblW, editLblH);
+		m_lblEdit.MoveWindow(M, topM, lblW, editLblH);
 	if (m_edit.GetSafeHwnd())
 		m_edit.MoveWindow(M, editTop, iw, editH);
 	if (m_legend.GetSafeHwnd())
@@ -632,6 +638,8 @@ void CPromptDlg::LayoutControls()
 	RaiseChildZOrder(&m_reset);
 	RaiseChildZOrder(&m_clear);
 	RaiseChildZOrder(&m_close);
+	// Raise 後に帯ボタンが下に沈むので載せ直す
+	CCC_CaptionLayout(m_hWnd);
 	CCC_MainLockBringToFront(m_hWnd);
 }
 

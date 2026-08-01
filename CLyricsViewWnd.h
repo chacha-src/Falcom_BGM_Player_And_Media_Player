@@ -4,6 +4,7 @@
 // （Static では滑らか追従できないため GDI owner-draw）
 class CLyricsViewWnd : public CWnd
 {
+	DECLARE_DYNAMIC(CLyricsViewWnd)
 public:
 	static const int kMaxLines = 300;
 

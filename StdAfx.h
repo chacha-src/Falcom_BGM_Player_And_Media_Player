@@ -452,6 +452,36 @@ struct save{
 	// --- 同時ミックス書き出し(末尾追記) ---
 	int wav_export_mix;       // 1=同時ミックス＋クロスフェード補充
 	int wav_export_mix_n;     // 同時曲数(2..)
+
+	// --- WAV保存時マイクミックス(末尾追記。旧.datは0初期化) ---
+	int mic_mix;              // 1=WAVへ保存ON時にマイクをミックス
+	int mic_mix_level;        // 0..200 (100=等倍)
+	TCHAR mic_device[256];    // WASAPI キャプチャ端末 ID(空=既定)
+	int mic_device_cur;       // CRender マイクコンボ選択(0=既定)
+
+	// --- デバイス録音 / 画面キャプチャ(末尾追記。旧.datは0初期化) ---
+	TCHAR loop_device[256];   // ループバック録音の再生端末 ID(空=既定)
+	int loop_device_cur;      // 録音UIコンボ選択
+	TCHAR cap_save_dir[1024]; // 画面キャプチャ保存先(空=曲と同じフォルダ等)
+	int record_format;        // 0=WAV 1=mp3 2=FLAC
+	int record_mp3_kbps;      // 128..320
+	int record_mix_mic;       // 1=録音時にマイクもミックス
+	TCHAR record_last_path[1024]; // 直近の出力パス
+	int record_flac_level;    // 0..8
+	int cap_with_audio;       // 1=画面キャプチャにシステム音
+	int cap_with_mic;         // 1=画面キャプチャにマイク
+	int cap_fps;              // 10..30
+	TCHAR cap_last_path[1024];
+
+	// --- K-Lite Codec Pack 未導入の誘導(末尾追記。旧.datは0) ---
+	// 0=未回答(未導入なら起動時に聞く) 1=いいえ済み(今後出さない)
+	int kliteAskSkip;
+	// 画面キャプチャモード(末尾追記)
+	int cap_mode;          // 0=プライマリ 1=全モニタ 2=ウィンドウ合成
+	int cap_canvas_preset; // 0=自動 1=1280x720 2=1920x1080 3=1600x900
+	int cap_canvas_w;      // 予備(将来カスタム)
+	int cap_canvas_h;
+	int cap_include_mp;    // 1=MP画面(慣らし中の曲)をキャプチャに載せる
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
@@ -498,6 +528,12 @@ void CCC_MainLockGetOverlayRect(HWND hDlg, CRect& rc);
 void CCC_MainLockSetHeaderRow(HWND hDlg, int top, int height);
 void CCC_MainLockClearHeaderRow(HWND hDlg);
 void CCC_InvalidateRectMinusOverlay(HWND hDlg, const CRect& area);
+int  CCC_GetCustomCaptionHeight(HWND hDlg);
+// キャプション帯のアクリルは savedata.aero と完全独立。インストール済みなら常に TRUE(1)
+BOOL CCC_AcrylicCaption(HWND hWnd);
+void CCC_CaptionPaint(CDC& dc, HWND hDlg);
+void CCC_CaptionLayout(HWND hDlg);
+void CCC_CaptionUnregister(HWND hDlg);
 
 #define cmnh() 	CBrush m_brDlg; \
 afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct); \

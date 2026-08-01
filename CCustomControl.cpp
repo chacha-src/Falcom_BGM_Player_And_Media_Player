@@ -54,9 +54,17 @@ BOOL CCC_IsBlurDialogChild(HWND hWnd)
     return FALSE;
 }
 
-// ぼかしダイアログ上ではラベル・スライダー等は透過、ボタン・リスト等は不透明
+static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd);
+static BOOL CCC_CaptionOnlyHostGlass(HWND hWnd);
+
+// キャプション帯コントロールは AcrylicCaption 時は常に透過（本文 aero と独立）
 static BOOL CCC_UseTransPaint(HWND hWnd, BOOL bAeroMode)
 {
+    if (hWnd) {
+        HWND hParent = ::GetParent(hWnd);
+        if (hParent && CCC_AcrylicCaption(hParent) && CCC_IsCaptionChromeCtrl(hWnd))
+            return TRUE;
+    }
     if (CCC_IsBlurDialogChild(hWnd) && CCC_IsAeroEnabled()) return TRUE;
     return bAeroMode && !CCC_IsBlurDialogChild(hWnd);
 }
@@ -73,14 +81,29 @@ void CCC_InvalidateParent(HWND hWnd, BOOL bAeroMode)
     ::InvalidateRect(hParent, &rc, FALSE);
 }
 
+// キャプション帯アクリルは Win11 では全面 Extend(-1) が必要（上辺だけだと黒帯になる）。
+// 本文との切り分けはマージンではなく描画側（MakeOpaquePreserve / OpaqueFixer / ClearRect）。
+static MARGINS CCC_CaptionHostMargins(HWND hWnd)
+{
+    UNREFERENCED_PARAMETER(hWnd);
+    MARGINS margins = { -1, -1, -1, -1 };
+    return margins;
+}
+
 void CCC_RefreshDwmBlur(HWND hWnd)
 {
-    if (!hWnd || !::IsWindow(hWnd) || !CCC_IsAeroEnabled() || !CCC_IsWin11()) return;
+    if (!hWnd || !::IsWindow(hWnd) || !CCC_IsWin11()) return;
+    if (!CCC_IsAeroEnabled() && !CCC_AcrylicCaption(hWnd)) return;
     BOOL compositionEnabled = FALSE;
     if (!::DwmIsCompositionEnabled(&compositionEnabled) || !compositionEnabled) return;
     const int backdropType = 3;
     ::DwmSetWindowAttribute(hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
-    const MARGINS margins = { -1, -1, -1, -1 };
+#ifndef DWMWA_REDIRECTIONBITMAP_ALPHA
+#define DWMWA_REDIRECTIONBITMAP_ALPHA 39
+#endif
+    BOOL useAlpha = TRUE;
+    ::DwmSetWindowAttribute(hWnd, DWMWA_REDIRECTIONBITMAP_ALPHA, &useAlpha, sizeof(useAlpha));
+    const MARGINS margins = CCC_CaptionHostMargins(hWnd);
     ::DwmExtendFrameIntoClientArea(hWnd, &margins);
 }
 
@@ -100,6 +123,10 @@ static void CCC_ClearDestBlt(HDC hdcDest, int x, int y, int w, int h,
 // 共通の描画処理
 // ============================================================================
 
+#if CCUSTOM_AERO_SUPPORT
+static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr);
+#endif
+
 static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWnd)
 {
     UNREFERENCED_PARAMETER(hWnd);
@@ -118,6 +145,20 @@ static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWn
 #endif
     CRect r;
     ::GetClientRect(hWnd, &r);
+    // カスタムキャプション帯は save.aero に関係なくアクリル源を残す（帯だけ塗らない）
+    const int capH = CCC_GetCustomCaptionHeight(hWnd);
+#if CCUSTOM_AERO_SUPPORT
+    if (capH > 0 && CCC_IsWin11() && r.Height() > capH) {
+        r.top = capH;
+        CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, COLOR_DIALOG_BG);
+        return TRUE;
+    }
+#endif
+    if (capH > 0 && r.Height() > capH) {
+        r.top = capH;
+        pDC->FillRect(&r, &brDlg);
+        return TRUE;
+    }
     pDC->FillRect(&r, &brDlg);
     return TRUE;
 }
@@ -143,6 +184,72 @@ static void DlgOnPaintAero(CWnd* pWnd, BOOL bAeroEnabled)
 #include <uxtheme.h>
 #pragma comment(lib, "msimg32.lib")
 #pragma comment(lib, "uxtheme.lib")
+#ifndef DTT_COMPOSITED
+#define DTT_TEXTCOLOR  0x00000001
+#define DTT_GLOWSIZE   0x00000800
+#define DTT_COMPOSITED 0x00002000
+#endif
+
+// 矩形を α=255 の不透明色で塗る（REDIRECTIONBITMAP_ALPHA 時の素 FillRect 透過を防ぐ）
+static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr)
+{
+    const int w = rc.right - rc.left;
+    const int h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0 || !hdc) return;
+
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    params.dwFlags = BPPF_ERASE;
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdc, &rc, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (hdcBuf && hBP) {
+        HBRUSH br = ::CreateSolidBrush(clr);
+        // buffer DC はクライアント座標を共有する
+        ::FillRect(hdcBuf, &rc, br);
+        ::DeleteObject(br);
+        ::BufferedPaintMakeOpaque(hBP, &rc);
+        RGBQUAD* pPixels = nullptr;
+        int rowLength = 0;
+        if (SUCCEEDED(::GetBufferedPaintBits(hBP, &pPixels, &rowLength)) && pPixels && rowLength > 0) {
+            for (int y = 0; y < h; ++y) {
+                RGBQUAD* row = reinterpret_cast<RGBQUAD*>(
+                    reinterpret_cast<BYTE*>(pPixels) + y * rowLength * static_cast<int>(sizeof(RGBQUAD)));
+                for (int x = 0; x < w; ++x)
+                    row[x].rgbReserved = 255;
+            }
+        }
+        ::EndBufferedPaint(hBP, TRUE);
+        return;
+    }
+
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* pBits = nullptr;
+    HBITMAP hDib = ::CreateDIBSection(hdc, &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
+    if (!hDib || !pBits) {
+        HBRUSH br = ::CreateSolidBrush(clr);
+        ::FillRect(hdc, &rc, br);
+        ::DeleteObject(br);
+        return;
+    }
+    RGBQUAD fill = { GetBValue(clr), GetGValue(clr), GetRValue(clr), 255 };
+    RGBQUAD* pq = static_cast<RGBQUAD*>(pBits);
+    const int n = w * h;
+    for (int i = 0; i < n; ++i)
+        pq[i] = fill;
+    // BitBlt は α を落としやすいので AlphaBlend で載せる
+    HDC hdcMem = ::CreateCompatibleDC(hdc);
+    HGDIOBJ old = ::SelectObject(hdcMem, hDib);
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    ::GdiAlphaBlend(hdc, rc.left, rc.top, w, h, hdcMem, 0, 0, w, h, bf);
+    ::SelectObject(hdcMem, old);
+    ::DeleteDC(hdcMem);
+    ::DeleteObject(hDib);
+}
 
 static void CCC_InitBPClear(HPAINTBUFFER hBP, int w, int h)
 {
@@ -3549,6 +3656,28 @@ void CCustomStatic::DrawClient(CDC& dc)
 void CCustomStatic::OnPaint()
 {
     CPaintDC dc(this);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)))
+    {
+        CRect r;
+        GetClientRect(&r);
+        if (r.Width() > 0 && r.Height() > 0) {
+            BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+            params.dwFlags = BPPF_ERASE;
+            HDC hdcBuf = NULL;
+            HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+            if (hdcBuf && hBP) {
+                CDC dcBuf;
+                dcBuf.Attach(hdcBuf);
+                DrawClient(dcBuf);
+                dcBuf.Detach();
+                ::BufferedPaintMakeOpaque(hBP, &r);
+                ::EndBufferedPaint(hBP, TRUE);
+                return;
+            }
+        }
+    }
+#endif
     DrawClient(dc);
 }
 
@@ -4266,6 +4395,28 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
 void CCustomSliderCtrl::OnPaint()
 {
     CPaintDC dc(this);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)))
+    {
+        CRect r;
+        GetClientRect(&r);
+        if (r.Width() > 0 && r.Height() > 0) {
+            BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+            params.dwFlags = BPPF_ERASE;
+            HDC hdcBuf = NULL;
+            HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+            if (hdcBuf && hBP) {
+                CDC dcBuf;
+                dcBuf.Attach(hdcBuf);
+                PaintClient(dcBuf);
+                dcBuf.Detach();
+                ::BufferedPaintMakeOpaque(hBP, &r);
+                ::EndBufferedPaint(hBP, TRUE);
+                return;
+            }
+        }
+    }
+#endif
     PaintClient(dc);
 }
 
@@ -5092,35 +5243,25 @@ LRESULT CCustomListCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
 void CCustomListCtrl::OnVScroll(UINT n, UINT p, CScrollBar* s)
 {
     CListCtrl::OnVScroll(n, p, s);
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
-        ScheduleOpaqueRepaint();
-#endif
-    UpdateHotItemFromCursor();
-    RedrawVisibleItems();
+    // OpaqueFixer が直後に全面描画する。ここでの Invalidate は名前列ちらつきの元。
+    m_nHotItem = -1;
 }
 void CCustomListCtrl::OnHScroll(UINT n, UINT p, CScrollBar* s)
 {
     CListCtrl::OnHScroll(n, p, s);
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
-        ScheduleOpaqueRepaint();
-#endif
-    UpdateHotItemFromCursor();
-    RedrawVisibleItems();
+    m_nHotItem = -1;
 }
 BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
 {
     BOOL r = CListCtrl::OnMouseWheel(n, z, p);
-#if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
-    {
-        ScheduleOpaqueRepaint();
-        SetTimer(kListScrollOpaqueTimerId, 33, NULL);
+    // ホット行の再 Invalidate 禁止(名前列ちらつき)。索引だけ合わせて直後の Opaque に任せる。
+    CPoint pt;
+    if (GetCursorPos(&pt)) {
+        ScreenToClient(&pt);
+        LVHITTESTINFO h;
+        h.pt = pt;
+        m_nHotItem = SubItemHitTest(&h);
     }
-#endif
-    UpdateHotItemFromCursor();
-    RedrawVisibleItems();
     return r;
 }
 
@@ -5153,10 +5294,27 @@ void CCustomListCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 void CCustomListCtrl::UpdateHotItem(int n)
 {
     if (m_nHotItem == n) return;
-    int o = m_nHotItem;
+    const int o = m_nHotItem;
     m_nHotItem = n;
-    if (o >= 0) RedrawItems(o, o);
-    if (m_nHotItem >= 0) RedrawItems(m_nHotItem, m_nHotItem);
+    // プレイリスト系(ジャケ/♪): ホット Invalidate → OpaqueFixer 全面描画で名前列がちらつく。
+    // キャプション常時アクリル下では部分 MakeOpaque も本文透過になるため使えない。
+    // 索引のみ更新し、見た目はスクロール等の全面描画時に合わせる。
+    if (m_mpNoteIconGet || m_mpJacketPx > 0)
+        return;
+    if (o >= 0) {
+        CRect rr;
+        if (GetItemRect(o, &rr, LVIR_BOUNDS))
+            RedrawWindow(&rr, NULL, RDW_INVALIDATE | RDW_NOERASE);
+        else
+            RedrawItems(o, o);
+    }
+    if (m_nHotItem >= 0) {
+        CRect rr;
+        if (GetItemRect(m_nHotItem, &rr, LVIR_BOUNDS))
+            RedrawWindow(&rr, NULL, RDW_INVALIDATE | RDW_NOERASE);
+        else
+            RedrawItems(m_nHotItem, m_nHotItem);
+    }
 }
 
 void CCustomListCtrl::UpdateHotItemFromCursor()
@@ -5184,14 +5342,173 @@ BOOL CCustomListCtrl::OnEraseBkgnd(CDC*)
     return FALSE;
 }
 
+void CCustomListCtrl::FillEmptyBelowVisible(HDC hdc, BOOL belowItemsOnly)
+{
+    if (!hdc || !m_hWnd) return;
+    CRect rcClient;
+    GetClientRect(&rcClient);
+    if (rcClient.Width() <= 0 || rcClient.Height() <= 0) return;
+
+    // OnCustomDraw の行色と一致
+    const COLORREF alt0 = COLOR_LIST_BG;
+    const COLORREF alt1 = RGB(183, 221, 238);
+
+    int hdrBottom = rcClient.top;
+    if (CHeaderCtrl* pHdr = GetHeaderCtrl()) {
+        CRect rh;
+        pHdr->GetWindowRect(&rh);
+        ScreenToClient(&rh);
+        if (rh.bottom > hdrBottom) hdrBottom = rh.bottom;
+    }
+
+    const int n = GetItemCount();
+    int topIdx = (n > 0) ? GetTopIndex() : 0;
+    if (topIdx < 0) topIdx = 0;
+
+    int rowH = 0;
+    int yBand0 = hdrBottom;
+    int idx0 = topIdx;
+    if (n > 0 && topIdx < n) {
+        CRect rc0;
+        if (GetItemRect(topIdx, &rc0, LVIR_BOUNDS) && rc0.Height() > 0) {
+            rowH = rc0.Height();
+            yBand0 = rc0.top;
+            idx0 = topIdx;
+        }
+    }
+    if (rowH <= 0) {
+        const int cpp = GetCountPerPage();
+        const int avail = rcClient.bottom - hdrBottom;
+        rowH = (cpp > 0 && avail > 0) ? (avail / cpp) : 18;
+        if (rowH <= 0) rowH = 18;
+        yBand0 = hdrBottom;
+        idx0 = topIdx;
+    }
+
+    int fillTop = hdrBottom;
+    int fillIdx = idx0;
+    if (belowItemsOnly) {
+        // 描画後: 行の上に塗ると文字/ジャケが消えるので空きだけ
+        int bottomY = hdrBottom;
+        if (n > 0) {
+            int scanEnd = topIdx + GetCountPerPage() + 2;
+            if (scanEnd > n) scanEnd = n;
+            CRect rcItem;
+            for (int i = topIdx; i < scanEnd; ++i) {
+                if (!GetItemRect(i, &rcItem, LVIR_BOUNDS)) continue;
+                if (rcItem.bottom > bottomY) bottomY = rcItem.bottom;
+            }
+            UINT ht = 0;
+            const int hit = HitTest(CPoint(rcClient.left + 8, rcClient.bottom - 4), &ht);
+            if (hit >= 0 && hit < n) {
+                CRect rh;
+                if (GetItemRect(hit, &rh, LVIR_BOUNDS) && rh.bottom > bottomY)
+                    bottomY = rh.bottom;
+            }
+            else if (hit < 0 && bottomY <= hdrBottom)
+                bottomY = hdrBottom;
+        }
+        if (bottomY >= rcClient.bottom) return;
+        if (rowH > 0 && yBand0 <= bottomY) {
+            const int steps = (bottomY - yBand0) / rowH;
+            fillIdx = idx0 + steps;
+            fillTop = yBand0 + steps * rowH;
+            if (fillTop < bottomY)
+                fillTop = bottomY;
+        }
+        else {
+            fillTop = bottomY;
+            fillIdx = n;
+        }
+    }
+    else {
+        // PREPAINT: 行下地ごとゼブラ(ITEMPREPAINT が同色で上書き)
+        fillTop = hdrBottom;
+        fillIdx = idx0;
+        if (yBand0 <= hdrBottom)
+            yBand0 = hdrBottom;
+    }
+    if (fillTop >= rcClient.bottom) return;
+
+    // アクリル: 素 FillRect は α=0 で黒。BPPF_ERASE のネスト BP は黒フラッシュ。
+    // 32bpp DIB(α=255)を1回 AlphaBlend(不透明塗り・フラッシュなし)。
+    const int saved = ::SaveDC(hdc);
+    ::SelectClipRgn(hdc, NULL);
+
+    const int dibTop = belowItemsOnly ? fillTop : hdrBottom;
+    int stripeY = fillTop;
+    int stripeIdx = fillIdx;
+    if (!belowItemsOnly) {
+        stripeY = (yBand0 > hdrBottom) ? yBand0 : hdrBottom;
+        stripeIdx = idx0;
+    }
+    const int fw = rcClient.right - rcClient.left;
+    const int fh = rcClient.bottom - dibTop;
+    if (fw <= 0 || fh <= 0) {
+        if (saved) ::RestoreDC(hdc, saved);
+        else ::SelectClipRgn(hdc, NULL);
+        return;
+    }
+
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = fw;
+    bi.bmiHeader.biHeight = -fh;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* pBits = nullptr;
+    HBITMAP hDib = ::CreateDIBSection(hdc, &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
+    if (hDib && pBits) {
+        RGBQUAD* pq = static_cast<RGBQUAD*>(pBits);
+        RGBQUAD c0 = { GetBValue(alt0), GetGValue(alt0), GetRValue(alt0), 255 };
+        RGBQUAD c1 = { GetBValue(alt1), GetGValue(alt1), GetRValue(alt1), 255 };
+        const int nPix = fw * fh;
+        for (int i = 0; i < nPix; ++i) pq[i] = c0;
+        for (int y = stripeY, idx = stripeIdx; y < rcClient.bottom; y += rowH, ++idx) {
+            int rowStart = y - dibTop;
+            int rowEnd = rowStart + rowH;
+            if (rowStart < 0) rowStart = 0;
+            if (rowEnd > fh) rowEnd = fh;
+            if (rowStart >= rowEnd) continue;
+            const RGBQUAD c = (idx % 2 == 0) ? c0 : c1;
+            for (int yy = rowStart; yy < rowEnd; ++yy) {
+                RGBQUAD* row = pq + yy * fw;
+                for (int x = 0; x < fw; ++x) row[x] = c;
+            }
+        }
+        HDC hdcMem = ::CreateCompatibleDC(hdc);
+        if (hdcMem) {
+            HGDIOBJ old = ::SelectObject(hdcMem, hDib);
+            const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+            ::GdiAlphaBlend(hdc, rcClient.left, dibTop, fw, fh, hdcMem, 0, 0, fw, fh, bf);
+            ::SelectObject(hdcMem, old);
+            ::DeleteDC(hdcMem);
+        }
+        ::DeleteObject(hDib);
+    }
+
+    if (saved)
+        ::RestoreDC(hdc, saved);
+    else
+        ::SelectClipRgn(hdc, NULL);
+}
+
 void CCustomListCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 {
     if (!hdcBuf || !m_hWnd) return;
     CRect r;
     GetClientRect(&r);
     if (r.Width() <= 0 || r.Height() <= 0) return;
-    ::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
+    {
+        const int saved = ::SaveDC(hdcBuf);
+        ::SelectClipRgn(hdcBuf, NULL);
+        ::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
+        if (saved) ::RestoreDC(hdcBuf, saved);
+    }
     ::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+    // PrintClient が空きを黒くしクリップを残すことがある → 解除して交互色で塗り直す
+    FillEmptyBelowVisible(hdcBuf);
 }
 
 void CCustomListCtrl::PaintOpaqueClient(CDC& dc)
@@ -5207,10 +5524,12 @@ void CCustomListCtrl::PaintOpaqueClient(CDC& dc)
     if (!hdcBuf || !hBP)
     {
         Default();
+        FillEmptyBelowVisible(dc.GetSafeHdc());
         return;
     }
     ::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
     ::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
+    FillEmptyBelowVisible(hdcBuf);
     ::BufferedPaintMakeOpaque(hBP, &r);
     ::EndBufferedPaint(hBP, TRUE);
 }
@@ -5218,24 +5537,8 @@ void CCustomListCtrl::PaintOpaqueClient(CDC& dc)
 void CCustomListCtrl::OnPaint()
 {
     Default();
-    // 最終行より下の余白を背景色で塗り、横スクロールゴミや「幽霊行」を消す
-    const int n = GetItemCount();
-    CRect rcClient;
-    GetClientRect(&rcClient);
-    if (rcClient.IsRectEmpty()) return;
     CClientDC dc(this);
-    if (n <= 0) {
-        dc.FillSolidRect(&rcClient, GetBkColor());
-    }
-    else {
-        CRect rcLast;
-        if (GetItemRect(n - 1, &rcLast, LVIR_BOUNDS)) {
-            CRect rcGap = rcClient;
-            rcGap.top = (std::max)(rcGap.top, rcLast.bottom);
-            if (rcGap.top < rcGap.bottom)
-                dc.FillSolidRect(&rcGap, GetBkColor());
-        }
-    }
+    FillEmptyBelowVisible(dc.GetSafeHdc());
     ShowScrollBar(SB_HORZ, FALSE);
 }
 
@@ -5286,6 +5589,8 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
     switch (p->nmcd.dwDrawStage)
     {
     case CDDS_PREPAINT:
+        // FillEmpty は行描画後のみ(OnPaint/PaintOpaque)。PREPAINT で塗ると
+        // 名前列(既定IL→自前ジャケ/♪)と二重になり黒ちらつきの元になる。
         *pResult = CDRF_NOTIFYITEMDRAW;
         break;
     case CDDS_ITEMPREPAINT:
@@ -5328,8 +5633,22 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         COLORREF bg = bS ? COLOR_SEL_BG : (ni % 2 == 0 ? COLOR_LIST_BG : RGB(183, 221, 238));
         if (bH && !bS) bg = RGB(220, 235, 250);
 
+        // キャプション常時アクリル下、名前列の素 FillRect は α=0→ガラスが一瞬見える。
+        // ジャケ有り行は StretchBlt で帯が埋まるが、ジャケ無し行は穴のままちらつく。
+        const BOOL bNameJakCol = (ns == 0 && m_mpJacketPx > 0);
+#if CCUSTOM_AERO_SUPPORT
+        const BOOL bCapGlass = CCC_IsWin11() && (CCC_CaptionOnlyHostGlass(m_hWnd) || CCC_IsAeroEnabled());
+#else
+        const BOOL bCapGlass = FALSE;
+#endif
         const BOOL bLvAero = m_bAeroMode && !CCC_IsBlurDialogChild(m_hWnd);
-        if (bLvAero)
+        if (bNameJakCol && bCapGlass)
+        {
+#if CCUSTOM_AERO_SUPPORT
+            CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, bg);
+#endif
+        }
+        else if (bLvAero)
         {
             pDC->FillSolidRect(&r, RGB(0, 0, 0));
             FillRectAlpha(pDC, r, bg, bS ? 180 : bH ? 140 : AERO_ALPHA_SEMI);
@@ -5340,6 +5659,9 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         if (bS && !bLvAero)
             DrawGlossHighlight(pDC, r, 6);
 
+        // プレイリスト系は m_mpNoteIconGet で実♪を取得(GetDispInfo の iImage は空のまま)。
+        // テキスト左余白計算でも同じ値を使う。
+        int noteImg = 1;
         if (ns == 0)
         {
             // LVS_EX_CHECKBOXES 指定リスト(kpi一覧)のみ、状態イメージ領域へ
@@ -5369,10 +5691,15 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             // ♡ は選択装飾だが ♪ を隠さないよう、♪ の下(奥)に先に描く。
             CRect ri;
             const BOOL hasIconRect = GetItemRect(ni, &ri, LVIR_ICON);
-            LVITEM lvi = { 0 };
-            lvi.mask = LVIF_IMAGE;
-            lvi.iItem = ni;
-            GetItem(&lvi);
+            if (m_mpNoteIconGet)
+                noteImg = m_mpNoteIconGet(m_mpJacketCtx, ni);
+            else {
+                LVITEM lvi = { 0 };
+                lvi.mask = LVIF_IMAGE;
+                lvi.iItem = ni;
+                if (GetItem(&lvi))
+                    noteImg = lvi.iImage;
+            }
             CImageList* pIL = GetImageList(LVSIL_SMALL);
             // ジャケット(左) → ♪(その右)。♡ は ♪ の下(奥)に先に描く。
             int jacketRight = r.left;
@@ -5386,7 +5713,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 if (rj.top < r.top + 1) rj.top = r.top + 1;
                 rj.right = rj.left + jsz;
                 rj.bottom = rj.top + jsz;
-                // ジャケ無しは枠も塗らない(行背景のまま)。列位置は m_mpJacketPx で揃える。
+                // ジャケ無し帯も行背景で不透明に埋める(α=0のままだとアクリルが透ける)
                 if (hb) {
                     jacketRight = rj.right;
                     CDC src;
@@ -5401,7 +5728,11 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                     src.DeleteDC();
                 }
                 else {
-                    jacketRight = rj.right; // ♪位置はジャケ枠ぶん確保(テキスト列と揃える)
+                    jacketRight = rj.right;
+#if CCUSTOM_AERO_SUPPORT
+                    if (bCapGlass)
+                        CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), rj, bg);
+#endif
                 }
             }
             // ♪描画位置(ジャケ有無で切替)。♡ は従来どおり ♪ と同位置・奥に重ねる。
@@ -5416,9 +5747,9 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 noteX = r.left + 2;
             if (bS)
                 DrawHeart(pDC, CRect(noteX, noteY + 2, noteX + 14, noteY + 16), COLOR_HEART);
-            if (pIL && lvi.iImage >= 0 && lvi.iImage != 1) {
+            if (pIL && noteImg >= 0 && noteImg != 1) {
                 // ImageList は行高確保で 24px。♪自体は従来どおり 16x16。
-                HICON hNote = ImageList_GetIcon(pIL->GetSafeHandle(), lvi.iImage, ILD_TRANSPARENT);
+                HICON hNote = ImageList_GetIcon(pIL->GetSafeHandle(), noteImg, ILD_TRANSPARENT);
                 if (hNote) {
                     ::DrawIconEx(pDC->GetSafeHdc(), noteX, noteY, hNote, 16, 16, 0, NULL, DI_NORMAL);
                     ::DestroyIcon(hNote);
@@ -5440,11 +5771,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             CRect ri2;
             if (GetItemRect(ni, &ri2, LVIR_ICON))
             {
-                LVITEM lvi2 = { 0 };
-                lvi2.mask = LVIF_IMAGE;
-                lvi2.iItem = ni;
-                GetItem(&lvi2);
-                if (lvi2.iImage >= 0 && lvi2.iImage != 1) {
+                if (noteImg >= 0 && noteImg != 1) {
                     if (m_mpJacketPx > 0)
                         tl = (std::max)(tl, (int)r.left + m_mpJacketPx + 3 + 16 + 4);
                     else if (ri2.Width() > 0)
@@ -6953,7 +7280,9 @@ void CCustomStandardButton::RepaintClient()
     if (r.Width() <= 0 || r.Height() <= 0)
         return;
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    // ホスト α（本文 aero / キャプションのみガラス）では素 BitBlt が消える
+    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)
+        || (CCC_IsCaptionChromeCtrl(m_hWnd) && CCC_AcrylicCaption(::GetParent(m_hWnd)))))
     {
         CClientDC dc(this);
         PaintOpaqueClient(dc);
@@ -6967,7 +7296,8 @@ void CCustomStandardButton::RepaintClient()
 void CCustomStandardButton::OnPaint()
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)
+        || (CCC_IsCaptionChromeCtrl(m_hWnd) && CCC_AcrylicCaption(::GetParent(m_hWnd)))))
     {
         CPaintDC dc(this);
         PaintOpaqueClient(dc);
@@ -6987,7 +7317,13 @@ LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
     {
         CRect r;
         GetClientRect(&r);
-        PaintClient(*pDC, r);
+#if CCUSTOM_AERO_SUPPORT
+        if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)
+            || (CCC_IsCaptionChromeCtrl(m_hWnd) && CCC_AcrylicCaption(::GetParent(m_hWnd)))))
+            PaintOpaqueClient(*pDC);
+        else
+#endif
+            PaintClient(*pDC, r);
     }
     return 0;
 }
@@ -6995,7 +7331,7 @@ LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
 BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11())
+    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)))
         return TRUE;
 #endif
     if (pDC)
@@ -7195,6 +7531,26 @@ void CCustomCheckBox::OnPaint()
         return;
     }
 
+#if CCUSTOM_AERO_SUPPORT
+    // キャプションのみホスト α / 本文 aero: 素 BitBlt は α=0 で消える
+    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)))
+    {
+        BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+        params.dwFlags = BPPF_ERASE;
+        HDC hdcBuf = NULL;
+        HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+        if (hdcBuf && hBP) {
+            CDC dcBuf;
+            dcBuf.Attach(hdcBuf);
+            OnDrawLayer(&dcBuf, r);
+            dcBuf.Detach();
+            ::BufferedPaintMakeOpaque(hBP, &r);
+            ::EndBufferedPaint(hBP, TRUE);
+            return;
+        }
+    }
+#endif
+
     // 非透過時はダブルバッファ化してちらつきを防ぐ(淫女モードの毎フレーム再描画対策)
     CDC mem;
     if (!mem.CreateCompatibleDC(&dc)) { OnDrawLayer(&dc, r); return; }
@@ -7296,7 +7652,17 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             if (!t.IsEmpty())
             {
                 CRect rt(rcB.right + 8, 0, rw, rh);
-                DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_SINGLELINE, bD, FALSE);
+                // キャプション帯の「メインに追従」は白文字（透過時の暗色だと黒帯に溶ける）
+                const BOOL bCapLock = (GetDlgCtrlID() == IDC_MAINWIN_LOCK)
+                    && (CCC_GetCustomCaptionHeight(::GetParent(m_hWnd)) > 0);
+                if (bCapLock) {
+                    dc.SetBkMode(TRANSPARENT);
+                    dc.SetTextColor(bD ? RGB(180, 180, 180) : RGB(255, 255, 255));
+                    dc.DrawText(t, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+                }
+                else {
+                    DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_SINGLELINE, bD, FALSE);
+                }
             }
             if (bC)
             {
@@ -8110,9 +8476,17 @@ private:
             break;
         case WM_PAINT:
         {
+            // BeginPaint の DC は更新矩形でクリップされるため、最終行より下の空きが
+            // 矩形外だと BPPF_ERASE の黒のまま残る。検証は BeginPaint で行い、
+            // 実描画はクリップ無しの GetDC へフルクライアントを描く。
+            // ※部分 MakeOpaque はキャプション常時アクリル時に本文が透過して見えるので禁止。
             PAINTSTRUCT ps = {};
-            HDC hDC = ::BeginPaint(hWnd, &ps);
-            if (hDC) pThis->PaintOpaque(hWnd, hDC);
+            ::BeginPaint(hWnd, &ps);
+            HDC hDC = ::GetDC(hWnd);
+            if (hDC) {
+                pThis->PaintOpaque(hWnd, hDC);
+                ::ReleaseDC(hWnd, hDC);
+            }
             ::EndPaint(hWnd, &ps);
             return 0;
         }
@@ -8129,16 +8503,25 @@ private:
         case WM_HSCROLL:
         case WM_MOUSEWHEEL:
         {
+            // キャプション常時アクリル下では、ListView の中間描画(ジャケ/♪の透明画素)が
+            // α=0 のまま画面に載り一瞬ガラスが見える=ちらつき。描画を止めてから
+            // 全面 MakeOpaque 1回だけ出す。部分 MakeOpaque は本文透過になるので使わない。
+            wchar_t cls[32];
+            cls[0] = 0;
+            ::GetClassNameW(hWnd, cls, 32);
+            const BOOL bList = (::_wcsicmp(cls, L"SysListView32") == 0);
+            if (bList)
+                ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            if (bList)
+                ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
+            ::ValidateRect(hWnd, NULL);
             HDC hDC = ::GetDC(hWnd);
-            if (hDC)
-            {
+            if (hDC) {
                 pThis->PaintOpaque(hWnd, hDC);
                 ::ReleaseDC(hWnd, hDC);
             }
-            // スクロール操作でスクロールバーの表示が変わるので NC も不透明化し直す
             pThis->MakeWindowOpaque(hWnd);
-            ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
             return lRes;
         }
         case CCC_WM_POST_OPAQUE_PAINT:
@@ -8227,6 +8610,8 @@ private:
             return;
         }
 
+        // キャプション常時アクリル(ExtendFrame -1)下では本文コントロールを
+        // 必ず全面 α=255 にする。部分 MakeOpaque は周囲が透過して見える。
         BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
         params.dwFlags = BPPF_ERASE;
         HDC hdcBuf = NULL;
@@ -8304,9 +8689,72 @@ static BOOL CCC_IsBlurControl(HWND hWnd)
     return FALSE;
 }
 
+// キャプションだけアクリル（本文 save.aero=0）。ホストは α ガラスだが本文は不透明必須。
+static BOOL CCC_CaptionOnlyHostGlass(HWND hWnd)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (!hWnd || !CCC_IsWin11() || CCC_IsAeroEnabled())
+        return FALSE;
+    for (HWND h = hWnd; h; h = ::GetParent(h)) {
+        if (CCC_AcrylicCaption(h))
+            return TRUE;
+    }
+    return FALSE;
+#else
+    UNREFERENCED_PARAMETER(hWnd);
+    return FALSE;
+#endif
+}
+
 static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
 {
     if (!::IsWindow(hWnd)) return FALSE;
+    // キャプション帯のボタン/追随はガラス透過描画するため fixer しない
+    if (CCC_IsCaptionChromeCtrl(hWnd)) return FALSE;
+
+    // キャプションのみアクリル時は、本文の blur 系（スライダー/STATIC 等）も不透明化
+    // （αホストのまま通常 GDI だと穴＝変なアクリルになる）
+    if (CCC_CaptionOnlyHostGlass(hWnd)) {
+        if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
+        {
+            // 自前 Opaque blit する GDI ビュー。fixer の PRINTCLIENT だと中身が空になる
+            if (pw->GetRuntimeClass()) {
+                const char* cn = pw->GetRuntimeClass()->m_lpszClassName;
+                if (cn && (strcmp(cn, "CCommandRollView") == 0 || strcmp(cn, "CLyricsViewWnd") == 0))
+                    return FALSE;
+            }
+            if (dynamic_cast<CCustomListBox*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomListCtrl*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomTreeCtrl*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomTabCtrl*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomComboBox*>(pw)) return TRUE;
+            if (dynamic_cast<CButtonST*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomEdit*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomStandardButton*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomStatic*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomSliderCtrl*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomRangeSliderCtrl*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomGroupBox*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomProgressCtrl*>(pw)) return TRUE;
+        }
+        TCHAR cls[64] = {};
+        ::GetClassName(hWnd, cls, 63);
+        CString c(cls);
+        c.MakeUpper();
+        if (c.Find(_T("BUTTON")) >= 0) return TRUE;
+        if (c.Find(_T("LISTBOX")) >= 0) return TRUE;
+        if (c.Find(_T("SYSLISTVIEW32")) >= 0) return TRUE;
+        if (c.Find(_T("SYSTREEVIEW32")) >= 0) return TRUE;
+        if (c.Find(_T("SYSTABCONTROL32")) >= 0) return TRUE;
+        if (c.Find(_T("COMBOBOX")) >= 0) return TRUE;
+        if (c.Find(_T("EDIT")) >= 0) return TRUE;
+        if (c.Find(_T("STATIC")) >= 0) return TRUE;
+        if (c.Find(TRACKBAR_CLASS) >= 0) return TRUE;
+        if (c.Find(_T("MSCTLS_PROGRESS32")) >= 0) return TRUE;
+        return TRUE; // その他の子も穴防止
+    }
+
     if (CCC_IsBlurControl(hWnd)) return FALSE;
     if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
     {
@@ -8592,7 +9040,9 @@ static void CCC_PostOpaqueRepaint(HWND hWnd)
 
 static void CCC_ReapplyOpaqueFix(CWnd* pDlg, CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
 {
-    if (!pDlg || !pDlg->GetSafeHwnd() || !CCC_IsWin11() || !CCC_IsAeroEnabled()) return;
+    if (!pDlg || !pDlg->GetSafeHwnd() || !CCC_IsWin11()) return;
+    // AcrylicCaption 時は save.aero OFF でも fixer が必要
+    if (!CCC_IsAeroEnabled() && !CCC_AcrylicCaption(pDlg->m_hWnd)) return;
     CCC_ClearOpaqueFixerList(fixers);
     CCC_InstallOpaqueFixers(pDlg->m_hWnd, fixers);
     CCC_PostOpaqueRepaint(pDlg->m_hWnd);
@@ -8621,6 +9071,21 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
             if (rect.right <= rect.left || rect.bottom <= rect.top)
                 return;
             CClientDC dc(pw);
+#if CCUSTOM_AERO_SUPPORT
+            if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(hWnd)))
+            {
+                BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+                params.dwFlags = BPPF_ERASE;
+                HDC hdcBuf = NULL;
+                HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+                if (hdcBuf && hBP) {
+                    CCC_DrawButtonSTClient(hWnd, pBtn, hdcBuf, rect);
+                    ::BufferedPaintMakeOpaque(hBP, &rect);
+                    ::EndBufferedPaint(hBP, TRUE);
+                    return;
+                }
+            }
+#endif
             CCC_DrawButtonSTClient(hWnd, pBtn, dc.GetSafeHdc(), rect);
         }
         return;
@@ -8633,7 +9098,7 @@ void CCC_ForceRepaintHwnd(HWND hWnd)
     }
 
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled() && CCC_IsWin11() && CCC_ShouldOpaqueFix(hWnd))
+    if ((CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(hWnd)) && CCC_IsWin11() && CCC_ShouldOpaqueFix(hWnd))
     {
         ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
         return;
@@ -8707,8 +9172,627 @@ void CCC_RefreshKids(HWND hWnd)
 #endif
 
 // ============================================================================
+// カスタムキャプション (CCustomBlurDialog* 共通・アクリル有無に関係なく常時)
+// システム WS_CAPTION を外し、クライアント先頭帯に CCustom ボタンを置く。
+// ============================================================================
+struct CCC_MainLockEntry;
+static CCC_MainLockEntry* CCC_FindMainLockEntry(HWND hWnd);
+static void CCC_MainLockReleaseOverlayCache(CCC_MainLockEntry* e);
+
+struct CCC_CaptionEntry {
+    HWND hWnd = NULL;
+    int height = 0;
+    BOOL hasMin = FALSE;
+    BOOL hasMax = FALSE;
+    BOOL hasSettings = FALSE;
+    BOOL topmost = FALSE;
+    BOOL installed = FALSE;
+    // savedata.aero 非依存。キャプション帯は常にアクリル(1)
+    BOOL acrylicCaption = TRUE;
+    CCustomStandardButton* pClose = nullptr;
+    CCustomStandardButton* pMin = nullptr;
+    CCustomStandardButton* pMax = nullptr;
+    CCustomStandardButton* pSettings = nullptr;
+    CCustomStandardButton* pPin = nullptr;
+};
+
+static CCC_CaptionEntry g_captions[64];
+static int g_captionCount = 0;
+static const int CCC_CAP_BTN = 26;
+static const int CCC_CAP_GAP = 2;
+static const int CCC_CAP_RIGHT_MARGIN = 4;
+static const COLORREF CCC_CAP_BG = RGB(48, 40, 62);
+static const COLORREF CCC_CAP_BG_INACTIVE = RGB(58, 52, 68);
+static const COLORREF CCC_CAP_TEXT = RGB(255, 248, 252);
+
+static CCC_CaptionEntry* CCC_FindCaption(HWND hWnd);
+
+// キャプション専用アクリル判定。savedata.aero / m_bAeroEnabled は見ない
+BOOL CCC_AcrylicCaption(HWND hWnd)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (!hWnd || !::IsWindow(hWnd) || !CCC_IsWin11())
+        return FALSE;
+    CCC_CaptionEntry* e = CCC_FindCaption(hWnd);
+    return (e && e->installed && e->acrylicCaption) ? TRUE : FALSE;
+#else
+    UNREFERENCED_PARAMETER(hWnd);
+    return FALSE;
+#endif
+}
+
+static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
+{
+    if (!hWnd) return FALSE;
+    const UINT id = (UINT)::GetDlgCtrlID(hWnd);
+    return id == IDC_MAINWIN_LOCK
+        || id == IDC_CAP_CLOSE || id == IDC_CAP_MIN || id == IDC_CAP_MAX
+        || id == IDC_CAP_SETTINGS || id == IDC_CAP_PIN;
+}
+
+// PROPAGATE 後もキャプション帯は透過描画（チェック等）。ボタンは Opaque 経路。
+static void CCC_CaptionChromeReapplyTrans(HWND hDlg)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (!CCC_AcrylicCaption(hDlg)) return;
+    for (HWND h = ::GetWindow(hDlg, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+        if (!CCC_IsCaptionChromeCtrl(h)) continue;
+        CWnd* pw = CWnd::FromHandlePermanent(h);
+        if (!pw) continue;
+        if (auto* p = dynamic_cast<CCustomCheckBox*>(pw))
+            p->SetAeroMode(TRUE);
+    }
+#else
+    UNREFERENCED_PARAMETER(hDlg);
+#endif
+}
+
+// ClearRect が帯上の子画素を消すので、キャプション描画の最後に必ず載せ直す
+static void CCC_CaptionPaintChromeNow(HWND hDlg)
+{
+    if (!hDlg || !::IsWindow(hDlg)) return;
+    for (HWND h = ::GetWindow(hDlg, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+        if (!CCC_IsCaptionChromeCtrl(h) || !::IsWindowVisible(h)) continue;
+        CWnd* pw = CWnd::FromHandlePermanent(h);
+        if (auto* pBtn = dynamic_cast<CCustomStandardButton*>(pw)) {
+            pBtn->RepaintClient();
+            continue;
+        }
+        ::RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
+    }
+}
+
+// 本文 aero だけ解除（ホストの backdrop/α/ExtendFrame は触らない）
+static void CCC_DisableBodyAeroOnly(HWND hWnd)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (!hWnd || !::IsWindow(hWnd)) return;
+    CCC_ClearChildDwmBackdrop(hWnd);
+    CCC_ClearChildTrans(hWnd);
+#else
+    UNREFERENCED_PARAMETER(hWnd);
+#endif
+}
+
+// AcrylicCaption 時のホストガラス（常に全面 -1 + REDIRECTIONBITMAP_ALPHA）。
+// 本文の不透明化は描画側（FillRectOpaque / MakeOpaque / BitBlt opaque）。
+static void CCC_CaptionEnsureBackdrop(HWND hWnd)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (!CCC_AcrylicCaption(hWnd))
+        return;
+    BOOL compositionEnabled = FALSE;
+    if (!::DwmIsCompositionEnabled(&compositionEnabled) || !compositionEnabled)
+        return;
+
+    static BOOL s_bpInit = FALSE;
+    if (!s_bpInit) {
+        ::BufferedPaintInit();
+        s_bpInit = TRUE;
+    }
+
+#ifndef DWMWA_COLOR_NONE
+#define DWMWA_COLOR_NONE 0xFFFFFFFE
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#ifndef DWMWA_TEXT_COLOR
+#define DWMWA_TEXT_COLOR 36
+#endif
+#ifndef DWMWA_REDIRECTIONBITMAP_ALPHA
+#define DWMWA_REDIRECTIONBITMAP_ALPHA 39
+#endif
+    const COLORREF colorNone = (COLORREF)DWMWA_COLOR_NONE;
+    ::DwmSetWindowAttribute(hWnd, DWMWA_CAPTION_COLOR, &colorNone, sizeof(colorNone));
+    ::DwmSetWindowAttribute(hWnd, DWMWA_TEXT_COLOR, &colorNone, sizeof(colorNone));
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
+    ::DwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, &colorNone, sizeof(colorNone));
+
+    LONG exStyle = ::GetWindowLong(hWnd, GWL_EXSTYLE);
+    if (exStyle & WS_EX_LAYERED)
+        ::SetWindowLong(hWnd, GWL_EXSTYLE, exStyle & ~WS_EX_LAYERED);
+
+    int backdropType = 3; // DWMSBT_TRANSIENTWINDOW = Desktop Acrylic
+    ::DwmSetWindowAttribute(hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropType, sizeof(backdropType));
+    ::EnableRoundedCorners(hWnd);
+
+    {
+        BOOL useAlpha = TRUE;
+        ::DwmSetWindowAttribute(hWnd, DWMWA_REDIRECTIONBITMAP_ALPHA, &useAlpha, sizeof(useAlpha));
+    }
+
+    const MARGINS margins = CCC_CaptionHostMargins(hWnd);
+    ::DwmExtendFrameIntoClientArea(hWnd, &margins);
+    ::SetClassLongPtr(hWnd, GCLP_HBRBACKGROUND, 0);
+#else
+    UNREFERENCED_PARAMETER(hWnd);
+#endif
+}
+
+// 既存 RGB を保ったまま α=255 にする（ピアノ/アナライザ等の BitBlt 後の全透過を塞ぐ）
+static void CCC_MakeRectOpaquePreserve(HDC hdc, const RECT& rc)
+{
+    const int w = rc.right - rc.left;
+    const int h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0 || !hdc) return;
+
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdc, &rc, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (hdcBuf && hBP) {
+        ::BitBlt(hdcBuf, rc.left, rc.top, w, h, hdc, rc.left, rc.top, SRCCOPY);
+        ::BufferedPaintMakeOpaque(hBP, &rc);
+        RGBQUAD* pPixels = nullptr;
+        int rowLength = 0;
+        if (SUCCEEDED(::GetBufferedPaintBits(hBP, &pPixels, &rowLength)) && pPixels && rowLength > 0) {
+            for (int y = 0; y < h; ++y) {
+                RGBQUAD* row = reinterpret_cast<RGBQUAD*>(
+                    reinterpret_cast<BYTE*>(pPixels) + y * rowLength * static_cast<int>(sizeof(RGBQUAD)));
+                for (int x = 0; x < w; ++x)
+                    row[x].rgbReserved = 255;
+            }
+        }
+        ::EndBufferedPaint(hBP, TRUE);
+    }
+}
+
+// ホストアクリルを有効化してから fixer（描画フラグ m_bAeroEnabled は別）
+static void CCC_CaptionApplyGlassAndFixers(CWnd* pDlg,
+    CTypedPtrList<CPtrList, CCustomOpaqueFixer*>& fixers)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (!pDlg || !pDlg->GetSafeHwnd()) return;
+    if (!CCC_AcrylicCaption(pDlg->m_hWnd) || !CCC_IsWin11()) {
+        CCC_CaptionEnsureBackdrop(pDlg->m_hWnd);
+        return;
+    }
+
+    // キャプションアクリル用ホストは本文 aero と同じ ApplyAero(TRUE)/-1。
+    // 子への透過モード伝播だけ save.aero に従う（本文 GDI は描画で α=255 化）。
+    if (CCC_IsAeroEnabled()) {
+        CCC_ApplyAero(pDlg->m_hWnd, TRUE);
+        PROPAGATE_AERO_TO_CHILDREN(pDlg->m_hWnd, TRUE);
+    }
+    else {
+        CCC_ApplyAero(pDlg->m_hWnd, TRUE);
+        PROPAGATE_AERO_TO_CHILDREN(pDlg->m_hWnd, FALSE);
+    }
+
+    // ApplyAero 末尾 FRAMECHANGED でマージンが落ちるので載せ直す
+    CCC_CaptionEnsureBackdrop(pDlg->m_hWnd);
+    CCC_PrepareDialogSurface(pDlg->m_hWnd, CCC_IsAeroEnabled());
+    pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+    CCC_CaptionChromeReapplyTrans(pDlg->m_hWnd);
+
+    CCC_ClearOpaqueFixerList(fixers);
+    CCC_InstallOpaqueFixers(pDlg->m_hWnd, fixers);
+    CCC_PostOpaqueRepaint(pDlg->m_hWnd);
+    pDlg->RedrawWindow(NULL, NULL,
+        RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+#else
+    UNREFERENCED_PARAMETER(pDlg);
+    UNREFERENCED_PARAMETER(fixers);
+#endif
+}
+
+// キャプション下の本文を α=255 で塗り、ホストガラスが本文に出ないようにする。
+// 帯は CaptionPaint の ClearRect のまま残す（clip 全体を塗るとアクリルが消える）。
+static void CCC_PaintOpaqueBodyBelowCaption(CDC& dc, CWnd* pDlg, CBrush& brDlg)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (!pDlg || !pDlg->GetSafeHwnd()) return;
+    if (!CCC_CaptionOnlyHostGlass(pDlg->m_hWnd)) return;
+    CRect body;
+    pDlg->GetClientRect(&body);
+    const int capH = CCC_GetCustomCaptionHeight(pDlg->m_hWnd);
+    if (capH > 0 && body.Height() > capH)
+        body.top = capH;
+    if (body.Width() <= 0 || body.Height() <= 0) return;
+    // 子(リストのスクロールバー等)を潰さないよう隙間だけ塗る
+    const int saved = dc.SaveDC();
+    CCC_ClipNoChildren(dc, pDlg);
+    UNREFERENCED_PARAMETER(brDlg);
+    CRect clip;
+    if (dc.GetClipBox(&clip) != ERROR && !clip.IsRectEmpty()) {
+        CRect fill;
+        // 更新領域∩本文のみ。帯を含む clip をそのまま塗ると ClearRect が潰れる
+        // （MP/ピアノ/アナライザは自前 OnPaint 末尾 CaptionPaint のため被害なし）
+        if (fill.IntersectRect(&body, &clip) && fill.Width() > 0 && fill.Height() > 0)
+            CCC_FillRectOpaqueBits(dc.GetSafeHdc(), fill, COLOR_DIALOG_BG);
+    }
+    dc.RestoreDC(saved);
+#else
+    UNREFERENCED_PARAMETER(dc);
+    UNREFERENCED_PARAMETER(pDlg);
+    UNREFERENCED_PARAMETER(brDlg);
+#endif
+}
+
+// カスタムキャプション時: システムキャプション NC を作らず、左右下のリサイズ枠のみ残す。
+// 上辺 NC も残さない（細い枠に DWM タイトル残骸が出るのを防ぐ）。上端リサイズはクライアント側で。
+static LRESULT CCC_CaptionHandleNcCalcSize(HWND hWnd, WPARAM wParam, LPARAM lParam, LRESULT defResult)
+{
+    if (CCC_GetCustomCaptionHeight(hWnd) <= 0)
+        return defResult;
+    if (!wParam || !lParam)
+        return defResult;
+
+    NCCALCSIZE_PARAMS* p = reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
+    const DWORD style = (DWORD)::GetWindowLong(hWnd, GWL_STYLE);
+    const UINT dpi = CCC_GetControlDpi(hWnd);
+    int frameX = 0, frameY = 0;
+    if (style & WS_THICKFRAME) {
+        frameX = ::GetSystemMetricsForDpi(SM_CXFRAME, dpi) + ::GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+        frameY = ::GetSystemMetricsForDpi(SM_CYFRAME, dpi) + ::GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+    }
+    else if (style & WS_BORDER) {
+        frameX = ::GetSystemMetricsForDpi(SM_CXBORDER, dpi);
+        frameY = ::GetSystemMetricsForDpi(SM_CYBORDER, dpi);
+    }
+    // rgrc[0] = 新しい窓矩形。上は NC ゼロ（クライアントが天辺まで）。キャプションはクライアント描画。
+    p->rgrc[0].left += frameX;
+    p->rgrc[0].right -= frameX;
+    p->rgrc[0].bottom -= frameY;
+    // top はそのまま（窓上端 = クライアント上端）。DWM のシステムタイトル帯を作らない。
+    UNREFERENCED_PARAMETER(frameY);
+    return 0;
+}
+
+static CCC_CaptionEntry* CCC_FindCaption(HWND hWnd)
+{
+    for (int i = 0; i < g_captionCount; ++i) {
+        if (g_captions[i].hWnd == hWnd)
+            return &g_captions[i];
+    }
+    return nullptr;
+}
+
+static CCC_CaptionEntry* CCC_GetOrCreateCaption(HWND hWnd)
+{
+    if (CCC_CaptionEntry* e = CCC_FindCaption(hWnd))
+        return e;
+    if (g_captionCount >= (int)_countof(g_captions))
+        return nullptr;
+    CCC_CaptionEntry* e = &g_captions[g_captionCount++];
+    e->hWnd = hWnd;
+    return e;
+}
+
+int CCC_GetCustomCaptionHeight(HWND hDlg)
+{
+    CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
+    if (!e || !e->installed)
+        return 0;
+    return e->height;
+}
+
+static void CCC_CaptionDestroyBtn(CCustomStandardButton*& p)
+{
+    if (!p)
+        return;
+    if (::IsWindow(p->GetSafeHwnd()))
+        p->DestroyWindow();
+    p = nullptr;
+}
+
+void CCC_CaptionUnregister(HWND hWnd)
+{
+    for (int i = 0; i < g_captionCount; ++i) {
+        if (g_captions[i].hWnd != hWnd)
+            continue;
+        CCC_CaptionDestroyBtn(g_captions[i].pClose);
+        CCC_CaptionDestroyBtn(g_captions[i].pMin);
+        CCC_CaptionDestroyBtn(g_captions[i].pMax);
+        CCC_CaptionDestroyBtn(g_captions[i].pSettings);
+        CCC_CaptionDestroyBtn(g_captions[i].pPin);
+        for (int j = i + 1; j < g_captionCount; ++j)
+            g_captions[j - 1] = g_captions[j];
+        --g_captionCount;
+        ZeroMemory(&g_captions[g_captionCount], sizeof(g_captions[g_captionCount]));
+        break;
+    }
+}
+
+static CCustomStandardButton* CCC_CaptionMakeBtn(CWnd* pDlg, UINT id, LPCWSTR text)
+{
+    CCustomStandardButton* p = new CCustomStandardButton();
+    p->EnableAutoDelete(TRUE);
+    p->SetFlat(TRUE);
+    CRect rc(0, 0, CCC_CAP_BTN, CCC_CAP_BTN);
+    if (!p->Create(text, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, rc, pDlg, id)) {
+        delete p;
+        return nullptr;
+    }
+    if (CFont* pFont = pDlg->GetFont())
+        p->SetFont(pFont);
+    return p;
+}
+
+static int CCC_CaptionSysBtnCount(const CCC_CaptionEntry* e)
+{
+    int n = 1; // close
+    if (e->hasMax) ++n;
+    if (e->hasMin) ++n;
+    return n;
+}
+
+static int CCC_CaptionExtraBtnCount(const CCC_CaptionEntry* e)
+{
+    int n = 0;
+    if (e->hasSettings) ++n;
+    ++n; // pin always
+    return n;
+}
+
+static void CCC_CaptionGetTitleRight(HWND hDlg, CCC_CaptionEntry* e, int& titleRight)
+{
+    CRect cr;
+    ::GetClientRect(hDlg, &cr);
+    const int sysN = CCC_CaptionSysBtnCount(e);
+    const int extraN = CCC_CaptionExtraBtnCount(e);
+    const int lockW = CCC_MainLockGetReserveWidth(hDlg);
+    titleRight = cr.right - CCC_CAP_RIGHT_MARGIN
+        - sysN * (CCC_CAP_BTN + CCC_CAP_GAP)
+        - extraN * (CCC_CAP_BTN + CCC_CAP_GAP)
+        - ((lockW > 0) ? (lockW + CCC_CAP_GAP) : 0);
+    if (titleRight < 28)
+        titleRight = 28;
+}
+
+void CCC_CaptionLayout(HWND hDlg)
+{
+    CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
+    if (!e || !e->installed || !::IsWindow(hDlg))
+        return;
+    CRect cr;
+    ::GetClientRect(hDlg, &cr);
+    const int y = (e->height - CCC_CAP_BTN) / 2;
+    int x = cr.right - CCC_CAP_RIGHT_MARGIN - CCC_CAP_BTN;
+
+    if (e->pClose && ::IsWindow(e->pClose->GetSafeHwnd())) {
+        e->pClose->SetWindowPos(&CWnd::wndTop, x, y, CCC_CAP_BTN, CCC_CAP_BTN,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOCOPYBITS);
+        x -= (CCC_CAP_BTN + CCC_CAP_GAP);
+    }
+    if (e->hasMax && e->pMax && ::IsWindow(e->pMax->GetSafeHwnd())) {
+        e->pMax->SetWindowPos(&CWnd::wndTop, x, y, CCC_CAP_BTN, CCC_CAP_BTN,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOCOPYBITS);
+        x -= (CCC_CAP_BTN + CCC_CAP_GAP);
+    }
+    if (e->hasMin && e->pMin && ::IsWindow(e->pMin->GetSafeHwnd())) {
+        e->pMin->SetWindowPos(&CWnd::wndTop, x, y, CCC_CAP_BTN, CCC_CAP_BTN,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOCOPYBITS);
+        x -= (CCC_CAP_BTN + CCC_CAP_GAP);
+    }
+    if (e->hasSettings && e->pSettings && ::IsWindow(e->pSettings->GetSafeHwnd())) {
+        e->pSettings->SetWindowPos(&CWnd::wndTop, x, y, CCC_CAP_BTN, CCC_CAP_BTN,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOCOPYBITS);
+        x -= (CCC_CAP_BTN + CCC_CAP_GAP);
+    }
+    if (e->pPin && ::IsWindow(e->pPin->GetSafeHwnd())) {
+        e->pPin->SetWindowPos(&CWnd::wndTop, x, y, CCC_CAP_BTN, CCC_CAP_BTN,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOCOPYBITS);
+    }
+
+    CCC_MainLockBringToFront(hDlg);
+}
+
+void CCC_CaptionPaint(CDC& dc, HWND hDlg)
+{
+    CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
+    if (!e || !e->installed || !::IsWindow(hDlg))
+        return;
+    CRect cr;
+    ::GetClientRect(hDlg, &cr);
+    CRect bar(0, 0, cr.right, e->height);
+    if (bar.Width() <= 0 || bar.Height() <= 0)
+        return;
+
+    // 本文だけの再描画では帯に触らない（ピアノ/アナライザ演奏中のちらつき・負荷の主因）
+    {
+        CRect clip;
+        if (dc.GetClipBox(&clip) != ERROR && !clip.IsRectEmpty()) {
+            CRect hit;
+            if (!hit.IntersectRect(&clip, &bar))
+                return;
+        }
+    }
+
+    const BOOL bAcrylicCap = CCC_AcrylicCaption(hDlg);
+    const BOOL active = (::GetForegroundWindow() == hDlg)
+        || (::GetActiveWindow() == hDlg)
+        || (::GetAncestor(hDlg, GA_ROOT) && ::GetForegroundWindow() == ::GetAncestor(hDlg, GA_ROOT));
+    const COLORREF bgSolid = active ? CCC_CAP_BG : CCC_CAP_BG_INACTIVE;
+
+#if CCUSTOM_AERO_SUPPORT
+    if (bAcrylicCap) {
+        // 帯ガラス: ClearRect(α=0) + タイトル。EnsureBackdrop は毎フレーム呼ばない（ちらつき源）。
+        // ClearRect は帯上のボタン画素も消すので、最後に ChromeNow で載せ直す。
+        const BOOL bCaptionOnly = !CCC_IsAeroEnabled();
+
+        if (bCaptionOnly) {
+            CRect body = cr;
+            if (e->height > 0 && body.Height() > e->height)
+                body.top = e->height;
+            CRect clip;
+            if (dc.GetClipBox(&clip) != ERROR && !clip.IsRectEmpty())
+                body.IntersectRect(&body, &clip);
+            // 帯だけの更新では本文 MakeOpaque しない（バナー演奏ちらつき抑制）
+            if (body.Width() > 0 && body.Height() > 8)
+                CCC_MakeRectOpaquePreserve(dc.GetSafeHdc(), body);
+        }
+
+        RECT rcBar = bar;
+        CCC_ClearRectChroma(dc.GetSafeHdc(), rcBar, CCC_AERO_CHROMA_KEY);
+
+        const int w = bar.Width();
+        const int h = bar.Height();
+        BITMAPINFO bi = {};
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = w;
+        bi.bmiHeader.biHeight = -h;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        void* pBits = nullptr;
+        HBITMAP hDib = ::CreateDIBSection(dc.GetSafeHdc(), &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
+        if (hDib && pBits) {
+            ::ZeroMemory(pBits, static_cast<size_t>(w) * static_cast<size_t>(h) * 4u);
+            HDC hdcMem = ::CreateCompatibleDC(dc.GetSafeHdc());
+            HGDIOBJ oldBmp = ::SelectObject(hdcMem, hDib);
+
+            int textLeft = 8;
+            HICON hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_SMALL, 0);
+            if (!hIcon)
+                hIcon = (HICON)::GetClassLongPtr(hDlg, GCLP_HICONSM);
+            if (!hIcon)
+                hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_BIG, 0);
+            if (hIcon) {
+                const int isz = 16;
+                const int iy = (h - isz) / 2;
+                ::DrawIconEx(hdcMem, 6, iy, hIcon, isz, isz, 0, NULL, DI_NORMAL);
+                textLeft = 6 + isz + 6;
+            }
+
+            wchar_t title[512];
+            title[0] = 0;
+            ::GetWindowTextW(hDlg, title, 511);
+            int titleRight = bar.right;
+            CCC_CaptionGetTitleRight(hDlg, e, titleRight);
+            RECT textRc = { textLeft, 0, titleRight - 4, h };
+
+            HTHEME hTheme = ::OpenThemeData(hDlg, L"WINDOW");
+            if (hTheme) {
+                DTTOPTS opt = {};
+                opt.dwSize = sizeof(opt);
+                opt.dwFlags = DTT_COMPOSITED | DTT_TEXTCOLOR | DTT_GLOWSIZE;
+                opt.crText = RGB(255, 255, 255);
+                opt.iGlowSize = 10;
+                ::DrawThemeTextEx(hTheme, hdcMem, 0, 0, title, -1,
+                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                    &textRc, &opt);
+                ::CloseThemeData(hTheme);
+            }
+            else {
+                ::SetBkMode(hdcMem, TRANSPARENT);
+                ::SetTextColor(hdcMem, RGB(255, 255, 255));
+                ::DrawTextW(hdcMem, title, -1, &textRc,
+                    DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            }
+
+            // DrawIconEx 等が α=0 のまま残す画素を、非ゼロ RGB だけ不透明化
+            {
+                UINT32* px = static_cast<UINT32*>(pBits);
+                const int n = w * h;
+                for (int i = 0; i < n; ++i) {
+                    UINT32 p = px[i];
+                    if ((p & 0x00FFFFFFu) != 0 && (p >> 24) == 0)
+                        px[i] = p | 0xFF000000u;
+                }
+            }
+
+            BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+            HDC hdcBuf = NULL;
+            HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &rcBar, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+            if (hdcBuf && hBP) {
+                CCC_InitBPClear(hBP, w, h);
+                const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+                ::GdiAlphaBlend(hdcBuf, rcBar.left, rcBar.top, w, h, hdcMem, 0, 0, w, h, bf);
+                ::EndBufferedPaint(hBP, TRUE);
+            }
+            else {
+                const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+                ::GdiAlphaBlend(dc.GetSafeHdc(), 0, 0, w, h, hdcMem, 0, 0, w, h, bf);
+            }
+
+            ::SelectObject(hdcMem, oldBmp);
+            ::DeleteDC(hdcMem);
+            ::DeleteObject(hDib);
+        }
+        CCC_CaptionPaintChromeNow(hDlg);
+        return;
+    }
+#endif
+
+    CDC mem;
+    CBitmap bmp;
+    mem.CreateCompatibleDC(&dc);
+    bmp.CreateCompatibleBitmap(&dc, bar.Width(), bar.Height());
+    CBitmap* old = mem.SelectObject(&bmp);
+    mem.FillSolidRect(0, 0, bar.Width(), bar.Height(), bgSolid);
+    mem.FillSolidRect(0, bar.Height() - 1, bar.Width(), 1, RGB(90, 70, 110));
+
+    int textLeft = 8;
+    HICON hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_SMALL, 0);
+    if (!hIcon)
+        hIcon = (HICON)::GetClassLongPtr(hDlg, GCLP_HICONSM);
+    if (!hIcon)
+        hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_BIG, 0);
+    if (hIcon) {
+        const int isz = 16;
+        const int iy = (bar.Height() - isz) / 2;
+        ::DrawIconEx(mem.GetSafeHdc(), 6, iy, hIcon, isz, isz, 0, NULL, DI_NORMAL);
+        textLeft = 6 + isz + 6;
+    }
+
+    wchar_t title[512];
+    title[0] = 0;
+    ::GetWindowTextW(hDlg, title, 511);
+    int titleRight = bar.right;
+    CCC_CaptionGetTitleRight(hDlg, e, titleRight);
+    CRect textRc(textLeft, 0, titleRight - 4, bar.Height());
+    mem.SetBkMode(TRANSPARENT);
+    mem.SetTextColor(CCC_CAP_TEXT);
+    CWnd* pDlg = CWnd::FromHandlePermanent(hDlg);
+    if (!pDlg)
+        pDlg = CWnd::FromHandle(hDlg);
+    CFont* pOldFont = nullptr;
+    if (pDlg && pDlg->GetFont())
+        pOldFont = mem.SelectObject(pDlg->GetFont());
+    mem.DrawText(title, textRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    if (pOldFont)
+        mem.SelectObject(pOldFont);
+
+    dc.BitBlt(0, 0, bar.Width(), bar.Height(), &mem, 0, 0, SRCCOPY);
+    mem.SelectObject(old);
+}
+
+static BOOL CCC_CaptionIsRenderClass(CWnd* pDlg)
+{
+    if (!pDlg || !pDlg->GetRuntimeClass())
+        return FALSE;
+    return strcmp(pDlg->GetRuntimeClass()->m_lpszClassName, "CRender") == 0;
+}
+
+static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip); // MainLock 定義後に実装
+
+// ============================================================================
 // メインウィンドウ位置ロック (サブウィンドウが COggDlg / CMediaPlayerDlg に追随)
 // 通常ダイアログ: 子 CCustomCheckBox / GDI全画面(ピアノロール等): オーバーレイ描画
+// カスタムキャプション時はキャプション帯へ子チェックを置く（オーバーレイも子へ切替）
 // ============================================================================
 struct CCC_MainLockOverlayCache {
     CDC dc;
@@ -8895,6 +9979,31 @@ static void CCC_MainLockGetClientRect(HWND hDlg, CRect& rc)
     CRect cr;
     pDlg->GetClientRect(&cr);
     const int w = CCC_MainLockMeasureWidth(pDlg);
+    const int capH = CCC_GetCustomCaptionHeight(hDlg);
+    if (capH > 0) {
+        // キャプション帯: システムボタン/設定/ピンの左（右端はみ出し禁止）
+        CCC_CaptionEntry* ce = CCC_FindCaption(hDlg);
+        int right = cr.right - CCC_CAP_RIGHT_MARGIN;
+        if (ce) {
+            right -= (CCC_CaptionSysBtnCount(ce) + CCC_CaptionExtraBtnCount(ce)) * (CCC_CAP_BTN + CCC_CAP_GAP);
+        }
+        if (right < 36)
+            right = 36;
+        int left = right - w;
+        if (left < 28)
+            left = 28;
+        if (left > right - 8)
+            left = max(28, right - 8);
+        rc.left = left;
+        rc.right = right;
+        if (rc.right <= rc.left)
+            rc.right = rc.left + 8;
+        rc.top = (capH - CCC_MAINLOCK_H) / 2;
+        if (rc.top < 1)
+            rc.top = 1;
+        rc.bottom = rc.top + CCC_MAINLOCK_H;
+        return;
+    }
     int left = cr.right - w - CCC_MAINLOCK_MARGIN;
     if (left < 4)
         left = 4;
@@ -9029,10 +10138,9 @@ static void CCC_MainLockEnsureBtn(CWnd* pDlg, CCC_MainLockEntry* e)
 
     e->pLockBtn = new CCustomCheckBox();
     e->pLockBtn->EnableAutoDelete(TRUE);
-    // 親がアクリルなら他のチェックボックスと同様に透過描画にする
-    // (FALSE 固定だと不透明ピンクの矩形がアクリル面に浮くデグレになる)
+    // 追従チェックは save.aero に関係なく Win11 ならアクリル透過描画
 #if CCUSTOM_AERO_SUPPORT
-    e->pLockBtn->SetAeroMode(CCC_IsAeroEnabled() && CCC_IsBlurDialogChild(pDlg->GetSafeHwnd()));
+    e->pLockBtn->SetAeroMode(CCC_AcrylicCaption(pDlg->GetSafeHwnd()) ? TRUE : FALSE);
 #else
     e->pLockBtn->SetAeroMode(FALSE);
 #endif
@@ -9097,7 +10205,11 @@ static void CCC_MainLockShowBtn(HWND hDlg, BOOL bShow)
 
 static void CCC_MainLockDrawOverlay(CDC& dc, const CRect& rc, BOOL locked)
 {
+#if CCUSTOM_AERO_SUPPORT
+    dc.FillSolidRect(rc, CCC_AERO_CHROMA_KEY);
+#else
     dc.FillSolidRect(rc, RGB(52, 44, 68));
+#endif
 
     CRect chk(rc.left + 3, rc.top + 4, rc.left + 17, rc.top + 18);
     dc.DrawEdge(chk, EDGE_SUNKEN, BF_RECT);
@@ -9111,7 +10223,7 @@ static void CCC_MainLockDrawOverlay(CDC& dc, const CRect& rc, BOOL locked)
     }
 
     dc.SetBkMode(TRANSPARENT);
-    dc.SetTextColor(RGB(255, 248, 252));
+    dc.SetTextColor(RGB(255, 255, 255));
     CRect textRc = rc;
     textRc.left += 20;
     dc.DrawText(CCC_MainLockLabel(), textRc, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
@@ -9165,11 +10277,9 @@ void CCC_MainLockPaintClient(CDC& dc, HWND hDlg)
     dc.SelectClipRgn(NULL);
     dc.IntersectClipRect(&rc);
 #if CCUSTOM_AERO_SUPPORT
-    // アクリル(Win11)面では通常 BitBlt はアルファ0のまま書かれ DWM に
-    // ガラス扱いされて完全透過になる(mp バナーと同じ理由)。不透明合成で描く。
-    if (CCC_IsAeroEnabled() && CCC_IsWin11()) {
-        CCC_BlitStretchOpaque(dc.GetSafeHdc(), rc.left, rc.top, w, h,
-            pCache->dc.GetSafeHdc(), 0, 0, w, h);
+    if (CCC_AcrylicCaption(hDlg)) {
+        CCC_BlitChromaNF(dc.GetSafeHdc(), rc.left, rc.top, w, h,
+            pCache->dc.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
         dc.RestoreDC(saved);
         return;
     }
@@ -9191,7 +10301,7 @@ BOOL CCC_MainLockOverlayHitTest(HWND hDlg, CPoint ptClient)
 void CCC_MainLockOverlayToggle(HWND hDlg)
 {
     CCC_MainLockEntry* e = CCC_FindMainLockEntry(hDlg);
-    if (!e || !e->pSaveFlag || !e->overlayPaint)
+    if (!e || !e->pSaveFlag)
         return;
     CCC_ApplyMainLockState(e, !e->locked);
 }
@@ -9237,6 +10347,9 @@ void CCC_MainLockSetup(CWnd* pDlg, int* pSavedLockFlag, BOOL bOverlayPaint)
     if (!e)
         return;
     e->pSaveFlag = pSavedLockFlag;
+    // カスタムキャプション時は子チェックのみ（オーバーレイはキャプション帯と競合するため）
+    if (CCC_GetCustomCaptionHeight(pDlg->GetSafeHwnd()) > 0)
+        bOverlayPaint = FALSE;
     e->overlayPaint = bOverlayPaint;
     if (e->overlayPaint)
         CCC_MainLockDestroyBtn(e);
@@ -9245,6 +10358,118 @@ void CCC_MainLockSetup(CWnd* pDlg, int* pSavedLockFlag, BOOL bOverlayPaint)
         CCC_MainLockInvalidateOverlay(pDlg->GetSafeHwnd());
     else
         CCC_MainLockBringToFront(pDlg->GetSafeHwnd());
+}
+
+static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
+{
+    if (!pDlg || !::IsWindow(pDlg->GetSafeHwnd()))
+        return;
+    HWND hWnd = pDlg->GetSafeHwnd();
+    if (CCC_FindCaption(hWnd) && CCC_FindCaption(hWnd)->installed)
+        return;
+
+    const DWORD style = (DWORD)::GetWindowLong(hWnd, GWL_STYLE);
+    if (!(style & WS_CAPTION))
+        return;
+
+    // DWM 連携のため WS_CAPTION は残す。描画は NC 吸収後のクライアント帯のみ。
+    const UINT dpi = CCC_GetControlDpi(hWnd);
+    int sysCap = ::GetSystemMetricsForDpi(SM_CYCAPTION, dpi);
+    if (sysCap < 24)
+        sysCap = 24;
+    int capH = CCC_ScaleDpi(32, dpi);
+    if (capH < CCC_CAP_BTN + 6)
+        capH = CCC_CAP_BTN + 6;
+    if (capH < sysCap)
+        capH = sysCap;
+
+    CCC_CaptionEntry* e = CCC_GetOrCreateCaption(hWnd);
+    if (!e)
+        return;
+    e->height = capH;
+    e->hasMin = (style & WS_MINIMIZEBOX) != 0;
+    e->hasMax = (style & WS_MAXIMIZEBOX) != 0;
+    e->hasSettings = !CCC_CaptionIsRenderClass(pDlg);
+    e->topmost = (::GetWindowLong(hWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+
+    CRect rcBefore;
+    pDlg->GetClientRect(&rcBefore);
+
+    // モーダル枠だけ外す。WS_CAPTION は DWM 用に維持。
+    // システムの min/max ボタンはカスタム側で描くのでスタイルから外す（残骸防止）
+    pDlg->ModifyStyle(DS_MODALFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX, 0);
+    // ホスト α 時は CLIPCHILDREN 必須（親塗りがリスト等のスクロールバーを潰すのを防ぐ）
+    pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+    e->acrylicCaption = TRUE; // 常時1。savedata.aero とは独立
+    e->installed = TRUE;
+
+    // 先に NC 吸収（FRAMECHANGED）。ExtendFrame より後に FRAMECHANGED すると
+    // DWM マージンが消えて「一瞬アクリル→黒帯」＋クライアント縦幅変化になる。
+    pDlg->SetWindowPos(NULL, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    CRect rcAfter;
+    pDlg->GetClientRect(&rcAfter);
+    int grown = rcAfter.Height() - rcBefore.Height();
+    if (grown < 0)
+        grown = 0;
+    // NC 吸収分だけ下げる。capH で上乗せすると内容が余分に下がり「縦幅変化」に見える
+    int shift = grown > 0 ? grown : capH;
+    e->height = capH;
+
+    HWND hChild = ::GetWindow(hWnd, GW_CHILD);
+    while (hChild) {
+        RECT r;
+        ::GetWindowRect(hChild, &r);
+        ::ScreenToClient(hWnd, (LPPOINT)&r.left);
+        ::ScreenToClient(hWnd, (LPPOINT)&r.right);
+        ::SetWindowPos(hChild, NULL, r.left, r.top + shift, 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        hChild = ::GetWindow(hChild, GW_HWNDNEXT);
+    }
+
+    e->pClose = CCC_CaptionMakeBtn(pDlg, IDC_CAP_CLOSE, L"\u00D7");
+    if (e->hasMin)
+        e->pMin = CCC_CaptionMakeBtn(pDlg, IDC_CAP_MIN, L"\u2013");
+    if (e->hasMax)
+        e->pMax = CCC_CaptionMakeBtn(pDlg, IDC_CAP_MAX, pDlg->IsZoomed() ? L"\u2752" : L"\u25A1");
+    if (e->hasSettings)
+        e->pSettings = CCC_CaptionMakeBtn(pDlg, IDC_CAP_SETTINGS, L"\u2699");
+    e->pPin = CCC_CaptionMakeBtn(pDlg, IDC_CAP_PIN, e->topmost ? L"P*" : L"P");
+
+    if (CCC_MainLockEntry* le = CCC_FindMainLockEntry(hWnd)) {
+        if (le->overlayPaint) {
+            le->overlayPaint = FALSE;
+            CCC_MainLockReleaseOverlayCache(le);
+        }
+        le->headerRowTop = -1;
+        le->headerRowH = 0;
+    }
+
+    CCC_CaptionLayout(hWnd);
+
+    // DWM アクリル源は FRAMECHANGED の後（呼び出し側で fixer 込み ApplyGlass も可）
+    CCC_CaptionEnsureBackdrop(hWnd);
+
+    if (pTip) {
+        CCustomControlUtility::BeginDialogToolTip(*pTip, pDlg, TTS_NOPREFIX);
+        if (e->pClose)
+            pTip->AddTool(e->pClose, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+        if (e->pMin)
+            pTip->AddTool(e->pMin, LL14(L"最小化", L"Minimize", L"Reduire", L"Riduci a icona", L"Minimizar", L"최소화", L"最小化", L"تصغير", L"Свернуть", L"Minimieren", L"Minimizar", L"Minimaliseren", L"Minimalizuj", L"Kucult"));
+        if (e->pMax)
+            pTip->AddTool(e->pMax, LL14(L"最大化 / 元のサイズ", L"Maximize / Restore", L"Agrandir / Restaurer", L"Ingrandisci / Ripristina", L"Maximizar / Restaurar", L"최대화 / 복원", L"最大化 / 还原", L"تكبير / استعادة", L"Развернуть / Восстановить", L"Maximieren / Wiederherstellen", L"Maximizar / Restaurar", L"Maximaliseren / Herstellen", L"Maksymalizuj / Przywroc", L"Buyut / Geri yukle"));
+        if (e->pSettings)
+            pTip->AddTool(e->pSettings, LL14(L"設定（描画・アクリルなど）", L"Settings (render, acrylic, etc.)", L"Parametres (rendu, acrylique...)", L"Impostazioni (render, acrilico...)", L"Ajustes (render, acrilico...)", L"설정(렌더/아크릴 등)", L"设置（渲染、亚克力等）", L"الإعدادات (العرض، الأكريليك...)", L"Настройки (рендер, акрил...)", L"Einstellungen (Render, Acryl...)", L"Configuracoes (render, acrilico...)", L"Instellingen (render, acryl...)", L"Ustawienia (render, akryl...)", L"Ayarlar (render, akrilik...)"));
+        if (e->pPin)
+            pTip->AddTool(e->pPin, LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위", L"总在最前", L"دائماً في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd bovenop", L"Zawsze na wierzchu", L"Her zaman ustte"));
+        CCustomControlUtility::FinalizeDialogToolTip(*pTip);
+    }
+
+    CRect crc;
+    pDlg->GetClientRect(&crc);
+    pDlg->SendMessage(WM_SIZE, SIZE_RESTORED, MAKELPARAM(crc.Width(), crc.Height()));
+    pDlg->Invalidate(FALSE);
 }
 
 void CCC_MainLockUnregister(HWND hWnd)
@@ -9344,6 +10569,10 @@ void CCC_MainLockOnChildMoving(CWnd* pDlg, LPRECT pRect)
     }
 }
 
+static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainLockSave);
+static void CCC_CaptionOpenSettings(CWnd* pDlg);
+static void CCC_CaptionTogglePin(CWnd* pDlg);
+
 // ============================================================================
 // アクリルぼかし適用済みカスタムダイアログ (CDialog版)
 // ============================================================================
@@ -9358,7 +10587,18 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
     ON_WM_DESTROY()
     ON_WM_MOVING()
     ON_COMMAND(IDC_MAINWIN_LOCK, OnMainLockClicked)
+    ON_COMMAND(IDC_CAP_CLOSE, OnCapClose)
+    ON_COMMAND(IDC_CAP_MIN, OnCapMin)
+    ON_COMMAND(IDC_CAP_MAX, OnCapMax)
+    ON_COMMAND(IDC_CAP_SETTINGS, OnCapSettings)
+    ON_COMMAND(IDC_CAP_PIN, OnCapPin)
     ON_WM_LBUTTONDOWN()
+    ON_WM_LBUTTONDBLCLK()
+    ON_WM_RBUTTONUP()
+    ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTW, 0, 0xFFFF, OnTtnNeedText)
+    ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTA, 0, 0xFFFF, OnTtnNeedText)
+    ON_MESSAGE(CCC_MSG_INSTALL_CAPTION, OnInstallCustomCaption)
+    ON_WM_NCCALCSIZE()
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
@@ -9385,11 +10625,10 @@ BOOL CCustomBlurDialogBase::PreCreateWindow(CREATESTRUCT& cs)
     if (!CCustomDialog::PreCreateWindow(cs))
         return FALSE;
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled())
-    {
-        RegisterBlurDialogWndClass(cs.lpszClass, _T("CCustomBlurDlg"));
-        cs.lpszClass = _T("CCustomBlurDlg");
-    }
+    // AcrylicCaption 常時のため、save.aero に関係なく null brush 専用クラスを使う。
+    // #32770 のままだとクラスブラシが残り、αクリアが黒帯になる。
+    RegisterBlurDialogWndClass(cs.lpszClass, _T("CCustomBlurDlg"));
+    cs.lpszClass = _T("CCustomBlurDlg");
 #endif
     return TRUE;
 }
@@ -9401,7 +10640,27 @@ BOOL CCustomBlurDialogBase::OnInitDialog()
     ::SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, 0);
 #endif
     ApplyDwmBlur();
+    // キャプション化は初回 OnShowWindow（表示前）で行う。
+    // PostMessage だと Show 後に走り、システム帯の一瞬アクリル＋縦幅ジャンプになる。
     return b;
+}
+
+LRESULT CCustomBlurDialogBase::OnInstallCustomCaption(WPARAM, LPARAM)
+{
+    CCC_CaptionInstallCore(this, &m_capTip);
+#if CCUSTOM_AERO_SUPPORT
+    CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+#endif
+    return 0;
+}
+
+void CCustomBlurDialogBase::OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp)
+{
+    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0 && bCalcValidRects && lpncsp) {
+        CCC_CaptionHandleNcCalcSize(m_hWnd, TRUE, reinterpret_cast<LPARAM>(lpncsp), 0);
+        return;
+    }
+    CCustomDialog::OnNcCalcSize(bCalcValidRects, lpncsp);
 }
 
 void CCustomBlurDialogBase::RefreshAeroMode()
@@ -9418,27 +10677,43 @@ void CCustomBlurDialogBase::ApplyDwmBlurCore(BOOL bForce)
 {
     if (!m_hWnd || !::IsWindow(m_hWnd)) return;
 #if CCUSTOM_AERO_SUPPORT
+    // 同一 HWND への再入のみ防止（全窓共通 static だと RefreshAll が後続窓をスキップする）
+    if (m_bInApplyBlur) return;
+    m_bInApplyBlur = TRUE;
+
     const BOOL bWant = CCC_IsAeroEnabled();
     if (bWant)
     {
-        if (m_bBlurApplied && !bForce)
+        if (m_bBlurApplied && !bForce) {
+            m_bInApplyBlur = FALSE;
             return;
+        }
         m_bAeroEnabled = TRUE;
         CCC_FinishBlurDlg(this, TRUE, m_bBlurApplied, m_opaqueFixers);
+        // FinishBlur の FRAMECHANGED 後に帯ガラス＋fixer を載せる
+        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
         if (m_pMainLockSave)
             CCC_MainLockBringToFront(m_hWnd);
+        m_bInApplyBlur = FALSE;
         return;
     }
 
     m_bAeroEnabled = FALSE;
-    if (!m_bBlurApplied && !bForce)
+    if (!m_bBlurApplied && !bForce) {
+        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+        m_bInApplyBlur = FALSE;
         return;
+    }
+    // 本文 aero だけ解除。ApplyAero(FALSE) はホスト α/backdrop まで落とすので使わない
+    // （落とす→Ensure の隙間で黒帯が定着する）
     CCC_ClearOpaqueFixerList(m_opaqueFixers);
-    CCC_ApplyAero(m_hWnd, FALSE);
+    CCC_DisableBodyAeroOnly(m_hWnd);
     CCC_PrepareDialogSurface(m_hWnd, FALSE);
     PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
     m_bBlurApplied = FALSE;
-    Invalidate();
+    CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+    RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+    m_bInApplyBlur = FALSE;
 #else
     UNREFERENCED_PARAMETER(bForce);
     m_bBlurApplied = FALSE;
@@ -9447,6 +10722,13 @@ void CCustomBlurDialogBase::ApplyDwmBlurCore(BOOL bForce)
 
 void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
 {
+    // 表示前にキャプション化（システム帯のフラッシュと NC 吸収ジャンプを隠す）
+    if (bShow) {
+        CCC_CaptionInstallCore(this, &m_capTip);
+#if CCUSTOM_AERO_SUPPORT
+        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+#endif
+    }
     CCustomDialog::OnShowWindow(bShow, nStatus);
     if (m_pMainLockSave)
         CCC_MainLockShowBtn(m_hWnd, bShow);
@@ -9455,9 +10737,15 @@ void CCustomBlurDialogBase::OnShowWindow(BOOL bShow, UINT nStatus)
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_IsAeroEnabled())
     {
-        // 初回のみ Finalize。以降の再表示は DWM 属性の軽い再適用だけで足りる。
         ApplyDwmBlur();
         CCC_RefreshDwmBlur(m_hWnd);
+        CCC_CaptionEnsureBackdrop(m_hWnd);
+    }
+    else {
+        // 本文 off・キャプション on の同居パス
+        // RefreshDwmBlur(ExtendFrame) を後段で呼ぶと本文不透明塗りがガラスに戻るので、
+        // ApplyGlassAndFixers（内部で EnsureBackdrop + UPDATENOW）だけにする
+        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
     }
 #endif
     UNREFERENCED_PARAMETER(nStatus);
@@ -9470,6 +10758,7 @@ void CCustomBlurDialogBase::OnPaint()
     if (m_bAeroEnabled && CCC_IsWin11())
     {
         CCC_PaintAeroGaps(dc, this, nullptr);
+        CCC_CaptionPaint(dc, m_hWnd);
         if (m_pMainLockSave)
             CCC_MainLockPaintClient(dc, m_hWnd);
         return;
@@ -9481,14 +10770,20 @@ void CCustomBlurDialogBase::OnPaint()
         dc.FillSolidRect(&rect, RGB(250, 250, 250));
     }
 #endif
-    // オーバーレイ方式の「メインに追従」はアクリル有無に関わらずここで描く。
-    // (FALSE=子チェック方式のときは PaintClient が no-op)
+    // CaptionPaint 内の EnsureBackdrop(ExtendFrame) が本文 α をガラスに戻すので、
+    // キャプションのみ時は帯描画の【後】に本文を不透明化する
+    CCC_CaptionPaint(dc, m_hWnd);
+#if CCUSTOM_AERO_SUPPORT
+    if (!m_bAeroEnabled && CCC_AcrylicCaption(m_hWnd))
+        CCC_PaintOpaqueBodyBelowCaption(dc, this, m_brDialog);
+#endif
     if (m_pMainLockSave)
         CCC_MainLockPaintClient(dc, m_hWnd);
 }
 
 void CCustomBlurDialogBase::OnDestroy()
 {
+    CCC_CaptionUnregister(m_hWnd);
     CCC_MainLockUnregister(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
     CCC_ClearOpaqueFixerList(m_opaqueFixers);
@@ -9499,8 +10794,13 @@ void CCustomBlurDialogBase::OnDestroy()
 void CCustomBlurDialogBase::OnSize(UINT nType, int cx, int cy)
 {
     CCustomDialog::OnSize(nType, cx, cy);
+    CCC_CaptionLayout(m_hWnd);
     if (m_pMainLockSave)
         CCC_MainLockBringToFront(m_hWnd);
+    if (CCC_CaptionEntry* e = CCC_FindCaption(m_hWnd)) {
+        if (e->installed && e->pMax && ::IsWindow(e->pMax->GetSafeHwnd()))
+            e->pMax->SetWindowText(IsZoomed() ? L"\u2752" : L"\u25A1");
+    }
 }
 
 void CCustomBlurDialogBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
@@ -9522,7 +10822,7 @@ void CCustomBlurDialogBase::OnCompositionChanged()
 LRESULT CCustomBlurDialogBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (m_bAeroEnabled && CCC_IsWin11())
+    if (CCC_IsWin11() && (m_bAeroEnabled || CCC_AcrylicCaption(m_hWnd)))
         CCC_ReapplyOpaqueFix(this, m_opaqueFixers);
 #endif
     if (m_pMainLockSave)
@@ -9547,7 +10847,78 @@ void CCustomBlurDialogBase::OnLButtonDown(UINT nFlags, CPoint point)
         CCC_MainLockOverlayToggle(m_hWnd);
         return;
     }
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    if (capH > 0 && point.y >= 0 && point.y < capH) {
+        CWnd* pHit = ChildWindowFromPoint(point, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
+        if (!pHit || pHit == this) {
+            SendMessage(WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(point.x, point.y));
+            return;
+        }
+    }
     CCustomDialog::OnLButtonDown(nFlags, point);
+}
+
+void CCustomBlurDialogBase::OnLButtonDblClk(UINT nFlags, CPoint point)
+{
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    if (capH > 0 && point.y >= 0 && point.y < capH) {
+        CWnd* pHit = ChildWindowFromPoint(point, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
+        if (!pHit || pHit == this) {
+            CCC_CaptionEntry* e = CCC_FindCaption(m_hWnd);
+            if (e && e->hasMax)
+                OnCapMax();
+            return;
+        }
+    }
+    CCustomDialog::OnLButtonDblClk(nFlags, point);
+}
+
+void CCustomBlurDialogBase::OnRButtonUp(UINT nFlags, CPoint point)
+{
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    if (capH > 0 && point.y >= 0 && point.y < capH) {
+        CCC_CaptionTrackContextMenu(this, point, m_pMainLockSave);
+        return;
+    }
+    CWnd::OnRButtonUp(nFlags, point);
+}
+
+void CCustomBlurDialogBase::OnCapClose()
+{
+    SendMessage(WM_SYSCOMMAND, SC_CLOSE, 0);
+}
+
+void CCustomBlurDialogBase::OnCapMin()
+{
+    SendMessage(WM_SYSCOMMAND, SC_MINIMIZE, 0);
+}
+
+void CCustomBlurDialogBase::OnCapMax()
+{
+    SendMessage(WM_SYSCOMMAND, IsZoomed() ? SC_RESTORE : SC_MAXIMIZE, 0);
+}
+
+void CCustomBlurDialogBase::OnCapSettings()
+{
+    CCC_CaptionOpenSettings(this);
+}
+
+void CCustomBlurDialogBase::OnCapPin()
+{
+    CCC_CaptionTogglePin(this);
+}
+
+BOOL CCustomBlurDialogBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
+{
+    *pResult = 0;
+    return FALSE;
+}
+
+BOOL CCustomBlurDialogBase::PreTranslateMessage(MSG* pMsg)
+{
+    if (m_capTip.GetSafeHwnd())
+        m_capTip.RelayEvent(pMsg);
+    return CCustomDialog::PreTranslateMessage(pMsg);
 }
 
 void CCustomBlurDialogBase::OnMoving(UINT fwSide, LPRECT pRect)
@@ -9637,6 +11008,78 @@ void CCustomDialogEx::OnPaint()
         CDialogEx::OnPaint();
 }
 
+static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainLockSave)
+{
+    if (!pDlg || !::IsWindow(pDlg->GetSafeHwnd()))
+        return;
+    HWND hWnd = pDlg->GetSafeHwnd();
+    CPoint scr = ptClient;
+    pDlg->ClientToScreen(&scr);
+    CMenu menu;
+    menu.CreatePopupMenu();
+    const BOOL zoomed = pDlg->IsZoomed();
+    menu.AppendMenu(MF_STRING | (zoomed ? 0 : MF_GRAYED), SC_RESTORE,
+        LL14(L"元のサイズに戻す", L"Restore", L"Restaurer", L"Ripristina", L"Restaurar", L"이전 크기로", L"还原", L"استعادة", L"Восстановить", L"Wiederherstellen", L"Restaurar", L"Vorige grootte", L"Przywroc", L"Onceki boyut"));
+    menu.AppendMenu(MF_STRING, SC_MOVE,
+        LL14(L"移動", L"Move", L"Deplacer", L"Sposta", L"Mover", L"이동", L"移动", L"تحريك", L"Переместить", L"Verschieben", L"Mover", L"Verplaatsen", L"Przesun", L"Tasi"));
+    if (pDlg->GetStyle() & WS_THICKFRAME)
+        menu.AppendMenu(MF_STRING | (zoomed ? MF_GRAYED : 0), SC_SIZE,
+            LL14(L"サイズ変更", L"Size", L"Taille", L"Dimensiona", L"Tamano", L"크기 조정", L"大小", L"الحجم", L"Размер", L"Groesse", L"Tamanho", L"Grootte", L"Rozmiar", L"Boyut"));
+    CCC_CaptionEntry* e = CCC_FindCaption(hWnd);
+    if (e && e->hasMin)
+        menu.AppendMenu(MF_STRING, SC_MINIMIZE,
+            LL14(L"最小化", L"Minimize", L"Reduire", L"Riduci a icona", L"Minimizar", L"최소화", L"最小化", L"تصغير", L"Свернуть", L"Minimieren", L"Minimizar", L"Minimaliseren", L"Minimalizuj", L"Kucult"));
+    if (e && e->hasMax)
+        menu.AppendMenu(MF_STRING | (zoomed ? MF_GRAYED : 0), SC_MAXIMIZE,
+            LL14(L"最大化", L"Maximize", L"Agrandir", L"Ingrandisci", L"Maximizar", L"최대화", L"最大化", L"تكبير", L"Развернуть", L"Maximieren", L"Maximizar", L"Maximaliseren", L"Maksymalizuj", L"Buyut"));
+    menu.AppendMenu(MF_SEPARATOR, 0, (LPCWSTR)NULL);
+    if (e && e->hasSettings)
+        menu.AppendMenu(MF_STRING, IDC_CAP_SETTINGS,
+            LL14(L"設定", L"Settings", L"Parametres", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"الإعدادات", L"Настройки", L"Einstellungen", L"Configuracoes", L"Instellingen", L"Ustawienia", L"Ayarlar"));
+    if (e)
+        menu.AppendMenu(MF_STRING | (e->topmost ? MF_CHECKED : 0), IDC_CAP_PIN,
+            LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위", L"总在最前", L"دائماً في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd bovenop", L"Zawsze na wierzchu", L"Her zaman ustte"));
+    if (pMainLockSave) {
+        CCC_MainLockEntry* le = CCC_FindMainLockEntry(hWnd);
+        menu.AppendMenu(MF_STRING | ((le && le->locked) ? MF_CHECKED : 0), IDC_MAINWIN_LOCK, CCC_MainLockLabel());
+    }
+    menu.AppendMenu(MF_SEPARATOR, 0, (LPCWSTR)NULL);
+    menu.AppendMenu(MF_STRING, SC_CLOSE,
+        LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+    const UINT cmd = menu.TrackPopupMenu(TPM_RETURNCMD | TPM_RIGHTBUTTON, scr.x, scr.y, pDlg);
+    if (cmd == IDC_CAP_SETTINGS)
+        pDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CAP_SETTINGS, BN_CLICKED), 0);
+    else if (cmd == IDC_CAP_PIN)
+        pDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CAP_PIN, BN_CLICKED), 0);
+    else if (cmd == IDC_MAINWIN_LOCK)
+        CCC_MainLockOverlayToggle(hWnd);
+    else if (cmd)
+        pDlg->SendMessage(WM_SYSCOMMAND, cmd, 0);
+}
+
+static void CCC_CaptionOpenSettings(CWnd* pDlg)
+{
+    CWnd* pMain = AfxGetMainWnd();
+    if (!pMain || !::IsWindow(pMain->GetSafeHwnd()))
+        return;
+    if (pDlg && pMain->GetSafeHwnd() == pDlg->GetSafeHwnd())
+        pDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON21, BN_CLICKED), 0);
+    else
+        pMain->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON21, BN_CLICKED), 0);
+}
+
+static void CCC_CaptionTogglePin(CWnd* pDlg)
+{
+    if (!pDlg) return;
+    CCC_CaptionEntry* e = CCC_FindCaption(pDlg->GetSafeHwnd());
+    if (!e) return;
+    e->topmost = !e->topmost;
+    pDlg->SetWindowPos(e->topmost ? &CWnd::wndTopMost : &CWnd::wndNoTopMost, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    if (e->pPin && ::IsWindow(e->pPin->GetSafeHwnd()))
+        e->pPin->SetWindowText(e->topmost ? L"P*" : L"P");
+}
+
 // ============================================================================
 // アクリルぼかし適用済みカスタムダイアログ (CDialogEx版)
 // ============================================================================
@@ -9651,7 +11094,18 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
     ON_WM_DESTROY()
     ON_WM_MOVING()
     ON_COMMAND(IDC_MAINWIN_LOCK, OnMainLockClicked)
+    ON_COMMAND(IDC_CAP_CLOSE, OnCapClose)
+    ON_COMMAND(IDC_CAP_MIN, OnCapMin)
+    ON_COMMAND(IDC_CAP_MAX, OnCapMax)
+    ON_COMMAND(IDC_CAP_SETTINGS, OnCapSettings)
+    ON_COMMAND(IDC_CAP_PIN, OnCapPin)
     ON_WM_LBUTTONDOWN()
+    ON_WM_LBUTTONDBLCLK()
+    ON_WM_RBUTTONUP()
+    ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTW, 0, 0xFFFF, OnTtnNeedText)
+    ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTA, 0, 0xFFFF, OnTtnNeedText)
+    ON_MESSAGE(CCC_MSG_INSTALL_CAPTION, OnInstallCustomCaption)
+    ON_WM_NCCALCSIZE()
 #if CCUSTOM_AERO_SUPPORT
     ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
@@ -9666,11 +11120,9 @@ BOOL CCustomBlurDialogExBase::PreCreateWindow(CREATESTRUCT& cs)
     if (!CCustomDialogEx::PreCreateWindow(cs))
         return FALSE;
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsAeroEnabled())
-    {
-        RegisterBlurDialogWndClass(cs.lpszClass, _T("CCustomBlurDlgEx"));
-        cs.lpszClass = _T("CCustomBlurDlgEx");
-    }
+    // AcrylicCaption 常時のため save.aero 不問で null brush 専用クラス
+    RegisterBlurDialogWndClass(cs.lpszClass, _T("CCustomBlurDlgEx"));
+    cs.lpszClass = _T("CCustomBlurDlgEx");
 #endif
     return TRUE;
 }
@@ -9682,7 +11134,26 @@ BOOL CCustomBlurDialogExBase::OnInitDialog()
     ::SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, 0);
 #endif
     ApplyDwmBlur();
+    // キャプション化は初回 OnShowWindow（表示前）。PostMessage だとフラッシュ＋縦幅ジャンプ。
     return b;
+}
+
+LRESULT CCustomBlurDialogExBase::OnInstallCustomCaption(WPARAM, LPARAM)
+{
+    CCC_CaptionInstallCore(this, &m_capTip);
+#if CCUSTOM_AERO_SUPPORT
+    CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+#endif
+    return 0;
+}
+
+void CCustomBlurDialogExBase::OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp)
+{
+    if (CCC_GetCustomCaptionHeight(m_hWnd) > 0 && bCalcValidRects && lpncsp) {
+        CCC_CaptionHandleNcCalcSize(m_hWnd, TRUE, reinterpret_cast<LPARAM>(lpncsp), 0);
+        return;
+    }
+    CCustomDialogEx::OnNcCalcSize(bCalcValidRects, lpncsp);
 }
 
 void CCustomBlurDialogExBase::RefreshAeroMode()
@@ -9699,27 +11170,39 @@ void CCustomBlurDialogExBase::ApplyDwmBlurCore(BOOL bForce)
 {
     if (!m_hWnd || !::IsWindow(m_hWnd)) return;
 #if CCUSTOM_AERO_SUPPORT
+    if (m_bInApplyBlur) return;
+    m_bInApplyBlur = TRUE;
+
     const BOOL bWant = CCC_IsAeroEnabled();
     if (bWant)
     {
-        if (m_bBlurApplied && !bForce)
+        if (m_bBlurApplied && !bForce) {
+            m_bInApplyBlur = FALSE;
             return;
+        }
         m_bAeroEnabled = TRUE;
         CCC_FinishBlurDlg(this, TRUE, m_bBlurApplied, m_opaqueFixers);
+        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
         if (m_pMainLockSave)
             CCC_MainLockBringToFront(m_hWnd);
+        m_bInApplyBlur = FALSE;
         return;
     }
 
     m_bAeroEnabled = FALSE;
-    if (!m_bBlurApplied && !bForce)
+    if (!m_bBlurApplied && !bForce) {
+        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+        m_bInApplyBlur = FALSE;
         return;
+    }
     CCC_ClearOpaqueFixerList(m_opaqueFixers);
-    CCC_ApplyAero(m_hWnd, FALSE);
+    CCC_DisableBodyAeroOnly(m_hWnd);
     CCC_PrepareDialogSurface(m_hWnd, FALSE);
     PROPAGATE_AERO_TO_CHILDREN(m_hWnd, FALSE);
     m_bBlurApplied = FALSE;
-    Invalidate();
+    CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+    RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+    m_bInApplyBlur = FALSE;
 #else
     UNREFERENCED_PARAMETER(bForce);
     m_bBlurApplied = FALSE;
@@ -9728,6 +11211,12 @@ void CCustomBlurDialogExBase::ApplyDwmBlurCore(BOOL bForce)
 
 void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
 {
+    if (bShow) {
+        CCC_CaptionInstallCore(this, &m_capTip);
+#if CCUSTOM_AERO_SUPPORT
+        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
+#endif
+    }
     CCustomDialogEx::OnShowWindow(bShow, nStatus);
     if (m_pMainLockSave)
         CCC_MainLockShowBtn(m_hWnd, bShow);
@@ -9736,9 +11225,13 @@ void CCustomBlurDialogExBase::OnShowWindow(BOOL bShow, UINT nStatus)
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_IsAeroEnabled())
     {
-        // 初回のみ Finalize。以降の再表示は DWM 属性の軽い再適用だけで足りる。
         ApplyDwmBlur();
         CCC_RefreshDwmBlur(m_hWnd);
+        CCC_CaptionEnsureBackdrop(m_hWnd);
+    }
+    else {
+        // 本文 off・キャプション on。後段 RefreshDwmBlur は本文不透明を潰すので呼ばない
+        CCC_CaptionApplyGlassAndFixers(this, m_opaqueFixers);
     }
 #endif
     UNREFERENCED_PARAMETER(nStatus);
@@ -9751,6 +11244,7 @@ void CCustomBlurDialogExBase::OnPaint()
     if (m_bAeroEnabled && CCC_IsWin11())
     {
         CCC_PaintAeroGaps(dc, this, nullptr);
+        CCC_CaptionPaint(dc, m_hWnd);
         if (m_pMainLockSave)
             CCC_MainLockPaintClient(dc, m_hWnd);
         return;
@@ -9762,14 +11256,19 @@ void CCustomBlurDialogExBase::OnPaint()
         dc.FillSolidRect(&rect, RGB(250, 250, 250));
     }
 #endif
-    // オーバーレイ方式の「メインに追従」はアクリル有無に関わらずここで描く。
-    // (FALSE=子チェック方式のときは PaintClient が no-op)
+    CCC_CaptionPaint(dc, m_hWnd);
+#if CCUSTOM_AERO_SUPPORT
+    // EnsureBackdrop 後に本文 α=255（キャプション帯 Clear の後でも本文だけ塞ぐ）
+    if (!m_bAeroEnabled && CCC_AcrylicCaption(m_hWnd))
+        CCC_PaintOpaqueBodyBelowCaption(dc, this, m_brDialog);
+#endif
     if (m_pMainLockSave)
         CCC_MainLockPaintClient(dc, m_hWnd);
 }
 
 void CCustomBlurDialogExBase::OnDestroy()
 {
+    CCC_CaptionUnregister(m_hWnd);
     CCC_MainLockUnregister(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
     CCC_ClearOpaqueFixerList(m_opaqueFixers);
@@ -9780,8 +11279,13 @@ void CCustomBlurDialogExBase::OnDestroy()
 void CCustomBlurDialogExBase::OnSize(UINT nType, int cx, int cy)
 {
     CCustomDialogEx::OnSize(nType, cx, cy);
+    CCC_CaptionLayout(m_hWnd);
     if (m_pMainLockSave)
         CCC_MainLockBringToFront(m_hWnd);
+    if (CCC_CaptionEntry* e = CCC_FindCaption(m_hWnd)) {
+        if (e->installed && e->pMax && ::IsWindow(e->pMax->GetSafeHwnd()))
+            e->pMax->SetWindowText(IsZoomed() ? L"\u2752" : L"\u25A1");
+    }
 }
 
 void CCustomBlurDialogExBase::OnWindowPosChanged(WINDOWPOS* lpwndpos)
@@ -9803,11 +11307,12 @@ void CCustomBlurDialogExBase::OnCompositionChanged()
 LRESULT CCustomBlurDialogExBase::OnReapplyOpaqueFixers(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (m_bAeroEnabled && CCC_IsWin11())
+    if (CCC_IsWin11() && (m_bAeroEnabled || CCC_AcrylicCaption(m_hWnd)))
         CCC_ReapplyOpaqueFix(this, m_opaqueFixers);
 #endif
     if (m_pMainLockSave)
         CCC_MainLockBringToFront(m_hWnd);
+    CCC_CaptionLayout(m_hWnd);
     return 0;
 }
 
@@ -9828,7 +11333,78 @@ void CCustomBlurDialogExBase::OnLButtonDown(UINT nFlags, CPoint point)
         CCC_MainLockOverlayToggle(m_hWnd);
         return;
     }
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    if (capH > 0 && point.y >= 0 && point.y < capH) {
+        CWnd* pHit = ChildWindowFromPoint(point, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
+        if (!pHit || pHit == this) {
+            SendMessage(WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(point.x, point.y));
+            return;
+        }
+    }
     CCustomDialogEx::OnLButtonDown(nFlags, point);
+}
+
+void CCustomBlurDialogExBase::OnLButtonDblClk(UINT nFlags, CPoint point)
+{
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    if (capH > 0 && point.y >= 0 && point.y < capH) {
+        CWnd* pHit = ChildWindowFromPoint(point, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
+        if (!pHit || pHit == this) {
+            CCC_CaptionEntry* e = CCC_FindCaption(m_hWnd);
+            if (e && e->hasMax)
+                OnCapMax();
+            return;
+        }
+    }
+    CCustomDialogEx::OnLButtonDblClk(nFlags, point);
+}
+
+void CCustomBlurDialogExBase::OnRButtonUp(UINT nFlags, CPoint point)
+{
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    if (capH > 0 && point.y >= 0 && point.y < capH) {
+        CCC_CaptionTrackContextMenu(this, point, m_pMainLockSave);
+        return;
+    }
+    CWnd::OnRButtonUp(nFlags, point);
+}
+
+void CCustomBlurDialogExBase::OnCapClose()
+{
+    SendMessage(WM_SYSCOMMAND, SC_CLOSE, 0);
+}
+
+void CCustomBlurDialogExBase::OnCapMin()
+{
+    SendMessage(WM_SYSCOMMAND, SC_MINIMIZE, 0);
+}
+
+void CCustomBlurDialogExBase::OnCapMax()
+{
+    SendMessage(WM_SYSCOMMAND, IsZoomed() ? SC_RESTORE : SC_MAXIMIZE, 0);
+}
+
+void CCustomBlurDialogExBase::OnCapSettings()
+{
+    CCC_CaptionOpenSettings(this);
+}
+
+void CCustomBlurDialogExBase::OnCapPin()
+{
+    CCC_CaptionTogglePin(this);
+}
+
+BOOL CCustomBlurDialogExBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
+{
+    *pResult = 0;
+    return FALSE;
+}
+
+BOOL CCustomBlurDialogExBase::PreTranslateMessage(MSG* pMsg)
+{
+    if (m_capTip.GetSafeHwnd())
+        m_capTip.RelayEvent(pMsg);
+    return CCustomDialogEx::PreTranslateMessage(pMsg);
 }
 
 void CCustomBlurDialogExBase::OnMoving(UINT fwSide, LPRECT pRect)

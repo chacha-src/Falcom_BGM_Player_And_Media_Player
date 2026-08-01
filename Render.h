@@ -111,7 +111,10 @@ public:
 	CCustomSliderCtrl m_eqCode;
 	CCustomStatic m_eqCodeMs;
 	CCustomComboBox m_soundlist;
+	CCustomComboBox m_miclist;
+	CCustomStatic m_micLabel;
 	afx_msg void OnCbnSelchangeCombo2();
+	afx_msg void OnCbnSelchangeMic();
 	CCustomStandardButton m_ao;
 	afx_msg void OnBnClickedButton1();
 	CCustomComboBox m_Hz;

@@ -25,6 +25,8 @@ public:
 	int m_mpJacketPx = 0;
 	HBITMAP (*m_mpJacketGet)(void* ctx, int row) = nullptr;
 	void* m_mpJacketCtx = nullptr;
+	// ♪番号(0/1/2)。指定時は既定ILを空のままにし自前描画する(名前列の二重描画防止)。
+	int (*m_mpNoteIconGet)(void* ctx, int row) = nullptr;
 protected:
 	virtual BOOL OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult);
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);

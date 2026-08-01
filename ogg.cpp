@@ -345,6 +345,27 @@ BOOL COggApp::InitInstance()
 	savedata.wav_export_xfade_sec = 5;
 	savedata.wav_export_mix = 0;
 	savedata.wav_export_mix_n = 2;
+	savedata.mic_mix = 0;
+	savedata.mic_mix_level = 100;
+	savedata.mic_device[0] = 0;
+	savedata.mic_device_cur = 0;
+	savedata.loop_device[0] = 0;
+	savedata.loop_device_cur = 0;
+	savedata.cap_save_dir[0] = 0;
+	savedata.record_format = 0;
+	savedata.record_mp3_kbps = 192;
+	savedata.record_mix_mic = 0;
+	savedata.record_last_path[0] = 0;
+	savedata.record_flac_level = 5;
+	savedata.cap_with_audio = 1;
+	savedata.cap_with_mic = 0;
+	savedata.cap_fps = 15;
+	savedata.cap_last_path[0] = 0;
+	savedata.cap_mode = 0;
+	savedata.cap_canvas_preset = 2;
+	savedata.cap_canvas_w = 1920;
+	savedata.cap_canvas_h = 1080;
+	savedata.cap_include_mp = 0;
 	savedata.pianorollviewmode = 0;
 	savedata.pianorollkeyrange = 108;
 	savedata.pianorollnotename = 1;
@@ -849,6 +870,58 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, wav_export_mix_n) + sizeof(savedata.wav_export_mix_n))
 		|| savedata.wav_export_mix_n < 2 || savedata.wav_export_mix_n > 64)
 		savedata.wav_export_mix_n = 2;
+	if (datFileSize < (int)(offsetof(save, mic_mix) + sizeof(savedata.mic_mix)))
+		savedata.mic_mix = 0;
+	else if (savedata.mic_mix != 0)
+		savedata.mic_mix = 1;
+	if (datFileSize < (int)(offsetof(save, mic_mix_level) + sizeof(savedata.mic_mix_level))
+		|| savedata.mic_mix_level < 0 || savedata.mic_mix_level > 200)
+		savedata.mic_mix_level = 100;
+	if (datFileSize < (int)(offsetof(save, mic_device) + sizeof(savedata.mic_device)))
+		savedata.mic_device[0] = 0;
+	savedata.mic_device[_countof(savedata.mic_device) - 1] = 0;
+	if (datFileSize < (int)(offsetof(save, mic_device_cur) + sizeof(savedata.mic_device_cur))
+		|| savedata.mic_device_cur < 0)
+		savedata.mic_device_cur = 0;
+	if (datFileSize < (int)(offsetof(save, loop_device) + sizeof(savedata.loop_device)))
+		savedata.loop_device[0] = 0;
+	savedata.loop_device[_countof(savedata.loop_device) - 1] = 0;
+	if (datFileSize < (int)(offsetof(save, loop_device_cur) + sizeof(savedata.loop_device_cur))
+		|| savedata.loop_device_cur < 0)
+		savedata.loop_device_cur = 0;
+	if (datFileSize < (int)(offsetof(save, cap_save_dir) + sizeof(savedata.cap_save_dir)))
+		savedata.cap_save_dir[0] = 0;
+	savedata.cap_save_dir[_countof(savedata.cap_save_dir) - 1] = 0;
+	if (datFileSize < (int)(offsetof(save, record_format) + sizeof(savedata.record_format))
+		|| savedata.record_format < 0 || savedata.record_format > 2)
+		savedata.record_format = 0;
+	if (datFileSize < (int)(offsetof(save, record_mp3_kbps) + sizeof(savedata.record_mp3_kbps))
+		|| savedata.record_mp3_kbps < 64 || savedata.record_mp3_kbps > 320)
+		savedata.record_mp3_kbps = 192;
+	if (datFileSize < (int)(offsetof(save, record_mix_mic) + sizeof(savedata.record_mix_mic)))
+		savedata.record_mix_mic = 0;
+	else if (savedata.record_mix_mic != 0)
+		savedata.record_mix_mic = 1;
+	if (datFileSize < (int)(offsetof(save, record_last_path) + sizeof(savedata.record_last_path)))
+		savedata.record_last_path[0] = 0;
+	savedata.record_last_path[_countof(savedata.record_last_path) - 1] = 0;
+	if (datFileSize < (int)(offsetof(save, record_flac_level) + sizeof(savedata.record_flac_level))
+		|| savedata.record_flac_level < 0 || savedata.record_flac_level > 8)
+		savedata.record_flac_level = 5;
+	if (datFileSize < (int)(offsetof(save, cap_with_audio) + sizeof(savedata.cap_with_audio)))
+		savedata.cap_with_audio = 1;
+	else if (savedata.cap_with_audio != 0)
+		savedata.cap_with_audio = 1;
+	if (datFileSize < (int)(offsetof(save, cap_with_mic) + sizeof(savedata.cap_with_mic)))
+		savedata.cap_with_mic = 0;
+	else if (savedata.cap_with_mic != 0)
+		savedata.cap_with_mic = 1;
+	if (datFileSize < (int)(offsetof(save, cap_fps) + sizeof(savedata.cap_fps))
+		|| savedata.cap_fps < 5 || savedata.cap_fps > 30)
+		savedata.cap_fps = 15;
+	if (datFileSize < (int)(offsetof(save, cap_last_path) + sizeof(savedata.cap_last_path)))
+		savedata.cap_last_path[0] = 0;
+	savedata.cap_last_path[_countof(savedata.cap_last_path) - 1] = 0;
 	// 簡易ピアノロール 表示拡張(末尾追記): 旧.dat には無いので既定値へ
 	if (datFileSize < (int)(offsetof(save, pianorollviewmode) + sizeof(savedata.pianorollviewmode)))
 		savedata.pianorollviewmode = 0;
@@ -895,6 +968,94 @@ BOOL COggApp::InitInstance()
 	savedata.mpPromptTextLong[_countof(savedata.mpPromptTextLong) - 1] = 0;
 	if (datFileSize < (int)(offsetof(save, mpPromptBackupEqSoundEq) + sizeof(savedata.mpPromptBackupEqSoundEq)))
 		savedata.mpPromptBackupEqSoundEq = 0;
+	if (datFileSize < (int)(offsetof(save, kliteAskSkip) + sizeof(savedata.kliteAskSkip)))
+		savedata.kliteAskSkip = 0;
+	else if (savedata.kliteAskSkip != 0)
+		savedata.kliteAskSkip = 1;
+	if (datFileSize < (int)(offsetof(save, cap_mode) + sizeof(savedata.cap_mode))
+		|| savedata.cap_mode < 0 || savedata.cap_mode > 2)
+		savedata.cap_mode = 0;
+	if (datFileSize < (int)(offsetof(save, cap_canvas_preset) + sizeof(savedata.cap_canvas_preset))
+		|| savedata.cap_canvas_preset < 0 || savedata.cap_canvas_preset > 3)
+		savedata.cap_canvas_preset = 2;
+	if (datFileSize < (int)(offsetof(save, cap_canvas_w) + sizeof(savedata.cap_canvas_w))
+		|| savedata.cap_canvas_w < 160 || savedata.cap_canvas_w > 7680)
+		savedata.cap_canvas_w = 1920;
+	if (datFileSize < (int)(offsetof(save, cap_canvas_h) + sizeof(savedata.cap_canvas_h))
+		|| savedata.cap_canvas_h < 120 || savedata.cap_canvas_h > 4320)
+		savedata.cap_canvas_h = 1080;
+	if (datFileSize < (int)(offsetof(save, cap_include_mp) + sizeof(savedata.cap_include_mp)))
+		savedata.cap_include_mp = 0;
+	else if (savedata.cap_include_mp != 0)
+		savedata.cap_include_mp = 1;
+	// K-Lite Codec Pack 未導入時の誘導(いいえで今後出さない)
+	if (savedata.kliteAskSkip == 0) {
+		int hasKlite = 0;
+		HKEY hk = NULL;
+		static const TCHAR* kliteUninst[] = {
+			_T("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\KLiteCodecPack_is1"),
+			_T("SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\KLiteCodecPack_is1"),
+			_T("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\K-Lite Codec Pack Full"),
+			_T("SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\K-Lite Codec Pack Full"),
+			_T("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\K-Lite Codec Pack Mega"),
+			_T("SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\K-Lite Codec Pack Mega"),
+			_T("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\K-Lite Codec Pack Standard"),
+			_T("SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\K-Lite Codec Pack Standard"),
+			_T("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\K-Lite Codec Pack Basic"),
+			_T("SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\K-Lite Codec Pack Basic"),
+		};
+		for (int ki = 0; ki < (int)_countof(kliteUninst); ki++) {
+			if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, kliteUninst[ki], 0, KEY_READ, &hk) == ERROR_SUCCESS) {
+				RegCloseKey(hk);
+				hasKlite = 1;
+				break;
+			}
+		}
+		if (!hasKlite) {
+			TCHAR pf[MAX_PATH];
+			TCHAR path[MAX_PATH];
+			pf[0] = 0;
+			if (GetEnvironmentVariable(_T("ProgramFiles"), pf, MAX_PATH) > 0) {
+				_sntprintf(path, MAX_PATH, _T("%s\\K-Lite Codec Pack"), pf);
+				path[MAX_PATH - 1] = 0;
+				if (GetFileAttributes(path) != INVALID_FILE_ATTRIBUTES)
+					hasKlite = 1;
+			}
+			if (!hasKlite) {
+				pf[0] = 0;
+				if (GetEnvironmentVariable(_T("ProgramFiles(x86)"), pf, MAX_PATH) > 0) {
+					_sntprintf(path, MAX_PATH, _T("%s\\K-Lite Codec Pack"), pf);
+					path[MAX_PATH - 1] = 0;
+					if (GetFileAttributes(path) != INVALID_FILE_ATTRIBUTES)
+						hasKlite = 1;
+				}
+			}
+		}
+		if (!hasKlite) {
+			int abcKlite = AfxMessageBox(LL14(
+				L"動画再生に必要な K-Lite Codec Pack がインストールされていないようです。\nインストール方法の解説ページを開きますか？\n(いいえを選ぶと今後表示しません)",
+				L"K-Lite Codec Pack (needed for video playback) does not appear to be installed.\nOpen the install guide page?\n(Selecting No will not show this again.)",
+				L"K-Lite Codec Pack (necessaire a la lecture video) ne semble pas installe.\nOuvrir la page d'installation ?\n(Non = ne plus afficher.)",
+				L"K-Lite Codec Pack (necessario per i video) non sembra installato.\nAprire la guida all'installazione?\n(No = non mostrare piu.)",
+				L"K-Lite Codec Pack (necesario para video) no parece instalado.\nAbrir la pagina de instalacion?\n(No = no volver a mostrar.)",
+				L"동영상 재생에 필요한 K-Lite Codec Pack이 설치되지 않은 것 같습니다.\n설치 안내 페이지를 여시겠습니까?\n(아니요를 누르면 다시 표시하지 않습니다)",
+				L"似乎未安装视频播放所需的 K-Lite Codec Pack。\n是否打开安装说明页面？\n（选择“否”后将不再显示）",
+				L"يبدو ان K-Lite Codec Pack المطلوب للفيديو غير مثبت.\nفتح صفحة دليل التثبيت؟\n(لا = عدم الاظهار مجددا)",
+				L"Похоже, K-Lite Codec Pack (нужен для видео) не установлен.\nОткрыть страницу с инструкцией?\n(Нет = больше не показывать.)",
+				L"K-Lite Codec Pack (fuer Video noetig) scheint nicht installiert.\nInstallationsseite oeffnen?\n(Nein = nicht mehr anzeigen.)",
+				L"K-Lite Codec Pack (necessario para video) nao parece instalado.\nAbrir a pagina de instalacao?\n(Nao = nao mostrar de novo.)",
+				L"K-Lite Codec Pack (nodig voor video) lijkt niet geinstalleerd.\nInstallatiepagina openen?\n(Nee = niet meer tonen.)",
+				L"K-Lite Codec Pack (potrzebny do wideo) wydaje sie nieinstalowany.\nOtworzyc strone instalacji?\n(Nie = nie pokazuj wiecej.)",
+				L"Video icin gerekli K-Lite Codec Pack yuklu degil gibi.\nKurulum sayfasi acilsin mi?\n(Hayir = bir daha gosterme.)"
+				), MB_YESNO | MB_ICONINFORMATION);
+			if (abcKlite == IDYES) {
+				::ShellExecute(NULL, _T("open"), _T("https://ppp.oohara.jp/k-lite.html"), NULL, NULL, SW_SHOWNORMAL);
+			}
+			else {
+				savedata.kliteAskSkip = 1;
+			}
+		}
+	}
 	if (savedata.aerocheck == 99) {
 		int abc = AfxMessageBox(LL14(
 			L"Win10/11アクリルぼかしが実装されました。\n有効にしますか？\n(このメッセージは一回しか表示されません)",
