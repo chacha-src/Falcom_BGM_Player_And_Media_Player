@@ -106,7 +106,7 @@ void PlaybackCcGetFormat(int& rate, int& ch, int& bits);
 static void MicMixCaptureStop();
 static void MicMixCaptureStart();
 static BOOL TryMfGrabVideoFrame(LPCTSTR path, CImage& out, LONGLONG preferHns = -1);
-// 戻り値: ファイルへ実際に書いたバイト数（レート変換後。wl 加算に使う）
+// 戻り値: wl(G:)加算用バイト。WAV ON=書込(変換後)、OFF=ソースn、解析専用=0
 UINT PlaybackCcWrite(const void* p, UINT n);
 UINT PlaybackCcWriteForced(const void* p, UINT n);
 
@@ -21675,7 +21675,9 @@ UINT PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, in
 			PlaybackCcLockFormat(srcRate, srcCh, srcBits);
 		return 0; // 解析専用: ファイルへは書かない
 	}
-	if (cc1 != 1 || !p || n == 0) return 0;
+	if (!p || n == 0) return 0;
+	// WAVオフでも G:(wl) は進める。旧来は wl+=cnt と書込が分離だった
+	if (cc1 != 1) return n;
 	const bool liveMic = (savedata.mic_mix != 0 && wavExportPath.GetLength() == 0 && !g_isWavExportRendering);
 	if (liveMic && InterlockedCompareExchange(&g_micRun, 0, 0) == 0)
 		MicMixCaptureStart();
