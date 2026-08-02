@@ -369,10 +369,11 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 		return TRUE;
 	}
 
-	// ウィンドウ合成: 末尾(奥) → 先頭(手前)
+	// ウィンドウ合成: 末尾(奥) → 先頭(手前) / hidden は映像から除外(音は別系統)
 	ScFrameBuf winBuf = {};
 	for (int i = snap.layerCnt - 1; i >= 0; --i) {
 		const CScreenCaptureDlg::Layer& L = snap.layers[i];
+		if (L.hidden) continue;
 		if (!L.hwnd || !IsWindow(L.hwnd) || L.w < 1 || L.h < 1) continue;
 		if (!ScCaptureWindowToBuf(L.hwnd, winBuf)) continue;
 		SetStretchBltMode(out.hdc, HALFTONE);
@@ -380,8 +381,9 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 	}
 	ScFrameFree(winBuf);
 
-	// MP画面を別途載せる (レイヤに無い場合)
-	if (snap.includeMp && snap.mpHwnd && ::IsWindow(snap.mpHwnd) && snap.mpW > 1 && snap.mpH > 1) {
+	// MP画面を別途載せる (レイヤに無い場合 / Hide 時は載せない)
+	if (snap.includeMp && !snap.mpHidden && snap.mpHwnd && ::IsWindow(snap.mpHwnd)
+		&& snap.mpW > 1 && snap.mpH > 1) {
 		BOOL already = FALSE;
 		for (int i = 0; i < snap.layerCnt; ++i) {
 			if (snap.layers[i].hwnd == snap.mpHwnd) { already = TRUE; break; }
@@ -556,6 +558,7 @@ BEGIN_MESSAGE_MAP(CScPreviewCtrl, CStatic)
 	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_LBUTTONUP()
+	ON_WM_RBUTTONUP()
 	ON_WM_MOUSEMOVE()
 	ON_WM_SETCURSOR()
 	ON_WM_CAPTURECHANGED()
@@ -649,6 +652,42 @@ void CScPreviewCtrl::OnLButtonUp(UINT nFlags, CPoint point)
 	CStatic::OnLButtonUp(nFlags, point);
 }
 
+void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
+{
+	if (m_owner && !m_owner->m_uiLocked && !m_owner->m_picking && ScPreviewInteractive(m_owner)) {
+		int handle = CScreenCaptureDlg::SC_HIT_NONE;
+		int layer = m_owner->HitTestPreview(point, &handle);
+		if (layer < 0) {
+			const int sel = m_owner->m_layer.GetCurSel();
+			if (sel >= 0 && sel < m_owner->m_layerCnt)
+				layer = sel;
+		}
+		if (layer >= 0 && layer < m_owner->m_layerCnt) {
+			m_owner->m_layer.SetCurSel(layer);
+			m_owner->SyncGeoEditsFromSel();
+			const BOOL hidden = m_owner->m_layers[layer].hidden;
+			CMenu menu;
+			if (menu.CreatePopupMenu()) {
+				menu.AppendMenu(MF_STRING, ID_SC_LAYER_HIDE,
+					hidden
+					? LL14(L"Show(表示)", L"Show", L"Afficher", L"Mostra", L"Mostrar", L"표시", L"显示", L"إظهار",
+						L"Показать", L"Einblenden", L"Mostrar", L"Tonen", L"Pokaż", L"Göster")
+					: LL14(L"Hide(非表示)", L"Hide", L"Masquer", L"Nascondi", L"Ocultar", L"숨기기", L"隐藏", L"إخفاء",
+						L"Скрыть", L"Ausblenden", L"Ocultar", L"Verbergen", L"Ukryj", L"Gizle"));
+				CPoint sp = point;
+				ClientToScreen(&sp);
+				const UINT cmd = menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+					sp.x, sp.y, m_owner);
+				if (cmd == ID_SC_LAYER_HIDE)
+					m_owner->ToggleLayerHidden(layer);
+			}
+			Invalidate(FALSE);
+			return;
+		}
+	}
+	CStatic::OnRButtonUp(nFlags, point);
+}
+
 void CScPreviewCtrl::OnMouseMove(UINT nFlags, CPoint point)
 {
 	if (m_owner) {
@@ -698,6 +737,8 @@ void CScPreviewCtrl::OnCaptureChanged(CWnd* pWnd)
 	CStatic::OnCaptureChanged(pWnd);
 }
 
+static CScreenCaptureDlg* g_screenCaptureDlg = NULL;
+
 IMPLEMENT_DYNAMIC(CScreenCaptureDlg, CCustomBlurDialogBase)
 
 CScreenCaptureDlg::CScreenCaptureDlg(CWnd* pParent)
@@ -727,10 +768,16 @@ CScreenCaptureDlg::CScreenCaptureDlg(CWnd* pParent)
 	, m_lastHr(S_OK)
 	, m_frameCnt(0)
 	, m_thread(NULL)
+	, m_peakThread(NULL)
+	, m_peakStop(0)
+	, m_peakRun(0)
 	, m_uiLocked(FALSE)
 	, m_stopping(FALSE)
 	, m_everStarted(FALSE)
 	, m_picking(FALSE)
+	, m_peakMic(0)
+	, m_peakSys(0)
+	, m_peakMix(0)
 	, m_withAudio(TRUE)
 	, m_withMic(FALSE)
 	, m_fpsVal(15)
@@ -745,6 +792,12 @@ CScreenCaptureDlg::~CScreenCaptureDlg()
 {
 	m_stopping = TRUE;
 	InterlockedExchange(&m_stop, 1);
+	InterlockedExchange(&m_peakStop, 1);
+	if (m_peakThread) {
+		WaitForSingleObject(m_peakThread, 4000);
+		CloseHandle(m_peakThread);
+		m_peakThread = NULL;
+	}
 	if (m_thread) {
 		WaitForSingleObject(m_thread, 8000);
 		CloseHandle(m_thread);
@@ -778,6 +831,12 @@ void CScreenCaptureDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SC_FPS, m_fps);
 	DDX_Control(pDX, IDC_SC_AUDIO, m_audio);
 	DDX_Control(pDX, IDC_SC_MIC, m_mic);
+	DDX_Control(pDX, IDC_SC_METER_MIC_L, m_meterMicL);
+	DDX_Control(pDX, IDC_SC_METER_SYS_L, m_meterSysL);
+	DDX_Control(pDX, IDC_SC_METER_MIX_L, m_meterMixL);
+	DDX_Control(pDX, IDC_SC_METER_MIC, m_meterMic);
+	DDX_Control(pDX, IDC_SC_METER_SYS, m_meterSys);
+	DDX_Control(pDX, IDC_SC_METER_MIX, m_meterMix);
 	DDX_Control(pDX, IDC_SC_INCMP, m_includeMp);
 	DDX_Control(pDX, IDC_SC_PICK, m_pick);
 	DDX_Control(pDX, IDC_SC_REFRESH, m_refresh);
@@ -825,6 +884,7 @@ BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_SC_TILE, &CScreenCaptureDlg::OnBnClickedTile)
 	ON_BN_CLICKED(IDC_SC_INCMP, &CScreenCaptureDlg::OnBnClickedIncludeMp)
 	ON_CBN_SELCHANGE(IDC_SC_MODE, &CScreenCaptureDlg::OnCbnSelchangeMode)
+	ON_CBN_SELCHANGE(IDC_SC_FPS, &CScreenCaptureDlg::OnCbnSelchangeFps)
 	ON_LBN_SELCHANGE(IDC_SC_LAYER, &CScreenCaptureDlg::OnLbnSelchangeLayer)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_TIMER()
@@ -901,6 +961,7 @@ void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 	const BOOL wantMp = (m_includeMp.GetSafeHwnd()
 		&& const_cast<CCustomCheckBox&>(m_includeMp).GetCheck());
 	out.includeMp = wantMp;
+	out.mpHidden = FALSE;
 	out.mpHwnd = FindMediaPlayerHwnd();
 
 	if (mode == SC_MODE_WINDOWS) {
@@ -919,6 +980,7 @@ void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 			out.mpY = m_layers[i].y;
 			out.mpW = m_layers[i].w;
 			out.mpH = m_layers[i].h;
+			out.mpHidden = m_layers[i].hidden;
 			break;
 		}
 		if (out.mpW < 2 && out.mpHwnd) {
@@ -942,6 +1004,7 @@ void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 				out.mpY = out.layers[i].y;
 				out.mpW = out.layers[i].w;
 				out.mpH = out.layers[i].h;
+				out.mpHidden = out.layers[i].hidden;
 				break;
 			}
 		}
@@ -954,10 +1017,7 @@ void CScreenCaptureDlg::PersistUiToSavedata()
 	savedata.cap_with_audio = m_audio.GetCheck() ? 1 : 0;
 	savedata.cap_with_mic = m_mic.GetCheck() ? 1 : 0;
 	savedata.cap_include_mp = m_includeMp.GetCheck() ? 1 : 0;
-	static const int fpsTab[] = { 10, 15, 20, 24, 30 };
-	int sel = m_fps.GetCurSel();
-	if (sel < 0 || sel > 4) sel = 1;
-	savedata.cap_fps = fpsTab[sel];
+	savedata.cap_fps = CurrentPreviewFps();
 	int mode = m_mode.GetCurSel();
 	if (mode < 0 || mode > 2) mode = 0;
 	savedata.cap_mode = mode;
@@ -1033,7 +1093,8 @@ void CScreenCaptureDlg::RefreshLayerList()
 	m_layer.ResetContent();
 	for (int i = 0; i < m_layerCnt; ++i) {
 		CString s;
-		s.Format(L"%s[Z%d] %s  (%d,%d %dx%d)",
+		s.Format(L"%s%s[Z%d] %s  (%d,%d %dx%d)",
+			m_layers[i].hidden ? L"[Hide] " : L"",
 			m_layers[i].isMp ? L"[MP] " : L"",
 			i, m_layers[i].title, m_layers[i].x, m_layers[i].y, m_layers[i].w, m_layers[i].h);
 		m_layer.AddString(s);
@@ -1188,20 +1249,20 @@ void CScreenCaptureDlg::SyncMpLayerFromCheck()
 		}
 		AddLayerHwnd(h, TRUE);
 		m_status.SetWindowText(LL14(
-			L"MP画面をレイヤに追加しました。プレビューで配置・拡大縮小できます。",
-			L"Added MP as a layer. Drag/resize on the preview.",
-			L"MP ajouté. Glissez/redimensionnez dans l'aperçu.",
-			L"MP aggiunto. Trascina/ridimensiona nell'anteprima.",
-			L"MP añadido. Arrastre/redimensione en la vista previa.",
-			L"MP를 레이어에 추가했습니다. 미리보기에서 배치/크기 조절하세요.",
-			L"已将MP加入层。可在预览中拖动/缩放。",
-			L"تمت إضافة MP. اسحب/غيّر الحجم في المعاينة.",
-			L"MP добавлен. Перетаскивайте/масштабируйте в превью.",
-			L"MP hinzugefügt. Ziehen/skalieren in der Vorschau.",
-			L"MP adicionado. Arraste/redimensione na prévia.",
-			L"MP toegevoegd. Sleep/schaal in het voorbeeld.",
-			L"Dodano MP. Przeciągaj/skaluj w podglądzie.",
-			L"MP eklendi. Önizlemede sürükleyin/ölçekleyin."));
+			L"MPをレイヤに追加。配置はドラッグ、音だけなら右クリック→Hide。",
+			L"MP added as layer. Drag to place; right-click Hide for audio-only.",
+			L"MP ajouté. Glissez; clic droit Hide pour audio seul.",
+			L"MP aggiunto. Trascina; destro Hide per solo audio.",
+			L"MP añadido. Arrastre; clic der. Hide para solo audio.",
+			L"MP를 레이어에 추가. 드래그로 배치, 오디오만이면 우클릭→Hide.",
+			L"已将MP加入层。拖动放置；只要声音则右键→Hide。",
+			L"أُضيف MP. اسحب؛ يمين Hide للصوت فقط.",
+			L"MP добавлен. Перетаскивайте; ПКМ Hide — только звук.",
+			L"MP hinzugefügt. Ziehen; Rechtsklick Hide für nur Audio.",
+			L"MP adicionado. Arraste; direito Hide para só áudio.",
+			L"MP toegevoegd. Sleep; rechtsklik Hide voor alleen audio.",
+			L"Dodano MP. Przeciągaj; PPM Hide dla samego dźwięku.",
+			L"MP eklendi. Sürükleyin; yalnızca ses için sağ tık→Hide."));
 	} else {
 		for (int i = m_layerCnt - 1; i >= 0; --i) {
 			if (!m_layers[i].isMp) continue;
@@ -1219,6 +1280,48 @@ void CScreenCaptureDlg::OnBnClickedIncludeMp()
 {
 	if (m_uiLocked) return;
 	SyncMpLayerFromCheck();
+}
+
+void CScreenCaptureDlg::ToggleLayerHidden(int layerIdx)
+{
+	if (layerIdx < 0 || layerIdx >= m_layerCnt) return;
+	m_layers[layerIdx].hidden = !m_layers[layerIdx].hidden;
+	const BOOL hid = m_layers[layerIdx].hidden;
+	RefreshLayerList();
+	m_layer.SetCurSel(layerIdx);
+	SyncGeoEditsFromSel();
+	UpdatePreview(TRUE);
+	m_status.SetWindowText(hid
+		? LL14(
+			L"レイヤを非表示にしました（音だけ載せたいときに）。もう一度右クリックで表示。",
+			L"Layer hidden (use for audio-only). Right-click again to show.",
+			L"Calque masqué (audio seul). Clic droit pour réafficher.",
+			L"Livello nascosto (solo audio). Clic destro per mostrare.",
+			L"Capa oculta (solo audio). Clic derecho para mostrar.",
+			L"레이어를 숨겼습니다(오디오만). 다시 우클릭하면 표시.",
+			L"已隐藏层（适合只录声音）。再右键可显示。",
+			L"تم إخفاء الطبقة (للصوت فقط). انقر باليمين لإظهارها.",
+			L"Слой скрыт (только звук). ПКМ — показать снова.",
+			L"Ebene ausgeblendet (nur Audio). Rechtsklick zum Einblenden.",
+			L"Camada oculta (só áudio). Clique direito para mostrar.",
+			L"Laag verborgen (alleen audio). Rechtsklik om te tonen.",
+			L"Warstwa ukryta (tylko dźwięk). PPM — pokaż.",
+			L"Katman gizlendi (yalnızca ses). Sağ tık ile göster.")
+		: LL14(
+			L"レイヤを再表示しました。",
+			L"Layer shown again.",
+			L"Calque réaffiché.",
+			L"Livello mostrato di nuovo.",
+			L"Capa visible de nuevo.",
+			L"레이어를 다시 표시했습니다.",
+			L"已重新显示层。",
+			L"أُظهرَت الطبقة مجدداً.",
+			L"Слой снова виден.",
+			L"Ebene wieder sichtbar.",
+			L"Camada visível novamente.",
+			L"Laag weer zichtbaar.",
+			L"Warstwa znów widoczna.",
+			L"Katman tekrar görünür."));
 }
 
 void CScreenCaptureDlg::FitSelected(int scalePercent)
@@ -1521,10 +1624,7 @@ void CScreenCaptureDlg::DrawPreviewHud(CDC& dc, const CRect& imageRect, float sc
 
 	const int mode = m_mode.GetCurSel();
 	const int sel = m_layer.GetCurSel();
-	static const int fpsTab[] = { 10, 15, 20, 24, 30 };
-	int fpsSel = m_fps.GetCurSel();
-	if (fpsSel < 0 || fpsSel > 4) fpsSel = 1;
-	const int showFps = fpsTab[fpsSel];
+	const int showFps = CurrentPreviewFps();
 
 	// 上部情報バー
 	CString hud;
@@ -1553,18 +1653,23 @@ void CScreenCaptureDlg::DrawPreviewHud(CDC& dc, const CRect& imageRect, float sc
 			const Layer& L = m_layers[i];
 			CRect rr = CanvasToPreview(L.x, L.y, L.w, L.h);
 			const BOOL selected = (i == sel);
-			CPen pen(PS_SOLID, selected ? 2 : 1, selected ? RGB(255, 200, 40) : (L.isMp ? RGB(120, 255, 160) : RGB(80, 200, 255)));
+			const COLORREF col = L.hidden
+				? RGB(140, 140, 150)
+				: (selected ? RGB(255, 200, 40) : (L.isMp ? RGB(120, 255, 160) : RGB(80, 200, 255)));
+			CPen pen(L.hidden ? PS_DOT : PS_SOLID, selected ? 2 : 1, col);
 			dc.SelectObject(&pen);
 			dc.SelectStockObject(NULL_BRUSH);
 			dc.Rectangle(&rr);
 
 			CString label;
-			label.Format(L"%sZ%d %dx%d  %s", L.isMp ? L"[MP] " : L"", i, L.w, L.h, L.title);
+			label.Format(L"%s%sZ%d %dx%d  %s",
+				L.hidden ? L"[Hide] " : L"",
+				L.isMp ? L"[MP] " : L"", i, L.w, L.h, L.title);
 			CRect lr = rr;
 			lr.bottom = lr.top + 16;
 			if (lr.bottom > rr.bottom) lr.bottom = rr.bottom;
-			dc.FillSolidRect(&lr, selected ? RGB(60, 45, 0) : RGB(0, 40, 60));
-			dc.SetTextColor(selected ? RGB(255, 230, 120) : RGB(180, 230, 255));
+			dc.FillSolidRect(&lr, L.hidden ? RGB(40, 40, 48) : (selected ? RGB(60, 45, 0) : RGB(0, 40, 60)));
+			dc.SetTextColor(L.hidden ? RGB(200, 200, 210) : (selected ? RGB(255, 230, 120) : RGB(180, 230, 255)));
 			dc.DrawText(label, &lr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
 			if (selected) {
@@ -1696,10 +1801,10 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_mic.SetWindowText(LL14(L"マイク", L"Mic", L"Micro", L"Microfono", L"Micrófono", L"마이크", L"麦克风", L"ميكروفون",
 		L"Микрофон", L"Mikrofon", L"Microfone", L"Microfoon", L"Mikrofon", L"Mikrofon"));
 	m_includeMp.SetWindowText(LL14(
-		L"MPの曲を載せる", L"Include MP song", L"Inclure morceau MP", L"Includi brano MP",
-		L"Incluir canción MP", L"MP 곡 포함", L"放入MP曲目", L"تضمين أغنية MP",
-		L"Включить трек MP", L"MP-Titel einbeziehen", L"Incluir faixa MP", L"MP-nummer opnemen",
-		L"Dołącz utwór MP", L"MP parçasını ekle"));
+		L"MPを載せる", L"Include MP", L"Inclure MP", L"Includi MP",
+		L"Incluir MP", L"MP 포함", L"放入MP", L"تضمين MP",
+		L"Включить MP", L"MP einbeziehen", L"Incluir MP", L"MP opnemen",
+		L"Dołącz MP", L"MP ekle"));
 	m_availLabel.SetWindowText(LL14(L"ウィンドウ一覧", L"Windows", L"Fenêtres", L"Finestre", L"Ventanas", L"창 목록", L"窗口列表", L"النوافذ",
 		L"Окна", L"Fenster", L"Janelas", L"Vensters", L"Okna", L"Pencereler"));
 	m_layerLabel.SetWindowText(LL14(L"合成レイヤ (上が手前)", L"Layers (top = front)", L"Calques (haut = avant)", L"Livelli (alto = davanti)",
@@ -1731,20 +1836,20 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
 		L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	m_status.SetWindowText(LL14(
-		L"プレビュー上で枠をドラッグ／四隅で拡大縮小できます（HUDは録画されません）。",
-		L"Drag frames on preview / resize by corners (HUD is not recorded).",
-		L"Glissez les cadres / redimensionnez aux coins (HUD non enregistré).",
-		L"Trascina i riquadri / ridimensiona agli angoli (HUD non registrato).",
-		L"Arrastre marcos / redimensione en esquinas (HUD no se graba).",
-		L"미리보기에서 프레임 드래그/모서리 크기조절 (HUD는 녹화 안 됨).",
-		L"可在预览中拖动边框/用四角缩放（HUD不会录制）。",
-		L"اسحب الإطارات / غيّر الحجم من الزوايا (لا يُسجَّل HUD).",
-		L"Перетаскивайте рамки / углы (HUD не записывается).",
-		L"Rahmen ziehen / an Ecken skalieren (HUD wird nicht aufgenommen).",
-		L"Arraste molduras / redimensione nos cantos (HUD não é gravado).",
-		L"Sleep kaders / schaal via hoeken (HUD wordt niet opgenomen).",
-		L"Przeciągaj ramki / skaluj rogami (HUD nie jest nagrywany).",
-		L"Çerçeveleri sürükleyin / köşelerden ölçekleyin (HUD kayda girmez)."));
+		L"プレビュー: ドラッグで配置／四隅で拡大縮小／右クリックでHide(非表示・音だけ可)。HUDは録画されません。",
+		L"Preview: drag to place / corners to resize / right-click Hide (audio-only OK). HUD not recorded.",
+		L"Aperçu: glisser / coins pour taille / clic droit Hide (audio seul OK). HUD non enregistré.",
+		L"Anteprima: trascina / angoli per dimensione / destro Hide (solo audio OK). HUD non registrato.",
+		L"Vista: arrastre / esquinas para tamaño / clic der. Hide (solo audio OK). HUD no se graba.",
+		L"미리보기: 드래그 배치/모서리 크기/우클릭 Hide(오디오만 가능). HUD는 녹화 안 됨.",
+		L"预览：拖动放置/四角缩放/右键Hide（可只录声音）。HUD不会录制。",
+		L"معاينة: اسحب / زوايا للحجم / يمين Hide (صوت فقط OK). لا يُسجَّل HUD.",
+		L"Превью: перетаскивание / углы / ПКМ Hide (можно только звук). HUD не пишется.",
+		L"Vorschau: ziehen / Ecken skalieren / Rechtsklick Hide (nur Audio OK). HUD nicht aufgenommen.",
+		L"Prévia: arraste / cantos / direito Hide (só áudio OK). HUD não é gravado.",
+		L"Voorbeeld: slepen / hoeken / rechtsklik Hide (alleen audio OK). HUD niet opgenomen.",
+		L"Podgląd: przeciągaj / rogi / PPM Hide (tylko dźwięk OK). HUD nie jest nagrywany.",
+		L"Önizleme: sürükle / köşe ölçek / sağ tık Hide (yalnızca ses OK). HUD kayda girmez."));
 
 	m_mode.AddString(LL14(L"プライマリ画面", L"Primary screen", L"Écran principal", L"Schermo principale",
 		L"Pantalla principal", L"기본 화면", L"主屏幕", L"الشاشة الرئيسية",
@@ -1775,9 +1880,9 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_mic.SetCheck(savedata.cap_with_mic ? BST_CHECKED : BST_UNCHECKED);
 	m_includeMp.SetCheck(savedata.cap_include_mp ? BST_CHECKED : BST_UNCHECKED);
 
-	static const int fpsTab[] = { 10, 15, 20, 24, 30 };
+	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60 };
 	int fpsSel = 1;
-	for (int i = 0; i < 5; ++i) {
+	for (int i = 0; i < 6; ++i) {
 		CString s; s.Format(L"%d", fpsTab[i]);
 		m_fps.AddString(s);
 		if (savedata.cap_fps == fpsTab[i]) fpsSel = i;
@@ -1802,8 +1907,7 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	if (savedata.cap_include_mp)
 		SyncMpLayerFromCheck();
 
-	if (m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX)) {
-		m_tooltip.Activate(TRUE);
+	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
 		m_tooltip.AddTool(&m_mode, LL14(
 			L"画面全体または複数ウィンドウの合成を選びます",
 			L"Full screen or multi-window composition",
@@ -1819,6 +1923,81 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 			L"Volledig scherm of multi-venstercompositie",
 			L"Pełny ekran lub kompozycja wielu okien",
 			L"Tam ekran veya çoklu pencere kompozisyonu"));
+		m_tooltip.AddTool(&m_canvas, LL14(
+			L"出力解像度。自動は合成内容に合わせます",
+			L"Output resolution. Auto follows composition",
+			L"Résolution de sortie. Auto suit la composition",
+			L"Risoluzione di uscita. Auto segue la composizione",
+			L"Resolución de salida. Auto sigue la composición",
+			L"출력 해상도. 자동은 합성에 맞춤",
+			L"输出分辨率。自动随合成内容",
+			L"دقة الإخراج. تلقائي يتبع التركيب",
+			L"Разрешение выхода. Авто по композиции",
+			L"Ausgabeauflösung. Auto folgt der Komposition",
+			L"Resolução de saída. Auto segue a composição",
+			L"Uitvoerresolutie. Auto volgt compositie",
+			L"Rozdzielczość wyjścia. Auto wg kompozycji",
+			L"Çıkış çözünürlüğü. Otomatik kompozisyona uyar"));
+		m_tooltip.AddTool(&m_fps, LL14(
+			L"録画＆プレビュー表示間隔(FPS)。PCスペックに合わせて選択(高いほど滑らか・負荷増)",
+			L"Record & preview FPS. Pick for your PC (higher = smoother, heavier)",
+			L"IPS enregistrement et aperçu. Selon le PC (plus élevé = plus fluide)",
+			L"FPS registrazione e anteprima. In base al PC (più alto = più fluido)",
+			L"FPS de grabación y vista previa. Según el PC (más alto = más fluido)",
+			L"녹화·미리보기 FPS. PC 사양에 맞게 선택(높을수록 부드럽고 부하↑)",
+			L"录制与预览帧率。按电脑性能选择（越高越流畅、更重）",
+			L"معدل التسجيل والمعاينة. اختر حسب الجهاز (الأعلى أنعم وأثقل)",
+			L"FPS записи и превью. Выберите по ПК (выше — плавнее, тяжелее)",
+			L"Aufnahme- und Vorschau-FPS. Nach PC wählen (höher = flüssiger)",
+			L"FPS de gravação e prévia. Escolha pelo PC (mais alto = mais suave)",
+			L"Opname- en voorbeeld-FPS. Kies naar PC (hoger = vloeiender)",
+			L"FPS nagrywania i podglądu. Dobierz do PC (wyższe = płynniej)",
+			L"Kayıt ve önizleme FPS. PC’ye göre seçin (yüksek = akıcı, ağır)"));
+		m_tooltip.AddTool(&m_audio, LL14(
+			L"PCの再生音(ループバック)を録画に載せます。MPの曲もここに含まれます",
+			L"Include PC playback (loopback). MP audio is included here",
+			L"Inclut la lecture PC (loopback). L'audio MP est inclus",
+			L"Include audio PC (loopback). L'audio MP è incluso",
+			L"Incluye audio del PC (loopback). El audio MP se incluye",
+			L"PC 재생음(루프백)을 녹화에 포함. MP 곡도 여기 포함",
+			L"录制PC播放音(环回)。MP曲目也在此",
+			L"يشمل صوت التشغيل (loopback). صوت MP هنا أيضاً",
+			L"Звук ПК (loopback). Трек MP тоже здесь",
+			L"PC-Wiedergabe (Loopback). MP-Audio ist enthalten",
+			L"Inclui áudio do PC (loopback). Áudio MP incluído",
+			L"PC-weergave (loopback). MP-audio zit hierin",
+			L"Dźwięk PC (loopback). Audio MP też tutaj",
+			L"PC oynatma sesi (loopback). MP sesi de burada"));
+		m_tooltip.AddTool(&m_mic, LL14(
+			L"マイク入力を録画にミックスします",
+			L"Mix microphone into the recording",
+			L"Mixer le micro dans l'enregistrement",
+			L"Mescola il microfono nella registrazione",
+			L"Mezclar el micrófono en la grabación",
+			L"마이크 입력을 녹화에 믹스",
+			L"将麦克风混入录制",
+			L"مزج الميكروفون في التسجيل",
+			L"Микрофон в запись",
+			L"Mikrofon in die Aufnahme mischen",
+			L"Misturar microfone na gravação",
+			L"Microfoon in de opname mixen",
+			L"Mikrofon do nagrania",
+			L"Mikrofonu kayda karıştır"));
+		m_tooltip.AddTool(&m_includeMp, LL14(
+			L"MP画面を合成に追加。音だけならプレビューで右クリック→Hide(チェックはONのまま)",
+			L"Add MP window. For audio-only: right-click preview → Hide (keep checked)",
+			L"Ajoute MP. Audio seul: clic droit aperçu → Hide (rester coché)",
+			L"Aggiunge MP. Solo audio: destro anteprima → Hide (lascia selezionato)",
+			L"Añade MP. Solo audio: clic der. vista → Hide (dejar marcado)",
+			L"MP 창 추가. 오디오만: 미리보기 우클릭→Hide(체크 유지)",
+			L"加入MP画面。只要声音：预览右键→Hide（保持勾选）",
+			L"يضيف MP. للصوت فقط: يمين المعاينة → Hide (اتركه محدداً)",
+			L"Добавляет окно MP. Только звук: ПКМ в превью → Hide (оставьте галочку)",
+			L"MP-Fenster hinzufügen. Nur Audio: Rechtsklick Vorschau → Hide (anlassen)",
+			L"Adiciona MP. Só áudio: direito na prévia → Hide (mantenha marcado)",
+			L"Voegt MP toe. Alleen audio: rechtsklik voorbeeld → Hide (aan laten)",
+			L"Dodaje MP. Tylko dźwięk: PPM podgląd → Hide (zostaw zaznaczone)",
+			L"MP penceresi ekler. Yalnızca ses: sağ tık önizleme → Hide (işaretli kalsın)"));
 		m_tooltip.AddTool(&m_pick, LL14(
 			L"次にクリックしたウィンドウをレイヤに追加します",
 			L"Next click adds that window as a layer",
@@ -1834,12 +2013,89 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 			L"Volgende klik voegt het venster toe",
 			L"Następne kliknięcie doda okno",
 			L"Sonraki tıklama pencereyi ekler"));
+		m_tooltip.AddTool(&m_refresh, LL14(
+			L"ウィンドウ一覧を更新し、プレビューを描き直します",
+			L"Refresh window list and redraw preview",
+			L"Actualiser la liste et redessiner l'aperçu",
+			L"Aggiorna elenco e ridisegna anteprima",
+			L"Actualizar lista y redibujar vista previa",
+			L"창 목록을 갱신하고 미리보기를 다시 그립니다",
+			L"刷新窗口列表并重绘预览",
+			L"تحديث قائمة النوافذ وإعادة رسم المعاينة",
+			L"Обновить список окон и превью",
+			L"Fensterliste aktualisieren und Vorschau neu zeichnen",
+			L"Atualizar lista e redesenhar prévia",
+			L"Vensterlijst vernieuwen en voorbeeld hertekenen",
+			L"Odśwież listę okien i podgląd",
+			L"Pencere listesini yenile ve önizlemeyi çiz"));
+		m_tooltip.AddTool(&m_preview, LL14(
+			L"合成プレビュー。左ドラッグで移動/四隅リサイズ。右クリックでHide/Show(全ウィンドウ)",
+			L"Compose preview. L-drag move/resize. R-click Hide/Show (any window)",
+			L"Aperçu. Glisser G pour bouger/taille. Clic D Hide/Show",
+			L"Anteprima. Trascina S per muovere/ridimensionare. Destro Hide/Show",
+			L"Vista previa. Arrastre izq. mover/tamaño. Der. Hide/Show",
+			L"합성 미리보기. 좌드래그 이동/크기. 우클릭 Hide/Show",
+			L"合成预览。左键拖动移动/缩放。右键Hide/Show",
+			L"معاينة التركيب. سحب أيسر للنقل/الحجم. يمين Hide/Show",
+			L"Превью. ЛКМ — двигать/размер. ПКМ Hide/Show",
+			L"Vorschau. L-Ziehen verschieben/skalieren. R-Klick Hide/Show",
+			L"Prévia. Arraste esq. mover/tamanho. Dir. Hide/Show",
+			L"Voorbeeld. L-slepen verplaatsen/schalen. R-klik Hide/Show",
+			L"Podgląd. LPM przeciągaj/skaluj. PPM Hide/Show",
+			L"Önizleme. Sol sürükle taşı/ölçek. Sağ tık Hide/Show"));
+		m_tooltip.AddTool(&m_avail, LL14(
+			L"キャプチャ可能なトップレベルウィンドウ一覧",
+			L"List of capturable top-level windows",
+			L"Liste des fenêtres capturables",
+			L"Elenco finestre catturabili",
+			L"Lista de ventanas capturables",
+			L"캡처 가능한 최상위 창 목록",
+			L"可捕获的顶级窗口列表",
+			L"قائمة النوافذ القابلة للالتقاط",
+			L"Список захватываемых окон",
+			L"Liste erfassbarer Fenster",
+			L"Lista de janelas capturáveis",
+			L"Lijst van te vangen vensters",
+			L"Lista okien do przechwycenia",
+			L"Yakalanabilir üst düzey pencereler"));
+		m_tooltip.AddTool(&m_layer, LL14(
+			L"合成レイヤ。上が手前。[Hide]は映像から除外(音はシステム音側)",
+			L"Layers; top is front. [Hide] excludes video (audio via system sound)",
+			L"Calques; haut = avant. [Hide] exclut la vidéo (audio système)",
+			L"Livelli; alto = davanti. [Hide] esclude video (audio sistema)",
+			L"Capas; arriba = frente. [Hide] excluye vídeo (audio sistema)",
+			L"합성 레이어. 위=앞. [Hide]는 영상 제외(소리는 시스템음)",
+			L"合成层；上为前。[Hide]排除画面（声音走系统音）",
+			L"الطبقات؛ الأعلى أمام. [Hide] يستبعد الفيديو (الصوت عبر النظام)",
+			L"Слои; верх = перед. [Hide] без видео (звук через системный)",
+			L"Ebenen; oben = vorne. [Hide] ohne Video (Ton über System)",
+			L"Camadas; cima = frente. [Hide] exclui vídeo (áudio do sistema)",
+			L"Lagen; boven = voor. [Hide] zonder video (audio via systeem)",
+			L"Warstwy; góra = przód. [Hide] bez wideo (dźwięk systemowy)",
+			L"Katmanlar; üst = ön. [Hide] görüntüyü çıkarır (ses sistemden)"));
+		m_tooltip.AddTool(&m_add, LL14(L"選択ウィンドウを合成レイヤへ追加", L"Add selected window to layers", L"Ajouter la fenêtre aux calques", L"Aggiungi finestra ai livelli", L"Añadir ventana a capas", L"선택 창을 레이어에 추가", L"将所选窗口加入层", L"إضافة النافذة إلى الطبقات", L"Добавить окно в слои", L"Fenster zu Ebenen hinzufügen", L"Adicionar janela às camadas", L"Venster aan lagen toevoegen", L"Dodaj okno do warstw", L"Seçili pencereyi katmanlara ekle"));
+		m_tooltip.AddTool(&m_remove, LL14(L"選択レイヤを削除", L"Remove selected layer", L"Retirer le calque", L"Rimuovi livello", L"Quitar capa", L"선택 레이어 삭제", L"删除所选层", L"إزالة الطبقة", L"Удалить слой", L"Ebene entfernen", L"Remover camada", L"Laag verwijderen", L"Usuń warstwę", L"Seçili katmanı kaldır"));
+		m_tooltip.AddTool(&m_zUp, LL14(L"レイヤを手前へ", L"Bring layer forward", L"Calque vers l'avant", L"Porta avanti", L"Traer al frente", L"레이어를 앞으로", L"将层前移", L"تقديم الطبقة", L"Слой вперёд", L"Ebene nach vorne", L"Trazer para frente", L"Laag naar voren", L"Warstwa do przodu", L"Katmanı öne getir"));
+		m_tooltip.AddTool(&m_zDown, LL14(L"レイヤを奥へ", L"Send layer back", L"Calque vers l'arrière", L"Porta indietro", L"Enviar atrás", L"레이어를 뒤로", L"将层后移", L"تأخير الطبقة", L"Слой назад", L"Ebene nach hinten", L"Enviar para trás", L"Laag naar achteren", L"Warstwa do tyłu", L"Katmanı geriye gönder"));
+		m_tooltip.AddTool(&m_applyGeo, LL14(L"X Y W H を選択レイヤに適用", L"Apply X Y W H to selected layer", L"Appliquer X Y W H", L"Applica X Y W H", L"Aplicar X Y W H", L"X Y W H를 선택 레이어에 적용", L"将 X Y W H 应用到所选层", L"تطبيق X Y W H", L"Применить X Y W H", L"X Y W H übernehmen", L"Aplicar X Y W H", L"X Y W H toepassen", L"Zastosuj X Y W H", L"X Y W H uygula"));
+		m_tooltip.AddTool(&m_fit, LL14(L"キャンバスにフィット", L"Fit to canvas", L"Ajuster au canevas", L"Adatta al canvas", L"Ajustar al lienzo", L"캔버스에 맞춤", L"铺满画布", L"ملاءمة اللوحة", L"Вписать в холст", L"In die Fläche einpassen", L"Ajustar à tela", L"Passen op canvas", L"Dopasuj do płótna", L"Tuvale sığdır"));
+		m_tooltip.AddTool(&m_scale50, LL14(L"元ウィンドウの50%サイズ", L"50% of source window size", L"50% de la taille source", L"50% della dimensione origine", L"50% del tamaño origen", L"원본 창의 50% 크기", L"源窗口 50% 大小", L"50٪ من حجم النافذة", L"50% размера окна", L"50% der Quellgröße", L"50% do tamanho da janela", L"50% van bronvenster", L"50% rozmiaru okna", L"Kaynak pencerenin %50'si"));
+		m_tooltip.AddTool(&m_scale100, LL14(L"元ウィンドウの実寸", L"100% source window size", L"Taille source 100%", L"Dimensione origine 100%", L"Tamaño origen 100%", L"원본 창 실측", L"源窗口实际大小", L"حجم النافذة 100٪", L"100% размера окна", L"100% Quellgröße", L"100% do tamanho da janela", L"100% bronvenster", L"100% rozmiaru okna", L"Kaynak pencere %100"));
+		m_tooltip.AddTool(&m_tile, LL14(L"レイヤをタイル状に整列", L"Tile layers", L"Mosaïque des calques", L"Affianca livelli", L"Mosaico de capas", L"레이어를 바둑판 정렬", L"平铺各层", L"تجانب الطبقات", L"Плиткой слои", L"Ebenen kacheln", L"Mosaico das camadas", L"Lagen tegelen", L"Ułóż warstwy", L"Katmanları döşe"));
+		m_tooltip.AddTool(&m_path, LL14(L"MP4の保存先パス", L"MP4 save path", L"Chemin MP4", L"Percorso MP4", L"Ruta MP4", L"MP4 저장 경로", L"MP4 保存路径", L"مسار حفظ MP4", L"Путь MP4", L"MP4-Pfad", L"Caminho MP4", L"MP4-pad", L"Ścieżka MP4", L"MP4 kayıt yolu"));
+		m_tooltip.AddTool(&m_browse, LL14(L"保存先を参照", L"Browse save location", L"Parcourir l'emplacement", L"Sfoglia destinazione", L"Examinar destino", L"저장 위치 찾아보기", L"浏览保存位置", L"استعراض موقع الحفظ", L"Обзор папки сохранения", L"Speicherort wählen", L"Procurar local", L"Bladeren naar locatie", L"Przeglądaj lokalizację", L"Kayıt konumuna göz at"));
+		m_tooltip.AddTool(&m_start, LL14(L"録画開始/停止", L"Start/stop recording", L"Démarrer/arrêter", L"Avvia/ferma", L"Iniciar/detener", L"녹화 시작/중지", L"开始/停止录制", L"بدء/إيقاف التسجيل", L"Старт/стоп записи", L"Aufnahme starten/stoppen", L"Iniciar/parar gravação", L"Opname starten/stoppen", L"Start/stop nagrywania", L"Kaydı başlat/durdur"));
+		m_tooltip.AddTool(&m_meterMic, LL14(L"マイク入力レベル(リアルタイム)", L"Mic level (live)", L"Niveau micro (live)", L"Livello microfono (live)", L"Nivel de micrófono (en vivo)", L"마이크 레벨(실시간)", L"麦克风电平(实时)", L"مستوى الميكروفون (مباشر)", L"Уровень микрофона (live)", L"Mikrofonpegel (live)", L"Nível do microfone (ao vivo)", L"Microfoonniveau (live)", L"Poziom mikrofonu (na żywo)", L"Mikrofon seviyesi (canlı)"));
+		m_tooltip.AddTool(&m_meterSys, LL14(L"システム音レベル(ループバック=演奏込み)", L"System audio level (loopback incl. playback)", L"Niveau système (lecture incluse)", L"Livello sistema (include riproduzione)", L"Nivel del sistema (incluye reproducción)", L"시스템 소리 레벨(재생 포함)", L"系统声音电平(含播放)", L"مستوى صوت النظام (يشمل التشغيل)", L"Уровень системного звука (с воспроизведением)", L"Systemtonpegel inkl. Wiedergabe", L"Nível do sistema (inclui reprodução)", L"Systeemniveau (inclusief afspelen)", L"Poziom dźwięku systemu (z odtwarzaniem)", L"Sistem sesi seviyesi (oynatma dahil)"));
+		m_tooltip.AddTool(&m_meterMix, LL14(L"プレビュー用ピーク(システム相当)", L"Preview peak (system-equivalent)", L"Pic d'aperçu (système)", L"Picco anteprima (sistema)", L"Pico de vista previa (sistema)", L"미리보기 피크(시스템 상당)", L"预览峰值(系统相当)", L"ذروة المعاينة (مكافئ النظام)", L"Пик превью (как система)", L"Vorschau-Peak (System)", L"Pico da prévia (sistema)", L"Voorbeeldpiek (systeem)", L"Szczyt podglądu (system)", L"Önizleme tepe (sistem)"));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 420, 12000);
 	}
 
-	SetTimer(SC_TIMER_PREV, 300, NULL);
-	SetTimer(SC_TIMER_UI, 500, NULL);
+	ApplyPreviewTimer(); // FPSコンボに連動(録画と同じ間隔でプレビュー)
+	SetTimer(SC_TIMER_UI, 200, NULL);
 	UpdatePreview();
 	RefreshOpaqueUi();
+	StartPeakMonitor();
 	return TRUE;
 }
 
@@ -1900,6 +2156,40 @@ void CScreenCaptureDlg::OnCbnSelchangeMode()
 	EnableComposeUi(m_mode.GetCurSel() == SC_MODE_WINDOWS);
 	UpdatePreview();
 	PersistUiToSavedata();
+}
+
+int CScreenCaptureDlg::CurrentPreviewFps() const
+{
+	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60 };
+	int sel = m_fps.GetSafeHwnd() ? m_fps.GetCurSel() : -1;
+	if (sel < 0 || sel > 5) {
+		int f = savedata.cap_fps;
+		if (f < 5) f = 15;
+		if (f > 60) f = 60;
+		return f;
+	}
+	return fpsTab[sel];
+}
+
+void CScreenCaptureDlg::ApplyPreviewTimer()
+{
+	if (!GetSafeHwnd()) return;
+	int fps = CurrentPreviewFps();
+	if (fps < 5) fps = 5;
+	if (fps > 60) fps = 60;
+	UINT ms = (UINT)(1000 / fps);
+	if (ms < 16) ms = 16; // ~60fps上限でも過負荷にならない程度
+	KillTimer(SC_TIMER_PREV);
+	SetTimer(SC_TIMER_PREV, ms, NULL);
+}
+
+void CScreenCaptureDlg::OnCbnSelchangeFps()
+{
+	if (m_uiLocked) return;
+	PersistUiToSavedata();
+	ApplyPreviewTimer();
+	if (m_preview.GetSafeHwnd())
+		m_preview.Invalidate(FALSE);
 }
 
 void CScreenCaptureDlg::OnLbnSelchangeLayer()
@@ -2087,10 +2377,9 @@ BOOL CScreenCaptureDlg::StartRecording()
 	}
 	::DeleteFile(path);
 
-	static const int fpsTab[] = { 10, 15, 20, 24, 30 };
-	int sel = m_fps.GetCurSel();
-	if (sel < 0 || sel > 4) sel = 1;
-	m_fpsVal = fpsTab[sel];
+	m_fpsVal = CurrentPreviewFps();
+	if (m_fpsVal < 5) m_fpsVal = 15;
+	if (m_fpsVal > 60) m_fpsVal = 60;
 	m_withAudio = m_audio.GetCheck() ? TRUE : FALSE;
 	m_withMic = m_mic.GetCheck() ? TRUE : FALSE;
 	m_outPath = path;
@@ -2100,6 +2389,9 @@ BOOL CScreenCaptureDlg::StartRecording()
 	m_recSnap = snap;
 	LeaveCriticalSection(&m_snapCs);
 
+	// 録画スレッドがループバックを独占するのでプレビュー監視を止める
+	StopPeakMonitor();
+
 	InterlockedExchange(&m_stop, 0);
 	InterlockedExchange(&m_lastHr, S_OK);
 	InterlockedExchange(&m_frameCnt, 0);
@@ -2108,6 +2400,7 @@ BOOL CScreenCaptureDlg::StartRecording()
 
 	uintptr_t th = _beginthreadex(NULL, 0, CaptureThread, this, 0, NULL);
 	if (!th) {
+		StartPeakMonitor();
 		m_status.SetWindowText(LL14(
 			L"スレッドを開始できませんでした。", L"Could not start thread.", L"Impossible de démarrer le thread.",
 			L"Impossibile avviare il thread.", L"No se pudo iniciar el hilo.", L"스레드를 시작할 수 없습니다.",
@@ -2179,6 +2472,198 @@ void CScreenCaptureDlg::StopRecording()
 		UpdateElapsedUi();
 	}
 	m_stopping = FALSE;
+	if (uiAlive)
+		StartPeakMonitor();
+}
+
+void CScreenCaptureDlg::StartPeakMonitor()
+{
+	if (m_peakThread || InterlockedCompareExchange(&m_peakRun, 0, 0) != 0)
+		return;
+	if (InterlockedCompareExchange(&m_run, 0, 0) != 0)
+		return; // 録画中は CaptureThread がピーク更新
+	InterlockedExchange(&m_peakStop, 0);
+	InterlockedExchange(&m_peakRun, 0);
+	uintptr_t th = _beginthreadex(NULL, 0, PeakMonitorThread, this, 0, NULL);
+	if (!th) return;
+	m_peakThread = (HANDLE)th;
+}
+
+void CScreenCaptureDlg::StopPeakMonitor()
+{
+	InterlockedExchange(&m_peakStop, 1);
+	if (m_peakThread) {
+		WaitForSingleObject(m_peakThread, 4000);
+		CloseHandle(m_peakThread);
+		m_peakThread = NULL;
+	}
+	InterlockedExchange(&m_peakRun, 0);
+	InterlockedExchange(&m_peakStop, 0);
+}
+
+UINT __stdcall CScreenCaptureDlg::PeakMonitorThread(void* p)
+{
+	CScreenCaptureDlg* self = (CScreenCaptureDlg*)p;
+	HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	InterlockedExchange(&self->m_peakRun, 1);
+
+	IMMDeviceEnumerator* enumer = NULL;
+	IMMDevice* renderDev = NULL;
+	IAudioClient* loopClient = NULL;
+	IAudioCaptureClient* loopCap = NULL;
+	WAVEFORMATEX* mixFmt = NULL;
+	HANDLE hEvent = NULL;
+	IMMDevice* micDev = NULL;
+	IAudioClient* micClient = NULL;
+	IAudioCaptureClient* micCap = NULL;
+	WAVEFORMATEX* micFmt = NULL;
+	HANDLE hMicEvent = NULL;
+
+	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+		__uuidof(IMMDeviceEnumerator), (void**)&enumer);
+	if (FAILED(hr) || !enumer) goto peak_done;
+
+	// プレビュー中は常にシステム(ループバック=演奏込み)とマイクを監視
+	if (savedata.loop_device[0]) {
+		hr = enumer->GetDevice(savedata.loop_device, &renderDev);
+		if (FAILED(hr) || !renderDev) {
+			if (renderDev) { renderDev->Release(); renderDev = NULL; }
+			hr = enumer->GetDefaultAudioEndpoint(eRender, eConsole, &renderDev);
+		}
+	} else {
+		hr = enumer->GetDefaultAudioEndpoint(eRender, eConsole, &renderDev);
+	}
+	if (SUCCEEDED(hr) && renderDev)
+		ScInitLoopbackCapture(renderDev, &loopClient, &loopCap, &mixFmt, &hEvent);
+
+	{
+		HRESULT hm = S_OK;
+		if (savedata.mic_device[0]) {
+			hm = enumer->GetDevice(savedata.mic_device, &micDev);
+			if (FAILED(hm) || !micDev) {
+				if (micDev) { micDev->Release(); micDev = NULL; }
+				hm = enumer->GetDefaultAudioEndpoint(eCapture, eConsole, &micDev);
+			}
+		} else {
+			hm = enumer->GetDefaultAudioEndpoint(eCapture, eConsole, &micDev);
+		}
+		if (SUCCEEDED(hm) && micDev) {
+			hm = micDev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void**)&micClient);
+			if (SUCCEEDED(hm) && micClient) {
+				hm = micClient->GetMixFormat(&micFmt);
+				if (SUCCEEDED(hm) && micFmt) {
+					hMicEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+					if (hMicEvent) {
+						hm = micClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
+							AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_NOPERSIST,
+							2000000, 0, micFmt, NULL);
+						if (SUCCEEDED(hm))
+							hm = micClient->SetEventHandle(hMicEvent);
+						if (SUCCEEDED(hm))
+							hm = micClient->GetService(__uuidof(IAudioCaptureClient), (void**)&micCap);
+						if (FAILED(hm) || !micCap) {
+							if (micCap) { micCap->Release(); micCap = NULL; }
+							micClient->Release(); micClient = NULL;
+							if (micFmt) { CoTaskMemFree(micFmt); micFmt = NULL; }
+							CloseHandle(hMicEvent); hMicEvent = NULL;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (loopClient) loopClient->Start();
+	if (micClient) micClient->Start();
+
+	while (InterlockedCompareExchange(&self->m_peakStop, 0, 0) == 0) {
+		HANDLE waits[2];
+		int nw = 0;
+		if (hEvent) waits[nw++] = hEvent;
+		if (hMicEvent) waits[nw++] = hMicEvent;
+		if (nw > 0)
+			WaitForMultipleObjects(nw, waits, FALSE, 50);
+		else
+			Sleep(30);
+
+		if (micCap && micFmt) {
+			UINT32 packet = 0;
+			HRESULT hm = micCap->GetNextPacketSize(&packet);
+			while (SUCCEEDED(hm) && packet > 0 && InterlockedCompareExchange(&self->m_peakStop, 0, 0) == 0) {
+				BYTE* data = NULL;
+				UINT32 frames = 0;
+				DWORD flags = 0;
+				hm = micCap->GetBuffer(&data, &frames, &flags, NULL, NULL);
+				if (FAILED(hm)) break;
+				if (frames > 0 && data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT)) {
+					float pk = 0.f;
+					for (UINT32 i = 0; i < frames; ++i) {
+						float L = 0.f, R = 0.f;
+						ScSampleToFloat(data + i * micFmt->nBlockAlign, micFmt, L, R);
+						const float aL = (L < 0.f) ? -L : L;
+						const float aR = (R < 0.f) ? -R : R;
+						if (aL > pk) pk = aL;
+						if (aR > pk) pk = aR;
+					}
+					const LONG v = (LONG)(pk * 1000.f);
+					LONG cur = InterlockedCompareExchange(&self->m_peakMic, 0, 0);
+					if (v > cur) InterlockedExchange(&self->m_peakMic, v > 1000 ? 1000 : v);
+				}
+				micCap->ReleaseBuffer(frames);
+				hm = micCap->GetNextPacketSize(&packet);
+			}
+		}
+
+		if (loopCap && mixFmt) {
+			UINT32 packet = 0;
+			hr = loopCap->GetNextPacketSize(&packet);
+			while (SUCCEEDED(hr) && packet > 0 && InterlockedCompareExchange(&self->m_peakStop, 0, 0) == 0) {
+				BYTE* data = NULL;
+				UINT32 frames = 0;
+				DWORD flags = 0;
+				hr = loopCap->GetBuffer(&data, &frames, &flags, NULL, NULL);
+				if (FAILED(hr)) break;
+				if (frames > 0) {
+					float pk = 0.f;
+					for (UINT32 i = 0; i < frames; ++i) {
+						float L = 0.f, R = 0.f;
+						if (data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT))
+							ScSampleToFloat(data + i * mixFmt->nBlockAlign, mixFmt, L, R);
+						const float aL = (L < 0.f) ? -L : L;
+						const float aR = (R < 0.f) ? -R : R;
+						if (aL > pk) pk = aL;
+						if (aR > pk) pk = aR;
+					}
+					const LONG v = (LONG)(pk * 1000.f);
+					LONG cur = InterlockedCompareExchange(&self->m_peakSys, 0, 0);
+					if (v > cur) InterlockedExchange(&self->m_peakSys, v > 1000 ? 1000 : v);
+					LONG curP = InterlockedCompareExchange(&self->m_peakMix, 0, 0);
+					if (v > curP) InterlockedExchange(&self->m_peakMix, v > 1000 ? 1000 : v);
+				}
+				loopCap->ReleaseBuffer(frames);
+				hr = loopCap->GetNextPacketSize(&packet);
+			}
+		}
+	}
+
+	if (loopClient) loopClient->Stop();
+	if (micClient) micClient->Stop();
+
+peak_done:
+	InterlockedExchange(&self->m_peakRun, 0);
+	if (loopCap) loopCap->Release();
+	if (loopClient) loopClient->Release();
+	if (mixFmt) CoTaskMemFree(mixFmt);
+	if (renderDev) renderDev->Release();
+	if (micCap) micCap->Release();
+	if (micClient) micClient->Release();
+	if (micFmt) CoTaskMemFree(micFmt);
+	if (micDev) micDev->Release();
+	if (enumer) enumer->Release();
+	if (hEvent) CloseHandle(hEvent);
+	if (hMicEvent) CloseHandle(hMicEvent);
+	if (SUCCEEDED(hrCo) || hrCo == S_FALSE) CoUninitialize();
+	return 0;
 }
 
 UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
@@ -2393,11 +2878,21 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 							while (done < frames) {
 								UINT32 n = frames - done;
 								if (n > 4096) n = 4096;
+								float pk = 0.f;
 								for (UINT32 i = 0; i < n; ++i) {
 									float L, R;
 									ScSampleToFloat(data + (done + i) * micFmt->nBlockAlign, micFmt, L, R);
 									conv[i * 2 + 0] = L;
 									conv[i * 2 + 1] = R;
+									const float aL = (L < 0.f) ? -L : L;
+									const float aR = (R < 0.f) ? -R : R;
+									if (aL > pk) pk = aL;
+									if (aR > pk) pk = aR;
+								}
+								{
+									const LONG v = (LONG)(pk * 1000.f);
+									LONG cur = InterlockedCompareExchange(&self->m_peakMic, 0, 0);
+									if (v > cur) InterlockedExchange(&self->m_peakMic, v > 1000 ? 1000 : v);
 								}
 								ScMicRingWrite(conv, (int)n);
 								done += n;
@@ -2423,12 +2918,25 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 						while (done < frames) {
 							UINT32 n = frames - done;
 							if (n > 4096) n = 4096;
+							float pkSys = 0.f;
 							for (UINT32 i = 0; i < n; ++i) {
 								float L = 0.f, R = 0.f;
 								if (data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT))
 									ScSampleToFloat(data + (done + i) * mixFmt->nBlockAlign, mixFmt, L, R);
 								fL[i] = L;
 								fR[i] = R;
+								const float aL = (L < 0.f) ? -L : L;
+								const float aR = (R < 0.f) ? -R : R;
+								if (aL > pkSys) pkSys = aL;
+								if (aR > pkSys) pkSys = aR;
+							}
+							{
+								const LONG v = (LONG)(pkSys * 1000.f);
+								LONG cur = InterlockedCompareExchange(&self->m_peakSys, 0, 0);
+								if (v > cur) InterlockedExchange(&self->m_peakSys, v > 1000 ? 1000 : v);
+								// 演奏中はループバックに含まれる。Pバーはシステムと同系を表示
+								LONG curP = InterlockedCompareExchange(&self->m_peakMix, 0, 0);
+								if (v > curP) InterlockedExchange(&self->m_peakMix, v > 1000 ? 1000 : v);
 							}
 							if (wantMic)
 								ScMicIntoStereo(fL, fR, (int)n, (int)srcHz);
@@ -2507,12 +3015,76 @@ void CScreenCaptureDlg::OnBnClickedStart()
 		StartRecording();
 }
 
-void CScreenCaptureDlg::OnBnClickedClose()
+static int ScMeterUiLevel(LONG peak)
+{
+	// 線形ピークは小さく見えやすいので平方根カーブ+ゲインで視認性を上げる
+	if (peak <= 0) return 0;
+	if (peak > 1000) peak = 1000;
+	const double n = (double)peak / 1000.0;
+	int ui = (int)(sqrt(n) * 1000.0 * 1.15);
+	if (ui < 1) ui = 1;
+	if (ui > 1000) ui = 1000;
+	return ui;
+}
+
+void CScreenCaptureDlg::PaintMetersFromPeaks()
+{
+	LONG mic = InterlockedCompareExchange(&m_peakMic, 0, 0);
+	LONG sys = InterlockedCompareExchange(&m_peakSys, 0, 0);
+	LONG mix = InterlockedCompareExchange(&m_peakMix, 0, 0);
+	// 減衰を緩やかにしてリアルタイム感を維持
+	InterlockedExchange(&m_peakMic, mic * 88 / 100);
+	InterlockedExchange(&m_peakSys, sys * 88 / 100);
+	InterlockedExchange(&m_peakMix, mix * 88 / 100);
+	if (m_meterMic.GetSafeHwnd()) m_meterMic.SetLevel(ScMeterUiLevel(mic));
+	if (m_meterSys.GetSafeHwnd()) m_meterSys.SetLevel(ScMeterUiLevel(sys));
+	if (m_meterMix.GetSafeHwnd()) m_meterMix.SetLevel(ScMeterUiLevel(mix));
+}
+
+void CScreenCaptureDlg::CloseModeless()
 {
 	if (InterlockedCompareExchange(&m_run, 0, 0))
 		StopRecording();
+	StopPeakMonitor();
 	PersistUiToSavedata();
-	EndDialog(IDCANCEL);
+	if (GetSafeHwnd())
+		DestroyWindow();
+}
+
+void CScreenCaptureDlg::OnBnClickedClose()
+{
+	CloseModeless();
+}
+
+void CScreenCaptureDlg::PostNcDestroy()
+{
+	CCustomBlurDialogBase::PostNcDestroy();
+	if (g_screenCaptureDlg == this)
+		g_screenCaptureDlg = NULL;
+	delete this;
+}
+
+void OpenScreenCaptureModeless(CWnd* parent)
+{
+	if (g_screenCaptureDlg && ::IsWindow(g_screenCaptureDlg->GetSafeHwnd())) {
+		g_screenCaptureDlg->ShowWindow(SW_SHOW);
+		g_screenCaptureDlg->SetForegroundWindow();
+		return;
+	}
+	g_screenCaptureDlg = new CScreenCaptureDlg(parent);
+	if (!g_screenCaptureDlg->Create(IDD_SCREENCAPTURE, parent)) {
+		delete g_screenCaptureDlg;
+		g_screenCaptureDlg = NULL;
+		return;
+	}
+	g_screenCaptureDlg->ShowWindow(SW_SHOW);
+	g_screenCaptureDlg->SetForegroundWindow();
+}
+
+void CloseScreenCaptureIfOpen()
+{
+	if (g_screenCaptureDlg && ::IsWindow(g_screenCaptureDlg->GetSafeHwnd()))
+		g_screenCaptureDlg->DestroyWindow();
 }
 
 void CScreenCaptureDlg::OnTimer(UINT_PTR nIDEvent)
@@ -2520,6 +3092,7 @@ void CScreenCaptureDlg::OnTimer(UINT_PTR nIDEvent)
 	if (nIDEvent == SC_TIMER_PREV) {
 		if (!m_dragging)
 			UpdatePreview(); // 録画中もライブプレビューを継続
+		PaintMetersFromPeaks(); // プレビューと同周期でメーター更新(二重減衰を避ける)
 	} else if (nIDEvent == SC_TIMER_UI) {
 		UpdateElapsedUi();
 		if (m_thread) {
@@ -2537,6 +3110,7 @@ void CScreenCaptureDlg::OnDestroy()
 {
 	KillTimer(SC_TIMER_PREV);
 	KillTimer(SC_TIMER_UI);
+	StopPeakMonitor();
 	if (m_picking) {
 		m_picking = FALSE;
 		ReleaseCapture();
@@ -2570,7 +3144,7 @@ void CScreenCaptureDlg::OnCancel()
 			L"Anulowano wybór.", L"Seçim iptal edildi."));
 		return;
 	}
-	OnBnClickedClose();
+	CloseModeless();
 }
 
 void CScreenCaptureDlg::OnOK()

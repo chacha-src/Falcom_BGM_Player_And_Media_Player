@@ -295,6 +295,8 @@ static HRESULT DrInitLoopbackCapture(IMMDevice* renderDev,
 
 IMPLEMENT_DYNAMIC(CDeviceRecordDlg, CCustomBlurDialogBase)
 
+static CDeviceRecordDlg* g_deviceRecordDlg = NULL;
+
 CDeviceRecordDlg::CDeviceRecordDlg(CWnd* pParent)
 	: CCustomBlurDialogBase(CDeviceRecordDlg::IDD, pParent)
 	, m_devCnt(0)
@@ -307,6 +309,7 @@ CDeviceRecordDlg::CDeviceRecordDlg(CWnd* pParent)
 	, m_uiLocked(FALSE)
 	, m_stopping(FALSE)
 	, m_everStarted(FALSE)
+	, m_peakOnly(FALSE)
 	, m_outFmt(0)
 	, m_mp3Kbps(192)
 	, m_flacLevel(5)
@@ -315,6 +318,9 @@ CDeviceRecordDlg::CDeviceRecordDlg(CWnd* pParent)
 	, m_wavCh(2)
 	, m_wavHz(48000)
 	, m_wavBits(16)
+	, m_peakMic(0)
+	, m_peakSys(0)
+	, m_peakMix(0)
 {
 	memset(m_devIds, 0, sizeof(m_devIds));
 }
@@ -352,6 +358,12 @@ void CDeviceRecordDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_DR_PATH, m_path);
 	DDX_Control(pDX, IDC_DR_BROWSE, m_browse);
 	DDX_Control(pDX, IDC_DR_MIXMIC, m_mixMic);
+	DDX_Control(pDX, IDC_DR_METER_MIC_L, m_meterMicL);
+	DDX_Control(pDX, IDC_DR_METER_SYS_L, m_meterSysL);
+	DDX_Control(pDX, IDC_DR_METER_MIX_L, m_meterMixL);
+	DDX_Control(pDX, IDC_DR_METER_MIC, m_meterMic);
+	DDX_Control(pDX, IDC_DR_METER_SYS, m_meterSys);
+	DDX_Control(pDX, IDC_DR_METER_MIX, m_meterMix);
 	DDX_Control(pDX, IDC_DR_START, m_start);
 	DDX_Control(pDX, IDC_DR_CLOSE, m_close);
 	DDX_Control(pDX, IDC_DR_STATUS, m_status);
@@ -706,10 +718,78 @@ BOOL CDeviceRecordDlg::OnInitDialog()
 			L"Mixt ook de in CRender gekozen microfoon.",
 			L"Miksuje też mikrofon z CRender.",
 			L"CRender’de seçilen mikrofonu da karıştırır."));
+		m_tooltip.AddTool(&m_meterMic, LL14(L"マイク入力レベル(リアルタイム)", L"Mic level (live)", L"Niveau micro (live)", L"Livello microfono (live)", L"Nivel de micrófono (en vivo)", L"마이크 레벨(실시간)", L"麦克风电平(实时)", L"مستوى الميكروفون (مباشر)", L"Уровень микрофона (live)", L"Mikrofonpegel (live)", L"Nível do microfone (ao vivo)", L"Microfoonniveau (live)", L"Poziom mikrofonu (na żywo)", L"Mikrofon seviyesi (canlı)"));
+		m_tooltip.AddTool(&m_meterSys, LL14(L"システム(ループバック)レベル = 演奏中を含む(リアルタイム)", L"System (loopback) level including playback (live)", L"Niveau système (lecture incluse, live)", L"Livello sistema (include riproduzione, live)", L"Nivel del sistema (incluye reproducción, en vivo)", L"시스템 레벨(재생 포함, 실시간)", L"系统电平（含播放，实时）", L"مستوى النظام (يشمل التشغيل، مباشر)", L"Уровень системы (с воспроизведением, live)", L"Systempegel inkl. Wiedergabe (live)", L"Nível do sistema (inclui reprodução, ao vivo)", L"Systeemniveau (inclusief afspelen, live)", L"Poziom systemu (z odtwarzaniem, na żywo)", L"Sistem seviyesi (oynatma dahil, canlı)"));
+		m_tooltip.AddTool(&m_meterMix, LL14(L"マイク+システム ミックス後(リアルタイム)", L"After mic+system mix (live)", L"Après mix micro+système (live)", L"Dopo mix micro+sistema (live)", L"Tras mezcla micro+sistema (en vivo)", L"마이크+시스템 믹스 후(실시간)", L"麦克风+系统混合后(实时)", L"بعد مزج الميكروفون والنظام (مباشر)", L"После микса микрофон+система (live)", L"Nach Mikrofon+System-Mix (live)", L"Após mix micro+sistema (ao vivo)", L"Na mic+systeem-mix (live)", L"Po miksie mikrofon+system (na żywo)", L"Mikrofon+sistem karışımı sonrası (canlı)"));
+		m_tooltip.AddTool(&m_fmt, LL14(L"保存フォーマット (WAV/MP3/FLAC)", L"Save format (WAV/MP3/FLAC)", L"Format de sortie", L"Formato di salvataggio", L"Formato de guardado", L"저장 형식", L"保存格式", L"صيغة الحفظ", L"Формат сохранения", L"Speicherformat", L"Formato de gravação", L"Opslagformaat", L"Format zapisu", L"Kayıt biçimi"));
+		m_tooltip.AddTool(&m_qual, LL14(L"ビットレート/品質", L"Bitrate / quality", L"Débit / qualité", L"Bitrate / qualità", L"Bitrate / calidad", L"비트레이트/품질", L"比特率/质量", L"معدل البت/الجودة", L"Битрейт / качество", L"Bitrate / Qualität", L"Bitrate / qualidade", L"Bitrate / kwaliteit", L"Bitrate / jakość", L"Bit hızı / kalite"));
+		m_tooltip.AddTool(&m_path, LL14(L"録音ファイルの保存先", L"Recording save path", L"Chemin d'enregistrement", L"Percorso registrazione", L"Ruta de grabación", L"녹음 저장 경로", L"录音保存路径", L"مسار حفظ التسجيل", L"Путь записи", L"Aufnahmepfad", L"Caminho da gravação", L"Opnamepad", L"Ścieżka nagrania", L"Kayıt yolu"));
+		m_tooltip.AddTool(&m_browse, LL14(L"保存先を参照", L"Browse save location", L"Parcourir", L"Sfoglia", L"Examinar", L"찾아보기", L"浏览", L"استعراض", L"Обзор", L"Durchsuchen", L"Procurar", L"Bladeren", L"Przeglądaj", L"Göz at"));
+		m_tooltip.AddTool(&m_start, LL14(L"録音開始/停止。レベルメーターは常時リアルタイム表示", L"Start/stop recording. Level meters stay live", L"Démarrer/arrêter. Compteurs toujours live", L"Avvia/ferma. Livelli sempre live", L"Iniciar/detener. Medidores siempre en vivo", L"녹음 시작/중지. 레벨 미터는 상시 실시간", L"开始/停止录音。电平表始终实时", L"بدء/إيقاف. العدادات مباشرة دائماً", L"Старт/стоп. Индикаторы всегда live", L"Start/Stop. Pegel bleiben live", L"Iniciar/parar. Medidores sempre ao vivo", L"Start/stop. Meters blijven live", L"Start/stop. Mierniki zawsze na żywo", L"Başlat/durdur. Seviye göstergeleri canlı kalır"));
 		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
 	}
+	m_meterMicL.SetWindowText(LL14(L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic"));
+	m_meterSysL.SetWindowText(LL14(L"Sys", L"Sys", L"Sys", L"Sys", L"Sys", L"Sys", L"Sys", L"Sys", L"Sys", L"Sys", L"Sys", L"Sys", L"Sys", L"Sys"));
+	m_meterMixL.SetWindowText(LL14(L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix"));
 	RefreshOpaqueUi();
+	StartPeakMonitor();
 	return TRUE;
+}
+
+static int DrMeterUiLevel(LONG peak)
+{
+	if (peak <= 0) return 0;
+	if (peak > 1000) peak = 1000;
+	const double n = (double)peak / 1000.0;
+	int ui = (int)(sqrt(n) * 1000.0 * 1.15);
+	if (ui < 1) ui = 1;
+	if (ui > 1000) ui = 1000;
+	return ui;
+}
+
+void CDeviceRecordDlg::PaintMetersFromPeaks()
+{
+	LONG mic = InterlockedCompareExchange(&m_peakMic, 0, 0);
+	LONG sys = InterlockedCompareExchange(&m_peakSys, 0, 0);
+	LONG mix = InterlockedCompareExchange(&m_peakMix, 0, 0);
+	InterlockedExchange(&m_peakMic, mic * 88 / 100);
+	InterlockedExchange(&m_peakSys, sys * 88 / 100);
+	InterlockedExchange(&m_peakMix, mix * 88 / 100);
+	if (m_meterMic.GetSafeHwnd()) m_meterMic.SetLevel(DrMeterUiLevel(mic));
+	if (m_meterSys.GetSafeHwnd()) m_meterSys.SetLevel(DrMeterUiLevel(sys));
+	if (m_meterMix.GetSafeHwnd()) m_meterMix.SetLevel(DrMeterUiLevel(mix));
+}
+
+void CDeviceRecordDlg::StartPeakMonitor()
+{
+	if (m_thread || InterlockedCompareExchange(&m_run, 0, 0) != 0) return;
+	m_peakOnly = TRUE;
+	m_doMixMic = (m_mixMic.GetSafeHwnd() && m_mixMic.GetCheck() == BST_CHECKED);
+	InterlockedExchange(&m_stop, 0);
+	InterlockedExchange(&m_run, 0);
+	InterlockedExchange(&m_pcmBytes, 0);
+	InterlockedExchange(&m_lastHr, S_OK);
+	InterlockedExchange(&s_micW, 0);
+	InterlockedExchange(&s_micR, 0);
+	uintptr_t th = _beginthreadex(NULL, 0, CaptureThread, this, 0, NULL);
+	if (!th) return;
+	m_thread = (HANDLE)th;
+	SetTimer(DR_TIMER, 50, NULL);
+}
+
+void CDeviceRecordDlg::StopPeakMonitor()
+{
+	if (!m_peakOnly) return;
+	InterlockedExchange(&m_stop, 1);
+	if (m_thread) {
+		WaitForSingleObject(m_thread, 3000);
+		CloseHandle(m_thread);
+		m_thread = NULL;
+	}
+	InterlockedExchange(&m_run, 0);
+	m_peakOnly = FALSE;
+	if (GetSafeHwnd())
+		KillTimer(DR_TIMER);
 }
 
 void CDeviceRecordDlg::OnCbnSelchangeFormat()
@@ -773,7 +853,9 @@ void CDeviceRecordDlg::UpdateElapsedUi()
 
 BOOL CDeviceRecordDlg::StartRecording()
 {
+	StopPeakMonitor();
 	if (m_thread || InterlockedCompareExchange(&m_run, 0, 0) != 0) return FALSE;
+	m_peakOnly = FALSE;
 	PersistUiToSavedata();
 
 	m_outFmt = savedata.record_format;
@@ -887,6 +969,7 @@ void CDeviceRecordDlg::StopRecording(BOOL encodeAfter)
 		if (!m_wavPath.IsEmpty() && m_outFmt != 0)
 			DeleteFile(m_wavPath);
 		m_stopping = FALSE;
+		if (uiAlive) StartPeakMonitor();
 		return;
 	}
 
@@ -931,6 +1014,7 @@ void CDeviceRecordDlg::StopRecording(BOOL encodeAfter)
 			m_status.SetWindowText(msg);
 		}
 		m_stopping = FALSE;
+		if (uiAlive) StartPeakMonitor();
 		return;
 	}
 
@@ -980,6 +1064,7 @@ void CDeviceRecordDlg::StopRecording(BOOL encodeAfter)
 		UpdateElapsedUi();
 	}
 	m_stopping = FALSE;
+	if (uiAlive) StartPeakMonitor();
 }
 
 UINT __stdcall CDeviceRecordDlg::CaptureThread(void* p)
@@ -1131,11 +1216,21 @@ UINT __stdcall CDeviceRecordDlg::CaptureThread(void* p)
 					while (done < frames) {
 						UINT32 n = frames - done;
 						if (n > 4096) n = 4096;
+						float pk = 0.f;
 						for (UINT32 i = 0; i < n; ++i) {
 							float L, R;
 							DrSampleToFloat(data + (done + i) * micFmt->nBlockAlign, micFmt, L, R);
 							conv[i * 2 + 0] = L;
 							conv[i * 2 + 1] = R;
+							const float aL = (L < 0.f) ? -L : L;
+							const float aR = (R < 0.f) ? -R : R;
+							if (aL > pk) pk = aL;
+							if (aR > pk) pk = aR;
+						}
+						{
+							const LONG v = (LONG)(pk * 1000.f);
+							LONG cur = InterlockedCompareExchange(&self->m_peakMic, 0, 0);
+							if (v > cur) InterlockedExchange(&self->m_peakMic, v > 1000 ? 1000 : v);
 						}
 						DrMicRingWrite(conv, (int)n);
 						done += n;
@@ -1161,12 +1256,22 @@ UINT __stdcall CDeviceRecordDlg::CaptureThread(void* p)
 				while (done < frames) {
 					UINT32 n = frames - done;
 					if (n > 4096) n = 4096;
+					float pkSys = 0.f;
 					for (UINT32 i = 0; i < n; ++i) {
 						float L = 0.f, R = 0.f;
 						if (data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT))
 							DrSampleToFloat(data + (done + i) * mixFmt->nBlockAlign, mixFmt, L, R);
 						fL[i] = L;
 						fR[i] = R;
+						const float aL = (L < 0.f) ? -L : L;
+						const float aR = (R < 0.f) ? -R : R;
+						if (aL > pkSys) pkSys = aL;
+						if (aR > pkSys) pkSys = aR;
+					}
+					{
+						const LONG v = (LONG)(pkSys * 1000.f);
+						LONG cur = InterlockedCompareExchange(&self->m_peakSys, 0, 0);
+						if (v > cur) InterlockedExchange(&self->m_peakSys, v > 1000 ? 1000 : v);
 					}
 					if (self->m_doMixMic)
 						DrMicIntoStereo(fL, fR, (int)n, (int)srcHz);
@@ -1174,6 +1279,7 @@ UINT __stdcall CDeviceRecordDlg::CaptureThread(void* p)
 					int outFrames = (int)(((__int64)n * 48000) / (srcHz ? srcHz : 48000));
 					if (outFrames < 1 && n > 0) outFrames = 1;
 					if (outFrames > 8192) outFrames = 8192;
+					float pkMix = 0.f;
 					for (int o = 0; o < outFrames; ++o) {
 						double srcPos = (srcHz == 48000) ? (double)o : ((double)o * (double)srcHz / 48000.0);
 						int i0 = (int)srcPos;
@@ -1186,6 +1292,10 @@ UINT __stdcall CDeviceRecordDlg::CaptureThread(void* p)
 						float R = fR[i0] + (fR[i1] - fR[i0]) * frac;
 						L = DrClamp1(L);
 						R = DrClamp1(R);
+						const float aL = (L < 0.f) ? -L : L;
+						const float aR = (R < 0.f) ? -R : R;
+						if (aL > pkMix) pkMix = aL;
+						if (aR > pkMix) pkMix = aR;
 						int iL = (int)(L * 32767.f);
 						int iR = (int)(R * 32767.f);
 						if (iL > 32767) iL = 32767; if (iL < -32768) iL = -32768;
@@ -1193,12 +1303,19 @@ UINT __stdcall CDeviceRecordDlg::CaptureThread(void* p)
 						pcm[o * 2 + 0] = (short)iL;
 						pcm[o * 2 + 1] = (short)iR;
 					}
-					EnterCriticalSection(&self->m_fileCs);
-					if (self->m_wavFile.m_hFile != CFile::hFileNull) {
-						self->m_wavFile.Write(pcm, outFrames * 4);
-						InterlockedExchangeAdd(&self->m_pcmBytes, (LONG)(outFrames * 4));
+					{
+						const LONG v = (LONG)(pkMix * 1000.f);
+						LONG cur = InterlockedCompareExchange(&self->m_peakMix, 0, 0);
+						if (v > cur) InterlockedExchange(&self->m_peakMix, v > 1000 ? 1000 : v);
 					}
-					LeaveCriticalSection(&self->m_fileCs);
+					if (!self->m_peakOnly) {
+						EnterCriticalSection(&self->m_fileCs);
+						if (self->m_wavFile.m_hFile != CFile::hFileNull) {
+							self->m_wavFile.Write(pcm, outFrames * 4);
+							InterlockedExchangeAdd(&self->m_pcmBytes, (LONG)(outFrames * 4));
+						}
+						LeaveCriticalSection(&self->m_fileCs);
+					}
 					done += n;
 				}
 			}
@@ -1236,19 +1353,26 @@ void CDeviceRecordDlg::OnBnClickedStart()
 	StartRecording();
 }
 
-void CDeviceRecordDlg::OnBnClickedClose()
+void CDeviceRecordDlg::CloseModeless()
 {
-	if (m_thread || InterlockedCompareExchange(&m_run, 0, 0) != 0)
+	if (!m_peakOnly && (m_thread || InterlockedCompareExchange(&m_run, 0, 0) != 0))
 		StopRecording(TRUE);
-	else if (GetSafeHwnd())
+	else
+		StopPeakMonitor();
+	if (GetSafeHwnd())
 		PersistUiToSavedata();
 	if (GetSafeHwnd())
-		EndDialog(IDCANCEL);
+		DestroyWindow();
+}
+
+void CDeviceRecordDlg::OnBnClickedClose()
+{
+	CloseModeless();
 }
 
 void CDeviceRecordDlg::OnCancel()
 {
-	OnBnClickedClose();
+	CloseModeless();
 }
 
 void CDeviceRecordDlg::OnOK()
@@ -1256,15 +1380,27 @@ void CDeviceRecordDlg::OnOK()
 	OnBnClickedStart();
 }
 
+void CDeviceRecordDlg::PostNcDestroy()
+{
+	CCustomBlurDialogBase::PostNcDestroy();
+	if (g_deviceRecordDlg == this)
+		g_deviceRecordDlg = NULL;
+	delete this;
+}
+
 void CDeviceRecordDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == DR_TIMER) {
-		UpdateElapsedUi();
+		PaintMetersFromPeaks();
+		if (!m_peakOnly)
+			UpdateElapsedUi();
 		if (m_thread) {
 			DWORD code = 0;
 			if (GetExitCodeThread(m_thread, &code) && code != STILL_ACTIVE) {
-				// 初期化失敗などでスレッドが先に終了
-				StopRecording(TRUE);
+				if (m_peakOnly)
+					StopPeakMonitor();
+				else
+					StopRecording(TRUE);
 				return;
 			}
 		}
@@ -1274,15 +1410,40 @@ void CDeviceRecordDlg::OnTimer(UINT_PTR nIDEvent)
 	CCustomBlurDialogBase::OnTimer(nIDEvent);
 }
 
+void OpenDeviceRecordModeless(CWnd* parent)
+{
+	if (g_deviceRecordDlg && ::IsWindow(g_deviceRecordDlg->GetSafeHwnd())) {
+		g_deviceRecordDlg->ShowWindow(SW_SHOW);
+		g_deviceRecordDlg->SetForegroundWindow();
+		return;
+	}
+	g_deviceRecordDlg = new CDeviceRecordDlg(parent);
+	if (!g_deviceRecordDlg->Create(IDD_DEVICERECORD, parent)) {
+		delete g_deviceRecordDlg;
+		g_deviceRecordDlg = NULL;
+		return;
+	}
+	g_deviceRecordDlg->ShowWindow(SW_SHOW);
+	g_deviceRecordDlg->SetForegroundWindow();
+}
+
+void CloseDeviceRecordIfOpen()
+{
+	if (g_deviceRecordDlg && ::IsWindow(g_deviceRecordDlg->GetSafeHwnd()))
+		g_deviceRecordDlg->DestroyWindow();
+}
+
 void CDeviceRecordDlg::OnDestroy()
 {
 	KillTimer(DR_TIMER);
+	m_peakOnly = TRUE; // StopPeakMonitor 経路でも落とす
 	InterlockedExchange(&m_stop, 1);
 	if (m_thread) {
 		WaitForSingleObject(m_thread, 8000);
 		CloseHandle(m_thread);
 		m_thread = NULL;
 	}
+	m_peakOnly = FALSE;
 	if (m_csInit) {
 		EnterCriticalSection(&m_fileCs);
 		if (m_wavFile.m_hFile != CFile::hFileNull) {

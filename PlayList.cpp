@@ -443,7 +443,7 @@ BOOL CPlayList::OnInitDialog()
 	m_lc.DragAcceptFiles(TRUE);
 	m_lc.ModifyStyle ( 0, LVS_REPORT );
 	m_lc.InsertColumn ( 0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, 200, 0 );
-	m_lc.InsertColumn ( 1, L"★", LVCFMT_CENTER, (int)(20 * hD2), 0 ); // 曲ごと設定の有無(中央寄せ・余白最小)
+	m_lc.InsertColumn ( 1, L"★♪", LVCFMT_CENTER, (int)(32 * hD2), 0 ); // ★=曲ごと設定 / ♪=歌詞(.lrc)
 	m_lc.InsertColumn ( 2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, 50, 0 );
 	m_lc.InsertColumn ( 3, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, 72, 0 );
 	m_lc.InsertColumn ( 4, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatçı"), LVCFMT_LEFT, 200, 0 );
@@ -898,6 +898,86 @@ void PlJakDiskForget(LPCTSTR fol)
 	}
 }
 
+CString PlLrcSidecarPath(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return CString();
+	CString s = fol;
+	const int slash = (s.ReverseFind(_T('\\')) > s.ReverseFind(_T('/')))
+		? s.ReverseFind(_T('\\')) : s.ReverseFind(_T('/'));
+	const int dot = s.ReverseFind(_T('.'));
+	if (dot > slash)
+		return s.Left(dot) + _T(".lrc");
+	return s + _T(".lrc");
+}
+
+int PlLrcDiskGet(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return 1;
+	CString dir = PlYsedCacheDir(_T("lrcflag"));
+	if (dir.IsEmpty()) return -1;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	HANDLE h = ::CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return -1;
+	BYTE b = 0;
+	DWORD rd = 0;
+	const BOOL ok = ::ReadFile(h, &b, 1, &rd, NULL);
+	::CloseHandle(h);
+	if (!ok || rd != 1) return -1;
+	return b ? 1 : 0;
+}
+
+void PlLrcDiskSet(LPCTSTR fol, int none)
+{
+	if (!fol || !fol[0]) return;
+	CString dir = PlYsedCacheDir(_T("lrcflag"));
+	if (dir.IsEmpty()) return;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	HANDLE h = ::CreateFile(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+		CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	BYTE b = none ? 1 : 0;
+	DWORD wr = 0;
+	::WriteFile(h, &b, 1, &wr, NULL);
+	::CloseHandle(h);
+}
+
+void PlLrcDiskForget(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return;
+	CString dir = PlYsedCacheDir(_T("lrcflag"));
+	if (dir.IsEmpty()) return;
+	CString path;
+	path.Format(_T("%s\\%016I64X"), (LPCTSTR)dir, PlCacheHashPath(fol));
+	::DeleteFile(path);
+}
+
+int PlLrcProbe(LPCTSTR fol)
+{
+	if (!fol || !fol[0]) return -1;
+	const int cached = PlLrcDiskGet(fol);
+	if (cached >= 0) return cached;
+	const CString lrc = PlLrcSidecarPath(fol);
+	const int none = (!lrc.IsEmpty() && ::PathFileExists(lrc)) ? 0 : 1;
+	PlLrcDiskSet(fol, none);
+	return none;
+}
+
+void PlFormatRowMarks(int row, LPCTSTR fol, CString& out)
+{
+	out.Empty();
+	const BOOL star = SongParams_HasEntryForRow(row);
+	BOOL lrc = FALSE;
+	if (fol && fol[0]) {
+		const int c = PlLrcDiskGet(fol);
+		lrc = (c == 0);
+	}
+	if (star) out += _T("★");
+	if (lrc) out += _T("♪");
+}
+
 // プレイリスト窓用ジャケ(メモリLRU)。ディスクは PlJakDiskPath と共有。
 static HBITMAP s_plJakBmp[kPlJakN];
 static TCHAR   s_plJakKey[kPlJakN][1024];
@@ -1015,10 +1095,9 @@ static UINT AFX_CDECL PlJakLoadThread(LPVOID p)
 					job->hb = hb;
 					job->noneFlag = 0;
 					hb = NULL;
+					// フル解像度を共有ディスクへ(リスト用24pxを書くと本編ジャケットが潰れる)
 					if (!diskBmp.IsEmpty()) {
-						CImage sav; sav.Attach(job->hb);
-						sav.Save(diskBmp, Gdiplus::ImageFormatBMP);
-						sav.Detach();
+						try { tmp.Save(diskBmp, Gdiplus::ImageFormatBMP); } catch (...) {}
 						if (!diskNone.IsEmpty()) ::DeleteFile(diskNone);
 					}
 				}
@@ -6344,9 +6423,11 @@ void CPlayList::OnLvnGetdispinfoList1(NMHDR* pNMHDR, LRESULT* pResult)
 				_tcscat_s(buf, pc[nTargetIndex].name);
 				_tcsncpy_s(lpDInfo->item.pszText, lpDInfo->item.cchTextMax, buf, _TRUNCATE);
 			} break;
-			case 1:
-				_tcscpy(lpDInfo->item.pszText, SongParams_HasEntryForRow(nTargetIndex) ? _T("★") : _T(""));
-				break;
+			case 1: {
+				CString marks;
+				PlFormatRowMarks(nTargetIndex, pc[nTargetIndex].fol, marks);
+				_tcsncpy_s(lpDInfo->item.pszText, lpDInfo->item.cchTextMax, marks, _TRUNCATE);
+			} break;
 			case 2:
 				_tcscpy(lpDInfo->item.pszText, pc[nTargetIndex].game);
 				break;
@@ -6681,13 +6762,34 @@ void CPlayList::OnFindDown()
 
 void CPlayList::OnBnClickedCheck6mp3()
 {
-	// TODO: ここにコントロール通知ハンドラー コードを追加します。
+	extern CMediaPlayerDlg* mp;
+	savedata.savecheck_mp3 = m_save_mp3.GetCheck() ? 1 : 0;
+	// MP はマスター無しのため、サブONでマスターも立てる(OFF時はもう一方を見る)
+	if (savedata.savecheck_mp3 || savedata.savecheck_dshow)
+		savedata.savecheck = 1;
+	else
+		savedata.savecheck = m_savecheck.GetCheck() ? 1 : 0;
+	if (m_savecheck.GetSafeHwnd())
+		m_savecheck.SetCheck(savedata.savecheck);
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_savemp3.GetSafeHwnd())
+		mp->m_savemp3.SetCheck(savedata.savecheck_mp3);
+	MpPersistSavedataQuick();
 }
 
 
 void CPlayList::OnBnClickedCheck7dshow()
 {
-	// TODO: ここにコントロール通知ハンドラー コードを追加します。
+	extern CMediaPlayerDlg* mp;
+	savedata.savecheck_dshow = m_save_kpi.GetCheck() ? 1 : 0;
+	if (savedata.savecheck_mp3 || savedata.savecheck_dshow)
+		savedata.savecheck = 1;
+	else
+		savedata.savecheck = m_savecheck.GetCheck() ? 1 : 0;
+	if (m_savecheck.GetSafeHwnd())
+		m_savecheck.SetCheck(savedata.savecheck);
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_saveds.GetSafeHwnd())
+		mp->m_saveds.SetCheck(savedata.savecheck_dshow);
+	MpPersistSavedataQuick();
 }
 
 
@@ -6853,6 +6955,24 @@ LRESULT CPlayList::OnPlJakDone(WPARAM wParam, LPARAM lParam)
 			if (m_lc.GetItemRect(job->row, &rIcon, LVIR_BOUNDS)) {
 				rIcon.right = rIcon.left + kPlJakPx + 28;
 				m_lc.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_NOERASE);
+			}
+		}
+		// リスト成功後: 等身大ディスクを本編へ直接採用(LoadJacket 再走査より確実)
+		extern CString filen;
+		if (!job->noneFlag && og && og->jx < 64 && filen.GetLength() > 0
+			&& _tcsicmp(job->path, filen) == 0) {
+			if (!og->AdoptJacketFromDisk(job->path))
+				og->LoadJacket(CString(job->path));
+			if (og->jx >= 64 && !og->img.IsNull()) {
+				if (::IsWindow(og->m_mp3jake.GetSafeHwnd()))
+					og->m_mp3jake.EnableWindow(TRUE);
+				extern CMediaPlayerDlg* mp;
+				if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+					if (!mp->m_jacketRect.IsRectEmpty())
+						mp->InvalidateRect(&mp->m_jacketRect, FALSE);
+					if (!mp->m_bannerRect.IsRectEmpty())
+						mp->InvalidateRect(&mp->m_bannerRect, FALSE);
+				}
 			}
 		}
 	}

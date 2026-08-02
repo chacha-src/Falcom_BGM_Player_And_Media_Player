@@ -177,6 +177,15 @@ void PlMissDiskForget(LPCTSTR fol);
 // ジャケットサムネディスクキャッシュ(%LOCALAPPDATA%\oggYSED\jak)
 CString PlJakDiskPath(LPCTSTR fol, BOOL noneSentinel);
 void PlJakDiskForget(LPCTSTR fol);
+// 歌詞(.lrc)有無キャッシュ(%LOCALAPPDATA%\oggYSED\lrcflag)。-1=未 / 0=あり / 1=なし
+int PlLrcDiskGet(LPCTSTR fol);
+void PlLrcDiskSet(LPCTSTR fol, int none);
+void PlLrcDiskForget(LPCTSTR fol);
+CString PlLrcSidecarPath(LPCTSTR fol);
+// 未キャッシュならサイドカーを見て登録。戻り: 0=あり 1=なし (-1はfol不正)
+int PlLrcProbe(LPCTSTR fol);
+// ★/♪ 表示文字列(キャッシュのみ参照。未スキャンは空)
+void PlFormatRowMarks(int row, LPCTSTR fol, CString& out);
 
 enum {
 	PL_CTX_INFO = 1,

@@ -128,6 +128,8 @@ public:
 	double hanWindow(int value, int index, int offset, int size);
 	// dest!=NULL のとき og->img を汚さず dest へ読み込む(リスト用サムネ等)。
 	void LoadJacket(CString s, CImage* dest = NULL);
+	// リスト抽出済みの共有ディスク(等身大)を本編 img へ載せる。成功で TRUE。
+	BOOL AdoptJacketFromDisk(LPCTSTR path);
 	CString mp3file;
 	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
 
@@ -433,6 +435,7 @@ void RefreshTaskbarJumpList(BOOL mediaPlayerMode);
 void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName);
 void MpPersistSavedataQuick();
 void MpMicMixRestartIfRunning();
+int MpMicPeakLevel(); // 0..1000
 void MpTaskbarReplay();
 void MpTaskbarNextTrack();
 void MpTaskbarPrevTrack();

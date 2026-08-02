@@ -24,6 +24,7 @@ protected:
 	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
+	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
 	afx_msg void OnCaptureChanged(CWnd* pWnd);
@@ -51,7 +52,8 @@ public:
 		HWND hwnd;
 		int x, y, w, h;
 		TCHAR title[128];
-		BOOL isMp; // MP画面レイヤ
+		BOOL isMp;   // MP画面レイヤ
+		BOOL hidden; // プレビュー/録画の映像から除外(音はシステム音側で可)
 	};
 
 	struct ComposeSnap {
@@ -61,6 +63,7 @@ public:
 		int layerCnt;
 		Layer layers[SC_LAYER_MAX];
 		BOOL includeMp;
+		BOOL mpHidden;
 		HWND mpHwnd;
 		int mpX, mpY, mpW, mpH;
 	};
@@ -68,6 +71,8 @@ public:
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	virtual void PostNcDestroy();
+	void CloseModeless();
 	DECLARE_MESSAGE_MAP()
 
 	void PersistUiToSavedata();
@@ -75,8 +80,12 @@ protected:
 	CString NormalizeOutPath(const CString& pathIn) const;
 	void SetRecordingUi(BOOL recording);
 	void UpdateElapsedUi();
+	void PaintMetersFromPeaks();
+	void StartPeakMonitor();
+	void StopPeakMonitor();
 	BOOL StartRecording();
 	void StopRecording();
+	static UINT __stdcall PeakMonitorThread(void* p);
 	void UpdatePreview(BOOL forceCompose = FALSE);
 	void PaintPreview(CDC& dc, const CRect& client);
 	void RefreshComposeCache();
@@ -101,6 +110,9 @@ protected:
 	HWND FindMediaPlayerHwnd() const;
 	void TileLayers();
 	void FitSelected(int scalePercent);
+	void ToggleLayerHidden(int layerIdx);
+	void ApplyPreviewTimer();
+	int CurrentPreviewFps() const;
 	static UINT __stdcall CaptureThread(void* p);
 
 public:
@@ -121,6 +133,7 @@ public:
 	afx_msg void OnBnClickedTile();
 	afx_msg void OnBnClickedIncludeMp();
 	afx_msg void OnCbnSelchangeMode();
+	afx_msg void OnCbnSelchangeFps();
 	afx_msg void OnLbnSelchangeLayer();
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
@@ -198,6 +211,9 @@ public:
 	volatile LONG m_lastHr;
 	volatile LONG m_frameCnt;
 	HANDLE m_thread;
+	HANDLE m_peakThread;
+	volatile LONG m_peakStop;
+	volatile LONG m_peakRun;
 	BOOL m_uiLocked;
 	BOOL m_stopping;
 	BOOL m_everStarted;
@@ -207,4 +223,17 @@ public:
 	BOOL m_withMic;
 	int m_fpsVal;
 	DWORD m_startTick;
+
+	volatile LONG m_peakMic;
+	volatile LONG m_peakSys;
+	volatile LONG m_peakMix;
+	CCustomStatic m_meterMicL;
+	CCustomStatic m_meterSysL;
+	CCustomStatic m_meterMixL;
+	CCustomLevelMeter m_meterMic;
+	CCustomLevelMeter m_meterSys;
+	CCustomLevelMeter m_meterMix;
 };
+
+void OpenScreenCaptureModeless(CWnd* parent);
+void CloseScreenCaptureIfOpen();

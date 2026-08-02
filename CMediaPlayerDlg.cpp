@@ -192,10 +192,9 @@ static UINT AFX_CDECL MpJakLoadThread(LPVOID p)
 					job->hb = hb;
 					job->noneFlag = 0;
 					hb = NULL;
+					// フル解像度を共有ディスクへ(24pxサムネを書くとバナーが潰れる)
 					if (!diskBmp.IsEmpty()) {
-						CImage sav; sav.Attach(job->hb);
-						sav.Save(diskBmp, Gdiplus::ImageFormatBMP);
-						sav.Detach();
+						try { tmp.Save(diskBmp, Gdiplus::ImageFormatBMP); } catch (...) {}
 						if (!diskNone.IsEmpty()) ::DeleteFile(diskNone);
 					}
 				}
@@ -255,6 +254,7 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract, BOOL b
 
 	CDC* pDCBatch = self->GetDC();
 	const int passN = bulkDisk ? 2 : 1;
+	BOOL lrcMarksDirty = FALSE;
 	for (int pass = 0; pass < passN; ++pass) {
 		int d0, d1;
 		BOOL allowLru;
@@ -272,6 +272,12 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract, BOOL b
 			if (pcIdx < 0 || pcIdx >= pl->playcnt) continue;
 			const TCHAR* path = pl->pc[pcIdx].fol;
 			if (!path || !path[0]) continue;
+
+			// 可視行の歌詞(.lrc)有無をキャッシュ(リスト★♪列用)
+			if (pass == 0 && PlLrcDiskGet(path) < 0) {
+				PlLrcProbe(path);
+				lrcMarksDirty = TRUE;
+			}
 
 			int hit = -1, freeSlot = -1, lruSlot = 0;
 			DWORD lruTick = 0xFFFFFFFF;
@@ -377,14 +383,15 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract, BOOL b
 	}
 	if (pDCBatch) self->ReleaseDC(pDCBatch);
 
-	if (anyDisk) {
+	if (anyDisk || lrcMarksDirty) {
 		CRect r0, r1;
 		if (self->m_list.GetItemRect(top, &r0, LVIR_BOUNDS)) {
 			int last = top + page - 1;
 			if (last >= nDisp) last = nDisp - 1;
 			if (self->m_list.GetItemRect(last, &r1, LVIR_BOUNDS))
 				r0.bottom = r1.bottom;
-			r0.right = r0.left + px + 28;
+			if (anyDisk)
+				r0.right = r0.left + px + 28;
 			self->m_list.RedrawWindow(&r0, NULL, RDW_INVALIDATE | RDW_NOERASE);
 		}
 	}
@@ -539,6 +546,20 @@ LRESULT CMediaPlayerDlg::OnJakLoadDone(WPARAM wParam, LPARAM lParam)
 			if (m_list.GetItemRect(job->disp, &rIcon, LVIR_BOUNDS)) {
 				rIcon.right = rIcon.left + kMpJakPx + 28;
 				m_list.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_NOERASE);
+			}
+		}
+		// リスト成功後: スレッドが書いた等身大ディスクを本編へ(再抽出より確実)
+		if (!job->noneFlag && og && og->jx < 64 && filen.GetLength() > 0
+			&& _tcsicmp(job->path, filen) == 0) {
+			if (!og->AdoptJacketFromDisk(job->path))
+				og->LoadJacket(CString(job->path));
+			if (og->jx >= 64 && !og->img.IsNull()) {
+				if (::IsWindow(og->m_mp3jake.GetSafeHwnd()))
+					og->m_mp3jake.EnableWindow(TRUE);
+				if (!m_jacketRect.IsRectEmpty())
+					InvalidateRect(&m_jacketRect, FALSE);
+				if (!m_bannerRect.IsRectEmpty())
+					InvalidateRect(&m_bannerRect, FALSE);
 			}
 		}
 	}
@@ -949,6 +970,7 @@ void CMediaPlayerDlg::DoDataExchange(CDataExchange* pDX)
 	MpDdxControl(pDX, IDC_MP_MICMIX, m_micmix);
 	MpDdxControl(pDX, IDC_MP_MICLEV, m_miclev);
 	MpDdxControl(pDX, IDC_MP_MICLEV_L, m_miclevL);
+	MpDdxControl(pDX, IDC_MP_MICMETER, m_micMeter);
 	MpDdxControl(pDX, IDC_MP_SAVEPARAM, m_saveparam);
 	MpDdxControl(pDX, IDC_MP_RECORD, m_record);
 	MpDdxControl(pDX, IDC_MP_CAPTURE, m_capture);
@@ -1445,7 +1467,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_list.m_mpJacketCtx = this;
 	m_list.m_mpNoteIconGet = MpNoteIconGetCb;
 	m_list.InsertColumn(0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, (int)(220 * hD2));
-	m_list.InsertColumn(1, L"★", LVCFMT_CENTER, (int)(20 * hD2)); // 曲ごと設定の有無(中央寄せ・余白最小)
+	m_list.InsertColumn(1, L"★♪", LVCFMT_CENTER, (int)(32 * hD2)); // ★=曲ごと設定 / ♪=歌詞(.lrc)
 	m_list.InsertColumn(2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, (int)(60 * hD2));
 	m_list.InsertColumn(3, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, (int)(72 * hD2));
 	m_list.InsertColumn(4, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatçı"), LVCFMT_LEFT, (int)(160 * hD2));
@@ -1570,6 +1592,12 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_micmix.SetCheck(savedata.mic_mix ? BST_CHECKED : BST_UNCHECKED);
 	if (m_micmix.GetSafeHwnd()) m_micmix.SetFont(&m_fontChk, TRUE);
 	if (m_miclevL.GetSafeHwnd()) m_miclevL.SetFont(&m_fontChk, TRUE);
+	// 起動時からマイクミックスONならメーター監視を開始(WAV保存不要)
+	if (savedata.mic_mix && og && ::IsWindow(og->GetSafeHwnd())) {
+		if (og->m_micmix.GetSafeHwnd())
+			og->m_micmix.SetCheck(BST_CHECKED);
+		og->OnMicMixCheck();
+	}
 
 	// 初期座標: 保存座標があればそれ、なければファルコム画面の位置・プレイリストの大きさ
 	{
@@ -1607,7 +1635,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_tooltip.AddTool(&w, text);
 	};
 	addTip(m_switch, LL14(L"ファルコムbgm特化型画面へ戻します。", L"Return to the Falcom BGM dedicated screen.", L"Revenir a l'ecran Falcom.", L"Torna alla schermata Falcom.", L"Volver a la pantalla Falcom.", L"팔콤 전용 화면으로 돌아갑니다.", L"返回Falcom专用画面。", L"العودة إلى شاشة Falcom.", L"Вернуться к экрану Falcom.", L"Zum Falcom-Bildschirm zuruck.", L"Voltar para a tela Falcom.", L"Terug naar Falcom-scherm.", L"Powrot do ekranu Falcom.", L"Falcom ekranına dön."));
-	addTip(m_prev, LL14(L"前の曲へ。再生中で曲頭から3秒未満なら頭出しします。", L"Previous track. Restarts if within 3 seconds of the start.", L"Piste precedente. Relance si <3s.", L"Traccia precedente. Riavvia se <3s.", L"Pista anterior. Reinicia si <3s.", L"이전 곡. 시작 3초 미만이면 처음으로.", L"上一曲。开场3秒内则从头播放。", L"المقطع السابق. إعادة إن أقل من 3 ثوانٍ.", L"Предыдущий. Сначала, если <3с.", L"Vorheriger Titel. Neustart wenn <3s.", L"Faixa anterior. Reinicia se <3s.", L"Vorige track. Herstart als <3s.", L"Poprzedni. Od poczatku gdy <3s.", L"Onceki parca. 3 sn icindeyse bastan."));
+	addTip(m_prev, LL14(L"前の曲へ。再生中で曲頭から3秒以上なら今の曲の先頭へ、3秒未満なら前の曲へ。", L"Previous track. Restarts current if 3+ seconds in; otherwise goes to previous.", L"Piste precedente. Relance si >=3s, sinon precedente.", L"Traccia precedente. Riavvia se >=3s, altrimenti precedente.", L"Pista anterior. Reinicia si >=3s; si no, anterior.", L"이전 곡. 3초 이상이면 현재 곡 처음으로, 미만이면 이전 곡.", L"上一曲。开场3秒以上则从头，未满则上一曲。", L"المقطع السابق. إعادة إن >=3 ثوانٍ وإلا السابق.", L"Предыдущий. Сначала если >=3с, иначе предыдущий.", L"Vorheriger Titel. Neustart bei >=3s, sonst vorheriger.", L"Faixa anterior. Reinicia se >=3s; senao anterior.", L"Vorige track. Herstart bij >=3s, anders vorige.", L"Poprzedni. Od poczatku gdy >=3s, inaczej poprzedni.", L"Onceki parca. >=3 sn ise bastan, degilse onceki."));
 	addTip(m_play, LL14(L"再生 / 選択曲を再生します。", L"Play / play the selected track.", L"Lire la piste selectionnee.", L"Riproduci la traccia selezionata.", L"Reproducir la pista seleccionada.", L"선택한 곡을 재생합니다.", L"播放所选曲目。", L"تشغيل المقطع المحدد.", L"Воспроизвести выбранный трек.", L"Ausgewahlten Titel abspielen.", L"Reproduzir a faixa selecionada.", L"Geselecteerde track afspelen.", L"Odtworz wybrany utwor.", L"Seçili parçayı çal."));
 	addTip(m_pause, LL14(L"一時停止 / 再開します。", L"Pause / resume.", L"Pause / reprise.", L"Pausa / riprendi.", L"Pausar / reanudar.", L"일시정지 / 재개.", L"暂停/继续。", L"إيقاف مؤقت / استئناف.", L"Пауза / продолжить.", L"Pause / Fortsetzen.", L"Pausar / retomar.", L"Pauze / hervatten.", L"Pauza / wznow.", L"Duraklat / surdur."));
 	addTip(m_stop, LL14(L"停止します。", L"Stop.", L"Arreter.", L"Ferma.", L"Detener.", L"정지합니다.", L"停止。", L"إيقاف.", L"Остановить.", L"Stoppen.", L"Parar.", L"Stoppen.", L"Zatrzymaj.", L"Durdur."));
@@ -1693,8 +1721,9 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_savemp3, LL14(L"内蔵音源の再生時に途中保存を有効にします。", L"Enable resume save for built-in audio formats.", L"Reprise pour les formats audio integres.", L"Ripresa per i formati audio interni.", L"Reanudar para formatos de audio internos.", L"내장 음원 재생 시 위치 저장.", L"内置音源续播保存。", L"حفظ موضع للصيغ الصوتية المدمجة.", L"Сохранение позиции для встроенных форматов.", L"Position fur eingebaute Audioformate speichern.", L"Retomar formatos de audio internos.", L"Hervatten voor ingebouwde audio.", L"Wznawianie wbudowanych formatow.", L"Dahili ses formatlari icin konum kaydi."));
 	addTip(m_saveds, LL14(L"DirectShow(動画等)で途中保存を有効にします。", L"Enable resume save for DirectShow.", L"Reprise pour DirectShow.", L"Ripresa per DirectShow.", L"Reanudar para DirectShow.", L"DirectShow 위치 저장.", L"DirectShow续播保存。", L"حفظ موضع DirectShow.", L"Сохранение позиции DirectShow.", L"DirectShow-Position.", L"Retomar DirectShow.", L"DirectShow hervatten.", L"Wznawianie DirectShow.", L"DirectShow surdurme."));
 	addTip(m_savewav, LL14(L"再生中の音声をWAVファイルへ保存します。", L"Save playback audio to a WAV file.", L"Enregistrer l'audio en WAV.", L"Salva l'audio in WAV.", L"Guardar audio en WAV.", L"재생 음을 WAV로 저장.", L"将播放音频保存为WAV。", L"حفظ الصوت كـ WAV.", L"Сохранить звук в WAV.", L"Audio als WAV speichern.", L"Salvar audio em WAV.", L"Audio opslaan als WAV.", L"Zapis audio jako WAV.", L"Sesi WAV olarak kaydet."));
-	addTip(m_micmix, LL14(L"WAV保存ONのとき、マイクの音を再生PCMにミックスして書き出します。", L"When Save WAV is on, mix microphone into the saved PCM.", L"Si Sauver WAV est ON, mixer le micro dans le PCM.", L"Con Salva WAV attivo, mixa il microfono nel PCM.", L"Con Guardar WAV activo, mezcla el micro en el PCM.", L"WAV 저장 ON일 때 마이크를 PCM에 믹스합니다.", L"WAV保存开启时，将麦克风混入保存的PCM。", L"عند حفظ WAV، امزج الميكروفون في PCM.", L"При сохранении WAV микшировать микрофон в PCM.", L"Bei WAV-Speichern Mikrofon in PCM mischen.", L"Com Salvar WAV, misturar microfone no PCM.", L"Bij WAV-opslaan microfoon in PCM mixen.", L"Przy zapisie WAV zmiksuj mikrofon do PCM.", L"WAV kaydı açıkken mikrofonu PCM'e karıştır."));
+	addTip(m_micmix, LL14(L"ONでマイク入力を監視(レベルメーター)。WAV保存ON時は再生PCMにもミックスして書き出します。", L"ON: monitor mic (level meter). With Save WAV, also mix into saved PCM.", L"ON: surveille le micro (niveau). Avec Sauver WAV, mixe aussi dans le PCM.", L"ON: monitora micro (livello). Con Salva WAV, mixa anche nel PCM.", L"ON: monitoriza el micro (nivel). Con Guardar WAV, también mezcla en el PCM.", L"ON이면 마이크 감시(레벨 미터). WAV 저장 ON이면 PCM에도 믹스.", L"开启后监视麦克风(电平表)。WAV保存开启时也会混入PCM。", L"تشغيل: مراقبة الميكروفون. مع حفظ WAV يُمزج في PCM أيضاً.", L"ON: мониторинг микрофона. При WAV — микс в PCM.", L"ON: Mikrofon überwachen. Bei WAV-Speichern auch in PCM mischen.", L"ON: monitorizar microfone. Com Salvar WAV, também misturar no PCM.", L"ON: microfoon bewaken. Bij WAV-opslaan ook in PCM mixen.", L"ON: monitoruj mikrofon. Przy zapisie WAV też miksuj do PCM.", L"Açıkken mikrofonu izler. WAV kaydı açıksa PCM'e de karıştırır."));
 	addTip(m_miclev, LL14(L"マイクのミックスレベル(0〜200%)。端末は設定画面で選択。", L"Mic mix level (0-200%). Device is selected in Settings.", L"Niveau mix micro (0-200%). Périphérique dans Paramètres.", L"Livello mix micro (0-200%). Dispositivo in Impostazioni.", L"Nivel mix micro (0-200%). Dispositivo en Ajustes.", L"마이크 믹스 레벨(0~200%). 장치는 설정에서 선택.", L"麦克风混音电平(0–200%)。设备在设置中选择。", L"مستوى مزج الميكروفون (0-200%). الجهاز من الإعدادات.", L"Уровень микса (0–200%). Устройство — в настройках.", L"Mikrofon-Mixpegel (0–200%). Gerät in den Einstellungen.", L"Nível de mix (0-200%). Dispositivo em Configurações.", L"Microfoon-mixniveau (0-200%). Apparaat in Instellingen.", L"Poziom miksu (0–200%). Urządzenie w Ustawieniach.", L"Mikrofon karışım seviyesi (0-200%). Aygıt Ayarlar'da."));
+	addTip(m_micMeter, LL14(L"マイク入力レベル(リアルタイム)。ミックスONで反応します。", L"Mic input level (live). Reacts when Mic mix is ON.", L"Niveau micro (live). Réagit si Mix micro est ON.", L"Livello micro (live). Reagisce con Mix micro ON.", L"Nivel de micro (en vivo). Reacciona con Mezcla micro ON.", L"마이크 입력 레벨(실시간). 믹스 ON일 때 반응.", L"麦克风输入电平(实时)。混音开启时会动。", L"مستوى الميكروفون (مباشر). يتحرك عند تشغيل المزج.", L"Уровень микрофона (live). Реагирует при включённом миксе.", L"Mikrofonpegel (live). Reagiert bei Mix ON.", L"Nível do microfone (ao vivo). Reage com Mix ON.", L"Microfoonniveau (live). Reageert bij Mix ON.", L"Poziom mikrofonu (na żywo). Reaguje przy Mix ON.", L"Mikrofon seviyesi (canlı). Karışım açıkken tepki verir."));
 	addTip(m_record, LL14(L"他デバイスの音を録音して WAV/mp3/FLAC を作ります。", L"Record other device audio to WAV/mp3/FLAC.", L"Enregistrer l'audio d'un autre périphérique en WAV/mp3/FLAC.", L"Registra audio da altro dispositivo in WAV/mp3/FLAC.", L"Grabar audio de otro dispositivo a WAV/mp3/FLAC.", L"다른 장치 음을 WAV/mp3/FLAC로 녹음.", L"录制其他设备音频为 WAV/mp3/FLAC。", L"تسجيل صوت جهاز آخر إلى WAV/mp3/FLAC.", L"Запись звука другого устройства в WAV/mp3/FLAC.", L"Audio eines anderen Geräts als WAV/mp3/FLAC aufnehmen.", L"Gravar áudio de outro dispositivo em WAV/mp3/FLAC.", L"Audio van ander apparaat opnemen als WAV/mp3/FLAC.", L"Nagraj dźwięk innego urządzenia do WAV/mp3/FLAC.", L"Başka aygıt sesini WAV/mp3/FLAC olarak kaydet."));
 	addTip(m_capture, LL14(L"画面と音声をキャプチャします（プレビュー付き）。", L"Capture screen and audio (with preview).", L"Capturer l'écran et l'audio (avec aperçu).", L"Cattura schermo e audio (con anteprima).", L"Capturar pantalla y audio (con vista previa).", L"화면과 음성을 캡처합니다(미리보기 포함).", L"捕获画面与音频（含预览）。", L"التقاط الشاشة والصوت (مع معاينة).", L"Захват экрана и звука (с предпросмотром).", L"Bildschirm und Audio aufnehmen (mit Vorschau).", L"Capturar tela e áudio (com prévia).", L"Scherm en audio opnemen (met voorbeeld).", L"Przechwyć ekran i dźwięk (z podglądem).", L"Ekran ve sesi yakala (önizlemeli)."));
 	addTip(m_saveparam, LL14(L"曲ごとに音量・EQ・テンポ等の全パラメータを記憶し、その曲を再生する度に自動で復元します。", L"Remember all parameters (volume, EQ, tempo, etc.) per song and auto-restore them each time the song plays.", L"Memoriser tous les parametres par morceau et les restaurer automatiquement.", L"Memorizza tutti i parametri per brano e li ripristina automaticamente.", L"Recuerda todos los parametros por pista y los restaura automaticamente.", L"곡별로 볼륨·EQ·템포 등 모든 파라미터를 기억하고 재생할 때마다 자동 복원합니다.", L"逐曲记忆音量、EQ、速度等所有参数，每次播放该曲时自动恢复。", L"تذكر كل المعلمات لكل أغنية واستعادتها تلقائيًا.", L"Запоминать все параметры для каждого трека и восстанавливать автоматически.", L"Alle Parameter pro Titel merken und automatisch wiederherstellen.", L"Memoriza todos os parametros por faixa e restaura automaticamente.", L"Onthoud alle parameters per nummer en herstel automatisch.", L"Zapamietaj wszystkie parametry na utwor i przywracaj automatycznie.", L"Her parça için tüm parametreleri hatırla ve otomatik geri yükle."));
@@ -2070,7 +2099,8 @@ void CMediaPlayerDlg::DoLayout()
 	const int lrcExtra = (savedata.mpLrcExpand ? 5 : 0); // 拡大時 +5行分の高さ
 	const int infoInnerH = lh * (5 + lrcExtra) + (int)(1 * s);
 	const bool hasLyrics = (og && og->lrcnum >= 2);
-	const bool lrcScroll = (hasLyrics && savedata.mpLrcExpand && m_lrcView.GetSafeHwnd());
+	// 拡大時は歌詞なしでも LRC ビュー(空GDI)を出す
+	const bool lrcScroll = (savedata.mpLrcExpand && m_lrcView.GetSafeHwnd());
 	// バッジ + 拡大ボタンをグループ右上へ
 	{
 		const int badgeW = (int)(90 * s);
@@ -2078,44 +2108,45 @@ void CMediaPlayerDlg::DoLayout()
 		MoveCtl(&m_lrcBadge, M + W - M * 2 - badgeW - expW - gPad, infoTop + (int)(1 * s), badgeW, (int)(12 * s));
 		MoveCtl(&m_lrcExpand, M + W - M * 2 - expW - (int)(2 * s), infoTop + (int)(1 * s), expW, (int)(14 * s));
 	}
-	if (hasLyrics) {
-		if (lrcScroll) {
-			const int viewTop = y + (int)(2 * s);
-			const int viewH = infoInnerH - (int)(4 * s);
-			MoveCtl(&m_lrcView, ix, viewTop, iw, viewH > 1 ? viewH : 1);
-			m_lrcView.ShowWindow(SW_SHOW);
-			m_lrcView.EnsureFonts((int)(90 * s), _T("Segoe UI"));
-			// 5行スタティックは隠す（空欄化防止）
-			MoveCtl(&m_lrc, ix, infoTop, 0, 0);
-			MoveCtl(&m_lrc2, ix, infoTop, 0, 0);
-			MoveCtl(&m_lrc3, ix, infoTop, 0, 0);
-			MoveCtl(&m_lrc4, ix, infoTop, 0, 0);
-			MoveCtl(&m_lrc5, ix, infoTop, 0, 0);
-			m_lrc.ShowWindow(SW_HIDE);
-			m_lrc2.ShowWindow(SW_HIDE);
-			m_lrc3.ShowWindow(SW_HIDE);
-			m_lrc4.ShowWindow(SW_HIDE);
-			m_lrc5.ShowWindow(SW_HIDE);
-			y = infoTop + gTitle + infoInnerH;
+	if (lrcScroll) {
+		const int viewTop = y + (int)(2 * s);
+		const int viewH = infoInnerH - (int)(4 * s);
+		MoveCtl(&m_lrcView, ix, viewTop, iw, viewH > 1 ? viewH : 1);
+		m_lrcView.ShowWindow(SW_SHOW);
+		m_lrcView.EnsureFonts((int)(90 * s), _T("Segoe UI"));
+		MoveCtl(&m_lrc, ix, infoTop, 0, 0);
+		MoveCtl(&m_lrc2, ix, infoTop, 0, 0);
+		MoveCtl(&m_lrc3, ix, infoTop, 0, 0);
+		MoveCtl(&m_lrc4, ix, infoTop, 0, 0);
+		MoveCtl(&m_lrc5, ix, infoTop, 0, 0);
+		m_lrc.ShowWindow(SW_HIDE);
+		m_lrc2.ShowWindow(SW_HIDE);
+		m_lrc3.ShowWindow(SW_HIDE);
+		m_lrc4.ShowWindow(SW_HIDE);
+		m_lrc5.ShowWindow(SW_HIDE);
+		MoveCtl(&m_os, ix, infoTop, 0, 0);
+		MoveCtl(&m_cpu, ix, infoTop, 0, 0);
+		MoveCtl(&m_os3, ix, infoTop, 0, 0);
+		m_os.ShowWindow(SW_HIDE);
+		m_cpu.ShowWindow(SW_HIDE);
+		m_os3.ShowWindow(SW_HIDE);
+		y = infoTop + gTitle + infoInnerH;
+	}
+	else if (hasLyrics) {
+		if (m_lrcView.GetSafeHwnd()) {
+			MoveCtl(&m_lrcView, ix, infoTop, 0, 0);
+			m_lrcView.ShowWindow(SW_HIDE);
 		}
-		else {
-			if (m_lrcView.GetSafeHwnd()) {
-				MoveCtl(&m_lrcView, ix, infoTop, 0, 0);
-				m_lrcView.ShowWindow(SW_HIDE);
-			}
-			MoveCtl(&m_lrc, ix, y, iw, lh); y += lh;
-			MoveCtl(&m_lrc2, ix, y, iw, lh); y += lh;
-			MoveCtl(&m_lrc3, ix, y, iw, lh); y += lh;
-			MoveCtl(&m_lrc4, ix, y, iw, lh); y += lh;
-			MoveCtl(&m_lrc5, ix, y, iw, lh); y += lh;
-			m_lrc.ShowWindow(SW_SHOW);
-			m_lrc2.ShowWindow(SW_SHOW);
-			m_lrc3.ShowWindow(SW_SHOW);
-			m_lrc4.ShowWindow(SW_SHOW);
-			m_lrc5.ShowWindow(SW_SHOW);
-			if (savedata.mpLrcExpand)
-				y += lh * lrcExtra;
-		}
+		MoveCtl(&m_lrc, ix, y, iw, lh); y += lh;
+		MoveCtl(&m_lrc2, ix, y, iw, lh); y += lh;
+		MoveCtl(&m_lrc3, ix, y, iw, lh); y += lh;
+		MoveCtl(&m_lrc4, ix, y, iw, lh); y += lh;
+		MoveCtl(&m_lrc5, ix, y, iw, lh); y += lh;
+		m_lrc.ShowWindow(SW_SHOW);
+		m_lrc2.ShowWindow(SW_SHOW);
+		m_lrc3.ShowWindow(SW_SHOW);
+		m_lrc4.ShowWindow(SW_SHOW);
+		m_lrc5.ShowWindow(SW_SHOW);
 		MoveCtl(&m_os, ix, infoTop, 0, 0);
 		MoveCtl(&m_cpu, ix, infoTop, 0, 0);
 		MoveCtl(&m_os3, ix, infoTop, 0, 0);
@@ -2144,8 +2175,6 @@ void CMediaPlayerDlg::DoLayout()
 		m_os.ShowWindow(SW_SHOW);
 		m_cpu.ShowWindow(SW_SHOW);
 		m_os3.ShowWindow(SW_SHOW);
-		if (savedata.mpLrcExpand)
-			y += lh * lrcExtra;
 	}
 	const int infoBottom = infoTop + gTitle + infoInnerH + gPad;
 	MoveCtl(&m_grpInfo, M, infoTop, W - M * 2, infoBottom - infoTop);
@@ -2625,7 +2654,10 @@ void CMediaPlayerDlg::DoLayout()
 		const int micSlW = (int)(120 * s);
 		MoveCtl(&m_micmix, mx, micY, micChkW, chkRowH); mx += micChkW + gapCk;
 		MoveCtl(&m_miclevL, mx, micY, micLabW, chkRowH); mx += micLabW + (int)(2 * s);
-		MoveCtl(&m_miclev, mx, micY, micSlW, chkRowH);
+		const int micMeterW = (int)(10 * s);
+		MoveCtl(&m_miclev, mx, micY, micSlW - micMeterW - (int)(4 * s), chkRowH);
+		mx += micSlW - micMeterW - (int)(2 * s);
+		MoveCtl(&m_micMeter, mx, micY, micMeterW, chkRowH);
 	}
 	MoveCtl(&m_tip, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
 	MoveCtl(&m_mini, ckx, ckY, ckW, chkRowH); ckx += ckW + gapCk;
@@ -3001,7 +3033,11 @@ void CMediaPlayerDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 			_tcscat_s(buf, d.name);
 			_tcsncpy_s(di->item.pszText, di->item.cchTextMax, buf, _TRUNCATE);
 		} break;
-		case 1: _tcscpy_s(di->item.pszText, di->item.cchTextMax, SongParams_HasEntryForRow(i) ? _T("★") : _T("")); break;
+		case 1: {
+			CString marks;
+			PlFormatRowMarks(i, d.fol, marks);
+			_tcsncpy_s(di->item.pszText, di->item.cchTextMax, marks, _TRUNCATE);
+		} break;
 		case 2: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.game); break;
 		case 3: {
 			CString s;
@@ -3173,19 +3209,33 @@ void CMediaPlayerDlg::SyncFromMain()
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
 		CString s, s2;
 		const bool hasLyrics = (og->lrcnum >= 2);
-		const bool lrcScroll = (hasLyrics && savedata.mpLrcExpand && m_lrcView.GetSafeHwnd());
+		const bool lrcScroll = (savedata.mpLrcExpand && m_lrcView.GetSafeHwnd());
+		extern UINT ttt;
 		if (lrcScroll) {
-			const int n = (og->lrcnum > 1) ? (og->lrcnum - 1) : 0;
-			m_lrcView.SetLines(og->lrc, n);
-			m_lrcView.SetCurrent(og->lrccur);
+			if (hasLyrics) {
+				const int n = (og->lrcnum > 1) ? (og->lrcnum - 1) : 0;
+				m_lrcView.SetLines(og->lrc, n, og->lrctm, og->lrcnum);
+				m_lrcView.SetPlayCentis(ttt);
+			} else {
+				m_lrcView.Clear();
+			}
 		}
 		else {
 			og->m_lrc.GetWindowText(s); m_lrc.GetWindowText(s2); if (s != s2) m_lrc.SetWindowText(s);
 			og->m_lrc2.GetWindowText(s); m_lrc2.GetWindowText(s2); if (s != s2) m_lrc2.SetWindowText(s);
-			og->m_lrc3.GetWindowText(s); m_lrc3.GetWindowText(s2); if (s != s2) m_lrc3.SetWindowText(s);
+			// 現在行(3行目): 背景+文字色でハイライト
 			if (hasLyrics) {
+				CString cur = og->lrc[og->lrccur];
+				CString hi;
+				hi.Format(_T("!@C1E46AA%s"), (LPCTSTR)cur);
+				m_lrc3.GetWindowText(s2);
+				if (hi != s2) m_lrc3.SetWindowText(hi);
+				m_lrc3.SetSolidFill(TRUE, RGB(220, 232, 255));
 				og->m_lrc4.GetWindowText(s); m_lrc4.GetWindowText(s2); if (s != s2) m_lrc4.SetWindowText(s);
 				og->m_lrc5.GetWindowText(s); m_lrc5.GetWindowText(s2); if (s != s2) m_lrc5.SetWindowText(s);
+			} else {
+				og->m_lrc3.GetWindowText(s); m_lrc3.GetWindowText(s2); if (s != s2) m_lrc3.SetWindowText(s);
+				m_lrc3.SetSolidFill(FALSE, 0);
 			}
 		}
 		if (!hasLyrics) {
@@ -3267,6 +3317,8 @@ void CMediaPlayerDlg::SyncFromMain()
 		if (m_savewav.GetCheck() != v1) m_savewav.SetCheck(v1);
 
 		v1 = savedata.mic_mix ? 1 : 0;
+		if (m_micMeter.GetSafeHwnd())
+			m_micMeter.SetLevel(MpMicPeakLevel());
 		if (m_micmix.GetSafeHwnd() && m_micmix.GetCheck() != v1) m_micmix.SetCheck(v1);
 		if (m_miclev.GetSafeHwnd() && GetFocus() != (CWnd*)&m_miclev) {
 			int lv = savedata.mic_mix_level;
@@ -4196,7 +4248,7 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			CBitmap bm; bm.CreateCompatibleBitmap(pDC, w, h);
 			CBitmap* ob = mem.SelectObject(&bm);
 			mem.FillSolidRect(0, 0, w, h, kBg);
-			if (og && og->jx > 0 && !og->img.IsNull()) {
+			if (og && og->jx >= 64 && !og->img.IsNull()) {
 				double jr = og->jxy; if (jr <= 0.0) jr = 1.0;
 				int dw = w, dh = h;                 // アスペクト維持で正方形内にフィット
 				if (jr >= 1.0) { dw = w; dh = (int)((double)w / jr); }
@@ -4210,7 +4262,7 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 				og->img.Draw(mem.GetSafeHdc(), dx, dy, dw, dh, 0, 0, og->jx, og->jy);
 				::SetStretchBltMode(mem.GetSafeHdc(), om);
 			}
-			else {                                  // ジャケ無し: 「Media Player らいら」+ 可愛い模様
+			else {                                  // 未取得/小さすぎ: プレースホルダ(24px引き伸ばし禁止)
 				Mp_DrawNoJacketPlaceholder(mem, w, h);
 			}
 			if (aero)
@@ -5075,14 +5127,12 @@ void CMediaPlayerDlg::OnMicLevRelease(NMHDR*, LRESULT* pResult)
 
 void CMediaPlayerDlg::OnRecord()
 {
-	CDeviceRecordDlg dlg(this);
-	dlg.DoModal();
+	OpenDeviceRecordModeless(this);
 }
 
 void CMediaPlayerDlg::OnCapture()
 {
-	CScreenCaptureDlg dlg(this);
-	dlg.DoModal();
+	OpenScreenCaptureModeless(this);
 }
 
 void CMediaPlayerDlg::OnSaveParam()
@@ -5300,10 +5350,15 @@ void CMediaPlayerDlg::OnLrcExpand()
 	if (m_lrcExpand.GetSafeHwnd())
 		m_lrcExpand.SetWindowText(savedata.mpLrcExpand ? L"▴" : L"▾");
 	DoLayout();
-	if (savedata.mpLrcExpand && og && og->lrcnum >= 2 && m_lrcView.GetSafeHwnd()) {
-		const int n = og->lrcnum - 1;
-		m_lrcView.SetLines(og->lrc, n > 0 ? n : 0);
-		m_lrcView.SetCurrent(og->lrccur);
+	if (savedata.mpLrcExpand && m_lrcView.GetSafeHwnd()) {
+		if (og && og->lrcnum >= 2) {
+			const int n = og->lrcnum - 1;
+			m_lrcView.SetLines(og->lrc, n > 0 ? n : 0, og->lrctm, og->lrcnum);
+			extern UINT ttt;
+			m_lrcView.SetPlayCentis(ttt);
+		} else {
+			m_lrcView.Clear();
+		}
 	}
 	CCC_GroupBoxesBack(GetSafeHwnd());
 	RefreshListAfterLayout();
@@ -6175,7 +6230,8 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 		}
 		return;
 	}
-	CDialog::OnRButtonUp(nFlags, point);
+	// キャプション帯(アイコン含む)のシステムメニューは Base 側
+	CCustomBlurDialogExBase::OnRButtonUp(nFlags, point);
 }
 
 void CMediaPlayerDlg::OnSpeanaStyleBar()

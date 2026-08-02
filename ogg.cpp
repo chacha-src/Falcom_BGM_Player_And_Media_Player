@@ -917,7 +917,7 @@ BOOL COggApp::InitInstance()
 	else if (savedata.cap_with_mic != 0)
 		savedata.cap_with_mic = 1;
 	if (datFileSize < (int)(offsetof(save, cap_fps) + sizeof(savedata.cap_fps))
-		|| savedata.cap_fps < 5 || savedata.cap_fps > 30)
+		|| savedata.cap_fps < 5 || savedata.cap_fps > 60)
 		savedata.cap_fps = 15;
 	if (datFileSize < (int)(offsetof(save, cap_last_path) + sizeof(savedata.cap_last_path)))
 		savedata.cap_last_path[0] = 0;

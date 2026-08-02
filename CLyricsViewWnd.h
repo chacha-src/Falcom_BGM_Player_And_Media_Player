@@ -13,15 +13,20 @@ public:
 
 	BOOL Create(CWnd* pParent, UINT nID);
 	void Clear();
-	// lines[0..count) を表示対象にする（終端番兵は含めない）
-	void SetLines(const CString* lines, int count);
+	// lines[0..count) を表示。times は 1/100 秒(lrctm と同じ)。NULL ならカラオケ塗り無し。
+	void SetLines(const CString* lines, int count, const DWORD* times = NULL, int timeCount = 0);
 	void SetCurrent(int idx);
+	// 再生位置(1/100秒)。現在行と行内進捗を更新しカラオケ塗りに使う。
+	void SetPlayCentis(DWORD centis);
 	void EnsureFonts(int dpiPointTenths, LPCTSTR face);
 
 protected:
 	CString m_line[kMaxLines];
+	DWORD m_tm[kMaxLines];
 	int m_count;
+	int m_tmCount;
 	int m_cur;
+	double m_frac; // 現在行の進捗 0..1
 	int m_lineH;
 	double m_scrollY;
 	double m_targetY;

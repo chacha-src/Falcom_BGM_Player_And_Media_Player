@@ -470,7 +470,7 @@ struct save{
 	int record_flac_level;    // 0..8
 	int cap_with_audio;       // 1=画面キャプチャにシステム音
 	int cap_with_mic;         // 1=画面キャプチャにマイク
-	int cap_fps;              // 10..30
+	int cap_fps;              // 10..60 (録画＆プレビュー間隔)
 	TCHAR cap_last_path[1024];
 
 	// --- K-Lite Codec Pack 未導入の誘導(末尾追記。旧.datは0) ---

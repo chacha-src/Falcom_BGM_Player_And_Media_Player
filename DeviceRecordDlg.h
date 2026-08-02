@@ -16,6 +16,8 @@ public:
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	virtual void PostNcDestroy();
+	void CloseModeless();
 	DECLARE_MESSAGE_MAP()
 
 	void FillDeviceCombo();
@@ -29,6 +31,9 @@ protected:
 	void UpdateElapsedUi();
 	BOOL StartRecording();
 	void StopRecording(BOOL encodeAfter);
+	void StartPeakMonitor();
+	void StopPeakMonitor();
+	void PaintMetersFromPeaks();
 	static UINT __stdcall CaptureThread(void* p);
 
 public:
@@ -73,6 +78,7 @@ public:
 	BOOL m_uiLocked;     // 録音中は EnableWindow せず入力だけ無視(透過防止)
 	BOOL m_stopping;     // StopRecording 再入防止
 	BOOL m_everStarted;
+	BOOL m_peakOnly;     // TRUE=ファイル無しでレベル監視のみ
 	CString m_wavPath;
 	CString m_finalPath;
 	int m_outFmt;
@@ -83,4 +89,18 @@ public:
 	WORD m_wavCh;
 	DWORD m_wavHz;
 	WORD m_wavBits;
+
+	// レベルメータ(0..1000)。プレビュー/録音中とも更新。
+	volatile LONG m_peakMic;
+	volatile LONG m_peakSys;
+	volatile LONG m_peakMix;
+	CCustomStatic m_meterMicL;
+	CCustomStatic m_meterSysL;
+	CCustomStatic m_meterMixL;
+	CCustomLevelMeter m_meterMic;
+	CCustomLevelMeter m_meterSys;
+	CCustomLevelMeter m_meterMix;
 };
+
+void OpenDeviceRecordModeless(CWnd* parent);
+void CloseDeviceRecordIfOpen();

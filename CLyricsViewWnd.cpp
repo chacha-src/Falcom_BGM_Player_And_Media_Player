@@ -20,13 +20,16 @@ END_MESSAGE_MAP()
 
 CLyricsViewWnd::CLyricsViewWnd()
 	: m_count(0)
+	, m_tmCount(0)
 	, m_cur(0)
+	, m_frac(0.0)
 	, m_lineH(18)
 	, m_scrollY(0.0)
 	, m_targetY(0.0)
 	, m_fontPt(0)
 	, m_timer(0)
 {
+	ZeroMemory(m_tm, sizeof(m_tm));
 }
 
 CLyricsViewWnd::~CLyricsViewWnd()
@@ -50,9 +53,12 @@ BOOL CLyricsViewWnd::Create(CWnd* pParent, UINT nID)
 void CLyricsViewWnd::Clear()
 {
 	m_count = 0;
+	m_tmCount = 0;
 	m_cur = 0;
+	m_frac = 0.0;
 	m_scrollY = 0.0;
 	m_targetY = 0.0;
+	ZeroMemory(m_tm, sizeof(m_tm));
 	StopAnim();
 	if (m_hWnd)
 		Invalidate(FALSE);
@@ -87,22 +93,37 @@ void CLyricsViewWnd::EnsureFonts(int dpiPointTenths, LPCTSTR face)
 	m_scrollY = m_targetY;
 }
 
-void CLyricsViewWnd::SetLines(const CString* lines, int count)
+void CLyricsViewWnd::SetLines(const CString* lines, int count, const DWORD* times, int timeCount)
 {
 	if (count < 0) count = 0;
 	if (count > kMaxLines) count = kMaxLines;
-	BOOL changed = (count != m_count);
-	if (!changed) {
+	if (timeCount < 0) timeCount = 0;
+	// 番兵時刻(次行開始)を含めるため count+1 まで許可
+	if (timeCount > kMaxLines) timeCount = kMaxLines;
+	BOOL changed = (count != m_count) || (timeCount != m_tmCount);
+	if (!changed && lines) {
 		for (int i = 0; i < count; i++) {
 			if (m_line[i] != lines[i]) { changed = TRUE; break; }
 		}
 	}
+	if (!changed && times) {
+		for (int i = 0; i < timeCount; i++) {
+			if (m_tm[i] != times[i]) { changed = TRUE; break; }
+		}
+	}
 	if (!changed) return;
 	m_count = count;
+	m_tmCount = times ? timeCount : 0;
 	for (int i = 0; i < count; i++)
-		m_line[i] = lines[i];
+		m_line[i] = lines ? lines[i] : CString();
 	for (int i = count; i < kMaxLines; i++)
 		m_line[i].Empty();
+	if (times) {
+		for (int i = 0; i < m_tmCount; i++)
+			m_tm[i] = times[i];
+	}
+	for (int i = m_tmCount; i < kMaxLines; i++)
+		m_tm[i] = 0;
 	if (m_cur >= m_count) m_cur = m_count > 0 ? m_count - 1 : 0;
 	RecalcTarget();
 	m_scrollY = m_targetY;
@@ -128,6 +149,41 @@ void CLyricsViewWnd::SetCurrent(int idx)
 	RecalcTarget();
 	StartAnim();
 	if (m_hWnd)
+		Invalidate(FALSE);
+}
+
+void CLyricsViewWnd::SetPlayCentis(DWORD centis)
+{
+	if (m_count <= 0 || m_tmCount < 2) {
+		SetCurrent(0);
+		m_frac = 0.0;
+		return;
+	}
+	int idx = 0;
+	for (int i = 0; i < m_tmCount - 1; i++) {
+		if (m_tm[i] <= centis && m_tm[i + 1] > centis) {
+			idx = i;
+			break;
+		}
+		if (centis >= m_tm[i])
+			idx = i;
+	}
+	if (idx < 0) idx = 0;
+	if (idx >= m_count) idx = m_count - 1;
+	double frac = 0.0;
+	const DWORD t0 = m_tm[idx];
+	const DWORD t1 = (idx + 1 < m_tmCount) ? m_tm[idx + 1] : (t0 + 1);
+	if (t1 > t0) {
+		frac = (double)(centis - t0) / (double)(t1 - t0);
+		if (frac < 0.0) frac = 0.0;
+		if (frac > 1.0) frac = 1.0;
+	}
+	const BOOL curChanged = (idx != m_cur);
+	const BOOL fracChanged = (AbsD(frac - m_frac) > 0.002);
+	m_frac = frac;
+	if (curChanged)
+		SetCurrent(idx);
+	else if (fracChanged && m_hWnd)
 		Invalidate(FALSE);
 }
 
@@ -276,9 +332,26 @@ void CLyricsViewWnd::OnPaint()
 
 			CFont* use = isCur ? &m_fontHi : &m_font;
 			CFont* old = mem.SelectObject(use);
-			mem.SetTextColor(col);
 			CRect tr(padX, y, rc.Width() - padX, y + m_lineH);
-			mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+			// 現在行: 時刻間の進捗で左→右に色を追従(文字単位ではなくピクセルクリップ)
+			if (isCur && m_tmCount >= 2 && m_frac > 0.0) {
+				CSize te = mem.GetTextExtent(m_line[i]);
+				int tw = te.cx;
+				if (tw > tr.Width()) tw = tr.Width();
+				const int split = tr.left + (int)(tw * m_frac + 0.5);
+				mem.SetTextColor(RGB(150, 155, 170));
+				mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+				CRgn clip;
+				if (split > tr.left && clip.CreateRectRgn(tr.left, tr.top, split, tr.bottom)) {
+					mem.SelectClipRgn(&clip);
+					mem.SetTextColor(RGB(220, 40, 90));
+					mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+					mem.SelectClipRgn(NULL);
+				}
+			} else {
+				mem.SetTextColor(col);
+				mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+			}
 			mem.SelectObject(old);
 		}
 	}

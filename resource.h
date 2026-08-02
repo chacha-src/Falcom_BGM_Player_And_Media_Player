@@ -1052,6 +1052,20 @@
 #define IDC_SC_SCALE100                 3803
 #define IDC_SC_TILE                     3804
 #define IDC_SC_INCMP                    3805
+#define IDC_DR_METER_MIC_L              3806
+#define IDC_DR_METER_SYS_L              3807
+#define IDC_DR_METER_MIX_L              3808
+#define IDC_DR_METER_MIC                3809
+#define IDC_DR_METER_SYS                3810
+#define IDC_DR_METER_MIX                3811
+#define IDC_SC_METER_MIC_L              3812
+#define IDC_SC_METER_SYS_L              3813
+#define IDC_SC_METER_MIX_L              3814
+#define IDC_SC_METER_MIC                3815
+#define IDC_SC_METER_SYS                3816
+#define IDC_SC_METER_MIX                3817
+#define IDC_MP_MICMETER                 3818
+#define ID_SC_LAYER_HIDE                39001
 
 #define ID_MP_SPEANA_BAR                32960
 #define ID_MP_SPEANA_MIRROR             32961

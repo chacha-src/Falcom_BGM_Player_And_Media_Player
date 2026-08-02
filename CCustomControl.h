@@ -128,6 +128,8 @@ void CCC_GroupBoxesBack(HWND hDlg);
 #define COLOR_VINE_DECO         RGB(216, 132, 176) // 蔓（つる）の装飾色（ローズモーヴ）
 #define COLOR_HEART             RGB(255,  86, 150) // ハートの装飾色（色っぽい濃ピンク）
 #define COLOR_SEL_BG            RGB(255, 184, 212) // リストなどの選択時背景色（ローズ）
+#define COLOR_EDIT_SEL_BG       RGB( 51, 120, 210) // Edit選択背景(青・文字と対比)
+#define COLOR_EDIT_SEL_TEXT     RGB(255, 255, 255) // Edit選択文字
 #define COLOR_GRAD_DARK_GREEN   RGB(  0, 100,   0) // グラデーション用の濃い緑
 #define COLOR_GRAD_DARK_PURPLE  RGB( 75,   0, 130) // グラデーション用の濃い紫
 
@@ -527,6 +529,7 @@ public:
     // 最小化復帰等: WM_PRINTCLIENT は Edit 本文を描かないため明示的に再描画
     void RepaintClient();
     void DrawClientText(CDC& dc, const CRect& r);
+    void PaintOpaqueFrame(); // NC枠(フォーカス色含む)を α=255 で描く
 
 protected:
     virtual void PreSubclassWindow();
@@ -542,6 +545,12 @@ protected:
     afx_msg void OnEnUpdate();
     afx_msg void OnTimer(UINT_PTR nIDEvent);
     afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
+    afx_msg void OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags);
+    afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
+    afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+    afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
+    afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
+    afx_msg void OnMouseMove(UINT nFlags, CPoint point);
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg LRESULT OnPostOpaquePaint(WPARAM, LPARAM);
 
@@ -549,11 +558,16 @@ protected:
 
 private:
     CBrush m_brBackground; // 背景塗りつぶし用ブラシ
+    void DrawEditFrame(CDC& dc, const CRect& rWin);
     CFont m_fontBold;      // 内部キャッシュフォント(太字固定ではない)
 
     BOOL m_bHasFocus;      // 現在フォーカスを持っているかどうか
+    BOOL m_bSelDrag;       // マウスで範囲選択中
+    int m_lastSel0;
+    int m_lastSel1;
     void PaintOpaqueClient(CDC& dc);
     void ScheduleOpaqueRepaint();
+    void RepaintIfSelChanged();
 };
 
 // ============================================================================
@@ -611,6 +625,15 @@ public:
     {
         m_bAeroMode = b;
         if (GetSafeHwnd()) Invalidate();
+    }
+
+    // 不透明塗りつぶし背景(LRC 現在行ハイライト等)。透過モード時は無視。
+    void SetSolidFill(BOOL en, COLORREF c)
+    {
+        if (m_bSolidFill == en && m_clrSolidFill == c) return;
+        m_bSolidFill = en;
+        m_clrSolidFill = c;
+        if (GetSafeHwnd()) Invalidate(FALSE);
     }
 
     // 頻繁更新ラベル用: 親ぼかし Invalidate を抑えて UI 詰まりを防ぐ
@@ -674,6 +697,8 @@ private:
 
     BOOL m_bAeroMode;                      // アクリルモードが有効かどうか
     BOOL m_bNoParentInvalidate;            // TRUE なら SetText 時に親 Invalidate しない
+    BOOL m_bSolidFill;                     // カスタム不透明背景
+    COLORREF m_clrSolidFill;
 #if CCUSTOM_AERO_SUPPORT
     // 共有 s_nfCache のサイズ thrash を避ける（EQ コード行など固定サイズ静的ラベル向け）
     CCC_ChromaBlitCache m_chromaCache;
@@ -1256,6 +1281,35 @@ private:
 };
 
 // ============================================================================
+// 縦レベルメータ (録音/キャプチャ/マイク検出)
+// CCustomLevelMeter
+// ============================================================================
+class CCustomLevelMeter : public CStatic
+{
+	DECLARE_DYNAMIC(CCustomLevelMeter)
+public:
+	CCustomLevelMeter();
+	virtual ~CCustomLevelMeter();
+	void SetLevel(int n); // 0..1000
+	int GetLevel() const { return m_level; }
+	void SetAeroMode(BOOL b) { m_bAeroMode = b; if (GetSafeHwnd()) Invalidate(FALSE); }
+	void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+	BOOL m_bAutoDelete;
+
+protected:
+	virtual void PostNcDestroy();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
+	DECLARE_MESSAGE_MAP()
+
+	void PaintClient(CDC& dc);
+
+	int m_level;
+	BOOL m_bAeroMode;
+};
+
+// ============================================================================
 // カスタムプログレスバー (オーナー描画・アクリル透過 / 淫女モード対応)
 // CCustomProgressCtrl
 // ============================================================================
@@ -1365,6 +1419,7 @@ do {                                                                            
             else if (auto* p = dynamic_cast<CCustomTabCtrl*>(_pw))         p->SetAeroMode(FALSE); \
             else if (auto* p = dynamic_cast<CCustomCheckBox*>(_pw))        p->SetAeroMode(_bA); \
             else if (auto* p = dynamic_cast<CCustomProgressCtrl*>(_pw))    p->SetAeroMode(_bA); \
+            else if (auto* p = dynamic_cast<CCustomLevelMeter*>(_pw))      p->SetAeroMode(_bA); \
             CCC_SetChildTransparent(_hc, FALSE);                                       \
             _pw->Invalidate();                                                         \
         }                                                                              \

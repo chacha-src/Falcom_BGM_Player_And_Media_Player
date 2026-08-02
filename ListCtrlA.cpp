@@ -42,6 +42,20 @@ void CListCtrlA::BuildToolTipText(int row, int col, CString& out)
 	m = GetItemText(row, 2);
 	out.Format(LL14(L"名前：%s\nアーティスト：%s\nアルバム：%s\n時間：%s\n種類：%s", L"Name: %s\nArtist: %s\nAlbum: %s\nTime: %s\nType: %s", L"Nom : %s\nArtiste : %s\nAlbum : %s\nDurée : %s\nType : %s", L"Nome: %s\nArtista: %s\nAlbum: %s\nTempo: %s\nTipo: %s", L"Nombre: %s\nArtista: %s\nÁlbum: %s\nTiempo: %s\nTipo: %s", L"이름: %s\n아티스트: %s\n앨범: %s\n시간: %s\n유형: %s", L"名称：%s\n艺术家：%s\n专辑：%s\n时间：%s\n类型：%s", L"الاسم: %s\nالفنان: %s\nالألبوم: %s\nالوقت: %s\nالنوع: %s", L"Название: %s\nИсполнитель: %s\nАльбом: %s\nВремя: %s\nТип: %s", L"Name: %s\nInterpret: %s\nAlbum: %s\nZeit: %s\nTyp: %s", L"Nome: %s\nArtista: %s\nÁlbum: %s\nTempo: %s\nTipo: %s", L"Naam: %s\nArtiest: %s\nAlbum: %s\nTijd: %s\nType: %s", L"Nazwa: %s\nWykonawca: %s\nAlbum: %s\nCzas: %s\nTyp: %s", L"Ad: %s\nSanatçı: %s\nAlbüm: %s\nSüre: %s\nTür: %s"), i, j, k, l, m);
 
+	CString marks = GetItemText(row, 1);
+	if (!marks.IsEmpty()) {
+		out += _T("\n");
+		out += LL14(L"印: ★=曲ごと設定 / ♪=歌詞(.lrc)", L"Marks: ★=per-track settings / ♪=lyrics (.lrc)",
+			L"Marques : ★=réglages / ♪=paroles (.lrc)", L"Segni: ★=impostazioni / ♪=testi (.lrc)",
+			L"Marcas: ★=ajustes / ♪=letra (.lrc)", L"표시: ★=곡별 설정 / ♪=가사(.lrc)",
+			L"标记: ★=单曲设置 / ♪=歌词(.lrc)", L"علامات: ★=إعدادات / ♪=كلمات (.lrc)",
+			L"Метки: ★=настройки / ♪=текст (.lrc)", L"Zeichen: ★=Einstellungen / ♪=Liedtext (.lrc)",
+			L"Marcas: ★=definições / ♪=letra (.lrc)", L"Tekens: ★=instellingen / ♪=songtekst (.lrc)",
+			L"Znaki: ★=ustawienia / ♪=tekst (.lrc)", L"İşaret: ★=parça ayarı / ♪=söz (.lrc)");
+		out += _T(" → ");
+		out += marks;
+	}
+
 	// 曲ごと保存パラメータが有効なプレイリストでは、変更のある項目を付記する。
 	// pc メンバは Load/realloc で古くなり得るため、行解決は SongParams 側(常に pl->pc)で行う。
 	// ※saveSongParams 判定も SongParams 側に寄せる(この TU の PCH ずれで誤判定しないため)

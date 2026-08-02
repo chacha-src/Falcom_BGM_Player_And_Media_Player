@@ -72,6 +72,12 @@ int flacmode = 0;
 //#include "vfw.h"
 #include "CImageBase.h"
 #include <shobjidl.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+#pragma comment(lib, "mfplat.lib")
+#pragma comment(lib, "mfreadwrite.lib")
+#pragma comment(lib, "mfuuid.lib")
 
 #include <direct.h>
 #include "Folder.h"
@@ -99,6 +105,7 @@ bool PlaybackCcFormatLocked();
 void PlaybackCcGetFormat(int& rate, int& ch, int& bits);
 static void MicMixCaptureStop();
 static void MicMixCaptureStart();
+static BOOL TryMfGrabVideoFrame(LPCTSTR path, CImage& out, LONGLONG preferHns = -1);
 // 戻り値: ファイルへ実際に書いたバイト数（レート変換後。wl 加算に使う）
 UINT PlaybackCcWrite(const void* p, UINT n);
 UINT PlaybackCcWriteForced(const void* p, UINT n);
@@ -21301,10 +21308,23 @@ static int g_micCapRate = 0;
 static int g_micCapCh = 0;
 static volatile LONG g_micRun = 0;
 static volatile LONG g_micStop = 0;
+static volatile LONG g_micPeak = 0; // 0..1000 UI用
 static HANDLE g_micThread = NULL;
 static CRITICAL_SECTION g_micCs;
 static volatile LONG g_micCsInit = 0;
 static BYTE g_micMixScratch[MIC_MIX_SCRATCH];
+
+int MpMicPeakLevel()
+{
+	LONG v = InterlockedCompareExchange(&g_micPeak, 0, 0);
+	InterlockedExchange(&g_micPeak, v * 88 / 100);
+	if (v <= 0) return 0;
+	if (v > 1000) v = 1000;
+	int ui = (int)(sqrt((double)v / 1000.0) * 1000.0 * 1.15);
+	if (ui < 1) ui = 1;
+	if (ui > 1000) ui = 1000;
+	return ui;
+}
 
 static void MicMixEnsureCs()
 {
@@ -21458,6 +21478,12 @@ static UINT __stdcall MicMixCaptureThread(void*)
 						}
 						conv[i * 2 + 0] = L;
 						conv[i * 2 + 1] = R;
+						const float aL = (L < 0.f) ? -L : L;
+						const float aR = (R < 0.f) ? -R : R;
+						const float pk = (aL > aR) ? aL : aR;
+						const LONG pv = (LONG)(pk * 1000.f);
+						const LONG cur = InterlockedCompareExchange(&g_micPeak, 0, 0);
+						if (pv > cur) InterlockedExchange(&g_micPeak, pv > 1000 ? 1000 : pv);
 					}
 					MicMixRingWrite(conv, (int)n, 2);
 					done += n;
@@ -24552,6 +24578,109 @@ void COggDlg::OnBnmp3jake()
 }
 
 
+// EVR/Shell 失敗時でも MF で1フレーム取得(再生開始前に呼ぶこと)
+static BOOL TryMfGrabVideoFrame(LPCTSTR path, CImage& out, LONGLONG preferHns /*=-1*/)
+{
+	if (!path || !path[0]) return FALSE;
+	HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	HRESULT hrMf = MFStartup(MF_VERSION);
+	if (FAILED(hrMf)) {
+		if (SUCCEEDED(hrCo) || hrCo == S_FALSE) CoUninitialize();
+		return FALSE;
+	}
+	IMFSourceReader* reader = NULL;
+	BOOL ok = FALSE;
+	HRESULT hr = MFCreateSourceReaderFromURL(path, NULL, &reader);
+	if (FAILED(hr) || !reader) {
+		CString url;
+		url.Format(_T("file:///%s"), path);
+		url.Replace(_T('\\'), _T('/'));
+		hr = MFCreateSourceReaderFromURL(url, NULL, &reader);
+	}
+	if (SUCCEEDED(hr) && reader) {
+		IMFMediaType* typ = NULL;
+		if (SUCCEEDED(MFCreateMediaType(&typ)) && typ) {
+			typ->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+			typ->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+			hr = reader->SetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, typ);
+			typ->Release();
+		}
+		if (SUCCEEDED(hr)) {
+			LONGLONG seeks[4] = {
+				(preferHns >= 0) ? preferHns : (8 * 10000000LL),
+				8 * 10000000LL, 1 * 10000000LL, 30 * 10000000LL
+			};
+			for (int si = 0; si < 4 && !ok; ++si) {
+				PROPVARIANT var; PropVariantInit(&var);
+				var.vt = VT_I8; var.hVal.QuadPart = seeks[si] < 0 ? 0 : seeks[si];
+				reader->SetCurrentPosition(GUID_NULL, var);
+				PropVariantClear(&var);
+				for (int attempt = 0; attempt < 20 && !ok; ++attempt) {
+					DWORD streamIndex = 0, flags = 0; LONGLONG ts = 0;
+					IMFSample* sample = NULL;
+					hr = reader->ReadSample((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+						0, &streamIndex, &flags, &ts, &sample);
+					if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
+					if (!sample) continue;
+					IMFMediaBuffer* buf = NULL;
+					if (SUCCEEDED(sample->ConvertToContiguousBuffer(&buf)) && buf) {
+						BYTE* data = NULL; DWORD maxLen = 0, curLen = 0;
+						if (SUCCEEDED(buf->Lock(&data, &maxLen, &curLen)) && data && curLen > 0) {
+							IMFMediaType* cur = NULL; UINT32 w = 0, h = 0;
+							if (SUCCEEDED(reader->GetCurrentMediaType(
+								(DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &cur)) && cur) {
+								MFGetAttributeSize(cur, MF_MT_FRAME_SIZE, &w, &h);
+								cur->Release();
+							}
+							if (w > 8 && h > 8 && curLen >= w * h * 4 && out.Create((int)w, (int)h, 24)) {
+								for (UINT32 y = 0; y < h; ++y) {
+									const BYTE* src = data + (size_t)y * w * 4;
+									BYTE* dst = (BYTE*)out.GetPixelAddress(0, (int)y);
+									if (!dst) continue;
+									for (UINT32 x = 0; x < w; ++x) {
+										dst[x * 3 + 0] = src[x * 4 + 0];
+										dst[x * 3 + 1] = src[x * 4 + 1];
+										dst[x * 3 + 2] = src[x * 4 + 2];
+									}
+								}
+								ok = TRUE;
+							}
+							buf->Unlock();
+						}
+						buf->Release();
+					}
+					sample->Release();
+				}
+			}
+		}
+		reader->Release();
+	}
+	MFShutdown();
+	if (SUCCEEDED(hrCo) || hrCo == S_FALSE) CoUninitialize();
+	if (!ok && !out.IsNull()) out.Destroy();
+	return ok;
+}
+
+BOOL COggDlg::AdoptJacketFromDisk(LPCTSTR path)
+{
+	if (!path || !path[0]) return FALSE;
+	const CString diskBmp = PlJakDiskPath(path, FALSE);
+	if (diskBmp.IsEmpty() || ::GetFileAttributes(diskBmp) == INVALID_FILE_ATTRIBUTES)
+		return FALSE;
+	if (!img.IsNull()) img.Destroy();
+	if (FAILED(img.Load(diskBmp)) || img.IsNull() || img.GetWidth() < 64) {
+		if (!img.IsNull()) img.Destroy();
+		jx = -1;
+		return FALSE;
+	}
+	jx = img.GetWidth();
+	jy = img.GetHeight();
+	jxy = (jy > 0) ? ((double)jx / (double)jy) : 1.0;
+	if (::IsWindow(m_mp3jake.GetSafeHwnd()))
+		m_mp3jake.EnableWindow(TRUE);
+	return TRUE;
+}
+
 void COggDlg::LoadJacket(CString s, CImage* dest)
 {
 	// dest 指定時はメイン再生用 img/jx を触らない(リストサムネ用)。
@@ -24569,15 +24698,75 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 	}
 
 	const CString origPath = s;
+	// Shell の種別アイコンだけ拒否(2の累乗正方形+単色外周)。リストが書いた等身大は通す。
+	auto looksLikeShellFileIcon = [](CImage& im) -> bool {
+		if (im.IsNull()) return true;
+		const int w = im.GetWidth(), h = im.GetHeight();
+		if (w < 64 || h < 64) return true;
+		if (w != h) return false;
+		const BOOL pow2 = (w > 0) && ((w & (w - 1)) == 0);
+		if (!pow2 && !(w == 96 || w == 48))
+			return false;
+		auto sample = [&](int x, int y) -> COLORREF {
+			if (x < 0) x = 0; if (y < 0) y = 0;
+			if (x >= w) x = w - 1; if (y >= h) y = h - 1;
+			try { return im.GetPixel(x, y); } catch (...) { return 0; }
+		};
+		const COLORREF c00 = sample(0, 0);
+		const COLORREF c10 = sample(w - 1, 0);
+		const COLORREF c01 = sample(0, h - 1);
+		const COLORREF c11 = sample(w - 1, h - 1);
+		auto near3 = [](COLORREF a, COLORREF b) {
+			return abs(GetRValue(a) - GetRValue(b)) <= 12
+				&& abs(GetGValue(a) - GetGValue(b)) <= 12
+				&& abs(GetBValue(a) - GetBValue(b)) <= 12;
+		};
+		if (!(near3(c00, c10) && near3(c00, c01) && near3(c00, c11)))
+			return false;
+		int flat = 0, samples = 0;
+		for (int i = 0; i < w; i += (std::max)(1, w / 16)) {
+			if (near3(sample(i, 0), c00)) flat++;
+			if (near3(sample(i, h - 1), c00)) flat++;
+			samples += 2;
+		}
+		return samples > 0 && flat * 10 >= samples * 9;
+	};
 	auto applyMainMeta = [&]() {
 		if (dest) return;
-		if (target.IsNull() || target.GetWidth() <= 0) return;
+		if (target.IsNull() || target.GetWidth() < 64) {
+			if (!target.IsNull()) target.Destroy();
+			jx = -1;
+			return;
+		}
 		jx = target.GetWidth();
 		jy = target.GetHeight();
 		jxy = (double)jx / (double)jy;
 		if (::IsWindow(m_mp3jake.GetSafeHwnd()))
 			m_mp3jake.EnableWindow(TRUE);
+		const CString diskBmp = PlJakDiskPath(origPath, FALSE);
+		if (!diskBmp.IsEmpty()) {
+			try { target.Save(diskBmp, Gdiplus::ImageFormatBMP); } catch (...) {}
+		}
 	};
+	// 共有ディスクキャッシュ(リスト抽出の等身大)。毒(24px/アイコン)だけ捨てる。
+	{
+		const CString diskBmp = PlJakDiskPath(origPath, FALSE);
+		if (!diskBmp.IsEmpty() && ::GetFileAttributes(diskBmp) != INVALID_FILE_ATTRIBUTES) {
+			if (SUCCEEDED(target.Load(diskBmp)) && !target.IsNull() && target.GetWidth() >= 64
+				&& !looksLikeShellFileIcon(target)) {
+				if (!dest) {
+					jx = target.GetWidth();
+					jy = target.GetHeight();
+					jxy = (double)jx / (double)jy;
+					if (::IsWindow(m_mp3jake.GetSafeHwnd()))
+						m_mp3jake.EnableWindow(TRUE);
+				}
+				return;
+			}
+			if (!target.IsNull()) target.Destroy();
+			if (!dest) ::DeleteFile(diskBmp); // 24px毒 / アイコン毒
+		}
+	}
 	// 埋め込み失敗時: 同名・folder.jpg/cover.jpg 等(再生中ジャケットも同じ)
 	auto trySidecars = [&]() -> bool {
 		static const TCHAR* kNear[] = {
@@ -24615,17 +24804,18 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		}
 		return false;
 	};
-	// 動画: 埋め込み/サイドカー無しなら Shell サムネ(エクスプローラ相当。埋め込みPNGも拾えることが多い)
-	auto tryShellVideoThumb = [&]() -> bool {
+	auto isVideoPath = [&]() -> bool {
 		CString low = origPath;
 		low.MakeLower();
-		const BOOL isVid =
-			(low.Right(3) == _T("mp4") || low.Right(3) == _T("m4v") || low.Right(3) == _T("mkv")
+		return (low.Right(3) == _T("mp4") || low.Right(3) == _T("m4v") || low.Right(3) == _T("mkv")
 			|| low.Right(3) == _T("avi") || low.Right(3) == _T("wmv") || low.Right(3) == _T("mov")
 			|| low.Right(3) == _T("mpg") || low.Right(3) == _T("flv") || low.Right(4) == _T("webm")
 			|| low.Right(4) == _T("mpeg") || low.Right(4) == _T("m2ts")
 			|| (low.GetLength() >= 3 && low.Right(3) == _T(".ts")));
-		if (!isVid) return false;
+	};
+	// 動画: 本物サムネのみ(SIIGBF_THUMBNAILONLY)。ファイルアイコンは拒否。
+	auto tryShellVideoThumb = [&]() -> bool {
+		if (!isVideoPath()) return false;
 		IShellItem* psi = NULL;
 		if (FAILED(::SHCreateItemFromParsingName(origPath, NULL, IID_PPV_ARGS(&psi))) || !psi)
 			return false;
@@ -24633,33 +24823,79 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 		HBITMAP hb = NULL;
 		BOOL ok = FALSE;
 		if (SUCCEEDED(psi->QueryInterface(IID_PPV_ARGS(&pif))) && pif) {
-			SIZE sz = { 256, 256 };
-			// THUMBNAILONLY は付けない: 埋め込み無しでもフレーム生成サムネを使う
-			if (SUCCEEDED(pif->GetImage(sz, SIIGBF_BIGGERSIZEOK | SIIGBF_RESIZETOFIT, &hb)) && hb) {
-				if (!target.IsNull()) target.Destroy();
-				target.Attach(hb);
-				hb = NULL;
-				ok = (!target.IsNull() && target.GetWidth() > 0);
-				if (!ok && !target.IsNull()) target.Destroy();
+			SIZE sz = { 1024, 1024 };
+			// THUMBNAILONLY: 無いときは失敗(アイコンへフォールバックしない)
+			const SIIGBF flags = (SIIGBF)(SIIGBF_THUMBNAILONLY | SIIGBF_BIGGERSIZEOK | SIIGBF_RESIZETOFIT);
+			if (SUCCEEDED(pif->GetImage(sz, flags, &hb)) && hb) {
+				BITMAP bm = {};
+				if (::GetObject(hb, sizeof(bm), &bm) && bm.bmWidth > 8 && abs(bm.bmHeight) > 8) {
+					const int bw = bm.bmWidth, bh = abs(bm.bmHeight);
+					if (!target.IsNull()) target.Destroy();
+					if (target.Create(bw, bh, 24)) {
+						HDC hdcDst = target.GetDC();
+						HDC hdcSrc = ::CreateCompatibleDC(hdcDst);
+						HGDIOBJ old = ::SelectObject(hdcSrc, hb);
+						::SetStretchBltMode(hdcDst, COLORONCOLOR);
+						::BitBlt(hdcDst, 0, 0, bw, bh, hdcSrc, 0, 0, SRCCOPY);
+						::SelectObject(hdcSrc, old);
+						::DeleteDC(hdcSrc);
+						target.ReleaseDC();
+						// 2の累乗正方形はエクスプローラのファイルアイコンが多い
+						ok = (target.GetWidth() >= 64) && !looksLikeShellFileIcon(target);
+					}
+				}
 			}
 			if (hb) ::DeleteObject(hb);
 			pif->Release();
 		}
 		psi->Release();
+		if (!ok && !target.IsNull()) target.Destroy();
 		return ok ? TRUE : FALSE;
 	};
+	// 埋め込み失敗後: サイドカー → MFフレーム →(最後に)本物Shellサムネ。アイコン禁止。
 	auto tryFallbacks = [&]() {
-		if (!target.IsNull() && target.GetWidth() > 0) {
+		if (!target.IsNull() && target.GetWidth() >= 64 && !looksLikeShellFileIcon(target)) {
 			applyMainMeta();
 			return;
 		}
+		if (!target.IsNull()) target.Destroy();
 		if (trySidecars()) {
 			applyMainMeta();
 			return;
 		}
+		if (isVideoPath() && TryMfGrabVideoFrame(origPath, target, -1)
+			&& !target.IsNull() && target.GetWidth() >= 64
+			&& !looksLikeShellFileIcon(target)) {
+			applyMainMeta();
+			return;
+		}
+		if (!target.IsNull()) target.Destroy();
 		if (tryShellVideoThumb())
 			applyMainMeta();
 	};
+
+	// 動画でも mp4/m4v は埋め込み covr/PNG を先に試す(Shellアイコンで早期returnしない)
+	if (isVideoPath()) {
+		CString lowV = origPath;
+		lowV.MakeLower();
+		const bool canEmbedScan = (lowV.Right(3) == _T("mp4") || lowV.Right(3) == _T("m4v")
+			|| lowV.Right(3) == _T("m4a"));
+		if (!canEmbedScan) {
+			// mkv/avi 等: 埋め込み走査対象外 → サイドカー/MF/Shell
+			if (trySidecars()) {
+				applyMainMeta();
+				return;
+			}
+			tryFallbacks();
+			if (!dest) {
+				if (jx >= 64) return;
+			} else if (!target.IsNull() && target.GetWidth() >= 64) {
+				return;
+			}
+			return;
+		}
+		// mp4系: 下の covr/PNG 走査へ続行
+	}
 
 	CString s1, s2;
 	TCHAR env[256];
@@ -24680,7 +24916,7 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 	IStream* stream = NULL;
 
 	CFile ff;
-	if (ff.Open(s, CFile::modeRead | CFile::shareDenyWrite, NULL) == FALSE) {
+	if (ff.Open(s, CFile::modeRead | CFile::shareDenyNone, NULL) == FALSE) {
 		tryFallbacks();
 		return;
 	}

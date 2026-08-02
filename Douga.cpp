@@ -2696,6 +2696,9 @@ void CDouga::plays(TCHAR* s)
 #else
 	MultiByteToWideChar(CP_ACP,0,s3,-1,ss1,2000);
 #endif
+	// RenderFile 前にジャケット取得(再生中はファイル占有で Shell/MF が失敗しやすい)
+	if (og && s && s[0])
+		og->LoadJacket(CString(s));
 	CoInitialize(NULL);
 	
 	int len = ::WideCharToMultiByte(CP_THREAD_ACP,0, ss, -1, NULL, 0, NULL, NULL);

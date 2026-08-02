@@ -179,6 +179,7 @@ public:
 	CCustomCheckBox m_micmix;
 	CCustomSliderCtrl m_miclev;
 	CCustomStatic m_miclevL;
+	CCustomLevelMeter m_micMeter;
 	CCustomCheckBox m_saveparam;   // 曲ごとオーディオ/DSP パラメータ保存
 	CCustomStandardButton m_resetdata; // 保存ファイル削除でリセット
 	CCustomStandardButton m_record;    // デバイス録音 UI
