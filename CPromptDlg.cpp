@@ -739,11 +739,12 @@ void CPromptDlg::RestorePosFromSavedata()
 	m_posRestored = TRUE;
 }
 
-static void ScrollLegendEdit(CCustomEdit& legend, short zDelta)
+static void ScrollMultilineEdit(CCustomEdit& edit, short zDelta)
 {
-	if (!legend.GetSafeHwnd()) return;
+	if (!edit.GetSafeHwnd()) return;
 	const int lines = (zDelta > 0) ? -3 : 3;
-	legend.SendMessage(EM_LINESCROLL, 0, lines);
+	edit.LineScroll(lines);
+	edit.RepaintClient();
 }
 
 BOOL CPromptDlg::OnInitDialog()
@@ -907,18 +908,22 @@ void CPromptDlg::OnSize(UINT nType, int cx, int cy)
 		SavePosToSavedata();
 }
 
-static BOOL LegendHitTestWheelPoint(const CCustomEdit& legend, CPoint screenPt)
+static BOOL EditHitTestWheelPoint(const CCustomEdit& edit, CPoint screenPt)
 {
-	if (!legend.GetSafeHwnd()) return FALSE;
+	if (!edit.GetSafeHwnd()) return FALSE;
 	CRect rc;
-	legend.GetWindowRect(&rc);
+	edit.GetWindowRect(&rc);
 	return rc.PtInRect(screenPt);
 }
 
 BOOL CPromptDlg::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 {
-	if (LegendHitTestWheelPoint(m_legend, pt)) {
-		ScrollLegendEdit(m_legend, zDelta);
+	if (EditHitTestWheelPoint(m_edit, pt)) {
+		ScrollMultilineEdit(m_edit, zDelta);
+		return TRUE;
+	}
+	if (EditHitTestWheelPoint(m_legend, pt)) {
+		ScrollMultilineEdit(m_legend, zDelta);
 		return TRUE;
 	}
 	return CCustomBlurDialogExBase::OnMouseWheel(nFlags, zDelta, pt);
@@ -926,10 +931,15 @@ BOOL CPromptDlg::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 
 BOOL CPromptDlg::PreTranslateMessage(MSG* pMsg)
 {
-	if (pMsg->message == WM_MOUSEWHEEL && m_legend.GetSafeHwnd()) {
+	if (pMsg->message == WM_MOUSEWHEEL) {
 		CPoint pt(GET_X_LPARAM(pMsg->lParam), GET_Y_LPARAM(pMsg->lParam));
-		if (LegendHitTestWheelPoint(m_legend, pt)) {
-			ScrollLegendEdit(m_legend, (short)HIWORD(pMsg->wParam));
+		const short z = (short)HIWORD(pMsg->wParam);
+		if (EditHitTestWheelPoint(m_edit, pt)) {
+			ScrollMultilineEdit(m_edit, z);
+			return TRUE;
+		}
+		if (EditHitTestWheelPoint(m_legend, pt)) {
+			ScrollMultilineEdit(m_legend, z);
 			return TRUE;
 		}
 	}

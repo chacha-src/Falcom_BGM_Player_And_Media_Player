@@ -2822,6 +2822,9 @@ BEGIN_MESSAGE_MAP(CCustomEdit, CEdit)
     ON_WM_LBUTTONUP()
     ON_WM_LBUTTONDBLCLK()
     ON_WM_MOUSEMOVE()
+    ON_WM_MOUSEWHEEL()
+    ON_WM_VSCROLL()
+    ON_WM_HSCROLL()
     ON_CONTROL_REFLECT(EN_UPDATE, OnEnUpdate)
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_MESSAGE(CCC_WM_POST_OPAQUE_PAINT, OnPostOpaquePaint)
@@ -2877,6 +2880,144 @@ HBRUSH CCustomEdit::CtlColor(CDC* pDC, UINT)
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
+void CCustomEdit::DrawMultilineVisibleText(CDC& dc, const CRect& rc)
+{
+    // スクロール位置を EM_POSFROMCHAR / FIRSTVISIBLELINE で反映（全文明け DrawText はスクロール無視）
+    TEXTMETRIC tm = {};
+    dc.GetTextMetrics(&tm);
+    int lineH = tm.tmHeight + tm.tmExternalLeading;
+    if (lineH < 1) lineH = 12;
+
+    CString text;
+    GetWindowText(text);
+    const int tlen = text.GetLength();
+    int sel0 = 0, sel1 = 0;
+    GetSel(sel0, sel1);
+    if (sel0 > sel1) { const int t = sel0; sel0 = sel1; sel1 = t; }
+    if (sel0 < 0) sel0 = 0;
+    if (sel1 < 0) sel1 = 0;
+    if (sel0 > tlen) sel0 = tlen;
+    if (sel1 > tlen) sel1 = tlen;
+    const BOOL hasSel = (sel0 < sel1) && m_bHasFocus;
+
+    auto posFromChar = [&](int idx, int& x, int& y) -> BOOL {
+        x = rc.left;
+        y = rc.top;
+        if (tlen <= 0) return FALSE;
+        if (idx < 0) idx = 0;
+        BOOL pastEnd = FALSE;
+        if (idx >= tlen) {
+            idx = tlen - 1;
+            pastEnd = TRUE;
+        }
+        LRESULT lr = SendMessage(EM_POSFROMCHAR, (WPARAM)idx, 0);
+        if (lr == (LRESULT)-1)
+            return FALSE;
+        x = (short)LOWORD(lr);
+        y = (short)HIWORD(lr);
+        if (pastEnd) {
+            CSize ch = dc.GetTextExtent(text.Mid(idx, 1));
+            x += ch.cx;
+        }
+        return TRUE;
+    };
+
+    const int savedDc = dc.SaveDC();
+    dc.IntersectClipRect(&rc);
+
+    int xSel0 = rc.left, ySel0 = rc.top, xSel1 = rc.left, ySel1 = rc.top;
+    if (hasSel) {
+        posFromChar(sel0, xSel0, ySel0);
+        posFromChar(sel1, xSel1, ySel1);
+        if (ySel0 == ySel1) {
+            int x0 = xSel0, x1 = xSel1;
+            if (x1 < x0) { const int t = x0; x0 = x1; x1 = t; }
+            if (x1 <= x0) x1 = x0 + 2;
+            CRect hi(x0, ySel0, x1, ySel0 + lineH);
+            if (hi.IntersectRect(&hi, &rc) && hi.Width() > 0)
+                dc.FillSolidRect(&hi, COLOR_EDIT_SEL_BG);
+        } else {
+            const int yStart = (ySel0 < ySel1) ? ySel0 : ySel1;
+            const int yEnd = (ySel0 > ySel1) ? ySel0 : ySel1;
+            for (int y = yStart; y <= yEnd; y += lineH) {
+                int xL = rc.left, xR = rc.right;
+                if (y == ySel0) xL = xSel0;
+                if (y == ySel1) xR = xSel1;
+                if (y == ySel0 && ySel0 > ySel1) { xL = rc.left; xR = xSel0; }
+                if (y == ySel1 && ySel1 > ySel0) { xL = rc.left; xR = xSel1; }
+                if (y != ySel0 && y != ySel1) { xL = rc.left; xR = rc.right; }
+                if (xR < xL) { const int t = xL; xL = xR; xR = t; }
+                if (xR <= xL) continue;
+                CRect hi(xL, y, xR, y + lineH);
+                if (hi.IntersectRect(&hi, &rc) && hi.Width() > 0)
+                    dc.FillSolidRect(&hi, COLOR_EDIT_SEL_BG);
+            }
+        }
+    }
+
+    dc.SetBkMode(TRANSPARENT);
+    const int first = (int)SendMessage(EM_GETFIRSTVISIBLELINE, 0, 0);
+    const int nLines = GetLineCount();
+    for (int li = first; li < nLines; ++li) {
+        const int idx = (int)SendMessage(EM_LINEINDEX, (WPARAM)li, 0);
+        if (idx < 0) break;
+        LRESULT lr = SendMessage(EM_POSFROMCHAR, (WPARAM)idx, 0);
+        if (lr == (LRESULT)-1)
+            continue;
+        const int x = (short)LOWORD(lr);
+        const int y = (short)HIWORD(lr);
+        if (y >= rc.bottom)
+            break;
+        if (y + lineH < rc.top)
+            continue;
+
+        int maxc = (int)SendMessage(EM_LINELENGTH, (WPARAM)idx, 0);
+        if (maxc < 0) maxc = 0;
+        CString line;
+        if (maxc > 0) {
+            TCHAR* buf = line.GetBuffer(maxc + 4);
+            *((WORD*)buf) = (WORD)(maxc + 2);
+            const int got = (int)SendMessage(EM_GETLINE, (WPARAM)li, (LPARAM)buf);
+            line.ReleaseBuffer(got > 0 ? got : 0);
+            while (!line.IsEmpty()) {
+                const TCHAR c = line[line.GetLength() - 1];
+                if (c != _T('\r') && c != _T('\n')) break;
+                line.Truncate(line.GetLength() - 1);
+            }
+        }
+
+        const int lineEnd = idx + line.GetLength();
+        if (hasSel && sel0 < lineEnd && sel1 > idx) {
+            const int a = (sel0 > idx) ? sel0 : idx;
+            const int b = (sel1 < lineEnd) ? sel1 : lineEnd;
+            CString pre = line.Left(a - idx);
+            CString mid = line.Mid(a - idx, b - a);
+            CString post = line.Mid(b - idx);
+            int cx = x;
+            if (!pre.IsEmpty()) {
+                dc.SetTextColor(COLOR_EDIT_TEXT);
+                dc.ExtTextOut(cx, y, ETO_CLIPPED, &rc, pre, pre.GetLength(), NULL);
+                cx += dc.GetTextExtent(pre).cx;
+            }
+            if (!mid.IsEmpty()) {
+                dc.SetTextColor(COLOR_EDIT_SEL_TEXT);
+                dc.ExtTextOut(cx, y, ETO_CLIPPED, &rc, mid, mid.GetLength(), NULL);
+                cx += dc.GetTextExtent(mid).cx;
+            }
+            if (!post.IsEmpty()) {
+                dc.SetTextColor(COLOR_EDIT_TEXT);
+                dc.ExtTextOut(cx, y, ETO_CLIPPED, &rc, post, post.GetLength(), NULL);
+            }
+        } else {
+            dc.SetTextColor(COLOR_EDIT_TEXT);
+            if (!line.IsEmpty())
+                dc.ExtTextOut(x, y, ETO_CLIPPED, &rc, line, line.GetLength(), NULL);
+        }
+    }
+
+    dc.RestoreDC(savedDc);
+}
+
 void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
 {
     CString text;
@@ -2898,21 +3039,22 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
     dc.SetTextColor(COLOR_EDIT_TEXT);
     dc.SetBkMode(OPAQUE);
 
-    UINT fmt = DT_NOPREFIX | DT_END_ELLIPSIS;
+    CRect rc = r;
+    rc.DeflateRect(3, 1);
+
+    if (style & ES_MULTILINE) {
+        DrawMultilineVisibleText(dc, rc);
+        if (pOld) dc.SelectObject(pOld);
+        return;
+    }
+
+    UINT fmt = DT_NOPREFIX | DT_END_ELLIPSIS | DT_SINGLELINE | DT_VCENTER;
     if (style & ES_CENTER)
         fmt |= DT_CENTER;
     else if (style & ES_RIGHT)
         fmt |= DT_RIGHT;
     else
         fmt |= DT_LEFT;
-
-    if (style & ES_MULTILINE)
-        fmt |= DT_WORDBREAK;
-    else
-        fmt |= DT_SINGLELINE | DT_VCENTER;
-
-    CRect rc = r;
-    rc.DeflateRect(3, 1);
 
     int sel0 = 0, sel1 = 0;
     GetSel(sel0, sel1);
@@ -2957,8 +3099,6 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
     dc.GetTextMetrics(&tm);
     const int lineH = tm.tmHeight > 0 ? tm.tmHeight : rc.Height();
 
-    // 選択描画は ETO_OPAQUE 禁止(巨大矩形が隣Editを食う)。
-    // クリップ内で帯Fill → TRANSPARENT 文字のみ。
     const int savedDc = dc.SaveDC();
     dc.IntersectClipRect(&rc);
 
@@ -2976,7 +3116,7 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
         if (!ok1) { xSel1 = baseX + pre1.cx; ySel1 = ySel0; }
     }
 
-    if (!(style & ES_MULTILINE) && !(style & (ES_CENTER | ES_RIGHT))) {
+    if (!(style & (ES_CENTER | ES_RIGHT))) {
         int xText = rc.left, yText = ySel0;
         if (!posFromChar(0, xText, yText)) {
             xText = rc.left;
@@ -3005,7 +3145,7 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
             dc.SetTextColor(COLOR_EDIT_TEXT);
             dc.ExtTextOut(xSel1, yText, ETO_CLIPPED, &rc, post, post.GetLength(), NULL);
         }
-    } else if (!(style & ES_MULTILINE) || ySel0 == ySel1) {
+    } else {
         int x0 = xSel0, x1 = xSel1;
         if (x1 < x0) { const int t = x0; x0 = x1; x1 = t; }
         if (x1 <= x0) x1 = x0 + 2;
@@ -3019,25 +3159,6 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
         if (!mid.IsEmpty() && hi.Width() > 0) {
             dc.SetTextColor(COLOR_EDIT_SEL_TEXT);
             dc.ExtTextOut(xSel0, ySel0, ETO_CLIPPED, &hi, mid, mid.GetLength(), NULL);
-        }
-    } else {
-        dc.SetBkMode(TRANSPARENT);
-        dc.SetTextColor(COLOR_EDIT_TEXT);
-        dc.DrawText(text, &rc, fmt & ~DT_END_ELLIPSIS);
-        const int yStart = (ySel0 < ySel1) ? ySel0 : ySel1;
-        const int yEnd = (ySel0 > ySel1) ? ySel0 : ySel1;
-        for (int y = yStart; y <= yEnd; y += lineH) {
-            int xL = rc.left, xR = rc.right;
-            if (y == ySel0) xL = xSel0;
-            if (y == ySel1) xR = xSel1;
-            if (y == ySel0 && ySel0 > ySel1) { xL = rc.left; xR = xSel0; }
-            if (y == ySel1 && ySel1 > ySel0) { xL = rc.left; xR = xSel1; }
-            if (y != ySel0 && y != ySel1) { xL = rc.left; xR = rc.right; }
-            if (xR < xL) { const int t = xL; xL = xR; xR = t; }
-            if (xR <= xL) continue;
-            CRect hi(xL, y, xR, y + lineH);
-            if (hi.IntersectRect(&hi, &rc) && hi.Width() > 0)
-                dc.InvertRect(&hi);
         }
     }
 
@@ -3325,6 +3446,48 @@ void CCustomEdit::OnLButtonUp(UINT nFlags, CPoint point)
     m_bSelDrag = FALSE;
     KillTimer(kEditSelTimerId);
     RepaintIfSelChanged();
+}
+
+BOOL CCustomEdit::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
+{
+    BOOL r = CEdit::OnMouseWheel(nFlags, zDelta, pt);
+    if (!r && (GetStyle() & ES_MULTILINE)) {
+        // フォーカス無し等で既定が無視するとき
+        LineScroll((zDelta > 0) ? -3 : 3);
+        r = TRUE;
+    }
+#if CCUSTOM_AERO_SUPPORT
+    if (r && CCC_HostNeedsChildOpaque(m_hWnd)) {
+        PaintOpaqueFrame();
+        CClientDC dc(this);
+        PaintOpaqueClient(dc);
+    }
+#endif
+    return r;
+}
+
+void CCustomEdit::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+    CEdit::OnVScroll(nSBCode, nPos, pScrollBar);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_HostNeedsChildOpaque(m_hWnd)) {
+        PaintOpaqueFrame();
+        CClientDC dc(this);
+        PaintOpaqueClient(dc);
+    }
+#endif
+}
+
+void CCustomEdit::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+    CEdit::OnHScroll(nSBCode, nPos, pScrollBar);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_HostNeedsChildOpaque(m_hWnd)) {
+        PaintOpaqueFrame();
+        CClientDC dc(this);
+        PaintOpaqueClient(dc);
+    }
+#endif
 }
 
 void CCustomEdit::OnMouseMove(UINT nFlags, CPoint point)

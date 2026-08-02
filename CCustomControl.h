@@ -551,6 +551,9 @@ protected:
     afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
     afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
     afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+    afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
+    afx_msg void OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+    afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg LRESULT OnPostOpaquePaint(WPARAM, LPARAM);
 
@@ -568,6 +571,7 @@ private:
     void PaintOpaqueClient(CDC& dc);
     void ScheduleOpaqueRepaint();
     void RepaintIfSelChanged();
+    void DrawMultilineVisibleText(CDC& dc, const CRect& rc);
 };
 
 // ============================================================================
