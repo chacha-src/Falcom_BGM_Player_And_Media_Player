@@ -131,6 +131,7 @@ struct MpJakJob {
 	int disp;
 	HBITMAP hb;
 	char noneFlag;
+	char bgOnly; // 1=非表示プリフェッチ。空きスロット無ならメモリへ載せない
 };
 
 static UINT AFX_CDECL MpJakLoadThread(LPVOID p)
@@ -243,6 +244,7 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract, BOOL b
 		InterlockedIncrement(&self->m_jakGen);
 		self->m_jakPend[0] = 0;
 		InterlockedExchange(&self->m_jakBusy, 0);
+		self->m_jakPrefetch = 0;
 		s_mpJakNoDiskN = 0; // .b2誤認で毒されたセッション負キャッシュを捨てる
 		for (int i = 0; i < CMediaPlayerDlg::kMpJakN; ++i) {
 			if (self->m_jakBmp[i]) { ::DeleteObject(self->m_jakBmp[i]); self->m_jakBmp[i] = NULL; }
@@ -399,40 +401,40 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract, BOOL b
 	if (!allowExtract || !og) return;
 	if (InterlockedCompareExchange(&self->m_jakBusy, 1, 0) != 0) return;
 
-	for (int disp = top; disp < top + page && disp < nDisp; ++disp) {
+	auto startExtractAt = [&](int disp, BOOL bgOnly) -> BOOL {
 		const int pcIdx = MpDispToPc(self, disp);
-		if (pcIdx < 0 || pcIdx >= pl->playcnt) continue;
+		if (pcIdx < 0 || pcIdx >= pl->playcnt) return FALSE;
 		const TCHAR* path = pl->pc[pcIdx].fol;
-		if (!path || !path[0]) continue;
+		if (!path || !path[0]) return FALSE;
 
-		int hit = -1;
 		for (int i = 0; i < CMediaPlayerDlg::kMpJakN; ++i) {
-			if (self->m_jakKey[i][0] && _tcsicmp(self->m_jakKey[i], path) == 0) {
-				hit = i;
-				break;
-			}
+			if (self->m_jakKey[i][0] && _tcsicmp(self->m_jakKey[i], path) == 0)
+				return FALSE;
 		}
-		if (hit >= 0) continue;
-		if (self->m_jakPend[0] && _tcsicmp(self->m_jakPend, path) == 0) {
-			InterlockedExchange(&self->m_jakBusy, 0);
-			return;
-		}
+		if (self->m_jakPend[0] && _tcsicmp(self->m_jakPend, path) == 0)
+			return FALSE;
 
+		const CString diskBmp = PlJakDiskPath(path, FALSE);
 		const CString diskNone = PlJakDiskPath(path, TRUE);
-		WIN32_FILE_ATTRIBUTE_DATA fadNone = {};
-		if (!diskNone.IsEmpty() && ::GetFileAttributesEx(diskNone, GetFileExInfoStandard, &fadNone)) {
+		WIN32_FILE_ATTRIBUTE_DATA fadBmp = {}, fadNone = {};
+		const BOOL hasBmp = !diskBmp.IsEmpty() && ::GetFileAttributesEx(diskBmp, GetFileExInfoStandard, &fadBmp);
+		const BOOL hasNone = !diskNone.IsEmpty() && ::GetFileAttributesEx(diskNone, GetFileExInfoStandard, &fadNone);
+		// ディスク済はメモリ補充(上段)に任せ、抽出は未キャッシュのみ
+		if (hasBmp) return FALSE;
+		if (hasNone) {
 			BOOL already = FALSE;
 			for (int ni = 0; ni < s_mpJakNoneDoneN; ++ni) {
 				if (_tcsicmp(s_mpJakNoneDone[ni], path) == 0) { already = TRUE; break; }
 			}
-			if (already) continue;
+			if (already) return FALSE;
 			if (s_mpJakNoneDoneN < 256)
 				_tcsncpy_s(s_mpJakNoneDone[s_mpJakNoneDoneN++], path, _TRUNCATE);
+			return FALSE;
 		}
 
-		// 再生中ジャケットの流用は UI で軽いので先にやる
+		// 再生中ジャケットの流用は UI で軽いので先にやる(可視のみ)
 		extern CString filen;
-		if (!og->img.IsNull() && og->jx > 0 && filen.GetLength() > 0
+		if (!bgOnly && !og->img.IsNull() && og->jx > 0 && filen.GetLength() > 0
 			&& _tcsicmp(path, filen) == 0) {
 			int freeSlot = -1, lruSlot = 0;
 			DWORD lruTick = 0xFFFFFFFF;
@@ -456,7 +458,6 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract, BOOL b
 					self->m_jakBmp[slot] = hb0;
 					self->m_jakTick[slot] = GetTickCount();
 					self->m_jakRow[slot] = pcIdx;
-					const CString diskBmp = PlJakDiskPath(path, FALSE);
 					if (!diskBmp.IsEmpty()) {
 						CImage sav; sav.Attach(hb0);
 						sav.Save(diskBmp, Gdiplus::ImageFormatBMP);
@@ -470,8 +471,7 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract, BOOL b
 					}
 					mem.DeleteDC();
 					::ReleaseDC(NULL, screen);
-					InterlockedExchange(&self->m_jakBusy, 0);
-					return;
+					return TRUE; // busy は呼び出し側で下ろす
 				}
 				mem.DeleteDC();
 				::ReleaseDC(NULL, screen);
@@ -479,24 +479,53 @@ static void MpJacketLoadVisible(CMediaPlayerDlg* self, BOOL allowExtract, BOOL b
 		}
 
 		MpJakJob* job = (MpJakJob*)malloc(sizeof(MpJakJob));
-		if (!job) {
-			InterlockedExchange(&self->m_jakBusy, 0);
-			return;
-		}
+		if (!job) return FALSE;
 		ZeroMemory(job, sizeof(*job));
 		job->hwnd = self->m_hWnd;
 		job->gen = InterlockedIncrement(&self->m_jakGen);
 		job->pcIdx = pcIdx;
 		job->disp = disp;
+		job->bgOnly = bgOnly ? 1 : 0;
 		_tcsncpy_s(job->path, path, _TRUNCATE);
 		_tcsncpy_s(self->m_jakPend, path, _TRUNCATE);
 		if (!AfxBeginThread(MpJakLoadThread, job, THREAD_PRIORITY_BELOW_NORMAL)) {
 			self->m_jakPend[0] = 0;
 			free(job);
-			InterlockedExchange(&self->m_jakBusy, 0);
+			return FALSE;
 		}
+		return TRUE;
+	};
+
+	// 1) 可視優先
+	if (self->m_jakPend[0]) {
+		InterlockedExchange(&self->m_jakBusy, 0);
 		return;
 	}
+	for (int disp = top; disp < top + page && disp < nDisp; ++disp) {
+		if (startExtractAt(disp, FALSE)) {
+			// スレッド起動済みなら busy 維持。再生中流用完了なら下ろす
+			if (!self->m_jakPend[0])
+				InterlockedExchange(&self->m_jakBusy, 0);
+			return;
+		}
+	}
+
+	// 2) 非表示を順次ディスクキャッシュ(一周したら頭から)
+	if (self->m_jakPrefetch < 0 || self->m_jakPrefetch >= nDisp)
+		self->m_jakPrefetch = 0;
+	const int vis0 = top;
+	const int vis1 = top + page;
+	for (int n = 0; n < nDisp; ++n) {
+		const int disp = (self->m_jakPrefetch + n) % nDisp;
+		if (disp >= vis0 && disp < vis1) continue; // 可視は上で済
+		if (startExtractAt(disp, TRUE)) {
+			self->m_jakPrefetch = (disp + 1) % nDisp;
+			if (!self->m_jakPend[0])
+				InterlockedExchange(&self->m_jakBusy, 0);
+			return;
+		}
+	}
+	self->m_jakPrefetch = 0;
 	InterlockedExchange(&self->m_jakBusy, 0);
 }
 
@@ -517,16 +546,24 @@ LRESULT CMediaPlayerDlg::OnJakLoadDone(WPARAM wParam, LPARAM lParam)
 			if (!m_jakKey[i][0] && freeSlot < 0) freeSlot = i;
 			if (m_jakTick[i] < lruTick) { lruTick = m_jakTick[i]; lruSlot = i; }
 		}
-		int slot = (hit >= 0) ? hit : ((freeSlot >= 0) ? freeSlot : lruSlot);
-		if (m_jakBmp[slot] && m_jakBmp[slot] != job->hb) {
-			::DeleteObject(m_jakBmp[slot]);
-			m_jakBmp[slot] = NULL;
+		// 非表示プリフェッチは空きスロットのみ。可視を追い出さない(ディスクは書込済)
+		int slot = (hit >= 0) ? hit : freeSlot;
+		if (slot < 0 && !job->bgOnly)
+			slot = lruSlot;
+		if (slot < 0) {
+			if (job->hb) { ::DeleteObject(job->hb); job->hb = NULL; }
 		}
-		_tcsncpy_s(m_jakKey[slot], job->path, _TRUNCATE);
-		m_jakBmp[slot] = job->hb;
-		job->hb = NULL;
-		m_jakTick[slot] = GetTickCount();
-		m_jakRow[slot] = job->pcIdx;
+		else {
+			if (m_jakBmp[slot] && m_jakBmp[slot] != job->hb) {
+				::DeleteObject(m_jakBmp[slot]);
+				m_jakBmp[slot] = NULL;
+			}
+			_tcsncpy_s(m_jakKey[slot], job->path, _TRUNCATE);
+			m_jakBmp[slot] = job->hb;
+			job->hb = NULL;
+			m_jakTick[slot] = GetTickCount();
+			m_jakRow[slot] = job->pcIdx;
+		}
 		if (job->noneFlag) {
 			BOOL marked = FALSE;
 			for (int ni = 0; ni < s_mpJakNoneDoneN; ++ni) {
@@ -859,6 +896,7 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_jakGen = 0;
 	m_jakBusy = 0;
 	m_jakPend[0] = 0;
+	m_jakPrefetch = 0;
 	ZeroMemory(m_jakBmp, sizeof(m_jakBmp));
 	ZeroMemory(m_jakKey, sizeof(m_jakKey));
 	ZeroMemory(m_jakTick, sizeof(m_jakTick));
@@ -1753,6 +1791,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	SetTimer(1, 250, NULL);          // 低速: テキスト/リスト/コンボ/チェックの同期
 	SetTimer(2, 100, NULL);          // 安全網: 取りこぼし時のみバナー再描画(通常はtimerpが駆動)
 	SetTimer(3, 33, NULL);           // 高速: シーク(playb追従)/時間/音量のミラー
+	SetTimer(8, 60, NULL);           // ミニジャケ抽出(~4x: 旧Timer1の250ms→60ms)
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1)
 		SetTimer(4, 250, NULL);  // 遅延でアクリル再適用(ウィンドウ合成確定後)。一回で止める。
@@ -3635,12 +3674,13 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		RefreshList(FALSE);
 		// 欠損判定はワーカスレッド(KickMissScan)。UI で PathFileExists しない。
 		KickMissScan();
-		// ジャケット: ディスク済は RefreshList で一括済。ここでは未抽出1件/tick + 可視の補充
-		MpJacketLoadVisible(this, TRUE, FALSE);
-		// 起動直後に裏画面が残る対策: メディアプレイヤーモード中は必ず隠す(監視)
 		EnforceFalcomHidden();
 		// 描画タイマー(2)は 60fps 固定。更新頻度の律速は og 側(ms2カウンタ)が行うため、
 		// ここで張り直す必要はない。
+	}
+	else if (nIDEvent == 8) {
+		// ミニジャケ: 可視優先の抽出 + 非表示の順次ディスクキャッシュ(旧250ms→60ms)
+		MpJacketLoadVisible(this, TRUE, FALSE);
 	}
 	else if (nIDEvent == 2) {
 		// 安全網: 通常は og の timerp が新フレーム時(ms2レート)に mp バナーを無効化し、

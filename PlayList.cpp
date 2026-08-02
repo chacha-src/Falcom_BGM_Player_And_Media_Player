@@ -495,7 +495,8 @@ BOOL CPlayList::OnInitDialog()
 	}
 	SetTimer(20,20,NULL);
 	SetTimer(3000,1200,NULL);
-	SetTimer(40,500,NULL);
+	SetTimer(40,500,NULL);   // 起動ワンショット(plw)。timerpl1 が Kill する
+	SetTimer(41,125,NULL);   // ミニジャケ抽出(~4x) + 欠損走査(継続)
 	SetTimer(5000,100,NULL);
 	SIcon(pnt1);
 
@@ -1030,6 +1031,7 @@ static int s_plJakNoDiskN = 0;
 static TCHAR s_plJakPend[1024];
 static volatile LONG s_plJakBusy = 0;
 static volatile LONG s_plJakGen = 0;
+static int s_plJakPrefetch = 0;
 
 struct PlJakJob {
 	HWND hwnd;
@@ -1038,6 +1040,7 @@ struct PlJakJob {
 	int row;
 	HBITMAP hb;
 	char noneFlag;
+	char bgOnly;
 };
 
 static UINT AFX_CDECL PlJakLoadThread(LPVOID p)
@@ -1147,6 +1150,7 @@ static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDis
 		InterlockedIncrement(&s_plJakGen);
 		s_plJakPend[0] = 0;
 		InterlockedExchange(&s_plJakBusy, 0);
+		s_plJakPrefetch = 0;
 		s_plJakNoDiskN = 0;
 		for (int i = 0; i < kPlJakN; ++i) {
 			if (s_plJakBmp[i]) { ::DeleteObject(s_plJakBmp[i]); s_plJakBmp[i] = NULL; }
@@ -1278,49 +1282,73 @@ static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDis
 	if (!allowExtract || !og) return;
 	if (InterlockedCompareExchange(&s_plJakBusy, 1, 0) != 0) return;
 
-	for (int row = top; row < top + page && row < nDisp && row < self->playcnt; ++row) {
+	auto startExtractAt = [&](int row, BOOL bgOnly) -> BOOL {
+		if (row < 0 || row >= self->playcnt || row >= nDisp) return FALSE;
 		const TCHAR* path = self->pc[row].fol;
-		if (!path || !path[0]) continue;
-		int hit = -1;
+		if (!path || !path[0]) return FALSE;
 		for (int i = 0; i < kPlJakN; ++i) {
-			if (s_plJakKey[i][0] && _tcsicmp(s_plJakKey[i], path) == 0) { hit = i; break; }
+			if (s_plJakKey[i][0] && _tcsicmp(s_plJakKey[i], path) == 0)
+				return FALSE;
 		}
-		if (hit >= 0) continue;
-		if (s_plJakPend[0] && _tcsicmp(s_plJakPend, path) == 0) {
-			InterlockedExchange(&s_plJakBusy, 0);
-			return;
-		}
+		if (s_plJakPend[0] && _tcsicmp(s_plJakPend, path) == 0)
+			return FALSE;
 
+		const CString diskBmp = PlJakDiskPath(path, FALSE);
 		const CString diskNone = PlJakDiskPath(path, TRUE);
-		WIN32_FILE_ATTRIBUTE_DATA fadNone = {};
-		if (!diskNone.IsEmpty() && ::GetFileAttributesEx(diskNone, GetFileExInfoStandard, &fadNone)) {
+		WIN32_FILE_ATTRIBUTE_DATA fadBmp = {}, fadNone = {};
+		const BOOL hasBmp = !diskBmp.IsEmpty() && ::GetFileAttributesEx(diskBmp, GetFileExInfoStandard, &fadBmp);
+		const BOOL hasNone = !diskNone.IsEmpty() && ::GetFileAttributesEx(diskNone, GetFileExInfoStandard, &fadNone);
+		if (hasBmp) return FALSE;
+		if (hasNone) {
 			BOOL already = FALSE;
 			for (int ni = 0; ni < s_plJakNoneDoneN; ++ni) {
 				if (_tcsicmp(s_plJakNoneDone[ni], path) == 0) { already = TRUE; break; }
 			}
-			if (already) continue;
+			if (already) return FALSE;
 			if (s_plJakNoneDoneN < 256)
 				_tcsncpy_s(s_plJakNoneDone[s_plJakNoneDoneN++], path, _TRUNCATE);
+			return FALSE;
 		}
 
 		PlJakJob* job = (PlJakJob*)malloc(sizeof(PlJakJob));
-		if (!job) {
-			InterlockedExchange(&s_plJakBusy, 0);
-			return;
-		}
+		if (!job) return FALSE;
 		ZeroMemory(job, sizeof(*job));
 		job->hwnd = self->m_hWnd;
 		job->gen = InterlockedIncrement(&s_plJakGen);
 		job->row = row;
+		job->bgOnly = bgOnly ? 1 : 0;
 		_tcsncpy_s(job->path, path, _TRUNCATE);
 		_tcsncpy_s(s_plJakPend, path, _TRUNCATE);
 		if (!AfxBeginThread(PlJakLoadThread, job, THREAD_PRIORITY_BELOW_NORMAL)) {
 			s_plJakPend[0] = 0;
 			free(job);
-			InterlockedExchange(&s_plJakBusy, 0);
+			return FALSE;
 		}
+		return TRUE;
+	};
+
+	if (s_plJakPend[0]) {
+		InterlockedExchange(&s_plJakBusy, 0);
 		return;
 	}
+	for (int row = top; row < top + page && row < nDisp && row < self->playcnt; ++row) {
+		if (startExtractAt(row, FALSE))
+			return;
+	}
+	if (s_plJakPrefetch < 0 || s_plJakPrefetch >= nDisp)
+		s_plJakPrefetch = 0;
+	const int vis0 = top;
+	const int vis1 = top + page;
+	const int lim = (nDisp < self->playcnt) ? nDisp : self->playcnt;
+	for (int n = 0; n < lim; ++n) {
+		const int row = (s_plJakPrefetch + n) % lim;
+		if (row >= vis0 && row < vis1) continue;
+		if (startExtractAt(row, TRUE)) {
+			s_plJakPrefetch = (row + 1) % lim;
+			return;
+		}
+	}
+	s_plJakPrefetch = 0;
 	InterlockedExchange(&s_plJakBusy, 0);
 }
 
@@ -6162,9 +6190,14 @@ void CPlayList::OnTimer(UINT nIDEvent)
 		RefreshNavControls();
 		return;
 	}
-	if (nIDEvent == 40) {
+	if (nIDEvent == 41) {
 		PlMissTickScan(this);
-		// ディスク済は Load/切替時に一括済。ここでは未抽出1件 + 可視補充
+		// 可視優先の抽出 + 非表示の順次ディスクキャッシュ
+		PlJacketLoadVisible(this, TRUE, FALSE);
+	}
+	if (nIDEvent == 40) {
+		// 互換: 旧経路。継続抽出は Timer41
+		PlMissTickScan(this);
 		PlJacketLoadVisible(this, TRUE, FALSE);
 	}
 	savedata.saveloop = m_loop.GetCheck();
@@ -6929,15 +6962,22 @@ LRESULT CPlayList::OnPlJakDone(WPARAM wParam, LPARAM lParam)
 			if (!s_plJakKey[i][0] && freeSlot < 0) freeSlot = i;
 			if (s_plJakTick[i] < lruTick) { lruTick = s_plJakTick[i]; lruSlot = i; }
 		}
-		int slot = (hit >= 0) ? hit : ((freeSlot >= 0) ? freeSlot : lruSlot);
-		if (s_plJakBmp[slot] && s_plJakBmp[slot] != job->hb) {
-			::DeleteObject(s_plJakBmp[slot]);
-			s_plJakBmp[slot] = NULL;
+		int slot = (hit >= 0) ? hit : freeSlot;
+		if (slot < 0 && !job->bgOnly)
+			slot = lruSlot;
+		if (slot < 0) {
+			if (job->hb) { ::DeleteObject(job->hb); job->hb = NULL; }
 		}
-		_tcsncpy_s(s_plJakKey[slot], job->path, _TRUNCATE);
-		s_plJakBmp[slot] = job->hb;
-		job->hb = NULL;
-		s_plJakTick[slot] = GetTickCount();
+		else {
+			if (s_plJakBmp[slot] && s_plJakBmp[slot] != job->hb) {
+				::DeleteObject(s_plJakBmp[slot]);
+				s_plJakBmp[slot] = NULL;
+			}
+			_tcsncpy_s(s_plJakKey[slot], job->path, _TRUNCATE);
+			s_plJakBmp[slot] = job->hb;
+			job->hb = NULL;
+			s_plJakTick[slot] = GetTickCount();
+		}
 		if (job->noneFlag) {
 			BOOL marked = FALSE;
 			for (int ni = 0; ni < s_plJakNoneDoneN; ++ni) {

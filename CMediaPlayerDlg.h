@@ -283,6 +283,7 @@ public:
 	volatile LONG m_jakGen;  // ジャケット抽出世代
 	volatile LONG m_jakBusy; // 1=ジャケット抽出スレッド稼働中
 	TCHAR m_jakPend[1024];   // 抽出中パス
+	int m_jakPrefetch;       // 非表示行の順次ディスクキャッシュ位置(disp)
 
 	// ---- ジャケットサムネキャッシュ(LRU・固定スロット) ----
 	enum { kMpJakN = 64, kMpJakPx = 24 };
