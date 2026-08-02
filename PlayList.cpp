@@ -6723,13 +6723,51 @@ void CPlayList::OnPopTagEdit()
 		memcpy(&a->pc, &pc[indices[0]], sizeof(playlistdata0));
 	}
 	CWnd::PostMessage(0x118);
-	a->DoModal();
+	const INT_PTR ret = a->DoModal();
 	w_flg = TRUE;
+	if (ret == IDOK) {
+		if (!a->multiFile) {
+			const int idx = indices[0];
+			if (idx >= 0 && idx < playcnt) {
+				_tcscpy(pc[idx].name, a->pc.name);
+				_tcscpy(pc[idx].art, a->pc.art);
+				_tcscpy(pc[idx].alb, a->pc.alb);
+			}
+		}
+		else {
+			const size_t n = (indices.size() < a->pcs.size()) ? indices.size() : a->pcs.size();
+			for (size_t i = 0; i < n; ++i) {
+				const int idx = indices[i];
+				if (idx < 0 || idx >= playcnt) continue;
+				_tcscpy(pc[idx].name, a->pcs[i].name);
+				_tcscpy(pc[idx].art, a->pcs[i].art);
+				_tcscpy(pc[idx].alb, a->pcs[i].alb);
+			}
+		}
+		// 再生中曲の表示名も追従
+		extern CString fnn;
+		extern CString filen;
+		if (pnt >= 0 && pnt < playcnt) {
+			CString cur = PlPhysicalMediaPath(filen);
+			if (cur.IsEmpty()) cur = filen;
+			CString row = PlPhysicalMediaPath(pc[pnt].fol);
+			if (row.IsEmpty()) row = pc[pnt].fol;
+			if (!cur.IsEmpty() && !row.IsEmpty() && _tcsicmp(cur, row) == 0)
+				fnn = pc[pnt].name;
+		}
+		Save();
+		m_lc.Invalidate(FALSE);
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->RefreshList(TRUE);
+	}
+	else {
+		m_lc.Invalidate(FALSE);
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->m_list.Invalidate(FALSE);
+	}
 	delete a;
-	m_lc.Invalidate(FALSE);
-	extern CMediaPlayerDlg* mp;
-	if (mp && ::IsWindow(mp->GetSafeHwnd()))
-		mp->m_list.Invalidate(FALSE);
 }
 
 void CPlayList::OnFindUp()

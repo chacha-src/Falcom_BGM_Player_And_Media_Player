@@ -15,14 +15,20 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <mferror.h>
+#include <codecapi.h>
+#include <wmcodecdsp.h>
 #include <process.h>
 #include <math.h>
 #include <ShlObj.h>
+#include <vector>
+#include <mmsystem.h>
 
 #pragma comment(lib, "Ole32.lib")
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfreadwrite.lib")
 #pragma comment(lib, "mfuuid.lib")
+#pragma comment(lib, "wmcodecdspuuid.lib")
+#pragma comment(lib, "winmm.lib")
 
 extern void MpPersistSavedataQuick();
 
@@ -427,7 +433,12 @@ static BOOL ScCaptureWindowFromScreen(HWND hwnd, ScFrameBuf& fb, int dstW, int d
 // 1) WGC（前面UI/遮蔽に依存しない・OBS同系統）
 // 2) 画面 StretchBlt（完全に見えているとき）
 // 3) PrintWindow（フォールバック・重い）
-static BOOL ScCaptureWindowScaled(HWND hwnd, ScFrameBuf& fb, int dstW, int dstH, HWND excludeHwnd)
+// dst サイズへウィンドウキャプチャ（任意でウィンドウ内切り出し）
+// 1) Windows.Graphics.Capture（前面UI/遮蔽に依存しない・OBS同系統）
+// 2) 画面 StretchBlt（完全に見えているとき）
+// 3) PrintWindow（フォールバック・重い）
+static BOOL ScCaptureWindowScaled(HWND hwnd, ScFrameBuf& fb, int dstW, int dstH, HWND excludeHwnd,
+	int cropX, int cropY, int cropW, int cropH, BOOL forceGdi)
 {
 	if (!hwnd || !IsWindow(hwnd)) return FALSE;
 	RECT wr = {};
@@ -441,17 +452,41 @@ static BOOL ScCaptureWindowScaled(HWND hwnd, ScFrameBuf& fb, int dstW, int dstH,
 			return FALSE;
 	}
 
+	BOOL useCrop = (cropW > 1 && cropH > 1);
+	if (useCrop) {
+		if (cropX < 0) cropX = 0;
+		if (cropY < 0) cropY = 0;
+		if (cropX + cropW > ww) cropW = ww - cropX;
+		if (cropY + cropH > wh) cropH = wh - cropY;
+		if (cropW < 2 || cropH < 2) useCrop = FALSE;
+	}
+
 	::SetStretchBltMode(fb.hdc, COLORONCOLOR);
 
-	// 1) Windows.Graphics.Capture（前面UIでも可）
-	// 暗いアプリ画面を ScBufferMostlyBlack で落とすと PrintWindow(~11fps) に落ちるので WGC 成功時は信頼する
-	if (ScWgcCaptureWindowBgra(hwnd, fb.bits, dstW, dstH, fb.stride))
-		return TRUE;
+	// 1) Windows.Graphics.Capture（前面UIでも可）※録画中は固着するためスキップ
+	if (!forceGdi) {
+		if (useCrop) {
+			if (ScWgcCaptureWindowBgraCrop(hwnd, fb.bits, dstW, dstH, fb.stride, cropX, cropY, cropW, cropH))
+				return TRUE;
+		} else if (ScWgcCaptureWindowBgra(hwnd, fb.bits, dstW, dstH, fb.stride)) {
+			return TRUE;
+		}
+	}
 
 	// 2) 高速経路: ターゲットが他窓に隠れていなければ画面から直接縮小コピー
 	if (ScWindowClearForScreenCap(hwnd, excludeHwnd)) {
-		if (ScCaptureWindowFromScreen(hwnd, fb, dstW, dstH))
-			return TRUE;
+		HDC screen = ::GetDC(NULL);
+		BOOL ok = FALSE;
+		if (screen) {
+			const int sx = wr.left + (useCrop ? cropX : 0);
+			const int sy = wr.top + (useCrop ? cropY : 0);
+			const int sw = useCrop ? cropW : ww;
+			const int sh = useCrop ? cropH : wh;
+			ok = ::StretchBlt(fb.hdc, 0, 0, dstW, dstH, screen, sx, sy, sw, sh, SRCCOPY);
+			::ReleaseDC(NULL, screen);
+			if (ok && ScBufferMostlyBlack(fb)) ok = FALSE;
+		}
+		if (ok) return TRUE;
 	}
 
 	// 3) 正確経路: PrintWindow（WGC不可・遮蔽時）
@@ -474,6 +509,10 @@ static BOOL ScCaptureWindowScaled(HWND hwnd, ScFrameBuf& fb, int dstW, int dstH,
 			return FALSE;
 	}
 
+	if (useCrop) {
+		return ::StretchBlt(fb.hdc, 0, 0, fb.w, fb.h,
+			s_scNativeBuf.hdc, cropX, cropY, cropW, cropH, SRCCOPY);
+	}
 	if (fb.w == s_scNativeBuf.w && fb.h == s_scNativeBuf.h)
 		return ::BitBlt(fb.hdc, 0, 0, fb.w, fb.h, s_scNativeBuf.hdc, 0, 0, SRCCOPY);
 	return ::StretchBlt(fb.hdc, 0, 0, fb.w, fb.h,
@@ -482,7 +521,8 @@ static BOOL ScCaptureWindowScaled(HWND hwnd, ScFrameBuf& fb, int dstW, int dstH,
 
 // キャンバスへウィンドウを描画（画面合成ではなく HWND ターゲット）
 static BOOL ScBlitWindowClipped(HWND hwnd, HDC dst, int canvasW, int canvasH,
-	int dx, int dy, int dw, int dh, HWND excludeHwnd)
+	int dx, int dy, int dw, int dh, HWND excludeHwnd,
+	int cropX, int cropY, int cropW, int cropH, BOOL forceGdi)
 {
 	if (!hwnd || !dst || !IsWindow(hwnd) || dw < 1 || dh < 1) return FALSE;
 	if (ScIsExcludedHwnd(hwnd, excludeHwnd)) return FALSE;
@@ -503,12 +543,11 @@ static BOOL ScBlitWindowClipped(HWND hwnd, HDC dst, int canvasW, int canvasH,
 	const int outH = y1 - y0;
 	if (outW < 1 || outH < 1) return TRUE;
 
-	// レイヤ配置サイズへ HWND をキャプチャ（前面=画面コピー高速 / 遮蔽=PrintWindow）
 	int capW = dw & ~1;
 	int capH = dh & ~1;
 	if (capW < 2) capW = 2;
 	if (capH < 2) capH = 2;
-	if (!ScCaptureWindowScaled(hwnd, s_scScaledBuf, capW, capH, excludeHwnd))
+	if (!ScCaptureWindowScaled(hwnd, s_scScaledBuf, capW, capH, excludeHwnd, cropX, cropY, cropW, cropH, forceGdi))
 		return FALSE;
 
 	const int sx = x0 - dx;
@@ -520,7 +559,50 @@ static BOOL ScBlitWindowClipped(HWND hwnd, HDC dst, int canvasW, int canvasH,
 		s_scScaledBuf.hdc, sx, sy, outW, outH, SRCCOPY);
 }
 
-static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap& snap)
+static thread_local HDC s_gdiScreenDc = NULL;
+
+static void ScGdiReleaseScreenDc()
+{
+	if (s_gdiScreenDc) {
+		ReleaseDC(NULL, s_gdiScreenDc);
+		s_gdiScreenDc = NULL;
+	}
+}
+
+static HDC ScGdiScreenDc()
+{
+	if (!s_gdiScreenDc)
+		s_gdiScreenDc = GetDC(NULL);
+	return s_gdiScreenDc;
+}
+
+static BOOL ScCaptureMonitorRectGdi(const RECT& mr, ScFrameBuf& out)
+{
+	const int mw = mr.right - mr.left;
+	const int mh = mr.bottom - mr.top;
+	if (mw < 2 || mh < 2 || !out.bits || !out.hdc) return FALSE;
+	HDC screen = ScGdiScreenDc();
+	if (!screen) return FALSE;
+	BOOL ok = FALSE;
+	if (out.w == mw && out.h == mh) {
+		// 等倍は BitBlt の方が速い（StretchBlt/CAPTUREBLT は 1080p で FPS 半減しやすい）
+		ok = BitBlt(out.hdc, 0, 0, out.w, out.h, screen, mr.left, mr.top, SRCCOPY);
+	} else {
+		SetStretchBltMode(out.hdc, COLORONCOLOR);
+		ok = StretchBlt(out.hdc, 0, 0, out.w, out.h, screen, mr.left, mr.top, mw, mh, SRCCOPY);
+	}
+	return ok;
+}
+
+static BOOL ScCaptureMonitorFast(HMONITOR mon, const RECT& mr, ScFrameBuf& out, BOOL forceGdi)
+{
+	if (out.w < 2 || out.h < 2) return FALSE;
+	if (!forceGdi && mon && ScWgcCaptureMonitorBgra(mon, out.bits, out.w, out.h, out.stride))
+		return TRUE;
+	return ScCaptureMonitorRectGdi(mr, out);
+}
+
+static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap& snap, BOOL forceGdi)
 {
 	int cw = snap.canvasW;
 	int ch = snap.canvasH;
@@ -530,28 +612,38 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 		if (!ScFrameAlloc(out, cw, ch))
 			return FALSE;
 	}
-	ScFrameClear(out, RGB(16, 16, 20));
 
-	if (snap.mode == CScreenCaptureDlg::SC_MODE_PRIMARY) {
-		const int sw = GetSystemMetrics(SM_CXSCREEN);
-		const int sh = GetSystemMetrics(SM_CYSCREEN);
-		HDC screen = GetDC(NULL);
-		if (!screen) return FALSE;
-		SetStretchBltMode(out.hdc, COLORONCOLOR);
-		BOOL ok = StretchBlt(out.hdc, 0, 0, out.w, out.h, screen, 0, 0, sw, sh, SRCCOPY);
-		ReleaseDC(NULL, screen);
+	if (snap.mode == CScreenCaptureDlg::SC_MODE_PRIMARY
+		|| snap.mode == CScreenCaptureDlg::SC_MODE_MONITOR) {
+		RECT mr = { snap.monL, snap.monT, snap.monR, snap.monB };
+		if (mr.right <= mr.left || mr.bottom <= mr.top) {
+			mr.left = 0;
+			mr.top = 0;
+			mr.right = GetSystemMetrics(SM_CXSCREEN);
+			mr.bottom = GetSystemMetrics(SM_CYSCREEN);
+		}
+		HMONITOR mon = snap.monHandle;
+		if (!mon)
+			mon = MonitorFromRect(&mr, MONITOR_DEFAULTTONEAREST);
+		// 全面キャプチャは上書きするので Clear 不要（1080p で数ms節約）
+		BOOL ok = ScCaptureMonitorFast(mon, mr, out, forceGdi);
+		if (ok && snap.fxN > 0 && out.bits)
+			ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime);
 		return ok;
 	}
+
+	ScFrameClear(out, RGB(16, 16, 20));
+
 	if (snap.mode == CScreenCaptureDlg::SC_MODE_VIRTUAL) {
 		const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
 		const int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
 		const int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
 		const int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-		HDC screen = GetDC(NULL);
-		if (!screen) return FALSE;
-		SetStretchBltMode(out.hdc, COLORONCOLOR);
-		BOOL ok = StretchBlt(out.hdc, 0, 0, out.w, out.h, screen, vx, vy, vw, vh, SRCCOPY);
-		ReleaseDC(NULL, screen);
+		RECT vr = { vx, vy, vx + vw, vy + vh };
+		// 仮想全体は複数GPUまたぎで WGC 1本では取れないことが多い → GDI
+		BOOL ok = ScCaptureMonitorRectGdi(vr, out);
+		if (ok && snap.fxN > 0 && out.bits)
+			ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime);
 		return ok;
 	}
 
@@ -561,7 +653,8 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 		if (L.hidden) continue;
 		if (!L.hwnd || !IsWindow(L.hwnd) || L.w < 1 || L.h < 1) continue;
 		if (ScIsExcludedHwnd(L.hwnd, snap.excludeHwnd)) continue;
-		ScBlitWindowClipped(L.hwnd, out.hdc, out.w, out.h, L.x, L.y, L.w, L.h, snap.excludeHwnd);
+		ScBlitWindowClipped(L.hwnd, out.hdc, out.w, out.h, L.x, L.y, L.w, L.h, snap.excludeHwnd,
+			L.srcX, L.srcY, L.srcW, L.srcH, forceGdi);
 	}
 
 	// MP画面を別途載せる (レイヤに無い場合 / Hide 時は載せない)
@@ -574,50 +667,354 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 		}
 		if (!already) {
 			ScBlitWindowClipped(snap.mpHwnd, out.hdc, out.w, out.h,
-				snap.mpX, snap.mpY, snap.mpW, snap.mpH, snap.excludeHwnd);
+				snap.mpX, snap.mpY, snap.mpW, snap.mpH, snap.excludeHwnd,
+				snap.mpSrcX, snap.mpSrcY, snap.mpSrcW, snap.mpSrcH, forceGdi);
 		}
 	}
+	if (snap.fxN > 0 && out.bits)
+		ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime);
 	return TRUE;
 }
 
-static HRESULT ScAddVideoStream(IMFSinkWriter* writer, DWORD* outIdx, int w, int h, int fps)
+static void ScEnsureColorConvertMft()
 {
+	static LONG s_once = 0;
+	if (InterlockedCompareExchange(&s_once, 1, 0) != 0)
+		return;
+	// SinkWriter が RGB→YUV / 形式変換 MFT を見つけられないと SetInput が 0xC00D36B4 になる
+	MFTRegisterLocalByCLSID(
+		__uuidof(CColorConvertDMO),
+		MFT_CATEGORY_VIDEO_PROCESSOR,
+		L"ColorConverter",
+		MFT_ENUM_FLAG_SYNCMFT,
+		0, NULL, 0, NULL);
+#ifdef CLSID_VideoProcessorMFT
+	MFTRegisterLocalByCLSID(
+		CLSID_VideoProcessorMFT,
+		MFT_CATEGORY_VIDEO_PROCESSOR,
+		L"VideoProcessor",
+		MFT_ENUM_FLAG_SYNCMFT,
+		0, NULL, 0, NULL);
+#endif
+}
+
+static HRESULT ScCreateSinkWriter(LPCWSTR path, BOOL enableHw, IMFSinkWriter** outWriter)
+{
+	if (!outWriter) return E_POINTER;
+	*outWriter = NULL;
+	ScEnsureColorConvertMft();
+
+	auto tryAttrs = [&](BOOL hw) -> HRESULT {
+		IMFAttributes* attrs = NULL;
+		HRESULT h = E_FAIL;
+		if (FAILED(MFCreateAttributes(&attrs, 3)) || !attrs)
+			return E_FAIL;
+#ifdef MF_TRANSCODE_CONTAINERTYPE
+		attrs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_MPEG4);
+#endif
+		if (hw)
+			attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+		attrs->SetUINT32(MF_SINK_WRITER_DISABLE_THROTTLING, TRUE);
+		h = MFCreateSinkWriterFromURL(path, NULL, attrs, outWriter);
+		attrs->Release();
+		return h;
+	};
+
+	HRESULT h = E_FAIL;
+	if (enableHw) {
+		h = tryAttrs(TRUE);
+		if (SUCCEEDED(h) && *outWriter) return h;
+	}
+	// MSチュートリアル相当（属性なし）
+	h = MFCreateSinkWriterFromURL(path, NULL, NULL, outWriter);
+	if (SUCCEEDED(h) && *outWriter) return h;
+	h = tryAttrs(FALSE);
+	if (SUCCEEDED(h) && *outWriter) return h;
+	if (!enableHw) {
+		h = tryAttrs(TRUE);
+		if (SUCCEEDED(h) && *outWriter) return h;
+	}
+	return FAILED(h) ? h : E_FAIL;
+}
+
+// attempt ごとに「1回だけ」AddStream→SetInput。失敗時は呼び出し側で writer を作り直すこと。
+// RGB32 を優先（CPU の NV12 変換は 1080p で数ms〜十数ms食う）
+// 0: H264+RGB32 公式
+// 1: H264 Main+RGB32
+// 2: H264 Base+RGB32
+// 3: H264+NV12
+// 4: H264 Base+NV12
+// outStep: 1=AddStream 2=SetInput
+static HRESULT ScAddVideoStream(IMFSinkWriter* writer, DWORD* outIdx, int w, int h, int fps,
+	BOOL* outNv12, BOOL* outRgbBottomUp, int* outStep, int attempt)
+{
+	if (outNv12) *outNv12 = FALSE;
+	if (outRgbBottomUp) *outRgbBottomUp = FALSE;
+	if (outStep) *outStep = 0;
+	if (!writer) return E_POINTER;
+	w &= ~1; h &= ~1;
+	if (w < 16) w = 16;
+	if (h < 16) h = 16;
+	if (w > 4096) w = 4096;
+	if (h > 2304) h = 2304;
+	if (fps < 5) fps = 5;
+	if (fps > 120) fps = 120;
+	if (attempt < 0) attempt = 0;
+
+	// 画質寄りビットレート（1080p30≈12Mbps、1080p60≈24Mbps、1080p120≈40Mbps上限）
+	UINT32 br = (UINT32)(((__int64)w * h * fps) / 5);
+	if (br < 4000000u) br = 4000000u;
+	if (br > 40000000u) br = 40000000u;
+
+	UINT32 profile = 0;
+	BOOL useNv12 = FALSE;
+	BOOL useStride = FALSE;
+	switch (attempt) {
+	case 0: useNv12 = FALSE; useStride = FALSE; profile = (UINT32)eAVEncH264VProfile_High; break;
+	case 1: useNv12 = FALSE; useStride = FALSE; profile = (UINT32)eAVEncH264VProfile_Main; break;
+	case 2: useNv12 = FALSE; useStride = FALSE; profile = 0; break;
+	case 3: useNv12 = FALSE; useStride = FALSE; profile = (UINT32)eAVEncH264VProfile_Base; break;
+	case 4: useNv12 = TRUE;  useStride = TRUE;  profile = (UINT32)eAVEncH264VProfile_Main; break;
+	default: useNv12 = FALSE; useStride = FALSE; profile = (UINT32)eAVEncH264VProfile_High; break;
+	}
+
 	IMFMediaType* outType = NULL;
-	IMFMediaType* inType = NULL;
 	HRESULT hr = MFCreateMediaType(&outType);
 	if (FAILED(hr)) return hr;
 	hr = outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
 	if (SUCCEEDED(hr)) hr = outType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
-	// 30fps 向け: 過大ビットレートはエンコード遅延の原因になるので抑える
-	{
-		UINT32 br = (UINT32)(((__int64)w * h * fps) / 6);
-		if (br < 2500000u) br = 2500000u;
-		if (br > 12000000u) br = 12000000u;
-		if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AVG_BITRATE, br);
-	}
+	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AVG_BITRATE, br);
 	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
 	if (SUCCEEDED(hr)) hr = MFSetAttributeSize(outType, MF_MT_FRAME_SIZE, (UINT32)w, (UINT32)h);
 	if (SUCCEEDED(hr)) hr = MFSetAttributeRatio(outType, MF_MT_FRAME_RATE, (UINT32)fps, 1);
 	if (SUCCEEDED(hr)) hr = MFSetAttributeRatio(outType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+	if (SUCCEEDED(hr) && profile != 0)
+		hr = outType->SetUINT32(MF_MT_MPEG2_PROFILE, profile);
+	// 高FPS / 高解像度向けレベル
+	if (SUCCEEDED(hr)) {
+		UINT32 level = (UINT32)eAVEncH264VLevel4;
+		if (fps > 60 || ((__int64)w * h > (__int64)1920 * 1080))
+			level = (UINT32)eAVEncH264VLevel5_1;
+		else if (fps > 30 || ((__int64)w * h > (__int64)1280 * 720))
+			level = (UINT32)eAVEncH264VLevel4_2;
+		hr = outType->SetUINT32(MF_MT_MPEG2_LEVEL, level);
+	}
 	DWORD idx = 0;
 	if (SUCCEEDED(hr)) hr = writer->AddStream(outType, &idx);
-	if (SUCCEEDED(hr)) hr = MFCreateMediaType(&inType);
+	if (outType) outType->Release();
+	if (FAILED(hr)) {
+		if (outStep) *outStep = 1;
+		return hr;
+	}
+
+	IMFMediaType* inType = NULL;
+	hr = MFCreateMediaType(&inType);
 	if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-	if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+	if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_SUBTYPE, useNv12 ? MFVideoFormat_NV12 : MFVideoFormat_RGB32);
 	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
 	if (SUCCEEDED(hr)) hr = MFSetAttributeSize(inType, MF_MT_FRAME_SIZE, (UINT32)w, (UINT32)h);
 	if (SUCCEEDED(hr)) hr = MFSetAttributeRatio(inType, MF_MT_FRAME_RATE, (UINT32)fps, 1);
 	if (SUCCEEDED(hr)) hr = MFSetAttributeRatio(inType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_DEFAULT_STRIDE, (UINT32)(w * 4));
-	if (SUCCEEDED(hr)) hr = writer->SetInputMediaType(idx, inType, NULL);
-	if (outType) outType->Release();
+	if (SUCCEEDED(hr) && useStride)
+		hr = inType->SetUINT32(MF_MT_DEFAULT_STRIDE, useNv12 ? (UINT32)w : (UINT32)(w * 4));
+
+	IMFAttributes* encParams = NULL;
+	if (SUCCEEDED(hr) && SUCCEEDED(MFCreateAttributes(&encParams, 4)) && encParams) {
+		encParams->SetUINT32(CODECAPI_AVLowLatencyMode, TRUE);
+		encParams->SetUINT32(CODECAPI_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_Quality);
+		encParams->SetUINT32(CODECAPI_AVEncCommonQuality, 88);
+#ifdef CODECAPI_AVEncMPVGOPSize
+		encParams->SetUINT32(CODECAPI_AVEncMPVGOPSize, (UINT32)(fps > 0 ? fps : 30));
+#endif
+	}
+	if (SUCCEEDED(hr))
+		hr = writer->SetInputMediaType(idx, inType, encParams);
+	if (FAILED(hr) && encParams)
+		hr = writer->SetInputMediaType(idx, inType, NULL);
+	if (encParams) encParams->Release();
 	if (inType) inType->Release();
-	if (SUCCEEDED(hr) && outIdx) *outIdx = idx;
+	if (FAILED(hr)) {
+		if (outStep) *outStep = 2;
+		return hr;
+	}
+
+	if (outNv12) *outNv12 = useNv12 ? TRUE : FALSE;
+	if (outRgbBottomUp) *outRgbBottomUp = FALSE;
+	if (outIdx) *outIdx = idx;
+	if (outStep) *outStep = 0;
+	return S_OK;
+}
+
+static BOOL ScScaleFrameTo(ScFrameBuf& frame, int maxW, int maxH)
+{
+	maxW &= ~1; maxH &= ~1;
+	if (maxW < 16) maxW = 16;
+	if (maxH < 16) maxH = 16;
+	if (frame.w <= maxW && frame.h <= maxH) return TRUE;
+	int nw = frame.w, nh = frame.h;
+	const double sx = (double)maxW / (double)((nw > 0) ? nw : 1);
+	const double sy = (double)maxH / (double)((nh > 0) ? nh : 1);
+	const double s = (sx < sy) ? sx : sy;
+	nw = ((int)(frame.w * s)) & ~1;
+	nh = ((int)(frame.h * s)) & ~1;
+	if (nw < 16) nw = 16;
+	if (nh < 16) nh = 16;
+	ScFrameBuf scaled = {};
+	if (!ScFrameAlloc(scaled, nw, nh)) return FALSE;
+	SetStretchBltMode(scaled.hdc, COLORONCOLOR);
+	StretchBlt(scaled.hdc, 0, 0, nw, nh, frame.hdc, 0, 0, frame.w, frame.h, SRCCOPY);
+	ScFrameFree(frame);
+	frame = scaled;
+	return TRUE;
+}
+
+// BGRA top-down → NV12 (BT.709 limited)。1080p 向けに分岐少なめ。
+static void ScBgraToNv12(const BYTE* bgra, int w, int h, int bgraStride, BYTE* nv12)
+{
+	BYTE* yPlane = nv12;
+	BYTE* uvPlane = nv12 + (size_t)w * (size_t)h;
+	for (int y = 0; y < h; ++y) {
+		const BYTE* row = bgra + (size_t)y * (size_t)bgraStride;
+		BYTE* yRow = yPlane + (size_t)y * (size_t)w;
+		int x = 0;
+		for (; x + 1 < w; x += 2) {
+			const BYTE* p0 = row + (size_t)x * 4;
+			const BYTE* p1 = p0 + 4;
+			int Y0 = ((47 * p0[2] + 157 * p0[1] + 16 * p0[0] + 128) >> 8) + 16;
+			int Y1 = ((47 * p1[2] + 157 * p1[1] + 16 * p1[0] + 128) >> 8) + 16;
+			if ((unsigned)Y0 > 235u) Y0 = (Y0 < 16) ? 16 : 235;
+			if ((unsigned)Y1 > 235u) Y1 = (Y1 < 16) ? 16 : 235;
+			yRow[x] = (BYTE)Y0;
+			yRow[x + 1] = (BYTE)Y1;
+		}
+		if (x < w) {
+			const BYTE* p = row + (size_t)x * 4;
+			int Y = ((47 * p[2] + 157 * p[1] + 16 * p[0] + 128) >> 8) + 16;
+			if ((unsigned)Y > 235u) Y = (Y < 16) ? 16 : 235;
+			yRow[x] = (BYTE)Y;
+		}
+	}
+	for (int y = 0; y < h; y += 2) {
+		const BYTE* row0 = bgra + (size_t)y * (size_t)bgraStride;
+		const BYTE* row1 = bgra + (size_t)(y + 1) * (size_t)bgraStride;
+		BYTE* uvRow = uvPlane + (size_t)(y / 2) * (size_t)w;
+		for (int x = 0; x < w; x += 2) {
+			const BYTE* p00 = row0 + (size_t)x * 4;
+			const BYTE* p01 = p00 + 4;
+			const BYTE* p10 = row1 + (size_t)x * 4;
+			const BYTE* p11 = p10 + 4;
+			const int B = (p00[0] + p01[0] + p10[0] + p11[0]) >> 2;
+			const int G = (p00[1] + p01[1] + p10[1] + p11[1]) >> 2;
+			const int R = (p00[2] + p01[2] + p10[2] + p11[2]) >> 2;
+			int U = ((-26 * R - 87 * G + 112 * B + 128) >> 8) + 128;
+			int V = ((112 * R - 102 * G - 10 * B + 128) >> 8) + 128;
+			if ((unsigned)U > 240u) U = (U < 16) ? 16 : 240;
+			if ((unsigned)V > 240u) V = (V < 16) ? 16 : 240;
+			uvRow[x] = (BYTE)U;
+			uvRow[x + 1] = (BYTE)V;
+		}
+	}
+}
+
+static thread_local std::vector<BYTE> s_scNv12Scratch;
+static thread_local IMFMediaBuffer* s_scReuseBuf = NULL;
+static thread_local DWORD s_scReuseBufCb = 0;
+
+static void ScReleaseReuseBuf()
+{
+	if (s_scReuseBuf) {
+		s_scReuseBuf->Release();
+		s_scReuseBuf = NULL;
+		s_scReuseBufCb = 0;
+	}
+}
+
+static HRESULT ScWriteVideoSample(IMFSinkWriter* writer, DWORD stream, const ScFrameBuf& fb,
+	LONGLONG rt, LONGLONG dur, BOOL asNv12, BOOL rgbBottomUp)
+{
+	DWORD cb = 0;
+	const BYTE* srcPtr = NULL;
+	std::vector<BYTE> flipScratch;
+	if (asNv12) {
+		cb = (DWORD)((size_t)fb.w * (size_t)fb.h * 3 / 2);
+		s_scNv12Scratch.resize(cb);
+		ScBgraToNv12(fb.bits, fb.w, fb.h, fb.stride, s_scNv12Scratch.data());
+		srcPtr = s_scNv12Scratch.data();
+	} else if (rgbBottomUp) {
+		const int rowBytes = fb.w * 4;
+		cb = (DWORD)((size_t)rowBytes * (size_t)fb.h);
+		flipScratch.resize(cb);
+		for (int y = 0; y < fb.h; ++y) {
+			memcpy(flipScratch.data() + (size_t)(fb.h - 1 - y) * (size_t)rowBytes,
+				fb.bits + (size_t)y * (size_t)fb.stride, (size_t)rowBytes);
+		}
+		srcPtr = flipScratch.data();
+	} else {
+		cb = (DWORD)(fb.stride * fb.h);
+		srcPtr = fb.bits;
+	}
+	if (!srcPtr || cb == 0) return E_FAIL;
+
+	IMFSample* sample = NULL;
+	HRESULT hr = MFCreateSample(&sample);
+	if (FAILED(hr)) return hr;
+
+	IMFMediaBuffer* buffer = NULL;
+	if (s_scReuseBuf && s_scReuseBufCb >= cb) {
+		buffer = s_scReuseBuf;
+		s_scReuseBuf = NULL;
+		s_scReuseBufCb = 0;
+	} else {
+		ScReleaseReuseBuf();
+		hr = MFCreateMemoryBuffer(cb, &buffer);
+		if (FAILED(hr)) { sample->Release(); return hr; }
+	}
+
+	BYTE* p = NULL;
+	hr = buffer->Lock(&p, NULL, NULL);
+	if (SUCCEEDED(hr)) {
+		memcpy(p, srcPtr, cb);
+		buffer->Unlock();
+		buffer->SetCurrentLength(cb);
+		sample->AddBuffer(buffer);
+		sample->SetSampleTime(rt);
+		sample->SetSampleDuration(dur);
+		hr = writer->WriteSample(stream, sample);
+	}
+	// バッファを再利用（次フレームの alloc を避ける）
+	if (SUCCEEDED(hr) || hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
+		ScReleaseReuseBuf();
+		s_scReuseBuf = buffer;
+		s_scReuseBufCb = cb;
+		buffer = NULL;
+	}
+	if (buffer) buffer->Release();
+	sample->Release();
 	return hr;
+}
+
+static HRESULT ScRebuildVideoOnlyWriter(LPCWSTR path, int w, int h, int fps,
+	IMFSinkWriter** writer, DWORD* videoIdx, BOOL* outNv12, BOOL* outRgbBottomUp,
+	BOOL enableHw, int* outStep, int attempt)
+{
+	if (!writer) return E_POINTER;
+	if (*writer) { (*writer)->Release(); *writer = NULL; }
+	::DeleteFile(path);
+	if (videoIdx) *videoIdx = 0;
+	if (outNv12) *outNv12 = FALSE;
+	if (outRgbBottomUp) *outRgbBottomUp = FALSE;
+	HRESULT hh = ScCreateSinkWriter(path, enableHw, writer);
+	if (FAILED(hh) || !*writer) return FAILED(hh) ? hh : E_FAIL;
+	return ScAddVideoStream(*writer, videoIdx, w, h, fps, outNv12, outRgbBottomUp, outStep, attempt);
 }
 
 static HRESULT ScAddAudioStream(IMFSinkWriter* writer, DWORD* outIdx, UINT32 hz, UINT32 ch)
 {
+	if (!writer) return E_POINTER;
+	if (hz != 44100 && hz != 48000) hz = 48000;
+	if (ch < 1) ch = 1;
+	if (ch > 2) ch = 2;
+
 	IMFMediaType* outType = NULL;
 	IMFMediaType* inType = NULL;
 	HRESULT hr = MFCreateMediaType(&outType);
@@ -627,10 +1024,15 @@ static HRESULT ScAddAudioStream(IMFSinkWriter* writer, DWORD* outIdx, UINT32 hz,
 	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
 	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, hz);
 	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, ch);
+	// AAC: 192kbps (以前通っていた値)
 	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 192000 / 8);
 	DWORD idx = 0;
 	if (SUCCEEDED(hr)) hr = writer->AddStream(outType, &idx);
-	if (SUCCEEDED(hr)) hr = MFCreateMediaType(&inType);
+	if (FAILED(hr)) {
+		if (outType) outType->Release();
+		return hr;
+	}
+	hr = MFCreateMediaType(&inType);
 	if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
 	if (SUCCEEDED(hr)) hr = inType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
 	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
@@ -638,36 +1040,12 @@ static HRESULT ScAddAudioStream(IMFSinkWriter* writer, DWORD* outIdx, UINT32 hz,
 	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, ch);
 	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, ch * 2);
 	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, hz * ch * 2);
-	if (SUCCEEDED(hr)) hr = inType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
+	// MF_MT_ALL_SAMPLES_INDEPENDENT は AAC 変換経路で SetInput 拒否の原因になることがあるので付けない
 	if (SUCCEEDED(hr)) hr = writer->SetInputMediaType(idx, inType, NULL);
 	if (outType) outType->Release();
 	if (inType) inType->Release();
+	// AddStream 後に SetInput 失敗すると orphan stream が残る → 呼び出し側で writer 作り直しが必要
 	if (SUCCEEDED(hr) && outIdx) *outIdx = idx;
-	return hr;
-}
-
-static HRESULT ScWriteVideoSample(IMFSinkWriter* writer, DWORD stream, const ScFrameBuf& fb, LONGLONG rt, LONGLONG dur)
-{
-	const DWORD cb = (DWORD)(fb.stride * fb.h);
-	IMFSample* sample = NULL;
-	IMFMediaBuffer* buffer = NULL;
-	HRESULT hr = MFCreateSample(&sample);
-	if (FAILED(hr)) return hr;
-	hr = MFCreateMemoryBuffer(cb, &buffer);
-	if (FAILED(hr)) { sample->Release(); return hr; }
-	BYTE* p = NULL;
-	hr = buffer->Lock(&p, NULL, NULL);
-	if (SUCCEEDED(hr)) {
-		memcpy(p, fb.bits, cb);
-		buffer->Unlock();
-		buffer->SetCurrentLength(cb);
-		sample->AddBuffer(buffer);
-		sample->SetSampleTime(rt);
-		sample->SetSampleDuration(dur);
-		hr = writer->WriteSample(stream, sample);
-	}
-	buffer->Release();
-	sample->Release();
 	return hr;
 }
 
@@ -752,7 +1130,7 @@ END_MESSAGE_MAP()
 static BOOL ScPreviewInteractive(CScreenCaptureDlg* o)
 {
 	if (!o || o->m_uiLocked || o->m_picking) return FALSE;
-	if (o->m_mode.GetCurSel() == CScreenCaptureDlg::SC_MODE_WINDOWS) return TRUE;
+	if (o->IsWindowComposeMode()) return TRUE;
 	if (o->m_includeMp.GetSafeHwnd() && o->m_includeMp.GetCheck() && o->m_layerCnt > 0) return TRUE;
 	return FALSE;
 }
@@ -855,16 +1233,76 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 			if (menu.CreatePopupMenu()) {
 				menu.AppendMenu(MF_STRING, ID_SC_LAYER_HIDE,
 					hidden
-					? LL14(L"Show(表示)", L"Show", L"Afficher", L"Mostra", L"Mostrar", L"표시", L"显示", L"إظهار",
+					? LL14(L"表示する", L"Show", L"Afficher", L"Mostra", L"Mostrar", L"표시", L"显示", L"إظهار",
 						L"Показать", L"Einblenden", L"Mostrar", L"Tonen", L"Pokaż", L"Göster")
-					: LL14(L"Hide(非表示)", L"Hide", L"Masquer", L"Nascondi", L"Ocultar", L"숨기기", L"隐藏", L"إخفاء",
+					: LL14(L"非表示にする", L"Hide", L"Masquer", L"Nascondi", L"Ocultar", L"숨기기", L"隐藏", L"إخفاء",
 						L"Скрыть", L"Ausblenden", L"Ocultar", L"Verbergen", L"Ukryj", L"Gizle"));
+				menu.AppendMenu(MF_SEPARATOR);
+				menu.AppendMenu(MF_STRING, ID_SC_LAYER_FIT,
+					LL14(L"キャンバスにフィット", L"Fit to canvas", L"Ajuster au canevas", L"Adatta al canvas",
+						L"Ajustar al lienzo", L"캔버스에 맞춤", L"铺满画布", L"ملاءمة اللوحة",
+						L"Вписать в холст", L"In Fläche einpassen", L"Ajustar à tela", L"Passen op canvas",
+						L"Dopasuj do płótna", L"Tuvale sığdır"));
+				menu.AppendMenu(MF_STRING, ID_SC_LAYER_SCALE50,
+					LL14(L"50% サイズ", L"50% size", L"Taille 50%", L"Dimensione 50%",
+						L"Tamaño 50%", L"50% 크기", L"50% 大小", L"حجم 50٪",
+						L"Размер 50%", L"50% Größe", L"Tamanho 50%", L"50% grootte",
+						L"Rozmiar 50%", L"%50 boyut"));
+				menu.AppendMenu(MF_STRING, ID_SC_LAYER_SCALE100,
+					LL14(L"実寸 (100%)", L"Actual size (100%)", L"Taille réelle (100%)", L"Dimensione reale (100%)",
+						L"Tamaño real (100%)", L"실측 (100%)", L"实际大小 (100%)", L"الحجم الفعلي (100٪)",
+						L"Реальный размер (100%)", L"Originalgröße (100%)", L"Tamanho real (100%)", L"Ware grootte (100%)",
+						L"Rzeczywisty rozmiar (100%)", L"Gerçek boyut (%100)"));
+				menu.AppendMenu(MF_SEPARATOR);
+				menu.AppendMenu(MF_STRING | (layer <= 0 ? MF_GRAYED : 0), ID_SC_LAYER_ZUP,
+					LL14(L"手前へ (Z+)", L"Bring forward (Z+)", L"Vers l'avant (Z+)", L"Porta avanti (Z+)",
+						L"Traer al frente (Z+)", L"앞으로 (Z+)", L"前移 (Z+)", L"تقديم (Z+)",
+						L"Вперёд (Z+)", L"Nach vorne (Z+)", L"Para frente (Z+)", L"Naar voren (Z+)",
+						L"Do przodu (Z+)", L"Öne getir (Z+)"));
+				menu.AppendMenu(MF_STRING | (layer >= m_owner->m_layerCnt - 1 ? MF_GRAYED : 0), ID_SC_LAYER_ZDOWN,
+					LL14(L"奥へ (Z-)", L"Send back (Z-)", L"Vers l'arrière (Z-)", L"Porta indietro (Z-)",
+						L"Enviar atrás (Z-)", L"뒤로 (Z-)", L"后移 (Z-)", L"تأخير (Z-)",
+						L"Назад (Z-)", L"Nach hinten (Z-)", L"Para trás (Z-)", L"Naar achteren (Z-)",
+						L"Do tyłu (Z-)", L"Geriye gönder (Z-)"));
+				menu.AppendMenu(MF_SEPARATOR);
+				menu.AppendMenu(MF_STRING, ID_SC_LAYER_CROP_FULL,
+					LL14(L"切出を解除", L"Clear crop", L"Annuler le rognage", L"Annulla ritaglio",
+						L"Quitar recorte", L"잘라내기 해제", L"清除裁剪", L"إلغاء القص",
+						L"Сбросить вырез", L"Ausschnitt aufheben", L"Limpar recorte", L"Uitsnede wissen",
+						L"Wyczyść wycinek", L"Kırpmayı temizle"));
+				menu.AppendMenu(MF_STRING, ID_SC_LAYER_REMOVE,
+					LL14(L"レイヤを削除", L"Remove layer", L"Retirer le calque", L"Rimuovi livello",
+						L"Quitar capa", L"레이어 삭제", L"删除层", L"إزالة الطبقة",
+						L"Удалить слой", L"Ebene entfernen", L"Remover camada", L"Laag verwijderen",
+						L"Usuń warstwę", L"Katmanı kaldır"));
 				CPoint sp = point;
 				ClientToScreen(&sp);
 				const UINT cmd = menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
 					sp.x, sp.y, m_owner);
-				if (cmd == ID_SC_LAYER_HIDE)
+				if (cmd == ID_SC_LAYER_HIDE) {
 					m_owner->ToggleLayerHidden(layer);
+				} else if (cmd == ID_SC_LAYER_FIT) {
+					m_owner->m_layer.SetCurSel(layer);
+					m_owner->FitSelected(0);
+				} else if (cmd == ID_SC_LAYER_SCALE50) {
+					m_owner->m_layer.SetCurSel(layer);
+					m_owner->FitSelected(50);
+				} else if (cmd == ID_SC_LAYER_SCALE100) {
+					m_owner->m_layer.SetCurSel(layer);
+					m_owner->FitSelected(100);
+				} else if (cmd == ID_SC_LAYER_ZUP && layer > 0) {
+					m_owner->m_layer.SetCurSel(layer);
+					m_owner->OnBnClickedZUp();
+				} else if (cmd == ID_SC_LAYER_ZDOWN && layer < m_owner->m_layerCnt - 1) {
+					m_owner->m_layer.SetCurSel(layer);
+					m_owner->OnBnClickedZDown();
+				} else if (cmd == ID_SC_LAYER_CROP_FULL) {
+					m_owner->m_layer.SetCurSel(layer);
+					m_owner->OnBnClickedCropFull();
+				} else if (cmd == ID_SC_LAYER_REMOVE) {
+					m_owner->m_layer.SetCurSel(layer);
+					m_owner->OnBnClickedRemove();
+				}
 			}
 			Invalidate(FALSE);
 			return;
@@ -922,6 +1360,647 @@ void CScPreviewCtrl::OnCaptureChanged(CWnd* pWnd)
 	CStatic::OnCaptureChanged(pWnd);
 }
 
+// ---- FX wire graph (linear chain, GDI) ----
+
+IMPLEMENT_DYNAMIC(CScFxWireCtrl, CStatic)
+
+CScFxWireCtrl::CScFxWireCtrl()
+	: m_owner(NULL)
+	, m_slotN(0)
+	, m_dragging(FALSE)
+	, m_dragFx(0)
+	, m_dragFromSlot(-1)
+{
+	memset(m_slots, 0, sizeof(m_slots));
+	m_dragPt = CPoint(0, 0);
+}
+
+CScFxWireCtrl::~CScFxWireCtrl()
+{
+}
+
+BEGIN_MESSAGE_MAP(CScFxWireCtrl, CStatic)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+	ON_WM_LBUTTONDOWN()
+	ON_WM_LBUTTONUP()
+	ON_WM_RBUTTONUP()
+	ON_WM_MOUSEMOVE()
+END_MESSAGE_MAP()
+
+void CScFxWireCtrl::SetChain(const int* fx, int n)
+{
+	memset(m_slots, 0, sizeof(m_slots));
+	m_slotN = 0;
+	if (!fx || n <= 0) {
+		Invalidate(FALSE);
+		return;
+	}
+	if (n > SC_FX_CHAIN_MAX) n = SC_FX_CHAIN_MAX;
+	for (int i = 0; i < n; ++i) {
+		if (fx[i] > SC_FX_NONE && fx[i] < SC_FX_COUNT)
+			m_slots[m_slotN++] = fx[i];
+	}
+	Invalidate(FALSE);
+}
+
+void CScFxWireCtrl::GetChain(int* fxOut, int* nOut) const
+{
+	if (nOut) *nOut = m_slotN;
+	if (!fxOut) return;
+	for (int i = 0; i < SC_FX_CHAIN_MAX; ++i)
+		fxOut[i] = (i < m_slotN) ? m_slots[i] : 0;
+}
+
+void CScFxWireCtrl::NotifyChanged()
+{
+	if (m_owner)
+		m_owner->OnFxWireChanged();
+}
+
+struct ScFxWireMetrics {
+	int railTop;
+	int slotW, slotH, gap, inW, x0;
+	int palCols, pw, ph, palX0, palY0, palGapX, palGapY;
+};
+
+static ScFxWireMetrics ScFxMakeMetrics(const CRect& rc)
+{
+	ScFxWireMetrics m = {};
+	m.railTop = 14;
+	m.slotH = 26;
+	m.gap = 4;
+	m.inW = 26;
+	const int margin = 4;
+	const int usable = rc.Width() - margin * 2 - m.inW - m.gap - m.inW;
+	m.slotW = (usable - SC_FX_CHAIN_MAX * m.gap) / SC_FX_CHAIN_MAX;
+	if (m.slotW < 64) m.slotW = 64;
+	if (m.slotW > 92) m.slotW = 92;
+	const int total = m.inW + m.gap + SC_FX_CHAIN_MAX * (m.slotW + m.gap) + m.inW;
+	m.x0 = (rc.Width() - total) / 2;
+	if (m.x0 < margin) m.x0 = margin;
+
+	m.palCols = 6;
+	m.palGapX = 4;
+	m.palGapY = 3;
+	m.palX0 = 6;
+	m.pw = (rc.Width() - m.palX0 * 2 - (m.palCols - 1) * m.palGapX) / m.palCols;
+	if (m.pw < 72) m.pw = 72;
+	m.ph = 18;
+	m.palY0 = m.railTop + m.slotH + 10;
+	return m;
+}
+
+CRect CScFxWireCtrl::SlotRect(int i) const
+{
+	CRect rc;
+	GetClientRect(&rc);
+	const ScFxWireMetrics m = ScFxMakeMetrics(rc);
+	const int x = m.x0 + m.inW + m.gap + i * (m.slotW + m.gap);
+	return CRect(x, m.railTop, x + m.slotW, m.railTop + m.slotH);
+}
+
+CRect CScFxWireCtrl::PaletteRect(int fx) const
+{
+	CRect rc;
+	GetClientRect(&rc);
+	const ScFxWireMetrics m = ScFxMakeMetrics(rc);
+	const int idx = fx - 1;
+	const int row = idx / m.palCols;
+	const int col = idx % m.palCols;
+	const int x = m.palX0 + col * (m.pw + m.palGapX);
+	const int y = m.palY0 + row * (m.ph + m.palGapY);
+	return CRect(x, y, x + m.pw, y + m.ph);
+}
+
+int CScFxWireCtrl::HitPalette(CPoint pt) const
+{
+	for (int fx = 1; fx < SC_FX_COUNT; ++fx) {
+		if (PaletteRect(fx).PtInRect(pt))
+			return fx;
+	}
+	return 0;
+}
+
+int CScFxWireCtrl::HitSlot(CPoint pt) const
+{
+	for (int i = 0; i < SC_FX_CHAIN_MAX; ++i) {
+		if (SlotRect(i).PtInRect(pt))
+			return i;
+	}
+	return -1;
+}
+
+void CScFxWireCtrl::PaintToDC(CDC& dc)
+{
+	CRect rc;
+	GetClientRect(&rc);
+	dc.FillSolidRect(&rc, RGB(22, 24, 30));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+	const ScFxWireMetrics m = ScFxMakeMetrics(rc);
+
+	CFont smallFont;
+	LOGFONT lf = {};
+	if (CFont* base = GetFont())
+		base->GetLogFont(&lf);
+	else {
+		lf.lfHeight = -12;
+		lf.lfCharSet = DEFAULT_CHARSET;
+		_tcsncpy(lf.lfFaceName, _T("MS Shell Dlg"), LF_FACESIZE - 1);
+		lf.lfFaceName[LF_FACESIZE - 1] = 0;
+	}
+	if (lf.lfHeight < 0) {
+		if (lf.lfHeight > -11) lf.lfHeight = -11;
+	} else if (lf.lfHeight > 0 && lf.lfHeight < 11) {
+		lf.lfHeight = 11;
+	} else if (lf.lfHeight > 13) {
+		lf.lfHeight = 12;
+	}
+	smallFont.CreateFontIndirect(&lf);
+	dc.SelectObject(&smallFont);
+
+	dc.SetTextColor(RGB(160, 175, 200));
+	CRect title(4, 1, rc.right - 4, m.railTop - 1);
+	dc.DrawText(LL14(
+		L"FX配線 (パレット→スロット / 右クリック解除)",
+		L"FX wiring (palette→slot / right-click clear)",
+		L"Câblage FX (palette→slot / clic droit)",
+		L"Cablaggio FX (palette→slot / destro)",
+		L"Cableado FX (paleta→ranura / clic der.)",
+		L"FX 배선 (팔레트→슬롯 / 우클릭 해제)",
+		L"效果连线（拖到插槽 / 右键清除）",
+		L"توصيل FX (اسحب إلى فتحة / يمين لمسح)",
+		L"Схема FX (на слот / ПКМ очистить)",
+		L"FX-Verdrahtung (Palette→Slot / Rechtsklick)",
+		L"Ligação FX (paleta→slot / direito limpar)",
+		L"FX-bedrading (palet→slot / rechtsklik)",
+		L"Okablowanie FX (przeciągnij→slot / PPM)",
+		L"FX kablolama (paletten slota / sağ tık)"),
+		&title, DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+	auto drawNode = [&](CRect r, COLORREF fill, COLORREF border, const CString& text) {
+		dc.FillSolidRect(&r, fill);
+		dc.Draw3dRect(&r, border, RGB(20, 20, 24));
+		dc.SetTextColor(RGB(230, 235, 245));
+		CRect tr = r;
+		tr.DeflateRect(2, 1);
+		dc.DrawText(text, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+	};
+
+	CRect inR(m.x0, m.railTop, m.x0 + m.inW, m.railTop + m.slotH);
+	drawNode(inR, RGB(40, 70, 50), RGB(100, 200, 140), L"IN");
+	int prevCx = inR.right;
+	int prevCy = (inR.top + inR.bottom) / 2;
+
+	for (int i = 0; i < SC_FX_CHAIN_MAX; ++i) {
+		CRect sr = SlotRect(i);
+		const BOOL filled = (i < m_slotN && m_slots[i] > 0);
+		CString lab;
+		if (filled && m_owner)
+			lab = m_owner->FxName(m_slots[i]);
+		else if (filled)
+			lab.Format(L"%d", m_slots[i]);
+		else
+			lab.Format(L"S%d", i + 1);
+		drawNode(sr, filled ? RGB(55, 45, 20) : RGB(35, 38, 48),
+			filled ? RGB(255, 200, 80) : RGB(90, 100, 120), lab);
+
+		CPen pen(PS_SOLID, 2, RGB(90, 160, 255));
+		CPen* old = dc.SelectObject(&pen);
+		dc.MoveTo(prevCx, prevCy);
+		dc.LineTo(sr.left, (sr.top + sr.bottom) / 2);
+		dc.SelectObject(old);
+		dc.FillSolidRect(sr.left - 3, (sr.top + sr.bottom) / 2 - 3, 6, 6, RGB(200, 220, 255));
+		dc.FillSolidRect(sr.right - 3, (sr.top + sr.bottom) / 2 - 3, 6, 6, RGB(200, 220, 255));
+		prevCx = sr.right;
+		prevCy = (sr.top + sr.bottom) / 2;
+	}
+
+	CRect outR(prevCx + m.gap, m.railTop, prevCx + m.gap + m.inW, m.railTop + m.slotH);
+	{
+		CPen pen(PS_SOLID, 2, RGB(90, 160, 255));
+		CPen* old = dc.SelectObject(&pen);
+		dc.MoveTo(prevCx, prevCy);
+		dc.LineTo(outR.left, (outR.top + outR.bottom) / 2);
+		dc.SelectObject(old);
+	}
+	drawNode(outR, RGB(70, 40, 40), RGB(255, 120, 120), L"OUT");
+
+	for (int fx = 1; fx < SC_FX_COUNT; ++fx) {
+		CRect pr = PaletteRect(fx);
+		CString name = m_owner ? m_owner->FxName(fx) : L"?";
+		dc.FillSolidRect(&pr, RGB(32, 40, 58));
+		dc.Draw3dRect(&pr, RGB(100, 140, 200), RGB(20, 24, 32));
+		dc.SetTextColor(RGB(200, 220, 255));
+		CRect tr = pr;
+		tr.DeflateRect(2, 0);
+		dc.DrawText(name, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+	}
+
+	if (m_dragging) {
+		CString ghost = m_owner ? m_owner->FxName(m_dragFx) : L"";
+		CRect gr(m_dragPt.x - 40, m_dragPt.y - 10, m_dragPt.x + 40, m_dragPt.y + 10);
+		dc.FillSolidRect(&gr, RGB(80, 60, 20));
+		dc.SetTextColor(RGB(255, 230, 150));
+		dc.DrawText(ghost, &gr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+		if (m_dragFromSlot >= 0) {
+			CPen pen(PS_DOT, 1, RGB(255, 200, 80));
+			CPen* old = dc.SelectObject(&pen);
+			CRect sr = SlotRect(m_dragFromSlot);
+			dc.MoveTo(sr.right, (sr.top + sr.bottom) / 2);
+			dc.LineTo(m_dragPt);
+			dc.SelectObject(old);
+		}
+	}
+
+	dc.SelectObject(oldFont);
+}
+
+void CScFxWireCtrl::OnPaint()
+{
+	CPaintDC dc(this);
+	PaintToDC(dc);
+}
+
+BOOL CScFxWireCtrl::OnEraseBkgnd(CDC* /*pDC*/)
+{
+	return TRUE;
+}
+
+LRESULT CScFxWireCtrl::OnPrintClient(WPARAM wParam, LPARAM /*lParam*/)
+{
+	CDC dc;
+	dc.Attach((HDC)wParam);
+	PaintToDC(dc);
+	dc.Detach();
+	return 0;
+}
+
+void CScFxWireCtrl::OnLButtonDown(UINT nFlags, CPoint point)
+{
+	if (m_owner && m_owner->m_uiLocked) return;
+	const int pal = HitPalette(point);
+	if (pal > 0) {
+		m_dragging = TRUE;
+		m_dragFx = pal;
+		m_dragFromSlot = -1;
+		m_dragPt = point;
+		SetCapture();
+		Invalidate(FALSE);
+		return;
+	}
+	const int slot = HitSlot(point);
+	if (slot >= 0 && slot < m_slotN && m_slots[slot] > 0) {
+		m_dragging = TRUE;
+		m_dragFx = m_slots[slot];
+		m_dragFromSlot = slot;
+		m_dragPt = point;
+		SetCapture();
+		Invalidate(FALSE);
+		return;
+	}
+	CStatic::OnLButtonDown(nFlags, point);
+}
+
+void CScFxWireCtrl::OnMouseMove(UINT nFlags, CPoint point)
+{
+	if (m_dragging) {
+		m_dragPt = point;
+		Invalidate(FALSE);
+		return;
+	}
+	CStatic::OnMouseMove(nFlags, point);
+}
+
+void CScFxWireCtrl::OnLButtonUp(UINT nFlags, CPoint point)
+{
+	if (m_dragging) {
+		ReleaseCapture();
+		m_dragging = FALSE;
+		const int dst = HitSlot(point);
+		if (dst >= 0 && m_dragFx > 0) {
+			if (m_dragFromSlot >= 0) {
+				// スロット間: 入れ替え or 移動
+				if (dst != m_dragFromSlot) {
+					if (dst < m_slotN) {
+						const int t = m_slots[dst];
+						m_slots[dst] = m_slots[m_dragFromSlot];
+						m_slots[m_dragFromSlot] = t;
+					} else {
+						// 末尾へ
+						const int v = m_slots[m_dragFromSlot];
+						for (int i = m_dragFromSlot; i < m_slotN - 1; ++i)
+							m_slots[i] = m_slots[i + 1];
+						m_slotN--;
+						if (m_slotN < SC_FX_CHAIN_MAX) {
+							m_slots[m_slotN++] = v;
+						}
+					}
+					NotifyChanged();
+				}
+			} else {
+				// パレットから: 空き or 上書き
+				if (dst < m_slotN) {
+					m_slots[dst] = m_dragFx;
+				} else if (m_slotN < SC_FX_CHAIN_MAX) {
+					m_slots[m_slotN++] = m_dragFx;
+				} else {
+					m_slots[SC_FX_CHAIN_MAX - 1] = m_dragFx;
+				}
+				NotifyChanged();
+			}
+		}
+		m_dragFx = 0;
+		m_dragFromSlot = -1;
+		Invalidate(FALSE);
+		return;
+	}
+	CStatic::OnLButtonUp(nFlags, point);
+}
+
+void CScFxWireCtrl::OnRButtonUp(UINT nFlags, CPoint point)
+{
+	if (m_owner && m_owner->m_uiLocked) return;
+	const int slot = HitSlot(point);
+	if (slot < 0 || slot >= m_slotN) {
+		CStatic::OnRButtonUp(nFlags, point);
+		return;
+	}
+	CMenu menu;
+	if (!menu.CreatePopupMenu()) {
+		CStatic::OnRButtonUp(nFlags, point);
+		return;
+	}
+	menu.AppendMenu(MF_STRING, ID_SC_FX_CLEAR_SLOT,
+		LL14(L"このスロットを解除", L"Clear this slot", L"Effacer ce slot", L"Azzera questo slot",
+			L"Borrar esta ranura", L"이 슬롯 해제", L"清除此插槽", L"مسح هذه الفتحة",
+			L"Очистить этот слот", L"Diesen Slot löschen", L"Limpar este slot", L"Deze slot wissen",
+			L"Wyczyść ten slot", L"Bu slotu temizle"));
+	menu.AppendMenu(MF_STRING | (slot <= 0 ? MF_GRAYED : 0), ID_SC_FX_MOVE_LEFT,
+		LL14(L"左へ移動", L"Move left", L"Déplacer à gauche", L"Sposta a sinistra",
+			L"Mover a la izquierda", L"왼쪽으로", L"向左移动", L"تحريك لليسار",
+			L"Влево", L"Nach links", L"Mover para a esquerda", L"Naar links",
+			L"W lewo", L"Sola taşı"));
+	menu.AppendMenu(MF_STRING | (slot >= m_slotN - 1 ? MF_GRAYED : 0), ID_SC_FX_MOVE_RIGHT,
+		LL14(L"右へ移動", L"Move right", L"Déplacer à droite", L"Sposta a destra",
+			L"Mover a la derecha", L"오른쪽으로", L"向右移动", L"تحريك لليمين",
+			L"Вправо", L"Nach rechts", L"Mover para a direita", L"Naar rechts",
+			L"W prawo", L"Sağa taşı"));
+	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING, ID_SC_FX_CLEAR_ALL,
+		LL14(L"すべての配線を解除", L"Clear all wiring", L"Effacer tout le câblage", L"Azzera tutto",
+			L"Borrar todo el cableado", L"모든 배선 해제", L"清除全部连线", L"مسح كل التوصيل",
+			L"Очистить всю схему", L"Gesamte Verdrahtung löschen", L"Limpar toda a ligação", L"Alle bedrading wissen",
+			L"Wyczyść całe okablowanie", L"Tüm kablolamayı temizle"));
+	CPoint sp = point;
+	ClientToScreen(&sp);
+	const UINT cmd = menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
+		sp.x, sp.y, this);
+	if (cmd == ID_SC_FX_CLEAR_SLOT) {
+		for (int i = slot; i < m_slotN - 1; ++i)
+			m_slots[i] = m_slots[i + 1];
+		m_slotN--;
+		m_slots[m_slotN] = 0;
+		NotifyChanged();
+		Invalidate(FALSE);
+	} else if (cmd == ID_SC_FX_MOVE_LEFT && slot > 0) {
+		const int t = m_slots[slot - 1];
+		m_slots[slot - 1] = m_slots[slot];
+		m_slots[slot] = t;
+		NotifyChanged();
+		Invalidate(FALSE);
+	} else if (cmd == ID_SC_FX_MOVE_RIGHT && slot < m_slotN - 1) {
+		const int t = m_slots[slot + 1];
+		m_slots[slot + 1] = m_slots[slot];
+		m_slots[slot] = t;
+		NotifyChanged();
+		Invalidate(FALSE);
+	} else if (cmd == ID_SC_FX_CLEAR_ALL) {
+		memset(m_slots, 0, sizeof(m_slots));
+		m_slotN = 0;
+		NotifyChanged();
+		Invalidate(FALSE);
+	}
+}
+
+namespace {
+
+class CScHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_SC_HELP };
+	explicit CScHelpDlg(CScreenCaptureDlg* owner, CWnd* pParent = nullptr)
+		: CDialog(IDD, pParent), m_owner(owner) {}
+protected:
+	CScreenCaptureDlg* m_owner;
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CScHelpDlg* g_scHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CScHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CScHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"画面キャプチャ操作ガイド", L"Screen Capture Guide", L"Guide de capture", L"Guida cattura",
+		L"Guía de captura", L"화면 캡처 가이드", L"屏幕捕获指南", L"دليل الالتقاط",
+		L"Руководство захвата", L"Aufnahme-Anleitung", L"Guia de captura", L"Opnamegids",
+		L"Przewodnik przechwytywania", L"Yakalama kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CScHelpDlg::OnOK() { DestroyWindow(); }
+void CScHelpDlg::OnCancel() { DestroyWindow(); }
+void CScHelpDlg::OnClose() { DestroyWindow(); }
+
+void CScHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_scHelpDlg == this)
+		g_scHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CScHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CScHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"画面キャプチャ操作ガイド", L"Screen Capture — Guide", L"Guide capture", L"Guida cattura",
+		L"Guía captura", L"화면 캡처 가이드", L"屏幕捕获指南", L"دليل الالتقاط",
+		L"Руководство захвата", L"Aufnahme-Guide", L"Guia captura", L"Opnamegids",
+		L"Przewodnik", L"Yakalama kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"プレビューで構図を整え、FXを配線してから MP4 に録画します。",
+		L"Compose in the preview, wire FX, then record to MP4.",
+		L"Composez l'aperçu, câblez FX, enregistrez en MP4.",
+		L"Componi anteprima, cablaggia FX, registra MP4.",
+		L"Compose la vista previa, cable FX, graba MP4.",
+		L"미리보기에서 구도를 잡고 FX를 배선한 뒤 MP4로 녹화합니다.",
+		L"在预览中构图、连接效果，然后录制为 MP4。",
+		L"رتّب المعاينة، وصّل FX، ثم سجّل إلى MP4.",
+		L"Соберите превью, соедините FX, запишите MP4.",
+		L"Vorschau komponieren, FX verdrahten, als MP4 aufnehmen.",
+		L"Componha a prévia, ligue FX, grave em MP4.",
+		L"Stel preview samen, bedraad FX, neem op naar MP4.",
+		L"Ułóż podgląd, podłącz FX, nagraj do MP4.",
+		L"Önizlemeyi düzenle, FX bağla, MP4 kaydet."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"基本操作", L"Basics", L"Bases", L"Basi", L"Básicos", L"기본", L"基本", L"أساسيات",
+		L"Основы", L"Grundlagen", L"Básicos", L"Basis", L"Podstawy", L"Temeller"));
+	y += titleLh;
+	body(L, y, LL14(L"・モード …… モニタ / 仮想画面 / ウィンドウ合成", L"· Mode …… monitor / virtual / window compose", L"· Mode …… moniteur / virtuel / fenêtres", L"· Modalità …… monitor / virtuale / finestre",
+		L"· Modo …… monitor / virtual / ventanas", L"· 모드 …… 모니터 / 가상 / 창 합성", L"· 模式 …… 监视器/虚拟/窗口合成", L"· الوضع …… شاشة / افتراضي / نوافذ",
+		L"· Режим …… монитор / вирт. / окна", L"· Modus …… Monitor / virtuell / Fenster", L"· Modo …… monitor / virtual / janelas", L"· Modus …… monitor / virtueel / vensters",
+		L"· Tryb …… monitor / wirtualny / okna", L"· Mod …… monitör / sanal / pencere")); y += lh;
+	body(L, y, LL14(L"・プレビュー …… ドラッグで移動、四隅でリサイズ、右クリックで表示切替", L"· Preview …… drag move, corners resize, right-click hide", L"· Aperçu …… glisser / coins / clic droit", L"· Anteprima …… trascina / angoli / destro",
+		L"· Vista …… arrastrar / esquinas / clic der.", L"· 미리보기 …… 드래그·모서리·우클릭", L"· 预览 …… 拖动/四角缩放/右键显隐", L"· معاينة …… سحب / زوايا / يمين",
+		L"· Превью …… перенос / углы / ПКМ", L"· Vorschau …… ziehen / Ecken / Rechtsklick", L"· Prévia …… arrastar / cantos / direito", L"· Preview …… slepen / hoeken / rechtsklik",
+		L"· Podgląd …… przeciągnij / rogi / PPM", L"· Önizleme …… sürükle / köşe / sağ tık")); y += lh;
+	body(L, y, LL14(L"・レイヤ …… 一覧から追加、Z+/Z- で前後、切出でクロップ", L"· Layers …… add from list, Z+/Z- order, crop fields", L"· Calques …… ajouter, Z+/Z-, rognage", L"· Livelli …… aggiungi, Z+/Z-, ritaglio",
+		L"· Capas …… añadir, Z+/Z-, recorte", L"· 레이어 …… 추가, Z+/Z-, 크롭", L"· 图层 …… 添加、Z+/Z-、裁剪", L"· طبقات …… إضافة، Z+/Z-، قص",
+		L"· Слои …… добавить, Z+/Z-, вырез", L"· Ebenen …… hinzufügen, Z+/Z-, Ausschnitt", L"· Camadas …… adicionar, Z+/Z-, recorte", L"· Lagen …… toevoegen, Z+/Z-, uitsnede",
+		L"· Warstwy …… dodaj, Z+/Z-, wycinek", L"· Katman …… ekle, Z+/Z-, kırp")); y += lh;
+	body(L, y, LL14(L"・音声 …… システム音 / マイク。右側の棒はピークメータ", L"· Audio …… system / mic. Right bars = peak meters", L"· Audio …… système / micro. Barres = crêtes", L"· Audio …… sistema / micro. Barre = picchi",
+		L"· Audio …… sistema / mic. Barras = picos", L"· 오디오 …… 시스템/마이크. 막대=피크", L"· 音频 …… 系统/麦克风。右侧=峰值", L"· صوت …… نظام/ميك. الأشرطة=قمم",
+		L"· Звук …… система / микрофон. Полосы = пики", L"· Audio …… System / Mikro. Balken = Pegel", L"· Áudio …… sistema / micro. Barras = picos", L"· Audio …… systeem / mic. Balken = pieken",
+		L"· Dźwięk …… system / mik. Paski = szczyty", L"· Ses …… sistem / mik. Çubuklar = tepe")); y += lh + 4;
+
+	// mini wiring diagram
+	title(L, y, LL14(L"FX配線", L"FX wiring", L"Câblage FX", L"Cablaggio FX", L"Cableado FX", L"FX 배선", L"效果连线", L"توصيل FX",
+		L"Схема FX", L"FX-Verdrahtung", L"Ligação FX", L"FX-bedrading", L"Okablowanie FX", L"FX kablolama"));
+	y += titleLh;
+	const int gx = L, gy = y, gw = min(280, rc.Width() / 2), gh = lh * 2 + 10;
+	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+	dc.FillSolidRect(gx + 4, gy + 6, 28, gh - 12, RGB(70, 140, 90));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + 8, gy + 8, L"IN");
+	dc.FillSolidRect(gx + 44, gy + 6, 50, gh - 12, RGB(180, 140, 60));
+	dc.FillSolidRect(gx + 104, gy + 6, 50, gh - 12, RGB(180, 140, 60));
+	dc.FillSolidRect(gx + 164, gy + 6, 40, gh - 12, RGB(55, 60, 75));
+	dc.FillSolidRect(gx + 214, gy + 6, 36, gh - 12, RGB(150, 70, 70));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + 48, gy + 8, L"Blur");
+	dc.TextOut(gx + 108, gy + 8, L"Neon");
+	dc.TextOut(gx + 172, gy + 8, L"S3");
+	dc.TextOut(gx + 218, gy + 8, L"OUT");
+	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+	y = gy + gh + 4;
+	muted(L, y, LL14(
+		L"パレットからスロットへドラッグ。右クリックで解除。最大8段・左→右に適用。",
+		L"Drag palette→slot. Right-click clears. Up to 8 steps, left→right.",
+		L"Glisser palette→slot. Clic droit = effacer. Max 8, gauche→droite.",
+		L"Trascina palette→slot. Destro = azzera. Max 8, sx→dx.",
+		L"Arrastre paleta→ranura. Clic der. borra. Máx. 8, izq→der.",
+		L"팔레트→슬롯 드래그. 우클릭 해제. 최대 8단, 좌→우.",
+		L"从调色板拖到插槽。右键清除。最多8段，左→右。",
+		L"اسحب إلى الفتحة. يمين=مسح. حتى 8، يسار→يمين.",
+		L"Перетащите на слот. ПКМ очищает. До 8, слева→направо.",
+		L"Palette→Slot. Rechtsklick löscht. Max. 8, links→rechts.",
+		L"Arraste paleta→slot. Direito limpa. Até 8, esq→dir.",
+		L"Palet→slot. Rechtsklik wist. Max 8, links→rechts.",
+		L"Przeciągnij→slot. PPM czyści. Max 8, lewo→prawo.",
+		L"Paletten→slot. Sağ tık siler. En fazla 8, sol→sağ."));
+	y += lh + 6;
+
+	title(L, y, LL14(L"エフェクト一覧", L"Effects", L"Effets", L"Effetti", L"Efectos", L"효과 목록", L"效果列表", L"التأثيرات",
+		L"Эффекты", L"Effekte", L"Efeitos", L"Effecten", L"Efekty", L"Efektler"));
+	y += titleLh;
+
+	const int colW = (rc.Width() - L * 2 - 8) / 2;
+	const int col2 = L + colW + 8;
+	int y1 = y, y2 = y;
+	for (int fx = 1; fx < SC_FX_COUNT; ++fx) {
+		const BOOL left = ((fx - 1) % 2) == 0;
+		int& yy = left ? y1 : y2;
+		const int xx = left ? L : col2;
+		CString line = m_owner ? (m_owner->FxName(fx) + L" — " + m_owner->FxDesc(fx))
+			: CString(L"?");
+		CRect tr(xx, yy, xx + colW - 2, yy + lh);
+		dc.SetTextColor(RGB(55, 55, 70));
+		dc.DrawText(line, &tr, DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+		yy += lh;
+	}
+	y = max(y1, y2) + 4;
+	if (y < rc.bottom - 4) {
+		muted(L, y, LL14(
+			L"FPS は 120 まで。重い配線では実フレームが下がることがあります。",
+			L"FPS up to 120. Heavy FX chains may lower real frame rate.",
+			L"FPS jusqu'à 120. Chaînes lourdes peuvent baisser le débit.",
+			L"FPS fino a 120. Catene pesanti possono ridurre gli fps.",
+			L"FPS hasta 120. Cadenas pesadas pueden bajar fps.",
+			L"FPS는 120까지. 무거운 배선은 실프레임이 낮아질 수 있습니다.",
+			L"FPS最高120。重效果链可能降低实际帧率。",
+			L"حتى 120 إطارًا. السلاسل الثقيلة قد تخفض المعدل.",
+			L"FPS до 120. Тяжёлые цепочки могут снизить частоту.",
+			L"FPS bis 120. Schwere Ketten senken ggf. die Rate.",
+			L"FPS até 120. Cadeias pesadas podem baixar a taxa.",
+			L"FPS tot 120. Zware ketens kunnen fps verlagen.",
+			L"FPS do 120. Ciężkie łańcuchy mogą obniżyć fps.",
+			L"FPS 120'ye kadar. Ağır zincirler gerçek kareyi düşürebilir."));
+	}
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
 static CScreenCaptureDlg* g_screenCaptureDlg = NULL;
 
 IMPLEMENT_DYNAMIC(CScreenCaptureDlg, CCustomBlurDialogBase)
@@ -930,6 +2009,8 @@ CScreenCaptureDlg::CScreenCaptureDlg(CWnd* pParent)
 	: CCustomBlurDialogBase(CScreenCaptureDlg::IDD, pParent)
 	, m_availCnt(0)
 	, m_layerCnt(0)
+	, m_monCnt(0)
+	, m_modeComboCnt(0)
 	, m_snapCsInit(FALSE)
 	, m_cacheBmp(NULL)
 	, m_cacheW(0)
@@ -950,7 +2031,9 @@ CScreenCaptureDlg::CScreenCaptureDlg(CWnd* pParent)
 	, m_hoverLayer(-1)
 	, m_stop(0)
 	, m_run(0)
+	, m_encodeGdi(0)
 	, m_lastHr(S_OK)
+	, m_lastStage(0)
 	, m_frameCnt(0)
 	, m_encFpsX10(0)
 	, m_prevFpsX10(0)
@@ -1013,12 +2096,16 @@ void CScreenCaptureDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_SC_PREVIEW, m_preview);
+	DDX_Control(pDX, IDC_SC_FXGRAPH, m_fxWire);
+	DDX_Control(pDX, IDC_SC_HELP, m_help);
 	DDX_Control(pDX, IDC_SC_MODE_L, m_modeLabel);
 	DDX_Control(pDX, IDC_SC_MODE, m_mode);
 	DDX_Control(pDX, IDC_SC_CANVAS_L, m_canvasLabel);
 	DDX_Control(pDX, IDC_SC_CANVAS, m_canvas);
 	DDX_Control(pDX, IDC_SC_FPS_L, m_fpsLabel);
 	DDX_Control(pDX, IDC_SC_FPS, m_fps);
+	DDX_Control(pDX, IDC_SC_EFFECT_L, m_effectLabel);
+	DDX_Control(pDX, IDC_SC_EFFECT, m_effect);
 	DDX_Control(pDX, IDC_SC_AUDIO, m_audio);
 	DDX_Control(pDX, IDC_SC_MIC, m_mic);
 	DDX_Control(pDX, IDC_SC_METER_MIC_L, m_meterMicL);
@@ -1043,6 +2130,12 @@ void CScreenCaptureDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SC_Y, m_editY);
 	DDX_Control(pDX, IDC_SC_W, m_editW);
 	DDX_Control(pDX, IDC_SC_H, m_editH);
+	DDX_Control(pDX, IDC_SC_CROP_L, m_cropLabel);
+	DDX_Control(pDX, IDC_SC_SX, m_editSX);
+	DDX_Control(pDX, IDC_SC_SY, m_editSY);
+	DDX_Control(pDX, IDC_SC_SW, m_editSW);
+	DDX_Control(pDX, IDC_SC_SH, m_editSH);
+	DDX_Control(pDX, IDC_SC_CROP_FULL, m_cropFull);
 	DDX_Control(pDX, IDC_SC_APPLYGEO, m_applyGeo);
 	DDX_Control(pDX, IDC_SC_FIT, m_fit);
 	DDX_Control(pDX, IDC_SC_SCALE50, m_scale50);
@@ -1061,6 +2154,7 @@ BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_SC_BROWSE, &CScreenCaptureDlg::OnBnClickedBrowse)
 	ON_BN_CLICKED(IDC_SC_START, &CScreenCaptureDlg::OnBnClickedStart)
 	ON_BN_CLICKED(IDC_SC_CLOSE, &CScreenCaptureDlg::OnBnClickedClose)
+	ON_BN_CLICKED(IDC_SC_HELP, &CScreenCaptureDlg::OnBnClickedHelp)
 	ON_BN_CLICKED(IDC_SC_REFRESH, &CScreenCaptureDlg::OnBnClickedRefresh)
 	ON_BN_CLICKED(IDC_SC_ADD, &CScreenCaptureDlg::OnBnClickedAdd)
 	ON_BN_CLICKED(IDC_SC_REMOVE, &CScreenCaptureDlg::OnBnClickedRemove)
@@ -1076,9 +2170,12 @@ BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
 	ON_CBN_SELCHANGE(IDC_SC_MODE, &CScreenCaptureDlg::OnCbnSelchangeMode)
 	ON_CBN_SELCHANGE(IDC_SC_CANVAS, &CScreenCaptureDlg::OnCbnSelchangeCanvas)
 	ON_CBN_SELCHANGE(IDC_SC_FPS, &CScreenCaptureDlg::OnCbnSelchangeFps)
+	ON_CBN_SELCHANGE(IDC_SC_EFFECT, &CScreenCaptureDlg::OnCbnSelchangeEffect)
+	ON_BN_CLICKED(IDC_SC_CROP_FULL, &CScreenCaptureDlg::OnBnClickedCropFull)
 	ON_LBN_SELCHANGE(IDC_SC_LAYER, &CScreenCaptureDlg::OnLbnSelchangeLayer)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_TIMER()
+	ON_WM_SIZE()
 	ON_WM_DESTROY()
 END_MESSAGE_MAP()
 
@@ -1088,6 +2185,8 @@ void CScreenCaptureDlg::RefreshOpaqueUi()
 	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 	if (m_path.GetSafeHwnd()) m_path.RepaintClient();
 	if (m_fps.GetSafeHwnd()) m_fps.Invalidate(FALSE);
+	if (m_effect.GetSafeHwnd()) m_effect.Invalidate(FALSE);
+	if (m_fxWire.GetSafeHwnd()) m_fxWire.Invalidate(FALSE);
 	if (m_mode.GetSafeHwnd()) m_mode.Invalidate(FALSE);
 	if (m_canvas.GetSafeHwnd()) m_canvas.Invalidate(FALSE);
 }
@@ -1150,28 +2249,169 @@ CString CScreenCaptureDlg::RefreshCaptureOutPathTimestamp(const CString& pathIn)
 	return path;
 }
 
+namespace {
+struct ScMonEnumCtx {
+	HMONITOR mons[CScreenCaptureDlg::SC_MON_MAX];
+	int cnt;
+};
+static BOOL CALLBACK ScEnumMonProc(HMONITOR hMon, HDC, LPRECT, LPARAM lp)
+{
+	ScMonEnumCtx* ctx = (ScMonEnumCtx*)lp;
+	if (!ctx || ctx->cnt >= CScreenCaptureDlg::SC_MON_MAX) return FALSE;
+	ctx->mons[ctx->cnt++] = hMon;
+	return TRUE;
+}
+} // namespace
+
+BOOL CScreenCaptureDlg::ResolveSelectedMonitorRect(int monIdx, RECT& outRc, HMONITOR* outMon) const
+{
+	memset(&outRc, 0, sizeof(outRc));
+	if (outMon) *outMon = NULL;
+	POINT ptZero = {};
+	HMONITOR primary = MonitorFromPoint(ptZero, MONITOR_DEFAULTTOPRIMARY);
+	if (monIdx < 0) {
+		MONITORINFO mi = {};
+		mi.cbSize = sizeof(mi);
+		if (primary && GetMonitorInfo(primary, &mi)) {
+			outRc = mi.rcMonitor;
+			if (outMon) *outMon = primary;
+			return TRUE;
+		}
+		outRc.left = 0;
+		outRc.top = 0;
+		outRc.right = GetSystemMetrics(SM_CXSCREEN);
+		outRc.bottom = GetSystemMetrics(SM_CYSCREEN);
+		if (outMon) *outMon = primary;
+		return TRUE;
+	}
+	if (monIdx >= 0 && monIdx < m_monCnt) {
+		HMONITOR mon = m_monHandles[monIdx];
+		MONITORINFO mi = {};
+		mi.cbSize = sizeof(mi);
+		if (mon && GetMonitorInfo(mon, &mi)) {
+			outRc = mi.rcMonitor;
+			if (outMon) *outMon = mon;
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+void CScreenCaptureDlg::RefreshModeCombo()
+{
+	if (!m_mode.GetSafeHwnd()) return;
+	const int keepMode = savedata.cap_mode;
+	const int keepMon = savedata.cap_monitor_idx;
+
+	ScMonEnumCtx ctx = {};
+	EnumDisplayMonitors(NULL, NULL, ScEnumMonProc, (LPARAM)&ctx);
+	m_monCnt = ctx.cnt;
+	for (int i = 0; i < m_monCnt; ++i)
+		m_monHandles[i] = ctx.mons[i];
+
+	m_mode.ResetContent();
+	m_modeComboCnt = 0;
+	auto addEntry = [&](int savedMode, int monIdx, const CString& text) {
+		if (m_modeComboCnt >= (int)_countof(m_modeComboMap)) return;
+		m_mode.AddString(text);
+		m_modeComboMap[m_modeComboCnt] = savedMode;
+		m_modeComboMonIdx[m_modeComboCnt] = monIdx;
+		m_modeComboCnt++;
+	};
+
+	addEntry(SC_MODE_PRIMARY, 0, LL14(L"プライマリ画面", L"Primary screen", L"Écran principal", L"Schermo principale",
+		L"Pantalla principal", L"기본 화면", L"主屏幕", L"الشاشة الرئيسية",
+		L"Основной экран", L"Primärer Bildschirm", L"Ecrã principal", L"Primair scherm",
+		L"Ekran główny", L"Birincil ekran"));
+
+	POINT ptZero = {};
+	HMONITOR primary = MonitorFromPoint(ptZero, MONITOR_DEFAULTTOPRIMARY);
+	int subNum = 2;
+	for (int i = 0; i < m_monCnt; ++i) {
+		if (m_monHandles[i] == primary) continue;
+		MONITORINFOEX mi = {};
+		mi.cbSize = sizeof(mi);
+		if (!GetMonitorInfo(m_monHandles[i], &mi)) continue;
+		const int mw = mi.rcMonitor.right - mi.rcMonitor.left;
+		const int mh = mi.rcMonitor.bottom - mi.rcMonitor.top;
+		CString label;
+		label.Format(LL14(L"モニタ%d (%dx%d)", L"Monitor %d (%dx%d)", L"Moniteur %d (%dx%d)", L"Monitor %d (%dx%d)",
+			L"Monitor %d (%dx%d)", L"모니터 %d (%dx%d)", L"显示器%d (%dx%d)", L"شاشة %d (%dx%d)",
+			L"Монитор %d (%dx%d)", L"Monitor %d (%dx%d)", L"Monitor %d (%dx%d)", L"Monitor %d (%dx%d)",
+			L"Monitor %d (%dx%d)", L"Monitör %d (%dx%d)"),
+			subNum, mw, mh);
+		addEntry(SC_MODE_MONITOR, i, label);
+		subNum++;
+	}
+
+	addEntry(SC_MODE_VIRTUAL, 0, LL14(L"全モニタ (仮想)", L"All monitors (virtual)", L"Tous les moniteurs", L"Tutti i monitor",
+		L"Todos los monitores", L"모든 모니터", L"全部显示器", L"كل الشاشات",
+		L"Все мониторы", L"Alle Monitore", L"Todos os monitores", L"Alle monitoren",
+		L"Wszystkie monitory", L"Tüm monitörler"));
+	addEntry(SC_MODE_WINDOWS, 0, LL14(L"ウィンドウ合成", L"Window compose", L"Composition fenêtres", L"Composizione finestre",
+		L"Composición de ventanas", L"창 합성", L"窗口合成", L"تركيب النوافذ",
+		L"Композиция окон", L"Fenster-Komposition", L"Composição de janelas", L"Venstercompositie",
+		L"Kompozycja okien", L"Pencere kompozisyonu"));
+
+	m_mode.SetCurSel(SavedModeToComboSel(keepMode, keepMon));
+}
+
+int CScreenCaptureDlg::ModeComboToSavedMode(int comboSel, int& outMonIdx) const
+{
+	outMonIdx = 0;
+	if (comboSel < 0 || comboSel >= m_modeComboCnt) return SC_MODE_PRIMARY;
+	outMonIdx = m_modeComboMonIdx[comboSel];
+	return m_modeComboMap[comboSel];
+}
+
+int CScreenCaptureDlg::SavedModeToComboSel(int mode, int monIdx) const
+{
+	for (int i = 0; i < m_modeComboCnt; ++i) {
+		if (m_modeComboMap[i] != mode) continue;
+		if (mode == SC_MODE_MONITOR && m_modeComboMonIdx[i] != monIdx) continue;
+		return i;
+	}
+	return 0;
+}
+
+BOOL CScreenCaptureDlg::IsWindowComposeMode() const
+{
+	int monIdx = 0;
+	return ModeComboToSavedMode(m_mode.GetCurSel(), monIdx) == SC_MODE_WINDOWS;
+}
+
 void CScreenCaptureDlg::ResolveCanvasSize(int& outW, int& outH) const
 {
 	const int preset = m_canvas.GetCurSel();
 	if (preset == 1) { outW = 1280; outH = 720; return; }
 	if (preset == 2) { outW = 1920; outH = 1080; return; }
 	if (preset == 3) { outW = 1600; outH = 900; return; }
-	// 0=自動: レイヤbboxではなく画面基準（レイヤはキャンバスへ縮小フィット）
-	const int mode = m_mode.GetCurSel();
+	if (preset == 4) { outW = 3840; outH = 2160; return; }
+
+	// 0=自動: 選択中のキャプチャ対象の実解像度（4K も維持。旧:常に1920へ縮小）
+	int monIdx = 0;
+	const int mode = ModeComboToSavedMode(m_mode.GetCurSel(), monIdx);
 	if (mode == SC_MODE_VIRTUAL) {
 		outW = GetSystemMetrics(SM_CXVIRTUALSCREEN);
 		outH = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+	} else if (mode == SC_MODE_MONITOR) {
+		RECT rc = {};
+		if (ResolveSelectedMonitorRect(monIdx, rc, NULL)) {
+			outW = rc.right - rc.left;
+			outH = rc.bottom - rc.top;
+		} else {
+			outW = GetSystemMetrics(SM_CXSCREEN);
+			outH = GetSystemMetrics(SM_CYSCREEN);
+		}
 	} else {
 		outW = GetSystemMetrics(SM_CXSCREEN);
 		outH = GetSystemMetrics(SM_CYSCREEN);
 	}
-	if (outW > 1920) {
-		outH = (int)(((__int64)outH * 1920) / outW);
-		outW = 1920;
-	}
 	outW &= ~1; outH &= ~1;
 	if (outW < 160) outW = 160;
 	if (outH < 120) outH = 120;
+	if (outW > 7680) outW = 7680;
+	if (outH > 4320) outH = 4320;
 }
 
 void CScreenCaptureDlg::FitLayerIntoCanvas(Layer& L, int cw, int ch) const
@@ -1227,8 +2467,8 @@ void CScreenCaptureDlg::FitAllLayersIntoCanvas()
 void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 {
 	memset(&out, 0, sizeof(out));
-	int mode = m_mode.GetCurSel();
-	if (mode < 0 || mode > 2) mode = 0;
+	int monIdx = 0;
+	int mode = ModeComboToSavedMode(m_mode.GetCurSel(), monIdx);
 	out.mode = mode;
 	ResolveCanvasSize(out.canvasW, out.canvasH);
 	out.layerCnt = 0;
@@ -1238,6 +2478,29 @@ void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 	out.includeMp = wantMp;
 	out.mpHidden = FALSE;
 	out.mpHwnd = FindMediaPlayerHwnd();
+
+	RECT monRc = {};
+	HMONITOR mon = NULL;
+	if (mode == SC_MODE_MONITOR)
+		ResolveSelectedMonitorRect(monIdx, monRc, &mon);
+	else if (mode == SC_MODE_PRIMARY)
+		ResolveSelectedMonitorRect(-1, monRc, &mon);
+	out.monL = monRc.left;
+	out.monT = monRc.top;
+	out.monR = monRc.right;
+	out.monB = monRc.bottom;
+	out.monHandle = mon;
+	out.fxN = 0;
+	out.fxTime = (float)(GetTickCount() % 600000) / 1000.f;
+	memset(out.fx, 0, sizeof(out.fx));
+	{
+		int chain[SC_FX_CHAIN_MAX] = {};
+		int cn = 0;
+		GetFxChain(chain, &cn);
+		out.fxN = cn;
+		for (int i = 0; i < cn; ++i)
+			out.fx[i] = chain[i];
+	}
 
 	if (mode == SC_MODE_WINDOWS) {
 		for (int i = 0; i < m_layerCnt && out.layerCnt < SC_LAYER_MAX; ++i) {
@@ -1280,6 +2543,10 @@ void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 			out.mpY = m_layers[i].y;
 			out.mpW = m_layers[i].w;
 			out.mpH = m_layers[i].h;
+			out.mpSrcX = m_layers[i].srcX;
+			out.mpSrcY = m_layers[i].srcY;
+			out.mpSrcW = m_layers[i].srcW;
+			out.mpSrcH = m_layers[i].srcH;
 			out.mpHidden = m_layers[i].hidden;
 			break;
 		}
@@ -1304,11 +2571,415 @@ void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 				out.mpY = out.layers[i].y;
 				out.mpW = out.layers[i].w;
 				out.mpH = out.layers[i].h;
+				out.mpSrcX = out.layers[i].srcX;
+				out.mpSrcY = out.layers[i].srcY;
+				out.mpSrcW = out.layers[i].srcW;
+				out.mpSrcH = out.layers[i].srcH;
 				out.mpHidden = out.layers[i].hidden;
 				break;
 			}
 		}
 	}
+}
+
+void CScreenCaptureDlg::GetFxChain(int* fxOut, int* nOut) const
+{
+	if (m_fxWire.GetSafeHwnd()) {
+		m_fxWire.GetChain(fxOut, nOut);
+		return;
+	}
+	int n = savedata.cap_fx_n;
+	if (n < 0) n = 0;
+	if (n > SC_FX_CHAIN_MAX) n = SC_FX_CHAIN_MAX;
+	const int src[SC_FX_CHAIN_MAX] = {
+		savedata.cap_fx0, savedata.cap_fx1, savedata.cap_fx2, savedata.cap_fx3,
+		savedata.cap_fx4, savedata.cap_fx5, savedata.cap_fx6, savedata.cap_fx7
+	};
+	int cn = 0;
+	int tmp[SC_FX_CHAIN_MAX] = {};
+	for (int i = 0; i < n; ++i) {
+		if (src[i] > SC_FX_NONE && src[i] < SC_FX_COUNT)
+			tmp[cn++] = src[i];
+	}
+	if (cn <= 0 && savedata.cap_effect > 0 && savedata.cap_effect < SC_FX_COUNT) {
+		tmp[0] = savedata.cap_effect;
+		cn = 1;
+	}
+	if (nOut) *nOut = cn;
+	if (fxOut) {
+		for (int i = 0; i < SC_FX_CHAIN_MAX; ++i)
+			fxOut[i] = (i < cn) ? tmp[i] : 0;
+	}
+}
+
+CString CScreenCaptureDlg::FxName(int fx) const
+{
+	switch (fx) {
+	case SC_FX_BLUR_SOFT:
+		return LL14(L"ぼかし弱", L"Soft blur", L"Flou léger", L"Sfocatura soft",
+			L"Desenfoque suave", L"약한 흐림", L"轻模糊", L"ضباب خفيف",
+			L"Лёгкое размытие", L"Weich (schwach)", L"Desfoque suave", L"Zachte blur",
+			L"Lekkie rozmycie", L"Hafif bulanık");
+	case SC_FX_BLUR_STRONG:
+		return LL14(L"ぼかし強", L"Strong blur", L"Flou fort", L"Sfocatura forte",
+			L"Desenfoque fuerte", L"강한 흐림", L"强模糊", L"ضباب قوي",
+			L"Сильное размытие", L"Weich (stark)", L"Desfoque forte", L"Sterke blur",
+			L"Silne rozmycie", L"Güçlü bulanık");
+	case SC_FX_GRAY:
+		return LL14(L"モノクロ", L"Monochrome", L"Monochrome", L"Monocromatico",
+			L"Monocromo", L"모노크롬", L"单色", L"أحادي اللون",
+			L"Монохром", L"Monochrom", L"Monocromático", L"Monochroom",
+			L"Monochromia", L"Monokrom");
+	case SC_FX_SEPIA:
+		return LL14(L"セピア", L"Sepia", L"Sépia", L"Seppia",
+			L"Sepia", L"세피아", L"棕褐", L"سيبيا",
+			L"Сепия", L"Sepia", L"Sépia", L"Sepia",
+			L"Sepia", L"Sepya");
+	case SC_FX_VIGNETTE:
+		return LL14(L"ビネット", L"Vignette", L"Vignette", L"Vignettatura",
+			L"Viñeta", L"비네트", L"暗角", L"تظليل الحواف",
+			L"Виньетка", L"Vignette", L"Vinheta", L"Vignet",
+			L"Winieta", L"Vinyet");
+	case SC_FX_SHARPEN:
+		return LL14(L"シャープ", L"Sharpen", L"Netteté", L"Nitidezza",
+			L"Nitidez", L"샤픈", L"锐化", L"حدة",
+			L"Резкость", L"Schärfen", L"Nitidez", L"Verscherpen",
+			L"Wyostrzenie", L"Keskinleştir");
+	case SC_FX_MIRROR:
+		return LL14(L"左右反転", L"Mirror", L"Miroir", L"Specchio",
+			L"Espejo", L"좌우반전", L"左右镜像", L"مرآة",
+			L"Зеркало", L"Spiegeln", L"Espelho", L"Spiegelen",
+			L"Odbicie", L"Ayna");
+	case SC_FX_WAVE:
+		return LL14(L"波", L"Wave", L"Vague", L"Onda",
+			L"Onda", L"파도", L"波浪", L"موجة",
+			L"Волна", L"Welle", L"Onda", L"Golf",
+			L"Fala", L"Dalga");
+	case SC_FX_UNDERWATER:
+		return LL14(L"水中", L"Underwater", L"Sous-marin", L"Sott'acqua",
+			L"Bajo el agua", L"수중", L"水下", L"تحت الماء",
+			L"Под водой", L"Unterwasser", L"Subaquático", L"Onderwater",
+			L"Pod wodą", L"Su altı");
+	case SC_FX_DUSK:
+		return LL14(L"夕暮れ", L"Dusk", L"Crépuscule", L"Crepuscolo",
+			L"Atardecer", L"황혼", L"黄昏", L"غروب",
+			L"Сумерки", L"Dämmerung", L"Crepúsculo", L"Schemering",
+			L"Zmierzch", L"Alacakaranlık");
+	case SC_FX_COOL:
+		return LL14(L"クール", L"Cool tone", L"Tons froids", L"Toni freddi",
+			L"Tono frío", L"쿨톤", L"冷色", L"درجات باردة",
+			L"Холодный тон", L"Kühle Töne", L"Tom frio", L"Koele tint",
+			L"Zimny ton", L"Soğuk ton");
+	case SC_FX_WARM:
+		return LL14(L"ウォーム", L"Warm tone", L"Tons chauds", L"Toni caldi",
+			L"Tono cálido", L"웜톤", L"暖色", L"درجات دافئة",
+			L"Тёплый тон", L"Warme Töne", L"Tom quente", L"Warme tint",
+			L"Ciepły ton", L"Sıcak ton");
+	case SC_FX_POSTER:
+		return LL14(L"ポスタライズ", L"Posterize", L"Postériser", L"Posterizza",
+			L"Posterizar", L"포스터화", L"色调分离", L"ملصق",
+			L"Постеризация", L"Posterisieren", L"Posterizar", L"Posteriseren",
+			L"Posteryzacja", L"Posterize");
+	case SC_FX_SCANLINE:
+		return LL14(L"走査線", L"Scanlines", L"Lignes de balayage", L"Linee di scansione",
+			L"Líneas de barrido", L"스캔라인", L"扫描线", L"خطوط المسح",
+			L"Строки развёртки", L"Abtastzeilen", L"Linhas de varredura", L"Aftastlijnen",
+			L"Linie skanowania", L"Tarama çizgileri");
+	case SC_FX_EDGE:
+		return LL14(L"エッジ", L"Edge detect", L"Contours", L"Bordi",
+			L"Bordes", L"에지", L"边缘", L"حواف",
+			L"Контуры", L"Kanten", L"Bordas", L"Randen",
+			L"Krawędzie", L"Kenar");
+	case SC_FX_INVERT:
+		return LL14(L"ネガ", L"Invert", L"Négatif", L"Inverti",
+			L"Invertir", L"반전", L"反色", L"عكس",
+			L"Негатив", L"Negativ", L"Inverter", L"Inverteren",
+			L"Negatyw", L"Negatif");
+	case SC_FX_SOLARIZE:
+		return LL14(L"ソラリゼ", L"Solarize", L"Solarisation", L"Solarizza",
+			L"Solarizar", L"솔라라이즈", L"曝光过度", L"تشميس",
+			L"Соляризация", L"Solarisieren", L"Solarizar", L"Solariseren",
+			L"Solaryzacja", L"Solarize");
+	case SC_FX_PIXELATE:
+		return LL14(L"モザイク", L"Pixelate", L"Pixeliser", L"Pixel",
+			L"Pixelar", L"모자이크", L"马赛克", L"بكسلة",
+			L"Пиксель", L"Verpixeln", L"Pixelizar", L"Verpixelen",
+			L"Pikselizacja", L"Piksel");
+	case SC_FX_FLIP_V:
+		return LL14(L"上下反転", L"Flip V", L"Retournement V", L"Capovolgi V",
+			L"Voltear V", L"상하반전", L"上下翻转", L"قلب عمودي",
+			L"Отразить В", L"Vertikal spiegeln", L"Inverter V", L"Verticaal",
+			L"Odwróć V", L"Dikey çevir");
+	case SC_FX_NOISE:
+		return LL14(L"ノイズ", L"Noise", L"Bruit", L"Rumore",
+			L"Ruido", L"노이즈", L"噪点", L"ضوضاء",
+			L"Шум", L"Rauschen", L"Ruído", L"Ruis",
+			L"Szum", L"Gürültü");
+	case SC_FX_BLOOM:
+		return LL14(L"ブルーム", L"Bloom", L"Bloom", L"Bloom",
+			L"Bloom", L"블룸", L"辉光", L"توهج",
+			L"Свечение", L"Bloom", L"Bloom", L"Bloom",
+			L"Bloom", L"Bloom");
+	case SC_FX_NEON:
+		return LL14(L"ネオン", L"Neon", L"Néon", L"Neon",
+			L"Neón", L"네온", L"霓虹", L"نيون",
+			L"Неон", L"Neon", L"Neon", L"Neon",
+			L"Neon", L"Neon");
+	case SC_FX_NIGHTVISION:
+		return LL14(L"ナイトビジョン", L"Night vision", L"Vision nocturne", L"Visione notturna",
+			L"Visión nocturna", L"야간투시", L"夜视", L"رؤية ليلية",
+			L"ПНВ", L"Nachtsicht", L"Visão noturna", L"Nachtzicht",
+			L"Noktowizja", L"Gece görüş");
+	case SC_FX_COMIC:
+		return LL14(L"コミック", L"Comic", L"Comic", L"Fumetto",
+			L"Cómic", L"코믹", L"漫画风", L"كوميك",
+			L"Комикс", L"Comic", L"HQ", L"Strip",
+			L"Komiks", L"Çizgi roman");
+	case SC_FX_RETRO:
+		return LL14(L"レトロ", L"Retro", L"Rétro", L"Retro",
+			L"Retro", L"레트로", L"复古", L"ريترو",
+			L"Ретро", L"Retro", L"Retrô", L"Retro",
+			L"Retro", L"Retro");
+	case SC_FX_FISHEYE:
+		return LL14(L"魚眼", L"Fisheye", L"Fish-eye", L"Fish-eye",
+			L"Ojo de pez", L"어안", L"鱼眼", L"عين السمكة",
+			L"Рыбий глаз", L"Fischauge", L"Olho de peixe", L"Visoog",
+			L"Rybie oko", L"Balık gözü");
+	case SC_FX_HUE_SHIFT:
+		return LL14(L"色相シフト", L"Hue shift", L"Teinte", L"Tonalità",
+			L"Matiz", L"색조 이동", L"色相偏移", L"إزاحة اللون",
+			L"Сдвиг оттенка", L"Farbton", L"Matiz", L"Tint",
+			L"Odcień", L"Ton kaydır");
+	case SC_FX_CONTRAST:
+		return LL14(L"コントラスト", L"Contrast", L"Contraste", L"Contrasto",
+			L"Contraste", L"대비", L"对比度", L"تباين",
+			L"Контраст", L"Kontrast", L"Contraste", L"Contrast",
+			L"Kontrast", L"Kontrast");
+	case SC_FX_BRIGHTNESS:
+		return LL14(L"明るさ", L"Brightness", L"Luminosité", L"Luminosità",
+			L"Brillo", L"밝기", L"亮度", L"سطوع",
+			L"Яркость", L"Helligkeit", L"Brilho", L"Helderheid",
+			L"Jasność", L"Parlaklık");
+	case SC_FX_SATURATE:
+		return LL14(L"彩度アップ", L"Saturate", L"Saturation", L"Saturazione",
+			L"Saturar", L"채도 업", L"饱和度", L"تشبع",
+			L"Насыщенность", L"Sättigung", L"Saturação", L"Verzadiging",
+			L"Nasycenie", L"Doygunluk");
+	default:
+		return LL14(L"なし", L"None", L"Aucun", L"Nessuno",
+			L"Ninguno", L"없음", L"无", L"بدون",
+			L"Нет", L"Kein", L"Nenhum", L"Geen",
+			L"Brak", L"Yok");
+	}
+}
+
+CString CScreenCaptureDlg::FxDesc(int fx) const
+{
+	switch (fx) {
+	case SC_FX_BLUR_SOFT:
+		return LL14(L"弱いぼかし", L"Light blur", L"Flou léger", L"Sfocatura leggera",
+			L"Desenfoque suave", L"약한 흐림", L"轻模糊", L"ضباب خفيف",
+			L"Лёгкое размытие", L"Leichte Unschärfe", L"Desfoque suave", L"Lichte blur",
+			L"Lekkie rozmycie", L"Hafif bulanıklık");
+	case SC_FX_BLUR_STRONG:
+		return LL14(L"強いぼかし", L"Strong blur", L"Flou fort", L"Sfocatura forte",
+			L"Desenfoque fuerte", L"강한 흐림", L"强模糊", L"ضباب قوي",
+			L"Сильное размытие", L"Starke Unschärfe", L"Desfoque forte", L"Sterke blur",
+			L"Silne rozmycie", L"Güçlü bulanıklık");
+	case SC_FX_GRAY:
+		return LL14(L"グレースケール", L"Grayscale", L"Niveaux de gris", L"Scala di grigi",
+			L"Escala de grises", L"그레이스케일", L"灰度", L"تدرج رمادي",
+			L"Оттенки серого", L"Graustufen", L"Escala de cinza", L"Grijstinten",
+			L"Odcienie szarości", L"Gri ton");
+	case SC_FX_SEPIA:
+		return LL14(L"セピア調", L"Sepia tone", L"Ton sépia", L"Tono seppia",
+			L"Tono sepia", L"세피아 톤", L"棕褐调", L"درجة سيبيا",
+			L"Сепия", L"Sepiaton", L"Tom sépia", L"Sepiatint",
+			L"Ton sepii", L"Sepya ton");
+	case SC_FX_VIGNETTE:
+		return LL14(L"周辺減光", L"Darken edges", L"Assombrir bords", L"Scurisce i bordi",
+			L"Oscurece bordes", L"가장자리 어둡게", L"暗角", L"تظليل الحواف",
+			L"Виньетка", L"Ränder abdunkeln", L"Escurece bordas", L"Randen donker",
+			L"Przyciemnia brzegi", L"Kenarları karart");
+	case SC_FX_SHARPEN:
+		return LL14(L"輪郭を強調", L"Emphasize edges", L"Renforce contours", L"Enfatizza bordi",
+			L"Resalta bordes", L"윤곽 강조", L"锐化轮廓", L"إبراز الحواف",
+			L"Подчёркивает края", L"Kanten betonen", L"Realça bordas", L"Randen benadrukken",
+			L"Wyostrza krawędzie", L"Kenarları belirginleştir");
+	case SC_FX_MIRROR:
+		return LL14(L"左右ミラー", L"Horizontal mirror", L"Miroir horizontal", L"Specchio orizz.",
+			L"Espejo horizontal", L"좌우 미러", L"水平镜像", L"مرآة أفقية",
+			L"Горизонтальное зеркало", L"Horizontal spiegeln", L"Espelho horizontal", L"Horizontaal spiegelen",
+			L"Odbicie poziome", L"Yatay ayna");
+	case SC_FX_WAVE:
+		return LL14(L"波紋ゆらぎ", L"Wave distortion", L"Distorsion vague", L"Distorsione onda",
+			L"Distorsión onda", L"물결 왜곡", L"波浪扭曲", L"تشويه موجي",
+			L"Волновое искажение", L"Wellenverzerrung", L"Distorção de onda", L"Golfvervorming",
+			L"Zniekształcenie fali", L"Dalga bozulması");
+	case SC_FX_UNDERWATER:
+		return LL14(L"水中＋青み", L"Underwater + cyan", L"Sous-marin + cyan", L"Sott'acqua + ciano",
+			L"Bajo agua + cian", L"수중+시안", L"水下+青调", L"تحت الماء + سماوي",
+			L"Под водой + циан", L"Unterwasser + Cyan", L"Subaquático + ciano", L"Onderwater + cyaan",
+			L"Pod wodą + cyjan", L"Su altı + camgöbeği");
+	case SC_FX_DUSK:
+		return LL14(L"夕暮れの暖色", L"Warm dusk tint", L"Teinte crépuscule", L"Tinta crepuscolo",
+			L"Tinte atardecer", L"황혼 웜톤", L"黄昏暖色", L"درجة غروب دافئة",
+			L"Тёплые сумерки", L"Warme Dämmerung", L"Tom crepúsculo", L"Warme schemer",
+			L"Ciepły zmierzch", L"Sıcak alacakaranlık");
+	case SC_FX_COOL:
+		return LL14(L"寒色寄り", L"Cool color cast", L"Dominante froide", L"Dominante fredda",
+			L"Dominante fría", L"쿨톤 캐스트", L"冷色偏移", L"صبغة باردة",
+			L"Холодный оттенок", L"Kühler Stich", L"Tom frio", L"Koele zweem",
+			L"Zimny odcień", L"Soğuk renk");
+	case SC_FX_WARM:
+		return LL14(L"暖色寄り", L"Warm color cast", L"Dominante chaude", L"Dominante calda",
+			L"Dominante cálida", L"웜톤 캐스트", L"暖色偏移", L"صبغة دافئة",
+			L"Тёплый оттенок", L"Warmer Stich", L"Tom quente", L"Warme zweem",
+			L"Ciepły odcień", L"Sıcak renk");
+	case SC_FX_POSTER:
+		return LL14(L"色数を減らす", L"Reduce color steps", L"Réduit les couleurs", L"Riduce i colori",
+			L"Reduce colores", L"색 단계 감소", L"减少色阶", L"تقليل الألوان",
+			L"Меньше оттенков", L"Weniger Farbstufen", L"Reduz cores", L"Minder kleuren",
+			L"Mniej barw", L"Renk basamağını azalt");
+	case SC_FX_SCANLINE:
+		return LL14(L"CRT風の走査線", L"CRT-like scanlines", L"Lignes type CRT", L"Linee tipo CRT",
+			L"Líneas tipo CRT", L"CRT 스캔라인", L"CRT扫描线", L"خطوط CRT",
+			L"Строки как CRT", L"CRT-Abtastzeilen", L"Linhas tipo CRT", L"CRT-aftastlijnen",
+			L"Linie jak CRT", L"CRT tarama çizgileri");
+	case SC_FX_EDGE:
+		return LL14(L"輪郭検出", L"Edge detection", L"Détection de contours", L"Rilevamento bordi",
+			L"Detección de bordes", L"에지 검출", L"边缘检测", L"كشف الحواف",
+			L"Выделение контуров", L"Kantenerkennung", L"Detecção de bordas", L"Randdetectie",
+			L"Wykrywanie krawędzi", L"Kenar algılama");
+	case SC_FX_INVERT:
+		return LL14(L"色反転(ネガ)", L"Color invert (negative)", L"Inversion (négatif)", L"Inversione (negativo)",
+			L"Invertir (negativo)", L"색 반전(네거)", L"反色(负片)", L"عكس الألوان",
+			L"Инверсия (негатив)", L"Negativ", L"Inverter (negativo)", L"Inverteren (negatief)",
+			L"Inwersja (negatyw)", L"Renk tersine (negatif)");
+	case SC_FX_SOLARIZE:
+		return LL14(L"明るい部分を反転", L"Invert bright areas", L"Inverse les zones claires", L"Inverte zone chiare",
+			L"Invierte zonas claras", L"밝은 영역 반전", L"亮部反转", L"عكس المناطق الساطعة",
+			L"Инверсия светлых", L"Helle Bereiche invertieren", L"Inverte áreas claras", L"Lichte delen inverteren",
+			L"Odwraca jasne obszary", L"Parlak alanları ters çevir");
+	case SC_FX_PIXELATE:
+		return LL14(L"モザイク化", L"Blocky pixelate", L"Pixellisation", L"Effetto pixel",
+			L"Pixelado", L"모자이크", L"马赛克化", L"بكسلة",
+			L"Пикселизация", L"Verpixeln", L"Pixelizar", L"Verpixelen",
+			L"Pikselizacja", L"Pikselleştir");
+	case SC_FX_FLIP_V:
+		return LL14(L"上下ミラー", L"Vertical flip", L"Retournement vertical", L"Capovolgi verticale",
+			L"Voltear vertical", L"상하 반전", L"垂直翻转", L"قلب عمودي",
+			L"Вертикальный переворот", L"Vertikal spiegeln", L"Inverter vertical", L"Verticaal spiegelen",
+			L"Odwrócenie pionowe", L"Dikey çevir");
+	case SC_FX_NOISE:
+		return LL14(L"粒状ノイズ", L"Grain noise", L"Grain", L"Rumore granulosità",
+			L"Grano", L"그레인 노이즈", L"颗粒噪点", L"ضوضاء حبيبية",
+			L"Зернистый шум", L"Körniges Rauschen", L"Grão", L"Korrelruis",
+			L"Ziarnisty szum", L"Gren gürültü");
+	case SC_FX_BLOOM:
+		return LL14(L"ハイライトの輝光", L"Highlight glow", L"Lueur des hautes lumières", L"Bagliore alte luci",
+			L"Resplandor de luces", L"하이라이트 글로우", L"高光辉光", L"توهج الإبراز",
+			L"Свечение бликов", L"Highlight-Glow", L"Brilho de realces", L"Highlight-gloed",
+			L"Poświata świateł", L"Vurgu parıltısı");
+	case SC_FX_NEON:
+		return LL14(L"ネオン輪郭", L"Neon outlines", L"Contours néon", L"Contorni neon",
+			L"Contornos neón", L"네온 윤곽", L"霓虹轮廓", L"حدود نيون",
+			L"Неоновые контуры", L"Neon-Konturen", L"Contornos neon", L"Neonranden",
+			L"Neonowe kontury", L"Neon kenarlar");
+	case SC_FX_NIGHTVISION:
+		return LL14(L"暗視風(緑)", L"Night-vision green", L"Vision nocturne verte", L"Visione notturna verde",
+			L"Visión nocturna verde", L"야간투시 녹색", L"夜视绿", L"رؤية ليلية خضراء",
+			L"ПНВ (зелёный)", L"Nachtsicht grün", L"Visão noturna verde", L"Nachtzicht groen",
+			L"Noktowizja zielona", L"Gece görüş yeşil");
+	case SC_FX_COMIC:
+		return LL14(L"漫画風の塗り", L"Comic shading", L"Rendu comic", L"Resa fumetto",
+			L"Sombreado cómic", L"코믹 음영", L"漫画着色", L"تظليل كوميك",
+			L"Комиксная заливка", L"Comic-Schattierung", L"Sombreamento HQ", L"Strip-arcering",
+			L"Cieniowanie komiksowe", L"Çizgi roman gölgeleme");
+	case SC_FX_RETRO:
+		return LL14(L"レトロ写真風", L"Retro photo look", L"Look photo rétro", L"Aspetto foto retro",
+			L"Aspecto foto retro", L"레트로 사진", L"复古照片风", L"مظهر صورة ريترو",
+			L"Ретро-фото", L"Retro-Fotooptik", L"Visual foto retrô", L"Retro-fotolook",
+			L"Wygląd retro", L"Retro foto görünümü");
+	case SC_FX_FISHEYE:
+		return LL14(L"魚眼レンズ歪み", L"Fisheye lens warp", L"Distorsion fish-eye", L"Distorsione fish-eye",
+			L"Distorsión ojo de pez", L"어안 왜곡", L"鱼眼畸变", L"تشويه عين السمكة",
+			L"Искажение рыбий глаз", L"Fischaugenverzerrung", L"Distorção olho de peixe", L"Visoogvervorming",
+			L"Zniekształcenie rybie oko", L"Balık gözü bozulması");
+	case SC_FX_HUE_SHIFT:
+		return LL14(L"色相を回転", L"Rotate hue", L"Fait tourner la teinte", L"Ruota la tonalità",
+			L"Rota el matiz", L"색조 회전", L"旋转色相", L"تدوير اللون",
+			L"Сдвиг оттенка", L"Farbton drehen", L"Rotaciona matiz", L"Tint draaien",
+			L"Obraca odcień", L"Ton kaydır");
+	case SC_FX_CONTRAST:
+		return LL14(L"コントラスト強調", L"Boost contrast", L"Augmente le contraste", L"Aumenta contrasto",
+			L"Aumenta contraste", L"대비 강화", L"提高对比", L"زيادة التباين",
+			L"Усиление контраста", L"Kontrast erhöhen", L"Aumenta contraste", L"Contrast verhogen",
+			L"Wzmacnia kontrast", L"Kontrast artır");
+	case SC_FX_BRIGHTNESS:
+		return LL14(L"全体を明るく", L"Brighten overall", L"Éclaircit globalement", L"Schiarisce tutto",
+			L"Aclara todo", L"전체 밝게", L"整体提亮", L"إضاءة عامة",
+			L"Общее осветление", L"Gesamt heller", L"Clareia tudo", L"Algeheel helderder",
+			L"Rozjaśnia całość", L"Genel parlaklık");
+	case SC_FX_SATURATE:
+		return LL14(L"彩度を上げる", L"Increase saturation", L"Augmente la saturation", L"Aumenta saturazione",
+			L"Aumenta saturación", L"채도 증가", L"提高饱和度", L"زيادة التشبع",
+			L"Повышает насыщенность", L"Sättigung erhöhen", L"Aumenta saturação", L"Verzadiging verhogen",
+			L"Zwiększa nasycenie", L"Doygunluk artır");
+	default:
+		return LL14(L"効果なし", L"No effect", L"Aucun effet", L"Nessun effetto",
+			L"Sin efecto", L"효과 없음", L"无效果", L"بدون تأثير",
+			L"Без эффекта", L"Kein Effekt", L"Sem efeito", L"Geen effect",
+			L"Bez efektu", L"Efekt yok");
+	}
+}
+
+void CScreenCaptureDlg::SyncFxComboFromChain()
+{
+	if (!m_effect.GetSafeHwnd()) return;
+	int chain[SC_FX_CHAIN_MAX] = {};
+	int cn = 0;
+	GetFxChain(chain, &cn);
+	if (cn <= 0) {
+		m_effect.SetCurSel(0);
+		return;
+	}
+	if (cn == 1) {
+		m_effect.SetCurSel(chain[0]);
+		return;
+	}
+	// 複数段: 「カスタム」行があればそこへ。なければ先頭を表示しつつ末尾カスタムを確保
+	const int customIdx = m_effect.FindStringExact(-1, LL14(
+		L"(カスタム配線)", L"(Custom wiring)", L"(Câblage perso.)", L"(Cablaggio pers.)",
+		L"(Cableado pers.)", L"(사용자 배선)", L"(自定义连线)", L"(توصيل مخصص)",
+		L"(Своя схема)", L"(Eigene Verdrahtung)", L"(Ligação pers.)", L"(Eigen bedrading)",
+		L"(Własne okablowanie)", L"(Özel kablolama)"));
+	if (customIdx >= 0)
+		m_effect.SetCurSel(customIdx);
+	else
+		m_effect.SetCurSel(chain[0]);
+}
+
+void CScreenCaptureDlg::ApplyFxComboToChain()
+{
+	if (!m_effect.GetSafeHwnd()) return;
+	const int sel = m_effect.GetCurSel();
+	if (sel <= 0) {
+		const int empty[SC_FX_CHAIN_MAX] = {};
+		m_fxWire.SetChain(empty, 0);
+		return;
+	}
+	if (sel > 0 && sel < SC_FX_COUNT) {
+		const int one[1] = { sel };
+		m_fxWire.SetChain(one, 1);
+	}
+}
+
+void CScreenCaptureDlg::OnFxWireChanged()
+{
+	SyncFxComboFromChain();
+	PersistUiToSavedata();
+	UpdatePreview(TRUE);
 }
 
 void CScreenCaptureDlg::PersistUiToSavedata()
@@ -1318,16 +2989,32 @@ void CScreenCaptureDlg::PersistUiToSavedata()
 	savedata.cap_with_mic = m_mic.GetCheck() ? 1 : 0;
 	savedata.cap_include_mp = m_includeMp.GetCheck() ? 1 : 0;
 	savedata.cap_fps = CurrentPreviewFps();
-	int mode = m_mode.GetCurSel();
-	if (mode < 0 || mode > 2) mode = 0;
+	int monIdx = 0;
+	int mode = ModeComboToSavedMode(m_mode.GetCurSel(), monIdx);
 	savedata.cap_mode = mode;
+	savedata.cap_monitor_idx = monIdx;
 	int canvas = m_canvas.GetCurSel();
-	if (canvas < 0 || canvas > 3) canvas = 2;
+	if (canvas < 0 || canvas > 4) canvas = 2;
 	savedata.cap_canvas_preset = canvas;
 	int cw = 0, ch = 0;
 	ResolveCanvasSize(cw, ch);
 	savedata.cap_canvas_w = cw;
 	savedata.cap_canvas_h = ch;
+	{
+		int chain[SC_FX_CHAIN_MAX] = {};
+		int cn = 0;
+		GetFxChain(chain, &cn);
+		savedata.cap_fx_n = cn;
+		savedata.cap_fx0 = (cn > 0) ? chain[0] : 0;
+		savedata.cap_fx1 = (cn > 1) ? chain[1] : 0;
+		savedata.cap_fx2 = (cn > 2) ? chain[2] : 0;
+		savedata.cap_fx3 = (cn > 3) ? chain[3] : 0;
+		savedata.cap_fx4 = (cn > 4) ? chain[4] : 0;
+		savedata.cap_fx5 = (cn > 5) ? chain[5] : 0;
+		savedata.cap_fx6 = (cn > 6) ? chain[6] : 0;
+		savedata.cap_fx7 = (cn > 7) ? chain[7] : 0;
+		savedata.cap_effect = savedata.cap_fx0;
+	}
 	CString path;
 	m_path.GetWindowText(path);
 	path = NormalizeOutPath(path);
@@ -1350,14 +3037,14 @@ void CScreenCaptureDlg::SetRecordingUi(BOOL recording)
 			L"Стоп", L"Stopp", L"Parar", L"Stop", L"Stop", L"Durdur")
 		: LL14(L"録画開始", L"Start", L"Démarrer", L"Avvia", L"Iniciar", L"시작", L"开始", L"بدء",
 			L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat"));
-	const BOOL compose = (m_mode.GetCurSel() == SC_MODE_WINDOWS);
+	const BOOL compose = IsWindowComposeMode();
 	EnableComposeUi(compose);
 	// EnableWindow は透過を壊すのでモード/キャンバスは PreTranslate でロック
 	RefreshOpaqueUi();
 	// 録画中はプレビュー描画を間引き（Enc の周期ドロップ軽減）
 	if (recording) {
 		KillTimer(SC_TIMER_PREV);
-		SetTimer(SC_TIMER_PREV, 100, NULL);
+		SetTimer(SC_TIMER_PREV, 200, NULL);
 	} else {
 		ApplyPreviewTimer();
 	}
@@ -1409,10 +3096,11 @@ void CScreenCaptureDlg::RefreshLayerList()
 	m_layer.ResetContent();
 	for (int i = 0; i < m_layerCnt; ++i) {
 		CString s;
-		s.Format(L"%s%s[Z%d] %s  (%d,%d %dx%d)",
+		s.Format(L"%s%s[Z%d] %s  (%d,%d %dx%d)%s",
 			m_layers[i].hidden ? L"[Hide] " : L"",
 			m_layers[i].isMp ? L"[MP] " : L"",
-			i, m_layers[i].title, m_layers[i].x, m_layers[i].y, m_layers[i].w, m_layers[i].h);
+			i, m_layers[i].title, m_layers[i].x, m_layers[i].y, m_layers[i].w, m_layers[i].h,
+			(m_layers[i].srcW > 1 && m_layers[i].srcH > 1) ? L" crop" : L"");
 		m_layer.AddString(s);
 	}
 	if (sel >= 0 && sel < m_layerCnt)
@@ -1430,6 +3118,10 @@ void CScreenCaptureDlg::SyncGeoEditsFromSel()
 		m_editY.SetWindowText(L"");
 		m_editW.SetWindowText(L"");
 		m_editH.SetWindowText(L"");
+		m_editSX.SetWindowText(L"");
+		m_editSY.SetWindowText(L"");
+		m_editSW.SetWindowText(L"");
+		m_editSH.SetWindowText(L"");
 		return;
 	}
 	CString s;
@@ -1437,6 +3129,10 @@ void CScreenCaptureDlg::SyncGeoEditsFromSel()
 	s.Format(L"%d", m_layers[sel].y); m_editY.SetWindowText(s);
 	s.Format(L"%d", m_layers[sel].w); m_editW.SetWindowText(s);
 	s.Format(L"%d", m_layers[sel].h); m_editH.SetWindowText(s);
+	s.Format(L"%d", m_layers[sel].srcX); m_editSX.SetWindowText(s);
+	s.Format(L"%d", m_layers[sel].srcY); m_editSY.SetWindowText(s);
+	s.Format(L"%d", m_layers[sel].srcW); m_editSW.SetWindowText(s);
+	s.Format(L"%d", m_layers[sel].srcH); m_editSH.SetWindowText(s);
 }
 
 void CScreenCaptureDlg::ApplyGeoEditsToSel()
@@ -1452,6 +3148,17 @@ void CScreenCaptureDlg::ApplyGeoEditsToSel()
 	m_layers[sel].h = _ttoi(sh);
 	if (m_layers[sel].w < 2) m_layers[sel].w = 2;
 	if (m_layers[sel].h < 2) m_layers[sel].h = 2;
+	CString csx, csy, csw, csh;
+	m_editSX.GetWindowText(csx); m_editSY.GetWindowText(csy);
+	m_editSW.GetWindowText(csw); m_editSH.GetWindowText(csh);
+	m_layers[sel].srcX = _ttoi(csx);
+	m_layers[sel].srcY = _ttoi(csy);
+	m_layers[sel].srcW = _ttoi(csw);
+	m_layers[sel].srcH = _ttoi(csh);
+	if (m_layers[sel].srcX < 0) m_layers[sel].srcX = 0;
+	if (m_layers[sel].srcY < 0) m_layers[sel].srcY = 0;
+	if (m_layers[sel].srcW < 0) m_layers[sel].srcW = 0;
+	if (m_layers[sel].srcH < 0) m_layers[sel].srcH = 0;
 	RefreshLayerList();
 	m_layer.SetCurSel(sel);
 	UpdatePreview();
@@ -1502,8 +3209,8 @@ void CScreenCaptureDlg::AddLayerHwnd(HWND hwnd, BOOL isMp)
 	if (!L.title[0])
 		_tcscpy_s(L.title, isMp ? L"Media Player" : L"(window)");
 	m_layerCnt++;
-	if (!isMp && m_mode.GetCurSel() != SC_MODE_WINDOWS)
-		m_mode.SetCurSel(SC_MODE_WINDOWS);
+	if (!isMp && !IsWindowComposeMode())
+		m_mode.SetCurSel(SavedModeToComboSel(SC_MODE_WINDOWS, 0));
 	EnableComposeUi(TRUE);
 	// 追加後に全レイヤをキャンバス内へ再フィット（見切れ防止）
 	FitAllLayersIntoCanvas();
@@ -1714,7 +3421,8 @@ void CScreenCaptureDlg::RefreshComposeCache()
 	ComposeSnap snap;
 	BuildComposeSnap(snap);
 	ScFrameBuf fb = {};
-	if (!ScComposeFrame(fb, snap)) {
+	// プレビューは WGC 優先。録画スレッド側は別途 GDI フォールバック付き。
+	if (!ScComposeFrame(fb, snap, FALSE)) {
 		ScFrameFree(fb);
 		return;
 	}
@@ -1823,7 +3531,7 @@ int CScreenCaptureDlg::HitTestPreview(CPoint ptClient, int* outHandle) const
 {
 	if (outHandle) *outHandle = SC_HIT_NONE;
 	if (m_layerCnt <= 0) return -1;
-	const BOOL winMode = (m_mode.GetCurSel() == SC_MODE_WINDOWS);
+	const BOOL winMode = IsWindowComposeMode();
 	const BOOL mpOnly = (!winMode && const_cast<CCustomCheckBox&>(m_includeMp).GetCheck());
 	if (!winMode && !mpOnly) return -1;
 
@@ -1948,39 +3656,84 @@ void CScreenCaptureDlg::EndPreviewDrag()
 
 void CScreenCaptureDlg::DrawPreviewHud(CDC& dc, const CRect& imageRect, float scale, int canvasW, int canvasH)
 {
-	// キャンバス枠
-	CPen penCanvas(PS_SOLID, 1, RGB(80, 90, 110));
-	CPen* oldPen = dc.SelectObject(&penCanvas);
-	dc.SelectStockObject(NULL_BRUSH);
-	dc.Rectangle(imageRect);
+	// MP4 に入る実フレーム枠（太枠 + コーナーマーク）。外側は PaintPreview で暗くしている
+	{
+		CPen penOuter(PS_SOLID, 3, RGB(255, 72, 72));
+		CPen* oldP = dc.SelectObject(&penOuter);
+		dc.SelectStockObject(NULL_BRUSH);
+		CRect fr = imageRect;
+		fr.InflateRect(1, 1);
+		dc.Rectangle(&fr);
+		dc.SelectObject(oldP);
 
-	const int mode = m_mode.GetCurSel();
+		const int mark = (scale >= 1.f) ? 12 : ((int)(12.f * scale) < 10 ? 10 : (int)(12.f * scale));
+		dc.FillSolidRect(imageRect.left, imageRect.top, mark, 3, RGB(255, 210, 60));
+		dc.FillSolidRect(imageRect.left, imageRect.top, 3, mark, RGB(255, 210, 60));
+		dc.FillSolidRect(imageRect.right - mark, imageRect.top, mark, 3, RGB(255, 210, 60));
+		dc.FillSolidRect(imageRect.right - 3, imageRect.top, 3, mark, RGB(255, 210, 60));
+		dc.FillSolidRect(imageRect.left, imageRect.bottom - 3, mark, 3, RGB(255, 210, 60));
+		dc.FillSolidRect(imageRect.left, imageRect.bottom - mark, 3, mark, RGB(255, 210, 60));
+		dc.FillSolidRect(imageRect.right - mark, imageRect.bottom - 3, mark, 3, RGB(255, 210, 60));
+		dc.FillSolidRect(imageRect.right - 3, imageRect.bottom - mark, 3, mark, RGB(255, 210, 60));
+	}
+
+	int monIdxHud = 0;
+	const int mode = ModeComboToSavedMode(m_mode.GetCurSel(), monIdxHud);
 	const int sel = m_layer.GetCurSel();
 	const int setFps = CurrentPreviewFps();
 	const double prevFps = InterlockedCompareExchange(&m_prevFpsX10, 0, 0) / 10.0;
 	const double encFps = InterlockedCompareExchange(&m_encFpsX10, 0, 0) / 10.0;
+	int fxChain[SC_FX_CHAIN_MAX] = {};
+	int fxN = 0;
+	GetFxChain(fxChain, &fxN);
 
 	// 上部情報バー（設定FPSと実測プレビュー/エンコードFPS）
 	CString hud;
 	CString modeName;
 	if (mode == SC_MODE_PRIMARY) modeName = L"Primary";
 	else if (mode == SC_MODE_VIRTUAL) modeName = L"All monitors";
+	else if (mode == SC_MODE_MONITOR) modeName.Format(L"Monitor#%d", monIdxHud + 1);
 	else modeName = L"Compose";
+	CString fxName = L"";
+	if (fxN > 0) {
+		fxName = L"  FX:";
+		for (int i = 0; i < fxN; ++i) {
+			if (i) fxName += L"→";
+			fxName += FxName(fxChain[i]);
+		}
+	}
 	if (InterlockedCompareExchange(&m_run, 0, 0)) {
-		hud.Format(L"%s  %dx%d  set %d  Prev %.1f  Enc %.1f  layers %d  ●REC %ldf",
-			(LPCTSTR)modeName, canvasW, canvasH, setFps, prevFps, encFps, m_layerCnt,
+		hud.Format(L"MP4 %dx%d  %s  set %d  Prev %.1f  Enc %.1f  layers %d%s  ●REC %ldf",
+			canvasW, canvasH, (LPCTSTR)modeName, setFps, prevFps, encFps, m_layerCnt, (LPCTSTR)fxName,
 			(long)InterlockedCompareExchange(&m_frameCnt, 0, 0));
 	} else {
-		hud.Format(L"%s  %dx%d  set %d  Prev %.1f fps  layers %d",
-			(LPCTSTR)modeName, canvasW, canvasH, setFps, prevFps, m_layerCnt);
+		hud.Format(L"MP4 frame  %dx%d  %s  set %d  Prev %.1f fps  layers %d%s",
+			canvasW, canvasH, (LPCTSTR)modeName, setFps, prevFps, m_layerCnt, (LPCTSTR)fxName);
 	}
 	CRect bar = imageRect;
 	bar.bottom = bar.top + 18;
-	dc.FillSolidRect(&bar, RGB(0, 0, 0));
+	dc.FillSolidRect(&bar, RGB(120, 20, 20));
 	dc.SetBkMode(TRANSPARENT);
-	dc.SetTextColor(RGB(220, 230, 255));
+	dc.SetTextColor(RGB(255, 235, 220));
 	CFont* oldFont = dc.SelectObject(GetFont());
 	dc.DrawText(hud, &bar, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+	// 右下に「ここがMP4」ラベル
+	{
+		CString tag = LL14(L"← この赤枠 = MP4", L"← Red frame = MP4", L"← Cadre rouge = MP4", L"← Cornice rossa = MP4",
+			L"← Marco rojo = MP4", L"← 빨간 틀 = MP4", L"← 红框 = MP4", L"← الإطار الأحمر = MP4",
+			L"← Красная рамка = MP4", L"← Roter Rahmen = MP4", L"← Moldura vermelha = MP4", L"← Rood kader = MP4",
+			L"← Czerwona ramka = MP4", L"← Kırmızı çerçeve = MP4");
+		CSize ts = dc.GetTextExtent(tag);
+		CRect tr(imageRect.right - ts.cx - 8, imageRect.bottom - 18, imageRect.right - 4, imageRect.bottom - 2);
+		if (tr.left < imageRect.left + 4) tr.left = imageRect.left + 4;
+		dc.FillSolidRect(&tr, RGB(90, 16, 16));
+		dc.SetTextColor(RGB(255, 220, 180));
+		dc.DrawText(tag, &tr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+	}
+
+	CPen penCanvas(PS_SOLID, 1, RGB(80, 90, 110));
+	CPen* oldPen = dc.SelectObject(&penCanvas);
 
 	if (mode == SC_MODE_WINDOWS || (m_includeMp.GetCheck() && m_layerCnt > 0)) {
 		for (int i = m_layerCnt - 1; i >= 0; --i) {
@@ -1988,6 +3741,7 @@ void CScreenCaptureDlg::DrawPreviewHud(CDC& dc, const CRect& imageRect, float sc
 			const Layer& L = m_layers[i];
 			CRect rr = CanvasToPreview(L.x, L.y, L.w, L.h);
 			const BOOL selected = (i == sel);
+			const BOOL cropped = (L.srcW > 1 && L.srcH > 1);
 			const COLORREF col = L.hidden
 				? RGB(140, 140, 150)
 				: (selected ? RGB(255, 200, 40) : (L.isMp ? RGB(120, 255, 160) : RGB(80, 200, 255)));
@@ -1997,9 +3751,14 @@ void CScreenCaptureDlg::DrawPreviewHud(CDC& dc, const CRect& imageRect, float sc
 			dc.Rectangle(&rr);
 
 			CString label;
-			label.Format(L"%s%sZ%d %dx%d  %s",
-				L.hidden ? L"[Hide] " : L"",
-				L.isMp ? L"[MP] " : L"", i, L.w, L.h, L.title);
+			if (cropped)
+				label.Format(L"%s%sZ%d %dx%d crop(%d,%d %dx%d)  %s",
+					L.hidden ? L"[Hide] " : L"",
+					L.isMp ? L"[MP] " : L"", i, L.w, L.h, L.srcX, L.srcY, L.srcW, L.srcH, L.title);
+			else
+				label.Format(L"%s%sZ%d %dx%d  %s",
+					L.hidden ? L"[Hide] " : L"",
+					L.isMp ? L"[MP] " : L"", i, L.w, L.h, L.title);
 			CRect lr = rr;
 			lr.bottom = lr.top + 16;
 			if (lr.bottom > rr.bottom) lr.bottom = rr.bottom;
@@ -2025,20 +3784,20 @@ void CScreenCaptureDlg::DrawPreviewHud(CDC& dc, const CRect& imageRect, float sc
 			CRect tip = imageRect;
 			tip.DeflateRect(8, 28, 8, 8);
 			dc.DrawText(LL14(
-				L"ウィンドウを追加し、枠をドラッグ / 四隅で拡大縮小",
-				L"Add windows, then drag / resize by corners",
-				L"Ajoutez des fenêtres, puis glissez / redimensionnez",
-				L"Aggiungi finestre, poi trascina / ridimensiona",
-				L"Añada ventanas y arrastre / redimensione",
-				L"창을 추가한 뒤 드래그 / 모서리로 크기 조절",
-				L"添加窗口后拖动 / 用四角缩放",
-				L"أضف نوافذ ثم اسحب / غيّر الحجم من الزوايا",
-				L"Добавьте окна, затем перетаскивайте / углы",
-				L"Fenster hinzufügen, dann ziehen / Ecken skalieren",
-				L"Adicione janelas e arraste / redimensione",
-				L"Vensters toevoegen, sleep / hoeken schalen",
-				L"Dodaj okna, przeciągaj / skaluj rogami",
-				L"Pencere ekleyin, sürükleyin / köşelerden ölçekleyin"),
+				L"ウィンドウを追加し、枠をドラッグ / 四隅で拡大縮小。部分だけ載せるなら Crop sx/sy/sw/sh",
+				L"Add windows, then drag / resize by corners. Use Crop sx/sy/sw/sh for a window region",
+				L"Ajoutez des fenêtres, puis glissez / redimensionnez. Crop pour une région",
+				L"Aggiungi finestre, poi trascina / ridimensiona. Crop per una regione",
+				L"Añada ventanas y arrastre / redimensione. Crop para una región",
+				L"창을 추가한 뒤 드래그 / 모서리로 크기 조절. 일부만 올릴 땐 Crop",
+				L"添加窗口后拖动 / 用四角缩放。局部放入用 Crop",
+				L"أضف نوافذ ثم اسحب / غيّر الحجم. Crop لمنطقة",
+				L"Добавьте окна, затем перетаскивайте / углы. Crop для области",
+				L"Fenster hinzufügen, dann ziehen / Ecken. Crop für Ausschnitt",
+				L"Adicione janelas e arraste / redimensione. Crop para região",
+				L"Vensters toevoegen, sleep / hoeken. Crop voor regio",
+				L"Dodaj okna, przeciągaj / skaluj. Crop dla obszaru",
+				L"Pencere ekleyin, sürükleyin / köşeler. Bölge için Crop"),
 				&tip, DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
 		}
 	} else {
@@ -2047,20 +3806,20 @@ void CScreenCaptureDlg::DrawPreviewHud(CDC& dc, const CRect& imageRect, float sc
 		tip.top += 22;
 		tip.DeflateRect(6, 0, 6, 6);
 		dc.DrawText(LL14(
-			L"プレビュー (録画にHUDは含まれません)",
-			L"Preview (HUD is not recorded)",
-			L"Aperçu (HUD non enregistré)",
-			L"Anteprima (HUD non registrato)",
-			L"Vista previa (HUD no se graba)",
-			L"미리보기 (HUD는 녹화되지 않음)",
-			L"预览（HUD不会录制）",
-			L"معاينة (لا يُسجَّل HUD)",
-			L"Превью (HUD не записывается)",
-			L"Vorschau (HUD wird nicht aufgenommen)",
-			L"Prévia (HUD não é gravado)",
-			L"Voorbeeld (HUD wordt niet opgenomen)",
-			L"Podgląd (HUD nie jest nagrywany)",
-			L"Onizleme (HUD kayda girmez)"),
+			L"プレビュー (赤枠内だけがMP4。HUDは録画されません)",
+			L"Preview (only inside red frame → MP4. HUD not recorded)",
+			L"Aperçu (seul le cadre rouge → MP4. HUD non enregistré)",
+			L"Anteprima (solo cornice rossa → MP4. HUD non registrato)",
+			L"Vista previa (solo marco rojo → MP4. HUD no se graba)",
+			L"미리보기 (빨간 틀 안만 MP4. HUD는 녹화 안 됨)",
+			L"预览（红框内才是MP4。HUD不会录制）",
+			L"معاينة (داخل الإطار الأحمر فقط → MP4. لا يُسجَّل HUD)",
+			L"Превью (только в красной рамке → MP4. HUD не пишется)",
+			L"Vorschau (nur im roten Rahmen → MP4. HUD nicht aufgenommen)",
+			L"Prévia (só dentro da moldura vermelha → MP4. HUD não é gravado)",
+			L"Voorbeeld (alleen in rood kader → MP4. HUD niet opgenomen)",
+			L"Podgląd (tylko w czerwonej ramce → MP4. HUD nie jest nagrywany)",
+			L"Onizleme (yalnızca kırmızı çerçeve → MP4. HUD kayda girmez)"),
 			&tip, DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
 	}
 
@@ -2071,12 +3830,23 @@ void CScreenCaptureDlg::DrawPreviewHud(CDC& dc, const CRect& imageRect, float sc
 
 void CScreenCaptureDlg::PaintPreview(CDC& dc, const CRect& client)
 {
-	dc.FillSolidRect(&client, RGB(18, 18, 22));
+	dc.FillSolidRect(&client, RGB(12, 12, 16));
 	CRect imageRect;
 	float scale = 1.f;
 	int cw = 0, ch = 0;
 	if (!GetPreviewMap(imageRect, scale, cw, ch))
 		return;
+
+	// キャンバス外（MP4に入らない余白）を暗くして、赤枠内が出力だと分かるようにする
+	{
+		CRgn rClient, rImage, rDim;
+		rClient.CreateRectRgnIndirect(&client);
+		rImage.CreateRectRgnIndirect(&imageRect);
+		rDim.CreateRectRgn(0, 0, 0, 0);
+		rDim.CombineRgn(&rClient, &rImage, RGN_DIFF);
+		CBrush brush(RGB(8, 8, 10));
+		dc.FillRgn(&rDim, &brush);
+	}
 
 	if (m_cacheDc && m_cacheBmp && m_cacheW > 0 && m_cacheH > 0) {
 		if (m_snapCsInit) EnterCriticalSection(&m_snapCs);
@@ -2098,8 +3868,7 @@ void CScreenCaptureDlg::UpdatePreview(BOOL forceCompose)
 	if (!recording && (forceCompose || !m_dragging))
 		RefreshComposeCache();
 	m_preview.Invalidate(FALSE);
-	if (!recording)
-		m_preview.UpdateWindow();
+	// 録画中は UPDATENOW しない（エンコードスレッドの CS 待ちを増やして FPS を落とす）
 	::RedrawWindow(m_preview.GetSafeHwnd(), NULL, NULL,
 		recording
 		? (RDW_INVALIDATE | RDW_FRAME)
@@ -2117,10 +3886,16 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 		m_snapCsInit = TRUE;
 	}
 	m_preview.SetOwner(this);
+	m_fxWire.SetOwner(this);
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	LayoutHelpBtn();
 	m_audio.SetAeroMode(FALSE);
 	m_mic.SetAeroMode(FALSE);
 	m_includeMp.SetAeroMode(FALSE);
 	m_fps.SetAeroMode(FALSE);
+	m_effect.SetAeroMode(FALSE);
 	m_mode.SetAeroMode(FALSE);
 	m_canvas.SetAeroMode(FALSE);
 	m_avail.SetAeroMode(FALSE);
@@ -2137,6 +3912,14 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_canvasLabel.SetWindowText(LL14(L"解像度", L"Resolution", L"Résolution", L"Risoluzione", L"Resolución", L"해상도", L"分辨率", L"الدقة",
 		L"Разрешение", L"Auflösung", L"Resolução", L"Resolutie", L"Rozdzielczość", L"Çözünürlük"));
 	m_fpsLabel.SetWindowText(L"FPS");
+	m_effectLabel.SetWindowText(LL14(L"効果", L"Effect", L"Effet", L"Effetto", L"Efecto", L"효과", L"效果", L"تأثير",
+		L"Эффект", L"Effekt", L"Efeito", L"Effect", L"Efekt", L"Efekt"));
+	m_cropLabel.SetWindowText(LL14(L"切出 sx sy sw sh", L"Crop sx sy sw sh", L"Rogner sx sy sw sh", L"Ritaglio sx sy sw sh",
+		L"Recorte sx sy sw sh", L"잘라내기 sx sy sw sh", L"裁剪 sx sy sw sh", L"قص sx sy sw sh",
+		L"Вырез sx sy sw sh", L"Ausschnitt sx sy sw sh", L"Recorte sx sy sw sh", L"Uitsnede sx sy sw sh",
+		L"Wycinek sx sy sw sh", L"Kırp sx sy sw sh"));
+	m_cropFull.SetWindowText(LL14(L"切出解除", L"Full", L"Plein", L"Intero", L"Completo", L"전체", L"整窗", L"كامل",
+		L"Весь", L"Ganz", L"Inteiro", L"Volledig", L"Całość", L"Tam"));
 	m_pathLabel.SetWindowText(LL14(L"保存先", L"Save path", L"Chemin", L"Percorso", L"Ruta", L"저장 위치", L"保存路径", L"المسار",
 		L"Путь", L"Pfad", L"Caminho", L"Pad", L"Ścieżka", L"Yol"));
 	m_audio.SetWindowText(LL14(L"システム音", L"System audio", L"Son système", L"Audio sistema", L"Audio sistema", L"시스템 소리", L"系统声音", L"صوت النظام",
@@ -2179,64 +3962,83 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
 		L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	m_status.SetWindowText(LL14(
-		L"プレビュー: ドラッグで配置／四隅で拡大縮小／右クリックでHide(非表示・音だけ可)。HUDは録画されません。",
-		L"Preview: drag to place / corners to resize / right-click Hide (audio-only OK). HUD not recorded.",
-		L"Aperçu: glisser / coins pour taille / clic droit Hide (audio seul OK). HUD non enregistré.",
-		L"Anteprima: trascina / angoli per dimensione / destro Hide (solo audio OK). HUD non registrato.",
-		L"Vista: arrastre / esquinas para tamaño / clic der. Hide (solo audio OK). HUD no se graba.",
-		L"미리보기: 드래그 배치/모서리 크기/우클릭 Hide(오디오만 가능). HUD는 녹화 안 됨.",
-		L"预览：拖动放置/四角缩放/右键Hide（可只录声音）。HUD不会录制。",
-		L"معاينة: اسحب / زوايا للحجم / يمين Hide (صوت فقط OK). لا يُسجَّل HUD.",
-		L"Превью: перетаскивание / углы / ПКМ Hide (можно только звук). HUD не пишется.",
-		L"Vorschau: ziehen / Ecken skalieren / Rechtsklick Hide (nur Audio OK). HUD nicht aufgenommen.",
-		L"Prévia: arraste / cantos / direito Hide (só áudio OK). HUD não é gravado.",
-		L"Voorbeeld: slepen / hoeken / rechtsklik Hide (alleen audio OK). HUD niet opgenomen.",
-		L"Podgląd: przeciągaj / rogi / PPM Hide (tylko dźwięk OK). HUD nie jest nagrywany.",
-		L"Önizleme: sürükle / köşe ölçek / sağ tık Hide (yalnızca ses OK). HUD kayda girmez."));
+		L"赤枠内がMP4。下の配線で効果を最大4段つなぎ可。Cropでウィンドウ一部。右クリックHideで映像オフ(音可)。HUDは録画されません。",
+		L"Red frame = MP4. Wire up to 4 FX below. Crop for a window region. Right-click Hide (audio OK). HUD not recorded.",
+		L"Cadre rouge = MP4. Chaînez jusqu'à 4 FX. Crop pour une région. Clic droit Hide. HUD non enregistré.",
+		L"Cornice rossa = MP4. Collega fino a 4 FX. Crop per regione. Destro Hide. HUD non registrato.",
+		L"Marco rojo = MP4. Encadene hasta 4 FX. Crop para región. Clic der. Hide. HUD no se graba.",
+		L"빨간 틀 = MP4. 아래에서 FX 최대 4단 연결. Crop으로 창 일부. 우클릭 Hide. HUD 미녹화.",
+		L"红框=MP4。下方可串联最多4段效果。Crop放局部。右键Hide。HUD不录。",
+		L"الإطار الأحمر = MP4. وصّل حتى 4 FX. Crop لمنطقة. يمين Hide. لا يُسجَّل HUD.",
+		L"Красная рамка = MP4. До 4 FX в цепочке. Crop для области. ПКМ Hide. HUD не пишется.",
+		L"Roter Rahmen = MP4. Bis 4 FX verketten. Crop für Ausschnitt. Rechtsklick Hide. HUD nicht aufgenommen.",
+		L"Moldura vermelha = MP4. Encadeie até 4 FX. Crop para região. Direito Hide. HUD não é gravado.",
+		L"Rood kader = MP4. Koppel tot 4 FX. Crop voor regio. Rechtsklik Hide. HUD niet opgenomen.",
+		L"Czerwona ramka = MP4. Połącz do 4 FX. Crop dla obszaru. PPM Hide. HUD nie jest nagrywany.",
+		L"Kırmızı çerçeve = MP4. En fazla 4 FX bağlayın. Crop ile bölge. Sağ tık Hide. HUD kayda girmez."));
 
-	m_mode.AddString(LL14(L"プライマリ画面", L"Primary screen", L"Écran principal", L"Schermo principale",
-		L"Pantalla principal", L"기본 화면", L"主屏幕", L"الشاشة الرئيسية",
-		L"Основной экран", L"Primärer Bildschirm", L"Ecrã principal", L"Primair scherm",
-		L"Ekran główny", L"Birincil ekran"));
-	m_mode.AddString(LL14(L"全モニタ (仮想)", L"All monitors (virtual)", L"Tous les moniteurs", L"Tutti i monitor",
-		L"Todos los monitores", L"모든 모니터", L"全部显示器", L"كل الشاشات",
-		L"Все мониторы", L"Alle Monitore", L"Todos os monitores", L"Alle monitoren",
-		L"Wszystkie monitory", L"Tüm monitörler"));
-	m_mode.AddString(LL14(L"ウィンドウ合成", L"Window compose", L"Composition fenêtres", L"Composizione finestre",
-		L"Composición de ventanas", L"창 합성", L"窗口合成", L"تركيب النوافذ",
-		L"Композиция окон", L"Fenster-Komposition", L"Composição de janelas", L"Venstercompositie",
-		L"Kompozycja okien", L"Pencere kompozisyonu"));
-	int mode = savedata.cap_mode;
-	if (mode < 0 || mode > 2) mode = 0;
-	m_mode.SetCurSel(mode);
+	RefreshModeCombo();
 
-	m_canvas.AddString(LL14(L"自動", L"Auto", L"Auto", L"Auto", L"Auto", L"자동", L"自动", L"تلقائي",
-		L"Авто", L"Auto", L"Auto", L"Auto", L"Auto", L"Otomatik"));
+	m_canvas.AddString(LL14(L"自動 (ネイティブ)", L"Auto (native)", L"Auto (natif)", L"Auto (nativo)",
+		L"Auto (nativo)", L"자동 (네이티브)", L"自动（原生）", L"تلقائي (أصلي)",
+		L"Авто (натив)", L"Auto (nativ)", L"Auto (nativo)", L"Auto (native)",
+		L"Auto (natywne)", L"Otomatik (yerel)"));
 	m_canvas.AddString(L"1280 x 720");
 	m_canvas.AddString(L"1920 x 1080");
 	m_canvas.AddString(L"1600 x 900");
+	m_canvas.AddString(L"3840 x 2160");
 	int canvas = savedata.cap_canvas_preset;
-	if (canvas < 0 || canvas > 3) canvas = 2;
+	if (canvas < 0 || canvas > 4) canvas = 2;
 	m_canvas.SetCurSel(canvas);
 
 	m_audio.SetCheck(savedata.cap_with_audio ? BST_CHECKED : BST_UNCHECKED);
 	m_mic.SetCheck(savedata.cap_with_mic ? BST_CHECKED : BST_UNCHECKED);
 	m_includeMp.SetCheck(savedata.cap_include_mp ? BST_CHECKED : BST_UNCHECKED);
 
-	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60 };
+	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60, 90, 120 };
 	int fpsSel = 1;
-	for (int i = 0; i < 6; ++i) {
+	for (int i = 0; i < (int)_countof(fpsTab); ++i) {
 		CString s; s.Format(L"%d", fpsTab[i]);
 		m_fps.AddString(s);
 		if (savedata.cap_fps == fpsTab[i]) fpsSel = i;
 	}
 	m_fps.SetCurSel(fpsSel);
 
+	m_effect.ResetContent();
+	for (int fx = 0; fx < SC_FX_COUNT; ++fx)
+		m_effect.AddString(FxName(fx));
+	m_effect.AddString(LL14(
+		L"(カスタム配線)", L"(Custom wiring)", L"(Câblage perso.)", L"(Cablaggio pers.)",
+		L"(Cableado pers.)", L"(사용자 배선)", L"(自定义连线)", L"(توصيل مخصص)",
+		L"(Своя схема)", L"(Eigene Verdrahtung)", L"(Ligação pers.)", L"(Eigen bedrading)",
+		L"(Własne okablowanie)", L"(Özel kablolama)"));
+	{
+		int chain[SC_FX_CHAIN_MAX] = {};
+		int cn = savedata.cap_fx_n;
+		if (cn < 0) cn = 0;
+		if (cn > SC_FX_CHAIN_MAX) cn = SC_FX_CHAIN_MAX;
+		const int src[SC_FX_CHAIN_MAX] = {
+			savedata.cap_fx0, savedata.cap_fx1, savedata.cap_fx2, savedata.cap_fx3,
+			savedata.cap_fx4, savedata.cap_fx5, savedata.cap_fx6, savedata.cap_fx7
+		};
+		int n = 0;
+		for (int i = 0; i < cn; ++i) {
+			if (src[i] > SC_FX_NONE && src[i] < SC_FX_COUNT)
+				chain[n++] = src[i];
+		}
+		if (n <= 0 && savedata.cap_effect > 0 && savedata.cap_effect < SC_FX_COUNT) {
+			chain[0] = savedata.cap_effect;
+			n = 1;
+		}
+		m_fxWire.SetChain(chain, n);
+		SyncFxComboFromChain();
+	}
+
 	// 日付ファイル名は毎回更新（フォルダだけ前回を引き継ぐ）
 	m_path.SetWindowText(NormalizeOutPath(RefreshCaptureOutPathTimestamp(savedata.cap_last_path)));
 
 	RefreshAvailList();
-	EnableComposeUi(mode == SC_MODE_WINDOWS);
+	EnableComposeUi(IsWindowComposeMode());
 	if (savedata.cap_include_mp)
 		SyncMpLayerFromCheck();
 
@@ -2272,20 +4074,65 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 			L"Rozdzielczość wyjścia. Auto wg kompozycji",
 			L"Çıkış çözünürlüğü. Otomatik kompozisyona uyar"));
 		m_tooltip.AddTool(&m_fps, LL14(
-			L"録画＆プレビュー表示間隔(FPS)。PCスペックに合わせて選択(高いほど滑らか・負荷増)",
-			L"Record & preview FPS. Pick for your PC (higher = smoother, heavier)",
-			L"IPS enregistrement et aperçu. Selon le PC (plus élevé = plus fluide)",
-			L"FPS registrazione e anteprima. In base al PC (più alto = più fluido)",
-			L"FPS de grabación y vista previa. Según el PC (más alto = más fluido)",
-			L"녹화·미리보기 FPS. PC 사양에 맞게 선택(높을수록 부드럽고 부하↑)",
-			L"录制与预览帧率。按电脑性能选择（越高越流畅、更重）",
-			L"معدل التسجيل والمعاينة. اختر حسب الجهاز (الأعلى أنعم وأثقل)",
-			L"FPS записи и превью. Выберите по ПК (выше — плавнее, тяжелее)",
-			L"Aufnahme- und Vorschau-FPS. Nach PC wählen (höher = flüssiger)",
-			L"FPS de gravação e prévia. Escolha pelo PC (mais alto = mais suave)",
-			L"Opname- en voorbeeld-FPS. Kies naar PC (hoger = vloeiender)",
-			L"FPS nagrywania i podglądu. Dobierz do PC (wyższe = płynniej)",
-			L"Kayıt ve önizleme FPS. PC’ye göre seçin (yüksek = akıcı, ağır)"));
+			L"録画＆プレビューFPS。90/120は限界計測用(PC次第で頭打ち)。高いほど負荷・画質ビットレート増",
+			L"Record & preview FPS. 90/120 for limit testing (may cap). Higher = heavier, higher bitrate",
+			L"FPS enregistrement/aperçu. 90/120 pour tester la limite (selon le PC)",
+			L"FPS registrazione/anteprima. 90/120 per test limite (dipende dal PC)",
+			L"FPS grabación/vista previa. 90/120 para probar límite (según PC)",
+			L"녹화·미리보기 FPS. 90/120은 한계 측정용(PC에 따라 제한)",
+			L"录制与预览FPS。90/120用于测极限（视电脑而定）",
+			L"FPS التسجيل والمعاينة. 90/120 لاختبار الحد (حسب الجهاز)",
+			L"FPS записи и превью. 90/120 для проверки предела (зависит от ПК)",
+			L"Aufnahme-/Vorschau-FPS. 90/120 zum Limit-Test (PC-abhängig)",
+			L"FPS gravação/prévia. 90/120 para testar limite (depende do PC)",
+			L"Opname-/voorbeeld-FPS. 90/120 om limiet te testen (afhankelijk van PC)",
+			L"FPS nagrywania/podglądu. 90/120 do testu limitu (zależnie od PC)",
+			L"Kayıt/önizleme FPS. 90/120 limit testi için (PC’ye bağlı)"));
+		m_tooltip.AddTool(&m_effect, LL14(
+			L"クイック1段効果。複数つなぐ場合は下の配線パレットからドラッグ",
+			L"Quick single FX. For a chain, drag from the wiring palette below",
+			L"Effet simple. Pour une chaîne, glissez depuis la palette ci-dessous",
+			L"Effetto singolo. Per una catena, trascina dalla palette sotto",
+			L"Efecto simple. Para una cadena, arrastre desde la paleta abajo",
+			L"빠른 1단 효과. 여러 개를 이으려면 아래 배선 팔레트에서 드래그",
+			L"快捷单段效果。多段请从下方连线面板拖入",
+			L"تأثير واحد سريع. للسلسلة اسحب من لوحة التوصيل أدناه",
+			L"Быстрый один эффект. Для цепочки перетащите с панели ниже",
+			L"Schneller Einzeleffekt. Für Kette von der Palette unten ziehen",
+			L"Efeito único rápido. Para cadeia, arraste da paleta abaixo",
+			L"Snelle enkele FX. Voor een keten sleep vanaf het palet hieronder",
+			L"Szybki jeden efekt. Łańcuch: przeciągnij z palety poniżej",
+			L"Hızlı tek efekt. Zincir için alttaki paletten sürükleyin"));
+		m_tooltip.AddTool(&m_fxWire, LL14(
+			L"パレットからスロットへドラッグで最大4段まで直列接続。右クリックで解除",
+			L"Drag palette chips onto slots (max 4 in series). Right-click clears a slot",
+			L"Glissez les puces vers les slots (max 4 en série). Clic droit pour effacer",
+			L"Trascina i chip sugli slot (max 4 in serie). Destro per azzerare",
+			L"Arrastre chips a las ranuras (máx. 4 en serie). Clic der. para borrar",
+			L"팔레트 칩을 슬롯에 드래그(최대 4단 직렬). 우클릭으로 해제",
+			L"将色块拖到插槽（最多串联4段）。右键清除",
+			L"اسحب الشرائح إلى الفتحات (حتى 4 متسلسلة). يمين للمسح",
+			L"Перетащите чипы на слоты (макс. 4 подряд). ПКМ очищает",
+			L"Chips auf Slots ziehen (max. 4 in Reihe). Rechtsklick löscht",
+			L"Arraste chips para slots (máx. 4 em série). Direito limpa",
+			L"Sleep chips naar slots (max 4 in serie). Rechtsklik wist",
+			L"Przeciągnij chipy na sloty (maks. 4 w szeregu). PPM czyści",
+			L"Chip’leri slotlara sürükleyin (en fazla 4 seri). Sağ tık siler"));
+		m_tooltip.AddTool(&m_cropFull, LL14(
+			L"選択レイヤのウィンドウ内切り出しを解除（全体を載せる）",
+			L"Clear crop on selected layer (use full window)",
+			L"Efface le rognage de la couche (fenêtre entière)",
+			L"Azzera il ritaglio del livello (finestra intera)",
+			L"Quita el recorte de la capa (ventana completa)",
+			L"선택 레이어 잘라내기 해제(창 전체)",
+			L"清除所选层裁剪（整窗）",
+			L"إلغاء القص للطبقة (النافذة كاملة)",
+			L"Сбросить вырез слоя (всё окно)",
+			L"Ausschnitt der Ebene aufheben (ganzes Fenster)",
+			L"Limpa o recorte da camada (janela inteira)",
+			L"Wis uitsnede van laag (heel venster)",
+			L"Wyczyść wycinek warstwy (całe okno)",
+			L"Katman kırpmasını kaldır (tüm pencere)"));
 		m_tooltip.AddTool(&m_audio, LL14(
 			L"PCの再生音(ループバック)を録画に載せます。MPの曲もここに含まれます",
 			L"Include PC playback (loopback). MP audio is included here",
@@ -2418,6 +4265,7 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 		m_tooltip.AddTool(&m_path, LL14(L"MP4の保存先パス", L"MP4 save path", L"Chemin MP4", L"Percorso MP4", L"Ruta MP4", L"MP4 저장 경로", L"MP4 保存路径", L"مسار حفظ MP4", L"Путь MP4", L"MP4-Pfad", L"Caminho MP4", L"MP4-pad", L"Ścieżka MP4", L"MP4 kayıt yolu"));
 		m_tooltip.AddTool(&m_browse, LL14(L"保存先を参照", L"Browse save location", L"Parcourir l'emplacement", L"Sfoglia destinazione", L"Examinar destino", L"저장 위치 찾아보기", L"浏览保存位置", L"استعراض موقع الحفظ", L"Обзор папки сохранения", L"Speicherort wählen", L"Procurar local", L"Bladeren naar locatie", L"Przeglądaj lokalizację", L"Kayıt konumuna göz at"));
 		m_tooltip.AddTool(&m_start, LL14(L"録画開始/停止", L"Start/stop recording", L"Démarrer/arrêter", L"Avvia/ferma", L"Iniciar/detener", L"녹화 시작/중지", L"开始/停止录制", L"بدء/إيقاف التسجيل", L"Старт/стоп записи", L"Aufnahme starten/stoppen", L"Iniciar/parar gravação", L"Opname starten/stoppen", L"Start/stop nagrywania", L"Kaydı başlat/durdur"));
+		m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 		m_tooltip.AddTool(&m_meterMic, LL14(L"マイク入力レベル(リアルタイム)", L"Mic level (live)", L"Niveau micro (live)", L"Livello microfono (live)", L"Nivel de micrófono (en vivo)", L"마이크 레벨(실시간)", L"麦克风电平(实时)", L"مستوى الميكروفون (مباشر)", L"Уровень микрофона (live)", L"Mikrofonpegel (live)", L"Nível do microfone (ao vivo)", L"Microfoonniveau (live)", L"Poziom mikrofonu (na żywo)", L"Mikrofon seviyesi (canlı)"));
 		m_tooltip.AddTool(&m_meterSys, LL14(L"システム音レベル(ループバック=演奏込み)", L"System audio level (loopback incl. playback)", L"Niveau système (lecture incluse)", L"Livello sistema (include riproduzione)", L"Nivel del sistema (incluye reproducción)", L"시스템 소리 레벨(재생 포함)", L"系统声音电平(含播放)", L"مستوى صوت النظام (يشمل التشغيل)", L"Уровень системного звука (с воспроизведением)", L"Systemtonpegel inkl. Wiedergabe", L"Nível do sistema (inclui reprodução)", L"Systeemniveau (inclusief afspelen)", L"Poziom dźwięku systemu (z odtwarzaniem)", L"Sistem sesi seviyesi (oynatma dahil)"));
 		m_tooltip.AddTool(&m_meterMix, LL14(L"プレビュー用ピーク(システム相当)", L"Preview peak (system-equivalent)", L"Pic d'aperçu (système)", L"Picco anteprima (sistema)", L"Pico de vista previa (sistema)", L"미리보기 피크(시스템 상당)", L"预览峰值(系统相当)", L"ذروة المعاينة (مكافئ النظام)", L"Пик превью (как система)", L"Vorschau-Peak (System)", L"Pico da prévia (sistema)", L"Voorbeeldpiek (systeem)", L"Szczyt podglądu (system)", L"Önizleme tepe (sistem)"));
@@ -2429,6 +4277,8 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	UpdatePreview();
 	RefreshOpaqueUi();
 	StartPeakMonitor();
+	CCC_CaptionLayout(m_hWnd); // 先に P/閉じる等を確定してから ? を左隣へ
+	LayoutHelpBtn();
 	return TRUE;
 }
 
@@ -2486,7 +4336,7 @@ void CScreenCaptureDlg::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CScreenCaptureDlg::OnCbnSelchangeMode()
 {
-	EnableComposeUi(m_mode.GetCurSel() == SC_MODE_WINDOWS);
+	EnableComposeUi(IsWindowComposeMode());
 	if (m_layerCnt > 0)
 		FitAllLayersIntoCanvas();
 	else
@@ -2505,12 +4355,12 @@ void CScreenCaptureDlg::OnCbnSelchangeCanvas()
 
 int CScreenCaptureDlg::CurrentPreviewFps() const
 {
-	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60 };
+	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60, 90, 120 };
 	int sel = m_fps.GetSafeHwnd() ? m_fps.GetCurSel() : -1;
-	if (sel < 0 || sel > 5) {
+	if (sel < 0 || sel >= (int)_countof(fpsTab)) {
 		int f = savedata.cap_fps;
 		if (f < 5) f = 15;
-		if (f > 60) f = 60;
+		if (f > 120) f = 120;
 		return f;
 	}
 	return fpsTab[sel];
@@ -2521,9 +4371,16 @@ void CScreenCaptureDlg::ApplyPreviewTimer()
 	if (!GetSafeHwnd()) return;
 	int fps = CurrentPreviewFps();
 	if (fps < 5) fps = 5;
-	if (fps > 60) fps = 60;
+	if (fps > 120) fps = 120;
 	UINT ms = (UINT)(1000 / fps);
-	if (ms < 16) ms = 16; // ~60fps上限でも過負荷にならない程度
+	if (ms < 8) ms = 8; // ~120fps
+	// エフェクトチェーンON時はプレビューだけ軽く間引き（録画FPSは別経路）
+	{
+		int cn = 0;
+		GetFxChain(NULL, &cn);
+		if (cn > 0 && ms < 16) ms = 16; // ~60fps
+		if (cn > 2 && ms < 20) ms = 20; // ~50fps
+	}
 	KillTimer(SC_TIMER_PREV);
 	SetTimer(SC_TIMER_PREV, ms, NULL);
 }
@@ -2535,6 +4392,33 @@ void CScreenCaptureDlg::OnCbnSelchangeFps()
 	ApplyPreviewTimer();
 	if (m_preview.GetSafeHwnd())
 		m_preview.Invalidate(FALSE);
+}
+
+void CScreenCaptureDlg::OnCbnSelchangeEffect()
+{
+	if (m_uiLocked) return;
+	const int sel = m_effect.GetCurSel();
+	// カスタム行は配線側が本体なので触らない
+	if (sel >= SC_FX_COUNT)
+		return;
+	ApplyFxComboToChain();
+	PersistUiToSavedata();
+	UpdatePreview(TRUE);
+}
+
+void CScreenCaptureDlg::OnBnClickedCropFull()
+{
+	if (m_uiLocked) return;
+	const int sel = m_layer.GetCurSel();
+	if (sel < 0 || sel >= m_layerCnt) return;
+	m_layers[sel].srcX = 0;
+	m_layers[sel].srcY = 0;
+	m_layers[sel].srcW = 0;
+	m_layers[sel].srcH = 0;
+	SyncGeoEditsFromSel();
+	RefreshLayerList();
+	m_layer.SetCurSel(sel);
+	UpdatePreview(TRUE);
 }
 
 void CScreenCaptureDlg::OnLbnSelchangeLayer()
@@ -2683,8 +4567,8 @@ BOOL CScreenCaptureDlg::StartRecording()
 	if (InterlockedCompareExchange(&m_run, 0, 0)) return FALSE;
 
 	// レイヤがあるのに画面モードだとキャプチャUIや前面窓が写る → ウィンドウ合成へ強制
-	if (m_layerCnt > 0 && m_mode.GetCurSel() != SC_MODE_WINDOWS) {
-		m_mode.SetCurSel(SC_MODE_WINDOWS);
+	if (m_layerCnt > 0 && !IsWindowComposeMode()) {
+		m_mode.SetCurSel(SavedModeToComboSel(SC_MODE_WINDOWS, 0));
 		EnableComposeUi(TRUE);
 	}
 	// 録画直前にキャンバス内へ再フィット（見切れ防止）
@@ -2743,21 +4627,29 @@ BOOL CScreenCaptureDlg::StartRecording()
 
 	m_fpsVal = CurrentPreviewFps();
 	if (m_fpsVal < 5) m_fpsVal = 15;
-	if (m_fpsVal > 60) m_fpsVal = 60;
+	if (m_fpsVal > 120) m_fpsVal = 120;
 	m_withAudio = m_audio.GetCheck() ? TRUE : FALSE;
 	m_withMic = m_mic.GetCheck() ? TRUE : FALSE;
 	m_outPath = path;
 	m_path.SetWindowText(path);
 
+	// 固着 WGC を破棄して新規セッションで録る（WGC=高速、失敗時のみ GDI）。
+	InterlockedExchange(&m_encodeGdi, 0);
+	ScWgcReleaseSessions();
+
 	EnterCriticalSection(&m_snapCs);
 	m_recSnap = snap;
 	LeaveCriticalSection(&m_snapCs);
+
+	// 録画スレッドが m_cache を更新するため、先にキャンバスサイズで確保
+	RefreshComposeCache();
 
 	// 録画スレッドがループバックを独占するのでプレビュー監視を止める
 	StopPeakMonitor();
 
 	InterlockedExchange(&m_stop, 0);
 	InterlockedExchange(&m_lastHr, S_OK);
+	InterlockedExchange(&m_lastStage, 0);
 	InterlockedExchange(&m_frameCnt, 0);
 	InterlockedExchange(&m_encFpsX10, 0);
 	m_startTick = GetTickCount();
@@ -2765,6 +4657,7 @@ BOOL CScreenCaptureDlg::StartRecording()
 
 	uintptr_t th = _beginthreadex(NULL, 0, CaptureThread, this, 0, NULL);
 	if (!th) {
+		InterlockedExchange(&m_encodeGdi, 0);
 		StartPeakMonitor();
 		m_status.SetWindowText(LL14(
 			L"スレッドを開始できませんでした。", L"Could not start thread.", L"Impossible de démarrer le thread.",
@@ -2805,6 +4698,7 @@ void CScreenCaptureDlg::StopRecording()
 		m_thread = NULL;
 	}
 	InterlockedExchange(&m_run, 0);
+	InterlockedExchange(&m_encodeGdi, 0);
 	const BOOL uiAlive = (GetSafeHwnd() != NULL);
 	if (uiAlive && IsIconic())
 		ShowWindow(SW_RESTORE);
@@ -2822,22 +4716,24 @@ void CScreenCaptureDlg::StopRecording()
 				L"Zapisano:\n%s", L"Kaydedildi:\n%s"), (LPCTSTR)m_outPath);
 			m_status.SetWindowText(msg);
 		} else if (FAILED(capHr)) {
+			const LONG stage = InterlockedCompareExchange(&m_lastStage, 0, 0);
 			CString msg;
 			msg.Format(LL14(
-				L"録画に失敗しました (HRESULT=0x%08X)。",
-				L"Capture failed (HRESULT=0x%08X).",
-				L"Échec de la capture (HRESULT=0x%08X).",
-				L"Cattura non riuscita (HRESULT=0x%08X).",
-				L"Error de captura (HRESULT=0x%08X).",
-				L"캡처 실패 (HRESULT=0x%08X).",
-				L"捕获失败 (HRESULT=0x%08X)。",
-				L"فشل الالتقاط (HRESULT=0x%08X).",
-				L"Ошибка захвата (HRESULT=0x%08X).",
-				L"Aufnahme fehlgeschlagen (HRESULT=0x%08X).",
-				L"Falha na captura (HRESULT=0x%08X).",
-				L"Opname mislukt (HRESULT=0x%08X).",
-				L"Przechwytywanie nie powiodło się (HRESULT=0x%08X).",
-				L"Yakalama başarısız (HRESULT=0x%08X)."), (unsigned)capHr);
+				L"録画に失敗しました (HRESULT=0x%08X, stage=%ld)。音声オフで再試行も可。",
+				L"Capture failed (HRESULT=0x%08X, stage=%ld). Try with audio off.",
+				L"Échec de la capture (HRESULT=0x%08X, stage=%ld). Essayez sans audio.",
+				L"Cattura non riuscita (HRESULT=0x%08X, stage=%ld). Prova senza audio.",
+				L"Error de captura (HRESULT=0x%08X, stage=%ld). Pruebe sin audio.",
+				L"캡처 실패 (HRESULT=0x%08X, stage=%ld). 오디오 끄고 재시도.",
+				L"捕获失败 (HRESULT=0x%08X, stage=%ld)。可尝试关闭音频。",
+				L"فشل الالتقاط (HRESULT=0x%08X, stage=%ld). جرّب بدون صوت.",
+				L"Ошибка захвата (HRESULT=0x%08X, stage=%ld). Попробуйте без звука.",
+				L"Aufnahme fehlgeschlagen (HRESULT=0x%08X, stage=%ld). Ohne Audio versuchen.",
+				L"Falha na captura (HRESULT=0x%08X, stage=%ld). Tente sem áudio.",
+				L"Opname mislukt (HRESULT=0x%08X, stage=%ld). Probeer zonder audio.",
+				L"Przechwytywanie nie powiodło się (HRESULT=0x%08X, stage=%ld). Spróbuj bez dźwięku.",
+				L"Yakalama başarısız (HRESULT=0x%08X, stage=%ld). Ses kapalı deneyin."),
+				(unsigned)capHr, (long)stage);
 			m_status.SetWindowText(msg);
 		} else {
 			m_status.SetWindowText(LL14(
@@ -3047,6 +4943,8 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 {
 	CScreenCaptureDlg* self = (CScreenCaptureDlg*)p;
 	HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+	timeBeginPeriod(1);
 
 	IMFSinkWriter* writer = NULL;
 	ScFrameBuf frame = {};
@@ -3077,37 +4975,82 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 	DWORD videoIdx = 0;
 	DWORD audioIdx = 0;
 	BOOL haveAudio = FALSE;
+	BOOL videoNv12 = FALSE;
+	BOOL videoRgbBottomUp = FALSE;
 	LONGLONG videoRt = 0;
 	LONGLONG audioRt = 0;
 
 	HRESULT hr = MFStartup(MF_VERSION);
-	if (FAILED(hr)) { InterlockedExchange(&self->m_lastHr, hr); goto done; }
-
-	if (!ScComposeFrame(frame, snap)) {
-		InterlockedExchange(&self->m_lastHr, E_FAIL);
+	if (FAILED(hr)) {
+		InterlockedExchange(&self->m_lastStage, 1);
+		InterlockedExchange(&self->m_lastHr, hr);
 		goto done;
+	}
+
+	if (!ScComposeFrame(frame, snap, FALSE)) {
+		if (!ScComposeFrame(frame, snap, TRUE)) {
+			InterlockedExchange(&self->m_lastStage, 2);
+			InterlockedExchange(&self->m_lastHr, E_FAIL);
+			goto done;
+		}
+	}
+	// エンコードに渡す解像度を偶数＆上限で正規化（H.264制約）
+	{
+		int ew = frame.w & ~1, eh = frame.h & ~1;
+		if (ew < 16) ew = 16;
+		if (eh < 16) eh = 16;
+		if (ew > 4096) ew = 4096;
+		if (eh > 2304) eh = 2304;
+		if (ew != frame.w || eh != frame.h) {
+			ScFrameBuf scaled = {};
+			if (ScFrameAlloc(scaled, ew, eh)) {
+				SetStretchBltMode(scaled.hdc, COLORONCOLOR);
+				StretchBlt(scaled.hdc, 0, 0, ew, eh, frame.hdc, 0, 0, frame.w, frame.h, SRCCOPY);
+				ScFrameFree(frame);
+				frame = scaled;
+			} else {
+				frame.w = ew;
+				frame.h = eh;
+			}
+		}
 	}
 
 	{
-		IMFAttributes* attrs = NULL;
-		if (SUCCEEDED(MFCreateAttributes(&attrs, 2)) && attrs) {
-			attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
-			attrs->SetUINT32(MF_SINK_WRITER_DISABLE_THROTTLING, TRUE);
-			hr = MFCreateSinkWriterFromURL(self->m_outPath, NULL, attrs, &writer);
-			attrs->Release();
-		} else {
-			hr = MFCreateSinkWriterFromURL(self->m_outPath, NULL, NULL, &writer);
+		int vstep = 0;
+		int okAttempt = -1;
+		HRESULT lastVideoHr = E_FAIL;
+		// HW エンコード優先（SW は 1080p30 で足りないことが多い）
+		for (int hwPass = 0; okAttempt < 0 && hwPass < 2; ++hwPass) {
+			const BOOL useHw = (hwPass == 0) ? TRUE : FALSE;
+			for (int attempt = 0; attempt < 5; ++attempt) {
+				haveAudio = FALSE;
+				hr = ScRebuildVideoOnlyWriter(self->m_outPath, frame.w, frame.h, fps,
+					&writer, &videoIdx, &videoNv12, &videoRgbBottomUp, useHw, &vstep, attempt);
+				if (SUCCEEDED(hr)) { okAttempt = attempt; break; }
+				lastVideoHr = hr;
+			}
 		}
-	}
-	if (FAILED(hr) || !writer) {
-		InterlockedExchange(&self->m_lastHr, FAILED(hr) ? hr : E_FAIL);
-		goto done;
-	}
-
-	hr = ScAddVideoStream(writer, &videoIdx, frame.w, frame.h, fps);
-	if (FAILED(hr)) {
-		InterlockedExchange(&self->m_lastHr, hr);
-		goto done;
+		// 高解像度拒否向け縮小リトライ（attempt0=公式RGB32 を優先）
+		const int kMaxList[][2] = { {1280, 720}, {854, 480} };
+		for (int i = 0; okAttempt < 0 && i < 2; ++i) {
+			if (frame.w <= kMaxList[i][0] && frame.h <= kMaxList[i][1])
+				continue;
+			if (!ScScaleFrameTo(frame, kMaxList[i][0], kMaxList[i][1]))
+				break;
+			for (int attempt = 0; attempt < 5; ++attempt) {
+				haveAudio = FALSE;
+				hr = ScRebuildVideoOnlyWriter(self->m_outPath, frame.w, frame.h, fps,
+					&writer, &videoIdx, &videoNv12, &videoRgbBottomUp, FALSE, &vstep, attempt);
+				if (SUCCEEDED(hr)) { okAttempt = attempt; break; }
+				lastVideoHr = hr;
+			}
+		}
+		if (okAttempt < 0) {
+			InterlockedExchange(&self->m_lastStage, (vstep == 1) ? 40 : (vstep == 2) ? 41 : 4);
+			InterlockedExchange(&self->m_lastHr, lastVideoHr);
+			goto done;
+		}
+		hr = S_OK;
 	}
 
 	if (wantAudio) {
@@ -3127,15 +5070,46 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 				hr = ScInitLoopbackCapture(renderDev, &loopClient, &loopCap, &mixFmt, &hEvent);
 				if (SUCCEEDED(hr) && loopClient && loopCap && mixFmt) {
 					hr = ScAddAudioStream(writer, &audioIdx, outHz, outCh);
-					if (SUCCEEDED(hr))
+					if (SUCCEEDED(hr)) {
 						haveAudio = TRUE;
+					} else {
+						// AddStream 後の失敗で orphan AAC が残ると BeginWriting が 0xC00D36B4 になる
+						HRESULT hv = ScRebuildVideoOnlyWriter(self->m_outPath, frame.w, frame.h, fps,
+							&writer, &videoIdx, &videoNv12, &videoRgbBottomUp, FALSE, NULL, 0);
+						haveAudio = FALSE;
+						audioIdx = 0;
+						if (FAILED(hv)) {
+							InterlockedExchange(&self->m_lastStage, 5);
+							InterlockedExchange(&self->m_lastHr, hr);
+							goto done;
+						}
+						hr = S_OK;
+					}
 				}
 			}
 		}
 	}
 
 	hr = writer->BeginWriting();
+	if (FAILED(hr) && haveAudio) {
+		// 映像+AAC の組み合わせ拒否 → 映像のみで再構築
+		const HRESULT beginHr = hr;
+		if (loopClient) { loopClient->Stop(); }
+		if (loopCap) { loopCap->Release(); loopCap = NULL; }
+		if (loopClient) { loopClient->Release(); loopClient = NULL; }
+		if (mixFmt) { CoTaskMemFree(mixFmt); mixFmt = NULL; }
+		if (hEvent) { CloseHandle(hEvent); hEvent = NULL; }
+		haveAudio = FALSE;
+		audioIdx = 0;
+		hr = ScRebuildVideoOnlyWriter(self->m_outPath, frame.w, frame.h, fps,
+			&writer, &videoIdx, &videoNv12, &videoRgbBottomUp, FALSE, NULL, 0);
+		if (SUCCEEDED(hr))
+			hr = writer->BeginWriting();
+		if (FAILED(hr))
+			hr = beginHr;
+	}
 	if (FAILED(hr)) {
+		InterlockedExchange(&self->m_lastStage, 6);
 		InterlockedExchange(&self->m_lastHr, hr);
 		goto done;
 	}
@@ -3317,6 +5291,7 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 						}
 						hr = ScWriteAudioSample(writer, audioIdx, pcm, outFrames, outCh, (int)outHz, audioRt);
 						if (FAILED(hr) && hr != MF_E_TRANSFORM_NEED_MORE_INPUT) {
+							InterlockedExchange(&self->m_lastStage, 7);
 							InterlockedExchange(&self->m_lastHr, hr);
 							writeFail = TRUE;
 							break;
@@ -3352,9 +5327,11 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 					videoRt = (elapsedQ * 10000000LL) / qpf64;
 				}
 				const LONGLONG dur = frameDur;
-				BOOL haveFrame = ScComposeFrame(frame, snap);
-				if (!haveFrame && frame.bits)
-					haveFrame = TRUE;
+				snap.fxTime = (float)((elapsedQ * 1000.0) / (double)qpf64) * 0.001f;
+				// WGC 優先（開始時にセッション再生成）。失敗フレームのみ GDI。
+				BOOL haveFrame = ScComposeFrame(frame, snap, FALSE);
+				if (!haveFrame)
+					haveFrame = ScComposeFrame(frame, snap, TRUE);
 				if (!haveFrame) {
 					if (ScFrameAlloc(frame, snap.canvasW, snap.canvasH)) {
 						ScFrameClear(frame, RGB(16, 16, 20));
@@ -3362,21 +5339,27 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 					}
 				}
 				if (haveFrame) {
-					hr = ScWriteVideoSample(writer, videoIdx, frame, videoRt, dur);
+					hr = ScWriteVideoSample(writer, videoIdx, frame, videoRt, dur, videoNv12, videoRgbBottomUp);
 					if (FAILED(hr) && hr != MF_E_TRANSFORM_NEED_MORE_INPUT) {
+						InterlockedExchange(&self->m_lastStage, 7);
 						InterlockedExchange(&self->m_lastHr, hr);
 						writeFail = TRUE;
 						break;
 					}
 					videoRt += dur;
-					InterlockedIncrement(&self->m_frameCnt);
-					// プレビュー用キャッシュへ共有（UI 側の二重 WGC を避ける）
-					if (self->m_snapCsInit) {
-						EnterCriticalSection(&self->m_snapCs);
-						if (self->m_cacheBits && self->m_cacheW == frame.w && self->m_cacheH == frame.h
-							&& frame.bits && frame.stride == frame.w * 4) {
-							const size_t nbytes = (size_t)frame.stride * (size_t)frame.h;
-							memcpy(self->m_cacheBits, frame.bits, nbytes);
+					const LONG fc = InterlockedIncrement(&self->m_frameCnt);
+					// プレビューは 3 フレームに 1 回（Enc を優先）
+					if ((fc % 3) == 0 && self->m_snapCsInit && TryEnterCriticalSection(&self->m_snapCs)) {
+						if (self->m_cacheBits && frame.bits) {
+							if (self->m_cacheW == frame.w && self->m_cacheH == frame.h
+								&& frame.stride == frame.w * 4) {
+								const size_t nbytes = (size_t)frame.stride * (size_t)frame.h;
+								memcpy(self->m_cacheBits, frame.bits, nbytes);
+							} else if (self->m_cacheDc && frame.hdc && self->m_cacheW > 0 && self->m_cacheH > 0) {
+								SetStretchBltMode(self->m_cacheDc, COLORONCOLOR);
+								StretchBlt(self->m_cacheDc, 0, 0, self->m_cacheW, self->m_cacheH,
+									frame.hdc, 0, 0, frame.w, frame.h, SRCCOPY);
+							}
 						}
 						LeaveCriticalSection(&self->m_snapCs);
 					}
@@ -3444,8 +5427,12 @@ done:
 	if (hEvent) CloseHandle(hEvent);
 	if (writer) writer->Release();
 	ScFrameFree(frame);
+	ScReleaseReuseBuf();
+	ScGdiReleaseScreenDc();
 	MFShutdown();
+	timeEndPeriod(1);
 	if (SUCCEEDED(hrCo)) CoUninitialize();
+	InterlockedExchange(&self->m_encodeGdi, 0);
 	InterlockedExchange(&self->m_run, 0);
 	return 0;
 }
@@ -3492,6 +5479,94 @@ void CScreenCaptureDlg::CloseModeless()
 	PersistUiToSavedata();
 	if (GetSafeHwnd())
 		DestroyWindow();
+}
+
+void CScreenCaptureDlg::LayoutHelpBtn()
+{
+	if (!m_help.GetSafeHwnd()) return;
+	// CCC_CaptionLayout と同じ寸法（BTN=26, GAP=2, RIGHT_MARGIN=4）
+	const int btn = 26;
+	const int gap = 2;
+	const int rightMargin = 4;
+
+	int x = 0;
+	int y = 0;
+	BOOL placed = FALSE;
+
+	// 実在するキャプションボタンの左端を基準にする（P/Settings/Min と絶対に重ねない）
+	static const UINT kCapIds[] = {
+		IDC_CAP_PIN, IDC_CAP_SETTINGS, IDC_CAP_MIN, IDC_CAP_MAX, IDC_CAP_CLOSE
+	};
+	int leftmost = INT_MAX;
+	int pinY = -1;
+	for (int i = 0; i < (int)_countof(kCapIds); ++i) {
+		CWnd* p = GetDlgItem(kCapIds[i]);
+		if (!p || !::IsWindow(p->GetSafeHwnd()) || !p->IsWindowVisible())
+			continue;
+		CRect r;
+		p->GetWindowRect(&r);
+		ScreenToClient(&r);
+		if (r.left < leftmost)
+			leftmost = r.left;
+		if (kCapIds[i] == IDC_CAP_PIN)
+			pinY = r.top;
+		placed = TRUE;
+	}
+	if (placed && leftmost < INT_MAX) {
+		x = leftmost - gap - btn;
+		const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+		y = (pinY >= 0) ? pinY : ((capH > btn) ? (capH - btn) / 2 : 2);
+	} else {
+		CRect cr;
+		GetClientRect(&cr);
+		const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+		y = (capH > btn) ? (capH - btn) / 2 : 2;
+		// close + min(+settings) + pin を想定したフォールバック
+		const int nChrome = 4;
+		x = cr.right - rightMargin - nChrome * (btn + gap) - btn;
+	}
+	if (x < 4) x = 4;
+
+	CRect cur;
+	m_help.GetWindowRect(&cur);
+	ScreenToClient(&cur);
+	if (cur.left == x && cur.top == y && cur.Width() == btn && cur.Height() == btn)
+		return;
+	m_help.SetWindowPos(&CWnd::wndTop, x, max(0, y), btn, btn,
+		SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+void CScreenCaptureDlg::ShowHelpSheet()
+{
+	if (g_scHelpDlg && ::IsWindow(g_scHelpDlg->GetSafeHwnd())) {
+		g_scHelpDlg->ShowWindow(SW_SHOW);
+		g_scHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_scHelpDlg && !::IsWindow(g_scHelpDlg->GetSafeHwnd()))
+		g_scHelpDlg = nullptr;
+	CScHelpDlg* dlg = new CScHelpDlg(this, nullptr);
+	if (!dlg->Create(IDD_SC_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_scHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CScreenCaptureDlg::OnBnClickedHelp()
+{
+	ShowHelpSheet();
+}
+
+void CScreenCaptureDlg::OnSize(UINT nType, int cx, int cy)
+{
+	CCustomBlurDialogBase::OnSize(nType, cx, cy);
+	if (nType != SIZE_MINIMIZED) {
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
 }
 
 void CScreenCaptureDlg::OnBnClickedClose()
@@ -3554,6 +5629,8 @@ void CScreenCaptureDlg::OnDestroy()
 	KillTimer(SC_TIMER_PREV);
 	KillTimer(SC_TIMER_UI);
 	StopPeakMonitor();
+	if (g_scHelpDlg && ::IsWindow(g_scHelpDlg->GetSafeHwnd()))
+		g_scHelpDlg->DestroyWindow();
 	if (m_picking) {
 		m_picking = FALSE;
 		ReleaseCapture();

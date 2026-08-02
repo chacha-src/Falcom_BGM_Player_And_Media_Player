@@ -440,8 +440,15 @@ void MpTaskbarReplay();
 void MpTaskbarNextTrack();
 void MpTaskbarPrevTrack();
 double OggGetGdiPlaybackTimeSec();
+// テンポ/ピッチ スライダー(0..400, 200=100%) → 表示% / RB 換算（MP と本体で共通）
+float TempoPercentFromPos(int tempoPos);
+double TempoPlaybackRateFromPos(int tempoPos);
+float TempoTimeRatioFromPos(int tempoPos);
+float PitchScaleFromPos(int pitchPos);
 void OggResetRubberBandStretcher();
 void RequestPlaybackRestart(HWND hwnd = NULL);
+// タグ編集など: 現再生位置を .save に書き、次回 play で確認なし復帰する
+void OggArmSilentResumeFromCurrent();
 
 //{{AFX_INSERT_LOCATION}}
 // Microsoft Visual C++ は前行の直前に追加の宣言を挿入します。

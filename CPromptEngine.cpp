@@ -103,9 +103,12 @@ static int DsVolToPercent(int v)
 
 static int PitchTempoSlFromPercent(int pct)
 {
-	if (pct < 0) pct = 0;
-	if (pct > 200) pct = 200;
-	return pct * 2;
+	// TempoPercentFromPos の逆写像（100%=slider200, 200%=slider300, 300%=slider400）
+	if (pct < 33) pct = 33;
+	if (pct > 300) pct = 300;
+	if (pct >= 100)
+		return pct + 100;
+	return (int)(((double)pct - 33.3) * 3.0 + 0.5);
 }
 
 static BOOL ParseTimeToken(const CString& s, int& pos, double& outSec)
@@ -690,18 +693,12 @@ static void MpPromptSyncUi()
 		og->m_EqualizerDlg->SyncSlidersFromSavedata();
 	if (og->m_pitch.GetSafeHwnd()) {
 		CString s;
-		float pi = (float)og->m_pitch_sl.GetPos();
-		if (pi >= 200.0f) pi -= 100.0f;
-		else pi = pi / 3.0f + 33.3f;
-		s.Format(L"%3d%%", (int)pi);
+		s.Format(L"%3d%%", (int)TempoPercentFromPos(og->m_pitch_sl.GetPos()));
 		og->m_pitch.SetWindowText(s);
 	}
 	if (og->m_temp_num.GetSafeHwnd()) {
 		CString s;
-		float te = (float)og->m_tempo_sl.GetPos();
-		if (te >= 200.0f) te -= 100.0f;
-		else te = te / 3.0f + 33.3f;
-		s.Format(L"%3d%%", (int)te);
+		s.Format(L"%3d%%", (int)TempoPercentFromPos(og->m_tempo_sl.GetPos()));
 		og->m_temp_num.SetWindowText(s);
 	}
 }

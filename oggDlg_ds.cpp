@@ -890,6 +890,7 @@ extern std::vector<float> inputFloatData;
 extern std::vector<uint8_t> m_bufwav3_1;
 extern int pitch;
 extern float tempoRate2;
+extern float PitchScaleFromPos(int pitchPos);
 std::vector<float> g_loopTailBuffer;
 size_t g_loopTailPos = 0;
 enum { RB_BANKS = 2 };
@@ -950,7 +951,7 @@ static bool InitializeRubberBandStretcherExUnlocked(int bank, int rate, int ch)
 	RubberBand_DestroyBankUnlocked(bank);
 
 	try {
-		double pitchRatio = pitch / 100.0;
+		double pitchRatio = (double)PitchScaleFromPos(pitch);
 		g_rubberBandStretcher[bank] = new RubberBand::RubberBandStretcher(
 			rate,
 			ch,
@@ -1029,17 +1030,8 @@ bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
 			return true;
 		}
 
-		float semitones = (float)pitch;
-		if (semitones >= 200.0f) {
-			semitones -= 100.0f;
-		}
-		else {
-			semitones = semitones / 3.0f + 33.3f;
-		}
-		semitones /= 100.0f;
-
 		g_rubberBandStretcher[bank]->setTimeRatio(tempoRate);
-		g_rubberBandStretcher[bank]->setPitchScale(static_cast<float>(semitones));
+		g_rubberBandStretcher[bank]->setPitchScale(PitchScaleFromPos(pitch));
 
 		if (!t) {
 			scr.raw.resize((size_t)inBytes);

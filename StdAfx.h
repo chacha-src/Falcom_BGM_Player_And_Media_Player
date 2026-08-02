@@ -470,18 +470,31 @@ struct save{
 	int record_flac_level;    // 0..8
 	int cap_with_audio;       // 1=画面キャプチャにシステム音
 	int cap_with_mic;         // 1=画面キャプチャにマイク
-	int cap_fps;              // 10..60 (録画＆プレビュー間隔)
+	int cap_fps;              // 10..120 (録画＆プレビュー間隔)
 	TCHAR cap_last_path[1024];
 
 	// --- K-Lite Codec Pack 未導入の誘導(末尾追記。旧.datは0) ---
 	// 0=未回答(未導入なら起動時に聞く) 1=いいえ済み(今後出さない)
 	int kliteAskSkip;
 	// 画面キャプチャモード(末尾追記)
-	int cap_mode;          // 0=プライマリ 1=全モニタ 2=ウィンドウ合成
-	int cap_canvas_preset; // 0=自動 1=1280x720 2=1920x1080 3=1600x900
+	int cap_mode;          // 0=プライマリ 1=全モニタ 2=ウィンドウ合成 3=特定モニタ
+	int cap_canvas_preset; // 0=自動 1=1280x720 2=1920x1080 3=1600x900 4=3840x2160
 	int cap_canvas_w;      // 予備(将来カスタム)
 	int cap_canvas_h;
 	int cap_include_mp;    // 1=MP画面(慣らし中の曲)をキャプチャに載せる
+	// 画面キャプチャ: 特定モニタ (末尾追記)
+	int cap_monitor_idx;   // EnumDisplayMonitors 0始まり。mode=3(特定モニタ)で使用
+	int cap_effect;        // SC_FX_* 画面キャプチャエフェクト（先頭スロット同期）
+	// 画面キャプチャ: エフェクトチェーン (末尾追記)
+	int cap_fx_n;          // 0..8
+	int cap_fx0;
+	int cap_fx1;
+	int cap_fx2;
+	int cap_fx3;
+	int cap_fx4;
+	int cap_fx5;
+	int cap_fx6;
+	int cap_fx7;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

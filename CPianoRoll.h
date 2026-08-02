@@ -1,4 +1,4 @@
-﻿// CPianoRoll.h : リアルタイム簡易ピアノロールビジュアライザ
+// CPianoRoll.h : リアルタイム簡易ピアノロールビジュアライザ
 //
 // PCM ストリームを Goertzel アルゴリズムで 88 鍵分に変換し、ノートのオン/オフと
 // 強度を推定して簡易ピアノロール形式で描画する。
@@ -60,6 +60,8 @@ public:
     // 「低音だけノートに乗らない」原因になる。低音も 8192 に揃え時間軸を一致させる。
     // 周波数分解能は F2 付近でなお半音未満を分離可能。
     static constexpr int REF_SAMPLE_RATE = 44100;
+    // Goertzel は 48k 超でも分解能はほぼ伸びず計算量だけ増える。解析専用に上限を設ける。
+    static constexpr int ANALYZE_RATE_MAX = 48000;
     static constexpr int WIN_LOW_REF = 8192;
     static constexpr int WIN_BASS_REF = 8192;
     static constexpr int WIN_HIGH_REF = 4096;
@@ -67,6 +69,10 @@ public:
     static int ScaleWinSamples(int refSamples, int sampleRate, int capSamples = 0);
     static int CaptureFrameCount(int sampleRate, int capSamples = 0);
     static int MinAnalyzeFrameCount(int sampleRate, int capSamples = 0);
+    // 再生 SR を解析用にキャップ（アップスケール/hi-res 時の窓肥大を防ぐ）
+    static int CapAnalyzeSampleRate(int sampleRate);
+    // ソース SR → 解析 SR 換算の必要ソースフレーム数
+    static int SourceFramesForAnalyze(int analyzeFrames, int sourceRate, int analyzeRate);
 
     // 再アタック判定(ゲート連結中の同鍵連打分離)を有効にするかどうか。
     // [重要] 既定 false。短窓オンセット信号は測定ノイズの影響を受けやすく、
@@ -337,7 +343,10 @@ private:
     float m_chMeterFill[PIANO_METER_CH_MAX];      // 表示用 IIR 平滑フィル値(0.0〜1.0)
     float m_chMeterAutoPeak[PIANO_METER_CH_MAX];  // 自動ピーク(棒グラフ上端の目印)
     int   m_chMeterCount = 0;
-    static constexpr DWORD ANALYZE_MIN_MS = 3;    // 連続分析の最短間隔(16分音符対応)
+    static constexpr DWORD ANALYZE_MIN_MS = 16;      // 表示(ms2)と同程度。3ms は Goertzel が描画の5倍走り UI を圧迫する
+    // RubberBand(テンポ/ピッチ)と CPU 競合するときさらに間隔を広げる
+    static constexpr DWORD ANALYZE_MIN_MS_TEMPO = 32;
+    static DWORD EffectiveAnalyzeMinMs();
     bool  m_detectSilent = false;                // Goertzel 直後の無音フラグ(publish 側で反映)
 
     void EnsureAnalysisTables(int sampleRate, int capCaptureFrames = 0);   // Goertzel 係数と窓関数を再計算
@@ -442,7 +451,8 @@ private:
     DWORD m_lastSyncPostTick = 0;
     DWORD m_lastAnalysisDonePostTick = 0;
     int   m_rollSpeedPct = 100;       // 表示スクロール速度(%) 25..200
-    int   m_rollSpeedCredit = 0;      // PushFrame 用アキュムレータ(×100 基準)
+    int   m_rollSpeedCredit = 0;      // PushFrame 用アキュムレータ(壁時計×速度%)
+    DWORD m_lastRollPushTick = 0;     // PushDisplayFrames の前回時刻
     bool  m_frozen = false;           // 表示スクロール停止(解析は継続、ライブ行は更新)
     bool  m_showExprLegend = true;    // 記号凡例パネル
     bool  m_showExprMarks = true;     // 表現記号グリフ/音階移行/バー装飾

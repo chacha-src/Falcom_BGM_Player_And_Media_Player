@@ -47,6 +47,8 @@ extern int wavbit_sample_Hz; // サンプルレート Hz (oggDlg.cpp)
 extern int wavchannel;       // チャンネル数 (oggDlg.cpp)
 extern int wavsam_depth;     // ビット深度 (oggDlg.cpp)
 extern int mode;         // 再生モード(タイトル解決に使用, oggDlg.cpp)
+extern int tempo;        // テンポスライダー位置(oggDlg.cpp)
+extern int pitch;        // ピッチスライダー位置(oggDlg.cpp)
 extern int playy;   // 再生中フラグ(oggDlg.cpp)
 extern int plf;          // 再生中(1=再生中。oggDlg.cpp)
 extern int ps;           // 一時停止中(1=再開表示。oggDlg.cpp)
@@ -3341,12 +3343,12 @@ void CMediaPlayerDlg::SyncFromMain()
 		m_kvolL.GetWindowText(s2); if (l != s2) m_kvolL.SetWindowText(l);
 		{
 			CString lbl = LL14(L"テンポ", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"템포", L"速度", L"الإيقاع", L"Темп", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo");
-			l.Format(_T("!@C606868%s!@C186878 %d%%"), (LPCTSTR)lbl, og->m_tempo_sl.GetPos() / 2);
+			l.Format(_T("!@C606868%s!@C186878 %d%%"), (LPCTSTR)lbl, (int)TempoPercentFromPos(og->m_tempo_sl.GetPos()));
 		}
 		m_tempoL.GetWindowText(s2); if (l != s2) m_tempoL.SetWindowText(l);
 		{
 			CString lbl = LL14(L"ピッチ", L"Pitch", L"Hauteur", L"Altezza", L"Tono", L"피치", L"音高", L"طبقة الصوت", L"Высота", L"Tonhohe", L"Tom", L"Toonhoogte", L"Wysokość", L"Perde");
-			l.Format(_T("!@C606868%s!@C704878 %d%%"), (LPCTSTR)lbl, og->m_pitch_sl.GetPos() / 2);
+			l.Format(_T("!@C606868%s!@C704878 %d%%"), (LPCTSTR)lbl, (int)TempoPercentFromPos(og->m_pitch_sl.GetPos()));
 		}
 		m_pitchL.GetWindowText(s2); if (l != s2) m_pitchL.SetWindowText(l);
 
@@ -4687,8 +4689,16 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		HWND h = r->GetSafeHwnd();
 		if (h == m_dsvol.GetSafeHwnd())      og->m_dsval.SetPos(m_dsvol.GetPos());
 		else if (h == m_kvol.GetSafeHwnd())  og->m_kakuVol.SetPos(m_kvol.GetPos());
-		else if (h == m_tempo.GetSafeHwnd()) og->m_tempo_sl.SetPos(m_tempo.GetPos());
-		else if (h == m_pitch.GetSafeHwnd()) og->m_pitch_sl.SetPos(m_pitch.GetPos());
+		else if (h == m_tempo.GetSafeHwnd()) {
+			const int p = m_tempo.GetPos();
+			og->m_tempo_sl.SetPos(p);
+			tempo = p; // timerp 待ちにせず RB/予想時間と一致させる
+		}
+		else if (h == m_pitch.GetSafeHwnd()) {
+			const int p = m_pitch.GetPos();
+			og->m_pitch_sl.SetPos(p);
+			pitch = p;
+		}
 	}
 	CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
 }

@@ -366,6 +366,17 @@ BOOL COggApp::InitInstance()
 	savedata.cap_canvas_w = 1920;
 	savedata.cap_canvas_h = 1080;
 	savedata.cap_include_mp = 0;
+	savedata.cap_monitor_idx = 0;
+	savedata.cap_effect = 0;
+	savedata.cap_fx_n = 0;
+	savedata.cap_fx0 = 0;
+	savedata.cap_fx1 = 0;
+	savedata.cap_fx2 = 0;
+	savedata.cap_fx3 = 0;
+	savedata.cap_fx4 = 0;
+	savedata.cap_fx5 = 0;
+	savedata.cap_fx6 = 0;
+	savedata.cap_fx7 = 0;
 	savedata.pianorollviewmode = 0;
 	savedata.pianorollkeyrange = 108;
 	savedata.pianorollnotename = 1;
@@ -917,7 +928,7 @@ BOOL COggApp::InitInstance()
 	else if (savedata.cap_with_mic != 0)
 		savedata.cap_with_mic = 1;
 	if (datFileSize < (int)(offsetof(save, cap_fps) + sizeof(savedata.cap_fps))
-		|| savedata.cap_fps < 5 || savedata.cap_fps > 60)
+		|| savedata.cap_fps < 5 || savedata.cap_fps > 120)
 		savedata.cap_fps = 15;
 	if (datFileSize < (int)(offsetof(save, cap_last_path) + sizeof(savedata.cap_last_path)))
 		savedata.cap_last_path[0] = 0;
@@ -973,10 +984,10 @@ BOOL COggApp::InitInstance()
 	else if (savedata.kliteAskSkip != 0)
 		savedata.kliteAskSkip = 1;
 	if (datFileSize < (int)(offsetof(save, cap_mode) + sizeof(savedata.cap_mode))
-		|| savedata.cap_mode < 0 || savedata.cap_mode > 2)
+		|| savedata.cap_mode < 0 || savedata.cap_mode > 3)
 		savedata.cap_mode = 0;
 	if (datFileSize < (int)(offsetof(save, cap_canvas_preset) + sizeof(savedata.cap_canvas_preset))
-		|| savedata.cap_canvas_preset < 0 || savedata.cap_canvas_preset > 3)
+		|| savedata.cap_canvas_preset < 0 || savedata.cap_canvas_preset > 4)
 		savedata.cap_canvas_preset = 2;
 	if (datFileSize < (int)(offsetof(save, cap_canvas_w) + sizeof(savedata.cap_canvas_w))
 		|| savedata.cap_canvas_w < 160 || savedata.cap_canvas_w > 7680)
@@ -988,6 +999,56 @@ BOOL COggApp::InitInstance()
 		savedata.cap_include_mp = 0;
 	else if (savedata.cap_include_mp != 0)
 		savedata.cap_include_mp = 1;
+	if (datFileSize < (int)(offsetof(save, cap_monitor_idx) + sizeof(savedata.cap_monitor_idx))
+		|| savedata.cap_monitor_idx < 0 || savedata.cap_monitor_idx > 63)
+		savedata.cap_monitor_idx = 0;
+	if (datFileSize < (int)(offsetof(save, cap_effect) + sizeof(savedata.cap_effect))
+		|| savedata.cap_effect < 0 || savedata.cap_effect >= 31)
+		savedata.cap_effect = 0;
+	if (datFileSize < (int)(offsetof(save, cap_fx_n) + sizeof(savedata.cap_fx_n))
+		|| savedata.cap_fx_n < 0 || savedata.cap_fx_n > 8)
+		savedata.cap_fx_n = 0;
+	auto clampFx = [](int v) -> int {
+		if (v < 0 || v >= 31) return 0; // SC_FX_COUNT
+		return v;
+	};
+	if (datFileSize < (int)(offsetof(save, cap_fx0) + sizeof(savedata.cap_fx0)))
+		savedata.cap_fx0 = 0;
+	else
+		savedata.cap_fx0 = clampFx(savedata.cap_fx0);
+	if (datFileSize < (int)(offsetof(save, cap_fx1) + sizeof(savedata.cap_fx1)))
+		savedata.cap_fx1 = 0;
+	else
+		savedata.cap_fx1 = clampFx(savedata.cap_fx1);
+	if (datFileSize < (int)(offsetof(save, cap_fx2) + sizeof(savedata.cap_fx2)))
+		savedata.cap_fx2 = 0;
+	else
+		savedata.cap_fx2 = clampFx(savedata.cap_fx2);
+	if (datFileSize < (int)(offsetof(save, cap_fx3) + sizeof(savedata.cap_fx3)))
+		savedata.cap_fx3 = 0;
+	else
+		savedata.cap_fx3 = clampFx(savedata.cap_fx3);
+	if (datFileSize < (int)(offsetof(save, cap_fx4) + sizeof(savedata.cap_fx4)))
+		savedata.cap_fx4 = 0;
+	else
+		savedata.cap_fx4 = clampFx(savedata.cap_fx4);
+	if (datFileSize < (int)(offsetof(save, cap_fx5) + sizeof(savedata.cap_fx5)))
+		savedata.cap_fx5 = 0;
+	else
+		savedata.cap_fx5 = clampFx(savedata.cap_fx5);
+	if (datFileSize < (int)(offsetof(save, cap_fx6) + sizeof(savedata.cap_fx6)))
+		savedata.cap_fx6 = 0;
+	else
+		savedata.cap_fx6 = clampFx(savedata.cap_fx6);
+	if (datFileSize < (int)(offsetof(save, cap_fx7) + sizeof(savedata.cap_fx7)))
+		savedata.cap_fx7 = 0;
+	else
+		savedata.cap_fx7 = clampFx(savedata.cap_fx7);
+	// 旧: cap_effect のみ → チェーン1段へ移行
+	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {
+		savedata.cap_fx_n = 1;
+		savedata.cap_fx0 = savedata.cap_effect;
+	}
 	// K-Lite Codec Pack 未導入時の誘導(いいえで今後出さない)
 	if (savedata.kliteAskSkip == 0) {
 		int hasKlite = 0;

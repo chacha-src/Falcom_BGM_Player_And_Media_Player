@@ -351,7 +351,7 @@ void CTagEditDlg::OnBnClickedSave()
 	}
 	if (targets.empty()) return;
 
-	// 演奏中の曲を含むときだけ停止→書込→再開
+	// 演奏中の曲を含むとき: 位置保存→停止→書込→途中から再開(確認ダイアログ無し)
 	BOOL needResume = FALSE;
 	CString playPhys;
 	if (og && (plf || playf) && !filen.IsEmpty()) {
@@ -368,7 +368,8 @@ void CTagEditDlg::OnBnClickedSave()
 	}
 	int savecheckBak = savedata.savecheck;
 	if (needResume) {
-		savedata.savecheck = 0; // 途中再生ダイアログを出さない
+		OggArmSilentResumeFromCurrent(); // stop1 前に位置を残す
+		savedata.savecheck = 0; // stop()経路の途中再生ダイアログ抑止(互換)
 		og->stop1();
 		savedata.savecheck = savecheckBak;
 	}
@@ -427,6 +428,19 @@ void CTagEditDlg::OnBnClickedSave()
 		if (textOk && coverOk) {
 			okN++;
 			TagEdit_ForgetJacket(fol);
+			playlistdata0* t = targets[i];
+			if (!title.IsEmpty()) {
+				_tcsncpy(t->name, title, _countof(t->name) - 1);
+				t->name[_countof(t->name) - 1] = 0;
+			}
+			if (!artist.IsEmpty()) {
+				_tcsncpy(t->art, artist, _countof(t->art) - 1);
+				t->art[_countof(t->art) - 1] = 0;
+			}
+			if (!album.IsEmpty()) {
+				_tcsncpy(t->alb, album, _countof(t->alb) - 1);
+				t->alb[_countof(t->alb) - 1] = 0;
+			}
 			if (!multiFile) {
 				if (!title.IsEmpty()) {
 					_tcsncpy(pc.name, title, _countof(pc.name) - 1);
@@ -446,9 +460,6 @@ void CTagEditDlg::OnBnClickedSave()
 			failN++;
 		}
 	}
-
-	if (needResume && og && ::IsWindow(og->GetSafeHwnd()))
-		RequestPlaybackRestart(og->GetSafeHwnd());
 
 	CString msg;
 	if (skipN > 0 && okN == 0 && failN == 0) {
@@ -486,6 +497,9 @@ void CTagEditDlg::OnBnClickedSave()
 		m_status.SetWindowText(msg);
 		MessageBox(msg, LL14(L"タグ編集", L"Edit tags", L"Tags", L"Tag", L"Etiquetas", L"태그", L"标签", L"Tags",
 			L"Теги", L"Tags", L"Tags", L"Tags", L"Tagi", L"Etiket"), MB_OK | MB_ICONINFORMATION);
+		// MessageBox 後に再開(途中位置は OggArmSilentResumeFromCurrent 済み)
+		if (needResume && og && ::IsWindow(og->GetSafeHwnd()))
+			RequestPlaybackRestart(og->GetSafeHwnd());
 		EndDialog(IDOK);
 	}
 	else {

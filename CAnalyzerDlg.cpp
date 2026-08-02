@@ -1,4 +1,4 @@
-﻿// CAnalyzerDlg.cpp : 簡易波形アナライザー(スクロールBB・多ch・周波数特性)
+// CAnalyzerDlg.cpp : 簡易波形アナライザー(スクロールBB・多ch・周波数特性)
 #include "stdafx.h"
 #include "ogg.h"
 #include "CAnalyzerDlg.h"
@@ -9,6 +9,8 @@
 #include <algorithm>
 
 extern COggDlg* og;
+extern int tempo;
+extern int pitch;
 
 IMPLEMENT_DYNAMIC(CAnalyzerDlg, CCustomBlurDialogExBase)
 
@@ -575,6 +577,14 @@ void CAnalyzerDlg::StopSpecWorker()
 void CAnalyzerDlg::RequestSpecAnalysis()
 {
 	if (m_frozen) return;
+	// RubberBand 伸縮中はスペクトル更新を間引き、ピアノロール/再生と CPU を奪い合わない
+	if (tempo != 200 || pitch != 200) {
+		static DWORD s_lastSpecKick = 0;
+		const DWORD now = GetTickCount();
+		if (s_lastSpecKick != 0 && (now - s_lastSpecKick) < 40u)
+			return;
+		s_lastSpecKick = now;
+	}
 	InterlockedExchange(&m_specNeed, 1);
 	if (m_hSpecWake) SetEvent(m_hSpecWake);
 }
@@ -644,6 +654,11 @@ void CAnalyzerDlg::RequestSyncFromMainUi()
 	int minMs = savedata.ms2;
 	if (minMs < 16) minMs = 16;
 	if (minMs > 960) minMs = 960;
+	// 伸縮中は同期も倍間隔（FeedPCM/描画が再生スレッドと競合しやすい）
+	if (tempo != 200 || pitch != 200) {
+		minMs *= 2;
+		if (minMs < 32) minMs = 32;
+	}
 	const DWORD now = GetTickCount();
 	if (m_lastSyncPostTick != 0 && (now - m_lastSyncPostTick) < (DWORD)minMs)
 		return;

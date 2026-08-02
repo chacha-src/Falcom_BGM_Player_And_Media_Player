@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
@@ -19,6 +19,8 @@ extern COggDlg* og;
 #include "PianoRollGoertzelAvx2.h"
 
 extern save savedata;
+extern int tempo;
+extern int pitch;
 void COggDlg_SyncPianoRollFast();
 void COggDlg_ShowPianoRollTune();
 
@@ -298,6 +300,49 @@ int CPianoRoll::MinAnalyzeFrameCount(int sampleRate, int capSamples)
     return ScaleWinSamples(WIN_BASS_REF, sampleRate, capSamples);
 }
 
+int CPianoRoll::CapAnalyzeSampleRate(int sampleRate)
+{
+    if (sampleRate < 8000) return REF_SAMPLE_RATE;
+    // 伸縮中は解析を 44.1k 相当に落とし Goertzel 窓を抑える
+    if (tempo != 200 || pitch != 200) {
+        if (sampleRate > REF_SAMPLE_RATE) return REF_SAMPLE_RATE;
+        return sampleRate;
+    }
+    if (sampleRate > ANALYZE_RATE_MAX) return ANALYZE_RATE_MAX;
+    return sampleRate;
+}
+
+int CPianoRoll::SourceFramesForAnalyze(int analyzeFrames, int sourceRate, int analyzeRate)
+{
+    if (analyzeFrames <= 0) return 0;
+    if (sourceRate < 8000) sourceRate = REF_SAMPLE_RATE;
+    if (analyzeRate < 8000) analyzeRate = REF_SAMPLE_RATE;
+    if (sourceRate <= analyzeRate) return analyzeFrames;
+    int64_t n = ((int64_t)analyzeFrames * (int64_t)sourceRate + analyzeRate / 2) / analyzeRate;
+    if (n < 64) n = 64;
+    if (n > WIN_SAMPLES_MAX) n = WIN_SAMPLES_MAX;
+    return (int)n;
+}
+
+DWORD CPianoRoll::EffectiveAnalyzeMinMs()
+{
+    // 解析を描画周期以上に速くしても、pending 上限で描画は間引かれ CPU だけ浪費する。
+    DWORD ms = ANALYZE_MIN_MS;
+    int drawMs = savedata.ms2;
+    if (drawMs < 16) drawMs = 16;
+    if (drawMs > 960) drawMs = 960;
+    if ((DWORD)drawMs > ms)
+        ms = (DWORD)drawMs;
+    // スライダ中央 200 = 100%。伸縮中はさらに間引く。
+    if (tempo != 200 || pitch != 200) {
+        DWORD t = ANALYZE_MIN_MS_TEMPO;
+        if ((DWORD)drawMs * 2u > t)
+            t = (DWORD)drawMs * 2u;
+        if (t > ms) ms = t;
+    }
+    return ms;
+}
+
 CPianoRoll::CPianoRoll(CWnd* pParent)
     : CCustomBlurDialogExBase(IDD_PIANOROLL, pParent)
 {
@@ -351,6 +396,7 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     m_historyCount = 0;
     m_historyHead = 0;
     m_rollSpeedCredit = 0;
+    m_lastRollPushTick = 0;
     for (int hi = 0; hi < (int)MAX_HISTORY; ++hi) {
         auto& f = m_historyRing[hi];
         memset(f.active, 0, sizeof(f.active));
@@ -467,6 +513,7 @@ void CPianoRoll::ResetPlaybackState()
         m_historyHead = 0;
         m_framesPending = 0;
         m_rollSpeedCredit = 0;
+        m_lastRollPushTick = 0;
         m_rollScrollValid = false;
         m_rollReady = false;
         m_bufwav3LevelDb = -60.0f;
@@ -621,6 +668,7 @@ BOOL CPianoRoll::OnInitDialog()
         if (sp < 25 || sp > 200) sp = 100;
         m_rollSpeedPct = sp;
         m_rollSpeedCredit = 0;
+        m_lastRollPushTick = 0;
     }
     m_showExprLegend = (savedata.pianorollexprlegend != 0);
     m_showExprMarks = (savedata.pianorollexprmarks != 0);
@@ -860,7 +908,8 @@ void CPianoRoll::AnalyzePlayCursorMono(const double* mono, int frameCount, int s
     if (!m_hAnalysisWake) return;
 
     const DWORD now = GetTickCount();
-    if (m_lastAnalyzeTick != 0 && (now - m_lastAnalyzeTick) < ANALYZE_MIN_MS)
+    const DWORD minMs = EffectiveAnalyzeMinMs();
+    if (m_lastAnalyzeTick != 0 && (now - m_lastAnalyzeTick) < minMs)
         return;
     m_lastAnalyzeTick = now;
 
@@ -882,7 +931,7 @@ bool CPianoRoll::ShouldCaptureAnalyzeJob()
     if (InterlockedCompareExchange(&m_jobPending, 0, 0) != 0) return false;
     if (m_lastAnalyzeTick != 0) {
         const DWORD now = GetTickCount();
-        if ((now - m_lastAnalyzeTick) < ANALYZE_MIN_MS)
+        if ((now - m_lastAnalyzeTick) < EffectiveAnalyzeMinMs())
             return false;
     }
     return true;
@@ -1766,15 +1815,25 @@ void CPianoRoll::PushDisplayFrames()
         }
         return;
     }
-    // 解析は毎ホップ実行済み。表示速度だけ変える:
-    //   100% → 1行/解析、200% → 2行、50% → 2解析に1行。
+    // 表示速度: 解析ホップとは独立に、壁時計で約60行/秒×速度% を目標にする。
+    // （旧: 解析1回=1行 → ANALYZE_MIN_MS=3 のとき理論333行/秒でワーカーだけ過負荷）
     int pct = m_rollSpeedPct;
     if (pct < 25) pct = 25;
     if (pct > 200) pct = 200;
-    m_rollSpeedCredit += pct;
+
+    const DWORD now = GetTickCount();
+    if (m_lastRollPushTick == 0)
+        m_lastRollPushTick = now;
+    DWORD dt = now - m_lastRollPushTick;
+    if (dt > 80) dt = 80;
+    m_lastRollPushTick = now;
+
+    // credit = Σ(dt_ms * pct)。100%・16.67ms で約 1667 → 1行。
+    m_rollSpeedCredit += (int)dt * pct;
+    static constexpr int kCreditPerRow = 1667;
     int pushed = 0;
-    while (m_rollSpeedCredit >= 100 && pushed < 4) {
-        m_rollSpeedCredit -= 100;
+    while (m_rollSpeedCredit >= kCreditPerRow && pushed < 4) {
+        m_rollSpeedCredit -= kCreditPerRow;
         PushFrame(false);
         ++pushed;
     }
@@ -1792,6 +1851,7 @@ void CPianoRoll::SetRollSpeedPct(int pct)
     m_rollSpeedPct = nearest;
     savedata.pianorollscrollspeed = nearest;
     m_rollSpeedCredit = 0;
+    m_lastRollPushTick = 0;
 }
 
 int CPianoRoll::RollSpeedIndex() const
@@ -1824,6 +1884,7 @@ void CPianoRoll::ClearRollHistory()
     m_historyCount = 0;
     m_historyHead = 0;
     m_rollSpeedCredit = 0;
+    m_lastRollPushTick = 0;
     m_framesPending = 0;
     for (int hi = 0; hi < (int)MAX_HISTORY; ++hi) {
         auto& f = m_historyRing[hi];
@@ -3568,7 +3629,7 @@ bool CPianoRoll::ProcessAnalysisJob()
 
     EnterCriticalSection(&m_jobCs);
     frameCount = m_jobFrameCount;
-    sampleRate = m_jobSampleRate;
+    sampleRate = CapAnalyzeSampleRate(m_jobSampleRate);
     if (frameCount > 0) {
         if (frameCount > WIN_SAMPLES_MAX) frameCount = WIN_SAMPLES_MAX;
         memcpy(m_workerMonoScratch, m_jobMono, (size_t)frameCount * sizeof(double));

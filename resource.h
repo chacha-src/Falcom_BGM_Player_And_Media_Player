@@ -1,6 +1,6 @@
 ﻿//{{NO_DEPENDENCIES}}
-// Microsoft Visual C++ で生成されたインクルード ファイル。
-// ogg.rc で使用
+// Microsoft Visual C++ ??????????C???N???[?h ?t?@?C???B
+// ogg.rc ??g?p
 //
 #define IDOK2                           2
 #define IDC_FOL                         2
@@ -595,7 +595,7 @@
 #define ID_ETC39                        40088
 #define ID_ETC40                        40089
 
-// --- メディアプレイヤーモード関連 ---
+// --- ???f?B?A?v???C???[???[?h??A ---
 #define IDD_MEDIAPLAYER                 199
 #define IDD_MODESELECT                  200
 #define IDC_OGG_SWITCHMODE              3400
@@ -766,7 +766,7 @@
 #define IDC_PRT_RESET                     3528
 #define IDC_PRT_OK                        3529
 #define IDC_MAINWIN_LOCK                  3530
-// キャプション帯ボタン（MICMIX/MP 系 3745+ と衝突しないよう 3900 台へ）
+// Capture / MICMIX / MP related IDs (3745+, menus from 3900)
 #define IDC_CAP_CLOSE                     3901
 #define IDC_CAP_MIN                       3902
 #define IDC_CAP_MAX                       3903
@@ -884,7 +884,7 @@
 #define IDC_MP_ADDFOLDER                3634
 #define IDC_MP_FINDFILTER               3635
 
-// CDouga 動画サイト / コントロールバー
+// CDouga ????T?C?g / ?R???g???[???o?[
 #define IDC_DOUGA_VIDEOSITE             3636
 #define IDC_DOUGA_BARHOST               3637
 #define IDC_DOUGA_SEEK                  3638
@@ -907,7 +907,7 @@
 #define IDC_DOUGA_VOLVAL                3655
 #define IDC_DOUGA_INFO                  3656
 
-// メディアプレイヤー: ツール帯 / ライブラリドロワー (IDC_MP_LRCVIEW=3629 との衝突を解消)
+// ???f?B?A?v???C???[: ?c?[???? / ???C?u?????h?????[ (IDC_MP_LRCVIEW=3629 ??????????)
 #define IDC_MP_TOOLSTOGGLE              3657
 #define IDC_MP_LIBTOGGLE                3658
 #define IDC_MP_LIBTREE                  3659
@@ -921,7 +921,7 @@
 #define IDC_MP_CHEAT_TEXT               3667
 #define IDC_MP_CHEATBTN                 3668
 
-// 書き出しダイアログ: タグ/ジャケットのコピー
+// ?????o???_?C?A???O: ?^?O/?W???P?b?g??R?s?[
 #define IDC_WAVEXPORT_COPY_TAGS         3669
 #define IDC_TC_COPY_TAGS                3670
 #define IDC_WAVEXPORT_PROGRESS          3671
@@ -984,7 +984,7 @@
 #define IDC_TC_MIX_N                    3743
 #define IDC_TC_MIX_VOL                  3744
 
-// WAV保存時マイクミックス
+// WAV??????}?C?N?~?b?N?X
 #define IDC_CHECK_MICMIX                3745
 #define IDC_SLIDER_MICLEV               3746
 #define IDC_STATIC_MICLEV               3747
@@ -996,7 +996,7 @@
 #define IDC_MP_RECORD                   3753
 #define IDC_MP_CAPTURE                  3754
 
-// デバイス録音ダイアログ
+// ?f?o?C?X?^???_?C?A???O
 #define IDD_DEVICERECORD                214
 #define IDC_DR_DEV_L                    3755
 #define IDC_DR_DEV                      3756
@@ -1013,8 +1013,9 @@
 #define IDC_DR_STATUS                   3767
 #define IDC_DR_TIME                     3768
 
-// 画面キャプチャダイアログ
+// ???L???v?`???_?C?A???O
 #define IDD_SCREENCAPTURE               215
+#define IDD_SC_HELP                     216
 #define IDC_SC_PREVIEW                  3769
 #define IDC_SC_PATH_L                   3770
 #define IDC_SC_PATH                     3771
@@ -1064,8 +1065,29 @@
 #define IDC_SC_METER_MIC                3815
 #define IDC_SC_METER_SYS                3816
 #define IDC_SC_METER_MIX                3817
+#define IDC_SC_EFFECT_L               3819
+#define IDC_SC_EFFECT                 3820
+#define IDC_SC_CROP_L                 3821
+#define IDC_SC_SX                     3822
+#define IDC_SC_SY                     3823
+#define IDC_SC_SW                     3824
+#define IDC_SC_SH                     3825
+#define IDC_SC_CROP_FULL              3826
+#define IDC_SC_FXGRAPH                3827
+#define IDC_SC_HELP                   3828
 #define IDC_MP_MICMETER                 3818
 #define ID_SC_LAYER_HIDE                39001
+#define ID_SC_LAYER_FIT                 39002
+#define ID_SC_LAYER_SCALE50             39003
+#define ID_SC_LAYER_SCALE100            39004
+#define ID_SC_LAYER_ZUP                 39005
+#define ID_SC_LAYER_ZDOWN               39006
+#define ID_SC_LAYER_REMOVE              39007
+#define ID_SC_LAYER_CROP_FULL           39008
+#define ID_SC_FX_CLEAR_SLOT             39010
+#define ID_SC_FX_CLEAR_ALL              39011
+#define ID_SC_FX_MOVE_LEFT              39012
+#define ID_SC_FX_MOVE_RIGHT             39013
 
 #define ID_MP_SPEANA_BAR                32960
 #define ID_MP_SPEANA_MIRROR             32961
@@ -1083,14 +1105,14 @@
 #define ID_DOUGA_FS                     32955
 #define ID_DOUGA_FADE                   32956
 
-// 動画画面 右クリック追加項目(コード生成メニュー)
+// ?????? ?E?N???b?N???????(?R?[?h???????j???[)
 #define ID_DOUGA_TOPMOST                32963
 #define ID_DOUGA_ASPECT                 32964
-// 再生速度 0.5 / 0.75 / 1.0 / 1.25 / 1.5 / 2.0 の6連番。順序を崩さないこと。
+// ??????x 0.5 / 0.75 / 1.0 / 1.25 / 1.5 / 2.0 ??6?A??B????????????????B
 #define ID_DOUGA_SPEED_FIRST            32965
 #define ID_DOUGA_SPEED_LAST             32970
 
-// メディアプレイヤー バナー右クリック追加項目
+// ???f?B?A?v???C???[ ?o?i?[?E?N???b?N???????
 #define ID_MP_OPEN_ANALYZER             32971
 #define ID_MP_OPEN_PIANOROLL            32972
 #define ID_MP_REFRESH_JACKET            32973
@@ -1099,9 +1121,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        216
+#define _APS_NEXT_RESOURCE_VALUE        217
 #define _APS_NEXT_COMMAND_VALUE         32974
-#define _APS_NEXT_CONTROL_VALUE         3806
+#define _APS_NEXT_CONTROL_VALUE         3829
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

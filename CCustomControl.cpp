@@ -9992,7 +9992,8 @@ static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
     const UINT id = (UINT)::GetDlgCtrlID(hWnd);
     return id == IDC_MAINWIN_LOCK
         || id == IDC_CAP_CLOSE || id == IDC_CAP_MIN || id == IDC_CAP_MAX
-        || id == IDC_CAP_SETTINGS || id == IDC_CAP_PIN;
+        || id == IDC_CAP_SETTINGS || id == IDC_CAP_PIN
+        || id == IDC_SC_HELP;
 }
 
 // PROPAGATE 後もキャプション帯は透過描画（チェック等）。ボタンは Opaque 経路。
