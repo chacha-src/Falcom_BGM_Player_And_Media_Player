@@ -6,6 +6,7 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "ScreenCaptureDlg.h"
+#include "ScWgcCapture.h"
 #include "CMediaPlayerDlg.h"
 #include <mmdeviceapi.h>
 #include <Audioclient.h>
@@ -30,6 +31,14 @@ extern void MpPersistSavedataQuick();
 #endif
 #ifndef PW_RENDERFULLCONTENT
 #define PW_RENDERFULLCONTENT 0x00000002
+#endif
+#ifndef WDA_EXCLUDEFROMCAPTURE
+#define WDA_EXCLUDEFROMCAPTURE 0x00000011
+#endif
+#ifndef MF_SINK_WRITER_DISABLE_THROTTLING
+// Windows SDK によってヘッダ未定義のことがある
+DEFINE_GUID(MF_SINK_WRITER_DISABLE_THROTTLING,
+	0x08b845d8, 0x2b74, 0x4afe, 0x9e, 0x8e, 0x5a, 0x03, 0x9f, 0xb8, 0x6e, 0xbe);
 #endif
 
 namespace {
@@ -299,39 +308,216 @@ static void ScFrameClear(ScFrameBuf& fb, COLORREF c)
 	}
 }
 
-static BOOL ScCaptureWindowToBuf(HWND hwnd, ScFrameBuf& fb)
+// スレッドローカル再利用バッファ（4K PrintWindow の都度 alloc を避ける）
+static thread_local ScFrameBuf s_scNativeBuf;
+static thread_local ScFrameBuf s_scScaledBuf;
+
+static BOOL ScIsExcludedHwnd(HWND hwnd, HWND excludeHwnd)
+{
+	if (!hwnd || !excludeHwnd) return FALSE;
+	if (hwnd == excludeHwnd) return TRUE;
+	if (::IsChild(excludeHwnd, hwnd)) return TRUE;
+	HWND root = ::GetAncestor(hwnd, GA_ROOT);
+	return (root == excludeHwnd) ? TRUE : FALSE;
+}
+
+// top-down DIB へ PrintWindow すると黒になる環境がある → 互換BMP経由で取る
+static BOOL ScPrintWindowViaCompat(HWND hwnd, int ww, int wh, ScFrameBuf& outTopDown)
+{
+	if (!hwnd || ww < 2 || wh < 2) return FALSE;
+	ww &= ~1; wh &= ~1;
+	if (!outTopDown.bits || outTopDown.w != ww || outTopDown.h != wh) {
+		if (!ScFrameAlloc(outTopDown, ww, wh))
+			return FALSE;
+	}
+
+	HDC hdcScreen = ::GetDC(NULL);
+	if (!hdcScreen) return FALSE;
+	HDC hdcMem = ::CreateCompatibleDC(hdcScreen);
+	HBITMAP hbmp = hdcMem ? ::CreateCompatibleBitmap(hdcScreen, ww, wh) : NULL;
+	BOOL ok = FALSE;
+	if (hdcMem && hbmp) {
+		HGDIOBJ old = ::SelectObject(hdcMem, hbmp);
+		::PatBlt(hdcMem, 0, 0, ww, wh, BLACKNESS);
+		ok = ::PrintWindow(hwnd, hdcMem, PW_RENDERFULLCONTENT);
+		if (!ok)
+			ok = ::PrintWindow(hwnd, hdcMem, 0);
+		if (ok)
+			ok = ::BitBlt(outTopDown.hdc, 0, 0, ww, wh, hdcMem, 0, 0, SRCCOPY);
+		::SelectObject(hdcMem, old);
+	}
+	if (hbmp) ::DeleteObject(hbmp);
+	if (hdcMem) ::DeleteDC(hdcMem);
+	::ReleaseDC(NULL, hdcScreen);
+	return ok;
+}
+
+static BOOL ScBufferMostlyBlack(const ScFrameBuf& fb)
+{
+	if (!fb.bits || fb.w < 4 || fb.h < 4) return TRUE;
+	const int pts[][2] = {
+		{ fb.w / 2, fb.h / 2 },
+		{ fb.w / 4, fb.h / 4 },
+		{ (fb.w * 3) / 4, (fb.h * 3) / 4 },
+		{ fb.w / 4, (fb.h * 3) / 4 },
+		{ (fb.w * 3) / 4, fb.h / 4 },
+	};
+	int dark = 0;
+	for (int i = 0; i < 5; ++i) {
+		const int x = pts[i][0];
+		const int y = pts[i][1];
+		const BYTE* p = fb.bits + (size_t)y * (size_t)fb.stride + (size_t)x * 4;
+		// BGRA
+		if (p[0] < 12 && p[1] < 12 && p[2] < 12)
+			dark++;
+	}
+	return dark >= 4;
+}
+
+// 他窓に隠れていなければ画面コピーで高速化できる（OBS等と同系統）
+static BOOL ScWindowClearForScreenCap(HWND hwnd, HWND excludeHwnd)
+{
+	if (!hwnd || !::IsWindow(hwnd) || !::IsWindowVisible(hwnd) || ::IsIconic(hwnd))
+		return FALSE;
+	RECT wr = {};
+	if (!::GetWindowRect(hwnd, &wr)) return FALSE;
+	const int ww = wr.right - wr.left;
+	const int wh = wr.bottom - wr.top;
+	if (ww < 8 || wh < 8) return FALSE;
+	const POINT pts[5] = {
+		{ wr.left + ww / 2, wr.top + wh / 2 },
+		{ wr.left + 8, wr.top + 8 },
+		{ wr.right - 9, wr.top + 8 },
+		{ wr.left + 8, wr.bottom - 9 },
+		{ wr.right - 9, wr.bottom - 9 },
+	};
+	for (int i = 0; i < 5; ++i) {
+		HWND hit = ::WindowFromPoint(pts[i]);
+		if (!hit) return FALSE;
+		HWND root = ::GetAncestor(hit, GA_ROOT);
+		if (root == hwnd)
+			continue;
+		// キャプチャUI自身は WDA で穴になるので「見えている」扱いにしない
+		if (excludeHwnd && (root == excludeHwnd || ::IsChild(excludeHwnd, hit)))
+			return FALSE;
+		return FALSE;
+	}
+	return TRUE;
+}
+
+// dst サイズへ直接画面ストレッチ（4K PrintWindow を避ける高速経路）
+static BOOL ScCaptureWindowFromScreen(HWND hwnd, ScFrameBuf& fb, int dstW, int dstH)
+{
+	RECT wr = {};
+	if (!::GetWindowRect(hwnd, &wr)) return FALSE;
+	const int ww = wr.right - wr.left;
+	const int wh = wr.bottom - wr.top;
+	if (ww < 2 || wh < 2) return FALSE;
+	HDC screen = ::GetDC(NULL);
+	if (!screen) return FALSE;
+	::SetStretchBltMode(fb.hdc, COLORONCOLOR);
+	const BOOL ok = ::StretchBlt(fb.hdc, 0, 0, dstW, dstH, screen, wr.left, wr.top, ww, wh, SRCCOPY);
+	::ReleaseDC(NULL, screen);
+	if (!ok) return FALSE;
+	if (ScBufferMostlyBlack(fb)) return FALSE;
+	return TRUE;
+}
+
+// dst サイズへウィンドウキャプチャ
+// 1) WGC（前面UI/遮蔽に依存しない・OBS同系統）
+// 2) 画面 StretchBlt（完全に見えているとき）
+// 3) PrintWindow（フォールバック・重い）
+static BOOL ScCaptureWindowScaled(HWND hwnd, ScFrameBuf& fb, int dstW, int dstH, HWND excludeHwnd)
 {
 	if (!hwnd || !IsWindow(hwnd)) return FALSE;
 	RECT wr = {};
 	if (!::GetWindowRect(hwnd, &wr)) return FALSE;
-	int ww = wr.right - wr.left;
-	int wh = wr.bottom - wr.top;
-	if (ww < 2 || wh < 2) return FALSE;
-	if (!fb.bits || fb.w != (ww & ~1) || fb.h != (wh & ~1)) {
-		if (!ScFrameAlloc(fb, ww, wh))
+	const int ww = wr.right - wr.left;
+	const int wh = wr.bottom - wr.top;
+	if (ww < 2 || wh < 2 || dstW < 2 || dstH < 2) return FALSE;
+	dstW &= ~1; dstH &= ~1;
+	if (!fb.bits || fb.w != dstW || fb.h != dstH) {
+		if (!ScFrameAlloc(fb, dstW, dstH))
 			return FALSE;
 	}
-	ScFrameClear(fb, RGB(0, 0, 0));
-	// PrintWindow が失敗したら BitBlt へ
-	BOOL ok = PrintWindow(hwnd, fb.hdc, PW_RENDERFULLCONTENT);
-	if (!ok)
-		ok = PrintWindow(hwnd, fb.hdc, 0);
-	if (!ok) {
-		HDC wdc = GetWindowDC(hwnd);
+
+	::SetStretchBltMode(fb.hdc, COLORONCOLOR);
+
+	// 1) Windows.Graphics.Capture（前面UIでも可）
+	// 暗いアプリ画面を ScBufferMostlyBlack で落とすと PrintWindow(~11fps) に落ちるので WGC 成功時は信頼する
+	if (ScWgcCaptureWindowBgra(hwnd, fb.bits, dstW, dstH, fb.stride))
+		return TRUE;
+
+	// 2) 高速経路: ターゲットが他窓に隠れていなければ画面から直接縮小コピー
+	if (ScWindowClearForScreenCap(hwnd, excludeHwnd)) {
+		if (ScCaptureWindowFromScreen(hwnd, fb, dstW, dstH))
+			return TRUE;
+	}
+
+	// 3) 正確経路: PrintWindow（WGC不可・遮蔽時）
+	if (!ScPrintWindowViaCompat(hwnd, ww, wh, s_scNativeBuf)) {
+		HDC wdc = ::GetWindowDC(hwnd);
+		BOOL ok = FALSE;
 		if (wdc) {
-			ok = BitBlt(fb.hdc, 0, 0, fb.w, fb.h, wdc, 0, 0, SRCCOPY);
-			ReleaseDC(hwnd, wdc);
+			if (!s_scNativeBuf.bits || s_scNativeBuf.w != (ww & ~1) || s_scNativeBuf.h != (wh & ~1)) {
+				if (!ScFrameAlloc(s_scNativeBuf, ww, wh)) {
+					::ReleaseDC(hwnd, wdc);
+					return FALSE;
+				}
+			}
+			ok = ::BitBlt(s_scNativeBuf.hdc, 0, 0, s_scNativeBuf.w, s_scNativeBuf.h, wdc, 0, 0, SRCCOPY);
+			::ReleaseDC(hwnd, wdc);
+			if (ok && ScBufferMostlyBlack(s_scNativeBuf))
+				ok = FALSE;
 		}
+		if (!ok)
+			return FALSE;
 	}
-	if (!ok) {
-		// 最後の手段: 画面上の矩形をコピー (前面にある場合)
-		HDC screen = ::GetDC(NULL);
-		if (screen) {
-			ok = ::BitBlt(fb.hdc, 0, 0, fb.w, fb.h, screen, wr.left, wr.top, SRCCOPY);
-			::ReleaseDC(NULL, screen);
-		}
-	}
-	return ok;
+
+	if (fb.w == s_scNativeBuf.w && fb.h == s_scNativeBuf.h)
+		return ::BitBlt(fb.hdc, 0, 0, fb.w, fb.h, s_scNativeBuf.hdc, 0, 0, SRCCOPY);
+	return ::StretchBlt(fb.hdc, 0, 0, fb.w, fb.h,
+		s_scNativeBuf.hdc, 0, 0, s_scNativeBuf.w, s_scNativeBuf.h, SRCCOPY);
+}
+
+// キャンバスへウィンドウを描画（画面合成ではなく HWND ターゲット）
+static BOOL ScBlitWindowClipped(HWND hwnd, HDC dst, int canvasW, int canvasH,
+	int dx, int dy, int dw, int dh, HWND excludeHwnd)
+{
+	if (!hwnd || !dst || !IsWindow(hwnd) || dw < 1 || dh < 1) return FALSE;
+	if (ScIsExcludedHwnd(hwnd, excludeHwnd)) return FALSE;
+	RECT wr = {};
+	if (!::GetWindowRect(hwnd, &wr)) return FALSE;
+	const int ww = wr.right - wr.left;
+	const int wh = wr.bottom - wr.top;
+	if (ww < 2 || wh < 2) return FALSE;
+
+	int x0 = dx, y0 = dy, x1 = dx + dw, y1 = dy + dh;
+	if (x0 < 0) x0 = 0;
+	if (y0 < 0) y0 = 0;
+	if (x1 > canvasW) x1 = canvasW;
+	if (y1 > canvasH) y1 = canvasH;
+	if (x1 <= x0 || y1 <= y0) return TRUE;
+
+	const int outW = x1 - x0;
+	const int outH = y1 - y0;
+	if (outW < 1 || outH < 1) return TRUE;
+
+	// レイヤ配置サイズへ HWND をキャプチャ（前面=画面コピー高速 / 遮蔽=PrintWindow）
+	int capW = dw & ~1;
+	int capH = dh & ~1;
+	if (capW < 2) capW = 2;
+	if (capH < 2) capH = 2;
+	if (!ScCaptureWindowScaled(hwnd, s_scScaledBuf, capW, capH, excludeHwnd))
+		return FALSE;
+
+	const int sx = x0 - dx;
+	const int sy = y0 - dy;
+	::SetStretchBltMode(dst, COLORONCOLOR);
+	if (s_scScaledBuf.w == capW && s_scScaledBuf.h == capH)
+		return ::BitBlt(dst, x0, y0, outW, outH, s_scScaledBuf.hdc, sx, sy, SRCCOPY);
+	return ::StretchBlt(dst, x0, y0, outW, outH,
+		s_scScaledBuf.hdc, sx, sy, outW, outH, SRCCOPY);
 }
 
 static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap& snap)
@@ -351,10 +537,10 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 		const int sh = GetSystemMetrics(SM_CYSCREEN);
 		HDC screen = GetDC(NULL);
 		if (!screen) return FALSE;
-		SetStretchBltMode(out.hdc, HALFTONE);
-		StretchBlt(out.hdc, 0, 0, out.w, out.h, screen, 0, 0, sw, sh, SRCCOPY);
+		SetStretchBltMode(out.hdc, COLORONCOLOR);
+		BOOL ok = StretchBlt(out.hdc, 0, 0, out.w, out.h, screen, 0, 0, sw, sh, SRCCOPY);
 		ReleaseDC(NULL, screen);
-		return TRUE;
+		return ok;
 	}
 	if (snap.mode == CScreenCaptureDlg::SC_MODE_VIRTUAL) {
 		const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
@@ -363,39 +549,32 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 		const int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
 		HDC screen = GetDC(NULL);
 		if (!screen) return FALSE;
-		SetStretchBltMode(out.hdc, HALFTONE);
-		StretchBlt(out.hdc, 0, 0, out.w, out.h, screen, vx, vy, vw, vh, SRCCOPY);
+		SetStretchBltMode(out.hdc, COLORONCOLOR);
+		BOOL ok = StretchBlt(out.hdc, 0, 0, out.w, out.h, screen, vx, vy, vw, vh, SRCCOPY);
 		ReleaseDC(NULL, screen);
-		return TRUE;
+		return ok;
 	}
 
-	// ウィンドウ合成: 末尾(奥) → 先頭(手前) / hidden は映像から除外(音は別系統)
-	ScFrameBuf winBuf = {};
+	// ウィンドウ合成: PrintWindow で HWND 単位（前面に隠れてもターゲットを描く／キャプチャUIは除外）
 	for (int i = snap.layerCnt - 1; i >= 0; --i) {
 		const CScreenCaptureDlg::Layer& L = snap.layers[i];
 		if (L.hidden) continue;
 		if (!L.hwnd || !IsWindow(L.hwnd) || L.w < 1 || L.h < 1) continue;
-		if (!ScCaptureWindowToBuf(L.hwnd, winBuf)) continue;
-		SetStretchBltMode(out.hdc, HALFTONE);
-		StretchBlt(out.hdc, L.x, L.y, L.w, L.h, winBuf.hdc, 0, 0, winBuf.w, winBuf.h, SRCCOPY);
+		if (ScIsExcludedHwnd(L.hwnd, snap.excludeHwnd)) continue;
+		ScBlitWindowClipped(L.hwnd, out.hdc, out.w, out.h, L.x, L.y, L.w, L.h, snap.excludeHwnd);
 	}
-	ScFrameFree(winBuf);
 
 	// MP画面を別途載せる (レイヤに無い場合 / Hide 時は載せない)
 	if (snap.includeMp && !snap.mpHidden && snap.mpHwnd && ::IsWindow(snap.mpHwnd)
-		&& snap.mpW > 1 && snap.mpH > 1) {
+		&& snap.mpW > 1 && snap.mpH > 1
+		&& !ScIsExcludedHwnd(snap.mpHwnd, snap.excludeHwnd)) {
 		BOOL already = FALSE;
 		for (int i = 0; i < snap.layerCnt; ++i) {
 			if (snap.layers[i].hwnd == snap.mpHwnd) { already = TRUE; break; }
 		}
 		if (!already) {
-			ScFrameBuf mpBuf = {};
-			if (ScCaptureWindowToBuf(snap.mpHwnd, mpBuf)) {
-				SetStretchBltMode(out.hdc, HALFTONE);
-				StretchBlt(out.hdc, snap.mpX, snap.mpY, snap.mpW, snap.mpH,
-					mpBuf.hdc, 0, 0, mpBuf.w, mpBuf.h, SRCCOPY);
-			}
-			ScFrameFree(mpBuf);
+			ScBlitWindowClipped(snap.mpHwnd, out.hdc, out.w, out.h,
+				snap.mpX, snap.mpY, snap.mpW, snap.mpH, snap.excludeHwnd);
 		}
 	}
 	return TRUE;
@@ -409,7 +588,13 @@ static HRESULT ScAddVideoStream(IMFSinkWriter* writer, DWORD* outIdx, int w, int
 	if (FAILED(hr)) return hr;
 	hr = outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
 	if (SUCCEEDED(hr)) hr = outType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
-	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AVG_BITRATE, (UINT32)(w * h * fps / 4));
+	// 30fps 向け: 過大ビットレートはエンコード遅延の原因になるので抑える
+	{
+		UINT32 br = (UINT32)(((__int64)w * h * fps) / 6);
+		if (br < 2500000u) br = 2500000u;
+		if (br > 12000000u) br = 12000000u;
+		if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_AVG_BITRATE, br);
+	}
 	if (SUCCEEDED(hr)) hr = outType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
 	if (SUCCEEDED(hr)) hr = MFSetAttributeSize(outType, MF_MT_FRAME_SIZE, (UINT32)w, (UINT32)h);
 	if (SUCCEEDED(hr)) hr = MFSetAttributeRatio(outType, MF_MT_FRAME_RATE, (UINT32)fps, 1);
@@ -767,6 +952,10 @@ CScreenCaptureDlg::CScreenCaptureDlg(CWnd* pParent)
 	, m_run(0)
 	, m_lastHr(S_OK)
 	, m_frameCnt(0)
+	, m_encFpsX10(0)
+	, m_prevFpsX10(0)
+	, m_prevFpsWinTick(0)
+	, m_prevFpsWinCnt(0)
 	, m_thread(NULL)
 	, m_peakThread(NULL)
 	, m_peakStop(0)
@@ -817,6 +1006,7 @@ CScreenCaptureDlg::~CScreenCaptureDlg()
 		DeleteCriticalSection(&m_snapCs);
 		m_snapCsInit = FALSE;
 	}
+	ScWgcShutdown();
 }
 
 void CScreenCaptureDlg::DoDataExchange(CDataExchange* pDX)
@@ -884,6 +1074,7 @@ BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_SC_TILE, &CScreenCaptureDlg::OnBnClickedTile)
 	ON_BN_CLICKED(IDC_SC_INCMP, &CScreenCaptureDlg::OnBnClickedIncludeMp)
 	ON_CBN_SELCHANGE(IDC_SC_MODE, &CScreenCaptureDlg::OnCbnSelchangeMode)
+	ON_CBN_SELCHANGE(IDC_SC_CANVAS, &CScreenCaptureDlg::OnCbnSelchangeCanvas)
 	ON_CBN_SELCHANGE(IDC_SC_FPS, &CScreenCaptureDlg::OnCbnSelchangeFps)
 	ON_LBN_SELCHANGE(IDC_SC_LAYER, &CScreenCaptureDlg::OnLbnSelchangeLayer)
 	ON_WM_LBUTTONDOWN()
@@ -916,27 +1107,60 @@ CString CScreenCaptureDlg::NormalizeOutPath(const CString& pathIn) const
 	return p;
 }
 
+CString CScreenCaptureDlg::DefaultCaptureOutPath() const
+{
+	wchar_t docs[MAX_PATH] = {};
+	CString dir;
+	if (SUCCEEDED(SHGetFolderPath(NULL, CSIDL_MYVIDEO, NULL, 0, docs)))
+		dir = docs;
+	if (dir.IsEmpty()) {
+		// 前回パスのフォルダを流用
+		CString prev = savedata.cap_last_path;
+		const int slash = (prev.ReverseFind(L'\\') > prev.ReverseFind(L'/')) ? prev.ReverseFind(L'\\') : prev.ReverseFind(L'/');
+		if (slash > 0)
+			dir = prev.Left(slash);
+	}
+	if (dir.IsEmpty())
+		dir = L".";
+	SYSTEMTIME st = {};
+	GetLocalTime(&st);
+	CString path;
+	path.Format(L"%s\\capture_%04d%02d%02d_%02d%02d%02d.mp4",
+		(LPCTSTR)dir, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	return path;
+}
+
+CString CScreenCaptureDlg::RefreshCaptureOutPathTimestamp(const CString& pathIn) const
+{
+	CString dir;
+	CString p = pathIn;
+	p.Trim();
+	if (!p.IsEmpty()) {
+		const int slash = (p.ReverseFind(L'\\') > p.ReverseFind(L'/')) ? p.ReverseFind(L'\\') : p.ReverseFind(L'/');
+		if (slash > 0)
+			dir = p.Left(slash);
+	}
+	if (dir.IsEmpty())
+		return DefaultCaptureOutPath();
+	SYSTEMTIME st = {};
+	GetLocalTime(&st);
+	CString path;
+	path.Format(L"%s\\capture_%04d%02d%02d_%02d%02d%02d.mp4",
+		(LPCTSTR)dir, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	return path;
+}
+
 void CScreenCaptureDlg::ResolveCanvasSize(int& outW, int& outH) const
 {
 	const int preset = m_canvas.GetCurSel();
 	if (preset == 1) { outW = 1280; outH = 720; return; }
 	if (preset == 2) { outW = 1920; outH = 1080; return; }
 	if (preset == 3) { outW = 1600; outH = 900; return; }
-	// 0=自動
+	// 0=自動: レイヤbboxではなく画面基準（レイヤはキャンバスへ縮小フィット）
 	const int mode = m_mode.GetCurSel();
 	if (mode == SC_MODE_VIRTUAL) {
 		outW = GetSystemMetrics(SM_CXVIRTUALSCREEN);
 		outH = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-	} else if (mode == SC_MODE_WINDOWS && m_layerCnt > 0) {
-		int maxR = 0, maxB = 0;
-		for (int i = 0; i < m_layerCnt; ++i) {
-			const int r = m_layers[i].x + m_layers[i].w;
-			const int b = m_layers[i].y + m_layers[i].h;
-			if (r > maxR) maxR = r;
-			if (b > maxB) maxB = b;
-		}
-		outW = maxR > 0 ? maxR : 1280;
-		outH = maxB > 0 ? maxB : 720;
 	} else {
 		outW = GetSystemMetrics(SM_CXSCREEN);
 		outH = GetSystemMetrics(SM_CYSCREEN);
@@ -950,6 +1174,56 @@ void CScreenCaptureDlg::ResolveCanvasSize(int& outW, int& outH) const
 	if (outH < 120) outH = 120;
 }
 
+void CScreenCaptureDlg::FitLayerIntoCanvas(Layer& L, int cw, int ch) const
+{
+	if (cw < 2) cw = 2;
+	if (ch < 2) ch = 2;
+	int nw = L.w, nh = L.h;
+	if (L.hwnd && ::IsWindow(L.hwnd)) {
+		RECT wr = {};
+		if (::GetWindowRect(L.hwnd, &wr)) {
+			nw = wr.right - wr.left;
+			nh = wr.bottom - wr.top;
+		}
+	}
+	if (nw < 2) nw = 2;
+	if (nh < 2) nh = 2;
+	// キャンバスに収まるよう縮小（拡大はしない）
+	if (nw > cw || nh > ch) {
+		const double sx = (double)cw / (double)nw;
+		const double sy = (double)ch / (double)nh;
+		const double s = (sx < sy) ? sx : sy;
+		L.w = (int)(nw * s);
+		L.h = (int)(nh * s);
+	} else {
+		L.w = nw;
+		L.h = nh;
+	}
+	if (L.w < 2) L.w = 2;
+	if (L.h < 2) L.h = 2;
+	if (L.w > cw) L.w = cw;
+	if (L.h > ch) L.h = ch;
+	L.x = (cw - L.w) / 2;
+	L.y = (ch - L.h) / 2;
+	if (L.x < 0) L.x = 0;
+	if (L.y < 0) L.y = 0;
+}
+
+void CScreenCaptureDlg::FitAllLayersIntoCanvas()
+{
+	int cw = 0, ch = 0;
+	ResolveCanvasSize(cw, ch);
+	for (int i = 0; i < m_layerCnt; ++i) {
+		if (m_layers[i].isMp)
+			EnsureMpDefaultRect(m_layers[i]);
+		else
+			FitLayerIntoCanvas(m_layers[i], cw, ch);
+	}
+	RefreshLayerList();
+	SyncGeoEditsFromSel();
+	UpdatePreview(TRUE);
+}
+
 void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 {
 	memset(&out, 0, sizeof(out));
@@ -958,6 +1232,7 @@ void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 	out.mode = mode;
 	ResolveCanvasSize(out.canvasW, out.canvasH);
 	out.layerCnt = 0;
+	out.excludeHwnd = GetSafeHwnd();
 	const BOOL wantMp = (m_includeMp.GetSafeHwnd()
 		&& const_cast<CCustomCheckBox&>(m_includeMp).GetCheck());
 	out.includeMp = wantMp;
@@ -967,7 +1242,32 @@ void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 	if (mode == SC_MODE_WINDOWS) {
 		for (int i = 0; i < m_layerCnt && out.layerCnt < SC_LAYER_MAX; ++i) {
 			if (!m_layers[i].hwnd || !::IsWindow(m_layers[i].hwnd)) continue;
-			out.layers[out.layerCnt] = m_layers[i];
+			if (ScIsExcludedHwnd(m_layers[i].hwnd, out.excludeHwnd)) continue;
+			Layer L = m_layers[i];
+			// キャンバス外にはみ出す配置は収まるよう縮小（録画見切れ防止）
+			if (L.w > out.canvasW || L.h > out.canvasH
+				|| L.x < 0 || L.y < 0
+				|| L.x + L.w > out.canvasW || L.y + L.h > out.canvasH) {
+				const int nw = L.w, nh = L.h;
+				double sx = (double)out.canvasW / (double)((nw > 0) ? nw : 1);
+				double sy = (double)out.canvasH / (double)((nh > 0) ? nh : 1);
+				double s = (sx < sy) ? sx : sy;
+				if (s > 1.0) s = 1.0;
+				if (L.x < 0 || L.y < 0 || L.x + L.w > out.canvasW || L.y + L.h > out.canvasH
+					|| L.w > out.canvasW || L.h > out.canvasH) {
+					if (L.w > out.canvasW || L.h > out.canvasH) {
+						L.w = (int)(nw * s);
+						L.h = (int)(nh * s);
+						if (L.w < 2) L.w = 2;
+						if (L.h < 2) L.h = 2;
+					}
+					if (L.x + L.w > out.canvasW) L.x = out.canvasW - L.w;
+					if (L.y + L.h > out.canvasH) L.y = out.canvasH - L.h;
+					if (L.x < 0) L.x = 0;
+					if (L.y < 0) L.y = 0;
+				}
+			}
+			out.layers[out.layerCnt] = L;
 			out.layerCnt++;
 		}
 	} else if (wantMp) {
@@ -1054,19 +1354,35 @@ void CScreenCaptureDlg::SetRecordingUi(BOOL recording)
 	EnableComposeUi(compose);
 	// EnableWindow は透過を壊すのでモード/キャンバスは PreTranslate でロック
 	RefreshOpaqueUi();
+	// 録画中はプレビュー描画を間引き（Enc の周期ドロップ軽減）
+	if (recording) {
+		KillTimer(SC_TIMER_PREV);
+		SetTimer(SC_TIMER_PREV, 100, NULL);
+	} else {
+		ApplyPreviewTimer();
+	}
 }
 
 void CScreenCaptureDlg::UpdateElapsedUi()
 {
 	if (!GetSafeHwnd() || !m_time.GetSafeHwnd()) return;
+	const int setFps = CurrentPreviewFps();
+	const double prevFps = InterlockedCompareExchange(&m_prevFpsX10, 0, 0) / 10.0;
+	const double encFps = InterlockedCompareExchange(&m_encFpsX10, 0, 0) / 10.0;
+	CString t;
 	if (!InterlockedCompareExchange(&m_run, 0, 0)) {
-		m_time.SetWindowText(L"");
+		t.Format(L"Preview %.1f fps  (set %d)", prevFps, setFps);
+		m_time.SetWindowText(t);
 		return;
 	}
 	const DWORD ms = GetTickCount() - m_startTick;
 	const int sec = (int)(ms / 1000);
-	CString t;
-	t.Format(L"%02d:%02d  (%ld f)", sec / 60, sec % 60, (long)InterlockedCompareExchange(&m_frameCnt, 0, 0));
+	const LONG frames = InterlockedCompareExchange(&m_frameCnt, 0, 0);
+	double avgEnc = 0.0;
+	if (ms > 200 && frames > 0)
+		avgEnc = (frames * 1000.0) / (double)ms;
+	t.Format(L"%02d:%02d  Enc %.1f fps (avg %.1f)  Prev %.1f  set %d  %ldf",
+		sec / 60, sec % 60, encFps, avgEnc, prevFps, setFps, (long)frames);
 	m_time.SetWindowText(t);
 }
 
@@ -1178,6 +1494,9 @@ void CScreenCaptureDlg::AddLayerHwnd(HWND hwnd, BOOL isMp)
 		L.h = wr.bottom - wr.top;
 		if (L.w < 2) L.w = 2;
 		if (L.h < 2) L.h = 2;
+		int cw = 0, ch = 0;
+		ResolveCanvasSize(cw, ch);
+		FitLayerIntoCanvas(L, cw, ch);
 	}
 	::GetWindowText(hwnd, L.title, _countof(L.title) - 1);
 	if (!L.title[0])
@@ -1186,10 +1505,10 @@ void CScreenCaptureDlg::AddLayerHwnd(HWND hwnd, BOOL isMp)
 	if (!isMp && m_mode.GetCurSel() != SC_MODE_WINDOWS)
 		m_mode.SetCurSel(SC_MODE_WINDOWS);
 	EnableComposeUi(TRUE);
-	RefreshLayerList();
+	// 追加後に全レイヤをキャンバス内へ再フィット（見切れ防止）
+	FitAllLayersIntoCanvas();
 	m_layer.SetCurSel(m_layerCnt - 1);
 	SyncGeoEditsFromSel();
-	UpdatePreview();
 }
 
 HWND CScreenCaptureDlg::FindMediaPlayerHwnd() const
@@ -1434,6 +1753,19 @@ void CScreenCaptureDlg::RefreshComposeCache()
 	}
 	BitBlt(m_cacheDc, 0, 0, fb.w, fb.h, fb.hdc, 0, 0, SRCCOPY);
 	ScFrameFree(fb);
+
+	// プレビュー実FPS（約1秒窓）
+	const DWORD now = GetTickCount();
+	if (m_prevFpsWinTick == 0)
+		m_prevFpsWinTick = now;
+	m_prevFpsWinCnt++;
+	const DWORD elapsed = now - m_prevFpsWinTick;
+	if (elapsed >= 800) {
+		const LONG x10 = (LONG)((m_prevFpsWinCnt * 10000.0) / (double)elapsed + 0.5);
+		InterlockedExchange(&m_prevFpsX10, x10);
+		m_prevFpsWinTick = now;
+		m_prevFpsWinCnt = 0;
+	}
 }
 
 BOOL CScreenCaptureDlg::GetPreviewMap(CRect& imageRect, float& scale, int& canvasW, int& canvasH) const
@@ -1624,20 +1956,23 @@ void CScreenCaptureDlg::DrawPreviewHud(CDC& dc, const CRect& imageRect, float sc
 
 	const int mode = m_mode.GetCurSel();
 	const int sel = m_layer.GetCurSel();
-	const int showFps = CurrentPreviewFps();
+	const int setFps = CurrentPreviewFps();
+	const double prevFps = InterlockedCompareExchange(&m_prevFpsX10, 0, 0) / 10.0;
+	const double encFps = InterlockedCompareExchange(&m_encFpsX10, 0, 0) / 10.0;
 
-	// 上部情報バー
+	// 上部情報バー（設定FPSと実測プレビュー/エンコードFPS）
 	CString hud;
 	CString modeName;
 	if (mode == SC_MODE_PRIMARY) modeName = L"Primary";
 	else if (mode == SC_MODE_VIRTUAL) modeName = L"All monitors";
 	else modeName = L"Compose";
-	hud.Format(L"%s  %dx%d  FPS %d  layers %d",
-		(LPCTSTR)modeName, canvasW, canvasH, showFps, m_layerCnt);
 	if (InterlockedCompareExchange(&m_run, 0, 0)) {
-		CString rec;
-		rec.Format(L"  ●REC %ldf", (long)InterlockedCompareExchange(&m_frameCnt, 0, 0));
-		hud += rec;
+		hud.Format(L"%s  %dx%d  set %d  Prev %.1f  Enc %.1f  layers %d  ●REC %ldf",
+			(LPCTSTR)modeName, canvasW, canvasH, setFps, prevFps, encFps, m_layerCnt,
+			(long)InterlockedCompareExchange(&m_frameCnt, 0, 0));
+	} else {
+		hud.Format(L"%s  %dx%d  set %d  Prev %.1f fps  layers %d",
+			(LPCTSTR)modeName, canvasW, canvasH, setFps, prevFps, m_layerCnt);
 	}
 	CRect bar = imageRect;
 	bar.bottom = bar.top + 18;
@@ -1744,9 +2079,11 @@ void CScreenCaptureDlg::PaintPreview(CDC& dc, const CRect& client)
 		return;
 
 	if (m_cacheDc && m_cacheBmp && m_cacheW > 0 && m_cacheH > 0) {
+		if (m_snapCsInit) EnterCriticalSection(&m_snapCs);
 		SetStretchBltMode(dc.GetSafeHdc(), HALFTONE);
 		StretchBlt(dc.GetSafeHdc(), imageRect.left, imageRect.top, imageRect.Width(), imageRect.Height(),
 			m_cacheDc, 0, 0, m_cacheW, m_cacheH, SRCCOPY);
+		if (m_snapCsInit) LeaveCriticalSection(&m_snapCs);
 	} else {
 		dc.FillSolidRect(&imageRect, RGB(30, 30, 36));
 	}
@@ -1756,19 +2093,25 @@ void CScreenCaptureDlg::PaintPreview(CDC& dc, const CRect& client)
 void CScreenCaptureDlg::UpdatePreview(BOOL forceCompose)
 {
 	if (!GetSafeHwnd() || !m_preview.GetSafeHwnd()) return;
-	if (forceCompose || !m_dragging)
+	// 録画中は CaptureThread が m_cache を更新するので再合成しない（Enc と奪い合わない）
+	const BOOL recording = InterlockedCompareExchange(&m_run, 0, 0) != 0;
+	if (!recording && (forceCompose || !m_dragging))
 		RefreshComposeCache();
 	m_preview.Invalidate(FALSE);
-	m_preview.UpdateWindow();
-	// OpaqueFixer 経由の再描画を確実に
+	if (!recording)
+		m_preview.UpdateWindow();
 	::RedrawWindow(m_preview.GetSafeHwnd(), NULL, NULL,
-		RDW_INVALIDATE | RDW_UPDATENOW | RDW_FRAME);
+		recording
+		? (RDW_INVALIDATE | RDW_FRAME)
+		: (RDW_INVALIDATE | RDW_UPDATENOW | RDW_FRAME));
 }
 
 BOOL CScreenCaptureDlg::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	CCC_BringDialogToForeground(this);
+	// 画面キャプチャAPIからこのダイアログを除外（写り込み防止。ウィンドウ合成は PrintWindow 側でも除外）
+	::SetWindowDisplayAffinity(m_hWnd, WDA_EXCLUDEFROMCAPTURE);
 	if (!m_snapCsInit) {
 		InitializeCriticalSection(&m_snapCs);
 		m_snapCsInit = TRUE;
@@ -1889,18 +2232,8 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	}
 	m_fps.SetCurSel(fpsSel);
 
-	CString path = savedata.cap_last_path;
-	if (path.IsEmpty()) {
-		wchar_t docs[MAX_PATH] = {};
-		if (SUCCEEDED(SHGetFolderPath(NULL, CSIDL_MYVIDEO, NULL, 0, docs))) {
-			SYSTEMTIME st; GetLocalTime(&st);
-			path.Format(L"%s\\capture_%04d%02d%02d_%02d%02d%02d.mp4",
-				docs, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-		} else {
-			path = L"capture.mp4";
-		}
-	}
-	m_path.SetWindowText(NormalizeOutPath(path));
+	// 日付ファイル名は毎回更新（フォルダだけ前回を引き継ぐ）
+	m_path.SetWindowText(NormalizeOutPath(RefreshCaptureOutPathTimestamp(savedata.cap_last_path)));
 
 	RefreshAvailList();
 	EnableComposeUi(mode == SC_MODE_WINDOWS);
@@ -2154,7 +2487,19 @@ void CScreenCaptureDlg::OnLButtonDown(UINT nFlags, CPoint point)
 void CScreenCaptureDlg::OnCbnSelchangeMode()
 {
 	EnableComposeUi(m_mode.GetCurSel() == SC_MODE_WINDOWS);
-	UpdatePreview();
+	if (m_layerCnt > 0)
+		FitAllLayersIntoCanvas();
+	else
+		UpdatePreview();
+	PersistUiToSavedata();
+}
+
+void CScreenCaptureDlg::OnCbnSelchangeCanvas()
+{
+	if (m_layerCnt > 0)
+		FitAllLayersIntoCanvas();
+	else
+		UpdatePreview(TRUE);
 	PersistUiToSavedata();
 }
 
@@ -2336,10 +2681,29 @@ void CScreenCaptureDlg::OnBnClickedBrowse()
 BOOL CScreenCaptureDlg::StartRecording()
 {
 	if (InterlockedCompareExchange(&m_run, 0, 0)) return FALSE;
+
+	// レイヤがあるのに画面モードだとキャプチャUIや前面窓が写る → ウィンドウ合成へ強制
+	if (m_layerCnt > 0 && m_mode.GetCurSel() != SC_MODE_WINDOWS) {
+		m_mode.SetCurSel(SC_MODE_WINDOWS);
+		EnableComposeUi(TRUE);
+	}
+	// 録画直前にキャンバス内へ再フィット（見切れ防止）
+	if (m_layerCnt > 0)
+		FitAllLayersIntoCanvas();
+	::SetWindowDisplayAffinity(m_hWnd, WDA_EXCLUDEFROMCAPTURE);
+
+	// ファイル名の日時を録画開始時点で更新（上書き連発を防ぐ）
+	{
+		CString cur;
+		m_path.GetWindowText(cur);
+		m_path.SetWindowText(NormalizeOutPath(RefreshCaptureOutPathTimestamp(cur)));
+	}
 	PersistUiToSavedata();
 
 	ComposeSnap snap;
 	BuildComposeSnap(snap);
+	// 録画スレッドがプレビューキャッシュへ書き込めるよう先に確保
+	RefreshComposeCache();
 	if (snap.mode == SC_MODE_WINDOWS && snap.layerCnt <= 0) {
 		m_status.SetWindowText(LL14(
 			L"合成レイヤにウィンドウを追加してください。",
@@ -2395,6 +2759,7 @@ BOOL CScreenCaptureDlg::StartRecording()
 	InterlockedExchange(&m_stop, 0);
 	InterlockedExchange(&m_lastHr, S_OK);
 	InterlockedExchange(&m_frameCnt, 0);
+	InterlockedExchange(&m_encFpsX10, 0);
 	m_startTick = GetTickCount();
 	m_everStarted = TRUE;
 
@@ -2412,10 +2777,20 @@ BOOL CScreenCaptureDlg::StartRecording()
 	InterlockedExchange(&m_run, 1);
 	SetRecordingUi(TRUE);
 	m_status.SetWindowText(LL14(
-		L"録画中…", L"Recording…", L"Enregistrement…", L"Registrazione…",
-		L"Grabando…", L"녹화 중…", L"录制中…", L"جاري التسجيل…",
-		L"Запись…", L"Aufnahme…", L"A gravar…", L"Opnemen…",
-		L"Nagrywanie…", L"Kaydediliyor…"));
+		L"録画中…",
+		L"Recording…",
+		L"Enregistrement…",
+		L"Registrazione…",
+		L"Grabando…",
+		L"녹화 중…",
+		L"录制中…",
+		L"جاري التسجيل…",
+		L"Запись…",
+		L"Aufnahme…",
+		L"A gravar…",
+		L"Opnemen…",
+		L"Nagrywanie…",
+		L"Kaydediliyor…"));
 	return TRUE;
 }
 
@@ -2431,6 +2806,8 @@ void CScreenCaptureDlg::StopRecording()
 	}
 	InterlockedExchange(&m_run, 0);
 	const BOOL uiAlive = (GetSafeHwnd() != NULL);
+	if (uiAlive && IsIconic())
+		ShowWindow(SW_RESTORE);
 	const HRESULT capHr = (HRESULT)InterlockedCompareExchange(&m_lastHr, 0, 0);
 	const LONG frames = InterlockedCompareExchange(&m_frameCnt, 0, 0);
 
@@ -2711,7 +3088,17 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 		goto done;
 	}
 
-	hr = MFCreateSinkWriterFromURL(self->m_outPath, NULL, NULL, &writer);
+	{
+		IMFAttributes* attrs = NULL;
+		if (SUCCEEDED(MFCreateAttributes(&attrs, 2)) && attrs) {
+			attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+			attrs->SetUINT32(MF_SINK_WRITER_DISABLE_THROTTLING, TRUE);
+			hr = MFCreateSinkWriterFromURL(self->m_outPath, NULL, attrs, &writer);
+			attrs->Release();
+		} else {
+			hr = MFCreateSinkWriterFromURL(self->m_outPath, NULL, NULL, &writer);
+		}
+	}
 	if (FAILED(hr) || !writer) {
 		InterlockedExchange(&self->m_lastHr, FAILED(hr) ? hr : E_FAIL);
 		goto done;
@@ -2828,153 +3215,209 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 		QueryPerformanceCounter(&qpc0);
 		LONGLONG nextFrameQpc = 0;
 		BOOL writeFail = FALSE;
+		const LONGLONG qpf64 = (qpf.QuadPart > 0) ? qpf.QuadPart : 1;
+
+		// 映像合成の前後で必ず音声を排出（4Kで合成が重いと音が欠ける主因）
+		auto drainAudio = [&]() {
+			if (!haveAudio || !loopCap || !mixFmt || writeFail) return;
+			if (micCap && micFmt) {
+				UINT32 micPkt = 0;
+				HRESULT hm = micCap->GetNextPacketSize(&micPkt);
+				while (SUCCEEDED(hm) && micPkt > 0 && InterlockedCompareExchange(&self->m_stop, 0, 0) == 0) {
+					BYTE* data = NULL;
+					UINT32 frames = 0;
+					DWORD flags = 0;
+					hm = micCap->GetBuffer(&data, &frames, &flags, NULL, NULL);
+					if (FAILED(hm)) break;
+					if (frames > 0 && data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT)) {
+						float conv[4096 * 2];
+						UINT32 done = 0;
+						while (done < frames) {
+							UINT32 n = frames - done;
+							if (n > 4096) n = 4096;
+							float pk = 0.f;
+							for (UINT32 i = 0; i < n; ++i) {
+								float L, R;
+								ScSampleToFloat(data + (done + i) * micFmt->nBlockAlign, micFmt, L, R);
+								conv[i * 2 + 0] = L;
+								conv[i * 2 + 1] = R;
+								const float aL = (L < 0.f) ? -L : L;
+								const float aR = (R < 0.f) ? -R : R;
+								if (aL > pk) pk = aL;
+								if (aR > pk) pk = aR;
+							}
+							{
+								const LONG v = (LONG)(pk * 1000.f);
+								LONG cur = InterlockedCompareExchange(&self->m_peakMic, 0, 0);
+								if (v > cur) InterlockedExchange(&self->m_peakMic, v > 1000 ? 1000 : v);
+							}
+							ScMicRingWrite(conv, (int)n);
+							done += n;
+						}
+					}
+					micCap->ReleaseBuffer(frames);
+					hm = micCap->GetNextPacketSize(&micPkt);
+				}
+			}
+
+			UINT32 packet = 0;
+			hr = loopCap->GetNextPacketSize(&packet);
+			while (SUCCEEDED(hr) && packet > 0 && InterlockedCompareExchange(&self->m_stop, 0, 0) == 0) {
+				BYTE* data = NULL;
+				UINT32 frames = 0;
+				DWORD flags = 0;
+				hr = loopCap->GetBuffer(&data, &frames, &flags, NULL, NULL);
+				if (FAILED(hr)) break;
+				if (frames > 0) {
+					float fL[4096], fR[4096];
+					short pcm[8192 * 2];
+					UINT32 done = 0;
+					while (done < frames) {
+						UINT32 n = frames - done;
+						if (n > 4096) n = 4096;
+						float pkSys = 0.f;
+						for (UINT32 i = 0; i < n; ++i) {
+							float L = 0.f, R = 0.f;
+							if (data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT))
+								ScSampleToFloat(data + (done + i) * mixFmt->nBlockAlign, mixFmt, L, R);
+							fL[i] = L;
+							fR[i] = R;
+							const float aL = (L < 0.f) ? -L : L;
+							const float aR = (R < 0.f) ? -R : R;
+							if (aL > pkSys) pkSys = aL;
+							if (aR > pkSys) pkSys = aR;
+						}
+						{
+							const LONG v = (LONG)(pkSys * 1000.f);
+							LONG cur = InterlockedCompareExchange(&self->m_peakSys, 0, 0);
+							if (v > cur) InterlockedExchange(&self->m_peakSys, v > 1000 ? 1000 : v);
+							LONG curP = InterlockedCompareExchange(&self->m_peakMix, 0, 0);
+							if (v > curP) InterlockedExchange(&self->m_peakMix, v > 1000 ? 1000 : v);
+						}
+						if (wantMic)
+							ScMicIntoStereo(fL, fR, (int)n, (int)srcHz);
+
+						int outFrames = (int)(((__int64)n * (int)outHz) / (srcHz ? (int)srcHz : (int)outHz));
+						if (outFrames < 1 && n > 0) outFrames = 1;
+						if (outFrames > 8192) outFrames = 8192;
+						for (int o = 0; o < outFrames; ++o) {
+							double srcPos = (srcHz == outHz) ? (double)o : ((double)o * (double)srcHz / (double)outHz);
+							int i0 = (int)srcPos;
+							int i1 = i0 + 1;
+							if (i0 < 0) i0 = 0;
+							if (i0 >= (int)n) i0 = (int)n - 1;
+							if (i1 >= (int)n) i1 = (int)n - 1;
+							const float frac = (float)(srcPos - (double)i0);
+							float L = fL[i0] + (fL[i1] - fL[i0]) * frac;
+							float R = fR[i0] + (fR[i1] - fR[i0]) * frac;
+							L = ScClamp1(L);
+							R = ScClamp1(R);
+							pcm[o * 2 + 0] = (short)(L * 32767.f);
+							pcm[o * 2 + 1] = (short)(R * 32767.f);
+						}
+						hr = ScWriteAudioSample(writer, audioIdx, pcm, outFrames, outCh, (int)outHz, audioRt);
+						if (FAILED(hr) && hr != MF_E_TRANSFORM_NEED_MORE_INPUT) {
+							InterlockedExchange(&self->m_lastHr, hr);
+							writeFail = TRUE;
+							break;
+						}
+						audioRt += (10000000LL * outFrames) / outHz;
+						done += n;
+					}
+				}
+				loopCap->ReleaseBuffer(frames);
+				if (writeFail) break;
+				hr = loopCap->GetNextPacketSize(&packet);
+			}
+		};
+
+		DWORD encWinTick = GetTickCount();
+		int encWinCnt = 0;
+		LONGLONG periodQ = qpf64 / (fps > 0 ? fps : 30);
+		if (periodQ < 1) periodQ = 1;
 
 		while (InterlockedCompareExchange(&self->m_stop, 0, 0) == 0 && !writeFail) {
+			// 合成前に溜まったループバックを先に書く
+			drainAudio();
+			if (writeFail) break;
+
 			LARGE_INTEGER qpc;
 			QueryPerformanceCounter(&qpc);
 			const LONGLONG elapsedQ = qpc.QuadPart - qpc0.QuadPart;
+			BOOL didVideo = FALSE;
 			if (elapsedQ >= nextFrameQpc) {
-				if (ScComposeFrame(frame, snap)) {
-					hr = ScWriteVideoSample(writer, videoIdx, frame, videoRt, frameDur);
+				// 遅れ分はバースト投入せず間引き（Enc が 7↔60 に振れる主因）
+				if (nextFrameQpc + periodQ < elapsedQ) {
+					nextFrameQpc = elapsedQ;
+					videoRt = (elapsedQ * 10000000LL) / qpf64;
+				}
+				const LONGLONG dur = frameDur;
+				BOOL haveFrame = ScComposeFrame(frame, snap);
+				if (!haveFrame && frame.bits)
+					haveFrame = TRUE;
+				if (!haveFrame) {
+					if (ScFrameAlloc(frame, snap.canvasW, snap.canvasH)) {
+						ScFrameClear(frame, RGB(16, 16, 20));
+						haveFrame = TRUE;
+					}
+				}
+				if (haveFrame) {
+					hr = ScWriteVideoSample(writer, videoIdx, frame, videoRt, dur);
 					if (FAILED(hr) && hr != MF_E_TRANSFORM_NEED_MORE_INPUT) {
 						InterlockedExchange(&self->m_lastHr, hr);
 						writeFail = TRUE;
 						break;
 					}
-					videoRt += frameDur;
+					videoRt += dur;
 					InterlockedIncrement(&self->m_frameCnt);
+					// プレビュー用キャッシュへ共有（UI 側の二重 WGC を避ける）
+					if (self->m_snapCsInit) {
+						EnterCriticalSection(&self->m_snapCs);
+						if (self->m_cacheBits && self->m_cacheW == frame.w && self->m_cacheH == frame.h
+							&& frame.bits && frame.stride == frame.w * 4) {
+							const size_t nbytes = (size_t)frame.stride * (size_t)frame.h;
+							memcpy(self->m_cacheBits, frame.bits, nbytes);
+						}
+						LeaveCriticalSection(&self->m_snapCs);
+					}
+					// 直近エンコード投入 FPS（約0.8秒窓）= 実ウォールクロック
+					{
+						encWinCnt++;
+						const DWORD nowEnc = GetTickCount();
+						const DWORD elEnc = nowEnc - encWinTick;
+						if (elEnc >= 800) {
+							const LONG x10 = (LONG)((encWinCnt * 10000.0) / (double)elEnc + 0.5);
+							InterlockedExchange(&self->m_encFpsX10, x10);
+							encWinTick = nowEnc;
+							encWinCnt = 0;
+						}
+					}
 				}
-				nextFrameQpc += (qpf.QuadPart / fps);
-				if (nextFrameQpc < elapsedQ - qpf.QuadPart)
-					nextFrameQpc = elapsedQ;
+				nextFrameQpc += periodQ;
+				didVideo = TRUE;
+				// 合成中に溜まった音声をすぐ排出
+				drainAudio();
 			}
 
+			if (writeFail) break;
 			if (haveAudio && loopCap && mixFmt) {
-				if (hEvent) {
-					HANDLE waits[2];
-					DWORD nWait = 1;
-					waits[0] = hEvent;
-					if (hMicEvent) { waits[1] = hMicEvent; nWait = 2; }
-					WaitForMultipleObjects(nWait, waits, FALSE, 5);
-				} else {
-					if (hMicEvent)
-						WaitForSingleObject(hMicEvent, 2);
-					else
-						Sleep(2);
-				}
-
-				if (micCap && micFmt) {
-					UINT32 micPkt = 0;
-					HRESULT hm = micCap->GetNextPacketSize(&micPkt);
-					while (SUCCEEDED(hm) && micPkt > 0 && InterlockedCompareExchange(&self->m_stop, 0, 0) == 0) {
-						BYTE* data = NULL;
-						UINT32 frames = 0;
-						DWORD flags = 0;
-						hm = micCap->GetBuffer(&data, &frames, &flags, NULL, NULL);
-						if (FAILED(hm)) break;
-						if (frames > 0 && data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT)) {
-							float conv[4096 * 2];
-							UINT32 done = 0;
-							while (done < frames) {
-								UINT32 n = frames - done;
-								if (n > 4096) n = 4096;
-								float pk = 0.f;
-								for (UINT32 i = 0; i < n; ++i) {
-									float L, R;
-									ScSampleToFloat(data + (done + i) * micFmt->nBlockAlign, micFmt, L, R);
-									conv[i * 2 + 0] = L;
-									conv[i * 2 + 1] = R;
-									const float aL = (L < 0.f) ? -L : L;
-									const float aR = (R < 0.f) ? -R : R;
-									if (aL > pk) pk = aL;
-									if (aR > pk) pk = aR;
-								}
-								{
-									const LONG v = (LONG)(pk * 1000.f);
-									LONG cur = InterlockedCompareExchange(&self->m_peakMic, 0, 0);
-									if (v > cur) InterlockedExchange(&self->m_peakMic, v > 1000 ? 1000 : v);
-								}
-								ScMicRingWrite(conv, (int)n);
-								done += n;
-							}
-						}
-						micCap->ReleaseBuffer(frames);
-						hm = micCap->GetNextPacketSize(&micPkt);
+				if (!didVideo) {
+					if (hEvent) {
+						HANDLE waits[2];
+						DWORD nWait = 1;
+						waits[0] = hEvent;
+						if (hMicEvent) { waits[1] = hMicEvent; nWait = 2; }
+						WaitForMultipleObjects(nWait, waits, FALSE, 5);
+					} else {
+						if (hMicEvent)
+							WaitForSingleObject(hMicEvent, 2);
+						else
+							Sleep(1);
 					}
+					drainAudio();
 				}
-
-				UINT32 packet = 0;
-				hr = loopCap->GetNextPacketSize(&packet);
-				while (SUCCEEDED(hr) && packet > 0 && InterlockedCompareExchange(&self->m_stop, 0, 0) == 0) {
-					BYTE* data = NULL;
-					UINT32 frames = 0;
-					DWORD flags = 0;
-					hr = loopCap->GetBuffer(&data, &frames, &flags, NULL, NULL);
-					if (FAILED(hr)) break;
-					if (frames > 0) {
-						float fL[4096], fR[4096];
-						short pcm[8192 * 2];
-						UINT32 done = 0;
-						while (done < frames) {
-							UINT32 n = frames - done;
-							if (n > 4096) n = 4096;
-							float pkSys = 0.f;
-							for (UINT32 i = 0; i < n; ++i) {
-								float L = 0.f, R = 0.f;
-								if (data && !(flags & AUDCLNT_BUFFERFLAGS_SILENT))
-									ScSampleToFloat(data + (done + i) * mixFmt->nBlockAlign, mixFmt, L, R);
-								fL[i] = L;
-								fR[i] = R;
-								const float aL = (L < 0.f) ? -L : L;
-								const float aR = (R < 0.f) ? -R : R;
-								if (aL > pkSys) pkSys = aL;
-								if (aR > pkSys) pkSys = aR;
-							}
-							{
-								const LONG v = (LONG)(pkSys * 1000.f);
-								LONG cur = InterlockedCompareExchange(&self->m_peakSys, 0, 0);
-								if (v > cur) InterlockedExchange(&self->m_peakSys, v > 1000 ? 1000 : v);
-								// 演奏中はループバックに含まれる。Pバーはシステムと同系を表示
-								LONG curP = InterlockedCompareExchange(&self->m_peakMix, 0, 0);
-								if (v > curP) InterlockedExchange(&self->m_peakMix, v > 1000 ? 1000 : v);
-							}
-							if (wantMic)
-								ScMicIntoStereo(fL, fR, (int)n, (int)srcHz);
-
-							int outFrames = (int)(((__int64)n * (int)outHz) / (srcHz ? (int)srcHz : (int)outHz));
-							if (outFrames < 1 && n > 0) outFrames = 1;
-							if (outFrames > 8192) outFrames = 8192;
-							for (int o = 0; o < outFrames; ++o) {
-								double srcPos = (srcHz == outHz) ? (double)o : ((double)o * (double)srcHz / (double)outHz);
-								int i0 = (int)srcPos;
-								int i1 = i0 + 1;
-								if (i0 < 0) i0 = 0;
-								if (i0 >= (int)n) i0 = (int)n - 1;
-								if (i1 >= (int)n) i1 = (int)n - 1;
-								const float frac = (float)(srcPos - (double)i0);
-								float L = fL[i0] + (fL[i1] - fL[i0]) * frac;
-								float R = fR[i0] + (fR[i1] - fR[i0]) * frac;
-								L = ScClamp1(L);
-								R = ScClamp1(R);
-								pcm[o * 2 + 0] = (short)(L * 32767.f);
-								pcm[o * 2 + 1] = (short)(R * 32767.f);
-							}
-							hr = ScWriteAudioSample(writer, audioIdx, pcm, outFrames, outCh, (int)outHz, audioRt);
-							if (FAILED(hr) && hr != MF_E_TRANSFORM_NEED_MORE_INPUT) {
-								InterlockedExchange(&self->m_lastHr, hr);
-								writeFail = TRUE;
-								break;
-							}
-							audioRt += (10000000LL * outFrames) / outHz;
-							done += n;
-						}
-					}
-					loopCap->ReleaseBuffer(frames);
-					if (writeFail) break;
-					hr = loopCap->GetNextPacketSize(&packet);
-				}
-			} else {
-				Sleep(5);
+			} else if (!didVideo) {
+				Sleep(1);
 			}
 		}
 	}

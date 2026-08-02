@@ -426,6 +426,9 @@
     <ClCompile Include="ScreenCaptureDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="ScWgcCapture.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="TagEditDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

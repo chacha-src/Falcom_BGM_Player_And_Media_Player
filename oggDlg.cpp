@@ -1887,12 +1887,12 @@ void MpTaskbarNextTrack()
 void MpTaskbarPrevTrack()
 {
 	if (!pl || pl->playcnt <= 0) return;
-	// 一般メディアプレイヤー準拠: 再生中かつ曲頭から3秒未満なら前曲ではなく頭出し。
+	// 一般メディアプレイヤー準拠: 再生中かつ曲頭から3秒以上なら頭出し、3秒未満なら前曲。
 	// ttt は 1/100 秒。一時停止中(ps==1)は常に前曲へ。
 	extern UINT ttt;
 	extern int plf;
 	extern int ps;
-	if (plf && ps != 1 && ttt < 300) {
+	if (plf && ps != 1 && ttt >= 300) {
 		MpTaskbarReplay();
 		return;
 	}
@@ -9452,9 +9452,12 @@ void COggDlg::play()
 			}
 		}
 
-		// 番兵追加 (ソートの後に追加)
-		lrctm[lrcnum] = 99 * 60 * 100 + 99 * 100 * 99;
-		lrcnum++;
+		// 番兵: 最終行+5秒(旧 99*100*99 は桁誤りで数時間になり最終行のカラオケがほぼ動かない)
+		{
+			DWORD lastT = (lrcnum > 0) ? lrctm[lrcnum - 1] : 0;
+			lrctm[lrcnum] = lastT + 500;
+			lrcnum++;
+		}
 	}
 	else
 		//ネットを見るかどうか
@@ -9537,9 +9540,12 @@ void COggDlg::play()
 					}
 				}
 
-				// 番兵追加
-				lrctm[lrcnum] = 99 * 60 * 100 + 99 * 100 * 99;
-				lrcnum++;
+				// 番兵: 最終行+5秒
+				{
+					DWORD lastT = (lrcnum > 0) ? lrctm[lrcnum - 1] : 0;
+					lrctm[lrcnum] = lastT + 500;
+					lrcnum++;
+				}
 			}
 		}
 
@@ -16552,7 +16558,12 @@ void COggDlg::stop()
 	loop1_2 = -1;
 	stflg = TRUE;
 	KillTimer(1250);
-	if (savedata.savecheck == 1 && (ResumeModeUsesPlayb(mode) || mode == -2) && filenback == filen) {
+	// filenback 一致条件は初回停止・曲替わり後の停止で保存が永遠にスキップされるため廃止。
+	// 曲切替時は stop1() 側で保存しない（プレイリストTipの仕様どおり）。
+	const BOOL wantResumeSave =
+		(savedata.savecheck == 1 || savedata.savecheck_mp3 == 1 || savedata.savecheck_dshow == 1)
+		&& (ResumeModeUsesPlayb(mode) || mode == -2);
+	if (wantResumeSave) {
 		try {
 			int flg = 0;
 			if (ResumeModeUsesPlayb(mode)) {
@@ -16593,8 +16604,6 @@ void COggDlg::stop()
 						ResumeSaveRemoveLegacyOnly(filen);
 					}
 				}
-			}
-			else {
 			}
 		}
 		catch (...) {
@@ -17702,7 +17711,9 @@ void COggDlg::timerp()
 	}
 
 	//時間
-	int t1, ta, tb, tc, ta1, tb1, tc1, tag = 0, tbg = 0, tcg = 0, ttt;
+	// ※ttt はグローバル(UINT)。ここにローカル ttt を置くと MP カラオケ/3秒ルール等が
+	//   再生位置を受け取れず、追従が一気に飛ぶ・効かない原因になる。
+	int t1, ta, tb, tc, ta1, tb1, tc1, tag = 0, tbg = 0, tcg = 0;
 	tt++;
 	//	if(tt==4)
 	//	{
@@ -17758,7 +17769,7 @@ void COggDlg::timerp()
 		ta1 = t1 / 60;
 		tb1 = t1 % 60;
 		tc1 = tt % 100;
-		ttt = tt;
+		ttt = (UINT)tt;
 	}
 	else {
 		double wavv[] = { 0,1.0,2.0,3.0 / 0.75,4.0 / 0.75,5.0 / 0.75,6.0 / 0.75 };//(double)(wavbit2/wavv[wavchannel])
@@ -17790,7 +17801,7 @@ void COggDlg::timerp()
 		ta1 = t1 / 60;
 		tb1 = t1 % 60;
 		tc1 = tt % 100;
-		ttt = tt;
+		ttt = (UINT)tt;
 		t3 = (double)snap_wl / (double)(wavbit_sample_Hz * 2 * wavv[wavchannel]) / (double)(wavsam_depth / 16.0f);
 		tt = (int)(t3 * 100.0);
 		t1 = tt / 100;

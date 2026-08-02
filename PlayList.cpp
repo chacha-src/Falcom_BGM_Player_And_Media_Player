@@ -465,6 +465,9 @@ BOOL CPlayList::OnInitDialog()
 	nnn=1;
 	pc=NULL;
 
+	// サブONなのにマスターが0の古い設定を補正（途中保存が一切動かない原因になり得る）
+	if ((savedata.savecheck_mp3 || savedata.savecheck_dshow) && !savedata.savecheck)
+		savedata.savecheck = 1;
 	m_savecheck.SetCheck(savedata.savecheck);
 	m_save_mp3.SetCheck(savedata.savecheck_mp3);
 	m_save_kpi.SetCheck(savedata.savecheck_dshow);

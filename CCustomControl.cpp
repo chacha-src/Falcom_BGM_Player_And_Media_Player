@@ -6812,7 +6812,8 @@ void CCustomTabCtrl::PreSubclassWindow()
 BOOL CCustomTabCtrl::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+	// SetAeroMode(FALSE) のタブは不透明。親アクリルでも穴を開けない
+	if (m_bAeroMode && CCC_IsAeroEnabled() && CCC_IsWin11())
 		return TRUE;
 #endif
 	if (pDC) {
@@ -7077,18 +7078,25 @@ void CCustomTabCtrl::OnPaint()
 	GetClientRect(&rcClient);
 	if (rcClient.IsRectEmpty()) return;
 
+#if CCUSTOM_AERO_SUPPORT
+	// SetAeroMode(FALSE) または親が不透明子を要求 → BufferedPaint で α=255
+	const BOOL bWantChroma = m_bAeroMode && CCC_IsAeroEnabled() && CCC_IsWin11()
+		&& !CCC_HostNeedsChildOpaque(m_hWnd);
+	if (!bWantChroma) {
+		PaintOpaqueClient(dcPaint);
+		return;
+	}
+#else
+	const BOOL bWantChroma = FALSE;
+#endif
+
 	CDC memDC;
 	memDC.CreateCompatibleDC(&dcPaint);
 	CBitmap memBmp;
 	memBmp.CreateCompatibleBitmap(&dcPaint, rcClient.Width(), rcClient.Height());
 	CBitmap* pOldBmp = memDC.SelectObject(&memBmp);
 
-#if CCUSTOM_AERO_SUPPORT
-	const BOOL bAero = CCC_IsAeroEnabled() && CCC_IsWin11();
-#else
-	const BOOL bAero = FALSE;
-#endif
-	DrawToDC(&memDC, rcClient, bAero);
+	DrawToDC(&memDC, rcClient, bWantChroma);
 
 	CRect rcDisp = rcClient;
 	AdjustRect(FALSE, &rcDisp);
@@ -7096,7 +7104,7 @@ void CCustomTabCtrl::OnPaint()
 		dcPaint.ExcludeClipRect(&rcDisp);
 
 #if CCUSTOM_AERO_SUPPORT
-	if (bAero)
+	if (bWantChroma)
 		CCC_BlitChromaTrans(dcPaint.GetSafeHdc(), 0, 0, rcClient.Width(), rcClient.Height(),
 			memDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
 	else
@@ -8646,6 +8654,56 @@ static void CCC_ExcludeGroupBoxSiblings(HWND hGrp, HDC hdc)
     }
 }
 
+// 兄弟(LRC GDI / Edit / Static)を差し引いた領域だけ MakeOpaque。
+// BeginBufferedPaint は DC クリップを無視しがちなので、全面 Opaque は禁止。
+static void CCC_BlitGroupBoxMinusSiblings(HWND hGrp, HDC hdcDest, int x, int y,
+    int w, int h, HDC hdcSrc, BOOL bOpaque)
+{
+    if (!hGrp || !hdcDest || !hdcSrc || w <= 0 || h <= 0) return;
+    CRgn rgn;
+    if (!rgn.CreateRectRgn(0, 0, w, h)) return;
+    HWND hParent = ::GetParent(hGrp);
+    RECT gr = {};
+    ::GetWindowRect(hGrp, &gr);
+    if (hParent) {
+        for (HWND hs = ::GetWindow(hParent, GW_CHILD); hs; hs = ::GetWindow(hs, GW_HWNDNEXT))
+        {
+            if (hs == hGrp || !::IsWindowVisible(hs)) continue;
+            RECT cr = {}, inter = {};
+            ::GetWindowRect(hs, &cr);
+            if (!::IntersectRect(&inter, &gr, &cr)) continue;
+            POINT pt1 = { inter.left, inter.top };
+            POINT pt2 = { inter.right, inter.bottom };
+            ::ScreenToClient(hGrp, &pt1);
+            ::ScreenToClient(hGrp, &pt2);
+            CRgn rs;
+            if (rs.CreateRectRgn(pt1.x, pt1.y, pt2.x, pt2.y))
+                rgn.CombineRgn(&rgn, &rs, RGN_DIFF);
+        }
+    }
+    const DWORD need = ::GetRegionData((HRGN)rgn.GetSafeHandle(), 0, NULL);
+    if (!need) return;
+    RGNDATA* rd = (RGNDATA*)malloc(need);
+    if (!rd) return;
+    if (::GetRegionData((HRGN)rgn.GetSafeHandle(), need, rd) && rd->rdh.nCount > 0) {
+        const RECT* rects = (const RECT*)rd->Buffer;
+        for (DWORD i = 0; i < rd->rdh.nCount; ++i) {
+            const int sx = rects[i].left;
+            const int sy = rects[i].top;
+            const int bw = rects[i].right - rects[i].left;
+            const int bh = rects[i].bottom - rects[i].top;
+            if (bw <= 0 || bh <= 0) continue;
+            if (bOpaque) {
+                RECT dest = { x + sx, y + sy, x + sx + bw, y + sy + bh };
+                CCC_BlitToRectOpaque(hdcDest, dest, hdcSrc, sx, sy, bw, bh, bw, bh, FALSE);
+            } else {
+                ::BitBlt(hdcDest, x + sx, y + sy, bw, bh, hdcSrc, sx, sy, SRCCOPY);
+            }
+        }
+    }
+    free(rd);
+}
+
 static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOOL bTrans);
 
 void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
@@ -8693,26 +8751,15 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
         return;
     }
     CBitmap* pOld = memDC.SelectObject(&bmp);
-    // 内側もダイアログ色で塗る(穴あけ透過はデグレ)。兄弟は CLIPSIBLINGS+除外で守る。
+    // 内側もダイアログ色。転送時に兄弟領域を差し引く(LRC GDI を消さない)。
     memDC.FillSolidRect(0, 0, rw, rh, COLOR_DIALOG_BG);
     CFont* pF = GetFont();
     if (pF) memDC.SelectObject(pF);
     CCC_DrawGroupBoxFrame(memDC, CRect(0, 0, rw, rh), t, FALSE);
     CCC_DrawInwoman(&memDC, CRect(0, 0, rw, rh), FALSE);
 
-    const int saved = pDC->SaveDC();
-    CCC_ExcludeGroupBoxSiblings(m_hWnd, pDC->GetSafeHdc());
-    if (bOpaqueFrame)
-    {
-        RECT full = { rect.left, rect.top, rect.left + rw, rect.top + rh };
-        CCC_BlitToRectOpaque(pDC->GetSafeHdc(), full, memDC.GetSafeHdc(),
-            0, 0, rw, rh, rw, rh, FALSE);
-    }
-    else
-    {
-        pDC->BitBlt(rect.left, rect.top, rw, rh, &memDC, 0, 0, SRCCOPY);
-    }
-    pDC->RestoreDC(saved);
+    CCC_BlitGroupBoxMinusSiblings(m_hWnd, pDC->GetSafeHdc(), rect.left, rect.top,
+        rw, rh, memDC.GetSafeHdc(), bOpaqueFrame);
     memDC.SelectObject(pOld);
 }
 

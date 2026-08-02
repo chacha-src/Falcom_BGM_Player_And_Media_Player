@@ -46,6 +46,9 @@ protected:
 
 public:
 	virtual BOOL OnInitDialog();
+	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
+	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+	afx_msg LRESULT OnLayoutTabsMsg(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnBnClickedExec();
 	afx_msg void OnBnClickedBrowse();
 	afx_msg void OnBnClickedClose();
@@ -57,6 +60,10 @@ public:
 	afx_msg void OnCbnSelchangeMixN();
 	afx_msg void OnDropFiles(HDROP hDropInfo);
 	virtual BOOL OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult);
+
+protected:
+	enum { WM_TC_LAYOUT_TABS = WM_APP + 7101 };
+	void LayoutTabsBelowCaption();
 
 	CCustomTabCtrl m_tabs;
 	CCustomComboBox m_format;

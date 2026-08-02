@@ -1274,6 +1274,9 @@ void CTranscodeExport::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CTranscodeExport, CCustomBlurDialogBase)
+	ON_WM_SHOWWINDOW()
+	ON_WM_LBUTTONDOWN()
+	ON_MESSAGE(WM_TC_LAYOUT_TABS, &CTranscodeExport::OnLayoutTabsMsg)
 	ON_BN_CLICKED(IDC_TC_EXEC, &CTranscodeExport::OnBnClickedExec)
 	ON_BN_CLICKED(IDC_TC_BROWSE, &CTranscodeExport::OnBnClickedBrowse)
 	ON_BN_CLICKED(IDC_TC_CLOSE, &CTranscodeExport::OnBnClickedClose)
@@ -1285,6 +1288,132 @@ BEGIN_MESSAGE_MAP(CTranscodeExport, CCustomBlurDialogBase)
 	ON_NOTIFY(TCN_SELCHANGE, IDC_TC_TABS, &CTranscodeExport::OnTcnSelchangeTabs)
 	ON_WM_DROPFILES()
 END_MESSAGE_MAP()
+
+void CTranscodeExport::LayoutTabsBelowCaption()
+{
+	if (!m_tabs.GetSafeHwnd())
+		return;
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	if (capH <= 0)
+		return;
+
+	CRect rcClient;
+	GetClientRect(&rcClient);
+	CRect rTabs;
+	m_tabs.GetWindowRect(&rTabs);
+	ScreenToClient(&rTabs);
+	const int wantTop = capH + 6;
+	const int stripH = (rTabs.Height() > 8) ? rTabs.Height() : 32;
+	const int wantLeft = 7;
+	const int wantW = max(200, rcClient.right - 14);
+	const int oldTop = rTabs.top;
+	const int dy = wantTop - oldTop;
+
+	// 毎回キャプション直下へ強制配置（早期returnで取り残さない）
+	m_tabs.SetWindowPos(&CWnd::wndBottom, wantLeft, wantTop, wantW, stripH,
+		SWP_NOACTIVATE | SWP_SHOWWINDOW);
+
+	// 下方向に空けるときだけ他コントロールを追従（上方向へ引き上げてキャプションに食い込ませない）
+	if (dy > 0) {
+		HWND hChild = ::GetWindow(m_hWnd, GW_CHILD);
+		while (hChild) {
+			const UINT id = (UINT)::GetDlgCtrlID(hChild);
+			if (hChild != m_tabs.GetSafeHwnd()
+				&& id != IDC_CAP_CLOSE && id != IDC_CAP_MIN && id != IDC_CAP_MAX
+				&& id != IDC_CAP_SETTINGS && id != IDC_CAP_PIN) {
+				RECT r;
+				::GetWindowRect(hChild, &r);
+				::ScreenToClient(m_hWnd, (LPPOINT)&r.left);
+				::ScreenToClient(m_hWnd, (LPPOINT)&r.right);
+				if (r.top >= oldTop || (r.top < wantTop + stripH && r.bottom > wantTop))
+					::SetWindowPos(hChild, NULL, r.left, r.top + dy, 0, 0,
+						SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+			}
+			hChild = ::GetWindow(hChild, GW_HWNDNEXT);
+		}
+	}
+
+	// タブ帯と重なる本文を、相対位置を保ったまま帯の下へまとめて押し下げ
+	{
+		const int clearTop = wantTop + stripH + 4;
+		int overlapMinTop = INT_MAX;
+		HWND hChild = ::GetWindow(m_hWnd, GW_CHILD);
+		while (hChild) {
+			const UINT id = (UINT)::GetDlgCtrlID(hChild);
+			if (hChild != m_tabs.GetSafeHwnd()
+				&& id != IDC_CAP_CLOSE && id != IDC_CAP_MIN && id != IDC_CAP_MAX
+				&& id != IDC_CAP_SETTINGS && id != IDC_CAP_PIN) {
+				RECT r;
+				::GetWindowRect(hChild, &r);
+				::ScreenToClient(m_hWnd, (LPPOINT)&r.left);
+				::ScreenToClient(m_hWnd, (LPPOINT)&r.right);
+				if (r.top < clearTop && r.bottom > wantTop && r.top >= capH && r.top < overlapMinTop)
+					overlapMinTop = r.top;
+			}
+			hChild = ::GetWindow(hChild, GW_HWNDNEXT);
+		}
+		const int push = (overlapMinTop < INT_MAX) ? (clearTop - overlapMinTop) : 0;
+		if (push > 0) {
+			hChild = ::GetWindow(m_hWnd, GW_CHILD);
+			while (hChild) {
+				const UINT id = (UINT)::GetDlgCtrlID(hChild);
+				if (hChild != m_tabs.GetSafeHwnd()
+					&& id != IDC_CAP_CLOSE && id != IDC_CAP_MIN && id != IDC_CAP_MAX
+					&& id != IDC_CAP_SETTINGS && id != IDC_CAP_PIN) {
+					RECT r;
+					::GetWindowRect(hChild, &r);
+					::ScreenToClient(m_hWnd, (LPPOINT)&r.left);
+					::ScreenToClient(m_hWnd, (LPPOINT)&r.right);
+					if (r.top >= overlapMinTop)
+						::SetWindowPos(hChild, NULL, r.left, r.top + push, 0, 0,
+							SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+				}
+				hChild = ::GetWindow(hChild, GW_HWNDNEXT);
+			}
+		}
+	}
+
+	// キャプションボタンを最前面に
+	CCC_CaptionLayout(m_hWnd);
+}
+
+LRESULT CTranscodeExport::OnLayoutTabsMsg(WPARAM, LPARAM)
+{
+	LayoutTabsBelowCaption();
+	return 0;
+}
+
+void CTranscodeExport::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
+	if (bShow) {
+		LayoutTabsBelowCaption();
+		// キャプション導入直後の再レイアウト（初回だけ取りこぼす環境向け）
+		PostMessage(WM_TC_LAYOUT_TABS, 0, 0);
+	}
+}
+
+void CTranscodeExport::OnLButtonDown(UINT nFlags, CPoint point)
+{
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	if (capH > 0 && point.y >= 0 && point.y < capH) {
+		CWnd* pHit = ChildWindowFromPoint(point, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
+		// キャプション帯に食い込んだタブはドラッグ扱いにし、誤反応を防ぐ
+		if (pHit == &m_tabs || pHit == this || !pHit) {
+			SendMessage(WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(point.x, point.y));
+			return;
+		}
+		const UINT id = pHit ? (UINT)pHit->GetDlgCtrlID() : 0;
+		if (id == IDC_CAP_CLOSE || id == IDC_CAP_MIN || id == IDC_CAP_MAX
+			|| id == IDC_CAP_SETTINGS || id == IDC_CAP_PIN) {
+			CCustomBlurDialogBase::OnLButtonDown(nFlags, point);
+			return;
+		}
+		SendMessage(WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(point.x, point.y));
+		return;
+	}
+	CCustomBlurDialogBase::OnLButtonDown(nFlags, point);
+}
 
 bool CTranscodeExport::IsXfadeMode()
 {
@@ -1693,8 +1822,9 @@ BOOL CTranscodeExport::OnInitDialog()
 
 		int tabRight = rcClient.right - 7;
 		if (tabRight < 200) tabRight = 200;
-		// 見出し帯だけの高さ（ページ空き枠を出さない）
-		CRect rTabs(7, 4, tabRight, 4 + 32);
+		// 見出し帯だけの高さ。初期Yはキャプション推定下（導入後に LayoutTabsBelowCaption で確定）
+		const int estCap = ::GetSystemMetrics(SM_CYCAPTION) + 8;
+		CRect rTabs(7, estCap, tabRight, estCap + 32);
 		m_tabs.Create(WS_CHILD | WS_VISIBLE | WS_TABSTOP | TCS_TABS | TCS_SINGLELINE | TCS_FIXEDWIDTH,
 			rTabs, this, IDC_TC_TABS);
 		m_tabs.SetAeroMode(FALSE);
@@ -1750,6 +1880,7 @@ BOOL CTranscodeExport::OnInitDialog()
 	ApplyTabUi();
 	if (m_tabs.GetSafeHwnd())
 		m_tabs.Invalidate(FALSE);
+	PostMessage(WM_TC_LAYOUT_TABS, 0, 0);
 
 	m_loopLabel.SetWindowText(LL14(L"繰返し回数", L"Loop count", L"Nombre de boucles", L"Conteggio loop",
 		L"Repeticiones", L"반복 횟수", L"循环次数", L"عدد التكرار",

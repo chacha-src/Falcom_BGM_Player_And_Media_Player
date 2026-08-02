@@ -172,12 +172,13 @@ void CLyricsViewWnd::SetPlayCentis(DWORD centis)
 	if (idx >= m_count) idx = m_count - 1;
 	double frac = 0.0;
 	const DWORD t0 = m_tm[idx];
-	const DWORD t1 = (idx + 1 < m_tmCount) ? m_tm[idx + 1] : (t0 + 1);
-	if (t1 > t0) {
-		frac = (double)(centis - t0) / (double)(t1 - t0);
-		if (frac < 0.0) frac = 0.0;
-		if (frac > 1.0) frac = 1.0;
-	}
+	// 次行開始までを分母にする(文字数キャップは塗りが音より早く終わる原因になるので使わない)
+	DWORD t1 = (idx + 1 < m_tmCount) ? m_tm[idx + 1] : (t0 + 500);
+	if (t1 <= t0)
+		t1 = t0 + 1;
+	frac = (double)(centis - t0) / (double)(t1 - t0);
+	if (frac < 0.0) frac = 0.0;
+	if (frac > 1.0) frac = 1.0;
 	const BOOL curChanged = (idx != m_cur);
 	const BOOL fracChanged = (AbsD(frac - m_frac) > 0.002);
 	m_frac = frac;
@@ -334,18 +335,20 @@ void CLyricsViewWnd::OnPaint()
 			CFont* old = mem.SelectObject(use);
 			CRect tr(padX, y, rc.Width() - padX, y + m_lineH);
 			// 現在行: 時刻間の進捗で左→右に色を追従(文字単位ではなくピクセルクリップ)
-			if (isCur && m_tmCount >= 2 && m_frac > 0.0) {
+			// END_ELLIPSIS は幅計算と描画がずれるのでカラオケ塗りでは使わない。
+			if (isCur && m_tmCount >= 2 && m_frac > 0.001) {
 				CSize te = mem.GetTextExtent(m_line[i]);
 				int tw = te.cx;
 				if (tw > tr.Width()) tw = tr.Width();
+				if (tw < 1) tw = 1;
 				const int split = tr.left + (int)(tw * m_frac + 0.5);
 				mem.SetTextColor(RGB(150, 155, 170));
-				mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+				mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 				CRgn clip;
 				if (split > tr.left && clip.CreateRectRgn(tr.left, tr.top, split, tr.bottom)) {
 					mem.SelectClipRgn(&clip);
 					mem.SetTextColor(RGB(220, 40, 90));
-					mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+					mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 					mem.SelectClipRgn(NULL);
 				}
 			} else {
@@ -368,7 +371,19 @@ void CLyricsViewWnd::OnPaint()
 	}
 
 #if CCUSTOM_AERO_SUPPORT
-	if (CCC_AcrylicCaption(::GetParent(m_hWnd)) || CCC_IsAeroEnabled()) {
+	// キャプション常時アクリル(本文 aero=0)でも親を辿ってガラスなら不透明合成。
+	// 素 BitBlt だと α=0 のまま開き閉じて追従描画が見えない。
+	BOOL needOpaque = FALSE;
+	if (CCC_IsWin11()) {
+		if (CCC_IsAeroEnabled())
+			needOpaque = TRUE;
+		else {
+			for (HWND h = m_hWnd; h; h = ::GetParent(h)) {
+				if (CCC_AcrylicCaption(h)) { needOpaque = TRUE; break; }
+			}
+		}
+	}
+	if (needOpaque) {
 		CCC_BlitStretchOpaque(pdc.GetSafeHdc(), 0, 0, rc.Width(), rc.Height(),
 			mem.GetSafeHdc(), 0, 0, rc.Width(), rc.Height());
 	}

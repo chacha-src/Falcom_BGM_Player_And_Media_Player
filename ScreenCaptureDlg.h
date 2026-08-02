@@ -66,6 +66,7 @@ public:
 		BOOL mpHidden;
 		HWND mpHwnd;
 		int mpX, mpY, mpW, mpH;
+		HWND excludeHwnd; // キャプチャダイアログ自身（合成から除外）
 	};
 
 protected:
@@ -103,11 +104,15 @@ protected:
 	void ApplyGeoEditsToSel();
 	void EnableComposeUi(BOOL enable);
 	void ResolveCanvasSize(int& outW, int& outH) const;
+	void FitLayerIntoCanvas(Layer& L, int cw, int ch) const;
+	void FitAllLayersIntoCanvas();
 	void BuildComposeSnap(ComposeSnap& out) const;
 	void AddLayerHwnd(HWND hwnd, BOOL isMp = FALSE);
 	void SyncMpLayerFromCheck();
 	void EnsureMpDefaultRect(Layer& L) const;
 	HWND FindMediaPlayerHwnd() const;
+	CString DefaultCaptureOutPath() const;
+	CString RefreshCaptureOutPathTimestamp(const CString& pathIn) const;
 	void TileLayers();
 	void FitSelected(int scalePercent);
 	void ToggleLayerHidden(int layerIdx);
@@ -133,6 +138,7 @@ public:
 	afx_msg void OnBnClickedTile();
 	afx_msg void OnBnClickedIncludeMp();
 	afx_msg void OnCbnSelchangeMode();
+	afx_msg void OnCbnSelchangeCanvas();
 	afx_msg void OnCbnSelchangeFps();
 	afx_msg void OnLbnSelchangeLayer();
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
@@ -210,6 +216,10 @@ public:
 	volatile LONG m_run;
 	volatile LONG m_lastHr;
 	volatile LONG m_frameCnt;
+	volatile LONG m_encFpsX10;   // 直近の録画(エンコード投入) FPS ×10
+	volatile LONG m_prevFpsX10;  // 直近のプレビュー合成 FPS ×10
+	DWORD m_prevFpsWinTick;
+	int m_prevFpsWinCnt;
 	HANDLE m_thread;
 	HANDLE m_peakThread;
 	volatile LONG m_peakStop;

@@ -160,7 +160,7 @@
       <Culture>0x0411</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>opusfile_avx2_2026.lib;opus_avx2_2026.lib;Strmbase.lib;comctl32.lib;mfuuid.lib;mfplat.lib;mfreadwrite.lib;User32.lib;uafxcw.lib;libogg_static_avx2_2026.lib;libvorbis_static_avx2_2026.lib;libvorbisfile_static_avx2_2026.lib;winmm.lib;dxguid.lib;dsound.lib;strmiids.lib;libmad_avx2_2026.lib;libFLAC_static_avx2_2026.lib;libsoxr_avx2_2026.lib;dwmapi.lib;libz-static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opusfile_avx2_2026.lib;opus_avx2_2026.lib;Strmbase.lib;comctl32.lib;mfuuid.lib;mfplat.lib;mfreadwrite.lib;User32.lib;uafxcw.lib;libogg_static_avx2_2026.lib;libvorbis_static_avx2_2026.lib;libvorbisfile_static_avx2_2026.lib;winmm.lib;dxguid.lib;dsound.lib;strmiids.lib;libmad_avx2_2026.lib;libFLAC_static_avx2_2026.lib;libsoxr_avx2_2026.lib;dwmapi.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;windowsapp.lib;libz-static.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_avx2.exe</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <ProgramDatabaseFile>uni/oggYSEDbgm.pdb</ProgramDatabaseFile>
@@ -238,7 +238,7 @@
       <Culture>0x0411</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>opusfile_avx2_2026.lib;opus_avx2_2026.lib;Strmbase.lib;comctl32.lib;mfuuid.lib;mfplat.lib;mfreadwrite.lib;User32.lib;uafxcw.lib;libogg_static_avx2_2026.lib;libvorbis_static_avx2_2026.lib;libvorbisfile_static_avx2_2026.lib;winmm.lib;dxguid.lib;dsound.lib;strmiids.lib;libmad_avx2_2026.lib;libFLAC_static_avx2_2026.lib;libsoxr_avx2_2026.lib;dwmapi.lib;libz-static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>opusfile_avx2_2026.lib;opus_avx2_2026.lib;Strmbase.lib;comctl32.lib;mfuuid.lib;mfplat.lib;mfreadwrite.lib;User32.lib;uafxcw.lib;libogg_static_avx2_2026.lib;libvorbis_static_avx2_2026.lib;libvorbisfile_static_avx2_2026.lib;winmm.lib;dxguid.lib;dsound.lib;strmiids.lib;libmad_avx2_2026.lib;libFLAC_static_avx2_2026.lib;libsoxr_avx2_2026.lib;dwmapi.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;windowsapp.lib;libz-static.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_avx2.exe</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <ProgramDatabaseFile>$(IntDir)oggYSEDbgm_uni_2026_de.pdb</ProgramDatabaseFile>
@@ -546,6 +546,11 @@
     <ClCompile Include="TranscodeExport.cpp" />
     <ClCompile Include="DeviceRecordDlg.cpp" />
     <ClCompile Include="ScreenCaptureDlg.cpp" />
+    <ClCompile Include="ScWgcCapture.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
     <ClCompile Include="TagEditDlg.cpp" />
     <ClCompile Include="Folder.cpp" />
     <ClCompile Include="Graph.cpp" />
@@ -671,6 +676,7 @@
     <ClInclude Include="TranscodeExport.h" />
     <ClInclude Include="DeviceRecordDlg.h" />
     <ClInclude Include="ScreenCaptureDlg.h" />
+    <ClInclude Include="ScWgcCapture.h" />
     <ClInclude Include="TagEditDlg.h" />
     <ClInclude Include="flac.h" />
     <ClInclude Include="Folder.h" />

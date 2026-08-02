@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -1090,7 +1090,7 @@ BEGIN
 END
 
 IDD_DEVICERECORD DIALOGEX 0, 0, 380, 210
-STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "デバイス録音"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
@@ -1117,7 +1117,7 @@ BEGIN
 END
 
 IDD_SCREENCAPTURE DIALOGEX 0, 0, 560, 520
-STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+STYLE DS_SETFONT | DS_FIXEDSYS | WS_MINIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "画面キャプチャ"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
@@ -1379,7 +1379,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,562
+ FILEVERSION 0,9,1,564
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1398,7 +1398,7 @@ BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
             VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.02"
-            VALUE "FileVersion", "0.9.1.562"
+            VALUE "FileVersion", "0.9.1.564"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.08.02"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"

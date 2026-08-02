@@ -2113,6 +2113,8 @@ void CMediaPlayerDlg::DoLayout()
 		const int viewH = infoInnerH - (int)(4 * s);
 		MoveCtl(&m_lrcView, ix, viewTop, iw, viewH > 1 ? viewH : 1);
 		m_lrcView.ShowWindow(SW_SHOW);
+		m_lrcView.SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 		m_lrcView.EnsureFonts((int)(90 * s), _T("Segoe UI"));
 		MoveCtl(&m_lrc, ix, infoTop, 0, 0);
 		MoveCtl(&m_lrc2, ix, infoTop, 0, 0);
@@ -3215,7 +3217,16 @@ void CMediaPlayerDlg::SyncFromMain()
 			if (hasLyrics) {
 				const int n = (og->lrcnum > 1) ? (og->lrcnum - 1) : 0;
 				m_lrcView.SetLines(og->lrc, n, og->lrctm, og->lrcnum);
-				m_lrcView.SetPlayCentis(ttt);
+				extern double OggGetGdiPlaybackTimeSec();
+				extern int mode;
+				extern int videoonly;
+				DWORD centis = ttt;
+				if (!(mode == -2 || videoonly)) {
+					const double sec = OggGetGdiPlaybackTimeSec();
+					if (sec >= 0.0)
+						centis = (DWORD)(sec * 100.0 + 0.5);
+				}
+				m_lrcView.SetPlayCentis(centis);
 			} else {
 				m_lrcView.Clear();
 			}
@@ -3643,6 +3654,22 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 	else if (nIDEvent == 3) {
 		// 高速: 再生位置(playb)に追従するシーク・時間・音量のミラー
 		MirrorSeekVol();
+		// LRC カラオケ塗りは 250ms 同期だと荒い → GDI時間表示と同じ実再生位置で追従
+		if (savedata.mpLrcExpand && m_lrcView.GetSafeHwnd()
+			&& ::IsWindowVisible(m_lrcView.GetSafeHwnd())) {
+			extern double OggGetGdiPlaybackTimeSec();
+			extern int mode;
+			extern int videoonly;
+			extern UINT ttt;
+			DWORD centis = ttt;
+			// 音声は DS 先読み補正済みの GDI 時刻。動画は MediaPosition(ttt) を使う。
+			if (!(mode == -2 || videoonly)) {
+				const double sec = OggGetGdiPlaybackTimeSec();
+				if (sec >= 0.0)
+					centis = (DWORD)(sec * 100.0 + 0.5);
+			}
+			m_lrcView.SetPlayCentis(centis);
+		}
 		// EQ/ピアノ/スペアナ/ST を X ボタン等で閉じたときも押下見た目を追従
 		SyncPushToggleButtons();
 		// バナーのホバー状態を再計算(カーソルが帯の上にあれば前面化アニメ継続)。
@@ -5350,19 +5377,38 @@ void CMediaPlayerDlg::OnLrcExpand()
 	if (m_lrcExpand.GetSafeHwnd())
 		m_lrcExpand.SetWindowText(savedata.mpLrcExpand ? L"▴" : L"▾");
 	DoLayout();
+	CCC_GroupBoxesBack(GetSafeHwnd());
 	if (savedata.mpLrcExpand && m_lrcView.GetSafeHwnd()) {
+		// グループより前面へ(不透明GBがGDI歌詞を覆わないよう z を確保)
+		m_lrcView.SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 		if (og && og->lrcnum >= 2) {
 			const int n = og->lrcnum - 1;
 			m_lrcView.SetLines(og->lrc, n > 0 ? n : 0, og->lrctm, og->lrcnum);
 			extern UINT ttt;
-			m_lrcView.SetPlayCentis(ttt);
+			extern double OggGetGdiPlaybackTimeSec();
+			extern int mode;
+			extern int videoonly;
+			DWORD centis = ttt;
+			if (!(mode == -2 || videoonly)) {
+				const double sec = OggGetGdiPlaybackTimeSec();
+				if (sec >= 0.0)
+					centis = (DWORD)(sec * 100.0 + 0.5);
+			}
+			m_lrcView.SetPlayCentis(centis);
 		} else {
 			m_lrcView.Clear();
 		}
+		m_lrcView.Invalidate(FALSE);
+		m_lrcView.UpdateWindow();
 	}
-	CCC_GroupBoxesBack(GetSafeHwnd());
 	RefreshListAfterLayout();
 	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+	if (savedata.mpLrcExpand && m_lrcView.GetSafeHwnd()) {
+		// 全面再描画後に歌詞GDIを最後に載せ直す(追従スクロールが消えるのを防ぐ)
+		m_lrcView.Invalidate(FALSE);
+		m_lrcView.UpdateWindow();
+	}
 	MpPersistSavedataQuick();
 }
 
