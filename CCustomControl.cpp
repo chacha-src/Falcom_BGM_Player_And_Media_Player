@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include <algorithm>
@@ -139,6 +139,7 @@ static void CCC_ClearDestBlt(HDC hdcDest, int x, int y, int w, int h,
 
 #if CCUSTOM_AERO_SUPPORT
 static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr);
+static void CCC_MakeRectOpaquePreserve(HDC hdc, const RECT& rc);
 #endif
 
 static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWnd)
@@ -214,26 +215,44 @@ static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr)
     const int h = rc.bottom - rc.top;
     if (w <= 0 || h <= 0 || !hdc) return;
 
+    // 再利用DIB + AlphaBlend（毎フレ BeginBufferedPaint + 画素ループを避ける）
+    {
+        static CCC_ChromaBlitCache s_fillCaches[2];
+        static unsigned s_fillNext = 0;
+        CCC_ChromaBlitCache* pCache = nullptr;
+        for (auto& c : s_fillCaches) {
+            if (c.pBits && c.dibW == w && c.dibH == h) {
+                pCache = &c;
+                break;
+            }
+        }
+        if (!pCache) {
+            pCache = &s_fillCaches[s_fillNext++ % 2];
+            if (!pCache->Ensure(hdc, w, h))
+                pCache = nullptr;
+        }
+        if (pCache && pCache->pBits && pCache->hdcDib) {
+            RECT zr = { 0, 0, w, h };
+            HBRUSH br = ::CreateSolidBrush(clr);
+            ::FillRect(pCache->hdcDib, &zr, br);
+            ::DeleteObject(br);
+            pCache->MakeRectOpaque(0, 0, w, h);
+            const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+            if (::GdiAlphaBlend(hdc, rc.left, rc.top, w, h,
+                    pCache->hdcDib, 0, 0, w, h, bf))
+                return;
+        }
+    }
+
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     params.dwFlags = BPPF_ERASE;
     HDC hdcBuf = NULL;
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdc, &rc, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (hdcBuf && hBP) {
         HBRUSH br = ::CreateSolidBrush(clr);
-        // buffer DC はクライアント座標を共有する
         ::FillRect(hdcBuf, &rc, br);
         ::DeleteObject(br);
         ::BufferedPaintMakeOpaque(hBP, &rc);
-        RGBQUAD* pPixels = nullptr;
-        int rowLength = 0;
-        if (SUCCEEDED(::GetBufferedPaintBits(hBP, &pPixels, &rowLength)) && pPixels && rowLength > 0) {
-            for (int y = 0; y < h; ++y) {
-                RGBQUAD* row = reinterpret_cast<RGBQUAD*>(
-                    reinterpret_cast<BYTE*>(pPixels) + y * rowLength * static_cast<int>(sizeof(RGBQUAD)));
-                for (int x = 0; x < w; ++x)
-                    row[x].rgbReserved = 255;
-            }
-        }
         ::EndBufferedPaint(hBP, TRUE);
         return;
     }
@@ -253,18 +272,22 @@ static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr)
         ::DeleteObject(br);
         return;
     }
-    RGBQUAD fill = { GetBValue(clr), GetGValue(clr), GetRValue(clr), 255 };
-    RGBQUAD* pq = static_cast<RGBQUAD*>(pBits);
-    const int n = w * h;
-    for (int i = 0; i < n; ++i)
-        pq[i] = fill;
-    // BitBlt は α を落としやすいので AlphaBlend で載せる
-    HDC hdcMem = ::CreateCompatibleDC(hdc);
-    HGDIOBJ old = ::SelectObject(hdcMem, hDib);
-    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    ::GdiAlphaBlend(hdc, rc.left, rc.top, w, h, hdcMem, 0, 0, w, h, bf);
-    ::SelectObject(hdcMem, old);
-    ::DeleteDC(hdcMem);
+    {
+        HDC hdcMem = ::CreateCompatibleDC(hdc);
+        HGDIOBJ old = ::SelectObject(hdcMem, hDib);
+        HBRUSH br = ::CreateSolidBrush(clr);
+        RECT zr = { 0, 0, w, h };
+        ::FillRect(hdcMem, &zr, br);
+        ::DeleteObject(br);
+        UINT32* px = (UINT32*)pBits;
+        const int n = w * h;
+        for (int i = 0; i < n; ++i)
+            px[i] |= 0xFF000000u;
+        const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+        ::GdiAlphaBlend(hdc, rc.left, rc.top, w, h, hdcMem, 0, 0, w, h, bf);
+        ::SelectObject(hdcMem, old);
+        ::DeleteDC(hdcMem);
+    }
     ::DeleteObject(hDib);
 }
 
@@ -635,19 +658,47 @@ void CCC_ClipNoChildren(CDC& dc, CWnd* pWnd)
     dc.SelectClipRgn(&rgn, RGN_AND);
 }
 
+// キャプション常時アクリル(dffb3db〜)下の不透明Blit。毎フレ BeginBufferedPaint すると
+// バナーGDI/ピアノ等が約数倍重くなるため、再利用DIBへ描いて α=255 付き AlphaBlend する。
 static void CCC_BlitToRectOpaque(HDC hdcDest, const RECT& rect, HDC hdcSrc, int srcX, int srcY,
     int destW, int destH, int srcW, int srcH, BOOL bStretch)
 {
-    if (destW <= 0 || destH <= 0) return;
+    if (destW <= 0 || destH <= 0 || !hdcDest || !hdcSrc) return;
+
+    static CCC_ChromaBlitCache s_opaqueCaches[4];
+    static unsigned s_opaqueNext = 0;
+    CCC_ChromaBlitCache* pCache = nullptr;
+    for (auto& c : s_opaqueCaches) {
+        if (c.pBits && c.dibW == destW && c.dibH == destH) {
+            pCache = &c;
+            break;
+        }
+    }
+    if (!pCache) {
+        pCache = &s_opaqueCaches[s_opaqueNext++ % 4];
+        if (!pCache->Ensure(hdcDest, destW, destH))
+            pCache = nullptr;
+    }
+    if (pCache && pCache->pBits && pCache->hdcDib) {
+        ::SetStretchBltMode(pCache->hdcDib, COLORONCOLOR);
+        if (bStretch && (destW != srcW || destH != srcH))
+            ::StretchBlt(pCache->hdcDib, 0, 0, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
+        else
+            ::BitBlt(pCache->hdcDib, 0, 0, destW, destH, hdcSrc, srcX, srcY, SRCCOPY);
+        pCache->MakeRectOpaque(0, 0, destW, destH);
+        const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+        if (::GdiAlphaBlend(hdcDest, rect.left, rect.top, destW, destH,
+                pCache->hdcDib, 0, 0, destW, destH, bf))
+            return;
+    }
+
+    // フォールバック: 旧 BeginBufferedPaint 経路
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     params.dwFlags = BPPF_ERASE;
     HDC hdcBuf = NULL;
     HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
     if (hdcBuf && hBP)
     {
-        // buffer DC はクライアント座標系を共有するため、(0,0) ではなく
-        // rect の左上から描画する。(0,0) に描くと rect が原点以外のとき
-        // バッファ範囲外に描かれ、BPPF_ERASE の黒だけが画面に残る。
         ::SetStretchBltMode(hdcBuf, COLORONCOLOR);
         if (bStretch)
             ::StretchBlt(hdcBuf, rect.left, rect.top, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
@@ -4810,15 +4861,19 @@ void CCustomSliderCtrl::SetMode(int m)
 }
 void CCustomSliderCtrl::SetPos(int nPos, BOOL bRedraw)
 {
-    CSliderCtrl::SetPos(nPos);
-    if (bRedraw && GetSafeHwnd())
-    {
+	// 値が同じなら何もしない。MirrorSeekVol 等が 60fps で呼ぶと
+	// UpdateWindow + 親アクリル Invalidate が毎フレ走り全体が約2倍重くなる。
+	if (GetSafeHwnd() && CSliderCtrl::GetPos() == nPos)
+		return;
+	CSliderCtrl::SetPos(nPos);
+	if (bRedraw && GetSafeHwnd())
+	{
 #if CCUSTOM_AERO_SUPPORT
-        CCC_InvalidateParent(m_hWnd, m_bAeroMode);
+		CCC_InvalidateParent(m_hWnd, m_bAeroMode);
 #endif
-        Invalidate(FALSE);
-        UpdateWindow();
-    }
+		Invalidate(FALSE);
+		UpdateWindow();
+	}
 }
 void CCustomSliderCtrl::SetAeroMode(BOOL b)
 {
@@ -5397,12 +5452,13 @@ void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax,
     const int newThumb = ValueToPixel(m_nLogicalPos);
     const int newSel0 = ValueToPixel(m_nSelMin);
     const int newSel1 = ValueToPixel(m_nSelMax);
-    if (newThumb == oldThumb && newSel0 == oldSel0 && newSel1 == oldSel1)
-        return;
+	if (newThumb == oldThumb && newSel0 == oldSel0 && newSel1 == oldSel1)
+		return;
 
-    // バナー Invalidate に合流させると再生が進むほど描画間隔が崩れるため、
-    // 見た目変化時のみこのコントロールを即時再描画(状態は上で一括更新済み)。
-    RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+	// UPDATENOW だと timerp 内で同期描画→直後のバナー Invalidate と合わせて毎フレ2回塗る。
+	// Invalidate のみにして次の WM_PAINT に合流させる（見た目の追従は十分）。
+	if (::IsWindowVisible(m_hWnd))
+		Invalidate(FALSE);
 }
 
 void CCustomRangeSliderCtrl::GetSelection(int& mn, int& mx) const
@@ -6204,7 +6260,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 if (rj.top < r.top + 1) rj.top = r.top + 1;
                 rj.right = rj.left + jsz;
                 rj.bottom = rj.top + jsz;
-                // ジャケ無し帯も行背景で不透明に埋める(α=0のままだとアクリルが透ける)
+                // ジャケ無し: 追加塗りしない(行背景のまま)。板/偽グラデは違和感の元。
                 if (hb) {
                     jacketRight = rj.right;
                     CDC src;
@@ -6220,10 +6276,6 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 }
                 else {
                     jacketRight = rj.right;
-#if CCUSTOM_AERO_SUPPORT
-                    if (bCapGlass)
-                        CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), rj, bg);
-#endif
                 }
             }
             // ♪描画位置(ジャケ有無で切替)。♡ は従来どおり ♪ と同位置・奥に重ねる。
@@ -7750,6 +7802,19 @@ void CCustomStandardButton::PaintOpaqueClient(CDC& dc)
     GetClientRect(&r);
     if (r.Width() <= 0 || r.Height() <= 0)
         return;
+
+    // dffb3db 以降のキャプション常時アクリル: BeginBufferedPaint 連打を避けて AlphaBlend
+    RECT rr = { 0, 0, r.Width(), r.Height() };
+    CDC mDC;
+    CBitmap mB;
+    if (mDC.CreateCompatibleDC(&dc) && mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height())) {
+        HGDIOBJ ob = mDC.SelectObject(mB);
+        PaintClient(mDC, r);
+        CCC_BlitToRectOpaque(dc.GetSafeHdc(), rr, mDC.GetSafeHdc(), 0, 0,
+            r.Width(), r.Height(), r.Width(), r.Height(), FALSE);
+        mDC.SelectObject(ob);
+        return;
+    }
 
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     params.dwFlags = BPPF_ERASE;
@@ -10370,6 +10435,35 @@ private:
 
         // キャプション常時アクリル(ExtendFrame -1)下では本文コントロールを
         // 必ず全面 α=255 にする。部分 MakeOpaque は周囲が透過して見える。
+        // BeginBufferedPaint 毎回は重いので、再利用DIB + AlphaBlend を先に試す。
+        {
+            static CCC_ChromaBlitCache s_fixCaches[4];
+            static unsigned s_fixNext = 0;
+            CCC_ChromaBlitCache* pCache = nullptr;
+            for (auto& c : s_fixCaches) {
+                if (c.pBits && c.dibW == width && c.dibH == height) {
+                    pCache = &c;
+                    break;
+                }
+            }
+            if (!pCache) {
+                pCache = &s_fixCaches[s_fixNext++ % 4];
+                if (!pCache->Ensure(hDestDC, width, height))
+                    pCache = nullptr;
+            }
+            if (pCache && pCache->pBits && pCache->hdcDib) {
+                CBrush brush(m_clrBg);
+                RECT zr = { 0, 0, width, height };
+                ::FillRect(pCache->hdcDib, &zr, (HBRUSH)brush.GetSafeHandle());
+                PaintClientIntoBuffer(hWnd, pCache->hdcDib);
+                pCache->MakeRectOpaque(0, 0, width, height);
+                const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+                if (::GdiAlphaBlend(hDestDC, 0, 0, width, height,
+                        pCache->hdcDib, 0, 0, width, height, bf))
+                    return;
+            }
+        }
+
         BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
         params.dwFlags = BPPF_ERASE;
         HDC hdcBuf = NULL;

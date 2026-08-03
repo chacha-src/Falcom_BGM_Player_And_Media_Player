@@ -41,6 +41,9 @@ extern void MpPersistSavedataQuick();
 #ifndef WDA_EXCLUDEFROMCAPTURE
 #define WDA_EXCLUDEFROMCAPTURE 0x00000011
 #endif
+#ifndef WDA_NONE
+#define WDA_NONE 0x00000000
+#endif
 #ifndef MF_SINK_WRITER_DISABLE_THROTTLING
 // Windows SDK によってヘッダ未定義のことがある
 DEFINE_GUID(MF_SINK_WRITER_DISABLE_THROTTLING,
@@ -2167,6 +2170,7 @@ BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_SC_SCALE100, &CScreenCaptureDlg::OnBnClickedScale100)
 	ON_BN_CLICKED(IDC_SC_TILE, &CScreenCaptureDlg::OnBnClickedTile)
 	ON_BN_CLICKED(IDC_SC_INCMP, &CScreenCaptureDlg::OnBnClickedIncludeMp)
+	ON_BN_CLICKED(IDC_SC_MIC, &CScreenCaptureDlg::OnBnClickedMic)
 	ON_CBN_SELCHANGE(IDC_SC_MODE, &CScreenCaptureDlg::OnCbnSelchangeMode)
 	ON_CBN_SELCHANGE(IDC_SC_CANVAS, &CScreenCaptureDlg::OnCbnSelchangeCanvas)
 	ON_CBN_SELCHANGE(IDC_SC_FPS, &CScreenCaptureDlg::OnCbnSelchangeFps)
@@ -3308,6 +3312,17 @@ void CScreenCaptureDlg::OnBnClickedIncludeMp()
 	SyncMpLayerFromCheck();
 }
 
+void CScreenCaptureDlg::OnBnClickedMic()
+{
+	if (m_uiLocked) return;
+	PersistUiToSavedata();
+	// PeakMonitor は起動時に mic を開くか決める。チェック変更で取り直す。
+	if (InterlockedCompareExchange(&m_run, 0, 0) == 0) {
+		StopPeakMonitor();
+		StartPeakMonitor();
+	}
+}
+
 void CScreenCaptureDlg::ToggleLayerHidden(int layerIdx)
 {
 	if (layerIdx < 0 || layerIdx >= m_layerCnt) return;
@@ -3879,8 +3894,9 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	CCC_BringDialogToForeground(this);
-	// 画面キャプチャAPIからこのダイアログを除外（写り込み防止。ウィンドウ合成は PrintWindow 側でも除外）
-	::SetWindowDisplayAffinity(m_hWnd, WDA_EXCLUDEFROMCAPTURE);
+	// 待機中は Win+Shift+S 等でスクショできるよう affinity なし。
+	// 録画開始時だけ WDA_EXCLUDEFROMCAPTURE（写り込み防止）。停止で戻す。
+	::SetWindowDisplayAffinity(m_hWnd, WDA_NONE);
 	if (!m_snapCsInit) {
 		InitializeCriticalSection(&m_snapCs);
 		m_snapCsInit = TRUE;
@@ -4745,8 +4761,11 @@ void CScreenCaptureDlg::StopRecording()
 		UpdateElapsedUi();
 	}
 	m_stopping = FALSE;
-	if (uiAlive)
+	if (uiAlive) {
+		// 録画終了後は再び Win+Shift+S でこの画面を撮れるようにする
+		::SetWindowDisplayAffinity(m_hWnd, WDA_NONE);
 		StartPeakMonitor();
+	}
 }
 
 void CScreenCaptureDlg::StartPeakMonitor()
@@ -4796,7 +4815,8 @@ UINT __stdcall CScreenCaptureDlg::PeakMonitorThread(void* p)
 		__uuidof(IMMDeviceEnumerator), (void**)&enumer);
 	if (FAILED(hr) || !enumer) goto peak_done;
 
-	// プレビュー中は常にシステム(ループバック=演奏込み)とマイクを監視
+	// プレビュー中: ループバックは常時。マイクは「マイク」チェックONのときだけ開く
+	// (常時 eCapture はマイク付きPCでUI全体を重くする)
 	if (savedata.loop_device[0]) {
 		hr = enumer->GetDevice(savedata.loop_device, &renderDev);
 		if (FAILED(hr) || !renderDev) {
@@ -4809,7 +4829,7 @@ UINT __stdcall CScreenCaptureDlg::PeakMonitorThread(void* p)
 	if (SUCCEEDED(hr) && renderDev)
 		ScInitLoopbackCapture(renderDev, &loopClient, &loopCap, &mixFmt, &hEvent);
 
-	{
+	if (savedata.cap_with_mic) {
 		HRESULT hm = S_OK;
 		if (savedata.mic_device[0]) {
 			hm = enumer->GetDevice(savedata.mic_device, &micDev);

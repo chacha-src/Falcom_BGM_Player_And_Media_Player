@@ -195,6 +195,7 @@ public:
 	afx_msg void OnBnClickedScale100();
 	afx_msg void OnBnClickedTile();
 	afx_msg void OnBnClickedIncludeMp();
+	afx_msg void OnBnClickedMic();
 	afx_msg void OnCbnSelchangeMode();
 	afx_msg void OnCbnSelchangeCanvas();
 	afx_msg void OnCbnSelchangeFps();

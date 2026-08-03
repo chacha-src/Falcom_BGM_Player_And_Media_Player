@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -43,7 +43,7 @@ enum { kPlJakN = 48, kPlJakPx = 24 };
 static void PlJakMemInit();
 static HBITMAP PlJacketGetCb(void* ctx, int row);
 static int PlNoteIconGetCb(void* ctx, int row);
-static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDisk = FALSE);
+static BOOL PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDisk = FALSE);
 static void PlMissTickScan(CPlayList* self);
 
 static bool DeserializeLogFont(const TCHAR* str, LOGFONT* lf)
@@ -496,7 +496,7 @@ BOOL CPlayList::OnInitDialog()
 	SetTimer(20,20,NULL);
 	SetTimer(3000,1200,NULL);
 	SetTimer(40,500,NULL);   // 起動ワンショット(plw)。timerpl1 が Kill する
-	SetTimer(41,125,NULL);   // ミニジャケ抽出(~4x) + 欠損走査(継続)
+	SetTimer(41,125,NULL);   // ミニジャケ+欠損。温いと500msに間引き
 	SetTimer(5000,100,NULL);
 	SIcon(pnt1);
 
@@ -987,8 +987,49 @@ static HBITMAP s_plJakBmp[kPlJakN];
 static TCHAR   s_plJakKey[kPlJakN][1024];
 static DWORD   s_plJakTick[kPlJakN];
 static BOOL    s_plJakInited = FALSE;
-static TCHAR   s_plJakNoneDone[256][1024];
+// 無し確定 / ディスク解決済み(AttrEx 済みで再監視不要)。リングで溢れても mark 可能。
+static const int kPlJakNegCap = 512;
+static TCHAR   s_plJakNoneDone[kPlJakNegCap][1024];
 static int     s_plJakNoneDoneN = 0;
+static int     s_plJakNoneDoneW = 0;
+static TCHAR   s_plJakDiskSettled[kPlJakNegCap][1024]; // .b2/.n2 確認済→prefetch で AttrEx しない
+static int     s_plJakDiskSettledN = 0;
+static int     s_plJakDiskSettledW = 0;
+static UINT    s_plJakTimerMs = 125;
+
+static BOOL PlJakIsInRing(const TCHAR (*ring)[1024], int n, int cap, const TCHAR* path)
+{
+	if (!path || !path[0]) return FALSE;
+	const int lim = (n < cap) ? n : cap;
+	for (int i = 0; i < lim; ++i) {
+		if (_tcsicmp(ring[i], path) == 0) return TRUE;
+	}
+	return FALSE;
+}
+static void PlJakRingAdd(TCHAR (*ring)[1024], int& n, int& w, int cap, const TCHAR* path)
+{
+	if (!path || !path[0] || PlJakIsInRing(ring, n, cap, path)) return;
+	_tcsncpy_s(ring[w], path, _TRUNCATE);
+	w = (w + 1) % cap;
+	if (n < cap) ++n;
+}
+static BOOL PlJakIsKnownNone(const TCHAR* path)
+{
+	return PlJakIsInRing(s_plJakNoneDone, s_plJakNoneDoneN, kPlJakNegCap, path);
+}
+static void PlJakMarkNone(const TCHAR* path)
+{
+	PlJakRingAdd(s_plJakNoneDone, s_plJakNoneDoneN, s_plJakNoneDoneW, kPlJakNegCap, path);
+	PlJakRingAdd(s_plJakDiskSettled, s_plJakDiskSettledN, s_plJakDiskSettledW, kPlJakNegCap, path);
+}
+static BOOL PlJakIsDiskSettled(const TCHAR* path)
+{
+	return PlJakIsInRing(s_plJakDiskSettled, s_plJakDiskSettledN, kPlJakNegCap, path);
+}
+static void PlJakMarkDiskSettled(const TCHAR* path)
+{
+	PlJakRingAdd(s_plJakDiskSettled, s_plJakDiskSettledN, s_plJakDiskSettledW, kPlJakNegCap, path);
+}
 
 static void PlJakMemInit()
 {
@@ -1132,19 +1173,20 @@ static UINT AFX_CDECL PlJakLoadThread(LPVOID p)
 	return 0;
 }
 
-static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDisk)
+static BOOL PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDisk)
 {
 	if (!self || !::IsWindow(self->m_lc.GetSafeHwnd()) || !self->pc)
-		return;
+		return FALSE;
 	PlJakMemInit();
 	const int nDisp = self->m_lc.GetItemCount();
-	if (nDisp <= 0) return;
+	if (nDisp <= 0) return FALSE;
 	int top = self->m_lc.GetTopIndex();
 	if (top < 0) top = 0;
 	int page = self->m_lc.GetCountPerPage() + 2;
 	if (page < 4) page = 4;
 	const DWORD now = GetTickCount();
 	BOOL anyDisk = FALSE;
+	BOOL visibleCold = FALSE;
 
 	if (bulkDisk) {
 		InterlockedIncrement(&s_plJakGen);
@@ -1183,14 +1225,29 @@ static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDis
 				if (!s_plJakKey[i][0] && freeSlot < 0) freeSlot = i;
 				if (s_plJakTick[i] < lruTick) { lruTick = s_plJakTick[i]; lruSlot = i; }
 			}
-			if (hit >= 0) { s_plJakTick[hit] = now; continue; }
-			if (s_plJakPend[0] && _tcsicmp(s_plJakPend, path) == 0) continue;
+			if (hit >= 0) {
+				if (!s_plJakBmp[hit]) {
+					s_plJakKey[hit][0] = 0;
+					s_plJakTick[hit] = 0;
+					PlJakMarkNone(path);
+					continue;
+				}
+				s_plJakTick[hit] = now;
+				continue;
+			}
+			if (s_plJakPend[0] && _tcsicmp(s_plJakPend, path) == 0) {
+				visibleCold = TRUE;
+				continue;
+			}
+			if (PlJakIsKnownNone(path))
+				continue;
 			BOOL knownNoDisk = FALSE;
 			for (int ni = 0; ni < s_plJakNoDiskN; ++ni) {
 				if (_tcsicmp(s_plJakNoDisk[ni], path) == 0) { knownNoDisk = TRUE; break; }
 			}
 			if (knownNoDisk) continue;
 
+			// 可視の未メモリのみ AttrEx/Load。settled でも BMP はメモリへ載せる。
 			int slot = freeSlot;
 			if (slot < 0) {
 				if (!allowLru) continue;
@@ -1204,6 +1261,7 @@ static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDis
 			if (!hasBmp && !hasNone) {
 				if (s_plJakNoDiskN < 96)
 					_tcsncpy_s(s_plJakNoDisk[s_plJakNoDiskN++], path, _TRUNCATE);
+				PlJakMarkDiskSettled(path);
 				continue;
 			}
 			{
@@ -1223,6 +1281,7 @@ static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDis
 								s_plJakTick[ci] = 0;
 							}
 						}
+						visibleCold = TRUE;
 						continue;
 					}
 				}
@@ -1244,6 +1303,7 @@ static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDis
 						s_plJakBmp[slot] = hbD;
 						s_plJakTick[slot] = now;
 						anyDisk = TRUE;
+						PlJakMarkDiskSettled(path);
 						disk.Destroy();
 						continue;
 					}
@@ -1252,18 +1312,12 @@ static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDis
 				}
 			}
 			if (hasNone) {
-				BOOL already = FALSE;
-				for (int ni = 0; ni < s_plJakNoneDoneN; ++ni) {
-					if (_tcsicmp(s_plJakNoneDone[ni], path) == 0) { already = TRUE; break; }
-				}
-				if (already) {
-					if (s_plJakBmp[slot]) { ::DeleteObject(s_plJakBmp[slot]); s_plJakBmp[slot] = NULL; }
-					_tcsncpy_s(s_plJakKey[slot], path, _TRUNCATE);
-					s_plJakBmp[slot] = NULL;
-					s_plJakTick[slot] = now;
-					continue;
-				}
+				// 空 HBITMAP をスロットに載せない(無色サムネの原因)
+				PlJakMarkNone(path);
+				continue;
 			}
+			PlJakMarkDiskSettled(path);
+			visibleCold = TRUE; // 抽出待ち
 		}
 	}
 	if (pDCBatch) self->ReleaseDC(pDCBatch);
@@ -1279,8 +1333,8 @@ static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDis
 			self->m_lc.RedrawWindow(&rc0, NULL, RDW_INVALIDATE | RDW_NOERASE);
 		}
 	}
-	if (!allowExtract || !og) return;
-	if (InterlockedCompareExchange(&s_plJakBusy, 1, 0) != 0) return;
+	if (!allowExtract || !og) return visibleCold;
+	if (InterlockedCompareExchange(&s_plJakBusy, 1, 0) != 0) return TRUE;
 
 	auto startExtractAt = [&](int row, BOOL bgOnly) -> BOOL {
 		if (row < 0 || row >= self->playcnt || row >= nDisp) return FALSE;
@@ -1292,21 +1346,23 @@ static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDis
 		}
 		if (s_plJakPend[0] && _tcsicmp(s_plJakPend, path) == 0)
 			return FALSE;
+		if (PlJakIsKnownNone(path) || PlJakIsDiskSettled(path))
+			return FALSE;
+		for (int ni = 0; ni < s_plJakNoDiskN; ++ni) {
+			if (_tcsicmp(s_plJakNoDisk[ni], path) == 0) return FALSE;
+		}
 
 		const CString diskBmp = PlJakDiskPath(path, FALSE);
 		const CString diskNone = PlJakDiskPath(path, TRUE);
 		WIN32_FILE_ATTRIBUTE_DATA fadBmp = {}, fadNone = {};
 		const BOOL hasBmp = !diskBmp.IsEmpty() && ::GetFileAttributesEx(diskBmp, GetFileExInfoStandard, &fadBmp);
 		const BOOL hasNone = !diskNone.IsEmpty() && ::GetFileAttributesEx(diskNone, GetFileExInfoStandard, &fadNone);
-		if (hasBmp) return FALSE;
+		if (hasBmp) {
+			PlJakMarkDiskSettled(path);
+			return FALSE;
+		}
 		if (hasNone) {
-			BOOL already = FALSE;
-			for (int ni = 0; ni < s_plJakNoneDoneN; ++ni) {
-				if (_tcsicmp(s_plJakNoneDone[ni], path) == 0) { already = TRUE; break; }
-			}
-			if (already) return FALSE;
-			if (s_plJakNoneDoneN < 256)
-				_tcsncpy_s(s_plJakNoneDone[s_plJakNoneDoneN++], path, _TRUNCATE);
+			PlJakMarkNone(path);
 			return FALSE;
 		}
 
@@ -1329,27 +1385,28 @@ static void PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDis
 
 	if (s_plJakPend[0]) {
 		InterlockedExchange(&s_plJakBusy, 0);
-		return;
+		return TRUE;
 	}
 	for (int row = top; row < top + page && row < nDisp && row < self->playcnt; ++row) {
 		if (startExtractAt(row, FALSE))
-			return;
+			return TRUE;
 	}
+	// 全曲 AttrEx 巡回はやめる。画面外は1件/tickだけ。
 	if (s_plJakPrefetch < 0 || s_plJakPrefetch >= nDisp)
 		s_plJakPrefetch = 0;
-	const int vis0 = top;
-	const int vis1 = top + page;
 	const int lim = (nDisp < self->playcnt) ? nDisp : self->playcnt;
-	for (int n = 0; n < lim; ++n) {
-		const int row = (s_plJakPrefetch + n) % lim;
-		if (row >= vis0 && row < vis1) continue;
-		if (startExtractAt(row, TRUE)) {
+	if (lim > 0 && plf == 0) {
+		for (int n = 0; n < lim; ++n) {
+			const int row = (s_plJakPrefetch + n) % lim;
 			s_plJakPrefetch = (row + 1) % lim;
-			return;
+			if (row >= top && row < top + page) continue;
+			if (startExtractAt(row, TRUE))
+				return TRUE;
+			break; // 1候補だけ見て終わる(解決済みなら次tickへ)
 		}
 	}
-	s_plJakPrefetch = 0;
 	InterlockedExchange(&s_plJakBusy, 0);
+	return visibleCold;
 }
 
 // 欠損表示用メモリ(描画中に PlMissDiskGet しない)。MP があるときは mp->m_miss を優先参照。
@@ -2177,7 +2234,7 @@ int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 	pnt1=-1;
 	CString s,s1;
 	// 単体メディアファイルはパス+形式(sub)で同一判定(タグ名とプレイリスト表示名の差異を吸収)
-	const bool pathKeyOnly = (sub == -1 || sub == -6 || sub == 34 || sub == 35 ||
+	const bool pathKeyOnly = (sub == -1 || sub == -6 || sub == 33 || sub == 34 || sub == 35 ||
 		sub == -7 || sub == -8 || sub == -9 ||
 		sub == -10 || sub == 999 || sub == -2 || sub == -3);
 	for(int j=0;j<i;j++){
@@ -2281,7 +2338,7 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 		case 20:s=LL14(L"海の檻歌", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"바다의 감옥 노래", L"海之槛歌", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean");break;
 		case 21:s = LL14(L"閃の軌跡Ⅰ,Ⅱ,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"섬의 궤적 I,II,Ys8", L"闪之轨迹I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8"); break;
 		case 30:s = LL14(L"空の軌跡 The 1st", L"Trails in the Sky The 1st", L"Les Sentiers du Ciel The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"하늘의 궤적 The 1st", L"空之轨迹 The 1st", L"Trails in the Sky The 1st", L"Тропы в Небе The 1st", L"Himmelsleitern The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st"); break;
-		// mode 31-33: 予約 / 34-35: Daybreak II / beyond the Horizon (opus loops=)
+		// mode 31-32: 予約 / 33-35: Daybreak / Daybreak II / beyond the Horizon (opus loops=)
 		case 31:s = LL14(L"空の軌跡 The 2nd", L"Trails in the Sky The 2nd", L"Les Sentiers du Ciel The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"하늘의 궤적 The 2nd", L"空之轨迹 The 2nd", L"Trails in the Sky The 2nd", L"Тропы в Небе The 2nd", L"Himmelsleitern The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd"); break;
 		case 32:s = LL14(L"空の軌跡 The 3rd", L"Trails in the Sky The 3rd", L"Les Sentiers du Ciel The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"하늘의 궤적 The 3rd", L"空之轨迹 The 3rd", L"Trails in the Sky The 3rd", L"Тропы в Небе The 3rd", L"Himmelsleitern The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd"); break;
 		case 33:s = LL14(L"英雄伝説 黎の軌跡", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"영웅전설 여의 궤적", L"英雄传说 黎之轨迹", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak"); break;
@@ -4344,12 +4401,12 @@ void CPlayList::Fol(CString fname)
 					CString b = a.Mid(6, 1);
 					int err;
 					int fff = 0;
-					// ed9 + フォルダ名で mode 34/35 を割当（インストール先はユーザー依存）
+					// ed9 + フォルダ名で mode 33/34/35（インストール先はユーザー依存）
 					{
 						CString pathL = fname;
 						pathL.MakeLower();
 						if (a.GetLength() >= 3 && a.Left(3).CompareNoCase(L"ed9") == 0) {
-							// 黎の軌跡単体はⅠの可能性あり → Ⅱ/II/ⅱ/crimson を要求
+							// Ⅱ を先に判定（Daybreak / 黎の軌跡 単体はⅠ）
 							if (pathL.Find(L"daybreak ii") >= 0 || pathL.Find(L"crimson sin") >= 0
 								|| pathL.Find(L"黎の軌跡ⅱ") >= 0 || pathL.Find(L"黎の軌跡Ⅱ") >= 0
 								|| pathL.Find(L"黎の軌跡ii") >= 0 || pathL.Find(L"黎の軌跡 ii") >= 0 || pathL.Find(L"黎の軌跡2") >= 0
@@ -4358,6 +4415,8 @@ void CPlayList::Fol(CString fname)
 							else if (pathL.Find(L"beyond the horizon") >= 0 || pathL.Find(L"界の軌跡") >= 0
 								|| pathL.Find(L"kai no kiseki") >= 0 || pathL.Find(L"界之轨迹") >= 0)
 								p.sub = 35;
+							else if (pathL.Find(L"daybreak") >= 0 || pathL.Find(L"黎の軌跡") >= 0 || pathL.Find(L"黎之轨迹") >= 0)
+								p.sub = 33;
 						}
 					}
 					// Ys X - 楽曲情報の一括修正
@@ -4572,6 +4631,16 @@ void CPlayList::Fol(CString fname)
 					else if (ft == L"y_title.opus") {
 						a = LL14(L"その優しさは誰のため", L"For Whom Is That Kindness", L"Pour qui est cette gentillesse", L"Per chi è quella gentilezza", L"Para quién es esa amabilidad", L"그 친절은 누구를 위한 것인가", L"那份温柔是为了谁", L"لمن هذا اللطف", L"Для кого эта доброта", L"Wem gilt diese Güte", L"Para quem é essa bondade", L"Voor wie is die vriendelijkheid", L"Dla kogo ta dobroć", L"Bu Nezaket Kimin İçin");
 						fff = 1;
+					}
+
+					// --- ed9 mode 33 titles (黎I: 当面ファイル名。購入後に曲名対応) ---
+					if (fff == 0 && (p.sub == 33)) {
+						if (a.Left(3).CompareNoCase(L"ed9") == 0) {
+							a = ft;
+							if (a.GetLength() > 5 && a.Right(5).CompareNoCase(L".opus") == 0)
+								a = a.Left(a.GetLength() - 5);
+							fff = 1;
+						}
 					}
 
 					// --- auto ed9 mode 35 titles ---
@@ -7487,8 +7556,21 @@ void CPlayList::OnTimer(UINT nIDEvent)
 	}
 	if (nIDEvent == 41) {
 		PlMissTickScan(this);
-		// 可視優先の抽出 + 非表示の順次ディスクキャッシュ
-		PlJacketLoadVisible(this, TRUE, FALSE);
+		static int s_plJakLastTop = -1;
+		const int topNow = ::IsWindow(m_lc.GetSafeHwnd()) ? m_lc.GetTopIndex() : -1;
+		if (topNow != s_plJakLastTop) {
+			s_plJakLastTop = topNow;
+			if (s_plJakTimerMs != 125) {
+				s_plJakTimerMs = 125;
+				SetTimer(41, 125, NULL);
+			}
+		}
+		const BOOL work = PlJacketLoadVisible(this, TRUE, FALSE);
+		const UINT want = work ? 125u : 500u;
+		if (want != s_plJakTimerMs) {
+			s_plJakTimerMs = want;
+			SetTimer(41, want, NULL);
+		}
 	}
 	if (nIDEvent == 40) {
 		// 互換: 旧経路。継続抽出は Timer41
@@ -8290,67 +8372,55 @@ LRESULT CPlayList::OnPlJakDone(WPARAM wParam, LPARAM lParam)
 		int freeSlot = -1, lruSlot = 0;
 		DWORD lruTick = 0xFFFFFFFF;
 		int hit = -1;
+		BOOL didImage = FALSE;
 		for (int i = 0; i < kPlJakN; ++i) {
 			if (s_plJakKey[i][0] && _tcsicmp(s_plJakKey[i], job->path) == 0) { hit = i; break; }
 			if (!s_plJakKey[i][0] && freeSlot < 0) freeSlot = i;
 			if (s_plJakTick[i] < lruTick) { lruTick = s_plJakTick[i]; lruSlot = i; }
 		}
-		int slot = (hit >= 0) ? hit : freeSlot;
-		if (slot < 0 && !job->bgOnly)
-			slot = lruSlot;
-		if (slot < 0) {
+		if (job->noneFlag || !job->hb) {
+			PlJakMarkNone(job->path);
+			if (hit >= 0) {
+				if (s_plJakBmp[hit]) { ::DeleteObject(s_plJakBmp[hit]); s_plJakBmp[hit] = NULL; }
+				s_plJakKey[hit][0] = 0;
+				s_plJakTick[hit] = 0;
+			}
 			if (job->hb) { ::DeleteObject(job->hb); job->hb = NULL; }
 		}
 		else {
-			if (s_plJakBmp[slot] && s_plJakBmp[slot] != job->hb) {
-				::DeleteObject(s_plJakBmp[slot]);
-				s_plJakBmp[slot] = NULL;
+			int slot = (hit >= 0) ? hit : freeSlot;
+			if (slot < 0 && !job->bgOnly)
+				slot = lruSlot;
+			if (slot < 0) {
+				if (job->hb) { ::DeleteObject(job->hb); job->hb = NULL; }
 			}
-			_tcsncpy_s(s_plJakKey[slot], job->path, _TRUNCATE);
-			s_plJakBmp[slot] = job->hb;
-			job->hb = NULL;
-			s_plJakTick[slot] = GetTickCount();
-		}
-		if (job->noneFlag) {
-			BOOL marked = FALSE;
-			for (int ni = 0; ni < s_plJakNoneDoneN; ++ni) {
-				if (_tcsicmp(s_plJakNoneDone[ni], job->path) == 0) { marked = TRUE; break; }
+			else {
+				if (s_plJakBmp[slot] && s_plJakBmp[slot] != job->hb) {
+					::DeleteObject(s_plJakBmp[slot]);
+					s_plJakBmp[slot] = NULL;
+				}
+				_tcsncpy_s(s_plJakKey[slot], job->path, _TRUNCATE);
+				s_plJakBmp[slot] = job->hb;
+				job->hb = NULL;
+				s_plJakTick[slot] = GetTickCount();
+				didImage = TRUE;
+				PlJakMarkDiskSettled(job->path);
 			}
-			if (!marked && s_plJakNoneDoneN < 256)
-				_tcsncpy_s(s_plJakNoneDone[s_plJakNoneDoneN++], job->path, _TRUNCATE);
 		}
-		// noDisk 登録を外す(抽出済み)
 		for (int ni = 0; ni < s_plJakNoDiskN; ++ni) {
 			if (_tcsicmp(s_plJakNoDisk[ni], job->path) == 0) {
 				s_plJakNoDisk[ni][0] = 0;
 				break;
 			}
 		}
-		if (::IsWindow(m_lc.GetSafeHwnd()) && job->row >= 0) {
+		if (didImage && ::IsWindow(m_lc.GetSafeHwnd()) && job->row >= 0) {
 			CRect rIcon;
 			if (m_lc.GetItemRect(job->row, &rIcon, LVIR_BOUNDS)) {
 				rIcon.right = rIcon.left + kPlJakPx + 28;
 				m_lc.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_NOERASE);
 			}
 		}
-		// リスト成功後: 等身大ディスクを本編へ直接採用(LoadJacket 再走査より確実)
-		extern CString filen;
-		if (!job->noneFlag && og && og->jx < 64 && filen.GetLength() > 0
-			&& _tcsicmp(job->path, filen) == 0) {
-			if (!og->AdoptJacketFromDisk(job->path))
-				og->LoadJacket(CString(job->path));
-			if (og->jx >= 64 && !og->img.IsNull()) {
-				if (::IsWindow(og->m_mp3jake.GetSafeHwnd()))
-					og->m_mp3jake.EnableWindow(TRUE);
-				extern CMediaPlayerDlg* mp;
-				if (mp && ::IsWindow(mp->GetSafeHwnd())) {
-					if (!mp->m_jacketRect.IsRectEmpty())
-						mp->InvalidateRect(&mp->m_jacketRect, FALSE);
-					if (!mp->m_bannerRect.IsRectEmpty())
-						mp->InvalidateRect(&mp->m_bannerRect, FALSE);
-				}
-			}
-		}
+		// 本編 Adopt/LoadJacket は UI 飢餓の元。曲切替側に任せる。
 	}
 	else if (job->hb) {
 		::DeleteObject(job->hb);

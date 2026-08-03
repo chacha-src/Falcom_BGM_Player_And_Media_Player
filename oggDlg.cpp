@@ -3366,6 +3366,16 @@ LONG COgg_GetGdiPaintPending()
 	return InterlockedCompareExchange(&g_gdiPaintPending, 0, 0);
 }
 
+DWORD COgg_GetGdiPaintPendingAgeMs()
+{
+	if (InterlockedCompareExchange(&g_gdiPaintPending, 0, 0) == 0)
+		return 0;
+	const DWORD since = g_gdiPaintPendingSince;
+	if (since == 0)
+		return 0;
+	return GetTickCount() - since;
+}
+
 static void COgg_RequestTimerp(COggDlg* dlg)
 {
 	if (!dlg)
@@ -19769,7 +19779,8 @@ void COggDlg::timerp()
 	if (bGdiFrame)
 	{
 	extern int g_mpSideJacket;   // 1=ジャケットを mp 左余白へ分離表示中(内蔵ジャケ抑止)
-	dc.FillSolidRect(0, 0, 3000, 2000, RGB(0, 0, 0));
+	// バナー実寸のみクリア(旧 3000x2000 はビットマップ外まで塗り GDI を食う)
+	dc.FillSolidRect(0, 0, MDCP + 5, (81 + 16) * 4, RGB(0, 0, 0));
 	//		dcsub.FillSolidRect(0,0,3000,30,RGB(1,1,1));
 
 	bool draw_jacket_early = (m_jacketFocus < 0.5);
@@ -20310,15 +20321,19 @@ void COggDlg::timerp()
 		}
 
 		// つまみは実デコード位置（poss5/ogg decode）。予測積分は時間表示用。
+		// MP3 の m_time だけは SetRange(F/100)＋OnHScroll(playb=cur×100) なので、
+		// サンプル数をそのまま入れると約100倍速で端まで走る（計算ミス）。
 		int srcPos;
 		{
 			const int realSamp = TempoPredRealSrcSamples();
+			int frames;
 			if (realSamp >= 0)
-				srcPos = realSamp;
+				frames = realSamp;
 			else if (g_tpUiValid && wavbit_sample_Hz > 0)
-				srcPos = (int)(g_tpSrcSec * (double)wavbit_sample_Hz + 0.5);
+				frames = (int)(g_tpSrcSec * (double)wavbit_sample_Hz + 0.5);
 			else
-				srcPos = (posMode == -10) ? (int)(pb / 100) : (int)pb;
+				frames = (int)pb;
+			srcPos = (posMode == -10) ? (frames / 100) : frames;
 		}
 		if (srcPos < 0) srcPos = 0;
 		if (srcPos > g_seekSrcMax) srcPos = g_seekSrcMax;
@@ -25345,6 +25360,8 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 					// m_time は壁時計。ソースフレーム = srcCur×100
 					playb = (__int64)srcCur * 100;
 					if (playb < 0) playb = 0;
+					// timerp の TempoPredRealSrcSamples(=poss5) と揃えないとシーク直後に棒が跳ねる
+					poss5 = (int)playb;
 
 					if (ps == 0) {
 						// 一時停止中でない場合、再生スレッドの状態をリセットしてシーク
@@ -25354,14 +25371,15 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 						// 旧 playb はフレーム×4 相当だったので、mp3orig 式の先頭に ×4 を入れて互換
 						if (savedata.mp3orig) mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
 						else                  mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
-						poss = 0; sek = TRUE; cnt3 = 0;
+						poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss6 = 0;
+						sek = TRUE; cnt3 = 0;
 						timer.SetEvent();
 						syukai = 0;
 						OnPause();
 					}
 					else {
 						// 再生中のバッファクリアとシーク
-						poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
+						poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss6 = 0;
 						ZeroMemory(bufkpi, OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3);
 						if (savedata.mp3orig) mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
 						else                  mp3_.seek(Mp3SeekDwPosFromPlaybFrames(playb), wavchannel);
@@ -25663,96 +25681,9 @@ void COggDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 
 void COggDlg::NudgeMicMixBelowGdi()
 {
-	// マイク行を GDI 下へ。その分 WAV/DS 音量などが重なれば左カラムだけ連鎖で下げる。
-	if (m_bMicRowNudged || !GetSafeHwnd())
-		return;
-	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
-	if (capH <= 0)
-		return;
-	const int gdiH = (int)((81 + 16) * hD * 4);
-	if (gdiH <= 8)
-		return;
-	const int gdiBottom = capH + gdiH;
-	const int gap = 4;
-
-	auto moveBy = [](CWnd* w, int dy) {
-		if (!w || !::IsWindow(w->GetSafeHwnd()) || dy == 0)
-			return;
-		CRect r;
-		w->GetWindowRect(&r);
-		w->GetParent()->ScreenToClient(&r);
-		w->SetWindowPos(NULL, r.left, r.top + dy, 0, 0,
-			SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-	};
-
-	CWnd* micRow[] = {
-		GetDlgItem(IDC_CHECK_MICMIX),
-		GetDlgItem(IDC_SLIDER_MICLEV),
-		GetDlgItem(IDC_STATIC_MICLEV),
-	};
-	int micTop = INT_MAX;
-	for (CWnd* w : micRow) {
-		if (!w || !::IsWindow(w->GetSafeHwnd()))
-			continue;
-		CRect r;
-		w->GetWindowRect(&r);
-		ScreenToClient(&r);
-		if (r.top < micTop)
-			micTop = r.top;
-	}
-	int dyMic = 0;
-	if (micTop != INT_MAX && micTop < gdiBottom + gap)
-		dyMic = gdiBottom + gap - micTop;
-	// 異常値は無視（全面シフトの再発防止）
-	if (dyMic < 0 || dyMic > 64)
-		dyMic = 0;
-	for (CWnd* w : micRow)
-		moveBy(w, dyMic);
-
-	CWnd* pWav = GetDlgItem(IDC_CHECK2);
-	if (!pWav || !::IsWindow(pWav->GetSafeHwnd())) {
-		m_bMicRowNudged = TRUE;
-		return;
-	}
-	CRect micUnion(0, 0, 0, 0);
-	BOOL hasMic = FALSE;
-	for (CWnd* w : micRow) {
-		if (!w || !::IsWindow(w->GetSafeHwnd()))
-			continue;
-		CRect r;
-		w->GetWindowRect(&r);
-		ScreenToClient(&r);
-		if (!hasMic) {
-			micUnion = r;
-			hasMic = TRUE;
-		}
-		else
-			micUnion.UnionRect(&micUnion, &r);
-	}
-	CRect wavRc;
-	pWav->GetWindowRect(&wavRc);
-	ScreenToClient(&wavRc);
-	int need = 0;
-	if (hasMic)
-		need = (micUnion.bottom + gap) - wavRc.top;
-	if (need < 0)
-		need = 0;
-	if (need > 80)
-		need = 0;
-
-	if (need > 0) {
-		// WAV〜ピッチ行だけ下げる（ゲームボタン／右パネルは動かさない）
-		static const UINT kVolStack[] = {
-			IDC_CHECK2,
-			IDC_SLIDER3, IDC_STATICaaa, IDC_STATICds,
-			IDC_STATICaaab, IDC_STATIC2, IDC_SLIDER1,
-			IDC_STATICaaac, IDC_SLIDER4, IDC_STATICds2,
-			IDC_STATIC_t, IDC_SLIDER7, IDC_STATICds3,
-			IDC_STATIC_p, IDC_SLIDER8, IDC_STATICds4,
-		};
-		for (UINT id : kVolStack)
-			moveBy(GetDlgItem(id), need);
-	}
+	// RC でマイク行をピッチ下(y≈108)に置いたので実行時シフトはしない。
+	// 旧 Nudge は GDI 重なり回避のつもりが、WAV より下のマイクを「重なり」と誤判定して
+	// 音量列を押し下げ、バナー Invalidate × アクリル再描画で全体が重くなった。
 	m_bMicRowNudged = TRUE;
 }
 
