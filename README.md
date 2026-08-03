@@ -117,6 +117,8 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 
 ![メディアプレイヤー画面](https://ppp.oohara.jp/img/mpe3.png)
 
+![メディアプレイヤー画面](https://ppp.oohara.jp/img/rec.png)
+
 ## 対応ゲームタイトル
 以下のゲームのBGMループ再生に対応しています。
 
@@ -340,6 +342,9 @@ From **Capture**, record the screen to **MP4 (H.264 + AAC)**.
 ![Player Screen](https://ppp.oohara.jp/img/mp3e.png)
 
 ![Player Screen](https://ppp.oohara.jp/img/mpe3e.png)
+
+![Player Screen](https://ppp.oohara.jp/img/rece.png)
+
 ## Supported Game Titles
 The player supports seamless BGM looping for the following titles:
 

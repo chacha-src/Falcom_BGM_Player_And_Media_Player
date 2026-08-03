@@ -4198,25 +4198,33 @@ void CCustomStatic::DrawClient(CDC& dc)
 void CCustomStatic::OnPaint()
 {
     CPaintDC dc(this);
+    CRect r;
+    GetClientRect(&r);
+
+    // 透過(アクリル)時はクロマ blit を潰す MakeOpaque を避ける(CCustomCheckBox と同じ)
+    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    if (bTrans || r.Width() <= 0 || r.Height() <= 0)
+    {
+        DrawClient(dc);
+        return;
+    }
+
 #if CCUSTOM_AERO_SUPPORT
+    // キャプションのみホスト α: 素 BitBlt は α=0 で消える → MakeOpaque
     if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)))
     {
-        CRect r;
-        GetClientRect(&r);
-        if (r.Width() > 0 && r.Height() > 0) {
-            BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-            params.dwFlags = BPPF_ERASE;
-            HDC hdcBuf = NULL;
-            HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-            if (hdcBuf && hBP) {
-                CDC dcBuf;
-                dcBuf.Attach(hdcBuf);
-                DrawClient(dcBuf);
-                dcBuf.Detach();
-                ::BufferedPaintMakeOpaque(hBP, &r);
-                ::EndBufferedPaint(hBP, TRUE);
-                return;
-            }
+        BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+        params.dwFlags = BPPF_ERASE;
+        HDC hdcBuf = NULL;
+        HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+        if (hdcBuf && hBP) {
+            CDC dcBuf;
+            dcBuf.Attach(hdcBuf);
+            DrawClient(dcBuf);
+            dcBuf.Detach();
+            ::BufferedPaintMakeOpaque(hBP, &r);
+            ::EndBufferedPaint(hBP, TRUE);
+            return;
         }
     }
 #endif
@@ -4941,25 +4949,33 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
 void CCustomSliderCtrl::OnPaint()
 {
     CPaintDC dc(this);
+    CRect r;
+    GetClientRect(&r);
+
+    // 透過(アクリル)時はクロマ blit を潰す MakeOpaque を避ける(CCustomCheckBox と同じ)
+    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    if (bTrans || r.Width() <= 0 || r.Height() <= 0)
+    {
+        PaintClient(dc);
+        return;
+    }
+
 #if CCUSTOM_AERO_SUPPORT
+    // キャプションのみホスト α: 素 BitBlt は α=0 で消える → MakeOpaque
     if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)))
     {
-        CRect r;
-        GetClientRect(&r);
-        if (r.Width() > 0 && r.Height() > 0) {
-            BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-            params.dwFlags = BPPF_ERASE;
-            HDC hdcBuf = NULL;
-            HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-            if (hdcBuf && hBP) {
-                CDC dcBuf;
-                dcBuf.Attach(hdcBuf);
-                PaintClient(dcBuf);
-                dcBuf.Detach();
-                ::BufferedPaintMakeOpaque(hBP, &r);
-                ::EndBufferedPaint(hBP, TRUE);
-                return;
-            }
+        BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+        params.dwFlags = BPPF_ERASE;
+        HDC hdcBuf = NULL;
+        HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+        if (hdcBuf && hBP) {
+            CDC dcBuf;
+            dcBuf.Attach(hdcBuf);
+            PaintClient(dcBuf);
+            dcBuf.Detach();
+            ::BufferedPaintMakeOpaque(hBP, &r);
+            ::EndBufferedPaint(hBP, TRUE);
+            return;
         }
     }
 #endif
@@ -9889,10 +9905,11 @@ static void CCC_ExcludeGroupBoxSiblings(HWND hGrp, HDC hdc)
     }
 }
 
-// 兄弟(LRC GDI / Edit / Static)を差し引いた領域だけ MakeOpaque。
+// 兄弟(LRC GDI / Edit / Static)を差し引いた領域だけ転送。
 // BeginBufferedPaint は DC クリップを無視しがちなので、全面 Opaque は禁止。
+// bChroma=TRUE のときクロマ透過(アクリル穴)。bOpaque はキャプションのみガラス用。
 static void CCC_BlitGroupBoxMinusSiblings(HWND hGrp, HDC hdcDest, int x, int y,
-    int w, int h, HDC hdcSrc, BOOL bOpaque)
+    int w, int h, HDC hdcSrc, BOOL bOpaque, BOOL bChroma)
 {
     if (!hGrp || !hdcDest || !hdcSrc || w <= 0 || h <= 0) return;
     CRgn rgn;
@@ -9931,7 +9948,13 @@ static void CCC_BlitGroupBoxMinusSiblings(HWND hGrp, HDC hdcDest, int x, int y,
             if (bOpaque) {
                 RECT dest = { x + sx, y + sy, x + sx + bw, y + sy + bh };
                 CCC_BlitToRectOpaque(hdcDest, dest, hdcSrc, sx, sy, bw, bh, bw, bh, FALSE);
-            } else {
+            }
+#if CCUSTOM_AERO_SUPPORT
+            else if (bChroma) {
+                CCC_BlitChromaTrans(hdcDest, x + sx, y + sy, bw, bh, hdcSrc, sx, sy, CCC_AERO_CHROMA_KEY);
+            }
+#endif
+            else {
                 ::BitBlt(hdcDest, x + sx, y + sy, bw, bh, hdcSrc, sx, sy, SRCCOPY);
             }
         }
@@ -9947,15 +9970,14 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
     const int rh = rect.Height();
     if (!pDC || rw <= 0 || rh <= 0) return;
 
-    // ガラス上は枠を MakeOpaque しないと全透過に見える(ピンク線も親と同色で消える)
-#if CCUSTOM_AERO_SUPPORT
-    const BOOL bHostGlass = CCC_HostNeedsChildOpaque(m_hWnd);
-#else
-    const BOOL bHostGlass = FALSE;
-#endif
+    // フルアクリル: 内側をクロマ透過。キャプションのみガラス: 不透明ピンク。
     const BOOL bAeroTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
-    // ガラス時は不透明枠パス(色は通常描画)。aero 透過でも枠は Opaque リングで出す。
-    const BOOL bOpaqueFrame = bHostGlass || bAeroTrans;
+#if CCUSTOM_AERO_SUPPORT
+    const BOOL bCaptionOnly = CCC_CaptionOnlyHostGlass(m_hWnd);
+    const BOOL bOpaqueFrame = !bAeroTrans && (bCaptionOnly || CCC_HostNeedsChildOpaque(m_hWnd));
+#else
+    const BOOL bOpaqueFrame = FALSE;
+#endif
     CString t;
     GetWindowText(t);
 
@@ -9967,7 +9989,7 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
             CCC_ExcludeGroupBoxSiblings(m_hWnd, pDC->GetSafeHdc());
             CFont* pF = GetFont();
             if (pF) pDC->SelectObject(pF);
-            CCC_DrawGroupBoxFrame(*pDC, CRect(0, 0, rw, rh), t, FALSE);
+            CCC_DrawGroupBoxFrame(*pDC, CRect(0, 0, rw, rh), t, bAeroTrans);
             pDC->RestoreDC(saved);
         }
         return;
@@ -9980,21 +10002,24 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
             CCC_ExcludeGroupBoxSiblings(m_hWnd, pDC->GetSafeHdc());
             CFont* pF = GetFont();
             if (pF) pDC->SelectObject(pF);
-            CCC_DrawGroupBoxFrame(*pDC, CRect(0, 0, rw, rh), t, FALSE);
+            CCC_DrawGroupBoxFrame(*pDC, CRect(0, 0, rw, rh), t, bAeroTrans);
             pDC->RestoreDC(saved);
         }
         return;
     }
     CBitmap* pOld = memDC.SelectObject(&bmp);
-    // 内側もダイアログ色。転送時に兄弟領域を差し引く(LRC GDI を消さない)。
+#if CCUSTOM_AERO_SUPPORT
+    memDC.FillSolidRect(0, 0, rw, rh, bAeroTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG);
+#else
     memDC.FillSolidRect(0, 0, rw, rh, COLOR_DIALOG_BG);
+#endif
     CFont* pF = GetFont();
     if (pF) memDC.SelectObject(pF);
-    CCC_DrawGroupBoxFrame(memDC, CRect(0, 0, rw, rh), t, FALSE);
-    CCC_DrawInwoman(&memDC, CRect(0, 0, rw, rh), FALSE);
+    CCC_DrawGroupBoxFrame(memDC, CRect(0, 0, rw, rh), t, bAeroTrans);
+    CCC_DrawInwoman(&memDC, CRect(0, 0, rw, rh), bAeroTrans);
 
     CCC_BlitGroupBoxMinusSiblings(m_hWnd, pDC->GetSafeHdc(), rect.left, rect.top,
-        rw, rh, memDC.GetSafeHdc(), bOpaqueFrame);
+        rw, rh, memDC.GetSafeHdc(), bOpaqueFrame, bAeroTrans);
     memDC.SelectObject(pOld);
 }
 
