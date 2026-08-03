@@ -136,6 +136,8 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 - 英雄伝説 碧の軌跡
 - Steam版 閃の軌跡 I / II / III / IV
 - Steam版 創の軌跡
+- Steam版 黎の軌跡 II
+- Steam版 界の軌跡
 
 ### その他のファルコム作品 / 他社作品
 - Zwei!! (CD版はADPCM、DVD版WAVはPCM処理)
@@ -357,6 +359,8 @@ The player supports seamless BGM looping for the following titles:
 - The Legend of Heroes: Trails to Azure
 - The Legend of Heroes: Trails of Cold Steel I / II / III / IV (Steam)
 - The Legend of Heroes: Trails into Reverie (Steam)
+- The Legend of Heroes: Trails through Daybreak II (Steam)
+- The Legend of Heroes: Trails beyond the Horizon (Steam)
 
 ### Other Falcom & Third-Party Works
 - Zwei!! (ADPCM for CD version / PCM for DVD version)
