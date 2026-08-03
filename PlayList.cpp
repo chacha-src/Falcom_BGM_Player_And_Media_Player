@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -2177,7 +2177,8 @@ int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 	pnt1=-1;
 	CString s,s1;
 	// 単体メディアファイルはパス+形式(sub)で同一判定(タグ名とプレイリスト表示名の差異を吸収)
-	const bool pathKeyOnly = (sub == -1 || sub == -6 || sub == -7 || sub == -8 || sub == -9 ||
+	const bool pathKeyOnly = (sub == -1 || sub == -6 || sub == 34 || sub == 35 ||
+		sub == -7 || sub == -8 || sub == -9 ||
 		sub == -10 || sub == 999 || sub == -2 || sub == -3);
 	for(int j=0;j<i;j++){
 		if (pathKeyOnly) {
@@ -2280,6 +2281,12 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 		case 20:s=LL14(L"海の檻歌", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"바다의 감옥 노래", L"海之槛歌", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean");break;
 		case 21:s = LL14(L"閃の軌跡Ⅰ,Ⅱ,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"섬의 궤적 I,II,Ys8", L"闪之轨迹I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8"); break;
 		case 30:s = LL14(L"空の軌跡 The 1st", L"Trails in the Sky The 1st", L"Les Sentiers du Ciel The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"하늘의 궤적 The 1st", L"空之轨迹 The 1st", L"Trails in the Sky The 1st", L"Тропы в Небе The 1st", L"Himmelsleitern The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st"); break;
+		// mode 31-33: 予約 / 34-35: Daybreak II / beyond the Horizon (opus loops=)
+		case 31:s = LL14(L"空の軌跡 The 2nd", L"Trails in the Sky The 2nd", L"Les Sentiers du Ciel The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"하늘의 궤적 The 2nd", L"空之轨迹 The 2nd", L"Trails in the Sky The 2nd", L"Тропы в Небе The 2nd", L"Himmelsleitern The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd"); break;
+		case 32:s = LL14(L"空の軌跡 The 3rd", L"Trails in the Sky The 3rd", L"Les Sentiers du Ciel The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"하늘의 궤적 The 3rd", L"空之轨迹 The 3rd", L"Trails in the Sky The 3rd", L"Тропы в Небе The 3rd", L"Himmelsleitern The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd"); break;
+		case 33:s = LL14(L"英雄伝説 黎の軌跡", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"영웅전설 여의 궤적", L"英雄传说 黎之轨迹", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak"); break;
+		case 34:s = LL14(L"英雄伝説 黎の軌跡Ⅱ", L"The Legend of Heroes: Trails through Daybreak II", L"The Legend of Heroes: Trails through Daybreak II", L"The Legend of Heroes: Trails through Daybreak II", L"The Legend of Heroes: Trails through Daybreak II", L"영웅전설 여의 궤적 II", L"英雄传说 黎之轨迹Ⅱ", L"The Legend of Heroes: Trails through Daybreak II", L"The Legend of Heroes: Trails through Daybreak II", L"The Legend of Heroes: Trails through Daybreak II", L"The Legend of Heroes: Trails through Daybreak II", L"The Legend of Heroes: Trails through Daybreak II", L"The Legend of Heroes: Trails through Daybreak II", L"The Legend of Heroes: Trails through Daybreak II"); break;
+		case 35:s = LL14(L"英雄伝説 界の軌跡", L"The Legend of Heroes: Trails beyond the Horizon", L"The Legend of Heroes: Trails beyond the Horizon", L"The Legend of Heroes: Trails beyond the Horizon", L"The Legend of Heroes: Trails beyond the Horizon", L"영웅전설 계의 궤적", L"英雄传说 界之轨迹", L"The Legend of Heroes: Trails beyond the Horizon", L"The Legend of Heroes: Trails beyond the Horizon", L"The Legend of Heroes: Trails beyond the Horizon", L"The Legend of Heroes: Trails beyond the Horizon", L"The Legend of Heroes: Trails beyond the Horizon", L"The Legend of Heroes: Trails beyond the Horizon", L"The Legend of Heroes: Trails beyond the Horizon"); break;
 		case -6:s = LL14(L"閃Ⅲ,Ⅳ,創,零改,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"섬 III,IV,창,영改,Ys9,YsX", L"闪III,IV,创,零改,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX", L"CS III,IV,Reverie,Zero Kai,Ys9,YsX"); break;
 		case -11:s=LL14(L"月影のラプソディー", L"Lunacy of the Moon", L"Rhapsodie de l'ombre lunaire", L"Rapsodia dell'ombra lunare", L"Rapsodia de la sombra lunar", L"월영의 랩소디", L"月影狂想曲", L"رابسودي ظل القمر", L"Рапсодия лунной тени", L"Rhapsodie des Mondschatten", L"Rapsódia da sombra lunar", L"Rapsodie van de maanschaduw", L"Rapsodia księżycowego cienia", L"Ay gölgesinin rapsodisi");break;
 		case -12:s=LL14(L"西風の狂詩曲", L"Rhapsody of the West Wind", L"Rhapsodie du vent d'ouest", L"Rapsodia del vento d'ovest", L"Rapsodia del viento del oeste", L"서풍의 랩소디", L"西风狂想曲", L"نشيد الرياح الغربية", L"Рапсодия западного ветра", L"Rhapsodie des Westwinds", L"Rapsódia do vento oeste", L"Rapsodie van de westenwind", L"Rapsodia zachodniego wiatru", L"Batı rüzgarının rapsodisi");break;
@@ -4337,6 +4344,22 @@ void CPlayList::Fol(CString fname)
 					CString b = a.Mid(6, 1);
 					int err;
 					int fff = 0;
+					// ed9 + フォルダ名で mode 34/35 を割当（インストール先はユーザー依存）
+					{
+						CString pathL = fname;
+						pathL.MakeLower();
+						if (a.GetLength() >= 3 && a.Left(3).CompareNoCase(L"ed9") == 0) {
+							// 黎の軌跡単体はⅠの可能性あり → Ⅱ/II/ⅱ/crimson を要求
+							if (pathL.Find(L"daybreak ii") >= 0 || pathL.Find(L"crimson sin") >= 0
+								|| pathL.Find(L"黎の軌跡ⅱ") >= 0 || pathL.Find(L"黎の軌跡Ⅱ") >= 0
+								|| pathL.Find(L"黎の軌跡ii") >= 0 || pathL.Find(L"黎の軌跡 ii") >= 0 || pathL.Find(L"黎の軌跡2") >= 0
+								|| pathL.Find(L"黎之轨迹ⅱ") >= 0 || pathL.Find(L"黎之轨迹Ⅱ") >= 0 || pathL.Find(L"黎之轨迹ii") >= 0)
+								p.sub = 34;
+							else if (pathL.Find(L"beyond the horizon") >= 0 || pathL.Find(L"界の軌跡") >= 0
+								|| pathL.Find(L"kai no kiseki") >= 0 || pathL.Find(L"界之轨迹") >= 0)
+								p.sub = 35;
+						}
+					}
 					// Ys X - 楽曲情報の一括修正
 // 前半：ファイル名判定による「音楽」カテゴリ設定
 					if (a.Left(2) == L"y_" && a.Right(5) == L".opus") {
@@ -4345,7 +4368,8 @@ void CPlayList::Fol(CString fname)
 					}
 
 					// 後半：詳細タイトル設定
-					CString ft = filen.Right(filen.GetLength() - filen.ReverseFind(L'\\') - 1);
+					// Add 中の filen は再生中パス(グローバル)なので、スキャン中の basename は ft2 を使う
+					CString ft = ft2;
 
 					if (ft == L"y_act_e002.opus") {
 						a = L"Operation SANDRAS"; fff = 1;
@@ -4550,7 +4574,1278 @@ void CPlayList::Fol(CString fname)
 						fff = 1;
 					}
 
-					if (fff == 0)
+					// --- auto ed9 mode 35 titles ---
+					if (fff == 0 && (p.sub == 35)) {
+						if (fff == 0 && ft == L"ed91000.opus") {
+							a = L"Dark Stalker"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91002.opus") {
+							a = LL14(L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91003.opus") {
+							a = LL14(L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91004.opus") {
+							a = LL14(L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91006.opus") {
+							a = L"Captive Soul"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91010.opus") {
+							a = LL14(L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91016.opus") {
+							a = LL14(L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91020.opus") {
+							a = LL14(L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91021.opus") {
+							a = LL14(L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91022.opus") {
+							a = LL14(L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91024.opus") {
+							a = LL14(L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91027.opus") {
+							a = LL14(L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91030.opus") {
+							a = LL14(L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91031.opus") {
+							a = LL14(L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91032.opus") {
+							a = LL14(L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91033.opus") {
+							a = LL14(L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91034.opus") {
+							a = LL14(L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91037.opus") {
+							a = LL14(L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91200.opus") {
+							a = L"Let me know, my SPRIGGAN..."; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91202.opus") {
+							a = LL14(L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91203.opus") {
+							a = LL14(L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91204.opus") {
+							a = L"The Days of Forest Flowers"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91206.opus") {
+							a = LL14(L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91207.opus") {
+							a = LL14(L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91208.opus") {
+							a = L"Cloudy Cloudy"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91210.opus") {
+							a = LL14(L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91211.opus") {
+							a = LL14(L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91216.opus") {
+							a = L"Step in the EDITH"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91218.opus") {
+							a = LL14(L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91219.opus") {
+							a = L"Hazard Coming"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91220.opus") {
+							a = LL14(L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91223.opus") {
+							a = L"Wailing Siren"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91224.opus") {
+							a = LL14(L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91225.opus") {
+							a = LL14(L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91228.opus") {
+							a = LL14(L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91229b.opus") {
+							a = LL14(L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91300.opus") {
+							a = L"First Skirmish"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91301.opus") {
+							a = L"OPEN THE SHARD!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92123.opus") {
+							a = LL14(L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92153.opus") {
+							a = L"Tharbad Night"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92169.opus") {
+							a = LL14(L"共に、新たな季節を -Diverse World-", L"Together, Toward a New Season -Diverse World-", L"Ensemble, vers une nouvelle saison -Diverse World-", L"Insieme, verso una nuova stagione -Diverse World-", L"Juntos, hacia una nueva estación -Diverse World-", L"함께, 새로운 계절을 -Diverse World-", L"一起,迎向新的季节 -Diverse World-", L"معاً نحو موسم جديد -Diverse World-", L"Вместе к новому сезону -Diverse World-", L"Gemeinsam in eine neue Jahreszeit -Diverse World-", L"Juntos, rumo a uma nova estação -Diverse World-", L"Samen naar een nieuw seizoen -Diverse World-", L"Razem ku nowej porze roku -Diverse World-", L"Birlikte Yeni Bir Mevsim -Diverse World-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92187.opus") {
+							a = LL14(L"空高く風に乗り", L"Riding the Wind High in the Sky", L"Chevaucher le vent haut dans le ciel", L"Cavalcando il vento alto nel cielo", L"Montando el viento alto en el cielo", L"하늘 높이 바람을 타고", L"乘风直上高空", L"ركوب الريح عالياً في السماء", L"Оседлав ветер высоко в небе", L"Hoch am Himmel auf dem Wind reiten", L"Montando o vento alto no céu", L"Hoog in de lucht op de wind rijden", L"Pędząc z wiatrem wysoko na niebie", L"Göklerde Rüzgara Binerek"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92195.opus") {
+							a = L"Diabolic Howl"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92197.opus") {
+							a = LL14(L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92199.opus") {
+							a = L"Too Much Vitality"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92202.opus") {
+							a = L"Hard Desperation"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92203.opus") {
+							a = L"Make a Breakthrough!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92205.opus") {
+							a = LL14(L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92206.opus") {
+							a = LL14(L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92211.opus") {
+							a = LL14(L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92212.opus") {
+							a = L"Scorching Impact"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92213.opus") {
+							a = LL14(L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92215.opus") {
+							a = LL14(L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92218.opus") {
+							a = L"Satisfied Madness"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92219.opus") {
+							a = L"Get Rid of the Urgent Menace"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92220.opus") {
+							a = LL14(L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92222.opus") {
+							a = LL14(L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92226.opus") {
+							a = L"Unreasonable Beast"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92227.opus") {
+							a = LL14(L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92230.opus") {
+							a = L"Unmitigated Evil"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92232.opus") {
+							a = L"I'm Grimcats!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92233.opus") {
+							a = LL14(L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92234.opus") {
+							a = L"Flowing Illusion"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92235.opus") {
+							a = L"Brilliant Grow"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92236.opus") {
+							a = LL14(L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92239.opus") {
+							a = L"Mechanical Syndrome"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92240.opus") {
+							a = LL14(L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92242.opus") {
+							a = L"Be Prepared"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92245.opus") {
+							a = L"Bang of Metatron"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92246.opus") {
+							a = LL14(L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92247.opus") {
+							a = L"WILD BEAT"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92253.opus") {
+							a = LL14(L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ..."); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92254.opus") {
+							a = LL14(L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92255.opus") {
+							a = LL14(L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92257.opus") {
+							a = L"Have a Good Time"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92258.opus") {
+							a = LL14(L"クセ者たちの挽歌", L"Elegy of the Eccentrics", L"Élégie des originaux", L"Elegia degli eccentrici", L"Elegía de los excéntricos", L"괴짜들의 만가", L"怪人们的挽歌", L"مرثية الغريبي الأطوار", L"Элегия чудаков", L"Elegie der Sonderlinge", L"Elegia dos excêntricos", L"Elegie van de zonderlingen", L"Elegia ekscentryków", L"Tuhaf Tiplerin Ağıtı"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92260b.opus") {
+							a = L"Deep Affection"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92262.opus") {
+							a = L"Do or Die!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92266.opus") {
+							a = LL14(L"冷厳なる現実", L"Harsh Reality", L"Réalité implacable", L"Crudele realtà", L"Cruda realidad", L"냉엄한 현실", L"冷酷的现实", L"واقع قاسٍ", L"Суровая реальность", L"Harte Realität", L"Realidade severa", L"Harde realiteit", L"Surowa rzeczywistość", L"Acımasız Gerçek"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92278.opus") {
+							a = L"Everlasting Dream"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92281.opus") {
+							a = L"Invitation of Cube!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92282.opus") {
+							a = L"Exert All One's Strength"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92283.opus") {
+							a = LL14(L"喧噪と吐息のあいだ", L"Between Clamor and Breath", L"Entre clameur et souffle", L"Tra clamore e respiro", L"Entre clamor y aliento", L"훤화와 한숨 사이", L"喧嚣与吐息之间", L"بين الضجيج والتنهد", L"Между шумом и вздохом", L"Zwischen Lärm und Atemzug", L"Entre clamor e suspiro", L"Tussen rumoer en ademtocht", L"Między zgiełkiem a oddechem", L"Gürültü ile Nefes Arasında"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92284.opus") {
+							a = L"Infinite Ferocity"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92292.opus") {
+							a = L"Believing Heart"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92298.opus") {
+							a = L"Hide and Seek"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92301.opus") {
+							a = LL14(L"御伽ヲ歪メシモノ", L"That Which Distorts Fairyland", L"Ce qui déforme le pays des contes", L"Ciò che distorce il paese delle fiabe", L"Lo que distorsiona el país de las hadas", L"동화를 왜곡하는 것", L"扭曲御伽之物", L"ما يشوه بلاد الجنيات", L"То, что искажает сказочную страну", L"Was das Märchenland verzerrt", L"O que distorce o país das fadas", L"Wat sprookjesland vervormt", L"To, co wypacza krainę baśni", L"Masal Diyarını Çarpıtan"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92304.opus") {
+							a = LL14(L"煌天の頂を目指して", L"Aiming for the Summit of the Radiant Sky", L"Visant le sommet du ciel éclatant", L"Verso la vetta del cielo radioso", L"Hacia la cima del cielo radiante", L"황천의 정상을 향해", L"以煌天之顶为目标", L"نحو قمة السماء المتلألئة", L"К вершине сияющего неба", L"Zum Gipfel des strahlenden Himmels", L"Rumo ao cume do céu radiante", L"Op naar de top van de stralende hemel", L"Ku szczytowi lśniącego nieba", L"Parlak Göğün Zirvesine"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92306.opus") {
+							a = LL14(L"在りし日を越えて", L"Beyond Days Gone By", L"Au-delà des jours d'antan", L"Oltre i giorni passati", L"Más allá de los días idos", L"지나간 날을 넘어", L"跨越往昔之日", L"ما وراء الأيام الخالية", L"За минувшими днями", L"Jenseits vergangener Tage", L"Além dos dias que se foram", L"Voorbij vervlogen dagen", L"Poza minionymi dniami", L"Geçmiş Günlerin Ötesinde"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92308.opus") {
+							a = LL14(L"幽世への還り路", L"Road Back to the Netherworld", L"Chemin du retour vers l'au-delà", L"Via di ritorno all'oltretomba", L"Camino de regreso al inframundo", L"유세로의 귀환로", L"通往幽世的归路", L"طريق العودة إلى العالم الآخر", L"Путь возвращения в загробный мир", L"Rückweg in die Unterwelt", L"Caminho de volta ao além", L"Terugweg naar de onderwereld", L"Droga powrotu do zaświatów", L"Öteki Dünyaya Dönüş Yolu"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92310.opus") {
+							a = L"Days Gone By"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92312.opus") {
+							a = LL14(L"暖かな昼下がり", L"Warm Afternoon", L"Chaude après-midi", L"Caldo pomeriggio", L"Tarde cálida", L"따뜻한 오후", L"温暖的午后", L"ظهيرة دافئة", L"Тёплый полдень", L"Warmer Nachmittag", L"Tarde quente", L"Warme namiddag", L"Ciepłe popołudnie", L"Sıcak Öğleden Sonra"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92313.opus") {
+							a = LL14(L"それでもあなたの側で", L"Still by Your Side", L"Pourtant à tes côtés", L"Eppure al tuo fianco", L"Aun así a tu lado", L"그래도 당신 곁에서", L"即便如此仍在你身边", L"ومع ذلك إلى جانبك", L"И всё же рядом с тобой", L"Dennoch an deiner Seite", L"Ainda assim ao seu lado", L"Toch aan jouw zijde", L"Mimo wszystko u twojego boku", L"Yine de Senin Yanında"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92315.opus") {
+							a = LL14(L"譲れない一線", L"A Line I Won't Cross", L"Une ligne que je ne franchirai pas", L"Una linea che non varcherò", L"Una línea que no cruzaré", L"양보할 수 없는 선", L"不能退让的一线", L"خط لن أتجاوزه", L"Черта, которую не переступлю", L"Eine Linie, die ich nicht überschreite", L"Uma linha que não cruzarei", L"Een lijn die ik niet oversteek", L"Linia, której nie przekroczę", L"Vazgeçemeyeceğim Çizgi"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92318.opus") {
+							a = LL14(L"暗き澱みの底で", L"At the Bottom of Dark Stagnation", L"Au fond de la stagnation sombre", L"In fondo alla stagnazione oscura", L"En el fondo del estancamiento oscuro", L"어두운 침전의 밑바닥에서", L"在暗沉淤积之底", L"في قاع الركود المظلم", L"На дне тёмного застоя", L"Am Grund dunkler Stagnation", L"No fundo da estagnação sombria", L"Op de bodem van donkere stagnatie", L"Na dnie mrocznego zastoju", L"Karanlık Durgunluğun Dibinde"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92319.opus") {
+							a = LL14(L"一瞬の駆け引き", L"A Moment's Maneuver", L"Une manœuvre d'un instant", L"Una manovra d'un istante", L"Una maniobra de un instante", L"순간의 기싸움", L"一瞬的交锋", L"مناورة للحظة", L"Манёвр на мгновение", L"Manöver eines Augenblicks", L"Manobra de um instante", L"Manoeuvre van een ogenblik", L"Manewr chwili", L"Bir Anlık Hamle"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92320.opus") {
+							a = L"Playing Dirty?"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92322.opus") {
+							a = L"Cut Off the Retreat"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92323.opus") {
+							a = LL14(L"赫焉のディグニティ", L"Dignity of the Crimson Sunset", L"Dignité du crépuscule écarlate", L"Dignità del tramonto scarlatto", L"Dignidad del ocaso escarlata", L"혁연의 디그니티", L"赫焉的尊严", L"كرامة الغروب القرمزي", L"Достоинство алого заката", L"Würde des scharlachroten Abendrots", L"Dignidade do crepúsculo escarlate", L"Waardigheid van de scharlaken zonsondergang", L"Godność szkarłatnego zmierzchu", L"Kıpkırmızı Gün Batımının İtibarı"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92326.opus") {
+							a = LL14(L"遠き日の記憶", L"Memories of Distant Days", L"Souvenirs de jours lointains", L"Memorie di giorni lontani", L"Recuerdos de días lejanos", L"머나먼 날의 기억", L"遥远日子的记忆", L"ذكريات الأيام البعيدة", L"Воспоминания далёких дней", L"Erinnerungen an ferne Tage", L"Memórias de dias distantes", L"Herinneringen aan verre dagen", L"Wspomnienia odległych dni", L"Uzak Günlerin Anıları"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92330.opus") {
+							a = LL14(L"共に、新たな季節を -Prelude-", L"Together, Toward a New Season -Prelude-", L"Ensemble, vers une nouvelle saison -Prelude-", L"Insieme, verso una nuova stagione -Prelude-", L"Juntos, hacia una nueva estación -Prelude-", L"함께, 새로운 계절을 -Prelude-", L"一起,迎向新的季节 -Prelude-", L"معاً نحو موسم جديد -Prelude-", L"Вместе к новому сезону -Prelude-", L"Gemeinsam in eine neue Jahreszeit -Prelude-", L"Juntos, rumo a uma nova estação -Prelude-", L"Samen naar een nieuw seizoen -Prelude-", L"Razem ku nowej porze roku -Prelude-", L"Birlikte Yeni Bir Mevsim -Prelude-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92332.opus") {
+							a = L"Where to Join the Chorus"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92335.opus") {
+							a = L"Just Arrived"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92337.opus") {
+							a = LL14(L"匣の中に在るのは...", L"What Lies Within the Box...", L"Ce qui se trouve dans la boîte...", L"Ciò che giace nella scatola...", L"Lo que hay dentro de la caja...", L"상자 속에 있는 것은...", L"匣中之物是...", L"ما يوجد داخل الصندوق...", L"То, что лежит в шкатулке...", L"Was in der Schatulle liegt...", L"O que há dentro da caixa...", L"Wat er in het kistje zit...", L"Co kryje się w szkatułce...", L"Kutunun İçinde Olan..."); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92342.opus") {
+							a = LL14(L"古趣礼賛", L"Praise of Antique Charm", L"Éloge du charme antique", L"Elogio del fascino antico", L"Elogio del encanto antiguo", L"고취 예찬", L"古趣礼赞", L"مدح السحر العتيق", L"Хвала старинному очарованию", L"Lob des antiken Charmes", L"Elogio do charme antigo", L"Lofzang op antieke charme", L"Pochwała dawnego uroku", L"Eski Tarzın Övgüsü"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92343.opus") {
+							a = LL14(L"共に、新たな季節を -Grand Finale-", L"Together, Toward a New Season -Grand Finale-", L"Ensemble, vers une nouvelle saison -Grand Finale-", L"Insieme, verso una nuova stagione -Grand Finale-", L"Juntos, hacia una nueva estación -Grand Finale-", L"함께, 새로운 계절을 -Grand Finale-", L"一起,迎向新的季节 -Grand Finale-", L"معاً نحو موسم جديد -Grand Finale-", L"Вместе к новому сезону -Grand Finale-", L"Gemeinsam in eine neue Jahreszeit -Grand Finale-", L"Juntos, rumo a uma nova estação -Grand Finale-", L"Samen naar een nieuw seizoen -Grand Finale-", L"Razem ku nowej porze roku -Grand Finale-", L"Birlikte Yeni Bir Mevsim -Grand Finale-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92343b.opus") {
+							a = LL14(L"共に、新たな季節を -Grand Finale-", L"Together, Toward a New Season -Grand Finale-", L"Ensemble, vers une nouvelle saison -Grand Finale-", L"Insieme, verso una nuova stagione -Grand Finale-", L"Juntos, hacia una nueva estación -Grand Finale-", L"함께, 새로운 계절을 -Grand Finale-", L"一起,迎向新的季节 -Grand Finale-", L"معاً نحو موسم جديد -Grand Finale-", L"Вместе к новому сезону -Grand Finale-", L"Gemeinsam in eine neue Jahreszeit -Grand Finale-", L"Juntos, rumo a uma nova estação -Grand Finale-", L"Samen naar een nieuw seizoen -Grand Finale-", L"Razem ku nowej porze roku -Grand Finale-", L"Birlikte Yeni Bir Mevsim -Grand Finale-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92343c.opus") {
+							a = LL14(L"共に、新たな季節を -Grand Finale-", L"Together, Toward a New Season -Grand Finale-", L"Ensemble, vers une nouvelle saison -Grand Finale-", L"Insieme, verso una nuova stagione -Grand Finale-", L"Juntos, hacia una nueva estación -Grand Finale-", L"함께, 새로운 계절을 -Grand Finale-", L"一起,迎向新的季节 -Grand Finale-", L"معاً نحو موسم جديد -Grand Finale-", L"Вместе к новому сезону -Grand Finale-", L"Gemeinsam in eine neue Jahreszeit -Grand Finale-", L"Juntos, rumo a uma nova estação -Grand Finale-", L"Samen naar een nieuw seizoen -Grand Finale-", L"Razem ku nowej porze roku -Grand Finale-", L"Birlikte Yeni Bir Mevsim -Grand Finale-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92344.opus") {
+							a = LL14(L"紅の衝撃", L"Crimson Impact", L"Impact cramoisi", L"Impatto cremisi", L"Impacto carmesí", L"홍의 충격", L"红之冲击", L"صدمة قرمزية", L"Алый удар", L"Purpurner Einschlag", L"Impacto carmesim", L"Karmozijnrode inslag", L"Szkarłatne uderzenie", L"Kızıl Darbe"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92_op_full.opus") {
+							a = L"CRIMSON SiN"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed93104.opus") {
+							a = LL14(L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed93105.opus") {
+							a = L"The Decisive Point"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed93108.opus") {
+							a = LL14(L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed93112.opus") {
+							a = LL14(L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed93_ed_inst.opus") {
+							a = LL14(L"女神の唄 -Instrumental Ver.-", L"Song of the Goddess -Instrumental Ver.-", L"Chant de la déesse -Instrumental Ver.-", L"Canto della dea -Instrumental Ver.-", L"Canto de la diosa -Instrumental Ver.-", L"여신의 노래 -Instrumental Ver.-", L"女神之歌 -Instrumental Ver.-", L"أغنية الإلهة -Instrumental Ver.-", L"Песнь богини -Instrumental Ver.-", L"Lied der Göttin -Instrumental Ver.-", L"Cântico da deusa -Instrumental Ver.-", L"Lied van de godin -Instrumental Ver.-", L"Pieśń bogini -Instrumental Ver.-", L"Tanrıça'nın Şarkısı -Instrumental Ver.-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed93_ed_maya.opus") {
+							a = LL14(L"女神の唄", L"Song of the Goddess", L"Chant de la déesse", L"Canto della dea", L"Canto de la diosa", L"여신의 노래", L"女神之歌", L"أغنية الإلهة", L"Песнь богини", L"Lied der Göttin", L"Cântico da deusa", L"Lied van de godin", L"Pieśń bogini", L"Tanrıça'nın Şarkısı"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94003.opus") {
+							a = LL14(L"学び舎に憩う", L"Resting at the Academy", L"Repos à l'académie", L"Riposo all'accademia", L"Descanso en la academia", L"배움터에서 쉬다", L"憩于学舍", L"الراحة في الأكاديمية", L"Отдых в учебном заведении", L"Ruhend in der Lehranstalt", L"Descansando na academia", L"Rustend op school", L"Odpoczynek w szkole", L"Okulda Dinlenmek"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94004.opus") {
+							a = LL14(L"リベレーションフロント", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"리버레이션 프론트", L"启示前线", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"Revelation Front"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94005.opus") {
+							a = LL14(L"刻の螺旋", L"Spiral of Time", L"Spirale du temps", L"Spirale del tempo", L"Espiral del tiempo", L"각의 나선", L"刻之螺旋", L"لولب الزمن", L"Спираль времени", L"Spirale der Zeit", L"Espiral do tempo", L"Spiraal van de tijd", L"Spirala czasu", L"Zamanın Spiralı"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94008.opus") {
+							a = L"Windy Corridor"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94010.opus") {
+							a = LL14(L"暗がりの先へ", L"Beyond the Darkness", L"Au-delà de l'obscurité", L"Oltre l'oscurità", L"Más allá de la oscuridad", L"어둠 너머로", L"向着黑暗的前方", L"إلى ما وراء الظلام", L"За темнотой", L"Jenseits der Dunkelheit", L"Além da escuridão", L"Voorbij de duisternis", L"Poza ciemnością", L"Karanlığın Ötesine"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94015.opus") {
+							a = L"The Battle by a Hair's Breath"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94016.opus") {
+							a = LL14(L"崩れる日常", L"Collapsing Everyday", L"Quotidien qui s'effondre", L"Quotidiano che crolla", L"Cotidiano que se derrumba", L"무너지는 일상", L"崩坏的日常", L"اليوميات المنهارة", L"Разрушающаяся повседневность", L"Zusammenbrechender Alltag", L"Cotidiano que desaba", L"Ineenstortend dagelijks leven", L"Waląca się codzienność", L"Yıkılan Günlük Hayat"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94017.opus") {
+							a = LL14(L"湧き上がる疑念", L"Rising Doubts", L"Doutes qui montent", L"Dubbi che sorgono", L"Dudas que emergen", L"솟아오르는 의념", L"涌起的疑念", L"شكوك متصاعدة", L"Нарастающие сомнения", L"Aufkommende Zweifel", L"Dúvidas que emergem", L"Opkomende twijfels", L"Narastające wątpliwości", L"Yükselen Şüpheler"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94018.opus") {
+							a = L"Smoky Smoky"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94020.opus") {
+							a = L"Advent Day"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94022.opus") {
+							a = LL14(L"想い愁う", L"Sorrowful Thoughts", L"Pensées mélancoliques", L"Pensieri melanconici", L"Pensamientos melancólicos", L"시름에 잠긴 마음", L"忧思", L"أفكار حزينة", L"Печальные думы", L"Trauernde Gedanken", L"Pensamentos melancólicos", L"Droevige gedachten", L"Smutne myśli", L"Hüzünlü Düşünceler"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94023.opus") {
+							a = LL14(L"焔舞 -友のために-", L"Flame Dance -For a Friend-", L"Danse des flammes -Pour un ami-", L"Danza delle fiamme -Per un amico-", L"Danza de llamas -Por un amigo-", L"염무 -친구를 위해-", L"焰舞 -为了友人-", L"رقصة اللهب -من أجل صديق-", L"Танец пламени -Ради друга-", L"Flammentanz -Für einen Freund-", L"Dança das chamas -Por um amigo-", L"VlammenDans -Voor een vriend-", L"Taniec płomieni -Dla przyjaciela-", L"Alev Dansı -Bir Dost İçin-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94024.opus") {
+							a = L"Blaze Soul"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94025.opus") {
+							a = LL14(L"さあ冒険の世界へ", L"Now, to the World of Adventure", L"Allons vers le monde de l'aventure", L"Ora, verso il mondo dell'avventura", L"Ahora, al mundo de la aventura", L"자, 모험의 세계로", L"出发吧,向冒险的世界", L"هيا إلى عالم المغامرة", L"Вперёд, в мир приключений", L"Auf in die Welt des Abenteuers", L"Agora, ao mundo da aventura", L"Nu, naar de wereld van avontuur", L"Naprzód, do świata przygód", L"Haydi Macera Dünyasına"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94026.opus") {
+							a = LL14(L"幻想領域", L"Realm of Fantasy", L"Royaume de fantaisie", L"Reame della fantasia", L"Reino de la fantasía", L"환상 영역", L"幻想领域", L"عالم الخيال", L"Царство фантазии", L"Reich der Fantasie", L"Reino da fantasia", L"Rijk der fantasie", L"Kraina fantazji", L"Fantazi Âlemi"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94027.opus") {
+							a = LL14(L"夢はゴロゴロライフ", L"Dreams Are a Laid-Back Life", L"Les rêves, une vie tranquille", L"I sogni sono una vita rilassata", L"Los sueños son una vida relajada", L"꿈은 뒹굴뒹굴 라이프", L"梦想是慵懒生活", L"الأحلام حياة مسترخية", L"Мечты — это беззаботная жизнь", L"Träume sind ein gemütliches Leben", L"Sonhos são uma vida descontraída", L"Dromen zijn een relaxed leven", L"Marzenia to leniwe życie", L"Rüyalar Tembel Bir Hayat"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94029.opus") {
+							a = LL14(L"最悪の思惑", L"The Worst Designs", L"Les pires intentions", L"I peggiori disegni", L"Las peores intenciones", L"최악의 속셈", L"最坏的企图", L"أسوأ النوايا", L"Худшие замыслы", L"Die schlimmsten Absichten", L"As piores intenções", L"De ergste bedoelingen", L"Najgorsze zamiary", L"En Kötü Hesaplar"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94201.opus") {
+							a = LL14(L"迫りくる災厄", L"Approaching Calamity", L"Calamité qui approche", L"Calamità in avvicinamento", L"Calamidad que se acerca", L"다가오는 재앙", L"迫近的灾厄", L"كارثة تقترب", L"Приближающееся бедствие", L"Nahendes Unheil", L"Calamidade que se aproxima", L"Naderende ramp", L"Zbliżająca się klęska", L"Yaklaşan Felaket"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94202.opus") {
+							a = LL14(L"君が残してくれたもの", L"What You Left Behind", L"Ce que tu as laissé", L"Ciò che hai lasciato", L"Lo que dejaste atrás", L"네가 남겨준 것", L"你留下的东西", L"ما تركته لي", L"То, что ты оставил", L"Was du hinterlassen hast", L"O que você deixou", L"Wat jij achterliet", L"To, co zostawiłeś", L"Bıraktığın Şeyler"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94400.opus") {
+							a = L"Regain the Administration! -Field Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94401.opus") {
+							a = L"Regain the Administration! -Field Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94402.opus") {
+							a = L"The Expanding World"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94404.opus") {
+							a = L"Pushed Over"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94406.opus") {
+							a = LL14(L"モノクローム・デイズ", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"모노크롬 데이즈", L"单色的日子", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94407.opus") {
+							a = LL14(L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇", L"陰影の照らす闇"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94408.opus") {
+							a = LL14(L"愛しき刻限の果てに", L"At the End of the Beloved Hour", L"Au bout de l'heure chérie", L"Alla fine dell'ora amata", L"Al final de la hora querida", L"사랑스러운 각한의 끝에서", L"在心爱时限的尽头", L"في نهاية الساعة العزيزة", L"В конце любимого срока", L"Am Ende der geliebten Frist", L"No fim da hora amada", L"Aan het eind van het geliefde uur", L"U kresu ukochanej godziny", L"Sevgili Vaktin Sonunda"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94410.opus") {
+							a = L"Work Out a Solution! -Field Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94411.opus") {
+							a = L"Work Out a Solution! -Command Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94412.opus") {
+							a = L"Into the Chill"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94414.opus") {
+							a = L"Buster the Ghost of Garden"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94415.opus") {
+							a = L"Skip to the Edith"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94416.opus") {
+							a = L"Hard-Boiled Short Cake"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94417.opus") {
+							a = L"Blurred Scene"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94418.opus") {
+							a = L"After the Spring Rain"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94419.opus") {
+							a = L"With the Dilemma"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94420.opus") {
+							a = LL14(L"雪解けの知らせ", L"News of the Thaw", L"Nouvelles du dégel", L"Notizie del disgelo", L"Noticias del deshielo", L"눈이 녹는 소식", L"融雪的消息", L"أخبار ذوبان الثلج", L"Весть о таянии снега", L"Kunde vom Tauwetter", L"Notícias do degelo", L"Nieuws van de dooi", L"Wieść o odwilży", L"Karların Erime Haberi"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95000.opus") {
+							a = LL14(L"GLORIA ~la revue -五月革命の奇跡-", L"GLORIA ~la revue -Miracle of the May Revolution-", L"GLORIA ~la revue -Miracle de la révolution de mai-", L"GLORIA ~la revue -Miracolo della rivoluzione di maggio-", L"GLORIA ~la revue -Milagro de la revolución de mayo-", L"GLORIA ~la revue -5월 혁명의 기적-", L"GLORIA ~la revue -五月革命的奇迹-", L"GLORIA ~la revue -معجزة ثورة مايو-", L"GLORIA ~la revue -Чудо майской революции-", L"GLORIA ~la revue -Wunder der Mairevolution-", L"GLORIA ~la revue -Milagre da revolução de maio-", L"GLORIA ~la revue -Wonder van de meirevolutie-", L"GLORIA ~la revue -Cud majowej rewolucji-", L"GLORIA ~la revue -Mayıs Devrimi Mucizesi-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95002.opus") {
+							a = LL14(L"崩れゆく日常", L"Crumbling Everyday", L"Quotidien qui s'effondre", L"Quotidiano che crolla", L"Cotidiano que se derrumba", L"무너져가는 일상", L"崩坏的日常", L"اليوميات المتداعية", L"Разрушающаяся повседневность", L"Zerbrechender Alltag", L"Cotidiano que desmorona", L"Brokkelend dagelijks leven", L"Krusząca się codzienność", L"Yıkılan Günlük Hayat"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95004.opus") {
+							a = LL14(L"妖魔の森", L"Forest of Demons", L"Forêt des démons", L"Foresta dei demoni", L"Bosque de demonios", L"요마의 숲", L"妖魔之森", L"غابة الشياطين", L"Лес демонов", L"Dämonenwald", L"Floresta dos demônios", L"Demonenbos", L"Las demonów", L"Şeytan Ormanı"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95005.opus") {
+							a = LL14(L"スターテイカー計画", L"Startaker Project", L"Projet Startaker", L"Progetto Startaker", L"Proyecto Startaker", L"스타테이커 계획", L"星取者计划", L"مشروع ستارتيكر", L"Проект Стартэйкер", L"Startaker-Projekt", L"Projeto Startaker", L"Startaker-project", L"Projekt Startaker", L"Startaker Projesi"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95006.opus") {
+							a = LL14(L"密かなる水底の記憶", L"Secret Memories of the Waterbed", L"Souvenirs secrets du fond de l'eau", L"Memorie segrete del fondo acqueo", L"Recuerdos secretos del lecho acuático", L"은밀한 수저의 기억", L"隐秘的水底记忆", L"ذكريات سرية لقاع الماء", L"Тайные воспоминания водной глубины", L"Geheime Erinnerungen des Wassergrunds", L"Memórias secretas do fundo d'água", L"Geheime herinneringen van de waterbodem", L"Skryte wspomnienia dna wodnego", L"Gizli Su Dibi Anıları"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95008.opus") {
+							a = LL14(L"罪の痕", L"Mark of Sin", L"Marque du péché", L"Segno del peccato", L"Marca del pecado", L"죄의 흔적", L"罪之痕", L"أثر الخطيئة", L"След греха", L"Mal der Sünde", L"Marca do pecado", L"Spoor van zonde", L"Ślad grzechu", L"Günahın İzi"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95009.opus") {
+							a = LL14(L"黒の庭城", L"Black Garden Castle", L"Château-jardin noir", L"Castello-giardino nero", L"Castillo-jardín negro", L"흑의 정성", L"黑之庭城", L"قلعة الحديقة السوداء", L"Чёрный садовый замок", L"Schwarzes Gartenschloss", L"Castelo-jardim negro", L"Zwart tuinkasteel", L"Czarny zamek-ogród", L"Siyah Bahçe Kalesi"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95013.opus") {
+							a = L"Gloomy Moon"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95014.opus") {
+							a = L"Starry Night"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95016.opus") {
+							a = L"Invited to a Foreign Town"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95020.opus") {
+							a = LL14(L"執行者 -Kai No Kiseki Ver.-", L"The Enforcer -Kai No Kiseki Ver.-", L"L'exécuteur -Kai No Kiseki Ver.-", L"L'esecutore -Kai No Kiseki Ver.-", L"El ejecutor -Kai No Kiseki Ver.-", L"집행자 -Kai No Kiseki Ver.-", L"执行者 -Kai No Kiseki Ver.-", L"المنفذ -Kai No Kiseki Ver.-", L"Исполнитель -Kai No Kiseki Ver.-", L"Vollstrecker -Kai No Kiseki Ver.-", L"O executor -Kai No Kiseki Ver.-", L"De handhaver -Kai No Kiseki Ver.-", L"Egzekutor -Kai No Kiseki Ver.-", L"İcraatçı -Kai No Kiseki Ver.-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95023.opus") {
+							a = LL14(L"静寂の余韻", L"Afterglow of Silence", L"Résonance du silence", L"Eco del silenzio", L"Resonancia del silencio", L"정적의 여운", L"静寂的余韵", L"صدى الصمت", L"Отзвук тишины", L"Nachhall der Stille", L"Ressonância do silêncio", L"Nagalm van stilte", L"Echo ciszy", L"Sessizliğin Yankısı"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95024.opus") {
+							a = LL14(L"プラネット・レイン", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"플래닛 레인", L"行星之雨", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"Planet Rain"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95024b.opus") {
+							a = LL14(L"プラネット・レイン", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"플래닛 레인", L"行星之雨", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"Planet Rain", L"Planet Rain"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95026.opus") {
+							a = LL14(L"安息の時間", L"Time of Rest", L"Temps de repos", L"Tempo di riposo", L"Tiempo de descanso", L"안식의 시간", L"安息之时", L"وقت الراحة", L"Время покоя", L"Zeit der Ruhe", L"Tempo de descanso", L"Tijd van rust", L"Czas odpoczynku", L"Dinlenme Zamanı"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95027.opus") {
+							a = LL14(L"掴もう、明るい未来!", L"Seize the Bright Future!", L"Saisissons l'avenir brillant !", L"Afferriamo il futuro luminoso!", L"¡Aferrémonos al futuro brillante!", L"밝은 미래를 잡자!", L"抓住光明的未来!", L"لنمسك بالمستقبل المشرق!", L"Схватим светлое будущее!", L"Ergreifen wir die helle Zukunft!", L"Vamos agarrar o futuro brilhante!", L"Grijp de heldere toekomst!", L"Chwyćmy jasną przyszłość!", L"Parlak Geleceği Yakalayalım!"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95029.opus") {
+							a = LL14(L"天空への散歩道", L"Promenade to the Sky", L"Promenade vers le ciel", L"Passeggiata verso il cielo", L"Paseo hacia el cielo", L"하늘로의 산책로", L"通向天空的散步道", L"ممشى نحو السماء", L"Прогулочная тропа к небу", L"Spazierweg zum Himmel", L"Passeio ao céu", L"Wandelpad naar de hemel", L"Promenada ku niebu", L"Gökyüzüne Yürüyüş Yolu"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95030.opus") {
+							a = L"Divine Reef"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95031.opus") {
+							a = LL14(L"冒険の準備はこちらで", L"Prepare for Adventure Here", L"Préparez l'aventure ici", L"Preparatevi all'avventura qui", L"Prepárate para la aventura aquí", L"모험 준비는 여기에서", L"冒险的准备在这边", L"جهّز للمغامرة هنا", L"Готовьтесь к приключению здесь", L"Hier bereitet man sich aufs Abenteuer vor", L"Prepare-se para a aventura aqui", L"Bereid hier het avontuur voor", L"Tu przygotuj się do przygody", L"Macera Hazırlığı Burada"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95032.opus") {
+							a = LL14(L"虚ろなる時の狭間で", L"In the Hollow Between Times", L"Dans le creux entre les temps", L"Nel vuoto tra i tempi", L"En el hueco entre los tiempos", L"공허한 시간의 틈에서", L"在虚空的时隙中", L"في الفراغ بين الأزمنة", L"В полом промежутке времён", L"Im hohlen Zwischenraum der Zeit", L"No vão oco entre os tempos", L"In de holle spleet tussen tijden", L"W pustej szczelinie między czasami", L"Boş Zaman Aralığında"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95033.opus") {
+							a = L"Absolute Being"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95034.opus") {
+							a = LL14(L"リミット迫る", L"Limit Closing In", L"Limite qui approche", L"Limite in avvicinamento", L"Límite acercándose", L"한계가 다가온다", L"极限迫近", L"الحد يقترب", L"Предел приближается", L"Limit rückt näher", L"Limite se aproximando", L"Limiet nadert", L"Limit się zbliża", L"Limit Yaklaşıyor"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95035.opus") {
+							a = LL14(L"真実の眼", L"Eye of Truth", L"Œil de la vérité", L"Occhio della verità", L"Ojo de la verdad", L"진실의 눈", L"真实之眼", L"عين الحقيقة", L"Око истины", L"Auge der Wahrheit", L"Olho da verdade", L"Oog der waarheid", L"Oko prawdy", L"Gerçeğin Gözü"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95036.opus") {
+							a = LL14(L"あの日の面影", L"Remnants of That Day", L"Souvenirs de ce jour-là", L"Ricordi di quel giorno", L"Reminiscencias de aquel día", L"그날의 면영", L"那日的面影", L"ملامح ذلك اليوم", L"Отголоски того дня", L"Schatten jenes Tages", L"Reminescências daquele dia", L"Schimmen van die dag", L"Widma tamtego dnia", L"O Günün Silueti"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95038.opus") {
+							a = LL14(L"目の前にいる貴方へ", L"To You Standing Before Me", L"À toi devant moi", L"A te che stai davanti a me", L"A ti que estás frente a mí", L"눈앞의 당신에게", L"致眼前的你", L"إليك الواقف أمامي", L"Тебе, стоящему передо мной", L"An dich, der vor mir steht", L"A você diante de mim", L"Aan jou die voor mij staat", L"Do ciebie stojącego przede mną", L"Karşımdaki Sana"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95100.opus") {
+							a = LL14(L"交差する意志", L"Crossing Wills", L"Volontés qui se croisent", L"Volontà che si incrociano", L"Voluntades que se cruzan", L"교차하는 의지", L"交错的意志", L"إرادات متقاطعة", L"Пересекающиеся воли", L"Kreuzende Willen", L"Vontades que se cruzam", L"Kruisende wilskrachten", L"Krzyżujące się wole", L"Kesişen İradeler"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95101.opus") {
+							a = L"Dies irae -juncture of the dawn-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95202.opus") {
+							a = LL14(L"異郷で見た花", L"Flower Seen in a Foreign Land", L"Fleur vue en terre étrangère", L"Fiore visto in terra straniera", L"Flor vista en tierra extranjera", L"이향에서 본 꽃", L"在异乡见到的花", L"زهرة رُئيت في أرض غريبة", L"Цветок, увиденный на чужбине", L"In der Fremde gesehene Blume", L"Flor vista em terra estrangeira", L"Bloem gezien in den vreemde", L"Kwiat widziany na obcej ziemi", L"Gurbette Görülen Çiçek"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95203.opus") {
+							a = L"Autumn Knows -Piano Solo Ver.-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95203b.opus") {
+							a = L"Autumn Knows -Piano Solo Ver.-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95204.opus") {
+							a = L"Battle Junction -1209-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95205.opus") {
+							a = LL14(L"いくつもの想い、積み重ねて", L"Piling Up So Many Feelings", L"Accumulant tant de sentiments", L"Accumulando tanti sentimenti", L"Acumulando tantos sentimientos", L"수많은 마음을 쌓아올려", L"层层堆积的心意", L"تراكم الكثير من المشاعر", L"Накапливая множество чувств", L"So viele Gefühle aufschichtend", L"Acumulando tantos sentimentos", L"Zoveel gevoelens opgestapeld", L"Piętrząc tyle uczuć", L"Birçok Duyguyu Biriktirerek"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95206.opus") {
+							a = LL14(L"仄白き光の先へ", L"Beyond the Pale Light", L"Au-delà de la pâle lumière", L"Oltre la luce pallida", L"Más allá de la luz pálida", L"어슴푸레한 빛 너머로", L"向着微白之光的前方", L"إلى ما وراء الضوء الشاحب", L"За бледным светом", L"Jenseits des fahlen Lichts", L"Além da luz pálida", L"Voorbij het bleke licht", L"Poza bladym światłem", L"Soluk Işığın Ötesine"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95207.opus") {
+							a = L"Find the 4spg Out! -Field Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95208.opus") {
+							a = L"Find the 4spg Out! -Command Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95209.opus") {
+							a = L"Autumn Knows"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95210.opus") {
+							a = L"Stroll Around the Edith"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95211.opus") {
+							a = L"Detoxify the Snake Venom! -Field Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95212.opus") {
+							a = L"Detoxify the Snake Venom! -Command Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95215.opus") {
+							a = L"Smells Like Mystery and Sweets"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95216.opus") {
+							a = L"Close to the Eruption"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95217.opus") {
+							a = L"KEVIN GRAHAM"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95217b.opus") {
+							a = L"KEVIN GRAHAM"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95218.opus") {
+							a = LL14(L"偽猫ト千年ノ呪イノ迷宮", L"Fake Cat and the Labyrinth of a Millennium Curse", L"Faux chat et le labyrinthe de la malédiction millénaire", L"Falso gatto e il labirinto della maledizione millenaria", L"Gato falso y el laberinto de la maldición milenaria", L"가짜 고양이와 천년의 저주의 미궁", L"伪猫与千年诅咒的迷宫", L"القط المزيف ومتاهة لعنة الألف عام", L"Фальшивый кот и лабиринт тысячелетнего проклятия", L"Falsche Katze und das Labyrinth des Jahrtausendfluchs", L"Gato falso e o labirinto da maldição milenar", L"Nepkat en het doolhof van de millennialangvloek", L"Fałszywy kot i labirynt tysiącletniej klątwy", L"Sahte Kedi ve Bin Yıllık Lanetin Labirenti"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95219.opus") {
+							a = L"Farewell, My Dear..."; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95222.opus") {
+							a = LL14(L"もう一つの夜明け", L"Another Dawn", L"Une autre aube", L"Un'altra alba", L"Otro amanecer", L"또 하나의 여명", L"另一个黎明", L"فجر آخر", L"Другой рассвет", L"Eine weitere Dämmerung", L"Outra aurora", L"Een andere dageraad", L"Kolejny świt", L"Başka Bir Şafak"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95224.opus") {
+							a = L"Abyss Looking into You"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95225.opus") {
+							a = L"Mementos"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed95227.opus") {
+							a = LL14(L"街角シエスタ", L"Street Corner Siesta", L"Sieste au coin de la rue", L"Siesta all'angolo della strada", L"Siesta en la esquina", L"거리 모퉁이 시에스타", L"街角午睡", L"قيلولة على ناصية الشارع", L"Сиеста на углу улицы", L"Siesta an der Straßenecke", L"Sesta na esquina", L"Siësta op de straathoek", L"Sjesta na rogu ulicy", L"Sokak Köşesi Siesta"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed97246.opus") {
+							a = L"The Legend of VII"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed97305.opus") {
+							a = LL14(L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9_op_full.opus") {
+							a = LL14(L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z144.opus") {
+							a = L"Pain of Memories"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z192.opus") {
+							a = L"Give It Your All!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z200.opus") {
+							a = LL14(L"小さな決意", L"小さな決意", L"小さな決意", L"小さな決意", L"小さな決意", L"小さな決意", L"小さな決意", L"小さな決意", L"小さな決意", L"小さな決意", L"小さな決意", L"小さな決意", L"小さな決意", L"小さな決意"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z204.opus") {
+							a = LL14(L"そして、宇宙へ──", L"And Then, to Space──", L"Et puis, vers l'espace──", L"E poi, verso lo spazio──", L"Y entonces, hacia el espacio──", L"그리고, 우주로──", L"然后,向着宇宙──", L"ثم إلى الفضاء──", L"И затем — в космос──", L"Und dann, ins All──", L"E então, para o espaço──", L"En dan, de ruimte in──", L"A potem w kosmos──", L"Ve Sonra, Uzaya──"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z261.opus") {
+							a = LL14(L"陽炎に浮かぶ都", L"City Floating in Heat Haze", L"Cité flottant dans la brume de chaleur", L"Città che fluttua nel miraggio", L"Ciudad flotando en el espejismo", L"아지랑이에 떠오르는 도시", L"浮现于阳炎中的都城", L"مدينة تطفو في السراب", L"Город в мареве", L"Stadt im Hitzeflimmern", L"Cidade flutuando na miragem", L"Stad in de hittewaas", L"Miasto w upalnym mirażu", L"Serapta Yüzen Kent"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z333.opus") {
+							a = LL14(L"遠い夜明けを求めて", L"Seeking a Distant Dawn", L"En quête d'une aube lointaine", L"Cercando un'alba lontana", L"Buscando un amanecer lejano", L"머나먼 여명을 찾아서", L"追寻遥远的黎明", L"بحثاً عن فجر بعيد", L"В поисках далёкого рассвета", L"Auf der Suche nach einer fernen Dämmerung", L"Buscando uma aurora distante", L"Op zoek naar een verre dageraad", L"W poszukiwaniu odległego świtu", L"Uzak Bir Şafak Arayarak"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z368.opus") {
+							a = L"Chaotic Beat"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z378.opus") {
+							a = L"Waltz of the Chardin"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z380.opus") {
+							a = L"Get to the Crux"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z385.opus") {
+							a = L"Raging Bloom"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z398.opus") {
+							a = L"Outrageous Bout"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z399.opus") {
+							a = L"Punish with All Your Might!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z411.opus") {
+							a = LL14(L"千古の夢", L"Age-Old Dream", L"Rêve immémorial", L"Sogno millenario", L"Sueño milenario", L"천고의 꿈", L"千古之梦", L"حلم قديم", L"Древний сон", L"Uralter Traum", L"Sonho milenar", L"Eeuwenoude droom", L"Wieczny sen", L"Kadim Rüya"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z415.opus") {
+							a = L"Breakneck Havoc"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z417.opus") {
+							a = L"The Fortress of Destiny"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z422.opus") {
+							a = L"Anchor in the Dark"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z426.opus") {
+							a = L"More Bets!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z427.opus") {
+							a = LL14(L"暗中行路", L"Path in the Dark", L"Chemin dans l'obscurité", L"Cammino nell'oscurità", L"Camino en la oscuridad", L"암중의 행로", L"暗中行路", L"طريق في الظلام", L"Путь во тьме", L"Pfad im Dunkeln", L"Caminho na escuridão", L"Pad in het donker", L"Ścieżka w ciemności", L"Karanlıktaki Yol"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z439.opus") {
+							a = L"Lunatic Showdown"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z452.opus") {
+							a = L"Let's be Maximum Energy!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z453.opus") {
+							a = LL14(L"光への矢印", L"Arrow Toward the Light", L"Flèche vers la lumière", L"Freccia verso la luce", L"Flecha hacia la luz", L"빛을 향한 화살표", L"指向光的箭矢", L"سهم نحو النور", L"Стрела к свету", L"Pfeil zum Licht", L"Seta em direção à luz", L"Pijl naar het licht", L"Strzała ku światłu", L"Işığa Doğru Ok"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z456.opus") {
+							a = LL14(L"燐光に憩う", L"Resting in Phosphorescence", L"Repos dans la phosphorescence", L"Riposare nella fosforescenza", L"Descansar en la fosforescencia", L"인광에 쉬다", L"憩于燐光之中", L"الراحة في التوهج الفسفوري", L"Отдых в фосфоресценции", L"Ruhend im Phosphorlicht", L"Descansando na fosforescência", L"Rustend in fosforescentie", L"Odpoczynek w fosforescencji", L"Fosforışıltıda Dinlenmek"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z460.opus") {
+							a = LL14(L"深き緑の小天地", L"Little World of Deep Green", L"Petit monde de vert profond", L"Piccolo mondo di verde profondo", L"Pequeño mundo de verde profundo", L"깊은 초록의 소천지", L"深绿的小天地", L"عالم صغير من الأخضر العميق", L"Малый мир глубокой зелени", L"Kleine Welt aus tiefem Grün", L"Pequeno mundo de verde profundo", L"Kleine wereld van diep groen", L"Mały świat głębokiej zieleni", L"Derin Yeşilin Küçük Dünyası"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z461.opus") {
+							a = LL14(L"墜ちたる希望", L"Fallen Hope", L"Espoir déchu", L"Speranza caduta", L"Esperanza caída", L"추락한 희망", L"坠落的希望", L"أمل ساقط", L"Падшая надежда", L"Gefallene Hoffnung", L"Esperança caída", L"Gevallen hoop", L"Upadła nadzieja", L"Düşmüş Umut"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z464.opus") {
+							a = L"The Height of Majesty"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z465.opus") {
+							a = LL14(L"丘のあなたの空遠く", L"Beyond the Sky Over Your Hill", L"Au-delà du ciel de votre colline", L"Oltre il cielo della tua collina", L"Más allá del cielo de tu colina", L"언덕 너머 그대의 먼 하늘", L"丘上彼方的遥远天空", L"وراء سماء تلّك", L"За небом над твоим холмом", L"Jenseits des Himmels über deinem Hügel", L"Além do céu da sua colina", L"Voorbij de hemel boven jouw heuvel", L"Poza niebem nad twoim wzgórzem", L"Tependeki Gökyüzünün Ötesinde"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z466.opus") {
+							a = L"So Heart-pounding"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z468.opus") {
+							a = LL14(L"貴方に伝えたいこと", L"What I Want to Tell You", L"Ce que je veux te dire", L"Ciò che voglio dirti", L"Lo que quiero decirte", L"당신에게 전하고 싶은 것", L"想告诉你的事", L"ما أريد أن أخبرك به", L"То, что хочу тебе сказать", L"Was ich dir sagen möchte", L"O que quero te dizer", L"Wat ik je wil zeggen", L"Co chcę ci powiedzieć", L"Sana Söylemek İstediklerim"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z471.opus") {
+							a = L"Wonderful Road"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z476.opus") {
+							a = LL14(L"裏路地の犬たち", L"Dogs of the Back Alleys", L"Chiens des ruelles", L"Cani dei vicoli", L"Perros de los callejones", L"뒷골목의 개들", L"后巷的狗们", L"كلاب الأزقة الخلفية", L"Псы задних переулков", L"Hunde der Hintergassen", L"Cães dos becos", L"Honden van de steegjes", L"Psy z zaułków", L"Arka Sokakların Köpekleri"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z479.opus") {
+							a = LL14(L"千切れ雲", L"Scattered Clouds", L"Nuages déchirés", L"Nuvole lacere", L"Nubes desgarradas", L"갈기갈기 찢긴 구름", L"千裂之云", L"غيوم ممزقة", L"Разорванные облака", L"Zerschnittene Wolken", L"Nuvens esfarrapadas", L"Verscheurde wolken", L"Postrzępione chmury", L"Parçalanmış Bulutlar"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z482.opus") {
+							a = L"Let's Meet in a Dream"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z483.opus") {
+							a = LL14(L"美味しいひととき", L"A Delicious Moment", L"Un délicieux moment", L"Un momento delizioso", L"Un momento delicioso", L"맛있는 한때", L"美味的片刻", L"لحظة لذيذة", L"Вкусный миг", L"Ein köstlicher Augenblick", L"Um momento delicioso", L"Een heerlijk moment", L"Smaczny moment", L"Lezzetli Bir An"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z484.opus") {
+							a = L"Mad Killer"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z484b.opus") {
+							a = L"Mad Killer"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z486_full.opus") {
+							a = LL14(L"とある優しき夜想曲", L"A Certain Gentle Nocturne", L"Un certain nocturne tendre", L"Un certo notturno gentile", L"Cierto nocturno gentil", L"어느 다정한 야상곡", L"某首温柔的夜想曲", L"نوكتورن لطيف معين", L"Некий нежный ноктюрн", L"Ein gewisses sanftes Nocturne", L"Certo noturno gentil", L"Een zeker zacht nocturne", L"Pewien łagodny nokturn", L"Belirli Bir Nazik Noktürn"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z487.opus") {
+							a = L"Ruthless Ruler"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z492.opus") {
+							a = LL14(L"ヴァルハラの戦士たち", L"Warriors of Valhalla", L"Guerriers du Valhalla", L"Guerrieri del Valhalla", L"Guerreros del Valhalla", L"발할라의 전사들", L"瓦尔哈拉的战士们", L"محاربو فالهالا", L"Воины Вальхаллы", L"Krieger von Walhalla", L"Guerreiros do Valhalla", L"Krijgers van Walhalla", L"Wojownicy Walhalli", L"Valhalla Savaşçıları"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z493.opus") {
+							a = LL14(L"流転洸刃", L"Transmigrating Brilliant Blade", L"Lame brillante en transmigration", L"Lama brillante in trasmutazione", L"Hoja brillante en transmigracion", L"유전광인", L"流转洸刃", L"نصل ساطع متقلب", L"Перерождающийся сияющий клинок", L"Wandernde gleißende Klinge", L"Lâmina brilhante em transmigração", L"Zwervend schitterend lemmet", L"Wędrujące świetliste ostrze", L"Akıp Giden Parlak Bıçak"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z494.opus") {
+							a = L"To Confirm My Existence"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z496.opus") {
+							a = L"The Final Phase"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z500.opus") {
+							a = LL14(L"世界の明日を懸けて", L"Staking the World's Tomorrow", L"Enjeu : le lendemain du monde", L"In gioco il domani del mondo", L"Apostando el mañana del mundo", L"세계의 내일을 걸고", L"赌上世界的明天", L"على محك غد العالم", L"Ставя на завтрашний день мира", L"Die Zukunft der Welt aufs Spiel setzen", L"Colocando o amanhã do mundo em jogo", L"De toekomst van de wereld inzetten", L"Stawiając jutro świata", L"Dünyanın Yarını İçin"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9z503.opus") {
+							a = L"Deviant Brain"; fff = 1;
+						}
+						if (fff == 0 && a.Left(3).CompareNoCase(L"ed9") == 0) {
+							a = ft;
+							if (a.GetLength() > 5 && a.Right(5).CompareNoCase(L".opus") == 0)
+								a = a.Left(a.GetLength() - 5);
+							fff = 1;
+						}
+					}
+
+					// --- auto ed9 mode 34 titles ---
+					if (fff == 0 && (p.sub == 34)) {
+						if (fff == 0 && ft == L"ed91000.opus") {
+							a = L"Dark Stalker"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91002.opus") {
+							a = LL14(L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街", L"イーディス旧市街"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91003.opus") {
+							a = LL14(L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器", L"世界を観測せし器"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91004.opus") {
+							a = LL14(L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐", L"暗がりの静謐"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91006.opus") {
+							a = L"Captive Soul"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91010.opus") {
+							a = LL14(L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々", L"風に揺れる樹々"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91016.opus") {
+							a = LL14(L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく", L"夜は更けゆく"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91020.opus") {
+							a = LL14(L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律", L"薄ら寒き旋律"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91021.opus") {
+							a = LL14(L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち", L"蠢く者たち"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91022.opus") {
+							a = LL14(L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割", L"果たすべき役割"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91024.opus") {
+							a = LL14(L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン", L"古都オラシオン"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91027.opus") {
+							a = LL14(L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-", L"深山幽谷の郷 -龍來-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91030.opus") {
+							a = LL14(L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を", L"魂の安寧を"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91031.opus") {
+							a = LL14(L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91032.opus") {
+							a = LL14(L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91033.opus") {
+							a = LL14(L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート", L"煌都ラングポート"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91034.opus") {
+							a = LL14(L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき", L"至福のひととき"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91037.opus") {
+							a = LL14(L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で", L"動かざる刻の中で"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91200.opus") {
+							a = L"Let me know, my SPRIGGAN..."; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91202.opus") {
+							a = LL14(L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル", L"工学都市バーゼル"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91203.opus") {
+							a = LL14(L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状", L"“A”からの招待状"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91204.opus") {
+							a = L"The Days of Forest Flowers"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91206.opus") {
+							a = LL14(L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所", L"アークライド解決事務所"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91207.opus") {
+							a = LL14(L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側", L"曇り空の向こう側"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91208.opus") {
+							a = L"Cloudy Cloudy"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91210.opus") {
+							a = LL14(L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標", L"路地裏の標"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91211.opus") {
+							a = LL14(L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ", L"ようこそモンマルトへ"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91216.opus") {
+							a = L"Step in the EDITH"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91218.opus") {
+							a = LL14(L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景", L"憩いの原風景"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91219.opus") {
+							a = L"Hazard Coming"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91220.opus") {
+							a = LL14(L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて", L"宵闇に溶かせて"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91223.opus") {
+							a = L"Wailing Siren"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91224.opus") {
+							a = LL14(L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海", L"果てなき砂の海"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91225.opus") {
+							a = LL14(L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で", L"黎き狭間の中で"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91227.opus") {
+							a = LL14(L"昔歳の情景", L"昔歳の情景", L"昔歳の情景", L"昔歳の情景", L"昔歳の情景", L"昔歳の情景", L"昔歳の情景", L"昔歳の情景", L"昔歳の情景", L"昔歳の情景", L"昔歳の情景", L"昔歳の情景", L"昔歳の情景", L"昔歳の情景"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91228.opus") {
+							a = LL14(L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道", L"朽廃と獣道"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91229.opus") {
+							a = LL14(L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91229b.opus") {
+							a = LL14(L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女", L"オアシスに舞う少女"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91300.opus") {
+							a = L"First Skirmish"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed91301.opus") {
+							a = L"OPEN THE SHARD!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92123.opus") {
+							a = LL14(L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの", L"目指す先にあるもの"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92153.opus") {
+							a = L"Tharbad Night"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92169.opus") {
+							a = LL14(L"共に、新たな季節を -Diverse World-", L"Together, Toward a New Season -Diverse World-", L"Ensemble, vers une nouvelle saison -Diverse World-", L"Insieme, verso una nuova stagione -Diverse World-", L"Juntos, hacia una nueva estación -Diverse World-", L"함께, 새로운 계절을 -Diverse World-", L"一起,迎向新的季节 -Diverse World-", L"معاً نحو موسم جديد -Diverse World-", L"Вместе к новому сезону -Diverse World-", L"Gemeinsam in eine neue Jahreszeit -Diverse World-", L"Juntos, rumo a uma nova estação -Diverse World-", L"Samen naar een nieuw seizoen -Diverse World-", L"Razem ku nowej porze roku -Diverse World-", L"Birlikte Yeni Bir Mevsim -Diverse World-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92187.opus") {
+							a = LL14(L"空高く風に乗り", L"Riding the Wind High in the Sky", L"Chevaucher le vent haut dans le ciel", L"Cavalcando il vento alto nel cielo", L"Montando el viento alto en el cielo", L"하늘 높이 바람을 타고", L"乘风直上高空", L"ركوب الريح عالياً في السماء", L"Оседлав ветер высоко в небе", L"Hoch am Himmel auf dem Wind reiten", L"Montando o vento alto no céu", L"Hoog in de lucht op de wind rijden", L"Pędząc z wiatrem wysoko na niebie", L"Göklerde Rüzgara Binerek"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92194.opus") {
+							a = L"Rise of the GRENDEL"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92195.opus") {
+							a = L"Diabolic Howl"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92197.opus") {
+							a = LL14(L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し", L"快調な滑り出し"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92199.opus") {
+							a = L"Too Much Vitality"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92202.opus") {
+							a = L"Hard Desperation"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92203.opus") {
+							a = L"Make a Breakthrough!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92205.opus") {
+							a = LL14(L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参", L"麒麟児、見参"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92206.opus") {
+							a = LL14(L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い", L"混沌への誘い"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92209.opus") {
+							a = LL14(L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路", L"瀑布への通い路"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92210.opus") {
+							a = L"Extreme Visitor"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92211.opus") {
+							a = LL14(L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖", L"白銀の剣聖"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92212.opus") {
+							a = L"Scorching Impact"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92213.opus") {
+							a = LL14(L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭", L"革命記念祭"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92215.opus") {
+							a = LL14(L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92218.opus") {
+							a = L"Satisfied Madness"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92219.opus") {
+							a = L"Get Rid of the Urgent Menace"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92220.opus") {
+							a = LL14(L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域", L"死と戯れの領域"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92222.opus") {
+							a = LL14(L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて", L"カクテルを傾けて"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92223.opus") {
+							a = L"Popping Smile"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92224.opus") {
+							a = L"Marginal Crisis"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92226.opus") {
+							a = L"Unreasonable Beast"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92227.opus") {
+							a = LL14(L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-", L"逢魔時の伝承 -黒龍城砦-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92230.opus") {
+							a = L"Unmitigated Evil"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92232.opus") {
+							a = L"I'm Grimcats!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92233.opus") {
+							a = LL14(L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス", L"光芒のレゾナンス"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92234.opus") {
+							a = L"Flowing Illusion"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92235.opus") {
+							a = L"Brilliant Grow"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92236.opus") {
+							a = LL14(L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台", L"晴れやかな舞台"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92239.opus") {
+							a = L"Mechanical Syndrome"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92240.opus") {
+							a = LL14(L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-", L"朱き賑わい -東方人街-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92242.opus") {
+							a = L"Be Prepared"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92243.opus") {
+							a = L"The Decisive Point"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92245.opus") {
+							a = L"Bang of Metatron"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92246.opus") {
+							a = LL14(L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの", L"愛おしき色、貴方だけの"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92247.opus") {
+							a = L"WILD BEAT"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92248.opus") {
+							a = LL14(L"想いは伝わる", L"想いは伝わる", L"想いは伝わる", L"想いは伝わる", L"想いは伝わる", L"想いは伝わる", L"想いは伝わる", L"想いは伝わる", L"想いは伝わる", L"想いは伝わる", L"想いは伝わる", L"想いは伝わる", L"想いは伝わる", L"想いは伝わる"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92253.opus") {
+							a = LL14(L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ...", L"ただ、噛み締めるだけ..."); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92254.opus") {
+							a = LL14(L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂", L"時代が求めた熱狂"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92255.opus") {
+							a = LL14(L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》", L"十三区《黒芒街》"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92257.opus") {
+							a = L"Have a Good Time"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92258.opus") {
+							a = LL14(L"クセ者たちの挽歌", L"Elegy of the Eccentrics", L"Élégie des originaux", L"Elegia degli eccentrici", L"Elegía de los excéntricos", L"괴짜들의 만가", L"怪人们的挽歌", L"مرثية الغريبي الأطوار", L"Элегия чудаков", L"Elegie der Sonderlinge", L"Elegia dos excêntricos", L"Elegie van de zonderlingen", L"Elegia ekscentryków", L"Tuhaf Tiplerin Ağıtı"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92260b.opus") {
+							a = L"Deep Affection"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92262.opus") {
+							a = L"Do or Die!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92266.opus") {
+							a = LL14(L"冷厳なる現実", L"Harsh Reality", L"Réalité implacable", L"Crudele realtà", L"Cruda realidad", L"냉엄한 현실", L"冷酷的现实", L"واقع قاسٍ", L"Суровая реальность", L"Harte Realität", L"Realidade severa", L"Harde realiteit", L"Surowa rzeczywistość", L"Acımasız Gerçek"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92272.opus") {
+							a = LL14(L"傲岸なる欲望", L"Arrogant Desire", L"Désir arrogant", L"Desiderio arrogante", L"Deseo arrogante", L"오만한 욕망", L"傲慢的欲望", L"رغبة متغطرسة", L"Горделивое желание", L"Hochmütiges Verlangen", L"Desejo arrogante", L"Arrogant verlangen", L"Aroganckie pożądanie", L"Kibirli Arzu"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92277.opus") {
+							a = LL14(L"明日への反抗 -With All Our Powers-", L"Rebellion Toward Tomorrow -With All Our Powers-", L"Rébellion vers demain -With All Our Powers-", L"Ribellione verso il domani -With All Our Powers-", L"Rebelión hacia el mañana -With All Our Powers-", L"내일로의 반항 -With All Our Powers-", L"通向明天的反抗 -With All Our Powers-", L"تمرد نحو الغد -With All Our Powers-", L"Бунт ради завтра -With All Our Powers-", L"Aufbegehren für morgen -With All Our Powers-", L"Rebelião rumo ao amanhã -With All Our Powers-", L"Opstand naar morgen -With All Our Powers-", L"Bunt ku jutru -With All Our Powers-", L"Yarına İsyan -With All Our Powers-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92278.opus") {
+							a = L"Everlasting Dream"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92281.opus") {
+							a = L"Invitation of Cube!"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92282.opus") {
+							a = L"Exert All One's Strength"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92283.opus") {
+							a = LL14(L"喧噪と吐息のあいだ", L"Between Clamor and Breath", L"Entre clameur et souffle", L"Tra clamore e respiro", L"Entre clamor y aliento", L"훤화와 한숨 사이", L"喧嚣与吐息之间", L"بين الضجيج والتنهد", L"Между шумом и вздохом", L"Zwischen Lärm und Atemzug", L"Entre clamor e suspiro", L"Tussen rumoer en ademtocht", L"Między zgiełkiem a oddechem", L"Gürültü ile Nefes Arasında"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92284.opus") {
+							a = L"Infinite Ferocity"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92289.opus") {
+							a = LL14(L"身を切るほどに切なくて", L"Heartache Sharp Enough to Cut", L"Douleur assez vive pour trancher", L"Dolore abbastanza tagliente da ferire", L"Dolor tan agudo que corta", L"몸이 베일 만큼 가슴 아픈", L"痛彻心肺的切念", L"ألم حاد بما يكفي ليقطع", L"Боль, острая до рези", L"Schmerz, der wie ein Schnitt sitzt", L"Dor tão cortante que fere", L"Pijn scherp genoeg om te snijden", L"Ból ostry jak cięcie", L"Kesilecek Kadar Acı"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92292.opus") {
+							a = L"Believing Heart"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92295.opus") {
+							a = L"Solid-State Shard Blow"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92296.opus") {
+							a = LL14(L"流儀、貫くとき", L"When Style Is Carried Through", L"Quand le style s'affirme", L"Quando lo stile si fa strada", L"Cuando el estilo se impone", L"유의를 관철할 때", L"贯彻流仪之时", L"حين يُثبَّت الأسلوب", L"Когда стиль проводится до конца", L"Wenn der Stil durchgesetzt wird", L"Quando o estilo se impõe", L"Wanneer de stijl wordt doorgezet", L"Gdy styl zostaje przeprowadzony", L"Tarzın Uygulandığı An"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92298.opus") {
+							a = L"Hide and Seek"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92301.opus") {
+							a = LL14(L"御伽ヲ歪メシモノ", L"That Which Distorts Fairyland", L"Ce qui déforme le pays des contes", L"Ciò che distorce il paese delle fiabe", L"Lo que distorsiona el país de las hadas", L"동화를 왜곡하는 것", L"扭曲御伽之物", L"ما يشوه بلاد الجنيات", L"То, что искажает сказочную страну", L"Was das Märchenland verzerrt", L"O que distorce o país das fadas", L"Wat sprookjesland vervormt", L"To, co wypacza krainę baśni", L"Masal Diyarını Çarpıtan"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92304.opus") {
+							a = LL14(L"煌天の頂を目指して", L"Aiming for the Summit of the Radiant Sky", L"Visant le sommet du ciel éclatant", L"Verso la vetta del cielo radioso", L"Hacia la cima del cielo radiante", L"황천의 정상을 향해", L"以煌天之顶为目标", L"نحو قمة السماء المتلألئة", L"К вершине сияющего неба", L"Zum Gipfel des strahlenden Himmels", L"Rumo ao cume do céu radiante", L"Op naar de top van de stralende hemel", L"Ku szczytowi lśniącego nieba", L"Parlak Göğün Zirvesine"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92306.opus") {
+							a = LL14(L"在りし日を越えて", L"Beyond Days Gone By", L"Au-delà des jours d'antan", L"Oltre i giorni passati", L"Más allá de los días idos", L"지나간 날을 넘어", L"跨越往昔之日", L"ما وراء الأيام الخالية", L"За минувшими днями", L"Jenseits vergangener Tage", L"Além dos dias que se foram", L"Voorbij vervlogen dagen", L"Poza minionymi dniami", L"Geçmiş Günlerin Ötesinde"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92308.opus") {
+							a = LL14(L"幽世への還り路", L"Road Back to the Netherworld", L"Chemin du retour vers l'au-delà", L"Via di ritorno all'oltretomba", L"Camino de regreso al inframundo", L"유세로의 귀환로", L"通往幽世的归路", L"طريق العودة إلى العالم الآخر", L"Путь возвращения в загробный мир", L"Rückweg in die Unterwelt", L"Caminho de volta ao além", L"Terugweg naar de onderwereld", L"Droga powrotu do zaświatów", L"Öteki Dünyaya Dönüş Yolu"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92310.opus") {
+							a = L"Days Gone By"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92312.opus") {
+							a = LL14(L"暖かな昼下がり", L"Warm Afternoon", L"Chaude après-midi", L"Caldo pomeriggio", L"Tarde cálida", L"따뜻한 오후", L"温暖的午后", L"ظهيرة دافئة", L"Тёплый полдень", L"Warmer Nachmittag", L"Tarde quente", L"Warme namiddag", L"Ciepłe popołudnie", L"Sıcak Öğleden Sonra"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92313.opus") {
+							a = LL14(L"それでもあなたの側で", L"Still by Your Side", L"Pourtant à tes côtés", L"Eppure al tuo fianco", L"Aun así a tu lado", L"그래도 당신 곁에서", L"即便如此仍在你身边", L"ومع ذلك إلى جانبك", L"И всё же рядом с тобой", L"Dennoch an deiner Seite", L"Ainda assim ao seu lado", L"Toch aan jouw zijde", L"Mimo wszystko u twojego boku", L"Yine de Senin Yanında"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92315.opus") {
+							a = LL14(L"譲れない一線", L"A Line I Won't Cross", L"Une ligne que je ne franchirai pas", L"Una linea che non varcherò", L"Una línea que no cruzaré", L"양보할 수 없는 선", L"不能退让的一线", L"خط لن أتجاوزه", L"Черта, которую не переступлю", L"Eine Linie, die ich nicht überschreite", L"Uma linha que não cruzarei", L"Een lijn die ik niet oversteek", L"Linia, której nie przekroczę", L"Vazgeçemeyeceğim Çizgi"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92318.opus") {
+							a = LL14(L"暗き澱みの底で", L"At the Bottom of Dark Stagnation", L"Au fond de la stagnation sombre", L"In fondo alla stagnazione oscura", L"En el fondo del estancamiento oscuro", L"어두운 침전의 밑바닥에서", L"在暗沉淤积之底", L"في قاع الركود المظلم", L"На дне тёмного застоя", L"Am Grund dunkler Stagnation", L"No fundo da estagnação sombria", L"Op de bodem van donkere stagnatie", L"Na dnie mrocznego zastoju", L"Karanlık Durgunluğun Dibinde"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92319.opus") {
+							a = LL14(L"一瞬の駆け引き", L"A Moment's Maneuver", L"Une manœuvre d'un instant", L"Una manovra d'un istante", L"Una maniobra de un instante", L"순간의 기싸움", L"一瞬的交锋", L"مناورة للحظة", L"Манёвр на мгновение", L"Manöver eines Augenblicks", L"Manobra de um instante", L"Manoeuvre van een ogenblik", L"Manewr chwili", L"Bir Anlık Hamle"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92320.opus") {
+							a = L"Playing Dirty?"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92322.opus") {
+							a = L"Cut Off the Retreat"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92323.opus") {
+							a = LL14(L"赫焉のディグニティ", L"Dignity of the Crimson Sunset", L"Dignité du crépuscule écarlate", L"Dignità del tramonto scarlatto", L"Dignidad del ocaso escarlata", L"혁연의 디그니티", L"赫焉的尊严", L"كرامة الغروب القرمزي", L"Достоинство алого заката", L"Würde des scharlachroten Abendrots", L"Dignidade do crepúsculo escarlate", L"Waardigheid van de scharlaken zonsondergang", L"Godność szkarłatnego zmierzchu", L"Kıpkırmızı Gün Batımının İtibarı"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92326.opus") {
+							a = LL14(L"遠き日の記憶", L"Memories of Distant Days", L"Souvenirs de jours lointains", L"Memorie di giorni lontani", L"Recuerdos de días lejanos", L"머나먼 날의 기억", L"遥远日子的记忆", L"ذكريات الأيام البعيدة", L"Воспоминания далёких дней", L"Erinnerungen an ferne Tage", L"Memórias de dias distantes", L"Herinneringen aan verre dagen", L"Wspomnienia odległych dni", L"Uzak Günlerin Anıları"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92330.opus") {
+							a = LL14(L"共に、新たな季節を -Prelude-", L"Together, Toward a New Season -Prelude-", L"Ensemble, vers une nouvelle saison -Prelude-", L"Insieme, verso una nuova stagione -Prelude-", L"Juntos, hacia una nueva estación -Prelude-", L"함께, 새로운 계절을 -Prelude-", L"一起,迎向新的季节 -Prelude-", L"معاً نحو موسم جديد -Prelude-", L"Вместе к новому сезону -Prelude-", L"Gemeinsam in eine neue Jahreszeit -Prelude-", L"Juntos, rumo a uma nova estação -Prelude-", L"Samen naar een nieuw seizoen -Prelude-", L"Razem ku nowej porze roku -Prelude-", L"Birlikte Yeni Bir Mevsim -Prelude-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92332.opus") {
+							a = L"Where to Join the Chorus"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92335.opus") {
+							a = L"Just Arrived"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92337.opus") {
+							a = LL14(L"匣の中に在るのは...", L"What Lies Within the Box...", L"Ce qui se trouve dans la boîte...", L"Ciò che giace nella scatola...", L"Lo que hay dentro de la caja...", L"상자 속에 있는 것은...", L"匣中之物是...", L"ما يوجد داخل الصندوق...", L"То, что лежит в шкатулке...", L"Was in der Schatulle liegt...", L"O que há dentro da caixa...", L"Wat er in het kistje zit...", L"Co kryje się w szkatułce...", L"Kutunun İçinde Olan..."); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92342.opus") {
+							a = LL14(L"古趣礼賛", L"Praise of Antique Charm", L"Éloge du charme antique", L"Elogio del fascino antico", L"Elogio del encanto antiguo", L"고취 예찬", L"古趣礼赞", L"مدح السحر العتيق", L"Хвала старинному очарованию", L"Lob des antiken Charmes", L"Elogio do charme antigo", L"Lofzang op antieke charme", L"Pochwała dawnego uroku", L"Eski Tarzın Övgüsü"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92343.opus") {
+							a = LL14(L"共に、新たな季節を -Grand Finale-", L"Together, Toward a New Season -Grand Finale-", L"Ensemble, vers une nouvelle saison -Grand Finale-", L"Insieme, verso una nuova stagione -Grand Finale-", L"Juntos, hacia una nueva estación -Grand Finale-", L"함께, 새로운 계절을 -Grand Finale-", L"一起,迎向新的季节 -Grand Finale-", L"معاً نحو موسم جديد -Grand Finale-", L"Вместе к новому сезону -Grand Finale-", L"Gemeinsam in eine neue Jahreszeit -Grand Finale-", L"Juntos, rumo a uma nova estação -Grand Finale-", L"Samen naar een nieuw seizoen -Grand Finale-", L"Razem ku nowej porze roku -Grand Finale-", L"Birlikte Yeni Bir Mevsim -Grand Finale-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92343b.opus") {
+							a = LL14(L"共に、新たな季節を -Grand Finale-", L"Together, Toward a New Season -Grand Finale-", L"Ensemble, vers une nouvelle saison -Grand Finale-", L"Insieme, verso una nuova stagione -Grand Finale-", L"Juntos, hacia una nueva estación -Grand Finale-", L"함께, 새로운 계절을 -Grand Finale-", L"一起,迎向新的季节 -Grand Finale-", L"معاً نحو موسم جديد -Grand Finale-", L"Вместе к новому сезону -Grand Finale-", L"Gemeinsam in eine neue Jahreszeit -Grand Finale-", L"Juntos, rumo a uma nova estação -Grand Finale-", L"Samen naar een nieuw seizoen -Grand Finale-", L"Razem ku nowej porze roku -Grand Finale-", L"Birlikte Yeni Bir Mevsim -Grand Finale-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92343c.opus") {
+							a = LL14(L"共に、新たな季節を -Grand Finale-", L"Together, Toward a New Season -Grand Finale-", L"Ensemble, vers une nouvelle saison -Grand Finale-", L"Insieme, verso una nuova stagione -Grand Finale-", L"Juntos, hacia una nueva estación -Grand Finale-", L"함께, 새로운 계절을 -Grand Finale-", L"一起,迎向新的季节 -Grand Finale-", L"معاً نحو موسم جديد -Grand Finale-", L"Вместе к новому сезону -Grand Finale-", L"Gemeinsam in eine neue Jahreszeit -Grand Finale-", L"Juntos, rumo a uma nova estação -Grand Finale-", L"Samen naar een nieuw seizoen -Grand Finale-", L"Razem ku nowej porze roku -Grand Finale-", L"Birlikte Yeni Bir Mevsim -Grand Finale-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92344.opus") {
+							a = LL14(L"紅の衝撃", L"Crimson Impact", L"Impact cramoisi", L"Impatto cremisi", L"Impacto carmesí", L"홍의 충격", L"红之冲击", L"صدمة قرمزية", L"Алый удар", L"Purpurner Einschlag", L"Impacto carmesim", L"Karmozijnrode inslag", L"Szkarłatne uderzenie", L"Kızıl Darbe"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed92_op_full.opus") {
+							a = L"CRIMSON SiN"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed93104.opus") {
+							a = LL14(L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ", L"ラ=オラシオネーズ"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed93105.opus") {
+							a = L"The Decisive Point"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed93108.opus") {
+							a = LL14(L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ", L"百花咲き乱れ"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed93112.opus") {
+							a = LL14(L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好", L"陽当たり良好"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94002.opus") {
+							a = L"Abysmal Erosion"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94003.opus") {
+							a = LL14(L"学び舎に憩う", L"Resting at the Academy", L"Repos à l'académie", L"Riposo all'accademia", L"Descanso en la academia", L"배움터에서 쉬다", L"憩于学舍", L"الراحة في الأكاديمية", L"Отдых в учебном заведении", L"Ruhend in der Lehranstalt", L"Descansando na academia", L"Rustend op school", L"Odpoczynek w szkole", L"Okulda Dinlenmek"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94004.opus") {
+							a = LL14(L"リベレーションフロント", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"리버레이션 프론트", L"启示前线", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"Revelation Front", L"Revelation Front"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94005.opus") {
+							a = LL14(L"刻の螺旋", L"Spiral of Time", L"Spirale du temps", L"Spirale del tempo", L"Espiral del tiempo", L"각의 나선", L"刻之螺旋", L"لولب الزمن", L"Спираль времени", L"Spirale der Zeit", L"Espiral do tempo", L"Spiraal van de tijd", L"Spirala czasu", L"Zamanın Spiralı"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94008.opus") {
+							a = L"Windy Corridor"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94010.opus") {
+							a = LL14(L"暗がりの先へ", L"Beyond the Darkness", L"Au-delà de l'obscurité", L"Oltre l'oscurità", L"Más allá de la oscuridad", L"어둠 너머로", L"向着黑暗的前方", L"إلى ما وراء الظلام", L"За темнотой", L"Jenseits der Dunkelheit", L"Além da escuridão", L"Voorbij de duisternis", L"Poza ciemnością", L"Karanlığın Ötesine"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94015.opus") {
+							a = L"The Battle by a Hair's Breath"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94016.opus") {
+							a = LL14(L"崩れる日常", L"Collapsing Everyday", L"Quotidien qui s'effondre", L"Quotidiano che crolla", L"Cotidiano que se derrumba", L"무너지는 일상", L"崩坏的日常", L"اليوميات المنهارة", L"Разрушающаяся повседневность", L"Zusammenbrechender Alltag", L"Cotidiano que desaba", L"Ineenstortend dagelijks leven", L"Waląca się codzienność", L"Yıkılan Günlük Hayat"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94017.opus") {
+							a = LL14(L"湧き上がる疑念", L"Rising Doubts", L"Doutes qui montent", L"Dubbi che sorgono", L"Dudas que emergen", L"솟아오르는 의념", L"涌起的疑念", L"شكوك متصاعدة", L"Нарастающие сомнения", L"Aufkommende Zweifel", L"Dúvidas que emergem", L"Opkomende twijfels", L"Narastające wątpliwości", L"Yükselen Şüpheler"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94018.opus") {
+							a = L"Smoky Smoky"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94020.opus") {
+							a = L"Advent Day"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94021.opus") {
+							a = L"Irreverent Laughter"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94022.opus") {
+							a = LL14(L"想い愁う", L"Sorrowful Thoughts", L"Pensées mélancoliques", L"Pensieri melanconici", L"Pensamientos melancólicos", L"시름에 잠긴 마음", L"忧思", L"أفكار حزينة", L"Печальные думы", L"Trauernde Gedanken", L"Pensamentos melancólicos", L"Droevige gedachten", L"Smutne myśli", L"Hüzünlü Düşünceler"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94023.opus") {
+							a = LL14(L"焔舞 -友のために-", L"Flame Dance -For a Friend-", L"Danse des flammes -Pour un ami-", L"Danza delle fiamme -Per un amico-", L"Danza de llamas -Por un amigo-", L"염무 -친구를 위해-", L"焰舞 -为了友人-", L"رقصة اللهب -من أجل صديق-", L"Танец пламени -Ради друга-", L"Flammentanz -Für einen Freund-", L"Dança das chamas -Por um amigo-", L"VlammenDans -Voor een vriend-", L"Taniec płomieni -Dla przyjaciela-", L"Alev Dansı -Bir Dost İçin-"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94024.opus") {
+							a = L"Blaze Soul"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94025.opus") {
+							a = LL14(L"さあ冒険の世界へ", L"Now, to the World of Adventure", L"Allons vers le monde de l'aventure", L"Ora, verso il mondo dell'avventura", L"Ahora, al mundo de la aventura", L"자, 모험의 세계로", L"出发吧,向冒险的世界", L"هيا إلى عالم المغامرة", L"Вперёд, в мир приключений", L"Auf in die Welt des Abenteuers", L"Agora, ao mundo da aventura", L"Nu, naar de wereld van avontuur", L"Naprzód, do świata przygód", L"Haydi Macera Dünyasına"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94026.opus") {
+							a = LL14(L"幻想領域", L"Realm of Fantasy", L"Royaume de fantaisie", L"Reame della fantasia", L"Reino de la fantasía", L"환상 영역", L"幻想领域", L"عالم الخيال", L"Царство фантазии", L"Reich der Fantasie", L"Reino da fantasia", L"Rijk der fantasie", L"Kraina fantazji", L"Fantazi Âlemi"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94027.opus") {
+							a = LL14(L"夢はゴロゴロライフ", L"Dreams Are a Laid-Back Life", L"Les rêves, une vie tranquille", L"I sogni sono una vita rilassata", L"Los sueños son una vida relajada", L"꿈은 뒹굴뒹굴 라이프", L"梦想是慵懒生活", L"الأحلام حياة مسترخية", L"Мечты — это беззаботная жизнь", L"Träume sind ein gemütliches Leben", L"Sonhos são uma vida descontraída", L"Dromen zijn een relaxed leven", L"Marzenia to leniwe życie", L"Rüyalar Tembel Bir Hayat"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94028.opus") {
+							a = LL14(L"マルドゥックサポートへようこそ", L"Welcome to Marduk Support", L"Bienvenue chez le support Marduk", L"Benvenuti al supporto Marduk", L"Bienvenido al soporte Marduk", L"마르두크 서포트에 오신 것을 환영합니다", L"欢迎来到马尔杜克支持", L"مرحباً بكم في دعم ماردوك", L"Добро пожаловать в поддержку Мардука", L"Willkommen beim Marduk-Support", L"Bem-vindo ao suporte Marduk", L"Welkom bij Marduk-ondersteuning", L"Witamy w wsparciu Marduka", L"Marduk Destek'e Hoş Geldiniz"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94029.opus") {
+							a = LL14(L"最悪の思惑", L"The Worst Designs", L"Les pires intentions", L"I peggiori disegni", L"Las peores intenciones", L"최악의 속셈", L"最坏的企图", L"أسوأ النوايا", L"Худшие замыслы", L"Die schlimmsten Absichten", L"As piores intenções", L"De ergste bedoelingen", L"Najgorsze zamiary", L"En Kötü Hesaplar"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94200.opus") {
+							a = LL14(L"迫りくる災厄", L"Approaching Calamity", L"Calamité qui approche", L"Calamità in avvicinamento", L"Calamidad que se acerca", L"다가오는 재앙", L"迫近的灾厄", L"كارثة تقترب", L"Приближающееся бедствие", L"Nahendes Unheil", L"Calamidade que se aproxima", L"Naderende ramp", L"Zbliżająca się klęska", L"Yaklaşan Felaket"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94201.opus") {
+							a = LL14(L"迫りくる災厄", L"Approaching Calamity", L"Calamité qui approche", L"Calamità in avvicinamento", L"Calamidad que se acerca", L"다가오는 재앙", L"迫近的灾厄", L"كارثة تقترب", L"Приближающееся бедствие", L"Nahendes Unheil", L"Calamidade que se aproxima", L"Naderende ramp", L"Zbliżająca się klęska", L"Yaklaşan Felaket"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94202.opus") {
+							a = LL14(L"君が残してくれたもの", L"What You Left Behind", L"Ce que tu as laissé", L"Ciò che hai lasciato", L"Lo que dejaste atrás", L"네가 남겨준 것", L"你留下的东西", L"ما تركته لي", L"То, что ты оставил", L"Was du hinterlassen hast", L"O que você deixou", L"Wat jij achterliet", L"To, co zostawiłeś", L"Bıraktığın Şeyler"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94203.opus") {
+							a = LL14(L"迫りくる災厄", L"Approaching Calamity", L"Calamité qui approche", L"Calamità in avvicinamento", L"Calamidad que se acerca", L"다가오는 재앙", L"迫近的灾厄", L"كارثة تقترب", L"Приближающееся бедствие", L"Nahendes Unheil", L"Calamidade que se aproxima", L"Naderende ramp", L"Zbliżająca się klęska", L"Yaklaşan Felaket"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94400.opus") {
+							a = L"Regain the Administration! -Field Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94401.opus") {
+							a = L"Regain the Administration! -Command Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94402.opus") {
+							a = L"The Expanding World"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94404.opus") {
+							a = L"Pushed Over"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94406.opus") {
+							a = LL14(L"モノクローム・デイズ", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"모노크롬 데이즈", L"单色的日子", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days", L"Monochrome Days"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94408.opus") {
+							a = LL14(L"愛しき刻限の果てに", L"At the End of the Beloved Hour", L"Au bout de l'heure chérie", L"Alla fine dell'ora amata", L"Al final de la hora querida", L"사랑스러운 각한의 끝에서", L"在心爱时限的尽头", L"في نهاية الساعة العزيزة", L"В конце любимого срока", L"Am Ende der geliebten Frist", L"No fim da hora amada", L"Aan het eind van het geliefde uur", L"U kresu ukochanej godziny", L"Sevgili Vaktin Sonunda"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94410.opus") {
+							a = L"Work Out a Solution! -Field Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94411.opus") {
+							a = L"Work Out a Solution! -Command Battle-"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94412.opus") {
+							a = L"Into the Chill"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94414.opus") {
+							a = L"Buster the Ghost of Garden"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94415.opus") {
+							a = L"Skip to the Edith"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94416.opus") {
+							a = L"Hard-Boiled Short Cake"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94417.opus") {
+							a = L"Blurred Scene"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94418.opus") {
+							a = L"After the Spring Rain"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94419.opus") {
+							a = L"With the Dilemma"; fff = 1;
+						}
+						if (fff == 0 && ft == L"ed94420.opus") {
+							a = LL14(L"雪解けの知らせ", L"News of the Thaw", L"Nouvelles du dégel", L"Notizie del disgelo", L"Noticias del deshielo", L"눈이 녹는 소식", L"融雪的消息", L"أخبار ذوبان الثلج", L"Весть о таянии снега", L"Kunde vom Tauwetter", L"Notícias do degelo", L"Nieuws van de dooi", L"Wieść o odwilży", L"Karların Erime Haberi"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed97305.opus") {
+							a = LL14(L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て"); fff = 1;
+						}
+						if (fff == 0 && ft == L"ed9_op_full.opus") {
+							a = LL14(L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て", L"名もなき悪夢の果て"); fff = 1;
+						}
+						if (fff == 0 && a.Left(3).CompareNoCase(L"ed9") == 0) {
+							a = ft;
+							if (a.GetLength() > 5 && a.Right(5).CompareNoCase(L".opus") == 0)
+								a = a.Left(a.GetLength() - 5);
+							fff = 1;
+						}
+					}
+
+if (fff == 0)
 						if (a.Left(2) == "y9") {
 							if (a.Mid(4, 4) == "b001") { a = "FEEL FORCE"; }
 							if (a.Mid(4, 4) == "b002") { a = "TROUBLEMAKER"; }

@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -99,19 +99,20 @@ IDI_T4                  ICON                    "res\\ico00004.ico"
 // Dialog
 //
 
-IDD_ABOUTBOX DIALOGEX 0, 0, 320, 112
+IDD_ABOUTBOX DIALOGEX 0, 0, 380, 420
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "oggのﾊﾞｰｼﾞｮﾝ情報"
 FONT 9, "ＭＳ Ｐゴシック", 0, 0, 0x0
 BEGIN
     ICON            IDR_MAINFRAME,IDC_STATIC,11,10,20,48
-    LTEXT           "ogg Version Ver 0.9a Release series",IDC_ABOUT_VER,40,10,200,8,SS_NOPREFIX
-    LTEXT           "Copyright (C) ちゃちゃ/ちゃー",IDC_ABOUT_COPY,40,22,200,8
-    DEFPUSHBUTTON   "OK",IDOK,260,7,50,14,WS_GROUP
-    LTEXT           "スタティック",IDC_STATICin,40,34,268,8
-    LTEXT           "スタティック",IDC_STATICin2,40,46,268,8
-    EDITTEXT        IDC_STATICin3,40,58,268,36,ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | NOT WS_TABSTOP
-    LTEXT           "http://ppp.oohara.jp/",IDC_Link,40,98,268,8,SS_NOTIFY
+    LTEXT           "ogg Version Ver 0.9a Release series",IDC_ABOUT_VER,40,10,270,8,SS_NOPREFIX
+    LTEXT           "Copyright (C) ちゃちゃ/ちゃー",IDC_ABOUT_COPY,40,22,270,8
+    DEFPUSHBUTTON   "OK",IDOK,320,7,50,14,WS_GROUP
+    LTEXT           "スタティック",IDC_STATICin,40,34,330,8
+    LTEXT           "スタティック",IDC_STATICin2,40,46,330,8
+    EDITTEXT        IDC_STATICin3,40,58,330,28,ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | NOT WS_TABSTOP
+    LTEXT           "",IDC_ABOUT_PERF,7,90,366,310,SS_NOTIFY
+    LTEXT           "http://ppp.oohara.jp/",IDC_Link,40,404,330,8,SS_NOTIFY
 END
 
 IDD_OGG_DIALOG DIALOGEX 0, 0, 416, 329
@@ -1397,7 +1398,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,600
+ FILEVERSION 0,9,1,601
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1415,10 +1416,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.02"
-            VALUE "FileVersion", "0.9.1.600"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.03"
+            VALUE "FileVersion", "0.9.1.601"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.08.02"
+            VALUE "LegalCopyright", "Copyright (C) 2026.08.03"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -1443,9 +1444,9 @@ BEGIN
     IDD_ABOUTBOX, DIALOG
     BEGIN
         LEFTMARGIN, 7
-        RIGHTMARGIN, 313
+        RIGHTMARGIN, 373
         TOPMARGIN, 7
-        BOTTOMMARGIN, 105
+        BOTTOMMARGIN, 413
     END
 
     IDD_OGG_DIALOG, DIALOG

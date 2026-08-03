@@ -1,4 +1,4 @@
-﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -3920,7 +3920,7 @@ CString CMediaPlayerDlg::CurrentTrackTitle() const
 	if (mode == -10 || mode == -9 || mode == -8 || mode == -7) {
 		if (!tagfile.IsEmpty()) t = tagfile;
 	}
-	if ((stitle != _T("") && mode == -1) || mode == 21 || mode == -6) t = stitle;
+	if ((stitle != _T("") && mode == -1) || mode == 21 || mode == -6 || mode == 34 || mode == 35) t = stitle;
 	// wav 等もタグのタイトルがあれば優先(無ければファイル名のまま)
 	if (mode == 999 && !stitle.IsEmpty()) t = stitle;
 	return t;

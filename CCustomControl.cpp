@@ -1,12 +1,15 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
 #include <vector>
+#include <psapi.h>
+#include <TlHelp32.h>
 
 #pragma comment(lib, "msimg32.lib")
+#pragma comment(lib, "psapi.lib")
 
 static UINT CCC_GetControlDpi(HWND hWnd)
 {
@@ -2272,6 +2275,7 @@ static BOOL CALLBACK CCC_InwomanInvalidateChild(HWND hChild, LPARAM)
          p->IsKindOf(RUNTIME_CLASS(CCustomRangeSliderCtrl)) ||
          p->IsKindOf(RUNTIME_CLASS(CCustomComboBox)) ||
          p->IsKindOf(RUNTIME_CLASS(CCustomProgressCtrl)) ||
+         p->IsKindOf(RUNTIME_CLASS(CCustomSysPerfCtrl)) ||
          p->IsKindOf(RUNTIME_CLASS(CCustomGroupBox)) ||
          p->IsKindOf(RUNTIME_CLASS(CCustomStatic))))
     {
@@ -8742,6 +8746,1009 @@ LRESULT CCustomProgressCtrl::OnPrintClient(WPARAM wParam, LPARAM)
 }
 
 // ============================================================================
+// CCustomSysPerfCtrl
+// ============================================================================
+namespace {
+enum {
+	kSysPerfTimerId = 0x53504631, // 'SPF1'
+	kCmdViewAll = 0x7101,
+	kCmdViewMem,
+	kCmdViewCpuOverall,
+	kCmdViewCpuGrid,
+	kCmdViewCpuBoth,
+	kCmdPause,
+	kCmdCopy,
+	kCmdColsAuto,
+	kCmdCols4,
+	kCmdCols6,
+	kCmdCols8
+};
+
+struct SysProcPerfInfo {
+	LARGE_INTEGER IdleTime;
+	LARGE_INTEGER KernelTime;
+	LARGE_INTEGER UserTime;
+	LARGE_INTEGER Reserved1[2];
+	ULONG Reserved2;
+};
+
+typedef LONG(WINAPI* PFN_NtQuerySystemInformation)(ULONG, PVOID, ULONG, PULONG);
+
+static ULONGLONG FtToU64(const FILETIME& ft)
+{
+	ULARGE_INTEGER u;
+	u.LowPart = ft.dwLowDateTime;
+	u.HighPart = ft.dwHighDateTime;
+	return u.QuadPart;
+}
+} // namespace
+
+IMPLEMENT_DYNAMIC(CCustomSysPerfCtrl, CWnd)
+
+BEGIN_MESSAGE_MAP(CCustomSysPerfCtrl, CWnd)
+	ON_WM_CREATE()
+	ON_WM_DESTROY()
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+	ON_WM_TIMER()
+	ON_WM_RBUTTONUP()
+	ON_WM_CONTEXTMENU()
+	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTW, 0, 0xFFFF, OnToolTipNotify)
+	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTA, 0, 0xFFFF, OnToolTipNotify)
+END_MESSAGE_MAP()
+
+CCustomSysPerfCtrl::CCustomSysPerfCtrl()
+	: m_bAutoDelete(FALSE)
+	, m_bAeroMode(FALSE)
+	, m_bPaused(FALSE)
+	, m_bSmbiosDone(FALSE)
+	, m_viewMode(VIEW_ALL)
+	, m_gridCols(0)
+	, m_coreCount(0)
+	, m_histCount(0)
+	, m_histPos(0)
+	, m_overallNow(0)
+	, m_bHaveTimes(FALSE)
+	, m_bHaveCore(FALSE)
+	, m_memInUse(0)
+	, m_memCompressed(0)
+	, m_memAvail(0)
+	, m_memCommit(0)
+	, m_memCommitLimit(0)
+	, m_memCached(0)
+	, m_memPaged(0)
+	, m_memNonPaged(0)
+	, m_memHwReserved(0)
+	, m_memSpeedMTs(0)
+	, m_memSlotsUsed(0)
+	, m_memSlotsTotal(0)
+	, m_memFormFactor(0)
+	, m_bHaveCompressed(FALSE)
+{
+	ZeroMemory(m_overallHist, sizeof(m_overallHist));
+	ZeroMemory(m_coreHist, sizeof(m_coreHist));
+	ZeroMemory(m_coreNow, sizeof(m_coreNow));
+	ZeroMemory(&m_ftIdlePrev, sizeof(m_ftIdlePrev));
+	ZeroMemory(&m_ftKerPrev, sizeof(m_ftKerPrev));
+	ZeroMemory(&m_ftUsrPrev, sizeof(m_ftUsrPrev));
+	ZeroMemory(m_coreIdlePrev, sizeof(m_coreIdlePrev));
+	ZeroMemory(m_coreKerPrev, sizeof(m_coreKerPrev));
+	ZeroMemory(m_coreUsrPrev, sizeof(m_coreUsrPrev));
+	SYSTEM_INFO si = {};
+	GetSystemInfo(&si);
+	m_coreCount = (int)si.dwNumberOfProcessors;
+	if (m_coreCount < 1) m_coreCount = 1;
+	if (m_coreCount > kMaxCores) m_coreCount = kMaxCores;
+}
+
+CCustomSysPerfCtrl::~CCustomSysPerfCtrl()
+{
+}
+
+BOOL CCustomSysPerfCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID)
+{
+	CString cls = AfxRegisterWndClass(CS_DBLCLKS,
+		::LoadCursor(NULL, IDC_ARROW), (HBRUSH)(COLOR_BTNFACE + 1), NULL);
+	return CWnd::Create(cls, _T(""), dwStyle | WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, rect, pParentWnd, nID);
+}
+
+void CCustomSysPerfCtrl::PostNcDestroy()
+{
+	CWnd::PostNcDestroy();
+	if (m_bAutoDelete) delete this;
+}
+
+UINT CCustomSysPerfCtrl::Dpi() const
+{
+	return CCC_GetControlDpi(m_hWnd);
+}
+
+int CCustomSysPerfCtrl::S(int v) const
+{
+	return CCC_ScaleDpi(v, Dpi());
+}
+
+void CCustomSysPerfCtrl::SetAeroMode(BOOL b)
+{
+	m_bAeroMode = b;
+	if (GetSafeHwnd()) {
+#if CCUSTOM_AERO_SUPPORT
+		CCC_SetChildTransparent(m_hWnd, FALSE);
+		CCC_InvalidateParent(m_hWnd, m_bAeroMode);
+#endif
+		Invalidate(FALSE);
+	}
+}
+
+void CCustomSysPerfCtrl::SetViewMode(int mode)
+{
+	if (mode < VIEW_ALL) mode = VIEW_ALL;
+	if (mode > VIEW_CPU_BOTH) mode = VIEW_CPU_BOTH;
+	if (m_viewMode == mode) return;
+	m_viewMode = mode;
+	if (GetSafeHwnd()) Invalidate(FALSE);
+}
+
+int CCustomSysPerfCtrl::OnCreate(LPCREATESTRUCT lpCreateStruct)
+{
+	if (CWnd::OnCreate(lpCreateStruct) == -1)
+		return -1;
+
+	LOGFONT lf = {};
+	lf.lfHeight = -S(11);
+	lf.lfWeight = FW_NORMAL;
+	lf.lfCharSet = DEFAULT_CHARSET;
+	_tcscpy_s(lf.lfFaceName, _T("Segoe UI"));
+	m_fontLabel.CreateFontIndirect(&lf);
+	lf.lfHeight = -S(16);
+	lf.lfWeight = FW_BOLD;
+	m_fontValue.CreateFontIndirect(&lf);
+
+	m_tip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX);
+	m_tip.AddTool(this, LPSTR_TEXTCALLBACK);
+	m_tip.SetMaxTipWidth(S(320));
+	m_tip.Activate(TRUE);
+	EnableToolTips(TRUE);
+
+	SampleSmbiosOnce();
+	SampleOnce();
+	SetTimer(kSysPerfTimerId, 1000, NULL);
+	return 0;
+}
+
+void CCustomSysPerfCtrl::OnDestroy()
+{
+	KillTimer(kSysPerfTimerId);
+	if (m_tip.GetSafeHwnd())
+		m_tip.DestroyWindow();
+	if (m_fontLabel.GetSafeHandle())
+		m_fontLabel.DeleteObject();
+	if (m_fontValue.GetSafeHandle())
+		m_fontValue.DeleteObject();
+	CWnd::OnDestroy();
+}
+
+BOOL CCustomSysPerfCtrl::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tip.GetSafeHwnd())
+		m_tip.RelayEvent(pMsg);
+	return CWnd::PreTranslateMessage(pMsg);
+}
+
+BOOL CCustomSysPerfCtrl::OnToolTipNotify(UINT, NMHDR* pNMHDR, LRESULT* pResult)
+{
+	if (!pNMHDR || !pResult) return FALSE;
+	CString tip;
+	tip.Format(LL14(
+		L"CPU %u%% / 利用可能メモリ ",
+		L"CPU %u%% / Available memory ",
+		L"CPU %u%% / Memoire disponible ",
+		L"CPU %u%% / Memoria disponibile ",
+		L"CPU %u%% / Memoria disponible ",
+		L"CPU %u%% / 사용 가능 메모리 ",
+		L"CPU %u%% / 可用内存 ",
+		L"CPU %u%% / الذاكرة المتاحة ",
+		L"CPU %u%% / Доступная память ",
+		L"CPU %u%% / Verfugbarer Speicher ",
+		L"CPU %u%% / Memoria disponivel ",
+		L"CPU %u%% / Beschikbaar geheugen ",
+		L"CPU %u%% / Dostepna pamiec ",
+		L"CPU %u%% / Kullanilabilir bellek "),
+		(UINT)m_overallNow);
+	CString avail;
+	FormatBytesGB(m_memAvail, avail);
+	tip += avail;
+	m_tipText = tip;
+
+	if (pNMHDR->code == TTN_NEEDTEXTW) {
+		TOOLTIPTEXTW* pttt = (TOOLTIPTEXTW*)pNMHDR;
+		pttt->lpszText = (LPWSTR)(LPCWSTR)m_tipText;
+	} else if (pNMHDR->code == TTN_NEEDTEXTA) {
+		TOOLTIPTEXTA* pttt = (TOOLTIPTEXTA*)pNMHDR;
+		static char tipA[512];
+		WideCharToMultiByte(CP_ACP, 0, m_tipText, -1, tipA, 512, NULL, NULL);
+		pttt->lpszText = tipA;
+	}
+	*pResult = 0;
+	return TRUE;
+}
+
+void CCustomSysPerfCtrl::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent != kSysPerfTimerId) {
+		CWnd::OnTimer(nIDEvent);
+		return;
+	}
+	if (!m_bPaused) {
+		SampleOnce();
+		Invalidate(FALSE);
+#if CCUSTOM_AERO_SUPPORT
+		CCC_InvalidateParent(m_hWnd, m_bAeroMode);
+#endif
+	}
+}
+
+void CCustomSysPerfCtrl::FormatBytesGB(ULONGLONG bytes, CString& out)
+{
+	const double gb = (double)bytes / (1024.0 * 1024.0 * 1024.0);
+	if (gb >= 10.0)
+		out.Format(_T("%.1f GB"), gb);
+	else if (gb >= 1.0)
+		out.Format(_T("%.1f GB"), gb);
+	else {
+		const double mb = (double)bytes / (1024.0 * 1024.0);
+		out.Format(_T("%.0f MB"), mb);
+	}
+}
+
+void CCustomSysPerfCtrl::SampleSmbiosOnce()
+{
+	if (m_bSmbiosDone) return;
+	m_bSmbiosDone = TRUE;
+	m_memSpeedMTs = 0;
+	m_memSlotsUsed = 0;
+	m_memSlotsTotal = 0;
+	m_memFormFactor = 0;
+
+	const DWORD sig = 'RSMB';
+	const DWORD need = GetSystemFirmwareTable(sig, 0, NULL, 0);
+	if (need == 0 || need > 128 * 1024)
+		return;
+	static BYTE raw[128 * 1024];
+	if (GetSystemFirmwareTable(sig, 0, raw, need) != need)
+		return;
+	if (need < 8) return;
+	const DWORD tableLen = *(DWORD*)(raw + 4);
+	if (tableLen == 0 || 8 + tableLen > need) return;
+	const BYTE* p = raw + 8;
+	const BYTE* end = raw + 8 + tableLen;
+	UINT maxSpeed = 0;
+	UINT form = 0;
+	UINT used = 0;
+	UINT totalSlots = 0;
+	while (p + 4 <= end) {
+		const BYTE type = p[0];
+		const BYTE len = p[1];
+		if (len < 4) break;
+		if (type == 16 && len >= 0x0F) {
+			totalSlots = p[0x0D] | (p[0x0E] << 8);
+		} else if (type == 17 && len >= 0x17) {
+			const WORD sizeRaw = (WORD)(p[0x0C] | (p[0x0D] << 8));
+			if (sizeRaw != 0 && sizeRaw != 0xFFFF) {
+				used++;
+				if (len > 0x12)
+					form = p[0x0E];
+				if (len >= 0x17) {
+					const WORD spd = (WORD)(p[0x15] | (p[0x16] << 8));
+					if (spd > maxSpeed) maxSpeed = spd;
+				}
+			} else if (sizeRaw == 0) {
+				// empty slot counted via Type16
+			}
+		}
+		const BYTE* q = p + len;
+		while (q + 1 < end && !(q[0] == 0 && q[1] == 0))
+			q++;
+		if (q + 1 >= end) break;
+		p = q + 2;
+	}
+	m_memSpeedMTs = maxSpeed;
+	m_memSlotsUsed = used;
+	m_memSlotsTotal = totalSlots ? totalSlots : used;
+	m_memFormFactor = form;
+}
+
+void CCustomSysPerfCtrl::SampleOnce()
+{
+	BOOL wroteSample = FALSE;
+
+	// --- overall CPU ---
+	FILETIME idle = {}, ker = {}, usr = {};
+	if (GetSystemTimes(&idle, &ker, &usr)) {
+		if (m_bHaveTimes) {
+			const ULONGLONG di = FtToU64(idle) - FtToU64(m_ftIdlePrev);
+			const ULONGLONG dk = FtToU64(ker) - FtToU64(m_ftKerPrev);
+			const ULONGLONG du = FtToU64(usr) - FtToU64(m_ftUsrPrev);
+			const ULONGLONG tot = dk + du;
+			BYTE pct = 0;
+			if (tot > 0) {
+				ULONGLONG busy = tot - di;
+				if (busy > tot) busy = tot;
+				pct = (BYTE)((busy * 100ull) / tot);
+				if (pct > 100) pct = 100;
+			}
+			m_overallNow = pct;
+			m_overallHist[m_histPos] = pct;
+			wroteSample = TRUE;
+		}
+		m_ftIdlePrev = idle;
+		m_ftKerPrev = ker;
+		m_ftUsrPrev = usr;
+		m_bHaveTimes = TRUE;
+	}
+
+	// --- per-core ---
+	static PFN_NtQuerySystemInformation pNtQ = NULL;
+	if (!pNtQ) {
+		HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+		if (ntdll)
+			pNtQ = (PFN_NtQuerySystemInformation)GetProcAddress(ntdll, "NtQuerySystemInformation");
+	}
+	if (pNtQ) {
+		SysProcPerfInfo info[kMaxCores];
+		ULONG retLen = 0;
+		const ULONG classId = 8; // SystemProcessorPerformanceInformation
+		LONG st = pNtQ(classId, info, sizeof(SysProcPerfInfo) * (ULONG)m_coreCount, &retLen);
+		if (st >= 0) {
+			const int n = (int)(retLen / sizeof(SysProcPerfInfo));
+			int cores = n;
+			if (cores > m_coreCount) cores = m_coreCount;
+			if (cores > kMaxCores) cores = kMaxCores;
+			if (cores > 0) m_coreCount = cores;
+			for (int i = 0; i < m_coreCount; ++i) {
+				const ULONGLONG idleC = (ULONGLONG)info[i].IdleTime.QuadPart;
+				const ULONGLONG kerC = (ULONGLONG)info[i].KernelTime.QuadPart;
+				const ULONGLONG usrC = (ULONGLONG)info[i].UserTime.QuadPart;
+				if (m_bHaveCore) {
+					const ULONGLONG di = idleC - m_coreIdlePrev[i];
+					const ULONGLONG dk = kerC - m_coreKerPrev[i];
+					const ULONGLONG du = usrC - m_coreUsrPrev[i];
+					const ULONGLONG tot = dk + du;
+					BYTE pct = 0;
+					if (tot > 0) {
+						ULONGLONG busy = tot - di;
+						if (busy > tot) busy = tot;
+						pct = (BYTE)((busy * 100ull) / tot);
+						if (pct > 100) pct = 100;
+					}
+					m_coreNow[i] = pct;
+					m_coreHist[i][m_histPos] = pct;
+				}
+				m_coreIdlePrev[i] = idleC;
+				m_coreKerPrev[i] = kerC;
+				m_coreUsrPrev[i] = usrC;
+			}
+			if (m_bHaveCore)
+				wroteSample = TRUE;
+			m_bHaveCore = TRUE;
+		}
+	}
+
+	if (wroteSample) {
+		m_histPos = (m_histPos + 1) % kHistLen;
+		if (m_histCount < kHistLen) m_histCount++;
+	}
+
+	// --- memory ---
+	MEMORYSTATUSEX ms = {};
+	ms.dwLength = sizeof(ms);
+	if (GlobalMemoryStatusEx(&ms)) {
+		m_memAvail = ms.ullAvailPhys;
+		m_memInUse = (ms.ullTotalPhys > ms.ullAvailPhys) ? (ms.ullTotalPhys - ms.ullAvailPhys) : 0;
+		ULONGLONG installedKB = 0;
+		if (GetPhysicallyInstalledSystemMemory(&installedKB)) {
+			const ULONGLONG installed = installedKB * 1024ull;
+			if (installed > ms.ullTotalPhys)
+				m_memHwReserved = installed - ms.ullTotalPhys;
+			else
+				m_memHwReserved = 0;
+		}
+	}
+
+	PERFORMANCE_INFORMATION pi = {};
+	pi.cb = sizeof(pi);
+	if (GetPerformanceInfo(&pi, sizeof(pi))) {
+		const SIZE_T pg = pi.PageSize ? pi.PageSize : 4096;
+		m_memCommit = (ULONGLONG)pi.CommitTotal * pg;
+		m_memCommitLimit = (ULONGLONG)pi.CommitLimit * pg;
+		m_memCached = (ULONGLONG)pi.SystemCache * pg;
+		m_memPaged = (ULONGLONG)pi.KernelPaged * pg;
+		m_memNonPaged = (ULONGLONG)pi.KernelNonpaged * pg;
+	}
+
+	// 圧縮メモリ概算: Memory Compression プロセスの WS
+	m_bHaveCompressed = FALSE;
+	m_memCompressed = 0;
+	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (snap != INVALID_HANDLE_VALUE) {
+		PROCESSENTRY32W pe = {};
+		pe.dwSize = sizeof(pe);
+		if (Process32FirstW(snap, &pe)) {
+			do {
+				if (_wcsicmp(pe.szExeFile, L"Memory Compression") == 0) {
+					HANDLE hp = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+					if (hp) {
+						PROCESS_MEMORY_COUNTERS pmc = {};
+						pmc.cb = sizeof(pmc);
+						if (GetProcessMemoryInfo(hp, &pmc, sizeof(pmc))) {
+							m_memCompressed = (ULONGLONG)pmc.WorkingSetSize;
+							m_bHaveCompressed = TRUE;
+						}
+						CloseHandle(hp);
+					}
+					break;
+				}
+			} while (Process32NextW(snap, &pe));
+		}
+		CloseHandle(snap);
+	}
+}
+
+void CCustomSysPerfCtrl::LayoutRects(const CRect& r, CRect& rcMem, CRect& rcOverall, CRect& rcGrid)
+{
+	rcMem.SetRectEmpty();
+	rcOverall.SetRectEmpty();
+	rcGrid.SetRectEmpty();
+	const int pad = S(2);
+	CRect body = r;
+	body.DeflateRect(pad, pad);
+	if (body.Width() <= 0 || body.Height() <= 0) return;
+
+	const BOOL showMem = (m_viewMode == VIEW_ALL || m_viewMode == VIEW_MEM);
+	const BOOL showOv = (m_viewMode == VIEW_ALL || m_viewMode == VIEW_CPU_OVERALL || m_viewMode == VIEW_CPU_BOTH);
+	const BOOL showGr = (m_viewMode == VIEW_ALL || m_viewMode == VIEW_CPU_GRID || m_viewMode == VIEW_CPU_BOTH);
+
+	int parts = 0;
+	int wMem = 0, wOv = 0, wGr = 0;
+	// メモリ行(4段)が潰れないよう比率を確保
+	if (showMem) { parts += 3; wMem = 3; }
+	if (showOv) { parts += 3; wOv = 3; }
+	if (showGr) { parts += 5; wGr = 5; }
+	if (parts <= 0) return;
+
+	const int H = body.Height();
+	int y = body.top;
+	if (showMem) {
+		int h = (H * wMem) / parts;
+		if (m_viewMode == VIEW_MEM) h = H;
+		const int minMem = S(26) * 4; // 4行×最低高さ
+		if (m_viewMode == VIEW_ALL && h < minMem && minMem < H * 4 / 10)
+			h = minMem;
+		rcMem.SetRect(body.left, y, body.right, y + h);
+		y += h;
+	}
+	if (showOv) {
+		int h = (H * wOv) / parts;
+		if (m_viewMode == VIEW_CPU_OVERALL) h = H;
+		if (y + h > body.bottom && !showGr) h = body.bottom - y;
+		rcOverall.SetRect(body.left, y, body.right, y + h);
+		y += h;
+	}
+	if (showGr) {
+		rcGrid.SetRect(body.left, y, body.right, body.bottom);
+	}
+}
+
+void CCustomSysPerfCtrl::DrawSpark(CDC& dc, const CRect& rc, const BYTE* hist, int histCount, BOOL bAeroTrans)
+{
+	if (rc.Width() < 4 || rc.Height() < 4 || !hist || histCount <= 0) return;
+	const COLORREF grid = bAeroTrans ? RGB(90, 90, 90) : RGB(210, 210, 210);
+	const COLORREF line = RGB(17, 125, 212);
+	const COLORREF fill = RGB(120, 180, 230);
+
+	CPen penGrid(PS_SOLID, 1, grid);
+	CPen* oldPen = dc.SelectObject(&penGrid);
+	for (int i = 1; i < 4; ++i) {
+		const int y = rc.top + (rc.Height() * i) / 4;
+		dc.MoveTo(rc.left, y);
+		dc.LineTo(rc.right, y);
+	}
+	for (int i = 1; i < 6; ++i) {
+		const int x = rc.left + (rc.Width() * i) / 6;
+		dc.MoveTo(x, rc.top);
+		dc.LineTo(x, rc.bottom);
+	}
+
+	POINT pts[kHistLen + 2];
+	const int n = histCount > kHistLen ? kHistLen : histCount;
+	for (int i = 0; i < n; ++i) {
+		int idx = m_histPos - n + i;
+		while (idx < 0) idx += kHistLen;
+		idx %= kHistLen;
+		const int x = rc.left + (i * (rc.Width() - 1)) / (n > 1 ? (n - 1) : 1);
+		const int y = rc.bottom - 1 - (hist[idx] * (rc.Height() - 1)) / 100;
+		pts[i].x = x;
+		pts[i].y = y;
+	}
+	if (n >= 2) {
+		POINT poly[kHistLen + 2];
+		for (int i = 0; i < n; ++i) poly[i] = pts[i];
+		poly[n].x = pts[n - 1].x;
+		poly[n].y = rc.bottom - 1;
+		poly[n + 1].x = pts[0].x;
+		poly[n + 1].y = rc.bottom - 1;
+		CBrush br(fill);
+		CBrush* oldBr = dc.SelectObject(&br);
+		CPen penFill(PS_NULL, 0, fill);
+		dc.SelectObject(&penFill);
+		dc.SetPolyFillMode(WINDING);
+		dc.Polygon(poly, n + 2);
+		dc.SelectObject(oldBr);
+		CPen penLine(PS_SOLID, S(1) < 1 ? 1 : S(1), line);
+		dc.SelectObject(&penLine);
+		dc.Polyline(pts, n);
+	}
+	dc.SelectObject(oldPen);
+}
+
+void CCustomSysPerfCtrl::DrawMemory(CDC& dc, const CRect& rc, BOOL bAeroTrans)
+{
+	if (rc.IsRectEmpty()) return;
+	const COLORREF clrLabel = bAeroTrans ? RGB(200, 200, 200) : RGB(80, 80, 80);
+	const COLORREF clrValue = bAeroTrans ? RGB(255, 255, 255) : RGB(20, 20, 20);
+	CFont* oldFont = dc.SelectObject(&m_fontLabel);
+	dc.SetBkMode(TRANSPARENT);
+
+	CString sInUseL = LL14(L"使用中 (圧縮)", L"In use (Compressed)", L"Utilise (compresse)", L"In uso (compressa)", L"En uso (comprimida)", L"사용 중 (압축)", L"正在使用 (已压缩)", L"قيد الاستخدام (مضغوط)", L"Используется (сжат.)", L"In Verwendung (kompr.)", L"Em uso (comprimida)", L"In gebruik (gecomprimeerd)", L"W uzyciu (skompr.)", L"Kullanimda (sikistirilmis)");
+	CString sAvailL = LL14(L"利用可能", L"Available", L"Disponible", L"Disponibile", L"Disponible", L"사용 가능", L"可用", L"متاح", L"Доступно", L"Verfugbar", L"Disponivel", L"Beschikbaar", L"Dostepne", L"Kullanilabilir");
+	CString sCommitL = LL14(L"コミット済み", L"Committed", L"Valide", L"Assegnato", L"Confirmado", L"커밋됨", L"已提交", L"ملتزم", L"Выделено", L"Festgeschrieben", L"Confirmado", L"Vastgelegd", L"Zadeklarowane", L"Ayrilmis");
+	CString sCacheL = LL14(L"キャッシュ済み", L"Cached", L"Cache", L"Cache", L"Cache", L"캐시됨", L"已缓存", L"مخزن مؤقت", L"Кэш", L"Zwischengespeichert", L"Em cache", L"Gecached", L"W pamieci podrecznej", L"Onbellekte");
+	CString sPagedL = LL14(L"ページ プール", L"Paged pool", L"Pool page", L"Pool paginato", L"Grupo paginado", L"페이지 풀", L"分页池", L"تجمع الصفحات", L"Выгружаемый пул", L"Seitenpool", L"Pool paginado", L"Wisselpool", L"Stronicowany pul", L"Sayfali havuz");
+	CString sNonPagedL = LL14(L"非ページ プール", L"Non-paged pool", L"Pool non page", L"Pool non paginato", L"Grupo no paginado", L"비페이지 풀", L"非分页池", L"تجمع غير صفحات", L"Невыгружаемый пул", L"Nichtseitenpool", L"Pool nao paginado", L"Niet-wisselpool", L"Niestronicowany pul", L"Sayfasiz havuz");
+	CString sSpeedL = LL14(L"速度", L"Speed", L"Vitesse", L"Velocita", L"Velocidad", L"속도", L"速度", L"السرعة", L"Скорость", L"Geschwindigkeit", L"Velocidade", L"Snelheid", L"Predkosc", L"Hiz");
+	CString sSlotsL = LL14(L"スロットの使用", L"Slots used", L"Emplacements", L"Slot usati", L"Ranuras usadas", L"슬롯 사용", L"已用插槽", L"الفتحات المستخدمة", L"Слоты", L"Steckplatze", L"Slots usados", L"Slots gebruikt", L"Uzyte sloty", L"Kullanilan yuvalar");
+	CString sFormL = LL14(L"フォーム ファクター", L"Form factor", L"Facteur de forme", L"Fattore di forma", L"Factor de forma", L"폼 팩터", L"外形规格", L"عامل الشكل", L"Форм-фактор", L"Formfaktor", L"Fator de forma", L"Vormfactor", L"Forma", L"Form faktoru");
+	CString sHwL = LL14(L"ハードウェア予約済み", L"Hardware reserved", L"Reserve materiel", L"Riservata hardware", L"Reservado por hardware", L"하드웨어 예약", L"硬件保留", L"محجوز للأجهزة", L"Зарезерв. оборудованием", L"Hardwarereserviert", L"Reservado por hardware", L"Gereserveerd door hardware", L"Zarezerwowane przez sprzet", L"Donanim tarafindan ayrilan");
+
+	CString vInUse, vComp, vAvail, vCommit, vCache, vPaged, vNonPaged, vHw, vSpeed, vSlots, vForm;
+	FormatBytesGB(m_memInUse, vInUse);
+	if (m_bHaveCompressed) {
+		FormatBytesGB(m_memCompressed, vComp);
+		vInUse += _T(" (");
+		vInUse += vComp;
+		vInUse += _T(")");
+	}
+	FormatBytesGB(m_memAvail, vAvail);
+	{
+		CString a, b;
+		FormatBytesGB(m_memCommit, a);
+		FormatBytesGB(m_memCommitLimit, b);
+		vCommit.Format(_T("%s/%s"), (LPCTSTR)a, (LPCTSTR)b);
+	}
+	FormatBytesGB(m_memCached, vCache);
+	FormatBytesGB(m_memPaged, vPaged);
+	FormatBytesGB(m_memNonPaged, vNonPaged);
+	FormatBytesGB(m_memHwReserved, vHw);
+	if (m_memSpeedMTs > 0)
+		vSpeed.Format(_T("%u MT/s"), m_memSpeedMTs);
+	else
+		vSpeed = _T("-");
+	if (m_memSlotsTotal > 0)
+		vSlots.Format(_T("%u/%u"), m_memSlotsUsed, m_memSlotsTotal);
+	else if (m_memSlotsUsed > 0)
+		vSlots.Format(_T("%u"), m_memSlotsUsed);
+	else
+		vSlots = _T("-");
+	if (m_memFormFactor == 0x09)
+		vForm = _T("DIMM");
+	else if (m_memFormFactor == 0x0D)
+		vForm = _T("SODIMM");
+	else if (m_memFormFactor != 0)
+		vForm.Format(_T("0x%02X"), m_memFormFactor);
+	else
+		vForm = _T("-");
+
+	struct Cell { const CString* lab; const CString* val; };
+	Cell cells[10];
+	cells[0].lab = &sInUseL; cells[0].val = &vInUse;
+	cells[1].lab = &sAvailL; cells[1].val = &vAvail;
+	cells[2].lab = &sCommitL; cells[2].val = &vCommit;
+	cells[3].lab = &sCacheL; cells[3].val = &vCache;
+	cells[4].lab = &sPagedL; cells[4].val = &vPaged;
+	cells[5].lab = &sNonPagedL; cells[5].val = &vNonPaged;
+	cells[6].lab = &sSpeedL; cells[6].val = &vSpeed;
+	cells[7].lab = &sSlotsL; cells[7].val = &vSlots;
+	cells[8].lab = &sFormL; cells[8].val = &vForm;
+	cells[9].lab = &sHwL; cells[9].val = &vHw;
+
+	const int cols = 3;
+	const int rows = 4;
+	const int cw = rc.Width() / cols;
+	const int rh = rc.Height() / rows;
+	if (cw < 8 || rh < 12) {
+		dc.SelectObject(oldFont);
+		return;
+	}
+
+	// セル高さからラベル/値の領域とフォントを決める（固定オフセットだと値が潰れる）
+	int labelH = rh * 38 / 100;
+	int valueH = rh - labelH;
+	if (labelH < 10) labelH = 10;
+	if (valueH < 12) {
+		valueH = (rh > 18) ? 12 : (rh * 55 / 100);
+		labelH = rh - valueH;
+		if (labelH < 8) labelH = rh / 2;
+		valueH = rh - labelH;
+	}
+	int labelPx = labelH - 1;
+	int valuePx = valueH - 1;
+	if (labelPx < 8) labelPx = 8;
+	if (valuePx < 10) valuePx = 10;
+	if (labelPx > labelH) labelPx = labelH;
+	if (valuePx > valueH) valuePx = valueH;
+
+	LOGFONT lf = {};
+	lf.lfCharSet = DEFAULT_CHARSET;
+	_tcscpy_s(lf.lfFaceName, _T("Segoe UI"));
+	lf.lfHeight = -labelPx;
+	lf.lfWeight = FW_NORMAL;
+	CFont fontLab;
+	fontLab.CreateFontIndirect(&lf);
+	lf.lfHeight = -valuePx;
+	lf.lfWeight = FW_BOLD;
+	CFont fontVal;
+	fontVal.CreateFontIndirect(&lf);
+
+	for (int i = 0; i < 10; ++i) {
+		const int col = i % cols;
+		const int row = i / cols;
+		CRect cell(rc.left + col * cw, rc.top + row * rh, rc.left + (col + 1) * cw, rc.top + (row + 1) * rh);
+		cell.DeflateRect(S(2), 0);
+		if (cell.Height() < 8) continue;
+
+		CRect labR = cell;
+		labR.bottom = labR.top + labelH;
+		if (labR.bottom > cell.bottom) labR.bottom = cell.bottom;
+		CRect valR = cell;
+		valR.top = labR.bottom;
+		if (valR.top >= valR.bottom) {
+			// 高不足時は同一セル内で値のみ（ラベル省略しないようラベル優先で縮める）
+			valR = cell;
+			valR.top = cell.top + cell.Height() / 2;
+		}
+
+		dc.SelectObject(&fontLab);
+		dc.SetTextColor(clrLabel);
+		dc.DrawText(*cells[i].lab, labR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+		dc.SelectObject(&fontVal);
+		dc.SetTextColor(clrValue);
+		dc.DrawText(*cells[i].val, valR, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+	}
+	dc.SelectObject(oldFont);
+}
+
+void CCustomSysPerfCtrl::DrawOverallCpu(CDC& dc, const CRect& rc, BOOL bAeroTrans)
+{
+	if (rc.IsRectEmpty()) return;
+	const COLORREF clrLabel = bAeroTrans ? RGB(200, 200, 200) : RGB(80, 80, 80);
+	CFont* oldFont = dc.SelectObject(&m_fontLabel);
+	dc.SetBkMode(TRANSPARENT);
+	dc.SetTextColor(clrLabel);
+	CString title = LL14(
+		L"CPU  60 秒間の使用率 (%)",
+		L"CPU  Utilization over 60 seconds (%)",
+		L"CPU  Utilisation sur 60 secondes (%)",
+		L"CPU  Utilizzo in 60 secondi (%)",
+		L"CPU  Uso durante 60 segundos (%)",
+		L"CPU  60초간 사용률 (%)",
+		L"CPU  60 秒利用率 (%)",
+		L"CPU  الاستخدام خلال 60 ثانية (%)",
+		L"CPU  Использование за 60 с (%)",
+		L"CPU  Auslastung uber 60 Sekunden (%)",
+		L"CPU  Utilizacao em 60 segundos (%)",
+		L"CPU  Gebruik over 60 seconden (%)",
+		L"CPU  Uzycie przez 60 sekund (%)",
+		L"CPU  60 saniyelik kullanim (%)");
+	CRect hdr = rc;
+	hdr.bottom = hdr.top + S(14);
+	dc.DrawText(title, hdr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+	CString pct;
+	pct.Format(_T("%u%%"), (UINT)m_overallNow);
+	dc.DrawText(pct, hdr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+
+	CRect plot = rc;
+	plot.top = hdr.bottom + S(1);
+	if (plot.Height() > 4)
+		DrawSpark(dc, plot, m_overallHist, m_histCount, bAeroTrans);
+	dc.SelectObject(oldFont);
+}
+
+void CCustomSysPerfCtrl::DrawCoreGrid(CDC& dc, const CRect& rc, BOOL bAeroTrans)
+{
+	if (rc.IsRectEmpty() || m_coreCount <= 0) return;
+	int cols = m_gridCols;
+	if (cols <= 0) {
+		const int minCell = S(56);
+		cols = rc.Width() / (minCell > 1 ? minCell : 1);
+		if (cols < 2) cols = 2;
+		if (cols > 12) cols = 12;
+	}
+	int rows = (m_coreCount + cols - 1) / cols;
+	if (rows < 1) rows = 1;
+	const int cw = rc.Width() / cols;
+	const int rh = rc.Height() / rows;
+	const COLORREF border = bAeroTrans ? RGB(70, 70, 70) : RGB(200, 200, 200);
+	CPen pen(PS_SOLID, 1, border);
+	CPen* oldPen = dc.SelectObject(&pen);
+	for (int i = 0; i < m_coreCount; ++i) {
+		const int col = i % cols;
+		const int row = i / cols;
+		CRect cell(rc.left + col * cw, rc.top + row * rh, rc.left + (col + 1) * cw, rc.top + (row + 1) * rh);
+		dc.Rectangle(cell);
+		cell.DeflateRect(1, 1);
+		if (cell.Width() > 2 && cell.Height() > 2)
+			DrawSpark(dc, cell, m_coreHist[i], m_histCount, bAeroTrans);
+	}
+	dc.SelectObject(oldPen);
+}
+
+void CCustomSysPerfCtrl::DrawPerfLayer(CDC& dc, const CRect& r, BOOL bAeroTrans)
+{
+	if (r.Width() <= 0 || r.Height() <= 0) return;
+	CRect rcMem, rcOverall, rcGrid;
+	LayoutRects(r, rcMem, rcOverall, rcGrid);
+	DrawMemory(dc, rcMem, bAeroTrans);
+	DrawOverallCpu(dc, rcOverall, bAeroTrans);
+	DrawCoreGrid(dc, rcGrid, bAeroTrans);
+	CCC_DrawInwoman(&dc, r, bAeroTrans);
+}
+
+void CCustomSysPerfCtrl::PaintClient(CDC& dc)
+{
+	CRect r;
+	GetClientRect(&r);
+	PaintClient(dc, r);
+}
+
+void CCustomSysPerfCtrl::PaintClient(CDC& dc, const CRect& r)
+{
+	const int rw = r.Width();
+	const int rh = r.Height();
+	if (rw <= 0 || rh <= 0) return;
+
+	CDC mDC;
+	if (!mDC.CreateCompatibleDC(&dc)) {
+		DrawPerfLayer(dc, r, FALSE);
+		return;
+	}
+	CBitmap bmp;
+	if (!bmp.CreateCompatibleBitmap(&dc, rw, rh)) {
+		mDC.DeleteDC();
+		DrawPerfLayer(dc, r, FALSE);
+		return;
+	}
+	CBitmap* ob = mDC.SelectObject(&bmp);
+	CRect local(0, 0, rw, rh);
+
+#if CCUSTOM_AERO_SUPPORT
+	const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+#else
+	const BOOL bTrans = FALSE;
+#endif
+	if (bTrans)
+	{
+#if CCUSTOM_AERO_SUPPORT
+		mDC.FillSolidRect(&local, CCC_AERO_CHROMA_KEY);
+		DrawPerfLayer(mDC, local, TRUE);
+		if (CCC_IsAeroEnabled() && CCC_IsWin11())
+			CCC_BlitChromaCached(dc.GetSafeHdc(), r.left, r.top, rw, rh,
+				mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY, m_chromaCache);
+		else
+			CCC_BlitChromaTrans(dc.GetSafeHdc(), r.left, r.top, rw, rh,
+				mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+#endif
+	}
+	else
+	{
+		mDC.FillSolidRect(&local, COLOR_DIALOG_BG);
+		DrawPerfLayer(mDC, local, FALSE);
+		dc.BitBlt(r.left, r.top, rw, rh, &mDC, 0, 0, SRCCOPY);
+	}
+
+	mDC.SelectObject(ob);
+	mDC.DeleteDC();
+}
+
+void CCustomSysPerfCtrl::PaintOpaqueClient(CDC& dc)
+{
+	CRect r;
+	GetClientRect(&r);
+	if (r.Width() <= 0 || r.Height() <= 0) return;
+	BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+	params.dwFlags = BPPF_ERASE;
+	HDC hdcBuf = NULL;
+	HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+	if (!hdcBuf || !hBP) {
+		CDC mem;
+		CBitmap bmp;
+		mem.CreateCompatibleDC(&dc);
+		bmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
+		CBitmap* old = mem.SelectObject(&bmp);
+		mem.FillSolidRect(0, 0, r.Width(), r.Height(), COLOR_DIALOG_BG);
+		DrawPerfLayer(mem, CRect(0, 0, r.Width(), r.Height()), FALSE);
+		dc.BitBlt(0, 0, r.Width(), r.Height(), &mem, 0, 0, SRCCOPY);
+		mem.SelectObject(old);
+		return;
+	}
+	CDC mem;
+	mem.Attach(hdcBuf);
+	mem.FillSolidRect(&r, COLOR_DIALOG_BG);
+	DrawPerfLayer(mem, r, FALSE);
+	mem.Detach();
+	::BufferedPaintMakeOpaque(hBP, &r);
+	::EndBufferedPaint(hBP, TRUE);
+}
+
+void CCustomSysPerfCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
+{
+	if (!hdcBuf || !m_hWnd) return;
+	CRect r;
+	GetClientRect(&r);
+	CDC mem;
+	mem.Attach(hdcBuf);
+	mem.FillSolidRect(&r, COLOR_DIALOG_BG);
+	DrawPerfLayer(mem, r, FALSE);
+	mem.Detach();
+}
+
+void CCustomSysPerfCtrl::OnPaint()
+{
+	CPaintDC dc(this);
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_HostNeedsChildOpaque(m_hWnd))
+	{
+		PaintOpaqueClient(dc);
+		return;
+	}
+#endif
+	PaintClient(dc);
+}
+
+BOOL CCustomSysPerfCtrl::OnEraseBkgnd(CDC* pDC)
+{
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_HostNeedsChildOpaque(m_hWnd) && pDC)
+	{
+		CRect r;
+		GetClientRect(&r);
+		CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, COLOR_DIALOG_BG);
+		return TRUE;
+	}
+	if (CCC_UseTransPaint(m_hWnd, m_bAeroMode)) return TRUE;
+#endif
+	if (pDC)
+	{
+		CRect r;
+		GetClientRect(&r);
+		pDC->FillSolidRect(&r, COLOR_DIALOG_BG);
+	}
+	return TRUE;
+}
+
+LRESULT CCustomSysPerfCtrl::OnPrintClient(WPARAM wParam, LPARAM)
+{
+	CDC* pDC = CDC::FromHandle((HDC)wParam);
+	if (!pDC) return 0;
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_HostNeedsChildOpaque(m_hWnd))
+	{
+		PaintOpaqueClient(*pDC);
+		return 1;
+	}
+#endif
+	PaintClient(*pDC);
+	return 0;
+}
+
+void CCustomSysPerfCtrl::CopyStatsToClipboard()
+{
+	CString a, b, c, d, e, f, g;
+	FormatBytesGB(m_memInUse, a);
+	FormatBytesGB(m_memAvail, b);
+	FormatBytesGB(m_memCommit, c);
+	FormatBytesGB(m_memCommitLimit, d);
+	FormatBytesGB(m_memCached, e);
+	FormatBytesGB(m_memPaged, f);
+	FormatBytesGB(m_memNonPaged, g);
+	CString s;
+	s.Format(_T("CPU %u%%\r\nInUse %s\r\nAvail %s\r\nCommit %s/%s\r\nCache %s\r\nPaged %s\r\nNonPaged %s\r\nSpeed %u MT/s\r\nSlots %u/%u\r\n"),
+		(UINT)m_overallNow, (LPCTSTR)a, (LPCTSTR)b, (LPCTSTR)c, (LPCTSTR)d, (LPCTSTR)e, (LPCTSTR)f, (LPCTSTR)g,
+		m_memSpeedMTs, m_memSlotsUsed, m_memSlotsTotal);
+	if (OpenClipboard()) {
+		EmptyClipboard();
+		const SIZE_T bytes = ((SIZE_T)s.GetLength() + 1) * sizeof(WCHAR);
+		HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes);
+		if (h) {
+			void* p = GlobalLock(h);
+			if (p) {
+				memcpy(p, (LPCWSTR)s, bytes);
+				GlobalUnlock(h);
+				SetClipboardData(CF_UNICODETEXT, h);
+			} else {
+				GlobalFree(h);
+			}
+		}
+		CloseClipboard();
+	}
+}
+
+void CCustomSysPerfCtrl::ShowCtxMenu(CPoint screenPt)
+{
+	CMenu menu;
+	menu.CreatePopupMenu();
+	menu.AppendMenu(MF_STRING | (m_viewMode == VIEW_ALL ? MF_CHECKED : 0), kCmdViewAll,
+		LL14(L"すべて表示", L"Show all", L"Tout afficher", L"Mostra tutto", L"Mostrar todo", L"모두 표시", L"全部显示", L"عرض الكل", L"Показать все", L"Alles anzeigen", L"Mostrar tudo", L"Alles tonen", L"Pokaz wszystko", L"Tumunu goster"));
+	menu.AppendMenu(MF_STRING | (m_viewMode == VIEW_MEM ? MF_CHECKED : 0), kCmdViewMem,
+		LL14(L"メモリのみ", L"Memory only", L"Memoire seule", L"Solo memoria", L"Solo memoria", L"메모리만", L"仅内存", L"الذاكرة فقط", L"Только память", L"Nur Speicher", L"Somente memoria", L"Alleen geheugen", L"Tylko pamiec", L"Yalniz bellek"));
+	menu.AppendMenu(MF_STRING | (m_viewMode == VIEW_CPU_OVERALL ? MF_CHECKED : 0), kCmdViewCpuOverall,
+		LL14(L"CPU 全体のみ", L"CPU overall only", L"CPU global seul", L"Solo CPU totale", L"Solo CPU total", L"CPU 전체만", L"仅 CPU 总体", L"وحدة المعالجة فقط", L"Только CPU общий", L"Nur CPU gesamt", L"Somente CPU geral", L"Alleen CPU totaal", L"Tylko CPU ogolne", L"Yalniz CPU genel"));
+	menu.AppendMenu(MF_STRING | (m_viewMode == VIEW_CPU_GRID ? MF_CHECKED : 0), kCmdViewCpuGrid,
+		LL14(L"CPU グリッドのみ", L"CPU grid only", L"Grille CPU seule", L"Solo griglia CPU", L"Solo cuadrícula CPU", L"CPU 그리드만", L"仅 CPU 网格", L"شبكة المعالج فقط", L"Только сетка CPU", L"Nur CPU-Raster", L"Somente grade CPU", L"Alleen CPU-raster", L"Tylko siatka CPU", L"Yalniz CPU izgarasi"));
+	menu.AppendMenu(MF_STRING | (m_viewMode == VIEW_CPU_BOTH ? MF_CHECKED : 0), kCmdViewCpuBoth,
+		LL14(L"CPU のみ (全体+グリッド)", L"CPU only (overall+grid)", L"CPU seul (global+grille)", L"Solo CPU (totale+griglia)", L"Solo CPU (total+cuadrícula)", L"CPU만 (전체+그리드)", L"仅 CPU（总体+网格）", L"المعالج فقط (كلي+شبكة)", L"Только CPU (общий+сетка)", L"Nur CPU (gesamt+Raster)", L"Somente CPU (geral+grade)", L"Alleen CPU (totaal+raster)", L"Tylko CPU (ogolne+siatka)", L"Yalniz CPU (genel+izgara)"));
+	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING | (m_bPaused ? MF_CHECKED : 0), kCmdPause,
+		m_bPaused
+		? LL14(L"更新を再開", L"Resume updates", L"Reprendre", L"Riprendi", L"Reanudar", L"업데이트 재개", L"恢复更新", L"استئناف التحديث", L"Возобновить", L"Fortsetzen", L"Retomar", L"Hervatten", L"Wznow", L"Devam et")
+		: LL14(L"更新を一時停止", L"Pause updates", L"Pause", L"Pausa", L"Pausar", L"업데이트 일시정지", L"暂停更新", L"إيقاف مؤقت", L"Пауза", L"Pausieren", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
+	menu.AppendMenu(MF_STRING, kCmdCopy,
+		LL14(L"統計をコピー", L"Copy statistics", L"Copier les stats", L"Copia statistiche", L"Copiar estadisticas", L"통계 복사", L"复制统计", L"نسخ الإحصاءات", L"Копировать статистику", L"Statistik kopieren", L"Copiar estatisticas", L"Statistieken kopieren", L"Kopiuj statystyki", L"Istatistikleri kopyala"));
+	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING | (m_gridCols == 0 ? MF_CHECKED : 0), kCmdColsAuto,
+		LL14(L"グリッド列: 自動", L"Grid columns: Auto", L"Colonnes: Auto", L"Colonne: Auto", L"Columnas: Auto", L"그리드 열: 자동", L"网格列: 自动", L"أعمدة الشبكة: تلقائي", L"Столбцы: Авто", L"Rasterspalten: Auto", L"Colunas: Auto", L"Rasterkolommen: Auto", L"Kolumny: Auto", L"Izgara sutun: Otomatik"));
+	menu.AppendMenu(MF_STRING | (m_gridCols == 4 ? MF_CHECKED : 0), kCmdCols4, _T("4"));
+	menu.AppendMenu(MF_STRING | (m_gridCols == 6 ? MF_CHECKED : 0), kCmdCols6, _T("6"));
+	menu.AppendMenu(MF_STRING | (m_gridCols == 8 ? MF_CHECKED : 0), kCmdCols8, _T("8"));
+
+	const UINT cmd = menu.TrackPopupMenu(TPM_RETURNCMD | TPM_RIGHTBUTTON, screenPt.x, screenPt.y, this);
+	switch (cmd) {
+	case kCmdViewAll: SetViewMode(VIEW_ALL); break;
+	case kCmdViewMem: SetViewMode(VIEW_MEM); break;
+	case kCmdViewCpuOverall: SetViewMode(VIEW_CPU_OVERALL); break;
+	case kCmdViewCpuGrid: SetViewMode(VIEW_CPU_GRID); break;
+	case kCmdViewCpuBoth: SetViewMode(VIEW_CPU_BOTH); break;
+	case kCmdPause: m_bPaused = !m_bPaused; break;
+	case kCmdCopy: CopyStatsToClipboard(); break;
+	case kCmdColsAuto: m_gridCols = 0; Invalidate(FALSE); break;
+	case kCmdCols4: m_gridCols = 4; Invalidate(FALSE); break;
+	case kCmdCols6: m_gridCols = 6; Invalidate(FALSE); break;
+	case kCmdCols8: m_gridCols = 8; Invalidate(FALSE); break;
+	default: break;
+	}
+}
+
+void CCustomSysPerfCtrl::OnRButtonUp(UINT nFlags, CPoint point)
+{
+	UNREFERENCED_PARAMETER(nFlags);
+	CPoint pt = point;
+	ClientToScreen(&pt);
+	ShowCtxMenu(pt);
+}
+
+void CCustomSysPerfCtrl::OnContextMenu(CWnd* pWnd, CPoint point)
+{
+	UNREFERENCED_PARAMETER(pWnd);
+	if (point.x == -1 && point.y == -1) {
+		CRect r;
+		GetWindowRect(&r);
+		point.x = r.left + S(8);
+		point.y = r.top + S(8);
+	}
+	ShowCtxMenu(point);
+}
+
+// ============================================================================
 IMPLEMENT_DYNAMIC(CCustomGroupBox, CButton)
 
 BEGIN_MESSAGE_MAP(CCustomGroupBox, CButton)
@@ -9405,6 +10412,7 @@ static COLORREF CCC_OpaqueBgForHwnd(HWND hWnd)
         if (dynamic_cast<CCustomComboBox*>(pw)) return COLOR_COMBO_BG;
         if (dynamic_cast<CCustomStandardButton*>(pw) || dynamic_cast<CButtonST*>(pw)) return COLOR_BUTTON_BG;
         if (dynamic_cast<CCustomProgressCtrl*>(pw)) return COLOR_DIALOG_BG;
+        if (dynamic_cast<CCustomSysPerfCtrl*>(pw)) return COLOR_DIALOG_BG;
         if (dynamic_cast<CCustomEdit*>(pw)) return COLOR_EDIT_BG;
     }
     TCHAR cls[64] = {};
@@ -9430,6 +10438,7 @@ static BOOL CCC_IsBlurControl(HWND hWnd)
         if (dynamic_cast<CCustomGroupBox*>(pw)) return TRUE;
         if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
         if (dynamic_cast<CCustomProgressCtrl*>(pw)) return TRUE;
+        if (dynamic_cast<CCustomSysPerfCtrl*>(pw)) return TRUE;
     }
     TCHAR cls[64] = {};
     ::GetClassName(hWnd, cls, 63);
@@ -9495,6 +10504,7 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
             if (dynamic_cast<CCustomRangeSliderCtrl*>(pw)) return TRUE;
             if (dynamic_cast<CCustomCheckBox*>(pw)) return TRUE;
             if (dynamic_cast<CCustomProgressCtrl*>(pw)) return TRUE;
+            if (dynamic_cast<CCustomSysPerfCtrl*>(pw)) return TRUE;
         }
         TCHAR cls[64] = {};
         ::GetClassName(hWnd, cls, 63);
@@ -9592,6 +10602,12 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     else if (auto* pProg = dynamic_cast<CCustomProgressCtrl*>(pw))
     {
         pProg->PaintOpaqueIntoBuffer(hdcBuf);
+        dc.Detach();
+        return TRUE;
+    }
+    else if (auto* pPerf = dynamic_cast<CCustomSysPerfCtrl*>(pw))
+    {
+        pPerf->PaintOpaqueIntoBuffer(hdcBuf);
         dc.Detach();
         return TRUE;
     }

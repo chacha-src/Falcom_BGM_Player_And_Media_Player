@@ -1,4 +1,4 @@
-﻿//{{NO_DEPENDENCIES}}
+//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ ??????????C???N???[?h ?t?@?C???B
 // ogg.rc ??g?p
 //
@@ -410,6 +410,7 @@
 #define IDC_OGG_GRP_GAME                3373
 #define IDC_ABOUT_VER                   3374
 #define IDC_ABOUT_COPY                  3375
+#define IDC_ABOUT_PERF                  3829
 #define IDC_STATIC_R_HZ                 3376
 #define IDC_SYOSAI_GRP_EDIT             3377
 #define IDC_SYOSAI_GRP_TAG              3378
@@ -1123,7 +1124,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        217
 #define _APS_NEXT_COMMAND_VALUE         32974
-#define _APS_NEXT_CONTROL_VALUE         3829
+#define _APS_NEXT_CONTROL_VALUE         3830
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

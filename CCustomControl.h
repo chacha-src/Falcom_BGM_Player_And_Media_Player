@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "stdafx.h"
 #include "afxdialogex.h"
@@ -1363,6 +1363,113 @@ private:
 };
 
 // ============================================================================
+// システム性能パネル (メモリ数値 + CPU 全体/コア別グラフ・アクリル/淫女対応)
+// CCustomSysPerfCtrl
+// ============================================================================
+class CCustomSysPerfCtrl : public CWnd
+{
+	DECLARE_DYNAMIC(CCustomSysPerfCtrl)
+public:
+	enum {
+		VIEW_ALL = 0,
+		VIEW_MEM,
+		VIEW_CPU_OVERALL,
+		VIEW_CPU_GRID,
+		VIEW_CPU_BOTH
+	};
+	static const int kMaxCores = 64;
+	static const int kHistLen = 60;
+
+	CCustomSysPerfCtrl();
+	virtual ~CCustomSysPerfCtrl();
+	void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
+	BOOL m_bAutoDelete;
+
+	BOOL Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID);
+	void SetAeroMode(BOOL b);
+	void PaintOpaqueIntoBuffer(HDC hdcBuf);
+	void SetViewMode(int mode);
+	int  GetViewMode() const { return m_viewMode; }
+
+protected:
+	virtual void PostNcDestroy();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
+	afx_msg void OnDestroy();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
+	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
+	afx_msg BOOL OnToolTipNotify(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
+	DECLARE_MESSAGE_MAP()
+
+private:
+	void PaintClient(CDC& dc);
+	void PaintClient(CDC& dc, const CRect& r);
+	void DrawPerfLayer(CDC& dc, const CRect& r, BOOL bAeroTrans);
+	void PaintOpaqueClient(CDC& dc);
+	void SampleOnce();
+	void SampleSmbiosOnce();
+	void LayoutRects(const CRect& r, CRect& rcMem, CRect& rcOverall, CRect& rcGrid);
+	void DrawMemory(CDC& dc, const CRect& rc, BOOL bAeroTrans);
+	void DrawOverallCpu(CDC& dc, const CRect& rc, BOOL bAeroTrans);
+	void DrawCoreGrid(CDC& dc, const CRect& rc, BOOL bAeroTrans);
+	void DrawSpark(CDC& dc, const CRect& rc, const BYTE* hist, int histCount, BOOL bAeroTrans);
+	void FormatBytesGB(ULONGLONG bytes, CString& out);
+	void CopyStatsToClipboard();
+	void ShowCtxMenu(CPoint screenPt);
+	UINT Dpi() const;
+	int  S(int v) const;
+
+	BOOL m_bAeroMode;
+	BOOL m_bPaused;
+	BOOL m_bSmbiosDone;
+	int  m_viewMode;
+	int  m_gridCols; // 0=auto
+	int  m_coreCount;
+	int  m_histCount;
+	int  m_histPos;
+	BYTE m_overallHist[kHistLen];
+	BYTE m_coreHist[kMaxCores][kHistLen];
+	BYTE m_overallNow;
+	BYTE m_coreNow[kMaxCores];
+
+	FILETIME m_ftIdlePrev;
+	FILETIME m_ftKerPrev;
+	FILETIME m_ftUsrPrev;
+	BOOL m_bHaveTimes;
+	ULONGLONG m_coreIdlePrev[kMaxCores];
+	ULONGLONG m_coreKerPrev[kMaxCores];
+	ULONGLONG m_coreUsrPrev[kMaxCores];
+	BOOL m_bHaveCore;
+
+	ULONGLONG m_memInUse;
+	ULONGLONG m_memCompressed;
+	ULONGLONG m_memAvail;
+	ULONGLONG m_memCommit;
+	ULONGLONG m_memCommitLimit;
+	ULONGLONG m_memCached;
+	ULONGLONG m_memPaged;
+	ULONGLONG m_memNonPaged;
+	ULONGLONG m_memHwReserved;
+	UINT m_memSpeedMTs;
+	UINT m_memSlotsUsed;
+	UINT m_memSlotsTotal;
+	UINT m_memFormFactor; // SMBIOS form factor
+	BOOL m_bHaveCompressed;
+
+	CString m_tipText;
+	CToolTipCtrl m_tip;
+	CFont m_fontLabel;
+	CFont m_fontValue;
+#if CCUSTOM_AERO_SUPPORT
+	CCC_ChromaBlitCache m_chromaCache;
+#endif
+};
+
+// ============================================================================
 // カスタムグループボックスコントロール
 // CCustomGroupBox
 // ============================================================================
@@ -1424,6 +1531,7 @@ do {                                                                            
             else if (auto* p = dynamic_cast<CCustomCheckBox*>(_pw))        p->SetAeroMode(_bA); \
             else if (auto* p = dynamic_cast<CCustomProgressCtrl*>(_pw))    p->SetAeroMode(_bA); \
             else if (auto* p = dynamic_cast<CCustomLevelMeter*>(_pw))      p->SetAeroMode(_bA); \
+            else if (auto* p = dynamic_cast<CCustomSysPerfCtrl*>(_pw))     p->SetAeroMode(_bA); \
             CCC_SetChildTransparent(_hc, FALSE);                                       \
             _pw->Invalidate();                                                         \
         }                                                                              \
