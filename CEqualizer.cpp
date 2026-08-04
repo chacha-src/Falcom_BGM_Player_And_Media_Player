@@ -1,4 +1,4 @@
-// CEqualizer.cpp : 実装ファイル
+﻿// CEqualizer.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -220,20 +220,20 @@ void CEqHelpDlg::OnPaint()
 		L"· Master / Klarność / Balans / Gęstość / 3D …… ogólny ton",
 		L"· Ana / Netlik / Denge / Yoğunluk / 3B …… genel ton")); y += lh;
 	body(L, y, LL14(
-		L"・リバーブ / コーラス / ディレイ …… 空間系 FX。値は再生に即時反映",
-		L"· Reverb / Chorus / Delay …… spatial FX. Changes apply live",
-		L"· Réverb / Chorus / Delay …… FX spatiaux. Appliqués en direct",
-		L"· Riverbero / Chorus / Delay …… FX spaziali. In tempo reale",
-		L"· Reverb / Chorus / Delay …… FX espaciales. En vivo",
-		L"· 리버브 / 코러스 / 딜레이 …… 공간 FX. 즉시 반영",
-		L"· 混响 / 合唱 / 延迟 …… 空间效果；即时生效",
-		L"· صدى / كورس / تأخير …… FX مكاني. يُطبَّق فوراً",
-		L"· Реверб / Хорус / Дилей …… пространственные FX. Сразу",
-		L"· Hall / Chorus / Delay …… Raum-FX. Sofort wirksam",
-		L"· Reverb / Chorus / Delay …… FX espaciais. Ao vivo",
-		L"· Galm / Chorus / Delay …… ruimte-FX. Meteen",
-		L"· Pogłos / Chorus / Delay …… FX przestrzenne. Natychmiast",
-		L"· Yankı / Koro / Gecikme …… mekansal FX. Anında")); y += lh;
+		L"・リバーブ / コーラス / ディレイ …… 空間系 FX（即時反映）。0=オフ / 1-100=通常 / 101-200=別モード",
+		L"· Reverb / Chorus / Delay …… spatial FX (live). 0=off / 1-100=normal / 101-200=alt mode",
+		L"· Réverb / Chorus / Delay …… FX spatiaux (direct). 0=off / 1-100=normal / 101-200=autre",
+		L"· Riverbero / Chorus / Delay …… FX spaziali (live). 0=off / 1-100=normale / 101-200=altro",
+		L"· Reverb / Chorus / Delay …… FX espaciales (en vivo). 0=off / 1-100=normal / 101-200=otro",
+		L"· 리버브 / 코러스 / 딜레이 …… 공간 FX(즉시). 0=끔 / 1-100=기본 / 101-200=다른 모드",
+		L"· 混响 / 合唱 / 延迟 …… 空间效果（即时）。0=关 / 1-100=普通 / 101-200=另一模式",
+		L"· صدى / كورس / تأخير …… FX مكاني فوري. 0=إيقاف / 1-100=عادي / 101-200=وضع آخر",
+		L"· Реверб / Хорус / Дилей …… FX сразу. 0=выкл / 1-100=обычный / 101-200=другой",
+		L"· Hall / Chorus / Delay …… Raum-FX (sofort). 0=aus / 1-100=normal / 101-200=anderer Modus",
+		L"· Reverb / Chorus / Delay …… FX ao vivo. 0=off / 1-100=normal / 101-200=outro",
+		L"· Galm / Chorus / Delay …… ruimte-FX (meteen). 0=uit / 1-100=normaal / 101-200=andere modus",
+		L"· Pogłos / Chorus / Delay …… FX natychmiast. 0=wył / 1-100=zwykły / 101-200=inny tryb",
+		L"· Yankı / Koro / Gecikme …… mekansal FX (anında). 0=kapalı / 1-100=normal / 101-200=diğer")); y += lh;
 	body(L, y, LL14(
 		L"・A / B / 切替 …… 現在の EQ+グローバルをスロットに保存し、聴き比べ",
 		L"· A / B / Toggle …… store current EQ+global to a slot and A/B compare",
@@ -514,6 +514,52 @@ BOOL CEqualizer::OnInitDialog()
 	addTip(IDC_SLIDER25, LL14(L"バランス（左右・帯域バランス）を調整します（左の数値が現在値）", L"Adjust balance (L/R and band balance; number at left is current value)", L"Ajuster l'equilibre (gauche/droite et bandes; nombre a gauche = valeur actuelle)", L"Regola bilanciamento (L/R e bande; numero a sinistra = valore attuale)", L"Ajustar balance (I/D y bandas; numero a la izquierda = valor actual)", L"밸런스(좌우·대역) 조정(왼쪽 숫자가 현재값)", L"调整平衡（左右与频段平衡；左侧数字为当前值）", L"ضبط التوازن (يسار/يمين ونطاقات؛ الرقم على اليسار = القيمة الحالية)", L"Настроить баланс (Л/П и полосы; число слева — текущее значение)", L"Balance einstellen (L/R und Bänder; Zahl links = aktueller Wert)", L"Ajustar balanco (E/D e bandas; numero a esquerda = valor atual)", L"Balans instellen (L/R en banden; getal links = huidige waarde)", L"Reguluj balans (L/P i pasma; liczba po lewej = biezaca wartosc)", L"Dengeyi ayarla (L/R ve bant dengesi; soldaki sayi guncel deger)"));
 	addTip(IDC_SLIDER26, LL14(L"密度（音の厚み）を調整します（左の数値が現在値）", L"Adjust density (number at left is current value)", L"Ajuster la densite (nombre a gauche = valeur actuelle)", L"Regola densita (numero a sinistra = valore attuale)", L"Ajustar densidad (numero a la izquierda = valor actual)", L"밀도 조정(왼쪽 숫자가 현재값)", L"调整密度（左侧数字为当前值）", L"ضبط الكثافة (الرقم على اليسار = القيمة الحالية)", L"Настроить плотность (число слева — текущее значение)", L"Dichte einstellen (Zahl links = aktueller Wert)", L"Ajustar densidade (numero a esquerda = valor atual)", L"Dichtheid instellen (getal links = huidige waarde)", L"Reguluj gestosc (liczba po lewej = biezaca wartosc)", L"Yogunlugu ayarla (soldaki sayi guncel deger)"));
 	addTip(IDC_SLIDER27, LL14(L"立体感（空間感）を調整します（左の数値が現在値）", L"Adjust spatial width (number at left is current value)", L"Ajuster l'espace stereo (nombre a gauche = valeur actuelle)", L"Regola spazialita (numero a sinistra = valore attuale)", L"Ajustar amplitud espacial (numero a la izquierda = valor actual)", L"입체감 조정(왼쪽 숫자가 현재값)", L"调整立体感（左侧数字为当前值）", L"ضبط العرض المكاني (الرقم على اليسار = القيمة الحالية)", L"Настроить пространственность (число слева — текущее значение)", L"Raumlichkeit einstellen (Zahl links = aktueller Wert)", L"Ajustar espacialidade (numero a esquerda = valor atual)", L"Ruimtelijkheid instellen (getal links = huidige waarde)", L"Reguluj przestrzennosc (liczba po lewej = biezaca wartosc)", L"Mekansal genisligi ayarla (soldaki sayi guncel deger)"));
+	// oggDlg_ds: 0=オフ / 1-100=モードA / 101-200=モードB（強さは各区間内で 0..1）
+	addTip(IDC_SLIDER28, LL14(
+		L"リバーブ量（左の数値が現在値）\n0=オフ / 1-100=リバーブ / 101-200=パンリバーブ",
+		L"Reverb amount (number at left is current)\n0=off / 1-100=reverb / 101-200=panning reverb",
+		L"Quantite de reverb (nombre a gauche)\n0=off / 1-100=reverb / 101-200=reverb panoramique",
+		L"Quantita riverbero (numero a sinistra)\n0=off / 1-100=riverbero / 101-200=riverbero pan",
+		L"Cantidad de reverb (numero a la izquierda)\n0=off / 1-100=reverb / 101-200=reverb panoramico",
+		L"리버브 양(왼쪽 숫자가 현재값)\n0=끔 / 1-100=리버브 / 101-200=팬 리버브",
+		L"混响量（左侧为当前值）\n0=关 / 1-100=混响 / 101-200=声像混响",
+		L"مقدار الصدى (الرقم على اليسار)\n0=إيقاف / 1-100=صدى / 101-200=صدى بانورامي",
+		L"Уровень реверба (число слева)\n0=выкл / 1-100=реверб / 101-200=панорамный реверб",
+		L"Hall-Anteil (Zahl links)\n0=aus / 1-100=Hall / 101-200=Pan-Hall",
+		L"Quantidade de reverb (numero a esquerda)\n0=off / 1-100=reverb / 101-200=reverb panoramico",
+		L"Galmhoeveelheid (getal links)\n0=uit / 1-100=galm / 101-200=pan-galm",
+		L"Ilosc poglosu (liczba po lewej)\n0=wył / 1-100=pogłos / 101-200=pogłos panoramiczny",
+		L"Yankı miktarı (soldaki sayı)\n0=kapalı / 1-100=yankı / 101-200=pan yankı"));
+	addTip(IDC_SLIDER29, LL14(
+		L"コーラス量（左の数値が現在値）\n0=オフ / 1-100=コーラス / 101-200=コーラスディストーション",
+		L"Chorus amount (number at left is current)\n0=off / 1-100=chorus / 101-200=chorus distortion",
+		L"Quantite de chorus (nombre a gauche)\n0=off / 1-100=chorus / 101-200=chorus distortion",
+		L"Quantita chorus (numero a sinistra)\n0=off / 1-100=chorus / 101-200=chorus distortion",
+		L"Cantidad de chorus (numero a la izquierda)\n0=off / 1-100=chorus / 101-200=chorus distortion",
+		L"코러스 양(왼쪽 숫자가 현재값)\n0=끔 / 1-100=코러스 / 101-200=코러스 디스토션",
+		L"合唱量（左侧为当前值）\n0=关 / 1-100=合唱 / 101-200=合唱失真",
+		L"مقدار الكورس (الرقم على اليسار)\n0=إيقاف / 1-100=كورس / 101-200=تشويه كورس",
+		L"Уровень хоруса (число слева)\n0=выкл / 1-100=хорус / 101-200=хорус+дисторшн",
+		L"Chorus-Anteil (Zahl links)\n0=aus / 1-100=Chorus / 101-200=Chorus-Distortion",
+		L"Quantidade de chorus (numero a esquerda)\n0=off / 1-100=chorus / 101-200=chorus distortion",
+		L"Chorushoeveelheid (getal links)\n0=uit / 1-100=chorus / 101-200=chorus-distortion",
+		L"Ilosc chorusa (liczba po lewej)\n0=wył / 1-100=chorus / 101-200=chorus+distortion",
+		L"Koro miktarı (soldaki sayı)\n0=kapalı / 1-100=koro / 101-200=koro distorsiyon"));
+	addTip(IDC_SLIDER30, LL14(
+		L"ディレイ量（左の数値が現在値）\n0=オフ / 1-100=ディレイ / 101-200=マルチディレイ（ピンポン）",
+		L"Delay amount (number at left is current)\n0=off / 1-100=delay / 101-200=multi-delay (ping-pong)",
+		L"Quantite de delay (nombre a gauche)\n0=off / 1-100=delay / 101-200=multi-delay (ping-pong)",
+		L"Quantita delay (numero a sinistra)\n0=off / 1-100=delay / 101-200=multi-delay (ping-pong)",
+		L"Cantidad de delay (numero a la izquierda)\n0=off / 1-100=delay / 101-200=multi-delay (ping-pong)",
+		L"딜레이 양(왼쪽 숫자가 현재값)\n0=끔 / 1-100=딜레이 / 101-200=멀티 딜레이(핑퐁)",
+		L"延迟量（左侧为当前值）\n0=关 / 1-100=延迟 / 101-200=多重延迟（乒乓）",
+		L"مقدار التأخير (الرقم على اليسار)\n0=إيقاف / 1-100=تأخير / 101-200=تأخير متعدد (بينغ بونغ)",
+		L"Уровень дилея (число слева)\n0=выкл / 1-100=дилей / 101-200=мультидилей (пинг-понг)",
+		L"Delay-Anteil (Zahl links)\n0=aus / 1-100=Delay / 101-200=Multi-Delay (Ping-Pong)",
+		L"Quantidade de delay (numero a esquerda)\n0=off / 1-100=delay / 101-200=multi-delay (pingue-pongue)",
+		L"Delayhoeveelheid (getal links)\n0=uit / 1-100=delay / 101-200=multi-delay (pingpong)",
+		L"Ilosc delayu (liczba po lewej)\n0=wył / 1-100=delay / 101-200=multi-delay (ping-pong)",
+		L"Gecikme miktarı (soldaki sayı)\n0=kapalı / 1-100=gecikme / 101-200=çoklu gecikme (ping-pong)"));
 	addTip(IDC_COMBO1, LL14(L"再生環境（部屋の響き）プリセットを選択します", L"Select acoustic environment preset", L"Choisir le preset d'environnement acoustique", L"Seleziona preset ambiente acustico", L"Seleccionar preset de entorno acustico", L"재생 환경(음향) 프리셋 선택", L"选择播放环境（混响）预设", L"اختر إعداد البيئة الصوتية", L"Выбрать пресет акустической среды", L"Akustische Umgebungsvoreinstellung wahlen", L"Selecionar preset de ambiente acustico", L"Akoestische omgevingspreset kiezen", L"Wybierz preset srodowiska akustycznego", L"Akustik ortam on ayarini sec"));
 	addTip(IDC_COMBO5, LL14(L"イコライザープリセットを選択します", L"Select equalizer preset", L"Choisir un preset d'egaliseur", L"Seleziona preset equalizzatore", L"Seleccionar preset del ecualizador", L"이퀄라이저 프리셋 선택", L"选择均衡器预设", L"اختر إعداد المعادل", L"Выбрать пресет эквалайзера", L"Equalizer-Voreinstellung wahlen", L"Selecionar preset do equalizador", L"Equalizerpreset kiezen", L"Wybierz preset korektora", L"Ekolayzer on ayarini sec"));
 	addTip(IDC_EQ_ABA, LL14(L"現在のEQ/グローバル値をスロットAに保存", L"Store current EQ/global values to slot A", L"Enregistrer EQ/global dans A", L"Salva EQ/global in A", L"Guardar EQ/global en A", L"현재 EQ/전역을 A에 저장", L"将当前EQ/全局存到A", L"حفظ EQ/العام في A", L"Сохранить EQ/глобальные в A", L"EQ/Global in A speichern", L"Salvar EQ/global em A", L"EQ/globaal in A opslaan", L"Zapisz EQ/globalne w A", L"EQ/global degerleri A'ya kaydet"));
