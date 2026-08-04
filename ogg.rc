@@ -1121,10 +1121,10 @@ BEGIN
     LTEXT           "",IDC_DR_METER_MIC,226,86,14,52,SS_NOTIFY | WS_BORDER
     LTEXT           "",IDC_DR_METER_SYS,256,86,14,52,SS_NOTIFY | WS_BORDER
     LTEXT           "",IDC_DR_METER_MIX,286,86,14,52,SS_NOTIFY | WS_BORDER
-    PUSHBUTTON      "録音開始",IDC_DR_START,60,132,90,18
-    PUSHBUTTON      "閉じる",IDC_DR_CLOSE,160,132,90,18
-    LTEXT           "",IDC_DR_TIME,260,136,113,12
-    LTEXT           "",IDC_DR_STATUS,7,156,366,40
+    PUSHBUTTON      "録音開始",IDC_DR_START,60,140,90,18
+    PUSHBUTTON      "閉じる",IDC_DR_CLOSE,160,140,90,18
+    LTEXT           "",IDC_DR_TIME,260,143,113,12
+    LTEXT           "",IDC_DR_STATUS,7,162,366,40
 END
 
 IDD_SCREENCAPTURE DIALOGEX 0, 0, 560, 700
@@ -1549,7 +1549,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,602
+ FILEVERSION 0,9,1,603
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1568,7 +1568,7 @@ BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
             VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.04"
-            VALUE "FileVersion", "0.9.1.602"
+            VALUE "FileVersion", "0.9.1.603"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.08.04"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
@@ -2392,6 +2392,11 @@ BEGIN
 END
 
 IDD_MP_CHEATSHEET AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_DEVICERECORD AFX_DIALOG_LAYOUT
 BEGIN
     0
 END
