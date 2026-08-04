@@ -4,6 +4,7 @@
 #include "oggDlg.h"
 #include "ProAudio.h"
 #include "SongParams.h"
+#include "MpPlayerAddons.h"
 
 #include "PlayList.h"
 //#include <math.h>
@@ -660,6 +661,8 @@ UINT HandleNotifications(LPVOID)
 					memcpy(pdsb2, s_dsStage.data() + copy1, (size_t)copy2);
 				if (stageFade && copy2 > 0) ZeroMemory(pdsb2, (SIZE_T)copy2);
 				dsb->Unlock(pdsb1, len3, pdsb2, len4);
+				if (!stageFade)
+					MpMirrorWritePcm(s_dsStage.data(), stageBytes);
 			}
 			InterlockedExchange(&g_dsDeviceOpBusy, 0);
 		}
@@ -5235,7 +5238,8 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 		masterVolume == 100 && clarity == 100 &&
 		balance == 100 && density == 100 && spatial == 100 &&
 		g_eqReverb == 0 && g_eqChorus == 0 && g_eqDelay == 0 &&
-		savedata.pro_ms_width == 100 && !savedata.pro_ms_mono)
+		savedata.pro_ms_width == 100 && !savedata.pro_ms_mono &&
+		savedata.mpVocalCenter == 100)
 	{
 		bool allFlat = true;
 		for (int i = 0; i < 15; i++) {
@@ -5692,6 +5696,16 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 	if (wavchannel >= 2 && bufferIndex > 0) {
 		ProAudio_ApplyMS(leftSamples, rightSamples, bufferIndex,
 			savedata.pro_ms_width, savedata.pro_ms_mono);
+	}
+	if (wavchannel >= 2 && bufferIndex > 0 && savedata.mpVocalCenter != 100) {
+		const float midGain = savedata.mpVocalCenter / 100.f;
+		for (int i = 0; i < bufferIndex; ++i) {
+			const float mid = (leftSamples[i] + rightSamples[i]) * 0.5f;
+			const float side = (leftSamples[i] - rightSamples[i]) * 0.5f;
+			const float midS = mid * midGain;
+			leftSamples[i] = midS + side;
+			rightSamples[i] = midS - side;
+		}
 	}
 
 	// ===================================================

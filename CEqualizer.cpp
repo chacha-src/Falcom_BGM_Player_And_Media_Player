@@ -14,6 +14,36 @@
 
 namespace {
 
+	enum {
+		IDM_EQ_SUGGEST_KEY = 42220,
+		IDM_EQ_KEY_AUTO = 42221
+	};
+
+	static int EqPresetIndexFromKeyCodes(const CString& keyAll)
+	{
+		CString u = keyAll;
+		u.MakeUpper();
+		int lt = u.ReverseFind(L'<');
+		int gt = u.ReverseFind(L'>');
+		CString chord;
+		if (lt >= 0 && gt > lt)
+			chord = u.Mid(lt + 1, gt - lt - 1);
+		else
+			chord = u;
+		chord.Trim();
+		bool minor = false;
+		if (chord.Find(L"MIN") >= 0 || chord.Find(L"DIM") >= 0 || chord.Find(L"M7B5") >= 0)
+			minor = true;
+		else if (chord.GetLength() >= 2 && chord[1] == L'M') {
+			if (chord.GetLength() == 2)
+				minor = true;
+			else if (chord[2] != L'A' && chord[2] != L'J')
+				minor = true;
+		}
+		if (minor) return 31;
+		return 11;
+	}
+
 class CEqHelpDlg : public CDialog
 {
 public:
@@ -280,7 +310,24 @@ void CEqHelpDlg::OnPaint()
 		L"Otwórz przez «?». Najedź na suwaki, by zobaczyć podpowiedzi.",
 		L"Başlık «?» ile açın. Kaydırıcılara gelince ayrıntılı ipucu çıkar."));
 
-	dc.SelectObject(oldFont);
+	
+	body(L, y, LL14(
+		L"・右クリック …… キーからEQを提案 / キー検出時に自動提案",
+		L"· Right-click …… suggest EQ from key / auto-suggest on detect",
+		L"· Clic droit …… EQ depuis la tonalite / suggestion auto",
+		L"· Destro …… EQ dalla tonalita / suggerimento auto",
+		L"· Clic der. …… EQ desde tonalidad / sugerencia auto",
+		L"· 우클릭 …… 키에서 EQ 제안 / 검출 시 자동 제안",
+		L"· 右键 …… 根据调性建议 EQ / 检测时自动建议",
+		L"· يمين …… اقتراح EQ من المفتاح / اقتراح تلقائي",
+		L"· ПКМ …… EQ по тональности / авто-предложение",
+		L"· Rechtsklick …… EQ aus Tonart / Auto-Vorschlag",
+		L"· Direito …… EQ pela tonalidade / sugestao auto",
+		L"· Rechtsklik …… EQ uit toonsoort / auto-voorstel",
+		L"· PPM …… EQ z tonacji / auto-propozycja",
+		L"· Sag tik …… anahtardan EQ / otomatik oneri")); y += lh;
+
+dc.SelectObject(oldFont);
 }
 
 } // namespace
@@ -388,6 +435,9 @@ BEGIN_MESSAGE_MAP(CEqualizer, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_EQ_ABB, &CEqualizer::OnBnClickedAbB)
 	ON_BN_CLICKED(IDC_EQ_ABTOG, &CEqualizer::OnBnClickedAbTog)
 	ON_BN_CLICKED(IDC_EQ_HELP, &CEqualizer::OnBnClickedHelp)
+	ON_WM_CONTEXTMENU()
+	ON_COMMAND(IDM_EQ_SUGGEST_KEY, &CEqualizer::OnSuggestEqFromKey)
+	ON_COMMAND(IDM_EQ_KEY_AUTO, &CEqualizer::OnToggleKeyEqAuto)
 END_MESSAGE_MAP()
 extern save savedata;
 extern int stflg;
@@ -1032,6 +1082,17 @@ LRESULT CEqualizer::OnEqKeyUpdate(WPARAM, LPARAM)
 	// スライダー等が消えるデグレになるため使わない。
 	if (::IsWindow(m_hWnd))
 		ApplyKeyCodesUi();
+	if (savedata.mpKeyEqSuggest) {
+		CString lo, mid, hi, all;
+		SnapshotEqKeyCodes(lo, mid, hi, all);
+		const int preset = EqPresetIndexFromKeyCodes(all);
+		if (preset != savedata.eqsoundeq) {
+			savedata.eqsoundeq = preset;
+			if (m_pre.GetSafeHwnd()) m_pre.SetCurSel(preset);
+			equaliser(0, 0, 2);
+			mod = preset;
+		}
+	}
 	AckEqKeyUiNotify();
 #if 0
 	{
@@ -1078,26 +1139,58 @@ void CEqualizer::LayoutHelpBtn()
 void CEqualizer::ShowHelpSheet()
 {
 	if (g_eqHelpDlg && ::IsWindow(g_eqHelpDlg->GetSafeHwnd())) {
-		g_eqHelpDlg->ShowWindow(SW_SHOW);
-		g_eqHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_eqHelpDlg, this);
 		return;
 	}
 	if (g_eqHelpDlg && !::IsWindow(g_eqHelpDlg->GetSafeHwnd()))
 		g_eqHelpDlg = nullptr;
-	CEqHelpDlg* dlg = new CEqHelpDlg(nullptr);
-	if (!dlg->Create(IDD_EQ_HELP, nullptr)) {
+	CEqHelpDlg* dlg = new CEqHelpDlg(this);
+	if (!dlg->Create(IDD_EQ_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_eqHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CEqualizer::OnBnClickedHelp()
 {
 	ShowHelpSheet();
 }
+
+void CEqualizer::OnSuggestEqFromKey()
+{
+	CString lo, mid, hi, all;
+	SnapshotEqKeyCodes(lo, mid, hi, all);
+	const int preset = EqPresetIndexFromKeyCodes(all);
+	savedata.eqsoundeq = preset;
+	if (m_pre.GetSafeHwnd()) m_pre.SetCurSel(preset);
+	equaliser(0, 0, 2);
+	mod = preset;
+	KillTimer(1);
+	SetTimer(1, 50, NULL);
+}
+
+void CEqualizer::OnToggleKeyEqAuto()
+{
+	savedata.mpKeyEqSuggest = savedata.mpKeyEqSuggest ? 0 : 1;
+}
+
+void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
+{
+	CMenu menu;
+	menu.CreatePopupMenu();
+	menu.AppendMenu(MF_STRING, IDM_EQ_SUGGEST_KEY,
+		LL14(L"キーからEQを提案", L"Suggest EQ from key", L"Suggérer EQ depuis la tonalité", L"Suggerisci EQ dalla tonalità", L"Sugerir EQ desde tonalidad", L"키에서 EQ 제안", L"根据调性建议 EQ", L"اقتراح EQ من المفتاح", L"Предложить EQ по тональности", L"EQ aus Tonart vorschlagen", L"Sugerir EQ pela tonalidade", L"EQ voorstellen uit toonsoort", L"Zaproponuj EQ z tonacji", L"Anahtardan EQ oner"));
+	menu.AppendMenu(MF_STRING | (savedata.mpKeyEqSuggest ? MF_CHECKED : 0), IDM_EQ_KEY_AUTO,
+		LL14(L"キー検出時に自動提案", L"Auto-suggest on key detect", L"Suggestion auto sur détection", L"Suggerimento auto su rilevamento", L"Sugerencia auto al detectar", L"키 검출 시 자동 제안", L"检测到调性时自动建议", L"اقتراح تلقائي عند الكشف", L"Авто-предложение по ключу", L"Auto-Vorschlag bei Erkennung", L"Sugestao auto na deteccao", L"Auto-voorstel bij detectie", L"Auto-propozycja przy wykryciu", L"Algilamada otomatik oneri"));
+	if (point.x == -1 && point.y == -1) {
+		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
+		point = CPoint(rc.left + 8, rc.top + 8);
+	}
+	menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y, this);
+}
+
 int backms = 0;
 void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 {

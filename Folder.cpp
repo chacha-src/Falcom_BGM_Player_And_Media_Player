@@ -913,20 +913,18 @@ void CFolder::LayoutHelpBtn()
 void CFolder::ShowHelpSheet()
 {
 	if (g_fdHelpDlg && ::IsWindow(g_fdHelpDlg->GetSafeHwnd())) {
-		g_fdHelpDlg->ShowWindow(SW_SHOW);
-		g_fdHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_fdHelpDlg, this);
 		return;
 	}
 	if (g_fdHelpDlg && !::IsWindow(g_fdHelpDlg->GetSafeHwnd()))
 		g_fdHelpDlg = nullptr;
-	CFdHelpDlg* dlg = new CFdHelpDlg(nullptr);
-	if (!dlg->Create(IDD_FD_HELP, nullptr)) {
+	CFdHelpDlg* dlg = new CFdHelpDlg(this);
+	if (!dlg->Create(IDD_FD_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_fdHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CFolder::OnBnClickedHelp()

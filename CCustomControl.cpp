@@ -4200,10 +4200,27 @@ void CCustomStatic::OnPaint()
     CPaintDC dc(this);
     CRect r;
     GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0)
+        return;
+
+#if CCUSTOM_AERO_SUPPORT
+    // ソリッド背景指定 + ホスト不透明必須: クロマ透過せず α=255 で塗る
+    // （MP Lib/Hist レール等の白抜け対策）
+    if (m_bSolidFill && CCC_HostNeedsChildOpaque(m_hWnd)) {
+        CCC_FillRectOpaqueBits(dc.GetSafeHdc(), r, m_clrSolidFill);
+        if (!m_strText.IsEmpty() || (CWnd::GetWindowTextLength() > 0)) {
+            // 文字がある場合は通常描画も重ねる（レールは空文字想定）
+            const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+            if (!bTrans)
+                DrawClient(dc);
+        }
+        return;
+    }
+#endif
 
     // 透過(アクリル)時はクロマ blit を潰す MakeOpaque を避ける(CCustomCheckBox と同じ)
     const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
-    if (bTrans || r.Width() <= 0 || r.Height() <= 0)
+    if (bTrans)
     {
         DrawClient(dc);
         return;
@@ -5346,15 +5363,26 @@ BEGIN_MESSAGE_MAP(CCustomRangeSliderCtrl, CSliderCtrl)
     ON_WM_LBUTTONDOWN()
     ON_WM_LBUTTONUP()
     ON_WM_MOUSEMOVE()
+    ON_WM_MOUSELEAVE()
     ON_WM_SETCURSOR()
     ON_WM_RBUTTONUP()
+    ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTW, 0, 0xFFFF, OnTtnNeedText)
+    ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTA, 0, 0xFFFF, OnTtnNeedText)
 END_MESSAGE_MAP()
 
 CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
     : m_bAutoDelete(FALSE), m_nMin(0), m_nMax(100), m_nSelMin(0), m_nSelMax(100),
     m_nAbA(-1), m_nAbB(-1), m_bSelLocked(TRUE),
     m_nDragTarget(0), m_bDragging(FALSE), m_nVisualPos(0), m_nLogicalPos(0), m_bAeroMode(FALSE),
-    m_backstoreW(0), m_backstoreH(0) {}
+    m_wavePeakCount(0), m_cueCount(0), m_nCueClick(-1),
+    m_ribbonN(0), m_xfadePreviewMs(0), m_timeBaseHz(44100),
+    m_beatBpm(120.f), m_bBeatGrid(FALSE), m_bHoverTracking(FALSE),
+    m_backstoreW(0), m_backstoreH(0)
+{
+    ZeroMemory(m_wavePeaks, sizeof(m_wavePeaks));
+    ZeroMemory(m_cueFrames, sizeof(m_cueFrames));
+    ZeroMemory(m_ribbon, sizeof(m_ribbon));
+}
 CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl() {}
 
 void CCustomRangeSliderCtrl::PostNcDestroy()
@@ -5392,6 +5420,13 @@ void CCustomRangeSliderCtrl::PreSubclassWindow()
     m_nMin = mn;
     m_nMax = mx;
     m_nLogicalPos = m_nVisualPos = CSliderCtrl::GetPos();
+}
+
+BOOL CCustomRangeSliderCtrl::PreTranslateMessage(MSG* pMsg)
+{
+    if (m_hoverTip.GetSafeHwnd())
+        m_hoverTip.RelayEvent(pMsg);
+    return CSliderCtrl::PreTranslateMessage(pMsg);
 }
 
 void CCustomRangeSliderCtrl::SetPos(int p)
@@ -5455,6 +5490,218 @@ void CCustomRangeSliderCtrl::SetSelectionLocked(BOOL bLocked)
     m_bSelLocked = bLocked ? TRUE : FALSE;
     if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
         Invalidate(FALSE);
+}
+
+void CCustomRangeSliderCtrl::SetWavePeaks(const float* peaks, int count)
+{
+    if (count <= 0 || !peaks) {
+        if (m_wavePeakCount == 0) return;
+        m_wavePeakCount = 0;
+        if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+            Invalidate(FALSE);
+        return;
+    }
+    if (count > kWavePeaksMax) count = kWavePeaksMax;
+    BOOL same = (count == m_wavePeakCount);
+    if (same) {
+        for (int i = 0; i < count; ++i) {
+            if (m_wavePeaks[i] != peaks[i]) { same = FALSE; break; }
+        }
+    }
+    if (same) return;
+    for (int i = 0; i < count; ++i) {
+        float v = peaks[i];
+        if (v < 0.f) v = 0.f;
+        if (v > 1.f) v = 1.f;
+        m_wavePeaks[i] = v;
+    }
+    m_wavePeakCount = count;
+    if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CCustomRangeSliderCtrl::ClearWavePeaks()
+{
+    SetWavePeaks(NULL, 0);
+}
+
+void CCustomRangeSliderCtrl::AccumulateWaveAtPos(int pos, float amp, int bins)
+{
+    if (m_nMax <= m_nMin) return;
+    if (amp < 0.f) amp = 0.f;
+    if (amp > 1.f) amp = 1.f;
+    if (bins < 32) bins = 32;
+    if (bins > kWavePeaksMax) bins = kWavePeaksMax;
+    // フル概観(大きめ bins)が載っている間はリアルタイムで壊さない
+    if (m_wavePeakCount > bins)
+        return;
+    if (m_wavePeakCount != bins) {
+        ZeroMemory(m_wavePeaks, sizeof(m_wavePeaks));
+        m_wavePeakCount = bins;
+    }
+    int bin = (int)((__int64)(pos - m_nMin) * bins / (m_nMax - m_nMin));
+    if (bin < 0) bin = 0;
+    if (bin >= bins) bin = bins - 1;
+    if (amp <= m_wavePeaks[bin]) return;
+    m_wavePeaks[bin] = amp;
+    // 近傍も少しならして見た目を埋める
+    if (bin > 0 && amp * 0.7f > m_wavePeaks[bin - 1]) m_wavePeaks[bin - 1] = amp * 0.7f;
+    if (bin + 1 < bins && amp * 0.7f > m_wavePeaks[bin + 1]) m_wavePeaks[bin + 1] = amp * 0.7f;
+    if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CCustomRangeSliderCtrl::SetCues(const int* frames, int count)
+{
+    if (count <= 0 || !frames) {
+        if (m_cueCount == 0) return;
+        m_cueCount = 0;
+        if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+            Invalidate(FALSE);
+        return;
+    }
+    if (count > kCueMax) count = kCueMax;
+    BOOL same = (count == m_cueCount);
+    if (same) {
+        for (int i = 0; i < count; ++i) {
+            if (m_cueFrames[i] != frames[i]) { same = FALSE; break; }
+        }
+    }
+    if (same) return;
+    for (int i = 0; i < count; ++i)
+        m_cueFrames[i] = frames[i];
+    m_cueCount = count;
+    if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CCustomRangeSliderCtrl::ClearCues()
+{
+    SetCues(NULL, 0);
+}
+
+void CCustomRangeSliderCtrl::SetMeterRibbon(const float* bins, int n)
+{
+    if (n <= 0 || !bins) {
+        if (m_ribbonN == 0) return;
+        m_ribbonN = 0;
+        if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+            Invalidate(FALSE);
+        return;
+    }
+    if (n > kRibbonMax) n = kRibbonMax;
+    BOOL same = (n == m_ribbonN);
+    if (same) {
+        for (int i = 0; i < n; ++i) {
+            if (m_ribbon[i] != bins[i]) { same = FALSE; break; }
+        }
+    }
+    if (same) return;
+    for (int i = 0; i < n; ++i) {
+        float v = bins[i];
+        if (v < 0.f) v = 0.f;
+        if (v > 1.f) v = 1.f;
+        m_ribbon[i] = v;
+    }
+    m_ribbonN = n;
+    if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CCustomRangeSliderCtrl::SetXfadePreviewMs(int ms)
+{
+    if (ms < 0) ms = 0;
+    if (ms == m_xfadePreviewMs) return;
+    m_xfadePreviewMs = ms;
+    if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CCustomRangeSliderCtrl::SetTimeBaseHz(int hz)
+{
+    if (hz < 8000) hz = 44100;
+    if (hz == m_timeBaseHz) return;
+    m_timeBaseHz = hz;
+}
+
+void CCustomRangeSliderCtrl::SetBeatGrid(float bpm, BOOL enabled)
+{
+    if (bpm <= 1.f) bpm = 120.f;
+    const BOOL en = enabled ? TRUE : FALSE;
+    if (en == m_bBeatGrid && fabsf(bpm - m_beatBpm) < 0.01f) return;
+    m_bBeatGrid = en;
+    m_beatBpm = bpm;
+    if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CCustomRangeSliderCtrl::EnsureHoverTip()
+{
+    if (m_hoverTip.GetSafeHwnd()) return;
+    if (!GetSafeHwnd()) return;
+    m_hoverTip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX);
+    m_hoverTip.Activate(TRUE);
+    m_hoverTip.SetDelayTime(TTDT_INITIAL, 200);
+    m_hoverTip.SetDelayTime(TTDT_RESHOW, 80);
+    m_hoverTip.SetDelayTime(TTDT_AUTOPOP, 8000);
+    CRect r; GetClientRect(&r);
+    m_hoverTip.AddTool(this, LPSTR_TEXTCALLBACK, &r, 1);
+}
+
+void CCustomRangeSliderCtrl::UpdateHoverTip(CPoint p)
+{
+    EnsureHoverTip();
+    if (!m_hoverTip.GetSafeHwnd()) return;
+    const int v = PixelToValue(p.x);
+    const int hz = (m_timeBaseHz > 0) ? m_timeBaseHz : 44100;
+    int sec = v / hz;
+    if (sec < 0) sec = 0;
+    int rem = 0;
+    if (m_nMax > m_nMin)
+        rem = (m_nMax - v) / hz;
+    if (rem < 0) rem = 0;
+    auto fmt = [](int s, CString& out) {
+        if (s >= 3600)
+            out.Format(_T("%d:%02d:%02d"), s / 3600, (s / 60) % 60, s % 60);
+        else
+            out.Format(_T("%d:%02d"), s / 60, s % 60);
+    };
+    CString absT, remT;
+    fmt(sec, absT);
+    fmt(rem, remT);
+    CString t;
+    t.Format(_T("%s  (-%s)"), (LPCTSTR)absT, (LPCTSTR)remT);
+    if (t != m_hoverTipText) {
+        m_hoverTipText = t;
+        m_hoverTip.UpdateTipText(m_hoverTipText, this, 1);
+    }
+}
+
+BOOL CCustomRangeSliderCtrl::OnTtnNeedText(UINT, NMHDR* pNMHDR, LRESULT* pResult)
+{
+    *pResult = 0;
+    if (!pNMHDR) return FALSE;
+    if (pNMHDR->code == TTN_NEEDTEXTW) {
+        TOOLTIPTEXTW* pTTT = (TOOLTIPTEXTW*)pNMHDR;
+        if (pTTT->uFlags & TTF_IDISHWND) return FALSE;
+        static WCHAR s_buf[64];
+        wcsncpy_s(s_buf, (LPCWSTR)(LPCTSTR)m_hoverTipText, _TRUNCATE);
+        pTTT->lpszText = s_buf;
+        return TRUE;
+    }
+    if (pNMHDR->code == TTN_NEEDTEXTA) {
+        TOOLTIPTEXTA* pTTT = (TOOLTIPTEXTA*)pNMHDR;
+        if (pTTT->uFlags & TTF_IDISHWND) return FALSE;
+        static char s_bufA[64];
+#ifdef _UNICODE
+        WideCharToMultiByte(CP_ACP, 0, m_hoverTipText, -1, s_bufA, 64, NULL, NULL);
+#else
+        strncpy_s(s_bufA, m_hoverTipText, _TRUNCATE);
+#endif
+        pTTT->lpszText = s_bufA;
+        return TRUE;
+    }
+    return FALSE;
 }
 
 void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax, int rangeMin, int rangeMax,
@@ -5620,17 +5867,88 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
     int xMn = ValueToPixel(m_nSelMin);
     int xMx = ValueToPixel(m_nSelMax);
     int xP = ValueToPixel(cur);
+    const int x0 = 14;
+    const int tw = r.Width() - 28;
+    const int half = max(4, min(cy - 1, r.Height() / 2 - 1));
 
     CPen* oldPen = pDC->GetCurrentPen();
+
+    // 最奥: 波形（トラック／ループ／A-B／つまみの下）
+    if (m_wavePeakCount > 1 && tw > 0) {
+        COLORREF wc = m_bAeroMode ? RGB(140, 200, 255) : RGB(70, 120, 190);
+        for (int x = 0; x < tw; ++x) {
+            int bin = x * m_wavePeakCount / tw;
+            if (bin < 0) bin = 0;
+            if (bin >= m_wavePeakCount) bin = m_wavePeakCount - 1;
+            int h = (int)(m_wavePeaks[bin] * half + 0.5f);
+            if (h < 1) continue;
+            pDC->FillSolidRect(x0 + x, cy - h, 1, h * 2, wc);
+        }
+    }
+
+    // 拍グリッド(薄い縦線)
+    if (m_bBeatGrid && m_timeBaseHz > 0) {
+        const float bpm = (m_beatBpm > 1.f) ? m_beatBpm : 120.f;
+        const double framesPerBeat = (double)m_timeBaseHz * 60.0 / (double)bpm;
+        if (framesPerBeat > 1.0) {
+            const int span = m_nMax - m_nMin;
+            int maxLines = (int)(span / framesPerBeat) + 2;
+            if (maxLines > 256) maxLines = 256;
+            COLORREF gc = m_bAeroMode ? RGB(60, 60, 70) : RGB(210, 215, 225);
+            for (int i = 0; i < maxLines; ++i) {
+                int fv = m_nMin + (int)(i * framesPerBeat + 0.5);
+                if (fv > m_nMax) break;
+                int x = ValueToPixel(fv);
+                pDC->FillSolidRect(x, cy - 10, 1, 20, gc);
+            }
+        }
+    }
+
     // トラック（バー）— プール済みペン（毎描画 CreatePen 禁止）
     if (CPen* pT = CCC_GetPooledPen(4, RGB(200, 200, 200)))
         pDC->SelectObject(pT);
     pDC->MoveTo(14, cy);
     pDC->LineTo(r.Width() - 14, cy);
 
-    // ループ選択帯(loop1/2)
+    // ループ選択帯(loop1/2) — 波形の上
     if (xMx > xMn)
         pDC->FillSolidRect(CRect(xMn, cy - 4, xMx, cy + 4), COLOR_RANGE_SELECTION);
+
+    // スペアナ・リボン(トラック中央の上)
+    if (m_ribbonN > 0 && tw > 0) {
+        const int barH = max(3, min(cy - 2, 10));
+        for (int i = 0; i < m_ribbonN; ++i) {
+            int x1 = x0 + i * tw / m_ribbonN;
+            int x2 = x0 + (i + 1) * tw / m_ribbonN;
+            if (x2 <= x1) x2 = x1 + 1;
+            int h = (int)(m_ribbon[i] * barH + 0.5f);
+            if (h < 1) continue;
+            pDC->FillSolidRect(x1, cy - 2 - h, x2 - x1 - 1, h, RGB(80, 180, 255));
+        }
+    }
+
+    // 書き出しクロスフェード帯プレビュー(範囲末尾のハッチ)
+    if (m_xfadePreviewMs > 0 && m_timeBaseHz > 0) {
+        const int xfFrames = (int)(((__int64)m_xfadePreviewMs * m_timeBaseHz) / 1000);
+        if (xfFrames > 0) {
+            int endV = m_nSelMax;
+            if (endV <= m_nSelMin) endV = m_nMax;
+            int startV = endV - xfFrames;
+            if (startV < m_nMin) startV = m_nMin;
+            int x0 = ValueToPixel(startV);
+            int x1 = ValueToPixel(endV);
+            if (x1 > x0) {
+                CRect hr(x0, cy - 6, x1, cy + 6);
+                CBrush brHat;
+                brHat.CreateHatchBrush(HS_BDIAGONAL, RGB(255, 140, 60));
+                CBrush* obr = pDC->SelectObject(&brHat);
+                int oldBk = pDC->SetBkMode(TRANSPARENT);
+                pDC->FillRect(&hr, &brHat);
+                pDC->SetBkMode(oldBk);
+                pDC->SelectObject(obr);
+            }
+        }
+    }
 
     // A-B 区間帯（B 確定後のみ）。ループ帯の上に重ねる。
     if (m_nAbA >= 0 && m_nAbB > m_nAbA) {
@@ -5664,6 +5982,28 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
         int xB = ValueToPixel(m_nAbB);
         pDC->FillSolidRect(CRect(xB - 5, cy - 8, xB + 5, cy + 8), COLOR_AB_SLIDER_THUMB);
         pDC->Rectangle(CRect(xB - 5, cy - 8, xB + 5, cy + 8));
+    }
+
+    // キューマーカー（上向き三角 + 番号）
+    if (m_cueCount > 0) {
+        COLORREF cueC = COLOR_SEEK_CUE;
+        for (int i = 0; i < m_cueCount; ++i) {
+            int x = ValueToPixel(m_cueFrames[i]);
+            POINT tri[3];
+            tri[0].x = x;     tri[0].y = cy - 11;
+            tri[1].x = x - 5; tri[1].y = cy - 3;
+            tri[2].x = x + 5; tri[2].y = cy - 3;
+            CBrush br(cueC);
+            CBrush* obr = pDC->SelectObject(&br);
+            pDC->Polygon(tri, 3);
+            pDC->SelectObject(obr);
+            TCHAR dig[2] = { (TCHAR)(_T('1') + i), 0 };
+            if (i >= 9) dig[0] = _T('0');
+            pDC->SetBkMode(TRANSPARENT);
+            pDC->SetTextColor(m_bAeroMode ? RGB(1, 1, 1) : RGB(40, 30, 0));
+            CRect tr(x - 4, cy - 22, x + 5, cy - 11);
+            pDC->DrawText(dig, &tr, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        }
     }
 
     // 現在位置（ハート + きらめき）
@@ -5708,6 +6048,10 @@ int CCustomRangeSliderCtrl::HitTest(CPoint p) const
         int xA = ValueToPixel(m_nAbA);
         if (CRect(xA - 7, cy - 10, xA + 7, cy + 10).PtInRect(p)) return 4;
     }
+    for (int i = 0; i < m_cueCount; ++i) {
+        int x = ValueToPixel(m_cueFrames[i]);
+        if (CRect(x - 6, cy - 22, x + 6, cy - 1).PtInRect(p)) return 10 + i;
+    }
     // ロック中でもヒットは取る（クリックをシークに落とさない）。ドラッグは OnLButtonDown で拒否。
     if (CRect(xMx - 7, cy - 10, xMx + 7, cy + 10).PtInRect(p)) return 2;
     if (CRect(xMn - 7, cy - 10, xMn + 7, cy + 10).PtInRect(p)) return 1;
@@ -5722,6 +6066,13 @@ void CCustomRangeSliderCtrl::OnLButtonDown(UINT f, CPoint p)
     SetFocus();
     m_nVisualPos = m_nLogicalPos;
     m_nDragTarget = HitTest(p);
+    if (m_nDragTarget >= 10 && m_nDragTarget < 10 + kCueMax) {
+        // キュークリック → 親が GetCueClick でジャンプ
+        m_nCueClick = m_nDragTarget - 10;
+        m_nDragTarget = 0;
+        GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, 0), (LPARAM)m_hWnd);
+        return;
+    }
     if ((m_nDragTarget == 1 || m_nDragTarget == 2) && m_bSelLocked) {
         // ロック中の loop つまみ: 動かさずシークもしない
         m_nDragTarget = 0;
@@ -5766,6 +6117,15 @@ void CCustomRangeSliderCtrl::OnLButtonUp(UINT f, CPoint p)
 }
 void CCustomRangeSliderCtrl::OnMouseMove(UINT f, CPoint p)
 {
+    if (!m_bHoverTracking) {
+        TRACKMOUSEEVENT tme = { sizeof(tme) };
+        tme.dwFlags = TME_LEAVE;
+        tme.hwndTrack = m_hWnd;
+        ::TrackMouseEvent(&tme);
+        m_bHoverTracking = TRUE;
+    }
+    if (!m_bDragging)
+        UpdateHoverTip(p);
     if (m_bDragging)
     {
 #if CCUSTOM_AERO_SUPPORT
@@ -5798,6 +6158,13 @@ void CCustomRangeSliderCtrl::OnMouseMove(UINT f, CPoint p)
     }
 }
 
+void CCustomRangeSliderCtrl::OnMouseLeave()
+{
+    m_bHoverTracking = FALSE;
+    if (m_hoverTip.GetSafeHwnd())
+        m_hoverTip.SendMessage(TTM_POP, 0, 0);
+}
+
 BOOL CCustomRangeSliderCtrl::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 {
     if (nHitTest == HTCLIENT && GetSafeHwnd()) {
@@ -5805,8 +6172,8 @@ BOOL CCustomRangeSliderCtrl::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message
         ::GetCursorPos(&pt);
         ScreenToClient(&pt);
         const int ht = HitTest(pt);
-        if (ht == 4 || ht == 5 || ((ht == 1 || ht == 2) && !m_bSelLocked)) {
-            ::SetCursor(::LoadCursor(NULL, IDC_SIZEWE));
+        if (ht == 4 || ht == 5 || ((ht == 1 || ht == 2) && !m_bSelLocked) || (ht >= 10 && ht < 10 + kCueMax)) {
+            ::SetCursor(::LoadCursor(NULL, (ht >= 10) ? IDC_HAND : IDC_SIZEWE));
             return TRUE;
         }
     }
@@ -6324,6 +6691,8 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         BOOL bH = (ni == m_nHotItem);
         COLORREF bg = bS ? COLOR_SEL_BG : (ni % 2 == 0 ? COLOR_LIST_BG : RGB(183, 221, 238));
         if (bH && !bS) bg = RGB(220, 235, 250);
+        if (!bS && m_mpRowMissGet && m_mpRowMissGet(m_mpJacketCtx, ni))
+            bg = RGB(255, 214, 214); // 欠損行: 薄い赤
 
         // キャプション常時アクリル下、名前列の素 FillRect は α=0→ガラスが一瞬見える。
         // ジャケ有り行は StretchBlt で帯が埋まるが、ジャケ無し行は穴のままちらつく。
@@ -6347,6 +6716,10 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         }
         else
             pDC->FillSolidRect(&r, bg);
+
+        // 欠損ヒート: 名前列左に 4px ストライプ
+        if (ns == 0 && !bS && m_mpRowMissGet && m_mpRowMissGet(m_mpJacketCtx, ni))
+            pDC->FillSolidRect(r.left, r.top, 4, r.Height(), RGB(220, 60, 60));
 
         if (bS && !bLvAero)
             DrawGlossHighlight(pDC, r, 6);
@@ -7572,6 +7945,7 @@ BEGIN_MESSAGE_MAP(CCustomStandardButton, CButton)
     ON_WM_PAINT()
     ON_WM_ERASEBKGND()
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+    ON_MESSAGE(BM_SETSTATE, OnBmSetState)
     ON_WM_MOUSEMOVE()
     ON_MESSAGE(WM_MOUSELEAVE, OnMouseLeave)
     ON_WM_SETFOCUS()
@@ -7722,6 +8096,15 @@ void CCustomStandardButton::SetFlat(BOOL bFlat)
 void CCustomStandardButton::PreSubclassWindow()
 {
     CButton::PreSubclassWindow();
+    // テーマ描画がカスタム OnPaint と混ざると白抜けする（メニュー後に顕在化しやすい）
+    HMODULE h = ::LoadLibrary(_T("UxTheme.dll"));
+    if (h)
+    {
+        typedef HRESULT(WINAPI* PFN)(HWND, LPCWSTR, LPCWSTR);
+        if (PFN p = (PFN)::GetProcAddress(h, "SetWindowTheme"))
+            p(m_hWnd, L"", L"");
+        ::FreeLibrary(h);
+    }
 }
 
 HBRUSH CCustomStandardButton::CtlColor(CDC*, UINT)
@@ -7990,7 +8373,8 @@ void CCustomStandardButton::RepaintClient()
         return;
 #if CCUSTOM_AERO_SUPPORT
     // ホスト α（本文 aero / キャプションのみガラス）では素 BitBlt が消える
-    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)
+    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
+        || CCC_CaptionOnlyHostGlass(m_hWnd)
         || (CCC_IsCaptionChromeCtrl(m_hWnd) && CCC_AcrylicCaption(::GetParent(m_hWnd)))))
     {
         CClientDC dc(this);
@@ -8005,7 +8389,8 @@ void CCustomStandardButton::RepaintClient()
 void CCustomStandardButton::OnPaint()
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)
+    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
+        || CCC_CaptionOnlyHostGlass(m_hWnd)
         || (CCC_IsCaptionChromeCtrl(m_hWnd) && CCC_AcrylicCaption(::GetParent(m_hWnd)))))
     {
         CPaintDC dc(this);
@@ -8027,7 +8412,8 @@ LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
         CRect r;
         GetClientRect(&r);
 #if CCUSTOM_AERO_SUPPORT
-        if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)
+        if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
+            || CCC_CaptionOnlyHostGlass(m_hWnd)
             || (CCC_IsCaptionChromeCtrl(m_hWnd) && CCC_AcrylicCaption(::GetParent(m_hWnd)))))
             PaintOpaqueClient(*pDC);
         else
@@ -8037,11 +8423,28 @@ LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
     return 0;
 }
 
+LRESULT CCustomStandardButton::OnBmSetState(WPARAM wParam, LPARAM)
+{
+    // テーマ無効時、Default の押下描画は空/白になり、アクリル上では完全透過に見える。
+    // 状態だけ更新してからカスタムで描き直す。
+    const LRESULT lr = Default();
+    UNREFERENCED_PARAMETER(wParam);
+    if (GetSafeHwnd())
+        RepaintClient();
+    return lr;
+}
+
 BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)))
+    // 空返し禁止: ERASE だけの更新だとアクリル上で完全透過のまま残る（ホバーで復帰する現象）
+    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
+        || CCC_CaptionOnlyHostGlass(m_hWnd)))
+    {
+        if (pDC)
+            PaintOpaqueClient(*pDC);
         return TRUE;
+    }
 #endif
     if (pDC)
     {
@@ -10371,7 +10774,12 @@ private:
         switch (uMsg)
         {
         case WM_ERASEBKGND:
-            if (!pThis->m_bPrinting) return TRUE;
+            // 空返しだと α=0 のまま残り完全透過になる（ホバーで WM_PAINT すると戻る）
+            if (!pThis->m_bPrinting) {
+                if (wParam)
+                    pThis->PaintOpaque(hWnd, (HDC)wParam);
+                return TRUE;
+            }
             return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
         case WM_PRINTCLIENT:
             if (pThis->m_bPrinting)
@@ -10781,6 +11189,8 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
         if (dynamic_cast<CCustomComboBox*>(pw)) return TRUE;
         if (dynamic_cast<CButtonST*>(pw)) return TRUE;
         if (dynamic_cast<CCustomEdit*>(pw)) return TRUE;
+        // StandardButton も自前 BitBlt だけだと ExtendFrame/ERASE 後に α=0 で消える
+        if (dynamic_cast<CCustomStandardButton*>(pw)) return TRUE;
         return FALSE;
     }
     TCHAR cls[64] = {};
@@ -12549,6 +12959,19 @@ void CCC_MainLockBringToFront(HWND hDlg)
     CCC_MainLockLayoutBtn(hDlg);
     if (e->pLockBtn && ::IsWindow(e->pLockBtn->GetSafeHwnd()))
         e->pLockBtn->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+void CCC_PresentOwnedHelp(CWnd* help, CWnd* owner)
+{
+    if (!help || !::IsWindow(help->GetSafeHwnd()))
+        return;
+    help->ShowWindow(SW_SHOW);
+    // オーナー直上へ（HWND_TOPMOST は使わない）。他ツールが前面になれば一緒に下へ回る。
+    if (owner && ::IsWindow(owner->GetSafeHwnd()))
+        ::SetWindowPos(owner->GetSafeHwnd(), help->GetSafeHwnd(),
+            0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    help->BringWindowToTop();
+    help->SetForegroundWindow();
 }
 
 int CCC_MainLockGetReserveWidth(HWND hDlg)

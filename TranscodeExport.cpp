@@ -2795,20 +2795,18 @@ void CTranscodeExport::LayoutHelpBtn()
 void CTranscodeExport::ShowHelpSheet()
 {
 	if (g_tcHelpDlg && ::IsWindow(g_tcHelpDlg->GetSafeHwnd())) {
-		g_tcHelpDlg->ShowWindow(SW_SHOW);
-		g_tcHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_tcHelpDlg, this);
 		return;
 	}
 	if (g_tcHelpDlg && !::IsWindow(g_tcHelpDlg->GetSafeHwnd()))
 		g_tcHelpDlg = nullptr;
-	CTcHelpDlg* dlg = new CTcHelpDlg(nullptr);
-	if (!dlg->Create(IDD_TC_HELP, nullptr)) {
+	CTcHelpDlg* dlg = new CTcHelpDlg(this);
+	if (!dlg->Create(IDD_TC_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_tcHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CTranscodeExport::OnBnClickedHelp()

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -577,13 +577,20 @@
     <ClCompile Include="FileTagInfo.cpp" />
     <ClCompile Include="LyricsProgressWnd.cpp" />
     <ClCompile Include="CLyricsViewWnd.cpp" />
+    <ClCompile Include="CDesktopLyricsWnd.cpp" />
     <ClCompile Include="Mp3Image.cpp" />
     <ClCompile Include="Nishi.cpp" />
     <ClCompile Include="AppMixerMuteCheck.cpp" />
     <ClCompile Include="ogg.cpp" />
     <ClCompile Include="CMediaPlayerDlg.cpp" />
+    <ClCompile Include="MpPlayerAddons.cpp" />
+    <ClCompile Include="MpSidecar.cpp" />
     <ClCompile Include="CMpM3uImportDlg.cpp" />
     <ClCompile Include="CMissingFilesDlg.cpp" />
+    <ClCompile Include="CMpDupesDlg.cpp" />
+    <ClCompile Include="CMpFolderSyncDlg.cpp" />
+    <ClCompile Include="CMpSmartPlaylistDlg.cpp" />
+    <ClCompile Include="CMpQueueDlg.cpp" />
     <ClCompile Include="CMpPlaylistIO.cpp" />
     <ClCompile Include="oggDlg.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">Use</PrecompiledHeader>
@@ -704,13 +711,20 @@
     <ClInclude Include="FileTagInfo.h" />
     <ClInclude Include="LyricsProgressWnd.h" />
     <ClInclude Include="CLyricsViewWnd.h" />
+    <ClInclude Include="CDesktopLyricsWnd.h" />
     <ClInclude Include="m4a.h" />
     <ClInclude Include="Mp3Image.h" />
     <ClInclude Include="Nishi.h" />
     <ClInclude Include="ogg.h" />
     <ClInclude Include="CMediaPlayerDlg.h" />
+    <ClInclude Include="MpPlayerAddons.h" />
+    <ClInclude Include="MpSidecar.h" />
     <ClInclude Include="CMpM3uImportDlg.h" />
     <ClInclude Include="CMissingFilesDlg.h" />
+    <ClInclude Include="CMpDupesDlg.h" />
+    <ClInclude Include="CMpFolderSyncDlg.h" />
+    <ClInclude Include="CMpSmartPlaylistDlg.h" />
+    <ClInclude Include="CMpQueueDlg.h" />
     <ClInclude Include="CMpPlaylistIO.h" />
     <ClInclude Include="oggDlg.h" />
     <ClInclude Include="opus.h" />

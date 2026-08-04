@@ -9,6 +9,7 @@
 #include "UpdateCheck.h"
 #include "SongParams.h"
 #include "ProAudio.h"
+#include "MpSidecar.h"
 #include "direct.h"
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -229,6 +230,27 @@ BOOL COggApp::InitInstance()
 	savedata.pro_export_ceiling = 99;
 	savedata.pro_export_tp = 1;
 	savedata.pro_corr_meter = 1;
+	savedata.mpLoopbackScore = 0;
+	savedata.mpChordPanel = 0;
+	savedata.deskLrcOn = 0;
+	savedata.deskLrcX = 80;
+	savedata.deskLrcY = 80;
+	savedata.deskLrcW = 640;
+	savedata.deskLrcH = 160;
+	savedata.deskLrcAlpha = 200;
+	savedata.mpVocalCenter = 100;
+	savedata.mpMirrorOut = 0;
+	savedata.mpMirrorVol = 100;
+	savedata.mpMirrorDevice[0] = 0;
+	savedata.mpRemoteOn = 0;
+	savedata.mpRemotePort = 8765;
+	savedata.mpAlarmHour = -1;
+	savedata.mpAlarmMin = 0;
+	savedata.mpSsVizOn = 0;
+	savedata.mpDetectedBpm = 0;
+	savedata.mpDjPadwindow = 0;
+	savedata.mpNormTargetLufs = -14;
+	savedata.mpKeyEqSuggest = 0;
 	savedata.tc_format = 0;
 	savedata.tc_mp3_kbps = 192;
 	savedata.tc_flac_level = 5;
@@ -1067,6 +1089,87 @@ BOOL COggApp::InitInstance()
 		savedata.mpSeekLoopUnlock = 0;
 	else if (savedata.mpSeekLoopUnlock)
 		savedata.mpSeekLoopUnlock = 1;
+	// シーク波形: 旧.dat 未所持は表示ON
+	if (datFileSize < (int)(offsetof(save, mpSeekWave) + sizeof(savedata.mpSeekWave)))
+		savedata.mpSeekWave = 1;
+	else if (savedata.mpSeekWave)
+		savedata.mpSeekWave = 1;
+	if (datFileSize < (int)(offsetof(save, mpPhraseSec) + sizeof(savedata.mpPhraseSec))
+		|| savedata.mpPhraseSec < 1 || savedata.mpPhraseSec > 60)
+		savedata.mpPhraseSec = 4;
+	if (datFileSize < (int)(offsetof(save, mpSleepMin) + sizeof(savedata.mpSleepMin))
+		|| (savedata.mpSleepMin != 0 && savedata.mpSleepMin != 15
+			&& savedata.mpSleepMin != 30 && savedata.mpSleepMin != 60))
+		savedata.mpSleepMin = 0;
+	if (datFileSize < (int)(offsetof(save, mpHistTod) + sizeof(savedata.mpHistTod))) {
+		for (int i = 0; i < 8; ++i) savedata.mpHistTod[i] = -1;
+	}
+	else {
+		for (int i = 0; i < 8; ++i) {
+			if (savedata.mpHistTod[i] < -1 || savedata.mpHistTod[i] >= 24 * 60)
+				savedata.mpHistTod[i] = -1;
+		}
+	}
+	if (datFileSize < (int)(offsetof(save, mpBeatGrid) + sizeof(savedata.mpBeatGrid)))
+		savedata.mpBeatGrid = 0;
+	else if (savedata.mpBeatGrid) savedata.mpBeatGrid = 1;
+	if (datFileSize < (int)(offsetof(save, mpXfadePreview) + sizeof(savedata.mpXfadePreview)))
+		savedata.mpXfadePreview = 0;
+	else if (savedata.mpXfadePreview) savedata.mpXfadePreview = 1;
+	if (datFileSize < (int)(offsetof(save, mpLoopbackScore) + sizeof(savedata.mpLoopbackScore)))
+		savedata.mpLoopbackScore = 0;
+	else if (savedata.mpLoopbackScore) savedata.mpLoopbackScore = 1;
+	if (datFileSize < (int)(offsetof(save, mpChordPanel) + sizeof(savedata.mpChordPanel)))
+		savedata.mpChordPanel = 0;
+	else if (savedata.mpChordPanel) savedata.mpChordPanel = 1;
+	if (datFileSize < (int)(offsetof(save, deskLrcOn) + sizeof(savedata.deskLrcOn))) {
+		savedata.deskLrcOn = 0;
+		savedata.deskLrcX = 80;
+		savedata.deskLrcY = 80;
+		savedata.deskLrcW = 640;
+		savedata.deskLrcH = 160;
+		savedata.deskLrcAlpha = 200;
+	}
+	if (savedata.deskLrcAlpha < 40) savedata.deskLrcAlpha = 40;
+	if (savedata.deskLrcAlpha > 255) savedata.deskLrcAlpha = 255;
+	if (datFileSize < (int)(offsetof(save, mpVocalCenter) + sizeof(savedata.mpVocalCenter)))
+		savedata.mpVocalCenter = 100;
+	else if (savedata.mpVocalCenter < 0) savedata.mpVocalCenter = 0;
+	else if (savedata.mpVocalCenter > 200) savedata.mpVocalCenter = 200;
+	if (datFileSize < (int)(offsetof(save, mpMirrorOut) + sizeof(savedata.mpMirrorOut))) {
+		savedata.mpMirrorOut = 0;
+		savedata.mpMirrorVol = 100;
+		savedata.mpMirrorDevice[0] = 0;
+	}
+	if (savedata.mpMirrorVol < 0) savedata.mpMirrorVol = 0;
+	if (savedata.mpMirrorVol > 100) savedata.mpMirrorVol = 100;
+	if (datFileSize < (int)(offsetof(save, mpRemoteOn) + sizeof(savedata.mpRemoteOn))) {
+		savedata.mpRemoteOn = 0;
+		savedata.mpRemotePort = 8765;
+	}
+	if (savedata.mpRemotePort < 1024 || savedata.mpRemotePort > 65535)
+		savedata.mpRemotePort = 8765;
+	if (datFileSize < (int)(offsetof(save, mpAlarmHour) + sizeof(savedata.mpAlarmHour))) {
+		savedata.mpAlarmHour = -1;
+		savedata.mpAlarmMin = 0;
+	}
+	if (savedata.mpAlarmMin < 0) savedata.mpAlarmMin = 0;
+	if (savedata.mpAlarmMin > 59) savedata.mpAlarmMin = 59;
+	if (savedata.mpAlarmHour < -1) savedata.mpAlarmHour = -1;
+	if (savedata.mpAlarmHour > 23) savedata.mpAlarmHour = -1;
+	if (datFileSize < (int)(offsetof(save, mpSsVizOn) + sizeof(savedata.mpSsVizOn)))
+		savedata.mpSsVizOn = 0;
+	if (datFileSize < (int)(offsetof(save, mpDetectedBpm) + sizeof(savedata.mpDetectedBpm)))
+		savedata.mpDetectedBpm = 0;
+	if (datFileSize < (int)(offsetof(save, mpDjPadwindow) + sizeof(savedata.mpDjPadwindow)))
+		savedata.mpDjPadwindow = 0;
+	if (datFileSize < (int)(offsetof(save, mpNormTargetLufs) + sizeof(savedata.mpNormTargetLufs)))
+		savedata.mpNormTargetLufs = -14;
+	if (savedata.mpNormTargetLufs > -1) savedata.mpNormTargetLufs = -14;
+	if (savedata.mpNormTargetLufs < -30) savedata.mpNormTargetLufs = -30;
+	if (datFileSize < (int)(offsetof(save, mpKeyEqSuggest) + sizeof(savedata.mpKeyEqSuggest)))
+		savedata.mpKeyEqSuggest = 0;
+	else if (savedata.mpKeyEqSuggest) savedata.mpKeyEqSuggest = 1;
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {
 		savedata.cap_fx_n = 1;
@@ -1179,6 +1282,8 @@ BOOL COggApp::InitInstance()
 	// 曲ごとのオーディオ/DSP パラメータ(別ファイル)を読み込む
 	SongParams_LoadFile();
 	ProAudio_Init();
+	MpHist_Init();
+	MpSmart_Init();
 	// 配布済 AudioData.dat の旧キー(pathのみ)を mode+ret2 付きへ一度だけ移行
 	// (playlistu*.dat をディスクから走査。UI 未作成でも可)
 	SongParams_ConvertKeysIfNeeded();

@@ -70,6 +70,9 @@ struct WavExportOptions {
 	int forceChannels; // 0=ソース。クロスフェード追従用 1..8
 	int forceBits; // 0=ソース。クロスフェード追従用 16/24/32
 	int applyPrompt; // 1=プロンプト実行を書き出しPCMへ時間適用
+	// A-B / 範囲書き出し(末尾追記。0=未指定=先頭〜終端)
+	int startFrame;
+	int endFrame;
 };
 
 class CEqualizer;

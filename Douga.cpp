@@ -6023,20 +6023,18 @@ void CDouga::OnDougaMenuFade() { m_bar.OnBnFade(); }
 void CDouga::ShowHelpSheet()
 {
 	if (g_dougaHelpDlg && ::IsWindow(g_dougaHelpDlg->GetSafeHwnd())) {
-		g_dougaHelpDlg->ShowWindow(SW_SHOW);
-		g_dougaHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_dougaHelpDlg, this);
 		return;
 	}
 	if (g_dougaHelpDlg && !::IsWindow(g_dougaHelpDlg->GetSafeHwnd()))
 		g_dougaHelpDlg = nullptr;
-	CDougaHelpDlg* dlg = new CDougaHelpDlg(nullptr);
-	if (!dlg->Create(IDD_DOUGA_HELP, nullptr)) {
+	CDougaHelpDlg* dlg = new CDougaHelpDlg(this);
+	if (!dlg->Create(IDD_DOUGA_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_dougaHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CDouga::DestroyHelpSheet()

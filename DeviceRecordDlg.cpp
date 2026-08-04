@@ -4,8 +4,10 @@
 #include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
+#include "CPianoRoll.h"
 #include "DeviceRecordDlg.h"
 #include "TranscodeExport.h"
+#include "ProAudio.h"
 #include <mmdeviceapi.h>
 #include <Audioclient.h>
 #include <FunctionDiscoveryKeys_devpkey.h>
@@ -484,6 +486,22 @@ void CDrHelpDlg::OnPaint()
 		L"Stilte kan geen data geven — speel audio af.",
 		L"Cisza może nie dać danych — odtwarzaj dźwięk.",
 		L"Sessizlik veri vermeyebilir — aygıtta ses çalın."));
+	y += lh + 4;
+	muted(L, y, LL14(
+		L"ピアノロールの「PC音を譜面化」や MIDI/MusicXML録り・BPM計測でも、同じループバックを自動利用します。",
+		L"Piano-roll “Score from PC audio”, MIDI/MusicXML capture, and BPM measure also auto-use this loopback.",
+		L"Le piano roll (partition PC), MIDI/MusicXML et BPM utilisent aussi cette boucle.",
+		L"Il piano roll (partitura PC), MIDI/MusicXML e BPM usano anche questo loopback.",
+		L"El piano roll (partitura PC), MIDI/MusicXML y BPM también usan este loopback.",
+		L"피아노롤「PC 소리 악보화」·MIDI/MusicXML 녹음·BPM 측정도 같은 루프백을 자동 사용.",
+		L"钢琴卷「PC成谱」、MIDI/MusicXML录制、BPM测量也会自动用同一环回。",
+		L"لفة البيانو وتسجيل MIDI/MusicXML وقياس BPM تستخدم أيضاً هذه الحلقة.",
+		L"Пианоролл, запись MIDI/MusicXML и BPM тоже автоматически используют этот loopback.",
+		L"Klavierrolle, MIDI/MusicXML-Aufnahme und BPM nutzen dieselbe Loopback automatisch.",
+		L"O piano roll, captura MIDI/MusicXML e BPM também usam este loopback automaticamente.",
+		L"Pianorol, MIDI/MusicXML-opname en BPM gebruiken dezelfde loopback automatisch.",
+		L"Rolka, zapis MIDI/MusicXML i BPM też automatycznie używają tej pętli.",
+		L"Piyano rulosu, MIDI/MusicXML kaydı ve BPM de aynı loopback'i otomatik kullanır."));
 
 	dc.SelectObject(oldFont);
 }
@@ -982,7 +1000,28 @@ void CDeviceRecordDlg::StartPeakMonitor()
 	uintptr_t th = _beginthreadex(NULL, 0, CaptureThread, this, 0, NULL);
 	if (!th) return;
 	m_thread = (HANDLE)th;
-	SetTimer(DR_TIMER, 50, NULL);
+	if (GetSafeHwnd())
+		SetTimer(DR_TIMER, 50, NULL);
+}
+
+void CDeviceRecordDlg::EnsurePeakMonitorRunning()
+{
+	if (IsCaptureThreadAlive()) return;
+	StartPeakMonitor();
+}
+
+void CDeviceRecordDlg::StopPeakMonitorIfPeakOnly()
+{
+	if (m_peakOnly)
+		StopPeakMonitor();
+}
+
+BOOL CDeviceRecordDlg::IsCaptureThreadAlive() const
+{
+	if (!m_thread) return FALSE;
+	DWORD code = 0;
+	if (!GetExitCodeThread(m_thread, &code)) return FALSE;
+	return code == STILL_ACTIVE;
 }
 
 void CDeviceRecordDlg::StopPeakMonitor()
@@ -1516,6 +1555,7 @@ UINT __stdcall CDeviceRecordDlg::CaptureThread(void* p)
 						LONG cur = InterlockedCompareExchange(&self->m_peakMix, 0, 0);
 						if (v > cur) InterlockedExchange(&self->m_peakMix, v > 1000 ? 1000 : v);
 					}
+					ProAudio_BumpLivePeak(pkMix);
 					if (!self->m_peakOnly) {
 						EnterCriticalSection(&self->m_fileCs);
 						if (self->m_wavFile.m_hFile != CFile::hFileNull) {
@@ -1523,6 +1563,29 @@ UINT __stdcall CDeviceRecordDlg::CaptureThread(void* p)
 							InterlockedExchangeAdd(&self->m_pcmBytes, (LONG)(outFrames * 4));
 						}
 						LeaveCriticalSection(&self->m_fileCs);
+					}
+					if (savedata.mpLoopbackScore && outFrames > 0) {
+						extern COggDlg* og;
+						if (og && og->m_PianoRollDlg
+							&& ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd())) {
+							double mono[8192];
+							const int nf = (outFrames > 8192) ? 8192 : outFrames;
+							float chDb[2] = { -60.f, -60.f };
+							float pkL = 0.f, pkR = 0.f;
+							for (int mi = 0; mi < nf; ++mi) {
+								const float L = (float)pcm[mi * 2 + 0] / 32768.f;
+								const float R = (float)pcm[mi * 2 + 1] / 32768.f;
+								mono[mi] = 0.5 * ((double)L + (double)R);
+								const float aL = (L < 0.f) ? -L : L;
+								const float aR = (R < 0.f) ? -R : R;
+								if (aL > pkL) pkL = aL;
+								if (aR > pkR) pkR = aR;
+							}
+							if (pkL > 1e-8f) chDb[0] = 20.f * (float)log10(pkL);
+							if (pkR > 1e-8f) chDb[1] = 20.f * (float)log10(pkR);
+							og->m_PianoRollDlg->SetChannelMeterDb(chDb, 2);
+							og->m_PianoRollDlg->FeedLoopbackMono(mono, nf, 48000);
+						}
 					}
 					done += n;
 				}
@@ -1565,10 +1628,16 @@ void CDeviceRecordDlg::CloseModeless()
 {
 	if (!m_peakOnly && (m_thread || InterlockedCompareExchange(&m_run, 0, 0) != 0))
 		StopRecording(TRUE);
-	else
+	else if (!savedata.mpLoopbackScore)
 		StopPeakMonitor();
 	if (GetSafeHwnd())
 		PersistUiToSavedata();
+	// PC音譜面化中はダイアログを隠すだけ(キャプチャ継続)。完全終了はアプリ終了時。
+	if (savedata.mpLoopbackScore && GetSafeHwnd()) {
+		EnsurePeakMonitorRunning();
+		ShowWindow(SW_HIDE);
+		return;
+	}
 	if (GetSafeHwnd())
 		DestroyWindow();
 }
@@ -1605,8 +1674,11 @@ void CDeviceRecordDlg::OnTimer(UINT_PTR nIDEvent)
 		if (m_thread) {
 			DWORD code = 0;
 			if (GetExitCodeThread(m_thread, &code) && code != STILL_ACTIVE) {
-				if (m_peakOnly)
+				if (m_peakOnly) {
 					StopPeakMonitor();
+					if (savedata.mpLoopbackScore)
+						StartPeakMonitor();
+				}
 				else
 					StopRecording(TRUE);
 				return;
@@ -1623,6 +1695,8 @@ void OpenDeviceRecordModeless(CWnd* parent)
 	if (g_deviceRecordDlg && ::IsWindow(g_deviceRecordDlg->GetSafeHwnd())) {
 		g_deviceRecordDlg->ShowWindow(SW_SHOW);
 		g_deviceRecordDlg->SetForegroundWindow();
+		if (savedata.mpLoopbackScore)
+			g_deviceRecordDlg->EnsurePeakMonitorRunning();
 		return;
 	}
 	g_deviceRecordDlg = new CDeviceRecordDlg(parent);
@@ -1633,6 +1707,31 @@ void OpenDeviceRecordModeless(CWnd* parent)
 	}
 	g_deviceRecordDlg->ShowWindow(SW_SHOW);
 	g_deviceRecordDlg->SetForegroundWindow();
+	if (savedata.mpLoopbackScore)
+		g_deviceRecordDlg->EnsurePeakMonitorRunning();
+}
+
+void EnsureDeviceRecordLoopbackFeed(CWnd* parent)
+{
+	if (!savedata.mpLoopbackScore) return;
+	if (g_deviceRecordDlg && ::IsWindow(g_deviceRecordDlg->GetSafeHwnd())) {
+		g_deviceRecordDlg->EnsurePeakMonitorRunning();
+		return;
+	}
+	g_deviceRecordDlg = new CDeviceRecordDlg(parent);
+	if (!g_deviceRecordDlg->Create(IDD_DEVICERECORD, parent)) {
+		delete g_deviceRecordDlg;
+		g_deviceRecordDlg = NULL;
+		return;
+	}
+	g_deviceRecordDlg->ShowWindow(SW_HIDE);
+	g_deviceRecordDlg->EnsurePeakMonitorRunning();
+}
+
+void StopDeviceRecordLoopbackFeed()
+{
+	if (!g_deviceRecordDlg || !::IsWindow(g_deviceRecordDlg->GetSafeHwnd())) return;
+	g_deviceRecordDlg->StopPeakMonitorIfPeakOnly();
 }
 
 void CloseDeviceRecordIfOpen()
@@ -1649,20 +1748,18 @@ void CDeviceRecordDlg::LayoutHelpBtn()
 void CDeviceRecordDlg::ShowHelpSheet()
 {
 	if (g_drHelpDlg && ::IsWindow(g_drHelpDlg->GetSafeHwnd())) {
-		g_drHelpDlg->ShowWindow(SW_SHOW);
-		g_drHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_drHelpDlg, this);
 		return;
 	}
 	if (g_drHelpDlg && !::IsWindow(g_drHelpDlg->GetSafeHwnd()))
 		g_drHelpDlg = nullptr;
-	CDrHelpDlg* dlg = new CDrHelpDlg(nullptr);
-	if (!dlg->Create(IDD_DR_HELP, nullptr)) {
+	CDrHelpDlg* dlg = new CDrHelpDlg(this);
+	if (!dlg->Create(IDD_DR_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_drHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CDeviceRecordDlg::OnBnClickedHelp()

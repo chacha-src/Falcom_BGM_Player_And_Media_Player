@@ -1,10 +1,11 @@
-// CAnalyzerDlg.cpp : 簡易波形アナライザー(スクロールBB・多ch・周波数特性)
+﻿// CAnalyzerDlg.cpp : 簡易波形アナライザー(スクロールBB・多ch・周波数特性)
 #include "stdafx.h"
 #include "ogg.h"
 #include "CAnalyzerDlg.h"
 #include "ProAudio.h"
 #include "oggDlg.h"
 #include "CEqualizer.h"
+#include "CProToolsDlg.h"
 #include <cmath>
 #include <algorithm>
 
@@ -287,6 +288,12 @@ namespace
 		IDM_MARKER_REMOVE = 42043,
 		IDM_MARKER_CLEAR = 42044,
 		IDM_CORR_METER = 42045,
+		IDM_SAVE_JACKET = 42050,
+		IDM_MS_NARROW = 42051,
+		IDM_MS_WIDE = 42052,
+		IDM_MS_MONO = 42053,
+		IDM_MS_RESET = 42054,
+		IDM_MS_FROM_CORR = 42055,
 
 		IDM_WAVE_SPEED_BASE = 42100, // +0..WAVE_SPEED_COUNT-1
 		WM_ANALYZER_SPEC_DONE = WM_APP + 510,
@@ -532,7 +539,39 @@ void CAnHelpDlg::OnPaint()
 		L"· TP/LUFS …… True Peak e LUFS simples perto da onda",
 		L"· TP/LUFS …… eenvoudige True Peak & LUFS bij de golf",
 		L"· TP/LUFS …… prosty True Peak i LUFS przy fali",
-		L"· TP/LUFS …… dalga yanında basit True Peak ve LUFS")); y += lh + 4;
+		L"· TP/LUFS …… dalga yanında basit True Peak ve LUFS")); 
+	body(L, y, LL14(
+		L"・スペクトログラムを画像保存 …… 右クリックで PNG/BMP に書き出し（ジャケット用）",
+		L"· Save spectrogram image …… RMB exports PNG/BMP (for jacket use)",
+		L"· Sauver spectro …… clic droit PNG/BMP",
+		L"· Salva spettrogramma …… destro PNG/BMP",
+		L"· Guardar espectrograma …… clic der. PNG/BMP",
+		L"· 스펙트로그램 이미지 저장 …… 우클릭으로 PNG/BMP",
+		L"· 保存频谱图 …… 右键导出 PNG/BMP（封面用）",
+		L"· حفظ المخطط الطيفي …… يمين PNG/BMP",
+		L"· Сохранить спектрограмму …… ПКМ PNG/BMP",
+		L"· Spektrogramm speichern …… RMB PNG/BMP",
+		L"· Salvar espectrograma …… direito PNG/BMP",
+		L"· Spectrogram opslaan …… RMB PNG/BMP",
+		L"· Zapisz spektrogram …… PPM PNG/BMP",
+		L"· Spektrogram kaydet …… sag tik PNG/BMP")); y += lh;
+	body(L, y, LL14(
+		L"・相関→M/S …… 右クリックの相関ヒストから狭める/広げる/モノを提案",
+		L"· Corr→M/S …… RMB suggests narrow/wide/mono from corr history",
+		L"· Corr→M/S …… clic droit propose d apres l historique",
+		L"· Corr→M/S …… destro propone da cronologia",
+		L"· Corr→M/S …… clic der. sugiere desde historial",
+		L"· 상관→M/S …… 우클릭 이력으로 좁힘/넓힘/모노 제안",
+		L"· 相关→M/S …… 右键根据历史建议收窄/加宽/单声道",
+		L"· ارتباط→M/S …… يمين يقترح من السجل",
+		L"· Корр→M/S …… ПКМ предлагает по истории",
+		L"· Korr→M/S …… RMB schlagt aus Verlauf vor",
+		L"· Corr→M/S …… direito sugere pelo historico",
+		L"· Corr→M/S …… RMB stelt voor uit geschiedenis",
+		L"· Kor→M/S …… PPM proponuje z historii",
+		L"· Kor→M/S …… sag tik gecmisten onerir")); y += lh;
+
+	y += lh + 4;
 
 	title(L, y, LL14(L"操作・ウィンドウ", L"Actions & window", L"Actions et fenêtre", L"Azioni e finestra",
 		L"Acciones y ventana", L"조작·창", L"操作与窗口", L"إجراءات والنافذة",
@@ -643,6 +682,8 @@ CAnalyzerDlg::CAnalyzerDlg(CWnd* pParent)	: CCustomBlurDialogExBase(IDD_ANALYZER
 	m_eqDragBand = -1;
 	m_eqDragPlot.SetRectEmpty();
 	m_tpLufsTipRc.SetRectEmpty();
+	memset(m_corrHist, 0, sizeof(m_corrHist));
+	m_corrHistHead = 0;
 }
 
 CAnalyzerDlg::~CAnalyzerDlg()
@@ -714,6 +755,12 @@ BEGIN_MESSAGE_MAP(CAnalyzerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(IDM_MARKER_REMOVE, &CAnalyzerDlg::OnMarkerRemoveNearest)
 	ON_COMMAND(IDM_MARKER_CLEAR, &CAnalyzerDlg::OnMarkerClearAll)
 	ON_COMMAND(IDM_CORR_METER, &CAnalyzerDlg::OnToggleCorrMeter)
+	ON_COMMAND(IDM_SAVE_JACKET, &CAnalyzerDlg::OnSaveSpectrogramJacket)
+	ON_COMMAND(IDM_MS_NARROW, &CAnalyzerDlg::OnMsPresetNarrow)
+	ON_COMMAND(IDM_MS_WIDE, &CAnalyzerDlg::OnMsPresetWide)
+	ON_COMMAND(IDM_MS_MONO, &CAnalyzerDlg::OnMsPresetMono)
+	ON_COMMAND(IDM_MS_RESET, &CAnalyzerDlg::OnMsPresetReset)
+	ON_COMMAND(IDM_MS_FROM_CORR, &CAnalyzerDlg::OnMsPresetFromCorr)
 	ON_MESSAGE(WM_ANALYZER_SPEC_DONE, &CAnalyzerDlg::OnSpecAnalysisDone)
 	ON_MESSAGE(WM_ANALYZER_PRESENT, &CAnalyzerDlg::OnPresentRequest)
 	ON_MESSAGE(WM_ANALYZER_SYNC, &CAnalyzerDlg::OnSyncRequest)
@@ -1254,8 +1301,142 @@ void CAnalyzerDlg::OnToggleCorrMeter()
 #if CCUSTOM_AERO_SUPPORT
 	m_chromaReady = false; // 相関帯の幅が変わるため残像を避ける
 #endif
+	extern void MpPersistSavedataQuick();
+	MpPersistSavedataQuick();
 	Invalidate(FALSE);
 	KickUiPresent();
+	// MPバナーは再生中毎フレーム再描画されるので、次フレームで φ/LR が追従する
+}
+
+static void AnalyzerApplyMsPreset(int widthPct, int mono)
+{
+	savedata.pro_ms_width = ProClampI(widthPct, 0, 200);
+	savedata.pro_ms_mono = mono ? 1 : 0;
+	extern CProToolsDlg* g_proToolsDlg;
+	if (g_proToolsDlg && ::IsWindow(g_proToolsDlg->GetSafeHwnd()))
+		g_proToolsDlg->LoadFromSavedata();
+}
+
+void CAnalyzerDlg::OnMsPresetNarrow() { AnalyzerApplyMsPreset(40, 0); }
+void CAnalyzerDlg::OnMsPresetWide() { AnalyzerApplyMsPreset(160, 0); }
+void CAnalyzerDlg::OnMsPresetMono() { AnalyzerApplyMsPreset(100, 1); }
+void CAnalyzerDlg::OnMsPresetReset() { AnalyzerApplyMsPreset(100, 0); }
+void CAnalyzerDlg::OnMsPresetFromCorr()
+{
+	const int sn = m_corrHistHead < 64 ? m_corrHistHead : 64;
+	if (sn <= 0) {
+		AnalyzerApplyMsPreset(100, 0);
+		return;
+	}
+	double sum = 0.0;
+	for (int i = 0; i < sn; ++i) {
+		const int idx = (m_corrHistHead - sn + i) & 63;
+		sum += (double)m_corrHist[idx];
+	}
+	const float avg = (float)(sum / (double)sn);
+	// High φ → correlated / mono-ish; low/negative → wide side; mid → narrow.
+	if (avg >= 0.75f)
+		AnalyzerApplyMsPreset(100, 1);
+	else if (avg >= 0.35f)
+		AnalyzerApplyMsPreset(40, 0);
+	else if (avg >= -0.15f)
+		AnalyzerApplyMsPreset(100, 0);
+	else
+		AnalyzerApplyMsPreset(160, 0);
+}
+
+void CAnalyzerDlg::OnSaveSpectrogramJacket()
+{
+	CFileDialog fd(FALSE, _T("png"), _T("spectrogram.png"),
+		OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY | OFN_ENABLESIZING,
+		_T("PNG (*.png)|*.png|Bitmap (*.bmp)|*.bmp||"), this);
+	if (fd.DoModal() != IDOK) return;
+
+	const CString path = fd.GetPathName();
+	const bool asBmp = (path.Right(4).CompareNoCase(_T(".bmp")) == 0);
+	CImage img;
+	HBITMAP hbCopy = NULL;
+
+	if (m_specReady && m_specBmp.GetSafeHandle() && m_specW > 0 && m_specH > 0) {
+		HDC screen = ::GetDC(NULL);
+		if (screen) {
+			HDC mem = ::CreateCompatibleDC(screen);
+			hbCopy = ::CreateCompatibleBitmap(screen, m_specW, m_specH);
+			if (hbCopy && mem) {
+				HGDIOBJ old = ::SelectObject(mem, hbCopy);
+				::BitBlt(mem, 0, 0, m_specW, m_specH, m_specDC.GetSafeHdc(), 0, 0, SRCCOPY);
+				::SelectObject(mem, old);
+			}
+			if (mem) ::DeleteDC(mem);
+			::ReleaseDC(NULL, screen);
+		}
+		if (hbCopy) {
+			img.Attach(hbCopy);
+			hbCopy = NULL;
+		}
+	}
+
+	if (img.IsNull()) {
+		int wfWrite = 0, wfFilled = 0;
+		EnterCriticalSection(&m_cs);
+		wfWrite = m_wfWrite;
+		wfFilled = m_wfFilled;
+		const int ch = (std::max)(1, (std::min)(m_channels, CH_MAX));
+		LeaveCriticalSection(&m_cs);
+		const int imgW = SPEC_BINS;
+		const int imgH = WF_ROWS;
+		if (SUCCEEDED(img.Create(imgW, imgH, 32, CImage::createAlphaChannel))) {
+			for (int y = 0; y < imgH; ++y) {
+				for (int x = 0; x < imgW; ++x) {
+					float db = -96.0f;
+					EnterCriticalSection(&m_cs);
+					const int src = ((wfWrite - 1 - y) % WF_ROWS + WF_ROWS) % WF_ROWS;
+					if (y < wfFilled)
+						db = m_wfHist[0][src][x];
+					LeaveCriticalSection(&m_cs);
+					float t = (db + 96.0f) / 96.0f;
+					if (t < 0.f) t = 0.f;
+					if (t > 1.f) t = 1.f;
+					int r, g, b;
+					if (t < 0.33f) {
+						float u = t / 0.33f;
+						r = (int)(20 + u * 20); g = (int)(30 + u * 120); b = (int)(60 + u * 160);
+					}
+					else if (t < 0.66f) {
+						float u = (t - 0.33f) / 0.33f;
+						r = (int)(40 + u * 180); g = (int)(150 + u * 80); b = (int)(220 - u * 180);
+					}
+					else {
+						float u = (t - 0.66f) / 0.34f;
+						r = (int)(220 + u * 35); g = (int)(230 + u * 25); b = (int)(40 + u * 200);
+					}
+					img.SetPixel(x, y, RGB(r, g, b));
+				}
+			}
+			(void)ch;
+		}
+	}
+
+	if (img.IsNull()) {
+		MessageBox(LL14(L"保存できるスペクトル画像がありません。", L"No spectrogram image to save.", L"Pas d'image spectre.", L"Nessuna immagine spettro.", L"No hay imagen de espectro.", L"저장할 스펙트럼 없음.", L"没有可保存的频谱图。", L"لا صورة طيف.", L"Нет изображения спектра.", L"Kein Spektrogramm.", L"Sem imagem.", L"Geen beeld.", L"Brak obrazu.", L"Kaydedilecek spektrum yok."), _T("Spectrogram"), MB_OK | MB_ICONINFORMATION);
+		return;
+	}
+	HRESULT hr = E_FAIL;
+	try {
+		if (asBmp)
+			hr = img.Save(path, Gdiplus::ImageFormatBMP);
+		else
+			hr = img.Save(path, Gdiplus::ImageFormatPNG);
+	}
+	catch (...) {}
+	img.Destroy();
+	if (FAILED(hr)) {
+		MessageBox(LL14(L"画像の保存に失敗しました。", L"Failed to save image.", L"Echec enregistrement.", L"Salvataggio fallito.", L"Error al guardar.", L"저장 실패.", L"保存失败。", L"فشل الحفظ.", L"Не удалось сохранить.", L"Speichern fehlgeschlagen.", L"Falha ao salvar.", L"Opslaan mislukt.", L"Zapis nieudany.", L"Kayit basarisiz."), _T("Spectrogram"), MB_OK | MB_ICONWARNING);
+		return;
+	}
+	CString msg;
+	msg.Format(LL14(L"保存しました:\n%s", L"Saved:\n%s", L"Enregistre:\n%s", L"Salvato:\n%s", L"Guardado:\n%s", L"저장:\n%s", L"已保存:\n%s", L"تم الحفظ:\n%s", L"Сохранено:\n%s", L"Gespeichert:\n%s", L"Salvo:\n%s", L"Opgeslagen:\n%s", L"Zapisano:\n%s", L"Kaydedildi:\n%s"), (LPCTSTR)path);
+	MessageBox(msg, _T("Spectrogram"), MB_OK | MB_ICONINFORMATION);
 }
 
 void CAnalyzerDlg::OnWaveSpeedCmd(UINT nID)
@@ -1465,6 +1646,23 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 
 	menu.AppendMenu(MF_STRING | (savedata.pro_corr_meter ? MF_CHECKED : 0),
 		IDM_CORR_METER, LL14(L"位相相関メーター", L"Correlation meter", L"Correlometre", L"Misuratore di correlazione", L"Medidor de correlacion", L"위상 상관 미터", L"相位相关表", L"مقياس الترابط الطوري", L"Измеритель корреляции", L"Korrelationsanzeige", L"Medidor de correlacao", L"Correlatiemeter", L"Miernik korelacji", L"Faz korelasyon olceri"));
+
+	CMenu subMs;
+	subMs.CreatePopupMenu();
+	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_width == 40 && !savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_MS_NARROW,
+		LL14(L"M/S 狭め (40%)", L"M/S narrow (40%)", L"M/S etroit (40%)", L"M/S stretto (40%)", L"M/S estrecho (40%)", L"M/S 좁게 (40%)", L"M/S 窄 (40%)", L"M/S ضيق (40%)", L"M/S узко (40%)", L"M/S schmal (40%)", L"M/S estreito (40%)", L"M/S smal (40%)", L"M/S wasko (40%)", L"M/S dar (40%)"));
+	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_width == 160 && !savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_MS_WIDE,
+		LL14(L"M/S 広げ (160%)", L"M/S wide (160%)", L"M/S large (160%)", L"M/S ampio (160%)", L"M/S ancho (160%)", L"M/S 넓게 (160%)", L"M/S 宽 (160%)", L"M/S واسع (160%)", L"M/S широко (160%)", L"M/S breit (160%)", L"M/S largo (160%)", L"M/S breed (160%)", L"M/S szeroko (160%)", L"M/S genis (160%)"));
+	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_MS_MONO,
+		LL14(L"M/S モノ", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S 모노", L"M/S  mono", L"M/S mono", L"M/S моно", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono"));
+	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_width == 100 && !savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_MS_RESET,
+		LL14(L"M/S リセット", L"M/S reset", L"M/S reinit.", L"M/S reset", L"M/S restablecer", L"M/S 리셋", L"M/S 重置", L"M/S reset", L"M/S сброс", L"M/S reset", L"M/S reset", L"M/S reset", L"M/S reset", L"M/S sifirla"));
+	subMs.AppendMenu(MF_STRING, IDM_MS_FROM_CORR,
+		LL14(L"相関ヒストから提案", L"Suggest from corr history", L"Suggérer depuis corr.", L"Suggerisci da corr.", L"Sugerir desde corr.", L"상관 이력에서 제안", L"根据相关历史建议", L"اقتراح من الارتباط", L"Предложить по корреляции", L"Aus Korr.-Verlauf vorschlagen", L"Sugerir pelo hist. corr.", L"Voorstel uit corr.-geschiedenis", L"Zaproponuj z historii kor.", L"Korelasyon gecmisinden oner"));
+	menu.AppendMenu(MF_POPUP, (UINT_PTR)subMs.Detach(),
+		LL14(L"相関→M/S", L"Correlation→M/S", L"Correlation→M/S", L"Correlazione→M/S", L"Correlacion→M/S", L"상관→M/S", L"相关→M/S", L"ترابط→M/S", L"Корреляция→M/S", L"Korrelation→M/S", L"Correlacao→M/S", L"Correlatie→M/S", L"Korelacja→M/S", L"Korelasyon→M/S"));
+	menu.AppendMenu(MF_STRING, IDM_SAVE_JACKET,
+		LL14(L"スペクトルを画像保存…", L"Save spectrogram as image…", L"Enregistrer le spectrogramme…", L"Salva spettrogramma…", L"Guardar espectrograma…", L"스펙트럼 이미지 저장…", L"将频谱图保存为图片…", L"حفظ الطيف كصورة…", L"Сохранить спектrogram…", L"Spektrogramm speichern…", L"Salvar espectrograma…", L"Spectrogram opslaan…", L"Zapisz spektrogram…", L"Spektrumu kaydet…"));
 	menu.AppendMenu(MF_SEPARATOR);
 
 	CMenu subLayout;
@@ -2892,6 +3090,8 @@ void CAnalyzerDlg::DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg)
 	if (savedata.pro_corr_meter && n >= 2) {
 		const float corr = ProAudio_CorrValue();
 		const float bal = ProAudio_CorrBalance();
+		m_corrHist[m_corrHistHead & 63] = corr;
+		m_corrHistHead++;
 		const int corrW = 22;
 		CRect corrRc(area.left - corrW - 4, area.top + 2, area.left - 4, area.bottom - 2);
 		if (corrRc.left < waveRc.left + 2)
@@ -2916,6 +3116,27 @@ void CAnalyzerDlg::DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg)
 			CFont* of2 = dc.SelectObject(&m_font);
 			dc.TextOut(corrRc.left + 2, corrRc.top, _T("φ"));
 			dc.SelectObject(of2);
+
+			// 相関ヒストの簡易スパークライン(右端)
+			{
+				const int sn = m_corrHistHead < 64 ? m_corrHistHead : 64;
+				const int sx0 = corrRc.right + 2;
+				if (sn >= 4 && sx0 + 20 < waveRc.right) {
+					CRect sparkRc(sx0, corrRc.top, sx0 + 18, corrRc.bottom);
+					dc.FillSolidRect(sparkRc, RGB(22, 26, 36));
+					const int mid = (sparkRc.top + sparkRc.bottom) / 2;
+					dc.FillSolidRect(sparkRc.left, mid, sparkRc.Width(), 1, RGB(60, 70, 90));
+					for (int i = 0; i < sn && i < sparkRc.Width() - 2; ++i) {
+						const int idx = (m_corrHistHead - sn + i) & 63;
+						float v = m_corrHist[idx];
+						if (v > 1.f) v = 1.f; if (v < -1.f) v = -1.f;
+						int yy = mid - (int)(v * ((sparkRc.Height() / 2) - 3));
+						if (yy < sparkRc.top + 1) yy = sparkRc.top + 1;
+						if (yy > sparkRc.bottom - 2) yy = sparkRc.bottom - 2;
+						dc.SetPixel(sparkRc.left + 1 + i, yy, v >= 0 ? RGB(100, 220, 140) : RGB(220, 120, 100));
+					}
+				}
+			}
 		}
 	}
 }
@@ -3571,20 +3792,18 @@ void CAnalyzerDlg::LayoutHelpBtn()
 void CAnalyzerDlg::ShowHelpSheet()
 {
 	if (g_anHelpDlg && ::IsWindow(g_anHelpDlg->GetSafeHwnd())) {
-		g_anHelpDlg->ShowWindow(SW_SHOW);
-		g_anHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_anHelpDlg, this);
 		return;
 	}
 	if (g_anHelpDlg && !::IsWindow(g_anHelpDlg->GetSafeHwnd()))
 		g_anHelpDlg = nullptr;
-	CAnHelpDlg* dlg = new CAnHelpDlg(nullptr);
-	if (!dlg->Create(IDD_AN_HELP, nullptr)) {
+	CAnHelpDlg* dlg = new CAnHelpDlg(this);
+	if (!dlg->Create(IDD_AN_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_anHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CAnalyzerDlg::OnBnClickedHelp()

@@ -265,6 +265,10 @@ void CRdHelpDlg::OnPaint()
 		L"· Pantalla / acordes / espectro …… carga y aspecto", L"· 표시/코드/스펙 …… 그리기 부하와 모양 조정", L"· 显示/和弦/频谱 …… 调整绘制负载与外观", L"· العرض/الأكورد/الطيف …… ضبط الحمل والمظهر",
 		L"· Дисплей / аккорды / спектр …… нагрузка и вид", L"· Anzeige / Akkorde / Spektrum …… Last und Optik", L"· Exibição / acordes / espectro …… carga e aspeto", L"· Weergave / akkoorden / spectrum …… belasting en uiterlijk",
 		L"· Wyświetlanie / akordy / widmo …… obciążenie i wygląd", L"· Görüntü / akor / spektrum …… yük ve görünüm")); y += lh;
+	body(L, y, LL14(L"・関連付け …… 音声に加え動画(avi/mp4/mkv/mov/webm等)とプレイリストも登録", L"· File association …… audio plus video (avi/mp4/mkv/mov/webm…) and playlists", L"· Association …… audio + vidéo (avi/mp4/mkv…) et playlists", L"· Associazione …… audio + video (avi/mp4/mkv…) e playlist",
+		L"· Asociación …… audio + vídeo (avi/mp4/mkv…) y listas", L"· 파일 연결 …… 음성+동영상(avi/mp4/mkv 등)+재생목록", L"· 文件关联 …… 音频+视频(avi/mp4/mkv等)+播放列表", L"· ربط الملفات …… صوت+فيديو+قوائم",
+		L"· Связь файлов …… аудио + видео (avi/mp4/mkv…) и плейлисты", L"· Dateizuordnung …… Audio + Video (avi/mp4/mkv…) und Playlists", L"· Associação …… áudio + vídeo (avi/mp4/mkv…) e playlists", L"· Koppeling …… audio + video (avi/mp4/mkv…) en playlists",
+		L"· Powiązanie …… audio + wideo (avi/mp4/mkv…) i playlisty", L"· İlişkilendirme …… ses + video (avi/mp4/mkv…) ve listeler")); y += lh;
 	muted(L, y, LL14(
 		L"OKで保存して閉じる。キャンセルは変更を破棄。各項目の細かい注意はツールチップにあります。",
 		L"OK saves and closes. Cancel discards changes. Fine print is in the tooltips.",
@@ -719,7 +723,21 @@ BOOL CRender::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_SPEAKER), LL14(L"アップスケール時の出力チャンネル配置（2ch / 2.1 / 4ch / 5.1 / 7.1 / マッピングなし）を選びます。マッピングなしはソースのチャンネル数のまま、レート・ビット深度のみ変換します。", L"Speaker layout when upscaling (2ch / 2.1 / 4ch / 5.1 / 7.1 / no mapping). No mapping keeps source channel count; only rate and bit depth change.", L"Disposition haut-parleurs en upscaling (2ch / 2.1 / 4ch / 5.1 / 7.1 / sans mappage). Sans mappage : meme nombre de canaux, seuls debit et bits changent.", L"Layout altoparlanti (2ch / 2.1 / 4ch / 5.1 / 7.1 / nessun mapping). Nessun mapping: stessi canali, solo frequenza e bit.", L"Disposicion de altavoces (2ch / 2.1 / 4ch / 5.1 / 7.1 / sin mapeo). Sin mapeo: mismos canales; solo tasa y bits.", L"업스케일 시 스피커(2ch/2.1/4ch/5.1/7.1/매핑 없음). 매핑 없음은 소스 채널 수 유지, 레이트·비트만 변환.", L"升频时的扬声器布局（含不映射声道）。不映射则保持源声道数，仅转换采样率与位深。", L"تخطيط السماعات مع خيار بدون تعيين. بدون تعيين: نفس عدد القنوات؛ تغيير المعدل والبت فقط.", L"Раскладка каналов при апскейле; «без маппинга» сохраняет число каналов источника, меняются только частота и битность.", L"Lautsprecher-Layout; „kein Mapping“ behalt Kanalzahl, nur Rate/Bits.", L"Layout de altifalante; sem mapeamento mantem canais da fonte, so taxa e bits.", L"Luidsprekerindeling; geen mapping behoudt bronkanalen, alleen rate en bits.", L"Uklad kanalow; bez mapowania = ta sama liczba kanalow, zmiana tylko czestotliwosci i bitow.", L"Hoparlor duzeni; esleme yok kaynak kanal sayisini korur, yalnizca hiz ve bit derinligi degisir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO4), LL14(L"スペアナで表示する表示方法を選択します。\n使う時は横のチェックボックスにチェックを入れてください\n音階：88鍵盤として表示します\n周波数帯：周波数として表示します\n標準：既定の見やすい形のスペアナで表示します", L"Select spectrum display.\nCheck the box to use.\nScale: 88-key piano\nFreq band: frequency view\nStandard: default spectrum", L"Choisir l'affichage du spectre.\nCochez la case pour activer.\nGamme : clavier 88 touches\nBandes : frequences\nStandard : spectre par defaut", L"Scegli visualizzazione spettro.\nSpunta la casella per usare.\nScale : tastiera 88 tasti\nBande : frequenze\nStandard : spettro predefinito", L"Elegir visualizacion del espectro.\nMarca la casilla para usar.\nEscala : piano 88 teclas\nBandas : frecuencias\nEstandar : espectro predeterminado", L"스펙트럼 표시 방식 선택.\n사용 시 옆 체크박스 선택.\n음계: 88건반\n주파수대: 주파수\n표준: 기본 스펙트럼", L"选择频谱显示方式。\n使用时请勾选旁边复选框。\n音阶：88键\n频段：频率\n标准：默认频谱", L"اختر عرض الطيف.\nحدّد المربع للاستخدام.\nسلم : 88 مفتاحاً\nنطاق : تردد\nقياسي : الطيف الافتراضي", L"Выбрать отображение спектра.\nОтметьте флажок для включения.\nГамма: 88 клавиш\nПолосы: частоты\nСтандарт: обычный спектр", L"Spektrum-Anzeige wahlen.\nKastchen ankreuzen zum Aktivieren.\nTonleiter: 88 Tasten\nBanden: Frequenzen\nStandard: Default-Spektrum", L"Escolher exibicao do espectro.\nMarque a caixa para usar.\nEscala: 88 teclas\nBandas: frequencias\nPadrao: espectro padrao", L"Spectrumweergave kiezen.\nVink aan om te gebruiken.\nToonladder: 88 toetsen\nBanden: frequenties\nStandaard: standaardspectrum", L"Wybierz wyswietlanie widma.\nZaznacz pole aby uzyc.\nSkala: 88 klawiszy\nPasma: czestotliwosci\nStandard: domyslne widmo", L"Spektrum gosterimini sec.\nKullanmak icin kutuyu isaretle.\nDizi: 88 tus\nBant: frekans\nStandart: varsayilan spektrum"));
 	m_tooltip.AddTool(GetDlgItem(IDC_BUTTON1), LL14(L"碧の軌跡用のt_bgm._dtを設定します。", L"Set t_bgm._dt for Ao no Kiseki.", L"Definir t_bgm._dt pour Ao no Kiseki.", L"Imposta t_bgm._dt per Ao no Kiseki.", L"Establecer t_bgm._dt para Ao no Kiseki.", L"Ao no Kiseki용 t_bgm._dt 설정.", L"设置碧之轨迹的 t_bgm._dt。", L"تعيين t_bgm._dt لـ Ao no Kiseki.", L"Задать t_bgm._dt для Ao no Kiseki.", L"t_bgm._dt fur Ao no Kiseki festlegen.", L"Definir t_bgm._dt para Ao no Kiseki.", L"t_bgm._dt instellen voor Ao no Kiseki.", L"Ustaw t_bgm._dt dla Ao no Kiseki.", L"Ao no Kiseki icin t_bgm._dt ayarla"));
-	m_tooltip.AddTool(GetDlgItem(IDCANCEL5), LL14(L"win7くらいまで対応。関連付けに追加します。\nwin10以降でも追加はされるとは思いますがされないときもあります。", L"Supported up to Win7. Add file associations.\nMay work on Win10+ but not always.", L"Prise en charge jusqu'a Win7. Ajouter des associations.\nPeut fonctionner sous Win10+ mais pas toujours.", L"Supportato fino a Win7. Aggiunge associazioni file.\nPuo funzionare su Win10+ ma non sempre.", L"Soportado hasta Win7. Anade asociaciones.\nPuede funcionar en Win10+ pero no siempre.", L"Win7까지 지원. 연결 추가.\nWin10+에서도 될 수 있으나 항상은 아님.", L"支持至 Win7。添加文件关联。\nWin10+ 可能有效也可能无效。", L"مدعوم حتى Win7. إضافة ارتباطات.\nقد يعمل على Win10+ لكن ليس دائماً.", L"Поддержка до Win7. Добавить ассоциации.\nНа Win10+ может работать, но не всегда.", L"Bis Win7 unterstutzt. Zuordnungen hinzufugen.\nUnter Win10+ evtl., aber nicht immer.", L"Suportado ate Win7. Adiciona associacoes.\nPode funcionar no Win10+ mas nem sempre.", L"Ondersteund tot Win7. Koppelingen toevoegen.\nOp Win10+ soms, niet altijd.", L"Obsluga do Win7. Dodaje powiazania.\nNa Win10+ moze dzialac, ale nie zawsze.", L"Win7'ye kadar destek. Iliskilendirme ekler.\nWin10+'da calisabilir ama her zaman degil."));
+	m_tooltip.AddTool(GetDlgItem(IDCANCEL5), LL14(
+		L"関連付けに追加します（音声・動画・プレイリスト）。\nwin10以降は「アプリで開く」候補への登録が主です。既定変更はOS側の設定が必要なことがあります。",
+		L"Add file associations (audio, video, playlists).\nOn Win10+ this mainly registers as an Open With candidate; default may need OS settings.",
+		L"Ajouter des associations (audio, video, listes).\nSous Win10+ surtout candidat Ouvrir avec.",
+		L"Aggiunge associazioni (audio, video, playlist).\nSu Win10+ soprattutto Apri con.",
+		L"Anade asociaciones (audio, video, listas).\nEn Win10+ principalmente Abrir con.",
+		L"파일 연결 추가(음성·동영상·재생목록).\nWin10+는 '연결 프로그램' 후보 등록이 주입니다.",
+		L"添加文件关联（音频、视频、播放列表）。\nWin10+ 主要为“打开方式”候选。",
+		L"إضافة ارتباطات (صوت/فيديو/قوائم).\nفي Win10+ غالباً مرشح فتح باستخدام.",
+		L"Добавить ассоциации (аудио, видео, плейлисты).\nНа Win10+ в основном «Открыть с помощью».",
+		L"Zuordnungen hinzufugen (Audio, Video, Playlists).\nUnter Win10+ vor allem Offnen mit.",
+		L"Adiciona associacoes (audio, video, playlists).\nNo Win10+ sobretudo Abrir com.",
+		L"Koppelingen toevoegen (audio, video, playlists).\nOp Win10+ vooral Openen met.",
+		L"Dodaje powiazania (audio, wideo, playlisty).\nNa Win10+ glownie Otworz za pomoca.",
+		L"Iliskilendirme ekler (ses, video, listeler).\nWin10+'da genellikle Birlikte Ac."));
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_lrc), LL14(L"歌詞情報をネットから参照するようにします。\n数パターン試すため少し再生までに時間かかります。", L"Fetch lyrics from network.\nMay take longer to start playback.", L"Recuperer les paroles sur le reseau.\nPeut retarder le demarrage de la lecture.", L"Recupera testi dalla rete.\nPuo ritardare l'avvio della riproduzione.", L"Obtener letras de la red.\nPuede tardar mas en iniciar la reproduccion.", L"가사 정보를 네트워크에서 조회.\n시도가 여러 번이라 재생 시작이 다소 지연될 수 있음.", L"从网络获取歌词。\n需尝试多种来源，播放可能稍慢。", L"جلب كلمات الأغاني من الشبكة.\nقد يتأخر بدء التشغيل.", L"Загружать текст песен из сети.\nСтарт воспроизведения может занять больше времени.", L"Texte aus dem Netz laden.\nWiedergabestart kann langer dauern.", L"Buscar letras na rede.\nPode demorar para iniciar reproducao.", L"Teksten ophalen via netwerk.\nAfspelen kan langer op starten.", L"Pobieraj teksty z sieci.\nStart odtwarzania moze trwac dluzej.", L"Sozleri agdan al.\nCalma baslangici biraz gecikebilir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER3), LL14(L"演奏のバッファ処理での割り込み時間を設定します。\n少なすぎると音飛びする可能性があります。", L"Set buffer interrupt time.\nToo low may cause audio glitches.", L"Regler le temps d'interruption du tampon.\nTrop bas peut provoquer des saccades audio.", L"Imposta tempo di interruzione buffer.\nTroppo basso puo causare salti audio.", L"Ajustar tiempo de interrupcion del buffer.\nMuy bajo puede causar cortes de audio.", L"버퍼 처리 인터럽트 시간 설정.\n너무 낮으면 끊김 가능.", L"设置播放缓冲中断时间。\n过低可能导致跳音。", L"ضبط وقت مقاطعة المخزن المؤقت.\nالمنخفض جداً قد يسبب تقطيعاً.", L"Задать время прерывания буфера.\nСлишком мало — возможны сбои звука.", L"Puffer-Unterbrechungszeit einstellen.\nZu niedrig kann Knackser verursachen.", L"Definir tempo de interrupcao do buffer.\nMuito baixo pode causar falhas de audio.", L"Buffer-onderbrekingstijd instellen.\nTe laag kan haperingen geven.", L"Ustaw czas przerwania bufora.\nZa niski moze powodowac przeskakiwanie.", L"Tampon kesme suresini ayarla.\nCok dusuk ses atlatabilir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER5), LL14(L"描画の間隔時間を設定します。\nCPU使用が高いときに上げます。", L"Set render interval.\nIncrease when CPU usage is high.", L"Regler l'intervalle de rendu.\nAugmentez si le CPU est charge.", L"Imposta intervallo di rendering.\nAumenta se il CPU e sotto carico.", L"Ajustar intervalo de renderizado.\nSube si el CPU esta alto.", L"그리기 간격 설정.\nCPU 사용률이 높을 때 늘리세요.", L"设置绘制间隔。\nCPU 占用高时可增大。", L"ضبط فترة الرسم.\nزِدها عند ارتفاع استخدام المعالج.", L"Задать интервал отрисовки.\nУвеличьте при высокой нагрузке на CPU.", L"Render-Intervall einstellen.\nBei hoher CPU-Last erhohen.", L"Definir intervalo de renderizacao.\nAumente se a CPU estiver alta.", L"Renderinterval instellen.\nVerhoog bij hoge CPU-belasting.", L"Ustaw odstep renderowania.\nZwieksz przy wysokim obciazeniu CPU.", L"Cizim araligini ayarla.\nCPU yuksekken artir."));
@@ -906,9 +924,10 @@ BOOL CRender::OnInitDialog()
 	GetWindowRect(&r);
 	if (renderbase && renderbase->GetSafeHwnd())
 		renderbase->MoveWindow(&r);
-	if(renderbase)
-		::SetWindowPos(renderbase->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-	::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	// TOPMOST 禁止: 他UIがメインになったとき下に回せる。グラスはダイアログの直下へ。
+	::SetWindowPos(m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	if (renderbase && renderbase->GetSafeHwnd())
+		::SetWindowPos(renderbase->m_hWnd, m_hWnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
 	EnableMainWindowLock(&savedata.renderMainLock, TRUE);
 	CCC_MainLockSetHeaderRow(m_hWnd, 0, 18);
@@ -927,20 +946,19 @@ void CRender::LayoutHelpBtn()
 void CRender::ShowHelpSheet()
 {
 	if (g_rdHelpDlg && ::IsWindow(g_rdHelpDlg->GetSafeHwnd())) {
-		g_rdHelpDlg->ShowWindow(SW_SHOW);
-		g_rdHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_rdHelpDlg, this);
 		return;
 	}
 	if (g_rdHelpDlg && !::IsWindow(g_rdHelpDlg->GetSafeHwnd()))
 		g_rdHelpDlg = nullptr;
-	CRdHelpDlg* dlg = new CRdHelpDlg(nullptr);
-	if (!dlg->Create(IDD_RD_HELP, nullptr)) {
+	// オーナー付きモードレス。ヘルプはオーナー上、他UI前面時は下へ（TOPMOSTしない）
+	CRdHelpDlg* dlg = new CRdHelpDlg(this);
+	if (!dlg->Create(IDD_RD_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_rdHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CRender::OnBnClickedHelp()
@@ -1421,6 +1439,33 @@ static void RenderUpdateProgIdOpenCommand(HKEY hRoot, const CString& subKey, LPC
 	}
 }
 
+// 関連付け対象: 再生できる音声／動画(DirectShow)／プレイリスト。IsDougaVideoFile と揃える。
+static const TCHAR* const* RenderAssocExtensions(int* outCount)
+{
+	static const TCHAR* kExt[] = {
+		// 音声
+		_T(".mp3"), _T(".mp2"), _T(".mp1"), _T(".rmp"),
+		_T(".ogg"), _T(".oga"), _T(".opus"),
+		_T(".flac"), _T(".wav"), _T(".wave"),
+		_T(".m4a"), _T(".aac"), _T(".wma"),
+		_T(".aif"), _T(".aiff"), _T(".aifc"),
+		_T(".dsf"), _T(".dff"),
+		_T(".tta"), _T(".tak"), _T(".ape"), _T(".wv"),
+		// 動画 (PlayList の DirectShow 動画判定と同系)
+		_T(".avi"), _T(".mp4"), _T(".m4v"), _T(".mkv"),
+		_T(".wmv"), _T(".asf"), _T(".mov"), _T(".qt"),
+		_T(".mpg"), _T(".mpeg"), _T(".mpe"), _T(".m1v"),
+		_T(".m2v"), _T(".mpv"), _T(".vob"), _T(".ts"),
+		_T(".m2ts"), _T(".mts"), _T(".webm"), _T(".ogv"),
+		_T(".flv"), _T(".f4v"), _T(".3gp"), _T(".3g2"),
+		_T(".divx"), _T(".rm"), _T(".rmvb"),
+		// プレイリスト
+		_T(".m3u"), _T(".m3u8"), _T(".pls"), _T(".xspf"),
+	};
+	if (outCount) *outCount = (int)_countof(kExt);
+	return kExt;
+}
+
 static void RenderMigrateLegacyFileAssociations(LPCTSTR szExePath, LPCTSTR pszNewProgID, const TCHAR* const* extensions, int extCount)
 {
 	HKEY hClasses = NULL;
@@ -1530,27 +1575,31 @@ void CRender::OnBnClickedCancel4()
 	s += "oggYSEDbgm_uni.exe\" \"%1\"";
 	ss = karento2;
 	ss += "oggYSEDbgm_uni.exe";
-	const TCHAR* legacyExt[] = {
-		_T(".mp3"), _T(".mp2"), _T(".mp1"), _T(".rmp"), _T(".flac"), _T(".m4a"), _T(".aac"),
-		_T(".avi"), _T(".mp4"), _T(".mkv"), _T(".wmv"), _T(".mpg")
-	};
-	RenderMigrateLegacyFileAssociations(ss, _T("falcombgm.mediaplayer"), legacyExt, _countof(legacyExt));
-	MySetFileType(_T(".mp3"), _T("oggYSEDbgm_uni.exe.mp3"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	MySetFileType(_T(".mp2"), _T("oggYSEDbgm_uni.exe.mp2"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	MySetFileType(_T(".mp1"), _T("oggYSEDbgm_uni.exe.mp1"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	MySetFileType(_T(".rmp"), _T("oggYSEDbgm_uni.exe.rmp"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	MySetFileType(_T(".flac"), _T("oggYSEDbgm_uni.exe.flac"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	MySetFileType(_T(".m4a"), _T("oggYSEDbgm_uni.exe.m4a"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	MySetFileType(_T(".aac"), _T("oggYSEDbgm_uni.exe.aac"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	MySetFileType(_T(".avi"), _T("oggYSEDbgm_uni.exe.avi"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	MySetFileType(_T(".mp4"), _T("oggYSEDbgm_uni.exe.mp4"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	MySetFileType(_T(".mkv"), _T("oggYSEDbgm_uni.exe.mkv"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	MySetFileType(_T(".wmv"), _T("oggYSEDbgm_uni.exe.wmv"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	MySetFileType(_T(".mpg"), _T("oggYSEDbgm_uni.exe.mpg"), LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç"), s, ss);
-	// 関連付けが変更された事をシステムに通知
+	int extN = 0;
+	const TCHAR* const* legacyExt = RenderAssocExtensions(&extN);
+	RenderMigrateLegacyFileAssociations(ss, _T("falcombgm.mediaplayer"), legacyExt, extN);
+	const CString openLabel = LL14(L"簡易プレイヤで開く", L"Open with Simple Player", L"Ouvrir avec le lecteur simple", L"Apri con lettore semplice", L"Abrir con reproductor simple", L"간이 플레이어로 열기", L"用简易播放器打开", L"فتح بمشغل بسيط", L"Открыть простым проигрывателем", L"Mit Simple Player öffnen", L"Abrir com leitor simples", L"Openen met eenvoudige speler", L"Otwórz prostym odtwarzaczem", L"Basit oynatıcıyla aç");
+	for (int i = 0; i < extN; ++i) {
+		CString progId;
+		progId.Format(_T("oggYSEDbgm_uni.exe%s"), legacyExt[i]);
+		MySetFileType(legacyExt[i], progId, openLabel, s, ss);
+	}
 	::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
-	MessageBox(LL14(L"一応関連づけを走らせてみました。\\nmp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpgに関連をつけました。", L"File association attempted.\\nAssociated mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg.", L"Association de fichiers tentée.\\nAssocié mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg.", L"Associazione file tentata.\\nAssociati mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg.", L"Asociación de archivos intentada.\\nAsociados mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg.", L"파일 연결을 시도했습니다.\\nmp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg에 연결했습니다.", L"已尝试文件关联。\\n已关联 mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg。", L"تمت محاولة ربط الملفات.\\nتم ربط mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg.", L"Попытка связи файлов.\\nСвязаны mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg.", L"Dateizuordnung versucht.\\nVerknüpft mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg.", L"Associação de ficheiros tentada.\\nAssociados mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg.", L"Bestandskoppeling geprobeerd.\\nGekoppeld mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg.", L"Próbowano powiązania plików.\\nPowiązano mp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg.", L"Dosya ilişkilendirme denendi.\\nmp1,2,3,rmp,flac,m4a,aac,avi,mp4,mkv,wmv,mpg ilişkilendirildi."));
-	// 関連付けが変更された事をシステムに通知
+	MessageBox(LL14(
+		L"一応関連づけを走らせてみました。\n音声・動画・プレイリスト拡張子に関連をつけました。",
+		L"File association attempted.\nAssociated audio, video, and playlist extensions.",
+		L"Association de fichiers tentée.\nAudio, vidéo et playlists associés.",
+		L"Associazione file tentata.\nAssociati audio, video e playlist.",
+		L"Asociación de archivos intentada.\nAsociados audio, vídeo y listas.",
+		L"파일 연결을 시도했습니다.\n음성·동영상·재생목록 확장자에 연결했습니다.",
+		L"已尝试文件关联。\n已关联音频、视频与播放列表扩展名。",
+		L"تمت محاولة ربط الملفات.\nتم ربط امتدادات الصوت والفيديو وقوائم التشغيل.",
+		L"Попытка связи файлов.\nСвязаны аудио, видео и плейлисты.",
+		L"Dateizuordnung versucht.\nAudio-, Video- und Playlist-Erweiterungen verknuepft.",
+		L"Associação de ficheiros tentada.\nAssociados áudio, vídeo e playlists.",
+		L"Bestandskoppeling geprobeerd.\nAudio-, video- en playlist-extensies gekoppeld.",
+		L"Próbowano powiązania plików.\nPowiązano audio, wideo i playlisty.",
+		L"Dosya ilişkilendirme denendi.\nSes, video ve çalma listesi uzantıları ilişkilendirildi."));
 	::SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
 }
 
@@ -1594,8 +1643,9 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 	m_wup.SetWindowText(s);
 	if (nIDEvent == 90) {
 		KillTimer(90);
-//		::SetWindowPos(renderbase->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		::SetWindowPos(m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		if (renderbase && renderbase->GetSafeHwnd())
+			::SetWindowPos(renderbase->m_hWnd, m_hWnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
@@ -1735,6 +1785,11 @@ void CRender::OnBnClickedCheck3()
 	Invalidate(FALSE);
 	if (og)
 		og->PostRefreshAllAeroWindows();
+	// mp 再適用で設定が背後へ回るのを防ぐ（Post 後にもう一度手前へ）
+	::SetWindowPos(m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	::SetForegroundWindow(m_hWnd);
+	if (renderbase && renderbase->GetSafeHwnd())
+		::SetWindowPos(renderbase->m_hWnd, m_hWnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void CRender::OnBnClickedCancel()
@@ -1883,7 +1938,7 @@ static void SyncRenderGrassBackdrop(CRender* pRender)
 		if (renderbase && renderbase->GetSafeHwnd())
 		{
 			renderbase->MoveWindow(&r);
-			::SetWindowPos(renderbase->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+			::SetWindowPos(renderbase->m_hWnd, pRender->m_hWnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 		}
 		if (!pRender->m_brDlg.GetSafeHandle())
 			pRender->m_brDlg.CreateSolidBrush(RGB(255, 0, 0));
@@ -1927,14 +1982,11 @@ void CRender::OnBnClickedCancel5()
 	CString strProgID = _T("falcombgm.mediaplayer");
 	CString strAppName = LL14(L"Falcom BGM&メディアプレイヤー", L"Falcom BGM&Media Player", L"Falcom BGM et lecteur média", L"Falcom BGM e lettore multimediale", L"Falcom BGM y reproductor multimedia", L"Falcom BGM 미디어 플레이어", L"Falcom BGM 媒体播放器", L"Falcom BGM ومشغل الوسائط", L"Falcom BGM и медиаплеер", L"Falcom BGM & Media Player", L"Falcom BGM e reprodutor multimédia", L"Falcom BGM & media player", L"Falcom BGM i odtwarzacz multimediów", L"Falcom BGM ve medya oynatıcı");
 
-	// 対応拡張子一覧
-	const TCHAR* extensions[] = {
-		_T(".mp3"), _T(".mp2"), _T(".mp1"), _T(".rmp"),
-		_T(".ogg"), _T(".flac"), _T(".m4a"), _T(".aac"),
-		_T(".dsf"), _T(".dff"), _T(".mp4"), _T(".mkv"), _T(".avi")
-	};
+	// 対応拡張子一覧（音声・動画・プレイリスト）
+	int extN = 0;
+	const TCHAR* const* extensions = RenderAssocExtensions(&extN);
 
-	RenderMigrateLegacyFileAssociations(szExePath, strProgID, extensions, _countof(extensions));
+	RenderMigrateLegacyFileAssociations(szExePath, strProgID, extensions, extN);
 
 	HKEY hKey;
 	LONG result;
@@ -1980,7 +2032,7 @@ void CRender::OnBnClickedCancel5()
 	}
 
 	// 4. 各拡張子にOpenWithProgidsを設定
-	for (int i = 0; i < _countof(extensions); i++)
+	for (int i = 0; i < extN; i++)
 	{
 		CString strExtKey;
 		strExtKey.Format(_T("Software\\Classes\\%s\\OpenWithProgids"), extensions[i]);
@@ -2017,7 +2069,7 @@ void CRender::OnBnClickedCancel5()
 		REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, NULL);
 	if (result == ERROR_SUCCESS)
 	{
-		for (int i = 0; i < _countof(extensions); i++)
+		for (int i = 0; i < extN; i++)
 		{
 			RegSetValueEx(hKey, extensions[i], 0, REG_SZ,
 				(BYTE*)(LPCTSTR)strProgID,
@@ -2042,5 +2094,19 @@ void CRender::OnBnClickedCancel5()
 	// 8. 変更をシステムに通知
 	SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
 
-	AfxMessageBox(LL14(L"ファイルの関連付け登録が完了しました。", L"File association registration completed.", L"Enregistrement de l'association de fichiers terminé.", L"Registrazione associazione file completata.", L"Registro de asociación de archivos completado.", L"파일 연결 등록이 완료되었습니다.", L"文件关联注册已完成。", L"اكتمل تسجيل ربط الملفات.", L"Регистрация связи файлов завершена.", L"Dateizuordnungsregistrierung abgeschlossen.", L"Registo de associação de ficheiros concluído.", L"Registratie bestandskoppeling voltooid.", L"Rejestracja powiązania plików zakończona.", L"Dosya ilişkilendirme kaydı tamamlandı."), MB_ICONINFORMATION);
+	AfxMessageBox(LL14(
+		L"ファイルの関連付け登録が完了しました。\n音声・動画(avi/mp4/mkv/wmv/mov/webm 等)・プレイリストを含めました。",
+		L"File association registration completed.\nIncludes audio, video (avi/mp4/mkv/wmv/mov/webm, etc.), and playlists.",
+		L"Enregistrement terminé.\nAudio, vidéo (avi/mp4/mkv/…) et playlists inclus.",
+		L"Registrazione completata.\nInclusi audio, video (avi/mp4/mkv/…) e playlist.",
+		L"Registro completado.\nIncluye audio, vídeo (avi/mp4/mkv/…) y listas.",
+		L"파일 연결 등록이 완료되었습니다.\n음성·동영상(avi/mp4/mkv 등)·재생목록을 포함했습니다.",
+		L"文件关联注册已完成。\n已包含音频、视频(avi/mp4/mkv 等)与播放列表。",
+		L"اكتمل تسجيل ربط الملفات.\nيشمل الصوت والفيديو وقوائم التشغيل.",
+		L"Регистрация связи файлов завершена.\nВключены аудио, видео и плейлисты.",
+		L"Dateizuordnung abgeschlossen.\nAudio, Video und Playlists eingeschlossen.",
+		L"Registo concluído.\nInclui áudio, vídeo e playlists.",
+		L"Registratie voltooid.\nAudio, video en playlists inbegrepen.",
+		L"Rejestracja zakończona.\nUwzględniono audio, wideo i playlisty.",
+		L"Dosya ilişkilendirme kaydı tamamlandı.\nSes, video ve çalma listeleri dahil."), MB_ICONINFORMATION);
 }

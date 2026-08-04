@@ -1728,21 +1728,19 @@ void CCmdRollHelpDlg::OnPaint()
 void CCommandRollDlg::ShowHelpSheet()
 {
 	if (g_helpDlg && ::IsWindow(g_helpDlg->GetSafeHwnd())) {
-		g_helpDlg->ShowWindow(SW_SHOW);
-		g_helpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_helpDlg, this);
 		return;
 	}
 	if (g_helpDlg && !::IsWindow(g_helpDlg->GetSafeHwnd()))
 		g_helpDlg = nullptr;
-	// オーナー無しのモードレス。DoModal だとメイン/アプリ終了が止まる
-	CCmdRollHelpDlg* dlg = new CCmdRollHelpDlg(nullptr);
-	if (!dlg->Create(IDD_MP_CMDROLL_HELP, nullptr)) {
+	// オーナー付きモードレス。ヘルプはオーナー上、他UI前面時は下へ（TOPMOSTしない）
+	CCmdRollHelpDlg* dlg = new CCmdRollHelpDlg(this);
+	if (!dlg->Create(IDD_MP_CMDROLL_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_helpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CCommandRollDlg::OnClose()

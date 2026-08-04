@@ -724,20 +724,18 @@ void CTagEditDlg::LayoutHelpBtn()
 void CTagEditDlg::ShowHelpSheet()
 {
 	if (g_teHelpDlg && ::IsWindow(g_teHelpDlg->GetSafeHwnd())) {
-		g_teHelpDlg->ShowWindow(SW_SHOW);
-		g_teHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_teHelpDlg, this);
 		return;
 	}
 	if (g_teHelpDlg && !::IsWindow(g_teHelpDlg->GetSafeHwnd()))
 		g_teHelpDlg = nullptr;
-	CTeHelpDlg* dlg = new CTeHelpDlg(nullptr);
-	if (!dlg->Create(IDD_TE_HELP, nullptr)) {
+	CTeHelpDlg* dlg = new CTeHelpDlg(this);
+	if (!dlg->Create(IDD_TE_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_teHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CTagEditDlg::OnBnClickedHelp()

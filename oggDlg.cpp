@@ -25730,6 +25730,7 @@ LRESULT COggDlg::OnRefreshAeroAll(WPARAM, LPARAM)
 void COggDlg::RefreshAllAeroWindows()
 {
 #if CCUSTOM_AERO_SUPPORT
+	HWND hKeepFront = ::GetForegroundWindow();
 	auto refreshMode = [](CWnd* w) {
 		if (!w || !w->GetSafeHwnd() || !::IsWindowVisible(w->m_hWnd))
 			return;
@@ -25759,6 +25760,11 @@ void COggDlg::RefreshAllAeroWindows()
 		CCC_ApplyAero(pMainFrame1->m_hWnd, CCC_IsAeroEnabled() ? TRUE : FALSE);
 		pMainFrame1->RefreshBarAero();
 		pMainFrame1->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+	}
+	if (hKeepFront && ::IsWindow(hKeepFront)) {
+		::SetWindowPos(hKeepFront, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		::BringWindowToTop(hKeepFront);
+		::SetForegroundWindow(hKeepFront);
 	}
 #endif
 }

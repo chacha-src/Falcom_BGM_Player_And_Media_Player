@@ -43,6 +43,11 @@ class CPlayList;
 #define WM_MP_JAK_DONE (WM_APP + 65)
 #endif
 
+// シーク波形オーバービュー構築完了
+#ifndef WM_MP_WAVE_DONE
+#define WM_MP_WAVE_DONE (WM_APP + 66)
+#endif
+
 // ライブラリツリー遅延構築(起動をブロックしない)
 #ifndef WM_MP_LIB_BUILD
 #define WM_MP_LIB_BUILD (WM_APP + 64)
@@ -133,12 +138,13 @@ public:
 	CCustomStandardButton m_abA, m_abB, m_abClr; // A-Bリピート
 	CCustomCheckBox m_seekLock; // シーク左: loop1/2つまみロック(既定ON)
 	CCustomStandardButton m_lrcExpand; // 歌詞パネル拡大/縮小
-	CCustomStandardButton m_toolsToggle; // 並べ替え/フォルダ帯の折りたたみ
+	CCustomStandardButton m_toolsToggle; // ツールメニュー（並べ替えパネル含む）
 	CCustomStandardButton m_cheatBtn;    // 操作ガイド(?)
 	CCustomStandardButton m_sortName, m_sortArt, m_sortAlb, m_sortTime;
 	CCustomStandardButton m_addFolder; // フォルダから追加(ライブラリ)
 	CCustomCheckBox m_findFilter;      // 検索=絞り込み
 	CCustomStatic m_lrcBadge;          // LRC状態バッジ
+	CCustomStatic m_plRailBg;          // Lib/Hist 左レールの不透明ピンク下地（白抜け防止）
 	// ライブラリ左ドロワー(フォルダツリー＋アルバム一覧)
 	CCustomStandardButton m_libToggle;
 	CCustomStandardButton m_libAddRoot, m_libAddPl;
@@ -217,6 +223,8 @@ public:
 	CRect m_jacketRect;
 	// 幅拡張時に右余白へ展開する曲情報パネル領域。IsRectEmpty なら非表示。
 	CRect m_infoPanelRect;
+	// ツール▾＋Lib/Hist 左レール。アクリル時のグループ隙間白抜けを不透明ピンクで塞ぐ。
+	CRect m_plRailRect;
 	// サイドパネルの再描画判定キー(タイトル/アーティスト/アルバム/ジャケ世代を結合した文字列)
 	CString m_lastBannerKey;
 	// 非アクリル時のバナー Blit 用永続メモリ DC(サイズ変化時のみ再確保)
@@ -266,12 +274,49 @@ public:
 	int  m_abApos;           // -1=未設定
 	int  m_abBpos;
 	int  m_abWrapBusy;       // シーク往復の再入防止
+	int  m_abLoopCount;      // A-B 周回回数(表示用)
+
+	// ---- シーク波形オーバービュー(ProAudio_BuildWaveOverview 非同期) ----
+	float m_wavePeaks[1024];
+	int   m_wavePeakN;
+	TCHAR m_wavePath[1024];
+	volatile LONG m_waveGen;
+	volatile LONG m_waveBusy;
+	int m_jacketRemBucket; // ジャケット残時間リング Invalidate 用(前回%)
+	void KickWaveOverview();
+	void ClearWaveOverview();
+	void RefreshSeekCues();
+	void JumpToCueIndex(int idx);
+	void ApplyPracticeTempoPercent(int pct); // 50/75/100 → スライダー
+	void SetPhraseAbAroundNow();             // 現在±mpPhraseSec を A-B に
+	BOOL TryPlayFromQueue();                 // キュー先頭を再生してシフト。空なら FALSE
+	void QueueAdd(int pcIdx, BOOL playNext);
+	int  QueueCount() const;
+	int  QueueAt(int i) const;
+	void QueueMove(int from, int to);
+	void QueueRemoveAt(int i);
+	void QueueClear();
+	void UpdateQueueChrome();                // ツール▾は記号のみ。状態はツールチップ
+	void ShowToolsExtrasMenu(CPoint screenPt);
+	void ApplySleepTimer(int minutes);       // 0=Off
+	void OpenTagEditForSelection();
+	void CycleRatingForDisp(int disp);
+	void ShiftLrcMs(int deltaMs);
+	void DrawBannerMeters(CDC* pDC, int bannerW, int bannerH);
+	void DrawJacketHeroOverlay(CDC& mem, int w, int h);
 
 	// ---- 検索フィルタ(表示行→pc インデックス)。std 禁止のため素の配列 ----
 	int* m_fmap;             // malloc。件数 m_fmapCap
 	int  m_fmapCap;
 	int  m_fcnt;             // フィルタ後件数(フィルタOFF時は playcnt と同値扱いしない: m_filtOn で判定)
 	int  m_filtOn;           // 1=絞り込み中
+	int  m_smartFilt;        // 0=なし 1=未再生 2=欠損のみ（クイック）
+	int  m_activeSmartId;    // -1=なし / >=0 = MpSmart ルール index
+
+	// ---- Up Next キュー(pc インデックス) ----
+	int  m_queue[64];
+	int  m_queueN;
+	ULONGLONG m_sleepEndTick; // 0=オフ。GetTickCount64 期限
 
 	// ---- 欠損フラグ(pc インデックス、1=欠損)。ワーカスレッド走査 ----
 	char* m_miss;            // malloc(表示用)
@@ -281,6 +326,8 @@ public:
 	volatile LONG m_missBusy;// 1=走査スレッド稼働中
 	void KickMissScan();     // playcnt 変化時に非同期走査を起動
 	void StopMissScan();     // 破棄前に世代を上げて結果を無視
+	void UpdateMissChrome(); // UpdateQueueChrome 経由で Tip 更新
+	int  CountMissing() const;
 	volatile LONG m_jakGen;  // ジャケット抽出世代
 	volatile LONG m_jakBusy; // 1=ジャケット抽出スレッド稼働中
 	TCHAR m_jakPend[1024];   // 抽出中パス
@@ -396,8 +443,81 @@ protected:
 	afx_msg void OnAbSetB();
 	afx_msg void OnAbClear();
 	afx_msg void OnSeekLock();
+	afx_msg void OnSeekWaveToggle();
+	afx_msg void OnSeekCueAdd();
+	afx_msg void OnSeekCueClear();
+	afx_msg void OnSeekCueJump1();
+	afx_msg void OnSeekCueJump2();
+	afx_msg void OnSeekCueJump3();
+	afx_msg void OnSeekCueJump4();
+	afx_msg void OnSeekCueJump5();
+	afx_msg void OnSeekCueJump6();
+	afx_msg void OnSeekCueJump7();
+	afx_msg void OnSeekCueJump8();
+	afx_msg void OnPracticeTempo50();
+	afx_msg void OnPracticeTempo75();
+	afx_msg void OnPracticeTempo100();
+	afx_msg void OnPhraseAbNow();
+	afx_msg void OnFiltUnplayed();
+	afx_msg void OnFiltMissing();
+	afx_msg void OnFiltClear();
+	afx_msg void OnMissManage();
+	afx_msg void OnSmartEdit();
+	afx_msg void OnSmartApplyId(UINT nID);
+	afx_msg void OnQueueShow();
+	afx_msg void OnQueueAdd();
+	afx_msg void OnQueuePlayNext();
+	afx_msg void OnQueueClear();
+	afx_msg void OnDupesScan();
+	afx_msg void OnFolderSyncDiff();
+	afx_msg void OnLrcPlus50();
+	afx_msg void OnLrcMinus50();
+	afx_msg void OnLrcPlus10();
+	afx_msg void OnLrcMinus10();
+	afx_msg void OnLrcPlus100();
+	afx_msg void OnLrcMinus100();
+	afx_msg void OnLrcSave();
+	afx_msg void OnDeskLrcToggle();
+	afx_msg void OnTagEdit();
+	afx_msg void OnJacketReloadAlt();
+	afx_msg void OnJacketPickCover();
+	afx_msg void OnJacketSaveCover();
+	afx_msg void OnExportAb();
+	afx_msg void OnExportAbNow();
+	afx_msg void OnAbPackExport();
+	afx_msg void OnNormBatch();
+	afx_msg void OnMbAutotag();
+	afx_msg void OnNormScan();
+	afx_msg void OnNormLufs14();
+	afx_msg void OnNormLufs16();
+	afx_msg void OnNormLufs18();
+	afx_msg void OnNormPreview();
+	afx_msg void OnAbSnapA();
+	afx_msg void OnAbSnapB();
+	afx_msg void OnAbApplyA();
+	afx_msg void OnAbApplyB();
+	afx_msg void OnAbSnapToggle();
+	afx_msg void OnSleep15();
+	afx_msg void OnSleep30();
+	afx_msg void OnSleep60();
+	afx_msg void OnSleepOff();
+	afx_msg void OnSleepCustom();
+	afx_msg void OnXfadePreviewToggle();
+	afx_msg void OnBeatGridToggle();
+	afx_msg void OnMpBpmDetect();
+	afx_msg void OnMpDjPad();
+	afx_msg void OnMpAlarm();
+	afx_msg void OnMpMirror();
+	afx_msg void OnMpRemote();
+	afx_msg void OnMpSsViz();
+	afx_msg void OnMpVideoExtract();
+	afx_msg void OnMpVideoReplace();
+	afx_msg void OnMpGamePreset();
+	afx_msg void OnMpMidiIn();
+	afx_msg LRESULT OnMpTransportCmd(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnLrcExpand();
-	afx_msg void OnToolsToggle();
+	afx_msg void OnToolsToggle();       // ツールメニューを開く
+	afx_msg void OnToolsPanelToggle();  // 並べ替えパネル開閉
 	afx_msg void OnCheatSheetBtn();
 	afx_msg void OnSortName();
 	afx_msg void OnSortArt();
@@ -421,6 +541,7 @@ protected:
 	afx_msg void OnSpeanaStyleBar();
 	afx_msg void OnSpeanaStyleMirror();
 	afx_msg void OnSpeanaStyleWave();
+	afx_msg void OnCorrMeterToggle();
 	afx_msg void OnRefreshJacket();
 	void LibStartFolderDrag(LPCTSTR path, CPoint ptClient);
 	void LibAddPath(LPCTSTR path, BOOL playAfter);
@@ -443,6 +564,7 @@ protected:
 	afx_msg void OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnListItemChanged(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnDblclkList(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnClickList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnRclickList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnKeydownList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnBeginDragList(NMHDR* pNMHDR, LRESULT* pResult);
@@ -458,6 +580,7 @@ protected:
 	afx_msg LRESULT OnPlselExpandPopup(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnMissScanDone(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnJakLoadDone(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnWaveOverviewDone(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnLibBuildLazy(WPARAM wParam, LPARAM lParam);
 	afx_msg BOOL OnNcActivate(BOOL bActive);
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);

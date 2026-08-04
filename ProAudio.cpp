@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ProAudio.h"
 #include "ogg.h"
 #include "oggDlg.h"
@@ -19,8 +19,10 @@ extern TCHAR karento2[1024];
 #define PRO_EXTRA_DAT_NAME "oggYSEDbgm_ProExtra.dat"
 #endif
 
-static const int PRO_EXTRA_FILE_VER = 2;
+static const int PRO_EXTRA_FILE_VER = 4;
 static const int PRO_EXTRA_FILE_VER_V1 = 1;
+static const int PRO_EXTRA_FILE_VER_V2 = 2;
+static const int PRO_EXTRA_FILE_VER_V3 = 3;
 
 // ---- 曲別テーブル(固定) ----
 static ProSongExtra g_extra[PRO_SONG_EXTRA_MAX];
@@ -52,6 +54,7 @@ static float g_xfadeTmpR[PRO_XFADE_TAIL_FRAMES];
 static double g_loudSum = 0.0;
 static double g_loudCount = 0.0;
 static float  g_loudPeak = 0.0f;
+static float  g_livePeak = 0.0f; // シーク波形用の短時定数ピーク(0..1)
 static float  g_kwZ1L = 0, g_kwZ2L = 0, g_kwZ1R = 0, g_kwZ2R = 0;
 static int    g_loudRate = 0;
 
@@ -134,18 +137,30 @@ void ProAudio_LoadExtras()
 	try {
 		int ver = 0, cnt = 0;
 		if (f.Read(&ver, sizeof(int)) != sizeof(int)) { f.Close(); return; }
-		if (ver != PRO_EXTRA_FILE_VER && ver != PRO_EXTRA_FILE_VER_V1) { f.Close(); return; }
+		if (ver != PRO_EXTRA_FILE_VER && ver != PRO_EXTRA_FILE_VER_V1
+			&& ver != PRO_EXTRA_FILE_VER_V2 && ver != PRO_EXTRA_FILE_VER_V3) { f.Close(); return; }
 		if (f.Read(&cnt, sizeof(int)) != sizeof(int)) { f.Close(); return; }
 		if (cnt < 0) cnt = 0;
 		if (cnt > PRO_SONG_EXTRA_MAX) cnt = PRO_SONG_EXTRA_MAX;
-		const size_t v1Size = sizeof(ProSongExtra) - sizeof(int); // albumRgValid 無し
+		const size_t v1Size = offsetof(ProSongExtra, albumRgValid); // albumRgValid/rating 無し
+		const size_t v2Size = offsetof(ProSongExtra, rating);       // rating 無し
+		const size_t v3Size = offsetof(ProSongExtra, playCount);   // playCount/lastPlay 無し
 		for (int i = 0; i < cnt; ++i) {
 			ProSongExtra e;
 			ZeroMemory(&e, sizeof(e));
 			if (ver == PRO_EXTRA_FILE_VER_V1) {
 				if (f.Read(&e, (UINT)v1Size) != v1Size) break;
-				// 旧: albumGainDb!=0 なら有効扱い。0dB album は移行で失われる
 				e.albumRgValid = (e.albumGainDb != 0.0f) ? 1 : 0;
+				e.rating = 0;
+			}
+			else if (ver == PRO_EXTRA_FILE_VER_V2) {
+				if (f.Read(&e, (UINT)v2Size) != v2Size) break;
+				e.rating = 0;
+			}
+			else if (ver == PRO_EXTRA_FILE_VER_V3) {
+				if (f.Read(&e, (UINT)v3Size) != v3Size) break;
+				e.playCount = 0;
+				ZeroMemory(&e.lastPlay, sizeof(e.lastPlay));
 			}
 			else {
 				if (f.Read(&e, sizeof(e)) != sizeof(e)) break;
@@ -154,6 +169,9 @@ void ProAudio_LoadExtras()
 			e.path[1023] = 0;
 			if (e.cueCount < 0) e.cueCount = 0;
 			if (e.cueCount > PRO_CUE_MAX) e.cueCount = PRO_CUE_MAX;
+			if (e.rating < 0) e.rating = 0;
+			if (e.rating > 5) e.rating = 5;
+			if (e.playCount < 0) e.playCount = 0;
 			g_extra[g_extraCount++] = e;
 		}
 	}
@@ -514,6 +532,7 @@ void ProAudio_LoudnessReset()
 	g_loudSum = 0;
 	g_loudCount = 0;
 	g_loudPeak = 0;
+	g_livePeak = 0;
 	g_kwZ1L = g_kwZ2L = g_kwZ1R = g_kwZ2R = 0;
 	g_loudRate = 0;
 }
@@ -538,6 +557,7 @@ void ProAudio_LoudnessFeed(const float* L, const float* R, int frames, int sampl
 		g_loudRate = sampleRate;
 		g_kwZ1L = g_kwZ2L = g_kwZ1R = g_kwZ2R = 0;
 	}
+	float blockPk = 0.f;
 	for (int i = 0; i < frames; ++i) {
 		float l = KwStep(L[i], g_kwZ1L, g_kwZ2L, sampleRate);
 		float r = KwStep(R[i], g_kwZ1R, g_kwZ2R, sampleRate);
@@ -547,7 +567,26 @@ void ProAudio_LoudnessFeed(const float* L, const float* R, int frames, int sampl
 		float p = fabsf(L[i]);
 		if (fabsf(R[i]) > p) p = fabsf(R[i]);
 		if (p > g_loudPeak) g_loudPeak = p;
+		if (p > blockPk) blockPk = p;
 	}
+	if (blockPk > g_livePeak) g_livePeak = blockPk;
+	else g_livePeak *= 0.92f;
+}
+
+float ProAudio_LivePeak()
+{
+	float v = g_livePeak;
+	if (v < 0.f) v = 0.f;
+	if (v > 1.f) v = 1.f;
+	return v;
+}
+
+void ProAudio_BumpLivePeak(float peak)
+{
+	if (peak < 0.f) peak = 0.f;
+	if (peak > 1.f) peak = 1.f;
+	if (peak > g_livePeak) g_livePeak = peak;
+	else g_livePeak *= 0.92f;
 }
 
 void ProAudio_LoudnessCommitCurrentSong()
@@ -918,6 +957,73 @@ bool ProAudio_CueRemove(int index)
 		g_cues[i] = g_cues[i + 1];
 	g_cueCount--;
 	ProAudio_CueSaveForCurrent();
+	return true;
+}
+
+int ProAudio_GetRating(LPCTSTR list, LPCTSTR path, int mode, int ret2)
+{
+	ProSongExtra e;
+	if (!ProAudio_GetExtra(list, path, mode, ret2, e))
+		return 0;
+	if (e.rating < 0) return 0;
+	if (e.rating > 5) return 5;
+	return e.rating;
+}
+
+void ProAudio_SetRating(LPCTSTR list, LPCTSTR path, int mode, int ret2, int rating)
+{
+	if (rating < 0) rating = 0;
+	if (rating > 5) rating = 5;
+	ProSongExtra e;
+	ZeroMemory(&e, sizeof(e));
+	if (!ProAudio_GetExtra(list, path, mode, ret2, e)) {
+		_tcsncpy(e.listName, list ? list : _T(""), 255);
+		e.listName[255] = 0;
+		FoldPath(e.path, 1024, path);
+		e.mode = mode;
+		e.ret2 = ret2;
+		e.loopIn = e.loopOut = -1;
+	}
+	e.rating = rating;
+	ProAudio_UpsertExtra(e);
+}
+
+int ProAudio_GetPlayCount(LPCTSTR list, LPCTSTR path, int mode, int ret2)
+{
+	ProSongExtra e;
+	if (!ProAudio_GetExtra(list, path, mode, ret2, e))
+		return 0;
+	return (e.playCount < 0) ? 0 : e.playCount;
+}
+
+void ProAudio_BumpPlayCount(LPCTSTR list, LPCTSTR path, int mode, int ret2)
+{
+	ProSongExtra e;
+	ZeroMemory(&e, sizeof(e));
+	if (!ProAudio_GetExtra(list, path, mode, ret2, e)) {
+		_tcsncpy(e.listName, list ? list : _T(""), 255);
+		e.listName[255] = 0;
+		FoldPath(e.path, 1024, path);
+		e.mode = mode;
+		e.ret2 = ret2;
+		e.loopIn = e.loopOut = -1;
+	}
+	if (e.playCount < 0) e.playCount = 0;
+	if (e.playCount < 1000000) e.playCount++;
+	SYSTEMTIME st; ::GetLocalTime(&st);
+	::SystemTimeToFileTime(&st, &e.lastPlay);
+	ProAudio_UpsertExtra(e);
+	ProAudio_SaveExtras();
+}
+
+bool ProAudio_GetLastPlay(LPCTSTR list, LPCTSTR path, int mode, int ret2, FILETIME& out)
+{
+	ProSongExtra e;
+	if (!ProAudio_GetExtra(list, path, mode, ret2, e))
+		return false;
+	if (e.lastPlay.dwLowDateTime == 0 && e.lastPlay.dwHighDateTime == 0)
+		return false;
+	out = e.lastPlay;
 	return true;
 }
 

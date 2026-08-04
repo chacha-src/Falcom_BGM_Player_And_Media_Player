@@ -1,4 +1,4 @@
-﻿// ScreenCaptureDlg.cpp
+// ScreenCaptureDlg.cpp
 // 画面キャプチャ → MP4 (H.264 + AAC)
 // プライマリ / 全モニタ / ウィンドウ合成(配置・拡大縮小・Z順)
 
@@ -6192,20 +6192,18 @@ void CScreenCaptureDlg::LayoutHelpBtn()
 void CScreenCaptureDlg::ShowHelpSheet()
 {
 	if (g_scHelpDlg && ::IsWindow(g_scHelpDlg->GetSafeHwnd())) {
-		g_scHelpDlg->ShowWindow(SW_SHOW);
-		g_scHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_scHelpDlg, this);
 		return;
 	}
 	if (g_scHelpDlg && !::IsWindow(g_scHelpDlg->GetSafeHwnd()))
 		g_scHelpDlg = nullptr;
-	CScHelpDlg* dlg = new CScHelpDlg(this, nullptr);
-	if (!dlg->Create(IDD_SC_HELP, nullptr)) {
+	CScHelpDlg* dlg = new CScHelpDlg(this, this);
+	if (!dlg->Create(IDD_SC_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_scHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CScreenCaptureDlg::OnBnClickedHelp()

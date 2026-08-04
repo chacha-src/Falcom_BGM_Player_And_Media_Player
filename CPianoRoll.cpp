@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
@@ -7,6 +7,9 @@
 #define M_PI 3.14159265358979323846
 #endif
 #include "CPianoRoll.h"
+#include "MpPlayerAddons.h"
+#include "CEqualizer.h"
+#include "DeviceRecordDlg.h"
 
 class COggDlg;
 extern COggDlg* og;
@@ -138,20 +141,20 @@ void CPrHelpDlg::OnPaint()
 		L"Prosta rolka — przewodnik", L"Basit piyano rulosu — kılavuz"));
 	y += titleLh;
 	muted(L, y, LL14(
-		L"再生音声からノートを推定し、鍵盤とロールで同期表示します（MIDI 入力ではありません）。",
-		L"Estimates notes from playback audio and syncs keys + roll (not MIDI input).",
-		L"Estime les notes depuis l'audio et synchronise clavier + roll (pas MIDI).",
-		L"Stima le note dall'audio e sincronizza tasti + roll (non MIDI).",
-		L"Estima notas del audio y sincroniza teclado + roll (no es MIDI).",
-		L"재생 오디오에서 노트를 추정해 건반·롤을 동기 표시(MIDI 입력 아님).",
-		L"从播放音频估计音符，并同步键盘与卷帘（非 MIDI 输入）。",
-		L"يقدّر النغمات من الصوت ويزامن المفاتيح واللفة (ليس إدخال MIDI).",
-		L"Оценивает ноты из аудио и синхронизирует клавиши и ролл (не MIDI).",
-		L"Schätzt Noten aus Audio und synchronisiert Tasten + Roll (kein MIDI).",
-		L"Estima notas do áudio e sincroniza teclas + roll (não é MIDI).",
-		L"Schat noten uit audio en synchroniseert toetsen + roll (geen MIDI).",
-		L"Szacuje nuty z audio i synchronizuje klawisze + rolkę (to nie MIDI).",
-		L"Çalmadan nota tahmin eder; tuşlar + rulo senkron (MIDI girişi değil)."));
+		L"再生音声からノートを推定し、鍵盤とロールで同期表示します（鍵盤MIDI入力ではありません。録りは右クリック）。",
+		L"Estimates notes from playback and syncs keys + roll (not keyboard MIDI in; capture via RMB).",
+		L"Estime les notes depuis l'audio (pas entrée MIDI clavier ; enreg. via clic droit).",
+		L"Stima le note dall'audio (non MIDI da tastiera; registrazione via destro).",
+		L"Estima notas del audio (no es MIDI de teclado; captura con clic der.).",
+		L"재생 오디오에서 노트 추정(건반 MIDI 입력 아님. 녹음은 우클릭).",
+		L"从播放音频估计音符（非键盘 MIDI 输入；录制见右键）。",
+		L"يقدّر النغمات من الصوت (ليس إدخال MIDI؛ التسجيل من اليمين).",
+		L"Оценивает ноты из аудио (не MIDI-клавиатура; запись через ПКМ).",
+		L"Schätzt Noten aus Audio (kein Tastatur-MIDI; Aufnahme per RMB).",
+		L"Estima notas do áudio (não MIDI de teclado; captura no direito).",
+		L"Schat noten uit audio (geen toetsenbord-MIDI; opname via RMB).",
+		L"Szacuje nuty z audio (to nie MIDI klawiatury; zapis przez PPM).",
+		L"Çalmadan nota tahmin eder (klavye MIDI değil; kayıt sağ tık)."));
 	y += lh + 4;
 
 	title(L, y, LL14(L"表示と速度", L"View & speed", L"Affichage et vitesse", L"Vista e velocità",
@@ -277,6 +280,66 @@ void CPrHelpDlg::OnPaint()
 		L"· Legenda / ekspresja / poziom / zawsze na wierzchu / wyczyść",
 		L"· Sembol / ifade / seviye / her zaman üstte / temizle")); y += lh;
 	body(L, y, LL14(
+		L"・コード進行パネル …… 検出コードを時系列表示（推定・実験的）",
+		L"· Chord panel …… timeline of detected chords (estimate / experimental)",
+		L"· Panneau accords …… accords détectés (estimé / expérimental)",
+		L"· Pannello accordi …… accordi rilevati (stima / sperimentale)",
+		L"· Panel de acordes …… acordes detectados (estimación / experimental)",
+		L"· 코드 진행 패널 …… 검출 코드 시계열(추정·실험적)",
+		L"· 和弦进行面板 …… 检测和弦时序（估计/实验）",
+		L"· لوحة التآلفات …… تآلفات مكتشفة (تقدير / تجريبي)",
+		L"· Панель аккордов …… обнаруженные аккорды (оценка / эксперимент)",
+		L"· Akkordpanel …… erkannte Akkorde (Schätzung / experimentell)",
+		L"· Painel de acordes …… acordes detectados (estimativa / experimental)",
+		L"· Akkoordenpaneel …… gedetecteerde akkoorden (schatting / experimenteel)",
+		L"· Panel akordów …… wykryte akordy (szacunek / eksperymentalne)",
+		L"· Akor paneli …… algılanan akorlar (tahmin / deneysel)")); y += lh;
+	body(L, y, LL14(
+		L"・PC音を譜面化 …… WASAPIループバックでPCの再生音をロールへ（無音時は止まります）",
+		L"· Score from PC audio …… WASAPI loopback into the roll (stops when silent)",
+		L"· Partition PC …… boucle WASAPI vers le roll (s'arrête si silence)",
+		L"· Partitura PC …… loopback WASAPI nel roll (si ferma se silenzio)",
+		L"· Partitura PC …… loopback WASAPI al roll (se detiene si silencio)",
+		L"· PC 소리 악보화 …… WASAPI 루프백을 롤로(무음이면 멈춤)",
+		L"· 从PC声音成谱 …… WASAPI 环回送入卷帘（静音则停）",
+		L"· تدوين صوت الجهاز …… حلقة WASAPI إلى اللفة (يتوقف عند الصمت)",
+		L"· Ноты с ПК …… WASAPI loopback в ролл (стоп при тишине)",
+		L"· Partitur aus PC …… WASAPI-Loopback in die Rolle (stoppt bei Stille)",
+		L"· Partitura do PC …… loopback WASAPI no roll (para se silêncio)",
+		L"· Partituur van pc …… WASAPI-loopback naar roll (stopt bij stilte)",
+		L"· Partytura z PC …… pętla WASAPI do rolki (stop przy ciszy)",
+		L"· PC sesinden parti …… WASAPI loopback ruloya (sessizlikte durur)")); y += lh;
+	body(L, y, LL14(
+		L"・MIDI録り / MusicXML録り …… ONでバッファ蓄積、OFFで保存。再生中またはPC音連動",
+		L"· MIDI / MusicXML capture …… ON buffers, OFF saves. During play or with PC-audio",
+		L"· MIDI / MusicXML …… ON=tampon, OFF=sauver. Lecture ou audio PC",
+		L"· MIDI / MusicXML …… ON=buffer, OFF=salva. In play o con audio PC",
+		L"· MIDI / MusicXML …… ON=búfer, OFF=guardar. En play o con audio PC",
+		L"· MIDI / MusicXML 녹음 …… ON=버퍼, OFF=저장. 재생 중 또는 PC 소리 연동",
+		L"· MIDI / MusicXML 录制 …… ON 缓冲，OFF 保存。播放中或 PC 声音联动",
+		L"· تسجيل MIDI / MusicXML …… ON=تخزين، OFF=حفظ. أثناء التشغيل أو صوت الجهاز",
+		L"· MIDI / MusicXML …… ON=буфер, OFF=сохранить. Во время play или звук ПК",
+		L"· MIDI / MusicXML …… ON=Puffer, OFF=speichern. Während Play oder PC-Audio",
+		L"· MIDI / MusicXML …… ON=buffer, OFF=salvar. Em play ou com áudio PC",
+		L"· MIDI / MusicXML …… ON=buffer, OFF=opslaan. Tijdens play of pc-audio",
+		L"· MIDI / MusicXML …… ON=bufor, OFF=zapisz. Podczas play lub dźwięk PC",
+		L"· MIDI / MusicXML …… ON=tampon, OFF=kaydet. Çalma veya PC sesi ile")); y += lh;
+	body(L, y, LL14(
+		L"・録り中はPC音譜面化を切れません。チェックを外したとき .mid / .musicxml を書き出します",
+		L"· While capturing, PC-audio score stays on. Uncheck writes .mid / .musicxml",
+		L"· Pendant l'enregistrement, audio PC reste ON. Décocher écrit .mid / .musicxml",
+		L"· Durante la registrazione audio PC resta ON. Togliere check scrive .mid / .musicxml",
+		L"· Durante la captura, audio PC sigue ON. Desmarcar escribe .mid / .musicxml",
+		L"· 녹음 중 PC 소리 악보화 유지. 체크 해제 시 .mid / .musicxml 저장",
+		L"· 录制中不可关 PC 成谱。取消勾选时写出 .mid / .musicxml",
+		L"· أثناء التسجيل يبقى صوت الجهاز. إلغاء التحديد يكتب .mid / .musicxml",
+		L"· Во время записи звук ПК остаётся. Снятие галочки пишет .mid / .musicxml",
+		L"· Während Aufnahme bleibt PC-Audio an. Abwahl schreibt .mid / .musicxml",
+		L"· Durante captura, áudio PC fica ON. Desmarcar grava .mid / .musicxml",
+		L"· Tijdens opname blijft pc-audio aan. Uitvinken schrijft .mid / .musicxml",
+		L"· Podczas zapisu dźwięk PC zostaje. Odznaczenie zapisuje .mid / .musicxml",
+		L"· Kayıtta PC sesi açık kalır. İşareti kaldırmak .mid / .musicxml yazar")); y += lh;
+	body(L, y, LL14(
 		L"・ショートカット …… V=2D/3D切替、N=ノート名。ウィンドウは端でリサイズ可",
 		L"· Shortcuts …… V=2D/3D, N=note names. Resize via window edges",
 		L"· Raccourcis …… V=2D/3D, N=noms. Redimensionner aux bords",
@@ -292,20 +355,20 @@ void CPrHelpDlg::OnPaint()
 		L"· Skróty …… V=2D/3D, N=nazwy. Rozmiar na krawędziach",
 		L"· Kısayollar …… V=2D/3B, N=adlar. Kenarlardan boyutlandır")); y += lh + 2;
 	muted(L, y, LL14(
-		L"キャプションの「?」または右クリック「操作ガイド」でもこの画面を開けます。",
-		L"Open this sheet from caption \"?\" or right-click → Operation guide.",
-		L"Ouvrir via « ? » ou clic droit → Guide d'utilisation.",
-		L"Apri da « ? » o destro → Guida operativa.",
-		L"Ábralo con « ? » o clic der. → Guía de operación.",
-		L"캡션「?」또는 우클릭「조작 가이드」로도 열 수 있습니다.",
-		L"也可通过标题栏「?」或右键「操作指南」打开。",
-		L"افتح من «؟» أو يمين ← دليل التشغيل.",
-		L"Откройте через «?» или ПКМ → Руководство.",
-		L"Öffnen über „?“ oder Rechtsklick → Bedienungsanleitung.",
-		L"Abra pelo «?» ou direito → Guia de operação.",
-		L"Open via «?» of rechtsklik → Handleiding.",
-		L"Otwórz przez «?» lub PPM → Przewodnik.",
-		L"Başlık «?» veya sağ tık → İşlem kılavuzu ile açın."));
+		L"キャプションの「?」または右クリック「操作ガイド」でもこの画面を開けます。録りは実験的です。",
+		L"Open from caption \"?\" or right-click → Operation guide. Capture is experimental.",
+		L"Ouvrir via « ? » ou clic droit → Guide. Enregistrement expérimental.",
+		L"Apri da « ? » o destro → Guida. Registrazione sperimentale.",
+		L"Ábralo con « ? » o clic der. → Guía. Captura experimental.",
+		L"캡션「?」또는 우클릭「조작 가이드」로 열기. 녹음은 실험적.",
+		L"也可通过标题栏「?」或右键「操作指南」打开。录制为实验性。",
+		L"افتح من «؟» أو يمين ← دليل. التسجيل تجريبي.",
+		L"Откройте через «?» или ПКМ → Руководство. Запись экспериментальна.",
+		L"Öffnen über „?“ oder Rechtsklick → Guide. Aufnahme experimentell.",
+		L"Abra pelo «?» ou direito → Guia. Captura experimental.",
+		L"Open via «?» of rechtsklik → Handleiding. Opname is experimenteel.",
+		L"Otwórz przez «?» lub PPM → Przewodnik. Zapis jest eksperymentalny.",
+		L"Başlık «?» veya sağ tık → Kılavuz. Kayıt deneyseldir."));
 
 	dc.SelectObject(oldFont);
 }
@@ -906,6 +969,10 @@ BEGIN_MESSAGE_MAP(CPianoRoll, CCustomBlurDialogExBase)
     ON_COMMAND_RANGE(IDM_ROLL_VIEW_BASE, IDM_ROLL_VIEW_BASE + IDM_ROLL_VIEW_COUNT - 1, &CPianoRoll::OnViewModeCmd)
     ON_COMMAND_RANGE(IDM_ROLL_KEYS_BASE, IDM_ROLL_KEYS_BASE + IDM_ROLL_KEYS_COUNT - 1, &CPianoRoll::OnKeyRangeCmd)
     ON_COMMAND(IDM_ROLL_NOTENAME, &CPianoRoll::OnToggleNoteNames)
+    ON_COMMAND(IDM_ROLL_CAPTURE_MIDI, &CPianoRoll::OnToggleCaptureMidi)
+    ON_COMMAND(IDM_ROLL_CAPTURE_MUSICXML, &CPianoRoll::OnToggleCaptureMusicXml)
+    ON_COMMAND(IDM_ROLL_CHORD_PANEL, &CPianoRoll::OnToggleChordPanel)
+    ON_COMMAND(IDM_ROLL_LOOPBACK_SCORE, &CPianoRoll::OnToggleLoopbackScore)
     ON_WM_LBUTTONDOWN()
     ON_WM_MOUSEMOVE()
     ON_WM_LBUTTONUP()
@@ -960,6 +1027,12 @@ BOOL CPianoRoll::OnInitDialog()
     m_viewMode = (savedata.pianorollviewmode == 1) ? 1 : 0;
     m_keyRange = (savedata.pianorollkeyrange == 88) ? 88 : 108;
     m_showNoteNames = (savedata.pianorollnotename != 0);
+    if (savedata.mpLoopbackScore) {
+        ResumePlaybackFeed();
+        CWnd* parent = CCC_GetActiveMainWindow();
+        if (!parent) parent = this;
+        EnsureDeviceRecordLoopbackFeed(parent);
+    }
     {
         float yaw = (float)savedata.pianoroll3dyaw / 10.0f;
         float pitch = (float)savedata.pianoroll3dpitch / 10.0f;
@@ -2345,6 +2418,384 @@ void CPianoRoll::OnToggleNoteNames()
     ToggleNoteNames();
 }
 
+// ---- recovered addon implementations ----
+
+void CPianoRoll::FeedLoopbackMono(const double* mono, int frameCount, int sampleRate)
+{
+    // PC音はWASAPIの短いパケットで来る。MinAnalyze(~8192@44.1k)未満だと
+    // AnalyzePlayCursorMono が即 return し、メーターだけ一瞬動いてロールが流れない。
+    if (!m_feedEnabled && !savedata.mpLoopbackScore) return;
+    if (!mono || frameCount <= 0) return;
+    if (sampleRate < 8000) sampleRate = 48000;
+    if (sampleRate != m_loopbackAccumRate) {
+        m_loopbackAccumN = 0;
+        m_loopbackAccumRate = sampleRate;
+    }
+    for (int i = 0; i < frameCount; ++i) {
+        if (m_loopbackAccumN >= LOOPBACK_ACCUM_MAX) {
+            const int keep = LOOPBACK_ACCUM_MAX / 2;
+            memmove(m_loopbackAccum, m_loopbackAccum + (LOOPBACK_ACCUM_MAX - keep),
+                (size_t)keep * sizeof(double));
+            m_loopbackAccumN = keep;
+        }
+        m_loopbackAccum[m_loopbackAccumN++] = mono[i];
+    }
+    const int needN = MinAnalyzeFrameCount(sampleRate, LOOPBACK_ACCUM_MAX);
+    if (needN <= 0 || m_loopbackAccumN < needN) return;
+    int use = CaptureFrameCount(sampleRate, m_loopbackAccumN);
+    if (use < needN) use = needN;
+    if (use > m_loopbackAccumN) use = m_loopbackAccumN;
+    AnalyzePlayCursorMono(m_loopbackAccum + (m_loopbackAccumN - use), use, sampleRate);
+}
+
+void CPianoRoll::ResetScoreCaptureLocked()
+{
+    m_scoreCapEvN = 0;
+    m_scoreCapPendingDelta = 0;
+    m_scoreCapFrameN = 0;
+    memset(m_scoreCapPrevActive, 0, sizeof(m_scoreCapPrevActive));
+}
+
+void CPianoRoll::AppendScoreCaptureLocked()
+{
+    if (!m_scoreCapMidi && !m_scoreCapXml)
+        return;
+    if (m_scoreCapFrameN > 0)
+        m_scoreCapPendingDelta += SCORE_TICKS_PER_FRAME;
+
+    for (int k = 0; k < KEY_COUNT; ++k) {
+        const bool on = m_activeKeys[k];
+        if (on == m_scoreCapPrevActive[k])
+            continue;
+        if (m_scoreCapEvN >= SCORE_CAP_EV_MAX)
+            break;
+        int vel = (int)(m_noteStrength[k] * 100.0f);
+        if (vel < 1) vel = 1;
+        if (vel > 127) vel = 127;
+        ScoreCapEv& e = m_scoreCapEv[m_scoreCapEvN++];
+        e.deltaTicks = m_scoreCapPendingDelta;
+        e.status = on ? (BYTE)0x90 : (BYTE)0x80;
+        e.note = (BYTE)k;
+        e.vel = on ? (BYTE)vel : (BYTE)0x40;
+        m_scoreCapPendingDelta = 0;
+        m_scoreCapPrevActive[k] = on;
+    }
+
+    if (m_scoreCapFrameN < SCORE_CAP_FRAME_MAX) {
+        uint8_t* bits = m_scoreCapFrames[m_scoreCapFrameN];
+        memset(bits, 0, (KEY_COUNT + 7) / 8);
+        for (int k = 0; k < KEY_COUNT; ++k) {
+            if (m_activeKeys[k])
+                bits[k >> 3] |= (uint8_t)(1u << (k & 7));
+        }
+        m_scoreCapFrameN++;
+    }
+}
+
+void CPianoRoll::SaveCapturedMidi()
+{
+    ScoreCapEv ev[SCORE_CAP_EV_MAX];
+    int evN = 0;
+    EnterCriticalSection(&m_cs);
+    evN = m_scoreCapEvN;
+    if (evN > SCORE_CAP_EV_MAX) evN = SCORE_CAP_EV_MAX;
+    if (evN > 0)
+        memcpy(ev, m_scoreCapEv, (size_t)evN * sizeof(ScoreCapEv));
+    int pending = m_scoreCapPendingDelta;
+    bool prev[KEY_COUNT];
+    memcpy(prev, m_scoreCapPrevActive, sizeof(prev));
+    LeaveCriticalSection(&m_cs);
+
+    for (int k = 0; k < KEY_COUNT; ++k) {
+        if (!prev[k]) continue;
+        if (evN >= SCORE_CAP_EV_MAX) break;
+        ScoreCapEv& e = ev[evN++];
+        e.deltaTicks = pending;
+        e.status = 0x80;
+        e.note = (BYTE)k;
+        e.vel = 0x40;
+        pending = 0;
+    }
+
+    if (evN < 1) {
+        MessageBox(LL14(L"録ったノートがありません。再生(またはPC音譜面化)しながらチェックを入れてください。", L"No notes captured. Check the item while playing (or PC-audio score).", L"Aucune note. Cochez pendant la lecture.", L"Nessuna nota. Spunta durante la riproduzione.", L"Sin notas. Marque durante la reproduccion.", L"녹음된 음이 없습니다. 재생 중 체크하세요.", L"没有录到音符。请在播放时勾选。", L"لا نغمات. فعّل أثناء التشغيل.", L"Нет нот. Включите во время воспроизведения.", L"Keine Noten. Wahrend Wiedergabe aktivieren.", L"Sem notas. Marque durante a reproducao.", L"Geen noten. Vink aan tijdens afspelen.", L"Brak nut. Zaznacz podczas odtwarzania.", L"Nota yok. Calarken isaretleyin."),
+            LL14(L"MIDI録り", L"MIDI capture", L"Enregistrement MIDI", L"Registrazione MIDI", L"Captura MIDI", L"MIDI 녹음", L"MIDI录制", L"تسجيل MIDI", L"Запись MIDI", L"MIDI-Aufnahme", L"Captura MIDI", L"MIDI-opname", L"Zapis MIDI", L"MIDI kayit"),
+            MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    BYTE track[65536];
+    int trackLen = 0;
+    auto putVlq = [&](int v) {
+        if (v < 0) v = 0;
+        BYTE stack[5];
+        int n = 0;
+        stack[n++] = (BYTE)(v & 0x7f);
+        while ((v >>= 7) > 0 && n < 5) {
+            stack[n] = (BYTE)((v & 0x7f) | 0x80);
+            n++;
+        }
+        for (int i = n - 1; i >= 0 && trackLen < (int)sizeof(track) - 1; --i)
+            track[trackLen++] = stack[i];
+    };
+    for (int i = 0; i < evN; ++i) {
+        putVlq(ev[i].deltaTicks);
+        if (trackLen + 3 < (int)sizeof(track)) {
+            track[trackLen++] = ev[i].status;
+            track[trackLen++] = ev[i].note;
+            track[trackLen++] = ev[i].vel;
+        }
+    }
+    putVlq(0);
+    if (trackLen + 3 < (int)sizeof(track)) {
+        track[trackLen++] = 0xFF;
+        track[trackLen++] = 0x2F;
+        track[trackLen++] = 0x00;
+    }
+
+    CFileDialog dlg(FALSE, _T("mid"), _T("pianoroll.mid"),
+        OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,
+        LL14(L"MIDI (*.mid)|*.mid|すべて (*.*)|*.*||", L"MIDI (*.mid)|*.mid|All (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tous (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tutti (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Todos (*.*)|*.*||", L"MIDI (*.mid)|*.mid|모두 (*.*)|*.*||", L"MIDI (*.mid)|*.mid|全部 (*.*)|*.*||", L"MIDI (*.mid)|*.mid|الكل (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Все (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Alle (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Todos (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Alles (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Wszystkie (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tumu (*.*)|*.*||"),
+        this);
+    if (dlg.DoModal() != IDOK) return;
+    CFile f;
+    if (!f.Open(dlg.GetPathName(), CFile::modeCreate | CFile::modeWrite | CFile::typeBinary)) return;
+    const int tpq = SCORE_TPQ;
+    BYTE hdr[14] = {
+        'M','T','h','d', 0,0,0,6, 0,0, 0,1, (BYTE)(tpq >> 8), (BYTE)(tpq & 0xff)
+    };
+    f.Write(hdr, 14);
+    BYTE th[8] = { 'M','T','r','k', 0,0,0,0 };
+    th[4] = (BYTE)((trackLen >> 24) & 0xff);
+    th[5] = (BYTE)((trackLen >> 16) & 0xff);
+    th[6] = (BYTE)((trackLen >> 8) & 0xff);
+    th[7] = (BYTE)(trackLen & 0xff);
+    f.Write(th, 8);
+    f.Write(track, trackLen);
+    f.Close();
+}
+
+void CPianoRoll::SaveCapturedMusicXml()
+{
+    uint8_t frames[SCORE_CAP_FRAME_MAX][(KEY_COUNT + 7) / 8];
+    int frameN = 0;
+    EnterCriticalSection(&m_cs);
+    frameN = m_scoreCapFrameN;
+    if (frameN > SCORE_CAP_FRAME_MAX) frameN = SCORE_CAP_FRAME_MAX;
+    if (frameN > 0)
+        memcpy(frames, m_scoreCapFrames, (size_t)frameN * ((KEY_COUNT + 7) / 8));
+    LeaveCriticalSection(&m_cs);
+
+    if (frameN < 2) {
+        MessageBox(LL14(L"録った譜面が足りません。再生(またはPC音譜面化)しながらチェックを入れてください。", L"Not enough score captured. Check while playing (or PC-audio score).", L"Partition insuffisante. Cochez pendant la lecture.", L"Partitura insufficiente. Spunta durante la riproduzione.", L"Partitura insuficiente. Marque durante la reproduccion.", L"녹음된 악보가 부족합니다. 재생 중 체크하세요.", L"录到的谱面不足。请在播放时勾选。", L"النوتة غير كافية. فعّل أثناء التشغيل.", L"Недостаточно партитуры. Включите во время воспроизведения.", L"Zu wenig Partitur. Wahrend Wiedergabe aktivieren.", L"Partitura insuficiente. Marque durante a reproducao.", L"Te weinig partituur. Vink aan tijdens afspelen.", L"Za malo partytury. Zaznacz podczas odtwarzania.", L"Parti yetersiz. Calarken isaretleyin."),
+            LL14(L"MusicXML録り", L"MusicXML capture", L"Enregistrement MusicXML", L"Registrazione MusicXML", L"Captura MusicXML", L"MusicXML 녹음", L"MusicXML录制", L"تسجيل MusicXML", L"Запись MusicXML", L"MusicXML-Aufnahme", L"Captura MusicXML", L"MusicXML-opname", L"Zapis MusicXML", L"MusicXML kayit"),
+            MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    CFileDialog dlg(FALSE, _T("musicxml"), _T("pianoroll.musicxml"),
+        OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,
+        LL14(L"MusicXML (*.musicxml)|*.musicxml|すべて (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|All (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tous (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tutti (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Todos (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|모두 (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|全部 (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|الكل (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Все (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Alle (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Todos (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Alles (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Wszystkie (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tumu (*.*)|*.*||"),
+        this);
+    if (dlg.DoModal() != IDOK) return;
+
+    static const char* kStep[12] = { "C","C","D","D","E","F","F","G","G","A","A","B" };
+    static const int kAlter[12] = { 0,1,0,1,0,0,1,0,1,0,1,0 };
+    char xml[262144];
+    int xp = 0;
+    auto append = [&](const char* s) {
+        while (*s && xp < (int)sizeof(xml) - 2) xml[xp++] = *s++;
+    };
+    append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    append("<!DOCTYPE score-partwise PUBLIC \"-//Recordare//DTD MusicXML 3.1 Partwise//EN\" \"http://www.musicxml.org/dtds/partwise.dtd\">\n");
+    append("<score-partwise version=\"3.1\"><part-list><score-part id=\"P1\"><part-name>PianoRoll</part-name></score-part></part-list><part id=\"P1\">\n");
+
+    int measure = 1;
+    int divisionsInMeasure = 0;
+    append("<measure number=\"1\"><attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>\n");
+
+    for (int fi = 0; fi < frameN; ++fi) {
+        const uint8_t* bits = frames[fi];
+        int written = 0;
+        for (int k = 21; k < KEY_COUNT && written < 8; ++k) {
+            if ((bits[k >> 3] & (uint8_t)(1u << (k & 7))) == 0)
+                continue;
+            const int pc = k % 12;
+            const int oct = (k / 12) - 1;
+            char nb[320];
+            const char* alter = "";
+            if (kAlter[pc] > 0) alter = "<alter>1</alter>";
+            else if (kAlter[pc] < 0) alter = "<alter>-1</alter>";
+            if (written == 0)
+                sprintf_s(nb, "<note><pitch><step>%s</step>%s<octave>%d</octave></pitch><duration>1</duration><type>quarter</type></note>\n",
+                    kStep[pc], alter, oct);
+            else
+                sprintf_s(nb, "<note><chord/><pitch><step>%s</step>%s<octave>%d</octave></pitch><duration>1</duration><type>quarter</type></note>\n",
+                    kStep[pc], alter, oct);
+            append(nb);
+            written++;
+        }
+        if (written == 0)
+            append("<note><rest/><duration>1</duration><type>quarter</type></note>\n");
+        divisionsInMeasure++;
+        if (divisionsInMeasure >= 4) {
+            append("</measure>\n");
+            measure++;
+            divisionsInMeasure = 0;
+            if (measure > 128)
+                break;
+            char mb[64];
+            sprintf_s(mb, "<measure number=\"%d\">\n", measure);
+            append(mb);
+        }
+    }
+    if (divisionsInMeasure > 0)
+        append("</measure>\n");
+    append("</part></score-partwise>\n");
+    xml[xp] = 0;
+
+    CFile f;
+    if (!f.Open(dlg.GetPathName(), CFile::modeCreate | CFile::modeWrite | CFile::typeBinary)) return;
+    f.Write(xml, xp);
+    f.Close();
+}
+
+void CPianoRoll::OnToggleChordPanel()
+{
+    savedata.mpChordPanel = savedata.mpChordPanel ? 0 : 1;
+    if (savedata.mpChordPanel) {
+        m_chordHistCount = 0;
+        m_chordHistHead = 0;
+        m_chordLast[0] = 0;
+    }
+#if CCUSTOM_AERO_SUPPORT
+    m_chromaReady = false;
+#endif
+    Invalidate(FALSE);
+}
+
+void CPianoRoll::OnToggleLoopbackScore()
+{
+    // 譜面録り中は PC 音を切れない（連動維持）
+    if (savedata.mpLoopbackScore && (m_scoreCapMidi || m_scoreCapXml)) {
+        MessageBox(LL14(L"MIDI/MusicXML録り中はPC音譜面化をオフにできません。先に録りを終えてください。", L"Cannot turn off PC-audio score while MIDI/MusicXML capture is on. Finish capture first.", L"Impossible de desactiver l'audio PC pendant l'enregistrement. Terminez d'abord.", L"Impossibile disattivare audio PC durante la registrazione. Termina prima.", L"No se puede desactivar audio PC durante la captura. Termine primero.", L"MIDI/MusicXML 녹음 중에는 PC 소리 악보화를 끌 수 없습니다. 먼저 녹음을 끝내세요.", L"MIDI/MusicXML录制中无法关闭PC声音成谱。请先结束录制。", L"لا يمكن إيقاف صوت الجهاز أثناء التسجيل. أنهِ التسجيل أولاً.", L"Нельзя выключить звук ПК во время записи. Сначала завершите запись.", L"PC-Audio-Partitur kann wahrend Aufnahme nicht aus. Zuerst Aufnahme beenden.", L"Nao e possivel desligar audio do PC durante a captura. Finalize antes.", L"Pc-audio kan niet uit tijdens opname. Beëindig eerst de opname.", L"Nie mozna wylaczyc dzwieku PC podczas zapisu. Najpierw zakoncz zapis.", L"Kayit sirasinda PC sesi kapatilamaz. Once kaydi bitirin."),
+            LL14(L"PC音を譜面化", L"Score from PC audio", L"Partition depuis le PC", L"Partitura da audio PC", L"Partitura desde audio PC", L"PC 소리로 악보화", L"从PC声音成谱", L"تدوين من صوت الجهاز", L"Ноты с ПК-звука", L"Partitur aus PC-Audio", L"Partitura do audio do PC", L"Partituur van pc-audio", L"Partytura z dzwieku PC", L"PC sesinden parti"),
+            MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    savedata.mpLoopbackScore = savedata.mpLoopbackScore ? 0 : 1;
+    if (savedata.mpLoopbackScore) {
+        MpPcAudioMarkUserOwned();
+        ResumePlaybackFeed();
+        extern void EnsureDeviceRecordLoopbackFeed(CWnd* parent);
+        CWnd* parent = CCC_GetActiveMainWindow();
+        if (!parent) parent = this;
+        EnsureDeviceRecordLoopbackFeed(parent);
+        // 初回は操作が分かるよう録音ダイアログも出す
+        extern void OpenDeviceRecordModeless(CWnd* parent);
+        OpenDeviceRecordModeless(parent);
+    }
+    else {
+        MpPcAudioMarkUserOwned();
+        extern void StopDeviceRecordLoopbackFeed();
+        StopDeviceRecordLoopbackFeed();
+        extern int playf;
+        if (!playf)
+            PauseAnalysis();
+    }
+}
+
+
+void CPianoRoll::OnToggleCaptureMidi()
+{
+    const bool wasAny = m_scoreCapMidi || m_scoreCapXml;
+    if (!m_scoreCapMidi) {
+        EnterCriticalSection(&m_cs);
+        if (!wasAny)
+            ResetScoreCaptureLocked();
+        m_scoreCapMidi = true;
+        LeaveCriticalSection(&m_cs);
+        HoldPcAudioForScoreCapture();
+        Invalidate(FALSE);
+        return;
+    }
+    EnterCriticalSection(&m_cs);
+    m_scoreCapMidi = false;
+    LeaveCriticalSection(&m_cs);
+    SaveCapturedMidi();
+    EnterCriticalSection(&m_cs);
+    if (!m_scoreCapMidi && !m_scoreCapXml)
+        ResetScoreCaptureLocked();
+    LeaveCriticalSection(&m_cs);
+    ReleasePcAudioForScoreCaptureIfHeld();
+    Invalidate(FALSE);
+}
+
+void CPianoRoll::OnToggleCaptureMusicXml()
+{
+    const bool wasAny = m_scoreCapMidi || m_scoreCapXml;
+    if (!m_scoreCapXml) {
+        EnterCriticalSection(&m_cs);
+        if (!wasAny)
+            ResetScoreCaptureLocked();
+        m_scoreCapXml = true;
+        LeaveCriticalSection(&m_cs);
+        HoldPcAudioForScoreCapture();
+        Invalidate(FALSE);
+        return;
+    }
+    EnterCriticalSection(&m_cs);
+    m_scoreCapXml = false;
+    LeaveCriticalSection(&m_cs);
+    SaveCapturedMusicXml();
+    EnterCriticalSection(&m_cs);
+    if (!m_scoreCapMidi && !m_scoreCapXml)
+        ResetScoreCaptureLocked();
+    LeaveCriticalSection(&m_cs);
+    ReleasePcAudioForScoreCaptureIfHeld();
+    Invalidate(FALSE);
+}
+
+
+void CPianoRoll::OnPlayerFeedStopping(bool fullReset)
+{
+    if (savedata.mpLoopbackScore || m_scoreCapMidi || m_scoreCapXml) {
+        if (!savedata.mpLoopbackScore && (m_scoreCapMidi || m_scoreCapXml) && !m_scoreCapHeldPcAudio) {
+            MpPcAudioRetain();
+            m_scoreCapHeldPcAudio = true;
+        }
+        ResumePlaybackFeed();
+        return;
+    }
+    if (fullReset)
+        ResetPlaybackState();
+    else
+        PauseAnalysis();
+}
+
+void CPianoRoll::HoldPcAudioForScoreCapture()
+{
+    extern int playf;
+    if (m_scoreCapHeldPcAudio)
+        return;
+    // ローカル再生中は既存フィードで足りる。停止中のみ PC 音を確保。
+    if (playf)
+        return;
+    MpPcAudioRetain();
+    m_scoreCapHeldPcAudio = true;
+}
+
+void CPianoRoll::ReleasePcAudioForScoreCaptureIfHeld()
+{
+    if (!m_scoreCapHeldPcAudio)
+        return;
+    if (m_scoreCapMidi || m_scoreCapXml)
+        return;
+    MpPcAudioRelease();
+    m_scoreCapHeldPcAudio = false;
+}
+
+
 void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
     CMenu menu;
@@ -2370,6 +2821,15 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 
     menu.AppendMenu(MF_STRING | (m_showNoteNames ? MF_CHECKED : 0), IDM_ROLL_NOTENAME,
         LL14(L"ノート名を表示", L"Show note names", L"Afficher les noms de notes", L"Mostra nomi delle note", L"Mostrar nombres de notas", L"음이름 표시", L"显示音名", L"إظهار أسماء النغمات", L"Показывать названия нот", L"Notennamen anzeigen", L"Mostrar nomes das notas", L"Notennamen tonen", L"Pokazuj nazwy nut", L"Nota adlarini goster"));
+    menu.AppendMenu(MF_STRING | (savedata.mpChordPanel ? MF_CHECKED : 0), IDM_ROLL_CHORD_PANEL,
+        LL14(L"コード進行パネル(実験)", L"Chord panel (experimental)", L"Panneau accords (exp.)", L"Pannello accordi (sper.)", L"Panel acordes (exp.)", L"코드 진행 패널(실험)", L"和弦进行面板(实验)", L"لوحة التآلفات (تجريبي)", L"Панель аккордов (эксп.)", L"Akkordpanel (exp.)", L"Painel de acordes (exp.)", L"Akkoordenpaneel (exp.)", L"Panel akordow (eksperymentalny)", L"Akor paneli (deneysel)"));
+    menu.AppendMenu(MF_STRING | (savedata.mpLoopbackScore ? MF_CHECKED : 0), IDM_ROLL_LOOPBACK_SCORE,
+        LL14(L"PC音を譜面化", L"Score from PC audio", L"Partition depuis le PC", L"Partitura da audio PC", L"Partitura desde audio PC", L"PC 소리로 악보화", L"从PC声音成谱", L"تدوين من صوت الجهاز", L"Ноты с ПК-звука", L"Partitur aus PC-Audio", L"Partitura do audio do PC", L"Partituur van pc-audio", L"Partytura z dzwieku PC", L"PC sesinden parti"));
+    menu.AppendMenu(MF_SEPARATOR);
+    menu.AppendMenu(MF_STRING | (m_scoreCapMidi ? MF_CHECKED : 0), IDM_ROLL_CAPTURE_MIDI,
+        LL14(L"MIDI録り (PC音連動)", L"MIDI capture (PC audio)", L"Enregistrement MIDI (audio PC)", L"Registrazione MIDI (audio PC)", L"Captura MIDI (audio PC)", L"MIDI 녹음 (PC 소리)", L"MIDI录制 (PC声音)", L"تسجيل MIDI (صوت الجهاز)", L"Запись MIDI (звук ПК)", L"MIDI-Aufnahme (PC-Audio)", L"Captura MIDI (audio PC)", L"MIDI-opname (pc-audio)", L"Zapis MIDI (dzwiek PC)", L"MIDI kayit (PC sesi)"));
+    menu.AppendMenu(MF_STRING | (m_scoreCapXml ? MF_CHECKED : 0), IDM_ROLL_CAPTURE_MUSICXML,
+        LL14(L"MusicXML録り (PC音連動)", L"MusicXML capture (PC audio)", L"Enregistrement MusicXML (audio PC)", L"Registrazione MusicXML (audio PC)", L"Captura MusicXML (audio PC)", L"MusicXML 녹음 (PC 소리)", L"MusicXML录制 (PC声音)", L"تسجيل MusicXML (صوت الجهاز)", L"Запись MusicXML (звук ПК)", L"MusicXML-Aufnahme (PC-Audio)", L"Captura MusicXML (audio PC)", L"MusicXML-opname (pc-audio)", L"Zapis MusicXML (dzwiek PC)", L"MusicXML kayit (PC sesi)"));
     menu.AppendMenu(MF_SEPARATOR);
 
     CMenu subSpeed;
@@ -3978,10 +4438,12 @@ void CPianoRoll::PublishDetectResults()
             memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
             m_exprFlags[i] = 0;
         }
+        AppendScoreCaptureLocked();
         PushFrame(false);
         return;
     }
     UpdateNoteStates();
+    AppendScoreCaptureLocked();
     PushDisplayFrames();
 }
 
@@ -4507,7 +4969,86 @@ bool CPianoRoll::EnsureFrameBuffer(CDC& refDC, int w, int h)
     return true;
 }
 
-void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySectionH)
+
+int CPianoRoll::ChordPanelHeightPx()
+{
+    return savedata.mpChordPanel ? 28 : 0;
+}
+
+void CPianoRoll::UpdateChordHistoryFromKeyCodes()
+{
+    if (!savedata.mpChordPanel) return;
+    CString lo, mid, hi, all;
+    SnapshotEqKeyCodes(lo, mid, hi, all);
+    CString u = all;
+    int lt = u.ReverseFind(L'<');
+    int gt = u.ReverseFind(L'>');
+    CString chord;
+    if (lt >= 0 && gt > lt)
+        chord = u.Mid(lt + 1, gt - lt - 1);
+    else
+        chord = u;
+    CString clean;
+    for (int i = 0; i < chord.GetLength(); ++i) {
+        if (chord[i] == L'!' && i + 1 < chord.GetLength() && chord[i + 1] == L'@') {
+            i += 2;
+            while (i < chord.GetLength() && ((chord[i] >= L'0' && chord[i] <= L'9')
+                || (chord[i] >= L'a' && chord[i] <= L'z')
+                || (chord[i] >= L'A' && chord[i] <= L'Z')
+                || chord[i] == L'+' || chord[i] == L'-'))
+                ++i;
+            --i;
+            continue;
+        }
+        if (chord[i] >= 32)
+            clean += chord[i];
+    }
+    clean.Trim();
+    if (clean.IsEmpty() || clean.Find(L"F-01") >= 0)
+        clean = L"-";
+    if (clean.GetLength() >= 24)
+        clean = clean.Left(23);
+    if (wcscmp(m_chordLast, clean) == 0)
+        return;
+    wcsncpy_s(m_chordLast, clean, _TRUNCATE);
+    const int slot = m_chordHistHead % CHORD_HIST_MAX;
+    wcsncpy_s(m_chordHist[slot], clean, _TRUNCATE);
+    m_chordHistHead++;
+    if (m_chordHistCount < CHORD_HIST_MAX)
+        m_chordHistCount++;
+}
+
+void CPianoRoll::DrawChordPanel(CDC& dc, int x, int y, int w, int h) const
+{
+    if (w <= 0 || h <= 0) return;
+    dc.FillSolidRect(x, y, w, h, RGB(24, 28, 40));
+    dc.FillSolidRect(x, y, w, 1, RGB(70, 90, 120));
+    dc.SetBkMode(TRANSPARENT);
+    dc.SetTextColor(RGB(180, 200, 230));
+    CFont* of = nullptr;
+    if (m_fontMeterTag.GetSafeHandle())
+        of = dc.SelectObject(const_cast<CFont*>(&m_fontMeterTag));
+    dc.TextOut(x + 6, y + 2, LL14(L"コード", L"Chord", L"Accord", L"Accordo", L"Acorde",
+        L"코드", L"和弦", L"تآلف", L"Аккорд", L"Akkord", L"Acorde", L"Akkoord", L"Akord", L"Akor"));
+    const int n = m_chordHistCount;
+    int cx = x + w - 8;
+    for (int i = 0; i < n; ++i) {
+        const int idx = (m_chordHistHead - 1 - i + CHORD_HIST_MAX * 8) % CHORD_HIST_MAX;
+        const WCHAR* s = m_chordHist[idx];
+        if (!s || !s[0]) continue;
+        CSize sz = dc.GetTextExtent(s);
+        cx -= sz.cx + 10;
+        if (cx < x + 56) break;
+        const bool newest = (i == 0);
+        dc.SetTextColor(newest ? RGB(255, 220, 120) : RGB(150, 170, 200));
+        dc.TextOut(cx, y + 6, s);
+        if (!newest)
+            dc.FillSolidRect(cx + sz.cx + 4, y + 8, 1, h - 12, RGB(55, 65, 85));
+    }
+    if (of) dc.SelectObject(of);
+}
+
+void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySectionH, int chordH)
 {
     // 凡例はスクロール用 m_rollDC に焼かない。最終面へだけ合成する。
     // （旧: 毎フレーム TransparentBlt→提示→書き戻しで GDI/DWM が分単位に劣化し EQ が飢える）
@@ -4532,8 +5073,24 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
         }
         const int yOff = CCC_GetCustomCaptionHeight(m_hWnd);
         // 簡易3Dは鍵盤帯が無いので全面 Blit。2Dはロール+鍵盤が揃っていれば全面。
-        if (m_rollReady && (m_keyBufReady || keySectionH <= 0)) {
+        if (m_rollReady && (m_keyBufReady || keySectionH <= 0) && chordH <= 0) {
             m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, yOff, w, h);
+            CCC_CaptionPaint(dc, m_hWnd);
+            return;
+        }
+        if (m_rollReady && (m_keyBufReady || keySectionH <= 0) && chordH > 0) {
+            if (yOff <= 0) {
+                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
+                if (m_keyBufReady)
+                    m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH + chordH, w, keySectionH);
+            }
+            else if (m_chromaCache.hdcDib) {
+                CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, yOff, w, rollH, m_chromaCache.hdcDib, 0, 0, w, rollH);
+                if (m_keyBufReady)
+                    CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, yOff + rollH + chordH, w, keySectionH,
+                        m_chromaCache.hdcDib, 0, rollH, w, keySectionH);
+            }
+            DrawChordPanel(dc, 0, yOff + rollH, w, chordH);
             CCC_CaptionPaint(dc, m_hWnd);
             return;
         }
@@ -4561,8 +5118,10 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
     if (!EnsureFrameBuffer(dc, w, h) || !m_frameDC.GetSafeHdc()) {
         if (m_rollReady)
             dc.BitBlt(0, yOffFb, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
+        if (chordH > 0)
+            DrawChordPanel(dc, 0, yOffFb + rollH, w, chordH);
         if (m_keyBufReady)
-            dc.BitBlt(0, yOffFb + rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
+            dc.BitBlt(0, yOffFb + rollH + chordH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
         if (haveLegend)
             DrawExprLegend(dc, w, rollH);
         if (m_frozen) {
@@ -4583,10 +5142,12 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
         m_frameDC.BitBlt(0, 0, w, rollH, &m_rollDC, 0, 0, SRCCOPY);
     else
         m_frameDC.FillSolidRect(0, 0, w, rollH, RGB(18, 18, 22));
+    if (chordH > 0)
+        DrawChordPanel(m_frameDC, 0, rollH, w, chordH);
     if (m_keyBufReady)
-        m_frameDC.BitBlt(0, rollH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
+        m_frameDC.BitBlt(0, rollH + chordH, w, keySectionH, &m_keyDC, 0, 0, SRCCOPY);
     else
-        m_frameDC.FillSolidRect(0, rollH, w, keySectionH, RGB(28, 28, 32));
+        m_frameDC.FillSolidRect(0, rollH + chordH, w, keySectionH, RGB(28, 28, 32));
 
     if (haveLegend)
         DrawExprLegend(m_frameDC, w, rollH);
@@ -4613,7 +5174,7 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
 
 void CPianoRoll::PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH, int keySectionH)
 {
-    PresentFinalFrame(dc, w, h, rollH, keySectionH);
+    PresentFinalFrame(dc, w, h, rollH, keySectionH, IsView3D() ? 0 : ChordPanelHeightPx());
     if (::IsWindow(m_hWnd)) {
         MSG msg;
         while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_ANALYSIS_DONE, WM_PIANOROLL_ANALYSIS_DONE, PM_REMOVE)) {}
@@ -4721,8 +5282,9 @@ void CPianoRoll::OnPaint()
     const bool view3D = IsView3D();
     int keyH = h * 20 / 100;
     if (keyH < 50) keyH = 50; if (keyH > 100) keyH = 100;
-    const int rollH = view3D ? h : (h - keyH);
-    const int keySectionH = h - rollH;
+    const int chordH = view3D ? 0 : ChordPanelHeightPx();
+    const int rollH = view3D ? h : (h - keyH - chordH);
+    const int keySectionH = view3D ? 0 : keyH;
     if (rollH <= 0 || (!view3D && keySectionH <= 0)) {
         InterlockedExchange(&m_analysisDonePosted, 0);
         InterlockedExchange(&m_syncPosted, 0);
@@ -4745,6 +5307,8 @@ void CPianoRoll::OnPaint()
         }
     }
 
+    if (!view3D)
+        UpdateChordHistoryFromKeyCodes();
     EnsurePaintFonts(w, keyH, rollH);
     if (!EnsureRollBuffer(dc, w, rollH) || (!view3D && !EnsureKeyBuffer(dc, w, keySectionH))) {
         InterlockedExchange(&m_analysisDonePosted, 0);
@@ -4957,7 +5521,7 @@ void CPianoRoll::OnPaint()
 #endif
 
     // 追従UI込みでオフスクリーン合成 → 画面へ1回だけ出す（凡例もここで最終面へ）
-    PresentFinalFrame(dc, w, h, rollH, keySectionH);
+    PresentFinalFrame(dc, w, h, rollH, keySectionH, IsView3D() ? 0 : ChordPanelHeightPx());
 
     if (didRollUpdate)
         m_historyDirty = false;
@@ -5126,20 +5690,18 @@ void CPianoRoll::LayoutHelpBtn()
 void CPianoRoll::ShowHelpSheet()
 {
     if (g_prHelpDlg && ::IsWindow(g_prHelpDlg->GetSafeHwnd())) {
-        g_prHelpDlg->ShowWindow(SW_SHOW);
-        g_prHelpDlg->SetForegroundWindow();
+        CCC_PresentOwnedHelp(g_prHelpDlg, this);
         return;
     }
     if (g_prHelpDlg && !::IsWindow(g_prHelpDlg->GetSafeHwnd()))
         g_prHelpDlg = nullptr;
-    CPrHelpDlg* dlg = new CPrHelpDlg(nullptr);
-    if (!dlg->Create(IDD_PR_HELP, nullptr)) {
+    CPrHelpDlg* dlg = new CPrHelpDlg(this);
+    if (!dlg->Create(IDD_PR_HELP, this)) {
         delete dlg;
         return;
     }
     g_prHelpDlg = dlg;
-    dlg->ShowWindow(SW_SHOW);
-    dlg->SetForegroundWindow();
+    CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CPianoRoll::OnBnClickedHelp()

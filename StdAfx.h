@@ -379,7 +379,7 @@ struct save{
 	int pro_export_limit;  // 1=WAV書き出しでリミッター
 	int pro_export_ceiling;// 天井% 50..100 (既定99)
 	int pro_export_tp;     // 1=True Peak 判定
-	int pro_corr_meter;    // 1=アナライザーに相関メーター
+	int pro_corr_meter;    // 1=アナライザー／MPバナーの相関メーター
 
 	// --- mp3/FLAC 書き出し(末尾追記) ---
 	int tc_format;         // 0=mp3 1=FLAC
@@ -499,6 +499,42 @@ struct save{
 	// --- メディアプレイヤー シーク: ループつまみロック(末尾追記。旧.datは0=ロック) ---
 	// 0=ロック(loop1/2つまみ固定) 1=解除(loop1/2つまみ可動)。A-Bつまみは常に可動。
 	int mpSeekLoopUnlock;
+
+	// --- シーク波形オーバービュー(末尾追記。旧.datは1へ正規化=表示) ---
+	int mpSeekWave; // 1=波形表示 0=非表示
+
+	// --- 練習用フレーズ幅(秒)。±N で A-B を張る(末尾追記。旧.datは4) ---
+	int mpPhraseSec;
+
+	// --- スリープタイマー(分)。0=Off。末尾追記 ---
+	int mpSleepMin;
+
+	// --- 再生履歴の時刻(当日0時からの分。不明は-1)。末尾追記 ---
+	int mpHistTod[8];
+
+	// --- シーク: 拍グリッド / 書き出しクロスフェード帯プレビュー(末尾追記) ---
+	int mpBeatGrid;       // 1=表示
+	int mpXfadePreview;   // 1=書き出しxfade帯をシークに表示
+
+	// --- 附属機能(末尾追記。旧.datは offsetof で初期化) ---
+	int mpLoopbackScore;     // 1=PC音(ループバック)をピアノロールへ(再生フィード抑制)
+	int mpChordPanel;        // 1=ピアノロールにコード進行パネル
+	int deskLrcOn;           // 1=デスクトップ歌詞表示
+	int deskLrcX, deskLrcY, deskLrcW, deskLrcH;
+	int deskLrcAlpha;        // 40..255
+	int mpVocalCenter;       // ボーカル: 100=中立, 0=キャンセル寄り, 200=強調(Midゲイン%)
+	int mpMirrorOut;         // 1=二次デバイスへミラー出力
+	int mpMirrorVol;         // 0..100 二次音量
+	TCHAR mpMirrorDevice[256];
+	int mpRemoteOn;          // 1=localhost 操作HTTP
+	int mpRemotePort;        // 例 8765
+	int mpAlarmHour;         // -1=Off, 0..23
+	int mpAlarmMin;          // 0..59
+	int mpSsVizOn;           // 1=起動時にSS風ビジュアライザを開かない(実行時フラグは別)
+	int mpDetectedBpm;       // 直近BPM推定(0=未)
+	int mpDjPadwindow;       // 1=DJパッド表示
+	int mpNormTargetLufs;    // バッチ正規化目標(負: 例 -14)
+	int mpKeyEqSuggest;      // 1=キー検出からEQプリセット自動提案を許可
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
@@ -553,6 +589,8 @@ void CCC_CaptionLayout(HWND hDlg);
 void CCC_CaptionUnregister(HWND hDlg);
 // キャプション隣の「?」を、実在する CAP ボタンと「メインに追随」の左へ置く（欠けるボタン分の空きを作らない）
 void CCC_CaptionPlaceHelpBtn(HWND hDlg, CWnd* pHelp);
+// オーナー付きヘルプを前面へ。TOPMOST は使わない（他UIがメインになったら下に回る）
+void CCC_PresentOwnedHelp(CWnd* help, CWnd* owner);
 // Per-Monitor DPI 変更時にキャプション帯高さを再計算してレイアウト
 void CCC_CaptionRefreshDpi(HWND hDlg);
 
@@ -668,9 +706,9 @@ void xxx::OnTimer(UINT_PTR nIDEvent) \
 	GetWindowRect(&r); \
 	if (Games) \
 		Games->MoveWindow(&r); \
+	::SetWindowPos(m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); \
 	if (Games) \
-		::SetWindowPos(Games->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); \
-	::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); \
+		::SetWindowPos(Games->m_hWnd, m_hWnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); \
     ip1 = 3; \
     SetTimer(501,10,NULL); \
     } \

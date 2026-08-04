@@ -17,6 +17,7 @@ public:
 	bool hasTrack;
 
 	void LoadTrackFromSelection();
+	void LoadFromSavedata();
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -24,7 +25,6 @@ protected:
 	virtual void PostNcDestroy();
 	DECLARE_MESSAGE_MAP()
 
-	void LoadFromSavedata();
 	void SaveToSavedata();
 	void ApplyLiveFlags(); // チェック/M/S など即時反映(適用ボタン不要)
 	void RefreshCueList();
@@ -97,7 +97,19 @@ public:
 	CCustomStandardButton m_loopInBtn;
 	CCustomStandardButton m_loopOutBtn;
 	CCustomStandardButton m_writeTag;
+	CCustomSliderCtrl m_vocalCenter;
+	CCustomStatic m_vocalVal;
+	BOOL m_vocalUiReady;
 	CRect m_waveRc;
+
+	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
+	afx_msg void OnVocalPresetCancel();
+	afx_msg void OnVocalPresetNeutral();
+	afx_msg void OnVocalPresetEmphasize();
+	afx_msg void OnMsPresetNarrow();
+	afx_msg void OnMsPresetWide();
+	afx_msg void OnMsPresetMono();
+	afx_msg void OnMsPresetReset();
 };
 
 void OpenProToolsForSelection();

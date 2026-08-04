@@ -954,20 +954,18 @@ void CPianoRollTuneDlg::LayoutHelpBtn()
 void CPianoRollTuneDlg::ShowHelpSheet()
 {
 	if (g_prtHelpDlg && ::IsWindow(g_prtHelpDlg->GetSafeHwnd())) {
-		g_prtHelpDlg->ShowWindow(SW_SHOW);
-		g_prtHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_prtHelpDlg, this);
 		return;
 	}
 	if (g_prtHelpDlg && !::IsWindow(g_prtHelpDlg->GetSafeHwnd()))
 		g_prtHelpDlg = nullptr;
-	CPrtHelpDlg* dlg = new CPrtHelpDlg(nullptr);
-	if (!dlg->Create(IDD_PRT_HELP, nullptr)) {
+	CPrtHelpDlg* dlg = new CPrtHelpDlg(this);
+	if (!dlg->Create(IDD_PRT_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_prtHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CPianoRollTuneDlg::OnBnClickedHelp()

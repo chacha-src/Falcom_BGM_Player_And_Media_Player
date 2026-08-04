@@ -26,7 +26,7 @@
 また環境モデルのかかり方の度合いの変更できるため、かなり自由度が高くなっています。
 
 ### ピアノロール機能
-108鍵盤の簡易ピアノロールが実装されました。右クリックメニューから操作でき、検出パラメータの微調整や、再生中のコード・メロディ表示にも対応しています。
+108鍵盤の簡易ピアノロールが実装されました。右クリックメニューから操作でき、検出パラメータの微調整や、再生中のコード・メロディ表示にも対応しています。再生（またはPC音譜面化）中の MIDI / MusicXML 録り（実験的）もできます。
 
 ### 波形・周波数アナライザー
 Ozone風のリアルタイムアナライザーを追加しました。
@@ -46,11 +46,22 @@ Ozone風のリアルタイムアナライザーを追加しました。
 ### メディアプレイヤー画面モード搭載
 普通のメディアプレイヤーのようなモード「らいら」を搭載。起動時にファルコムBGM画面との切り替えもできます。
 
+シークバーまわりを強化しています。
+
+- **波形オーバービュー:** シークバー上に波形を表示（再生しながらリアルタイムで埋まり、WAVはファイル全体の概観に差し替え）。右クリックでON/OFF
+- **ループとA-Bの分離:** ピンク帯／つまみがループ範囲、青がA-B。ロックチェックでループつまみを固定（既定ロック）
+- **キュー / フレーズA-B / 練習テンポ:** キュー追加・1〜8でジャンプ、Rで現在±秒をA-B、テンポ50/75/100%
+- **ジャケット残時間リング**、バナー相関メーター、シーク上の細いスペアナリボン
+- **Up Next キュー**（一覧・並替）、**スマートプレイリスト**（名前付きルール／Libツリー）、欠損ヒート＋整理、重複ダイアログ、フォルダ同期リスト、★レーティング
+- **書き出しクロスフェード帯プレビュー**、拍グリッド、LRC微調整、スリープ（カスタム分＋残り表示）、操作ガイド（？）
+- **再生履歴タイムライン**（日付ヘッダ・最大64件）
+- シークホバーで時刻チップ、A-B周回回数表示（L%d）
+
 ### テンポ・ピッチ変更
 再生中のテンポとピッチを、それぞれ独立して変えられます。
 
 ### 歌詞表示
-.lrc形式の歌詞表示に対応しています。ネットからの歌詞取得もできます。
+.lrc形式の歌詞表示に対応しています。ネットからの歌詞取得もできます。デスクトップ常時最前面の歌詞オーバーレイや、LRCの細かいずれ補正・保存も使えます。
 
 ### ジャケット・プレイリスト
 アルバムジャケットの表示と、プレイリスト機能（m3u / m3u8 / pls / xspf の取り込みなど）があります。曲ごとの音量やEQなどの設定も覚えます。
@@ -110,6 +121,28 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 - **システム音**（ループバック）と**マイク**の有無、FPS、出力解像度
 - **MPの曲を載せる:** 開いているメディアプレイヤー画面を合成に含め、配置・サイズを調整可能
 - プレビューは録画中も更新されます（枠やHUDは録画ファイルには入りません）
+
+### 附属ツール（らいら）
+メディアプレイヤーのツール右クリック／各ウィンドウの右クリックから使える、プレイヤー附属の便利機能です。
+
+- **デスクトップ歌詞:** 常時最前面の歌詞オーバーレイ。透明度・位置を覚えます。LRC は ±10/±50/±100ms のずれ補正とファイル保存にも対応
+- **ピアノロール拡張:** 再生中の MIDI / MusicXML 録り（実験的・停止時はPC音自動連動）、コード進行パネル、PC音（ループバック）の譜面化
+- **スペクトロジャケット:** アナライザ表示を画像として保存
+- **A-B／キュー素材パック:** A-B やキュー区間を連番で書き出し
+- **音量正規化バッチ:** 選択曲を目標ラウドネス寄りに書き出し（リミッタ併用）
+- **MusicBrainz 自動タグ:** 曲名・アーティストなどから候補を引いてタグ反映（指紋照合なし）
+- **ボーカルキャンセル／強調:** Mid 成分の減衰・強調。ProTools から操作
+- **M/S プリセット:** 相関まわりから狭める／広げる／モノをワンクリック
+- **キー→EQ提案:** 検出キーからプリセットを提案
+- **BPM計測:** 再生またはPC音を聴きながらチェックONで計測し、OFFで拍グリッドや書き出しクロスフェード秒に反映
+- **DJパッド:** ピッチ／テンポ／ボーカル／M/S をワンタッチ
+- **MIDIキーボード操作:** ノート／CC で再生・次曲・音量など
+- **動画の音声抽出／差し替え:** 選択動画から WAV 抽出、または外部 WAV で音声を差し替えて MP4 へ書き出し
+- **出力ミラー:** 別再生デバイスへ同じミックスをミラー（音量のみ別）
+- **スクリーンセーバー風ビジュアライザ:** フルスクリーン表示（ESCで解除）
+- **localhost 操作:** `127.0.0.1` のみの簡易HTTPで再生操作（外部公開なし）
+- **アラーム:** 指定時刻に再生開始（スリープタイマーは従来どおり）
+- **ゲーム配信プリセット:** 画面キャプチャ＋デバイス録音を所定設定でまとめて開く
 
 ![ファルコムプレイヤー画面](https://ppp.oohara.jp/img/ysedplay2_git7.png)
 
@@ -191,17 +224,22 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 
 ### 補足
 - ランダム再生、連続再生、ループ回数の指定、A-Bリピート
+- シーク波形オーバービュー、ループつまみロック、Up Next、スリープタイマー
 - ファイルのドラッグ＆ドロップ追加
 - mp3やDirectShow再生の途中位置の保存
 - 音声書き出し（WAV / mp3 / FLAC。ループ／フェード／先頭無音揃え／クロスフェード／同時ミックス／サンプリング指定）
 - WAV書き出し時の2GB超対応（RF64）
 - マイクミックス（WAVへ保存時）、デバイス録音（ループバック→WAV/mp3/FLAC）、画面キャプチャ（MP4）
+- デスクトップ歌詞、LRC微調整／保存、ピアノロールのMIDI・MusicXML録り、PC音譜面化
+- A-B／キュー素材パック、音量正規化バッチ、MusicBrainz自動タグ、ボーカルMid、M/Sプリセット、キーEQ提案
+- BPM計測、DJパッド、MIDI操作、動画音声抽出、出力ミラー、SS風ビジュアライザ、localhost操作、アラーム、ゲーム配信プリセット
 - ピアノロールの検出パラメータ調整ダイアログ（多数スライダー）
 - プレイリストからアナライザー／ピアノロールを直接開く
 - 並べ替え、他プレイリストへの移動・コピー、選択曲のジャケ再取得
 - 欠損ファイル確認（パス修正・適用・インライン編集）と欠損マークの再スキャン
 - プレイリスト取り込み（m3u / m3u8 / pls / xspf。UTF-8、相対パス、欠損／重複スキップなど）
 - レンダリング設定（デバイス、バッファ、ビット深度、フォント、ファイル関連付けなど）
+- ファイル関連付けは音声に加え動画（avi/mp4/mkv/wmv/mov/webm 等）とプレイリスト（m3u 等）にも対応
 - タスクバーのジャンプリスト（再生／停止、EQ、ジャケット、プレイリストなど）
 - 起動時・定期の更新チェック
 - Windowsミキサーでアプリがミュートされているときの警告
@@ -252,7 +290,7 @@ For Reverb / Chorus / Delay, the upper half of each slider switches to pan rever
 Additionally, the intensity of the environmental effects can be adjusted, offering a high degree of acoustic freedom.
 
 ### Piano Roll Feature
-A simplified **108-key** piano roll has been implemented. Use the right-click menu for controls, detection tuning, and chord/melody display during playback.
+A simplified **108-key** piano roll has been implemented. Use the right-click menu for controls, detection tuning, and chord/melody display during playback. MIDI / MusicXML capture while playing (or PC-audio score) is experimental, and PC loopback audio can feed the roll.
 
 ### Waveform & Spectrum Analyzer
 An Ozone-inspired real-time analyzer has been added.
@@ -272,11 +310,23 @@ Playback note icon blinking (two frames) and heart (♡) draw order on the media
 ### Media Player Screen Mode Included
 Includes a media-player mode called **Raira**. You can choose between the Falcom BGM screen and this mode at startup.
 
+The seek bar area has been expanded:
+
+- **Waveform overview:** Waveform on the seek bar (fills in real time during playback; WAV can be replaced by a full-file overview). Toggle via right-click
+- **Separate loop vs A-B:** Pink band/thumbs are the loop range; blue is A-B. A lock checkbox freezes the loop thumbs (locked by default)
+- **Cues / phrase A-B / practice tempo:** Add cues and jump with 1–8, R sets A-B around now ±seconds, tempo 50/75/100%
+- **Jacket remaining-time ring**, banner correlation meters, and a thin spectrum ribbon on the seek bar
+- **Up Next queue** (panel + reorder), **smart playlists** (named rules / Lib tree), missing heat + manage, dupes dialog, folder sync lists, and ★ ratings
+- Export crossfade-band preview, beat grid, LRC nudge, sleep timer (custom minutes + countdown), and the ? cheat sheet
+- Play-history timeline (date headers, up to 64 entries)
+- **Export crossfade-band preview**, beat grid, LRC nudge, sleep timer, and an operation guide (?)
+- Seek hover time tip and A-B loop count display (L%d)
+
 ### Tempo & Pitch Control
 Tempo and pitch can be adjusted independently during playback.
 
 ### Lyrics Display
-Supports .lrc lyrics display, including optional online lyric lookup.
+Supports .lrc lyrics display, including optional online lyric lookup. An always-on-top desktop overlay and fine LRC timing shift/save are also available.
 
 ### Jacket Art & Playlist
 Album jacket display and playlists are supported (import m3u / m3u8 / pls / xspf, among other features). Per-track settings such as volume and EQ are remembered.
@@ -336,6 +386,28 @@ From **Capture**, record the screen to **MP4 (H.264 + AAC)**.
 - Optional **system audio** (loopback) and **microphone**, FPS, and output resolution
 - **Include MP song:** composite the open media-player window and adjust its layout on the preview
 - Preview keeps updating while recording (HUD overlays are not written into the file)
+
+### Companion Tools (Raira)
+Handy media-player add-ons from the Tools right-click menu and each window’s context menu.
+
+- **Desktop lyrics:** Always-on-top overlay; remembers opacity and position. LRC shift ±10/±50/±100 ms and save to file
+- **Piano-roll extras:** Experimental MIDI / MusicXML capture during playback (auto PC-audio when idle), chord panel, score-from-PC-audio (loopback)
+- **Spectrogram jacket:** Save the analyzer view as an image
+- **A-B / cue pack export:** Write A-B and cue ranges as numbered files
+- **Loudness normalize batch:** Export selected tracks toward a target loudness (with limiter)
+- **MusicBrainz auto-tag:** Look up by title/artist (no fingerprinting) and apply tags
+- **Vocal cancel / emphasize:** Mid attenuation or boost from Pro Tools
+- **M/S presets:** One-click narrow / wide / mono from correlation tools
+- **Key → EQ suggest:** Propose an EQ preset from detected key
+- **BPM measure:** Check while playing or with PC audio; uncheck to apply to beat grid and export crossfade seconds
+- **DJ pad:** One-touch pitch / tempo / vocal / M/S
+- **MIDI keyboard control:** Notes / CC for play, next, volume, etc.
+- **Video audio extract:** Export audio from a selected video to WAV
+- **Output mirror:** Mirror the same mix to another playback device (separate volume only)
+- **Screensaver-style visualizer:** Fullscreen display (ESC to exit)
+- **localhost remote:** Tiny HTTP on `127.0.0.1` only (no external bind)
+- **Alarm:** Start playback at a set time (sleep timer remains as before)
+- **Game-stream preset:** Open screen capture + device record with preset settings
 
 ![Player Screen](https://ppp.oohara.jp/img/ysedplay2e_git7.png)
 
@@ -417,17 +489,22 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 
 ### Additional Notes
 - Random play, continuous play, loop-count settings, and A-B repeat
+- Seek waveform overview, loop-thumb lock, Up Next, and sleep timer
 - Drag-and-drop file adding
 - Resume position for mp3 and DirectShow playback
 - Audio export (WAV / mp3 / FLAC; loop / fade / leading-silence align / crossfade / concurrent mix / sample-rate)
 - WAV export larger than 2GB (RF64)
 - Mic mix (with Save to WAV), device recording (loopback → WAV/mp3/FLAC), screen capture (MP4)
+- Desktop lyrics, LRC nudge/save, piano-roll MIDI/MusicXML capture, score from PC audio
+- A-B/cue pack export, loudness normalize batch, MusicBrainz auto-tag, vocal Mid, M/S presets, key→EQ suggest
+- BPM measure, DJ pad, MIDI control, video audio extract, output mirror, screensaver visualizer, localhost remote, alarm, game-stream preset
 - Piano-roll detection tuning dialog (many sliders)
 - Open analyzer / piano roll directly from the playlist
 - Sort, move/copy to another playlist, refresh jacket for selection
 - Missing-file review (path fix / apply / inline edit) and missing-mark rescan
 - Playlist import (m3u / m3u8 / pls / xspf; UTF-8, relative paths, skip missing/duplicates)
 - Rendering options (device, buffer, bit depth, fonts, file associations, etc.)
+- File associations cover audio plus video (avi/mp4/mkv/wmv/mov/webm, etc.) and playlists (m3u, etc.)
 - Taskbar jump list (play/pause, EQ, jacket, playlist, and more)
 - Startup and periodic update checks
 - Warning when the app is muted in the Windows volume mixer

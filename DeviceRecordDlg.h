@@ -39,6 +39,9 @@ protected:
 	void ShowHelpSheet();
 
 public:
+	void EnsurePeakMonitorRunning();
+	void StopPeakMonitorIfPeakOnly();
+	BOOL IsCaptureThreadAlive() const;
 	virtual BOOL OnInitDialog();
 	afx_msg void OnBnClickedBrowse();
 	afx_msg void OnBnClickedStart();
@@ -109,3 +112,6 @@ public:
 
 void OpenDeviceRecordModeless(CWnd* parent);
 void CloseDeviceRecordIfOpen();
+// PC音譜面化用: ピーク監視(ループバック)を確実に稼働させる
+void EnsureDeviceRecordLoopbackFeed(CWnd* parent);
+void StopDeviceRecordLoopbackFeed();

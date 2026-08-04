@@ -1564,20 +1564,18 @@ void CPromptDlg::OnHistSel()
 void CPromptDlg::ShowHelpSheet()
 {
 	if (g_prmHelpDlg && ::IsWindow(g_prmHelpDlg->GetSafeHwnd())) {
-		g_prmHelpDlg->ShowWindow(SW_SHOW);
-		g_prmHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_prmHelpDlg, this);
 		return;
 	}
 	if (g_prmHelpDlg && !::IsWindow(g_prmHelpDlg->GetSafeHwnd()))
 		g_prmHelpDlg = nullptr;
-	CPrmHelpDlg* dlg = new CPrmHelpDlg(nullptr);
-	if (!dlg->Create(IDD_PRM_HELP, nullptr)) {
+	CPrmHelpDlg* dlg = new CPrmHelpDlg(this);
+	if (!dlg->Create(IDD_PRM_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_prmHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CPromptDlg::DestroyHelpSheet()

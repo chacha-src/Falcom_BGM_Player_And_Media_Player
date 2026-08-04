@@ -41,11 +41,15 @@ public:
 	void SIconTimer(int i);
 	int Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f=TRUE,BOOL ff=TRUE);
 	void Del();
+	// プレイリスト行をインデックス配列で削除(降順ソートして安全に後ろから)。Save あり。
+	void DelByIndices(const std::vector<int>& indices);
 	void Load(BOOL restoreSavedRow = TRUE);
 	void Save();
 	int chk(CString name,int sub,CString art,CString fol,int ret);
 	int FindByPath(LPCTSTR fol); // 絶対パス一致(大文字小文字・正規化)。-1=なし
 	void Fol(CString fname);
+	// 単一ファイルをプレイリストへ追加(既存ならスキップ)。Fol の単一パス経路を利用。
+	void AddFilePath(LPCTSTR path);
 	void plug(CString ff,KMPMODULE *mod);
 	void plugs(CString ext1,playlistdata *p,TCHAR* kpi, BYTE& kv);
 	void Get(int i);
@@ -218,6 +222,9 @@ enum {
 	PL_CTX_TAG_EDIT = 23,
 	PL_CTX_XFADE = 24,
 	PL_CTX_MICMIX = 25,
+	PL_CTX_QUEUE_ADD = 26,
+	PL_CTX_QUEUE_PLAYNEXT = 27,
+	PL_CTX_QUEUE_CLEAR = 28,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

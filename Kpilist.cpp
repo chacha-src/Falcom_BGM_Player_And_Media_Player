@@ -589,20 +589,18 @@ void CKpilist::LayoutHelpBtn()
 void CKpilist::ShowHelpSheet()
 {
 	if (g_kpiHelpDlg && ::IsWindow(g_kpiHelpDlg->GetSafeHwnd())) {
-		g_kpiHelpDlg->ShowWindow(SW_SHOW);
-		g_kpiHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_kpiHelpDlg, this);
 		return;
 	}
 	if (g_kpiHelpDlg && !::IsWindow(g_kpiHelpDlg->GetSafeHwnd()))
 		g_kpiHelpDlg = nullptr;
-	CKpiHelpDlg* dlg = new CKpiHelpDlg(nullptr);
-	if (!dlg->Create(IDD_KPI_HELP, nullptr)) {
+	CKpiHelpDlg* dlg = new CKpiHelpDlg(this);
+	if (!dlg->Create(IDD_KPI_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_kpiHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CKpilist::OnBnClickedHelp()

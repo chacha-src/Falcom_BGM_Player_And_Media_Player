@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
 // ProAudio : ギャップレス、ReplayGain、A/B、相関、M/S、
 //            書き出しリミッター、キュー、曲別拡張データの中核。
@@ -41,6 +41,9 @@ struct ProSongExtra {
 	int   loopOut;
 	int   loopFadeMs;
 	int   albumRgValid;  // 1=albumGainDb 有効(0dB も正当)。末尾追記
+	int   rating;        // 0..5。末尾追記(ファイル ver3)
+	int   playCount;     // 再生回数。末尾追記(ファイル ver4)
+	FILETIME lastPlay;   // 最終再生(ローカル FILETIME)。0=未
 };
 
 // ---- A/B スナップショット(EQ/環境/FX/テンポ/ピッチ) ----
@@ -86,6 +89,8 @@ void  ProAudio_LoudnessReset();
 void  ProAudio_LoudnessFeed(const float* L, const float* R, int frames, int sampleRate);
 void  ProAudio_LoudnessCommitCurrentSong(); // 計測結果を現在曲の extra へ
 float ProAudio_ReplayGainLinear();          // 再生ゲイン(1.0=そのまま)
+float ProAudio_LivePeak();                  // 短時定数ピーク 0..1（シーク波形用）
+void  ProAudio_BumpLivePeak(float peak);    // ループバック等から短時定数ピークを更新
 void  ProAudio_SetCurrentSongKey(LPCTSTR list, LPCTSTR path, int mode, int ret2);
 bool  ProAudio_GetExtra(LPCTSTR list, LPCTSTR path, int mode, int ret2, ProSongExtra& out);
 bool  ProAudio_UpsertExtra(const ProSongExtra& e);
@@ -123,6 +128,15 @@ bool ProAudio_CueRemove(int index);
 // 現在曲 extra のキューをメモリへロード / 保存
 void ProAudio_CueLoadForCurrent();
 void ProAudio_CueSaveForCurrent();
+
+// ---- 評価(0..5) ----
+int  ProAudio_GetRating(LPCTSTR list, LPCTSTR path, int mode, int ret2);
+void ProAudio_SetRating(LPCTSTR list, LPCTSTR path, int mode, int ret2, int rating);
+
+// ---- 再生回数(ver4) ----
+int  ProAudio_GetPlayCount(LPCTSTR list, LPCTSTR path, int mode, int ret2);
+void ProAudio_BumpPlayCount(LPCTSTR list, LPCTSTR path, int mode, int ret2);
+bool ProAudio_GetLastPlay(LPCTSTR list, LPCTSTR path, int mode, int ret2, FILETIME& out);
 
 // ---- ループ上書き(曲別) ----
 void ProAudio_GetLoopOverride(int& inFrame, int& outFrame, int& fadeMs); // -1=無効

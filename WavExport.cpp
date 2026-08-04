@@ -630,20 +630,18 @@ void CWavExport::LayoutHelpBtn()
 void CWavExport::ShowHelpSheet()
 {
 	if (g_weHelpDlg && ::IsWindow(g_weHelpDlg->GetSafeHwnd())) {
-		g_weHelpDlg->ShowWindow(SW_SHOW);
-		g_weHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_weHelpDlg, this);
 		return;
 	}
 	if (g_weHelpDlg && !::IsWindow(g_weHelpDlg->GetSafeHwnd()))
 		g_weHelpDlg = nullptr;
-	CWeHelpDlg* dlg = new CWeHelpDlg(nullptr);
-	if (!dlg->Create(IDD_WE_HELP, nullptr)) {
+	CWeHelpDlg* dlg = new CWeHelpDlg(this);
+	if (!dlg->Create(IDD_WE_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_weHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CWavExport::OnBnClickedHelp()

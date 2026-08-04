@@ -141,6 +141,12 @@ protected:
 	afx_msg void OnMarkerRemoveNearest();
 	afx_msg void OnMarkerClearAll();
 	afx_msg void OnToggleCorrMeter();
+	afx_msg void OnSaveSpectrogramJacket();
+	afx_msg void OnMsPresetNarrow();
+	afx_msg void OnMsPresetWide();
+	afx_msg void OnMsPresetMono();
+	afx_msg void OnMsPresetReset();
+	afx_msg void OnMsPresetFromCorr();
 	afx_msg LRESULT OnSpecAnalysisDone(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPresentRequest(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnSyncRequest(WPARAM wParam, LPARAM lParam);
@@ -203,6 +209,8 @@ private:
 	bool m_alwaysOnTop = false;
 	bool m_specDiff = false;
 	bool m_specSnapValid = false;
+	float m_corrHist[64];
+	int m_corrHistHead = 0;
 
 	std::vector<float> m_ring[CH_MAX];
 	std::vector<float> m_ringSnap[CH_MAX];

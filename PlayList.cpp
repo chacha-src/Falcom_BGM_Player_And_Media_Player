@@ -951,20 +951,18 @@ void CPlayList::LayoutHelpBtn()
 void CPlayList::ShowHelpSheet()
 {
 	if (g_plHelpDlg && ::IsWindow(g_plHelpDlg->GetSafeHwnd())) {
-		g_plHelpDlg->ShowWindow(SW_SHOW);
-		g_plHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_plHelpDlg, this);
 		return;
 	}
 	if (g_plHelpDlg && !::IsWindow(g_plHelpDlg->GetSafeHwnd()))
 		g_plHelpDlg = nullptr;
-	CPlHelpDlg* dlg = new CPlHelpDlg(this, nullptr);
-	if (!dlg->Create(IDD_PL_HELP, nullptr)) {
+	CPlHelpDlg* dlg = new CPlHelpDlg(this, this);
+	if (!dlg->Create(IDD_PL_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_plHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CPlayList::OnBnClickedHelp()
@@ -2228,6 +2226,17 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 		LL14(L"A-B: 現在位置をBに", L"A-B: Set B at position", L"A-B: Definir B", L"A-B: Imposta B", L"A-B: Fijar B", L"A-B: 현재 위치를 B로", L"A-B: 将当前位置设为B", L"A-B: تعيين B", L"A-B: Задать B", L"A-B: B setzen", L"A-B: Definir B", L"A-B: Stel B in", L"A-B: Ustaw B", L"A-B: B ayarla"));
 	menu.AppendMenu(MF_STRING, PL_CTX_AB_CLEAR,
 		LL14(L"A-Bリピート解除", L"Clear A-B repeat", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 반복 해제", L"清除A-B重复", L"مسح تكرار A-B", L"Сбросить A-B", L"A-B aufheben", L"Limpar A-B", L"A-B wissen", L"Wyczysc A-B", L"A-B temizle"));
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		menu.AppendMenu(MF_SEPARATOR);
+		menu.AppendMenu(MF_STRING, PL_CTX_QUEUE_ADD,
+			LL14(L"Up Next に追加", L"Add to Up Next", L"Ajouter a Up Next", L"Aggiungi a Up Next", L"Anadir a Up Next", L"Up Next에 추가", L"加入 Up Next", L"إضافة إلى Up Next", L"В Up Next", L"Zu Up Next", L"Adicionar a Up Next", L"Toevoegen aan Up Next", L"Dodaj do Up Next", L"Up Next'e ekle"));
+		menu.AppendMenu(MF_STRING, PL_CTX_QUEUE_PLAYNEXT,
+			LL14(L"次に再生", L"Play Next", L"Lire ensuite", L"Riproduci dopo", L"Reproducir despues", L"다음에 재생", L"下一首播放", L"تشغيل التالي", L"Играть следующим", L"Als Nachstes", L"Tocar a seguir", L"Speel hierna", L"Odtworz nastepnie", L"Sonraki oynat"));
+		CString qclr;
+		qclr.Format(LL14(L"キューをクリア (%d)", L"Clear Queue (%d)", L"Vider la file (%d)", L"Svuota coda (%d)", L"Vaciar cola (%d)", L"큐 비우기 (%d)", L"清空队列 (%d)", L"مسح الطابور (%d)", L"Очистить очередь (%d)", L"Warteschlange leeren (%d)", L"Limpar fila (%d)", L"Wachtrij wissen (%d)", L"Wyczysc kolejke (%d)", L"Kuyrugu temizle (%d)"),
+			mp->m_queueN);
+		menu.AppendMenu(MF_STRING | (mp->m_queueN > 0 ? 0 : MF_GRAYED), PL_CTX_QUEUE_CLEAR, qclr);
+	}
 	menu.AppendMenu(MF_SEPARATOR);
 
 	const int plCnt = GetPlaylistFileCount();
@@ -2864,7 +2873,15 @@ void CPlayList::Del()
 		if (Lindex < playcnt) sel.push_back(Lindex);
 	}
 	if (sel.empty()) return;
+	DelByIndices(sel);
+}
 
+void CPlayList::DelByIndices(const std::vector<int>& indices)
+{
+	if (!pc || playcnt <= 0 || indices.empty()) return;
+	std::vector<int> sel = indices;
+	std::sort(sel.begin(), sel.end());
+	sel.erase(std::unique(sel.begin(), sel.end()), sel.end());
 	std::sort(sel.begin(), sel.end(), std::greater<int>());
 	for (int i : sel) {
 		if (i < 0 || i >= playcnt) continue;
@@ -2875,14 +2892,17 @@ void CPlayList::Del()
 	playlistdata0* newPc = (playlistdata0*)realloc(pc, (size_t)sizeof(playlistdata0) * (playcnt + 2));
 	if (newPc) pc = newPc;
 	extern int plcnt;
-	std::vector<int> selAsc = sel;
+	std::vector<int> selAsc = indices;
 	std::sort(selAsc.begin(), selAsc.end());
+	selAsc.erase(std::unique(selAsc.begin(), selAsc.end()), selAsc.end());
 	plcnt = PlAdjustIndexAfterRemovals(plcnt, selAsc);
 	pnt = PlAdjustIndexAfterRemovals(pnt, selAsc);
 	pnt1 = PlAdjustIndexAfterRemovals(pnt1, selAsc);
-	m_lc.SetItemCount(playcnt);
-	for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
-	m_lc.RedrawWindow();
+	if (::IsWindow(m_lc.GetSafeHwnd())) {
+		m_lc.SetItemCount(playcnt);
+		for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
+		m_lc.RedrawWindow();
+	}
 	Save();
 }
 
@@ -3122,6 +3142,15 @@ extern int Callback_Close(void *datasource);
 extern long Callback_Tell(void *datasource);
 
 extern ov_callbacks callbacks;
+
+void CPlayList::AddFilePath(LPCTSTR path)
+{
+	if (!path || !*path) return;
+	const CString norm = NormalizePlaylistPath(path);
+	if (norm.IsEmpty()) return;
+	if (FindByPath(norm) >= 0) return;
+	Fol(norm);
+}
 
 void CPlayList::Fol(CString fname)
 {

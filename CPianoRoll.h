@@ -1,4 +1,4 @@
-// CPianoRoll.h : リアルタイム簡易ピアノロールビジュアライザ
+﻿// CPianoRoll.h : リアルタイム簡易ピアノロールビジュアライザ
 //
 // PCM ストリームを Goertzel アルゴリズムで 88 鍵分に変換し、ノートのオン/オフと
 // 強度を推定して簡易ピアノロール形式で描画する。
@@ -39,6 +39,8 @@ public:
         int playbackDelaySamples = 0);
     // bufwav3 経路(再生バッファ直後)から呼ぶ。ワーカーに分析ジョブをキューイング
     void AnalyzePlayCursorMono(const double* mono, int frameCount, int sampleRate);
+    // PC音(ループバック)用: 短いWASAPIパケットを蓄積してから解析に渡す
+    void FeedLoopbackMono(const double* mono, int frameCount, int sampleRate);
     // Sync 側の重い PCM 変換を、解析受付可能時だけに限定するための判定
     bool ShouldCaptureAnalyzeJob();
     // チャンネル別 dB を受け取りメーターバーへ反映(レベルメーターは Goertzel 非依存)
@@ -49,6 +51,9 @@ public:
     void ResetPlaybackState();
     // 再生スレッド稼働後に解析を再開する
     void ResumePlaybackFeed();
+    // プレイヤー停止時: PC音譜面化または譜面録り中なら解析継続、それ以外は Pause/Reset
+    void OnPlayerFeedStopping(bool fullReset);
+    bool IsScoreCapturing() const { return m_scoreCapMidi || m_scoreCapXml; }
     // ウィンドウ破棄前に呼ぶ。ワーカースレッド停止と GDI バッファ解放を安全に行う
     void DetachForDestroy();
 
@@ -139,6 +144,10 @@ protected:
     afx_msg void OnViewModeCmd(UINT nID);
     afx_msg void OnKeyRangeCmd(UINT nID);
     afx_msg void OnToggleNoteNames();
+    afx_msg void OnToggleCaptureMidi();
+    afx_msg void OnToggleCaptureMusicXml();
+    afx_msg void OnToggleChordPanel();
+    afx_msg void OnToggleLoopbackScore();
     // 簡易3D 表示時のみ、クライアント領域のドラッグで視点(ヨー/ピッチ)を回す。
     // 2D 表示時は一切介入せず基底(ウィンドウドラッグ/追従チェック)へ素通しする。
     afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
@@ -215,6 +224,10 @@ private:
     static constexpr UINT  IDM_ROLL_KEYS_BASE = 42224;   // +0=88鍵 +1=108鍵
     static constexpr UINT  IDM_ROLL_KEYS_COUNT = 2;
     static constexpr UINT  IDM_ROLL_NOTENAME = 42227;
+    static constexpr UINT  IDM_ROLL_CAPTURE_MIDI = 42228;
+    static constexpr UINT  IDM_ROLL_CAPTURE_MUSICXML = 42229;
+    static constexpr UINT  IDM_ROLL_CHORD_PANEL = 42230;
+    static constexpr UINT  IDM_ROLL_LOOPBACK_SCORE = 42231;
 
     // ---- フレーム履歴リングバッファ(UI スレッドのみ読み書き) ----
     NoteFrame m_historyRing[MAX_HISTORY];  // 確定済みフレームの環状配列
@@ -284,6 +297,11 @@ private:
     int                 m_samplesSinceAnalyze = 0;   // 前回分析からのサンプル数(ANALYZE_INTERVAL トリガー用)
     int                 m_playbackDelaySamples = 0;  // 再生バッファ遅延の補正値(IIR 平均)
     bool                m_analysisTablesReady = false;
+    // PC音ループバック蓄積(短いWASAPIパケットを MinAnalyze まで溜める)
+    static constexpr int LOOPBACK_ACCUM_MAX = 16384;
+    double              m_loopbackAccum[LOOPBACK_ACCUM_MAX];
+    int                 m_loopbackAccumN = 0;
+    int                 m_loopbackAccumRate = 48000;
 
     // ---- Goertzel 係数 / 窓関数(サンプルレート変化時に再計算) ----
     // ScaleWinSamples の絶対上限 = RING_SIZE。std::vector 禁止（長時間断片化防止）
@@ -357,6 +375,12 @@ private:
     void EnsureAnalysisTables(int sampleRate, int capCaptureFrames = 0);   // Goertzel 係数と窓関数を再計算
     void RunGoertzelFromBuffer(const double* winLow, const double* winBass, int bassWinLen);
     void PublishDetectResults(); // UpdateNoteStates/PushDisplayFrames または無音クリア（m_cs 下）
+    void ResetScoreCaptureLocked();
+    void AppendScoreCaptureLocked();
+    void SaveCapturedMidi();
+    void SaveCapturedMusicXml();
+    void HoldPcAudioForScoreCapture();
+    void ReleasePcAudioForScoreCaptureIfHeld();
     void UpdateNoteStates();    // ピック結果からノートのオン/オフ・強度・セグメントを更新
     void DetectExpressions();   // UpdateNoteStates 後に表現記号(アクセント/ビブラート等)を付与
     // 音色エンベロープモデルを更新し、再アタック(タイ分割)を判定する。
@@ -470,6 +494,32 @@ private:
     int   m_viewMode = 0;             // 0=通常(2D) 1=簡易3D
     int   m_keyRange = 108;           // 表示鍵数(88/108)。解析は常に 108 鍵で不変
     bool  m_showNoteNames = true;     // 白鍵のノート名(C/D/E…)
+    // 譜面録り: チェックONで解析フレームを蓄積し、OFF時にファイル保存
+    static constexpr int SCORE_CAP_EV_MAX = 8192;
+    static constexpr int SCORE_CAP_FRAME_MAX = 1024;
+    static constexpr int SCORE_TPQ = 480;
+    static constexpr int SCORE_TICKS_PER_FRAME = 120; // 16分相当(実験的)
+    struct ScoreCapEv {
+        int  deltaTicks;
+        BYTE status; // 0x90 / 0x80
+        BYTE note;
+        BYTE vel;
+    };
+    ScoreCapEv m_scoreCapEv[SCORE_CAP_EV_MAX];
+    int   m_scoreCapEvN = 0;
+    int   m_scoreCapPendingDelta = 0;
+    bool  m_scoreCapPrevActive[KEY_COUNT] = {};
+    uint8_t m_scoreCapFrames[SCORE_CAP_FRAME_MAX][(KEY_COUNT + 7) / 8];
+    int   m_scoreCapFrameN = 0;
+    bool  m_scoreCapMidi = false;
+    bool  m_scoreCapXml = false;
+    bool  m_scoreCapHeldPcAudio = false; // MpPcAudioRetain を録り側で保持中
+    // コード進行パネル(実験的・キー検出と履歴から簡易表示)
+    static constexpr int CHORD_HIST_MAX = 48;
+    WCHAR m_chordHist[CHORD_HIST_MAX][24] = {};
+    int   m_chordHistCount = 0;
+    int   m_chordHistHead = 0;
+    WCHAR m_chordLast[24] = {};
     float m_view3dYawDeg = -22.0f;    // 簡易3D 水平回転角(-180..180、ドラッグで360度)
     float m_view3dPitchDeg = 26.0f;   // 簡易3D 仰角(負=下から / 正=上から)
     float m_view3dZoom = 1.0f;        // ホイール拡大縮小(1=自動フレーミング基準)
@@ -523,7 +573,10 @@ private:
     bool EnsureFrameBuffer(CDC& refDC, int w, int h);
     void PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH, int keySectionH);
     // ロール+鍵盤+追従UI をオフスクリーンへ合成し、画面へは1回だけ出す
-    void PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySectionH);
+    void PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySectionH, int chordH = 0);
+    void UpdateChordHistoryFromKeyCodes();
+    void DrawChordPanel(CDC& dc, int x, int y, int w, int h) const;
+    static int ChordPanelHeightPx();
 #if CCUSTOM_AERO_SUPPORT
     // 「メインに追従」をクロマへ焼付けてから1回 Blit（画面2段合成のちらつき防止）
     void BakeMainFollowOverlayIntoChroma(int w, int h, int rollH, int keySectionH);

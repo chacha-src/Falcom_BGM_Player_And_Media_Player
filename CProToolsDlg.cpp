@@ -148,7 +148,26 @@ void CPtHelpDlg::OnPaint()
 	body(L, y, LL14(L"・M/S幅・モノ互換・エクスポート制限 …… 空間感と書き出し時の頭打ち", L"· M/S width / mono / export limit …… space and export ceiling", L"· Largeur M/S / mono / plafond export", L"· Larghezza M/S / mono / tetto export",
 		L"· Ancho M/S / mono / techo de exportación", L"· M/S 폭·모노·내보내기 제한", L"· M/S 宽度 / 单声道 / 导出上限", L"· عرض M/S / مونو / سقف التصدير",
 		L"· Ширина M/S / моно / потолок экспорта", L"· M/S-Breite / Mono / Export-Deckel", L"· Largura M/S / mono / teto de exportação", L"· M/S-breedte / mono / exportplafond",
-		L"· Szerokość M/S / mono / limit eksportu", L"· M/S genişliği / mono / dışa aktarma tavanı")); y += lh + 4;
+		L"· Szerokość M/S / mono / limit eksportu", L"· M/S genişliği / mono / dışa aktarma tavanı")); y += lh;
+	body(L, y, LL14(
+		L"・ボーカル Mid …… 0=キャンセル寄り / 100=中立 / 200=強調（右クリックプリセットあり）",
+		L"· Vocal Mid …… 0=cancel-ish / 100=neutral / 200=emphasize (RMB presets)",
+		L"· Vocal Mid …… 0=annulation / 100=neutre / 200=emphasis",
+		L"· Vocal Mid …… 0=cancel / 100=neutro / 200=emphasis",
+		L"· Vocal Mid …… 0=cancelar / 100=neutral / 200=enfasis",
+		L"· 보컬 Mid …… 0=취소 / 100=중립 / 200=강조(우클릭 프리셋)",
+		L"· 人声 Mid …… 0=取消倾向 / 100=中性 / 200=强调（右键预设）",
+		L"· Vocal Mid …… 0=إلغاء / 100=محايد / 200=تأكيد",
+		L"· Vocal Mid …… 0=отмена / 100=нейтр. / 200=акцент",
+		L"· Vocal Mid …… 0=Cancel / 100=neutral / 200=betonen",
+		L"· Vocal Mid …… 0=cancelar / 100=neutro / 200=enfase",
+		L"· Vocal Mid …… 0=annuleren / 100=neutraal / 200=benadrukken",
+		L"· Vocal Mid …… 0=anuluj / 100=neutralny / 200=podkresl",
+		L"· Vocal Mid …… 0=iptal / 100=notr / 200=vurgula")); y += lh;
+	body(L, y, LL14(L"・相関メーター …… φ表示。MPバナー右のメーターにも反映", L"· Correlation meter …… φ display; also on MP banner right", L"· Mètre corr. …… φ; aussi à droite de la bannière MP", L"· Metro corr. …… φ; anche a destra del banner MP",
+		L"· Metro corr. …… φ; también a la der. del banner MP", L"· 상관 미터 …… φ 표시. MP 배너 오른쪽에도 반영", L"· 相关表 …… φ；也反映在 MP 横幅右侧", L"· عداد الترابط …… φ؛ أيضاً يمين بانر MP",
+		L"· Корреляция …… φ; также справа на баннере MP", L"· Korrelationsmesser …… φ; auch rechts am MP-Banner", L"· Metro corr. …… φ; também à direita do banner MP", L"· Correlatiemeter …… φ; ook rechts op MP-banner",
+		L"· Metr korelacji …… φ; też po prawej banera MP", L"· Korelasyon metresi …… φ; MP banner sağında da")); y += lh + 4;
 
 	title(L, y, LL14(L"ループ / キュー", L"Loop / Cues", L"Boucle / Cues", L"Loop / Cue", L"Bucle / Cues", L"루프 / 큐", L"循环 / 标记", L"حلقة / إشارات",
 		L"Цикл / Метки", L"Loop / Cues", L"Loop / Cues", L"Loop / Cues", L"Pętla / Cue", L"Döngü / Cue"));
@@ -208,6 +227,28 @@ void CPtHelpDlg::OnPaint()
 
 } // namespace
 
+namespace {
+	enum {
+		IDM_PT_VOCAL_CANCEL = 42310,
+		IDM_PT_VOCAL_NEUTRAL = 42311,
+		IDM_PT_VOCAL_EMPH = 42312,
+		IDM_PT_MS_NARROW = 42213,
+		IDM_PT_MS_WIDE = 42214,
+		IDM_PT_MS_MONO = 42215,
+		IDM_PT_MS_RESET = 42216,
+		IDC_PT_VOCAL_SLIDER = 42217,
+		IDC_PT_VOCAL_LBL = 42218
+	};
+
+	static void PtApplyMsPreset(int widthPct, int mono)
+	{
+		savedata.pro_ms_width = ProClampI(widthPct, 0, 200);
+		savedata.pro_ms_mono = mono ? 1 : 0;
+		if (g_proToolsDlg && ::IsWindow(g_proToolsDlg->GetSafeHwnd()))
+			g_proToolsDlg->LoadFromSavedata();
+	}
+}
+
 IMPLEMENT_DYNAMIC(CProToolsDlg, CCustomBlurDialogBase)
 CProToolsDlg::CProToolsDlg(CWnd* pParent)
 	: CCustomBlurDialogBase(IDD_PROTOOLS, pParent)
@@ -216,6 +257,7 @@ CProToolsDlg::CProToolsDlg(CWnd* pParent)
 	, m_totalFrames(0)
 	, m_loopIn(-1)
 	, m_loopOut(-1)
+	, m_vocalUiReady(FALSE)
 {
 	ZeroMemory(&pc, sizeof(pc));
 	ZeroMemory(m_peaksL, sizeof(m_peaksL));
@@ -286,6 +328,14 @@ BEGIN_MESSAGE_MAP(CProToolsDlg, CCustomBlurDialogBase)
 	ON_WM_SIZE()
 	ON_WM_CLOSE()
 	ON_WM_DESTROY()
+	ON_WM_CONTEXTMENU()
+	ON_COMMAND(IDM_PT_VOCAL_CANCEL, &CProToolsDlg::OnVocalPresetCancel)
+	ON_COMMAND(IDM_PT_VOCAL_NEUTRAL, &CProToolsDlg::OnVocalPresetNeutral)
+	ON_COMMAND(IDM_PT_VOCAL_EMPH, &CProToolsDlg::OnVocalPresetEmphasize)
+	ON_COMMAND(IDM_PT_MS_NARROW, &CProToolsDlg::OnMsPresetNarrow)
+	ON_COMMAND(IDM_PT_MS_WIDE, &CProToolsDlg::OnMsPresetWide)
+	ON_COMMAND(IDM_PT_MS_MONO, &CProToolsDlg::OnMsPresetMono)
+	ON_COMMAND(IDM_PT_MS_RESET, &CProToolsDlg::OnMsPresetReset)
 END_MESSAGE_MAP()
 void CProToolsDlg::LoadFromSavedata()
 {
@@ -308,6 +358,11 @@ void CProToolsDlg::LoadFromSavedata()
 	m_expCeil.SetWindowText(s);
 	m_expTp.SetCheck(savedata.pro_export_tp ? BST_CHECKED : BST_UNCHECKED);
 	m_corr.SetCheck(savedata.pro_corr_meter ? BST_CHECKED : BST_UNCHECKED);
+	if (m_vocalUiReady && m_vocalCenter.GetSafeHwnd()) {
+		m_vocalCenter.SetPos(ProClampI(savedata.mpVocalCenter, 0, 200));
+		s.Format(_T("%d"), m_vocalCenter.GetPos());
+		m_vocalVal.SetWindowText(s);
+	}
 }
 
 void CProToolsDlg::SaveToSavedata()
@@ -351,6 +406,12 @@ void CProToolsDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
 	if (pScrollBar && pScrollBar->GetDlgCtrlID() == IDC_PRO_MSWIDTH)
 		ApplyLiveFlags();
+	else if (pScrollBar && pScrollBar->GetDlgCtrlID() == IDC_PT_VOCAL_SLIDER) {
+		savedata.mpVocalCenter = ProClampI(m_vocalCenter.GetPos(), 0, 200);
+		CString s;
+		s.Format(_T("%d"), savedata.mpVocalCenter);
+		m_vocalVal.SetWindowText(s);
+	}
 	CCustomBlurDialogBase::OnHScroll(nSBCode, nPos, pScrollBar);
 }
 
@@ -446,6 +507,29 @@ BOOL CProToolsDlg::OnInitDialog()
 
 	RefreshCueList();
 	SetupToolTips();
+
+	if (!m_vocalUiReady && m_msWidth.GetSafeHwnd()) {
+		CRect rcMs, rcLab;
+		m_msWidth.GetWindowRect(&rcMs);
+		ScreenToClient(&rcMs);
+		rcLab = rcMs;
+		rcLab.OffsetRect(0, rcMs.Height() + 2);
+		rcLab.bottom = rcLab.top + 14;
+		rcLab.right = rcLab.left + 120;
+		m_vocalVal.Create(_T(""), WS_CHILD | WS_VISIBLE | SS_LEFT, rcLab, this, IDC_PT_VOCAL_LBL);
+		CRect rcSl = rcMs;
+		rcSl.OffsetRect(0, rcMs.Height() + 4);
+		rcSl.bottom = rcSl.top + 22;
+		m_vocalCenter.Create(WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS, rcSl, this, IDC_PT_VOCAL_SLIDER);
+		m_vocalCenter.SetRange(0, 200);
+		m_vocalCenter.SetPos(ProClampI(savedata.mpVocalCenter, 0, 200));
+		m_vocalUiReady = TRUE;
+		m_tooltip.AddTool(&m_vocalCenter, LL14(L"ボーカル Mid 強調(100=中立, 0=キャンセル寄り, 200=強調)", L"Vocal Mid (100=neutral, 0=cancel-ish, 200=emphasize)", L"Vocal Mid (100=neutre)", L"Vocal Mid (100=neutro)", L"Vocal Mid (100=neutral)", L"보컬 Mid (100=중립)", L"人声 Mid (100=中性)", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid"));
+		CString vs;
+		vs.Format(_T("%d"), m_vocalCenter.GetPos());
+		m_vocalVal.SetWindowText(vs);
+	}
+
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
 	return TRUE;
@@ -803,20 +887,18 @@ void CProToolsDlg::LayoutHelpBtn()
 void CProToolsDlg::ShowHelpSheet()
 {
 	if (g_ptHelpDlg && ::IsWindow(g_ptHelpDlg->GetSafeHwnd())) {
-		g_ptHelpDlg->ShowWindow(SW_SHOW);
-		g_ptHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_ptHelpDlg, this);
 		return;
 	}
 	if (g_ptHelpDlg && !::IsWindow(g_ptHelpDlg->GetSafeHwnd()))
 		g_ptHelpDlg = nullptr;
-	CPtHelpDlg* dlg = new CPtHelpDlg(nullptr);
-	if (!dlg->Create(IDD_PT_HELP, nullptr)) {
+	CPtHelpDlg* dlg = new CPtHelpDlg(this);
+	if (!dlg->Create(IDD_PT_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_ptHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CProToolsDlg::OnBnClickedHelp()
@@ -985,6 +1067,57 @@ void CProToolsDlg::OnBnClickedWriteTag()
 		L"Etiquetas escritas.", L"태그 저장됨.", L"标签已写入。", L"تمت الكتابة.",
 		L"Теги записаны.", L"Tags geschrieben.", L"Tags gravadas.", L"Tags geschreven.",
 		L"Tagi zapisane.", L"Etiketler yazıldı."), MB_ICONINFORMATION);
+}
+
+static void PtSetVocalCenter(int v)
+{
+	savedata.mpVocalCenter = ProClampI(v, 0, 200);
+	if (g_proToolsDlg && ::IsWindow(g_proToolsDlg->GetSafeHwnd())) {
+		if (g_proToolsDlg->m_vocalUiReady && g_proToolsDlg->m_vocalCenter.GetSafeHwnd()) {
+			g_proToolsDlg->m_vocalCenter.SetPos(savedata.mpVocalCenter);
+			CString s;
+			s.Format(_T("%d"), savedata.mpVocalCenter);
+			g_proToolsDlg->m_vocalVal.SetWindowText(s);
+		}
+	}
+}
+
+void CProToolsDlg::OnVocalPresetCancel() { PtSetVocalCenter(0); }
+void CProToolsDlg::OnVocalPresetNeutral() { PtSetVocalCenter(100); }
+void CProToolsDlg::OnVocalPresetEmphasize() { PtSetVocalCenter(200); }
+void CProToolsDlg::OnMsPresetNarrow() { PtApplyMsPreset(40, 0); }
+void CProToolsDlg::OnMsPresetWide() { PtApplyMsPreset(160, 0); }
+void CProToolsDlg::OnMsPresetMono() { PtApplyMsPreset(100, 1); }
+void CProToolsDlg::OnMsPresetReset() { PtApplyMsPreset(100, 0); }
+
+void CProToolsDlg::OnContextMenu(CWnd* pWnd, CPoint point)
+{
+	CMenu menu;
+	menu.CreatePopupMenu();
+	CMenu subV;
+	subV.CreatePopupMenu();
+	subV.AppendMenu(MF_STRING | (savedata.mpVocalCenter == 0 ? MF_CHECKED : 0), IDM_PT_VOCAL_CANCEL,
+		LL14(L"ボーカルキャンセル (0)", L"Vocal cancel (0)", L"Annulation vocale (0)", L"Cancella voce (0)", L"Cancelar voz (0)", L"보컬 캔슬 (0)", L"人声消除 (0)", L"إلغاء الصوت (0)", L"Вокал cancel (0)", L"Vokal cancel (0)", L"Cancelar vocal (0)", L"Vocal cancel (0)", L"Anuluj wokal (0)", L"Vokal iptal (0)"));
+	subV.AppendMenu(MF_STRING | (savedata.mpVocalCenter == 100 ? MF_CHECKED : 0), IDM_PT_VOCAL_NEUTRAL,
+		LL14(L"中立 (100)", L"Neutral (100)", L"Neutre (100)", L"Neutro (100)", L"Neutral (100)", L"중립 (100)", L"中性 (100)", L"محايد (100)", L"Нейтрально (100)", L"Neutral (100)", L"Neutro (100)", L"Neutraal (100)", L"Neutralnie (100)", L"Notr (100)"));
+	subV.AppendMenu(MF_STRING | (savedata.mpVocalCenter == 200 ? MF_CHECKED : 0), IDM_PT_VOCAL_EMPH,
+		LL14(L"Mid強調 (200)", L"Emphasize Mid (200)", L"Accent Mid (200)", L"Enfatizza Mid (200)", L"Enfatizar Mid (200)", L"Mid 강조 (200)", L"强调 Mid (200)", L"Mid (200)", L"Mid акцент (200)", L"Mid betonen (200)", L"Enfatizar Mid (200)", L"Mid benadrukken (200)", L"Mid akcent (200)", L"Mid vurgula (200)"));
+	menu.AppendMenu(MF_POPUP, (UINT_PTR)subV.Detach(),
+		LL14(L"ボーカル Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"보컬 Mid", L"人声 Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid"));
+	CMenu subMs;
+	subMs.CreatePopupMenu();
+	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_width == 40 && !savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_PT_MS_NARROW,
+		LL14(L"M/S 狭め (40%)", L"M/S narrow (40%)", L"M/S etroit (40%)", L"M/S stretto (40%)", L"M/S estrecho (40%)", L"M/S 좁게", L"M/S 窄", L"M/S ضيق", L"M/S узко", L"M/S schmal", L"M/S estreito", L"M/S smal", L"M/S wasko", L"M/S dar"));
+	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_width == 160 && !savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_PT_MS_WIDE,
+		LL14(L"M/S 広げ (160%)", L"M/S wide (160%)", L"M/S large (160%)", L"M/S ampio (160%)", L"M/S ancho (160%)", L"M/S 넓게", L"M/S 宽", L"M/S واسع", L"M/S широко", L"M/S breit", L"M/S largo", L"M/S breed", L"M/S szeroko", L"M/S genis"));
+	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_PT_MS_MONO, LL14(L"M/S モノ", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S 모노", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono"));
+	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_width == 100 && !savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_PT_MS_RESET, LL14(L"M/S リセット", L"M/S reset", L"M/S reinit.", L"M/S reset", L"M/S reset", L"M/S 리셋", L"M/S 重置", L"M/S reset", L"M/S сброс", L"M/S reset", L"M/S reset", L"M/S reset", L"M/S reset", L"M/S sifirla"));
+	menu.AppendMenu(MF_POPUP, (UINT_PTR)subMs.Detach(), LL14(L"相関→M/S", L"Correlation→M/S", L"Correlation→M/S", L"Correlazione→M/S", L"Correlacion→M/S", L"상관→M/S", L"相关→M/S", L"ترابط→M/S", L"Корреляция→M/S", L"Korrelation→M/S", L"Correlacao→M/S", L"Correlatie→M/S", L"Korelacja→M/S", L"Korelasyon→M/S"));
+	if (point.x == -1 && point.y == -1) {
+		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
+		point = CPoint(rc.left + 8, rc.top + 8);
+	}
+	menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y, this);
 }
 
 void CProToolsDlg::LoadTrackFromSelection()

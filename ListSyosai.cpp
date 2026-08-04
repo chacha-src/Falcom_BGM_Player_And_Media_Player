@@ -976,20 +976,18 @@ void CListSyosai::LayoutHelpBtn()
 void CListSyosai::ShowHelpSheet()
 {
 	if (g_syHelpDlg && ::IsWindow(g_syHelpDlg->GetSafeHwnd())) {
-		g_syHelpDlg->ShowWindow(SW_SHOW);
-		g_syHelpDlg->SetForegroundWindow();
+		CCC_PresentOwnedHelp(g_syHelpDlg, this);
 		return;
 	}
 	if (g_syHelpDlg && !::IsWindow(g_syHelpDlg->GetSafeHwnd()))
 		g_syHelpDlg = nullptr;
-	CSyHelpDlg* dlg = new CSyHelpDlg(nullptr);
-	if (!dlg->Create(IDD_SY_HELP, nullptr)) {
+	CSyHelpDlg* dlg = new CSyHelpDlg(this);
+	if (!dlg->Create(IDD_SY_HELP, this)) {
 		delete dlg;
 		return;
 	}
 	g_syHelpDlg = dlg;
-	dlg->ShowWindow(SW_SHOW);
-	dlg->SetForegroundWindow();
+	CCC_PresentOwnedHelp(dlg, this);
 }
 
 void CListSyosai::OnBnClickedHelp()

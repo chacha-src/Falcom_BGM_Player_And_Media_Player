@@ -125,6 +125,8 @@ void CCC_GroupBoxesBack(HWND hDlg);
 #define COLOR_RANGE_SELECTION   RGB(255, 182, 213) // 範囲スライダーの選択範囲色（ローズ=ループ）
 #define COLOR_AB_SLIDER_THUMB   RGB(64, 160, 255)  // A-B つまみ（A単独時からこの色）
 #define COLOR_AB_RANGE          RGB(90, 210, 150)  // A-B 区間塗り（B確定後）
+#define COLOR_SEEK_WAVE         RGB(120, 170, 220) // シーク波形オーバービュー
+#define COLOR_SEEK_CUE          RGB(255, 190, 60)  // キュー／マーカー
 #define COLOR_HANAMARU          RGB(255,   0,   0) // はなまるの色
 #define COLOR_FLOWER_DECO       RGB(255, 240, 245) // お花の装飾色
 #define COLOR_VINE_DECO         RGB(216, 132, 176) // 蔓（つる）の装飾色（ローズモーヴ）
@@ -1052,6 +1054,7 @@ protected:
     afx_msg HBRUSH CtlColor(CDC*, UINT);
     afx_msg void OnPaint();
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
+    afx_msg LRESULT OnBmSetState(WPARAM, LPARAM);
     afx_msg BOOL OnEraseBkgnd(CDC*);
     afx_msg void OnMouseMove(UINT, CPoint);
     afx_msg LRESULT OnMouseLeave(WPARAM, LPARAM);
@@ -1201,8 +1204,36 @@ public:
     // ドラッグ対象(HitTest 値)。ドラッグ中/直後の親通知判別に使う。
     int GetDragTarget() const { return m_nDragTarget; }
 
+    // 波形オーバービュー(0..1ピーク)。count<=0 で消去。内部にコピー(最大 kWavePeaksMax)。
+    enum { kWavePeaksMax = 1024, kCueMax = 8 };
+    void SetWavePeaks(const float* peaks, int count);
+    void ClearWavePeaks();
+    int GetWavePeakCount() const { return m_wavePeakCount; }
+    // 再生位置の振幅をビンに最大合成（リアルタイム波形。full概観が来たら SetWavePeaks で置換）
+    void AccumulateWaveAtPos(int pos, float amp, int bins = 512);
+
+    // キューマーカー(フレーム位置)。count<=0 で消去。クリックで GetCueClick>=0。
+    void SetCues(const int* frames, int count);
+    void ClearCues();
+    int GetCueClick() const { return m_nCueClick; }
+    void ClearCueClick() { m_nCueClick = -1; }
+
+    // スペアナ・リボン(最大64本)。シーク中央上に細いバー。
+    enum { kRibbonMax = 64 };
+    void SetMeterRibbon(const float* bins, int n);
+
+    // 書き出しクロスフェード帯プレビュー(ms)。0=非表示。timeBaseHz でフレーム換算。
+    void SetXfadePreviewMs(int ms);
+    void SetTimeBaseHz(int hz);
+
+    // 拍グリッド。bpm<=0 は 120 扱い。
+    void SetBeatGrid(float bpm, BOOL enabled);
+
     // アクリルモードの設定
     void SetAeroMode(BOOL b);
+
+    // ホバー時刻チップ用(親 PreTranslate から呼ぶ)
+    virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 protected:
     BOOL m_bAeroMode; // アクリルモードが有効かどうか
@@ -1217,8 +1248,10 @@ protected:
     afx_msg void OnLButtonDown(UINT, CPoint);
     afx_msg void OnLButtonUp(UINT, CPoint);
     afx_msg void OnMouseMove(UINT, CPoint);
+    afx_msg void OnMouseLeave();
     afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
     afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
+    afx_msg BOOL OnTtnNeedText(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
 
     DECLARE_MESSAGE_MAP()
 
@@ -1231,6 +1264,8 @@ private:
     int ValueToPixel(int v) const;
     int PixelToValue(int x) const;
     int HitTest(CPoint p) const;
+    void EnsureHoverTip();
+    void UpdateHoverTip(CPoint p);
 
     // 状態保持用メンバ変数
     int m_nMin, m_nMax;         // 全体の最小値・最大値
@@ -1241,6 +1276,20 @@ private:
     int m_nLogicalPos;          // 確定された論理位置
     BOOL m_bDragging;           // ドラッグ中かどうか
     int m_nVisualPos;           // ドラッグ中の見た目上の位置
+    float m_wavePeaks[kWavePeaksMax];
+    int m_wavePeakCount;
+    int m_cueFrames[kCueMax];
+    int m_cueCount;
+    int m_nCueClick;            // クリックされたキュー index。-1=なし
+    float m_ribbon[kRibbonMax];
+    int m_ribbonN;
+    int m_xfadePreviewMs;
+    int m_timeBaseHz;
+    float m_beatBpm;
+    BOOL m_bBeatGrid;
+    BOOL m_bHoverTracking;
+    CToolTipCtrl m_hoverTip;
+    CString m_hoverTipText;
     CBitmap m_memBackstore;     // 毎描画 CreateCompatibleBitmap を避ける
     int m_backstoreW;
     int m_backstoreH;

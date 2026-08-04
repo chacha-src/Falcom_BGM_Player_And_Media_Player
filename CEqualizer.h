@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 
@@ -150,4 +150,7 @@ public:
 	afx_msg void OnBnClickedAbA();
 	afx_msg void OnBnClickedAbB();
 	afx_msg void OnBnClickedAbTog();
+	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
+	afx_msg void OnSuggestEqFromKey();
+	afx_msg void OnToggleKeyEqAuto();
 };
