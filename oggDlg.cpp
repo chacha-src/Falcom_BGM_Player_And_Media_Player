@@ -2302,7 +2302,7 @@ void COggDlg::Resize()
 {
 	// 折りたたみ時は ▲▼ / MP画面の下に十分な余白を残す(端すぎて押しにくい対策)
 	const int kBottomPad = 12;
-	const int kRightPad = 5;
+	const int kRightPad = 8;
 	CString s;
 	m_ue.GetWindowText(s);
 	if (s == L"▼") {
@@ -2315,6 +2315,24 @@ void COggDlg::Resize()
 		CRect rect_1, rect_2;
 		GetWindowRect(&rect_1);
 		m_ue.GetWindowRect(&rect_2);
+		// ▲▼ 基準だと右端ゲーム列(Ysオリジン/アーク/三国志2/終了)が欠ける。
+		// 左ペインの右端コントロールを拾って幅を決める。
+		auto widen = [&](UINT id) {
+			if (CWnd* w = GetDlgItem(id)) {
+				if (!::IsWindow(w->GetSafeHwnd())) return;
+				CRect r;
+				w->GetWindowRect(&r);
+				if (r.right > rect_2.right) rect_2.right = r.right;
+				if (r.bottom > rect_2.bottom) rect_2.bottom = r.bottom;
+			}
+		};
+		widen(IDC_SLIDER2);      // シークバー(左ペイン幅の基準)
+		widen(IDC_BUTTON15);     // Ys オリジン
+		widen(IDC_BUTTON5);      // フェードアウト
+		widen(IDOK);             // 終了
+		widen(IDC_BUTTON51);     // アーク
+		widen(IDC_BUTTON54);     // 三国志2
+		widen(IDC_OGG_SWITCHMODE);
 		rect_1.bottom = rect_2.bottom + kBottomPad;
 		rect_1.right = rect_2.right + kRightPad;
 		MoveWindow(&rect_1);
@@ -25681,9 +25699,7 @@ void COggDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 
 void COggDlg::NudgeMicMixBelowGdi()
 {
-	// RC でマイク行をピッチ下(y≈108)に置いたので実行時シフトはしない。
-	// 旧 Nudge は GDI 重なり回避のつもりが、WAV より下のマイクを「重なり」と誤判定して
-	// 音量列を押し下げ、バナー Invalidate × アクリル再描画で全体が重くなった。
+	// マイク行は RC でピッチ下・ゲームボタン上(y≈106)。ゲーム列は +16 下げ済み。
 	m_bMicRowNudged = TRUE;
 }
 
