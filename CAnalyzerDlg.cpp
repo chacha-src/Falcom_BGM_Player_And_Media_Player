@@ -287,6 +287,7 @@ namespace
 		IDM_MARKER_REMOVE = 42043,
 		IDM_MARKER_CLEAR = 42044,
 		IDM_CORR_METER = 42045,
+
 		IDM_WAVE_SPEED_BASE = 42100, // +0..WAVE_SPEED_COUNT-1
 		WM_ANALYZER_SPEC_DONE = WM_APP + 510,
 		WM_ANALYZER_PRESENT = WM_APP + 511,
@@ -294,8 +295,317 @@ namespace
 	};
 }
 
-CAnalyzerDlg::CAnalyzerDlg(CWnd* pParent)
-	: CCustomBlurDialogExBase(IDD_ANALYZER, pParent)
+namespace {
+
+class CAnHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_AN_HELP };
+	explicit CAnHelpDlg(CWnd* pParent = nullptr)
+		: CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CAnHelpDlg* g_anHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CAnHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CAnHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"アナライザー操作ガイド", L"Analyzer Guide", L"Guide analyseur", L"Guida analizzatore",
+		L"Guía del analizador", L"분석기 가이드", L"分析器指南", L"دليل المحلل",
+		L"Руководство анализатора", L"Analysator-Anleitung", L"Guia do analisador", L"Analyser-gids",
+		L"Przewodnik analizatora", L"Analizör kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CAnHelpDlg::OnOK() { DestroyWindow(); }
+void CAnHelpDlg::OnCancel() { DestroyWindow(); }
+void CAnHelpDlg::OnClose() { DestroyWindow(); }
+
+void CAnHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_anHelpDlg == this)
+		g_anHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CAnHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CAnHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"アナライザー操作ガイド", L"Analyzer — Guide", L"Guide analyseur", L"Guida analizzatore",
+		L"Guía analizador", L"분석기 가이드", L"分析器指南", L"دليل المحلل",
+		L"Анализатор — руководство", L"Analysator-Guide", L"Guia analisador", L"Analyser-gids",
+		L"Analizator — przewodnik", L"Analizör kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"再生中の PCM を上部の波形と下部の周波数表示で監視します。右クリックで切替。",
+		L"Watch live PCM: wave on top, spectrum below. Right-click to switch modes.",
+		L"Surveillez le PCM : onde en haut, spectre en bas. Clic droit pour changer.",
+		L"Monitora il PCM: onda in alto, spettro sotto. Tasto destro per cambiare.",
+		L"Vea el PCM: onda arriba, espectro abajo. Clic derecho para cambiar.",
+		L"재생 PCM을 상단 파형·하단 스펙트럼으로 감시. 우클릭으로 전환.",
+		L"监视播放 PCM：上方波形、下方频谱。右键切换模式。",
+		L"راقب PCM: موجة أعلى وطيف أسفل. يمين للتبديل.",
+		L"Следите за PCM: волна сверху, спектр снизу. ПКМ — смена режима.",
+		L"PCM beobachten: Welle oben, Spektrum unten. Rechtsklick wechselt.",
+		L"Monitore o PCM: onda em cima, espectro abaixo. Direito troca modos.",
+		L"Bekijk PCM: golf boven, spectrum onder. Rechtsklik wisselt.",
+		L"Obserwuj PCM: fala u góry, widmo na dole. PPM przełącza.",
+		L"PCM izle: üstte dalga, altta spektrum. Sağ tık ile değiştir."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"表示レイアウト", L"Display layout", L"Disposition", L"Layout",
+		L"Diseño", L"표시 레이아웃", L"显示布局", L"تخطيط العرض",
+		L"Макет", L"Anordnung", L"Layout", L"Indeling",
+		L"Układ", L"Düzen"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・上部 …… スクロール波形 / トリガー式オシロ。速度は右クリックで x0.25〜x2.0",
+		L"· Upper …… scrolling wave / triggered scope. Speed via right-click x0.25–x2.0",
+		L"· Haut …… onde / oscilloscope. Vitesse clic droit x0.25–x2.0",
+		L"· Alto …… onda / oscilloscopio. Velocità destro x0.25–x2.0",
+		L"· Superior …… onda / osciloscopio. Velocidad clic der. x0.25–x2.0",
+		L"· 상단 …… 스크롤 파형 / 트리거 스코프. 우클릭으로 x0.25~x2.0",
+		L"· 上部 …… 滚动波形 / 触发示波。右键速度 x0.25–x2.0",
+		L"· أعلى …… موجة / راسم. السرعة يمين x0.25–x2.0",
+		L"· Верх …… прокрутка / осциллограф. Скорость ПКМ x0.25–x2.0",
+		L"· Oben …… Scrollwelle / Scope. Tempo Rechtsklick x0.25–x2.0",
+		L"· Topo …… onda / osciloscópio. Velocidade direito x0.25–x2.0",
+		L"· Boven …… golf / scoop. Snelheid rechtsklik x0.25–x2.0",
+		L"· Góra …… fala / oscyloskop. Prędkość PPM x0.25–x2.0",
+		L"· Üst …… kayan dalga / osiloskop. Hız sağ tık x0.25–x2.0")); y += lh;
+	body(L, y, LL14(
+		L"・下部 …… 周波数特性 / スペクトログラム / 位相スコープ",
+		L"· Lower …… spectrum / spectrogram / phase scope",
+		L"· Bas …… spectre / spectrogramme / phase",
+		L"· Basso …… spettro / spettrogramma / fase",
+		L"· Inferior …… espectro / espectrograma / fase",
+		L"· 하단 …… 스펙트럼 / 스펙트로그램 / 위상 스코프",
+		L"· 下部 …… 频谱 / 频谱图 / 相位示波",
+		L"· أسفل …… طيف / مخطط طيفي / طور",
+		L"· Низ …… спектр / спектрограмма / фаза",
+		L"· Unten …… Spektrum / Spektrogramm / Phase",
+		L"· Inferior …… espectro / espectrograma / fase",
+		L"· Onder …… spectrum / spectrogram / fase",
+		L"· Dół …… widmo / spektrogram / faza",
+		L"· Alt …… spektrum / spektrogram / faz")); y += lh;
+	body(L, y, LL14(
+		L"・周波数モード …… 塗+線 / バー / Cubase・SPAN・Ableton・FabFilter 風など",
+		L"· Spectrum style …… fill+line / bars / Cubase·SPAN·Ableton·FabFilter looks",
+		L"· Style spectre …… rempl.+ligne / barres / styles DAW",
+		L"· Stile spettro …… riemp.+linea / barre / stili DAW",
+		L"· Estilo espectro …… relleno+línea / barras / estilos DAW",
+		L"· 스펙트럼 스타일 …… 채움+선 / 막대 / Cubase·SPAN 등",
+		L"· 频谱样式 …… 填充+线 / 柱状 / Cubase·SPAN 等风格",
+		L"· نمط الطيف …… تعبئة+خط / أشرطة / أنماط DAW",
+		L"· Стиль спектра …… заливка+линия / столбцы / стили DAW",
+		L"· Spektrumstil …… Füllung+Linie / Balken / DAW-Looks",
+		L"· Estilo espectro …… preench.+linha / barras / estilos DAW",
+		L"· Spectrumstijl …… vulling+lijn / balken / DAW-stijlen",
+		L"· Styl widma …… wypełn.+linia / słupki / style DAW",
+		L"· Spektrum stili …… dolgu+çizgi / çubuk / DAW görünümleri")); y += lh + 2;
+
+	// mini layout diagram
+	{
+		const int gx = L, gy = y, gw = min(300, rc.Width() - L * 2), gh = lh * 3 + 8;
+		dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+		dc.FillSolidRect(gx + 4, gy + 4, gw - 8, gh / 2 - 4, RGB(40, 80, 120));
+		dc.SetTextColor(RGB(230, 240, 255));
+		dc.TextOut(gx + 10, gy + 6, L"WAVE");
+		const int by = gy + gh / 2 + 2;
+		const int barH = gh / 2 - 6;
+		const int barW = 8;
+		const int bars[] = { 40, 70, 55, 85, 60, 45, 75, 50 };
+		for (int i = 0; i < 8; ++i) {
+			const int h = barH * bars[i] / 100;
+			dc.FillSolidRect(gx + 10 + i * (barW + 3), by + barH - h, barW, h, RGB(80, 180, 220));
+		}
+		dc.SetTextColor(RGB(55, 55, 70));
+		dc.TextOut(gx + 10 + 8 * (barW + 3) + 8, by + 2, L"SPEC");
+		dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+		y = gy + gh + 4;
+	}
+
+	title(L, y, LL14(L"ズーム・マーカー・計測", L"Zoom, markers, meters", L"Zoom, marqueurs, mesures", L"Zoom, marker, misure",
+		L"Zoom, marcadores, medidores", L"줌·마커·계측", L"缩放、标记、计量", L"تكبير وعلامات ومقاييس",
+		L"Зум, маркеры, метры", L"Zoom, Marker, Anzeigen", L"Zoom, marcadores, medidores", L"Zoom, markers, meters",
+		L"Zoom, znaczniki, mierniki", L"Zoom, işaretler, ölçerler"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・周波数範囲 …… 全帯域 / 低域(20–250Hz) / 中域 / 高域(4kHz〜)",
+		L"· Freq. range …… full / low (20–250 Hz) / mid / high (4 kHz+)",
+		L"· Plage …… complète / graves / médiums / aigus (4 kHz+)",
+		L"· Intervallo …… intero / bassi / medi / alti (4 kHz+)",
+		L"· Rango …… completo / graves / medios / agudos (4 kHz+)",
+		L"· 주파수 범위 …… 전대역 / 저역 / 중역 / 고역(4kHz+)",
+		L"· 频率范围 …… 全频 / 低频 / 中频 / 高频(4kHz+)",
+		L"· النطاق …… كامل / منخفض / متوسط / عالي (4 كيلوهرتز+)",
+		L"· Диапазон …… весь / низ / середина / верх (от 4 кГц)",
+		L"· Bereich …… voll / Tiefen / Mitten / Höhen (ab 4 kHz)",
+		L"· Faixa …… completa / graves / médios / agudos (4 kHz+)",
+		L"· Bereik …… volledig / laag / midden / hoog (4 kHz+)",
+		L"· Zakres …… pełny / niskie / średnie / wysokie (od 4 kHz)",
+		L"· Aralık …… tam / bas / orta / tiz (4 kHz+)")); y += lh;
+	body(L, y, LL14(
+		L"・ホバーで Hz/dB 読取。マーカー追加/削除。レベルメーター・位相相関も切替可",
+		L"· Hover shows Hz/dB. Add/remove markers. Toggle level & correlation meters",
+		L"· Survol = Hz/dB. Marqueurs. Compteurs niveau / corrélation",
+		L"· Hover = Hz/dB. Marker. Misuratori livello / correlazione",
+		L"· Hover = Hz/dB. Marcadores. Medidores nivel / correlación",
+		L"· 호버로 Hz/dB. 마커 추가/삭제. 레벨·상관 미터 토글",
+		L"· 悬停显示 Hz/dB。可加删标记。可切换电平/相关表",
+		L"· التمرير = هرتز/ديسيبل. علامات. مقاييس المستوى/الترابط",
+		L"· Наведение = Гц/дБ. Маркеры. Уровень / корреляция",
+		L"· Hover = Hz/dB. Marker. Pegel- / Korrelationsanzeige",
+		L"· Hover = Hz/dB. Marcadores. Medidores nível / correlação",
+		L"· Hover = Hz/dB. Markers. Niveau- / correlatiemeter",
+		L"· Hover = Hz/dB. Znaczniki. Poziom / korelacja",
+		L"· Hover = Hz/dB. İşaretler. Seviye / korelasyon")); y += lh;
+	body(L, y, LL14(
+		L"・TP/LUFS …… 波形付近に簡易 True Peak と LUFS。ホバーで計測の注意が出ます",
+		L"· TP/LUFS …… simple True Peak & LUFS near the wave; hover for notes",
+		L"· TP/LUFS …… True Peak et LUFS simples près de l'onde",
+		L"· TP/LUFS …… True Peak e LUFS semplici vicino all'onda",
+		L"· TP/LUFS …… True Peak y LUFS simples junto a la onda",
+		L"· TP/LUFS …… 파형 근처 간이 True Peak·LUFS. 호버로 안내",
+		L"· TP/LUFS …… 波形旁简易 True Peak 与 LUFS；悬停有说明",
+		L"· TP/LUFS …… قمة حقيقية و LUFS بسيطان قرب الموجة",
+		L"· TP/LUFS …… простой True Peak и LUFS у волны",
+		L"· TP/LUFS …… einfaches True Peak & LUFS an der Welle",
+		L"· TP/LUFS …… True Peak e LUFS simples perto da onda",
+		L"· TP/LUFS …… eenvoudige True Peak & LUFS bij de golf",
+		L"· TP/LUFS …… prosty True Peak i LUFS przy fali",
+		L"· TP/LUFS …… dalga yanında basit True Peak ve LUFS")); y += lh + 4;
+
+	title(L, y, LL14(L"操作・ウィンドウ", L"Actions & window", L"Actions et fenêtre", L"Azioni e finestra",
+		L"Acciones y ventana", L"조작·창", L"操作与窗口", L"إجراءات والنافذة",
+		L"Действия и окно", L"Aktionen & Fenster", L"Ações e janela", L"Acties & venster",
+		L"Akcje i okno", L"İşlemler ve pencere"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・右クリック …… レイアウト/スタイル/差分/フリーズ/コピー/常に手前 など",
+		L"· Right-click …… layout/style/diff/freeze/copy/always-on-top, etc.",
+		L"· Clic droit …… disposition/style/diff/gel/copie/premier plan…",
+		L"· Destro …… layout/stile/diff/congelamento/copia/primo piano…",
+		L"· Clic der. …… diseño/estilo/diff/congelar/copiar/siempre visible…",
+		L"· 우클릭 …… 레이아웃/스타일/차분/정지/복사/항상 위 등",
+		L"· 右键 …… 布局/样式/差分/冻结/复制/置顶等",
+		L"· يمين …… تخطيط/نمط/فرق/تجميد/نسخ/دائماً أعلى…",
+		L"· ПКМ …… макет/стиль/разница/заморозка/копия/поверх…",
+		L"· Rechtsklick …… Layout/Stil/Diff/Freeze/Kopieren/immer oben…",
+		L"· Direito …… layout/estilo/diff/congelar/copiar/sempre no topo…",
+		L"· Rechtsklik …… layout/stijl/diff/bevriezen/kopiëren/boven…",
+		L"· PPM …… układ/styl/różnica/zamroź/kopiuj/zawsze na wierzchu…",
+		L"· Sağ tık …… düzen/stil/fark/dondur/kopyala/her zaman üstte…")); y += lh;
+	body(L, y, LL14(
+		L"・EQオーバーレイ …… 曲線をドラッグして帯域ゲインを直接いじれます",
+		L"· EQ overlay …… drag the curve to tweak band gains live",
+		L"· Superposition EQ …… glisser la courbe pour les gains",
+		L"· Overlay EQ …… trascina la curva per i gain",
+		L"· Superposición EQ …… arrastre la curva para ganancias",
+		L"· EQ 오버레이 …… 곡선을 드래그해 밴드 게인 조절",
+		L"· EQ 叠加 …… 拖动曲线直接调频段增益",
+		L"· تراكب EQ …… اسحب المنحنى لتعديل الكسب",
+		L"· Оверлей EQ …… тяните кривую для усиления полос",
+		L"· EQ-Overlay …… Kurve ziehen für Bandverstärkung",
+		L"· Overlay EQ …… arraste a curva para ganhos",
+		L"· EQ-overlay …… sleep de curve voor bandgains",
+		L"· Nakładka EQ …… przeciągnij krzywą, by zmienić wzmocnienie",
+		L"· EQ kaplama …… eğriyi sürükleyerek bant kazancını ayarla")); y += lh;
+	body(L, y, LL14(
+		L"・ウィンドウ …… 枠をドラッグで移動、端でリサイズ。位置/サイズは記憶されます",
+		L"· Window …… drag the frame to move, edges to resize. Position is remembered",
+		L"· Fenêtre …… glisser pour déplacer, bords pour redimensionner",
+		L"· Finestra …… trascina per spostare, bordi per ridimensionare",
+		L"· Ventana …… arrastre para mover, bordes para redimensionar",
+		L"· 창 …… 테두리 드래그로 이동, 가장자리로 크기. 위치 저장",
+		L"· 窗口 …… 拖边框移动、拖边缘缩放；位置会记住",
+		L"· النافذة …… اسحب للإزاحة والحواف للتحجيم. يُحفظ الموضع",
+		L"· Окно …… перетащите рамку / края. Позиция запоминается",
+		L"· Fenster …… Rahmen ziehen / Ränder skalieren. Position merken",
+		L"· Janela …… arraste a moldura / bordas. Posição lembrada",
+		L"· Venster …… sleep kader / randen. Positie wordt onthouden",
+		L"· Okno …… przeciągnij ramkę / krawędzie. Pozycja zapamiętana",
+		L"· Pencere …… çerçeveyi sürükle, kenarlardan boyutlandır. Konum hatırlanır")); y += lh + 2;
+	muted(L, y, LL14(
+		L"キャプションの「?」または右クリック「操作ガイド」でもこの画面を開けます。",
+		L"Open this sheet from caption \"?\" or right-click → Operation guide.",
+		L"Ouvrir via « ? » ou clic droit → Guide d'utilisation.",
+		L"Apri da « ? » o destro → Guida operativa.",
+		L"Ábralo con « ? » o clic der. → Guía de operación.",
+		L"캡션「?」또는 우클릭「조작 가이드」로도 열 수 있습니다.",
+		L"也可通过标题栏「?」或右键「操作指南」打开。",
+		L"افتح من «؟» أو يمين ← دليل التشغيل.",
+		L"Откройте через «?» или ПКМ → Руководство.",
+		L"Öffnen über „?“ oder Rechtsklick → Bedienungsanleitung.",
+		L"Abra pelo «?» ou direito → Guia de operação.",
+		L"Open via «?» of rechtsklik → Handleiding.",
+		L"Otwórz przez «?» lub PPM → Przewodnik.",
+		L"Başlık «?» veya sağ tık → İşlem kılavuzu ile açın."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
+CAnalyzerDlg::CAnalyzerDlg(CWnd* pParent)	: CCustomBlurDialogExBase(IDD_ANALYZER, pParent)
 {
 	InitializeCriticalSection(&m_cs);
 	for (int c = 0; c < CH_MAX; ++c) {
@@ -342,9 +652,11 @@ CAnalyzerDlg::~CAnalyzerDlg()
 	DeleteCriticalSection(&m_cs);
 }
 
+
 void CAnalyzerDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CCustomBlurDialogExBase::DoDataExchange(pDX);
+	DDX_Control(pDX, IDC_AN_HELP, m_help);
 }
 
 BEGIN_MESSAGE_MAP(CAnalyzerDlg, CCustomBlurDialogExBase)
@@ -352,9 +664,12 @@ BEGIN_MESSAGE_MAP(CAnalyzerDlg, CCustomBlurDialogExBase)
 	ON_WM_TIMER()
 	ON_WM_SIZE()
 	ON_WM_CLOSE()
+	ON_WM_DESTROY()
 	ON_WM_SHOWWINDOW()
 	ON_WM_ERASEBKGND()
 	ON_WM_CONTEXTMENU()
+	ON_BN_CLICKED(IDC_AN_HELP, &CAnalyzerDlg::OnBnClickedHelp)
+	ON_COMMAND(ID_HELP_SHOWSHEET, &CAnalyzerDlg::OnBnClickedHelp)
 	ON_WM_MOUSEMOVE()
 	ON_WM_MOUSELEAVE()
 	ON_WM_LBUTTONDOWN()
@@ -459,11 +774,19 @@ BOOL CAnalyzerDlg::OnInitDialog()
 	m_hoverPlot.SetRectEmpty();
 	m_hoverPlotCount = 0;
 
+
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	LayoutHelpBtn();
+
 	// TP/LUFS 読取部だけツールチップを付ける(簡易計測である旨)。
 	// 子コントロールを持たない描画専用ダイアログなので矩形ツール。矩形は描画時に更新。
 	if (m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX)) {
 		CRect dummy(0, 0, 1, 1);
 		m_tooltip.AddTool(this, AnalyzerTpLufsTipText(), &dummy, 1);
+		if (m_help.GetSafeHwnd())
+			m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 		m_tooltip.SetDelayTime(TTDT_INITIAL, 400);
 		m_tooltip.SetDelayTime(TTDT_RESHOW, 120);
 		m_tooltip.SetDelayTime(TTDT_AUTOPOP, 12000);
@@ -483,9 +806,10 @@ BOOL CAnalyzerDlg::OnInitDialog()
 	// タイマーは座標保存のみ。描画は解析/音声完了の PostMessage で自由走行(ピアノロール方式)。
 	SetTimer(1, 500, nullptr);
 	EnableMainWindowLock(&savedata.analyzerMainLock, TRUE);
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	return TRUE;
 }
-
 void CAnalyzerDlg::ResumePlaybackFeed() { m_feedEnabled = true; }
 void CAnalyzerDlg::PauseFeed() { m_feedEnabled = false; }
 
@@ -1211,11 +1535,18 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	menu.AppendMenu(MF_STRING, IDM_COPY_LEVELS,
 		LL14(L"レベルをコピー", L"Copy levels", L"Copier les niveaux", L"Copia livelli", L"Copiar niveles", L"레벨 복사", L"复制电平", L"نسخ المستويات", L"Копировать уровни", L"Pegel kopieren", L"Copiar niveis", L"Niveaus kopieren", L"Kopiuj poziomy", L"Seviyeleri kopyala"));
 
+
 	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING, IDM_CLEAR_DISPLAY,
 		LL14(L"表示をクリア", L"Clear display", L"Effacer l'affichage", L"Cancella visualizzazione", L"Borrar pantalla", L"표시 지우기", L"清除显示", L"مسح العرض", L"Очистить экран", L"Anzeige leeren", L"Limpar exibicao", L"Weergave wissen", L"Wyczysc wyswietlacz", L"Goruntuyu temizle"));
 	menu.AppendMenu(MF_STRING | (m_alwaysOnTop ? MF_CHECKED : 0),
 		IDM_ALWAYS_ON_TOP, LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위에 표시", L"始终置顶", L"دائما في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd op voorgrond", L"Zawsze na wierzchu", L"Her zaman ustte"));
+	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING, ID_HELP_SHOWSHEET,
+		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
+			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
+			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
+			L"Przewodnik", L"İşlem kılavuzu"));
 
 	if (point.x == -1 && point.y == -1) {
 		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
@@ -1223,7 +1554,6 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	}
 	menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y, this);
 }
-
 LPCTSTR CAnalyzerDlg::ChannelLabel(int ch, int channels)
 {
 	static const TCHAR* stereo[] = { _T("L"), _T("R") };
@@ -3184,6 +3514,7 @@ void CAnalyzerDlg::OnTimer(UINT_PTR nIDEvent)
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
 
+
 void CAnalyzerDlg::OnSize(UINT nType, int cx, int cy)
 {
 	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
@@ -3193,6 +3524,10 @@ void CAnalyzerDlg::OnSize(UINT nType, int cx, int cy)
 	if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
 		CCC_RefreshDwmBlur(m_hWnd);
 #endif
+	if (nType != SIZE_MINIMIZED) {
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
 	if (::IsWindow(m_hWnd)) {
 		CRect cr;
 		GetClientRect(&cr);
@@ -3203,7 +3538,6 @@ void CAnalyzerDlg::OnSize(UINT nType, int cx, int cy)
 			CCC_InvalidateRectMinusOverlay(m_hWnd, cr);
 	}
 }
-
 void CAnalyzerDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogExBase::OnShowWindow(bShow, nStatus);
@@ -3214,6 +3548,7 @@ void CAnalyzerDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 #endif
 }
 
+
 void CAnalyzerDlg::OnClose()
 {
 	savedata.analyzerwindow = 0;
@@ -3221,6 +3556,41 @@ void CAnalyzerDlg::OnClose()
 	DestroyWindow();
 }
 
+void CAnalyzerDlg::OnDestroy()
+{
+	if (g_anHelpDlg && ::IsWindow(g_anHelpDlg->GetSafeHwnd()))
+		g_anHelpDlg->DestroyWindow();
+	CCustomBlurDialogExBase::OnDestroy();
+}
+
+void CAnalyzerDlg::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CAnalyzerDlg::ShowHelpSheet()
+{
+	if (g_anHelpDlg && ::IsWindow(g_anHelpDlg->GetSafeHwnd())) {
+		g_anHelpDlg->ShowWindow(SW_SHOW);
+		g_anHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_anHelpDlg && !::IsWindow(g_anHelpDlg->GetSafeHwnd()))
+		g_anHelpDlg = nullptr;
+	CAnHelpDlg* dlg = new CAnHelpDlg(nullptr);
+	if (!dlg->Create(IDD_AN_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_anHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CAnalyzerDlg::OnBnClickedHelp()
+{
+	ShowHelpSheet();
+}
 void CAnalyzerDlg::OnMouseMove(UINT nFlags, CPoint point)
 {
 	UNREFERENCED_PARAMETER(nFlags);

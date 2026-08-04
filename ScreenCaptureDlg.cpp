@@ -5503,57 +5503,7 @@ void CScreenCaptureDlg::CloseModeless()
 
 void CScreenCaptureDlg::LayoutHelpBtn()
 {
-	if (!m_help.GetSafeHwnd()) return;
-	// CCC_CaptionLayout と同じ寸法（BTN=26, GAP=2, RIGHT_MARGIN=4）
-	const int btn = 26;
-	const int gap = 2;
-	const int rightMargin = 4;
-
-	int x = 0;
-	int y = 0;
-	BOOL placed = FALSE;
-
-	// 実在するキャプションボタンの左端を基準にする（P/Settings/Min と絶対に重ねない）
-	static const UINT kCapIds[] = {
-		IDC_CAP_PIN, IDC_CAP_SETTINGS, IDC_CAP_MIN, IDC_CAP_MAX, IDC_CAP_CLOSE
-	};
-	int leftmost = INT_MAX;
-	int pinY = -1;
-	for (int i = 0; i < (int)_countof(kCapIds); ++i) {
-		CWnd* p = GetDlgItem(kCapIds[i]);
-		if (!p || !::IsWindow(p->GetSafeHwnd()) || !p->IsWindowVisible())
-			continue;
-		CRect r;
-		p->GetWindowRect(&r);
-		ScreenToClient(&r);
-		if (r.left < leftmost)
-			leftmost = r.left;
-		if (kCapIds[i] == IDC_CAP_PIN)
-			pinY = r.top;
-		placed = TRUE;
-	}
-	if (placed && leftmost < INT_MAX) {
-		x = leftmost - gap - btn;
-		const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
-		y = (pinY >= 0) ? pinY : ((capH > btn) ? (capH - btn) / 2 : 2);
-	} else {
-		CRect cr;
-		GetClientRect(&cr);
-		const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
-		y = (capH > btn) ? (capH - btn) / 2 : 2;
-		// close + min(+settings) + pin を想定したフォールバック
-		const int nChrome = 4;
-		x = cr.right - rightMargin - nChrome * (btn + gap) - btn;
-	}
-	if (x < 4) x = 4;
-
-	CRect cur;
-	m_help.GetWindowRect(&cur);
-	ScreenToClient(&cur);
-	if (cur.left == x && cur.top == y && cur.Width() == btn && cur.Height() == btn)
-		return;
-	m_help.SetWindowPos(&CWnd::wndTop, x, max(0, y), btn, btn,
-		SWP_NOACTIVATE | SWP_SHOWWINDOW);
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
 }
 
 void CScreenCaptureDlg::ShowHelpSheet()

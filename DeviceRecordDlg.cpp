@@ -293,6 +293,203 @@ static HRESULT DrInitLoopbackCapture(IMMDevice* renderDev,
 
 } // namespace
 
+namespace {
+
+class CDrHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_DR_HELP };
+	explicit CDrHelpDlg(CWnd* pParent = nullptr) : CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CDrHelpDlg* g_drHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CDrHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CDrHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"デバイス録音操作ガイド", L"Device Recording Guide", L"Guide d'enregistrement", L"Guida registrazione",
+		L"Guía de grabación", L"장치 녹음 가이드", L"设备录音指南", L"دليل تسجيل الجهاز",
+		L"Руководство записи", L"Geräteaufnahme-Anleitung", L"Guia de gravação", L"Apparaatopname-gids",
+		L"Przewodnik nagrywania", L"Cihaz kaydı kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CDrHelpDlg::OnOK() { DestroyWindow(); }
+void CDrHelpDlg::OnCancel() { DestroyWindow(); }
+void CDrHelpDlg::OnClose() { DestroyWindow(); }
+
+void CDrHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_drHelpDlg == this)
+		g_drHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CDrHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CDrHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"デバイス録音操作ガイド", L"Device Recording — Guide", L"Guide enregistrement", L"Guida registrazione",
+		L"Guía grabación", L"장치 녹음 가이드", L"设备录音指南", L"دليل تسجيل الجهاز",
+		L"Руководство записи", L"Geräteaufnahme-Guide", L"Guia gravação", L"Apparaatopname-gids",
+		L"Przewodnik nagrywania", L"Cihaz kaydı kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"再生端末のループバックを録音し、WAV / MP3 / FLAC に保存します。",
+		L"Records loopback from a playback device to WAV / MP3 / FLAC.",
+		L"Enregistre la boucle d'un périphérique vers WAV / MP3 / FLAC.",
+		L"Registra il loopback del dispositivo in WAV / MP3 / FLAC.",
+		L"Graba el loopback del dispositivo a WAV / MP3 / FLAC.",
+		L"재생 장치의 루프백을 녹음해 WAV / MP3 / FLAC으로 저장합니다.",
+		L"录制播放设备的环回，保存为 WAV / MP3 / FLAC。",
+		L"يسجّل حلقة الجهاز إلى WAV / MP3 / FLAC.",
+		L"Записывает loopback устройства в WAV / MP3 / FLAC.",
+		L"Nimmt Loopback eines Geräts als WAV / MP3 / FLAC auf.",
+		L"Grava o loopback do dispositivo em WAV / MP3 / FLAC.",
+		L"Neemt loopback van een apparaat op naar WAV / MP3 / FLAC.",
+		L"Nagrywa loopback urządzenia do WAV / MP3 / FLAC.",
+		L"Oynatma aygıtı loopback'ini WAV / MP3 / FLAC olarak kaydeder."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"基本操作", L"Basics", L"Bases", L"Basi", L"Básicos", L"기본", L"基本", L"أساسيات",
+		L"Основы", L"Grundlagen", L"Básicos", L"Basis", L"Podstawy", L"Temeller"));
+	y += titleLh;
+	body(L, y, LL14(L"・再生端末 …… 録音する出力デバイス（この端末で鳴る音をキャプチャ）", L"· Device …… playback output to record (captures audio on it)", L"· Périphérique …… sortie à enregistrer", L"· Dispositivo …… uscita da registrare",
+		L"· Dispositivo …… salida a grabar", L"· 재생 장치 …… 녹음할 출력 장치", L"· 播放设备 …… 要录制的输出设备", L"· الجهاز …… مخرج التسجيل",
+		L"· Устройство …… выход для записи", L"· Gerät …… aufzunehmende Ausgabe", L"· Dispositivo …… saída a gravar", L"· Apparaat …… op te nemen uitvoer",
+		L"· Urządzenie …… wyjście do nagrania", L"· Aygıt …… kaydedilecek çıkış")); y += lh;
+	body(L, y, LL14(L"・形式 / 品質 …… WAV・MP3・FLAC とビットレート／圧縮レベル", L"· Format / quality …… WAV, MP3, FLAC and bitrate / level", L"· Format / qualité …… WAV, MP3, FLAC", L"· Formato / qualità …… WAV, MP3, FLAC",
+		L"· Formato / calidad …… WAV, MP3, FLAC", L"· 형식 / 품질 …… WAV·MP3·FLAC과 비트레이트", L"· 格式 / 质量 …… WAV、MP3、FLAC 与比特率", L"· التنسيق / الجودة …… WAV وMP3 وFLAC",
+		L"· Формат / качество …… WAV, MP3, FLAC", L"· Format / Qualität …… WAV, MP3, FLAC", L"· Formato / qualidade …… WAV, MP3, FLAC", L"· Formaat / kwaliteit …… WAV, MP3, FLAC",
+		L"· Format / jakość …… WAV, MP3, FLAC", L"· Biçim / kalite …… WAV, MP3, FLAC")); y += lh;
+	body(L, y, LL14(L"・保存先 …… 録音ファイルのパス（… で参照）", L"· Path …… recording file path (browse with …)", L"· Chemin …… fichier d'enregistrement", L"· Percorso …… file di registrazione",
+		L"· Ruta …… archivo de grabación", L"· 저장 경로 …… 녹음 파일 경로", L"· 保存路径 …… 录音文件路径", L"· المسار …… ملف التسجيل",
+		L"· Путь …… файл записи", L"· Pfad …… Aufnahmedatei", L"· Caminho …… arquivo de gravação", L"· Pad …… opnamebestand",
+		L"· Ścieżka …… plik nagrania", L"· Yol …… kayıt dosyası")); y += lh;
+	body(L, y, LL14(L"・マイクもミックス …… CRender のマイクを同時に混ぜる", L"· Mix mic …… also mix the mic selected in CRender", L"· Mixer micro …… aussi le micro de CRender", L"· Mixa micro …… anche il micro di CRender",
+		L"· Mezclar mic …… también el mic de CRender", L"· 마이크 믹스 …… CRender 마이크도 함께", L"· 混入麦克风 …… 同时混入 CRender 麦克风", L"· مزج الميك …… ميك CRender أيضاً",
+		L"· Микс микрофона …… также микрофон CRender", L"· Mikro mischen …… auch CRender-Mikro", L"· Misturar micro …… também o micro do CRender", L"· Micro mixen …… ook de CRender-micro",
+		L"· Miksuj mik …… także mikrofon CRender", L"· Mikrofon karıştır …… CRender mikrofounu da")); y += lh + 4;
+
+	title(L, y, LL14(L"レベルメータ", L"Level meters", L"Niveaux", L"Livelli", L"Niveles", L"레벨 미터", L"电平表", L"عدادات المستوى",
+		L"Индикаторы", L"Pegel", L"Medidores", L"Meters", L"Mierniki", L"Seviye göstergeleri"));
+	y += titleLh;
+
+	const int gx = L, gy = y, gw = min(300, rc.Width() - L * 2), gh = lh * 2 + 12;
+	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+	dc.FillSolidRect(gx + 4, gy + 6, 36, gh - 12, RGB(70, 140, 90));
+	dc.FillSolidRect(gx + 48, gy + 6, 36, gh - 12, RGB(70, 110, 160));
+	dc.FillSolidRect(gx + 92, gy + 6, 40, gh - 12, RGB(150, 100, 60));
+	dc.FillSolidRect(gx + 148, gy + 6, 44, gh - 12, RGB(55, 60, 75));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + 10, gy + 8, L"Mic");
+	dc.TextOut(gx + 54, gy + 8, L"Sys");
+	dc.TextOut(gx + 98, gy + 8, L"Mix");
+	dc.TextOut(gx + 156, gy + 8, L"File");
+	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+	y = gy + gh + 4;
+	muted(L, y, LL14(
+		L"Mic=マイク / Sys=ループバック(演奏込み) / Mix=ミックス後。常時リアルタイム。",
+		L"Mic=microphone / Sys=loopback (incl. playback) / Mix=after mix. Always live.",
+		L"Mic=micro / Sys=boucle (lecture) / Mix=après mix. Toujours live.",
+		L"Mic=microfono / Sys=loopback / Mix=dopo mix. Sempre live.",
+		L"Mic=micrófono / Sys=loopback / Mix=tras mezcla. Siempre en vivo.",
+		L"Mic=마이크 / Sys=루프백(재생 포함) / Mix=믹스 후. 상시 실시간.",
+		L"Mic=麦克风 / Sys=环回(含播放) / Mix=混合后。始终实时。",
+		L"Mic=ميك / Sys=حلقة / Mix=بعد المزج. مباشرة دائماً.",
+		L"Mic=микрофон / Sys=loopback / Mix=после микса. Всегда live.",
+		L"Mic=Mikro / Sys=Loopback / Mix=nach Mix. Immer live.",
+		L"Mic=microfone / Sys=loopback / Mix=após mix. Sempre ao vivo.",
+		L"Mic=microfoon / Sys=loopback / Mix=na mix. Altijd live.",
+		L"Mic=mikrofon / Sys=loopback / Mix=po miksie. Zawsze na żywo.",
+		L"Mic=mikrofon / Sys=loopback / Mix=karışım sonrası. Her zaman canlı."));
+	y += lh + 6;
+
+	title(L, y, LL14(L"開始 / 停止", L"Start / Stop", L"Démarrer / Arrêter", L"Avvia / Ferma", L"Iniciar / Detener", L"시작 / 중지", L"开始 / 停止", L"بدء / إيقاف",
+		L"Старт / Стоп", L"Start / Stop", L"Iniciar / Parar", L"Start / Stop", L"Start / Stop", L"Başlat / Durdur"));
+	y += titleLh;
+	body(L, y, LL14(L"・録音開始 …… キャプチャ開始。もう一度押すと停止してエンコード", L"· Start …… begin capture. Press again to stop and encode", L"· Démarrer …… capture. Recliquer = arrêt + encodage", L"· Avvia …… cattura. Di nuovo = stop e encode",
+		L"· Iniciar …… captura. Otra vez = detener y codificar", L"· 녹음 시작 …… 캡처 시작. 다시 누르면 중지·인코딩", L"· 开始录音 …… 开始捕获。再按停止并编码", L"· بدء …… الالتقاط. مرة أخرى = إيقاف وترميز",
+		L"· Старт …… захват. Ещё раз = стоп и кодирование", L"· Start …… Aufnahme. Erneut = Stop + Encode", L"· Iniciar …… captura. De novo = parar e codificar", L"· Start …… opname. Opnieuw = stop en encode",
+		L"· Start …… przechwytywanie. Ponownie = stop i encode", L"· Başlat …… yakalama. Tekrar = durdur ve kodla")); y += lh;
+	muted(L, y, LL14(
+		L"無音だとデータが来ないことがあります。再生端末で音を出してください。",
+		L"Silence may yield no data — play audio on the selected device.",
+		L"Le silence peut ne rien donner — jouez de l'audio.",
+		L"Il silenzio può non dare dati — riproduci audio.",
+		L"El silencio puede no dar datos — reproduzca audio.",
+		L"무음이면 데이터가 없을 수 있습니다. 장치에서 소리를 재생하세요.",
+		L"静音可能没有数据。请在所选设备上播放声音。",
+		L"الصمت قد لا يعطي بيانات — شغّل الصوت على الجهاز.",
+		L"Тишина может не дать данных — воспроизведите звук.",
+		L"Stille kann keine Daten liefern — spielen Sie Audio ab.",
+		L"Silêncio pode não gerar dados — reproduza áudio.",
+		L"Stilte kan geen data geven — speel audio af.",
+		L"Cisza może nie dać danych — odtwarzaj dźwięk.",
+		L"Sessizlik veri vermeyebilir — aygıtta ses çalın."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
 IMPLEMENT_DYNAMIC(CDeviceRecordDlg, CCustomBlurDialogBase)
 
 static CDeviceRecordDlg* g_deviceRecordDlg = NULL;
@@ -348,6 +545,7 @@ CDeviceRecordDlg::~CDeviceRecordDlg()
 void CDeviceRecordDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CCustomBlurDialogBase::DoDataExchange(pDX);
+	DDX_Control(pDX, IDC_DR_HELP, m_help);
 	DDX_Control(pDX, IDC_DR_DEV_L, m_devLabel);
 	DDX_Control(pDX, IDC_DR_DEV, m_dev);
 	DDX_Control(pDX, IDC_DR_FMT_L, m_fmtLabel);
@@ -374,8 +572,10 @@ BEGIN_MESSAGE_MAP(CDeviceRecordDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_DR_BROWSE, &CDeviceRecordDlg::OnBnClickedBrowse)
 	ON_BN_CLICKED(IDC_DR_START, &CDeviceRecordDlg::OnBnClickedStart)
 	ON_BN_CLICKED(IDC_DR_CLOSE, &CDeviceRecordDlg::OnBnClickedClose)
+	ON_BN_CLICKED(IDC_DR_HELP, &CDeviceRecordDlg::OnBnClickedHelp)
 	ON_CBN_SELCHANGE(IDC_DR_FMT, &CDeviceRecordDlg::OnCbnSelchangeFormat)
 	ON_WM_TIMER()
+	ON_WM_SIZE()
 	ON_WM_DESTROY()
 END_MESSAGE_MAP()
 
@@ -607,6 +807,11 @@ BOOL CDeviceRecordDlg::OnInitDialog()
 		m_csInit = TRUE;
 	}
 
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	LayoutHelpBtn();
+
 	m_dev.SetAeroMode(FALSE);
 	m_fmt.SetAeroMode(FALSE);
 	m_qual.SetAeroMode(FALSE);
@@ -726,6 +931,7 @@ BOOL CDeviceRecordDlg::OnInitDialog()
 		m_tooltip.AddTool(&m_path, LL14(L"録音ファイルの保存先", L"Recording save path", L"Chemin d'enregistrement", L"Percorso registrazione", L"Ruta de grabación", L"녹음 저장 경로", L"录音保存路径", L"مسار حفظ التسجيل", L"Путь записи", L"Aufnahmepfad", L"Caminho da gravação", L"Opnamepad", L"Ścieżka nagrania", L"Kayıt yolu"));
 		m_tooltip.AddTool(&m_browse, LL14(L"保存先を参照", L"Browse save location", L"Parcourir", L"Sfoglia", L"Examinar", L"찾아보기", L"浏览", L"استعراض", L"Обзор", L"Durchsuchen", L"Procurar", L"Bladeren", L"Przeglądaj", L"Göz at"));
 		m_tooltip.AddTool(&m_start, LL14(L"録音開始/停止。レベルメーターは常時リアルタイム表示", L"Start/stop recording. Level meters stay live", L"Démarrer/arrêter. Compteurs toujours live", L"Avvia/ferma. Livelli sempre live", L"Iniciar/detener. Medidores siempre en vivo", L"녹음 시작/중지. 레벨 미터는 상시 실시간", L"开始/停止录音。电平表始终实时", L"بدء/إيقاف. العدادات مباشرة دائماً", L"Старт/стоп. Индикаторы всегда live", L"Start/Stop. Pegel bleiben live", L"Iniciar/parar. Medidores sempre ao vivo", L"Start/stop. Meters blijven live", L"Start/stop. Mierniki zawsze na żywo", L"Başlat/durdur. Seviye göstergeleri canlı kalır"));
+		m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
 	}
 	m_meterMicL.SetWindowText(LL14(L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic", L"Mic"));
@@ -733,6 +939,8 @@ BOOL CDeviceRecordDlg::OnInitDialog()
 	m_meterMixL.SetWindowText(LL14(L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix", L"Mix"));
 	RefreshOpaqueUi();
 	StartPeakMonitor();
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	return TRUE;
 }
 
@@ -1433,6 +1641,44 @@ void CloseDeviceRecordIfOpen()
 		g_deviceRecordDlg->DestroyWindow();
 }
 
+void CDeviceRecordDlg::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CDeviceRecordDlg::ShowHelpSheet()
+{
+	if (g_drHelpDlg && ::IsWindow(g_drHelpDlg->GetSafeHwnd())) {
+		g_drHelpDlg->ShowWindow(SW_SHOW);
+		g_drHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_drHelpDlg && !::IsWindow(g_drHelpDlg->GetSafeHwnd()))
+		g_drHelpDlg = nullptr;
+	CDrHelpDlg* dlg = new CDrHelpDlg(nullptr);
+	if (!dlg->Create(IDD_DR_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_drHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CDeviceRecordDlg::OnBnClickedHelp()
+{
+	ShowHelpSheet();
+}
+
+void CDeviceRecordDlg::OnSize(UINT nType, int cx, int cy)
+{
+	CCustomBlurDialogBase::OnSize(nType, cx, cy);
+	if (nType != SIZE_MINIMIZED) {
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
+}
+
 void CDeviceRecordDlg::OnDestroy()
 {
 	KillTimer(DR_TIMER);
@@ -1452,6 +1698,8 @@ void CDeviceRecordDlg::OnDestroy()
 		}
 		LeaveCriticalSection(&m_fileCs);
 	}
+	if (g_drHelpDlg && ::IsWindow(g_drHelpDlg->GetSafeHwnd()))
+		g_drHelpDlg->DestroyWindow();
 	CCustomBlurDialogBase::OnDestroy();
 }
 

@@ -133,7 +133,7 @@ public:
 	CCustomStandardButton m_abA, m_abB, m_abClr; // A-Bリピート
 	CCustomStandardButton m_lrcExpand; // 歌詞パネル拡大/縮小
 	CCustomStandardButton m_toolsToggle; // 並べ替え/フォルダ帯の折りたたみ
-	CCustomStandardButton m_cheatBtn;    // ショートカット一覧(?)
+	CCustomStandardButton m_cheatBtn;    // 操作ガイド(?)
 	CCustomStandardButton m_sortName, m_sortArt, m_sortAlb, m_sortTime;
 	CCustomStandardButton m_addFolder; // フォルダから追加(ライブラリ)
 	CCustomCheckBox m_findFilter;      // 検索=絞り込み
@@ -459,18 +459,6 @@ protected:
 	afx_msg LRESULT OnLibBuildLazy(WPARAM wParam, LPARAM lParam);
 	afx_msg BOOL OnNcActivate(BOOL bActive);
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
-	DECLARE_MESSAGE_MAP()
-};
-
-// キーボードショートカット一覧(?キー)
-class CMpCheatSheetDlg : public CDialog
-{
-	DECLARE_DYNAMIC(CMpCheatSheetDlg)
-public:
-	CMpCheatSheetDlg(CWnd* pParent = NULL);
-	enum { IDD = IDD_MP_CHEATSHEET };
-protected:
-	virtual BOOL OnInitDialog();
 	DECLARE_MESSAGE_MAP()
 };
 

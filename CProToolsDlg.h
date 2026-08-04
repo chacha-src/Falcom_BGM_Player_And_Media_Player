@@ -33,6 +33,8 @@ protected:
 	void ApplyLoopFromUi();
 	void CloseModeless();
 	void SetupToolTips();
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
 
 	float m_peaksL[PRO_WAVE_PEAKS];
 	float m_peaksR[PRO_WAVE_PEAKS];
@@ -54,6 +56,7 @@ public:
 	afx_msg void OnBnClickedLoopOut();
 	afx_msg void OnBnClickedWriteTag();
 	afx_msg void OnBnClickedLiveFlag();
+	afx_msg void OnBnClickedHelp();
 	afx_msg void OnCbnSelchangeRgMode();
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnEnKillfocusLiveEdit();
@@ -62,7 +65,9 @@ public:
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnClose();
+	afx_msg void OnDestroy();
 
+	CCustomStandardButton m_help;
 	CCustomCheckBox m_gapless;
 	CCustomComboBox m_rgMode;
 	CCustomEdit m_rgTarget;

@@ -1,4 +1,4 @@
-//{{NO_DEPENDENCIES}}
+﻿//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ ??????????C???N???[?h ?t?@?C???B
 // ogg.rc ??g?p
 //
@@ -1077,6 +1077,43 @@
 #define IDC_SC_FXGRAPH                3827
 #define IDC_SC_HELP                   3828
 #define IDC_MP_MICMETER                 3818
+
+// GDI操作ガイド（? ボタン / ヘルプダイアログ）
+#define IDD_PL_HELP                     217
+#define IDD_AN_HELP                     218
+#define IDD_PR_HELP                     219
+#define IDD_EQ_HELP                     220
+#define IDD_PT_HELP                     221
+#define IDD_PRM_HELP                    222
+#define IDD_RD_HELP                     223
+#define IDD_DR_HELP                     224
+#define IDD_WE_HELP                     225
+#define IDD_TC_HELP                     226
+#define IDD_TE_HELP                     227
+#define IDD_FD_HELP                     228
+#define IDD_KPI_HELP                    229
+#define IDD_SY_HELP                     230
+#define IDD_PRT_HELP                    231
+#define IDD_OGG_HELP                    232
+#define IDD_DOUGA_HELP                  233
+#define IDC_PL_HELP                     3830
+#define IDC_AN_HELP                     3831
+#define IDC_PR_HELP                     3832
+#define IDC_EQ_HELP                     3833
+#define IDC_PT_HELP                     3834
+#define IDC_PRM_HELP                    3835
+#define IDC_RD_HELP                     3836
+#define IDC_DR_HELP                     3837
+#define IDC_WE_HELP                     3838
+#define IDC_TC_HELP                     3839
+#define IDC_TE_HELP                     3840
+#define IDC_FD_HELP                     3841
+#define IDC_KPI_HELP                    3842
+#define IDC_SY_HELP                     3843
+#define IDC_PRT_HELP                    3844
+#define IDC_OGG_HELP                    3845
+#define IDC_DOUGA_HELP                  3846
+#define ID_HELP_SHOWSHEET               39100
 #define ID_SC_LAYER_HIDE                39001
 #define ID_SC_LAYER_FIT                 39002
 #define ID_SC_LAYER_SCALE50             39003
@@ -1122,9 +1159,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        217
+#define _APS_NEXT_RESOURCE_VALUE        234
 #define _APS_NEXT_COMMAND_VALUE         32974
-#define _APS_NEXT_CONTROL_VALUE         3830
+#define _APS_NEXT_CONTROL_VALUE         3847
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

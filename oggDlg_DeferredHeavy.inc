@@ -950,6 +950,11 @@
 
 		addTip(IDC_STATIC_OS, s);
 		addTip(IDC_STATIC_OS2, s);
+		addTip(IDC_OGG_HELP, LL14(
+			L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida",
+			L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل",
+			L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen",
+			L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 	}
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 	// FFT三角関数テーブルの初期化

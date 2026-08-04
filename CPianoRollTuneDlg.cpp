@@ -4,6 +4,247 @@
 extern save savedata;
 extern void MpPersistSavedataQuick();
 
+namespace {
+
+class CPrtHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_PRT_HELP };
+	explicit CPrtHelpDlg(CWnd* pParent = nullptr)
+		: CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CPrtHelpDlg* g_prtHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CPrtHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CPrtHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"検出パラメータ操作ガイド", L"Detection Tune Guide", L"Guide paramètres détection", L"Guida parametri rilevamento",
+		L"Guía parámetros detección", L"검출 파라미터 가이드", L"检测参数指南", L"دليل معلمات الكشف",
+		L"Руководство параметров обнаружения", L"Erkennungsparameter-Anleitung", L"Guia parâmetros detecção", L"Detectieparameters-gids",
+		L"Przewodnik parametrów wykrywania", L"Algılama parametreleri kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CPrtHelpDlg::OnOK() { DestroyWindow(); }
+void CPrtHelpDlg::OnCancel() { DestroyWindow(); }
+void CPrtHelpDlg::OnClose() { DestroyWindow(); }
+
+void CPrtHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_prtHelpDlg == this)
+		g_prtHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CPrtHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CPrtHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"ピアノロール検出パラメータ", L"Piano roll detection — Guide", L"Détection piano roll — Guide", L"Rilevamento piano roll — Guida",
+		L"Detección piano roll — Guía", L"피아노롤 검출 — 가이드", L"钢琴卷帘检测 — 指南", L"كشف البيانو — دليل",
+		L"Обнаружение piano roll — руководство", L"Piano-Roll-Erkennung — Guide", L"Detecção piano roll — Guia", L"Piano roll detectie — Gids",
+		L"Wykrywanie piano roll — przewodnik", L"Piano roll algılama — kılavuz"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"音からノートを拾う感度を % で調整します。100% が既定です（25〜400%）。",
+		L"Tune note-pick sensitivity as %. 100% is default (25–400%).",
+		L"Régler la sensibilité en %. 100% = défaut (25–400%).",
+		L"Regola la sensibilità in %. 100% = default (25–400%).",
+		L"Ajuste la sensibilidad en %. 100% = predeterminado (25–400%).",
+		L"음에서 노트를 잡는 감도를 %로 조정. 100%가 기본(25~400%).",
+		L"以 % 调整从音频拾取音符的灵敏度。100% 为默认（25–400%）。",
+		L"اضبط حساسية التقاط النغمات كنسبة. 100% افتراضي (25–400%).",
+		L"Чувствительность подбора нот в %. 100% — по умолчанию (25–400%).",
+		L"Noten-Empfindlichkeit in %. 100% = Standard (25–400%).",
+		L"Ajuste a sensibilidade em %. 100% = padrão (25–400%).",
+		L"Stel gevoeligheid in als %. 100% = standaard (25–400%).",
+		L"Czułość wykrywania nut w %. 100% = domyślnie (25–400%).",
+		L"Nota yakalama hassasiyetini % ile ayarla. %100 varsayılan (25–400)."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"スライダーの意味（概要）", L"Slider meanings (overview)", L"Signification des curseurs", L"Significato cursori",
+		L"Significado de deslizadores", L"슬라이더 의미(개요)", L"滑块含义（概览）", L"معاني المنزلقات (نظرة عامة)",
+		L"Смысл ползунков (обзор)", L"Bedeutung der Schieberegler", L"Significado dos controles", L"Betekenis van schuifregelaars",
+		L"Znaczenie suwaków (przegląd)", L"Kaydırıcı anlamları (özet)"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・無音閾値 / 帯域無音 …… 低いほど小さな音もノート扱い。高いほど厳格",
+		L"· Silence / band silence …… lower = pick quieter notes; higher = stricter",
+		L"· Silence / bande …… bas = plus sensible; haut = plus strict",
+		L"· Silenzio / banda …… basso = più sensibile; alto = più stretto",
+		L"· Silencio / banda …… bajo = más sensible; alto = más estricto",
+		L"· 무음/대역 무음 …… 낮을수록 작은 음도 노트. 높을수록 엄격",
+		L"· 静音/频带静音 …… 越低越拾取轻音；越高越严格",
+		L"· صمت / نطاق …… أقل = أكثر حساسية؛ أعلى = أشد",
+		L"· Тишина / полоса …… ниже = чувствительнее; выше = строже",
+		L"· Stille / Band …… niedriger = empfindlicher; höher = strenger",
+		L"· Silêncio / banda …… menor = mais sensível; maior = mais rigoroso",
+		L"· Stilte / band …… lager = gevoeliger; hoger = strenger",
+		L"· Cisza / pasmo …… niżej = czulsze; wyżej = ostrzejsze",
+		L"· Sessizlik / bant …… düşük = daha hassas; yüksek = daha katı")); y += lh;
+	body(L, y, LL14(
+		L"・ホールド / 再トリガー …… ノートの持続と再発音のしやすさ",
+		L"· Hold / retrigger …… how long notes sustain and how easily they re-fire",
+		L"· Maintien / redeclenchement …… durée et redéclenchement",
+		L"· Sostegno / retrigger …… durata e riattivazione",
+		L"· Sostenido / retrigger …… duración y reactivación",
+		L"· 홀드 / 재트리거 …… 노트 지속과 재발화의 쉬움",
+		L"· 保持 / 再触发 …… 音符持续与再次触发难易",
+		L"· ثبات / إعادة تشغيل …… مدة النغمة وسهولة إعادة الإطلاق",
+		L"· Удержание / ретриггер …… длительность и повторный запуск",
+		L"· Halten / Retrigger …… Haltedauer und erneutes Auslösen",
+		L"· Sustentação / retrigger …… duração e novo disparo",
+		L"· Vasthouden / retrigger …… duur en opnieuw afvuren",
+		L"· Podtrzymanie / retrigger …… czas trwania i ponowne odpalenie",
+		L"· Tutma / yeniden tetik …… nota süresi ve yeniden ateşleme")); y += lh;
+	body(L, y, LL14(
+		L"・ピック感度(低〜高/メロディ) …… 帯域ごとの拾いやすさ",
+		L"· Pick sensitivity (bass…treble/melody) …… per-band pick ease",
+		L"· Sensibilité (graves…aigus/mélodie) …… par bande",
+		L"· Sensibilità (graves…acuti/melodia) …… per banda",
+		L"· Sensibilidad (graves…agudos/melodía) …… por banda",
+		L"· 픽 감도(저~고/멜로디) …… 대역별 잡기 쉬움",
+		L"· 拾取灵敏度（低…高/旋律）…… 各频带拾取难易",
+		L"· حساسية الاختيار (منخفض…عالي/لحن) …… لكل نطاق",
+		L"· Чувствит. подбора (бас…верх/мелодия) …… по полосам",
+		L"· Empfindlichkeit (Bass…Höhen/Melodie) …… pro Band",
+		L"· Sensibilidade (graves…agudos/melodia) …… por banda",
+		L"· Pick-gevoeligheid (bas…hoog/melodie) …… per band",
+		L"· Czułość (bas…sopran/melodia) …… wg pasma",
+		L"· Seçim hassasiyeti (bas…tiz/melodi) …… banda göre")); y += lh;
+	body(L, y, LL14(
+		L"・倍音/ノイズ/オンセット …… ゴースト抑制・床・アタック検出の厳しさ",
+		L"· Harmonics / noise / onset …… ghost reject, floor, attack strictness",
+		L"· Harmoniques / bruit / attaque …… fantômes, plancher, strictesse",
+		L"· Armoniche / rumore / attacco …… fantasmi, piano, rigidità",
+		L"· Armónicos / ruido / ataque …… fantasmas, suelo, rigor",
+		L"· 배음/노이즈/온셋 …… 고스트 억제·바닥·어택 엄격도",
+		L"· 泛音/噪声/起音 …… 幽灵抑制、底噪、起音严格度",
+		L"· توافقيات / ضوضاء / بداية …… رفض الشبح والأرضية والهجوم",
+		L"· Обертоны / шум / атака …… призраки, пол, строгость",
+		L"· Obertöne / Rauschen / Onset …… Geister, Boden, Strenge",
+		L"· Harmônicos / ruído / ataque …… fantasmas, piso, rigor",
+		L"· Harmonischen / ruis / onset …… spoken, vloer, strengheid",
+		L"· Harmoniczne / szum / onset …… duchy, podłoga, ostrość",
+		L"· Armonik / gürültü / onset …… hayalet, taban, saldırı katılığı")); y += lh + 4;
+
+	title(L, y, LL14(L"既定に戻す", L"Reset to defaults", L"Réinitialiser", L"Ripristina",
+		L"Restablecer", L"기본값", L"恢复默认", L"إعادة ضبط",
+		L"Сброс", L"Zurücksetzen", L"Redefinir", L"Reset",
+		L"Reset", L"Sıfırla"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・すべての検出パラメータを 100%（既定）へ戻します。即時反映されます",
+		L"· Sets all detection parameters back to 100% (defaults). Applies immediately",
+		L"· Remet tous les paramètres à 100%. Appliqué immédiatement",
+		L"· Ripristina tutti i parametri al 100%. Applicato subito",
+		L"· Restablece todos los parámetros al 100%. Se aplica al instante",
+		L"· 모든 검출 파라미터를 100%(기본)으로. 즉시 반영",
+		L"· 将所有检测参数恢复为 100%（默认）。立即生效",
+		L"· يعيد كل المعلمات إلى 100%. يُطبَّق فوراً",
+		L"· Сбрасывает все параметры на 100%. Применяется сразу",
+		L"· Setzt alle Parameter auf 100%. Sofort wirksam",
+		L"· Redefine todos os parâmetros para 100%. Aplica na hora",
+		L"· Zet alle parameters terug op 100%. Meteen van kracht",
+		L"· Przywraca wszystkie parametry do 100%. Natychmiast",
+		L"· Tüm parametreleri %100'e döndürür. Hemen uygulanır")); y += lh + 4;
+
+	title(L, y, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+		L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・現在の値を保存してウィンドウを閉じます（スライダー操作でも随時保存）",
+		L"· Saves current values and closes (sliders also save as you move them)",
+		L"· Enregistre et ferme (les curseurs sauvent aussi en temps réel)",
+		L"· Salva e chiude (i cursori salvano anche in tempo reale)",
+		L"· Guarda y cierra (los deslizadores también guardan al mover)",
+		L"· 현재 값을 저장하고 닫습니다(슬라이더 조작 시에도 수시 저장)",
+		L"· 保存当前值并关闭（移动滑块时也会随时保存）",
+		L"· يحفظ القيم ويغلق (المنزلقات تحفظ أيضاً أثناء التحريك)",
+		L"· Сохраняет и закрывает (ползунки тоже сохраняют сразу)",
+		L"· Speichert und schließt (Schieberegler speichern auch laufend)",
+		L"· Salva e fecha (controles também salvam ao mover)",
+		L"· Slaat op en sluit (schuiven slaan ook meteen op)",
+		L"· Zapisuje i zamyka (suwaki też zapisują na bieżąco)",
+		L"· Değerleri kaydedip kapatır (kaydırıcılar da anında kaydeder)")); y += lh + 4;
+	muted(L, y, LL14(
+		L"各行のラベル/スライダーにマウスを置くと、個別の詳しい説明が出ます。",
+		L"Hover a row label or slider for a detailed per-parameter tip.",
+		L"Survolez un libellé/curseur pour le détail de chaque paramètre.",
+		L"Passa su etichetta/cursore per il dettaglio di ogni parametro.",
+		L"Pase el ratón por etiqueta/deslizador para el detalle de cada parámetro.",
+		L"각 행 라벨/슬라이더에 마우스를 올리면 개별 설명이 나옵니다.",
+		L"将鼠标悬停在各行标签/滑块上可查看单项详细说明。",
+		L"مرّر على التسمية/المنزلق لعرض تفاصيل كل معلمة.",
+		L"Наведите на подпись/ползунок для подробной подсказки.",
+		L"Hover über Label/Schieberegler zeigt die Detail-Hilfe.",
+		L"Passe o mouse no rótulo/controle para a dica detalhada.",
+		L"Hover over label/schuif voor de gedetailleerde tip.",
+		L"Najedź na etykietę/suwak, by zobaczyć szczegółową podpowiedź.",
+		L"Satır etiketi/kaydırıcıya gelince ayrıntılı ipucu görünür."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
 IMPLEMENT_DYNAMIC(CPianoRollTuneDlg, CCustomBlurDialogExBase)
 
 CPianoRollTuneDlg::CPianoRollTuneDlg(CWnd* pParent)
@@ -23,15 +264,18 @@ void CPianoRollTuneDlg::DoDataExchange(CDataExchange* pDX)
 	CCustomBlurDialogExBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_PRT_RESET, m_reset);
 	DDX_Control(pDX, IDC_PRT_OK, m_ok);
+	DDX_Control(pDX, IDC_PRT_HELP, m_help);
 }
 
 BEGIN_MESSAGE_MAP(CPianoRollTuneDlg, CCustomBlurDialogExBase)
 	ON_WM_HSCROLL()
 	ON_WM_CLOSE()
 	ON_WM_DESTROY()
+	ON_WM_SIZE()
 	ON_WM_MOVE()
 	ON_BN_CLICKED(IDC_PRT_RESET, &CPianoRollTuneDlg::OnReset)
 	ON_BN_CLICKED(IDC_PRT_OK, &CPianoRollTuneDlg::OnOk)
+	ON_BN_CLICKED(IDC_PRT_HELP, &CPianoRollTuneDlg::OnBnClickedHelp)
 END_MESSAGE_MAP()
 
 static void PrTuneInitStatic(CCustomStatic& st, CFont* pFont, BOOL bAero)
@@ -449,6 +693,8 @@ void CPianoRollTuneDlg::SetupTooltips()
 			L"Alle parameters resetten naar 100%.",
 			L"Przywroc wszystkie parametry do 100%.",
 			L"Tum algilama parametrelerini %100'e sifirla."));
+	if (m_help.GetSafeHwnd())
+		m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 480, 12000);
 }
 
@@ -542,13 +788,19 @@ BOOL CPianoRollTuneDlg::OnInitDialog()
 	}
 	m_reset.SetGradation(RGB(255, 235, 205), RGB(255, 205, 150), 0, TRUE);
 	m_ok.SetGradation(RGB(200, 240, 200), RGB(130, 205, 140), 0, TRUE);
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
 	SetDlgItemText(IDC_PRT_RESET, LL14(L"既定に戻す", L"Reset to defaults", L"Reinitialiser", L"Ripristina", L"Restablecer", L"기본값", L"恢复默认", L"إعادة ضبط", L"Сброс", L"Zuruecksetzen", L"Redefinir", L"Reset", L"Reset", L"Sifirla"));
 	SetDlgItemText(IDC_PRT_OK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	StyleRows();
 	SyncSlidersFromSavedata();
 	EnableMainWindowLock(&savedata.prTuneMainLock);
 	ApplyDialogSize();
+	LayoutHelpBtn();
 	SetupTooltips();
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	return TRUE;
 }
 
@@ -594,6 +846,7 @@ void CPianoRollTuneDlg::LayoutRows()
 			m_val[i].MoveWindow(xVal, y + 5, valW, 24);
 	}
 	CCC_MainLockBringToFront(m_hWnd);
+	LayoutHelpBtn();
 }
 
 void CPianoRollTuneDlg::SyncSlidersFromSavedata()
@@ -673,13 +926,53 @@ void CPianoRollTuneDlg::OnDestroy()
 {
 	SaveWindowPos();
 	savedata.prTunewindow = 0;
+	if (g_prtHelpDlg && ::IsWindow(g_prtHelpDlg->GetSafeHwnd()))
+		g_prtHelpDlg->DestroyWindow();
 	CCustomBlurDialogExBase::OnDestroy();
+}
+
+void CPianoRollTuneDlg::OnSize(UINT nType, int cx, int cy)
+{
+	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
+	if (nType != SIZE_MINIMIZED) {
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
 }
 
 void CPianoRollTuneDlg::OnMove(int x, int y)
 {
 	CCustomBlurDialogExBase::OnMove(x, y);
 	SaveWindowPos();
+}
+
+void CPianoRollTuneDlg::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CPianoRollTuneDlg::ShowHelpSheet()
+{
+	if (g_prtHelpDlg && ::IsWindow(g_prtHelpDlg->GetSafeHwnd())) {
+		g_prtHelpDlg->ShowWindow(SW_SHOW);
+		g_prtHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_prtHelpDlg && !::IsWindow(g_prtHelpDlg->GetSafeHwnd()))
+		g_prtHelpDlg = nullptr;
+	CPrtHelpDlg* dlg = new CPrtHelpDlg(nullptr);
+	if (!dlg->Create(IDD_PRT_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_prtHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CPianoRollTuneDlg::OnBnClickedHelp()
+{
+	ShowHelpSheet();
 }
 
 BOOL CPianoRollTuneDlg::PreTranslateMessage(MSG* pMsg)

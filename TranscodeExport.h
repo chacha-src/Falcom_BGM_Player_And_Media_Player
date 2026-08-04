@@ -52,6 +52,7 @@ public:
 	afx_msg void OnBnClickedExec();
 	afx_msg void OnBnClickedBrowse();
 	afx_msg void OnBnClickedClose();
+	afx_msg void OnBnClickedHelp();
 	afx_msg void OnCbnSelchangeFormat();
 	afx_msg void OnTcnSelchangeTabs(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnBnClickedCoverClear();
@@ -59,12 +60,17 @@ public:
 	afx_msg void OnBnClickedMix();
 	afx_msg void OnCbnSelchangeMixN();
 	afx_msg void OnDropFiles(HDROP hDropInfo);
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnDestroy();
 	virtual BOOL OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult);
 
 protected:
 	enum { WM_TC_LAYOUT_TABS = WM_APP + 7101 };
 	void LayoutTabsBelowCaption();
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
 
+	CCustomStandardButton m_help;
 	CCustomTabCtrl m_tabs;
 	CCustomComboBox m_format;
 	CCustomStatic m_formatLabel;

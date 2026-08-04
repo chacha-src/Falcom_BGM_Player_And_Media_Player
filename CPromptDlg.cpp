@@ -9,6 +9,197 @@ extern void MpPersistSavedataQuick();
 static CPromptDlg* g_promptDlg = nullptr;
 static BOOL g_histSelChanging = FALSE;
 
+namespace {
+
+class CPrmHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_PRM_HELP };
+	explicit CPrmHelpDlg(CWnd* pParent = nullptr) : CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CPrmHelpDlg* g_prmHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CPrmHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CPrmHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"プロンプト操作ガイド", L"Prompt Guide", L"Guide du prompt", L"Guida Prompt",
+		L"Guía Prompt", L"프롬프트 가이드", L"提示操作指南", L"دليل الموجه",
+		L"Руководство промпта", L"Prompt-Anleitung", L"Guia Prompt", L"Prompt-gids",
+		L"Przewodnik Prompt", L"Prompt kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CPrmHelpDlg::OnOK() { DestroyWindow(); }
+void CPrmHelpDlg::OnCancel() { DestroyWindow(); }
+void CPrmHelpDlg::OnClose() { DestroyWindow(); }
+
+void CPrmHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_prmHelpDlg == this)
+		g_prmHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CPrmHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CPrmHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"プロンプト操作ガイド", L"Prompt — Guide", L"Guide prompt", L"Guida Prompt",
+		L"Guía Prompt", L"프롬프트 가이드", L"提示指南", L"دليل الموجه",
+		L"Руководство промпта", L"Prompt-Guide", L"Guia Prompt", L"Prompt-gids",
+		L"Przewodnik Prompt", L"Prompt kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"時刻付きコマンドで再生中の音を自動変更します。コマンドロールと本文は同じ列を共有します。",
+		L"Timed commands change sound during playback. Roll and prompt share the same list.",
+		L"Commandes horodatées pendant la lecture. Rouleau et prompt partagent la liste.",
+		L"Comandi a tempo in riproduzione. Roll e prompt condividono l'elenco.",
+		L"Comandos temporizados en reproducción. Roll y prompt comparten la lista.",
+		L"시간 명령으로 재생 중 소리를 바꿉니다. 롤과 프롬프트는 같은 목록을 공유합니다.",
+		L"带时间命令在播放中改音。卷轴与提示共享同一命令列。",
+		L"أوامر موقوتة أثناء التشغيل. الرول والموجه يشتركان في القائمة.",
+		L"Команды по времени меняют звук. Ролл и промпт делят список.",
+		L"Zeitbefehle aendern den Klang. Roll und Prompt teilen die Liste.",
+		L"Comandos com tempo mudam o som. Roll e prompt partilham a lista.",
+		L"Getimede opdrachten wijzigen geluid. Roll en prompt delen de lijst.",
+		L"Komendy czasowe zmieniają dźwięk. Roll i prompt współdzielą listę.",
+		L"Zamanlı komutlar sesi değiştirir. Rulo ve istem aynı listeyi paylaşır."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"編集 / コマンド", L"Edit / Commands", L"Édition / Commandes", L"Modifica / Comandi",
+		L"Edición / Comandos", L"편집 / 명령", L"编辑 / 命令", L"تحرير / أوامر",
+		L"Правка / Команды", L"Bearbeiten / Befehle", L"Editar / Comandos", L"Bewerken / Opdrachten",
+		L"Edycja / Komendy", L"Düzenle / Komutlar"));
+	y += titleLh;
+	body(L, y, LL14(L"・@cmd …… 時刻指定　　%cmd …… 周期指定。詳細は下の凡例欄", L"· @cmd …… absolute time　　%cmd …… periodic. See legend below", L"· @cmd …… temps absolu　　%cmd …… périodique. Voir légende", L"· @cmd …… tempo assoluto　　%cmd …… periodico. Vedi legenda",
+		L"· @cmd …… tiempo absoluto　　%cmd …… periódico. Ver leyenda", L"· @cmd …… 절대 시각　　%cmd …… 주기. 아래 범례 참고", L"· @cmd …… 绝对时间　　%cmd …… 周期。见下方图例", L"· @cmd …… وقت مطلق　　%cmd …… دوري. انظر المفتاح",
+		L"· @cmd …… абсолютное время　　%cmd …… период. См. легенду", L"· @cmd …… Absolute Zeit　　%cmd …… periodisch. Siehe Legende", L"· @cmd …… tempo absoluto　　%cmd …… periódico. Ver legenda", L"· @cmd …… absolute tijd　　%cmd …… periodiek. Zie legenda",
+		L"· @cmd …… czas bezwzględny　　%cmd …… okresowo. Zob. legendę", L"· @cmd …… mutlak zaman　　%cmd …… periyodik. Açıklamaya bakın")); y += lh;
+	body(L, y, LL14(L"・右クリック …… サンプル挿入・履歴保存・操作ガイド", L"· Right-click …… insert samples, save history, open guide", L"· Clic droit …… exemples, historique, guide", L"· Destro …… esempi, cronologia, guida",
+		L"· Clic der. …… ejemplos, historial, guía", L"· 우클릭 …… 샘플 삽입·기록 저장·가이드", L"· 右键 …… 插入示例、保存历史、打开指南", L"· يمين …… عينات وسجل ودليل",
+		L"· ПКМ …… примеры, история, руководство", L"· Rechtsklick …… Beispiele, Verlauf, Guide", L"· Direito …… amostras, histórico, guia", L"· Rechtsklik …… voorbeelden, geschiedenis, gids",
+		L"· PPM …… przykłady, historia, przewodnik", L"· Sağ tık …… örnek, geçmiş, kılavuz")); y += lh + 4;
+
+	title(L, y, LL14(L"解析 / 実行 / ロール", L"Analyze / Run / Roll", L"Analyser / Exécuter / Rouleau", L"Analizza / Esegui / Roll",
+		L"Analizar / Ejecutar / Roll", L"분석 / 실행 / 롤", L"分析 / 执行 / 卷轴", L"تحليل / تشغيل / رول",
+		L"Анализ / Запуск / Ролл", L"Analysieren / Ausführen / Roll", L"Analisar / Executar / Roll", L"Analyseren / Uitvoeren / Roll",
+		L"Analizuj / Uruchom / Roll", L"Analiz / Çalıştır / Rulo"));
+	y += titleLh;
+	body(L, y, LL14(L"・解析 …… 選択曲から @/% を自動生成（再生は一時停止）", L"· Analyze …… auto-generate @/% from the selected track (pauses)", L"· Analyser …… génère @/% (pause lecture)", L"· Analizza …… genera @/% (pausa)",
+		L"· Analizar …… genera @/% (pausa)", L"· 분석 …… 선택 곡에서 @/% 자동 생성(일시정지)", L"· 分析 …… 从所选曲自动生成 @/%（暂停）", L"· تحليل …… يولّد @/% (يوقف التشغيل)",
+		L"· Анализ …… генерирует @/% (пауза)", L"· Analysieren …… erzeugt @/% (Pause)", L"· Analisar …… gera @/% (pausa)", L"· Analyseren …… maakt @/% (pauze)",
+		L"· Analizuj …… generuje @/% (pauza)", L"· Analiz …… @/% üretir (duraklatır)")); y += lh;
+	body(L, y, LL14(L"・実行 …… 本文を有効化。停止＝適用停止／リセット＝実行前に戻す", L"· Run …… enable text. Stop=halt apply / Reset=restore pre-run", L"· Exécuter …… active. Arrêt=stop / Réinit.=avant exécution", L"· Esegui …… attiva. Stop=ferma / Reset=prima dell'esecuzione",
+		L"· Ejecutar …… activa. Detener=parar / Restablecer=antes", L"· 실행 …… 본문 활성화. 중지=적용 정지 / 리셋=실행 전", L"· 执行 …… 启用正文。停止=停用 / 重置=执行前", L"· تشغيل …… يفعّل. إيقاف=توقف / إعادة=قبل التشغيل",
+		L"· Запуск …… включает. Стоп=остановить / Сброс=до запуска", L"· Ausführen …… aktiviert. Stopp=halt / Reset=vor Start", L"· Executar …… ativa. Parar=parar / Redefinir=antes", L"· Uitvoeren …… activeert. Stop=stop / Reset=vóór run",
+		L"· Uruchom …… włącza. Stop=zatrzymaj / Reset=przed startem", L"· Çalıştır …… etkinleştirir. Dur=uygulamayı kes / Sıfırla=öncesi")); y += lh;
+	body(L, y, LL14(L"・ロール …… 時間軸で同じコマンドを確認・編集（相互に即同期）", L"· Roll …… view/edit the same commands on a timeline (live sync)", L"· Rouleau …… même liste sur la timeline (sync)", L"· Roll …… stessa lista sulla timeline (sync)",
+		L"· Roll …… misma lista en el timeline (sync)", L"· 롤 …… 같은 명령을 시간축에서 편집(즉시 동기)", L"· 卷轴 …… 在时间轴编辑同一命令（即时同步）", L"· رول …… نفس الأوامر على الخط الزمني (مزامنة)",
+		L"· Ролл …… те же команды на шкале (синхр.)", L"· Roll …… dieselben Befehle auf der Zeitachse (Sync)", L"· Roll …… mesmos comandos na linha do tempo (sync)", L"· Roll …… dezelfde opdrachten op de tijdlijn (sync)",
+		L"· Roll …… te same komendy na osi czasu (sync)", L"· Rulo …… aynı komutlar zaman ekseninde (senkron)")); y += lh + 4;
+
+	const int gx = L, gy = y, gw = min(320, rc.Width() - L * 2), gh = lh * 2 + 12;
+	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+	dc.FillSolidRect(gx + 4, gy + 6, 48, gh - 12, RGB(255, 180, 120));
+	dc.FillSolidRect(gx + 60, gy + 6, 44, gh - 12, RGB(130, 205, 140));
+	dc.FillSolidRect(gx + 112, gy + 6, 44, gh - 12, RGB(160, 195, 240));
+	dc.FillSolidRect(gx + 164, gy + 6, 50, gh - 12, RGB(240, 210, 160));
+	dc.SetTextColor(RGB(40, 40, 55));
+	dc.TextOut(gx + 10, gy + 8, L"Analyze");
+	dc.TextOut(gx + 68, gy + 8, L"Run");
+	dc.TextOut(gx + 120, gy + 8, L"Roll");
+	dc.TextOut(gx + 172, gy + 8, L"Hist");
+	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+	y = gy + gh + 6;
+
+	title(L, y, LL14(L"履歴 / 共有", L"History / Sharing", L"Historique / Partage", L"Cronologia / Condivisione",
+		L"Historial / Compartir", L"기록 / 공유", L"历史 / 共享", L"السجل / المشاركة",
+		L"История / Общее", L"Verlauf / Teilen", L"Histórico / Partilha", L"Geschiedenis / Delen",
+		L"Historia / Współdzielone", L"Geçmiş / Paylaşım"));
+	y += titleLh;
+	body(L, y, LL14(L"・履歴保存 …… 現在の本文を履歴へ。コンボから再読込", L"· Save history …… store current text; reload from the combo", L"· Historique …… enregistrer le texte; recharger via combo", L"· Cronologia …… salva il testo; ricarica dalla combo",
+		L"· Historial …… guardar texto; recargar desde el combo", L"· 기록 저장 …… 현재 본문 저장. 콤보에서 다시 읽기", L"· 保存历史 …… 保存当前正文；从组合框重载", L"· حفظ السجل …… احفظ النص؛ أعد التحميل من القائمة",
+		L"· История …… сохранить текст; загрузить из списка", L"· Verlauf …… Text speichern; aus Combo laden", L"· Histórico …… guardar texto; recarregar no combo", L"· Geschiedenis …… tekst opslaan; herladen via combo",
+		L"· Historia …… zapisz tekst; wczytaj z listy", L"· Geçmiş …… metni kaydet; kombinasyondan yükle")); y += lh;
+	muted(L, y, LL14(
+		L"プロンプトとコマンドロールは同じコマンド列を共有します。片方を直せばもう片方も更新されます。",
+		L"Prompt and command roll share one command list; editing either updates the other.",
+		L"Prompt et rouleau partagent la même liste; éditer l'un met à jour l'autre.",
+		L"Prompt e roll condividono l'elenco; modificare uno aggiorna l'altro.",
+		L"Prompt y roll comparten la lista; editar uno actualiza el otro.",
+		L"프롬프트와 커맨드 롤은 같은 명령열을 공유합니다.",
+		L"提示与命令卷轴共享同一命令列；改一侧另一侧也更新。",
+		L"الموجه والرول يشتركان في قائمة واحدة؛ تعديل أحدهما يحدّر الآخر.",
+		L"Промпт и ролл делят один список; правка одного обновляет другой.",
+		L"Prompt und Roll teilen dieselbe Liste; Aenderung am einen aktualisiert den anderen.",
+		L"Prompt e roll partilham a lista; editar um atualiza o outro.",
+		L"Prompt en roll delen dezelfde lijst; wijzigen van één werkt de ander bij.",
+		L"Prompt i roll współdzielą listę; edycja jednego aktualizuje drugi.",
+		L"İstem ve rulo aynı listeyi paylaşır; birini düzeltmek diğerini günceller."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
 IMPLEMENT_DYNAMIC(CPromptDlg, CCustomBlurDialogExBase)
 
 CPromptDlg::CPromptDlg(CWnd* pParent)
@@ -37,6 +228,7 @@ void CPromptDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_MPP_HIST, m_hist);
 	DDX_Control(pDX, IDC_MPP_MODE, m_mode);
 	DDX_Control(pDX, IDC_MPP_SAVEHIST, m_saveHist);
+	DDX_Control(pDX, IDC_PRM_HELP, m_help);
 }
 
 BEGIN_MESSAGE_MAP(CPromptDlg, CCustomBlurDialogExBase)
@@ -48,6 +240,7 @@ BEGIN_MESSAGE_MAP(CPromptDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MPP_CLEAR, &CPromptDlg::OnClear)
 	ON_BN_CLICKED(IDC_MPP_CLOSE, &CPromptDlg::OnCloseBtn)
 	ON_BN_CLICKED(IDC_MPP_SAVEHIST, &CPromptDlg::OnSaveHist)
+	ON_BN_CLICKED(IDC_PRM_HELP, &CPromptDlg::OnHelpBtn)
 	ON_CBN_SELCHANGE(IDC_MPP_HIST, &CPromptDlg::OnHistSel)
 	ON_CBN_SELCHANGE(IDC_MPP_MODE, &CPromptDlg::OnModeSel)
 	ON_EN_CHANGE(IDC_MPP_TEXT, &CPromptDlg::OnTextChanged)
@@ -481,6 +674,9 @@ void CPromptDlg::StyleButtons()
 	m_clear.SetGradation(RGB(255, 235, 205), RGB(255, 205, 150), 0, TRUE);
 	m_close.SetGradation(RGB(235, 230, 240), RGB(205, 195, 215), 0, TRUE);
 	m_saveHist.SetGradation(RGB(215, 235, 255), RGB(165, 205, 245), 0, TRUE);
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
 }
 
 void CPromptDlg::SetupTooltips()
@@ -501,6 +697,7 @@ void CPromptDlg::SetupTooltips()
 	addTip(m_saveHist, LL14(L"現在のプロンプト本文を履歴に保存します。", L"Save current prompt text to history.", L"Enregistrer le prompt dans l'historique.", L"Salva il prompt nella cronologia.", L"Guardar el prompt en el historial.", L"현재 프롬프트를 기록에 저장합니다.", L"将当前提示保存到历史。", L"حفظ الموجه في السجل.", L"Сохранить промпт в историю.", L"Prompt in Verlauf speichern.", L"Salvar prompt no historico.", L"Prompt in geschiedenis opslaan.", L"Zapisz prompt w historii.", L"Promptu gecmise kaydet."));
 	addTip(m_mode, LL14(L"解析の雰囲気モード(癒やし系含む)。自動生成コマンドの傾向が変わります。", L"Analyze mood mode (includes healing). Changes the style of generated commands.", L"Mode d ambiance (dont guerison).", L"Modalita atmosfera (con guarigione).", L"Modo de ambiente (incluye sanacion).", L"분석 분위기 모드(힐링 포함).", L"分析氛围模式(含疗愈)。", L"Mode (includes healing).", L"Режим (включая исцеление).", L"Stimmungsmodus (inkl. Heilung).", L"Modo (inclui cura).", L"Sfeermodus (incl. heling).", L"Tryb nastroju (z uzdrawianiem).", L"Mod (iyilestirme dahil)."));
 	addTip(m_hist, LL14(L"保存したプロンプト履歴から読み込みます。", L"Load a saved prompt from history.", L"Charger un prompt depuis l'historique.", L"Carica un prompt dalla cronologia.", L"Cargar un prompt del historial.", L"저장된 프롬프트 기록에서 불러옵니다.", L"从历史记录加载提示。", L"تحميل موجه من السجل.", L"Загрузить промпт из истории.", L"Prompt aus Verlauf laden.", L"Carregar prompt do historico.", L"Prompt uit geschiedenis laden.", L"Wczytaj prompt z historii.", L"Gecmisten prompt yukle."));
+	addTip(m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
 }
 
@@ -546,9 +743,20 @@ void CPromptDlg::LayoutControls()
 		CCC_MainLockSetHeaderRow(m_hWnd, topM, editLblH);
 	CRect lockRc;
 	CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
-	const int lblW = lockRc.IsRectEmpty()
-		? max(80, iw - CCC_MainLockGetReserveWidth(m_hWnd) - lockGap)
-		: max(80, lockRc.left - M - lockGap);
+	// 本文ヘッダ帯（キャプション下）に ? を置く。アクリル帯には載せない
+	int rightLimit = lockRc.IsRectEmpty()
+		? (rc.right - M - ((capH > 0) ? 0 : CCC_MainLockGetReserveWidth(m_hWnd)))
+		: (lockRc.left - lockGap);
+	const int helpW = 28;
+	const int helpH = 22;
+	const int helpGap = 4;
+	if (m_help.GetSafeHwnd()) {
+		const int hx = rightLimit - helpW;
+		const int hy = topM + max(0, (editLblH - helpH) / 2);
+		m_help.MoveWindow(hx, hy, helpW, helpH);
+		rightLimit = hx - helpGap;
+	}
+	const int lblW = max(80, rightLimit - M);
 
 	// 下から順に確保(ボタン → 履歴 → 進捗 → モード → 残り文字 → 説明 → 入力)
 	const int btnY = max(topM, H - M - btnH);
@@ -621,6 +829,7 @@ void CPromptDlg::LayoutControls()
 
 	// ボタンを最前面へ(履歴コンボと重ならないよう)
 	RaiseChildZOrder(&m_lblEdit);
+	RaiseChildZOrder(&m_help);
 	RaiseChildZOrder(&m_edit);
 	RaiseChildZOrder(&m_legend);
 	RaiseChildZOrder(GetDlgItem(IDC_MPP_REMAIN));
@@ -641,6 +850,8 @@ void CPromptDlg::LayoutControls()
 	// Raise 後に帯ボタンが下に沈むので載せ直す
 	CCC_CaptionLayout(m_hWnd);
 	CCC_MainLockBringToFront(m_hWnd);
+	if (m_help.GetSafeHwnd())
+		RaiseChildZOrder(&m_help);
 }
 
 void CPromptDlg::RefreshAfterLayout(BOOL bSyncRedraw)
@@ -659,6 +870,8 @@ void CPromptDlg::RefreshAfterLayout(BOOL bSyncRedraw)
 	m_reset.RepaintClient();
 	m_clear.RepaintClient();
 	m_close.RepaintClient();
+	if (m_help.GetSafeHwnd())
+		m_help.RepaintClient();
 
 	if (m_lblEdit.GetSafeHwnd())
 		m_lblEdit.Invalidate(TRUE);
@@ -1074,9 +1287,16 @@ void CPromptDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING, IDM_SAVEHIST, LL14(L"履歴へ保存", L"Save to history", L"Enregistrer historique", L"Salva in cronologia", L"Guardar en historial", L"기록에 저장", L"保存到历史", L"Save history", L"В историю", L"In Verlauf", L"Salvar historico", L"Naar geschiedenis", L"Do historii", L"Gecmise kaydet"));
 	menu.AppendMenu(MF_STRING, IDM_CLEAR, LL14(L"クリア", L"Clear", L"Effacer", L"Cancella", L"Borrar", L"지우기", L"清除", L"Clear", L"Очистить", L"Loeschen", L"Limpar", L"Wissen", L"Wyczysc", L"Temizle"));
+	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING, ID_HELP_SHOWSHEET,
+		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
+			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
+			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
+			L"Przewodnik", L"İşlem kılavuzu"));
 
 	const int cmd = (int)menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y, this);
 	if (cmd <= 0) return;
+	if (cmd == ID_HELP_SHOWSHEET) { ShowHelpSheet(); return; }
 	switch (cmd) {
 	case IDM_CUT: m_edit.Cut(); break;
 	case IDM_COPY: m_edit.Copy(); break;
@@ -1341,11 +1561,42 @@ void CPromptDlg::OnHistSel()
 	UpdateRemainLabel();
 }
 
+void CPromptDlg::ShowHelpSheet()
+{
+	if (g_prmHelpDlg && ::IsWindow(g_prmHelpDlg->GetSafeHwnd())) {
+		g_prmHelpDlg->ShowWindow(SW_SHOW);
+		g_prmHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_prmHelpDlg && !::IsWindow(g_prmHelpDlg->GetSafeHwnd()))
+		g_prmHelpDlg = nullptr;
+	CPrmHelpDlg* dlg = new CPrmHelpDlg(nullptr);
+	if (!dlg->Create(IDD_PRM_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_prmHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CPromptDlg::DestroyHelpSheet()
+{
+	if (g_prmHelpDlg && ::IsWindow(g_prmHelpDlg->GetSafeHwnd()))
+		g_prmHelpDlg->DestroyWindow();
+}
+
+void CPromptDlg::OnHelpBtn()
+{
+	ShowHelpSheet();
+}
+
 void CPromptDlg::OnCloseBtn()
 {
 	SaveTextToSavedata();
 	SavePosToSavedata();
 	savedata.mpPromptwindow = 0;
+	DestroyHelpSheet();
 	DestroyWindow();
 }
 
@@ -1354,11 +1605,13 @@ void CPromptDlg::OnClose()
 	SaveTextToSavedata();
 	SavePosToSavedata();
 	savedata.mpPromptwindow = 0;
+	DestroyHelpSheet();
 	DestroyWindow();
 }
 
 void CPromptDlg::PostNcDestroy()
 {
+	DestroyHelpSheet();
 	CCustomBlurDialogExBase::PostNcDestroy();
 	if (g_promptDlg == this)
 		g_promptDlg = nullptr;

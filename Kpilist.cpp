@@ -9,6 +9,252 @@
 // 先に使用するファイルスコープ関数の前方宣言
 static void KpiPersistSavedata();
 
+namespace {
+
+class CKpiHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_KPI_HELP };
+	explicit CKpiHelpDlg(CWnd* pParent = nullptr)
+		: CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CKpiHelpDlg* g_kpiHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CKpiHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CKpiHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"KPI一覧操作ガイド", L"KPI List Guide", L"Guide liste KPI", L"Guida elenco KPI",
+		L"Guía lista KPI", L"KPI 목록 가이드", L"KPI 列表指南", L"دليل قائمة KPI",
+		L"Руководство списка KPI", L"KPI-Listen-Anleitung", L"Guia lista KPI", L"KPI-lijst gids",
+		L"Przewodnik listy KPI", L"KPI listesi kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CKpiHelpDlg::OnOK() { DestroyWindow(); }
+void CKpiHelpDlg::OnCancel() { DestroyWindow(); }
+void CKpiHelpDlg::OnClose() { DestroyWindow(); }
+
+void CKpiHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_kpiHelpDlg == this)
+		g_kpiHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CKpiHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CKpiHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"KPI一覧操作ガイド", L"KPI List — Guide", L"Guide liste KPI", L"Guida elenco KPI",
+		L"Guía lista KPI", L"KPI 목록 가이드", L"KPI 列表指南", L"دليل قائمة KPI",
+		L"Руководство списка KPI", L"KPI-Listen-Guide", L"Guia lista KPI", L"KPI-lijst gids",
+		L"Przewodnik KPI", L"KPI listesi kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"プラグインの有効/無効と優先順を管理します。上から順に適用されます。",
+		L"Manage plugin enable/order. Applied top-first.",
+		L"Gérer activation/ordre. Appliqué du haut vers le bas.",
+		L"Gestisci attivazione/ordine. Applicato dall'alto.",
+		L"Gestionar activación/orden. Se aplica de arriba abajo.",
+		L"플러그인 사용/우선순위를 관리합니다. 위에서부터 적용됩니다.",
+		L"管理插件启用与优先顺序。从上到下依次应用。",
+		L"إدارة التفعيل/الترتيب. يُطبَّق من الأعلى.",
+		L"Управление включением/порядком. Сверху вниз.",
+		L"Plugins aktivieren/ordnen. Oben zuerst.",
+		L"Gerenciar ativação/ordem. Aplicado de cima.",
+		L"Beheer activatie/volgorde. Boven eerst.",
+		L"Zarządzaj włączeniem/kolejnością. Od góry.",
+		L"Eklenti açık/sıra yönet. Üstten uygulanır."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"一覧と優先順", L"List & priority", L"Liste et priorité", L"Elenco e priorità",
+		L"Lista y prioridad", L"목록과 우선순위", L"列表与优先顺序", L"القائمة والأولوية",
+		L"Список и приоритет", L"Liste & Priorität", L"Lista e prioridade", L"Lijst & prioriteit",
+		L"Lista i priorytet", L"Liste ve öncelik"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・チェック …… 有効な KPI のみ再生時に使われます",
+		L"· Check …… only enabled KPIs are used for playback",
+		L"· Case …… seuls les KPI cochés sont utilisés",
+		L"· Spunta …… solo i KPI abilitati vengono usati",
+		L"· Marca …… solo se usan KPI habilitados",
+		L"· 체크 …… 사용 중인 KPI만 재생에 사용됩니다",
+		L"· 勾选 …… 仅启用的 KPI 用于播放",
+		L"· تحديد …… يُستخدم فقط KPI المفعّل",
+		L"· Галочка …… используются только включённые KPI",
+		L"· Haken …… nur aktivierte KPI werden genutzt",
+		L"· Marcar …… só KPIs ativos são usados",
+		L"· Vink …… alleen actieve KPI’s worden gebruikt",
+		L"· Zaznacz …… używane tylko włączone KPI",
+		L"· İşaret …… yalnızca açık KPI kullanılır")); y += lh;
+	body(L, y, LL14(
+		L"・並び …… 上ほど優先。同じ拡張子は上のプラグインが先に試されます",
+		L"· Order …… top has priority. Same ext: top plugin tried first",
+		L"· Ordre …… haut = priorité. Même ext: haut d'abord",
+		L"· Ordine …… alto = priorità. Stessa est: alto prima",
+		L"· Orden …… arriba = prioridad. Misma ext: arriba primero",
+		L"· 순서 …… 위가 우선. 같은 확장자는 위 플러그인이 먼저",
+		L"· 顺序 …… 越靠上越优先。相同扩展名先试上方插件",
+		L"· ترتيب …… الأعلى أولوية. نفس الامتداد: الأعلى أولاً",
+		L"· Порядок …… верх приоритетнее. То же расш. — сверху",
+		L"· Reihenfolge …… oben zuerst. Gleiche Ext: oben zuerst",
+		L"· Ordem …… topo tem prioridade. Mesma ext: topo primeiro",
+		L"· Volgorde …… boven heeft voorrang. Zelfde ext: boven eerst",
+		L"· Kolejność …… góra ma priorytet. To samo rozsz.: góra",
+		L"· Sıra …… üst öncelikli. Aynı uzantı: üst önce")); y += lh;
+	body(L, y, LL14(
+		L"・列 …… kpi名 / Ver / Arch / 対応拡張子。行にマウスで詳細ツールチップ",
+		L"· Columns …… name / Ver / Arch / extensions. Hover row for tip",
+		L"· Colonnes …… nom / Ver / Arch / extensions. Survol = tip",
+		L"· Colonne …… nome / Ver / Arch / estensioni. Passa per tip",
+		L"· Columnas …… nombre / Ver / Arch / extensiones. Tip al pasar",
+		L"· 열 …… 이름 / Ver / Arch / 확장자. 행에 마우스면 상세 팁",
+		L"· 列 …… 名称 / Ver / Arch / 扩展名。悬停行显示详情",
+		L"· أعمدة …… الاسم / Ver / Arch / الامتدادات. مرّر للتلميح",
+		L"· Столбцы …… имя / Ver / Arch / расширения. Наведите для подсказки",
+		L"· Spalten …… Name / Ver / Arch / Erweiterungen. Hover = Tip",
+		L"· Colunas …… nome / Ver / Arch / extensões. Passe para tip",
+		L"· Kolommen …… naam / Ver / Arch / extensies. Hover = tip",
+		L"· Kolumny …… nazwa / Ver / Arch / rozszerzenia. Tip po najechaniu",
+		L"· Sütun …… ad / Ver / Arch / uzantılar. Satıra gelince ipucu")); y += lh + 4;
+
+	title(L, y, LL14(L"拡張子フィルタ", L"Extension filter", L"Filtre d'extension", L"Filtro estensione",
+		L"Filtro de extensión", L"확장자 필터", L"扩展名筛选", L"تصفية الامتداد",
+		L"Фильтр расширения", L"Erweiterungsfilter", L"Filtro de extensão", L"Extensiefilter",
+		L"Filtr rozszerzenia", L"Uzantı filtresi"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・入力すると即座に一覧を絞り込みます。空欄で全表示",
+		L"· Typing filters the list immediately. Empty shows all",
+		L"· La saisie filtre aussitôt. Vide = tout",
+		L"· Digitando filtra subito. Vuoto = tutto",
+		L"· Al escribir filtra al instante. Vacío = todo",
+		L"· 입력하면 즉시 목록을 좁힙니다. 비우면 전체",
+		L"· 输入即筛选列表。空则显示全部",
+		L"· الكتابة تصفّي فوراً. فارغ = الكل",
+		L"· Ввод сразу фильтрует. Пусто = всё",
+		L"· Eingabe filtert sofort. Leer = alle",
+		L"· Digitar filtra na hora. Vazio = todos",
+		L"· Typen filtert meteen. Leeg = alles",
+		L"· Wpisywanie filtruje od razu. Puste = wszystkie",
+		L"· Yazınca anında süzülür. Boş = tümü")); y += lh;
+	body(L, y, LL14(
+		L"・先頭の . の有無は問いません。複数は空白や , / で区切れます",
+		L"· Leading dot optional. Separate multiple with space, comma or /",
+		L"· Point initial optionnel. Séparez par espace, virgule ou /",
+		L"· Punto iniziale opzionale. Separare con spazio, virgola o /",
+		L"· Punto inicial opcional. Separe con espacio, coma o /",
+		L"· 앞의 . 유무는 무관. 여러 개는 공백·,·/ 로 구분",
+		L"· 前导点可选。多个用空格、逗号或 / 分隔",
+		L"· النقطة الأولى اختيارية. افصل بمسافة أو , أو /",
+		L"· Точка в начале необязательна. Разделяйте пробелом, запятой или /",
+		L"· Führender Punkt optional. Trennen mit Leerzeichen, Komma oder /",
+		L"· Ponto inicial opcional. Separe com espaço, vírgula ou /",
+		L"· Voorlopende punt optioneel. Scheid met spatie, komma of /",
+		L"· Kropka na początku opcjonalna. Oddziel spacją, przecinkiem lub /",
+		L"· Baştaki . isteğe bağlı. Birden fazlasını boşluk, , veya / ile ayırın")); y += lh + 4;
+
+	title(L, y, LL14(L"Ver5 について", L"About Ver5", L"À propos de Ver5", L"Informazioni su Ver5",
+		L"Acerca de Ver5", L"Ver5 정보", L"关于 Ver5", L"حول Ver5",
+		L"О Ver5", L"Zu Ver5", L"Sobre Ver5", L"Over Ver5",
+		L"O Ver5", L"Ver5 hakkında"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・Ver5 プラグインは一部機能が未対応です（説明文にも記載）",
+		L"· Ver5 plugins have some unsupported features (also noted in the caption)",
+		L"· Les plugins Ver5 ont des fonctions non prises en charge",
+		L"· I plugin Ver5 hanno funzioni non supportate",
+		L"· Los plugins Ver5 tienen funciones no admitidas",
+		L"· Ver5 플러그인은 일부 기능이 미지원입니다(설명에도 표시)",
+		L"· Ver5 插件部分功能未支持（说明文字中也有标注）",
+		L"· إضافات Ver5 لها ميزات غير مدعومة",
+		L"· У плагинов Ver5 часть функций не поддерживается",
+		L"· Ver5-Plugins haben teilweise ununterstützte Funktionen",
+		L"· Plugins Ver5 têm recursos não suportados",
+		L"· Ver5-plugins hebben deels niet-ondersteunde functies",
+		L"· Wtyczki Ver5 mają częściowo nieobsługiwane funkcje",
+		L"· Ver5 eklentilerinde bazı özellikler desteklenmez")); y += lh + 4;
+
+	title(L, y, LL14(L"OK", L"OK", L"OK", L"OK", L"OK", L"OK", L"确定", L"موافق",
+		L"ОК", L"OK", L"OK", L"OK", L"OK", L"Tamam"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・チェック状態を保存して閉じます。ウィンドウサイズも記憶されます",
+		L"· Saves check state and closes. Window size is also remembered",
+		L"· Enregistre les cases et ferme. La taille est mémorisée",
+		L"· Salva le spunte e chiude. Anche la dimensione viene ricordata",
+		L"· Guarda las marcas y cierra. También se recuerda el tamaño",
+		L"· 체크 상태를 저장하고 닫습니다. 창 크기도 기억됩니다",
+		L"· 保存勾选状态并关闭。窗口大小也会被记住",
+		L"· يحفظ التحديد ويغلق. يُحفظ حجم النافذة أيضاً",
+		L"· Сохраняет галочки и закрывает. Размер окна тоже запоминается",
+		L"· Speichert Haken und schließt. Fenstergröße wird gemerkt",
+		L"· Salva as marcas e fecha. O tamanho também é lembrado",
+		L"· Slaat vinkjes op en sluit. Venstergrootte wordt onthouden",
+		L"· Zapisuje zaznaczenia i zamyka. Rozmiar okna też jest zapamiętany",
+		L"· İşaretleri kaydedip kapatır. Pencere boyutu da hatırlanır"));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
 
 // CKpilist ダイアログ
 
@@ -32,6 +278,7 @@ void CKpilist::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATIC, m_desc);
 	DDX_Control(pDX, IDC_KPI_EXTFILTER, m_extFilter);
 	DDX_Control(pDX, IDC_KPI_EXTFILTER_L, m_extFilterLbl);
+	DDX_Control(pDX, IDC_KPI_HELP, m_help);
 }
 
 #include "CImageBase.h"
@@ -39,6 +286,7 @@ BEGIN_MESSAGE_MAP(CKpilist, CCustomBlurDialogBase)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST1, &CKpilist::OnLvnItemchangedList1)
 	ON_EN_CHANGE(IDC_KPI_EXTFILTER, &CKpilist::OnEnChangeExtFilter)
 	ON_BN_CLICKED(IDOK, &CKpilist::OnBnClickedOk)
+	ON_BN_CLICKED(IDC_KPI_HELP, &CKpilist::OnBnClickedHelp)
 	ON_WM_SIZE()
 	ON_WM_GETMINMAXINFO()
 	ON_WM_DESTROY()
@@ -113,8 +361,13 @@ BOOL CKpilist::OnInitDialog()
 	SetWindowText(LL14(L"kpi一覧", L"kpi list", L"Liste kpi", L"Elenco kpi", L"Lista kpi", L"kpi 목록", L"kpi 列表", L"قائمة kpi", L"Список kpi", L"kpi-Liste", L"Lista kpi", L"kpi-lijst", L"Lista kpi", L"kpi listesi"));
 	if (m_extFilterLbl.GetSafeHwnd())
 		m_extFilterLbl.SetWindowText(LL14(L"拡張子", L"Ext", L"Ext", L"Est", L"Ext", L"확장자", L"扩展名", L"امتداد", L"Расш", L"Erw", L"Ext", L"Ext", L"Rozsz", L"Uzantı"));
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	LayoutHelpBtn();
 	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
 	m_tooltip.AddTool(&m_okdummy, LL14(L"閉じます", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 	if (m_extFilter.GetSafeHwnd()) {
 		m_tooltip.AddTool(&m_extFilter, LL14(
 			L"拡張子で一覧を絞り込みます。入力すると即座に反映。空欄で全表示。. の有無は問いません。複数は空白や , / で区切れます。",
@@ -156,6 +409,8 @@ BOOL CKpilist::OnInitDialog()
 
 	// 初期レイアウト(kpi/拡張子 列を自動フィット。kpi 初期幅もここで拡げる)
 	LayoutControls();
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
@@ -247,8 +502,11 @@ void CKpilist::LayoutKpiColumns()
 void CKpilist::OnSize(UINT nType, int cx, int cy)
 {
 	CCustomBlurDialogBase::OnSize(nType, cx, cy);
-	if (nType == SIZE_MINIMIZED) return;
-	LayoutControls();
+	if (nType != SIZE_MINIMIZED) {
+		LayoutControls();
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
 }
 
 void CKpilist::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
@@ -318,7 +576,38 @@ void CKpilist::OnDestroy()
 		SaveSavedPlacement();
 		KpiPersistSavedata();
 	}
+	if (g_kpiHelpDlg && ::IsWindow(g_kpiHelpDlg->GetSafeHwnd()))
+		g_kpiHelpDlg->DestroyWindow();
 	CCustomBlurDialogBase::OnDestroy();
+}
+
+void CKpilist::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CKpilist::ShowHelpSheet()
+{
+	if (g_kpiHelpDlg && ::IsWindow(g_kpiHelpDlg->GetSafeHwnd())) {
+		g_kpiHelpDlg->ShowWindow(SW_SHOW);
+		g_kpiHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_kpiHelpDlg && !::IsWindow(g_kpiHelpDlg->GetSafeHwnd()))
+		g_kpiHelpDlg = nullptr;
+	CKpiHelpDlg* dlg = new CKpiHelpDlg(nullptr);
+	if (!dlg->Create(IDD_KPI_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_kpiHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CKpilist::OnBnClickedHelp()
+{
+	ShowHelpSheet();
 }
 
 BOOL kpichks[300];

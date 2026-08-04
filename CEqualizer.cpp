@@ -9,10 +9,283 @@
 #include "CPromptEngine.h"
 
 
+
 // CEqualizer ダイアログ
 
-IMPLEMENT_DYNAMIC(CEqualizer, CCustomBlurDialogExBase)
+namespace {
 
+class CEqHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_EQ_HELP };
+	explicit CEqHelpDlg(CWnd* pParent = nullptr)
+		: CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CEqHelpDlg* g_eqHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CEqHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CEqHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"イコライザー操作ガイド", L"Equalizer Guide", L"Guide égaliseur", L"Guida equalizzatore",
+		L"Guía del ecualizador", L"이퀄라이저 가이드", L"均衡器指南", L"دليل المعادل",
+		L"Руководство эквалайзера", L"Equalizer-Anleitung", L"Guia do equalizador", L"Equalizer-gids",
+		L"Przewodnik korektora", L"Ekolayzer kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CEqHelpDlg::OnOK() { DestroyWindow(); }
+void CEqHelpDlg::OnCancel() { DestroyWindow(); }
+void CEqHelpDlg::OnClose() { DestroyWindow(); }
+
+void CEqHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_eqHelpDlg == this)
+		g_eqHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CEqHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CEqHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"イコライザー操作ガイド", L"Equalizer — Guide", L"Égaliseur — Guide", L"Equalizzatore — Guida",
+		L"Ecualizador — Guía", L"이퀄라이저 — 가이드", L"均衡器 — 指南", L"المعادل — دليل",
+		L"Эквалайзер — руководство", L"Equalizer — Guide", L"Equalizador — Guia", L"Equalizer — Gids",
+		L"Korektor — przewodnik", L"Ekolayzer — kılavuz"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"15 バンド EQ・プリセット・グローバル調整・空間 FX・A/B 比較をまとめたパネルです。",
+		L"15-band EQ, presets, global controls, spatial FX, and A/B compare in one panel.",
+		L"EQ 15 bandes, préréglages, globales, FX spatiaux et A/B.",
+		L"EQ a 15 bande, preset, globali, FX spaziali e A/B.",
+		L"EQ de 15 bandas, presets, globales, FX espaciales y A/B.",
+		L"15밴드 EQ·프리셋·전역·공간 FX·A/B 비교를 한 패널에.",
+		L"15 段 EQ、预设、全局、空间效果与 A/B 对比合一面板。",
+		L"معادل 15 نطاقاً وإعدادات وقيم عامة وFX وأ/ب.",
+		L"15-полосный EQ, пресеты, глобальные, FX и A/B.",
+		L"15-Band-EQ, Presets, Global, Raum-FX und A/B.",
+		L"EQ 15 bandas, presets, globais, FX e A/B.",
+		L"15-bands EQ, presets, globaal, FX en A/B.",
+		L"EQ 15-pasmowy, presety, globalne, FX i A/B.",
+		L"15 bant EQ, ön ayarlar, global, FX ve A/B."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"バンドとプリセット", L"Bands & presets", L"Bandes et préréglages", L"Bande e preset",
+		L"Bandas y presets", L"밴드와 프리셋", L"频段与预设", L"النطاقات والإعدادات",
+		L"Полосы и пресеты", L"Bänder & Presets", L"Bandas e presets", L"Banden & presets",
+		L"Pasma i presety", L"Bantlar ve ön ayarlar"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・縦スライダー …… 25Hz〜16kHz の各帯域ゲイン。左の数値が現在値",
+		L"· Vertical sliders …… gain per band (25 Hz–16 kHz). Left number = value",
+		L"· Curseurs …… gain par bande (25 Hz–16 kHz). Nombre à gauche",
+		L"· Cursori …… gain per banda (25 Hz–16 kHz). Numero a sinistra",
+		L"· Deslizadores …… ganancia por banda (25 Hz–16 kHz). Número a la izq.",
+		L"· 세로 슬라이더 …… 25Hz~16kHz 대역 게인. 왼쪽 숫자=현재값",
+		L"· 竖滑块 …… 25Hz–16kHz 各频段增益；左侧数字为当前值",
+		L"· منزلقات …… كسب لكل نطاق (25 هرتز–16 كيلوهرتز). الرقم يساراً",
+		L"· Ползунки …… усиление полос (25 Гц–16 кГц). Число слева",
+		L"· Schieberegler …… Bandgain (25 Hz–16 kHz). Zahl links",
+		L"· Controles …… ganho por banda (25 Hz–16 kHz). Número à esquerda",
+		L"· Schuiven …… bandgain (25 Hz–16 kHz). Getal links",
+		L"· Suwaki …… wzmocnienie pasm (25 Hz–16 kHz). Liczba po lewej",
+		L"· Kaydırıcılar …… bant kazancı (25 Hz–16 kHz). Soldaki sayı")); y += lh;
+	body(L, y, LL14(
+		L"・プリセット …… ジャンル別カーブを一括適用。手動調整後もそのまま再生に反映",
+		L"· Preset …… apply genre curves at once. Manual tweaks still apply live",
+		L"· Préréglage …… courbes de genre. Ajustements manuels en direct",
+		L"· Preset …… curve per genere. Regolazioni manuali in tempo reale",
+		L"· Preset …… curvas por género. Ajustes manuales en vivo",
+		L"· 프리셋 …… 장르 커브를 일괄 적용. 수동 조정도 즉시 반영",
+		L"· 预设 …… 一键应用曲风曲线；手动调整也会即时生效",
+		L"· إعداد …… منحنيات الأنواع. التعديل اليدوي فوري",
+		L"· Пресет …… кривые жанров сразу. Ручная правка тоже сразу",
+		L"· Preset …… Genre-Kurven auf einmal. Manuell gilt live",
+		L"· Preset …… curvas de gênero de uma vez. Ajustes manuais ao vivo",
+		L"· Preset …… genre-curves in één keer. Handmatig geldt live",
+		L"· Preset …… krzywe gatunków naraz. Ręczne też na żywo",
+		L"· Ön ayar …… tür eğrilerini toplu uygula. Elle ayar da anında")); y += lh;
+	body(L, y, LL14(
+		L"・環境 …… 部屋の響きプリセット。「かかり具合」でウェット量を調整",
+		L"· Environment …… room acoustic presets. Effect slider = wet amount",
+		L"· Environnement …… salles. Curseur d'effet = wet",
+		L"· Ambiente …… stanze. Cursore effetto = wet",
+		L"· Entorno …… salas. Deslizador de efecto = wet",
+		L"· 환경 …… 방 음향 프리셋. 효과 슬라이더=웨트량",
+		L"· 环境 …… 房间混响预设；效果滑块控制 wet 量",
+		L"· البيئة …… إعدادات الغرف. شريط التأثير = الرطوبة",
+		L"· Среда …… пресеты комнат. Ползунок эффекта = wet",
+		L"· Umgebung …… Raum-Presets. Effektregler = Wet",
+		L"· Ambiente …… salas. Controle de efeito = wet",
+		L"· Omgeving …… kamerpresets. Effectschuif = wet",
+		L"· Środowisko …… presety pomieszczeń. Suwak efektu = wet",
+		L"· Ortam …… oda ön ayarları. Efekt kaydırıcısı = wet")); y += lh + 2;
+
+	// mini EQ curve diagram
+	{
+		const int gx = L, gy = y, gw = min(280, rc.Width() - L * 2), gh = lh * 2 + 8;
+		dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+		const int midY = gy + gh / 2;
+		dc.FillSolidRect(gx + 4, midY, gw - 8, 1, RGB(180, 180, 190));
+		POINT pts[8];
+		const int levels[] = { 20, 35, 55, 70, 60, 45, 30, 25 };
+		for (int i = 0; i < 8; ++i) {
+			pts[i].x = gx + 12 + i * ((gw - 24) / 7);
+			pts[i].y = gy + gh - 6 - levels[i] * (gh - 12) / 100;
+		}
+		CPen pen(PS_SOLID, 2, RGB(70, 120, 180));
+		CPen* oldPen = dc.SelectObject(&pen);
+		dc.Polyline(pts, 8);
+		dc.SelectObject(oldPen);
+		dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+		y = gy + gh + 4;
+	}
+
+	title(L, y, LL14(L"グローバル / FX / A-B", L"Global / FX / A-B", L"Global / FX / A-B", L"Globali / FX / A-B",
+		L"Global / FX / A-B", L"전역 / FX / A-B", L"全局 / 效果 / A-B", L"عام / FX / أ-ب",
+		L"Глобальные / FX / A-B", L"Global / FX / A-B", L"Global / FX / A-B", L"Globaal / FX / A-B",
+		L"Globalne / FX / A-B", L"Global / FX / A-B"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・マスター / 明瞭 / バランス / 密度 / 立体 …… 全体トーンの仕上げ用",
+		L"· Master / Clarity / Balance / Density / 3D …… overall tone finish",
+		L"· Maître / Clarté / Balance / Densité / 3D …… finition globale",
+		L"· Master / Chiarezza / Bilancio / Densità / 3D …… finitura",
+		L"· Máster / Claridad / Balance / Densidad / 3D …… acabado general",
+		L"· 마스터 / 명료 / 밸런스 / 밀도 / 입체 …… 전체 톤 마무리",
+		L"· 主控 / 清晰 / 平衡 / 密度 / 立体 …… 整体音色收尾",
+		L"· رئيسي / وضوح / توازن / كثافة / 3D …… إنهاء النغمة",
+		L"· Мастер / Чёткость / Баланс / Плотность / 3D …… общий тон",
+		L"· Master / Klarheit / Balance / Dichte / 3D …… Gesamtton",
+		L"· Mestre / Clareza / Balanço / Densidade / 3D …… tom geral",
+		L"· Master / Helderheid / Balans / Dichtheid / 3D …… eindtoon",
+		L"· Master / Klarność / Balans / Gęstość / 3D …… ogólny ton",
+		L"· Ana / Netlik / Denge / Yoğunluk / 3B …… genel ton")); y += lh;
+	body(L, y, LL14(
+		L"・リバーブ / コーラス / ディレイ …… 空間系 FX。値は再生に即時反映",
+		L"· Reverb / Chorus / Delay …… spatial FX. Changes apply live",
+		L"· Réverb / Chorus / Delay …… FX spatiaux. Appliqués en direct",
+		L"· Riverbero / Chorus / Delay …… FX spaziali. In tempo reale",
+		L"· Reverb / Chorus / Delay …… FX espaciales. En vivo",
+		L"· 리버브 / 코러스 / 딜레이 …… 공간 FX. 즉시 반영",
+		L"· 混响 / 合唱 / 延迟 …… 空间效果；即时生效",
+		L"· صدى / كورس / تأخير …… FX مكاني. يُطبَّق فوراً",
+		L"· Реверб / Хорус / Дилей …… пространственные FX. Сразу",
+		L"· Hall / Chorus / Delay …… Raum-FX. Sofort wirksam",
+		L"· Reverb / Chorus / Delay …… FX espaciais. Ao vivo",
+		L"· Galm / Chorus / Delay …… ruimte-FX. Meteen",
+		L"· Pogłos / Chorus / Delay …… FX przestrzenne. Natychmiast",
+		L"· Yankı / Koro / Gecikme …… mekansal FX. Anında")); y += lh;
+	body(L, y, LL14(
+		L"・A / B / 切替 …… 現在の EQ+グローバルをスロットに保存し、聴き比べ",
+		L"· A / B / Toggle …… store current EQ+global to a slot and A/B compare",
+		L"· A / B / Basculer …… enregistrer EQ+global et comparer",
+		L"· A / B / Alterna …… salva EQ+global e confronta",
+		L"· A / B / Alternar …… guardar EQ+global y comparar",
+		L"· A / B / 전환 …… 현재 EQ+전역을 슬롯에 저장해 비교",
+		L"· A / B / 切换 …… 将当前 EQ+全局存入槽位并对比试听",
+		L"· أ / ب / تبديل …… احفظ EQ+العام وقارن",
+		L"· A / B / Перекл. …… сохранить EQ+глобальные и сравнить",
+		L"· A / B / Umsch. …… EQ+Global speichern und vergleichen",
+		L"· A / B / Alternar …… salvar EQ+global e comparar",
+		L"· A / B / Wisselen …… EQ+globaal opslaan en vergelijken",
+		L"· A / B / Przełącz …… zapisz EQ+globalne i porównaj",
+		L"· A / B / Geç …… mevcut EQ+globali kaydedip karşılaştır")); y += lh;
+	body(L, y, LL14(
+		L"・イコライザーリセット / グローバルリセット …… 帯域のみ、または全体を戻す",
+		L"· EQ reset / Global reset …… restore bands only, or everything",
+		L"· Reset EQ / global …… bandes seules, ou tout",
+		L"· Reset EQ / globale …… solo bande, o tutto",
+		L"· Reset EQ / global …… solo bandas, o todo",
+		L"· EQ 리셋 / 전역 리셋 …… 대역만 또는 전체 복원",
+		L"· EQ 重置 / 全局重置 …… 仅频段，或全部恢复",
+		L"· إعادة EQ / عامة …… النطاقات فقط أو الكل",
+		L"· Сброс EQ / глобальный …… только полосы или всё",
+		L"· EQ-/Global-Reset …… nur Bänder oder alles",
+		L"· Reset EQ / global …… só bandas ou tudo",
+		L"· EQ-/globaal reset …… alleen banden of alles",
+		L"· Reset EQ / globalny …… tylko pasma lub wszystko",
+		L"· EQ sıfırla / genel sıfırla …… yalnızca bantlar veya tümü")); y += lh + 2;
+	muted(L, y, LL14(
+		L"キャプションの「?」でこのガイドを開けます。各スライダーにマウスを置くと個別の説明が出ます。",
+		L"Open this guide from caption \"?\". Hover sliders for per-control tips.",
+		L"Ouvrir via « ? ». Survolez les curseurs pour les détails.",
+		L"Apri da « ? ». Passa sui cursori per i dettagli.",
+		L"Ábralo con « ? ». Pase el ratón por los deslizadores.",
+		L"캡션「?」로 가이드를 엽니다. 슬라이더에 올리면 개별 설명이 나옵니다.",
+		L"通过标题栏「?」打开本指南；悬停滑块可看单项说明。",
+		L"افتح الدليل من «؟». مرّر على المنزلقات للتفاصيل.",
+		L"Откройте через «?». Наведите на ползунки для подсказок.",
+		L"Öffnen über „?“. Hover über Regler zeigt Tipps.",
+		L"Abra pelo «?». Passe o mouse nos controles para dicas.",
+		L"Open via «?». Hover over schuiven voor tips.",
+		L"Otwórz przez «?». Najedź na suwaki, by zobaczyć podpowiedzi.",
+		L"Başlık «?» ile açın. Kaydırıcılara gelince ayrıntılı ipucu çıkar."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
+IMPLEMENT_DYNAMIC(CEqualizer, CCustomBlurDialogExBase)
 CEqualizer::CEqualizer(CWnd* pParent /*=nullptr*/)
 	: CCustomBlurDialogExBase(IDD_EQUALIZER, pParent)
 {
@@ -93,9 +366,11 @@ void CEqualizer::DoDataExchange(CDataExchange* pDX)
 	bind(pDX, IDC_STATIC_e20, m_reverbi);
 	bind(pDX, IDC_STATIC_e21, m_chorusi);
 	bind(pDX, IDC_STATIC_e22, m_delayi);
+
 	bind(pDX, IDC_EQ_ABA, m_abA);
 	bind(pDX, IDC_EQ_ABB, m_abB);
 	bind(pDX, IDC_EQ_ABTOG, m_abTog);
+	bind(pDX, IDC_EQ_HELP, m_help);
 }
 
 
@@ -104,6 +379,7 @@ BEGIN_MESSAGE_MAP(CEqualizer, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_COMBO5, &CEqualizer::OnCbnSelchangeCombo5)
 	ON_WM_TIMER()
 	ON_WM_DESTROY()
+	ON_WM_SIZE()
 	ON_MESSAGE(WM_EQ_KEY_UPDATE, &CEqualizer::OnEqKeyUpdate)
 	ON_BN_CLICKED(IDOK3, &CEqualizer::OnBnClickedOk3)
 	ON_BN_CLICKED(IDOK, &CEqualizer::OnBnClickedOk)
@@ -111,8 +387,8 @@ BEGIN_MESSAGE_MAP(CEqualizer, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_EQ_ABA, &CEqualizer::OnBnClickedAbA)
 	ON_BN_CLICKED(IDC_EQ_ABB, &CEqualizer::OnBnClickedAbB)
 	ON_BN_CLICKED(IDC_EQ_ABTOG, &CEqualizer::OnBnClickedAbTog)
+	ON_BN_CLICKED(IDC_EQ_HELP, &CEqualizer::OnBnClickedHelp)
 END_MESSAGE_MAP()
-
 extern save savedata;
 extern int stflg;
 
@@ -242,9 +518,10 @@ BOOL CEqualizer::OnInitDialog()
 	addTip(IDC_COMBO5, LL14(L"イコライザープリセットを選択します", L"Select equalizer preset", L"Choisir un preset d'egaliseur", L"Seleziona preset equalizzatore", L"Seleccionar preset del ecualizador", L"이퀄라이저 프리셋 선택", L"选择均衡器预设", L"اختر إعداد المعادل", L"Выбрать пресет эквалайзера", L"Equalizer-Voreinstellung wahlen", L"Selecionar preset do equalizador", L"Equalizerpreset kiezen", L"Wybierz preset korektora", L"Ekolayzer on ayarini sec"));
 	addTip(IDC_EQ_ABA, LL14(L"現在のEQ/グローバル値をスロットAに保存", L"Store current EQ/global values to slot A", L"Enregistrer EQ/global dans A", L"Salva EQ/global in A", L"Guardar EQ/global en A", L"현재 EQ/전역을 A에 저장", L"将当前EQ/全局存到A", L"حفظ EQ/العام في A", L"Сохранить EQ/глобальные в A", L"EQ/Global in A speichern", L"Salvar EQ/global em A", L"EQ/globaal in A opslaan", L"Zapisz EQ/globalne w A", L"EQ/global degerleri A'ya kaydet"));
 	addTip(IDC_EQ_ABB, LL14(L"現在のEQ/グローバル値をスロットBに保存", L"Store current EQ/global values to slot B", L"Enregistrer EQ/global dans B", L"Salva EQ/global in B", L"Guardar EQ/global en B", L"현재 EQ/전역을 B에 저장", L"将当前EQ/全局存到B", L"حفظ EQ/العام في B", L"Сохранить EQ/глобальные в B", L"EQ/Global in B speichern", L"Salvar EQ/global em B", L"EQ/globaal in B opslaan", L"Zapisz EQ/globalne w B", L"EQ/global degerleri B'ye kaydet"));
-	addTip(IDC_EQ_ABTOG, LL14(L"スロットA/Bを切り替え", L"Toggle between slots A and B", L"Basculer entre A et B", L"Alterna tra A e B", L"Alternar entre A y B", L"A/B 슬롯 전환", L"在A/B槽间切换", L"التبديل بين A و B", L"Переключить A/B", L"Zwischen A und B umschalten", L"Alternar entre A e B", L"Wissel tussen A en B", L"Przelacz A/B", L"A/B arasinda gec"));
-	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
+	addTip(IDC_EQ_ABTOG, LL14(L"スロットA/Bを切り替え", L"Toggle between slots A and B", L"Basculer entre A et B", L"Alterna tra A e B", L"Alternar entre A y B", L"A/B 슬롯 전환", L"在A/B槽间切换", L"التبديل بين A و B", L"Переключить A/B", L"Zwischen A und B umschalten", L"Alternar entre A e B", L"Wissel tussen A en B", L"Przelacz A/B", L"A/B arasinda gec"));
+	addTip(IDC_EQ_HELP, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 	m_s0.SetMode(1);
 	m_s1.SetMode(1);
 	m_s2.SetMode(1);
@@ -577,13 +854,20 @@ BOOL CEqualizer::OnInitDialog()
 	RegisterEqKeyUiHwnd(m_hWnd);
 	ApplyKeyCodesUi();
 
+
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	LayoutHelpBtn();
+
 	SetTimer(1, 50, NULL);
 	EnableMainWindowLock(&savedata.eqMainLock, TRUE);
 	CCC_MainLockSetHeaderRow(m_hWnd, 0, 18);
 	CCC_MainLockBringToFront(m_hWnd);
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	return TRUE;
 }
-
 void CEqualizer::ApplyTitleFont()
 {
 	if (!m_t.GetSafeHwnd())
@@ -721,13 +1005,53 @@ LRESULT CEqualizer::OnEqKeyUpdate(WPARAM, LPARAM)
 	return 0;
 }
 
+
 void CEqualizer::OnDestroy()
 {
 	UnregisterEqKeyUiHwnd(m_hWnd);
 	KillTimer(1);
+	if (g_eqHelpDlg && ::IsWindow(g_eqHelpDlg->GetSafeHwnd()))
+		g_eqHelpDlg->DestroyWindow();
 	CCustomBlurDialogExBase::OnDestroy();
 }
 
+void CEqualizer::OnSize(UINT nType, int cx, int cy)
+{
+	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
+	if (nType != SIZE_MINIMIZED) {
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
+}
+
+void CEqualizer::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CEqualizer::ShowHelpSheet()
+{
+	if (g_eqHelpDlg && ::IsWindow(g_eqHelpDlg->GetSafeHwnd())) {
+		g_eqHelpDlg->ShowWindow(SW_SHOW);
+		g_eqHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_eqHelpDlg && !::IsWindow(g_eqHelpDlg->GetSafeHwnd()))
+		g_eqHelpDlg = nullptr;
+	CEqHelpDlg* dlg = new CEqHelpDlg(nullptr);
+	if (!dlg->Create(IDD_EQ_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_eqHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CEqualizer::OnBnClickedHelp()
+{
+	ShowHelpSheet();
+}
 int backms = 0;
 void CEqualizer::OnTimer(UINT_PTR nIDEvent)
 {

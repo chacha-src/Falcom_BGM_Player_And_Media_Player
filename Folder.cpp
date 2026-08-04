@@ -85,6 +85,7 @@ void CFolder::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_BUTTON55, m25);
 	DDX_Control(pDX, IDC_BUTTON56, m27);
 	DDX_Control(pDX, IDC_BUTTON57, m_fsafa);
+	DDX_Control(pDX, IDC_FD_HELP, m_help);
 	static const UINT folLblIds[] = {
 		IDC_FOL_LBL01, IDC_FOL_LBL02, IDC_FOL_LBL03, IDC_FOL_LBL04, IDC_FOL_LBL05,
 		IDC_FOL_LBL06, IDC_FOL_LBL07, IDC_FOL_LBL08, IDC_FOL_LBL09, IDC_FOL_LBL10,
@@ -131,6 +132,9 @@ BEGIN_MESSAGE_MAP(CFolder, CCustomBlurDialogBase)
 	ON_WM_CREATE()
 	ON_BN_CLICKED(IDOK, &CFolder::OnBnClickedOk)
 	ON_BN_CLICKED(IDCANCEL, &CFolder::OnBnClickedCancel)
+	ON_BN_CLICKED(IDC_FD_HELP, &CFolder::OnBnClickedHelp)
+	ON_WM_SIZE()
+	ON_WM_DESTROY()
 	ON_WM_TIMER()
 END_MESSAGE_MAP()
 
@@ -200,6 +204,23 @@ BOOL CFolder::OnInitDialog()
 	}
 	EnableMainWindowLock(&savedata.folderMainLock);
 	CCC_MainLockBringToFront(m_hWnd);
+
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	LayoutHelpBtn();
+
+	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
+		m_tooltip.AddTool(&m_help, LL14(
+			L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida",
+			L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل",
+			L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen",
+			L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 420, 12000);
+	}
+
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	return TRUE;  // コントロールにフォーカスを設定しないとき、戻り値は TRUE となります
 	              // 例外: OCX プロパティ ページの戻り値は FALSE となります
 }
@@ -681,4 +702,250 @@ void CFolder::OnTimer(UINT_PTR nIDEvent)
 {
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
 	CCustomBlurDialogBase::OnTimer(nIDEvent);
+}
+
+BOOL CFolder::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
+}
+
+namespace {
+
+class CFdHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_FD_HELP };
+	explicit CFdHelpDlg(CWnd* pParent = nullptr) : CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CFdHelpDlg* g_fdHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CFdHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CFdHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"フォルダ設定操作ガイド", L"Folder Settings Guide", L"Guide des dossiers", L"Guida cartelle",
+		L"Guía de carpetas", L"폴더 설정 가이드", L"文件夹设置指南", L"دليل المجلدات",
+		L"Руководство по папкам", L"Ordner-Anleitung", L"Guia de pastas", L"Mapgids",
+		L"Przewodnik folderów", L"Klasör kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CFdHelpDlg::OnOK() { DestroyWindow(); }
+void CFdHelpDlg::OnCancel() { DestroyWindow(); }
+void CFdHelpDlg::OnClose() { DestroyWindow(); }
+
+void CFdHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_fdHelpDlg == this)
+		g_fdHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CFdHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CFdHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"フォルダ設定操作ガイド", L"Folder Settings — Guide", L"Guide dossiers", L"Guida cartelle",
+		L"Guía carpetas", L"폴더 설정 가이드", L"文件夹设置指南", L"دليل المجلدات",
+		L"Руководство по папкам", L"Ordner-Guide", L"Guia pastas", L"Mapgids",
+		L"Przewodnik folderów", L"Klasör kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"各ゲームのインストール先を登録し、曲一覧や KPI 展開に使います。",
+		L"Register each game install path for song lists and KPI extraction.",
+		L"Enregistrez le dossier de chaque jeu (listes / KPI).",
+		L"Registra il percorso di ogni gioco (liste / KPI).",
+		L"Registra la ruta de cada juego (listas / KPI).",
+		L"각 게임 설치 경로를 등록해 곡 목록·KPI 전개에 사용합니다.",
+		L"登记各游戏安装路径，供曲目列表与 KPI 展开使用。",
+		L"سجّل مسار تثبيت كل لعبة للقوائم وKPI.",
+		L"Укажите папку каждой игры для списков и KPI.",
+		L"Spielordner für Listen und KPI hinterlegen.",
+		L"Registe a pasta de cada jogo (listas / KPI).",
+		L"Registreer de map van elk spel (lijsten / KPI).",
+		L"Zarejestruj folder każdej gry (listy / KPI).",
+		L"Her oyunun kurulum yolunu kaydedin (listeler / KPI)."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"基本操作", L"Basics", L"Bases", L"Basi", L"Básicos", L"기본", L"基本", L"أساسيات",
+		L"Основы", L"Grundlagen", L"Básicos", L"Basis", L"Podstawy", L"Temeller"));
+	y += titleLh;
+	body(L, y, LL14(L"・「...」 …… フォルダ参照。選んだパスが編集欄に入ります", L"· \"...\" …… browse folder; selection fills the edit field", L"· « ... » …… parcourir; le chemin remplit le champ", L"· \"...\" …… sfoglia; il percorso va nel campo",
+		L"· \"...\" …… examinar; la ruta llena el campo", L"· \"...\" …… 폴더 찾아보기. 선택 경로가 입력란에", L"· \"...\" …… 浏览文件夹，所选路径填入编辑框", L"· \"...\" …… استعراض؛ المسار يملأ الحقل",
+		L"· «...» …… обзор папки; путь в поле", L"· \"...\" …… Ordner wählen; Pfad ins Feld", L"· \"...\" …… procurar; caminho vai ao campo", L"· \"...\" …… bladeren; pad vult het veld",
+		L"· \"...\" …… przeglądaj; ścieżka trafia do pola", L"· \"...\" …… klasöre göz at; yol alana gelir")); y += lh;
+	body(L, y, LL14(L"・OK …… 入力中のパスを保存して閉じます", L"· OK …… save the paths and close", L"· OK …… enregistrer et fermer", L"· OK …… salva i percorsi e chiudi",
+		L"· OK …… guardar rutas y cerrar", L"· OK …… 경로를 저장하고 닫습니다", L"· OK …… 保存路径并关闭", L"· موافق …… حفظ المسارات والإغلاق",
+		L"· OK …… сохранить пути и закрыть", L"· OK …… Pfade speichern und schließen", L"· OK …… gravar caminhos e fechar", L"· OK …… paden opslaan en sluiten",
+		L"· OK …… zapisz ścieżki i zamknij", L"· OK …… yolları kaydedip kapat")); y += lh;
+	body(L, y, LL14(L"・KPI ver5設定 …… KPI プラグイン ver5 の詳細設定を開きます", L"· KPI ver5 Settings …… open KPI plugin v5 options", L"· Paramètres KPI ver5 …… options du plugin", L"· Impostazioni KPI ver5 …… opzioni plugin",
+		L"· Config. KPI ver5 …… opciones del plugin", L"· KPI ver5 설정 …… KPI 플러그인 v5 옵션", L"· KPI ver5 设置 …… 打开 KPI 插件 v5 选项", L"· إعدادات KPI ver5 …… خيارات المكون",
+		L"· KPI ver5 …… настройки плагина v5", L"· KPI ver5 …… Plugin-Optionen öffnen", L"· KPI ver5 …… opções do plugin", L"· KPI ver5 …… pluginopties openen",
+		L"· KPI ver5 …… otwórz opcje wtyczki", L"· KPI ver5 …… eklenti seçeneklerini aç")); y += lh + 4;
+
+	// mini diagram: label | path | ...
+	title(L, y, LL14(L"行の見方", L"Row layout", L"Disposition", L"Disposizione", L"Filas", L"행 구성", L"行布局", L"تخطيط الصف",
+		L"Строка", L"Zeilenlayout", L"Linha", L"Rij-indeling", L"Układ wiersza", L"Satır düzeni"));
+	y += titleLh;
+	const int gx = L, gy = y, gw = min(300, rc.Width() - L * 2), gh = lh * 2 + 10;
+	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+	dc.FillSolidRect(gx + 4, gy + 6, 40, gh - 12, RGB(90, 120, 170));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + 8, gy + 8, L"YS6");
+	dc.FillSolidRect(gx + 50, gy + 6, gw - 110, gh - 12, RGB(255, 255, 255));
+	dc.FrameRect(CRect(gx + 50, gy + 6, gx + gw - 60, gy + gh - 6), &frameBrush);
+	dc.SetTextColor(RGB(80, 80, 95));
+	dc.TextOut(gx + 56, gy + 8, L"C:\\Games\\...");
+	dc.FillSolidRect(gx + gw - 52, gy + 6, 44, gh - 12, RGB(180, 140, 60));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + gw - 44, gy + 8, L"...");
+	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+	y = gy + gh + 4;
+	muted(L, y, LL14(
+		L"左=ゲーム名、中央=パス、右の「...」=参照ボタン。",
+		L"Left = game name, center = path, right \"...\" = browse.",
+		L"Gauche = jeu, centre = chemin, « ... » = parcourir.",
+		L"Sinistra = gioco, centro = percorso, \"...\" = sfoglia.",
+		L"Izq. = juego, centro = ruta, \"...\" = examinar.",
+		L"왼쪽=게임명, 가운데=경로, 오른쪽 \"...\"=찾아보기.",
+		L"左=游戏名，中=路径，右\"...\"=浏览。",
+		L"يسار=اللعبة، وسط=المسار، \"...\"=استعراض.",
+		L"Слева=игра, центр=путь, «...»=обзор.",
+		L"Links=Spiel, Mitte=Pfad, \"...\"=Durchsuchen.",
+		L"Esq.=jogo, centro=caminho, \"...\"=procurar.",
+		L"Links=spel, midden=pad, \"...\"=bladeren.",
+		L"Lewo=gra, środek=ścieżka, \"...\"=przeglądaj.",
+		L"Sol=oyun, orta=yol, \"...\"=göz at."));
+	y += lh + 6;
+
+	title(L, y, LL14(L"補足", L"Notes", L"Notes", L"Note", L"Notas", L"보완", L"补充", L"ملاحظات",
+		L"Заметки", L"Hinweise", L"Notas", L"Opmerkingen", L"Uwagi", L"Notlar"));
+	y += titleLh;
+	body(L, y, LL14(L"・パスは曲の取り込み・アーカイブ展開の起点になります", L"· Paths are the root for song import and archive extract", L"· Chemins = base d'import / extraction", L"· Percorsi = base import / estrazione",
+		L"· Rutas = base de importación / extracción", L"· 경로는 곡 가져오기·아카이브 전개의 기준", L"· 路径是导入曲目与解压归档的起点", L"· المسارات أساس الاستيراد والاستخراج",
+		L"· Пути — корень импорта и распаковки", L"· Pfade = Wurzel für Import/Extraktion", L"· Caminhos = raiz de importação/extração", L"· Paden = basis voor import/extractie",
+		L"· Ścieżki = baza importu/rozpakowania", L"· Yollar = içe aktarma/çıkarma kökü")); y += lh;
+	muted(L, y, LL14(
+		L"未設定のゲームは機能が使えません。必要なタイトルだけ指定すれば十分です。",
+		L"Unset games stay unavailable. Set only the titles you need.",
+		L"Jeux non définis = indisponibles. Définissez seulement ceux utiles.",
+		L"Giochi non impostati = non disponibili. Imposta solo i necessari.",
+		L"Juegos sin ruta = no disponibles. Configure solo los necesarios.",
+		L"미설정 게임은 사용할 수 없습니다. 필요한 타이틀만 지정하면 됩니다.",
+		L"未设置的游戏不可用。只需指定需要的标题。",
+		L"الألعاب غير المعيّنة غير متاحة. عيّن ما تحتاجه فقط.",
+		L"Не заданные игры недоступны. Укажите только нужные.",
+		L"Unsetzte Spiele sind nicht nutzbar. Nur benötigte setzen.",
+		L"Jogos sem pasta ficam indisponíveis. Defina só os necessários.",
+		L"Niet ingestelde spellen zijn niet beschikbaar. Stel alleen nodige in.",
+		L"Gry bez ścieżki są niedostępne. Ustaw tylko potrzebne.",
+		L"Ayarlanmayan oyunlar kullanılamaz. Sadece gerekenleri ayarlayın."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
+void CFolder::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CFolder::ShowHelpSheet()
+{
+	if (g_fdHelpDlg && ::IsWindow(g_fdHelpDlg->GetSafeHwnd())) {
+		g_fdHelpDlg->ShowWindow(SW_SHOW);
+		g_fdHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_fdHelpDlg && !::IsWindow(g_fdHelpDlg->GetSafeHwnd()))
+		g_fdHelpDlg = nullptr;
+	CFdHelpDlg* dlg = new CFdHelpDlg(nullptr);
+	if (!dlg->Create(IDD_FD_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_fdHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CFolder::OnBnClickedHelp()
+{
+	ShowHelpSheet();
+}
+
+void CFolder::OnSize(UINT nType, int cx, int cy)
+{
+	CCustomBlurDialogBase::OnSize(nType, cx, cy);
+	if (nType != SIZE_MINIMIZED) {
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
+}
+
+void CFolder::OnDestroy()
+{
+	if (g_fdHelpDlg && ::IsWindow(g_fdHelpDlg->GetSafeHwnd()))
+		g_fdHelpDlg->DestroyWindow();
+	CCustomBlurDialogBase::OnDestroy();
 }

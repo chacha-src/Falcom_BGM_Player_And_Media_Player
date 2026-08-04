@@ -21,6 +21,9 @@ public:
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
 	DECLARE_MESSAGE_MAP()
 
 public:
@@ -29,8 +32,13 @@ public:
 	afx_msg void OnBnClickedWavExportBrowse();
 	afx_msg void OnBnClickedWavExportClose();
 	afx_msg void OnBnClickedCoverClear();
+	afx_msg void OnBnClickedHelp();
 	afx_msg void OnDropFiles(HDROP hDropInfo);
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnDestroy();
 
+	CCustomStandardButton m_help;
+	CToolTipCtrl m_tooltip;
 	CCustomEdit m_loop;
 	CCustomEdit m_path;
 	CCustomStatic m_status;

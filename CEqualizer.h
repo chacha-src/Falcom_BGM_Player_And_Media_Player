@@ -29,6 +29,9 @@ public:
 #endif
 	CToolTipCtrl m_tooltip;
 	int mod = 0;
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
+
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV サポート
 
@@ -132,6 +135,9 @@ public:
 	void SyncSlidersFromSavedata();
 	afx_msg LRESULT OnEqKeyUpdate(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnDestroy();
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnBnClickedHelp();
+	CCustomStandardButton m_help;
 	CCustomSliderCtrl m_reverb;
 	CCustomSliderCtrl m_chorus;
 	CCustomSliderCtrl m_delay;

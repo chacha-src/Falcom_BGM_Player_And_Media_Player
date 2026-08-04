@@ -105,6 +105,9 @@ public:
     // ノイズ系とみなす最低確信度(コサイン類似度)。楽器側とのマージン判定と併用。
     static constexpr float kHarmonicProfileNoiseMinConfidence = 0.92f;
 
+    void LayoutHelpBtn();
+    void ShowHelpSheet();
+
 protected:
     virtual void DoDataExchange(CDataExchange* pDX);
     virtual BOOL OnInitDialog();
@@ -116,6 +119,8 @@ protected:
     afx_msg void OnMove(int x, int y);
     afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg void OnClose();
+    afx_msg void OnDestroy();
+    afx_msg void OnBnClickedHelp();
     afx_msg LRESULT OnSyncRequest(WPARAM wParam, LPARAM lParam);
     afx_msg LRESULT OnAnalysisDone(WPARAM wParam, LPARAM lParam);
     afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
@@ -581,4 +586,7 @@ private:
     void PushDisplayFrames();
     void ClearRollHistory();
     void RequestFullRollRedraw();
+
+    CCustomStandardButton m_help;
+    CToolTipCtrl m_tooltip;
 };

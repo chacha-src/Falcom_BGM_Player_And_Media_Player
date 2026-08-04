@@ -25,6 +25,7 @@ protected:
 	CCustomStatic m_val[kRowMax];
 	CCustomStandardButton m_reset;
 	CCustomStandardButton m_ok;
+	CCustomStandardButton m_help;
 	CToolTipCtrl m_tooltip;
 	CFont m_fontRow;
 
@@ -37,6 +38,8 @@ protected:
 	void SyncSavedataFromSliders();
 	void UpdateValueLabels();
 	void SaveWindowPos();
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
 	static int ClampPct(int v);
 
 	virtual BOOL OnInitDialog();
@@ -45,8 +48,10 @@ protected:
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnReset();
 	afx_msg void OnOk();
+	afx_msg void OnBnClickedHelp();
 	afx_msg void OnClose();
 	afx_msg void OnDestroy();
+	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnMove(int x, int y);
 	DECLARE_MESSAGE_MAP()
 };

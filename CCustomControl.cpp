@@ -11125,10 +11125,60 @@ static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd)
 {
     if (!hWnd) return FALSE;
     const UINT id = (UINT)::GetDlgCtrlID(hWnd);
-    return id == IDC_MAINWIN_LOCK
+    if (id == IDC_MAINWIN_LOCK
         || id == IDC_CAP_CLOSE || id == IDC_CAP_MIN || id == IDC_CAP_MAX
-        || id == IDC_CAP_SETTINGS || id == IDC_CAP_PIN
-        || id == IDC_SC_HELP;
+        || id == IDC_CAP_SETTINGS || id == IDC_CAP_PIN)
+        return TRUE;
+    // キャプション隣の「?」操作ガイド（アクリル帯で欠けないよう chrome 扱い）
+    static const UINT kHelpChromeIds[] = {
+        IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
+        IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
+        IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
+        IDC_OGG_HELP, IDC_MP_CHEATBTN
+    };
+    for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
+        if (id == kHelpChromeIds[i])
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL CCC_IsCaptionHelpChromeId(UINT id)
+{
+    static const UINT kHelpChromeIds[] = {
+        IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
+        IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
+        IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
+        IDC_OGG_HELP, IDC_MP_CHEATBTN
+    };
+    for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
+        if (id == kHelpChromeIds[i])
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static HWND CCC_FindCaptionHelpChrome(HWND hDlg)
+{
+    if (!hDlg || !::IsWindow(hDlg)) return NULL;
+    static const UINT kHelpChromeIds[] = {
+        IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
+        IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
+        IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
+        IDC_OGG_HELP, IDC_MP_CHEATBTN
+    };
+    for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
+        HWND h = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
+        if (h && ::IsWindow(h))
+            return h;
+    }
+    return NULL;
+}
+
+// 表示前でも HWND があれば「?」1 枠分を確保（追随が P/? に被るのを防ぐ）
+static int CCC_CaptionHelpChromeReserve(HWND hDlg)
+{
+    return CCC_FindCaptionHelpChrome(hDlg) ? (CCC_CAP_BTN + CCC_CAP_GAP) : 0;
 }
 
 // PROPAGATE 後もキャプション帯は透過描画（チェック等）。ボタンは Opaque 経路。
@@ -11456,12 +11506,85 @@ static void CCC_CaptionGetTitleRight(HWND hDlg, CCC_CaptionEntry* e, int& titleR
     const int sysN = CCC_CaptionSysBtnCount(e);
     const int extraN = CCC_CaptionExtraBtnCount(e);
     const int lockW = CCC_MainLockGetReserveWidth(hDlg);
+    // オーバーレイ式「メインに追随」は GetReserveWidth=0 なので、キャプション内に描かれている分を別途確保
+    int lockOverlayW = 0;
+    if (lockW <= 0 && CCC_GetCustomCaptionHeight(hDlg) > 0) {
+        CRect lockRc;
+        CCC_MainLockGetOverlayRect(hDlg, lockRc);
+        if (!lockRc.IsRectEmpty() && lockRc.top < CCC_GetCustomCaptionHeight(hDlg))
+            lockOverlayW = lockRc.Width() + CCC_CAP_GAP;
+    }
+    const int helpW = CCC_CaptionHelpChromeReserve(hDlg);
     titleRight = cr.right - CCC_CAP_RIGHT_MARGIN
         - sysN * (CCC_CAP_BTN + CCC_CAP_GAP)
         - extraN * (CCC_CAP_BTN + CCC_CAP_GAP)
-        - ((lockW > 0) ? (lockW + CCC_CAP_GAP) : 0);
+        - ((lockW > 0) ? (lockW + CCC_CAP_GAP) : 0)
+        - lockOverlayW
+        - helpW;
     if (titleRight < 28)
         titleRight = 28;
+}
+
+// CAP 配置と同じ規則で「ピン左端」を求める
+// CCC_CaptionLayout: Close を置いた直後に x-=(BTN+GAP) してから Max?/Min?/Settings?/Pin。
+// has* フラグだけでなく実 HWND があるときだけスロットを消費（無いのに空きが出るのを防ぐ）。
+static int CCC_CaptionPinLeft(HWND hDlg, const CCC_CaptionEntry* e)
+{
+    if (!hDlg || !e || !::IsWindow(hDlg))
+        return 0;
+    // レイアウト後は実ウィンドウ位置が最優先
+    if (e->pPin && ::IsWindow(e->pPin->GetSafeHwnd()) && e->pPin->IsWindowVisible()) {
+        CRect pr;
+        e->pPin->GetWindowRect(&pr);
+        ::ScreenToClient(hDlg, &pr.TopLeft());
+        ::ScreenToClient(hDlg, &pr.BottomRight());
+        return pr.left;
+    }
+    CRect cr;
+    ::GetClientRect(hDlg, &cr);
+    int x = cr.right - CCC_CAP_RIGHT_MARGIN - CCC_CAP_BTN; // Close left
+    // Close を置いたあと同じく 1 スロット左へ
+    x -= (CCC_CAP_BTN + CCC_CAP_GAP);
+    if (e->hasMax && e->pMax && ::IsWindow(e->pMax->GetSafeHwnd()))
+        x -= (CCC_CAP_BTN + CCC_CAP_GAP);
+    if (e->hasMin && e->pMin && ::IsWindow(e->pMin->GetSafeHwnd()))
+        x -= (CCC_CAP_BTN + CCC_CAP_GAP);
+    if (e->hasSettings && e->pSettings && ::IsWindow(e->pSettings->GetSafeHwnd()))
+        x -= (CCC_CAP_BTN + CCC_CAP_GAP);
+    return x;
+}
+
+void CCC_CaptionPlaceHelpBtn(HWND hDlg, CWnd* pHelp)
+{
+    if (!hDlg || !::IsWindow(hDlg) || !pHelp || !pHelp->GetSafeHwnd())
+        return;
+    if (!CCC_IsCaptionHelpChromeId((UINT)pHelp->GetDlgCtrlID()))
+        return;
+
+    CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
+    if (!e || !e->installed)
+        return;
+
+    const int btn = CCC_CAP_BTN;
+    const int gap = CCC_CAP_GAP;
+    const int pinLeft = CCC_CaptionPinLeft(hDlg, e);
+    const int y = (e->height > btn) ? (e->height - btn) / 2 : 2;
+    // 右から: × Max? Min? ⚙? P ←?← メインに追従
+    int x = pinLeft - gap - btn;
+    if (x < 4) x = 4;
+
+    CRect cur;
+    pHelp->GetWindowRect(&cur);
+    ::ScreenToClient(hDlg, &cur.TopLeft());
+    ::ScreenToClient(hDlg, &cur.BottomRight());
+    if (cur.left == x && cur.top == y && cur.Width() == btn && cur.Height() == btn) {
+        // 位置は合っていても P の下に沈んでいることがあるので前面へ
+        pHelp->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        return;
+    }
+    pHelp->SetWindowPos(&CWnd::wndTop, x, max(0, y), btn, btn,
+        SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
 void CCC_CaptionLayout(HWND hDlg)
@@ -11499,7 +11622,41 @@ void CCC_CaptionLayout(HWND hDlg)
             SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOCOPYBITS);
     }
 
+    // P を置いた後に、実 Pin 左端基準で「?」→ その左に「メインに追従」
+    static const UINT kHelpChromeIds[] = {
+        IDC_SC_HELP, IDC_PL_HELP, IDC_AN_HELP, IDC_PR_HELP, IDC_EQ_HELP,
+        IDC_PT_HELP, IDC_RD_HELP, IDC_DR_HELP, IDC_WE_HELP, IDC_TC_HELP,
+        IDC_TE_HELP, IDC_FD_HELP, IDC_KPI_HELP, IDC_SY_HELP, IDC_PRT_HELP,
+        IDC_OGG_HELP, IDC_MP_CHEATBTN
+    };
+    for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
+        HWND hHelp = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
+        if (!hHelp || !::IsWindow(hHelp))
+            continue;
+        CWnd* pHelp = CWnd::FromHandlePermanent(hHelp);
+        if (!pHelp)
+            pHelp = CWnd::FromHandle(hHelp);
+        if (!pHelp)
+            continue;
+        // 未表示でも位置だけ合わせる（初回に P の裏に残るのを防ぐ）
+        if (!pHelp->IsWindowVisible())
+            pHelp->ShowWindow(SW_SHOWNA);
+        CCC_CaptionPlaceHelpBtn(hDlg, pHelp);
+    }
+
     CCC_MainLockBringToFront(hDlg);
+    // 追随を前面にしたあと、? が沈まないよう再度前面へ
+    for (int i = 0; i < (int)_countof(kHelpChromeIds); ++i) {
+        HWND hHelp = ::GetDlgItem(hDlg, kHelpChromeIds[i]);
+        if (!hHelp || !::IsWindowVisible(hHelp))
+            continue;
+        CWnd* pHelp = CWnd::FromHandlePermanent(hHelp);
+        if (!pHelp)
+            pHelp = CWnd::FromHandle(hHelp);
+        if (pHelp)
+            pHelp->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 }
 
 void CCC_CaptionPaint(CDC& dc, HWND hDlg)
@@ -11883,11 +12040,28 @@ static void CCC_MainLockGetClientRect(HWND hDlg, CRect& rc)
     const int w = CCC_MainLockMeasureWidth(pDlg);
     const int capH = CCC_GetCustomCaptionHeight(hDlg);
     if (capH > 0) {
-        // キャプション帯: システムボタン/設定/ピンの左（右端はみ出し禁止）
+        // キャプション帯: [追従][?][P][⚙?][Min?][Max?][×]
+        // 右端は「?」左端 − gap。無ければ Pin 左端 − gap。
         CCC_CaptionEntry* ce = CCC_FindCaption(hDlg);
-        int right = cr.right - CCC_CAP_RIGHT_MARGIN;
-        if (ce) {
-            right -= (CCC_CaptionSysBtnCount(ce) + CCC_CaptionExtraBtnCount(ce)) * (CCC_CAP_BTN + CCC_CAP_GAP);
+        int right = 0;
+        HWND hHelp = CCC_FindCaptionHelpChrome(hDlg);
+        if (hHelp) {
+            CRect hr;
+            ::GetWindowRect(hHelp, &hr);
+            ::ScreenToClient(hDlg, &hr.TopLeft());
+            ::ScreenToClient(hDlg, &hr.BottomRight());
+            // まだ RC 配置のまま（幅が CAP でない）なら予約幅で見積もる
+            if (hr.Width() == CCC_CAP_BTN && hr.Height() == CCC_CAP_BTN && hr.left > 0) {
+                right = hr.left - CCC_CAP_GAP;
+            }
+        }
+        if (right <= 0) {
+            if (ce && ce->installed)
+                right = CCC_CaptionPinLeft(hDlg, ce) - CCC_CAP_GAP
+                    - CCC_CaptionHelpChromeReserve(hDlg);
+            else
+                right = cr.right - CCC_CAP_RIGHT_MARGIN - CCC_CAP_BTN - CCC_CAP_GAP
+                    - CCC_CaptionHelpChromeReserve(hDlg);
         }
         if (right < 36)
             right = 36;

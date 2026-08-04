@@ -26,7 +26,7 @@ protected:
 	CCustomComboBox m_hist;
 	CCustomComboBox m_mode;
 	CCustomProgressCtrl m_progress;
-	CCustomStandardButton m_run, m_stop, m_reset, m_clear, m_close, m_saveHist, m_analyze, m_roll;
+	CCustomStandardButton m_run, m_stop, m_reset, m_clear, m_close, m_saveHist, m_analyze, m_roll, m_help;
 	CToolTipCtrl m_tooltip;
 	CFont m_fontLegend;
 	CFont m_fontEditLbl;
@@ -43,6 +43,8 @@ protected:
 	void RefreshAfterLayout(BOOL bSyncRedraw);
 	void SetupTooltips();
 	void StyleButtons();
+	void ShowHelpSheet();
+	void DestroyHelpSheet();
 	void RefreshOpaqueFixers(BOOL bSync = FALSE);
 	void SyncLayoutAndPaint(BOOL bSyncRedraw, BOOL bReapplyOpaqueFixers);
 	void SavePosToSavedata();
@@ -69,6 +71,7 @@ protected:
 	afx_msg void OnSaveHist();
 	afx_msg void OnHistSel();
 	afx_msg void OnTextChanged();
+	afx_msg void OnHelpBtn();
 	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnEnterSizeMove();

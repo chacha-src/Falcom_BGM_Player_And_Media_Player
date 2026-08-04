@@ -80,6 +80,9 @@ public:
 	// 曲ごと保存パラメータからの周波数表示モード適用(外部から)
 	void ApplySpecStyleExternal(int style) { SetSpecStyle(style); }
 
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
+
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
@@ -89,8 +92,10 @@ protected:
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnClose();
+	afx_msg void OnDestroy();
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnBnClickedHelp();
 	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnMouseLeave();
@@ -273,6 +278,7 @@ private:
 	int m_eqDragBand = -1;
 	CRect m_eqDragPlot;
 
+	CCustomStandardButton m_help;
 	CToolTipCtrl m_tooltip;
 	CRect m_tpLufsTipRc;
 

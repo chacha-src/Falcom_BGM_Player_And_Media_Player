@@ -35,18 +35,23 @@ protected:
 	void StopPeakMonitor();
 	void PaintMetersFromPeaks();
 	static UINT __stdcall CaptureThread(void* p);
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
 
 public:
 	virtual BOOL OnInitDialog();
 	afx_msg void OnBnClickedBrowse();
 	afx_msg void OnBnClickedStart();
 	afx_msg void OnBnClickedClose();
+	afx_msg void OnBnClickedHelp();
 	afx_msg void OnCbnSelchangeFormat();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnDestroy();
 	virtual void OnCancel();
 	virtual void OnOK();
 
+	CCustomStandardButton m_help;
 	CCustomStatic m_devLabel;
 	CCustomComboBox m_dev;
 	CCustomStatic m_fmtLabel;

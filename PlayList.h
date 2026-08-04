@@ -157,9 +157,14 @@ public:
 	afx_msg void OnBnClickedButton3();
 	afx_msg void OnBnClickedPlaydelete();
 	afx_msg void OnBnClickedPianoroll();
+	afx_msg void OnBnClickedHelp();
+	afx_msg void OnDestroy();
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
 	CCustomStandardButton m_namechage;
 	CCustomStandardButton m_listdelete;
 	CCustomStandardButton m_pianorollBtn;
+	CCustomStandardButton m_help;
 	CFont m_fontList;
 };
 

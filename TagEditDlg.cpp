@@ -57,13 +57,17 @@ void CTagEditDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_TAGEDIT_STATUS, m_status);
 	DDX_Control(pDX, IDC_TAGEDIT_SAVE, m_save);
 	DDX_Control(pDX, IDC_TAGEDIT_CLOSE, m_close);
+	DDX_Control(pDX, IDC_TE_HELP, m_help);
 }
 
 BEGIN_MESSAGE_MAP(CTagEditDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_TAGEDIT_SAVE, &CTagEditDlg::OnBnClickedSave)
 	ON_BN_CLICKED(IDC_TAGEDIT_CLOSE, &CTagEditDlg::OnBnClickedClose)
 	ON_BN_CLICKED(IDC_TAGEDIT_COVER_CLEAR, &CTagEditDlg::OnBnClickedCoverClear)
+	ON_BN_CLICKED(IDC_TE_HELP, &CTagEditDlg::OnBnClickedHelp)
 	ON_WM_DROPFILES()
+	ON_WM_SIZE()
+	ON_WM_DESTROY()
 END_MESSAGE_MAP()
 
 static CString TagEdit_ExtLower(LPCTSTR path)
@@ -253,11 +257,21 @@ BOOL CTagEditDlg::OnInitDialog()
 			SetWindowPos(NULL, 0, 0, rcWin.Width(), y + chrome, SWP_NOMOVE | SWP_NOZORDER);
 	}
 
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	LayoutHelpBtn();
+
 	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
 		auto addTip = [this](CWnd& w, LPCWSTR text) {
 			if (w.GetSafeHwnd() && text && text[0])
 				m_tooltip.AddTool(&w, text);
 		};
+		addTip(m_help, LL14(
+			L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida",
+			L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل",
+			L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen",
+			L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 		addTip(m_coverClear, LL14(
 			L"ジャケット画像の指定を解除します",
 			L"Clear the cover image selection",
@@ -305,6 +319,9 @@ BOOL CTagEditDlg::OnInitDialog()
 			L"Kaydetmeden kapatir"));
 		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
 	}
+
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	return TRUE;
 }
 
@@ -512,4 +529,234 @@ void CTagEditDlg::OnBnClickedSave()
 		MessageBox(msg, LL14(L"タグ編集", L"Edit tags", L"Tags", L"Tag", L"Etiquetas", L"태그", L"标签", L"Tags",
 			L"Теги", L"Tags", L"Tags", L"Tags", L"Tagi", L"Etiket"), MB_OK | MB_ICONERROR);
 	}
+}
+
+namespace {
+
+class CTeHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_TE_HELP };
+	explicit CTeHelpDlg(CWnd* pParent = nullptr) : CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CTeHelpDlg* g_teHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CTeHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CTeHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"タグ編集操作ガイド", L"Tag Edit Guide", L"Guide d'édition des tags", L"Guida modifica tag",
+		L"Guía de edición de etiquetas", L"태그 편집 가이드", L"标签编辑指南", L"دليل تحرير الوسوم",
+		L"Руководство по тегам", L"Tag-Bearbeitungsanleitung", L"Guia de edição de tags", L"Tag-bewerkingsgids",
+		L"Przewodnik edycji tagów", L"Etiket düzenleme kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CTeHelpDlg::OnOK() { DestroyWindow(); }
+void CTeHelpDlg::OnCancel() { DestroyWindow(); }
+void CTeHelpDlg::OnClose() { DestroyWindow(); }
+
+void CTeHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_teHelpDlg == this)
+		g_teHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CTeHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CTeHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"タグ編集操作ガイド", L"Tag Edit — Guide", L"Guide tags", L"Guida tag",
+		L"Guía etiquetas", L"태그 편집 가이드", L"标签编辑指南", L"دليل الوسوم",
+		L"Руководство по тегам", L"Tag-Guide", L"Guia tags", L"Tag-gids",
+		L"Przewodnik tagów", L"Etiket kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"タイトルやアーティストなどのタグとジャケットを編集してファイルへ書き込みます。",
+		L"Edit title, artist, and cover art, then write them to the file.",
+		L"Modifiez titre, artiste, pochette, puis écrivez dans le fichier.",
+		L"Modifica titolo, artista, copertina e scrivi nel file.",
+		L"Edita título, artista y portada; escribe en el archivo.",
+		L"제목·아티스트·재킷 등을 편집해 파일에 씁니다.",
+		L"编辑标题、艺术家、封面等，并写入文件。",
+		L"حرّر العنوان والفنان والغلاف، ثم اكتب إلى الملف.",
+		L"Правите название, исполнителя и обложку, затем пишете в файл.",
+		L"Titel, Artist und Cover bearbeiten und in die Datei schreiben.",
+		L"Edite título, artista e capa; grave no arquivo.",
+		L"Bewerk titel, artiest en cover; schrijf naar het bestand.",
+		L"Edytuj tytuł, artystę i okładkę; zapisz do pliku.",
+		L"Başlık, sanatçı ve kapağı düzenleyip dosyaya yazın."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"フィールド", L"Fields", L"Champs", L"Campi", L"Campos", L"필드", L"字段", L"الحقول",
+		L"Поля", L"Felder", L"Campos", L"Velden", L"Pola", L"Alanlar"));
+	y += titleLh;
+	body(L, y, LL14(L"・タイトル / アーティスト / アルバム …… 基本の曲情報", L"· Title / Artist / Album …… basic track info", L"· Titre / Artiste / Album …… infos de base", L"· Titolo / Artista / Album …… info base",
+		L"· Título / Artista / Álbum …… info básica", L"· 제목 / 아티스트 / 앨범 …… 기본 곡 정보", L"· 标题 / 艺术家 / 专辑 …… 基本曲目信息", L"· العنوان / الفنان / الألبوم …… معلومات أساسية",
+		L"· Название / Исполнитель / Альбом …… базовая информация", L"· Titel / Artist / Album …… Basisinfos", L"· Título / Artista / Álbum …… info básica", L"· Titel / Artiest / Album …… basisinfo",
+		L"· Tytuł / Artysta / Album …… podstawowe info", L"· Başlık / Sanatçı / Albüm …… temel bilgi")); y += lh;
+	body(L, y, LL14(L"・年 / トラック / ジャンル / コメント …… 詳細メタデータ", L"· Year / Track / Genre / Comment …… extra metadata", L"· Année / Piste / Genre / Commentaire …… métadonnées", L"· Anno / Traccia / Genere / Commento …… metadati",
+		L"· Año / Pista / Género / Comentario …… metadatos", L"· 연도 / 트랙 / 장르 / 설명 …… 상세 메타데이터", L"· 年份 / 音轨 / 流派 / 注释 …… 详细元数据", L"· السنة / المسار / النوع / التعليق …… بيانات إضافية",
+		L"· Год / Трек / Жанр / Комментарий …… доп. метаданные", L"· Jahr / TitelNr / Genre / Kommentar …… Metadaten", L"· Ano / Faixa / Gênero / Comentário …… metadados", L"· Jaar / Nummer / Genre / Opmerking …… metadata",
+		L"· Rok / Utwór / Gatunek / Komentarz …… metadane", L"· Yıl / Parça / Tür / Yorum …… ek meta veri")); y += lh + 4;
+
+	title(L, y, LL14(L"ジャケット", L"Cover art", L"Pochette", L"Copertina", L"Portada", L"재킷", L"封面", L"الغلاف",
+		L"Обложка", L"Cover", L"Capa", L"Omslag", L"Okładka", L"Kapak"));
+	y += titleLh;
+	const int gx = L, gy = y, gw = min(260, rc.Width() - L * 2), gh = lh * 3 + 12;
+	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+	dc.FillSolidRect(gx + 8, gy + 8, gh - 16, gh - 16, RGB(90, 120, 170));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + 14, gy + gh / 2 - lh / 2, L"JPG");
+	dc.FillSolidRect(gx + gh, gy + 10, gw - gh - 12, lh + 4, RGB(255, 255, 255));
+	dc.FrameRect(CRect(gx + gh, gy + 10, gx + gw - 12, gy + 10 + lh + 4), &frameBrush);
+	dc.SetTextColor(RGB(80, 80, 95));
+	dc.TextOut(gx + gh + 6, gy + 12, L"cover.png");
+	dc.FillSolidRect(gx + gh, gy + 10 + lh + 10, 70, lh, RGB(180, 140, 60));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + gh + 8, gy + 10 + lh + 10, L"drop");
+	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+	y = gy + gh + 4;
+	body(L, y, LL14(L"・JPG / PNG をプレビュー枠へドロップして指定", L"· Drop a JPG/PNG onto the preview to set cover", L"· Déposez JPG/PNG sur l'aperçu", L"· Trascina JPG/PNG sull'anteprima",
+		L"· Suelte JPG/PNG en la vista previa", L"· JPG/PNG를 미리보기 영역에 드롭", L"· 将 JPG/PNG 拖到预览区指定封面", L"· أفلت JPG/PNG على المعاينة",
+		L"· Перетащите JPG/PNG на превью", L"· JPG/PNG auf die Vorschau ziehen", L"· Solte JPG/PNG na prévia", L"· Drop JPG/PNG op de preview",
+		L"· Upuść JPG/PNG na podgląd", L"· JPG/PNG'yi önizlemeye bırakın")); y += lh;
+	body(L, y, LL14(L"・クリア …… 指定したジャケットを解除", L"· Clear …… remove the selected cover", L"· Effacer …… retirer la pochette", L"· Cancella …… rimuovi la copertina",
+		L"· Quitar …… quitar la portada", L"· 지우기 …… 지정한 재킷 해제", L"· 清除 …… 取消已选封面", L"· مسح …… إزالة الغلاف",
+		L"· Сброс …… убрать обложку", L"· Löschen …… Cover entfernen", L"· Limpar …… remover a capa", L"· Wissen …… omslag verwijderen",
+		L"· Wyczyść …… usuń okładkę", L"· Temizle …… kapağı kaldır")); y += lh + 4;
+
+	title(L, y, LL14(L"保存と閉じる", L"Save & Close", L"Enregistrer & Fermer", L"Salva e Chiudi", L"Guardar y Cerrar", L"저장과 닫기", L"保存与关闭", L"حفظ وإغلاق",
+		L"Сохранить и закрыть", L"Speichern & Schließen", L"Salvar e Fechar", L"Opslaan & Sluiten", L"Zapisz i Zamknij", L"Kaydet ve Kapat"));
+	y += titleLh;
+	body(L, y, LL14(L"・保存 …… 編集内容をファイルタグへ書き込み、ダイアログを閉じます", L"· Save …… write tags to the file and close", L"· Enregistrer …… écrire et fermer", L"· Salva …… scrivi e chiudi",
+		L"· Guardar …… escribir y cerrar", L"· 저장 …… 태그를 파일에 쓰고 닫습니다", L"· 保存 …… 写入文件标签并关闭", L"· حفظ …… اكتب الوسوم وأغلق",
+		L"· Сохранить …… записать теги и закрыть", L"· Speichern …… Tags schreiben und schließen", L"· Salvar …… gravar tags e fechar", L"· Opslaan …… tags schrijven en sluiten",
+		L"· Zapisz …… zapisz tagi i zamknij", L"· Kaydet …… etiketleri yazıp kapat")); y += lh;
+	body(L, y, LL14(L"・閉じる …… 保存せずに閉じます", L"· Close …… dismiss without saving", L"· Fermer …… sans enregistrer", L"· Chiudi …… senza salvare",
+		L"· Cerrar …… sin guardar", L"· 닫기 …… 저장하지 않고 닫습니다", L"· 关闭 …… 不保存并关闭", L"· إغلاق …… دون حفظ",
+		L"· Закрыть …… без сохранения", L"· Schließen …… ohne Speichern", L"· Fechar …… sem salvar", L"· Sluiten …… zonder opslaan",
+		L"· Zamknij …… bez zapisu", L"· Kapat …… kaydetmeden")); y += lh + 4;
+	muted(L, y, LL14(
+		L"複数選択時は空欄の項目は変更しません。入力した項目だけ全選択へ適用します。",
+		L"In multi-select, blank fields are unchanged; filled fields apply to all.",
+		L"Sélection multiple: champs vides inchangés; remplis = tous.",
+		L"Selezione multipla: vuoti invariati; compilati = a tutti.",
+		L"Multiselección: vacíos sin cambio; rellenos = a todos.",
+		L"다중 선택 시 빈칸은 유지되고, 입력한 항목만 전체에 적용됩니다.",
+		L"多选时，空栏不改；有内容的项应用到全部。",
+		L"في التحديد المتعدد: الفراغ لا يتغير؛ المعبأ يُطبَّق على الكل.",
+		L"При множественном выборе пустые поля не меняются.",
+		L"Mehrfach: leere Felder unverändert; ausgefüllte für alle.",
+		L"Multi: vazios inalterados; preenchidos = para todos.",
+		L"Multi: lege velden ongewijzigd; ingevuld = voor allen.",
+		L"Wiele: puste bez zmian; wypełnione = do wszystkich.",
+		L"Çoklu seçimde boş alanlar değişmez; dolular hepsine uygulanır."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
+void CTagEditDlg::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CTagEditDlg::ShowHelpSheet()
+{
+	if (g_teHelpDlg && ::IsWindow(g_teHelpDlg->GetSafeHwnd())) {
+		g_teHelpDlg->ShowWindow(SW_SHOW);
+		g_teHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_teHelpDlg && !::IsWindow(g_teHelpDlg->GetSafeHwnd()))
+		g_teHelpDlg = nullptr;
+	CTeHelpDlg* dlg = new CTeHelpDlg(nullptr);
+	if (!dlg->Create(IDD_TE_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_teHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CTagEditDlg::OnBnClickedHelp()
+{
+	ShowHelpSheet();
+}
+
+void CTagEditDlg::OnSize(UINT nType, int cx, int cy)
+{
+	CCustomBlurDialogBase::OnSize(nType, cx, cy);
+	if (nType != SIZE_MINIMIZED) {
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
+}
+
+void CTagEditDlg::OnDestroy()
+{
+	if (g_teHelpDlg && ::IsWindow(g_teHelpDlg->GetSafeHwnd()))
+		g_teHelpDlg->DestroyWindow();
+	CCustomBlurDialogBase::OnDestroy();
 }

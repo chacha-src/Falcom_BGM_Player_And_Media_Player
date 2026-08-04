@@ -1446,10 +1446,11 @@ void COggDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATICaaab, m_dummys2);
 	DDX_Control(pDX, IDC_STATICaaac, m_dummys3);
 	DDX_Control(pDX, IDC_STATICaaad, m_dummys4);
+
 	DDX_Control(pDX, IDC_BUTTON5, m_fadedummy);
 	DDX_Control(pDX, IDC_BUTTON59, m_eqq);
+	DDX_Control(pDX, IDC_OGG_HELP, m_help);
 }
-
 BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(COggDlg)
 	ON_WM_SYSCOMMAND()
@@ -1541,9 +1542,10 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_STN_CLICKED(IDC_STATIC2, &COggDlg::OnStnClickedStatic2)
 	ON_STN_DBLCLK(IDC_STATIC_p, &COggDlg::OnStnDblclickStaticp)
 	ON_STN_DBLCLK(IDC_STATIC_t, &COggDlg::OnStnDblclickStatict)
-	ON_BN_CLICKED(IDC_BUTTON59, &COggDlg::OnBnClickedButton59)
-END_MESSAGE_MAP()
 
+	ON_BN_CLICKED(IDC_BUTTON59, &COggDlg::OnBnClickedButton59)
+	ON_BN_CLICKED(IDC_OGG_HELP, &COggDlg::OnBnClickedHelp)
+END_MESSAGE_MAP()
 REFTIME aa1, aa2 = 0;
 
 
@@ -3919,10 +3921,19 @@ BOOL COggDlg::OnInitDialog()
 	// 後回しになり、KPI〜MP 間で CInvalidArgException が出る順序に変わっていた。
 	if (savedata.playerMode == 1)
 		EnterMediaPlayerMode();
+
 	// サブUI復元は MP Create 完了後に武装(Create 中の WM_TIMER ネストを避ける)
 	SetTimer(59877, 500, NULL);
+
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
+
 	return TRUE;  // TRUE を返すとコントロールに設定したフォーカスは失われません。
 }
+
 //////////////////////////////////////////////////////////////////////////////
 void COggDlg::OnPaint()
 {
@@ -25815,13 +25826,17 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 		if (maini)
 			maini->ShowWindow(SW_RESTORE);
 	}
+
 	if (nType != SIZE_MINIMIZED && ::IsWindow(m_hWnd)) {
 		CRect wr;
 		GetWindowRect(&wr);
 		CCC_MainLockOnMainMoving(&wr);
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
 	}
 
 }
+
 #if _UNICODE
 void COggDlg::_CreateShellLink(LPWSTR pszArguments, LPWSTR pszTitle, IShellLink * *ppsl, int iconindex, bool WA, BOOL wa2)
 #else
@@ -27259,8 +27274,314 @@ void COggDlg::LoadJacket(CString s, CImage* dest)
 }
 
 
+
+namespace {
+
+class COggHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_OGG_HELP };
+	explicit COggHelpDlg(CWnd* pParent = nullptr) : CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static COggHelpDlg* g_oggHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(COggHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL COggHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"メイン画面操作ガイド", L"Main Window Guide", L"Guide fenêtre principale", L"Guida finestra principale",
+		L"Guía ventana principal", L"메인 화면 가이드", L"主窗口指南", L"دليل النافذة الرئيسية",
+		L"Руководство главного окна", L"Hauptfenster-Anleitung", L"Guia da janela principal", L"Hoofdvenstergids",
+		L"Przewodnik okna głównego", L"Ana pencere kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void COggHelpDlg::OnOK() { DestroyWindow(); }
+void COggHelpDlg::OnCancel() { DestroyWindow(); }
+void COggHelpDlg::OnClose() { DestroyWindow(); }
+
+void COggHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_oggHelpDlg == this)
+		g_oggHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL COggHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void COggHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"ファルコム特化 BGM メイン画面", L"Falcom BGM — Main Window", L"BGM Falcom — Fenêtre principale", L"BGM Falcom — Finestra principale",
+		L"BGM Falcom — Ventana principal", L"Falcom BGM — 메인 화면", L"Falcom BGM — 主窗口", L"Falcom BGM — النافذة الرئيسية",
+		L"Falcom BGM — Главное окно", L"Falcom-BGM — Hauptfenster", L"Falcom BGM — Janela principal", L"Falcom-BGM — Hoofdvenster",
+		L"Falcom BGM — Okno główne", L"Falcom BGM — Ana pencere"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"ゲーム別 BGM・再生操作・サブウィンドウへの入口です。右上「?」でいつでも再表示できます。",
+		L"Game BGM, playback, and sub-window entry points. Reopen anytime with top-right \"?\".",
+		L"BGM par jeu, lecture et sous-fenêtres. Rouvrir via « ? » en haut à droite.",
+		L"BGM per gioco, riproduzione e sottofinestre. Riapri con « ? » in alto a destra.",
+		L"BGM por juego, reproducción y subventanas. Reabra con « ? » arriba a la derecha.",
+		L"게임별 BGM·재생·서브 창 입구. 우측 상단 \"?\"로 다시 표시.",
+		L"各游戏 BGM、播放与子窗口入口。右上「?」可随时再开。",
+		L"BGM لكل لعبة والتشغيل والنوافذ الفرعية. أعد الفتح بـ \"؟\" أعلى اليمين.",
+		L"BGM по играм, воспроизведение и доп. окна. Снова — «?» справа сверху.",
+		L"Spiel-BGM, Wiedergabe und Unterfenster. Erneut öffnen mit \"?\" oben rechts.",
+		L"BGM por jogo, reprodução e subjanelas. Reabra com \"?\" no canto superior direito.",
+		L"Game-BGM, afspelen en subvensters. Opnieuw via \"?\" rechtsboven.",
+		L"BGM gier, odtwarzanie i podokna. Ponownie przez \"?\" w prawym górnym rogu.",
+		L"Oyun BGM, çalma ve alt pencereler. Sağ üst \"?\" ile yeniden açın."));
+	y += lh + 4;
+
+	// mini UI map
+	title(L, y, LL14(L"画面マップ", L"UI map", L"Carte UI", L"Mappa UI", L"Mapa UI", L"화면 맵", L"界面地图", L"خريطة الواجهة",
+		L"Карта UI", L"UI-Karte", L"Mapa da UI", L"UI-kaart", L"Mapa UI", L"Arayüz haritası"));
+	y += titleLh;
+	const int gx = L, gy = y;
+	const int gw = min(460, rc.Width() - L * 2);
+	const int gh = lh * 5 + 18;
+	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+	// title / spectrum band
+	dc.FillSolidRect(gx + 4, gy + 4, gw - 8, lh + 2, RGB(70, 110, 160));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + 8, gy + 5, LL14(L"情報帯 / スペアナ", L"Info / spectrum", L"Infos / spectre", L"Info / spettro",
+		L"Info / espectro", L"정보 / 스펙트럼", L"信息 / 频谱", L"معلومات / طيف",
+		L"Инфо / спектр", L"Info / Spektrum", L"Info / espectro", L"Info / spectrum",
+		L"Info / widmo", L"Bilgi / spektrum"));
+	// transport
+	const int ty = gy + lh + 10;
+	dc.FillSolidRect(gx + 4, ty, 70, lh + 2, RGB(180, 140, 60));
+	dc.FillSolidRect(gx + 78, ty, 50, lh + 2, RGB(180, 140, 60));
+	dc.FillSolidRect(gx + 132, ty, 50, lh + 2, RGB(180, 140, 60));
+	dc.FillSolidRect(gx + 186, ty, 56, lh + 2, RGB(90, 140, 90));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + 10, ty + 1, L"Play");
+	dc.TextOut(gx + 84, ty + 1, L"Pause");
+	dc.TextOut(gx + 140, ty + 1, L"Stop");
+	dc.TextOut(gx + 192, ty + 1, L"Replay");
+	// game grid
+	const int by = ty + lh + 8;
+	for (int i = 0; i < 6; ++i) {
+		dc.FillSolidRect(gx + 4 + i * 52, by, 48, lh, RGB(120, 130, 170));
+		dc.SetTextColor(RGB(255, 255, 255));
+		CString lab;
+		lab.Format(L"G%d", i + 1);
+		dc.TextOut(gx + 14 + i * 52, by + 1, lab);
+	}
+	// side tools
+	dc.FillSolidRect(gx + gw - 120, ty, 52, lh + 2, RGB(150, 90, 120));
+	dc.FillSolidRect(gx + gw - 64, ty, 56, lh + 2, RGB(100, 120, 140));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + gw - 112, ty + 1, L"EQ");
+	dc.TextOut(gx + gw - 56, ty + 1, L"PL");
+	muted(gx + 4, by + lh + 4, LL14(
+		L"上=情報/スペアナ、中=再生、下=ゲームBGM、右=EQ・プレイリスト等",
+		L"Top=info/spectrum, mid=transport, bottom=game BGM, right=EQ/playlist",
+		L"Haut=infos/spectre, milieu=lecture, bas=BGM jeux, droite=EQ/liste",
+		L"Alto=info/spettro, centro=trasporto, basso=BGM, destra=EQ/lista",
+		L"Arriba=info/espectro, medio=transporte, abajo=BGM, der.=EQ/lista",
+		L"위=정보/스펙트럼, 가운데=재생, 아래=게임 BGM, 오른쪽=EQ/목록",
+		L"上=信息/频谱，中=播放，下=游戏BGM，右=EQ/播放列表",
+		L"أعلى=معلومات/طيف، وسط=تشغيل، أسفل=BGM، يمين=EQ/قائمة",
+		L"Верх=инфо/спектр, центр=транспорт, низ=BGM, справа=EQ/список",
+		L"Oben=Info/Spektrum, Mitte=Transport, unten=Spiel-BGM, rechts=EQ/Liste",
+		L"Topo=info/espectro, meio=transporte, baixo=BGM, dir.=EQ/lista",
+		L"Boven=info/spectrum, midden=transport, onder=game-BGM, rechts=EQ/lijst",
+		L"Góra=info/widmo, środek=transport, dół=BGM, prawo=EQ/lista",
+		L"Üst=bilgi/spektrum, orta=çalma, alt=oyun BGM, sağ=EQ/liste"));
+	y = gy + gh + 6;
+
+	title(L, y, LL14(L"ゲーム BGM", L"Game BGM", L"BGM jeux", L"BGM giochi", L"BGM juegos", L"게임 BGM", L"游戏 BGM", L"BGM الألعاب",
+		L"BGM игр", L"Spiel-BGM", L"BGM jogos", L"Game-BGM", L"BGM gier", L"Oyun BGM"));
+	y += titleLh;
+	body(L, y, LL14(L"・各ゲームボタン …… 曲一覧を開き、選んだ曲を再生します", L"· Game buttons …… open the track list and play the chosen song", L"· Boutons jeu …… ouvrir la liste et lire le morceau", L"· Pulsanti gioco …… apri lista e riproduci",
+		L"· Botones juego …… abrir lista y reproducir", L"· 게임 버튼 …… 곡 목록을 열고 선택한 곡 재생", L"· 各游戏按钮 …… 打开曲目列表并播放所选曲", L"· أزرار اللعبة …… افتح القائمة وشغّل المقطع",
+		L"· Кнопки игр …… открыть список и воспроизвести", L"· Spielknöpfe …… Trackliste öffnen und Titel abspielen", L"· Botões de jogo …… abrir lista e reproduzir", L"· Spelknoppen …… lijst openen en nummer afspelen",
+		L"· Przyciski gier …… otwórz listę i odtwórz utwór", L"· Oyun düğmeleri …… listeyi açıp parçayı çal")); y += lh;
+	body(L, y, LL14(L"・チェック …… プレイリスト取り込み対象のゲームを選びます", L"· Checkboxes …… choose which games feed the playlist import", L"· Cases …… jeux inclus dans l'import playlist", L"· Caselle …… giochi per l'import della playlist",
+		L"· Casillas …… juegos para importar a la lista", L"· 체크 …… 재생 목록 가져오기 대상 게임 선택", L"· 勾选 …… 选择导入播放列表的游戏", L"· خانات …… اختر الألعاب لاستيراد القائمة",
+		L"· Флажки …… игры для импорта в плейлист", L"· Häkchen …… Spiele für Playlist-Import", L"· Caixas …… jogos para importar à lista", L"· Selectievakjes …… spellen voor playlist-import",
+		L"· Pola …… gry do importu playlisty", L"· Kutular …… çalma listesine alınacak oyunlar")); y += lh + 4;
+
+	title(L, y, LL14(L"再生コントロール", L"Playback", L"Lecture", L"Riproduzione", L"Reproducción", L"재생", L"播放", L"التشغيل",
+		L"Воспроизведение", L"Wiedergabe", L"Reprodução", L"Afspelen", L"Odtwarzanie", L"Çalma"));
+	y += titleLh;
+	body(L, y, LL14(L"・演奏開始 / 一時停止 / 停止 / 再演奏 …… 基本の再生操作", L"· Play / Pause / Stop / Replay …… basic transport", L"· Lecture / Pause / Arrêt / Rejouer …… transport de base", L"· Play / Pausa / Stop / Replay …… trasporto base",
+		L"· Reproducir / Pausa / Detener / Repetir …… transporte básico", L"· 재생 / 일시정지 / 중지 / 다시재생 …… 기본 조작", L"· 播放 / 暂停 / 停止 / 重播 …… 基本操作", L"· تشغيل / إيقاف مؤقت / إيقاف / إعادة …… التحكم الأساسي",
+		L"· Пуск / Пауза / Стоп / Повтор …… базовый транспорт", L"· Play / Pause / Stop / Replay …… Basistransport", L"· Play / Pausa / Parar / Repetir …… transporte básico", L"· Play / Pauze / Stop / Opnieuw …… basisbediening",
+		L"· Odtwórz / Pauza / Stop / Ponów …… podstawowy transport", L"· Çal / Duraklat / Durdur / Tekrar …… temel kontroller")); y += lh;
+	body(L, y, LL14(L"・シーク / 音量 / テンポ・ピッチ …… スライダーで調整。ラベルをダブルクリックで100%に戻ります", L"· Seek / volume / tempo·pitch …… sliders; double-click labels to reset to 100%", L"· Seek / volume / tempo·hauteur …… curseurs ; double-clic = 100%", L"· Seek / volume / tempo·tono …… slider; doppio clic = 100%",
+		L"· Seek / volumen / tempo·tono …… deslizadores; doble clic = 100%", L"· 시크/볼륨/템포·피치 …… 슬라이더. 라벨 더블클릭=100%", L"· 进度/音量/速度·音高 …… 滑块；双击标签恢复100%", L"· التقديم/الصوت/الإيقاع·الدرجة …… منزلقات؛ نقر مزدوج=100٪",
+		L"· Seek / громкость / темп·тон …… ползунки; двойной клик = 100%", L"· Seek / Lautstärke / Tempo·Ton …… Schieberegler; Doppelklick = 100%", L"· Seek / volume / tempo·tom …… controles; duplo clique = 100%", L"· Seek / volume / tempo·toon …… schuiven; dubbelklik = 100%",
+		L"· Seek / głośność / tempo·ton …… suwaki; dwuklik = 100%", L"· Seek / ses / tempo·perde …… kaydırıcılar; çift tık = %100")); y += lh;
+	body(L, y, LL14(L"・ランダム / 順次 …… 次曲の選び方。ループ回数は編集欄で指定", L"· Random / Sequential …… next-track mode. Loop count is in the edit box", L"· Aléatoire / Séquentiel …… mode suivant. Boucles = champ d'édition", L"· Casuale / Sequenziale …… modalità successiva. Loop = campo",
+		L"· Aleatorio / Secuencial …… modo siguiente. Bucles = cuadro", L"· 랜덤/순차 …… 다음 곡 방식. 루프 횟수는 입력란", L"· 随机/顺序 …… 下一曲方式。循环次数在编辑框", L"· عشوائي/متسلسل …… نمط التالي. الحلقات في الحقل",
+		L"· Случайный / Последовательный …… режим следующей. Циклы — в поле", L"· Zufall / Sequentiell …… Folgemodus. Schleifen = Eingabefeld", L"· Aleatório / Sequencial …… modo seguinte. Loops = caixa", L"· Willekeurig / Sequentieel …… volgendenummer. Lussen = veld",
+		L"· Losowe / Kolejne …… tryb następnego. Pętle = pole", L"· Rastgele / Sıralı …… sonraki parça. Döngü = kutu")); y += lh + 4;
+
+	const int colW = (rc.Width() - L * 2 - 8) / 2;
+	const int col2 = L + colW + 8;
+	int y1 = y, y2 = y;
+
+	title(L, y1, LL14(L"サブウィンドウ", L"Sub-windows", L"Sous-fenêtres", L"Sottofinestre", L"Subventanas", L"서브 창", L"子窗口", L"نوافذ فرعية",
+		L"Доп. окна", L"Unterfenster", L"Subjanelas", L"Subvensters", L"Podokna", L"Alt pencereler"));
+	y1 += titleLh;
+	body(L, y1, LL14(L"・EQ …… イコライザー", L"· EQ …… equalizer", L"· EQ …… égaliseur", L"· EQ …… equalizzatore",
+		L"· EQ …… ecualizador", L"· EQ …… 이퀄라이저", L"· EQ …… 均衡器", L"· EQ …… معادل",
+		L"· EQ …… эквалайзер", L"· EQ …… Equalizer", L"· EQ …… equalizador", L"· EQ …… equalizer",
+		L"· EQ …… korektor", L"· EQ …… equalizer")); y1 += lh;
+	body(L, y1, LL14(L"・プレイリスト …… 曲の並び・連続再生", L"· Playlist …… reorder / continuous play", L"· Playlist …… ordre / lecture continue", L"· Playlist …… ordine / continua",
+		L"· Lista …… orden / continua", L"· 재생 목록 …… 정렬·연속 재생", L"· 播放列表 …… 排序/连续播放", L"· قائمة …… ترتيب / متواصل",
+		L"· Плейлист …… порядок / непрерывно", L"· Playlist …… Reihenfolge / fortlaufend", L"· Playlist …… ordem / contínua", L"· Playlist …… volgorde / doorlopend",
+		L"· Playlist …… kolejność / ciągłe", L"· Liste …… sıra / sürekli")); y1 += lh;
+	body(L, y1, LL14(L"・ピアノロール / アナライザ …… 解析表示", L"· Piano roll / Analyzer …… analysis views", L"· Piano roll / Analyseur …… vues d'analyse", L"· Pianoroll / Analizzatore …… viste",
+		L"· Piano / Analizador …… vistas", L"· 피아노롤 / 분석기 …… 분석 표시", L"· 钢琴卷帘/分析器 …… 分析视图", L"· بيانو / محلل …… عروض التحليل",
+		L"· Пианоролл / Анализатор …… виды", L"· Pianorolle / Analyzer …… Ansichten", L"· Piano / Analisador …… vistas", L"· Pianorol / Analyzer …… weergaven",
+		L"· Pianoroll / Analizator …… widoki", L"· Piyano / Analizör …… görünümler")); y1 += lh;
+	body(L, y1, LL14(L"・プロンプト / ロール …… コマンド実行", L"· Prompt / Roll …… command tools", L"· Invite / Roll …… outils commande", L"· Prompt / Roll …… strumenti comando",
+		L"· Prompt / Roll …… herramientas", L"· 프롬프트 / 롤 …… 명령 도구", L"· 提示/卷帘 …… 命令工具", L"· موجه / لفة …… أدوات الأوامر",
+		L"· Промпт / Ролл …… команды", L"· Prompt / Roll …… Befehle", L"· Prompt / Roll …… ferramentas", L"· Prompt / Roll …… opdrachten",
+		L"· Prompt / Roll …… polecenia", L"· İstem / Roll …… komut araçları")); y1 += lh;
+
+	title(col2, y2, LL14(L"設定・その他", L"Settings & more", L"Réglages & plus", L"Impostazioni e altro", L"Ajustes y más", L"설정·기타", L"设置与其它", L"إعدادات والمزيد",
+		L"Настройки и ещё", L"Einstellungen & mehr", L"Config. e mais", L"Instellingen & meer", L"Ustawienia i więcej", L"Ayarlar ve daha"));
+	y2 += titleLh;
+	body(col2, y2, LL14(L"・フォルダ設定 …… 各ゲームのインストール先", L"· Folder settings …… game install paths", L"· Dossiers …… chemins d'installation", L"· Cartelle …… percorsi di installazione",
+		L"· Carpetas …… rutas de instalación", L"· 폴더 설정 …… 게임 설치 경로", L"· 文件夹设置 …… 各游戏安装路径", L"· المجلدات …… مسارات التثبيت",
+		L"· Папки …… пути установки", L"· Ordner …… Installationspfade", L"· Pastas …… caminhos de instalação", L"· Mappen …… installatiepaden",
+		L"· Foldery …… ścieżki instalacji", L"· Klasör …… kurulum yolları")); y2 += lh;
+	body(col2, y2, LL14(L"・設定 …… DirectSound / フォント / 動画フィルタ", L"· Settings …… DirectSound / fonts / video filters", L"· Paramètres …… DirectSound / polices / vidéo", L"· Impostazioni …… DirectSound / font / video",
+		L"· Ajustes …… DirectSound / fuentes / vídeo", L"· 설정 …… DirectSound / 글꼴 / 동영상 필터", L"· 设置 …… DirectSound / 字体 / 视频滤镜", L"· الإعدادات …… DirectSound / خطوط / فيديو",
+		L"· Настройки …… DirectSound / шрифты / видео", L"· Einstellungen …… DirectSound / Schrift / Video", L"· Config …… DirectSound / fontes / vídeo", L"· Instellingen …… DirectSound / lettertypes / video",
+		L"· Ustawienia …… DirectSound / czcionki / wideo", L"· Ayarlar …… DirectSound / yazı tipi / video")); y2 += lh;
+	body(col2, y2, LL14(L"・KPI …… プラグイン一覧（設定画面から）", L"· KPI …… plugin list (from Settings)", L"· KPI …… liste plugins (Paramètres)", L"· KPI …… elenco plugin (Impostazioni)",
+		L"· KPI …… lista de plugins (Ajustes)", L"· KPI …… 플러그인 목록(설정에서)", L"· KPI …… 插件列表（设置中）", L"· KPI …… قائمة المكونات (الإعدادات)",
+		L"· KPI …… список плагинов (Настройки)", L"· KPI …… Pluginliste (Einstellungen)", L"· KPI …… lista de plugins (Config)", L"· KPI …… pluginlijst (Instellingen)",
+		L"· KPI …… lista wtyczek (Ustawienia)", L"· KPI …… eklenti listesi (Ayarlar)")); y2 += lh;
+	body(col2, y2, LL14(L"・動画も表示 …… 再生中の動画ウィンドウ", L"· Show video …… video window during playback", L"· Afficher vidéo …… fenêtre pendant la lecture", L"· Mostra video …… finestra in riproduzione",
+		L"· Mostrar vídeo …… ventana durante reproducción", L"· 동영상 표시 …… 재생 중 동영상 창", L"· 显示视频 …… 播放中的视频窗口", L"· عرض الفيديو …… نافذة أثناء التشغيل",
+		L"· Показывать видео …… окно при воспроизведении", L"· Video anzeigen …… Fenster während Wiedergabe", L"· Mostrar vídeo …… janela durante reprodução", L"· Video tonen …… venster tijdens afspelen",
+		L"· Pokaż wideo …… okno podczas odtwarzania", L"· Videoyu göster …… çalma sırasında pencere")); y2 += lh;
+	body(col2, y2, LL14(L"・MP画面 …… 汎用メディアプレイヤーへ切替", L"· MP screen …… switch to general media player", L"· Écran MP …… passer au lecteur général", L"· Schermo MP …… passa al player generale",
+		L"· Pantalla MP …… cambiar al reproductor general", L"· MP화면 …… 일반 미디어 플레이어로 전환", L"· MP画面 …… 切换到通用媒体播放器", L"· شاشة MP …… التبديل إلى المشغل العام",
+		L"· Экран MP …… общий медиаплеер", L"· MP-Ansicht …… zum allgemeinen Player", L"· Tela MP …… ir ao player geral", L"· MP-scherm …… naar algemene speler",
+		L"· Ekran MP …… ogólny odtwarzacz", L"· MP ekranı …… genel oynatıcıya geç")); y2 += lh;
+
+	y = max(y1, y2) + 4;
+	if (y < rc.bottom - 4) {
+		muted(L, y, LL14(
+			L"WAV保存・マイクミックス・フェードアウトもこの画面から使えます。各サブ窓にも「?」があります。",
+			L"WAV save, mic mix, and fade-out are here too. Sub-windows also have \"?\".",
+			L"Export WAV, mix micro et fondu aussi ici. Les sous-fenêtres ont « ? ».",
+			L"Anche WAV, mix micro e fade. Le sottofinestre hanno « ? ».",
+			L"También WAV, mezcla mic y fade. Las subventanas tienen « ? ».",
+			L"WAV 저장·마이크 믹스·페이드아웃도 여기. 서브 창에도 \"?\"가 있습니다.",
+			L"WAV 保存、麦克风混音、淡出也在此。各子窗口也有「?」。",
+			L"حفظ WAV ومزج الميك والتلاشي هنا أيضاً. للنوافذ الفرعية \"؟\".",
+			L"Также WAV, микс микрофона и fade. У доп. окон есть «?».",
+			L"Auch WAV, Mikro-Mix und Fade. Unterfenster haben ebenfalls \"?\".",
+			L"Também WAV, mix de micro e fade. Subjanelas também têm \"?\".",
+			L"Ook WAV, mic-mix en fade-out. Subvensters hebben ook \"?\".",
+			L"Też WAV, mix mikrofonu i fade. Podokna mają też \"?\".",
+			L"WAV kaydı, mik karışımı ve fade de burada. Alt pencerelerde de \"?\" var."));
+	}
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
+void COggDlg::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void COggDlg::ShowHelpSheet()
+{
+	if (g_oggHelpDlg && ::IsWindow(g_oggHelpDlg->GetSafeHwnd())) {
+		g_oggHelpDlg->ShowWindow(SW_SHOW);
+		g_oggHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_oggHelpDlg && !::IsWindow(g_oggHelpDlg->GetSafeHwnd()))
+		g_oggHelpDlg = nullptr;
+	COggHelpDlg* dlg = new COggHelpDlg(nullptr);
+	if (!dlg->Create(IDD_OGG_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_oggHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void COggDlg::OnBnClickedHelp()
+{
+	ShowHelpSheet();
+}
+
 void COggDlg::OnDestroy()
 {
+	if (g_oggHelpDlg && ::IsWindow(g_oggHelpDlg->GetSafeHwnd()))
+		g_oggHelpDlg->DestroyWindow();
 	MpPromptFlushHistoryOnExit();
 	CCustomBlurDialogBase::OnDestroy();
 
@@ -27271,7 +27592,6 @@ void COggDlg::OnDestroy()
 	delete m_newFont1;
 
 }
-
 
 BOOL COggDlg::Create(LPCTSTR lpszTemplateName, CWnd * pParentWnd)
 {

@@ -43,6 +43,9 @@ public:
 // インプリメンテーション
 protected:
 	CToolTipCtrl m_tooltip;
+	CCustomStandardButton m_help;
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
 	// 生成されたメッセージ マップ関数
 	//{{AFX_MSG(CRender)
 	virtual BOOL OnInitDialog();
@@ -50,6 +53,9 @@ protected:
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 public:
+	afx_msg void OnBnClickedHelp();
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnDestroy();
 	CCustomCheckBox m_evr;
 	virtual INT_PTR OnToolHitTest(CPoint point, TOOLINFO* pTI) const;
 	virtual BOOL PreTranslateMessage(MSG* pMsg);

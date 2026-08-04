@@ -156,6 +156,200 @@ public:
 static char THIS_FILE[] = __FILE__;
 #endif
 extern save savedata;
+
+namespace {
+
+class CDougaHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_DOUGA_HELP };
+	explicit CDougaHelpDlg(CWnd* pParent = nullptr) : CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CDougaHelpDlg* g_dougaHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CDougaHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CDougaHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"動画操作ガイド", L"Video Guide", L"Guide vidéo", L"Guida video",
+		L"Guía de vídeo", L"동영상 가이드", L"视频操作指南", L"دليل الفيديو",
+		L"Руководство видео", L"Video-Anleitung", L"Guia de vídeo", L"Videogids",
+		L"Przewodnik wideo", L"Video kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CDougaHelpDlg::OnOK() { DestroyWindow(); }
+void CDougaHelpDlg::OnCancel() { DestroyWindow(); }
+void CDougaHelpDlg::OnClose() { DestroyWindow(); }
+
+void CDougaHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_dougaHelpDlg == this)
+		g_dougaHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CDougaHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CDougaHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"動画操作ガイド", L"Video — Guide", L"Guide vidéo", L"Guida video",
+		L"Guía de vídeo", L"동영상 가이드", L"视频指南", L"دليل الفيديو",
+		L"Руководство видео", L"Video-Guide", L"Guia de vídeo", L"Videogids",
+		L"Przewodnik wideo", L"Video kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"下部バーと右クリックメニューで再生・表示・ストリームを操作します。ダブルクリックでも全画面切替。",
+		L"Use the bottom bar and right-click menu for playback, display, and streams. Double-click toggles fullscreen.",
+		L"Barre bas et clic droit : lecture, affichage, flux. Double-clic = plein écran.",
+		L"Barra in basso e destro: riproduzione, visualizzazione, stream. Doppio clic = schermo intero.",
+		L"Barra inferior y clic derecho: reproducción, pantalla y streams. Doble clic = pantalla completa.",
+		L"하단 바와 우클릭으로 재생·표시·스트림을 조작합니다. 더블클릭으로 전체화면.",
+		L"用底部栏和右键菜单操作播放、显示与流。双击也可切换全屏。",
+		L"الشريط السفلي والنقر الأيمن للتشغيل والعرض والمسارات. النقر المزدوج يبدّل ملء الشاشة.",
+		L"Нижняя панель и ПКМ: воспроизведение, вид и потоки. Двойной щелчок — полный экран.",
+		L"Untere Leiste und Rechtsklick: Wiedergabe, Anzeige, Streams. Doppelklick = Vollbild.",
+		L"Barra inferior e botão direito: reprodução, ecrã e streams. Duplo clique = ecrã inteiro.",
+		L"Onderbalk en rechtsklik: afspelen, weergave, streams. Dubbelklik = volledig scherm.",
+		L"Dolny pasek i PPM: odtwarzanie, widok i strumienie. Dwuklik = pełny ekran.",
+		L"Alt çubuk ve sağ tık: oynatma, görünüm, akışlar. Çift tık = tam ekran."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"再生 / シーク", L"Play / Seek", L"Lecture / Position", L"Play / Seek",
+		L"Reproducir / Buscar", L"재생 / 탐색", L"播放 / 定位", L"تشغيل / تقديم",
+		L"Воспроизведение / Перемотка", L"Wiedergabe / Suche", L"Reproduzir / Busca", L"Afspelen / Zoeken",
+		L"Odtwarzanie / Przewijanie", L"Oynat / Sar"));
+	y += titleLh;
+	body(L, y, LL14(L"・再生／一時停止／停止 …… バーまたは右クリック。前へ／次へで曲切替", L"· Play / Pause / Stop …… bar or right-click. Prev / Next changes track", L"· Lect. / Pause / Stop …… barre ou clic droit. Préc./Suiv. change de piste", L"· Play / Pausa / Stop …… barra o destro. Prec./Succ. cambia brano",
+		L"· Play / Pausa / Stop …… barra o clic der. Ant./Sig. cambia pista", L"· 재생/일시정지/중지 …… 바 또는 우클릭. 이전/다음으로 곡 전환", L"· 播放/暂停/停止 …… 栏或右键。上一首/下一首切换曲目", L"· تشغيل/إيقاف/إيقاف تام …… الشريط أو يمين. السابق/التالي يغيّر المقطع",
+		L"· Играть / Пауза / Стоп …… панель или ПКМ. Пред./След. — трек", L"· Play / Pause / Stop …… Leiste oder Rechtsklick. Zurück/Weiter wechselt Titel", L"· Play / Pausa / Parar …… barra ou direito. Ant./Prox. muda faixa", L"· Play / Pauze / Stop …… balk of rechtsklik. Vorige/Volgende wisselt track",
+		L"· Odtwórz / Pauza / Stop …… pasek lub PPM. Poprz./Nast. zmienia utwór", L"· Çal / Duraklat / Dur …… çubuk veya sağ tık. Önceki/Sonraki parça")); y += lh;
+	body(L, y, LL14(L"・シーク …… 上段スライダー。←→ キーでも前後。戻す／進めるで少し移動", L"· Seek …… top slider. ←→ keys also step. Rew / FF nudge a bit", L"· Position …… curseur haut. ←→ aussi. Recul / Avance = petit saut", L"· Seek …… cursore in alto. ←→ pure. Indietro / Avanti = piccolo salto",
+		L"· Buscar …… control superior. ←→ también. Retr./Avanz. = un poco", L"· 탐색 …… 상단 슬라이더. ←→ 키도 가능. 되감기/빨리감기로 조금 이동", L"· 定位 …… 上方滑块。←→ 键也可。快退/快进微调", L"· تقديم …… شريط علوي. ←→ أيضاً. ترجيع/تقديم = خطوة صغيرة",
+		L"· Перемотка …… верхний ползунок. ←→ тоже. Назад/Вперёд — чуть", L"· Suche …… oberer Schieber. ←→ ebenfalls. Zurück/Vor = etwas", L"· Busca …… controlo superior. ←→ também. Voltar/Avançar = um pouco", L"· Zoeken …… bovenste schuif. ←→ ook. Terug/Vooruit = beetje",
+		L"· Przewijanie …… górny suwak. ←→ też. Wstecz/Naprzód = trochę", L"· Sar …… üst kaydırıcı. ←→ da. Geri/İleri = biraz")); y += lh + 4;
+
+	title(L, y, LL14(L"表示 / 全画面", L"Display / Fullscreen", L"Affichage / Plein écran", L"Visualizzazione / Schermo intero",
+		L"Pantalla / Completa", L"표시 / 전체화면", L"显示 / 全屏", L"عرض / ملء الشاشة",
+		L"Вид / Полный экран", L"Anzeige / Vollbild", L"Ecrã / Completo", L"Weergave / Volledig",
+		L"Widok / Pełny ekran", L"Görünüm / Tam ekran"));
+	y += titleLh;
+	body(L, y, LL14(L"・全画面 …… バー／メニュー／ダブルクリック。ウィンドウ時は 1x・1.5x・2x サイズ", L"· Fullscreen …… bar / menu / double-click. In window: 1x · 1.5x · 2x size", L"· Plein écran …… barre / menu / double-clic. Fenêtre: 1x · 1,5x · 2x", L"· Schermo intero …… barra / menu / doppio clic. Finestra: 1x · 1.5x · 2x",
+		L"· Completa …… barra / menú / doble clic. Ventana: 1x · 1.5x · 2x", L"· 전체화면 …… 바/메뉴/더블클릭. 창 모드: 1x·1.5x·2x", L"· 全屏 …… 栏/菜单/双击。窗口模式: 1x·1.5x·2x", L"· ملء الشاشة …… شريط/قائمة/نقر مزدوج. النافذة: 1x·1.5x·2x",
+		L"· Полный экран …… панель / меню / двойной щелчок. Окно: 1x · 1.5x · 2x", L"· Vollbild …… Leiste / Menü / Doppelklick. Fenster: 1x · 1,5x · 2x", L"· Ecrã inteiro …… barra / menu / duplo clique. Janela: 1x · 1.5x · 2x", L"· Volledig …… balk / menu / dubbelklik. Venster: 1x · 1.5x · 2x",
+		L"· Pełny ekran …… pasek / menu / dwuklik. Okno: 1x · 1.5x · 2x", L"· Tam ekran …… çubuk / menü / çift tık. Pencere: 1x · 1.5x · 2x")); y += lh;
+	body(L, y, LL14(L"・アスペクト比を維持 …… 右クリック。黒帯で比率を保つ／伸ばして埋める", L"· Keep aspect …… right-click. Letterbox vs stretch-to-fill", L"· Proportions …… clic droit. Bandes noires ou étirement", L"· Proporzioni …… destro. Bande nere o stiramento",
+		L"· Proporción …… clic der. Bandas negras o estirar", L"· 화면비 유지 …… 우클릭. 레터박스 / 늘려 채우기", L"· 保持宽高比 …… 右键。黑边或拉伸填满", L"· نسبة العرض …… يمين. أشرطة سوداء أو تمديد",
+		L"· Пропорции …… ПКМ. Поля или растяжение", L"· Seitenverhältnis …… Rechtsklick. Balken oder strecken", L"· Proporção …… direito. Barras pretas ou esticar", L"· Beeldverhouding …… rechtsklik. Zwarte balken of rekken",
+		L"· Proporcje …… PPM. Pasma lub rozciągnięcie", L"· En-boy …… sağ tık. Siyah şerit veya esnetme")); y += lh;
+	body(L, y, LL14(L"・常に手前に表示 …… 右クリック。他ウィンドウの上に固定", L"· Always on top …… right-click. Keep above other windows", L"· Toujours devant …… clic droit. Au-dessus des autres", L"· Sempre in primo piano …… destro. Sopra le altre finestre",
+		L"· Siempre visible …… clic der. Sobre otras ventanas", L"· 항상 위에 …… 우클릭. 다른 창 위에 고정", L"· 总在最前 …… 右键。固定在其他窗口之上", L"· دائماً في المقدمة …… يمين. فوق النوافذ الأخرى",
+		L"· Поверх всех …… ПКМ. Над другими окнами", L"· Immer im Vordergrund …… Rechtsklick. Über anderen Fenstern", L"· Sempre visível …… direito. Acima das outras janelas", L"· Altijd op voorgrond …… rechtsklik. Boven andere vensters",
+		L"· Zawsze na wierzchu …… PPM. Nad innymi oknami", L"· Her zaman üstte …… sağ tık. Diğer pencerelerin üstünde")); y += lh;
+	body(L, y, LL14(L"・再生速度 …… 右クリック（対応グラフ時）。0.5x〜2.0x", L"· Playback speed …… right-click (when supported). 0.5x–2.0x", L"· Vitesse …… clic droit (si pris en charge). 0,5x–2,0x", L"· Velocità …… destro (se supportato). 0.5x–2.0x",
+		L"· Velocidad …… clic der. (si se admite). 0.5x–2.0x", L"· 재생 속도 …… 우클릭(지원 시). 0.5x–2.0x", L"· 播放速度 …… 右键（支持时）。0.5x–2.0x", L"· سرعة التشغيل …… يمين (إن دعم). 0.5x–2.0x",
+		L"· Скорость …… ПКМ (если есть). 0.5x–2.0x", L"· Geschwindigkeit …… Rechtsklick (falls unterstützt). 0.5x–2.0x", L"· Velocidade …… direito (se suportado). 0.5x–2.0x", L"· Snelheid …… rechtsklik (indien ondersteund). 0.5x–2.0x",
+		L"· Prędkość …… PPM (jeśli obsługiwane). 0.5x–2.0x", L"· Hız …… sağ tık (desteklenirse). 0.5x–2.0x")); y += lh + 4;
+
+	title(L, y, LL14(L"音量 / 消音 / フェード", L"Volume / Mute / Fade", L"Volume / Muet / Fondu", L"Volume / Mute / Fade",
+		L"Volumen / Silencio / Fade", L"음량 / 음소거 / 페이드", L"音量 / 静音 / 淡出", L"الصوت / كتم / تلاشي",
+		L"Громкость / Без звука / Затухание", L"Lautstärke / Stumm / Fade", L"Volume / Mudo / Fade", L"Volume / Dempen / Fade",
+		L"Głośność / Wycisz / Fade", L"Ses / Sessiz / Fade"));
+	y += titleLh;
+	body(L, y, LL14(L"・音量 …… 右端スライダー／↑↓ キー。消音で一時的に 0。フェードで徐々に停止", L"· Volume …… right slider / ↑↓. Mute zeros temporarily. Fade stops gradually", L"· Volume …… curseur droit / ↑↓. Muet = 0. Fondu = arrêt progressif", L"· Volume …… cursore destro / ↑↓. Mute = 0. Fade = stop graduale",
+		L"· Volumen …… control der. / ↑↓. Silencio = 0. Fade = parada gradual", L"· 음량 …… 우측 슬라이더/↑↓. 음소거는 일시 0. 페이드는 서서히 정지", L"· 音量 …… 右侧滑块/↑↓。静音暂置 0。淡出逐渐停止", L"· الصوت …… شريط يمين / ↑↓. الكتم = 0. التلاشي يوقف تدريجياً",
+		L"· Громкость …… правый ползунок / ↑↓. Без звука = 0. Затухание — плавный стоп", L"· Lautstärke …… rechter Schieber / ↑↓. Stumm = 0. Fade = sanftes Stoppen", L"· Volume …… controlo direito / ↑↓. Mudo = 0. Fade = paragem gradual", L"· Volume …… rechter schuif / ↑↓. Dempen = 0. Fade = geleidelijk stoppen",
+		L"· Głośność …… prawy suwak / ↑↓. Wycisz = 0. Fade = stopniowy stop", L"· Ses …… sağ kaydırıcı / ↑↓. Sessiz = 0. Fade = yavaşça durur")); y += lh + 4;
+
+	title(L, y, LL14(L"ストリーム / フィルタ", L"Streams / Filters", L"Flux / Filtres", L"Stream / Filtri",
+		L"Streams / Filtros", L"스트림 / 필터", L"流 / 滤镜", L"المسارات / المرشحات",
+		L"Потоки / Фильтры", L"Streams / Filter", L"Streams / Filtros", L"Streams / Filters",
+		L"Strumienie / Filtry", L"Akışlar / Filtreler"));
+	y += titleLh;
+	body(L, y, LL14(L"・右クリック …… 映像／音声／字幕ストリームを選択（ある場合）", L"· Right-click …… choose video / audio / subtitle streams (when present)", L"· Clic droit …… choisir flux vidéo / audio / sous-titres (si présents)", L"· Destro …… scegli stream video / audio / sottotitoli (se presenti)",
+		L"· Clic der. …… elegir streams de vídeo / audio / subtítulos (si hay)", L"· 우클릭 …… 영상/음성/자막 스트림 선택(있을 때)", L"· 右键 …… 选择视频/音频/字幕流（若有）", L"· يمين …… اختيار مسارات فيديو/صوت/ترجمة (إن وُجدت)",
+		L"· ПКМ …… выбрать видео / аудио / субтитры (если есть)", L"· Rechtsklick …… Video-/Audio-/Untertitelstreams (falls vorhanden)", L"· Direito …… escolher streams de vídeo / áudio / legendas (se houver)", L"· Rechtsklik …… video-/audio-/ondertitelstreams (indien aanwezig)",
+		L"· PPM …… wybierz strumienie wideo / audio / napisów (jeśli są)", L"· Sağ tık …… video / ses / altyazı akışları (varsa)")); y += lh;
+	body(L, y, LL14(L"・フィルタ …… 再生設定のデコーダ／レンダラ等。グラフ構築時に適用", L"· Filters …… decoders / renderers from playback settings; applied when building the graph", L"· Filtres …… décodeurs / rendus des réglages; appliqués à la construction du graphe", L"· Filtri …… decoder / renderer dalle impostazioni; applicati nella costruzione del grafo",
+		L"· Filtros …… decodificadores / renderizadores de ajustes; al construir el grafo", L"· 필터 …… 재생 설정의 디코더/렌더러 등. 그래프 구축 시 적용", L"· 滤镜 …… 播放设置中的解码器/渲染器等，建图时应用", L"· المرشحات …… وحدات فك/عرض من الإعدادات؛ تُطبَّق عند بناء الرسم",
+		L"· Фильтры …… декодеры / рендереры из настроек; при построении графа", L"· Filter …… Decoder / Renderer aus Einstellungen; beim Graphaufbau", L"· Filtros …… descodificadores / renderers das definições; ao construir o grafo", L"· Filters …… decoders / renderers uit instellingen; bij opbouw van de graph",
+		L"· Filtry …… dekodery / renderery z ustawień; przy budowie grafu", L"· Filtreler …… ayarlardaki kod çözücü / renderer; grafik kurulurken")); y += lh + 4;
+
+	const int gx = L, gy = y, gw = min(360, rc.Width() - L * 2), gh = lh * 2 + 12;
+	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+	dc.FillSolidRect(gx + 4, gy + 6, 44, gh - 12, RGB(255, 180, 120));
+	dc.FillSolidRect(gx + 56, gy + 6, 44, gh - 12, RGB(130, 205, 140));
+	dc.FillSolidRect(gx + 108, gy + 6, 48, gh - 12, RGB(160, 195, 240));
+	dc.FillSolidRect(gx + 164, gy + 6, 50, gh - 12, RGB(240, 210, 160));
+	dc.SetTextColor(RGB(40, 40, 55));
+	dc.TextOut(gx + 10, gy + 8, L"Play");
+	dc.TextOut(gx + 64, gy + 8, L"FS");
+	dc.TextOut(gx + 116, gy + 8, L"Mute");
+	dc.TextOut(gx + 172, gy + 8, L"RMB");
+	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
 /////////////////////////////////////////////////////////////////////////////
 // CDouga
 
@@ -263,6 +457,7 @@ BEGIN_MESSAGE_MAP(CDougaBarHost, CWnd)
 	ON_BN_CLICKED(IDC_DOUGA_SZ1, OnBnSz1)
 	ON_BN_CLICKED(IDC_DOUGA_SZ15, OnBnSz15)
 	ON_BN_CLICKED(IDC_DOUGA_SZ2, OnBnSz2)
+	ON_BN_CLICKED(IDC_DOUGA_HELP, OnBnHelp)
 END_MESSAGE_MAP()
 
 // ファイル後方で定義されるグローバルへの前方参照
@@ -355,6 +550,9 @@ BOOL CDougaBarHost::CreateBar(CDouga* owner)
 	m_sz1.Create(_T(""), btnStyle, z, this, IDC_DOUGA_SZ1);
 	m_sz15.Create(_T(""), btnStyle, z, this, IDC_DOUGA_SZ15);
 	m_sz2.Create(_T(""), btnStyle, z, this, IDC_DOUGA_SZ2);
+	m_help.Create(_T("?"), btnStyle, z, this, IDC_DOUGA_HELP);
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
 	m_volL.Create(_T(""), stStyle, z, this, IDC_DOUGA_VOL_L);
 	m_vol.Create(slStyle, z, this, IDC_DOUGA_VOL);
 	m_volVal.Create(_T(""), stStyle, z, this, IDC_DOUGA_VOLVAL);
@@ -398,6 +596,7 @@ BOOL CDougaBarHost::CreateBar(CDouga* owner)
 		DougaAddTip(m_tip, m_sz1, LL14(L"通常サイズ (1x)", L"Normal size (1x)", L"Taille normale (1x)", L"Dimensione normale (1x)", L"Tamaño normal (1x)", L"표준 크기 (1x)", L"标准尺寸 (1x)", L"الحجم العادي (1x)", L"Обычный размер (1x)", L"Normalgröße (1x)", L"Tamanho normal (1x)", L"Normale grootte (1x)", L"Normalny rozmiar (1x)", L"Normal boyut (1x)"));
 		DougaAddTip(m_tip, m_sz15, LL14(L"中間サイズ (1.5x)", L"Medium size (1.5x)", L"Taille moyenne (1,5x)", L"Dimensione media (1.5x)", L"Tamaño medio (1.5x)", L"중간 크기 (1.5x)", L"中等尺寸 (1.5x)", L"الحجم المتوسط (1.5x)", L"Средний размер (1.5x)", L"Mittlere Größe (1,5x)", L"Tamanho médio (1.5x)", L"Middelgroot (1.5x)", L"Średni rozmiar (1.5x)", L"Orta boyut (1.5x)"));
 		DougaAddTip(m_tip, m_sz2, LL14(L"倍サイズ (2x)", L"Large size (2x)", L"Grande taille (2x)", L"Dimensione grande (2x)", L"Tamaño grande (2x)", L"2배 크기 (2x)", L"双倍尺寸 (2x)", L"الحجم الكبير (2x)", L"Двойной размер (2x)", L"Doppelte Größe (2x)", L"Tamanho grande (2x)", L"Grote maat (2x)", L"Duży rozmiar (2x)", L"Büyük boyut (2x)"));
+		DougaAddTip(m_tip, m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 		DougaAddTip(m_tip, m_vol, LL14(L"DirectShow 音量", L"DirectShow volume", L"Volume DirectShow", L"Volume DirectShow", L"Volumen DirectShow", L"DirectShow 음량", L"DirectShow 音量", L"صوت DirectShow", L"Громкость DirectShow", L"DirectShow-Lautstärke", L"Volume DirectShow", L"DirectShow-volume", L"Głośność DirectShow", L"DirectShow sesi"));
 		DougaAddTip(m_tip, m_seek, LL14(L"シーク", L"Seek", L"Position", L"Posizione", L"Posición", L"탐색", L"定位", L"تقديم", L"Перемотка", L"Suche", L"Busca", L"Zoeken", L"Przewijanie", L"Sar"));
 	}
@@ -459,6 +658,7 @@ void CDougaBarHost::LayoutBar()
 		{ &m_sz1,  btnW(36, 32, 26) },
 		{ &m_sz15, btnW(44, 36, 30) },
 		{ &m_sz2,  btnW(36, 32, 26) },
+		{ &m_help, DougaDpiScale(m_hWnd, m_short ? 22 : 26) },
 	};
 	for (size_t i = 0; i < sizeof(btns) / sizeof(btns[0]); ++i) {
 		move(*btns[i].w, x, y2, btns[i].ww, bh);
@@ -647,6 +847,7 @@ void CDougaBarHost::OnBnFs()
 void CDougaBarHost::OnBnSz1() { if (m_owner) m_owner->OnMenuitem32771(); }
 void CDougaBarHost::OnBnSz15() { if (m_owner) m_owner->OnMenuitem32773(); }
 void CDougaBarHost::OnBnSz2() { if (m_owner) m_owner->OnMenuitem32772(); }
+void CDougaBarHost::OnBnHelp() { if (m_owner) m_owner->ShowHelpSheet(); }
 
 /////////////////////////////////////////////////////////////////////////////
 // CDouga — 動画配置(バーと競合しないよう videoSite に限定)
@@ -1311,6 +1512,7 @@ BEGIN_MESSAGE_MAP(CDouga, CFrameWnd)
 	ON_COMMAND(ID_DOUGA_TOPMOST, OnDougaMenuTopmost)
 	ON_COMMAND(ID_DOUGA_ASPECT, OnDougaMenuAspect)
 	ON_COMMAND_RANGE(ID_DOUGA_SPEED_FIRST, ID_DOUGA_SPEED_LAST, OnDougaMenuSpeed)
+	ON_COMMAND(ID_HELP_SHOWSHEET, OnHelpShowSheet)
 END_MESSAGE_MAP()
 
 /////////////////////////////////////////////////////////////////////////////
@@ -4802,8 +5004,7 @@ void CDouga::OnExitSizeMove()
 
 void CDouga::OnClose() 
 {
-
-	// TODO: この位置にメッセージ ハンドラ用のコードを追加するかまたはデフォルトの処理を呼び出してください
+	DestroyHelpSheet();
 	CFrameWnd::OnClose();
 }
 
@@ -4941,6 +5142,12 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 					L"Скорость воспроизведения", L"Wiedergabegeschwindigkeit", L"Velocidade de reproducao",
 					L"Afspeelsnelheid", L"Predkosc odtwarzania", L"Oynatma hizi"));
 		}
+		pPopup->InsertMenu(at++, MF_BYPOSITION | MF_SEPARATOR);
+		pPopup->InsertMenu(at++, MF_BYPOSITION | MF_STRING, ID_HELP_SHOWSHEET,
+			LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
+				L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
+				L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Bedieningsgids",
+				L"Przewodnik", L"İşlem kılavuzu"));
 	}
 
 	CWnd* pWndPopupOwner = this;
@@ -5550,7 +5757,7 @@ BOOL CDouga::OnEraseBkgnd(CDC* pDC)
 extern CDouga *pMainFrame1;
 BOOL CDouga::DestroyWindow() 
 {
-	// TODO: この位置に固有の処理を追加するか、または基本クラスを呼び出してください
+	DestroyHelpSheet();
 	KillTimer(1255);
 	stop();	
 	bmp.DeleteObject();
@@ -5812,6 +6019,36 @@ void CDouga::OnDougaMenuFf() { m_bar.OnBnFf(); }
 void CDouga::OnDougaMenuMute() { m_bar.OnBnMute(); }
 void CDouga::OnDougaMenuFs() { m_bar.OnBnFs(); }
 void CDouga::OnDougaMenuFade() { m_bar.OnBnFade(); }
+
+void CDouga::ShowHelpSheet()
+{
+	if (g_dougaHelpDlg && ::IsWindow(g_dougaHelpDlg->GetSafeHwnd())) {
+		g_dougaHelpDlg->ShowWindow(SW_SHOW);
+		g_dougaHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_dougaHelpDlg && !::IsWindow(g_dougaHelpDlg->GetSafeHwnd()))
+		g_dougaHelpDlg = nullptr;
+	CDougaHelpDlg* dlg = new CDougaHelpDlg(nullptr);
+	if (!dlg->Create(IDD_DOUGA_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_dougaHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CDouga::DestroyHelpSheet()
+{
+	if (g_dougaHelpDlg && ::IsWindow(g_dougaHelpDlg->GetSafeHwnd()))
+		g_dougaHelpDlg->DestroyWindow();
+}
+
+void CDouga::OnHelpShowSheet()
+{
+	ShowHelpSheet();
+}
 
 void CDouga::OnDougaMenuTopmost()
 {

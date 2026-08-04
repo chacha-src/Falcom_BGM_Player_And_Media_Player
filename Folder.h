@@ -110,6 +110,14 @@ public:
 	afx_msg void OnBnClickedOk();
 	afx_msg void OnBnClickedCancel();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg void OnBnClickedHelp();
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnDestroy();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
+	CCustomStandardButton m_help;
+	CToolTipCtrl m_tooltip;
 	CCustomStandardButton m_okdummy;
 	CCustomStandardButton aaaaaaaaaa;
 	CCustomStandardButton asfsfcascs;

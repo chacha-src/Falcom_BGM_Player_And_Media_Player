@@ -174,6 +174,195 @@ bool WavExportBrowseFolder(CWnd* owner, CString& outFolder)
 	return true;
 }
 
+class CWeHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_WE_HELP };
+	explicit CWeHelpDlg(CWnd* pParent = nullptr) : CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CWeHelpDlg* g_weHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CWeHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CWeHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"WAV出力操作ガイド", L"WAV Export Guide", L"Guide d'export WAV", L"Guida esportazione WAV",
+		L"Guía de exportación WAV", L"WAV 내보내기 가이드", L"WAV 导出指南", L"دليل تصدير WAV",
+		L"Руководство экспорта WAV", L"WAV-Export-Anleitung", L"Guia de exportação WAV", L"WAV-exportgids",
+		L"Przewodnik eksportu WAV", L"WAV dışa aktarma kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CWeHelpDlg::OnOK() { DestroyWindow(); }
+void CWeHelpDlg::OnCancel() { DestroyWindow(); }
+void CWeHelpDlg::OnClose() { DestroyWindow(); }
+
+void CWeHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_weHelpDlg == this)
+		g_weHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CWeHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CWeHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"WAV出力操作ガイド", L"WAV Export — Guide", L"Guide export WAV", L"Guida esportazione WAV",
+		L"Guía exportación WAV", L"WAV 내보내기 가이드", L"WAV 导出指南", L"دليل تصدير WAV",
+		L"Руководство экспорта WAV", L"WAV-Export-Guide", L"Guia exportação WAV", L"WAV-exportgids",
+		L"Przewodnik eksportu WAV", L"WAV dışa aktarma kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"曲をデコードして WAV に書き出します。ループ・フェード・タグもここで指定します。",
+		L"Decode the track and write WAV. Set loops, fade, and tags here.",
+		L"Décodez la piste en WAV. Boucles, fondu et tags ici.",
+		L"Decodifica la traccia in WAV. Loop, fade e tag qui.",
+		L"Decodifica la pista a WAV. Bucles, fundido y etiquetas aquí.",
+		L"곡을 디코드해 WAV로 내보냅니다. 루프·페이드·태그도 여기서 지정합니다.",
+		L"解码曲目并写出 WAV。在此设置循环、淡出和标签。",
+		L"فكّ الترميز واكتب WAV. الحلقات والتلاشي والوسوم هنا.",
+		L"Декодируйте трек в WAV. Циклы, затухание и теги здесь.",
+		L"Track dekodieren und als WAV schreiben. Schleifen, Fade und Tags hier.",
+		L"Decode a faixa e grave WAV. Loops, fade e tags aqui.",
+		L"Decodeer het nummer naar WAV. Loops, fade en tags hier.",
+		L"Dekoduj utwór do WAV. Pętle, fade i tagi tutaj.",
+		L"Parçayı decode edip WAV yazın. Döngü, solma ve etiketler burada."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"基本操作", L"Basics", L"Bases", L"Basi", L"Básicos", L"기본", L"基本", L"أساسيات",
+		L"Основы", L"Grundlagen", L"Básicos", L"Basis", L"Podstawy", L"Temeller"));
+	y += titleLh;
+	body(L, y, LL14(L"・繰返し回数 …… ループ再生して書き出す回数", L"· Loop count …… how many times to loop while exporting", L"· Boucles …… nombre de répétitions à l'export", L"· Loop …… quante volte ripetere in export",
+		L"· Repeticiones …… veces a repetir al exportar", L"· 반복 횟수 …… 내보내기 시 루프 횟수", L"· 循环次数 …… 导出时循环播放的次数", L"· التكرار …… مرات الحلقة عند التصدير",
+		L"· Повторы …… сколько раз зациклить при экспорте", L"· Schleifen …… wie oft beim Export wiederholen", L"· Repetições …… quantas vezes repetir na exportação", L"· Herhalingen …… hoe vaak loopen bij export",
+		L"· Powtórzenia …… ile razy zapętlić przy eksporcie", L"· Döngü sayısı …… dışa aktarırken kaç kez döngü")); y += lh;
+	body(L, y, LL14(L"・出力パス …… 単曲はファイル名、複数選択時はフォルダ", L"· Path …… file name for one track, folder for multi-select", L"· Chemin …… fichier (1) ou dossier (plusieurs)", L"· Percorso …… file (1) o cartella (più)",
+		L"· Ruta …… archivo (1) o carpeta (varios)", L"· 출력 경로 …… 단곡=파일명, 다중=폴더", L"· 输出路径 …… 单曲为文件名，多选为文件夹", L"· المسار …… ملف لواحدة أو مجلد لعدة",
+		L"· Путь …… файл (1) или папка (несколько)", L"· Pfad …… Datei (1) oder Ordner (mehrere)", L"· Caminho …… arquivo (1) ou pasta (vários)", L"· Pad …… bestand (1) of map (meer)",
+		L"· Ścieżka …… plik (1) lub folder (wiele)", L"· Yol …… tek parça=dosya, çoklu=klasör")); y += lh;
+	body(L, y, LL14(L"・フェードアウト …… 末尾を指定秒でフェード", L"· Fade out …… fade the end over N seconds", L"· Fondu …… fondre la fin sur N sec", L"· Dissolvenza …… fade finale in N sec",
+		L"· Fundido …… fundir el final en N seg", L"· 페이드 아웃 …… 끝을 N초 페이드", L"· 淡出 …… 末尾用 N 秒淡出", L"· تلاشي …… تلاشي النهاية خلال N ث",
+		L"· Затухание …… затухание конца за N сек", L"· Ausblenden …… Ende über N Sek. ausblenden", L"· Fade out …… esmaecer o fim em N seg", L"· Fade-out …… einde over N sec faden",
+		L"· Wyciszanie …… wycisz koniec przez N sek", L"· Solma …… sonu N sn sol")); y += lh;
+	body(L, y, LL14(L"・先頭無音を揃える …… 先頭の無音を指定秒だけ残して揃える", L"· Align leading silence …… keep N sec of lead-in silence", L"· Silence initial …… garder N sec au début", L"· Silenzio iniziale …… lascia N sec all'inizio",
+		L"· Silencio inicial …… dejar N seg al inicio", L"· 앞 무음 맞추기 …… 앞 무음을 N초만 남김", L"· 对齐开头静音 …… 开头静音保留 N 秒", L"· صمت ابتدائي …… الإبقاء على N ث في البداية",
+		L"· Нач. тишина …… оставить N сек в начале", L"· Anfangsstille …… N Sek. am Anfang behalten", L"· Silêncio inicial …… manter N seg no início", L"· Beginstilte …… N sec stilte vooraan houden",
+		L"· Cisza na początku …… zostaw N sek na początku", L"· Baştaki sessizlik …… başta N sn bırak")); y += lh + 4;
+
+	title(L, y, LL14(L"タグ / ジャケット", L"Tags / Cover", L"Tags / Pochette", L"Tag / Copertina", L"Etiquetas / Portada", L"태그 / 재킷", L"标签 / 封面", L"الوسوم / الغلاف",
+		L"Теги / Обложка", L"Tags / Cover", L"Tags / Capa", L"Tags / Cover", L"Tagi / Okładka", L"Etiketler / Kapak"));
+	y += titleLh;
+	body(L, y, LL14(L"・タグとジャケットをコピー …… 元曲のタグ／カバーを引き継ぐ", L"· Copy tags and cover …… carry over source tags/cover", L"· Copier tags/pochette …… depuis la source", L"· Copia tag/copertina …… dalla sorgente",
+		L"· Copiar etiquetas/portada …… desde el origen", L"· 태그·재킷 복사 …… 원곡에서 이어받음", L"· 复制标签和封面 …… 从源曲继承", L"· نسخ الوسوم/الغلاف …… من المصدر",
+		L"· Копировать теги/обложку …… из источника", L"· Tags/Cover kopieren …… von der Quelle", L"· Copiar tags/capa …… da origem", L"· Tags/hoes kopiëren …… van de bron",
+		L"· Kopiuj tagi/okładkę …… ze źródła", L"· Etiket/kapak kopyala …… kaynaktan")); y += lh;
+	body(L, y, LL14(L"・プロンプト実行を適用 …… 出力時にプロンプト効果を適用", L"· Apply prompt …… apply prompt effects on export", L"· Appliquer le prompt …… effets à l'export", L"· Applica prompt …… effetti in export",
+		L"· Aplicar prompt …… efectos al exportar", L"· 프롬프트 적용 …… 내보내기 시 프롬프트 효과", L"· 应用提示 …… 导出时应用提示效果", L"· تطبيق البرومبت …… تأثيرات عند التصدير",
+		L"· Применить промпт …… эффекты при экспорте", L"· Prompt anwenden …… Effekte beim Export", L"· Aplicar prompt …… efeitos na exportação", L"· Prompt toepassen …… effecten bij export",
+		L"· Zastosuj prompt …… efekty przy eksporcie", L"· Prompt uygula …… dışa aktarmada efekt")); y += lh;
+	body(L, y, LL14(L"・ジャケット …… JPG/PNG をドロップ、または解除でクリア", L"· Cover …… drop JPG/PNG, or Clear to remove", L"· Pochette …… déposer JPG/PNG, ou Effacer", L"· Copertina …… trascina JPG/PNG, o Cancella",
+		L"· Portada …… soltar JPG/PNG, o Borrar", L"· 재킷 …… JPG/PNG 드롭, 또는 해제로 지움", L"· 封面 …… 拖入 JPG/PNG，或点解除清除", L"· الغلاف …… أسقط JPG/PNG أو امسح",
+		L"· Обложка …… перетащите JPG/PNG или очистите", L"· Cover …… JPG/PNG ablegen oder Löschen", L"· Capa …… solte JPG/PNG ou Limpar", L"· Cover …… JPG/PNG neerzetten of Wissen",
+		L"· Okładka …… upuść JPG/PNG lub Wyczyść", L"· Kapak …… JPG/PNG bırak veya Temizle")); y += lh + 4;
+
+	const int gx = L, gy = y, gw = min(320, rc.Width() - L * 2), gh = lh * 2 + 12;
+	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+	dc.FillSolidRect(gx + 4, gy + 6, 44, gh - 12, RGB(70, 140, 90));
+	dc.FillSolidRect(gx + 56, gy + 6, 44, gh - 12, RGB(180, 140, 60));
+	dc.FillSolidRect(gx + 108, gy + 6, 44, gh - 12, RGB(70, 110, 160));
+	dc.FillSolidRect(gx + 160, gy + 6, 50, gh - 12, RGB(150, 70, 70));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + 10, gy + 8, L"Loop");
+	dc.TextOut(gx + 62, gy + 8, L"Fade");
+	dc.TextOut(gx + 114, gy + 8, L"Tags");
+	dc.TextOut(gx + 168, gy + 8, L"WAV");
+	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+	y = gy + gh + 4;
+
+	title(L, y, LL14(L"実行", L"Execute", L"Exécuter", L"Esegui", L"Ejecutar", L"실행", L"执行", L"تنفيذ",
+		L"Выполнить", L"Ausführen", L"Executar", L"Uitvoeren", L"Wykonaj", L"Çalıştır"));
+	y += titleLh;
+	body(L, y, LL14(L"・実行 …… デコードと書き出しを開始。進捗バーで進行を確認", L"· Execute …… start decode/write. Watch the progress bar", L"· Exécuter …… démarre. Suivre la barre de progression", L"· Esegui …… avvia. Controlla la barra di avanzamento",
+		L"· Ejecutar …… inicia. Mire la barra de progreso", L"· 실행 …… 디코드·쓰기 시작. 진행 바로 확인", L"· 执行 …… 开始解码与写出。用进度条查看", L"· تنفيذ …… يبدأ. راقب شريط التقدم",
+		L"· Выполнить …… старт. Смотрите прогресс", L"· Ausführen …… startet. Fortschrittsbalken beobachten", L"· Executar …… inicia. Veja a barra de progresso", L"· Uitvoeren …… start. Volg de voortgangsbalk",
+		L"· Wykonaj …… start. Pilnuj paska postępu", L"· Çalıştır …… decode/yazmayı başlat. İlerleme çubuğuna bak")); y += lh;
+	muted(L, y, LL14(
+		L"閉じるでキャンセルできます（書き出し中は完了を待ってください）。",
+		L"Close cancels when idle (wait if export is running).",
+		L"Fermer annule au repos (attendez si l'export tourne).",
+		L"Chiudi annulla a riposo (attendi se l'export è in corso).",
+		L"Cerrar cancela en reposo (espere si exporta).",
+		L"닫기는 대기 중 취소(내보내기 중이면 완료를 기다리세요).",
+		L"空闲时可关闭取消（导出进行中请等待完成）。",
+		L"الإغلاق يلغي عند الخمول (انتظر إن كان التصدير جارياً).",
+		L"Закрыть отменяет в простое (дождитесь при экспорте).",
+		L"Schliessen bricht im Leerlauf ab (bei Export warten).",
+		L"Fechar cancela em espera (aguarde se exportar).",
+		L"Sluiten annuleert in rust (wacht bij export).",
+		L"Zamknij anuluje w bezczynności (poczekaj przy eksporcie).",
+		L"Kapat boştayken iptal eder (dışa aktarma sürüyorsa bekleyin)."));
+
+	dc.SelectObject(oldFont);
+}
+
 } // namespace
 
 IMPLEMENT_DYNAMIC(CWavExport, CCustomBlurDialogBase)
@@ -196,6 +385,7 @@ CWavExport::~CWavExport()
 void CWavExport::DoDataExchange(CDataExchange* pDX)
 {
 	CCustomBlurDialogBase::DoDataExchange(pDX);
+	DDX_Control(pDX, IDC_WE_HELP, m_help);
 	DDX_Control(pDX, IDC_WAVEXPORT_LOOP, m_loop);
 	DDX_Control(pDX, IDC_WAVEXPORT_PATH, m_path);
 	DDX_Control(pDX, IDC_WAVEXPORT_STATUS, m_status);
@@ -229,13 +419,20 @@ BEGIN_MESSAGE_MAP(CWavExport, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_WAVEXPORT_BROWSE, &CWavExport::OnBnClickedWavExportBrowse)
 	ON_BN_CLICKED(IDC_WAVEXPORT_CLOSE, &CWavExport::OnBnClickedWavExportClose)
 	ON_BN_CLICKED(IDC_WAVEXPORT_COVER_CLEAR, &CWavExport::OnBnClickedCoverClear)
+	ON_BN_CLICKED(IDC_WE_HELP, &CWavExport::OnBnClickedHelp)
 	ON_WM_DROPFILES()
+	ON_WM_SIZE()
+	ON_WM_DESTROY()
 END_MESSAGE_MAP()
 
 BOOL CWavExport::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	CCC_BringDialogToForeground(this);
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	LayoutHelpBtn();
 	SetWindowText(LL14(L"WAVへ出力", L"Export to WAV", L"Exporter en WAV", L"Esporta in WAV",
 		L"Exportar a WAV", L"WAV로 내보내기", L"导出到WAV", L"تصدير إلى WAV",
 		L"Экспорт в WAV", L"Als WAV exportieren", L"Exportar para WAV", L"Exporteren naar WAV",
@@ -416,7 +613,65 @@ BOOL CWavExport::OnInitDialog()
 			placeSized(m_promptCheck, marginL, rP.top, fitCheck(m_promptCheck), (std::max)(rP.Height(), scale(18)));
 		}
 	}
+	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
+		m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 10000);
+	}
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	return TRUE;
+}
+
+void CWavExport::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CWavExport::ShowHelpSheet()
+{
+	if (g_weHelpDlg && ::IsWindow(g_weHelpDlg->GetSafeHwnd())) {
+		g_weHelpDlg->ShowWindow(SW_SHOW);
+		g_weHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_weHelpDlg && !::IsWindow(g_weHelpDlg->GetSafeHwnd()))
+		g_weHelpDlg = nullptr;
+	CWeHelpDlg* dlg = new CWeHelpDlg(nullptr);
+	if (!dlg->Create(IDD_WE_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_weHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CWavExport::OnBnClickedHelp()
+{
+	ShowHelpSheet();
+}
+
+void CWavExport::OnSize(UINT nType, int cx, int cy)
+{
+	CCustomBlurDialogBase::OnSize(nType, cx, cy);
+	if (nType != SIZE_MINIMIZED) {
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
+}
+
+void CWavExport::OnDestroy()
+{
+	if (g_weHelpDlg && ::IsWindow(g_weHelpDlg->GetSafeHwnd()))
+		g_weHelpDlg->DestroyWindow();
+	CCustomBlurDialogBase::OnDestroy();
+}
+
+BOOL CWavExport::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
 void CWavExport::OnBnClickedCoverClear()

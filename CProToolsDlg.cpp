@@ -7,6 +7,7 @@
 #include "SongParams.h"
 #include "PlayList.h"
 
+
 extern save savedata;
 extern COggDlg* og;
 extern CPlayList* pl;
@@ -16,8 +17,198 @@ extern int wavbit_sample_Hz;
 
 CProToolsDlg* g_proToolsDlg = nullptr;
 
-IMPLEMENT_DYNAMIC(CProToolsDlg, CCustomBlurDialogBase)
+namespace {
 
+class CPtHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_PT_HELP };
+	explicit CPtHelpDlg(CWnd* pParent = nullptr) : CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CPtHelpDlg* g_ptHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CPtHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CPtHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"再生詳細操作ガイド", L"Playback Details Guide", L"Guide détails lecture", L"Guida dettagli riproduzione",
+		L"Guía detalles reproducción", L"재생 상세 가이드", L"播放详情指南", L"دليل تفاصيل التشغيل",
+		L"Руководство деталей воспроизведения", L"Wiedergabe-Details Guide", L"Guia detalhes reprodução", L"Afspeeldetails-gids",
+		L"Przewodnik szczegółów odtwarzania", L"Oynatma ayrıntıları kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CPtHelpDlg::OnOK() { DestroyWindow(); }
+void CPtHelpDlg::OnCancel() { DestroyWindow(); }
+void CPtHelpDlg::OnClose() { DestroyWindow(); }
+
+void CPtHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_ptHelpDlg == this)
+		g_ptHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CPtHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CPtHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"再生詳細操作ガイド", L"Playback Details — Guide", L"Guide détails lecture", L"Guida dettagli",
+		L"Guía detalles", L"재생 상세 가이드", L"播放详情指南", L"دليل التشغيل",
+		L"Руководство", L"Wiedergabe-Guide", L"Guia detalhes", L"Afspeeldetails",
+		L"Przewodnik", L"Oynatma kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"ギャップレス・ReplayGain・ループ／キュー・タグをここでまとめます。多くの項目は即時反映されます。",
+		L"Gapless, ReplayGain, loop/cues, and tags live here. Many options apply immediately.",
+		L"Gapless, ReplayGain, boucles/cues et tags. Beaucoup s'appliquent tout de suite.",
+		L"Gapless, ReplayGain, loop/cue e tag. Molte opzioni si applicano subito.",
+		L"Gapless, ReplayGain, bucles/cues y etiquetas. Muchas se aplican al instante.",
+		L"갭리스·ReplayGain·루프/큐·태그를 모읍니다. 많은 항목이 즉시 반영됩니다.",
+		L"在此汇总无缝、ReplayGain、循环/标记与标签。多数项立即生效。",
+		L"Gapless و ReplayGain والحلقة/الإشارات والوسوم هنا. كثير منها فوري.",
+		L"Gapless, ReplayGain, цикл/метки и теги. Многие параметры применяются сразу.",
+		L"Gapless, ReplayGain, Loop/Cues und Tags. Viele gelten sofort.",
+		L"Gapless, ReplayGain, loop/cues e tags. Muitos aplicam de imediato.",
+		L"Gapless, ReplayGain, loop/cues en tags. Veel opties meteen.",
+		L"Gapless, ReplayGain, pętla/cue i tagi. Wiele działa od razu.",
+		L"Gapless, ReplayGain, döngü/cue ve etiketler. Çoğu hemen uygulanır."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"再生 / レベル", L"Playback / Level", L"Lecture / Niveau", L"Riproduzione / Livello",
+		L"Reproducción / Nivel", L"재생 / 레벨", L"播放 / 电平", L"تشغيل / مستوى",
+		L"Воспроизведение / Уровень", L"Wiedergabe / Pegel", L"Reprodução / Nível", L"Afspelen / Niveau",
+		L"Odtwarzanie / Poziom", L"Oynatma / Seviye"));
+	y += titleLh;
+	body(L, y, LL14(L"・ギャップレス …… 連続再生で曲間の無音を詰めます", L"· Gapless …… tighten silence between tracks", L"· Gapless …… réduit le silence entre pistes", L"· Gapless …… riduce il silenzio tra brani",
+		L"· Gapless …… reduce el silencio entre pistas", L"· 갭리스 …… 곡 사이 무음을 줄입니다", L"· 无缝 …… 缩短曲间静音", L"· Gapless …… يقلل الصمت بين المقاطع",
+		L"· Gapless …… сокращает паузу между треками", L"· Gapless …… verkürzt Stille zwischen Titeln", L"· Gapless …… reduz silêncio entre faixas", L"· Gapless …… verkort stilte tussen nummers",
+		L"· Gapless …… zmniejsza ciszę między utworami", L"· Gapless …… parçalar arası sessizliği kısaltır")); y += lh;
+	body(L, y, LL14(L"・ReplayGain …… Off / Track / Album。目標LUで再生ゲインを補正", L"· ReplayGain …… Off / Track / Album. Target LU corrects level", L"· ReplayGain …… Off / Track / Album. LU cible", L"· ReplayGain …… Off / Track / Album. LU obiettivo",
+		L"· ReplayGain …… Off / Track / Album. LU objetivo", L"· ReplayGain …… Off/Track/Album. 목표 LU로 보정", L"· ReplayGain …… Off/Track/Album。目标 LU 校正", L"· ReplayGain …… Off/Track/Album. تصحيح LU",
+		L"· ReplayGain …… Off/Track/Album. Целевой LU", L"· ReplayGain …… Off/Track/Album. Ziel-LU", L"· ReplayGain …… Off/Track/Album. LU alvo", L"· ReplayGain …… Off/Track/Album. Doel-LU",
+		L"· ReplayGain …… Off/Track/Album. Docelowe LU", L"· ReplayGain …… Off/Track/Album. Hedef LU")); y += lh;
+	body(L, y, LL14(L"・M/S幅・モノ互換・エクスポート制限 …… 空間感と書き出し時の頭打ち", L"· M/S width / mono / export limit …… space and export ceiling", L"· Largeur M/S / mono / plafond export", L"· Larghezza M/S / mono / tetto export",
+		L"· Ancho M/S / mono / techo de exportación", L"· M/S 폭·모노·내보내기 제한", L"· M/S 宽度 / 单声道 / 导出上限", L"· عرض M/S / مونو / سقف التصدير",
+		L"· Ширина M/S / моно / потолок экспорта", L"· M/S-Breite / Mono / Export-Deckel", L"· Largura M/S / mono / teto de exportação", L"· M/S-breedte / mono / exportplafond",
+		L"· Szerokość M/S / mono / limit eksportu", L"· M/S genişliği / mono / dışa aktarma tavanı")); y += lh + 4;
+
+	title(L, y, LL14(L"ループ / キュー", L"Loop / Cues", L"Boucle / Cues", L"Loop / Cue", L"Bucle / Cues", L"루프 / 큐", L"循环 / 标记", L"حلقة / إشارات",
+		L"Цикл / Метки", L"Loop / Cues", L"Loop / Cues", L"Loop / Cues", L"Pętla / Cue", L"Döngü / Cue"));
+	y += titleLh;
+	body(L, y, LL14(L"・波形クリック …… イン点、Shift+クリック …… アウト点", L"· Wave click …… in point, Shift+click …… out point", L"· Clic onde …… entrée, Maj+clic …… sortie", L"· Clic onda …… in, Maiusc+clic …… out",
+		L"· Clic onda …… entrada, Mayús+clic …… salida", L"· 파형 클릭 …… 인, Shift+클릭 …… 아웃", L"· 波形点击 …… 入点，Shift+点击 …… 出点", L"· نقر الموجة …… دخول، Shift+نقر …… خروج",
+		L"· Клик по волне …… вход, Shift+клик …… выход", L"· Wellenklick …… In, Umschalt+Klick …… Out", L"· Clique na onda …… in, Shift+clique …… out", L"· Golfklik …… in, Shift+klik …… out",
+		L"· Klik fali …… in, Shift+klik …… out", L"· Dalga tık …… giriş, Shift+tık …… çıkış")); y += lh;
+	body(L, y, LL14(L"・ループイン／アウト／フェードms …… 適用で反映。次ループから効きます", L"· Loop in/out/fade ms …… Apply. Takes effect from next loop", L"· Boucle in/out/fondu …… Appliquer. Dès la boucle suivante", L"· Loop in/out/fade …… Applica. Dal loop successivo",
+		L"· Bucle in/out/fade …… Aplicar. Desde el siguiente bucle", L"· 루프 인/아웃/페이드 …… 적용. 다음 루프부터", L"· 循环入/出/淡化 …… 应用。下一循环起生效", L"· حلقة in/out/fade …… تطبيق. من الحلقة التالية",
+		L"· Цикл in/out/fade …… Применить. Со следующего цикла", L"· Loop In/Out/Fade …… Anwenden. Ab nächster Schleife", L"· Loop in/out/fade …… Aplicar. No próximo loop", L"· Loop in/out/fade …… Toepassen. Vanaf volgende loop",
+		L"· Pętla in/out/fade …… Zastosuj. Od następnej pętli", L"· Döngü in/out/fade …… Uygula. Sonraki döngüden")); y += lh;
+	body(L, y, LL14(L"・キュー …… 現在位置を追加／削除／ジャンプ。曲ごとの目印", L"· Cues …… add/delete/jump at current position. Per-track marks", L"· Cues …… ajouter/supprimer/sauter. Repères par piste", L"· Cue …… aggiungi/elimina/vai. Segnalibri per brano",
+		L"· Cues …… añadir/borrar/saltar. Marcas por pista", L"· 큐 …… 현재 위치 추가/삭제/점프. 곡별 표시", L"· 标记 …… 在当前位置添加/删除/跳转。按曲标记", L"· إشارات …… إضافة/حذف/قفز عند الموضع",
+		L"· Метки …… добавить/удалить/перейти. На трек", L"· Cues …… hinzufügen/löschen/springen. Pro Titel", L"· Cues …… adicionar/apagar/saltar. Por faixa", L"· Cues …… toevoegen/wissen/springen. Per nummer",
+		L"· Cue …… dodaj/usuń/skocz. Znaczniki utworu", L"· Cue …… ekle/sil/atla. Parça işaretleri")); y += lh + 4;
+
+	const int gx = L, gy = y, gw = min(340, rc.Width() - L * 2), gh = lh * 2 + 12;
+	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+	dc.FillSolidRect(gx + 4, gy + 6, 52, gh - 12, RGB(70, 140, 90));
+	dc.FillSolidRect(gx + 64, gy + 6, 44, gh - 12, RGB(180, 140, 60));
+	dc.FillSolidRect(gx + 116, gy + 6, 44, gh - 12, RGB(70, 110, 160));
+	dc.FillSolidRect(gx + 168, gy + 6, 50, gh - 12, RGB(150, 70, 70));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + 10, gy + 8, L"Gapless");
+	dc.TextOut(gx + 72, gy + 8, L"RG");
+	dc.TextOut(gx + 124, gy + 8, L"Loop");
+	dc.TextOut(gx + 176, gy + 8, L"Tags");
+	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+	y = gy + gh + 6;
+
+	title(L, y, LL14(L"タグ", L"Tags", L"Tags", L"Tag", L"Etiquetas", L"태그", L"标签", L"الوسوم",
+		L"Теги", L"Tags", L"Tags", L"Tags", L"Tagi", L"Etiketler"));
+	y += titleLh;
+	body(L, y, LL14(L"・タイトル／アーティスト／アルバム等 …… ファイルへ書き込みで保存", L"· Title / artist / album …… Write tags to save into the file", L"· Titre / artiste / album …… Écrire pour enregistrer", L"· Titolo / artista / album …… Scrivi per salvare",
+		L"· Título / artista / álbum …… Escribir para guardar", L"· 제목/아티스트/앨범 …… 쓰기로 파일에 저장", L"· 标题/艺人/专辑 …… 写入以保存到文件", L"· عنوان/فنان/ألبوم …… اكتب للحفظ في الملف",
+		L"· Название / исполнитель / альбом …… Записать в файл", L"· Titel / Artist / Album …… In Datei schreiben", L"· Título / artista / álbum …… Escrever no ficheiro", L"· Titel / artiest / album …… Naar bestand schrijven",
+		L"· Tytuł / artysta / album …… Zapisz do pliku", L"· Başlık / sanatçı / albüm …… Dosyaya yaz")); y += lh;
+	muted(L, y, LL14(
+		L"適用でループ等を確定。OK／閉じるでウィンドウを閉じます（反映済みの値は保持）。",
+		L"Apply commits loops etc. OK/Close closes the window (keeps applied values).",
+		L"Appliquer valide. OK/Fermer ferme (valeurs appliquées gardées).",
+		L"Applica conferma. OK/Chiudi chiude (valori applicati restano).",
+		L"Aplicar confirma. OK/Cerrar cierra (se conservan aplicados).",
+		L"적용으로 루프 등을 확정. OK/닫기로 창을 닫습니다(반영값 유지).",
+		L"应用确认循环等。OK/关闭关闭窗口（保留已应用值）。",
+		L"تطبيق يؤكد. موافق/إغلاق يغلق (تُحفظ القيم).",
+		L"Применить фиксирует. OK/Закрыть закрывает (значения остаются).",
+		L"Anwenden bestätigt. OK/Schliessen schliesst (Werte bleiben).",
+		L"Aplicar confirma. OK/Fechar fecha (valores aplicados ficam).",
+		L"Toepassen bevestigt. OK/Sluiten sluit (toegepaste waarden blijven).",
+		L"Zastosuj zatwierdza. OK/Zamknij zamyka (wartości zostają).",
+		L"Uygula onaylar. Tamam/Kapat kapatır (uygulanan değerler kalır)."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
+IMPLEMENT_DYNAMIC(CProToolsDlg, CCustomBlurDialogBase)
 CProToolsDlg::CProToolsDlg(CWnd* pParent)
 	: CCustomBlurDialogBase(IDD_PROTOOLS, pParent)
 	, hasTrack(false)
@@ -35,11 +226,12 @@ CProToolsDlg::~CProToolsDlg()
 {
 }
 
+
 void CProToolsDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CCustomBlurDialogBase::DoDataExchange(pDX);
-	DDX_Control(pDX, IDC_PRO_GAPLESS, m_gapless);
-	DDX_Control(pDX, IDC_PRO_RGMODE, m_rgMode);
+	DDX_Control(pDX, IDC_PT_HELP, m_help);
+	DDX_Control(pDX, IDC_PRO_GAPLESS, m_gapless);	DDX_Control(pDX, IDC_PRO_RGMODE, m_rgMode);
 	DDX_Control(pDX, IDC_PRO_RGTARGET, m_rgTarget);
 	DDX_Control(pDX, IDC_PRO_MSWIDTH, m_msWidth);
 	DDX_Control(pDX, IDC_PRO_MSVAL, m_msVal);
@@ -69,6 +261,7 @@ void CProToolsDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_PRO_WRITETAG, m_writeTag);
 }
 
+
 BEGIN_MESSAGE_MAP(CProToolsDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_PRO_APPLY, &CProToolsDlg::OnBnClickedApply)
 	ON_BN_CLICKED(IDC_PRO_CUEADD, &CProToolsDlg::OnBnClickedCueAdd)
@@ -77,6 +270,7 @@ BEGIN_MESSAGE_MAP(CProToolsDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_PRO_LOOPIN_BTN, &CProToolsDlg::OnBnClickedLoopIn)
 	ON_BN_CLICKED(IDC_PRO_LOOPOUT_BTN, &CProToolsDlg::OnBnClickedLoopOut)
 	ON_BN_CLICKED(IDC_PRO_WRITETAG, &CProToolsDlg::OnBnClickedWriteTag)
+	ON_BN_CLICKED(IDC_PT_HELP, &CProToolsDlg::OnBnClickedHelp)
 	ON_BN_CLICKED(IDC_PRO_GAPLESS, &CProToolsDlg::OnBnClickedLiveFlag)
 	ON_BN_CLICKED(IDC_PRO_MSMONO, &CProToolsDlg::OnBnClickedLiveFlag)
 	ON_BN_CLICKED(IDC_PRO_CORR, &CProToolsDlg::OnBnClickedLiveFlag)
@@ -91,8 +285,8 @@ BEGIN_MESSAGE_MAP(CProToolsDlg, CCustomBlurDialogBase)
 	ON_WM_ERASEBKGND()
 	ON_WM_SIZE()
 	ON_WM_CLOSE()
+	ON_WM_DESTROY()
 END_MESSAGE_MAP()
-
 void CProToolsDlg::LoadFromSavedata()
 {
 	m_gapless.SetCheck(savedata.pro_gapless ? BST_CHECKED : BST_UNCHECKED);
@@ -198,6 +392,7 @@ void CProToolsDlg::ApplyLoopFromUi()
 	if (m_loopOut >= 0) loop2 = m_loopOut;
 }
 
+
 BOOL CProToolsDlg::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
@@ -205,9 +400,12 @@ BOOL CProToolsDlg::OnInitDialog()
 		L"Detalles de reproduccion", L"재생 상세", L"播放详情", L"تفاصيل التشغيل",
 		L"Параметры воспроизведения", L"Wiedergabedetails", L"Detalhes de reproducao", L"Afspeeldetails",
 		L"Szczegoly odtwarzania", L"Oynatma ayrintilari"));
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	LayoutHelpBtn();
 
 	LoadFromSavedata();
-
 	if (GetDlgItem(IDC_PRO_WAVE))
 		GetDlgItem(IDC_PRO_WAVE)->GetWindowRect(&m_waveRc);
 	ScreenToClient(&m_waveRc);
@@ -245,8 +443,11 @@ BOOL CProToolsDlg::OnInitDialog()
 		m_tagGenre.SetWindowText(tags.genre);
 		m_tagComment.SetWindowText(tags.comment);
 	}
+
 	RefreshCueList();
 	SetupToolTips();
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	return TRUE;
 }
 
@@ -259,8 +460,9 @@ void CProToolsDlg::SetupToolTips()
 		if (w && w->GetSafeHwnd())
 			m_tooltip.AddTool(w, text);
 	};
-	addTip(IDC_PRO_GAPLESS, LL14(
-		L"連続再生時に曲間の無音ギャップを詰めます。",
+	if (m_help.GetSafeHwnd())
+		m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
+	addTip(IDC_PRO_GAPLESS, LL14(		L"連続再生時に曲間の無音ギャップを詰めます。",
 		L"Tighten silence between tracks on continuous play.",
 		L"Reduit le silence entre les pistes en lecture continue.",
 		L"Riduce il silenzio tra i brani in riproduzione continua.",
@@ -582,14 +784,52 @@ BOOL CProToolsDlg::OnEraseBkgnd(CDC* pDC)
 	return CCustomBlurDialogBase::OnEraseBkgnd(pDC);
 }
 
+
 void CProToolsDlg::OnSize(UINT nType, int cx, int cy)
 {
 	CCustomBlurDialogBase::OnSize(nType, cx, cy);
 	if (nType == SIZE_MINIMIZED) return;
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	SyncWaveRect();
 	Invalidate(FALSE);
 }
 
+void CProToolsDlg::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CProToolsDlg::ShowHelpSheet()
+{
+	if (g_ptHelpDlg && ::IsWindow(g_ptHelpDlg->GetSafeHwnd())) {
+		g_ptHelpDlg->ShowWindow(SW_SHOW);
+		g_ptHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_ptHelpDlg && !::IsWindow(g_ptHelpDlg->GetSafeHwnd()))
+		g_ptHelpDlg = nullptr;
+	CPtHelpDlg* dlg = new CPtHelpDlg(nullptr);
+	if (!dlg->Create(IDD_PT_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_ptHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CProToolsDlg::OnBnClickedHelp()
+{
+	ShowHelpSheet();
+}
+
+void CProToolsDlg::OnDestroy()
+{
+	if (g_ptHelpDlg && ::IsWindow(g_ptHelpDlg->GetSafeHwnd()))
+		g_ptHelpDlg->DestroyWindow();
+	CCustomBlurDialogBase::OnDestroy();
+}
 void CProToolsDlg::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	if (m_waveRc.PtInRect(point) && m_totalFrames > 0) {

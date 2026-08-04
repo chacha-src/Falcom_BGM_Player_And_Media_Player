@@ -403,6 +403,10 @@ public:
 	CCustomStandardButton m_fadedummy;
 	afx_msg void OnBnClickedButton59();
 	CCustomStandardButton m_eqq;
+	CCustomStandardButton m_help;
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
+	afx_msg void OnBnClickedHelp();
 	BOOL drawth = FALSE;
 
 	afx_msg void OnSwitchMode();   // メディアプレイヤーモードへ切替

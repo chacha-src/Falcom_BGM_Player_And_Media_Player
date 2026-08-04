@@ -37,6 +37,8 @@ public:
 	CCustomEdit m_alb;
 	CCustomEdit m_fol;
 	afx_msg void OnClose();
+	afx_msg void OnDestroy();
+	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnBnClickedExplorer();
 	afx_msg void OnBnClickedOk();
 	afx_msg void OnBnClickedBrowse();
@@ -47,8 +49,10 @@ public:
 	afx_msg void OnBnClickedCopyName();
 	afx_msg void OnBnClickedProTools();
 	afx_msg void OnBnClickedClearParam();
+	afx_msg void OnBnClickedHelp();
 	virtual BOOL OnInitDialog();
 	CCustomStandardButton m_ok2;
+	CCustomStandardButton m_help;
 	CCustomEdit m_cmt;
 	CCustomEdit m_year;
 	CCustomEdit m_track;
@@ -90,5 +94,7 @@ private:
 	void ApplyTagsToControls(const FileTagFields& tags, bool forceEmpty = false);
 	void RefreshStatusLines();
 	void ApplyBatchUi();
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
 	CString CurrentPathText() const;
 };

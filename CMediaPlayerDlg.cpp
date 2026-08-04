@@ -64,6 +64,9 @@ extern void ShowOggAboutDialog(CWnd* pParent);   // バージョン情報ダイ�
 static const int MP_SRCW = (88 * 2 + 175) * 4 + 5; // = 1409 (og の srcW と一致)
 static const int MP_SRCH = (81 + 16) * 4;          // = 388
 
+// 操作ガイド(モードレス)シングルトン。実装はファイル後半の CMpCheatSheetDlg。
+static CDialog* g_mpHelpDlg = nullptr;
+
 // ---- メディアプレイヤー拡張: 行↔pc 対応・ジャケット・ソート用(ファイル内 static) ----
 static int MpDispToPc(CMediaPlayerDlg* self, int disp)
 {
@@ -1013,6 +1016,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_LRCEXPAND, &CMediaPlayerDlg::OnLrcExpand)
 	ON_BN_CLICKED(IDC_MP_TOOLSTOGGLE, &CMediaPlayerDlg::OnToolsToggle)
 	ON_BN_CLICKED(IDC_MP_CHEATBTN, &CMediaPlayerDlg::OnCheatSheetBtn)
+	ON_COMMAND(ID_HELP_SHOWSHEET, &CMediaPlayerDlg::OnCheatSheetBtn)
 	ON_BN_CLICKED(IDC_MP_SORTNAME, &CMediaPlayerDlg::OnSortName)
 	ON_BN_CLICKED(IDC_MP_SORTART, &CMediaPlayerDlg::OnSortArt)
 	ON_BN_CLICKED(IDC_MP_SORTALB, &CMediaPlayerDlg::OnSortAlb)
@@ -1227,8 +1231,11 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_abClr.SetGradation(RGB(255, 230, 230), RGB(255, 180, 180), 0, TRUE);
 		m_lrcExpand.SetGradation(RGB(240, 235, 255), RGB(210, 200, 245), 0, TRUE);
 		m_toolsToggle.SetGradation(RGB(240, 235, 255), RGB(210, 200, 245), 0, TRUE);
-		if (m_cheatBtn.GetSafeHwnd())
+		if (m_cheatBtn.GetSafeHwnd()) {
+			m_cheatBtn.SetFlat(TRUE);
 			m_cheatBtn.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+			CCC_CaptionPlaceHelpBtn(m_hWnd, &m_cheatBtn);
+		}
 		m_sortName.SetGradation(RGB(230, 245, 255), RGB(190, 220, 245), 0, TRUE);
 		m_sortArt.SetGradation(RGB(230, 245, 255), RGB(190, 220, 245), 0, TRUE);
 		m_sortAlb.SetGradation(RGB(230, 245, 255), RGB(190, 220, 245), 0, TRUE);
@@ -1654,7 +1661,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_toolsToggle.GetSafeHwnd())
 		addTip(m_toolsToggle, LL14(L"並べ替え・フォルダ追加パネルの表示を切り替えます。", L"Toggle sort / add-folder panel.", L"Afficher tri / dossier.", L"Mostra ordina / cartella.", L"Mostrar ordenar / carpeta.", L"정렬/폴더 추가 패널 전환.", L"切换排序/添加文件夹面板。", L"تبديل لوحة الترتيب/المجلد.", L"Панель сортировки/папки.", L"Sortier-/Ordnerpanel.", L"Painel ordenar/pasta.", L"Sorteer-/mappaneel.", L"Panel sortowania/folderu.", L"Sirala/klasor paneli."));
 	if (m_cheatBtn.GetSafeHwnd())
-		addTip(m_cheatBtn, LL14(L"キーボードショートカット一覧(?キーでも表示)。", L"Keyboard shortcut list (also ? key).", L"Liste des raccourcis.", L"Elenco scorciatoie.", L"Lista de atajos.", L"단축키 목록.", L"快捷键一览。", L"Shortcuts.", L"Список.", L"Tastenkuerzel.", L"Atalhos.", L"Sneltoetsen.", L"Skroty.", L"Kisayollar."));
+		addTip(m_cheatBtn, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 	if (m_lrcBadge.GetSafeHwnd())
 		addTip(m_lrcBadge, LL14(L"歌詞の有無。LRC●=ローカル、net=取得、—=なし。", L"Lyrics status. LRC●=local, net=fetched, —=none.", L"Paroles: LRC●/net/—.", L"Testi: LRC●/net/—.", L"Letra: LRC●/net/—.", L"가사: LRC●/net/—.", L"歌词: LRC●/net/—.", L"كلمات: LRC●/net/—.", L"Текст: LRC●/net/—.", L"Text: LRC●/net/—.", L"Letra: LRC●/net/—.", L"Tekst: LRC●/net/—.", L"Tekst: LRC●/net/—.", L"Soz: LRC●/net/—."));
 	if (m_addFolder.GetSafeHwnd())
@@ -1771,7 +1778,7 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 			return TRUE;
 		}
 	}
-	// ? / でショートカット一覧(入力欄フォーカス時は文字入力を優先)
+	// ? / で操作ガイド(入力欄フォーカス時は文字入力を優先)
 	if (pMsg->message == WM_KEYDOWN && (pMsg->wParam == '?' || pMsg->wParam == VK_OEM_2)) {
 		CWnd* pFocus = GetFocus();
 		const BOOL inEdit = (pFocus && (pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()
@@ -2389,13 +2396,12 @@ void CMediaPlayerDlg::DoLayout()
 	{
 		const int togW = (int)(22 * s);
 		MoveCtl(&m_toolsToggle, M + gPad, byTools, togW, tbH);
-		if (m_cheatBtn.GetSafeHwnd()) {
-			MoveCtl(&m_cheatBtn, M + gPad + togW + (int)(2 * s), byTools, togW, tbH);
-			m_cheatBtn.ShowWindow(SW_SHOW);
-		}
+		// ? はキャプション帯へ（CCC_CaptionPlaceHelpBtn）。ツール帯には置かない
+		if (m_cheatBtn.GetSafeHwnd())
+			CCC_CaptionPlaceHelpBtn(m_hWnd, &m_cheatBtn);
 		if (savedata.mpToolsOpen) {
 			toolsH = tbH + (int)(2 * s);
-			int sx = M + gPad + togW + togW + (int)(6 * s);
+			int sx = M + gPad + togW + (int)(6 * s);
 			int sw = (int)(48 * s);
 			MoveCtl(&m_sortName, sx, byTools, sw, tbH); sx += sw + (int)(2 * s);
 			MoveCtl(&m_sortArt, sx, byTools, sw, tbH); sx += sw + (int)(2 * s);
@@ -4616,6 +4622,8 @@ void CMediaPlayerDlg::OnDestroy()
 	KillTimer(7);
 	if (::IsWindow(m_list.GetSafeHwnd()))
 		RemoveWindowSubclass(m_list.GetSafeHwnd(), ListHeaderNotifySubclassProc, kMpListHdrSubclassId);
+	if (g_mpHelpDlg && ::IsWindow(g_mpHelpDlg->GetSafeHwnd()))
+		g_mpHelpDlg->DestroyWindow();
 	CCustomBlurDialogExBase::OnDestroy();
 }
 
@@ -6309,6 +6317,12 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 					L"Actualizar caratula en reproduccion", L"재생 중 재킷 다시 가져오기", L"重新获取正在播放的封面", L"تحديث غلاف التشغيل",
 					L"Обновить обложку текущего", L"Aktuelles Cover neu laden", L"Atualizar capa em reproducao",
 					L"Huidige hoes vernieuwen", L"Odswiez okladke odtwarzanego", L"Oynatilan kapagi yenile"));
+			menu.AppendMenu(MF_SEPARATOR);
+			menu.AppendMenu(MF_STRING, ID_HELP_SHOWSHEET,
+				LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
+					L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
+					L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
+					L"Przewodnik", L"İşlem kılavuzu"));
 			CPoint sp = point;
 			ClientToScreen(&sp);
 			menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, sp.x, sp.y, this);
@@ -6431,6 +6445,318 @@ CString CMediaPlayerDlg::MpTechFormatLine() const
 	return line;
 }
 
+namespace {
+
+class CMpCheatSheetDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_MP_CHEATSHEET };
+	explicit CMpCheatSheetDlg(CWnd* pParent = nullptr) : CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+BEGIN_MESSAGE_MAP(CMpCheatSheetDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CMpCheatSheetDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"メディアプレイヤー操作ガイド", L"Media Player Guide", L"Guide lecteur", L"Guida Media Player",
+		L"Guía Media Player", L"미디어 플레이어 가이드", L"媒体播放器指南", L"دليل المشغّل",
+		L"Руководство плеера", L"Media-Player-Anleitung", L"Guia Media Player", L"Mediaspeler-gids",
+		L"Przewodnik Media Player", L"Medya Oynatıcı kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CMpCheatSheetDlg::OnOK() { DestroyWindow(); }
+void CMpCheatSheetDlg::OnCancel() { DestroyWindow(); }
+void CMpCheatSheetDlg::OnClose() { DestroyWindow(); }
+
+void CMpCheatSheetDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_mpHelpDlg == this)
+		g_mpHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CMpCheatSheetDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CMpCheatSheetDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(13, tm.tmHeight + tm.tmExternalLeading);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 4;
+	const int L = 10;
+	const int R = rc.Width() / 2 + 4;
+	title(L, y, LL14(L"メディアプレイヤー操作ガイド（詳細）", L"Media Player — Detailed Guide", L"Guide détaillé Media Player", L"Guida dettagliata Media Player",
+		L"Guía detallada Media Player", L"미디어 플레이어 상세 가이드", L"媒体播放器详细指南", L"دليل المشغّل التفصيلي",
+		L"Подробное руководство плеера", L"Media-Player — ausführliche Anleitung", L"Guia detalhado Media Player", L"Gedetailleerde mediaspeler-gids",
+		L"Szczegółowy przewodnik Media Player", L"Medya Oynatıcı ayrıntılı kılavuz"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"らいら向け再生画面。バナー・リスト・歌詞・連携ツールの全体像です。キャプション右の ? からも開けます。",
+		L"Laira playback screen. Overview of banner, list, lyrics, linked tools. Also from caption ?.",
+		L"Écran Laira. Aperçu bannière, liste, paroles, outils. Aussi via ? de la légende.",
+		L"Schermata Laira. Panoramica banner, lista, testi, strumenti. Anche da ? didascalia.",
+		L"Pantalla Laira. Resumen banner, lista, letras, herramientas. También desde ? del título.",
+		L"라이라 재생 화면. 배너·목록·가사·연동 도구 개요. 캡션 ? 로도 열립니다.",
+		L"面向らいら的播放界面。横幅、列表、歌词与联动工具总览。也可从标题栏 ? 打开。",
+		L"شاشة Laira. نظرة على البانر والقائمة والكلمات والأدوات. أيضاً من ? الشريط.",
+		L"Экран Laira. Обзор баннера, списка, текста и окон. Также с ? в заголовке.",
+		L"Laira-Fenster. Ueberblick Banner, Liste, Text, Tools. Auch per ? in der Titelleiste.",
+		L"Tela Laira. Visão de banner, lista, letras e ferramentas. Também pelo ? da legenda.",
+		L"Laira-scherm. Overzicht banner, lijst, tekst, tools. Ook via ? in de titel.",
+		L"Ekran Laira. Przegląd banera, listy, tekstu i narzędzi. Też z ? na belce.",
+		L"Laira ekranı. Banner, liste, söz ve araçların özeti. Başlıktaki ? ile de açılır."));
+	y += lh + 3;
+
+	// mini map
+	{
+		const int gx = L, gy = y, gw = min(520, rc.Width() - L * 2), gh = lh * 2 + 10;
+		dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+		dc.FillSolidRect(gx + 4, gy + 5, 40, gh - 10, RGB(160, 195, 240));
+		dc.FillSolidRect(gx + 50, gy + 5, 70, gh - 10, RGB(255, 210, 160));
+		dc.FillSolidRect(gx + 126, gy + 5, 48, gh - 10, RGB(130, 205, 140));
+		dc.FillSolidRect(gx + 180, gy + 5, 52, gh - 10, RGB(240, 210, 160));
+		dc.FillSolidRect(gx + 238, gy + 5, 48, gh - 10, RGB(220, 190, 245));
+		dc.FillSolidRect(gx + 292, gy + 5, 56, gh - 10, RGB(255, 180, 120));
+		dc.FillSolidRect(gx + 354, gy + 5, 44, gh - 10, RGB(180, 220, 200));
+		dc.SetTextColor(RGB(35, 35, 50));
+		dc.TextOut(gx + 10, gy + 7, L"Lib");
+		dc.TextOut(gx + 58, gy + 7, L"Banner");
+		dc.TextOut(gx + 134, gy + 7, L"Play");
+		dc.TextOut(gx + 188, gy + 7, L"Sound");
+		dc.TextOut(gx + 246, gy + 7, L"List");
+		dc.TextOut(gx + 300, gy + 7, L"Lyrics");
+		dc.TextOut(gx + 360, gy + 7, L"Tools");
+		dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+		y = gy + gh + 4;
+	}
+
+	int yL = y, yR = y;
+
+	title(L, yL, LL14(L"バナー / ジャケット", L"Banner / Jacket", L"Bannière / Pochette", L"Banner / Copertina",
+		L"Banner / Carátula", L"배너 / 자켓", L"横幅 / 封面", L"البانر / الغلاف",
+		L"Баннер / Обложка", L"Banner / Cover", L"Banner / Capa", L"Banner / Omslag",
+		L"Baner / Okładka", L"Banner / Kapak")); yL += titleLh;
+	body(L, yL, LL14(L"・中央バナー …… スペアナ＋曲情報。幅を広げると左にジャケット分離", L"· Center banner …… spectrum + info. Wider window splits jacket left", L"· Bannière …… spectre + infos. Largeur → pochette à gauche", L"· Banner …… spettro + info. Largo → copertina a sinistra",
+		L"· Banner …… espectro + info. Ancho → carátula a la izq.", L"· 중앙 배너 …… 스펙트럼+정보. 넓히면 왼쪽 자켓 분리", L"· 中央横幅 …… 频谱+信息。加宽后左侧分离封面", L"· البانر …… طيف+معلومات. التوسيع يفصل الغلاف يساراً",
+		L"· Баннер …… спектр + инфо. Шире — обложка слева", L"· Banner …… Spektrum+Info. Breiter → Cover links", L"· Banner …… espectro+info. Mais largo → capa à esquerda", L"· Banner …… spectrum+info. Breder → omslag links",
+		L"· Baner …… widmo+info. Szersze → okładka z lewej", L"· Banner …… spektrum+bilgi. Genişleyince kapak sola")); yL += lh;
+	body(L, yL, LL14(L"・右クリック …… スペアナ様式(バー/ミラー/波形)・連携起動・本ガイド", L"· Right-click …… spectrum style, linked tools, this guide", L"· Clic droit …… style spectre, outils, ce guide", L"· Destro …… stile spettro, strumenti, guida",
+		L"· Clic der. …… estilo espectro, herramientas, guía", L"· 우클릭 …… 스펙트럼 양식·연동·이 가이드", L"· 右键 …… 频谱样式、联动、本指南", L"· يمين …… نمط الطيف والأدوات وهذا الدليل",
+		L"· ПКМ …… стиль спектра, окна, это руководство", L"· Rechtsklick …… Spektrumstil, Tools, Guide", L"· Direito …… estilo espectro, ferramentas, guia", L"· Rechtsklik …… spectrumstijl, tools, gids",
+		L"· PPM …… styl widma, narzędzia, przewodnik", L"· Sağ tık …… spektrum stili, araçlar, kılavuz")); yL += lh;
+	body(L, yL, LL14(L"・ジャケットボタン …… 埋め込み/外部画像の表示切替", L"· Jacket button …… toggle embedded/external cover art", L"· Pochette …… bascule image intégrée/externe", L"· Copertina …… alterna arte incorporata/esterna",
+		L"· Carátula …… alternar arte embebida/externa", L"· 자켓 버튼 …… 내장/외부 커버 전환", L"· 封面按钮 …… 切换内嵌/外部封面", L"· زر الغلاف …… تبديل غلاف مضمّن/خارجي",
+		L"· Обложка …… встроенное/внешнее изображение", L"· Cover-Taste …… eingebettet/extern umschalten", L"· Capa …… alternar arte embutida/externa", L"· Omslag …… wissel ingebed/extern",
+		L"· Okładka …… przełącz osadzoną/zewnętrzną", L"· Kapak …… gömülü/dış kapak geçişi")); yL += lh + 2;
+
+	title(R, yR, LL14(L"再生 / シーク / A-B", L"Play / Seek / A-B", L"Lecture / Seek / A-B", L"Play / Seek / A-B",
+		L"Play / Seek / A-B", L"재생 / 시크 / A-B", L"播放 / 定位 / A-B", L"تشغيل / Seek / A-B",
+		L"Play / Seek / A-B", L"Play / Seek / A-B", L"Play / Seek / A-B", L"Play / Seek / A-B",
+		L"Play / Seek / A-B", L"Play / Seek / A-B")); yR += titleLh;
+	body(R, yR, LL14(L"・▶ / ⏸ / ■ / |◀ ▶| …… 再生・一時停止・停止・前後曲", L"· ▶ / ⏸ / ■ / |◀ ▶| …… play, pause, stop, prev/next", L"· ▶ / ⏸ / ■ …… lire, pause, stop, préc/suiv", L"· ▶ / ⏸ / ■ …… play, pausa, stop, prec/succ",
+		L"· ▶ / ⏸ / ■ …… play, pausa, stop, ant/sig", L"· ▶ / ⏸ / ■ …… 재생·일시정지·정지·이전/다음", L"· ▶ / ⏸ / ■ …… 播放、暂停、停止、上一/下一", L"· ▶ / ⏸ / ■ …… تشغيل، إيقاف مؤقت، إيقاف، سابق/تالٍ",
+		L"· ▶ / ⏸ / ■ …… play, пауза, стоп, пред/след", L"· ▶ / ⏸ / ■ …… Play, Pause, Stop, zurueck/weiter", L"· ▶ / ⏸ / ■ …… play, pausa, parar, ant/prox", L"· ▶ / ⏸ / ■ …… play, pauze, stop, vorige/volgende",
+		L"· ▶ / ⏸ / ■ …… play, pauza, stop, poprz/nast", L"· ▶ / ⏸ / ■ …… play, duraklat, dur, önceki/sonraki")); yR += lh;
+	body(R, yR, LL14(L"・シークバー …… 緑帯=ループ/A-B。端つまみでA/B点を微調整", L"· Seek …… green band = loop/A-B; edge thumbs fine-tune A/B", L"· Seek …… bande verte = boucle/A-B; poignées A/B", L"· Seek …… banda verde = loop/A-B; maniglie A/B",
+		L"· Seek …… banda verde = bucle/A-B; asas A/B", L"· 시크 …… 녹색=루프/A-B. 가장자리로 A/B 미세조정", L"· 进度条 …… 绿色=循环/A-B。端点微调 A/B", L"· Seek …… أخضر=حلقة/A-B. مقابض لضبط A/B",
+		L"· Seek …… зелёный=цикл/A-B; ручки A/B", L"· Seek …… gruen=Schleife/A-B; Griffe fuer A/B", L"· Seek …… verde=loop/A-B; alças A/B", L"· Seek …… groen=lus/A-B; grepen A/B",
+		L"· Seek …… zielony=pętla/A-B; uchwyty A/B", L"· Seek …… yeşil=döngü/A-B; A/B tutamaçları")); yR += lh;
+	body(R, yR, LL14(L"・A / B / A-B解除 …… 区間ループ。フェードアウトも下部にあり", L"· A / B / Clear …… section loop. Fade-out is at the bottom", L"· A / B / Effacer …… boucle de section. Fondu en bas", L"· A / B / Cancella …… loop di sezione. Fade in basso",
+		L"· A / B / Borrar …… bucle de sección. Fade abajo", L"· A / B / 해제 …… 구간 루프. 페이드는 하단", L"· A / B / 清除 …… 区间循环。淡出在底部", L"· A / B / مسح …… حلقة مقطع. التلاشي في الأسفل",
+		L"· A / B / Сброс …… петля участка. Затухание внизу", L"· A / B / Aus …… Abschnittsloop. Fade unten", L"· A / B / Limpar …… loop de seção. Fade embaixo", L"· A / B / Uit …… sectielus. Fade onderaan",
+		L"· A / B / Wyczyść …… pętla odcinka. Fade na dole", L"· A / B / Sil …… bölüm döngüsü. Fade altta")); yR += lh + 2;
+
+	y = max(yL, yR) + 2;
+	yL = y; yR = y;
+
+	title(L, yL, LL14(L"サウンド調整", L"Sound controls", L"Réglages son", L"Controlli audio",
+		L"Controles de sonido", L"사운드 조절", L"声音调节", L"ضبط الصوت",
+		L"Звук", L"Soundregler", L"Controles de som", L"Geluidsregelaars",
+		L"Regulacja dźwięku", L"Ses ayarları")); yL += titleLh;
+	body(L, yL, LL14(L"・主音量 / DS音量 / KPI音量 …… 系統別レベル", L"· Master / DS / KPI volume …… per-path levels", L"· Volume maître / DS / KPI", L"· Volume master / DS / KPI",
+		L"· Volumen máster / DS / KPI", L"· 주음량 / DS / KPI …… 경로별 레벨", L"· 主音量 / DS / KPI …… 各通路电平", L"· مستوى رئيسي / DS / KPI",
+		L"· Громкость master / DS / KPI", L"· Master / DS / KPI-Lautstaerke", L"· Volume master / DS / KPI", L"· Master / DS / KPI-volume",
+		L"· Głośność master / DS / KPI", L"· Ana / DS / KPI ses")); yL += lh;
+	body(L, yL, LL14(L"・テンポ / ピッチ …… 再生速度と音程（曲ごと保存可）", L"· Tempo / Pitch …… speed and pitch (can save per song)", L"· Tempo / Hauteur …… vitesse et hauteur (par morceau)", L"· Tempo / Pitch …… velocità e altezza (per brano)",
+		L"· Tempo / Tono …… velocidad y tono (por pista)", L"· 템포 / 피치 …… 속도·음정(곡별 저장 가능)", L"· 速度 / 音高 …… 可按曲保存", L"· الإيقاع / الطبقة …… السرعة والطبقة (لكل أغنية)",
+		L"· Темп / Высота …… скорость и тон (на трек)", L"· Tempo / Pitch …… Tempo und Tonhoehe (pro Titel)", L"· Tempo / Tom …… velocidade e tom (por faixa)", L"· Tempo / Pitch …… snelheid en toonhoogte (per nummer)",
+		L"· Tempo / Pitch …… prędkość i wysokość (na utwór)", L"· Tempo / Pitch …… hız ve perde (parça başına)")); yL += lh;
+	body(L, yL, LL14(L"・マイクミックス / レベル …… WAV保存時などにマイクを混ぜる", L"· Mic mix / level …… blend mic (e.g. while saving WAV)", L"· Mix micro …… mélanger le micro (ex. WAV)", L"· Mix micro …… mescola microfono (es. WAV)",
+		L"· Mezcla micro …… mezclar micro (p. ej. WAV)", L"· 마이크 믹스 …… WAV 저장 등에 마이크 혼합", L"· 麦克风混音 …… 如保存 WAV 时混入麦克风", L"· مزج الميك …… خلط الميك (مثل حفظ WAV)",
+		L"· Микс микрофона …… подмешать (напр. при WAV)", L"· Mikrofon-Mix …… Mikro beim WAV-Speichern mischen", L"· Mix micro …… misturar micro (ex. WAV)", L"· Mic-mix …… microfoon mengen (bijv. WAV)",
+		L"· Mix mikrofonu …… zmieszaj mik (np. przy WAV)", L"· Mikrofon karışımı …… WAV kaydında mik karıştır")); yL += lh + 2;
+
+	title(R, yR, LL14(L"プレイリスト操作", L"Playlist ops", L"Opérations liste", L"Operazioni playlist",
+		L"Operaciones de lista", L"재생목록 조작", L"播放列表操作", L"عمليات القائمة",
+		L"Операции плейлиста", L"Playlist-Aktionen", L"Operações de lista", L"Afspeellijst-acties",
+		L"Operacje listy", L"Liste işlemleri")); yR += titleLh;
+	body(R, yR, LL14(L"・連続 / ループ / ランダム …… 再生モード。ループ回数は下部", L"· Continuous / Loop / Random …… modes. Loop count at bottom", L"· Continue / Boucle / Aléatoire …… modes. Nb boucles en bas", L"· Continua / Loop / Casuale …… modalità. Conteggio in basso",
+		L"· Continua / Bucle / Aleatorio …… modos. Cuenta abajo", L"· 연속 / 루프 / 랜덤 …… 모드. 루프 횟수는 하단", L"· 连续 / 循环 / 随机 …… 模式。循环次数在底部", L"· متتابع / حلقة / عشوائي …… أوضاع. العدد أسفل",
+		L"· Подряд / Цикл / Случайно …… режимы. Счётчик внизу", L"· Folge / Schleife / Zufall …… Modi. Zaehler unten", L"· Contínuo / Loop / Aleatório …… modos. Contagem embaixo", L"· Doorlopend / Lus / Willekeurig …… modi. Aantal onder",
+		L"· Ciągłe / Pętla / Losowo …… tryby. Licznik na dole", L"· Sürekli / Döngü / Rastgele …… modlar. Sayı altta")); yR += lh;
+	body(R, yR, LL14(L"・名前変更 / リスト削除 / 曲削除 …… PL管理。D&Dで並べ替え", L"· Rename / Delete list / Remove …… manage PL. D&D to reorder", L"· Renommer / Suppr. liste / Retirer …… D&D pour trier", L"· Rinomina / Elimina lista / Rimuovi …… D&D per ordine",
+		L"· Renombrar / Eliminar lista / Quitar …… D&D para ordenar", L"· 이름변경 / 목록삭제 / 곡삭제 …… D&D로 정렬", L"· 重命名 / 删列表 / 删曲 …… 拖放排序", L"· إعادة تسمية / حذف قائمة / حذف …… سحب للترتيب",
+		L"· Переименовать / Удалить список / Удалить …… D&D порядок", L"· Umbenennen / Liste loeschen / Entfernen …… D&D sortieren", L"· Renomear / Excluir lista / Remover …… D&D ordenar", L"· Hernoemen / Lijst wissen / Verwijder …… D&D ordenen",
+		L"· Zmień nazwę / Usuń listę / Usuń …… D&D kolejność", L"· Yeniden adlandır / Liste sil / Parça sil …… D&D sırala")); yR += lh;
+	body(R, yR, LL14(L"・m3u入出力 / 検索 / 絞り込み / ▾ツール …… 並べ替え・Folder+", L"· m3u I/O / Find / Filter / ▾ tools …… sort & Folder+", L"· m3u / Recherche / Filtre / ▾ …… tri et Folder+", L"· m3u / Cerca / Filtro / ▾ …… ordina e Folder+",
+		L"· m3u / Buscar / Filtro / ▾ …… orden y Folder+", L"· m3u / 검색 / 필터 / ▾ …… 정렬·Folder+", L"· m3u / 搜索 / 筛选 / ▾ …… 排序与 Folder+", L"· m3u / بحث / تصفية / ▾ …… فرز و Folder+",
+		L"· m3u / Поиск / Фильтр / ▾ …… сорт и Folder+", L"· m3u / Suche / Filter / ▾ …… Sort und Folder+", L"· m3u / Busca / Filtro / ▾ …… ordem e Folder+", L"· m3u / Zoeken / Filter / ▾ …… sorteren en Folder+",
+		L"· m3u / Szukaj / Filtr / ▾ …… sort i Folder+", L"· m3u / Ara / Filtre / ▾ …… sırala ve Folder+")); yR += lh + 2;
+
+	y = max(yL, yR) + 2;
+	yL = y; yR = y;
+
+	title(L, yL, LL14(L"ライブラリ / 履歴", L"Library / History", L"Bibliothèque / Historique", L"Libreria / Cronologia",
+		L"Biblioteca / Historial", L"라이브러리 / 기록", L"媒体库 / 历史", L"المكتبة / السجل",
+		L"Библиотека / История", L"Bibliothek / Verlauf", L"Biblioteca / Histórico", L"Bibliotheek / Geschiedenis",
+		L"Biblioteka / Historia", L"Kitaplık / Geçmiş")); yL += titleLh;
+	body(L, yL, LL14(L"・Lib …… 左ドロワー。ルート追加でフォルダを登録し曲を収集", L"· Lib …… left drawer. Add roots to register folders and collect tracks", L"· Lib …… tiroir. Ajouter des racines pour collecter", L"· Lib …… cassetto. Aggiungi root per raccogliere",
+		L"· Lib …… cajón. Añadir raíces para recopilar", L"· Lib …… 왼쪽 드로어. 루트 추가로 폴더 등록", L"· Lib …… 左侧抽屉。添加根目录收集曲目", L"· Lib …… درج أيسر. أضف جذوراً لجمع المقاطع",
+		L"· Lib …… левый ящик. Корни для сбора треков", L"· Lib …… linke Schublade. Roots zum Sammeln", L"· Lib …… gaveta. Adicionar raízes para coletar", L"· Lib …… lade. Roots toevoegen om te verzamelen",
+		L"· Lib …… lewa szuflada. Dodaj korzenie by zbierać", L"· Lib …… sol çekmece. Kök ekleyip parça topla")); yL += lh;
+	body(L, yL, LL14(L"・Hist …… 再生履歴。ダブルクリックで再生（該当PLへ切替）", L"· Hist …… play history. Double-click to play (switch PL when found)", L"· Hist …… historique. Double-clic pour lire", L"· Hist …… cronologia. Doppio clic per riprodurre",
+		L"· Hist …… historial. Doble clic para reproducir", L"· Hist …… 재생 기록. 더블클릭으로 재생", L"· Hist …… 播放历史。双击播放", L"· Hist …… سجل التشغيل. نقر مزدوج للتشغيل",
+		L"· Hist …… история. Двойной щелчок — воспроизвести", L"· Hist …… Verlauf. Doppelklick zum Abspielen", L"· Hist …… histórico. Duplo clique para reproduzir", L"· Hist …… geschiedenis. Dubbelklik om af te spelen",
+		L"· Hist …… historia. Dwuklik aby odtworzyć", L"· Hist …… geçmiş. Çift tıkla çal")); yL += lh + 2;
+
+	title(R, yR, LL14(L"歌詞パネル", L"Lyrics panel", L"Panneau paroles", L"Pannello testi",
+		L"Panel de letras", L"가사 패널", L"歌词面板", L"لوحة الكلمات",
+		L"Панель текста", L"Textfenster", L"Painel de letras", L"Tekstpaneel",
+		L"Panel tekstu", L"Söz paneli")); yR += titleLh;
+	body(R, yR, LL14(L"・▾/▴ …… 拡大。LRC●=ローカル / net=取得 / —=なし", L"· ▾/▴ …… expand. LRC●=local / net=fetched / —=none", L"· ▾/▴ …… agrandir. LRC●/net/—", L"· ▾/▴ …… espandi. LRC●/net/—",
+		L"· ▾/▴ …… ampliar. LRC●/net/—", L"· ▾/▴ …… 확대. LRC●/net/—", L"· ▾/▴ …… 扩大。LRC●/net/—", L"· ▾/▴ …… توسيع. LRC●/net/—",
+		L"· ▾/▴ …… расширить. LRC●/net/—", L"· ▾/▴ …… vergroessern. LRC●/net/—", L"· ▾/▴ …… ampliar. LRC●/net/—", L"· ▾/▴ …… vergroten. LRC●/net/—",
+		L"· ▾/▴ …… powiększ. LRC●/net/—", L"· ▾/▴ …… genişlet. LRC●/net/—")); yR += lh;
+	body(R, yR, LL14(L"・拡大時はカラオケ風ビュー。同期LRCがあれば追従表示", L"· Expanded = karaoke-style view; follows synced LRC when present", L"· Agrandi = vue karaoké; suit LRC synchronisé", L"· Espanso = vista karaoke; segue LRC sincronizzato",
+		L"· Ampliado = vista karaoke; sigue LRC sincronizado", L"· 확대 시 노래방 뷰. 동기 LRC 추종", L"· 扩大为卡拉OK风；有同步 LRC 则跟随", L"· موسّع = عرض كاريوكي؛ يتبع LRC المتزامن",
+		L"· Расширение = караоке; следует за синхронным LRC", L"· Erweitert = Karaoke-Ansicht; folgt sync-LRC", L"· Ampliado = vista karaokê; segue LRC sincronizado", L"· Uitgeklapt = karaokeweergave; volgt sync-LRC",
+		L"· Rozszerzony = widok karaoke; śledzi zsynchronizowane LRC", L"· Geniş = karaoke görünümü; senkron LRC izler")); yR += lh + 2;
+
+	y = max(yL, yR) + 2;
+	yL = y; yR = y;
+
+	title(L, yL, LL14(L"連携ツール", L"Linked tools", L"Outils liés", L"Strumenti collegati",
+		L"Herramientas vinculadas", L"연동 도구", L"联动工具", L"أدوات مرتبطة",
+		L"Связанные окна", L"Verknuepfte Tools", L"Ferramentas ligadas", L"Gekoppelde tools",
+		L"Powiązane narzędzia", L"Bağlı araçlar")); yL += titleLh;
+	body(L, yL, LL14(L"・EQ / ピアノロール / アナライザー / 詳細 …… 各窓に ? ガイドあり", L"· EQ / Piano roll / Analyzer / Extra …… each has its own ? guide", L"· EQ / Piano / Analyseur / Extra …… chacun a un guide ?", L"· EQ / Piano / Analizzatore / Extra …… ciascuno ha guida ?",
+		L"· EQ / Piano / Analizador / Extra …… cada uno tiene guía ?", L"· EQ / 피아노 / 분석기 / 상세 …… 각 창에 ? 가이드", L"· EQ / 钢琴卷 / 分析器 / 详情 …… 各窗有 ? 指南", L"· EQ / بيانو / محلل / تفاصيل …… لكل منها دليل ?",
+		L"· EQ / Пианоролл / Анализатор / Доп. …… у каждого свой ?", L"· EQ / Piano / Analyzer / Extra …… jeweils eigener ?-Guide", L"· EQ / Piano / Analisador / Extra …… cada um tem guia ?", L"· EQ / Piano / Analyser / Extra …… elk heeft ?-gids",
+		L"· EQ / Piano / Analizator / Extra …… każde ma przewodnik ?", L"· EQ / Piano / Analizör / Extra …… her birinin ? kılavuzu var")); yL += lh;
+	body(L, yL, LL14(L"・プロンプト / ロール …… 時刻付きコマンドで再生中パラメータ変更", L"· Prompt / Roll …… timed commands change params during play", L"· Prompt / Rouleau …… commandes horodatées", L"· Prompt / Roll …… comandi a tempo",
+		L"· Prompt / Roll …… comandos temporizados", L"· 프롬프트 / 롤 …… 시간 명령으로 재생 중 변경", L"· 提示 / 卷轴 …… 定时命令改播放参数", L"· الموجه / الرول …… أوامر موقوتة",
+		L"· Промпт / Ролл …… команды по времени", L"· Prompt / Roll …… Zeitbefehle aendern Parameter", L"· Prompt / Roll …… comandos com tempo", L"· Prompt / Roll …… getimede opdrachten",
+		L"· Prompt / Roll …… komendy czasowe", L"· Prompt / Rulo …… zamanlı komutlar")); yL += lh;
+	body(L, yL, LL14(L"・録音 / キャプチャ / WAV保存 …… デバイス録音・画面録画・書き出し", L"· Record / Capture / WAV …… device record, screen capture, export", L"· Enreg. / Capture / WAV …… enregistrement et export", L"· Registra / Cattura / WAV …… registrazione ed export",
+		L"· Grabar / Captura / WAV …… grabación y exportación", L"· 녹음 / 캡처 / WAV …… 장치 녹음·화면 녹화·내보내기", L"· 录音 / 捕获 / WAV …… 设备录音、屏录、导出", L"· تسجيل / التقاط / WAV …… تسجيل وتصدير",
+		L"· Запись / Захват / WAV …… запись и экспорт", L"· Aufnahme / Capture / WAV …… Aufnahme und Export", L"· Gravar / Captura / WAV …… gravação e exportação", L"· Opnemen / Capture / WAV …… opname en export",
+		L"· Nagraj / Capture / WAV …… nagrywanie i eksport", L"· Kaydet / Yakalama / WAV …… kayıt ve dışa aktarma")); yL += lh + 2;
+
+	title(R, yR, LL14(L"保存 / 設定 / 切替", L"Save / Settings / Switch", L"Sauver / Réglages / Basculer", L"Salva / Impostazioni / Passa",
+		L"Guardar / Ajustes / Cambiar", L"저장 / 설정 / 전환", L"保存 / 设置 / 切换", L"حفظ / إعدادات / تبديل",
+		L"Сохранить / Настройки / Переключить", L"Speichern / Einstellungen / Wechsel", L"Salvar / Config. / Alternar", L"Opslaan / Instellingen / Wisselen",
+		L"Zapisz / Ustawienia / Przełącz", L"Kaydet / Ayarlar / Geçiş")); yR += titleLh;
+	body(R, yR, LL14(L"・途中保存 / DShow途中保存 / 曲ごとに設定保存 …… 位置・音量等", L"· Resume / DShow resume / per-song save …… position, volume, etc.", L"· Reprise / DShow / par morceau …… position, volume…", L"· Ripresa / DShow / per brano …… posizione, volume…",
+		L"· Reanudar / DShow / por pista …… posición, volumen…", L"· 위치저장 / DShow / 곡별 …… 위치·음량 등", L"· 续播 / DShow / 逐曲 …… 位置、音量等", L"· استئناف / DShow / لكل أغنية …… موضع ومستوى…",
+		L"· Позиция / DShow / на трек …… позиция, громкость…", L"· Position / DShow / pro Titel …… Position, Lautstaerke…", L"· Retomar / DShow / por faixa …… posição, volume…", L"· Hervatten / DShow / per nummer …… positie, volume…",
+		L"· Wznowienie / DShow / na utwór …… pozycja, głośność…", L"· Konum / DShow / parça …… konum, ses…")); yR += lh;
+	body(R, yR, LL14(L"・設定 / フォルダ / ファルコム特化型へ …… 出力設定・パス・本窓切替", L"· Settings / Folder / To Falcom …… output, paths, switch main UI", L"· Réglages / Dossier / Falcom …… sortie, chemins, bascule", L"· Impostazioni / Cartella / Falcom …… uscita, percorsi, passa",
+		L"· Ajustes / Carpeta / Falcom …… salida, rutas, cambiar", L"· 설정 / 폴더 / 팔콤 …… 출력·경로·화면 전환", L"· 设置 / 文件夹 / Falcom …… 输出、路径、切主界面", L"· إعدادات / مجلد / Falcom …… إخراج ومسارات وتبديل",
+		L"· Настройки / Папка / Falcom …… вывод, пути, переключение", L"· Einstellungen / Ordner / Falcom …… Ausgabe, Pfade, Wechsel", L"· Config. / Pasta / Falcom …… saída, caminhos, alternar", L"· Instellingen / Map / Falcom …… uitvoer, paden, wisselen",
+		L"· Ustawienia / Folder / Falcom …… wyjście, ścieżki, przełącz", L"· Ayarlar / Klasör / Falcom …… çıkış, yollar, geçiş")); yR += lh;
+	body(R, yR, LL14(L"・ツールチップ / ステレオ / 最小化連動 / スペアナ …… 表示オプション", L"· Tooltips / Stereo / Min.sync / Spectrum …… display options", L"· Infobulles / Stéréo / Sync.min / Spectre …… affichage", L"· Suggerimenti / Stereo / Sinc.min / Spettro …… visualizzazione",
+		L"· Sugerencias / Estéreo / Sincr.min / Espectro …… visualización", L"· 툴팁 / 스테레오 / 최소화연동 / 스펙트럼 …… 표시 옵션", L"· 工具提示 / 立体声 / 最小化联动 / 频谱 …… 显示选项", L"· تلميحات / ستيريو / تزامن تصغير / طيف …… خيارات العرض",
+		L"· Подсказки / Стерео / Синхр.сверт. / Спектр …… отображение", L"· Tooltips / Stereo / Min.-Sync / Spektrum …… Anzeige", L"· Dicas / Stereo / Sinc.min / Espectro …… exibição", L"· Tooltips / Stereo / Min.koppel / Spectrum …… weergave",
+		L"· Etykiety / Stereo / Synch.min / Widmo …… wyświetlanie", L"· İpuçları / Stereo / Min.eşit / Spektrum …… görünüm")); yR += lh + 2;
+
+	y = max(yL, yR) + 2;
+	title(L, y, LL14(L"キーボードショートカット", L"Keyboard shortcuts", L"Raccourcis clavier", L"Scorciatoie",
+		L"Atajos de teclado", L"키보드 단축키", L"键盘快捷键", L"اختصارات لوحة المفاتيح",
+		L"Горячие клавиши", L"Tastenkuerzel", L"Atalhos de teclado", L"Sneltoetsen",
+		L"Skróty klawiszowe", L"Klavye kısayolları"));
+	y += titleLh;
+	body(L, y, LL14(L"・Space …… 再生/一時停止　　←/→ …… シーク　　Home/End …… 曲頭/曲末付近", L"· Space …… Play/Pause　　←/→ …… Seek　　Home/End …… start/near end", L"· Espace …… Lecture/Pause　　←/→ …… Seek　　Home/End …… début/fin", L"· Spazio …… Play/Pausa　　←/→ …… Seek　　Home/End …… inizio/fine",
+		L"· Espacio …… Play/Pausa　　←/→ …… Seek　　Home/End …… inicio/fin", L"· Space …… 재생/일시정지　　←/→ …… 시크　　Home/End …… 곡처음/끝", L"· Space …… 播放/暂停　　←/→ …… 定位　　Home/End …… 曲头/近曲末", L"· Space …… تشغيل/إيقاف　　←/→ …… Seek　　Home/End …… بداية/نهاية",
+		L"· Space …… Play/Пауза　　←/→ …… Seek　　Home/End …… начало/конец", L"· Leertaste …… Play/Pause　　←/→ …… Seek　　Home/End …… Anfang/Ende", L"· Espaço …… Play/Pausa　　←/→ …… Seek　　Home/End …… início/fim", L"· Spatie …… Play/Pauze　　←/→ …… Seek　　Home/End …… begin/einde",
+		L"· Spacja …… Play/Pauza　　←/→ …… Seek　　Home/End …… początek/koniec", L"· Space …… Play/Duraklat　　←/→ …… Seek　　Home/End …… baş/son")); y += lh;
+	body(L, y, LL14(L"・PgUp/PgDn …… 前/次曲　　Enter …… 検索次候補　　? …… 本ガイド（入力欄優先）", L"· PgUp/PgDn …… Prev/Next　　Enter …… next find　　? …… this guide (typing wins in edits)", L"· PgUp/PgDn …… Préc/Suiv　　Entrée …… recherche　　? …… ce guide", L"· PgUp/PgDn …… Prec/Succ　　Invio …… cerca　　? …… questa guida",
+		L"· PgUp/PgDn …… Ant/Sig　　Enter …… buscar　　? …… esta guía", L"· PgUp/PgDn …… 이전/다음　　Enter …… 검색　　? …… 이 가이드", L"· PgUp/PgDn …… 上一/下一　　Enter …… 搜索　　? …… 本指南", L"· PgUp/PgDn …… سابق/تالٍ　　Enter …… بحث　　? …… هذا الدليل",
+		L"· PgUp/PgDn …… Пред/След　　Enter …… поиск　　? …… это руководство", L"· PgUp/PgDn …… Zurueck/Weiter　　Enter …… Suche　　? …… dieser Guide", L"· PgUp/PgDn …… Ant/Prox　　Enter …… busca　　? …… este guia", L"· PgUp/PgDn …… Vorige/Volgende　　Enter …… zoeken　　? …… deze gids",
+		L"· PgUp/PgDn …… Poprz/Nast　　Enter …… szukaj　　? …… ten przewodnik", L"· PgUp/PgDn …… Önceki/Sonraki　　Enter …… ara　　? …… bu kılavuz")); y += lh + 2;
+
+	muted(L, y, LL14(
+		L"各サブ窓の ? も同様に操作ガイドを開きます。キャプションの「メインに追随」はサブ窓の位置追従です。",
+		L"Each sub-window ? opens its own guide. Caption “Follow main” keeps sub-windows attached.",
+		L"Chaque ? de sous-fenêtre ouvre son guide. « Suivre principal » attache les fenêtres.",
+		L"Ogni ? delle sottofinestre apre la guida. « Segui principale » le tiene agganciate.",
+		L"Cada ? de subventana abre su guía. « Seguir principal » las mantiene unidas.",
+		L"각 하위 창 ? 도 가이드를 엽니다. 「메인 추종」은 하위 창 위치 추종입니다.",
+		L"各子窗口的 ? 也会打开指南。标题栏「跟随主窗口」用于子窗位置跟随。",
+		L"كل ? في النوافذ الفرعية يفتح دليله. «اتبع الرئيسي» يلصق النوافذ.",
+		L"Каждый ? дочернего окна открывает своё руководство. «Следовать за главным» держит окна.",
+		L"Jedes Unterfenster-? oeffnet seinen Guide. «Hauptfenster folgen» haelt Fenster angeheftet.",
+		L"Cada ? de subjanela abre seu guia. «Seguir principal» mantém janelas anexadas.",
+		L"Elke subvenster-? opent zijn gids. «Volg hoofd» houdt vensters vast.",
+		L"Każde ? okna podrzędnego otwiera przewodnik. «Podążaj za głównym» przykleja okna.",
+		L"Her alt pencere ? kendi kılavuzunu açar. «Ana pencereyi takip» konumları yapıştırır."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
 void CMediaPlayerDlg::OnCheatSheetBtn()
 {
 	ShowCheatSheet();
@@ -6438,88 +6764,22 @@ void CMediaPlayerDlg::OnCheatSheetBtn()
 
 void CMediaPlayerDlg::ShowCheatSheet()
 {
-	CMpCheatSheetDlg dlg(this);
-	dlg.DoModal();
-}
-
-IMPLEMENT_DYNAMIC(CMpCheatSheetDlg, CDialog)
-
-CMpCheatSheetDlg::CMpCheatSheetDlg(CWnd* pParent)
-	: CDialog(CMpCheatSheetDlg::IDD, pParent)
-{
-}
-
-BEGIN_MESSAGE_MAP(CMpCheatSheetDlg, CDialog)
-END_MESSAGE_MAP()
-
-BOOL CMpCheatSheetDlg::OnInitDialog()
-{
-	CDialog::OnInitDialog();
-	SetWindowText(LL14(L"キーボードショートカット", L"Keyboard shortcuts", L"Raccourcis clavier", L"Scorciatoie da tastiera", L"Atajos de teclado", L"키보드 단축키", L"键盘快捷键", L"اختصارات لوحة المفاتيح", L"Горячие клавиши", L"Tastenkuerzel", L"Atalhos de teclado", L"Sneltoetsen", L"Skroty klawiszowe", L"Klavye kisayollari"));
-	CString body = LL14(
-		L"Space      Play / Pause\r\n"
-		L"Left/Right Seek\r\n"
-		L"Home/End   Track start / near end\r\n"
-		L"PgUp/PgDn  Prev / Next track\r\n"
-		L"Enter      Next find hit (search box)\r\n"
-		L"?          This cheat sheet\r\n"
-		L"\r\n"
-		L"Right-click on banner\r\n"
-		L"  -> Spectrum style (bars / mirror / wave)\r\n"
-		L"\r\n"
-		L"Lib / Hist on the left\r\n"
-		L"  -> Library / play-history drawer\r\n"
-		L"Double-click history to play\r\n"
-		L"(switches playlist when found)",
-		L"Space      Play / Pause\r\n"
-		L"Left/Right Seek\r\n"
-		L"Home/End   Track start / near end\r\n"
-		L"PgUp/PgDn  Prev / Next track\r\n"
-		L"Enter      Next find hit (search box)\r\n"
-		L"?          This cheat sheet\r\n"
-		L"\r\n"
-		L"Right-click on banner\r\n"
-		L"  -> Spectrum style (bars / mirror / wave)\r\n"
-		L"\r\n"
-		L"Lib / Hist on the left\r\n"
-		L"  -> Library / play-history drawer\r\n"
-		L"Double-click history to play\r\n"
-		L"(switches playlist when found)",
-		L"Space      Lecture / Pause\r\nLeft/Right Seek\r\n?          Cette aide",
-		L"Space      Play / Pausa\r\nLeft/Right Seek\r\n?          Questa guida",
-		L"Space      Reproducir / Pausa\r\nLeft/Right Seek\r\n?          Esta guia",
-		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
-		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
-		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
-		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
-		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
-		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
-		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
-		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list",
-		L"Space      Play / Pause\r\nLeft/Right Seek\r\n?          This list");
-	// Prefer Japanese body when lang=0; rebuild JA strings (LL14 arg0)
-	if (savedata.lang == 0) {
-		body =
-			L"Space      再生 / 一時停止\r\n"
-			L"← / →     シーク\r\n"
-			L"Home/End   曲頭 / 曲末付近\r\n"
-			L"PgUp/PgDn  前の曲 / 次の曲\r\n"
-			L"Enter      検索欄で次候補\r\n"
-			L"?          この一覧\r\n"
-			L"\r\n"
-			L"バナー上で右クリック\r\n"
-			L"  → スペアナ表示(バー / ミラー / 波形)\r\n"
-			L"\r\n"
-			L"左の Lib / Hist\r\n"
-			L"  → ライブラリ / 再生履歴ドロワー\r\n"
-			L"履歴をダブルクリックで再生\r\n"
-			L"（見つかれば該当PLへ切替）";
+	if (g_mpHelpDlg && ::IsWindow(g_mpHelpDlg->GetSafeHwnd())) {
+		g_mpHelpDlg->ShowWindow(SW_SHOW);
+		g_mpHelpDlg->SetForegroundWindow();
+		return;
 	}
-	if (CWnd* p = GetDlgItem(IDC_MP_CHEAT_TEXT))
-		p->SetWindowText(body);
-	if (CWnd* pOk = GetDlgItem(IDOK))
-		pOk->SetWindowText(L"OK");
-	return TRUE;
+	if (g_mpHelpDlg && !::IsWindow(g_mpHelpDlg->GetSafeHwnd()))
+		g_mpHelpDlg = nullptr;
+	// オーナー無しのモードレス。DoModal だとメイン/アプリ終了が止まる
+	CMpCheatSheetDlg* dlg = new CMpCheatSheetDlg(nullptr);
+	if (!dlg->Create(IDD_MP_CHEATSHEET, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_mpHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
 }
 
 // pc[] を src→dst へ移動(リスト内ドラッグ移動)。再生インデックスも追従。

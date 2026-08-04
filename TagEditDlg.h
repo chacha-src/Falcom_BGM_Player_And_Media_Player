@@ -28,7 +28,12 @@ public:
 	afx_msg void OnBnClickedSave();
 	afx_msg void OnBnClickedClose();
 	afx_msg void OnBnClickedCoverClear();
+	afx_msg void OnBnClickedHelp();
 	afx_msg void OnDropFiles(HDROP hDropInfo);
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnDestroy();
+	void LayoutHelpBtn();
+	void ShowHelpSheet();
 
 	CCustomStatic m_titleL;
 	CCustomEdit m_title;
@@ -52,6 +57,7 @@ public:
 	CCustomStatic m_status;
 	CCustomStandardButton m_save;
 	CCustomStandardButton m_close;
+	CCustomStandardButton m_help;
 	CString m_coverPath;
 	HBITMAP m_coverBmp;
 	CToolTipCtrl m_tooltip;

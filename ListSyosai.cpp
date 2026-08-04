@@ -16,6 +16,306 @@
 // ワードラップ解除コールバック(前方宣言)
 static int CALLBACK EditWordBreakProc(LPTSTR lpch, int ichCurrent, int cch, int code);
 
+namespace {
+
+class CSyHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_SY_HELP };
+	explicit CSyHelpDlg(CWnd* pParent = nullptr)
+		: CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CSyHelpDlg* g_syHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CSyHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CSyHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"ファイル情報操作ガイド", L"File Info Guide", L"Guide infos fichier", L"Guida info file",
+		L"Guía info. archivo", L"파일 정보 가이드", L"文件信息指南", L"دليل معلومات الملف",
+		L"Руководство сведений о файле", L"Dateiinfo-Anleitung", L"Guia info. arquivo", L"Bestandsinfo-gids",
+		L"Przewodnik info. o pliku", L"Dosya bilgisi kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CSyHelpDlg::OnOK() { DestroyWindow(); }
+void CSyHelpDlg::OnCancel() { DestroyWindow(); }
+void CSyHelpDlg::OnClose() { DestroyWindow(); }
+
+void CSyHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_syHelpDlg == this)
+		g_syHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CSyHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CSyHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"ファイル情報操作ガイド", L"File Info — Guide", L"Guide infos fichier", L"Guida info file",
+		L"Guía info. archivo", L"파일 정보 가이드", L"文件信息指南", L"دليل معلومات الملف",
+		L"Сведения о файле — руководство", L"Dateiinfo-Guide", L"Guia info. arquivo", L"Bestandsinfo-gids",
+		L"Info. o pliku — przewodnik", L"Dosya bilgisi kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"プレイリスト表示とファイルタグを分けて編集できます。OK で PL 側を保存します。",
+		L"Edit playlist display and file tags separately. OK saves playlist fields.",
+		L"Éditer affichage playlist et tags séparément. OK = playlist.",
+		L"Modifica playlist e tag separatamente. OK salva la playlist.",
+		L"Edite lista y etiquetas por separado. OK guarda la lista.",
+		L"재생 목록 표시와 파일 태그를 나눠 편집. OK로 PL 쪽 저장.",
+		L"可分别编辑播放列表显示与文件标签。确定保存播放列表侧。",
+		L"حرّر عرض القائمة والوسوم منفصلين. OK يحفظ القائمة.",
+		L"Редактируйте плейлист и теги отдельно. OK сохраняет плейлист.",
+		L"Playlist-Anzeige und Tags getrennt. OK speichert Playlist.",
+		L"Edite lista e tags separadamente. OK salva a playlist.",
+		L"Bewerk afspeellijst en tags apart. OK slaat playlist op.",
+		L"Edytuj listę i tagi osobno. OK zapisuje playlistę.",
+		L"Çalma listesi ve etiketleri ayrı düzenle. Tamam PL kaydeder."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"プレイリスト欄 vs タグ", L"Playlist fields vs tags", L"Playlist vs tags", L"Playlist vs tag",
+		L"Lista vs etiquetas", L"재생 목록 vs 태그", L"播放列表栏 vs 标签", L"الحقول vs الوسوم",
+		L"Плейлист vs теги", L"Playlist vs Tags", L"Playlist vs tags", L"Afspeellijst vs tags",
+		L"Playlista vs tagi", L"Liste vs etiketler"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・上段(名前/アーティスト/アルバム/パス) …… プレイリスト表示。OK で保存",
+		L"· Top (name/artist/album/path) …… playlist display. Saved with OK",
+		L"· Haut (nom/artiste/album/chemin) …… affichage playlist. OK",
+		L"· Alto (nome/artista/album/percorso) …… playlist. OK",
+		L"· Superior (nombre/artista/álbum/ruta) …… lista. OK",
+		L"· 상단(이름/아티스트/앨범/경로) …… 재생 목록 표시. OK로 저장",
+		L"· 上段（名称/艺术家/专辑/路径）…… 播放列表显示。确定保存",
+		L"· أعلى (اسم/فنان/ألبوم/مسار) …… عرض القائمة. يُحفظ مع OK",
+		L"· Верх (имя/исполнитель/альбом/путь) …… плейлист. OK",
+		L"· Oben (Name/Artist/Album/Pfad) …… Playlist. Mit OK speichern",
+		L"· Topo (nome/artista/álbum/caminho) …… playlist. OK",
+		L"· Boven (naam/artiest/album/pad) …… afspeellijst. OK",
+		L"· Góra (nazwa/artysta/album/ścieżka) …… playlista. OK",
+		L"· Üst (ad/sanatçı/albüm/yol) …… çalma listesi. Tamam ile kaydet")); y += lh;
+	body(L, y, LL14(
+		L"・中段(年/Track/ジャンル/コメント) …… ファイルタグ。タグ書込でファイルへ",
+		L"· Middle (year/track/genre/comment) …… file tags. Write tag → file",
+		L"· Milieu (année/piste/genre/commentaire) …… tags. Écrire → fichier",
+		L"· Centro (anno/traccia/genere/commento) …… tag. Scrivi → file",
+		L"· Medio (año/pista/género/comentario) …… etiquetas. Escribir → archivo",
+		L"· 중단(연도/트랙/장르/코멘트) …… 파일 태그. 태그 쓰기로 파일에",
+		L"· 中段（年/曲目/流派/注释）…… 文件标签。写入标签到文件",
+		L"· وسط (سنة/مسار/نوع/تعليق) …… وسوم. الكتابة → الملف",
+		L"· Середина (год/трек/жанр/коммент.) …… теги. Запись → файл",
+		L"· Mitte (Jahr/Track/Genre/Kommentar) …… Tags. Schreiben → Datei",
+		L"· Meio (ano/faixa/gênero/comentário) …… tags. Gravar → arquivo",
+		L"· Midden (jaar/track/genre/opmerking) …… tags. Schrijven → bestand",
+		L"· Środek (rok/utwór/gatunek/komentarz) …… tagi. Zapisz → plik",
+		L"· Orta (yıl/parça/tür/yorum) …… etiketler. Yaz → dosya")); y += lh;
+	body(L, y, LL14(
+		L"・タグ→PL …… タグのタイトル/アーティスト/アルバムを上段へコピー",
+		L"· Tag→PL …… copy tag title/artist/album into playlist fields",
+		L"· Tag→PL …… copier titre/artiste/album vers la playlist",
+		L"· Tag→PL …… copia titolo/artista/album nella playlist",
+		L"· Tag→PL …… copiar título/artista/álbum a la lista",
+		L"· 태그→PL …… 태그 제목/아티스트/앨범을 상단으로 복사",
+		L"· 标签→列表 …… 将标签标题/艺术家/专辑复制到上段",
+		L"· وسم→قائمة …… نسخ العنوان/الفنان/الألبوم إلى الأعلى",
+		L"· Тег→PL …… копировать название/исполнителя/альбом вверх",
+		L"· Tag→PL …… Titel/Artist/Album nach oben kopieren",
+		L"· Tag→PL …… copiar título/artista/álbum para cima",
+		L"· Tag→PL …… titel/artiest/album naar boven kopiëren",
+		L"· Tag→PL …… kopiuj tytuł/artystę/album w górę",
+		L"· Etiket→PL …… başlık/sanatçı/albümü üste kopyala")); y += lh + 4;
+
+	title(L, y, LL14(L"タグの読み書き", L"Tag read / write", L"Lecture / écriture tags", L"Lettura / scrittura tag",
+		L"Lectura / escritura de etiquetas", L"태그 읽기/쓰기", L"标签读写", L"قراءة/كتابة الوسوم",
+		L"Чтение / запись тегов", L"Tags lesen / schreiben", L"Leitura / gravação de tags", L"Tags lezen / schrijven",
+		L"Odczyt / zapis tagów", L"Etiket oku / yaz"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・再読込 …… ファイルからタグを再取得（編集中のタグ欄を上書き）",
+		L"· Reload …… re-read tags from file (overwrites tag fields)",
+		L"· Recharger …… relire les tags (écrase les champs)",
+		L"· Ricarica …… rileggi i tag (sovrascrive i campi)",
+		L"· Recargar …… releer etiquetas (sobrescribe campos)",
+		L"· 다시 읽기 …… 파일에서 태그를 다시 읽음(태그란 덮어씀)",
+		L"· 重新加载 …… 从文件重读标签（覆盖标签栏）",
+		L"· إعادة تحميل …… إعادة قراءة الوسوم (تستبدل الحقول)",
+		L"· Обновить …… перечитать теги (перезапишет поля)",
+		L"· Neu laden …… Tags neu lesen (überschreibt Felder)",
+		L"· Recarregar …… reler tags (sobrescreve campos)",
+		L"· Herladen …… tags opnieuw lezen (overschrijft velden)",
+		L"· Wczytaj …… odczytaj tagi ponownie (nadpisuje pola)",
+		L"· Yenile …… dosyadan etiketleri yeniden oku (alanları yazar)")); y += lh;
+	body(L, y, LL14(
+		L"・タグ書込 …… 表示中のメタデータをファイルへ。MP3/FLAC/WAV/M4A/Ogg 等",
+		L"· Write tag …… save displayed metadata to file. MP3/FLAC/WAV/M4A/Ogg…",
+		L"· Écrire tag …… métadonnées → fichier. MP3/FLAC/WAV/M4A/Ogg…",
+		L"· Scrivi tag …… metadati → file. MP3/FLAC/WAV/M4A/Ogg…",
+		L"· Escribir tag …… metadatos → archivo. MP3/FLAC/WAV/M4A/Ogg…",
+		L"· 태그 쓰기 …… 표시 메타데이터를 파일에. MP3/FLAC/WAV/M4A/Ogg 등",
+		L"· 写入标签 …… 将显示的元数据写入文件。MP3/FLAC/WAV/M4A/Ogg 等",
+		L"· كتابة وسم …… البيانات المعروضة → الملف. MP3/FLAC/WAV/M4A/Ogg…",
+		L"· Записать тег …… метаданные → файл. MP3/FLAC/WAV/M4A/Ogg…",
+		L"· Tag schreiben …… Metadaten → Datei. MP3/FLAC/WAV/M4A/Ogg…",
+		L"· Gravar tag …… metadados → arquivo. MP3/FLAC/WAV/M4A/Ogg…",
+		L"· Tag schrijven …… metadata → bestand. MP3/FLAC/WAV/M4A/Ogg…",
+		L"· Zapisz tag …… metadane → plik. MP3/FLAC/WAV/M4A/Ogg…",
+		L"· Etiket yaz …… görünen metadata → dosya. MP3/FLAC/WAV/M4A/Ogg…")); y += lh + 4;
+
+	title(L, y, LL14(L"ループ欄", L"Loop fields", L"Champs de boucle", L"Campi loop",
+		L"Campos de bucle", L"루프 란", L"循环字段", L"حقول التكرار",
+		L"Поля цикла", L"Schleifenfelder", L"Campos de loop", L"Loopvelden",
+		L"Pola pętli", L"Döngü alanları"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・開始/終了はサンプル単位。OK でプレイリストへ保存されます",
+		L"· Start/end are in samples. Saved to the playlist with OK",
+		L"· Début/fin en échantillons. Enregistrés avec OK",
+		L"· Inizio/fine in campioni. Salvati con OK",
+		L"· Inicio/fin en muestras. Se guardan con OK",
+		L"· 시작/종료는 샘플 단위. OK로 재생 목록에 저장",
+		L"· 开始/结束以采样为单位。确定保存到播放列表",
+		L"· البداية/النهاية بالعينات. تُحفظ مع OK",
+		L"· Начало/конец в сэмплах. Сохраняется по OK",
+		L"· Start/Ende in Samples. Mit OK in Playlist speichern",
+		L"· Início/fim em amostras. Salvos com OK",
+		L"· Start/einde in samples. Opslaan met OK",
+		L"· Start/koniec w próbkach. Zapis po OK",
+		L"· Başlangıç/bitiş örnek cinsinden. Tamam ile kaydet")); y += lh + 4;
+
+	title(L, y, LL14(L"パス操作", L"Path actions", L"Actions chemin", L"Azioni percorso",
+		L"Acciones de ruta", L"경로 조작", L"路径操作", L"إجراءات المسار",
+		L"Действия с путём", L"Pfad-Aktionen", L"Ações de caminho", L"Padacties",
+		L"Akcje ścieżki", L"Yol işlemleri"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・Explorer …… エクスプローラーでファイルを選択表示（無ければフォルダ）",
+		L"· Explorer …… select the file in Explorer (folder if missing)",
+		L"· Explorateur …… sélectionner le fichier (dossier sinon)",
+		L"· Esplora …… seleziona il file (cartella se assente)",
+		L"· Explorador …… seleccionar el archivo (carpeta si falta)",
+		L"· 탐색기 …… 탐색기에서 파일 선택 표시(없으면 폴더)",
+		L"· 资源管理器 …… 在资源管理器中选中文件（否则打开文件夹）",
+		L"· المستكشف …… تحديد الملف (المجلد إن لم يوجد)",
+		L"· Проводник …… выделить файл (папку, если нет)",
+		L"· Explorer …… Datei auswählen (Ordner falls fehlend)",
+		L"· Explorer …… selecionar o arquivo (pasta se ausente)",
+		L"· Verkenner …… bestand selecteren (map als ontbreekt)",
+		L"· Eksplorator …… zaznacz plik (folder jeśli brak)",
+		L"· Gezgin …… dosyayı seç (yoksa klasör)")); y += lh;
+	body(L, y, LL14(
+		L"・パスコピー / 名コピー …… クリップボードへ。参照でパス差し替えも可",
+		L"· Copy path / name …… to clipboard. Browse can replace the path",
+		L"· Copier chemin / nom …… presse-papiers. Parcourir remplace",
+		L"· Copia percorso / nome …… appunti. Sfoglia sostituisce",
+		L"· Copiar ruta / nombre …… portapapeles. Examinar reemplaza",
+		L"· 경로/이름 복사 …… 클립보드로. 참조로 경로 교체 가능",
+		L"· 复制路径/文件名 …… 到剪贴板。浏览可替换路径",
+		L"· نسخ المسار/الاسم …… إلى الحافظة. الاستعراض يستبدل",
+		L"· Копировать путь / имя …… в буфер. Обзор заменяет путь",
+		L"· Pfad/Name kopieren …… Zwischenablage. Durchsuchen ersetzt",
+		L"· Copiar caminho / nome …… área de transferência. Procurar troca",
+		L"· Pad/naam kopiëren …… klembord. Bladeren vervangt pad",
+		L"· Kopiuj ścieżkę / nazwę …… schowek. Przeglądaj zamienia",
+		L"· Yol/ad kopyala …… panoya. Gözat yolu değiştirir")); y += lh + 4;
+
+	title(L, y, LL14(L"再生詳細", L"Playback details", L"Détails lecture", L"Dettagli riproduzione",
+		L"Detalles reproducción", L"재생 상세", L"播放详情", L"تفاصيل التشغيل",
+		L"Детали воспроизведения", L"Wiedergabedetails", L"Detalhes de reprodução", L"Afspeeldetails",
+		L"Szczegóły odtwarzania", L"Oynatma ayrıntıları"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・再生詳細 …… ループ/キュー/タグ等の詳細ダイアログを開きます",
+		L"· Playback details …… opens loop/cues/tags detail dialog",
+		L"· Détails lecture …… ouvre boucle/repères/tags",
+		L"· Dettagli …… apre loop/cue/tag",
+		L"· Detalles …… abre bucle/cues/etiquetas",
+		L"· 재생 상세 …… 루프/큐/태그 등 상세 대화상자를 엽니다",
+		L"· 播放详情 …… 打开循环/标记/标签等详细对话框",
+		L"· تفاصيل التشغيل …… يفتح حوار الحلقة/العلامات/الوسوم",
+		L"· Детали …… открывает цикл/метки/теги",
+		L"· Wiedergabedetails …… öffnet Schleife/Cues/Tags",
+		L"· Detalhes …… abre loop/cues/tags",
+		L"· Afspeeldetails …… opent loop/cues/tags",
+		L"· Szczegóły …… otwiera pętlę/cue/tagi",
+		L"· Oynatma ayrıntıları …… döngü/cue/etiket penceresini açar")); y += lh;
+	muted(L, y, LL14(
+		L"★削除は曲ごとの音量・EQ 等の記憶パラメータを消します。閉じるは保存しません。",
+		L"Clear ★ removes per-track volume/EQ memory. Close does not save.",
+		L"Effacer ★ supprime volume/EQ mémorisés. Fermer n'enregistre pas.",
+		L"Cancella ★ rimuove volume/EQ salvati. Chiudi non salva.",
+		L"Borrar ★ quita volumen/EQ guardados. Cerrar no guarda.",
+		L"★삭제는 곡별 볼륨·EQ 기억을 지웁니다. 닫기는 저장하지 않습니다.",
+		L"删除★会清除逐曲音量/EQ记忆。关闭不保存。",
+		L"مسح ★ يحذف ذاكرة الصوت/EQ. الإغلاق لا يحفظ.",
+		L"Удалить ★ стирает громкость/EQ трека. Закрыть не сохраняет.",
+		L"★ löschen entfernt Lautstärke/EQ. Schließen speichert nicht.",
+		L"Limpar ★ remove volume/EQ. Fechar não salva.",
+		L"★ wissen verwijdert volume/EQ. Sluiten slaat niet op.",
+		L"Usuń ★ kasuje głośność/EQ. Zamknij nie zapisuje.",
+		L"★ sil parça ses/EQ belleğini siler. Kapat kaydetmez."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
 // CListSyosai ダイアログ
 
 IMPLEMENT_DYNAMIC(CListSyosai, CCustomBlurDialogBase)
@@ -75,6 +375,7 @@ void CListSyosai::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SYOSAI_BTN_COPYNAME, m_btnCopyName);
 	DDX_Control(pDX, IDC_SYOSAI_BTN_PROTOOLS, m_btnProTools);
 	DDX_Control(pDX, IDC_SYOSAI_BTN_CLEARPARAM, m_btnClearParam);
+	DDX_Control(pDX, IDC_SY_HELP, m_help);
 }
 
 #include "CImageBase.h"
@@ -89,7 +390,10 @@ BEGIN_MESSAGE_MAP(CListSyosai, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_SYOSAI_BTN_COPYNAME, &CListSyosai::OnBnClickedCopyName)
 	ON_BN_CLICKED(IDC_SYOSAI_BTN_PROTOOLS, &CListSyosai::OnBnClickedProTools)
 	ON_BN_CLICKED(IDC_SYOSAI_BTN_CLEARPARAM, &CListSyosai::OnBnClickedClearParam)
+	ON_BN_CLICKED(IDC_SY_HELP, &CListSyosai::OnBnClickedHelp)
 	ON_WM_CLOSE()
+	ON_WM_DESTROY()
+	ON_WM_SIZE()
 	cmn(CListSyosai);
 
 
@@ -370,6 +674,22 @@ void CListSyosai::OnClose()
 	EndDialog(IDCANCEL);
 }
 
+void CListSyosai::OnDestroy()
+{
+	if (g_syHelpDlg && ::IsWindow(g_syHelpDlg->GetSafeHwnd()))
+		g_syHelpDlg->DestroyWindow();
+	CCustomBlurDialogBase::OnDestroy();
+}
+
+void CListSyosai::OnSize(UINT nType, int cx, int cy)
+{
+	CCustomBlurDialogBase::OnSize(nType, cx, cy);
+	if (nType != SIZE_MINIMIZED) {
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
+}
+
 void CListSyosai::OnBnClickedExplorer()
 {
 	CString path = CurrentPathText();
@@ -534,6 +854,11 @@ BOOL CListSyosai::OnInitDialog()
 	if (!IsBatchMode())
 		RefreshPcDetails(pc);
 
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	LayoutHelpBtn();
+
 	SetWindowText(LL14(L"ファイル情報", L"File Info", L"Infos fichier", L"Info file", L"Info. de archivo", L"파일 정보", L"文件信息", L"معلومات الملف", L"Сведения о файле", L"Dateiinfo", L"Info. do arquivo", L"Bestandsinfo", L"Informacje o pliku", L"Dosya bilgisi"));
 	SetDlgItemText(ID_OK, LL14(L"OK", L"OK", L"OK", L"OK", L"OK", L"OK", L"确定", L"موافق", L"ОК", L"OK", L"OK", L"OK", L"OK", L"Tamam"));
 	SetDlgItemText(IDCANCEL, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
@@ -635,9 +960,41 @@ BOOL CListSyosai::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(IDC_SYOSAI_LBL_PARAM), LL14(L"曲ごとに保存した音量・EQ等の有無と内容です。", L"Whether per-song volume/EQ settings exist, and a summary.", L"Presence et resume des reglages par morceau.", L"Presenza e riepilogo impostazioni per brano.", L"Presencia y resumen de ajustes por pista.", L"곡별 볼륨·EQ 설정 유무와 요약입니다.", L"逐曲音量/EQ 等设置的有无与摘要。", L"وجود ملخص إعدادات الصوت/EQ لكل أغنية.", L"Наличие и сводка настроек трека.", L"Vorhandensein und Kurzinfo der Pro-Titel-Einstellungen.", L"Presenca e resumo das config. por faixa.", L"Aanwezigheid en samenvatting per-nummer-instellingen.", L"Obecnosc i skrot ustawien utworu.", L"Parça ayarlarinin varligi ve ozeti."));
 	m_tooltip.AddTool(GetDlgItem(ID_OK), LL14(L"プレイリスト表示の変更を保存して閉じます。", L"Save playlist display changes and close.", L"Enregistrer les modifications et fermer.", L"Salva le modifiche alla playlist e chiudi.", L"Guardar cambios de la lista y cerrar.", L"재생 목록 변경을 저장하고 닫습니다.", L"保存播放列表更改并关闭。", L"حفظ التغييرات وإغلاق النافذة.", L"Сохранить изменения и закрыть.", L"Anderungen speichern und schliessen.", L"Salvar alteracoes e fechar.", L"Wijzigingen opslaan en sluiten.", L"Zapisz zmiany i zamknij.", L"Degisiklikleri kaydet ve kapat."));
 	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL14(L"変更を保存せずに閉じます。", L"Close without saving changes.", L"Fermer sans enregistrer.", L"Chiudi senza salvare.", L"Cerrar sin guardar.", L"변경을 저장하지 않고 닫습니다.", L"不保存更改并关闭。", L"إغلاق دون حفظ التغييرات.", L"Закрыть без сохранения.", L"Ohne Speichern schliessen.", L"Fechar sem salvar.", L"Sluiten zonder opslaan.", L"Zamknij bez zapisywania.", L"Kaydetmeden kapat."));
+	m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	return TRUE;
+}
+
+void CListSyosai::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CListSyosai::ShowHelpSheet()
+{
+	if (g_syHelpDlg && ::IsWindow(g_syHelpDlg->GetSafeHwnd())) {
+		g_syHelpDlg->ShowWindow(SW_SHOW);
+		g_syHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_syHelpDlg && !::IsWindow(g_syHelpDlg->GetSafeHwnd()))
+		g_syHelpDlg = nullptr;
+	CSyHelpDlg* dlg = new CSyHelpDlg(nullptr);
+	if (!dlg->Create(IDD_SY_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_syHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CListSyosai::OnBnClickedHelp()
+{
+	ShowHelpSheet();
 }
 
 BOOL CListSyosai::PreTranslateMessage(MSG* pMsg)

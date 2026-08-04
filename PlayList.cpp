@@ -196,6 +196,350 @@ static void WavReadRiffListInfoTags(const CString& fname, TCHAR* nameOut, TCHAR*
 
 } // namespace
 
+namespace {
+
+class CPlHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_PL_HELP };
+	explicit CPlHelpDlg(CPlayList* owner, CWnd* pParent = nullptr)
+		: CDialog(IDD, pParent), m_owner(owner) {}
+protected:
+	CPlayList* m_owner;
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CPlHelpDlg* g_plHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CPlHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CPlHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"プレイリスト操作ガイド", L"Playlist Guide", L"Guide de la liste", L"Guida playlist",
+		L"Guía de lista", L"재생 목록 가이드", L"播放列表指南", L"دليل قائمة التشغيل",
+		L"Руководство плейлиста", L"Playlist-Anleitung", L"Guia da lista", L"Afspeellijstgids",
+		L"Przewodnik listy", L"Çalma listesi kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	(void)m_owner;
+	return TRUE;
+}
+
+void CPlHelpDlg::OnOK() { DestroyWindow(); }
+void CPlHelpDlg::OnCancel() { DestroyWindow(); }
+void CPlHelpDlg::OnClose() { DestroyWindow(); }
+
+void CPlHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_plHelpDlg == this)
+		g_plHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CPlHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CPlHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"プレイリスト操作ガイド", L"Playlist — Guide", L"Guide liste", L"Guida playlist",
+		L"Guía lista", L"재생 목록 가이드", L"播放列表指南", L"دليل القائمة",
+		L"Руководство плейлиста", L"Playlist-Guide", L"Guia lista", L"Afspeellijstgids",
+		L"Przewodnik listy", L"Liste kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"曲の並び替え・連続/ループ再生・検索・リスト管理をここで行います。",
+		L"Reorder tracks, continuous/loop play, search, and manage lists here.",
+		L"Réordonnez, lecture continue/boucle, recherche et gestion des listes.",
+		L"Riordina, continua/loop, ricerca e gestione liste.",
+		L"Reordene, continua/bucle, búsqueda y gestión de listas.",
+		L"곡 정렬·연속/루프 재생·검색·목록 관리를 여기서 합니다.",
+		L"在此重排曲目、连续/循环播放、搜索并管理列表。",
+		L"أعد الترتيب، التشغيل المتواصل/الحلقي، البحث وإدارة القوائم.",
+		L"Здесь порядок треков, непрерывный/цикл, поиск и списки.",
+		L"Hier sortieren, fortlaufend/Schleife, Suche und Listen verwalten.",
+		L"Reordene, contínua/loop, pesquisa e gerencie listas aqui.",
+		L"Hier herschikken, doorlopend/lus, zoeken en lijsten beheren.",
+		L"Tu przestawiaj, ciągłe/pętla, szukaj i zarządzaj listami.",
+		L"Burada sırala, sürekli/döngü, ara ve listeleri yönet."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"再生チェック", L"Playback checks", L"Cases lecture", L"Opzioni riproduzione",
+		L"Casillas de reproducción", L"재생 체크", L"播放选项", L"خيارات التشغيل",
+		L"Флажки воспроизведения", L"Wiedergabe-Optionen", L"Opções de reprodução", L"Afspeelopties",
+		L"Opcje odtwarzania", L"Çalma seçenekleri"));
+	y += titleLh;
+	body(L, y, LL14(L"・連続再生 …… リスト順に次曲へ進みます。再生中の追加でも現在曲は続きます。",
+		L"· Continuous …… play next in list order. Adding files keeps current track.",
+		L"· Continue …… piste suivante. Ajout en cours = piste actuelle continue.",
+		L"· Continua …… brano successivo. Aggiunte non interrompono il corrente.",
+		L"· Continua …… siguiente en orden. Añadir no corta la pista actual.",
+		L"· 연속 재생 …… 목록 순으로 다음 곡. 재생 중 추가해도 현재 곡 유지.",
+		L"· 连续播放 …… 按列表顺序下一曲。播放中添加仍继续当前曲。",
+		L"· متواصل …… التالي بالترتيب. الإضافة لا توقف المسار الحالي.",
+		L"· Непрерывное …… следующий по списку. Добавление не рвёт текущий трек.",
+		L"· Fortlaufend …… nächster Titel. Hinzufügen unterbricht nicht.",
+		L"· Contínua …… próxima da lista. Adicionar mantém a faixa atual.",
+		L"· Doorlopend …… volgende in volgorde. Toevoegen houdt huidig nummer.",
+		L"· Ciągłe …… następny z listy. Dodawanie nie przerywa bieżącego.",
+		L"· Sürekli …… listedeki sıradaki. Ekleme mevcut parçayı kesmez.")); y += lh;
+	body(L, y, LL14(L"・ループ再生 …… 再生前にチェック。ループ点0の曲(mp3等)が対象です。",
+		L"· Loop …… check before play. For tracks with loop point 0 (e.g. mp3).",
+		L"· Boucle …… cocher avant lecture. Pistes avec point de boucle 0.",
+		L"· Loop …… spunta prima di riprodurre. Tracce con punto loop 0.",
+		L"· Bucle …… marcar antes. Pistas con punto de bucle 0.",
+		L"· 루프 …… 재생 전 체크. 루프 포인트 0인 곡(mp3 등).",
+		L"· 循环 …… 播放前勾选。循环点为0的曲目（如 mp3）。",
+		L"· حلقي …… حدد قبل التشغيل. مسارات بنقطة تكرار 0.",
+		L"· Цикл …… отметить до старта. Треки с точкой цикла 0.",
+		L"· Schleife …… vor Wiedergabe aktivieren. Loop-Punkt 0.",
+		L"· Loop …… marcar antes. Faixas com ponto de loop 0.",
+		L"· Lus …… vooraf aanvinken. Nummers met luspunt 0.",
+		L"· Pętla …… zaznacz przed startem. Utwory z punktem pętli 0.",
+		L"· Döngü …… çalmadan önce işaretle. Döngü noktası 0 olanlar.")); y += lh + 4;
+
+	title(L, y, LL14(L"移動・検索", L"Move / search", L"Déplacer / chercher", L"Sposta / cerca",
+		L"Mover / buscar", L"이동·검색", L"移动/搜索", L"نقل / بحث",
+		L"Перемещение / поиск", L"Verschieben / Suche", L"Mover / pesquisar", L"Verplaatsen / zoeken",
+		L"Przenoszenie / szukaj", L"Taşı / ara"));
+	y += titleLh;
+	body(L, y, LL14(L"・ファイル移動 …… ↑/↓ で選択行を上下、最上/最下へ一括移動。",
+		L"· File move …… ↑/↓ reorder selection; top/bottom jump buttons.",
+		L"· Déplacer …… ↑/↓ réordonner ; boutons haut/bas absolus.",
+		L"· Sposta …… ↑/↓ riordina; pulsanti cima/fondo.",
+		L"· Mover …… ↑/↓ reordenar; botones inicio/final.",
+		L"· 파일 이동 …… ↑/↓로 선택 행 이동, 맨 위/아래 버튼.",
+		L"· 文件移动 …… ↑/↓ 调整顺序；置顶/置底按钮。",
+		L"· نقل …… ↑/↓ لإعادة الترتيب؛ أعلى/أسفل.",
+		L"· Перемещение …… ↑/↓ порядок; кнопки вверх/вниз списка.",
+		L"· Verschieben …… ↑/↓ sortieren; Ganz oben/unten.",
+		L"· Mover …… ↑/↓ reordenar; topo/fim.",
+		L"· Verplaatsen …… ↑/↓ herschikken; top/onder.",
+		L"· Przenieś …… ↑/↓ kolejność; góra/dół listy.",
+		L"· Taşı …… ↑/↓ sırala; en üst/en alt.")); y += lh;
+	body(L, y, LL14(L"・あいまい検索 …… キーワード入力後、上下検索で名前/アーティスト等を探します。",
+		L"· Fuzzy search …… type a keyword, then search up/down in name/artist/etc.",
+		L"· Recherche floue …… mot-clé puis chercher haut/bas (nom/artiste…).",
+		L"· Fuzzy …… parola chiave, poi cerca su/giù (nome/artista…).",
+		L"· Difusa …… palabra clave y buscar arriba/abajo (nombre/artista…).",
+		L"· 퍼지 검색 …… 키워드 입력 후 위/아래로 이름·아티스트 등 검색.",
+		L"· 模糊搜索 …… 输入关键字后用上下搜索名称/艺术家等。",
+		L"· بحث غامض …… أدخل كلمة ثم ابحث أعلى/أسفل.",
+		L"· Нечёткий поиск …… ключ, затем вверх/вниз по полям.",
+		L"· Fuzzy …… Stichwort, dann auf/ab in Name/Interpret usw.",
+		L"· Fuzzy …… palavra-chave e buscar cima/baixo.",
+		L"· Fuzzy …… zoekterm, dan omhoog/omlaag in velden.",
+		L"· Rozmyte …… słowo kluczowe, potem góra/dół w polach.",
+		L"· Bulanık …… anahtar kelime, sonra yukarı/aşağı ara.")); y += lh + 4;
+
+	title(L, y, LL14(L"リスト操作", L"List actions", L"Actions liste", L"Azioni lista",
+		L"Acciones de lista", L"목록 조작", L"列表操作", L"عمليات القائمة",
+		L"Действия со списком", L"Listenaktionen", L"Ações da lista", L"Lijstacties",
+		L"Akcje listy", L"Liste işlemleri"));
+	y += titleLh;
+	body(L, y, LL14(L"・D&D …… ファイル/フォルダをリストへドロップで追加。行ドラッグで並べ替え。",
+		L"· D&D …… drop files/folders onto the list. Drag rows to reorder.",
+		L"· D&D …… déposer fichiers/dossiers. Glisser les lignes pour trier.",
+		L"· D&D …… rilascia file/cartelle. Trascina le righe per riordinare.",
+		L"· D&D …… soltar archivos/carpetas. Arrastrar filas para ordenar.",
+		L"· D&D …… 파일/폴더를 목록에 드롭. 행 드래그로 정렬.",
+		L"· 拖放 …… 将文件/文件夹拖到列表添加。拖行可重排。",
+		L"· سحب وإفلات …… أضف بالسحب. اسحب الصفوف للترتيب.",
+		L"· D&D …… перетащите файлы/папки. Строки — для порядка.",
+		L"· D&D …… Dateien/Ordner ablegen. Zeilen ziehen zum Sortieren.",
+		L"· D&D …… solte arquivos/pastas. Arraste linhas para ordenar.",
+		L"· D&D …… sleep bestanden/mappen. Rijen slepen om te ordenen.",
+		L"· D&D …… upuść pliki/foldery. Przeciągnij wiersze.",
+		L"· Sürükle-bırak …… dosya/klasör ekle. Satır sürükleyerek sırala.")); y += lh;
+	body(L, y, LL14(L"・名前変更 / リスト削除 …… 表示中のプレイリスト名変更・削除（削除は復元不可）。",
+		L"· Rename / Delete list …… rename or remove the current playlist (no undo).",
+		L"· Renommer / Supprimer …… liste affichée (suppression définitive).",
+		L"· Rinomina / Elimina …… playlist corrente (eliminazione definitiva).",
+		L"· Renombrar / Eliminar …… lista actual (sin recuperación).",
+		L"· 이름 변경 / 목록 삭제 …… 현재 목록 (삭제 후 복구 불가).",
+		L"· 重命名/删除列表 …… 当前列表（删除不可恢复）。",
+		L"· إعادة تسمية / حذف …… القائمة الحالية (لا استرداد).",
+		L"· Переименовать / Удалить …… текущий список (без отмены).",
+		L"· Umbenennen / Löschen …… aktuelle Liste (kein Undo).",
+		L"· Renomear / Excluir …… lista atual (sem desfazer).",
+		L"· Hernoemen / Verwijderen …… huidige lijst (geen herstel).",
+		L"· Zmień nazwę / Usuń …… bieżąca lista (bez cofania).",
+		L"· Yeniden adlandır / Sil …… geçerli liste (geri alınamaz).")); y += lh;
+	body(L, y, LL14(L"・簡易ピアノロール …… 再生中の音程を鍵盤表示で確認します。",
+		L"· Simple Piano Roll …… show live pitch on a keyboard layout.",
+		L"· Rouleau piano …… hauteur en direct sur un clavier.",
+		L"· Piano roll …… altezza live su tastiera.",
+		L"· Piano roll …… tono en vivo en teclado.",
+		L"· 간이 피아노 롤 …… 재생 중 음정을 건반으로 표시.",
+		L"· 简易钢琴卷帘 …… 以键盘显示正在播放的音高。",
+		L"· لوحة بيانو …… طبقة الصوت على مفاتيح.",
+		L"· Пианоролл …… высота звука на клавиатуре.",
+		L"· Klavierrolle …… Tonhöhe live als Tastatur.",
+		L"· Piano roll …… altura ao vivo no teclado.",
+		L"· Pianorol …… toonhoogte live op toetsenbord.",
+		L"· Rolka pianina …… wysokość dźwięku na klawiaturze.",
+		L"· Piyano rulosu …… canlı perdeyi klavyede gösterir.")); y += lh + 4;
+
+	title(L, y, LL14(L"途中保存・表示", L"Resume / display", L"Reprise / affichage", L"Ripresa / display",
+		L"Reanudar / pantalla", L"이어듣기·표시", L"续播/显示", L"استئناف / عرض",
+		L"Возобновление / вид", L"Fortsetzen / Anzeige", L"Retomar / exibição", L"Hervatten / weergave",
+		L"Wznów / widok", L"Sürdür / görünüm"));
+	y += titleLh;
+	body(L, y, LL14(L"・再生位置を保存 + 音源 / DShow …… 内蔵音源・動画で停止位置を記憶。",
+		L"· Save position + Audio / DShow …… remember stop point for built-in & video.",
+		L"· Position + Audio / DShow …… mémoriser l'arrêt (intégré & vidéo).",
+		L"· Posizione + Audio / DShow …… ricorda lo stop (interno & video).",
+		L"· Posición + Audio / DShow …… recordar parada (interno y vídeo).",
+		L"· 재생 위치 저장 + 음원/DShow …… 내장·동영상 정지 위치 기억.",
+		L"· 保存位置 + 音源/DShow …… 记住内置与视频的停止位置。",
+		L"· حفظ الموضع + صوت/DShow …… تذكر موضع الإيقاف.",
+		L"· Позиция + Аудио / DShow …… помнить стоп для встроенных и видео.",
+		L"· Position + Audio / DShow …… Stopp für eingebaut & Video merken.",
+		L"· Posição + Áudio / DShow …… lembrar parada (interno e vídeo).",
+		L"· Positie + Audio / DShow …… onthoud stop (ingebouwd & video).",
+		L"· Pozycja + Audio / DShow …… zapamiętaj stop (wbudowane i wideo).",
+		L"· Konum + Ses / DShow …… dahili ve video durma noktasını kaydet.")); y += lh;
+	body(L, y, LL14(L"・ツールチップ表示 …… コントロールとリスト行の説明を出します。",
+		L"· Show tooltips …… tips for controls and list rows.",
+		L"· Info-bulles …… pour contrôles et lignes de liste.",
+		L"· Suggerimenti …… per controlli e righe.",
+		L"· Sugerencias …… para controles y filas.",
+		L"· 도구 설명 …… 컨트롤·목록 행 설명 표시.",
+		L"· 工具提示 …… 显示控件与列表行说明。",
+		L"· تلميحات …… لعناصر التحكم وصفوف القائمة.",
+		L"· Подсказки …… для элементов и строк списка.",
+		L"· Tooltips …… für Steuerelemente und Zeilen.",
+		L"· Dicas …… para controles e linhas.",
+		L"· Tooltips …… voor bediening en rijen.",
+		L"· Etykiety …… dla kontrolek i wierszy.",
+		L"· İpuçları …… denetimler ve satırlar için.")); y += lh;
+	body(L, y, LL14(L"・最小化、復帰 …… オン時はメイン画面とプレイリストを同時に最小化/復帰。",
+		L"· Minimize, restore …… when on, main + playlist minimize/restore together.",
+		L"· Réduire/restaurer …… principal + liste ensemble si coché.",
+		L"· Riduci/ripristina …… principale + playlist insieme.",
+		L"· Minimizar/restaurar …… principal + lista juntos.",
+		L"· 최소화·복원 …… 켜면 메인과 목록을 함께.",
+		L"· 最小化/还原 …… 开启时主窗口与列表同步。",
+		L"· تصغير/استعادة …… الرئيسية والقائمة معاً.",
+		L"· Свернуть/восстановить …… главное и список вместе.",
+		L"· Minimieren …… Hauptfenster + Playlist gemeinsam.",
+		L"· Minimizar …… principal + lista juntos.",
+		L"· Minimaliseren …… hoofd + lijst samen.",
+		L"· Minimalizuj …… główne + lista razem.",
+		L"· Küçült …… ana pencere + liste birlikte.")); y += lh + 6;
+
+	// mini toolbar region diagram
+	title(L, y, LL14(L"画面レイアウト", L"Layout map", L"Plan de la fenêtre", L"Mappa finestra",
+		L"Mapa de ventana", L"화면 레이아웃", L"界面布局", L"تخطيط النافذة",
+		L"Схема окна", L"Fensterlayout", L"Mapa da janela", L"Vensterindeling",
+		L"Układ okna", L"Pencere düzeni"));
+	y += titleLh;
+	const int gx = L, gy = y, gw = min(420, rc.Width() - L * 2), gh = lh * 3 + 16;
+	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+	const int pad = 4;
+	const int bw1 = (gw - pad * 5) / 4;
+	const int bh = gh - pad * 2 - lh - 2;
+	const int by = gy + pad;
+	dc.FillSolidRect(gx + pad, by, bw1, bh, RGB(70, 140, 90));
+	dc.FillSolidRect(gx + pad * 2 + bw1, by, bw1, bh, RGB(180, 140, 60));
+	dc.FillSolidRect(gx + pad * 3 + bw1 * 2, by, bw1, bh, RGB(55, 90, 140));
+	dc.FillSolidRect(gx + pad * 4 + bw1 * 3, by, bw1, bh, RGB(150, 70, 70));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + pad + 6, by + 4, LL14(L"移動", L"Move", L"Dépl.", L"Sposta", L"Mover", L"이동", L"移动", L"نقل", L"Перем.", L"Versch.", L"Mover", L"Verpl.", L"Przen.", L"Taşı"));
+	dc.TextOut(gx + pad * 2 + bw1 + 6, by + 4, LL14(L"検索", L"Find", L"Rech.", L"Cerca", L"Buscar", L"검색", L"搜索", L"بحث", L"Поиск", L"Suche", L"Pesq.", L"Zoek", L"Szukaj", L"Ara"));
+	dc.TextOut(gx + pad * 3 + bw1 * 2 + 6, by + 4, LL14(L"リスト", L"List", L"Liste", L"Lista", L"Lista", L"목록", L"列表", L"قائمة", L"Список", L"Liste", L"Lista", L"Lijst", L"Lista", L"Liste"));
+	dc.TextOut(gx + pad * 4 + bw1 * 3 + 6, by + 4, LL14(L"保存", L"Save", L"Sauver", L"Salva", L"Guardar", L"저장", L"保存", L"حفظ", L"Сохр.", L"Speich.", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
+	dc.SetTextColor(RGB(80, 80, 95));
+	dc.TextOut(gx + pad, gy + pad + bh + 2, LL14(
+		L"↑↓移動 | あいまい検索 | コンボ/改名/削除/ピアノ | 位置保存+音源",
+		L"↑↓ move | fuzzy find | combo/rename/del/piano | resume+audio",
+		L"↑↓ | recherche | combo/renommer/suppr./piano | reprise",
+		L"↑↓ | fuzzy | combo/rinomina/elim./piano | ripresa",
+		L"↑↓ | difusa | combo/renombrar/elim./piano | reanudar",
+		L"↑↓ 이동 | 퍼지 검색 | 콤보/이름/삭제/피아노 | 이어듣기",
+		L"↑↓移动 | 模糊搜索 | 组合/改名/删除/钢琴 | 续播",
+		L"↑↓ | بحث | قائمة/إعادة تسمية | استئناف",
+		L"↑↓ | поиск | комбо/имя/удал./piano | позиция",
+		L"↑↓ | Suche | Kombo/Name/Lösch./Piano | Position",
+		L"↑↓ | fuzzy | combo/renomear/excl./piano | retomar",
+		L"↑↓ | zoeken | combo/hernoemen/verw./piano | hervatten",
+		L"↑↓ | szukaj | combo/nazwa/usuń/piano | wznów",
+		L"↑↓ | ara | kombo/ad/sil/piyano | sürdür"));
+	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+	y = gy + gh + 4;
+	if (y < rc.bottom - 4) {
+		muted(L, y, LL14(
+			L"右クリックメニューからも詳細操作や「操作ガイド」を開けます。",
+			L"Right-click the list for more actions and this guide.",
+			L"Clic droit sur la liste pour plus d'actions et ce guide.",
+			L"Tasto destro sulla lista per altre azioni e questa guida.",
+			L"Clic derecho en la lista para más acciones y esta guía.",
+			L"목록 우클릭으로 상세 조작과 이 가이드를 열 수 있습니다.",
+			L"右键列表可进行更多操作并打开本指南。",
+			L"انقر يميناً على القائمة لمزيد من الإجراءات وهذا الدليل.",
+			L"ПКМ по списку — доп. действия и это руководство.",
+			L"Rechtsklick auf die Liste für mehr Aktionen und diesen Guide.",
+			L"Clique direito na lista para mais ações e este guia.",
+			L"Rechtsklik op de lijst voor meer acties en deze gids.",
+			L"PPM na liście — więcej akcji i ten przewodnik.",
+			L"Listede sağ tık ile daha fazla işlem ve bu kılavuz."));
+	}
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
 CPlayList::CPlayList(CWnd* pParent /*=NULL*/)
 	: CCustomBlurDialogBase(CPlayList::IDD, pParent)
 {
@@ -238,6 +582,7 @@ void CPlayList::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_BUTTON3, m_namechage);
 	DDX_Control(pDX, IDC_PLAYDELETE, m_listdelete);
 	DDX_Control(pDX, IDC_PIANOROLL, m_pianorollBtn);
+	DDX_Control(pDX, IDC_PL_HELP, m_help);
 }
 
 
@@ -282,6 +627,8 @@ BEGIN_MESSAGE_MAP(CPlayList, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_BUTTON3, &CPlayList::OnBnClickedButton3)
 	ON_BN_CLICKED(IDC_PLAYDELETE, &CPlayList::OnBnClickedPlaydelete)
 	ON_BN_CLICKED(IDC_PIANOROLL, &CPlayList::OnBnClickedPianoroll)
+	ON_BN_CLICKED(IDC_PL_HELP, &CPlayList::OnBnClickedHelp)
+	ON_WM_DESTROY()
 #if CCUSTOM_AERO_SUPPORT
 	ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
@@ -423,6 +770,7 @@ BOOL CPlayList::OnInitDialog()
 	addTip(IDC_PLAYDELETE, LL14(L"表示されているプレイリストを削除します。\n※削除したものは復活できないので注意ください。", L"Delete the displayed playlist.\n*Deleted playlists cannot be recovered.", L"Supprimer la liste affichee.\n*Les listes supprimees ne peuvent pas etre recuperees.", L"Elimina la playlist visualizzata.\n*Le playlist eliminate non possono essere recuperate.", L"Eliminar la lista mostrada.\n*Las listas eliminadas no se pueden recuperar.", L"표시된 재생 목록 삭제.\n*삭제 후 복구 불가.", L"删除显示的播放列表。\n*删除后无法恢复。", L"حذف قائمة التشغيل المعروضة.\n*لا يمكن استرداد المحذوفة.", L"Удалить отображаемый плейлист.\n*Удалённые плейлисты восстановить нельзя.", L"Angezeigte Playlist loschen.\n*Geloschte Playlists konnen nicht wiederhergestellt werden.", L"Excluir lista exibida.\n*Listas excluidas nao podem ser recuperadas.", L"Getoonde playlist verwijderen.\n*Verwijderde playlists kunnen niet worden hersteld.", L"Usuń wyświetlaną listę.\n*Usuniętych list nie można odzyskać.", L"Gösterilen listeyi sil.\n*Silinen listeler geri alınamaz."));
 	addTip(IDC_PIANOROLL, LL14(L"簡易ピアノロール表示を開きます。\n再生中の音程を鍵盤状に表示します。", L"Open simple piano roll view.\nShows pitch of playing audio on a keyboard layout.", L"Ouvrir le rouleau piano simple.\nAffiche la hauteur du son en cours sur un clavier.", L"Apri rotolo pianoforte semplice.\nMostra l'altezza dell'audio in riproduzione su tastiera.", L"Abrir rollo de piano simple.\nMuestra el tono del audio en reproduccion en un teclado.", L"간이 피아노 롤 창을 엽니다.\n재생 중 음정을 건반 형태로 표시합니다.", L"打开简易钢琴卷帘。\n以键盘形式显示正在播放的音频音高。", L"فتح لوحة البيانو البسيطة.\nيعرض طبقة الصوت على شكل لوحة مفاتيح.", L"Открыть простой пианоролл.\nПоказывает высоту звука на клавиатуре.", L"Einfache Klavierrolle offnen.\nZeigt Tonhohe als Tastatur.", L"Abrir rolo de piano simples.\nMostra altura do audio em teclado.", L"Eenvoudige pianorol openen.\nToont toonhoogte op een toetsenbord.", L"Otworz prosta rolke pianina.\nPokazuje wysokosc dzwieku na klawiaturze.", L"Basit piyano rulosunu ac.\nCalan sesin perdesini klavye duzeninde gosterir."));
 	addTip(IDC_EDIT2, LL14(L"あいまい検索のキーワードを入力します。\n上下の検索ボタンでリスト内を検索します。", L"Enter fuzzy search keyword.\nUse search buttons above/below to find in list.", L"Saisir le mot-cle de recherche floue.\nUtilisez les boutons pour chercher dans la liste.", L"Inserisci parola chiave ricerca fuzzy.\nUsa i pulsanti per cercare nella lista.", L"Introduzca palabra clave de busqueda difusa.\nUse los botones para buscar en la lista.", L"퍼지 검색 키워드를 입력합니다.\n위/아래 검색 버튼으로 목록을 검색합니다.", L"输入模糊搜索关键字。\n用上下搜索按钮在列表中查找。", L"أدخل كلمة البحث الغامض.\nاستخدم أزرار البحث للعثور في القائمة.", L"Введите ключевое слово нечеткого поиска.\nКнопками ищите в списке.", L"Suchbegriff fur Fuzzy-Suche eingeben.\nMit Suchtasten in der Liste suchen.", L"Digite palavra-chave de pesquisa fuzzy.\nUse os botoes para buscar na lista.", L"Voer fuzzy-zoekterm in.\nGebruik zoekknoppen in de lijst.", L"Wpisz slowo kluczowe wyszukiwania rozmytego.\nPrzyciskami szukaj na liscie.", L"Bulanik arama anahtar kelimesini girin.\nListede aramak icin arama dugmelerini kullanin."));
+	addTip(IDC_PL_HELP, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 //	m_lc.SetMaxTipWidth(500)
 	DWORD dwExStyle = m_lc.GetExtendedStyle();
@@ -546,10 +894,15 @@ BOOL CPlayList::OnInitDialog()
 	m_findup.SetFlat(TRUE);
 	m_finddown.SetIcon(IDR_UP);
 	m_finddown.SetFlat(TRUE);
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
 	ScheduleRefreshNavControls();
 
 	EnableMainWindowLock(&savedata.playlistMainLock);
 	CCC_MainLockBringToFront(m_hWnd);
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
 	}
@@ -581,6 +934,42 @@ void CPlayList::OnNcDestroy()
 
 	// TODO: ここにメッセージ ハンドラ コードを追加します。
 	killw1=1;
+}
+
+void CPlayList::OnDestroy()
+{
+	if (g_plHelpDlg && ::IsWindow(g_plHelpDlg->GetSafeHwnd()))
+		g_plHelpDlg->DestroyWindow();
+	CCustomBlurDialogBase::OnDestroy();
+}
+
+void CPlayList::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CPlayList::ShowHelpSheet()
+{
+	if (g_plHelpDlg && ::IsWindow(g_plHelpDlg->GetSafeHwnd())) {
+		g_plHelpDlg->ShowWindow(SW_SHOW);
+		g_plHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_plHelpDlg && !::IsWindow(g_plHelpDlg->GetSafeHwnd()))
+		g_plHelpDlg = nullptr;
+	CPlHelpDlg* dlg = new CPlHelpDlg(this, nullptr);
+	if (!dlg->Create(IDD_PL_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_plHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CPlayList::OnBnClickedHelp()
+{
+	ShowHelpSheet();
 }
 
 BOOL CPlayList::DestroyWindow()
@@ -1868,11 +2257,19 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 		}
 	}
 
+	menu.AppendMenu(MF_SEPARATOR);
+	menu.AppendMenu(MF_STRING, ID_HELP_SHOWSHEET,
+		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
+			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
+			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
+			L"Przewodnik", L"İşlem kılavuzu"));
+
 	return (int)menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RETURNCMD, pt.x, pt.y, pOwner);
 }
 
 void CPlayList::HandleTrackContextCmd(int cmd)
 {
+	if (cmd == ID_HELP_SHOWSHEET) { ShowHelpSheet(); return; }
 	if (cmd == PL_CTX_INFO) OnList();
 	else if (cmd == PL_CTX_WAV) OnPopWavExport();
 	else if (cmd == PL_CTX_MICMIX) {
@@ -7355,6 +7752,10 @@ void CPlayList::OnSize(UINT nType, int cx, int cy)
 	CCustomBlurDialogBase::OnSize(nType, cx, cy);
 
 	// TODO: ここにメッセージ ハンドラ コードを追加します。
+	if (nType != SIZE_MINIMIZED) {
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
 	RECT r;
 	GetClientRect(&r);
 	if( ::IsWindow( this->GetSafeHwnd()) == TRUE &&  this->IsWindowVisible() == TRUE){

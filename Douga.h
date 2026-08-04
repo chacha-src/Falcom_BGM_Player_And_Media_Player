@@ -47,7 +47,7 @@ public:
 	CCustomSliderCtrl m_vol;
 	CCustomStatic m_time, m_volL, m_volVal, m_info;
 	CCustomStandardButton m_prev, m_rew, m_play, m_pause, m_stop, m_ff, m_next;
-	CCustomStandardButton m_fade, m_mute, m_fs, m_sz1, m_sz15, m_sz2;
+	CCustomStandardButton m_fade, m_mute, m_fs, m_sz1, m_sz15, m_sz2, m_help;
 	CToolTipCtrl m_tip;
 
 	void OnBnPrev();
@@ -63,6 +63,7 @@ public:
 	void OnBnSz1();
 	void OnBnSz15();
 	void OnBnSz2();
+	void OnBnHelp();
 
 protected:
 	CDouga* m_owner;
@@ -323,6 +324,9 @@ public:
 	afx_msg void OnDougaMenuAspect();
 	afx_msg void OnDougaMenuSpeed(UINT nID);
 	void ApplyDougaTopmost();
+	void ShowHelpSheet();
+	void DestroyHelpSheet();
+	afx_msg void OnHelpShowSheet();
 };
 
 /////////////////////////////////////////////////////////////////////////////

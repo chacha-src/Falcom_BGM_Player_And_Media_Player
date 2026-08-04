@@ -37,10 +37,284 @@ static float PrTuneF(int pct, float defVal)
 	return defVal * (float)PrTuneClampPct(pct) / 100.0f;
 }
 
+
+namespace {
+
+class CPrHelpDlg : public CDialog
+{
+public:
+	enum { IDD = IDD_PR_HELP };
+	explicit CPrHelpDlg(CWnd* pParent = nullptr)
+		: CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CPrHelpDlg* g_prHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CPrHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CPrHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"ピアノロール操作ガイド", L"Piano Roll Guide", L"Guide piano roll", L"Guida piano roll",
+		L"Guía de piano roll", L"피아노롤 가이드", L"钢琴卷帘指南", L"دليل لفة البيانو",
+		L"Руководство piano roll", L"Piano-Roll-Anleitung", L"Guia piano roll", L"Piano roll-gids",
+		L"Przewodnik piano roll", L"Piano roll kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CPrHelpDlg::OnOK() { DestroyWindow(); }
+void CPrHelpDlg::OnCancel() { DestroyWindow(); }
+void CPrHelpDlg::OnClose() { DestroyWindow(); }
+
+void CPrHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_prHelpDlg == this)
+		g_prHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CPrHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CPrHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"簡易ピアノロール操作ガイド", L"Simple Piano Roll — Guide", L"Piano roll simple — Guide", L"Piano roll semplice — Guida",
+		L"Piano roll simple — Guía", L"간이 피아노롤 — 가이드", L"简易钢琴卷帘 — 指南", L"لفة بيانو بسيطة — دليل",
+		L"Простой piano roll — руководство", L"Einfache Klavierrolle — Guide", L"Piano roll simples — Guia", L"Eenvoudige pianorol — Gids",
+		L"Prosta rolka — przewodnik", L"Basit piyano rulosu — kılavuz"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"再生音声からノートを推定し、鍵盤とロールで同期表示します（MIDI 入力ではありません）。",
+		L"Estimates notes from playback audio and syncs keys + roll (not MIDI input).",
+		L"Estime les notes depuis l'audio et synchronise clavier + roll (pas MIDI).",
+		L"Stima le note dall'audio e sincronizza tasti + roll (non MIDI).",
+		L"Estima notas del audio y sincroniza teclado + roll (no es MIDI).",
+		L"재생 오디오에서 노트를 추정해 건반·롤을 동기 표시(MIDI 입력 아님).",
+		L"从播放音频估计音符，并同步键盘与卷帘（非 MIDI 输入）。",
+		L"يقدّر النغمات من الصوت ويزامن المفاتيح واللفة (ليس إدخال MIDI).",
+		L"Оценивает ноты из аудио и синхронизирует клавиши и ролл (не MIDI).",
+		L"Schätzt Noten aus Audio und synchronisiert Tasten + Roll (kein MIDI).",
+		L"Estima notas do áudio e sincroniza teclas + roll (não é MIDI).",
+		L"Schat noten uit audio en synchroniseert toetsen + roll (geen MIDI).",
+		L"Szacuje nuty z audio i synchronizuje klawisze + rolkę (to nie MIDI).",
+		L"Çalmadan nota tahmin eder; tuşlar + rulo senkron (MIDI girişi değil)."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"表示と速度", L"View & speed", L"Affichage et vitesse", L"Vista e velocità",
+		L"Vista y velocidad", L"표시와 속도", L"显示与速度", L"العرض والسرعة",
+		L"Вид и скорость", L"Ansicht & Tempo", L"Vista e velocidade", L"Weergave & snelheid",
+		L"Widok i prędkość", L"Görünüm ve hız"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・表示モード …… 通常(2D) / 簡易3D。3D はドラッグで視点、ホイールでズーム",
+		L"· View …… Normal (2D) / Soft 3D. In 3D: drag to orbit, wheel to zoom",
+		L"· Vue …… Normal (2D) / 3D. En 3D : glisser / molette",
+		L"· Vista …… Normale (2D) / 3D. In 3D: trascina / rotella",
+		L"· Vista …… Normal (2D) / 3D. En 3D: arrastrar / rueda",
+		L"· 표시 …… 일반(2D) / 간이3D. 3D는 드래그·휠 줌",
+		L"· 显示 …… 普通(2D) / 简易3D。3D 可拖动视角、滚轮缩放",
+		L"· العرض …… عادي (2D) / 3D. في 3D: سحب / عجلة",
+		L"· Вид …… обычный (2D) / 3D. В 3D: перетаскивание / колесо",
+		L"· Ansicht …… Normal (2D) / 3D. In 3D: ziehen / Rad",
+		L"· Vista …… Normal (2D) / 3D. Em 3D: arrastar / roda",
+		L"· Weergave …… Normaal (2D) / 3D. In 3D: slepen / wiel",
+		L"· Widok …… zwykły (2D) / 3D. W 3D: przeciągnij / kółko",
+		L"· Görünüm …… Normal (2D) / 3B. 3B'de sürükle / tekerlek")); y += lh;
+	body(L, y, LL14(
+		L"・鍵盤レンジ …… 88鍵(A0〜) / 108鍵。ノート名の表示切替あり",
+		L"· Key range …… 88 keys (A0–) / 108 keys. Toggle note names",
+		L"· Clavier …… 88 touches (A0–) / 108. Noms de notes on/off",
+		L"· Tastiera …… 88 tasti (A0–) / 108. Nomi note on/off",
+		L"· Teclado …… 88 teclas (A0–) / 108. Nombres on/off",
+		L"· 건반 …… 88건(A0~) / 108건. 음이름 표시 토글",
+		L"· 键盘 …… 88键(A0–) / 108键。可开关音名",
+		L"· المفاتيح …… 88 (A0–) / 108. إظهار أسماء النغمات",
+		L"· Клавиши …… 88 (A0–) / 108. Имена нот вкл/выкл",
+		L"· Tastatur …… 88 (A0–) / 108. Notennamen ein/aus",
+		L"· Teclado …… 88 (A0–) / 108. Nomes das notas on/off",
+		L"· Toetsen …… 88 (A0–) / 108. Notennamen aan/uit",
+		L"· Klawiatura …… 88 (A0–) / 108. Nazwy nut wł./wył.",
+		L"· Klavye …… 88 (A0–) / 108. Nota adları aç/kapa")); y += lh;
+	body(L, y, LL14(
+		L"・流れる速度 …… 右クリックで x0.25〜x2.0。フリーズでスクロールだけ止められます",
+		L"· Scroll speed …… right-click x0.25–x2.0. Freeze stops scrolling only",
+		L"· Vitesse …… clic droit x0.25–x2.0. Gel = arrêt du défilement",
+		L"· Velocità …… destro x0.25–x2.0. Congela ferma lo scorrimento",
+		L"· Velocidad …… clic der. x0.25–x2.0. Congelar detiene el scroll",
+		L"· 스크롤 속도 …… 우클릭 x0.25~x2.0. 정지는 스크롤만 멈춤",
+		L"· 滚动速度 …… 右键 x0.25–x2.0。冻结只停滚动",
+		L"· السرعة …… يمين x0.25–x2.0. التجميد يوقف التمرير فقط",
+		L"· Скорость …… ПКМ x0.25–x2.0. Заморозка останавливает прокрутку",
+		L"· Tempo …… Rechtsklick x0.25–x2.0. Freeze stoppt nur Scroll",
+		L"· Velocidade …… direito x0.25–x2.0. Congelar para só o scroll",
+		L"· Snelheid …… rechtsklik x0.25–x2.0. Bevriezen stopt alleen scroll",
+		L"· Prędkość …… PPM x0.25–x2.0. Zamroź zatrzymuje przewijanie",
+		L"· Hız …… sağ tık x0.25–x2.0. Dondur yalnızca kaydırmayı durdurur")); y += lh + 2;
+
+	// mini roll diagram
+	{
+		const int gx = L, gy = y, gw = min(300, rc.Width() - L * 2), gh = lh * 3 + 6;
+		dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+		for (int row = 0; row < 5; ++row) {
+			const int yy = gy + 4 + row * (gh / 6);
+			dc.FillSolidRect(gx + 20 + row * 12, yy, 36 + (row % 3) * 10, 6, RGB(90, 140, 200));
+		}
+		dc.FillSolidRect(gx + 4, gy + gh - lh - 2, gw - 8, lh, RGB(235, 235, 240));
+		dc.SetTextColor(RGB(55, 55, 70));
+		dc.TextOut(gx + 10, gy + gh - lh, L"A0  C  E  G  B …");
+		dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+		y = gy + gh + 4;
+	}
+
+	title(L, y, LL14(L"検出とチューニング", L"Detection & tuning", L"Détection et réglage", L"Rilevamento e regolazione",
+		L"Detección y ajuste", L"검출과 튜닝", L"检测与调参", L"الكشف والضبط",
+		L"Обнаружение и настройка", L"Erkennung & Feintuning", L"Detecção e ajuste", L"Detectie & afstemming",
+		L"Wykrywanie i strojenie", L"Algılama ve ayar"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・検出オプション …… 再アタック / 打撃音・倍音ゴースト抑制 / 音色プロファイル",
+		L"· Detection …… re-attack / impulsive & harmonic ghost suppress / timbre profile",
+		L"· Détection …… réattaque / fantômes / profil de timbre",
+		L"· Rilevamento …… riattacco / fantasmi / profilo timbrico",
+		L"· Detección …… reataque / fantasmas / perfil tímbrico",
+		L"· 검출 …… 리어택 / 타격·배음 고스트 억제 / 음색 프로파일",
+		L"· 检测 …… 再起音 / 打击与泛音幽灵抑制 / 音色轮廓",
+		L"· الكشف …… إعادة هجوم / أشباح / ملف الطابع",
+		L"· Обнаружение …… реатака / призраки / профиль тембра",
+		L"· Erkennung …… Re-Attack / Geister / Klangprofil",
+		L"· Detecção …… reataque / fantasmas / perfil tímbrico",
+		L"· Detectie …… her-aanval / spoken / timbreprofiel",
+		L"· Wykrywanie …… reatak / duchy / profil barwy",
+		L"· Algılama …… yeniden saldırı / hayalet / timbre profili")); y += lh;
+	body(L, y, LL14(
+		L"・検出パラメータ調整… …… 感度を % で細かく調整する別ダイアログを開きます",
+		L"· Detection parameter tuning… …… opens a dialog to fine-tune sensitivity (%)",
+		L"· Paramètres de détection… …… dialogue de sensibilité (%)",
+		L"· Parametri rilevamento… …… dialogo sensibilità (%)",
+		L"· Parámetros de detección… …… diálogo de sensibilidad (%)",
+		L"· 검출 파라미터 조정… …… 감도를 %로 미세 조정하는 대화상자",
+		L"· 检测参数调整… …… 打开以 % 微调灵敏度的对话框",
+		L"· معلمات الكشف… …… حوار لضبط الحساسية (%)",
+		L"· Параметры… …… диалог тонкой настройки чувствительности (%)",
+		L"· Erkennungsparameter… …… Dialog für Empfindlichkeit (%)",
+		L"· Parâmetros… …… diálogo de sensibilidade (%)",
+		L"· Detectieparameters… …… dialoog voor gevoeligheid (%)",
+		L"· Parametry… …… okno czułości (%)",
+		L"· Algılama parametreleri… …… hassasiyet (%) iletişim kutusu")); y += lh + 4;
+
+	title(L, y, LL14(L"右クリックメニュー", L"Context menu", L"Menu contextuel", L"Menu contestuale",
+		L"Menú contextual", L"우클릭 메뉴", L"右键菜单", L"قائمة السياق",
+		L"Контекстное меню", L"Kontextmenü", L"Menu de contexto", L"Contextmenu",
+		L"Menu kontekstowe", L"Bağlam menüsü"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・記号凡例 / 表現記号 / レベルメーター / 常に手前 / 表示クリア",
+		L"· Symbol legend / expression marks / level meter / always on top / clear",
+		L"· Légende / expression / niveau / premier plan / effacer",
+		L"· Legenda / espressione / livello / primo piano / cancella",
+		L"· Leyenda / expresión / nivel / siempre visible / borrar",
+		L"· 기호 범례 / 표현 기호 / 레벨 미터 / 항상 위 / 지우기",
+		L"· 符号图例 / 奏法记号 / 电平表 / 置顶 / 清除",
+		L"· دليل الرموز / التعبير / المستوى / دائماً أعلى / مسح",
+		L"· Легенда / экспрессия / уровень / поверх / очистить",
+		L"· Legende / Ausdruck / Pegel / immer oben / leeren",
+		L"· Legenda / expressão / nível / sempre no topo / limpar",
+		L"· Legenda / expressie / niveau / altijd boven / wissen",
+		L"· Legenda / ekspresja / poziom / zawsze na wierzchu / wyczyść",
+		L"· Sembol / ifade / seviye / her zaman üstte / temizle")); y += lh;
+	body(L, y, LL14(
+		L"・ショートカット …… V=2D/3D切替、N=ノート名。ウィンドウは端でリサイズ可",
+		L"· Shortcuts …… V=2D/3D, N=note names. Resize via window edges",
+		L"· Raccourcis …… V=2D/3D, N=noms. Redimensionner aux bords",
+		L"· Scorciatoie …… V=2D/3D, N=nomi. Ridimensiona ai bordi",
+		L"· Atajos …… V=2D/3D, N=nombres. Redimensione en bordes",
+		L"· 단축키 …… V=2D/3D, N=음이름. 창 가장자리로 크기 조절",
+		L"· 快捷键 …… V=2D/3D，N=音名。可用窗口边缘缩放",
+		L"· اختصارات …… V=2D/3D، N=أسماء. غيّر الحجم من الحواف",
+		L"· Ярлыки …… V=2D/3D, N=имена. Размер — за края окна",
+		L"· Kürzel …… V=2D/3D, N=Namen. Größe an Fensterrändern",
+		L"· Atalhos …… V=2D/3D, N=nomes. Redimensione nas bordas",
+		L"· Sneltoetsen …… V=2D/3D, N=namen. Formaat aan randen",
+		L"· Skróty …… V=2D/3D, N=nazwy. Rozmiar na krawędziach",
+		L"· Kısayollar …… V=2D/3B, N=adlar. Kenarlardan boyutlandır")); y += lh + 2;
+	muted(L, y, LL14(
+		L"キャプションの「?」または右クリック「操作ガイド」でもこの画面を開けます。",
+		L"Open this sheet from caption \"?\" or right-click → Operation guide.",
+		L"Ouvrir via « ? » ou clic droit → Guide d'utilisation.",
+		L"Apri da « ? » o destro → Guida operativa.",
+		L"Ábralo con « ? » o clic der. → Guía de operación.",
+		L"캡션「?」또는 우클릭「조작 가이드」로도 열 수 있습니다.",
+		L"也可通过标题栏「?」或右键「操作指南」打开。",
+		L"افتح من «؟» أو يمين ← دليل التشغيل.",
+		L"Откройте через «?» или ПКМ → Руководство.",
+		L"Öffnen über „?“ oder Rechtsklick → Bedienungsanleitung.",
+		L"Abra pelo «?» ou direito → Guia de operação.",
+		L"Open via «?» of rechtsklik → Handleiding.",
+		L"Otwórz przez «?» lub PPM → Przewodnik.",
+		L"Başlık «?» veya sağ tık → İşlem kılavuzu ile açın."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
 IMPLEMENT_DYNAMIC(CPianoRoll, CCustomBlurDialogExBase)
 
-// pick fix 5 ベースを低音/中高音(一体)の2帯に整理。
-// BAND_MID_END はレーン色用のみ。追加パッチ関数は置かない。
+// pick fix 5 ベースを低音/中高音(一体)の2帯に整理。// BAND_MID_END はレーン色用のみ。追加パッチ関数は置かない。
 namespace Cfg
 {
     // piano roll3: 基音ピック + NormalizeDisplayPeak + 包絡ホールド
@@ -599,9 +873,11 @@ void CPianoRoll::ResumePlaybackFeed()
     m_feedEnabled = true;
 }
 
+
 void CPianoRoll::DoDataExchange(CDataExchange* pDX)
 {
     CCustomBlurDialogExBase::DoDataExchange(pDX);
+    DDX_Control(pDX, IDC_PR_HELP, m_help);
 }
 
 BEGIN_MESSAGE_MAP(CPianoRoll, CCustomBlurDialogExBase)
@@ -611,7 +887,10 @@ BEGIN_MESSAGE_MAP(CPianoRoll, CCustomBlurDialogExBase)
     ON_WM_MOVE()
     ON_WM_SHOWWINDOW()
     ON_WM_CLOSE()
+    ON_WM_DESTROY()
     ON_WM_CONTEXTMENU()
+    ON_BN_CLICKED(IDC_PR_HELP, &CPianoRoll::OnBnClickedHelp)
+    ON_COMMAND(ID_HELP_SHOWSHEET, &CPianoRoll::OnBnClickedHelp)
     ON_COMMAND_RANGE(IDM_ROLL_SPEED_BASE, IDM_ROLL_SPEED_BASE + ROLL_SPEED_COUNT - 1, &CPianoRoll::OnRollSpeedCmd)
     ON_COMMAND(IDM_ROLL_FREEZE, &CPianoRoll::OnToggleFreeze)
     ON_COMMAND(IDM_ROLL_CLEAR, &CPianoRoll::OnClearDisplay)
@@ -709,16 +988,34 @@ BOOL CPianoRoll::OnInitDialog()
             100, 150, 800, 450,
             SWP_NOOWNERZORDER | (m_alwaysOnTop ? 0 : SWP_NOZORDER));
 
+
     EnsureAnalysisTables(m_inputSampleRate);
     StartAnalysisWorker();
     UpdatePianoRollTimer();
     m_feedEnabled = true;
     m_paintDisabled = false;
     m_historyDirty = true;
+
+    m_help.SetWindowText(L"?");
+    m_help.SetFlat(TRUE);
+    m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+    LayoutHelpBtn();
+    if (m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX)) {
+        if (m_help.GetSafeHwnd())
+            m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
+        m_tooltip.SetDelayTime(TTDT_INITIAL, 400);
+        m_tooltip.SetDelayTime(TTDT_RESHOW, 120);
+        m_tooltip.SetDelayTime(TTDT_AUTOPOP, 12000);
+        m_tooltip.SendMessage(TTM_SETMAXTIPWIDTH, 0, 460);
+        m_tooltip.Activate(TRUE);
+    }
+    EnableToolTips(TRUE);
+
     EnableMainWindowLock(&savedata.pianorollMainLock, TRUE);
+    CCC_CaptionLayout(m_hWnd);
+    LayoutHelpBtn();
     return TRUE;
 }
-
 float CPianoRoll::MidiToFreq(int midi)
 {
     return 440.0f * powf(2.0f, (midi - 69) / 12.0f);
@@ -2116,10 +2413,17 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
             L"Regola parametri rilevamento...", L"Ajustar parametros de deteccion...", L"검출 파라미터 조정...",
             L"检测参数调整...", L"ضبط معلمات الكشف...", L"Настройка параметров...", L"Erkennungsparameter...",
             L"Ajustar parametros...", L"Detectieparameters...", L"Dostosuj parametry...", L"Algilama parametreleri..."));
+
     menu.AppendMenu(MF_STRING | (m_frozen ? MF_CHECKED : 0), IDM_ROLL_FREEZE,
         LL14(L"フリーズ", L"Freeze", L"Gel", L"Congela", L"Congelar", L"정지", L"冻结", L"تجميد", L"Заморозка", L"Einfrieren", L"Congelar", L"Bevriezen", L"Zamroz", L"Dondur"));
     menu.AppendMenu(MF_STRING, IDM_ROLL_CLEAR,
         LL14(L"表示をクリア", L"Clear display", L"Effacer l'affichage", L"Cancella visualizzazione", L"Borrar pantalla", L"표시 지우기", L"清除显示", L"مسح العرض", L"Очистить экран", L"Anzeige leeren", L"Limpar exibicao", L"Weergave wissen", L"Wyczysc wyswietlacz", L"Goruntuyu temizle"));
+    menu.AppendMenu(MF_SEPARATOR);
+    menu.AppendMenu(MF_STRING, ID_HELP_SHOWSHEET,
+        LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
+            L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
+            L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
+            L"Przewodnik", L"İşlem kılavuzu"));
 
     if (point.x == -1 && point.y == -1) {
         CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
@@ -2127,7 +2431,6 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
     }
     menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y, this);
 }
-
 int CPianoRoll::HistoryCountLocked() const
 {
     return m_historyCount;
@@ -4755,6 +5058,7 @@ void CPianoRoll::OnTimer(UINT_PTR nIDEvent)
     CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
 
+
 void CPianoRoll::OnSize(UINT nType, int cx, int cy)
 {
     CCustomBlurDialogExBase::OnSize(nType, cx, cy);
@@ -4767,9 +5071,12 @@ void CPianoRoll::OnSize(UINT nType, int cx, int cy)
     if (nType != SIZE_MINIMIZED && CCC_IsAeroEnabled())
         CCC_RefreshDwmBlur(m_hWnd);
 #endif
+    if (nType != SIZE_MINIMIZED) {
+        CCC_CaptionLayout(m_hWnd);
+        LayoutHelpBtn();
+    }
     InvalidateRegions(true, true);
 }
-
 void CPianoRoll::OnMove(int x, int y)
 {
     CCustomBlurDialogExBase::OnMove(x, y);
@@ -4796,6 +5103,7 @@ void CPianoRoll::OnShowWindow(BOOL bShow, UINT nStatus)
     }
 }
 
+
 void CPianoRoll::OnClose()
 {
     DetachForDestroy();
@@ -4803,6 +5111,41 @@ void CPianoRoll::OnClose()
     DestroyWindow();
 }
 
+void CPianoRoll::OnDestroy()
+{
+    if (g_prHelpDlg && ::IsWindow(g_prHelpDlg->GetSafeHwnd()))
+        g_prHelpDlg->DestroyWindow();
+    CCustomBlurDialogExBase::OnDestroy();
+}
+
+void CPianoRoll::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CPianoRoll::ShowHelpSheet()
+{
+    if (g_prHelpDlg && ::IsWindow(g_prHelpDlg->GetSafeHwnd())) {
+        g_prHelpDlg->ShowWindow(SW_SHOW);
+        g_prHelpDlg->SetForegroundWindow();
+        return;
+    }
+    if (g_prHelpDlg && !::IsWindow(g_prHelpDlg->GetSafeHwnd()))
+        g_prHelpDlg = nullptr;
+    CPrHelpDlg* dlg = new CPrHelpDlg(nullptr);
+    if (!dlg->Create(IDD_PR_HELP, nullptr)) {
+        delete dlg;
+        return;
+    }
+    g_prHelpDlg = dlg;
+    dlg->ShowWindow(SW_SHOW);
+    dlg->SetForegroundWindow();
+}
+
+void CPianoRoll::OnBnClickedHelp()
+{
+    ShowHelpSheet();
+}
 // 簡易3D 表示中のドラッグで視点を回す。2D 表示中は何もせず基底へ渡すので、
 // 従来のウィンドウドラッグ/「メインに追従」チェックの挙動は変わらない。
 void CPianoRoll::OnLButtonDown(UINT nFlags, CPoint point)
@@ -4889,6 +5232,8 @@ BOOL CPianoRoll::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 
 BOOL CPianoRoll::PreTranslateMessage(MSG* pMsg)
 {
+    if (m_tooltip.GetSafeHwnd())
+        m_tooltip.RelayEvent(pMsg);
     // V=表示モード切替 / N=ノート名。修飾キー併用時と入力コントロール上では既定処理へ。
     bool textFocus = false;
     if (pMsg->message == WM_KEYDOWN) {

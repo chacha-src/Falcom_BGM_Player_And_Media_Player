@@ -89,11 +89,204 @@ extern ULONG oldw;
 static char THIS_FILE[] = __FILE__;
 #endif
 
+
 extern save savedata;
 CImageBase* renderbase;
 
-static void ReleaseRenderGrassBackdrop()
+namespace {
+
+class CRdHelpDlg : public CDialog
 {
+public:
+	enum { IDD = IDD_RD_HELP };
+	explicit CRdHelpDlg(CWnd* pParent = nullptr) : CDialog(IDD, pParent) {}
+protected:
+	virtual BOOL OnInitDialog();
+	virtual void PostNcDestroy();
+	virtual void OnOK();
+	virtual void OnCancel();
+	afx_msg void OnPaint();
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnClose();
+	DECLARE_MESSAGE_MAP()
+};
+
+static CRdHelpDlg* g_rdHelpDlg = nullptr;
+
+BEGIN_MESSAGE_MAP(CRdHelpDlg, CDialog)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_CLOSE()
+END_MESSAGE_MAP()
+
+BOOL CRdHelpDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	SetWindowText(LL14(
+		L"レンダリング操作ガイド", L"Rendering Guide", L"Guide de rendu", L"Guida rendering",
+		L"Guía de renderizado", L"렌더링 가이드", L"渲染指南", L"دليل العرض",
+		L"Руководство рендеринга", L"Rendering-Anleitung", L"Guia de renderização", L"Rendergids",
+		L"Przewodnik renderowania", L"Render kılavuzu"));
+	if (CWnd* pOk = GetDlgItem(IDOK))
+		pOk->SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
+			L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+	return TRUE;
+}
+
+void CRdHelpDlg::OnOK() { DestroyWindow(); }
+void CRdHelpDlg::OnCancel() { DestroyWindow(); }
+void CRdHelpDlg::OnClose() { DestroyWindow(); }
+
+void CRdHelpDlg::PostNcDestroy()
+{
+	CDialog::PostNcDestroy();
+	if (g_rdHelpDlg == this)
+		g_rdHelpDlg = nullptr;
+	delete this;
+}
+
+BOOL CRdHelpDlg::OnEraseBkgnd(CDC* pDC)
+{
+	CRect rc; GetClientRect(&rc);
+	pDC->FillSolidRect(rc, RGB(248, 248, 252));
+	return TRUE;
+}
+
+void CRdHelpDlg::OnPaint()
+{
+	CPaintDC dc(this);
+	CRect rc; GetClientRect(&rc);
+	const int footerH = 26;
+	rc.bottom -= footerH;
+	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	dc.SetBkMode(TRANSPARENT);
+	CFont* oldFont = dc.SelectObject(GetFont());
+
+	TEXTMETRIC tm{};
+	dc.GetTextMetrics(&tm);
+	const int lh = max(14, tm.tmHeight + tm.tmExternalLeading + 1);
+	const int titleLh = lh + 1;
+	CBrush frameBrush(RGB(130, 130, 150));
+
+	auto title = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(55, 45, 85));
+		dc.TextOut(x, y, t);
+	};
+	auto body = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(65, 65, 80));
+		dc.TextOut(x, y, t);
+	};
+	auto muted = [&](int x, int y, LPCTSTR t) {
+		dc.SetTextColor(RGB(100, 100, 115));
+		dc.TextOut(x, y, t);
+	};
+
+	int y = 6;
+	const int L = 10;
+	title(L, y, LL14(L"レンダリング操作ガイド", L"Rendering — Guide", L"Guide rendu", L"Guida rendering",
+		L"Guía renderizado", L"렌더링 가이드", L"渲染指南", L"دليل العرض",
+		L"Руководство рендеринга", L"Rendering-Guide", L"Guia renderização", L"Rendergids",
+		L"Przewodnik renderowania", L"Render kılavuzu"));
+	y += titleLh;
+	muted(L, y, LL14(
+		L"出力デバイス・バッファ・映像レンダラ・アクリルなど、再生まわりの総合設定です。詳細は各コントロールのツールチップも参照。",
+		L"Global playback settings: device, buffer, video renderer, acrylic. See control tooltips for detail.",
+		L"Réglages globaux: périphérique, tampon, rendu vidéo, acrylique. Voir aussi les info-bulles.",
+		L"Impostazioni globali: dispositivo, buffer, renderer, acrilico. Vedi anche i tooltip.",
+		L"Ajustes globales: dispositivo, búfer, renderizador, acrílico. Ver también tooltips.",
+		L"출력 장치·버퍼·영상 렌더러·아크릴 등 재생 종합 설정입니다. 각 툴팁도 참고하세요.",
+		L"播放综合设置：输出设备、缓冲、视频渲染器、亚克力等。各控件提示也有细节。",
+		L"إعدادات التشغيل العامة: الجهاز والمخزن والعارض والأكريليك. راجع أيضاً التلميحات.",
+		L"Общие настройки: устройство, буфер, рендерер, акрил. См. также подсказки.",
+		L"Globale Einstellungen: Geraet, Puffer, Video-Renderer, Acryl. Auch Tooltips beachten.",
+		L"Definições globais: dispositivo, buffer, renderer, acrílico. Veja também as dicas.",
+		L"Globale instellingen: apparaat, buffer, renderer, acryl. Zie ook tooltips.",
+		L"Ustawienia globalne: urządzenie, bufor, renderer, akryl. Zobacz też podpowiedzi.",
+		L"Genel oynatma ayarları: aygıt, tampon, video, akrilik. İpuçlarına da bakın."));
+	y += lh + 4;
+
+	title(L, y, LL14(L"音声出力", L"Audio output", L"Sortie audio", L"Uscita audio", L"Salida de audio", L"오디오 출력", L"音频输出", L"إخراج الصوت",
+		L"Аудиовыход", L"Audioausgabe", L"Saída de áudio", L"Audio-uitvoer", L"Wyjście audio", L"Ses çıkışı"));
+	y += titleLh;
+	body(L, y, LL14(L"・再生デバイス …… DirectSound 出力先", L"· Playback device …… DirectSound output target", L"· Périphérique …… sortie DirectSound", L"· Dispositivo …… uscita DirectSound",
+		L"· Dispositivo …… salida DirectSound", L"· 재생 장치 …… DirectSound 출력", L"· 播放设备 …… DirectSound 输出", L"· جهاز التشغيل …… مخرج DirectSound",
+		L"· Устройство …… вывод DirectSound", L"· Wiedergabegeraet …… DirectSound-Ausgabe", L"· Dispositivo …… saída DirectSound", L"· Apparaat …… DirectSound-uitvoer",
+		L"· Urządzenie …… wyjście DirectSound", L"· Oynatma aygıtı …… DirectSound çıkışı")); y += lh;
+	body(L, y, LL14(L"・割込間隔 …… バッファ処理の割り込み。短すぎると音飛びの原因", L"· Interrupt interval …… buffer timing; too short may glitch", L"· Intervalle …… timing tampon; trop court = saccades", L"· Intervallo …… timing buffer; troppo corto = salti",
+		L"· Intervalo …… temporización; muy corto = cortes", L"· 인터럽트 간격 …… 버퍼 타이밍. 너무 짧으면 끊김", L"· 中断间隔 …… 缓冲时序；过短可能跳音", L"· فاصل المقاطعة …… توقيت المخزن؛ القصير جداً يقطع",
+		L"· Интервал …… тайминг буфера; слишком мало — сбои", L"· Interrupt …… Puffer-Timing; zu kurz = Aussetzer", L"· Intervalo …… timing do buffer; curto demais falha", L"· Interrupt …… buffertiming; te kort = haperingen",
+		L"· Interwał …… timing bufora; za krótki = przeskoki", L"· Kesme aralığı …… tampon zamanlaması; çok kısa = atlama")); y += lh;
+	body(L, y, LL14(L"・MAXサンプル／24・32bit／アップスケール …… 出力形式の上限と変換", L"· Max sample / 24·32bit / upscale …… output format limits", L"· Échant. max / 24·32 bits / upscale …… format de sortie", L"· Camp. max / 24·32 bit / upscale …… formato uscita",
+		L"· Muestreo máx. / 24·32 bits / upscale …… formato", L"· MAX 샘플/24·32bit/업스케일 …… 출력 형식", L"· 最大采样/24·32bit/升频 …… 输出格式上限", L"· أقصى عينات/24·32بت/ترقية …… حدود الخرج",
+		L"· Макс. частота / 24·32 бит / апскейл …… формат", L"· Max. Rate / 24·32 Bit / Upscale …… Ausgabeformat", L"· Taxa máx. / 24·32 bits / upscale …… formato", L"· Max. sample / 24·32 bit / upscale …… formaat",
+		L"· Maks. próbk. / 24·32 bit / upscale …… format", L"· Maks. örnek / 24·32 bit / upscale …… çıkış biçimi")); y += lh + 4;
+
+	title(L, y, LL14(L"映像 / UI", L"Video / UI", L"Vidéo / UI", L"Video / UI", L"Vídeo / UI", L"영상 / UI", L"视频 / UI", L"فيديو / واجهة",
+		L"Видео / UI", L"Video / UI", L"Vídeo / UI", L"Video / UI", L"Wideo / UI", L"Video / UI"));
+	y += titleLh;
+	body(L, y, LL14(L"・EVR …… Vista以降の既定映像レンダラ（Indeo等はOFF推奨）", L"· EVR …… default video renderer on Vista+ (OFF for Indeo etc.)", L"· EVR …… rendu vidéo par défaut (Vista+; OFF pour Indeo)", L"· EVR …… renderer predefinito (Vista+; OFF per Indeo)",
+		L"· EVR …… renderizador predeterminado (Vista+; OFF para Indeo)", L"· EVR …… Vista+ 기본 렌더러(Indeo 등은 OFF)", L"· EVR …… Vista+ 默认渲染器（Indeo 等建议关）", L"· EVR …… عارض افتراضي (Vista+؛ أوقف لـ Indeo)",
+		L"· EVR …… рендерер по умолчанию (Vista+; выкл. для Indeo)", L"· EVR …… Standard-Renderer (Vista+; AUS bei Indeo)", L"· EVR …… renderer padrão (Vista+; OFF para Indeo)", L"· EVR …… standaardrenderer (Vista+; UIT voor Indeo)",
+		L"· EVR …… domyślny renderer (Vista+; WYŁ. dla Indeo)", L"· EVR …… varsayılan renderer (Vista+; Indeo için KAPALI)")); y += lh;
+	body(L, y, LL14(L"・デスクトップコンポジション …… Aero。OFFでも映像がきれいになる場合あり", L"· Desktop composition …… Aero; OFF may still look clean without EVR", L"· Composition bureau …… Aero; OFF peut rester net sans EVR", L"· Composizione …… Aero; OFF puo restare nitido senza EVR",
+		L"· Composición …… Aero; OFF puede verse bien sin EVR", L"· 데스크톱 컴포지션 …… Aero. OFF여도 화질이 좋을 수 있음", L"· 桌面合成 …… Aero；关闭时无 EVR 也可能清晰", L"· تركيب سطح المكتب …… Aero؛ قد يبدو جيداً بدون EVR",
+		L"· Композиция …… Aero; без неё видео может быть чётким", L"· Desktop-Komposition …… Aero; ohne sie oft trotzdem klar", L"· Composição …… Aero; OFF pode ficar nítido sem EVR", L"· Compositie …… Aero; UIT kan nog steeds scherp zijn",
+		L"· Kompozycja …… Aero; WYŁ. też może wyglądać dobrze", L"· Masaüstü birleşimi …… Aero; KAPALI da net olabilir")); y += lh;
+	body(L, y, LL14(L"・アクリルモード …… Win10以降の半透明ぼかし背景", L"· Acrylic mode …… translucent blurred background on Win10+", L"· Mode acrylique …… fond flou translucide (Win10+)", L"· Modalita acrilica …… sfondo sfocato (Win10+)",
+		L"· Modo acrílico …… fondo borroso (Win10+)", L"· 아크릴 모드 …… Win10+ 반투명 흐림 배경", L"· 亚克力模式 …… Win10+ 半透明模糊背景", L"· وضع الأكريليك …… خلفية ضبابية (Win10+)",
+		L"· Акрил …… полупрозрачный размытый фон (Win10+)", L"· Acryl …… transparenter Unschaerfe-Hintergrund (Win10+)", L"· Acrílico …… fundo desfocado (Win10+)", L"· Acryl …… doorzichtige wazige achtergrond (Win10+)",
+		L"· Akryl …… półprzezroczyste rozmyte tło (Win10+)", L"· Akrilik …… yarı saydam bulanık arka plan (Win10+)")); y += lh + 4;
+
+	const int gx = L, gy = y, gw = min(340, rc.Width() - L * 2), gh = lh * 2 + 12;
+	dc.FillSolidRect(gx, gy, gw, gh, RGB(245, 246, 250));
+	dc.FillSolidRect(gx + 4, gy + 6, 40, gh - 12, RGB(70, 140, 90));
+	dc.FillSolidRect(gx + 52, gy + 6, 44, gh - 12, RGB(180, 140, 60));
+	dc.FillSolidRect(gx + 104, gy + 6, 48, gh - 12, RGB(70, 110, 160));
+	dc.FillSolidRect(gx + 160, gy + 6, 52, gh - 12, RGB(150, 70, 70));
+	dc.SetTextColor(RGB(255, 255, 255));
+	dc.TextOut(gx + 10, gy + 8, L"DS");
+	dc.TextOut(gx + 58, gy + 8, L"Buf");
+	dc.TextOut(gx + 112, gy + 8, L"EVR");
+	dc.TextOut(gx + 168, gy + 8, L"Acrylic");
+	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
+	y = gy + gh + 6;
+
+	title(L, y, LL14(L"倍率 / その他", L"Scale / Other", L"Échelle / Autres", L"Scala / Altro", L"Escala / Otros", L"배율 / 기타", L"倍率 / 其他", L"المقياس / أخرى",
+		L"Масштаб / Прочее", L"Skalierung / Sonstiges", L"Escala / Outros", L"Schaal / Overig", L"Skala / Inne", L"Ölçek / Diğer"));
+	y += titleLh;
+	body(L, y, LL14(L"・SPC / mp3 / kpi 倍率 …… プラグイン出力ゲイン（EQで割れ抑制）", L"· SPC / mp3 / kpi scales …… plugin gain (EQ helps avoid clipping)", L"· Échelles SPC / mp3 / kpi …… gain plugin (EQ anti-clip)", L"· Scale SPC / mp3 / kpi …… gain plugin (EQ anti-clip)",
+		L"· Escalas SPC / mp3 / kpi …… ganancia (EQ anti-clip)", L"· SPC/mp3/kpi 배율 …… 플러그인 게인(EQ가 클리핑 완화)", L"· SPC/mp3/kpi 倍率 …… 插件增益（EQ 防削波）", L"· مقاييس SPC/mp3/kpi …… كسب المكوّن (EQ يمنع القص)",
+		L"· Множители SPC/mp3/kpi …… усиление (EQ против клиппинга)", L"· SPC/mp3/kpi-Skalierung …… Plugin-Gain (EQ gegen Clipping)", L"· Escalas SPC/mp3/kpi …… ganho (EQ anti-clip)", L"· SPC/mp3/kpi-schalen …… plugingain (EQ tegen clipping)",
+		L"· Skale SPC/mp3/kpi …… wzmocnienie (EQ przeciw przesterom)", L"· SPC/mp3/kpi ölçekleri …… eklenti kazancı (EQ kırpmayı azaltır)")); y += lh;
+	body(L, y, LL14(L"・表示間隔／コード間隔／スペアナ …… 描画負荷と見た目の調整", L"· Display / chord / spectrum …… tune draw load and look", L"· Affichage / accords / spectre …… charge et rendu", L"· Display / accordi / spettro …… carico e aspetto",
+		L"· Pantalla / acordes / espectro …… carga y aspecto", L"· 표시/코드/스펙 …… 그리기 부하와 모양 조정", L"· 显示/和弦/频谱 …… 调整绘制负载与外观", L"· العرض/الأكورد/الطيف …… ضبط الحمل والمظهر",
+		L"· Дисплей / аккорды / спектр …… нагрузка и вид", L"· Anzeige / Akkorde / Spektrum …… Last und Optik", L"· Exibição / acordes / espectro …… carga e aspeto", L"· Weergave / akkoorden / spectrum …… belasting en uiterlijk",
+		L"· Wyświetlanie / akordy / widmo …… obciążenie i wygląd", L"· Görüntü / akor / spektrum …… yük ve görünüm")); y += lh;
+	muted(L, y, LL14(
+		L"OKで保存して閉じる。キャンセルは変更を破棄。各項目の細かい注意はツールチップにあります。",
+		L"OK saves and closes. Cancel discards changes. Fine print is in the tooltips.",
+		L"OK enregistre et ferme. Annuler annule. Détails dans les info-bulles.",
+		L"OK salva e chiude. Annulla scarta. Dettagli nei tooltip.",
+		L"OK guarda y cierra. Cancelar descarta. Detalles en tooltips.",
+		L"OK는 저장 후 닫기. 취소는 변경 폐기. 세부 주의는 툴팁에 있습니다.",
+		L"OK 保存并关闭。取消丢弃更改。细节见各提示。",
+		L"موافق يحفظ ويغلق. إلغاء يتجاهل. التفاصيل في التلميحات.",
+		L"OK сохраняет и закрывает. Отмена отбрасывает. Подробности в подсказках.",
+		L"OK speichert und schliesst. Abbrechen verwirft. Details in Tooltips.",
+		L"OK salva e fecha. Cancelar descarta. Detalhes nas dicas.",
+		L"OK slaat op en sluit. Annuleren verwerpt. Details in tooltips.",
+		L"OK zapisuje i zamyka. Anuluj odrzuca. Szczegóły w podpowiedziach.",
+		L"Tamam kaydedip kapatır. İptal değişiklikleri atar. Ayrıntılar ipuçlarında."));
+
+	dc.SelectObject(oldFont);
+}
+
+} // namespace
+
+static void ReleaseRenderGrassBackdrop(){
 	if (!renderbase)
 		return;
 	CImageBase* p = renderbase;
@@ -223,14 +416,15 @@ CRender::CRender(CWnd* pParent /*=NULL*/)
 }
 
 
+
 void CRender::DoDataExchange(CDataExchange* pDX)
 {
 	CCustomBlurDialogExBase::DoDataExchange(pDX);
 	//{{AFX_DATA_MAP(CRender)
 	DDX_Control(pDX, IDC_COMBO1, m_1);
 	//}}AFX_DATA_MAP
-	DDX_Control(pDX, IDC_CHECK1, m_evr);
-	DDX_Control(pDX, IDC_CHECK2, m_con);
+	DDX_Control(pDX, IDC_RD_HELP, m_help);
+	DDX_Control(pDX, IDC_CHECK1, m_evr);	DDX_Control(pDX, IDC_CHECK2, m_con);
 	DDX_Control(pDX, IDC_CHECK3, m_a);
 	DDX_Control(pDX, IDC_CHECK27, m_ffd);
 	DDX_Control(pDX, IDCANCEL2, m_l);
@@ -282,11 +476,14 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 }
 
 
+
 BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	//{{AFX_MSG_MAP(CRender)
 	//}}AFX_MSG_MAP
-	ON_BN_CLICKED(IDCANCEL2, &CRender::OnBnClickedCancel2)
-	ON_BN_CLICKED(IDC_CHECK32, &CRender::Onspc2x)
+	ON_BN_CLICKED(IDC_RD_HELP, &CRender::OnBnClickedHelp)
+	ON_WM_SIZE()
+	ON_WM_DESTROY()
+	ON_BN_CLICKED(IDCANCEL2, &CRender::OnBnClickedCancel2)	ON_BN_CLICKED(IDC_CHECK32, &CRender::Onspc2x)
 	ON_BN_CLICKED(IDC_CHECK33, &CRender::Onspc4x)
 	ON_BN_CLICKED(IDC_CHECK34, &CRender::Onspc8x)
 	ON_BN_CLICKED(IDC_CHECK35, &CRender::Onspc1x)
@@ -336,12 +533,16 @@ CString sls[200];
 DWORD samp[] = { 11025, 12000, 22050, 24000, 44100, 48000, 96000, 192000, 384000, 768000, 1536000, 3072000 };
 extern COggDlg* og;
 
+
 BOOL CRender::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
+	m_help.SetWindowText(L"?");
+	m_help.SetFlat(TRUE);
+	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
+	LayoutHelpBtn();
 
-	m_bakSoundGuid = savedata.soundguid;
-	m_bakSoundCur = savedata.soundcur;
+	m_bakSoundGuid = savedata.soundguid;	m_bakSoundCur = savedata.soundcur;
 	m_bakSamples = savedata.samples;
 	m_bakUpscale = savedata.upscale_enable;
 	m_bakSpeaker = savedata.speaker_layout;
@@ -474,9 +675,11 @@ BOOL CRender::OnInitDialog()
 		m_speaker.SetCurSel(sp);
 	}
 
+
 	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
-	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"設定を保存して閉じます", L"Save settings and close", L"Enregistrer les parametres et fermer", L"Salva impostazioni e chiudi", L"Guardar ajustes y cerrar", L"설정 저장 후 닫기", L"保存设置并关闭", L"حفظ الإعدادات وإغلاق", L"Сохранить настройки и закрыть", L"Einstellungen speichern und schließen", L"Salvar configuracoes e fechar", L"Instellingen opslaan en sluiten", L"Zapisz ustawienia i zamknij", L"Ayarları kaydet ve kapat"));
-	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL14(L"保存せずに閉じます", L"Close without saving", L"Fermer sans enregistrer", L"Chiudi senza salvare", L"Cerrar sin guardar", L"저장하지 않고 닫기", L"不保存并关闭", L"إغلاق دون حفظ", L"Закрыть без сохранения", L"Ohne Speichern schließen", L"Fechar sem salvar", L"Sluiten zonder opslaan", L"Zamknij bez zapisywania", L"Kaydetmeden kapat"));
+	if (m_help.GetSafeHwnd())
+		m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
+	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"設定を保存して閉じます", L"Save settings and close", L"Enregistrer les parametres et fermer", L"Salva impostazioni e chiudi", L"Guardar ajustes y cerrar", L"설정 저장 후 닫기", L"保存设置并关闭", L"حفظ الإعدادات وإغلاق", L"Сохранить настройки и закрыть", L"Einstellungen speichern und schließen", L"Salvar configuracoes e fechar", L"Instellingen opslaan en sluiten", L"Zapisz ustawienia i zamknij", L"Ayarları kaydet ve kapat"));	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL14(L"保存せずに閉じます", L"Close without saving", L"Fermer sans enregistrer", L"Chiudi senza salvare", L"Cerrar sin guardar", L"저장하지 않고 닫기", L"不保存并关闭", L"إغلاق دون حفظ", L"Закрыть без сохранения", L"Ohne Speichern schließen", L"Fechar sem salvar", L"Sluiten zonder opslaan", L"Zamknij bez zapisywania", L"Kaydetmeden kapat"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO2), LL14(L"DirectSoundの出力デバイスを選択します", L"Select DirectSound output device", L"Choisir le peripherique de sortie DirectSound", L"Seleziona dispositivo di uscita DirectSound", L"Seleccionar dispositivo de salida DirectSound", L"DirectSound 출력 장치 선택", L"选择 DirectSound 输出设备", L"اختر جهاز إخراج DirectSound", L"Выбрать устройство вывода DirectSound", L"DirectSound-Ausgabegerat wahlen", L"Selecionar dispositivo de saida DirectSound", L"DirectSound-uitvoerapparaat kiezen", L"Wybierz urzadzenie wyjsciowe DirectSound", L"DirectSound cikis aygitini sec"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_MICDEV), LL14(L"WAV保存時のマイクミックス／録音に使うマイク端末を選びます", L"Select microphone for WAV mic-mix / recording", L"Choisir le micro pour le mix WAV / enregistrement", L"Scegli il microfono per mix WAV / registrazione", L"Elegir microfono para mix WAV / grabacion", L"WAV 마이크 믹스/녹음에 쓸 마이크 선택", L"选择用于WAV麦克风混音/录音的麦克风", L"اختر الميكروفون لمزج/تسجيل WAV", L"Выберите микрофон для микса/записи WAV", L"Mikrofon fur WAV-Mix / Aufnahme wahlen", L"Escolher microfone para mix WAV / gravacao", L"Kies microfoon voor WAV-mix / opname", L"Wybierz mikrofon do miksu/nagrania WAV", L"WAV miks/kayit icin mikrofon secin"));
 	m_tooltip.AddTool(GetDlgItem(IDC_FONT), LL14(L"メイン画面のフォントを設定します", L"Set main window font", L"Definir la police de la fenetre principale", L"Imposta carattere finestra principale", L"Establecer fuente de ventana principal", L"메인 화면 글꼴 설정", L"设置主窗口字体", L"تعيين خط النافذة الرئيسية", L"Задать шрифт главного окна", L"Schriftart des Hauptfensters festlegen", L"Definir fonte da janela principal", L"Lettertype hoofdvenster instellen", L"Ustaw czcionke okna glownego", L"Ana pencere yazi tipini ayarla"));
@@ -522,10 +725,12 @@ BOOL CRender::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER5), LL14(L"描画の間隔時間を設定します。\nCPU使用が高いときに上げます。", L"Set render interval.\nIncrease when CPU usage is high.", L"Regler l'intervalle de rendu.\nAugmentez si le CPU est charge.", L"Imposta intervallo di rendering.\nAumenta se il CPU e sotto carico.", L"Ajustar intervalo de renderizado.\nSube si el CPU esta alto.", L"그리기 간격 설정.\nCPU 사용률이 높을 때 늘리세요.", L"设置绘制间隔。\nCPU 占用高时可增大。", L"ضبط فترة الرسم.\nزِدها عند ارتفاع استخدام المعالج.", L"Задать интервал отрисовки.\nУвеличьте при высокой нагрузке на CPU.", L"Render-Intervall einstellen.\nBei hoher CPU-Last erhohen.", L"Definir intervalo de renderizacao.\nAumente se a CPU estiver alta.", L"Renderinterval instellen.\nVerhoog bij hoge CPU-belasting.", L"Ustaw odstep renderowania.\nZwieksz przy wysokim obciazeniu CPU.", L"Cizim araligini ayarla.\nCPU yuksekken artir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER_EQCODE), LL14(L"EQコード表示の更新間隔を設定します。\n短くすると追従が速く、長くすると負荷が下がります。", L"Set EQ chord display update interval.\nShorter = faster tracking; longer = lower load.", L"Intervalle de maj des accords EQ.\nPlus court = plus reactif; plus long = moins de charge.", L"Intervallo aggiornamento accordi EQ.\nPiu corto = piu reattivo; piu lungo = meno carico.", L"Intervalo de actualizacion de acordes EQ.\nMas corto = mas reactivo; mas largo = menos carga.", L"EQ 코드 표시 갱신 간격.\n짧을수록 빠른 추종, 길수록 부하 감소.", L"设置 EQ 和弦显示更新间隔。\n越短跟随越快，越长负载越低。", L"ضبط فاصل تحديث أكورد EQ.\nأقصر=تتبع أسرع؛ أطول=حمل أقل.", L"Интервал обновления аккордов EQ.\nКороче — быстрее; дольше — меньше нагрузка.", L"Update-Intervall der EQ-Akkorde.\nKuerzer = schneller; laenger = weniger Last.", L"Intervalo de atualizacao dos acordes EQ.\nMais curto = mais rapido; mais longo = menos carga.", L"Update-interval EQ-akkoorden.\nKorter = sneller; langer = minder belasting.", L"Interwal odswiezania akordow EQ.\nKrotszy = szybciej; dluzszy = mniejsze obciazenie.", L"EQ akor guncelleme araligi.\nKisa = daha hizli; uzun = daha az yuk."));
 	m_tooltip.AddTool(GetDlgItem(IDC_SLIDER6), LL14(L"スペアナの表示倍率を設定します。", L"Set spectrum display scale.", L"Regler l'echelle d'affichage du spectre.", L"Imposta scala visualizzazione spettro.", L"Ajustar escala de visualizacion del espectro.", L"스펙트럼 표시 배율 설정.", L"设置频谱显示倍率。", L"ضبط مقياس عرض الطيف.", L"Задать масштаб отображения спектра.", L"Spektrum-Anzeigeskala einstellen.", L"Definir escala de exibicao do espectro.", L"Spectrumweergaveschaal instellen.", L"Ustaw skale wyswietlania spektrum.", L"Spektrum gosterim olcegini ayarla."));
-	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
-	m_ms.SetMode(1);
-	m_hyouji2.SetMode(1);
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
+
+	m_ms.SetMode(1);	m_hyouji2.SetMode(1);
 	m_eqCode.SetMode(1);
 	w_wups.SetMode(1);
 	m_evr.SetCheck(savedata.evr);
@@ -704,13 +909,60 @@ BOOL CRender::OnInitDialog()
 	if(renderbase)
 		::SetWindowPos(renderbase->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	::SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+
 	EnableMainWindowLock(&savedata.renderMainLock, TRUE);
 	CCC_MainLockSetHeaderRow(m_hWnd, 0, 18);
 	CCC_MainLockBringToFront(m_hWnd);
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
 	return TRUE;  // コントロールにフォーカスを設定しないとき、戻り値は TRUE となります
 	              // 例外: OCX プロパティ ページの戻り値は FALSE となります
 }
 
+void CRender::LayoutHelpBtn()
+{
+	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+void CRender::ShowHelpSheet()
+{
+	if (g_rdHelpDlg && ::IsWindow(g_rdHelpDlg->GetSafeHwnd())) {
+		g_rdHelpDlg->ShowWindow(SW_SHOW);
+		g_rdHelpDlg->SetForegroundWindow();
+		return;
+	}
+	if (g_rdHelpDlg && !::IsWindow(g_rdHelpDlg->GetSafeHwnd()))
+		g_rdHelpDlg = nullptr;
+	CRdHelpDlg* dlg = new CRdHelpDlg(nullptr);
+	if (!dlg->Create(IDD_RD_HELP, nullptr)) {
+		delete dlg;
+		return;
+	}
+	g_rdHelpDlg = dlg;
+	dlg->ShowWindow(SW_SHOW);
+	dlg->SetForegroundWindow();
+}
+
+void CRender::OnBnClickedHelp()
+{
+	ShowHelpSheet();
+}
+
+void CRender::OnSize(UINT nType, int cx, int cy)
+{
+	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
+	if (nType != SIZE_MINIMIZED) {
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+	}
+}
+
+void CRender::OnDestroy()
+{
+	if (g_rdHelpDlg && ::IsWindow(g_rdHelpDlg->GetSafeHwnd()))
+		g_rdHelpDlg->DestroyWindow();
+	CCustomBlurDialogExBase::OnDestroy();
+}
 BOOL CALLBACK CRender::DSEnumCallback(LPGUID pGUID, LPCWSTR strDesc,LPCWSTR strDrvName, LPVOID pContext)
 {
 	if (pGUID)
