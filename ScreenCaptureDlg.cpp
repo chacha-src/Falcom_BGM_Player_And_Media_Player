@@ -1176,6 +1176,21 @@ LRESULT CScPreviewCtrl::OnPrintClient(WPARAM wParam, LPARAM)
 {
 	// CCustomOpaqueFixer が WM_PAINT を奪い、ここ経由で描画する
 	if (HDC hdc = (HDC)wParam) {
+		CRect r;
+		GetClientRect(&r);
+		BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+		params.dwFlags = BPPF_ERASE;
+		HDC hdcBuf = NULL;
+		HPAINTBUFFER hBP = ::BeginBufferedPaint(hdc, &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+		if (hdcBuf && hBP) {
+			CDC dcBuf;
+			dcBuf.Attach(hdcBuf);
+			PaintToDC(dcBuf);
+			dcBuf.Detach();
+			::BufferedPaintMakeOpaque(hBP, &r);
+			::EndBufferedPaint(hBP, TRUE);
+			return 0;
+		}
 		CDC dc;
 		dc.Attach(hdc);
 		PaintToDC(dc);
@@ -1373,6 +1388,9 @@ CScFxWireCtrl::CScFxWireCtrl()
 	, m_dragging(FALSE)
 	, m_dragFx(0)
 	, m_dragFromSlot(-1)
+	, m_hoverFx(0)
+	, m_hoverSlot(-1)
+	, m_trackLeave(FALSE)
 {
 	memset(m_slots, 0, sizeof(m_slots));
 	m_dragPt = CPoint(0, 0);
@@ -1390,6 +1408,7 @@ BEGIN_MESSAGE_MAP(CScFxWireCtrl, CStatic)
 	ON_WM_LBUTTONUP()
 	ON_WM_RBUTTONUP()
 	ON_WM_MOUSEMOVE()
+	ON_WM_MOUSELEAVE()
 END_MESSAGE_MAP()
 
 void CScFxWireCtrl::SetChain(const int* fx, int n)
@@ -1422,54 +1441,83 @@ void CScFxWireCtrl::NotifyChanged()
 		m_owner->OnFxWireChanged();
 }
 
+void CScFxWireCtrl::UpdateHover(CPoint pt)
+{
+	if (m_dragging) {
+		// ドロップ中はドロップ先スロットだけハイライト
+		const int slot = HitSlot(pt);
+		const int fx = 0;
+		if (slot == m_hoverSlot && fx == m_hoverFx)
+			return;
+		m_hoverSlot = slot;
+		m_hoverFx = fx;
+		Invalidate(FALSE);
+		return;
+	}
+	const int fx = HitPalette(pt);
+	const int slot = (fx > 0) ? -1 : HitSlot(pt);
+	if (fx == m_hoverFx && slot == m_hoverSlot)
+		return;
+	m_hoverFx = fx;
+	m_hoverSlot = slot;
+	Invalidate(FALSE);
+}
+
 struct ScFxWireMetrics {
+	int titleH;
 	int railTop;
-	int slotW, slotH, gap, inW, x0;
-	int palCols, pw, ph, palX0, palY0, palGapX, palGapY;
+	int slotW, slotH, gap, inW, outW, x0;
+	int palCols, palRows, pw, ph, palX0, palY0, palGapX, palGapY;
 };
 
 static ScFxWireMetrics ScFxMakeMetrics(const CRect& rc)
 {
 	ScFxWireMetrics m = {};
-	m.railTop = 12;
+	// 説明ラベル用の帯を確保（潰さない）
+	m.titleH = 18;
+	m.railTop = m.titleH + 2;
 	m.slotH = 24;
 	m.gap = 3;
-	m.inW = 24;
+	m.inW = 26;
+	m.outW = 36;
 	const int margin = 4;
-	const int usable = rc.Width() - margin * 2 - m.inW - m.gap - m.inW;
+	const int usable = rc.Width() - margin * 2 - m.inW - m.gap - m.outW;
 	m.slotW = (usable - SC_FX_CHAIN_MAX * m.gap) / SC_FX_CHAIN_MAX;
-	if (m.slotW < 58) m.slotW = 58;
-	if (m.slotW > 88) m.slotW = 88;
-	const int total = m.inW + m.gap + SC_FX_CHAIN_MAX * (m.slotW + m.gap) + m.inW;
+	if (m.slotW < 52) m.slotW = 52;
+	if (m.slotW > 92) m.slotW = 92;
+	const int total = m.inW + m.gap + SC_FX_CHAIN_MAX * (m.slotW + m.gap) + m.outW;
 	m.x0 = (rc.Width() - total) / 2;
 	if (m.x0 < margin) m.x0 = margin;
 
 	m.palX0 = 4;
 	m.palGapX = 3;
 	m.palGapY = 2;
-	m.palY0 = m.railTop + m.slotH + 8;
-	const int availH = rc.Height() - m.palY0 - 3;
+	m.palY0 = m.railTop + m.slotH + 5;
+	int availH = rc.Height() - m.palY0 - 3;
+	int availW = rc.Width() - m.palX0 * 2;
+	if (availH < 40) availH = 40;
+	if (availW < 80) availW = 80;
 	const int nFx = SC_FX_COUNT - 1;
-	// 高さに収まる列数を優先（ノートPC向けに縦を削ってもパレットが落ちない）
-	m.palCols = (nFx > 56) ? 9 : 8;
-	for (;;) {
-		m.pw = (rc.Width() - m.palX0 * 2 - (m.palCols - 1) * m.palGapX) / m.palCols;
-		if (m.pw < 52 && m.palCols > 7) {
-			--m.palCols;
-			continue;
-		}
-		if (m.pw < 48) m.pw = 48;
-		int rows = (nFx + m.palCols - 1) / m.palCols;
-		if (rows < 1) rows = 1;
-		m.ph = (availH - (rows - 1) * m.palGapY) / rows;
-		if (m.ph < 12 && m.palCols < 10) {
-			++m.palCols;
-			continue;
-		}
-		break;
-	}
-	if (m.ph < 11) m.ph = 11;
-	if (m.ph > 17) m.ph = 17;
+
+	// 横6列を基本（約12行で縦を満杯・文字を大きく）。狭いときだけ減列。
+	int cols = 6;
+	if (availW < 6 * 58) cols = 5;
+	if (availW < 5 * 58) cols = 4;
+	if (cols < 4) cols = 4;
+
+	int rows = (nFx + cols - 1) / cols;
+	if (rows < 1) rows = 1;
+
+	m.palCols = cols;
+	m.palRows = rows;
+	m.pw = (availW - (cols - 1) * m.palGapX) / cols;
+	if (m.pw < 50) m.pw = 50;
+	// 縦は端数込みで availH を使い切る（下限で無理に伸ばすと空き／溢れの原因）
+	m.ph = (availH - (rows - 1) * m.palGapY) / rows;
+	if (m.ph < 1) m.ph = 1;
+	const int used = rows * m.ph + (rows - 1) * m.palGapY;
+	if (used < availH && rows > 0)
+		m.ph += (availH - used) / rows;
 	return m;
 }
 
@@ -1488,8 +1536,10 @@ CRect CScFxWireCtrl::PaletteRect(int fx) const
 	GetClientRect(&rc);
 	const ScFxWireMetrics m = ScFxMakeMetrics(rc);
 	const int idx = fx - 1;
-	const int row = idx / m.palCols;
-	const int col = idx % m.palCols;
+	const int cols = (m.palCols > 0) ? m.palCols : 6;
+	// 行優先: 左→右、上→下（6列×約12行）
+	const int row = idx / cols;
+	const int col = idx % cols;
 	const int x = m.palX0 + col * (m.pw + m.palGapX);
 	const int y = m.palY0 + row * (m.ph + m.palGapY);
 	return CRect(x, y, x + m.pw, y + m.ph);
@@ -1522,28 +1572,33 @@ void CScFxWireCtrl::PaintToDC(CDC& dc)
 	CFont* oldFont = dc.SelectObject(GetFont());
 	const ScFxWireMetrics m = ScFxMakeMetrics(rc);
 
+	CFont titleFont;
 	CFont smallFont;
-	LOGFONT lf = {};
+	LOGFONT lfBase = {};
 	if (CFont* base = GetFont())
-		base->GetLogFont(&lf);
+		base->GetLogFont(&lfBase);
 	else {
-		lf.lfHeight = -12;
-		lf.lfCharSet = DEFAULT_CHARSET;
-		_tcsncpy(lf.lfFaceName, _T("MS Shell Dlg"), LF_FACESIZE - 1);
-		lf.lfFaceName[LF_FACESIZE - 1] = 0;
+		lfBase.lfHeight = -12;
+		lfBase.lfCharSet = DEFAULT_CHARSET;
+		_tcsncpy(lfBase.lfFaceName, _T("MS Shell Dlg"), LF_FACESIZE - 1);
+		lfBase.lfFaceName[LF_FACESIZE - 1] = 0;
 	}
-	if (lf.lfHeight < 0) {
-		if (lf.lfHeight > -11) lf.lfHeight = -11;
-	} else if (lf.lfHeight > 0 && lf.lfHeight < 11) {
-		lf.lfHeight = 11;
-	} else if (lf.lfHeight > 13) {
-		lf.lfHeight = 12;
-	}
-	smallFont.CreateFontIndirect(&lf);
-	dc.SelectObject(&smallFont);
+	LOGFONT lfTitle = lfBase;
+	lfTitle.lfHeight = -13;
+	lfTitle.lfWeight = FW_NORMAL;
+	titleFont.CreateFontIndirect(&lfTitle);
 
-	dc.SetTextColor(RGB(160, 175, 200));
-	CRect title(4, 1, rc.right - 4, m.railTop - 1);
+	LOGFONT lfPal = lfBase;
+	// セル高さに合わせて読みやすいサイズへ（下限11、上限15）
+	int want = m.ph - 6;
+	if (want < 11) want = 11;
+	if (want > 15) want = 15;
+	lfPal.lfHeight = -want;
+	smallFont.CreateFontIndirect(&lfPal);
+
+	dc.SelectObject(&titleFont);
+	dc.SetTextColor(RGB(180, 195, 220));
+	CRect title(6, 2, rc.right - 6, m.titleH);
 	dc.DrawText(LL14(
 		L"FX配線 (パレット→スロット / 右クリック解除)",
 		L"FX wiring (palette→slot / right-click clear)",
@@ -1559,7 +1614,9 @@ void CScFxWireCtrl::PaintToDC(CDC& dc)
 		L"FX-bedrading (palet→slot / rechtsklik)",
 		L"Okablowanie FX (przeciągnij→slot / PPM)",
 		L"FX kablolama (paletten slota / sağ tık)"),
-		&title, DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+		&title, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+	dc.SelectObject(&smallFont);
 
 	auto drawNode = [&](CRect r, COLORREF fill, COLORREF border, const CString& text) {
 		dc.FillSolidRect(&r, fill);
@@ -1585,8 +1642,13 @@ void CScFxWireCtrl::PaintToDC(CDC& dc)
 			lab.Format(L"%d", m_slots[i]);
 		else
 			lab.Format(L"S%d", i + 1);
-		drawNode(sr, filled ? RGB(55, 45, 20) : RGB(35, 38, 48),
-			filled ? RGB(255, 200, 80) : RGB(90, 100, 120), lab);
+		const BOOL hover = (i == m_hoverSlot);
+		drawNode(sr,
+			hover ? (filled ? RGB(80, 65, 28) : RGB(48, 62, 88))
+			      : (filled ? RGB(55, 45, 20) : RGB(35, 38, 48)),
+			hover ? RGB(120, 210, 255)
+			      : (filled ? RGB(255, 200, 80) : RGB(90, 100, 120)),
+			lab);
 
 		CPen pen(PS_SOLID, 2, RGB(90, 160, 255));
 		CPen* old = dc.SelectObject(&pen);
@@ -1599,7 +1661,7 @@ void CScFxWireCtrl::PaintToDC(CDC& dc)
 		prevCy = (sr.top + sr.bottom) / 2;
 	}
 
-	CRect outR(prevCx + m.gap, m.railTop, prevCx + m.gap + m.inW, m.railTop + m.slotH);
+	CRect outR(prevCx + m.gap, m.railTop, prevCx + m.gap + m.outW, m.railTop + m.slotH);
 	{
 		CPen pen(PS_SOLID, 2, RGB(90, 160, 255));
 		CPen* old = dc.SelectObject(&pen);
@@ -1611,12 +1673,21 @@ void CScFxWireCtrl::PaintToDC(CDC& dc)
 
 	for (int fx = 1; fx < SC_FX_COUNT; ++fx) {
 		CRect pr = PaletteRect(fx);
+		if (pr.left >= rc.right - 1 || pr.top >= rc.bottom - 1)
+			continue;
+		if (pr.right > rc.right - 1) pr.right = rc.right - 1;
+		if (pr.bottom > rc.bottom - 1) pr.bottom = rc.bottom - 1;
+		if (pr.Width() < 8 || pr.Height() < 8)
+			continue;
 		CString name = m_owner ? m_owner->FxName(fx) : L"?";
-		dc.FillSolidRect(&pr, RGB(32, 40, 58));
-		dc.Draw3dRect(&pr, RGB(100, 140, 200), RGB(20, 24, 32));
-		dc.SetTextColor(RGB(200, 220, 255));
+		const BOOL hover = (fx == m_hoverFx) || (m_dragging && fx == m_dragFx && m_dragFromSlot < 0);
+		dc.FillSolidRect(&pr, hover ? RGB(55, 85, 130) : RGB(32, 40, 58));
+		dc.Draw3dRect(&pr,
+			hover ? RGB(160, 220, 255) : RGB(100, 140, 200),
+			hover ? RGB(40, 70, 110) : RGB(20, 24, 32));
+		dc.SetTextColor(hover ? RGB(255, 250, 220) : RGB(220, 230, 245));
 		CRect tr = pr;
-		tr.DeflateRect(2, 0);
+		tr.DeflateRect(3, 1);
 		dc.DrawText(name, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 	}
 
@@ -1636,12 +1707,32 @@ void CScFxWireCtrl::PaintToDC(CDC& dc)
 		}
 	}
 
+	// システム WS_BORDER はアクリル下で欠け・ちらつきやすいので自前1px枠
+	dc.Draw3dRect(&rc, RGB(70, 78, 96), RGB(18, 20, 26));
+
 	dc.SelectObject(oldFont);
 }
 
 void CScFxWireCtrl::OnPaint()
 {
 	CPaintDC dc(this);
+	CRect r;
+	GetClientRect(&r);
+	if (r.Width() > 0 && r.Height() > 0) {
+		BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+		params.dwFlags = BPPF_ERASE;
+		HDC hdcBuf = NULL;
+		HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+		if (hdcBuf && hBP) {
+			CDC dcBuf;
+			dcBuf.Attach(hdcBuf);
+			PaintToDC(dcBuf);
+			dcBuf.Detach();
+			::BufferedPaintMakeOpaque(hBP, &r);
+			::EndBufferedPaint(hBP, TRUE);
+			return;
+		}
+	}
 	PaintToDC(dc);
 }
 
@@ -1652,10 +1743,27 @@ BOOL CScFxWireCtrl::OnEraseBkgnd(CDC* /*pDC*/)
 
 LRESULT CScFxWireCtrl::OnPrintClient(WPARAM wParam, LPARAM /*lParam*/)
 {
-	CDC dc;
-	dc.Attach((HDC)wParam);
-	PaintToDC(dc);
-	dc.Detach();
+	if (HDC hdc = (HDC)wParam) {
+		CRect r;
+		GetClientRect(&r);
+		BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+		params.dwFlags = BPPF_ERASE;
+		HDC hdcBuf = NULL;
+		HPAINTBUFFER hBP = ::BeginBufferedPaint(hdc, &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+		if (hdcBuf && hBP) {
+			CDC dcBuf;
+			dcBuf.Attach(hdcBuf);
+			PaintToDC(dcBuf);
+			dcBuf.Detach();
+			::BufferedPaintMakeOpaque(hBP, &r);
+			::EndBufferedPaint(hBP, TRUE);
+			return 0;
+		}
+		CDC dc;
+		dc.Attach(hdc);
+		PaintToDC(dc);
+		dc.Detach();
+	}
 	return 0;
 }
 
@@ -1687,12 +1795,31 @@ void CScFxWireCtrl::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CScFxWireCtrl::OnMouseMove(UINT nFlags, CPoint point)
 {
+	if (!m_trackLeave) {
+		TRACKMOUSEEVENT tme = { sizeof(tme) };
+		tme.dwFlags = TME_LEAVE;
+		tme.hwndTrack = m_hWnd;
+		if (TrackMouseEvent(&tme))
+			m_trackLeave = TRUE;
+	}
 	if (m_dragging) {
 		m_dragPt = point;
-		Invalidate(FALSE);
+		UpdateHover(point);
+		Invalidate(FALSE); // ゴースト位置更新
 		return;
 	}
+	UpdateHover(point);
 	CStatic::OnMouseMove(nFlags, point);
+}
+
+void CScFxWireCtrl::OnMouseLeave()
+{
+	m_trackLeave = FALSE;
+	if (m_hoverFx != 0 || m_hoverSlot >= 0) {
+		m_hoverFx = 0;
+		m_hoverSlot = -1;
+		Invalidate(FALSE);
+	}
 }
 
 void CScFxWireCtrl::OnLButtonUp(UINT nFlags, CPoint point)
@@ -1735,7 +1862,7 @@ void CScFxWireCtrl::OnLButtonUp(UINT nFlags, CPoint point)
 		}
 		m_dragFx = 0;
 		m_dragFromSlot = -1;
-		Invalidate(FALSE);
+		UpdateHover(point);
 		return;
 	}
 	CStatic::OnLButtonUp(nFlags, point);
@@ -4278,8 +4405,10 @@ void CScreenCaptureDlg::PaintPreview(CDC& dc, const CRect& client)
 	CRect imageRect;
 	float scale = 1.f;
 	int cw = 0, ch = 0;
-	if (!GetPreviewMap(imageRect, scale, cw, ch))
+	if (!GetPreviewMap(imageRect, scale, cw, ch)) {
+		dc.Draw3dRect(&client, RGB(90, 98, 118), RGB(16, 18, 22));
 		return;
+	}
 
 	// キャンバス外（MP4に入らない余白）を暗くして、赤枠内が出力だと分かるようにする
 	{
@@ -4302,6 +4431,8 @@ void CScreenCaptureDlg::PaintPreview(CDC& dc, const CRect& client)
 		dc.FillSolidRect(&imageRect, RGB(30, 30, 36));
 	}
 	DrawPreviewHud(dc, imageRect, scale, cw, ch);
+	// システム WS_BORDER はプレビュー更新のたびちらつくので自前1px枠
+	dc.Draw3dRect(&client, RGB(90, 98, 118), RGB(16, 18, 22));
 }
 
 void CScreenCaptureDlg::UpdatePreview(BOOL forceCompose)
@@ -4312,11 +4443,11 @@ void CScreenCaptureDlg::UpdatePreview(BOOL forceCompose)
 	if (!recording && (forceCompose || !m_dragging))
 		RefreshComposeCache();
 	m_preview.Invalidate(FALSE);
-	// 録画中は UPDATENOW しない（エンコードスレッドの CS 待ちを増やして FPS を落とす）
+	// RDW_FRAME はシステム枠の再描画でちらつく。枠は PaintPreview 側の自前描画。
 	::RedrawWindow(m_preview.GetSafeHwnd(), NULL, NULL,
 		recording
-		? (RDW_INVALIDATE | RDW_FRAME)
-		: (RDW_INVALIDATE | RDW_UPDATENOW | RDW_FRAME));
+		? (RDW_INVALIDATE)
+		: (RDW_INVALIDATE | RDW_UPDATENOW));
 }
 
 BOOL CScreenCaptureDlg::OnInitDialog()
@@ -4332,6 +4463,11 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	}
 	m_preview.SetOwner(this);
 	m_fxWire.SetOwner(this);
+	// アクリル下の WS_BORDER 欠け/ちらつき回避（枠は各 Paint で自前描画）
+	if (m_preview.GetSafeHwnd())
+		m_preview.ModifyStyle(WS_BORDER, 0, SWP_FRAMECHANGED);
+	if (m_fxWire.GetSafeHwnd())
+		m_fxWire.ModifyStyle(WS_BORDER, 0, SWP_FRAMECHANGED);
 	m_help.SetWindowText(L"?");
 	m_help.SetFlat(TRUE);
 	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);

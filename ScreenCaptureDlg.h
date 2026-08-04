@@ -50,6 +50,9 @@ protected:
 	int m_dragFx;      // パレットから: SC_FX_* / スロットから: 負でスロットindex+1
 	int m_dragFromSlot; // >=0 ならスロットドラッグ
 	CPoint m_dragPt;
+	int m_hoverFx;      // パレットホバー SC_FX_* / 0
+	int m_hoverSlot;    // スロットホバー / -1
+	BOOL m_trackLeave;
 	DECLARE_MESSAGE_MAP()
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
@@ -58,9 +61,11 @@ protected:
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+	afx_msg void OnMouseLeave();
 	int HitPalette(CPoint pt) const;
 	int HitSlot(CPoint pt) const;
 	void NotifyChanged();
+	void UpdateHover(CPoint pt);
 	CRect SlotRect(int i) const;
 	CRect PaletteRect(int fx) const;
 };
