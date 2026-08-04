@@ -1431,27 +1431,45 @@ struct ScFxWireMetrics {
 static ScFxWireMetrics ScFxMakeMetrics(const CRect& rc)
 {
 	ScFxWireMetrics m = {};
-	m.railTop = 14;
-	m.slotH = 26;
-	m.gap = 4;
-	m.inW = 26;
+	m.railTop = 12;
+	m.slotH = 24;
+	m.gap = 3;
+	m.inW = 24;
 	const int margin = 4;
 	const int usable = rc.Width() - margin * 2 - m.inW - m.gap - m.inW;
 	m.slotW = (usable - SC_FX_CHAIN_MAX * m.gap) / SC_FX_CHAIN_MAX;
-	if (m.slotW < 64) m.slotW = 64;
-	if (m.slotW > 92) m.slotW = 92;
+	if (m.slotW < 58) m.slotW = 58;
+	if (m.slotW > 88) m.slotW = 88;
 	const int total = m.inW + m.gap + SC_FX_CHAIN_MAX * (m.slotW + m.gap) + m.inW;
 	m.x0 = (rc.Width() - total) / 2;
 	if (m.x0 < margin) m.x0 = margin;
 
-	m.palCols = 6;
-	m.palGapX = 4;
-	m.palGapY = 3;
-	m.palX0 = 6;
-	m.pw = (rc.Width() - m.palX0 * 2 - (m.palCols - 1) * m.palGapX) / m.palCols;
-	if (m.pw < 72) m.pw = 72;
-	m.ph = 18;
-	m.palY0 = m.railTop + m.slotH + 10;
+	m.palX0 = 4;
+	m.palGapX = 3;
+	m.palGapY = 2;
+	m.palY0 = m.railTop + m.slotH + 8;
+	const int availH = rc.Height() - m.palY0 - 3;
+	const int nFx = SC_FX_COUNT - 1;
+	// 高さに収まる列数を優先（ノートPC向けに縦を削ってもパレットが落ちない）
+	m.palCols = (nFx > 56) ? 9 : 8;
+	for (;;) {
+		m.pw = (rc.Width() - m.palX0 * 2 - (m.palCols - 1) * m.palGapX) / m.palCols;
+		if (m.pw < 52 && m.palCols > 7) {
+			--m.palCols;
+			continue;
+		}
+		if (m.pw < 48) m.pw = 48;
+		int rows = (nFx + m.palCols - 1) / m.palCols;
+		if (rows < 1) rows = 1;
+		m.ph = (availH - (rows - 1) * m.palGapY) / rows;
+		if (m.ph < 12 && m.palCols < 10) {
+			++m.palCols;
+			continue;
+		}
+		break;
+	}
+	if (m.ph < 11) m.ph = 11;
+	if (m.ph > 17) m.ph = 17;
 	return m;
 }
 
@@ -1983,20 +2001,20 @@ void CScHelpDlg::OnPaint()
 	y = max(y1, y2) + 4;
 	if (y < rc.bottom - 4) {
 		muted(L, y, LL14(
-			L"FPS は 120 まで。重い配線では実フレームが下がることがあります。",
-			L"FPS up to 120. Heavy FX chains may lower real frame rate.",
-			L"FPS jusqu'à 120. Chaînes lourdes peuvent baisser le débit.",
-			L"FPS fino a 120. Catene pesanti possono ridurre gli fps.",
-			L"FPS hasta 120. Cadenas pesadas pueden bajar fps.",
-			L"FPS는 120까지. 무거운 배선은 실프레임이 낮아질 수 있습니다.",
-			L"FPS最高120。重效果链可能降低实际帧率。",
-			L"حتى 120 إطارًا. السلاسل الثقيلة قد تخفض المعدل.",
-			L"FPS до 120. Тяжёлые цепочки могут снизить частоту.",
-			L"FPS bis 120. Schwere Ketten senken ggf. die Rate.",
-			L"FPS até 120. Cadeias pesadas podem baixar a taxa.",
-			L"FPS tot 120. Zware ketens kunnen fps verlagen.",
-			L"FPS do 120. Ciężkie łańcuchy mogą obniżyć fps.",
-			L"FPS 120'ye kadar. Ağır zincirler gerçek kareyi düşürebilir."));
+			L"FPS は 120 まで。色味は軽め。中〜重（ぼかし極大/放射/油絵/ゴッドレイ等）は GPU 負荷大・実フレーム低下はユーザー判断。",
+			L"FPS up to 120. Tints are light. Med–heavy (mega blur/radial/oil/godrays…) tax the GPU—FPS drop is your call.",
+			L"FPS jusqu'à 120. Teintes légères. Moyen–lourd (flou max/radial/huile/rayons…) charge le GPU—baisse = votre choix.",
+			L"FPS fino a 120. Tinte leggere. Medio–pesante (mega blur/radiale/olio/godrays…) carica la GPU—calo fps a vostra scelta.",
+			L"FPS hasta 120. Tintes ligeros. Med–pesado (mega blur/radial/óleo/rayos…) carga la GPU—bajar fps es su decisión.",
+			L"FPS는 120까지. 색조는 가벼움. 중~무거움(초대형 블러/방사/유화/갓레이 등)은 GPU 부하—프레임 저하는 사용자 판단.",
+			L"FPS最高120。色调较轻。中~重（超模糊/径向/油画/丁达尔等）GPU负载大，掉帧由您决定。",
+			L"حتى 120 إطارًا. الصبغات خفيفة. المتوسط–الثقيل يحمّل GPU—انخفاض الإطارات قرارك.",
+			L"FPS до 120. Оттенки лёгкие. Сред–тяж. (мега-blur/radial/масло/лучи…) нагружают GPU—падение частоты на ваш выбор.",
+			L"FPS bis 120. Töne leicht. Mittel–schwer (Mega-Blur/Radial/Öl/Godrays…) belasten die GPU—FPS-Abfall ist Ihre Entscheidung.",
+			L"FPS até 120. Tons leves. Méd–pesado (mega blur/radial/óleo/raios…) carrega a GPU—queda de fps é sua escolha.",
+			L"FPS tot 120. Tinten licht. Mid–zwaar (mega-blur/radiaal/olie/godrays…) belasten de GPU—fps-daling is jouw keuze.",
+			L"FPS do 120. Odcienie lekkie. Śr.–ciężkie (mega blur/radial/olej/promienie…) obciążają GPU—spadek fps to Twoja decyzja.",
+			L"FPS 120'ye kadar. Tonlar hafif. Orta–ağır (mega blur/radyal/yağlı/godrays…) GPU yükler—kare düşüşü sizin kararınız."));
 	}
 
 	dc.SelectObject(oldFont);
@@ -2180,6 +2198,7 @@ BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_TIMER()
 	ON_WM_SIZE()
+	ON_MESSAGE(WM_DPICHANGED, &CScreenCaptureDlg::OnDpiChanged)
 	ON_WM_DESTROY()
 END_MESSAGE_MAP()
 
@@ -2769,6 +2788,211 @@ CString CScreenCaptureDlg::FxName(int fx) const
 			L"Saturar", L"채도 업", L"饱和度", L"تشبع",
 			L"Насыщенность", L"Sättigung", L"Saturação", L"Verzadiging",
 			L"Nasycenie", L"Doygunluk");
+	case SC_FX_DESAT:
+		return LL14(L"彩度ダウン", L"Desaturate", L"Désaturer", L"Desatura",
+			L"Desaturar", L"채도 다운", L"降饱和", L"إلغاء التشبع",
+			L"Обесцветить", L"Entsättigen", L"Dessaturar", L"Desatureren",
+			L"Desaturacja", L"Doygunluk düşür");
+	case SC_FX_THRESHOLD:
+		return LL14(L"二値化", L"Threshold", L"Seuil", L"Soglia",
+			L"Umbral", L"이진화", L"二值化", L"عتبة",
+			L"Порог", L"Schwellwert", L"Limiar", L"Drempel",
+			L"Próg", L"Eşik");
+	case SC_FX_RED_CAST:
+		return LL14(L"赤キャスト", L"Red cast", L"Dominante rouge", L"Dominante rossa",
+			L"Dominante roja", L"레드 캐스트", L"红色偏色", L"صبغة حمراء",
+			L"Красный оттенок", L"Rotstich", L"Tom vermelho", L"Rode zweem",
+			L"Czerwony odcień", L"Kırmızı ton");
+	case SC_FX_GREEN_CAST:
+		return LL14(L"緑キャスト", L"Green cast", L"Dominante verte", L"Dominante verde",
+			L"Dominante verde", L"그린 캐스트", L"绿色偏色", L"صبغة خضراء",
+			L"Зелёный оттенок", L"Grünstich", L"Tom verde", L"Groene zweem",
+			L"Zielony odcień", L"Yeşil ton");
+	case SC_FX_BLUE_CAST:
+		return LL14(L"青キャスト", L"Blue cast", L"Dominante bleue", L"Dominante blu",
+			L"Dominante azul", L"블루 캐스트", L"蓝色偏色", L"صبغة زرقاء",
+			L"Синий оттенок", L"Blaustich", L"Tom azul", L"Blauwe zweem",
+			L"Niebieski odcień", L"Mavi ton");
+	case SC_FX_CYAN:
+		return LL14(L"シアン", L"Cyan", L"Cyan", L"Ciano",
+			L"Cian", L"시안", L"青色", L"سماوي",
+			L"Голубой", L"Cyan", L"Ciano", L"Cyaan",
+			L"Cyjan", L"Camgöbeği");
+	case SC_FX_MAGENTA:
+		return LL14(L"マゼンタ", L"Magenta", L"Magenta", L"Magenta",
+			L"Magenta", L"마젠타", L"品红", L"أرجواني",
+			L"Пурпурный", L"Magenta", L"Magenta", L"Magenta",
+			L"Magenta", L"Macenta");
+	case SC_FX_YELLOW:
+		return LL14(L"イエロー", L"Yellow", L"Jaune", L"Giallo",
+			L"Amarillo", L"옐로", L"黄色", L"أصفر",
+			L"Жёлтый", L"Gelb", L"Amarelo", L"Geel",
+			L"Żółty", L"Sarı");
+	case SC_FX_TEAL_ORANGE:
+		return LL14(L"ティールオレンジ", L"Teal & orange", L"Sarcelle/orange", L"Teal/arancio",
+			L"Verdeazulado/naranja", L"틸 오렌지", L"青橙", L"أزرق مخضر/برتقالي",
+			L"Бирюза/оранж", L"Teal & Orange", L"Verde-água/laranja", L"Teal & oranje",
+			L"Morski/pomarańcz", L"Turkuaz turuncu");
+	case SC_FX_FADE:
+		return LL14(L"フェード", L"Fade", L"Fondu", L"Sbiadito",
+			L"Desvanecer", L"페이드", L"淡化", L"تلاشي",
+			L"Выцветание", L"Verblassen", L"Desbotar", L"Vervagen",
+			L"Blaknięcie", L"Soluk");
+	case SC_FX_SPOTLIGHT:
+		return LL14(L"スポットライト", L"Spotlight", L"Spot", L"Riflettore",
+			L"Foco", L"스포트라이트", L"聚光", L"ضوء موضعي",
+			L"Прожектор", L"Spotlight", L"Holofote", L"Spotlight",
+			L"Reflektor", L"Spot");
+	case SC_FX_BARS_H:
+		return LL14(L"横バー", L"H-bars", L"Barres H", L"Barre H",
+			L"Barras H", L"가로 바", L"横条", L"أشرطة أفقية",
+			L"Гор. полосы", L"H-Balken", L"Barras H", L"H-balken",
+			L"Paski poz.", L"Yatay çubuk");
+	case SC_FX_BARS_V:
+		return LL14(L"縦バー", L"V-bars", L"Barres V", L"Barre V",
+			L"Barras V", L"세로 바", L"竖条", L"أشرطة عمودية",
+			L"Верт. полосы", L"V-Balken", L"Barras V", L"V-balken",
+			L"Paski pion.", L"Dikey çubuk");
+	case SC_FX_CHROMA:
+		return LL14(L"色収差", L"Chroma shift", L"Aberration", L"Aberrazione",
+			L"Aberración", L"색수차", L"色差", L"زيغ لوني",
+			L"Хроматика", L"Chromatisch", L"Aberração", L"Chroma",
+			L"Aberracja", L"Kromatik");
+	case SC_FX_EMBOSS:
+		return LL14(L"エンボス", L"Emboss", L"Relief", L"Rilievo",
+			L"Relieve", L"엠보스", L"浮雕", L"نقش بارز",
+			L"Тиснение", L"Prägung", L"Relevo", L"Reliëf",
+			L"Płaskorzeźba", L"Kabartma");
+	case SC_FX_LIFT:
+		return LL14(L"リフト", L"Lift", L"Lift", L"Lift",
+			L"Lift", L"리프트", L"提亮", L"رفع",
+			L"Подъём", L"Anheben", L"Lift", L"Lift",
+			L"Podniesienie", L"Kaldır");
+	case SC_FX_MONO_BLUE:
+		return LL14(L"青モノクロ", L"Blue mono", L"Mono bleu", L"Mono blu",
+			L"Mono azul", L"블루 모노", L"蓝色单色", L"أحادي أزرق",
+			L"Синий моно", L"Blau-Mono", L"Mono azul", L"Blauw mono",
+			L"Nieb. mono", L"Mavi mono");
+	case SC_FX_MONO_GREEN:
+		return LL14(L"緑モノクロ", L"Green mono", L"Mono vert", L"Mono verde",
+			L"Mono verde", L"그린 모노", L"绿色单色", L"أحادي أخضر",
+			L"Зел. моно", L"Grün-Mono", L"Mono verde", L"Groen mono",
+			L"Ziel. mono", L"Yeşil mono");
+	case SC_FX_QUAD:
+		return LL14(L"四分割ミラー", L"Quad mirror", L"Miroir 4", L"Specchio 4",
+			L"Espejo 4", L"4분할 미러", L"四象限镜像", L"مرآة رباعية",
+			L"4 зеркала", L"4-Spiegel", L"Espelho 4", L"4-spiegel",
+			L"4 lustra", L"4 ayna");
+	case SC_FX_DUO_PURPLE:
+		return LL14(L"紫デュオトーン", L"Purple duo", L"Duo violet", L"Duo viola",
+			L"Dúo púrpura", L"퍼플 듀오", L"紫色双色", L"ثنائي بنفسجي",
+			L"Фиолет. дуо", L"Lila-Duo", L"Duo roxo", L"Paars duo",
+			L"Fiolet duo", L"Mor ikili");
+	case SC_FX_BLUR_MEGA:
+		return LL14(L"ぼかし極大", L"Mega blur", L"Flou max", L"Sfocatura mega",
+			L"Desenfoque mega", L"초대형 흐림", L"超强模糊", L"ضباب هائل",
+			L"Мега-размытие", L"Mega-Blur", L"Desfoque mega", L"Mega-blur",
+			L"Mega rozmycie", L"Mega bulanık");
+	case SC_FX_MOTION_BLUR:
+		return LL14(L"モーションブラー", L"Motion blur", L"Flou de mouvement", L"Motion blur",
+			L"Motion blur", L"모션 블러", L"动态模糊", L"ضباب حركة",
+			L"Размытие движения", L"Bewegungsunschärfe", L"Motion blur", L"Motion blur",
+			L"Motion blur", L"Hareket bulanıklığı");
+	case SC_FX_RADIAL_BLUR:
+		return LL14(L"放射ブラー", L"Radial blur", L"Flou radial", L"Sfocatura radiale",
+			L"Desenfoque radial", L"방사 블러", L"径向模糊", L"ضباب شعاعي",
+			L"Радиальное размытие", L"Radialer Blur", L"Desfoque radial", L"Radiale blur",
+			L"Rozmycie radialne", L"Radyal bulanık");
+	case SC_FX_ZOOM_BLUR:
+		return LL14(L"ズームブラー", L"Zoom blur", L"Flou zoom", L"Zoom blur",
+			L"Zoom blur", L"줌 블러", L"变焦模糊", L"ضباب تكبير",
+			L"Зум-размытие", L"Zoom-Blur", L"Zoom blur", L"Zoom-blur",
+			L"Zoom blur", L"Yakınlaştırma blur");
+	case SC_FX_SWIRL:
+		return LL14(L"スワール", L"Swirl", L"Tourbillon", L"Vortice",
+			L"Remolino", L"소용돌이", L"漩涡", L"دوامة",
+			L"Свирл", L"Wirbel", L"Redemoinho", L"Werveling",
+			L"Wir", L"Girdap");
+	case SC_FX_RIPPLE:
+		return LL14(L"リップル", L"Ripple", L"Ondulation", L"Increspatura",
+			L"Ondulación", L"잔물결", L"波纹", L"تموج",
+			L"Рябь", L"Kräuselung", L"Ondulação", L"Rimpel",
+			L"Falowanie", L"Dalgalanma");
+	case SC_FX_VORTEX:
+		return LL14(L"ボルテックス", L"Vortex", L"Vortex", L"Vortex",
+			L"Vórtice", L"볼텍스", L"涡流", L"دوامة قوية",
+			L"Вихрь", L"Vortex", L"Vórtice", L"Vortex",
+			L"Wir wodny", L"Vortex");
+	case SC_FX_HEAT_HAZE:
+		return LL14(L"陽炎", L"Heat haze", L"Mirage chaleur", L"Foschia calore",
+			L"Calima", L"아지랑이", L"热浪", L"سراب حراري",
+			L"Марево", L"Hitzeflimmern", L"Névoa de calor", L"Hittewaas",
+			L"Miraż ciepła", L"Sıcaklık serabı");
+	case SC_FX_GLITCH:
+		return LL14(L"グリッチ", L"Glitch", L"Glitch", L"Glitch",
+			L"Glitch", L"글리치", L"故障风", L"خلل",
+			L"Глитч", L"Glitch", L"Glitch", L"Glitch",
+			L"Glitch", L"Glitch");
+	case SC_FX_CRT_CURVE:
+		return LL14(L"CRT曲面", L"CRT curve", L"Courbe CRT", L"Curva CRT",
+			L"Curva CRT", L"CRT 곡선", L"CRT曲面", L"منحنى CRT",
+			L"Кривизна CRT", L"CRT-Kurve", L"Curva CRT", L"CRT-kromme",
+			L"Krzywa CRT", L"CRT eğri");
+	case SC_FX_KALEIDO:
+		return LL14(L"万華鏡", L"Kaleidoscope", L"Kaléidoscope", L"Caleidoscopio",
+			L"Caleidoscopio", L"만화경", L"万花筒", L"مشكال",
+			L"Калейдоскоп", L"Kaleidoskop", L"Caleidoscópio", L"Caleidoscoop",
+			L"Kalejdoskop", L"Kaleydoskop");
+	case SC_FX_OIL:
+		return LL14(L"油絵風", L"Oil paint", L"Peinture à l’huile", L"Olio",
+			L"Óleo", L"유화풍", L"油画风", L"زيت",
+			L"Масло", L"Ölmalerei", L"Óleo", L"Olieverf",
+			L"Farba olejna", L"Yağlı boya");
+	case SC_FX_WATERCOLOR:
+		return LL14(L"水彩風", L"Watercolor", L"Aquarelle", L"Acquerello",
+			L"Acuarela", L"수채화", L"水彩", L"ألوان مائية",
+			L"Акварель", L"Aquarell", L"Aquarela", L"Aquarel",
+			L"Akwarela", L"Sulu boya");
+	case SC_FX_PENCIL:
+		return LL14(L"鉛筆画", L"Pencil sketch", L"Crayon", L"Matita",
+			L"Lápiz", L"연필화", L"铅笔素描", L"قلم رصاص",
+			L"Карандаш", L"Bleistift", L"Lápis", L"Potlood",
+			L"Ołówek", L"Kurşun kalem");
+	case SC_FX_DREAM:
+		return LL14(L"ドリーム", L"Dream", L"Rêve", L"Sogno",
+			L"Sueño", L"드림", L"梦幻", L"حلم",
+			L"Мечта", L"Traum", L"Sonho", L"Droom",
+			L"Sen", L"Rüya");
+	case SC_FX_GODRAYS:
+		return LL14(L"ゴッドレイ", L"God rays", L"Rayons divins", L"God rays",
+			L"Rayos de dios", L"갓레이", L"丁达尔光", L"أشعة إلهية",
+			L"Божественные лучи", L"Godrays", L"Raios divinos", L"Godrays",
+			L"Promienie boga", L"Tanrı ışınları");
+	case SC_FX_DISPLACE:
+		return LL14(L"ディスプレイス", L"Displace", L"Déplacement", L"Displace",
+			L"Desplazar", L"디스플레이스", L"置换", L"إزاحة",
+			L"Смещение", L"Displace", L"Deslocar", L"Displace",
+			L"Przesunięcie", L"Kaydırma");
+	case SC_FX_INTERLACE:
+		return LL14(L"インターレース", L"Interlace", L"Entrelacement", L"Interlacciato",
+			L"Entrelazado", L"인터레이스", L"隔行", L"تشابك",
+			L"Чересстрочная", L"Zeilensprung", L"Entrelaçado", L"Interlace",
+			L"Przeplot", L"Satır atlama");
+	case SC_FX_CHROMA_HEAVY:
+		return LL14(L"色収差強", L"Heavy chroma", L"Aberration forte", L"Aberrazione forte",
+			L"Aberración fuerte", L"강한 색수차", L"强色差", L"زيغ لوني قوي",
+			L"Сильная хроматика", L"Starke Chromatik", L"Aberração forte", L"Sterke chroma",
+			L"Silna aberracja", L"Güçlü kromatik");
+	case SC_FX_FOG:
+		return LL14(L"フォグ", L"Fog", L"Brouillard", L"Nebbia",
+			L"Niebla", L"안개", L"雾", L"ضباب",
+			L"Туман", L"Nebel", L"Névoa", L"Mist",
+			L"Mgła", L"Sis");
+	case SC_FX_SHARPEN_HEAVY:
+		return LL14(L"シャープ強", L"Heavy sharpen", L"Netteté forte", L"Nitidezza forte",
+			L"Nitidez fuerte", L"강한 샤픈", L"强锐化", L"حدة قوية",
+			L"Сильная резкость", L"Stark schärfen", L"Nitidez forte", L"Sterk verscherpen",
+			L"Silne wyostrzenie", L"Güçlü keskinleştir");
 	default:
 		return LL14(L"なし", L"None", L"Aucun", L"Nessuno",
 			L"Ninguno", L"없음", L"无", L"بدون",
@@ -2930,6 +3154,211 @@ CString CScreenCaptureDlg::FxDesc(int fx) const
 			L"Aumenta saturación", L"채도 증가", L"提高饱和度", L"زيادة التشبع",
 			L"Повышает насыщенность", L"Sättigung erhöhen", L"Aumenta saturação", L"Verzadiging verhogen",
 			L"Zwiększa nasycenie", L"Doygunluk artır");
+	case SC_FX_DESAT:
+		return LL14(L"彩度を下げる", L"Reduce saturation", L"Réduit la saturation", L"Riduce saturazione",
+			L"Reduce saturación", L"채도 감소", L"降低饱和度", L"تقليل التشبع",
+			L"Снижает насыщенность", L"Sättigung senken", L"Reduz saturação", L"Verzadiging verlagen",
+			L"Zmniejsza nasycenie", L"Doygunluk azalt");
+	case SC_FX_THRESHOLD:
+		return LL14(L"白黒の二値", L"Hard B&W threshold", L"Seuil N&B", L"Soglia B/N",
+			L"Umbral B/N", L"흑백 이진화", L"黑白二值", L"عتبة أبيض/أسود",
+			L"Жёсткий порог Ч/Б", L"Hartes S/W", L"Limiar P/B", L"Harde Z/W",
+			L"Twardy próg C/B", L"Sert S/B eşik");
+	case SC_FX_RED_CAST:
+		return LL14(L"赤みを足す", L"Add red tint", L"Ajoute du rouge", L"Aggiunge rosso",
+			L"Añade rojo", L"빨강 톤 추가", L"加红调", L"إضافة أحمر",
+			L"Добавляет красный", L"Rot hinzufügen", L"Adiciona vermelho", L"Rood toevoegen",
+			L"Dodaje czerwień", L"Kırmızı ekle");
+	case SC_FX_GREEN_CAST:
+		return LL14(L"緑みを足す", L"Add green tint", L"Ajoute du vert", L"Aggiunge verde",
+			L"Añade verde", L"초록 톤 추가", L"加绿调", L"إضافة أخضر",
+			L"Добавляет зелёный", L"Grün hinzufügen", L"Adiciona verde", L"Groen toevoegen",
+			L"Dodaje zieleń", L"Yeşil ekle");
+	case SC_FX_BLUE_CAST:
+		return LL14(L"青みを足す", L"Add blue tint", L"Ajoute du bleu", L"Aggiunge blu",
+			L"Añade azul", L"파랑 톤 추가", L"加蓝调", L"إضافة أزرق",
+			L"Добавляет синий", L"Blau hinzufügen", L"Adiciona azul", L"Blauw toevoegen",
+			L"Dodaje błękit", L"Mavi ekle");
+	case SC_FX_CYAN:
+		return LL14(L"シアン寄り", L"Cyan tint", L"Teinte cyan", L"Tinta ciano",
+			L"Tinte cian", L"시안 톤", L"青色调", L"درجة سماوية",
+			L"Голубой тон", L"Cyan-Ton", L"Tom ciano", L"Cyaantint",
+			L"Ton cyjanu", L"Camgöbeği ton");
+	case SC_FX_MAGENTA:
+		return LL14(L"マゼンタ寄り", L"Magenta tint", L"Teinte magenta", L"Tinta magenta",
+			L"Tinte magenta", L"마젠타 톤", L"品红调", L"درجة أرجوانية",
+			L"Пурпурный тон", L"Magenta-Ton", L"Tom magenta", L"Magentatint",
+			L"Ton magenty", L"Macenta ton");
+	case SC_FX_YELLOW:
+		return LL14(L"イエロー寄り", L"Yellow tint", L"Teinte jaune", L"Tinta gialla",
+			L"Tinte amarillo", L"옐로 톤", L"黄色调", L"درجة صفراء",
+			L"Жёлтый тон", L"Gelbton", L"Tom amarelo", L"Geeltint",
+			L"Ton żółci", L"Sarı ton");
+	case SC_FX_TEAL_ORANGE:
+		return LL14(L"映画風の補色", L"Cinematic teal/orange", L"Complémentaire cinéma", L"Complementari cinema",
+			L"Complementarios cine", L"시네마틱 보색", L"电影互补色", L"تكميلي سينمائي",
+			L"Кино-комплемент", L"Kino-Komplementär", L"Complementar cinema", L"Cinema-complementair",
+			L"Kinowe dopełnienie", L"Sinematik tamamlayıcı");
+	case SC_FX_FADE:
+		return LL14(L"洗いざらし風", L"Washed-out look", L"Aspect délavé", L"Aspetto sbiadito",
+			L"Aspecto desgastado", L"바랜 느낌", L"褪色感", L"مظهر باهت",
+			L"Выцветший вид", L"Verwaschener Look", L"Visual desbotado", L"Uitgewassen look",
+			L"Wyblakły wygląd", L"Soluk görünüm");
+	case SC_FX_SPOTLIGHT:
+		return LL14(L"中央を明るく", L"Brighten center", L"Éclaircit le centre", L"Schiarisce il centro",
+			L"Aclara el centro", L"중앙 밝게", L"中心提亮", L"إضاءة المركز",
+			L"Осветляет центр", L"Mitte aufhellen", L"Clareia o centro", L"Midden helderder",
+			L"Rozjaśnia środek", L"Merkezi parlat");
+	case SC_FX_BARS_H:
+		return LL14(L"細い横縞", L"Thin horizontal bars", L"Fines barres H", L"Sottili barre H",
+			L"Barras H finas", L"가는 가로줄", L"细横条", L"أشرطة أفقية رفيعة",
+			L"Тонкие гор. полосы", L"Dünne H-Balken", L"Barras H finas", L"Dunne H-balken",
+			L"Cienkie paski poz.", L"İnce yatay çubuk");
+	case SC_FX_BARS_V:
+		return LL14(L"細い縦縞", L"Thin vertical bars", L"Fines barres V", L"Sottili barre V",
+			L"Barras V finas", L"가는 세로줄", L"细竖条", L"أشرطة عمودية رفيعة",
+			L"Тонкие верт. полосы", L"Dünne V-Balken", L"Barras V finas", L"Dunne V-balken",
+			L"Cienkie paski pion.", L"İnce dikey çubuk");
+	case SC_FX_CHROMA:
+		return LL14(L"軽いRGBずれ", L"Light RGB split", L"Léger décalage RGB", L"Lieve split RGB",
+			L"Ligera separación RGB", L"약한 RGB 분리", L"轻微RGB偏移", L"انزياح RGB خفيف",
+			L"Лёгкий RGB-сдвиг", L"Leichte RGB-Trennung", L"Leve split RGB", L"Lichte RGB-split",
+			L"Lekki rozdział RGB", L"Hafif RGB kayması");
+	case SC_FX_EMBOSS:
+		return LL14(L"浮き彫り風", L"Relief emboss", L"Relief léger", L"Rilievo leggero",
+			L"Relieve ligero", L"얕은 엠보스", L"浅浮雕", L"نقش خفيف",
+			L"Лёгкое тиснение", L"Leichte Prägung", L"Relevo leve", L"Licht reliëf",
+			L"Lekka płaskorzeźba", L"Hafif kabartma");
+	case SC_FX_LIFT:
+		return LL14(L"中間調を持ち上げ", L"Lift midtones", L"Remonte les tons moyens", L"Alza i mezzitoni",
+			L"Eleva medios tonos", L"중간톤 올림", L"提升中间调", L"رفع الدرجات الوسطى",
+			L"Поднимает средние", L"Mitteltöne anheben", L"Eleva meios-tons", L"Middentonen omhoog",
+			L"Podnosi półtony", L"Orta tonları kaldır");
+	case SC_FX_MONO_BLUE:
+		return LL14(L"青みのモノクロ", L"Cool blue mono", L"Mono bleu froid", L"Mono blu freddo",
+			L"Mono azul frío", L"차가운 블루 모노", L"冷蓝单色", L"أحادي أزرق بارد",
+			L"Холодный синий моно", L"Kühles Blau-Mono", L"Mono azul frio", L"Koel blauw mono",
+			L"Zimny nieb. mono", L"Soğuk mavi mono");
+	case SC_FX_MONO_GREEN:
+		return LL14(L"緑みのモノクロ", L"Green mono tint", L"Mono teinté vert", L"Mono tinta verde",
+			L"Mono tinte verde", L"그린 모노 톤", L"绿色单色调", L"أحادي أخضر ملوّن",
+			L"Зелёный моно", L"Grün getöntes Mono", L"Mono tom verde", L"Groen getint mono",
+			L"Zielone mono", L"Yeşil mono ton");
+	case SC_FX_QUAD:
+		return LL14(L"四隅にミラー", L"Mirror into 4 tiles", L"Miroir en 4", L"Specchio in 4",
+			L"Espejo en 4", L"4칸 미러", L"四格镜像", L"مرآة إلى 4",
+			L"Зеркало на 4", L"In 4 spiegeln", L"Espelho em 4", L"Spiegel in 4",
+			L"Lustro na 4", L"4’e ayna");
+	case SC_FX_DUO_PURPLE:
+		return LL14(L"紫〜琥珀の二色", L"Purple–amber duo", L"Duo violet/ambre", L"Duo viola/ambra",
+			L"Dúo púrpura/ámbar", L"퍼플-앰버 듀오", L"紫琥珀双色", L"ثنائي بنفسجي/كهرماني",
+			L"Фиолет–янтарь", L"Lila–Bernstein", L"Duo roxo/âmbar", L"Paars–amber duo",
+			L"Fiolet–bursztyn", L"Mor–kehribar");
+	case SC_FX_BLUR_MEGA:
+		return LL14(L"非常に強いぼかし（重い）", L"Very strong blur (heavy)", L"Flou très fort (lourd)", L"Sfocatura molto forte (pesante)",
+			L"Desenfoque muy fuerte (pesado)", L"매우 강한 흐림(무거움)", L"超强模糊（重）", L"ضباب قوي جداً (ثقيل)",
+			L"Очень сильное размытие (тяж.)", L"Sehr starker Blur (schwer)", L"Desfoque muito forte (pesado)", L"Zeer sterke blur (zwaar)",
+			L"Bardzo silne rozmycie (ciężkie)", L"Çok güçlü blur (ağır)");
+	case SC_FX_MOTION_BLUR:
+		return LL14(L"横方向の残像（中〜重）", L"Horizontal smear (med–heavy)", L"Traînée H (moy–lourd)", L"Smear orizz. (medio–pesante)",
+			L"Arrastre H (med–pesado)", L"가로 잔상(중~무거움)", L"水平拖影（中~重）", L"أثر أفقي (متوسط–ثقيل)",
+			L"Гор. шлейф (сред–тяж.)", L"Horiz. Nachzieh (mittel–schwer)", L"Arrasto H (méd–pesado)", L"Horiz. sleep (mid–zwaar)",
+			L"Poziomy smug (śr.–ciężki)", L"Yatay iz (orta–ağır)");
+	case SC_FX_RADIAL_BLUR:
+		return LL14(L"中心から外側へ放射ぼかし（中）", L"Outward radial blur (med)", L"Flou radial vers l’extérieur (moy)", L"Blur radiale verso fuori (medio)",
+			L"Blur radial hacia afuera (med)", L"바깥 방사 블러(중)", L"向外径向模糊（中）", L"ضباب شعاعي للخارج (متوسط)",
+			L"Радиальное наружу (сред.)", L"Radial nach außen (mittel)", L"Blur radial para fora (méd)", L"Radiaal naar buiten (mid)",
+			L"Radialnie na zewnątrz (śr.)", L"Dışa radyal blur (orta)");
+	case SC_FX_ZOOM_BLUR:
+		return LL14(L"中心ズーム残像（中〜重）", L"Center zoom trails (med–heavy)", L"Traînées zoom centre (moy–lourd)", L"Code zoom centro (medio–pesante)",
+			L"Estelas zoom centro (med–pesado)", L"중심 줌 잔상(중~무거움)", L"中心变焦拖影（中~重）", L"آثار تكبير المركز (متوسط–ثقيل)",
+			L"Зум-шлейф центра (сред–тяж.)", L"Zoom-Spuren Mitte (mittel–schwer)", L"Rastros zoom centro (méd–pesado)", L"Zoom-sporen midden (mid–zwaar)",
+			L"Ślady zoom środka (śr.–ciężki)", L"Merkez zoom izi (orta–ağır)");
+	case SC_FX_SWIRL:
+		return LL14(L"渦巻き歪み（中）", L"Swirl warp (med)", L"Distorsion tourbillon (moy)", L"Distorsione vortice (medio)",
+			L"Distorsión remolino (med)", L"소용돌이 왜곡(중)", L"漩涡扭曲（中）", L"تشويه دوامة (متوسط)",
+			L"Вихревое искажение (сред.)", L"Wirbelverzerrung (mittel)", L"Distorção redemoinho (méd)", L"Wervelvervorming (mid)",
+			L"Zniekształcenie wiru (śr.)", L"Girdap bozulması (orta)");
+	case SC_FX_RIPPLE:
+		return LL14(L"同心円の波紋（中）", L"Concentric ripples (med)", L"Ondulations concentriques (moy)", L"Increspature concentriche (medio)",
+			L"Ondas concéntricas (med)", L"동심원 잔물결(중)", L"同心波纹（中）", L"تموجات مركزية (متوسط)",
+			L"Концентрическая рябь (сред.)", L"Konzentrische Wellen (mittel)", L"Ondulações concêntricas (méd)", L"Concentrische rimpels (mid)",
+			L"Koncentryczne fale (śr.)", L"Eşmerkez dalga (orta)");
+	case SC_FX_VORTEX:
+		return LL14(L"強い渦巻き（中〜重）", L"Strong vortex (med–heavy)", L"Vortex fort (moy–lourd)", L"Vortex forte (medio–pesante)",
+			L"Vórtice fuerte (med–pesado)", L"강한 볼텍스(중~무거움)", L"强涡流（中~重）", L"دوامة قوية (متوسط–ثقيل)",
+			L"Сильный вихрь (сред–тяж.)", L"Starker Vortex (mittel–schwer)", L"Vórtice forte (méd–pesado)", L"Sterke vortex (mid–zwaar)",
+			L"Silny wir (śr.–ciężki)", L"Güçlü vortex (orta–ağır)");
+	case SC_FX_HEAT_HAZE:
+		return LL14(L"熱気流のゆらぎ（中）", L"Heat shimmer (med)", L"Mirage de chaleur (moy)", L"Foschia di calore (medio)",
+			L"Calima térmica (med)", L"열기 아지랑이(중)", L"热浪闪烁（中）", L"وميض حراري (متوسط)",
+			L"Тепловое марево (сред.)", L"Hitze-Flimmern (mittel)", L"Cintilação de calor (méd)", L"Hitteflikkering (mid)",
+			L"Migotanie ciepła (śr.)", L"Isı titreşimi (orta)");
+	case SC_FX_GLITCH:
+		return LL14(L"帯ずれ＋RGBずれ（中）", L"Band + RGB glitch (med)", L"Glitch bandes+RGB (moy)", L"Glitch bande+RGB (medio)",
+			L"Glitch bandas+RGB (med)", L"밴드+RGB 글리치(중)", L"条带+RGB故障（中）", L"خلل شرائط+RGB (متوسط)",
+			L"Глитч полос+RGB (сред.)", L"Band+RGB-Glitch (mittel)", L"Glitch faixas+RGB (méd)", L"Band+RGB-glitch (mid)",
+			L"Glitch pasm+RGB (śr.)", L"Şerit+RGB glitch (orta)");
+	case SC_FX_CRT_CURVE:
+		return LL14(L"ブラウン管の湾曲＋走査線（中）", L"CRT bulge + scanlines (med)", L"Bombé CRT + lignes (moy)", L"Curva CRT + scanline (medio)",
+			L"Curva CRT + líneas (med)", L"CRT 곡면+스캔라인(중)", L"CRT鼓面+扫描线（中）", L"تحدب CRT + خطوط (متوسط)",
+			L"Выпуклость CRT + строки (сред.)", L"CRT-Wölbung + Zeilen (mittel)", L"Curva CRT + linhas (méd)", L"CRT-bol + scanlines (mid)",
+			L"Wypukłość CRT + linie (śr.)", L"CRT şişkinlik + tarama (orta)");
+	case SC_FX_KALEIDO:
+		return LL14(L"万華鏡ミラー（中）", L"Kaleido mirror (med)", L"Miroir kaléido (moy)", L"Specchio caleido (medio)",
+			L"Espejo caleido (med)", L"만화경 미러(중)", L"万花筒镜像（中）", L"مرآة مشكال (متوسط)",
+			L"Калейдоскоп-зеркало (сред.)", L"Kaleido-Spiegel (mittel)", L"Espelho caleido (méd)", L"Caleido-spiegel (mid)",
+			L"Lustro kalejdoskopu (śr.)", L"Kaleydoskop ayna (orta)");
+	case SC_FX_OIL:
+		return LL14(L"油絵風の平滑＋量子化（重）", L"Oil smooth + quantize (heavy)", L"Huile lisse+quantif. (lourd)", L"Olio liscio+quantizza (pesante)",
+			L"Óleo suave+cuantiza (pesado)", L"유화 평활+양자화(무거움)", L"油画平滑+量化（重）", L"زيت ناعم+تكميم (ثقيل)",
+			L"Масло сглаж.+квант. (тяж.)", L"Öl glätten+quant. (schwer)", L"Óleo suave+quantiza (pesado)", L"Olie glad+quant. (zwaar)",
+			L"Olej wygładź+kwant. (ciężkie)", L"Yağlı düzgün+nicel (ağır)");
+	case SC_FX_WATERCOLOR:
+		return LL14(L"ぼかし＋淡い色面（中〜重）", L"Blur + soft washes (med–heavy)", L"Flou + lavis doux (moy–lourd)", L"Blur + lavaggi soft (medio–pesante)",
+			L"Blur + lavados suaves (med–pesado)", L"블러+옅은 색면(중~무거움)", L"模糊+淡色面（中~重）", L"ضباب + غسلات ناعمة (متوسط–ثقيل)",
+			L"Размытие + мягкие заливки (сред–тяж.)", L"Blur + weiche Lavierung (mittel–schwer)", L"Blur + lavagens suaves (méd–pesado)", L"Blur + zachte wassingen (mid–zwaar)",
+			L"Blur + miękkie plamy (śr.–ciężki)", L"Blur + yumuşak yıka (orta–ağır)");
+	case SC_FX_PENCIL:
+		return LL14(L"線画スケッチ風（中）", L"Line sketch look (med)", L"Aspect croquis (moy)", L"Aspetto schizzo (medio)",
+			L"Aspecto boceto (med)", L"선화 스케치(중)", L"线稿素描（中）", L"مظهر رسم خطي (متوسط)",
+			L"Линейный набросок (сред.)", L"Strichskizze (mittel)", L"Visual de esboço (méd)", L"Lijnskets-look (mid)",
+			L"Szkic liniowy (śr.)", L"Çizgi eskiz (orta)");
+	case SC_FX_DREAM:
+		return LL14(L"柔らかい夢うつつ（中）", L"Soft dream haze (med)", L"Brume de rêve douce (moy)", L"Foschia sogno soft (medio)",
+			L"Neblina de sueño suave (med)", L"부드러운 드림(중)", L"柔和梦幻（中）", L"ضباب حلم ناعم (متوسط)",
+			L"Мягкая мечтательность (сред.)", L"Weicher Traumschleier (mittel)", L"Névoa de sonho suave (méd)", L"Zachte droomwaas (mid)",
+			L"Miękka senność (śr.)", L"Yumuşak rüya (orta)");
+	case SC_FX_GODRAYS:
+		return LL14(L"光条の放射（重）", L"Light shaft rays (heavy)", L"Rayons de lumière (lourd)", L"Raggi di luce (pesante)",
+			L"Rayos de luz (pesado)", L"빛줄기 방사(무거움)", L"光束放射（重）", L"أشعة ضوئية (ثقيل)",
+			L"Световые лучи (тяж.)", L"Lichtstrahlen (schwer)", L"Raios de luz (pesado)", L"Lichtstralen (zwaar)",
+			L"Promienie światła (ciężkie)", L"Işık huzmeleri (ağır)");
+	case SC_FX_DISPLACE:
+		return LL14(L"ノイズ変位（中）", L"Noise displace (med)", L"Déplacement bruit (moy)", L"Displace rumore (medio)",
+			L"Desplazamiento ruido (med)", L"노이즈 변위(중)", L"噪点置换（中）", L"إزاحة ضوضاء (متوسط)",
+			L"Смещение шумом (сред.)", L"Rausch-Displace (mittel)", L"Deslocar com ruído (méd)", L"Ruis-displace (mid)",
+			L"Przesunięcie szumem (śr.)", L"Gürültü kaydırma (orta)");
+	case SC_FX_INTERLACE:
+		return LL14(L"奇数行シフト（軽〜中）", L"Odd-line shift (light–med)", L"Décalage lignes impaires (lég–moy)", L"Shift righe dispari (leg–medio)",
+			L"Desfase líneas impares (lig–med)", L"홀수 줄 시프트(가벼움~중)", L"奇数行偏移（轻~中）", L"إزاحة الأسطر الفردية (خفيف–متوسط)",
+			L"Сдвиг нечётных строк (лёг–сред.)", L"Ungerade Zeilen verschieben (leicht–mittel)", L"Deslocar linhas ímpares (leve–méd)", L"Oneven regels verschuiven (licht–mid)",
+			L"Przesunięcie nieparzystych (lek–śr.)", L"Tek satır kaydır (hafif–orta)");
+	case SC_FX_CHROMA_HEAVY:
+		return LL14(L"強いRGBずれ（中）", L"Strong RGB split (med)", L"Fort décalage RGB (moy)", L"Forte split RGB (medio)",
+			L"Fuerte separación RGB (med)", L"강한 RGB 분리(중)", L"强RGB偏移（中）", L"انزياح RGB قوي (متوسط)",
+			L"Сильный RGB-сдвиг (сред.)", L"Starke RGB-Trennung (mittel)", L"Forte split RGB (méd)", L"Sterke RGB-split (mid)",
+			L"Silny rozdział RGB (śr.)", L"Güçlü RGB kayması (orta)");
+	case SC_FX_FOG:
+		return LL14(L"霧っぽい白み＋周辺減光（中）", L"Foggy lift + vignette (med)", L"Voile brumeux + vignette (moy)", L"Velatura nebbia + vignette (medio)",
+			L"Velo niebla + viñeta (med)", L"안개+비네트(중)", L"雾白+暗角（中）", L"ضباب أبيض + تظليل (متوسط)",
+			L"Туманный подъём + виньетка (сред.)", L"Nebelschleier + Vignette (mittel)", L"Véu de névoa + vinheta (méd)", L"Mistwaas + vignet (mid)",
+			L"Mglista poświata + winieta (śr.)", L"Sis + vinyet (orta)");
+	case SC_FX_SHARPEN_HEAVY:
+		return LL14(L"強い輪郭強調（中）", L"Strong edge boost (med)", L"Netteté contours forte (moy)", L"Forte enfasi bordi (medio)",
+			L"Fuerte realce de bordes (med)", L"강한 윤곽 강조(중)", L"强轮廓锐化（中）", L"تعزيز حواف قوي (متوسط)",
+			L"Сильный акцент краёв (сред.)", L"Starke Kantenschärfung (mittel)", L"Forte realce de bordas (méd)", L"Sterke randboost (mid)",
+			L"Silne wyostrzenie krawędzi (śr.)", L"Güçlü kenar vurgusu (orta)");
 	default:
 		return LL14(L"効果なし", L"No effect", L"Aucun effet", L"Nessun effetto",
 			L"Sin efecto", L"효과 없음", L"无效果", L"بدون تأثير",
@@ -3978,20 +4407,20 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
 		L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	m_status.SetWindowText(LL14(
-		L"赤枠内がMP4。下の配線で効果を最大4段つなぎ可。Cropでウィンドウ一部。右クリックHideで映像オフ(音可)。HUDは録画されません。",
-		L"Red frame = MP4. Wire up to 4 FX below. Crop for a window region. Right-click Hide (audio OK). HUD not recorded.",
-		L"Cadre rouge = MP4. Chaînez jusqu'à 4 FX. Crop pour une région. Clic droit Hide. HUD non enregistré.",
-		L"Cornice rossa = MP4. Collega fino a 4 FX. Crop per regione. Destro Hide. HUD non registrato.",
-		L"Marco rojo = MP4. Encadene hasta 4 FX. Crop para región. Clic der. Hide. HUD no se graba.",
-		L"빨간 틀 = MP4. 아래에서 FX 최대 4단 연결. Crop으로 창 일부. 우클릭 Hide. HUD 미녹화.",
-		L"红框=MP4。下方可串联最多4段效果。Crop放局部。右键Hide。HUD不录。",
-		L"الإطار الأحمر = MP4. وصّل حتى 4 FX. Crop لمنطقة. يمين Hide. لا يُسجَّل HUD.",
-		L"Красная рамка = MP4. До 4 FX в цепочке. Crop для области. ПКМ Hide. HUD не пишется.",
-		L"Roter Rahmen = MP4. Bis 4 FX verketten. Crop für Ausschnitt. Rechtsklick Hide. HUD nicht aufgenommen.",
-		L"Moldura vermelha = MP4. Encadeie até 4 FX. Crop para região. Direito Hide. HUD não é gravado.",
-		L"Rood kader = MP4. Koppel tot 4 FX. Crop voor regio. Rechtsklik Hide. HUD niet opgenomen.",
-		L"Czerwona ramka = MP4. Połącz do 4 FX. Crop dla obszaru. PPM Hide. HUD nie jest nagrywany.",
-		L"Kırmızı çerçeve = MP4. En fazla 4 FX bağlayın. Crop ile bölge. Sağ tık Hide. HUD kayda girmez."));
+		L"赤枠内がMP4。下の配線で効果を最大8段つなぎ可。Cropでウィンドウ一部。右クリックHideで映像オフ(音可)。HUDは録画されません。",
+		L"Red frame = MP4. Wire up to 8 FX below. Crop for a window region. Right-click Hide (audio OK). HUD not recorded.",
+		L"Cadre rouge = MP4. Chaînez jusqu'à 8 FX. Crop pour une région. Clic droit Hide. HUD non enregistré.",
+		L"Cornice rossa = MP4. Collega fino a 8 FX. Crop per regione. Destro Hide. HUD non registrato.",
+		L"Marco rojo = MP4. Encadene hasta 8 FX. Crop para región. Clic der. Hide. HUD no se graba.",
+		L"빨간 틀 = MP4. 아래에서 FX 최대 8단 연결. Crop으로 창 일부. 우클릭 Hide. HUD 미녹화.",
+		L"红框=MP4。下方可串联最多8段效果。Crop放局部。右键Hide。HUD不录。",
+		L"الإطار الأحمر = MP4. وصّل حتى 8 FX. Crop لمنطقة. يمين Hide. لا يُسجَّل HUD.",
+		L"Красная рамка = MP4. До 8 FX в цепочке. Crop для области. ПКМ Hide. HUD не пишется.",
+		L"Roter Rahmen = MP4. Bis 8 FX verketten. Crop für Ausschnitt. Rechtsklick Hide. HUD nicht aufgenommen.",
+		L"Moldura vermelha = MP4. Encadeie até 8 FX. Crop para região. Direito Hide. HUD não é gravado.",
+		L"Rood kader = MP4. Koppel tot 8 FX. Crop voor regio. Rechtsklik Hide. HUD niet opgenomen.",
+		L"Czerwona ramka = MP4. Połącz do 8 FX. Crop dla obszaru. PPM Hide. HUD nie jest nagrywany.",
+		L"Kırmızı çerçeve = MP4. En fazla 8 FX bağlayın. Crop ile bölge. Sağ tık Hide. HUD kayda girmez."));
 
 	RefreshModeCombo();
 
@@ -4293,6 +4722,7 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	UpdatePreview();
 	RefreshOpaqueUi();
 	StartPeakMonitor();
+	FitToWorkArea();
 	CCC_CaptionLayout(m_hWnd); // 先に P/閉じる等を確定してから ? を左隣へ
 	LayoutHelpBtn();
 	return TRUE;
@@ -5501,6 +5931,123 @@ void CScreenCaptureDlg::CloseModeless()
 		DestroyWindow();
 }
 
+void CScreenCaptureDlg::ShiftChildrenBelow(CWnd* dlg, int yThresholdClient, int dy)
+{
+	if (!dlg || !dlg->GetSafeHwnd() || dy == 0) return;
+	for (CWnd* p = dlg->GetWindow(GW_CHILD); p; p = p->GetWindow(GW_HWNDNEXT)) {
+		CRect r;
+		p->GetWindowRect(&r);
+		dlg->ScreenToClient(&r);
+		if (r.top >= yThresholdClient)
+			p->SetWindowPos(NULL, r.left, r.top + dy, 0, 0,
+				SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+}
+
+void CScreenCaptureDlg::FitToWorkArea()
+{
+	if (!GetSafeHwnd()) return;
+
+	HMONITOR mon = MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
+	MONITORINFO mi = { sizeof(mi) };
+	if (!GetMonitorInfo(mon, &mi)) return;
+	const int workW = mi.rcWork.right - mi.rcWork.left;
+	const int workH = mi.rcWork.bottom - mi.rcWork.top;
+	if (workW < 200 || workH < 200) return;
+
+	CRect wr;
+	GetWindowRect(&wr);
+	int overflow = wr.Height() - workH;
+	const int margin = 8;
+
+	auto shrinkCtrlH = [](CWnd& w, int shrink) {
+		if (!w.GetSafeHwnd() || shrink <= 0) return;
+		CRect r;
+		w.GetWindowRect(&r);
+		w.SetWindowPos(NULL, 0, 0, r.Width(), r.Height() - shrink,
+			SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	};
+
+	// 1) FX配線を優先して縮める（パレットは ScFxMakeMetrics が列増で追従）
+	if (overflow > margin && m_fxWire.GetSafeHwnd()) {
+		CRect fx;
+		m_fxWire.GetWindowRect(&fx);
+		ScreenToClient(&fx);
+		const int minFxH = 120;
+		int can = fx.Height() - minFxH;
+		if (can < 0) can = 0;
+		int take = overflow - margin;
+		if (take > can) take = can;
+		if (take > 0) {
+			shrinkCtrlH(m_fxWire, take);
+			ShiftChildrenBelow(this, fx.bottom, -take);
+			SetWindowPos(NULL, 0, 0, wr.Width(), wr.Height() - take,
+				SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+			GetWindowRect(&wr);
+			overflow = wr.Height() - workH;
+			m_fxWire.Invalidate(FALSE);
+		}
+	}
+
+	// 2) プレビュー高さを縮める
+	if (overflow > margin && m_preview.GetSafeHwnd()) {
+		CRect pv;
+		m_preview.GetWindowRect(&pv);
+		ScreenToClient(&pv);
+		const int minPvH = 110;
+		int can = pv.Height() - minPvH;
+		if (can < 0) can = 0;
+		int take = overflow - margin;
+		if (take > can) take = can;
+		if (take > 0) {
+			shrinkCtrlH(m_preview, take);
+			ShiftChildrenBelow(this, pv.bottom, -take);
+			SetWindowPos(NULL, 0, 0, wr.Width(), wr.Height() - take,
+				SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+			GetWindowRect(&wr);
+			overflow = wr.Height() - workH;
+			m_preview.Invalidate(FALSE);
+		}
+	}
+
+	// 3) リスト高さを縮める
+	if (overflow > margin && m_avail.GetSafeHwnd() && m_layer.GetSafeHwnd()) {
+		CRect a;
+		m_avail.GetWindowRect(&a);
+		ScreenToClient(&a);
+		const int minListH = 36;
+		int can = a.Height() - minListH;
+		if (can < 0) can = 0;
+		int take = overflow - margin;
+		if (take > can) take = can;
+		if (take > 0) {
+			shrinkCtrlH(m_avail, take);
+			shrinkCtrlH(m_layer, take);
+			ShiftChildrenBelow(this, a.bottom, -take);
+			SetWindowPos(NULL, 0, 0, wr.Width(), wr.Height() - take,
+				SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+			GetWindowRect(&wr);
+			overflow = wr.Height() - workH;
+		}
+	}
+
+	// 横は通常余裕。万一は作業領域内へクランプのみ
+	GetWindowRect(&wr);
+	int x = wr.left, y = wr.top, w = wr.Width(), h = wr.Height();
+	if (w > workW) w = workW;
+	if (h > workH) h = workH;
+	if (x < mi.rcWork.left) x = mi.rcWork.left;
+	if (y < mi.rcWork.top) y = mi.rcWork.top;
+	if (x + w > mi.rcWork.right) x = mi.rcWork.right - w;
+	if (y + h > mi.rcWork.bottom) y = mi.rcWork.bottom - h;
+	// 余白があれば中央寄せ
+	if (w < workW && h <= workH) {
+		x = mi.rcWork.left + (workW - w) / 2;
+		y = mi.rcWork.top + (workH - h) / 2;
+	}
+	SetWindowPos(NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 void CScreenCaptureDlg::LayoutHelpBtn()
 {
 	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
@@ -5537,6 +6084,26 @@ void CScreenCaptureDlg::OnSize(UINT nType, int cx, int cy)
 		CCC_CaptionLayout(m_hWnd);
 		LayoutHelpBtn();
 	}
+}
+
+LRESULT CScreenCaptureDlg::OnDpiChanged(WPARAM /*wParam*/, LPARAM lParam)
+{
+	const RECT* prc = reinterpret_cast<const RECT*>(lParam);
+	if (prc) {
+		SetWindowPos(NULL, prc->left, prc->top,
+			prc->right - prc->left, prc->bottom - prc->top,
+			SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+	CCC_CaptionRefreshDpi(m_hWnd);
+	FitToWorkArea();
+	LayoutHelpBtn();
+	// 配線メトリクスはクライアント矩形基準なので再描画のみ（ちらつき抑制で erase なし）
+	if (m_fxWire.GetSafeHwnd())
+		m_fxWire.Invalidate(FALSE);
+	if (m_preview.GetSafeHwnd())
+		m_preview.Invalidate(FALSE);
+	RefreshOpaqueUi();
+	return 0;
 }
 
 void CScreenCaptureDlg::OnBnClickedClose()

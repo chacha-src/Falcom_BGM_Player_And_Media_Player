@@ -11587,6 +11587,24 @@ void CCC_CaptionPlaceHelpBtn(HWND hDlg, CWnd* pHelp)
         SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
+void CCC_CaptionRefreshDpi(HWND hDlg)
+{
+    CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
+    if (!e || !e->installed || !::IsWindow(hDlg))
+        return;
+    const UINT dpi = CCC_GetControlDpi(hDlg);
+    int sysCap = ::GetSystemMetricsForDpi(SM_CYCAPTION, dpi);
+    if (sysCap < 24)
+        sysCap = 24;
+    int capH = CCC_ScaleDpi(32, dpi);
+    if (capH < CCC_CAP_BTN + 6)
+        capH = CCC_CAP_BTN + 6;
+    if (capH < sysCap)
+        capH = sysCap;
+    e->height = capH;
+    CCC_CaptionLayout(hDlg);
+}
+
 void CCC_CaptionLayout(HWND hDlg)
 {
     CCC_CaptionEntry* e = CCC_FindCaption(hDlg);

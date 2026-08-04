@@ -173,6 +173,8 @@ protected:
 	void GetFxChain(int* fxOut, int* nOut) const;
 	void LayoutHelpBtn();
 	void ShowHelpSheet();
+	void FitToWorkArea();
+	static void ShiftChildrenBelow(CWnd* dlg, int yThresholdClient, int dy);
 
 public:
 	CString FxName(int fx) const;
@@ -205,6 +207,7 @@ public:
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg LRESULT OnDpiChanged(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnDestroy();
 	virtual void OnCancel();
 	virtual void OnOK();

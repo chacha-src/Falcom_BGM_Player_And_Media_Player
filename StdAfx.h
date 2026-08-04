@@ -549,6 +549,8 @@ void CCC_CaptionLayout(HWND hDlg);
 void CCC_CaptionUnregister(HWND hDlg);
 // キャプション隣の「?」を、実在する CAP ボタンと「メインに追随」の左へ置く（欠けるボタン分の空きを作らない）
 void CCC_CaptionPlaceHelpBtn(HWND hDlg, CWnd* pHelp);
+// Per-Monitor DPI 変更時にキャプション帯高さを再計算してレイアウト
+void CCC_CaptionRefreshDpi(HWND hDlg);
 
 #define cmnh() 	CBrush m_brDlg; \
 afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct); \

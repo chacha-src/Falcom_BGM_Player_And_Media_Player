@@ -113,6 +113,24 @@ LRESULT COggApp::ProcessWndProcException(CException* e, const MSG* pMsg)
 
 BOOL COggApp::InitInstance()
 {
+	// マニフェストに dpiAwareness を足すと SxS が壊れやすいので API で Per-Monitor V2 を要求
+	{
+		HMODULE hUser = ::GetModuleHandleW(L"user32.dll");
+		if (hUser) {
+			typedef BOOL(WINAPI* PFN_SetProcessDpiAwarenessContext)(HANDLE);
+			auto pSet = (PFN_SetProcessDpiAwarenessContext)::GetProcAddress(hUser, "SetProcessDpiAwarenessContext");
+			if (pSet) {
+#ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+#define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE)(LONG_PTR)-4)
+#endif
+				pSet(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+			} else {
+				typedef BOOL(WINAPI* PFN_SetProcessDPIAware)(void);
+				auto pOld = (PFN_SetProcessDPIAware)::GetProcAddress(hUser, "SetProcessDPIAware");
+				if (pOld) pOld();
+			}
+		}
+	}
 //	INITCOMMONCONTROLSEX InitCtrls;
 //	InitCtrls.dwSize = sizeof(InitCtrls);
 	// アプリケーションで使用するすべてのコモン コントロール クラスを含めるには、
@@ -1003,13 +1021,13 @@ BOOL COggApp::InitInstance()
 		|| savedata.cap_monitor_idx < 0 || savedata.cap_monitor_idx > 63)
 		savedata.cap_monitor_idx = 0;
 	if (datFileSize < (int)(offsetof(save, cap_effect) + sizeof(savedata.cap_effect))
-		|| savedata.cap_effect < 0 || savedata.cap_effect >= 31)
+		|| savedata.cap_effect < 0 || savedata.cap_effect >= 72)
 		savedata.cap_effect = 0;
 	if (datFileSize < (int)(offsetof(save, cap_fx_n) + sizeof(savedata.cap_fx_n))
 		|| savedata.cap_fx_n < 0 || savedata.cap_fx_n > 8)
 		savedata.cap_fx_n = 0;
 	auto clampFx = [](int v) -> int {
-		if (v < 0 || v >= 31) return 0; // SC_FX_COUNT
+		if (v < 0 || v >= 72) return 0; // SC_FX_COUNT
 		return v;
 	};
 	if (datFileSize < (int)(offsetof(save, cap_fx0) + sizeof(savedata.cap_fx0)))

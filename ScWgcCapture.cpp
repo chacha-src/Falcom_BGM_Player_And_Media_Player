@@ -1081,8 +1081,13 @@ static void ScFxCpuOne(BYTE* bgra, int w, int h, int stride, int effect, float t
 	switch (effect) {
 	case SC_FX_BLUR_SOFT:
 	case SC_FX_BLUR_STRONG:
+	case SC_FX_BLUR_MEGA:
+	case SC_FX_MOTION_BLUR:
+	case SC_FX_RADIAL_BLUR:
+	case SC_FX_ZOOM_BLUR:
+	case SC_FX_GODRAYS:
 	case SC_FX_BLOOM:
-		// 4K箱型は捨てる（色味なしのまま / GPU任せ）
+		// 重量系は GPU 任せ（失敗時は素通し）
 		break;
 	case SC_FX_GRAY: ScFxCpuGray(bgra, w, h, stride); break;
 	case SC_FX_SEPIA: ScFxCpuSepia(bgra, w, h, stride); break;
@@ -1123,6 +1128,132 @@ static void ScFxCpuOne(BYTE* bgra, int w, int h, int stride, int effect, float t
 	case SC_FX_CONTRAST: ScFxCpuContrast(bgra, w, h, stride, 145); break;
 	case SC_FX_BRIGHTNESS: ScFxCpuBrightness(bgra, w, h, stride, 28); break;
 	case SC_FX_SATURATE: ScFxCpuTint(bgra, w, h, stride, 0, 0, 0, 160); break;
+	case SC_FX_DESAT: ScFxCpuTint(bgra, w, h, stride, 0, 0, 0, 45); break;
+	case SC_FX_THRESHOLD: {
+		for (int y = 0; y < h; ++y) {
+			BYTE* row = bgra + (size_t)y * (size_t)stride;
+			for (int x = 0; x < w; ++x) {
+				BYTE* p = row + (size_t)x * 4;
+				const int g = (p[0] * 29 + p[1] * 150 + p[2] * 77) >> 8;
+				const BYTE v = (g > 128) ? 255 : 0;
+				p[0] = p[1] = p[2] = v;
+			}
+		}
+		break;
+	}
+	case SC_FX_RED_CAST: ScFxCpuTint(bgra, w, h, stride, 45, -15, -20, 110); break;
+	case SC_FX_GREEN_CAST: ScFxCpuTint(bgra, w, h, stride, -20, 40, -15, 110); break;
+	case SC_FX_BLUE_CAST: ScFxCpuTint(bgra, w, h, stride, -20, -10, 50, 110); break;
+	case SC_FX_CYAN: ScFxCpuTint(bgra, w, h, stride, -25, 20, 35, 105); break;
+	case SC_FX_MAGENTA: ScFxCpuTint(bgra, w, h, stride, 35, -20, 30, 110); break;
+	case SC_FX_YELLOW: ScFxCpuTint(bgra, w, h, stride, 30, 25, -30, 110); break;
+	case SC_FX_TEAL_ORANGE: ScFxCpuTint(bgra, w, h, stride, 25, 5, -20, 120); break;
+	case SC_FX_FADE:
+		ScFxCpuBrightness(bgra, w, h, stride, 18);
+		ScFxCpuTint(bgra, w, h, stride, 8, 8, 8, 70);
+		break;
+	case SC_FX_SPOTLIGHT: {
+		const float cx = (w - 1) * 0.5f, cy = (h - 1) * 0.5f;
+		const float maxd = sqrtf(cx * cx + cy * cy);
+		for (int y = 0; y < h; ++y) {
+			BYTE* row = bgra + (size_t)y * (size_t)stride;
+			for (int x = 0; x < w; ++x) {
+				const float dx = (x - cx) / maxd, dy = (y - cy) / maxd;
+				float v = 1.15f - (dx * dx + dy * dy) * 1.4f;
+				if (v < 0.25f) v = 0.25f;
+				if (v > 1.25f) v = 1.25f;
+				BYTE* p = row + (size_t)x * 4;
+				for (int k = 0; k < 3; ++k) {
+					int t = (int)(p[k] * v);
+					if (t > 255) t = 255;
+					p[k] = (BYTE)t;
+				}
+			}
+		}
+		break;
+	}
+	case SC_FX_BARS_H:
+		for (int y = 0; y < h; y += 4) {
+			BYTE* row = bgra + (size_t)y * (size_t)stride;
+			for (int x = 0; x < w; ++x) {
+				BYTE* p = row + (size_t)x * 4;
+				p[0] = (BYTE)((p[0] * 50) >> 6);
+				p[1] = (BYTE)((p[1] * 50) >> 6);
+				p[2] = (BYTE)((p[2] * 50) >> 6);
+			}
+		}
+		break;
+	case SC_FX_BARS_V:
+		for (int y = 0; y < h; ++y) {
+			BYTE* row = bgra + (size_t)y * (size_t)stride;
+			for (int x = 0; x < w; x += 4) {
+				BYTE* p = row + (size_t)x * 4;
+				p[0] = (BYTE)((p[0] * 50) >> 6);
+				p[1] = (BYTE)((p[1] * 50) >> 6);
+				p[2] = (BYTE)((p[2] * 50) >> 6);
+			}
+		}
+		break;
+	case SC_FX_CHROMA:
+		ScFxCpuTint(bgra, w, h, stride, 15, 0, -15, 120);
+		break;
+	case SC_FX_EMBOSS: ScFxCpuSharpen(bgra, w, h, stride); break;
+	case SC_FX_LIFT: ScFxCpuBrightness(bgra, w, h, stride, 20); ScFxCpuContrast(bgra, w, h, stride, 90); break;
+	case SC_FX_MONO_BLUE:
+		ScFxCpuGray(bgra, w, h, stride);
+		ScFxCpuTint(bgra, w, h, stride, -15, 5, 40, 100);
+		break;
+	case SC_FX_MONO_GREEN:
+		ScFxCpuGray(bgra, w, h, stride);
+		ScFxCpuTint(bgra, w, h, stride, -20, 35, -15, 100);
+		break;
+	case SC_FX_QUAD: ScFxCpuMirror(bgra, w, h, stride); ScFxCpuFlipV(bgra, w, h, stride); break;
+	case SC_FX_DUO_PURPLE: ScFxCpuTint(bgra, w, h, stride, 30, -15, 35, 115); break;
+	case SC_FX_SWIRL:
+	case SC_FX_RIPPLE:
+	case SC_FX_VORTEX:
+	case SC_FX_HEAT_HAZE:
+	case SC_FX_KALEIDO:
+	case SC_FX_DISPLACE:
+		ScFxCpuWaveLike(bgra, w, h, stride, timeSec, FALSE);
+		break;
+	case SC_FX_GLITCH:
+		ScFxCpuTint(bgra, w, h, stride, 20, 0, -20, 130);
+		ScFxCpuNoise(bgra, w, h, stride, timeSec);
+		break;
+	case SC_FX_CRT_CURVE:
+		ScFxCpuScanline(bgra, w, h, stride);
+		ScFxCpuVignette(bgra, w, h, stride);
+		break;
+	case SC_FX_OIL:
+		ScFxCpuPoster(bgra, w, h, stride);
+		ScFxCpuSharpen(bgra, w, h, stride);
+		break;
+	case SC_FX_WATERCOLOR:
+	case SC_FX_DREAM:
+		ScFxCpuBrightness(bgra, w, h, stride, 16);
+		ScFxCpuTint(bgra, w, h, stride, 8, 6, 4, 85);
+		break;
+	case SC_FX_PENCIL:
+		ScFxCpuGray(bgra, w, h, stride);
+		ScFxCpuSharpen(bgra, w, h, stride);
+		ScFxCpuInvert(bgra, w, h, stride);
+		break;
+	case SC_FX_INTERLACE:
+		ScFxCpuScanline(bgra, w, h, stride);
+		break;
+	case SC_FX_CHROMA_HEAVY:
+		ScFxCpuTint(bgra, w, h, stride, 25, -5, -25, 140);
+		break;
+	case SC_FX_FOG:
+		ScFxCpuBrightness(bgra, w, h, stride, 22);
+		ScFxCpuTint(bgra, w, h, stride, 10, 12, 16, 55);
+		ScFxCpuVignette(bgra, w, h, stride);
+		break;
+	case SC_FX_SHARPEN_HEAVY:
+		ScFxCpuSharpen(bgra, w, h, stride);
+		ScFxCpuContrast(bgra, w, h, stride, 130);
+		break;
 	default: break;
 	}
 }
@@ -1159,13 +1290,19 @@ static void ScFxReleaseGpuCache()
 
 static BOOL ScFxEnsureShaders(ScFxGpuCache& c)
 {
-	if (c.compiled) return (c.psBlur && c.psColor) ? TRUE : FALSE;
+	enum { kColorShaderVer = 3 };
+	static int s_colorVer = 0;
+	if (c.compiled && s_colorVer == kColorShaderVer)
+		return (c.psBlur && c.psColor) ? TRUE : FALSE;
+	c.psBlur = nullptr;
+	c.psColor = nullptr;
 	c.compiled = 1;
+	s_colorVer = kColorShaderVer;
 	static const char kBlur[] =
 		"Texture2D tex0 : register(t0); SamplerState samp0 : register(s0);\n"
 		"cbuffer CB : register(b0) { float2 texel; float2 dir; float radius; float3 pad; };\n"
 		"float4 PSMain(float4 p:SV_Position, float2 uv:TEXCOORD0):SV_Target{\n"
-		"  int R=(int)radius; if(R<1)R=1; if(R>6)R=6;\n"
+		"  int R=(int)radius; if(R<1)R=1; if(R>8)R=8;\n"
 		"  float4 a=0; float wsum=0;\n"
 		"  [loop] for(int i=-R;i<=R;++i){\n"
 		"    float wt=1.0-(abs((float)i)/(float)(R+1));\n"
@@ -1189,6 +1326,30 @@ static BOOL ScFxEnsureShaders(ScFxGpuCache& c)
 		"  } else if(mode>25.5 && mode<26.5){\n"
 		"    float2 d=u-0.5; float r=length(d); float nr=pow(saturate(r*1.35),0.72);\n"
 		"    if(r>1e-4) u=0.5+d*(nr/r); }\n"
+		"  else if(mode>48.5 && mode<49.5){\n"
+		"    float2 q=u; if(q.x>0.5)q.x=1-q.x; if(q.y>0.5)q.y=1-q.y; u=saturate(q*2.0); }\n"
+		"  else if(mode>54.5 && mode<55.5){\n"
+		"    float2 d=u-0.5; float a=atan2(d.y,d.x)+length(d)*3.2; float r=length(d);\n"
+		"    u=saturate(0.5+float2(cos(a),sin(a))*r); }\n"
+		"  else if(mode>55.5 && mode<56.5){\n"
+		"    float2 d=u-0.5; float r=length(d);\n"
+		"    u+=normalize(d+1e-5)*sin(r*40.0-time*6.0)*0.018; }\n"
+		"  else if(mode>56.5 && mode<57.5){\n"
+		"    float2 d=u-0.5; float a=atan2(d.y,d.x)+6.0*(0.7-length(d)); float r=length(d);\n"
+		"    u=saturate(0.5+float2(cos(a),sin(a))*r); }\n"
+		"  else if(mode>57.5 && mode<58.5){\n"
+		"    u.x+=sin(u.y*30.0+time*5.0)*0.01; u.y+=cos(u.x*28.0+time*4.0)*0.008; }\n"
+		"  else if(mode>58.5 && mode<59.5){\n"
+		"    float band=floor(u.y*18.0); u.x+=sin(band*12.0+time*8.0)*0.035*(fmod(band,2.0)*2.0-1.0); }\n"
+		"  else if(mode>59.5 && mode<60.5){\n"
+		"    float2 d=u-0.5; float r=length(d); float nr=r+(r*r)*0.55; if(r>1e-4)u=0.5+d*(nr/r); }\n"
+		"  else if(mode>60.5 && mode<61.5){\n"
+		"    float2 d=u-0.5; float a=atan2(d.y,d.x); float r=length(d);\n"
+		"    a=fmod(a+3.14159,1.0472)-0.5236; u=saturate(0.5+float2(cos(a),sin(a))*r); }\n"
+		"  else if(mode>66.5 && mode<67.5){\n"
+		"    float n=hash21(u*float2(90.0,70.0)+time)-0.5; u+=float2(n,n*0.7)*0.03; }\n"
+		"  else if(mode>67.5 && mode<68.5){\n"
+		"    if(fmod(floor(u.y/(texel.y*2.0+1e-6)),2.0)>0.5) u.x+=0.012; }\n"
 		"  float4 c=tex0.SampleLevel(samp0,saturate(u),0);\n"
 		"  if(mode>2.5 && mode<3.5){ float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=g; }\n"
 		"  else if(mode>3.5 && mode<4.5){\n"
@@ -1261,6 +1422,102 @@ static BOOL ScFxEnsureShaders(ScFxGpuCache& c)
 		"  else if(mode>28.5 && mode<29.5){ c.rgb=saturate(c.rgb+0.12); }\n"
 		"  else if(mode>29.5 && mode<30.5){\n"
 		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(lerp(float3(g,g,g),c.rgb,1.6)); }\n"
+		"  else if(mode>30.5 && mode<31.5){\n"
+		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(lerp(c.rgb,float3(g,g,g),0.65)); }\n"
+		"  else if(mode>31.5 && mode<32.5){\n"
+		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=(g>0.5)?1:0; }\n"
+		"  else if(mode>32.5 && mode<33.5){ c.rgb=saturate(c.rgb*float3(1.35,0.85,0.80)+float3(0.05,0,0)); }\n"
+		"  else if(mode>33.5 && mode<34.5){ c.rgb=saturate(c.rgb*float3(0.80,1.30,0.85)+float3(0,0.04,0)); }\n"
+		"  else if(mode>34.5 && mode<35.5){ c.rgb=saturate(c.rgb*float3(0.80,0.90,1.35)+float3(0,0,0.05)); }\n"
+		"  else if(mode>35.5 && mode<36.5){ c.rgb=saturate(c.rgb*float3(0.70,1.15,1.25)); }\n"
+		"  else if(mode>36.5 && mode<37.5){ c.rgb=saturate(c.rgb*float3(1.25,0.75,1.20)); }\n"
+		"  else if(mode>37.5 && mode<38.5){ c.rgb=saturate(c.rgb*float3(1.25,1.20,0.70)); }\n"
+		"  else if(mode>38.5 && mode<39.5){\n"
+		"    float g=dot(c.rgb,float3(0.114,0.587,0.299));\n"
+		"    c.rgb=saturate(lerp(float3(0.05,0.35,0.40),float3(1.0,0.55,0.20),g)*0.55+c.rgb*0.55); }\n"
+		"  else if(mode>39.5 && mode<40.5){\n"
+		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(lerp(c.rgb,float3(0.92,0.90,0.88),0.45)+0.06); }\n"
+		"  else if(mode>40.5 && mode<41.5){\n"
+		"    float2 d=u-0.5; float v=1.2-dot(d,d)*1.8; c.rgb*=saturate(max(v,0.22)); }\n"
+		"  else if(mode>41.5 && mode<42.5){\n"
+		"    float s=frac(u.y/(texel.y*4.0+1e-6)); if(s<0.5) c.rgb*=0.62; }\n"
+		"  else if(mode>42.5 && mode<43.5){\n"
+		"    float s=frac(u.x/(texel.x*4.0+1e-6)); if(s<0.5) c.rgb*=0.62; }\n"
+		"  else if(mode>43.5 && mode<44.5){\n"
+		"    float r=tex0.SampleLevel(samp0,saturate(u+float2(texel.x*2,0)),0).r;\n"
+		"    float b=tex0.SampleLevel(samp0,saturate(u-float2(texel.x*2,0)),0).b;\n"
+		"    c.rgb=saturate(float3(r,c.g,b)); }\n"
+		"  else if(mode>44.5 && mode<45.5){\n"
+		"    float4 up=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y)),0);\n"
+		"    float4 lf=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x,0)),0);\n"
+		"    float e=dot(c.rgb-up.rgb,float3(0.3,0.3,0.3))+dot(c.rgb-lf.rgb,float3(0.3,0.3,0.3));\n"
+		"    c.rgb=saturate(0.5+e*2.2); }\n"
+		"  else if(mode>45.5 && mode<46.5){ c.rgb=saturate(c.rgb*0.92+0.10); }\n"
+		"  else if(mode>46.5 && mode<47.5){\n"
+		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(float3(g*0.75,g*0.9,g*1.25)); }\n"
+		"  else if(mode>47.5 && mode<48.5){\n"
+		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(float3(g*0.75,g*1.2,g*0.8)); }\n"
+		"  else if(mode>49.5 && mode<50.5){\n"
+		"    float g=dot(c.rgb,float3(0.114,0.587,0.299));\n"
+		"    c.rgb=saturate(lerp(float3(0.25,0.08,0.40),float3(1.0,0.75,0.35),g)*0.5+c.rgb*0.55); }\n"
+		"  else if(mode>51.5 && mode<52.5){\n"
+		"    float4 a=0; [unroll] for(int i=1;i<=6;++i){\n"
+		"      a+=tex0.SampleLevel(samp0,saturate(u+float2(texel.x*(float)i*2.5,0)),0);\n"
+		"      a+=tex0.SampleLevel(samp0,saturate(u-float2(texel.x*(float)i*2.5,0)),0); }\n"
+		"    c.rgb=saturate((c.rgb+a.rgb)/(1.0+12.0)); }\n"
+		"  else if(mode>52.5 && mode<53.5){\n"
+		"    float2 d=normalize(u-0.5+1e-5); float4 a=c;\n"
+		"    [unroll] for(int i=1;i<=7;++i) a+=tex0.SampleLevel(samp0,saturate(u-d*texel*float(i)*3.0),0);\n"
+		"    c.rgb=saturate(a.rgb/8.0); }\n"
+		"  else if(mode>53.5 && mode<54.5){\n"
+		"    float2 d=u-0.5; float4 a=c;\n"
+		"    [unroll] for(int i=1;i<=8;++i){ float t=1.0-(float)i/9.0; a+=tex0.SampleLevel(samp0,saturate(0.5+d*t),0); }\n"
+		"    c.rgb=saturate(a.rgb/9.0); }\n"
+		"  else if(mode>58.5 && mode<59.5){\n"
+		"    float r=tex0.SampleLevel(samp0,saturate(u+float2(0.02,0)),0).r;\n"
+		"    float b=tex0.SampleLevel(samp0,saturate(u-float2(0.02,0)),0).b;\n"
+		"    c.rgb=saturate(float3(r,c.g,b)); float n=hash21(u+time); if(n>0.97)c.rgb=1-c.rgb; }\n"
+		"  else if(mode>59.5 && mode<60.5){\n"
+		"    float s=frac(u.y/(texel.y*2.0+1e-6)); if(s<0.5)c.rgb*=0.7;\n"
+		"    float2 d=u-0.5; c.rgb*=saturate(1.05-dot(d,d)*1.3); }\n"
+		"  else if(mode>61.5 && mode<62.5){\n"
+		"    float4 a=0; a+=tex0.SampleLevel(samp0,saturate(u+float2(texel.x*3,0)),0);\n"
+		"    a+=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x*3,0)),0);\n"
+		"    a+=tex0.SampleLevel(samp0,saturate(u+float2(0,texel.y*3)),0);\n"
+		"    a+=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y*3)),0);\n"
+		"    a+=tex0.SampleLevel(samp0,saturate(u+float2(texel.x*2,texel.y*2)),0);\n"
+		"    a+=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x*2,-texel.y*2)),0);\n"
+		"    c.rgb=saturate((c.rgb*0.35+a.rgb*0.65/6.0)); c.rgb=floor(c.rgb*10.0+0.5)/10.0; }\n"
+		"  else if(mode>62.5 && mode<63.5){\n"
+		"    c.rgb=floor(c.rgb*6.0+0.5)/6.0; c.rgb=saturate(c.rgb*1.08+0.04); }\n"
+		"  else if(mode>63.5 && mode<64.5){\n"
+		"    float4 up=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y)),0);\n"
+		"    float4 dn=tex0.SampleLevel(samp0,saturate(u+float2(0, texel.y)),0);\n"
+		"    float4 lf=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x,0)),0);\n"
+		"    float4 rt=tex0.SampleLevel(samp0,saturate(u+float2( texel.x,0)),0);\n"
+		"    float e=saturate(length(rt.rgb-lf.rgb)+length(dn.rgb-up.rgb));\n"
+		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(1.0-(e*1.4)+(g*0.15)); }\n"
+		"  else if(mode>64.5 && mode<65.5){ c.rgb=saturate(c.rgb*0.85+0.12); }\n"
+		"  else if(mode>65.5 && mode<66.5){\n"
+		"    float2 d=normalize(u-0.5+1e-5); float4 a=0;\n"
+		"    [unroll] for(int i=1;i<=10;++i){\n"
+		"      float4 s=tex0.SampleLevel(samp0,saturate(u-d*texel*float(i)*4.0),0);\n"
+		"      a+=s*max(dot(s.rgb,float3(0.3,0.3,0.3))-0.55,0); }\n"
+		"    c.rgb=saturate(c.rgb+a.rgb*0.35); }\n"
+		"  else if(mode>68.5 && mode<69.5){\n"
+		"    float r=tex0.SampleLevel(samp0,saturate(u+float2(texel.x*5,0)),0).r;\n"
+		"    float b=tex0.SampleLevel(samp0,saturate(u-float2(texel.x*5,texel.y*2)),0).b;\n"
+		"    c.rgb=saturate(float3(r,c.g*0.95,b)); }\n"
+		"  else if(mode>69.5 && mode<70.5){\n"
+		"    float g=dot(c.rgb,float3(0.114,0.587,0.299));\n"
+		"    c.rgb=saturate(lerp(c.rgb,float3(0.78,0.82,0.88),0.45)+0.05);\n"
+		"    float2 d=u-0.5; c.rgb*=saturate(1.0-dot(d,d)*0.9); }\n"
+		"  else if(mode>70.5 && mode<71.5){\n"
+		"    float4 up=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y)),0);\n"
+		"    float4 dn=tex0.SampleLevel(samp0,saturate(u+float2(0, texel.y)),0);\n"
+		"    float4 lf=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x,0)),0);\n"
+		"    float4 rt=tex0.SampleLevel(samp0,saturate(u+float2( texel.x,0)),0);\n"
+		"    c.rgb=saturate(c.rgb*7 - up.rgb - dn.rgb - lf.rgb - rt.rgb); }\n"
 		"  return c;\n"
 		"}\n";
 	com_ptr<ID3DBlob> blob, err;
@@ -1368,16 +1625,24 @@ static BOOL ScFxGpuApplyChainLocked(BYTE* bgra, int w, int h, int stride,
 		ID3D11ShaderResourceView* srv = srcIsA ? c.srvA.get() : c.srvB.get();
 		ID3D11RenderTargetView* rtv = srcIsA ? c.rtvB.get() : c.rtvA.get();
 
-		if (fx == SC_FX_BLUR_SOFT || fx == SC_FX_BLUR_STRONG) {
-			const float radius = (fx == SC_FX_BLUR_STRONG) ? 4.f : 2.f;
+		if (fx == SC_FX_BLUR_SOFT || fx == SC_FX_BLUR_STRONG || fx == SC_FX_BLUR_MEGA
+			|| fx == SC_FX_DREAM || fx == SC_FX_WATERCOLOR) {
+			float radius = 2.f;
+			if (fx == SC_FX_BLUR_STRONG || fx == SC_FX_DREAM) radius = 4.f;
+			if (fx == SC_FX_BLUR_MEGA) radius = 6.f;
 			float cbH[8] = { 1.f / (float)w, 1.f / (float)h, 1.f, 0.f, radius, 0, 0, 0 };
 			float cbV[8] = { 1.f / (float)w, 1.f / (float)h, 0.f, 1.f, radius, 0, 0, 0 };
-			// H: src -> dst, V: dst -> src (最終は src 側に戻す)
 			ScFxDrawPass(c, srv, rtv, c.psBlur.get(), cbH);
 			ID3D11ShaderResourceView* srv2 = srcIsA ? c.srvB.get() : c.srvA.get();
 			ID3D11RenderTargetView* rtv2 = srcIsA ? c.rtvA.get() : c.rtvB.get();
 			ScFxDrawPass(c, srv2, rtv2, c.psBlur.get(), cbV);
-			// srcIsA unchanged (result back on same tex)
+			if (fx == SC_FX_DREAM || fx == SC_FX_WATERCOLOR) {
+				ID3D11ShaderResourceView* srv3 = srcIsA ? c.srvA.get() : c.srvB.get();
+				ID3D11RenderTargetView* rtv3 = srcIsA ? c.rtvB.get() : c.rtvA.get();
+				float cb[8] = { (float)fx, timeSec, 1.f / (float)w, 1.f / (float)h, 0, 0, 0, 0 };
+				ScFxDrawPass(c, srv3, rtv3, c.psColor.get(), cb);
+				srcIsA = !srcIsA;
+			}
 			continue;
 		}
 
