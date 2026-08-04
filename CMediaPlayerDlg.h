@@ -131,6 +131,7 @@ public:
 	CCustomStandardButton m_m3uExport, m_m3uImport;
 	CCustomStandardButton m_supe, m_st, m_prompt, m_cmdroll;
 	CCustomStandardButton m_abA, m_abB, m_abClr; // A-Bリピート
+	CCustomCheckBox m_seekLock; // シーク左: loop1/2つまみロック(既定ON)
 	CCustomStandardButton m_lrcExpand; // 歌詞パネル拡大/縮小
 	CCustomStandardButton m_toolsToggle; // 並べ替え/フォルダ帯の折りたたみ
 	CCustomStandardButton m_cheatBtn;    // 操作ガイド(?)
@@ -394,6 +395,7 @@ protected:
 	afx_msg void OnAbSetA();
 	afx_msg void OnAbSetB();
 	afx_msg void OnAbClear();
+	afx_msg void OnSeekLock();
 	afx_msg void OnLrcExpand();
 	afx_msg void OnToolsToggle();
 	afx_msg void OnCheatSheetBtn();

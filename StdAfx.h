@@ -495,6 +495,10 @@ struct save{
 	int cap_fx5;
 	int cap_fx6;
 	int cap_fx7;
+
+	// --- メディアプレイヤー シーク: ループつまみロック(末尾追記。旧.datは0=ロック) ---
+	// 0=ロック(loop1/2つまみ固定) 1=解除(loop1/2つまみ可動)。A-Bつまみは常に可動。
+	int mpSeekLoopUnlock;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

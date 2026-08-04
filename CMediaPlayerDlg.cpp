@@ -1013,6 +1013,11 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_ABA, &CMediaPlayerDlg::OnAbSetA)
 	ON_BN_CLICKED(IDC_MP_ABB, &CMediaPlayerDlg::OnAbSetB)
 	ON_BN_CLICKED(IDC_MP_ABCLR, &CMediaPlayerDlg::OnAbClear)
+	ON_BN_CLICKED(IDC_MP_SEEKLOCK, &CMediaPlayerDlg::OnSeekLock)
+	ON_COMMAND(ID_MP_SEEK_LOCK, &CMediaPlayerDlg::OnSeekLock)
+	ON_COMMAND(ID_MP_SEEK_ABCLR, &CMediaPlayerDlg::OnAbClear)
+	ON_COMMAND(ID_MP_SEEK_SETA, &CMediaPlayerDlg::OnAbSetA)
+	ON_COMMAND(ID_MP_SEEK_SETB, &CMediaPlayerDlg::OnAbSetB)
 	ON_BN_CLICKED(IDC_MP_LRCEXPAND, &CMediaPlayerDlg::OnLrcExpand)
 	ON_BN_CLICKED(IDC_MP_TOOLSTOGGLE, &CMediaPlayerDlg::OnToolsToggle)
 	ON_BN_CLICKED(IDC_MP_CHEATBTN, &CMediaPlayerDlg::OnCheatSheetBtn)
@@ -1203,6 +1208,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_abB.Create(_T("B"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_ABB);
 		if (!m_abClr.GetSafeHwnd())
 			m_abClr.Create(_T("A-B×"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_ABCLR);
+		if (!m_seekLock.GetSafeHwnd())
+			m_seekLock.Create(_T("Lock"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP, rc, this, IDC_MP_SEEKLOCK);
 		if (!m_lrcExpand.GetSafeHwnd())
 			m_lrcExpand.Create(_T("▾"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_LRCEXPAND);
 		if (!m_toolsToggle.GetSafeHwnd())
@@ -1243,6 +1250,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_addFolder.SetGradation(RGB(220, 240, 230), RGB(180, 220, 200), 0, TRUE);
 		if (m_findFilter.GetSafeHwnd())
 			m_findFilter.SetCheck(savedata.mpFindFilter ? BST_CHECKED : BST_UNCHECKED);
+		if (m_seekLock.GetSafeHwnd())
+			m_seekLock.SetCheck(savedata.mpSeekLoopUnlock ? BST_UNCHECKED : BST_CHECKED);
 	}
 
 	SetIcon(m_hIcon, TRUE);
@@ -1288,6 +1297,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_abB.SetWindowText(L"B");
 	if (m_abClr.GetSafeHwnd())
 		m_abClr.SetWindowText(LL14(L"A-B解除", L"Clear A-B", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 해제", L"清除A-B", L"مسح A-B", L"Сброс A-B", L"A-B aus", L"Limpar A-B", L"A-B uit", L"Wyczysc A-B", L"A-B sil"));
+	if (m_seekLock.GetSafeHwnd())
+		m_seekLock.SetWindowText(LL14(L"ロック", L"Lock", L"Verrou", L"Blocco", L"Bloqueo", L"잠금", L"锁定", L"قفل", L"Блок", L"Sperre", L"Travar", L"Vergrendel", L"Blokada", L"Kilit"));
 	if (m_lrcExpand.GetSafeHwnd())
 		m_lrcExpand.SetWindowText(savedata.mpLrcExpand ? L"▴" : L"▾");
 	if (m_toolsToggle.GetSafeHwnd())
@@ -1373,6 +1384,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	// シークスライダーに選択範囲(緑)を有効化。リソースでは付いていないため
 	// ここで付与しないと MirrorSeekVol の SetSelection(ループ範囲/緑追随)が描画されない。
 	m_seek.ModifyStyle(0, TBS_ENABLESELRANGE);
+	m_seek.SetSelectionLocked(savedata.mpSeekLoopUnlock ? FALSE : TRUE);
+	m_seek.SetAB(m_abApos, m_abBpos);
 
 	// 少し可愛い系の配色
 	m_prev.SetGradation(RGB(215, 235, 255), RGB(165, 205, 245), 0, TRUE);
@@ -1524,6 +1537,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_renzoku.SetFont(&m_fontChk, TRUE);
 	m_loop.SetFont(&m_fontChk, TRUE);
 	m_random.SetFont(&m_fontChk, TRUE);
+	if (m_seekLock.GetSafeHwnd())
+		m_seekLock.SetFont(&m_fontChk, TRUE);
 	m_kaisuuL.SetFont(&m_fontChk, TRUE);
 	// PreferWideMode は縦に引き伸ばして「ループ回数」だけ巨大化するので使わない
 	m_kaisuuL.SetPreferWideMode(FALSE);
@@ -1615,7 +1630,9 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_renzoku, LL14(L"プレイリストを順番に連続再生します。", L"Play the playlist continuously in order.", L"Lecture continue dans l'ordre.", L"Riproduzione continua in ordine.", L"Reproduccion continua en orden.", L"순서대로 연속 재생.", L"按顺序连续播放。", L"تشغيل متواصل بالترتيب.", L"Непрерывное воспроизведение по порядку.", L"Fortlaufend in Reihenfolge abspielen.", L"Reproducao continua em ordem.", L"Doorlopend afspelen op volgorde.", L"Odtwarzaj po kolei.", L"Sırayla sürekli çal."));
 	addTip(m_loop, LL14(L"選択した曲をループ再生します。", L"Loop the selected track.", L"Lire la piste en boucle.", L"Ripeti la traccia.", L"Repetir la pista.", L"선택한 곡을 반복 재생.", L"循环播放所选曲目。", L"تكرار المقطع المحدد.", L"Зациклить выбранный трек.", L"Ausgewahlten Titel wiederholen.", L"Repetir a faixa selecionada.", L"Geselecteerde track herhalen.", L"Zapętl wybrany utwór.", L"Seçili parçayı döngüye al."));
 	addTip(m_random, LL14(L"ランダム再生 / 順次再生を切り替えます。", L"Toggle random / sequential play.", L"Lecture aleatoire / sequentielle.", L"Riproduzione casuale / sequenziale.", L"Reproduccion aleatoria / secuencial.", L"랜덤 / 순차 재생 전환.", L"切换随机/顺序播放。", L"تبديل التشغيل العشوائي/المتسلسل.", L"Случайное / последовательное.", L"Zufall / Reihenfolge umschalten.", L"Aleatorio / sequencial.", L"Willekeurig / opeenvolgend.", L"Losowo / po kolei.", L"Rastgele / sıralı."));
-	addTip(m_seek, LL14(L"再生位置。緑の範囲はループ/A-B。端のつまみでA-B範囲を調整できます。", L"Position. Green range is loop/A-B. Drag edge thumbs to adjust A-B.", L"Position. Vert = boucle/A-B.", L"Posizione. Verde = loop/A-B.", L"Posicion. Verde = bucle/A-B.", L"재생 위치. 녹색=루프/A-B.", L"播放位置。绿色=循环/A-B。", L"الموضع. الأخضر=حلقة/A-B.", L"Позиция. Зелёный=цикл/A-B.", L"Position. Grun=Schleife/A-B.", L"Posicao. Verde=loop/A-B.", L"Positie. Groen=lus/A-B.", L"Pozycja. Zielony=petla/A-B.", L"Konum. Yesil=dongu/A-B."));
+	addTip(m_seek, LL14(L"再生位置。ピンク帯=ループ。青つまみ=A-B。⇔カーソルでつまみ移動、他はシーク。", L"Position. Pink=loop. Blue thumbs=A-B. Size cursor moves thumbs; else seek.", L"Position. Rose=boucle. Bleu=A-B. Curseur⇔=poignees.", L"Posizione. Rosa=loop. Blu=A-B. Cursore⇔=maniglie.", L"Posicion. Rosa=bucle. Azul=A-B. Cursor⇔=asas.", L"재생 위치. 분홍=루프. 파랑=A-B. ⇔커서=손잡이.", L"播放位置。粉=循环。蓝=A-B。⇔光标移动端点。", L"الموضع. وردي=حلقة. أزرق=A-B. مؤشر⇔=مقابض.", L"Позиция. Розовый=цикл. Синий=A-B. Курсор⇔=ручки.", L"Position. Rosa=Schleife. Blau=A-B. Cursor⇔=Griffe.", L"Posicao. Rosa=loop. Azul=A-B. Cursor⇔=alças.", L"Positie. Roze=lus. Blauw=A-B. Cursor⇔=grepen.", L"Pozycja. Rozowy=petla. Niebieski=A-B. Kursor⇔=uchwyty.", L"Konum. Pembe=dongu. Mavi=A-B. Imlec⇔=tutamac."));
+	if (m_seekLock.GetSafeHwnd())
+		addTip(m_seekLock, LL14(L"ONでループ(loop1/2)つまみを固定。OFFで可動。A-Bつまみは常に動かせます。", L"ON locks loop thumbs. OFF unlocks them. A-B thumbs always move.", L"ON verrouille les poignees de boucle. A-B toujours mobiles.", L"ON blocca le maniglie loop. A-B sempre mobili.", L"ON bloque asas de bucle. A-B siempre moviles.", L"ON이면 루프 손잡이 고정. A-B는 항상 이동 가능.", L"ON锁定循环端点。A-B端点始终可调。", L"ON يقفل مقابض الحلقة. A-B دائماً قابلة للتحريك.", L"ON блокирует ручки цикла. A-B всегда подвижны.", L"ON sperrt Schleifengriffe. A-B immer beweglich.", L"ON trava alças de loop. A-B sempre moveis.", L"ON vergrendelt lusgrepen. A-B altijd beweegbaar.", L"ON blokuje uchwyty petli. A-B zawsze ruchome.", L"ON dongu tutamaclarini kilitler. A-B her zaman hareket eder."));
 	if (m_abA.GetSafeHwnd())
 		addTip(m_abA, LL14(L"現在の再生位置をA点に設定します。", L"Set A point to the current position.", L"Definir le point A.", L"Imposta il punto A.", L"Fijar el punto A.", L"현재 위치를 A로.", L"将当前位置设为A点。", L"تعيين النقطة A.", L"Задать точку A.", L"Punkt A setzen.", L"Definir ponto A.", L"Punt A instellen.", L"Ustaw punkt A.", L"A noktasini ayarla."));
 	if (m_abB.GetSafeHwnd())
@@ -2155,16 +2172,18 @@ void CMediaPlayerDlg::DoLayout()
 	const int infoBottom = infoTop + gTitle + infoInnerH + gPad;
 	MoveCtl(&m_grpInfo, M, infoTop, W - M * 2, infoBottom - infoTop);
 
-	// ===== シーク(範囲スライダー, 全幅) + 時間% + A-B =====
+	// ===== シーク: ロック + 範囲スライダー + 時間% + A-B =====
 	int seekY = infoBottom + (int)(5 * s);
 	int timeW = (int)(42 * s);
+	int lockW = (int)(52 * s);
 	int abW = (int)(28 * s), abClrW = (int)(56 * s), abGap = (int)(3 * s);
 	int abBlock = abW + abGap + abW + abGap + abClrW + abGap;
-	int seekW = W - M * 2 - timeW - (int)(4 * s) - abBlock;
+	int seekW = W - M * 2 - lockW - (int)(4 * s) - timeW - (int)(4 * s) - abBlock;
 	if (seekW < 1) seekW = 1;
-	MoveCtl(&m_seek, M, seekY, seekW, (int)(16 * s));
-	MoveCtl(&m_time, M + seekW + (int)(2 * s), seekY + (int)(2 * s), timeW, (int)(14 * s));
-	int abX = M + seekW + timeW + (int)(4 * s);
+	MoveCtl(&m_seekLock, M, seekY, lockW, (int)(16 * s));
+	MoveCtl(&m_seek, M + lockW + (int)(4 * s), seekY, seekW, (int)(16 * s));
+	MoveCtl(&m_time, M + lockW + (int)(4 * s) + seekW + (int)(2 * s), seekY + (int)(2 * s), timeW, (int)(14 * s));
+	int abX = M + lockW + (int)(4 * s) + seekW + timeW + (int)(4 * s);
 	MoveCtl(&m_abA, abX, seekY, abW, (int)(16 * s)); abX += abW + abGap;
 	MoveCtl(&m_abB, abX, seekY, abW, (int)(16 * s)); abX += abW + abGap;
 	MoveCtl(&m_abClr, abX, seekY, abClrW, (int)(16 * s));
@@ -3432,10 +3451,8 @@ void CMediaPlayerDlg::MirrorSeekVol()
 		if (mx <= mn) mx = mn + 1;
 		int psPos = og->m_time.GetPos();
 		int selMn, selMx; og->m_time.GetSelection(selMn, selMx);
-		// A-B 有効時は緑帯を A-B に差し替え、B到達で A へ巻き戻す
+		// A-B 有効時は巻き戻しのみ（緑帯はループのまま。A-Bは別つまみ/帯）
 		if (m_abApos >= 0 && m_abBpos > m_abApos) {
-			selMn = m_abApos;
-			selMx = m_abBpos;
 			if (!m_abWrapBusy && plf && ps != 1 && psPos >= m_abBpos) {
 				m_abWrapBusy = 1;
 				og->m_time.SetPos(m_abApos);
@@ -3444,8 +3461,8 @@ void CMediaPlayerDlg::MirrorSeekVol()
 				m_abWrapBusy = 0;
 			}
 		}
-		// 一括更新+見た目変化時のみ1回 UPDATENOW。ここで追加 Invalidate すると毎tickアクリル再描画になる。
-		m_seek.SetPlaybackMirror(psPos, selMn, selMx, mn, mx);
+		// 一括更新+見た目変化時のみ Invalidate。ループ選択と A-B を分離して渡す。
+		m_seek.SetPlaybackMirror(psPos, selMn, selMx, mn, mx, m_abApos, m_abBpos);
 		double pct = (double)(psPos - mn) * 100.0 / (double)(mx - mn);
 		if (pct < 0.0) pct = 0.0; if (pct > 100.0) pct = 100.0;
 		CString t; t.Format(_T("!@C206830%.1f%%"), pct);
@@ -4637,16 +4654,47 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
 	CSliderCtrl* r = (CSliderCtrl*)pScrollBar;
 	if (r && r->GetSafeHwnd() == m_seek.GetSafeHwnd()) {
+		const int tgt = m_seek.GetDragTarget();
 		if (nSBCode == SB_THUMBTRACK) {
 			m_seekDragging = 1;
+			if (tgt == 4 || tgt == 5) {
+				// A-B つまみドラッグ中 → 別変数へ即反映
+				m_seek.GetAB(m_abApos, m_abBpos);
+			}
+			else if (tgt == 1 || tgt == 2) {
+				// loop1/2 つまみドラッグ中 → グローバル/プレイリストへ即反映
+				int a = 0, b = 0;
+				m_seek.GetSelection(a, b);
+				extern int loop1, loop2;
+				loop1 = a;
+				loop2 = (b > a) ? (b - a) : 0;
+				if (og && ::IsWindow(og->GetSafeHwnd()))
+					og->m_time.SetSelection(a, b);
+				if (pl && plcnt >= 0 && plcnt < pl->playcnt) {
+					pl->pc[plcnt].loop1 = loop1;
+					pl->pc[plcnt].loop2 = loop2;
+				}
+			}
 			CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
 			return;
 		}
 		if (nSBCode == TB_ENDTRACK) {
-			// 選択範囲つまみ確定 → A-B に反映
-			int a, b; m_seek.GetSelection(a, b);
-			m_abApos = a;
-			m_abBpos = b;
+			if (tgt == 4 || tgt == 5) {
+				m_seek.GetAB(m_abApos, m_abBpos);
+			}
+			else if (tgt == 1 || tgt == 2) {
+				int a = 0, b = 0;
+				m_seek.GetSelection(a, b);
+				extern int loop1, loop2;
+				loop1 = a;
+				loop2 = (b > a) ? (b - a) : 0;
+				if (og && ::IsWindow(og->GetSafeHwnd()))
+					og->m_time.SetSelection(a, b);
+				if (pl && plcnt >= 0 && plcnt < pl->playcnt) {
+					pl->pc[plcnt].loop1 = loop1;
+					pl->pc[plcnt].loop2 = loop2;
+				}
+			}
 			m_seekDragging = 0;
 			CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
 			return;
@@ -4711,6 +4759,8 @@ static void MP_PlayIndex(int idx)
 	if (mp) {
 		mp->m_abApos = -1;
 		mp->m_abBpos = -1;
+		if (mp->m_seek.GetSafeHwnd())
+			mp->m_seek.SetAB(-1, -1);
 	}
 	MpPushPlayHistory(pl->pc[idx].fol, pl->pc[idx].name);
 	if (og && ::IsWindow(og->GetSafeHwnd()))
@@ -5397,6 +5447,7 @@ void CMediaPlayerDlg::OnAbSetA()
 	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
 	m_abApos = og->m_time.GetPos();
 	if (m_abBpos >= 0 && m_abBpos <= m_abApos) m_abBpos = -1;
+	m_seek.SetAB(m_abApos, m_abBpos);
 	MirrorSeekVol();
 }
 
@@ -5408,6 +5459,7 @@ void CMediaPlayerDlg::OnAbSetB()
 	if (m_abBpos <= m_abApos) {
 		int t = m_abApos; m_abApos = m_abBpos; m_abBpos = t;
 	}
+	m_seek.SetAB(m_abApos, m_abBpos);
 	MirrorSeekVol();
 }
 
@@ -5415,7 +5467,21 @@ void CMediaPlayerDlg::OnAbClear()
 {
 	m_abApos = -1;
 	m_abBpos = -1;
+	m_seek.SetAB(-1, -1);
 	MirrorSeekVol();
+}
+
+void CMediaPlayerDlg::OnSeekLock()
+{
+	if (!m_seekLock.GetSafeHwnd()) return;
+	// メニューからの呼び出しはチェックをトグル。BN_CLICKED は既にトグル済み。
+	const MSG* msg = GetCurrentMessage();
+	if (msg && msg->message == WM_COMMAND && LOWORD(msg->wParam) == ID_MP_SEEK_LOCK)
+		m_seekLock.SetCheck((m_seekLock.GetCheck() == BST_CHECKED) ? BST_UNCHECKED : BST_CHECKED);
+	const BOOL locked = (m_seekLock.GetCheck() == BST_CHECKED);
+	savedata.mpSeekLoopUnlock = locked ? 0 : 1;
+	m_seek.SetSelectionLocked(locked);
+	MpPersistSavedataQuick();
 }
 
 void CMediaPlayerDlg::OnLrcExpand()
@@ -6292,6 +6358,39 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 {
 	const BOOL onBanner = m_bannerRect.PtInRect(point);
 	const BOOL onJacket = (g_mpSideJacket && !m_jacketRect.IsRectEmpty() && m_jacketRect.PtInRect(point));
+	BOOL onSeek = FALSE;
+	if (m_seek.GetSafeHwnd()) {
+		CRect sr; m_seek.GetWindowRect(&sr); ScreenToClient(&sr);
+		onSeek = sr.PtInRect(point);
+	}
+	if (onSeek) {
+		CMenu menu;
+		if (menu.CreatePopupMenu()) {
+			const UINT lockChk = (m_seekLock.GetSafeHwnd() && m_seekLock.GetCheck() == BST_CHECKED) ? MF_CHECKED : 0;
+			menu.AppendMenu(MF_STRING | lockChk, ID_MP_SEEK_LOCK,
+				LL14(L"ループつまみをロック", L"Lock loop thumbs", L"Verrouiller poignees boucle", L"Blocca maniglie loop",
+					L"Bloquear asas de bucle", L"루프 손잡이 잠금", L"锁定循环端点", L"قفل مقابض الحلقة",
+					L"Блокировать ручки цикла", L"Schleifengriffe sperren", L"Travar alças de loop",
+					L"Lusgrepen vergrendelen", L"Blokuj uchwyty petli", L"Dongu tutamaclarini kilitle"));
+			menu.AppendMenu(MF_SEPARATOR);
+			menu.AppendMenu(MF_STRING, ID_MP_SEEK_SETA,
+				LL14(L"A点を現在位置に", L"Set A to now", L"Definir A ici", L"Imposta A qui",
+					L"Fijar A aqui", L"A를 현재 위치로", L"将A设为当前位置", L"تعيين A هنا",
+					L"Задать A здесь", L"A hier setzen", L"Definir A aqui", L"A hier instellen",
+					L"Ustaw A tutaj", L"A'yi buraya ayarla"));
+			menu.AppendMenu(MF_STRING, ID_MP_SEEK_SETB,
+				LL14(L"B点を現在位置に", L"Set B to now", L"Definir B ici", L"Imposta B qui",
+					L"Fijar B aqui", L"B를 현재 위치로", L"将B设为当前位置", L"تعيين B هنا",
+					L"Задать B здесь", L"B hier setzen", L"Definir B aqui", L"B hier instellen",
+					L"Ustaw B tutaj", L"B'yi buraya ayarla"));
+			menu.AppendMenu(MF_STRING, ID_MP_SEEK_ABCLR,
+				LL14(L"A-B解除", L"Clear A-B", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 해제", L"清除A-B", L"مسح A-B", L"Сброс A-B", L"A-B aus", L"Limpar A-B", L"A-B uit", L"Wyczysc A-B", L"A-B sil"));
+			CPoint sp = point;
+			ClientToScreen(&sp);
+			menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, sp.x, sp.y, this);
+		}
+		return;
+	}
 	if (onBanner || onJacket) {
 		CMenu menu;
 		if (menu.CreatePopupMenu()) {
@@ -6609,10 +6708,10 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· ▶ / ⏸ / ■ …… play, pausa, stop, ant/sig", L"· ▶ / ⏸ / ■ …… 재생·일시정지·정지·이전/다음", L"· ▶ / ⏸ / ■ …… 播放、暂停、停止、上一/下一", L"· ▶ / ⏸ / ■ …… تشغيل، إيقاف مؤقت، إيقاف، سابق/تالٍ",
 		L"· ▶ / ⏸ / ■ …… play, пауза, стоп, пред/след", L"· ▶ / ⏸ / ■ …… Play, Pause, Stop, zurueck/weiter", L"· ▶ / ⏸ / ■ …… play, pausa, parar, ant/prox", L"· ▶ / ⏸ / ■ …… play, pauze, stop, vorige/volgende",
 		L"· ▶ / ⏸ / ■ …… play, pauza, stop, poprz/nast", L"· ▶ / ⏸ / ■ …… play, duraklat, dur, önceki/sonraki")); yR += lh;
-	body(R, yR, LL14(L"・シークバー …… 緑帯=ループ/A-B。端つまみでA/B点を微調整", L"· Seek …… green band = loop/A-B; edge thumbs fine-tune A/B", L"· Seek …… bande verte = boucle/A-B; poignées A/B", L"· Seek …… banda verde = loop/A-B; maniglie A/B",
-		L"· Seek …… banda verde = bucle/A-B; asas A/B", L"· 시크 …… 녹색=루프/A-B. 가장자리로 A/B 미세조정", L"· 进度条 …… 绿色=循环/A-B。端点微调 A/B", L"· Seek …… أخضر=حلقة/A-B. مقابض لضبط A/B",
-		L"· Seek …… зелёный=цикл/A-B; ручки A/B", L"· Seek …… gruen=Schleife/A-B; Griffe fuer A/B", L"· Seek …… verde=loop/A-B; alças A/B", L"· Seek …… groen=lus/A-B; grepen A/B",
-		L"· Seek …… zielony=pętla/A-B; uchwyty A/B", L"· Seek …… yeşil=döngü/A-B; A/B tutamaçları")); yR += lh;
+	body(R, yR, LL14(L"・シークバー …… ピンク帯=ループ。青つまみ=A-B。⇔でつまみ、他はシーク。左のロックでloop固定", L"· Seek …… pink=loop; blue=A-B; size-cursor moves thumbs. Lock pins loop", L"· Seek …… rose=boucle; bleu=A-B; verrou fixe la boucle", L"· Seek …… rosa=loop; blu=A-B; blocco fissa il loop",
+		L"· Seek …… rosa=bucle; azul=A-B; bloqueo fija el bucle", L"· 시크 …… 분홍=루프; 파랑=A-B; 잠금으로 루프 고정", L"· 进度条 …… 粉=循环；蓝=A-B；锁定固定循环", L"· Seek …… وردي=حلقة؛ أزرق=A-B؛ القفل يثبت الحلقة",
+		L"· Seek …… розовый=цикл; синий=A-B; блок фиксирует цикл", L"· Seek …… rosa=Schleife; blau=A-B; Sperre fixiert Schleife", L"· Seek …… rosa=loop; azul=A-B; trava fixa o loop", L"· Seek …… roze=lus; blauw=A-B; slot fixeert lus",
+		L"· Seek …… rozowy=petla; niebieski=A-B; blokada pinuje petle", L"· Seek …… pembe=dongu; mavi=A-B; kilit donguyu sabitler")); yR += lh;
 	body(R, yR, LL14(L"・A / B / A-B解除 …… 区間ループ。フェードアウトも下部にあり", L"· A / B / Clear …… section loop. Fade-out is at the bottom", L"· A / B / Effacer …… boucle de section. Fondu en bas", L"· A / B / Cancella …… loop di sezione. Fade in basso",
 		L"· A / B / Borrar …… bucle de sección. Fade abajo", L"· A / B / 해제 …… 구간 루프. 페이드는 하단", L"· A / B / 清除 …… 区间循环。淡出在底部", L"· A / B / مسح …… حلقة مقطع. التلاشي في الأسفل",
 		L"· A / B / Сброс …… петля участка. Затухание внизу", L"· A / B / Aus …… Abschnittsloop. Fade unten", L"· A / B / Limpar …… loop de seção. Fade embaixo", L"· A / B / Uit …… sectielus. Fade onderaan",

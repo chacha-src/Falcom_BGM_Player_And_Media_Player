@@ -1062,6 +1062,11 @@ BOOL COggApp::InitInstance()
 		savedata.cap_fx7 = 0;
 	else
 		savedata.cap_fx7 = clampFx(savedata.cap_fx7);
+	// シーク loop つまみ: 旧.dat 未所持は 0=ロック(既定)
+	if (datFileSize < (int)(offsetof(save, mpSeekLoopUnlock) + sizeof(savedata.mpSeekLoopUnlock)))
+		savedata.mpSeekLoopUnlock = 0;
+	else if (savedata.mpSeekLoopUnlock)
+		savedata.mpSeekLoopUnlock = 1;
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {
 		savedata.cap_fx_n = 1;

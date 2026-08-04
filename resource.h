@@ -996,6 +996,7 @@
 #define IDC_STATIC_R_MIC                3752
 #define IDC_MP_RECORD                   3753
 #define IDC_MP_CAPTURE                  3754
+#define IDC_MP_SEEKLOCK                 3847
 
 // ?f?o?C?X?^???_?C?A???O
 #define IDD_DEVICERECORD                214
@@ -1154,6 +1155,10 @@
 #define ID_MP_OPEN_ANALYZER             32971
 #define ID_MP_OPEN_PIANOROLL            32972
 #define ID_MP_REFRESH_JACKET            32973
+#define ID_MP_SEEK_LOCK                 32974
+#define ID_MP_SEEK_ABCLR                32975
+#define ID_MP_SEEK_SETA                 32976
+#define ID_MP_SEEK_SETB                 32977
 
 // Next default values for new objects
 // 
@@ -1161,7 +1166,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        234
 #define _APS_NEXT_COMMAND_VALUE         32974
-#define _APS_NEXT_CONTROL_VALUE         3847
+#define _APS_NEXT_CONTROL_VALUE         3848
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

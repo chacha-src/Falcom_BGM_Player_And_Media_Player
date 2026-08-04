@@ -5346,10 +5346,13 @@ BEGIN_MESSAGE_MAP(CCustomRangeSliderCtrl, CSliderCtrl)
     ON_WM_LBUTTONDOWN()
     ON_WM_LBUTTONUP()
     ON_WM_MOUSEMOVE()
+    ON_WM_SETCURSOR()
+    ON_WM_RBUTTONUP()
 END_MESSAGE_MAP()
 
 CCustomRangeSliderCtrl::CCustomRangeSliderCtrl()
     : m_bAutoDelete(FALSE), m_nMin(0), m_nMax(100), m_nSelMin(0), m_nSelMax(100),
+    m_nAbA(-1), m_nAbB(-1), m_bSelLocked(TRUE),
     m_nDragTarget(0), m_bDragging(FALSE), m_nVisualPos(0), m_nLogicalPos(0), m_bAeroMode(FALSE),
     m_backstoreW(0), m_backstoreH(0) {}
 CCustomRangeSliderCtrl::~CCustomRangeSliderCtrl() {}
@@ -5431,7 +5434,31 @@ void CCustomRangeSliderCtrl::SetSelection(int mn, int mx)
         Invalidate(FALSE);
 }
 
-void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax, int rangeMin, int rangeMax)
+void CCustomRangeSliderCtrl::SetAB(int a, int b)
+{
+    if (a == m_nAbA && b == m_nAbB) return;
+    m_nAbA = a;
+    m_nAbB = b;
+    if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CCustomRangeSliderCtrl::GetAB(int& a, int& b) const
+{
+    a = m_nAbA;
+    b = m_nAbB;
+}
+
+void CCustomRangeSliderCtrl::SetSelectionLocked(BOOL bLocked)
+{
+    if ((bLocked ? TRUE : FALSE) == m_bSelLocked) return;
+    m_bSelLocked = bLocked ? TRUE : FALSE;
+    if (::IsWindow(m_hWnd) && ::IsWindowVisible(m_hWnd))
+        Invalidate(FALSE);
+}
+
+void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax, int rangeMin, int rangeMax,
+    int abA, int abB)
 {
     if (m_bDragging) return;
     if (rangeMax <= rangeMin) rangeMax = rangeMin + 1;
@@ -5440,10 +5467,21 @@ void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax,
     selMax = max(rangeMin, min(rangeMax, selMax));
     nPos = max(rangeMin, min(rangeMax, nPos));
 
+    const int kAbKeep = (int)0x80000000;
+    const BOOL touchAb = (abA != kAbKeep || abB != kAbKeep);
+    int newAbA = touchAb ? abA : m_nAbA;
+    int newAbB = touchAb ? abB : m_nAbB;
+    if (touchAb) {
+        if (abA == kAbKeep) newAbA = m_nAbA;
+        if (abB == kAbKeep) newAbB = m_nAbB;
+    }
+
     // range 更新前の見た目(px)。サブピクセルの値変化は描画しない。
     const int oldThumb = ValueToPixel(m_nLogicalPos);
     const int oldSel0 = ValueToPixel(m_nSelMin);
     const int oldSel1 = ValueToPixel(m_nSelMax);
+    const int oldAbA = (m_nAbA >= 0) ? ValueToPixel(m_nAbA) : -1;
+    const int oldAbB = (m_nAbB >= 0) ? ValueToPixel(m_nAbB) : -1;
 
     BOOL dirty = FALSE;
     if (rangeMin != m_nMin || rangeMax != m_nMax) {
@@ -5457,6 +5495,11 @@ void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax,
         m_nSelMax = selMax;
         dirty = TRUE;
     }
+    if (touchAb && (newAbA != m_nAbA || newAbB != m_nAbB)) {
+        m_nAbA = newAbA;
+        m_nAbB = newAbB;
+        dirty = TRUE;
+    }
     if (nPos != m_nLogicalPos || nPos != m_nVisualPos) {
         m_nLogicalPos = m_nVisualPos = nPos;
         CSliderCtrl::SetPos(nPos);
@@ -5468,13 +5511,16 @@ void CCustomRangeSliderCtrl::SetPlaybackMirror(int nPos, int selMin, int selMax,
     const int newThumb = ValueToPixel(m_nLogicalPos);
     const int newSel0 = ValueToPixel(m_nSelMin);
     const int newSel1 = ValueToPixel(m_nSelMax);
-	if (newThumb == oldThumb && newSel0 == oldSel0 && newSel1 == oldSel1)
-		return;
+    const int newAbAPx = (m_nAbA >= 0) ? ValueToPixel(m_nAbA) : -1;
+    const int newAbBPx = (m_nAbB >= 0) ? ValueToPixel(m_nAbB) : -1;
+    if (newThumb == oldThumb && newSel0 == oldSel0 && newSel1 == oldSel1
+        && newAbAPx == oldAbA && newAbBPx == oldAbB)
+        return;
 
-	// UPDATENOW だと timerp 内で同期描画→直後のバナー Invalidate と合わせて毎フレ2回塗る。
-	// Invalidate のみにして次の WM_PAINT に合流させる（見た目の追従は十分）。
-	if (::IsWindowVisible(m_hWnd))
-		Invalidate(FALSE);
+    // UPDATENOW だと timerp 内で同期描画→直後のバナー Invalidate と合わせて毎フレ2回塗る。
+    // Invalidate のみにして次の WM_PAINT に合流させる（見た目の追従は十分）。
+    if (::IsWindowVisible(m_hWnd))
+        Invalidate(FALSE);
 }
 
 void CCustomRangeSliderCtrl::GetSelection(int& mn, int& mx) const
@@ -5581,18 +5627,44 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
         pDC->SelectObject(pT);
     pDC->MoveTo(14, cy);
     pDC->LineTo(r.Width() - 14, cy);
+
+    // ループ選択帯(loop1/2)
     if (xMx > xMn)
         pDC->FillSolidRect(CRect(xMn, cy - 4, xMx, cy + 4), COLOR_RANGE_SELECTION);
 
-    // 最小・最大つまみ
+    // A-B 区間帯（B 確定後のみ）。ループ帯の上に重ねる。
+    if (m_nAbA >= 0 && m_nAbB > m_nAbA) {
+        int xA = ValueToPixel(m_nAbA);
+        int xB = ValueToPixel(m_nAbB);
+        if (xB > xA)
+            pDC->FillSolidRect(CRect(xA, cy - 3, xB, cy + 3), COLOR_AB_RANGE);
+    }
+
     COLORREF penC = m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0);
     if (CPen* pB = CCC_GetPooledPen(1, penC))
         pDC->SelectObject(pB);
-    pDC->FillSolidRect(CRect(xMn - 5, cy - 8, xMn + 5, cy + 8), COLOR_RANGE_SLIDER_THUMB);
     pDC->SelectObject(GetStockObject(NULL_BRUSH));
-    pDC->Rectangle(CRect(xMn - 5, cy - 8, xMn + 5, cy + 8));
-    pDC->FillSolidRect(CRect(xMx - 5, cy - 8, xMx + 5, cy + 8), COLOR_RANGE_SLIDER_THUMB);
-    pDC->Rectangle(CRect(xMx - 5, cy - 8, xMx + 5, cy + 8));
+
+    // loop1/2 つまみ（ロック時も表示。ドラッグ不可は HitTest 側）
+    {
+        COLORREF th = m_bSelLocked ? RGB(220, 220, 220) : COLOR_RANGE_SLIDER_THUMB;
+        pDC->FillSolidRect(CRect(xMn - 5, cy - 8, xMn + 5, cy + 8), th);
+        pDC->Rectangle(CRect(xMn - 5, cy - 8, xMn + 5, cy + 8));
+        pDC->FillSolidRect(CRect(xMx - 5, cy - 8, xMx + 5, cy + 8), th);
+        pDC->Rectangle(CRect(xMx - 5, cy - 8, xMx + 5, cy + 8));
+    }
+
+    // A-B つまみ（A 時点から別色。B は区間確定後）
+    if (m_nAbA >= 0) {
+        int xA = ValueToPixel(m_nAbA);
+        pDC->FillSolidRect(CRect(xA - 5, cy - 8, xA + 5, cy + 8), COLOR_AB_SLIDER_THUMB);
+        pDC->Rectangle(CRect(xA - 5, cy - 8, xA + 5, cy + 8));
+    }
+    if (m_nAbA >= 0 && m_nAbB > m_nAbA) {
+        int xB = ValueToPixel(m_nAbB);
+        pDC->FillSolidRect(CRect(xB - 5, cy - 8, xB + 5, cy + 8), COLOR_AB_SLIDER_THUMB);
+        pDC->Rectangle(CRect(xB - 5, cy - 8, xB + 5, cy + 8));
+    }
 
     // 現在位置（ハート + きらめき）
     DrawHeart(pDC, CRect(xP - 9, cy - 12, xP + 9, cy + 6), COLOR_SLIDER_THUMB);
@@ -5627,9 +5699,19 @@ int CCustomRangeSliderCtrl::HitTest(CPoint p) const
     int xMx = ValueToPixel(m_nSelMax);
     int xMn = ValueToPixel(m_nSelMin);
 
-    if (CRect(xM - 10, cy - 14, xM + 10, cy + 14).PtInRect(p)) return 3; // 現在位置
-    if (CRect(xMx - 7, cy - 10, xMx + 7, cy + 10).PtInRect(p)) return 2;  // 最大つまみ
-    if (CRect(xMn - 7, cy - 10, xMn + 7, cy + 10).PtInRect(p)) return 1;  // 最小つまみ
+    // A-B / loop つまみを再生位置より優先（シークと相打ちにしない）
+    if (m_nAbA >= 0 && m_nAbB > m_nAbA) {
+        int xB = ValueToPixel(m_nAbB);
+        if (CRect(xB - 7, cy - 10, xB + 7, cy + 10).PtInRect(p)) return 5;
+    }
+    if (m_nAbA >= 0) {
+        int xA = ValueToPixel(m_nAbA);
+        if (CRect(xA - 7, cy - 10, xA + 7, cy + 10).PtInRect(p)) return 4;
+    }
+    // ロック中でもヒットは取る（クリックをシークに落とさない）。ドラッグは OnLButtonDown で拒否。
+    if (CRect(xMx - 7, cy - 10, xMx + 7, cy + 10).PtInRect(p)) return 2;
+    if (CRect(xMn - 7, cy - 10, xMn + 7, cy + 10).PtInRect(p)) return 1;
+    if (CRect(xM - 10, cy - 14, xM + 10, cy + 14).PtInRect(p)) return 3;
     return 0;
 }
 void CCustomRangeSliderCtrl::OnLButtonDown(UINT f, CPoint p)
@@ -5640,8 +5722,14 @@ void CCustomRangeSliderCtrl::OnLButtonDown(UINT f, CPoint p)
     SetFocus();
     m_nVisualPos = m_nLogicalPos;
     m_nDragTarget = HitTest(p);
+    if ((m_nDragTarget == 1 || m_nDragTarget == 2) && m_bSelLocked) {
+        // ロック中の loop つまみ: 動かさずシークもしない
+        m_nDragTarget = 0;
+        return;
+    }
     if (m_nDragTarget == 0)
     {
+        // トラック空白＝シーク（つまみ上ではここに来ない＝相打ち回避）
         m_nVisualPos = PixelToValue(p.x);
         m_nDragTarget = 3;
         CSliderCtrl::SetPos(m_nVisualPos);
@@ -5664,9 +5752,9 @@ void CCustomRangeSliderCtrl::OnLButtonUp(UINT f, CPoint p)
             GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, m_nLogicalPos), (LPARAM)m_hWnd);
             GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_ENDSCROLL, m_nLogicalPos), (LPARAM)m_hWnd);
         }
-        else if (dragTarget == 1 || dragTarget == 2)
+        else if (dragTarget == 1 || dragTarget == 2 || dragTarget == 4 || dragTarget == 5)
         {
-            // 選択範囲つまみ(A-B)を確定。親が GetSelection で読み取る。
+            // loop / A-B つまみ確定。親が GetSelection / GetAB + GetDragTarget で判別。
             // SB_THUMBPOSITION は位置シークと衝突しないよう LOWORD に TB_ENDTRACK を使う。
             GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, 0), (LPARAM)m_hWnd);
         }
@@ -5694,8 +5782,49 @@ void CCustomRangeSliderCtrl::OnMouseMove(UINT f, CPoint p)
             m_nSelMin = min(v, m_nSelMax);
         else if (m_nDragTarget == 2)
             m_nSelMax = max(v, m_nSelMin);
+        else if (m_nDragTarget == 4) {
+            m_nAbA = max(m_nMin, min(m_nMax, v));
+            if (m_nAbB >= 0 && m_nAbA >= m_nAbB)
+                m_nAbA = max(m_nMin, m_nAbB - 1);
+        }
+        else if (m_nDragTarget == 5) {
+            m_nAbB = max(m_nMin, min(m_nMax, v));
+            if (m_nAbA >= 0 && m_nAbB <= m_nAbA)
+                m_nAbB = min(m_nMax, m_nAbA + 1);
+        }
+        if (m_nDragTarget == 1 || m_nDragTarget == 2 || m_nDragTarget == 4 || m_nDragTarget == 5)
+            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_THUMBTRACK, 0), (LPARAM)m_hWnd);
         RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
     }
+}
+
+BOOL CCustomRangeSliderCtrl::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
+{
+    if (nHitTest == HTCLIENT && GetSafeHwnd()) {
+        CPoint pt;
+        ::GetCursorPos(&pt);
+        ScreenToClient(&pt);
+        const int ht = HitTest(pt);
+        if (ht == 4 || ht == 5 || ((ht == 1 || ht == 2) && !m_bSelLocked)) {
+            ::SetCursor(::LoadCursor(NULL, IDC_SIZEWE));
+            return TRUE;
+        }
+    }
+    return CSliderCtrl::OnSetCursor(pWnd, nHitTest, message);
+}
+
+void CCustomRangeSliderCtrl::OnRButtonUp(UINT nFlags, CPoint point)
+{
+    // 親ダイアログへクライアント座標を変換して渡す（シーク上のコンテキストメニュー拡充用）
+    CWnd* pParent = GetParent();
+    if (pParent && pParent->GetSafeHwnd()) {
+        CPoint sp = point;
+        ClientToScreen(&sp);
+        pParent->ScreenToClient(&sp);
+        pParent->SendMessage(WM_RBUTTONUP, (WPARAM)nFlags, MAKELPARAM(sp.x, sp.y));
+        return;
+    }
+    CSliderCtrl::OnRButtonUp(nFlags, point);
 }
 
 // ============================================================================

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "stdafx.h"
 #include "afxdialogex.h"
@@ -121,8 +121,10 @@ void CCC_GroupBoxesBack(HWND hDlg);
 #define COLOR_BUTTON_PUSHED     RGB( 60, 160,  60) // ボタンの押下時背景色（濃い緑）
 #define COLOR_BUTTON_HOVER      RGB(100, 200, 100) // ボタンのホバー時背景色（あかるい緑）
 #define COLOR_SLIDER_THUMB      RGB(255,  92, 150) // スライダーのつまみの色（色っぽいローズ）
-#define COLOR_RANGE_SLIDER_THUMB RGB(255, 255, 255) // 範囲スライダーのつまみ色
-#define COLOR_RANGE_SELECTION   RGB(255, 182, 213) // 範囲スライダーの選択範囲色（ローズ）
+#define COLOR_RANGE_SLIDER_THUMB RGB(255, 255, 255) // 範囲スライダーのつまみ色(loop1/2)
+#define COLOR_RANGE_SELECTION   RGB(255, 182, 213) // 範囲スライダーの選択範囲色（ローズ=ループ）
+#define COLOR_AB_SLIDER_THUMB   RGB(64, 160, 255)  // A-B つまみ（A単独時からこの色）
+#define COLOR_AB_RANGE          RGB(90, 210, 150)  // A-B 区間塗り（B確定後）
 #define COLOR_HANAMARU          RGB(255,   0,   0) // はなまるの色
 #define COLOR_FLOWER_DECO       RGB(255, 240, 245) // お花の装飾色
 #define COLOR_VINE_DECO         RGB(216, 132, 176) // 蔓（つる）の装飾色（ローズモーヴ）
@@ -1153,8 +1155,9 @@ private:
 // ============================================================================
 // カスタム範囲スライダーコントロール
 // CCustomRangeSliderCtrl
-// 2つのつまみを持ち、最小値・最大値の範囲を選択できるスライダーです。
+// 再生位置 + ループ選択(loop1/2) + 任意の A-B つまみ。
 // （アクリルモードの挙動は CCustomSliderCtrl と同様です）
+// HitTest: 0=なし 1=loop最小 2=loop最大 3=再生位置/シーク 4=A 5=B
 // ============================================================================
 class CCustomRangeSliderCtrl : public CSliderCtrl
 {
@@ -1170,21 +1173,33 @@ public:
     // 全体の範囲設定
     void SetRange(int mn, int mx, BOOL bRedraw = TRUE);
 
-    // 選択された範囲（つまみの位置）の設定・取得
+    // 選択された範囲（loop1/2 つまみの位置）の設定・取得
     void SetSelection(int mn, int mx);
     void GetSelection(int& mn, int& mx) const;
+
+    // A-B 区間（-1=未設定）。loop 選択とは別変数。Aのみでつまみ表示、Bで区間塗り。
+    void SetAB(int a, int b);
+    void GetAB(int& a, int& b) const;
+
+    // TRUE=loop1/2 つまみをドラッグ不可（既定）。A-B は常に可。
+    void SetSelectionLocked(BOOL bLocked);
+    BOOL IsSelectionLocked() const { return m_bSelLocked; }
 
     // 現在の位置（ドラッグ中の仮想位置ではなく確定位置）の設定・取得
     void SetPos(int nPos);
     int GetPos() const;
 
-    // 再生追従用: 範囲・選択・位置を一括更新し、見た目(px)が変わったときだけ1回 UPDATENOW
-    // (旧: SetSelection→SetPos の二重 UPDATENOW / 新: Invalidate 合流で再生が進むほど遅延)
-    void SetPlaybackMirror(int nPos, int selMin, int selMax, int rangeMin, int rangeMax);
+    // 再生追従用: 範囲・選択・位置・A-B を一括更新し、見た目(px)が変わったときだけ Invalidate
+    // abA/abB に 0x80000000 を渡すとその項目は触らない（Douga 等の既存呼び出し互換）
+    void SetPlaybackMirror(int nPos, int selMin, int selMax, int rangeMin, int rangeMax,
+        int abA = (int)0x80000000, int abB = (int)0x80000000);
 
     // 範囲(最小/最大)の取得(メディアプレイヤー画面のシーク表示用)
     int GetMinValue() const { return m_nMin; }
     int GetMaxValue() const { return m_nMax; }
+
+    // ドラッグ対象(HitTest 値)。ドラッグ中/直後の親通知判別に使う。
+    int GetDragTarget() const { return m_nDragTarget; }
 
     // アクリルモードの設定
     void SetAeroMode(BOOL b);
@@ -1202,6 +1217,8 @@ protected:
     afx_msg void OnLButtonDown(UINT, CPoint);
     afx_msg void OnLButtonUp(UINT, CPoint);
     afx_msg void OnMouseMove(UINT, CPoint);
+    afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
+    afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
 
     DECLARE_MESSAGE_MAP()
 
@@ -1213,11 +1230,13 @@ private:
     // 値とピクセル座標の相互変換、マウスクリック時のヒットテスト
     int ValueToPixel(int v) const;
     int PixelToValue(int x) const;
-    int HitTest(CPoint p) const; // 戻り値: 1=最小つまみ, 2=最大つまみ, 3=全体, 0=なし
+    int HitTest(CPoint p) const;
 
     // 状態保持用メンバ変数
     int m_nMin, m_nMax;         // 全体の最小値・最大値
-    int m_nSelMin, m_nSelMax;   // 選択されている最小値・最大値
+    int m_nSelMin, m_nSelMax;   // ループ選択(loop1 / loop1+loop2)
+    int m_nAbA, m_nAbB;         // A-B（-1=未設定）
+    BOOL m_bSelLocked;          // loop つまみロック
     int m_nDragTarget;          // 現在ドラッグしている対象（HitTestの戻り値に対応）
     int m_nLogicalPos;          // 確定された論理位置
     BOOL m_bDragging;           // ドラッグ中かどうか
