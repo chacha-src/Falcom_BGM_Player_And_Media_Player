@@ -1041,6 +1041,8 @@ public:
     DWORD SetIcon(int nIconIn, int nIconOut = 0);
     DWORD SetIcon(HICON hIconIn, HICON hIconOut = NULL);
     void SetFlat(BOOL bFlat);
+    // TRUE=アクリル下地をクロマ透過（Lib/Hist レール等のラベル風ボタン向け）
+    void SetAeroMode(BOOL b);
 
     void PaintClient(CDC& dc, const CRect& r);
     void RepaintClient();
@@ -1085,6 +1087,7 @@ private:
     HICON m_hIconIn;       // 通常アイコン(所有)
     HICON m_hIconOut;      // ホバー用(所有・無くても可)
     BOOL m_bFlat;          // TRUE=薄い枠・装飾控えめ(アイコンボタン向け)
+    BOOL m_bAeroMode;      // TRUE=クロマ透過（既定ボタンは不透明のまま）
     BOOL m_bIconOwnedIn;   // DestroyIcon が必要か
     BOOL m_bIconOwnedOut;
 };

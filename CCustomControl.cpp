@@ -5870,12 +5870,14 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
     const int x0 = 14;
     const int tw = r.Width() - 28;
     const int half = max(4, min(cy - 1, r.Height() / 2 - 1));
+    const BOOL bWave = (m_wavePeakCount > 1 && tw > 0);
 
     CPen* oldPen = pDC->GetCurrentPen();
+    CBrush* oldBrush = pDC->GetCurrentBrush();
 
     // 最奥: 波形（トラック／ループ／A-B／つまみの下）
-    if (m_wavePeakCount > 1 && tw > 0) {
-        COLORREF wc = m_bAeroMode ? RGB(140, 200, 255) : RGB(70, 120, 190);
+    if (bWave) {
+        COLORREF wc = m_bAeroMode ? RGB(140, 200, 255) : COLOR_SEEK_WAVE;
         for (int x = 0; x < tw; ++x) {
             int bin = x * m_wavePeakCount / tw;
             if (bin < 0) bin = 0;
@@ -5904,15 +5906,36 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
         }
     }
 
+    // 波形あり: シークバー一式を XOR 合成（波形もバーも同時に読める）
+    // 波形なし: 従来どおり不透明塗り
+    const int oldRop = bWave ? pDC->SetROP2(R2_XORPEN) : 0;
+
+    auto xorOrFill = [&](const CRect& rc, COLORREF c) {
+        if (rc.Width() <= 0 || rc.Height() <= 0) return;
+        if (bWave) {
+            CBrush br(c);
+            CBrush* obr = pDC->SelectObject(&br);
+            HGDIOBJ op = pDC->SelectObject(::GetStockObject(NULL_PEN));
+            pDC->Rectangle(rc.left, rc.top, rc.right, rc.bottom);
+            pDC->SelectObject(op);
+            pDC->SelectObject(obr);
+        } else {
+            pDC->FillSolidRect(rc, c);
+        }
+    };
+
     // トラック（バー）— プール済みペン（毎描画 CreatePen 禁止）
-    if (CPen* pT = CCC_GetPooledPen(4, RGB(200, 200, 200)))
-        pDC->SelectObject(pT);
-    pDC->MoveTo(14, cy);
-    pDC->LineTo(r.Width() - 14, cy);
+    {
+        const COLORREF trackC = bWave ? RGB(255, 255, 255) : RGB(200, 200, 200);
+        if (CPen* pT = CCC_GetPooledPen(bWave ? 3 : 4, trackC))
+            pDC->SelectObject(pT);
+        pDC->MoveTo(14, cy);
+        pDC->LineTo(r.Width() - 14, cy);
+    }
 
     // ループ選択帯(loop1/2) — 波形の上
     if (xMx > xMn)
-        pDC->FillSolidRect(CRect(xMn, cy - 4, xMx, cy + 4), COLOR_RANGE_SELECTION);
+        xorOrFill(CRect(xMn, cy - 4, xMx, cy + 4), COLOR_RANGE_SELECTION);
 
     // スペアナ・リボン(トラック中央の上)
     if (m_ribbonN > 0 && tw > 0) {
@@ -5923,11 +5946,12 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
             if (x2 <= x1) x2 = x1 + 1;
             int h = (int)(m_ribbon[i] * barH + 0.5f);
             if (h < 1) continue;
-            pDC->FillSolidRect(x1, cy - 2 - h, x2 - x1 - 1, h, RGB(80, 180, 255));
+            xorOrFill(CRect(x1, cy - 2 - h, x2 - 1, cy - 2), RGB(80, 180, 255));
         }
     }
 
     // 書き出しクロスフェード帯プレビュー(範囲末尾のハッチ)
+    // ハッチは XOR と相性が悪いので一時的に COPY に戻す
     if (m_xfadePreviewMs > 0 && m_timeBaseHz > 0) {
         const int xfFrames = (int)(((__int64)m_xfadePreviewMs * m_timeBaseHz) / 1000);
         if (xfFrames > 0) {
@@ -5935,10 +5959,11 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
             if (endV <= m_nSelMin) endV = m_nMax;
             int startV = endV - xfFrames;
             if (startV < m_nMin) startV = m_nMin;
-            int x0 = ValueToPixel(startV);
-            int x1 = ValueToPixel(endV);
-            if (x1 > x0) {
-                CRect hr(x0, cy - 6, x1, cy + 6);
+            int xa = ValueToPixel(startV);
+            int xb = ValueToPixel(endV);
+            if (xb > xa) {
+                if (bWave) pDC->SetROP2(R2_COPYPEN);
+                CRect hr(xa, cy - 6, xb, cy + 6);
                 CBrush brHat;
                 brHat.CreateHatchBrush(HS_BDIAGONAL, RGB(255, 140, 60));
                 CBrush* obr = pDC->SelectObject(&brHat);
@@ -5946,6 +5971,7 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
                 pDC->FillRect(&hr, &brHat);
                 pDC->SetBkMode(oldBk);
                 pDC->SelectObject(obr);
+                if (bWave) pDC->SetROP2(R2_XORPEN);
             }
         }
     }
@@ -5955,10 +5981,11 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
         int xA = ValueToPixel(m_nAbA);
         int xB = ValueToPixel(m_nAbB);
         if (xB > xA)
-            pDC->FillSolidRect(CRect(xA, cy - 3, xB, cy + 3), COLOR_AB_RANGE);
+            xorOrFill(CRect(xA, cy - 3, xB, cy + 3), COLOR_AB_RANGE);
     }
 
     COLORREF penC = m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0);
+    if (bWave) penC = RGB(255, 255, 255); // XOR 縁取りは白が波形上で読みやすい
     if (CPen* pB = CCC_GetPooledPen(1, penC))
         pDC->SelectObject(pB);
     pDC->SelectObject(GetStockObject(NULL_BRUSH));
@@ -5966,21 +5993,22 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
     // loop1/2 つまみ（ロック時も表示。ドラッグ不可は HitTest 側）
     {
         COLORREF th = m_bSelLocked ? RGB(220, 220, 220) : COLOR_RANGE_SLIDER_THUMB;
-        pDC->FillSolidRect(CRect(xMn - 5, cy - 8, xMn + 5, cy + 8), th);
+        if (bWave && m_bSelLocked) th = RGB(180, 180, 180);
+        xorOrFill(CRect(xMn - 5, cy - 8, xMn + 5, cy + 8), th);
         pDC->Rectangle(CRect(xMn - 5, cy - 8, xMn + 5, cy + 8));
-        pDC->FillSolidRect(CRect(xMx - 5, cy - 8, xMx + 5, cy + 8), th);
+        xorOrFill(CRect(xMx - 5, cy - 8, xMx + 5, cy + 8), th);
         pDC->Rectangle(CRect(xMx - 5, cy - 8, xMx + 5, cy + 8));
     }
 
     // A-B つまみ（A 時点から別色。B は区間確定後）
     if (m_nAbA >= 0) {
         int xA = ValueToPixel(m_nAbA);
-        pDC->FillSolidRect(CRect(xA - 5, cy - 8, xA + 5, cy + 8), COLOR_AB_SLIDER_THUMB);
+        xorOrFill(CRect(xA - 5, cy - 8, xA + 5, cy + 8), COLOR_AB_SLIDER_THUMB);
         pDC->Rectangle(CRect(xA - 5, cy - 8, xA + 5, cy + 8));
     }
     if (m_nAbA >= 0 && m_nAbB > m_nAbA) {
         int xB = ValueToPixel(m_nAbB);
-        pDC->FillSolidRect(CRect(xB - 5, cy - 8, xB + 5, cy + 8), COLOR_AB_SLIDER_THUMB);
+        xorOrFill(CRect(xB - 5, cy - 8, xB + 5, cy + 8), COLOR_AB_SLIDER_THUMB);
         pDC->Rectangle(CRect(xB - 5, cy - 8, xB + 5, cy + 8));
     }
 
@@ -5997,18 +6025,31 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
             CBrush* obr = pDC->SelectObject(&br);
             pDC->Polygon(tri, 3);
             pDC->SelectObject(obr);
+            // 数字は XOR だと潰れるので COPY に戻して描く
+            if (bWave) pDC->SetROP2(R2_COPYPEN);
             TCHAR dig[2] = { (TCHAR)(_T('1') + i), 0 };
             if (i >= 9) dig[0] = _T('0');
             pDC->SetBkMode(TRANSPARENT);
-            pDC->SetTextColor(m_bAeroMode ? RGB(1, 1, 1) : RGB(40, 30, 0));
+            pDC->SetTextColor(m_bAeroMode ? RGB(2, 2, 2) : RGB(40, 30, 0));
             CRect tr(x - 4, cy - 22, x + 5, cy - 11);
             pDC->DrawText(dig, &tr, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+            if (bWave) pDC->SetROP2(R2_XORPEN);
         }
     }
 
-    // 現在位置（ハート + きらめき）
+    // 現在位置（ハート + きらめき）— 波形時は XOR で波形を潰さない
     DrawHeart(pDC, CRect(xP - 9, cy - 12, xP + 9, cy + 6), COLOR_SLIDER_THUMB);
     DrawSparkle(pDC, xP + 7, cy - 12, 3, COLOR_SPARKLE);
+    // 再生位置の縦ガイド（波形全体で位置が追える）
+    if (bWave) {
+        if (CPen* pG = CCC_GetPooledPen(1, RGB(255, 255, 255)))
+            pDC->SelectObject(pG);
+        pDC->MoveTo(xP, 1);
+        pDC->LineTo(xP, r.Height() - 1);
+    }
+
+    if (bWave) pDC->SetROP2(oldRop);
+    if (oldBrush) pDC->SelectObject(oldBrush);
     if (oldPen) pDC->SelectObject(oldPen);
 }
 
@@ -7960,7 +8001,7 @@ CCustomStandardButton::CCustomStandardButton()
     m_clrGradEnd(RGB(255, 255, 255)), m_nGradDirection(0), m_bGradEnable(FALSE),
     m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135), m_nShadowDistance(2),
     m_nShadowBlur(3), m_bShadowEnable(FALSE),
-    m_hIconIn(NULL), m_hIconOut(NULL), m_bFlat(FALSE),
+    m_hIconIn(NULL), m_hIconOut(NULL), m_bFlat(FALSE), m_bAeroMode(FALSE),
     m_bIconOwnedIn(FALSE), m_bIconOwnedOut(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_BUTTON_BG);
@@ -8093,6 +8134,15 @@ void CCustomStandardButton::SetFlat(BOOL bFlat)
     if (GetSafeHwnd()) Invalidate(FALSE);
 }
 
+void CCustomStandardButton::SetAeroMode(BOOL b)
+{
+    m_bAeroMode = b ? TRUE : FALSE;
+    if (GetSafeHwnd()) {
+        Invalidate(FALSE);
+        CCC_InvalidateParent(m_hWnd, m_bAeroMode);
+    }
+}
+
 void CCustomStandardButton::PreSubclassWindow()
 {
     CButton::PreSubclassWindow();
@@ -8129,9 +8179,26 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         && (GetStyle() & BS_PUSHLIKE);
     if (bPushLike && (GetCheck() == BST_CHECKED)) bP = TRUE;
     const BOOL bShowFlow = m_bMouseOver;
+#if CCUSTOM_AERO_SUPPORT
+    // オプトイン透過は Win11+アクリル時のみ（非アクリルでクロマ穴を開けない）
+    const BOOL bAeroTrans = m_bAeroMode && CCC_IsWin11() && CCC_IsAeroEnabled();
+#else
+    const BOOL bAeroTrans = FALSE;
+#endif
 
     // 無効時もカスタムの質感(グラデ/サテン/ツヤ/装飾)は描く。ただし彩度を落とし、
     // 最後にやわらかいグレーヴェールを重ねて「無効」であることを明確に伝える。
+    // アクリル透過(Lib/Hist 等): 背景はクロマ、ホバー/押下のみ薄いティントを載せる。
+    if (bAeroTrans)
+    {
+        mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
+        if (bP)
+            mDC.FillSolidRect(&r, bD ? CCC_Desaturate(RGB(255, 210, 230), 68) : RGB(255, 210, 230));
+        else if (m_bMouseOver)
+            mDC.FillSolidRect(&r, bD ? CCC_Desaturate(RGB(255, 235, 245), 68) : RGB(255, 235, 245));
+    }
+    else
+    {
     COLORREF bg = bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG);
     if (bD) bg = CCC_Desaturate(bg, 68);
     if (m_bGradEnable)
@@ -8141,7 +8208,9 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             m_nGradDirection);
     else
         DrawSatinFill(&mDC, r, bg);          // サテン/シルク質感
+    }
 
+    if (!bAeroTrans)
     {
         // ぷるんとした濡れツヤ + ジェリー感(リムライト&インナーシャドウ)
         CRect rg = r;
@@ -8211,9 +8280,11 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     }
 
     // 無効: 装飾の質感は残しつつ、やわらかいグレーのヴェールで沈めて「押せない」ことを明示。
-    if (bD)
+    if (bD && !bAeroTrans)
         FillRectAlpha(&mDC, r, RGB(232, 232, 232), 122);
 
+    if (!bAeroTrans)
+    {
     CPen pL(PS_SOLID, m_bFlat ? 1 : 2, RGB(255, 255, 255));
     CPen pD(PS_SOLID, m_bFlat ? 1 : 2, RGB(128, 128, 128));
     CPen* op;
@@ -8255,6 +8326,14 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     {
         CRect rf = r;
         rf.DeflateRect(m_bFlat ? 2 : 4, m_bFlat ? 2 : 4);
+        mDC.DrawFocusRect(&rf);
+    }
+    }
+    else if (bF && !bD)
+    {
+        // 透過時は枠なし・フォーカスは点線のみ（白枠が不透明板に見えるのを防ぐ）
+        CRect rf = r;
+        rf.DeflateRect(1, 1);
         mDC.DrawFocusRect(&rf);
     }
 
@@ -8316,9 +8395,17 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         mDC.SelectObject(pOF);
     }
 
-    if (!bD) CCC_DrawInwoman(&mDC, r, FALSE); // 淫女モード演出
+    if (!bD) CCC_DrawInwoman(&mDC, r, bAeroTrans); // 淫女モード演出
 
-    dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+#if CCUSTOM_AERO_SUPPORT
+    if (bAeroTrans) {
+        CCC_BlitChromaTrans(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(),
+            mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+    } else
+#endif
+    {
+        dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+    }
     mDC.SelectObject(ob);
     mB.DeleteObject();
     mDC.DeleteDC();
@@ -8372,6 +8459,14 @@ void CCustomStandardButton::RepaintClient()
     if (r.Width() <= 0 || r.Height() <= 0)
         return;
 #if CCUSTOM_AERO_SUPPORT
+    // オプトイン透過: 不透明パスを使わずクロマ合成
+    if (m_bAeroMode && CCC_IsWin11() && CCC_IsAeroEnabled())
+    {
+        CClientDC dc(this);
+        PaintClient(dc, r);
+        CCC_InvalidateParent(m_hWnd, TRUE);
+        return;
+    }
     // ホスト α（本文 aero / キャプションのみガラス）では素 BitBlt が消える
     if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
         || CCC_CaptionOnlyHostGlass(m_hWnd)
@@ -8389,6 +8484,14 @@ void CCustomStandardButton::RepaintClient()
 void CCustomStandardButton::OnPaint()
 {
 #if CCUSTOM_AERO_SUPPORT
+    if (m_bAeroMode && CCC_IsWin11() && CCC_IsAeroEnabled())
+    {
+        CPaintDC dc(this);
+        CRect r;
+        GetClientRect(&r);
+        PaintClient(dc, r);
+        return;
+    }
     if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
         || CCC_CaptionOnlyHostGlass(m_hWnd)
         || (CCC_IsCaptionChromeCtrl(m_hWnd) && CCC_AcrylicCaption(::GetParent(m_hWnd)))))
@@ -8412,7 +8515,9 @@ LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
         CRect r;
         GetClientRect(&r);
 #if CCUSTOM_AERO_SUPPORT
-        if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
+        if (m_bAeroMode && CCC_IsWin11() && CCC_IsAeroEnabled())
+            PaintClient(*pDC, r);
+        else if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
             || CCC_CaptionOnlyHostGlass(m_hWnd)
             || (CCC_IsCaptionChromeCtrl(m_hWnd) && CCC_AcrylicCaption(::GetParent(m_hWnd)))))
             PaintOpaqueClient(*pDC);
@@ -8437,6 +8542,9 @@ LRESULT CCustomStandardButton::OnBmSetState(WPARAM wParam, LPARAM)
 BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
+    // 透過ボタン: 消去で不透明塗りをしない（親アクリルを残す）
+    if (m_bAeroMode && CCC_IsWin11() && CCC_IsAeroEnabled())
+        return TRUE;
     // 空返し禁止: ERASE だけの更新だとアクリル上で完全透過のまま残る（ホバーで復帰する現象）
     if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
         || CCC_CaptionOnlyHostGlass(m_hWnd)))
@@ -8464,6 +8572,7 @@ void CCustomStandardButton::OnMouseMove(UINT f, CPoint p)
         m_bMouseOver = TRUE;
         UpdateAnimTimer();
         Invalidate(FALSE);
+        CCC_InvalidateParent(m_hWnd, m_bAeroMode);
     }
     CButton::OnMouseMove(f, p);
 }
@@ -8473,6 +8582,7 @@ LRESULT CCustomStandardButton::OnMouseLeave(WPARAM, LPARAM)
     m_bMouseOver = FALSE;
     UpdateAnimTimer();
     Invalidate(FALSE);
+    CCC_InvalidateParent(m_hWnd, m_bAeroMode);
     return 0;
 }
 

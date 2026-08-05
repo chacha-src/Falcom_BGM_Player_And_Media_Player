@@ -5914,7 +5914,11 @@ void CMediaPlayerDlg::OnSeekWaveToggle()
 		m_wavePath[0] = 0; // 強制再構築
 		KickWaveOverview();
 	}
+	// seekH が変わるので DoLayout 単独では残像・位置ずれが残る（歌詞拡大切替と同方針）
 	DoLayout();
+	CCC_GroupBoxesBack(GetSafeHwnd());
+	RefreshListAfterLayout();
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	MpPersistSavedataQuick();
 }
 
@@ -6268,13 +6272,15 @@ void CMediaPlayerDlg::EnsureLibControls()
 	}
 	if (!m_libToggle.GetSafeHwnd()) {
 		m_libToggle.Create(_T("Lib"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_LIBTOGGLE);
-		m_libToggle.SetGradation(RGB(230, 240, 255), RGB(190, 210, 240), 0, TRUE);
+		m_libToggle.SetGradation(RGB(230, 240, 255), RGB(190, 210, 240), 0, FALSE);
 		m_libToggle.SetFlat(TRUE); // 狭いレール: 2px白枠が白抜けに見えるのを防ぐ
+		m_libToggle.SetAeroMode(TRUE); // アクリル下地を透かす（ラベル風）
 	}
 	if (!m_histToggle.GetSafeHwnd()) {
 		m_histToggle.Create(_T("Hist"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_HISTTOGGLE);
-		m_histToggle.SetGradation(RGB(255, 240, 230), RGB(240, 200, 170), 0, TRUE);
+		m_histToggle.SetGradation(RGB(255, 240, 230), RGB(240, 200, 170), 0, FALSE);
 		m_histToggle.SetFlat(TRUE);
+		m_histToggle.SetAeroMode(TRUE);
 	}
 	if (!m_libAddRoot.GetSafeHwnd()) {
 		m_libAddRoot.Create(LL14(L"ルート追加", L"Add root", L"Aj. racine", L"Agg. radice", L"Anadir raiz", L"루트 추가", L"添加根", L"إضافة جذر", L"Добавить корень", L"Wurzel +", L"Add raiz", L"Wortel +", L"Dodaj korzen", L"Kok +"),
