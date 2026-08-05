@@ -17,14 +17,34 @@ enum {
 	ID_DLRC_ALPHA_255 = 41005,
 	ID_DLRC_TOPMOST = 41006,
 	ID_DLRC_COPY = 41007,
-	ID_DLRC_CLOSE = 41008
+	ID_DLRC_CLOSE = 41008,
+	ID_DLRC_ALPHA_SLIDER = 41009,
+	ID_DLRC_ALPHA_PROG = 41010,
+	ID_DLRC_ALPHA_RESET = 41011
+};
+
+struct DeskLrcMenuCtx {
+	CDesktopLyricsWnd* wnd;
+	CCustomPopupMenu* menu;
 };
 
 static void DeskLrcAlphaSliderCb(void* ctx, int value)
 {
-	CDesktopLyricsWnd* p = (CDesktopLyricsWnd*)ctx;
-	if (!p || !::IsWindow(p->GetSafeHwnd())) return;
-	p->SetDeskLrcAlpha(value, TRUE);
+	DeskLrcMenuCtx* c = (DeskLrcMenuCtx*)ctx;
+	if (!c || !c->wnd || !::IsWindow(c->wnd->GetSafeHwnd())) return;
+	c->wnd->SetDeskLrcAlpha(value, TRUE);
+	if (c->menu) c->menu->SetProgressPos(ID_DLRC_ALPHA_PROG, value);
+}
+
+static void DeskLrcAlphaResetBtnCb(void* ctx, UINT /*id*/)
+{
+	DeskLrcMenuCtx* c = (DeskLrcMenuCtx*)ctx;
+	if (!c || !c->wnd || !::IsWindow(c->wnd->GetSafeHwnd())) return;
+	c->wnd->SetDeskLrcAlpha(200, TRUE);
+	if (c->menu) {
+		c->menu->SetSliderPos(ID_DLRC_ALPHA_SLIDER, 200);
+		c->menu->SetProgressPos(ID_DLRC_ALPHA_PROG, 200);
+	}
 }
 
 IMPLEMENT_DYNAMIC(CDesktopLyricsWnd, CCustomBlurDialogBase)
@@ -364,16 +384,40 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 {
 	CCustomPopupMenu menu;
 	menu.SetAeroMode(FALSE);
+	DeskLrcMenuCtx ctx;
+	ctx.wnd = this;
+	ctx.menu = &menu;
 
 	const int curA = savedata.deskLrcAlpha;
 	menu.AddSlider(
 		LL14(L"不透明度", L"Opacity", L"Opacite", L"Opacita", L"Opacidad",
 			L"불투명도", L"不透明度", L"الشفافية", L"Непрозрачность", L"Deckkraft",
 			L"Opacidade", L"Dekking", L"Nieprzezroczystosc", L"Opaklik"),
-		40, 255, curA, DeskLrcAlphaSliderCb, this,
+		40, 255, curA, DeskLrcAlphaSliderCb, &ctx,
 		LL14(L"ウィンドウ全体の不透明度", L"Overall window opacity", L"Opacite de la fenetre", L"Opacita finestra", L"Opacidad de ventana",
 			L"창 전체 불투명도", L"窗口整体不透明度", L"شفافية النافذة", L"Непрозрачность окна", L"Fensterdeckkraft",
-			L"Opacidade da janela", L"Dekking van venster", L"Nieprzezroczystosc okna", L"Pencere opakligi"));
+			L"Opacidade da janela", L"Dekking van venster", L"Nieprzezroczystosc okna", L"Pencere opakligi"),
+		ID_DLRC_ALPHA_SLIDER);
+	menu.AddProgress(
+		LL14(L"不透明度プレビュー", L"Opacity preview", L"Apercu opacite", L"Anteprima opacita", L"Vista previa opacidad",
+			L"불투명도 미리보기", L"不透明度预览", L"معاينة الشفافية", L"Превью непрозрачности", L"Deckkraft-Vorschau",
+			L"Previa opacidade", L"Dekking voorbeeld", L"Podglad nieprzezroczystosci", L"Opaklik onizleme"),
+		40, 255, curA, TRUE,
+		LL14(L"スライダーと連動", L"Follows the slider", L"Suit le curseur", L"Segue lo slider", L"Sigue el control",
+			L"슬라이더와 연동", L"与滑块联动", L"يتبع الشريط", L"Следует за ползунком", L"Folgt dem Schieberegler",
+			L"Acompanha o slider", L"Volgt de schuif", L"Podaza za suwakiem", L"Kaydiriciyi izler"),
+		ID_DLRC_ALPHA_PROG);
+	menu.AddButton(ID_DLRC_ALPHA_RESET,
+		LL14(L"標準(200)に戻す", L"Reset to normal (200)", L"Reinitialiser (200)", L"Ripristina (200)", L"Restablecer (200)",
+			L"표준(200)으로", L"恢复标准(200)", L"إعادة إلى عادي (200)", L"Сброс на обычную (200)", L"Auf Normal (200)",
+			L"Redefinir (200)", L"Terugzetten (200)", L"Przywroc (200)", L"Normala don (200)"),
+		DeskLrcAlphaResetBtnCb, &ctx,
+		LL14(L"不透明度を 200 に戻します（メニューは開いたまま）", L"Reset opacity to 200 (menu stays open)",
+			L"Remettre a 200 (menu reste ouvert)", L"Ripristina a 200 (menu aperto)", L"Restablecer a 200 (menu abierto)",
+			L"불투명도 200으로 (메뉴 유지)", L"恢复为 200（菜单保持打开）", L"إعادة إلى 200 (القائمة تبقى)",
+			L"Сброс на 200 (меню открыто)", L"Auf 200 (Menü bleibt)", L"Redefinir para 200 (menu aberto)",
+			L"Terug naar 200 (menu open)", L"Przywroc 200 (menu otwarte)", L"200'e don (menu acik kalir)"),
+		FALSE);
 
 	menu.AddSeparator();
 	menu.AddCommand(ID_DLRC_ALPHA_120,

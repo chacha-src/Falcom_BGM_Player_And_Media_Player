@@ -7,7 +7,19 @@
 // ・描画は BufferedPaint+Opaque / 淫女オーバーレイ正式対応（ちらつき禁止）
 // ・項目は固定配列。std::function / vector は使わない
 // ・ルート先頭にフォント／アクリル（骨格注入）。フォントはホバーで即プレビュー
-// ・スライダー / Edit / Combo / List 行は CCustom*。操作中はメニューを閉じずライブ通知可
+// ・チェック以外の CCustom* 内包は「ラベル + コントロール」のスライダー方式
+//
+// 【公開API（他アプリ向け）】
+//   構築: Reset / AddCommand / AddCheck / AddSeparator / AddSubMenu
+//         AddSlider / AddEdit / AddCombo / AddList
+//         AddRangeSlider / AddProgress / AddButton
+//   表示: Track(screenPt, owner) → 選択コマンド ID（骨格IDは 0）
+//   照会: FindItemById / GetItemCount / GetItemKind / GetItemId
+//         GetSliderPos / SetSliderPos / GetEditText / GetChoiceSel
+//         GetRangeValues / SetProgressPos / GetProgressPos
+//         GetSliderCtrl / GetEditCtrl / GetComboCtrl / GetListCtrl
+//         GetRangeSliderCtrl / GetProgressCtrl / GetButtonCtrl
+//   オプション: SetSkipChrome / SetStickyLeading / SetAeroMode
 // ============================================================================
 
 enum {
@@ -17,7 +29,11 @@ enum {
 	CCUSTOM_POPUP_MAX_EDITS = 8,
 	CCUSTOM_POPUP_MAX_COMBOS = 8,
 	CCUSTOM_POPUP_MAX_LISTS = 4,
+	CCUSTOM_POPUP_MAX_RANGES = 4,
+	CCUSTOM_POPUP_MAX_PROGRESSES = 4,
+	CCUSTOM_POPUP_MAX_BUTTONS = 8,
 	CCUSTOM_POPUP_MAX_CHOICES = 24,
+	CCUSTOM_POPUP_MAX_CHOICE_SETS = CCUSTOM_POPUP_MAX_COMBOS + CCUSTOM_POPUP_MAX_LISTS + CCUSTOM_POPUP_MAX_EDITS,
 	CCUSTOM_POPUP_MAX_FACES = 96,
 	CCUSTOM_POPUP_CHOICE_LEN = 64,
 	CCUSTOM_POPUP_TEXT_LEN = 128,
@@ -28,6 +44,9 @@ enum {
 	CCUSTOM_POPUP_EDIT_H = 48,
 	CCUSTOM_POPUP_COMBO_H = 48,
 	CCUSTOM_POPUP_LIST_H = 96,
+	CCUSTOM_POPUP_RANGE_H = 58,
+	CCUSTOM_POPUP_PROGRESS_H = 44,
+	CCUSTOM_POPUP_BUTTON_H = 40,
 	CCUSTOM_POPUP_PAD_X = 14,       // 左（リボン後）
 	CCUSTOM_POPUP_PAD_RIGHT = 20,   // 右 — 余裕の余白
 	CCUSTOM_POPUP_RIBBON_W = 9,
@@ -53,12 +72,18 @@ enum CCustomPopupItemKind {
 	CCUSTOM_POPUP_SLIDER = 4,
 	CCUSTOM_POPUP_EDIT = 5,
 	CCUSTOM_POPUP_COMBO = 6,
-	CCUSTOM_POPUP_LIST = 7
+	CCUSTOM_POPUP_LIST = 7,
+	CCUSTOM_POPUP_RANGE = 8,
+	CCUSTOM_POPUP_PROGRESS = 9,
+	CCUSTOM_POPUP_BUTTON = 10
 };
 
 typedef void (*CCustomPopupSliderCb)(void* ctx, int value);
 typedef void (*CCustomPopupEditCb)(void* ctx, LPCTSTR text);
 typedef void (*CCustomPopupChoiceCb)(void* ctx, int index, LPCTSTR text);
+// pos / loop選択 / A-B（未設定は -1 のまま）
+typedef void (*CCustomPopupRangeCb)(void* ctx, int pos, int selMin, int selMax, int abA, int abB);
+typedef void (*CCustomPopupButtonCb)(void* ctx, UINT id);
 
 struct CCustomPopupItem {
 	int kind;
@@ -71,15 +96,26 @@ struct CCustomPopupItem {
 	int sliderMin;
 	int sliderMax;
 	int sliderPos;
+	int rangeSelMin;
+	int rangeSelMax;
+	int rangeAbA;
+	int rangeAbB;
+	BOOL progressShowPct;
+	BOOL buttonCloseOnClick;
 	CCustomPopupSliderCb sliderCb;
 	CCustomPopupEditCb editCb;
 	CCustomPopupChoiceCb choiceCb;
+	CCustomPopupRangeCb rangeCb;
+	CCustomPopupButtonCb buttonCb;
 	void* ctrlCtx;
 	int subIndex;
 	int sliderIndex;
 	int editIndex;
 	int comboIndex;
 	int listIndex;
+	int rangeIndex;
+	int progressIndex;
+	int buttonIndex;
 	int choiceSet;
 	int choiceSel;
 	CRect rc;
@@ -98,18 +134,31 @@ public:
 	virtual ~CCustomPopupMenu();
 
 	void Reset();
+
+	// --- 基本項目 ---
 	BOOL AddCommand(UINT id, LPCTSTR text, LPCTSTR tip = NULL, BOOL enabled = TRUE);
 	BOOL AddCheck(UINT id, LPCTSTR text, BOOL checked, LPCTSTR tip = NULL, BOOL enabled = TRUE);
 	BOOL AddSeparator();
 	CCustomPopupMenu* AddSubMenu(LPCTSTR text, LPCTSTR tip = NULL);
+
+	// --- CCustom* 内包（チェック以外はスライダー方式: ラベル行 + コントロール）---
+	// id は FindItemById / Get* 用。0 でも可。
 	BOOL AddSlider(LPCTSTR label, int vmin, int vmax, int vpos,
-		CCustomPopupSliderCb cb, void* ctx, LPCTSTR tip = NULL);
+		CCustomPopupSliderCb cb, void* ctx, LPCTSTR tip = NULL, UINT id = 0);
 	BOOL AddEdit(LPCTSTR label, LPCTSTR initial,
-		CCustomPopupEditCb cb, void* ctx, LPCTSTR tip = NULL);
+		CCustomPopupEditCb cb, void* ctx, LPCTSTR tip = NULL, UINT id = 0);
 	BOOL AddCombo(LPCTSTR label, const LPCTSTR* items, int count, int curSel,
-		CCustomPopupChoiceCb cb, void* ctx, LPCTSTR tip = NULL);
+		CCustomPopupChoiceCb cb, void* ctx, LPCTSTR tip = NULL, UINT id = 0);
 	BOOL AddList(LPCTSTR label, const LPCTSTR* items, int count, int curSel,
-		CCustomPopupChoiceCb cb, void* ctx, LPCTSTR tip = NULL);
+		CCustomPopupChoiceCb cb, void* ctx, LPCTSTR tip = NULL, UINT id = 0);
+	BOOL AddRangeSlider(LPCTSTR label, int vmin, int vmax, int vpos,
+		int selMin, int selMax, int abA, int abB,
+		CCustomPopupRangeCb cb, void* ctx, LPCTSTR tip = NULL, UINT id = 0);
+	BOOL AddProgress(LPCTSTR label, int vmin, int vmax, int vpos,
+		BOOL showPercent = TRUE, LPCTSTR tip = NULL, UINT id = 0);
+	// closeOnClick=TRUE ならクリックでメニューを閉じ Track が id を返す。cb は閉じる前に呼ばれる。
+	BOOL AddButton(UINT id, LPCTSTR text,
+		CCustomPopupButtonCb cb = NULL, void* ctx = NULL, LPCTSTR tip = NULL, BOOL closeOnClick = TRUE);
 
 	UINT Track(CPoint screenPt, CWnd* pOwner);
 
@@ -118,6 +167,28 @@ public:
 	void SetStickyLeading(int n) { m_stickyCount = (n < 0) ? 0 : n; }
 	void PersistPopupFont();
 	void RefreshFontChain();
+
+	// --- 照会 / 実行中更新（Track 中も可。id==0 の項目は先頭一致）---
+	int GetItemCount() const { return m_itemCount; }
+	int FindItemById(UINT id) const;
+	int GetItemKind(int idx) const;
+	UINT GetItemId(int idx) const;
+
+	BOOL GetSliderPos(UINT id, int* outPos) const;
+	BOOL SetSliderPos(UINT id, int pos);
+	BOOL GetEditText(UINT id, wchar_t* buf, int bufCch) const;
+	BOOL GetChoiceSel(UINT id, int* outSel) const;
+	BOOL GetRangeValues(UINT id, int* pos, int* selMin, int* selMax, int* abA, int* abB) const;
+	BOOL GetProgressPos(UINT id, int* outPos) const;
+	BOOL SetProgressPos(UINT id, int pos);
+
+	CCustomSliderCtrl* GetSliderCtrl(UINT id);
+	CCustomEdit* GetEditCtrl(UINT id);
+	CCustomComboBox* GetComboCtrl(UINT id);
+	CCustomListBox* GetListCtrl(UINT id);
+	CCustomRangeSliderCtrl* GetRangeSliderCtrl(UINT id);
+	CCustomProgressCtrl* GetProgressCtrl(UINT id);
+	CCustomStandardButton* GetButtonCtrl(UINT id);
 
 protected:
 	CCustomPopupItem m_items[CCUSTOM_POPUP_MAX_ITEMS];
@@ -132,7 +203,13 @@ protected:
 	int m_comboCount;
 	CCustomListBox m_lists[CCUSTOM_POPUP_MAX_LISTS];
 	int m_listCount;
-	CCustomPopupChoiceSet m_choiceSets[CCUSTOM_POPUP_MAX_COMBOS + CCUSTOM_POPUP_MAX_LISTS];
+	CCustomRangeSliderCtrl m_ranges[CCUSTOM_POPUP_MAX_RANGES];
+	int m_rangeCount;
+	CCustomProgressCtrl m_progresses[CCUSTOM_POPUP_MAX_PROGRESSES];
+	int m_progressCount;
+	CCustomStandardButton m_buttons[CCUSTOM_POPUP_MAX_BUTTONS];
+	int m_buttonCount;
+	CCustomPopupChoiceSet m_choiceSets[CCUSTOM_POPUP_MAX_CHOICE_SETS];
 	int m_choiceSetCount;
 
 	BOOL m_bAeroMode;
@@ -194,6 +271,8 @@ protected:
 	void AnimateOut();
 	void NotifyEditFromHwnd(HWND hwnd);
 	void NotifyChoiceFromHwnd(HWND hwnd, BOOL fromList);
+	void NotifyRangeFromHwnd(HWND hwnd);
+	void NotifyButtonFromHwnd(HWND hwnd);
 	void ApplyPreviewFace(LPCTSTR face);
 	void ClearPreviewFace();
 	void CommitFace(LPCTSTR face);
@@ -204,6 +283,8 @@ protected:
 	void SetScrollY(int y);
 	BOOL OnWheelDelta(int delta);
 	BOOL HandleWheelInChain(CPoint screenPt, int delta);
+	void InvalidateBgOnly(); // 背景アニメ用：子コントロールを巻き込まない
+	int FindItemIndexById(UINT id) const;
 
 	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam);
 

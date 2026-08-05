@@ -6061,6 +6061,28 @@ static void MpSleepSliderCb(void* ctx, int value)
 	p->ApplySleepTimer(value);
 }
 
+static void MpAbRangeCb(void* ctx, int pos, int selMin, int selMax, int abA, int abB)
+{
+	CMediaPlayerDlg* p = (CMediaPlayerDlg*)ctx;
+	if (!p) return;
+	p->m_abApos = abA;
+	p->m_abBpos = abB;
+	extern int loop1, loop2;
+	loop1 = selMin;
+	loop2 = (selMax > selMin) ? (selMax - selMin) : 0;
+	if (p->m_seek.GetSafeHwnd()) {
+		p->m_seek.SetPos(pos);
+		p->m_seek.SetSelection(selMin, selMax);
+		p->m_seek.SetAB(abA, abB);
+	}
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->m_time.SetSelection(selMin, selMax);
+	if (pl && plcnt >= 0 && plcnt < pl->playcnt) {
+		pl->pc[plcnt].loop1 = loop1;
+		pl->pc[plcnt].loop2 = loop2;
+	}
+}
+
 static void MpSleepEditCb(void* ctx, LPCTSTR text)
 {
 	CMediaPlayerDlg* p = (CMediaPlayerDlg*)ctx;
@@ -7851,6 +7873,28 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	menu.AddCommand(ID_MP_MB_AUTOTAG,
 		LL14(L"MusicBrainz 自動タグ…", L"MusicBrainz auto-tag…", L"Auto-tag MusicBrainz…", L"Auto-tag MusicBrainz…", L"Auto-etiqueta MusicBrainz…", L"MusicBrainz 자동 태그…", L"MusicBrainz 自动标签…", L"وسوم MusicBrainz…", L"Авто-тег MusicBrainz…", L"MusicBrainz Auto-Tag…", L"Auto-tag MusicBrainz…", L"MusicBrainz auto-tag…", L"Auto-tag MusicBrainz…", L"MusicBrainz otomatik etiket…"));
 	menu.AddSeparator();
+	if (m_seek.GetSafeHwnd()) {
+		const int mn = m_seek.GetMinValue();
+		const int mx = m_seek.GetMaxValue();
+		if (mx > mn) {
+			int selMn = 0, selMx = 0;
+			m_seek.GetSelection(selMn, selMx);
+			menu.AddRangeSlider(
+				LL14(L"シーク / ループ / A-B", L"Seek / loop / A-B", L"Seek / boucle / A-B", L"Seek / loop / A-B",
+					L"Seek / bucle / A-B", L"시크 / 루프 / A-B", L"定位 / 循环 / A-B", L"تقديم / حلقة / A-B",
+					L"Поиск / цикл / A-B", L"Suche / Loop / A-B", L"Seek / loop / A-B", L"Zoek / lus / A-B",
+					L"Seek / petla / A-B", L"Seek / dongu / A-B"),
+				mn, mx, m_seek.GetPos(), selMn, selMx, m_abApos, m_abBpos,
+				MpAbRangeCb, this,
+				LL14(L"再生位置・ループ・A-B をメニュー上で調整", L"Adjust position, loop and A-B in the menu",
+					L"Regler position, boucle et A-B dans le menu", L"Regola posizione, loop e A-B dal menu",
+					L"Ajustar posicion, bucle y A-B en el menu", L"메뉴에서 위치/루프/A-B 조정", L"在菜单中调整位置、循环与 A-B",
+					L"ضبط الموضع والحلقة و A-B من القائمة", L"Настройка позиции, цикла и A-B в меню",
+					L"Position, Loop und A-B im Menü", L"Ajustar posicao, loop e A-B no menu",
+					L"Positie, lus en A-B in het menu", L"Pozycja, petla i A-B w menu", L"Menude konum, dongu ve A-B"));
+			menu.AddSeparator();
+		}
+	}
 	menu.AddCommand(ID_MP_AB_SNAP_A,
 		LL14(L"スナップショット A", L"Snapshot A", L"Instantane A", L"Istantanea A", L"Instantanea A", L"스냅샷 A", L"快照 A", L"لقطة A", L"Снимок A", L"Schnappschuss A", L"Instantaneo A", L"Momentopname A", L"Migawka A", L"Anlik goruntu A"));
 	menu.AddCommand(ID_MP_AB_SNAP_B,

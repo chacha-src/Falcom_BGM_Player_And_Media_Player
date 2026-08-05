@@ -360,7 +360,8 @@ namespace {
 
 CCustomPopupMenu::CCustomPopupMenu()
 	: m_itemCount(0), m_subCount(0), m_sliderCount(0), m_editCount(0)
-	, m_comboCount(0), m_listCount(0), m_choiceSetCount(0)
+	, m_comboCount(0), m_listCount(0), m_rangeCount(0), m_progressCount(0), m_buttonCount(0)
+	, m_choiceSetCount(0)
 	, m_bAeroMode(FALSE), m_tracking(FALSE), m_done(FALSE), m_result(0)
 	, m_hot(-1), m_openSub(-1), m_owner(NULL), m_parentMenu(NULL), m_root(NULL)
 	, m_tipHot(-1), m_memW(0), m_memH(0), m_font(NULL), m_fontOwned(NULL)
@@ -391,7 +392,8 @@ void CCustomPopupMenu::Reset()
 		if (m_subs[i]) { delete m_subs[i]; m_subs[i] = NULL; }
 	}
 	m_itemCount = m_subCount = m_sliderCount = m_editCount = 0;
-	m_comboCount = m_listCount = m_choiceSetCount = 0;
+	m_comboCount = m_listCount = m_rangeCount = m_progressCount = m_buttonCount = 0;
+	m_choiceSetCount = 0;
 	m_hot = m_openSub = -1; m_result = 0; m_done = FALSE; m_tipHot = -1;
 	m_chromeInjected = FALSE; m_previewing = FALSE; m_previewFace[0] = 0;
 	m_scrollY = m_scrollMax = m_contentH = 0;
@@ -412,7 +414,9 @@ void CCustomPopupMenu::CopyText(wchar_t* dst, int dstN, LPCTSTR src)
 BOOL CCustomPopupMenu::IsInteractiveKind(int kind) const
 {
 	return kind == CCUSTOM_POPUP_SLIDER || kind == CCUSTOM_POPUP_EDIT
-		|| kind == CCUSTOM_POPUP_COMBO || kind == CCUSTOM_POPUP_LIST;
+		|| kind == CCUSTOM_POPUP_COMBO || kind == CCUSTOM_POPUP_LIST
+		|| kind == CCUSTOM_POPUP_RANGE || kind == CCUSTOM_POPUP_PROGRESS
+		|| kind == CCUSTOM_POPUP_BUTTON;
 }
 
 BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
@@ -430,6 +434,12 @@ BOOL CCustomPopupMenu::AddItemBase(int kind, UINT id, LPCTSTR text, LPCTSTR tip,
 	ZeroMemory(&it, sizeof(it));
 	it.kind = kind; it.id = id; it.enabled = enabled; it.checked = checked;
 	it.subIndex = it.sliderIndex = it.editIndex = it.comboIndex = it.listIndex = it.choiceSet = -1;
+	it.rangeIndex = it.progressIndex = it.buttonIndex = -1;
+	it.rangeSelMin = it.rangeSelMax = 0;
+	it.rangeAbA = it.rangeAbB = -1;
+	it.progressShowPct = TRUE;
+	it.buttonCloseOnClick = TRUE;
+	it.rangeCb = NULL; it.buttonCb = NULL;
 	CopyText(it.text, CCUSTOM_POPUP_TEXT_LEN, text);
 	if (tip && tip[0]) { CopyText(it.tip, CCUSTOM_POPUP_TIP_LEN, tip); it.hasTip = TRUE; }
 	return TRUE;
@@ -459,10 +469,10 @@ CCustomPopupMenu* CCustomPopupMenu::AddSubMenu(LPCTSTR text, LPCTSTR tip)
 }
 
 BOOL CCustomPopupMenu::AddSlider(LPCTSTR label, int vmin, int vmax, int vpos,
-	CCustomPopupSliderCb cb, void* ctx, LPCTSTR tip)
+	CCustomPopupSliderCb cb, void* ctx, LPCTSTR tip, UINT id)
 {
 	if (m_sliderCount >= CCUSTOM_POPUP_MAX_SLIDERS) return FALSE;
-	if (!AddItemBase(CCUSTOM_POPUP_SLIDER, 0, label, tip, TRUE, FALSE)) return FALSE;
+	if (!AddItemBase(CCUSTOM_POPUP_SLIDER, id, label, tip, TRUE, FALSE)) return FALSE;
 	CCustomPopupItem& it = m_items[m_itemCount - 1];
 	if (vmin > vmax) { const int t = vmin; vmin = vmax; vmax = t; }
 	if (vpos < vmin) vpos = vmin; if (vpos > vmax) vpos = vmax;
@@ -474,7 +484,7 @@ BOOL CCustomPopupMenu::AddSlider(LPCTSTR label, int vmin, int vmax, int vpos,
 int CCustomPopupMenu::AllocChoiceSet(const LPCTSTR* items, int count)
 {
 	if (!items || count <= 0) return -1;
-	if (m_choiceSetCount >= (CCUSTOM_POPUP_MAX_COMBOS + CCUSTOM_POPUP_MAX_LISTS)) return -1;
+	if (m_choiceSetCount >= CCUSTOM_POPUP_MAX_CHOICE_SETS) return -1;
 	CCustomPopupChoiceSet& set = m_choiceSets[m_choiceSetCount];
 	ZeroMemory(&set, sizeof(set));
 	const int n = min(count, (int)CCUSTOM_POPUP_MAX_CHOICES);
@@ -483,25 +493,25 @@ int CCustomPopupMenu::AllocChoiceSet(const LPCTSTR* items, int count)
 	return m_choiceSetCount++;
 }
 
-BOOL CCustomPopupMenu::AddEdit(LPCTSTR label, LPCTSTR initial, CCustomPopupEditCb cb, void* ctx, LPCTSTR tip)
+BOOL CCustomPopupMenu::AddEdit(LPCTSTR label, LPCTSTR initial, CCustomPopupEditCb cb, void* ctx, LPCTSTR tip, UINT id)
 {
 	if (m_editCount >= CCUSTOM_POPUP_MAX_EDITS) return FALSE;
 	LPCTSTR one[1] = { initial ? initial : L"" };
 	const int cs = AllocChoiceSet(one, 1);
 	if (cs < 0) return FALSE;
-	if (!AddItemBase(CCUSTOM_POPUP_EDIT, 0, label, tip, TRUE, FALSE)) { --m_choiceSetCount; return FALSE; }
+	if (!AddItemBase(CCUSTOM_POPUP_EDIT, id, label, tip, TRUE, FALSE)) { --m_choiceSetCount; return FALSE; }
 	CCustomPopupItem& it = m_items[m_itemCount - 1];
 	it.editCb = cb; it.ctrlCtx = ctx; it.choiceSet = cs; it.editIndex = m_editCount++;
 	return TRUE;
 }
 
 BOOL CCustomPopupMenu::AddCombo(LPCTSTR label, const LPCTSTR* items, int count, int curSel,
-	CCustomPopupChoiceCb cb, void* ctx, LPCTSTR tip)
+	CCustomPopupChoiceCb cb, void* ctx, LPCTSTR tip, UINT id)
 {
 	if (m_comboCount >= CCUSTOM_POPUP_MAX_COMBOS) return FALSE;
 	const int cs = AllocChoiceSet(items, count);
 	if (cs < 0) return FALSE;
-	if (!AddItemBase(CCUSTOM_POPUP_COMBO, 0, label, tip, TRUE, FALSE)) { --m_choiceSetCount; return FALSE; }
+	if (!AddItemBase(CCUSTOM_POPUP_COMBO, id, label, tip, TRUE, FALSE)) { --m_choiceSetCount; return FALSE; }
 	CCustomPopupItem& it = m_items[m_itemCount - 1];
 	it.choiceCb = cb; it.ctrlCtx = ctx; it.choiceSet = cs; it.choiceSel = curSel;
 	if (it.choiceSel < 0) it.choiceSel = 0;
@@ -511,17 +521,61 @@ BOOL CCustomPopupMenu::AddCombo(LPCTSTR label, const LPCTSTR* items, int count, 
 }
 
 BOOL CCustomPopupMenu::AddList(LPCTSTR label, const LPCTSTR* items, int count, int curSel,
-	CCustomPopupChoiceCb cb, void* ctx, LPCTSTR tip)
+	CCustomPopupChoiceCb cb, void* ctx, LPCTSTR tip, UINT id)
 {
 	if (m_listCount >= CCUSTOM_POPUP_MAX_LISTS) return FALSE;
 	const int cs = AllocChoiceSet(items, count);
 	if (cs < 0) return FALSE;
-	if (!AddItemBase(CCUSTOM_POPUP_LIST, 0, label, tip, TRUE, FALSE)) { --m_choiceSetCount; return FALSE; }
+	if (!AddItemBase(CCUSTOM_POPUP_LIST, id, label, tip, TRUE, FALSE)) { --m_choiceSetCount; return FALSE; }
 	CCustomPopupItem& it = m_items[m_itemCount - 1];
 	it.choiceCb = cb; it.ctrlCtx = ctx; it.choiceSet = cs; it.choiceSel = curSel;
 	if (it.choiceSel < 0) it.choiceSel = 0;
 	if (it.choiceSel >= m_choiceSets[cs].count) it.choiceSel = m_choiceSets[cs].count - 1;
 	it.listIndex = m_listCount++;
+	return TRUE;
+}
+
+BOOL CCustomPopupMenu::AddRangeSlider(LPCTSTR label, int vmin, int vmax, int vpos,
+	int selMin, int selMax, int abA, int abB,
+	CCustomPopupRangeCb cb, void* ctx, LPCTSTR tip, UINT id)
+{
+	if (m_rangeCount >= CCUSTOM_POPUP_MAX_RANGES) return FALSE;
+	if (!AddItemBase(CCUSTOM_POPUP_RANGE, id, label, tip, TRUE, FALSE)) return FALSE;
+	CCustomPopupItem& it = m_items[m_itemCount - 1];
+	if (vmin > vmax) { const int t = vmin; vmin = vmax; vmax = t; }
+	if (vpos < vmin) vpos = vmin; if (vpos > vmax) vpos = vmax;
+	if (selMin > selMax) { const int t = selMin; selMin = selMax; selMax = t; }
+	if (selMin < vmin) selMin = vmin; if (selMax > vmax) selMax = vmax;
+	it.sliderMin = vmin; it.sliderMax = vmax; it.sliderPos = vpos;
+	it.rangeSelMin = selMin; it.rangeSelMax = selMax;
+	it.rangeAbA = abA; it.rangeAbB = abB;
+	it.rangeCb = cb; it.ctrlCtx = ctx; it.rangeIndex = m_rangeCount++;
+	return TRUE;
+}
+
+BOOL CCustomPopupMenu::AddProgress(LPCTSTR label, int vmin, int vmax, int vpos,
+	BOOL showPercent, LPCTSTR tip, UINT id)
+{
+	if (m_progressCount >= CCUSTOM_POPUP_MAX_PROGRESSES) return FALSE;
+	if (!AddItemBase(CCUSTOM_POPUP_PROGRESS, id, label, tip, TRUE, FALSE)) return FALSE;
+	CCustomPopupItem& it = m_items[m_itemCount - 1];
+	if (vmin > vmax) { const int t = vmin; vmin = vmax; vmax = t; }
+	if (vpos < vmin) vpos = vmin; if (vpos > vmax) vpos = vmax;
+	it.sliderMin = vmin; it.sliderMax = vmax; it.sliderPos = vpos;
+	it.progressShowPct = showPercent ? TRUE : FALSE;
+	it.progressIndex = m_progressCount++;
+	return TRUE;
+}
+
+BOOL CCustomPopupMenu::AddButton(UINT id, LPCTSTR text,
+	CCustomPopupButtonCb cb, void* ctx, LPCTSTR tip, BOOL closeOnClick)
+{
+	if (m_buttonCount >= CCUSTOM_POPUP_MAX_BUTTONS) return FALSE;
+	if (!AddItemBase(CCUSTOM_POPUP_BUTTON, id, text, tip, TRUE, FALSE)) return FALSE;
+	CCustomPopupItem& it = m_items[m_itemCount - 1];
+	it.buttonCb = cb; it.ctrlCtx = ctx;
+	it.buttonCloseOnClick = closeOnClick ? TRUE : FALSE;
+	it.buttonIndex = m_buttonCount++;
 	return TRUE;
 }
 
@@ -710,6 +764,9 @@ void CCustomPopupMenu::MeasureLayout()
 		else if (it.kind == CCUSTOM_POPUP_EDIT) h = CCUSTOM_POPUP_EDIT_H;
 		else if (it.kind == CCUSTOM_POPUP_COMBO) h = CCUSTOM_POPUP_COMBO_H;
 		else if (it.kind == CCUSTOM_POPUP_LIST) h = CCUSTOM_POPUP_LIST_H;
+		else if (it.kind == CCUSTOM_POPUP_RANGE) h = CCUSTOM_POPUP_RANGE_H;
+		else if (it.kind == CCUSTOM_POPUP_PROGRESS) h = CCUSTOM_POPUP_PROGRESS_H;
+		else if (it.kind == CCUSTOM_POPUP_BUTTON) h = CCUSTOM_POPUP_BUTTON_H;
 		it.rc.SetRect(CCUSTOM_POPUP_RIBBON_W + 2, y, m_menuW - 6, y + h);
 		y += h;
 		if (i + 1 == m_stickyCount)
@@ -723,71 +780,150 @@ void CCustomPopupMenu::MeasureLayout()
 
 void CCustomPopupMenu::SyncEmbeddedChildren()
 {
+	auto placeChild = [&](CWnd& wnd, const CRect& dest, BOOL onScreen) {
+		if (!wnd.GetSafeHwnd()) return;
+		CRect old;
+		wnd.GetWindowRect(&old);
+		ScreenToClient(&old);
+		const BOOL moved = (old != dest);
+		if (moved)
+			wnd.MoveWindow(&dest, FALSE);
+		if (onScreen) {
+			wnd.ShowWindow(SW_SHOWNA);
+			// MoveWindow(FALSE) のあと親は子領域を塗らない → 必ず子自身を描き直す
+			wnd.Invalidate(FALSE);
+			wnd.UpdateWindow();
+		} else {
+			wnd.ShowWindow(SW_HIDE);
+		}
+	};
+
 	for (int i = 0; i < m_itemCount; ++i) {
 		CCustomPopupItem& it = m_items[i];
 		CRect vr = ItemViewRect(i);
 		const BOOL sticky = (i < m_stickyCount);
-		const BOOL onScreen = sticky
-			? (vr.bottom > 0 && vr.top < m_menuH)
-			: (vr.bottom > m_stickyH && vr.top < m_menuH);
+		const int clipTop = sticky ? 0 : m_stickyH;
+		CRect body(0, clipTop, m_menuW, m_menuH);
+		CRect vis;
+		const BOOL rowVisible = vis.IntersectRect(&vr, &body) && vis.Height() > 1;
+
 		if (it.kind == CCUSTOM_POPUP_SLIDER && it.sliderIndex >= 0) {
 			CCustomSliderCtrl& sl = m_sliders[it.sliderIndex];
 			CRect sr = vr; sr.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect hit;
+			const BOOL onScreen = rowVisible && hit.IntersectRect(&sr, &body) && hit.Height() > 2;
 			if (!sl.GetSafeHwnd()) {
-				sl.Create(WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS | TBS_BOTH, sr, this, 6000 + it.sliderIndex);
+				sl.Create(WS_CHILD | WS_CLIPSIBLINGS | TBS_HORZ | TBS_NOTICKS, sr, this, 6000 + it.sliderIndex);
 				sl.SetAeroMode(FALSE); sl.SetRange(it.sliderMin, it.sliderMax, TRUE); sl.SetPos(it.sliderPos);
-			} else sl.MoveWindow(&sr, TRUE);
-			sl.ShowWindow(onScreen ? SW_SHOWNA : SW_HIDE);
+			}
+			placeChild(sl, sr, onScreen);
 		} else if (it.kind == CCUSTOM_POPUP_EDIT && it.editIndex >= 0) {
 			CCustomEdit& ed = m_edits[it.editIndex];
 			CRect er = vr; er.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect hit;
+			const BOOL onScreen = rowVisible && hit.IntersectRect(&er, &body) && hit.Height() > 2;
 			LPCTSTR init = L"";
 			if (it.choiceSet >= 0 && it.choiceSet < m_choiceSetCount && m_choiceSets[it.choiceSet].count > 0)
 				init = m_choiceSets[it.choiceSet].items[0];
 			if (!ed.GetSafeHwnd()) {
-				ed.Create(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, er, this, 6100 + it.editIndex);
+				ed.Create(WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, er, this, 6100 + it.editIndex);
 				ed.SetWindowText(init);
-			} else ed.MoveWindow(&er, TRUE);
-			ed.ShowWindow(onScreen ? SW_SHOWNA : SW_HIDE);
+			}
+			placeChild(ed, er, onScreen);
 		} else if (it.kind == CCUSTOM_POPUP_COMBO && it.comboIndex >= 0 && it.choiceSet >= 0) {
 			CCustomComboBox& cb = m_combos[it.comboIndex];
 			CRect cr = vr; cr.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect hit;
+			const BOOL onScreen = rowVisible && hit.IntersectRect(&cr, &body) && hit.Height() > 2;
 			const CCustomPopupChoiceSet& set = m_choiceSets[it.choiceSet];
 			if (!cb.GetSafeHwnd()) {
-				cb.Create(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS,
+				cb.Create(WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS,
 					cr, this, 6200 + it.comboIndex);
 				cb.SetAeroMode(FALSE);
 				for (int k = 0; k < set.count; ++k) cb.AddString(set.items[k]);
 				if (set.count > 0) cb.SetCurSelPhysical(it.choiceSel);
-			} else cb.MoveWindow(&cr, TRUE);
-			cb.ShowWindow(onScreen ? SW_SHOWNA : SW_HIDE);
+			}
+			placeChild(cb, cr, onScreen);
 		} else if (it.kind == CCUSTOM_POPUP_LIST && it.listIndex >= 0 && it.choiceSet >= 0) {
 			CCustomListBox& lb = m_lists[it.listIndex];
 			CRect lr = vr; lr.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect hit;
+			const BOOL onScreen = rowVisible && hit.IntersectRect(&lr, &body) && hit.Height() > 2;
 			const CCustomPopupChoiceSet& set = m_choiceSets[it.choiceSet];
 			if (!lb.GetSafeHwnd()) {
-				lb.Create(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | WS_BORDER
+				lb.Create(WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP | WS_VSCROLL | WS_BORDER
 					| LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | LBS_NOINTEGRALHEIGHT,
 					lr, this, 6300 + it.listIndex);
 				lb.SetAeroMode(FALSE);
 				for (int k = 0; k < set.count; ++k) lb.AddString(set.items[k]);
 				if (set.count > 0) lb.SetCurSel(it.choiceSel);
-			} else lb.MoveWindow(&lr, TRUE);
-			lb.ShowWindow(onScreen ? SW_SHOWNA : SW_HIDE);
+			}
+			placeChild(lb, lr, onScreen);
+		} else if (it.kind == CCUSTOM_POPUP_RANGE && it.rangeIndex >= 0) {
+			CCustomRangeSliderCtrl& rs = m_ranges[it.rangeIndex];
+			CRect rr = vr; rr.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect hit;
+			const BOOL onScreen = rowVisible && hit.IntersectRect(&rr, &body) && hit.Height() > 2;
+			if (!rs.GetSafeHwnd()) {
+				rs.Create(WS_CHILD | WS_CLIPSIBLINGS | TBS_HORZ | TBS_NOTICKS, rr, this, 6400 + it.rangeIndex);
+				rs.SetAeroMode(FALSE);
+				rs.SetRange(it.sliderMin, it.sliderMax, TRUE);
+				rs.SetPos(it.sliderPos);
+				rs.SetSelection(it.rangeSelMin, it.rangeSelMax);
+				rs.SetAB(it.rangeAbA, it.rangeAbB);
+				rs.SetSelectionLocked(FALSE);
+			}
+			placeChild(rs, rr, onScreen);
+		} else if (it.kind == CCUSTOM_POPUP_PROGRESS && it.progressIndex >= 0) {
+			CCustomProgressCtrl& pg = m_progresses[it.progressIndex];
+			CRect pr = vr; pr.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect hit;
+			const BOOL onScreen = rowVisible && hit.IntersectRect(&pr, &body) && hit.Height() > 2;
+			if (!pg.GetSafeHwnd()) {
+				pg.Create(WS_CHILD | WS_CLIPSIBLINGS, pr, this, 6500 + it.progressIndex);
+				pg.SetAeroMode(FALSE);
+				pg.SetRange(it.sliderMin, it.sliderMax);
+				pg.SetPos(it.sliderPos);
+				pg.SetShowPercent(it.progressShowPct);
+			}
+			placeChild(pg, pr, onScreen);
+		} else if (it.kind == CCUSTOM_POPUP_BUTTON && it.buttonIndex >= 0) {
+			CCustomStandardButton& bt = m_buttons[it.buttonIndex];
+			CRect br = vr; br.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 6, CCUSTOM_POPUP_PAD_RIGHT, 6);
+			CRect hit;
+			const BOOL onScreen = rowVisible && hit.IntersectRect(&br, &body) && hit.Height() > 2;
+			if (!bt.GetSafeHwnd()) {
+				bt.Create(it.text, WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP | BS_PUSHBUTTON,
+					br, this, 6600 + it.buttonIndex);
+				bt.SetAeroMode(FALSE);
+				bt.SetFlat(FALSE);
+			}
+			placeChild(bt, br, onScreen);
 		}
 	}
 }
 
 void CCustomPopupMenu::ShowEmbedded(BOOL show)
 {
-	for (int i = 0; i < m_sliderCount; ++i)
-		if (m_sliders[i].GetSafeHwnd()) m_sliders[i].ShowWindow(show ? SW_SHOWNA : SW_HIDE);
-	for (int i = 0; i < m_editCount; ++i)
-		if (m_edits[i].GetSafeHwnd()) m_edits[i].ShowWindow(show ? SW_SHOWNA : SW_HIDE);
-	for (int i = 0; i < m_comboCount; ++i)
-		if (m_combos[i].GetSafeHwnd()) m_combos[i].ShowWindow(show ? SW_SHOWNA : SW_HIDE);
-	for (int i = 0; i < m_listCount; ++i)
-		if (m_lists[i].GetSafeHwnd()) m_lists[i].ShowWindow(show ? SW_SHOWNA : SW_HIDE);
+	if (!show) {
+		for (int i = 0; i < m_sliderCount; ++i)
+			if (m_sliders[i].GetSafeHwnd()) m_sliders[i].ShowWindow(SW_HIDE);
+		for (int i = 0; i < m_editCount; ++i)
+			if (m_edits[i].GetSafeHwnd()) m_edits[i].ShowWindow(SW_HIDE);
+		for (int i = 0; i < m_comboCount; ++i)
+			if (m_combos[i].GetSafeHwnd()) m_combos[i].ShowWindow(SW_HIDE);
+		for (int i = 0; i < m_listCount; ++i)
+			if (m_lists[i].GetSafeHwnd()) m_lists[i].ShowWindow(SW_HIDE);
+		for (int i = 0; i < m_rangeCount; ++i)
+			if (m_ranges[i].GetSafeHwnd()) m_ranges[i].ShowWindow(SW_HIDE);
+		for (int i = 0; i < m_progressCount; ++i)
+			if (m_progresses[i].GetSafeHwnd()) m_progresses[i].ShowWindow(SW_HIDE);
+		for (int i = 0; i < m_buttonCount; ++i)
+			if (m_buttons[i].GetSafeHwnd()) m_buttons[i].ShowWindow(SW_HIDE);
+		return;
+	}
+	// 表示は onScreen 判定込みの Sync に任せる
+	SyncEmbeddedChildren();
 }
 
 void CCustomPopupMenu::AnimateIn()
@@ -799,6 +935,9 @@ void CCustomPopupMenu::AnimateIn()
 	if (!::AnimateWindow(m_hWnd, ms, flags)) {
 		ShowWindow(SW_SHOWNA); Invalidate(FALSE); UpdateWindow();
 	}
+	// AW_BLEND が WS_EX_LAYERED を残すと、子（特に自前 BitBlt）が消えて見える
+	if (GetExStyle() & WS_EX_LAYERED)
+		ModifyStyleEx(WS_EX_LAYERED, 0);
 	m_animTick = 0;
 	SetTimer(kAnimTimer, 50, NULL); // 再描画は控えめ、位置は GetTickCount でスムーズ
 }
@@ -849,7 +988,8 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 	m_bounceIdx = -1; m_nBounce = 0;
 	if (GetSafeHwnd()) DestroyWindow();
 
-	if (!CreateEx(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, L"CCustomPopupMenuClass", NULL, WS_POPUP,
+	if (!CreateEx(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, L"CCustomPopupMenuClass", NULL,
+		WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
 		screenPt.x, screenPt.y, m_menuW, m_menuH, m_owner ? m_owner->GetSafeHwnd() : NULL, NULL))
 		return FALSE;
 
@@ -883,6 +1023,12 @@ void CCustomPopupMenu::DestroyPopupTree()
 		if (m_combos[i].GetSafeHwnd()) m_combos[i].DestroyWindow();
 	for (int i = 0; i < m_listCount; ++i)
 		if (m_lists[i].GetSafeHwnd()) m_lists[i].DestroyWindow();
+	for (int i = 0; i < m_rangeCount; ++i)
+		if (m_ranges[i].GetSafeHwnd()) m_ranges[i].DestroyWindow();
+	for (int i = 0; i < m_progressCount; ++i)
+		if (m_progresses[i].GetSafeHwnd()) m_progresses[i].DestroyWindow();
+	for (int i = 0; i < m_buttonCount; ++i)
+		if (m_buttons[i].GetSafeHwnd()) m_buttons[i].DestroyWindow();
 	if (m_tip.GetSafeHwnd()) m_tip.DestroyWindow();
 	if (GetSafeHwnd()) {
 		KillTimer(kTipTimer); KillTimer(kInwomanTimer); KillTimer(kAnimTimer); KillTimer(kBounceTimer);
@@ -976,14 +1122,45 @@ CRect CCustomPopupMenu::ItemViewRect(int idx) const
 	return r;
 }
 
+void CCustomPopupMenu::InvalidateBgOnly()
+{
+	if (!GetSafeHwnd()) return;
+	CRect rc; GetClientRect(&rc);
+	CRgn rgn;
+	if (!rgn.CreateRectRgnIndirect(&rc)) {
+		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_NOCHILDREN);
+		return;
+	}
+	for (HWND h = ::GetWindow(m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+		if (!::IsWindowVisible(h)) continue;
+		CRect cr; ::GetWindowRect(h, &cr); ScreenToClient(&cr);
+		CRgn child;
+		if (child.CreateRectRgnIndirect(&cr))
+			rgn.CombineRgn(&rgn, &child, RGN_DIFF);
+	}
+	InvalidateRgn(&rgn, FALSE);
+}
+
 void CCustomPopupMenu::SetScrollY(int y)
 {
 	if (y < 0) y = 0;
 	if (y > m_scrollMax) y = m_scrollMax;
 	if (y == m_scrollY) return;
+	// 移動前の子領域も親で塗り直すため、一旦子を隠してからスクロール同期
+	CRect oldChildUnion(0, 0, 0, 0);
+	BOOL haveOld = FALSE;
+	for (HWND h = ::GetWindow(m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+		if (!::IsWindowVisible(h)) continue;
+		CRect cr; ::GetWindowRect(h, &cr); ScreenToClient(&cr);
+		if (!haveOld) { oldChildUnion = cr; haveOld = TRUE; }
+		else oldChildUnion.UnionRect(&oldChildUnion, &cr);
+	}
 	m_scrollY = y;
 	SyncEmbeddedChildren();
-	Invalidate(FALSE);
+	if (haveOld)
+		InvalidateRect(&oldChildUnion, FALSE);
+	InvalidateBgOnly();
+	UpdateWindow();
 }
 
 BOOL CCustomPopupMenu::OnWheelDelta(int delta)
@@ -1120,13 +1297,17 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		}
 
 		if (interactive) {
+			if (it.kind == CCUSTOM_POPUP_BUTTON)
+				return; // 文言は CCustomStandardButton 側
 			CRect lr = vr;
 			lr.left = vr.left + CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W;
 			lr.right = vr.right - CCUSTOM_POPUP_PAD_RIGHT;
 			lr.top = vr.top + 2;
 			lr.bottom = vr.top + 18;
 			wchar_t line[CCUSTOM_POPUP_TEXT_LEN + 32];
-			if (it.kind == CCUSTOM_POPUP_SLIDER)
+			if (it.kind == CCUSTOM_POPUP_SLIDER || it.kind == CCUSTOM_POPUP_RANGE)
+				_snwprintf_s(line, _TRUNCATE, L"%s  (%d)", it.text, it.sliderPos);
+			else if (it.kind == CCUSTOM_POPUP_PROGRESS)
 				_snwprintf_s(line, _TRUNCATE, L"%s  (%d)", it.text, it.sliderPos);
 			else
 				_snwprintf_s(line, _TRUNCATE, L"%s", it.text);
@@ -1209,14 +1390,24 @@ void CCustomPopupMenu::OnPaint()
 	CPaintDC dc(this);
 	CRect r; GetClientRect(&r);
 	if (r.Width() <= 0 || r.Height() <= 0) return;
-	BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-	params.dwFlags = BPPF_ERASE;
-	HDC hdcBuf = NULL;
-	HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-	if (hdcBuf && hBP) {
-		CDC dcBuf; dcBuf.Attach(hdcBuf); PaintToDC(dcBuf); dcBuf.Detach();
-		::BufferedPaintMakeOpaque(hBP, &r); ::EndBufferedPaint(hBP, TRUE); return;
+
+	// 子 HWND をクリップから除外（rcPaint は外接矩形なので InvalidateRgn だけでは足りない）
+	CRgn exclude;
+	BOOL haveExclude = FALSE;
+	for (HWND h = ::GetWindow(m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+		if (!::IsWindowVisible(h)) continue;
+		CRect cr; ::GetWindowRect(h, &cr); ScreenToClient(&cr);
+		if (!haveExclude) {
+			haveExclude = exclude.CreateRectRgnIndirect(&cr);
+		} else {
+			CRgn child;
+			if (child.CreateRectRgnIndirect(&cr))
+				exclude.CombineRgn(&exclude, &child, RGN_OR);
+		}
 	}
+	if (haveExclude)
+		dc.SelectClipRgn(&exclude, RGN_DIFF);
+
 	CDC mDC; mDC.CreateCompatibleDC(&dc);
 	if (!m_memBmp.GetSafeHandle() || m_memW != r.Width() || m_memH != r.Height()) {
 		if (m_memBmp.GetSafeHandle()) m_memBmp.DeleteObject();
@@ -1225,7 +1416,20 @@ void CCustomPopupMenu::OnPaint()
 	}
 	CBitmap* ob = mDC.SelectObject(&m_memBmp);
 	PaintToDC(mDC);
-	dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+
+	// Win11 では素の BitBlt が α=0 になり得る → BufferedPaint で不透明化
+	BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+	params.dwFlags = BPPF_ERASE;
+	HDC hdcBuf = NULL;
+	const CRect& pr = dc.m_ps.rcPaint;
+	HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &pr, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+	if (hdcBuf && hBP) {
+		::BitBlt(hdcBuf, 0, 0, pr.Width(), pr.Height(), mDC.GetSafeHdc(), pr.left, pr.top, SRCCOPY);
+		::BufferedPaintMakeOpaque(hBP, NULL);
+		::EndBufferedPaint(hBP, TRUE);
+	} else {
+		dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
+	}
 	mDC.SelectObject(ob);
 }
 
@@ -1383,16 +1587,54 @@ BOOL CCustomPopupMenu::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 void CCustomPopupMenu::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
 	if (!pScrollBar) return;
+	const HWND hwnd = pScrollBar->GetSafeHwnd();
 	for (int i = 0; i < m_itemCount; ++i) {
 		CCustomPopupItem& it = m_items[i];
-		if (it.kind != CCUSTOM_POPUP_SLIDER || it.sliderIndex < 0) continue;
-		if (m_sliders[it.sliderIndex].GetSafeHwnd() != pScrollBar->GetSafeHwnd()) continue;
-		const int v = m_sliders[it.sliderIndex].GetPos();
-		it.sliderPos = v;
-		if (it.sliderCb) it.sliderCb(it.ctrlCtx, v);
-		Invalidate(FALSE); break;
+		if (it.kind == CCUSTOM_POPUP_SLIDER && it.sliderIndex >= 0
+			&& m_sliders[it.sliderIndex].GetSafeHwnd() == hwnd) {
+			const int v = m_sliders[it.sliderIndex].GetPos();
+			it.sliderPos = v;
+			if (it.sliderCb) it.sliderCb(it.ctrlCtx, v);
+			InvalidateBgOnly();
+			break;
+		}
+		if (it.kind == CCUSTOM_POPUP_RANGE && it.rangeIndex >= 0
+			&& m_ranges[it.rangeIndex].GetSafeHwnd() == hwnd) {
+			NotifyRangeFromHwnd(hwnd);
+			break;
+		}
 	}
 	CWnd::OnHScroll(nSBCode, nPos, pScrollBar);
+}
+
+void CCustomPopupMenu::NotifyRangeFromHwnd(HWND hwnd)
+{
+	for (int i = 0; i < m_itemCount; ++i) {
+		CCustomPopupItem& it = m_items[i];
+		if (it.kind != CCUSTOM_POPUP_RANGE || it.rangeIndex < 0) continue;
+		CCustomRangeSliderCtrl& rs = m_ranges[it.rangeIndex];
+		if (rs.GetSafeHwnd() != hwnd) continue;
+		it.sliderPos = rs.GetPos();
+		rs.GetSelection(it.rangeSelMin, it.rangeSelMax);
+		rs.GetAB(it.rangeAbA, it.rangeAbB);
+		if (it.rangeCb)
+			it.rangeCb(it.ctrlCtx, it.sliderPos, it.rangeSelMin, it.rangeSelMax, it.rangeAbA, it.rangeAbB);
+		InvalidateBgOnly();
+		break;
+	}
+}
+
+void CCustomPopupMenu::NotifyButtonFromHwnd(HWND hwnd)
+{
+	for (int i = 0; i < m_itemCount; ++i) {
+		CCustomPopupItem& it = m_items[i];
+		if (it.kind != CCUSTOM_POPUP_BUTTON || it.buttonIndex < 0) continue;
+		if (m_buttons[it.buttonIndex].GetSafeHwnd() != hwnd) continue;
+		if (it.buttonCb) it.buttonCb(it.ctrlCtx, it.id);
+		if (it.buttonCloseOnClick)
+			CloseChain(it.id);
+		break;
+	}
 }
 
 void CCustomPopupMenu::NotifyEditFromHwnd(HWND hwnd)
@@ -1439,6 +1681,7 @@ BOOL CCustomPopupMenu::OnCommand(WPARAM wParam, LPARAM lParam)
 		if (code == EN_CHANGE || code == EN_KILLFOCUS) NotifyEditFromHwnd(hwnd);
 		else if (code == CBN_SELCHANGE) NotifyChoiceFromHwnd(hwnd, FALSE);
 		else if (code == LBN_SELCHANGE) NotifyChoiceFromHwnd(hwnd, TRUE);
+		else if (code == BN_CLICKED) NotifyButtonFromHwnd(hwnd);
 	}
 	return CWnd::OnCommand(wParam, lParam);
 }
@@ -1457,12 +1700,12 @@ BOOL CCustomPopupMenu::OnTtnNeedText(UINT, NMHDR* pNMHDR, LRESULT* pResult)
 void CCustomPopupMenu::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == kInwomanTimer) {
-		if (CCC_IsInwoman()) Invalidate(FALSE); else KillTimer(kInwomanTimer);
+		if (CCC_IsInwoman()) InvalidateBgOnly(); else KillTimer(kInwomanTimer);
 		return;
 	}
 	if (nIDEvent == kAnimTimer) {
 		++m_animTick;
-		Invalidate(FALSE); // 斜め背景のスクロールを継続
+		InvalidateBgOnly(); // 斜め背景のみ。内包コントロールは触らない
 		return;
 	}
 	if (nIDEvent == kBounceTimer) {
@@ -1537,4 +1780,205 @@ UINT CCustomPopupMenu::Track(CPoint screenPt, CWnd* pOwner)
 	if (IsChromeCommand(m_result))
 		return 0;
 	return m_result;
+}
+
+int CCustomPopupMenu::FindItemIndexById(UINT id) const
+{
+	if (id == 0) return -1;
+	for (int i = 0; i < m_itemCount; ++i)
+		if (m_items[i].id == id) return i;
+	return -1;
+}
+
+int CCustomPopupMenu::FindItemById(UINT id) const
+{
+	return FindItemIndexById(id);
+}
+
+int CCustomPopupMenu::GetItemKind(int idx) const
+{
+	if (idx < 0 || idx >= m_itemCount) return -1;
+	return m_items[idx].kind;
+}
+
+UINT CCustomPopupMenu::GetItemId(int idx) const
+{
+	if (idx < 0 || idx >= m_itemCount) return 0;
+	return m_items[idx].id;
+}
+
+BOOL CCustomPopupMenu::GetSliderPos(UINT id, int* outPos) const
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0 || !outPos) return FALSE;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_SLIDER || it.sliderIndex < 0) return FALSE;
+	if (m_sliders[it.sliderIndex].GetSafeHwnd())
+		*outPos = m_sliders[it.sliderIndex].GetPos();
+	else
+		*outPos = it.sliderPos;
+	return TRUE;
+}
+
+BOOL CCustomPopupMenu::SetSliderPos(UINT id, int pos)
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0) return FALSE;
+	CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_SLIDER || it.sliderIndex < 0) return FALSE;
+	if (pos < it.sliderMin) pos = it.sliderMin;
+	if (pos > it.sliderMax) pos = it.sliderMax;
+	it.sliderPos = pos;
+	if (m_sliders[it.sliderIndex].GetSafeHwnd())
+		m_sliders[it.sliderIndex].SetPos(pos);
+	InvalidateBgOnly();
+	return TRUE;
+}
+
+BOOL CCustomPopupMenu::GetEditText(UINT id, wchar_t* buf, int bufCch) const
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0 || !buf || bufCch <= 0) return FALSE;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_EDIT || it.editIndex < 0) return FALSE;
+	buf[0] = 0;
+	if (m_edits[it.editIndex].GetSafeHwnd()) {
+		CString s; m_edits[it.editIndex].GetWindowText(s);
+		lstrcpynW(buf, s, bufCch);
+	} else if (it.choiceSet >= 0 && it.choiceSet < m_choiceSetCount)
+		lstrcpynW(buf, m_choiceSets[it.choiceSet].items[0], bufCch);
+	return TRUE;
+}
+
+BOOL CCustomPopupMenu::GetChoiceSel(UINT id, int* outSel) const
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0 || !outSel) return FALSE;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind == CCUSTOM_POPUP_COMBO && it.comboIndex >= 0) {
+		if (m_combos[it.comboIndex].GetSafeHwnd())
+			*outSel = m_combos[it.comboIndex].GetCurSelPhysical();
+		else
+			*outSel = it.choiceSel;
+		return TRUE;
+	}
+	if (it.kind == CCUSTOM_POPUP_LIST && it.listIndex >= 0) {
+		if (m_lists[it.listIndex].GetSafeHwnd())
+			*outSel = m_lists[it.listIndex].GetCurSel();
+		else
+			*outSel = it.choiceSel;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+BOOL CCustomPopupMenu::GetRangeValues(UINT id, int* pos, int* selMin, int* selMax, int* abA, int* abB) const
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0) return FALSE;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_RANGE || it.rangeIndex < 0) return FALSE;
+	int p = it.sliderPos, s0 = it.rangeSelMin, s1 = it.rangeSelMax, a = it.rangeAbA, b = it.rangeAbB;
+	if (m_ranges[it.rangeIndex].GetSafeHwnd()) {
+		p = m_ranges[it.rangeIndex].GetPos();
+		m_ranges[it.rangeIndex].GetSelection(s0, s1);
+		m_ranges[it.rangeIndex].GetAB(a, b);
+	}
+	if (pos) *pos = p;
+	if (selMin) *selMin = s0;
+	if (selMax) *selMax = s1;
+	if (abA) *abA = a;
+	if (abB) *abB = b;
+	return TRUE;
+}
+
+BOOL CCustomPopupMenu::GetProgressPos(UINT id, int* outPos) const
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0 || !outPos) return FALSE;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_PROGRESS || it.progressIndex < 0) return FALSE;
+	if (m_progresses[it.progressIndex].GetSafeHwnd())
+		*outPos = m_progresses[it.progressIndex].GetPos();
+	else
+		*outPos = it.sliderPos;
+	return TRUE;
+}
+
+BOOL CCustomPopupMenu::SetProgressPos(UINT id, int pos)
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0) return FALSE;
+	CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_PROGRESS || it.progressIndex < 0) return FALSE;
+	if (pos < it.sliderMin) pos = it.sliderMin;
+	if (pos > it.sliderMax) pos = it.sliderMax;
+	it.sliderPos = pos;
+	if (m_progresses[it.progressIndex].GetSafeHwnd())
+		m_progresses[it.progressIndex].SetPos(pos);
+	InvalidateBgOnly();
+	return TRUE;
+}
+
+CCustomSliderCtrl* CCustomPopupMenu::GetSliderCtrl(UINT id)
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0) return NULL;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_SLIDER || it.sliderIndex < 0) return NULL;
+	return &m_sliders[it.sliderIndex];
+}
+
+CCustomEdit* CCustomPopupMenu::GetEditCtrl(UINT id)
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0) return NULL;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_EDIT || it.editIndex < 0) return NULL;
+	return &m_edits[it.editIndex];
+}
+
+CCustomComboBox* CCustomPopupMenu::GetComboCtrl(UINT id)
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0) return NULL;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_COMBO || it.comboIndex < 0) return NULL;
+	return &m_combos[it.comboIndex];
+}
+
+CCustomListBox* CCustomPopupMenu::GetListCtrl(UINT id)
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0) return NULL;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_LIST || it.listIndex < 0) return NULL;
+	return &m_lists[it.listIndex];
+}
+
+CCustomRangeSliderCtrl* CCustomPopupMenu::GetRangeSliderCtrl(UINT id)
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0) return NULL;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_RANGE || it.rangeIndex < 0) return NULL;
+	return &m_ranges[it.rangeIndex];
+}
+
+CCustomProgressCtrl* CCustomPopupMenu::GetProgressCtrl(UINT id)
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0) return NULL;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_PROGRESS || it.progressIndex < 0) return NULL;
+	return &m_progresses[it.progressIndex];
+}
+
+CCustomStandardButton* CCustomPopupMenu::GetButtonCtrl(UINT id)
+{
+	const int idx = FindItemIndexById(id);
+	if (idx < 0) return NULL;
+	const CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_BUTTON || it.buttonIndex < 0) return NULL;
+	return &m_buttons[it.buttonIndex];
 }

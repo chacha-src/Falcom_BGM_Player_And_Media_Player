@@ -4802,6 +4802,24 @@ void CCustomComboBox::PaintClient(CDC& dc)
 void CCustomComboBox::OnPaint()
 {
     CPaintDC dc(this);
+    CRect r;
+    GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0) return;
+
+    // ポップアップ子など: 素 BitBlt が消える環境向けに不透明化
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    params.dwFlags = BPPF_ERASE;
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (hdcBuf && hBP) {
+        CDC dcBuf;
+        dcBuf.Attach(hdcBuf);
+        PaintClient(dcBuf);
+        dcBuf.Detach();
+        ::BufferedPaintMakeOpaque(hBP, &r);
+        ::EndBufferedPaint(hBP, TRUE);
+        return;
+    }
     PaintClient(dc);
 }
 
@@ -5107,9 +5125,7 @@ void CCustomSliderCtrl::OnPaint()
         return;
     }
 
-#if CCUSTOM_AERO_SUPPORT
-    // キャプションのみホスト α: 素 BitBlt は α=0 で消える → MakeOpaque
-    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)))
+    // 不透明描画は常に MakeOpaque（ポップアップ子や Win11 で素 BitBlt が消える対策）
     {
         BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
         params.dwFlags = BPPF_ERASE;
@@ -5125,7 +5141,6 @@ void CCustomSliderCtrl::OnPaint()
             return;
         }
     }
-#endif
     PaintClient(dc);
 }
 
@@ -5958,6 +5973,26 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
 void CCustomRangeSliderCtrl::OnPaint()
 {
     CPaintDC dc(this);
+    CRect r;
+    GetClientRect(&r);
+    const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    if (bTrans || r.Width() <= 0 || r.Height() <= 0) {
+        PaintClient(dc);
+        return;
+    }
+    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+    params.dwFlags = BPPF_ERASE;
+    HDC hdcBuf = NULL;
+    HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+    if (hdcBuf && hBP) {
+        CDC dcBuf;
+        dcBuf.Attach(hdcBuf);
+        PaintClient(dcBuf);
+        dcBuf.Detach();
+        ::BufferedPaintMakeOpaque(hBP, &r);
+        ::EndBufferedPaint(hBP, TRUE);
+        return;
+    }
     PaintClient(dc);
 }
 
@@ -9639,6 +9674,8 @@ void CCustomProgressCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 void CCustomProgressCtrl::OnPaint()
 {
 	CPaintDC dc(this);
+	CRect r;
+	GetClientRect(&r);
 #if CCUSTOM_AERO_SUPPORT
 	if (CCC_HostNeedsChildOpaque(m_hWnd))
 	{
@@ -9646,6 +9683,21 @@ void CCustomProgressCtrl::OnPaint()
 		return;
 	}
 #endif
+	if (r.Width() <= 0 || r.Height() <= 0) return;
+	// ポップアップ子など素 BitBlt が消える環境向け
+	BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+	params.dwFlags = BPPF_ERASE;
+	HDC hdcBuf = NULL;
+	HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &r, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+	if (hdcBuf && hBP) {
+		CDC dcBuf;
+		dcBuf.Attach(hdcBuf);
+		PaintClient(dcBuf);
+		dcBuf.Detach();
+		::BufferedPaintMakeOpaque(hBP, &r);
+		::EndBufferedPaint(hBP, TRUE);
+		return;
+	}
 	PaintClient(dc);
 }
 
