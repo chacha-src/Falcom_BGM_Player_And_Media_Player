@@ -504,6 +504,7 @@ protected:
 	afx_msg void OnSleepCustom();
 	afx_msg void OnXfadePreviewToggle();
 	afx_msg void OnBeatGridToggle();
+	afx_msg void OnJacketRemOverlayToggle();
 	afx_msg void OnMpBpmDetect();
 	afx_msg void OnMpDjPad();
 	afx_msg void OnMpAlarm();

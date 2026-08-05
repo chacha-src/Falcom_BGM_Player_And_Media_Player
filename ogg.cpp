@@ -251,6 +251,7 @@ BOOL COggApp::InitInstance()
 	savedata.mpDjPadwindow = 0;
 	savedata.mpNormTargetLufs = -14;
 	savedata.mpKeyEqSuggest = 0;
+	savedata.mpJacketRemOverlay = 1;
 	savedata.tc_format = 0;
 	savedata.tc_mp3_kbps = 192;
 	savedata.tc_flac_level = 5;
@@ -1169,6 +1170,9 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, mpKeyEqSuggest) + sizeof(savedata.mpKeyEqSuggest)))
 		savedata.mpKeyEqSuggest = 0;
 	else if (savedata.mpKeyEqSuggest) savedata.mpKeyEqSuggest = 1;
+	if (datFileSize < (int)(offsetof(save, mpJacketRemOverlay) + sizeof(savedata.mpJacketRemOverlay)))
+		savedata.mpJacketRemOverlay = 1; // 従来どおり表示
+	else if (savedata.mpJacketRemOverlay) savedata.mpJacketRemOverlay = 1;
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {
 		savedata.cap_fx_n = 1;

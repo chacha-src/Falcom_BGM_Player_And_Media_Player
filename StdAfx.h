@@ -535,6 +535,7 @@ struct save{
 	int mpDjPadwindow;       // 1=DJパッド表示
 	int mpNormTargetLufs;    // バッチ正規化目標(負: 例 -14)
 	int mpKeyEqSuggest;      // 1=キー検出からEQプリセット自動提案を許可
+	int mpJacketRemOverlay;  // 1=ミニジャケに残時間リング+タイム表示
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

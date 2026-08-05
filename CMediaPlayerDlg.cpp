@@ -1190,6 +1190,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_SLEEP_OFF, &CMediaPlayerDlg::OnSleepOff)
 	ON_COMMAND(ID_MP_XFADE_PREVIEW, &CMediaPlayerDlg::OnXfadePreviewToggle)
 	ON_COMMAND(ID_MP_BEAT_GRID, &CMediaPlayerDlg::OnBeatGridToggle)
+	ON_COMMAND(ID_MP_JACKET_REM_OVERLAY, &CMediaPlayerDlg::OnJacketRemOverlayToggle)
 	ON_COMMAND(ID_MP_BPM_DETECT, &CMediaPlayerDlg::OnMpBpmDetect)
 	ON_COMMAND(ID_MP_DJPAD, &CMediaPlayerDlg::OnMpDjPad)
 	ON_COMMAND(ID_MP_ALARM, &CMediaPlayerDlg::OnMpAlarm)
@@ -3819,7 +3820,7 @@ void CMediaPlayerDlg::MirrorSeekVol()
 		}
 
 		// #6: ジャケット残時間リングを進捗に合わせて更新(1%刻みで Invalidate)
-		if (!m_jacketRect.IsRectEmpty() && plf) {
+		if (savedata.mpJacketRemOverlay && !m_jacketRect.IsRectEmpty() && plf) {
 			const int bucket = (int)(pct + 0.5);
 			if (bucket != m_jacketRemBucket) {
 				m_jacketRemBucket = bucket;
@@ -7221,6 +7222,11 @@ menu.AppendMenu(MF_STRING | lockChk, ID_MP_SEEK_LOCK,
 					L"Обновить обложку текущего", L"Aktuelles Cover neu laden", L"Atualizar capa em reproducao",
 					L"Huidige hoes vernieuwen", L"Odswiez okladke odtwarzanego", L"Oynatilan kapagi yenile"));
 			if (onJacket) {
+				menu.AppendMenu(MF_STRING | (savedata.mpJacketRemOverlay ? MF_CHECKED : 0), ID_MP_JACKET_REM_OVERLAY,
+					LL14(L"残時間リングとタイム", L"Remaining ring and time", L"Anneau restant et temps", L"Anello rest. e tempo",
+						L"Anillo restante y tiempo", L"남은 시간 링과 타임", L"剩余时间环与时间", L"حلقة الوقت المتبقي والزمن",
+						L"Кольцо остатка и время", L"Restzeit-Ring und Zeit", L"Anel restante e tempo",
+						L"Resttijd-ring en tijd", L"Piermien pozostaly i czas", L"Kalan sure halkasi ve zaman"));
 				menu.AppendMenu(MF_STRING, ID_MP_JACKET_RELOAD,
 					LL14(L"代替ジャケを再読込", L"Reload jacket alternatives", L"Recharger alternatives", L"Ricarica alternative",
 						L"Recargar alternativas", L"대체 재킷 다시 읽기", L"重新加载备选封面", L"إعادة تحميل البدائل",
@@ -7305,6 +7311,7 @@ void CMediaPlayerDlg::OnRefreshJacket()
 
 void CMediaPlayerDlg::DrawJacketHeroOverlay(CDC& mem, int w, int h)
 {
+	if (!savedata.mpJacketRemOverlay) return;
 	if (!plf || !og) return;
 	const int mn = m_seek.GetMinValue();
 	const int mx = m_seek.GetMaxValue();
@@ -8704,6 +8711,15 @@ void CMediaPlayerDlg::OnBeatGridToggle()
 		m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE);
 		m_seek.Invalidate(FALSE);
 	}
+}
+
+void CMediaPlayerDlg::OnJacketRemOverlayToggle()
+{
+	savedata.mpJacketRemOverlay = savedata.mpJacketRemOverlay ? 0 : 1;
+	MpPersistSavedataQuick();
+	m_jacketRemBucket = -1;
+	if (!m_jacketRect.IsRectEmpty())
+		InvalidateRect(&m_jacketRect, FALSE);
 }
 
 void CMediaPlayerDlg::OnMpBpmDetect() { MpOnBpmDetect(this); }

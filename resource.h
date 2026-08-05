@@ -841,6 +841,7 @@
 #define ID_MP_SLEEP_CUSTOM              33047
 #define ID_MP_JACKET_SAVE_COVER         33048
 #define ID_MP_TOOLS_PANEL               33049
+#define ID_MP_JACKET_REM_OVERLAY        33050
 #define ID_MP_SMART_BASE                33100
 
 #define IDC_MP_SAVEPARAM                3543
