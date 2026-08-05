@@ -19,6 +19,8 @@ public:
 	// 再生位置(1/100秒)。現在行と行内進捗を更新しカラオケ塗りに使う。
 	void SetPlayCentis(DWORD centis);
 	void EnsureFonts(int dpiPointTenths, LPCTSTR face);
+	// デスクトップ常時前面向け: 暗背景・高コントラスト文字
+	void SetOverlayStyle(BOOL on);
 
 protected:
 	CString m_line[kMaxLines];
@@ -35,6 +37,7 @@ protected:
 	int m_fontPt;
 	CString m_fontFace;
 	UINT_PTR m_timer;
+	BOOL m_overlay;
 
 	void RecalcTarget();
 	void StartAnim();

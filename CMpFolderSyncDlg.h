@@ -20,11 +20,13 @@ protected:
 	CCustomStandardButton m_remove;
 	CCustomStandardButton m_close;
 	CBrush m_brDlg;
+	CToolTipCtrl m_tooltip;
 	std::vector<CString> m_diskOnly;
 	std::vector<int> m_plOnly; // pc indices
 
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	afx_msg void OnBnClickedAdd();
 	afx_msg void OnBnClickedRemove();
 	afx_msg void OnBnClickedClose();

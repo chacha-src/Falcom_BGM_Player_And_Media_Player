@@ -35,10 +35,12 @@ protected:
 	CCustomStandardButton m_apply;
 	CCustomStandardButton m_close;
 	CBrush m_brDlg;
+	CToolTipCtrl m_tooltip;
 	int m_sel;
 
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	afx_msg void OnBnClickedAdd();
 	afx_msg void OnBnClickedUpdate();
 	afx_msg void OnBnClickedDel();

@@ -14,6 +14,7 @@ void CloseMpAlarmDlgIfOpen();
 void CloseMpMirrorDlgIfOpen();
 void CloseMpRemoteDlgIfOpen();
 void CloseMpSsVizIfOpen();
+BOOL MpSsVizIsOpen();
 
 void OpenMpDjPadModeless(CWnd* parent);
 void OpenMpAlarmDlgModeless(CWnd* parent);
@@ -27,6 +28,7 @@ void MpMirrorShutdown();
 void MpBpmOnTimerTick();
 void MpBpmDetectFromPeaks();
 BOOL MpBpmIsMeasuring();
+void MpBpmNotifyPeak(float peak); // 音声スレッドから短時定数ピークを渡す
 
 // PC音ループバックをツール側から一時確保。MIDI録り/BPM計測などが共有。
 void MpPcAudioRetain();

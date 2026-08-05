@@ -43,12 +43,18 @@ static CMpMirrorDlg* g_mpMirrorDlg = NULL;
 static CMpRemoteDlg* g_mpRemoteDlg = NULL;
 static CMpSsVizDlg* g_mpSsViz = NULL;
 
-// ---- BPM onset timing (crude): チェックONのあいだ蓄積し、OFFで推定 ----
-static DWORD g_bpmPeakTimes[32];
-static int g_bpmPeakN = 0;
-static int g_bpmWasHigh = 0;
+// ---- BPM: 音声ピーク封筒の自己相関（再生中に自動で結果ダイアログ） ----
+enum { kBpmEnvCap = 400 }; // ~8秒 @ 50Hz
+static float g_bpmEnv[kBpmEnvCap];
+static int g_bpmEnvN = 0;
+static int g_bpmEnvPos = 0;
+static DWORD g_bpmEnvLastMs = 0;
+static float g_bpmEnvWinMax = 0.f;
 static int g_bpmArmed = 0;
 static int g_bpmHeldPcAudio = 0;
+static DWORD g_bpmArmedSince = 0;
+static int g_bpmResultShown = 0;
+static int g_bpmLastEstimate = 0;
 
 // PC音ループバックの参照カウント(MIDI録り・BPM計測などが共有)
 static int g_pcAudioRetain = 0;
@@ -85,7 +91,6 @@ void MpPcAudioRelease()
 
 void MpPcAudioMarkUserOwned()
 {
-	// 明示ONされたPC音は、ツール側 Release で勝手に落とさない
 	g_pcAudioPrevOff = 0;
 }
 
@@ -94,46 +99,135 @@ BOOL MpBpmIsMeasuring()
 	return g_bpmArmed ? TRUE : FALSE;
 }
 
-void MpBpmOnTimerTick()
+static int MpBpmEstimateAutocorr();
+static void MpBpmFinishAndShow(BOOL showFailIfNone);
+static void MpBpmPushEnv(float pk);
+
+void MpBpmNotifyPeak(float peak)
 {
-	if (!g_bpmArmed) return;
-	const float pk = ProAudio_LivePeak();
-	const int high = (pk >= 0.45f) ? 1 : 0;
-	if (high && !g_bpmWasHigh) {
-		const DWORD t = GetTickCount();
-		if (g_bpmPeakN >= 32) {
-			for (int i = 0; i < 31; ++i) g_bpmPeakTimes[i] = g_bpmPeakTimes[i + 1];
-			g_bpmPeakTimes[31] = t;
-		}
-		else {
-			g_bpmPeakTimes[g_bpmPeakN++] = t;
-		}
+	if (!g_bpmArmed || g_bpmResultShown) return;
+	if (peak < 0.f) peak = 0.f;
+	if (peak > 1.f) peak = 1.f;
+	const DWORD now = GetTickCount();
+	if (g_bpmEnvLastMs == 0) {
+		g_bpmEnvLastMs = now;
+		g_bpmEnvWinMax = peak;
+		return;
 	}
-	g_bpmWasHigh = high;
+	if (peak > g_bpmEnvWinMax) g_bpmEnvWinMax = peak;
+	// 20ms ごとに封筒サンプルを1つ積む（音声スレッド高頻度→50Hz）
+	if (now - g_bpmEnvLastMs < 20)
+		return;
+	g_bpmEnvLastMs = now;
+	MpBpmPushEnv(g_bpmEnvWinMax);
+	g_bpmEnvWinMax = peak;
 }
 
-static int MpBpmEstimateFromPeaks()
+static void MpBpmPushEnv(float pk)
 {
-	if (g_bpmPeakN < 4) return 0;
-	int hist[120];
-	for (int i = 0; i < 120; ++i) hist[i] = 0;
-	for (int i = 1; i < g_bpmPeakN; ++i) {
-		const int dt = (int)(g_bpmPeakTimes[i] - g_bpmPeakTimes[i - 1]);
-		if (dt < 250 || dt > 2000) continue;
-		const int bpm = (int)(60000.0 / (double)dt + 0.5);
-		if (bpm >= 60 && bpm <= 180)
-			hist[bpm - 60]++;
+	g_bpmEnv[g_bpmEnvPos] = pk;
+	g_bpmEnvPos = (g_bpmEnvPos + 1) % kBpmEnvCap;
+	if (g_bpmEnvN < kBpmEnvCap) g_bpmEnvN++;
+}
+
+void MpBpmOnTimerTick()
+{
+	if (!g_bpmArmed || g_bpmResultShown) return;
+	// UI側フォールバック（音声フィードが無い経路向け）
+	float pk = ProAudio_LivePeak();
+	{
+		extern int spelv[400];
+		float e = 0.f;
+		for (int i = 0; i < 48; ++i) {
+			float v = (float)spelv[i];
+			if (v > e) e = v;
+		}
+		e *= (1.f / 96.f);
+		if (e > pk) pk = e;
 	}
-	int best = 0, bestBpm = 0;
-	for (int b = 60; b <= 180; ++b) {
-		if (hist[b - 60] > best) { best = hist[b - 60]; bestBpm = b; }
+	MpBpmNotifyPeak(pk);
+
+	if (g_bpmEnvN >= 100) { // ~2秒分
+		const int bpm = MpBpmEstimateAutocorr();
+		if (bpm > 0) {
+			g_bpmLastEstimate = bpm;
+			MpBpmFinishAndShow(FALSE);
+			return;
+		}
 	}
-	return bestBpm;
+	if (g_bpmArmedSince && (GetTickCount() - g_bpmArmedSince) > 20000)
+		MpBpmFinishAndShow(TRUE);
+}
+
+static int MpBpmEstimateAutocorr()
+{
+	if (g_bpmEnvN < 80) return 0;
+	float env[kBpmEnvCap];
+	const int n = g_bpmEnvN;
+	const int start = (g_bpmEnvPos - n + kBpmEnvCap * 2) % kBpmEnvCap;
+	for (int i = 0; i < n; ++i)
+		env[i] = g_bpmEnv[(start + i) % kBpmEnvCap];
+
+	float mean = 0.f;
+	for (int i = 0; i < n; ++i) mean += env[i];
+	mean /= (float)n;
+	for (int i = 0; i < n; ++i) env[i] -= mean;
+
+	const float sr = 50.f; // 20ms
+	// 旧 60..180 だと高速曲(約177–190)の真ピークが範囲外→半テンポ(≈90)を拾う
+	const int lagMin = (int)(60.f * sr / 220.f + 0.5f); // ~14
+	const int lagMax = (int)(60.f * sr / 70.f + 0.5f);  // ~43
+	float best = -1.f;
+	int bestLag = 0;
+	for (int lag = lagMin; lag <= lagMax && lag < n / 2; ++lag) {
+		float c = 0.f;
+		for (int i = 0; i + lag < n; ++i)
+			c += env[i] * env[i + lag];
+		if (c > best) { best = c; bestLag = lag; }
+	}
+	if (bestLag <= 0 || best <= 0.f) return 0;
+
+	auto scoreAtLag = [&](int lag) -> float {
+		if (lag < lagMin || lag > lagMax || lag >= n / 2) return -1.f;
+		float c = 0.f;
+		for (int i = 0; i + lag < n; ++i)
+			c += env[i] * env[i + lag];
+		return c;
+	};
+
+	// オクターブ候補: lag / 2lag / lag/2 のスコアを比較し、近いときは速め(110–200)を優先
+	int candLag[3] = { bestLag, bestLag * 2, (bestLag >= 2) ? (bestLag / 2) : 0 };
+	float candSc[3];
+	for (int i = 0; i < 3; ++i)
+		candSc[i] = (candLag[i] > 0) ? scoreAtLag(candLag[i]) : -1.f;
+
+	int pick = 0;
+	float pickSc = candSc[0];
+	for (int i = 1; i < 3; ++i) {
+		if (candSc[i] < 0.f) continue;
+		const int bpmI = (int)(60.f * sr / (float)candLag[i] + 0.5f);
+		const int bpmP = (int)(60.f * sr / (float)candLag[pick] + 0.5f);
+		const bool iInSweet = (bpmI >= 110 && bpmI <= 200);
+		const bool pInSweet = (bpmP >= 110 && bpmP <= 200);
+		if (candSc[i] > pickSc * 1.08f
+			|| (candSc[i] > pickSc * 0.92f && iInSweet && !pInSweet)
+			|| (candSc[i] > pickSc * 0.97f && iInSweet && pInSweet && bpmI > bpmP)) {
+			pick = i;
+			pickSc = candSc[i];
+		}
+	}
+
+	int bpm = (int)(60.f * sr / (float)candLag[pick] + 0.5f);
+	if (bpm < 70) bpm *= 2;
+	if (bpm > 220 && (bpm / 2) >= 70) bpm /= 2;
+	if (bpm < 70 || bpm > 220) return 0;
+	return bpm;
 }
 
 void MpBpmDetectFromPeaks()
 {
-	const int bpm = MpBpmEstimateFromPeaks();
+	int bpm = g_bpmLastEstimate;
+	if (bpm <= 0) bpm = MpBpmEstimateAutocorr();
 	if (bpm <= 0) return;
 	savedata.mpDetectedBpm = bpm;
 	MpPersistSavedataQuick();
@@ -148,33 +242,85 @@ void MpBpmDetectFromPeaks()
 	}
 }
 
-void MpOnBpmDetect(CMediaPlayerDlg* /*mpDlg*/)
+static void MpBpmFinishAndShow(BOOL showFailIfNone)
 {
-	extern int playf;
-	if (!g_bpmArmed) {
-		g_bpmArmed = 1;
-		g_bpmPeakN = 0;
-		g_bpmWasHigh = 0;
-		// 再生していなければ PC 音ピークを確保
-		if (!playf && !g_bpmHeldPcAudio) {
-			MpPcAudioRetain();
-			g_bpmHeldPcAudio = 1;
-		}
-		return;
-	}
+	if (g_bpmResultShown) return;
+	g_bpmResultShown = 1;
 	g_bpmArmed = 0;
 	MpBpmDetectFromPeaks();
 	if (g_bpmHeldPcAudio) {
 		MpPcAudioRelease();
 		g_bpmHeldPcAudio = 0;
 	}
-	if (savedata.mpDetectedBpm <= 0 && mp) {
-		mp->MessageBox(
-			LL14(L"BPM を推定できませんでした。再生またはPC音を鳴らしながら数秒計測してからオフにしてください。", L"Could not estimate BPM. Measure for a few seconds while playing (or PC audio), then uncheck.", L"BPM non estime. Mesurez quelques secondes (lecture ou audio PC) puis decochez.", L"BPM non stimato. Misura alcuni secondi (riproduzione o audio PC) poi togli il segno.", L"No se pudo estimar BPM. Mida unos segundos (reproduccion o audio PC) y quite la marca.",
-				L"BPM 추정 실패. 재생 또는 PC 소리를 내며 몇 초 측정 후 체크 해제.", L"无法估计 BPM。请在播放或PC声音中测量数秒后再取消勾选。", L"تعذر تقدير BPM. قِس ثوانٍ أثناء التشغيل أو صوت الجهاز ثم ألغِ التحديد.", L"Не удалось оценить BPM. Измерьте несколько секунд при воспроизведении или звуке ПК и снимите галочку.", L"BPM nicht geschaetzt. Einige Sekunden bei Wiedergabe/PC-Audio messen, dann abwaehlen.",
-				L"Nao foi possivel estimar BPM. Meca alguns segundos (reproducao ou audio do PC) e desmarque.", L"BPM niet geschat. Meet enkele seconden (afspelen of pc-audio) en vink uit.", L"Nie udalo sie oszacowac BPM. Mierz kilka sekund (odtwarzanie lub dzwiek PC) i odznacz.", L"BPM tahmin edilemedi. Calarken veya PC sesinde birkaç saniye ölçüp işareti kaldırın."),
-			_T("BPM"), MB_OK | MB_ICONINFORMATION);
+	if (!mp) return;
+	if (savedata.mpDetectedBpm <= 0) {
+		if (showFailIfNone) {
+			mp->MessageBox(
+				LL14(L"BPM を推定できませんでした。\n曲を再生したまま数秒待ち、もう一度「BPM 計測」を試してください。",
+					L"Could not estimate BPM.\nKeep playing for a few seconds, then try Measure BPM again.",
+					L"BPM non estime. Lisez quelques secondes puis reessayez.",
+					L"BPM non stimato. Riproduci alcuni secondi e riprova.",
+					L"No se pudo estimar BPM. Reproduzca unos segundos y reintente.",
+					L"BPM 추정 실패. 재생을 유지한 채 몇 초 후 다시 시도하세요.",
+					L"无法估计 BPM。请保持播放数秒后重试。",
+					L"تعذر تقدير BPM. أبقِ التشغيل ثوانٍ ثم أعد المحاولة.",
+					L"Не удалось оценить BPM. Продолжайте воспроизведение и повторите.",
+					L"BPM nicht geschaetzt. Wiedergabe fortsetzen und erneut versuchen.",
+					L"Nao foi possivel estimar BPM. Continue reproduzindo e tente de novo.",
+					L"BPM niet geschat. Speel door en probeer opnieuw.",
+					L"Nie udalo sie oszacowac BPM. Odtwarzaj dalej i sprobuj ponownie.",
+					L"BPM tahmin edilemedi. Calmaya devam edip tekrar deneyin."),
+				LL14(L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM"),
+				MB_OK | MB_ICONINFORMATION);
+		}
+		return;
 	}
+	savedata.mpBeatGrid = 1;
+	if (mp->m_seek.GetSafeHwnd()) {
+		mp->m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, TRUE);
+		mp->m_seek.Invalidate(FALSE);
+	}
+	MpPersistSavedataQuick();
+	CString msg;
+	msg.Format(LL14(
+		L"BPM ≈ %d\nシークの拍グリッドに反映しました。",
+		L"BPM ≈ %d\nApplied to the seek beat grid.",
+		L"BPM ≈ %d\nApplique a la grille.",
+		L"BPM ≈ %d\nApplicato alla griglia.",
+		L"BPM ≈ %d\nAplicado a la rejilla.",
+		L"BPM ≈ %d\n시크 비트 그리드에 반영했습니다.",
+		L"BPM ≈ %d\n已应用到进度条拍网格。",
+		L"BPM ≈ %d\nطُبّق على شبكة الإيقاع.",
+		L"BPM ≈ %d\nПрименено к сетке долей.",
+		L"BPM ≈ %d\nAuf Beat-Raster angewendet.",
+		L"BPM ≈ %d\nAplicado na grade.",
+		L"BPM ≈ %d\nToegepast op beatgrid.",
+		L"BPM ≈ %d\nZastosowano do siatki.",
+		L"BPM ≈ %d\nVurus izgarasina uygulandi."),
+		savedata.mpDetectedBpm);
+	mp->MessageBox(msg, LL14(L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM"), MB_OK | MB_ICONINFORMATION);
+}
+
+void MpOnBpmDetect(CMediaPlayerDlg* /*mpDlg*/)
+{
+	extern int playf;
+	if (!g_bpmArmed) {
+		g_bpmArmed = 1;
+		g_bpmResultShown = 0;
+		g_bpmEnvN = 0;
+		g_bpmEnvPos = 0;
+		g_bpmEnvLastMs = 0;
+		g_bpmEnvWinMax = 0.f;
+		g_bpmLastEstimate = 0;
+		g_bpmArmedSince = GetTickCount();
+		ZeroMemory(g_bpmEnv, sizeof(g_bpmEnv));
+		if (!playf && !g_bpmHeldPcAudio) {
+			MpPcAudioRetain();
+			g_bpmHeldPcAudio = 1;
+		}
+		return;
+	}
+	MpBpmFinishAndShow(TRUE);
 }
 
 // ---- Mirror output ----
@@ -388,14 +534,32 @@ static void MpRemoteHandleRequest(SOCKET s)
 	char* nl = strchr(line, '\n');
 	if (nl) *nl = 0;
 
-	const char* body =
-		"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n"
-		"<html><body><h3>MP Remote</h3>"
-		"<p><a href=\"/cmd?c=play\">Play</a> | "
-		"<a href=\"/cmd?c=pause\">Pause</a> | "
-		"<a href=\"/cmd?c=next\">Next</a> | "
-		"<a href=\"/cmd?c=volup\">Vol+</a> | "
-		"<a href=\"/cmd?c=voldn\">Vol-</a></p></body></html>";
+	CStringW page;
+	page.Format(L"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n"
+		L"<html><body><h3>%s</h3><p>"
+		L"<a href=\"/cmd?c=play\">%s</a> | "
+		L"<a href=\"/cmd?c=pause\">%s</a> | "
+		L"<a href=\"/cmd?c=next\">%s</a> | "
+		L"<a href=\"/cmd?c=volup\">%s</a> | "
+		L"<a href=\"/cmd?c=voldn\">%s</a></p></body></html>",
+		(LPCWSTR)LL14(L"ローカルリモート", L"MP Remote", L"Telecommande", L"Remote MP", L"Remoto MP",
+			L"로컬 리모트", L"本地遥控", L"تحكم محلي", L"Локальный пульт", L"Lokalfernbedienung",
+			L"Remoto local", L"Lokale bediening", L"Pilot lokalny", L"Yerel uzaktan"),
+		(LPCWSTR)LL14(L"再生", L"Play", L"Lecture", L"Play", L"Play", L"재생", L"播放", L"تشغيل", L"Играть", L"Play", L"Play", L"Play", L"Odtwarzaj", L"Oynat"),
+		(LPCWSTR)LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat"),
+		(LPCWSTR)LL14(L"次へ", L"Next", L"Suivant", L"Successivo", L"Siguiente", L"다음", L"下一首", L"التالي", L"След.", L"Weiter", L"Proximo", L"Volgende", L"Nastepny", L"Sonraki"),
+		(LPCWSTR)LL14(L"音量+", L"Vol+", L"Vol+", L"Vol+", L"Vol+", L"볼륨+", L"音量+", L"صوت+", L"Громк.+", L"Laut+", L"Vol+", L"Vol+", L"Glosn.+", L"Ses+"),
+		(LPCWSTR)LL14(L"音量-", L"Vol-", L"Vol-", L"Vol-", L"Vol-", L"볼륨-", L"音量-", L"صوت-", L"Громк.-", L"Laut-", L"Vol-", L"Vol-", L"Glosn.-", L"Ses-"));
+	CStringA bodyA;
+	{
+		const int nbytes = ::WideCharToMultiByte(CP_UTF8, 0, page, -1, NULL, 0, NULL, NULL);
+		if (nbytes > 1) {
+			char* pb = bodyA.GetBufferSetLength(nbytes - 1);
+			::WideCharToMultiByte(CP_UTF8, 0, page, -1, pb, nbytes, NULL, NULL);
+			bodyA.ReleaseBuffer(nbytes - 1);
+		}
+	}
+	const char* body = (LPCSTR)bodyA;
 
 	if (strstr(line, "GET /cmd")) {
 		if (strstr(line, "c=play")) MpRemoteSendCmd(0);
@@ -612,7 +776,7 @@ void MpOnVideoExtract(CMediaPlayerDlg* mpDlg)
 			LL14(L"動画ファイルを選択してください。", L"Select a video file.", L"Selectionnez une video.", L"Seleziona un video.", L"Seleccione un video.",
 				L"동영상 파일을 선택하세요.", L"请选择视频文件。", L"اختر ملف فيديو.", L"Выберите видеофайл.", L"Video waehlen.",
 				L"Selecione um video.", L"Selecteer video.", L"Wybierz plik wideo.", L"Video dosyasi secin."),
-			_T("Extract"), MB_OK);
+			LL14(L"抽出", L"Extract", L"Extraction", L"Estrazione", L"Extraccion", L"추출", L"提取", L"استخراج", L"Извлечение", L"Extraktion", L"Extracao", L"Extractie", L"Ekstrakcja", L"Cikarma"), MB_OK);
 		return;
 	}
 	CString out = item.fol;
@@ -624,7 +788,7 @@ void MpOnVideoExtract(CMediaPlayerDlg* mpDlg)
 			LL14(L"WAV が既にあります。上書きしますか？", L"WAV exists. Overwrite?", L"WAV existe. Ecraser?", L"WAV esiste. Sovrascrivere?", L"WAV existe. ¿Sobrescribir?",
 				L"WAV가 있습니다. 덮어쓸까요?", L"WAV 已存在。覆盖？", L"WAV موجود. استبدال؟", L"WAV есть. Перезаписать?", L"WAV vorhanden. Ueberschreiben?",
 				L"WAV existe. Substituir?", L"WAV bestaat. Overschrijven?", L"WAV istnieje. Nadpisac?", L"WAV var. Uzerine yazilsin mi?"),
-			_T("Extract"), MB_YESNO | MB_ICONQUESTION) != IDYES)
+			LL14(L"抽出", L"Extract", L"Extraction", L"Estrazione", L"Extraccion", L"추출", L"提取", L"استخراج", L"Извлечение", L"Extraktion", L"Extracao", L"Extractie", L"Ekstrakcja", L"Cikarma"), MB_YESNO | MB_ICONQUESTION) != IDYES)
 			return;
 	}
 	if (!og->ExportToWav(&item, out, 1, NULL, true)) {
@@ -632,7 +796,7 @@ void MpOnVideoExtract(CMediaPlayerDlg* mpDlg)
 			LL14(L"抽出に失敗しました。", L"Extract failed.", L"Echec extraction.", L"Estrazione fallita.", L"Extraccion fallida.",
 				L"추출 실패.", L"提取失败。", L"فشل الاستخراج.", L"Ошибка извлечения.", L"Extraktion fehlgeschlagen.",
 				L"Falha na extracao.", L"Extractie mislukt.", L"Ekstrakcja nie powiodla sie.", L"Cikarma basarisiz."),
-			_T("Extract"), MB_OK | MB_ICONWARNING);
+			LL14(L"抽出", L"Extract", L"Extraction", L"Estrazione", L"Extraccion", L"추출", L"提取", L"استخراج", L"Извлечение", L"Extraktion", L"Extracao", L"Extractie", L"Ekstrakcja", L"Cikarma"), MB_OK | MB_ICONWARNING);
 	}
 }
 
@@ -788,7 +952,7 @@ void MpOnVideoReplaceAudio(CMediaPlayerDlg* mpDlg)
 			LL14(L"動画ファイルを選択してください。", L"Select a video file.", L"Selectionnez une video.", L"Seleziona un video.", L"Seleccione un video.",
 				L"동영상 파일을 선택하세요.", L"请选择视频文件。", L"اختر ملف فيديو.", L"Выберите видеофайл.", L"Video waehlen.",
 				L"Selecione um video.", L"Selecteer video.", L"Wybierz plik wideo.", L"Video dosyasi secin."),
-			_T("Replace"), MB_OK);
+			LL14(L"差し替え", L"Replace", L"Remplacer", L"Sostituisci", L"Reemplazar", L"교체", L"替换", L"استبدال", L"Замена", L"Ersetzen", L"Substituir", L"Vervangen", L"Zamien", L"Degistir"), MB_OK);
 		return;
 	}
 	CFileDialog wavDlg(TRUE, _T("wav"), NULL, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_ENABLESIZING,
@@ -803,7 +967,7 @@ void MpOnVideoReplaceAudio(CMediaPlayerDlg* mpDlg)
 			LL14(L"出力 MP4 が既にあります。上書きしますか？", L"Output MP4 exists. Overwrite?", L"MP4 existe. Ecraser?", L"MP4 esiste. Sovrascrivere?", L"MP4 existe. ¿Sobrescribir?",
 				L"출력 MP4가 있습니다. 덮어쓸까요?", L"输出 MP4 已存在。覆盖？", L"MP4 موجود. استبدال؟", L"MP4 есть. Перезаписать?", L"MP4 vorhanden. Ueberschreiben?",
 				L"MP4 existe. Substituir?", L"MP4 bestaat. Overschrijven?", L"MP4 istnieje. Nadpisac?", L"MP4 var. Uzerine yazilsin mi?"),
-			_T("Replace"), MB_YESNO | MB_ICONQUESTION) != IDYES)
+			LL14(L"差し替え", L"Replace", L"Remplacer", L"Sostituisci", L"Reemplazar", L"교체", L"替换", L"استبدال", L"Замена", L"Ersetzen", L"Substituir", L"Vervangen", L"Zamien", L"Degistir"), MB_YESNO | MB_ICONQUESTION) != IDYES)
 			return;
 	}
 
@@ -813,7 +977,7 @@ void MpOnVideoReplaceAudio(CMediaPlayerDlg* mpDlg)
 			LL14(L"WAV を読めません（16bit PCM のみ）。", L"Cannot read WAV (16-bit PCM only).", L"Lecture WAV impossible (PCM 16 bits).", L"Impossibile leggere WAV (solo PCM 16 bit).", L"No se puede leer WAV (solo PCM 16 bit).",
 				L"WAV를 읽을 수 없습니다(16bit PCM만).", L"无法读取 WAV（仅 16bit PCM）。", L"تعذر قراءة WAV (PCM 16 بت فقط).", L"Не удалось прочитать WAV (только PCM 16 бит).", L"WAV nicht lesbar (nur 16-bit PCM).",
 				L"Nao foi possivel ler WAV (somente PCM 16 bits).", L"Kan WAV niet lezen (alleen 16-bit PCM).", L"Nie mozna odczytac WAV (tylko PCM 16-bit).", L"WAV okunamadi (yalniz 16-bit PCM)."),
-			_T("Replace"), MB_OK | MB_ICONWARNING);
+			LL14(L"差し替え", L"Replace", L"Remplacer", L"Sostituisci", L"Reemplazar", L"교체", L"替换", L"استبدال", L"Замена", L"Ersetzen", L"Substituir", L"Vervangen", L"Zamien", L"Degistir"), MB_OK | MB_ICONWARNING);
 		return;
 	}
 	if (ch > 2) ch = 2;
@@ -904,14 +1068,14 @@ void MpOnVideoReplaceAudio(CMediaPlayerDlg* mpDlg)
 			LL14(L"差し替えに失敗しました。", L"Replace failed.", L"Echec du remplacement.", L"Sostituzione fallita.", L"Reemplazo fallido.",
 				L"교체 실패.", L"替换失败。", L"فشل الاستبدال.", L"Замена не удалась.", L"Ersetzen fehlgeschlagen.",
 				L"Falha na substituicao.", L"Vervangen mislukt.", L"Zastepowanie nie powiodlo sie.", L"Degistirme basarisiz."),
-			_T("Replace"), MB_OK | MB_ICONWARNING);
+			LL14(L"差し替え", L"Replace", L"Remplacer", L"Sostituisci", L"Reemplazar", L"교체", L"替换", L"استبدال", L"Замена", L"Ersetzen", L"Substituir", L"Vervangen", L"Zamien", L"Degistir"), MB_OK | MB_ICONWARNING);
 		return;
 	}
 	CString msg;
 	msg.Format(LL14(L"書き出しました:\n%s", L"Wrote:\n%s", L"Ecrit:\n%s", L"Scritto:\n%s", L"Escrito:\n%s",
 		L"저장됨:\n%s", L"已写出:\n%s", L"كُتب:\n%s", L"Записано:\n%s", L"Geschrieben:\n%s",
 		L"Gravado:\n%s", L"Geschreven:\n%s", L"Zapisano:\n%s", L"Yazildi:\n%s"), (LPCTSTR)out);
-	mpDlg->MessageBox(msg, _T("Replace"), MB_OK | MB_ICONINFORMATION);
+	mpDlg->MessageBox(msg, LL14(L"差し替え", L"Replace", L"Remplacer", L"Sostituisci", L"Reemplazar", L"교체", L"替换", L"استبدال", L"Замена", L"Ersetzen", L"Substituir", L"Vervangen", L"Zamien", L"Degistir"), MB_OK | MB_ICONINFORMATION);
 }
 
 void MpOnGameCapturePreset(CMediaPlayerDlg* mpDlg)
@@ -936,6 +1100,7 @@ public:
 	enum { IDD = IDD_MP_DJPAD };
 	CMpDjPadDlg(CWnd* p = NULL) : CCustomBlurDialogBase(IDD, p) {}
 	CCustomStandardButton m_pitchUp, m_pitchDn, m_tempoUp, m_tempoDn, m_vocal, m_msNarrow, m_msWide;
+	CToolTipCtrl m_tooltip;
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX)
 	{
@@ -947,6 +1112,42 @@ protected:
 		DDX_Control(pDX, IDC_DJPAD_VOCAL, m_vocal);
 		DDX_Control(pDX, IDC_DJPAD_MS_NARROW, m_msNarrow);
 		DDX_Control(pDX, IDC_DJPAD_MS_WIDE, m_msWide);
+	}
+	virtual BOOL OnInitDialog()
+	{
+		CCustomBlurDialogBase::OnInitDialog();
+		SetWindowText(LL14(L"DJ パッド", L"DJ Pad", L"Pad DJ", L"Pad DJ", L"Pad DJ",
+			L"DJ 패드", L"DJ 垫", L"لوحة DJ", L"DJ-панель", L"DJ-Pad",
+			L"Pad DJ", L"DJ-pad", L"Pad DJ", L"DJ paneli"));
+		m_pitchUp.SetWindowText(LL14(L"音程 +", L"Pitch +", L"Hauteur +", L"Pitch +", L"Tono +", L"음정 +", L"音高 +", L"درجة +", L"Тон +", L"Tonhöhe +", L"Tom +", L"Toonhoogte +", L"Wysokosc +", L"Perde +"));
+		m_pitchDn.SetWindowText(LL14(L"音程 -", L"Pitch -", L"Hauteur -", L"Pitch -", L"Tono -", L"음정 -", L"音高 -", L"درجة -", L"Тон -", L"Tonhöhe -", L"Tom -", L"Toonhoogte -", L"Wysokosc -", L"Perde -"));
+		m_tempoUp.SetWindowText(LL14(L"テンポ +", L"Tempo +", L"Tempo +", L"Tempo +", L"Tempo +", L"템포 +", L"速度 +", L"إيقاع +", L"Темп +", L"Tempo +", L"Tempo +", L"Tempo +", L"Tempo +", L"Tempo +"));
+		m_tempoDn.SetWindowText(LL14(L"テンポ -", L"Tempo -", L"Tempo -", L"Tempo -", L"Tempo -", L"템포 -", L"速度 -", L"إيقاع -", L"Темп -", L"Tempo -", L"Tempo -", L"Tempo -", L"Tempo -", L"Tempo -"));
+		m_vocal.SetWindowText(LL14(L"ボーカル強調", L"Vocal +", L"Voix +", L"Voce +", L"Voz +", L"보컬 강조", L"人声增强", L"صوت +", L"Вокал +", L"Gesang +", L"Vocal +", L"Zang +", L"Wokal +", L"Vokal +"));
+		m_msNarrow.SetWindowText(LL14(L"MS 狭く", L"MS Narrow", L"MS etroit", L"MS stretto", L"MS estrecho", L"MS 좁게", L"MS 变窄", L"MS ضيق", L"MS узко", L"MS eng", L"MS estreito", L"MS smal", L"MS wasko", L"MS dar"));
+		m_msWide.SetWindowText(LL14(L"MS 広く", L"MS Wide", L"MS large", L"MS ampio", L"MS ancho", L"MS 넓게", L"MS 变宽", L"MS واسع", L"MS широко", L"MS weit", L"MS largo", L"MS breed", L"MS szeroko", L"MS genis"));
+		m_pitchUp.SetGradation(RGB(220, 240, 255), RGB(170, 210, 250), 0, TRUE);
+		m_pitchDn.SetGradation(RGB(220, 240, 255), RGB(170, 210, 250), 0, TRUE);
+		m_tempoUp.SetGradation(RGB(220, 245, 230), RGB(170, 220, 190), 0, TRUE);
+		m_tempoDn.SetGradation(RGB(220, 245, 230), RGB(170, 220, 190), 0, TRUE);
+		m_vocal.SetGradation(RGB(255, 230, 245), RGB(255, 180, 220), 0, TRUE);
+		m_msNarrow.SetGradation(RGB(235, 230, 255), RGB(200, 185, 250), 0, TRUE);
+		m_msWide.SetGradation(RGB(235, 230, 255), RGB(200, 185, 250), 0, TRUE);
+		CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
+		m_tooltip.AddTool(&m_pitchUp, LL14(L"音程を +3 します。", L"Raise pitch by +3.", L"Monter la hauteur de +3.", L"Alza il pitch di +3.", L"Sube el tono +3.", L"음정을 +3.", L"音高 +3。", L"رفع الدرجة +3.", L"Поднять тон на +3.", L"Tonhöhe +3.", L"Tom +3.", L"Toonhoogte +3.", L"Wysokosc +3.", L"Perde +3."));
+		m_tooltip.AddTool(&m_pitchDn, LL14(L"音程を -3 します。", L"Lower pitch by -3.", L"Baisser la hauteur de -3.", L"Abbassa il pitch di -3.", L"Baja el tono -3.", L"음정을 -3.", L"音高 -3。", L"خفض الدرجة -3.", L"Опустить тон на -3.", L"Tonhöhe -3.", L"Tom -3.", L"Toonhoogte -3.", L"Wysokosc -3.", L"Perde -3."));
+		m_tooltip.AddTool(&m_tempoUp, LL14(L"テンポを +3% します。", L"Raise tempo by +3%.", L"Augmenter le tempo de +3%.", L"Aumenta il tempo del +3%.", L"Sube el tempo +3%.", L"템포 +3%.", L"速度 +3%。", L"رفع الإيقاع +3%.", L"Ускорить темп на +3%.", L"Tempo +3%.", L"Tempo +3%.", L"Tempo +3%.", L"Tempo +3%.", L"Tempo +3%."));
+		m_tooltip.AddTool(&m_tempoDn, LL14(L"テンポを -3% します。", L"Lower tempo by -3%.", L"Baisser le tempo de -3%.", L"Riduci il tempo del -3%.", L"Baja el tempo -3%.", L"템포 -3%.", L"速度 -3%。", L"خفض الإيقاع -3%.", L"Замедлить темп на -3%.", L"Tempo -3%.", L"Tempo -3%.", L"Tempo -3%.", L"Tempo -3%.", L"Tempo -3%."));
+		m_tooltip.AddTool(&m_vocal, LL14(L"センター（ボーカル）成分を強調します。", L"Boost center/vocal component.", L"Renforcer la voix (centre).", L"Enfatizza la voce (centro).", L"Refuerza la voz (centro).", L"보컬(센터) 강조.", L"增强人声（中置）。", L"تعزيز الصوت المركزي.", L"Усилить вокал (центр).", L"Gesang (Mitte) betonen.", L"Realcar vocal (centro).", L"Zang (midden) versterken.", L"Wzmocnij wokal (srodek).", L"Vokali (orta) vurgula."));
+		m_tooltip.AddTool(&m_msNarrow, LL14(L"M/S 幅を狭くします（センター寄り）。", L"Narrow M/S width (more center).", L"Reduire la largeur M/S.", L"Restringi la larghezza M/S.", L"Reduce el ancho M/S.", L"M/S 폭을 좁힘.", L"缩小 M/S 宽度。", L"تضييق عرض M/S.", L"Сузить ширину M/S.", L"M/S-Breite verengen.", L"Estreitar largura M/S.", L"M/S-breedte vernauwen.", L"Zwez szerokosc M/S.", L"M/S genisligini daralt."));
+		m_tooltip.AddTool(&m_msWide, LL14(L"M/S 幅を広くします（サイド寄り）。", L"Widen M/S width (more sides).", L"Elargir la largeur M/S.", L"Allarga la larghezza M/S.", L"Amplia el ancho M/S.", L"M/S 폭을 넓힘.", L"加宽 M/S 宽度。", L"توسيع عرض M/S.", L"Расширить ширину M/S.", L"M/S-Breite erweitern.", L"Alargar largura M/S.", L"M/S-breedte verbreden.", L"Poszerz szerokosc M/S.", L"M/S genisligini genislet."));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 8000);
+		return TRUE;
+	}
+	virtual BOOL PreTranslateMessage(MSG* pMsg)
+	{
+		if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(pMsg);
+		return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 	}
 	virtual void PostNcDestroy() { g_mpDjPad = NULL; delete this; CCustomBlurDialogBase::PostNcDestroy(); }
 	afx_msg void OnPitchUp() { CString e; MpPromptExecute(_T("pitch +3"), &e); }
@@ -1019,9 +1220,20 @@ protected:
 		DDX_Control(pDX, IDC_ALARM_MIN, m_min);
 		DDX_Control(pDX, IDC_ALARM_ENABLE, m_enable);
 	}
+	CToolTipCtrl m_tooltip;
 	virtual BOOL OnInitDialog()
 	{
 		CCustomBlurDialogBase::OnInitDialog();
+		SetWindowText(LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma",
+			L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker",
+			L"Alarme", L"Wekker", L"Budzik", L"Alarm"));
+		m_enable.SetWindowText(LL14(L"有効", L"Enable", L"Activer", L"Abilita", L"Activar",
+			L"사용", L"启用", L"تفعيل", L"Включить", L"Aktiv",
+			L"Ativar", L"Inschakelen", L"Wlacz", L"Etkin"));
+		SetDlgItemText(IDC_ALARM_HOUR_L, LL14(L"時", L"Hour", L"Heure", L"Ora", L"Hora",
+			L"시", L"时", L"ساعة", L"Час", L"Stunde", L"Hora", L"Uur", L"Godz.", L"Saat"));
+		SetDlgItemText(IDC_ALARM_MIN_L, LL14(L"分", L"Min", L"Min", L"Min", L"Min",
+			L"분", L"分", L"دقيقة", L"Мин", L"Min", L"Min", L"Min", L"Min", L"Dk"));
 		for (int h = 0; h < 24; ++h) {
 			CString s; s.Format(_T("%02d"), h);
 			m_hour.AddString(s);
@@ -1034,8 +1246,25 @@ protected:
 			m_enable.SetCheck(BST_CHECKED);
 			m_hour.SetCurSel(savedata.mpAlarmHour);
 			m_min.SetCurSel(savedata.mpAlarmMin);
+		} else {
+			SYSTEMTIME st = {};
+			::GetLocalTime(&st);
+			m_hour.SetCurSel(st.wHour);
+			m_min.SetCurSel(st.wMinute);
 		}
+		CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
+		m_tooltip.AddTool(&m_enable, LL14(L"指定時刻に再生を開始します（一致する分に一度）。", L"Start playback at the set time (once per matching minute).", L"Demarre la lecture a l'heure (une fois).", L"Avvia la riproduzione all'ora (una volta).", L"Inicia la reproduccion a la hora (una vez).",
+			L"지정 시각에 재생 시작(일치 분에 1회).", L"在指定时刻开始播放（匹配分钟一次）。", L"بدء التشغيل في الوقت المحدد.", L"Запуск в заданное время (раз в минуту).", L"Wiedergabe zur Zeit starten (einmal).",
+			L"Inicia a reproducao no horario (uma vez).", L"Start afspelen op tijd (eenmaal).", L"Uruchom o zadanej godzinie (raz).", L"Belirlenen saatte calmayi baslat (bir kez)."));
+		m_tooltip.AddTool(&m_hour, LL14(L"アラームの時 (0–23)。", L"Alarm hour (0–23).", L"Heure (0–23).", L"Ora (0–23).", L"Hora (0–23).", L"시 (0–23).", L"时 (0–23).", L"ساعة (0–23).", L"Час (0–23).", L"Stunde (0–23).", L"Hora (0–23).", L"Uur (0–23).", L"Godzina (0–23).", L"Saat (0–23)."));
+		m_tooltip.AddTool(&m_min, LL14(L"アラームの分 (0–59)。", L"Alarm minute (0–59).", L"Minute (0–59).", L"Minuto (0–59).", L"Minuto (0–59).", L"분 (0–59).", L"分 (0–59).", L"دقيقة (0–59).", L"Минута (0–59).", L"Minute (0–59).", L"Minuto (0–59).", L"Minuut (0–59).", L"Minuta (0–59).", L"Dakika (0–59)."));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 8000);
 		return TRUE;
+	}
+	virtual BOOL PreTranslateMessage(MSG* pMsg)
+	{
+		if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(pMsg);
+		return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 	}
 	virtual void PostNcDestroy() { g_mpAlarmDlg = NULL; delete this; CCustomBlurDialogBase::PostNcDestroy(); }
 	afx_msg void OnDestroy()
@@ -1098,9 +1327,20 @@ protected:
 		DDX_Control(pDX, IDC_MIRROR_VOL, m_vol);
 		DDX_Control(pDX, IDC_MIRROR_DEV, m_dev);
 	}
+	CToolTipCtrl m_tooltip;
 	virtual BOOL OnInitDialog()
 	{
 		CCustomBlurDialogBase::OnInitDialog();
+		SetWindowText(LL14(L"ミラー出力", L"Mirror output", L"Sortie miroir", L"Uscita mirror", L"Salida espejo",
+			L"미러 출력", L"镜像输出", L"خرج مرآة", L"Зеркальный выход", L"Spiegelausgabe",
+			L"Saida espelho", L"Spiegelaudio", L"Wyjscie lustrzane", L"Ayna cikis"));
+		m_enable.SetWindowText(LL14(L"ミラー ON", L"Mirror on", L"Miroir ON", L"Mirror ON", L"Espejo ON",
+			L"미러 ON", L"镜像开", L"المرآة تشغيل", L"Зеркало ВКЛ", L"Spiegel AN",
+			L"Espelho ON", L"Spiegel AAN", L"Lustro ON", L"Ayna AC"));
+		SetDlgItemText(IDC_MIRROR_VOL_L, LL14(L"音量", L"Vol", L"Vol", L"Vol", L"Vol",
+			L"볼륨", L"音量", L"صوت", L"Громк.", L"Laut", L"Vol", L"Vol", L"Glosn.", L"Ses"));
+		SetDlgItemText(IDC_MIRROR_DEV_L, LL14(L"デバイス", L"Device", L"Peripherique", L"Dispositivo", L"Dispositivo",
+			L"장치", L"设备", L"جهاز", L"Устройство", L"Gerät", L"Dispositivo", L"Apparaat", L"Urzadzenie", L"Aygit"));
 		m_enable.SetCheck(savedata.mpMirrorOut ? BST_CHECKED : BST_UNCHECKED);
 		m_vol.SetRange(0, 100);
 		m_vol.SetPos(savedata.mpMirrorVol);
@@ -1137,7 +1377,23 @@ protected:
 			}
 			en->Release();
 		}
+		CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
+		m_tooltip.AddTool(&m_enable, LL14(L"別の再生デバイスへ同時出力します。", L"Also output to another playback device.", L"Sortir aussi vers un autre peripherique.", L"Invia anche a un altro dispositivo.", L"Salida tambien a otro dispositivo.",
+			L"다른 재생 장치로도 출력.", L"同时输出到另一播放设备。", L"الإخراج أيضاً لجهاز آخر.", L"Также выводить на другое устройство.", L"Zusätzlich auf anderes Gerät ausgeben.",
+			L"Tambem sair para outro dispositivo.", L"Ook uitvoeren naar ander apparaat.", L"Takze wyprowadzaj na inne urzadzenie.", L"Baska bir aygita da cik."));
+		m_tooltip.AddTool(&m_vol, LL14(L"ミラー側の音量 (0–100)。", L"Mirror volume (0–100).", L"Volume miroir (0–100).", L"Volume mirror (0–100).", L"Volumen espejo (0–100).",
+			L"미러 볼륨 (0–100).", L"镜像音量 (0–100)。", L"مستوى المرآة (0–100).", L"Громкость зеркала (0–100).", L"Spiegel-Lautstärke (0–100).",
+			L"Volume do espelho (0–100).", L"Spiegelvolume (0–100).", L"Glosnosc lustra (0–100).", L"Ayna sesi (0–100)."));
+		m_tooltip.AddTool(&m_dev, LL14(L"ミラー出力先デバイス。", L"Target device for mirror output.", L"Peripherique de sortie miroir.", L"Dispositivo di destinazione.", L"Dispositivo de destino.",
+			L"미러 출력 장치.", L"镜像输出设备。", L"جهاز خرج المرآة.", L"Устройство зеркального выхода.", L"Zielgerät für Spiegelausgabe.",
+			L"Dispositivo de saida espelho.", L"Doelapparaat voor spiegel.", L"Docelowe urzadzenie lustra.", L"Ayna cikis aygiti."));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 8000);
 		return TRUE;
+	}
+	virtual BOOL PreTranslateMessage(MSG* pMsg)
+	{
+		if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(pMsg);
+		return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 	}
 	virtual void PostNcDestroy() { g_mpMirrorDlg = NULL; delete this; CCustomBlurDialogBase::PostNcDestroy(); }
 	afx_msg void OnDestroy()
@@ -1211,13 +1467,35 @@ protected:
 		DDX_Control(pDX, IDC_REMOTE_ENABLE, m_enable);
 		DDX_Control(pDX, IDC_REMOTE_PORT, m_port);
 	}
+	CToolTipCtrl m_tooltip;
 	virtual BOOL OnInitDialog()
 	{
 		CCustomBlurDialogBase::OnInitDialog();
+		SetWindowText(LL14(L"ローカルリモート", L"Local remote", L"Telecommande locale", L"Remote locale", L"Remoto local",
+			L"로컬 리모트", L"本地遥控", L"تحكم محلي", L"Локальный пульт", L"Lokalfernbedienung",
+			L"Remoto local", L"Lokale bediening", L"Pilot lokalny", L"Yerel uzaktan"));
+		m_enable.SetWindowText(LL14(L"localhost で HTTP", L"HTTP on localhost", L"HTTP sur localhost", L"HTTP su localhost", L"HTTP en localhost",
+			L"localhost HTTP", L"本机 HTTP", L"HTTP على localhost", L"HTTP на localhost", L"HTTP auf localhost",
+			L"HTTP em localhost", L"HTTP op localhost", L"HTTP na localhost", L"localhost HTTP"));
+		SetDlgItemText(IDC_REMOTE_PORT_L, LL14(L"ポート", L"Port", L"Port", L"Porta", L"Puerto",
+			L"포트", L"端口", L"منفذ", L"Порт", L"Port", L"Porta", L"Poort", L"Port", L"Port"));
 		m_enable.SetCheck(savedata.mpRemoteOn ? BST_CHECKED : BST_UNCHECKED);
 		CString p; p.Format(_T("%d"), savedata.mpRemotePort);
 		m_port.SetWindowText(p);
+		CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
+		m_tooltip.AddTool(&m_enable, LL14(L"ブラウザから再生操作できる簡易 HTTP サーバを起動します。", L"Start a simple HTTP server for browser transport control.", L"Demarrer un serveur HTTP simple pour controler la lecture.", L"Avvia un semplice server HTTP per il controllo.", L"Inicia un servidor HTTP simple para control.",
+			L"브라우저로 조작하는 간이 HTTP 서버를 켭니다.", L"启动简易 HTTP 服务器以便浏览器控制播放。", L"تشغيل خادم HTTP بسيط للتحكم.", L"Запустить простой HTTP-сервер для управления.", L"Einfachen HTTP-Server für Steuerung starten.",
+			L"Inicia um servidor HTTP simples para controle.", L"Start een eenvoudige HTTP-server voor bediening.", L"Uruchom prosty serwer HTTP do sterowania.", L"Tarayicidan kontrol icin basit HTTP sunucusu baslat."));
+		m_tooltip.AddTool(&m_port, LL14(L"待ち受けポート (1024–65535)。", L"Listen port (1024–65535).", L"Port d'ecoute (1024–65535).", L"Porta di ascolto (1024–65535).", L"Puerto de escucha (1024–65535).",
+			L"수신 포트 (1024–65535).", L"监听端口 (1024–65535)。", L"منفذ الاستماع (1024–65535).", L"Порт прослушивания (1024–65535).", L"Listenport (1024–65535).",
+			L"Porta de escuta (1024–65535).", L"Luisterpoort (1024–65535).", L"Port nasluchu (1024–65535).", L"Dinleme portu (1024–65535)."));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 8000);
 		return TRUE;
+	}
+	virtual BOOL PreTranslateMessage(MSG* pMsg)
+	{
+		if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(pMsg);
+		return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 	}
 	virtual void PostNcDestroy() { g_mpRemoteDlg = NULL; delete this; CCustomBlurDialogBase::PostNcDestroy(); }
 	afx_msg void OnDestroy()
@@ -1280,6 +1558,9 @@ protected:
 	virtual BOOL OnInitDialog()
 	{
 		CCustomBlurDialogBase::OnInitDialog();
+		SetWindowText(LL14(L"SS ビジュアライザ (Escで閉じる)", L"SS visualizer (Esc to close)", L"Visualiseur SS (Esc)", L"Visualizzatore SS (Esc)", L"Visualizador SS (Esc)",
+			L"SS 비주얼 (Esc로 닫기)", L"SS 可视化（Esc关闭）", L"عارض SS (Esc للإغلاق)", L"SS-визуализатор (Esc)", L"SS-Visualizer (Esc)",
+			L"Visual SS (Esc)", L"SS-visualizer (Esc)", L"Wizual SS (Esc)", L"SS gorsel (Esc)"));
 		ShowWindow(SW_SHOWMAXIMIZED);
 		SetTimer(1, 33, NULL);
 		return TRUE;
@@ -1292,6 +1573,25 @@ protected:
 			return TRUE;
 		}
 		return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
+	}
+	afx_msg void OnContextMenu(CWnd*, CPoint point)
+	{
+		if (point.x == -1 && point.y == -1) {
+			CRect r; GetWindowRect(&r);
+			point.x = r.left + 40; point.y = r.top + 40;
+		}
+		CMenu menu;
+		menu.CreatePopupMenu();
+		menu.AppendMenu(MF_STRING, 1,
+			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+		const int cmd = (int)menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RETURNCMD | TPM_RIGHTBUTTON, point.x, point.y, this);
+		if (cmd == 1)
+			DestroyWindow();
+	}
+	afx_msg void OnRButtonUp(UINT, CPoint point)
+	{
+		ClientToScreen(&point);
+		OnContextMenu(this, point);
 	}
 	afx_msg void OnTimer(UINT_PTR nIDEvent)
 	{
@@ -1321,12 +1621,16 @@ protected:
 		const int gap = 2;
 		const int bw = max(2, (w - gap * (bars + 1)) / bars);
 		for (int i = 0; i < bars; ++i) {
+			// モノ=0.. / ステレオL=100.. / R=200..。STオン時は 0台が空のままになり真っ黒になる
 			int v = spelv[i];
+			if (spelv[100 + i] > v) v = spelv[100 + i];
+			if (spelv[200 + i] > v) v = spelv[200 + i];
 			if (v < 0) v = 0;
 			if (v > 96) v = 96;
-			const int bh = (v + 1) * h / 100;
+			const int bh = max(2, (v + 1) * h / 100);
 			const int x = gap + i * (bw + gap);
-			m_mem.FillSolidRect(x, h - bh, bw, bh, RGB(40, 180, 120));
+			const COLORREF c = (v > 70) ? RGB(80, 255, 160) : RGB(40, 180, 120);
+			m_mem.FillSolidRect(x, h - bh, bw, bh, c);
 		}
 		dc.BitBlt(0, 0, w, h, &m_mem, 0, 0, SRCCOPY);
 	}
@@ -1348,6 +1652,8 @@ BEGIN_MESSAGE_MAP(CMpSsVizDlg, CCustomBlurDialogBase)
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
 	ON_WM_DESTROY()
+	ON_WM_CONTEXTMENU()
+	ON_WM_RBUTTONUP()
 END_MESSAGE_MAP()
 
 void CloseMpSsVizIfOpen()
@@ -1355,6 +1661,11 @@ void CloseMpSsVizIfOpen()
 	if (g_mpSsViz && ::IsWindow(g_mpSsViz->GetSafeHwnd()))
 		g_mpSsViz->DestroyWindow();
 	g_mpSsViz = NULL;
+}
+
+BOOL MpSsVizIsOpen()
+{
+	return (g_mpSsViz && ::IsWindow(g_mpSsViz->GetSafeHwnd())) ? TRUE : FALSE;
 }
 
 void OpenMpSsVizModeless(CWnd* parent)

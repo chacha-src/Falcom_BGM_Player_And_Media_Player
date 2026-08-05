@@ -18,6 +18,7 @@ public:
 	void SyncFromOg();
 	void PersistGeometry();
 	void ApplyWindowAlpha();
+	void MakeSolidClient();
 
 protected:
 	CLyricsViewWnd m_view;
@@ -30,9 +31,13 @@ protected:
 
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	virtual void PostNcDestroy();
 	virtual void OnCancel();
+	virtual void ApplyDwmBlur();
+	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
+	afx_msg void OnPaint();
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnMoving(UINT fwSide, LPRECT pRect);
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
@@ -40,6 +45,7 @@ protected:
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnDestroy();
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	DECLARE_MESSAGE_MAP()
 

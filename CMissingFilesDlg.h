@@ -47,6 +47,7 @@ protected:
 	CCustomStandardButton m_delete;
 	CCustomStandardButton m_close;
 	CBrush m_brDlg;
+	CToolTipCtrl m_tooltip;
 	int m_selRow;
 	BOOL m_bInlineEdit;
 	CCustomEdit m_inlineEdit;

@@ -22,9 +22,11 @@ protected:
 	CCustomStandardButton m_clear;
 	CCustomStandardButton m_close;
 	CBrush m_brDlg;
+	CToolTipCtrl m_tooltip;
 
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	afx_msg void OnBnClickedUp();
 	afx_msg void OnBnClickedDown();
 	afx_msg void OnBnClickedRemove();

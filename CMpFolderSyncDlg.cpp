@@ -119,7 +119,21 @@ BOOL CMpFolderSyncDlg::OnInitDialog()
 	Scan();
 	RebuildLists();
 	UpdateStatus();
+
+	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
+	m_tooltip.AddTool(&m_add, LL14(L"ディスクのみの曲をプレイリストへ追加。", L"Add disk-only tracks to the playlist.", L"Ajouter les pistes disque-only.", L"Aggiungi brani solo su disco.", L"Anadir pistas solo en disco.", L"디스크만 있는 곡을 PL에 추가.", L"将仅磁盘曲目加入播放列表。", L"إضافة المقاطع الموجودة على القرص فقط.", L"Добавить треки только с диска.", L"Nur-auf-Disk-Titel zur Playlist.", L"Adicionar faixas so no disco.", L"Schijf-only nummers toevoegen.", L"Dodaj utwory tylko z dysku.", L"Sadece diskteki parcalari listeye ekle."));
+	m_tooltip.AddTool(&m_remove, LL14(L"ディスクに無いプレイリスト項目を削除。", L"Remove playlist entries missing on disk.", L"Supprimer les entrees absentes du disque.", L"Rimuovi voci assenti dal disco.", L"Quitar entradas ausentes en disco.", L"디스크에 없는 PL 항목 삭제.", L"删除磁盘上不存在的播放列表项。", L"حذف عناصر القائمة الغائبة عن القرص.", L"Удалить записи без файла на диске.", L"PL-Einträge ohne Datei entfernen.", L"Remover entradas ausentes no disco.", L"PL-items zonder schijfbestand verwijderen.", L"Usun wpisy PL bez pliku na dysku.", L"Diskte olmayan liste ogelerini sil."));
+	m_tooltip.AddTool(&m_close, LL14(L"閉じる。", L"Close.", L"Fermer.", L"Chiudi.", L"Cerrar.", L"닫기.", L"关闭。", L"إغلاق.", L"Закрыть.", L"Schließen.", L"Fechar.", L"Sluiten.", L"Zamknij.", L"Kapat."));
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 8000);
+
 	return TRUE;
+}
+
+BOOL CMpFolderSyncDlg::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
 void CMpFolderSyncDlg::Scan()

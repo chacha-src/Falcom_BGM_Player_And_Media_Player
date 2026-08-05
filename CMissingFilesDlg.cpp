@@ -222,6 +222,15 @@ BOOL CMissingFilesDlg::OnInitDialog()
 	}
 	UpdateStatus();
 	UpdateButtonEnable();
+
+	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
+	m_tooltip.AddTool(&m_browse, LL14(L"ファイルを参照してパスを設定します。", L"Browse for a file to set the path.", L"Parcourir un fichier.", L"Sfoglia un file.", L"Examinar un archivo.", L"파일을 찾아 경로 설정.", L"浏览文件以设置路径。", L"استعراض ملف لتعيين المسار.", L"Выбрать файл для пути.", L"Datei zum Pfad wählen.", L"Procurar arquivo para o caminho.", L"Bladeren naar bestand voor pad.", L"Przegladaj plik dla sciezki.", L"Yol icin dosya gozat."));
+	m_tooltip.AddTool(&m_apply, LL14(L"修正したパスをプレイリストへ適用します。", L"Apply the fixed path to the playlist.", L"Appliquer le chemin a la liste.", L"Applica il percorso alla playlist.", L"Aplicar la ruta a la lista.", L"수정 경로를 PL에 적용.", L"将修正路径应用到播放列表。", L"تطبيق المسار على القائمة.", L"Применить путь к плейлисту.", L"Pfad auf Playlist anwenden.", L"Aplicar caminho na playlist.", L"Pad op playlist toepassen.", L"Zastosuj sciezke do playlisty.", L"Duzeltilen yolu listeye uygula."));
+	m_tooltip.AddTool(&m_openFol, LL14(L"パスのフォルダをエクスプローラで開きます。", L"Open the path folder in Explorer.", L"Ouvrir le dossier dans l'Explorateur.", L"Apri la cartella in Esplora risorse.", L"Abrir la carpeta en el Explorador.", L"경로 폴더를 탐색기로 열기.", L"在资源管理器中打开路径文件夹。", L"فتح مجلد المسار في المستكشف.", L"Открыть папку пути в проводнике.", L"Pfadordner im Explorer öffnen.", L"Abrir pasta do caminho no Explorer.", L"Padmap in Verkenner openen.", L"Otworz folder sciezki w Eksploratorze.", L"Yol klasorunu Gezgin'de ac."));
+	m_tooltip.AddTool(&m_delete, LL14(L"一覧に残っている項目をプレイリストから削除します。", L"Delete remaining listed items from the playlist.", L"Supprimer le reste de la liste.", L"Elimina i rimanenti dalla playlist.", L"Eliminar los restantes de la lista.", L"남은 항목을 PL에서 삭제.", L"从播放列表删除剩余项。", L"حذف المتبقي من القائمة.", L"Удалить оставшиеся из плейлиста.", L"Restliche aus Playlist löschen.", L"Excluir restantes da playlist.", L"Resterende uit playlist verwijderen.", L"Usun pozostale z playlisty.", L"Kalanlari listeden sil."));
+	m_tooltip.AddTool(&m_close, LL14(L"閉じる（削除せず終了）。", L"Close without deleting.", L"Fermer sans supprimer.", L"Chiudi senza eliminare.", L"Cerrar sin eliminar.", L"삭제 없이 닫기.", L"关闭（不删除）。", L"إغلاق دون حذف.", L"Закрыть без удаления.", L"Schließen ohne Löschen.", L"Fechar sem excluir.", L"Sluiten zonder verwijderen.", L"Zamknij bez usuwania.", L"Silmeden kapat."));
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 8000);
+
 	return TRUE;
 }
 
@@ -638,6 +647,8 @@ void CMissingFilesDlg::OnInlineEditKillFocus()
 
 BOOL CMissingFilesDlg::PreTranslateMessage(MSG* pMsg)
 {
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
 	if (pMsg->message == WM_KEYDOWN) {
 		if (m_bInlineEdit && m_inlineEdit.GetSafeHwnd() &&
 			(pMsg->hwnd == m_inlineEdit.GetSafeHwnd())) {

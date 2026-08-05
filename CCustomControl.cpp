@@ -12281,9 +12281,9 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
             HGDIOBJ oldBmp = ::SelectObject(hdcMem, hDib);
 
             int textLeft = 8;
+            // ウィンドウに明示 SetIcon されたものだけ描く。
+            // GCLP_HICONSM はクラス共有で、未設定ダイアログに空アイコンが付く原因になる。
             HICON hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_SMALL, 0);
-            if (!hIcon)
-                hIcon = (HICON)::GetClassLongPtr(hDlg, GCLP_HICONSM);
             if (!hIcon)
                 hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_BIG, 0);
             if (hIcon) {
@@ -12363,8 +12363,6 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
 
     int textLeft = 8;
     HICON hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_SMALL, 0);
-    if (!hIcon)
-        hIcon = (HICON)::GetClassLongPtr(hDlg, GCLP_HICONSM);
     if (!hIcon)
         hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_BIG, 0);
     if (hIcon) {
@@ -13257,6 +13255,8 @@ static BOOL RegisterBlurDialogWndClass(LPCTSTR pszClass, LPCTSTR pszNewClass)
     if (!::GetClassInfo(hInst, pszClass, &wc) && !::GetClassInfo(NULL, pszClass, &wc))
         return FALSE;
     wc.hbrBackground = NULL;
+    // ダイアログクラスからコピーした空/不正アイコンがキャプションに出るのを防ぐ
+    wc.hIcon = NULL;
     wc.lpszClassName = pszNewClass;
     wc.hInstance = hInst;
     return AfxRegisterClass(&wc) != FALSE;
@@ -13282,6 +13282,10 @@ BOOL CCustomBlurDialogBase::PreCreateWindow(CREATESTRUCT& cs)
 BOOL CCustomBlurDialogBase::OnInitDialog()
 {
     BOOL b = CCustomDialog::OnInitDialog();
+    // ツール系ダイアログは明示 SetIcon しないとクラス/既定の空アイコンがキャプションに出る。
+    // メイン画面などアイコンが必要な側は、この後に SetIcon(m_hIcon, …) する。
+    SetIcon(nullptr, TRUE);
+    SetIcon(nullptr, FALSE);
 #if CCUSTOM_AERO_SUPPORT
     ::SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, 0);
 #endif
@@ -13805,6 +13809,8 @@ BOOL CCustomBlurDialogExBase::PreCreateWindow(CREATESTRUCT& cs)
 BOOL CCustomBlurDialogExBase::OnInitDialog()
 {
     BOOL b = CCustomDialogEx::OnInitDialog();
+    SetIcon(nullptr, TRUE);
+    SetIcon(nullptr, FALSE);
 #if CCUSTOM_AERO_SUPPORT
     ::SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, 0);
 #endif

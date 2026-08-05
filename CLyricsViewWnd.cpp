@@ -28,6 +28,7 @@ CLyricsViewWnd::CLyricsViewWnd()
 	, m_targetY(0.0)
 	, m_fontPt(0)
 	, m_timer(0)
+	, m_overlay(FALSE)
 {
 	ZeroMemory(m_tm, sizeof(m_tm));
 }
@@ -86,11 +87,21 @@ void CLyricsViewWnd::EnsureFonts(int dpiPointTenths, LPCTSTR face)
 	CFont* old = dc.SelectObject(&m_fontHi);
 	TEXTMETRIC tm = {};
 	dc.GetTextMetrics(&tm);
-	m_lineH = tm.tmHeight + tm.tmExternalLeading + 4;
+	m_lineH = tm.tmHeight + tm.tmExternalLeading + (m_overlay ? 8 : 4);
 	if (m_lineH < 16) m_lineH = 16;
 	dc.SelectObject(old);
 	RecalcTarget();
 	m_scrollY = m_targetY;
+}
+
+void CLyricsViewWnd::SetOverlayStyle(BOOL on)
+{
+	if (m_overlay == on) return;
+	m_overlay = on;
+	const int pt = m_fontPt > 0 ? m_fontPt : (m_overlay ? 140 : 100);
+	m_fontPt = 0; // force recreate
+	EnsureFonts(m_overlay ? max(pt, 130) : pt, m_fontFace.IsEmpty() ? _T("Segoe UI") : (LPCTSTR)m_fontFace);
+	Invalidate(FALSE);
 }
 
 void CLyricsViewWnd::SetLines(const CString* lines, int count, const DWORD* times, int timeCount)
@@ -286,14 +297,14 @@ void CLyricsViewWnd::OnPaint()
 	bmp.CreateCompatibleBitmap(&pdc, rc.Width(), rc.Height());
 	CBitmap* oldBmp = mem.SelectObject(&bmp);
 
-	mem.FillSolidRect(&rc, RGB(248, 250, 255));
+	mem.FillSolidRect(&rc, m_overlay ? RGB(18, 18, 28) : RGB(248, 250, 255));
 
 	// 上下フェード帯
 	for (int i = 0; i < 12 && i < rc.Height() / 4; i++) {
 		const int a = 40 - i * 3;
 		if (a <= 0) break;
-		mem.FillSolidRect(0, i, rc.Width(), 1, RGB(235, 240, 250));
-		mem.FillSolidRect(0, rc.bottom - 1 - i, rc.Width(), 1, RGB(235, 240, 250));
+		mem.FillSolidRect(0, i, rc.Width(), 1, m_overlay ? RGB(28, 28, 40) : RGB(235, 240, 250));
+		mem.FillSolidRect(0, rc.bottom - 1 - i, rc.Width(), 1, m_overlay ? RGB(28, 28, 40) : RGB(235, 240, 250));
 	}
 
 	if (m_count > 0 && m_lineH > 0) {
@@ -306,8 +317,8 @@ void CLyricsViewWnd::OnPaint()
 			const int cy = (int)((double)m_cur * m_lineH - m_scrollY);
 			CRect hi(0, cy - 1, rc.Width(), cy + m_lineH + 1);
 			if (hi.bottom > 0 && hi.top < rc.Height()) {
-				mem.FillSolidRect(&hi, RGB(220, 232, 255));
-				CPen pen(PS_SOLID, 1, RGB(160, 190, 235));
+				mem.FillSolidRect(&hi, m_overlay ? RGB(40, 50, 80) : RGB(220, 232, 255));
+				CPen pen(PS_SOLID, 1, m_overlay ? RGB(90, 140, 220) : RGB(160, 190, 235));
 				CPen* op = mem.SelectObject(&pen);
 				mem.MoveTo(0, hi.top);
 				mem.LineTo(rc.Width(), hi.top);
@@ -326,10 +337,17 @@ void CLyricsViewWnd::OnPaint()
 			const BOOL isCur = (i == m_cur);
 			const int dist = abs(i - m_cur);
 			COLORREF col;
-			if (isCur) col = RGB(30, 70, 170);
-			else if (dist == 1) col = RGB(70, 90, 130);
-			else if (dist == 2) col = RGB(110, 120, 145);
-			else col = RGB(150, 155, 170);
+			if (m_overlay) {
+				if (isCur) col = RGB(255, 230, 120);
+				else if (dist == 1) col = RGB(220, 225, 240);
+				else if (dist == 2) col = RGB(170, 175, 195);
+				else col = RGB(130, 135, 155);
+			} else {
+				if (isCur) col = RGB(30, 70, 170);
+				else if (dist == 1) col = RGB(70, 90, 130);
+				else if (dist == 2) col = RGB(110, 120, 145);
+				else col = RGB(150, 155, 170);
+			}
 
 			CFont* use = isCur ? &m_fontHi : &m_font;
 			CFont* old = mem.SelectObject(use);
@@ -342,12 +360,12 @@ void CLyricsViewWnd::OnPaint()
 				if (tw > tr.Width()) tw = tr.Width();
 				if (tw < 1) tw = 1;
 				const int split = tr.left + (int)(tw * m_frac + 0.5);
-				mem.SetTextColor(RGB(150, 155, 170));
+				mem.SetTextColor(m_overlay ? RGB(140, 145, 165) : RGB(150, 155, 170));
 				mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 				CRgn clip;
 				if (split > tr.left && clip.CreateRectRgn(tr.left, tr.top, split, tr.bottom)) {
 					mem.SelectClipRgn(&clip);
-					mem.SetTextColor(RGB(220, 40, 90));
+					mem.SetTextColor(m_overlay ? RGB(255, 90, 140) : RGB(220, 40, 90));
 					mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 					mem.SelectClipRgn(NULL);
 				}
@@ -360,7 +378,7 @@ void CLyricsViewWnd::OnPaint()
 	}
 	else {
 		mem.SetBkMode(TRANSPARENT);
-		mem.SetTextColor(RGB(140, 150, 170));
+		mem.SetTextColor(m_overlay ? RGB(200, 205, 220) : RGB(140, 150, 170));
 		if (m_font.GetSafeHandle())
 			mem.SelectObject(&m_font);
 		CString empty = LL14(
@@ -373,8 +391,8 @@ void CLyricsViewWnd::OnPaint()
 #if CCUSTOM_AERO_SUPPORT
 	// キャプション常時アクリル(本文 aero=0)でも親を辿ってガラスなら不透明合成。
 	// 素 BitBlt だと α=0 のまま開き閉じて追従描画が見えない。
-	BOOL needOpaque = FALSE;
-	if (CCC_IsWin11()) {
+	BOOL needOpaque = m_overlay ? TRUE : FALSE;
+	if (!needOpaque && CCC_IsWin11()) {
 		if (CCC_IsAeroEnabled())
 			needOpaque = TRUE;
 		else {

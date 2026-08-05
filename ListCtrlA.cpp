@@ -45,15 +45,25 @@ void CListCtrlA::BuildToolTipText(int row, int col, CString& out)
 	CString marks = GetItemText(row, 1);
 	if (!marks.IsEmpty()) {
 		out += _T("\n");
-		out += LL14(L"印: ★=曲ごと設定 / ♪=歌詞(.lrc)", L"Marks: ★=per-track settings / ♪=lyrics (.lrc)",
-			L"Marques : ★=réglages / ♪=paroles (.lrc)", L"Segni: ★=impostazioni / ♪=testi (.lrc)",
-			L"Marcas: ★=ajustes / ♪=letra (.lrc)", L"표시: ★=곡별 설정 / ♪=가사(.lrc)",
-			L"标记: ★=单曲设置 / ♪=歌词(.lrc)", L"علامات: ★=إعدادات / ♪=كلمات (.lrc)",
-			L"Метки: ★=настройки / ♪=текст (.lrc)", L"Zeichen: ★=Einstellungen / ♪=Liedtext (.lrc)",
-			L"Marcas: ★=definições / ♪=letra (.lrc)", L"Tekens: ★=instellingen / ♪=songtekst (.lrc)",
-			L"Znaki: ★=ustawienia / ♪=tekst (.lrc)", L"İşaret: ★=parça ayarı / ♪=söz (.lrc)");
-		out += _T(" → ");
-		out += marks;
+		if (m_bCol1IsRating) {
+			out += LL14(L"評価: ", L"Rating: ", L"Note : ", L"Voto: ", L"Valoracion: ",
+				L"평점: ", L"评分: ", L"التقييم: ", L"Оценка: ", L"Bewertung: ",
+				L"Avaliacao: ", L"Waardering: ", L"Ocena: ", L"Puan: ");
+			out += marks;
+			out += LL14(L"（クリックで変更）", L" (click to change)", L" (clic pour changer)", L" (clic per cambiare)", L" (clic para cambiar)",
+				L" (클릭으로 변경)", L"（点击更改）", L" (انقر للتغيير)", L" (щелчок — изменить)", L" (Klick zum Andern)",
+				L" (clique para alterar)", L" (klik om te wijzigen)", L" (kliknij, by zmienic)", L" (degistirmek icin tikla)");
+		} else {
+			out += LL14(L"印: ★=曲ごと設定 / ♪=歌詞(.lrc)", L"Marks: ★=per-track settings / ♪=lyrics (.lrc)",
+				L"Marques : ★=réglages / ♪=paroles (.lrc)", L"Segni: ★=impostazioni / ♪=testi (.lrc)",
+				L"Marcas: ★=ajustes / ♪=letra (.lrc)", L"표시: ★=곡별 설정 / ♪=가사(.lrc)",
+				L"标记: ★=单曲设置 / ♪=歌词(.lrc)", L"علامات: ★=إعدادات / ♪=كلمات (.lrc)",
+				L"Метки: ★=настройки / ♪=текст (.lrc)", L"Zeichen: ★=Einstellungen / ♪=Liedtext (.lrc)",
+				L"Marcas: ★=definições / ♪=letra (.lrc)", L"Tekens: ★=instellingen / ♪=songtekst (.lrc)",
+				L"Znaki: ★=ustawienia / ♪=tekst (.lrc)", L"İşaret: ★=parça ayarı / ♪=söz (.lrc)");
+			out += _T(" → ");
+			out += marks;
+		}
 	}
 
 	// 曲ごと保存パラメータが有効なプレイリストでは、変更のある項目を付記する。

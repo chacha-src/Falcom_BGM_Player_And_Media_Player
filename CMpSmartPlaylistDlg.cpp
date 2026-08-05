@@ -61,6 +61,7 @@ BOOL CMpSmartPlaylistDlg::OnInitDialog()
 		L"スマートプレイリスト", L"Smart playlist", L"Playlist intelligente", L"Playlist smart", L"Lista inteligente",
 		L"스마트 재생목록", L"智能播放列表", L"قائمة ذكية", L"Умный плейлист", L"Smart-Playlist",
 		L"Playlist inteligente", L"Slimme playlist", L"Inteligentna playlista", L"Akilli liste"));
+	SetDlgItemText(IDC_MSM_NAME_L, LL14(L"名前:", L"Name:", L"Nom:", L"Nome:", L"Nombre:", L"이름:", L"名称:", L"الاسم:", L"Имя:", L"Name:", L"Nome:", L"Naam:", L"Nazwa:", L"Ad:"));
 	SetDlgItemText(IDC_MSM_UNPLAYED, LL14(L"未再生", L"Unplayed", L"Non joues", L"Non riprodotti", L"No reproducidos", L"미재생", L"未播放", L"غير مشغّل", L"Неигранные", L"Ungespielt", L"Nao tocados", L"Ongespeeld", L"Nieodtworzone", L"Oynatilmamis"));
 	SetDlgItemText(IDC_MSM_MISSING, LL14(L"欠損", L"Missing", L"Manquants", L"Mancanti", L"Faltantes", L"결손", L"缺失", L"مفقود", L"Отсутствующие", L"Fehlend", L"Ausentes", L"Ontbrekend", L"Brakujace", L"Eksik"));
 	SetDlgItemText(IDC_MSM_RATING, LL14(L"評価≧", L"Rating ≥", L"Note ≥", L"Voto ≥", L"Valoración ≥", L"평점≧", L"评分≥", L"تقييم ≥", L"Оценка ≥", L"Bewertung ≥", L"Nota ≥", L"Beoordeling ≥", L"Ocena ≥", L"Puan ≥"));
@@ -82,6 +83,17 @@ BOOL CMpSmartPlaylistDlg::OnInitDialog()
 	m_lc.SetExtendedStyle(m_lc.GetExtendedStyle() | LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
 	m_lc.InsertColumn(0, LL14(L"ルール", L"Rule", L"Regle", L"Regola", L"Regla", L"규칙", L"规则", L"قاعدة", L"Правило", L"Regel", L"Regra", L"Regel", L"Regula", L"Kural"), LVCFMT_LEFT, 140, 0);
 
+	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
+	m_tooltip.AddTool(&m_name, LL14(L"ルール名。", L"Rule name.", L"Nom de la regle.", L"Nome regola.", L"Nombre de regla.", L"규칙 이름.", L"规则名称。", L"اسم القاعدة.", L"Имя правила.", L"Regelname.", L"Nome da regra.", L"Regelnaam.", L"Nazwa reguly.", L"Kural adi."));
+	m_tooltip.AddTool(&m_unplayed, LL14(L"未再生の曲だけ。", L"Only unplayed tracks.", L"Uniquement non joues.", L"Solo non riprodotti.", L"Solo no reproducidos.", L"미재생만.", L"仅未播放。", L"غير مشغّل فقط.", L"Только неигранные.", L"Nur ungespielt.", L"So nao tocados.", L"Alleen ongespeeld.", L"Tylko nieodtworzone.", L"Sadece oynatilmamis."));
+	m_tooltip.AddTool(&m_missing, LL14(L"欠損パスの曲だけ。", L"Only missing-file tracks.", L"Uniquement manquants.", L"Solo mancanti.", L"Solo faltantes.", L"결손만.", L"仅缺失。", L"مفقود فقط.", L"Только отсутствующие.", L"Nur fehlend.", L"So ausentes.", L"Alleen ontbrekend.", L"Tylko brakujace.", L"Sadece eksik."));
+	m_tooltip.AddTool(&m_add, LL14(L"現在の条件でルールを追加。", L"Add a rule from current criteria.", L"Ajouter une regle.", L"Aggiungi regola.", L"Anadir regla.", L"규칙 추가.", L"添加规则。", L"إضافة قاعدة.", L"Добавить правило.", L"Regel hinzufügen.", L"Adicionar regra.", L"Regel toevoegen.", L"Dodaj regule.", L"Kural ekle."));
+	m_tooltip.AddTool(&m_update, LL14(L"選択ルールを更新。", L"Update selected rule.", L"Mettre a jour la regle.", L"Aggiorna regola.", L"Actualizar regla.", L"규칙 업데이트.", L"更新规则。", L"تحديث القاعدة.", L"Обновить правило.", L"Regel aktualisieren.", L"Atualizar regra.", L"Regel bijwerken.", L"Aktualizuj regule.", L"Kurali guncelle."));
+	m_tooltip.AddTool(&m_del, LL14(L"選択ルールを削除。", L"Delete selected rule.", L"Supprimer la regle.", L"Elimina regola.", L"Eliminar regla.", L"규칙 삭제.", L"删除规则。", L"حذف القاعدة.", L"Удалить правило.", L"Regel löschen.", L"Excluir regra.", L"Regel verwijderen.", L"Usun regule.", L"Kurali sil."));
+	m_tooltip.AddTool(&m_apply, LL14(L"ルールをリストに適用して閉じる。", L"Apply rule to the list and close.", L"Appliquer et fermer.", L"Applica e chiudi.", L"Aplicar y cerrar.", L"적용 후 닫기.", L"应用并关闭。", L"تطبيق وإغلاق.", L"Применить и закрыть.", L"Übernehmen und schließen.", L"Aplicar e fechar.", L"Toepassen en sluiten.", L"Zastosuj i zamknij.", L"Uygula ve kapat."));
+	m_tooltip.AddTool(&m_close, LL14(L"閉じる。", L"Close.", L"Fermer.", L"Chiudi.", L"Cerrar.", L"닫기.", L"关闭。", L"إغلاق.", L"Закрыть.", L"Schließen.", L"Fechar.", L"Sluiten.", L"Zamknij.", L"Kapat."));
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 8000);
+
 	RebuildList();
 	if (m_lc.GetItemCount() > 0) {
 		m_lc.SetItemState(0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
@@ -89,6 +101,13 @@ BOOL CMpSmartPlaylistDlg::OnInitDialog()
 		LoadSelToUi();
 	}
 	return TRUE;
+}
+
+BOOL CMpSmartPlaylistDlg::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
 void CMpSmartPlaylistDlg::RebuildList()

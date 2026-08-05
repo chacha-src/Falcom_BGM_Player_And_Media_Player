@@ -571,6 +571,8 @@ void ProAudio_LoudnessFeed(const float* L, const float* R, int frames, int sampl
 	}
 	if (blockPk > g_livePeak) g_livePeak = blockPk;
 	else g_livePeak *= 0.92f;
+	extern void MpBpmNotifyPeak(float peak);
+	MpBpmNotifyPeak(blockPk);
 }
 
 float ProAudio_LivePeak()
@@ -587,6 +589,8 @@ void ProAudio_BumpLivePeak(float peak)
 	if (peak > 1.f) peak = 1.f;
 	if (peak > g_livePeak) g_livePeak = peak;
 	else g_livePeak *= 0.92f;
+	extern void MpBpmNotifyPeak(float peak);
+	MpBpmNotifyPeak(peak);
 }
 
 void ProAudio_LoudnessCommitCurrentSong()

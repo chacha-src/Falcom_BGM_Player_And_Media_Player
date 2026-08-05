@@ -61,9 +61,21 @@ BOOL CMpDupesDlg::OnInitDialog()
 		L"중복 그룹", L"重复组", L"مجموعات", L"Группы", L"Gruppen",
 		L"Grupos", L"Groepen", L"Grupy", L"Gruplar"), LVCFMT_LEFT, 400, 0);
 
+	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
+	m_tooltip.AddTool(&m_delete, LL14(L"選択した重複グループの余分な曲を削除します。", L"Delete extras in selected duplicate groups.", L"Supprimer les doublons selectionnes.", L"Elimina i duplicati selezionati.", L"Eliminar duplicados seleccionados.", L"선택한 중복 그룹의 여분을 삭제.", L"删除所选重复组中的多余项。", L"حذف الزائد في المجموعات المحددة.", L"Удалить лишнее в выбранных группах.", L"Überzählige in Auswahl löschen.", L"Excluir extras nos grupos selecionados.", L"Extra's in selectie verwijderen.", L"Usun nadmiar w wybranych grupach.", L"Secili gruplardaki fazlalari sil."));
+	m_tooltip.AddTool(&m_close, LL14(L"閉じる。", L"Close.", L"Fermer.", L"Chiudi.", L"Cerrar.", L"닫기.", L"关闭。", L"إغلاق.", L"Закрыть.", L"Schließen.", L"Fechar.", L"Sluiten.", L"Zamknij.", L"Kapat."));
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 8000);
+
 	RebuildList();
 	UpdateStatus();
 	return TRUE;
+}
+
+BOOL CMpDupesDlg::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
 void CMpDupesDlg::RebuildList()

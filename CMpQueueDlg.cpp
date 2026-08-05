@@ -75,14 +75,29 @@ BOOL CMpQueueDlg::OnInitDialog()
 	m_close.SetGradation(RGB(235, 235, 240), RGB(200, 200, 210), 0, TRUE);
 
 	m_lc.SetExtendedStyle(m_lc.GetExtendedStyle() | LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
-	m_lc.InsertColumn(0, _T("#"), LVCFMT_RIGHT, 36, 0);
+	m_lc.InsertColumn(0, LL14(L"#", L"#", L"#", L"#", L"#", L"#", L"#", L"#", L"#", L"#", L"#", L"#", L"#", L"#"), LVCFMT_RIGHT, 36, 0);
 	m_lc.InsertColumn(1, LL14(
 		L"曲名", L"Title", L"Titre", L"Titolo", L"Titulo",
 		L"제목", L"标题", L"العنوان", L"Название", L"Titel",
 		L"Titulo", L"Titel", L"Tytul", L"Baslik"), LVCFMT_LEFT, 220, 0);
 
+	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
+	m_tooltip.AddTool(&m_up, LL14(L"選択行を上へ。", L"Move selected row up.", L"Monter la ligne.", L"Sposta su.", L"Subir fila.", L"선택 행을 위로.", L"上将所选行。", L"تحريك لأعلى.", L"Вверх.", L"Zeile nach oben.", L"Mover para cima.", L"Omhoog.", L"W gore.", L"Yukari tasi."));
+	m_tooltip.AddTool(&m_down, LL14(L"選択行を下へ。", L"Move selected row down.", L"Descendre la ligne.", L"Sposta giu.", L"Bajar fila.", L"선택 행을 아래로.", L"下移所选行。", L"تحريك لأسفل.", L"Вниз.", L"Zeile nach unten.", L"Mover para baixo.", L"Omlaag.", L"W dol.", L"Asagi tasi."));
+	m_tooltip.AddTool(&m_remove, LL14(L"選択行をキューから外します。", L"Remove selected from queue.", L"Retirer de la file.", L"Rimuovi dalla coda.", L"Quitar de la cola.", L"큐에서 제거.", L"从队列移除。", L"إزالة من الطابور.", L"Убрать из очереди.", L"Aus Warteschlange entfernen.", L"Remover da fila.", L"Uit wachtrij.", L"Usun z kolejki.", L"Kuyruktan cikar."));
+	m_tooltip.AddTool(&m_clear, LL14(L"キューをすべてクリアします。", L"Clear the entire queue.", L"Vider toute la file.", L"Svuota tutta la coda.", L"Vaciar toda la cola.", L"큐 전체 비우기.", L"清空整个队列。", L"مسح الطابور بالكامل.", L"Очистить всю очередь.", L"Gesamte Warteschlange leeren.", L"Limpar toda a fila.", L"Hele wachtrij wissen.", L"Wyczysc cala kolejke.", L"Tum kuyrugu temizle."));
+	m_tooltip.AddTool(&m_close, LL14(L"閉じる。", L"Close.", L"Fermer.", L"Chiudi.", L"Cerrar.", L"닫기.", L"关闭。", L"إغلاق.", L"Закрыть.", L"Schließen.", L"Fechar.", L"Sluiten.", L"Zamknij.", L"Kapat."));
+	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 320, 8000);
+
 	RebuildList();
 	return TRUE;
+}
+
+BOOL CMpQueueDlg::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
 
 void CMpQueueDlg::RebuildList()

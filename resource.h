@@ -793,6 +793,7 @@
 #define IDD_MP_FOLDER_SYNC              241
 #define IDD_MP_SMART                    242
 #define IDD_MP_QUEUE                    243
+#define IDD_MP_MBPICK                   244
 #define IDC_MPD_LIST                    3865
 #define IDC_MPD_DELETE                  3866
 #define IDC_MPD_CLOSE                   3867
@@ -1299,6 +1300,15 @@
 #define IDC_MIRROR_DEV                  3861
 #define IDC_REMOTE_ENABLE               3862
 #define IDC_REMOTE_PORT                 3863
+#define IDC_ALARM_HOUR_L                3910
+#define IDC_ALARM_MIN_L                 3911
+#define IDC_MIRROR_VOL_L                3912
+#define IDC_MIRROR_DEV_L                3913
+#define IDC_REMOTE_PORT_L               3914
+#define IDC_MSM_NAME_L                  3915
+#define IDC_MMP_LIST                    3916
+#define IDC_MMP_APPLY                   3917
+#define IDC_MMP_CANCEL                  3918
 
 // Next default values for new objects
 // 
@@ -1306,7 +1316,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        250
 #define _APS_NEXT_COMMAND_VALUE         33120
-#define _APS_NEXT_CONTROL_VALUE         3902
+#define _APS_NEXT_CONTROL_VALUE         3916
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

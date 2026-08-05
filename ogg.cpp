@@ -1098,8 +1098,7 @@ BOOL COggApp::InitInstance()
 		|| savedata.mpPhraseSec < 1 || savedata.mpPhraseSec > 60)
 		savedata.mpPhraseSec = 4;
 	if (datFileSize < (int)(offsetof(save, mpSleepMin) + sizeof(savedata.mpSleepMin))
-		|| (savedata.mpSleepMin != 0 && savedata.mpSleepMin != 15
-			&& savedata.mpSleepMin != 30 && savedata.mpSleepMin != 60))
+		|| savedata.mpSleepMin < 0 || savedata.mpSleepMin > 240)
 		savedata.mpSleepMin = 0;
 	if (datFileSize < (int)(offsetof(save, mpHistTod) + sizeof(savedata.mpHistTod))) {
 		for (int i = 0; i < 8; ++i) savedata.mpHistTod[i] = -1;

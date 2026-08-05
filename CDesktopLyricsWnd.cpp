@@ -19,6 +19,9 @@ BEGIN_MESSAGE_MAP(CDesktopLyricsWnd, CCustomBlurDialogBase)
 	ON_WM_MOUSEMOVE()
 	ON_WM_DESTROY()
 	ON_WM_ERASEBKGND()
+	ON_WM_TIMER()
+	ON_WM_SHOWWINDOW()
+	ON_WM_PAINT()
 END_MESSAGE_MAP()
 
 CDesktopLyricsWnd::CDesktopLyricsWnd(CWnd* pParent)
@@ -66,25 +69,39 @@ BOOL CDesktopLyricsWnd::OnInitDialog()
 	int h = savedata.deskLrcH;
 	if (w < 200) w = 640;
 	if (h < 80) h = 160;
+	// 誤ってメイン画面サイズが保存されていると全面透過に見える
+	if (w > 1200) w = 720;
+	if (h > 600) h = 220;
 
 	ModifyStyleEx(0, WS_EX_LAYERED);
 	ApplyWindowAlpha();
 
 	SetWindowPos(&wndTopMost, x, y, w, h, SWP_SHOWWINDOW);
 
+	// 本文ガラスを切る（キャプション帯は残す）
+	MakeSolidClient();
+
 	if (!m_view.GetSafeHwnd()) {
 		CRect rc;
 		GetClientRect(&rc);
-		m_view.Create(this, kViewChildId);
+		if (!m_view.Create(this, kViewChildId)) {
+			// create fail: still show chrome
+		}
 	}
-	m_view.EnsureFonts(100, _T("Segoe UI"));
+	if (m_view.GetSafeHwnd()) {
+		m_view.ModifyStyle(0, WS_VISIBLE | WS_CLIPSIBLINGS, 0);
+		m_view.SetOverlayStyle(TRUE);
+		m_view.EnsureFonts(140, _T("Segoe UI"));
+	}
 	LayoutClient();
+	SetTimer(1, 100, NULL);
 
-	m_alpha.SetRange(40, 255, TRUE);
-	m_alpha.SetTicFreq(32);
+	m_alpha.SetRange(160, 255, TRUE);
+	m_alpha.SetTicFreq(16);
 	int a = savedata.deskLrcAlpha;
-	if (a < 40) a = 40;
+	if (a < 160) a = 160;
 	if (a > 255) a = 255;
+	savedata.deskLrcAlpha = a;
 	m_alpha.SetPos(a);
 
 	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
@@ -93,6 +110,12 @@ BOOL CDesktopLyricsWnd::OnInitDialog()
 			L"ウィンドウ全体の透明度", L"Overall window opacity", L"Opacite de la fenetre", L"Opacita finestra", L"Opacidad de ventana",
 			L"창 전체 불투명도", L"窗口整体不透明度", L"شفافية النافذة", L"Прозрачность окна", L"Fensterdeckkraft",
 			L"Opacidade da janela", L"Dekking van venster", L"Nieprzezroczystosc okna", L"Pencere opakligi"));
+	}
+	if (m_close.GetSafeHwnd()) {
+		m_tooltip.AddTool(&m_close, LL14(
+			L"デスクトップ歌詞を閉じます。", L"Close desktop lyrics.", L"Fermer les paroles bureau.", L"Chiudi i testi desktop.", L"Cerrar letra de escritorio.",
+			L"데스크톱 가사를 닫습니다.", L"关闭桌面歌词。", L"إغلاق كلمات سطح المكتب.", L"Закрыть текст на рабочем столе.", L"Desktop-Text schließen.",
+			L"Fechar letra na area de trabalho.", L"Bureaubladtekst sluiten.", L"Zamknij tekst na pulpicie.", L"Masaustu sozlerini kapat."));
 	}
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 320, 8000);
 
@@ -108,10 +131,53 @@ BOOL CDesktopLyricsWnd::OnInitDialog()
 	return TRUE;
 }
 
+BOOL CDesktopLyricsWnd::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
+}
+
+void CDesktopLyricsWnd::MakeSolidClient()
+{
+	if (!GetSafeHwnd()) return;
+#if CCUSTOM_AERO_SUPPORT
+	CCC_ApplyAero(m_hWnd, FALSE);
+	CCC_ClearChildTrans(m_hWnd);
+#endif
+	m_bAeroEnabled = FALSE;
+}
+
+void CDesktopLyricsWnd::ApplyDwmBlur()
+{
+	// 全面アクリルにしない（歌詞が透け落ちる）
+	MakeSolidClient();
+}
+
+void CDesktopLyricsWnd::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
+	if (bShow) {
+		MakeSolidClient();
+		if (m_view.GetSafeHwnd()) {
+			m_view.ShowWindow(SW_SHOW);
+			m_view.Invalidate(FALSE);
+		}
+		Invalidate(FALSE);
+	}
+}
+
+void CDesktopLyricsWnd::OnPaint()
+{
+	// ガラス再適用を抑止したうえで基底描画（キャプション＋本文不透明化）
+	MakeSolidClient();
+	CCustomBlurDialogBase::OnPaint();
+}
+
 void CDesktopLyricsWnd::ApplyWindowAlpha()
 {
 	int a = savedata.deskLrcAlpha;
-	if (a < 40) a = 40;
+	if (a < 160) a = 160;
 	if (a > 255) a = 255;
 	::SetLayeredWindowAttributes(m_hWnd, 0, (BYTE)a, LWA_ALPHA);
 }
@@ -133,11 +199,18 @@ void CDesktopLyricsWnd::LayoutClient()
 	CRect rc;
 	GetClientRect(&rc);
 	const int footer = 28;
+	const int cap = GetCustomCaptionHeight();
 	CRect viewRc = rc;
+	if (cap > 0 && viewRc.Height() > cap)
+		viewRc.top = cap;
 	if (viewRc.Height() > footer)
 		viewRc.bottom -= footer;
-	if (m_view.GetSafeHwnd())
-		m_view.MoveWindow(&viewRc, FALSE);
+	if (viewRc.bottom < viewRc.top + 40)
+		viewRc.bottom = viewRc.top + 40;
+	if (m_view.GetSafeHwnd()) {
+		m_view.MoveWindow(&viewRc, TRUE);
+		m_view.ShowWindow(SW_SHOW);
+	}
 
 	if (m_alphaL.GetSafeHwnd())
 		m_alphaL.SetWindowPos(NULL, 8, rc.bottom - 22, 52, 14, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -150,8 +223,10 @@ void CDesktopLyricsWnd::LayoutClient()
 void CDesktopLyricsWnd::SyncFromOg()
 {
 	if (!m_view.GetSafeHwnd()) return;
+	MakeSolidClient();
 	if (!og || og->lrcnum < 2) {
 		m_view.Clear();
+		m_view.Invalidate(FALSE);
 		return;
 	}
 	const int n = og->lrcnum - 1;
@@ -167,6 +242,7 @@ void CDesktopLyricsWnd::SyncFromOg()
 			centis = (DWORD)(sec * 100.0 + 0.5);
 	}
 	m_view.SetPlayCentis(centis);
+	m_view.Invalidate(FALSE);
 }
 
 void CDesktopLyricsWnd::OnSize(UINT nType, int cx, int cy)
@@ -192,7 +268,7 @@ void CDesktopLyricsWnd::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBa
 {
 	if (pScrollBar && pScrollBar->GetSafeHwnd() == m_alpha.GetSafeHwnd()) {
 		int a = m_alpha.GetPos();
-		if (a < 40) { a = 40; m_alpha.SetPos(a); }
+		if (a < 160) { a = 160; m_alpha.SetPos(a); }
 		savedata.deskLrcAlpha = a;
 		ApplyWindowAlpha();
 		MpPersistSavedataQuick();
@@ -241,15 +317,29 @@ void CDesktopLyricsWnd::OnMouseMove(UINT nFlags, CPoint point)
 
 void CDesktopLyricsWnd::OnDestroy()
 {
+	KillTimer(1);
 	PersistGeometry();
 	savedata.deskLrcOn = 0;
 	MpPersistSavedataQuick();
 	CCustomBlurDialogBase::OnDestroy();
 }
 
+void CDesktopLyricsWnd::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == 1)
+		SyncFromOg();
+	CCustomBlurDialogBase::OnTimer(nIDEvent);
+}
+
 BOOL CDesktopLyricsWnd::OnEraseBkgnd(CDC* pDC)
 {
-	UNREFERENCED_PARAMETER(pDC);
+	if (!pDC) return TRUE;
+	CRect rc;
+	GetClientRect(&rc);
+	const int cap = GetCustomCaptionHeight();
+	if (cap > 0 && rc.Height() > cap)
+		rc.top = cap;
+	pDC->FillSolidRect(&rc, RGB(18, 18, 28));
 	return TRUE;
 }
 

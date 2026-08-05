@@ -19,6 +19,7 @@
 #include "mp3image.h"
 #include "CMediaPlayerDlg.h"
 #include "CMissingFilesDlg.h"
+#include "MpPlayerAddons.h"
 
 static CWnd* GetPlaylistModalOwner(CPlayList* plDlg)
 {
@@ -791,7 +792,7 @@ BOOL CPlayList::OnInitDialog()
 	m_lc.DragAcceptFiles(TRUE);
 	m_lc.ModifyStyle ( 0, LVS_REPORT );
 	m_lc.InsertColumn ( 0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, 200, 0 );
-	m_lc.InsertColumn ( 1, L"★♪", LVCFMT_CENTER, (int)(32 * hD2), 0 ); // ★=曲ごと設定 / ♪=歌詞(.lrc)
+	m_lc.InsertColumn ( 1, LL14(L"印", L"Mark", L"Marq.", L"Segno", L"Marca", L"표시", L"标记", L"علامة", L"Метка", L"Zchn", L"Marca", L"Teken", L"Znak", L"Isaret"), LVCFMT_CENTER, (int)(32 * hD2), 0 ); // ★=曲ごと設定 / ♪=歌詞(.lrc)
 	m_lc.InsertColumn ( 2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, 50, 0 );
 	m_lc.InsertColumn ( 3, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, 72, 0 );
 	m_lc.InsertColumn ( 4, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatçı"), LVCFMT_LEFT, 200, 0 );
@@ -2135,6 +2136,33 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Editar etiquetas...", L"태그 편집...", L"编辑标签…", L"تحرير الوسوم...",
 			L"Редактировать теги...", L"Tags bearbeiten...", L"Editar tags...", L"Tags bewerken...",
 			L"Edytuj tagi...", L"Etiketleri duzenle..."));
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		menu.AppendMenu(MF_STRING, PL_CTX_MB_AUTOTAG,
+			LL14(L"MusicBrainz 自動タグ", L"MusicBrainz auto-tag", L"Auto-tag MusicBrainz", L"Auto-tag MusicBrainz",
+				L"Auto-etiqueta MusicBrainz", L"MusicBrainz 자동 태그", L"MusicBrainz 自动标签", L"وسم تلقائي MusicBrainz",
+				L"Автотег MusicBrainz", L"MusicBrainz Auto-Tag", L"Auto-tag MusicBrainz", L"MusicBrainz auto-tag",
+				L"Auto-tag MusicBrainz", L"MusicBrainz otomatik etiket"));
+		CString bpmLbl;
+		if (MpBpmIsMeasuring())
+			bpmLbl = LL14(L"BPM 計測中…（再クリックで確定）", L"Measuring BPM… (click again)", L"Mesure BPM…", L"Misura BPM…", L"Midiendo BPM…", L"BPM 측정 중…", L"正在测 BPM…", L"قياس BPM…", L"Измерение BPM…", L"BPM messen…", L"Medindo BPM…", L"BPM meten…", L"Pomiar BPM…", L"BPM olculuyor…");
+		else if (savedata.mpDetectedBpm > 0)
+			bpmLbl.Format(LL14(L"BPM 計測（現在 %d）", L"Measure BPM (now %d)", L"Mesurer BPM (%d)", L"Misura BPM (%d)", L"Medir BPM (%d)", L"BPM 측정 (현재 %d)", L"测量 BPM（当前 %d）", L"قياس BPM (%d)", L"BPM (%d)", L"BPM messen (%d)", L"Medir BPM (%d)", L"BPM meten (%d)", L"Mierz BPM (%d)", L"BPM olc (%d)"), savedata.mpDetectedBpm);
+		else
+			bpmLbl = LL14(L"BPM 計測", L"Measure BPM", L"Mesurer BPM", L"Misura BPM", L"Medir BPM", L"BPM 측정", L"测量 BPM", L"قياس BPM", L"Измерить BPM", L"BPM messen", L"Medir BPM", L"BPM meten", L"Mierz BPM", L"BPM olc");
+		menu.AppendMenu(MF_STRING | (MpBpmIsMeasuring() ? MF_CHECKED : 0), PL_CTX_BPM, bpmLbl);
+		menu.AppendMenu(MF_STRING, PL_CTX_NORM_SCAN,
+			LL14(L"ラウドネス計測", L"Measure loudness", L"Mesurer loudness", L"Misura loudness", L"Medir loudness", L"라우드니스 측정", L"响度测量", L"قياس الجهارة", L"Измерить громкость", L"Lautheit messen", L"Medir loudness", L"Loudness meten", L"Zmierz glosnosc", L"Loudness olc"));
+		menu.AppendMenu(MF_STRING, PL_CTX_EXPORT_AB,
+			LL14(L"A-B を WAV 書き出し", L"Export A-B to WAV", L"Exporter A-B en WAV", L"Esporta A-B in WAV", L"Exportar A-B a WAV", L"A-B를 WAV로 내보내기", L"将 A-B 导出为 WAV", L"تصدير A-B إلى WAV", L"Экспорт A-B в WAV", L"A-B als WAV exportieren", L"Exportar A-B para WAV", L"A-B naar WAV", L"Eksport A-B do WAV", L"A-B WAV aktar"));
+		menu.AppendMenu(MF_STRING, PL_CTX_SSVIZ,
+			LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"));
+		menu.AppendMenu(MF_STRING | (savedata.deskLrcOn ? MF_CHECKED : 0), PL_CTX_DESK_LRC,
+			LL14(L"デスクトップ歌詞", L"Desktop lyrics", L"Paroles bureau", L"Testi desktop", L"Letras escritorio", L"데스크톱 가사", L"桌面歌词", L"كلمات سطح المكتب", L"Текст на рабочем столе", L"Desktop-Lyrics", L"Letras na area", L"Desktoptekst", L"Tekst pulpitu", L"Masaustu sozleri"));
+		menu.AppendMenu(MF_STRING, PL_CTX_DUPES,
+			LL14(L"重複スキャン", L"Scan duplicates", L"Detecter doublons", L"Scansiona duplicati", L"Buscar duplicados", L"중복 스캔", L"扫描重复", L"فحص التكرار", L"Поиск дублей", L"Duplikate scannen", L"Procurar duplicatas", L"Duplicaten scannen", L"Skanuj duplikaty", L"Kopyalari tara"));
+		menu.AppendMenu(MF_STRING, PL_CTX_FOLDER_SYNC,
+			LL14(L"フォルダ差分", L"Folder sync diff", L"Diff dossier", L"Diff cartella", L"Diff carpeta", L"폴더 차이", L"文件夹差异", L"فرق المجلد", L"Разница папки", L"Ordner-Diff", L"Diff pasta", L"Mapverschil", L"Roznica folderu", L"Klasor farki"));
+	}
 	menu.AppendMenu(MF_SEPARATOR);
 	menu.AppendMenu(MF_STRING, PL_CTX_REMOVE_MISSING,
 		LL14(L"存在しないファイルを一覧から削除", L"Remove missing files from list",
@@ -2414,6 +2442,46 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	}
 	else if (cmd == PL_CTX_PIANOROLL) {
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->TogglePianoRoll();
+	}
+	else if (cmd == PL_CTX_MB_AUTOTAG) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_MB_AUTOTAG, 0);
+	}
+	else if (cmd == PL_CTX_BPM) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_BPM_DETECT, 0);
+	}
+	else if (cmd == PL_CTX_NORM_SCAN) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_NORM_SCAN, 0);
+	}
+	else if (cmd == PL_CTX_EXPORT_AB) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_EXPORT_AB_NOW, 0);
+	}
+	else if (cmd == PL_CTX_SSVIZ) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_SSVIZ, 0);
+	}
+	else if (cmd == PL_CTX_DESK_LRC) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_DESK_LRC, 0);
+	}
+	else if (cmd == PL_CTX_DUPES) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_DUPES, 0);
+	}
+	else if (cmd == PL_CTX_FOLDER_SYNC) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_FOLDER_SYNC, 0);
 	}
 	else if (cmd == PL_CTX_OPEN_FOLDER || cmd == PL_CTX_ADD_SAME_FOLDER) {
 		const int idx = m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);

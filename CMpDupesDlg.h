@@ -17,10 +17,12 @@ protected:
 	CCustomStandardButton m_delete;
 	CCustomStandardButton m_close;
 	CBrush m_brDlg;
+	CToolTipCtrl m_tooltip;
 	std::vector<int> m_groupOf; // parallel to list rows: group id, or -1 for header
 
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	afx_msg void OnBnClickedDelete();
 	afx_msg void OnBnClickedClose();
 	afx_msg void OnClose();

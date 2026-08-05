@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -2051,6 +2051,9 @@ void MpTaskbarReplay()
 
 void MpTaskbarNextTrack()
 {
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->TryPlayFromQueue())
+		return;
 	if (!pl || pl->playcnt <= 0) return;
 	int idx = MpCurrentPlayIndex();
 	if (idx < 0) idx = 0;
@@ -5134,8 +5137,8 @@ CString UrlEncode(const CString& str)
 	return result;
 }
 
-// HTTP GET (汎用版・タイムアウト付き)
-CStringA HttpGet(const CString& url, const CString& userAgent = _T(""), const CString& headers = _T(""))
+// HTTP GET (汎用版・タイムアウト付き)。timeoutMs=0 は既定 2 秒。
+CStringA HttpGet(const CString& url, const CString& userAgent = _T(""), const CString& headers = _T(""), DWORD timeoutMs = 2000)
 {
 	CStringA response;
 	CString ua = userAgent.IsEmpty() ?
@@ -5144,8 +5147,8 @@ CStringA HttpGet(const CString& url, const CString& userAgent = _T(""), const CS
 	HINTERNET hInternet = InternetOpen(ua, INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
 	if (!hInternet) return response;
 
-	// ★タイムアウト設定（ミリ秒）
-	DWORD timeout = 2000; // 2秒（高速化）
+	// ★タイムアウト設定（ミリ秒）。MusicBrainz 等は呼び出し側で延長する。
+	DWORD timeout = timeoutMs ? timeoutMs : 2000;
 	InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInternet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
@@ -5155,6 +5158,15 @@ CStringA HttpGet(const CString& url, const CString& userAgent = _T(""), const CS
 
 	HINTERNET hConnect = InternetOpenUrl(hInternet, url, headers, headers.GetLength(), flags, 0);
 	if (!hConnect) { InternetCloseHandle(hInternet); return response; }
+
+	DWORD httpStatus = 0;
+	DWORD statusSize = sizeof(httpStatus);
+	if (HttpQueryInfo(hConnect, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &httpStatus, &statusSize, NULL)
+		&& httpStatus != 0 && httpStatus != 200) {
+		InternetCloseHandle(hConnect);
+		InternetCloseHandle(hInternet);
+		return response; // 空=失敗。呼び出し側でメッセージ
+	}
 
 	char buffer[4096];
 	DWORD bytesRead;
@@ -11199,6 +11211,21 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 		if (oIn >= 0) loop1 = oIn;
 		if (oOut >= 0) loop2 = oOut;
 		(void)oFade;
+	}
+	// A-B / 範囲書き出し: opts または一時グローバルを loop に反映
+	{
+		extern int g_mpExportStartFrame, g_mpExportEndFrame;
+		int sf = localOpts.startFrame;
+		int ef = localOpts.endFrame;
+		if (!(sf >= 0 && ef > sf) && g_mpExportStartFrame >= 0 && g_mpExportEndFrame > g_mpExportStartFrame) {
+			sf = g_mpExportStartFrame;
+			ef = g_mpExportEndFrame;
+			g_mpExportStartFrame = g_mpExportEndFrame = -1;
+		}
+		if (sf >= 0 && ef > sf) {
+			loop1 = sf;
+			loop2 = ef;
+		}
 	}
 	ret2 = pc->ret2;
 	wavExportPath = outputPath;
@@ -19795,12 +19822,23 @@ void COggDlg::timerp()
 			&& ::IsWindow(pEq->GetSafeHwnd())
 			&& ::IsWindowVisible(pEq->GetSafeHwnd());
 		const bool speanaDraw = bGdiFrame && m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg || m_dsb);
-		if (plf == 1 && (wav || ogg || m_dsb) && eqVis && !speanaDraw) {
+		extern BOOL MpSsVizIsOpen();
+		const bool ssVizNeed = MpSsVizIsOpen() && plf == 1 && (wav || ogg || m_dsb);
+		if (plf == 1 && (wav || ogg || m_dsb) && eqVis && !speanaDraw && !ssVizNeed) {
 			static DWORD s_eqFeedMs = 0;
 			const DWORD nowFeed = GetTickCount();
 			if (s_eqFeedMs == 0 || (nowFeed - s_eqFeedMs) >= (DWORD)EqCodeIntervalMs()) {
 				s_eqFeedMs = nowFeed;
 				Speana(FALSE);
+			}
+		}
+		// GDIフレーム外でも SSビジュアライザ用に spelv を更新
+		if (!bGdiFrame && ssVizNeed) {
+			static DWORD s_ssSpeanaMs = 0;
+			const DWORD nowSs = GetTickCount();
+			if (s_ssSpeanaMs == 0 || (nowSs - s_ssSpeanaMs) >= 33u) {
+				s_ssSpeanaMs = nowSs;
+				Speana(TRUE);
 			}
 		}
 	}
@@ -19844,8 +19882,12 @@ void COggDlg::timerp()
 	// 非同期(WM_SPEANA_TICK)化すると Speana() が文字の後に不透明の棒を上書きし、
 	// XOR 合成が棒に覆われて無効化される（バナー文字が見えなくなるデグレ）。
 	// ここで TRUE 指定すると EQ 供給も同梱（上の Speana(FALSE) と二重にならない）。
-	if (m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg || m_dsb))
-		Speana(TRUE);
+	// SSビジュアライザは spelv 依存のため、スペアナOFFでも解析を回す。
+	{
+		extern BOOL MpSsVizIsOpen();
+		if ((m_supe.GetCheck() == TRUE || MpSsVizIsOpen()) && plf == 1 && (wav || ogg || m_dsb))
+			Speana(TRUE);
+	}
 	if (plf == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
 		m_PianoRollDlg->RequestSyncFromMainUi();
 	if (plf == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()) && Ms2DrawDue(ms2))
@@ -21275,15 +21317,18 @@ void timerog1(UINT nIDEvent)
 			if (xms <= 0 && endflg != 1)
 				return;
 			ProAudio_OnSongBoundary();
+			endflg = 0;
+			fade1 = 0; lenl = 0;
+			fade = 1.0f; plf = 0;
+			og->KillTimer(9000);
+			extern CMediaPlayerDlg* mp;
+			if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->TryPlayFromQueue())
+				return;
 			plcnt++;
 			if (pl && plcnt >= pl->m_lc.GetItemCount()) plcnt = 0;
-			endflg = 0;
 			if (pl && plcnt < pl->m_lc.GetItemCount()) {
 				pl->Get(plcnt);
 				pl->SIcon(plcnt);
-				fade1 = 0; lenl = 0;
-				fade = 1.0f; plf = 0;
-				og->KillTimer(9000);
 				RequestPlaybackRestart(og->GetSafeHwnd());
 			}
 		}
