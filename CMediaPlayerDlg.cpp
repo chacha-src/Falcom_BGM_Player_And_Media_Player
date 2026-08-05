@@ -139,6 +139,16 @@ static BOOL MpHourInRange(int hour, int from, int to)
 	return hour >= from || hour <= to;
 }
 
+// 既定シードの英語名を UI 言語へ（メニュー/Lib ツリー表示用。保存名は触らない）
+static CString MpSmartUiLabel(const MpSmartRule& r)
+{
+	if (_tcsicmp(r.name, _T("Unplayed")) == 0)
+		return LL14(L"未再生", L"Unplayed", L"Non joues", L"Non riprodotti", L"No reproducidos", L"미재생", L"未播放", L"غير مشغّل", L"Неигранные", L"Ungespielt", L"Nao tocados", L"Ongespeeld", L"Nieodtworzone", L"Oynatilmamis");
+	if (_tcsicmp(r.name, _T("Missing")) == 0)
+		return LL14(L"欠損", L"Missing", L"Manquants", L"Mancanti", L"Faltantes", L"결손", L"缺失", L"مفقود", L"Отсутствующие", L"Fehlend", L"Ausentes", L"Ontbrekend", L"Brakujace", L"Eksik");
+	return CString(r.name);
+}
+
 static BOOL MpTrackMatchesSmart(CMediaPlayerDlg* self, int pcIdx, const MpSmartRule& rule)
 {
 	if (!self || !pl || !pl->pc || pcIdx < 0 || pcIdx >= pl->playcnt) return FALSE;
@@ -6545,7 +6555,7 @@ void CMediaPlayerDlg::LibRebuildTree()
 	for (int si = 0; si < MpSmart_Count(); ++si) {
 		MpSmartRule r;
 		if (!MpSmart_Get(si, r)) continue;
-		HTREEITEM hR = m_libTree.InsertItem(r.name, hSmart, TVI_LAST);
+		HTREEITEM hR = m_libTree.InsertItem(MpSmartUiLabel(r), hSmart, TVI_LAST);
 		m_libTree.SetItemData(hR, (DWORD_PTR)(0x80000000u | (unsigned)(si + 1)));
 	}
 	m_libTree.Expand(hSmart, TVE_EXPAND);
@@ -7588,13 +7598,10 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		MpSmartRule r;
 		if (!MpSmart_Get(si, r)) continue;
 		const UINT chk = (m_activeSmartId == si) ? MF_CHECKED : 0;
-		menu.AppendMenu(MF_STRING | chk, ID_MP_SMART_BASE + si, r.name);
+		menu.AppendMenu(MF_STRING | chk, ID_MP_SMART_BASE + si, MpSmartUiLabel(r));
 	}
 	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING | (m_smartFilt == 1 ? MF_CHECKED : 0), ID_MP_FILT_UNPLAYED,
-		LL14(L"クイック: 未再生", L"Quick: Unplayed", L"Rapide: non joues", L"Rapido: non riprodotti", L"Rapido: no reproducidos", L"빠른: 미재생", L"快捷: 未播放", L"سريع: غير مشغّل", L"Быстро: неигранные", L"Schnell: ungespielt", L"Rapido: nao tocados", L"Snel: ongespeeld", L"Szybko: nieodtworzone", L"Hizli: oynatilmamis"));
-	menu.AppendMenu(MF_STRING | (m_smartFilt == 2 ? MF_CHECKED : 0), ID_MP_FILT_MISSING,
-		LL14(L"クイック: 欠損", L"Quick: Missing", L"Rapide: manquants", L"Rapido: mancanti", L"Rapido: faltantes", L"빠른: 결손", L"快捷: 缺失", L"سريع: مفقود", L"Быстро: отсутствующие", L"Schnell: fehlend", L"Rapido: ausentes", L"Snel: ontbrekend", L"Szybko: brakujace", L"Hizli: eksik"));
+	// 旧「クイック: 未再生/欠損」は既定スマートPLと同義のため出さない
 	menu.AppendMenu(MF_STRING, ID_MP_FILT_CLEAR,
 		LL14(L"フィルタ解除", L"Clear filter", L"Effacer filtre", L"Cancella filtro", L"Borrar filtro", L"필터 해제", L"清除筛选", L"مسح التصفية", L"Сбросить фильтр", L"Filter aus", L"Limpar filtro", L"Filter wissen", L"Wyczysc filtr", L"Filtreyi temizle"));
 	menu.AppendMenu(MF_SEPARATOR);

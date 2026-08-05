@@ -292,7 +292,11 @@ void MpSmart_EnsureDefaults()
 {
 	if (g_smartCnt > 0) return;
 	MpSmartRule a; ZeroMemory(&a, sizeof(a));
-	_tcscpy(a.name, _T("Unplayed"));
+	{
+		const CString n = LL14(L"未再生", L"Unplayed", L"Non joues", L"Non riprodotti", L"No reproducidos", L"미재생", L"未播放", L"غير مشغّل", L"Неигранные", L"Ungespielt", L"Nao tocados", L"Ongespeeld", L"Nieodtworzone", L"Oynatilmamis");
+		_tcsncpy(a.name, n, _countof(a.name) - 1);
+		a.name[_countof(a.name) - 1] = 0;
+	}
 	a.flags = MP_SMART_UNPLAYED;
 	a.enabled = 1;
 	a.ratingMin = 1;
@@ -300,7 +304,11 @@ void MpSmart_EnsureDefaults()
 	a.playCountMax = 0;
 	MpSmart_Add(a);
 	MpSmartRule b; ZeroMemory(&b, sizeof(b));
-	_tcscpy(b.name, _T("Missing"));
+	{
+		const CString n = LL14(L"欠損", L"Missing", L"Manquants", L"Mancanti", L"Faltantes", L"결손", L"缺失", L"مفقود", L"Отсутствующие", L"Fehlend", L"Ausentes", L"Ontbrekend", L"Brakujace", L"Eksik");
+		_tcsncpy(b.name, n, _countof(b.name) - 1);
+		b.name[_countof(b.name) - 1] = 0;
+	}
 	b.flags = MP_SMART_MISSING;
 	b.enabled = 1;
 	b.ratingMin = 1;
