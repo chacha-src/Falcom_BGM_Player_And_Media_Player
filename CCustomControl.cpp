@@ -7186,7 +7186,7 @@ void CCustomTreeCtrl::ScheduleOpaqueRepaint()
 LRESULT CCustomTreeCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+	if (CCC_HostNeedsChildOpaque(m_hWnd))
 	{
 		CClientDC dc(this);
 		PaintOpaqueClient(dc);
@@ -7228,6 +7228,19 @@ void CCustomTreeCtrl::PaintOpaqueClient(CDC& dc)
 
 void CCustomTreeCtrl::OnPaint()
 {
+#if CCUSTOM_AERO_SUPPORT
+	// OpaqueFixer 未装着時でもアクリル穴を避ける（遅延生成 Lib ツリー等）
+	// CPaintDC は更新矩形クリップのため、フルクライアントは GetDC へ描く。
+	if (CCC_HostNeedsChildOpaque(m_hWnd))
+	{
+		PAINTSTRUCT ps = {};
+		::BeginPaint(m_hWnd, &ps);
+		CClientDC dc(this);
+		PaintOpaqueClient(dc);
+		::EndPaint(m_hWnd, &ps);
+		return;
+	}
+#endif
 	if (GetCount() == 0)
 	{
 		CPaintDC dc(this);
@@ -7270,7 +7283,7 @@ void CCustomTreeCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
 	CTreeCtrl::OnWindowPosChanged(lpwndpos);
 #if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+	if (CCC_HostNeedsChildOpaque(m_hWnd))
 		ScheduleOpaqueRepaint();
 #endif
 }
@@ -7281,7 +7294,7 @@ void CCustomTreeCtrl::OnTimer(UINT_PTR nIDEvent)
 	{
 		KillTimer(kTreeScrollOpaqueTimerId);
 #if CCUSTOM_AERO_SUPPORT
-		if (CCC_IsAeroEnabled() && CCC_IsWin11())
+		if (CCC_HostNeedsChildOpaque(m_hWnd))
 		{
 			CClientDC dc(this);
 			PaintOpaqueClient(dc);
@@ -7472,7 +7485,7 @@ void CCustomTreeCtrl::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		if (GetCursorPos(&pt)) { ScreenToClient(&pt); UINT f = 0; m_hHotItem = HitTest(pt, &f); }
 	}
 #if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+	if (CCC_HostNeedsChildOpaque(m_hWnd))
 		ScheduleOpaqueRepaint();
 #endif
 	Invalidate(FALSE);
@@ -7489,7 +7502,7 @@ BOOL CCustomTreeCtrl::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 		m_hHotItem = HitTest(ptC, &f);
 	}
 #if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled() && CCC_IsWin11())
+	if (CCC_HostNeedsChildOpaque(m_hWnd))
 	{
 		ScheduleOpaqueRepaint();
 		SetTimer(kTreeScrollOpaqueTimerId, 33, NULL);
@@ -7534,7 +7547,12 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 		else if (m_nItemDrawIndex % 2 == 0) clrBg = COLOR_LIST_BG;
 		else                                clrBg = RGB(255, 236, 246);
 
-		pDC->FillSolidRect(&rcRow, clrBg);
+#if CCUSTOM_AERO_SUPPORT
+		if (CCC_HostNeedsChildOpaque(m_hWnd))
+			CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), rcRow, clrBg);
+		else
+#endif
+			pDC->FillSolidRect(&rcRow, clrBg);
 
 		int nLevel = GetItemLevel(hItem);
 		int nIndent = GetIndent();
@@ -7617,7 +7635,12 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 			CRect rcLbl(rcText.left - 2, rcRow.top + 1,
 				(std::min)(rcText.left + szT.cx + 4, rcText.right),
 				rcRow.bottom - 1);
-			pDC->FillSolidRect(&rcLbl, RGB(200, 170, 235));
+#if CCUSTOM_AERO_SUPPORT
+			if (CCC_HostNeedsChildOpaque(m_hWnd))
+				CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), rcLbl, RGB(200, 170, 235));
+			else
+#endif
+				pDC->FillSolidRect(&rcLbl, RGB(200, 170, 235));
 		}
 
 		pDC->SetBkMode(TRANSPARENT);
@@ -11198,10 +11221,11 @@ private:
             cls[0] = 0;
             ::GetClassNameW(hWnd, cls, 32);
             const BOOL bList = (::_wcsicmp(cls, L"SysListView32") == 0);
-            if (bList)
+            const BOOL bTree = (::_wcsicmp(cls, L"SysTreeView32") == 0);
+            if (bList || bTree)
                 ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            if (bList)
+            if (bList || bTree)
                 ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
             ::ValidateRect(hWnd, NULL);
             HDC hDC = ::GetDC(hWnd);

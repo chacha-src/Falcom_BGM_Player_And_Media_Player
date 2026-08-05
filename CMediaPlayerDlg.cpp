@@ -6264,33 +6264,39 @@ void CMediaPlayerDlg::OnAddFolder()
 void CMediaPlayerDlg::EnsureLibControls()
 {
 	CRect rc(0, 0, 40, 20);
+	BOOL createdLibChild = FALSE;
 	if (!m_plRailBg.GetSafeHwnd()) {
 		m_plRailBg.Create(_T(""), WS_CHILD | SS_NOTIFY, rc, this, IDC_MP_PLRAILBG);
 		m_plRailBg.SetAeroMode(FALSE);
 		m_plRailBg.SetSolidFill(TRUE, COLOR_DIALOG_BG);
 		m_plRailBg.ShowWindow(SW_HIDE);
+		createdLibChild = TRUE;
 	}
 	if (!m_libToggle.GetSafeHwnd()) {
 		m_libToggle.Create(_T("Lib"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_LIBTOGGLE);
 		m_libToggle.SetGradation(RGB(230, 240, 255), RGB(190, 210, 240), 0, FALSE);
 		m_libToggle.SetFlat(TRUE); // 狭いレール: 2px白枠が白抜けに見えるのを防ぐ
 		m_libToggle.SetAeroMode(TRUE); // アクリル下地を透かす（ラベル風）
+		createdLibChild = TRUE;
 	}
 	if (!m_histToggle.GetSafeHwnd()) {
 		m_histToggle.Create(_T("Hist"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_HISTTOGGLE);
 		m_histToggle.SetGradation(RGB(255, 240, 230), RGB(240, 200, 170), 0, FALSE);
 		m_histToggle.SetFlat(TRUE);
 		m_histToggle.SetAeroMode(TRUE);
+		createdLibChild = TRUE;
 	}
 	if (!m_libAddRoot.GetSafeHwnd()) {
 		m_libAddRoot.Create(LL14(L"ルート追加", L"Add root", L"Aj. racine", L"Agg. radice", L"Anadir raiz", L"루트 추가", L"添加根", L"إضافة جذر", L"Добавить корень", L"Wurzel +", L"Add raiz", L"Wortel +", L"Dodaj korzen", L"Kok +"),
 			WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_LIBADDROOT);
 		m_libAddRoot.SetGradation(RGB(220, 240, 230), RGB(180, 220, 200), 0, TRUE);
+		createdLibChild = TRUE;
 	}
 	if (!m_libAddPl.GetSafeHwnd()) {
 		m_libAddPl.Create(LL14(L"PLへ追加", L"Add to PL", L"Aj. a liste", L"Agg. a PL", L"Aadir a PL", L"목록에 추가", L"加入列表", L"إضافة للقائمة", L"В плейлист", L"Zur PL", L"Para PL", L"Naar PL", L"Do listy", L"Listeye"),
 			WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_LIBADDPL);
 		m_libAddPl.SetGradation(RGB(255, 240, 220), RGB(240, 200, 160), 0, TRUE);
+		createdLibChild = TRUE;
 	}
 	if (!m_libTree.GetSafeHwnd()) {
 #ifndef TVS_NOHSCROLL
@@ -6299,6 +6305,7 @@ void CMediaPlayerDlg::EnsureLibControls()
 		m_libTree.Create(WS_CHILD | WS_BORDER | TVS_HASLINES | TVS_LINESATROOT | TVS_HASBUTTONS | TVS_SHOWSELALWAYS | TVS_INFOTIP | TVS_NOHSCROLL,
 			rc, this, IDC_MP_LIBTREE);
 		m_libTree.SetAeroMode(FALSE);
+		createdLibChild = TRUE;
 	}
 	if (!m_libAlbums.GetSafeHwnd()) {
 		m_libAlbums.Create(WS_CHILD | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER,
@@ -6307,6 +6314,7 @@ void CMediaPlayerDlg::EnsureLibControls()
 		m_libAlbums.InsertColumn(0, _T("Album"), LVCFMT_LEFT, 120);
 		m_libAlbums.SetAeroMode(FALSE);
 		m_libAlbums.DragAcceptFiles(TRUE);
+		createdLibChild = TRUE;
 	}
 	if (!m_histList.GetSafeHwnd()) {
 		m_histList.Create(WS_CHILD | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER,
@@ -6314,22 +6322,29 @@ void CMediaPlayerDlg::EnsureLibControls()
 		m_histList.SetExtendedStyle(LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP);
 		m_histList.InsertColumn(0, _T("History"), LVCFMT_LEFT, 200);
 		m_histList.SetAeroMode(FALSE);
+		createdLibChild = TRUE;
 	}
 	if (!m_emptyFolder.GetSafeHwnd()) {
 		m_emptyFolder.Create(LL14(L"フォルダをドロップ / 開く", L"Drop or open a folder", L"Deposer/ouvrir un dossier", L"Trascina/apri cartella", L"Soltar/abrir carpeta", L"폴더 드롭 / 열기", L"拖放/打开文件夹", L"إسقاط/فتح مجلد", L"Перетащите/откройте папку", L"Ordner ablegen/offnen", L"Soltar/abrir pasta", L"Map neerzetten/openen", L"Upuść/otwórz folder", L"Klasor birak/ac"),
 			WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EMPTYFOLDER);
 		m_emptyFolder.SetGradation(RGB(220, 245, 230), RGB(170, 220, 190), 0, TRUE);
+		createdLibChild = TRUE;
 	}
 	if (!m_emptyM3u.GetSafeHwnd()) {
 		m_emptyM3u.Create(LL14(L"m3u を開く", L"Open m3u", L"Ouvrir m3u", L"Apri m3u", L"Abrir m3u", L"m3u 열기", L"打开 m3u", L"فتح m3u", L"Открыть m3u", L"m3u offnen", L"Abrir m3u", L"m3u openen", L"Otwórz m3u", L"m3u ac"),
 			WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_EMPTYM3U);
 		m_emptyM3u.SetGradation(RGB(230, 240, 255), RGB(180, 205, 240), 0, TRUE);
+		createdLibChild = TRUE;
 	}
 	if (m_fontList.GetSafeHandle()) {
 		if (m_libTree.GetSafeHwnd()) m_libTree.SetFont(&m_fontList);
 		if (m_libAlbums.GetSafeHwnd()) m_libAlbums.SetFont(&m_fontList);
 		if (m_histList.GetSafeHwnd()) m_histList.SetFont(&m_fontList);
 	}
+	// FinishBlur/CaptionApply より後に作られる子は OpaqueFixer が乗らない。
+	// 再適用しないと Win11 アクリル上でツリー/アルバム/履歴が透ける。
+	if (createdLibChild)
+		PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 }
 
 CString CMediaPlayerDlg::LibRootsFilePath() const
@@ -6733,6 +6748,10 @@ void CMediaPlayerDlg::OnLibToggle()
 	DoLayout();
 	CCC_GroupBoxesBack(GetSafeHwnd());
 	RefreshListAfterLayout();
+	// 開いた直後にツリー/リストがアクリル穴になるのを防ぐ（遅延生成子向け）
+	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
+	if (m_libTree.GetSafeHwnd() && savedata.mpLibOpen)
+		m_libTree.ScheduleOpaqueRepaint();
 	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	MpPersistSavedataQuick();
 }
@@ -6914,6 +6933,7 @@ void CMediaPlayerDlg::OnHistToggle()
 	DoLayout();
 	CCC_GroupBoxesBack(GetSafeHwnd());
 	RefreshListAfterLayout();
+	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	MpPersistSavedataQuick();
 }
