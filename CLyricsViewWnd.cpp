@@ -106,6 +106,8 @@ void CLyricsViewWnd::EnsureFonts(int dpiPointTenths, LPCTSTR face)
 	dc.SelectObject(old);
 	RecalcTarget();
 	m_scrollY = m_targetY;
+	if (m_hWnd)
+		Invalidate(FALSE);
 }
 
 void CLyricsViewWnd::SetOverlayStyle(BOOL on)
@@ -342,7 +344,7 @@ BOOL CLyricsViewWnd::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 
 void CLyricsViewWnd::OnRButtonUp(UINT nFlags, CPoint point)
 {
-	// デスクトップ歌詞オーバーレイ時のみ親へコンテキストメニューを渡す
+	// 歌詞ウィンドウオーバーレイ時のみ親へコンテキストメニューを渡す
 	if (m_overlay) {
 		CPoint sp = point;
 		ClientToScreen(&sp);

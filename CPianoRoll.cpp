@@ -2245,6 +2245,57 @@ void CPianoRoll::RollSpeedSliderCb(void* ctx, int value)
     p->SetRollSpeedPct(value);
 }
 
+void CPianoRoll::YawSliderCb(void* ctx, int value)
+{
+    CPianoRoll* p = (CPianoRoll*)ctx;
+    if (!p || !::IsWindow(p->GetSafeHwnd())) return;
+    float yaw = (float)value / 10.0f;
+    while (yaw > 180.0f) yaw -= 360.0f;
+    while (yaw < -180.0f) yaw += 360.0f;
+    if (yaw == p->m_view3dYawDeg) return;
+    p->m_view3dYawDeg = yaw;
+    p->Save3DAngles();
+    p->m_historyDirty = true;
+#if CCUSTOM_AERO_SUPPORT
+    p->m_chromaReady = false;
+#endif
+    p->Invalidate(FALSE);
+}
+
+void CPianoRoll::PitchSliderCb(void* ctx, int value)
+{
+    CPianoRoll* p = (CPianoRoll*)ctx;
+    if (!p || !::IsWindow(p->GetSafeHwnd())) return;
+    float pitch = (float)value / 10.0f;
+    if (pitch < kView3dPitchMin) pitch = kView3dPitchMin;
+    if (pitch > kView3dPitchMax) pitch = kView3dPitchMax;
+    if (pitch == p->m_view3dPitchDeg) return;
+    p->m_view3dPitchDeg = pitch;
+    p->Save3DAngles();
+    p->m_historyDirty = true;
+#if CCUSTOM_AERO_SUPPORT
+    p->m_chromaReady = false;
+#endif
+    p->Invalidate(FALSE);
+}
+
+void CPianoRoll::ZoomSliderCb(void* ctx, int value)
+{
+    CPianoRoll* p = (CPianoRoll*)ctx;
+    if (!p || !::IsWindow(p->GetSafeHwnd())) return;
+    float zoom = (float)value / 100.0f;
+    if (zoom < kView3dZoomMin) zoom = kView3dZoomMin;
+    if (zoom > kView3dZoomMax) zoom = kView3dZoomMax;
+    if (zoom == p->m_view3dZoom) return;
+    p->m_view3dZoom = zoom;
+    p->Save3DAngles();
+    p->m_historyDirty = true;
+#if CCUSTOM_AERO_SUPPORT
+    p->m_chromaReady = false;
+#endif
+    p->Invalidate(FALSE);
+}
+
 void CPianoRoll::RequestFullRollRedraw()
 {
     m_historyDirty = true;
@@ -2819,6 +2870,46 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
         subView->AddCheck(IDM_ROLL_VIEW_BASE + 1,
             LL14(L"簡易3D", L"Soft 3D", L"3D simplifie", L"3D semplificato", L"3D simple", L"간이 3D", L"简易3D", L"ثلاثي الأبعاد مبسط", L"Простой 3D", L"Einfaches 3D", L"3D simples", L"Eenvoudig 3D", L"Uproszczone 3D", L"Basit 3B"),
             m_viewMode == 1);
+        if (IsView3D()) {
+            int yaw10 = (int)(m_view3dYawDeg * 10.0f);
+            if (yaw10 < -1800) yaw10 = -1800;
+            if (yaw10 > 1800) yaw10 = 1800;
+            int pit10 = (int)(m_view3dPitchDeg * 10.0f);
+            int pmin = (int)(kView3dPitchMin * 10.0f);
+            int pmax = (int)(kView3dPitchMax * 10.0f);
+            if (pit10 < pmin) pit10 = pmin;
+            if (pit10 > pmax) pit10 = pmax;
+            int zoomPct = (int)(m_view3dZoom * 100.0f + 0.5f);
+            int zmin = (int)(kView3dZoomMin * 100.0f + 0.5f);
+            int zmax = (int)(kView3dZoomMax * 100.0f + 0.5f);
+            if (zoomPct < zmin) zoomPct = zmin;
+            if (zoomPct > zmax) zoomPct = zmax;
+            subView->AddSeparator();
+            subView->AddSlider(
+                LL14(L"Yaw (0.1°)", L"Yaw (0.1°)", L"Lacet (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)",
+                    L"Yaw (0.1°)", L"偏航 (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)",
+                    L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)", L"Yaw (0.1°)"),
+                -1800, 1800, yaw10, &CPianoRoll::YawSliderCb, this,
+                LL14(L"水平回転（ドラッグ中に反映）", L"Horizontal rotation (live)", L"Rotation horizontale (direct)", L"Rotazione orizzontale (live)", L"Rotacion horizontal (en vivo)",
+                    L"수평 회전(즉시)", L"水平旋转（即时）", L"دوران أفقي (مباشر)", L"Горизонтальный поворот (сразу)", L"Horizontale Drehung (live)",
+                    L"Rotacao horizontal (ao vivo)", L"Horizontale rotatie (live)", L"Obrot poziomy (na zywo)", L"Yatay donus (anlik)"));
+            subView->AddSlider(
+                LL14(L"Pitch (0.1°)", L"Pitch (0.1°)", L"Tangage (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)",
+                    L"Pitch (0.1°)", L"俯仰 (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)",
+                    L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)", L"Pitch (0.1°)"),
+                pmin, pmax, pit10, &CPianoRoll::PitchSliderCb, this,
+                LL14(L"仰角（ドラッグ中に反映）", L"Elevation angle (live)", L"Angle d'elevation (direct)", L"Angolo di elevazione (live)", L"Angulo de elevacion (en vivo)",
+                    L"앙각(즉시)", L"仰角（即时）", L"زاوية الارتفاع (مباشر)", L"Угол наклона (сразу)", L"Neigungswinkel (live)",
+                    L"Angulo de elevacao (ao vivo)", L"Elevatiehoek (live)", L"Kat nachylenia (na zywo)", L"Yukselis acisi (anlik)"));
+            subView->AddSlider(
+                LL14(L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)",
+                    L"Zoom (%)", L"缩放 (%)", L"تكبير (%)", L"Масштаб (%)", L"Zoom (%)",
+                    L"Zoom (%)", L"Zoom (%)", L"Zoom (%)", L"Zoom (%)"),
+                zmin, zmax, zoomPct, &CPianoRoll::ZoomSliderCb, this,
+                LL14(L"拡大縮小（ドラッグ中に反映）", L"Zoom (live)", L"Zoom (direct)", L"Zoom (live)", L"Zoom (en vivo)",
+                    L"확대/축소(즉시)", L"缩放（即时）", L"تكبير (مباشر)", L"Масштаб (сразу)", L"Zoom (live)",
+                    L"Zoom (ao vivo)", L"Zoom (live)", L"Powiększenie (na zywo)", L"Yakinlastirma (anlik)"));
+        }
     }
 
     CCustomPopupMenu* subKeys = menu.AddSubMenu(

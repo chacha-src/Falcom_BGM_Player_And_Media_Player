@@ -429,6 +429,9 @@ BOOL COggApp::InitInstance()
 	savedata.popupMenuPoint = 9;
 	savedata.popupMenuBold = 0;
 	savedata.popupMenuItalic = 0;
+	savedata.deskLrcFontAuto = 1;
+	savedata.deskLrcFontPt = 140;
+	savedata.deskLrcLines = 10;
 	savedata.pianorollviewmode = 0;
 	savedata.pianorollkeyrange = 108;
 	savedata.pianorollnotename = 1;
@@ -1238,6 +1241,21 @@ BOOL COggApp::InitInstance()
 			savedata.popupMenuPoint = 9;
 		savedata.popupMenuBold = savedata.popupMenuBold ? 1 : 0;
 		savedata.popupMenuItalic = savedata.popupMenuItalic ? 1 : 0;
+	}
+	if (datFileSize < (int)(offsetof(save, deskLrcFontAuto) + sizeof(savedata.deskLrcFontAuto))) {
+		savedata.deskLrcFontAuto = 1;
+		savedata.deskLrcFontPt = 140;
+		savedata.deskLrcLines = 10;
+	} else {
+		savedata.deskLrcFontAuto = savedata.deskLrcFontAuto ? 1 : 0;
+		if (savedata.deskLrcFontPt < 80) savedata.deskLrcFontPt = 80;
+		if (savedata.deskLrcFontPt > 480) savedata.deskLrcFontPt = 480;
+	}
+	if (datFileSize < (int)(offsetof(save, deskLrcLines) + sizeof(savedata.deskLrcLines)))
+		savedata.deskLrcLines = 10;
+	else {
+		if (savedata.deskLrcLines < 3) savedata.deskLrcLines = 3;
+		if (savedata.deskLrcLines > 20) savedata.deskLrcLines = 20;
 	}
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {

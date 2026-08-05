@@ -1328,6 +1328,12 @@ void CAnalyzerDlg::OnMsPresetNarrow() { AnalyzerApplyMsPreset(40, 0); }
 void CAnalyzerDlg::OnMsPresetWide() { AnalyzerApplyMsPreset(160, 0); }
 void CAnalyzerDlg::OnMsPresetMono() { AnalyzerApplyMsPreset(100, 1); }
 void CAnalyzerDlg::OnMsPresetReset() { AnalyzerApplyMsPreset(100, 0); }
+
+static void AnalyzerMsWidthSliderCb(void* /*ctx*/, int value)
+{
+	AnalyzerApplyMsPreset(value, 0);
+}
+
 void CAnalyzerDlg::OnMsPresetFromCorr()
 {
 	const int sn = m_corrHistHead < 64 ? m_corrHistHead : 64;
@@ -1672,6 +1678,15 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		LL14(L"相関→M/S", L"Correlation→M/S", L"Correlation→M/S", L"Correlazione→M/S", L"Correlacion→M/S", L"상관→M/S", L"相关→M/S", L"ترابط→M/S", L"Корреляция→M/S", L"Korrelation→M/S", L"Correlacao→M/S", L"Correlatie→M/S", L"Korelacja→M/S", L"Korelasyon→M/S"),
 		LL14(L"相関メーターの傾向から Mid/Side 幅プリセットを適用します。", L"Apply Mid/Side width presets from correlation trends.", L"Appliquer des presets Mid/Side selon la correlation.", L"Applica preset Mid/Side dalla correlazione.", L"Aplicar presets Mid/Side segun la correlacion.", L"상관 추세에 따라 Mid/Side 폭 프리셋을 적용합니다.", L"根据相关趋势应用 Mid/Side 宽度预设。", L"تطبيق إعدادات عرض Mid/Side من اتجاه الترابط.", L"Применять пресеты ширины Mid/Side по корреляции.", L"Mid/Side-Breitenpresets aus Korrelationstrends.", L"Aplicar presets Mid/Side pela correlacao.", L"Pas Mid/Side-breedtepresets toe via correlatie.", L"Stosuj presety szerokosci Mid/Side z korelacji.", L"Korelasyon egiliminden Mid/Side genislik onayarlarini uygula."));
 	if (subMs) {
+		subMs->AddSlider(
+			LL14(L"M/S 幅 (%)", L"M/S width (%)", L"Largeur M/S (%)", L"Larghezza M/S (%)", L"Ancho M/S (%)",
+				L"M/S 폭 (%)", L"M/S 宽度 (%)", L"عرض M/S (%)", L"Ширина M/S (%)", L"M/S-Breite (%)",
+				L"Largura M/S (%)", L"M/S-breedte (%)", L"Szerokosc M/S (%)", L"M/S genislik (%)"),
+			0, 200, ProClampI(savedata.pro_ms_width, 0, 200),
+			AnalyzerMsWidthSliderCb, NULL,
+			LL14(L"Mid/Side 幅（ドラッグ中に反映・モノ解除）", L"Mid/Side width (live; clears mono)", L"Largeur Mid/Side (direct; coupe mono)", L"Larghezza Mid/Side (live; toglie mono)", L"Ancho Mid/Side (en vivo; quita mono)",
+				L"Mid/Side 폭(즉시·모노 해제)", L"Mid/Side 宽度（即时；清除 mono）", L"عرض Mid/Side (مباشر؛ يلغي mono)", L"Ширина Mid/Side (сразу; сброс mono)", L"Mid/Side-Breite (live; Mono aus)",
+				L"Largura Mid/Side (ao vivo; limpa mono)", L"Mid/Side-breedte (live; mono uit)", L"Szerokosc Mid/Side (na zywo; bez mono)", L"Mid/Side genislik (anlik; mono kapat)"));
 		subMs->AddCheck(IDM_MS_NARROW,
 			LL14(L"M/S 狭め (40%)", L"M/S narrow (40%)", L"M/S etroit (40%)", L"M/S stretto (40%)", L"M/S estrecho (40%)", L"M/S 좁게 (40%)", L"M/S 窄 (40%)", L"M/S ضيق (40%)", L"M/S узко (40%)", L"M/S schmal (40%)", L"M/S estreito (40%)", L"M/S smal (40%)", L"M/S wasko (40%)", L"M/S dar (40%)"),
 			savedata.pro_ms_width == 40 && !savedata.pro_ms_mono);

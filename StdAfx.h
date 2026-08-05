@@ -519,7 +519,7 @@ struct save{
 	// --- 附属機能(末尾追記。旧.datは offsetof で初期化) ---
 	int mpLoopbackScore;     // 1=PC音(ループバック)をピアノロールへ(再生フィード抑制)
 	int mpChordPanel;        // 1=ピアノロールにコード進行パネル
-	int deskLrcOn;           // 1=デスクトップ歌詞表示
+	int deskLrcOn;           // 1=歌詞ウィンドウ表示
 	int deskLrcX, deskLrcY, deskLrcW, deskLrcH;
 	int deskLrcAlpha;        // 40..255
 	int mpVocalCenter;       // ボーカル: 100=中立, 0=キャンセル寄り, 200=強調(Midゲイン%)
@@ -553,6 +553,11 @@ struct save{
 	int popupMenuPoint;      // 8..24（既定 9）
 	int popupMenuBold;       // 0/1
 	int popupMenuItalic;     // 0/1
+
+	// --- 歌詞ウィンドウフォント。末尾追記（旧.datは offsetof で初期化）---
+	int deskLrcFontAuto; // 1=ウィンドウ高さで表示行数フィット
+	int deskLrcFontPt;   // CreatePointFont 用ポイント10倍（80..480）。手動時に使用／自動時は実効値を同期
+	int deskLrcLines;    // 自動フィット時の目標表示行数（3..20、既定10）
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

@@ -61,7 +61,7 @@ Ozone風のリアルタイムアナライザーを追加しました。
 再生中のテンポとピッチを、それぞれ独立して変えられます。
 
 ### 歌詞表示
-.lrc形式の歌詞表示に対応しています。ネットからの歌詞取得もできます。デスクトップ常時最前面の歌詞オーバーレイや、LRCの細かいずれ補正・保存も使えます。
+.lrc形式の歌詞表示に対応しています。ネットからの歌詞取得もできます。常時最前面の歌詞ウィンドウや、LRCの細かいずれ補正・保存も使えます。
 
 ### ジャケット・プレイリスト
 アルバムジャケットの表示と、プレイリスト機能（m3u / m3u8 / pls / xspf の取り込みなど）があります。曲ごとの音量やEQなどの設定も覚えます。
@@ -125,7 +125,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 ### 附属ツール（らいら）
 メディアプレイヤーのツール右クリック／各ウィンドウの右クリックから使える、プレイヤー附属の便利機能です。
 
-- **デスクトップ歌詞:** 常時最前面の歌詞オーバーレイ。透明度・位置を覚えます。LRC は ±10/±50/±100ms のずれ補正とファイル保存にも対応
+- **歌詞ウィンドウ:** 常時最前面の歌詞表示。透明度・表示行数・フォント・位置を覚えます。LRC は ±10/±50/±100ms のずれ補正とファイル保存にも対応。メディアプレイヤーの歌詞▾右クリックからも開けます
 - **ピアノロール拡張:** 再生中の MIDI / MusicXML 録り（実験的・停止時はPC音自動連動）、コード進行パネル、PC音（ループバック）の譜面化
 - **スペクトロジャケット:** アナライザ表示を画像として保存
 - **A-B／キュー素材パック:** A-B やキュー区間を連番で書き出し
@@ -230,7 +230,7 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 - 音声書き出し（WAV / mp3 / FLAC。ループ／フェード／先頭無音揃え／クロスフェード／同時ミックス／サンプリング指定）
 - WAV書き出し時の2GB超対応（RF64）
 - マイクミックス（WAVへ保存時）、デバイス録音（ループバック→WAV/mp3/FLAC）、画面キャプチャ（MP4）
-- デスクトップ歌詞、LRC微調整／保存、ピアノロールのMIDI・MusicXML録り、PC音譜面化
+- 歌詞ウィンドウ、LRC微調整／保存、ピアノロールのMIDI・MusicXML録り、PC音譜面化
 - A-B／キュー素材パック、音量正規化バッチ、MusicBrainz自動タグ、ボーカルMid、M/Sプリセット、キーEQ提案
 - BPM計測、DJパッド、MIDI操作、動画音声抽出、出力ミラー、SS風ビジュアライザ、localhost操作、アラーム、ゲーム配信プリセット
 - ピアノロールの検出パラメータ調整ダイアログ（多数スライダー）
@@ -326,7 +326,7 @@ The seek bar area has been expanded:
 Tempo and pitch can be adjusted independently during playback.
 
 ### Lyrics Display
-Supports .lrc lyrics display, including optional online lyric lookup. An always-on-top desktop overlay and fine LRC timing shift/save are also available.
+Supports .lrc lyrics display, including optional online lyric lookup. An always-on-top lyrics window and fine LRC timing shift/save are also available.
 
 ### Jacket Art & Playlist
 Album jacket display and playlists are supported (import m3u / m3u8 / pls / xspf, among other features). Per-track settings such as volume and EQ are remembered.
@@ -390,7 +390,7 @@ From **Capture**, record the screen to **MP4 (H.264 + AAC)**.
 ### Companion Tools (Raira)
 Handy media-player add-ons from the Tools right-click menu and each window’s context menu.
 
-- **Desktop lyrics:** Always-on-top overlay; remembers opacity and position. LRC shift ±10/±50/±100 ms and save to file
+- **Lyrics window:** Always-on-top lyrics display; remembers opacity, visible lines, font, and position. LRC shift ±10/±50/±100 ms and save to file. Also openable from the media player lyrics ▾ right-click menu
 - **Piano-roll extras:** Experimental MIDI / MusicXML capture during playback (auto PC-audio when idle), chord panel, score-from-PC-audio (loopback)
 - **Spectrogram jacket:** Save the analyzer view as an image
 - **A-B / cue pack export:** Write A-B and cue ranges as numbered files
@@ -495,7 +495,7 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 - Audio export (WAV / mp3 / FLAC; loop / fade / leading-silence align / crossfade / concurrent mix / sample-rate)
 - WAV export larger than 2GB (RF64)
 - Mic mix (with Save to WAV), device recording (loopback → WAV/mp3/FLAC), screen capture (MP4)
-- Desktop lyrics, LRC nudge/save, piano-roll MIDI/MusicXML capture, score from PC audio
+- Lyrics window, LRC nudge/save, piano-roll MIDI/MusicXML capture, score from PC audio
 - A-B/cue pack export, loudness normalize batch, MusicBrainz auto-tag, vocal Mid, M/S presets, key→EQ suggest
 - BPM measure, DJ pad, MIDI control, video audio extract, output mirror, screensaver visualizer, localhost remote, alarm, game-stream preset
 - Piano-roll detection tuning dialog (many sliders)

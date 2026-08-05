@@ -16,8 +16,46 @@ namespace {
 
 	enum {
 		IDM_EQ_SUGGEST_KEY = 42220,
-		IDM_EQ_KEY_AUTO = 42221
+		IDM_EQ_KEY_AUTO = 42221,
+		IDM_EQ_ABA = 42222,
+		IDM_EQ_ABB = 42223,
+		IDM_EQ_ABTOG = 42224,
+		IDM_EQ_EFF_SLIDER = 42225,
+		IDM_EQ_MASTER_SLIDER = 42226,
+		IDM_EQ_REVERB_SLIDER = 42227
 	};
+
+	static void EqEffSliderCb(void* ctx, int value)
+	{
+		CEqualizer* p = (CEqualizer*)ctx;
+		if (value < 0) value = 0;
+		if (value > 200) value = 200;
+		savedata.eqsoundeffect = value / 2;
+		if (p && ::IsWindow(p->GetSafeHwnd()))
+			p->SyncSlidersFromSavedata();
+	}
+
+	static void EqMasterSliderCb(void* ctx, int value)
+	{
+		CEqualizer* p = (CEqualizer*)ctx;
+		if (value < 0) value = 0;
+		if (value > 200) value = 200;
+		// 本体は SetPos(200-eq[15]) なので、メニューは表示値=savedata を直接扱う
+		savedata.eq[15] = value;
+		if (p && ::IsWindow(p->GetSafeHwnd()))
+			p->SyncSlidersFromSavedata();
+	}
+
+	static void EqReverbSliderCb(void* ctx, int value)
+	{
+		CEqualizer* p = (CEqualizer*)ctx;
+		if (value < 0) value = 0;
+		if (value > 200) value = 200;
+		// 本体は SetPos(200-eq_reverb)／ラベルは eq_reverb。メニュー表示もラベルに合わせる
+		savedata.eq_reverb = value;
+		if (p && ::IsWindow(p->GetSafeHwnd()))
+			p->SyncSlidersFromSavedata();
+	}
 
 	static int EqPresetIndexFromKeyCodes(const CString& keyAll)
 	{
@@ -1192,12 +1230,71 @@ void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		LL14(L"キー検出時に自動提案", L"Auto-suggest on key detect", L"Suggestion auto sur détection", L"Suggerimento auto su rilevamento", L"Sugerencia auto al detectar", L"키 검출 시 자동 제안", L"检测到调性时自动建议", L"اقتراح تلقائي عند الكشف", L"Авто-предложение по ключу", L"Auto-Vorschlag bei Erkennung", L"Sugestao auto na deteccao", L"Auto-voorstel bij detectie", L"Auto-propozycja przy wykryciu", L"Algilamada otomatik oneri"),
 		savedata.mpKeyEqSuggest != 0,
 		LL14(L"キーが変わると自動でEQを提案", L"Auto-suggest EQ when the key changes", L"Suggérer EQ auto si la tonalité change", L"Suggerisci EQ auto al cambio tonalità", L"Sugerir EQ auto al cambiar tonalidad", L"키가 바뀌면 EQ 자동 제안", L"调性变化时自动建议 EQ", L"اقتراح EQ تلقائياً عند تغير المفتاح", L"Авто-предлагать EQ при смене ключа", L"EQ auto vorschlagen bei Tonartwechsel", L"Sugerir EQ auto ao mudar tonalidade", L"EQ auto voorstellen bij toonsoortwissel", L"Auto-proponuj EQ przy zmianie tonacji", L"Anahtar degisince EQ otomatik oner"));
+	menu.AddSeparator();
+	menu.AddCommand(IDM_EQ_ABA,
+		LL14(L"A に保存", L"Store to A", L"Enregistrer dans A", L"Salva in A", L"Guardar en A",
+			L"A에 저장", L"保存到 A", L"حفظ في A", L"Сохранить в A", L"In A speichern",
+			L"Salvar em A", L"Opslaan in A", L"Zapisz w A", L"A'ya kaydet"));
+	menu.AddCommand(IDM_EQ_ABB,
+		LL14(L"B に保存", L"Store to B", L"Enregistrer dans B", L"Salva in B", L"Guardar en B",
+			L"B에 저장", L"保存到 B", L"حفظ في B", L"Сохранить в B", L"In B speichern",
+			L"Salvar em B", L"Opslaan in B", L"Zapisz w B", L"B'ye kaydet"));
+	menu.AddCommand(IDM_EQ_ABTOG,
+		LL14(L"A ↔ B 切替", L"Toggle A ↔ B", L"Basculer A ↔ B", L"Alterna A ↔ B", L"Alternar A ↔ B",
+			L"A ↔ B 전환", L"切换 A ↔ B", L"تبديل A ↔ B", L"Переключить A ↔ B", L"A ↔ B umschalten",
+			L"Alternar A ↔ B", L"Wissel A ↔ B", L"Przelacz A ↔ B", L"A ↔ B gec"));
+	menu.AddSeparator();
+	{
+		int eff = savedata.eqsoundeffect * 2;
+		if (eff < 0) eff = 0;
+		if (eff > 200) eff = 200;
+		menu.AddSlider(
+			LL14(L"エフェクト", L"Effect", L"Effet", L"Effetto", L"Efecto",
+				L"이펙트", L"效果", L"تأثير", L"Эффект", L"Effekt",
+				L"Efeito", L"Effect", L"Efekt", L"Efekt"),
+			0, 200, eff, EqEffSliderCb, this,
+			LL14(L"エフェクト Wet 量（ドラッグ中に反映）", L"Effect wet amount (live)", L"Quantite wet effet (direct)", L"Quantita wet effetto (live)", L"Cantidad wet efecto (en vivo)",
+				L"이펙트 Wet 양(즉시)", L"效果 Wet 量（即时）", L"مقدار Wet للتأثير (مباشر)", L"Wet эффекта (сразу)", L"Effekt-Wet (live)",
+				L"Quantidade wet do efeito (ao vivo)", L"Effect-wet (live)", L"Wet efektu (na zywo)", L"Efekt wet (anlik)"));
+		int masterUi = savedata.eq[15];
+		if (masterUi < 0) masterUi = 0;
+		if (masterUi > 200) masterUi = 200;
+		menu.AddSlider(
+			LL14(L"マスター", L"Master", L"Master", L"Master", L"Master",
+				L"마스터", L"主音量", L"الماستر", L"Мастер", L"Master",
+				L"Master", L"Master", L"Master", L"Master"),
+			0, 200, masterUi, EqMasterSliderCb, this,
+			LL14(L"マスター音量（ドラッグ中に反映）", L"Master volume (live)", L"Volume master (direct)", L"Volume master (live)", L"Volumen master (en vivo)",
+				L"마스터 볼륨(즉시)", L"主音量（即时）", L"مستوى الماستر (مباشر)", L"Громкость мастера (сразу)", L"Masterlautstarke (live)",
+				L"Volume master (ao vivo)", L"Mastervolume (live)", L"Glosnosc master (na zywo)", L"Master ses (anlik)"));
+		int revUi = savedata.eq_reverb;
+		if (revUi < 0) revUi = 0;
+		if (revUi > 200) revUi = 200;
+		menu.AddSlider(
+			LL14(L"リバーブ", L"Reverb", L"Reverb", L"Riverbero", L"Reverb",
+				L"리버브", L"混响", L"صدى", L"Реверб", L"Hall",
+				L"Reverb", L"Galm", L"Poglos", L"Reverb"),
+			0, 200, revUi, EqReverbSliderCb, this,
+			LL14(L"リバーブ量（ドラッグ中に反映）", L"Reverb amount (live)", L"Quantite reverb (direct)", L"Quantita riverbero (live)", L"Cantidad reverb (en vivo)",
+				L"리버브 양(즉시)", L"混响量（即时）", L"مقدار الصدى (مباشر)", L"Количество реверба (сразу)", L"Hallanteil (live)",
+				L"Quantidade de reverb (ao vivo)", L"Galmhoeveelheid (live)", L"Ilosc poglosu (na zywo)", L"Reverb miktari (anlik)"));
+	}
+	menu.AddSeparator();
+	menu.AddCommand(ID_HELP_SHOWSHEET,
+		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
+			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
+			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
+			L"Przewodnik", L"İşlem kılavuzu"));
 	if (point.x == -1 && point.y == -1) {
 		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
 		point = CPoint(rc.left + 8, rc.top + 8);
 	}
 	const UINT cmd = menu.Track(point, this);
-	if (cmd)
+	if (cmd == IDM_EQ_ABA) OnBnClickedAbA();
+	else if (cmd == IDM_EQ_ABB) OnBnClickedAbB();
+	else if (cmd == IDM_EQ_ABTOG) OnBnClickedAbTog();
+	else if (cmd == ID_HELP_SHOWSHEET) ShowHelpSheet();
+	else if (cmd)
 		SendMessage(WM_COMMAND, cmd);
 }
 

@@ -20,7 +20,15 @@ enum {
 	ID_DLRC_CLOSE = 41008,
 	ID_DLRC_ALPHA_SLIDER = 41009,
 	ID_DLRC_ALPHA_PROG = 41010,
-	ID_DLRC_ALPHA_RESET = 41011
+	ID_DLRC_ALPHA_RESET = 41011,
+	ID_DLRC_FONT_AUTO = 41012,
+	ID_DLRC_FONT_SLIDER = 41013,
+	ID_DLRC_FONT_S = 41014,
+	ID_DLRC_FONT_M = 41015,
+	ID_DLRC_FONT_L = 41016,
+	ID_DLRC_FONT_XL = 41017,
+	ID_DLRC_FONT_XXL = 41018,
+	ID_DLRC_LINES_SLIDER = 41019
 };
 
 struct DeskLrcMenuCtx {
@@ -45,6 +53,21 @@ static void DeskLrcAlphaResetBtnCb(void* ctx, UINT /*id*/)
 		c->menu->SetSliderPos(ID_DLRC_ALPHA_SLIDER, 200);
 		c->menu->SetProgressPos(ID_DLRC_ALPHA_PROG, 200);
 	}
+}
+
+static void DeskLrcFontSliderCb(void* ctx, int value)
+{
+	DeskLrcMenuCtx* c = (DeskLrcMenuCtx*)ctx;
+	if (!c || !c->wnd || !::IsWindow(c->wnd->GetSafeHwnd())) return;
+	// スライダーはポイント(8..48)。CreatePointFont は×10
+	c->wnd->SetDeskLrcFont(value * 10, FALSE);
+}
+
+static void DeskLrcLinesSliderCb(void* ctx, int value)
+{
+	DeskLrcMenuCtx* c = (DeskLrcMenuCtx*)ctx;
+	if (!c || !c->wnd || !::IsWindow(c->wnd->GetSafeHwnd())) return;
+	c->wnd->SetDeskLrcLines(value);
 }
 
 IMPLEMENT_DYNAMIC(CDesktopLyricsWnd, CCustomBlurDialogBase)
@@ -93,9 +116,9 @@ BOOL CDesktopLyricsWnd::OnInitDialog()
 	CCustomBlurDialogBase::OnInitDialog();
 
 	SetWindowText(LL14(
-		L"デスクトップ歌詞", L"Desktop lyrics", L"Paroles bureau", L"Testi desktop", L"Letra escritorio",
-		L"데스크톱 가사", L"桌面歌词", L"كلمات سطح المكتب", L"Текст на рабочем столе", L"Desktop-Text",
-		L"Letra na area de trabalho", L"Bureaublad songtekst", L"Tekst na pulpicie", L"Masaustu sozleri"));
+		L"歌詞ウィンドウ", L"Lyrics window", L"Fenetre de paroles", L"Finestra testi", L"Ventana de letra",
+		L"가사 창", L"歌词窗口", L"نافذة الكلمات", L"Окно текста", L"Textfenster",
+		L"Janela de letra", L"Songtekstvenster", L"Okno tekstu", L"Soz penceresi"));
 
 	if (m_alphaL.GetSafeHwnd())
 		m_alphaL.SetWindowText(LL14(
@@ -110,8 +133,8 @@ BOOL CDesktopLyricsWnd::OnInitDialog()
 	if (w < 200) w = 640;
 	if (h < 80) h = 160;
 	// 誤ってメイン画面サイズが保存されていると全面透過に見える
-	if (w > 1200) w = 720;
-	if (h > 600) h = 220;
+	if (w > 1600) w = 800;
+	if (h > 900) h = 360;
 
 	// 本文ガラスを切る（キャプション帯アクリルも deskLrc では無効）
 	MakeSolidClient();
@@ -129,7 +152,6 @@ BOOL CDesktopLyricsWnd::OnInitDialog()
 	if (m_view.GetSafeHwnd()) {
 		m_view.ModifyStyle(0, WS_VISIBLE | WS_CLIPSIBLINGS, 0);
 		m_view.SetOverlayStyle(TRUE);
-		m_view.EnsureFonts(140, _T("Segoe UI"));
 	}
 	LayoutClient();
 	SetTimer(1, 33, NULL);
@@ -151,9 +173,9 @@ BOOL CDesktopLyricsWnd::OnInitDialog()
 	}
 	if (m_close.GetSafeHwnd()) {
 		m_tooltip.AddTool(&m_close, LL14(
-			L"デスクトップ歌詞を閉じます。", L"Close desktop lyrics.", L"Fermer les paroles bureau.", L"Chiudi i testi desktop.", L"Cerrar letra de escritorio.",
-			L"데스크톱 가사를 닫습니다.", L"关闭桌面歌词。", L"إغلاق كلمات سطح المكتب.", L"Закрыть текст на рабочем столе.", L"Desktop-Text schließen.",
-			L"Fechar letra na area de trabalho.", L"Bureaubladtekst sluiten.", L"Zamknij tekst na pulpicie.", L"Masaustu sozlerini kapat."));
+			L"歌詞ウィンドウを閉じます。", L"Close the lyrics window.", L"Fermer la fenetre de paroles.", L"Chiudi la finestra testi.", L"Cerrar la ventana de letra.",
+			L"가사 창을 닫습니다.", L"关闭歌词窗口。", L"إغلاق نافذة الكلمات.", L"Закрыть окно текста.", L"Textfenster schließen.",
+			L"Fechar a janela de letra.", L"Songtekstvenster sluiten.", L"Zamknij okno tekstu.", L"Soz penceresini kapat."));
 	}
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 320, 8000);
 
@@ -238,6 +260,30 @@ void CDesktopLyricsWnd::SetDeskLrcAlpha(int a, BOOL syncSlider)
 	MpPersistSavedataQuick();
 }
 
+void CDesktopLyricsWnd::SetDeskLrcFont(int ptTenths, BOOL autoFit)
+{
+	if (autoFit) {
+		savedata.deskLrcFontAuto = 1;
+	} else {
+		savedata.deskLrcFontAuto = 0;
+		if (ptTenths < 80) ptTenths = 80;
+		if (ptTenths > 480) ptTenths = 480;
+		savedata.deskLrcFontPt = ptTenths;
+	}
+	LayoutClient();
+	MpPersistSavedataQuick();
+}
+
+void CDesktopLyricsWnd::SetDeskLrcLines(int lines)
+{
+	if (lines < 3) lines = 3;
+	if (lines > 20) lines = 20;
+	savedata.deskLrcLines = lines;
+	savedata.deskLrcFontAuto = 1; // 行数指定は自動フィット前提
+	LayoutClient();
+	MpPersistSavedataQuick();
+}
+
 void CDesktopLyricsWnd::ApplyWindowAlpha()
 {
 	if (!m_hWnd || !::IsWindow(m_hWnd)) return;
@@ -279,6 +325,36 @@ void CDesktopLyricsWnd::LayoutClient()
 	if (m_view.GetSafeHwnd()) {
 		m_view.MoveWindow(&viewRc, TRUE);
 		m_view.ShowWindow(SW_SHOW);
+
+		// フォント: 自動=表示高さ÷目標行数でフィット（既定14pt未満にはしない＝窓が小さいときは行数減）
+		int pt = savedata.deskLrcFontPt;
+		if (savedata.deskLrcFontAuto) {
+			const int viewH = viewRc.Height();
+			int dpi = 96;
+			HDC hdc = ::GetDC(m_hWnd);
+			if (hdc) {
+				dpi = ::GetDeviceCaps(hdc, LOGPIXELSY);
+				::ReleaseDC(m_hWnd, hdc);
+			}
+			if (dpi < 72) dpi = 96;
+			int lines = savedata.deskLrcLines;
+			if (lines < 3) lines = 3;
+			if (lines > 20) lines = 20;
+			// overlay 行高 ≈ (pt/10)*(dpi/72)*1.12 + ~10
+			int targetLH = viewH / lines;
+			if (targetLH < 18) targetLH = 18;
+			if (targetLH > 120) targetLH = 120;
+			int body = targetLH - 10;
+			if (body < 8) body = 8;
+			pt = (body * 72000) / (dpi * 112);
+			if (pt < 140) pt = 140; // 旧既定未満へ縮めない
+			if (pt > 480) pt = 480;
+			savedata.deskLrcFontPt = pt; // スライダー／手動切替用に実効値を同期
+		} else {
+			if (pt < 80) pt = 80;
+			if (pt > 480) pt = 480;
+		}
+		m_view.EnsureFonts(pt, _T("Segoe UI"));
 	}
 
 	if (m_alphaL.GetSafeHwnd())
@@ -442,6 +518,77 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 			L"Opaca (255)", L"Ondoorzichtig (255)", L"Nieprzezroczysta (255)", L"Opak (255)"));
 
 	menu.AddSeparator();
+	{
+		const BOOL fontAuto = savedata.deskLrcFontAuto != 0;
+		int curPt = savedata.deskLrcFontPt;
+		if (m_view.GetSafeHwnd()) {
+			const int vpt = m_view.GetFontPt();
+			if (vpt >= 80 && vpt <= 480)
+				curPt = vpt;
+		}
+		if (curPt < 80) curPt = 80;
+		if (curPt > 480) curPt = 480;
+		int curPtUi = curPt / 10;
+		if (curPtUi < 8) curPtUi = 8;
+		if (curPtUi > 48) curPtUi = 48;
+
+		menu.AddCheck(ID_DLRC_FONT_AUTO,
+			LL14(L"フォントをウィンドウに合わせる", L"Fit font to window", L"Police selon fenetre", L"Adatta font alla finestra", L"Ajustar fuente a ventana",
+				L"글꼴을 창에 맞춤", L"字体随窗口", L"ملاءمة الخط مع النافذة", L"Шрифт по окну", L"Schrift an Fenster",
+				L"Fonte conforme a janela", L"Lettertype op venster", L"Czcionka do okna", L"Yazi tipini pencereye uyarla"),
+			fontAuto,
+			LL14(L"表示領域の高さで文字サイズを変え、下の「表示行数」に合わせます。", L"Scales text with the view height to match Visible lines below.", L"Ajuste la taille pour le nombre de lignes ci-dessous.", L"Scala il testo per le righe sotto.", L"Escala el texto segun las lineas abajo.",
+				L"표시 높이로 글자 크기를 바꿔 아래 표시 행수에 맞춥니다.", L"按显示高度调整字号以匹配下方“显示行数”。", L"يغيّر حجم النص حسب الارتفاع ليطابق عدد الأسطر أدناه.", L"Меняет размер по высоте под число строк ниже.", L"Passt die Größe an die Höhe und die Zeilenzahl unten an.",
+				L"Ajusta o tamanho pela altura conforme as linhas abaixo.", L"Past grootte aan op hoogte en regels hieronder.", L"Dopasowuje rozmiar do wysokosci i liczby wierszy.", L"Yukseklige ve asagidaki satir sayisina gore boyutu ayarlar."));
+
+		{
+			int lines = savedata.deskLrcLines;
+			if (lines < 3) lines = 3;
+			if (lines > 20) lines = 20;
+			menu.AddSlider(
+				LL14(L"表示行数", L"Visible lines", L"Lignes visibles", L"Righe visibili", L"Lineas visibles",
+					L"표시 행수", L"显示行数", L"الأسطر الظاهرة", L"Видимые строки", L"Sichtbare Zeilen",
+					L"Linhas visiveis", L"Zichtbare regels", L"Widoczne wiersze", L"Gorunen satir"),
+				3, 20, lines, DeskLrcLinesSliderCb, &ctx,
+				LL14(L"画面内にだいたい何行見せるか（リアルタイム・自動フィットON）", L"About how many lines fit on screen (live; turns auto-fit on)", L"Nombre de lignes a l'ecran (direct; active l'auto)", L"Quante righe a schermo (live; attiva auto)", L"Cuantas lineas caben (en vivo; activa auto)",
+					L"화면에 대략 몇 행 보일지(즉시·자동 맞춤 ON)", L"大约显示几行（即时；开启自动）", L"كم سطراً تقريباً يظهر (مباشر؛ يفعّل الملاءمة)", L"Сколько строк на экране (сразу; включает авто)", L"Wie viele Zeilen passen (live; schaltet Auto ein)",
+					L"Quantas linhas cabem (ao vivo; liga o auto)", L"Hoeveel regels passen (live; zet auto aan)", L"Ile wierszy sie miesci (na zywo; wlacza auto)", L"Ekrana kac satir sigsin (anlik; otomati acar)"),
+				ID_DLRC_LINES_SLIDER);
+		}
+
+		menu.AddSlider(
+			LL14(L"文字サイズ (pt)", L"Font size (pt)", L"Taille police (pt)", L"Dimensione font (pt)", L"Tamano fuente (pt)",
+				L"글자 크기 (pt)", L"字号 (pt)", L"حجم الخط (pt)", L"Размер шрифта (pt)", L"Schriftgroesse (pt)",
+				L"Tamanho da fonte (pt)", L"Tekengrootte (pt)", L"Rozmiar czcionki (pt)", L"Yazi boyutu (pt)"),
+			8, 48, curPtUi, DeskLrcFontSliderCb, &ctx,
+			LL14(L"手動サイズ（動かすと自動フィットを解除）", L"Manual size (disables auto-fit)", L"Taille manuelle (desactive l'auto)", L"Manuale (disattiva auto)", L"Manual (desactiva auto)",
+				L"수동 크기(움직이면 자동 맞춤 해제)", L"手动大小（拖动后关闭自动）", L"يدوي (يلغي الملاءمة التلقائية)", L"Вручную (отключает авто)", L"Manuell (schaltet Auto aus)",
+				L"Manual (desativa o auto)", L"Handmatig (zet auto uit)", L"Recznie (wylacza auto)", L"Manuel (otomatigi kapatir)"),
+			ID_DLRC_FONT_SLIDER);
+
+		menu.AddCommand(ID_DLRC_FONT_S,
+			LL14(L"小 (10pt)", L"Small (10pt)", L"Petite (10pt)", L"Piccola (10pt)", L"Pequena (10pt)",
+				L"작게 (10pt)", L"小 (10pt)", L"صغير (10pt)", L"Мелкий (10pt)", L"Klein (10pt)",
+				L"Pequena (10pt)", L"Klein (10pt)", L"Mala (10pt)", L"Kucuk (10pt)"));
+		menu.AddCommand(ID_DLRC_FONT_M,
+			LL14(L"標準 (14pt)", L"Normal (14pt)", L"Normale (14pt)", L"Normale (14pt)", L"Normal (14pt)",
+				L"표준 (14pt)", L"标准 (14pt)", L"عادي (14pt)", L"Обычный (14pt)", L"Normal (14pt)",
+				L"Normal (14pt)", L"Normaal (14pt)", L"Normalna (14pt)", L"Normal (14pt)"));
+		menu.AddCommand(ID_DLRC_FONT_L,
+			LL14(L"大 (20pt)", L"Large (20pt)", L"Grande (20pt)", L"Grande (20pt)", L"Grande (20pt)",
+				L"크게 (20pt)", L"大 (20pt)", L"كبير (20pt)", L"Крупный (20pt)", L"Gross (20pt)",
+				L"Grande (20pt)", L"Groot (20pt)", L"Duza (20pt)", L"Buyuk (20pt)"));
+		menu.AddCommand(ID_DLRC_FONT_XL,
+			LL14(L"特大 (28pt)", L"XL (28pt)", L"Tres grande (28pt)", L"Molto grande (28pt)", L"Muy grande (28pt)",
+				L"아주 크게 (28pt)", L"特大 (28pt)", L"كبير جداً (28pt)", L"Очень крупный (28pt)", L"Sehr gross (28pt)",
+				L"Muito grande (28pt)", L"Erg groot (28pt)", L"Bardzo duza (28pt)", L"Cok buyuk (28pt)"));
+		menu.AddCommand(ID_DLRC_FONT_XXL,
+			LL14(L"極大 (36pt)", L"XXL (36pt)", L"Enorme (36pt)", L"Enorme (36pt)", L"Enorme (36pt)",
+				L"최대 (36pt)", L"极大 (36pt)", L"ضخم (36pt)", L"Огромный (36pt)", L"Riesig (36pt)",
+				L"Enorme (36pt)", L"Enorm (36pt)", L"Ogromna (36pt)", L"Dev (36pt)"));
+	}
+
+	menu.AddSeparator();
 	const BOOL topmost = (::GetWindowLong(m_hWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 	menu.AddCheck(ID_DLRC_TOPMOST,
 		LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible",
@@ -464,9 +611,9 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 		LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar",
 			L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen",
 			L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"),
-		LL14(L"デスクトップ歌詞を閉じます。", L"Close desktop lyrics.", L"Fermer les paroles bureau.", L"Chiudi i testi desktop.", L"Cerrar letra de escritorio.",
-			L"데스크톱 가사를 닫습니다.", L"关闭桌面歌词。", L"إغلاق كلمات سطح المكتب.", L"Закрыть текст на рабочем столе.", L"Desktop-Text schließen.",
-			L"Fechar letra na area de trabalho.", L"Bureaubladtekst sluiten.", L"Zamknij tekst na pulpicie.", L"Masaustu sozlerini kapat."));
+		LL14(L"歌詞ウィンドウを閉じます。", L"Close the lyrics window.", L"Fermer la fenetre de paroles.", L"Chiudi la finestra testi.", L"Cerrar la ventana de letra.",
+			L"가사 창을 닫습니다.", L"关闭歌词窗口。", L"إغلاق نافذة الكلمات.", L"Закрыть окно текста.", L"Textfenster schließen.",
+			L"Fechar a janela de letra.", L"Songtekstvenster sluiten.", L"Zamknij okno tekstu.", L"Soz penceresini kapat."));
 
 	const UINT cmd = menu.Track(screenPt, this);
 	if (cmd == ID_DLRC_ALPHA_120) SetDeskLrcAlpha(120, TRUE);
@@ -474,6 +621,13 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 	else if (cmd == ID_DLRC_ALPHA_200) SetDeskLrcAlpha(200, TRUE);
 	else if (cmd == ID_DLRC_ALPHA_230) SetDeskLrcAlpha(230, TRUE);
 	else if (cmd == ID_DLRC_ALPHA_255) SetDeskLrcAlpha(255, TRUE);
+	else if (cmd == ID_DLRC_FONT_AUTO)
+		SetDeskLrcFont(savedata.deskLrcFontPt, savedata.deskLrcFontAuto ? FALSE : TRUE);
+	else if (cmd == ID_DLRC_FONT_S) SetDeskLrcFont(100, FALSE);
+	else if (cmd == ID_DLRC_FONT_M) SetDeskLrcFont(140, FALSE);
+	else if (cmd == ID_DLRC_FONT_L) SetDeskLrcFont(200, FALSE);
+	else if (cmd == ID_DLRC_FONT_XL) SetDeskLrcFont(280, FALSE);
+	else if (cmd == ID_DLRC_FONT_XXL) SetDeskLrcFont(360, FALSE);
 	else if (cmd == ID_DLRC_TOPMOST)
 		SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CAP_PIN, BN_CLICKED), 0);
 	else if (cmd == ID_DLRC_COPY && canCopy) {

@@ -1232,6 +1232,10 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_CORR_METER, &CMediaPlayerDlg::OnCorrMeterToggle)
 	ON_COMMAND(ID_MP_OPEN_ANALYZER, &CMediaPlayerDlg::OnAnalyzer)
 	ON_COMMAND(ID_MP_OPEN_PIANOROLL, &CMediaPlayerDlg::OnPiano)
+	ON_COMMAND(ID_MP_OPEN_EQ, &CMediaPlayerDlg::OnEq)
+	ON_COMMAND(ID_MP_OPEN_PROTOOLS, &CMediaPlayerDlg::OnProTools)
+	ON_COMMAND(ID_MP_LRC_EXPAND, &CMediaPlayerDlg::OnLrcExpand)
+	ON_COMMAND(ID_MP_MICMIX_TOGGLE, &CMediaPlayerDlg::OnMicMixMenuToggle)
 	ON_COMMAND(ID_MP_REFRESH_JACKET, &CMediaPlayerDlg::OnRefreshJacket)
 	ON_NOTIFY(TVN_SELCHANGED, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeSel)
 	ON_NOTIFY(TVN_ITEMEXPANDING, IDC_MP_LIBTREE, &CMediaPlayerDlg::OnLibTreeExpanding)
@@ -1878,7 +1882,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_findFilter.GetSafeHwnd())
 		addTip(m_findFilter, LL14(L"ONで検索語に一致する曲だけ表示します。OFFはジャンプ検索のみ。", L"ON: show only matching tracks. OFF: jump search only.", L"ON: filtrer. OFF: recherche seule.", L"ON: filtra. OFF: solo salto.", L"ON: filtrar. OFF: solo saltar.", L"ON: 일치 곡만. OFF: 점프만.", L"ON:仅显示匹配。OFF:仅跳转。", L"ON: تصفية. OFF: قفز فقط.", L"ON: фильтр. OFF: только переход.", L"ON: filtern. OFF: nur springen.", L"ON: filtrar. OFF: so saltar.", L"ON: filteren. OFF: alleen springen.", L"ON: filtruj. OFF: tylko skok.", L"ON: filtrele. OFF: sadece atla."));
 	if (m_lrcExpand.GetSafeHwnd())
-		addTip(m_lrcExpand, LL14(L"歌詞パネルを拡大し、カラオケ風スクロール表示に切り替えます。", L"Expand lyrics into a karaoke-style scrolling view.", L"Agrandir les paroles en defilement karaoke.", L"Espandi i testi in stile karaoke.", L"Expandir letra con desplazamiento karaoke.", L"가사를 가라오케풍 스크롤로 확대.", L"展开为卡拉OK风格滚动歌词。", L"توسيع الكلمات بأسلوب كاريوكي.", L"Развернуть текст в стиле караоке.", L"Liedtext karaokeartig erweitern.", L"Expandir letra estilo karaoke.", L"Songtekst karaoke-achtig uitklappen.", L"Rozwiń tekst w stylu karaoke.", L"Sarkı sozunu karaoke kaydırmaya genislet."));
+		addTip(m_lrcExpand, LL14(L"左クリック: 歌詞パネル拡大（カラオケ風）。右クリック: 歌詞メニュー（ウィンドウ表示など）。", L"Left-click: expand lyrics (karaoke). Right-click: lyrics menu (window, etc.).", L"Clic gauche: agrandir. Clic droit: menu paroles (fenetre…).", L"Clic sinistro: espandi. Clic destro: menu testi (finestra…).", L"Clic izq.: ampliar. Clic der.: menu letra (ventana…).", L"왼쪽 클릭: 가사 확대. 오른쪽 클릭: 가사 메뉴(창 표시 등).", L"左键：扩大歌词。右键：歌词菜单（窗口显示等）。", L"نقر يسار: توسيع. نقر يمين: قائمة الكلمات (نافذة…).", L"ЛКМ: расширить. ПКМ: меню текста (окно…).", L"Linksklick: erweitern. Rechtsklick: Textmenue (Fenster…).", L"Clique esq.: ampliar. Clique dir.: menu de letra (janela…).", L"Linksklik: uitklappen. Rechtsklik: tekstmenu (venster…).", L"LPM: rozszerz. PPM: menu tekstu (okno…).", L"Sol tik: genislet. Sag tik: soz menusu (pencere…)."));
 	if (m_toolsToggle.GetSafeHwnd())
 		addTip(m_toolsToggle, LL14(L"クリックでメニュー（並べ替え・欠損整理など）。", L"Click for menu (sort, missing manage, etc.).", L"Clic = menu.", L"Clic = menu.", L"Clic = menu.", L"클릭=메뉴.", L"点击打开菜单。", L"انقر للقائمة.", L"Клик = меню.", L"Klick = Menue.", L"Clique = menu.", L"Klik = menu.", L"Klik = menu.", L"Tikla = menu."));
 	if (m_cheatBtn.GetSafeHwnd())
@@ -2002,7 +2006,7 @@ BOOL CMediaPlayerDlg::PreCreateWindow(CREATESTRUCT& cs)
 
 BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 {
-	// ツール▾: 右クリックは子ボタンが食うので親 OnRButtonUp に届かない → ここでメニュー。
+	// ツール▾ / 歌詞▾: 右クリックは子ボタンが食うので親 OnRButtonUp に届かない → ここでメニュー。
 	if (m_toolsToggle.GetSafeHwnd()
 		&& (pMsg->message == WM_RBUTTONUP || pMsg->message == WM_CONTEXTMENU)
 		&& pMsg->hwnd == m_toolsToggle.GetSafeHwnd()) {
@@ -2019,6 +2023,24 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 			m_toolsToggle.ClientToScreen(&sp);
 		}
 		ShowToolsExtrasMenu(sp);
+		return TRUE;
+	}
+	if (m_lrcExpand.GetSafeHwnd()
+		&& (pMsg->message == WM_RBUTTONUP || pMsg->message == WM_CONTEXTMENU)
+		&& pMsg->hwnd == m_lrcExpand.GetSafeHwnd()) {
+		CPoint sp;
+		if (pMsg->message == WM_CONTEXTMENU) {
+			sp.x = (short)LOWORD(pMsg->lParam);
+			sp.y = (short)HIWORD(pMsg->lParam);
+			if (sp.x == -1 && sp.y == -1)
+				::GetCursorPos(&sp);
+		}
+		else {
+			sp.x = (short)LOWORD(pMsg->lParam);
+			sp.y = (short)HIWORD(pMsg->lParam);
+			m_lrcExpand.ClientToScreen(&sp);
+		}
+		ShowLyricsExtrasMenu(sp);
 		return TRUE;
 	}
 	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN) {
@@ -3584,7 +3606,7 @@ void CMediaPlayerDlg::SyncFromMain()
 			og->m_cpu.GetWindowText(s); m_cpu.GetWindowText(s2); if (s != s2) m_cpu.SetWindowText(s);
 			og->m_os3.GetWindowText(s); m_os3.GetWindowText(s2); if (s != s2) m_os3.SetWindowText(s);
 		}
-		// 拡大歌詞の有無に関係なくデスクトップ歌詞へ同期（以前は mpLrcExpand 時のみだった）
+		// 拡大歌詞の有無に関係なく歌詞ウィンドウへ同期（以前は mpLrcExpand 時のみだった）
 		SyncDesktopLyricsIfOpen();
 		static int s_lastLyricsMode = -1;
 		const int lyricsMode = hasLyrics ? 1 : 0;
@@ -5258,7 +5280,12 @@ void CMediaPlayerDlg::OnAnalyzer()
 
 void CMediaPlayerDlg::OnProTools()
 {
-	OpenProToolsForSelection();
+	extern CProToolsDlg* g_proToolsDlg;
+	extern void CloseProToolsIfOpen();
+	if (g_proToolsDlg && ::IsWindow(g_proToolsDlg->GetSafeHwnd()))
+		CloseProToolsIfOpen();
+	else
+		OpenProToolsForSelection();
 }
 
 void CMediaPlayerDlg::OnFadeout()
@@ -5666,6 +5693,20 @@ void CMediaPlayerDlg::OnMicMix()
 	}
 }
 
+void CMediaPlayerDlg::OnMicMixMenuToggle()
+{
+	savedata.mic_mix = savedata.mic_mix ? 0 : 1;
+	if (m_micmix.GetSafeHwnd())
+		m_micmix.SetCheck(savedata.mic_mix ? BST_CHECKED : BST_UNCHECKED);
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		if (og->m_micmix.GetSafeHwnd())
+			og->m_micmix.SetCheck(savedata.mic_mix ? BST_CHECKED : BST_UNCHECKED);
+		og->OnMicMixCheck();
+	} else {
+		MpPersistSavedataQuick();
+	}
+}
+
 void CMediaPlayerDlg::OnMicLevRelease(NMHDR*, LRESULT* pResult)
 {
 	if (pResult) *pResult = 0;
@@ -6026,6 +6067,30 @@ static void MpPracticeTempoSliderCb(void* ctx, int value)
 {
 	CMediaPlayerDlg* p = (CMediaPlayerDlg*)ctx;
 	if (p) p->ApplyPracticeTempoPercent(value);
+}
+
+static void MpPhraseSecSliderCb(void* /*ctx*/, int value)
+{
+	if (value < 1) value = 1;
+	if (value > 60) value = 60;
+	savedata.mpPhraseSec = value;
+	MpPersistSavedataQuick();
+}
+
+static void MpMicLevSliderCb(void* ctx, int value)
+{
+	CMediaPlayerDlg* p = (CMediaPlayerDlg*)ctx;
+	if (value < 0) value = 0;
+	if (value > 200) value = 200;
+	savedata.mic_mix_level = value;
+	if (p && ::IsWindow(p->GetSafeHwnd()) && p->m_miclev.GetSafeHwnd())
+		p->m_miclev.SetPos(value);
+	extern COggDlg* og;
+	if (og && ::IsWindow(og->GetSafeHwnd()) && og->m_miclev.GetSafeHwnd()) {
+		og->m_miclev.SetPos(value);
+		og->ApplyMicMixLevelLabel();
+	}
+	MpPersistSavedataQuick();
 }
 
 struct MpLrcSliderCtx {
@@ -7286,6 +7351,14 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 			return;
 		}
 	}
+	if (m_lrcExpand.GetSafeHwnd()) {
+		CRect lr; m_lrcExpand.GetWindowRect(&lr); ScreenToClient(&lr);
+		if (lr.PtInRect(point)) {
+			CPoint sp = point; ClientToScreen(&sp);
+			ShowLyricsExtrasMenu(sp);
+			return;
+		}
+	}
 	const BOOL onBanner = m_bannerRect.PtInRect(point);
 	const BOOL onJacket = (g_mpSideJacket && !m_jacketRect.IsRectEmpty() && m_jacketRect.PtInRect(point));
 	BOOL onSeek = FALSE;
@@ -7384,14 +7457,44 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 						L"템포 100%", L"速度 100%", L"إيقاع 100%", L"Темп 100%", L"Tempo 100%",
 						L"Tempo 100%", L"Tempo 100%", L"Tempo 100%", L"Tempo 100%"));
 				prac->AddSeparator();
+				int phSec = savedata.mpPhraseSec;
+				if (phSec < 1) phSec = 4;
+				if (phSec > 60) phSec = 60;
+				prac->AddSlider(
+					LL14(L"フレーズ幅 (秒)", L"Phrase width (sec)", L"Largeur phrase (s)", L"Larghezza frase (s)", L"Ancho frase (s)",
+						L"프레이즈 폭 (초)", L"乐句宽度 (秒)", L"عرض العبارة (ث)", L"Ширина фразы (с)", L"Phrasenbreite (s)",
+						L"Largura da frase (s)", L"Frasebreedte (s)", L"Szerokosc frazy (s)", L"Cumle genisligi (sn)"),
+					1, 60, phSec, MpPhraseSecSliderCb, this,
+					LL14(L"フレーズA-Bの±秒（ドラッグ中に反映）", L"Phrase A-B ±seconds (live)", L"±secondes de la phrase A-B (direct)", L"±secondi frase A-B (live)", L"±segundos frase A-B (en vivo)",
+						L"프레이즈 A-B ±초(즉시)", L"乐句 A-B ±秒（即时）", L"±ثوانٍ لعبارة A-B (مباشر)", L"±секунды фразы A-B (сразу)", L"±Sekunden Phrase A-B (live)",
+						L"±segundos da frase A-B (ao vivo)", L"±seconden frase A-B (live)", L"±sekundy frazy A-B (na zywo)", L"A-B cumle ±saniye (anlik)"));
 				CString ph;
 				ph.Format(LL14(L"フレーズA-B (±%d秒) [R]", L"Phrase A-B (±%d sec) [R]", L"Phrase A-B (±%d s) [R]", L"Frase A-B (±%d s) [R]",
 					L"Frase A-B (±%d s) [R]", L"프레이즈 A-B (±%d초) [R]", L"乐句A-B (±%d秒) [R]", L"عبارة A-B (±%d ث) [R]",
 					L"Фраза A-B (±%d с) [R]", L"Phrase A-B (±%d s) [R]", L"Frase A-B (±%d s) [R]", L"Frase A-B (±%d s) [R]",
 					L"Fraza A-B (±%d s) [R]", L"Cumle A-B (±%d sn) [R]"),
-					savedata.mpPhraseSec > 0 ? savedata.mpPhraseSec : 4);
+					phSec);
 				prac->AddCommand(ID_MP_PHRASE_AB, ph);
 			}
+		}
+		menu.AddSeparator();
+		menu.AddCheck(ID_MP_MICMIX_TOGGLE,
+			LL14(L"マイクミックス", L"Mic mix", L"Mix micro", L"Mix microfono", L"Mezcla micro",
+				L"마이크 믹스", L"麦克风混音", L"مزج الميكروفون", L"Микс микрофона", L"Mikrofon-Mix",
+				L"Mix microfone", L"Mic-mix", L"Mix mikrofonu", L"Mikrofon karisimi"),
+			savedata.mic_mix != 0);
+		{
+			int lv = savedata.mic_mix_level;
+			if (lv < 0) lv = 0;
+			if (lv > 200) lv = 200;
+			menu.AddSlider(
+				LL14(L"マイクレベル", L"Mic level", L"Niveau micro", L"Livello microfono", L"Nivel micro",
+					L"마이크 레벨", L"麦克风电平", L"مستوى الميكروفون", L"Уровень микрофона", L"Mikrofonpegel",
+					L"Nivel do microfone", L"Mic-niveau", L"Poziom mikrofonu", L"Mikrofon seviyesi"),
+				0, 200, lv, MpMicLevSliderCb, this,
+				LL14(L"マイクミックスの音量 0〜200（ドラッグ中に反映）", L"Mic mix level 0–200 (live)", L"Niveau mix micro 0–200 (direct)", L"Livello mix microfono 0–200 (live)", L"Nivel mezcla micro 0–200 (en vivo)",
+					L"마이크 믹스 볼륨 0–200(즉시)", L"麦克风混音音量 0–200（即时）", L"مستوى مزج الميكروفون 0–200 (مباشر)", L"Громкость микса микрофона 0–200 (сразу)", L"Mikrofon-Mix-Pegel 0–200 (live)",
+					L"Nivel do mix de microfone 0–200 (ao vivo)", L"Mic-mixniveau 0–200 (live)", L"Poziom mixu mikrofonu 0–200 (na zywo)", L"Mikrofon mix seviyesi 0–200 (anlik)"));
 		}
 		menu.AddSeparator();
 		menu.AddCheck(ID_MP_BEAT_GRID,
@@ -7430,6 +7533,31 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 			menu.AddCheck(ID_MP_OPEN_PIANOROLL,
 				LL14(L"ピアノロール...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"피아노 롤...", L"钢琴卷帘...", L"لفة البيانو...", L"Пианоролл...", L"Piano Roll...", L"Piano roll...", L"Piano roll...", L"Piano roll...", L"Piano roll..."),
 				savedata.pianorollwindow != 0);
+			menu.AddCheck(ID_MP_OPEN_EQ,
+				LL14(L"イコライザー...", L"Equalizer...", L"Egaliseur...", L"Equalizzatore...", L"Ecualizador...",
+					L"이퀄라이저...", L"均衡器...", L"المعادل...", L"Эквалайзер...", L"Equalizer...",
+					L"Equalizador...", L"Equalizer...", L"Equalizer...", L"Equalizer..."),
+				savedata.eqwindow != 0);
+			{
+				extern CProToolsDlg* g_proToolsDlg;
+				const BOOL ptOpen = (g_proToolsDlg && ::IsWindow(g_proToolsDlg->GetSafeHwnd())) ? TRUE : FALSE;
+				menu.AddCheck(ID_MP_OPEN_PROTOOLS,
+					LL14(L"再生詳細...", L"Playback details...", L"Details lecture...", L"Dettagli riproduzione...", L"Detalles de reproduccion...",
+						L"재생 상세...", L"播放详情...", L"تفاصيل التشغيل...", L"Подробности воспроизведения...", L"Wiedergabedetails...",
+						L"Detalhes de reproducao...", L"Afspeeldetails...", L"Szczegoly odtwarzania...", L"Calma ayrintilari..."),
+					ptOpen);
+			}
+			menu.AddSeparator();
+			menu.AddCheck(ID_MP_LRC_EXPAND,
+				LL14(L"歌詞パネル拡大", L"Expand lyrics panel", L"Agrandir paroles", L"Espandi testi", L"Expandir letra",
+					L"가사 패널 확대", L"扩大歌词面板", L"توسيع لوحة الكلمات", L"Развернуть панель текста", L"Textpanel vergroessern",
+					L"Expandir painel de letra", L"Songtekstpaneel vergroten", L"Rozszerz panel tekstu", L"Soz panelini genislet"),
+				savedata.mpLrcExpand != 0);
+			menu.AddCheck(ID_MP_DESK_LRC,
+				LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
+					L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
+					L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
+				savedata.deskLrcOn != 0);
 			menu.AddSeparator();
 		}
 		menu.AddCommand(ID_MP_REFRESH_JACKET,
@@ -7765,6 +7893,53 @@ void CMediaPlayerDlg::QueueAdd(int pcIdx, BOOL playNext)
 	UpdateQueueChrome();
 }
 
+void CMediaPlayerDlg::ShowLyricsExtrasMenu(CPoint screenPt)
+{
+	CCustomPopupMenu menu;
+	menu.SetAeroMode(FALSE);
+
+	menu.AddCheck(ID_MP_LRC_EXPAND,
+		LL14(L"歌詞パネル拡大（カラオケ風）", L"Expand lyrics panel (karaoke)", L"Agrandir paroles (karaoke)", L"Espandi testi (karaoke)", L"Expandir letra (karaoke)",
+			L"가사 패널 확대(가라오케)", L"扩大歌词面板（卡拉OK）", L"توسيع لوحة الكلمات (كاريوكي)", L"Развернуть панель текста (караоке)", L"Textpanel vergroessern (Karaoke)",
+			L"Expandir painel de letra (karaoke)", L"Songtekstpaneel vergroten (karaoke)", L"Rozszerz panel tekstu (karaoke)", L"Soz panelini genislet (karaoke)"),
+		savedata.mpLrcExpand != 0,
+		LL14(L"プレイヤー内の歌詞をカラオケ風スクロール表示にします。", L"Show in-player lyrics as karaoke-style scrolling text.", L"Afficher les paroles en defilement karaoke.", L"Mostra i testi a scorrimento karaoke.", L"Mostrar letra con desplazamiento karaoke.",
+			L"플레이어 내 가사를 가라오케풍 스크롤로 표시.", L"将播放器内歌词显示为卡拉OK滚动。", L"عرض الكلمات داخل المشغّل بأسلوب كاريوكي.", L"Показывать текст в плеере в стиле караоке.", L"Liedtext im Player karaokeartig scrollen.",
+			L"Mostrar letra no player em estilo karaoke.", L"Songtekst in speler karaoke-achtig tonen.", L"Pokaz tekst w odtwarzaczu jak karaoke.", L"Oynaticida sozleri karaoke kaydirmali goster."));
+
+	menu.AddCheck(ID_MP_DESK_LRC,
+		LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
+			L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
+			L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
+		savedata.deskLrcOn != 0,
+		LL14(L"常時最前面の歌詞ウィンドウを開きます（不透明度・行数・フォントはウィンドウ右クリック）。", L"Open an always-on-top lyrics window (opacity/lines/font via window RMB).", L"Ouvre une fenetre de paroles au premier plan (opacite/lignes/police au clic droit).", L"Apre una finestra testi in primo piano (opacita/righe/font col destro).", L"Abre una ventana de letra siempre visible (opacidad/lineas/fuente con clic der.).",
+			L"항상 위 가사 창을 엽니다(불투명도·행수·글꼴은 창 우클릭).", L"打开置顶歌词窗口（不透明度/行数/字体在窗口右键）。", L"يفتح نافذة كلمات في المقدمة (العتامة/الأسطر/الخط بزر يمين النافذة).", L"Открывает окно текста поверх всех (непрозрачность/строки/шрифт — ПКМ по окну).", L"Oeffnet ein Textfenster im Vordergrund (Deckkraft/Zeilen/Schrift per RMB).",
+			L"Abre janela de letra no topo (opacidade/linhas/fonte no botao dir. da janela).", L"Opent songtekstvenster bovenop (dekking/regels/lettertype via RMB).", L"Otwiera okno tekstu na wierzchu (nieprzezroczystosc/wiersze/czcionka przez PPM).", L"Her zaman ustte soz penceresi acar (opaklik/satir/yazi pencere sag tik)."));
+
+	menu.AddSeparator();
+	{
+		CCustomPopupMenu* lrcSub = menu.AddSubMenu(
+			LL14(L"LRC 微調整", L"LRC fine adjust", L"Reglage fin LRC", L"Regolazione fine LRC",
+				L"Ajuste fino LRC", L"LRC 미세 조정", L"LRC 微调", L"ضبط دقيق LRC",
+				L"Тонкая настройка LRC", L"LRC Feineinstellung", L"Ajuste fino LRC", L"LRC fijnafstellen",
+				L"Dostrojenie LRC", L"LRC ince ayar"));
+		if (lrcSub) {
+			lrcSub->AddCommand(ID_MP_LRC_MINUS100, L"-100 ms");
+			lrcSub->AddCommand(ID_MP_LRC_MINUS50, L"-50 ms");
+			lrcSub->AddCommand(ID_MP_LRC_MINUS10, L"-10 ms");
+			lrcSub->AddCommand(ID_MP_LRC_PLUS10, L"+10 ms");
+			lrcSub->AddCommand(ID_MP_LRC_PLUS50, L"+50 ms");
+			lrcSub->AddCommand(ID_MP_LRC_PLUS100, L"+100 ms");
+		}
+	}
+	menu.AddCommand(ID_MP_LRC_SAVE,
+		LL14(L"LRC を保存…", L"Save LRC…", L"Enregistrer LRC…", L"Salva LRC…", L"Guardar LRC…", L"LRC 저장…", L"保存 LRC…", L"حفظ LRC…", L"Сохранить LRC…", L"LRC speichern…", L"Salvar LRC…", L"LRC opslaan…", L"Zapisz LRC…", L"LRC kaydet…"));
+
+	const UINT cmd = menu.Track(screenPt, this);
+	if (cmd)
+		PostMessage(WM_COMMAND, cmd);
+}
+
 void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 {
 	CCustomPopupMenu menu;
@@ -7835,7 +8010,9 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	menu.AddCommand(ID_MP_LRC_SAVE,
 		LL14(L"LRC を保存…", L"Save LRC…", L"Enregistrer LRC…", L"Salva LRC…", L"Guardar LRC…", L"LRC 저장…", L"保存 LRC…", L"حفظ LRC…", L"Сохранить LRC…", L"LRC speichern…", L"Salvar LRC…", L"LRC opslaan…", L"Zapisz LRC…", L"LRC kaydet…"));
 	menu.AddCheck(ID_MP_DESK_LRC,
-		LL14(L"デスクトップ歌詞", L"Desktop lyrics", L"Paroles bureau", L"Testi desktop", L"Letra escritorio", L"데스크톱 가사", L"桌面歌词", L"كلمات سطح المكتب", L"Текст на рабочем столе", L"Desktop-Text", L"Letra na area de trabalho", L"Bureaublad songtekst", L"Tekst na pulpicie", L"Masaustu sozleri"),
+		LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
+			L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
+			L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
 		savedata.deskLrcOn != 0);
 	menu.AddCommand(ID_MP_TAG_EDIT,
 		LL14(L"タグ編集 (F2)", L"Edit tags (F2)", L"Editer tags (F2)", L"Modifica tag (F2)", L"Editar etiquetas (F2)", L"태그 편집 (F2)", L"编辑标签 (F2)", L"تحرير الوسوم (F2)", L"Правка тегов (F2)", L"Tags bearbeiten (F2)", L"Editar tags (F2)", L"Tags bewerken (F2)", L"Edytuj tagi (F2)", L"Etiket duzenle (F2)"));
@@ -9608,14 +9785,18 @@ void CMpCheatSheetDlg::OnPaint()
 		L"Panel de letras", L"가사 패널", L"歌词面板", L"لوحة الكلمات",
 		L"Панель текста", L"Textfenster", L"Painel de letras", L"Tekstpaneel",
 		L"Panel tekstu", L"Söz paneli")); yR += titleLh;
-	body(R, yR, LL14(L"・▾/▴ …… 拡大。LRC●=ローカル / net=取得 / —=なし", L"· ▾/▴ …… expand. LRC●=local / net=fetched / —=none", L"· ▾/▴ …… agrandir. LRC●/net/—", L"· ▾/▴ …… espandi. LRC●/net/—",
-		L"· ▾/▴ …… ampliar. LRC●/net/—", L"· ▾/▴ …… 확대. LRC●/net/—", L"· ▾/▴ …… 扩大。LRC●/net/—", L"· ▾/▴ …… توسيع. LRC●/net/—",
-		L"· ▾/▴ …… расширить. LRC●/net/—", L"· ▾/▴ …… vergroessern. LRC●/net/—", L"· ▾/▴ …… ampliar. LRC●/net/—", L"· ▾/▴ …… vergroten. LRC●/net/—",
-		L"· ▾/▴ …… powiększ. LRC●/net/—", L"· ▾/▴ …… genişlet. LRC●/net/—")); yR += lh;
+	body(R, yR, LL14(L"・▾/▴ …… 左クリックで拡大。右クリックで歌詞メニュー（ウィンドウ表示・LRC微調整）", L"· ▾/▴ …… left-click expands. Right-click lyrics menu (window, LRC nudge)", L"· ▾/▴ …… clic gauche agrandit. Clic droit = menu paroles", L"· ▾/▴ …… clic sinistro espande. Clic destro = menu testi",
+		L"· ▾/▴ …… clic izq. amplía. Clic der. = menú letra", L"· ▾/▴ …… 왼쪽 클릭 확대. 오른쪽 클릭=가사 메뉴", L"· ▾/▴ …… 左键扩大。右键=歌词菜单", L"· ▾/▴ …… نقر يسار للتوسيع. يمين=قائمة الكلمات",
+		L"· ▾/▴ …… ЛКМ расширяет. ПКМ = меню текста", L"· ▾/▴ …… Linksklick erweitert. Rechtsklick = Textmenue", L"· ▾/▴ …… clique esq. amplia. Dir. = menu de letra", L"· ▾/▴ …… linksklik vergroot. Rechtsklik = tekstmenu",
+		L"· ▾/▴ …… LPM rozszerza. PPM = menu tekstu", L"· ▾/▴ …… sol tik genisletir. Sag tik = soz menusu")); yR += lh;
 	body(R, yR, LL14(L"・拡大時はカラオケ風ビュー。同期LRCがあれば追従表示", L"· Expanded = karaoke-style view; follows synced LRC when present", L"· Agrandi = vue karaoké; suit LRC synchronisé", L"· Espanso = vista karaoke; segue LRC sincronizzato",
 		L"· Ampliado = vista karaoke; sigue LRC sincronizado", L"· 확대 시 노래방 뷰. 동기 LRC 추종", L"· 扩大为卡拉OK风；有同步 LRC 则跟随", L"· موسّع = عرض كاريوكي؛ يتبع LRC المتزامن",
 		L"· Расширение = караоке; следует за синхронным LRC", L"· Erweitert = Karaoke-Ansicht; folgt sync-LRC", L"· Ampliado = vista karaokê; segue LRC sincronizado", L"· Uitgeklapt = karaokeweergave; volgt sync-LRC",
-		L"· Rozszerzony = widok karaoke; śledzi zsynchronizowane LRC", L"· Geniş = karaoke görünümü; senkron LRC izler")); yR += lh + 2;
+		L"· Rozszerzony = widok karaoke; śledzi zsynchronizowane LRC", L"· Geniş = karaoke görünümü; senkron LRC izler")); yR += lh;
+	body(R, yR, LL14(L"・歌詞ウィンドウ …… 常時最前面。不透明度・表示行数・フォントはウィンドウ右クリック", L"· Lyrics window …… always on top. Opacity/lines/font via window RMB", L"· Fenetre paroles …… premier plan. Opacite/lignes/police au clic droit", L"· Finestra testi …… in primo piano. Opacita/righe/font col destro",
+		L"· Ventana letra …… siempre visible. Opacidad/lineas/fuente con clic der.", L"· 가사 창 …… 항상 위. 불투명도·행수·글꼴은 창 우클릭", L"· 歌词窗口 …… 置顶。不透明度/行数/字体在窗口右键", L"· نافذة الكلمات …… في المقدمة. العتامة/الأسطر/الخط بزر يمين",
+		L"· Окно текста …… поверх всех. Непрозрачность/строки/шрифт — ПКМ", L"· Textfenster …… Vordergrund. Deckkraft/Zeilen/Schrift per RMB", L"· Janela de letra …… no topo. Opacidade/linhas/fonte no botao dir.", L"· Songtekstvenster …… bovenop. Dekking/regels/lettertype via RMB",
+		L"· Okno tekstu …… na wierzchu. Nieprzezroczystosc/wiersze/czcionka przez PPM", L"· Soz penceresi …… her zaman ustte. Opaklik/satir/yazi pencere sag tik")); yR += lh + 2;
 
 	y = max(yL, yR) + 2;
 	yL = y; yR = y;
@@ -9715,10 +9896,10 @@ void CMpCheatSheetDlg::OnPaint()
 		L"· ★ nota / tempo 50·75·100% / snap A-B / vista normalizar", L"· ★ 평점 / 연습 템포 50·75·100% / A-B 스냅 / 정규화 미리보기", L"· ★评分 / 练习速度50·75·100% / A-B快照 / 标准化预览", L"· ★ تقييم / إيقاع 50·75·100% / لقطة A-B / معاينة تطبيع",
 		L"· ★ рейтинг / темп 50·75·100% / снимок A-B / превью нормализации", L"· ★ Bewertung / Tempo 50·75·100% / A-B-Snap / Normalisierungsvorschau", L"· ★ nota / tempo 50·75·100% / snap A-B / prévia normalizar", L"· ★ beoordeling / tempo 50·75·100% / A-B-snap / normalisatie-voorbeeld",
 		L"· ★ ocena / tempo 50·75·100% / snap A-B / podgląd normalizacji", L"· ★ puan / tempo 50·75·100% / A-B anlık / normalizasyon önizleme")); yR += lh;
-	body(R, yR, LL14(L"・LRC ±10/50/100ms・保存 / デスクトップ歌詞(不透明度・右クリック) / A-Bを書き出し範囲に", L"· LRC ±10/50/100ms·save / desktop lyrics (opacity·RMB) / export A-B range", L"· LRC ±ms·sauver / paroles bureau (opacite·clic droit) / exporter plage A-B", L"· LRC ±ms·salva / testi desktop (opacita·tasto destro) / esporta intervallo A-B",
-		L"· LRC ±ms·guardar / letra escritorio (opacidad·clic der.) / exportar rango A-B", L"· LRC ±ms·저장 / 데스크톱 가사(불투명도·우클릭) / A-B 내보내기 범위", L"· LRC ±ms·保存 / 桌面歌词(不透明度·右键) / 将A-B设为导出范围", L"· LRC ±ms·حفظ / كلمات سطح المكتب (عتامة·يمين) / تصدير نطاق A-B",
-		L"· LRC ±мс·сохранить / текст на рабочем (непрозрачность·ПКМ) / экспорт A-B", L"· LRC ±ms·speichern / Desktop-Text (Deckkraft·RMB) / A-B exportieren", L"· LRC ±ms·salvar / letra na área (opacidade·botao dir.) / exportar faixa A-B", L"· LRC ±ms·opslaan / bureaubladtekst (dekking·RMB) / A-B-bereik exporteren",
-		L"· LRC ±ms·zapisz / tekst na pulpicie (nieprzezroczystosc·PPM) / eksport zakresu A-B", L"· LRC ±ms·kaydet / masaüstü söz (opaklik·sag tik) / A-B aralığını dışa aktar")); yR += lh;
+	body(R, yR, LL14(L"・LRC ±10/50/100ms・保存 / 歌詞ウィンドウ(不透明度・表示行数・フォント・右クリック) / A-Bを書き出し範囲に", L"· LRC ±10/50/100ms·save / lyrics window (opacity·visible lines·font·RMB) / export A-B range", L"· LRC ±ms·sauver / fenetre paroles (opacite·lignes·police·clic droit) / exporter plage A-B", L"· LRC ±ms·salva / finestra testi (opacita·righe·font·tasto destro) / esporta intervallo A-B",
+		L"· LRC ±ms·guardar / ventana letra (opacidad·lineas·fuente·clic der.) / exportar rango A-B", L"· LRC ±ms·저장 / 가사 창(불투명도·표시행수·글꼴·우클릭) / A-B 내보내기 범위", L"· LRC ±ms·保存 / 歌词窗口(不透明度·显示行数·字号·右键) / 将A-B设为导出范围", L"· LRC ±ms·حفظ / نافذة الكلمات (عتامة·أسطر·خط·يمين) / تصدير نطاق A-B",
+		L"· LRC ±мс·сохранить / окно текста (непрозрачность·строки·шрифт·ПКМ) / экспорт A-B", L"· LRC ±ms·speichern / Textfenster (Deckkraft·Zeilen·Schrift·RMB) / A-B exportieren", L"· LRC ±ms·salvar / janela de letra (opacidade·linhas·fonte·botao dir.) / exportar faixa A-B", L"· LRC ±ms·opslaan / songtekstvenster (dekking·regels·lettertype·RMB) / A-B-bereik exporteren",
+		L"· LRC ±ms·zapisz / okno tekstu (nieprzezroczystosc·wiersze·czcionka·PPM) / eksport zakresu A-B", L"· LRC ±ms·kaydet / soz penceresi (opaklik·satir·yazi·sag tik) / A-B aralığını dışa aktar")); yR += lh;
 	body(R, yR, LL14(L"・BPM計測 …… 開始→再生数秒→再クリックで確定。BPMはダイアログとシーク拍グリッドへ", L"· BPM …… start → play a few sec → click again. Shows dialog + seek beat grid", L"· BPM …… demarrer → lire → recliquer. Dialogue + grille", L"· BPM …… avvia → riproduci → clic. Dialogo + griglia",
 		L"· BPM …… iniciar → reproducir → clic. Dialogo + rejilla", L"· BPM 측정 …… 시작→재생 수초→다시 클릭 확정. 대화상자+비트 그리드", L"· BPM测量 …… 开始→播放数秒→再点确定。对话框+拍网格", L"· قياس BPM …… ابدأ→شغّل→انقر. حوار+شبكة",
 		L"· BPM …… старт→воспроизведение→клик. Диалог+сетка", L"· BPM …… Start→Wiedergabe→Klick. Dialog+Raster", L"· BPM …… iniciar→reproduzir→clique. Dialogo+grade", L"· BPM …… start→afspelen→klik. Dialoog+raster",

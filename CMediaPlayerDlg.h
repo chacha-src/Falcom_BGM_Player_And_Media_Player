@@ -300,6 +300,7 @@ public:
 	void QueueClear();
 	void UpdateQueueChrome();                // ツール▾は記号のみ。状態はツールチップ
 	void ShowToolsExtrasMenu(CPoint screenPt);
+	void ShowLyricsExtrasMenu(CPoint screenPt);
 	void ApplySleepTimer(int minutes);       // 0=Off
 	void OpenTagEditForSelection();
 	void CycleRatingForDisp(int disp);
@@ -433,6 +434,7 @@ protected:
 	afx_msg void OnSaveDs();
 	afx_msg void OnSaveWav();
 	afx_msg void OnMicMix();
+	afx_msg void OnMicMixMenuToggle();
 	afx_msg void OnMicLevRelease(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnRecord();
 	afx_msg void OnCapture();

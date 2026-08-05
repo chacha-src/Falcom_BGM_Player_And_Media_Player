@@ -1296,6 +1296,15 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 					L"Quitar recorte", L"잘라내기 해제", L"清除裁剪", L"إلغاء القص",
 					L"Сбросить вырез", L"Ausschnitt aufheben", L"Limpar recorte", L"Uitsnede wissen",
 					L"Wyczyść wycinek", L"Kırpmayı temizle"));
+			menu.AddSeparator();
+			menu.AddCommand(ID_SC_LAYER_TILE,
+				LL14(L"レイヤを整列", L"Tile layers", L"Aligner les calques", L"Allinea livelli",
+					L"Alinear capas", L"레이어 정렬", L"排列图层", L"ترتيب الطبقات",
+					L"Упорядочить слои", L"Ebenen anordnen", L"Alinhar camadas", L"Lagen tegelen",
+					L"Uloz warstwy", L"Katmanlari diz"),
+				LL14(L"全レイヤをキャンバス内に並べます。", L"Arrange all layers on the canvas.", L"Disposer tous les calques sur le canevas.", L"Disponi tutti i livelli sul canvas.", L"Disponer todas las capas en el lienzo.",
+					L"모든 레이어를 캔버스에 배치합니다.", L"将所有层排列到画布上。", L"ترتيب كل الطبقات على اللوحة.", L"Разместить все слои на холсте.", L"Alle Ebenen auf der Flache anordnen.",
+					L"Organizar todas as camadas na tela.", L"Alle lagen op het canvas schikken.", L"Uloz wszystkie warstwy na plotnie.", L"Tum katmanlari tuvalde diz."));
 			menu.AddCommand(ID_SC_LAYER_REMOVE,
 				LL14(L"レイヤを削除", L"Remove layer", L"Retirer le calque", L"Rimuovi livello",
 					L"Quitar capa", L"레이어 삭제", L"删除层", L"إزالة الطبقة",
@@ -1324,6 +1333,8 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 			} else if (cmd == ID_SC_LAYER_CROP_FULL) {
 				m_owner->m_layer.SetCurSel(layer);
 				m_owner->OnBnClickedCropFull();
+			} else if (cmd == ID_SC_LAYER_TILE) {
+				m_owner->TileLayers();
 			} else if (cmd == ID_SC_LAYER_REMOVE) {
 				m_owner->m_layer.SetCurSel(layer);
 				m_owner->OnBnClickedRemove();

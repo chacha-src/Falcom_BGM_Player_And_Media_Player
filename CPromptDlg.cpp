@@ -1265,13 +1265,28 @@ void CPromptDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	enum {
 		IDM_CUT = 1, IDM_COPY, IDM_PASTE, IDM_SELALL,
 		IDM_INS_AT, IDM_INS_PCT, IDM_INS_SB, IDM_INS_WM, IDM_INS_PW, IDM_INS_DR,
-		IDM_SAVEHIST, IDM_CLEAR
+		IDM_SAVEHIST, IDM_CLEAR, IDM_RUN, IDM_ANALYZE
 	};
 	CCustomPopupMenu menu;
 	menu.AddCommand(IDM_CUT, LL14(L"切り取り", L"Cut", L"Couper", L"Taglia", L"Cortar", L"잘라내기", L"剪切", L"Cut", L"Вырезать", L"Ausschneiden", L"Recortar", L"Knippen", L"Wytnij", L"Kes"));
 	menu.AddCommand(IDM_COPY, LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"Copy", L"Копировать", L"Kopieren", L"Copiar", L"Kopieren", L"Kopiuj", L"Kopyala"));
 	menu.AddCommand(IDM_PASTE, LL14(L"貼り付け", L"Paste", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"Paste", L"Вставить", L"Einfuegen", L"Colar", L"Plakken", L"Wklej", L"Yapistir"));
 	menu.AddCommand(IDM_SELALL, LL14(L"すべて選択", L"Select All", L"Tout selectionner", L"Seleziona tutto", L"Seleccionar todo", L"모두 선택", L"全选", L"Select All", L"Выделить всё", L"Alles auswaehlen", L"Selecionar tudo", L"Alles selecteren", L"Zaznacz wszystko", L"Tumunu sec"));
+	menu.AddSeparator();
+	menu.AddCommand(IDM_RUN,
+		LL14(L"実行", L"Run", L"Executer", L"Esegui", L"Ejecutar",
+			L"실행", L"执行", L"تشغيل", L"Выполнить", L"Ausfuhren",
+			L"Executar", L"Uitvoeren", L"Uruchom", L"Calistir"),
+		LL14(L"プロンプトを実行します。", L"Run the prompt.", L"Executer le prompt.", L"Esegui il prompt.", L"Ejecutar el prompt.",
+			L"프롬프트를 실행합니다.", L"执行提示。", L"تشغيل الموجه.", L"Выполнить промпт.", L"Prompt ausfuhren.",
+			L"Executar o prompt.", L"Prompt uitvoeren.", L"Uruchom prompt.", L"Istemi calistir."));
+	menu.AddCommand(IDM_ANALYZE,
+		LL14(L"解析", L"Analyze", L"Analyser", L"Analizza", L"Analizar",
+			L"분석", L"分析", L"تحليل", L"Анализ", L"Analysieren",
+			L"Analisar", L"Analyseren", L"Analizuj", L"Analiz et"),
+		LL14(L"選択モードで解析します。", L"Analyze with the selected mode.", L"Analyser avec le mode choisi.", L"Analizza con la modalita scelta.", L"Analizar con el modo elegido.",
+			L"선택한 모드로 분석합니다.", L"用所选模式分析。", L"تحليل بالوضع المحدد.", L"Анализ в выбранном режиме.", L"Mit gewahltem Modus analysieren.",
+			L"Analisar no modo selecionado.", L"Analyseren in gekozen modus.", L"Analizuj w wybranym trybie.", L"Secili modda analiz et."));
 	menu.AddSeparator();
 	CCustomPopupMenu* sub = menu.AddSubMenu(
 		LL14(L"サンプル挿入", L"Insert sample", L"Inserer exemple", L"Inserisci esempio", L"Insertar ejemplo", L"샘플 삽입", L"插入示例", L"Insert sample", L"Вставить пример", L"Beispiel einfuegen", L"Inserir exemplo", L"Voorbeeld invoegen", L"Wstaw przyklad", L"Ornek ekle"),
@@ -1324,6 +1339,8 @@ void CPromptDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	}
 	case IDM_SAVEHIST: OnSaveHist(); break;
 	case IDM_CLEAR: OnClear(); break;
+	case IDM_RUN: OnRun(); break;
+	case IDM_ANALYZE: OnAnalyze(); break;
 	default: break;
 	}
 }

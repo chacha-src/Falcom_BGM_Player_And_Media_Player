@@ -4,7 +4,7 @@
 #include "CLyricsViewWnd.h"
 #include "resource.h"
 
-// デスクトップ常時最前面の歌詞オーバーレイ(モードレス・シングルトン)
+// 常時最前面の歌詞ウィンドウ(モードレス・シングルトン)
 // 透過度は WS_EX_LAYERED + LWA_ALPHA（アクリル帯とは併用不可）
 class CDesktopLyricsWnd : public CCustomBlurDialogBase
 {
@@ -21,6 +21,9 @@ public:
 	void ApplyWindowAlpha();
 	void MakeSolidClient();
 	void SetDeskLrcAlpha(int a, BOOL syncSlider);
+	// autoFit=TRUE: ウィンドウ高さで表示行数フィット。FALSE: ptTenths(ポイント×10)を手動適用
+	void SetDeskLrcFont(int ptTenths, BOOL autoFit);
+	void SetDeskLrcLines(int lines);
 
 protected:
 	CLyricsViewWnd m_view;

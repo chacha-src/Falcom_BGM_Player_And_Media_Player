@@ -13437,7 +13437,7 @@ static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
     pDlg->ModifyStyle(DS_MODALFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX, 0);
     // ホスト α 時は CLIPCHILDREN 必須（親塗りがリスト等のスクロールバーを潰すのを防ぐ）
     pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
-    // デスクトップ歌詞は LWA_ALPHA 透過度のためアクリル帯を使わない
+    // 歌詞ウィンドウは LWA_ALPHA 透過度のためアクリル帯を使わない
     // （EnsureBackdrop / ApplyAero が WS_EX_LAYERED を剥がすとスライダーが無効になる）
     e->acrylicCaption = TRUE;
     if (pDlg->GetRuntimeClass()

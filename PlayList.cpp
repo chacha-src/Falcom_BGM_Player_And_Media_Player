@@ -2097,6 +2097,22 @@ CString CPlayList::GetPlaylistDisplayName(int ii)
 
 static bool IsDougaVideoFile(const CString& path);
 
+static void PlMicLevSliderCb(void* /*ctx*/, int value)
+{
+	if (value < 0) value = 0;
+	if (value > 200) value = 200;
+	savedata.mic_mix_level = value;
+	extern COggDlg* og;
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_miclev.GetSafeHwnd())
+		mp->m_miclev.SetPos(value);
+	if (og && ::IsWindow(og->GetSafeHwnd()) && og->m_miclev.GetSafeHwnd()) {
+		og->m_miclev.SetPos(value);
+		og->ApplyMicMixLevelLabel();
+	}
+	MpPersistSavedataQuick();
+}
+
 int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 {
 	int Lindex = -1;
@@ -2140,6 +2156,19 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Микшировать микрофон при сохранении WAV", L"Mikrofon beim WAV-Speichern mischen", L"Misturar microfone ao salvar WAV", L"Microfoon mixen bij WAV-opslag",
 			L"Miksuj mikrofon przy zapisie WAV", L"WAV kaydında mikrofonu karıştır"),
 		savedata.mic_mix ? TRUE : FALSE);
+	{
+		int lv = savedata.mic_mix_level;
+		if (lv < 0) lv = 0;
+		if (lv > 200) lv = 200;
+		menu.AddSlider(
+			LL14(L"マイクレベル", L"Mic level", L"Niveau micro", L"Livello microfono", L"Nivel micro",
+				L"마이크 레벨", L"麦克风电平", L"مستوى الميكروفون", L"Уровень микрофона", L"Mikrofonpegel",
+				L"Nivel do microfone", L"Mic-niveau", L"Poziom mikrofonu", L"Mikrofon seviyesi"),
+			0, 200, lv, PlMicLevSliderCb, NULL,
+			LL14(L"マイクミックスの音量 0〜200（ドラッグ中に反映）", L"Mic mix level 0–200 (live)", L"Niveau mix micro 0–200 (direct)", L"Livello mix microfono 0–200 (live)", L"Nivel mezcla micro 0–200 (en vivo)",
+				L"마이크 믹스 볼륨 0–200(즉시)", L"麦克风混音音量 0–200（即时）", L"مستوى مزج الميكروفون 0–200 (مباشر)", L"Громкость микса микрофона 0–200 (сразу)", L"Mikrofon-Mix-Pegel 0–200 (live)",
+				L"Nivel do mix de microfone 0–200 (ao vivo)", L"Mic-mixniveau 0–200 (live)", L"Poziom mixu mikrofonu 0–200 (na zywo)", L"Mikrofon mix seviyesi 0–200 (anlik)"));
+	}
 	{
 		int selCount = 0;
 		int idx = -1;
@@ -2216,7 +2245,9 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 		menu.AddCommand(PL_CTX_SSVIZ,
 			LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"));
 		menu.AddCheck(PL_CTX_DESK_LRC,
-			LL14(L"デスクトップ歌詞", L"Desktop lyrics", L"Paroles bureau", L"Testi desktop", L"Letras escritorio", L"데스크톱 가사", L"桌面歌词", L"كلمات سطح المكتب", L"Текст на рабочем столе", L"Desktop-Lyrics", L"Letras na area", L"Desktoptekst", L"Tekst pulpitu", L"Masaustu sozleri"),
+			LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
+				L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
+				L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
 			savedata.deskLrcOn ? TRUE : FALSE);
 		menu.AddCommand(PL_CTX_DUPES,
 			LL14(L"重複スキャン", L"Scan duplicates", L"Detecter doublons", L"Scansiona duplicati", L"Buscar duplicados", L"중복 스캔", L"扫描重复", L"فحص التكرار", L"Поиск дублей", L"Duplikate scannen", L"Procurar duplicatas", L"Duplicaten scannen", L"Skanuj duplikaty", L"Kopyalari tara"));
@@ -2262,6 +2293,12 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Detalles de reproduccion...", L"재생 상세...", L"播放详情...", L"تفاصيل التشغيل...",
 			L"Параметры воспроизведения...", L"Wiedergabedetails...", L"Detalhes de reproducao...", L"Afspeeldetails...",
 			L"Szczegoly odtwarzania...", L"Oynatma ayrintilari..."));
+	menu.AddCheck(PL_CTX_EQ,
+		LL14(L"イコライザーを開く", L"Open Equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore",
+			L"Abrir ecualizador", L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل",
+			L"Открыть эквалайзер", L"Equalizer offnen", L"Abrir equalizador", L"Equalizer openen",
+			L"Otworz equalizer", L"Equalizeri ac"),
+		savedata.eqwindow ? TRUE : FALSE);
 	menu.AddCheck(PL_CTX_ANALYZER,
 		LL14(L"アナライザーを開く", L"Open Analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore",
 			L"Abrir analizador", L"애널라이저 열기", L"打开分析器", L"فتح المحلل",
@@ -2478,6 +2515,11 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd == PL_CTX_PROTOOLS) {
 		extern void OpenProToolsForSelection();
 		OpenProToolsForSelection();
+	}
+	else if (cmd == PL_CTX_EQ) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_OPEN_EQ, 0);
 	}
 	else if (cmd == PL_CTX_CLEAR_SONGPARAM) {
 		std::vector<playlistdata0> items;

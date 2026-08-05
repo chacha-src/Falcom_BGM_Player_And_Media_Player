@@ -842,6 +842,11 @@
 #define ID_MP_JACKET_SAVE_COVER         33048
 #define ID_MP_TOOLS_PANEL               33049
 #define ID_MP_JACKET_REM_OVERLAY        33050
+#define ID_MP_OPEN_EQ                   33120
+#define ID_MP_OPEN_PROTOOLS             33121
+#define ID_MP_LRC_EXPAND                33122
+#define ID_MP_MICMIX_TOGGLE             33123
+#define ID_SC_LAYER_TILE                39009
 #define ID_MP_SMART_BASE                33100
 
 #define IDC_MP_SAVEPARAM                3543
@@ -1329,7 +1334,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        250
-#define _APS_NEXT_COMMAND_VALUE         33120
+#define _APS_NEXT_COMMAND_VALUE         33124
 #define _APS_NEXT_CONTROL_VALUE         3916
 #define _APS_NEXT_SYMED_VALUE           104
 #endif

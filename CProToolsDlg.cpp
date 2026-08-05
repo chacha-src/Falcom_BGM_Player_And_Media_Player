@@ -237,7 +237,11 @@ namespace {
 		IDM_PT_MS_MONO = 42215,
 		IDM_PT_MS_RESET = 42216,
 		IDC_PT_VOCAL_SLIDER = 42217,
-		IDC_PT_VOCAL_LBL = 42218
+		IDC_PT_VOCAL_LBL = 42218,
+		IDM_PT_GAPLESS = 42313,
+		IDM_PT_CORR = 42314,
+		IDM_PT_EXPLIMIT = 42315,
+		IDM_PT_EXPTP = 42316
 	};
 
 	static void PtApplyMsPreset(int widthPct, int mono)
@@ -1090,12 +1094,30 @@ void CProToolsDlg::OnMsPresetWide() { PtApplyMsPreset(160, 0); }
 void CProToolsDlg::OnMsPresetMono() { PtApplyMsPreset(100, 1); }
 void CProToolsDlg::OnMsPresetReset() { PtApplyMsPreset(100, 0); }
 
+static void PtVocalSliderCb(void* /*ctx*/, int value)
+{
+	PtSetVocalCenter(value);
+}
+
+static void PtMsWidthSliderCb(void* /*ctx*/, int value)
+{
+	PtApplyMsPreset(value, 0);
+}
+
 void CProToolsDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 {
 	(void)pWnd;
 	CCustomPopupMenu menu;
+	menu.AddSlider(
+		LL14(L"ボーカル Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid",
+			L"보컬 Mid", L"人声 Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid",
+			L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid"),
+		0, 200, ProClampI(savedata.mpVocalCenter, 0, 200), PtVocalSliderCb, this,
+		LL14(L"Mid帯 0=キャンセル寄り / 100=中立 / 200=強調（ドラッグ中に反映）", L"Mid 0=cancel-ish / 100=neutral / 200=emphasize (live)", L"Mid 0=annulation / 100=neutre / 200=accent (direct)", L"Mid 0=cancella / 100=neutro / 200=enfatizza (live)", L"Mid 0=cancelar / 100=neutral / 200=enfatizar (en vivo)",
+			L"Mid 0=캔슬 / 100=중립 / 200=강조(즉시)", L"Mid 0=消除 / 100=中性 / 200=强调（即时）", L"Mid 0=إلغاء / 100=محايد / 200=تأكيد (مباشر)", L"Mid 0=cancel / 100=нейтр. / 200=акцент (сразу)", L"Mid 0=Cancel / 100=neutral / 200=betonen (live)",
+			L"Mid 0=cancelar / 100=neutro / 200=enfatizar (ao vivo)", L"Mid 0=cancel / 100=neutraal / 200=benadrukken (live)", L"Mid 0=anuluj / 100=neutral / 200=akcent (na zywo)", L"Mid 0=iptal / 100=notr / 200=vurgu (anlik)"));
 	CCustomPopupMenu* subV = menu.AddSubMenu(
-		LL14(L"ボーカル Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"보컬 Mid", L"人声 Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid", L"Vocal Mid"),
+		LL14(L"ボーカル Mid プリセット", L"Vocal Mid presets", L"Presets Vocal Mid", L"Preset Vocal Mid", L"Preajustes Vocal Mid", L"보컬 Mid 프리셋", L"人声 Mid 预设", L"إعدادات Vocal Mid", L"Пресеты Vocal Mid", L"Vocal-Mid-Presets", L"Predefinicoes Vocal Mid", L"Vocal Mid-presets", L"Presety Vocal Mid", L"Vocal Mid onayarlari"),
 		LL14(L"Mid帯のプリセット（本体スライダーと同じ値）", L"Mid-band presets (same values as the main slider)",
 			L"Préréglages Mid (mêmes valeurs que le curseur)", L"Preset Mid (stessi valori dello slider)",
 			L"Preajustes Mid (mismos valores que el deslizador)", L"Mid 대역 프리셋(본체 슬라이더와 동일)",
@@ -1114,6 +1136,14 @@ void CProToolsDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			LL14(L"Mid強調 (200)", L"Emphasize Mid (200)", L"Accent Mid (200)", L"Enfatizza Mid (200)", L"Enfatizar Mid (200)", L"Mid 강조 (200)", L"强调 Mid (200)", L"Mid (200)", L"Mid акцент (200)", L"Mid betonen (200)", L"Enfatizar Mid (200)", L"Mid benadrukken (200)", L"Mid akcent (200)", L"Mid vurgula (200)"),
 			savedata.mpVocalCenter == 200);
 	}
+	menu.AddSlider(
+		LL14(L"M/S 幅 (%)", L"M/S width (%)", L"Largeur M/S (%)", L"Larghezza M/S (%)", L"Ancho M/S (%)",
+			L"M/S 폭 (%)", L"M/S 宽度 (%)", L"عرض M/S (%)", L"Ширина M/S (%)", L"M/S-Breite (%)",
+			L"Largura M/S (%)", L"M/S-breedte (%)", L"Szerokosc M/S (%)", L"M/S genislik (%)"),
+		0, 200, ProClampI(savedata.pro_ms_width, 0, 200), PtMsWidthSliderCb, this,
+		LL14(L"Mid/Side 幅（ドラッグ中に反映・モノ解除）", L"Mid/Side width (live; clears mono)", L"Largeur Mid/Side (direct; coupe mono)", L"Larghezza Mid/Side (live; toglie mono)", L"Ancho Mid/Side (en vivo; quita mono)",
+			L"Mid/Side 폭(즉시·모노 해제)", L"Mid/Side 宽度（即时；清除 mono）", L"عرض Mid/Side (مباشر؛ يلغي mono)", L"Ширина Mid/Side (сразу; сброс mono)", L"Mid/Side-Breite (live; Mono aus)",
+			L"Largura Mid/Side (ao vivo; limpa mono)", L"Mid/Side-breedte (live; mono uit)", L"Szerokosc Mid/Side (na zywo; bez mono)", L"Mid/Side genislik (anlik; mono kapat)"));
 	CCustomPopupMenu* subMs = menu.AddSubMenu(
 		LL14(L"相関→M/S", L"Correlation→M/S", L"Correlation→M/S", L"Correlazione→M/S", L"Correlacion→M/S", L"상관→M/S", L"相关→M/S", L"ترابط→M/S", L"Корреляция→M/S", L"Korrelation→M/S", L"Correlacao→M/S", L"Correlatie→M/S", L"Korelacja→M/S", L"Korelasyon→M/S"));
 	if (subMs) {
@@ -1128,12 +1158,49 @@ void CProToolsDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		subMs->AddCheck(IDM_PT_MS_RESET, LL14(L"M/S リセット", L"M/S reset", L"M/S reinit.", L"M/S reset", L"M/S reset", L"M/S 리셋", L"M/S 重置", L"M/S reset", L"M/S сброс", L"M/S reset", L"M/S reset", L"M/S reset", L"M/S reset", L"M/S sifirla"),
 			savedata.pro_ms_width == 100 && !savedata.pro_ms_mono);
 	}
+	menu.AddSeparator();
+	menu.AddCheck(IDM_PT_GAPLESS,
+		LL14(L"ギャップレス", L"Gapless", L"Sans silence", L"Senza gap", L"Sin pausa",
+			L"갭리스", L"无缝", L"بدون فجوة", L"Без паузы", L"Lückenlos",
+			L"Sem intervalo", L"Naadloos", L"Bez przerw", L"Bosluksuz"),
+		savedata.pro_gapless != 0);
+	menu.AddCheck(IDM_PT_CORR,
+		LL14(L"位相相関メーター", L"Correlation meter", L"Correlometre", L"Misuratore correlazione", L"Medidor correlacion",
+			L"위상 상관 미터", L"相位相关表", L"مقياس الترابط", L"Корреляция", L"Korrelationsmesser",
+			L"Medidor correlacao", L"Correlatiemeter", L"Miernik korelacji", L"Faz korelasyon"),
+		savedata.pro_corr_meter != 0);
+	menu.AddCheck(IDM_PT_EXPLIMIT,
+		LL14(L"書き出しリミット", L"Export limit", L"Limite export", L"Limite export", L"Limite exportacion",
+			L"내보내기 리밋", L"导出限制", L"حد التصدير", L"Лимит экспорта", L"Exportlimit",
+			L"Limite de exportacao", L"Exportlimiet", L"Limit eksportu", L"Disa aktarma limiti"),
+		savedata.pro_export_limit != 0);
+	menu.AddCheck(IDM_PT_EXPTP,
+		LL14(L"True Peak 制限", L"True Peak limit", L"Limite True Peak", L"Limite True Peak", L"Limite True Peak",
+			L"True Peak 제한", L"True Peak 限制", L"حد True Peak", L"Лимит True Peak", L"True-Peak-Limit",
+			L"Limite True Peak", L"True Peak-limiet", L"Limit True Peak", L"True Peak limiti"),
+		savedata.pro_export_tp != 0);
 	if (point.x == -1 && point.y == -1) {
 		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
 		point = CPoint(rc.left + 8, rc.top + 8);
 	}
 	const UINT cmd = menu.Track(point, this);
-	if (cmd)
+	if (cmd == IDM_PT_GAPLESS) {
+		savedata.pro_gapless = savedata.pro_gapless ? 0 : 1;
+		if (m_gapless.GetSafeHwnd()) m_gapless.SetCheck(savedata.pro_gapless ? BST_CHECKED : BST_UNCHECKED);
+		OnBnClickedLiveFlag();
+	} else if (cmd == IDM_PT_CORR) {
+		savedata.pro_corr_meter = savedata.pro_corr_meter ? 0 : 1;
+		if (m_corr.GetSafeHwnd()) m_corr.SetCheck(savedata.pro_corr_meter ? BST_CHECKED : BST_UNCHECKED);
+		OnBnClickedLiveFlag();
+	} else if (cmd == IDM_PT_EXPLIMIT) {
+		savedata.pro_export_limit = savedata.pro_export_limit ? 0 : 1;
+		if (m_expLimit.GetSafeHwnd()) m_expLimit.SetCheck(savedata.pro_export_limit ? BST_CHECKED : BST_UNCHECKED);
+		OnBnClickedLiveFlag();
+	} else if (cmd == IDM_PT_EXPTP) {
+		savedata.pro_export_tp = savedata.pro_export_tp ? 0 : 1;
+		if (m_expTp.GetSafeHwnd()) m_expTp.SetCheck(savedata.pro_export_tp ? BST_CHECKED : BST_UNCHECKED);
+		OnBnClickedLiveFlag();
+	} else if (cmd)
 		SendMessage(WM_COMMAND, cmd);
 }
 
