@@ -1267,34 +1267,37 @@ void CPromptDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		IDM_INS_AT, IDM_INS_PCT, IDM_INS_SB, IDM_INS_WM, IDM_INS_PW, IDM_INS_DR,
 		IDM_SAVEHIST, IDM_CLEAR
 	};
-	CMenu menu;
-	if (!menu.CreatePopupMenu()) return;
-	menu.AppendMenu(MF_STRING, IDM_CUT, LL14(L"切り取り", L"Cut", L"Couper", L"Taglia", L"Cortar", L"잘라내기", L"剪切", L"Cut", L"Вырезать", L"Ausschneiden", L"Recortar", L"Knippen", L"Wytnij", L"Kes"));
-	menu.AppendMenu(MF_STRING, IDM_COPY, LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"Copy", L"Копировать", L"Kopieren", L"Copiar", L"Kopieren", L"Kopiuj", L"Kopyala"));
-	menu.AppendMenu(MF_STRING, IDM_PASTE, LL14(L"貼り付け", L"Paste", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"Paste", L"Вставить", L"Einfuegen", L"Colar", L"Plakken", L"Wklej", L"Yapistir"));
-	menu.AppendMenu(MF_STRING, IDM_SELALL, LL14(L"すべて選択", L"Select All", L"Tout selectionner", L"Seleziona tutto", L"Seleccionar todo", L"모두 선택", L"全选", L"Select All", L"Выделить всё", L"Alles auswaehlen", L"Selecionar tudo", L"Alles selecteren", L"Zaznacz wszystko", L"Tumunu sec"));
-	menu.AppendMenu(MF_SEPARATOR);
-	CMenu sub;
-	sub.CreatePopupMenu();
-	sub.AppendMenu(MF_STRING, IDM_INS_AT, L"@p0-30[100-110]");
-	sub.AppendMenu(MF_STRING, IDM_INS_PCT, L"%N1:00<20-40>[100-120]");
-	sub.AppendMenu(MF_STRING, IDM_INS_SB, L"@sb1:00");
-	sub.AppendMenu(MF_STRING, IDM_INS_WM, L"@wm1:00");
-	sub.AppendMenu(MF_STRING, IDM_INS_PW, L"@pw1:30");
-	sub.AppendMenu(MF_STRING, IDM_INS_DR, L"@dr2:00");
-	menu.AppendMenu(MF_POPUP, (UINT_PTR)sub.Detach(),
-		LL14(L"サンプル挿入", L"Insert sample", L"Inserer exemple", L"Inserisci esempio", L"Insertar ejemplo", L"샘플 삽입", L"插入示例", L"Insert sample", L"Вставить пример", L"Beispiel einfuegen", L"Inserir exemplo", L"Voorbeeld invoegen", L"Wstaw przyklad", L"Ornek ekle"));
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING, IDM_SAVEHIST, LL14(L"履歴へ保存", L"Save to history", L"Enregistrer historique", L"Salva in cronologia", L"Guardar en historial", L"기록에 저장", L"保存到历史", L"Save history", L"В историю", L"In Verlauf", L"Salvar historico", L"Naar geschiedenis", L"Do historii", L"Gecmise kaydet"));
-	menu.AppendMenu(MF_STRING, IDM_CLEAR, LL14(L"クリア", L"Clear", L"Effacer", L"Cancella", L"Borrar", L"지우기", L"清除", L"Clear", L"Очистить", L"Loeschen", L"Limpar", L"Wissen", L"Wyczysc", L"Temizle"));
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING, ID_HELP_SHOWSHEET,
+	CCustomPopupMenu menu;
+	menu.AddCommand(IDM_CUT, LL14(L"切り取り", L"Cut", L"Couper", L"Taglia", L"Cortar", L"잘라내기", L"剪切", L"Cut", L"Вырезать", L"Ausschneiden", L"Recortar", L"Knippen", L"Wytnij", L"Kes"));
+	menu.AddCommand(IDM_COPY, LL14(L"コピー", L"Copy", L"Copier", L"Copia", L"Copiar", L"복사", L"复制", L"Copy", L"Копировать", L"Kopieren", L"Copiar", L"Kopieren", L"Kopiuj", L"Kopyala"));
+	menu.AddCommand(IDM_PASTE, LL14(L"貼り付け", L"Paste", L"Coller", L"Incolla", L"Pegar", L"붙여넣기", L"粘贴", L"Paste", L"Вставить", L"Einfuegen", L"Colar", L"Plakken", L"Wklej", L"Yapistir"));
+	menu.AddCommand(IDM_SELALL, LL14(L"すべて選択", L"Select All", L"Tout selectionner", L"Seleziona tutto", L"Seleccionar todo", L"모두 선택", L"全选", L"Select All", L"Выделить всё", L"Alles auswaehlen", L"Selecionar tudo", L"Alles selecteren", L"Zaznacz wszystko", L"Tumunu sec"));
+	menu.AddSeparator();
+	CCustomPopupMenu* sub = menu.AddSubMenu(
+		LL14(L"サンプル挿入", L"Insert sample", L"Inserer exemple", L"Inserisci esempio", L"Insertar ejemplo", L"샘플 삽입", L"插入示例", L"Insert sample", L"Вставить пример", L"Beispiel einfuegen", L"Inserir exemplo", L"Voorbeeld invoegen", L"Wstaw przyklad", L"Ornek ekle"),
+		LL14(L"よく使うプロンプト構文を挿入", L"Insert a common prompt snippet", L"Inserer un exemple de prompt", L"Inserisci uno snippet prompt", L"Insertar un ejemplo de prompt", L"자주 쓰는 프롬프트 구문 삽입", L"插入常用提示语法", L"إدراج مثال موجه", L"Вставить пример промпта", L"Prompt-Beispiel einfuegen", L"Inserir exemplo de prompt", L"Promptvoorbeeld invoegen", L"Wstaw przyklad promptu", L"Sik kullanilan istem ornegi ekle"));
+	if (sub) {
+		sub->AddCommand(IDM_INS_AT, L"@p0-30[100-110]",
+			LL14(L"区間ピッチ指定の例", L"Pitch range example", L"Exemple de hauteur", L"Esempio pitch", L"Ejemplo de pitch", L"구간 피치 예", L"音高校区间示例", L"مثال طبقة", L"Пример высоты", L"Pitch-Bereich Beispiel", L"Exemplo de pitch", L"Pitchbereik voorbeeld", L"Przyklad pitch", L"Perde araligi ornegi"));
+		sub->AddCommand(IDM_INS_PCT, L"%N1:00<20-40>[100-120]",
+			LL14(L"相対指定の例", L"Relative cue example", L"Exemple relatif", L"Esempio relativo", L"Ejemplo relativo", L"상대 지정 예", L"相对指定示例", L"مثال نسبي", L"Относительный пример", L"Relatives Beispiel", L"Exemplo relativo", L"Relatief voorbeeld", L"Przyklad wzgledny", L"Goreceli ornek"));
+		sub->AddCommand(IDM_INS_SB, L"@sb1:00",
+			LL14(L"サビ頭へシーク", L"Seek to chorus start", L"Aller au refrain", L"Vai al ritornello", L"Ir al estribillo", L"후렴 시작으로", L"跳到副歌开头", L"الانتقال للمقطع", L"К припеву", L"Zum Refrain", L"Ir ao refrão", L"Naar refrein", L"Do refrenu", L"Nakarat basina"));
+		sub->AddCommand(IDM_INS_WM, L"@wm1:00");
+		sub->AddCommand(IDM_INS_PW, L"@pw1:30");
+		sub->AddCommand(IDM_INS_DR, L"@dr2:00");
+	}
+	menu.AddSeparator();
+	menu.AddCommand(IDM_SAVEHIST, LL14(L"履歴へ保存", L"Save to history", L"Enregistrer historique", L"Salva in cronologia", L"Guardar en historial", L"기록에 저장", L"保存到历史", L"Save history", L"В историю", L"In Verlauf", L"Salvar historico", L"Naar geschiedenis", L"Do historii", L"Gecmise kaydet"));
+	menu.AddCommand(IDM_CLEAR, LL14(L"クリア", L"Clear", L"Effacer", L"Cancella", L"Borrar", L"지우기", L"清除", L"Clear", L"Очистить", L"Loeschen", L"Limpar", L"Wissen", L"Wyczysc", L"Temizle"));
+	menu.AddSeparator();
+	menu.AddCommand(ID_HELP_SHOWSHEET,
 		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
 			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
 			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
 			L"Przewodnik", L"İşlem kılavuzu"));
 
-	const int cmd = (int)menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y, this);
+	const int cmd = (int)menu.Track(pt, this);
 	if (cmd <= 0) return;
 	if (cmd == ID_HELP_SHOWSHEET) { ShowHelpSheet(); return; }
 	switch (cmd) {

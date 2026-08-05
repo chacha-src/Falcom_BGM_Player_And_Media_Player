@@ -138,13 +138,7 @@ public:
 	std::vector<StreamInfo> audioStreams, videoStreams, subtitleStreams;
 
 
-	void DeleteAudioMenuItems(CMenu& menu);
-	void DeleteEmptyMenuItems(CMenu& menu, CString* streamNames, int maxCount, UINT baseID);
-	void UpdateStreamMenu(CMenu* pMenu, CString* streamNames, int maxCount, LPCWSTR prefix);
-	void LocalizeDougaMenu(CMenu* pPopup);
-	void LocalizeDougaMenu1(CMenu* pPopup);
 	void ShowDougaContextMenu(CPoint point);
-	int  FindDougaStreamSubMenu(CMenu* pPopup, UINT firstItemId);
 
 	void DumpFilterGraph();
 

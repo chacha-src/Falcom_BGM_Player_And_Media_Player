@@ -22,6 +22,8 @@ void OpenMpMirrorDlgModeless(CWnd* parent);
 void OpenMpRemoteDlgModeless(CWnd* parent);
 void OpenMpSsVizModeless(CWnd* parent);
 
+void MpSortPlaylistByKey(int key);
+
 void MpMirrorWritePcm(const BYTE* pcm, int bytes);
 void MpMirrorShutdown();
 void MpMirrorOnFormatReady(); // UI/再生準備後: ミラーONなら初期化（オーディオスレッドから呼ばない）

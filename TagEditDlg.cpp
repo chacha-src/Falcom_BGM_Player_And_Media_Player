@@ -425,8 +425,6 @@ void CTagEditDlg::OnBnClickedSave()
 			fields.comment = comment;
 		}
 
-		const bool hasText = fields.HasTitleArtistAlbum() || fields.HasAnyTagField()
-			|| (!multiFile); // 単一は空でも書く意図（全クリア相当は未対応なので非空のみ）
 		bool textOk = true;
 		if (multiFile) {
 			const bool anyInput = !title.IsEmpty() || !artist.IsEmpty() || !album.IsEmpty()
@@ -434,7 +432,8 @@ void CTagEditDlg::OnBnClickedSave()
 			if (anyInput)
 				textOk = WriteFileTagFields(path, fields);
 		}
-		else if (hasText) {
+		else {
+			// 単一: 空でも Write（対応形式は空＝タグ削除）
 			textOk = WriteFileTagFields(path, fields);
 		}
 

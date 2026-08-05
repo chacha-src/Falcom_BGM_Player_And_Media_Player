@@ -1070,15 +1070,11 @@ void CAnalyzerDlg::SetSpecStyle(int style)
 
 void CAnalyzerDlg::SetWaveSpeedPct(int pct)
 {
-	int nearest = 100;
-	int best = 100000;
-	for (int i = 0; i < WAVE_SPEED_COUNT; ++i) {
-		const int d = abs(kWaveSpeedPct[i] - pct);
-		if (d < best) { best = d; nearest = kWaveSpeedPct[i]; }
-	}
-	if (m_waveSpeedPct == nearest) return;
-	m_waveSpeedPct = nearest;
-	savedata.analyzerwavespeed = nearest;
+	if (pct < 25) pct = 25;
+	if (pct > 200) pct = 200;
+	if (m_waveSpeedPct == pct) return;
+	m_waveSpeedPct = pct;
+	savedata.analyzerwavespeed = pct;
 	EnterCriticalSection(&m_cs);
 	if (m_sampleRate > 0) {
 		const int targetW = (m_waveW > 40) ? m_waveW : 640;
@@ -1160,9 +1156,20 @@ void CAnalyzerDlg::SyncEqUiFromSavedata()
 
 int CAnalyzerDlg::WaveSpeedIndex() const
 {
-	for (int i = 0; i < WAVE_SPEED_COUNT; ++i)
-		if (kWaveSpeedPct[i] == m_waveSpeedPct) return i;
-	return 3; // x1.0
+	int nearest = 3;
+	int best = 100000;
+	for (int i = 0; i < WAVE_SPEED_COUNT; ++i) {
+		const int d = abs(kWaveSpeedPct[i] - m_waveSpeedPct);
+		if (d < best) { best = d; nearest = i; }
+	}
+	return nearest;
+}
+
+void CAnalyzerDlg::WaveSpeedSliderCb(void* ctx, int value)
+{
+	CAnalyzerDlg* p = (CAnalyzerDlg*)ctx;
+	if (!p || !::IsWindow(p->GetSafeHwnd())) return;
+	p->SetWaveSpeedPct(value);
 }
 
 void CAnalyzerDlg::ResetPeakHold()
@@ -1586,161 +1593,198 @@ void CAnalyzerDlg::OnCopyLevels()
 
 void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
-	CMenu menu;
-	menu.CreatePopupMenu();
+	CCustomPopupMenu menu;
 
-	CMenu subWave;
-	subWave.CreatePopupMenu();
-	subWave.AppendMenu(MF_STRING | (m_waveMode == WaveScroll ? MF_CHECKED : 0),
-		IDM_WAVE_SCROLL, LL14(L"スクロール波形", L"Scrolling wave", L"Onde defilante", L"Onda scorrevole", L"Onda desplazable", L"스크롤 파형", L"滚动波形", L"موجة متمررة", L"Прокрутка волны", L"Scrollende Welle", L"Onda rolante", L"Scrollende golf", L"Przewijana fala", L"Kayan dalga"));
-	subWave.AppendMenu(MF_STRING | (m_waveMode == WaveTrigger ? MF_CHECKED : 0),
-		IDM_WAVE_TRIGGER, LL14(L"トリガー式オシロ", L"Triggered scope", L"Oscillo declenche", L"Oscilloscopio con trigger", L"Osciloscopio con disparo", L"트리거 오실로스코프", L"触发示波器", L"راسم ذبذبات محفز", L"Синхр. осциллограф", L"Getriggertes Oszilloskop", L"Osciloscopio disparado", L"Getriggerde scoop", L"Wyzwalany oscyloskop", L"Tetiklemeli osiloskop"));
-	menu.AppendMenu(MF_POPUP, (UINT_PTR)subWave.Detach(),
+	CCustomPopupMenu* subWave = menu.AddSubMenu(
 		LL14(L"上部の表示", L"Upper display", L"Affichage superieur", L"Display superiore", L"Pantalla superior", L"상단 표시", L"上部显示", L"العرض العلوي", L"Верхняя область", L"Obere Anzeige", L"Exibicao superior", L"Bovenste weergave", L"Gorny widok", L"Ust gosterim"));
-
-	CMenu subLower;
-	subLower.CreatePopupMenu();
-	subLower.AppendMenu(MF_STRING | (m_lowerMode == LowerSpectrum ? MF_CHECKED : 0),
-		IDM_LOWER_SPECTRUM, LL14(L"周波数特性", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"));
-	subLower.AppendMenu(MF_STRING | (m_lowerMode == LowerWaterfall ? MF_CHECKED : 0),
-		IDM_LOWER_WATERFALL, LL14(L"スペクトログラム", L"Spectrogram", L"Spectrogramme", L"Spettrogramma", L"Espectrograma", L"스펙트로그램", L"频谱图", L"مخطط طيفي", L"Спектрограмма", L"Spektrogramm", L"Espectrograma", L"Spectrogram", L"Spektrogram", L"Spektrogram"));
-	subLower.AppendMenu(MF_STRING | (m_lowerMode == LowerPhase ? MF_CHECKED : 0),
-		IDM_LOWER_PHASE, LL14(L"位相スコープ", L"Phase scope", L"Scope de phase", L"Scope di fase", L"Osciloscopio de fase", L"위상 스코프", L"相位示波器", L"راسم الطور", L"Фазовый скоп", L"Phasenskop", L"Escopo de fase", L"Fasescoop", L"Skop fazy", L"Faz skopu"));
-	menu.AppendMenu(MF_POPUP, (UINT_PTR)subLower.Detach(),
-		LL14(L"下部の表示", L"Lower display", L"Affichage inferieur", L"Display inferiore", L"Pantalla inferior", L"하단 표시", L"下部显示", L"العرض السفلي", L"Нижняя область", L"Untere Anzeige", L"Exibicao inferior", L"Onderste weergave", L"Dolny widok", L"Alt gosterim"));
-
-	CMenu subDiff;
-	subDiff.CreatePopupMenu();
-	subDiff.AppendMenu(MF_STRING | (m_specDiff ? MF_CHECKED : 0),
-		IDM_SPEC_DIFF, LL14(L"差分を表示", L"Show difference", L"Afficher la difference", L"Mostra differenza", L"Mostrar diferencia", L"차분 표시", L"显示差分", L"إظهار الفرق", L"Показать разницу", L"Differenz anzeigen", L"Mostrar diferenca", L"Verschil tonen", L"Pokaz roznice", L"Farki goster"));
-	subDiff.AppendMenu(MF_STRING, IDM_SPEC_SNAP,
-		LL14(L"現在をスナップショット", L"Capture snapshot", L"Capturer un instantane", L"Cattura istantanea", L"Capturar instantanea", L"현재를 스냅샷", L"捕获快照", L"التقاط لقطة", L"Сделать снимок", L"Momentaufnahme erstellen", L"Capturar instantaneo", L"Momentopname maken", L"Zrob migawke", L"Anlik goruntu al"));
-	subDiff.AppendMenu(MF_STRING | (m_specSnapValid ? 0 : MF_GRAYED), IDM_SPEC_SNAP_CLEAR,
-		LL14(L"スナップショットを消去", L"Clear snapshot", L"Effacer l'instantane", L"Cancella istantanea", L"Borrar instantanea", L"스냅샷 지우기", L"清除快照", L"مسح اللقطة", L"Удалить снимок", L"Momentaufnahme loschen", L"Limpar instantaneo", L"Momentopname wissen", L"Wyczysc migawke", L"Anlik goruntuyu sil"));
-	menu.AppendMenu(MF_POPUP, (UINT_PTR)subDiff.Detach(),
-		LL14(L"スペクトラム差分", L"Spectrum difference", L"Difference de spectre", L"Differenza di spettro", L"Diferencia de espectro", L"스펙트럼 차분", L"频谱差分", L"فرق الطيف", L"Разница спектра", L"Spektrumdifferenz", L"Diferenca de espectro", L"Spectrumverschil", L"Roznica widma", L"Spektrum farki"));
-
-	CMenu subZoom;
-	subZoom.CreatePopupMenu();
-	subZoom.AppendMenu(MF_STRING | (m_freqZoom == ZoomFull ? MF_CHECKED : 0),
-		IDM_ZOOM_FULL, LL14(L"全帯域", L"Full range", L"Bande complete", L"Banda intera", L"Banda completa", L"전대역", L"全频段", L"النطاق الكامل", L"Весь диапазон", L"Voller Bereich", L"Faixa completa", L"Volledig bereik", L"Pelny zakres", L"Tam bant"));
-	subZoom.AppendMenu(MF_STRING | (m_freqZoom == ZoomLow ? MF_CHECKED : 0),
-		IDM_ZOOM_LOW, LL14(L"低域 (20-250Hz)", L"Low (20-250 Hz)", L"Graves (20-250 Hz)", L"Bassi (20-250 Hz)", L"Graves (20-250 Hz)", L"저역 (20-250Hz)", L"低频 (20-250Hz)", L"منخفض (20-250 هرتز)", L"Низкие (20-250 Гц)", L"Tiefen (20-250 Hz)", L"Graves (20-250 Hz)", L"Laag (20-250 Hz)", L"Niskie (20-250 Hz)", L"Bas (20-250 Hz)"));
-	subZoom.AppendMenu(MF_STRING | (m_freqZoom == ZoomMid ? MF_CHECKED : 0),
-		IDM_ZOOM_MID, LL14(L"中域 (250Hz-4kHz)", L"Mid (250 Hz - 4 kHz)", L"Mediums (250 Hz - 4 kHz)", L"Medi (250 Hz - 4 kHz)", L"Medios (250 Hz - 4 kHz)", L"중역 (250Hz-4kHz)", L"中频 (250Hz-4kHz)", L"متوسط (250 هرتز - 4 كيلوهرتز)", L"Средние (250 Гц - 4 кГц)", L"Mitten (250 Hz - 4 kHz)", L"Medios (250 Hz - 4 kHz)", L"Midden (250 Hz - 4 kHz)", L"Srednie (250 Hz - 4 kHz)", L"Orta (250 Hz - 4 kHz)"));
-	subZoom.AppendMenu(MF_STRING | (m_freqZoom == ZoomHigh ? MF_CHECKED : 0),
-		IDM_ZOOM_HIGH, LL14(L"高域 (4kHz以上)", L"High (4 kHz and up)", L"Aigus (4 kHz et plus)", L"Alti (da 4 kHz)", L"Agudos (desde 4 kHz)", L"고역 (4kHz 이상)", L"高频 (4kHz 以上)", L"عالي (4 كيلوهرتز فأكثر)", L"Высокие (от 4 кГц)", L"Hohen (ab 4 kHz)", L"Agudos (a partir de 4 kHz)", L"Hoog (vanaf 4 kHz)", L"Wysokie (od 4 kHz)", L"Tiz (4 kHz ve ustu)"));
-	menu.AppendMenu(MF_POPUP, (UINT_PTR)subZoom.Detach(),
-		LL14(L"周波数の範囲", L"Frequency range", L"Plage de frequences", L"Intervallo di frequenza", L"Rango de frecuencias", L"주파수 범위", L"频率范围", L"نطاق التردد", L"Диапазон частот", L"Frequenzbereich", L"Faixa de frequencia", L"Frequentiebereik", L"Zakres czestotliwosci", L"Frekans araligi"));
-
-	CMenu subMarker;
-	subMarker.CreatePopupMenu();
-	subMarker.AppendMenu(MF_STRING | (m_hoverValid ? 0 : MF_GRAYED), IDM_MARKER_ADD,
-		LL14(L"ホバー位置に追加", L"Add at hover position", L"Ajouter a la position du survol", L"Aggiungi alla posizione del cursore", L"Anadir en la posicion del cursor", L"호버 위치에 추가", L"在悬停位置添加", L"إضافة عند موضع المؤشر", L"Добавить в позиции курсора", L"An Hover-Position hinzufugen", L"Adicionar na posicao do cursor", L"Toevoegen op hoverpositie", L"Dodaj w miejscu kursora", L"Imlec konumuna ekle"));
-	subMarker.AppendMenu(MF_STRING, IDM_MARKER_REMOVE,
-		LL14(L"最も近いものを削除", L"Remove nearest", L"Supprimer le plus proche", L"Rimuovi il piu vicino", L"Eliminar el mas cercano", L"가장 가까운 것 삭제", L"删除最近的", L"إزالة الأقرب", L"Удалить ближайший", L"Nachsten entfernen", L"Remover o mais proximo", L"Dichtstbijzijnde verwijderen", L"Usun najblizszy", L"En yakini kaldir"));
-	subMarker.AppendMenu(MF_STRING, IDM_MARKER_CLEAR,
-		LL14(L"すべて削除", L"Clear all", L"Tout effacer", L"Cancella tutti", L"Borrar todos", L"모두 삭제", L"全部清除", L"مسح الكل", L"Удалить все", L"Alle loschen", L"Limpar todos", L"Alles wissen", L"Usun wszystkie", L"Tumunu temizle"));
-	menu.AppendMenu(MF_POPUP, (UINT_PTR)subMarker.Detach(),
-		LL14(L"周波数マーカー", L"Frequency markers", L"Marqueurs de frequence", L"Marcatori di frequenza", L"Marcadores de frecuencia", L"주파수 마커", L"频率标记", L"علامات التردد", L"Частотные маркеры", L"Frequenzmarker", L"Marcadores de frequencia", L"Frequentiemarkeringen", L"Znaczniki czestotliwosci", L"Frekans isaretleri"));
-
-	menu.AppendMenu(MF_STRING | (savedata.pro_corr_meter ? MF_CHECKED : 0),
-		IDM_CORR_METER, LL14(L"位相相関メーター", L"Correlation meter", L"Correlometre", L"Misuratore di correlazione", L"Medidor de correlacion", L"위상 상관 미터", L"相位相关表", L"مقياس الترابط الطوري", L"Измеритель корреляции", L"Korrelationsanzeige", L"Medidor de correlacao", L"Correlatiemeter", L"Miernik korelacji", L"Faz korelasyon olceri"));
-
-	CMenu subMs;
-	subMs.CreatePopupMenu();
-	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_width == 40 && !savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_MS_NARROW,
-		LL14(L"M/S 狭め (40%)", L"M/S narrow (40%)", L"M/S etroit (40%)", L"M/S stretto (40%)", L"M/S estrecho (40%)", L"M/S 좁게 (40%)", L"M/S 窄 (40%)", L"M/S ضيق (40%)", L"M/S узко (40%)", L"M/S schmal (40%)", L"M/S estreito (40%)", L"M/S smal (40%)", L"M/S wasko (40%)", L"M/S dar (40%)"));
-	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_width == 160 && !savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_MS_WIDE,
-		LL14(L"M/S 広げ (160%)", L"M/S wide (160%)", L"M/S large (160%)", L"M/S ampio (160%)", L"M/S ancho (160%)", L"M/S 넓게 (160%)", L"M/S 宽 (160%)", L"M/S واسع (160%)", L"M/S широко (160%)", L"M/S breit (160%)", L"M/S largo (160%)", L"M/S breed (160%)", L"M/S szeroko (160%)", L"M/S genis (160%)"));
-	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_MS_MONO,
-		LL14(L"M/S モノ", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S 모노", L"M/S  mono", L"M/S mono", L"M/S моно", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono"));
-	subMs.AppendMenu(MF_STRING | (savedata.pro_ms_width == 100 && !savedata.pro_ms_mono ? MF_CHECKED : 0), IDM_MS_RESET,
-		LL14(L"M/S リセット", L"M/S reset", L"M/S reinit.", L"M/S reset", L"M/S restablecer", L"M/S 리셋", L"M/S 重置", L"M/S reset", L"M/S сброс", L"M/S reset", L"M/S reset", L"M/S reset", L"M/S reset", L"M/S sifirla"));
-	subMs.AppendMenu(MF_STRING, IDM_MS_FROM_CORR,
-		LL14(L"相関ヒストから提案", L"Suggest from corr history", L"Suggérer depuis corr.", L"Suggerisci da corr.", L"Sugerir desde corr.", L"상관 이력에서 제안", L"根据相关历史建议", L"اقتراح من الارتباط", L"Предложить по корреляции", L"Aus Korr.-Verlauf vorschlagen", L"Sugerir pelo hist. corr.", L"Voorstel uit corr.-geschiedenis", L"Zaproponuj z historii kor.", L"Korelasyon gecmisinden oner"));
-	menu.AppendMenu(MF_POPUP, (UINT_PTR)subMs.Detach(),
-		LL14(L"相関→M/S", L"Correlation→M/S", L"Correlation→M/S", L"Correlazione→M/S", L"Correlacion→M/S", L"상관→M/S", L"相关→M/S", L"ترابط→M/S", L"Корреляция→M/S", L"Korrelation→M/S", L"Correlacao→M/S", L"Correlatie→M/S", L"Korelacja→M/S", L"Korelasyon→M/S"));
-	menu.AppendMenu(MF_STRING, IDM_SAVE_JACKET,
-		LL14(L"スペクトルを画像保存…", L"Save spectrogram as image…", L"Enregistrer le spectrogramme…", L"Salva spettrogramma…", L"Guardar espectrograma…", L"스펙트럼 이미지 저장…", L"将频谱图保存为图片…", L"حفظ الطيف كصورة…", L"Сохранить спектrogram…", L"Spektrogramm speichern…", L"Salvar espectrograma…", L"Spectrogram opslaan…", L"Zapisz spektrogram…", L"Spektrumu kaydet…"));
-	menu.AppendMenu(MF_SEPARATOR);
-
-	CMenu subLayout;
-	subLayout.CreatePopupMenu();
-	subLayout.AppendMenu(MF_STRING | (m_specLayout == SpecOverlay ? MF_CHECKED : 0),
-		IDM_SPEC_OVERLAY, LL14(L"重ね描き", L"Overlay", L"Superpose", L"Sovrapposto", L"Superpuesto", L"겹침", L"叠加", L"تراكب", L"Наложение", L"Uberlagert", L"Sobreposto", L"Overlay", L"Nakladanie", L"Ustuste"));
-	subLayout.AppendMenu(MF_STRING | (m_specLayout == SpecSplitV ? MF_CHECKED : 0),
-		IDM_SPEC_SPLIT_V, LL14(L"上下分割", L"Split vertical", L"Division verticale", L"Divisione verticale", L"Division vertical", L"상하 분할", L"上下分割", L"تقسيم رأسي", L"Вертикально", L"Vertikal teilen", L"Dividir vertical", L"Verticaal", L"Pionowo", L"Dikey bol"));
-	subLayout.AppendMenu(MF_STRING | (m_specLayout == SpecSplitH ? MF_CHECKED : 0),
-		IDM_SPEC_SPLIT_H, LL14(L"左右分割", L"Split horizontal", L"Division horizontale", L"Divisione orizzontale", L"Division horizontal", L"좌우 분할", L"左右分割", L"تقسيم أفقي", L"Горизонтально", L"Horizontal teilen", L"Dividir horizontal", L"Horizontaal", L"Poziomo", L"Yatay bol"));
-	subLayout.AppendMenu(MF_STRING | (m_specLayout == SpecGrid4 ? MF_CHECKED : 0)
-		| (m_channels < 4 ? MF_GRAYED : 0),
-		IDM_SPEC_GRID4, LL14(L"4分割 (2x2)", L"4-way (2x2)", L"4 voies (2x2)", L"4 vie (2x2)", L"4 vias (2x2)", L"4분할 (2x2)", L"四分割(2x2)", L"4 اتجاهات", L"4 панели", L"4-fach (2x2)", L"4 vias (2x2)", L"4-weg (2x2)", L"4 panele (2x2)", L"4 bolum (2x2)"));
-	subLayout.AppendMenu(MF_STRING | (m_specLayout == SpecGrid8 ? MF_CHECKED : 0)
-		| (m_channels < 5 ? MF_GRAYED : 0),
-		IDM_SPEC_GRID8, LL14(L"8分割 (2x4)", L"8-way (2x4)", L"8 voies (2x4)", L"8 vie (2x4)", L"8 vias (2x4)", L"8분할 (2x4)", L"八分割(2x4)", L"8 اتجاهات", L"8 панелей", L"8-fach (2x4)", L"8 vias (2x4)", L"8-weg (2x4)", L"8 paneli (2x4)", L"8 bolum (2x4)"));
-	menu.AppendMenu(MF_POPUP, (UINT_PTR)subLayout.Detach(),
-		LL14(L"周波数特性の表示", L"Frequency display", L"Affichage frequence", L"Visualizzazione frequenza", L"Vista de frecuencia", L"주파수 표시", L"频率显示", L"عرض التردد", L"Отображение АЧХ", L"Frequenzanzeige", L"Exibicao de frequencia", L"Frequentieweergave", L"Wyswietlanie czest.", L"Frekans gorunumu"));
-
-	CMenu subStyle;
-	subStyle.CreatePopupMenu();
-	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleFill ? MF_CHECKED : 0),
-		IDM_STYLE_FILL, LL14(L"Ozone 風 (塗+線)", L"Ozone (fill+line)", L"Ozone (rempl.+ligne)", L"Ozone (riemp.+linea)", L"Ozone (relleno+linea)", L"Ozone (채움+선)", L"Ozone(填充+线)", L"Ozone (تعبئة+خط)", L"Ozone (заливка+линия)", L"Ozone (Fullung+Linie)", L"Ozone (preench.+linha)", L"Ozone (vulling+lijn)", L"Ozone (wypeln.+linia)", L"Ozone (dolgu+cizgi)"));
-	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleCubase ? MF_CHECKED : 0),
-		IDM_STYLE_CUBASE, LL14(L"Cubase Frequency 風", L"Cubase Frequency style", L"Style Cubase Frequency", L"Stile Cubase Frequency", L"Estilo Cubase Frequency", L"Cubase Frequency 스타일", L"Cubase Frequency 风格", L"نمط Cubase Frequency", L"Стиль Cubase Frequency", L"Cubase Frequency-Stil", L"Estilo Cubase Frequency", L"Cubase Frequency-stijl", L"Styl Cubase Frequency", L"Cubase Frequency tarzı"));
-	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleSpan ? MF_CHECKED : 0),
-		IDM_STYLE_SPAN, LL14(L"Voxengo SPAN 風", L"Voxengo SPAN style", L"Style Voxengo SPAN", L"Stile Voxengo SPAN", L"Estilo Voxengo SPAN", L"Voxengo SPAN 스타일", L"Voxengo SPAN 风格", L"نمط Voxengo SPAN", L"Стиль Voxengo SPAN", L"Voxengo SPAN-Stil", L"Estilo Voxengo SPAN", L"Voxengo SPAN-stijl", L"Styl Voxengo SPAN", L"Voxengo SPAN tarzı"));
-	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleAbleton ? MF_CHECKED : 0),
-		IDM_STYLE_ABLETON, LL14(L"Ableton Spectrum 風", L"Ableton Spectrum style", L"Style Ableton Spectrum", L"Stile Ableton Spectrum", L"Estilo Ableton Spectrum", L"Ableton Spectrum 스타일", L"Ableton Spectrum 风格", L"نمط Ableton Spectrum", L"Стиль Ableton Spectrum", L"Ableton Spectrum-Stil", L"Estilo Ableton Spectrum", L"Ableton Spectrum-stijl", L"Styl Ableton Spectrum", L"Ableton Spectrum tarzı"));
-	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleFabFilter ? MF_CHECKED : 0),
-		IDM_STYLE_FABFILTER, LL14(L"FabFilter Pro-Q 風", L"FabFilter Pro-Q style", L"Style FabFilter Pro-Q", L"Stile FabFilter Pro-Q", L"Estilo FabFilter Pro-Q", L"FabFilter Pro-Q 스타일", L"FabFilter Pro-Q 风格", L"نمط FabFilter Pro-Q", L"Стиль FabFilter Pro-Q", L"FabFilter Pro-Q-Stil", L"Estilo FabFilter Pro-Q", L"FabFilter Pro-Q-stijl", L"Styl FabFilter Pro-Q", L"FabFilter Pro-Q tarzı"));
-	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleBars ? MF_CHECKED : 0),
-		IDM_STYLE_BARS, LL14(L"バー (汎用)", L"Bars (generic)", L"Barres", L"Barre", L"Barras", L"막대", L"柱状", L"أشرطة", L"Столбцы", L"Balken", L"Barras", L"Balken", L"Slupki", L"Cubuk"));
-	subStyle.AppendMenu(MF_STRING | (m_specStyle == StyleLine ? MF_CHECKED : 0),
-		IDM_STYLE_LINE, LL14(L"線のみ", L"Line only", L"Ligne seule", L"Solo linea", L"Solo linea", L"선만", L"仅线", L"خط فقط", L"Только линия", L"Nur Linie", L"Somente linha", L"Alleen lijn", L"Tylko linia", L"Sadece cizgi"));
-	menu.AppendMenu(MF_POPUP, (UINT_PTR)subStyle.Detach(),
-		LL14(L"周波数の表示モード", L"Frequency display mode", L"Mode d'affichage frequence", L"Modalita visualizzazione", L"Modo de visualizacion", L"주파수 표시 모드", L"频率显示模式", L"وضع عرض التردد", L"Режим АЧХ", L"Frequenz-Anzeigemodus", L"Modo de frequencia", L"Frequentieweergavemodus", L"Tryb wyswietlania czest.", L"Frekans gorunum modu"));
-
-	CMenu subSpeed;
-	subSpeed.CreatePopupMenu();
-	const int speedIdx = WaveSpeedIndex();
-	for (int i = 0; i < WAVE_SPEED_COUNT; ++i) {
-		CString lab;
-		lab.Format(_T("x%.2f"), (double)kWaveSpeedPct[i] / 100.0);
-		subSpeed.AppendMenu(MF_STRING | (i == speedIdx ? MF_CHECKED : 0),
-			IDM_WAVE_SPEED_BASE + i, lab);
+	if (subWave) {
+		subWave->AddCheck(IDM_WAVE_SCROLL,
+			LL14(L"スクロール波形", L"Scrolling wave", L"Onde defilante", L"Onda scorrevole", L"Onda desplazable", L"스크롤 파형", L"滚动波形", L"موجة متمررة", L"Прокрутка волны", L"Scrollende Welle", L"Onda rolante", L"Scrollende golf", L"Przewijana fala", L"Kayan dalga"),
+			m_waveMode == WaveScroll);
+		subWave->AddCheck(IDM_WAVE_TRIGGER,
+			LL14(L"トリガー式オシロ", L"Triggered scope", L"Oscillo declenche", L"Oscilloscopio con trigger", L"Osciloscopio con disparo", L"트리거 오실로스코프", L"触发示波器", L"راسم ذبذبات محفز", L"Синхр. осциллограф", L"Getriggertes Oszilloskop", L"Osciloscopio disparado", L"Getriggerde scoop", L"Wyzwalany oscyloskop", L"Tetiklemeli osiloskop"),
+			m_waveMode == WaveTrigger);
 	}
-	menu.AppendMenu(MF_POPUP, (UINT_PTR)subSpeed.Detach(),
-		LL14(L"波形の流れる速度", L"Wave scroll speed", L"Vitesse de defilement", L"Velocita scorrimento", L"Velocidad de desplazamiento", L"파형 스크롤 속도", L"波形滚动速度", L"سرعة تمرير الموجة", L"Скорость прокрутки волны", L"Wellen-Scrollgeschwindigkeit", L"Velocidade de rolagem", L"Golf-scrolsnelheid", L"Predkosc przewijania fali", L"Dalga kaydirma hizi"));
 
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING | (m_peakHold ? MF_CHECKED : 0),
-		IDM_PEAK_HOLD, LL14(L"ピークホールド", L"Peak hold", L"Maintien de crete", L"Picco trattenuto", L"Retencion de pico", L"피크 홀드", L"峰值保持", L"الاحتفاظ بالذروة", L"Удержание пика", L"Peak Hold", L"Retencao de pico", L"Piekvasthouden", L"Przytrzymanie szczytu", L"Tepe tutma"));
-	menu.AppendMenu(MF_STRING | (m_eqOverlay ? MF_CHECKED : 0),
-		IDM_EQ_OVERLAY, LL14(L"EQオーバーレイ", L"EQ overlay", L"Superposition EQ", L"Sovrapposizione EQ", L"Superposicion EQ", L"EQ 오버레이", L"EQ叠加", L"تراكب EQ", L"Оверлей EQ", L"EQ-Overlay", L"Sobreposicao EQ", L"EQ-overlay", L"Nakladka EQ", L"EQ kaplama"));
-	menu.AppendMenu(MF_STRING | (m_showLevelMeter ? MF_CHECKED : 0),
-		IDM_LEVEL_METER, LL14(L"レベルメーター", L"Level meter", L"Indicateur de niveau", L"Misuratore di livello", L"Medidor de nivel", L"레벨 미터", L"电平表", L"مقياس المستوى", L"Уровень сигнала", L"Pegelanzeige", L"Medidor de nivel", L"Niveaumeter", L"Miernik poziomu", L"Seviye olcer"));
-	menu.AppendMenu(MF_STRING | (m_frozen ? MF_CHECKED : 0),
-		IDM_FREEZE, LL14(L"フリーズ", L"Freeze", L"Gel", L"Congela", L"Congelar", L"정지", L"冻结", L"تجميد", L"Заморозка", L"Einfrieren", L"Congelar", L"Bevriezen", L"Zamroz", L"Dondur"));
-	menu.AppendMenu(MF_STRING, IDM_RESET_PEAK,
-		LL14(L"ピークをリセット (ダブルクリック)", L"Reset peaks (double-click)", L"Reinit. cretes (double-clic)", L"Reset picchi (doppio clic)", L"Restablecer picos (doble clic)", L"피크 리셋(더블클릭)", L"重置峰值(双击)", L"إعادة الذروة (نقر مزدوج)", L"Сброс пиков (двойной клик)", L"Peaks zurucksetzen (Doppelklick)", L"Redefinir picos (duplo clique)", L"Piekreset (dubbelklik)", L"Reset szczytow (dwuklik)", L"Tepe sifirla (cift tik)"));
+	CCustomPopupMenu* subLower = menu.AddSubMenu(
+		LL14(L"下部の表示", L"Lower display", L"Affichage inferieur", L"Display inferiore", L"Pantalla inferior", L"하단 표시", L"下部显示", L"العرض السفلي", L"Нижняя область", L"Untere Anzeige", L"Exibicao inferior", L"Onderste weergave", L"Dolny widok", L"Alt gosterim"));
+	if (subLower) {
+		subLower->AddCheck(IDM_LOWER_SPECTRUM,
+			LL14(L"周波数特性", L"Spectrum", L"Spectre", L"Spettro", L"Espectro", L"스펙트럼", L"频谱", L"الطيف", L"Спектр", L"Spektrum", L"Espectro", L"Spectrum", L"Widmo", L"Spektrum"),
+			m_lowerMode == LowerSpectrum);
+		subLower->AddCheck(IDM_LOWER_WATERFALL,
+			LL14(L"スペクトログラム", L"Spectrogram", L"Spectrogramme", L"Spettrogramma", L"Espectrograma", L"스펙트로그램", L"频谱图", L"مخطط طيفي", L"Спектрограмма", L"Spektrogramm", L"Espectrograma", L"Spectrogram", L"Spektrogram", L"Spektrogram"),
+			m_lowerMode == LowerWaterfall);
+		subLower->AddCheck(IDM_LOWER_PHASE,
+			LL14(L"位相スコープ", L"Phase scope", L"Scope de phase", L"Scope di fase", L"Osciloscopio de fase", L"위상 스코프", L"相位示波器", L"راسم الطور", L"Фазовый скоп", L"Phasenskop", L"Escopo de fase", L"Fasescoop", L"Skop fazy", L"Faz skopu"),
+			m_lowerMode == LowerPhase);
+	}
 
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING | (m_hoverValid ? 0 : MF_GRAYED), IDM_COPY_HOVER,
-		LL14(L"ホバー値をコピー", L"Copy hover readout", L"Copier la lecture au survol", L"Copia lettura hover", L"Copiar lectura al pasar", L"호버 값 복사", L"复制悬停读数", L"نسخ قراءة التمرير", L"Копировать наведение", L"Hover-Wert kopieren", L"Copiar leitura ao pairar", L"Hoverwaarde kopieren", L"Kopiuj odczyt hover", L"Hover degerini kopyala"));
-	menu.AppendMenu(MF_STRING, IDM_COPY_PEAK,
+	CCustomPopupMenu* subDiff = menu.AddSubMenu(
+		LL14(L"スペクトラム差分", L"Spectrum difference", L"Difference de spectre", L"Differenza di spettro", L"Diferencia de espectro", L"스펙트럼 차분", L"频谱差分", L"فرق الطيف", L"Разница спектра", L"Spektrumdifferenz", L"Diferenca de espectro", L"Spectrumverschil", L"Roznica widma", L"Spektrum farki"),
+		LL14(L"スナップショットとの差分表示で周波数特性の変化を比較します。", L"Compare spectrum changes against a captured snapshot.", L"Comparer le spectre a un instantane capture.", L"Confronta lo spettro con un'istantanea.", L"Comparar el espectro con una instantanea.", L"스냅샷과 비교해 스펙트럼 변화를 봅니다.", L"对照快照比较频谱变化。", L"مقارنة تغيّر الطيف مع لقطة محفوظة.", L"Сравнивать спектр со снимком.", L"Spektrumanderungen mit Momentaufnahme vergleichen.", L"Comparar mudancas do espectro com um instantaneo.", L"Vergelijk spectrumwijzigingen met een momentopname.", L"Porownuj zmiany widma ze snapshotem.", L"Spektrum degisimini anlik goruntuyle karsilastir."));
+	if (subDiff) {
+		subDiff->AddCheck(IDM_SPEC_DIFF,
+			LL14(L"差分を表示", L"Show difference", L"Afficher la difference", L"Mostra differenza", L"Mostrar diferencia", L"차분 표시", L"显示差分", L"إظهار الفرق", L"Показать разницу", L"Differenz anzeigen", L"Mostrar diferenca", L"Verschil tonen", L"Pokaz roznice", L"Farki goster"),
+			m_specDiff);
+		subDiff->AddCommand(IDM_SPEC_SNAP,
+			LL14(L"現在をスナップショット", L"Capture snapshot", L"Capturer un instantane", L"Cattura istantanea", L"Capturar instantanea", L"현재를 스냅샷", L"捕获快照", L"التقاط لقطة", L"Сделать снимок", L"Momentaufnahme erstellen", L"Capturar instantaneo", L"Momentopname maken", L"Zrob migawke", L"Anlik goruntu al"));
+		subDiff->AddCommand(IDM_SPEC_SNAP_CLEAR,
+			LL14(L"スナップショットを消去", L"Clear snapshot", L"Effacer l'instantane", L"Cancella istantanea", L"Borrar instantanea", L"스냅샷 지우기", L"清除快照", L"مسح اللقطة", L"Удалить снимок", L"Momentaufnahme loschen", L"Limpar instantaneo", L"Momentopname wissen", L"Wyczysc migawke", L"Anlik goruntuyu sil"),
+			NULL, m_specSnapValid);
+	}
+
+	CCustomPopupMenu* subZoom = menu.AddSubMenu(
+		LL14(L"周波数の範囲", L"Frequency range", L"Plage de frequences", L"Intervallo di frequenza", L"Rango de frecuencias", L"주파수 범위", L"频率范围", L"نطاق التردد", L"Диапазон частот", L"Frequenzbereich", L"Faixa de frequencia", L"Frequentiebereik", L"Zakres czestotliwosci", L"Frekans araligi"));
+	if (subZoom) {
+		subZoom->AddCheck(IDM_ZOOM_FULL,
+			LL14(L"全帯域", L"Full range", L"Bande complete", L"Banda intera", L"Banda completa", L"전대역", L"全频段", L"النطاق الكامل", L"Весь диапазон", L"Voller Bereich", L"Faixa completa", L"Volledig bereik", L"Pelny zakres", L"Tam bant"),
+			m_freqZoom == ZoomFull);
+		subZoom->AddCheck(IDM_ZOOM_LOW,
+			LL14(L"低域 (20-250Hz)", L"Low (20-250 Hz)", L"Graves (20-250 Hz)", L"Bassi (20-250 Hz)", L"Graves (20-250 Hz)", L"저역 (20-250Hz)", L"低频 (20-250Hz)", L"منخفض (20-250 هرتز)", L"Низкие (20-250 Гц)", L"Tiefen (20-250 Hz)", L"Graves (20-250 Hz)", L"Laag (20-250 Hz)", L"Niskie (20-250 Hz)", L"Bas (20-250 Hz)"),
+			m_freqZoom == ZoomLow);
+		subZoom->AddCheck(IDM_ZOOM_MID,
+			LL14(L"中域 (250Hz-4kHz)", L"Mid (250 Hz - 4 kHz)", L"Mediums (250 Hz - 4 kHz)", L"Medi (250 Hz - 4 kHz)", L"Medios (250 Hz - 4 kHz)", L"중역 (250Hz-4kHz)", L"中频 (250Hz-4kHz)", L"متوسط (250 هرتز - 4 كيلوهرتز)", L"Средние (250 Гц - 4 кГц)", L"Mitten (250 Hz - 4 kHz)", L"Medios (250 Hz - 4 kHz)", L"Midden (250 Hz - 4 kHz)", L"Srednie (250 Hz - 4 kHz)", L"Orta (250 Hz - 4 kHz)"),
+			m_freqZoom == ZoomMid);
+		subZoom->AddCheck(IDM_ZOOM_HIGH,
+			LL14(L"高域 (4kHz以上)", L"High (4 kHz and up)", L"Aigus (4 kHz et plus)", L"Alti (da 4 kHz)", L"Agudos (desde 4 kHz)", L"고역 (4kHz 이상)", L"高频 (4kHz 以上)", L"عالي (4 كيلوهرتز فأكثر)", L"Высокие (от 4 кГц)", L"Hohen (ab 4 kHz)", L"Agudos (a partir de 4 kHz)", L"Hoog (vanaf 4 kHz)", L"Wysokie (od 4 kHz)", L"Tiz (4 kHz ve ustu)"),
+			m_freqZoom == ZoomHigh);
+	}
+
+	CCustomPopupMenu* subMarker = menu.AddSubMenu(
+		LL14(L"周波数マーカー", L"Frequency markers", L"Marqueurs de frequence", L"Marcatori di frequenza", L"Marcadores de frecuencia", L"주파수 마커", L"频率标记", L"علامات التردد", L"Частотные маркеры", L"Frequenzmarker", L"Marcadores de frequencia", L"Frequentiemarkeringen", L"Znaczniki czestotliwosci", L"Frekans isaretleri"));
+	if (subMarker) {
+		subMarker->AddCommand(IDM_MARKER_ADD,
+			LL14(L"ホバー位置に追加", L"Add at hover position", L"Ajouter a la position du survol", L"Aggiungi alla posizione del cursore", L"Anadir en la posicion del cursor", L"호버 위치에 추가", L"在悬停位置添加", L"إضافة عند موضع المؤشر", L"Добавить в позиции курсора", L"An Hover-Position hinzufugen", L"Adicionar na posicao do cursor", L"Toevoegen op hoverpositie", L"Dodaj w miejscu kursora", L"Imlec konumuna ekle"),
+			NULL, m_hoverValid);
+		subMarker->AddCommand(IDM_MARKER_REMOVE,
+			LL14(L"最も近いものを削除", L"Remove nearest", L"Supprimer le plus proche", L"Rimuovi il piu vicino", L"Eliminar el mas cercano", L"가장 가까운 것 삭제", L"删除最近的", L"إزالة الأقرب", L"Удалить ближайший", L"Nachsten entfernen", L"Remover o mais proximo", L"Dichtstbijzijnde verwijderen", L"Usun najblizszy", L"En yakini kaldir"));
+		subMarker->AddCommand(IDM_MARKER_CLEAR,
+			LL14(L"すべて削除", L"Clear all", L"Tout effacer", L"Cancella tutti", L"Borrar todos", L"모두 삭제", L"全部清除", L"مسح الكل", L"Удалить все", L"Alle loschen", L"Limpar todos", L"Alles wissen", L"Usun wszystkie", L"Tumunu temizle"));
+	}
+
+	menu.AddCheck(IDM_CORR_METER,
+		LL14(L"位相相関メーター", L"Correlation meter", L"Correlometre", L"Misuratore di correlazione", L"Medidor de correlacion", L"위상 상관 미터", L"相位相关表", L"مقياس الترابط الطوري", L"Измеритель корреляции", L"Korrelationsanzeige", L"Medidor de correlacao", L"Correlatiemeter", L"Miernik korelacji", L"Faz korelasyon olceri"),
+		savedata.pro_corr_meter != 0,
+		LL14(L"ステレオ位相相関を表示します（-1…+1）。", L"Show stereo phase correlation (-1…+1).", L"Afficher la correlation de phase stereo (-1…+1).", L"Mostra la correlazione di fase stereo (-1…+1).", L"Mostrar correlacion de fase estereo (-1…+1).", L"스테레오 위상 상관을 표시합니다(-1…+1).", L"显示立体声相位相关（-1…+1）。", L"عرض ترابط الطور الاستريو (-1…+1).", L"Показывать фазовую корреляцию стерео (-1…+1).", L"Stereo-Phasenkorrelation anzeigen (-1…+1).", L"Mostrar correlacao de fase stereo (-1…+1).", L"Stereo-fasecorrelatie tonen (-1…+1).", L"Pokaz korelacje fazy stereo (-1…+1).", L"Stereo faz korelasyonunu goster (-1…+1)."));
+
+	CCustomPopupMenu* subMs = menu.AddSubMenu(
+		LL14(L"相関→M/S", L"Correlation→M/S", L"Correlation→M/S", L"Correlazione→M/S", L"Correlacion→M/S", L"상관→M/S", L"相关→M/S", L"ترابط→M/S", L"Корреляция→M/S", L"Korrelation→M/S", L"Correlacao→M/S", L"Correlatie→M/S", L"Korelacja→M/S", L"Korelasyon→M/S"),
+		LL14(L"相関メーターの傾向から Mid/Side 幅プリセットを適用します。", L"Apply Mid/Side width presets from correlation trends.", L"Appliquer des presets Mid/Side selon la correlation.", L"Applica preset Mid/Side dalla correlazione.", L"Aplicar presets Mid/Side segun la correlacion.", L"상관 추세에 따라 Mid/Side 폭 프리셋을 적용합니다.", L"根据相关趋势应用 Mid/Side 宽度预设。", L"تطبيق إعدادات عرض Mid/Side من اتجاه الترابط.", L"Применять пресеты ширины Mid/Side по корреляции.", L"Mid/Side-Breitenpresets aus Korrelationstrends.", L"Aplicar presets Mid/Side pela correlacao.", L"Pas Mid/Side-breedtepresets toe via correlatie.", L"Stosuj presety szerokosci Mid/Side z korelacji.", L"Korelasyon egiliminden Mid/Side genislik onayarlarini uygula."));
+	if (subMs) {
+		subMs->AddCheck(IDM_MS_NARROW,
+			LL14(L"M/S 狭め (40%)", L"M/S narrow (40%)", L"M/S etroit (40%)", L"M/S stretto (40%)", L"M/S estrecho (40%)", L"M/S 좁게 (40%)", L"M/S 窄 (40%)", L"M/S ضيق (40%)", L"M/S узко (40%)", L"M/S schmal (40%)", L"M/S estreito (40%)", L"M/S smal (40%)", L"M/S wasko (40%)", L"M/S dar (40%)"),
+			savedata.pro_ms_width == 40 && !savedata.pro_ms_mono);
+		subMs->AddCheck(IDM_MS_WIDE,
+			LL14(L"M/S 広げ (160%)", L"M/S wide (160%)", L"M/S large (160%)", L"M/S ampio (160%)", L"M/S ancho (160%)", L"M/S 넓게 (160%)", L"M/S 宽 (160%)", L"M/S واسع (160%)", L"M/S широко (160%)", L"M/S breit (160%)", L"M/S largo (160%)", L"M/S breed (160%)", L"M/S szeroko (160%)", L"M/S genis (160%)"),
+			savedata.pro_ms_width == 160 && !savedata.pro_ms_mono);
+		subMs->AddCheck(IDM_MS_MONO,
+			LL14(L"M/S モノ", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S 모노", L"M/S  mono", L"M/S mono", L"M/S моно", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono", L"M/S mono"),
+			savedata.pro_ms_mono != 0);
+		subMs->AddCheck(IDM_MS_RESET,
+			LL14(L"M/S リセット", L"M/S reset", L"M/S reinit.", L"M/S reset", L"M/S restablecer", L"M/S 리셋", L"M/S 重置", L"M/S reset", L"M/S сброс", L"M/S reset", L"M/S reset", L"M/S reset", L"M/S reset", L"M/S sifirla"),
+			savedata.pro_ms_width == 100 && !savedata.pro_ms_mono);
+		subMs->AddCommand(IDM_MS_FROM_CORR,
+			LL14(L"相関ヒストから提案", L"Suggest from corr history", L"Suggérer depuis corr.", L"Suggerisci da corr.", L"Sugerir desde corr.", L"상관 이력에서 제안", L"根据相关历史建议", L"اقتراح من الارتباط", L"Предложить по корреляции", L"Aus Korr.-Verlauf vorschlagen", L"Sugerir pelo hist. corr.", L"Voorstel uit corr.-geschiedenis", L"Zaproponuj z historii kor.", L"Korelasyon gecmisinden oner"));
+	}
+	menu.AddCommand(IDM_SAVE_JACKET,
+		LL14(L"スペクトルを画像保存…", L"Save spectrogram as image…", L"Enregistrer le spectrogramme…", L"Salva spettrogramma…", L"Guardar espectrograma…", L"스펙트럼 이미지 저장…", L"将频谱图保存为图片…", L"حفظ الطيف كصورة…", L"Сохранить спектrogram…", L"Spektrogramm speichern…", L"Salvar espectrograma…", L"Spectrogram opslaan…", L"Zapisz spektrogram…", L"Spektrumu kaydet…"));
+	menu.AddSeparator();
+
+	CCustomPopupMenu* subLayout = menu.AddSubMenu(
+		LL14(L"周波数特性の表示", L"Frequency display", L"Affichage frequence", L"Visualizzazione frequenza", L"Vista de frecuencia", L"주파수 표시", L"频率显示", L"عرض التردد", L"Отображение АЧХ", L"Frequenzanzeige", L"Exibicao de frequencia", L"Frequentieweergave", L"Wyswietlanie czest.", L"Frekans gorunumu"));
+	if (subLayout) {
+		subLayout->AddCheck(IDM_SPEC_OVERLAY,
+			LL14(L"重ね描き", L"Overlay", L"Superpose", L"Sovrapposto", L"Superpuesto", L"겹침", L"叠加", L"تراكب", L"Наложение", L"Uberlagert", L"Sobreposto", L"Overlay", L"Nakladanie", L"Ustuste"),
+			m_specLayout == SpecOverlay);
+		subLayout->AddCheck(IDM_SPEC_SPLIT_V,
+			LL14(L"上下分割", L"Split vertical", L"Division verticale", L"Divisione verticale", L"Division vertical", L"상하 분할", L"上下分割", L"تقسيم رأسي", L"Вертикально", L"Vertikal teilen", L"Dividir vertical", L"Verticaal", L"Pionowo", L"Dikey bol"),
+			m_specLayout == SpecSplitV);
+		subLayout->AddCheck(IDM_SPEC_SPLIT_H,
+			LL14(L"左右分割", L"Split horizontal", L"Division horizontale", L"Divisione orizzontale", L"Division horizontal", L"좌우 분할", L"左右分割", L"تقسيم أفقي", L"Горизонтально", L"Horizontal teilen", L"Dividir horizontal", L"Horizontaal", L"Poziomo", L"Yatay bol"),
+			m_specLayout == SpecSplitH);
+		subLayout->AddCheck(IDM_SPEC_GRID4,
+			LL14(L"4分割 (2x2)", L"4-way (2x2)", L"4 voies (2x2)", L"4 vie (2x2)", L"4 vias (2x2)", L"4분할 (2x2)", L"四分割(2x2)", L"4 اتجاهات", L"4 панели", L"4-fach (2x2)", L"4 vias (2x2)", L"4-weg (2x2)", L"4 panele (2x2)", L"4 bolum (2x2)"),
+			m_specLayout == SpecGrid4, NULL, m_channels >= 4);
+		subLayout->AddCheck(IDM_SPEC_GRID8,
+			LL14(L"8分割 (2x4)", L"8-way (2x4)", L"8 voies (2x4)", L"8 vie (2x4)", L"8 vias (2x4)", L"8분할 (2x4)", L"八分割(2x4)", L"8 اتجاهات", L"8 панелей", L"8-fach (2x4)", L"8 vias (2x4)", L"8-weg (2x4)", L"8 paneli (2x4)", L"8 bolum (2x4)"),
+			m_specLayout == SpecGrid8, NULL, m_channels >= 5);
+	}
+
+	CCustomPopupMenu* subStyle = menu.AddSubMenu(
+		LL14(L"周波数の表示モード", L"Frequency display mode", L"Mode d'affichage frequence", L"Modalita visualizzazione", L"Modo de visualizacion", L"주파수 표시 모드", L"频率显示模式", L"وضع عرض التردد", L"Режим АЧХ", L"Frequenz-Anzeigemodus", L"Modo de frequencia", L"Frequentieweergavemodus", L"Tryb wyswietlania czest.", L"Frekans gorunum modu"));
+	if (subStyle) {
+		subStyle->AddCheck(IDM_STYLE_FILL,
+			LL14(L"Ozone 風 (塗+線)", L"Ozone (fill+line)", L"Ozone (rempl.+ligne)", L"Ozone (riemp.+linea)", L"Ozone (relleno+linea)", L"Ozone (채움+선)", L"Ozone(填充+线)", L"Ozone (تعبئة+خط)", L"Ozone (заливка+линия)", L"Ozone (Fullung+Linie)", L"Ozone (preench.+linha)", L"Ozone (vulling+lijn)", L"Ozone (wypeln.+linia)", L"Ozone (dolgu+cizgi)"),
+			m_specStyle == StyleFill);
+		subStyle->AddCheck(IDM_STYLE_CUBASE,
+			LL14(L"Cubase Frequency 風", L"Cubase Frequency style", L"Style Cubase Frequency", L"Stile Cubase Frequency", L"Estilo Cubase Frequency", L"Cubase Frequency 스타일", L"Cubase Frequency 风格", L"نمط Cubase Frequency", L"Стиль Cubase Frequency", L"Cubase Frequency-Stil", L"Estilo Cubase Frequency", L"Cubase Frequency-stijl", L"Styl Cubase Frequency", L"Cubase Frequency tarzı"),
+			m_specStyle == StyleCubase);
+		subStyle->AddCheck(IDM_STYLE_SPAN,
+			LL14(L"Voxengo SPAN 風", L"Voxengo SPAN style", L"Style Voxengo SPAN", L"Stile Voxengo SPAN", L"Estilo Voxengo SPAN", L"Voxengo SPAN 스타일", L"Voxengo SPAN 风格", L"نمط Voxengo SPAN", L"Стиль Voxengo SPAN", L"Voxengo SPAN-Stil", L"Estilo Voxengo SPAN", L"Voxengo SPAN-stijl", L"Styl Voxengo SPAN", L"Voxengo SPAN tarzı"),
+			m_specStyle == StyleSpan);
+		subStyle->AddCheck(IDM_STYLE_ABLETON,
+			LL14(L"Ableton Spectrum 風", L"Ableton Spectrum style", L"Style Ableton Spectrum", L"Stile Ableton Spectrum", L"Estilo Ableton Spectrum", L"Ableton Spectrum 스타일", L"Ableton Spectrum 风格", L"نمط Ableton Spectrum", L"Стиль Ableton Spectrum", L"Ableton Spectrum-Stil", L"Estilo Ableton Spectrum", L"Ableton Spectrum-stijl", L"Styl Ableton Spectrum", L"Ableton Spectrum tarzı"),
+			m_specStyle == StyleAbleton);
+		subStyle->AddCheck(IDM_STYLE_FABFILTER,
+			LL14(L"FabFilter Pro-Q 風", L"FabFilter Pro-Q style", L"Style FabFilter Pro-Q", L"Stile FabFilter Pro-Q", L"Estilo FabFilter Pro-Q", L"FabFilter Pro-Q 스타일", L"FabFilter Pro-Q 风格", L"نمط FabFilter Pro-Q", L"Стиль FabFilter Pro-Q", L"FabFilter Pro-Q-Stil", L"Estilo FabFilter Pro-Q", L"FabFilter Pro-Q-stijl", L"Styl FabFilter Pro-Q", L"FabFilter Pro-Q tarzı"),
+			m_specStyle == StyleFabFilter);
+		subStyle->AddCheck(IDM_STYLE_BARS,
+			LL14(L"バー (汎用)", L"Bars (generic)", L"Barres", L"Barre", L"Barras", L"막대", L"柱状", L"أشرطة", L"Столбцы", L"Balken", L"Barras", L"Balken", L"Slupki", L"Cubuk"),
+			m_specStyle == StyleBars);
+		subStyle->AddCheck(IDM_STYLE_LINE,
+			LL14(L"線のみ", L"Line only", L"Ligne seule", L"Solo linea", L"Solo linea", L"선만", L"仅线", L"خط فقط", L"Только линия", L"Nur Linie", L"Somente linha", L"Alleen lijn", L"Tylko linia", L"Sadece cizgi"),
+			m_specStyle == StyleLine);
+	}
+
+	CCustomPopupMenu* subSpeed = menu.AddSubMenu(
+		LL14(L"波形の流れる速度", L"Wave scroll speed", L"Vitesse de defilement", L"Velocita scorrimento", L"Velocidad de desplazamiento", L"파형 스크롤 속도", L"波形滚动速度", L"سرعة تمرير الموجة", L"Скорость прокрутки волны", L"Wellen-Scrollgeschwindigkeit", L"Velocidade de rolagem", L"Golf-scrolsnelheid", L"Predkosc przewijania fali", L"Dalga kaydirma hizi"),
+		LL14(L"上部波形の横スクロール速さを調整します。", L"Adjust horizontal scroll speed of the upper waveform.", L"Regler la vitesse de defilement de l'onde.", L"Regola la velocita di scorrimento dell'onda.", L"Ajustar la velocidad de desplazamiento de la onda.", L"상단 파형의 가로 스크롤 속도를 조정합니다.", L"调整上部波形的横向滚动速度。", L"ضبط سرعة التمرير الأفقي للموجة العلوية.", L"Скорость горизонтальной прокрутки верхней волны.", L"Horizontale Scrollgeschwindigkeit der oberen Welle.", L"Ajustar a velocidade de rolagem da onda superior.", L"Pas horizontale scrollsnelheid van de golf aan.", L"Dostosuj predkosc przewijania fali gornej.", L"Ust dalganin yatay kaydirma hizini ayarla."));
+	if (subSpeed) {
+		subSpeed->AddSlider(
+			LL14(L"速度 (%)", L"Speed (%)", L"Vitesse (%)", L"Velocita (%)", L"Velocidad (%)", L"속도 (%)", L"速度 (%)", L"السرعة (%)", L"Скорость (%)", L"Geschwindigkeit (%)", L"Velocidade (%)", L"Snelheid (%)", L"Predkosc (%)", L"Hiz (%)"),
+			25, 200, m_waveSpeedPct, &CAnalyzerDlg::WaveSpeedSliderCb, this,
+			LL14(L"25%=遅い … 100%=標準 … 200%=速い（ドラッグ中に即反映）", L"25%=slow … 100%=normal … 200%=fast (live while dragging)", L"25%=lent … 100%=normal … 200%=rapide (temps reel)", L"25%=lento … 100%=normale … 200%=veloce (in tempo reale)", L"25%=lento … 100%=normal … 200%=rapido (en vivo)", L"25%=느림 … 100%=표준 … 200%=빠름(드래그 중 즉시 반영)", L"25%=慢 … 100%=标准 … 200%=快（拖动时即时生效）", L"25%=بطيء … 100%=عادي … 200%=سريع (مباشر أثناء السحب)", L"25%=медленно … 100%=обычно … 200%=быстро (сразу при перетаскивании)", L"25%=langsam … 100%=normal … 200%=schnell (live beim Ziehen)", L"25%=lento … 100%=normal … 200%=rapido (ao vivo)", L"25%=traag … 100%=normaal … 200%=snel (live tijdens slepen)", L"25%=wolno … 100%=normalnie … 200%=szybko (na zywo)", L"25%=yavas … 100%=normal … 200%=hizli (suruklerken anlik)"));
+		subSpeed->AddSeparator();
+		subSpeed->AddCommand(IDM_WAVE_SPEED_BASE + 3,
+			LL14(L"100% に戻す", L"Reset to 100%", L"Remettre a 100%", L"Ripristina a 100%", L"Restablecer a 100%", L"100%로 되돌리기", L"重置为 100%", L"إعادة إلى 100%", L"Сбросить на 100%", L"Auf 100% zurucksetzen", L"Redefinir para 100%", L"Terugzetten naar 100%", L"Przywroc 100%", L"100%'e sifirla"));
+	}
+
+	menu.AddSeparator();
+	menu.AddCheck(IDM_PEAK_HOLD,
+		LL14(L"ピークホールド", L"Peak hold", L"Maintien de crete", L"Picco trattenuto", L"Retencion de pico", L"피크 홀드", L"峰值保持", L"الاحتفاظ بالذروة", L"Удержание пика", L"Peak Hold", L"Retencao de pico", L"Piekvasthouden", L"Przytrzymanie szczytu", L"Tepe tutma"),
+		m_peakHold);
+	menu.AddCheck(IDM_EQ_OVERLAY,
+		LL14(L"EQオーバーレイ", L"EQ overlay", L"Superposition EQ", L"Sovrapposizione EQ", L"Superposicion EQ", L"EQ 오버레이", L"EQ叠加", L"تراكب EQ", L"Оверлей EQ", L"EQ-Overlay", L"Sobreposicao EQ", L"EQ-overlay", L"Nakladka EQ", L"EQ kaplama"),
+		m_eqOverlay,
+		LL14(L"周波数特性の上に EQ カーブを重ねてドラッグ調整できます。", L"Overlay the EQ curve on the spectrum for drag adjustment.", L"Superposer la courbe EQ pour un reglage au glisser.", L"Sovrapponi la curva EQ per regolarla trascinando.", L"Superponer la curva EQ para ajustar arrastrando.", L"스펙트럼 위에 EQ 곡선을 겹쳐 드래그 조정합니다.", L"在频谱上叠加 EQ 曲线以便拖动调整。", L"تراكب منحنى EQ على الطيف للضبط بالسحب.", L"Наложить кривую EQ на спектр для правки перетаскиванием.", L"EQ-Kurve uber Spektrum legen und per Ziehen anpassen.", L"Sobrepor a curva EQ no espectro para ajustar arrastando.", L"EQ-curve over spectrum leggen om te slepen.", L"Nakladka krzywej EQ na widmo do regulacji przeciagnieciem.", L"Spektrum uzerine EQ egrisini bindirip surukleyerek ayarla."));
+	menu.AddCheck(IDM_LEVEL_METER,
+		LL14(L"レベルメーター", L"Level meter", L"Indicateur de niveau", L"Misuratore di livello", L"Medidor de nivel", L"레벨 미터", L"电平表", L"مقياس المستوى", L"Уровень сигнала", L"Pegelanzeige", L"Medidor de nivel", L"Niveaumeter", L"Miernik poziomu", L"Seviye olcer"),
+		m_showLevelMeter);
+	menu.AddCheck(IDM_FREEZE,
+		LL14(L"フリーズ", L"Freeze", L"Gel", L"Congela", L"Congelar", L"정지", L"冻结", L"تجميد", L"Заморозка", L"Einfrieren", L"Congelar", L"Bevriezen", L"Zamroz", L"Dondur"),
+		m_frozen);
+	menu.AddCommand(IDM_RESET_PEAK,
+		LL14(L"ピークをリセット (ダブルクリック)", L"Reset peaks (double-click)", L"Reinit. cretes (double-clic)", L"Reset picchi (doppio clic)", L"Restablecer picos (doble clic)", L"피크 리셋(더블클릭)", L"重置峰值(双击)", L"إعادة الذروة (نقر مزدوج)", L"Сброс пиков (двойной клик)", L"Peaks zurucksetzen (Doppelklick)", L"Redefinir picos (duplo clique)", L"Piekreset (dubbelklik)", L"Reset szczytow (dwuklik)", L"Tepe sifirla (cift tik)"),
+		LL14(L"ピークホールドをリセットします（ダブルクリックでも可）。", L"Reset peak hold (also via double-click).", L"Reinitialiser le maintien de crete (aussi double-clic).", L"Reset del picco trattenuto (anche doppio clic).", L"Restablecer retencion de pico (tambien doble clic).", L"피크 홀드를 리셋합니다(더블클릭도 가능).", L"重置峰值保持（也可双击）。", L"إعادة الاحتفاظ بالذروة (أو بالنقر المزدوج).", L"Сброс удержания пика (также двойной клик).", L"Peak Hold zurucksetzen (auch Doppelklick).", L"Redefinir retencao de pico (tambem duplo clique).", L"Piekvasthouden resetten (ook dubbelklik).", L"Reset przytrzymania szczytu (tez dwuklik).", L"Tepe tutmayi sifirla (cift tik de olur)."));
+
+	menu.AddSeparator();
+	menu.AddCommand(IDM_COPY_HOVER,
+		LL14(L"ホバー値をコピー", L"Copy hover readout", L"Copier la lecture au survol", L"Copia lettura hover", L"Copiar lectura al pasar", L"호버 값 복사", L"复制悬停读数", L"نسخ قراءة التمرير", L"Копировать наведение", L"Hover-Wert kopieren", L"Copiar leitura ao pairar", L"Hoverwaarde kopieren", L"Kopiuj odczyt hover", L"Hover degerini kopyala"),
+		NULL, m_hoverValid);
+	menu.AddCommand(IDM_COPY_PEAK,
 		LL14(L"最大ピークをコピー", L"Copy loudest peak", L"Copier le pic max", L"Copia picco massimo", L"Copiar pico maximo", L"최대 피크 복사", L"复制最大峰值", L"نسخ أعلى قمة", L"Копировать макс. пик", L"Lautesten Peak kopieren", L"Copiar pico mais alto", L"Luidste piek kopieren", L"Kopiuj najglosniejszy szczyt", L"En yuksek tepeyi kopyala"));
-	menu.AppendMenu(MF_STRING, IDM_COPY_LEVELS,
+	menu.AddCommand(IDM_COPY_LEVELS,
 		LL14(L"レベルをコピー", L"Copy levels", L"Copier les niveaux", L"Copia livelli", L"Copiar niveles", L"레벨 복사", L"复制电平", L"نسخ المستويات", L"Копировать уровни", L"Pegel kopieren", L"Copiar niveis", L"Niveaus kopieren", L"Kopiuj poziomy", L"Seviyeleri kopyala"));
 
-
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING, IDM_CLEAR_DISPLAY,
+	menu.AddSeparator();
+	menu.AddCommand(IDM_CLEAR_DISPLAY,
 		LL14(L"表示をクリア", L"Clear display", L"Effacer l'affichage", L"Cancella visualizzazione", L"Borrar pantalla", L"표시 지우기", L"清除显示", L"مسح العرض", L"Очистить экран", L"Anzeige leeren", L"Limpar exibicao", L"Weergave wissen", L"Wyczysc wyswietlacz", L"Goruntuyu temizle"));
-	menu.AppendMenu(MF_STRING | (m_alwaysOnTop ? MF_CHECKED : 0),
-		IDM_ALWAYS_ON_TOP, LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위에 표시", L"始终置顶", L"دائما في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd op voorgrond", L"Zawsze na wierzchu", L"Her zaman ustte"));
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING, ID_HELP_SHOWSHEET,
+	menu.AddCheck(IDM_ALWAYS_ON_TOP,
+		LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위에 표시", L"始终置顶", L"دائما في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd op voorgrond", L"Zawsze na wierzchu", L"Her zaman ustte"),
+		m_alwaysOnTop);
+	menu.AddSeparator();
+	menu.AddCommand(ID_HELP_SHOWSHEET,
 		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
 			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
 			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
@@ -1750,7 +1794,9 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
 		point = CPoint(rc.left + 8, rc.top + 8);
 	}
-	menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y, this);
+	const UINT cmd = menu.Track(point, this);
+	if (cmd != 0)
+		SendMessage(WM_COMMAND, cmd);
 }
 LPCTSTR CAnalyzerDlg::ChannelLabel(int ch, int channels)
 {

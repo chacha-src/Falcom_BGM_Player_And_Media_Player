@@ -5032,17 +5032,12 @@ void CDouga::OnNcRButtonDown(UINT nHitTest, CPoint point)
 	CFrameWnd::OnNcRButtonDown(nHitTest, point);
 }
 
-int CDouga::FindDougaStreamSubMenu(CMenu* pPopup, UINT firstItemId)
+static void DougaRateSliderCb(void* /*ctx*/, int value)
 {
-	if (!pPopup) return -1;
-	const int n = pPopup->GetMenuItemCount();
-	for (int i = 0; i < n; i++) {
-		CMenu* sub = pPopup->GetSubMenu(i);
-		if (!sub || sub->GetMenuItemCount() <= 0) continue;
-		if (sub->GetMenuItemID(0) == firstItemId)
-			return i;
-	}
-	return -1;
+	if (!pMediaSeeking) return;
+	if (value < 50) value = 50;
+	if (value > 200) value = 200;
+	pMediaSeeking->SetRate((double)value / 100.0);
 }
 
 void CDouga::ShowDougaContextMenu(CPoint point)
@@ -5055,267 +5050,184 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 		point.Offset(5, 5);
 	}
 
-	CMenu menu;
-	// ウィンドウ時は倍率付き(DOUGA1)、FS時は DOUGA
-	VERIFY(menu.LoadMenu(savedata.fs ? CG_IDR_POPUP_DOUGA : CG_IDR_POPUP_DOUGA1));
-	CMenu* pPopup = menu.GetSubMenu(0);
-	if (!pPopup) return;
+	CCustomPopupMenu menu;
+	menu.SetAeroMode(FALSE);
 
-	// 先頭に残った空セパレータを除去
-	while (pPopup->GetMenuItemCount() > 0) {
-		MENUITEMINFO mii = { sizeof(mii) };
-		mii.fMask = MIIM_FTYPE;
-		if (!pPopup->GetMenuItemInfo(0, &mii, TRUE))
-			break;
-		if ((mii.fType & MFT_SEPARATOR) == 0)
-			break;
-		pPopup->DeleteMenu(0, MF_BYPOSITION);
+	// ウィンドウ時は倍率項目付き
+	if (!savedata.fs) {
+		menu.AddCommand(ID_MENUITEM32771,
+			LL14(L"通常(1x1)", L"Normal (1x1)", L"Normal (1x1)", L"Normale (1x1)",
+				L"Normal (1x1)", L"표준 (1x1)", L"标准 (1x1)", L"عادي (1×1)",
+				L"Обычный (1x1)", L"Normal (1x1)", L"Normal (1x1)", L"Normaal (1x1)",
+				L"Normalny (1x1)", L"Normal (1x1)"));
+		menu.AddCommand(ID_MENUITEM32773,
+			LL14(L"中間(1.5x1.5)", L"Medium (1.5x1.5)", L"Moyen (1,5x1,5)", L"Medio (1.5x1.5)",
+				L"Mediano (1.5x1.5)", L"중간 (1.5x1.5)", L"中等 (1.5x1.5)", L"متوسط (1.5×1.5)",
+				L"Средний (1.5x1.5)", L"Mittel (1,5x1,5)", L"Médio (1.5x1.5)", L"Middel (1.5x1.5)",
+				L"Średni (1.5x1.5)", L"Orta (1.5x1.5)"));
+		menu.AddCommand(ID_MENUITEM32772,
+			LL14(L"倍(2x2)", L"Large (2x2)", L"Grand (2x2)", L"Grande (2x2)",
+				L"Grande (2x2)", L"2배 (2x2)", L"双倍 (2x2)", L"كبير (2×2)",
+				L"Двойной (2x2)", L"Groß (2x2)", L"Grande (2x2)", L"Groot (2x2)",
+				L"Duży (2x2)", L"Büyük (2x2)"));
+		menu.AddSeparator();
 	}
 
-	const int idxVideo = FindDougaStreamSubMenu(pPopup, ID_MV1);
-	const int idxAudio = FindDougaStreamSubMenu(pPopup, ID_ST1);
-	const int idxSub = FindDougaStreamSubMenu(pPopup, ID_ETC1);
-
-	if (idxVideo >= 0) {
-		CMenu* sub2 = pPopup->GetSubMenu(idxVideo);
-		UpdateStreamMenu(sub2, streamname1, 10,
-			LL14(L"映像", L"Video", L"Vidéo", L"Video",
-				L"Vídeo", L"비디오", L"视频", L"فيديو",
-				L"Видео", L"Video", L"Vídeo", L"Video",
-				L"Wideo", L"Video"));
-		DeleteEmptyMenuItems(menu, streamname1, 10, ID_MV1);
-	}
-	if (idxAudio >= 0) {
-		CMenu* sub2 = pPopup->GetSubMenu(idxAudio);
-		UpdateStreamMenu(sub2, streamname, 40,
-			LL14(L"音声", L"Audio", L"Audio", L"Audio",
-				L"Audio", L"오디오", L"音频", L"صوت",
-				L"Аудио", L"Audio", L"Áudio", L"Audio",
-				L"Audio", L"Ses"));
-		DeleteAudioMenuItems(menu);
-	}
-	if (idxSub >= 0) {
-		CMenu* sub2 = pPopup->GetSubMenu(idxSub);
-		UpdateStreamMenu(sub2, streamname2, 40, L"");
-		DeleteEmptyMenuItems(menu, streamname2, 40, ID_ETC1);
-	}
-
-	if (savedata.fs)
-		LocalizeDougaMenu(pPopup);
-	else
-		LocalizeDougaMenu1(pPopup);
-
-	// 表示系の追加項目(リソースではなくコード生成)。フェードアウトの直後に差し込む。
-	{
-		int at = pPopup->GetMenuItemCount();
-		for (int i = 0; i < pPopup->GetMenuItemCount(); i++) {
-			if (pPopup->GetMenuItemID(i) == ID_DOUGA_FADE) { at = i + 1; break; }
-		}
-		pPopup->InsertMenu(at++, MF_BYPOSITION | MF_SEPARATOR);
-		pPopup->InsertMenu(at++, MF_BYPOSITION | MF_STRING | (savedata.dougatopmost ? MF_CHECKED : 0), ID_DOUGA_TOPMOST,
-			LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano",
-				L"Siempre visible", L"항상 위에 표시", L"总在最前面", L"دائمًا في المقدمة",
-				L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre visivel", L"Altijd op voorgrond",
-				L"Zawsze na wierzchu", L"Her zaman ustte"));
-		pPopup->InsertMenu(at++, MF_BYPOSITION | MF_STRING | (savedata.dougaaspect ? MF_CHECKED : 0), ID_DOUGA_ASPECT,
-			LL14(L"アスペクト比を維持", L"Keep aspect ratio", L"Conserver les proportions", L"Mantieni proporzioni",
-				L"Mantener proporcion", L"화면 비율 유지", L"保持宽高比", L"الحفاظ على نسبة العرض",
-				L"Сохранять пропорции", L"Seitenverhaltnis beibehalten", L"Manter proporcao", L"Beeldverhouding behouden",
-				L"Zachowaj proporcje", L"En-boy oranini koru"));
-
-		// 再生速度は IMediaSeeking がレートを返せるグラフのときだけ出す(未対応なら項目を作らない)
-		double cur = 1.0;
-		if (pMediaSeeking && SUCCEEDED(pMediaSeeking->GetRate(&cur))) {
-			static const double kRates[6] = { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
-			if (cur <= 0.0) cur = 1.0;
-			CMenu subSpeed;
-			subSpeed.CreatePopupMenu();
-			for (int i = 0; i < 6; i++) {
-				CString s;
-				s.Format(L"%gx", kRates[i]);
-				subSpeed.AppendMenu(MF_STRING | ((fabs(cur - kRates[i]) < 0.01) ? MF_CHECKED : 0),
-					ID_DOUGA_SPEED_FIRST + i, s);
-			}
-			pPopup->InsertMenu(at++, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)subSpeed.Detach(),
-				LL14(L"再生速度", L"Playback speed", L"Vitesse de lecture", L"Velocita di riproduzione",
-					L"Velocidad de reproduccion", L"재생 속도", L"播放速度", L"سرعة التشغيل",
-					L"Скорость воспроизведения", L"Wiedergabegeschwindigkeit", L"Velocidade de reproducao",
-					L"Afspeelsnelheid", L"Predkosc odtwarzania", L"Oynatma hizi"));
-		}
-		pPopup->InsertMenu(at++, MF_BYPOSITION | MF_SEPARATOR);
-		pPopup->InsertMenu(at++, MF_BYPOSITION | MF_STRING, ID_HELP_SHOWSHEET,
-			LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
-				L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
-				L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Bedieningsgids",
-				L"Przewodnik", L"İşlem kılavuzu"));
-	}
-
-	CWnd* pWndPopupOwner = this;
-	while (pWndPopupOwner->GetStyle() & WS_CHILD)
-		pWndPopupOwner = pWndPopupOwner->GetParent();
-
-	pPopup->TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y,
-		pWndPopupOwner);
-}
-
-void CDouga::UpdateStreamMenu(CMenu* pMenu, CString* streamNames, int maxCount, LPCWSTR prefix)
-{
-	if (!pMenu || !streamNames) return;
-	MENUITEMINFO mii = { sizeof(mii) };
-	mii.fMask = MIIM_STRING;
-
-	for (int i = 0; i < maxCount; i++)
-	{
-		CString buf;
-		if (prefix && wcslen(prefix) > 0)
-		{
-			// 映像・音声の場合はプレフィックス付き
-			buf.Format(L"%s %d:%s", prefix, i + 1, (LPCWSTR)streamNames[i]);
-		}
-		else
-		{
-			// 字幕の場合はストリーム名のみ
-			buf = streamNames[i];
-		}
-
-		mii.dwTypeData = buf.GetBuffer();
-		pMenu->SetMenuItemInfo(i, &mii, TRUE);
-		buf.ReleaseBuffer();
-	}
-}
-
-void CDouga::DeleteEmptyMenuItems(CMenu& menu, CString* streamNames, int maxCount, UINT baseID)
-{
-	for (int i = maxCount - 1; i >= 0; i--)
-	{
-		if (streamNames[i] == "")
-		{
-			menu.DeleteMenu(baseID + i, MF_BYCOMMAND);
-		}
-	}
-}
-
-// 音声メニュー項目の削除（audionumに基づく）
-void CDouga::DeleteAudioMenuItems(CMenu& menu)
-{
-	for (int i = 40; i > audionum; i--)
-	{
-		menu.DeleteMenu(ID_ST1 + (i - 1), MF_BYCOMMAND);
-	}
-}
-
-// CG_IDR_POPUP_DOUGA メニューの固定テキスト項目を多言語化する
-void CDouga::LocalizeDougaMenu(CMenu* pPopup)
-{
-	// 一時停止/再開
-	pPopup->ModifyMenu(32775, MF_BYCOMMAND | MF_STRING, 32775,
+	menu.AddCommand(32775,
 		LL14(L"一時停止/再開 (&C)", L"Pause/Resume (&C)", L"Pause/Reprendre (&C)", L"Pausa/Riprendi (&C)",
 			L"Pausa/Reanudar (&C)", L"일시정지/재개 (&C)", L"暂停/继续 (&C)", L"إيقاف مؤقت/استئناف (&C)",
 			L"Пауза/Возобновить (&C)", L"Pause/Fortsetzen (&C)", L"Pausar/Retomar (&C)", L"Pauzeren/Hervatten (&C)",
 			L"Pauza/Wznów (&C)", L"Duraklat/Devam Et (&C)"));
+	menu.AddSeparator();
 
-	// 映像ストリーム サブメニュータイトル
 	{
-		const int idx = FindDougaStreamSubMenu(pPopup, ID_MV1);
-		if (idx >= 0)
-			if (CMenu* pSub = pPopup->GetSubMenu(idx))
-				pPopup->ModifyMenu(idx, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
+		LPCWSTR vpref = LL14(L"映像", L"Video", L"Vidéo", L"Video",
+			L"Vídeo", L"비디오", L"视频", L"فيديو",
+			L"Видео", L"Video", L"Vídeo", L"Video",
+			L"Wideo", L"Video");
+		CCustomPopupMenu* subV = NULL;
+		for (int i = 0; i < 10; ++i) {
+			if (streamname1[i].IsEmpty()) continue;
+			if (!subV) {
+				subV = menu.AddSubMenu(
 					LL14(L"映像ストリーム", L"Video Stream", L"Flux vidéo", L"Flusso video",
 						L"Flujo de vídeo", L"비디오 스트림", L"视频流", L"تدفق الفيديو",
 						L"Видеопоток", L"Videostream", L"Fluxo de vídeo", L"Videostream",
 						L"Strumień wideo", L"Video Akışı"));
+				if (!subV) break;
+			}
+			CString buf;
+			buf.Format(L"%s %d:%s", vpref, i + 1, (LPCWSTR)streamname1[i]);
+			subV->AddCommand(ID_MV1 + i, buf);
+		}
 	}
-
-	// 音声ストリーム サブメニュータイトル
 	{
-		const int idx = FindDougaStreamSubMenu(pPopup, ID_ST1);
-		if (idx >= 0)
-			if (CMenu* pSub = pPopup->GetSubMenu(idx))
-				pPopup->ModifyMenu(idx, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
+		LPCWSTR apref = LL14(L"音声", L"Audio", L"Audio", L"Audio",
+			L"Audio", L"오디오", L"音频", L"صوت",
+			L"Аудио", L"Audio", L"Áudio", L"Audio",
+			L"Audio", L"Ses");
+		CCustomPopupMenu* subA = NULL;
+		const int nAud = (audionum > 40) ? 40 : audionum;
+		for (int i = 0; i < nAud; ++i) {
+			if (!subA) {
+				subA = menu.AddSubMenu(
 					LL14(L"音声ストリーム", L"Audio Stream", L"Flux audio", L"Flusso audio",
 						L"Flujo de audio", L"오디오 스트림", L"音频流", L"تدفق الصوت",
 						L"Аудиопоток", L"Audiostream", L"Fluxo de áudio", L"Audiostream",
 						L"Strumień audio", L"Ses Akışı"));
+				if (!subA) break;
+			}
+			CString buf;
+			buf.Format(L"%s %d:%s", apref, i + 1, (LPCWSTR)streamname[i]);
+			subA->AddCommand(ID_ST1 + i, buf);
+		}
 	}
-
-	// 字幕ストリーム サブメニュータイトル
 	{
-		const int idx = FindDougaStreamSubMenu(pPopup, ID_ETC1);
-		if (idx >= 0)
-			if (CMenu* pSub = pPopup->GetSubMenu(idx))
-				pPopup->ModifyMenu(idx, MF_BYPOSITION | MF_POPUP | MF_STRING, (UINT_PTR)pSub->m_hMenu,
+		CCustomPopupMenu* subS = NULL;
+		for (int i = 0; i < 40; ++i) {
+			if (streamname2[i].IsEmpty()) continue;
+			if (!subS) {
+				subS = menu.AddSubMenu(
 					LL14(L"字幕ストリーム", L"Subtitle Stream", L"Flux de sous-titres", L"Flusso sottotitoli",
 						L"Flujo de subtítulos", L"자막 스트림", L"字幕流", L"تدفق الترجمة",
 						L"Поток субтитров", L"Untertitelstream", L"Fluxo de legendas", L"Ondertitelstream",
 						L"Strumień napisów", L"Altyazı Akışı"));
+				if (!subS) break;
+			}
+			subS->AddCommand(ID_ETC1 + i, streamname2[i]);
+		}
 	}
 
-	// 操作ヒント: 上下左右キー
-	pPopup->ModifyMenu(ID__32783, MF_BYCOMMAND | MF_STRING, ID__32783,
+	menu.AddSeparator();
+	menu.AddCommand(ID_DOUGA_PLAY,
+		LL14(L"再生", L"Play", L"Lecture", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Воспроизведение", L"Abspielen", L"Reproduzir", L"Afspelen", L"Odtwórz", L"Çal"));
+	menu.AddCommand(ID_DOUGA_STOP,
+		LL14(L"停止", L"Stop", L"Arrêt", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
+	menu.AddCommand(ID_DOUGA_PREV,
+		LL14(L"前へ", L"Previous", L"Précédent", L"Precedente", L"Anterior", L"이전", L"上一首", L"السابق", L"Предыдущий", L"Zurück", L"Anterior", L"Vorige", L"Poprzedni", L"Önceki"));
+	menu.AddCommand(ID_DOUGA_NEXT,
+		LL14(L"次へ", L"Next", L"Suivant", L"Successivo", L"Siguiente", L"다음", L"下一首", L"التالي", L"Следующий", L"Weiter", L"Próximo", L"Volgende", L"Następny", L"Sonraki"));
+	menu.AddCommand(ID_DOUGA_REW,
+		LL14(L"戻す", L"Rewind", L"Reculer", L"Indietro", L"Retroceder", L"되감기", L"快退", L"ترجيع", L"Назад", L"Zurückspulen", L"Voltar", L"Terugspoelen", L"Przewiń wstecz", L"Geri sar"));
+	menu.AddCommand(ID_DOUGA_FF,
+		LL14(L"進める", L"Fast forward", L"Avancer", L"Avanti", L"Avanzar", L"빨리감기", L"快进", L"تقديم", L"Вперёд", L"Vorspulen", L"Avançar", L"Vooruitspoelen", L"Przewiń naprzód", L"İleri sar"));
+	menu.AddCommand(ID_DOUGA_MUTE,
+		LL14(L"消音", L"Mute", L"Muet", L"Mute", L"Silencio", L"음소거", L"静音", L"كتم", L"Без звука", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz"));
+	menu.AddCommand(ID_DOUGA_FS,
+		LL14(L"フルスクリーン", L"Fullscreen", L"Plein écran", L"Schermo intero", L"Pantalla completa", L"전체화면", L"全屏", L"ملء الشاشة", L"Полный экран", L"Vollbild", L"Tela cheia", L"Volledig scherm", L"Pełny ekran", L"Tam ekran"));
+	menu.AddCommand(ID_DOUGA_FADE,
+		LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Uitfaden", L"Zanikanie", L"Soluklaştır"));
+
+	menu.AddSeparator();
+	menu.AddCheck(ID_DOUGA_TOPMOST,
+		LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano",
+			L"Siempre visible", L"항상 위에 표시", L"总在最前面", L"دائمًا في المقدمة",
+			L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre visivel", L"Altijd op voorgrond",
+			L"Zawsze na wierzchu", L"Her zaman ustte"),
+		savedata.dougatopmost != 0);
+	menu.AddCheck(ID_DOUGA_ASPECT,
+		LL14(L"アスペクト比を維持", L"Keep aspect ratio", L"Conserver les proportions", L"Mantieni proporzioni",
+			L"Mantener proporcion", L"화면 비율 유지", L"保持宽高比", L"الحفاظ على نسبة العرض",
+			L"Сохранять пропорции", L"Seitenverhaltnis beibehalten", L"Manter proporcao", L"Beeldverhouding behouden",
+			L"Zachowaj proporcje", L"En-boy oranini koru"),
+		savedata.dougaaspect != 0);
+
+	// 再生速度: IMediaSeeking がレートを返せるときだけスライダー(0.5x..2.0x、ドラッグ中ライブ)
+	{
+		double cur = 1.0;
+		if (pMediaSeeking && SUCCEEDED(pMediaSeeking->GetRate(&cur))) {
+			if (cur <= 0.0) cur = 1.0;
+			int pos = (int)(cur * 100.0 + 0.5);
+			if (pos < 50) pos = 50;
+			if (pos > 200) pos = 200;
+			menu.AddSlider(
+				LL14(L"再生速度", L"Playback speed", L"Vitesse de lecture", L"Velocita di riproduzione",
+					L"Velocidad de reproduccion", L"재생 속도", L"播放速度", L"سرعة التشغيل",
+					L"Скорость воспроизведения", L"Wiedergabegeschwindigkeit", L"Velocidade de reproducao",
+					L"Afspeelsnelheid", L"Predkosc odtwarzania", L"Oynatma hizi"),
+				50, 200, pos, DougaRateSliderCb, NULL,
+				LL14(L"0.5x〜2.0x（ドラッグ中に即反映）", L"0.5x–2.0x (live while dragging)",
+					L"0,5x–2,0x (en direct)", L"0,5x–2,0x (in tempo reale)",
+					L"0,5x–2,0x (en vivo)", L"0.5x–2.0x (드래그 중 즉시)", L"0.5x–2.0x（拖动即时）",
+					L"0.5x–2.0x (مباشر أثناء السحب)", L"0.5x–2.0x (сразу при перетаскивании)",
+					L"0,5x–2,0x (live beim Ziehen)", L"0,5x–2,0x (ao arrastar)",
+					L"0,5x–2,0x (live tijdens slepen)", L"0,5x–2,0x (na zywo)", L"0.5x–2.0x (suruklerken anlik)"));
+		}
+	}
+
+	menu.AddSeparator();
+	menu.AddCommand(ID__32783,
 		LL14(L"上下左右キー音量とシークが出来ます。", L"Arrow keys: volume & seek.",
 			L"Touches fléchées : volume et défilement.", L"Frecce: volume e avanzamento.",
 			L"Teclas de flecha: volumen y posición.", L"방향키: 음량 및 탐색.",
 			L"方向键: 音量和搜索。", L"مفاتيح الأسهم: الصوت والتقديم.",
 			L"Стрелки: громкость и перемотка.", L"Pfeiltasten: Lautstärke & Suche.",
 			L"Teclas de seta: volume e busca.", L"Pijltoetsen: volume & zoeken.",
-			L"Klawisze strzałek: głośność i wyszukiwanie.", L"Ok tuşları: ses ve arama."));
-
-	// 操作ヒント: ダブルクリック
-	pPopup->ModifyMenu(ID__32784, MF_BYCOMMAND | MF_STRING, ID__32784,
+			L"Klawisze strzałek: głośność i wyszukiwanie.", L"Ok tuşları: ses ve arama."),
+		NULL, FALSE);
+	menu.AddCommand(ID__32784,
 		LL14(L"ダブルクリックでフルスクリーンです。", L"Double-click for fullscreen.",
 			L"Double-clic pour plein écran.", L"Doppio clic per schermo intero.",
 			L"Doble clic para pantalla completa.", L"더블클릭: 전체화면.",
 			L"双击进入全屏。", L"انقر نقراً مزدوجاً للشاشة الكاملة.",
 			L"Двойной щелчок — полный экран.", L"Doppelklick für Vollbild.",
 			L"Clique duplo para tela cheia.", L"Dubbelklik voor volledig scherm.",
-			L"Dwuklik dla pełnego ekranu.", L"Tam ekran için çift tıklayın."));
+			L"Dwuklik dla pełnego ekranu.", L"Tam ekran için çift tıklayın."),
+		NULL, FALSE);
+	menu.AddSeparator();
+	menu.AddCommand(ID_HELP_SHOWSHEET,
+		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
+			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
+			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Bedieningsgids",
+			L"Przewodnik", L"İşlem kılavuzu"));
 
-	pPopup->ModifyMenu(ID_DOUGA_PLAY, MF_BYCOMMAND | MF_STRING, ID_DOUGA_PLAY,
-		LL14(L"再生", L"Play", L"Lecture", L"Riproduci", L"Reproducir", L"재생", L"播放", L"تشغيل", L"Воспроизведение", L"Abspielen", L"Reproduzir", L"Afspelen", L"Odtwórz", L"Çal"));
-	pPopup->ModifyMenu(ID_DOUGA_STOP, MF_BYCOMMAND | MF_STRING, ID_DOUGA_STOP,
-		LL14(L"停止", L"Stop", L"Arrêt", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stoppen", L"Stop", L"Durdur"));
-	pPopup->ModifyMenu(ID_DOUGA_PREV, MF_BYCOMMAND | MF_STRING, ID_DOUGA_PREV,
-		LL14(L"前へ", L"Previous", L"Précédent", L"Precedente", L"Anterior", L"이전", L"上一首", L"السابق", L"Предыдущий", L"Zurück", L"Anterior", L"Vorige", L"Poprzedni", L"Önceki"));
-	pPopup->ModifyMenu(ID_DOUGA_NEXT, MF_BYCOMMAND | MF_STRING, ID_DOUGA_NEXT,
-		LL14(L"次へ", L"Next", L"Suivant", L"Successivo", L"Siguiente", L"다음", L"下一首", L"التالي", L"Следующий", L"Weiter", L"Próximo", L"Volgende", L"Następny", L"Sonraki"));
-	pPopup->ModifyMenu(ID_DOUGA_REW, MF_BYCOMMAND | MF_STRING, ID_DOUGA_REW,
-		LL14(L"戻す", L"Rewind", L"Reculer", L"Indietro", L"Retroceder", L"되감기", L"快退", L"ترجيع", L"Назад", L"Zurückspulen", L"Voltar", L"Terugspoelen", L"Przewiń wstecz", L"Geri sar"));
-	pPopup->ModifyMenu(ID_DOUGA_FF, MF_BYCOMMAND | MF_STRING, ID_DOUGA_FF,
-		LL14(L"進める", L"Fast forward", L"Avancer", L"Avanti", L"Avanzar", L"빨리감기", L"快进", L"تقديم", L"Вперёд", L"Vorspulen", L"Avançar", L"Vooruitspoelen", L"Przewiń naprzód", L"İleri sar"));
-	pPopup->ModifyMenu(ID_DOUGA_MUTE, MF_BYCOMMAND | MF_STRING, ID_DOUGA_MUTE,
-		LL14(L"消音", L"Mute", L"Muet", L"Mute", L"Silencio", L"음소거", L"静音", L"كتم", L"Без звука", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz"));
-	pPopup->ModifyMenu(ID_DOUGA_FS, MF_BYCOMMAND | MF_STRING, ID_DOUGA_FS,
-		LL14(L"フルスクリーン", L"Fullscreen", L"Plein écran", L"Schermo intero", L"Pantalla completa", L"전체화면", L"全屏", L"ملء الشاشة", L"Полный экран", L"Vollbild", L"Tela cheia", L"Volledig scherm", L"Pełny ekran", L"Tam ekran"));
-	pPopup->ModifyMenu(ID_DOUGA_FADE, MF_BYCOMMAND | MF_STRING, ID_DOUGA_FADE,
-		LL14(L"フェードアウト", L"Fade out", L"Fondu", L"Dissolvenza", L"Desvanecer", L"페이드 아웃", L"淡出", L"تلاشي", L"Затухание", L"Ausblenden", L"Desvanecer", L"Uitfaden", L"Zanikanie", L"Soluklaştır"));
-}
+	CWnd* pWndPopupOwner = this;
+	while (pWndPopupOwner->GetStyle() & WS_CHILD)
+		pWndPopupOwner = pWndPopupOwner->GetParent();
 
-// CG_IDR_POPUP_DOUGA1 メニュー（ウィンドウモード専用項目＋共通項目）を多言語化する
-void CDouga::LocalizeDougaMenu1(CMenu* pPopup)
-{
-	// 通常(1x1)
-	pPopup->ModifyMenu(ID_MENUITEM32771, MF_BYCOMMAND | MF_STRING, ID_MENUITEM32771,
-		LL14(L"通常(1x1)", L"Normal (1x1)", L"Normal (1x1)", L"Normale (1x1)",
-			L"Normal (1x1)", L"표준 (1x1)", L"标准 (1x1)", L"عادي (1×1)",
-			L"Обычный (1x1)", L"Normal (1x1)", L"Normal (1x1)", L"Normaal (1x1)",
-			L"Normalny (1x1)", L"Normal (1x1)"));
-
-	// 中間(1.5x1.5)
-	pPopup->ModifyMenu(ID_MENUITEM32773, MF_BYCOMMAND | MF_STRING, ID_MENUITEM32773,
-		LL14(L"中間(1.5x1.5)", L"Medium (1.5x1.5)", L"Moyen (1,5x1,5)", L"Medio (1.5x1.5)",
-			L"Mediano (1.5x1.5)", L"중간 (1.5x1.5)", L"中等 (1.5x1.5)", L"متوسط (1.5×1.5)",
-			L"Средний (1.5x1.5)", L"Mittel (1,5x1,5)", L"Médio (1.5x1.5)", L"Middel (1.5x1.5)",
-			L"Średni (1.5x1.5)", L"Orta (1.5x1.5)"));
-
-	// 倍(2x2)
-	pPopup->ModifyMenu(ID_MENUITEM32772, MF_BYCOMMAND | MF_STRING, ID_MENUITEM32772,
-		LL14(L"倍(2x2)", L"Large (2x2)", L"Grand (2x2)", L"Grande (2x2)",
-			L"Grande (2x2)", L"2배 (2x2)", L"双倍 (2x2)", L"كبير (2×2)",
-			L"Двойной (2x2)", L"Groß (2x2)", L"Grande (2x2)", L"Groot (2x2)",
-			L"Duży (2x2)", L"Büyük (2x2)"));
-
-	// DOUGA と共通の項目を翻訳
-	LocalizeDougaMenu(pPopup);
+	const UINT cmd = menu.Track(point, pWndPopupOwner);
+	if (cmd)
+		pWndPopupOwner->PostMessage(WM_COMMAND, cmd);
 }
 
 //void CDouga::OnNcLButtonDown(UINT nHitTest, CPoint point)

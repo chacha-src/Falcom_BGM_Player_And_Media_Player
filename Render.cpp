@@ -1954,7 +1954,8 @@ static void SyncRenderGrassBackdrop(CRender* pRender)
 
 void CRender::OnBnClickedCheck52()
 {
-	// TODO: ここにコントロール通知ハンドラー コードを追加します。
+	savedata.speanamode = m_speana.GetCheck();
+	savedata.speananum = m_speana_num.GetCurSel();
 }
 
 void CRender::OnCbnEditchangeCombo4()

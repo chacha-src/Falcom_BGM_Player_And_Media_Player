@@ -1,13 +1,19 @@
 ﻿#include "StdAfx.h"
 #include "CLyricsViewWnd.h"
 #include "CCustomControl.h"
+#include <math.h>
 
 IMPLEMENT_DYNAMIC(CLyricsViewWnd, CWnd)
 
 namespace {
 	const UINT_PTR kAnimTimer = 61;
-	const UINT kAnimMs = 16;
+	const UINT kAnimMs = 8; // ~120Hz サンプリング（実dtで積分）
 	inline double AbsD(double x) { return (x < 0.0) ? -x : x; }
+	// 描画Yの量子化を安定させ、スクロール終端の1px震えを抑える
+	inline int ScrollToPix(double v)
+	{
+		return (int)floor(v + 1e-6);
+	}
 }
 
 BEGIN_MESSAGE_MAP(CLyricsViewWnd, CWnd)
@@ -16,6 +22,7 @@ BEGIN_MESSAGE_MAP(CLyricsViewWnd, CWnd)
 	ON_WM_TIMER()
 	ON_WM_SIZE()
 	ON_WM_MOUSEWHEEL()
+	ON_WM_RBUTTONUP()
 END_MESSAGE_MAP()
 
 CLyricsViewWnd::CLyricsViewWnd()
@@ -26,11 +33,17 @@ CLyricsViewWnd::CLyricsViewWnd()
 	, m_lineH(18)
 	, m_scrollY(0.0)
 	, m_targetY(0.0)
+	, m_scrollVel(0.0)
+	, m_lastAnimQpc(0)
+	, m_qpcFreq(0)
 	, m_fontPt(0)
 	, m_timer(0)
 	, m_overlay(FALSE)
 {
 	ZeroMemory(m_tm, sizeof(m_tm));
+	LARGE_INTEGER f = {};
+	if (::QueryPerformanceFrequency(&f) && f.QuadPart > 0)
+		m_qpcFreq = (ULONGLONG)f.QuadPart;
 }
 
 CLyricsViewWnd::~CLyricsViewWnd()
@@ -59,6 +72,7 @@ void CLyricsViewWnd::Clear()
 	m_frac = 0.0;
 	m_scrollY = 0.0;
 	m_targetY = 0.0;
+	m_scrollVel = 0.0;
 	ZeroMemory(m_tm, sizeof(m_tm));
 	StopAnim();
 	if (m_hWnd)
@@ -136,7 +150,9 @@ void CLyricsViewWnd::SetLines(const CString* lines, int count, const DWORD* time
 	for (int i = m_tmCount; i < kMaxLines; i++)
 		m_tm[i] = 0;
 	if (m_cur >= m_count) m_cur = m_count > 0 ? m_count - 1 : 0;
+	m_scrollVel = 0.0;
 	RecalcTarget();
+	// 歌詞入れ替え時のみ瞬間合わせ（追従アニメの途中ジャンプを防ぐ）
 	m_scrollY = m_targetY;
 	if (m_hWnd)
 		Invalidate(FALSE);
@@ -152,7 +168,7 @@ void CLyricsViewWnd::SetCurrent(int idx)
 	if (idx >= m_count) idx = m_count - 1;
 	if (idx == m_cur) {
 		RecalcTarget();
-		if (AbsD(m_scrollY - m_targetY) > 0.5)
+		if (AbsD(m_scrollY - m_targetY) > 0.35)
 			StartAnim();
 		return;
 	}
@@ -191,12 +207,18 @@ void CLyricsViewWnd::SetPlayCentis(DWORD centis)
 	if (frac < 0.0) frac = 0.0;
 	if (frac > 1.0) frac = 1.0;
 	const BOOL curChanged = (idx != m_cur);
-	const BOOL fracChanged = (AbsD(frac - m_frac) > 0.002);
+	const BOOL fracChanged = (AbsD(frac - m_frac) > 0.0015);
 	m_frac = frac;
-	if (curChanged)
+	if (curChanged) {
 		SetCurrent(idx);
-	else if (fracChanged && m_hWnd)
-		Invalidate(FALSE);
+	} else {
+		// 行内進捗でも目標を少しずつ進め、行切替の段差を消す
+		RecalcTarget();
+		if (AbsD(m_scrollY - m_targetY) > 0.35)
+			StartAnim();
+		if (fracChanged && m_hWnd)
+			Invalidate(FALSE);
+	}
 }
 
 void CLyricsViewWnd::RecalcTarget()
@@ -209,9 +231,11 @@ void CLyricsViewWnd::RecalcTarget()
 		m_targetY = 0.0;
 		return;
 	}
-	// 現在行の上端がビュー中央付近に来るようオフセット
-	const double curTop = (double)m_cur * (double)m_lineH;
-	m_targetY = curTop - ((double)viewH - (double)m_lineH) * 0.5;
+	// 現在行 + 行内進捗で連続的に次行へ寄せる（切替瞬間のジャンプを緩和）
+	const double softFrac = m_frac * m_frac * (3.0 - 2.0 * m_frac); // smoothstep
+	const double curTop = (double)m_cur * (double)m_lineH + softFrac * (double)m_lineH;
+	// 中央やや上（カラオケ視線）
+	m_targetY = curTop - ((double)viewH - (double)m_lineH) * 0.42;
 	if (m_targetY < 0.0) m_targetY = 0.0;
 	const double maxY = (double)m_count * (double)m_lineH - (double)viewH;
 	if (maxY > 0.0 && m_targetY > maxY)
@@ -225,6 +249,11 @@ void CLyricsViewWnd::StartAnim()
 	if (!m_hWnd) return;
 	if (!m_timer)
 		m_timer = SetTimer(kAnimTimer, kAnimMs, NULL);
+	LARGE_INTEGER now = {};
+	if (m_qpcFreq && ::QueryPerformanceCounter(&now))
+		m_lastAnimQpc = (ULONGLONG)now.QuadPart;
+	else
+		m_lastAnimQpc = ::GetTickCount64();
 }
 
 void CLyricsViewWnd::StopAnim()
@@ -233,6 +262,33 @@ void CLyricsViewWnd::StopAnim()
 		KillTimer(m_timer);
 		m_timer = 0;
 	}
+	m_scrollVel = 0.0;
+}
+
+void CLyricsViewWnd::StepScroll(double dtSec)
+{
+	if (dtSec < 0.0) dtSec = 0.0;
+	if (dtSec > 0.05) dtSec = 0.05; // スパイク吸収
+	const double d = m_targetY - m_scrollY;
+	if (AbsD(d) < 0.25 && AbsD(m_scrollVel) < 8.0) {
+		m_scrollY = m_targetY;
+		m_scrollVel = 0.0;
+		StopAnim();
+		Invalidate(FALSE);
+		return;
+	}
+	// 臨界減衰っぽい追従: 加速度 = ω^2 * d - 2ζω * v
+	// ω≈10, ζ≈1.05 → 素早く・行き過ぎ少なめ
+	const double omega = 11.0;
+	const double zeta = 1.05;
+	const double acc = (omega * omega) * d - (2.0 * zeta * omega) * m_scrollVel;
+	m_scrollVel += acc * dtSec;
+	// 速度上限（行高の約14倍/秒）で大ジャンプ時の飛び過ぎを抑える
+	const double vmax = (m_lineH > 0) ? ((double)m_lineH * 14.0) : 400.0;
+	if (m_scrollVel > vmax) m_scrollVel = vmax;
+	if (m_scrollVel < -vmax) m_scrollVel = -vmax;
+	m_scrollY += m_scrollVel * dtSec;
+	Invalidate(FALSE);
 }
 
 void CLyricsViewWnd::OnTimer(UINT_PTR nIDEvent)
@@ -241,16 +297,22 @@ void CLyricsViewWnd::OnTimer(UINT_PTR nIDEvent)
 		CWnd::OnTimer(nIDEvent);
 		return;
 	}
-	const double d = m_targetY - m_scrollY;
-	if (AbsD(d) < 0.4) {
-		m_scrollY = m_targetY;
-		StopAnim();
-		Invalidate(FALSE);
-		return;
+	double dt = 0.008;
+	if (m_qpcFreq) {
+		LARGE_INTEGER now = {};
+		if (::QueryPerformanceCounter(&now)) {
+			const ULONGLONG q = (ULONGLONG)now.QuadPart;
+			if (m_lastAnimQpc > 0 && q > m_lastAnimQpc)
+				dt = (double)(q - m_lastAnimQpc) / (double)m_qpcFreq;
+			m_lastAnimQpc = q;
+		}
+	} else {
+		const ULONGLONG t = ::GetTickCount64();
+		if (m_lastAnimQpc > 0 && t > m_lastAnimQpc)
+			dt = (double)(t - m_lastAnimQpc) * 0.001;
+		m_lastAnimQpc = t;
 	}
-	// イージング: 残り距離の約20%/tick → 16ms想定で滑らか追従
-	m_scrollY += d * 0.20;
-	Invalidate(FALSE);
+	StepScroll(dt);
 }
 
 void CLyricsViewWnd::OnSize(UINT nType, int cx, int cy)
@@ -276,6 +338,21 @@ BOOL CLyricsViewWnd::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	if (maxY <= 0.0) m_targetY = 0.0;
 	StartAnim();
 	return TRUE;
+}
+
+void CLyricsViewWnd::OnRButtonUp(UINT nFlags, CPoint point)
+{
+	// デスクトップ歌詞オーバーレイ時のみ親へコンテキストメニューを渡す
+	if (m_overlay) {
+		CPoint sp = point;
+		ClientToScreen(&sp);
+		CWnd* p = GetParent();
+		if (p) {
+			p->SendMessage(WM_CONTEXTMENU, (WPARAM)m_hWnd, MAKELPARAM(sp.x, sp.y));
+			return;
+		}
+	}
+	CWnd::OnRButtonUp(nFlags, point);
 }
 
 BOOL CLyricsViewWnd::OnEraseBkgnd(CDC* pDC)
@@ -308,13 +385,14 @@ void CLyricsViewWnd::OnPaint()
 	}
 
 	if (m_count > 0 && m_lineH > 0) {
-		const int first = (int)(m_scrollY / m_lineH);
+		const int scrollPix = ScrollToPix(m_scrollY);
+		const int first = (m_lineH > 0) ? (scrollPix / m_lineH) : 0;
 		const int last = first + rc.Height() / m_lineH + 2;
 		const int padX = 6;
 
 		// 現在行ハイライト帯
 		{
-			const int cy = (int)((double)m_cur * m_lineH - m_scrollY);
+			const int cy = (int)((double)m_cur * m_lineH) - scrollPix;
 			CRect hi(0, cy - 1, rc.Width(), cy + m_lineH + 1);
 			if (hi.bottom > 0 && hi.top < rc.Height()) {
 				mem.FillSolidRect(&hi, m_overlay ? RGB(40, 50, 80) : RGB(220, 232, 255));
@@ -331,7 +409,7 @@ void CLyricsViewWnd::OnPaint()
 		mem.SetBkMode(TRANSPARENT);
 		for (int i = first; i <= last; i++) {
 			if (i < 0 || i >= m_count) continue;
-			const int y = (int)((double)i * m_lineH - m_scrollY);
+			const int y = (int)((double)i * m_lineH) - scrollPix;
 			if (y + m_lineH < 0 || y > rc.Height()) continue;
 
 			const BOOL isCur = (i == m_cur);

@@ -636,6 +636,7 @@ private:
 
     void SetRollSpeedPct(int pct);
     int  RollSpeedIndex() const;
+    static void RollSpeedSliderCb(void* ctx, int value);
     void PushDisplayFrames();
     void ClearRollHistory();
     void RequestFullRollRedraw();

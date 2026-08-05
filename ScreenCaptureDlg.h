@@ -7,6 +7,7 @@ class CScreenCaptureDlg;
 
 // プレビュー上で選択・移動・四隅リサイズ (XSplit風簡易)
 // DDX で直接アタッチする (二重 Subclass 禁止 — 起動クラッシュ防止)
+// 不透明パネル: アクリル下でも BufferedPaint+Opaque。SetAeroMode は Invalidate のみ。
 class CScPreviewCtrl : public CStatic
 {
 	DECLARE_DYNAMIC(CScPreviewCtrl)
@@ -14,10 +15,12 @@ public:
 	CScPreviewCtrl();
 	virtual ~CScPreviewCtrl();
 	void SetOwner(CScreenCaptureDlg* owner) { m_owner = owner; }
+	void SetAeroMode(BOOL b) { m_bAeroMode = b; if (GetSafeHwnd()) Invalidate(FALSE); }
 	void PaintToDC(CDC& dc);
 
 protected:
 	CScreenCaptureDlg* m_owner;
+	BOOL m_bAeroMode;
 	DECLARE_MESSAGE_MAP()
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
@@ -31,6 +34,7 @@ protected:
 };
 
 // エフェクト線形配線 (IN→最大8スロット→OUT) + パレットからドラッグ
+// 不透明オーナー描画。アクリル/淫女時も自前バッファでちらつきなし。
 class CScFxWireCtrl : public CStatic
 {
 	DECLARE_DYNAMIC(CScFxWireCtrl)
@@ -38,13 +42,16 @@ public:
 	CScFxWireCtrl();
 	virtual ~CScFxWireCtrl();
 	void SetOwner(CScreenCaptureDlg* owner) { m_owner = owner; }
-	void SetChain(const int* fx, int n);
-	void GetChain(int* fxOut, int* nOut) const;
+	void SetAeroMode(BOOL b) { m_bAeroMode = b; if (GetSafeHwnd()) Invalidate(FALSE); }
+	void SetChain(const int* fx, int n, const BYTE str[][8] = NULL);
+	void GetChain(int* fxOut, int* nOut, BYTE strOut[][8] = NULL) const;
 	void PaintToDC(CDC& dc);
 
 protected:
 	CScreenCaptureDlg* m_owner;
+	BOOL m_bAeroMode;
 	int m_slots[8];
+	BYTE m_str[8][8]; // S1..S8 per slot (0..8)
 	int m_slotN;
 	BOOL m_dragging;
 	int m_dragFx;      // パレットから: SC_FX_* / スロットから: 負でスロットindex+1
@@ -68,6 +75,7 @@ protected:
 	void UpdateHover(CPoint pt);
 	CRect SlotRect(int i) const;
 	CRect PaletteRect(int fx) const;
+	static void OnStrSlider(void* ctx, int v);
 };
 
 // 画面キャプチャ → MP4 (H.264 + AAC)
@@ -81,6 +89,9 @@ public:
 	CScreenCaptureDlg(CWnd* pParent = NULL);
 	virtual ~CScreenCaptureDlg();
 	enum { IDD = IDD_SCREENCAPTURE };
+
+	// savedata.cap_* を UI に反映（ゲーム録画プリセット等）。録画中は無視。
+	void ApplySavedataToUi(BOOL gameGuide);
 
 	enum { SC_LAYER_MAX = 16, SC_AVAIL_MAX = 128, SC_MON_MAX = 16 };
 	enum { SC_MODE_PRIMARY = 0, SC_MODE_VIRTUAL = 1, SC_MODE_WINDOWS = 2, SC_MODE_MONITOR = 3 };
@@ -114,6 +125,7 @@ public:
 		HMONITOR monHandle;
 		int fxN;
 		int fx[8]; // SC_FX_* chain (max SC_FX_CHAIN_MAX)
+		BYTE fxStr[8][8]; // S1..S8 (0..8)
 		float fxTime;
 	};
 
@@ -175,13 +187,20 @@ protected:
 	void SyncFxComboFromChain();
 	void ApplyFxComboToChain();
 	void OnFxWireChanged();
-	void GetFxChain(int* fxOut, int* nOut) const;
+	void GetFxChain(int* fxOut, int* nOut, BYTE strOut[][8] = NULL) const;
+	void FillFxPresetCombo();
+	CString FxPresetDefaultName(int idx) const;
+	void PersistFxPresetsToSavedata();
+	void ApplyFxPreset(int idx);
+	void SaveFxPreset(int idx);
 	void LayoutHelpBtn();
 	void ShowHelpSheet();
 	void FitToWorkArea();
 	static void ShiftChildrenBelow(CWnd* dlg, int yThresholdClient, int dy);
 
 public:
+	int FxParamCount(int fx) const;
+	CString FxParamName(int fx, int si) const;
 	CString FxName(int fx) const;
 	CString FxDesc(int fx) const;
 	BOOL IsWindowComposeMode() const;
@@ -207,6 +226,9 @@ public:
 	afx_msg void OnCbnSelchangeCanvas();
 	afx_msg void OnCbnSelchangeFps();
 	afx_msg void OnCbnSelchangeEffect();
+	afx_msg void OnBnClickedFxPreLoad();
+	afx_msg void OnBnClickedFxPreSave();
+	afx_msg void OnCbnSelchangeFxPre();
 	afx_msg void OnBnClickedCropFull();
 	afx_msg void OnLbnSelchangeLayer();
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
@@ -219,6 +241,10 @@ public:
 
 	CScPreviewCtrl m_preview;
 	CScFxWireCtrl m_fxWire;
+	CCustomStatic m_fxPreLabel;
+	CCustomComboBox m_fxPre;
+	CCustomStandardButton m_fxPreLoad;
+	CCustomStandardButton m_fxPreSave;
 	CCustomStandardButton m_help;
 	CCustomStatic m_modeLabel;
 	CCustomComboBox m_mode;
@@ -334,3 +360,5 @@ public:
 
 void OpenScreenCaptureModeless(CWnd* parent);
 void CloseScreenCaptureIfOpen();
+// 開いていれば savedata を UI へ同期。未開なら何もしない。
+void ScreenCaptureApplySavedataToUi(BOOL gameGuide);

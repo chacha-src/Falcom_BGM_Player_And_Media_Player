@@ -958,23 +958,17 @@ void CMp3Image::OnMouseMove(UINT nFlags, CPoint point)
 
 void CMp3Image::OnRButtonDown(UINT nFlags, CPoint point)
 {
-	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
-	CMenu menu;
-	menu.CreatePopupMenu();
-	menu.AppendMenu(MF_STRING | MF_ENABLED, IDOK, LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
-
+	(void)nFlags;
 	ClientToScreen(&point);
-	menu.TrackPopupMenu(
-		TPM_LEFTALIGN |	//クリック時のX座標をメニューの左辺にする
-		TPM_RIGHTBUTTON,	//右クリックでメニュー選択可能とする
-		point.x, point.y,	//メニューの表示位置
-		this            	//このメニューを所有するウィンドウ
-		);
-	menu.DestroyMenu();
+	CCustomPopupMenu menu;
+	menu.AddCommand(IDOK,
+		LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"),
+		LL14(L"ジャケット表示を閉じる", L"Close jacket view", L"Fermer la pochette", L"Chiudi la copertina", L"Cerrar la carátula", L"재킷 보기 닫기", L"关闭封面显示", L"إغلاق الغلاف", L"Закрыть обложку", L"Cover schließen", L"Fechar a capa", L"Hoes sluiten", L"Zamknij okladke", L"Kapak gorunumunu kapat"));
+	const UINT cmd = menu.Track(point, this);
+	if (cmd == IDOK)
+		SendMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
 	::SetWindowPos(this->m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	::SetWindowPos(this->m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-
-	//CCustomBlurDialogBase::OnRButtonDown(nFlags, point);
 }
 
 

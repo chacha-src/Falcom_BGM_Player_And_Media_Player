@@ -76,5 +76,5 @@ void CFilename::OnBnClickedOk()
 
 void CFilename::OnBnClickedOk2()
 {
-	
+	OnBnClickedOk();
 }

@@ -181,6 +181,7 @@ private:
 	void SetFreqZoom(int zoom);
 	void ResetPeakHold();
 	int WaveSpeedIndex() const;
+	static void WaveSpeedSliderCb(void* ctx, int value);
 	bool UpdateHoverFromPoint(CPoint ptClient); // true=表示内容が変わった
 	void StartSpecWorker();
 	void StopSpecWorker();

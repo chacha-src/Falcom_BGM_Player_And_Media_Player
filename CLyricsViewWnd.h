@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-// カラオケ風: 現在行を中央付近に保ち、切替時はピクセル単位で追従スクロールする歌詞ビュー。
+// カラオケ風: 現在行を中央付近に保ち、行内進捗も加味して滑らかに追従スクロールする歌詞ビュー。
 // （Static では滑らか追従できないため GDI owner-draw）
 class CLyricsViewWnd : public CWnd
 {
@@ -32,6 +32,9 @@ protected:
 	int m_lineH;
 	double m_scrollY;
 	double m_targetY;
+	double m_scrollVel; // px/sec（臨界減衰風）
+	ULONGLONG m_lastAnimQpc;
+	ULONGLONG m_qpcFreq;
 	CFont m_font;
 	CFont m_fontHi;
 	int m_fontPt;
@@ -42,12 +45,15 @@ protected:
 	void RecalcTarget();
 	void StartAnim();
 	void StopAnim();
+	void StepScroll(double dtSec);
 
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
+	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
 
 	DECLARE_MESSAGE_MAP()
 };
+

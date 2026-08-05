@@ -2103,30 +2103,43 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 	Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED);
 	if (Lindex < 0) return 0;
 
-	CMenu menu;
-	menu.CreatePopupMenu();
-	menu.AppendMenu(MF_STRING, PL_CTX_INFO,
+	CCustomPopupMenu menu;
+	menu.AddCommand(PL_CTX_INFO,
 		LL14(L"ファイル情報", L"File Info", L"Infos fichier", L"Info file",
 			L"Info. de archivo", L"파일 정보", L"文件信息", L"معلومات الملف",
 			L"Сведения о файле", L"Dateiinfo", L"Info. do arquivo", L"Bestandsinfo",
-			L"Informacje o pliku", L"Dosya bilgisi"));
-	menu.AppendMenu(MF_STRING, PL_CTX_WAV,
+			L"Informacje o pliku", L"Dosya bilgisi"),
+		LL14(L"選択曲の詳細情報を表示", L"Show details for the selection", L"Afficher les infos", L"Mostra dettagli",
+			L"Mostrar detalles", L"선택 곡 상세 정보", L"显示所选详细信息", L"عرض تفاصيل التحديد",
+			L"Показать сведения", L"Details anzeigen", L"Mostrar detalhes", L"Details tonen",
+			L"Pokaz szczegoly", L"Secimin ayrintilarini goster"));
+	menu.AddCommand(PL_CTX_WAV,
 		LL14(L"音声書き出し…", L"Audio export...", L"Export audio...", L"Esporta audio...",
 			L"Exportar audio...", L"오디오 내보내기...", L"音频导出…", L"تصدير الصوت...",
 			L"Экспорт аудио...", L"Audio exportieren...", L"Exportar audio...", L"Audio exporteren...",
 			L"Eksport audio...", L"Ses disa aktar..."));
+	menu.AddCommand(PL_CTX_TRANSCODE,
+		LL14(L"mp3/FLAC 変換…", L"Convert to mp3/FLAC…", L"Convertir en mp3/FLAC…", L"Converti in mp3/FLAC…",
+			L"Convertir a mp3/FLAC…", L"mp3/FLAC 변환…", L"转换为 mp3/FLAC…", L"تحويل إلى mp3/FLAC…",
+			L"Конвертировать в mp3/FLAC…", L"Nach mp3/FLAC konvertieren…", L"Converter para mp3/FLAC…", L"Converteren naar mp3/FLAC…",
+			L"Konwertuj do mp3/FLAC…", L"mp3/FLAC donustur…"),
+		LL14(L"選択曲を mp3 または FLAC に変換して書き出し", L"Convert selection to mp3 or FLAC", L"Convertir la selection en mp3/FLAC", L"Converti la selezione in mp3/FLAC",
+			L"Convertir la seleccion a mp3/FLAC", L"선택 곡을 mp3/FLAC로 변환", L"将所选转为 mp3/FLAC", L"تحويل التحديد إلى mp3/FLAC",
+			L"Конвертировать выбор в mp3/FLAC", L"Auswahl nach mp3/FLAC konvertieren", L"Converter selecao para mp3/FLAC", L"Selectie naar mp3/FLAC converteren",
+			L"Konwertuj wybor do mp3/FLAC", L"Secimi mp3/FLAC'a donustur"));
 	if (Lindex >= 0 && Lindex < playcnt && (pc[Lindex].sub == -2 || IsDougaVideoFile(pc[Lindex].fol))) {
-		menu.AppendMenu(MF_STRING, PL_CTX_VIDEO_EXTRACT,
+		menu.AddCommand(PL_CTX_VIDEO_EXTRACT,
 			LL14(L"動画→音声抽出…", L"Extract audio from video…", L"Extraire audio de la video…", L"Estrai audio dal video…",
 				L"Extraer audio del video…", L"동영상→오디오 추출…", L"从视频提取音频…", L"استخراج صوت من الفيديو…",
 				L"Извлечь аудио из видео…", L"Audio aus Video extrahieren…", L"Extrair audio do video…", L"Audio uit video…",
 				L"Wyodrebnij audio z wideo…", L"Videodan ses cikar…"));
 	}
-	menu.AppendMenu(MF_STRING | (savedata.mic_mix ? MF_CHECKED : 0), PL_CTX_MICMIX,
+	menu.AddCheck(PL_CTX_MICMIX,
 		LL14(L"WAV保存時にマイクをミックス", L"Mix mic when saving WAV", L"Mixer le micro à l'enregistrement WAV", L"Mix microfono al salvataggio WAV",
 			L"Mezclar micro al guardar WAV", L"WAV 저장 시 마이크 믹스", L"保存WAV时混合麦克风", L"مزج الميكروفون عند حفظ WAV",
 			L"Микшировать микрофон при сохранении WAV", L"Mikrofon beim WAV-Speichern mischen", L"Misturar microfone ao salvar WAV", L"Microfoon mixen bij WAV-opslag",
-			L"Miksuj mikrofon przy zapisie WAV", L"WAV kaydında mikrofonu karıştır"));
+			L"Miksuj mikrofon przy zapisie WAV", L"WAV kaydında mikrofonu karıştır"),
+		savedata.mic_mix ? TRUE : FALSE);
 	{
 		int selCount = 0;
 		int idx = -1;
@@ -2134,20 +2147,24 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			if (idx < playcnt) ++selCount;
 		}
 		if (selCount >= 2) {
-			menu.AppendMenu(MF_STRING, PL_CTX_XFADE,
+			menu.AddCommand(PL_CTX_XFADE,
 				LL14(L"クロスフェード書き出し…", L"Crossfade export...", L"Export fondu enchaine...", L"Esporta con crossfade...",
 					L"Exportar con fundido cruzado...", L"크로스페이드 내보내기...", L"交叉淡入淡出导出…", L"تصدير بتلاشي متقاطع...",
 					L"Экспорт с кроссфейдом...", L"Ueberblend-Export...", L"Exportar com crossfade...", L"Crossfade-export...",
-					L"Eksport z przejsciem...", L"Capraz solma disa aktar..."));
+					L"Eksport z przejsciem...", L"Capraz solma disa aktar..."),
+				LL14(L"選択した複数曲をクロスフェードで書き出し", L"Export selection with crossfade", L"Exporter avec fondu", L"Esporta con crossfade",
+					L"Exportar con fundido", L"선택 곡을 크로스페이드로 내보내기", L"交叉淡入淡出导出所选", L"تصدير بتلاشي متقاطع",
+					L"Экспорт с кроссфейдом", L"Mit Ueberblendung exportieren", L"Exportar com crossfade", L"Exporteren met crossfade",
+					L"Eksport z przejsciem", L"Capraz solma ile aktar"));
 		}
 	}
-	menu.AppendMenu(MF_STRING, PL_CTX_TAG_EDIT,
+	menu.AddCommand(PL_CTX_TAG_EDIT,
 		LL14(L"タグ編集…", L"Edit tags...", L"Modifier les tags...", L"Modifica tag...",
 			L"Editar etiquetas...", L"태그 편집...", L"编辑标签…", L"تحرير الوسوم...",
 			L"Редактировать теги...", L"Tags bearbeiten...", L"Editar tags...", L"Tags bewerken...",
 			L"Edytuj tagi...", L"Etiketleri duzenle..."));
 	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
-		menu.AppendMenu(MF_STRING, PL_CTX_MB_AUTOTAG,
+		menu.AddCommand(PL_CTX_MB_AUTOTAG,
 			LL14(L"MusicBrainz 自動タグ", L"MusicBrainz auto-tag", L"Auto-tag MusicBrainz", L"Auto-tag MusicBrainz",
 				L"Auto-etiqueta MusicBrainz", L"MusicBrainz 자동 태그", L"MusicBrainz 自动标签", L"وسم تلقائي MusicBrainz",
 				L"Автотег MusicBrainz", L"MusicBrainz Auto-Tag", L"Auto-tag MusicBrainz", L"MusicBrainz auto-tag",
@@ -2159,65 +2176,80 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			bpmLbl.Format(LL14(L"BPM 計測（現在 %d）", L"Measure BPM (now %d)", L"Mesurer BPM (%d)", L"Misura BPM (%d)", L"Medir BPM (%d)", L"BPM 측정 (현재 %d)", L"测量 BPM（当前 %d）", L"قياس BPM (%d)", L"BPM (%d)", L"BPM messen (%d)", L"Medir BPM (%d)", L"BPM meten (%d)", L"Mierz BPM (%d)", L"BPM olc (%d)"), savedata.mpDetectedBpm);
 		else
 			bpmLbl = LL14(L"BPM 計測", L"Measure BPM", L"Mesurer BPM", L"Misura BPM", L"Medir BPM", L"BPM 측정", L"测量 BPM", L"قياس BPM", L"Измерить BPM", L"BPM messen", L"Medir BPM", L"BPM meten", L"Mierz BPM", L"BPM olc");
-		menu.AppendMenu(MF_STRING | (MpBpmIsMeasuring() ? MF_CHECKED : 0), PL_CTX_BPM, bpmLbl);
+		menu.AddCheck(PL_CTX_BPM, bpmLbl, MpBpmIsMeasuring() ? TRUE : FALSE,
+			LL14(L"再生中のテンポを計測／確定", L"Measure / confirm tempo while playing", L"Mesurer / confirmer le tempo", L"Misura / conferma il tempo",
+				L"Medir / confirmar tempo", L"재생 중 템포 측정/확정", L"测量/确认播放中的速度", L"قياس/تأكيد الإيقاع",
+				L"Измерить / подтвердить темп", L"Tempo messen / bestaetigen", L"Medir / confirmar o tempo", L"Tempo meten / bevestigen",
+				L"Zmierz / potwierdz tempo", L"Temposu olc / onayla"));
 		if (!MpBpmIsMeasuring() && (savedata.mpDetectedBpm > 0 || savedata.mpBpmCand[0] > 0)) {
 			MpBpmEnsureCandList();
-			CMenu candSub;
-			candSub.CreatePopupMenu();
 			int nSub = 0;
 			for (int ci = 0; ci < 3; ++ci) {
-				const int cb = savedata.mpBpmCand[ci];
-				if (cb <= 0) continue;
-				CString candItem;
-				candItem.Format(L"%d", cb);
-				const UINT id = (ci == 0) ? PL_CTX_BPM_CAND1 : (ci == 1) ? PL_CTX_BPM_CAND2 : PL_CTX_BPM_CAND3;
-				candSub.AppendMenu(MF_STRING | (savedata.mpDetectedBpm == cb ? MF_CHECKED : 0), id, candItem);
-				++nSub;
+				if (savedata.mpBpmCand[ci] > 0) ++nSub;
 			}
 			if (nSub > 0) {
-				menu.AppendMenu(MF_POPUP, (UINT_PTR)candSub.Detach(),
+				CCustomPopupMenu* candSub = menu.AddSubMenu(
 					LL14(L"BPM 候補", L"BPM candidates", L"Candidats BPM", L"Candidati BPM",
 						L"Candidatos BPM", L"BPM 후보", L"BPM 候选", L"مرشحو BPM",
 						L"Кандидаты BPM", L"BPM-Kandidaten", L"Candidatos BPM", L"BPM-kandidaten",
-						L"Kandydaci BPM", L"BPM adaylari"));
+						L"Kandydaci BPM", L"BPM adaylari"),
+					LL14(L"検出された候補BPMを選択", L"Pick a detected BPM candidate", L"Choisir un candidat BPM", L"Scegli un candidato BPM",
+						L"Elegir candidato BPM", L"감지된 BPM 후보 선택", L"选择检测到的 BPM 候选", L"اختر مرشح BPM",
+						L"Выбрать кандидата BPM", L"BPM-Kandidat waehlen", L"Escolher candidato BPM", L"BPM-kandidaat kiezen",
+						L"Wybierz kandydata BPM", L"BPM adayi sec"));
+				if (candSub) {
+					for (int ci = 0; ci < 3; ++ci) {
+						const int cb = savedata.mpBpmCand[ci];
+						if (cb <= 0) continue;
+						CString candItem;
+						candItem.Format(L"%d", cb);
+						const UINT id = (ci == 0) ? PL_CTX_BPM_CAND1 : (ci == 1) ? PL_CTX_BPM_CAND2 : PL_CTX_BPM_CAND3;
+						candSub->AddCheck(id, candItem, savedata.mpDetectedBpm == cb ? TRUE : FALSE);
+					}
+				}
 			}
 		}
-		menu.AppendMenu(MF_STRING, PL_CTX_NORM_SCAN,
+		menu.AddCommand(PL_CTX_NORM_SCAN,
 			LL14(L"ラウドネス計測", L"Measure loudness", L"Mesurer loudness", L"Misura loudness", L"Medir loudness", L"라우드니스 측정", L"响度测量", L"قياس الجهارة", L"Измерить громкость", L"Lautheit messen", L"Medir loudness", L"Loudness meten", L"Zmierz glosnosc", L"Loudness olc"));
-		menu.AppendMenu(MF_STRING, PL_CTX_EXPORT_AB,
+		menu.AddCommand(PL_CTX_EXPORT_AB,
 			LL14(L"A-B を WAV 書き出し", L"Export A-B to WAV", L"Exporter A-B en WAV", L"Esporta A-B in WAV", L"Exportar A-B a WAV", L"A-B를 WAV로 내보내기", L"将 A-B 导出为 WAV", L"تصدير A-B إلى WAV", L"Экспорт A-B в WAV", L"A-B als WAV exportieren", L"Exportar A-B para WAV", L"A-B naar WAV", L"Eksport A-B do WAV", L"A-B WAV aktar"));
-		menu.AppendMenu(MF_STRING, PL_CTX_SSVIZ,
+		menu.AddCommand(PL_CTX_SSVIZ,
 			LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"));
-		menu.AppendMenu(MF_STRING | (savedata.deskLrcOn ? MF_CHECKED : 0), PL_CTX_DESK_LRC,
-			LL14(L"デスクトップ歌詞", L"Desktop lyrics", L"Paroles bureau", L"Testi desktop", L"Letras escritorio", L"데스크톱 가사", L"桌面歌词", L"كلمات سطح المكتب", L"Текст на рабочем столе", L"Desktop-Lyrics", L"Letras na area", L"Desktoptekst", L"Tekst pulpitu", L"Masaustu sozleri"));
-		menu.AppendMenu(MF_STRING, PL_CTX_DUPES,
+		menu.AddCheck(PL_CTX_DESK_LRC,
+			LL14(L"デスクトップ歌詞", L"Desktop lyrics", L"Paroles bureau", L"Testi desktop", L"Letras escritorio", L"데스크톱 가사", L"桌面歌词", L"كلمات سطح المكتب", L"Текст на рабочем столе", L"Desktop-Lyrics", L"Letras na area", L"Desktoptekst", L"Tekst pulpitu", L"Masaustu sozleri"),
+			savedata.deskLrcOn ? TRUE : FALSE);
+		menu.AddCommand(PL_CTX_DUPES,
 			LL14(L"重複スキャン", L"Scan duplicates", L"Detecter doublons", L"Scansiona duplicati", L"Buscar duplicados", L"중복 스캔", L"扫描重复", L"فحص التكرار", L"Поиск дублей", L"Duplikate scannen", L"Procurar duplicatas", L"Duplicaten scannen", L"Skanuj duplikaty", L"Kopyalari tara"));
-		menu.AppendMenu(MF_STRING, PL_CTX_FOLDER_SYNC,
+		menu.AddCommand(PL_CTX_FOLDER_SYNC,
 			LL14(L"フォルダ差分", L"Folder sync diff", L"Diff dossier", L"Diff cartella", L"Diff carpeta", L"폴더 차이", L"文件夹差异", L"فرق المجلد", L"Разница папки", L"Ordner-Diff", L"Diff pasta", L"Mapverschil", L"Roznica folderu", L"Klasor farki"));
 	}
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING, PL_CTX_REMOVE_MISSING,
+	menu.AddSeparator();
+	menu.AddCommand(PL_CTX_REMOVE_MISSING,
 		LL14(L"存在しないファイルを一覧から削除", L"Remove missing files from list",
 			L"Supprimer les fichiers manquants", L"Rimuovi file mancanti", L"Eliminar archivos inexistentes",
 			L"없는 파일을 목록에서 삭제", L"从列表中删除不存在的文件", L"إزالة الملفات المفقودة",
 			L"Удалить отсутствующие файлы", L"Fehlende Dateien entfernen", L"Remover arquivos ausentes",
 			L"Ontbrekende bestanden verwijderen", L"Usuń brakujące pliki", L"Eksik dosyalari kaldir"));
-	menu.AppendMenu(MF_STRING, PL_CTX_RESCAN_MISS,
+	menu.AddCommand(PL_CTX_RESCAN_MISS,
 		LL14(L"欠損マークを再スキャン", L"Rescan missing marks", L"Rescanner les manquants", L"Ricontrolla mancanti",
 			L"Reexaminar faltantes", L"결손 표시 재스캔", L"重新扫描缺失标记", L"إعادة فحص المفقود",
 			L"Пересканировать отсутствующие", L"Fehlend-Markierungen erneut pruefen", L"Verificar ausentes de novo",
 			L"Ontbrekende markeringen opnieuw scannen", L"Ponownie skanuj brakujace", L"Eksik isaretlerini yeniden tara"));
-	menu.AppendMenu(MF_STRING, PL_CTX_REFRESH_JAK,
+	menu.AddCommand(PL_CTX_REFRESH_JAK,
 		LL14(L"選択曲のジャケを再取得", L"Refresh jacket for selection", L"Rafraichir la pochette", L"Aggiorna copertina",
 			L"Actualizar caratula", L"선택 곡 재킷 다시 가져오기", L"重新获取所选封面", L"تحديث الغلاف للتحديد",
 			L"Обновить обложку выбранного", L"Cover der Auswahl neu laden", L"Atualizar capa da selecao",
 			L"Hoes van selectie vernieuwen", L"Odswiez okladke zaznaczenia", L"Secimin kapagini yenile"));
-	menu.AppendMenu(MF_STRING, PL_CTX_DEL,
+	menu.AddCommand(PL_CTX_DEL,
 		LL14(L"削除", L"Delete", L"Supprimer", L"Elimina",
 			L"Eliminar", L"삭제", L"删除", L"حذف",
 			L"Удалить", L"Löschen", L"Excluir", L"Verwijderen",
-			L"Usuń", L"Sil"));
-	menu.AppendMenu(MF_STRING, PL_CTX_CLEAR_SONGPARAM,
+			L"Usuń", L"Sil"),
+		LL14(L"一覧から選択曲を削除（ファイルは残る）", L"Remove selection from list (files kept)", L"Retirer de la liste", L"Rimuovi dall'elenco",
+			L"Quitar de la lista", L"목록에서 선택 곡 삭제(파일 유지)", L"从列表删除所选（保留文件）", L"إزالة من القائمة",
+			L"Удалить из списка", L"Aus Liste entfernen", L"Remover da lista", L"Uit lijst verwijderen",
+			L"Usun z listy", L"Listeden kaldir (dosya kalir)"));
+	menu.AddCommand(PL_CTX_CLEAR_SONGPARAM,
 		LL14(L"選択曲の記憶パラメータを削除", L"Clear saved params for selection",
 			L"Effacer les parametres enregistres de la selection", L"Cancella parametri salvati della selezione",
 			L"Borrar parametros guardados de la seleccion", L"선택 곡의 저장 파라미터 삭제",
@@ -2225,40 +2257,42 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Удалить сохранённые параметры выбранного", L"Gespeicherte Parameter der Auswahl loeschen",
 			L"Limpar parametros salvos da selecao", L"Opgeslagen parameters van selectie wissen",
 			L"Usun zapisane parametry zaznaczenia", L"Secimin kayitli parametrelerini sil"));
-	menu.AppendMenu(MF_STRING, PL_CTX_PROTOOLS,
+	menu.AddCommand(PL_CTX_PROTOOLS,
 		LL14(L"再生詳細...", L"Playback details...", L"Details lecture...", L"Dettagli riproduzione...",
 			L"Detalles de reproduccion...", L"재생 상세...", L"播放详情...", L"تفاصيل التشغيل...",
 			L"Параметры воспроизведения...", L"Wiedergabedetails...", L"Detalhes de reproducao...", L"Afspeeldetails...",
 			L"Szczegoly odtwarzania...", L"Oynatma ayrintilari..."));
-	menu.AppendMenu(MF_STRING | (savedata.analyzerwindow ? MF_CHECKED : 0), PL_CTX_ANALYZER,
+	menu.AddCheck(PL_CTX_ANALYZER,
 		LL14(L"アナライザーを開く", L"Open Analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore",
 			L"Abrir analizador", L"애널라이저 열기", L"打开分析器", L"فتح المحلل",
 			L"Открыть анализатор", L"Analyzer offnen", L"Abrir analisador", L"Analyser openen",
-			L"Otworz analizator", L"Analizoru ac"));
-	menu.AppendMenu(MF_STRING | (savedata.pianorollwindow ? MF_CHECKED : 0), PL_CTX_PIANOROLL,
+			L"Otworz analizator", L"Analizoru ac"),
+		savedata.analyzerwindow ? TRUE : FALSE);
+	menu.AddCheck(PL_CTX_PIANOROLL,
 		LL14(L"ピアノロールを開く", L"Open Piano Roll", L"Ouvrir le piano roll", L"Apri piano roll",
 			L"Abrir piano roll", L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفة البيانو",
 			L"Открыть пианоролл", L"Piano Roll offnen", L"Abrir piano roll", L"Piano roll openen",
-			L"Otworz piano roll", L"Piano roll'u ac"));
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING, PL_CTX_COPY_TITLEART,
+			L"Otworz piano roll", L"Piano roll'u ac"),
+		savedata.pianorollwindow ? TRUE : FALSE);
+	menu.AddSeparator();
+	menu.AddCommand(PL_CTX_COPY_TITLEART,
 		LL14(L"タイトル - アーティストをコピー", L"Copy Title - Artist", L"Copier Titre - Artiste", L"Copia Titolo - Artista",
 			L"Copiar Titulo - Artista", L"제목 - 아티스트 복사", L"复制 标题 - 艺术家", L"نسخ العنوان - الفنان",
 			L"Копировать Название - Исполнитель", L"Titel - Interpret kopieren", L"Copiar Titulo - Artista", L"Kopieer Titel - Artiest",
 			L"Kopiuj Tytul - Artysta", L"Baslik - Sanatciyi kopyala"));
-	menu.AppendMenu(MF_STRING, PL_CTX_ADD_FOLDER,
+	menu.AddCommand(PL_CTX_ADD_FOLDER,
 		LL14(L"フォルダから追加...", L"Add from folder...", L"Ajouter depuis un dossier...", L"Aggiungi da cartella...",
 			L"Anadir desde carpeta...", L"폴더에서 추가...", L"从文件夹添加...", L"إضافة من مجلد...",
 			L"Добавить из папки...", L"Aus Ordner hinzufugen...", L"Adicionar da pasta...", L"Toevoegen uit map...",
 			L"Dodaj z folderu...", L"Klasorden ekle..."));
-	menu.AppendMenu(MF_STRING, PL_CTX_ADD_SAME_FOLDER,
+	menu.AddCommand(PL_CTX_ADD_SAME_FOLDER,
 		LL14(L"同じフォルダの曲を追加", L"Add tracks from same folder", L"Ajouter les pistes du meme dossier",
 			L"Aggiungi brani dalla stessa cartella", L"Anadir pistas de la misma carpeta",
 			L"같은 폴더의 곡 추가", L"添加同一文件夹的曲目", L"إضافة مقاطع من نفس المجلد",
 			L"Добавить треки из этой же папки", L"Titel aus demselben Ordner hinzufugen",
 			L"Adicionar faixas da mesma pasta", L"Nummers uit dezelfde map toevoegen",
 			L"Dodaj utwory z tego samego folderu", L"Ayni klasordeki parcalari ekle"));
-	menu.AppendMenu(MF_STRING, PL_CTX_OPEN_FOLDER,
+	menu.AddCommand(PL_CTX_OPEN_FOLDER,
 		LL14(L"エクスプローラーで開く", L"Open containing folder", L"Ouvrir le dossier du fichier",
 			L"Apri cartella del file", L"Abrir la carpeta del archivo",
 			L"파일 위치 열기", L"打开所在文件夹", L"فتح المجلد الحاوي",
@@ -2266,74 +2300,75 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Abrir a pasta do arquivo", L"Map van bestand openen",
 			L"Otworz folder pliku", L"Dosya klasorunu ac"));
 	{
-		CMenu subSort;
-		subSort.CreatePopupMenu();
-		subSort.AppendMenu(MF_STRING, PL_CTX_SORT_NAME,
-			LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"));
-		subSort.AppendMenu(MF_STRING, PL_CTX_SORT_ART,
-			LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Interpret", L"Artista", L"Artiest", L"Artysta", L"Sanatci"));
-		subSort.AppendMenu(MF_STRING, PL_CTX_SORT_ALB,
-			LL14(L"アルバム", L"Album", L"Album", L"Album", L"Album", L"앨범", L"专辑", L"الألبوم", L"Альбом", L"Album", L"Album", L"Album", L"Album", L"Album"));
-		subSort.AppendMenu(MF_STRING, PL_CTX_SORT_TIME,
-			LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"));
-		menu.AppendMenu(MF_POPUP, (UINT_PTR)subSort.Detach(),
+		CCustomPopupMenu* subSort = menu.AddSubMenu(
 			LL14(L"並べ替え", L"Sort", L"Trier", L"Ordina", L"Ordenar", L"정렬", L"排序", L"ترتيب", L"Сортировка", L"Sortieren", L"Ordenar", L"Sorteren", L"Sortuj", L"Sirala"));
+		if (subSort) {
+			subSort->AddCommand(PL_CTX_SORT_NAME,
+				LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"));
+			subSort->AddCommand(PL_CTX_SORT_ART,
+				LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Interpret", L"Artista", L"Artiest", L"Artysta", L"Sanatci"));
+			subSort->AddCommand(PL_CTX_SORT_ALB,
+				LL14(L"アルバム", L"Album", L"Album", L"Album", L"Album", L"앨범", L"专辑", L"الألبوم", L"Альбом", L"Album", L"Album", L"Album", L"Album", L"Album"));
+			subSort->AddCommand(PL_CTX_SORT_TIME,
+				LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"));
+		}
 	}
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING, PL_CTX_AB_SET_A,
+	menu.AddSeparator();
+	menu.AddCommand(PL_CTX_AB_SET_A,
 		LL14(L"A-B: 現在位置をAに", L"A-B: Set A at position", L"A-B: Definir A", L"A-B: Imposta A", L"A-B: Fijar A", L"A-B: 현재 위치를 A로", L"A-B: 将当前位置设为A", L"A-B: تعيين A", L"A-B: Задать A", L"A-B: A setzen", L"A-B: Definir A", L"A-B: Stel A in", L"A-B: Ustaw A", L"A-B: A ayarla"));
-	menu.AppendMenu(MF_STRING, PL_CTX_AB_SET_B,
+	menu.AddCommand(PL_CTX_AB_SET_B,
 		LL14(L"A-B: 現在位置をBに", L"A-B: Set B at position", L"A-B: Definir B", L"A-B: Imposta B", L"A-B: Fijar B", L"A-B: 현재 위치를 B로", L"A-B: 将当前位置设为B", L"A-B: تعيين B", L"A-B: Задать B", L"A-B: B setzen", L"A-B: Definir B", L"A-B: Stel B in", L"A-B: Ustaw B", L"A-B: B ayarla"));
-	menu.AppendMenu(MF_STRING, PL_CTX_AB_CLEAR,
+	menu.AddCommand(PL_CTX_AB_CLEAR,
 		LL14(L"A-Bリピート解除", L"Clear A-B repeat", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 반복 해제", L"清除A-B重复", L"مسح تكرار A-B", L"Сбросить A-B", L"A-B aufheben", L"Limpar A-B", L"A-B wissen", L"Wyczysc A-B", L"A-B temizle"));
 	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
-		menu.AppendMenu(MF_SEPARATOR);
-		menu.AppendMenu(MF_STRING, PL_CTX_QUEUE_ADD,
+		menu.AddSeparator();
+		menu.AddCommand(PL_CTX_QUEUE_ADD,
 			LL14(L"Up Next に追加", L"Add to Up Next", L"Ajouter a Up Next", L"Aggiungi a Up Next", L"Anadir a Up Next", L"Up Next에 추가", L"加入 Up Next", L"إضافة إلى Up Next", L"В Up Next", L"Zu Up Next", L"Adicionar a Up Next", L"Toevoegen aan Up Next", L"Dodaj do Up Next", L"Up Next'e ekle"));
-		menu.AppendMenu(MF_STRING, PL_CTX_QUEUE_PLAYNEXT,
+		menu.AddCommand(PL_CTX_QUEUE_PLAYNEXT,
 			LL14(L"次に再生", L"Play Next", L"Lire ensuite", L"Riproduci dopo", L"Reproducir despues", L"다음에 재생", L"下一首播放", L"تشغيل التالي", L"Играть следующим", L"Als Nachstes", L"Tocar a seguir", L"Speel hierna", L"Odtworz nastepnie", L"Sonraki oynat"));
 		CString qclr;
 		qclr.Format(LL14(L"キューをクリア (%d)", L"Clear Queue (%d)", L"Vider la file (%d)", L"Svuota coda (%d)", L"Vaciar cola (%d)", L"큐 비우기 (%d)", L"清空队列 (%d)", L"مسح الطابور (%d)", L"Очистить очередь (%d)", L"Warteschlange leeren (%d)", L"Limpar fila (%d)", L"Wachtrij wissen (%d)", L"Wyczysc kolejke (%d)", L"Kuyrugu temizle (%d)"),
 			mp->m_queueN);
-		menu.AppendMenu(MF_STRING | (mp->m_queueN > 0 ? 0 : MF_GRAYED), PL_CTX_QUEUE_CLEAR, qclr);
+		menu.AddCommand(PL_CTX_QUEUE_CLEAR, qclr, NULL, mp->m_queueN > 0 ? TRUE : FALSE);
 	}
-	menu.AppendMenu(MF_SEPARATOR);
+	menu.AddSeparator();
 
 	const int plCnt = GetPlaylistFileCount();
 	if (plCnt > 1) {
-		CMenu subMove, subCopy;
-		subMove.CreatePopupMenu();
-		subCopy.CreatePopupMenu();
+		int otherN = 0;
 		for (int i = 0; i < plCnt; ++i) {
-			if (i == savedata.playlistnum) continue;
-			CString name = GetPlaylistDisplayName(i);
-			subMove.AppendMenu(MF_STRING, PL_CTX_MOVE_BASE + i, name);
-			subCopy.AppendMenu(MF_STRING, PL_CTX_COPY_BASE + i, name);
+			if (i != savedata.playlistnum) ++otherN;
 		}
-		if (subMove.GetMenuItemCount() > 0) {
-			menu.AppendMenu(MF_POPUP, (UINT_PTR)subMove.Detach(),
+		if (otherN > 0) {
+			CCustomPopupMenu* subMove = menu.AddSubMenu(
 				LL14(L"他のリストへ移動", L"Move to another playlist", L"Deplacer vers une autre liste",
 					L"Sposta in un'altra playlist", L"Mover a otra lista", L"다른 리스트로 이동", L"移动到其他列表",
 					L"نقل إلى قائمة أخرى", L"Переместить в другой плейлист", L"In andere Liste verschieben",
 					L"Mover para outra lista", L"Verplaatsen naar andere lijst", L"Przenieś do innej listy",
 					L"Baska listeye tasi"));
-			menu.AppendMenu(MF_POPUP, (UINT_PTR)subCopy.Detach(),
+			CCustomPopupMenu* subCopy = menu.AddSubMenu(
 				LL14(L"他のリストへコピー", L"Copy to another playlist", L"Copier vers une autre liste",
 					L"Copia in un'altra playlist", L"Copiar a otra lista", L"다른 리스트로 복사", L"复制到其他列表",
 					L"نسخ إلى قائمة أخرى", L"Копировать в другой плейлист", L"In andere Liste kopieren",
 					L"Copiar para outra lista", L"Kopiëren naar andere lijst", L"Kopiuj do innej listy",
 					L"Baska listeye kopyala"));
+			for (int i = 0; i < plCnt; ++i) {
+				if (i == savedata.playlistnum) continue;
+				CString name = GetPlaylistDisplayName(i);
+				if (subMove) subMove->AddCommand(PL_CTX_MOVE_BASE + i, name);
+				if (subCopy) subCopy->AddCommand(PL_CTX_COPY_BASE + i, name);
+			}
 		}
 	}
 
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING, ID_HELP_SHOWSHEET,
+	menu.AddSeparator();
+	menu.AddCommand(ID_HELP_SHOWSHEET,
 		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
 			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
 			L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
 			L"Przewodnik", L"İşlem kılavuzu"));
 
-	return (int)menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RETURNCMD, pt.x, pt.y, pOwner);
+	return (int)menu.Track(pt, pOwner ? pOwner : this);
 }
 
 void CPlayList::HandleTrackContextCmd(int cmd)
@@ -2478,6 +2513,99 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	}
 	else if (cmd == PL_CTX_PIANOROLL) {
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->TogglePianoRoll();
+	}
+	else if (cmd == PL_CTX_COPY_TITLEART) {
+		const int idx = m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+		if (pc && idx >= 0 && idx < playcnt) {
+			CString s;
+			s.Format(_T("%s - %s"), pc[idx].name, pc[idx].art);
+			if (OpenClipboard()) {
+				EmptyClipboard();
+				const size_t bytes = ((size_t)s.GetLength() + 1) * sizeof(TCHAR);
+				HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes);
+				if (h) {
+					memcpy(GlobalLock(h), (LPCTSTR)s, bytes);
+					GlobalUnlock(h);
+#ifdef _UNICODE
+					SetClipboardData(CF_UNICODETEXT, h);
+#else
+					SetClipboardData(CF_TEXT, h);
+#endif
+				}
+				CloseClipboard();
+			}
+		}
+	}
+	else if (cmd == PL_CTX_ADD_FOLDER) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+			mp->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_ADDFOLDER, BN_CLICKED), 0);
+		}
+		else {
+			BROWSEINFO bi; ZeroMemory(&bi, sizeof(bi));
+			TCHAR path[MAX_PATH] = { 0 };
+			bi.hwndOwner = GetSafeHwnd();
+			bi.pszDisplayName = path;
+			bi.lpszTitle = LL14(L"追加するフォルダを選んでください", L"Select a folder to add", L"Choisir un dossier", L"Scegli una cartella", L"Elija una carpeta", L"추가할 폴더 선택", L"选择要添加的文件夹", L"اختر مجلدًا للإضافة", L"Выберите папку", L"Ordner zum Hinzufugen", L"Selecione uma pasta", L"Selecteer een map", L"Wybierz folder", L"Eklenecek klasoru secin");
+			bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+			LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
+			if (pidl) {
+				if (SHGetPathFromIDList(pidl, path)) {
+					TCHAR cwd[1024];
+					_tgetcwd(cwd, 1000);
+					syo = 0; syos = _T(""); syomode = 0;
+					m_lc.SetRedraw(FALSE);
+					Fol(path);
+					m_lc.SetRedraw(TRUE);
+					m_lc.Invalidate();
+					m_lc.UpdateWindow();
+					_tchdir(cwd);
+					Save();
+				}
+				CoTaskMemFree(pidl);
+			}
+		}
+	}
+	else if (cmd == PL_CTX_SORT_NAME || cmd == PL_CTX_SORT_ART || cmd == PL_CTX_SORT_ALB || cmd == PL_CTX_SORT_TIME) {
+		extern CMediaPlayerDlg* mp;
+		const int key = (cmd == PL_CTX_SORT_NAME) ? 1
+			: (cmd == PL_CTX_SORT_ART) ? 2
+			: (cmd == PL_CTX_SORT_ALB) ? 3 : 4;
+		MpSortPlaylistByKey(key);
+		m_lc.Invalidate(FALSE);
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->RefreshList(TRUE);
+		MpPersistSavedataQuick();
+	}
+	else if (cmd == PL_CTX_AB_SET_A) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_SEEK_SETA, 0);
+	}
+	else if (cmd == PL_CTX_AB_SET_B) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_SEEK_SETB, 0);
+	}
+	else if (cmd == PL_CTX_AB_CLEAR) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_SEEK_ABCLR, 0);
+	}
+	else if (cmd == PL_CTX_QUEUE_ADD) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_QUEUE_ADD, 0);
+	}
+	else if (cmd == PL_CTX_QUEUE_PLAYNEXT) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_QUEUE_PLAYNEXT, 0);
+	}
+	else if (cmd == PL_CTX_QUEUE_CLEAR) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_QUEUE_CLEAR, 0);
 	}
 	else if (cmd == PL_CTX_MB_AUTOTAG) {
 		extern CMediaPlayerDlg* mp;

@@ -95,14 +95,19 @@ enum {
 };
 
 enum { SC_FX_CHAIN_MAX = 8 };
+enum { SC_FX_STR_N = 8 };     // S1..S8（0..8、既定4=等倍）
+enum { SC_FX_STR_DEF = 4 };
+enum { SC_FX_STR_MAX = 8 };
 
 // 単発（chain n=1 の薄いラッパ）
 BOOL ScGpuApplyEffect(BYTE* bgra, int w, int h, int stride, int effect);
 
 // 線形チェーン（n<=SC_FX_CHAIN_MAX）。GPU: 1 upload → ping-pong → 1 download。
 // timeSec は波/水中アニメ用。effects[i] は SC_FX_*（NONE は無視）。
+// str[i][0..7] は S1..S8（0..8）。nullptr ならすべて SC_FX_STR_DEF。
 BOOL ScGpuApplyEffectChain(BYTE* bgra, int w, int h, int stride,
-	const int* effects, int n, float timeSec);
+	const int* effects, int n, float timeSec,
+	const BYTE str[][SC_FX_STR_N]);
 
 // 全セッション解放（ダイアログ終了時など）
 void ScWgcShutdown(void);

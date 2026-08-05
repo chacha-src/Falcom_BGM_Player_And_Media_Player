@@ -1135,6 +1135,10 @@
 #define IDC_SC_CROP_FULL              3826
 #define IDC_SC_FXGRAPH                3827
 #define IDC_SC_HELP                   3828
+#define IDC_SC_FXPRE_L                3829
+#define IDC_SC_FXPRE                  39410
+#define IDC_SC_FXPRE_LOAD             39411
+#define IDC_SC_FXPRE_SAVE             39412
 #define IDC_MP_MICMETER                 3818
 
 // GDI操作ガイド（? ボタン / ヘルプダイアログ）
@@ -1185,6 +1189,12 @@
 #define ID_SC_FX_CLEAR_ALL              39011
 #define ID_SC_FX_MOVE_LEFT              39012
 #define ID_SC_FX_MOVE_RIGHT             39013
+#define ID_SC_FX_DUP_SLOT               39014
+#define ID_SC_FX_CLEAR_AFTER            39015
+#define ID_SC_FX_STR_RESET              39016
+// S設定: 39100 + si*9 + level (si=0..7, level=0..8)
+#define ID_SC_FX_STR_BASE               39100
+#define ID_SC_FX_STR_END                39171
 
 #define ID_MP_SPEANA_BAR                32960
 #define ID_MP_SPEANA_MIRROR             32961

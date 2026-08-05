@@ -386,6 +386,7 @@
     <ClCompile Include="CBlurDialogBase.cpp" />
     <ClCompile Include="CBlurDialogExBase.cpp" />
     <ClCompile Include="CCustomControl.cpp" />
+    <ClCompile Include="CCustomPopupMenu.cpp" />
     <ClCompile Include="CDailog1.cpp" />
     <ClCompile Include="CEqualizer.cpp" />
     <ClCompile Include="CImageBase.cpp" />
@@ -479,6 +480,7 @@
     <ClInclude Include="CBlurDialogBase.h" />
     <ClInclude Include="CBlurDialogExBase.h" />
     <ClInclude Include="CCustomControl.h" />
+    <ClInclude Include="CCustomPopupMenu.h" />
     <ClInclude Include="CDailog1.h" />
     <ClInclude Include="CEqualizer.h" />
     <ClInclude Include="CImageBase.h" />

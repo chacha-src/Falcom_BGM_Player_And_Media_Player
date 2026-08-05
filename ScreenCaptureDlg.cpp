@@ -1,4 +1,4 @@
-// ScreenCaptureDlg.cpp
+﻿// ScreenCaptureDlg.cpp
 // 画面キャプチャ → MP4 (H.264 + AAC)
 // プライマリ / 全モニタ / ウィンドウ合成(配置・拡大縮小・Z順)
 
@@ -631,7 +631,7 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 		// 全面キャプチャは上書きするので Clear 不要（1080p で数ms節約）
 		BOOL ok = ScCaptureMonitorFast(mon, mr, out, forceGdi);
 		if (ok && snap.fxN > 0 && out.bits)
-			ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime);
+			ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime, snap.fxStr);
 		return ok;
 	}
 
@@ -646,7 +646,7 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 		// 仮想全体は複数GPUまたぎで WGC 1本では取れないことが多い → GDI
 		BOOL ok = ScCaptureMonitorRectGdi(vr, out);
 		if (ok && snap.fxN > 0 && out.bits)
-			ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime);
+			ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime, snap.fxStr);
 		return ok;
 	}
 
@@ -675,7 +675,7 @@ static BOOL ScComposeFrame(ScFrameBuf& out, const CScreenCaptureDlg::ComposeSnap
 		}
 	}
 	if (snap.fxN > 0 && out.bits)
-		ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime);
+		ScGpuApplyEffectChain(out.bits, out.w, out.h, out.stride, snap.fx, snap.fxN, snap.fxTime, snap.fxStr);
 	return TRUE;
 }
 
@@ -764,10 +764,10 @@ static HRESULT ScAddVideoStream(IMFSinkWriter* writer, DWORD* outIdx, int w, int
 	if (fps > 120) fps = 120;
 	if (attempt < 0) attempt = 0;
 
-	// 画質寄りビットレート（1080p30≈12Mbps、1080p60≈24Mbps、1080p120≈40Mbps上限）
-	UINT32 br = (UINT32)(((__int64)w * h * fps) / 5);
-	if (br < 4000000u) br = 4000000u;
-	if (br > 40000000u) br = 40000000u;
+	// 画質寄りビットレート（1080p30≈15Mbps、1080p60≈31Mbps、1080p120≈50Mbps上限）
+	UINT32 br = (UINT32)(((__int64)w * h * fps) / 4);
+	if (br < 5000000u) br = 5000000u;
+	if (br > 60000000u) br = 60000000u;
 
 	UINT32 profile = 0;
 	BOOL useNv12 = FALSE;
@@ -823,9 +823,10 @@ static HRESULT ScAddVideoStream(IMFSinkWriter* writer, DWORD* outIdx, int w, int
 
 	IMFAttributes* encParams = NULL;
 	if (SUCCEEDED(hr) && SUCCEEDED(MFCreateAttributes(&encParams, 4)) && encParams) {
-		encParams->SetUINT32(CODECAPI_AVLowLatencyMode, TRUE);
+		// ゲーム録画など高FPSは低遅延より画質優先
+		encParams->SetUINT32(CODECAPI_AVLowLatencyMode, (fps >= 60) ? FALSE : TRUE);
 		encParams->SetUINT32(CODECAPI_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_Quality);
-		encParams->SetUINT32(CODECAPI_AVEncCommonQuality, 88);
+		encParams->SetUINT32(CODECAPI_AVEncCommonQuality, (fps >= 60) ? 92 : ((fps >= 30) ? 90 : 88));
 #ifdef CODECAPI_AVEncMPVGOPSize
 		encParams->SetUINT32(CODECAPI_AVEncMPVGOPSize, (UINT32)(fps > 0 ? fps : 30));
 #endif
@@ -1111,6 +1112,7 @@ IMPLEMENT_DYNAMIC(CScPreviewCtrl, CStatic)
 
 CScPreviewCtrl::CScPreviewCtrl()
 	: m_owner(NULL)
+	, m_bAeroMode(FALSE)
 {
 }
 
@@ -1247,80 +1249,84 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 			m_owner->m_layer.SetCurSel(layer);
 			m_owner->SyncGeoEditsFromSel();
 			const BOOL hidden = m_owner->m_layers[layer].hidden;
-			CMenu menu;
-			if (menu.CreatePopupMenu()) {
-				menu.AppendMenu(MF_STRING, ID_SC_LAYER_HIDE,
-					hidden
-					? LL14(L"表示する", L"Show", L"Afficher", L"Mostra", L"Mostrar", L"표시", L"显示", L"إظهار",
-						L"Показать", L"Einblenden", L"Mostrar", L"Tonen", L"Pokaż", L"Göster")
-					: LL14(L"非表示にする", L"Hide", L"Masquer", L"Nascondi", L"Ocultar", L"숨기기", L"隐藏", L"إخفاء",
-						L"Скрыть", L"Ausblenden", L"Ocultar", L"Verbergen", L"Ukryj", L"Gizle"));
-				menu.AppendMenu(MF_SEPARATOR);
-				menu.AppendMenu(MF_STRING, ID_SC_LAYER_FIT,
-					LL14(L"キャンバスにフィット", L"Fit to canvas", L"Ajuster au canevas", L"Adatta al canvas",
-						L"Ajustar al lienzo", L"캔버스에 맞춤", L"铺满画布", L"ملاءمة اللوحة",
-						L"Вписать в холст", L"In Fläche einpassen", L"Ajustar à tela", L"Passen op canvas",
-						L"Dopasuj do płótna", L"Tuvale sığdır"));
-				menu.AppendMenu(MF_STRING, ID_SC_LAYER_SCALE50,
-					LL14(L"50% サイズ", L"50% size", L"Taille 50%", L"Dimensione 50%",
-						L"Tamaño 50%", L"50% 크기", L"50% 大小", L"حجم 50٪",
-						L"Размер 50%", L"50% Größe", L"Tamanho 50%", L"50% grootte",
-						L"Rozmiar 50%", L"%50 boyut"));
-				menu.AppendMenu(MF_STRING, ID_SC_LAYER_SCALE100,
-					LL14(L"実寸 (100%)", L"Actual size (100%)", L"Taille réelle (100%)", L"Dimensione reale (100%)",
-						L"Tamaño real (100%)", L"실측 (100%)", L"实际大小 (100%)", L"الحجم الفعلي (100٪)",
-						L"Реальный размер (100%)", L"Originalgröße (100%)", L"Tamanho real (100%)", L"Ware grootte (100%)",
-						L"Rzeczywisty rozmiar (100%)", L"Gerçek boyut (%100)"));
-				menu.AppendMenu(MF_SEPARATOR);
-				menu.AppendMenu(MF_STRING | (layer <= 0 ? MF_GRAYED : 0), ID_SC_LAYER_ZUP,
-					LL14(L"手前へ (Z+)", L"Bring forward (Z+)", L"Vers l'avant (Z+)", L"Porta avanti (Z+)",
-						L"Traer al frente (Z+)", L"앞으로 (Z+)", L"前移 (Z+)", L"تقديم (Z+)",
-						L"Вперёд (Z+)", L"Nach vorne (Z+)", L"Para frente (Z+)", L"Naar voren (Z+)",
-						L"Do przodu (Z+)", L"Öne getir (Z+)"));
-				menu.AppendMenu(MF_STRING | (layer >= m_owner->m_layerCnt - 1 ? MF_GRAYED : 0), ID_SC_LAYER_ZDOWN,
-					LL14(L"奥へ (Z-)", L"Send back (Z-)", L"Vers l'arrière (Z-)", L"Porta indietro (Z-)",
-						L"Enviar atrás (Z-)", L"뒤로 (Z-)", L"后移 (Z-)", L"تأخير (Z-)",
-						L"Назад (Z-)", L"Nach hinten (Z-)", L"Para trás (Z-)", L"Naar achteren (Z-)",
-						L"Do tyłu (Z-)", L"Geriye gönder (Z-)"));
-				menu.AppendMenu(MF_SEPARATOR);
-				menu.AppendMenu(MF_STRING, ID_SC_LAYER_CROP_FULL,
-					LL14(L"切出を解除", L"Clear crop", L"Annuler le rognage", L"Annulla ritaglio",
-						L"Quitar recorte", L"잘라내기 해제", L"清除裁剪", L"إلغاء القص",
-						L"Сбросить вырез", L"Ausschnitt aufheben", L"Limpar recorte", L"Uitsnede wissen",
-						L"Wyczyść wycinek", L"Kırpmayı temizle"));
-				menu.AppendMenu(MF_STRING, ID_SC_LAYER_REMOVE,
-					LL14(L"レイヤを削除", L"Remove layer", L"Retirer le calque", L"Rimuovi livello",
-						L"Quitar capa", L"레이어 삭제", L"删除层", L"إزالة الطبقة",
-						L"Удалить слой", L"Ebene entfernen", L"Remover camada", L"Laag verwijderen",
-						L"Usuń warstwę", L"Katmanı kaldır"));
-				CPoint sp = point;
-				ClientToScreen(&sp);
-				const UINT cmd = menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
-					sp.x, sp.y, m_owner);
-				if (cmd == ID_SC_LAYER_HIDE) {
-					m_owner->ToggleLayerHidden(layer);
-				} else if (cmd == ID_SC_LAYER_FIT) {
-					m_owner->m_layer.SetCurSel(layer);
-					m_owner->FitSelected(0);
-				} else if (cmd == ID_SC_LAYER_SCALE50) {
-					m_owner->m_layer.SetCurSel(layer);
-					m_owner->FitSelected(50);
-				} else if (cmd == ID_SC_LAYER_SCALE100) {
-					m_owner->m_layer.SetCurSel(layer);
-					m_owner->FitSelected(100);
-				} else if (cmd == ID_SC_LAYER_ZUP && layer > 0) {
-					m_owner->m_layer.SetCurSel(layer);
-					m_owner->OnBnClickedZUp();
-				} else if (cmd == ID_SC_LAYER_ZDOWN && layer < m_owner->m_layerCnt - 1) {
-					m_owner->m_layer.SetCurSel(layer);
-					m_owner->OnBnClickedZDown();
-				} else if (cmd == ID_SC_LAYER_CROP_FULL) {
-					m_owner->m_layer.SetCurSel(layer);
-					m_owner->OnBnClickedCropFull();
-				} else if (cmd == ID_SC_LAYER_REMOVE) {
-					m_owner->m_layer.SetCurSel(layer);
-					m_owner->OnBnClickedRemove();
-				}
+			CCustomPopupMenu menu;
+			menu.AddCommand(ID_SC_LAYER_HIDE,
+				hidden
+				? LL14(L"表示する", L"Show", L"Afficher", L"Mostra", L"Mostrar", L"표시", L"显示", L"إظهار",
+					L"Показать", L"Einblenden", L"Mostrar", L"Tonen", L"Pokaż", L"Göster")
+				: LL14(L"非表示にする", L"Hide", L"Masquer", L"Nascondi", L"Ocultar", L"숨기기", L"隐藏", L"إخفاء",
+					L"Скрыть", L"Ausblenden", L"Ocultar", L"Verbergen", L"Ukryj", L"Gizle"));
+			menu.AddSeparator();
+			menu.AddCommand(ID_SC_LAYER_FIT,
+				LL14(L"キャンバスにフィット", L"Fit to canvas", L"Ajuster au canevas", L"Adatta al canvas",
+					L"Ajustar al lienzo", L"캔버스에 맞춤", L"铺满画布", L"ملاءمة اللوحة",
+					L"Вписать в холст", L"In Fläche einpassen", L"Ajustar à tela", L"Passen op canvas",
+					L"Dopasuj do płótna", L"Tuvale sığdır"),
+				LL14(L"選択レイヤをキャンバス全体に合わせる", L"Fit selected layer to the whole canvas",
+					L"Ajuster le calque au canevas", L"Adatta il livello al canvas", L"Ajustar capa al lienzo",
+					L"선택 레이어를 캔버스에 맞춤", L"将所选层铺满画布", L"ملاءمة الطبقة للوحة",
+					L"Вписать слой в холст", L"Ebene an Fläche anpassen", L"Ajustar camada à tela",
+					L"Laag op canvas passen", L"Dopasuj warstwę do płótna", L"Katmanı tuvale sığdır"));
+			menu.AddCommand(ID_SC_LAYER_SCALE50,
+				LL14(L"50% サイズ", L"50% size", L"Taille 50%", L"Dimensione 50%",
+					L"Tamaño 50%", L"50% 크기", L"50% 大小", L"حجم 50٪",
+					L"Размер 50%", L"50% Größe", L"Tamanho 50%", L"50% grootte",
+					L"Rozmiar 50%", L"%50 boyut"));
+			menu.AddCommand(ID_SC_LAYER_SCALE100,
+				LL14(L"実寸 (100%)", L"Actual size (100%)", L"Taille réelle (100%)", L"Dimensione reale (100%)",
+					L"Tamaño real (100%)", L"실측 (100%)", L"实际大小 (100%)", L"الحجم الفعلي (100٪)",
+					L"Реальный размер (100%)", L"Originalgröße (100%)", L"Tamanho real (100%)", L"Ware grootte (100%)",
+					L"Rzeczywisty rozmiar (100%)", L"Gerçek boyut (%100)"));
+			menu.AddSeparator();
+			menu.AddCommand(ID_SC_LAYER_ZUP,
+				LL14(L"手前へ (Z+)", L"Bring forward (Z+)", L"Vers l'avant (Z+)", L"Porta avanti (Z+)",
+					L"Traer al frente (Z+)", L"앞으로 (Z+)", L"前移 (Z+)", L"تقديم (Z+)",
+					L"Вперёд (Z+)", L"Nach vorne (Z+)", L"Para frente (Z+)", L"Naar voren (Z+)",
+					L"Do przodu (Z+)", L"Öne getir (Z+)"),
+				NULL, layer > 0);
+			menu.AddCommand(ID_SC_LAYER_ZDOWN,
+				LL14(L"奥へ (Z-)", L"Send back (Z-)", L"Vers l'arrière (Z-)", L"Porta indietro (Z-)",
+					L"Enviar atrás (Z-)", L"뒤로 (Z-)", L"后移 (Z-)", L"تأخير (Z-)",
+					L"Назад (Z-)", L"Nach hinten (Z-)", L"Para trás (Z-)", L"Naar achteren (Z-)",
+					L"Do tyłu (Z-)", L"Geriye gönder (Z-)"),
+				NULL, layer < m_owner->m_layerCnt - 1);
+			menu.AddSeparator();
+			menu.AddCommand(ID_SC_LAYER_CROP_FULL,
+				LL14(L"切出を解除", L"Clear crop", L"Annuler le rognage", L"Annulla ritaglio",
+					L"Quitar recorte", L"잘라내기 해제", L"清除裁剪", L"إلغاء القص",
+					L"Сбросить вырез", L"Ausschnitt aufheben", L"Limpar recorte", L"Uitsnede wissen",
+					L"Wyczyść wycinek", L"Kırpmayı temizle"));
+			menu.AddCommand(ID_SC_LAYER_REMOVE,
+				LL14(L"レイヤを削除", L"Remove layer", L"Retirer le calque", L"Rimuovi livello",
+					L"Quitar capa", L"레이어 삭제", L"删除层", L"إزالة الطبقة",
+					L"Удалить слой", L"Ebene entfernen", L"Remover camada", L"Laag verwijderen",
+					L"Usuń warstwę", L"Katmanı kaldır"));
+			CPoint sp = point;
+			ClientToScreen(&sp);
+			const UINT cmd = menu.Track(sp, m_owner);
+			if (cmd == ID_SC_LAYER_HIDE) {
+				m_owner->ToggleLayerHidden(layer);
+			} else if (cmd == ID_SC_LAYER_FIT) {
+				m_owner->m_layer.SetCurSel(layer);
+				m_owner->FitSelected(0);
+			} else if (cmd == ID_SC_LAYER_SCALE50) {
+				m_owner->m_layer.SetCurSel(layer);
+				m_owner->FitSelected(50);
+			} else if (cmd == ID_SC_LAYER_SCALE100) {
+				m_owner->m_layer.SetCurSel(layer);
+				m_owner->FitSelected(100);
+			} else if (cmd == ID_SC_LAYER_ZUP && layer > 0) {
+				m_owner->m_layer.SetCurSel(layer);
+				m_owner->OnBnClickedZUp();
+			} else if (cmd == ID_SC_LAYER_ZDOWN && layer < m_owner->m_layerCnt - 1) {
+				m_owner->m_layer.SetCurSel(layer);
+				m_owner->OnBnClickedZDown();
+			} else if (cmd == ID_SC_LAYER_CROP_FULL) {
+				m_owner->m_layer.SetCurSel(layer);
+				m_owner->OnBnClickedCropFull();
+			} else if (cmd == ID_SC_LAYER_REMOVE) {
+				m_owner->m_layer.SetCurSel(layer);
+				m_owner->OnBnClickedRemove();
 			}
 			Invalidate(FALSE);
 			return;
@@ -1384,6 +1390,7 @@ IMPLEMENT_DYNAMIC(CScFxWireCtrl, CStatic)
 
 CScFxWireCtrl::CScFxWireCtrl()
 	: m_owner(NULL)
+	, m_bAeroMode(FALSE)
 	, m_slotN(0)
 	, m_dragging(FALSE)
 	, m_dragFx(0)
@@ -1393,6 +1400,7 @@ CScFxWireCtrl::CScFxWireCtrl()
 	, m_trackLeave(FALSE)
 {
 	memset(m_slots, 0, sizeof(m_slots));
+	memset(m_str, SC_FX_STR_DEF, sizeof(m_str));
 	m_dragPt = CPoint(0, 0);
 }
 
@@ -1411,9 +1419,10 @@ BEGIN_MESSAGE_MAP(CScFxWireCtrl, CStatic)
 	ON_WM_MOUSELEAVE()
 END_MESSAGE_MAP()
 
-void CScFxWireCtrl::SetChain(const int* fx, int n)
+void CScFxWireCtrl::SetChain(const int* fx, int n, const BYTE str[][8])
 {
 	memset(m_slots, 0, sizeof(m_slots));
+	memset(m_str, SC_FX_STR_DEF, sizeof(m_str));
 	m_slotN = 0;
 	if (!fx || n <= 0) {
 		Invalidate(FALSE);
@@ -1421,18 +1430,31 @@ void CScFxWireCtrl::SetChain(const int* fx, int n)
 	}
 	if (n > SC_FX_CHAIN_MAX) n = SC_FX_CHAIN_MAX;
 	for (int i = 0; i < n; ++i) {
-		if (fx[i] > SC_FX_NONE && fx[i] < SC_FX_COUNT)
-			m_slots[m_slotN++] = fx[i];
+		if (fx[i] > SC_FX_NONE && fx[i] < SC_FX_COUNT) {
+			m_slots[m_slotN] = fx[i];
+			for (int s = 0; s < SC_FX_STR_N; ++s) {
+				BYTE v = str ? str[i][s] : (BYTE)SC_FX_STR_DEF;
+				if (v > SC_FX_STR_MAX) v = (BYTE)SC_FX_STR_MAX;
+				m_str[m_slotN][s] = v;
+			}
+			m_slotN++;
+		}
 	}
 	Invalidate(FALSE);
 }
 
-void CScFxWireCtrl::GetChain(int* fxOut, int* nOut) const
+void CScFxWireCtrl::GetChain(int* fxOut, int* nOut, BYTE strOut[][8]) const
 {
 	if (nOut) *nOut = m_slotN;
-	if (!fxOut) return;
-	for (int i = 0; i < SC_FX_CHAIN_MAX; ++i)
-		fxOut[i] = (i < m_slotN) ? m_slots[i] : 0;
+	if (!fxOut && !strOut) return;
+	for (int i = 0; i < SC_FX_CHAIN_MAX; ++i) {
+		if (fxOut)
+			fxOut[i] = (i < m_slotN) ? m_slots[i] : 0;
+		if (strOut) {
+			for (int s = 0; s < SC_FX_STR_N; ++s)
+				strOut[i][s] = (i < m_slotN) ? m_str[i][s] : (BYTE)SC_FX_STR_DEF;
+		}
+	}
 }
 
 void CScFxWireCtrl::NotifyChanged()
@@ -1508,13 +1530,24 @@ static ScFxWireMetrics ScFxMakeMetrics(const CRect& rc)
 	int rows = (nFx + cols - 1) / cols;
 	if (rows < 1) rows = 1;
 
+	m.pw = (availW - (cols - 1) * m.palGapX) / cols;
+	if (m.pw < 44) m.pw = 44;
+	// 縦は端数込みで availH を使い切る。セルが読めない高さは拒否して列を増やす。
+	m.ph = (availH - (rows - 1) * m.palGapY) / rows;
+	if (m.ph < 12) {
+		// 行を減らすため列を増やして再計算（最大 10 列）
+		while (m.ph < 12 && cols < 10) {
+			cols++;
+			rows = (nFx + cols - 1) / cols;
+			if (rows < 1) rows = 1;
+			m.pw = (availW - (cols - 1) * m.palGapX) / cols;
+			if (m.pw < 44) m.pw = 44;
+			m.ph = (availH - (rows - 1) * m.palGapY) / rows;
+		}
+		if (m.ph < 12) m.ph = 12;
+	}
 	m.palCols = cols;
 	m.palRows = rows;
-	m.pw = (availW - (cols - 1) * m.palGapX) / cols;
-	if (m.pw < 50) m.pw = 50;
-	// 縦は端数込みで availH を使い切る（下限で無理に伸ばすと空き／溢れの原因）
-	m.ph = (availH - (rows - 1) * m.palGapY) / rows;
-	if (m.ph < 1) m.ph = 1;
 	const int used = rows * m.ph + (rows - 1) * m.palGapY;
 	if (used < availH && rows > 0)
 		m.ph += (availH - used) / rows;
@@ -1547,8 +1580,15 @@ CRect CScFxWireCtrl::PaletteRect(int fx) const
 
 int CScFxWireCtrl::HitPalette(CPoint pt) const
 {
+	CRect rc;
+	GetClientRect(&rc);
 	for (int fx = 1; fx < SC_FX_COUNT; ++fx) {
-		if (PaletteRect(fx).PtInRect(pt))
+		CRect pr = PaletteRect(fx);
+		if (pr.Height() < 8 || pr.Width() < 8)
+			continue;
+		if (pr.top >= rc.bottom - 1 || pr.left >= rc.right - 1)
+			continue;
+		if (pr.PtInRect(pt))
 			return fx;
 	}
 	return 0;
@@ -1600,20 +1640,20 @@ void CScFxWireCtrl::PaintToDC(CDC& dc)
 	dc.SetTextColor(RGB(180, 195, 220));
 	CRect title(6, 2, rc.right - 6, m.titleH);
 	dc.DrawText(LL14(
-		L"FX配線 (パレット→スロット / 右クリック解除)",
-		L"FX wiring (palette→slot / right-click clear)",
-		L"Câblage FX (palette→slot / clic droit)",
-		L"Cablaggio FX (palette→slot / destro)",
-		L"Cableado FX (paleta→ranura / clic der.)",
-		L"FX 배선 (팔레트→슬롯 / 우클릭 해제)",
-		L"效果连线（拖到插槽 / 右键清除）",
-		L"توصيل FX (اسحب إلى فتحة / يمين لمسح)",
-		L"Схема FX (на слот / ПКМ очистить)",
-		L"FX-Verdrahtung (Palette→Slot / Rechtsklick)",
-		L"Ligação FX (paleta→slot / direito limpar)",
-		L"FX-bedrading (palet→slot / rechtsklik)",
-		L"Okablowanie FX (przeciągnij→slot / PPM)",
-		L"FX kablolama (paletten slota / sağ tık)"),
+		L"FX配線 (パレット→スロット / 同一効果の並列可 / 右クリック)",
+		L"FX wiring (palette→slot / duplicates OK / right-click)",
+		L"Câblage FX (palette→slot / doublons OK / clic droit)",
+		L"Cablaggio FX (palette→slot / duplicati OK / destro)",
+		L"Cableado FX (paleta→ranura / duplicados OK / clic der.)",
+		L"FX 배선 (팔레트→슬롯 / 중복 가능 / 우클릭)",
+		L"效果连线（拖到插槽 / 可重复 / 右键）",
+		L"توصيل FX (اسحب إلى فتحة / تكرار مسموح / يمين)",
+		L"Схема FX (на слот / дубликаты OK / ПКМ)",
+		L"FX-Verdrahtung (Palette→Slot / Duplikate OK / Rechtsklick)",
+		L"Ligação FX (paleta→slot / duplicatas OK / direito)",
+		L"FX-bedrading (palet→slot / duplicaten OK / rechtsklik)",
+		L"Okablowanie FX (przeciągnij→slot / duplikaty OK / PPM)",
+		L"FX kablolama (paletten slota / tekrar OK / sağ tık)"),
 		&title, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 
 	dc.SelectObject(&smallFont);
@@ -1830,32 +1870,57 @@ void CScFxWireCtrl::OnLButtonUp(UINT nFlags, CPoint point)
 		const int dst = HitSlot(point);
 		if (dst >= 0 && m_dragFx > 0) {
 			if (m_dragFromSlot >= 0) {
-				// スロット間: 入れ替え or 移動
 				if (dst != m_dragFromSlot) {
 					if (dst < m_slotN) {
 						const int t = m_slots[dst];
 						m_slots[dst] = m_slots[m_dragFromSlot];
 						m_slots[m_dragFromSlot] = t;
+						BYTE ts[SC_FX_STR_N];
+						memcpy(ts, m_str[dst], SC_FX_STR_N);
+						memcpy(m_str[dst], m_str[m_dragFromSlot], SC_FX_STR_N);
+						memcpy(m_str[m_dragFromSlot], ts, SC_FX_STR_N);
 					} else {
-						// 末尾へ
 						const int v = m_slots[m_dragFromSlot];
-						for (int i = m_dragFromSlot; i < m_slotN - 1; ++i)
+						BYTE vs[SC_FX_STR_N];
+						memcpy(vs, m_str[m_dragFromSlot], SC_FX_STR_N);
+						for (int i = m_dragFromSlot; i < m_slotN - 1; ++i) {
 							m_slots[i] = m_slots[i + 1];
+							memcpy(m_str[i], m_str[i + 1], SC_FX_STR_N);
+						}
 						m_slotN--;
 						if (m_slotN < SC_FX_CHAIN_MAX) {
-							m_slots[m_slotN++] = v;
+							m_slots[m_slotN] = v;
+							memcpy(m_str[m_slotN], vs, SC_FX_STR_N);
+							m_slotN++;
 						}
 					}
 					NotifyChanged();
 				}
 			} else {
-				// パレットから: 空き or 上書き
+				auto initStr = [&](int idx) {
+					for (int s = 0; s < SC_FX_STR_N; ++s)
+						m_str[idx][s] = (BYTE)SC_FX_STR_DEF;
+				};
 				if (dst < m_slotN) {
-					m_slots[dst] = m_dragFx;
+					if (m_slotN < SC_FX_CHAIN_MAX) {
+						for (int i = m_slotN; i > dst; --i) {
+							m_slots[i] = m_slots[i - 1];
+							memcpy(m_str[i], m_str[i - 1], SC_FX_STR_N);
+						}
+						m_slots[dst] = m_dragFx;
+						initStr(dst);
+						m_slotN++;
+					} else {
+						m_slots[dst] = m_dragFx;
+						initStr(dst);
+					}
 				} else if (m_slotN < SC_FX_CHAIN_MAX) {
-					m_slots[m_slotN++] = m_dragFx;
+					m_slots[m_slotN] = m_dragFx;
+					initStr(m_slotN);
+					m_slotN++;
 				} else {
 					m_slots[SC_FX_CHAIN_MAX - 1] = m_dragFx;
+					initStr(SC_FX_CHAIN_MAX - 1);
 				}
 				NotifyChanged();
 			}
@@ -1863,9 +1928,31 @@ void CScFxWireCtrl::OnLButtonUp(UINT nFlags, CPoint point)
 		m_dragFx = 0;
 		m_dragFromSlot = -1;
 		UpdateHover(point);
+		Invalidate(FALSE);
 		return;
 	}
 	CStatic::OnLButtonUp(nFlags, point);
+}
+
+namespace {
+struct ScFxStrCtx {
+	CScFxWireCtrl* w;
+	int slot;
+	int si;
+};
+}
+
+void CScFxWireCtrl::OnStrSlider(void* ctx, int v)
+{
+	ScFxStrCtx* c = (ScFxStrCtx*)ctx;
+	if (!c || !c->w) return;
+	if (c->slot < 0 || c->slot >= SC_FX_CHAIN_MAX) return;
+	if (c->si < 0 || c->si >= SC_FX_STR_N) return;
+	if (v < 0) v = 0;
+	if (v > SC_FX_STR_MAX) v = SC_FX_STR_MAX;
+	c->w->m_str[c->slot][c->si] = (BYTE)v;
+	c->w->NotifyChanged();
+	c->w->Invalidate(FALSE);
 }
 
 void CScFxWireCtrl::OnRButtonUp(UINT nFlags, CPoint point)
@@ -1876,58 +1963,169 @@ void CScFxWireCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 		CStatic::OnRButtonUp(nFlags, point);
 		return;
 	}
-	CMenu menu;
-	if (!menu.CreatePopupMenu()) {
-		CStatic::OnRButtonUp(nFlags, point);
-		return;
-	}
-	menu.AppendMenu(MF_STRING, ID_SC_FX_CLEAR_SLOT,
+	CCustomPopupMenu menu;
+	menu.AddCommand(ID_SC_FX_CLEAR_SLOT,
 		LL14(L"このスロットを解除", L"Clear this slot", L"Effacer ce slot", L"Azzera questo slot",
 			L"Borrar esta ranura", L"이 슬롯 해제", L"清除此插槽", L"مسح هذه الفتحة",
 			L"Очистить этот слот", L"Diesen Slot löschen", L"Limpar este slot", L"Deze slot wissen",
 			L"Wyczyść ten slot", L"Bu slotu temizle"));
-	menu.AppendMenu(MF_STRING | (slot <= 0 ? MF_GRAYED : 0), ID_SC_FX_MOVE_LEFT,
+	menu.AddCommand(ID_SC_FX_DUP_SLOT,
+		LL14(L"この効果を右に複製", L"Duplicate effect to the right", L"Dupliquer à droite", L"Duplica a destra",
+			L"Duplicar a la derecha", L"오른쪽으로 복제", L"向右复制此效果", L"تكرار التأثير يميناً",
+			L"Дублировать вправо", L"Rechts duplizieren", L"Duplicar à direita", L"Rechts dupliceren",
+			L"Duplikuj w prawo", L"Sağa çoğalt"),
+		LL14(L"同じ効果を右隣スロットへコピー", L"Copy this effect into the next slot on the right",
+			L"Copier l'effet dans le slot de droite", L"Copia l'effetto nello slot a destra",
+			L"Copiar el efecto al slot de la derecha", L"이 효과를 오른쪽 슬롯에 복사",
+			L"将此效果复制到右侧插槽", L"نسخ التأثير إلى الفتحة اليمنى",
+			L"Скопировать эффект в слот справа", L"Effekt in den rechten Slot kopieren",
+			L"Copiar o efeito para o slot à direita", L"Effect naar rechter slot kopiëren",
+			L"Skopiuj efekt do slotu po prawej", L"Efekti sağdaki slota kopyala"),
+		m_slotN < SC_FX_CHAIN_MAX);
+	menu.AddCommand(ID_SC_FX_MOVE_LEFT,
 		LL14(L"左へ移動", L"Move left", L"Déplacer à gauche", L"Sposta a sinistra",
 			L"Mover a la izquierda", L"왼쪽으로", L"向左移动", L"تحريك لليسار",
 			L"Влево", L"Nach links", L"Mover para a esquerda", L"Naar links",
-			L"W lewo", L"Sola taşı"));
-	menu.AppendMenu(MF_STRING | (slot >= m_slotN - 1 ? MF_GRAYED : 0), ID_SC_FX_MOVE_RIGHT,
+			L"W lewo", L"Sola taşı"),
+		NULL, slot > 0);
+	menu.AddCommand(ID_SC_FX_MOVE_RIGHT,
 		LL14(L"右へ移動", L"Move right", L"Déplacer à droite", L"Sposta a destra",
 			L"Mover a la derecha", L"오른쪽으로", L"向右移动", L"تحريك لليمين",
 			L"Вправо", L"Nach rechts", L"Mover para a direita", L"Naar rechts",
-			L"W prawo", L"Sağa taşı"));
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING, ID_SC_FX_CLEAR_ALL,
+			L"W prawo", L"Sağa taşı"),
+		NULL, slot < m_slotN - 1);
+	menu.AddSeparator();
+
+	CCustomPopupMenu* strRoot = menu.AddSubMenu(
+		LL14(L"強度設定", L"Strength", L"Intensité", L"Intensità",
+			L"Intensidad", L"강도", L"强度", L"الشدة",
+			L"Сила", L"Stärke", L"Intensidade", L"Sterkte",
+			L"Siła", L"Yoğunluk"),
+		LL14(L"各パラメータをスライダーで調整（ドラッグ中に即反映）",
+			L"Adjust each parameter with a slider (live while dragging)",
+			L"Régler chaque paramètre au curseur (temps réel)",
+			L"Regola ogni parametro con lo slider (in tempo reale)",
+			L"Ajustar cada parámetro con el deslizador (en vivo)",
+			L"각 파라미터를 슬라이더로 조정(드래그 중 즉시 반영)",
+			L"用滑块调整各参数（拖动时即时生效）",
+			L"ضبط كل معلمة بالمنزلق (مباشر أثناء السحب)",
+			L"Настройка параметров ползунком (сразу при перетаскивании)",
+			L"Parameter per Schieberegler (live beim Ziehen)",
+			L"Ajustar cada parâmetro com o controle (ao vivo)",
+			L"Elke parameter met schuifregelaar (live tijdens slepen)",
+			L"Reguluj parametry suwakiem (na żywo podczas przeciągania)",
+			L"Her parametreyi kaydırıcıyla ayarla (sürüklerken anlık)"));
+	const int fx = m_slots[slot];
+	const int pn = m_owner ? m_owner->FxParamCount(fx) : 1;
+	ScFxStrCtx lives[SC_FX_STR_N];
+	ZeroMemory(lives, sizeof(lives));
+	if (strRoot) {
+		for (int si = 0; si < pn && si < SC_FX_STR_N; ++si) {
+			CString pname = m_owner ? m_owner->FxParamName(fx, si) : L"";
+			if (pname.IsEmpty())
+				pname.Format(L"%d", si + 1);
+			lives[si].w = this;
+			lives[si].slot = slot;
+			lives[si].si = si;
+			strRoot->AddSlider(pname, 0, SC_FX_STR_MAX, (int)m_str[slot][si],
+				&CScFxWireCtrl::OnStrSlider, &lives[si],
+				LL14(L"0=弱 … 4=標準 … 8=強（ドラッグでプレビュー更新）",
+					L"0=weak … 4=default … 8=strong (drag updates preview)",
+					L"0=faible … 4=défaut … 8=fort (aperçu en direct)",
+					L"0=debole … 4=predef. … 8=forte (anteprima live)",
+					L"0=débil … 4=predet. … 8=fuerte (vista previa en vivo)",
+					L"0=약 … 4=기본 … 8=강(드래그 시 미리보기 갱신)",
+					L"0=弱 … 4=默认 … 8=强（拖动更新预览）",
+					L"0=ضعيف … 4=افتراضي … 8=قوي (تحديث المعاينة)",
+					L"0=слабо … 4=обычно … 8=сильно (превью сразу)",
+					L"0=schwach … 4=Standard … 8=stark (Vorschau live)",
+					L"0=fraco … 4=padrão … 8=forte (prévia ao vivo)",
+					L"0=zwak … 4=standaard … 8=sterk (live voorvertoning)",
+					L"0=słabo … 4=domyślnie … 8=mocno (podgląd na żywo)",
+					L"0=zayıf … 4=varsayılan … 8=güçlü (sürüklerken önizleme)"));
+		}
+		strRoot->AddSeparator();
+		strRoot->AddCommand(ID_SC_FX_STR_RESET,
+			LL14(L"強度を標準に戻す", L"Reset strength to default", L"Réinit. intensité", L"Ripristina intensità",
+				L"Restablecer intensidad", L"강도 기본값", L"重置强度", L"إعادة الشدة",
+				L"Сброс силы", L"Stärke zurücksetzen", L"Repor intensidade", L"Sterkte resetten",
+				L"Reset siły", L"Yoğunluğu sıfırla"));
+	}
+
+	menu.AddSeparator();
+	menu.AddCommand(ID_SC_FX_CLEAR_AFTER,
+		LL14(L"これより右を解除", L"Clear slots to the right", L"Effacer à droite", L"Azzera a destra",
+			L"Borrar a la derecha", L"오른쪽 슬롯 해제", L"清除右侧插槽", L"مسح الفتحات إلى اليمين",
+			L"Очистить справа", L"Rechts löschen", L"Limpar à direita", L"Rechts wissen",
+			L"Wyczyść na prawo", L"Sağı temizle"),
+		NULL, slot < m_slotN - 1);
+	menu.AddCommand(ID_SC_FX_CLEAR_ALL,
 		LL14(L"すべての配線を解除", L"Clear all wiring", L"Effacer tout le câblage", L"Azzera tutto",
 			L"Borrar todo el cableado", L"모든 배선 해제", L"清除全部连线", L"مسح كل التوصيل",
 			L"Очистить всю схему", L"Gesamte Verdrahtung löschen", L"Limpar toda a ligação", L"Alle bedrading wissen",
 			L"Wyczyść całe okablowanie", L"Tüm kablolamayı temizle"));
 	CPoint sp = point;
 	ClientToScreen(&sp);
-	const UINT cmd = menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
-		sp.x, sp.y, this);
+	const UINT cmd = menu.Track(sp, this);
 	if (cmd == ID_SC_FX_CLEAR_SLOT) {
-		for (int i = slot; i < m_slotN - 1; ++i)
+		for (int i = slot; i < m_slotN - 1; ++i) {
 			m_slots[i] = m_slots[i + 1];
+			memcpy(m_str[i], m_str[i + 1], SC_FX_STR_N);
+		}
 		m_slotN--;
 		m_slots[m_slotN] = 0;
+		memset(m_str[m_slotN], SC_FX_STR_DEF, SC_FX_STR_N);
+		NotifyChanged();
+		Invalidate(FALSE);
+	} else if (cmd == ID_SC_FX_DUP_SLOT && m_slotN < SC_FX_CHAIN_MAX) {
+		const int v = m_slots[slot];
+		BYTE vs[SC_FX_STR_N];
+		memcpy(vs, m_str[slot], SC_FX_STR_N);
+		for (int i = m_slotN; i > slot + 1; --i) {
+			m_slots[i] = m_slots[i - 1];
+			memcpy(m_str[i], m_str[i - 1], SC_FX_STR_N);
+		}
+		m_slots[slot + 1] = v;
+		memcpy(m_str[slot + 1], vs, SC_FX_STR_N);
+		m_slotN++;
 		NotifyChanged();
 		Invalidate(FALSE);
 	} else if (cmd == ID_SC_FX_MOVE_LEFT && slot > 0) {
 		const int t = m_slots[slot - 1];
 		m_slots[slot - 1] = m_slots[slot];
 		m_slots[slot] = t;
+		BYTE ts[SC_FX_STR_N];
+		memcpy(ts, m_str[slot - 1], SC_FX_STR_N);
+		memcpy(m_str[slot - 1], m_str[slot], SC_FX_STR_N);
+		memcpy(m_str[slot], ts, SC_FX_STR_N);
 		NotifyChanged();
 		Invalidate(FALSE);
 	} else if (cmd == ID_SC_FX_MOVE_RIGHT && slot < m_slotN - 1) {
 		const int t = m_slots[slot + 1];
 		m_slots[slot + 1] = m_slots[slot];
 		m_slots[slot] = t;
+		BYTE ts[SC_FX_STR_N];
+		memcpy(ts, m_str[slot + 1], SC_FX_STR_N);
+		memcpy(m_str[slot + 1], m_str[slot], SC_FX_STR_N);
+		memcpy(m_str[slot], ts, SC_FX_STR_N);
+		NotifyChanged();
+		Invalidate(FALSE);
+	} else if (cmd == ID_SC_FX_CLEAR_AFTER && slot < m_slotN - 1) {
+		for (int i = slot + 1; i < m_slotN; ++i) {
+			m_slots[i] = 0;
+			memset(m_str[i], SC_FX_STR_DEF, SC_FX_STR_N);
+		}
+		m_slotN = slot + 1;
 		NotifyChanged();
 		Invalidate(FALSE);
 	} else if (cmd == ID_SC_FX_CLEAR_ALL) {
 		memset(m_slots, 0, sizeof(m_slots));
+		memset(m_str, SC_FX_STR_DEF, sizeof(m_str));
 		m_slotN = 0;
+		NotifyChanged();
+		Invalidate(FALSE);
+	} else if (cmd == ID_SC_FX_STR_RESET) {
+		memset(m_str[slot], SC_FX_STR_DEF, SC_FX_STR_N);
 		NotifyChanged();
 		Invalidate(FALSE);
 	}
@@ -2086,25 +2284,25 @@ void CScHelpDlg::OnPaint()
 	dc.SetTextColor(RGB(255, 255, 255));
 	dc.TextOut(gx + 48, gy + 8, L"Blur");
 	dc.TextOut(gx + 108, gy + 8, L"Neon");
-	dc.TextOut(gx + 172, gy + 8, L"S3");
+	dc.TextOut(gx + 172, gy + 8, L"…");
 	dc.TextOut(gx + 218, gy + 8, L"OUT");
 	dc.FrameRect(CRect(gx, gy, gx + gw, gy + gh), &frameBrush);
 	y = gy + gh + 4;
 	muted(L, y, LL14(
-		L"パレットからスロットへドラッグ。右クリックで解除。最大8段・左→右に適用。",
-		L"Drag palette→slot. Right-click clears. Up to 8 steps, left→right.",
-		L"Glisser palette→slot. Clic droit = effacer. Max 8, gauche→droite.",
-		L"Trascina palette→slot. Destro = azzera. Max 8, sx→dx.",
-		L"Arrastre paleta→ranura. Clic der. borra. Máx. 8, izq→der.",
-		L"팔레트→슬롯 드래그. 우클릭 해제. 최대 8단, 좌→우.",
-		L"从调色板拖到插槽。右键清除。最多8段，左→右。",
-		L"اسحب إلى الفتحة. يمين=مسح. حتى 8، يسار→يمين.",
-		L"Перетащите на слот. ПКМ очищает. До 8, слева→направо.",
-		L"Palette→Slot. Rechtsklick löscht. Max. 8, links→rechts.",
-		L"Arraste paleta→slot. Direito limpa. Até 8, esq→dir.",
-		L"Palet→slot. Rechtsklik wist. Max 8, links→rechts.",
-		L"Przeciągnij→slot. PPM czyści. Max 8, lewo→prawo.",
-		L"Paletten→slot. Sağ tık siler. En fazla 8, sol→sağ."));
+		L"パレットからスロットへドラッグ。占有スロットへ落とすと挿入（同一効果の並列可）。右クリックで解除/複製/強度。最大8段・左→右に適用。上のプリセットで配線を保存/読込。",
+		L"Drag palette→slot. Drop on filled slot inserts (duplicates OK). Right-click clears/duplicates/strength. Up to 8, left→right. Presets above save/load wiring.",
+		L"Glisser palette→slot. Déposer sur rempli = insertion (doublons OK). Clic droit. Max 8, gauche→droite. Préréglages au-dessus.",
+		L"Trascina palette→slot. Su pieno = inserimento (duplicati OK). Destro. Max 8, sx→dx. Preset sopra.",
+		L"Arrastre paleta→ranura. Sobre ocupada = insertar (duplicados OK). Clic der. Máx. 8, izq→der. Ajustes arriba.",
+		L"팔레트→슬롯 드래그. 채워진 슬롯에 놓으면 삽입(중복 가능). 우클릭 해제/복제/강도. 최대 8단, 좌→우. 위 프리셋으로 저장/불러오기.",
+		L"从调色板拖到插槽。放到已占用插槽会插入（可重复）。右键清除/复制/强度。最多8段，左→右。上方预设可保存/读取连线。",
+		L"اسحب إلى الفتحة. الإسقاط على ممتلئة يُدرج (تكرار مسموح). يمين. حتى 8، يسار→يمين. الإعدادات أعلاه.",
+		L"Перетащите на слот. На занятый = вставка (дубликаты OK). ПКМ. До 8, слева→направо. Пресеты сверху.",
+		L"Palette→Slot. Auf belegten = Einfügen (Duplikate OK). Rechtsklick. Max. 8, links→rechts. Presets oben.",
+		L"Arraste paleta→slot. Em ocupado = inserir (duplicatas OK). Direito. Até 8, esq→dir. Predefinições acima.",
+		L"Palet→slot. Op bezet = invoegen (duplicaten OK). Rechtsklik. Max 8, links→rechts. Presets hierboven.",
+		L"Przeciągnij→slot. Na zajęty = wstaw (duplikaty OK). PPM. Max 8, lewo→prawo. Presety powyżej.",
+		L"Paletten→slot. Dolu slota bırakınca ekler (tekrar OK). Sağ tık. En fazla 8, sol→sağ. Üstteki önayarlar."));
 	y += lh + 6;
 
 	title(L, y, LL14(L"エフェクト一覧", L"Effects", L"Effets", L"Effetti", L"Efectos", L"효과 목록", L"效果列表", L"التأثيرات",
@@ -2245,6 +2443,10 @@ void CScreenCaptureDlg::DoDataExchange(CDataExchange* pDX)
 	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_SC_PREVIEW, m_preview);
 	DDX_Control(pDX, IDC_SC_FXGRAPH, m_fxWire);
+	DDX_Control(pDX, IDC_SC_FXPRE_L, m_fxPreLabel);
+	DDX_Control(pDX, IDC_SC_FXPRE, m_fxPre);
+	DDX_Control(pDX, IDC_SC_FXPRE_LOAD, m_fxPreLoad);
+	DDX_Control(pDX, IDC_SC_FXPRE_SAVE, m_fxPreSave);
 	DDX_Control(pDX, IDC_SC_HELP, m_help);
 	DDX_Control(pDX, IDC_SC_MODE_L, m_modeLabel);
 	DDX_Control(pDX, IDC_SC_MODE, m_mode);
@@ -2320,6 +2522,9 @@ BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
 	ON_CBN_SELCHANGE(IDC_SC_CANVAS, &CScreenCaptureDlg::OnCbnSelchangeCanvas)
 	ON_CBN_SELCHANGE(IDC_SC_FPS, &CScreenCaptureDlg::OnCbnSelchangeFps)
 	ON_CBN_SELCHANGE(IDC_SC_EFFECT, &CScreenCaptureDlg::OnCbnSelchangeEffect)
+	ON_BN_CLICKED(IDC_SC_FXPRE_LOAD, &CScreenCaptureDlg::OnBnClickedFxPreLoad)
+	ON_BN_CLICKED(IDC_SC_FXPRE_SAVE, &CScreenCaptureDlg::OnBnClickedFxPreSave)
+	ON_CBN_SELCHANGE(IDC_SC_FXPRE, &CScreenCaptureDlg::OnCbnSelchangeFxPre)
 	ON_BN_CLICKED(IDC_SC_CROP_FULL, &CScreenCaptureDlg::OnBnClickedCropFull)
 	ON_LBN_SELCHANGE(IDC_SC_LAYER, &CScreenCaptureDlg::OnLbnSelchangeLayer)
 	ON_WM_LBUTTONDOWN()
@@ -2336,6 +2541,7 @@ void CScreenCaptureDlg::RefreshOpaqueUi()
 	if (m_path.GetSafeHwnd()) m_path.RepaintClient();
 	if (m_fps.GetSafeHwnd()) m_fps.Invalidate(FALSE);
 	if (m_effect.GetSafeHwnd()) m_effect.Invalidate(FALSE);
+	if (m_fxPre.GetSafeHwnd()) m_fxPre.Invalidate(FALSE);
 	if (m_fxWire.GetSafeHwnd()) m_fxWire.Invalidate(FALSE);
 	if (m_mode.GetSafeHwnd()) m_mode.Invalidate(FALSE);
 	if (m_canvas.GetSafeHwnd()) m_canvas.Invalidate(FALSE);
@@ -2643,13 +2849,17 @@ void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 	out.fxN = 0;
 	out.fxTime = (float)(GetTickCount() % 600000) / 1000.f;
 	memset(out.fx, 0, sizeof(out.fx));
+	memset(out.fxStr, SC_FX_STR_DEF, sizeof(out.fxStr));
 	{
 		int chain[SC_FX_CHAIN_MAX] = {};
+		BYTE str[SC_FX_CHAIN_MAX][SC_FX_STR_N] = {};
 		int cn = 0;
-		GetFxChain(chain, &cn);
+		GetFxChain(chain, &cn, str);
 		out.fxN = cn;
-		for (int i = 0; i < cn; ++i)
+		for (int i = 0; i < cn; ++i) {
 			out.fx[i] = chain[i];
+			memcpy(out.fxStr[i], str[i], SC_FX_STR_N);
+		}
 	}
 
 	if (mode == SC_MODE_WINDOWS) {
@@ -2732,10 +2942,10 @@ void CScreenCaptureDlg::BuildComposeSnap(ComposeSnap& out) const
 	}
 }
 
-void CScreenCaptureDlg::GetFxChain(int* fxOut, int* nOut) const
+void CScreenCaptureDlg::GetFxChain(int* fxOut, int* nOut, BYTE strOut[][8]) const
 {
 	if (m_fxWire.GetSafeHwnd()) {
-		m_fxWire.GetChain(fxOut, nOut);
+		m_fxWire.GetChain(fxOut, nOut, strOut);
 		return;
 	}
 	int n = savedata.cap_fx_n;
@@ -2747,9 +2957,14 @@ void CScreenCaptureDlg::GetFxChain(int* fxOut, int* nOut) const
 	};
 	int cn = 0;
 	int tmp[SC_FX_CHAIN_MAX] = {};
+	BYTE tmpStr[SC_FX_CHAIN_MAX][SC_FX_STR_N];
+	memset(tmpStr, SC_FX_STR_DEF, sizeof(tmpStr));
 	for (int i = 0; i < n; ++i) {
-		if (src[i] > SC_FX_NONE && src[i] < SC_FX_COUNT)
-			tmp[cn++] = src[i];
+		if (src[i] > SC_FX_NONE && src[i] < SC_FX_COUNT) {
+			tmp[cn] = src[i];
+			memcpy(tmpStr[cn], savedata.cap_fx_str[i], SC_FX_STR_N);
+			cn++;
+		}
 	}
 	if (cn <= 0 && savedata.cap_effect > 0 && savedata.cap_effect < SC_FX_COUNT) {
 		tmp[0] = savedata.cap_effect;
@@ -2760,6 +2975,144 @@ void CScreenCaptureDlg::GetFxChain(int* fxOut, int* nOut) const
 		for (int i = 0; i < SC_FX_CHAIN_MAX; ++i)
 			fxOut[i] = (i < cn) ? tmp[i] : 0;
 	}
+	if (strOut) {
+		for (int i = 0; i < SC_FX_CHAIN_MAX; ++i)
+			memcpy(strOut[i], tmpStr[i], SC_FX_STR_N);
+	}
+}
+
+int CScreenCaptureDlg::FxParamCount(int fx) const
+{
+	switch (fx) {
+	case SC_FX_BLUR_SOFT: case SC_FX_BLUR_STRONG: case SC_FX_BLUR_MEGA: return 1;
+	case SC_FX_WAVE: case SC_FX_UNDERWATER: case SC_FX_HEAT_HAZE: case SC_FX_RIPPLE: return 3;
+	case SC_FX_GLITCH: return 3;
+	case SC_FX_PIXELATE: case SC_FX_NOISE: return 2;
+	case SC_FX_VIGNETTE: case SC_FX_SPOTLIGHT: case SC_FX_FISHEYE: case SC_FX_SWIRL: case SC_FX_VORTEX: return 2;
+	case SC_FX_BLOOM: case SC_FX_GODRAYS: case SC_FX_MOTION_BLUR: case SC_FX_RADIAL_BLUR: case SC_FX_ZOOM_BLUR: return 2;
+	case SC_FX_OIL: return 5;
+	case SC_FX_WATERCOLOR: return 4;
+	case SC_FX_DREAM: return 4;
+	case SC_FX_PENCIL: return 3;
+	case SC_FX_KALEIDO: case SC_FX_CRT_CURVE: case SC_FX_CHROMA: case SC_FX_CHROMA_HEAVY: return 2;
+	case SC_FX_FOG: case SC_FX_DISPLACE: case SC_FX_POSTER: case SC_FX_COMIC: return 2;
+	case SC_FX_NONE: return 0;
+	default: return 1; // 色調系など S1=効き
+	}
+}
+
+CString CScreenCaptureDlg::FxParamName(int fx, int si) const
+{
+	auto L = [](const wchar_t* ja, const wchar_t* en) -> CString {
+		return LL14(ja, en, en, en, en, en, en, en, en, en, en, en, en, en);
+	};
+	if (si < 0 || si >= SC_FX_STR_N) return L(L"?", L"?");
+	switch (fx) {
+	case SC_FX_WAVE: case SC_FX_UNDERWATER: case SC_FX_HEAT_HAZE: case SC_FX_RIPPLE:
+		if (si == 0) return L(L"振幅", L"Amplitude");
+		if (si == 1) return L(L"速度", L"Speed");
+		if (si == 2) return L(L"周波数", L"Frequency");
+		break;
+	case SC_FX_BLUR_SOFT: case SC_FX_BLUR_STRONG: case SC_FX_BLUR_MEGA:
+		if (si == 0) return L(L"強さ", L"Amount");
+		break;
+	case SC_FX_MOTION_BLUR: case SC_FX_RADIAL_BLUR: case SC_FX_ZOOM_BLUR:
+		if (si == 0) return L(L"強さ", L"Amount");
+		if (si == 1) return L(L"広がり", L"Spread");
+		break;
+	case SC_FX_PIXELATE:
+		if (si == 0) return L(L"ブロック", L"Block size");
+		if (si == 1) return L(L"効き", L"Amount");
+		break;
+	case SC_FX_NOISE:
+		if (si == 0) return L(L"量", L"Amount");
+		if (si == 1) return L(L"速度", L"Speed");
+		break;
+	case SC_FX_GLITCH:
+		if (si == 0) return L(L"ずれ", L"Shift");
+		if (si == 1) return L(L"速度", L"Speed");
+		if (si == 2) return L(L"頻度", L"Frequency");
+		break;
+	case SC_FX_OIL:
+		if (si == 0) return L(L"筆の長さ", L"Stroke length");
+		if (si == 1) return L(L"筆の間隔", L"Stroke spacing");
+		if (si == 2) return L(L"区画", L"Cell size");
+		if (si == 3) return L(L"色面", L"Color steps");
+		if (si == 4) return L(L"筆跡", L"Stroke mark");
+		break;
+	case SC_FX_WATERCOLOR:
+		if (si == 0) return L(L"滲み", L"Bleed");
+		if (si == 1) return L(L"洗い", L"Wash");
+		if (si == 2) return L(L"紙目", L"Paper");
+		if (si == 3) return L(L"縁取り", L"Edge");
+		break;
+	case SC_FX_DREAM:
+		if (si == 0) return L(L"ブルーム", L"Bloom");
+		if (si == 1) return L(L"広がり", L"Spread");
+		if (si == 2) return L(L"半径", L"Radius");
+		if (si == 3) return L(L"パステル", L"Pastel");
+		break;
+	case SC_FX_PENCIL:
+		if (si == 0) return L(L"線の強さ", L"Line");
+		if (si == 1) return L(L"ハッチ1", L"Hatch 1");
+		if (si == 2) return L(L"ハッチ2", L"Hatch 2");
+		break;
+	case SC_FX_GODRAYS: case SC_FX_BLOOM:
+		if (si == 0) return L(L"強さ", L"Amount");
+		if (si == 1) return L(L"広がり", L"Spread");
+		break;
+	case SC_FX_VIGNETTE: case SC_FX_SPOTLIGHT: case SC_FX_FOG:
+		if (si == 0) return L(L"強さ", L"Amount");
+		if (si == 1) return L(L"範囲", L"Range");
+		break;
+	case SC_FX_FISHEYE:
+		if (si == 0) return L(L"歪み", L"Distortion");
+		if (si == 1) return L(L"カーブ", L"Curve");
+		break;
+	case SC_FX_SWIRL: case SC_FX_VORTEX:
+		if (si == 0) return L(L"回転", L"Twist");
+		if (si == 1) return L(L"範囲", L"Range");
+		break;
+	case SC_FX_KALEIDO:
+		if (si == 0) return L(L"分割", L"Segments");
+		if (si == 1) return L(L"効き", L"Amount");
+		break;
+	case SC_FX_CRT_CURVE:
+		if (si == 0) return L(L"湾曲", L"Curve");
+		if (si == 1) return L(L"走査線", L"Scanline");
+		break;
+	case SC_FX_CHROMA: case SC_FX_CHROMA_HEAVY:
+		if (si == 0) return L(L"ずれ幅", L"Offset");
+		if (si == 1) return L(L"効き", L"Amount");
+		break;
+	case SC_FX_POSTER:
+		if (si == 0) return L(L"効き", L"Amount");
+		if (si == 1) return L(L"階調", L"Levels");
+		break;
+	case SC_FX_COMIC:
+		if (si == 0) return L(L"効き", L"Amount");
+		if (si == 1) return L(L"線の強さ", L"Ink");
+		break;
+	case SC_FX_DISPLACE:
+		if (si == 0) return L(L"変位量", L"Displace");
+		if (si == 1) return L(L"速度", L"Speed");
+		break;
+	case SC_FX_INTERLACE:
+		if (si == 0) return L(L"ずれ", L"Shift");
+		break;
+	case SC_FX_SHARPEN: case SC_FX_SHARPEN_HEAVY:
+		if (si == 0) return L(L"強さ", L"Amount");
+		break;
+	default: break;
+	}
+	if (si == 0) return L(L"効き", L"Amount");
+	if (si == 1) return L(L"補助1", L"Param 2");
+	if (si == 2) return L(L"補助2", L"Param 3");
+	if (si == 3) return L(L"補助3", L"Param 4");
+	if (si == 4) return L(L"補助4", L"Param 5");
+	if (si == 5) return L(L"補助5", L"Param 6");
+	if (si == 6) return L(L"補助6", L"Param 7");
+	return L(L"補助7", L"Param 8");
 }
 
 CString CScreenCaptureDlg::FxName(int fx) const
@@ -3437,25 +3790,25 @@ CString CScreenCaptureDlg::FxDesc(int fx) const
 			L"Калейдоскоп-зеркало (сред.)", L"Kaleido-Spiegel (mittel)", L"Espelho caleido (méd)", L"Caleido-spiegel (mid)",
 			L"Lustro kalejdoskopu (śr.)", L"Kaleydoskop ayna (orta)");
 	case SC_FX_OIL:
-		return LL14(L"油絵風の平滑＋量子化（重）", L"Oil smooth + quantize (heavy)", L"Huile lisse+quantif. (lourd)", L"Olio liscio+quantizza (pesante)",
-			L"Óleo suave+cuantiza (pesado)", L"유화 평활+양자화(무거움)", L"油画平滑+量化（重）", L"زيت ناعم+تكميم (ثقيل)",
-			L"Масло сглаж.+квант. (тяж.)", L"Öl glätten+quant. (schwer)", L"Óleo suave+quantiza (pesado)", L"Olie glad+quant. (zwaar)",
-			L"Olej wygładź+kwant. (ciężkie)", L"Yağlı düzgün+nicel (ağır)");
+		return LL14(L"筆致方向の色面（油絵・重）", L"Directional brush oil (heavy)", L"Huile à coups de pinceau (lourd)", L"Olio a pennellate (pesante)",
+			L"Óleo a pinceladas (pesado)", L"붓방향 유화(무거움)", L"笔触方向油画（重）", L"زيت بضربات فرشاة (ثقيل)",
+			L"Масло мазками (тяж.)", L"Öl mit Pinselstrichen (schwer)", L"Óleo com pinceladas (pesado)", L"Olie met penseelstreken (zwaar)",
+			L"Olej pociągnięciami (ciężkie)", L"Fırça darbeli yağlı (ağır)");
 	case SC_FX_WATERCOLOR:
-		return LL14(L"ぼかし＋淡い色面（中〜重）", L"Blur + soft washes (med–heavy)", L"Flou + lavis doux (moy–lourd)", L"Blur + lavaggi soft (medio–pesante)",
-			L"Blur + lavados suaves (med–pesado)", L"블러+옅은 색면(중~무거움)", L"模糊+淡色面（中~重）", L"ضباب + غسلات ناعمة (متوسط–ثقيل)",
-			L"Размытие + мягкие заливки (сред–тяж.)", L"Blur + weiche Lavierung (mittel–schwer)", L"Blur + lavagens suaves (méd–pesado)", L"Blur + zachte wassingen (mid–zwaar)",
-			L"Blur + miękkie plamy (śr.–ciężki)", L"Blur + yumuşak yıka (orta–ağır)");
+		return LL14(L"滲み＋紙目の水彩（中）", L"Bleed + paper grain wash (med)", L"Lavis + grain papier (moy)", L"Lavis + grana carta (medio)",
+			L"Lavado + grano papel (med)", L"번짐+종이결 수채(중)", L"渗色+纸纹水彩（中）", L"غسل + حبيبات ورق (متوسط)",
+			L"Размыв + фактура бумаги (сред.)", L"Ausbluten + Papierkorn (mittel)", L"Sangria + grão papel (méd)", L"Uitlopen + papierkorrel (mid)",
+			L"Przeciekanie + ziarno papieru (śr.)", L"Sızma + kağıt dokusu (orta)");
 	case SC_FX_PENCIL:
-		return LL14(L"線画スケッチ風（中）", L"Line sketch look (med)", L"Aspect croquis (moy)", L"Aspetto schizzo (medio)",
-			L"Aspecto boceto (med)", L"선화 스케치(중)", L"线稿素描（中）", L"مظهر رسم خطي (متوسط)",
-			L"Линейный набросок (сред.)", L"Strichskizze (mittel)", L"Visual de esboço (méd)", L"Lijnskets-look (mid)",
-			L"Szkic liniowy (śr.)", L"Çizgi eskiz (orta)");
+		return LL14(L"ハッチング鉛筆画（中）", L"Hatched pencil sketch (med)", L"Croquis hachuré (moy)", L"Schizzo tratteggiato (medio)",
+			L"Boceto rayado (med)", L"해칭 연필화(중)", L"排线铅笔素描（中）", L"رسم بخطوط متقاطعة (متوسط)",
+			L"Штриховой карандаш (сред.)", L"Schraffierte Bleistiftskizze (mittel)", L"Esboço hachurado (méd)", L"Gearceerde potloodschets (mid)",
+			L"Szkic kreskowany (śr.)", L"Taralı kurşun kalem (orta)");
 	case SC_FX_DREAM:
-		return LL14(L"柔らかい夢うつつ（中）", L"Soft dream haze (med)", L"Brume de rêve douce (moy)", L"Foschia sogno soft (medio)",
-			L"Neblina de sueño suave (med)", L"부드러운 드림(중)", L"柔和梦幻（中）", L"ضباب حلم ناعم (متوسط)",
-			L"Мягкая мечтательность (сред.)", L"Weicher Traumschleier (mittel)", L"Névoa de sonho suave (méd)", L"Zachte droomwaas (mid)",
-			L"Miękka senność (śr.)", L"Yumuşak rüya (orta)");
+		return LL14(L"ハイライトブルーム夢幻（中）", L"Highlight bloom dream (med)", L"Rêve bloom highlights (moy)", L"Sogno bloom highlights (medio)",
+			L"Sueño bloom de brillos (med)", L"하이라이트 블룸 드림(중)", L"高光绽放梦幻（中）", L"حلم بتوهج الإبراز (متوسط)",
+			L"Мечта с bloom бликов (сред.)", L"Traum mit Highlight-Bloom (mittel)", L"Sonho com bloom de brilho (méd)", L"Droom met highlight-bloom (mid)",
+			L"Sen z bloomem świateł (śr.)", L"Vurgu bloom rüya (orta)");
 	case SC_FX_GODRAYS:
 		return LL14(L"光条の放射（重）", L"Light shaft rays (heavy)", L"Rayons de lumière (lourd)", L"Raggi di luce (pesante)",
 			L"Rayos de luz (pesado)", L"빛줄기 방사(무거움)", L"光束放射（重）", L"أشعة ضوئية (ثقيل)",
@@ -3477,10 +3830,10 @@ CString CScreenCaptureDlg::FxDesc(int fx) const
 			L"Сильный RGB-сдвиг (сред.)", L"Starke RGB-Trennung (mittel)", L"Forte split RGB (méd)", L"Sterke RGB-split (mid)",
 			L"Silny rozdział RGB (śr.)", L"Güçlü RGB kayması (orta)");
 	case SC_FX_FOG:
-		return LL14(L"霧っぽい白み＋周辺減光（中）", L"Foggy lift + vignette (med)", L"Voile brumeux + vignette (moy)", L"Velatura nebbia + vignette (medio)",
-			L"Velo niebla + viñeta (med)", L"안개+비네트(중)", L"雾白+暗角（中）", L"ضباب أبيض + تظليل (متوسط)",
-			L"Туманный подъём + виньетка (сред.)", L"Nebelschleier + Vignette (mittel)", L"Véu de névoa + vinheta (méd)", L"Mistwaas + vignet (mid)",
-			L"Mglista poświata + winieta (śr.)", L"Sis + vinyet (orta)");
+		return LL14(L"距離フォグ（白み・中）", L"Distance fog wash (med)", L"Brouillard de distance (moy)", L"Nebbia di distanza (medio)",
+			L"Niebla por distancia (med)", L"거리 안개(중)", L"距离雾化（中）", L"ضباب مسافة (متوسط)",
+			L"Дистанционный туман (сред.)", L"Distanznebel (mittel)", L"Névoa por distância (méd)", L"Afstandsmist (mid)",
+			L"Mgła dystansowa (śr.)", L"Mesafe sisi (orta)");
 	case SC_FX_SHARPEN_HEAVY:
 		return LL14(L"強い輪郭強調（中）", L"Strong edge boost (med)", L"Netteté contours forte (moy)", L"Forte enfasi bordi (medio)",
 			L"Fuerte realce de bordes (med)", L"강한 윤곽 강조(중)", L"强轮廓锐化（中）", L"تعزيز حواف قوي (متوسط)",
@@ -3542,6 +3895,137 @@ void CScreenCaptureDlg::OnFxWireChanged()
 	UpdatePreview(TRUE);
 }
 
+CString CScreenCaptureDlg::FxPresetDefaultName(int idx) const
+{
+	CString s;
+	s.Format(LL14(L"配線 %d", L"Wiring %d", L"Câblage %d", L"Cablaggio %d",
+		L"Cableado %d", L"배선 %d", L"连线 %d", L"توصيل %d",
+		L"Схема %d", L"Verdrahtung %d", L"Ligação %d", L"Bedrading %d",
+		L"Okablowanie %d", L"Kablolama %d"), idx + 1);
+	return s;
+}
+
+void CScreenCaptureDlg::FillFxPresetCombo()
+{
+	if (!m_fxPre.GetSafeHwnd()) return;
+	m_fxPre.ResetContent();
+	for (int i = 0; i < 16; ++i) {
+		CString name = savedata.cap_fx_pre_name[i];
+		name.Trim();
+		if (name.IsEmpty())
+			name = FxPresetDefaultName(i);
+		m_fxPre.AddString(name);
+	}
+	int sel = savedata.cap_fx_pre_sel;
+	if (sel < 0 || sel > 15) sel = 0;
+	m_fxPre.SetCurSel(sel);
+}
+
+void CScreenCaptureDlg::PersistFxPresetsToSavedata()
+{
+	// 名前は保存時点でスロットへ書き込む。ここでは選択のみ。
+	int sel = m_fxPre.GetSafeHwnd() ? m_fxPre.GetCurSel() : savedata.cap_fx_pre_sel;
+	if (sel < 0 || sel > 15) sel = 0;
+	savedata.cap_fx_pre_sel = sel;
+	MpPersistSavedataQuick();
+}
+
+void CScreenCaptureDlg::ApplyFxPreset(int idx)
+{
+	if (idx < 0 || idx > 15) return;
+	int chain[SC_FX_CHAIN_MAX] = {};
+	BYTE str[SC_FX_CHAIN_MAX][SC_FX_STR_N];
+	memset(str, SC_FX_STR_DEF, sizeof(str));
+	int cn = savedata.cap_fx_pre_n[idx];
+	if (cn < 0) cn = 0;
+	if (cn > SC_FX_CHAIN_MAX) cn = SC_FX_CHAIN_MAX;
+	int n = 0;
+	for (int i = 0; i < cn; ++i) {
+		const int fx = savedata.cap_fx_pre_fx[idx][i];
+		if (fx > SC_FX_NONE && fx < SC_FX_COUNT) {
+			chain[n] = fx;
+			memcpy(str[n], savedata.cap_fx_pre_str[idx][i], SC_FX_STR_N);
+			n++;
+		}
+	}
+	m_fxWire.SetChain(chain, n, str);
+	savedata.cap_fx_pre_sel = idx;
+	SyncFxComboFromChain();
+	PersistUiToSavedata();
+	UpdatePreview(TRUE);
+}
+
+void CScreenCaptureDlg::SaveFxPreset(int idx)
+{
+	if (idx < 0 || idx > 15) return;
+	int chain[SC_FX_CHAIN_MAX] = {};
+	BYTE str[SC_FX_CHAIN_MAX][SC_FX_STR_N];
+	memset(str, SC_FX_STR_DEF, sizeof(str));
+	int cn = 0;
+	GetFxChain(chain, &cn, str);
+	savedata.cap_fx_pre_n[idx] = cn;
+	memset(savedata.cap_fx_pre_fx[idx], 0, sizeof(savedata.cap_fx_pre_fx[idx]));
+	memset(savedata.cap_fx_pre_str[idx], SC_FX_STR_DEF, sizeof(savedata.cap_fx_pre_str[idx]));
+	for (int i = 0; i < cn && i < 8; ++i) {
+		savedata.cap_fx_pre_fx[idx][i] = chain[i];
+		memcpy(savedata.cap_fx_pre_str[idx][i], str[i], SC_FX_STR_N);
+	}
+	CString name;
+	if (m_fxPre.GetSafeHwnd())
+		m_fxPre.GetWindowText(name);
+	name.Trim();
+	if (name.IsEmpty())
+		name = FxPresetDefaultName(idx);
+	_tcsncpy(savedata.cap_fx_pre_name[idx], name, _countof(savedata.cap_fx_pre_name[idx]) - 1);
+	savedata.cap_fx_pre_name[idx][_countof(savedata.cap_fx_pre_name[idx]) - 1] = 0;
+	savedata.cap_fx_pre_sel = idx;
+	if (m_fxPre.GetSafeHwnd()) {
+		m_fxPre.DeleteString(idx);
+		m_fxPre.InsertString(idx, name);
+		m_fxPre.SetCurSel(idx);
+	}
+	MpPersistSavedataQuick();
+}
+
+void CScreenCaptureDlg::OnBnClickedFxPreLoad()
+{
+	if (m_uiLocked) return;
+	int sel = m_fxPre.GetCurSel();
+	if (sel < 0) sel = savedata.cap_fx_pre_sel;
+	if (sel < 0 || sel > 15) sel = 0;
+	ApplyFxPreset(sel);
+}
+
+void CScreenCaptureDlg::OnBnClickedFxPreSave()
+{
+	if (m_uiLocked) return;
+	int sel = m_fxPre.GetCurSel();
+	if (sel < 0) {
+		// DROPDOWN 編集中は GetCurSel==-1 になり得る → テキスト一致 or 前回選択
+		CString cur;
+		m_fxPre.GetWindowText(cur);
+		cur.Trim();
+		sel = savedata.cap_fx_pre_sel;
+		if (sel < 0 || sel > 15) sel = 0;
+		for (int i = 0; i < 16; ++i) {
+			CString n = savedata.cap_fx_pre_name[i];
+			n.Trim();
+			if (n.IsEmpty()) n = FxPresetDefaultName(i);
+			if (n == cur) { sel = i; break; }
+		}
+	}
+	SaveFxPreset(sel);
+}
+
+void CScreenCaptureDlg::OnCbnSelchangeFxPre()
+{
+	if (m_uiLocked) return;
+	int sel = m_fxPre.GetCurSel();
+	if (sel < 0 || sel > 15) return;
+	savedata.cap_fx_pre_sel = sel;
+	MpPersistSavedataQuick();
+}
+
 void CScreenCaptureDlg::PersistUiToSavedata()
 {
 	if (!GetSafeHwnd()) return;
@@ -3562,8 +4046,10 @@ void CScreenCaptureDlg::PersistUiToSavedata()
 	savedata.cap_canvas_h = ch;
 	{
 		int chain[SC_FX_CHAIN_MAX] = {};
+		BYTE str[SC_FX_CHAIN_MAX][SC_FX_STR_N];
+		memset(str, SC_FX_STR_DEF, sizeof(str));
 		int cn = 0;
-		GetFxChain(chain, &cn);
+		GetFxChain(chain, &cn, str);
 		savedata.cap_fx_n = cn;
 		savedata.cap_fx0 = (cn > 0) ? chain[0] : 0;
 		savedata.cap_fx1 = (cn > 1) ? chain[1] : 0;
@@ -3574,6 +4060,15 @@ void CScreenCaptureDlg::PersistUiToSavedata()
 		savedata.cap_fx6 = (cn > 6) ? chain[6] : 0;
 		savedata.cap_fx7 = (cn > 7) ? chain[7] : 0;
 		savedata.cap_effect = savedata.cap_fx0;
+		memset(savedata.cap_fx_str, SC_FX_STR_DEF, sizeof(savedata.cap_fx_str));
+		for (int i = 0; i < cn && i < 8; ++i)
+			memcpy(savedata.cap_fx_str[i], str[i], SC_FX_STR_N);
+	}
+	if (m_fxPre.GetSafeHwnd()) {
+		int sel = m_fxPre.GetCurSel();
+		if (sel < 0 || sel > 15) sel = savedata.cap_fx_pre_sel;
+		if (sel < 0 || sel > 15) sel = 0;
+		savedata.cap_fx_pre_sel = sel;
 	}
 	CString path;
 	m_path.GetWindowText(path);
@@ -4463,6 +4958,9 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	}
 	m_preview.SetOwner(this);
 	m_fxWire.SetOwner(this);
+	// プレビュー/配線は不透明オーナー描画（アクリル透過に乗せない）
+	m_preview.SetAeroMode(FALSE);
+	m_fxWire.SetAeroMode(FALSE);
 	// アクリル下の WS_BORDER 欠け/ちらつき回避（枠は各 Paint で自前描画）
 	if (m_preview.GetSafeHwnd())
 		m_preview.ModifyStyle(WS_BORDER, 0, SWP_FRAMECHANGED);
@@ -4477,6 +4975,7 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_includeMp.SetAeroMode(FALSE);
 	m_fps.SetAeroMode(FALSE);
 	m_effect.SetAeroMode(FALSE);
+	m_fxPre.SetAeroMode(FALSE);
 	m_mode.SetAeroMode(FALSE);
 	m_canvas.SetAeroMode(FALSE);
 	m_avail.SetAeroMode(FALSE);
@@ -4495,6 +4994,14 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_fpsLabel.SetWindowText(L"FPS");
 	m_effectLabel.SetWindowText(LL14(L"効果", L"Effect", L"Effet", L"Effetto", L"Efecto", L"효과", L"效果", L"تأثير",
 		L"Эффект", L"Effekt", L"Efeito", L"Effect", L"Efekt", L"Efekt"));
+	m_fxPreLabel.SetWindowText(LL14(L"配線プリセット", L"Wiring preset", L"Préréglage câblage", L"Preset cablaggio",
+		L"Ajuste cableado", L"배선 프리셋", L"连线预设", L"إعداد التوصيل",
+		L"Пресет схемы", L"Verdrahtungs-Preset", L"Predefinição ligação", L"Bedradingspreset",
+		L"Preset okablowania", L"Kablolama önayarı"));
+	m_fxPreLoad.SetWindowText(LL14(L"読込", L"Load", L"Charger", L"Carica", L"Cargar", L"불러오기", L"读取", L"تحميل",
+		L"Загрузить", L"Laden", L"Carregar", L"Laden", L"Wczytaj", L"Yükle"));
+	m_fxPreSave.SetWindowText(LL14(L"保存", L"Save", L"Enreg.", L"Salva", L"Guardar", L"저장", L"保存", L"حفظ",
+		L"Сохранить", L"Speichern", L"Guardar", L"Opslaan", L"Zapisz", L"Kaydet"));
 	m_cropLabel.SetWindowText(LL14(L"切出 sx sy sw sh", L"Crop sx sy sw sh", L"Rogner sx sy sw sh", L"Ritaglio sx sy sw sh",
 		L"Recorte sx sy sw sh", L"잘라내기 sx sy sw sh", L"裁剪 sx sy sw sh", L"قص sx sy sw sh",
 		L"Вырез sx sy sw sh", L"Ausschnitt sx sy sw sh", L"Recorte sx sy sw sh", L"Uitsnede sx sy sw sh",
@@ -4543,20 +5050,20 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق",
 		L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	m_status.SetWindowText(LL14(
-		L"赤枠内がMP4。下の配線で効果を最大8段つなぎ可。Cropでウィンドウ一部。右クリックHideで映像オフ(音可)。HUDは録画されません。",
-		L"Red frame = MP4. Wire up to 8 FX below. Crop for a window region. Right-click Hide (audio OK). HUD not recorded.",
-		L"Cadre rouge = MP4. Chaînez jusqu'à 8 FX. Crop pour une région. Clic droit Hide. HUD non enregistré.",
-		L"Cornice rossa = MP4. Collega fino a 8 FX. Crop per regione. Destro Hide. HUD non registrato.",
-		L"Marco rojo = MP4. Encadene hasta 8 FX. Crop para región. Clic der. Hide. HUD no se graba.",
-		L"빨간 틀 = MP4. 아래에서 FX 최대 8단 연결. Crop으로 창 일부. 우클릭 Hide. HUD 미녹화.",
-		L"红框=MP4。下方可串联最多8段效果。Crop放局部。右键Hide。HUD不录。",
-		L"الإطار الأحمر = MP4. وصّل حتى 8 FX. Crop لمنطقة. يمين Hide. لا يُسجَّل HUD.",
-		L"Красная рамка = MP4. До 8 FX в цепочке. Crop для области. ПКМ Hide. HUD не пишется.",
-		L"Roter Rahmen = MP4. Bis 8 FX verketten. Crop für Ausschnitt. Rechtsklick Hide. HUD nicht aufgenommen.",
-		L"Moldura vermelha = MP4. Encadeie até 8 FX. Crop para região. Direito Hide. HUD não é gravado.",
-		L"Rood kader = MP4. Koppel tot 8 FX. Crop voor regio. Rechtsklik Hide. HUD niet opgenomen.",
-		L"Czerwona ramka = MP4. Połącz do 8 FX. Crop dla obszaru. PPM Hide. HUD nie jest nagrywany.",
-		L"Kırmızı çerçeve = MP4. En fazla 8 FX bağlayın. Crop ile bölge. Sağ tık Hide. HUD kayda girmez."));
+		L"赤枠内がMP4。下の配線で効果を最大8段つなぎ可。スロット右クリックで強度。配線プリセットで保存/読込。Cropでウィンドウ一部。右クリックHideで映像オフ(音可)。HUDは録画されません。",
+		L"Red frame = MP4. Wire up to 8 FX below. Right-click slot for strength. Save/load wiring presets. Crop for a window region. Right-click Hide (audio OK). HUD not recorded.",
+		L"Cadre rouge = MP4. Chaînez jusqu'à 8 FX. Clic droit slot = intensité. Préréglages câblage. Crop pour une région. Clic droit Hide. HUD non enregistré.",
+		L"Cornice rossa = MP4. Collega fino a 8 FX. Destro sullo slot = intensità. Preset cablaggio. Crop per regione. Destro Hide. HUD non registrato.",
+		L"Marco rojo = MP4. Encadene hasta 8 FX. Clic der. en ranura = intensidad. Ajustes de cableado. Crop para región. Clic der. Hide. HUD no se graba.",
+		L"빨간 틀 = MP4. 아래에서 FX 최대 8단 연결. 슬롯 우클릭으로 강도. 배선 프리셋 저장/불러오기. Crop으로 창 일부. 우클릭 Hide. HUD 미녹화.",
+		L"红框=MP4。下方可串联最多8段效果。右键插槽调强度。连线预设可保存/读取。Crop放局部。右键Hide。HUD不录。",
+		L"الإطار الأحمر = MP4. وصّل حتى 8 FX. يمين على الفتحة للشدة. إعدادات التوصيل. Crop لمنطقة. يمين Hide. لا يُسجَّل HUD.",
+		L"Красная рамка = MP4. До 8 FX в цепочке. ПКМ по слоту — сила. Пресеты схемы. Crop для области. ПКМ Hide. HUD не пишется.",
+		L"Roter Rahmen = MP4. Bis 8 FX verketten. Rechtsklick Slot = Stärke. Verdrahtungs-Presets. Crop für Ausschnitt. Rechtsklick Hide. HUD nicht aufgenommen.",
+		L"Moldura vermelha = MP4. Encadeie até 8 FX. Direito no slot = intensidade. Predefinições de ligação. Crop para região. Direito Hide. HUD não é gravado.",
+		L"Rood kader = MP4. Koppel tot 8 FX. Rechtsklik slot = sterkte. Bedradingspresets. Crop voor regio. Rechtsklik Hide. HUD niet opgenomen.",
+		L"Czerwona ramka = MP4. Połącz do 8 FX. PPM na slocie = siła. Presety okablowania. Crop dla obszaru. PPM Hide. HUD nie jest nagrywany.",
+		L"Kırmızı çerçeve = MP4. En fazla 8 FX bağlayın. Slota sağ tık = yoğunluk. Kablolama önayarları. Crop ile bölge. Sağ tık Hide. HUD kayda girmez."));
 
 	RefreshModeCombo();
 
@@ -4595,6 +5102,8 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 		L"(Własne okablowanie)", L"(Özel kablolama)"));
 	{
 		int chain[SC_FX_CHAIN_MAX] = {};
+		BYTE str[SC_FX_CHAIN_MAX][SC_FX_STR_N];
+		memset(str, SC_FX_STR_DEF, sizeof(str));
 		int cn = savedata.cap_fx_n;
 		if (cn < 0) cn = 0;
 		if (cn > SC_FX_CHAIN_MAX) cn = SC_FX_CHAIN_MAX;
@@ -4604,16 +5113,20 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 		};
 		int n = 0;
 		for (int i = 0; i < cn; ++i) {
-			if (src[i] > SC_FX_NONE && src[i] < SC_FX_COUNT)
-				chain[n++] = src[i];
+			if (src[i] > SC_FX_NONE && src[i] < SC_FX_COUNT) {
+				chain[n] = src[i];
+				memcpy(str[n], savedata.cap_fx_str[i], SC_FX_STR_N);
+				n++;
+			}
 		}
 		if (n <= 0 && savedata.cap_effect > 0 && savedata.cap_effect < SC_FX_COUNT) {
 			chain[0] = savedata.cap_effect;
 			n = 1;
 		}
-		m_fxWire.SetChain(chain, n);
+		m_fxWire.SetChain(chain, n, str);
 		SyncFxComboFromChain();
 	}
+	FillFxPresetCombo();
 
 	// 日付ファイル名は毎回更新（フォルダだけ前回を引き継ぐ）
 	m_path.SetWindowText(NormalizeOutPath(RefreshCaptureOutPathTimestamp(savedata.cap_last_path)));
@@ -4685,20 +5198,35 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 			L"Szybki jeden efekt. Łańcuch: przeciągnij z palety poniżej",
 			L"Hızlı tek efekt. Zincir için alttaki paletten sürükleyin"));
 		m_tooltip.AddTool(&m_fxWire, LL14(
-			L"パレットからスロットへドラッグで最大4段まで直列接続。右クリックで解除",
-			L"Drag palette chips onto slots (max 4 in series). Right-click clears a slot",
-			L"Glissez les puces vers les slots (max 4 en série). Clic droit pour effacer",
-			L"Trascina i chip sugli slot (max 4 in serie). Destro per azzerare",
-			L"Arrastre chips a las ranuras (máx. 4 en serie). Clic der. para borrar",
-			L"팔레트 칩을 슬롯에 드래그(최대 4단 직렬). 우클릭으로 해제",
-			L"将色块拖到插槽（最多串联4段）。右键清除",
-			L"اسحب الشرائح إلى الفتحات (حتى 4 متسلسلة). يمين للمسح",
-			L"Перетащите чипы на слоты (макс. 4 подряд). ПКМ очищает",
-			L"Chips auf Slots ziehen (max. 4 in Reihe). Rechtsklick löscht",
-			L"Arraste chips para slots (máx. 4 em série). Direito limpa",
-			L"Sleep chips naar slots (max 4 in serie). Rechtsklik wist",
-			L"Przeciągnij chipy na sloty (maks. 4 w szeregu). PPM czyści",
-			L"Chip’leri slotlara sürükleyin (en fazla 4 seri). Sağ tık siler"));
+			L"パレットからスロットへドラッグで最大8段まで直列接続。同じ効果の並列配置可。右クリックで解除/複製/強度",
+			L"Drag palette chips onto slots (max 8 in series; duplicates OK). Right-click clears/duplicates/strength",
+			L"Glissez les puces vers les slots (max 8 en série; doublons OK). Clic droit efface/duplique/intensité",
+			L"Trascina i chip sugli slot (max 8 in serie; duplicati OK). Destro azzera/duplica/intensità",
+			L"Arrastre chips a las ranuras (máx. 8 en serie; duplicados OK). Clic der. borra/duplica/intensidad",
+			L"팔레트 칩을 슬롯에 드래그(최대 8단 직렬·중복 가능). 우클릭으로 해제/복제/강도",
+			L"将色块拖到插槽（最多串联8段，可重复）。右键清除/复制/强度",
+			L"اسحب الشرائح إلى الفتحات (حتى 8 متسلسلة؛ التكرار مسموح). يمين للمسح/التكرار/الشدة",
+			L"Перетащите чипы на слоты (макс. 8 подряд; дубликаты OK). ПКМ очищает/дублирует/сила",
+			L"Chips auf Slots ziehen (max. 8 in Reihe; Duplikate OK). Rechtsklick löscht/dupliziert/Stärke",
+			L"Arraste chips para slots (máx. 8 em série; duplicatas OK). Direito limpa/duplica/intensidade",
+			L"Sleep chips naar slots (max 8 in serie; duplicaten OK). Rechtsklik wist/dupliceert/sterkte",
+			L"Przeciągnij chipy na sloty (maks. 8 w szeregu; duplikaty OK). PPM czyści/duplikuje/siła",
+			L"Chip’leri slotlara sürükleyin (en fazla 8 seri; tekrar OK). Sağ tık siler/çoğaltır/yoğunluk"));
+		m_tooltip.AddTool(&m_fxPre, LL14(
+			L"配線プリセット16枠。名前を編集して保存／読込",
+			L"16 wiring presets. Edit name, then Save / Load",
+			L"16 préréglages. Modifier le nom, puis Enreg. / Charger",
+			L"16 preset. Modifica nome, poi Salva / Carica",
+			L"16 ajustes. Edite el nombre y Guardar / Cargar",
+			L"배선 프리셋 16칸. 이름 편집 후 저장/불러오기",
+			L"16个连线预设。编辑名称后保存/读取",
+			L"16 إعدادات توصيل. عدّل الاسم ثم حفظ/تحميل",
+			L"16 пресетов схемы. Измените имя, затем Сохранить / Загрузить",
+			L"16 Verdrahtungs-Presets. Name ändern, dann Speichern / Laden",
+			L"16 predefinições. Edite o nome e Guarde / Carregue",
+			L"16 bedradingspresets. Bewerk naam, dan Opslaan / Laden",
+			L"16 presetów okablowania. Edytuj nazwę, potem Zapisz / Wczytaj",
+			L"16 kablolama önayarı. Adı düzenleyip Kaydet / Yükle"));
 		m_tooltip.AddTool(&m_cropFull, LL14(
 			L"選択レイヤのウィンドウ内切り出しを解除（全体を載せる）",
 			L"Clear crop on selected layer (use full window)",
@@ -5921,6 +6449,9 @@ UINT __stdcall CScreenCaptureDlg::CaptureThread(void* p)
 				if (!haveFrame) {
 					if (ScFrameAlloc(frame, snap.canvasW, snap.canvasH)) {
 						ScFrameClear(frame, RGB(16, 16, 20));
+						if (snap.fxN > 0 && frame.bits)
+							ScGpuApplyEffectChain(frame.bits, frame.w, frame.h, frame.stride,
+								snap.fx, snap.fxN, snap.fxTime, snap.fxStr);
 						haveFrame = TRUE;
 					}
 				}
@@ -6109,7 +6640,7 @@ void CScreenCaptureDlg::FitToWorkArea()
 		CRect fx;
 		m_fxWire.GetWindowRect(&fx);
 		ScreenToClient(&fx);
-		const int minFxH = 120;
+		const int minFxH = 168;
 		int can = fx.Height() - minFxH;
 		if (can < 0) can = 0;
 		int take = overflow - margin;
@@ -6268,6 +6799,92 @@ void OpenScreenCaptureModeless(CWnd* parent)
 	}
 	g_screenCaptureDlg->ShowWindow(SW_SHOW);
 	g_screenCaptureDlg->SetForegroundWindow();
+}
+
+void ScreenCaptureApplySavedataToUi(BOOL gameGuide)
+{
+	if (g_screenCaptureDlg && ::IsWindow(g_screenCaptureDlg->GetSafeHwnd()))
+		g_screenCaptureDlg->ApplySavedataToUi(gameGuide);
+}
+
+void CScreenCaptureDlg::ApplySavedataToUi(BOOL gameGuide)
+{
+	if (!GetSafeHwnd() || m_uiLocked || InterlockedCompareExchange(&m_run, 0, 0) != 0)
+		return;
+
+	RefreshModeCombo();
+
+	int canvas = savedata.cap_canvas_preset;
+	if (canvas < 0 || canvas > 4) canvas = 2;
+	if (m_canvas.GetSafeHwnd())
+		m_canvas.SetCurSel(canvas);
+
+	if (m_audio.GetSafeHwnd())
+		m_audio.SetCheck(savedata.cap_with_audio ? BST_CHECKED : BST_UNCHECKED);
+	if (m_mic.GetSafeHwnd())
+		m_mic.SetCheck(savedata.cap_with_mic ? BST_CHECKED : BST_UNCHECKED);
+	if (m_includeMp.GetSafeHwnd())
+		m_includeMp.SetCheck(savedata.cap_include_mp ? BST_CHECKED : BST_UNCHECKED);
+
+	static const int fpsTab[] = { 10, 15, 20, 24, 30, 60, 90, 120 };
+	int fpsSel = 1;
+	for (int i = 0; i < (int)_countof(fpsTab); ++i) {
+		if (savedata.cap_fps == fpsTab[i]) fpsSel = i;
+	}
+	if (m_fps.GetSafeHwnd())
+		m_fps.SetCurSel(fpsSel);
+
+	{
+		int chain[SC_FX_CHAIN_MAX] = {};
+		BYTE str[SC_FX_CHAIN_MAX][SC_FX_STR_N];
+		memset(str, SC_FX_STR_DEF, sizeof(str));
+		int cn = savedata.cap_fx_n;
+		if (cn < 0) cn = 0;
+		if (cn > SC_FX_CHAIN_MAX) cn = SC_FX_CHAIN_MAX;
+		const int src[SC_FX_CHAIN_MAX] = {
+			savedata.cap_fx0, savedata.cap_fx1, savedata.cap_fx2, savedata.cap_fx3,
+			savedata.cap_fx4, savedata.cap_fx5, savedata.cap_fx6, savedata.cap_fx7
+		};
+		int n = 0;
+		for (int i = 0; i < cn; ++i) {
+			if (src[i] > SC_FX_NONE && src[i] < SC_FX_COUNT) {
+				chain[n] = src[i];
+				memcpy(str[n], savedata.cap_fx_str[i], SC_FX_STR_N);
+				n++;
+			}
+		}
+		if (n <= 0 && savedata.cap_effect > 0 && savedata.cap_effect < SC_FX_COUNT) {
+			chain[0] = savedata.cap_effect;
+			n = 1;
+		}
+		m_fxWire.SetChain(chain, n, str);
+		SyncFxComboFromChain();
+	}
+
+	EnableComposeUi(IsWindowComposeMode());
+	if (savedata.cap_include_mp)
+		SyncMpLayerFromCheck();
+	ApplyPreviewTimer();
+	UpdatePreview(TRUE);
+	RefreshOpaqueUi();
+
+	if (gameGuide && m_status.GetSafeHwnd()) {
+		m_status.SetWindowText(LL14(
+			L"ゲーム録画プリセット適用済み。①モードで録画したい画面/窓を選ぶ ②必要ならCrop ③赤枠を確認して「開始」。効果配線はクリア済み（高画質優先）。",
+			L"Game capture preset applied. ① Pick screen/window in Mode ② Crop if needed ③ Check red frame → Start. FX cleared for quality.",
+			L"Preset jeu applique. ① Mode ecran/fenetre ② Crop si besoin ③ Cadre rouge → Demarrer. FX effaces (qualite).",
+			L"Preset gioco applicato. ① Modalita schermo/finestra ② Crop se serve ③ Cornice rossa → Avvia. FX azzerati (qualita).",
+			L"Preset juego aplicado. ① Modo pantalla/ventana ② Crop si hace falta ③ Marco rojo → Iniciar. FX limpios (calidad).",
+			L"게임 캡처 프리셋 적용. ①모드에서 화면/창 선택 ②필요시 Crop ③빨간 틀 확인 후 시작. FX 제거(고화질).",
+			L"已应用游戏录制预设。①在模式中选画面/窗口 ②需要时Crop ③确认红框后开始。已清效果（偏画质）。",
+			L"تم تطبيق إعداد اللعبة. ① اختر الشاشة/النافذة ② Crop إن لزم ③ الإطار الأحمر ثم ابدأ. أُزيلت التأثيرات للجودة.",
+			L"Пресет игры применён. ① Режим экран/окно ② Crop при необходимости ③ Красная рамка → Старт. FX очищены (качество).",
+			L"Game-Preset angewendet. ① Modus Bildschirm/Fenster ② ggf. Crop ③ Roten Rahmen prüfen → Start. FX geleert (Qualität).",
+			L"Preset de jogo aplicado. ① Modo tela/janela ② Crop se preciso ③ Moldura vermelha → Iniciar. FX limpos (qualidade).",
+			L"Game-preset toegepast. ① Modus scherm/venster ② Crop indien nodig ③ Rood kader → Start. FX gewist (kwaliteit).",
+			L"Preset gry zastosowany. ① Tryb ekran/okno ② Crop w razie potrzeby ③ Czerwona ramka → Start. FX wyczyszczone (jakosc).",
+			L"Oyun on ayari uygulandi. ① Modda ekran/pencere sec ② Gerekirse Crop ③ Kirmizi cerceve → Baslat. FX temiz (kalite)."));
+	}
 }
 
 void CloseScreenCaptureIfOpen()

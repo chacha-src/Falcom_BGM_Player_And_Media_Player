@@ -1541,6 +1541,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONDOWN()
 	ON_STN_CLICKED(IDC_STATIC2, &COggDlg::OnStnClickedStatic2)
+	ON_STN_DBLCLK(IDC_STATIC2, &COggDlg::OnStnClickedStatic2)
 	ON_STN_DBLCLK(IDC_STATIC_p, &COggDlg::OnStnDblclickStaticp)
 	ON_STN_DBLCLK(IDC_STATIC_t, &COggDlg::OnStnDblclickStatict)
 
@@ -1926,6 +1927,16 @@ void MpPersistSavedataQuick()
 		ab.Close();
 	}
 	_tchdir(tmp);
+}
+
+void CCC_NotifyAeroSettingChanged()
+{
+	MpPersistSavedataQuick();
+	if (og)
+		og->PostRefreshAllAeroWindows();
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->RefreshAeroMode();
 }
 
 void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
@@ -2843,12 +2854,22 @@ public:
 	}
 
 
-	// ★★★ CreateClone (★未実装のまま) ★★★
 	virtual BOOL WINAPI CreateClone(IKpiFile** ppFile)
 	{
-		// クローン非対応（これが原因のプラグインもあるかもしれない）
+		if (!ppFile) return FALSE;
 		*ppFile = NULL;
-		return FALSE;
+		if (m_wszFullFilePath[0] == L'\0')
+			return FALSE;
+		CMyHostFile* clone = new (std::nothrow) CMyHostFile();
+		if (!clone)
+			return FALSE;
+		if (!clone->Open(m_wszFullFilePath)) {
+			clone->Release();
+			return FALSE;
+		}
+		// クローンは先頭位置から（仕様どおり）
+		*ppFile = clone;
+		return TRUE;
 	}
 
 	// --- 他のメソッド (変更なし) ---
@@ -27837,19 +27858,24 @@ void COggDlg::OnLButtonDown(UINT nFlags, CPoint point)
 
 void COggDlg::OnStnClickedStatic2()
 {
-	// TODO: ここにコントロール通知ハンドラー コードを追加します。
+	// 音量ラベル: クリック／ダブルクリックで 100% に戻す（ヘルプ記載どおり）
+	if (deve)
+		m_sl.SetPos(100000);
+	else
+		m_sl.SetPos(1000);
+	s_lastAppliedVol = -1.0f;
 }
 
 void COggDlg::OnStnDblclickStaticp()
 {
-	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	m_pitch_sl.SetPos(200);
+	pitch = 200;
 }
 
 void COggDlg::OnStnDblclickStatict()
 {
-	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	m_tempo_sl.SetPos(200);
+	tempo = 200;
 }
 void COggDlg::OnBnClickedButton59()
 {

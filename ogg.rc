@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -1293,7 +1293,11 @@ BEGIN
     PUSHBUTTON      "Pick",IDC_SC_PICK,360,142,90,16
     PUSHBUTTON      "Refresh",IDC_SC_REFRESH,455,142,50,16
     CONTROL         "Include MP",IDC_SC_INCMP,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,360,164,145,10
-    LTEXT           "",IDC_SC_FXGRAPH,7,212,546,175,SS_NOTIFY | NOT WS_GROUP
+    LTEXT           "Preset",IDC_SC_FXPRE_L,7,214,72,10
+    COMBOBOX        IDC_SC_FXPRE,80,212,164,140,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Load",IDC_SC_FXPRE_LOAD,248,211,40,16
+    PUSHBUTTON      "Save",IDC_SC_FXPRE_SAVE,292,211,40,16
+    LTEXT           "",IDC_SC_FXGRAPH,7,230,546,157,SS_NOTIFY | NOT WS_GROUP
     LTEXT           "Windows",IDC_SC_AVAIL_L,7,392,100,10
     LISTBOX         IDC_SC_AVAIL,7,404,220,52,LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
     PUSHBUTTON      "Add >>",IDC_SC_ADD,232,414,55,16

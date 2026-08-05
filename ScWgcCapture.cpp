@@ -33,6 +33,8 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -185,7 +187,22 @@ static BOOL EnsureShaders()
 
 static BOOL EnsureD3D()
 {
-	if (g_winrtDevice && g_shaderReady) return TRUE;
+	// FX は D3D11+VS があれば足りる。WinRT ラップ失敗で GPU FX 全体を落とさない。
+	if (g_d3d && g_shaderReady) {
+		if (!g_winrtDevice) {
+			try {
+				com_ptr<IDXGIDevice> dxgi;
+				if (SUCCEEDED(g_d3d->QueryInterface(__uuidof(IDXGIDevice), dxgi.put_void())) && dxgi) {
+					com_ptr<::IInspectable> insp;
+					if (SUCCEEDED(CreateDirect3D11DeviceFromDXGIDevice(dxgi.get(), insp.put())) && insp)
+						g_winrtDevice = insp.as<IDirect3DDevice>();
+				}
+			} catch (...) {
+				g_winrtDevice = nullptr;
+			}
+		}
+		return TRUE;
+	}
 	EnsureApartment();
 
 	if (!g_d3d) {
@@ -204,18 +221,24 @@ static BOOL EnsureD3D()
 		com_ptr<ID3D10Multithread> mt;
 		if (SUCCEEDED(g_d3d->QueryInterface(__uuidof(ID3D10Multithread), mt.put_void())) && mt)
 			mt->SetMultithreadProtected(TRUE);
-
-		com_ptr<IDXGIDevice> dxgi;
-		hr = g_d3d->QueryInterface(__uuidof(IDXGIDevice), dxgi.put_void());
-		if (FAILED(hr) || !dxgi) return FALSE;
-
-		com_ptr<::IInspectable> insp;
-		hr = CreateDirect3D11DeviceFromDXGIDevice(dxgi.get(), insp.put());
-		if (FAILED(hr) || !insp) return FALSE;
-		g_winrtDevice = insp.as<IDirect3DDevice>();
-		if (!g_winrtDevice) return FALSE;
 	}
-	return EnsureShaders();
+
+	if (!EnsureShaders())
+		return FALSE;
+
+	if (!g_winrtDevice) {
+		try {
+			com_ptr<IDXGIDevice> dxgi;
+			if (SUCCEEDED(g_d3d->QueryInterface(__uuidof(IDXGIDevice), dxgi.put_void())) && dxgi) {
+				com_ptr<::IInspectable> insp;
+				if (SUCCEEDED(CreateDirect3D11DeviceFromDXGIDevice(dxgi.get(), insp.put())) && insp)
+					g_winrtDevice = insp.as<IDirect3DDevice>();
+			}
+		} catch (...) {
+			g_winrtDevice = nullptr;
+		}
+	}
+	return TRUE;
 }
 
 static GraphicsCaptureItem CreateItemForWindow(HWND hwnd)
@@ -1268,9 +1291,13 @@ struct ScFxGpuCache {
 	com_ptr<ID3D11RenderTargetView> rtvA;
 	com_ptr<ID3D11RenderTargetView> rtvB;
 	com_ptr<ID3D11Buffer> cb;
+	com_ptr<ID3D11VertexShader> vs;
 	com_ptr<ID3D11PixelShader> psBlur;
 	com_ptr<ID3D11PixelShader> psColor;
-	int compiled = 0;
+	com_ptr<ID3D11SamplerState> samp;
+	com_ptr<ID3D11RasterizerState> rs;
+	com_ptr<ID3D11BlendState> bs;
+	int ready = 0;
 };
 
 static ScFxGpuCache& FxCache()
@@ -1284,256 +1311,61 @@ static void ScFxReleaseGpuCache()
 	ScFxGpuCache& c = FxCache();
 	c.texA = nullptr; c.texB = nullptr; c.staging = nullptr;
 	c.srvA = nullptr; c.srvB = nullptr; c.rtvA = nullptr; c.rtvB = nullptr;
-	c.cb = nullptr; c.psBlur = nullptr; c.psColor = nullptr;
-	c.w = 0; c.h = 0; c.compiled = 0;
+	c.cb = nullptr; c.vs = nullptr; c.psBlur = nullptr; c.psColor = nullptr;
+	c.samp = nullptr; c.rs = nullptr; c.bs = nullptr;
+	c.w = 0; c.h = 0; c.ready = 0;
 }
 
-static BOOL ScFxEnsureShaders(ScFxGpuCache& c)
+// 事前コンパイル済みバイトコード（実行時 D3DCompile しない）
+#include "ScFxShaders.inc"
+
+static BOOL ScFxEnsurePipeline(ScFxGpuCache& c)
 {
-	enum { kColorShaderVer = 3 };
-	static int s_colorVer = 0;
-	if (c.compiled && s_colorVer == kColorShaderVer)
-		return (c.psBlur && c.psColor) ? TRUE : FALSE;
-	c.psBlur = nullptr;
-	c.psColor = nullptr;
-	c.compiled = 1;
-	s_colorVer = kColorShaderVer;
-	static const char kBlur[] =
-		"Texture2D tex0 : register(t0); SamplerState samp0 : register(s0);\n"
-		"cbuffer CB : register(b0) { float2 texel; float2 dir; float radius; float3 pad; };\n"
-		"float4 PSMain(float4 p:SV_Position, float2 uv:TEXCOORD0):SV_Target{\n"
-		"  int R=(int)radius; if(R<1)R=1; if(R>8)R=8;\n"
-		"  float4 a=0; float wsum=0;\n"
-		"  [loop] for(int i=-R;i<=R;++i){\n"
-		"    float wt=1.0-(abs((float)i)/(float)(R+1));\n"
-		"    a+=tex0.SampleLevel(samp0,saturate(uv+dir*texel*(float)i),0)*wt; wsum+=wt;\n"
-		"  } return a/max(wsum,1e-3);\n"
-		"}\n";
-	static const char kColor[] =
-		"Texture2D tex0 : register(t0); SamplerState samp0 : register(s0);\n"
-		"cbuffer CB : register(b0) { float mode; float time; float2 texel; };\n"
-		"float hash21(float2 p){ return frac(sin(dot(p,float2(127.1,311.7)))*43758.5453); }\n"
-		"float4 PSMain(float4 p:SV_Position, float2 uv:TEXCOORD0):SV_Target{\n"
-		"  float2 u=uv;\n"
-		"  if(mode>6.5 && mode<7.5) u.x=1-u.x;\n"
-		"  else if(mode>18.5 && mode<19.5) u.y=1-u.y;\n"
-		"  else if(mode>7.5 && mode<8.5){\n"
-		"    u.x+=sin(u.y*40.0+time*4.0)*0.008; u.y+=cos(u.x*30.0+time*3.0)*0.006;\n"
-		"  } else if(mode>8.5 && mode<9.5){\n"
-		"    u.x+=sin(u.y*25.0+time*2.0)*0.012; u.y+=sin(u.x*20.0+time*1.5)*0.010;\n"
-		"  } else if(mode>17.5 && mode<18.5){\n"
-		"    float2 bs=float2(texel.x*14.0,texel.y*14.0); u=floor(u/bs)*bs+bs*0.5;\n"
-		"  } else if(mode>25.5 && mode<26.5){\n"
-		"    float2 d=u-0.5; float r=length(d); float nr=pow(saturate(r*1.35),0.72);\n"
-		"    if(r>1e-4) u=0.5+d*(nr/r); }\n"
-		"  else if(mode>48.5 && mode<49.5){\n"
-		"    float2 q=u; if(q.x>0.5)q.x=1-q.x; if(q.y>0.5)q.y=1-q.y; u=saturate(q*2.0); }\n"
-		"  else if(mode>54.5 && mode<55.5){\n"
-		"    float2 d=u-0.5; float a=atan2(d.y,d.x)+length(d)*3.2; float r=length(d);\n"
-		"    u=saturate(0.5+float2(cos(a),sin(a))*r); }\n"
-		"  else if(mode>55.5 && mode<56.5){\n"
-		"    float2 d=u-0.5; float r=length(d);\n"
-		"    u+=normalize(d+1e-5)*sin(r*40.0-time*6.0)*0.018; }\n"
-		"  else if(mode>56.5 && mode<57.5){\n"
-		"    float2 d=u-0.5; float a=atan2(d.y,d.x)+6.0*(0.7-length(d)); float r=length(d);\n"
-		"    u=saturate(0.5+float2(cos(a),sin(a))*r); }\n"
-		"  else if(mode>57.5 && mode<58.5){\n"
-		"    u.x+=sin(u.y*30.0+time*5.0)*0.01; u.y+=cos(u.x*28.0+time*4.0)*0.008; }\n"
-		"  else if(mode>58.5 && mode<59.5){\n"
-		"    float band=floor(u.y*18.0); u.x+=sin(band*12.0+time*8.0)*0.035*(fmod(band,2.0)*2.0-1.0); }\n"
-		"  else if(mode>59.5 && mode<60.5){\n"
-		"    float2 d=u-0.5; float r=length(d); float nr=r+(r*r)*0.55; if(r>1e-4)u=0.5+d*(nr/r); }\n"
-		"  else if(mode>60.5 && mode<61.5){\n"
-		"    float2 d=u-0.5; float a=atan2(d.y,d.x); float r=length(d);\n"
-		"    a=fmod(a+3.14159,1.0472)-0.5236; u=saturate(0.5+float2(cos(a),sin(a))*r); }\n"
-		"  else if(mode>66.5 && mode<67.5){\n"
-		"    float n=hash21(u*float2(90.0,70.0)+time)-0.5; u+=float2(n,n*0.7)*0.03; }\n"
-		"  else if(mode>67.5 && mode<68.5){\n"
-		"    if(fmod(floor(u.y/(texel.y*2.0+1e-6)),2.0)>0.5) u.x+=0.012; }\n"
-		"  float4 c=tex0.SampleLevel(samp0,saturate(u),0);\n"
-		"  if(mode>2.5 && mode<3.5){ float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=g; }\n"
-		"  else if(mode>3.5 && mode<4.5){\n"
-		"    float3x3 m=float3x3(0.393,0.769,0.189, 0.349,0.686,0.168, 0.272,0.534,0.131);\n"
-		"    c.rgb=saturate(mul(c.rgb,m)); }\n"
-		"  else if(mode>4.5 && mode<5.5){\n"
-		"    float2 d=u-0.5; float v=saturate(1-dot(d,d)*2.2); c.rgb*=max(v,0.15); }\n"
-		"  else if(mode>5.5 && mode<6.5){\n"
-		"    float4 up=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y)),0);\n"
-		"    float4 dn=tex0.SampleLevel(samp0,saturate(u+float2(0, texel.y)),0);\n"
-		"    float4 lf=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x,0)),0);\n"
-		"    float4 rt=tex0.SampleLevel(samp0,saturate(u+float2( texel.x,0)),0);\n"
-		"    c.rgb=saturate(c.rgb*5 - up.rgb - dn.rgb - lf.rgb - rt.rgb); }\n"
-		"  else if(mode>8.5 && mode<9.5){\n"
-		"    c.rgb=saturate(c.rgb*float3(0.75,1.05,1.25)+float3(-0.02,0.02,0.06)); }\n"
-		"  else if(mode>9.5 && mode<10.5){\n"
-		"    c.rgb=saturate(c.rgb*float3(1.25,0.95,0.70)+float3(0.06,0.02,-0.04));\n"
-		"    float2 d=u-0.5; float v=saturate(1-dot(d,d)*1.6); c.rgb*=max(v,0.35); }\n"
-		"  else if(mode>10.5 && mode<11.5){ c.rgb=saturate(c.rgb*float3(0.85,0.95,1.20)); }\n"
-		"  else if(mode>11.5 && mode<12.5){ c.rgb=saturate(c.rgb*float3(1.20,1.05,0.85)); }\n"
-		"  else if(mode>12.5 && mode<13.5){ c.rgb=floor(c.rgb*8.0+0.5)/8.0; }\n"
-		"  else if(mode>13.5 && mode<14.5){\n"
-		"    float s=frac(u.y/(texel.y*2.0+1e-6)); if(s<0.5) c.rgb*=0.72; }\n"
-		"  else if(mode>14.5 && mode<15.5){\n"
-		"    float4 up=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y)),0);\n"
-		"    float4 dn=tex0.SampleLevel(samp0,saturate(u+float2(0, texel.y)),0);\n"
-		"    float4 lf=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x,0)),0);\n"
-		"    float4 rt=tex0.SampleLevel(samp0,saturate(u+float2( texel.x,0)),0);\n"
-		"    float3 gx=rt.rgb-lf.rgb; float3 gy=dn.rgb-up.rgb;\n"
-		"    c.rgb=saturate(length(gx)+length(gy)); }\n"
-		"  else if(mode>15.5 && mode<16.5){ c.rgb=1.0-c.rgb; }\n"
-		"  else if(mode>16.5 && mode<17.5){\n"
-		"    c.rgb=lerp(c.rgb,1.0-c.rgb,step(0.5,c.rgb)); }\n"
-		"  else if(mode>19.5 && mode<20.5){\n"
-		"    float n=hash21(u*float2(640.0,360.0)+float2(time,time))-0.5; c.rgb=saturate(c.rgb+n*0.18); }\n"
-		"  else if(mode>20.5 && mode<21.5){\n"
-		"    float4 b=0; b+=tex0.SampleLevel(samp0,saturate(u+float2(texel.x*4,0)),0);\n"
-		"    b+=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x*4,0)),0);\n"
-		"    b+=tex0.SampleLevel(samp0,saturate(u+float2(0,texel.y*4)),0);\n"
-		"    b+=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y*4)),0); b*=0.25;\n"
-		"    c.rgb=saturate(c.rgb+max(b.rgb-0.55,0)*0.9); }\n"
-		"  else if(mode>21.5 && mode<22.5){\n"
-		"    float4 up=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y)),0);\n"
-		"    float4 dn=tex0.SampleLevel(samp0,saturate(u+float2(0, texel.y)),0);\n"
-		"    float4 lf=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x,0)),0);\n"
-		"    float4 rt=tex0.SampleLevel(samp0,saturate(u+float2( texel.x,0)),0);\n"
-		"    float e=saturate(length(rt.rgb-lf.rgb)+length(dn.rgb-up.rgb));\n"
-		"    c.rgb=saturate(c.rgb*0.35+float3(0.1,0.9,1.0)*e); }\n"
-		"  else if(mode>22.5 && mode<23.5){\n"
-		"    float g=dot(c.rgb,float3(0.114,0.587,0.299));\n"
-		"    float n=hash21(u+float2(time,time))-0.5; c.rgb=saturate(float3(0.05,g*1.25+n*0.1,0.08));\n"
-		"    float2 d=u-0.5; float v=saturate(1-dot(d,d)*2.4); c.rgb*=max(v,0.12); }\n"
-		"  else if(mode>23.5 && mode<24.5){\n"
-		"    float4 up=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y)),0);\n"
-		"    float4 dn=tex0.SampleLevel(samp0,saturate(u+float2(0, texel.y)),0);\n"
-		"    float4 lf=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x,0)),0);\n"
-		"    float4 rt=tex0.SampleLevel(samp0,saturate(u+float2( texel.x,0)),0);\n"
-		"    float e=saturate(length(rt.rgb-lf.rgb)+length(dn.rgb-up.rgb));\n"
-		"    c.rgb=floor(c.rgb*6.0+0.5)/6.0; c.rgb=saturate(c.rgb*(1.15)+e*0.55); }\n"
-		"  else if(mode>24.5 && mode<25.5){\n"
-		"    float3x3 m=float3x3(0.393,0.769,0.189, 0.349,0.686,0.168, 0.272,0.534,0.131);\n"
-		"    c.rgb=saturate(mul(c.rgb,m));\n"
-		"    float s=frac(u.y/(texel.y*2.0+1e-6)); if(s<0.5) c.rgb*=0.78;\n"
-		"    float2 d=u-0.5; float v=saturate(1-dot(d,d)*1.8); c.rgb*=max(v,0.25); }\n"
-		"  else if(mode>26.5 && mode<27.5){\n"
-		"    float ang=0.55; float ca=cos(ang), sa=sin(ang);\n"
-		"    float3 k=normalize(float3(1,1,1));\n"
-		"    c.rgb=saturate(c.rgb*ca+cross(k,c.rgb)*sa+k*dot(k,c.rgb)*(1-ca)); }\n"
-		"  else if(mode>27.5 && mode<28.5){ c.rgb=saturate((c.rgb-0.5)*1.45+0.5); }\n"
-		"  else if(mode>28.5 && mode<29.5){ c.rgb=saturate(c.rgb+0.12); }\n"
-		"  else if(mode>29.5 && mode<30.5){\n"
-		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(lerp(float3(g,g,g),c.rgb,1.6)); }\n"
-		"  else if(mode>30.5 && mode<31.5){\n"
-		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(lerp(c.rgb,float3(g,g,g),0.65)); }\n"
-		"  else if(mode>31.5 && mode<32.5){\n"
-		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=(g>0.5)?1:0; }\n"
-		"  else if(mode>32.5 && mode<33.5){ c.rgb=saturate(c.rgb*float3(1.35,0.85,0.80)+float3(0.05,0,0)); }\n"
-		"  else if(mode>33.5 && mode<34.5){ c.rgb=saturate(c.rgb*float3(0.80,1.30,0.85)+float3(0,0.04,0)); }\n"
-		"  else if(mode>34.5 && mode<35.5){ c.rgb=saturate(c.rgb*float3(0.80,0.90,1.35)+float3(0,0,0.05)); }\n"
-		"  else if(mode>35.5 && mode<36.5){ c.rgb=saturate(c.rgb*float3(0.70,1.15,1.25)); }\n"
-		"  else if(mode>36.5 && mode<37.5){ c.rgb=saturate(c.rgb*float3(1.25,0.75,1.20)); }\n"
-		"  else if(mode>37.5 && mode<38.5){ c.rgb=saturate(c.rgb*float3(1.25,1.20,0.70)); }\n"
-		"  else if(mode>38.5 && mode<39.5){\n"
-		"    float g=dot(c.rgb,float3(0.114,0.587,0.299));\n"
-		"    c.rgb=saturate(lerp(float3(0.05,0.35,0.40),float3(1.0,0.55,0.20),g)*0.55+c.rgb*0.55); }\n"
-		"  else if(mode>39.5 && mode<40.5){\n"
-		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(lerp(c.rgb,float3(0.92,0.90,0.88),0.45)+0.06); }\n"
-		"  else if(mode>40.5 && mode<41.5){\n"
-		"    float2 d=u-0.5; float v=1.2-dot(d,d)*1.8; c.rgb*=saturate(max(v,0.22)); }\n"
-		"  else if(mode>41.5 && mode<42.5){\n"
-		"    float s=frac(u.y/(texel.y*4.0+1e-6)); if(s<0.5) c.rgb*=0.62; }\n"
-		"  else if(mode>42.5 && mode<43.5){\n"
-		"    float s=frac(u.x/(texel.x*4.0+1e-6)); if(s<0.5) c.rgb*=0.62; }\n"
-		"  else if(mode>43.5 && mode<44.5){\n"
-		"    float r=tex0.SampleLevel(samp0,saturate(u+float2(texel.x*2,0)),0).r;\n"
-		"    float b=tex0.SampleLevel(samp0,saturate(u-float2(texel.x*2,0)),0).b;\n"
-		"    c.rgb=saturate(float3(r,c.g,b)); }\n"
-		"  else if(mode>44.5 && mode<45.5){\n"
-		"    float4 up=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y)),0);\n"
-		"    float4 lf=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x,0)),0);\n"
-		"    float e=dot(c.rgb-up.rgb,float3(0.3,0.3,0.3))+dot(c.rgb-lf.rgb,float3(0.3,0.3,0.3));\n"
-		"    c.rgb=saturate(0.5+e*2.2); }\n"
-		"  else if(mode>45.5 && mode<46.5){ c.rgb=saturate(c.rgb*0.92+0.10); }\n"
-		"  else if(mode>46.5 && mode<47.5){\n"
-		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(float3(g*0.75,g*0.9,g*1.25)); }\n"
-		"  else if(mode>47.5 && mode<48.5){\n"
-		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(float3(g*0.75,g*1.2,g*0.8)); }\n"
-		"  else if(mode>49.5 && mode<50.5){\n"
-		"    float g=dot(c.rgb,float3(0.114,0.587,0.299));\n"
-		"    c.rgb=saturate(lerp(float3(0.25,0.08,0.40),float3(1.0,0.75,0.35),g)*0.5+c.rgb*0.55); }\n"
-		"  else if(mode>51.5 && mode<52.5){\n"
-		"    float4 a=0; [unroll] for(int i=1;i<=6;++i){\n"
-		"      a+=tex0.SampleLevel(samp0,saturate(u+float2(texel.x*(float)i*2.5,0)),0);\n"
-		"      a+=tex0.SampleLevel(samp0,saturate(u-float2(texel.x*(float)i*2.5,0)),0); }\n"
-		"    c.rgb=saturate((c.rgb+a.rgb)/(1.0+12.0)); }\n"
-		"  else if(mode>52.5 && mode<53.5){\n"
-		"    float2 d=normalize(u-0.5+1e-5); float4 a=c;\n"
-		"    [unroll] for(int i=1;i<=7;++i) a+=tex0.SampleLevel(samp0,saturate(u-d*texel*float(i)*3.0),0);\n"
-		"    c.rgb=saturate(a.rgb/8.0); }\n"
-		"  else if(mode>53.5 && mode<54.5){\n"
-		"    float2 d=u-0.5; float4 a=c;\n"
-		"    [unroll] for(int i=1;i<=8;++i){ float t=1.0-(float)i/9.0; a+=tex0.SampleLevel(samp0,saturate(0.5+d*t),0); }\n"
-		"    c.rgb=saturate(a.rgb/9.0); }\n"
-		"  else if(mode>58.5 && mode<59.5){\n"
-		"    float r=tex0.SampleLevel(samp0,saturate(u+float2(0.02,0)),0).r;\n"
-		"    float b=tex0.SampleLevel(samp0,saturate(u-float2(0.02,0)),0).b;\n"
-		"    c.rgb=saturate(float3(r,c.g,b)); float n=hash21(u+time); if(n>0.97)c.rgb=1-c.rgb; }\n"
-		"  else if(mode>59.5 && mode<60.5){\n"
-		"    float s=frac(u.y/(texel.y*2.0+1e-6)); if(s<0.5)c.rgb*=0.7;\n"
-		"    float2 d=u-0.5; c.rgb*=saturate(1.05-dot(d,d)*1.3); }\n"
-		"  else if(mode>61.5 && mode<62.5){\n"
-		"    float4 a=0; a+=tex0.SampleLevel(samp0,saturate(u+float2(texel.x*3,0)),0);\n"
-		"    a+=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x*3,0)),0);\n"
-		"    a+=tex0.SampleLevel(samp0,saturate(u+float2(0,texel.y*3)),0);\n"
-		"    a+=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y*3)),0);\n"
-		"    a+=tex0.SampleLevel(samp0,saturate(u+float2(texel.x*2,texel.y*2)),0);\n"
-		"    a+=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x*2,-texel.y*2)),0);\n"
-		"    c.rgb=saturate((c.rgb*0.35+a.rgb*0.65/6.0)); c.rgb=floor(c.rgb*10.0+0.5)/10.0; }\n"
-		"  else if(mode>62.5 && mode<63.5){\n"
-		"    c.rgb=floor(c.rgb*6.0+0.5)/6.0; c.rgb=saturate(c.rgb*1.08+0.04); }\n"
-		"  else if(mode>63.5 && mode<64.5){\n"
-		"    float4 up=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y)),0);\n"
-		"    float4 dn=tex0.SampleLevel(samp0,saturate(u+float2(0, texel.y)),0);\n"
-		"    float4 lf=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x,0)),0);\n"
-		"    float4 rt=tex0.SampleLevel(samp0,saturate(u+float2( texel.x,0)),0);\n"
-		"    float e=saturate(length(rt.rgb-lf.rgb)+length(dn.rgb-up.rgb));\n"
-		"    float g=dot(c.rgb,float3(0.114,0.587,0.299)); c.rgb=saturate(1.0-(e*1.4)+(g*0.15)); }\n"
-		"  else if(mode>64.5 && mode<65.5){ c.rgb=saturate(c.rgb*0.85+0.12); }\n"
-		"  else if(mode>65.5 && mode<66.5){\n"
-		"    float2 d=normalize(u-0.5+1e-5); float4 a=0;\n"
-		"    [unroll] for(int i=1;i<=10;++i){\n"
-		"      float4 s=tex0.SampleLevel(samp0,saturate(u-d*texel*float(i)*4.0),0);\n"
-		"      a+=s*max(dot(s.rgb,float3(0.3,0.3,0.3))-0.55,0); }\n"
-		"    c.rgb=saturate(c.rgb+a.rgb*0.35); }\n"
-		"  else if(mode>68.5 && mode<69.5){\n"
-		"    float r=tex0.SampleLevel(samp0,saturate(u+float2(texel.x*5,0)),0).r;\n"
-		"    float b=tex0.SampleLevel(samp0,saturate(u-float2(texel.x*5,texel.y*2)),0).b;\n"
-		"    c.rgb=saturate(float3(r,c.g*0.95,b)); }\n"
-		"  else if(mode>69.5 && mode<70.5){\n"
-		"    float g=dot(c.rgb,float3(0.114,0.587,0.299));\n"
-		"    c.rgb=saturate(lerp(c.rgb,float3(0.78,0.82,0.88),0.45)+0.05);\n"
-		"    float2 d=u-0.5; c.rgb*=saturate(1.0-dot(d,d)*0.9); }\n"
-		"  else if(mode>70.5 && mode<71.5){\n"
-		"    float4 up=tex0.SampleLevel(samp0,saturate(u+float2(0,-texel.y)),0);\n"
-		"    float4 dn=tex0.SampleLevel(samp0,saturate(u+float2(0, texel.y)),0);\n"
-		"    float4 lf=tex0.SampleLevel(samp0,saturate(u+float2(-texel.x,0)),0);\n"
-		"    float4 rt=tex0.SampleLevel(samp0,saturate(u+float2( texel.x,0)),0);\n"
-		"    c.rgb=saturate(c.rgb*7 - up.rgb - dn.rgb - lf.rgb - rt.rgb); }\n"
-		"  return c;\n"
-		"}\n";
-	com_ptr<ID3DBlob> blob, err;
-	if (SUCCEEDED(D3DCompile(kBlur, sizeof(kBlur) - 1, nullptr, nullptr, nullptr,
-		"PSMain", "ps_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, blob.put(), err.put())) && blob)
-		g_d3d->CreatePixelShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, c.psBlur.put());
-	blob = nullptr; err = nullptr;
-	if (SUCCEEDED(D3DCompile(kColor, sizeof(kColor) - 1, nullptr, nullptr, nullptr,
-		"PSMain", "ps_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, blob.put(), err.put())) && blob)
-		g_d3d->CreatePixelShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, c.psColor.put());
-	return (c.psBlur && c.psColor) ? TRUE : FALSE;
+	enum { kPipeVer = 9 };
+	static int s_pipeVer = 0;
+	if (c.ready && s_pipeVer == kPipeVer && c.vs && c.psBlur && c.psColor && c.samp && c.rs && c.bs)
+		return TRUE;
+	c.vs = nullptr; c.psBlur = nullptr; c.psColor = nullptr;
+	c.samp = nullptr; c.rs = nullptr; c.bs = nullptr;
+	c.ready = 0;
+	c.w = 0; c.h = 0; // CB サイズ変更時にターゲット再生成
+	c.cb = nullptr;
+	if (!g_d3d) return FALSE;
+
+	if (FAILED(g_d3d->CreateVertexShader(kScFxVsBlob, sizeof(kScFxVsBlob), nullptr, c.vs.put())) || !c.vs)
+		return FALSE;
+	if (FAILED(g_d3d->CreatePixelShader(kScFxBlurPsBlob, sizeof(kScFxBlurPsBlob), nullptr, c.psBlur.put())) || !c.psBlur)
+		return FALSE;
+	if (FAILED(g_d3d->CreatePixelShader(kScFxColorPsBlob, sizeof(kScFxColorPsBlob), nullptr, c.psColor.put())) || !c.psColor)
+		return FALSE;
+
+	D3D11_SAMPLER_DESC sd = {};
+	sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+	sd.MaxLOD = D3D11_FLOAT32_MAX;
+	sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	if (FAILED(g_d3d->CreateSamplerState(&sd, c.samp.put())) || !c.samp)
+		return FALSE;
+
+	D3D11_RASTERIZER_DESC rd = {};
+	rd.FillMode = D3D11_FILL_SOLID;
+	rd.CullMode = D3D11_CULL_NONE;
+	if (FAILED(g_d3d->CreateRasterizerState(&rd, c.rs.put())) || !c.rs)
+		return FALSE;
+
+	D3D11_BLEND_DESC bd = {};
+	bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+	if (FAILED(g_d3d->CreateBlendState(&bd, c.bs.put())) || !c.bs)
+		return FALSE;
+
+	c.ready = 1;
+	s_pipeVer = kPipeVer;
+	return TRUE;
 }
 
 static BOOL ScFxEnsureTargets(ScFxGpuCache& c, int w, int h)
 {
-	if (c.w == w && c.h == h && c.texA && c.texB && c.staging && c.srvA && c.srvB && c.rtvA && c.rtvB && c.cb)
+	if (c.w == w && c.h == h && c.texA && c.texB && c.staging
+		&& c.srvA && c.srvB && c.rtvA && c.rtvB && c.cb)
 		return TRUE;
 	c.texA = nullptr; c.texB = nullptr; c.staging = nullptr;
 	c.srvA = nullptr; c.srvB = nullptr; c.rtvA = nullptr; c.rtvB = nullptr;
@@ -1555,11 +1387,11 @@ static BOOL ScFxEnsureTargets(ScFxGpuCache& c, int w, int h)
 	D3D11_TEXTURE2D_DESC sd = td;
 	sd.Usage = D3D11_USAGE_STAGING;
 	sd.BindFlags = 0;
-	sd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE | D3D11_CPU_ACCESS_READ;
+	sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
 	if (FAILED(g_d3d->CreateTexture2D(&sd, nullptr, c.staging.put()))) return FALSE;
 
 	D3D11_BUFFER_DESC bd = {};
-	bd.ByteWidth = 32;
+	bd.ByteWidth = 48; // mode/time/texel + sA + sB（または blur 用 12 float）
 	bd.Usage = D3D11_USAGE_DYNAMIC;
 	bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -1569,27 +1401,30 @@ static BOOL ScFxEnsureTargets(ScFxGpuCache& c, int w, int h)
 	return TRUE;
 }
 
-static void ScFxDrawPass(ScFxGpuCache& c, ID3D11ShaderResourceView* srv, ID3D11RenderTargetView* rtv,
-	ID3D11PixelShader* ps, const float* cbData /* 8 floats */)
+static BOOL ScFxDrawPass(ScFxGpuCache& c, ID3D11ShaderResourceView* srv, ID3D11RenderTargetView* rtv,
+	ID3D11PixelShader* ps, const float* cbData)
 {
+	if (!srv || !rtv || !ps || !c.cb || !c.vs || !c.samp || !c.rs || !c.bs) return FALSE;
 	D3D11_MAPPED_SUBRESOURCE mapped = {};
-	if (SUCCEEDED(g_ctx->Map(c.cb.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-		memcpy(mapped.pData, cbData, 32);
-		g_ctx->Unmap(c.cb.get(), 0);
-	}
+	if (FAILED(g_ctx->Map(c.cb.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)) || !mapped.pData)
+		return FALSE;
+	memcpy(mapped.pData, cbData, 48);
+	g_ctx->Unmap(c.cb.get(), 0);
+
 	ID3D11RenderTargetView* prtv = rtv;
 	g_ctx->OMSetRenderTargets(1, &prtv, nullptr);
 	D3D11_VIEWPORT vp = {};
-	vp.Width = (float)c.w; vp.Height = (float)c.h; vp.MaxDepth = 1.f;
+	vp.Width = (float)c.w; vp.Height = (float)c.h; vp.MinDepth = 0.f; vp.MaxDepth = 1.f;
 	g_ctx->RSSetViewports(1, &vp);
-	g_ctx->RSSetState(g_rs.get());
+	g_ctx->RSSetState(c.rs.get());
 	float bf[4] = {};
-	g_ctx->OMSetBlendState(g_bs.get(), bf, 0xffffffff);
-	g_ctx->VSSetShader(g_vs.get(), nullptr, 0);
+	g_ctx->OMSetBlendState(c.bs.get(), bf, 0xffffffff);
+	g_ctx->OMSetDepthStencilState(nullptr, 0);
+	g_ctx->VSSetShader(c.vs.get(), nullptr, 0);
 	g_ctx->PSSetShader(ps, nullptr, 0);
 	ID3D11ShaderResourceView* psrv = srv;
 	g_ctx->PSSetShaderResources(0, 1, &psrv);
-	ID3D11SamplerState* samp = g_sampLinear.get();
+	ID3D11SamplerState* samp = c.samp.get();
 	g_ctx->PSSetSamplers(0, 1, &samp);
 	ID3D11Buffer* pcb = c.cb.get();
 	g_ctx->PSSetConstantBuffers(0, 1, &pcb);
@@ -1600,59 +1435,77 @@ static void ScFxDrawPass(ScFxGpuCache& c, ID3D11ShaderResourceView* srv, ID3D11R
 	g_ctx->PSSetShaderResources(0, 1, &nullSrv);
 	ID3D11RenderTargetView* nullRtv = nullptr;
 	g_ctx->OMSetRenderTargets(1, &nullRtv, nullptr);
+	return TRUE;
+}
+
+static BOOL ScFxIsSeparableBlur(int fx)
+{
+	// ぼかしのみ分離パス。油絵/水彩/ドリームは色シェーダ側で別表現。
+	return (fx == SC_FX_BLUR_SOFT || fx == SC_FX_BLUR_STRONG || fx == SC_FX_BLUR_MEGA) ? TRUE : FALSE;
+}
+
+static float ScFxS01(BYTE v)
+{
+	if (v > SC_FX_STR_MAX) v = SC_FX_STR_MAX;
+	return (float)v * 0.25f; // 0..8 → 0..2、既定4→1.0
+}
+
+static void ScFxFillStr4(float out4[4], const BYTE* s, int base)
+{
+	out4[0] = ScFxS01(s ? s[base + 0] : (BYTE)SC_FX_STR_DEF);
+	out4[1] = ScFxS01(s ? s[base + 1] : (BYTE)SC_FX_STR_DEF);
+	out4[2] = ScFxS01(s ? s[base + 2] : (BYTE)SC_FX_STR_DEF);
+	out4[3] = ScFxS01(s ? s[base + 3] : (BYTE)SC_FX_STR_DEF);
 }
 
 static BOOL ScFxGpuApplyChainLocked(BYTE* bgra, int w, int h, int stride,
-	const int* effects, int n, float timeSec)
+	const int* effects, int n, float timeSec, const BYTE str[][SC_FX_STR_N])
 {
 	ScFxGpuCache& c = FxCache();
-	if (!ScFxEnsureShaders(c) || !ScFxEnsureTargets(c, w, h))
+	if (!g_d3d || !g_ctx) return FALSE;
+	if (!ScFxEnsurePipeline(c) || !ScFxEnsureTargets(c, w, h))
 		return FALSE;
 
-	D3D11_MAPPED_SUBRESOURCE mapped = {};
-	if (FAILED(g_ctx->Map(c.staging.get(), 0, D3D11_MAP_WRITE, 0, &mapped)))
-		return FALSE;
-	for (int y = 0; y < h; ++y)
-		memcpy((BYTE*)mapped.pData + (size_t)y * mapped.RowPitch, bgra + (size_t)y * (size_t)stride, (size_t)w * 4);
-	g_ctx->Unmap(c.staging.get(), 0);
-	g_ctx->CopyResource(c.texA.get(), c.staging.get());
+	g_ctx->UpdateSubresource(c.texA.get(), 0, nullptr, bgra, (UINT)stride, 0);
 
 	BOOL srcIsA = TRUE;
 	for (int i = 0; i < n; ++i) {
 		const int fx = effects[i];
 		if (fx <= SC_FX_NONE || fx >= SC_FX_COUNT) continue;
+		const BYTE* slotStr = str ? str[i] : nullptr;
+		const float s1 = ScFxS01(slotStr ? slotStr[0] : (BYTE)SC_FX_STR_DEF);
 
 		ID3D11ShaderResourceView* srv = srcIsA ? c.srvA.get() : c.srvB.get();
 		ID3D11RenderTargetView* rtv = srcIsA ? c.rtvB.get() : c.rtvA.get();
 
-		if (fx == SC_FX_BLUR_SOFT || fx == SC_FX_BLUR_STRONG || fx == SC_FX_BLUR_MEGA
-			|| fx == SC_FX_DREAM || fx == SC_FX_WATERCOLOR) {
-			float radius = 2.f;
-			if (fx == SC_FX_BLUR_STRONG || fx == SC_FX_DREAM) radius = 4.f;
-			if (fx == SC_FX_BLUR_MEGA) radius = 6.f;
-			float cbH[8] = { 1.f / (float)w, 1.f / (float)h, 1.f, 0.f, radius, 0, 0, 0 };
-			float cbV[8] = { 1.f / (float)w, 1.f / (float)h, 0.f, 1.f, radius, 0, 0, 0 };
-			ScFxDrawPass(c, srv, rtv, c.psBlur.get(), cbH);
+		if (ScFxIsSeparableBlur(fx)) {
+			float radius = 3.f;
+			if (fx == SC_FX_BLUR_STRONG) radius = 5.f;
+			if (fx == SC_FX_BLUR_MEGA) radius = 8.f;
+			// blur CB: texel.xy, dir.xy, radius, strength, pad.xy
+			float cbH[12] = { 1.f / (float)w, 1.f / (float)h, 1.f, 0.f, radius, s1, 0, 0, 0, 0, 0, 0 };
+			float cbV[12] = { 1.f / (float)w, 1.f / (float)h, 0.f, 1.f, radius, s1, 0, 0, 0, 0, 0, 0 };
+			if (!ScFxDrawPass(c, srv, rtv, c.psBlur.get(), cbH)) return FALSE;
 			ID3D11ShaderResourceView* srv2 = srcIsA ? c.srvB.get() : c.srvA.get();
 			ID3D11RenderTargetView* rtv2 = srcIsA ? c.rtvA.get() : c.rtvB.get();
-			ScFxDrawPass(c, srv2, rtv2, c.psBlur.get(), cbV);
-			if (fx == SC_FX_DREAM || fx == SC_FX_WATERCOLOR) {
-				ID3D11ShaderResourceView* srv3 = srcIsA ? c.srvA.get() : c.srvB.get();
-				ID3D11RenderTargetView* rtv3 = srcIsA ? c.rtvB.get() : c.rtvA.get();
-				float cb[8] = { (float)fx, timeSec, 1.f / (float)w, 1.f / (float)h, 0, 0, 0, 0 };
-				ScFxDrawPass(c, srv3, rtv3, c.psColor.get(), cb);
-				srcIsA = !srcIsA;
-			}
+			if (!ScFxDrawPass(c, srv2, rtv2, c.psBlur.get(), cbV)) return FALSE;
 			continue;
 		}
 
-		float cb[8] = { (float)fx, timeSec, 1.f / (float)w, 1.f / (float)h, 0, 0, 0, 0 };
-		ScFxDrawPass(c, srv, rtv, c.psColor.get(), cb);
+		float cb[12] = {};
+		cb[0] = (float)fx;
+		cb[1] = timeSec;
+		cb[2] = 1.f / (float)w;
+		cb[3] = 1.f / (float)h;
+		ScFxFillStr4(cb + 4, slotStr, 0);
+		ScFxFillStr4(cb + 8, slotStr, 4);
+		if (!ScFxDrawPass(c, srv, rtv, c.psColor.get(), cb)) return FALSE;
 		srcIsA = !srcIsA;
 	}
 
 	ID3D11Texture2D* finalTex = srcIsA ? c.texA.get() : c.texB.get();
 	g_ctx->CopyResource(c.staging.get(), finalTex);
+	D3D11_MAPPED_SUBRESOURCE mapped = {};
 	if (FAILED(g_ctx->Map(c.staging.get(), 0, D3D11_MAP_READ, 0, &mapped)))
 		return FALSE;
 	for (int y = 0; y < h; ++y)
@@ -1662,7 +1515,8 @@ static BOOL ScFxGpuApplyChainLocked(BYTE* bgra, int w, int h, int stride,
 }
 
 BOOL ScGpuApplyEffectChain(BYTE* bgra, int w, int h, int stride,
-	const int* effects, int n, float timeSec)
+	const int* effects, int n, float timeSec,
+	const BYTE str[][SC_FX_STR_N])
 {
 	if (!bgra || !effects || w < 2 || h < 2 || stride < w * 4 || n <= 0)
 		return FALSE;
@@ -1670,29 +1524,36 @@ BOOL ScGpuApplyEffectChain(BYTE* bgra, int w, int h, int stride,
 	w &= ~1; h &= ~1;
 
 	int cleaned[SC_FX_CHAIN_MAX];
+	BYTE cleanedStr[SC_FX_CHAIN_MAX][SC_FX_STR_N];
 	int cn = 0;
 	for (int i = 0; i < n && cn < SC_FX_CHAIN_MAX; ++i) {
 		const int fx = effects[i];
-		if (fx > SC_FX_NONE && fx < SC_FX_COUNT)
-			cleaned[cn++] = fx;
+		if (fx > SC_FX_NONE && fx < SC_FX_COUNT) {
+			cleaned[cn] = fx;
+			for (int s = 0; s < SC_FX_STR_N; ++s) {
+				BYTE v = str ? str[i][s] : (BYTE)SC_FX_STR_DEF;
+				if (v > SC_FX_STR_MAX) v = SC_FX_STR_MAX;
+				cleanedStr[cn][s] = v;
+			}
+			cn++;
+		}
 	}
 	if (cn <= 0) return TRUE;
 
-	if (EnsureD3D() && g_d3d && g_ctx && g_vs) {
-		std::lock_guard<std::mutex> ctxLock(g_ctxMtx);
-		if (ScFxGpuApplyChainLocked(bgra, w, h, stride, cleaned, cn, timeSec))
-			return TRUE;
-	}
-	for (int i = 0; i < cn; ++i)
-		ScFxCpuOne(bgra, w, h, stride, cleaned[i], timeSec);
-	return TRUE;
+	if (!EnsureD3D() || !g_d3d || !g_ctx)
+		return FALSE;
+	std::lock_guard<std::mutex> ctxLock(g_ctxMtx);
+	return ScFxGpuApplyChainLocked(bgra, w, h, stride, cleaned, cn, timeSec, cleanedStr);
 }
 
 BOOL ScGpuApplyEffect(BYTE* bgra, int w, int h, int stride, int effect)
 {
 	if (effect <= SC_FX_NONE || effect >= SC_FX_COUNT) return TRUE;
 	const int one = effect;
-	return ScGpuApplyEffectChain(bgra, w, h, stride, &one, 1, 0.f);
+	BYTE defStr[1][SC_FX_STR_N];
+	for (int s = 0; s < SC_FX_STR_N; ++s)
+		defStr[0][s] = (BYTE)SC_FX_STR_DEF;
+	return ScGpuApplyEffectChain(bgra, w, h, stride, &one, 1, 0.f, defStr);
 }
 
 void ScWgcShutdown(void)

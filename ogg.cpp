@@ -419,6 +419,16 @@ BOOL COggApp::InitInstance()
 	savedata.cap_fx5 = 0;
 	savedata.cap_fx6 = 0;
 	savedata.cap_fx7 = 0;
+	memset(savedata.cap_fx_str, 4, sizeof(savedata.cap_fx_str)); // SC_FX_STR_DEF
+	memset(savedata.cap_fx_pre_name, 0, sizeof(savedata.cap_fx_pre_name));
+	memset(savedata.cap_fx_pre_n, 0, sizeof(savedata.cap_fx_pre_n));
+	memset(savedata.cap_fx_pre_fx, 0, sizeof(savedata.cap_fx_pre_fx));
+	memset(savedata.cap_fx_pre_str, 4, sizeof(savedata.cap_fx_pre_str)); // SC_FX_STR_DEF
+	savedata.cap_fx_pre_sel = 0;
+	savedata.popupMenuFace[0] = 0;
+	savedata.popupMenuPoint = 9;
+	savedata.popupMenuBold = 0;
+	savedata.popupMenuItalic = 0;
 	savedata.pianorollviewmode = 0;
 	savedata.pianorollkeyrange = 108;
 	savedata.pianorollnotename = 1;
@@ -1183,6 +1193,51 @@ BOOL COggApp::InitInstance()
 			if (savedata.mpBpmCand[i] < 0 || savedata.mpBpmCand[i] > 300)
 				savedata.mpBpmCand[i] = 0;
 		}
+	}
+	if (datFileSize < (int)(offsetof(save, cap_fx_str) + sizeof(savedata.cap_fx_str))) {
+		memset(savedata.cap_fx_str, 4, sizeof(savedata.cap_fx_str)); // SC_FX_STR_DEF
+	} else {
+		for (int i = 0; i < 8; ++i) {
+			for (int s = 0; s < 8; ++s) {
+				if (savedata.cap_fx_str[i][s] > 8)
+					savedata.cap_fx_str[i][s] = 4;
+			}
+		}
+	}
+	if (datFileSize < (int)(offsetof(save, cap_fx_pre_name) + sizeof(savedata.cap_fx_pre_name))) {
+		memset(savedata.cap_fx_pre_name, 0, sizeof(savedata.cap_fx_pre_name));
+		memset(savedata.cap_fx_pre_n, 0, sizeof(savedata.cap_fx_pre_n));
+		memset(savedata.cap_fx_pre_fx, 0, sizeof(savedata.cap_fx_pre_fx));
+		memset(savedata.cap_fx_pre_str, 4, sizeof(savedata.cap_fx_pre_str));
+		savedata.cap_fx_pre_sel = 0;
+	} else {
+		for (int p = 0; p < 16; ++p) {
+			savedata.cap_fx_pre_name[p][_countof(savedata.cap_fx_pre_name[p]) - 1] = 0;
+			if (savedata.cap_fx_pre_n[p] < 0 || savedata.cap_fx_pre_n[p] > 8)
+				savedata.cap_fx_pre_n[p] = 0;
+			for (int i = 0; i < 8; ++i) {
+				if (savedata.cap_fx_pre_fx[p][i] < 0 || savedata.cap_fx_pre_fx[p][i] >= 72) // SC_FX_COUNT
+					savedata.cap_fx_pre_fx[p][i] = 0;
+				for (int s = 0; s < 8; ++s) {
+					if (savedata.cap_fx_pre_str[p][i][s] > 8)
+						savedata.cap_fx_pre_str[p][i][s] = 4;
+				}
+			}
+		}
+		if (savedata.cap_fx_pre_sel < 0 || savedata.cap_fx_pre_sel > 15)
+			savedata.cap_fx_pre_sel = 0;
+	}
+	if (datFileSize < (int)(offsetof(save, popupMenuFace) + sizeof(savedata.popupMenuFace))) {
+		savedata.popupMenuFace[0] = 0;
+		savedata.popupMenuPoint = 9;
+		savedata.popupMenuBold = 0;
+		savedata.popupMenuItalic = 0;
+	} else {
+		savedata.popupMenuFace[_countof(savedata.popupMenuFace) - 1] = 0;
+		if (savedata.popupMenuPoint < 8 || savedata.popupMenuPoint > 24)
+			savedata.popupMenuPoint = 9;
+		savedata.popupMenuBold = savedata.popupMenuBold ? 1 : 0;
+		savedata.popupMenuItalic = savedata.popupMenuItalic ? 1 : 0;
 	}
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {

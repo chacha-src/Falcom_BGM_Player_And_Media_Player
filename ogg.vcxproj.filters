@@ -399,6 +399,9 @@
     <ClCompile Include="CCustomControl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CCustomPopupMenu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="CEqualizer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -977,6 +980,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CCustomControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CCustomPopupMenu.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CEqualizer.h">

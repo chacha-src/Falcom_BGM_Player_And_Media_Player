@@ -537,6 +537,22 @@ struct save{
 	int mpKeyEqSuggest;      // 1=キー検出からEQプリセット自動提案を許可
 	int mpJacketRemOverlay;  // 1=ミニジャケに残時間リング+タイム表示
 	int mpBpmCand[3];        // 計測時の候補(主+4:3/3:2等)。0=空き
+
+	// --- 画面キャプチャ FX 強度 S1..S8（スロットごと。0..8、既定4。末尾追記）---
+	BYTE cap_fx_str[8][8];
+
+	// --- 画面キャプチャ 配線プリセット16（名前自由。末尾追記）---
+	TCHAR cap_fx_pre_name[16][48];
+	int cap_fx_pre_n[16];
+	int cap_fx_pre_fx[16][8];
+	BYTE cap_fx_pre_str[16][8][8];
+	int cap_fx_pre_sel; // 0..15
+
+	// --- コンテキストメニュー(CCustomPopupMenu)用フォント。末尾追記 ---
+	TCHAR popupMenuFace[32]; // LOGFONT face（空=DEFAULT_GUI）
+	int popupMenuPoint;      // 8..24（既定 9）
+	int popupMenuBold;       // 0/1
+	int popupMenuItalic;     // 0/1
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

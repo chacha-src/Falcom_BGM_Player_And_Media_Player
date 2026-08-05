@@ -7,6 +7,7 @@
 #include "CPianoRoll.h"
 #include "DeviceRecordDlg.h"
 #include "ScreenCaptureDlg.h"
+#include "CCustomPopupMenu.h"
 #include "PlayList.h"
 #include "AudioUpscaler.h"
 #include "SongParams.h"
@@ -1888,11 +1889,98 @@ void MpOnVideoReplaceAudio(CMediaPlayerDlg* mpDlg)
 
 void MpOnGameCapturePreset(CMediaPlayerDlg* mpDlg)
 {
+	if (!mpDlg || !::IsWindow(mpDlg->GetSafeHwnd()))
+		return;
+
+	CPoint pt;
+	::GetCursorPos(&pt);
+
+	enum {
+		ID_GCP_720_60 = 42001,
+		ID_GCP_1080_60 = 42002,
+		ID_GCP_1080_120 = 42003,
+		ID_GCP_4K_60 = 42004,
+		ID_GCP_PLUS_WAV = 42005
+	};
+
+	CCustomPopupMenu menu;
+	menu.SetAeroMode(FALSE);
+	menu.AddCommand(ID_GCP_720_60,
+		LL14(L"720p / 60fps（軽量）", L"720p / 60fps (light)", L"720p / 60fps (leger)", L"720p / 60fps (leggero)", L"720p / 60fps (ligero)",
+			L"720p / 60fps (가벼움)", L"720p / 60fps（轻量）", L"720p / 60fps (خفيف)", L"720p / 60fps (лёгкий)", L"720p / 60fps (leicht)",
+			L"720p / 60fps (leve)", L"720p / 60fps (licht)", L"720p / 60fps (lekki)", L"720p / 60fps (hafif)"),
+		LL14(L"負荷を抑えたゲーム録画。まずはこれで試せます。", L"Lower-load game capture. Good starting point.", L"Capture jeu legere. Bon point de depart.", L"Cattura gioco leggera. Buon inizio.", L"Captura ligera. Buen punto de partida.",
+			L"부하를 낮춘 게임 녹화. 먼저 이것부터.", L"低负载游戏录制。可先试这个。", L"تسجيل لعبة خفيف. نقطة بداية جيدة.", L"Лёгкая запись игры. Хороший старт.", L"Leichte Game-Aufnahme. Guter Start.",
+			L"Captura leve. Bom ponto de partida.", L"Lichte game-opname. Goed startpunt.", L"Lekkie nagrywanie gry. Dobry start.", L"Hafif oyun kaydi. Iyi baslangic."));
+	menu.AddCommand(ID_GCP_1080_60,
+		LL14(L"1080p / 60fps（推奨・高品位）", L"1080p / 60fps (recommended)", L"1080p / 60fps (recommande)", L"1080p / 60fps (consigliato)", L"1080p / 60fps (recomendado)",
+			L"1080p / 60fps (권장·고화질)", L"1080p / 60fps（推荐·高画质）", L"1080p / 60fps (موصى به)", L"1080p / 60fps (рекомендуется)", L"1080p / 60fps (empfohlen)",
+			L"1080p / 60fps (recomendado)", L"1080p / 60fps (aanbevolen)", L"1080p / 60fps (zalecane)", L"1080p / 60fps (onerilen)"),
+		LL14(L"フルHD・60fps・高ビットレート。多くのゲーム向けの標準高品位。", L"Full HD 60fps high bitrate. Standard high quality for most games.", L"Plein HD 60fps debit eleve. Qualite standard pour la plupart des jeux.", L"Full HD 60fps bitrate alto. Qualita standard per molti giochi.", L"Full HD 60fps alto bitrate. Calidad estandar para la mayoria.",
+			L"풀HD 60fps 고비트레이트. 대부분 게임에 맞는 표준 고화질.", L"全高清60fps高码率。多数游戏的标准高画质。", L"Full HD 60 إطار بمعدل بت عالٍ. جودة قياسية لمعظم الألعاب.", L"Full HD 60fps высокий битрейт. Стандарт для большинства игр.", L"Full HD 60fps hohe Bitrate. Standard-Qualität für die meisten Spiele.",
+			L"Full HD 60fps alto bitrate. Qualidade padrao para a maioria.", L"Full HD 60fps hoge bitrate. Standaardkwaliteit voor de meeste games.", L"Full HD 60fps wysoki bitrate. Standard dla wiekszosci gier.", L"Full HD 60fps yuksek bitrate. Cogu oyun icin standart kalite."));
+	menu.AddCommand(ID_GCP_1080_120,
+		LL14(L"1080p / 120fps（滑らか・高負荷）", L"1080p / 120fps (smooth·heavy)", L"1080p / 120fps (fluide·lourd)", L"1080p / 120fps (fluido·pesante)", L"1080p / 120fps (suave·pesado)",
+			L"1080p / 120fps (부드러움·고부하)", L"1080p / 120fps（流畅·高负载）", L"1080p / 120fps (سلس·ثقيل)", L"1080p / 120fps (плавно·тяжело)", L"1080p / 120fps (flüssig·schwer)",
+			L"1080p / 120fps (suave·pesado)", L"1080p / 120fps (soepel·zwaar)", L"1080p / 120fps (plynnie·ciezkie)", L"1080p / 120fps (akici·agir)"),
+		LL14(L"高リフレッシュ向け。PC性能が必要です。", L"For high-refresh games. Needs a strong PC.", L"Pour ecrans haute frequence. PC puissant requis.", L"Per alti Hz. Serve un PC potente.", L"Para alto refresco. Requiere PC potente.",
+			L"고주사율용. 강한 PC 필요.", L"适合高刷新。需要较强电脑。", L"لشاشات عالية التردد. يحتاج جهاز قوي.", L"Для высокого Гц. Нужен мощный ПК.", L"Für hohe Hz. Starker PC nötig.",
+			L"Para alto refresh. Precisa de PC forte.", L"Voor hoge Hz. Sterke PC nodig.", L"Dla wysokiego Hz. Potrzebny mocny PC.", L"Yuksek Hz icin. Guclu PC gerekir."));
+	menu.AddCommand(ID_GCP_4K_60,
+		LL14(L"4K / 60fps（最高画質）", L"4K / 60fps (max quality)", L"4K / 60fps (qualite max)", L"4K / 60fps (qualita max)", L"4K / 60fps (max calidad)",
+			L"4K / 60fps (최고화질)", L"4K / 60fps（最高画质）", L"4K / 60fps (أقصى جودة)", L"4K / 60fps (макс. качество)", L"4K / 60fps (max. Qualität)",
+			L"4K / 60fps (qualidade max)", L"4K / 60fps (max kwaliteit)", L"4K / 60fps (max jakosc)", L"4K / 60fps (en yuksek kalite)"),
+		LL14(L"3840×2160。容量と負荷が最大。強力なGPU向け。", L"3840×2160. Largest size/load. For strong GPUs.", L"3840×2160. Taille/charge max. GPU puissant.", L"3840×2160. Dimensione/carico max. GPU potente.", L"3840×2160. Tamano/carga max. GPU potente.",
+			L"3840×2160. 용량·부하 최대. 강한 GPU용.", L"3840×2160。体积与负载最大。需强GPU。", L"3840×2160. أكبر حجم/حمل. لوحدة GPU قوية.", L"3840×2160. Макс. размер/нагрузка. Для мощных GPU.", L"3840×2160. Max. Größe/Last. Für starke GPUs.",
+			L"3840×2160. Tamanho/carga max. Para GPU forte.", L"3840×2160. Max. formaat/belasting. Voor sterke GPU.", L"3840×2160. Max. rozmiar/obciazenie. Dla mocnego GPU.", L"3840×2160. En buyuk boyut/yuk. Guclu GPU icin."));
+	menu.AddSeparator();
+	menu.AddCommand(ID_GCP_PLUS_WAV,
+		LL14(L"1080p60 + 高音質WAV録音も開く", L"1080p60 + open HQ WAV recorder", L"1080p60 + ouvrir enregistreur WAV HQ", L"1080p60 + apri registratore WAV HQ", L"1080p60 + abrir grabador WAV HQ",
+			L"1080p60 + 고음질 WAV 녹음도 열기", L"1080p60 + 同时打开高音质WAV录音", L"1080p60 + فتح مسجل WAV عالي الجودة", L"1080p60 + открыть WAV-запись HQ", L"1080p60 + WAV-Rekorder HQ öffnen",
+			L"1080p60 + abrir gravador WAV HQ", L"1080p60 + WAV-recorder HQ openen", L"1080p60 + otworz rejestrator WAV HQ", L"1080p60 + yuksek kaliteli WAV ac"),
+		LL14(L"画面キャプチャに加え、システム音を別途WAVで残します。", L"Screen capture plus a separate WAV of system audio.", L"Capture ecran plus WAV separe du son systeme.", L"Cattura piu WAV separato dell'audio di sistema.", L"Captura mas WAV aparte del audio del sistema.",
+			L"화면 캡처와 함께 시스템 음을 별도 WAV로 남김.", L"画面捕获并另存系统声为WAV。", L"التقاط الشاشة مع WAV منفصل لصوت النظام.", L"Захват экрана плюс отдельный WAV системного звука.", L"Bildschirmaufnahme plus separates System-WAV.",
+			L"Captura mais WAV separado do audio do sistema.", L"Schermopname plus apart systeemaudio-WAV.", L"Nagranie ekranu plus osobny WAV dzwieku systemu.", L"Ekran yakalama artı ayri sistem sesi WAV."));
+
+	const UINT cmd = menu.Track(pt, mpDlg);
+	if (cmd == 0)
+		return;
+
+	int canvas = 2; // 1080
+	int fps = 60;
+	BOOL openWav = FALSE;
+	if (cmd == ID_GCP_720_60) { canvas = 1; fps = 60; }
+	else if (cmd == ID_GCP_1080_60) { canvas = 2; fps = 60; }
+	else if (cmd == ID_GCP_1080_120) { canvas = 2; fps = 120; }
+	else if (cmd == ID_GCP_4K_60) { canvas = 4; fps = 60; }
+	else if (cmd == ID_GCP_PLUS_WAV) { canvas = 2; fps = 60; openWav = TRUE; }
+	else
+		return;
+
 	savedata.cap_include_mp = 0;
 	savedata.cap_with_audio = 1;
+	savedata.cap_with_mic = 0;
+	savedata.cap_fps = fps;
+	savedata.cap_canvas_preset = canvas;
+	if (canvas == 1) { savedata.cap_canvas_w = 1280; savedata.cap_canvas_h = 720; }
+	else if (canvas == 2) { savedata.cap_canvas_w = 1920; savedata.cap_canvas_h = 1080; }
+	else if (canvas == 4) { savedata.cap_canvas_w = 3840; savedata.cap_canvas_h = 2160; }
+	else { savedata.cap_canvas_w = 1920; savedata.cap_canvas_h = 1080; }
+	// ゲーム映像は素のまま（配線FXオフ）
+	savedata.cap_fx_n = 0;
+	savedata.cap_fx0 = savedata.cap_fx1 = savedata.cap_fx2 = savedata.cap_fx3 = 0;
+	savedata.cap_fx4 = savedata.cap_fx5 = savedata.cap_fx6 = savedata.cap_fx7 = 0;
+	savedata.cap_effect = 0;
+	for (int i = 0; i < 8; ++i)
+		for (int s = 0; s < 8; ++s)
+			savedata.cap_fx_str[i][s] = 4; // 中立強度（SC_FX_STR_DEF 相当）
 	MpPersistSavedataQuick();
+
 	OpenScreenCaptureModeless(mpDlg);
-	OpenDeviceRecordModeless(mpDlg);
+	ScreenCaptureApplySavedataToUi(TRUE);
+
+	if (openWav)
+		OpenDeviceRecordModeless(mpDlg);
 }
 
 void MpOnMidiInToggle(CMediaPlayerDlg* mpDlg)
@@ -2451,13 +2539,33 @@ protected:
 			CRect r; GetWindowRect(&r);
 			point.x = r.left + 40; point.y = r.top + 40;
 		}
-		CMenu menu;
-		menu.CreatePopupMenu();
-		menu.AppendMenu(MF_STRING, 1,
+		const BOOL topMost = (GetExStyle() & WS_EX_TOPMOST) != 0;
+		const BOOL maximized = IsZoomed();
+		CCustomPopupMenu menu;
+		menu.SetAeroMode(FALSE);
+		menu.AddCheck(2,
+			LL14(L"最前面", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano",
+				L"Siempre visible", L"항상 위", L"置顶", L"دائماً في المقدمة", L"Поверх всех", L"Immer im Vordergrund",
+				L"Sempre no topo", L"Altijd boven", L"Zawsze na wierzchu", L"Her zaman ustte"),
+			topMost);
+		menu.AddCheck(3,
+			LL14(L"最大化", L"Maximize", L"Agrandir", L"Ingrandisci", L"Maximizar", L"최대화", L"最大化", L"تكبير",
+				L"Развернуть", L"Maximieren", L"Maximizar", L"Maximaliseren", L"Maksymalizuj", L"Buyut"),
+			maximized);
+		menu.AddSeparator();
+		menu.AddCommand(1,
 			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
-		const int cmd = (int)menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RETURNCMD | TPM_RIGHTBUTTON, point.x, point.y, this);
-		if (cmd == 1)
+		const UINT cmd = menu.Track(point, this);
+		if (cmd == 1) {
 			DestroyWindow();
+		}
+		else if (cmd == 2) {
+			SetWindowPos(topMost ? &wndNoTopMost : &wndTopMost, 0, 0, 0, 0,
+				SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		}
+		else if (cmd == 3) {
+			ShowWindow(maximized ? SW_RESTORE : SW_SHOWMAXIMIZED);
+		}
 	}
 	afx_msg void OnRButtonUp(UINT, CPoint point)
 	{

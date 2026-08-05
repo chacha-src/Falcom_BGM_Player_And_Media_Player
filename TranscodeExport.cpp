@@ -1789,7 +1789,15 @@ void CTranscodeExport::OnBnClickedMix()
 
 void CTranscodeExport::OnCbnSelchangeMixN()
 {
-	// 同時曲数のみ保存。音量リストは曲数Nのまま。
+	// 同時曲数を保存。音量リストは選択曲数ぶん（N とは独立）のまま再構築。
+	int mixN = 2;
+	if (m_mixN.GetSafeHwnd() && m_mixN.GetCount() > 0) {
+		mixN = m_mixN.GetCurSel() + 2;
+		if (mixN < 2) mixN = 2;
+	}
+	savedata.wav_export_mix_n = mixN;
+	if (IsMixMode())
+		RebuildMixVolList();
 }
 
 int CTranscodeExport::CurrentFormat() const

@@ -2211,25 +2211,24 @@ void CPianoRoll::PushDisplayFrames()
 
 void CPianoRoll::SetRollSpeedPct(int pct)
 {
-    int nearest = 100;
-    int best = 100000;
-    for (int i = 0; i < ROLL_SPEED_COUNT; ++i) {
-        const int d = abs(kRollSpeedPct[i] - pct);
-        if (d < best) { best = d; nearest = kRollSpeedPct[i]; }
-    }
-    if (m_rollSpeedPct == nearest) return;
-    m_rollSpeedPct = nearest;
-    savedata.pianorollscrollspeed = nearest;
+    if (pct < 25) pct = 25;
+    if (pct > 200) pct = 200;
+    if (m_rollSpeedPct == pct) return;
+    m_rollSpeedPct = pct;
+    savedata.pianorollscrollspeed = pct;
     m_rollSpeedCredit = 0;
     m_lastRollPushTick = 0;
 }
 
 int CPianoRoll::RollSpeedIndex() const
 {
+    int nearest = 3;
+    int best = 100000;
     for (int i = 0; i < ROLL_SPEED_COUNT; ++i) {
-        if (kRollSpeedPct[i] == m_rollSpeedPct) return i;
+        const int d = abs(kRollSpeedPct[i] - m_rollSpeedPct);
+        if (d < best) { best = d; nearest = i; }
     }
-    return 3; // 100%
+    return nearest;
 }
 
 void CPianoRoll::OnRollSpeedCmd(UINT nID)
@@ -2237,6 +2236,13 @@ void CPianoRoll::OnRollSpeedCmd(UINT nID)
     const int idx = (int)nID - (int)IDM_ROLL_SPEED_BASE;
     if (idx < 0 || idx >= ROLL_SPEED_COUNT) return;
     SetRollSpeedPct(kRollSpeedPct[idx]);
+}
+
+void CPianoRoll::RollSpeedSliderCb(void* ctx, int value)
+{
+    CPianoRoll* p = (CPianoRoll*)ctx;
+    if (!p || !::IsWindow(p->GetSafeHwnd())) return;
+    p->SetRollSpeedPct(value);
 }
 
 void CPianoRoll::RequestFullRollRedraw()
@@ -2802,88 +2808,112 @@ void CPianoRoll::ReleasePcAudioForScoreCaptureIfHeld()
 
 void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
-    CMenu menu;
-    menu.CreatePopupMenu();
+    CCustomPopupMenu menu;
 
-    CMenu subView;
-    subView.CreatePopupMenu();
-    subView.AppendMenu(MF_STRING | (m_viewMode == 0 ? MF_CHECKED : 0), IDM_ROLL_VIEW_BASE + 0,
-        LL14(L"通常 (2D)", L"Normal (2D)", L"Normal (2D)", L"Normale (2D)", L"Normal (2D)", L"일반 (2D)", L"普通 (2D)", L"عادي (2D)", L"Обычный (2D)", L"Normal (2D)", L"Normal (2D)", L"Normaal (2D)", L"Zwykly (2D)", L"Normal (2D)"));
-    subView.AppendMenu(MF_STRING | (m_viewMode == 1 ? MF_CHECKED : 0), IDM_ROLL_VIEW_BASE + 1,
-        LL14(L"簡易3D", L"Soft 3D", L"3D simplifie", L"3D semplificato", L"3D simple", L"간이 3D", L"简易3D", L"ثلاثي الأبعاد مبسط", L"Простой 3D", L"Einfaches 3D", L"3D simples", L"Eenvoudig 3D", L"Uproszczone 3D", L"Basit 3B"));
-    menu.AppendMenu(MF_POPUP, (UINT_PTR)subView.Detach(),
+    CCustomPopupMenu* subView = menu.AddSubMenu(
         LL14(L"表示モード", L"View mode", L"Mode d'affichage", L"Modalita di visualizzazione", L"Modo de visualizacion", L"표시 모드", L"显示模式", L"وضع العرض", L"Режим отображения", L"Anzeigemodus", L"Modo de exibicao", L"Weergavemodus", L"Tryb wyswietlania", L"Goruntuleme modu"));
-
-    CMenu subKeys;
-    subKeys.CreatePopupMenu();
-    subKeys.AppendMenu(MF_STRING | (m_keyRange == 88 ? MF_CHECKED : 0), IDM_ROLL_KEYS_BASE + 0,
-        LL14(L"88鍵 (A0～)", L"88 keys (A0-)", L"88 touches (A0-)", L"88 tasti (A0-)", L"88 teclas (A0-)", L"88건반 (A0-)", L"88键 (A0-)", L"88 مفتاحا (A0-)", L"88 клавиш (A0-)", L"88 Tasten (A0-)", L"88 teclas (A0-)", L"88 toetsen (A0-)", L"88 klawiszy (A0-)", L"88 tus (A0-)"));
-    subKeys.AppendMenu(MF_STRING | (m_keyRange != 88 ? MF_CHECKED : 0), IDM_ROLL_KEYS_BASE + 1,
-        LL14(L"108鍵 (全域)", L"108 keys (full)", L"108 touches (complet)", L"108 tasti (completo)", L"108 teclas (completo)", L"108건반 (전체)", L"108键 (全域)", L"108 مفتاحا (كامل)", L"108 клавиш (полный)", L"108 Tasten (voll)", L"108 teclas (completo)", L"108 toetsen (volledig)", L"108 klawiszy (pelny)", L"108 tus (tam)"));
-    menu.AppendMenu(MF_POPUP, (UINT_PTR)subKeys.Detach(),
-        LL14(L"鍵盤レンジ", L"Keyboard range", L"Etendue du clavier", L"Estensione tastiera", L"Rango del teclado", L"건반 범위", L"键盘范围", L"مدى لوحة المفاتيح", L"Диапазон клавиатуры", L"Tastaturumfang", L"Faixa do teclado", L"Toetsenbereik", L"Zakres klawiatury", L"Klavye araligi"));
-
-    menu.AppendMenu(MF_STRING | (m_showNoteNames ? MF_CHECKED : 0), IDM_ROLL_NOTENAME,
-        LL14(L"ノート名を表示", L"Show note names", L"Afficher les noms de notes", L"Mostra nomi delle note", L"Mostrar nombres de notas", L"음이름 표시", L"显示音名", L"إظهار أسماء النغمات", L"Показывать названия нот", L"Notennamen anzeigen", L"Mostrar nomes das notas", L"Notennamen tonen", L"Pokazuj nazwy nut", L"Nota adlarini goster"));
-    menu.AppendMenu(MF_STRING | (savedata.mpChordPanel ? MF_CHECKED : 0), IDM_ROLL_CHORD_PANEL,
-        LL14(L"コード進行パネル(実験)", L"Chord panel (experimental)", L"Panneau accords (exp.)", L"Pannello accordi (sper.)", L"Panel acordes (exp.)", L"코드 진행 패널(실험)", L"和弦进行面板(实验)", L"لوحة التآلفات (تجريبي)", L"Панель аккордов (эксп.)", L"Akkordpanel (exp.)", L"Painel de acordes (exp.)", L"Akkoordenpaneel (exp.)", L"Panel akordow (eksperymentalny)", L"Akor paneli (deneysel)"));
-    menu.AppendMenu(MF_STRING | (savedata.mpLoopbackScore ? MF_CHECKED : 0), IDM_ROLL_LOOPBACK_SCORE,
-        LL14(L"PC音を譜面化", L"Score from PC audio", L"Partition depuis le PC", L"Partitura da audio PC", L"Partitura desde audio PC", L"PC 소리로 악보화", L"从PC声音成谱", L"تدوين من صوت الجهاز", L"Ноты с ПК-звука", L"Partitur aus PC-Audio", L"Partitura do audio do PC", L"Partituur van pc-audio", L"Partytura z dzwieku PC", L"PC sesinden parti"));
-    menu.AppendMenu(MF_SEPARATOR);
-    menu.AppendMenu(MF_STRING | (m_scoreCapMidi ? MF_CHECKED : 0), IDM_ROLL_CAPTURE_MIDI,
-        LL14(L"MIDI録り (PC音連動)", L"MIDI capture (PC audio)", L"Enregistrement MIDI (audio PC)", L"Registrazione MIDI (audio PC)", L"Captura MIDI (audio PC)", L"MIDI 녹음 (PC 소리)", L"MIDI录制 (PC声音)", L"تسجيل MIDI (صوت الجهاز)", L"Запись MIDI (звук ПК)", L"MIDI-Aufnahme (PC-Audio)", L"Captura MIDI (audio PC)", L"MIDI-opname (pc-audio)", L"Zapis MIDI (dzwiek PC)", L"MIDI kayit (PC sesi)"));
-    menu.AppendMenu(MF_STRING | (m_scoreCapXml ? MF_CHECKED : 0), IDM_ROLL_CAPTURE_MUSICXML,
-        LL14(L"MusicXML録り (PC音連動)", L"MusicXML capture (PC audio)", L"Enregistrement MusicXML (audio PC)", L"Registrazione MusicXML (audio PC)", L"Captura MusicXML (audio PC)", L"MusicXML 녹음 (PC 소리)", L"MusicXML录制 (PC声音)", L"تسجيل MusicXML (صوت الجهاز)", L"Запись MusicXML (звук ПК)", L"MusicXML-Aufnahme (PC-Audio)", L"Captura MusicXML (audio PC)", L"MusicXML-opname (pc-audio)", L"Zapis MusicXML (dzwiek PC)", L"MusicXML kayit (PC sesi)"));
-    menu.AppendMenu(MF_SEPARATOR);
-
-    CMenu subSpeed;
-    subSpeed.CreatePopupMenu();
-    const int speedIdx = RollSpeedIndex();
-    for (int i = 0; i < ROLL_SPEED_COUNT; ++i) {
-        CString lab;
-        lab.Format(_T("x%.2f"), (double)kRollSpeedPct[i] / 100.0);
-        subSpeed.AppendMenu(MF_STRING | (i == speedIdx ? MF_CHECKED : 0),
-            IDM_ROLL_SPEED_BASE + i, lab);
+    if (subView) {
+        subView->AddCheck(IDM_ROLL_VIEW_BASE + 0,
+            LL14(L"通常 (2D)", L"Normal (2D)", L"Normal (2D)", L"Normale (2D)", L"Normal (2D)", L"일반 (2D)", L"普通 (2D)", L"عادي (2D)", L"Обычный (2D)", L"Normal (2D)", L"Normal (2D)", L"Normaal (2D)", L"Zwykly (2D)", L"Normal (2D)"),
+            m_viewMode == 0);
+        subView->AddCheck(IDM_ROLL_VIEW_BASE + 1,
+            LL14(L"簡易3D", L"Soft 3D", L"3D simplifie", L"3D semplificato", L"3D simple", L"간이 3D", L"简易3D", L"ثلاثي الأبعاد مبسط", L"Простой 3D", L"Einfaches 3D", L"3D simples", L"Eenvoudig 3D", L"Uproszczone 3D", L"Basit 3B"),
+            m_viewMode == 1);
     }
-    menu.AppendMenu(MF_POPUP, (UINT_PTR)subSpeed.Detach(),
-        LL14(L"表示の流れる速度", L"Display scroll speed", L"Vitesse de defilement", L"Velocita scorrimento", L"Velocidad de desplazamiento", L"표시 스크롤 속도", L"显示滚动速度", L"سرعة التمرير", L"Скорость прокрутки", L"Anzeigegeschwindigkeit", L"Velocidade de rolagem", L"Weergavesnelheid", L"Predkosc przewijania", L"Goruntuleme hizi"));
 
-    menu.AppendMenu(MF_SEPARATOR);
-    menu.AppendMenu(MF_STRING | (m_showExprLegend ? MF_CHECKED : 0), IDM_ROLL_LEGEND,
-        LL14(L"記号の凡例", L"Symbol legend", L"Legende des symboles", L"Legenda simboli", L"Leyenda de simbolos", L"기호 범례", L"符号图例", L"دليل الرموز", L"Легенда символов", L"Symbollegende", L"Legenda de simbolos", L"Symbollegenda", L"Legenda symboli", L"Sembol aciklamasi"));
-    menu.AppendMenu(MF_STRING | (m_showExprMarks ? MF_CHECKED : 0), IDM_ROLL_EXPR,
-        LL14(L"表現記号を表示", L"Show expression marks", L"Afficher les symboles d'expression", L"Mostra simboli espressivi", L"Mostrar simbolos de expresion", L"표현 기호 표시", L"显示奏法记号", L"إظهار رموز التعبير", L"Показывать знаки экспрессии", L"Ausdruckszeichen anzeigen", L"Mostrar simbolos de expressao", L"Expressietekens tonen", L"Pokazuj znaki ekspresji", L"Ifade isaretlerini goster"));
-    menu.AppendMenu(MF_STRING | (m_showLevelMeter ? MF_CHECKED : 0), IDM_ROLL_METER,
-        LL14(L"レベルメーター", L"Level meter", L"Indicateur de niveau", L"Misuratore di livello", L"Medidor de nivel", L"레벨 미터", L"电平表", L"مقياس المستوى", L"Уровень сигнала", L"Pegelanzeige", L"Medidor de nivel", L"Niveaumeter", L"Miernik poziomu", L"Seviye olcer"));
-    menu.AppendMenu(MF_STRING | (m_alwaysOnTop ? MF_CHECKED : 0), IDM_ROLL_TOPMOST,
-        LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위에 표시", L"始终置顶", L"دائما في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd op voorgrond", L"Zawsze na wierzchu", L"Her zaman ustte"));
+    CCustomPopupMenu* subKeys = menu.AddSubMenu(
+        LL14(L"鍵盤レンジ", L"Keyboard range", L"Etendue du clavier", L"Estensione tastiera", L"Rango del teclado", L"건반 범위", L"键盘范围", L"مدى لوحة المفاتيح", L"Диапазон клавиатуры", L"Tastaturumfang", L"Faixa do teclado", L"Toetsenbereik", L"Zakres klawiatury", L"Klavye araligi"));
+    if (subKeys) {
+        subKeys->AddCheck(IDM_ROLL_KEYS_BASE + 0,
+            LL14(L"88鍵 (A0～)", L"88 keys (A0-)", L"88 touches (A0-)", L"88 tasti (A0-)", L"88 teclas (A0-)", L"88건반 (A0-)", L"88键 (A0-)", L"88 مفتاحا (A0-)", L"88 клавиш (A0-)", L"88 Tasten (A0-)", L"88 teclas (A0-)", L"88 toetsen (A0-)", L"88 klawiszy (A0-)", L"88 tus (A0-)"),
+            m_keyRange == 88);
+        subKeys->AddCheck(IDM_ROLL_KEYS_BASE + 1,
+            LL14(L"108鍵 (全域)", L"108 keys (full)", L"108 touches (complet)", L"108 tasti (completo)", L"108 teclas (completo)", L"108건반 (전체)", L"108键 (全域)", L"108 مفتاحا (كامل)", L"108 клавиш (полный)", L"108 Tasten (voll)", L"108 teclas (completo)", L"108 toetsen (volledig)", L"108 klawiszy (pelny)", L"108 tus (tam)"),
+            m_keyRange != 88);
+    }
 
-    CMenu subDetect;
-    subDetect.CreatePopupMenu();
-    subDetect.AppendMenu(MF_STRING | (m_reattackDetectEnabled ? MF_CHECKED : 0), IDM_ROLL_REATTACK,
-        LL14(L"再アタック検出", L"Re-attack detect", L"Detection de reattaque", L"Rilevamento riattacco", L"Deteccion de reataque", L"리어택 검출", L"再起音检测", L"كشف الهجوم المتكرر", L"Обнаружение реатаки", L"Re-Attack-Erkennung", L"Detectar reataque", L"Her-aanval detectie", L"Wykrywanie reataku", L"Yeniden saldiri algilama"));
-    subDetect.AppendMenu(MF_STRING | (m_impulsiveGhostSuppressEnabled ? MF_CHECKED : 0), IDM_ROLL_IMPULSE,
-        LL14(L"打撃音ゴースト抑制", L"Impulsive ghost suppress", L"Suppression fantomes impulsifs", L"Soppressione fantasmi impulsivi", L"Supresion de fantasmas impulsivos", L"타격음 고스트 억제", L"打击音幽灵抑制", L"كبح أشباح الإيقاع", L"Подавление импульсных призраков", L"Impulsiv-Geister unterdrucken", L"Suprimir fantasmas impulsivos", L"Impulsieve spoken dempen", L"Tlumienie duchow impulsywnych", L"Vurus hayaletini bastir"));
-    subDetect.AppendMenu(MF_STRING | (m_harmonicGhostGuardEnabled ? MF_CHECKED : 0), IDM_ROLL_HARM_GHOST,
-        LL14(L"倍音ゴースト抑制", L"Harmonic ghost suppress", L"Suppression fantomes harmoniques", L"Soppressione fantasmi armonici", L"Supresion de fantasmas armonicos", L"배음 고스트 억제", L"泛音幽灵抑制", L"كبح أشباح التوافقيات", L"Подавление гармонических призраков", L"Oberton-Geister unterdrucken", L"Suprimir fantasmas harmonicos", L"Harmonische spoken dempen", L"Tlumienie duchow harmonicznych", L"Armonik hayaletini bastir"));
-    subDetect.AppendMenu(MF_STRING | (m_harmonicProfileGuardEnabled ? MF_CHECKED : 0), IDM_ROLL_HARM_PROF,
-        LL14(L"音色プロファイル判定", L"Timbre profile guard", L"Garde profil de timbre", L"Protezione profilo timbrico", L"Guardia de perfil timbrico", L"음색 프로파일 판정", L"音色轮廓判定", L"حارس ملف الطابع", L"Профиль тембра", L"Klangprofil-Schutz", L"Guarda de perfil timbrico", L"Timbreprofiel-bewaking", L"Ochrona profilu barwy", L"Timbre profil korumasi"));
-    menu.AppendMenu(MF_POPUP, (UINT_PTR)subDetect.Detach(),
-        LL14(L"検出オプション", L"Detection options", L"Options de detection", L"Opzioni di rilevamento", L"Opciones de deteccion", L"검출 옵션", L"检测选项", L"خيارات الكشف", L"Параметры обнаружения", L"Erkennungsoptionen", L"Opcoes de deteccao", L"Detectie-opties", L"Opcje wykrywania", L"Algilama secenekleri"));
+    menu.AddCheck(IDM_ROLL_NOTENAME,
+        LL14(L"ノート名を表示", L"Show note names", L"Afficher les noms de notes", L"Mostra nomi delle note", L"Mostrar nombres de notas", L"음이름 표시", L"显示音名", L"إظهار أسماء النغمات", L"Показывать названия нот", L"Notennamen anzeigen", L"Mostrar nomes das notas", L"Notennamen tonen", L"Pokazuj nazwy nut", L"Nota adlarini goster"),
+        m_showNoteNames);
+    menu.AddCheck(IDM_ROLL_CHORD_PANEL,
+        LL14(L"コード進行パネル(実験)", L"Chord panel (experimental)", L"Panneau accords (exp.)", L"Pannello accordi (sper.)", L"Panel acordes (exp.)", L"코드 진행 패널(실험)", L"和弦进行面板(实验)", L"لوحة التآلفات (تجريبي)", L"Панель аккордов (эксп.)", L"Akkordpanel (exp.)", L"Painel de acordes (exp.)", L"Akkoordenpaneel (exp.)", L"Panel akordow (eksperymentalny)", L"Akor paneli (deneysel)"),
+        savedata.mpChordPanel != 0,
+        LL14(L"検出コード進行を別パネルで表示します（実験機能）。", L"Show detected chord progressions in a side panel (experimental).", L"Affiche les accords detectes dans un panneau (experimental).", L"Mostra gli accordi rilevati in un pannello (sperimentale).", L"Muestra acordes detectados en un panel (experimental).", L"감지된 코드 진행을 별도 패널에 표시합니다(실험).", L"在侧面板显示检测到的和弦进行（实验）。", L"عرض تقدم التآلفات المكتشفة في لوحة (تجريبي).", L"Показывать аккорды в панели (экспериментально).", L"Erkannte Akkordfolgen in einem Panel anzeigen (experimentell).", L"Mostra progressoes de acordes num painel (experimental).", L"Toon gedetecteerde akkoorden in een paneel (experimenteel).", L"Pokaz wykryte akordy w panelu (eksperymentalnie).", L"Algilanan akor ilerlemelerini panelde goster (deneysel)."));
+    menu.AddCheck(IDM_ROLL_LOOPBACK_SCORE,
+        LL14(L"PC音を譜面化", L"Score from PC audio", L"Partition depuis le PC", L"Partitura da audio PC", L"Partitura desde audio PC", L"PC 소리로 악보화", L"从PC声音成谱", L"تدوين من صوت الجهاز", L"Ноты с ПК-звука", L"Partitur aus PC-Audio", L"Partitura do audio do PC", L"Partituur van pc-audio", L"Partytura z dzwieku PC", L"PC sesinden parti"),
+        savedata.mpLoopbackScore != 0,
+        LL14(L"PCの再生音（ループバック）から譜面を生成します。", L"Build a score from PC loopback audio.", L"Creer une partition depuis l'audio PC (loopback).", L"Crea una partitura dall'audio PC (loopback).", L"Crear partitura desde audio PC (loopback).", L"PC 재생음(루프백)에서 악보를 만듭니다.", L"从 PC 环回音频生成乐谱。", L"إنشاء تدوين من صوت الجهاز (loopback).", L"Создавать ноты из звука ПК (loopback).", L"Partitur aus PC-Loopback-Audio erzeugen.", L"Gerar partitura do audio loopback do PC.", L"Maak partituur van pc-loopback-audio.", L"Tworz partyture z dzwieku PC (loopback).", L"PC loopback sesinden parti olustur."));
+    menu.AddSeparator();
+    menu.AddCheck(IDM_ROLL_CAPTURE_MIDI,
+        LL14(L"MIDI録り (PC音連動)", L"MIDI capture (PC audio)", L"Enregistrement MIDI (audio PC)", L"Registrazione MIDI (audio PC)", L"Captura MIDI (audio PC)", L"MIDI 녹음 (PC 소리)", L"MIDI录制 (PC声音)", L"تسجيل MIDI (صوت الجهاز)", L"Запись MIDI (звук ПК)", L"MIDI-Aufnahme (PC-Audio)", L"Captura MIDI (audio PC)", L"MIDI-opname (pc-audio)", L"Zapis MIDI (dzwiek PC)", L"MIDI kayit (PC sesi)"),
+        m_scoreCapMidi,
+        LL14(L"PC音連動で検出ノートを MIDI として記録します。", L"Record detected notes as MIDI linked to PC audio.", L"Enregistrer les notes detectees en MIDI (audio PC).", L"Registra le note rilevate come MIDI (audio PC).", L"Grabar notas detectadas como MIDI (audio PC).", L"PC 소리 연동으로 감지 노트를 MIDI로 기록합니다.", L"将检测到的音符记录为 MIDI（联动 PC 声音）。", L"تسجيل النغمات المكتشفة كـ MIDI مع صوت الجهاز.", L"Записывать найденные ноты в MIDI вместе со звуком ПК.", L"Erkannte Noten als MIDI mit PC-Audio aufzeichnen.", L"Gravar notas detectadas como MIDI com audio PC.", L"Gedetecteerde noten als MIDI opnemen met pc-audio.", L"Zapisuj wykryte nuty jako MIDI z dzwiekiem PC.", L"Algilanan notalari PC sesiyle MIDI olarak kaydet."));
+    menu.AddCheck(IDM_ROLL_CAPTURE_MUSICXML,
+        LL14(L"MusicXML録り (PC音連動)", L"MusicXML capture (PC audio)", L"Enregistrement MusicXML (audio PC)", L"Registrazione MusicXML (audio PC)", L"Captura MusicXML (audio PC)", L"MusicXML 녹음 (PC 소리)", L"MusicXML录制 (PC声音)", L"تسجيل MusicXML (صوت الجهاز)", L"Запись MusicXML (звук ПК)", L"MusicXML-Aufnahme (PC-Audio)", L"Captura MusicXML (audio PC)", L"MusicXML-opname (pc-audio)", L"Zapis MusicXML (dzwiek PC)", L"MusicXML kayit (PC sesi)"),
+        m_scoreCapXml,
+        LL14(L"PC音連動で検出ノートを MusicXML として記録します。", L"Record detected notes as MusicXML linked to PC audio.", L"Enregistrer les notes detectees en MusicXML (audio PC).", L"Registra le note rilevate come MusicXML (audio PC).", L"Grabar notas detectadas como MusicXML (audio PC).", L"PC 소리 연동으로 감지 노트를 MusicXML로 기록합니다.", L"将检测到的音符记录为 MusicXML（联动 PC 声音）。", L"تسجيل النغمات المكتشفة كـ MusicXML مع صوت الجهاز.", L"Записывать найденные ноты в MusicXML вместе со звуком ПК.", L"Erkannte Noten als MusicXML mit PC-Audio aufzeichnen.", L"Gravar notas detectadas como MusicXML com audio PC.", L"Gedetecteerde noten als MusicXML opnemen met pc-audio.", L"Zapisuj wykryte nuty jako MusicXML z dzwiekiem PC.", L"Algilanan notalari PC sesiyle MusicXML olarak kaydet."));
+    menu.AddSeparator();
 
-    menu.AppendMenu(MF_SEPARATOR);
-    menu.AppendMenu(MF_STRING, IDM_ROLL_TUNE,
+    CCustomPopupMenu* subSpeed = menu.AddSubMenu(
+        LL14(L"表示の流れる速度", L"Display scroll speed", L"Vitesse de defilement", L"Velocita scorrimento", L"Velocidad de desplazamiento", L"표시 스크롤 속도", L"显示滚动速度", L"سرعة التمرير", L"Скорость прокрутки", L"Anzeigegeschwindigkeit", L"Velocidade de rolagem", L"Weergavesnelheid", L"Predkosc przewijania", L"Goruntuleme hizi"),
+        LL14(L"ロール表示の流れる速さを調整します（解析速度は変わりません）。", L"Adjust how fast the roll display scrolls (analysis rate is unchanged).", L"Regler la vitesse de defilement (l'analyse ne change pas).", L"Regola la velocita di scorrimento (l'analisi non cambia).", L"Ajustar la velocidad de desplazamiento (el analisis no cambia).", L"롤 표시 스크롤 속도를 조정합니다(분석 속도는 그대로).", L"调整卷帘显示滚动速度（分析速度不变）。", L"ضبط سرعة تمرير العرض (معدل التحليل لا يتغير).", L"Скорость прокрутки отображения (анализ не меняется).", L"Anzeigegeschwindigkeit anpassen (Analyse unverandert).", L"Ajustar a velocidade de rolagem (analise inalterada).", L"Pas weergavesnelheid aan (analyse blijft gelijk).", L"Dostosuj predkosc przewijania (analiza bez zmian).", L"Goruntuleme kaydirma hizini ayarla (analiz degismez)."));
+    if (subSpeed) {
+        subSpeed->AddSlider(
+            LL14(L"速度 (%)", L"Speed (%)", L"Vitesse (%)", L"Velocita (%)", L"Velocidad (%)", L"속도 (%)", L"速度 (%)", L"السرعة (%)", L"Скорость (%)", L"Geschwindigkeit (%)", L"Velocidade (%)", L"Snelheid (%)", L"Predkosc (%)", L"Hiz (%)"),
+            25, 200, m_rollSpeedPct, &CPianoRoll::RollSpeedSliderCb, this,
+            LL14(L"25%=遅い … 100%=標準 … 200%=速い（ドラッグ中に即反映）", L"25%=slow … 100%=normal … 200%=fast (live while dragging)", L"25%=lent … 100%=normal … 200%=rapide (temps reel)", L"25%=lento … 100%=normale … 200%=veloce (in tempo reale)", L"25%=lento … 100%=normal … 200%=rapido (en vivo)", L"25%=느림 … 100%=표준 … 200%=빠름(드래그 중 즉시 반영)", L"25%=慢 … 100%=标准 … 200%=快（拖动时即时生效）", L"25%=بطيء … 100%=عادي … 200%=سريع (مباشر أثناء السحب)", L"25%=медленно … 100%=обычно … 200%=быстро (сразу при перетаскивании)", L"25%=langsam … 100%=normal … 200%=schnell (live beim Ziehen)", L"25%=lento … 100%=normal … 200%=rapido (ao vivo)", L"25%=traag … 100%=normaal … 200%=snel (live tijdens slepen)", L"25%=wolno … 100%=normalnie … 200%=szybko (na zywo)", L"25%=yavas … 100%=normal … 200%=hizli (suruklerken anlik)"));
+        subSpeed->AddSeparator();
+        subSpeed->AddCommand(IDM_ROLL_SPEED_BASE + 3,
+            LL14(L"100% に戻す", L"Reset to 100%", L"Remettre a 100%", L"Ripristina a 100%", L"Restablecer a 100%", L"100%로 되돌리기", L"重置为 100%", L"إعادة إلى 100%", L"Сбросить на 100%", L"Auf 100% zurucksetzen", L"Redefinir para 100%", L"Terugzetten naar 100%", L"Przywroc 100%", L"100%'e sifirla"));
+    }
+
+    menu.AddSeparator();
+    menu.AddCheck(IDM_ROLL_LEGEND,
+        LL14(L"記号の凡例", L"Symbol legend", L"Legende des symboles", L"Legenda simboli", L"Leyenda de simbolos", L"기호 범례", L"符号图例", L"دليل الرموز", L"Легенда символов", L"Symbollegende", L"Legenda de simbolos", L"Symbollegenda", L"Legenda symboli", L"Sembol aciklamasi"),
+        m_showExprLegend);
+    menu.AddCheck(IDM_ROLL_EXPR,
+        LL14(L"表現記号を表示", L"Show expression marks", L"Afficher les symboles d'expression", L"Mostra simboli espressivi", L"Mostrar simbolos de expresion", L"표현 기호 표시", L"显示奏法记号", L"إظهار رموز التعبير", L"Показывать знаки экспрессии", L"Ausdruckszeichen anzeigen", L"Mostrar simbolos de expressao", L"Expressietekens tonen", L"Pokazuj znaki ekspresji", L"Ifade isaretlerini goster"),
+        m_showExprMarks);
+    menu.AddCheck(IDM_ROLL_METER,
+        LL14(L"レベルメーター", L"Level meter", L"Indicateur de niveau", L"Misuratore di livello", L"Medidor de nivel", L"레벨 미터", L"电平表", L"مقياس المستوى", L"Уровень сигнала", L"Pegelanzeige", L"Medidor de nivel", L"Niveaumeter", L"Miernik poziomu", L"Seviye olcer"),
+        m_showLevelMeter);
+    menu.AddCheck(IDM_ROLL_TOPMOST,
+        LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위에 표시", L"始终置顶", L"دائما في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd op voorgrond", L"Zawsze na wierzchu", L"Her zaman ustte"),
+        m_alwaysOnTop);
+
+    CCustomPopupMenu* subDetect = menu.AddSubMenu(
+        LL14(L"検出オプション", L"Detection options", L"Options de detection", L"Opzioni di rilevamento", L"Opciones de deteccion", L"검출 옵션", L"检测选项", L"خيارات الكشف", L"Параметры обнаружения", L"Erkennungsoptionen", L"Opcoes de deteccao", L"Detectie-opties", L"Opcje wykrywania", L"Algilama secenekleri"),
+        LL14(L"ノート検出のゴースト抑制や再アタック判定などを切り替えます。", L"Toggle ghost suppression, re-attack detection, and related options.", L"Activer/desactiver suppressions de fantomes et reattaque.", L"Attiva/disattiva soppressione fantasmi e riattacco.", L"Activar/desactivar supresion de fantasmas y reataque.", L"고스트 억제·리어택 등 검출 옵션을 전환합니다.", L"切换幽灵抑制、再起音检测等相关选项。", L"تبديل كبح الأشباح وكشف الهجوم المتكرر وغيرها.", L"Переключать подавление призраков и реатаку.", L"Geisterunterdruckung, Re-Attack u. a. umschalten.", L"Alternar supressao de fantasmas e reataque.", L"Schakel spookdemping, her-aanval e.d. om.", L"Przelaczaj tlumienie duchow i reatak.", L"Hayalet bastirma, yeniden saldiri vb. secenekleri ac/kapat."));
+    if (subDetect) {
+        subDetect->AddCheck(IDM_ROLL_REATTACK,
+            LL14(L"再アタック検出", L"Re-attack detect", L"Detection de reattaque", L"Rilevamento riattacco", L"Deteccion de reataque", L"리어택 검출", L"再起音检测", L"كشف الهجوم المتكرر", L"Обнаружение реатаки", L"Re-Attack-Erkennung", L"Detectar reataque", L"Her-aanval detectie", L"Wykrywanie reataku", L"Yeniden saldiri algilama"),
+            m_reattackDetectEnabled);
+        subDetect->AddCheck(IDM_ROLL_IMPULSE,
+            LL14(L"打撃音ゴースト抑制", L"Impulsive ghost suppress", L"Suppression fantomes impulsifs", L"Soppressione fantasmi impulsivi", L"Supresion de fantasmas impulsivos", L"타격음 고스트 억제", L"打击音幽灵抑制", L"كبح أشباح الإيقاع", L"Подавление импульсных призраков", L"Impulsiv-Geister unterdrucken", L"Suprimir fantasmas impulsivos", L"Impulsieve spoken dempen", L"Tlumienie duchow impulsywnych", L"Vurus hayaletini bastir"),
+            m_impulsiveGhostSuppressEnabled);
+        subDetect->AddCheck(IDM_ROLL_HARM_GHOST,
+            LL14(L"倍音ゴースト抑制", L"Harmonic ghost suppress", L"Suppression fantomes harmoniques", L"Soppressione fantasmi armonici", L"Supresion de fantasmas armonicos", L"배음 고스트 억제", L"泛音幽灵抑制", L"كبح أشباح التوافقيات", L"Подавление гармонических призраков", L"Oberton-Geister unterdrucken", L"Suprimir fantasmas harmonicos", L"Harmonische spoken dempen", L"Tlumienie duchow harmonicznych", L"Armonik hayaletini bastir"),
+            m_harmonicGhostGuardEnabled);
+        subDetect->AddCheck(IDM_ROLL_HARM_PROF,
+            LL14(L"音色プロファイル判定", L"Timbre profile guard", L"Garde profil de timbre", L"Protezione profilo timbrico", L"Guardia de perfil timbrico", L"음색 프로파일 판정", L"音色轮廓判定", L"حارس ملف الطابع", L"Профиль тембра", L"Klangprofil-Schutz", L"Guarda de perfil timbrico", L"Timbreprofiel-bewaking", L"Ochrona profilu barwy", L"Timbre profil korumasi"),
+            m_harmonicProfileGuardEnabled);
+    }
+
+    menu.AddSeparator();
+    menu.AddCommand(IDM_ROLL_TUNE,
         LL14(L"検出パラメータ調整...", L"Detection parameter tuning...", L"Regler les parametres...",
             L"Regola parametri rilevamento...", L"Ajustar parametros de deteccion...", L"검출 파라미터 조정...",
             L"检测参数调整...", L"ضبط معلمات الكشف...", L"Настройка параметров...", L"Erkennungsparameter...",
-            L"Ajustar parametros...", L"Detectieparameters...", L"Dostosuj parametry...", L"Algilama parametreleri..."));
+            L"Ajustar parametros...", L"Detectieparameters...", L"Dostosuj parametry...", L"Algilama parametreleri..."),
+        LL14(L"検出感度などの詳細パラメータを開きます。", L"Open detailed detection parameter tuning.", L"Ouvrir le reglage detaille des parametres.", L"Apri la regolazione dettagliata dei parametri.", L"Abrir el ajuste detallado de parametros.", L"검출 감도 등 상세 파라미터를 엽니다.", L"打开检测灵敏度等详细参数。", L"فتح ضبط معلمات الكشف التفصيلية.", L"Открыть детальную настройку параметров.", L"Detaillierte Erkennungsparameter offnen.", L"Abrir ajuste detalhado de parametros.", L"Open gedetailleerde detectieparameters.", L"Otworz szczegolowe parametry wykrywania.", L"Ayrintili algilama parametrelerini ac."));
 
-    menu.AppendMenu(MF_STRING | (m_frozen ? MF_CHECKED : 0), IDM_ROLL_FREEZE,
-        LL14(L"フリーズ", L"Freeze", L"Gel", L"Congela", L"Congelar", L"정지", L"冻结", L"تجميد", L"Заморозка", L"Einfrieren", L"Congelar", L"Bevriezen", L"Zamroz", L"Dondur"));
-    menu.AppendMenu(MF_STRING, IDM_ROLL_CLEAR,
+    menu.AddCheck(IDM_ROLL_FREEZE,
+        LL14(L"フリーズ", L"Freeze", L"Gel", L"Congela", L"Congelar", L"정지", L"冻结", L"تجميد", L"Заморозка", L"Einfrieren", L"Congelar", L"Bevriezen", L"Zamroz", L"Dondur"),
+        m_frozen);
+    menu.AddCommand(IDM_ROLL_CLEAR,
         LL14(L"表示をクリア", L"Clear display", L"Effacer l'affichage", L"Cancella visualizzazione", L"Borrar pantalla", L"표시 지우기", L"清除显示", L"مسح العرض", L"Очистить экран", L"Anzeige leeren", L"Limpar exibicao", L"Weergave wissen", L"Wyczysc wyswietlacz", L"Goruntuyu temizle"));
-    menu.AppendMenu(MF_SEPARATOR);
-    menu.AppendMenu(MF_STRING, ID_HELP_SHOWSHEET,
+    menu.AddSeparator();
+    menu.AddCommand(ID_HELP_SHOWSHEET,
         LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
             L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
             L"Руководство", L"Bedienungsanleitung", L"Guia de operação", L"Handleiding",
@@ -2893,7 +2923,9 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
         CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
         point = CPoint(rc.left + 8, rc.top + 8);
     }
-    menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y, this);
+    const UINT cmd = menu.Track(point, this);
+    if (cmd != 0)
+        SendMessage(WM_COMMAND, cmd);
 }
 int CPianoRoll::HistoryCountLocked() const
 {

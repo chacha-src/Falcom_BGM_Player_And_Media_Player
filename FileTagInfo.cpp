@@ -1014,17 +1014,14 @@ static bool WriteMp3Id3Tags(LPCTSTR path, const FileTagFields& in)
 {
 	CId3tagv2 tag;
 	tag.Load(path);
-	if (!in.title.IsEmpty()) tag.SetTitle(in.title);
-	if (!in.artist.IsEmpty()) tag.SetArtist(in.artist);
-	if (!in.album.IsEmpty()) tag.SetAlbum(in.album);
-	if (!in.year.IsEmpty()) tag.SetYear(in.year);
-	if (!in.track.IsEmpty()) tag.SetTrackNo(in.track);
-	if (!in.genre.IsEmpty()) tag.SetGenre(in.genre);
-
-	CString comment = BuildLoopAwareComment(in.comment, in.loop1, in.loop2);
-	if (!comment.IsEmpty() || !in.comment.IsEmpty() || in.loop1 > 0 || in.loop2 > 0)
-		tag.SetComment(comment);
-
+	// 空文字も書く（フレーム削除＝クリア）。呼び出し側が「変更なし」を意図するときは既存値を渡す。
+	tag.SetTitle(in.title);
+	tag.SetArtist(in.artist);
+	tag.SetAlbum(in.album);
+	tag.SetYear(in.year);
+	tag.SetTrackNo(in.track);
+	tag.SetGenre(in.genre);
+	tag.SetComment(BuildLoopAwareComment(in.comment, in.loop1, in.loop2));
 	return tag.Save(path) == 0;
 }
 
@@ -1073,15 +1070,13 @@ static bool BuildId3v2FileBlob(const FileTagFields& in, const BYTE* cover, int c
 		if (tag.GetVer() < 0x0300)
 			tag.SetVer(0x0300);
 		tag.SetUnSynchronization(FALSE);
-		if (!in.title.IsEmpty()) tag.SetTitle(in.title);
-		if (!in.artist.IsEmpty()) tag.SetArtist(in.artist);
-		if (!in.album.IsEmpty()) tag.SetAlbum(in.album);
-		if (!in.year.IsEmpty()) tag.SetYear(in.year);
-		if (!in.track.IsEmpty()) tag.SetTrackNo(in.track);
-		if (!in.genre.IsEmpty()) tag.SetGenre(in.genre);
-		CString comment = BuildLoopAwareComment(in.comment, in.loop1, in.loop2);
-		if (!comment.IsEmpty() || !in.comment.IsEmpty() || in.loop1 > 0 || in.loop2 > 0)
-			tag.SetComment(comment);
+		tag.SetTitle(in.title);
+		tag.SetArtist(in.artist);
+		tag.SetAlbum(in.album);
+		tag.SetYear(in.year);
+		tag.SetTrackNo(in.track);
+		tag.SetGenre(in.genre);
+		tag.SetComment(BuildLoopAwareComment(in.comment, in.loop1, in.loop2));
 		if (cover && coverLen > 0)
 			tag.SetPicture(cover, (DWORD)coverLen, mime && mime[0] ? mime : "image/jpeg");
 		if (tag.Save(tmpFile) != ERROR_SUCCESS) {
@@ -1161,19 +1156,8 @@ static bool WriteDsfId3Blob(LPCTSTR path, const BYTE* id3, DWORD id3Len)
 
 static bool WriteDsfTags(LPCTSTR path, const FileTagFields& in)
 {
-	FileTagFields cur;
-	ReadFileTagFields(path, cur);
-	if (!in.title.IsEmpty()) cur.title = in.title;
-	if (!in.artist.IsEmpty()) cur.artist = in.artist;
-	if (!in.album.IsEmpty()) cur.album = in.album;
-	if (!in.year.IsEmpty()) cur.year = in.year;
-	if (!in.track.IsEmpty()) cur.track = in.track;
-	if (!in.genre.IsEmpty()) cur.genre = in.genre;
-	if (!in.comment.IsEmpty() || in.loop1 > 0 || in.loop2 > 0) {
-		cur.comment = in.comment;
-		cur.loop1 = in.loop1;
-		cur.loop2 = in.loop2;
-	}
+	// 渡されたフィールドをそのまま書く（空＝クリア）。呼び出し側がマージする。
+	FileTagFields cur = in;
 
 	BYTE* cover = (BYTE*)malloc(FILETAG_COVER_MAX);
 	char mime[64] = {};
@@ -1199,8 +1183,11 @@ static bool FlacSetVorbisField(FLAC__StreamMetadata* vc, const char* key, const 
 {
 	if (!vc || !key)
 		return false;
-	if (val.IsEmpty())
+	if (val.IsEmpty()) {
+		// 空＝該当コメント削除（タグクリア）
+		FLAC__metadata_object_vorbiscomment_remove_entries_matching(vc, key);
 		return true;
+	}
 	CStringA u8 = CStringToUtf8(val);
 	FLAC__StreamMetadata_VorbisComment_Entry entry;
 	if (!FLAC__metadata_object_vorbiscomment_entry_from_name_value_pair(&entry, key, u8))

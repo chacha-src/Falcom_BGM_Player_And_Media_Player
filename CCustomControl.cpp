@@ -2688,7 +2688,7 @@ static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double 
 // SM/拘束は無し。読みやすさ優先で中央は塗らず、縁と隅だけで火照り・トロ顔・汗・ビクッ。
 // ハート一辺倒にならないよう、愛液(滴り)とバイブ(振動)も添える。
 // bAeroTrans時は半透明演出を避ける。
-static void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
+void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
 {
     if (!pDC || !CCC_IsInwoman() || rc.Width() < 8 || rc.Height() < 8)
         return;
@@ -10625,33 +10625,46 @@ void CCustomSysPerfCtrl::CopyStatsToClipboard()
 
 void CCustomSysPerfCtrl::ShowCtxMenu(CPoint screenPt)
 {
-	CMenu menu;
-	menu.CreatePopupMenu();
-	menu.AppendMenu(MF_STRING | (m_viewMode == VIEW_ALL ? MF_CHECKED : 0), kCmdViewAll,
-		LL14(L"すべて表示", L"Show all", L"Tout afficher", L"Mostra tutto", L"Mostrar todo", L"모두 표시", L"全部显示", L"عرض الكل", L"Показать все", L"Alles anzeigen", L"Mostrar tudo", L"Alles tonen", L"Pokaz wszystko", L"Tumunu goster"));
-	menu.AppendMenu(MF_STRING | (m_viewMode == VIEW_MEM ? MF_CHECKED : 0), kCmdViewMem,
-		LL14(L"メモリのみ", L"Memory only", L"Memoire seule", L"Solo memoria", L"Solo memoria", L"메모리만", L"仅内存", L"الذاكرة فقط", L"Только память", L"Nur Speicher", L"Somente memoria", L"Alleen geheugen", L"Tylko pamiec", L"Yalniz bellek"));
-	menu.AppendMenu(MF_STRING | (m_viewMode == VIEW_CPU_OVERALL ? MF_CHECKED : 0), kCmdViewCpuOverall,
-		LL14(L"CPU 全体のみ", L"CPU overall only", L"CPU global seul", L"Solo CPU totale", L"Solo CPU total", L"CPU 전체만", L"仅 CPU 总体", L"وحدة المعالجة فقط", L"Только CPU общий", L"Nur CPU gesamt", L"Somente CPU geral", L"Alleen CPU totaal", L"Tylko CPU ogolne", L"Yalniz CPU genel"));
-	menu.AppendMenu(MF_STRING | (m_viewMode == VIEW_CPU_GRID ? MF_CHECKED : 0), kCmdViewCpuGrid,
-		LL14(L"CPU グリッドのみ", L"CPU grid only", L"Grille CPU seule", L"Solo griglia CPU", L"Solo cuadrícula CPU", L"CPU 그리드만", L"仅 CPU 网格", L"شبكة المعالج فقط", L"Только сетка CPU", L"Nur CPU-Raster", L"Somente grade CPU", L"Alleen CPU-raster", L"Tylko siatka CPU", L"Yalniz CPU izgarasi"));
-	menu.AppendMenu(MF_STRING | (m_viewMode == VIEW_CPU_BOTH ? MF_CHECKED : 0), kCmdViewCpuBoth,
-		LL14(L"CPU のみ (全体+グリッド)", L"CPU only (overall+grid)", L"CPU seul (global+grille)", L"Solo CPU (totale+griglia)", L"Solo CPU (total+cuadrícula)", L"CPU만 (전체+그리드)", L"仅 CPU（总体+网格）", L"المعالج فقط (كلي+شبكة)", L"Только CPU (общий+сетка)", L"Nur CPU (gesamt+Raster)", L"Somente CPU (geral+grade)", L"Alleen CPU (totaal+raster)", L"Tylko CPU (ogolne+siatka)", L"Yalniz CPU (genel+izgara)"));
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING | (m_bPaused ? MF_CHECKED : 0), kCmdPause,
+	CCustomPopupMenu menu;
+	menu.AddCheck(kCmdViewAll,
+		LL14(L"すべて表示", L"Show all", L"Tout afficher", L"Mostra tutto", L"Mostrar todo", L"모두 표시", L"全部显示", L"عرض الكل", L"Показать все", L"Alles anzeigen", L"Mostrar tudo", L"Alles tonen", L"Pokaz wszystko", L"Tumunu goster"),
+		m_viewMode == VIEW_ALL);
+	menu.AddCheck(kCmdViewMem,
+		LL14(L"メモリのみ", L"Memory only", L"Memoire seule", L"Solo memoria", L"Solo memoria", L"메모리만", L"仅内存", L"الذاكرة فقط", L"Только память", L"Nur Speicher", L"Somente memoria", L"Alleen geheugen", L"Tylko pamiec", L"Yalniz bellek"),
+		m_viewMode == VIEW_MEM);
+	menu.AddCheck(kCmdViewCpuOverall,
+		LL14(L"CPU 全体のみ", L"CPU overall only", L"CPU global seul", L"Solo CPU totale", L"Solo CPU total", L"CPU 전체만", L"仅 CPU 总体", L"وحدة المعالجة فقط", L"Только CPU общий", L"Nur CPU gesamt", L"Somente CPU geral", L"Alleen CPU totaal", L"Tylko CPU ogolne", L"Yalniz CPU genel"),
+		m_viewMode == VIEW_CPU_OVERALL);
+	menu.AddCheck(kCmdViewCpuGrid,
+		LL14(L"CPU グリッドのみ", L"CPU grid only", L"Grille CPU seule", L"Solo griglia CPU", L"Solo cuadrícula CPU", L"CPU 그리드만", L"仅 CPU 网格", L"شبكة المعالج فقط", L"Только сетка CPU", L"Nur CPU-Raster", L"Somente grade CPU", L"Alleen CPU-raster", L"Tylko siatka CPU", L"Yalniz CPU izgarasi"),
+		m_viewMode == VIEW_CPU_GRID);
+	menu.AddCheck(kCmdViewCpuBoth,
+		LL14(L"CPU のみ (全体+グリッド)", L"CPU only (overall+grid)", L"CPU seul (global+grille)", L"Solo CPU (totale+griglia)", L"Solo CPU (total+cuadrícula)", L"CPU만 (전체+그리드)", L"仅 CPU（总体+网格）", L"المعالج فقط (كلي+شبكة)", L"Только CPU (общий+сетка)", L"Nur CPU (gesamt+Raster)", L"Somente CPU (geral+grade)", L"Alleen CPU (totaal+raster)", L"Tylko CPU (ogolne+siatka)", L"Yalniz CPU (genel+izgara)"),
+		m_viewMode == VIEW_CPU_BOTH);
+	menu.AddSeparator();
+	menu.AddCheck(kCmdPause,
 		m_bPaused
 		? LL14(L"更新を再開", L"Resume updates", L"Reprendre", L"Riprendi", L"Reanudar", L"업데이트 재개", L"恢复更新", L"استئناف التحديث", L"Возобновить", L"Fortsetzen", L"Retomar", L"Hervatten", L"Wznow", L"Devam et")
-		: LL14(L"更新を一時停止", L"Pause updates", L"Pause", L"Pausa", L"Pausar", L"업데이트 일시정지", L"暂停更新", L"إيقاف مؤقت", L"Пауза", L"Pausieren", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
-	menu.AppendMenu(MF_STRING, kCmdCopy,
+		: LL14(L"更新を一時停止", L"Pause updates", L"Pause", L"Pausa", L"Pausar", L"업데이트 일시정지", L"暂停更新", L"إيقاف مؤقت", L"Пауза", L"Pausieren", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"),
+		m_bPaused);
+	menu.AddCommand(kCmdCopy,
 		LL14(L"統計をコピー", L"Copy statistics", L"Copier les stats", L"Copia statistiche", L"Copiar estadisticas", L"통계 복사", L"复制统计", L"نسخ الإحصاءات", L"Копировать статистику", L"Statistik kopieren", L"Copiar estatisticas", L"Statistieken kopieren", L"Kopiuj statystyki", L"Istatistikleri kopyala"));
-	menu.AppendMenu(MF_SEPARATOR);
-	menu.AppendMenu(MF_STRING | (m_gridCols == 0 ? MF_CHECKED : 0), kCmdColsAuto,
-		LL14(L"グリッド列: 自動", L"Grid columns: Auto", L"Colonnes: Auto", L"Colonne: Auto", L"Columnas: Auto", L"그리드 열: 자동", L"网格列: 自动", L"أعمدة الشبكة: تلقائي", L"Столбцы: Авто", L"Rasterspalten: Auto", L"Colunas: Auto", L"Rasterkolommen: Auto", L"Kolumny: Auto", L"Izgara sutun: Otomatik"));
-	menu.AppendMenu(MF_STRING | (m_gridCols == 4 ? MF_CHECKED : 0), kCmdCols4, _T("4"));
-	menu.AppendMenu(MF_STRING | (m_gridCols == 6 ? MF_CHECKED : 0), kCmdCols6, _T("6"));
-	menu.AppendMenu(MF_STRING | (m_gridCols == 8 ? MF_CHECKED : 0), kCmdCols8, _T("8"));
+	menu.AddSeparator();
+	{
+		CCustomPopupMenu* cols = menu.AddSubMenu(
+			LL14(L"グリッド列", L"Grid columns", L"Colonnes", L"Colonne", L"Columnas", L"그리드 열", L"网格列", L"أعمدة الشبكة", L"Столбцы", L"Rasterspalten", L"Colunas", L"Rasterkolommen", L"Kolumny", L"Izgara sutun"),
+			LL14(L"CPUグリッドの列数", L"Column count for the CPU grid", L"Nombre de colonnes de la grille CPU", L"Numero di colonne griglia CPU", L"Numero de columnas de la cuadrícula CPU", L"CPU 그리드 열 수", L"CPU 网格列数", L"عدد أعمدة شبكة المعالج", L"Число столбцов сетки CPU", L"Spaltenanzahl des CPU-Rasters", L"Numero de colunas da grade CPU", L"Aantal kolommen CPU-raster", L"Liczba kolumn siatki CPU", L"CPU izgara sutun sayisi"));
+		if (cols) {
+			cols->AddCheck(kCmdColsAuto,
+				LL14(L"自動", L"Auto", L"Auto", L"Auto", L"Auto", L"자동", L"自动", L"تلقائي", L"Авто", L"Auto", L"Auto", L"Auto", L"Auto", L"Otomatik"),
+				m_gridCols == 0);
+			cols->AddCheck(kCmdCols4, _T("4"), m_gridCols == 4);
+			cols->AddCheck(kCmdCols6, _T("6"), m_gridCols == 6);
+			cols->AddCheck(kCmdCols8, _T("8"), m_gridCols == 8);
+		}
+	}
 
-	const UINT cmd = menu.TrackPopupMenu(TPM_RETURNCMD | TPM_RIGHTBUTTON, screenPt.x, screenPt.y, this);
+	const UINT cmd = menu.Track(screenPt, this);
 	switch (cmd) {
 	case kCmdViewAll: SetViewMode(VIEW_ALL); break;
 	case kCmdViewMem: SetViewMode(VIEW_MEM); break;
@@ -13372,7 +13385,13 @@ static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
     pDlg->ModifyStyle(DS_MODALFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX, 0);
     // ホスト α 時は CLIPCHILDREN 必須（親塗りがリスト等のスクロールバーを潰すのを防ぐ）
     pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
-    e->acrylicCaption = TRUE; // 常時1。savedata.aero とは独立
+    // デスクトップ歌詞は LWA_ALPHA 透過度のためアクリル帯を使わない
+    // （EnsureBackdrop / ApplyAero が WS_EX_LAYERED を剥がすとスライダーが無効になる）
+    e->acrylicCaption = TRUE;
+    if (pDlg->GetRuntimeClass()
+        && pDlg->GetRuntimeClass()->m_lpszClassName
+        && strcmp(pDlg->GetRuntimeClass()->m_lpszClassName, "CDesktopLyricsWnd") == 0)
+        e->acrylicCaption = FALSE;
     e->installed = TRUE;
 
     // 先に NC 吸収（FRAMECHANGED）。ExtendFrame より後に FRAMECHANGED すると
@@ -13993,36 +14012,41 @@ static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainL
     HWND hWnd = pDlg->GetSafeHwnd();
     CPoint scr = ptClient;
     pDlg->ClientToScreen(&scr);
-    CMenu menu;
-    menu.CreatePopupMenu();
+    CCustomPopupMenu menu;
     const BOOL zoomed = pDlg->IsZoomed();
-    menu.AppendMenu(MF_STRING | (zoomed ? 0 : MF_GRAYED), SC_RESTORE,
-        LL14(L"元のサイズに戻す", L"Restore", L"Restaurer", L"Ripristina", L"Restaurar", L"이전 크기로", L"还原", L"استعادة", L"Восстановить", L"Wiederherstellen", L"Restaurar", L"Vorige grootte", L"Przywroc", L"Onceki boyut"));
-    menu.AppendMenu(MF_STRING, SC_MOVE,
+    menu.AddCommand(SC_RESTORE,
+        LL14(L"元のサイズに戻す", L"Restore", L"Restaurer", L"Ripristina", L"Restaurar", L"이전 크기로", L"还原", L"استعادة", L"Восстановить", L"Wiederherstellen", L"Restaurar", L"Vorige grootte", L"Przywroc", L"Onceki boyut"),
+        NULL, zoomed);
+    menu.AddCommand(SC_MOVE,
         LL14(L"移動", L"Move", L"Deplacer", L"Sposta", L"Mover", L"이동", L"移动", L"تحريك", L"Переместить", L"Verschieben", L"Mover", L"Verplaatsen", L"Przesun", L"Tasi"));
     if (pDlg->GetStyle() & WS_THICKFRAME)
-        menu.AppendMenu(MF_STRING | (zoomed ? MF_GRAYED : 0), SC_SIZE,
-            LL14(L"サイズ変更", L"Size", L"Taille", L"Dimensiona", L"Tamano", L"크기 조정", L"大小", L"الحجم", L"Размер", L"Groesse", L"Tamanho", L"Grootte", L"Rozmiar", L"Boyut"));
+        menu.AddCommand(SC_SIZE,
+            LL14(L"サイズ変更", L"Size", L"Taille", L"Dimensiona", L"Tamano", L"크기 조정", L"大小", L"الحجم", L"Размер", L"Groesse", L"Tamanho", L"Grootte", L"Rozmiar", L"Boyut"),
+            NULL, !zoomed);
     CCC_CaptionEntry* e = CCC_FindCaption(hWnd);
     if (e && e->hasMin)
-        menu.AppendMenu(MF_STRING, SC_MINIMIZE,
+        menu.AddCommand(SC_MINIMIZE,
             LL14(L"最小化", L"Minimize", L"Reduire", L"Riduci a icona", L"Minimizar", L"최소화", L"最小化", L"تصغير", L"Свернуть", L"Minimieren", L"Minimizar", L"Minimaliseren", L"Minimalizuj", L"Kucult"));
     if (e && e->hasMax)
-        menu.AppendMenu(MF_STRING | (zoomed ? MF_GRAYED : 0), SC_MAXIMIZE,
-            LL14(L"最大化", L"Maximize", L"Agrandir", L"Ingrandisci", L"Maximizar", L"최대화", L"最大化", L"تكبير", L"Развернуть", L"Maximieren", L"Maximizar", L"Maximaliseren", L"Maksymalizuj", L"Buyut"));
-    menu.AppendMenu(MF_SEPARATOR, 0, (LPCWSTR)NULL);
+        menu.AddCommand(SC_MAXIMIZE,
+            LL14(L"最大化", L"Maximize", L"Agrandir", L"Ingrandisci", L"Maximizar", L"최대화", L"最大化", L"تكبير", L"Развернуть", L"Maximieren", L"Maximizar", L"Maximaliseren", L"Maksymalizuj", L"Buyut"),
+            NULL, !zoomed);
+    menu.AddSeparator();
     if (e && e->hasSettings)
-        menu.AppendMenu(MF_STRING, IDC_CAP_SETTINGS,
+        menu.AddCommand(IDC_CAP_SETTINGS,
             LL14(L"設定", L"Settings", L"Parametres", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"الإعدادات", L"Настройки", L"Einstellungen", L"Configuracoes", L"Instellingen", L"Ustawienia", L"Ayarlar"));
     if (e)
-        menu.AppendMenu(MF_STRING | (e->topmost ? MF_CHECKED : 0), IDC_CAP_PIN,
-            LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위", L"总在最前", L"دائماً في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd bovenop", L"Zawsze na wierzchu", L"Her zaman ustte"));
+        menu.AddCheck(IDC_CAP_PIN,
+            LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위", L"总在最前", L"دائماً في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd bovenop", L"Zawsze na wierzchu", L"Her zaman ustte"),
+            e->topmost);
     if (pMainLockSave) {
         CCC_MainLockEntry* le = CCC_FindMainLockEntry(hWnd);
-        menu.AppendMenu(MF_STRING | ((le && le->locked) ? MF_CHECKED : 0), IDC_MAINWIN_LOCK, CCC_MainLockLabel());
+        menu.AddCheck(IDC_MAINWIN_LOCK, CCC_MainLockLabel(), (le && le->locked) ? TRUE : FALSE,
+            LL14(L"メイン窓の位置・サイズを固定", L"Lock main window position and size", L"Verrouiller position/taille", L"Blocca posizione/dimensione",
+                L"Bloquear posicion/tamano", L"메인 창 위치·크기 고정", L"锁定主窗口位置和大小", L"قفل موضع/حجم النافذة",
+                L"Зафиксировать положение/размер", L"Position/Groesse sperren", L"Travar posicao/tamanho", L"Positie/grootte vergrendelen",
+                L"Zablokuj pozycje/rozmiar", L"Ana pencere konum/boyut kilitle"));
     }
-    // GetSystemMenu に追加された項目(バージョン情報/About 等)を載せる。
-    // 自前メニューだけでは IDM_ABOUTBOX が欠ける。
     {
         HMENU hSys = ::GetSystemMenu(hWnd, FALSE);
         if (hSys) {
@@ -14031,12 +14055,12 @@ static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainL
             for (int i = 0; i < nSys; ++i) {
                 const UINT id = ::GetMenuItemID(hSys, i);
                 if (id == 0 || id == (UINT)-1) continue;
-                if (id >= 0xF000) continue; // SC_* は上で追加済み
+                if (id >= 0xF000) continue;
                 anyCustom = TRUE;
                 break;
             }
             if (anyCustom) {
-                menu.AppendMenu(MF_SEPARATOR, 0, (LPCWSTR)NULL);
+                menu.AddSeparator();
                 for (int i = 0; i < nSys; ++i) {
                     const UINT id = ::GetMenuItemID(hSys, i);
                     if (id == 0 || id == (UINT)-1) continue;
@@ -14045,15 +14069,15 @@ static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainL
                     text[0] = 0;
                     ::GetMenuStringW(hSys, i, text, 256, MF_BYPOSITION);
                     if (text[0])
-                        menu.AppendMenu(MF_STRING, id, text);
+                        menu.AddCommand(id, text);
                 }
             }
         }
     }
-    menu.AppendMenu(MF_SEPARATOR, 0, (LPCWSTR)NULL);
-    menu.AppendMenu(MF_STRING, SC_CLOSE,
+    menu.AddSeparator();
+    menu.AddCommand(SC_CLOSE,
         LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
-    const UINT cmd = menu.TrackPopupMenu(TPM_RETURNCMD | TPM_RIGHTBUTTON, scr.x, scr.y, pDlg);
+    const UINT cmd = menu.Track(scr, pDlg);
     if (cmd == IDC_CAP_SETTINGS)
         pDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CAP_SETTINGS, BN_CLICKED), 0);
     else if (cmd == IDC_CAP_PIN)

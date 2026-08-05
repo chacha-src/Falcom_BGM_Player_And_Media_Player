@@ -92,6 +92,10 @@ static inline BOOL CCC_IsInwoman()
 BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd);
 // 淫女モードのアニメ用に全ウィンドウを定期再描画するタイマーを用意(冪等)
 void CCC_StartInwomanTimer();
+// 不透明パネル等への淫女オーバーレイ描画（ポップアップメニュー等から利用）
+void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans);
+// コンテキストメニューからアクリルON/OFFしたとき全UIへ再適用
+void CCC_NotifyAeroSettingChanged();
 
 // モーダルダイアログを親の背後に隠さず前面へ出す(メディアプレイヤー等)
 inline void CCC_BringDialogToForeground(CWnd* dlg)
@@ -1806,3 +1810,5 @@ private:
     int* m_pMainLockSave = nullptr;
     CToolTipCtrl m_capTip;
 };
+
+#include "CCustomPopupMenu.h"

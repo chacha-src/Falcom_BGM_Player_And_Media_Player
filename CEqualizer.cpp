@@ -1178,17 +1178,27 @@ void CEqualizer::OnToggleKeyEqAuto()
 
 void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
-	CMenu menu;
-	menu.CreatePopupMenu();
-	menu.AppendMenu(MF_STRING, IDM_EQ_SUGGEST_KEY,
-		LL14(L"キーからEQを提案", L"Suggest EQ from key", L"Suggérer EQ depuis la tonalité", L"Suggerisci EQ dalla tonalità", L"Sugerir EQ desde tonalidad", L"키에서 EQ 제안", L"根据调性建议 EQ", L"اقتراح EQ من المفتاح", L"Предложить EQ по тональности", L"EQ aus Tonart vorschlagen", L"Sugerir EQ pela tonalidade", L"EQ voorstellen uit toonsoort", L"Zaproponuj EQ z tonacji", L"Anahtardan EQ oner"));
-	menu.AppendMenu(MF_STRING | (savedata.mpKeyEqSuggest ? MF_CHECKED : 0), IDM_EQ_KEY_AUTO,
-		LL14(L"キー検出時に自動提案", L"Auto-suggest on key detect", L"Suggestion auto sur détection", L"Suggerimento auto su rilevamento", L"Sugerencia auto al detectar", L"키 검출 시 자동 제안", L"检测到调性时自动建议", L"اقتراح تلقائي عند الكشف", L"Авто-предложение по ключу", L"Auto-Vorschlag bei Erkennung", L"Sugestao auto na deteccao", L"Auto-voorstel bij detectie", L"Auto-propozycja przy wykryciu", L"Algilamada otomatik oneri"));
+	CCustomPopupMenu menu;
+	menu.AddCommand(IDM_EQ_SUGGEST_KEY,
+		LL14(L"キーからEQを提案", L"Suggest EQ from key", L"Suggérer EQ depuis la tonalité", L"Suggerisci EQ dalla tonalità", L"Sugerir EQ desde tonalidad", L"키에서 EQ 제안", L"根据调性建议 EQ", L"اقتراح EQ من المفتاح", L"Предложить EQ по тональности", L"EQ aus Tonart vorschlagen", L"Sugerir EQ pela tonalidade", L"EQ voorstellen uit toonsoort", L"Zaproponuj EQ z tonacji", L"Anahtardan EQ oner"),
+		LL14(L"検出中のキーに合わせたEQカーブを提案する", L"Suggest an EQ curve matching the detected key",
+			L"Proposer une courbe EQ selon la tonalité détectée", L"Suggerisci una curva EQ per la tonalità rilevata",
+			L"Sugerir una curva EQ según la tonalidad detectada", L"감지된 키에 맞는 EQ 커브 제안",
+			L"按检测到的调性建议 EQ 曲线", L"اقتراح منحنى EQ حسب المفتاح المكتشف",
+			L"Предложить кривую EQ по обнаруженной тональности", L"EQ-Kurve zur erkannten Tonart vorschlagen",
+			L"Sugerir curva EQ conforme a tonalidade detectada", L"EQ-curve voorstellen bij gedetecteerde toonsoort",
+			L"Zaproponuj krzywą EQ dla wykrytej tonacji", L"Algılanan anahtara uygun EQ eğrisi öner"));
+	menu.AddCheck(IDM_EQ_KEY_AUTO,
+		LL14(L"キー検出時に自動提案", L"Auto-suggest on key detect", L"Suggestion auto sur détection", L"Suggerimento auto su rilevamento", L"Sugerencia auto al detectar", L"키 검출 시 자동 제안", L"检测到调性时自动建议", L"اقتراح تلقائي عند الكشف", L"Авто-предложение по ключу", L"Auto-Vorschlag bei Erkennung", L"Sugestao auto na deteccao", L"Auto-voorstel bij detectie", L"Auto-propozycja przy wykryciu", L"Algilamada otomatik oneri"),
+		savedata.mpKeyEqSuggest != 0,
+		LL14(L"キーが変わると自動でEQを提案", L"Auto-suggest EQ when the key changes", L"Suggérer EQ auto si la tonalité change", L"Suggerisci EQ auto al cambio tonalità", L"Sugerir EQ auto al cambiar tonalidad", L"키가 바뀌면 EQ 자동 제안", L"调性变化时自动建议 EQ", L"اقتراح EQ تلقائياً عند تغير المفتاح", L"Авто-предлагать EQ при смене ключа", L"EQ auto vorschlagen bei Tonartwechsel", L"Sugerir EQ auto ao mudar tonalidade", L"EQ auto voorstellen bij toonsoortwissel", L"Auto-proponuj EQ przy zmianie tonacji", L"Anahtar degisince EQ otomatik oner"));
 	if (point.x == -1 && point.y == -1) {
 		CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
 		point = CPoint(rc.left + 8, rc.top + 8);
 	}
-	menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_RIGHTBUTTON, point.x, point.y, this);
+	const UINT cmd = menu.Track(point, this);
+	if (cmd)
+		SendMessage(WM_COMMAND, cmd);
 }
 
 int backms = 0;
