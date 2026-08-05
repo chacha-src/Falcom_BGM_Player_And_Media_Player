@@ -296,20 +296,20 @@ void CSyHelpDlg::OnPaint()
 		L"· Szczegóły …… otwiera pętlę/cue/tagi",
 		L"· Oynatma ayrıntıları …… döngü/cue/etiket penceresini açar")); y += lh;
 	muted(L, y, LL14(
-		L"★削除は曲ごとの音量・EQ 等の記憶パラメータを消します。閉じるは保存しません。",
-		L"Clear ★ removes per-track volume/EQ memory. Close does not save.",
-		L"Effacer ★ supprime volume/EQ mémorisés. Fermer n'enregistre pas.",
-		L"Cancella ★ rimuove volume/EQ salvati. Chiudi non salva.",
-		L"Borrar ★ quita volumen/EQ guardados. Cerrar no guarda.",
-		L"★삭제는 곡별 볼륨·EQ 기억을 지웁니다. 닫기는 저장하지 않습니다.",
-		L"删除★会清除逐曲音量/EQ记忆。关闭不保存。",
-		L"مسح ★ يحذف ذاكرة الصوت/EQ. الإغلاق لا يحفظ.",
-		L"Удалить ★ стирает громкость/EQ трека. Закрыть не сохраняет.",
-		L"★ löschen entfernt Lautstärke/EQ. Schließen speichert nicht.",
-		L"Limpar ★ remove volume/EQ. Fechar não salva.",
-		L"★ wissen verwijdert volume/EQ. Sluiten slaat niet op.",
-		L"Usuń ★ kasuje głośność/EQ. Zamknij nie zapisuje.",
-		L"★ sil parça ses/EQ belleğini siler. Kapat kaydetmez."));
+		L"[SAV]削除は曲ごとの音量・EQ 等の記憶パラメータを消します。閉じるは保存しません。",
+		L"Clear [SAV] removes per-track volume/EQ memory. Close does not save.",
+		L"Effacer [SAV] supprime volume/EQ mémorisés. Fermer n'enregistre pas.",
+		L"Cancella [SAV] rimuove volume/EQ salvati. Chiudi non salva.",
+		L"Borrar [SAV] quita volumen/EQ guardados. Cerrar no guarda.",
+		L"[SAV]삭제는 곡별 볼륨·EQ 기억을 지웁니다. 닫기는 저장하지 않습니다.",
+		L"删除[SAV]会清除逐曲音量/EQ记忆。关闭不保存。",
+		L"مسح [SAV] يحذف ذاكرة الصوت/EQ. الإغلاق لا يحفظ.",
+		L"Удалить [SAV] стирает громкость/EQ трека. Закрыть не сохраняет.",
+		L"[SAV] löschen entfernt Lautstärke/EQ. Schließen speichert nicht.",
+		L"Limpar [SAV] remove volume/EQ. Fechar não salva.",
+		L"[SAV] wissen verwijdert volume/EQ. Sluiten slaat niet op.",
+		L"Usuń [SAV] kasuje głośność/EQ. Zamknij nie zapisuje.",
+		L"[SAV] sil parça ses/EQ belleğini siler. Kapat kaydetmez."));
 
 	dc.SelectObject(oldFont);
 }
@@ -601,20 +601,20 @@ void CListSyosai::RefreshStatusLines()
 	const bool has = SongParams_HasEntry(list, path.IsEmpty() ? pc.fol : path, pc.sub, pc.ret2);
 	CString param;
 	if (has) {
-		param = LL14(L"★ 曲ごと設定あり", L"★ Per-song settings saved", L"★ Réglages/morceau", L"★ Impost. per brano",
-			L"★ Ajustes por pista", L"★ 곡별 설정 있음", L"★ 有逐曲设置", L"★ إعدادات لكل أغنية",
-			L"★ Есть настройки трека", L"★ Pro-Titel-Einstellungen", L"★ Config. por faixa",
-			L"★ Per-nummer-instellingen", L"★ Ustawienia utworu", L"★ Parça ayarları var");
+		param = LL14(L"[SAV] 曲ごと設定あり", L"[SAV] Per-song settings saved", L"[SAV] Réglages/morceau", L"[SAV] Impost. per brano",
+			L"[SAV] Ajustes por pista", L"[SAV] 곡별 설정 있음", L"[SAV] 有逐曲设置", L"[SAV] إعدادات لكل أغنية",
+			L"[SAV] Есть настройки трека", L"[SAV] Pro-Titel-Einstellungen", L"[SAV] Config. por faixa",
+			L"[SAV] Per-nummer-instellingen", L"[SAV] Ustawienia utworu", L"[SAV] Parça ayarları var");
 		if (!tip.IsEmpty()) {
 			param += _T(": ");
 			param += tip;
 		}
 	}
 	else {
-		param = LL14(L"★ 曲ごと設定なし", L"★ No per-song settings", L"★ Pas de réglages/morceau", L"★ Nessuna impost. per brano",
-			L"★ Sin ajustes por pista", L"★ 곡별 설정 없음", L"★ 无逐曲设置", L"★ لا إعدادات لكل أغنية",
-			L"★ Нет настроек трека", L"★ Keine Pro-Titel-Einstellungen", L"★ Sem config. por faixa",
-			L"★ Geen per-nummer-instellingen", L"★ Brak ustawień utworu", L"★ Parça ayarı yok");
+		param = LL14(L"[SAV] なし（未保存）", L"[SAV] none (not saved)", L"[SAV] aucun (non sauvé)", L"[SAV] nessuno (non salvato)",
+			L"[SAV] ninguno (no guardado)", L"[SAV] 없음(미저장)", L"[SAV] 无（未保存）", L"[SAV] لا (غير محفوظ)",
+			L"[SAV] нет (не сохранено)", L"[SAV] keine (nicht gespeichert)", L"[SAV] nenhum (não salvo)",
+			L"[SAV] geen (niet opgeslagen)", L"[SAV] brak (niezapisane)", L"[SAV] yok (kaydedilmedi)");
 	}
 	m_lblParam.SetWindowText(param);
 
@@ -870,7 +870,7 @@ BOOL CListSyosai::OnInitDialog()
 	SetDlgItemText(IDC_SYOSAI_BTN_COPYPATH, LL14(L"パスコピー", L"Copy path", L"Copier chemin", L"Copia percorso", L"Copiar ruta", L"경로 복사", L"复制路径", L"نسخ المسار", L"Копировать путь", L"Pfad kopieren", L"Copiar caminho", L"Pad kopiëren", L"Kopiuj ścieżkę", L"Yolu kopyala"));
 	SetDlgItemText(IDC_SYOSAI_BTN_COPYNAME, LL14(L"名コピー", L"Copy name", L"Copier nom", L"Copia nome", L"Copiar nombre", L"이름 복사", L"复制文件名", L"نسخ الاسم", L"Копировать имя", L"Name kopieren", L"Copiar nome", L"Naam kopiëren", L"Kopiuj nazwę", L"Adı kopyala"));
 	SetDlgItemText(IDC_SYOSAI_BTN_PROTOOLS, LL14(L"再生詳細", L"Playback details", L"Details lecture", L"Dettagli riproduzione", L"Detalles reproducción", L"재생 상세", L"播放详情", L"تفاصيل التشغيل", L"Детали воспроизведения", L"Wiedergabedetails", L"Detalhes de reprodução", L"Afspeeldetails", L"Szczegóły odtwarzania", L"Oynatma ayrıntıları"));
-	SetDlgItemText(IDC_SYOSAI_BTN_CLEARPARAM, LL14(L"★削除", L"Clear ★", L"Effacer ★", L"Cancella ★", L"Borrar ★", L"★ 삭제", L"删除★", L"مسح ★", L"Удалить ★", L"★ löschen", L"Limpar ★", L"★ wissen", L"Usuń ★", L"★ sil"));
+	SetDlgItemText(IDC_SYOSAI_BTN_CLEARPARAM, LL14(L"[SAV]削除", L"Clear [SAV]", L"Effacer [SAV]", L"Cancella [SAV]", L"Borrar [SAV]", L"[SAV] 삭제", L"删除[SAV]", L"مسح [SAV]", L"Удалить [SAV]", L"[SAV] löschen", L"Limpar [SAV]", L"[SAV] wissen", L"Usuń [SAV]", L"[SAV] sil"));
 	SetDlgItemText(IDC_SYOSAI_GRP_EDIT, LL14(L"プレイリスト", L"Playlist", L"Liste de lecture", L"Playlist", L"Lista de reproducción", L"재생 목록", L"播放列表", L"قائمة التشغيل", L"Плейлист", L"Wiedergabeliste", L"Lista de reprodução", L"Afspeellijst", L"Playlista", L"Çalma listesi"));
 	SetDlgItemText(IDC_SYOSAI_GRP_TAG, LL14(L"タグ情報", L"Tag info", L"Infos balises", L"Info tag", L"Info. de etiquetas", L"태그 정보", L"标签信息", L"معلومات الوسم", L"Теги", L"Tag-Info", L"Info. de tags", L"Taginfo", L"Info. o tagach", L"Etiket bilgisi"));
 	SetDlgItemText(IDC_SYOSAI_GRP_INTERNAL, LL14(L"内部情報", L"Internal info", L"Infos internes", L"Info interne", L"Info. interna", L"내부 정보", L"内部信息", L"معلومات داخلية", L"Служебная информация", L"Interne Info", L"Info. interna", L"Interne info", L"Info. wewnętrzne", L"Dahili bilgi"));

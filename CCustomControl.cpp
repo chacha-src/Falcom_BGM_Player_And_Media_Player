@@ -1916,6 +1916,136 @@ static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT 
     dc.RestoreDC(-1);
 }
 
+// 名前列/印列の [SAV]/[LRC] を抜き出し、色付きチップ描画用に分離する。
+static void CCC_ExtractSavLrc(CString& text, BOOL& bSav, BOOL& bLrc)
+{
+    bSav = FALSE;
+    bLrc = FALSE;
+    if (text.IsEmpty()) return;
+
+    // 先頭の欠損印「⚠ 」は残す
+    CString head;
+    int i = 0;
+    const int n = text.GetLength();
+    while (i < n && text[i] != _T('[')) {
+        head.AppendChar(text[i]);
+        ++i;
+    }
+    CString rest = (i < n) ? text.Mid(i) : CString();
+    for (;;) {
+        if (rest.GetLength() >= 5 && rest.Left(5) == _T("[SAV]")) {
+            bSav = TRUE;
+            rest = rest.Mid(5);
+            continue;
+        }
+        if (rest.GetLength() >= 5 && rest.Left(5) == _T("[LRC]")) {
+            bLrc = TRUE;
+            rest = rest.Mid(5);
+            continue;
+        }
+        if (!rest.IsEmpty() && (rest[0] == _T(' ') || rest[0] == _T('\t'))) {
+            rest = rest.Mid(1);
+            continue;
+        }
+        break;
+    }
+    // head 末尾の空白は1つ残して体裁を整える（⚠ の直後など）
+    while (head.GetLength() > 1 && head[head.GetLength() - 1] == _T(' ')
+        && head[head.GetLength() - 2] == _T(' '))
+        head = head.Left(head.GetLength() - 1);
+    text = head + rest;
+}
+
+// 小さな色タグ（アイコン代わり）。戻り=消費幅(余白込み)
+static int CCC_DrawMarkChip(CDC* pDC, int x, int midY, LPCTSTR label,
+    COLORREF bg, COLORREF fg, BOOL bOpaque)
+{
+    if (!pDC || !label || !label[0]) return 0;
+
+    CFont* pCur = pDC->GetCurrentFont();
+    LOGFONT lf = {};
+    if (pCur) pCur->GetLogFont(&lf);
+    const int base = lf.lfHeight ? abs(lf.lfHeight) : 12;
+    lf.lfHeight = -max(8, (base * 76) / 100);
+    lf.lfWeight = FW_BOLD;
+    CFont fontChip;
+    if (!fontChip.CreateFontIndirect(&lf))
+        return 0;
+    CFont* pOf = pDC->SelectObject(&fontChip);
+    const CSize sz = pDC->GetTextExtent(label);
+    const int padX = 4;
+    const int padY = 1;
+    int w = sz.cx + padX * 2;
+    int h = sz.cy + padY * 2;
+    if (w < 20) w = 20;
+    if (h < 12) h = 12;
+    if (h > 18) h = 18;
+    CRect rc(x, midY - h / 2, x + w, midY + h / 2);
+    if (rc.top < 0) { rc.OffsetRect(0, -rc.top); }
+
+#if CCUSTOM_AERO_SUPPORT
+    if (bOpaque)
+        CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), rc, bg);
+    else
+#endif
+        pDC->FillSolidRect(&rc, bg);
+
+    // ごく薄いハイライト帯（上1px）でチップ感
+    CRect hi(rc.left + 1, rc.top, rc.right - 1, rc.top + 1);
+#if CCUSTOM_AERO_SUPPORT
+    if (bOpaque)
+        CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), hi, CCC_Lighten(bg, 36));
+    else
+#endif
+        pDC->FillSolidRect(&hi, CCC_Lighten(bg, 36));
+
+    pDC->SetBkMode(TRANSPARENT);
+    pDC->SetTextColor(fg);
+    pDC->DrawText(label, (int)_tcslen(label), &rc,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    pDC->SelectObject(pOf);
+    return w + 3;
+}
+
+// SAV=琥珀 / LRC=青。文字は黒固定（白字はアクリル上で読みにくい）
+static int CCC_DrawSavLrcChips(CDC* pDC, int x, int midY, BOOL bSav, BOOL bLrc, BOOL bOpaque)
+{
+    if (!bSav && !bLrc) return x;
+    const COLORREF fg = RGB(20, 20, 24);
+    if (bSav)
+        x += CCC_DrawMarkChip(pDC, x, midY, _T("SAV"),
+            RGB(255, 214, 160), fg, bOpaque);
+    if (bLrc)
+        x += CCC_DrawMarkChip(pDC, x, midY, _T("LRC"),
+            RGB(186, 210, 255), fg, bOpaque);
+    return x;
+}
+
+static int CCC_MeasureSavLrcChips(CDC* pDC, BOOL bSav, BOOL bLrc)
+{
+    if (!pDC || (!bSav && !bLrc)) return 0;
+    CFont* pCur = pDC->GetCurrentFont();
+    LOGFONT lf = {};
+    if (pCur) pCur->GetLogFont(&lf);
+    const int base = lf.lfHeight ? abs(lf.lfHeight) : 12;
+    lf.lfHeight = -max(8, (base * 76) / 100);
+    lf.lfWeight = FW_BOLD;
+    CFont fontChip;
+    if (!fontChip.CreateFontIndirect(&lf)) return 0;
+    CFont* pOf = pDC->SelectObject(&fontChip);
+    int w = 0;
+    if (bSav) {
+        CSize s = pDC->GetTextExtent(_T("SAV"));
+        w += max(20, s.cx + 8) + 3;
+    }
+    if (bLrc) {
+        CSize s = pDC->GetTextExtent(_T("LRC"));
+        w += max(20, s.cx + 8) + 3;
+    }
+    pDC->SelectObject(pOf);
+    return w;
+}
+
 static void DrawListSubitemCellText(CDC* pDC, const CString& str, const CRect& rcInner, UINT uAlignFmt = DT_LEFT)
 {
     if (!pDC || str.IsEmpty() || rcInner.Width() <= 0 || rcInner.Height() <= 0) return;
@@ -6825,11 +6955,26 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                     CDC src;
                     src.CreateCompatibleDC(pDC);
                     HGDIOBJ old = src.SelectObject(hb);
-                    pDC->SetStretchBltMode(COLORONCOLOR);
                     BITMAP bm; ZeroMemory(&bm, sizeof(bm));
                     ::GetObject(hb, sizeof(bm), &bm);
-                    if (bm.bmWidth > 0 && bm.bmHeight > 0)
-                        pDC->StretchBlt(rj.left, rj.top, jsz, jsz, &src, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+                    if (bm.bmWidth > 0 && bm.bmHeight > 0) {
+                        // CreateCompatibleBitmap 由来のサムネは α=0 が多い。
+                        // 素 StretchBlt だとアクリル上でホバー部分再描画時に透ける。
+                        // α=255 付き不透明 Blit に統一する。
+#if CCUSTOM_AERO_SUPPORT
+                        if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(m_hWnd)
+                            || CCC_HostNeedsChildOpaque(m_hWnd))) {
+                            CCC_BlitStretchOpaque(pDC->GetSafeHdc(),
+                                rj.left, rj.top, jsz, jsz,
+                                src.GetSafeHdc(), 0, 0, bm.bmWidth, bm.bmHeight);
+                        } else
+#endif
+                        {
+                            pDC->SetStretchBltMode(COLORONCOLOR);
+                            pDC->StretchBlt(rj.left, rj.top, jsz, jsz, &src,
+                                0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+                        }
+                    }
                     src.SelectObject(old);
                     src.DeleteDC();
                 }
@@ -6857,10 +7002,23 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                     ::DestroyIcon(hNote);
                 }
             }
-            if (bH && !bS) DrawStar(pDC, noteX + 8, noteY + 8, 2, RGB(255, 215, 0));
+            // ホバー印: DrawStar(ペン線)はアクリル上で α=0→黒線/透けになるので使わない。
+            // 行背景の淡色(上で塗済)だけで十分。左端に不透明の細いアクセントのみ。
+            if (bH && !bS) {
+#if CCUSTOM_AERO_SUPPORT
+                if (bCapGlass)
+                    CCC_FillRectOpaqueBits(pDC->GetSafeHdc(),
+                        CRect(r.left, r.top, r.left + 3, r.bottom), RGB(90, 150, 220));
+                else
+#endif
+                    pDC->FillSolidRect(r.left, r.top, 3, r.Height(), RGB(90, 150, 220));
+            }
         }
 
         CString st = GetItemText(ni, ns);
+        BOOL bSav = FALSE, bLrc = FALSE;
+        CCC_ExtractSavLrc(st, bSav, bLrc);
+        const BOOL bOpaqueChips = bCapGlass;
         pDC->SetTextColor(m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0));
         pDC->SetBkMode(TRANSPARENT);
 
@@ -6898,18 +7056,53 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         }
 
         CFont* po = pDC->SelectObject(GetFont());
-        DrawListSubitemCellText(pDC, st, rt, uColFmt);
+        const int midY = (r.top + r.bottom) / 2;
+        if (bSav || bLrc) {
+            if (st.IsEmpty() && (uColFmt & DT_CENTER)) {
+                // 印列のみ: チップを中央寄せ
+                const int chipsW = CCC_MeasureSavLrcChips(pDC, bSav, bLrc);
+                int x = r.left + (r.Width() - chipsW) / 2;
+                if (x < r.left + 2) x = r.left + 2;
+                CCC_DrawSavLrcChips(pDC, x, midY, bSav, bLrc, bOpaqueChips);
+            } else {
+                // 名前列: チップ → 曲名
+                int x = rt.left;
+                x = CCC_DrawSavLrcChips(pDC, x, midY, bSav, bLrc, bOpaqueChips);
+                if (x + 2 < rt.right)
+                    rt.left = x + 1;
+                if (!st.IsEmpty() && rt.Width() > 4)
+                    DrawListSubitemCellText(pDC, st, rt, DT_LEFT);
+            }
+        } else if (!st.IsEmpty()) {
+            DrawListSubitemCellText(pDC, st, rt, uColFmt);
+        }
         pDC->SelectObject(po);
 
-        if (nCols > 0 && ns == nCols - 1)
-            DrawLaceLine(pDC, r.left + 10, r.bottom - 1, r.right - 10, r.bottom - 1, RGB(200, 180, 220));
+        // 装飾線: アクリル上の素 Pen/Ellipse は α=0 で黒線・透けになる → 不透明1px塗りに置換
+        if (nCols > 0 && ns == nCols - 1) {
+#if CCUSTOM_AERO_SUPPORT
+            if (bCapGlass)
+                CCC_FillRectOpaqueBits(pDC->GetSafeHdc(),
+                    CRect(r.left + 10, r.bottom - 1, r.right - 10, r.bottom), RGB(200, 180, 220));
+            else
+#endif
+                DrawLaceLine(pDC, r.left + 10, r.bottom - 1, r.right - 10, r.bottom - 1, RGB(200, 180, 220));
+        }
         if (GetExtendedStyle() & LVS_EX_GRIDLINES)
         {
-            CPen pp(PS_SOLID, 1, RGB(220, 220, 230));
-            CPen* po2 = pDC->SelectObject(&pp);
-            pDC->MoveTo(r.left, r.bottom - 1);
-            pDC->LineTo(r.right, r.bottom - 1);
-            pDC->SelectObject(po2);
+#if CCUSTOM_AERO_SUPPORT
+            if (bCapGlass)
+                CCC_FillRectOpaqueBits(pDC->GetSafeHdc(),
+                    CRect(r.left, r.bottom - 1, r.right, r.bottom), RGB(220, 220, 230));
+            else
+#endif
+            {
+                CPen pp(PS_SOLID, 1, RGB(220, 220, 230));
+                CPen* po2 = pDC->SelectObject(&pp);
+                pDC->MoveTo(r.left, r.bottom - 1);
+                pDC->LineTo(r.right, r.bottom - 1);
+                pDC->SelectObject(po2);
+            }
         }
         *pResult = CDRF_SKIPDEFAULT;
         break;

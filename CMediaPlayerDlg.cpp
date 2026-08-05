@@ -1640,7 +1640,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_list.m_mpRowMissGet = MpRowMissGetCb;
 	m_list.m_bCol1IsRating = true;
 	m_list.InsertColumn(0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, (int)(220 * hD2));
-	// 列1はレーティング(クリックで0〜5)。曲ごと設定★ / 歌詞♪は名前列先頭の印。
+	// 列1はレーティング(クリックで0〜5)。曲ごと保存[SAV] / 歌詞[LRC]は名前列先頭の印。
 	m_list.InsertColumn(1, LL14(L"評価", L"Rate", L"Note", L"Voto", L"Nota", L"평점", L"评分", L"تقييم", L"Оценка", L"Bew.", L"Nota", L"Cijfer", L"Ocena", L"Puan"), LVCFMT_CENTER, (int)(36 * hD2));
 	m_list.InsertColumn(2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, (int)(60 * hD2));
 	m_list.InsertColumn(3, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, (int)(72 * hD2));
@@ -9042,7 +9042,11 @@ void CMpCheatSheetDlg::OnPaint()
 	body(R, yR, LL14(L"・m3u入出力 / 検索 / 絞り込み / ▾ツール …… 並べ替え・Folder+", L"· m3u I/O / Find / Filter / ▾ tools …… sort & Folder+", L"· m3u / Recherche / Filtre / ▾ …… tri et Folder+", L"· m3u / Cerca / Filtro / ▾ …… ordina e Folder+",
 		L"· m3u / Buscar / Filtro / ▾ …… orden y Folder+", L"· m3u / 검색 / 필터 / ▾ …… 정렬·Folder+", L"· m3u / 搜索 / 筛选 / ▾ …… 排序与 Folder+", L"· m3u / بحث / تصفية / ▾ …… فرز و Folder+",
 		L"· m3u / Поиск / Фильтр / ▾ …… сорт и Folder+", L"· m3u / Suche / Filter / ▾ …… Sort und Folder+", L"· m3u / Busca / Filtro / ▾ …… ordem e Folder+", L"· m3u / Zoeken / Filter / ▾ …… sorteren en Folder+",
-		L"· m3u / Szukaj / Filtr / ▾ …… sort i Folder+", L"· m3u / Ara / Filtre / ▾ …… sırala ve Folder+")); yR += lh + 2;
+		L"· m3u / Szukaj / Filtr / ▾ …… sort i Folder+", L"· m3u / Ara / Filtre / ▾ …… sırala ve Folder+")); yR += lh;
+	body(R, yR, LL14(L"・名前の印 …… 橙SAV=曲ごと保存 / 青LRC=歌詞。色タグで表示（PLの印列も同じ）", L"· Name marks …… amber SAV=per-song saved / blue LRC=lyrics. Color chips (same in PL Mark col)", L"· Marques …… orange SAV / bleu LRC. Pastilles couleur", L"· Segni …… arancio SAV / blu LRC. Chip colorati",
+		L"· Marcas …… naranja SAV / azul LRC. Chips de color", L"· 이름 표시 …… 주황 SAV / 파랑 LRC. 컬러 태그", L"· 名称标记 …… 橙SAV / 蓝LRC。彩色标签", L"· علامات …… برتقالي SAV / أزرق LRC. شارات ملونة",
+		L"· Метки …… оранж. SAV / син. LRC. Цветные чипы", L"· Zeichen …… orange SAV / blau LRC. Farb-Chips", L"· Marcas …… laranja SAV / azul LRC. Chips coloridos", L"· Tekens …… oranje SAV / blauw LRC. Kleurchips",
+		L"· Znaki …… pomarańcz. SAV / nieb. LRC. Kolorowe chipy", L"· İşaret …… turuncu SAV / mavi LRC. Renkli etiket")); yR += lh + 2;
 
 	y = max(yL, yR) + 2;
 	yL = y; yR = y;

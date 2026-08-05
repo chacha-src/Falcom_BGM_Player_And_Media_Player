@@ -54,13 +54,13 @@ void CListCtrlA::BuildToolTipText(int row, int col, CString& out)
 				L" (클릭으로 변경)", L"（点击更改）", L" (انقر للتغيير)", L" (щелчок — изменить)", L" (Klick zum Andern)",
 				L" (clique para alterar)", L" (klik om te wijzigen)", L" (kliknij, by zmienic)", L" (degistirmek icin tikla)");
 		} else {
-			out += LL14(L"印: ★=曲ごと設定 / ♪=歌詞(.lrc)", L"Marks: ★=per-track settings / ♪=lyrics (.lrc)",
-				L"Marques : ★=réglages / ♪=paroles (.lrc)", L"Segni: ★=impostazioni / ♪=testi (.lrc)",
-				L"Marcas: ★=ajustes / ♪=letra (.lrc)", L"표시: ★=곡별 설정 / ♪=가사(.lrc)",
-				L"标记: ★=单曲设置 / ♪=歌词(.lrc)", L"علامات: ★=إعدادات / ♪=كلمات (.lrc)",
-				L"Метки: ★=настройки / ♪=текст (.lrc)", L"Zeichen: ★=Einstellungen / ♪=Liedtext (.lrc)",
-				L"Marcas: ★=definições / ♪=letra (.lrc)", L"Tekens: ★=instellingen / ♪=songtekst (.lrc)",
-				L"Znaki: ★=ustawienia / ♪=tekst (.lrc)", L"İşaret: ★=parça ayarı / ♪=söz (.lrc)");
+			out += LL14(L"印: 橙SAV=曲ごと保存 / 青LRC=歌詞(.lrc)", L"Marks: amber SAV=per-track saved / blue LRC=lyrics (.lrc)",
+				L"Marques : orange SAV=réglages / bleu LRC=paroles (.lrc)", L"Segni: arancio SAV=salvato / blu LRC=testi (.lrc)",
+				L"Marcas: naranja SAV=guardado / azul LRC=letra (.lrc)", L"표시: 주황 SAV=곡별 저장 / 파랑 LRC=가사(.lrc)",
+				L"标记: 橙SAV=逐曲已存 / 蓝LRC=歌词(.lrc)", L"علامات: برتقالي SAV=محفوظ / أزرق LRC=كلمات",
+				L"Метки: оранж. SAV=сохранено / син. LRC=текст", L"Zeichen: orange SAV=gespeichert / blau LRC=Liedtext",
+				L"Marcas: laranja SAV=salvo / azul LRC=letra", L"Tekens: oranje SAV=opgeslagen / blauw LRC=songtekst",
+				L"Znaki: pomarańcz. SAV=zapisane / nieb. LRC=tekst", L"İşaret: turuncu SAV=kayıtlı / mavi LRC=söz");
 			out += _T(" → ");
 			out += marks;
 		}

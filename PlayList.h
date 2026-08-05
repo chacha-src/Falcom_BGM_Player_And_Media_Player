@@ -193,7 +193,7 @@ void PlLrcDiskForget(LPCTSTR fol);
 CString PlLrcSidecarPath(LPCTSTR fol);
 // 未キャッシュならサイドカーを見て登録。戻り: 0=あり 1=なし (-1はfol不正)
 int PlLrcProbe(LPCTSTR fol);
-// ★/♪ 表示文字列(キャッシュのみ参照。未スキャンは空)
+// [SAV]=曲ごと保存 / [LRC]=歌詞(.lrc)。キャッシュのみ参照。未スキャンは空
 void PlFormatRowMarks(int row, LPCTSTR fol, CString& out);
 
 enum {

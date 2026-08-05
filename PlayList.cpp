@@ -792,7 +792,7 @@ BOOL CPlayList::OnInitDialog()
 	m_lc.DragAcceptFiles(TRUE);
 	m_lc.ModifyStyle ( 0, LVS_REPORT );
 	m_lc.InsertColumn ( 0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, 200, 0 );
-	m_lc.InsertColumn ( 1, LL14(L"印", L"Mark", L"Marq.", L"Segno", L"Marca", L"표시", L"标记", L"علامة", L"Метка", L"Zchn", L"Marca", L"Teken", L"Znak", L"Isaret"), LVCFMT_CENTER, (int)(32 * hD2), 0 ); // ★=曲ごと設定 / ♪=歌詞(.lrc)
+	m_lc.InsertColumn ( 1, LL14(L"印", L"Mark", L"Marq.", L"Segno", L"Marca", L"표시", L"标记", L"علامة", L"Метка", L"Zchn", L"Marca", L"Teken", L"Znak", L"Isaret"), LVCFMT_CENTER, (int)(88 * hD2), 0 ); // [SAV]=曲ごと保存 / [LRC]=歌詞(.lrc)
 	m_lc.InsertColumn ( 2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, 50, 0 );
 	m_lc.InsertColumn ( 3, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, 72, 0 );
 	m_lc.InsertColumn ( 4, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatçı"), LVCFMT_LEFT, 200, 0 );
@@ -1360,14 +1360,15 @@ int PlLrcProbe(LPCTSTR fol)
 void PlFormatRowMarks(int row, LPCTSTR fol, CString& out)
 {
 	out.Empty();
-	const BOOL star = SongParams_HasEntryForRow(row);
+	const BOOL sav = SongParams_HasEntryForRow(row);
 	BOOL lrc = FALSE;
 	if (fol && fol[0]) {
 		const int c = PlLrcDiskGet(fol);
 		lrc = (c == 0);
 	}
-	if (star) out += _T("★");
-	if (lrc) out += _T("♪");
+	// [SAV]=曲ごと保存パラメータあり / [LRC]=歌詞(.lrc)あり
+	if (sav) out += _T("[SAV]");
+	if (lrc) out += _T("[LRC]");
 }
 
 // プレイリスト窓用ジャケ(メモリLRU)。ディスクは PlJakDiskPath と共有。
@@ -7730,10 +7731,10 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		f.Read(&c,4);m_lc.SetColumnWidth(2,c); // ゲーム
 		f.Read(&c,4);m_lc.SetColumnWidth(4,c); // アーティスト
 		f.Read(&c,4);m_lc.SetColumnWidth(5,c); // アルバム
-		f.Read(&c,4); // ★(旧未使用スロット。0 や異常値なら既定幅のまま)
-		if (c > 0 && c <= 200) {
-			const int minStar = (int)(20 * hD2);
-			if (c < minStar) c = minStar;
+		f.Read(&c,4); // 印列([SAV]/[LRC]。旧★幅は狭いので下限を上げる)
+		if (c > 0 && c <= 400) {
+			const int minMark = (int)(72 * hD2);
+			if (c < minMark) c = minMark;
 			m_lc.SetColumnWidth(1, c);
 		}
 		playlistdata pld;
