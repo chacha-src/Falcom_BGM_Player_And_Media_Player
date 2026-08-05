@@ -81,8 +81,8 @@ enum CCustomPopupItemKind {
 typedef void (*CCustomPopupSliderCb)(void* ctx, int value);
 typedef void (*CCustomPopupEditCb)(void* ctx, LPCTSTR text);
 typedef void (*CCustomPopupChoiceCb)(void* ctx, int index, LPCTSTR text);
-// pos / loop選択 / A-B（未設定は -1 のまま）
-typedef void (*CCustomPopupRangeCb)(void* ctx, int pos, int selMin, int selMax, int abA, int abB);
+// pos / loop選択 / A-B（未設定は -1 のまま）/ nSBCode / dragTarget(HitTest)
+typedef void (*CCustomPopupRangeCb)(void* ctx, int pos, int selMin, int selMax, int abA, int abB, UINT nSBCode, int dragTarget);
 typedef void (*CCustomPopupButtonCb)(void* ctx, UINT id);
 
 struct CCustomPopupItem {
@@ -167,6 +167,8 @@ public:
 	void SetStickyLeading(int n) { m_stickyCount = (n < 0) ? 0 : n; }
 	void PersistPopupFont();
 	void RefreshFontChain();
+	// フォント変更後に開いているメニューの寸法・子コントロールを張り直す
+	void RelayoutOpenChain();
 
 	// --- 照会 / 実行中更新（Track 中も可。id==0 の項目は先頭一致）---
 	int GetItemCount() const { return m_itemCount; }
@@ -179,8 +181,12 @@ public:
 	BOOL GetEditText(UINT id, wchar_t* buf, int bufCch) const;
 	BOOL GetChoiceSel(UINT id, int* outSel) const;
 	BOOL GetRangeValues(UINT id, int* pos, int* selMin, int* selMax, int* abA, int* abB) const;
+	// Track 中の再生追従。ドラッグ中は無視。id==0 なら先頭の Range。
+	BOOL LiveMirrorRange(UINT id, int pos, int selMin, int selMax, int mn, int mx, int abA, int abB);
 	BOOL GetProgressPos(UINT id, int* outPos) const;
 	BOOL SetProgressPos(UINT id, int pos);
+
+	static CCustomPopupMenu* GetTrackingRoot();
 
 	CCustomSliderCtrl* GetSliderCtrl(UINT id);
 	CCustomEdit* GetEditCtrl(UINT id);
@@ -221,6 +227,7 @@ protected:
 	CWnd* m_owner;
 	CCustomPopupMenu* m_parentMenu;
 	CCustomPopupMenu* m_root;
+	static CCustomPopupMenu* s_trackingRoot;
 	CToolTipCtrl m_tip;
 	int m_tipHot;
 	CBitmap m_memBmp;
@@ -271,7 +278,7 @@ protected:
 	void AnimateOut();
 	void NotifyEditFromHwnd(HWND hwnd);
 	void NotifyChoiceFromHwnd(HWND hwnd, BOOL fromList);
-	void NotifyRangeFromHwnd(HWND hwnd);
+	void NotifyRangeFromHwnd(HWND hwnd, UINT nSBCode);
 	void NotifyButtonFromHwnd(HWND hwnd);
 	void ApplyPreviewFace(LPCTSTR face);
 	void ClearPreviewFace();

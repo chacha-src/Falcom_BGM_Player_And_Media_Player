@@ -57,6 +57,26 @@ namespace {
 			p->SyncSlidersFromSavedata();
 	}
 
+	static void EqChorusSliderCb(void* ctx, int value)
+	{
+		CEqualizer* p = (CEqualizer*)ctx;
+		if (value < 0) value = 0;
+		if (value > 200) value = 200;
+		savedata.eq_chorus = value;
+		if (p && ::IsWindow(p->GetSafeHwnd()))
+			p->SyncSlidersFromSavedata();
+	}
+
+	static void EqDelaySliderCb(void* ctx, int value)
+	{
+		CEqualizer* p = (CEqualizer*)ctx;
+		if (value < 0) value = 0;
+		if (value > 200) value = 200;
+		savedata.eq_delay = value;
+		if (p && ::IsWindow(p->GetSafeHwnd()))
+			p->SyncSlidersFromSavedata();
+	}
+
 	static int EqPresetIndexFromKeyCodes(const CString& keyAll)
 	{
 		CString u = keyAll;
@@ -1159,6 +1179,7 @@ void CEqualizer::OnDestroy()
 	KillTimer(1);
 	if (g_eqHelpDlg && ::IsWindow(g_eqHelpDlg->GetSafeHwnd()))
 		g_eqHelpDlg->DestroyWindow();
+	savedata.eqwindow = 0;
 	CCustomBlurDialogExBase::OnDestroy();
 }
 
@@ -1280,6 +1301,28 @@ void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			LL14(L"リバーブ量（ドラッグ中に反映）", L"Reverb amount (live)", L"Quantite reverb (direct)", L"Quantita riverbero (live)", L"Cantidad reverb (en vivo)",
 				L"리버브 양(즉시)", L"混响量（即时）", L"مقدار الصدى (مباشر)", L"Количество реверба (сразу)", L"Hallanteil (live)",
 				L"Quantidade de reverb (ao vivo)", L"Galmhoeveelheid (live)", L"Ilosc poglosu (na zywo)", L"Reverb miktari (anlik)"));
+		int chUi = savedata.eq_chorus;
+		if (chUi < 0) chUi = 0;
+		if (chUi > 200) chUi = 200;
+		menu.AddSlider(
+			LL14(L"コーラス", L"Chorus", L"Chorus", L"Chorus", L"Chorus",
+				L"코러스", L"合唱", L"كورس", L"Хорус", L"Chorus",
+				L"Chorus", L"Chorus", L"Chorus", L"Chorus"),
+			0, 200, chUi, EqChorusSliderCb, this,
+			LL14(L"コーラス量（ドラッグ中に反映）", L"Chorus amount (live)", L"Quantite chorus (direct)", L"Quantita chorus (live)", L"Cantidad chorus (en vivo)",
+				L"코러스 양(즉시)", L"合唱量（即时）", L"مقدار الكورس (مباشر)", L"Количество хоруса (сразу)", L"Chorusanteil (live)",
+				L"Quantidade de chorus (ao vivo)", L"Chorushoeveelheid (live)", L"Ilosc chorus (na zywo)", L"Chorus miktari (anlik)"));
+		int dlUi = savedata.eq_delay;
+		if (dlUi < 0) dlUi = 0;
+		if (dlUi > 200) dlUi = 200;
+		menu.AddSlider(
+			LL14(L"ディレイ", L"Delay", L"Delay", L"Delay", L"Delay",
+				L"딜레이", L"延迟", L"تأخير", L"Дилей", L"Delay",
+				L"Delay", L"Delay", L"Delay", L"Delay"),
+			0, 200, dlUi, EqDelaySliderCb, this,
+			LL14(L"ディレイ量（ドラッグ中に反映）", L"Delay amount (live)", L"Quantite delay (direct)", L"Quantita delay (live)", L"Cantidad delay (en vivo)",
+				L"딜레이 양(즉시)", L"延迟量（即时）", L"مقدار التأخير (مباشر)", L"Количество дилея (сразу)", L"Delayanteil (live)",
+				L"Quantidade de delay (ao vivo)", L"Delayhoeveelheid (live)", L"Ilosc delay (na zywo)", L"Delay miktari (anlik)"));
 	}
 	menu.AddSeparator();
 	menu.AddCommand(ID_HELP_SHOWSHEET,

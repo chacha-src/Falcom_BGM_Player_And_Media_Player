@@ -2522,8 +2522,11 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	}
 	else if (cmd == PL_CTX_EQ) {
 		extern CMediaPlayerDlg* mp;
+		extern COggDlg* og;
 		if (mp && ::IsWindow(mp->GetSafeHwnd()))
 			mp->SendMessage(WM_COMMAND, ID_MP_OPEN_EQ, 0);
+		else if (og && ::IsWindow(og->GetSafeHwnd()))
+			og->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON59, BN_CLICKED), 0);
 	}
 	else if (cmd == PL_CTX_CLEAR_SONGPARAM) {
 		std::vector<playlistdata0> items;

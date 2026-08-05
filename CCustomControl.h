@@ -1212,6 +1212,7 @@ public:
 
     // ドラッグ対象(HitTest 値)。ドラッグ中/直後の親通知判別に使う。
     int GetDragTarget() const { return m_nDragTarget; }
+    BOOL IsDragging() const { return m_bDragging; }
 
     // 波形オーバービュー(0..1ピーク)。count<=0 で消去。内部にコピー(最大 kWavePeaksMax)。
     enum { kWavePeaksMax = 1024, kCueMax = 8 };

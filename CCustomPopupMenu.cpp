@@ -355,6 +355,7 @@ namespace {
 		ClampPopupFontSave();
 		menu->PersistPopupFont();
 		menu->RefreshFontChain();
+		menu->RelayoutOpenChain();
 	}
 }
 
@@ -622,6 +623,50 @@ void CCustomPopupMenu::RefreshFontChain()
 		root->m_subs[i]->RebuildMenuFont();
 		if (root->m_subs[i]->GetSafeHwnd())
 			root->m_subs[i]->Invalidate(FALSE);
+	}
+}
+
+void CCustomPopupMenu::RelayoutOpenChain()
+{
+	CCustomPopupMenu* root = RootMenu();
+	if (!root) return;
+	for (int pass = 0; pass < 1 + root->m_subCount; ++pass) {
+		CCustomPopupMenu* menu = (pass == 0) ? root : root->m_subs[pass - 1];
+		if (!menu || !menu->GetSafeHwnd() || !::IsWindowVisible(menu->m_hWnd)) continue;
+		CRect wr;
+		menu->GetWindowRect(&wr);
+		menu->MeasureLayout();
+		int x = wr.left;
+		int y = wr.top;
+		MONITORINFO mi; ZeroMemory(&mi, sizeof(mi)); mi.cbSize = sizeof(mi);
+		HMONITOR hMon = ::MonitorFromWindow(menu->m_hWnd, MONITOR_DEFAULTTONEAREST);
+		if (hMon && ::GetMonitorInfo(hMon, &mi)) {
+			const int maxH = mi.rcWork.bottom - mi.rcWork.top - 8;
+			if (menu->m_contentH > maxH) {
+				menu->m_menuH = maxH;
+				if (menu->m_stickyH > 0 && menu->m_menuH < menu->m_stickyH + CCUSTOM_POPUP_ITEM_H * 3)
+					menu->m_menuH = min(maxH, menu->m_stickyH + CCUSTOM_POPUP_ITEM_H * 3);
+				const int bodyView = max(0, menu->m_menuH - menu->m_stickyH);
+				const int bodyContent = max(0, menu->m_contentH - menu->m_stickyH);
+				menu->m_scrollMax = max(0, bodyContent - bodyView);
+				if (menu->m_scrollY > menu->m_scrollMax) menu->m_scrollY = menu->m_scrollMax;
+			} else {
+				menu->m_menuH = menu->m_contentH;
+				menu->m_scrollMax = 0;
+				menu->m_scrollY = 0;
+			}
+			if (x + menu->m_menuW > mi.rcWork.right) x = mi.rcWork.right - menu->m_menuW;
+			if (y + menu->m_menuH > mi.rcWork.bottom) y = mi.rcWork.bottom - menu->m_menuH;
+			if (x < mi.rcWork.left) x = mi.rcWork.left;
+			if (y < mi.rcWork.top) y = mi.rcWork.top;
+		} else {
+			menu->m_menuH = menu->m_contentH;
+			menu->m_scrollMax = 0;
+		}
+		menu->SetWindowPos(NULL, x, y, menu->m_menuW, menu->m_menuH,
+			SWP_NOZORDER | SWP_NOACTIVATE);
+		menu->SyncEmbeddedChildren();
+		menu->Invalidate(FALSE);
 	}
 }
 
@@ -1012,6 +1057,8 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 
 void CCustomPopupMenu::DestroyPopupTree()
 {
+	if (s_trackingRoot == this)
+		s_trackingRoot = NULL;
 	CloseOpenSub();
 	for (int i = 0; i < m_subCount; ++i)
 		if (m_subs[i]) m_subs[i]->DestroyPopupTree();
@@ -1305,7 +1352,10 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 			lr.top = vr.top + 2;
 			lr.bottom = vr.top + 18;
 			wchar_t line[CCUSTOM_POPUP_TEXT_LEN + 32];
-			if (it.kind == CCUSTOM_POPUP_SLIDER || it.kind == CCUSTOM_POPUP_RANGE)
+			if (it.kind == CCUSTOM_POPUP_RANGE && it.sliderMax > it.sliderMin) {
+				const int pct = MulDiv(it.sliderPos - it.sliderMin, 100, it.sliderMax - it.sliderMin);
+				_snwprintf_s(line, _TRUNCATE, L"%s  (%d%%)", it.text, pct);
+			} else if (it.kind == CCUSTOM_POPUP_SLIDER || it.kind == CCUSTOM_POPUP_RANGE)
 				_snwprintf_s(line, _TRUNCATE, L"%s  (%d)", it.text, it.sliderPos);
 			else if (it.kind == CCUSTOM_POPUP_PROGRESS)
 				_snwprintf_s(line, _TRUNCATE, L"%s  (%d)", it.text, it.sliderPos);
@@ -1487,6 +1537,7 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 		if (it.checked) StartCheckBounce(idx);
 		PersistPopupFont();
 		RefreshFontChain();
+		RelayoutOpenChain();
 		Invalidate(FALSE);
 		return TRUE;
 	}
@@ -1496,6 +1547,7 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 		if (it.checked) StartCheckBounce(idx);
 		PersistPopupFont();
 		RefreshFontChain();
+		RelayoutOpenChain();
 		Invalidate(FALSE);
 		return TRUE;
 	}
@@ -1600,14 +1652,14 @@ void CCustomPopupMenu::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar
 		}
 		if (it.kind == CCUSTOM_POPUP_RANGE && it.rangeIndex >= 0
 			&& m_ranges[it.rangeIndex].GetSafeHwnd() == hwnd) {
-			NotifyRangeFromHwnd(hwnd);
+			NotifyRangeFromHwnd(hwnd, nSBCode);
 			break;
 		}
 	}
 	CWnd::OnHScroll(nSBCode, nPos, pScrollBar);
 }
 
-void CCustomPopupMenu::NotifyRangeFromHwnd(HWND hwnd)
+void CCustomPopupMenu::NotifyRangeFromHwnd(HWND hwnd, UINT nSBCode)
 {
 	for (int i = 0; i < m_itemCount; ++i) {
 		CCustomPopupItem& it = m_items[i];
@@ -1618,7 +1670,8 @@ void CCustomPopupMenu::NotifyRangeFromHwnd(HWND hwnd)
 		rs.GetSelection(it.rangeSelMin, it.rangeSelMax);
 		rs.GetAB(it.rangeAbA, it.rangeAbB);
 		if (it.rangeCb)
-			it.rangeCb(it.ctrlCtx, it.sliderPos, it.rangeSelMin, it.rangeSelMax, it.rangeAbA, it.rangeAbB);
+			it.rangeCb(it.ctrlCtx, it.sliderPos, it.rangeSelMin, it.rangeSelMax,
+				it.rangeAbA, it.rangeAbB, nSBCode, rs.GetDragTarget());
 		InvalidateBgOnly();
 		break;
 	}
@@ -1775,7 +1828,10 @@ UINT CCustomPopupMenu::Track(CPoint screenPt, CWnd* pOwner)
 	EnsureChromePrefix();
 	if (!CreatePopupAt(screenPt, NULL, this))
 		return 0;
+	s_trackingRoot = this;
 	RunModalLoop();
+	if (s_trackingRoot == this)
+		s_trackingRoot = NULL;
 	// 骨格コマンドは呼び出し元へ返さない
 	if (IsChromeCommand(m_result))
 		return 0;
@@ -1889,6 +1945,45 @@ BOOL CCustomPopupMenu::GetRangeValues(UINT id, int* pos, int* selMin, int* selMa
 	if (selMax) *selMax = s1;
 	if (abA) *abA = a;
 	if (abB) *abB = b;
+	return TRUE;
+}
+
+CCustomPopupMenu* CCustomPopupMenu::s_trackingRoot = NULL;
+
+CCustomPopupMenu* CCustomPopupMenu::GetTrackingRoot()
+{
+	return s_trackingRoot;
+}
+
+BOOL CCustomPopupMenu::LiveMirrorRange(UINT id, int pos, int selMin, int selMax, int mn, int mx, int abA, int abB)
+{
+	int idx = -1;
+	if (id != 0)
+		idx = FindItemIndexById(id);
+	if (idx < 0) {
+		for (int i = 0; i < m_itemCount; ++i) {
+			if (m_items[i].kind == CCUSTOM_POPUP_RANGE && m_items[i].rangeIndex >= 0) {
+				idx = i;
+				break;
+			}
+		}
+	}
+	if (idx < 0) return FALSE;
+	CCustomPopupItem& it = m_items[idx];
+	if (it.kind != CCUSTOM_POPUP_RANGE || it.rangeIndex < 0) return FALSE;
+	CCustomRangeSliderCtrl& rs = m_ranges[it.rangeIndex];
+	if (!rs.GetSafeHwnd()) return FALSE;
+	if (rs.IsDragging()) return FALSE;
+
+	if (mn > mx) { const int t = mn; mn = mx; mx = t; }
+	if (mx <= mn) mx = mn + 1;
+	rs.SetPlaybackMirror(pos, selMin, selMax, mn, mx, abA, abB);
+	it.sliderMin = mn;
+	it.sliderMax = mx;
+	it.sliderPos = rs.GetPos();
+	rs.GetSelection(it.rangeSelMin, it.rangeSelMax);
+	rs.GetAB(it.rangeAbA, it.rangeAbB);
+	InvalidateBgOnly();
 	return TRUE;
 }
 

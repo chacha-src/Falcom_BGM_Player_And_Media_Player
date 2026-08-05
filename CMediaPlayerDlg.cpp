@@ -3808,6 +3808,9 @@ void CMediaPlayerDlg::MirrorSeekVol()
 		}
 		// 一括更新+見た目変化時のみ Invalidate。ループ選択と A-B を分離して渡す。
 		m_seek.SetPlaybackMirror(psPos, selMn, selMx, mn, mx, m_abApos, m_abBpos);
+		// 開いているツールメニューのシーク／ループ／A-B も再生に追従
+		if (CCustomPopupMenu* pop = CCustomPopupMenu::GetTrackingRoot())
+			pop->LiveMirrorRange(0x00E01001u, psPos, selMn, selMx, mn, mx, m_abApos, m_abBpos);
 		// MP3 等はスライダーが frames/100。動画系(aa*100)は centisec。それ以外は PCM フレーム。
 		{
 			int tb = wavbit_sample_Hz > 0 ? wavbit_sample_Hz : 44100;
@@ -6070,12 +6073,15 @@ static void MpPracticeTempoSliderCb(void* ctx, int value)
 	if (p) p->ApplyPracticeTempoPercent(value);
 }
 
-static void MpPhraseSecSliderCb(void* /*ctx*/, int value)
+static void MpPhraseSecSliderCb(void* ctx, int value)
 {
 	if (value < 1) value = 1;
 	if (value > 60) value = 60;
 	savedata.mpPhraseSec = value;
 	MpPersistSavedataQuick();
+	// ツールチップどおりドラッグ中に現在位置基準のフレーズ A-B を張り直す
+	CMediaPlayerDlg* p = (CMediaPlayerDlg*)ctx;
+	if (p) p->SetPhraseAbAroundNow();
 }
 
 static void MpMicLevSliderCb(void* ctx, int value)
@@ -6097,6 +6103,7 @@ static void MpMicLevSliderCb(void* ctx, int value)
 struct MpLrcSliderCtx {
 	CMediaPlayerDlg* dlg;
 	int lastMs;
+	int pendingMs; // lrctm は 10ms 単位。端数を捨てると小刻みドラッグが無反映になる
 };
 
 static void MpLrcOffsetSliderCb(void* ctx, int value)
@@ -6105,14 +6112,18 @@ static void MpLrcOffsetSliderCb(void* ctx, int value)
 	if (!c || !c->dlg) return;
 	const int delta = value - c->lastMs;
 	if (delta == 0) return;
-	c->dlg->ShiftLrcMs(delta);
 	c->lastMs = value;
+	c->pendingMs += delta;
+	const int dCentis = c->pendingMs / 10;
+	if (dCentis == 0) return;
+	c->pendingMs -= dCentis * 10;
+	c->dlg->ShiftLrcMs(dCentis * 10);
 }
 
 static void MpLufsSliderCb(void* /*ctx*/, int value)
 {
-	if (value > -1) value = -1;
-	if (value < -30) value = -30;
+	if (value > -14) value = -14;
+	if (value < -18) value = -18;
 	savedata.mpNormTargetLufs = value;
 	savedata.pro_rg_target = value;
 	MpPersistSavedataQuick();
@@ -6123,29 +6134,74 @@ static void MpSleepSliderCb(void* ctx, int value)
 	CMediaPlayerDlg* p = (CMediaPlayerDlg*)ctx;
 	if (!p) return;
 	if (value < 0) value = 0;
-	if (value > 120) value = 120;
+	if (value > 240) value = 240;
 	p->ApplySleepTimer(value);
 }
 
-static void MpAbRangeCb(void* ctx, int pos, int selMin, int selMax, int abA, int abB)
+static void MpAbRangeCb(void* ctx, int pos, int selMin, int selMax, int abA, int abB, UINT nSBCode, int dragTarget)
 {
 	CMediaPlayerDlg* p = (CMediaPlayerDlg*)ctx;
 	if (!p) return;
+
 	p->m_abApos = abA;
 	p->m_abBpos = abB;
 	extern int loop1, loop2;
 	loop1 = selMin;
 	loop2 = (selMax > selMin) ? (selMax - selMin) : 0;
-	if (p->m_seek.GetSafeHwnd()) {
-		p->m_seek.SetPos(pos);
-		p->m_seek.SetSelection(selMin, selMax);
-		p->m_seek.SetAB(abA, abB);
-	}
-	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->m_time.SetSelection(selMin, selMax);
 	if (pl && plcnt >= 0 && plcnt < pl->playcnt) {
 		pl->pc[plcnt].loop1 = loop1;
 		pl->pc[plcnt].loop2 = loop2;
+	}
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->m_time.SetSelection(selMin, selMax);
+	if (p->m_seek.GetSafeHwnd()) {
+		p->m_seek.SetSelection(selMin, selMax);
+		p->m_seek.SetAB(abA, abB);
+	}
+
+	// 注意: TB_ENDTRACK == SB_ENDSCROLL。loop/A-B 確定も ENDTRACK なので SEEK 条件に含めない。
+	const BOOL seekCommit =
+		nSBCode == SB_THUMBPOSITION
+		|| nSBCode == SB_PAGELEFT || nSBCode == SB_PAGERIGHT
+		|| nSBCode == SB_LINELEFT || nSBCode == SB_LINERIGHT;
+
+	if (nSBCode == TB_THUMBTRACK || nSBCode == SB_THUMBTRACK) {
+		// 再生位置つまみ中のみミラーを止め、見た目を追従
+		if (dragTarget == 3 || dragTarget == 0) {
+			p->m_seekDragging = 1;
+			extern int hsc;
+			if (hsc == 0) hsc = 1;
+			if (p->m_seek.GetSafeHwnd())
+				p->m_seek.SetPos(pos);
+		}
+		return;
+	}
+
+	if (seekCommit) {
+		// 位置つまみ／クリックシークのみ。loop(1,2) / A-B(4,5) は上で反映済み。
+		if (dragTarget == 1 || dragTarget == 2 || dragTarget == 4 || dragTarget == 5) {
+			p->m_seekDragging = 0;
+			return;
+		}
+		if (p->m_seek.GetSafeHwnd())
+			p->m_seek.SetPos(pos);
+		if (og && ::IsWindow(og->GetSafeHwnd())) {
+			extern int hsc;
+			if (hsc == 0) hsc = 1;
+			og->m_time.SetPos(pos);
+			og->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, pos), (LPARAM)og->m_time.GetSafeHwnd());
+			if (hsc == 1) hsc = 0;
+		}
+		p->m_seekHoldPos = pos;
+		p->m_seekHoldUntil = GetTickCount64() + 800;
+		p->m_seekDragging = 0;
+		return;
+	}
+
+	if (nSBCode == TB_ENDTRACK || nSBCode == SB_ENDSCROLL) {
+		extern int hsc;
+		if (hsc == 1) hsc = 0;
+		p->m_seekDragging = 0;
 	}
 }
 
@@ -6163,8 +6219,10 @@ static void MpSleepChoiceCb(void* ctx, int /*index*/, LPCTSTR text)
 {
 	CMediaPlayerDlg* p = (CMediaPlayerDlg*)ctx;
 	if (!p || !text || !text[0]) return;
+	// 「—」等のプレースホルダ（現在値が長めリスト外のとき）
+	if (text[0] < _T('0') || text[0] > _T('9')) return;
 	int mins = _ttoi(text);
-	if (mins < 1) mins = 1;
+	if (mins < 1) return;
 	if (mins > 240) mins = 240;
 	p->ApplySleepTimer(mins);
 }
@@ -6172,12 +6230,15 @@ static void MpSleepChoiceCb(void* ctx, int /*index*/, LPCTSTR text)
 // メニュー内アラーム用（無効中もコンボの選択を保持）
 static int g_mpMenuAlarmH = 8;
 static int g_mpMenuAlarmM = 0;
+static BOOL g_mpMenuAlarmDraftValid = FALSE;
 
 static void MpAlarmHourCb(void* ctx, int index, LPCTSTR /*text*/)
 {
 	CMediaPlayerDlg* p = (CMediaPlayerDlg*)ctx;
 	if (!p || index < 0 || index > 23) return;
 	g_mpMenuAlarmH = index;
+	g_mpMenuAlarmDraftValid = TRUE;
+	// OFF 中も選択を保持。ON 中は即保存してタイマー更新。
 	if (savedata.mpAlarmHour >= 0) {
 		savedata.mpAlarmHour = index;
 		MpPersistSavedataQuick();
@@ -6190,6 +6251,7 @@ static void MpAlarmMinCb(void* ctx, int index, LPCTSTR /*text*/)
 	CMediaPlayerDlg* p = (CMediaPlayerDlg*)ctx;
 	if (!p || index < 0 || index > 59) return;
 	g_mpMenuAlarmM = index;
+	g_mpMenuAlarmDraftValid = TRUE;
 	if (savedata.mpAlarmHour >= 0) {
 		savedata.mpAlarmMin = index;
 		MpPersistSavedataQuick();
@@ -6213,12 +6275,13 @@ static void MpRemotePortCb(void* ctx, LPCTSTR text)
 void CMediaPlayerDlg::ApplyPracticeTempoPercent(int pct)
 {
 	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
-	if (pct < 25) pct = 25;
+	if (pct < 50) pct = 50;
 	if (pct > 200) pct = 200;
 	// スライダー 0..400、200=100%
 	const int pos = pct * 2;
 	og->m_tempo_sl.SetPos(pos);
-	m_tempo.SetPos(pos);
+	if (m_tempo.GetSafeHwnd())
+		m_tempo.SetPos(pos);
 	tempo = pos;
 }
 
@@ -7948,6 +8011,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	MpLrcSliderCtx lrcCtx;
 	lrcCtx.dlg = this;
 	lrcCtx.lastMs = 0;
+	lrcCtx.pendingMs = 0;
 
 	menu.AddCheck(ID_MP_TOOLS_PANEL,
 		LL14(L"並べ替え・フォルダ追加パネル", L"Sort / add-folder panel", L"Panneau tri / dossier", L"Pannello ordina / cartella", L"Panel ordenar / carpeta", L"정렬/폴더 추가 패널", L"排序/添加文件夹面板", L"لوحة الترتيب/المجلد", L"Панель сортировки/папки", L"Sortier-/Ordnerpanel", L"Painel ordenar/pasta", L"Sorteer-/mappaneel", L"Panel sortowania/folderu", L"Sirala/klasor paneli"),
@@ -8051,7 +8115,33 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	menu.AddCommand(ID_MP_MB_AUTOTAG,
 		LL14(L"MusicBrainz 自動タグ…", L"MusicBrainz auto-tag…", L"Auto-tag MusicBrainz…", L"Auto-tag MusicBrainz…", L"Auto-etiqueta MusicBrainz…", L"MusicBrainz 자동 태그…", L"MusicBrainz 自动标签…", L"وسوم MusicBrainz…", L"Авто-тег MusicBrainz…", L"MusicBrainz Auto-Tag…", L"Auto-tag MusicBrainz…", L"MusicBrainz auto-tag…", L"Auto-tag MusicBrainz…", L"MusicBrainz otomatik etiket…"));
 	menu.AddSeparator();
-	if (m_seek.GetSafeHwnd()) {
+	// 本体シークと同系統の値を og->m_time から取る（メニュー開時の (0) ズレ防止）
+	if (og && ::IsWindow(og->GetSafeHwnd())) {
+		MirrorSeekVol();
+		const int mn = og->m_time.GetMinValue();
+		int mx = og->m_time.GetMaxValue();
+		if (mx <= mn) mx = mn + 1;
+		if (mx > mn) {
+			int selMn = 0, selMx = 0;
+			og->m_time.GetSelection(selMn, selMx);
+			const int pos = og->m_time.GetPos();
+			menu.AddRangeSlider(
+				LL14(L"シーク / ループ / A-B", L"Seek / loop / A-B", L"Seek / boucle / A-B", L"Seek / loop / A-B",
+					L"Seek / bucle / A-B", L"시크 / 루프 / A-B", L"定位 / 循环 / A-B", L"تقديم / حلقة / A-B",
+					L"Поиск / цикл / A-B", L"Suche / Loop / A-B", L"Seek / loop / A-B", L"Zoek / lus / A-B",
+					L"Seek / petla / A-B", L"Seek / dongu / A-B"),
+				mn, mx, pos, selMn, selMx, m_abApos, m_abBpos,
+				MpAbRangeCb, this,
+				LL14(L"再生位置・ループ・A-B をメニュー上で調整", L"Adjust position, loop and A-B in the menu",
+					L"Regler position, boucle et A-B dans le menu", L"Regola posizione, loop e A-B dal menu",
+					L"Ajustar posicion, bucle y A-B en el menu", L"메뉴에서 위치/루프/A-B 조정", L"在菜单中调整位置、循环与 A-B",
+					L"ضبط الموضع والحلقة و A-B من القائمة", L"Настройка позиции, цикла и A-B в меню",
+					L"Position, Loop und A-B im Menü", L"Ajustar posicao, loop e A-B no menu",
+					L"Positie, lus en A-B in het menu", L"Pozycja, petla i A-B w menu", L"Menude konum, dongu ve A-B"),
+				0x00E01001u);
+			menu.AddSeparator();
+		}
+	} else if (m_seek.GetSafeHwnd()) {
 		const int mn = m_seek.GetMinValue();
 		const int mx = m_seek.GetMaxValue();
 		if (mx > mn) {
@@ -8069,7 +8159,8 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 					L"Ajustar posicion, bucle y A-B en el menu", L"메뉴에서 위치/루프/A-B 조정", L"在菜单中调整位置、循环与 A-B",
 					L"ضبط الموضع والحلقة و A-B من القائمة", L"Настройка позиции, цикла и A-B в меню",
 					L"Position, Loop und A-B im Menü", L"Ajustar posicao, loop e A-B no menu",
-					L"Positie, lus en A-B in het menu", L"Pozycja, petla i A-B w menu", L"Menude konum, dongu ve A-B"));
+					L"Positie, lus en A-B in het menu", L"Pozycja, petla i A-B w menu", L"Menude konum, dongu ve A-B"),
+				0x00E01001u);
 			menu.AddSeparator();
 		}
 	}
@@ -8087,18 +8178,18 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	{
 		int sleepMin = savedata.mpSleepMin;
 		if (sleepMin < 0) sleepMin = 0;
-		if (sleepMin > 60) sleepMin = 60;
+		if (sleepMin > 240) sleepMin = 240;
 		menu.AddSlider(
 			LL14(L"スリープ (分)", L"Sleep (min)", L"Veille (min)", L"Sleep (min)", L"Suspensión (min)",
 				L"슬립 (분)", L"睡眠 (分)", L"نوم (د)", L"Сон (мин)", L"Schlaf (Min)",
 				L"Sono (min)", L"Slaap (min)", L"Sen (min)", L"Uyku (dk)"),
-			0, 60, sleepMin, MpSleepSliderCb, this,
-			LL14(L"0=解除 … 60分。ドラッグ中にタイマー反映", L"0=off … 60 min. Live timer while dragging",
-				L"0=off … 60 min. Timer en direct", L"0=off … 60 min. Timer live",
-				L"0=off … 60 min. Temporizador en vivo", L"0=해제 … 60분. 드래그 중 타이머 반영", L"0=关闭 … 60 分钟。拖动即时计时",
-				L"0=إيقاف … 60 د. مؤقت مباشر", L"0=выкл … 60 мин. Таймер сразу",
-				L"0=aus … 60 Min. Timer live", L"0=off … 60 min. Timer ao vivo",
-				L"0=uit … 60 min. Timer live", L"0=wyl … 60 min. Timer na zywo", L"0=kapali … 60 dk. Suruklerken anlik"));
+			0, 240, sleepMin, MpSleepSliderCb, this,
+			LL14(L"0=解除 … 240分。ドラッグ中にタイマー反映", L"0=off … 240 min. Live timer while dragging",
+				L"0=off … 240 min. Timer en direct", L"0=off … 240 min. Timer live",
+				L"0=off … 240 min. Temporizador en vivo", L"0=해제 … 240분. 드래그 중 타이머 반영", L"0=关闭 … 240 分钟。拖动即时计时",
+				L"0=إيقاف … 240 د. مؤقت مباشر", L"0=выкл … 240 мин. Таймер сразу",
+				L"0=aus … 240 Min. Timer live", L"0=off … 240 min. Timer ao vivo",
+				L"0=uit … 240 min. Timer live", L"0=wyl … 240 min. Timer na zywo", L"0=kapali … 240 dk. Suruklerken anlik"));
 		{
 			wchar_t init[16];
 			const int cur = (savedata.mpSleepMin > 0) ? savedata.mpSleepMin : 45;
@@ -8115,16 +8206,22 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 					L"1–240 د. يطبق أثناء الكتابة", L"1–240 мин. При вводе", L"1–240 Min. Beim Tippen",
 					L"1–240 min. Ao digitar", L"1–240 min. Tijdens typen", L"1–240 min. Podczas wpisywania",
 					L"1–240 dk. Yazarken uygula"));
-			static const LPCTSTR kSleepLong[] = { L"75", L"90", L"120", L"180", L"240" };
+			static const LPCTSTR kSleepLongNums[] = { L"75", L"90", L"120", L"180", L"240" };
+			// 現在値がリスト外だと先頭が誤選択され、同じ値を選んでも選択イベントが飛ばず無反映になる
+			static wchar_t s_sleepDash[] = L"—";
+			LPCTSTR sleepLongItems[6];
+			sleepLongItems[0] = s_sleepDash;
+			for (int i = 0; i < 5; ++i)
+				sleepLongItems[i + 1] = kSleepLongNums[i];
 			int longSel = 0;
 			for (int i = 0; i < 5; ++i) {
-				if (_ttoi(kSleepLong[i]) == cur) { longSel = i; break; }
+				if (_ttoi(kSleepLongNums[i]) == savedata.mpSleepMin) { longSel = i + 1; break; }
 			}
 			menu.AddCombo(
 				LL14(L"長めプリセット", L"Long presets", L"Presets longs", L"Preset lunghi", L"Presets largos",
 					L"긴 프리셋", L"较长预设", L"إعدادات طويلة", L"Длинные пресеты", L"Lange Vorgaben",
 					L"Presets longos", L"Lange presets", L"Dlugie preset", L"Uzun onayar"),
-				kSleepLong, 5, longSel, MpSleepChoiceCb, this,
+				sleepLongItems, 6, longSel, MpSleepChoiceCb, this,
 				LL14(L"61分超はここから。選択で即タイマー", L"Over 60 min from here. Applies on select",
 					L"Au-dela de 60 min. Applique a la selection", L"Oltre 60 min. Applica alla selezione",
 					L"Mas de 60 min. Aplica al elegir", L"60분 초과는 여기. 선택 즉시", L"超过 60 分钟从这里。选择即应用",
@@ -8215,11 +8312,13 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			g_mpMenuAlarmM = savedata.mpAlarmMin;
 			if (g_mpMenuAlarmM < 0) g_mpMenuAlarmM = 0;
 			if (g_mpMenuAlarmM > 59) g_mpMenuAlarmM = 59;
-		} else {
+			g_mpMenuAlarmDraftValid = TRUE;
+		} else if (!g_mpMenuAlarmDraftValid) {
 			SYSTEMTIME st = {};
 			::GetLocalTime(&st);
 			g_mpMenuAlarmH = (int)st.wHour;
 			g_mpMenuAlarmM = (int)st.wMinute;
+			g_mpMenuAlarmDraftValid = TRUE;
 		}
 		menu.AddCombo(
 			LL14(L"アラーム時", L"Alarm hour", L"Heure alarme", L"Ora sveglia", L"Hora alarma",
@@ -8288,6 +8387,16 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		LL14(L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI 输入", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In"),
 		MpMidiInIsActive());
 	const UINT cmd = menu.Track(screenPt, this);
+	// メニュー閉鎖時に LRC オフセットの端数(1–9ms)を捨てない
+	if (lrcCtx.pendingMs != 0) {
+		const int rem = lrcCtx.pendingMs;
+		lrcCtx.pendingMs = 0;
+		// 四捨五入相当: ±5ms 以上なら 10ms 単位へ繰り上げ
+		int apply = 0;
+		if (rem >= 5) apply = 10;
+		else if (rem <= -5) apply = -10;
+		if (apply) ShiftLrcMs(apply);
+	}
 	if (cmd)
 		PostMessage(WM_COMMAND, cmd);
 	// メニュー後はカスタム再描画のみ（BM_SETSTATE はテーマ無効時に空塗り→完全透過の原因）
@@ -8299,6 +8408,8 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 
 void CMediaPlayerDlg::ApplySleepTimer(int minutes)
 {
+	if (minutes < 0) minutes = 0;
+	if (minutes > 240) minutes = 240;
 	savedata.mpSleepMin = minutes;
 	KillTimer(9);
 	m_sleepEndTick = 0;
@@ -9380,9 +9491,24 @@ void CMediaPlayerDlg::OnNormPreview()
 
 void CMediaPlayerDlg::OnAbSnapA() { ProAudio_AbCapture(0); }
 void CMediaPlayerDlg::OnAbSnapB() { ProAudio_AbCapture(1); }
-void CMediaPlayerDlg::OnAbApplyA() { ProAudio_AbApply(0); }
-void CMediaPlayerDlg::OnAbApplyB() { ProAudio_AbApply(1); }
-void CMediaPlayerDlg::OnAbSnapToggle() { ProAudio_AbToggle(); }
+void CMediaPlayerDlg::OnAbApplyA()
+{
+	ProAudio_AbApply(0);
+	if (m_tempo.GetSafeHwnd()) m_tempo.SetPos(tempo);
+	if (m_pitch.GetSafeHwnd()) m_pitch.SetPos(pitch);
+}
+void CMediaPlayerDlg::OnAbApplyB()
+{
+	ProAudio_AbApply(1);
+	if (m_tempo.GetSafeHwnd()) m_tempo.SetPos(tempo);
+	if (m_pitch.GetSafeHwnd()) m_pitch.SetPos(pitch);
+}
+void CMediaPlayerDlg::OnAbSnapToggle()
+{
+	ProAudio_AbToggle();
+	if (m_tempo.GetSafeHwnd()) m_tempo.SetPos(tempo);
+	if (m_pitch.GetSafeHwnd()) m_pitch.SetPos(pitch);
+}
 void CMediaPlayerDlg::OnSleep15() { ApplySleepTimer(15); }
 void CMediaPlayerDlg::OnSleep30() { ApplySleepTimer(30); }
 void CMediaPlayerDlg::OnSleep60() { ApplySleepTimer(60); }
@@ -9430,8 +9556,13 @@ void CMediaPlayerDlg::OnMpAlarm()
 {
 	CloseMpAlarmDlgIfOpen();
 	if (savedata.mpAlarmHour >= 0) {
+		// OFF にしても時分下書きは残す（メニュー再オープンで現在時刻に戻さない）
+		g_mpMenuAlarmH = savedata.mpAlarmHour;
+		g_mpMenuAlarmM = savedata.mpAlarmMin;
+		if (g_mpMenuAlarmM < 0) g_mpMenuAlarmM = 0;
+		if (g_mpMenuAlarmM > 59) g_mpMenuAlarmM = 59;
+		g_mpMenuAlarmDraftValid = TRUE;
 		savedata.mpAlarmHour = -1;
-		savedata.mpAlarmMin = 0;
 	} else {
 		if (g_mpMenuAlarmH < 0 || g_mpMenuAlarmH > 23) g_mpMenuAlarmH = 8;
 		if (g_mpMenuAlarmM < 0 || g_mpMenuAlarmM > 59) g_mpMenuAlarmM = 0;

@@ -1017,6 +1017,7 @@ void MpMirrorWritePcm(const BYTE* pcm, int bytes)
 static SOCKET g_mpRemoteListen = INVALID_SOCKET;
 static HANDLE g_mpRemoteThread = NULL;
 static volatile LONG g_mpRemoteStop = 0;
+static int g_mpRemoteBoundPort = 0; // EnsureRunning が実際に bind したポート
 static HWND g_mpRemoteHwnd = NULL;
 static int g_mpRemoteWsa = 0;
 
@@ -1122,6 +1123,7 @@ void MpRemoteStop()
 		WSACleanup();
 		g_mpRemoteWsa = 0;
 	}
+	g_mpRemoteBoundPort = 0;
 }
 
 void MpRemoteEnsureRunning(HWND notifyHwnd)
@@ -1131,7 +1133,11 @@ void MpRemoteEnsureRunning(HWND notifyHwnd)
 		MpRemoteStop();
 		return;
 	}
-	if (g_mpRemoteThread && g_mpRemoteListen != INVALID_SOCKET) return;
+	const int port = (savedata.mpRemotePort >= 1024 && savedata.mpRemotePort <= 65535)
+		? savedata.mpRemotePort : 8765;
+	// 既に同じポートで待ち受け中なら何もしない。ポート変更時は再 bind。
+	if (g_mpRemoteThread && g_mpRemoteListen != INVALID_SOCKET && g_mpRemoteBoundPort == port)
+		return;
 
 	MpRemoteStop();
 	InterlockedExchange(&g_mpRemoteStop, 0);
@@ -1151,8 +1157,6 @@ void MpRemoteEnsureRunning(HWND notifyHwnd)
 	sockaddr_in addr = {};
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-	const int port = (savedata.mpRemotePort >= 1024 && savedata.mpRemotePort <= 65535)
-		? savedata.mpRemotePort : 8765;
 	addr.sin_port = htons((u_short)port);
 	if (bind(g_mpRemoteListen, (sockaddr*)&addr, sizeof(addr)) != 0) {
 		MpRemoteStop();
@@ -1160,8 +1164,11 @@ void MpRemoteEnsureRunning(HWND notifyHwnd)
 	}
 	listen(g_mpRemoteListen, 4);
 	g_mpRemoteThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)MpRemoteThreadProc, NULL, 0, NULL);
-	if (!g_mpRemoteThread)
+	if (!g_mpRemoteThread) {
 		MpRemoteStop();
+		return;
+	}
+	g_mpRemoteBoundPort = port;
 }
 
 // ---- MIDI In ----
