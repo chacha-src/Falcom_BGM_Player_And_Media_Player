@@ -1,7 +1,7 @@
 ﻿#pragma once
 
-// カラオケ風: 現在行を中央付近に保ち、行内進捗も加味して滑らかに追従スクロールする歌詞ビュー。
-// （Static では滑らか追従できないため GDI owner-draw）
+// カラオケ風: 先頭は上から、途中は現在行を縦中央に追従、末尾は最終行を下端へ（MP LRC GDI と同系）。
+// 長い行は描画幅に収まるようフォントを縮める。CreatePointFont は窓の DPI を使う。
 class CLyricsViewWnd : public CWnd
 {
 	DECLARE_DYNAMIC(CLyricsViewWnd)
@@ -39,10 +39,12 @@ protected:
 	CFont m_font;
 	CFont m_fontHi;
 	int m_fontPt;
+	UINT m_dpi;
 	CString m_fontFace;
 	UINT_PTR m_timer;
 	BOOL m_overlay;
 
+	UINT GetViewDpi() const;
 	void RecalcTarget();
 	void StartAnim();
 	void StopAnim();
@@ -57,4 +59,4 @@ protected:
 
 	DECLARE_MESSAGE_MAP()
 };
-
+

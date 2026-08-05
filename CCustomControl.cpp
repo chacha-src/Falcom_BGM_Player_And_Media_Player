@@ -616,6 +616,48 @@ void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey)
     }
 }
 
+void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha)
+{
+	const int w = rc.right - rc.left;
+	const int h = rc.bottom - rc.top;
+	if (w <= 0 || h <= 0 || !hdc || alpha == 0)
+		return;
+	if (alpha >= 255) {
+		CCC_FillRectOpaqueBits(hdc, rc, clr);
+		return;
+	}
+
+	BITMAPINFO bi = {};
+	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth = w;
+	bi.bmiHeader.biHeight = -h;
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+	void* pBits = nullptr;
+	HBITMAP hDib = ::CreateDIBSection(hdc, &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
+	if (!hDib || !pBits) {
+		CCC_FillRectOpaqueBits(hdc, rc, clr);
+		return;
+	}
+	HDC hdcMem = ::CreateCompatibleDC(hdc);
+	HGDIOBJ old = ::SelectObject(hdcMem, hDib);
+	HBRUSH br = ::CreateSolidBrush(clr);
+	RECT zr = { 0, 0, w, h };
+	::FillRect(hdcMem, &zr, br);
+	::DeleteObject(br);
+	// プレマルチプライ不要: SourceConstantAlpha のみで合成
+	UINT32* px = (UINT32*)pBits;
+	const int n = w * h;
+	for (int i = 0; i < n; ++i)
+		px[i] |= 0xFF000000u;
+	const BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, 0 };
+	::GdiAlphaBlend(hdc, rc.left, rc.top, w, h, hdcMem, 0, 0, w, h, bf);
+	::SelectObject(hdcMem, old);
+	::DeleteDC(hdcMem);
+	::DeleteObject(hDib);
+}
+
 void CCC_PaintAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect)
 {
     if (!pWnd || !pWnd->GetSafeHwnd()) return;
@@ -12157,6 +12199,36 @@ static void CCC_DisableBodyAeroOnly(HWND hWnd)
 #endif
 }
 
+// AcrylicCaption ではない窓でも、DWM 既定キャプション（アイコン含む）の重ね描きを止める
+static void CCC_CaptionHideDwmTitleChrome(HWND hWnd)
+{
+#if CCUSTOM_AERO_SUPPORT
+	if (!hWnd || !::IsWindow(hWnd))
+		return;
+	BOOL compositionEnabled = FALSE;
+	if (!::DwmIsCompositionEnabled(&compositionEnabled) || !compositionEnabled)
+		return;
+#ifndef DWMWA_COLOR_NONE
+#define DWMWA_COLOR_NONE 0xFFFFFFFE
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#ifndef DWMWA_TEXT_COLOR
+#define DWMWA_TEXT_COLOR 36
+#endif
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
+	const COLORREF colorNone = (COLORREF)DWMWA_COLOR_NONE;
+	::DwmSetWindowAttribute(hWnd, DWMWA_CAPTION_COLOR, &colorNone, sizeof(colorNone));
+	::DwmSetWindowAttribute(hWnd, DWMWA_TEXT_COLOR, &colorNone, sizeof(colorNone));
+	::DwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, &colorNone, sizeof(colorNone));
+#else
+	UNREFERENCED_PARAMETER(hWnd);
+#endif
+}
+
 // AcrylicCaption 時のホストガラス（常に全面 -1 + REDIRECTIONBITMAP_ALPHA）。
 // 本文の不透明化は描画側（FillRectOpaque / MakeOpaque / BitBlt opaque）。
 static void CCC_CaptionEnsureBackdrop(HWND hWnd)
@@ -12212,6 +12284,15 @@ static void CCC_CaptionEnsureBackdrop(HWND hWnd)
     ::SetClassLongPtr(hWnd, GCLP_HBRBACKGROUND, 0);
 #else
     UNREFERENCED_PARAMETER(hWnd);
+#endif
+}
+
+void CCC_CaptionEnsureHostAcrylic(HWND hWnd)
+{
+#if CCUSTOM_AERO_SUPPORT
+	CCC_CaptionEnsureBackdrop(hWnd);
+#else
+	UNREFERENCED_PARAMETER(hWnd);
 #endif
 }
 
@@ -12609,6 +12690,26 @@ void CCC_CaptionLayout(HWND hDlg)
     }
 }
 
+// カスタムキャプション用アイコン取得。
+// WM_GETICON は未設定時に exe 既定アイコンへフォールバックするため、
+// ツール系が立てる WS_EX_DLGMODALFRAME（アイコン無し）では描かない。
+static HICON CCC_CaptionGetTitleIcon(HWND hDlg)
+{
+	if (!hDlg || !::IsWindow(hDlg))
+		return NULL;
+	CWnd* pWnd = CWnd::FromHandlePermanent(hDlg);
+	if (pWnd && pWnd->GetRuntimeClass() && pWnd->GetRuntimeClass()->m_lpszClassName
+		&& strcmp(pWnd->GetRuntimeClass()->m_lpszClassName, "CDesktopLyricsWnd") == 0)
+		return NULL;
+	const DWORD ex = (DWORD)::GetWindowLong(hDlg, GWL_EXSTYLE);
+	if (ex & WS_EX_DLGMODALFRAME)
+		return NULL;
+	HICON hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_SMALL, 0);
+	if (!hIcon)
+		hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_BIG, 0);
+	return hIcon;
+}
+
 void CCC_CaptionPaint(CDC& dc, HWND hDlg)
 {
     CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
@@ -12674,11 +12775,9 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
             HGDIOBJ oldBmp = ::SelectObject(hdcMem, hDib);
 
             int textLeft = 8;
-            // ウィンドウに明示 SetIcon されたものだけ描く。
-            // GCLP_HICONSM はクラス共有で、未設定ダイアログに空アイコンが付く原因になる。
-            HICON hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_SMALL, 0);
-            if (!hIcon)
-                hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_BIG, 0);
+            // 明示 SetIcon された窓のみ。WS_EX_DLGMODALFRAME 時は描かない
+            // （WM_GETICON の exe フォールバックで歌詞ウィンドウ等にアイコンが付くのを防ぐ）
+            HICON hIcon = CCC_CaptionGetTitleIcon(hDlg);
             if (hIcon) {
                 const int isz = 16;
                 const int iy = (h - isz) / 2;
@@ -12755,9 +12854,7 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
     mem.FillSolidRect(0, bar.Height() - 1, bar.Width(), 1, RGB(90, 70, 110));
 
     int textLeft = 8;
-    HICON hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_SMALL, 0);
-    if (!hIcon)
-        hIcon = (HICON)::SendMessage(hDlg, WM_GETICON, ICON_BIG, 0);
+    HICON hIcon = CCC_CaptionGetTitleIcon(hDlg);
     if (hIcon) {
         const int isz = 16;
         const int iy = (bar.Height() - isz) / 2;
@@ -13352,10 +13449,271 @@ void CCC_MainLockBringToFront(HWND hDlg)
         e->pLockBtn->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
+// ---- GDI ヘルプ: DPI 込み実描画範囲フィット ----
+static const UINT CCC_GDIHELP_SUBCLASS_ID = 0x47444948u; // 'GDIH'
+static const UINT CCC_WM_GDIHELP_FIT = WM_USER + 0x47F1;
+static const COLORREF CCC_GDIHELP_BG = RGB(248, 248, 252);
+static const WCHAR CCC_GDIHELP_PROP_FITTED[] = L"CCC_GdiHelpFitted";
+static const WCHAR CCC_GDIHELP_PROP_CW[] = L"CCC_GdiHelpCW";
+static const WCHAR CCC_GDIHELP_PROP_CH[] = L"CCC_GdiHelpCH";
+
+static void CCC_GdiHelpLayoutCloseBtn(CWnd* wnd, int footerH)
+{
+    if (!wnd || !::IsWindow(wnd->GetSafeHwnd())) return;
+    CWnd* ok = wnd->GetDlgItem(IDOK);
+    if (!ok || !::IsWindow(ok->GetSafeHwnd())) return;
+    const UINT dpi = CCC_GetControlDpi(wnd->GetSafeHwnd());
+    CRect rc;
+    wnd->GetClientRect(&rc);
+    const int btnW = CCC_ScaleDpi(50, dpi);
+    const int btnH = CCC_ScaleDpi(14, dpi);
+    const int margin = CCC_ScaleDpi(8, dpi);
+    int top = rc.bottom - btnH - margin;
+    if (footerH > 0) {
+        const int ft = rc.bottom - footerH + (footerH - btnH) / 2;
+        if (ft > 0) top = ft;
+    }
+    ok->SetWindowPos(NULL, rc.right - btnW - margin, top, btnW, btnH,
+        SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+static void CCC_GdiHelpApplyClientSize(HWND hWnd, int clientW, int clientH)
+{
+    if (!hWnd || !::IsWindow(hWnd) || clientW < 80 || clientH < 60) return;
+    CRect rcW, rcC;
+    ::GetWindowRect(hWnd, &rcW);
+    ::GetClientRect(hWnd, &rcC);
+    const int borderW = rcW.Width() - rcC.Width();
+    const int borderH = rcW.Height() - rcC.Height();
+    int newW = clientW + borderW;
+    int newH = clientH + borderH;
+
+    HMONITOR mon = ::MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
+    CRect work;
+    if (mon && ::GetMonitorInfo(mon, &mi))
+        work = mi.rcWork;
+    else
+        ::SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);
+
+    int x = rcW.left;
+    int y = rcW.top;
+    if (x + newW > work.right) x = work.right - newW;
+    if (y + newH > work.bottom) y = work.bottom - newH;
+    if (x < work.left) x = work.left;
+    if (y < work.top) y = work.top;
+
+    ::SetWindowPos(hWnd, NULL, x, y, newW, newH, SWP_NOZORDER | SWP_NOACTIVATE);
+    CWnd* w = CWnd::FromHandle(hWnd);
+    const UINT dpi = CCC_GetControlDpi(hWnd);
+    CCC_GdiHelpLayoutCloseBtn(w, CCC_ScaleDpi(26, dpi));
+}
+
+static LRESULT CALLBACK CCC_GdiHelpSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+    UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+    UNREFERENCED_PARAMETER(uIdSubclass);
+    UNREFERENCED_PARAMETER(dwRefData);
+    if (uMsg == CCC_WM_GDIHELP_FIT) {
+        CCC_GdiHelpApplyClientSize(hWnd, (int)wParam, (int)lParam);
+        ::InvalidateRect(hWnd, NULL, FALSE);
+        return 0;
+    }
+    if (uMsg == WM_DPICHANGED) {
+        ::RemoveProp(hWnd, CCC_GDIHELP_PROP_FITTED);
+        ::RemoveProp(hWnd, CCC_GDIHELP_PROP_CW);
+        ::RemoveProp(hWnd, CCC_GDIHELP_PROP_CH);
+    }
+    if (uMsg == WM_NCDESTROY) {
+        ::RemoveProp(hWnd, CCC_GDIHELP_PROP_FITTED);
+        ::RemoveProp(hWnd, CCC_GDIHELP_PROP_CW);
+        ::RemoveProp(hWnd, CCC_GDIHELP_PROP_CH);
+        ::RemoveWindowSubclass(hWnd, CCC_GdiHelpSubclassProc, CCC_GDIHELP_SUBCLASS_ID);
+    }
+    return ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
+static void CCC_GdiHelpEnsureSubclass(HWND hWnd)
+{
+    if (!hWnd || !::IsWindow(hWnd)) return;
+    DWORD_PTR data = 0;
+    if (!::GetWindowSubclass(hWnd, CCC_GdiHelpSubclassProc, CCC_GDIHELP_SUBCLASS_ID, &data))
+        ::SetWindowSubclass(hWnd, CCC_GdiHelpSubclassProc, CCC_GDIHELP_SUBCLASS_ID, 0);
+}
+
+static void CCC_GdiHelpScanExtent(const UINT32* bits, int w, int h, COLORREF bg, int* pMaxX, int* pMaxY)
+{
+    const UINT32 bgPx = ((UINT32)GetRValue(bg) << 16) | ((UINT32)GetGValue(bg) << 8) | (UINT32)GetBValue(bg);
+    int mx = 0, my = 0;
+    BOOL any = FALSE;
+    for (int y = 0; y < h; ++y) {
+        const UINT32* row = bits + y * w;
+        for (int x = 0; x < w; ++x) {
+            if ((row[x] & 0x00FFFFFFu) != bgPx) {
+                any = TRUE;
+                if (x > mx) mx = x;
+                if (y > my) my = y;
+            }
+        }
+    }
+    if (!any) {
+        *pMaxX = CCC_ScaleDpi(200, 96);
+        *pMaxY = CCC_ScaleDpi(120, 96);
+        return;
+    }
+    *pMaxX = mx + 1;
+    *pMaxY = my + 1;
+}
+
+BOOL CCC_GdiHelpBeginPaint(CWnd* wnd, CDC& paintDc, CCC_GdiHelpPaint& hp)
+{
+    hp.ok = FALSE;
+    hp.wnd = wnd;
+    hp.pPaintDc = &paintDc;
+    hp.oldBmp = NULL;
+    hp.bits = NULL;
+    if (!wnd || !::IsWindow(wnd->GetSafeHwnd()))
+        return FALSE;
+
+    HWND hWnd = wnd->GetSafeHwnd();
+    CCC_GdiHelpEnsureSubclass(hWnd);
+
+    const UINT dpi = CCC_GetControlDpi(hWnd);
+    hp.footerH = CCC_ScaleDpi(26, dpi);
+
+    const BOOL fitted = (::GetProp(hWnd, CCC_GDIHELP_PROP_FITTED) != NULL);
+    int bw = 0, bh = 0;
+    if (fitted) {
+        bw = (int)(INT_PTR)::GetProp(hWnd, CCC_GDIHELP_PROP_CW);
+        bh = (int)(INT_PTR)::GetProp(hWnd, CCC_GDIHELP_PROP_CH);
+    }
+    if (bw < 80 || bh < 60) {
+        // 未フィット時は DPI スケールした十分大きなキャンバスで実座標を測る
+        bw = CCC_ScaleDpi(1000, dpi);
+        bh = CCC_ScaleDpi(2200, dpi);
+        CRect rcClient;
+        wnd->GetClientRect(&rcClient);
+        if (rcClient.Width() > bw) bw = rcClient.Width();
+        if (rcClient.Height() > bh) bh = rcClient.Height();
+    }
+
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = bw;
+    bi.bmiHeader.biHeight = -bh;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP hDib = ::CreateDIBSection(paintDc.GetSafeHdc(), &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!hDib || !bits)
+        return FALSE;
+
+    hp.mem.CreateCompatibleDC(&paintDc);
+    hp.bmp.Attach(hDib);
+    hp.oldBmp = hp.mem.SelectObject(&hp.bmp);
+    hp.bits = bits;
+    hp.bw = bw;
+    hp.bh = bh;
+    hp.rc.SetRect(0, 0, bw, max(1, bh - hp.footerH));
+    hp.mem.FillSolidRect(0, 0, bw, bh, CCC_GDIHELP_BG);
+    hp.ok = TRUE;
+    return TRUE;
+}
+
+void CCC_GdiHelpEndPaint(CCC_GdiHelpPaint& hp)
+{
+    if (!hp.ok || !hp.wnd || !hp.pPaintDc || !hp.bits)
+        return;
+
+    HWND hWnd = hp.wnd->GetSafeHwnd();
+    const UINT dpi = CCC_GetControlDpi(hWnd);
+    const int pad = CCC_ScaleDpi(10, dpi);
+
+    int maxX = 0, maxY = 0;
+    CCC_GdiHelpScanExtent((const UINT32*)hp.bits, hp.bw, hp.bh, CCC_GDIHELP_BG, &maxX, &maxY);
+
+    // フッター帯より上に描画がある前提。フッター分を足して論理サイズに
+    int logicalW = maxX + pad;
+    int logicalH = maxY + pad;
+    if (logicalH < maxY + hp.footerH)
+        logicalH = maxY + hp.footerH;
+    if (logicalW < CCC_ScaleDpi(200, dpi)) logicalW = CCC_ScaleDpi(200, dpi);
+    if (logicalH < CCC_ScaleDpi(120, dpi)) logicalH = CCC_ScaleDpi(120, dpi);
+    if (logicalW > hp.bw) logicalW = hp.bw;
+    if (logicalH > hp.bh) logicalH = hp.bh;
+
+    HMONITOR mon = ::MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
+    CRect work;
+    if (mon && ::GetMonitorInfo(mon, &mi))
+        work = mi.rcWork;
+    else
+        ::SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);
+
+    CRect rcW, rcC;
+    ::GetWindowRect(hWnd, &rcW);
+    ::GetClientRect(hWnd, &rcC);
+    const int borderW = rcW.Width() - rcC.Width();
+    const int borderH = rcW.Height() - rcC.Height();
+    const int maxClientW = max(120, work.Width() - borderW - CCC_ScaleDpi(16, dpi));
+    const int maxClientH = max(80, work.Height() - borderH - CCC_ScaleDpi(16, dpi));
+
+    double scale = 1.0;
+    if (logicalW > maxClientW)
+        scale = (double)maxClientW / (double)logicalW;
+    if (logicalH > maxClientH) {
+        const double sy = (double)maxClientH / (double)logicalH;
+        if (sy < scale) scale = sy;
+    }
+    if (scale > 1.0) scale = 1.0;
+    if (scale < 0.25) scale = 0.25;
+
+    int clientW = (int)(logicalW * scale + 0.5);
+    int clientH = (int)(logicalH * scale + 0.5);
+    if (clientW < 80) clientW = 80;
+    if (clientH < 60) clientH = 60;
+    if (clientW > maxClientW) clientW = maxClientW;
+    if (clientH > maxClientH) clientH = maxClientH;
+
+    // 現フレームは論理内容を現クライアントへ縮小描画（ちらつき低減）
+    CRect rcNow;
+    hp.wnd->GetClientRect(&rcNow);
+    if (rcNow.Width() > 0 && rcNow.Height() > 0) {
+        ::SetStretchBltMode(hp.pPaintDc->GetSafeHdc(), HALFTONE);
+        ::StretchBlt(hp.pPaintDc->GetSafeHdc(), 0, 0, rcNow.Width(), rcNow.Height(),
+            hp.mem.GetSafeHdc(), 0, 0, logicalW, logicalH, SRCCOPY);
+    }
+
+    const BOOL fitted = (::GetProp(hWnd, CCC_GDIHELP_PROP_FITTED) != NULL);
+    const int prevW = (int)(INT_PTR)::GetProp(hWnd, CCC_GDIHELP_PROP_CW);
+    const int prevH = (int)(INT_PTR)::GetProp(hWnd, CCC_GDIHELP_PROP_CH);
+    const BOOL sizeChanged = !fitted || prevW != logicalW || prevH != logicalH
+        || rcNow.Width() != clientW || rcNow.Height() != clientH;
+
+    ::SetProp(hWnd, CCC_GDIHELP_PROP_CW, (HANDLE)(INT_PTR)logicalW);
+    ::SetProp(hWnd, CCC_GDIHELP_PROP_CH, (HANDLE)(INT_PTR)logicalH);
+    ::SetProp(hWnd, CCC_GDIHELP_PROP_FITTED, (HANDLE)(INT_PTR)1);
+
+    if (hp.oldBmp)
+        hp.mem.SelectObject(hp.oldBmp);
+    hp.oldBmp = NULL;
+    hp.bmp.DeleteObject();
+    hp.mem.DeleteDC();
+    hp.bits = NULL;
+    hp.ok = FALSE;
+
+    if (sizeChanged)
+        ::PostMessage(hWnd, CCC_WM_GDIHELP_FIT, (WPARAM)clientW, (LPARAM)clientH);
+}
+
 void CCC_PresentOwnedHelp(CWnd* help, CWnd* owner)
 {
     if (!help || !::IsWindow(help->GetSafeHwnd()))
         return;
+    CCC_GdiHelpEnsureSubclass(help->GetSafeHwnd());
     help->ShowWindow(SW_SHOW);
     // オーナー直上へ（HWND_TOPMOST は使わない）。他ツールが前面になれば一緒に下へ回る。
     if (owner && ::IsWindow(owner->GetSafeHwnd()))
@@ -13363,6 +13721,8 @@ void CCC_PresentOwnedHelp(CWnd* help, CWnd* owner)
             0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     help->BringWindowToTop();
     help->SetForegroundWindow();
+    // 初回表示で実描画範囲フィットを走らせる
+    help->Invalidate(FALSE);
 }
 
 int CCC_MainLockGetReserveWidth(HWND hDlg)
@@ -13437,13 +13797,8 @@ static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
     pDlg->ModifyStyle(DS_MODALFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX, 0);
     // ホスト α 時は CLIPCHILDREN 必須（親塗りがリスト等のスクロールバーを潰すのを防ぐ）
     pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
-    // 歌詞ウィンドウは LWA_ALPHA 透過度のためアクリル帯を使わない
-    // （EnsureBackdrop / ApplyAero が WS_EX_LAYERED を剥がすとスライダーが無効になる）
+    // キャプション帯は常時アクリル（本文の不透明化は描画側）。歌詞も同様。
     e->acrylicCaption = TRUE;
-    if (pDlg->GetRuntimeClass()
-        && pDlg->GetRuntimeClass()->m_lpszClassName
-        && strcmp(pDlg->GetRuntimeClass()->m_lpszClassName, "CDesktopLyricsWnd") == 0)
-        e->acrylicCaption = FALSE;
     e->installed = TRUE;
 
     // 先に NC 吸収（FRAMECHANGED）。ExtendFrame より後に FRAMECHANGED すると

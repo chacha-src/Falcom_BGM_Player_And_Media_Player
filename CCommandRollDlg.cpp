@@ -1587,11 +1587,13 @@ static void HelpDrawArrow(CDC& dc, int x0, int y0, int x1, int y1, COLORREF col)
 
 void CCmdRollHelpDlg::OnPaint()
 {
-	CPaintDC dc(this);
-	CRect rc; GetClientRect(&rc);
-	const int footerH = 26;
-	rc.bottom -= footerH;
-	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	CPaintDC pdc(this);
+	CCC_GdiHelpPaint hp;
+	if (!CCC_GdiHelpBeginPaint(this, pdc, hp))
+		return;
+	CDC& dc = hp.mem;
+	CRect rc = hp.rc;
+	const int footerH = hp.footerH;
 	dc.SetBkMode(TRANSPARENT);
 	CFont* oldFont = dc.SelectObject(GetFont());
 
@@ -1721,6 +1723,7 @@ void CCmdRollHelpDlg::OnPaint()
 	muted(L, y, LL14(L"・ロールとプロンプトは同じコマンド列を共有します。片方を直せばもう片方も更新されます。", L"· Roll and prompt share the same command list; editing either updates the other.", L"· Rouleau et prompt partagent les commandes.", L"· Roll e prompt condividono i comandi.", L"· Roll y prompt comparten los comandos.", L"· 롤과 프롬프트는 같은 명령열을 공유합니다.", L"· 卷轴与提示共享同一命令列。", L"· Roll and prompt share commands.", L"· Ролл и промпт делят одни команды.", L"· Roll und Prompt teilen dieselben Befehle.", L"· Roll e prompt compartilham os comandos.", L"· Roll en prompt delen dezelfde opdrachten.", L"· Roll i prompt wspoldziela komendy.", L"· Rulo ve istem ayni komutlari paylasir."));
 
 	dc.SelectObject(oldFont);
+	CCC_GdiHelpEndPaint(hp);
 }
 
 } // namespace

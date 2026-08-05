@@ -367,11 +367,13 @@ BOOL CAnHelpDlg::OnEraseBkgnd(CDC* pDC)
 
 void CAnHelpDlg::OnPaint()
 {
-	CPaintDC dc(this);
-	CRect rc; GetClientRect(&rc);
-	const int footerH = 26;
-	rc.bottom -= footerH;
-	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	CPaintDC pdc(this);
+	CCC_GdiHelpPaint hp;
+	if (!CCC_GdiHelpBeginPaint(this, pdc, hp))
+		return;
+	CDC& dc = hp.mem;
+	CRect rc = hp.rc;
+	const int footerH = hp.footerH;
 	dc.SetBkMode(TRANSPARENT);
 	CFont* oldFont = dc.SelectObject(GetFont());
 
@@ -640,6 +642,7 @@ void CAnHelpDlg::OnPaint()
 		L"Başlık «?» veya sağ tık → İşlem kılavuzu ile açın."));
 
 	dc.SelectObject(oldFont);
+	CCC_GdiHelpEndPaint(hp);
 }
 
 } // namespace

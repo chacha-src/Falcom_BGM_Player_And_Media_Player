@@ -2138,6 +2138,7 @@ BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 
 void CMediaPlayerDlg::RequestAppShutdown()
 {
+	DesktopLyricsPrepareAppExit();
 	SavePos();
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
@@ -7557,7 +7558,7 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 				LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
 					L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
 					L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
-				savedata.deskLrcOn != 0);
+				IsDesktopLyricsOpen());
 			menu.AddSeparator();
 		}
 		menu.AddCommand(ID_MP_REFRESH_JACKET,
@@ -7911,7 +7912,7 @@ void CMediaPlayerDlg::ShowLyricsExtrasMenu(CPoint screenPt)
 		LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
 			L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
 			L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
-		savedata.deskLrcOn != 0,
+		IsDesktopLyricsOpen(),
 		LL14(L"常時最前面の歌詞ウィンドウを開きます（不透明度・行数・フォントはウィンドウ右クリック）。", L"Open an always-on-top lyrics window (opacity/lines/font via window RMB).", L"Ouvre une fenetre de paroles au premier plan (opacite/lignes/police au clic droit).", L"Apre una finestra testi in primo piano (opacita/righe/font col destro).", L"Abre una ventana de letra siempre visible (opacidad/lineas/fuente con clic der.).",
 			L"항상 위 가사 창을 엽니다(불투명도·행수·글꼴은 창 우클릭).", L"打开置顶歌词窗口（不透明度/行数/字体在窗口右键）。", L"يفتح نافذة كلمات في المقدمة (العتامة/الأسطر/الخط بزر يمين النافذة).", L"Открывает окно текста поверх всех (непрозрачность/строки/шрифт — ПКМ по окну).", L"Oeffnet ein Textfenster im Vordergrund (Deckkraft/Zeilen/Schrift per RMB).",
 			L"Abre janela de letra no topo (opacidade/linhas/fonte no botao dir. da janela).", L"Opent songtekstvenster bovenop (dekking/regels/lettertype via RMB).", L"Otwiera okno tekstu na wierzchu (nieprzezroczystosc/wiersze/czcionka przez PPM).", L"Her zaman ustte soz penceresi acar (opaklik/satir/yazi pencere sag tik)."));
@@ -8013,7 +8014,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
 			L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
 			L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
-		savedata.deskLrcOn != 0);
+		IsDesktopLyricsOpen());
 	menu.AddCommand(ID_MP_TAG_EDIT,
 		LL14(L"タグ編集 (F2)", L"Edit tags (F2)", L"Editer tags (F2)", L"Modifica tag (F2)", L"Editar etiquetas (F2)", L"태그 편집 (F2)", L"编辑标签 (F2)", L"تحرير الوسوم (F2)", L"Правка тегов (F2)", L"Tags bearbeiten (F2)", L"Editar tags (F2)", L"Tags bewerken (F2)", L"Edytuj tagi (F2)", L"Etiket duzenle (F2)"));
 	menu.AddCommand(ID_MP_NORM_PREVIEW,
@@ -8647,7 +8648,7 @@ void CMediaPlayerDlg::OnLrcSave()
 
 void CMediaPlayerDlg::OnDeskLrcToggle()
 {
-	if (savedata.deskLrcOn) {
+	if (IsDesktopLyricsOpen()) {
 		CloseDesktopLyricsIfOpen();
 		savedata.deskLrcOn = 0;
 	}
@@ -9593,11 +9594,13 @@ BOOL CMpCheatSheetDlg::OnEraseBkgnd(CDC* pDC)
 
 void CMpCheatSheetDlg::OnPaint()
 {
-	CPaintDC dc(this);
-	CRect rc; GetClientRect(&rc);
-	const int footerH = 26;
-	rc.bottom -= footerH;
-	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	CPaintDC pdc(this);
+	CCC_GdiHelpPaint hp;
+	if (!CCC_GdiHelpBeginPaint(this, pdc, hp))
+		return;
+	CDC& dc = hp.mem;
+	CRect rc = hp.rc;
+	const int footerH = hp.footerH;
 	dc.SetBkMode(TRANSPARENT);
 	CFont* oldFont = dc.SelectObject(GetFont());
 
@@ -9927,6 +9930,7 @@ void CMpCheatSheetDlg::OnPaint()
 		L"Her alt pencere ? kendi kılavuzunu açar. «Ana pencereyi takip» konumları yapıştırır."));
 
 	dc.SelectObject(oldFont);
+	CCC_GdiHelpEndPaint(hp);
 }
 
 } // namespace

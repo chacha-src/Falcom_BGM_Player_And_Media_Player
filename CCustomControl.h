@@ -77,6 +77,8 @@ void CCC_InvalidateParent(HWND hWnd, BOOL bAeroMode);
 void CCC_RefreshDwmBlur(HWND hWnd);
 void CCC_PaintAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr);
 void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey);
+// アクリルホスト上に定数αの矩形を塗る（本文パネルの透け用）
+void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha);
 #endif
 
 // ============================================================================

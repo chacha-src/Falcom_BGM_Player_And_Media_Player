@@ -145,11 +145,13 @@ BOOL CEqHelpDlg::OnEraseBkgnd(CDC* pDC)
 
 void CEqHelpDlg::OnPaint()
 {
-	CPaintDC dc(this);
-	CRect rc; GetClientRect(&rc);
-	const int footerH = 26;
-	rc.bottom -= footerH;
-	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	CPaintDC pdc(this);
+	CCC_GdiHelpPaint hp;
+	if (!CCC_GdiHelpBeginPaint(this, pdc, hp))
+		return;
+	CDC& dc = hp.mem;
+	CRect rc = hp.rc;
+	const int footerH = hp.footerH;
 	dc.SetBkMode(TRANSPARENT);
 	CFont* oldFont = dc.SelectObject(GetFont());
 
@@ -347,8 +349,7 @@ void CEqHelpDlg::OnPaint()
 		L"Open via «?». Hover over schuiven voor tips.",
 		L"Otwórz przez «?». Najedź na suwaki, by zobaczyć podpowiedzi.",
 		L"Başlık «?» ile açın. Kaydırıcılara gelince ayrıntılı ipucu çıkar."));
-
-	
+	y += lh + 2;
 	body(L, y, LL14(
 		L"・右クリック …… キーからEQを提案 / キー検出時に自動提案",
 		L"· Right-click …… suggest EQ from key / auto-suggest on detect",
@@ -365,7 +366,8 @@ void CEqHelpDlg::OnPaint()
 		L"· PPM …… EQ z tonacji / auto-propozycja",
 		L"· Sag tik …… anahtardan EQ / otomatik oneri")); y += lh;
 
-dc.SelectObject(oldFont);
+	dc.SelectObject(oldFont);
+	CCC_GdiHelpEndPaint(hp);
 }
 
 } // namespace

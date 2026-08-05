@@ -558,6 +558,9 @@ struct save{
 	int deskLrcFontAuto; // 1=ウィンドウ高さで表示行数フィット
 	int deskLrcFontPt;   // CreatePointFont 用ポイント10倍（80..480）。手動時に使用／自動時は実効値を同期
 	int deskLrcLines;    // 自動フィット時の目標表示行数（3..20、既定10）
+
+	// --- 歌詞ウィンドウ位置・サイズ。末尾追記（旧 mid の deskLrcX..H から移行）---
+	int deskLrcWinX, deskLrcWinY, deskLrcWinW, deskLrcWinH;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
@@ -607,6 +610,8 @@ void CCC_InvalidateRectMinusOverlay(HWND hDlg, const CRect& area);
 int  CCC_GetCustomCaptionHeight(HWND hDlg);
 // キャプション帯のアクリルは savedata.aero と完全独立。インストール済みなら常に TRUE(1)
 BOOL CCC_AcrylicCaption(HWND hWnd);
+// AcrylicCaption ホストの帯ガラスを再適用（WS_EX_LAYERED を剥がしてから）
+void CCC_CaptionEnsureHostAcrylic(HWND hWnd);
 void CCC_CaptionPaint(CDC& dc, HWND hDlg);
 void CCC_CaptionLayout(HWND hDlg);
 void CCC_CaptionUnregister(HWND hDlg);
@@ -614,6 +619,25 @@ void CCC_CaptionUnregister(HWND hDlg);
 void CCC_CaptionPlaceHelpBtn(HWND hDlg, CWnd* pHelp);
 // オーナー付きヘルプを前面へ。TOPMOST は使わない（他UIがメインになったら下に回る）
 void CCC_PresentOwnedHelp(CWnd* help, CWnd* owner);
+// GDIヘルプ: 実描画の MAX 座標を測り、DPI／ワークエリアに収まるよう窓を縮小フィット
+struct CCC_GdiHelpPaint {
+	CWnd* wnd;
+	CDC* pPaintDc;
+	CDC mem;
+	CBitmap bmp;
+	CBitmap* oldBmp;
+	void* bits;
+	int bw;
+	int bh;
+	int footerH;
+	CRect rc; // フッター除く描画領域
+	BOOL ok;
+	CCC_GdiHelpPaint()
+		: wnd(NULL), pPaintDc(NULL), oldBmp(NULL), bits(NULL)
+		, bw(0), bh(0), footerH(26), ok(FALSE) {}
+};
+BOOL CCC_GdiHelpBeginPaint(CWnd* wnd, CDC& paintDc, CCC_GdiHelpPaint& hp);
+void CCC_GdiHelpEndPaint(CCC_GdiHelpPaint& hp);
 // Per-Monitor DPI 変更時にキャプション帯高さを再計算してレイアウト
 void CCC_CaptionRefreshDpi(HWND hDlg);
 

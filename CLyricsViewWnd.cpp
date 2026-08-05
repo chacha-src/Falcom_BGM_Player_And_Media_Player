@@ -14,6 +14,53 @@ namespace {
 	{
 		return (int)floor(v + 1e-6);
 	}
+	UINT LrcGetDpi(HWND hWnd)
+	{
+		if (!hWnd) return 96;
+		HMODULE user32 = ::GetModuleHandle(_T("user32.dll"));
+		if (user32) {
+			typedef UINT (WINAPI* GetDpiForWindowFn)(HWND);
+			GetDpiForWindowFn p = (GetDpiForWindowFn)::GetProcAddress(user32, "GetDpiForWindow");
+			if (p) {
+				const UINT d = p(hWnd);
+				if (d >= 72 && d <= 480) return d;
+			}
+		}
+		HDC hdc = ::GetDC(hWnd);
+		if (!hdc) return 96;
+		const int d = ::GetDeviceCaps(hdc, LOGPIXELSY);
+		::ReleaseDC(hWnd, hdc);
+		return (d >= 72) ? (UINT)d : 96;
+	}
+	// テキストが maxW に収まるよう base を縮小したフォントを out に作る。縮小不要なら FALSE。
+	BOOL LrcMakeFitFont(CDC& dc, CFont& base, LPCTSTR text, int maxW, UINT dpi, CFont& out)
+	{
+		if (out.GetSafeHandle()) out.DeleteObject();
+		if (!text || !text[0] || maxW < 12 || !base.GetSafeHandle()) return FALSE;
+		CFont* old = dc.SelectObject(&base);
+		const CSize sz = dc.GetTextExtent(text);
+		dc.SelectObject(old);
+		if (sz.cx <= 0) return FALSE;
+		// DrawText / ClearType の端ピクセル欠けを避けるため少し余白を残して縮める
+		const int safeW = maxW - MulDiv(4, (int)dpi, 96);
+		if (safeW < 8) return FALSE;
+		if (sz.cx <= safeW) return FALSE;
+		LOGFONT lf = {};
+		base.GetLogFont(&lf);
+		if (lf.lfHeight == 0) return FALSE;
+		double scale = (double)safeW / (double)sz.cx;
+		if (scale > 0.995) scale = 0.98; // ほぼ同じ幅でも一拍縮める
+		if (scale < 0.28) scale = 0.28;
+		lf.lfHeight = (LONG)((double)lf.lfHeight * scale);
+		const int minPx = MulDiv(8, (int)dpi, 72);
+		if (lf.lfHeight < 0) {
+			if (-lf.lfHeight < minPx) lf.lfHeight = -minPx;
+		} else {
+			if (lf.lfHeight > 0 && lf.lfHeight < minPx) lf.lfHeight = minPx;
+			if (lf.lfHeight == 0) lf.lfHeight = minPx;
+		}
+		return out.CreateFontIndirect(&lf) ? TRUE : FALSE;
+	}
 }
 
 BEGIN_MESSAGE_MAP(CLyricsViewWnd, CWnd)
@@ -37,6 +84,7 @@ CLyricsViewWnd::CLyricsViewWnd()
 	, m_lastAnimQpc(0)
 	, m_qpcFreq(0)
 	, m_fontPt(0)
+	, m_dpi(96)
 	, m_timer(0)
 	, m_overlay(FALSE)
 {
@@ -79,33 +127,50 @@ void CLyricsViewWnd::Clear()
 		Invalidate(FALSE);
 }
 
+UINT CLyricsViewWnd::GetViewDpi() const
+{
+	return LrcGetDpi(m_hWnd);
+}
+
 void CLyricsViewWnd::EnsureFonts(int dpiPointTenths, LPCTSTR face)
 {
 	if (dpiPointTenths <= 0) dpiPointTenths = 90;
 	if (!face || !face[0]) face = _T("Segoe UI");
-	if (m_fontPt == dpiPointTenths && m_fontFace == face && m_font.GetSafeHandle() && m_fontHi.GetSafeHandle())
+	const UINT dpi = GetViewDpi();
+	if (m_fontPt == dpiPointTenths && m_dpi == dpi && m_fontFace == face
+		&& m_font.GetSafeHandle() && m_fontHi.GetSafeHandle())
 		return;
 	m_fontPt = dpiPointTenths;
+	m_dpi = dpi;
 	m_fontFace = face;
 	if (m_font.GetSafeHandle()) m_font.DeleteObject();
 	if (m_fontHi.GetSafeHandle()) m_fontHi.DeleteObject();
-	m_font.CreatePointFont(dpiPointTenths, face);
+
+	// 窓の DC を渡して Per-Monitor DPI でポイント→ピクセル変換する
+	CClientDC dc(this);
+	m_font.CreatePointFont(dpiPointTenths, face, &dc);
 	LOGFONT lf = {};
 	m_font.GetLogFont(&lf);
 	lf.lfWeight = FW_BOLD;
 	lf.lfHeight = (LONG)(lf.lfHeight * 1.12);
-	if (lf.lfHeight == 0) lf.lfHeight = -14;
+	if (lf.lfHeight == 0) lf.lfHeight = -MulDiv(14, (int)dpi, 72);
 	m_fontHi.CreateFontIndirect(&lf);
 
-	CClientDC dc(this);
 	CFont* old = dc.SelectObject(&m_fontHi);
 	TEXTMETRIC tm = {};
 	dc.GetTextMetrics(&tm);
-	m_lineH = tm.tmHeight + tm.tmExternalLeading + (m_overlay ? 8 : 4);
-	if (m_lineH < 16) m_lineH = 16;
+	const int pad = m_overlay ? MulDiv(8, (int)dpi, 96) : MulDiv(4, (int)dpi, 96);
+	m_lineH = tm.tmHeight + tm.tmExternalLeading + pad;
+	const int minLH = MulDiv(16, (int)dpi, 96);
+	if (m_lineH < minLH) m_lineH = minLH;
 	dc.SelectObject(old);
+	const double prevScroll = m_scrollY;
 	RecalcTarget();
-	m_scrollY = m_targetY;
+	// フォント寸法が変わったときだけ瞬間合わせ。追従中のジャンプを避ける
+	if (AbsD(prevScroll - m_targetY) > (double)m_lineH * 2.0)
+		m_scrollY = m_targetY;
+	else if (AbsD(m_scrollY - m_targetY) > 0.35)
+		StartAnim();
 	if (m_hWnd)
 		Invalidate(FALSE);
 }
@@ -229,21 +294,27 @@ void CLyricsViewWnd::RecalcTarget()
 	if (!m_hWnd) { m_targetY = 0.0; return; }
 	GetClientRect(&rc);
 	const int viewH = rc.Height();
-	if (viewH <= 0 || m_lineH <= 0) {
+	if (viewH <= 0 || m_lineH <= 0 || m_count <= 0) {
 		m_targetY = 0.0;
 		return;
 	}
-	// 現在行 + 行内進捗で連続的に次行へ寄せる（切替瞬間のジャンプを緩和）
+	// 現在行 + 行内進捗（切替の段差を消す）
 	const double softFrac = m_frac * m_frac * (3.0 - 2.0 * m_frac); // smoothstep
-	const double curTop = (double)m_cur * (double)m_lineH + softFrac * (double)m_lineH;
-	// 中央やや上（カラオケ視線）
-	m_targetY = curTop - ((double)viewH - (double)m_lineH) * 0.42;
-	if (m_targetY < 0.0) m_targetY = 0.0;
-	const double maxY = (double)m_count * (double)m_lineH - (double)viewH;
-	if (maxY > 0.0 && m_targetY > maxY)
-		m_targetY = maxY;
-	if (maxY <= 0.0)
+	const double curMid = ((double)m_cur + softFrac + 0.5) * (double)m_lineH;
+
+	// 視線は中央よりやや下（約58%）。上に寄りすぎ／上端欠けを避ける。
+	// 先頭は target<0→0、末尾は maxY で最終行を下端へ。
+	const double focusY = (double)viewH * 0.58;
+	m_targetY = curMid - focusY;
+
+	const double contentH = (double)m_count * (double)m_lineH;
+	const double maxY = contentH - (double)viewH;
+	if (maxY <= 0.0) {
 		m_targetY = 0.0;
+	} else {
+		if (m_targetY < 0.0) m_targetY = 0.0;
+		if (m_targetY > maxY) m_targetY = maxY;
+	}
 }
 
 void CLyricsViewWnd::StartAnim()
@@ -368,42 +439,44 @@ void CLyricsViewWnd::OnPaint()
 	CPaintDC pdc(this);
 	CRect rc;
 	GetClientRect(&rc);
-	if (rc.Width() <= 0 || rc.Height() <= 0) return;
+	const int w = rc.Width();
+	const int h = rc.Height();
+	if (w <= 0 || h <= 0) return;
 
+	// 本体は通常の不透明 GDI。半透明は親側の子 LWA_ALPHA に任せる（キャプションアクリルと分離）。
 	CDC mem;
 	mem.CreateCompatibleDC(&pdc);
 	CBitmap bmp;
-	bmp.CreateCompatibleBitmap(&pdc, rc.Width(), rc.Height());
+	bmp.CreateCompatibleBitmap(&pdc, w, h);
 	CBitmap* oldBmp = mem.SelectObject(&bmp);
 
 	mem.FillSolidRect(&rc, m_overlay ? RGB(18, 18, 28) : RGB(248, 250, 255));
 
-	// 上下フェード帯
-	for (int i = 0; i < 12 && i < rc.Height() / 4; i++) {
-		const int a = 40 - i * 3;
-		if (a <= 0) break;
-		mem.FillSolidRect(0, i, rc.Width(), 1, m_overlay ? RGB(28, 28, 40) : RGB(235, 240, 250));
-		mem.FillSolidRect(0, rc.bottom - 1 - i, rc.Width(), 1, m_overlay ? RGB(28, 28, 40) : RGB(235, 240, 250));
+	for (int i = 0; i < 12 && i < h / 4; i++) {
+		const int fa = 40 - i * 3;
+		if (fa <= 0) break;
+		mem.FillSolidRect(0, i, w, 1, m_overlay ? RGB(28, 28, 40) : RGB(235, 240, 250));
+		mem.FillSolidRect(0, h - 1 - i, w, 1, m_overlay ? RGB(28, 28, 40) : RGB(235, 240, 250));
 	}
 
 	if (m_count > 0 && m_lineH > 0) {
 		const int scrollPix = ScrollToPix(m_scrollY);
 		const int first = (m_lineH > 0) ? (scrollPix / m_lineH) : 0;
-		const int last = first + rc.Height() / m_lineH + 2;
-		const int padX = 6;
+		const int last = first + h / m_lineH + 2;
+		const UINT dpi = m_dpi ? m_dpi : LrcGetDpi(m_hWnd);
+		const int padX = MulDiv(8, (int)dpi, 96);
 
-		// 現在行ハイライト帯
 		{
 			const int cy = (int)((double)m_cur * m_lineH) - scrollPix;
-			CRect hi(0, cy - 1, rc.Width(), cy + m_lineH + 1);
-			if (hi.bottom > 0 && hi.top < rc.Height()) {
+			CRect hi(0, cy - 1, w, cy + m_lineH + 1);
+			if (hi.bottom > 0 && hi.top < h) {
 				mem.FillSolidRect(&hi, m_overlay ? RGB(40, 50, 80) : RGB(220, 232, 255));
 				CPen pen(PS_SOLID, 1, m_overlay ? RGB(90, 140, 220) : RGB(160, 190, 235));
 				CPen* op = mem.SelectObject(&pen);
 				mem.MoveTo(0, hi.top);
-				mem.LineTo(rc.Width(), hi.top);
+				mem.LineTo(w, hi.top);
 				mem.MoveTo(0, hi.bottom - 1);
-				mem.LineTo(rc.Width(), hi.bottom - 1);
+				mem.LineTo(w, hi.bottom - 1);
 				mem.SelectObject(op);
 			}
 		}
@@ -412,7 +485,7 @@ void CLyricsViewWnd::OnPaint()
 		for (int i = first; i <= last; i++) {
 			if (i < 0 || i >= m_count) continue;
 			const int y = (int)((double)i * m_lineH) - scrollPix;
-			if (y + m_lineH < 0 || y > rc.Height()) continue;
+			if (y + m_lineH < 0 || y > h) continue;
 
 			const BOOL isCur = (i == m_cur);
 			const int dist = abs(i - m_cur);
@@ -430,10 +503,14 @@ void CLyricsViewWnd::OnPaint()
 			}
 
 			CFont* use = isCur ? &m_fontHi : &m_font;
+			CFont fit;
+			CRect tr(padX, y, w - padX, y + m_lineH);
+			const BOOL fitted = LrcMakeFitFont(mem, *use, m_line[i], tr.Width(), dpi, fit);
+			if (fitted)
+				use = &fit;
 			CFont* old = mem.SelectObject(use);
-			CRect tr(padX, y, rc.Width() - padX, y + m_lineH);
-			// 現在行: 時刻間の進捗で左→右に色を追従(文字単位ではなくピクセルクリップ)
-			// END_ELLIPSIS は幅計算と描画がずれるのでカラオケ塗りでは使わない。
+			// 「...」は濁るので使わない。縮小後もあふれる分は矩形クリップのみ。
+			const UINT dtFlags = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
 			if (isCur && m_tmCount >= 2 && m_frac > 0.001) {
 				CSize te = mem.GetTextExtent(m_line[i]);
 				int tw = te.cx;
@@ -441,17 +518,17 @@ void CLyricsViewWnd::OnPaint()
 				if (tw < 1) tw = 1;
 				const int split = tr.left + (int)(tw * m_frac + 0.5);
 				mem.SetTextColor(m_overlay ? RGB(140, 145, 165) : RGB(150, 155, 170));
-				mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+				mem.DrawText(m_line[i], &tr, dtFlags);
 				CRgn clip;
 				if (split > tr.left && clip.CreateRectRgn(tr.left, tr.top, split, tr.bottom)) {
 					mem.SelectClipRgn(&clip);
 					mem.SetTextColor(m_overlay ? RGB(255, 90, 140) : RGB(220, 40, 90));
-					mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+					mem.DrawText(m_line[i], &tr, dtFlags);
 					mem.SelectClipRgn(NULL);
 				}
 			} else {
 				mem.SetTextColor(col);
-				mem.DrawText(m_line[i], &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+				mem.DrawText(m_line[i], &tr, dtFlags);
 			}
 			mem.SelectObject(old);
 		}
@@ -469,26 +546,18 @@ void CLyricsViewWnd::OnPaint()
 	}
 
 #if CCUSTOM_AERO_SUPPORT
-	// キャプション常時アクリル(本文 aero=0)でも親を辿ってガラスなら不透明合成。
-	// 素 BitBlt だと α=0 のまま開き閉じて追従描画が見えない。
-	BOOL needOpaque = m_overlay ? TRUE : FALSE;
-	if (!needOpaque && CCC_IsWin11()) {
-		if (CCC_IsAeroEnabled())
-			needOpaque = TRUE;
-		else {
-			for (HWND h = m_hWnd; h; h = ::GetParent(h)) {
-				if (CCC_AcrylicCaption(h)) { needOpaque = TRUE; break; }
-			}
-		}
+	// 親アクリル帯の上でも本文ビットマップは不透明に載せる（透過キー合成にしない）
+	if (m_overlay || CCC_IsAeroEnabled() || CCC_IsWin11()) {
+		CCC_BlitStretchOpaque(pdc.GetSafeHdc(), 0, 0, w, h,
+			mem.GetSafeHdc(), 0, 0, w, h);
+	} else {
+		pdc.BitBlt(0, 0, w, h, &mem, 0, 0, SRCCOPY);
 	}
-	if (needOpaque) {
-		CCC_BlitStretchOpaque(pdc.GetSafeHdc(), 0, 0, rc.Width(), rc.Height(),
-			mem.GetSafeHdc(), 0, 0, rc.Width(), rc.Height());
-	}
-	else
+#else
+	pdc.BitBlt(0, 0, w, h, &mem, 0, 0, SRCCOPY);
 #endif
-	{
-		pdc.BitBlt(0, 0, rc.Width(), rc.Height(), &mem, 0, 0, SRCCOPY);
-	}
 	mem.SelectObject(oldBmp);
 }
+
+
+

@@ -5,7 +5,8 @@
 #include "resource.h"
 
 // 常時最前面の歌詞ウィンドウ(モードレス・シングルトン)
-// 透過度は WS_EX_LAYERED + LWA_ALPHA（アクリル帯とは併用不可）
+// Win11: キャプション帯アクリル（WS_EX_LAYERED と併用不可 → 不透明度は本文側）。
+// それ以外: WS_EX_LAYERED + LWA_ALPHA で窓全体の不透明度。
 class CDesktopLyricsWnd : public CCustomBlurDialogBase
 {
 	DECLARE_DYNAMIC(CDesktopLyricsWnd)
@@ -33,6 +34,7 @@ protected:
 	BOOL m_dragLyrics;
 	CPoint m_dragOff;
 	CToolTipCtrl m_tooltip;
+	BOOL m_bGeomReady; // FALSE: Create/初期 OnSize で savedata を潰さない
 
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
@@ -53,6 +55,7 @@ protected:
 	afx_msg void OnDestroy();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnPaint();
 	DECLARE_MESSAGE_MAP()
 
 private:
@@ -63,4 +66,7 @@ private:
 void OpenDesktopLyricsModeless(CWnd* pParent);
 void CloseDesktopLyricsIfOpen();
 void SyncDesktopLyricsIfOpen();
+BOOL IsDesktopLyricsOpen();
+// アプリ終了前: 開いていれば位置を保存し deskLrcOn を残す（OnDestroy で落とさない）
+void DesktopLyricsPrepareAppExit();
 

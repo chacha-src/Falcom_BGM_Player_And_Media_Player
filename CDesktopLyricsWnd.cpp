@@ -8,6 +8,7 @@ extern COggDlg* og;
 extern void MpPersistSavedataQuick();
 
 static CDesktopLyricsWnd* g_desktopLyricsWnd = NULL;
+static int s_deskLrcAppExit = 0; // 1=アプリ終了中（deskLrcOn を落とさない）
 
 enum {
 	ID_DLRC_ALPHA_120 = 41001,
@@ -83,6 +84,7 @@ BEGIN_MESSAGE_MAP(CDesktopLyricsWnd, CCustomBlurDialogBase)
 	ON_WM_CONTEXTMENU()
 	ON_WM_DESTROY()
 	ON_WM_ERASEBKGND()
+	ON_WM_PAINT()
 	ON_WM_TIMER()
 	ON_WM_SHOWWINDOW()
 END_MESSAGE_MAP()
@@ -90,6 +92,7 @@ END_MESSAGE_MAP()
 CDesktopLyricsWnd::CDesktopLyricsWnd(CWnd* pParent)
 	: CCustomBlurDialogBase(CDesktopLyricsWnd::IDD, pParent)
 	, m_dragLyrics(FALSE)
+	, m_bGeomReady(FALSE)
 {
 }
 
@@ -107,13 +110,20 @@ void CDesktopLyricsWnd::DoDataExchange(CDataExchange* pDX)
 
 BOOL CDesktopLyricsWnd::PreCreateWindow(CREATESTRUCT& cs)
 {
-	cs.dwExStyle |= WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
+	cs.dwExStyle |= WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_DLGMODALFRAME;
 	return CCustomBlurDialogBase::PreCreateWindow(cs);
 }
 
 BOOL CDesktopLyricsWnd::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
+
+	SetIcon(nullptr, TRUE);
+	SetIcon(nullptr, FALSE);
+	// キャプションアイコンは付けない。WM_SETICON(NULL) だけでは DWM が
+	// 既定アイコンへフォールバックするため、Aero 有効時も常に
+	// WS_EX_DLGMODALFRAME を立ててフレーム再計算する（ピアノロール／アナライザと同じ）。
+	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 
 	SetWindowText(LL14(
 		L"歌詞ウィンドウ", L"Lyrics window", L"Fenetre de paroles", L"Finestra testi", L"Ventana de letra",
@@ -126,21 +136,30 @@ BOOL CDesktopLyricsWnd::OnInitDialog()
 			L"불투명도", L"不透明度", L"الشفافية", L"Непрозрачность", L"Deckkraft",
 			L"Opacidade", L"Dekking", L"Nieprzezroczystosc", L"Opaklik"));
 
-	int x = savedata.deskLrcX;
-	int y = savedata.deskLrcY;
-	int w = savedata.deskLrcW;
-	int h = savedata.deskLrcH;
+	int x = savedata.deskLrcWinX;
+	int y = savedata.deskLrcWinY;
+	int w = savedata.deskLrcWinW;
+	int h = savedata.deskLrcWinH;
+	// 末尾未書き込み／壊れているときは mid フィールドへフォールバック
+	if (w < 200 && savedata.deskLrcW >= 200) {
+		x = savedata.deskLrcX;
+		y = savedata.deskLrcY;
+		w = savedata.deskLrcW;
+		h = savedata.deskLrcH;
+	}
 	if (w < 200) w = 640;
 	if (h < 80) h = 160;
 	// 誤ってメイン画面サイズが保存されていると全面透過に見える
 	if (w > 1600) w = 800;
 	if (h > 900) h = 360;
 
-	// 本文ガラスを切る（キャプション帯アクリルも deskLrc では無効）
+	// 本文は不透明塗り。キャプション帯アクリルは OnShowWindow の EnsureBackdrop に任せる
 	MakeSolidClient();
 	ApplyWindowAlpha();
 
 	SetWindowPos(&wndTopMost, x, y, w, h, SWP_SHOWWINDOW);
+	// Create 直後の OnSize がテンプレ寸法で Persist しないよう、復元後に解禁
+	m_bGeomReady = TRUE;
 
 	if (!m_view.GetSafeHwnd()) {
 		CRect rc;
@@ -203,43 +222,27 @@ void CDesktopLyricsWnd::MakeSolidClient()
 {
 	if (!GetSafeHwnd()) return;
 #if CCUSTOM_AERO_SUPPORT
-	// CCC_ApplyAero(FALSE) は WS_EX_LAYERED を剥がすので使わない。
-	// LWA_ALPHA 透過度を維持したまま、本文アクリル/blur だけ落とす。
+	// 本文 aero ガラスは使わない。キャプション帯アクリルは維持。
 	CCC_ClearChildTrans(m_hWnd);
-	{
-		int backdropNone = 1; // DWMSBT_NONE
-		::DwmSetWindowAttribute(m_hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdropNone, sizeof(backdropNone));
-		MARGINS mz = { 0, 0, 0, 0 };
-		::DwmExtendFrameIntoClientArea(m_hWnd, &mz);
-		DWM_BLURBEHIND bb = {};
-		bb.dwFlags = DWM_BB_ENABLE;
-		bb.fEnable = FALSE;
-		::DwmEnableBlurBehindWindow(m_hWnd, &bb);
-		if (CCC_GetWindowsBuildNumber() >= 26100) {
-#ifndef DWMWA_REDIRECTIONBITMAP_ALPHA
-#define DWMWA_REDIRECTIONBITMAP_ALPHA 39
-#endif
-			BOOL useAlpha = FALSE;
-			::DwmSetWindowAttribute(m_hWnd, DWMWA_REDIRECTIONBITMAP_ALPHA, &useAlpha, sizeof(useAlpha));
-		}
-	}
+	// 子 LWA_ALPHA の下地を親でα=0クリアするため CLIPCHILDREN は外す
+	ModifyStyle(WS_CLIPCHILDREN, 0);
 #endif
 	m_bAeroEnabled = FALSE;
 }
 
 void CDesktopLyricsWnd::ApplyDwmBlur()
 {
-	// 全面アクリルにしない（歌詞が透け落ちる / LAYERED と競合）
+	// キャプションは基底の AcrylicCaption / EnsureBackdrop に任せる。
+	// ここで LWA_ALPHA を掛けない（LAYERED が帯アクリルを潰す）。
 	MakeSolidClient();
-	ApplyWindowAlpha();
 }
 
 void CDesktopLyricsWnd::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
 	if (bShow) {
-		// 基底が RefreshDwmBlur で backdrop を戻す場合があるので再切断
 		MakeSolidClient();
+		// 基底 EnsureBackdrop の後に LAYERED を付け直さない。帯アクリルを維持。
 		ApplyWindowAlpha();
 		if (m_view.GetSafeHwnd()) {
 			m_view.ShowWindow(SW_SHOW);
@@ -291,6 +294,29 @@ void CDesktopLyricsWnd::ApplyWindowAlpha()
 	if (a < 40) a = 40;
 	if (a > 255) a = 255;
 	savedata.deskLrcAlpha = a;
+
+#if CCUSTOM_AERO_SUPPORT
+	// 切り分け: 親=アクリル帯（LAYERED禁止） / 本体子=通常GDI + LWA_ALPHA
+	if (CCC_IsWin11() && CCC_AcrylicCaption(m_hWnd)) {
+		const LONG ex = ::GetWindowLong(m_hWnd, GWL_EXSTYLE);
+		if (ex & WS_EX_LAYERED)
+			::SetWindowLong(m_hWnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+		CCC_CaptionEnsureHostAcrylic(m_hWnd);
+
+		CWnd* kids[] = { &m_view, &m_alpha, &m_alphaL, &m_close };
+		for (int i = 0; i < (int)(sizeof(kids) / sizeof(kids[0])); ++i) {
+			CWnd* w = kids[i];
+			if (!w || !::IsWindow(w->GetSafeHwnd())) continue;
+			HWND h = w->GetSafeHwnd();
+			LONG cex = ::GetWindowLong(h, GWL_EXSTYLE);
+			if (!(cex & WS_EX_LAYERED))
+				::SetWindowLong(h, GWL_EXSTYLE, cex | WS_EX_LAYERED);
+			::SetLayeredWindowAttributes(h, 0, (BYTE)a, LWA_ALPHA);
+		}
+		Invalidate(FALSE);
+		return;
+	}
+#endif
 	LONG ex = ::GetWindowLong(m_hWnd, GWL_EXSTYLE);
 	if (!(ex & WS_EX_LAYERED))
 		::SetWindowLong(m_hWnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
@@ -299,13 +325,18 @@ void CDesktopLyricsWnd::ApplyWindowAlpha()
 
 void CDesktopLyricsWnd::PersistGeometry()
 {
-	if (!m_hWnd) return;
+	if (!m_hWnd || !m_bGeomReady) return;
 	CRect r;
 	GetWindowRect(&r);
-	savedata.deskLrcX = r.left;
-	savedata.deskLrcY = r.top;
-	savedata.deskLrcW = r.Width();
-	savedata.deskLrcH = r.Height();
+	savedata.deskLrcWinX = r.left;
+	savedata.deskLrcWinY = r.top;
+	savedata.deskLrcWinW = r.Width();
+	savedata.deskLrcWinH = r.Height();
+	// 旧 mid フィールドも同期（過去コード／途中 .dat 互換）
+	savedata.deskLrcX = savedata.deskLrcWinX;
+	savedata.deskLrcY = savedata.deskLrcWinY;
+	savedata.deskLrcW = savedata.deskLrcWinW;
+	savedata.deskLrcH = savedata.deskLrcWinH;
 	MpPersistSavedataQuick();
 }
 
@@ -313,43 +344,60 @@ void CDesktopLyricsWnd::LayoutClient()
 {
 	CRect rc;
 	GetClientRect(&rc);
-	const int footer = 28;
+	UINT dpi = 96;
+	{
+		HMODULE user32 = ::GetModuleHandle(_T("user32.dll"));
+		if (user32) {
+			typedef UINT (WINAPI* GetDpiForWindowFn)(HWND);
+			GetDpiForWindowFn p = (GetDpiForWindowFn)::GetProcAddress(user32, "GetDpiForWindow");
+			if (p && m_hWnd) {
+				const UINT d = p(m_hWnd);
+				if (d >= 72 && d <= 480) dpi = d;
+			}
+		}
+		if (dpi == 96) {
+			HDC hdc = ::GetDC(m_hWnd);
+			if (hdc) {
+				const int d = ::GetDeviceCaps(hdc, LOGPIXELSY);
+				::ReleaseDC(m_hWnd, hdc);
+				if (d >= 72) dpi = (UINT)d;
+			}
+		}
+	}
+	const int footer = MulDiv(28, (int)dpi, 96);
 	const int cap = GetCustomCaptionHeight();
 	CRect viewRc = rc;
 	if (cap > 0 && viewRc.Height() > cap)
 		viewRc.top = cap;
 	if (viewRc.Height() > footer)
 		viewRc.bottom -= footer;
-	if (viewRc.bottom < viewRc.top + 40)
-		viewRc.bottom = viewRc.top + 40;
+	if (viewRc.bottom < viewRc.top + MulDiv(40, (int)dpi, 96))
+		viewRc.bottom = viewRc.top + MulDiv(40, (int)dpi, 96);
 	if (m_view.GetSafeHwnd()) {
 		m_view.MoveWindow(&viewRc, TRUE);
 		m_view.ShowWindow(SW_SHOW);
 
-		// フォント: 自動=表示高さ÷目標行数でフィット（既定14pt未満にはしない＝窓が小さいときは行数減）
+		// フォント: 自動=表示高さ÷目標行数でフィット（窓DPIでポイント換算）
 		int pt = savedata.deskLrcFontPt;
 		if (savedata.deskLrcFontAuto) {
 			const int viewH = viewRc.Height();
-			int dpi = 96;
-			HDC hdc = ::GetDC(m_hWnd);
-			if (hdc) {
-				dpi = ::GetDeviceCaps(hdc, LOGPIXELSY);
-				::ReleaseDC(m_hWnd, hdc);
-			}
-			if (dpi < 72) dpi = 96;
 			int lines = savedata.deskLrcLines;
 			if (lines < 3) lines = 3;
 			if (lines > 20) lines = 20;
-			// overlay 行高 ≈ (pt/10)*(dpi/72)*1.12 + ~10
 			int targetLH = viewH / lines;
-			if (targetLH < 18) targetLH = 18;
-			if (targetLH > 120) targetLH = 120;
-			int body = targetLH - 10;
-			if (body < 8) body = 8;
-			pt = (body * 72000) / (dpi * 112);
-			if (pt < 140) pt = 140; // 旧既定未満へ縮めない
+			const int minLH = MulDiv(18, (int)dpi, 96);
+			const int maxLH = MulDiv(120, (int)dpi, 96);
+			if (targetLH < minLH) targetLH = minLH;
+			if (targetLH > maxLH) targetLH = maxLH;
+			int body = targetLH - MulDiv(10, (int)dpi, 96);
+			if (body < MulDiv(8, (int)dpi, 96)) body = MulDiv(8, (int)dpi, 96);
+			// CreatePointFont は nPointSize=tenths-of-point、窓DCでDPI変換
+			pt = MulDiv(body * 10, 72, (int)dpi);
+			// bold 1.12 分を見込んで少し小さめに
+			pt = (pt * 100) / 112;
+			if (pt < 140) pt = 140;
 			if (pt > 480) pt = 480;
-			savedata.deskLrcFontPt = pt; // スライダー／手動切替用に実効値を同期
+			savedata.deskLrcFontPt = pt;
 		} else {
 			if (pt < 80) pt = 80;
 			if (pt > 480) pt = 480;
@@ -357,12 +405,16 @@ void CDesktopLyricsWnd::LayoutClient()
 		m_view.EnsureFonts(pt, _T("Segoe UI"));
 	}
 
+	const int footY = rc.bottom - MulDiv(24, (int)dpi, 96);
 	if (m_alphaL.GetSafeHwnd())
-		m_alphaL.SetWindowPos(NULL, 8, rc.bottom - 22, 56, 14, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_alphaL.SetWindowPos(NULL, MulDiv(8, (int)dpi, 96), rc.bottom - MulDiv(22, (int)dpi, 96),
+			MulDiv(56, (int)dpi, 96), MulDiv(14, (int)dpi, 96), SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_alpha.GetSafeHwnd())
-		m_alpha.SetWindowPos(NULL, 66, rc.bottom - 24, rc.Width() - 134, 18, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_alpha.SetWindowPos(NULL, MulDiv(66, (int)dpi, 96), footY,
+			rc.Width() - MulDiv(134, (int)dpi, 96), MulDiv(18, (int)dpi, 96), SWP_NOZORDER | SWP_NOACTIVATE);
 	if (m_close.GetSafeHwnd())
-		m_close.SetWindowPos(NULL, rc.right - 58, rc.bottom - 24, 50, 18, SWP_NOZORDER | SWP_NOACTIVATE);
+		m_close.SetWindowPos(NULL, rc.right - MulDiv(58, (int)dpi, 96), footY,
+			MulDiv(50, (int)dpi, 96), MulDiv(18, (int)dpi, 96), SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void CDesktopLyricsWnd::SyncFromOg()
@@ -401,10 +453,14 @@ void CDesktopLyricsWnd::OnMoving(UINT fwSide, LPRECT pRect)
 {
 	CCustomBlurDialogBase::OnMoving(fwSide, pRect);
 	if (pRect) {
-		savedata.deskLrcX = pRect->left;
-		savedata.deskLrcY = pRect->top;
-		savedata.deskLrcW = pRect->right - pRect->left;
-		savedata.deskLrcH = pRect->bottom - pRect->top;
+		savedata.deskLrcWinX = pRect->left;
+		savedata.deskLrcWinY = pRect->top;
+		savedata.deskLrcWinW = pRect->right - pRect->left;
+		savedata.deskLrcWinH = pRect->bottom - pRect->top;
+		savedata.deskLrcX = savedata.deskLrcWinX;
+		savedata.deskLrcY = savedata.deskLrcWinY;
+		savedata.deskLrcW = savedata.deskLrcWinW;
+		savedata.deskLrcH = savedata.deskLrcWinH;
 	}
 }
 
@@ -649,8 +705,10 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 			::CloseClipboard();
 		}
 	}
-	else if (cmd == ID_DLRC_CLOSE)
+	else if (cmd == ID_DLRC_CLOSE) {
+		savedata.deskLrcOn = 0;
 		DestroyWindow();
+	}
 }
 
 void CDesktopLyricsWnd::OnRButtonUp(UINT nFlags, CPoint point)
@@ -686,8 +744,11 @@ void CDesktopLyricsWnd::OnDestroy()
 {
 	KillTimer(1);
 	PersistGeometry();
-	// deskLrcOn はトグル側で管理。X 閉じでは好みを落とさない（次回起動で復元）
-	MpPersistSavedataQuick();
+	// ユーザー閉じ: チェック／次回起動の復元を落とす。アプリ終了時は PrepareAppExit で残す
+	if (!s_deskLrcAppExit) {
+		savedata.deskLrcOn = 0;
+		MpPersistSavedataQuick();
+	}
 	CCustomBlurDialogBase::OnDestroy();
 }
 
@@ -698,9 +759,52 @@ void CDesktopLyricsWnd::OnTimer(UINT_PTR nIDEvent)
 	CCustomBlurDialogBase::OnTimer(nIDEvent);
 }
 
+void CDesktopLyricsWnd::OnPaint()
+{
+	CPaintDC dc(this);
+	CCC_CaptionPaint(dc, m_hWnd);
+#if CCUSTOM_AERO_SUPPORT
+	// 帯下は黒で塗らない。α=0クリアして子の通常GDI+LWAが背面と混ざる。
+	if (CCC_IsWin11() && CCC_AcrylicCaption(m_hWnd)) {
+		CRect body;
+		GetClientRect(&body);
+		const int cap = GetCustomCaptionHeight();
+		if (cap > 0 && body.Height() > cap)
+			body.top = cap;
+		if (body.Width() > 0 && body.Height() > 0) {
+			HDC hdc = dc.GetSafeHdc();
+			HRGN oldRgn = ::CreateRectRgn(0, 0, 0, 0);
+			const int hasOld = ::GetClipRgn(hdc, oldRgn);
+			::SelectClipRgn(hdc, NULL);
+			CRgn bodyRgn;
+			bodyRgn.CreateRectRgnIndirect(&body);
+			::SelectClipRgn(hdc, (HRGN)bodyRgn.GetSafeHandle());
+			CCC_ClearRectChroma(hdc, body, CCC_AERO_CHROMA_KEY);
+			if (hasOld == 1)
+				::SelectClipRgn(hdc, oldRgn);
+			else
+				::SelectClipRgn(hdc, NULL);
+			::DeleteObject(oldRgn);
+		}
+		return;
+	}
+#endif
+	CRect body;
+	GetClientRect(&body);
+	const int cap = GetCustomCaptionHeight();
+	if (cap > 0 && body.Height() > cap)
+		body.top = cap;
+	dc.FillSolidRect(&body, RGB(18, 18, 28));
+}
+
 BOOL CDesktopLyricsWnd::OnEraseBkgnd(CDC* pDC)
 {
 	if (!pDC) return TRUE;
+#if CCUSTOM_AERO_SUPPORT
+	// Win11 アクリル帯: 本文は子 LWA_ALPHA に任せる
+	if (CCC_IsWin11() && CCC_AcrylicCaption(m_hWnd))
+		return TRUE;
+#endif
 	CRect rc;
 	GetClientRect(&rc);
 	const int cap = GetCustomCaptionHeight();
@@ -712,6 +816,7 @@ BOOL CDesktopLyricsWnd::OnEraseBkgnd(CDC* pDC)
 
 void CDesktopLyricsWnd::OnCancel()
 {
+	savedata.deskLrcOn = 0;
 	DestroyWindow();
 }
 
@@ -750,13 +855,30 @@ void OpenDesktopLyricsModeless(CWnd* pParent)
 
 void CloseDesktopLyricsIfOpen()
 {
-	if (g_desktopLyricsWnd && ::IsWindow(g_desktopLyricsWnd->GetSafeHwnd()))
+	if (g_desktopLyricsWnd && ::IsWindow(g_desktopLyricsWnd->GetSafeHwnd())) {
+		savedata.deskLrcOn = 0;
 		g_desktopLyricsWnd->DestroyWindow();
+	}
 }
 
 void SyncDesktopLyricsIfOpen()
 {
 	if (g_desktopLyricsWnd && ::IsWindow(g_desktopLyricsWnd->GetSafeHwnd()))
 		g_desktopLyricsWnd->SyncFromOg();
+}
+
+BOOL IsDesktopLyricsOpen()
+{
+	return (g_desktopLyricsWnd && ::IsWindow(g_desktopLyricsWnd->GetSafeHwnd())) ? TRUE : FALSE;
+}
+
+void DesktopLyricsPrepareAppExit()
+{
+	if (!IsDesktopLyricsOpen())
+		return;
+	s_deskLrcAppExit = 1;
+	g_desktopLyricsWnd->PersistGeometry();
+	savedata.deskLrcOn = 1;
+	MpPersistSavedataQuick();
 }
 

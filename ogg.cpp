@@ -432,6 +432,10 @@ BOOL COggApp::InitInstance()
 	savedata.deskLrcFontAuto = 1;
 	savedata.deskLrcFontPt = 140;
 	savedata.deskLrcLines = 10;
+	savedata.deskLrcWinX = 80;
+	savedata.deskLrcWinY = 80;
+	savedata.deskLrcWinW = 640;
+	savedata.deskLrcWinH = 160;
 	savedata.pianorollviewmode = 0;
 	savedata.pianorollkeyrange = 108;
 	savedata.pianorollnotename = 1;
@@ -1257,6 +1261,17 @@ BOOL COggApp::InitInstance()
 		if (savedata.deskLrcLines < 3) savedata.deskLrcLines = 3;
 		if (savedata.deskLrcLines > 20) savedata.deskLrcLines = 20;
 	}
+	if (datFileSize < (int)(offsetof(save, deskLrcWinX) + sizeof(savedata.deskLrcWinX) * 4)) {
+		// 旧 mid フィールドから末尾へ移行
+		savedata.deskLrcWinX = savedata.deskLrcX;
+		savedata.deskLrcWinY = savedata.deskLrcY;
+		savedata.deskLrcWinW = savedata.deskLrcW;
+		savedata.deskLrcWinH = savedata.deskLrcH;
+	}
+	if (savedata.deskLrcWinW < 200) savedata.deskLrcWinW = 640;
+	if (savedata.deskLrcWinH < 80) savedata.deskLrcWinH = 160;
+	if (savedata.deskLrcWinW > 1600) savedata.deskLrcWinW = 800;
+	if (savedata.deskLrcWinH > 900) savedata.deskLrcWinH = 360;
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {
 		savedata.cap_fx_n = 1;

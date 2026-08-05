@@ -20,6 +20,7 @@
 #include "CMediaPlayerDlg.h"
 #include "CMissingFilesDlg.h"
 #include "MpPlayerAddons.h"
+#include "CDesktopLyricsWnd.h"
 
 static CWnd* GetPlaylistModalOwner(CPlayList* plDlg)
 {
@@ -264,11 +265,13 @@ BOOL CPlHelpDlg::OnEraseBkgnd(CDC* pDC)
 
 void CPlHelpDlg::OnPaint()
 {
-	CPaintDC dc(this);
-	CRect rc; GetClientRect(&rc);
-	const int footerH = 26;
-	rc.bottom -= footerH;
-	dc.FillSolidRect(CRect(0, 0, rc.right, rc.bottom + footerH), RGB(248, 248, 252));
+	CPaintDC pdc(this);
+	CCC_GdiHelpPaint hp;
+	if (!CCC_GdiHelpBeginPaint(this, pdc, hp))
+		return;
+	CDC& dc = hp.mem;
+	CRect rc = hp.rc;
+	const int footerH = hp.footerH;
 	dc.SetBkMode(TRANSPARENT);
 	CFont* oldFont = dc.SelectObject(GetFont());
 
@@ -537,6 +540,7 @@ void CPlHelpDlg::OnPaint()
 	}
 
 	dc.SelectObject(oldFont);
+	CCC_GdiHelpEndPaint(hp);
 }
 
 } // namespace
@@ -2248,7 +2252,7 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			LL14(L"歌詞ウィンドウを表示", L"Show lyrics window", L"Afficher fenetre paroles", L"Mostra finestra testi", L"Mostrar ventana de letra",
 				L"가사 창 표시", L"显示歌词窗口", L"عرض نافذة الكلمات", L"Показать окно текста", L"Textfenster anzeigen",
 				L"Mostrar janela de letra", L"Songtekstvenster tonen", L"Pokaz okno tekstu", L"Soz penceresini goster"),
-			savedata.deskLrcOn ? TRUE : FALSE);
+			IsDesktopLyricsOpen());
 		menu.AddCommand(PL_CTX_DUPES,
 			LL14(L"重複スキャン", L"Scan duplicates", L"Detecter doublons", L"Scansiona duplicati", L"Buscar duplicados", L"중복 스캔", L"扫描重复", L"فحص التكرار", L"Поиск дублей", L"Duplikate scannen", L"Procurar duplicatas", L"Duplicaten scannen", L"Skanuj duplikaty", L"Kopyalari tara"));
 		menu.AddCommand(PL_CTX_FOLDER_SYNC,
