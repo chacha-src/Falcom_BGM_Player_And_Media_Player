@@ -531,11 +531,12 @@ struct save{
 	int mpAlarmHour;         // -1=Off, 0..23
 	int mpAlarmMin;          // 0..59
 	int mpSsVizOn;           // 1=起動時にSS風ビジュアライザを開かない(実行時フラグは別)
-	int mpDetectedBpm;       // 直近BPM推定(0=未)
+	int mpDetectedBpm;       // 直近BPM推定(0=未)＝自動反映した主候補
 	int mpDjPadwindow;       // 1=DJパッド表示
 	int mpNormTargetLufs;    // バッチ正規化目標(負: 例 -14)
 	int mpKeyEqSuggest;      // 1=キー検出からEQプリセット自動提案を許可
 	int mpJacketRemOverlay;  // 1=ミニジャケに残時間リング+タイム表示
+	int mpBpmCand[3];        // 計測時の候補(主+4:3/3:2等)。0=空き
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

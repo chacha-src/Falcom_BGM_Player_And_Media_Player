@@ -1202,6 +1202,9 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_BEAT_GRID, &CMediaPlayerDlg::OnBeatGridToggle)
 	ON_COMMAND(ID_MP_JACKET_REM_OVERLAY, &CMediaPlayerDlg::OnJacketRemOverlayToggle)
 	ON_COMMAND(ID_MP_BPM_DETECT, &CMediaPlayerDlg::OnMpBpmDetect)
+	ON_COMMAND(ID_MP_BPM_CAND1, &CMediaPlayerDlg::OnMpBpmCand1)
+	ON_COMMAND(ID_MP_BPM_CAND2, &CMediaPlayerDlg::OnMpBpmCand2)
+	ON_COMMAND(ID_MP_BPM_CAND3, &CMediaPlayerDlg::OnMpBpmCand3)
 	ON_COMMAND(ID_MP_DJPAD, &CMediaPlayerDlg::OnMpDjPad)
 	ON_COMMAND(ID_MP_ALARM, &CMediaPlayerDlg::OnMpAlarm)
 	ON_COMMAND(ID_MP_MIRROR, &CMediaPlayerDlg::OnMpMirror)
@@ -5791,6 +5794,9 @@ void CMediaPlayerDlg::OnRclickList(NMHDR* pNMHDR, LRESULT* pResult)
 	}
 	if (cmd == PL_CTX_MB_AUTOTAG) { OnMbAutotag(); return; }
 	if (cmd == PL_CTX_BPM) { OnMpBpmDetect(); return; }
+	if (cmd == PL_CTX_BPM_CAND1) { OnMpBpmCand1(); return; }
+	if (cmd == PL_CTX_BPM_CAND2) { OnMpBpmCand2(); return; }
+	if (cmd == PL_CTX_BPM_CAND3) { OnMpBpmCand3(); return; }
 	if (cmd == PL_CTX_NORM_SCAN) { OnNormScan(); return; }
 	if (cmd == PL_CTX_EXPORT_AB) { OnExportAbNow(); return; }
 	if (cmd == PL_CTX_SSVIZ) { OnMpSsViz(); return; }
@@ -7690,6 +7696,28 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			bpmItem = LL14(L"BPM 計測開始（再生/PC音で数秒→再クリック）", L"Start BPM measure (play/PC audio a few sec → click again)", L"Demarrer BPM (lecture/PC quelques sec → recliquer)", L"Avvia BPM (riproduci/PC pochi sec → clic)", L"Iniciar BPM (reproduccion/PC unos seg → clic)", L"BPM 측정 시작 (재생/PC 소리 수초→다시 클릭)", L"开始测 BPM（播放/PC声数秒→再点）", L"بدء قياس BPM (تشغيل/صوت الجهاز ثم انقر)", L"Начать BPM (воспроизведение/ПК сек → клик)", L"BPM starten (Wiedergabe/PC einige Sek → Klick)", L"Iniciar BPM (reproducao/PC alguns seg → clique)", L"Start BPM (afspelen/pc enkele sec → klik)", L"Start BPM (odtwarzanie/PC kilka sek → klik)", L"BPM baslat (cal/PC birkac sn → tekrar)");
 		}
 		menu.AppendMenu(MF_STRING | (MpBpmIsMeasuring() ? MF_CHECKED : 0), ID_MP_BPM_DETECT, bpmItem);
+		if (!MpBpmIsMeasuring() && (savedata.mpDetectedBpm > 0 || savedata.mpBpmCand[0] > 0)) {
+			MpBpmEnsureCandList();
+			CMenu candSub;
+			candSub.CreatePopupMenu();
+			int nSub = 0;
+			for (int ci = 0; ci < 3; ++ci) {
+				const int cb = savedata.mpBpmCand[ci];
+				if (cb <= 0) continue;
+				CString candItem;
+				candItem.Format(L"%d", cb);
+				const UINT id = (ci == 0) ? ID_MP_BPM_CAND1 : (ci == 1) ? ID_MP_BPM_CAND2 : ID_MP_BPM_CAND3;
+				candSub.AppendMenu(MF_STRING | (savedata.mpDetectedBpm == cb ? MF_CHECKED : 0), id, candItem);
+				++nSub;
+			}
+			if (nSub > 0) {
+				menu.AppendMenu(MF_POPUP, (UINT_PTR)candSub.Detach(),
+					LL14(L"BPM 候補", L"BPM candidates", L"Candidats BPM", L"Candidati BPM",
+						L"Candidatos BPM", L"BPM 후보", L"BPM 候选", L"مرشحو BPM",
+						L"Кандидаты BPM", L"BPM-Kandidaten", L"Candidatos BPM", L"BPM-kandidaten",
+						L"Kandydaci BPM", L"BPM adaylari"));
+			}
+		}
 	}
 	menu.AppendMenu(MF_STRING, ID_MP_DJPAD,
 		LL14(L"DJ パッド", L"DJ Pad", L"Pad DJ", L"Pad DJ", L"Pad DJ", L"DJ 패드", L"DJ 垫", L"لوحة DJ", L"DJ-панель", L"DJ-Pad", L"Pad DJ", L"DJ-pad", L"Pad DJ", L"DJ paneli"));
@@ -8744,6 +8772,8 @@ void CMediaPlayerDlg::OnBeatGridToggle()
 		m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE);
 		m_seek.Invalidate(FALSE);
 	}
+	if (savedata.mpDetectedBpm > 0)
+		SongParams_SaveBpmForCurrentSong();
 }
 
 void CMediaPlayerDlg::OnJacketRemOverlayToggle()
@@ -8756,6 +8786,9 @@ void CMediaPlayerDlg::OnJacketRemOverlayToggle()
 }
 
 void CMediaPlayerDlg::OnMpBpmDetect() { MpOnBpmDetect(this); }
+void CMediaPlayerDlg::OnMpBpmCand1() { MpOnBpmCandPick(0); }
+void CMediaPlayerDlg::OnMpBpmCand2() { MpOnBpmCandPick(1); }
+void CMediaPlayerDlg::OnMpBpmCand3() { MpOnBpmCandPick(2); }
 void CMediaPlayerDlg::OnMpDjPad() { OpenMpDjPadModeless(this); }
 void CMediaPlayerDlg::OnMpAlarm() { OpenMpAlarmDlgModeless(this); }
 void CMediaPlayerDlg::OnMpMirror() { OpenMpMirrorDlgModeless(this); }

@@ -28,7 +28,11 @@ void MpMirrorShutdown();
 void MpBpmOnTimerTick();
 void MpBpmDetectFromPeaks();
 BOOL MpBpmIsMeasuring();
-void MpBpmNotifyPeak(float peak); // 音声スレッドから短時定数ピークを渡す
+void MpBpmNotifyPeak(float peak); // 互換用（拍推定には使わない）
+void MpBpmNotifyPcm(const float* L, const float* R, int frames, int sampleRate); // 再生PCMから拍推定
+void MpBpmApplyValue(int bpm); // 拍グリッドへ反映して保持
+void MpOnBpmCandPick(int candIndex); // 0..2 候補を採用
+void MpBpmEnsureCandList(); // 主値から 3/4・3/2 等を補完（メニュー用）
 
 // PC音ループバックをツール側から一時確保。MIDI録り/BPM計測などが共有。
 void MpPcAudioRetain();

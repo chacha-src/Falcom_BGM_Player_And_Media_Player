@@ -252,6 +252,7 @@ BOOL COggApp::InitInstance()
 	savedata.mpNormTargetLufs = -14;
 	savedata.mpKeyEqSuggest = 0;
 	savedata.mpJacketRemOverlay = 1;
+	savedata.mpBpmCand[0] = savedata.mpBpmCand[1] = savedata.mpBpmCand[2] = 0;
 	savedata.tc_format = 0;
 	savedata.tc_mp3_kbps = 192;
 	savedata.tc_flac_level = 5;
@@ -1173,6 +1174,16 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, mpJacketRemOverlay) + sizeof(savedata.mpJacketRemOverlay)))
 		savedata.mpJacketRemOverlay = 1; // 従来どおり表示
 	else if (savedata.mpJacketRemOverlay) savedata.mpJacketRemOverlay = 1;
+	if (datFileSize < (int)(offsetof(save, mpBpmCand) + sizeof(savedata.mpBpmCand))) {
+		savedata.mpBpmCand[0] = savedata.mpBpmCand[1] = savedata.mpBpmCand[2] = 0;
+		if (savedata.mpDetectedBpm > 0)
+			savedata.mpBpmCand[0] = savedata.mpDetectedBpm;
+	} else {
+		for (int i = 0; i < 3; ++i) {
+			if (savedata.mpBpmCand[i] < 0 || savedata.mpBpmCand[i] > 300)
+				savedata.mpBpmCand[i] = 0;
+		}
+	}
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {
 		savedata.cap_fx_n = 1;

@@ -17,8 +17,10 @@
 //            チェックOFF時: 現行のパラメータをその曲エントリへ保存してから無効化
 //   移行   : savedata.audioDataVersion (末尾追記)
 //            0→1 で旧キー(pathのみ)を playlistu*.dat 照合により mode+ret2 付きへ自動コンバート
+//            AudioData.dat ファイル ver: 1=pathのみ / 2=mode+ret2 / 3=BPM(選択+候補3+グリッド)
 //   リスト : 名前変更/削除/曲の他リスト移動・コピー時に listName キーを追従
 //            コンテキストメニューから選択曲の記憶パラメータだけ削除も可
+//   BPM    : detectedBpm / bpmCand[3] / beatGrid は「曲ごと保存」OFFでも曲単位で保存・再生時復元
 //   索引   : メモリ上は主キー(list+path+mode+ret2)ハッシュで検索。削除は末尾入替。
 // ============================================================================
 
@@ -50,6 +52,10 @@ struct SongParam {
 	int analyzerspecstyle; // アナライザー周波数表示モード 0..6
 	int mode;              // キー: pc[].sub / modesub (ゲームモード含む再生形式)
 	int ret2;              // キー: pc[].ret2 (同一ファイル内の曲番号など)
+	// --- ver3 追記: 曲ごとの BPM（選択中 + 候補3） ---
+	int detectedBpm;       // 選択中 BPM (0=未)
+	int bpmCand[3];        // 候補3つ (0=空き)
+	int beatGrid;          // 1=シーク拍グリッド表示
 };
 
 // 起動時に 1 度だけ読み込む
@@ -113,3 +119,8 @@ bool SongParams_HasEntryForRow(int row);
 
 // PL/MP リストの★列を再描画。別スレッドからは PostMessage 経由。
 void SongParams_NotifyListMarksChanged();
+
+// 現在曲の BPM（選択中 + 候補3 + グリッド）を AudioData.dat へ即時反映。
+// 「曲ごと保存」チェックOFFでも BPM だけは曲単位で覚える。
+void SongParams_SaveBpmForCurrentSong();
+void SongParams_RestoreBpmForCurrentSong();

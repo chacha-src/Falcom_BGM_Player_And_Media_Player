@@ -506,6 +506,9 @@ protected:
 	afx_msg void OnBeatGridToggle();
 	afx_msg void OnJacketRemOverlayToggle();
 	afx_msg void OnMpBpmDetect();
+	afx_msg void OnMpBpmCand1();
+	afx_msg void OnMpBpmCand2();
+	afx_msg void OnMpBpmCand3();
 	afx_msg void OnMpDjPad();
 	afx_msg void OnMpAlarm();
 	afx_msg void OnMpMirror();

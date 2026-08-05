@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ProAudio.h"
 #include "ogg.h"
 #include "oggDlg.h"
@@ -571,8 +571,8 @@ void ProAudio_LoudnessFeed(const float* L, const float* R, int frames, int sampl
 	}
 	if (blockPk > g_livePeak) g_livePeak = blockPk;
 	else g_livePeak *= 0.92f;
-	extern void MpBpmNotifyPeak(float peak);
-	MpBpmNotifyPeak(blockPk);
+	extern void MpBpmNotifyPcm(const float* L, const float* R, int frames, int sampleRate);
+	MpBpmNotifyPcm(L, R, frames, sampleRate);
 }
 
 float ProAudio_LivePeak()

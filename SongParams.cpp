@@ -1,4 +1,4 @@
-// SongParams.cpp : 曲ごとのオーディオ/DSP パラメータ 保持・復元
+﻿// SongParams.cpp : 曲ごとのオーディオ/DSP パラメータ 保持・復元
 #include "stdafx.h"
 #include "SongParams.h"
 #include "ProAudio.h"
@@ -50,9 +50,11 @@ static bool SongParams_IsStopping()
 #else
 #define SONGPARAM_DAT_NAME "oggYSEDbgm_AudioData.dat"
 #endif
-static const int SONGPARAM_FILE_VERSION = 2;
+static const int SONGPARAM_FILE_VERSION = 3;
 // ver1 レコード末尾(mode/ret2 無し)のサイズ
 static const size_t SONGPARAM_V1_SIZE = offsetof(SongParam, mode);
+// ver2 レコード末尾(BPM 無し)のサイズ
+static const size_t SONGPARAM_V2_SIZE = offsetof(SongParam, detectedBpm);
 
 // ---- メモリ内テーブル(g_cs で保護) ----
 // g_tbl: レコード本体(ファイルI/O用)。順序は問わない。
@@ -176,6 +178,8 @@ static bool ParamsEqual(const SongParam& a, const SongParam& b)
 	if (a.eqsoundeffect != b.eqsoundeffect) return false;
 	if (a.eq_reverb != b.eq_reverb || a.eq_chorus != b.eq_chorus || a.eq_delay != b.eq_delay) return false;
 	if (a.analyzerspecstyle != b.analyzerspecstyle) return false;
+	if (a.detectedBpm != b.detectedBpm || a.beatGrid != b.beatGrid) return false;
+	for (int i = 0; i < 3; i++) if (a.bpmCand[i] != b.bpmCand[i]) return false;
 	return true;
 }
 
@@ -207,6 +211,11 @@ static void SnapshotCurrent(SongParam& p)
 	p.eq_chorus = savedata.eq_chorus;
 	p.eq_delay = savedata.eq_delay;
 	p.analyzerspecstyle = savedata.analyzerspecstyle;
+	p.detectedBpm = savedata.mpDetectedBpm;
+	p.bpmCand[0] = savedata.mpBpmCand[0];
+	p.bpmCand[1] = savedata.mpBpmCand[1];
+	p.bpmCand[2] = savedata.mpBpmCand[2];
+	p.beatGrid = savedata.mpBeatGrid ? 1 : 0;
 }
 
 // プレイリストの fol / filen をキー用に整える。
@@ -335,9 +344,16 @@ void SongParams_LoadFile()
 		for (int i = 0; i < cnt; i++) {
 			SongParam e;
 			ZeroMemory(&e, sizeof(e));
-			if (ver >= 2) {
+			if (ver >= 3) {
 				UINT got = f.Read(&e, sizeof(SongParam));
 				if (got != sizeof(SongParam)) break;
+			}
+			else if (ver >= 2) {
+				UINT got = f.Read(&e, (UINT)SONGPARAM_V2_SIZE);
+				if (got != (UINT)SONGPARAM_V2_SIZE) break;
+				e.detectedBpm = 0;
+				e.bpmCand[0] = e.bpmCand[1] = e.bpmCand[2] = 0;
+				e.beatGrid = 0;
 			}
 			else {
 				// ver1: mode/ret2 無し
@@ -345,6 +361,9 @@ void SongParams_LoadFile()
 				if (got != (UINT)SONGPARAM_V1_SIZE) break;
 				e.mode = 0;
 				e.ret2 = 0;
+				e.detectedBpm = 0;
+				e.bpmCand[0] = e.bpmCand[1] = e.bpmCand[2] = 0;
+				e.beatGrid = 0;
 			}
 			e.listName[255] = 0;
 			e.path[1023] = 0;
@@ -625,6 +644,11 @@ static bool Upsert(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, const 
 		e.eqsoundeffect = params.eqsoundeffect;
 		e.eq_reverb = params.eq_reverb; e.eq_chorus = params.eq_chorus; e.eq_delay = params.eq_delay;
 		e.analyzerspecstyle = params.analyzerspecstyle;
+		e.detectedBpm = params.detectedBpm;
+		e.bpmCand[0] = params.bpmCand[0];
+		e.bpmCand[1] = params.bpmCand[1];
+		e.bpmCand[2] = params.bpmCand[2];
+		e.beatGrid = params.beatGrid ? 1 : 0;
 		SpReindexRowLocked((size_t)idx, oldKey);
 		return false;
 	}
@@ -641,6 +665,62 @@ void SongParams_NotifyListMarksChanged()
 		pl->m_lc.Invalidate(FALSE);
 	if (mp && ::IsWindow(mp->GetSafeHwnd()) && ::IsWindow(mp->m_list.GetSafeHwnd()))
 		mp->m_list.Invalidate(FALSE);
+}
+
+void SongParams_SaveBpmForCurrentSong()
+{
+	if (MpPromptIsActive())
+		return;
+	CString list, path;
+	int md = 0, r2 = 0;
+	ResolvePlayingKey(list, path, md, r2);
+	if (path.IsEmpty() || list.IsEmpty())
+		return;
+	if (savedata.mpDetectedBpm <= 0 && savedata.mpBpmCand[0] <= 0)
+		return;
+
+	SongParam e;
+	ZeroMemory(&e, sizeof(e));
+	const bool had = SongParams_FindCopy(list, path, md, r2, e);
+	if (!had)
+		SnapshotCurrent(e);
+	e.detectedBpm = savedata.mpDetectedBpm;
+	e.bpmCand[0] = savedata.mpBpmCand[0];
+	e.bpmCand[1] = savedata.mpBpmCand[1];
+	e.bpmCand[2] = savedata.mpBpmCand[2];
+	e.beatGrid = savedata.mpBeatGrid ? 1 : 0;
+	const bool added = Upsert(list, path, md, r2, e);
+	s_lastSaved = e;
+	s_baselineValid = true;
+	MarkDirtyAndMaybeWrite();
+	if (added)
+		SongParams_NotifyListMarksChanged();
+}
+
+void SongParams_RestoreBpmForCurrentSong()
+{
+	CString list = s_curList;
+	CString path = s_curPath;
+	int md = s_curMode;
+	int r2 = s_curRet2;
+	if (path.IsEmpty())
+		ResolvePlayingKey(list, path, md, r2);
+	if (path.IsEmpty())
+		return;
+
+	SongParam e;
+	if (!SongParams_FindCopy(list, path, md, r2, e) || e.detectedBpm <= 0)
+		return;
+
+	savedata.mpDetectedBpm = ClampI(e.detectedBpm, 0, 300);
+	savedata.mpBpmCand[0] = ClampI(e.bpmCand[0], 0, 300);
+	savedata.mpBpmCand[1] = ClampI(e.bpmCand[1], 0, 300);
+	savedata.mpBpmCand[2] = ClampI(e.bpmCand[2], 0, 300);
+	savedata.mpBeatGrid = e.beatGrid ? 1 : 0;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_seek.GetSafeHwnd()) {
+		mp->m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE);
+		mp->m_seek.Invalidate(FALSE);
+	}
 }
 
 void SongParams_ResetAll()
@@ -916,6 +996,13 @@ void SongParams_ApplyEntryToMain(const SongParam& e)
 	savedata.eq_chorus = ClampI(e.eq_chorus, 0, 200);
 	savedata.eq_delay = ClampI(e.eq_delay, 0, 200);
 	savedata.analyzerspecstyle = ClampI(e.analyzerspecstyle, 0, 6);
+	if (e.detectedBpm > 0) {
+		savedata.mpDetectedBpm = ClampI(e.detectedBpm, 0, 300);
+		savedata.mpBpmCand[0] = ClampI(e.bpmCand[0], 0, 300);
+		savedata.mpBpmCand[1] = ClampI(e.bpmCand[1], 0, 300);
+		savedata.mpBpmCand[2] = ClampI(e.bpmCand[2], 0, 300);
+		savedata.mpBeatGrid = e.beatGrid ? 1 : 0;
+	}
 
 	if (!og || !::IsWindow(og->GetSafeHwnd()))
 		return;
@@ -939,6 +1026,11 @@ void SongParams_ApplyEntryToMain(const SongParam& e)
 	// アナライザーが開いていれば周波数表示モードを反映
 	if (og->m_AnalyzerDlg && ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd()))
 		og->m_AnalyzerDlg->ApplySpecStyleExternal(savedata.analyzerspecstyle);
+
+	if (e.detectedBpm > 0 && mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_seek.GetSafeHwnd()) {
+		mp->m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE);
+		mp->m_seek.Invalidate(FALSE);
+	}
 }
 
 // play() 完了後に呼ぶ。復元をメインスレッドで同期実行する。
@@ -968,6 +1060,9 @@ void SongParams_OnSongStarted()
 	s_curRet2 = r2;
 	s_restorePending = false;
 	s_songReady = true;
+
+	// BPM は「曲ごと保存」OFFでも曲単位で復元する
+	SongParams_RestoreBpmForCurrentSong();
 
 	if (!savedata.saveSongParams) {
 		s_baselineValid = false;
@@ -1261,6 +1356,17 @@ CString SongParams_BuildTipExtra(LPCTSTR listName, LPCTSTR path, int mode, int r
 
 	if (e.analyzerspecstyle != 0) {
 		tmp.Format(L"%s=%d", LL14(L"表示", L"Disp", L"Aff", L"Disp", L"Vista", L"표시", L"显示", L"عرض", L"Вид", L"Anz", L"Exib", L"Weerg", L"Wyśw", L"Görün"), e.analyzerspecstyle);
+		TipAppend(body, tmp);
+	}
+	if (e.detectedBpm > 0) {
+		CString cand;
+		cand.Format(L"%d", e.detectedBpm);
+		if (e.bpmCand[0] > 0 || e.bpmCand[1] > 0 || e.bpmCand[2] > 0) {
+			CString c3;
+			c3.Format(L" (%d/%d/%d)", e.bpmCand[0], e.bpmCand[1], e.bpmCand[2]);
+			cand += c3;
+		}
+		tmp.Format(L"%s=%s", LL14(L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM"), cand);
 		TipAppend(body, tmp);
 	}
 

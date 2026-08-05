@@ -1282,6 +1282,9 @@
 #define ID_MP_VIDEO_REPLACE             33038
 #define ID_MP_MIDI_IN                   33035
 #define ID_MP_BPM_DETECT                33036
+#define ID_MP_BPM_CAND1                 33039
+#define ID_MP_BPM_CAND2                 33040
+#define ID_MP_BPM_CAND3                 33041
 #define ID_MP_CORR_METER                33037
 #define ID_MP_AB_PACK                   33025
 #define ID_MP_NORM_BATCH                33026

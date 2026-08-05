@@ -2151,6 +2151,28 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 		else
 			bpmLbl = LL14(L"BPM 計測", L"Measure BPM", L"Mesurer BPM", L"Misura BPM", L"Medir BPM", L"BPM 측정", L"测量 BPM", L"قياس BPM", L"Измерить BPM", L"BPM messen", L"Medir BPM", L"BPM meten", L"Mierz BPM", L"BPM olc");
 		menu.AppendMenu(MF_STRING | (MpBpmIsMeasuring() ? MF_CHECKED : 0), PL_CTX_BPM, bpmLbl);
+		if (!MpBpmIsMeasuring() && (savedata.mpDetectedBpm > 0 || savedata.mpBpmCand[0] > 0)) {
+			MpBpmEnsureCandList();
+			CMenu candSub;
+			candSub.CreatePopupMenu();
+			int nSub = 0;
+			for (int ci = 0; ci < 3; ++ci) {
+				const int cb = savedata.mpBpmCand[ci];
+				if (cb <= 0) continue;
+				CString candItem;
+				candItem.Format(L"%d", cb);
+				const UINT id = (ci == 0) ? PL_CTX_BPM_CAND1 : (ci == 1) ? PL_CTX_BPM_CAND2 : PL_CTX_BPM_CAND3;
+				candSub.AppendMenu(MF_STRING | (savedata.mpDetectedBpm == cb ? MF_CHECKED : 0), id, candItem);
+				++nSub;
+			}
+			if (nSub > 0) {
+				menu.AppendMenu(MF_POPUP, (UINT_PTR)candSub.Detach(),
+					LL14(L"BPM 候補", L"BPM candidates", L"Candidats BPM", L"Candidati BPM",
+						L"Candidatos BPM", L"BPM 후보", L"BPM 候选", L"مرشحو BPM",
+						L"Кандидаты BPM", L"BPM-Kandidaten", L"Candidatos BPM", L"BPM-kandidaten",
+						L"Kandydaci BPM", L"BPM adaylari"));
+			}
+		}
 		menu.AppendMenu(MF_STRING, PL_CTX_NORM_SCAN,
 			LL14(L"ラウドネス計測", L"Measure loudness", L"Mesurer loudness", L"Misura loudness", L"Medir loudness", L"라우드니스 측정", L"响度测量", L"قياس الجهارة", L"Измерить громкость", L"Lautheit messen", L"Medir loudness", L"Loudness meten", L"Zmierz glosnosc", L"Loudness olc"));
 		menu.AppendMenu(MF_STRING, PL_CTX_EXPORT_AB,
@@ -2453,6 +2475,21 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 		extern CMediaPlayerDlg* mp;
 		if (mp && ::IsWindow(mp->GetSafeHwnd()))
 			mp->SendMessage(WM_COMMAND, ID_MP_BPM_DETECT, 0);
+	}
+	else if (cmd == PL_CTX_BPM_CAND1) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_BPM_CAND1, 0);
+	}
+	else if (cmd == PL_CTX_BPM_CAND2) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_BPM_CAND2, 0);
+	}
+	else if (cmd == PL_CTX_BPM_CAND3) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, ID_MP_BPM_CAND3, 0);
 	}
 	else if (cmd == PL_CTX_NORM_SCAN) {
 		extern CMediaPlayerDlg* mp;
