@@ -2095,6 +2095,8 @@ CString CPlayList::GetPlaylistDisplayName(int ii)
 	return ss;
 }
 
+static bool IsDougaVideoFile(const CString& path);
+
 int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 {
 	int Lindex = -1;
@@ -2113,6 +2115,13 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			L"Exportar audio...", L"오디오 내보내기...", L"音频导出…", L"تصدير الصوت...",
 			L"Экспорт аудио...", L"Audio exportieren...", L"Exportar audio...", L"Audio exporteren...",
 			L"Eksport audio...", L"Ses disa aktar..."));
+	if (Lindex >= 0 && Lindex < playcnt && (pc[Lindex].sub == -2 || IsDougaVideoFile(pc[Lindex].fol))) {
+		menu.AppendMenu(MF_STRING, PL_CTX_VIDEO_EXTRACT,
+			LL14(L"動画→音声抽出…", L"Extract audio from video…", L"Extraire audio de la video…", L"Estrai audio dal video…",
+				L"Extraer audio del video…", L"동영상→오디오 추출…", L"从视频提取音频…", L"استخراج صوت من الفيديو…",
+				L"Извлечь аудио из видео…", L"Audio aus Video extrahieren…", L"Extrair audio do video…", L"Audio uit video…",
+				L"Wyodrebnij audio z wideo…", L"Videodan ses cikar…"));
+	}
 	menu.AppendMenu(MF_STRING | (savedata.mic_mix ? MF_CHECKED : 0), PL_CTX_MICMIX,
 		LL14(L"WAV保存時にマイクをミックス", L"Mix mic when saving WAV", L"Mixer le micro à l'enregistrement WAV", L"Mix microfono al salvataggio WAV",
 			L"Mezclar micro al guardar WAV", L"WAV 저장 시 마이크 믹스", L"保存WAV时混合麦克风", L"مزج الميكروفون عند حفظ WAV",
@@ -2332,6 +2341,10 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	if (cmd == ID_HELP_SHOWSHEET) { ShowHelpSheet(); return; }
 	if (cmd == PL_CTX_INFO) OnList();
 	else if (cmd == PL_CTX_WAV) OnPopWavExport();
+	else if (cmd == PL_CTX_VIDEO_EXTRACT) {
+		extern CMediaPlayerDlg* mp;
+		MpOnVideoExtract(mp);
+	}
 	else if (cmd == PL_CTX_MICMIX) {
 		savedata.mic_mix = savedata.mic_mix ? 0 : 1;
 		extern COggDlg* og;
@@ -3004,12 +3017,24 @@ void CPlayList::DelByIndices(const std::vector<int>& indices)
 	plcnt = PlAdjustIndexAfterRemovals(plcnt, selAsc);
 	pnt = PlAdjustIndexAfterRemovals(pnt, selAsc);
 	pnt1 = PlAdjustIndexAfterRemovals(pnt1, selAsc);
+	extern CMediaPlayerDlg* mp;
+	if (mp) {
+		int w = 0;
+		for (int i = 0; i < mp->m_queueN; ++i) {
+			const int adj = PlAdjustIndexAfterRemovals(mp->m_queue[i], selAsc);
+			if (adj >= 0)
+				mp->m_queue[w++] = adj;
+		}
+		mp->m_queueN = w;
+	}
 	if (::IsWindow(m_lc.GetSafeHwnd())) {
 		m_lc.SetItemCount(playcnt);
 		for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
 		m_lc.RedrawWindow();
 	}
 	Save();
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->RefreshList(TRUE);
 }
 
 void CPlayList::OnSUP()

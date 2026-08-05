@@ -29,6 +29,8 @@ extern int spelv[400];
 extern int tempo;
 extern int pitch;
 extern int ps;
+extern int plf;
+extern CMediaPlayerDlg* mp;
 extern int wavbit_sample_Hz;
 extern int g_ds_pcm_rate;
 extern int g_ds_pcm_ch;
@@ -641,13 +643,15 @@ static void MpBpmFinishAndShow(BOOL showFailIfNone)
 	if (g_bpmResultShown) return;
 	g_bpmResultShown = 1;
 	g_bpmArmed = 0;
+	const BOOL hadCapture = (g_bpmHistN > 0 || g_bpmEnvN > 64 || g_bpmLastAcoustic > 0 || g_bpmLastEstimate > 0);
 	MpBpmDetectFromPeaks();
 	if (g_bpmHeldPcAudio) {
 		MpPcAudioRelease();
 		g_bpmHeldPcAudio = 0;
 	}
 	if (!mp) return;
-	if (savedata.mpDetectedBpm <= 0 && savedata.mpBpmCand[0] <= 0) {
+	// 今回のキャプチャが空なら旧曲の savedata BPM を成功扱いしない
+	if (!hadCapture || (savedata.mpDetectedBpm <= 0 && savedata.mpBpmCand[0] <= 0)) {
 		if (showFailIfNone) {
 			mp->MessageBox(
 				LL14(L"BPM を推定できませんでした。\n曲を再生したまま数秒待ち、もう一度「BPM 計測」を試してください。",
@@ -750,16 +754,27 @@ void MpOnBpmDetect(CMediaPlayerDlg* /*mpDlg*/)
 }
 
 // ---- Mirror output ----
+// 初期化/解放は UI スレッドのみ。再生スレッドは Write のみ（CoCreate 禁止）。
 static IAudioClient* g_mpMirrorClient = NULL;
 static IAudioRenderClient* g_mpMirrorRender = NULL;
 static UINT32 g_mpMirrorBufSize = 0;
-static int g_mpMirrorFailed = 0;
+static volatile LONG g_mpMirrorFailed = 0;
 static int g_mpMirrorRate = 0;
 static int g_mpMirrorCh = 0;
 static int g_mpMirrorBits = 0;
 static int g_mpMirrorBpf = 0;
+static CRITICAL_SECTION g_mpMirrorCs;
+static BOOL g_mpMirrorCsInit = FALSE;
 
-static void MpMirrorRelease()
+static void MpMirrorCsEnsure()
+{
+	if (!g_mpMirrorCsInit) {
+		InitializeCriticalSection(&g_mpMirrorCs);
+		g_mpMirrorCsInit = TRUE;
+	}
+}
+
+static void MpMirrorReleaseLocked()
 {
 	if (g_mpMirrorRender) { g_mpMirrorRender->Release(); g_mpMirrorRender = NULL; }
 	if (g_mpMirrorClient) {
@@ -776,21 +791,42 @@ static void MpMirrorRelease()
 
 void MpMirrorShutdown()
 {
-	MpMirrorRelease();
-	g_mpMirrorFailed = 0;
+	MpMirrorCsEnsure();
+	EnterCriticalSection(&g_mpMirrorCs);
+	MpMirrorReleaseLocked();
+	LeaveCriticalSection(&g_mpMirrorCs);
+	InterlockedExchange(&g_mpMirrorFailed, 0);
 }
 
-static BOOL MpMirrorEnsureInit()
+// UI スレッド専用。失敗時は failed=1（ユーザーが再ONするまで試行しない）。
+static BOOL MpMirrorInitUiLocked()
 {
-	if (g_mpMirrorFailed || !savedata.mpMirrorOut) return FALSE;
-	if (g_mpMirrorClient && g_mpMirrorRender) return TRUE;
+	if (!savedata.mpMirrorOut) {
+		MpMirrorReleaseLocked();
+		return FALSE;
+	}
+	if (InterlockedCompareExchange(&g_mpMirrorFailed, 0, 0) != 0)
+		return FALSE;
 
-	MpMirrorRelease();
+	const int rate = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : ((wavbit_sample_Hz >= 8000) ? wavbit_sample_Hz : 44100);
+	const int ch = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : 2;
+	int bits = g_ds_pcm_bits;
+	if (bits != 16 && bits != 24 && bits != 32) bits = 16;
+
+	if (g_mpMirrorClient && g_mpMirrorRender
+		&& g_mpMirrorRate == rate && g_mpMirrorCh == ch && g_mpMirrorBits == bits)
+		return TRUE;
+
+	MpMirrorReleaseLocked();
+
 	IMMDeviceEnumerator* en = NULL;
 	IMMDevice* dev = NULL;
 	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
 		__uuidof(IMMDeviceEnumerator), (void**)&en);
-	if (FAILED(hr) || !en) { g_mpMirrorFailed = 1; return FALSE; }
+	if (FAILED(hr) || !en) {
+		InterlockedExchange(&g_mpMirrorFailed, 1);
+		return FALSE;
+	}
 
 	if (savedata.mpMirrorDevice[0]) {
 		hr = en->GetDevice(savedata.mpMirrorDevice, &dev);
@@ -823,16 +859,17 @@ static BOOL MpMirrorEnsureInit()
 			hr = en->GetDefaultAudioEndpoint(eRender, eConsole, &dev);
 	}
 	en->Release();
-	if (FAILED(hr) || !dev) { g_mpMirrorFailed = 1; return FALSE; }
+	if (FAILED(hr) || !dev) {
+		InterlockedExchange(&g_mpMirrorFailed, 1);
+		return FALSE;
+	}
 
 	hr = dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void**)&g_mpMirrorClient);
 	dev->Release();
-	if (FAILED(hr) || !g_mpMirrorClient) { g_mpMirrorFailed = 1; return FALSE; }
-
-	const int rate = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : 44100;
-	const int ch = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : 2;
-	int bits = g_ds_pcm_bits;
-	if (bits != 16 && bits != 24 && bits != 32) bits = 16;
+	if (FAILED(hr) || !g_mpMirrorClient) {
+		InterlockedExchange(&g_mpMirrorFailed, 1);
+		return FALSE;
+	}
 
 	WAVEFORMATEX wfx = {};
 	wfx.wFormatTag = WAVE_FORMAT_PCM;
@@ -846,15 +883,15 @@ static BOOL MpMirrorEnsureInit()
 	const REFERENCE_TIME bufDur = bufPeriod * 4;
 	hr = g_mpMirrorClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, bufDur, 0, &wfx, NULL);
 	if (FAILED(hr)) {
-		MpMirrorRelease();
-		g_mpMirrorFailed = 1;
+		MpMirrorReleaseLocked();
+		InterlockedExchange(&g_mpMirrorFailed, 1);
 		return FALSE;
 	}
 	g_mpMirrorClient->GetBufferSize(&g_mpMirrorBufSize);
 	hr = g_mpMirrorClient->GetService(__uuidof(IAudioRenderClient), (void**)&g_mpMirrorRender);
 	if (FAILED(hr) || !g_mpMirrorRender) {
-		MpMirrorRelease();
-		g_mpMirrorFailed = 1;
+		MpMirrorReleaseLocked();
+		InterlockedExchange(&g_mpMirrorFailed, 1);
 		return FALSE;
 	}
 	g_mpMirrorRate = rate;
@@ -865,18 +902,52 @@ static BOOL MpMirrorEnsureInit()
 	return TRUE;
 }
 
+void MpMirrorOnFormatReady()
+{
+	if (!savedata.mpMirrorOut) return;
+	MpMirrorCsEnsure();
+	EnterCriticalSection(&g_mpMirrorCs);
+	MpMirrorInitUiLocked();
+	LeaveCriticalSection(&g_mpMirrorCs);
+}
+
 void MpMirrorWritePcm(const BYTE* pcm, int bytes)
 {
-	if (!pcm || bytes <= 0 || !savedata.mpMirrorOut || g_mpMirrorFailed) return;
-	if (!MpMirrorEnsureInit()) return;
+	if (!pcm || bytes <= 0 || !savedata.mpMirrorOut) return;
+	if (InterlockedCompareExchange(&g_mpMirrorFailed, 0, 0) != 0) return;
 
 	const int vol = savedata.mpMirrorVol;
 	if (vol <= 0) return;
 
+	MpMirrorCsEnsure();
+	if (!TryEnterCriticalSection(&g_mpMirrorCs))
+		return; // 初期化中はドロップ（再生を止めない）
+
+	IAudioClient* client = g_mpMirrorClient;
+	IAudioRenderClient* render = g_mpMirrorRender;
+	const int bits = g_mpMirrorBits;
+	const int bpf = (g_mpMirrorBpf > 0) ? g_mpMirrorBpf : ((g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4);
+	const UINT32 bufSize = g_mpMirrorBufSize;
+	const int rate = g_mpMirrorRate;
+	const int ch = g_mpMirrorCh;
+
+	if (!client || !render || bpf < 1 || bufSize == 0) {
+		LeaveCriticalSection(&g_mpMirrorCs);
+		return;
+	}
+	// フォーマットずれ: 再初期化は UI 側。ここでは書かない。
+	const int wantRate = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : rate;
+	const int wantCh = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : ch;
+	int wantBits = g_ds_pcm_bits;
+	if (wantBits != 16 && wantBits != 24 && wantBits != 32) wantBits = bits;
+	if (rate != wantRate || ch != wantCh || bits != wantBits) {
+		LeaveCriticalSection(&g_mpMirrorCs);
+		return;
+	}
+
 	static BYTE scaled[65536];
 	BYTE* dst = (BYTE*)pcm;
-	int useLen = bytes;
-	const int bits = g_mpMirrorBits;
+	const int useLen = bytes;
 	if (vol < 100 && bits == 16 && bytes <= (int)sizeof(scaled)) {
 		const int samples = bytes / 2;
 		const short* src = (const short*)pcm;
@@ -914,27 +985,31 @@ void MpMirrorWritePcm(const BYTE* pcm, int bytes)
 		}
 		dst = scaled;
 	}
-	// vol<100 でバッファ不足時はフル音量のまま通す(無音よりマシ)
 
 	UINT32 pad = 0;
-	if (FAILED(g_mpMirrorClient->GetCurrentPadding(&pad))) {
-		g_mpMirrorFailed = 1;
-		MpMirrorRelease();
+	if (FAILED(client->GetCurrentPadding(&pad))) {
+		MpMirrorReleaseLocked();
+		InterlockedExchange(&g_mpMirrorFailed, 1);
+		LeaveCriticalSection(&g_mpMirrorCs);
 		return;
 	}
-	const UINT32 room = (g_mpMirrorBufSize > pad) ? (g_mpMirrorBufSize - pad) : 0;
-	const int bpf = (g_mpMirrorBpf > 0) ? g_mpMirrorBpf : ((g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4);
+	const UINT32 room = (bufSize > pad) ? (bufSize - pad) : 0;
 	const UINT32 framesNeed = (UINT32)(useLen / bpf);
-	if (framesNeed == 0 || framesNeed > room) return;
+	if (framesNeed == 0 || framesNeed > room) {
+		LeaveCriticalSection(&g_mpMirrorCs);
+		return;
+	}
 
 	BYTE* pData = NULL;
-	if (FAILED(g_mpMirrorRender->GetBuffer(framesNeed, &pData))) {
-		g_mpMirrorFailed = 1;
-		MpMirrorRelease();
+	if (FAILED(render->GetBuffer(framesNeed, &pData))) {
+		MpMirrorReleaseLocked();
+		InterlockedExchange(&g_mpMirrorFailed, 1);
+		LeaveCriticalSection(&g_mpMirrorCs);
 		return;
 	}
 	memcpy(pData, dst, (size_t)useLen);
-	g_mpMirrorRender->ReleaseBuffer(framesNeed, 0);
+	render->ReleaseBuffer(framesNeed, 0);
+	LeaveCriticalSection(&g_mpMirrorCs);
 }
 
 // ---- Remote HTTP (127.0.0.1) ----
@@ -948,6 +1023,19 @@ static void MpRemoteSendCmd(int cmd)
 {
 	if (g_mpRemoteHwnd && ::IsWindow(g_mpRemoteHwnd))
 		::PostMessage(g_mpRemoteHwnd, WM_MP_TRANSPORT_CMD, (WPARAM)cmd, 0);
+}
+
+static BOOL MpRemoteHasQueryParam(const char* qs, const char* key)
+{
+	if (!qs || !key) return FALSE;
+	const size_t klen = strlen(key);
+	for (const char* p = qs; (p = strstr(p, key)) != NULL; ++p) {
+		if (p > qs && p[-1] != '?' && p[-1] != '&') continue;
+		const char after = p[klen];
+		if (after == 0 || after == ' ' || after == '&' || after == '\r' || after == '\n')
+			return TRUE;
+	}
+	return FALSE;
 }
 
 static void MpRemoteHandleRequest(SOCKET s)
@@ -988,11 +1076,12 @@ static void MpRemoteHandleRequest(SOCKET s)
 	const char* body = (LPCSTR)bodyA;
 
 	if (strstr(line, "GET /cmd")) {
-		if (strstr(line, "c=play")) MpRemoteSendCmd(0);
-		else if (strstr(line, "c=pause")) MpRemoteSendCmd(1);
-		else if (strstr(line, "c=next")) MpRemoteSendCmd(2);
-		else if (strstr(line, "c=volup")) MpRemoteSendCmd(3);
-		else if (strstr(line, "c=voldn")) MpRemoteSendCmd(4);
+		const char* q = strchr(line, '?');
+		if (MpRemoteHasQueryParam(q, "c=play")) MpRemoteSendCmd(0);
+		else if (MpRemoteHasQueryParam(q, "c=pause")) MpRemoteSendCmd(1);
+		else if (MpRemoteHasQueryParam(q, "c=next")) MpRemoteSendCmd(2);
+		else if (MpRemoteHasQueryParam(q, "c=volup")) MpRemoteSendCmd(3);
+		else if (MpRemoteHasQueryParam(q, "c=voldn")) MpRemoteSendCmd(4);
 		const char* ok = "HTTP/1.0 204 No Content\r\nConnection: close\r\n\r\n";
 		send(s, ok, (int)strlen(ok), 0);
 		return;
@@ -1086,15 +1175,20 @@ static void CALLBACK MpMidiInCallback(HMIDIIN, UINT msg, DWORD_PTR, DWORD_PTR dw
 	const BYTE d1 = (BYTE)((pack >> 8) & 0xFF);
 	const BYTE d2 = (BYTE)((pack >> 16) & 0xFF);
 	int cmd = -1;
+	int volAbs = -1;
 	if ((st & 0xF0) == 0x90 && d2 > 0) {
 		if (d1 == 60) cmd = 0;
 		else if (d1 == 61) cmd = 1;
 		else if (d1 == 62) cmd = 2;
 	}
-	else if ((st & 0xF0) == 0xB0) {
-		if (d1 == 7) {
-			cmd = (d2 >= 64) ? 3 : 4;
-		}
+	else if ((st & 0xF0) == 0xB0 && d1 == 7) {
+		// CC7 = 絶対音量 0..100（±5 連打にしない）
+		volAbs = (int)d2 * 100 / 127;
+		cmd = 10;
+	}
+	if (cmd == 10) {
+		::PostMessage(g_mpMidiHwnd, WM_MP_TRANSPORT_CMD, (WPARAM)10, (LPARAM)volAbs);
+		return;
 	}
 	if (cmd >= 0)
 		::PostMessage(g_mpMidiHwnd, WM_MP_TRANSPORT_CMD, (WPARAM)cmd, 1);
@@ -1122,7 +1216,13 @@ void MpMidiInSetActive(BOOL on, HWND notifyHwnd)
 		return;
 	}
 	if (g_mpMidiIn) return;
-	MMRESULT r = midiInOpen(&g_mpMidiIn, MIDI_MAPPER, (DWORD_PTR)MpMidiInCallback, 0, CALLBACK_FUNCTION);
+	const UINT nDev = midiInGetNumDevs();
+	if (nDev == 0) {
+		g_mpMidiIn = NULL;
+		return;
+	}
+	// MIDI_MAPPER は入力に使えない。先頭デバイスを開く。
+	MMRESULT r = midiInOpen(&g_mpMidiIn, 0, (DWORD_PTR)MpMidiInCallback, 0, CALLBACK_FUNCTION);
 	if (r != MMSYSERR_NOERROR) {
 		g_mpMidiIn = NULL;
 		return;
@@ -1130,7 +1230,7 @@ void MpMidiInSetActive(BOOL on, HWND notifyHwnd)
 	midiInStart(g_mpMidiIn);
 }
 
-LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM)
+LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lParam)
 {
 	if (!mpDlg) return 0;
 	switch ((int)wParam) {
@@ -1139,13 +1239,38 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM)
 	case 2: mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_NEXT, BN_CLICKED), 0); break;
 	case 3:
 	case 4:
-		if (og && og->m_sl.GetSafeHwnd()) {
-			int v = og->m_sl.GetPos() / 1000;
+		{
+			int v = 50;
+			if (mpDlg->m_vol.GetSafeHwnd())
+				v = mpDlg->m_vol.GetPos();
+			else if (og && og->m_sl.GetSafeHwnd())
+				v = og->m_sl.GetPos() / 1000;
 			v += (wParam == 3) ? 5 : -5;
 			if (v < 0) v = 0;
 			if (v > 100) v = 100;
-			og->m_sl.SetPos(v * 1000);
-			og->PostMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v * 1000), (LPARAM)og->m_sl.GetSafeHwnd());
+			if (mpDlg->m_vol.GetSafeHwnd()) {
+				mpDlg->m_vol.SetPos(v);
+				mpDlg->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v), (LPARAM)mpDlg->m_vol.GetSafeHwnd());
+			}
+			if (og && og->m_sl.GetSafeHwnd()) {
+				og->m_sl.SetPos(v * 1000);
+				og->PostMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v * 1000), (LPARAM)og->m_sl.GetSafeHwnd());
+			}
+		}
+		break;
+	case 10:
+		{
+			int v = (int)lParam;
+			if (v < 0) v = 0;
+			if (v > 100) v = 100;
+			if (mpDlg->m_vol.GetSafeHwnd()) {
+				mpDlg->m_vol.SetPos(v);
+				mpDlg->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v), (LPARAM)mpDlg->m_vol.GetSafeHwnd());
+			}
+			if (og && og->m_sl.GetSafeHwnd()) {
+				og->m_sl.SetPos(v * 1000);
+				og->PostMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v * 1000), (LPARAM)og->m_sl.GetSafeHwnd());
+			}
 		}
 		break;
 	default: break;
@@ -1173,11 +1298,13 @@ void MpAlarmTick(CMediaPlayerDlg* mpDlg)
 	GetLocalTime(&st);
 	if (st.wHour != (WORD)savedata.mpAlarmHour || st.wMinute != (WORD)savedata.mpAlarmMin)
 		return;
-	const int key = st.wHour * 100 + st.wMinute;
+	// 日付込み（翌日の同時刻でも再発火）
+	const int key = ((int)st.wYear * 10000 + (int)st.wMonth * 100 + (int)st.wDay) * 10000
+		+ (int)st.wHour * 100 + (int)st.wMinute;
 	if (key == g_mpAlarmLastFireKey) return;
 	g_mpAlarmLastFireKey = key;
-	if (ps == 0)
-		mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PLAY, BN_CLICKED), 0);
+	if (plf == 1) return;
+	mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PLAY, BN_CLICKED), 0);
 }
 
 static BOOL MpPathLooksLikeVideo(LPCTSTR path)
@@ -1185,49 +1312,22 @@ static BOOL MpPathLooksLikeVideo(LPCTSTR path)
 	if (!path || !path[0]) return FALSE;
 	LPCTSTR dot = _tcsrchr(path, _T('.'));
 	if (!dot) return FALSE;
-	if (_tcsicmp(dot, _T(".mp4")) == 0 || _tcsicmp(dot, _T(".mkv")) == 0 || _tcsicmp(dot, _T(".avi")) == 0
-		|| _tcsicmp(dot, _T(".webm")) == 0 || _tcsicmp(dot, _T(".mov")) == 0 || _tcsicmp(dot, _T(".wmv")) == 0)
-		return TRUE;
+	static const LPCTSTR kExts[] = {
+		_T(".mp4"), _T(".m4v"), _T(".mkv"), _T(".avi"), _T(".webm"),
+		_T(".mov"), _T(".qt"), _T(".wmv"), _T(".asf"), _T(".mpg"),
+		_T(".mpeg"), _T(".mpe"), _T(".m1v"), _T(".m2v"), _T(".mpv"),
+		_T(".vob"), _T(".ts"), _T(".m2ts"), _T(".mts"), _T(".ogv"),
+		_T(".flv"), _T(".f4v"), _T(".3gp"), _T(".3g2"), _T(".divx"),
+		_T(".rm"), _T(".rmvb")
+	};
+	for (int i = 0; i < (int)_countof(kExts); ++i) {
+		if (_tcsicmp(dot, kExts[i]) == 0)
+			return TRUE;
+	}
 	return FALSE;
 }
 
-void MpOnVideoExtract(CMediaPlayerDlg* mpDlg)
-{
-	if (!mpDlg || !pl || !og) return;
-	const int pc = mpDlg->GetSelectedPcIndex();
-	if (pc < 0 || pc >= pl->playcnt) return;
-	playlistdata0& item = pl->pc[pc];
-	if (!MpPathLooksLikeVideo(item.fol)) {
-		mpDlg->MessageBox(
-			LL14(L"動画ファイルを選択してください。", L"Select a video file.", L"Selectionnez une video.", L"Seleziona un video.", L"Seleccione un video.",
-				L"동영상 파일을 선택하세요.", L"请选择视频文件。", L"اختر ملف فيديو.", L"Выберите видеофайл.", L"Video waehlen.",
-				L"Selecione um video.", L"Selecteer video.", L"Wybierz plik wideo.", L"Video dosyasi secin."),
-			LL14(L"抽出", L"Extract", L"Extraction", L"Estrazione", L"Extraccion", L"추출", L"提取", L"استخراج", L"Извлечение", L"Extraktion", L"Extracao", L"Extractie", L"Ekstrakcja", L"Cikarma"), MB_OK);
-		return;
-	}
-	CString out = item.fol;
-	const int dot = out.ReverseFind(_T('.'));
-	if (dot > 0) out = out.Left(dot);
-	out += _T(".wav");
-	if (GetFileAttributes(out) != INVALID_FILE_ATTRIBUTES) {
-		if (mpDlg->MessageBox(
-			LL14(L"WAV が既にあります。上書きしますか？", L"WAV exists. Overwrite?", L"WAV existe. Ecraser?", L"WAV esiste. Sovrascrivere?", L"WAV existe. ¿Sobrescribir?",
-				L"WAV가 있습니다. 덮어쓸까요?", L"WAV 已存在。覆盖？", L"WAV موجود. استبدال؟", L"WAV есть. Перезаписать?", L"WAV vorhanden. Ueberschreiben?",
-				L"WAV existe. Substituir?", L"WAV bestaat. Overschrijven?", L"WAV istnieje. Nadpisac?", L"WAV var. Uzerine yazilsin mi?"),
-			LL14(L"抽出", L"Extract", L"Extraction", L"Estrazione", L"Extraccion", L"추출", L"提取", L"استخراج", L"Извлечение", L"Extraktion", L"Extracao", L"Extractie", L"Ekstrakcja", L"Cikarma"), MB_YESNO | MB_ICONQUESTION) != IDYES)
-			return;
-	}
-	if (!og->ExportToWav(&item, out, 1, NULL, true)) {
-		mpDlg->MessageBox(
-			LL14(L"抽出に失敗しました。", L"Extract failed.", L"Echec extraction.", L"Estrazione fallita.", L"Extraccion fallida.",
-				L"추출 실패.", L"提取失败。", L"فشل الاستخراج.", L"Ошибка извлечения.", L"Extraktion fehlgeschlagen.",
-				L"Falha na extracao.", L"Extractie mislukt.", L"Ekstrakcja nie powiodla sie.", L"Cikarma basarisiz."),
-			LL14(L"抽出", L"Extract", L"Extraction", L"Estrazione", L"Extraccion", L"추출", L"提取", L"استخراج", L"Извлечение", L"Extraktion", L"Extracao", L"Extractie", L"Ekstrakcja", L"Cikarma"), MB_OK | MB_ICONWARNING);
-	}
-}
-
-
-// ---- 動画の音声差し替え: 映像は MF SourceReader、音声は外部 WAV → MP4(H264+AAC) ----
+// ---- 動画の音声抽出 / 差し替え: Media Foundation ----
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
@@ -1235,7 +1335,289 @@ void MpOnVideoExtract(CMediaPlayerDlg* mpDlg)
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfreadwrite.lib")
 #pragma comment(lib, "mfuuid.lib")
+#include "TranscodeExport.h"
 
+static void MpVeWriteWavHeader(CFile& f, WORD ch, DWORD hz, WORD bits)
+{
+	BYTE h[44];
+	memset(h, 0, sizeof(h));
+	const WORD blockAlign = (WORD)(ch * (bits / 8));
+	memcpy(h + 0, "RIFF", 4);
+	*(DWORD*)(h + 4) = 0;
+	memcpy(h + 8, "WAVE", 4);
+	memcpy(h + 12, "fmt ", 4);
+	*(DWORD*)(h + 16) = 16;
+	*(WORD*)(h + 20) = WAVE_FORMAT_PCM;
+	*(WORD*)(h + 22) = ch;
+	*(DWORD*)(h + 24) = hz;
+	*(DWORD*)(h + 28) = hz * blockAlign;
+	*(WORD*)(h + 32) = blockAlign;
+	*(WORD*)(h + 34) = bits;
+	memcpy(h + 36, "data", 4);
+	*(DWORD*)(h + 40) = 0;
+	f.Write(h, 44);
+}
+
+static void MpVeFinalizeWavHeader(CFile& f, WORD ch, WORD bits)
+{
+	const ULONGLONG fileLen = f.GetLength();
+	ULONGLONG dataBytes = (fileLen > 44) ? (fileLen - 44) : 0;
+	if (dataBytes > 0xFFFFFFFFu) dataBytes = 0xFFFFFFFFu;
+	DWORD riffSize = (DWORD)((fileLen > 8) ? (fileLen - 8) : 0);
+	if (riffSize > 0xFFFFFFFFu - 8) riffSize = 0xFFFFFFFFu;
+	f.SeekToBegin();
+	BYTE riff[8];
+	memcpy(riff, "RIFF", 4);
+	*(DWORD*)(riff + 4) = riffSize;
+	f.Write(riff, 8);
+	f.Seek(40, CFile::begin);
+	DWORD ds = (DWORD)dataBytes;
+	f.Write(&ds, 4);
+	(void)ch; (void)bits;
+}
+
+static BOOL MpExtractVideoAudioToWav(LPCTSTR videoPath, LPCTSTR wavPath, CString* errOut)
+{
+	if (errOut) errOut->Empty();
+	if (!videoPath || !videoPath[0] || !wavPath || !wavPath[0]) return FALSE;
+
+	HRESULT hrCo = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	HRESULT hr = MFStartup(MF_VERSION);
+	if (FAILED(hr)) {
+		if (errOut) *errOut = L"MFStartup failed";
+		if (SUCCEEDED(hrCo) || hrCo == S_FALSE) CoUninitialize();
+		return FALSE;
+	}
+
+	IMFSourceReader* reader = NULL;
+	hr = MFCreateSourceReaderFromURL(videoPath, NULL, &reader);
+	if (FAILED(hr) || !reader) {
+		CString url;
+		url.Format(_T("file:///%s"), videoPath);
+		url.Replace(_T('\\'), _T('/'));
+		hr = MFCreateSourceReaderFromURL(url, NULL, &reader);
+	}
+	BOOL ok = FALSE;
+	if (SUCCEEDED(hr) && reader) {
+		reader->SetStreamSelection((DWORD)MF_SOURCE_READER_ALL_STREAMS, FALSE);
+		reader->SetStreamSelection((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
+
+		IMFMediaType* typ = NULL;
+		if (SUCCEEDED(MFCreateMediaType(&typ)) && typ) {
+			typ->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+			typ->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
+			typ->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+			hr = reader->SetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, NULL, typ);
+			typ->Release();
+		}
+		UINT32 ch = 0;
+		UINT32 hz = 0;
+		UINT32 bitDepth = 16;
+		UINT32 bps = 0;
+		UINT32 blkAlign = 0;
+		IMFMediaType* cur = NULL;
+		if (SUCCEEDED(hr) && SUCCEEDED(reader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, &cur)) && cur) {
+			cur->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &ch);
+			cur->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &hz);
+			cur->GetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, &bitDepth);
+			cur->GetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, &blkAlign);
+			cur->GetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, &bps);
+			cur->Release();
+		}
+		if (ch < 1) ch = 2;
+		if (ch > 8) ch = 2;
+		if (hz < 8000) hz = 44100;
+		if (bitDepth != 8 && bitDepth != 16 && bitDepth != 24 && bitDepth != 32) bitDepth = 16;
+		if (blkAlign < 1) blkAlign = ch * (bitDepth / 8);
+		if (bps < 1) bps = hz * blkAlign;
+
+		if (SUCCEEDED(hr) && ch >= 1 && hz >= 8000) {
+			CFile f;
+			if (f.Open(wavPath, CFile::modeCreate | CFile::modeReadWrite | CFile::typeBinary | CFile::shareExclusive)) {
+				MpVeWriteWavHeader(f, (WORD)ch, hz, (WORD)bitDepth);
+				ok = TRUE;
+				for (;;) {
+					DWORD streamIndex = 0, flags = 0;
+					LONGLONG ts = 0;
+					IMFSample* sample = NULL;
+					hr = reader->ReadSample((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+						0, &streamIndex, &flags, &ts, &sample);
+					if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
+						if (sample) sample->Release();
+						break;
+					}
+					if (!sample) continue;
+					IMFMediaBuffer* buf = NULL;
+					if (SUCCEEDED(sample->ConvertToContiguousBuffer(&buf)) && buf) {
+						BYTE* p = NULL;
+						DWORD maxLen = 0, curLen = 0;
+						if (SUCCEEDED(buf->Lock(&p, &maxLen, &curLen)) && p && curLen > 0) {
+							f.Write(p, curLen);
+							buf->Unlock();
+						}
+						buf->Release();
+					}
+					sample->Release();
+				}
+				MpVeFinalizeWavHeader(f, (WORD)ch, (WORD)bitDepth);
+				const ULONGLONG len = f.GetLength();
+				f.Close();
+				if (len <= 44) {
+					ok = FALSE;
+					::DeleteFile(wavPath);
+					if (errOut) *errOut = LL14(
+						L"音声ストリームがありません。", L"No audio stream.", L"Pas de piste audio.", L"Nessuna traccia audio.", L"Sin pista de audio.",
+						L"오디오 스트림 없음.", L"没有音轨。", L"لا يوجد مسار صوت.", L"Нет аудиопотока.", L"Kein Audiostream.",
+						L"Sem faixa de audio.", L"Geen audiostream.", L"Brak strumienia audio.", L"Ses akisi yok.");
+				}
+			} else if (errOut) {
+				*errOut = LL14(
+					L"出力ファイルを作成できません。", L"Cannot create output file.", L"Impossible de creer le fichier.", L"Impossibile creare il file.", L"No se puede crear el archivo.",
+					L"출력 파일을 만들 수 없습니다.", L"无法创建输出文件。", L"تعذر إنشاء الملف.", L"Не удалось создать файл.", L"Ausgabedatei nicht erstellbar.",
+					L"Nao foi possivel criar o arquivo.", L"Kan uitvoerbestand niet maken.", L"Nie mozna utworzyc pliku.", L"Cikti dosyasi olusturulamadi.");
+			}
+		} else {
+			if (errOut) *errOut = LL14(
+				L"音声をデコードできません（コーデック未対応の可能性）。", L"Cannot decode audio (codec may be unsupported).", L"Decodage audio impossible.", L"Impossibile decodificare l'audio.", L"No se puede decodificar el audio.",
+				L"오디오를 디코드할 수 없습니다.", L"无法解码音频。", L"تعذر فك الصوت.", L"Не удалось декодировать аудио.", L"Audio nicht dekodierbar.",
+				L"Nao foi possivel decodificar o audio.", L"Kan audio niet decoderen.", L"Nie mozna zdekodowac audio.", L"Ses cozulemedi.");
+		}
+	} else if (errOut) {
+		*errOut = LL14(
+			L"動画を開けません。", L"Cannot open video.", L"Impossible d'ouvrir la video.", L"Impossibile aprire il video.", L"No se puede abrir el video.",
+			L"동영상을 열 수 없습니다.", L"无法打开视频。", L"تعذر فتح الفيديو.", L"Не удалось открыть видео.", L"Video nicht oeffenbar.",
+			L"Nao foi possivel abrir o video.", L"Kan video niet openen.", L"Nie mozna otworzyc wideo.", L"Video acilamadi.");
+	}
+	if (reader) reader->Release();
+	MFShutdown();
+	if (SUCCEEDED(hrCo) || hrCo == S_FALSE) CoUninitialize();
+	return ok;
+}
+
+void MpOnVideoExtract(CMediaPlayerDlg* mpDlg)
+{
+	if (!pl) return;
+	CWnd* owner = NULL;
+	if (mpDlg && ::IsWindow(mpDlg->GetSafeHwnd()))
+		owner = mpDlg;
+	else if (::IsWindow(pl->GetSafeHwnd()))
+		owner = pl;
+	if (!owner) return;
+
+	int pc = -1;
+	if (mpDlg && ::IsWindow(mpDlg->GetSafeHwnd()))
+		pc = mpDlg->GetSelectedPcIndex();
+	if (pc < 0 || pc >= pl->playcnt) {
+		if (pl->pnt1 >= 0 && pl->pnt1 < pl->playcnt)
+			pc = pl->pnt1;
+		else if (::IsWindow(pl->m_lc.GetSafeHwnd())) {
+			const int sel = pl->m_lc.GetNextItem(-1, LVNI_SELECTED);
+			if (sel >= 0 && sel < pl->playcnt)
+				pc = sel;
+		}
+	}
+	if (pc < 0 || pc >= pl->playcnt) return;
+	playlistdata0& item = pl->pc[pc];
+	const CString title = LL14(L"音声抽出", L"Extract audio", L"Extraire audio", L"Estrai audio", L"Extraer audio",
+		L"오디오 추출", L"提取音频", L"استخراج الصوت", L"Извлечь аудио", L"Audio extrahieren",
+		L"Extrair audio", L"Audio extraheren", L"Wyodrebnij audio", L"Ses cikar");
+	if (!MpPathLooksLikeVideo(item.fol) && item.sub != -2) {
+		owner->MessageBox(
+			LL14(L"動画ファイルを選択してください。", L"Select a video file.", L"Selectionnez une video.", L"Seleziona un video.", L"Seleccione un video.",
+				L"동영상 파일을 선택하세요.", L"请选择视频文件。", L"اختر ملف فيديو.", L"Выберите видеофайл.", L"Video waehlen.",
+				L"Selecione um video.", L"Selecteer video.", L"Wybierz plik wideo.", L"Video dosyasi secin."),
+			title, MB_OK);
+		return;
+	}
+
+	CString base = item.fol;
+	const int dot = base.ReverseFind(_T('.'));
+	if (dot > 0) base = base.Left(dot);
+	CString defName = base + _T(".wav");
+	const int slash = defName.ReverseFind(_T('\\'));
+	CString initDir, initFile;
+	if (slash >= 0) {
+		initDir = defName.Left(slash);
+		initFile = defName.Mid(slash + 1);
+	} else {
+		initFile = defName;
+	}
+
+	CFileDialog dlg(FALSE, _T("wav"), initFile,
+		OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST,
+		_T("WAV (*.wav)|*.wav|MP3 (*.mp3)|*.mp3|FLAC (*.flac)|*.flac||"),
+		owner);
+	if (!initDir.IsEmpty())
+		dlg.m_ofn.lpstrInitialDir = initDir;
+	if (dlg.DoModal() != IDOK)
+		return;
+
+	CString out = dlg.GetPathName();
+	CString ext = out;
+	const int od = ext.ReverseFind(_T('.'));
+	if (od >= 0) ext = ext.Mid(od);
+	else ext.Empty();
+	ext.MakeLower();
+
+	enum { kFmtWav = 0, kFmtMp3 = 1, kFmtFlac = 2 };
+	int fmt = kFmtWav;
+	const int filterIdx = (int)dlg.m_ofn.nFilterIndex;
+	if (ext == _T(".mp3") || (ext.IsEmpty() && filterIdx == 2)) fmt = kFmtMp3;
+	else if (ext == _T(".flac") || (ext.IsEmpty() && filterIdx == 3)) fmt = kFmtFlac;
+	else if (ext == _T(".wav") || filterIdx == 1) fmt = kFmtWav;
+	else if (filterIdx == 2) fmt = kFmtMp3;
+	else if (filterIdx == 3) fmt = kFmtFlac;
+
+	if (ext.IsEmpty()) {
+		if (fmt == kFmtMp3) out += _T(".mp3");
+		else if (fmt == kFmtFlac) out += _T(".flac");
+		else out += _T(".wav");
+	} else if (fmt == kFmtWav && ext != _T(".wav") && ext != _T(".mp3") && ext != _T(".flac")) {
+		out += _T(".wav");
+		fmt = kFmtWav;
+	}
+
+	CString wavPath = out;
+	CString tempWav;
+	if (fmt != kFmtWav) {
+		wchar_t tmpDir[MAX_PATH] = {};
+		GetTempPath(MAX_PATH, tmpDir);
+		tempWav.Format(L"%sogg_ve_%u_%u.wav", tmpDir, GetCurrentProcessId(), GetTickCount());
+		wavPath = tempWav;
+	}
+
+	CWaitCursor wait;
+	CString err;
+	if (!MpExtractVideoAudioToWav(item.fol, wavPath, &err)) {
+		owner->MessageBox(err.IsEmpty()
+			? LL14(L"抽出に失敗しました。", L"Extract failed.", L"Echec extraction.", L"Estrazione fallita.", L"Extraccion fallida.",
+				L"추출 실패.", L"提取失败。", L"فشل الاستخراج.", L"Ошибка извлечения.", L"Extraktion fehlgeschlagen.",
+				L"Falha na extracao.", L"Extractie mislukt.", L"Ekstrakcja nie powiodla sie.", L"Cikarma basarisiz.")
+			: err,
+			title, MB_OK | MB_ICONWARNING);
+		if (!tempWav.IsEmpty()) ::DeleteFile(tempWav);
+		return;
+	}
+
+	BOOL ok = TRUE;
+	if (fmt == kFmtMp3) {
+		ok = EncodeWavToMp3(wavPath, out, 192);
+		::DeleteFile(wavPath);
+	} else if (fmt == kFmtFlac) {
+		ok = EncodeWavToFlac(wavPath, out, 5);
+		::DeleteFile(wavPath);
+	}
+	if (!ok) {
+		owner->MessageBox(
+			LL14(L"エンコードに失敗しました。", L"Encode failed.", L"Echec encodage.", L"Codifica fallita.", L"Codificacion fallida.",
+				L"인코딩 실패.", L"编码失败。", L"فشل الترميز.", L"Ошибка кодирования.", L"Kodierung fehlgeschlagen.",
+				L"Falha na codificacao.", L"Coderen mislukt.", L"Kodowanie nie powiodlo sie.", L"Kodlama basarisiz."),
+			title, MB_OK | MB_ICONWARNING);
+		return;
+	}
+}
+
+// ---- 動画の音声差し替え: 映像は MF SourceReader、音声は外部 WAV → MP4(H264+AAC) ----
 static BOOL MpReadWavPcm16(LPCTSTR path, short** outPcm, int* outFrames, int* outCh, int* outHz, BYTE** outOwned)
 {
 	*outPcm = NULL; *outFrames = 0; *outCh = 0; *outHz = 0; *outOwned = NULL;
@@ -1519,6 +1901,46 @@ void MpOnMidiInToggle(CMediaPlayerDlg* mpDlg)
 	MpMidiInSetActive(on, mpDlg ? mpDlg->GetSafeHwnd() : NULL);
 }
 
+// DJパッド: プロンプトDSLではなくスライダーを直接 ±%。MpPromptExecute("pitch +3") は文法不一致で無効果だった。
+static int MpDjPitchTempoSlFromPercent(int pct)
+{
+	if (pct < 33) pct = 33;
+	if (pct > 300) pct = 300;
+	if (pct >= 100)
+		return pct + 100;
+	return (int)(((double)pct - 33.3) * 3.0 + 0.5);
+}
+
+static void MpDjApplyPitchTempoDelta(BOOL isPitch, int deltaPct)
+{
+	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
+	CCustomSliderCtrl& sl = isPitch ? og->m_pitch_sl : og->m_tempo_sl;
+	if (!sl.GetSafeHwnd()) return;
+	const int curPct = (int)TempoPercentFromPos(sl.GetPos());
+	const int pos = MpDjPitchTempoSlFromPercent(curPct + deltaPct);
+	sl.SetPos(pos);
+	if (isPitch) {
+		pitch = pos;
+		if (og->m_pitch.GetSafeHwnd()) {
+			CString s;
+			s.Format(L"%3d%%", (int)TempoPercentFromPos(pos));
+			og->m_pitch.SetWindowText(s);
+		}
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_pitch.GetSafeHwnd())
+			mp->m_pitch.SetPos(pos);
+	}
+	else {
+		tempo = pos;
+		if (og->m_temp_num.GetSafeHwnd()) {
+			CString s;
+			s.Format(L"%3d%%", (int)TempoPercentFromPos(pos));
+			og->m_temp_num.SetWindowText(s);
+		}
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_tempo.GetSafeHwnd())
+			mp->m_tempo.SetPos(pos);
+	}
+}
+
 // ---- DJ Pad dialog ----
 class CMpDjPadDlg : public CCustomBlurDialogBase
 {
@@ -1575,11 +1997,20 @@ protected:
 		if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(pMsg);
 		return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 	}
-	virtual void PostNcDestroy() { g_mpDjPad = NULL; delete this; CCustomBlurDialogBase::PostNcDestroy(); }
-	afx_msg void OnPitchUp() { CString e; MpPromptExecute(_T("pitch +3"), &e); }
-	afx_msg void OnPitchDn() { CString e; MpPromptExecute(_T("pitch -3"), &e); }
-	afx_msg void OnTempoUp() { CString e; MpPromptExecute(_T("tempo +3"), &e); }
-	afx_msg void OnTempoDn() { CString e; MpPromptExecute(_T("tempo -3"), &e); }
+	virtual void PostNcDestroy()
+	{
+		g_mpDjPad = NULL;
+		if (savedata.mpDjPadwindow) {
+			savedata.mpDjPadwindow = 0;
+			MpPersistSavedataQuick();
+		}
+		CCustomBlurDialogBase::PostNcDestroy();
+		delete this;
+	}
+	afx_msg void OnPitchUp() { MpDjApplyPitchTempoDelta(TRUE, +3); }
+	afx_msg void OnPitchDn() { MpDjApplyPitchTempoDelta(TRUE, -3); }
+	afx_msg void OnTempoUp() { MpDjApplyPitchTempoDelta(FALSE, +3); }
+	afx_msg void OnTempoDn() { MpDjApplyPitchTempoDelta(FALSE, -3); }
 	afx_msg void OnVocal() {
 		savedata.mpVocalCenter = min(200, savedata.mpVocalCenter + 10);
 		MpPersistSavedataQuick();
@@ -1610,6 +2041,10 @@ void CloseMpDjPadIfOpen()
 	if (g_mpDjPad && ::IsWindow(g_mpDjPad->GetSafeHwnd()))
 		g_mpDjPad->DestroyWindow();
 	g_mpDjPad = NULL;
+	if (savedata.mpDjPadwindow) {
+		savedata.mpDjPadwindow = 0;
+		MpPersistSavedataQuick();
+	}
 }
 
 void OpenMpDjPadModeless(CWnd* parent)
@@ -1692,7 +2127,7 @@ protected:
 		if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(pMsg);
 		return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 	}
-	virtual void PostNcDestroy() { g_mpAlarmDlg = NULL; delete this; CCustomBlurDialogBase::PostNcDestroy(); }
+	virtual void PostNcDestroy() { g_mpAlarmDlg = NULL; CCustomBlurDialogBase::PostNcDestroy(); delete this; }
 	afx_msg void OnDestroy()
 	{
 		if (m_enable.GetCheck()) {
@@ -1772,6 +2207,7 @@ protected:
 		m_vol.SetPos(savedata.mpMirrorVol);
 		m_dev.AddString(LL14(L"(既定)", L"(Default)", L"(Defaut)", L"(Predefinito)", L"(Predeterminado)",
 			L"(기본)", L"(默认)", L"(افتراضي)", L"(По умолчанию)", L"(Standard)", L"(Padrao)", L"(Standaard)", L"(Domyslnie)", L"(Varsayilan)"));
+		int selDev = 0;
 		IMMDeviceEnumerator* en = NULL;
 		if (SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
 			__uuidof(IMMDeviceEnumerator), (void**)&en)) && en) {
@@ -1790,8 +2226,11 @@ protected:
 						PropVariantInit(&v);
 						if (SUCCEEDED(ps->GetValue(PKEY_Device_FriendlyName, &v)) && v.vt == VT_LPWSTR) {
 							const int idx = m_dev.AddString(v.pwszVal);
-							if (pid && idx >= 0)
+							if (pid && idx >= 0) {
 								m_dev.SetItemData(idx, (DWORD_PTR)_wcsdup(pid));
+								if (savedata.mpMirrorDevice[0] && _tcsicmp(savedata.mpMirrorDevice, pid) == 0)
+									selDev = idx;
+							}
 						}
 						PropVariantClear(&v);
 						ps->Release();
@@ -1803,6 +2242,7 @@ protected:
 			}
 			en->Release();
 		}
+		m_dev.SetCurSel(selDev);
 		CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
 		m_tooltip.AddTool(&m_enable, LL14(L"別の再生デバイスへ同時出力します。", L"Also output to another playback device.", L"Sortir aussi vers un autre peripherique.", L"Invia anche a un altro dispositivo.", L"Salida tambien a otro dispositivo.",
 			L"다른 재생 장치로도 출력.", L"同时输出到另一播放设备。", L"الإخراج أيضاً لجهاز آخر.", L"Также выводить на другое устройство.", L"Zusätzlich auf anderes Gerät ausgeben.",
@@ -1821,7 +2261,7 @@ protected:
 		if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(pMsg);
 		return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 	}
-	virtual void PostNcDestroy() { g_mpMirrorDlg = NULL; delete this; CCustomBlurDialogBase::PostNcDestroy(); }
+	virtual void PostNcDestroy() { g_mpMirrorDlg = NULL; CCustomBlurDialogBase::PostNcDestroy(); delete this; }
 	afx_msg void OnDestroy()
 	{
 		savedata.mpMirrorOut = m_enable.GetCheck() ? 1 : 0;
@@ -1846,7 +2286,12 @@ protected:
 			m_dev.SetItemData(i, 0);
 		}
 		MpPersistSavedataQuick();
-		MpMirrorShutdown();
+		// ダイアログ閉じてもミラーONなら UI スレッドで再初期化（失敗フラグもリセット）
+		InterlockedExchange(&g_mpMirrorFailed, 0);
+		if (savedata.mpMirrorOut)
+			MpMirrorOnFormatReady();
+		else
+			MpMirrorShutdown();
 		CCustomBlurDialogBase::OnDestroy();
 	}
 	DECLARE_MESSAGE_MAP()
@@ -1923,7 +2368,7 @@ protected:
 		if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(pMsg);
 		return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 	}
-	virtual void PostNcDestroy() { g_mpRemoteDlg = NULL; delete this; CCustomBlurDialogBase::PostNcDestroy(); }
+	virtual void PostNcDestroy() { g_mpRemoteDlg = NULL; CCustomBlurDialogBase::PostNcDestroy(); delete this; }
 	afx_msg void OnDestroy()
 	{
 		savedata.mpRemoteOn = m_enable.GetCheck() ? 1 : 0;
@@ -1991,7 +2436,7 @@ protected:
 		SetTimer(1, 33, NULL);
 		return TRUE;
 	}
-	virtual void PostNcDestroy() { g_mpSsViz = NULL; delete this; CCustomBlurDialogBase::PostNcDestroy(); }
+	virtual void PostNcDestroy() { g_mpSsViz = NULL; CCustomBlurDialogBase::PostNcDestroy(); delete this; }
 	virtual BOOL PreTranslateMessage(MSG* pMsg)
 	{
 		if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_ESCAPE) {

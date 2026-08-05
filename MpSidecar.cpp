@@ -292,11 +292,8 @@ void MpSmart_EnsureDefaults()
 {
 	if (g_smartCnt > 0) return;
 	MpSmartRule a; ZeroMemory(&a, sizeof(a));
-	{
-		const CString n = LL14(L"未再生", L"Unplayed", L"Non joues", L"Non riprodotti", L"No reproducidos", L"미재생", L"未播放", L"غير مشغّل", L"Неигранные", L"Ungespielt", L"Nao tocados", L"Ongespeeld", L"Nieodtworzone", L"Oynatilmamis");
-		_tcsncpy(a.name, n, _countof(a.name) - 1);
-		a.name[_countof(a.name) - 1] = 0;
-	}
+	// 保存キーは英語固定。表示は MpSmart_UiLabel で LL14
+	_tcscpy_s(a.name, _T("Unplayed"));
 	a.flags = MP_SMART_UNPLAYED;
 	a.enabled = 1;
 	a.ratingMin = 1;
@@ -304,14 +301,26 @@ void MpSmart_EnsureDefaults()
 	a.playCountMax = 0;
 	MpSmart_Add(a);
 	MpSmartRule b; ZeroMemory(&b, sizeof(b));
-	{
-		const CString n = LL14(L"欠損", L"Missing", L"Manquants", L"Mancanti", L"Faltantes", L"결손", L"缺失", L"مفقود", L"Отсутствующие", L"Fehlend", L"Ausentes", L"Ontbrekend", L"Brakujace", L"Eksik");
-		_tcsncpy(b.name, n, _countof(b.name) - 1);
-		b.name[_countof(b.name) - 1] = 0;
-	}
+	_tcscpy_s(b.name, _T("Missing"));
 	b.flags = MP_SMART_MISSING;
 	b.enabled = 1;
 	b.ratingMin = 1;
 	b.hourFrom = 0; b.hourTo = 23;
 	MpSmart_Add(b);
+}
+
+CString MpSmart_UiLabel(const MpSmartRule& r)
+{
+	// 既定ルール: 英語キー / 旧LL14シード名 / flags 単独 のいずれかで判定
+	const bool onlyUnplayed = (r.flags == MP_SMART_UNPLAYED);
+	const bool onlyMissing = (r.flags == MP_SMART_MISSING);
+	if (onlyUnplayed
+		|| _tcsicmp(r.name, _T("Unplayed")) == 0
+		|| _tcscmp(r.name, L"未再生") == 0)
+		return LL14(L"未再生", L"Unplayed", L"Non joues", L"Non riprodotti", L"No reproducidos", L"미재생", L"未播放", L"غير مشغّل", L"Неигранные", L"Ungespielt", L"Nao tocados", L"Ongespeeld", L"Nieodtworzone", L"Oynatilmamis");
+	if (onlyMissing
+		|| _tcsicmp(r.name, _T("Missing")) == 0
+		|| _tcscmp(r.name, L"欠損") == 0)
+		return LL14(L"欠損", L"Missing", L"Manquants", L"Mancanti", L"Faltantes", L"결손", L"缺失", L"مفقود", L"Отсутствующие", L"Fehlend", L"Ausentes", L"Ontbrekend", L"Brakujace", L"Eksik");
+	return CString(r.name);
 }

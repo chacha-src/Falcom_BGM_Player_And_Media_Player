@@ -5573,7 +5573,8 @@ void CCustomRangeSliderCtrl::SetPos(int p)
 
 int CCustomRangeSliderCtrl::GetPos() const
 {
-    return m_nLogicalPos;
+    // ドラッグ中は見た目位置を返す（親の確定シークが旧 LogicalPos を拾わない）
+    return m_bDragging ? m_nVisualPos : m_nLogicalPos;
 }
 
 void CCustomRangeSliderCtrl::SetRange(int mn, int mx, BOOL b)
@@ -6206,11 +6207,11 @@ int CCustomRangeSliderCtrl::HitTest(CPoint p) const
     CRect r;
     GetClientRect(&r);
     int cy = r.Height() / 2;
-    int xM = ValueToPixel(m_nLogicalPos);
+    int xM = ValueToPixel(m_bDragging ? m_nVisualPos : m_nLogicalPos);
     int xMx = ValueToPixel(m_nSelMax);
     int xMn = ValueToPixel(m_nSelMin);
 
-    // A-B / loop つまみを再生位置より優先（シークと相打ちにしない）
+    // A-B つまみは常に優先
     if (m_nAbA >= 0 && m_nAbB > m_nAbA) {
         int xB = ValueToPixel(m_nAbB);
         if (CRect(xB - 7, cy - 10, xB + 7, cy + 10).PtInRect(p)) return 5;
@@ -6223,9 +6224,11 @@ int CCustomRangeSliderCtrl::HitTest(CPoint p) const
         int x = ValueToPixel(m_cueFrames[i]);
         if (CRect(x - 6, cy - 22, x + 6, cy - 1).PtInRect(p)) return 10 + i;
     }
-    // ロック中でもヒットは取る（クリックをシークに落とさない）。ドラッグは OnLButtonDown で拒否。
-    if (CRect(xMx - 7, cy - 10, xMx + 7, cy + 10).PtInRect(p)) return 2;
-    if (CRect(xMn - 7, cy - 10, xMn + 7, cy + 10).PtInRect(p)) return 1;
+    // ロック解除時のみ loop つまみを再生位置より優先。ロック中はシークを優先（クリックを食わない）
+    if (!m_bSelLocked) {
+        if (CRect(xMx - 7, cy - 10, xMx + 7, cy + 10).PtInRect(p)) return 2;
+        if (CRect(xMn - 7, cy - 10, xMn + 7, cy + 10).PtInRect(p)) return 1;
+    }
     if (CRect(xM - 10, cy - 14, xM + 10, cy + 14).PtInRect(p)) return 3;
     return 0;
 }
@@ -6244,11 +6247,9 @@ void CCustomRangeSliderCtrl::OnLButtonDown(UINT f, CPoint p)
         GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, 0), (LPARAM)m_hWnd);
         return;
     }
-    if ((m_nDragTarget == 1 || m_nDragTarget == 2) && m_bSelLocked) {
-        // ロック中の loop つまみ: 動かさずシークもしない
+    // ロック中に loop つまみへ当たってもシークへ落とす（旧: return でシーク不能）
+    if ((m_nDragTarget == 1 || m_nDragTarget == 2) && m_bSelLocked)
         m_nDragTarget = 0;
-        return;
-    }
     if (m_nDragTarget == 0)
     {
         // トラック空白＝シーク（つまみ上ではここに来ない＝相打ち回避）
@@ -6271,8 +6272,8 @@ void CCustomRangeSliderCtrl::OnLButtonUp(UINT f, CPoint p)
         {
             m_nLogicalPos = m_nVisualPos;
             CSliderCtrl::SetPos(m_nLogicalPos);
+            // SB_ENDSCROLL==TB_ENDTRACK のため、シーク確定は THUMBPOSITION のみ送る
             GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, m_nLogicalPos), (LPARAM)m_hWnd);
-            GetParent()->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_ENDSCROLL, m_nLogicalPos), (LPARAM)m_hWnd);
         }
         else if (dragTarget == 1 || dragTarget == 2 || dragTarget == 4 || dragTarget == 5)
         {

@@ -208,6 +208,8 @@ public:
 	int  m_lastFollowPnt; // FollowPlayingRow: 前回追従した pl->pnt(曲変化時だけ追従)
 	int  m_lastMs2;      // savedata.ms2 の変化検出用(タイマー間隔の変更を反映するため)
 	int  m_seekDragging; // ユーザーがシークをドラッグ中なら 1(ミラー更新をスキップ)
+	int  m_seekHoldPos;  // シーク確定位置。timerp の一瞬古い値で棒が戻るのを抑止
+	ULONGLONG m_seekHoldUntil; // 0=なし。GetTickCount64 期限まで HoldPos を優先
 	int  m_lastPlayIcon; // 再生行(♪)の前回アイコン値。変化時のみ再描画して点滅をなめらかに
 	int  m_savedEqVisible;       // 最小化連動: 最小化前にイコライザーが表示されていたか
 	int  m_savedPianoVisible;    // 最小化連動: 最小化前に簡易ピアノロールが表示されていたか

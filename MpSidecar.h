@@ -55,3 +55,5 @@ bool MpSmart_Set(int i, const MpSmartRule& r);
 int  MpSmart_Add(const MpSmartRule& r); // -1 fail
 bool MpSmart_Remove(int i);
 void MpSmart_EnsureDefaults(); // seed Unplayed / Missing if empty
+// 表示用ラベル（保存名 Unplayed/Missing や flags から UI 言語へ）
+CString MpSmart_UiLabel(const MpSmartRule& r);

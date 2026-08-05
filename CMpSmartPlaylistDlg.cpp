@@ -1,6 +1,7 @@
 ﻿#include "stdafx.h"
 #include "ogg.h"
 #include "CMpSmartPlaylistDlg.h"
+#include "MpSidecar.h"
 
 extern save savedata;
 
@@ -118,7 +119,7 @@ void CMpSmartPlaylistDlg::RebuildList()
 	for (int i = 0; i < n; ++i) {
 		MpSmartRule r;
 		if (!MpSmart_Get(i, r)) continue;
-		const int row = m_lc.InsertItem(i, r.name);
+		const int row = m_lc.InsertItem(i, MpSmart_UiLabel(r));
 		m_lc.SetItemData(row, (DWORD_PTR)i);
 	}
 	m_lc.SetRedraw(TRUE);
@@ -140,7 +141,7 @@ void CMpSmartPlaylistDlg::LoadSelToUi()
 	MpSmartRule r;
 	ZeroMemory(&r, sizeof(r));
 	if (i >= 0) MpSmart_Get(i, r);
-	m_name.SetWindowText(r.name);
+	m_name.SetWindowText(MpSmart_UiLabel(r));
 	m_unplayed.SetCheck((r.flags & MP_SMART_UNPLAYED) ? 1 : 0);
 	m_missing.SetCheck((r.flags & MP_SMART_MISSING) ? 1 : 0);
 	m_rating.SetCheck((r.flags & MP_SMART_RATING_MIN) ? 1 : 0);
@@ -165,7 +166,17 @@ void CMpSmartPlaylistDlg::UiToRule(MpSmartRule& r)
 	CString name, artist, tmp;
 	m_name.GetWindowText(name);
 	name.Trim();
-	if (name.IsEmpty()) name = _T("Rule");
+	if (name.IsEmpty())
+		name = LL14(L"ルール", L"Rule", L"Regle", L"Regola", L"Regla", L"규칙", L"规则", L"قاعدة", L"Правило", L"Regel", L"Regra", L"Regel", L"Regula", L"Kural");
+	// 既定ルールの表示名を英語キーへ戻す（言語切替後も MpSmart_UiLabel が効くように）
+	{
+		const CString unplayed = LL14(L"未再生", L"Unplayed", L"Non joues", L"Non riprodotti", L"No reproducidos", L"미재생", L"未播放", L"غير مشغّل", L"Неигранные", L"Ungespielt", L"Nao tocados", L"Ongespeeld", L"Nieodtworzone", L"Oynatilmamis");
+		const CString missing = LL14(L"欠損", L"Missing", L"Manquants", L"Mancanti", L"Faltantes", L"결손", L"缺失", L"مفقود", L"Отсутствующие", L"Fehlend", L"Ausentes", L"Ontbrekend", L"Brakujace", L"Eksik");
+		if (name.CompareNoCase(unplayed) == 0 || name.CompareNoCase(_T("Unplayed")) == 0 || name == L"未再生")
+			name = _T("Unplayed");
+		else if (name.CompareNoCase(missing) == 0 || name.CompareNoCase(_T("Missing")) == 0 || name == L"欠損")
+			name = _T("Missing");
+	}
 	_tcsncpy(r.name, name, _countof(r.name) - 1);
 	m_artist.GetWindowText(artist);
 	_tcsncpy(r.artist, artist, _countof(r.artist) - 1);

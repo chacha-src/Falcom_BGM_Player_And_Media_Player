@@ -8,6 +8,7 @@
 #include "DeviceRecordDlg.h"
 #include "TranscodeExport.h"
 #include "ProAudio.h"
+#include "MpPlayerAddons.h"
 #include <mmdeviceapi.h>
 #include <Audioclient.h>
 #include <FunctionDiscoveryKeys_devpkey.h>
@@ -1586,6 +1587,17 @@ UINT __stdcall CDeviceRecordDlg::CaptureThread(void* p)
 							og->m_PianoRollDlg->SetChannelMeterDb(chDb, 2);
 							og->m_PianoRollDlg->FeedLoopbackMono(mono, nf, 48000);
 						}
+					}
+					// 再生停止中のみループバックPCMをBPMへ（再生中は ProAudio 経路）
+					extern int plf;
+					if (MpBpmIsMeasuring() && plf != 1 && outFrames > 0) {
+						const int nf = (outFrames > 8192) ? 8192 : outFrames;
+						float Lbuf[8192], Rbuf[8192];
+						for (int mi = 0; mi < nf; ++mi) {
+							Lbuf[mi] = (float)pcm[mi * 2 + 0] / 32768.f;
+							Rbuf[mi] = (float)pcm[mi * 2 + 1] / 32768.f;
+						}
+						MpBpmNotifyPcm(Lbuf, Rbuf, nf, 48000);
 					}
 					done += n;
 				}

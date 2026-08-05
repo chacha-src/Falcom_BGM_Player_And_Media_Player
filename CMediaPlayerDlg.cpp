@@ -139,16 +139,6 @@ static BOOL MpHourInRange(int hour, int from, int to)
 	return hour >= from || hour <= to;
 }
 
-// 既定シードの英語名を UI 言語へ（メニュー/Lib ツリー表示用。保存名は触らない）
-static CString MpSmartUiLabel(const MpSmartRule& r)
-{
-	if (_tcsicmp(r.name, _T("Unplayed")) == 0)
-		return LL14(L"未再生", L"Unplayed", L"Non joues", L"Non riprodotti", L"No reproducidos", L"미재생", L"未播放", L"غير مشغّل", L"Неигранные", L"Ungespielt", L"Nao tocados", L"Ongespeeld", L"Nieodtworzone", L"Oynatilmamis");
-	if (_tcsicmp(r.name, _T("Missing")) == 0)
-		return LL14(L"欠損", L"Missing", L"Manquants", L"Mancanti", L"Faltantes", L"결손", L"缺失", L"مفقود", L"Отсутствующие", L"Fehlend", L"Ausentes", L"Ontbrekend", L"Brakujace", L"Eksik");
-	return CString(r.name);
-}
-
 static BOOL MpTrackMatchesSmart(CMediaPlayerDlg* self, int pcIdx, const MpSmartRule& rule)
 {
 	if (!self || !pl || !pl->pc || pcIdx < 0 || pcIdx >= pl->playcnt) return FALSE;
@@ -182,6 +172,10 @@ static BOOL MpTrackMatchesSmart(CMediaPlayerDlg* self, int pcIdx, const MpSmartR
 			if (ProAudio_GetLastPlay(MpCurListName(), it.fol, it.sub, it.ret2, ft)) {
 				SYSTEMTIME st; ::FileTimeToSystemTime(&ft, &st);
 				hour = (int)st.wHour;
+			}
+			else {
+				// 未再生は LAST_HOUR 不一致（現在時刻へのフォールバック禁止）
+				return FALSE;
 			}
 		}
 		if (hour < 0) {
@@ -867,6 +861,8 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_plselLayoutDpi = 0.f;
 	m_lastMs2 = 0;
 	m_seekDragging = 0;
+	m_seekHoldPos = 0;
+	m_seekHoldUntil = 0;
 	m_lastPlayIcon = -999;
 	m_savedEqVisible = 0;
 	m_savedPianoVisible = 0;
@@ -1966,6 +1962,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	SetTimer(6, 120, NULL);
 	MpRemoteEnsureRunning(m_hWnd);
 	MpAlarmEnsureTimer(this);
+	if (savedata.mpMirrorOut)
+		MpMirrorOnFormatReady();
 	if (savedata.deskLrcOn)
 		OpenDesktopLyricsModeless(this);
 	return TRUE;
@@ -3762,10 +3760,21 @@ void CMediaPlayerDlg::MirrorSeekVol()
 		int mx = og->m_time.GetMaxValue();
 		if (mx <= mn) mx = mn + 1;
 		int psPos = og->m_time.GetPos();
+		// シーク直後: decode/timerp が1〜数フレ旧位置を返す間は確定位置を維持（一瞬戻るのを防ぐ）
+		if (m_seekHoldUntil != 0) {
+			const ULONGLONG now = GetTickCount64();
+			int eps = (mx - mn) / 200;
+			if (eps < 1) eps = 1;
+			if (abs(psPos - m_seekHoldPos) <= eps || now >= m_seekHoldUntil)
+				m_seekHoldUntil = 0;
+			else
+				psPos = m_seekHoldPos;
+		}
 		int selMn, selMx; og->m_time.GetSelection(selMn, selMx);
 		// A-B 有効時は巻き戻しのみ（緑帯はループのまま。A-Bは別つまみ/帯）
 		if (m_abApos >= 0 && m_abBpos > m_abApos) {
-			if (!m_abWrapBusy && plf && ps != 1 && psPos >= m_abBpos) {
+			// ユーザーがシーク操作中は巻き戻さない（離した直後の Mirror で旧位置へ戻る温床）
+			if (!m_seekDragging && !m_abWrapBusy && plf && ps != 1 && psPos >= m_abBpos) {
 				m_abWrapBusy = 1;
 				m_abLoopCount++;
 				og->m_time.SetPos(m_abApos);
@@ -5052,8 +5061,13 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	CSliderCtrl* r = (CSliderCtrl*)pScrollBar;
 	if (r && r->GetSafeHwnd() == m_seek.GetSafeHwnd()) {
 		const int tgt = m_seek.GetDragTarget();
+		extern int hsc;
 		if (nSBCode == SB_THUMBTRACK) {
 			m_seekDragging = 1;
+			m_seekHoldUntil = 0; // 新しいドラッグでホールド解除
+			// ドラッグ中に timerp が og->m_time を旧 playb で上書き→離した瞬間に棒が戻るのを防ぐ
+			if (tgt == 3 && hsc == 0)
+				hsc = 1;
 			if (tgt == 4 || tgt == 5) {
 				// A-B つまみドラッグ中 → 別変数へ即反映
 				m_seek.GetAB(m_abApos, m_abBpos);
@@ -5081,6 +5095,7 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				m_seek.ClearCueClick();
 				JumpToCueIndex(cueHit);
 				m_seekDragging = 0;
+				if (hsc == 1) hsc = 0;
 				CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
 				return;
 			}
@@ -5101,19 +5116,27 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				}
 			}
 			m_seekDragging = 0;
+			if (hsc == 1) hsc = 0;
 			CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
 			return;
 		}
 		if (nSBCode == SB_THUMBPOSITION || nSBCode == SB_ENDSCROLL ||
 			nSBCode == SB_PAGELEFT || nSBCode == SB_PAGERIGHT ||
 			nSBCode == SB_LINELEFT || nSBCode == SB_LINERIGHT) {
+			// クリックのみ(THUMBTRACK無し)でもシーク中ミラーを止め、timerp 上書きを抑止
+			m_seekDragging = 1;
+			if (hsc == 0) hsc = 1;
 			int p = m_seek.GetPos();
 			if (og && ::IsWindow(og->GetSafeHwnd())) {
 				// og 側の m_time を動かして og の既存シーク処理を流用
 				og->m_time.SetPos(p);
 				og->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, p), (LPARAM)og->m_time.GetSafeHwnd());
 			}
+			// decode が追いつくまで棒を確定位置に固定（離した直後の一瞬戻り対策）
+			m_seekHoldPos = p;
+			m_seekHoldUntil = GetTickCount64() + 800;
 			m_seekDragging = 0;
+			if (hsc == 1) hsc = 0;
 		}
 	}
 	else if (r && r->GetSafeHwnd() == m_vol.GetSafeHwnd()) {
@@ -5165,6 +5188,7 @@ static void MP_PlayIndex(int idx)
 		mp->m_abApos = -1;
 		mp->m_abBpos = -1;
 		mp->m_abLoopCount = 0;
+		mp->m_seekHoldUntil = 0;
 		if (mp->m_seek.GetSafeHwnd())
 			mp->m_seek.SetAB(-1, -1);
 		mp->ClearWaveOverview();
@@ -6561,7 +6585,7 @@ void CMediaPlayerDlg::LibRebuildTree()
 	for (int si = 0; si < MpSmart_Count(); ++si) {
 		MpSmartRule r;
 		if (!MpSmart_Get(si, r)) continue;
-		HTREEITEM hR = m_libTree.InsertItem(MpSmartUiLabel(r), hSmart, TVI_LAST);
+		HTREEITEM hR = m_libTree.InsertItem(MpSmart_UiLabel(r), hSmart, TVI_LAST);
 		m_libTree.SetItemData(hR, (DWORD_PTR)(0x80000000u | (unsigned)(si + 1)));
 	}
 	m_libTree.Expand(hSmart, TVE_EXPAND);
@@ -7604,7 +7628,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		MpSmartRule r;
 		if (!MpSmart_Get(si, r)) continue;
 		const UINT chk = (m_activeSmartId == si) ? MF_CHECKED : 0;
-		menu.AppendMenu(MF_STRING | chk, ID_MP_SMART_BASE + si, MpSmartUiLabel(r));
+		menu.AppendMenu(MF_STRING | chk, ID_MP_SMART_BASE + si, MpSmart_UiLabel(r));
 	}
 	menu.AppendMenu(MF_SEPARATOR);
 	// 旧「クイック: 未再生/欠損」は既定スマートPLと同義のため出さない
@@ -7722,7 +7746,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	menu.AppendMenu(MF_STRING, ID_MP_DJPAD,
 		LL14(L"DJ パッド", L"DJ Pad", L"Pad DJ", L"Pad DJ", L"Pad DJ", L"DJ 패드", L"DJ 垫", L"لوحة DJ", L"DJ-панель", L"DJ-Pad", L"Pad DJ", L"DJ-pad", L"Pad DJ", L"DJ paneli"));
 	menu.AppendMenu(MF_STRING, ID_MP_VIDEO_EXTRACT,
-		LL14(L"動画→WAV 抽出", L"Video to WAV", L"Video vers WAV", L"Video in WAV", L"Video a WAV", L"동영상→WAV", L"视频转 WAV", L"فيديو إلى WAV", L"Видео в WAV", L"Video nach WAV", L"Video para WAV", L"Video naar WAV", L"Wideo do WAV", L"Video WAV"));
+		LL14(L"動画→音声抽出…", L"Extract audio from video…", L"Extraire audio de la video…", L"Estrai audio dal video…", L"Extraer audio del video…", L"동영상→오디오 추출…", L"从视频提取音频…", L"استخراج صوت من الفيديو…", L"Извлечь аудио из видео…", L"Audio aus Video…", L"Extrair audio do video…", L"Audio uit video…", L"Wyodrebnij audio z wideo…", L"Videodan ses cikar…"));
 	menu.AppendMenu(MF_STRING, ID_MP_GAME_PRESET,
 		LL14(L"ゲーム録画プリセット", L"Game capture preset", L"Preset capture jeu", L"Preset cattura gioco", L"Preset captura juego", L"게임 캡처 프리셋", L"游戏录制预设", L"إعداد التقاط اللعبة", L"Пресет записи игры", L"Game-Capture-Preset", L"Preset captura jogo", L"Game-capturepreset", L"Preset nagrywania gry", L"Oyun kayit on ayari"));
 	menu.AppendMenu(MF_STRING, ID_MP_MIRROR,
@@ -7852,12 +7876,48 @@ void CMediaPlayerDlg::OnExportAbNow()
 		return;
 	}
 	if (!og || !pl || !pl->pc) return;
-	const int pc = GetSelectedPcIndex();
-	if (pc < 0 || pc >= pl->playcnt) return;
+	// A-B フレームは演奏中曲のもの。選択行が違うと誤書き出しになるので演奏中行を使う。
+	extern int plcnt;
+	int pc = -1;
+	if (plcnt >= 0 && plcnt < pl->playcnt)
+		pc = plcnt;
+	else if (pl->pnt >= 0 && pl->pnt < pl->playcnt)
+		pc = pl->pnt;
+	const int sel = GetSelectedPcIndex();
+	if (sel >= 0 && sel < pl->playcnt && pc >= 0 && sel != pc) {
+		MessageBox(LL14(
+			L"A-B は演奏中の曲に対するものです。\n選択行が違うため書き出しを中止しました。",
+			L"A-B belongs to the playing track.\nSelection differs; export cancelled.",
+			L"A-B concerne la piste en lecture.\nSelection differente; export annule.",
+			L"A-B e della traccia in riproduzione.\nSelezione diversa; esportazione annullata.",
+			L"A-B es de la pista en reproduccion.\nSeleccion distinta; exportacion cancelada.",
+			L"A-B는 재생 중인 곡 기준입니다.\n선택 행이 달라 내보내기를 취소했습니다.",
+			L"A-B 属于正在播放的曲目。\n选择行不同，已取消导出。",
+			L"A-B للمسار قيد التشغيل.\nالتحديد مختلف؛ أُلغي التصدير.",
+			L"A-B относится к играющему треку.\nВыбор другой; экспорт отменён.",
+			L"A-B gehoert zum spielenden Titel.\nAuswahl weicht ab; Export abgebrochen.",
+			L"A-B e da faixa em reproducao.\nSelecao diferente; exportacao cancelada.",
+			L"A-B hoort bij het spelende nummer.\nSelectie wijkt af; export geannuleerd.",
+			L"A-B nalezy do odtwarzanej sciezki.\nInny wybor; anulowano eksport.",
+			L"A-B calinan parcaya aittir.\nSecim farkli; disa aktarma iptal."),
+			LL14(L"A-B書き出し", L"Export A-B", L"Export A-B", L"Esporta A-B", L"Exportar A-B", L"A-B보내기", L"导出A-B", L"تصدير A-B", L"Экспорт A-B", L"A-B exportieren", L"Exportar A-B", L"A-B exporteren", L"Eksport A-B", L"A-B disa aktar"),
+			MB_OK | MB_ICONWARNING);
+		return;
+	}
+	if (pc < 0 || pc >= pl->playcnt) {
+		if (sel >= 0 && sel < pl->playcnt) pc = sel;
+		else return;
+	}
 	playlistdata0& item = pl->pc[pc];
 	CString path = item.fol;
 	const int dot = path.ReverseFind(_T('.'));
 	CString out = (dot > 0) ? (path.Left(dot) + _T("_ab.wav")) : (path + _T("_ab.wav"));
+	if (PathFileExists(out)) {
+		CString ask;
+		ask.Format(LL14(L"%s は既に存在します。上書きしますか？", L"%s already exists. Overwrite?", L"%s existe deja. Ecraser ?", L"%s esiste gia. Sovrascrivere?", L"%s ya existe. ¿Sobrescribir?", L"%s 이(가) 이미 있습니다. 덮어쓸까요?", L"%s 已存在。要覆盖吗？", L"%s موجود بالفعل. هل تريد الاستبدال؟", L"%s уже существует. Перезаписать?", L"%s existiert bereits. Ueberschreiben?", L"%s ja existe. Sobrescrever?", L"%s bestaat al. Overschrijven?", L"%s juz istnieje. Nadpisac?", L"%s zaten var. Uzerine yazilsin mi?"), (LPCTSTR)out);
+		if (MessageBox(ask, LL14(L"A-B書き出し", L"Export A-B", L"Export A-B", L"Esporta A-B", L"Exportar A-B", L"A-B보내기", L"导出A-B", L"تصدير A-B", L"Экспорт A-B", L"A-B exportieren", L"Exportar A-B", L"A-B exporteren", L"Eksport A-B", L"A-B disa aktar"), MB_YESNO | MB_ICONQUESTION) != IDYES)
+			return;
+	}
 	WavExportOptions opts = {};
 	opts.startFrame = m_abApos;
 	opts.endFrame = m_abBpos;
@@ -7874,6 +7934,26 @@ void CMediaPlayerDlg::OnNormScan()
 	const int pc = GetSelectedPcIndex();
 	if (pc < 0 || pc >= pl->playcnt) return;
 	playlistdata0& item = pl->pc[pc];
+	if (item.sub == -2) {
+		MessageBox(LL14(
+			L"動画の正規化計測には対応していません。\n先に音声抽出してください。",
+			L"Normalize measure is not supported for video.\nExtract audio first.",
+			L"Mesure non prise en charge pour la video.\nExtrayez l'audio d'abord.",
+			L"Misura non supportata per video.\nEstrarre prima l'audio.",
+			L"Medicion no compatible con video.\nExtraiga el audio primero.",
+			L"동영상 정규화 측정은 지원되지 않습니다.\n먼저 오디오를 추출하세요.",
+			L"不支持对视频做标准化测量。\n请先提取音频。",
+			L"القياس غير مدعوم للفيديو.\nاستخرج الصوت أولاً.",
+			L"Измерение для видео не поддерживается.\nСначала извлеките аудио.",
+			L"Messung fuer Video nicht unterstuetzt.\nZuerst Audio extrahieren.",
+			L"Medicao nao suportada para video.\nExtraia o audio primeiro.",
+			L"Meting niet ondersteund voor video.\nExtraheer eerst audio.",
+			L"Pomiar nieobslugiwany dla wideo.\nNajpierw wyodrebnij audio.",
+			L"Video icin olcum desteklenmiyor.\nOnce sesi cikarin."),
+			LL14(L"ノーマライズ", L"Normalize", L"Normaliser", L"Normalizza", L"Normalizar", L"정규화", L"标准化", L"تطبيع", L"Нормализация", L"Normalisieren", L"Normalizar", L"Normaliseren", L"Normalizuj", L"Normalize"),
+			MB_OK | MB_ICONINFORMATION);
+		return;
+	}
 	const int rgTargetBak = savedata.pro_rg_target;
 	savedata.pro_rg_target = savedata.mpNormTargetLufs;
 	ProAudio_SetCurrentSongKey(MpCurListName(), item.fol, item.sub, item.ret2);
@@ -8120,8 +8200,9 @@ void CMediaPlayerDlg::OnAbPackExport()
 			}
 		}
 	}
-	int endDefault = item.loop2 > 0 ? (item.loop1 + item.loop2) : (item.time > 0 ? item.time * 44100 : 0);
-	if (endDefault <= 0) endDefault = 44100 * 300;
+	int endHz = wavbit_sample_Hz > 0 ? wavbit_sample_Hz : 44100;
+	int endDefault = item.loop2 > 0 ? (item.loop1 + item.loop2) : (item.time > 0 ? item.time * endHz : 0);
+	if (endDefault <= 0) endDefault = endHz * 300;
 	for (int i = 0; i < cueN && nSeg < 16; ++i) {
 		segs[nSeg].start = cueFrames[i];
 		segs[nSeg].end = (i + 1 < cueN) ? cueFrames[i + 1] : endDefault;
@@ -8136,12 +8217,23 @@ void CMediaPlayerDlg::OnAbPackExport()
 	int dot = path.ReverseFind(_T('.'));
 	CString stem = (dot > 0) ? path.Left(dot) : path;
 	BOOL ok = TRUE;
+	BOOL overwriteAsked = FALSE;
+	BOOL overwriteAll = TRUE;
 	for (int i = 0; i < nSeg; ++i) {
 		WavExportOptions opts = {};
 		opts.startFrame = segs[i].start;
 		opts.endFrame = segs[i].end;
 		CString out;
 		out.Format(_T("%s_seg%02d.wav"), (LPCTSTR)stem, i + 1);
+		if (PathFileExists(out)) {
+			if (!overwriteAsked) {
+				overwriteAsked = TRUE;
+				CString ask;
+				ask.Format(LL14(L"既存の区間 WAV があります。上書きしますか？\n例: %s", L"Segment WAV files already exist. Overwrite?\nE.g. %s", L"Des WAV de segments existent. Ecraser ?\nEx. %s", L"WAV segmenti gia presenti. Sovrascrivere?\nEs. %s", L"Ya hay WAV de segmentos. ¿Sobrescribir?\nEj. %s", L"구간 WAV가 이미 있습니다. 덮어쓸까요?\n예: %s", L"已有区间 WAV。要覆盖吗？\n例: %s", L"ملفات WAV للمقاطع موجودة. هل تريد الاستبدال؟\nمثال: %s", L"Файлы сегментов уже есть. Перезаписать?\nНапр. %s", L"Segment-WAVs existieren bereits. Ueberschreiben?\nZ.B. %s", L"WAVs de segmentos ja existem. Sobrescrever?\nEx. %s", L"Segment-WAVs bestaan al. Overschrijven?\nBv. %s", L"Pliki segmentow juz istnieja. Nadpisac?\nNp. %s", L"Bolum WAV dosyalari var. Uzerine yazilsin mi?\nOrn. %s"), (LPCTSTR)out);
+				overwriteAll = (MessageBox(ask, LL14(L"書き出しパック", L"Export pack", L"Pack export", L"Pacchetto export", L"Paquete export", L"내보내기 팩", L"导出包", L"حزمة تصدير", L"Пакет экспорта", L"Export-Paket", L"Pacote export", L"Exportpakket", L"Pakiet eksportu", L"Disa aktarma paketi"), MB_YESNO | MB_ICONQUESTION) == IDYES);
+			}
+			if (!overwriteAll) continue;
+		}
 		ok = og->ExportToWav(&item, out, 1, &opts, TRUE) && ok;
 	}
 	CString msg;
@@ -8172,6 +8264,8 @@ void CMediaPlayerDlg::OnNormBatch()
 	savedata.pro_export_limit = 1;
 
 	BOOL ok = TRUE;
+	BOOL overwriteAsked = FALSE;
+	BOOL overwriteAll = TRUE;
 	for (int i = 0; i < nPc; ++i) {
 		playlistdata0& item = pl->pc[pcs[i]];
 		ProAudio_SetCurrentSongKey(MpCurListName(), item.fol, item.sub, item.ret2);
@@ -8180,10 +8274,22 @@ void CMediaPlayerDlg::OnNormBatch()
 		CString path = item.fol;
 		const int dot = path.ReverseFind(_T('.'));
 		const CString out = (dot > 0) ? (path.Left(dot) + _T("_norm.wav")) : (path + _T("_norm.wav"));
+		if (PathFileExists(out)) {
+			if (!overwriteAsked) {
+				overwriteAsked = TRUE;
+				CString ask;
+				ask.Format(LL14(L"%s など既存の正規化 WAV を上書きしますか？", L"Overwrite existing normalized WAVs such as %s?", L"Ecraser les WAV normalises existants (ex. %s) ?", L"Sovrascrivere i WAV normalizzati esistenti (es. %s)?", L"¿Sobrescribir WAV normalizados existentes (ej. %s)?", L"기존 정규화 WAV를 덮어쓸까요? (예: %s)", L"是否覆盖已有的标准化 WAV（如 %s）？", L"هل تريد استبدال ملفات WAV المطبّعة الموجودة (مثل %s)؟", L"Перезаписать существующие нормализованные WAV (напр. %s)?", L"Vorhandene normalisierte WAVs ueberschreiben (z.B. %s)?", L"Sobrescrever WAVs normalizados existentes (ex. %s)?", L"Bestaande genormaliseerde WAVs overschrijven (bv. %s)?", L"Nadpisac istniejace znormalizowane WAV (np. %s)?", L"Mevcut normallestirilmis WAV uzerine yazilsin mi (orn. %s)?"), (LPCTSTR)out);
+				overwriteAll = (MessageBox(ask, LL14(L"ノーマライズ", L"Normalize", L"Normaliser", L"Normalizza", L"Normalizar", L"정규화", L"标准化", L"تطبيع", L"Нормализация", L"Normalisieren", L"Normalizar", L"Normaliseren", L"Normalizuj", L"Normalize"), MB_YESNO | MB_ICONQUESTION) == IDYES);
+			}
+			if (!overwriteAll) continue;
+		}
 		if (!hadRg) {
+			// 計測パスは最終名に書かない（失敗時に未正規化ファイルが残るのを防ぐ）
+			const CString tmp = (dot > 0) ? (path.Left(dot) + _T("_normscan.tmp.wav")) : (path + _T("_normscan.tmp.wav"));
 			ProAudio_LoudnessReset();
-			ok = og->ExportToWav(&item, out, 1, NULL, FALSE) && ok;
+			ok = og->ExportToWav(&item, tmp, 1, NULL, FALSE) && ok;
 			ProAudio_LoudnessCommitCurrentSong();
+			::DeleteFile(tmp);
 		}
 		ok = og->ExportToWav(&item, out, 1, NULL, TRUE) && ok;
 	}

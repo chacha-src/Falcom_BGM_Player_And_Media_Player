@@ -2601,10 +2601,10 @@ void CPianoRoll::SaveCapturedMusicXml()
 
     static const char* kStep[12] = { "C","C","D","D","E","F","F","G","G","A","A","B" };
     static const int kAlter[12] = { 0,1,0,1,0,0,1,0,1,0,1,0 };
-    char xml[262144];
-    int xp = 0;
+    CStringA xml;
+    xml.Preallocate((frameN > 0 ? frameN : 1) * 512);
     auto append = [&](const char* s) {
-        while (*s && xp < (int)sizeof(xml) - 2) xml[xp++] = *s++;
+        if (s && *s) xml += s;
     };
     append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     append("<!DOCTYPE score-partwise PUBLIC \"-//Recordare//DTD MusicXML 3.1 Partwise//EN\" \"http://www.musicxml.org/dtds/partwise.dtd\">\n");
@@ -2652,11 +2652,15 @@ void CPianoRoll::SaveCapturedMusicXml()
     if (divisionsInMeasure > 0)
         append("</measure>\n");
     append("</part></score-partwise>\n");
-    xml[xp] = 0;
 
     CFile f;
-    if (!f.Open(dlg.GetPathName(), CFile::modeCreate | CFile::modeWrite | CFile::typeBinary)) return;
-    f.Write(xml, xp);
+    if (!f.Open(dlg.GetPathName(), CFile::modeCreate | CFile::modeWrite | CFile::typeBinary)) {
+        MessageBox(LL14(L"ファイルを書けませんでした。", L"Could not write file.", L"Impossible d'ecrire le fichier.", L"Impossibile scrivere il file.", L"No se pudo escribir el archivo.", L"파일을 쓸 수 없습니다.", L"无法写入文件。", L"تعذر كتابة الملف.", L"Не удалось записать файл.", L"Datei konnte nicht geschrieben werden.", L"Nao foi possivel gravar o arquivo.", L"Kon bestand niet schrijven.", L"Nie udalo sie zapisac pliku.", L"Dosya yazilamadi."),
+            LL14(L"MusicXML録り", L"MusicXML capture", L"Enregistrement MusicXML", L"Registrazione MusicXML", L"Captura MusicXML", L"MusicXML 녹음", L"MusicXML录制", L"تسجيل MusicXML", L"Запись MusicXML", L"MusicXML-Aufnahme", L"Captura MusicXML", L"MusicXML-opname", L"Zapis MusicXML", L"MusicXML kayit"),
+            MB_OK | MB_ICONWARNING);
+        return;
+    }
+    f.Write((LPCSTR)xml, (UINT)xml.GetLength());
     f.Close();
 }
 

@@ -319,7 +319,7 @@ void CDesktopLyricsWnd::OnDestroy()
 {
 	KillTimer(1);
 	PersistGeometry();
-	savedata.deskLrcOn = 0;
+	// deskLrcOn はトグル側で管理。X 閉じでは好みを落とさない（次回起動で復元）
 	MpPersistSavedataQuick();
 	CCustomBlurDialogBase::OnDestroy();
 }

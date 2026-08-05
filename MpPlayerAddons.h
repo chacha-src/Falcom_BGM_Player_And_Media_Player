@@ -24,6 +24,7 @@ void OpenMpSsVizModeless(CWnd* parent);
 
 void MpMirrorWritePcm(const BYTE* pcm, int bytes);
 void MpMirrorShutdown();
+void MpMirrorOnFormatReady(); // UI/再生準備後: ミラーONなら初期化（オーディオスレッドから呼ばない）
 
 void MpBpmOnTimerTick();
 void MpBpmDetectFromPeaks();

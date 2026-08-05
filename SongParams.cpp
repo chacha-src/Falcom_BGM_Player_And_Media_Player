@@ -320,6 +320,34 @@ static void ResolvePlayingKey(CString& outList, CString& outPath, int& outMode, 
 	outRet2 = pl->pc[idx].ret2;
 }
 
+// BPM 保存用: ♪再生行だけでなく、リストの選択/アクティブ行も対象にする。
+static void ResolveActiveOrPlayingKey(CString& outList, CString& outPath, int& outMode, int& outRet2)
+{
+	outList = SongParams_CurrentListName();
+	outMode = modesub;
+	outRet2 = ret2;
+	outPath = SongParams_KeyPath(filen);
+	if (!pl || !pl->pc || pl->playcnt <= 0)
+		return;
+	int idx = -1;
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		const int sel = mp->GetSelectedPcIndex();
+		if (sel >= 0 && sel < pl->playcnt)
+			idx = sel;
+	}
+	if (idx < 0 && pl->pnt1 >= 0 && pl->pnt1 < pl->playcnt)
+		idx = pl->pnt1;
+	if (idx < 0 && plcnt >= 0 && plcnt < pl->playcnt)
+		idx = plcnt;
+	if (idx < 0 && pl->pnt >= 0 && pl->pnt < pl->playcnt)
+		idx = pl->pnt;
+	if (idx < 0)
+		return;
+	outPath = SongParams_KeyPath(pl->pc[idx].fol);
+	outMode = pl->pc[idx].sub;
+	outRet2 = pl->pc[idx].ret2;
+}
+
 // ============================================================================
 // ファイル入出力
 // ============================================================================
@@ -673,7 +701,7 @@ void SongParams_SaveBpmForCurrentSong()
 		return;
 	CString list, path;
 	int md = 0, r2 = 0;
-	ResolvePlayingKey(list, path, md, r2);
+	ResolveActiveOrPlayingKey(list, path, md, r2);
 	if (path.IsEmpty() || list.IsEmpty())
 		return;
 	if (savedata.mpDetectedBpm <= 0 && savedata.mpBpmCand[0] <= 0)

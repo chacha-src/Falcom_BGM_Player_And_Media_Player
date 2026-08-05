@@ -98,6 +98,7 @@ int g_kpiSourceBitsPerSample = 16;
 #include "UpdateCheck.h"
 #include "SongParams.h"
 #include "ProAudio.h"
+#include "MpSidecar.h"
 
 void PlaybackCcClearFormat();
 void PlaybackCcLockFormat(int rate, int ch, int bits);
@@ -1794,6 +1795,8 @@ void ConfigurePlaybackOutputAndUpscaler()
 	}
 	g_audioUpscaler.Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
 	g_pcm_upscale_active = g_audioUpscaler.IsActive() ? 1 : 0;
+	extern void MpMirrorOnFormatReady();
+	MpMirrorOnFormatReady();
 }
 
 extern __int64 playb;
@@ -1938,35 +1941,40 @@ void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
 		int slash = p.ReverseFind(_T('\\'));
 		n = (slash >= 0) ? p.Mid(slash + 1) : p;
 	}
-	// 同一曲は先頭へ
-	for (int i = 0; i < savedata.mpHistCnt && i < 8; ++i) {
-		if (NormalizePlaylistPath(savedata.mpHistPath[i]).CompareNoCase(p) == 0) {
-			for (int j = i; j > 0; --j) {
-				_tcscpy(savedata.mpHistPath[j], savedata.mpHistPath[j - 1]);
-				_tcscpy(savedata.mpHistName[j], savedata.mpHistName[j - 1]);
+
+	int plIdx = -1;
+	int mode = 0;
+	int r2 = 0;
+	extern int plcnt;
+	extern int modesub;
+	extern int ret2;
+	if (pl && pl->pc && pl->playcnt > 0) {
+		if (plcnt >= 0 && plcnt < pl->playcnt
+			&& NormalizePlaylistPath(pl->pc[plcnt].fol).CompareNoCase(p) == 0) {
+			plIdx = plcnt;
+			mode = pl->pc[plcnt].sub;
+			r2 = pl->pc[plcnt].ret2;
+		}
+		else {
+			for (int i = 0; i < pl->playcnt; ++i) {
+				if (NormalizePlaylistPath(pl->pc[i].fol).CompareNoCase(p) == 0) {
+					plIdx = i;
+					mode = pl->pc[i].sub;
+					r2 = pl->pc[i].ret2;
+					break;
+				}
 			}
-			_tcscpy(savedata.mpHistPath[0], p);
-			_tcsncpy(savedata.mpHistName[0], n, _countof(savedata.mpHistName[0]) - 1);
-			savedata.mpHistName[0][_countof(savedata.mpHistName[0]) - 1] = 0;
-			MpPersistSavedataQuick();
-			if (savedata.playerMode == 1)
-				RefreshTaskbarJumpList(TRUE);
-			if (mp && ::IsWindow(mp->GetSafeHwnd()) && savedata.mpHistOpen)
-				mp->HistRebuildList();
-			return;
 		}
 	}
-	const int nMove = (savedata.mpHistCnt < 8) ? savedata.mpHistCnt : 7;
-	for (int j = nMove; j > 0; --j) {
-		_tcscpy(savedata.mpHistPath[j], savedata.mpHistPath[j - 1]);
-		_tcscpy(savedata.mpHistName[j], savedata.mpHistName[j - 1]);
+	if (plIdx < 0) {
+		mode = modesub;
+		r2 = ret2;
 	}
-	_tcscpy(savedata.mpHistPath[0], p);
-	_tcsncpy(savedata.mpHistName[0], n, _countof(savedata.mpHistName[0]) - 1);
-	savedata.mpHistName[0][_countof(savedata.mpHistName[0]) - 1] = 0;
-	if (savedata.mpHistCnt < 8)
-		savedata.mpHistCnt++;
+
+	MpHist_Push(p, n, plIdx);
 	MpPersistSavedataQuick();
+	ProAudio_BumpPlayCount(SongParams_CurrentListName(), p, mode, r2);
+
 	if (savedata.playerMode == 1)
 		RefreshTaskbarJumpList(TRUE);
 	if (mp && ::IsWindow(mp->GetSafeHwnd()) && savedata.mpHistOpen)
@@ -11224,7 +11232,7 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 		}
 		if (sf >= 0 && ef > sf) {
 			loop1 = sf;
-			loop2 = ef;
+			loop2 = ef - sf; // loop2 は長さ（絶対終端ではない）
 		}
 	}
 	ret2 = pc->ret2;
@@ -15082,8 +15090,13 @@ static inline bool WantPlaybackLoop()
 
 // 予測用ソースは壁時計積分のみ（poss5/decode を毎フレ入れると総時間がゆれる）。
 // 実デコード位置はシーク棒用。大きく乖離したときだけ補正。
+static ULONGLONG g_seekUiHoldUntil = 0; // シーク直後、旧 decode 位置で棒が戻るのを抑止
 static int TempoPredRealSrcSamples()
 {
+	// シーク確定直後は playb/poss5 を優先（g_oggPcmDecodePos が1フレ遅れると棒が跳ねる）
+	if (g_seekUiHoldUntil != 0 && GetTickCount64() < g_seekUiHoldUntil) {
+		if (poss5 > 0) return poss5;
+	}
 	const int dm = ActiveDecodeMode();
 	if (dm == -1 && g_oggPcmDecodePos >= 0)
 		return (int)g_oggPcmDecodePos;
@@ -20366,8 +20379,11 @@ void COggDlg::timerp()
 			ogs = oggsize;
 		}
 		// スライダーも時間表示と同じく実再生位置（DS 先読み分を除去）に揃える。
-		if (qSamplesHeard > 0 && pb > qSamplesHeard) pb -= qSamplesHeard;
-		else if (qSamplesHeard > 0) pb = 0;
+		// シーク直後は先読み差し引きしない（確定位置から一瞬戻って見えるのを防ぐ）
+		if (!(g_seekUiHoldUntil != 0 && GetTickCount64() < g_seekUiHoldUntil)) {
+			if (qSamplesHeard > 0 && pb > qSamplesHeard) pb -= qSamplesHeard;
+			else if (qSamplesHeard > 0) pb = 0;
+		}
 		int posMode = mode;
 		const double rate = TempoPlaybackRateFromPos(m_tempo_sl.GetPos());
 
@@ -24380,6 +24396,8 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	if (playf == 0 || thn1 || plf != 1) return;
 	if (ps == 1) return; // 一時停止中は履歴スクロール・解析更新を止める
 	if (!::IsWindow(m_PianoRollDlg->GetSafeHwnd())) return;
+	// PC音譜面化時はループバック側が解析を供給（再生フィードと二重書きしない）
+	if (savedata.mpLoopbackScore) return;
 	if (!bufwav3) return;
 	// DS 未生成中は解析しない（形式切替の隙間で旧パラメータを使わない）
 	if (!m_dsb) return;
@@ -25399,6 +25417,9 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 		// 二重スロット運用中は active スロットのデコーダへシーク（グローバル mp3_/flac_ は閉じ済み）
 			m_time.SetPos(curpos);
 		playb = (__int64)srcCur;
+		// timerp の TempoPredRealSrcSamples が旧 poss5 を返すとシーク棒が即座に戻る
+		poss5 = (int)srcCur;
+		g_seekUiHoldUntil = GetTickCount64() + 600;
 		if (tempoSeek && wavbit_sample_Hz > 0) {
 			const double srcSec = (mode == -10)
 				? ((double)srcCur * 100.0 / (double)wavbit_sample_Hz)
