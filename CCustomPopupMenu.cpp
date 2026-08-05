@@ -615,14 +615,19 @@ void CCustomPopupMenu::RefreshFontChain()
 	CCustomPopupMenu* root = RootMenu();
 	if (!root) return;
 	root->RebuildMenuFont();
-	if (root->GetSafeHwnd()) root->Invalidate(FALSE);
+	if (root->GetSafeHwnd()) {
+		root->InvalidateBgOnly();
+		root->RefreshEmbeddedChildren();
+	}
 	for (int i = 0; i < root->m_subCount; ++i) {
 		if (!root->m_subs[i]) continue;
 		root->m_subs[i]->m_previewing = root->m_previewing;
 		lstrcpynW(root->m_subs[i]->m_previewFace, root->m_previewFace, 32);
 		root->m_subs[i]->RebuildMenuFont();
-		if (root->m_subs[i]->GetSafeHwnd())
-			root->m_subs[i]->Invalidate(FALSE);
+		if (root->m_subs[i]->GetSafeHwnd()) {
+			root->m_subs[i]->InvalidateBgOnly();
+			root->m_subs[i]->RefreshEmbeddedChildren();
+		}
 	}
 }
 
@@ -666,7 +671,8 @@ void CCustomPopupMenu::RelayoutOpenChain()
 		menu->SetWindowPos(NULL, x, y, menu->m_menuW, menu->m_menuH,
 			SWP_NOZORDER | SWP_NOACTIVATE);
 		menu->SyncEmbeddedChildren();
-		menu->Invalidate(FALSE);
+		menu->InvalidateBgOnly();
+		menu->RefreshEmbeddedChildren();
 	}
 }
 
@@ -971,6 +977,15 @@ void CCustomPopupMenu::ShowEmbedded(BOOL show)
 	SyncEmbeddedChildren();
 }
 
+void CCustomPopupMenu::RefreshEmbeddedChildren()
+{
+	if (!GetSafeHwnd()) return;
+	for (HWND h = ::GetWindow(m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+		if (!::IsWindowVisible(h)) continue;
+		::RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
+	}
+}
+
 void CCustomPopupMenu::AnimateIn()
 {
 	if (!GetSafeHwnd()) return;
@@ -978,12 +993,13 @@ void CCustomPopupMenu::AnimateIn()
 	const DWORD ms = m_asSubmenu ? CCUSTOM_POPUP_ANIM_SUB_MS : CCUSTOM_POPUP_ANIM_IN_MS;
 	flags |= m_asSubmenu ? (AW_SLIDE | AW_HOR_POSITIVE) : (AW_SLIDE | AW_VER_POSITIVE);
 	if (!::AnimateWindow(m_hWnd, ms, flags)) {
-		ShowWindow(SW_SHOWNA); Invalidate(FALSE); UpdateWindow();
+		ShowWindow(SW_SHOWNA); InvalidateBgOnly(); UpdateWindow();
 	}
 	// AW_BLEND が WS_EX_LAYERED を残すと、子（特に自前 BitBlt）が消えて見える
 	if (GetExStyle() & WS_EX_LAYERED)
 		ModifyStyleEx(WS_EX_LAYERED, 0);
 	m_animTick = 0;
+	RefreshEmbeddedChildren();
 	SetTimer(kAnimTimer, 50, NULL); // 再描画は控えめ、位置は GetTickCount でスムーズ
 }
 
@@ -1193,21 +1209,12 @@ void CCustomPopupMenu::SetScrollY(int y)
 	if (y < 0) y = 0;
 	if (y > m_scrollMax) y = m_scrollMax;
 	if (y == m_scrollY) return;
-	// 移動前の子領域も親で塗り直すため、一旦子を隠してからスクロール同期
-	CRect oldChildUnion(0, 0, 0, 0);
-	BOOL haveOld = FALSE;
-	for (HWND h = ::GetWindow(m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
-		if (!::IsWindowVisible(h)) continue;
-		CRect cr; ::GetWindowRect(h, &cr); ScreenToClient(&cr);
-		if (!haveOld) { oldChildUnion = cr; haveOld = TRUE; }
-		else oldChildUnion.UnionRect(&oldChildUnion, &cr);
-	}
 	m_scrollY = y;
+	// 先に子を新位置へ。親は子領域を除外して塗る（InvalidateRect 全塗りは BufferedPaint で子を潰す）
 	SyncEmbeddedChildren();
-	if (haveOld)
-		InvalidateRect(&oldChildUnion, FALSE);
 	InvalidateBgOnly();
 	UpdateWindow();
+	RefreshEmbeddedChildren();
 }
 
 BOOL CCustomPopupMenu::OnWheelDelta(int delta)
@@ -1242,7 +1249,7 @@ void CCustomPopupMenu::StartCheckBounce(int idx)
 	m_nBounce = 8;
 	if (GetSafeHwnd())
 		SetTimer(kBounceTimer, 28, NULL);
-	Invalidate(FALSE);
+	InvalidateBgOnly();
 }
 
 void CCustomPopupMenu::OpenSubAt(int idx)
@@ -1265,7 +1272,8 @@ void CCustomPopupMenu::SetHot(int idx)
 {
 	if (idx == m_hot) return;
 	m_hot = idx;
-	Invalidate(FALSE);
+	// Invalidate(FALSE) は BufferedPaint が子 HWND を塗り潰す。背景のみ。
+	InvalidateBgOnly();
 	UpdateTip();
 	if (idx >= 0 && idx < m_itemCount) {
 		const CCustomPopupItem& it = m_items[idx];
@@ -1473,14 +1481,19 @@ void CCustomPopupMenu::OnPaint()
 	HDC hdcBuf = NULL;
 	const CRect& pr = dc.m_ps.rcPaint;
 	HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &pr, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+	BOOL usedBuffered = FALSE;
 	if (hdcBuf && hBP) {
 		::BitBlt(hdcBuf, 0, 0, pr.Width(), pr.Height(), mDC.GetSafeHdc(), pr.left, pr.top, SRCCOPY);
 		::BufferedPaintMakeOpaque(hBP, NULL);
 		::EndBufferedPaint(hBP, TRUE);
+		usedBuffered = TRUE;
 	} else {
 		dc.BitBlt(0, 0, r.Width(), r.Height(), &mDC, 0, 0, SRCCOPY);
 	}
 	mDC.SelectObject(ob);
+	// BeginBufferedPaint + MakeOpaque がクリップを無視して子を潰すことがある
+	if (usedBuffered)
+		RefreshEmbeddedChildren();
 }
 
 BOOL CCustomPopupMenu::OnEraseBkgnd(CDC*) { return TRUE; }
@@ -1514,7 +1527,8 @@ void CCustomPopupMenu::OnMouseLeave()
 {
 	if (m_hot >= 0 && m_items[m_hot].kind != CCUSTOM_POPUP_SUB) {
 		const BOOL wasFace = (m_items[m_hot].id == CCUSTOM_POPUP_ID_FONT_FACE);
-		m_hot = -1; Invalidate(FALSE);
+		m_hot = -1;
+		InvalidateBgOnly();
 		if (wasFace) ClearPreviewFace();
 	}
 }
@@ -1538,7 +1552,7 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 		PersistPopupFont();
 		RefreshFontChain();
 		RelayoutOpenChain();
-		Invalidate(FALSE);
+		InvalidateBgOnly();
 		return TRUE;
 	}
 	if (it.id == CCUSTOM_POPUP_ID_FONT_ITALIC) {
@@ -1548,7 +1562,7 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 		PersistPopupFont();
 		RefreshFontChain();
 		RelayoutOpenChain();
-		Invalidate(FALSE);
+		InvalidateBgOnly();
 		return TRUE;
 	}
 	if (it.id == CCUSTOM_POPUP_ID_FONT_FACE) {
@@ -1767,7 +1781,7 @@ void CCustomPopupMenu::OnTimer(UINT_PTR nIDEvent)
 			m_bounceIdx = -1;
 			KillTimer(kBounceTimer);
 		}
-		Invalidate(FALSE);
+		InvalidateBgOnly();
 		return;
 	}
 	CWnd::OnTimer(nIDEvent);

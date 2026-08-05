@@ -266,6 +266,7 @@ protected:
 	void CloseOpenSub();
 	void SyncEmbeddedChildren();
 	void ShowEmbedded(BOOL show);
+	void RefreshEmbeddedChildren(); // 親描画で子が塗り潰された場合の再描画
 	void UpdateTip();
 	BOOL IsPointInChain(CPoint screenPt) const;
 	BOOL IsHwndRelated(HWND h) const;
