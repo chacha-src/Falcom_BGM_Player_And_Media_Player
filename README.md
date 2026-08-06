@@ -140,7 +140,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 - **動画の音声抽出／差し替え:** 選択動画から WAV 抽出、または外部 WAV で音声を差し替えて MP4 へ書き出し
 - **出力ミラー:** 別再生デバイスへ同じミックスをミラー（音量のみ別）
 - **スクリーンセーバー風ビジュアライザ:** フルスクリーン表示（ESCで解除）
-- **localhost 操作:** `127.0.0.1` のみの簡易HTTPで再生操作（外部公開なし）
+- **ローカルリモート:** 同じ Wi-Fi / LAN 上の PC・スマホ（同時最大3台）からブラウザで再生操作。設定に表示される `http://（LANのIP）:ポート/` を開く（PC では `127.0.0.1` でも可）。インターネットへの公開はしません。初回は Windows ファイアウォールの許可が必要なことがあります
 - **アラーム:** 指定時刻に再生開始（スリープタイマーは従来どおり）
 - **ゲーム配信プリセット:** 画面キャプチャ＋デバイス録音を所定設定でまとめて開く
 
@@ -232,7 +232,7 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 - マイクミックス（WAVへ保存時）、デバイス録音（ループバック→WAV/mp3/FLAC）、画面キャプチャ（MP4）
 - 歌詞ウィンドウ、LRC微調整／保存、ピアノロールのMIDI・MusicXML録り、PC音譜面化
 - A-B／キュー素材パック、音量正規化バッチ、MusicBrainz自動タグ、ボーカルMid、M/Sプリセット、キーEQ提案
-- BPM計測、DJパッド、MIDI操作、動画音声抽出、出力ミラー、SS風ビジュアライザ、localhost操作、アラーム、ゲーム配信プリセット
+- BPM計測、DJパッド、MIDI操作、動画音声抽出、出力ミラー、SS風ビジュアライザ、ローカルリモート（LAN／同時3台）、アラーム、ゲーム配信プリセット
 - ピアノロールの検出パラメータ調整ダイアログ（多数スライダー）
 - プレイリストからアナライザー／ピアノロールを直接開く
 - 並べ替え、他プレイリストへの移動・コピー、選択曲のジャケ再取得
@@ -402,10 +402,10 @@ Handy media-player add-ons from the Tools right-click menu and each window’s c
 - **BPM measure:** Check while playing or with PC audio; uncheck to apply to beat grid and export crossfade seconds
 - **DJ pad:** One-touch pitch / tempo / vocal / M/S
 - **MIDI keyboard control:** Notes / CC for play, next, volume, etc.
-- **Video audio extract:** Export audio from a selected video to WAV
+- **Video audio extract / replace:** Export audio from a selected video to WAV, or replace the video’s audio with an external WAV and write MP4
 - **Output mirror:** Mirror the same mix to another playback device (separate volume only)
 - **Screensaver-style visualizer:** Fullscreen display (ESC to exit)
-- **localhost remote:** Tiny HTTP on `127.0.0.1` only (no external bind)
+- **Local remote:** Browser transport control from PCs/phones on the same Wi-Fi / LAN (up to 3 clients). Open the `http://(LAN IP):port/` shown in settings (on the PC, `127.0.0.1` also works). Not exposed to the public Internet; Windows Firewall may prompt once
 - **Alarm:** Start playback at a set time (sleep timer remains as before)
 - **Game-stream preset:** Open screen capture + device record with preset settings
 
@@ -497,7 +497,7 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 - Mic mix (with Save to WAV), device recording (loopback → WAV/mp3/FLAC), screen capture (MP4)
 - Lyrics window, LRC nudge/save, piano-roll MIDI/MusicXML capture, score from PC audio
 - A-B/cue pack export, loudness normalize batch, MusicBrainz auto-tag, vocal Mid, M/S presets, key→EQ suggest
-- BPM measure, DJ pad, MIDI control, video audio extract, output mirror, screensaver visualizer, localhost remote, alarm, game-stream preset
+- BPM measure, DJ pad, MIDI control, video audio extract, output mirror, screensaver visualizer, local remote (LAN / up to 3 clients), alarm, game-stream preset
 - Piano-roll detection tuning dialog (many sliders)
 - Open analyzer / piano roll directly from the playlist
 - Sort, move/copy to another playlist, refresh jacket for selection
