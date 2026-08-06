@@ -3114,6 +3114,60 @@ void CAnalyzerDlg::DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg)
 		return area.bottom - (int)(t * area.Height());
 	};
 
+	// 位相相関メーター(-1..+1)と L/R バランス。
+	// 先に描き、チャネルバーを後で重ねる（旧: スパークが L バーを塗り潰していた）。
+	if (savedata.pro_corr_meter && n >= 2) {
+		const float corr = ProAudio_CorrValue();
+		const float bal = ProAudio_CorrBalance();
+		m_corrHist[m_corrHistHead & 63] = corr;
+		m_corrHistHead++;
+		const int corrW = 22;
+		const int sparkW = 18;
+		CRect corrRc(area.left - corrW - 4, area.top + 2, area.left - 4, area.bottom - 2);
+		// スパークは φ の左。チャネル帯(area)には食い込ませない
+		CRect sparkRc(corrRc.left - sparkW - 2, corrRc.top, corrRc.left - 2, corrRc.bottom);
+		if (sparkRc.left < waveRc.left + 2) {
+			const int dx = waveRc.left + 2 - sparkRc.left;
+			sparkRc.OffsetRect(dx, 0);
+			corrRc.OffsetRect(dx, 0);
+		}
+		if (corrRc.Width() >= 12 && corrRc.right <= area.left - 2) {
+			dc.FillSolidRect(corrRc, RGB(28, 32, 44));
+			dc.Draw3dRect(corrRc, RGB(70, 80, 100), RGB(40, 45, 60));
+			const int midY = (corrRc.top + corrRc.bottom) / 2;
+			dc.FillSolidRect(corrRc.left + 2, midY, corrRc.Width() - 4, 1, RGB(90, 100, 120));
+			int y = midY - (int)(corr * ((corrRc.Height() / 2) - 5));
+			if (y < corrRc.top + 3) y = corrRc.top + 3;
+			if (y > corrRc.bottom - 4) y = corrRc.bottom - 4;
+			dc.FillSolidRect(corrRc.left + 3, y - 2, corrRc.Width() - 6, 5, RGB(100, 230, 150));
+			int bx = corrRc.left + corrRc.Width() / 2 + (int)(bal * (corrRc.Width() / 2 - 3));
+			if (bx < corrRc.left + 2) bx = corrRc.left + 2;
+			if (bx > corrRc.right - 3) bx = corrRc.right - 3;
+			dc.FillSolidRect(bx - 1, corrRc.bottom - 5, 3, 4, RGB(255, 180, 80));
+			dc.SetTextColor(RGB(170, 200, 190));
+			dc.SetBkMode(TRANSPARENT);
+			CFont* of2 = dc.SelectObject(&m_font);
+			dc.TextOut(corrRc.left + 2, corrRc.top, _T("φ"));
+			dc.SelectObject(of2);
+
+			const int sn = m_corrHistHead < 64 ? m_corrHistHead : 64;
+			if (sn >= 4 && sparkRc.Width() >= 12 && sparkRc.right <= corrRc.left) {
+				dc.FillSolidRect(sparkRc, RGB(22, 26, 36));
+				const int mid = (sparkRc.top + sparkRc.bottom) / 2;
+				dc.FillSolidRect(sparkRc.left, mid, sparkRc.Width(), 1, RGB(60, 70, 90));
+				for (int i = 0; i < sn && i < sparkRc.Width() - 2; ++i) {
+					const int idx = (m_corrHistHead - sn + i) & 63;
+					float v = m_corrHist[idx];
+					if (v > 1.f) v = 1.f; if (v < -1.f) v = -1.f;
+					int yy = mid - (int)(v * ((sparkRc.Height() / 2) - 3));
+					if (yy < sparkRc.top + 1) yy = sparkRc.top + 1;
+					if (yy > sparkRc.bottom - 2) yy = sparkRc.bottom - 2;
+					dc.SetPixel(sparkRc.left + 1 + i, yy, v >= 0 ? RGB(100, 220, 140) : RGB(220, 120, 100));
+				}
+			}
+		}
+	}
+
 	// すべて RMS 基準: バー=現在RMS、白線=RMSピークホールド、黄/赤=RMS閾値
 	const float ampYellow = powf(10.0f, -9.0f / 20.0f);
 	const float ampRed = powf(10.0f, -3.0f / 20.0f);
@@ -3151,61 +3205,6 @@ void CAnalyzerDlg::DrawLevelMeters(CDC& dc, const CRect& waveRc, COLORREF bg)
 		dc.TextOut(x0, area.top - 2, ChannelLabel(c, channels));
 		dc.SelectObject(of);
 	}
-
-	// 位相相関メーター(-1..+1)と L/R バランス
-	// メータ帯の左隣に固定幅で描く(波形領域が狭くても strip 更新で見える)
-	if (savedata.pro_corr_meter && n >= 2) {
-		const float corr = ProAudio_CorrValue();
-		const float bal = ProAudio_CorrBalance();
-		m_corrHist[m_corrHistHead & 63] = corr;
-		m_corrHistHead++;
-		const int corrW = 22;
-		CRect corrRc(area.left - corrW - 4, area.top + 2, area.left - 4, area.bottom - 2);
-		if (corrRc.left < waveRc.left + 2)
-			corrRc.OffsetRect(waveRc.left + 2 - corrRc.left, 0);
-		if (corrRc.Width() >= 12 && corrRc.right <= waveRc.right) {
-			dc.FillSolidRect(corrRc, RGB(28, 32, 44));
-			dc.Draw3dRect(corrRc, RGB(70, 80, 100), RGB(40, 45, 60));
-			const int midY = (corrRc.top + corrRc.bottom) / 2;
-			dc.FillSolidRect(corrRc.left + 2, midY, corrRc.Width() - 4, 1, RGB(90, 100, 120));
-			// 相関: 上=+1(同相) 下=-1(逆相)。緑バー
-			int y = midY - (int)(corr * ((corrRc.Height() / 2) - 5));
-			if (y < corrRc.top + 3) y = corrRc.top + 3;
-			if (y > corrRc.bottom - 4) y = corrRc.bottom - 4;
-			dc.FillSolidRect(corrRc.left + 3, y - 2, corrRc.Width() - 6, 5, RGB(100, 230, 150));
-			// バランス: 下端の横位置
-			int bx = corrRc.left + corrRc.Width() / 2 + (int)(bal * (corrRc.Width() / 2 - 3));
-			if (bx < corrRc.left + 2) bx = corrRc.left + 2;
-			if (bx > corrRc.right - 3) bx = corrRc.right - 3;
-			dc.FillSolidRect(bx - 1, corrRc.bottom - 5, 3, 4, RGB(255, 180, 80));
-			dc.SetTextColor(RGB(170, 200, 190));
-			dc.SetBkMode(TRANSPARENT);
-			CFont* of2 = dc.SelectObject(&m_font);
-			dc.TextOut(corrRc.left + 2, corrRc.top, _T("φ"));
-			dc.SelectObject(of2);
-
-			// 相関ヒストの簡易スパークライン(右端)
-			{
-				const int sn = m_corrHistHead < 64 ? m_corrHistHead : 64;
-				const int sx0 = corrRc.right + 2;
-				if (sn >= 4 && sx0 + 20 < waveRc.right) {
-					CRect sparkRc(sx0, corrRc.top, sx0 + 18, corrRc.bottom);
-					dc.FillSolidRect(sparkRc, RGB(22, 26, 36));
-					const int mid = (sparkRc.top + sparkRc.bottom) / 2;
-					dc.FillSolidRect(sparkRc.left, mid, sparkRc.Width(), 1, RGB(60, 70, 90));
-					for (int i = 0; i < sn && i < sparkRc.Width() - 2; ++i) {
-						const int idx = (m_corrHistHead - sn + i) & 63;
-						float v = m_corrHist[idx];
-						if (v > 1.f) v = 1.f; if (v < -1.f) v = -1.f;
-						int yy = mid - (int)(v * ((sparkRc.Height() / 2) - 3));
-						if (yy < sparkRc.top + 1) yy = sparkRc.top + 1;
-						if (yy > sparkRc.bottom - 2) yy = sparkRc.bottom - 2;
-						dc.SetPixel(sparkRc.left + 1 + i, yy, v >= 0 ? RGB(100, 220, 140) : RGB(220, 120, 100));
-					}
-				}
-			}
-		}
-	}
 }
 
 // 波形右端のレベルメーター帯幅(クロマ更新用)。DrawLevelMeters の早期 return 下限以上にすること。
@@ -3215,7 +3214,7 @@ static int AnalyzerMeterStripWidth(int channels)
 	AnalyzerMeterGeom(channels, n, meterW, gap, totalW);
 	int w = totalW + 16; // 余白多め(>=44)
 	if (savedata.pro_corr_meter && n >= 2)
-		w += 28; // φ 相関帯
+		w += 28 + 20; // φ 相関帯 + 左スパーク（Lバーへ食い込まない幅）
 	return w;
 }
 
