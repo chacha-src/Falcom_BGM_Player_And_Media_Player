@@ -526,7 +526,7 @@ struct save{
 	int mpMirrorOut;         // 1=二次デバイスへミラー出力
 	int mpMirrorVol;         // 0..100 二次音量
 	TCHAR mpMirrorDevice[256];
-	int mpRemoteOn;          // 1=localhost 操作HTTP
+	int mpRemoteOn;          // 1=LAN/Wi-Fi 操作HTTP（同時最大3）
 	int mpRemotePort;        // 例 8765
 	int mpAlarmHour;         // -1=Off, 0..23
 	int mpAlarmMin;          // 0..59

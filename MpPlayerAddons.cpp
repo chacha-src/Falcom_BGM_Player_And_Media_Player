@@ -1030,7 +1030,8 @@ void MpMirrorWritePcm(const BYTE* pcm, int bytes)
 	LeaveCriticalSection(&g_mpMirrorCs);
 }
 
-// ---- Remote HTTP (127.0.0.1) ----
+// ---- Remote HTTP (LAN / Wi-Fi、最大3クライアント同時) ----
+enum { kMpRemoteMaxClients = 3 };
 static SOCKET g_mpRemoteListen = INVALID_SOCKET;
 static HANDLE g_mpRemoteThread = NULL;
 static volatile LONG g_mpRemoteStop = 0;
@@ -1038,8 +1039,112 @@ static int g_mpRemoteBoundPort = 0; // EnsureRunning が実際に bind したポ
 static HWND g_mpRemoteHwnd = NULL;
 static int g_mpRemoteWsa = 0;
 static int g_mpRemoteMuteRestore = -1; // >=0: ミュート中（復元音量）
+static volatile LONG g_mpRemoteBusy = 0; // 処理中クライアント数
+static CRITICAL_SECTION g_mpRemoteCs;
+static int g_mpRemoteCsInit = 0;
+static SOCKET g_mpRemoteActive[kMpRemoteMaxClients];
 
 static volatile LONG g_mpRemoteVolCache = 50;
+
+static void MpRemoteCsEnsure()
+{
+	if (g_mpRemoteCsInit) return;
+	InitializeCriticalSection(&g_mpRemoteCs);
+	for (int i = 0; i < kMpRemoteMaxClients; ++i)
+		g_mpRemoteActive[i] = INVALID_SOCKET;
+	g_mpRemoteCsInit = 1;
+}
+
+static void MpRemoteTrackClient(SOCKET s, BOOL add)
+{
+	MpRemoteCsEnsure();
+	EnterCriticalSection(&g_mpRemoteCs);
+	if (add) {
+		for (int i = 0; i < kMpRemoteMaxClients; ++i) {
+			if (g_mpRemoteActive[i] == INVALID_SOCKET) {
+				g_mpRemoteActive[i] = s;
+				break;
+			}
+		}
+	} else {
+		for (int i = 0; i < kMpRemoteMaxClients; ++i) {
+			if (g_mpRemoteActive[i] == s)
+				g_mpRemoteActive[i] = INVALID_SOCKET;
+		}
+	}
+	LeaveCriticalSection(&g_mpRemoteCs);
+}
+
+// Kick 済みなら closesocket しない（二重 close 防止）
+static void MpRemoteReleaseClient(SOCKET s)
+{
+	MpRemoteCsEnsure();
+	BOOL mine = FALSE;
+	EnterCriticalSection(&g_mpRemoteCs);
+	for (int i = 0; i < kMpRemoteMaxClients; ++i) {
+		if (g_mpRemoteActive[i] == s) {
+			g_mpRemoteActive[i] = INVALID_SOCKET;
+			mine = TRUE;
+			break;
+		}
+	}
+	LeaveCriticalSection(&g_mpRemoteCs);
+	if (mine)
+		closesocket(s);
+}
+
+static void MpRemoteKickClients()
+{
+	MpRemoteCsEnsure();
+	SOCKET kill[kMpRemoteMaxClients];
+	EnterCriticalSection(&g_mpRemoteCs);
+	for (int i = 0; i < kMpRemoteMaxClients; ++i) {
+		kill[i] = g_mpRemoteActive[i];
+		g_mpRemoteActive[i] = INVALID_SOCKET;
+	}
+	LeaveCriticalSection(&g_mpRemoteCs);
+	for (int i = 0; i < kMpRemoteMaxClients; ++i) {
+		if (kill[i] != INVALID_SOCKET) {
+			shutdown(kill[i], SD_BOTH);
+			closesocket(kill[i]);
+		}
+	}
+}
+
+// 既定ルートの IPv4（LAN）。UDP connect で実送信なし。
+static BOOL MpRemoteGetLanIpv4(wchar_t* out, int cch)
+{
+	if (!out || cch < 8) return FALSE;
+	out[0] = 0;
+	WSADATA wsa = {};
+	const BOOL needWsa = (g_mpRemoteWsa == 0);
+	if (needWsa && WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+		return FALSE;
+	SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	BOOL ok = FALSE;
+	if (s != INVALID_SOCKET) {
+		sockaddr_in dst = {};
+		dst.sin_family = AF_INET;
+		dst.sin_port = htons(53);
+		dst.sin_addr.s_addr = htonl(0x08080808); // 8.8.8.8
+		if (connect(s, (sockaddr*)&dst, sizeof(dst)) == 0) {
+			sockaddr_in local = {};
+			int len = sizeof(local);
+			if (getsockname(s, (sockaddr*)&local, &len) == 0) {
+				const DWORD ip = ntohl(local.sin_addr.s_addr);
+				if (ip != 0 && (ip >> 24) != 127) {
+					_snwprintf_s(out, cch, _TRUNCATE, L"%u.%u.%u.%u",
+						(ip >> 24) & 255, (ip >> 16) & 255, (ip >> 8) & 255, ip & 255);
+					ok = TRUE;
+				}
+			}
+		}
+		closesocket(s);
+	}
+	if (needWsa)
+		WSACleanup();
+	return ok;
+}
 
 static void MpRemoteCacheVol(int v)
 {
@@ -1050,8 +1155,7 @@ static void MpRemoteCacheVol(int v)
 
 static void MpRemoteSendCmd(int cmd)
 {
-	// accept スレッドから UI へは PostMessage のみ。
-	// SendMessage だと MpRemoteStop のスレッド待機と相互待ちで終了が数秒固まる。
+	// accept/worker から UI へは PostMessage のみ（SendMessage は終了時デッドロック）
 	if (g_mpRemoteHwnd && ::IsWindow(g_mpRemoteHwnd))
 		::PostMessage(g_mpRemoteHwnd, WM_MP_TRANSPORT_CMD, (WPARAM)cmd, 0);
 }
@@ -1362,7 +1466,7 @@ static void MpRemoteHandleRequest(SOCKET s)
 	}
 	page += L"\"></div>"
 		L"</section>"
-		L"<p class=\"hint\">Wi-Fi / LAN · localhost remote</p>"
+		L"<p class=\"hint\">Wi-Fi / LAN · up to 3 clients</p>"
 		L"</div><div id=\"toast\" class=\"toast\"></div>"
 		L"<script src=\"https://code.jquery.com/jquery-3.7.1.min.js\"></script>"
 		L"<script>"
@@ -1408,18 +1512,53 @@ static void MpRemoteHandleRequest(SOCKET s)
 	MpRemoteSendAll(s, bodyA, bodyA.GetLength());
 }
 
+static UINT MpRemoteClientProc(LPVOID p)
+{
+	SOCKET c = (SOCKET)(UINT_PTR)p;
+	MpRemoteTrackClient(c, TRUE);
+	if (InterlockedCompareExchange(&g_mpRemoteStop, 0, 0) == 0)
+		MpRemoteHandleRequest(c);
+	MpRemoteReleaseClient(c);
+	InterlockedDecrement(&g_mpRemoteBusy);
+	return 0;
+}
+
 static UINT MpRemoteThreadProc(LPVOID)
 {
 	while (InterlockedCompareExchange(&g_mpRemoteStop, 0, 0) == 0) {
+		if (g_mpRemoteListen == INVALID_SOCKET)
+			break;
 		fd_set rf;
 		FD_ZERO(&rf);
 		FD_SET(g_mpRemoteListen, &rf);
-		timeval tv = { 1, 0 };
-		if (select(0, &rf, NULL, NULL, &tv) <= 0) continue;
+		timeval tv = { 0, 200000 }; // 0.2s — 停止反応を速く
+		const int sel = select(0, &rf, NULL, NULL, &tv);
+		if (sel < 0) break;
+		if (sel == 0) continue;
 		SOCKET c = accept(g_mpRemoteListen, NULL, NULL);
-		if (c == INVALID_SOCKET) continue;
-		MpRemoteHandleRequest(c);
-		closesocket(c);
+		if (c == INVALID_SOCKET) {
+			if (InterlockedCompareExchange(&g_mpRemoteStop, 0, 0) != 0)
+				break;
+			continue;
+		}
+		// 同時接続上限（PC+スマホ×2 想定）
+		const LONG n = InterlockedIncrement(&g_mpRemoteBusy);
+		if (n > kMpRemoteMaxClients) {
+			InterlockedDecrement(&g_mpRemoteBusy);
+			const char* busy =
+				"HTTP/1.0 503 Service Unavailable\r\nConnection: close\r\n"
+				"Content-Type: text/plain; charset=utf-8\r\n\r\nbusy";
+			MpRemoteSendAll(c, busy, (int)strlen(busy));
+			closesocket(c);
+			continue;
+		}
+		HANDLE h = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)MpRemoteClientProc, (LPVOID)(UINT_PTR)c, 0, NULL);
+		if (!h) {
+			InterlockedDecrement(&g_mpRemoteBusy);
+			closesocket(c);
+			continue;
+		}
+		CloseHandle(h); // デタッチ（完了は g_mpRemoteBusy で追跡）
 	}
 	return 0;
 }
@@ -1427,16 +1566,16 @@ static UINT MpRemoteThreadProc(LPVOID)
 void MpRemoteStop()
 {
 	InterlockedExchange(&g_mpRemoteStop, 1);
+	MpRemoteKickClients();
 	if (g_mpRemoteListen != INVALID_SOCKET) {
 		closesocket(g_mpRemoteListen);
 		g_mpRemoteListen = INVALID_SOCKET;
 	}
 	if (g_mpRemoteThread) {
-		// 旧実装は WaitForSingleObject のみ → accept 側が UI へ SendMessage 中だと
-		// UI がここで待つ／スレッドが UI を待つ、で終了が最大 3 秒固まる。
+		// 最大 ~250ms。それ以上待たずハンドルだけ手放す（終了遅延の主因だった）
 		const DWORD t0 = GetTickCount();
 		for (;;) {
-			const DWORD w = WaitForSingleObject(g_mpRemoteThread, 50);
+			const DWORD w = WaitForSingleObject(g_mpRemoteThread, 25);
 			if (w == WAIT_OBJECT_0)
 				break;
 			MSG msg;
@@ -1444,14 +1583,17 @@ void MpRemoteStop()
 				TranslateMessage(&msg);
 				DispatchMessage(&msg);
 			}
-			if (GetTickCount() - t0 >= 3000)
+			if (GetTickCount() - t0 >= 250)
 				break;
 		}
 		CloseHandle(g_mpRemoteThread);
 		g_mpRemoteThread = NULL;
 	}
+	// busy ワーカーが残っていてもプロセス終了時は OS が回収。WSACleanup は残ソケットで固まるので
+	// まだ busy>0 ならスキップする。
 	if (g_mpRemoteWsa) {
-		WSACleanup();
+		if (InterlockedCompareExchange(&g_mpRemoteBusy, 0, 0) == 0)
+			WSACleanup();
 		g_mpRemoteWsa = 0;
 	}
 	g_mpRemoteBoundPort = 0;
@@ -1472,6 +1614,8 @@ void MpRemoteEnsureRunning(HWND notifyHwnd)
 
 	MpRemoteStop();
 	InterlockedExchange(&g_mpRemoteStop, 0);
+	InterlockedExchange(&g_mpRemoteBusy, 0);
+	MpRemoteCsEnsure();
 	WSADATA wsa;
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return;
 	g_mpRemoteWsa = 1;
@@ -1487,13 +1631,13 @@ void MpRemoteEnsureRunning(HWND notifyHwnd)
 
 	sockaddr_in addr = {};
 	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	addr.sin_addr.s_addr = htonl(INADDR_ANY); // LAN / Wi-Fi から到達可能
 	addr.sin_port = htons((u_short)port);
 	if (bind(g_mpRemoteListen, (sockaddr*)&addr, sizeof(addr)) != 0) {
 		MpRemoteStop();
 		return;
 	}
-	listen(g_mpRemoteListen, 4);
+	listen(g_mpRemoteListen, 8);
 	g_mpRemoteThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)MpRemoteThreadProc, NULL, 0, NULL);
 	if (!g_mpRemoteThread) {
 		MpRemoteStop();
@@ -4187,8 +4331,12 @@ protected:
 		CString p; m_port.GetWindowText(p);
 		const int typed = _ttoi(p);
 		if (typed >= 1024 && typed <= 65535) port = typed;
+		wchar_t lan[64] = {};
 		CString url;
-		url.Format(L"http://127.0.0.1:%d/", port);
+		if (MpRemoteGetLanIpv4(lan, 64))
+			url.Format(L"http://%s:%d/  (PC: http://127.0.0.1:%d/)", lan, port, port);
+		else
+			url.Format(L"http://127.0.0.1:%d/", port);
 		if (m_url.GetSafeHwnd())
 			m_url.SetWindowText(url);
 	}
@@ -4198,9 +4346,9 @@ protected:
 		SetWindowText(LL14(L"ローカルリモート", L"Local remote", L"Telecommande locale", L"Remote locale", L"Remoto local",
 			L"로컬 리모트", L"本地遥控", L"تحكم محلي", L"Локальный пульт", L"Lokalfernbedienung",
 			L"Remoto local", L"Lokale bediening", L"Pilot lokalny", L"Yerel uzaktan"));
-		m_enable.SetWindowText(LL14(L"localhost で HTTP", L"HTTP on localhost", L"HTTP sur localhost", L"HTTP su localhost", L"HTTP en localhost",
-			L"localhost HTTP", L"本机 HTTP", L"HTTP على localhost", L"HTTP на localhost", L"HTTP auf localhost",
-			L"HTTP em localhost", L"HTTP op localhost", L"HTTP na localhost", L"localhost HTTP"));
+		m_enable.SetWindowText(LL14(L"Wi-Fi / LAN で HTTP（最大3台）", L"HTTP on Wi-Fi/LAN (max 3)", L"HTTP Wi-Fi/LAN (max 3)", L"HTTP Wi-Fi/LAN (max 3)", L"HTTP Wi-Fi/LAN (máx. 3)",
+			L"Wi-Fi/LAN HTTP (최대 3)", L"Wi-Fi/LAN HTTP（最多3）", L"HTTP عبر Wi-Fi/LAN (حد 3)", L"HTTP по Wi-Fi/LAN (до 3)", L"HTTP im WLAN/LAN (max. 3)",
+			L"HTTP no Wi-Fi/LAN (máx. 3)", L"HTTP op Wi-Fi/LAN (max 3)", L"HTTP w Wi-Fi/LAN (max 3)", L"Wi-Fi/LAN HTTP (en fazla 3)"));
 		SetDlgItemText(IDC_REMOTE_PORT_L, LL14(L"ポート", L"Port", L"Port", L"Porta", L"Puerto",
 			L"포트", L"端口", L"منفذ", L"Порт", L"Port", L"Porta", L"Poort", L"Port", L"Port"));
 		m_open.SetWindowText(LL14(L"ブラウザで開く", L"Open in browser", L"Ouvrir dans le navigateur", L"Apri nel browser", L"Abrir en el navegador",
@@ -4212,18 +4360,18 @@ protected:
 		RefreshUrlLabel();
 		m_open.SetGradation(RGB(220, 240, 255), RGB(160, 200, 240), 0, TRUE);
 		CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
-		m_tooltip.AddTool(&m_enable, LL14(L"ブラウザから再生操作できる簡易 HTTP サーバを起動します。", L"Start a simple HTTP server for browser transport control.", L"Demarrer un serveur HTTP simple pour controler la lecture.", L"Avvia un semplice server HTTP per il controllo.", L"Inicia un servidor HTTP simple para control.",
-			L"브라우저로 조작하는 간이 HTTP 서버를 켭니다.", L"启动简易 HTTP 服务器以便浏览器控制播放。", L"تشغيل خادم HTTP بسيط للتحكم.", L"Запустить простой HTTP-сервер для управления.", L"Einfachen HTTP-Server für Steuerung starten.",
-			L"Inicia um servidor HTTP simples para controle.", L"Start een eenvoudige HTTP-server voor bediening.", L"Uruchom prosty serwer HTTP do sterowania.", L"Tarayicidan kontrol icin basit HTTP sunucusu baslat."));
+		m_tooltip.AddTool(&m_enable, LL14(L"同じ Wi-Fi のスマホ／PC から再生操作できる HTTP サーバ（同時3接続まで）。", L"HTTP server for phones/PCs on the same Wi-Fi (up to 3 clients).", L"Serveur HTTP pour telephones/PC sur le meme Wi-Fi (max 3).", L"Server HTTP per telefoni/PC sulla stessa Wi-Fi (max 3).", L"Servidor HTTP para moviles/PC en la misma Wi-Fi (máx. 3).",
+			L"같은 Wi-Fi의 폰/PC에서 조작하는 HTTP 서버(최대 3).", L"同一 Wi-Fi 下手机/PC 控制的 HTTP 服务器（最多3）。", L"خادم HTTP للهواتف/أجهزة الكمبيوتر على نفس Wi-Fi (حد 3).", L"HTTP-сервер для телефонов/ПК в той же Wi-Fi (до 3).", L"HTTP-Server für Telefone/PCs im gleichen WLAN (max. 3).",
+			L"Servidor HTTP para telemoveis/PCs na mesma Wi-Fi (máx. 3).", L"HTTP-server voor telefoons/pc's op hetzelfde Wi-Fi (max 3).", L"Serwer HTTP dla telefonow/PC w tej samej Wi-Fi (max 3).", L"Ayni Wi-Fi'deki telefon/PC icin HTTP sunucusu (en fazla 3)."));
 		m_tooltip.AddTool(&m_port, LL14(L"待ち受けポート (1024–65535)。", L"Listen port (1024–65535).", L"Port d'ecoute (1024–65535).", L"Porta di ascolto (1024–65535).", L"Puerto de escucha (1024–65535).",
 			L"수신 포트 (1024–65535).", L"监听端口 (1024–65535)。", L"منفذ الاستماع (1024–65535).", L"Порт прослушивания (1024–65535).", L"Listenport (1024–65535).",
 			L"Porta de escuta (1024–65535).", L"Luisterpoort (1024–65535).", L"Port nasluchu (1024–65535).", L"Dinleme portu (1024–65535)."));
-		m_tooltip.AddTool(&m_url, LL14(L"スマホ／PC のブラウザで開く URL（localhost のみ）。", L"URL for phone/PC browser (localhost only).", L"URL navigateur (localhost seulement).", L"URL browser (solo localhost).", L"URL del navegador (solo localhost).",
-			L"브라우저 URL (localhost만).", L"浏览器 URL（仅本机）。", L"رابط المتصفح (localhost فقط).", L"URL браузера (только localhost).", L"Browser-URL (nur localhost).",
-			L"URL do navegador (somente localhost).", L"Browser-URL (alleen localhost).", L"URL przegladarki (tylko localhost).", L"Tarayici URL (yalniz localhost)."));
+		m_tooltip.AddTool(&m_url, LL14(L"スマホは LAN の URL、PC は 127.0.0.1 でも可。初回はファイアウォール許可が必要なことがあります。", L"Phones use the LAN URL; PC can use 127.0.0.1. Firewall may ask once.", L"Telephones: URL LAN; PC: 127.0.0.1. Pare-feu possible.", L"Telefoni: URL LAN; PC: 127.0.0.1. Firewall possibile.", L"Moviles: URL LAN; PC: 127.0.0.1. Puede pedir firewall.",
+			L"폰은 LAN URL, PC는 127.0.0.1 가능. 방화벽 허용이 필요할 수 있음.", L"手机用 LAN URL；PC 可用 127.0.0.1。可能需允许防火墙。", L"الهواتف: رابط LAN؛ الكمبيوتر: 127.0.0.1. قد يطلب الجدار الناري.", L"Телефоны: LAN URL; ПК: 127.0.0.1. Может спросить брандмауэр.", L"Telefone: LAN-URL; PC: 127.0.0.1. Firewall ggf. einmal erlauben.",
+			L"Telemoveis: URL LAN; PC: 127.0.0.1. Firewall pode pedir.", L"Telefoons: LAN-URL; pc: 127.0.0.1. Firewall kan vragen.", L"Telefony: URL LAN; PC: 127.0.0.1. Firewall moze zapytac.", L"Telefonlar: LAN URL; PC: 127.0.0.1. Guvenlik duvari isteyebilir."));
 		m_tooltip.AddTool(&m_open, LL14(L"既定ブラウザでリモコンページを開きます。", L"Open the remote page in the default browser.", L"Ouvrir la page telecommande dans le navigateur.", L"Apri la pagina remote nel browser.", L"Abrir la pagina remota en el navegador.",
 			L"기본 브라우저로 리모트 페이지를 엽니다.", L"用默认浏览器打开遥控页。", L"فتح صفحة التحكم في المتصفح الافتراضي.", L"Открыть страницу пульта в браузере.", L"Remote-Seite im Standardbrowser öffnen.",
-			L"Abrir a pagina remota no navegador padrao.", L"Remote-pagina openen in standaardbrowser.", L"Otworz strone pilota w przegladarce.", L"Uzaktan sayfasini varsayilan tarayicida ac."));
+			L"Abrir a pagina remota no navegador padrao.", L"Remote-pagina openen in standaardbrowser.", L"Otworz strone pilota w przegladarce", L"Uzaktan sayfasini varsayilan tarayicida ac."));
 		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 8000);
 		return TRUE;
 	}
@@ -4247,16 +4395,18 @@ protected:
 	afx_msg void OnOpenBrowser()
 	{
 		RefreshUrlLabel();
+		int port = savedata.mpRemotePort;
+		CString p; m_port.GetWindowText(p);
+		const int typed = _ttoi(p);
+		if (typed >= 1024 && typed <= 65535) port = typed;
+		if (port < 1024 || port > 65535) port = 8765;
 		CString url;
-		if (m_url.GetSafeHwnd()) m_url.GetWindowText(url);
-		if (url.IsEmpty()) return;
+		url.Format(L"http://127.0.0.1:%d/", port);
 		// 有効化してから開く（無効のままだと接続できない）
 		if (m_enable.GetCheck() != BST_CHECKED) {
 			m_enable.SetCheck(BST_CHECKED);
 			savedata.mpRemoteOn = 1;
 		}
-		CString p; m_port.GetWindowText(p);
-		int port = _ttoi(p);
 		if (port >= 1024 && port <= 65535) savedata.mpRemotePort = port;
 		MpPersistSavedataQuick();
 		if (mp) MpRemoteEnsureRunning(mp->GetSafeHwnd());
@@ -4460,13 +4610,13 @@ void OpenMpSsVizModeless(CWnd* parent)
 
 void MpAddonsShutdownAll()
 {
+	MpRemoteStop(); // 先に止めて終了待ちを短くする
 	MpDjScratchShutdown();
 	CloseMpDjPadIfOpen();
 	CloseMpAlarmDlgIfOpen();
 	CloseMpMirrorDlgIfOpen();
 	CloseMpRemoteDlgIfOpen();
 	CloseMpSsVizIfOpen();
-	MpRemoteStop();
 	MpMidiInShutdown();
 	MpMirrorShutdown();
 	g_bpmArmed = 0;

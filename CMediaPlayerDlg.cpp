@@ -8430,13 +8430,13 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 				L"로컬 리모트 (HTTP)", L"本地遥控 (HTTP)", L"تحكم محلي (HTTP)", L"Локальный пульт (HTTP)", L"Lokalfernbedienung (HTTP)",
 				L"Remoto local (HTTP)", L"Lokale bediening (HTTP)", L"Pilot lokalny (HTTP)", L"Yerel uzaktan (HTTP)"),
 			savedata.mpRemoteOn ? TRUE : FALSE,
-			LL14(L"localhost の簡易 HTTP で再生操作。先にポートを確認", L"Simple HTTP on localhost for transport. Confirm port first",
-				L"HTTP simple sur localhost. Verifier le port d'abord", L"HTTP su localhost. Controlla prima la porta",
-				L"HTTP en localhost. Confirme el puerto primero", L"localhost 간이 HTTP. 포트 먼저 확인",
-				L"本机简易 HTTP。先确认端口", L"HTTP بسيط على localhost. أكد المنفذ أولاً",
-				L"Простой HTTP на localhost. Сначала порт", L"Einfaches HTTP auf localhost. Zuerst Port prüfen",
-				L"HTTP simples em localhost. Confirme a porta antes", L"Eenvoudige HTTP op localhost. Eerst poort",
-				L"Prosty HTTP na localhost. Najpierw port", L"localhost HTTP. Once portu kontrol et"));
+			LL14(L"同じ Wi-Fi のスマホ／PC から操作（同時3台まで）。先にポートを確認", L"Control from phones/PCs on same Wi-Fi (max 3). Confirm port first",
+				L"Controle depuis telephones/PC sur le meme Wi-Fi (max 3). Verifier le port", L"Controllo da telefoni/PC sulla stessa Wi-Fi (max 3). Controlla porta",
+				L"Control desde moviles/PC en la misma Wi-Fi (máx. 3). Confirme puerto", L"같은 Wi-Fi의 폰/PC에서 조작(최대 3). 포트 먼저 확인",
+				L"同一 Wi-Fi 下手机/PC 控制（最多3）。先确认端口", L"تحكم من الهواتف/أجهزة الكمبيوتر على نفس Wi-Fi (حد 3). أكد المنفذ",
+				L"Управление с телефонов/ПК в той же Wi-Fi (до 3). Сначала порт", L"Steuerung von Telefonen/PCs im gleichen WLAN (max. 3). Zuerst Port",
+				L"Controlo de telemoveis/PCs na mesma Wi-Fi (máx. 3). Confirme a porta", L"Bediening vanaf telefoons/pc's op hetzelfde Wi-Fi (max 3). Eerst poort",
+				L"Sterowanie z telefonow/PC w tej samej Wi-Fi (max 3). Najpierw port", L"Ayni Wi-Fi'deki telefon/PC'den kontrol (en fazla 3). Once port"));
 	}
 	menu.AddCheck(ID_MP_MIDI_IN,
 		LL14(L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI 输入", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In"),
