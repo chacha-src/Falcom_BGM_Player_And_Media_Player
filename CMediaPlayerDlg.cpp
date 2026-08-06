@@ -6078,6 +6078,7 @@ static void MpPhraseSecSliderCb(void* ctx, int value)
 {
 	if (value < 1) value = 1;
 	if (value > 60) value = 60;
+	if (value == savedata.mpPhraseSec) return;
 	savedata.mpPhraseSec = value;
 	MpPersistSavedataQuick();
 	// ツールチップどおりドラッグ中に現在位置基準のフレーズ A-B を張り直す
@@ -6136,6 +6137,7 @@ static void MpSleepSliderCb(void* ctx, int value)
 	if (!p) return;
 	if (value < 0) value = 0;
 	if (value > 240) value = 240;
+	if (value == savedata.mpSleepMin) return;
 	p->ApplySleepTimer(value);
 }
 
@@ -6213,6 +6215,8 @@ static void MpSleepEditCb(void* ctx, LPCTSTR text)
 	int mins = _ttoi(text);
 	if (mins < 1) return;
 	if (mins > 240) mins = 240;
+	// 同じ値の再通知（初期 SetWindowText / KILLFOCUS）でタイマーを振り直さない
+	if (mins == savedata.mpSleepMin) return;
 	p->ApplySleepTimer(mins);
 }
 
@@ -6225,6 +6229,7 @@ static void MpSleepChoiceCb(void* ctx, int /*index*/, LPCTSTR text)
 	int mins = _ttoi(text);
 	if (mins < 1) return;
 	if (mins > 240) mins = 240;
+	if (mins == savedata.mpSleepMin) return;
 	p->ApplySleepTimer(mins);
 }
 
@@ -8193,8 +8198,11 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 				L"0=uit … 240 min. Timer live", L"0=wyl … 240 min. Timer na zywo", L"0=kapali … 240 dk. Suruklerken anlik"));
 		{
 			wchar_t init[16];
-			const int cur = (savedata.mpSleepMin > 0) ? savedata.mpSleepMin : 45;
-			_snwprintf_s(init, _TRUNCATE, L"%d", cur);
+			// 解除中は空欄（旧: 45 を仮表示 → SetWindowText/EN_CHANGE で 45 分スリープが武装する表記バグ）
+			if (savedata.mpSleepMin > 0)
+				_snwprintf_s(init, _TRUNCATE, L"%d", savedata.mpSleepMin);
+			else
+				init[0] = 0;
 			menu.AddEdit(
 				LL14(L"カスタム分 (1–240)", L"Custom min (1–240)", L"Min perso (1–240)", L"Min personalizzati (1–240)",
 					L"Min personalizados (1–240)", L"사용자 분 (1–240)", L"自定义分钟 (1–240)", L"دقائق مخصصة (1–240)",
@@ -8358,19 +8366,22 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 	}
 	{
 		wchar_t portInit[16];
-		_snwprintf_s(portInit, _TRUNCATE, L"%d",
-			(savedata.mpRemotePort >= 1024 && savedata.mpRemotePort <= 65535) ? savedata.mpRemotePort : 8765);
+		// 無効値は空欄（旧: 8765 仮表示 → KILLFOCUS で保存される表記寄りバグ）
+		if (savedata.mpRemotePort >= 1024 && savedata.mpRemotePort <= 65535)
+			_snwprintf_s(portInit, _TRUNCATE, L"%d", savedata.mpRemotePort);
+		else
+			portInit[0] = 0;
 		menu.AddEdit(
 			LL14(L"リモートポート", L"Remote port", L"Port remote", L"Porta remote", L"Puerto remoto",
 				L"리모트 포트", L"遥控端口", L"منفذ التحكم", L"Порт пульта", L"Remote-Port",
 				L"Porta remota", L"Remote-poort", L"Port pilota", L"Uzaktan port"),
 			portInit, MpRemotePortCb, this,
-			LL14(L"1024–65535。有効中は入力で再起動", L"1024–65535. Restarts while remote is on",
-				L"1024–65535. Redemarre si actif", L"1024–65535. Riavvia se attivo",
-				L"1024–65535. Reinicia si activo", L"1024–65535. 켜져 있으면 재시작", L"1024–65535。开启时会重启",
-				L"1024–65535. يعاد التشغيل إن كان مفعلاً", L"1024–65535. Перезапуск если включён", L"1024–65535. Neustart wenn aktiv",
-				L"1024–65535. Reinicia se ligado", L"1024–65535. Herstart als aan", L"1024–65535. Restart gdy wl",
-				L"1024–65535. Aciksa yeniden baslar"));
+			LL14(L"1024–65535。有効中は入力で再起動（空は無視）", L"1024–65535. Restarts while remote is on (empty ignored)",
+				L"1024–65535. Redemarre si actif (vide ignore)", L"1024–65535. Riavvia se attivo (vuoto ignorato)",
+				L"1024–65535. Reinicia si activo (vacio ignorado)", L"1024–65535. 켜져 있으면 재시작(빈칸 무시)", L"1024–65535。开启时会重启（空忽略）",
+				L"1024–65535. يعاد التشغيل إن كان مفعلاً (فارغ يُتجاهل)", L"1024–65535. Перезапуск если включён (пусто игнор)", L"1024–65535. Neustart wenn aktiv (leer ignoriert)",
+				L"1024–65535. Reinicia se ligado (vazio ignorado)", L"1024–65535. Herstart als aan (leeg genegeerd)", L"1024–65535. Restart gdy wl (puste ignoruj)",
+				L"1024–65535. Aciksa yeniden baslar (bos yok sayilir)"));
 		menu.AddCheck(ID_MP_REMOTE,
 			LL14(L"ローカルリモート (HTTP)", L"Local remote (HTTP)", L"Telecommande locale (HTTP)", L"Remote locale (HTTP)", L"Remoto local (HTTP)",
 				L"로컬 리모트 (HTTP)", L"本地遥控 (HTTP)", L"تحكم محلي (HTTP)", L"Локальный пульт (HTTP)", L"Lokalfernbedienung (HTTP)",
@@ -8411,6 +8422,11 @@ void CMediaPlayerDlg::ApplySleepTimer(int minutes)
 {
 	if (minutes < 0) minutes = 0;
 	if (minutes > 240) minutes = 240;
+	// 同値の再適用で残り時間をフルに振り直さない（武装中の同分数）
+	if (minutes == savedata.mpSleepMin && minutes > 0 && m_sleepEndTick != 0)
+		return;
+	if (minutes == 0 && savedata.mpSleepMin == 0 && m_sleepEndTick == 0)
+		return;
 	savedata.mpSleepMin = minutes;
 	KillTimer(9);
 	m_sleepEndTick = 0;
@@ -8625,7 +8641,7 @@ void CMediaPlayerDlg::OnSleepCustom()
 	class CSleepMinDlg : public CDialog {
 	public:
 		int m_mins;
-		CSleepMinDlg(CWnd* p) : CDialog(IDD_FILENAME, p), m_mins(45) {}
+		CSleepMinDlg(CWnd* p) : CDialog(IDD_FILENAME, p), m_mins(30) {}
 		virtual BOOL OnInitDialog() {
 			CDialog::OnInitDialog();
 			SetWindowText(LL14(L"スリープ", L"Sleep", L"Veille", L"Sleep", L"Suspensión", L"슬립", L"睡眠", L"نوم", L"Сон", L"Schlaf", L"Sono", L"Slaap", L"Sen", L"Uyku"));
@@ -8651,7 +8667,7 @@ void CMediaPlayerDlg::OnSleepCustom()
 		}
 	};
 	CSleepMinDlg dlg(this);
-	dlg.m_mins = (savedata.mpSleepMin > 0) ? savedata.mpSleepMin : 45;
+	dlg.m_mins = (savedata.mpSleepMin > 0) ? savedata.mpSleepMin : 30;
 	if (dlg.DoModal() != IDOK) return;
 	int mins = dlg.m_mins;
 	if (mins < 1) mins = 1;

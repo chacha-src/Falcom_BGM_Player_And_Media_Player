@@ -2425,6 +2425,23 @@ static void ResetKpiRemoteCache()
 	g_kpiRemoteEof = false;
 }
 
+// loop2=PCMサンプル数 → oggsize/data_size。int 乗算溢れ防止（192k/2ch/16bit で約46.6分が壁）
+static void SetPcmByteLengthFromSamples(int samples, int bits, int channels)
+{
+	extern int oggsize;
+	extern long data_size;
+	const int bps = (abs(bits) >= 8) ? (abs(bits) / 8) : 2;
+	const int ch = (channels > 0) ? channels : 2;
+	const __int64 bytesTotal = (samples > 0)
+		? ((__int64)samples * (__int64)ch * (__int64)bps) : (__int64)0;
+	if (bytesTotal > 0 && bytesTotal <= (__int64)0x7fffffff)
+		data_size = oggsize = (int)bytesTotal;
+	else if (bytesTotal > (__int64)0x7fffffff)
+		data_size = oggsize = 0x7fffffff; // UI int 用クランプ（loop2 はサンプルのまま）
+	else
+		data_size = oggsize = 0;
+}
+
 static bool SplitKpiSubsongPath(const CString& in, CString& outPath, uint32_t& outSel)
 {
 	outPath = in;
@@ -9393,8 +9410,8 @@ void COggDlg::play()
 			loop1 = 0;
 			loop2 = (int)kpi_100nsToSample(g_kpiSession.mediaInfo.qwLength, g_kpiSession.mediaInfo.dwSampleRate);
 			if (g_kpiSession.mediaInfo.qwLength == (UINT64)-1) loop2 = 0;
-			data_size = oggsize = loop2 * (wavsam_depth / 4);
-			m_time.SetRange(0, (data_size) / (wavsam_depth / 4), TRUE);
+			SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
+			m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 			uint64_t np = 0;
 			g_kpiHost.Seek(g_kpiSession.sessionId, 0, 0, np);
 			g_openDecoderMode = mode;
@@ -9591,7 +9608,9 @@ void COggDlg::play()
 						ik->Release();
 					}
 					if (pMediaInfo == NULL) return;
-					wavbit_sample_Hz = pMediaInfo->dwSampleRate;	wavchannel = pMediaInfo->dwChannels;	loop1 = 0; loop2 = kpi_100nsToSample(pMediaInfo->qwLength, pMediaInfo->dwSampleRate);;
+					wavbit_sample_Hz = pMediaInfo->dwSampleRate;	wavchannel = pMediaInfo->dwChannels;	loop1 = 0;
+					loop2 = (int)kpi_100nsToSample(pMediaInfo->qwLength, pMediaInfo->dwSampleRate);
+					if (pMediaInfo->qwLength == (UINT64)-1) loop2 = 0;
 					wavsam_src = pMediaInfo->nBitsPerSample;
 					g_kpiSourceBitsPerSample = wavsam_src;
 					// DS生成/再生系は整数PCM前提。元フォーマットは wavsam_src 側で保持する。
@@ -9600,9 +9619,10 @@ void COggDlg::play()
 				}
 			}
 
-			if (sikpi.dwLength == (DWORD)-1) loop2 = 0;
-			data_size = oggsize = loop2 * (wavsam_depth / 4);
-			m_time.SetRange(0, (data_size) / (wavsam_depth / 4), TRUE);
+			// kvver5 は pMediaInfo 由来の loop2 を残す（sikpi.dwLength は未更新の -1 のまま）
+			if (kvver != 5 && sikpi.dwLength == (DWORD)-1) loop2 = 0;
+			SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
+			m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
 			if (kvver == 2 && mod && mod->SetPosition) mod->SetPosition(kmp1, 0);
 			if (kvver == 5 && kpidec) kpidec->Seek(0, 0);
 			// Open 失敗なのに共通処理へ進むと playwavkpi が空振りし、書き出しが2〜3%で終わる

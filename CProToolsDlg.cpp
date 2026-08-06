@@ -1104,6 +1104,9 @@ static void PtVocalSliderCb(void* /*ctx*/, int value)
 
 static void PtMsWidthSliderCb(void* /*ctx*/, int value)
 {
+	// 同値クリックで mono を落とさない（幅変更時だけ mono=0）
+	if (ProClampI(value, 0, 200) == ProClampI(savedata.pro_ms_width, 0, 200))
+		return;
 	PtApplyMsPreset(value, 0);
 }
 

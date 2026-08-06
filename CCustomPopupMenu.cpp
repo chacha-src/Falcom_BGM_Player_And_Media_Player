@@ -370,7 +370,7 @@ CCustomPopupMenu::CCustomPopupMenu()
 	, m_stickyCount(0), m_stickyH(0)
 	, m_asSubmenu(FALSE), m_animTick(0)
 	, m_skipChrome(FALSE), m_chromeInjected(FALSE), m_previewing(FALSE)
-	, m_bounceIdx(-1), m_nBounce(0)
+	, m_bounceIdx(-1), m_nBounce(0), m_suppressEditNotify(FALSE)
 {
 	ZeroMemory(m_items, sizeof(m_items));
 	ZeroMemory(m_subs, sizeof(m_subs));
@@ -878,7 +878,10 @@ void CCustomPopupMenu::SyncEmbeddedChildren()
 				init = m_choiceSets[it.choiceSet].items[0];
 			if (!ed.GetSafeHwnd()) {
 				ed.Create(WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, er, this, 6100 + it.editIndex);
+				// SetWindowText は EN_CHANGE を飛ばす。初期値でスリープ等が武装しないよう抑止
+				m_suppressEditNotify = TRUE;
 				ed.SetWindowText(init);
+				m_suppressEditNotify = FALSE;
 			}
 			placeChild(ed, er, onScreen);
 		} else if (it.kind == CCUSTOM_POPUP_COMBO && it.comboIndex >= 0 && it.choiceSet >= 0) {
@@ -1706,6 +1709,7 @@ void CCustomPopupMenu::NotifyButtonFromHwnd(HWND hwnd)
 
 void CCustomPopupMenu::NotifyEditFromHwnd(HWND hwnd)
 {
+	if (m_suppressEditNotify) return;
 	for (int i = 0; i < m_itemCount; ++i) {
 		CCustomPopupItem& it = m_items[i];
 		if (it.kind != CCUSTOM_POPUP_EDIT || it.editIndex < 0) continue;

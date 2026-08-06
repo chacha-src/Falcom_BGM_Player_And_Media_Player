@@ -250,6 +250,7 @@ protected:
 	BOOL m_previewing;
 	int m_bounceIdx;   // レ点バウンス中の項目（-1=なし）
 	int m_nBounce;     // CCustomCheckBox と同じ 8→0
+	BOOL m_suppressEditNotify; // Create 時 SetWindowText の EN_CHANGE を無視
 
 	void CopyText(wchar_t* dst, int dstN, LPCTSTR src);
 	BOOL AddItemBase(int kind, UINT id, LPCTSTR text, LPCTSTR tip, BOOL enabled, BOOL checked);
