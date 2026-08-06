@@ -2139,6 +2139,7 @@ BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 void CMediaPlayerDlg::RequestAppShutdown()
 {
 	DesktopLyricsPrepareAppExit();
+	MpDjPadPrepareAppExit();
 	SavePos();
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);

@@ -36,6 +36,8 @@ int flacmode = 0;
 #include "CCommandRollDlg.h"
 #include "DecodeProgress.h"
 #include "CMediaPlayerDlg.h"
+#include "CDesktopLyricsWnd.h"
+#include "MpPlayerAddons.h"
 #include "FileTagInfo.h"
 #include "NoteFundamentalPick.h"
 #include <math.h>
@@ -18811,6 +18813,9 @@ BOOL COggDlg::DestroyWindow()
 {
 	// TODO: この位置に固有の処理を追加するか、または基本クラスを呼び出してください
 	//	ReleaseOggVorbis(&ogg);
+	// 終了経路（MPの×以外の「終了」含む）でも開状態を保存してから子を破棄する
+	DesktopLyricsPrepareAppExit();
+	MpDjPadPrepareAppExit();
 	MpPromptOnAppShutdown();
 	stop();
 	waveOutReset(hwo);
@@ -21271,7 +21276,7 @@ void timerog1(UINT nIDEvent)
 				return;
 			}
 		}
-		// 同期一括 Create はしない。1窓ずつ WM_OGG_TOGGLE_SUBUI(10..15) で復元。
+		// 同期一括 Create はしない。1窓ずつ WM_OGG_TOGGLE_SUBUI(10..16) で復元。
 		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 10, 0);
 	}
 
@@ -26095,7 +26100,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 		TogglePianoRoll();
 	else if (wParam == 2)
 		ToggleAnalyzer();
-	else if (wParam >= 10 && wParam <= 15) {
+	else if (wParam >= 10 && wParam <= 16) {
 		// 起動時サブUI復元: 開くだけ(トグルしない)。1メッセージ=最大1 Create。
 		// SW_SHOWNOACTIVATE でフォーカス奪取・ちらつきを抑える。
 		g_oggSubUiRestoring = 1;
@@ -26156,12 +26161,20 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 				MpShowCommandRollDialog(pParent, FALSE);
 			}
 		}
+		else if (wParam == 16) {
+			if (savedata.mpDjPadwindow == 1) {
+				extern CMediaPlayerDlg* mp;
+				CWnd* pParent = (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+					? (CWnd*)mp : (CWnd*)this;
+				OpenMpDjPadModeless(pParent);
+			}
+		}
 		}
 		catch (CException* e) {
 			e->Delete();
 		}
 		g_oggSubUiRestoring = 0;
-		if (wParam < 15)
+		if (wParam < 16)
 			PostMessage(WM_OGG_TOGGLE_SUBUI, wParam + 1, 0);
 		else {
 			// 復元完了: 押下見た目を一度だけ同期(復元中は抑止していた)

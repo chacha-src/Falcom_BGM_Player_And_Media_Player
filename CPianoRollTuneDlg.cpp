@@ -928,7 +928,7 @@ void CPianoRollTuneDlg::OnClose()
 void CPianoRollTuneDlg::OnDestroy()
 {
 	SaveWindowPos();
-	savedata.prTunewindow = 0;
+	// prTunewindow は落とさない（アプリ終了時も次回復元）。ユーザー閉じは OnClose/OnOk。
 	if (g_prtHelpDlg && ::IsWindow(g_prtHelpDlg->GetSafeHwnd()))
 		g_prtHelpDlg->DestroyWindow();
 	CCustomBlurDialogExBase::OnDestroy();

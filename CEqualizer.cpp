@@ -486,6 +486,7 @@ BEGIN_MESSAGE_MAP(CEqualizer, CCustomBlurDialogExBase)
 	ON_CBN_SELCHANGE(IDC_COMBO5, &CEqualizer::OnCbnSelchangeCombo5)
 	ON_WM_TIMER()
 	ON_WM_DESTROY()
+	ON_WM_CLOSE()
 	ON_WM_SIZE()
 	ON_MESSAGE(WM_EQ_KEY_UPDATE, &CEqualizer::OnEqKeyUpdate)
 	ON_BN_CLICKED(IDOK3, &CEqualizer::OnBnClickedOk3)
@@ -1179,8 +1180,15 @@ void CEqualizer::OnDestroy()
 	KillTimer(1);
 	if (g_eqHelpDlg && ::IsWindow(g_eqHelpDlg->GetSafeHwnd()))
 		g_eqHelpDlg->DestroyWindow();
-	savedata.eqwindow = 0;
+	// eqwindow は落とさない: アプリ終了時の Destroy でも次回起動復元のため残す。
+	// ユーザー閉じは OnClose / OK / トグル側で 0 にする（Piano/Analyzer と同じ）。
 	CCustomBlurDialogExBase::OnDestroy();
+}
+
+void CEqualizer::OnClose()
+{
+	savedata.eqwindow = 0;
+	DestroyWindow();
 }
 
 void CEqualizer::OnSize(UINT nType, int cx, int cy)

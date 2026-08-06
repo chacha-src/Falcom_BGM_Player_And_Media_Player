@@ -15,6 +15,9 @@ void CloseMpMirrorDlgIfOpen();
 void CloseMpRemoteDlgIfOpen();
 void CloseMpSsVizIfOpen();
 BOOL MpSsVizIsOpen();
+BOOL IsMpDjPadOpen();
+// アプリ終了前: 開いていれば mpDjPadwindow を残す（Destroy で落とさない）
+void MpDjPadPrepareAppExit();
 
 void OpenMpDjPadModeless(CWnd* parent);
 void OpenMpAlarmDlgModeless(CWnd* parent);

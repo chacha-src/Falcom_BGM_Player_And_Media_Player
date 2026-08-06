@@ -26,6 +26,7 @@ extern save savedata;
 extern COggDlg* og;
 extern CPlayList* pl;
 extern void MpPersistSavedataQuick();
+extern int g_oggSubUiRestoring;
 extern int spelv[400];
 extern int tempo;
 extern int pitch;
@@ -44,6 +45,7 @@ class CMpMirrorDlg;
 class CMpRemoteDlg;
 class CMpSsVizDlg;
 static CMpDjPadDlg* g_mpDjPad = NULL;
+static int s_djPadAppExit = 0; // 1=アプリ終了中（mpDjPadwindow を落とさない）
 static CMpAlarmDlg* g_mpAlarmDlg = NULL;
 static CMpMirrorDlg* g_mpMirrorDlg = NULL;
 static CMpRemoteDlg* g_mpRemoteDlg = NULL;
@@ -2095,7 +2097,8 @@ protected:
 	virtual void PostNcDestroy()
 	{
 		g_mpDjPad = NULL;
-		if (savedata.mpDjPadwindow) {
+		// ユーザー閉じ: 次回復元を落とす。アプリ終了時は PrepareAppExit で残す
+		if (!s_djPadAppExit && savedata.mpDjPadwindow) {
 			savedata.mpDjPadwindow = 0;
 			MpPersistSavedataQuick();
 		}
@@ -2131,12 +2134,26 @@ BEGIN_MESSAGE_MAP(CMpDjPadDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_DJPAD_MS_WIDE, &CMpDjPadDlg::OnMsWide)
 END_MESSAGE_MAP()
 
+BOOL IsMpDjPadOpen()
+{
+	return (g_mpDjPad && ::IsWindow(g_mpDjPad->GetSafeHwnd())) ? TRUE : FALSE;
+}
+
+void MpDjPadPrepareAppExit()
+{
+	if (!IsMpDjPadOpen())
+		return;
+	s_djPadAppExit = 1;
+	savedata.mpDjPadwindow = 1;
+	MpPersistSavedataQuick();
+}
+
 void CloseMpDjPadIfOpen()
 {
 	if (g_mpDjPad && ::IsWindow(g_mpDjPad->GetSafeHwnd()))
 		g_mpDjPad->DestroyWindow();
 	g_mpDjPad = NULL;
-	if (savedata.mpDjPadwindow) {
+	if (!s_djPadAppExit && savedata.mpDjPadwindow) {
 		savedata.mpDjPadwindow = 0;
 		MpPersistSavedataQuick();
 	}
@@ -2145,8 +2162,9 @@ void CloseMpDjPadIfOpen()
 void OpenMpDjPadModeless(CWnd* parent)
 {
 	if (g_mpDjPad && ::IsWindow(g_mpDjPad->GetSafeHwnd())) {
-		g_mpDjPad->ShowWindow(SW_SHOW);
-		g_mpDjPad->SetForegroundWindow();
+		g_mpDjPad->ShowWindow(g_oggSubUiRestoring ? SW_SHOWNOACTIVATE : SW_SHOW);
+		if (!g_oggSubUiRestoring)
+			g_mpDjPad->SetForegroundWindow();
 		return;
 	}
 	g_mpDjPad = new CMpDjPadDlg(parent);
@@ -2157,7 +2175,7 @@ void OpenMpDjPadModeless(CWnd* parent)
 	}
 	savedata.mpDjPadwindow = 1;
 	MpPersistSavedataQuick();
-	g_mpDjPad->ShowWindow(SW_SHOW);
+	g_mpDjPad->ShowWindow(g_oggSubUiRestoring ? SW_SHOWNOACTIVATE : SW_SHOW);
 }
 
 // ---- Alarm settings dialog ----
