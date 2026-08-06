@@ -10276,7 +10276,7 @@ void CCustomSysPerfCtrl::LayoutRects(const CRect& r, CRect& rcMem, CRect& rcOver
 
 void CCustomSysPerfCtrl::DrawSpark(CDC& dc, const CRect& rc, const BYTE* hist, int histCount, BOOL bAeroTrans)
 {
-	if (rc.Width() < 4 || rc.Height() < 4 || !hist || histCount <= 0) return;
+	if (rc.Width() < 4 || rc.Height() < 4 || !hist) return;
 	const COLORREF grid = bAeroTrans ? RGB(90, 90, 90) : RGB(210, 210, 210);
 	const COLORREF line = RGB(17, 125, 212);
 	const COLORREF fill = RGB(120, 180, 230);
@@ -10294,18 +10294,26 @@ void CCustomSysPerfCtrl::DrawSpark(CDC& dc, const CRect& rc, const BYTE* hist, i
 		dc.LineTo(x, rc.bottom);
 	}
 
+	// 常に kHistLen 幅で描く。未蓄積分は 0（左）／新しい値は右端。
+	// 旧: histCount 点を全幅に引き伸ばすため、たまるまでスクロールに見えなかった。
 	POINT pts[kHistLen + 2];
-	const int n = histCount > kHistLen ? kHistLen : histCount;
+	const int n = kHistLen;
+	const int valid = (histCount > kHistLen) ? kHistLen : ((histCount > 0) ? histCount : 0);
 	for (int i = 0; i < n; ++i) {
-		int idx = m_histPos - n + i;
-		while (idx < 0) idx += kHistLen;
-		idx %= kHistLen;
+		BYTE v = 0;
+		const int ageFromNewest = n - 1 - i; // 0=最新
+		if (ageFromNewest < valid) {
+			int idx = m_histPos - 1 - ageFromNewest;
+			while (idx < 0) idx += kHistLen;
+			idx %= kHistLen;
+			v = hist[idx];
+		}
 		const int x = rc.left + (i * (rc.Width() - 1)) / (n > 1 ? (n - 1) : 1);
-		const int y = rc.bottom - 1 - (hist[idx] * (rc.Height() - 1)) / 100;
+		const int y = rc.bottom - 1 - (v * (rc.Height() - 1)) / 100;
 		pts[i].x = x;
 		pts[i].y = y;
 	}
-	if (n >= 2) {
+	{
 		POINT poly[kHistLen + 2];
 		for (int i = 0; i < n; ++i) poly[i] = pts[i];
 		poly[n].x = pts[n - 1].x;
