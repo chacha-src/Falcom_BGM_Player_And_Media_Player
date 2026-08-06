@@ -59,6 +59,6 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mp, WPARAM wParam, LPARAM lParam
 void MpOnBpmDetect(CMediaPlayerDlg* mp);
 void MpOnVideoExtract(CMediaPlayerDlg* mp);
 void MpOnVideoReplaceAudio(CMediaPlayerDlg* mp);
-void MpOnGameCapturePreset(CMediaPlayerDlg* mp);
+void MpOnGameCapturePreset(CMediaPlayerDlg* mp, UINT presetCmd);
 BOOL MpMidiInIsActive();
 void MpOnMidiInToggle(CMediaPlayerDlg* mp);

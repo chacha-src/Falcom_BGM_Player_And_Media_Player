@@ -436,6 +436,15 @@ BOOL COggApp::InitInstance()
 	savedata.deskLrcWinY = 80;
 	savedata.deskLrcWinW = 640;
 	savedata.deskLrcWinH = 160;
+	savedata.mpDjScratchEffect = 100;
+	savedata.mpDjScratchSpeed = 100;
+	savedata.mpDjEqLow = 100;
+	savedata.mpDjEqMid = 100;
+	savedata.mpDjEqHigh = 100;
+	savedata.mpDjFilter = 100;
+	savedata.mpDjEqKill = 0;
+	savedata.mpDjPadMainLock = 0;
+	savedata.mpDjPadTopMost = 0;
 	savedata.pianorollviewmode = 0;
 	savedata.pianorollkeyrange = 108;
 	savedata.pianorollnotename = 1;
@@ -1181,6 +1190,8 @@ BOOL COggApp::InitInstance()
 		savedata.mpDetectedBpm = 0;
 	if (datFileSize < (int)(offsetof(save, mpDjPadwindow) + sizeof(savedata.mpDjPadwindow)))
 		savedata.mpDjPadwindow = 0;
+	else if (savedata.mpDjPadwindow != 0)
+		savedata.mpDjPadwindow = 1;
 	if (datFileSize < (int)(offsetof(save, mpNormTargetLufs) + sizeof(savedata.mpNormTargetLufs)))
 		savedata.mpNormTargetLufs = -14;
 	if (savedata.mpNormTargetLufs > -1) savedata.mpNormTargetLufs = -14;
@@ -1272,6 +1283,36 @@ BOOL COggApp::InitInstance()
 	if (savedata.deskLrcWinH < 80) savedata.deskLrcWinH = 160;
 	if (savedata.deskLrcWinW > 1600) savedata.deskLrcWinW = 800;
 	if (savedata.deskLrcWinH > 900) savedata.deskLrcWinH = 360;
+	if (datFileSize < (int)(offsetof(save, mpDjScratchEffect) + sizeof(savedata.mpDjScratchEffect) * 2)) {
+		savedata.mpDjScratchEffect = 100;
+		savedata.mpDjScratchSpeed = 100;
+	} else {
+		if (savedata.mpDjScratchEffect < 0) savedata.mpDjScratchEffect = 0;
+		if (savedata.mpDjScratchEffect > 200) savedata.mpDjScratchEffect = 200;
+		if (savedata.mpDjScratchSpeed < 0) savedata.mpDjScratchSpeed = 0;
+		if (savedata.mpDjScratchSpeed > 200) savedata.mpDjScratchSpeed = 200;
+	}
+	if (datFileSize < (int)(offsetof(save, mpDjEqLow) + sizeof(savedata.mpDjEqLow) * 7)) {
+		savedata.mpDjEqLow = 100;
+		savedata.mpDjEqMid = 100;
+		savedata.mpDjEqHigh = 100;
+		savedata.mpDjFilter = 100;
+		savedata.mpDjEqKill = 0;
+		savedata.mpDjPadMainLock = 0;
+		savedata.mpDjPadTopMost = 0;
+	} else {
+		if (savedata.mpDjEqLow < 0) savedata.mpDjEqLow = 0;
+		if (savedata.mpDjEqLow > 200) savedata.mpDjEqLow = 200;
+		if (savedata.mpDjEqMid < 0) savedata.mpDjEqMid = 0;
+		if (savedata.mpDjEqMid > 200) savedata.mpDjEqMid = 200;
+		if (savedata.mpDjEqHigh < 0) savedata.mpDjEqHigh = 0;
+		if (savedata.mpDjEqHigh > 200) savedata.mpDjEqHigh = 200;
+		if (savedata.mpDjFilter < 0) savedata.mpDjFilter = 0;
+		if (savedata.mpDjFilter > 200) savedata.mpDjFilter = 200;
+		savedata.mpDjEqKill &= 7;
+		if (savedata.mpDjPadMainLock != 0) savedata.mpDjPadMainLock = 1;
+		if (savedata.mpDjPadTopMost != 0) savedata.mpDjPadTopMost = 1;
+	}
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {
 		savedata.cap_fx_n = 1;

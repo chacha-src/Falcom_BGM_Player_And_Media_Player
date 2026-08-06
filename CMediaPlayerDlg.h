@@ -521,6 +521,7 @@ protected:
 	afx_msg void OnMpVideoExtract();
 	afx_msg void OnMpVideoReplace();
 	afx_msg void OnMpGamePreset();
+	afx_msg void OnMpGcpRange(UINT nID);
 	afx_msg void OnMpMidiIn();
 	afx_msg LRESULT OnMpTransportCmd(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnLrcExpand();

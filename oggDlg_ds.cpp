@@ -5708,6 +5708,79 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 		}
 	}
 
+	// DJパッド: 3バンドEQ + Kill + フィルタ（ボーカル後・メイクアップ前）
+	if (bufferIndex > 0) {
+		static Biquad s_djLow[2], s_djMid[2], s_djHigh[2], s_djFilt[2];
+		static int s_djLowV = -999, s_djMidV = -999, s_djHighV = -999, s_djFiltV = -999, s_djKillV = -999, s_djRate = -1;
+		int lowV = savedata.mpDjEqLow;
+		int midV = savedata.mpDjEqMid;
+		int highV = savedata.mpDjEqHigh;
+		int filtV = savedata.mpDjFilter;
+		int killV = savedata.mpDjEqKill & 7;
+		if (lowV < 0) lowV = 0; if (lowV > 200) lowV = 200;
+		if (midV < 0) midV = 0; if (midV > 200) midV = 200;
+		if (highV < 0) highV = 0; if (highV > 200) highV = 200;
+		if (filtV < 0) filtV = 0; if (filtV > 200) filtV = 200;
+		const int rate = wavbitbackup > 0 ? wavbitbackup : 44100;
+		if (lowV != s_djLowV || midV != s_djMidV || highV != s_djHighV || filtV != s_djFiltV || killV != s_djKillV || rate != s_djRate) {
+			s_djLowV = lowV; s_djMidV = midV; s_djHighV = highV; s_djFiltV = filtV; s_djKillV = killV; s_djRate = rate;
+			for (int ch = 0; ch < 2; ++ch) {
+				if (killV & 1)
+					CalcShelvingEQ(&s_djLow[ch], 0, 250.0f, -48.0f, rate);
+				else
+					CalcPeakingEQ(&s_djLow[ch], 100.0f, 0.707f, (float)lowV, rate);
+				if (killV & 2) {
+					CalcPeakingEQ(&s_djMid[ch], 1000.0f, 0.9f, 0.0f, rate);
+				} else
+					CalcPeakingEQ(&s_djMid[ch], 1000.0f, 0.707f, (float)midV, rate);
+				if (killV & 4)
+					CalcShelvingEQ(&s_djHigh[ch], 1, 4000.0f, -48.0f, rate);
+				else
+					CalcPeakingEQ(&s_djHigh[ch], 8000.0f, 0.707f, (float)highV, rate);
+				if (filtV < 98) {
+					const float t = (float)filtV / 100.0f;
+					float freq = 200.0f * powf(100.0f, t);
+					if (freq < 80.0f) freq = 80.0f;
+					if (freq > 18000.0f) freq = 18000.0f;
+					CalcFilter(&s_djFilt[ch], 0, freq, 0.707f, rate);
+				} else if (filtV > 102) {
+					const float t = (float)(filtV - 100) / 100.0f;
+					float freq = 30.0f * powf(300.0f, t);
+					if (freq < 30.0f) freq = 30.0f;
+					if (freq > 10000.0f) freq = 10000.0f;
+					CalcFilter(&s_djFilt[ch], 1, freq, 0.707f, rate);
+				} else {
+					s_djFilt[ch].b0 = 1.0f; s_djFilt[ch].b1 = 0.0f; s_djFilt[ch].b2 = 0.0f;
+					s_djFilt[ch].a1 = 0.0f; s_djFilt[ch].a2 = 0.0f;
+				}
+			}
+		}
+		const BOOL djActive = (lowV != 100 || midV != 100 || highV != 100 || filtV != 100 || killV != 0);
+		if (djActive) {
+			const int chN = (wavchannel >= 2) ? 2 : 1;
+			for (int i = 0; i < bufferIndex; ++i) {
+				float l = leftSamples[i];
+				l = ProcessBiquad(&s_djLow[0], l);
+				l = ProcessBiquad(&s_djMid[0], l);
+				if (killV & 2) l = ProcessBiquad(&s_djMid[0], l);
+				l = ProcessBiquad(&s_djHigh[0], l);
+				l = ProcessBiquad(&s_djFilt[0], l);
+				leftSamples[i] = l;
+				if (chN > 1) {
+					float r = rightSamples[i];
+					r = ProcessBiquad(&s_djLow[1], r);
+					r = ProcessBiquad(&s_djMid[1], r);
+					if (killV & 2) r = ProcessBiquad(&s_djMid[1], r);
+					r = ProcessBiquad(&s_djHigh[1], r);
+					r = ProcessBiquad(&s_djFilt[1], r);
+					rightSamples[i] = r;
+				} else {
+					rightSamples[i] = l;
+				}
+			}
+		}
+	}
+
 	// ===================================================
 	// 【最終段前】メイクアップゲインの適用
 	// ===================================================

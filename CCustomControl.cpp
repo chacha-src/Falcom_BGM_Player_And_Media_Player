@@ -11587,7 +11587,8 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
             // 自前 Opaque blit する GDI ビュー。fixer の PRINTCLIENT だと中身が空になる
             if (pw->GetRuntimeClass()) {
                 const char* cn = pw->GetRuntimeClass()->m_lpszClassName;
-                if (cn && (strcmp(cn, "CCommandRollView") == 0 || strcmp(cn, "CLyricsViewWnd") == 0))
+                if (cn && (strcmp(cn, "CCommandRollView") == 0 || strcmp(cn, "CLyricsViewWnd") == 0
+                    || strcmp(cn, "CCustomDjVinylCtrl") == 0))
                     return FALSE;
             }
             if (dynamic_cast<CCustomListBox*>(pw)) return TRUE;

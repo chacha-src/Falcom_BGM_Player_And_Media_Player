@@ -561,6 +561,18 @@ struct save{
 
 	// --- 歌詞ウィンドウ位置・サイズ。末尾追記（旧 mid の deskLrcX..H から移行）---
 	int deskLrcWinX, deskLrcWinY, deskLrcWinW, deskLrcWinH;
+
+	// --- DJパッド スクラッチ。末尾追記（旧.datは offsetof で初期化）---
+	int mpDjScratchEffect; // 効果 0..200（100=標準ゲイン）
+	int mpDjScratchSpeed;  // 速度 0..200（100=標準感度）
+	// --- DJパッド 本格デッキ。末尾追記 ---
+	int mpDjEqLow;       // 3バンドEQ Low 0..200（100=中立）
+	int mpDjEqMid;       // Mid
+	int mpDjEqHigh;      // High
+	int mpDjFilter;      // DJフィルタ 0..200（100=OFF、<100=LPF、>100=HPF）
+	int mpDjEqKill;      // bit0=Low kill / bit1=Mid / bit2=High
+	int mpDjPadMainLock; // 1=メインに追随
+	int mpDjPadTopMost;  // 1=最前面
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

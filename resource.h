@@ -1293,6 +1293,11 @@
 #define ID_MP_SSVIZ                     33031
 #define ID_MP_DJPAD                     33032
 #define ID_MP_GAME_PRESET               33033
+#define ID_MP_GCP_720_60                33042
+#define ID_MP_GCP_1080_60               33043
+#define ID_MP_GCP_1080_120              33044
+#define ID_MP_GCP_4K_60                 33045
+#define ID_MP_GCP_PLUS_WAV              33046
 #define ID_MP_VIDEO_EXTRACT             33034
 #define ID_MP_VIDEO_REPLACE             33038
 #define ID_MP_MIDI_IN                   33035
@@ -1311,6 +1316,7 @@
 #define IDC_DJPAD_VOCAL                 3853
 #define IDC_DJPAD_MS_NARROW             3854
 #define IDC_DJPAD_MS_WIDE               3855
+#define IDC_DJPAD_VINYL                 3856
 #define IDC_ALARM_HOUR                  3856
 #define IDC_ALARM_MIN                   3857
 #define IDC_ALARM_ENABLE                3858
@@ -1319,6 +1325,13 @@
 #define IDC_MIRROR_DEV                  3861
 #define IDC_REMOTE_ENABLE               3862
 #define IDC_REMOTE_PORT                 3863
+#define IDC_REMOTE_URL                  3967
+#define IDC_REMOTE_OPEN                 3968
+#define IDC_DJPAD_TIP                   3864
+#define IDC_DJPAD_FX_L                  3865
+#define IDC_DJPAD_FX                    3866
+#define IDC_DJPAD_SPD_L                 3867
+#define IDC_DJPAD_SPD                   3868
 #define IDC_ALARM_HOUR_L                3910
 #define IDC_ALARM_MIN_L                 3911
 #define IDC_MIRROR_VOL_L                3912
@@ -1328,6 +1341,54 @@
 #define IDC_MMP_LIST                    3916
 #define IDC_MMP_APPLY                   3917
 #define IDC_MMP_CANCEL                  3918
+#define IDC_DJPAD_SEEK                  3919
+#define IDC_DJPAD_BPM                   3920
+#define IDC_DJPAD_STATUS                3921
+#define IDC_DJPAD_PLAY                  3922
+#define IDC_DJPAD_PAUSE                 3923
+#define IDC_DJPAD_STOP                  3924
+#define IDC_DJPAD_CUE                   3925
+#define IDC_DJPAD_PREV                  3926
+#define IDC_DJPAD_NEXT                  3927
+#define IDC_DJPAD_CUE1                  3928
+#define IDC_DJPAD_CUE2                  3929
+#define IDC_DJPAD_CUE3                  3930
+#define IDC_DJPAD_CUE4                  3931
+#define IDC_DJPAD_CUE5                  3932
+#define IDC_DJPAD_CUE6                  3933
+#define IDC_DJPAD_CUE7                  3934
+#define IDC_DJPAD_CUE8                  3935
+#define IDC_DJPAD_CUESET                3936
+#define IDC_DJPAD_CUECLR                3937
+#define IDC_DJPAD_ABA                   3938
+#define IDC_DJPAD_ABB                   3939
+#define IDC_DJPAD_ABCLR                 3940
+#define IDC_DJPAD_LOOP1                 3941
+#define IDC_DJPAD_LOOP2                 3942
+#define IDC_DJPAD_LOOP4                 3943
+#define IDC_DJPAD_LOOP8                 3944
+#define IDC_DJPAD_PITCH_RST             3945
+#define IDC_DJPAD_TEMPO_RST             3946
+#define IDC_DJPAD_VOCAL_DN              3947
+#define IDC_DJPAD_VOCAL_RST             3948
+#define IDC_DJPAD_MS_RST                3949
+#define IDC_DJPAD_EQ_LOW                3950
+#define IDC_DJPAD_EQ_MID                3951
+#define IDC_DJPAD_EQ_HIGH               3952
+#define IDC_DJPAD_EQ_LOW_L              3953
+#define IDC_DJPAD_EQ_MID_L              3954
+#define IDC_DJPAD_EQ_HIGH_L             3955
+#define IDC_DJPAD_KILL_L                3956
+#define IDC_DJPAD_KILL_M                3957
+#define IDC_DJPAD_KILL_H                3958
+#define IDC_DJPAD_FILTER                3959
+#define IDC_DJPAD_FILTER_L              3960
+#define IDC_DJPAD_VOL                   3961
+#define IDC_DJPAD_VOL_L                 3962
+#define IDC_DJPAD_METER                 3963
+#define IDC_DJPAD_BPM_DET               3964
+#define IDC_DJPAD_BEAT_BK               3965
+#define IDC_DJPAD_BEAT_FW               3966
 
 // Next default values for new objects
 // 
@@ -1335,7 +1396,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        250
 #define _APS_NEXT_COMMAND_VALUE         33124
-#define _APS_NEXT_CONTROL_VALUE         3916
+#define _APS_NEXT_CONTROL_VALUE         3969
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

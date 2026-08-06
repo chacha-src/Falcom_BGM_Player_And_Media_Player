@@ -8,6 +8,7 @@
 #include "DeviceRecordDlg.h"
 #include "ScreenCaptureDlg.h"
 #include "CCustomPopupMenu.h"
+#include "CProToolsDlg.h"
 #include "PlayList.h"
 #include "AudioUpscaler.h"
 #include "SongParams.h"
@@ -19,8 +20,14 @@
 #include <mmsystem.h>
 #include <propsys.h>
 #include <functiondiscoverykeys_devpkey.h>
+#include <math.h>
+#include <windowsx.h>
+#include <uxtheme.h>
 
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "msimg32.lib")
+#pragma comment(lib, "uxtheme.lib")
+#pragma comment(lib, "winmm.lib")
 
 extern save savedata;
 extern COggDlg* og;
@@ -32,12 +39,16 @@ extern int tempo;
 extern int pitch;
 extern int ps;
 extern int plf;
+extern int mode;
 extern CMediaPlayerDlg* mp;
+extern CProToolsDlg* g_proToolsDlg;
 extern int wavbit_sample_Hz;
 extern int g_ds_pcm_rate;
 extern int g_ds_pcm_ch;
 extern int g_ds_pcm_bits;
 extern int g_outBytesPerFrame;
+extern CString fnn, tagname, tagfile, tagalbum;
+extern CString stitle;
 
 class CMpDjPadDlg;
 class CMpAlarmDlg;
@@ -228,10 +239,14 @@ BOOL MpBpmIsMeasuring()
 
 static int MpBpmEstimateAutocorr();
 static void MpBpmFinishAndShow(BOOL showFailIfNone);
+static void MpDjScratchCapturePcm(const float* L, const float* R, int frames, int sampleRate);
+static void MpDjSeekToSliderPos(int pos);
 
 // 再生PCM経路（LoudnessFeed）。~500Hz 間引き＋ABS封筒
 void MpBpmNotifyPcm(const float* L, const float* R, int frames, int sampleRate)
 {
+	if (L && R && frames > 0 && sampleRate >= 8000)
+		MpDjScratchCapturePcm(L, R, frames, sampleRate);
 	if (!g_bpmArmed || g_bpmResultShown) return;
 	if (!L || !R || frames <= 0 || sampleRate < 8000) return;
 
@@ -1022,11 +1037,34 @@ static volatile LONG g_mpRemoteStop = 0;
 static int g_mpRemoteBoundPort = 0; // EnsureRunning が実際に bind したポート
 static HWND g_mpRemoteHwnd = NULL;
 static int g_mpRemoteWsa = 0;
+static int g_mpRemoteMuteRestore = -1; // >=0: ミュート中（復元音量）
+
+static volatile LONG g_mpRemoteVolCache = 50;
+
+static void MpRemoteCacheVol(int v)
+{
+	if (v < 0) v = 0;
+	if (v > 100) v = 100;
+	InterlockedExchange(&g_mpRemoteVolCache, (LONG)v);
+}
 
 static void MpRemoteSendCmd(int cmd)
 {
+	// accept スレッドから UI へは PostMessage のみ。
+	// SendMessage だと MpRemoteStop のスレッド待機と相互待ちで終了が数秒固まる。
 	if (g_mpRemoteHwnd && ::IsWindow(g_mpRemoteHwnd))
 		::PostMessage(g_mpRemoteHwnd, WM_MP_TRANSPORT_CMD, (WPARAM)cmd, 0);
+}
+
+static void MpRemoteSendVolAbs(int v)
+{
+	if (v < 0) v = 0;
+	if (v > 100) v = 100;
+	if (v > 0)
+		g_mpRemoteMuteRestore = -1;
+	MpRemoteCacheVol(v);
+	if (g_mpRemoteHwnd && ::IsWindow(g_mpRemoteHwnd))
+		::PostMessage(g_mpRemoteHwnd, WM_MP_TRANSPORT_CMD, (WPARAM)10, (LPARAM)v);
 }
 
 static BOOL MpRemoteHasQueryParam(const char* qs, const char* key)
@@ -1042,6 +1080,78 @@ static BOOL MpRemoteHasQueryParam(const char* qs, const char* key)
 	return FALSE;
 }
 
+static void MpRemoteEscHtml(const wchar_t* in, CStringW& out)
+{
+	out.Empty();
+	if (!in) { out = L""; return; }
+	for (const wchar_t* p = in; *p; ++p) {
+		if (*p == L'&') out += L"&amp;";
+		else if (*p == L'<') out += L"&lt;";
+		else if (*p == L'>') out += L"&gt;";
+		else if (*p == L'"') out += L"&quot;";
+		else if (*p == L'\'') out += L"&#39;";
+		else out += *p;
+	}
+}
+
+static void MpRemoteEscJson(const wchar_t* in, CStringW& out)
+{
+	out.Empty();
+	if (!in) { out = L""; return; }
+	for (const wchar_t* p = in; *p; ++p) {
+		if (*p == L'\\' || *p == L'"') { out += L'\\'; out += *p; }
+		else if (*p == L'\n') out += L"\\n";
+		else if (*p == L'\r') out += L"\\r";
+		else if (*p == L'\t') out += L"\\t";
+		else if (*p < 0x20) { wchar_t b[8]; _snwprintf_s(b, _TRUNCATE, L"\\u%04x", (unsigned)*p); out += b; }
+		else out += *p;
+	}
+}
+
+static void MpRemoteSendAll(SOCKET s, const char* data, int len)
+{
+	if (!data || len <= 0) return;
+	int off = 0;
+	while (off < len) {
+		const int n = send(s, data + off, len - off, 0);
+		if (n <= 0) break;
+		off += n;
+	}
+}
+
+static void MpRemoteReadMeta(CStringW& title, CStringW& artist, CStringW& album, int& vol, const wchar_t*& state, int& muted)
+{
+	title.Empty(); artist.Empty(); album.Empty();
+	muted = 0;
+	state = L"stop";
+
+	// accept スレッドから呼ぶ。CWnd::GetPos/GetWindowText は SendMessage 相当なので使わない。
+	title = fnn;
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		// CurrentTrackTitle はグローバル参照のみ（HWND メッセージ無し）
+		CString t = mp->CurrentTrackTitle();
+		if (!t.IsEmpty()) title = t;
+	}
+	artist = tagname;
+	album = tagalbum;
+	if (pl && pl->pc && pl->pnt >= 0 && pl->pnt < pl->playcnt) {
+		const playlistdata0& row = pl->pc[pl->pnt];
+		if (title.IsEmpty() && row.name[0]) title = row.name;
+		if (artist.IsEmpty() && row.art[0]) artist = row.art;
+		if (album.IsEmpty() && row.alb[0]) album = row.alb;
+	}
+	vol = (int)InterlockedCompareExchange(&g_mpRemoteVolCache, 0, 0);
+	if (vol < 0) vol = 0;
+	if (vol > 100) vol = 100;
+	if (g_mpRemoteMuteRestore >= 0) {
+		muted = 1;
+		vol = 0;
+	}
+	if (plf == 1 && ps == 1) state = L"pause";
+	else if (plf == 1) state = L"play";
+	else state = L"stop";
+}
+
 static void MpRemoteHandleRequest(SOCKET s)
 {
 	char buf[2048];
@@ -1052,22 +1162,240 @@ static void MpRemoteHandleRequest(SOCKET s)
 	char* nl = strchr(line, '\n');
 	if (nl) *nl = 0;
 
+	if (strstr(line, "GET /cmd")) {
+		const char* q = strchr(line, '?');
+		if (MpRemoteHasQueryParam(q, "c=play")) MpRemoteSendCmd(0);
+		else if (MpRemoteHasQueryParam(q, "c=pause")) MpRemoteSendCmd(1);
+		else if (MpRemoteHasQueryParam(q, "c=next")) MpRemoteSendCmd(2);
+		else if (MpRemoteHasQueryParam(q, "c=volup")) MpRemoteSendCmd(3);
+		else if (MpRemoteHasQueryParam(q, "c=voldn")) MpRemoteSendCmd(4);
+		else if (MpRemoteHasQueryParam(q, "c=prev")) MpRemoteSendCmd(5);
+		else if (MpRemoteHasQueryParam(q, "c=stop")) MpRemoteSendCmd(6);
+		else if (MpRemoteHasQueryParam(q, "c=seekbk")) MpRemoteSendCmd(7);
+		else if (MpRemoteHasQueryParam(q, "c=seekfw")) MpRemoteSendCmd(8);
+		else if (MpRemoteHasQueryParam(q, "c=mute")) MpRemoteSendCmd(9);
+		else if (MpRemoteHasQueryParam(q, "c=vol") && q) {
+			int v = 50;
+			const char* pv = strstr(q, "v=");
+			if (pv) v = atoi(pv + 2);
+			MpRemoteSendVolAbs(v);
+		}
+		const char* ok = "HTTP/1.0 204 No Content\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n";
+		MpRemoteSendAll(s, ok, (int)strlen(ok));
+		return;
+	}
+
+	CStringW title, artist, album;
+	int vol = 50;
+	int muted = 0;
+	const wchar_t* state = L"stop";
+	MpRemoteReadMeta(title, artist, album, vol, state, muted);
+
+	if (strstr(line, "GET /api/status")) {
+		CStringW jt, ja, jb;
+		MpRemoteEscJson(title, jt);
+		MpRemoteEscJson(artist, ja);
+		MpRemoteEscJson(album, jb);
+		CStringW json;
+		json.Format(L"{\"title\":\"%s\",\"artist\":\"%s\",\"album\":\"%s\",\"vol\":%d,\"state\":\"%s\",\"muted\":%d}",
+			(LPCWSTR)jt, (LPCWSTR)ja, (LPCWSTR)jb, vol, state, muted);
+		CStringA utf8;
+		{
+			const int nbytes = ::WideCharToMultiByte(CP_UTF8, 0, json, -1, NULL, 0, NULL, NULL);
+			if (nbytes > 1) {
+				char* pb = utf8.GetBufferSetLength(nbytes - 1);
+				::WideCharToMultiByte(CP_UTF8, 0, json, -1, pb, nbytes, NULL, NULL);
+				utf8.ReleaseBuffer(nbytes - 1);
+			}
+		}
+		CStringA hdr;
+		hdr.Format("HTTP/1.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nConnection: close\r\nCache-Control: no-store\r\nContent-Length: %d\r\n\r\n",
+			utf8.GetLength());
+		MpRemoteSendAll(s, hdr, hdr.GetLength());
+		MpRemoteSendAll(s, utf8, utf8.GetLength());
+		return;
+	}
+
+	CStringW ht, ha, hb;
+	MpRemoteEscHtml(title.IsEmpty() ? L"—" : (LPCWSTR)title, ht);
+	MpRemoteEscHtml(artist.IsEmpty() ? L"" : (LPCWSTR)artist, ha);
+	MpRemoteEscHtml(album.IsEmpty() ? L"" : (LPCWSTR)album, hb);
+
+	const wchar_t* brand = LL14(L"ローカルリモート", L"MP Remote", L"Telecommande", L"Remote MP", L"Remoto MP",
+		L"로컬 리모트", L"本地遥控", L"تحكم محلي", L"Локальный пульт", L"Lokalfernbedienung",
+		L"Remoto local", L"Lokale bediening", L"Pilot lokalny", L"Yerel uzaktan");
+	const wchar_t* labPlay = LL14(L"再生", L"Play", L"Lecture", L"Play", L"Play", L"재생", L"播放", L"تشغيل", L"Играть", L"Play", L"Play", L"Play", L"Odtwarzaj", L"Oynat");
+	const wchar_t* labPause = LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat");
+	const wchar_t* labStop = LL14(L"停止", L"Stop", L"Stop", L"Stop", L"Stop", L"정지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stop", L"Stop", L"Durdur");
+	const wchar_t* labPrev = LL14(L"前へ", L"Prev", L"Prec.", L"Prec.", L"Ant.", L"이전", L"上一首", L"السابق", L"Пред.", L"Zurück", L"Ant.", L"Vorige", L"Poprzedni", L"Onceki");
+	const wchar_t* labNext = LL14(L"次へ", L"Next", L"Suivant", L"Successivo", L"Siguiente", L"다음", L"下一首", L"التالي", L"След.", L"Weiter", L"Proximo", L"Volgende", L"Nastepny", L"Sonraki");
+	const wchar_t* labSeekBk = LL14(L"戻る 5%", L"Back 5%", L"-5%", L"-5%", L"-5%", L"뒤로 5%", L"后退 5%", L"-5%", L"-5%", L"-5%", L"-5%", L"-5%", L"-5%", L"-5%");
+	const wchar_t* labSeekFw = LL14(L"進む 5%", L"Fwd 5%", L"+5%", L"+5%", L"+5%", L"앞으로 5%", L"前进 5%", L"+5%", L"+5%", L"+5%", L"+5%", L"+5%", L"+5%", L"+5%");
+	const wchar_t* labVol = LL14(L"音量", L"Volume", L"Volume", L"Volume", L"Volumen", L"볼륨", L"音量", L"الصوت", L"Громкость", L"Lautstärke", L"Volume", L"Volume", L"Glosnosc", L"Ses");
+	const wchar_t* labMute = LL14(L"ミュート", L"Mute", L"Muet", L"Mute", L"Silencio", L"음소거", L"静音", L"كتم", L"Мьют", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz");
+	const wchar_t* labNow = LL14(L"再生中", L"Now playing", L"En lecture", L"In riproduzione", L"Reproduciendo", L"재생 중", L"正在播放", L"قيد التشغيل", L"Сейчас играет", L"Wird gespielt", L"Tocando", L"Nu spelen", L"Odtwarzanie", L"Caliniyor");
+
 	CStringW page;
-	page.Format(L"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n"
-		L"<html><body><h3>%s</h3><p>"
-		L"<a href=\"/cmd?c=play\">%s</a> | "
-		L"<a href=\"/cmd?c=pause\">%s</a> | "
-		L"<a href=\"/cmd?c=next\">%s</a> | "
-		L"<a href=\"/cmd?c=volup\">%s</a> | "
-		L"<a href=\"/cmd?c=voldn\">%s</a></p></body></html>",
-		(LPCWSTR)LL14(L"ローカルリモート", L"MP Remote", L"Telecommande", L"Remote MP", L"Remoto MP",
-			L"로컬 리모트", L"本地遥控", L"تحكم محلي", L"Локальный пульт", L"Lokalfernbedienung",
-			L"Remoto local", L"Lokale bediening", L"Pilot lokalny", L"Yerel uzaktan"),
-		(LPCWSTR)LL14(L"再生", L"Play", L"Lecture", L"Play", L"Play", L"재생", L"播放", L"تشغيل", L"Играть", L"Play", L"Play", L"Play", L"Odtwarzaj", L"Oynat"),
-		(LPCWSTR)LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف", L"Пауза", L"Pause", L"Pausar", L"Pauze", L"Pauza", L"Duraklat"),
-		(LPCWSTR)LL14(L"次へ", L"Next", L"Suivant", L"Successivo", L"Siguiente", L"다음", L"下一首", L"التالي", L"След.", L"Weiter", L"Proximo", L"Volgende", L"Nastepny", L"Sonraki"),
-		(LPCWSTR)LL14(L"音量+", L"Vol+", L"Vol+", L"Vol+", L"Vol+", L"볼륨+", L"音量+", L"صوت+", L"Громк.+", L"Laut+", L"Vol+", L"Vol+", L"Glosn.+", L"Ses+"),
-		(LPCWSTR)LL14(L"音量-", L"Vol-", L"Vol-", L"Vol-", L"Vol-", L"볼륨-", L"音量-", L"صوت-", L"Громк.-", L"Laut-", L"Vol-", L"Vol-", L"Glosn.-", L"Ses-"));
+	page = L"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n";
+	page += L"<!DOCTYPE html><html lang=\"ja\"><head><meta charset=\"utf-8\">"
+		L"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">"
+		L"<meta name=\"apple-mobile-web-app-capable\" content=\"yes\">"
+		L"<meta name=\"theme-color\" content=\"#ff9ec8\">"
+		L"<title>";
+	page += brand;
+	page += L"</title>"
+		L"<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css\">"
+		L"<style>"
+		L":root{--bg1:#fff5fb;--bg2:#eef3ff;--card:#fffffff2;--ink:#3a2a3a;--muted:#8a6a80;"
+		L"--pink:#ff69b4;--pink2:#c45ad0;--play1:#c8f0c8;--play2:#8cd296;--pause1:#fff0c8;--pause2:#ffd28c;"
+		L"--stop1:#ffd7dc;--stop2:#ffaab9;--nav1:#d7ebff;--nav2:#a5cdf5;--shadow:0 12px 40px #ff69b433}"
+		L"*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}"
+		L"html,body{margin:0;min-height:100%;font-family:\"Segoe UI\",\"Yu Gothic UI\",\"Meiryo\",sans-serif;color:var(--ink);"
+		L"background:radial-gradient(1200px 600px at 10% -10%,#ffd6ec 0%,transparent 55%),"
+		L"radial-gradient(900px 500px at 100% 0%,#d6e6ff 0%,transparent 50%),"
+		L"linear-gradient(160deg,var(--bg1),var(--bg2));}"
+		L"body{padding:18px 16px 28px}"
+		L".shell{max-width:440px;margin:0 auto}"
+		L".brand{display:flex;align-items:center;gap:10px;margin-bottom:14px}"
+		L".brand i{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;"
+		L"background:linear-gradient(135deg,var(--pink),var(--pink2));color:#fff;box-shadow:var(--shadow);font-size:18px}"
+		L".brand h1{margin:0;font-size:1.15rem;background:linear-gradient(90deg,var(--pink),var(--pink2));"
+		L"-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:800}"
+		L".card{background:var(--card);backdrop-filter:blur(14px);border:1px solid #ffffffaa;border-radius:22px;"
+		L"padding:18px 16px;box-shadow:var(--shadow);margin-bottom:14px}"
+		L".now-label{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}"
+		L"#title{margin:0;font-size:1.25rem;font-weight:750;line-height:1.35;word-break:break-word;"
+		L"background:linear-gradient(90deg,#ff69b4,#963ca0);-webkit-background-clip:text;background-clip:text;color:transparent}"
+		L"#artist,#album{margin:6px 0 0;color:var(--muted);font-size:.95rem;word-break:break-word}"
+		L"#album{font-size:.85rem;opacity:.9}"
+		L".state{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:4px 10px;border-radius:999px;"
+		L"background:#ffe6f3;color:#b03070;font-size:.75rem;font-weight:700}"
+		L".state.play{background:#e4ffe8;color:#2d7a3e}.state.pause{background:#fff3d6;color:#9a6a10}"
+		L".pad{display:grid;grid-template-columns:1fr 1.15fr 1fr;gap:10px;margin-top:4px}"
+		L".btn{appearance:none;border:0;cursor:pointer;user-select:none;border-radius:18px;min-height:64px;"
+		L"padding:12px 8px;font-weight:750;font-size:.92rem;color:#2a2030;display:flex;flex-direction:column;"
+		L"align-items:center;justify-content:center;gap:6px;box-shadow:0 6px 16px #00000014;"
+		L"transition:transform .12s ease,filter .12s ease,box-shadow .12s ease}"
+		L".btn i{font-size:1.25rem}.btn:active{transform:scale(.96);filter:brightness(.97)}"
+		L".btn.busy{opacity:.65;pointer-events:none}"
+		L".b-prev,.b-next{background:linear-gradient(180deg,var(--nav1),var(--nav2))}"
+		L".b-play{background:linear-gradient(180deg,var(--play1),var(--play2));min-height:76px;font-size:1rem}"
+		L".b-pause{background:linear-gradient(180deg,var(--pause1),var(--pause2))}"
+		L".b-stop{background:linear-gradient(180deg,var(--stop1),var(--stop2))}"
+		L".row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}"
+		L".b-seek{background:linear-gradient(180deg,#efe7ff,#d5c8f8);min-height:54px}"
+		L".b-mute{background:linear-gradient(180deg,#ffe8f1,#ffc1d8);min-height:48px;width:100%;margin-top:10px}"
+		L".b-mute.on{background:linear-gradient(180deg,#ff9eb8,#ff5a8a);color:#fff;box-shadow:0 0 0 2px #ff69b466}"
+		L".vol-wrap{margin-top:8px}.vol-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}"
+		L".vol-top span{font-weight:700;font-size:.9rem}#volVal{color:var(--pink);font-variant-numeric:tabular-nums}"
+		L"#vol{width:100%;accent-color:var(--pink);height:28px}"
+		L".toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;"
+		L"background:#3a2a3add;color:#fff;padding:10px 16px;border-radius:999px;font-size:.85rem;pointer-events:none;"
+		L"transition:opacity .2s,transform .2s;z-index:9}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}"
+		L".hint{text-align:center;color:var(--muted);font-size:.75rem;margin-top:12px}"
+		L"</style></head><body><div class=\"shell\">"
+		L"<div class=\"brand\"><i class=\"fa-solid fa-wifi\"></i><h1>";
+	page += brand;
+	page += L"</h1></div>"
+		L"<section class=\"card now\">"
+		L"<p class=\"now-label\">";
+	page += labNow;
+	page += L"</p>"
+		L"<h2 id=\"title\">";
+	page += ht;
+	page += L"</h2>"
+		L"<p id=\"artist\">";
+	page += ha;
+	page += L"</p>"
+		L"<p id=\"album\">";
+	page += hb;
+	page += L"</p>"
+		L"<div id=\"state\" class=\"state\">—</div>"
+		L"</section>"
+		L"<section class=\"card\">"
+		L"<div class=\"pad\">"
+		L"<button type=\"button\" class=\"btn b-prev\" data-cmd=\"prev\"><i class=\"fa-solid fa-backward-step\"></i><span>";
+	page += labPrev;
+	page += L"</span></button>"
+		L"<button type=\"button\" class=\"btn b-play\" data-cmd=\"play\"><i class=\"fa-solid fa-play\"></i><span>";
+	page += labPlay;
+	page += L"</span></button>"
+		L"<button type=\"button\" class=\"btn b-next\" data-cmd=\"next\"><i class=\"fa-solid fa-forward-step\"></i><span>";
+	page += labNext;
+	page += L"</span></button>"
+		L"</div>"
+		L"<div class=\"row2\">"
+		L"<button type=\"button\" class=\"btn b-pause\" data-cmd=\"pause\"><i class=\"fa-solid fa-pause\"></i><span>";
+	page += labPause;
+	page += L"</span></button>"
+		L"<button type=\"button\" class=\"btn b-stop\" data-cmd=\"stop\"><i class=\"fa-solid fa-stop\"></i><span>";
+	page += labStop;
+	page += L"</span></button>"
+		L"</div>"
+		L"<div class=\"row2\">"
+		L"<button type=\"button\" class=\"btn b-seek\" data-cmd=\"seekbk\"><i class=\"fa-solid fa-rotate-left\"></i><span>";
+	page += labSeekBk;
+	page += L"</span></button>"
+		L"<button type=\"button\" class=\"btn b-seek\" data-cmd=\"seekfw\"><i class=\"fa-solid fa-rotate-right\"></i><span>";
+	page += labSeekFw;
+	page += L"</span></button>"
+		L"</div>"
+		L"<button type=\"button\" class=\"btn b-mute\" data-cmd=\"mute\"><i class=\"fa-solid fa-volume-xmark\"></i><span>";
+	page += labMute;
+	page += L"</span></button>"
+		L"</section>"
+		L"<section class=\"card\">"
+		L"<div class=\"vol-wrap\"><div class=\"vol-top\"><span>";
+	page += labVol;
+	page += L"</span><span id=\"volVal\">";
+	{
+		wchar_t vb[16];
+		_snwprintf_s(vb, _TRUNCATE, L"%d", vol);
+		page += vb;
+	}
+	page += L"</span></div>"
+		L"<input id=\"vol\" type=\"range\" min=\"0\" max=\"100\" value=\"";
+	{
+		wchar_t vb[16];
+		_snwprintf_s(vb, _TRUNCATE, L"%d", vol);
+		page += vb;
+	}
+	page += L"\"></div>"
+		L"</section>"
+		L"<p class=\"hint\">Wi-Fi / LAN · localhost remote</p>"
+		L"</div><div id=\"toast\" class=\"toast\"></div>"
+		L"<script src=\"https://code.jquery.com/jquery-3.7.1.min.js\"></script>"
+		L"<script>"
+		L"function toast(m){var $t=$('#toast');$t.text(m).addClass('show');clearTimeout(window._tt);"
+		L"window._tt=setTimeout(function(){$t.removeClass('show')},900)}"
+		L"function setState(s){var $s=$('#state');$s.removeClass('play pause stop');"
+		L"if(s==='play'){$s.addClass('play').html('<i class=\"fa-solid fa-play\"></i> PLAY')}"
+		L"else if(s==='pause'){$s.addClass('pause').html('<i class=\"fa-solid fa-pause\"></i> PAUSE')}"
+		L"else{$s.addClass('stop').html('<i class=\"fa-solid fa-stop\"></i> STOP')}}"
+		L"function applyStatus(d){if(!d)return;"
+		L"$('#title').text(d.title&&d.title.length?d.title:'—');"
+		L"$('#artist').text(d.artist||'').toggle(!!(d.artist&&d.artist.length));"
+		L"$('#album').text(d.album||'').toggle(!!(d.album&&d.album.length));"
+		L"if(typeof d.vol==='number'){$('#vol').val(d.vol);$('#volVal').text(d.vol)}"
+		L"$('.b-mute').toggleClass('on',!!d.muted);"
+		L"setState(d.state||'stop')}"
+		L"function refresh(){$.getJSON('/api/status').done(applyStatus).fail(function(){})}"
+		L"function sendCmd(c,extra){var q='/cmd?c='+encodeURIComponent(c)+(extra||'');"
+		L"return $.ajax({url:q,method:'GET',timeout:2500})}"
+		L"$(function(){setState('";
+	page += state;
+	page += L"');"
+		L"$('#artist').toggle(!!$('#artist').text());$('#album').toggle(!!$('#album').text());"
+		L"$(document).on('click','.btn[data-cmd]',function(){var $b=$(this),c=$b.data('cmd');"
+		L"$b.addClass('busy');sendCmd(c).always(function(){$b.removeClass('busy');"
+		L"setTimeout(refresh,80);toast(c)})});"
+		L"var volTimer=null;$('#vol').on('input',function(){$('#volVal').text(this.value)});"
+		L"$('#vol').on('change input',function(){var v=+this.value;clearTimeout(volTimer);"
+		L"volTimer=setTimeout(function(){sendCmd('vol','&v='+v).always(refresh)},120)});"
+		L"setInterval(refresh,2000);refresh();"
+		L"});"
+		L"</script></body></html>";
+
 	CStringA bodyA;
 	{
 		const int nbytes = ::WideCharToMultiByte(CP_UTF8, 0, page, -1, NULL, 0, NULL, NULL);
@@ -1077,20 +1405,7 @@ static void MpRemoteHandleRequest(SOCKET s)
 			bodyA.ReleaseBuffer(nbytes - 1);
 		}
 	}
-	const char* body = (LPCSTR)bodyA;
-
-	if (strstr(line, "GET /cmd")) {
-		const char* q = strchr(line, '?');
-		if (MpRemoteHasQueryParam(q, "c=play")) MpRemoteSendCmd(0);
-		else if (MpRemoteHasQueryParam(q, "c=pause")) MpRemoteSendCmd(1);
-		else if (MpRemoteHasQueryParam(q, "c=next")) MpRemoteSendCmd(2);
-		else if (MpRemoteHasQueryParam(q, "c=volup")) MpRemoteSendCmd(3);
-		else if (MpRemoteHasQueryParam(q, "c=voldn")) MpRemoteSendCmd(4);
-		const char* ok = "HTTP/1.0 204 No Content\r\nConnection: close\r\n\r\n";
-		send(s, ok, (int)strlen(ok), 0);
-		return;
-	}
-	send(s, body, (int)strlen(body), 0);
+	MpRemoteSendAll(s, bodyA, bodyA.GetLength());
 }
 
 static UINT MpRemoteThreadProc(LPVOID)
@@ -1117,7 +1432,21 @@ void MpRemoteStop()
 		g_mpRemoteListen = INVALID_SOCKET;
 	}
 	if (g_mpRemoteThread) {
-		WaitForSingleObject(g_mpRemoteThread, 3000);
+		// 旧実装は WaitForSingleObject のみ → accept 側が UI へ SendMessage 中だと
+		// UI がここで待つ／スレッドが UI を待つ、で終了が最大 3 秒固まる。
+		const DWORD t0 = GetTickCount();
+		for (;;) {
+			const DWORD w = WaitForSingleObject(g_mpRemoteThread, 50);
+			if (w == WAIT_OBJECT_0)
+				break;
+			MSG msg;
+			while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+				TranslateMessage(&msg);
+				DispatchMessage(&msg);
+			}
+			if (GetTickCount() - t0 >= 3000)
+				break;
+		}
 		CloseHandle(g_mpRemoteThread);
 		g_mpRemoteThread = NULL;
 	}
@@ -1171,6 +1500,15 @@ void MpRemoteEnsureRunning(HWND notifyHwnd)
 		return;
 	}
 	g_mpRemoteBoundPort = port;
+	// UI スレッドで音量キャッシュを初期化（accept 側は GetPos しない）
+	{
+		int v = 50;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_vol.GetSafeHwnd())
+			v = mp->m_vol.GetPos();
+		else if (og && og->m_sl.GetSafeHwnd())
+			v = og->m_sl.GetPos() / 1000;
+		MpRemoteCacheVol(v);
+	}
 }
 
 // ---- MIDI In ----
@@ -1258,6 +1596,8 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lPa
 			v += (wParam == 3) ? 5 : -5;
 			if (v < 0) v = 0;
 			if (v > 100) v = 100;
+			if (v > 0)
+				g_mpRemoteMuteRestore = -1;
 			if (mpDlg->m_vol.GetSafeHwnd()) {
 				mpDlg->m_vol.SetPos(v);
 				mpDlg->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v), (LPARAM)mpDlg->m_vol.GetSafeHwnd());
@@ -1266,6 +1606,49 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lPa
 				og->m_sl.SetPos(v * 1000);
 				og->PostMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v * 1000), (LPARAM)og->m_sl.GetSafeHwnd());
 			}
+			MpRemoteCacheVol(v);
+		}
+		break;
+	case 5: mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PREV, BN_CLICKED), 0); break;
+	case 6: mpDlg->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_STOP, BN_CLICKED), 0); break;
+	case 7:
+	case 8:
+		if (og && ::IsWindow(og->GetSafeHwnd()) && og->m_time.GetSafeHwnd()) {
+			int mn = 0, mx = 0;
+			og->m_time.GetRange(mn, mx);
+			const int span = mx - mn;
+			int delta = span / 20; // 約5%
+			if (delta < 1) delta = 1;
+			int pos = og->m_time.GetPos() + ((wParam == 8) ? delta : -delta);
+			MpDjSeekToSliderPos(pos);
+		}
+		break;
+	case 9:
+		{
+			int v = 50;
+			if (mpDlg->m_vol.GetSafeHwnd())
+				v = mpDlg->m_vol.GetPos();
+			else if (og && og->m_sl.GetSafeHwnd())
+				v = og->m_sl.GetPos() / 1000;
+			if (g_mpRemoteMuteRestore >= 0) {
+				v = g_mpRemoteMuteRestore;
+				g_mpRemoteMuteRestore = -1;
+			} else if (v > 0) {
+				g_mpRemoteMuteRestore = v;
+				v = 0;
+			} else {
+				v = 50;
+				g_mpRemoteMuteRestore = -1;
+			}
+			if (mpDlg->m_vol.GetSafeHwnd()) {
+				mpDlg->m_vol.SetPos(v);
+				mpDlg->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v), (LPARAM)mpDlg->m_vol.GetSafeHwnd());
+			}
+			if (og && og->m_sl.GetSafeHwnd()) {
+				og->m_sl.SetPos(v * 1000);
+				og->PostMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v * 1000), (LPARAM)og->m_sl.GetSafeHwnd());
+			}
+			MpRemoteCacheVol(v);
 		}
 		break;
 	case 10:
@@ -1273,6 +1656,12 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lPa
 			int v = (int)lParam;
 			if (v < 0) v = 0;
 			if (v > 100) v = 100;
+			if (v > 0)
+				g_mpRemoteMuteRestore = -1;
+			else if (g_mpRemoteMuteRestore < 0 && mpDlg->m_vol.GetSafeHwnd()) {
+				const int cur = mpDlg->m_vol.GetPos();
+				if (cur > 0) g_mpRemoteMuteRestore = cur;
+			}
 			if (mpDlg->m_vol.GetSafeHwnd()) {
 				mpDlg->m_vol.SetPos(v);
 				mpDlg->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v), (LPARAM)mpDlg->m_vol.GetSafeHwnd());
@@ -1281,6 +1670,7 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lPa
 				og->m_sl.SetPos(v * 1000);
 				og->PostMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v * 1000), (LPARAM)og->m_sl.GetSafeHwnd());
 			}
+			MpRemoteCacheVol(v);
 		}
 		break;
 	default: break;
@@ -1896,73 +2286,19 @@ void MpOnVideoReplaceAudio(CMediaPlayerDlg* mpDlg)
 	mpDlg->MessageBox(msg, LL14(L"差し替え", L"Replace", L"Remplacer", L"Sostituisci", L"Reemplazar", L"교체", L"替换", L"استبدال", L"Замена", L"Ersetzen", L"Substituir", L"Vervangen", L"Zamien", L"Degistir"), MB_OK | MB_ICONINFORMATION);
 }
 
-void MpOnGameCapturePreset(CMediaPlayerDlg* mpDlg)
+void MpOnGameCapturePreset(CMediaPlayerDlg* mpDlg, UINT presetCmd)
 {
 	if (!mpDlg || !::IsWindow(mpDlg->GetSafeHwnd()))
-		return;
-
-	CPoint pt;
-	::GetCursorPos(&pt);
-
-	enum {
-		ID_GCP_720_60 = 42001,
-		ID_GCP_1080_60 = 42002,
-		ID_GCP_1080_120 = 42003,
-		ID_GCP_4K_60 = 42004,
-		ID_GCP_PLUS_WAV = 42005
-	};
-
-	CCustomPopupMenu menu;
-	menu.SetAeroMode(FALSE);
-	menu.AddCommand(ID_GCP_720_60,
-		LL14(L"720p / 60fps（軽量）", L"720p / 60fps (light)", L"720p / 60fps (leger)", L"720p / 60fps (leggero)", L"720p / 60fps (ligero)",
-			L"720p / 60fps (가벼움)", L"720p / 60fps（轻量）", L"720p / 60fps (خفيف)", L"720p / 60fps (лёгкий)", L"720p / 60fps (leicht)",
-			L"720p / 60fps (leve)", L"720p / 60fps (licht)", L"720p / 60fps (lekki)", L"720p / 60fps (hafif)"),
-		LL14(L"負荷を抑えたゲーム録画。まずはこれで試せます。", L"Lower-load game capture. Good starting point.", L"Capture jeu legere. Bon point de depart.", L"Cattura gioco leggera. Buon inizio.", L"Captura ligera. Buen punto de partida.",
-			L"부하를 낮춘 게임 녹화. 먼저 이것부터.", L"低负载游戏录制。可先试这个。", L"تسجيل لعبة خفيف. نقطة بداية جيدة.", L"Лёгкая запись игры. Хороший старт.", L"Leichte Game-Aufnahme. Guter Start.",
-			L"Captura leve. Bom ponto de partida.", L"Lichte game-opname. Goed startpunt.", L"Lekkie nagrywanie gry. Dobry start.", L"Hafif oyun kaydi. Iyi baslangic."));
-	menu.AddCommand(ID_GCP_1080_60,
-		LL14(L"1080p / 60fps（推奨・高品位）", L"1080p / 60fps (recommended)", L"1080p / 60fps (recommande)", L"1080p / 60fps (consigliato)", L"1080p / 60fps (recomendado)",
-			L"1080p / 60fps (권장·고화질)", L"1080p / 60fps（推荐·高画质）", L"1080p / 60fps (موصى به)", L"1080p / 60fps (рекомендуется)", L"1080p / 60fps (empfohlen)",
-			L"1080p / 60fps (recomendado)", L"1080p / 60fps (aanbevolen)", L"1080p / 60fps (zalecane)", L"1080p / 60fps (onerilen)"),
-		LL14(L"フルHD・60fps・高ビットレート。多くのゲーム向けの標準高品位。", L"Full HD 60fps high bitrate. Standard high quality for most games.", L"Plein HD 60fps debit eleve. Qualite standard pour la plupart des jeux.", L"Full HD 60fps bitrate alto. Qualita standard per molti giochi.", L"Full HD 60fps alto bitrate. Calidad estandar para la mayoria.",
-			L"풀HD 60fps 고비트레이트. 대부분 게임에 맞는 표준 고화질.", L"全高清60fps高码率。多数游戏的标准高画质。", L"Full HD 60 إطار بمعدل بت عالٍ. جودة قياسية لمعظم الألعاب.", L"Full HD 60fps высокий битрейт. Стандарт для большинства игр.", L"Full HD 60fps hohe Bitrate. Standard-Qualität für die meisten Spiele.",
-			L"Full HD 60fps alto bitrate. Qualidade padrao para a maioria.", L"Full HD 60fps hoge bitrate. Standaardkwaliteit voor de meeste games.", L"Full HD 60fps wysoki bitrate. Standard dla wiekszosci gier.", L"Full HD 60fps yuksek bitrate. Cogu oyun icin standart kalite."));
-	menu.AddCommand(ID_GCP_1080_120,
-		LL14(L"1080p / 120fps（滑らか・高負荷）", L"1080p / 120fps (smooth·heavy)", L"1080p / 120fps (fluide·lourd)", L"1080p / 120fps (fluido·pesante)", L"1080p / 120fps (suave·pesado)",
-			L"1080p / 120fps (부드러움·고부하)", L"1080p / 120fps（流畅·高负载）", L"1080p / 120fps (سلس·ثقيل)", L"1080p / 120fps (плавно·тяжело)", L"1080p / 120fps (flüssig·schwer)",
-			L"1080p / 120fps (suave·pesado)", L"1080p / 120fps (soepel·zwaar)", L"1080p / 120fps (plynnie·ciezkie)", L"1080p / 120fps (akici·agir)"),
-		LL14(L"高リフレッシュ向け。PC性能が必要です。", L"For high-refresh games. Needs a strong PC.", L"Pour ecrans haute frequence. PC puissant requis.", L"Per alti Hz. Serve un PC potente.", L"Para alto refresco. Requiere PC potente.",
-			L"고주사율용. 강한 PC 필요.", L"适合高刷新。需要较强电脑。", L"لشاشات عالية التردد. يحتاج جهاز قوي.", L"Для высокого Гц. Нужен мощный ПК.", L"Für hohe Hz. Starker PC nötig.",
-			L"Para alto refresh. Precisa de PC forte.", L"Voor hoge Hz. Sterke PC nodig.", L"Dla wysokiego Hz. Potrzebny mocny PC.", L"Yuksek Hz icin. Guclu PC gerekir."));
-	menu.AddCommand(ID_GCP_4K_60,
-		LL14(L"4K / 60fps（最高画質）", L"4K / 60fps (max quality)", L"4K / 60fps (qualite max)", L"4K / 60fps (qualita max)", L"4K / 60fps (max calidad)",
-			L"4K / 60fps (최고화질)", L"4K / 60fps（最高画质）", L"4K / 60fps (أقصى جودة)", L"4K / 60fps (макс. качество)", L"4K / 60fps (max. Qualität)",
-			L"4K / 60fps (qualidade max)", L"4K / 60fps (max kwaliteit)", L"4K / 60fps (max jakosc)", L"4K / 60fps (en yuksek kalite)"),
-		LL14(L"3840×2160。容量と負荷が最大。強力なGPU向け。", L"3840×2160. Largest size/load. For strong GPUs.", L"3840×2160. Taille/charge max. GPU puissant.", L"3840×2160. Dimensione/carico max. GPU potente.", L"3840×2160. Tamano/carga max. GPU potente.",
-			L"3840×2160. 용량·부하 최대. 강한 GPU용.", L"3840×2160。体积与负载最大。需强GPU。", L"3840×2160. أكبر حجم/حمل. لوحدة GPU قوية.", L"3840×2160. Макс. размер/нагрузка. Для мощных GPU.", L"3840×2160. Max. Größe/Last. Für starke GPUs.",
-			L"3840×2160. Tamanho/carga max. Para GPU forte.", L"3840×2160. Max. formaat/belasting. Voor sterke GPU.", L"3840×2160. Max. rozmiar/obciazenie. Dla mocnego GPU.", L"3840×2160. En buyuk boyut/yuk. Guclu GPU icin."));
-	menu.AddSeparator();
-	menu.AddCommand(ID_GCP_PLUS_WAV,
-		LL14(L"1080p60 + 高音質WAV録音も開く", L"1080p60 + open HQ WAV recorder", L"1080p60 + ouvrir enregistreur WAV HQ", L"1080p60 + apri registratore WAV HQ", L"1080p60 + abrir grabador WAV HQ",
-			L"1080p60 + 고음질 WAV 녹음도 열기", L"1080p60 + 同时打开高音质WAV录音", L"1080p60 + فتح مسجل WAV عالي الجودة", L"1080p60 + открыть WAV-запись HQ", L"1080p60 + WAV-Rekorder HQ öffnen",
-			L"1080p60 + abrir gravador WAV HQ", L"1080p60 + WAV-recorder HQ openen", L"1080p60 + otworz rejestrator WAV HQ", L"1080p60 + yuksek kaliteli WAV ac"),
-		LL14(L"画面キャプチャに加え、システム音を別途WAVで残します。", L"Screen capture plus a separate WAV of system audio.", L"Capture ecran plus WAV separe du son systeme.", L"Cattura piu WAV separato dell'audio di sistema.", L"Captura mas WAV aparte del audio del sistema.",
-			L"화면 캡처와 함께 시스템 음을 별도 WAV로 남김.", L"画面捕获并另存系统声为WAV。", L"التقاط الشاشة مع WAV منفصل لصوت النظام.", L"Захват экрана плюс отдельный WAV системного звука.", L"Bildschirmaufnahme plus separates System-WAV.",
-			L"Captura mais WAV separado do audio do sistema.", L"Schermopname plus apart systeemaudio-WAV.", L"Nagranie ekranu plus osobny WAV dzwieku systemu.", L"Ekran yakalama artı ayri sistem sesi WAV."));
-
-	const UINT cmd = menu.Track(pt, mpDlg);
-	if (cmd == 0)
 		return;
 
 	int canvas = 2; // 1080
 	int fps = 60;
 	BOOL openWav = FALSE;
-	if (cmd == ID_GCP_720_60) { canvas = 1; fps = 60; }
-	else if (cmd == ID_GCP_1080_60) { canvas = 2; fps = 60; }
-	else if (cmd == ID_GCP_1080_120) { canvas = 2; fps = 120; }
-	else if (cmd == ID_GCP_4K_60) { canvas = 4; fps = 60; }
-	else if (cmd == ID_GCP_PLUS_WAV) { canvas = 2; fps = 60; openWav = TRUE; }
+	if (presetCmd == ID_MP_GCP_720_60) { canvas = 1; fps = 60; }
+	else if (presetCmd == ID_MP_GCP_1080_60 || presetCmd == ID_MP_GAME_PRESET) { canvas = 2; fps = 60; }
+	else if (presetCmd == ID_MP_GCP_1080_120) { canvas = 2; fps = 120; }
+	else if (presetCmd == ID_MP_GCP_4K_60) { canvas = 4; fps = 60; }
+	else if (presetCmd == ID_MP_GCP_PLUS_WAV) { canvas = 2; fps = 60; openWav = TRUE; }
 	else
 		return;
 
@@ -2038,14 +2374,621 @@ static void MpDjApplyPitchTempoDelta(BOOL isPitch, int deltaPct)
 	}
 }
 
+// ---- DJ Vinyl (レコード盤) : ドラッグ／ホイールでスクラッチ・シーク ----
+// アクリル下では OpaqueFixer が WM_PAINT を横取りするため、
+// 自前 Opaque 描画 + WM_PRINTCLIENT、および fixer 除外が必要。
+
+static void MpDjSeekToSliderPos(int pos)
+{
+	if (!og || !::IsWindow(og->GetSafeHwnd()) || !og->m_time.GetSafeHwnd()) return;
+	int mn = 0, mx = 0;
+	og->m_time.GetRange(mn, mx);
+	if (mx <= mn) return;
+	if (pos < mn) pos = mn;
+	if (pos > mx) pos = mx;
+	extern int hsc;
+	if (hsc == 0) hsc = 1;
+	og->m_time.SetPos(pos);
+	og->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, pos), (LPARAM)og->m_time.GetSafeHwnd());
+	if (hsc == 1) hsc = 0;
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		mp->m_seekHoldPos = pos;
+		mp->m_seekHoldUntil = GetTickCount64() + 800;
+		if (mp->m_seek.GetSafeHwnd())
+			mp->m_seek.SetPos(pos);
+	}
+}
+
+static float MpDjNormDeg(float deg)
+{
+	while (deg < 0.f) deg += 360.f;
+	while (deg >= 360.f) deg -= 360.f;
+	return deg;
+}
+
+// 画面角度(atan2) → 12時=0・時計回り 0..360
+static float MpDjPointerDegFromPoint(CPoint pt, CPoint c)
+{
+	const float rad = (float)atan2((double)(pt.y - c.y), (double)(pt.x - c.x));
+	return MpDjNormDeg((float)(rad * 180.0 / 3.14159265358979323846) + 90.f);
+}
+
+// ---- DJ Scratch: 再生PCMリングを速度追従で擦る（本場は曲そのものが鳴る） ----
+enum { kDjOutRate = 22050, kDjRingCap = 22050, kDjBufSamples = 512, kDjBufCount = 3 };
+// 33.3rpm ≒ 200°/s を等速再生の基準にする
+static const float kDjVinylDegPerSec = 200.f;
+
+static float g_djRing[kDjRingCap];
+static volatile LONG g_djRingWrite = 0;
+static volatile LONG g_djRingCount = 0;
+static int g_djDecimNeed = 0;
+static int g_djDecimCnt = 0;
+static float g_djDecimSum = 0.f;
+static int g_djCapRate = 0;
+
+static HWAVEOUT g_djWo = NULL;
+static WAVEHDR g_djHdr[kDjBufCount];
+static short g_djPcm[kDjBufCount][kDjBufSamples];
+static CRITICAL_SECTION g_djCs;
+static int g_djCsInit = 0;
+static volatile LONG g_djActive = 0;
+static volatile LONG g_djHoldCap = 0;
+static volatile LONG g_djOutGen = 0; // Shutdown のたびに加算（Write 競合防止）
+static volatile LONG g_djVelBits = 0; // float bits of deg/s
+static double g_djReadAge = 0.0; // 0=最新端, 大きいほど過去
+static float g_djHpZ = 0.f;
+static float g_djOutGain = 0.f;
+
+static void MpDjScratchCsEnsure()
+{
+	if (g_djCsInit) return;
+	InitializeCriticalSection(&g_djCs);
+	g_djCsInit = 1;
+}
+
+static void MpDjScratchCapturePcm(const float* L, const float* R, int frames, int sampleRate)
+{
+	if (!L || !R || frames <= 0 || sampleRate < 8000) return;
+	if (InterlockedCompareExchange(&g_djHoldCap, 0, 0) != 0) return;
+
+	if (g_djCapRate != sampleRate || g_djDecimNeed < 1) {
+		g_djCapRate = sampleRate;
+		g_djDecimNeed = sampleRate / kDjOutRate;
+		if (g_djDecimNeed < 1) g_djDecimNeed = 1;
+		g_djDecimCnt = 0;
+		g_djDecimSum = 0.f;
+	}
+
+	for (int i = 0; i < frames; ++i) {
+		g_djDecimSum += 0.5f * (L[i] + R[i]);
+		g_djDecimCnt++;
+		if (g_djDecimCnt < g_djDecimNeed) continue;
+		const float s = g_djDecimSum / (float)g_djDecimCnt;
+		g_djDecimSum = 0.f;
+		g_djDecimCnt = 0;
+		const LONG w = InterlockedIncrement(&g_djRingWrite) - 1;
+		g_djRing[w % kDjRingCap] = s;
+		LONG c = g_djRingCount;
+		if (c < kDjRingCap) {
+			c++;
+			InterlockedExchange(&g_djRingCount, c);
+		}
+	}
+}
+
+static float MpDjScratchReadVel()
+{
+	LONG bits = InterlockedCompareExchange(&g_djVelBits, 0, 0);
+	float v;
+	memcpy(&v, &bits, sizeof(v));
+	return v;
+}
+
+static float MpDjScratchEffectGain()
+{
+	int e = savedata.mpDjScratchEffect;
+	if (e < 0) e = 0;
+	if (e > 200) e = 200;
+	return (float)e / 100.f;
+}
+
+static float MpDjScratchSpeedScale()
+{
+	int s = savedata.mpDjScratchSpeed;
+	if (s < 0) s = 0;
+	if (s > 200) s = 200;
+	if (s < 5) s = 5; // 完全停止は避け極低速に
+	return (float)s / 100.f;
+}
+
+static void MpDjScratchSetVelocity(float degPerSec)
+{
+	degPerSec *= MpDjScratchSpeedScale();
+	if (degPerSec > 1600.f) degPerSec = 1600.f;
+	if (degPerSec < -1600.f) degPerSec = -1600.f;
+	LONG bits;
+	memcpy(&bits, &degPerSec, sizeof(bits));
+	InterlockedExchange(&g_djVelBits, bits);
+}
+
+static float MpDjScratchRingAt(LONG write, LONG count, double age)
+{
+	if (count < 2) return 0.f;
+	if (age < 0.0) age = 0.0;
+	if (age > (double)(count - 2)) age = (double)(count - 2);
+	const int i0 = (int)age;
+	const float frac = (float)(age - (double)i0);
+	// age=0 → 最新 = write-1
+	const LONG newest = write - 1;
+	const LONG idx0 = newest - i0;
+	const LONG idx1 = idx0 - 1;
+	const float a = g_djRing[((idx0 % kDjRingCap) + kDjRingCap) % kDjRingCap];
+	const float b = g_djRing[((idx1 % kDjRingCap) + kDjRingCap) % kDjRingCap];
+	return a + (b - a) * frac;
+}
+
+static void MpDjScratchFill(short* dst, int n)
+{
+	if (!dst || n <= 0) return;
+	const LONG active = InterlockedCompareExchange(&g_djActive, 0, 0);
+	const LONG write = InterlockedCompareExchange(&g_djRingWrite, 0, 0);
+	const LONG count = InterlockedCompareExchange(&g_djRingCount, 0, 0);
+	float vel = MpDjScratchReadVel();
+	// 速度を少し平滑（マウス量子化のガタを抑える）
+	static float s_velSm = 0.f;
+	s_velSm += 0.35f * (vel - s_velSm);
+	vel = s_velSm;
+	float speed = vel / kDjVinylDegPerSec;
+	if (speed > 4.f) speed = 4.f;
+	if (speed < -4.f) speed = -4.f;
+	if (!active) speed = 0.f;
+
+	const float targetGain = (active && (speed > 0.04f || speed < -0.04f) && count > 64) ? 1.f : 0.f;
+	for (int i = 0; i < n; ++i) {
+		g_djOutGain += 0.08f * (targetGain - g_djOutGain);
+		float x = 0.f;
+		if (g_djOutGain > 0.001f && count > 2) {
+			x = MpDjScratchRingAt(write, count, g_djReadAge);
+			g_djReadAge -= (double)speed;
+			if (g_djReadAge < 0.0) g_djReadAge = 0.0;
+			if (g_djReadAge > (double)(count - 2)) g_djReadAge = (double)(count - 2);
+			// 針先っぽい帯域: 軽いHPF + ソフトクリップ（ノイズではなく楽曲成分）
+			const float hp = x - g_djHpZ;
+			g_djHpZ += 0.18f * (x - g_djHpZ);
+			float y = hp * 1.35f + x * 0.45f;
+			if (y > 1.2f) y = 1.2f + 0.2f * (y - 1.2f);
+			if (y < -1.2f) y = -1.2f + 0.2f * (y + 1.2f);
+			y = y * (0.7f + 0.3f * (float)fabs((double)speed));
+			x = y * g_djOutGain * 0.85f * MpDjScratchEffectGain();
+		} else {
+			g_djHpZ *= 0.9f;
+		}
+		int v = (int)(x * 32767.f);
+		if (v > 32767) v = 32767;
+		if (v < -32768) v = -32768;
+		dst[i] = (short)v;
+	}
+}
+
+static void CALLBACK MpDjScratchWoProc(HWAVEOUT hwo, UINT uMsg, DWORD_PTR, DWORD_PTR dw1, DWORD_PTR)
+{
+	if (uMsg != WOM_DONE || !hwo || !dw1) return;
+	WAVEHDR* hdr = (WAVEHDR*)dw1;
+	if (!(hdr->dwFlags & WHDR_PREPARED)) return;
+	// waveOutWrite は CS 外。Shutdown の waveOutReset がコールバック完了待ちのとき
+	// 同 CS で詰まるとプロセスが残留する。
+	BOOL doWrite = FALSE;
+	LONG gen = 0;
+	MpDjScratchCsEnsure();
+	EnterCriticalSection(&g_djCs);
+	if (g_djWo == hwo) {
+		MpDjScratchFill((short*)hdr->lpData, kDjBufSamples);
+		hdr->dwFlags &= ~WHDR_DONE;
+		doWrite = TRUE;
+		gen = g_djOutGen;
+	}
+	LeaveCriticalSection(&g_djCs);
+	if (doWrite && InterlockedCompareExchange(&g_djOutGen, 0, 0) == gen)
+		waveOutWrite(hwo, hdr, sizeof(WAVEHDR));
+}
+
+static void MpDjScratchShutdown()
+{
+	MpDjScratchCsEnsure();
+	EnterCriticalSection(&g_djCs);
+	InterlockedExchange(&g_djActive, 0);
+	InterlockedExchange(&g_djHoldCap, 0);
+	MpDjScratchSetVelocity(0.f);
+	// CS 保持中に waveOutReset/Close すると、WOM_DONE コールバックの
+	// EnterCriticalSection と相互待ちでデッドロックする。先に所有権を外す。
+	InterlockedIncrement(&g_djOutGen);
+	HWAVEOUT wo = g_djWo;
+	g_djWo = NULL;
+	LeaveCriticalSection(&g_djCs);
+	if (!wo) return;
+	waveOutReset(wo);
+	for (int i = 0; i < kDjBufCount; ++i) {
+		if (g_djHdr[i].dwFlags & WHDR_PREPARED)
+			waveOutUnprepareHeader(wo, &g_djHdr[i], sizeof(WAVEHDR));
+		ZeroMemory(&g_djHdr[i], sizeof(WAVEHDR));
+	}
+	waveOutClose(wo);
+}
+
+static BOOL MpDjScratchEnsureOut()
+{
+	MpDjScratchCsEnsure();
+	EnterCriticalSection(&g_djCs);
+	if (g_djWo) {
+		LeaveCriticalSection(&g_djCs);
+		return TRUE;
+	}
+	WAVEFORMATEX wfx = {};
+	wfx.wFormatTag = WAVE_FORMAT_PCM;
+	wfx.nChannels = 1;
+	wfx.nSamplesPerSec = kDjOutRate;
+	wfx.wBitsPerSample = 16;
+	wfx.nBlockAlign = 2;
+	wfx.nAvgBytesPerSec = kDjOutRate * 2;
+	HWAVEOUT wo = NULL;
+	if (waveOutOpen(&wo, WAVE_MAPPER, &wfx, (DWORD_PTR)MpDjScratchWoProc, 0, CALLBACK_FUNCTION) != MMSYSERR_NOERROR) {
+		LeaveCriticalSection(&g_djCs);
+		return FALSE;
+	}
+	g_djWo = wo;
+	const LONG gen = g_djOutGen;
+	for (int i = 0; i < kDjBufCount; ++i) {
+		ZeroMemory(&g_djHdr[i], sizeof(WAVEHDR));
+		ZeroMemory(g_djPcm[i], sizeof(g_djPcm[i]));
+		g_djHdr[i].lpData = (LPSTR)g_djPcm[i];
+		g_djHdr[i].dwBufferLength = kDjBufSamples * sizeof(short);
+		waveOutPrepareHeader(g_djWo, &g_djHdr[i], sizeof(WAVEHDR));
+		MpDjScratchFill(g_djPcm[i], kDjBufSamples);
+	}
+	LeaveCriticalSection(&g_djCs);
+	// 初期 Write も CS 外（Shutdown 競合時は世代／所有権で打ち切り）
+	for (int i = 0; i < kDjBufCount; ++i) {
+		if (InterlockedCompareExchange(&g_djOutGen, 0, 0) != gen) break;
+		EnterCriticalSection(&g_djCs);
+		const BOOL ok = (g_djWo == wo) && (g_djHdr[i].dwFlags & WHDR_PREPARED);
+		LeaveCriticalSection(&g_djCs);
+		if (!ok) break;
+		waveOutWrite(wo, &g_djHdr[i], sizeof(WAVEHDR));
+	}
+	return TRUE;
+}
+
+static void MpDjScratchBegin()
+{
+	InterlockedExchange(&g_djHoldCap, 1);
+	g_djReadAge = 0.0;
+	g_djHpZ = 0.f;
+	g_djOutGain = 0.f;
+	MpDjScratchSetVelocity(0.f);
+	InterlockedExchange(&g_djActive, 1);
+	MpDjScratchEnsureOut();
+}
+
+static void MpDjScratchEnd()
+{
+	MpDjScratchSetVelocity(0.f);
+	InterlockedExchange(&g_djActive, 0);
+	InterlockedExchange(&g_djHoldCap, 0);
+}
+
+class CCustomDjVinylCtrl : public CStatic
+{
+	DECLARE_DYNAMIC(CCustomDjVinylCtrl)
+public:
+	CCustomDjVinylCtrl()
+		: m_dragging(FALSE)
+		, m_spinDeg(0.f)
+		, m_lastPtrDeg(0.f)
+		, m_playheadDeg(0.f)
+		, m_lastMoveMs(0)
+		, m_bAeroMode(FALSE)
+	{}
+	void SetAeroMode(BOOL b) { m_bAeroMode = b; if (GetSafeHwnd()) Invalidate(FALSE); }
+
+	void SyncFromPlayback()
+	{
+		if (m_dragging) return;
+		if (!og || !::IsWindow(og->GetSafeHwnd()) || !og->m_time.GetSafeHwnd()) return;
+		int mn = 0, mx = 0;
+		og->m_time.GetRange(mn, mx);
+		const int span = mx - mn;
+		if (span <= 0) {
+			m_playheadDeg = 0.f;
+			return;
+		}
+		const int pos = og->m_time.GetPos();
+		m_playheadDeg = MpDjNormDeg(360.f * (float)(pos - mn) / (float)span);
+		if (plf && ps != 1)
+			m_spinDeg = MpDjNormDeg(m_spinDeg + 2.2f);
+		if (GetSafeHwnd())
+			Invalidate(FALSE);
+	}
+
+protected:
+	BOOL m_dragging;
+	float m_spinDeg;
+	float m_lastPtrDeg;
+	float m_playheadDeg;
+	DWORD m_lastMoveMs;
+	BOOL m_bAeroMode;
+
+	BOOL HitDisc(CPoint pt, CPoint& center, int& radius) const
+	{
+		CRect rc; GetClientRect(&rc);
+		center.x = (rc.left + rc.right) / 2;
+		center.y = (rc.top + rc.bottom) / 2;
+		radius = ((rc.Width() < rc.Height()) ? rc.Width() : rc.Height()) / 2 - 2;
+		if (radius < 8) return FALSE;
+		const int dx = pt.x - center.x;
+		const int dy = pt.y - center.y;
+		return (dx * dx + dy * dy) <= (radius * radius);
+	}
+
+	void RefreshPlayheadFromPos()
+	{
+		if (!og || !og->m_time.GetSafeHwnd()) return;
+		int mn = 0, mx = 0;
+		og->m_time.GetRange(mn, mx);
+		const int span = mx - mn;
+		if (span <= 0) { m_playheadDeg = 0.f; return; }
+		m_playheadDeg = MpDjNormDeg(360.f * (float)(og->m_time.GetPos() - mn) / (float)span);
+	}
+
+	void ScratchByDeltaDeg(float d)
+	{
+		const DWORD now = GetTickCount();
+		float dt = (m_lastMoveMs == 0) ? 0.016f : (float)(now - m_lastMoveMs) * 0.001f;
+		m_lastMoveMs = now;
+		if (dt < 0.004f) dt = 0.004f;
+		if (dt > 0.08f) dt = 0.08f;
+		MpDjScratchSetVelocity(d / dt);
+
+		if (!og || !::IsWindow(og->GetSafeHwnd()) || !og->m_time.GetSafeHwnd()) return;
+		int mn = 0, mx = 0;
+		og->m_time.GetRange(mn, mx);
+		const int span = mx - mn;
+		if (span <= 0) return;
+		double units = (double)d * (double)span / 360.0 / 50.0 * (double)MpDjScratchSpeedScale();
+		int delta = (int)(units >= 0.0 ? units + 0.5 : units - 0.5);
+		if (delta == 0 && (d > 0.4f || d < -0.4f))
+			delta = (d > 0.f) ? 1 : -1;
+		int cap = span / 250;
+		if (cap < 1) cap = 1;
+		cap = (int)((double)cap * (double)MpDjScratchSpeedScale() + 0.5);
+		if (cap < 1) cap = 1;
+		if (delta > cap) delta = cap;
+		if (delta < -cap) delta = -cap;
+		if (delta == 0) return;
+		MpDjSeekToSliderPos(og->m_time.GetPos() + delta);
+		RefreshPlayheadFromPos();
+	}
+
+	void NudgeSeekByWheel(int wheelSteps)
+	{
+		if (!og || !::IsWindow(og->GetSafeHwnd()) || !og->m_time.GetSafeHwnd()) return;
+		int mn = 0, mx = 0;
+		og->m_time.GetRange(mn, mx);
+		const int span = mx - mn;
+		if (span <= 0) return;
+		int step = span / 400;
+		if (step < 1) step = 1;
+		MpDjSeekToSliderPos(og->m_time.GetPos() - wheelSteps * step);
+		RefreshPlayheadFromPos();
+	}
+
+	void PaintVinyl(CDC& dc, const CRect& rc)
+	{
+		dc.FillSolidRect(&rc, RGB(28, 30, 38));
+		const int cx = (rc.left + rc.right) / 2;
+		const int cy = (rc.top + rc.bottom) / 2;
+		const int rw = rc.Width();
+		const int rh = rc.Height();
+		const int R = ((rw < rh) ? rw : rh) / 2 - 2;
+		if (R <= 8) {
+			CCC_DrawInwoman(&dc, rc, FALSE);
+			return;
+		}
+
+		CBrush vinyl(RGB(18, 18, 20));
+		CPen edge(PS_SOLID, 2, RGB(55, 55, 62));
+		CBrush* ob = dc.SelectObject(&vinyl);
+		CPen* op = dc.SelectObject(&edge);
+		dc.Ellipse(cx - R, cy - R, cx + R, cy + R);
+
+		CPen groove(PS_SOLID, 1, RGB(32, 32, 36));
+		dc.SelectObject(&groove);
+		for (int i = 3; i < 18; ++i) {
+			const int r = R * i / 20;
+			dc.Ellipse(cx - r, cy - r, cx + r, cy + r);
+		}
+		CPen hi(PS_SOLID, 2, RGB(70, 72, 82));
+		dc.SelectObject(&hi);
+		dc.Arc(cx - R + 4, cy - R + 4, cx + R - 4, cy + R - 4,
+			cx - R / 2, cy - R, cx + R / 3, cy - R / 2);
+
+		const int lr = R / 3;
+		CBrush label(RGB(190, 60, 90));
+		CPen labelEdge(PS_SOLID, 1, RGB(240, 140, 160));
+		dc.SelectObject(&label);
+		dc.SelectObject(&labelEdge);
+		dc.Ellipse(cx - lr, cy - lr, cx + lr, cy + lr);
+		const int hub = (lr / 6 > 3) ? (lr / 6) : 3;
+		CBrush hubBr(RGB(220, 220, 230));
+		dc.SelectObject(&hubBr);
+		dc.SelectStockObject(NULL_PEN);
+		dc.Ellipse(cx - hub, cy - hub, cx + hub, cy + hub);
+
+		{
+			const double rad = (m_spinDeg - 90.f) * 3.14159265358979323846 / 180.0;
+			const int x1 = cx + (int)((lr + 4) * cos(rad));
+			const int y1 = cy + (int)((lr + 4) * sin(rad));
+			const int x2 = cx + (int)((R - 6) * cos(rad));
+			const int y2 = cy + (int)((R - 6) * sin(rad));
+			CPen mark(PS_SOLID, 1, RGB(48, 48, 54));
+			dc.SelectObject(&mark);
+			dc.MoveTo(x1, y1);
+			dc.LineTo(x2, y2);
+		}
+		{
+			const double rad = (m_playheadDeg - 90.f) * 3.14159265358979323846 / 180.0;
+			const int x2 = cx + (int)((R - 3) * cos(rad));
+			const int y2 = cy + (int)((R - 3) * sin(rad));
+			CPen needle(PS_SOLID, 3, RGB(255, 210, 120));
+			dc.SelectObject(&needle);
+			dc.MoveTo(cx, cy);
+			dc.LineTo(x2, y2);
+		}
+
+		dc.SelectObject(ob);
+		dc.SelectObject(op);
+		CCC_DrawInwoman(&dc, rc, FALSE);
+	}
+
+	afx_msg void OnPaint()
+	{
+		CPaintDC dc(this);
+		CRect rc; GetClientRect(&rc);
+		if (rc.Width() <= 0 || rc.Height() <= 0) return;
+
+		BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+		params.dwFlags = BPPF_ERASE;
+		HDC hdcBuf = NULL;
+		HPAINTBUFFER hBP = ::BeginBufferedPaint(dc.GetSafeHdc(), &rc, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+		if (hdcBuf && hBP) {
+			CDC mem; mem.Attach(hdcBuf);
+			PaintVinyl(mem, rc);
+			mem.Detach();
+			::BufferedPaintMakeOpaque(hBP, &rc);
+			::EndBufferedPaint(hBP, TRUE);
+			return;
+		}
+		PaintVinyl(dc, rc);
+	}
+
+	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM)
+	{
+		CDC* pDC = CDC::FromHandle((HDC)wParam);
+		if (!pDC) return 0;
+		CRect rc; GetClientRect(&rc);
+		PaintVinyl(*pDC, CRect(0, 0, rc.Width(), rc.Height()));
+		return 1;
+	}
+
+	afx_msg BOOL OnEraseBkgnd(CDC* pDC)
+	{
+		if (pDC) {
+			CRect rc; GetClientRect(&rc);
+			pDC->FillSolidRect(&rc, RGB(28, 30, 38));
+		}
+		return TRUE;
+	}
+
+	afx_msg void OnLButtonDown(UINT nFlags, CPoint point)
+	{
+		CPoint c; int R = 0;
+		if (!HitDisc(point, c, R)) {
+			CStatic::OnLButtonDown(nFlags, point);
+			return;
+		}
+		SetCapture();
+		m_dragging = TRUE;
+		m_lastPtrDeg = MpDjPointerDegFromPoint(point, c);
+		m_lastMoveMs = GetTickCount();
+		MpDjScratchBegin();
+		Invalidate(FALSE);
+	}
+
+	afx_msg void OnMouseMove(UINT nFlags, CPoint point)
+	{
+		if (!m_dragging) {
+			CStatic::OnMouseMove(nFlags, point);
+			return;
+		}
+		CPoint c; int R = 0;
+		HitDisc(point, c, R);
+		const float deg = MpDjPointerDegFromPoint(point, c);
+		float d = deg - m_lastPtrDeg;
+		if (d > 180.f) d -= 360.f;
+		if (d < -180.f) d += 360.f;
+		m_spinDeg = MpDjNormDeg(m_spinDeg + d);
+		m_lastPtrDeg = deg;
+		ScratchByDeltaDeg(d);
+		Invalidate(FALSE);
+	}
+
+	afx_msg void OnLButtonUp(UINT nFlags, CPoint point)
+	{
+		if (m_dragging) {
+			m_dragging = FALSE;
+			ReleaseCapture();
+			MpDjScratchEnd();
+			m_lastMoveMs = 0;
+		}
+		CStatic::OnLButtonUp(nFlags, point);
+	}
+
+	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
+	{
+		UNREFERENCED_PARAMETER(nFlags);
+		UNREFERENCED_PARAMETER(pt);
+		const int steps = zDelta / WHEEL_DELTA;
+		if (steps != 0)
+			NudgeSeekByWheel(steps);
+		Invalidate(FALSE);
+		return TRUE;
+	}
+
+	DECLARE_MESSAGE_MAP()
+};
+
+IMPLEMENT_DYNAMIC(CCustomDjVinylCtrl, CStatic)
+
+BEGIN_MESSAGE_MAP(CCustomDjVinylCtrl, CStatic)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_LBUTTONDOWN()
+	ON_WM_MOUSEMOVE()
+	ON_WM_LBUTTONUP()
+	ON_WM_MOUSEWHEEL()
+	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+END_MESSAGE_MAP()
+
 // ---- DJ Pad dialog ----
 class CMpDjPadDlg : public CCustomBlurDialogBase
 {
 public:
 	enum { IDD = IDD_MP_DJPAD };
-	CMpDjPadDlg(CWnd* p = NULL) : CCustomBlurDialogBase(IDD, p) {}
-	CCustomStandardButton m_pitchUp, m_pitchDn, m_tempoUp, m_tempoDn, m_vocal, m_msNarrow, m_msWide;
+	CMpDjPadDlg(CWnd* p = NULL)
+		: CCustomBlurDialogBase(IDD, p)
+		, m_cueMem(-1)
+		, m_lastCueLit(-1)
+	{}
+	CCustomStandardButton m_pitchUp, m_pitchDn, m_tempoUp, m_tempoDn;
+	CCustomStandardButton m_vocal, m_vocalDn, m_vocalRst;
+	CCustomStandardButton m_msNarrow, m_msWide, m_msRst;
+	CCustomStandardButton m_pitchRst, m_tempoRst;
+	CCustomStandardButton m_play, m_pause, m_stop, m_cue, m_prev, m_next;
+	CCustomStandardButton m_beatBk, m_beatFw, m_bpmDet;
+	CCustomStandardButton m_cuePad[8];
+	CCustomStandardButton m_cueSet, m_cueClr;
+	CCustomStandardButton m_abA, m_abB, m_abClr;
+	CCustomStandardButton m_loop1, m_loop2, m_loop4, m_loop8;
+	CCustomStandardButton m_killL, m_killM, m_killH;
+	CCustomDjVinylCtrl m_vinyl;
+	CCustomStatic m_tip, m_bpm, m_status;
+	CCustomStatic m_eqLowL, m_eqMidL, m_eqHighL;
+	CCustomSliderCtrl m_fx, m_spd, m_filter, m_vol;
+	CCustomSliderCtrl m_eqLow, m_eqMid, m_eqHigh;
+	CCustomRangeSliderCtrl m_seek;
+	CCustomLevelMeter m_meter;
 	CToolTipCtrl m_tooltip;
+	int m_cueMem;
+	int m_lastCueLit;
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX)
 	{
@@ -2055,12 +2998,65 @@ protected:
 		DDX_Control(pDX, IDC_DJPAD_TEMPO_UP, m_tempoUp);
 		DDX_Control(pDX, IDC_DJPAD_TEMPO_DN, m_tempoDn);
 		DDX_Control(pDX, IDC_DJPAD_VOCAL, m_vocal);
+		DDX_Control(pDX, IDC_DJPAD_VOCAL_DN, m_vocalDn);
+		DDX_Control(pDX, IDC_DJPAD_VOCAL_RST, m_vocalRst);
 		DDX_Control(pDX, IDC_DJPAD_MS_NARROW, m_msNarrow);
 		DDX_Control(pDX, IDC_DJPAD_MS_WIDE, m_msWide);
+		DDX_Control(pDX, IDC_DJPAD_MS_RST, m_msRst);
+		DDX_Control(pDX, IDC_DJPAD_PITCH_RST, m_pitchRst);
+		DDX_Control(pDX, IDC_DJPAD_TEMPO_RST, m_tempoRst);
+		DDX_Control(pDX, IDC_DJPAD_VINYL, m_vinyl);
+		DDX_Control(pDX, IDC_DJPAD_TIP, m_tip);
+		DDX_Control(pDX, IDC_DJPAD_FX, m_fx);
+		DDX_Control(pDX, IDC_DJPAD_SPD, m_spd);
+		DDX_Control(pDX, IDC_DJPAD_FILTER, m_filter);
+		DDX_Control(pDX, IDC_DJPAD_VOL, m_vol);
+		DDX_Control(pDX, IDC_DJPAD_BPM, m_bpm);
+		DDX_Control(pDX, IDC_DJPAD_STATUS, m_status);
+		DDX_Control(pDX, IDC_DJPAD_PLAY, m_play);
+		DDX_Control(pDX, IDC_DJPAD_PAUSE, m_pause);
+		DDX_Control(pDX, IDC_DJPAD_STOP, m_stop);
+		DDX_Control(pDX, IDC_DJPAD_CUE, m_cue);
+		DDX_Control(pDX, IDC_DJPAD_PREV, m_prev);
+		DDX_Control(pDX, IDC_DJPAD_NEXT, m_next);
+		DDX_Control(pDX, IDC_DJPAD_BEAT_BK, m_beatBk);
+		DDX_Control(pDX, IDC_DJPAD_BEAT_FW, m_beatFw);
+		DDX_Control(pDX, IDC_DJPAD_BPM_DET, m_bpmDet);
+		DDX_Control(pDX, IDC_DJPAD_CUE1, m_cuePad[0]);
+		DDX_Control(pDX, IDC_DJPAD_CUE2, m_cuePad[1]);
+		DDX_Control(pDX, IDC_DJPAD_CUE3, m_cuePad[2]);
+		DDX_Control(pDX, IDC_DJPAD_CUE4, m_cuePad[3]);
+		DDX_Control(pDX, IDC_DJPAD_CUE5, m_cuePad[4]);
+		DDX_Control(pDX, IDC_DJPAD_CUE6, m_cuePad[5]);
+		DDX_Control(pDX, IDC_DJPAD_CUE7, m_cuePad[6]);
+		DDX_Control(pDX, IDC_DJPAD_CUE8, m_cuePad[7]);
+		DDX_Control(pDX, IDC_DJPAD_CUESET, m_cueSet);
+		DDX_Control(pDX, IDC_DJPAD_CUECLR, m_cueClr);
+		DDX_Control(pDX, IDC_DJPAD_ABA, m_abA);
+		DDX_Control(pDX, IDC_DJPAD_ABB, m_abB);
+		DDX_Control(pDX, IDC_DJPAD_ABCLR, m_abClr);
+		DDX_Control(pDX, IDC_DJPAD_LOOP1, m_loop1);
+		DDX_Control(pDX, IDC_DJPAD_LOOP2, m_loop2);
+		DDX_Control(pDX, IDC_DJPAD_LOOP4, m_loop4);
+		DDX_Control(pDX, IDC_DJPAD_LOOP8, m_loop8);
+		DDX_Control(pDX, IDC_DJPAD_EQ_LOW, m_eqLow);
+		DDX_Control(pDX, IDC_DJPAD_EQ_MID, m_eqMid);
+		DDX_Control(pDX, IDC_DJPAD_EQ_HIGH, m_eqHigh);
+		DDX_Control(pDX, IDC_DJPAD_EQ_LOW_L, m_eqLowL);
+		DDX_Control(pDX, IDC_DJPAD_EQ_MID_L, m_eqMidL);
+		DDX_Control(pDX, IDC_DJPAD_EQ_HIGH_L, m_eqHighL);
+		DDX_Control(pDX, IDC_DJPAD_KILL_L, m_killL);
+		DDX_Control(pDX, IDC_DJPAD_KILL_M, m_killM);
+		DDX_Control(pDX, IDC_DJPAD_KILL_H, m_killH);
+		DDX_Control(pDX, IDC_DJPAD_SEEK, m_seek);
+		DDX_Control(pDX, IDC_DJPAD_METER, m_meter);
 	}
 	virtual BOOL OnInitDialog()
 	{
 		CCustomBlurDialogBase::OnInitDialog();
+		EnableMainWindowLock(&savedata.mpDjPadMainLock, FALSE);
+		if (savedata.mpDjPadTopMost)
+			SetWindowPos(&wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 		SetWindowText(LL14(L"DJ パッド", L"DJ Pad", L"Pad DJ", L"Pad DJ", L"Pad DJ",
 			L"DJ 패드", L"DJ 垫", L"لوحة DJ", L"DJ-панель", L"DJ-Pad",
 			L"Pad DJ", L"DJ-pad", L"Pad DJ", L"DJ paneli"));
@@ -2068,70 +3064,797 @@ protected:
 		m_pitchDn.SetWindowText(LL14(L"音程 -", L"Pitch -", L"Hauteur -", L"Pitch -", L"Tono -", L"음정 -", L"音高 -", L"درجة -", L"Тон -", L"Tonhöhe -", L"Tom -", L"Toonhoogte -", L"Wysokosc -", L"Perde -"));
 		m_tempoUp.SetWindowText(LL14(L"テンポ +", L"Tempo +", L"Tempo +", L"Tempo +", L"Tempo +", L"템포 +", L"速度 +", L"إيقاع +", L"Темп +", L"Tempo +", L"Tempo +", L"Tempo +", L"Tempo +", L"Tempo +"));
 		m_tempoDn.SetWindowText(LL14(L"テンポ -", L"Tempo -", L"Tempo -", L"Tempo -", L"Tempo -", L"템포 -", L"速度 -", L"إيقاع -", L"Темп -", L"Tempo -", L"Tempo -", L"Tempo -", L"Tempo -", L"Tempo -"));
-		m_vocal.SetWindowText(LL14(L"ボーカル強調", L"Vocal +", L"Voix +", L"Voce +", L"Voz +", L"보컬 강조", L"人声增强", L"صوت +", L"Вокал +", L"Gesang +", L"Vocal +", L"Zang +", L"Wokal +", L"Vokal +"));
-		m_msNarrow.SetWindowText(LL14(L"MS 狭く", L"MS Narrow", L"MS etroit", L"MS stretto", L"MS estrecho", L"MS 좁게", L"MS 变窄", L"MS ضيق", L"MS узко", L"MS eng", L"MS estreito", L"MS smal", L"MS wasko", L"MS dar"));
-		m_msWide.SetWindowText(LL14(L"MS 広く", L"MS Wide", L"MS large", L"MS ampio", L"MS ancho", L"MS 넓게", L"MS 变宽", L"MS واسع", L"MS широко", L"MS weit", L"MS largo", L"MS breed", L"MS szeroko", L"MS genis"));
+		m_pitchRst.SetWindowText(LL14(L"音程戻", L"P rst", L"P rst", L"P rst", L"P rst", L"음정복", L"音高复", L"P rst", L"P rst", L"P rst", L"P rst", L"P rst", L"P rst", L"P rst"));
+		m_tempoRst.SetWindowText(LL14(L"テンポ戻", L"T rst", L"T rst", L"T rst", L"T rst", L"템포복", L"速度复", L"T rst", L"T rst", L"T rst", L"T rst", L"T rst", L"T rst", L"T rst"));
+		m_vocal.SetWindowText(LL14(L"ボーカル+", L"Vocal +", L"Voix +", L"Voce +", L"Voz +", L"보컬+", L"人声+", L"صوت+", L"Вокал+", L"Gesang+", L"Vocal+", L"Zang+", L"Wokal+", L"Vokal+"));
+		m_vocalDn.SetWindowText(LL14(L"ボーカル-", L"Vocal -", L"Voix -", L"Voce -", L"Voz -", L"보컬-", L"人声-", L"صوت-", L"Вокал-", L"Gesang-", L"Vocal-", L"Zang-", L"Wokal-", L"Vokal-"));
+		m_vocalRst.SetWindowText(LL14(L"V 戻", L"V rst", L"V rst", L"V rst", L"V rst", L"V 복", L"V 复", L"V rst", L"V rst", L"V rst", L"V rst", L"V rst", L"V rst", L"V rst"));
+		m_msNarrow.SetWindowText(LL14(L"MS 狭", L"MS Nar", L"MS etr", L"MS str", L"MS est", L"MS 좁", L"MS 窄", L"MS ضيق", L"MS узк", L"MS eng", L"MS est", L"MS smal", L"MS was", L"MS dar"));
+		m_msWide.SetWindowText(LL14(L"MS 広", L"MS Wide", L"MS lar", L"MS amp", L"MS anc", L"MS 넓", L"MS 宽", L"MS واسع", L"MS шир", L"MS weit", L"MS lar", L"MS breed", L"MS sze", L"MS gen"));
+		m_msRst.SetWindowText(LL14(L"MS戻", L"MS rst", L"MS rst", L"MS rst", L"MS rst", L"MS복", L"MS复", L"MS rst", L"MS rst", L"MS rst", L"MS rst", L"MS rst", L"MS rst", L"MS rst"));
+		m_play.SetWindowText(LL14(L"再生", L"Play", L"Lire", L"Play", L"Play", L"재생", L"播放", L"تشغيل", L"Играть", L"Play", L"Play", L"Play", L"Odtw.", L"Oynat"));
+		m_pause.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시정지", L"暂停", L"إيقاف", L"Пауза", L"Pause", L"Pausa", L"Pauze", L"Pauza", L"Duraklat"));
+		m_stop.SetWindowText(LL14(L"停止", L"Stop", L"Stop", L"Stop", L"Stop", L"정지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stop", L"Stop", L"Durdur"));
+		m_cue.SetWindowText(L"CUE");
+		m_prev.SetWindowText(L"<<");
+		m_next.SetWindowText(L">>");
+		m_beatBk.SetWindowText(LL14(L"-拍", L"-Beat", L"-Batt", L"-Beat", L"-Comp", L"-박", L"-拍", L"-نبض", L"-Доля", L"-Beat", L"-Bat", L"-Beat", L"-Beat", L"-Vurus"));
+		m_beatFw.SetWindowText(LL14(L"+拍", L"+Beat", L"+Batt", L"+Beat", L"+Comp", L"+박", L"+拍", L"+نبض", L"+Доля", L"+Beat", L"+Bat", L"+Beat", L"+Beat", L"+Vurus"));
+		m_bpmDet.SetWindowText(LL14(L"BPM計測", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM", L"BPM"));
+		m_cueSet.SetWindowText(LL14(L"SET", L"SET", L"SET", L"SET", L"SET", L"SET", L"SET", L"SET", L"SET", L"SET", L"SET", L"SET", L"SET", L"SET"));
+		m_cueClr.SetWindowText(LL14(L"CLR", L"CLR", L"CLR", L"CLR", L"CLR", L"CLR", L"CLR", L"CLR", L"CLR", L"CLR", L"CLR", L"CLR", L"CLR", L"CLR"));
+		m_abA.SetWindowText(L"A");
+		m_abB.SetWindowText(L"B");
+		m_abClr.SetWindowText(LL14(L"AB消", L"ABclr", L"ABclr", L"ABclr", L"ABclr", L"AB지", L"AB清", L"ABclr", L"ABclr", L"ABclr", L"ABclr", L"ABclr", L"ABclr", L"ABclr"));
+		m_loop1.SetWindowText(L"1");
+		m_loop2.SetWindowText(L"2");
+		m_loop4.SetWindowText(L"4");
+		m_loop8.SetWindowText(L"8");
+		m_killL.SetWindowText(LL14(L"Kill低", L"Kill L", L"Kill L", L"Kill L", L"Kill L", L"Kill저", L"Kill低", L"Kill L", L"Kill L", L"Kill L", L"Kill L", L"Kill L", L"Kill L", L"Kill L"));
+		m_killM.SetWindowText(LL14(L"Kill中", L"Kill M", L"Kill M", L"Kill M", L"Kill M", L"Kill중", L"Kill中", L"Kill M", L"Kill M", L"Kill M", L"Kill M", L"Kill M", L"Kill M", L"Kill M"));
+		m_killH.SetWindowText(LL14(L"Kill高", L"Kill H", L"Kill H", L"Kill H", L"Kill H", L"Kill고", L"Kill高", L"Kill H", L"Kill H", L"Kill H", L"Kill H", L"Kill H", L"Kill H", L"Kill H"));
+		{
+			static const TCHAR* cueLabs[8] = { L"C1", L"C2", L"C3", L"C4", L"C5", L"C6", L"C7", L"C8" };
+			for (int i = 0; i < 8; ++i)
+				m_cuePad[i].SetWindowText(cueLabs[i]);
+		}
+		m_tip.SetWindowText(LL14(L"ドラッグでスクラッチ", L"Drag to scratch",
+			L"Glisser pour scratch", L"Trascina per scratch", L"Arrastrar para scratch",
+			L"드래그로 스크래치", L"拖动刮盘", L"اسحب للخدش",
+			L"Тяните для скретча", L"Ziehen zum Scratchen", L"Arrastar para scratch",
+			L"Slepen om te scratchen", L"Przeciagaj aby scratch", L"Surukle scratch"));
+		m_eqLowL.SetWindowText(LL14(L"低域", L"Low", L"Graves", L"Bassi", L"Graves", L"저역", L"低音", L"منخفض", L"Низ", L"Tief", L"Graves", L"Laag", L"Niskie", L"Bas"));
+		m_eqMidL.SetWindowText(LL14(L"中域", L"Mid", L"Medium", L"Medi", L"Medios", L"중역", L"中音", L"وسط", L"Серед", L"Mitten", L"Medios", L"Midden", L"Srednie", L"Orta"));
+		m_eqHighL.SetWindowText(LL14(L"高域", L"High", L"Aigus", L"Alti", L"Agudos", L"고역", L"高音", L"مرتفع", L"Верх", L"Höhen", L"Agudos", L"Hoog", L"Wysokie", L"Tiz"));
+		SetDlgItemText(IDC_DJPAD_FX_L, LL14(L"効果", L"Effect", L"Effet", L"Effetto", L"Efecto",
+			L"효과", L"效果", L"تأثير", L"Эффект", L"Effekt", L"Efeito", L"Effect", L"Efekt", L"Efekt"));
+		SetDlgItemText(IDC_DJPAD_SPD_L, LL14(L"速度", L"Speed", L"Vitesse", L"Velocita", L"Velocidad",
+			L"속도", L"速度", L"سرعة", L"Скорость", L"Tempo", L"Velocidade", L"Snelheid", L"Predkosc", L"Hiz"));
+		SetDlgItemText(IDC_DJPAD_FILTER_L, LL14(L"フィルタ", L"Filter", L"Filtre", L"Filtro", L"Filtro",
+			L"필터", L"滤镜", L"مرشح", L"Фильтр", L"Filter", L"Filtro", L"Filter", L"Filtr", L"Filtre"));
+		SetDlgItemText(IDC_DJPAD_VOL_L, LL14(L"音量", L"Vol", L"Vol", L"Vol", L"Vol",
+			L"볼륨", L"音量", L"صوت", L"Громк.", L"Laut", L"Vol", L"Vol", L"Glosn.", L"Ses"));
+		{
+			int fx = savedata.mpDjScratchEffect;
+			int spd = savedata.mpDjScratchSpeed;
+			int filt = savedata.mpDjFilter;
+			int low = savedata.mpDjEqLow;
+			int mid = savedata.mpDjEqMid;
+			int high = savedata.mpDjEqHigh;
+			if (fx < 0 || fx > 200) fx = 100;
+			if (spd < 0 || spd > 200) spd = 100;
+			if (filt < 0 || filt > 200) filt = 100;
+			if (low < 0 || low > 200) low = 100;
+			if (mid < 0 || mid > 200) mid = 100;
+			if (high < 0 || high > 200) high = 100;
+			savedata.mpDjScratchEffect = fx;
+			savedata.mpDjScratchSpeed = spd;
+			savedata.mpDjFilter = filt;
+			savedata.mpDjEqLow = low;
+			savedata.mpDjEqMid = mid;
+			savedata.mpDjEqHigh = high;
+			m_fx.SetRange(0, 200); m_fx.SetPos(fx);
+			m_spd.SetRange(0, 200); m_spd.SetPos(spd);
+			m_filter.SetRange(0, 200); m_filter.SetPos(filt);
+			m_eqLow.SetRange(0, 200); m_eqLow.SetPos(200 - low); m_eqLow.SetMode(1);
+			m_eqMid.SetRange(0, 200); m_eqMid.SetPos(200 - mid); m_eqMid.SetMode(1);
+			m_eqHigh.SetRange(0, 200); m_eqHigh.SetPos(200 - high); m_eqHigh.SetMode(1);
+			int vol = 50;
+			if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_vol.GetSafeHwnd())
+				vol = mp->m_vol.GetPos();
+			else if (og && og->m_sl.GetSafeHwnd())
+				vol = og->m_sl.GetPos() / 1000;
+			if (vol < 0) vol = 0; if (vol > 100) vol = 100;
+			m_vol.SetRange(0, 100); m_vol.SetPos(vol);
+		}
+		m_seek.SetSelectionLocked(TRUE);
+		if (og && og->m_time.GetSafeHwnd()) {
+			int mn = 0, mx = 1;
+			og->m_time.GetRange(mn, mx);
+			m_seek.SetRange(mn, mx);
+			m_seek.SetPos(og->m_time.GetPos());
+		}
 		m_pitchUp.SetGradation(RGB(220, 240, 255), RGB(170, 210, 250), 0, TRUE);
 		m_pitchDn.SetGradation(RGB(220, 240, 255), RGB(170, 210, 250), 0, TRUE);
 		m_tempoUp.SetGradation(RGB(220, 245, 230), RGB(170, 220, 190), 0, TRUE);
 		m_tempoDn.SetGradation(RGB(220, 245, 230), RGB(170, 220, 190), 0, TRUE);
+		m_pitchRst.SetGradation(RGB(230, 230, 240), RGB(190, 190, 210), 0, TRUE);
+		m_tempoRst.SetGradation(RGB(230, 230, 240), RGB(190, 190, 210), 0, TRUE);
 		m_vocal.SetGradation(RGB(255, 230, 245), RGB(255, 180, 220), 0, TRUE);
+		m_vocalDn.SetGradation(RGB(255, 230, 245), RGB(255, 180, 220), 0, TRUE);
+		m_vocalRst.SetGradation(RGB(240, 230, 240), RGB(210, 190, 210), 0, TRUE);
 		m_msNarrow.SetGradation(RGB(235, 230, 255), RGB(200, 185, 250), 0, TRUE);
 		m_msWide.SetGradation(RGB(235, 230, 255), RGB(200, 185, 250), 0, TRUE);
+		m_msRst.SetGradation(RGB(230, 230, 240), RGB(190, 190, 210), 0, TRUE);
+		m_play.SetGradation(RGB(200, 240, 200), RGB(140, 210, 150), 0, TRUE);
+		m_pause.SetGradation(RGB(255, 240, 200), RGB(240, 200, 120), 0, TRUE);
+		m_stop.SetGradation(RGB(255, 210, 210), RGB(230, 140, 140), 0, TRUE);
+		m_cue.SetGradation(RGB(255, 230, 180), RGB(240, 180, 100), 0, TRUE);
+		m_prev.SetGradation(RGB(220, 230, 245), RGB(170, 190, 230), 0, TRUE);
+		m_next.SetGradation(RGB(220, 230, 245), RGB(170, 190, 230), 0, TRUE);
+		m_beatBk.SetGradation(RGB(230, 245, 255), RGB(170, 210, 240), 0, TRUE);
+		m_beatFw.SetGradation(RGB(230, 245, 255), RGB(170, 210, 240), 0, TRUE);
+		m_bpmDet.SetGradation(RGB(220, 255, 240), RGB(150, 220, 190), 0, TRUE);
+		for (int i = 0; i < 8; ++i)
+			m_cuePad[i].SetGradation(RGB(255, 245, 220), RGB(240, 200, 140), 0, TRUE);
+		m_cueSet.SetGradation(RGB(230, 255, 230), RGB(160, 220, 160), 0, TRUE);
+		m_cueClr.SetGradation(RGB(255, 230, 230), RGB(230, 160, 160), 0, TRUE);
+		m_abA.SetGradation(RGB(220, 240, 255), RGB(150, 190, 240), 0, TRUE);
+		m_abB.SetGradation(RGB(220, 240, 255), RGB(150, 190, 240), 0, TRUE);
+		m_abClr.SetGradation(RGB(240, 230, 230), RGB(210, 180, 180), 0, TRUE);
+		m_loop1.SetGradation(RGB(235, 255, 235), RGB(170, 230, 170), 0, TRUE);
+		m_loop2.SetGradation(RGB(235, 255, 235), RGB(170, 230, 170), 0, TRUE);
+		m_loop4.SetGradation(RGB(235, 255, 235), RGB(170, 230, 170), 0, TRUE);
+		m_loop8.SetGradation(RGB(235, 255, 235), RGB(170, 230, 170), 0, TRUE);
+		RefreshKillLook();
 		CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
 		m_tooltip.AddTool(&m_pitchUp, LL14(L"音程を +3 します。", L"Raise pitch by +3.", L"Monter la hauteur de +3.", L"Alza il pitch di +3.", L"Sube el tono +3.", L"음정을 +3.", L"音高 +3。", L"رفع الدرجة +3.", L"Поднять тон на +3.", L"Tonhöhe +3.", L"Tom +3.", L"Toonhoogte +3.", L"Wysokosc +3.", L"Perde +3."));
 		m_tooltip.AddTool(&m_pitchDn, LL14(L"音程を -3 します。", L"Lower pitch by -3.", L"Baisser la hauteur de -3.", L"Abbassa il pitch di -3.", L"Baja el tono -3.", L"음정을 -3.", L"音高 -3。", L"خفض الدرجة -3.", L"Опустить тон на -3.", L"Tonhöhe -3.", L"Tom -3.", L"Toonhoogte -3.", L"Wysokosc -3.", L"Perde -3."));
 		m_tooltip.AddTool(&m_tempoUp, LL14(L"テンポを +3% します。", L"Raise tempo by +3%.", L"Augmenter le tempo de +3%.", L"Aumenta il tempo del +3%.", L"Sube el tempo +3%.", L"템포 +3%.", L"速度 +3%。", L"رفع الإيقاع +3%.", L"Ускорить темп на +3%.", L"Tempo +3%.", L"Tempo +3%.", L"Tempo +3%.", L"Tempo +3%.", L"Tempo +3%."));
 		m_tooltip.AddTool(&m_tempoDn, LL14(L"テンポを -3% します。", L"Lower tempo by -3%.", L"Baisser le tempo de -3%.", L"Riduci il tempo del -3%.", L"Baja el tempo -3%.", L"템포 -3%.", L"速度 -3%。", L"خفض الإيقاع -3%.", L"Замедлить темп на -3%.", L"Tempo -3%.", L"Tempo -3%.", L"Tempo -3%.", L"Tempo -3%.", L"Tempo -3%."));
+		m_tooltip.AddTool(&m_pitchRst, LL14(L"音程を 100% に戻します。", L"Reset pitch to 100%.", L"Remettre la hauteur a 100%.", L"Ripristina pitch a 100%.", L"Restablece tono a 100%.", L"음정 100%로.", L"音高恢复 100%。", L"إعادة الدرجة إلى 100%.", L"Сброс тона на 100%.", L"Tonhöhe auf 100%.", L"Tom para 100%.", L"Toonhoogte naar 100%.", L"Wysokosc na 100%.", L"Perdeyi 100% yap."));
+		m_tooltip.AddTool(&m_tempoRst, LL14(L"テンポを 100% に戻します。", L"Reset tempo to 100%.", L"Remettre le tempo a 100%.", L"Ripristina tempo a 100%.", L"Restablece tempo a 100%.", L"템포 100%로.", L"速度恢复 100%。", L"إعادة الإيقاع إلى 100%.", L"Сброс темпа на 100%.", L"Tempo auf 100%.", L"Tempo para 100%.", L"Tempo naar 100%.", L"Tempo na 100%.", L"Tempo 100% yap."));
 		m_tooltip.AddTool(&m_vocal, LL14(L"センター（ボーカル）成分を強調します。", L"Boost center/vocal component.", L"Renforcer la voix (centre).", L"Enfatizza la voce (centro).", L"Refuerza la voz (centro).", L"보컬(센터) 강조.", L"增强人声（中置）。", L"تعزيز الصوت المركزي.", L"Усилить вокал (центр).", L"Gesang (Mitte) betonen.", L"Realcar vocal (centro).", L"Zang (midden) versterken.", L"Wzmocnij wokal (srodek).", L"Vokali (orta) vurgula."));
+		m_tooltip.AddTool(&m_vocalDn, LL14(L"センター（ボーカル）成分を弱めます。", L"Reduce center/vocal component.", L"Affaiblir la voix (centre).", L"Riduci la voce (centro).", L"Reduce la voz (centro).", L"보컬(센터) 약화.", L"减弱人声（中置）。", L"تخفيف الصوت المركزي.", L"Ослабить вокал (центр).", L"Gesang (Mitte) abschwächen.", L"Reduzir vocal (centro).", L"Zang (midden) verzwakken.", L"Osłab wokal (srodek).", L"Vokali (orta) azalt."));
+		m_tooltip.AddTool(&m_vocalRst, LL14(L"ボーカルを中立(100)に戻します。", L"Reset vocal to neutral (100).", L"Remettre la voix a 100.", L"Ripristina voce a 100.", L"Restablece voz a 100.", L"보컬 중립(100).", L"人声恢复中性(100)。", L"إعادة الصوت إلى 100.", L"Сброс вокала на 100.", L"Gesang auf 100.", L"Vocal para 100.", L"Zang naar 100.", L"Wokal na 100.", L"Vokal 100."));
 		m_tooltip.AddTool(&m_msNarrow, LL14(L"M/S 幅を狭くします（センター寄り）。", L"Narrow M/S width (more center).", L"Reduire la largeur M/S.", L"Restringi la larghezza M/S.", L"Reduce el ancho M/S.", L"M/S 폭을 좁힘.", L"缩小 M/S 宽度。", L"تضييق عرض M/S.", L"Сузить ширину M/S.", L"M/S-Breite verengen.", L"Estreitar largura M/S.", L"M/S-breedte vernauwen.", L"Zwez szerokosc M/S.", L"M/S genisligini daralt."));
 		m_tooltip.AddTool(&m_msWide, LL14(L"M/S 幅を広くします（サイド寄り）。", L"Widen M/S width (more sides).", L"Elargir la largeur M/S.", L"Allarga la larghezza M/S.", L"Amplia el ancho M/S.", L"M/S 폭을 넓힘.", L"加宽 M/S 宽度。", L"توسيع عرض M/S.", L"Расширить ширину M/S.", L"M/S-Breite erweitern.", L"Alargar largura M/S.", L"M/S-breedte verbreden.", L"Poszerz szerokosc M/S.", L"M/S genisligini genislet."));
+		m_tooltip.AddTool(&m_msRst, LL14(L"M/S 幅を中立(100)に戻します。", L"Reset M/S width to 100.", L"Remettre M/S a 100.", L"Ripristina M/S a 100.", L"Restablece M/S a 100.", L"M/S 중립(100).", L"M/S 恢复 100。", L"إعادة M/S إلى 100.", L"Сброс M/S на 100.", L"M/S auf 100.", L"M/S para 100.", L"M/S naar 100.", L"M/S na 100.", L"M/S 100."));
+		m_tooltip.AddTool(&m_vinyl, LL14(
+			L"レコード盤。ドラッグでスクラッチ（相対）、ホイールで微調整。",
+			L"Vinyl platter. Drag to scratch (relative), wheel to nudge.",
+			L"Platine. Glisser pour scratch (relatif), molette pour ajuster.",
+			L"Piatto. Trascina per scratch (relativo), rotella per regolare.",
+			L"Plato. Arrastre para scratch (relativo), rueda para ajustar.",
+			L"턴테이블. 드래그로 스크래치(상대), 휠로 미세 조정.",
+			L"唱片盘。拖动刮盘（相对），滚轮微调。",
+			L"قرص. اسحب للخدش (نسبي)، العجلة للضبط.",
+			L"Пластинка. Тяните для скретча (относит.), колесо для точной настройки.",
+			L"Platte. Ziehen zum Scratchen (relativ), Rad zum Feinjustieren.",
+			L"Disco. Arraste para scratch (relativo), roda para ajustar.",
+			L"Platenspeler. Sleep om te scratchen (relatief), wiel om bij te stellen.",
+			L"Plyta. Przeciagaj aby scratch (wzglednie), kolelko do dojscia.",
+			L"Plak. Scratch icin surukle (goreli), ince ayar icin tekerlek."));
+		m_tooltip.AddTool(&m_fx, LL14(
+			L"スクラッチ効果の強さ（音量）。100=標準。",
+			L"Scratch effect strength (level). 100=default.",
+			L"Force de l'effet scratch (niveau). 100=defaut.",
+			L"Intensita effetto scratch (livello). 100=predefinito.",
+			L"Fuerza del efecto scratch (nivel). 100=predeterminado.",
+			L"스크래치 효과 강도(볼륨). 100=기본.",
+			L"刮盘效果强度（音量）。100=标准。",
+			L"قوة تأثير الخدش (المستوى). 100=افتراضي.",
+			L"Сила эффекта скретча (уровень). 100=по умолчанию.",
+			L"Scratch-Effektstarke (Pegel). 100=Standard.",
+			L"Forca do efeito scratch (nivel). 100=padrao.",
+			L"Scratch-effectsterkte (niveau). 100=standaard.",
+			L"Sila efektu scratch (poziom). 100=domyslny.",
+			L"Scratch efekti gucu (seviye). 100=varsayilan."));
+		m_tooltip.AddTool(&m_spd, LL14(
+			L"スクラッチの速度感度。100=標準。",
+			L"Scratch speed sensitivity. 100=default.",
+			L"Sensibilite vitesse scratch. 100=defaut.",
+			L"Sensibilita velocita scratch. 100=predefinito.",
+			L"Sensibilidad de velocidad scratch. 100=predeterminado.",
+			L"스크래치 속도 감도. 100=기본.",
+			L"刮盘速度灵敏度。100=标准。",
+			L"حساسية سرعة الخدش. 100=افتراضي.",
+			L"Чувствительность скорости скретча. 100=по умолчанию.",
+			L"Scratch-Geschwindigkeitsempfindlichkeit. 100=Standard.",
+			L"Sensibilidade de velocidade scratch. 100=padrao.",
+			L"Scratch-snelheidsgevoeligheid. 100=standaard.",
+			L"Czulosc predkosci scratch. 100=domyslny.",
+			L"Scratch hiz duyarliligi. 100=varsayilan."));
+		m_tooltip.AddTool(&m_filter, LL14(
+			L"DJフィルタ。100=OFF、<100=LPF、>100=HPF。",
+			L"DJ filter. 100=OFF, <100=LPF, >100=HPF.",
+			L"Filtre DJ. 100=OFF, <100=LPF, >100=HPF.",
+			L"Filtro DJ. 100=OFF, <100=LPF, >100=HPF.",
+			L"Filtro DJ. 100=OFF, <100=LPF, >100=HPF.",
+			L"DJ 필터. 100=OFF, <100=LPF, >100=HPF.",
+			L"DJ 滤镜。100=关，<100=LPF，>100=HPF。",
+			L"مرشح DJ. 100=OFF، <100=LPF، >100=HPF.",
+			L"DJ-фильтр. 100=OFF, <100=LPF, >100=HPF.",
+			L"DJ-Filter. 100=AUS, <100=LPF, >100=HPF.",
+			L"Filtro DJ. 100=OFF, <100=LPF, >100=HPF.",
+			L"DJ-filter. 100=UIT, <100=LPF, >100=HPF.",
+			L"Filtr DJ. 100=OFF, <100=LPF, >100=HPF.",
+			L"DJ filtre. 100=KAPALI, <100=LPF, >100=HPF."));
+		m_tooltip.AddTool(&m_vol, LL14(L"再生音量（メディアプレイヤーと同期）。", L"Playback volume (synced with media player).", L"Volume (sync lecteur).", L"Volume (sync player).", L"Volumen (sync reproductor).", L"재생 볼륨(플레이어 동기).", L"播放音量（与播放器同步）。", L"مستوى الصوت (مزامن).", L"Громкость (синхр.).", L"Lautstarke (sync).", L"Volume (sincronizado).", L"Volume (gesynchroniseerd).", L"Glosnosc (sync).", L"Ses (eszamanli)."));
+		m_tooltip.AddTool(&m_eqLow, LL14(L"低域EQ（100=中立）。", L"Low EQ (100=neutral).", L"EQ graves (100=neutre).", L"EQ bassi (100=neutro).", L"EQ graves (100=neutral).", L"저역 EQ(100=중립).", L"低音 EQ（100=中性）。", L"EQ منخفض (100=محايد).", L"Низкий EQ (100=нейтр.).", L"Tiefen-EQ (100=neutral).", L"EQ graves (100=neutro).", L"Lage EQ (100=neutraal).", L"EQ niskie (100=neutral).", L"Bas EQ (100=notr)."));
+		m_tooltip.AddTool(&m_eqMid, LL14(L"中域EQ（100=中立）。", L"Mid EQ (100=neutral).", L"EQ medium (100=neutre).", L"EQ medi (100=neutro).", L"EQ medios (100=neutral).", L"중역 EQ(100=중립).", L"中音 EQ（100=中性）。", L"EQ وسط (100=محايد).", L"Средний EQ (100=нейтр.).", L"Mitten-EQ (100=neutral).", L"EQ medios (100=neutro).", L"Midden EQ (100=neutraal).", L"EQ srednie (100=neutral).", L"Orta EQ (100=notr)."));
+		m_tooltip.AddTool(&m_eqHigh, LL14(L"高域EQ（100=中立）。", L"High EQ (100=neutral).", L"EQ aigus (100=neutre).", L"EQ alti (100=neutro).", L"EQ agudos (100=neutral).", L"고역 EQ(100=중립).", L"高音 EQ（100=中性）。", L"EQ مرتفع (100=محايد).", L"Высокий EQ (100=нейтр.).", L"Höhen-EQ (100=neutral).", L"EQ agudos (100=neutro).", L"Hoge EQ (100=neutraal).", L"EQ wysokie (100=neutral).", L"Tiz EQ (100=notr)."));
+		m_tooltip.AddTool(&m_killL, LL14(L"低域キル（トグル）。", L"Low kill (toggle).", L"Kill graves (bascule).", L"Kill bassi (toggle).", L"Kill graves (alternar).", L"저역 킬(토글).", L"低音消除（切换）。", L"قتل المنخفض (تبديل).", L"Kill низа (перекл.).", L"Tiefen-Kill (Umschalt).", L"Kill graves (alternar).", L"Lage kill (schakel).", L"Kill niskie (przełącz).", L"Bas kill (ac/kapa)."));
+		m_tooltip.AddTool(&m_killM, LL14(L"中域キル（トグル）。", L"Mid kill (toggle).", L"Kill medium (bascule).", L"Kill medi (toggle).", L"Kill medios (alternar).", L"중역 킬(토글).", L"中音消除（切换）。", L"قتل الوسط (تبديل).", L"Kill середины (перекл.).", L"Mitten-Kill (Umschalt).", L"Kill medios (alternar).", L"Midden kill (schakel).", L"Kill srednie (przełącz).", L"Orta kill (ac/kapa)."));
+		m_tooltip.AddTool(&m_killH, LL14(L"高域キル（トグル）。", L"High kill (toggle).", L"Kill aigus (bascule).", L"Kill alti (toggle).", L"Kill agudos (alternar).", L"고역 킬(토글).", L"高音消除（切换）。", L"قتل المرتفع (تبديل).", L"Kill верха (перекл.).", L"Höhen-Kill (Umschalt).", L"Kill agudos (alternar).", L"Hoge kill (schakel).", L"Kill wysokie (przełącz).", L"Tiz kill (ac/kapa)."));
+		m_tooltip.AddTool(&m_play, LL14(L"再生を開始します。", L"Start playback.", L"Demarrer la lecture.", L"Avvia riproduzione.", L"Iniciar reproduccion.", L"재생 시작.", L"开始播放。", L"بدء التشغيل.", L"Начать воспроизведение.", L"Wiedergabe starten.", L"Iniciar reproducao.", L"Afspelen starten.", L"Rozpocznij odtwarzanie.", L"Oynatmayi baslat."));
+		m_tooltip.AddTool(&m_pause, LL14(L"一時停止／再開します。", L"Pause / resume.", L"Pause / reprendre.", L"Pausa / riprendi.", L"Pausa / reanudar.", L"일시정지/재개.", L"暂停/继续。", L"إيقاف مؤقت / استئناف.", L"Пауза / продолжить.", L"Pause / Fortsetzen.", L"Pausar / retomar.", L"Pauzeren / hervatten.", L"Pauza / wznow.", L"Duraklat / devam."));
+		m_tooltip.AddTool(&m_stop, LL14(L"再生を停止します。", L"Stop playback.", L"Arreter la lecture.", L"Ferma riproduzione.", L"Detener reproduccion.", L"재생 정지.", L"停止播放。", L"إيقاف التشغيل.", L"Остановить воспроизведение.", L"Wiedergabe stoppen.", L"Parar reproducao.", L"Afspelen stoppen.", L"Zatrzymaj odtwarzanie.", L"Oynatmayı durdur."));
+		m_tooltip.AddTool(&m_cue, LL14(L"停止中:キュー記憶 / 再生中:キューへ戻り一時停止。", L"Paused: store cue / Playing: jump to cue and pause.", L"Pause: memoriser cue / Lecture: revenir au cue.", L"Pausa: memorizza cue / Play: vai al cue e pausa.", L"Pausa: guardar cue / Reproduciendo: saltar al cue.", L"정지: 큐 저장 / 재생: 큐로 이동 후 일시정지.", L"暂停：存储 cue / 播放：跳回 cue 并暂停。", L"متوقف: حفظ cue / تشغيل: العودة إلى cue.", L"Пауза: запомнить cue / Игра: вернуться к cue.", L"Pause: Cue speichern / Play: zum Cue und Pause.", L"Pausa: guardar cue / Play: voltar ao cue.", L"Pauze: cue opslaan / Play: naar cue en pauze.", L"Pauza: zapisz cue / Play: skocz do cue.", L"Duraklat: cue kaydet / Oynat: cue'ya don."));
+		m_tooltip.AddTool(&m_prev, LL14(L"前の曲へ。", L"Previous track.", L"Piste precedente.", L"Brano precedente.", L"Pista anterior.", L"이전 곡.", L"上一曲。", L"المقطع السابق.", L"Предыдущий трек.", L"Vorheriger Titel.", L"Faixa anterior.", L"Vorig nummer.", L"Poprzedni utwor.", L"Onceki parca."));
+		m_tooltip.AddTool(&m_next, LL14(L"次の曲へ。", L"Next track.", L"Piste suivante.", L"Brano successivo.", L"Pista siguiente.", L"다음 곡.", L"下一曲。", L"المقطع التالي.", L"Следующий трек.", L"Nächster Titel.", L"Faixa seguinte.", L"Volgend nummer.", L"Nastepny utwor.", L"Sonraki parca."));
+		m_tooltip.AddTool(&m_beatBk, LL14(L"1拍戻ります。", L"Jump back 1 beat.", L"Reculer d'1 battement.", L"Indietro di 1 beat.", L"Retroceder 1 compas.", L"1박 뒤로.", L"后退 1 拍。", L"رجوع نبضة واحدة.", L"Назад на 1 долю.", L"1 Beat zurück.", L"Voltar 1 batida.", L"1 beat terug.", L"Cofnij 1 beat.", L"1 vurus geri."));
+		m_tooltip.AddTool(&m_beatFw, LL14(L"1拍進みます。", L"Jump forward 1 beat.", L"Avancer d'1 battement.", L"Avanti di 1 beat.", L"Avanzar 1 compas.", L"1박 앞으로.", L"前进 1 拍。", L"تقدم نبضة واحدة.", L"Вперёд на 1 долю.", L"1 Beat vor.", L"Avancar 1 batida.", L"1 beat vooruit.", L"Do przodu 1 beat.", L"1 vurus ileri."));
+		{
+			const wchar_t* cueTip = LL14(
+				L"ホットキューへジャンプします。",
+				L"Jump to this hot cue.",
+				L"Aller a ce hot cue.",
+				L"Vai a questo hot cue.",
+				L"Saltar a este hot cue.",
+				L"이 핫큐로 이동.",
+				L"跳转到此热 cue。",
+				L"الانتقال إلى نقطة hot cue هذه.",
+				L"Перейти к этому hot cue.",
+				L"Zu diesem Hot-Cue springen.",
+				L"Ir a este hot cue.",
+				L"Naar deze hot cue springen.",
+				L"Skocz do tego hot cue.",
+				L"Bu hot cue'ya git.");
+			for (int i = 0; i < 8; ++i)
+				m_tooltip.AddTool(&m_cuePad[i], cueTip);
+		}
+		m_tooltip.AddTool(&m_cueSet, LL14(L"現在位置にホットキューを追加します。", L"Add a hot cue at the current position.", L"Ajouter un hot cue a la position actuelle.", L"Aggiungi hot cue alla posizione attuale.", L"Anadir hot cue en la posicion actual.", L"현재 위치에 핫큐 추가.", L"在当前位置添加热 cue。", L"إضافة hot cue عند الموضع الحالي.", L"Добавить hot cue в текущую позицию.", L"Hot-Cue an aktueller Position hinzufügen.", L"Adicionar hot cue na posicao atual.", L"Hot cue op huidige positie toevoegen.", L"Dodaj hot cue w biezacej pozycji.", L"Gecerli konuma hot cue ekle."));
+		m_tooltip.AddTool(&m_cueClr, LL14(L"ホットキューをすべてクリアします。", L"Clear all hot cues.", L"Effacer tous les hot cues.", L"Cancella tutti gli hot cue.", L"Borrar todos los hot cues.", L"모든 핫큐 삭제.", L"清除全部热 cue。", L"مسح كل نقاط hot cue.", L"Очистить все hot cue.", L"Alle Hot-Cues löschen.", L"Limpar todos os hot cues.", L"Alle hot cues wissen.", L"Wyczysc wszystkie hot cue.", L"Tum hot cue'lari temizle."));
+		m_tooltip.AddTool(&m_abA, LL14(L"A-Bループの A 点を現在位置に設定。", L"Set A point of A-B loop to current position.", L"Definir le point A de la boucle A-B.", L"Imposta punto A del loop A-B.", L"Establecer punto A del bucle A-B.", L"A-B 루프 A 지점을 현재 위치로.", L"将 A-B 循环的 A 点设为当前位置。", L"تعيين نقطة A لحلقة A-B.", L"Установить точку A цикла A-B.", L"A-Punkt der A-B-Schleife setzen.", L"Definir ponto A do loop A-B.", L"A-punt van A-B-lus zetten.", L"Ustaw punkt A petli A-B.", L"A-B dongusunun A noktasini ayarla."));
+		m_tooltip.AddTool(&m_abB, LL14(L"A-Bループの B 点を現在位置に設定。", L"Set B point of A-B loop to current position.", L"Definir le point B de la boucle A-B.", L"Imposta punto B del loop A-B.", L"Establecer punto B del bucle A-B.", L"A-B 루프 B 지점을 현재 위치로.", L"将 A-B 循环的 B 点设为当前位置。", L"تعيين نقطة B لحلقة A-B.", L"Установить точку B цикла A-B.", L"B-Punkt der A-B-Schleife setzen.", L"Definir ponto B do loop A-B.", L"B-punt van A-B-lus zetten.", L"Ustaw punkt B petli A-B.", L"A-B dongusunun B noktasini ayarla."));
+		m_tooltip.AddTool(&m_abClr, LL14(L"A-Bループを解除します。", L"Clear A-B loop.", L"Effacer la boucle A-B.", L"Cancella loop A-B.", L"Borrar bucle A-B.", L"A-B 루프 해제.", L"清除 A-B 循环。", L"مسح حلقة A-B.", L"Сбросить цикл A-B.", L"A-B-Schleife löschen.", L"Limpar loop A-B.", L"A-B-lus wissen.", L"Wyczysc petle A-B.", L"A-B dongusunu temizle."));
+		m_tooltip.AddTool(&m_loop1, LL14(L"現在位置から 1 拍ループ。", L"Loop 1 beat from current position.", L"Boucle 1 battement.", L"Loop di 1 beat.", L"Bucle de 1 compas.", L"현재 위치에서 1박 루프.", L"从当前位置起 1 拍循环。", L"حلقة نبضة واحدة.", L"Цикл 1 доля.", L"1-Beat-Schleife.", L"Loop de 1 batida.", L"1-beat-lus.", L"Petla 1 beat.", L"1 vurus dongusu."));
+		m_tooltip.AddTool(&m_loop2, LL14(L"現在位置から 2 拍ループ。", L"Loop 2 beats from current position.", L"Boucle 2 battements.", L"Loop di 2 beat.", L"Bucle de 2 compases.", L"현재 위치에서 2박 루프.", L"从当前位置起 2 拍循环。", L"حلقة نبضتين.", L"Цикл 2 доли.", L"2-Beat-Schleife.", L"Loop de 2 batidas.", L"2-beat-lus.", L"Petla 2 beat.", L"2 vurus dongusu."));
+		m_tooltip.AddTool(&m_loop4, LL14(L"現在位置から 4 拍ループ。", L"Loop 4 beats from current position.", L"Boucle 4 battements.", L"Loop di 4 beat.", L"Bucle de 4 compases.", L"현재 위치에서 4박 루프.", L"从当前位置起 4 拍循环。", L"حلقة 4 نبضات.", L"Цикл 4 доли.", L"4-Beat-Schleife.", L"Loop de 4 batidas.", L"4-beat-lus.", L"Petla 4 beat.", L"4 vurus dongusu."));
+		m_tooltip.AddTool(&m_loop8, LL14(L"現在位置から 8 拍ループ。", L"Loop 8 beats from current position.", L"Boucle 8 battements.", L"Loop di 8 beat.", L"Bucle de 8 compases.", L"현재 위치에서 8박 루프.", L"从当前位置起 8 拍循环。", L"حلقة 8 نبضات.", L"Цикл 8 долей.", L"8-Beat-Schleife.", L"Loop de 8 batidas.", L"8-beat-lus.", L"Petla 8 beat.", L"8 vurus dongusu."));
+		m_tooltip.AddTool(&m_seek, LL14(L"波形シーク。ドラッグで位置移動。", L"Waveform seek. Drag to move position.", L"Seek forme d'onde. Glisser pour deplacer.", L"Seek forma d'onda. Trascina per muovere.", L"Seek de forma de onda. Arrastre para mover.", L"파형 시크. 드래그로 이동.", L"波形定位。拖动移动位置。", L"سعي الموجة. اسحب للنقل.", L"Волновой seek. Тяните для перемещения.", L"Wellenform-Seek. Ziehen zum Verschieben.", L"Seek de forma de onda. Arraste para mover.", L"Golfvorm-seek. Sleep om te verplaatsen.", L"Seek przebiegu. Przeciagnij aby przesunac.", L"Dalga sekli seek. Konum icin surukle."));
+		m_tooltip.AddTool(&m_bpmDet, LL14(L"BPMを計測して拍グリッドへ反映します。", L"Measure BPM and apply beat grid.", L"Mesurer le BPM et appliquer la grille.", L"Misura BPM e applica griglia.", L"Medir BPM y aplicar rejilla.", L"BPM 측정 후 비트 그리드 반영.", L"测量 BPM 并应用到拍网格。", L"قياس BPM وتطبيق الشبكة.", L"Измерить BPM и сетку.", L"BPM messen und Raster anwenden.", L"Medir BPM e aplicar grade.", L"BPM meten en raster toepassen.", L"Zmierz BPM i zastosuj siatke.", L"BPM olc ve izgara uygula."));
+		m_tooltip.AddTool(&m_meter, LL14(L"出力レベルメーター。", L"Output level meter.", L"Vu-metre de sortie.", L"Misuratore livello uscita.", L"Medidor de nivel de salida.", L"출력 레벨 미터.", L"输出电平表。", L"مقياس مستوى الإخراج.", L"Индикатор уровня выхода.", L"Ausgangspegelmesser.", L"Medidor de nivel de saida.", L"Uitgangsniveaumeter.", L"Miernik poziomu wyjsciowego.", L"Cikis seviye gostergesi."));
 		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 8000);
+		SetTimer(1, 33, NULL);
+		m_vinyl.SyncFromPlayback();
+		RefreshStatus();
+		RefreshCueLit();
 		return TRUE;
+	}
+	void RefreshKillLook()
+	{
+		const int k = savedata.mpDjEqKill & 7;
+		m_killL.SetGradation(k & 1 ? RGB(255, 120, 120) : RGB(255, 230, 230), k & 1 ? RGB(220, 60, 60) : RGB(230, 160, 160), 0, TRUE);
+		m_killM.SetGradation(k & 2 ? RGB(255, 120, 120) : RGB(255, 230, 230), k & 2 ? RGB(220, 60, 60) : RGB(230, 160, 160), 0, TRUE);
+		m_killH.SetGradation(k & 4 ? RGB(255, 120, 120) : RGB(255, 230, 230), k & 4 ? RGB(220, 60, 60) : RGB(230, 160, 160), 0, TRUE);
+		if (m_killL.GetSafeHwnd()) m_killL.Invalidate(FALSE);
+		if (m_killM.GetSafeHwnd()) m_killM.Invalidate(FALSE);
+		if (m_killH.GetSafeHwnd()) m_killH.Invalidate(FALSE);
+	}
+	void RefreshCueLit()
+	{
+		const int n = ProAudio_CueCount();
+		for (int i = 0; i < 8; ++i) {
+			const BOOL on = (i < n);
+			m_cuePad[i].SetGradation(on ? RGB(255, 220, 160) : RGB(255, 245, 220), on ? RGB(240, 160, 80) : RGB(240, 200, 140), 0, TRUE);
+			if (m_cuePad[i].GetSafeHwnd()) m_cuePad[i].Invalidate(FALSE);
+		}
+		m_lastCueLit = n;
+	}
+	void RefreshStatus()
+	{
+		CString bpm;
+		if (savedata.mpDetectedBpm > 0)
+			bpm.Format(L"BPM %d", savedata.mpDetectedBpm);
+		else
+			bpm = LL14(L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --", L"BPM --");
+		if (m_bpm.GetSafeHwnd()) m_bpm.SetWindowText(bpm);
+		int pp = 100, tp = 100;
+		if (og && og->m_pitch_sl.GetSafeHwnd())
+			pp = (int)TempoPercentFromPos(og->m_pitch_sl.GetPos());
+		if (og && og->m_tempo_sl.GetSafeHwnd())
+			tp = (int)TempoPercentFromPos(og->m_tempo_sl.GetPos());
+		CString st;
+		st.Format(L"P %d%%  T %d%%  V %d  MS %d", pp, tp, savedata.mpVocalCenter, savedata.pro_ms_width);
+		if (m_status.GetSafeHwnd()) m_status.SetWindowText(st);
+	}
+	void SyncProToolsMsVocal()
+	{
+		if (g_proToolsDlg && ::IsWindow(g_proToolsDlg->GetSafeHwnd()))
+			g_proToolsDlg->LoadFromSavedata();
+	}
+	void SetPitchTempoAbs(BOOL isPitch, int pct)
+	{
+		if (!og || !::IsWindow(og->GetSafeHwnd())) return;
+		CCustomSliderCtrl& sl = isPitch ? og->m_pitch_sl : og->m_tempo_sl;
+		if (!sl.GetSafeHwnd()) return;
+		const int pos = MpDjPitchTempoSlFromPercent(pct);
+		sl.SetPos(pos);
+		if (isPitch) {
+			pitch = pos;
+			if (og->m_pitch.GetSafeHwnd()) {
+				CString s; s.Format(L"%3d%%", (int)TempoPercentFromPos(pos));
+				og->m_pitch.SetWindowText(s);
+			}
+			if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_pitch.GetSafeHwnd())
+				mp->m_pitch.SetPos(pos);
+		} else {
+			tempo = pos;
+			if (og->m_temp_num.GetSafeHwnd()) {
+				CString s; s.Format(L"%3d%%", (int)TempoPercentFromPos(pos));
+				og->m_temp_num.SetWindowText(s);
+			}
+			if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_tempo.GetSafeHwnd())
+				mp->m_tempo.SetPos(pos);
+		}
+		RefreshStatus();
+	}
+	void BeatJump(int beats)
+	{
+		if (!og || !og->m_time.GetSafeHwnd()) return;
+		int bpm = savedata.mpDetectedBpm > 0 ? savedata.mpDetectedBpm : 120;
+		if (bpm < 40) bpm = 40;
+		if (bpm > 300) bpm = 300;
+		int rate = wavbit_sample_Hz;
+		if (rate < 8000) rate = 44100;
+		int delta = (int)(((__int64)rate * 60 * beats) / bpm);
+		if (mode == -10) delta /= 100;
+		MpDjSeekToSliderPos(og->m_time.GetPos() + delta);
+	}
+	void SetBeatLoop(int beats)
+	{
+		if (!mp || !::IsWindow(mp->GetSafeHwnd()) || !og || !og->m_time.GetSafeHwnd()) return;
+		int bpm = savedata.mpDetectedBpm > 0 ? savedata.mpDetectedBpm : 120;
+		if (bpm < 40) bpm = 40;
+		if (bpm > 300) bpm = 300;
+		int rate = wavbit_sample_Hz;
+		if (rate < 8000) rate = 44100;
+		int len = (int)(((__int64)rate * 60 * beats) / bpm);
+		if (mode == -10) len /= 100;
+		if (len < 1) len = 1;
+		const int mn = og->m_time.GetMinValue();
+		const int mx = og->m_time.GetMaxValue();
+		int a = og->m_time.GetPos();
+		int b = a + len;
+		if (a < mn) a = mn;
+		if (b > mx) b = mx;
+		if (b <= a) b = (a < mx) ? (a + 1) : a;
+		mp->m_abApos = a;
+		mp->m_abBpos = b;
+		mp->m_abLoopCount = 0;
+		if (mp->m_seek.GetSafeHwnd())
+			mp->m_seek.SetAB(a, b);
+		if (m_seek.GetSafeHwnd())
+			m_seek.SetAB(a, b);
+	}
+	void PollSliders()
+	{
+		BOOL dirty = FALSE;
+		if (m_fx.GetSafeHwnd()) {
+			const int v = m_fx.GetPos();
+			if (v != savedata.mpDjScratchEffect) { savedata.mpDjScratchEffect = v; dirty = TRUE; }
+		}
+		if (m_spd.GetSafeHwnd()) {
+			const int v = m_spd.GetPos();
+			if (v != savedata.mpDjScratchSpeed) { savedata.mpDjScratchSpeed = v; dirty = TRUE; }
+		}
+		if (m_filter.GetSafeHwnd()) {
+			const int v = m_filter.GetPos();
+			if (v != savedata.mpDjFilter) { savedata.mpDjFilter = v; dirty = TRUE; }
+		}
+		if (m_eqLow.GetSafeHwnd()) {
+			const int v = 200 - m_eqLow.GetPos();
+			if (v != savedata.mpDjEqLow) { savedata.mpDjEqLow = v; dirty = TRUE; }
+		}
+		if (m_eqMid.GetSafeHwnd()) {
+			const int v = 200 - m_eqMid.GetPos();
+			if (v != savedata.mpDjEqMid) { savedata.mpDjEqMid = v; dirty = TRUE; }
+		}
+		if (m_eqHigh.GetSafeHwnd()) {
+			const int v = 200 - m_eqHigh.GetPos();
+			if (v != savedata.mpDjEqHigh) { savedata.mpDjEqHigh = v; dirty = TRUE; }
+		}
+		if (m_vol.GetSafeHwnd()) {
+			int v = m_vol.GetPos();
+			if (v < 0) v = 0; if (v > 100) v = 100;
+			int cur = v;
+			if (mp && mp->m_vol.GetSafeHwnd()) cur = mp->m_vol.GetPos();
+			if (v != cur) {
+				if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_vol.GetSafeHwnd()) {
+					mp->m_vol.SetPos(v);
+					mp->SendMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v), (LPARAM)mp->m_vol.GetSafeHwnd());
+				}
+				if (og && og->m_sl.GetSafeHwnd()) {
+					og->m_sl.SetPos(v * 1000);
+					og->PostMessage(WM_HSCROLL, MAKEWPARAM(SB_THUMBPOSITION, v * 1000), (LPARAM)og->m_sl.GetSafeHwnd());
+				}
+			}
+		}
+		if (dirty) MpPersistSavedataQuick();
+	}
+	void SyncSeekMirror()
+	{
+		if (!m_seek.GetSafeHwnd() || !og || !og->m_time.GetSafeHwnd()) return;
+		if (m_seek.IsDragging()) return;
+		int mn = 0, mx = 1;
+		og->m_time.GetRange(mn, mx);
+		int abA = -1, abB = -1;
+		if (mp) { abA = mp->m_abApos; abB = mp->m_abBpos; }
+		m_seek.SetPlaybackMirror(og->m_time.GetPos(), mn, mx, mn, mx, abA, abB);
+		if (mp && mp->m_wavePeakN > 0)
+			m_seek.SetWavePeaks(mp->m_wavePeaks, mp->m_wavePeakN);
+		if (savedata.mpDetectedBpm > 0)
+			m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE);
+		int frames[8];
+		int n = ProAudio_CueCount();
+		if (n > 8) n = 8;
+		for (int i = 0; i < n; ++i) {
+			ProCue c;
+			if (!ProAudio_CueGet(i, c)) { n = i; break; }
+			int pos = c.frame;
+			if (mx > mn && pos > mx) {
+				const int scaled100 = pos / 100;
+				if (scaled100 >= mn && scaled100 <= mx)
+					pos = scaled100;
+			}
+			if (pos < mn) pos = mn;
+			if (pos > mx) pos = mx;
+			frames[i] = pos;
+		}
+		m_seek.SetCues(frames, n);
+		if (n != m_lastCueLit) RefreshCueLit();
 	}
 	virtual BOOL PreTranslateMessage(MSG* pMsg)
 	{
 		if (m_tooltip.GetSafeHwnd()) m_tooltip.RelayEvent(pMsg);
+		if (pMsg && pMsg->message == WM_MOUSEWHEEL && m_vinyl.GetSafeHwnd()) {
+			CPoint pt(GET_X_LPARAM(pMsg->lParam), GET_Y_LPARAM(pMsg->lParam));
+			CRect vr; m_vinyl.GetWindowRect(&vr);
+			if (vr.PtInRect(pt)) {
+				m_vinyl.SendMessage(WM_MOUSEWHEEL, pMsg->wParam, pMsg->lParam);
+				return TRUE;
+			}
+		}
 		return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 	}
 	virtual void PostNcDestroy()
 	{
 		g_mpDjPad = NULL;
-		// ユーザー閉じ: 次回復元を落とす。アプリ終了時は PrepareAppExit で残す
-		if (!s_djPadAppExit && savedata.mpDjPadwindow) {
-			savedata.mpDjPadwindow = 0;
-			MpPersistSavedataQuick();
-		}
 		CCustomBlurDialogBase::PostNcDestroy();
 		delete this;
 	}
-	afx_msg void OnPitchUp() { MpDjApplyPitchTempoDelta(TRUE, +3); }
-	afx_msg void OnPitchDn() { MpDjApplyPitchTempoDelta(TRUE, -3); }
-	afx_msg void OnTempoUp() { MpDjApplyPitchTempoDelta(FALSE, +3); }
-	afx_msg void OnTempoDn() { MpDjApplyPitchTempoDelta(FALSE, -3); }
+	afx_msg void OnClose()
+	{
+		// ユーザー閉じ: 次回起動で復活させない（アプリ終了時は PrepareAppExit で残す）
+		if (!s_djPadAppExit) {
+			savedata.mpDjPadwindow = 0;
+			MpPersistSavedataQuick();
+		}
+		DestroyWindow();
+	}
+	afx_msg void OnDestroy()
+	{
+		KillTimer(1);
+		MpDjScratchShutdown();
+		CCustomBlurDialogBase::OnDestroy();
+	}
+	afx_msg void OnTimer(UINT_PTR nIDEvent)
+	{
+		if (nIDEvent == 1) {
+			m_vinyl.SyncFromPlayback();
+			PollSliders();
+			SyncSeekMirror();
+			RefreshStatus();
+			const int lv = (int)(ProAudio_LivePeak() * 1000.f + 0.5f);
+			if (m_meter.GetSafeHwnd()) m_meter.SetLevel(lv);
+		}
+		CCustomBlurDialogBase::OnTimer(nIDEvent);
+	}
+	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+	{
+		UNREFERENCED_PARAMETER(nSBCode);
+		UNREFERENCED_PARAMETER(nPos);
+		if (pScrollBar && pScrollBar->GetSafeHwnd() == m_seek.GetSafeHwnd()) {
+			const int cueHit = m_seek.GetCueClick();
+			if (cueHit >= 0) {
+				m_seek.ClearCueClick();
+				if (mp) mp->JumpToCueIndex(cueHit);
+				else {
+					ProCue c;
+					if (ProAudio_CueGet(cueHit, c) && og)
+						og->PostMessage(WM_APP_PROAUDIO_CUESEEK, 0, (LPARAM)c.frame);
+				}
+			} else if (!m_seek.IsDragging() || m_seek.GetDragTarget() == 3) {
+				MpDjSeekToSliderPos(m_seek.GetPos());
+			}
+			if (mp) {
+				int a = -1, b = -1;
+				m_seek.GetAB(a, b);
+				if (a != mp->m_abApos || b != mp->m_abBpos) {
+					mp->m_abApos = a;
+					mp->m_abBpos = b;
+					mp->m_abLoopCount = 0;
+					if (mp->m_seek.GetSafeHwnd())
+						mp->m_seek.SetAB(a, b);
+				}
+			}
+		} else {
+			PollSliders();
+		}
+		CCustomBlurDialogBase::OnHScroll(nSBCode, nPos, pScrollBar);
+	}
+	afx_msg void OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+	{
+		UNREFERENCED_PARAMETER(nSBCode);
+		UNREFERENCED_PARAMETER(nPos);
+		UNREFERENCED_PARAMETER(pScrollBar);
+		PollSliders();
+	}
+	afx_msg void OnContextMenu(CWnd*, CPoint point)
+	{
+		if (point.x == -1 && point.y == -1) {
+			CRect r; GetWindowRect(&r);
+			point.x = r.left + 40; point.y = r.top + 40;
+		}
+		const BOOL topMost = (GetExStyle() & WS_EX_TOPMOST) != 0;
+		CCustomPopupMenu menu;
+		menu.SetAeroMode(FALSE);
+		menu.AddCheck(10,
+			LL14(L"最前面", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano",
+				L"Siempre visible", L"항상 위", L"置顶", L"دائماً في المقدمة", L"Поверх всех", L"Immer im Vordergrund",
+				L"Sempre no topo", L"Altijd boven", L"Zawsze na wierzchu", L"Her zaman ustte"),
+			topMost);
+		menu.AddCheck(11,
+			LL14(L"メインに追随", L"Follow main window", L"Suivre la fenetre principale", L"Segui finestra principale",
+				L"Seguir ventana principal", L"메인 창 따라가기", L"跟随主窗口", L"اتبع النافذة الرئيسية", L"Следовать главному", L"Hauptfenster folgen",
+				L"Seguir janela principal", L"Volg hoofdvenster", L"Podazaj za glownym", L"Ana pencereyi izle"),
+			savedata.mpDjPadMainLock != 0);
+		menu.AddSeparator();
+		menu.AddCommand(12,
+			LL14(L"音程/テンポをリセット", L"Reset pitch/tempo", L"Reinit hauteur/tempo", L"Reset pitch/tempo",
+				L"Restablecer tono/tempo", L"음정/템포 초기화", L"重置音高/速度", L"إعادة الدرجة/الإيقاع", L"Сброс тона/темпа", L"Tonhöhe/Tempo zurücksetzen",
+				L"Redefinir tom/tempo", L"Toonhoogte/tempo resetten", L"Reset wysokosci/tempa", L"Perde/tempo sifirla"));
+		menu.AddCommand(13,
+			LL14(L"EQ/フィルタをリセット", L"Reset EQ/filter", L"Reinit EQ/filtre", L"Reset EQ/filtro",
+				L"Restablecer EQ/filtro", L"EQ/필터 초기화", L"重置 EQ/滤镜", L"إعادة EQ/المرشح", L"Сброс EQ/фильтра", L"EQ/Filter zurücksetzen",
+				L"Redefinir EQ/filtro", L"EQ/filter resetten", L"Reset EQ/filtra", L"EQ/filtre sifirla"));
+		menu.AddCommand(14,
+			LL14(L"スクラッチ設定をリセット", L"Reset scratch settings", L"Reinit scratch", L"Reset scratch",
+				L"Restablecer scratch", L"스크래치 초기화", L"重置刮盘设置", L"إعادة إعدادات الخدش", L"Сброс скретча", L"Scratch zurücksetzen",
+				L"Redefinir scratch", L"Scratch resetten", L"Reset scratch", L"Scratch sifirla"));
+		menu.AddCommand(15,
+			LL14(L"BPM計測", L"Detect BPM", L"Detecter BPM", L"Rileva BPM", L"Detectar BPM",
+				L"BPM 측정", L"检测 BPM", L"اكتشاف BPM", L"Определить BPM", L"BPM erkennen",
+				L"Detectar BPM", L"BPM detecteren", L"Wykryj BPM", L"BPM algila"));
+		menu.AddSeparator();
+		menu.AddCommand(1,
+			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+		const UINT cmd = menu.Track(point, this);
+		if (cmd == 1) {
+			if (!s_djPadAppExit) {
+				savedata.mpDjPadwindow = 0;
+				MpPersistSavedataQuick();
+			}
+			DestroyWindow();
+		} else if (cmd == 10) {
+			savedata.mpDjPadTopMost = topMost ? 0 : 1;
+			SetWindowPos(topMost ? &wndNoTopMost : &wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+			MpPersistSavedataQuick();
+		} else if (cmd == 11) {
+			savedata.mpDjPadMainLock = savedata.mpDjPadMainLock ? 0 : 1;
+			EnableMainWindowLock(&savedata.mpDjPadMainLock, FALSE);
+			MpPersistSavedataQuick();
+		} else if (cmd == 12) {
+			SetPitchTempoAbs(TRUE, 100);
+			SetPitchTempoAbs(FALSE, 100);
+		} else if (cmd == 13) {
+			savedata.mpDjEqLow = savedata.mpDjEqMid = savedata.mpDjEqHigh = 100;
+			savedata.mpDjFilter = 100;
+			savedata.mpDjEqKill = 0;
+			if (m_eqLow.GetSafeHwnd()) m_eqLow.SetPos(100);
+			if (m_eqMid.GetSafeHwnd()) m_eqMid.SetPos(100);
+			if (m_eqHigh.GetSafeHwnd()) m_eqHigh.SetPos(100);
+			if (m_filter.GetSafeHwnd()) m_filter.SetPos(100);
+			RefreshKillLook();
+			MpPersistSavedataQuick();
+		} else if (cmd == 14) {
+			savedata.mpDjScratchEffect = 100;
+			savedata.mpDjScratchSpeed = 100;
+			if (m_fx.GetSafeHwnd()) m_fx.SetPos(100);
+			if (m_spd.GetSafeHwnd()) m_spd.SetPos(100);
+			MpPersistSavedataQuick();
+		} else if (cmd == 15) {
+			if (mp) MpOnBpmDetect(mp);
+		}
+	}
+	afx_msg void OnRButtonUp(UINT, CPoint point)
+	{
+		ClientToScreen(&point);
+		OnContextMenu(this, point);
+	}
+	afx_msg void OnPitchUp() { MpDjApplyPitchTempoDelta(TRUE, +3); RefreshStatus(); }
+	afx_msg void OnPitchDn() { MpDjApplyPitchTempoDelta(TRUE, -3); RefreshStatus(); }
+	afx_msg void OnTempoUp() { MpDjApplyPitchTempoDelta(FALSE, +3); RefreshStatus(); }
+	afx_msg void OnTempoDn() { MpDjApplyPitchTempoDelta(FALSE, -3); RefreshStatus(); }
+	afx_msg void OnPitchRst() { SetPitchTempoAbs(TRUE, 100); }
+	afx_msg void OnTempoRst() { SetPitchTempoAbs(FALSE, 100); }
 	afx_msg void OnVocal() {
 		savedata.mpVocalCenter = min(200, savedata.mpVocalCenter + 10);
 		MpPersistSavedataQuick();
+		SyncProToolsMsVocal();
+		RefreshStatus();
+	}
+	afx_msg void OnVocalDn() {
+		savedata.mpVocalCenter = max(0, savedata.mpVocalCenter - 10);
+		MpPersistSavedataQuick();
+		SyncProToolsMsVocal();
+		RefreshStatus();
+	}
+	afx_msg void OnVocalRst() {
+		savedata.mpVocalCenter = 100;
+		MpPersistSavedataQuick();
+		SyncProToolsMsVocal();
+		RefreshStatus();
 	}
 	afx_msg void OnMsNarrow() {
 		savedata.pro_ms_width = max(0, savedata.pro_ms_width - 10);
+		savedata.pro_ms_mono = 0;
 		MpPersistSavedataQuick();
+		SyncProToolsMsVocal();
+		RefreshStatus();
 	}
 	afx_msg void OnMsWide() {
 		savedata.pro_ms_width = min(200, savedata.pro_ms_width + 10);
+		savedata.pro_ms_mono = 0;
+		MpPersistSavedataQuick();
+		SyncProToolsMsVocal();
+		RefreshStatus();
+	}
+	afx_msg void OnMsRst() {
+		savedata.pro_ms_width = 100;
+		savedata.pro_ms_mono = 0;
+		MpPersistSavedataQuick();
+		SyncProToolsMsVocal();
+		RefreshStatus();
+	}
+	afx_msg void OnPlay() {
+		if (mp) mp->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PLAY, BN_CLICKED), 0);
+	}
+	afx_msg void OnPause() {
+		if (mp) mp->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PAUSE, BN_CLICKED), 0);
+	}
+	afx_msg void OnStop() {
+		if (mp) mp->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_STOP, BN_CLICKED), 0);
+	}
+	afx_msg void OnPrev() {
+		if (mp) mp->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PREV, BN_CLICKED), 0);
+	}
+	afx_msg void OnNext() {
+		if (mp) mp->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_NEXT, BN_CLICKED), 0);
+	}
+	afx_msg void OnCueBtn() {
+		if (!og || !og->m_time.GetSafeHwnd()) return;
+		if (ps == 1 || !plf) {
+			m_cueMem = og->m_time.GetPos();
+		} else {
+			if (m_cueMem >= 0)
+				MpDjSeekToSliderPos(m_cueMem);
+			if (mp) mp->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PAUSE, BN_CLICKED), 0);
+			else if (og) og->OnPause();
+		}
+	}
+	afx_msg void OnBeatBk() { BeatJump(-1); }
+	afx_msg void OnBeatFw() { BeatJump(+1); }
+	afx_msg void OnBpmDet() { if (mp) MpOnBpmDetect(mp); }
+	afx_msg void OnCuePad(UINT nID) {
+		const int idx = (int)nID - IDC_DJPAD_CUE1;
+		if (idx < 0 || idx > 7) return;
+		if (mp) mp->JumpToCueIndex(idx);
+		else {
+			ProCue c;
+			if (ProAudio_CueGet(idx, c) && og)
+				og->PostMessage(WM_APP_PROAUDIO_CUESEEK, 0, (LPARAM)c.frame);
+		}
+	}
+	afx_msg void OnCueSet() {
+		if (!og || !::IsWindow(og->GetSafeHwnd())) return;
+		const int pos = og->m_time.GetPos();
+		TCHAR lab[32];
+		_stprintf_s(lab, _T("C%d"), ProAudio_CueCount() + 1);
+		if (ProAudio_CueAdd(pos, lab) < 0) return;
+		if (mp) mp->RefreshSeekCues();
+		RefreshCueLit();
+		SyncSeekMirror();
+	}
+	afx_msg void OnCueClr() {
+		ProAudio_CueClearAll();
+		if (mp) mp->RefreshSeekCues();
+		RefreshCueLit();
+		SyncSeekMirror();
+	}
+	afx_msg void OnAbA() {
+		if (!mp || !og || !::IsWindow(og->GetSafeHwnd())) return;
+		mp->m_abApos = og->m_time.GetPos();
+		if (mp->m_abBpos >= 0 && mp->m_abBpos <= mp->m_abApos) mp->m_abBpos = -1;
+		mp->m_abLoopCount = 0;
+		if (mp->m_seek.GetSafeHwnd()) mp->m_seek.SetAB(mp->m_abApos, mp->m_abBpos);
+		SyncSeekMirror();
+	}
+	afx_msg void OnAbB() {
+		if (!mp || !og || !::IsWindow(og->GetSafeHwnd())) return;
+		mp->m_abBpos = og->m_time.GetPos();
+		if (mp->m_abApos < 0) mp->m_abApos = og->m_time.GetMinValue();
+		if (mp->m_abBpos <= mp->m_abApos) {
+			int t = mp->m_abApos; mp->m_abApos = mp->m_abBpos; mp->m_abBpos = t;
+		}
+		mp->m_abLoopCount = 0;
+		if (mp->m_seek.GetSafeHwnd()) mp->m_seek.SetAB(mp->m_abApos, mp->m_abBpos);
+		SyncSeekMirror();
+	}
+	afx_msg void OnAbClr() {
+		if (!mp) return;
+		mp->m_abApos = -1;
+		mp->m_abBpos = -1;
+		mp->m_abLoopCount = 0;
+		if (mp->m_seek.GetSafeHwnd()) mp->m_seek.SetAB(-1, -1);
+		SyncSeekMirror();
+	}
+	afx_msg void OnLoop1() { SetBeatLoop(1); }
+	afx_msg void OnLoop2() { SetBeatLoop(2); }
+	afx_msg void OnLoop4() { SetBeatLoop(4); }
+	afx_msg void OnLoop8() { SetBeatLoop(8); }
+	afx_msg void OnKillL() {
+		savedata.mpDjEqKill ^= 1;
+		RefreshKillLook();
+		MpPersistSavedataQuick();
+	}
+	afx_msg void OnKillM() {
+		savedata.mpDjEqKill ^= 2;
+		RefreshKillLook();
+		MpPersistSavedataQuick();
+	}
+	afx_msg void OnKillH() {
+		savedata.mpDjEqKill ^= 4;
+		RefreshKillLook();
 		MpPersistSavedataQuick();
 	}
 	DECLARE_MESSAGE_MAP()
 };
 
 BEGIN_MESSAGE_MAP(CMpDjPadDlg, CCustomBlurDialogBase)
+	ON_WM_CLOSE()
+	ON_WM_DESTROY()
+	ON_WM_TIMER()
+	ON_WM_HSCROLL()
+	ON_WM_VSCROLL()
+	ON_WM_CONTEXTMENU()
+	ON_WM_RBUTTONUP()
 	ON_BN_CLICKED(IDC_DJPAD_PITCH_UP, &CMpDjPadDlg::OnPitchUp)
 	ON_BN_CLICKED(IDC_DJPAD_PITCH_DN, &CMpDjPadDlg::OnPitchDn)
 	ON_BN_CLICKED(IDC_DJPAD_TEMPO_UP, &CMpDjPadDlg::OnTempoUp)
 	ON_BN_CLICKED(IDC_DJPAD_TEMPO_DN, &CMpDjPadDlg::OnTempoDn)
+	ON_BN_CLICKED(IDC_DJPAD_PITCH_RST, &CMpDjPadDlg::OnPitchRst)
+	ON_BN_CLICKED(IDC_DJPAD_TEMPO_RST, &CMpDjPadDlg::OnTempoRst)
 	ON_BN_CLICKED(IDC_DJPAD_VOCAL, &CMpDjPadDlg::OnVocal)
+	ON_BN_CLICKED(IDC_DJPAD_VOCAL_DN, &CMpDjPadDlg::OnVocalDn)
+	ON_BN_CLICKED(IDC_DJPAD_VOCAL_RST, &CMpDjPadDlg::OnVocalRst)
 	ON_BN_CLICKED(IDC_DJPAD_MS_NARROW, &CMpDjPadDlg::OnMsNarrow)
 	ON_BN_CLICKED(IDC_DJPAD_MS_WIDE, &CMpDjPadDlg::OnMsWide)
+	ON_BN_CLICKED(IDC_DJPAD_MS_RST, &CMpDjPadDlg::OnMsRst)
+	ON_BN_CLICKED(IDC_DJPAD_PLAY, &CMpDjPadDlg::OnPlay)
+	ON_BN_CLICKED(IDC_DJPAD_PAUSE, &CMpDjPadDlg::OnPause)
+	ON_BN_CLICKED(IDC_DJPAD_STOP, &CMpDjPadDlg::OnStop)
+	ON_BN_CLICKED(IDC_DJPAD_CUE, &CMpDjPadDlg::OnCueBtn)
+	ON_BN_CLICKED(IDC_DJPAD_PREV, &CMpDjPadDlg::OnPrev)
+	ON_BN_CLICKED(IDC_DJPAD_NEXT, &CMpDjPadDlg::OnNext)
+	ON_BN_CLICKED(IDC_DJPAD_BEAT_BK, &CMpDjPadDlg::OnBeatBk)
+	ON_BN_CLICKED(IDC_DJPAD_BEAT_FW, &CMpDjPadDlg::OnBeatFw)
+	ON_BN_CLICKED(IDC_DJPAD_BPM_DET, &CMpDjPadDlg::OnBpmDet)
+	ON_CONTROL_RANGE(BN_CLICKED, IDC_DJPAD_CUE1, IDC_DJPAD_CUE8, &CMpDjPadDlg::OnCuePad)
+	ON_BN_CLICKED(IDC_DJPAD_CUESET, &CMpDjPadDlg::OnCueSet)
+	ON_BN_CLICKED(IDC_DJPAD_CUECLR, &CMpDjPadDlg::OnCueClr)
+	ON_BN_CLICKED(IDC_DJPAD_ABA, &CMpDjPadDlg::OnAbA)
+	ON_BN_CLICKED(IDC_DJPAD_ABB, &CMpDjPadDlg::OnAbB)
+	ON_BN_CLICKED(IDC_DJPAD_ABCLR, &CMpDjPadDlg::OnAbClr)
+	ON_BN_CLICKED(IDC_DJPAD_LOOP1, &CMpDjPadDlg::OnLoop1)
+	ON_BN_CLICKED(IDC_DJPAD_LOOP2, &CMpDjPadDlg::OnLoop2)
+	ON_BN_CLICKED(IDC_DJPAD_LOOP4, &CMpDjPadDlg::OnLoop4)
+	ON_BN_CLICKED(IDC_DJPAD_LOOP8, &CMpDjPadDlg::OnLoop8)
+	ON_BN_CLICKED(IDC_DJPAD_KILL_L, &CMpDjPadDlg::OnKillL)
+	ON_BN_CLICKED(IDC_DJPAD_KILL_M, &CMpDjPadDlg::OnKillM)
+	ON_BN_CLICKED(IDC_DJPAD_KILL_H, &CMpDjPadDlg::OnKillH)
 END_MESSAGE_MAP()
 
 BOOL IsMpDjPadOpen()
@@ -2145,11 +3868,12 @@ void MpDjPadPrepareAppExit()
 		return;
 	s_djPadAppExit = 1;
 	savedata.mpDjPadwindow = 1;
-	MpPersistSavedataQuick();
+	// ディスク書き込みは DestroyWindow 末尾の本保存に任せる（ここで Quick すると終了が二重 I/O）
 }
 
 void CloseMpDjPadIfOpen()
 {
+	MpDjScratchShutdown();
 	if (g_mpDjPad && ::IsWindow(g_mpDjPad->GetSafeHwnd()))
 		g_mpDjPad->DestroyWindow();
 	g_mpDjPad = NULL;
@@ -2444,14 +4168,30 @@ public:
 	CMpRemoteDlg(CWnd* p = NULL) : CCustomBlurDialogBase(IDD, p) {}
 	CCustomCheckBox m_enable;
 	CCustomEdit m_port;
+	CCustomStatic m_url;
+	CCustomStandardButton m_open;
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX)
 	{
 		CCustomBlurDialogBase::DoDataExchange(pDX);
 		DDX_Control(pDX, IDC_REMOTE_ENABLE, m_enable);
 		DDX_Control(pDX, IDC_REMOTE_PORT, m_port);
+		DDX_Control(pDX, IDC_REMOTE_URL, m_url);
+		DDX_Control(pDX, IDC_REMOTE_OPEN, m_open);
 	}
 	CToolTipCtrl m_tooltip;
+	void RefreshUrlLabel()
+	{
+		int port = savedata.mpRemotePort;
+		if (port < 1024 || port > 65535) port = 8765;
+		CString p; m_port.GetWindowText(p);
+		const int typed = _ttoi(p);
+		if (typed >= 1024 && typed <= 65535) port = typed;
+		CString url;
+		url.Format(L"http://127.0.0.1:%d/", port);
+		if (m_url.GetSafeHwnd())
+			m_url.SetWindowText(url);
+	}
 	virtual BOOL OnInitDialog()
 	{
 		CCustomBlurDialogBase::OnInitDialog();
@@ -2463,9 +4203,14 @@ protected:
 			L"HTTP em localhost", L"HTTP op localhost", L"HTTP na localhost", L"localhost HTTP"));
 		SetDlgItemText(IDC_REMOTE_PORT_L, LL14(L"ポート", L"Port", L"Port", L"Porta", L"Puerto",
 			L"포트", L"端口", L"منفذ", L"Порт", L"Port", L"Porta", L"Poort", L"Port", L"Port"));
+		m_open.SetWindowText(LL14(L"ブラウザで開く", L"Open in browser", L"Ouvrir dans le navigateur", L"Apri nel browser", L"Abrir en el navegador",
+			L"브라우저에서 열기", L"在浏览器打开", L"فتح في المتصفح", L"Открыть в браузере", L"Im Browser öffnen",
+			L"Abrir no navegador", L"Openen in browser", L"Otworz w przegladarce", L"Tarayicida ac"));
 		m_enable.SetCheck(savedata.mpRemoteOn ? BST_CHECKED : BST_UNCHECKED);
 		CString p; p.Format(_T("%d"), savedata.mpRemotePort);
 		m_port.SetWindowText(p);
+		RefreshUrlLabel();
+		m_open.SetGradation(RGB(220, 240, 255), RGB(160, 200, 240), 0, TRUE);
 		CCustomControlUtility::BeginDialogToolTip(m_tooltip, this, TTS_NOPREFIX);
 		m_tooltip.AddTool(&m_enable, LL14(L"ブラウザから再生操作できる簡易 HTTP サーバを起動します。", L"Start a simple HTTP server for browser transport control.", L"Demarrer un serveur HTTP simple pour controler la lecture.", L"Avvia un semplice server HTTP per il controllo.", L"Inicia un servidor HTTP simple para control.",
 			L"브라우저로 조작하는 간이 HTTP 서버를 켭니다.", L"启动简易 HTTP 服务器以便浏览器控制播放。", L"تشغيل خادم HTTP بسيط للتحكم.", L"Запустить простой HTTP-сервер для управления.", L"Einfachen HTTP-Server für Steuerung starten.",
@@ -2473,6 +4218,12 @@ protected:
 		m_tooltip.AddTool(&m_port, LL14(L"待ち受けポート (1024–65535)。", L"Listen port (1024–65535).", L"Port d'ecoute (1024–65535).", L"Porta di ascolto (1024–65535).", L"Puerto de escucha (1024–65535).",
 			L"수신 포트 (1024–65535).", L"监听端口 (1024–65535)。", L"منفذ الاستماع (1024–65535).", L"Порт прослушивания (1024–65535).", L"Listenport (1024–65535).",
 			L"Porta de escuta (1024–65535).", L"Luisterpoort (1024–65535).", L"Port nasluchu (1024–65535).", L"Dinleme portu (1024–65535)."));
+		m_tooltip.AddTool(&m_url, LL14(L"スマホ／PC のブラウザで開く URL（localhost のみ）。", L"URL for phone/PC browser (localhost only).", L"URL navigateur (localhost seulement).", L"URL browser (solo localhost).", L"URL del navegador (solo localhost).",
+			L"브라우저 URL (localhost만).", L"浏览器 URL（仅本机）。", L"رابط المتصفح (localhost فقط).", L"URL браузера (только localhost).", L"Browser-URL (nur localhost).",
+			L"URL do navegador (somente localhost).", L"Browser-URL (alleen localhost).", L"URL przegladarki (tylko localhost).", L"Tarayici URL (yalniz localhost)."));
+		m_tooltip.AddTool(&m_open, LL14(L"既定ブラウザでリモコンページを開きます。", L"Open the remote page in the default browser.", L"Ouvrir la page telecommande dans le navigateur.", L"Apri la pagina remote nel browser.", L"Abrir la pagina remota en el navegador.",
+			L"기본 브라우저로 리모트 페이지를 엽니다.", L"用默认浏览器打开遥控页。", L"فتح صفحة التحكم في المتصفح الافتراضي.", L"Открыть страницу пульта в браузере.", L"Remote-Seite im Standardbrowser öffnen.",
+			L"Abrir a pagina remota no navegador padrao.", L"Remote-pagina openen in standaardbrowser.", L"Otworz strone pilota w przegladarce.", L"Uzaktan sayfasini varsayilan tarayicida ac."));
 		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 360, 8000);
 		return TRUE;
 	}
@@ -2492,11 +4243,32 @@ protected:
 		if (mp) MpRemoteEnsureRunning(mp->GetSafeHwnd());
 		CCustomBlurDialogBase::OnDestroy();
 	}
+	afx_msg void OnEnChangePort() { RefreshUrlLabel(); }
+	afx_msg void OnOpenBrowser()
+	{
+		RefreshUrlLabel();
+		CString url;
+		if (m_url.GetSafeHwnd()) m_url.GetWindowText(url);
+		if (url.IsEmpty()) return;
+		// 有効化してから開く（無効のままだと接続できない）
+		if (m_enable.GetCheck() != BST_CHECKED) {
+			m_enable.SetCheck(BST_CHECKED);
+			savedata.mpRemoteOn = 1;
+		}
+		CString p; m_port.GetWindowText(p);
+		int port = _ttoi(p);
+		if (port >= 1024 && port <= 65535) savedata.mpRemotePort = port;
+		MpPersistSavedataQuick();
+		if (mp) MpRemoteEnsureRunning(mp->GetSafeHwnd());
+		::ShellExecute(NULL, L"open", url, NULL, NULL, SW_SHOWNORMAL);
+	}
 	DECLARE_MESSAGE_MAP()
 };
 
 BEGIN_MESSAGE_MAP(CMpRemoteDlg, CCustomBlurDialogBase)
 	ON_WM_DESTROY()
+	ON_EN_CHANGE(IDC_REMOTE_PORT, &CMpRemoteDlg::OnEnChangePort)
+	ON_BN_CLICKED(IDC_REMOTE_OPEN, &CMpRemoteDlg::OnOpenBrowser)
 END_MESSAGE_MAP()
 
 void CloseMpRemoteDlgIfOpen()
@@ -2688,6 +4460,7 @@ void OpenMpSsVizModeless(CWnd* parent)
 
 void MpAddonsShutdownAll()
 {
+	MpDjScratchShutdown();
 	CloseMpDjPadIfOpen();
 	CloseMpAlarmDlgIfOpen();
 	CloseMpMirrorDlgIfOpen();

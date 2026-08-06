@@ -1209,6 +1209,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_VIDEO_EXTRACT, &CMediaPlayerDlg::OnMpVideoExtract)
 	ON_COMMAND(ID_MP_VIDEO_REPLACE, &CMediaPlayerDlg::OnMpVideoReplace)
 	ON_COMMAND(ID_MP_GAME_PRESET, &CMediaPlayerDlg::OnMpGamePreset)
+	ON_COMMAND_RANGE(ID_MP_GCP_720_60, ID_MP_GCP_PLUS_WAV, &CMediaPlayerDlg::OnMpGcpRange)
 	ON_COMMAND(ID_MP_MIDI_IN, &CMediaPlayerDlg::OnMpMidiIn)
 	ON_BN_CLICKED(IDC_MP_LRCEXPAND, &CMediaPlayerDlg::OnLrcExpand)
 	ON_BN_CLICKED(IDC_MP_TOOLSTOGGLE, &CMediaPlayerDlg::OnToolsToggle)
@@ -8290,11 +8291,53 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 		LL14(L"動画ファイルの音声トラックを WAV で差し替えます", L"Replace the video file audio track with a WAV", L"Remplacer la piste audio video par un WAV", L"Sostituisci la traccia audio del video con WAV", L"Reemplazar la pista de audio del video con WAV",
 			L"동영상 오디오 트랙을 WAV로 교체", L"用 WAV 替换视频音轨", L"استبدال مسار صوت الفيديو بـ WAV", L"Заменить звуковую дорожку видео на WAV", L"Video-Tonspur durch WAV ersetzen",
 			L"Substituir a faixa de audio do video por WAV", L"Vervang de video-audiotrack door WAV", L"Zastap sciezke audio wideo plikiem WAV", L"Video ses izini WAV ile degistir"));
-	menu.AddCommand(ID_MP_GAME_PRESET,
-		LL14(L"ゲーム録画プリセット…", L"Game capture preset…", L"Preset capture jeu…", L"Preset cattura gioco…", L"Preset captura juego…", L"게임 캡처 프리셋…", L"游戏录制预设…", L"إعداد التقاط اللعبة…", L"Пресет записи игры…", L"Game-Capture-Preset…", L"Preset captura jogo…", L"Game-capturepreset…", L"Preset nagrywania gry…", L"Oyun kayit on ayari…"),
-		LL14(L"画質を選んで画面キャプチャを開きます（1080p60推奨）", L"Pick quality and open screen capture (1080p60 recommended)", L"Choisir la qualite et ouvrir la capture (1080p60 recommande)", L"Scegli qualita e apri cattura (1080p60 consigliato)", L"Elija calidad y abra captura (1080p60 recomendado)",
-			L"화질을 고르고 화면 캡처를 엽니다(1080p60 권장)", L"选择画质并打开画面捕获（推荐1080p60）", L"اختر الجودة وافتح الالتقاط (يُفضل 1080p60)", L"Выберите качество и откройте захват (рекомендуется 1080p60)", L"Qualität wählen und Capture öffnen (1080p60 empfohlen)",
-			L"Escolha qualidade e abra a captura (1080p60 recomendado)", L"Kies kwaliteit en open capture (1080p60 aanbevolen)", L"Wybierz jakosc i otworz przechwytywanie (zalecane 1080p60)", L"Kalite secip ekran yakalamayi ac (onerilen 1080p60)"));
+	{
+		CCustomPopupMenu* gcp = menu.AddSubMenu(
+			LL14(L"ゲーム録画プリセット", L"Game capture preset", L"Preset capture jeu", L"Preset cattura gioco", L"Preset captura juego",
+				L"게임 캡처 프리셋", L"游戏录制预设", L"إعداد التقاط اللعبة", L"Пресет записи игры", L"Game-Capture-Preset",
+				L"Preset captura jogo", L"Game-capturepreset", L"Preset nagrywania gry", L"Oyun kayit on ayari"),
+			LL14(L"画質を選んで画面キャプチャを開きます（1080p60推奨）", L"Pick quality and open screen capture (1080p60 recommended)", L"Choisir la qualite et ouvrir la capture (1080p60 recommande)", L"Scegli qualita e apri cattura (1080p60 consigliato)", L"Elija calidad y abra captura (1080p60 recomendado)",
+				L"화질을 고르고 화면 캡처를 엽니다(1080p60 권장)", L"选择画质并打开画面捕获（推荐1080p60）", L"اختر الجودة وافتح الالتقاط (يُفضل 1080p60)", L"Выберите качество и откройте захват (рекомендуется 1080p60)", L"Qualität wählen und Capture öffnen (1080p60 empfohlen)",
+				L"Escolha qualidade e abra a captura (1080p60 recomendado)", L"Kies kwaliteit en open capture (1080p60 aanbevolen)", L"Wybierz jakosc i otworz przechwytywanie (zalecane 1080p60)", L"Kalite secip ekran yakalamayi ac (onerilen 1080p60)"));
+		if (gcp) {
+			gcp->AddCommand(ID_MP_GCP_720_60,
+				LL14(L"720p / 60fps（軽量）", L"720p / 60fps (light)", L"720p / 60fps (leger)", L"720p / 60fps (leggero)", L"720p / 60fps (ligero)",
+					L"720p / 60fps (가벼움)", L"720p / 60fps（轻量）", L"720p / 60fps (خفيف)", L"720p / 60fps (лёгкий)", L"720p / 60fps (leicht)",
+					L"720p / 60fps (leve)", L"720p / 60fps (licht)", L"720p / 60fps (lekki)", L"720p / 60fps (hafif)"),
+				LL14(L"負荷を抑えたゲーム録画。まずはこれで試せます。", L"Lower-load game capture. Good starting point.", L"Capture jeu legere. Bon point de depart.", L"Cattura gioco leggera. Buon inizio.", L"Captura ligera. Buen punto de partida.",
+					L"부하를 낮춘 게임 녹화. 먼저 이것부터.", L"低负载游戏录制。可先试这个。", L"تسجيل لعبة خفيف. نقطة بداية جيدة.", L"Лёгкая запись игры. Хороший старт.", L"Leichte Game-Aufnahme. Guter Start.",
+					L"Captura leve. Bom ponto de partida.", L"Lichte game-opname. Goed startpunt.", L"Lekkie nagrywanie gry. Dobry start.", L"Hafif oyun kaydi. Iyi baslangic."));
+			gcp->AddCommand(ID_MP_GCP_1080_60,
+				LL14(L"1080p / 60fps（推奨・高品位）", L"1080p / 60fps (recommended)", L"1080p / 60fps (recommande)", L"1080p / 60fps (consigliato)", L"1080p / 60fps (recomendado)",
+					L"1080p / 60fps (권장·고화질)", L"1080p / 60fps（推荐·高画质）", L"1080p / 60fps (موصى به)", L"1080p / 60fps (рекомендуется)", L"1080p / 60fps (empfohlen)",
+					L"1080p / 60fps (recomendado)", L"1080p / 60fps (aanbevolen)", L"1080p / 60fps (zalecane)", L"1080p / 60fps (onerilen)"),
+				LL14(L"フルHD・60fps・高ビットレート。多くのゲーム向けの標準高品位。", L"Full HD 60fps high bitrate. Standard high quality for most games.", L"Plein HD 60fps debit eleve. Qualite standard pour la plupart des jeux.", L"Full HD 60fps bitrate alto. Qualita standard per molti giochi.", L"Full HD 60fps alto bitrate. Calidad estandar para la mayoria.",
+					L"풀HD 60fps 고비트레이트. 대부분 게임에 맞는 표준 고화질.", L"全高清60fps高码率。多数游戏的标准高画质。", L"Full HD 60 إطار بمعدل بت عالٍ. جودة قياسية لمعظم الألعاب.", L"Full HD 60fps высокий битрейт. Стандарт для большинства игр.", L"Full HD 60fps hohe Bitrate. Standard-Qualität für die meisten Spiele.",
+					L"Full HD 60fps alto bitrate. Qualidade padrao para a maioria.", L"Full HD 60fps hoge bitrate. Standaardkwaliteit voor de meeste games.", L"Full HD 60fps wysoki bitrate. Standard dla wiekszosci gier.", L"Full HD 60fps yuksek bitrate. Cogu oyun icin standart kalite."));
+			gcp->AddCommand(ID_MP_GCP_1080_120,
+				LL14(L"1080p / 120fps（滑らか・高負荷）", L"1080p / 120fps (smooth·heavy)", L"1080p / 120fps (fluide·lourd)", L"1080p / 120fps (fluido·pesante)", L"1080p / 120fps (suave·pesado)",
+					L"1080p / 120fps (부드러움·고부하)", L"1080p / 120fps（流畅·高负载）", L"1080p / 120fps (سلس·ثقيل)", L"1080p / 120fps (плавно·тяжело)", L"1080p / 120fps (flüssig·schwer)",
+					L"1080p / 120fps (suave·pesado)", L"1080p / 120fps (soepel·zwaar)", L"1080p / 120fps (plynnie·ciezkie)", L"1080p / 120fps (akici·agir)"),
+				LL14(L"高リフレッシュ向け。PC性能が必要です。", L"For high-refresh games. Needs a strong PC.", L"Pour ecrans haute frequence. PC puissant requis.", L"Per alti Hz. Serve un PC potente.", L"Para alto refresco. Requiere PC potente.",
+					L"고주사율용. 강한 PC 필요.", L"适合高刷新。需要较强电脑。", L"لشاشات عالية التردد. يحتاج جهاز قوي.", L"Для высокого Гц. Нужен мощный ПК.", L"Für hohe Hz. Starker PC nötig.",
+					L"Para alto refresh. Precisa de PC forte.", L"Voor hoge Hz. Sterke PC nodig.", L"Dla wysokiego Hz. Potrzebny mocny PC.", L"Yuksek Hz icin. Guclu PC gerekir."));
+			gcp->AddCommand(ID_MP_GCP_4K_60,
+				LL14(L"4K / 60fps（最高画質）", L"4K / 60fps (max quality)", L"4K / 60fps (qualite max)", L"4K / 60fps (qualita max)", L"4K / 60fps (max calidad)",
+					L"4K / 60fps (최고화질)", L"4K / 60fps（最高画质）", L"4K / 60fps (أقصى جودة)", L"4K / 60fps (макс. качество)", L"4K / 60fps (max. Qualität)",
+					L"4K / 60fps (qualidade max)", L"4K / 60fps (max kwaliteit)", L"4K / 60fps (max jakosc)", L"4K / 60fps (en yuksek kalite)"),
+				LL14(L"3840×2160。容量と負荷が最大。強力なGPU向け。", L"3840×2160. Largest size/load. For strong GPUs.", L"3840×2160. Taille/charge max. GPU puissant.", L"3840×2160. Dimensione/carico max. GPU potente.", L"3840×2160. Tamano/carga max. GPU potente.",
+					L"3840×2160. 용량·부하 최대. 강한 GPU용.", L"3840×2160。体积与负载最大。需强GPU。", L"3840×2160. أكبر حجم/حمل. لوحدة GPU قوية.", L"3840×2160. Макс. размер/нагрузка. Для мощных GPU.", L"3840×2160. Max. Größe/Last. Für starke GPUs.",
+					L"3840×2160. Tamanho/carga max. Para GPU forte.", L"3840×2160. Max. formaat/belasting. Voor sterke GPU.", L"3840×2160. Max. rozmiar/obciazenie. Dla mocnego GPU.", L"3840×2160. En buyuk boyut/yuk. Guclu GPU icin."));
+			gcp->AddSeparator();
+			gcp->AddCommand(ID_MP_GCP_PLUS_WAV,
+				LL14(L"1080p60 + 高音質WAV録音も開く", L"1080p60 + open HQ WAV recorder", L"1080p60 + ouvrir enregistreur WAV HQ", L"1080p60 + apri registratore WAV HQ", L"1080p60 + abrir grabador WAV HQ",
+					L"1080p60 + 고음질 WAV 녹음도 열기", L"1080p60 + 同时打开高音质WAV录音", L"1080p60 + فتح مسجل WAV عالي الجودة", L"1080p60 + открыть WAV-запись HQ", L"1080p60 + WAV-Rekorder HQ öffnen",
+					L"1080p60 + abrir gravador WAV HQ", L"1080p60 + WAV-recorder HQ openen", L"1080p60 + otworz rejestrator WAV HQ", L"1080p60 + yuksek kaliteli WAV ac"),
+				LL14(L"画面キャプチャに加え、システム音を別途WAVで残します。", L"Screen capture plus a separate WAV of system audio.", L"Capture ecran plus WAV separe du son systeme.", L"Cattura piu WAV separato dell'audio di sistema.", L"Captura mas WAV aparte del audio del sistema.",
+					L"화면 캡처와 함께 시스템 음을 별도 WAV로 남김.", L"画面捕获并另存系统声为WAV。", L"التقاط الشاشة مع WAV منفصل لصوت النظام.", L"Захват экрана плюс отдельный WAV системного звука.", L"Bildschirmaufnahme plus separates System-WAV.",
+					L"Captura mais WAV separado do audio do sistema.", L"Schermopname plus apart systeemaudio-WAV.", L"Nagranie ekranu plus osobny WAV dzwieku systemu.", L"Ekran yakalama artı ayri sistem sesi WAV."));
+		}
+	}
 	menu.AddCommand(ID_MP_MIRROR,
 		LL14(L"ミラー出力…", L"Mirror output…", L"Sortie miroir…", L"Uscita mirror…", L"Salida espejo…", L"미러 출력…", L"镜像输出…", L"خرج مرآة…", L"Зеркальный выход…", L"Spiegelausgabe…", L"Saida espelho…", L"Spiegelaudio…", L"Wyjscie lustrzane…", L"Ayna cikis…"));
 	menu.AddCommand(ID_MP_SSVIZ,
@@ -9602,7 +9645,8 @@ void CMediaPlayerDlg::OnMpRemote()
 void CMediaPlayerDlg::OnMpSsViz() { OpenMpSsVizModeless(this); }
 void CMediaPlayerDlg::OnMpVideoExtract() { MpOnVideoExtract(this); }
 void CMediaPlayerDlg::OnMpVideoReplace() { MpOnVideoReplaceAudio(this); }
-void CMediaPlayerDlg::OnMpGamePreset() { MpOnGameCapturePreset(this); }
+void CMediaPlayerDlg::OnMpGamePreset() { MpOnGameCapturePreset(this, ID_MP_GCP_1080_60); }
+void CMediaPlayerDlg::OnMpGcpRange(UINT nID) { MpOnGameCapturePreset(this, nID); }
 void CMediaPlayerDlg::OnMpMidiIn() { MpOnMidiInToggle(this); }
 LRESULT CMediaPlayerDlg::OnMpTransportCmd(WPARAM wParam, LPARAM lParam)
 {
