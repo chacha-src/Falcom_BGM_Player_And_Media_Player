@@ -540,6 +540,10 @@ public:
     void RepaintClient();
     void DrawClientText(CDC& dc, const CRect& r);
     void PaintOpaqueFrame(); // NC枠(フォーカス色含む)を α=255 で描く
+    // Opaque 再描画でシステムキャレットが消えるため自前描画。IME 候補位置もここから合わせる
+    BOOL GetCaretClientPos(CPoint& pt, int& lineH);
+    void DrawCaretIfNeeded(CDC& dc);
+    void SyncImePos();
 
 protected:
     virtual void PreSubclassWindow();
@@ -566,6 +570,9 @@ protected:
     afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg LRESULT OnPostOpaquePaint(WPARAM, LPARAM);
+    afx_msg LRESULT OnImeStartComposition(WPARAM, LPARAM);
+    afx_msg LRESULT OnImeComposition(WPARAM, LPARAM);
+    afx_msg LRESULT OnImeNotify(WPARAM, LPARAM);
 
     DECLARE_MESSAGE_MAP()
 
@@ -576,12 +583,15 @@ private:
 
     BOOL m_bHasFocus;      // 現在フォーカスを持っているかどうか
     BOOL m_bSelDrag;       // マウスで範囲選択中
+    BOOL m_bCaretOn;       // 自前キャレット点滅
     int m_lastSel0;
     int m_lastSel1;
     void PaintOpaqueClient(CDC& dc);
     void ScheduleOpaqueRepaint();
     void RepaintIfSelChanged();
     void DrawMultilineVisibleText(CDC& dc, const CRect& rc);
+    void StartCaretBlink();
+    void StopCaretBlink();
 };
 
 // ============================================================================

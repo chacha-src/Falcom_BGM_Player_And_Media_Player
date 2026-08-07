@@ -7,9 +7,11 @@
 #include <vector>
 #include <psapi.h>
 #include <TlHelp32.h>
+#include <imm.h>
 
 #pragma comment(lib, "msimg32.lib")
 #pragma comment(lib, "psapi.lib")
+#pragma comment(lib, "imm32.lib")
 
 static UINT CCC_GetControlDpi(HWND hWnd)
 {
@@ -3055,15 +3057,21 @@ BEGIN_MESSAGE_MAP(CCustomEdit, CEdit)
     ON_CONTROL_REFLECT(EN_UPDATE, OnEnUpdate)
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_MESSAGE(CCC_WM_POST_OPAQUE_PAINT, OnPostOpaquePaint)
+    ON_MESSAGE(WM_IME_STARTCOMPOSITION, OnImeStartComposition)
+    ON_MESSAGE(WM_IME_COMPOSITION, OnImeComposition)
+    ON_MESSAGE(WM_IME_NOTIFY, OnImeNotify)
 END_MESSAGE_MAP()
 
-static const UINT_PTR kEditOpaqueTimerId = 4107;
+static const UINT_PTR kEditOpaqueTimerId = 4107; // 互換用（未使用）
 static const UINT_PTR kEditSelTimerId = 4108;
+static const UINT_PTR kEditCaretTimerId = 4109; // 自前キャレット点滅
 static const UINT_PTR kButtonAnimTimerId    = 4120; // ボタンの流れるツヤ/鼓動パルス
 static const UINT_PTR kCheckBounceTimerId   = 4121; // チェックON時のバウンス
 static const UINT_PTR kSliderShimmerTimerId = 4122; // スライダーの流れるシマー
 
-CCustomEdit::CCustomEdit() : m_bHasFocus(FALSE), m_bAutoDelete(FALSE), m_bSelDrag(FALSE), m_lastSel0(-1), m_lastSel1(-1)
+CCustomEdit::CCustomEdit()
+    : m_bHasFocus(FALSE), m_bAutoDelete(FALSE), m_bSelDrag(FALSE), m_bCaretOn(TRUE)
+    , m_lastSel0(-1), m_lastSel1(-1)
 {
     m_brBackground.CreateSolidBrush(COLOR_EDIT_BG);
 }
@@ -3272,6 +3280,7 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
     if (style & ES_MULTILINE) {
         DrawMultilineVisibleText(dc, rc);
         if (pOld) dc.SelectObject(pOld);
+        DrawCaretIfNeeded(dc);
         return;
     }
 
@@ -3319,6 +3328,7 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
     if (!hasSel) {
         dc.DrawText(text, &rc, fmt);
         if (pOld) dc.SelectObject(pOld);
+        DrawCaretIfNeeded(dc);
         return;
     }
 
@@ -3392,6 +3402,175 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
     dc.RestoreDC(savedDc);
     if (pOld)
         dc.SelectObject(pOld);
+    DrawCaretIfNeeded(dc);
+}
+
+BOOL CCustomEdit::GetCaretClientPos(CPoint& pt, int& lineH)
+{
+    pt.x = 0;
+    pt.y = 0;
+    lineH = 16;
+    if (!GetSafeHwnd())
+        return FALSE;
+
+    CRect r;
+    GetClientRect(&r);
+    CRect rc = r;
+    rc.DeflateRect(3, 1);
+
+    HDC hdcRaw = ::GetDC(m_hWnd);
+    if (!hdcRaw)
+        return FALSE;
+    CDC dc;
+    dc.Attach(hdcRaw);
+    CFont* pFont = GetFont();
+    CFont* pOld = pFont ? dc.SelectObject(pFont) : nullptr;
+    TEXTMETRIC tm = {};
+    dc.GetTextMetrics(&tm);
+    lineH = tm.tmHeight + tm.tmExternalLeading;
+    if (lineH < 1) lineH = 16;
+
+    CString text;
+    GetWindowText(text);
+    const int tlen = text.GetLength();
+    int sel0 = 0, sel1 = 0;
+    GetSel(sel0, sel1);
+    // 挿入位置（選択中は先頭側）
+    int idx = sel0;
+    if (idx < 0) idx = 0;
+    if (idx > tlen) idx = tlen;
+
+    const DWORD style = (DWORD)GetStyle();
+    BOOL ok = FALSE;
+    if (tlen <= 0) {
+        pt.x = rc.left;
+        if (style & ES_MULTILINE)
+            pt.y = rc.top;
+        else
+            pt.y = rc.top + (rc.Height() - lineH) / 2;
+        if (pt.y < rc.top) pt.y = rc.top;
+        ok = TRUE;
+    } else {
+        BOOL pastEnd = FALSE;
+        int q = idx;
+        if (q >= tlen) {
+            q = tlen - 1;
+            pastEnd = TRUE;
+        }
+        LRESULT lr = SendMessage(EM_POSFROMCHAR, (WPARAM)q, 0);
+        if (lr != (LRESULT)-1) {
+            pt.x = (short)LOWORD(lr);
+            pt.y = (short)HIWORD(lr);
+            if (pastEnd) {
+                CSize ch = dc.GetTextExtent(text.Mid(q, 1));
+                pt.x += ch.cx;
+            }
+            ok = TRUE;
+        } else {
+            // フォールバック: 先頭からの幅
+            CSize pre = dc.GetTextExtent(text.Left(idx));
+            CSize all = dc.GetTextExtent(text);
+            pt.x = rc.left + pre.cx;
+            if (style & ES_CENTER)
+                pt.x = rc.left + (rc.Width() - all.cx) / 2 + pre.cx;
+            else if (style & ES_RIGHT)
+                pt.x = rc.right - all.cx + pre.cx;
+            if (style & ES_MULTILINE)
+                pt.y = rc.top;
+            else
+                pt.y = rc.top + (rc.Height() - lineH) / 2;
+            ok = TRUE;
+        }
+    }
+
+    if (pOld) dc.SelectObject(pOld);
+    dc.Detach();
+    ::ReleaseDC(m_hWnd, hdcRaw);
+    if (pt.x < rc.left) pt.x = rc.left;
+    if (pt.x > rc.right) pt.x = rc.right;
+    if (pt.y < rc.top) pt.y = rc.top;
+    if (pt.y + lineH > rc.bottom && !(style & ES_MULTILINE))
+        pt.y = rc.bottom - lineH;
+    return ok;
+}
+
+void CCustomEdit::DrawCaretIfNeeded(CDC& dc)
+{
+    if (!m_bHasFocus || !m_bCaretOn)
+        return;
+    int s0 = 0, s1 = 0;
+    GetSel(s0, s1);
+    if (s0 != s1)
+        return; // 選択中はキャレット非表示
+
+    CPoint pt;
+    int lineH = 16;
+    if (!GetCaretClientPos(pt, lineH))
+        return;
+
+    CRect r;
+    GetClientRect(&r);
+    // 幅2〜3pxの濃色キャレット（桃色背景でもはっきり見える）
+    const UINT dpi = CCC_GetControlDpi(m_hWnd);
+    int w = CCC_ScaleDpi(2, dpi);
+    if (w < 2) w = 2;
+    CRect caret(pt.x, pt.y, pt.x + w, pt.y + lineH);
+    if (!caret.IntersectRect(&caret, &r) || caret.Width() <= 0 || caret.Height() <= 0)
+        return;
+    dc.FillSolidRect(&caret, RGB(80, 20, 40));
+}
+
+void CCustomEdit::SyncImePos()
+{
+    if (!GetSafeHwnd() || !m_bHasFocus)
+        return;
+
+    // Imm* → IME通知 → 再描画 → Imm* の再入でクラッシュしやすい
+    static LONG s_busy = 0;
+    if (InterlockedCompareExchange(&s_busy, 1, 0) != 0)
+        return;
+
+    CPoint pt;
+    int lineH = 16;
+    if (!GetCaretClientPos(pt, lineH)) {
+        InterlockedExchange(&s_busy, 0);
+        return;
+    }
+
+    ::SetCaretPos(pt.x, pt.y);
+
+    HIMC himc = ::ImmGetContext(m_hWnd);
+    if (himc) {
+        COMPOSITIONFORM cf = {};
+        cf.dwStyle = CFS_POINT;
+        cf.ptCurrentPos = pt;
+        ::ImmSetCompositionWindow(himc, &cf);
+
+        CANDIDATEFORM cand = {};
+        cand.dwIndex = 0;
+        cand.dwStyle = CFS_CANDIDATEPOS;
+        cand.ptCurrentPos = CPoint(pt.x, pt.y + lineH);
+        ::ImmSetCandidateWindow(himc, &cand);
+        ::ImmReleaseContext(m_hWnd, himc);
+    }
+    InterlockedExchange(&s_busy, 0);
+}
+
+void CCustomEdit::StartCaretBlink()
+{
+    StopCaretBlink();
+    m_bCaretOn = TRUE;
+    UINT blink = ::GetCaretBlinkTime();
+    if (blink == 0 || blink == INFINITE)
+        blink = 530;
+    SetTimer(kEditCaretTimerId, blink, NULL);
+}
+
+void CCustomEdit::StopCaretBlink()
+{
+    KillTimer(kEditCaretTimerId);
+    KillTimer(kEditOpaqueTimerId);
+    m_bCaretOn = FALSE;
 }
 
 void CCustomEdit::RepaintClient()
@@ -3417,6 +3596,10 @@ void CCustomEdit::PaintOpaqueClient(CDC& dc)
     CRect r;
     GetClientRect(&r);
     if (r.Width() <= 0 || r.Height() <= 0) return;
+
+    // システムキャレットは Opaque blit で消える／α穴の原因。自前描画に任せる
+    if (m_bHasFocus)
+        ::HideCaret(m_hWnd);
 
     // ClientDC 直描きでも絶対に窓外へ出さない
     const int savedDc = dc.SaveDC();
@@ -3454,8 +3637,9 @@ void CCustomEdit::PaintOpaqueClient(CDC& dc)
 
 void CCustomEdit::ScheduleOpaqueRepaint()
 {
+    // SendMessage 同期再入を避け、キューに1回まとめる
     if (GetSafeHwnd())
-        SendMessage(CCC_WM_POST_OPAQUE_PAINT);
+        PostMessage(CCC_WM_POST_OPAQUE_PAINT);
 }
 
 LRESULT CCustomEdit::OnPostOpaquePaint(WPARAM, LPARAM)
@@ -3595,7 +3779,9 @@ void CCustomEdit::OnEnUpdate()
 {
     // OpaqueFixer が WM_CHAR 等で既に不透明描画する。ここでは Invalidate せず
     // 同期 Opaque のみ(既定描画→アクリル一瞬を避ける)。
+    m_bCaretOn = TRUE;
     ScheduleOpaqueRepaint();
+    SyncImePos();
 }
 
 void CCustomEdit::RepaintIfSelChanged()
@@ -3606,7 +3792,9 @@ void CCustomEdit::RepaintIfSelChanged()
         return;
     m_lastSel0 = s0;
     m_lastSel1 = s1;
+    m_bCaretOn = TRUE; // 移動直後は点灯
     RepaintClient();
+    SyncImePos();
     // 選択再描画で親/アクリル側が兄弟Editの不透明面を落とすことがあるので立て直す
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_HostNeedsChildOpaque(m_hWnd))
@@ -3722,6 +3910,11 @@ void CCustomEdit::OnMouseMove(UINT nFlags, CPoint point)
     CEdit::OnMouseMove(nFlags, point);
     if (nFlags & MK_LBUTTON)
         RepaintIfSelChanged();
+#if CCUSTOM_AERO_SUPPORT
+    // ホバーで NC/テーマが α=0 を載せるのを即打ち消す
+    else if (CCC_HostNeedsChildOpaque(m_hWnd))
+        ScheduleOpaqueRepaint();
+#endif
 }
 
 void CCustomEdit::OnTimer(UINT_PTR nIDEvent)
@@ -3734,9 +3927,27 @@ void CCustomEdit::OnTimer(UINT_PTR nIDEvent)
             KillTimer(kEditSelTimerId);
         return;
     }
+    if (nIDEvent == kEditCaretTimerId)
+    {
+        if (!m_bHasFocus) {
+            StopCaretBlink();
+            return;
+        }
+        int s0 = 0, s1 = 0;
+        GetSel(s0, s1);
+        if (s0 != s1) {
+            // 選択中は点滅不要（描画もスキップ）
+            m_bCaretOn = FALSE;
+            return;
+        }
+        m_bCaretOn = !m_bCaretOn;
+        RepaintClient();
+        return;
+    }
     if (nIDEvent == kEditOpaqueTimerId)
     {
-        ScheduleOpaqueRepaint();
+        // 旧: 50ms 全再描画はキャレットを潰していた。点滅タイマーへ移行済み。
+        KillTimer(kEditOpaqueTimerId);
         return;
     }
     CEdit::OnTimer(nIDEvent);
@@ -3754,6 +3965,9 @@ void CCustomEdit::OnSetFocus(CWnd* p)
 {
     CEdit::OnSetFocus(p);
     m_bHasFocus = TRUE;
+    // システムキャレットは Opaque 再描画で消え、点滅が α=0 穴になる。隠して自前描画。
+    ::HideCaret(m_hWnd);
+    StartCaretBlink();
     // SWP_FRAMECHANGED / Invalidate は親ガラス消去→枠消失・一瞬アクリルの元凶。
     // 枠色変更は自前の不透明 NC 描画だけで行う。
     PaintOpaqueFrame();
@@ -3761,11 +3975,7 @@ void CCustomEdit::OnSetFocus(CWnd* p)
         CClientDC dc(this);
         PaintOpaqueClient(dc);
     }
-#if CCUSTOM_AERO_SUPPORT
-    // キャレット点滅が α=0 で穴を開けるので、キャプション常時アクリル時も再不透明化
-    if (CCC_HostNeedsChildOpaque(m_hWnd))
-        SetTimer(kEditOpaqueTimerId, 50, NULL);
-#endif
+    SyncImePos();
 }
 
 void CCustomEdit::OnKillFocus(CWnd* p)
@@ -3774,12 +3984,38 @@ void CCustomEdit::OnKillFocus(CWnd* p)
     m_bHasFocus = FALSE;
     m_bSelDrag = FALSE;
     KillTimer(kEditSelTimerId);
-    KillTimer(kEditOpaqueTimerId);
+    StopCaretBlink();
     PaintOpaqueFrame();
     {
         CClientDC dc(this);
         PaintOpaqueClient(dc);
     }
+}
+
+LRESULT CCustomEdit::OnImeStartComposition(WPARAM wParam, LPARAM lParam)
+{
+    SyncImePos();
+    return Default();
+}
+
+LRESULT CCustomEdit::OnImeComposition(WPARAM wParam, LPARAM lParam)
+{
+    LRESULT r = Default();
+    SyncImePos();
+    // 確定時のみ再不透明化（変換中毎フレームは再入・クラッシュの温床）
+    if (lParam & GCS_RESULTSTR)
+        ScheduleOpaqueRepaint();
+    return r;
+}
+
+LRESULT CCustomEdit::OnImeNotify(WPARAM wParam, LPARAM lParam)
+{
+    LRESULT r = Default();
+    if (wParam == IMN_OPENCANDIDATE || wParam == IMN_SETCOMPOSITIONWINDOW
+        || wParam == IMN_SETCANDIDATEPOS || wParam == IMN_CHANGECANDIDATE)
+        SyncImePos();
+    UNREFERENCED_PARAMETER(lParam);
+    return r;
 }
 
 // ============================================================================
@@ -11248,8 +11484,31 @@ private:
             // 非クライアント(スクロールバー/枠)は既定描画だとアクリル(ガラス)上で
             // アルファ0になり透過して見えなくなる。既定描画後にウィンドウ全体の
             // アルファを不透明化して、スクロールバーを確実に表示させる。
+            // ※ホバー等の NC 再描画でクライアントも α=0 になることがあるので、
+            //   MakeOpaque の前にクライアントを不透明再描画する（Edit 透過の主因）。
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            HDC hDC = ::GetDC(hWnd);
+            if (hDC) {
+                pThis->PaintOpaque(hWnd, hDC);
+                ::ReleaseDC(hWnd, hDC);
+            }
             pThis->MakeWindowOpaque(hWnd);
+            return lRes;
+        }
+        // Edit: マウス進入/移動でテーマ NC や既定描画が α=0 を載せる → 透過に見える
+        case WM_MOUSEMOVE:
+        case WM_MOUSELEAVE:
+        case WM_NCMOUSEMOVE:
+        case WM_NCMOUSELEAVE:
+        {
+            wchar_t cls[32];
+            cls[0] = 0;
+            ::GetClassNameW(hWnd, cls, 32);
+            if (::_wcsicmp(cls, L"Edit") != 0)
+                break;
+            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            // 連続 WM_MOUSEMOVE は Post でまとめて再不透明化
+            ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
             return lRes;
         }
         // Edit: キー入力の既定描画が α=0 で先に載り一瞬アクリルが見える。
@@ -11304,6 +11563,20 @@ private:
             ::ValidateRect(hWnd, NULL);
             return lRes;
         }
+        case WM_IME_STARTCOMPOSITION:
+        {
+            wchar_t cls[32];
+            cls[0] = 0;
+            ::GetClassNameW(hWnd, cls, 32);
+            if (::_wcsicmp(cls, L"Edit") != 0)
+                break;
+            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            if (CWnd* pw = CWnd::FromHandlePermanent(hWnd)) {
+                if (CCustomEdit* e = dynamic_cast<CCustomEdit*>(pw))
+                    e->SyncImePos();
+            }
+            return lRes;
+        }
         case WM_IME_COMPOSITION:
         {
             wchar_t cls[32];
@@ -11311,19 +11584,23 @@ private:
             ::GetClassNameW(hWnd, cls, 32);
             if (::_wcsicmp(cls, L"Edit") != 0)
                 break;
-            // 確定時だけ(変換中の毎描画は止めない)
-            if (!(lParam & GCS_RESULTSTR))
-                break;
-            ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
+            // 変換中も IME 位置をキャレットへ追従。確定時は不透明再描画。
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
-            HDC hDC = ::GetDC(hWnd);
-            if (hDC) {
-                pThis->PaintOpaque(hWnd, hDC);
-                ::ReleaseDC(hWnd, hDC);
+            if (CWnd* pw = CWnd::FromHandlePermanent(hWnd)) {
+                if (CCustomEdit* e = dynamic_cast<CCustomEdit*>(pw))
+                    e->SyncImePos();
             }
-            ::ValidateRect(hWnd, NULL);
-            ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
-            ::ValidateRect(hWnd, NULL);
+            if (lParam & GCS_RESULTSTR) {
+                ::SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
+                HDC hDC = ::GetDC(hWnd);
+                if (hDC) {
+                    pThis->PaintOpaque(hWnd, hDC);
+                    ::ReleaseDC(hWnd, hDC);
+                }
+                ::ValidateRect(hWnd, NULL);
+                ::SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
+                ::ValidateRect(hWnd, NULL);
+            }
             return lRes;
         }
         case WM_VSCROLL:

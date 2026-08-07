@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -1218,7 +1218,7 @@ STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "DJ Pad"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    CONTROL         "",IDC_DJPAD_VINYL,"Static",SS_NOTIFY,8,8,176,148
+    LTEXT           "",IDC_DJPAD_VINYL,8,8,176,148,SS_NOTIFY | NOT WS_GROUP
     LTEXT           "Drag to scratch",IDC_DJPAD_TIP,8,158,176,10
     LTEXT           "Effect",IDC_DJPAD_FX_L,8,172,36,10
     CONTROL         "",IDC_DJPAD_FX,"msctls_trackbar32",TBS_AUTOTICKS | WS_TABSTOP,44,168,120,18
@@ -1228,7 +1228,7 @@ BEGIN
     CONTROL         "",IDC_DJPAD_FILTER,"msctls_trackbar32",TBS_AUTOTICKS | WS_TABSTOP,44,208,120,18
     LTEXT           "Vol",IDC_DJPAD_VOL_L,8,232,36,10
     CONTROL         "",IDC_DJPAD_VOL,"msctls_trackbar32",TBS_AUTOTICKS | WS_TABSTOP,44,228,120,18
-    CONTROL         "",IDC_DJPAD_METER,"Static",SS_NOTIFY,168,168,16,80
+    LTEXT           "",IDC_DJPAD_METER,168,168,16,80,SS_NOTIFY | NOT WS_GROUP
     LTEXT           "BPM --",IDC_DJPAD_BPM,192,8,100,12
     LTEXT           "",IDC_DJPAD_STATUS,296,8,216,12
     PUSHBUTTON      "Play",IDC_DJPAD_PLAY,192,24,40,18
@@ -1272,9 +1272,9 @@ BEGIN
     LTEXT           "Low",IDC_DJPAD_EQ_LOW_L,192,180,28,10
     LTEXT           "Mid",IDC_DJPAD_EQ_MID_L,232,180,28,10
     LTEXT           "High",IDC_DJPAD_EQ_HIGH_L,272,180,28,10
-    CONTROL         "",IDC_DJPAD_EQ_LOW,"msctls_trackbar32",TBS_VERT | TBS_AUTOTICKS | WS_TABSTOP,196,192,28,120
-    CONTROL         "",IDC_DJPAD_EQ_MID,"msctls_trackbar32",TBS_VERT | TBS_AUTOTICKS | WS_TABSTOP,236,192,28,120
-    CONTROL         "",IDC_DJPAD_EQ_HIGH,"msctls_trackbar32",TBS_VERT | TBS_AUTOTICKS | WS_TABSTOP,276,192,28,120
+    CONTROL         "",IDC_DJPAD_EQ_LOW,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | WS_TABSTOP,196,192,28,120
+    CONTROL         "",IDC_DJPAD_EQ_MID,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | WS_TABSTOP,236,192,28,120
+    CONTROL         "",IDC_DJPAD_EQ_HIGH,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | WS_TABSTOP,276,192,28,120
     PUSHBUTTON      "Kill L",IDC_DJPAD_KILL_L,192,318,40,18
     PUSHBUTTON      "Kill M",IDC_DJPAD_KILL_M,236,318,40,18
     PUSHBUTTON      "Kill H",IDC_DJPAD_KILL_H,280,318,40,18
@@ -1749,7 +1749,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,652
+ FILEVERSION 0,9,1,653
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1767,10 +1767,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.06"
-            VALUE "FileVersion", "0.9.1.652"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.07"
+            VALUE "FileVersion", "0.9.1.653"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.08.06"
+            VALUE "LegalCopyright", "Copyright (C) 2026.08.07"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
