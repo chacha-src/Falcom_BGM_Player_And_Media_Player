@@ -777,8 +777,16 @@ BOOL COggApp::InitInstance()
 				savedata.analyzermarkers[mi] = 0;
 		}
 	}
-	if (savedata.mpLibOpen && savedata.mpHistOpen)
-		savedata.mpHistOpen = 0; // 左ドロワーは排他
+	if (datFileSize < (int)(offsetof(save, mpTempOpen) + sizeof(savedata.mpTempOpen)))
+		savedata.mpTempOpen = 0;
+	else if (savedata.mpTempOpen) savedata.mpTempOpen = 1;
+	// 左ドロワー(Lib/Hist/Temp)は排他
+	if (savedata.mpTempOpen) {
+		savedata.mpLibOpen = 0;
+		savedata.mpHistOpen = 0;
+	}
+	else if (savedata.mpLibOpen && savedata.mpHistOpen)
+		savedata.mpHistOpen = 0;
 	// MP窓座標もずれ破損しやすいので、明らかに不正なら未設定扱いにする
 	if (savedata.mpHasPos) {
 		if (savedata.mpw < 100 || savedata.mph < 100

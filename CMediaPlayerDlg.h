@@ -152,6 +152,9 @@ public:
 	CCustomListCtrl m_libAlbums;
 	CCustomStandardButton m_histToggle;
 	CCustomListCtrl m_histList;
+	CCustomStandardButton m_tempToggle;
+	CCustomStandardButton m_tempClear;
+	CCustomStatic m_tempHint;
 	CCustomStandardButton m_emptyFolder, m_emptyM3u;
 	int m_histBuilt;
 	enum { kLibPathMax = 512, kLibAlbumMax = 256 };
@@ -536,6 +539,8 @@ protected:
 	afx_msg void OnFindFilter();
 	afx_msg void OnLibToggle();
 	afx_msg void OnHistToggle();
+	afx_msg void OnTempToggle();
+	afx_msg void OnTempClear();
 	afx_msg void OnLibAddRoot();
 	afx_msg void OnLibAddPl();
 	afx_msg void OnLibTreeSel(NMHDR* pNMHDR, LRESULT* pResult);

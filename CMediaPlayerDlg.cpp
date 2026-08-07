@@ -1223,6 +1223,8 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_FINDFILTER, &CMediaPlayerDlg::OnFindFilter)
 	ON_BN_CLICKED(IDC_MP_LIBTOGGLE, &CMediaPlayerDlg::OnLibToggle)
 	ON_BN_CLICKED(IDC_MP_HISTTOGGLE, &CMediaPlayerDlg::OnHistToggle)
+	ON_BN_CLICKED(IDC_MP_TEMPTOGGLE, &CMediaPlayerDlg::OnTempToggle)
+	ON_BN_CLICKED(IDC_MP_TEMPCLEAR, &CMediaPlayerDlg::OnTempClear)
 	ON_BN_CLICKED(IDC_MP_LIBADDROOT, &CMediaPlayerDlg::OnLibAddRoot)
 	ON_BN_CLICKED(IDC_MP_LIBADDPL, &CMediaPlayerDlg::OnLibAddPl)
 	ON_BN_CLICKED(IDC_MP_EMPTYFOLDER, &CMediaPlayerDlg::OnEmptyAddFolder)
@@ -1900,6 +1902,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		addTip(m_libAddRoot, LL14(L"ライブラリのルートフォルダを追加します。", L"Add a library root folder.", L"Ajouter une racine.", L"Aggiungi radice.", L"Anadir raiz.", L"라이브러리 루트 추가.", L"添加库根文件夹。", L"إضافة جذر المكتبة.", L"Добавить корень библиотеки.", L"Bibliothekswurzel hinzufugen.", L"Adicionar raiz.", L"Wortel toevoegen.", L"Dodaj korzen.", L"Kok klasor ekle."));
 	if (m_libAddPl.GetSafeHwnd())
 		addTip(m_libAddPl, LL14(L"選択中のアルバム/フォルダをプレイリストへ追加します。", L"Add selected album/folder to the playlist.", L"Ajouter l album/dossier a la liste.", L"Aggiungi album/cartella alla playlist.", L"Anadir album/carpeta a la lista.", L"선택 앨범/폴더를 목록에 추가.", L"将所选专辑/文件夹加入播放列表。", L"إضافة الألبوم/المجلد للقائمة.", L"Добавить альбом/папку в плейлист.", L"Album/Ordner zur Playlist.", L"Adicionar album/pasta a lista.", L"Album/map aan playlist.", L"Dodaj album/folder do listy.", L"Secili album/klasoru listeye ekle."));
+	if (m_tempToggle.GetSafeHwnd())
+		addTip(m_tempToggle, LL14(L"一時プレイリスト。ON(凹み)中の曲は保存されず、アプリ終了で破棄されます。", L"Temporary playlist. While pressed(ON), tracks are not saved and are discarded when the app closes.", L"Liste temporaire. Enfonce(ON): non enregistree, effacee a la fermeture.", L"Playlist temporanea. Premuto(ON): non salvata, scartata alla chiusura.", L"Lista temporal. Hundido(ON): no se guarda; se descarta al cerrar.", L"임시 재생목록. 눌림(ON) 중에는 저장되지 않으며 종료 시 버려집니다.", L"临时播放列表。按下(ON)时不保存，关闭应用后丢弃。", L"قائمة مؤقتة. مضغوط(ON): لا تُحفظ وتُهمل عند الإغلاق.", L"Временный плейлист. Нажат(ON): не сохраняется, сбрасывается при выходе.", L"Temporaere Playlist. Gedrueckt(ON): wird nicht gespeichert und beim Beenden verworfen.", L"Lista temporaria. Pressionado(ON): nao e salva; descartada ao fechar.", L"Tijdelijke playlist. Ingedrukt(ON): niet opgeslagen; weg bij afsluiten.", L"Lista tymczasowa. Wcisniety(ON): bez zapisu; znika po zamknieciu.", L"Gecici liste. Basili(ON): kaydedilmez; kapaninca silinir."));
 	if (m_sortName.GetSafeHwnd())
 		addTip(m_sortName, LL14(L"名前で並べ替え(再クリックで昇順/降順)。", L"Sort by name (click again to toggle asc/desc).", L"Trier par nom.", L"Ordina per nome.", L"Ordenar por nombre.", L"이름으로 정렬.", L"按名称排序。", L"ترتيب حسب الاسم.", L"Сортировка по имени.", L"Nach Name sortieren.", L"Ordenar por nome.", L"Sorteren op naam.", L"Sortuj wg nazwy.", L"Ada gore sirala."));
 	if (m_sortArt.GetSafeHwnd())
@@ -1933,6 +1937,27 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	DoLayout();
 	CCC_GroupBoxesBack(GetSafeHwnd());   // 区分け枠を最背面へ(兄弟コントロールを覆わない)
 	ReloadPlaylistCombo();
+	// 起動時 Temp ON: 通常 Load 済みの pl を一時モードへ(空・非保存)
+	if (savedata.mpTempOpen && pl && ::IsWindow(pl->GetSafeHwnd()) && !pl->m_tempMode) {
+		pl->Save();
+		if (pl->pc) { free(pl->pc); pl->pc = NULL; }
+		pl->playcnt = 0;
+		pl->pnt = -1;
+		pl->pnt1 = -1;
+		plcnt = -1;
+		pl->pc = (playlistdata0*)malloc(sizeof(playlistdata0));
+		if (pl->m_lc.GetSafeHwnd())
+			pl->m_lc.SetItemCount(0);
+		pl->m_tempMode = 1;
+		m_queueN = 0;
+	}
+	if (savedata.mpTempOpen) {
+		if (m_grpPl.GetSafeHwnd())
+			m_grpPl.SetWindowText(LL14(L"一時プレイリスト", L"Temporary playlist", L"Liste temporaire", L"Playlist temporanea", L"Lista temporal", L"임시 재생목록", L"临时播放列表", L"قائمة مؤقتة", L"Временный плейлист", L"Temporaere Playlist", L"Lista temporaria", L"Tijdelijke playlist", L"Lista tymczasowa", L"Gecici liste"));
+		if (m_plsel.GetSafeHwnd()) m_plsel.EnableWindow(FALSE);
+		if (m_plrename.GetSafeHwnd()) m_plrename.EnableWindow(FALSE);
+		if (m_pldelete.GetSafeHwnd()) m_pldelete.EnableWindow(FALSE);
+	}
 	RefreshList(TRUE);
 	// SyncFromMain / Timer の GetCheck 前に立てる。これより前の WM_SIZE は抑止のまま。
 	m_uiReady = true;
@@ -2750,32 +2775,41 @@ void CMediaPlayerDlg::DoLayout()
 	// 下限で押し広げるとマイク行に食い込み末尾が黒く潰れるので、空きが足りないときは縮めるだけ
 	if (listH < 1) listH = 1;
 
-	// ===== ライブラリ/履歴 左ドロワー(排他) =====
-	// 閉: 縦に Lib/Hist。開: ヘッダ1行に横並び(被り防止) + その下に本体。
+	// ===== ライブラリ/履歴 左ドロワー + Tempトグル(レール) =====
+	// Lib/Hist のみドロワー展開。Temp は押しボタン凹み=ON（パネル無し）。
 	EnsureLibControls();
 	const int libRail = (int)(26 * s);
 	const int libPanel = (int)(280 * s);
 	const int libGap = (int)(4 * s);
 	const BOOL libOpen = (savedata.mpLibOpen != 0);
 	const BOOL histOpen = (savedata.mpHistOpen != 0);
+	const BOOL tempOn = (savedata.mpTempOpen != 0);
 	const int libW = (libOpen || histOpen) ? libPanel : libRail;
 	const int listX = M + gPad + libW + libGap;
 	int listW = W - M - gPad - listX;
 	if (listW < (int)(80 * s)) listW = (int)(80 * s);
 
 	const int togH = (int)(22 * s);
-	const int headerH = (libOpen || histOpen) ? (togH + (int)(4 * s)) : (togH * 2 + (int)(4 * s));
+	const int headerH = (libOpen || histOpen) ? (togH + (int)(4 * s)) : (togH * 3 + (int)(6 * s));
 	if (libOpen || histOpen) {
-		const int half = (libPanel - (int)(4 * s)) / 2;
+		const int gapT = (int)(3 * s);
+		const int third = (libPanel - gapT * 2) / 3;
 		if (m_libToggle.GetSafeHwnd()) {
-			MoveCtl(&m_libToggle, M + gPad, listY, half, togH);
+			MoveCtl(&m_libToggle, M + gPad, listY, third, togH);
 			m_libToggle.ShowWindow(SW_SHOW);
 			m_libToggle.SetWindowText(libOpen ? L"≪ Lib" : L"Lib");
 		}
 		if (m_histToggle.GetSafeHwnd()) {
-			MoveCtl(&m_histToggle, M + gPad + half + (int)(4 * s), listY, half, togH);
+			MoveCtl(&m_histToggle, M + gPad + third + gapT, listY, third, togH);
 			m_histToggle.ShowWindow(SW_SHOW);
 			m_histToggle.SetWindowText(histOpen ? L"≪ Hist" : L"Hist");
+		}
+		if (m_tempToggle.GetSafeHwnd()) {
+			MoveCtl(&m_tempToggle, M + gPad + (third + gapT) * 2, listY, third, togH);
+			m_tempToggle.ShowWindow(SW_SHOW);
+			m_tempToggle.SetWindowText(L"Temp");
+			if (m_tempToggle.GetCheck() != (tempOn ? BST_CHECKED : BST_UNCHECKED))
+				m_tempToggle.SetCheck(tempOn ? BST_CHECKED : BST_UNCHECKED);
 		}
 	}
 	else {
@@ -2788,6 +2822,13 @@ void CMediaPlayerDlg::DoLayout()
 			MoveCtl(&m_histToggle, M + gPad, listY + togH + (int)(2 * s), libRail, togH);
 			m_histToggle.ShowWindow(SW_SHOW);
 			m_histToggle.SetWindowText(L"Hist");
+		}
+		if (m_tempToggle.GetSafeHwnd()) {
+			MoveCtl(&m_tempToggle, M + gPad, listY + (togH + (int)(2 * s)) * 2, libRail, togH);
+			m_tempToggle.ShowWindow(SW_SHOW);
+			m_tempToggle.SetWindowText(L"Temp");
+			if (m_tempToggle.GetCheck() != (tempOn ? BST_CHECKED : BST_UNCHECKED))
+				m_tempToggle.SetCheck(tempOn ? BST_CHECKED : BST_UNCHECKED);
 		}
 	}
 
@@ -2847,6 +2888,8 @@ void CMediaPlayerDlg::DoLayout()
 		if (m_libAddPl.GetSafeHwnd()) { MoveCtl(&m_libAddPl, M + gPad, listY, 0, 0); m_libAddPl.ShowWindow(SW_HIDE); }
 		if (m_histList.GetSafeHwnd()) { MoveCtl(&m_histList, M + gPad, listY, 0, 0); m_histList.ShowWindow(SW_HIDE); }
 	}
+	if (m_tempHint.GetSafeHwnd()) { MoveCtl(&m_tempHint, M + gPad, listY, 0, 0); m_tempHint.ShowWindow(SW_HIDE); }
+	if (m_tempClear.GetSafeHwnd()) { MoveCtl(&m_tempClear, M + gPad, listY, 0, 0); m_tempClear.ShowWindow(SW_HIDE); }
 
 	MoveCtl(&m_list, listX, listY, listW, listH);
 
@@ -5432,6 +5475,7 @@ extern BOOL changeflg;
 void CMediaPlayerDlg::OnPlSel()
 {
 	if (!pl || !::IsWindow(pl->m_listchange.GetSafeHwnd())) return;
+	if (pl->m_tempMode) return;
 	int sel = m_plsel.GetCurSel();
 	if (sel < 0) return;
 	if (sel == savedata.playlistnum && pl->pc != NULL && pl->playcnt > 0)
@@ -5447,6 +5491,7 @@ void CMediaPlayerDlg::OnPlSel()
 void CMediaPlayerDlg::OnPlRename()
 {
 	if (!pl) return;
+	if (pl->m_tempMode) return;
 	pl->OnBnClickedButton3();
 	ReloadPlaylistCombo();
 }
@@ -5454,6 +5499,7 @@ void CMediaPlayerDlg::OnPlRename()
 void CMediaPlayerDlg::OnPlDelete()
 {
 	if (!pl) return;
+	if (pl->m_tempMode) return;
 	pl->OnBnClickedPlaydelete();
 	ReloadPlaylistCombo();
 	RefreshList(TRUE);
@@ -6584,6 +6630,15 @@ void CMediaPlayerDlg::EnsureLibControls()
 		m_histToggle.SetAeroMode(TRUE);
 		createdLibChild = TRUE;
 	}
+	if (!m_tempToggle.GetSafeHwnd()) {
+		m_tempToggle.Create(_T("Temp"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_TEMPTOGGLE);
+		m_tempToggle.SetGradation(RGB(235, 255, 235), RGB(180, 230, 180), 0, FALSE);
+		m_tempToggle.SetFlat(TRUE);
+		m_tempToggle.SetAeroMode(TRUE);
+		MpMakePushToggle(&m_tempToggle);
+		m_tempToggle.SetCheck(savedata.mpTempOpen ? BST_CHECKED : BST_UNCHECKED);
+		createdLibChild = TRUE;
+	}
 	if (!m_libAddRoot.GetSafeHwnd()) {
 		m_libAddRoot.Create(LL14(L"ルート追加", L"Add root", L"Aj. racine", L"Agg. radice", L"Anadir raiz", L"루트 추가", L"添加根", L"إضافة جذر", L"Добавить корень", L"Wurzel +", L"Add raiz", L"Wortel +", L"Dodaj korzen", L"Kok +"),
 			WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_LIBADDROOT);
@@ -6638,6 +6693,7 @@ void CMediaPlayerDlg::EnsureLibControls()
 		if (m_libTree.GetSafeHwnd()) m_libTree.SetFont(&m_fontList);
 		if (m_libAlbums.GetSafeHwnd()) m_libAlbums.SetFont(&m_fontList);
 		if (m_histList.GetSafeHwnd()) m_histList.SetFont(&m_fontList);
+		if (m_tempToggle.GetSafeHwnd()) m_tempToggle.SetFont(&m_fontList);
 	}
 	// FinishBlur/CaptionApply より後に作られる子は OpaqueFixer が乗らない。
 	// 再適用しないと Win11 アクリル上でツリー/アルバム/履歴が透ける。
@@ -7034,8 +7090,24 @@ void CMediaPlayerDlg::OnLibToggle()
 		savedata.mpLibOpen = 0;
 	}
 	else {
+		// Temp 中なら先に退出(保存済みPLへ戻す)
+		if (savedata.mpTempOpen && pl) {
+			savedata.mpTempOpen = 0;
+			pl->m_tempMode = 0;
+			pl->Load(TRUE);
+			if (pl->m_lc.GetSafeHwnd())
+				pl->m_lc.SetItemCount(pl->playcnt);
+			m_queueN = 0;
+			RefreshList(TRUE);
+			if (m_grpPl.GetSafeHwnd())
+				m_grpPl.SetWindowText(LL14(L"プレイリスト", L"Playlist", L"Liste", L"Playlist", L"Lista", L"재생목록", L"播放列表", L"قائمة", L"Плейлист", L"Playlist", L"Lista", L"Playlist", L"Lista", L"Liste"));
+			if (m_plsel.GetSafeHwnd()) m_plsel.EnableWindow(TRUE);
+			if (m_plrename.GetSafeHwnd()) m_plrename.EnableWindow(TRUE);
+			if (m_pldelete.GetSafeHwnd()) m_pldelete.EnableWindow(TRUE);
+		}
 		savedata.mpLibOpen = 1;
 		savedata.mpHistOpen = 0;
+		savedata.mpTempOpen = 0;
 		m_libTreeBuilt = 0;
 		m_libBuildPosted = 0;
 	}
@@ -7043,6 +7115,12 @@ void CMediaPlayerDlg::OnLibToggle()
 		m_libToggle.SetWindowText(savedata.mpLibOpen ? L"≪" : L"Lib");
 	if (m_histToggle.GetSafeHwnd())
 		m_histToggle.SetWindowText(savedata.mpHistOpen ? L"≪" : L"Hist");
+	if (m_tempToggle.GetSafeHwnd()) {
+		m_tempToggle.SetWindowText(L"Temp");
+		m_tempToggle.SetCheck(savedata.mpTempOpen ? BST_CHECKED : BST_UNCHECKED);
+		m_tempToggle.EnsureAnimTimer();
+		m_tempToggle.RepaintClient();
+	}
 	DoLayout();
 	CCC_GroupBoxesBack(GetSafeHwnd());
 	RefreshListAfterLayout();
@@ -7220,20 +7298,125 @@ void CMediaPlayerDlg::OnHistToggle()
 		savedata.mpHistOpen = 0;
 	}
 	else {
+		if (savedata.mpTempOpen && pl) {
+			savedata.mpTempOpen = 0;
+			pl->m_tempMode = 0;
+			pl->Load(TRUE);
+			if (pl->m_lc.GetSafeHwnd())
+				pl->m_lc.SetItemCount(pl->playcnt);
+			m_queueN = 0;
+			RefreshList(TRUE);
+			if (m_grpPl.GetSafeHwnd())
+				m_grpPl.SetWindowText(LL14(L"プレイリスト", L"Playlist", L"Liste", L"Playlist", L"Lista", L"재생목록", L"播放列表", L"قائمة", L"Плейлист", L"Playlist", L"Lista", L"Playlist", L"Lista", L"Liste"));
+			if (m_plsel.GetSafeHwnd()) m_plsel.EnableWindow(TRUE);
+			if (m_plrename.GetSafeHwnd()) m_plrename.EnableWindow(TRUE);
+			if (m_pldelete.GetSafeHwnd()) m_pldelete.EnableWindow(TRUE);
+		}
 		savedata.mpHistOpen = 1;
 		savedata.mpLibOpen = 0;
+		savedata.mpTempOpen = 0;
 		m_histBuilt = 0;
 	}
 	if (m_libToggle.GetSafeHwnd())
 		m_libToggle.SetWindowText(savedata.mpLibOpen ? L"≪" : L"Lib");
 	if (m_histToggle.GetSafeHwnd())
 		m_histToggle.SetWindowText(savedata.mpHistOpen ? L"≪" : L"Hist");
+	if (m_tempToggle.GetSafeHwnd()) {
+		m_tempToggle.SetWindowText(L"Temp");
+		m_tempToggle.SetCheck(savedata.mpTempOpen ? BST_CHECKED : BST_UNCHECKED);
+		m_tempToggle.EnsureAnimTimer();
+		m_tempToggle.RepaintClient();
+	}
 	DoLayout();
 	CCC_GroupBoxesBack(GetSafeHwnd());
 	RefreshListAfterLayout();
 	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
 	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 	MpPersistSavedataQuick();
+}
+
+void CMediaPlayerDlg::OnTempToggle()
+{
+	if (savedata.mpTempOpen) {
+		// OFF: 一時破棄 → ディスクのPLへ戻す
+		savedata.mpTempOpen = 0;
+		if (pl) {
+			pl->m_tempMode = 0;
+			pl->Load(TRUE);
+			if (pl->m_lc.GetSafeHwnd())
+				pl->m_lc.SetItemCount(pl->playcnt);
+		}
+		m_queueN = 0;
+		if (m_grpPl.GetSafeHwnd())
+			m_grpPl.SetWindowText(LL14(L"プレイリスト", L"Playlist", L"Liste", L"Playlist", L"Lista", L"재생목록", L"播放列表", L"قائمة", L"Плейлист", L"Playlist", L"Lista", L"Playlist", L"Lista", L"Liste"));
+		if (m_plsel.GetSafeHwnd()) m_plsel.EnableWindow(TRUE);
+		if (m_plrename.GetSafeHwnd()) m_plrename.EnableWindow(TRUE);
+		if (m_pldelete.GetSafeHwnd()) m_pldelete.EnableWindow(TRUE);
+	}
+	else {
+		// ON: 現行PLを保存してから空の一時へ
+		savedata.mpTempOpen = 1;
+		savedata.mpLibOpen = 0;
+		savedata.mpHistOpen = 0;
+		if (pl && !pl->m_tempMode) {
+			pl->Save();
+			if (pl->pc) { free(pl->pc); pl->pc = NULL; }
+			pl->playcnt = 0;
+			pl->pnt = -1;
+			pl->pnt1 = -1;
+			pl->pc = (playlistdata0*)malloc(sizeof(playlistdata0));
+			if (pl->m_lc.GetSafeHwnd())
+				pl->m_lc.SetItemCount(0);
+			pl->m_tempMode = 1;
+		}
+		m_queueN = 0;
+		if (m_grpPl.GetSafeHwnd())
+			m_grpPl.SetWindowText(LL14(L"一時プレイリスト", L"Temporary playlist", L"Liste temporaire", L"Playlist temporanea", L"Lista temporal", L"임시 재생목록", L"临时播放列表", L"قائمة مؤقتة", L"Временный плейлист", L"Temporaere Playlist", L"Lista temporaria", L"Tijdelijke playlist", L"Lista tymczasowa", L"Gecici liste"));
+		if (m_plsel.GetSafeHwnd()) m_plsel.EnableWindow(FALSE);
+		if (m_plrename.GetSafeHwnd()) m_plrename.EnableWindow(FALSE);
+		if (m_pldelete.GetSafeHwnd()) m_pldelete.EnableWindow(FALSE);
+	}
+	if (m_libToggle.GetSafeHwnd())
+		m_libToggle.SetWindowText(savedata.mpLibOpen ? L"≪" : L"Lib");
+	if (m_histToggle.GetSafeHwnd())
+		m_histToggle.SetWindowText(savedata.mpHistOpen ? L"≪" : L"Hist");
+	if (m_tempToggle.GetSafeHwnd()) {
+		m_tempToggle.SetWindowText(L"Temp");
+		m_tempToggle.SetCheck(savedata.mpTempOpen ? BST_CHECKED : BST_UNCHECKED);
+		m_tempToggle.EnsureAnimTimer();
+		m_tempToggle.RepaintClient();
+	}
+	RefreshList(TRUE);
+	DoLayout();
+	CCC_GroupBoxesBack(GetSafeHwnd());
+	RefreshListAfterLayout();
+	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS, 0, 0);
+	RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+	MpPersistSavedataQuick();
+}
+
+void CMediaPlayerDlg::OnTempClear()
+{
+	if (!pl || !pl->m_tempMode) return;
+	if (pl->playcnt <= 0) return;
+	if (MessageBox(LL14(
+		L"一時リストをすべてクリアしますか？", L"Clear the entire temporary list?", L"Vider toute la liste temporaire ?", L"Svuotare tutta la lista temporanea?", L"¿Vaciar toda la lista temporal?",
+		L"임시 목록을 모두 비울까요?", L"清空整个临时列表？", L"مسح القائمة المؤقتة بالكامل؟", L"Очистить весь временный список?", L"Gesamte Templiste leeren?",
+		L"Limpar toda a lista temporaria?", L"Hele tijdelijke lijst wissen?", L"Wyczyscic cala liste tymczasowa?", L"Tum gecici liste temizlensin mi?"),
+		LL14(L"確認", L"Confirm", L"Confirmer", L"Conferma", L"Confirmar", L"확인", L"确认", L"تأكيد",
+			L"Подтверждение", L"Bestätigen", L"Confirmar", L"Bevestigen", L"Potwierdzenie", L"Onay"),
+		MB_YESNO | MB_ICONQUESTION) != IDYES)
+		return;
+	if (pl->pc) { free(pl->pc); pl->pc = NULL; }
+	pl->playcnt = 0;
+	pl->pnt = -1;
+	pl->pnt1 = -1;
+	pl->pc = (playlistdata0*)malloc(sizeof(playlistdata0));
+	if (pl->m_lc.GetSafeHwnd())
+		pl->m_lc.SetItemCount(0);
+	m_queueN = 0;
+	RefreshList(TRUE);
+	UpdateEmptyStateUi();
 }
 
 void CMediaPlayerDlg::HistRebuildList()

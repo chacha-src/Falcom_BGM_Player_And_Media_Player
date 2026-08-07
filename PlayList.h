@@ -36,6 +36,7 @@ public:
 	int nnn;
 	int pnt,pnt1;
 	int playcnt;
+	int m_tempMode; // 1=一時PL(Saveしない)。savedata.mpTempOpen と同期して使う
 
 	void SIcon(int i);
 	void SIconTimer(int i);
@@ -238,6 +239,8 @@ enum {
 	PL_CTX_DUPES = 35,
 	PL_CTX_FOLDER_SYNC = 36,
 	PL_CTX_EQ = 41,
+	PL_CTX_TEMP_CLEAR = 42,
+	PL_CTX_TEMP_EXIT = 43,
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

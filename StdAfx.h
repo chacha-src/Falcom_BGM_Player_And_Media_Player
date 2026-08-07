@@ -579,6 +579,10 @@ struct save{
 	// 次回起動で exe の更新日時がこれと同一なら上書き失敗とみなし、
 	// 「ダウンロード」フォルダへ手動展開フォールバックする。
 	__int64 updateAttemptExeTime;
+
+	// --- 一時プレイリスト(末尾追記。旧.datは0) ---
+	// 1=一時モードON(曲は非保存・アプリ終了で破棄)。ON/OFFのみ永続。
+	int mpTempOpen;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

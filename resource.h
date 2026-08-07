@@ -984,6 +984,9 @@
 #define IDC_MP_CHEAT_TEXT               3667
 #define IDC_MP_CHEATBTN                 3668
 #define IDC_MP_PLRAILBG                 3901
+#define IDC_MP_TEMPTOGGLE               3902
+#define IDC_MP_TEMPCLEAR                3903
+#define IDC_MP_TEMPHINT                 3904
 
 // ?????o???_?C?A???O: ?^?O/?W???P?b?g??R?s?[
 #define IDC_WAVEXPORT_COPY_TAGS         3669

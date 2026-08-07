@@ -11114,7 +11114,7 @@ void COggDlg::play()
 	}
 	if (mode == -3 || mode == -8 || mode == -9 || mode == -10 || mode == 999) endf = 1;
 	loopcnt = 0;
-	if (pl && plw) {
+	if (pl && plw && !pl->m_tempMode) {
 		int plc = 1;
 		if (mode == -10)
 			plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, (oggsize / (2 * wavchannel * wavbit_sample_Hz / 4) / ((mode == -9) ? 4 : 1)), 1);
@@ -11204,6 +11204,8 @@ void COggDlg::play()
 
 void COggDlg::SetAdd(CString fnn, int mode, int loop1, int loop2, CString filen, int ret2, REFTIME time)
 {
+	// 一時PL: 自動追記しない(D&D/Fol 等の明示追加のみ)
+	if (pl && pl->m_tempMode) return;
 	if (pl && plw) {
 		int plc;
 		plc = pl->Add(fnn, mode, loop1, loop2, _T(""), _T(""), filen, ret2, (int)time);
@@ -18191,7 +18193,7 @@ void COggDlg::dp(CString a)
 		m_time.SetRange(0, (int)((REFTIME)aa * 100.0), TRUE);
 		m_time.SetSelection(0, (int)((REFTIME)aa * 100.0) - 1);
 		m_time.Invalidate();
-		if (pl && plw) {
+		if (pl && plw && !pl->m_tempMode) {
 			int plc;
 			plc = pl->Add(fnn, mode, 0, 0, _T(""), _T(""), filen, 0, (int)aa, 1);
 			if (plc == -1) {
@@ -21422,7 +21424,8 @@ void timerog1(UINT nIDEvent)
 			}
 			// RestoreSavedPlaybackRow 後の filen は既にリストにあることが多い。
 			// oggsize==0 の Add は time=0 で既存行を上書きしてしまうためスキップする。
-			if (pl && plw && filen != "" && !(wavbit_sample_Hz == 0 || wavchannel == 0 || wavsam_depth == 0)) {
+			// 一時PLも自動追記しない(起動時に最後の曲が載るのを防ぐ)。
+			if (pl && plw && !pl->m_tempMode && filen != "" && !(wavbit_sample_Hz == 0 || wavchannel == 0 || wavsam_depth == 0)) {
 				const int existing = pl->FindByPath(filen);
 				if (existing >= 0 && oggsize == 0) {
 					plcnt = existing;
@@ -24168,7 +24171,7 @@ void COggDlg::OnRestart()
 			m_time.SetRange(0, (int)((REFTIME)aa * 100.0), TRUE);
 			m_time.SetSelection(0, (int)((REFTIME)aa * 100.0) - 1);
 			m_time.Invalidate();
-			if (pl && plw) {
+			if (pl && plw && !pl->m_tempMode) {
 				int plc = -1;
 				plc = pl->Add(fnn, mode, 0, 0, _T(""), _T(""), filen, 0, (int)aa, 1);
 				if (plc == -1) {

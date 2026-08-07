@@ -552,6 +552,7 @@ CPlayList::CPlayList(CWnd* pParent /*=NULL*/)
 	pc=NULL;
 	plw=0;
 	playcnt=0;
+	m_tempMode = 0;
 //	pc = new playlistdata0[60000];
 }
 
@@ -2375,7 +2376,7 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 	menu.AddSeparator();
 
 	const int plCnt = GetPlaylistFileCount();
-	if (plCnt > 1) {
+	if (!m_tempMode && plCnt > 1) {
 		int otherN = 0;
 		for (int i = 0; i < plCnt; ++i) {
 			if (i != savedata.playlistnum) ++otherN;
@@ -2402,6 +2403,28 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 		}
 	}
 
+	if (m_tempMode) {
+		menu.AddSeparator();
+		menu.AddCommand(PL_CTX_TEMP_CLEAR,
+			LL14(L"一時リストをクリア", L"Clear temporary list", L"Vider la liste temporaire", L"Svuota lista temporanea",
+				L"Vaciar lista temporal", L"임시 목록 비우기", L"清空临时列表", L"مسح القائمة المؤقتة",
+				L"Очистить временный список", L"Templiste leeren", L"Limpar lista temporaria", L"Tijdelijke lijst wissen",
+				L"Wyczysc liste tymczasowa", L"Gecici listeyi temizle"),
+			LL14(L"一時プレイリストの曲をすべて削除(保存されません)", L"Remove all tracks from the temporary playlist (not saved)", L"Supprimer toutes les pistes temporaires (non enregistrees)", L"Rimuovi tutte le tracce temporanee (non salvate)",
+				L"Quitar todas las pistas temporales (no se guardan)", L"임시 재생목록의 모든 곡 삭제(저장 안 됨)", L"删除临时列表全部曲目（不保存）", L"إزالة كل المقاطع المؤقتة (غير محفوظة)",
+				L"Удалить все временные треки (не сохраняется)", L"Alle Titel der Templiste entfernen (wird nicht gespeichert)", L"Remover todas as faixas temporarias (nao salvas)", L"Alle tijdelijke nummers verwijderen (niet opgeslagen)",
+				L"Usun wszystkie utwory tymczasowe (bez zapisu)", L"Gecici listedeki tum parcalari sil (kaydedilmez)"));
+		menu.AddCommand(PL_CTX_TEMP_EXIT,
+			LL14(L"一時モード終了", L"Exit temporary mode", L"Quitter le mode temporaire", L"Esci modalita temporanea",
+				L"Salir del modo temporal", L"임시 모드 종료", L"退出临时模式", L"إنهاء الوضع المؤقت",
+				L"Выйти из временного режима", L"Tempmodus beenden", L"Sair do modo temporario", L"Tijdelijke modus verlaten",
+				L"Zakoncz tryb tymczasowy", L"Gecici moddan cik"),
+			LL14(L"一時リストを破棄し、保存済みプレイリストへ戻る", L"Discard the temporary list and restore the saved playlist", L"Abandonner la liste temporaire et restaurer la liste enregistree", L"Scarta la lista temporanea e ripristina quella salvata",
+				L"Descartar la lista temporal y restaurar la guardada", L"임시 목록을 버리고 저장된 재생목록으로 복원", L"丢弃临时列表并恢复已保存列表", L"تجاهل القائمة المؤقتة واستعادة المحفوظة",
+				L"Сбросить временный список и восстановить сохранённый", L"Templiste verwerfen und gespeicherte Playlist wiederherstellen", L"Descartar a lista temporaria e restaurar a salva", L"Tijdelijke lijst verwerpen en opgeslagen herstellen",
+				L"Odrzuc liste tymczasowa i przywroc zapisana", L"Gecici listeyi at ve kayitli listeye don"));
+	}
+
 	menu.AddSeparator();
 	menu.AddCommand(ID_HELP_SHOWSHEET,
 		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
@@ -2415,6 +2438,18 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 void CPlayList::HandleTrackContextCmd(int cmd)
 {
 	if (cmd == ID_HELP_SHOWSHEET) { ShowHelpSheet(); return; }
+	if (cmd == PL_CTX_TEMP_CLEAR) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_TEMPCLEAR, BN_CLICKED), 0);
+		return;
+	}
+	if (cmd == PL_CTX_TEMP_EXIT) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && savedata.mpTempOpen)
+			mp->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_TEMPTOGGLE, BN_CLICKED), 0);
+		return;
+	}
 	if (cmd == PL_CTX_INFO) OnList();
 	else if (cmd == PL_CTX_WAV) OnPopWavExport();
 	else if (cmd == PL_CTX_VIDEO_EXTRACT) {
@@ -7862,6 +7897,7 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 
 void CPlayList::Save()
 {
+	if (m_tempMode) return;
 	TCHAR tmp[1024];int cnt,j;CString s;
 	int cx,cy,x,y;RECT r;
 	int c;
@@ -9228,6 +9264,7 @@ BOOL changeflg = FALSE;
 void CPlayList::OnCbnSelchangeCombo1()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
+	if (m_tempMode) return;
 	if (changeflg == TRUE) return;
 	int num = m_listchange.GetCurSel();
 	if (num < 0) return;
@@ -9380,6 +9417,7 @@ CString CPlayList::GetModulePath()
 void CPlayList::OnBnClickedButton3()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
+	if (m_tempMode) return;
 	CPlayListNew pn;
 	pn.name = savedata.playlistname[savedata.playlistnum];
 	if (pn.name == L"") pn.name = GetPlaylistDisplayName(savedata.playlistnum);
@@ -9436,6 +9474,7 @@ void CPlayList::OnBnClickedButton3()
 void CPlayList::OnBnClickedPlaydelete()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
+	if (m_tempMode) return;
 	if (MessageBox(LL14(
 		L"現在のリストを削除しますがよろしいですか？", /* 日本語 */
 		L"Are you sure you want to delete the current list?", /* 英語 */
