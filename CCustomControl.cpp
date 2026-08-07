@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include <algorithm>
