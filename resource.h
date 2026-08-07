@@ -842,6 +842,8 @@
 #define ID_MP_JACKET_SAVE_COVER         33048
 #define ID_MP_TOOLS_PANEL               33049
 #define ID_MP_JACKET_REM_OVERLAY        33050
+#define ID_MP_REMOTE_DLG                33051
+#define ID_MP_REMOTE_BROWSER            33052
 #define ID_MP_OPEN_EQ                   33120
 #define ID_MP_OPEN_PROTOOLS             33121
 #define ID_MP_LRC_EXPAND                33122

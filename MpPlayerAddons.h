@@ -47,6 +47,8 @@ void MpPcAudioMarkUserOwned(); // ユーザーが明示的にPC音ONにした
 
 void MpRemoteEnsureRunning(HWND notifyHwnd);
 void MpRemoteStop();
+void MpRemoteUiTick(CMediaPlayerDlg* mp); // UIスレッド: status 用 pos/lrc/index キャッシュ
+void MpRemoteOpenInBrowser(); // 127.0.0.1 でリモコンページを開く（必要ならサーバ起動）
 
 void MpMidiInSetActive(BOOL on, HWND notifyHwnd);
 void MpMidiInShutdown();

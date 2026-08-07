@@ -1205,6 +1205,8 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_ALARM, &CMediaPlayerDlg::OnMpAlarm)
 	ON_COMMAND(ID_MP_MIRROR, &CMediaPlayerDlg::OnMpMirror)
 	ON_COMMAND(ID_MP_REMOTE, &CMediaPlayerDlg::OnMpRemote)
+	ON_COMMAND(ID_MP_REMOTE_DLG, &CMediaPlayerDlg::OnMpRemoteDlg)
+	ON_COMMAND(ID_MP_REMOTE_BROWSER, &CMediaPlayerDlg::OnMpRemoteBrowser)
 	ON_COMMAND(ID_MP_SSVIZ, &CMediaPlayerDlg::OnMpSsViz)
 	ON_COMMAND(ID_MP_VIDEO_EXTRACT, &CMediaPlayerDlg::OnMpVideoExtract)
 	ON_COMMAND(ID_MP_VIDEO_REPLACE, &CMediaPlayerDlg::OnMpVideoReplace)
@@ -4163,6 +4165,8 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 	}
 	else if (nIDEvent == 3) {
 		MpBpmOnTimerTick();
+		if (savedata.mpRemoteOn)
+			MpRemoteUiTick(this);
 		// シーク/音量ミラーは timerp 側(同一UIターン)に一本化。ここでも呼ぶと
 		// SetPlaybackMirror(UPDATENOW) が二重になり全体が約2倍重い。
 		// LRC カラオケ塗りは 250ms 同期だと荒い → GDI時間表示と同じ実再生位置で追従
@@ -8620,6 +8624,20 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 				L"Управление с телефонов/ПК в той же Wi-Fi (до 3). Сначала порт", L"Steuerung von Telefonen/PCs im gleichen WLAN (max. 3). Zuerst Port",
 				L"Controlo de telemoveis/PCs na mesma Wi-Fi (máx. 3). Confirme a porta", L"Bediening vanaf telefoons/pc's op hetzelfde Wi-Fi (max 3). Eerst poort",
 				L"Sterowanie z telefonow/PC w tej samej Wi-Fi (max 3). Najpierw port", L"Ayni Wi-Fi'deki telefon/PC'den kontrol (en fazla 3). Once port"));
+		menu.AddCommand(ID_MP_REMOTE_DLG,
+			LL14(L"リモート設定…", L"Remote settings…", L"Reglages remote…", L"Impostazioni remote…", L"Ajustes remoto…",
+				L"리모트 설정…", L"遥控设置…", L"إعدادات التحكم…", L"Настройки пульта…", L"Remote-Einstellungen…",
+				L"Definicoes remotas…", L"Remote-instellingen…", L"Ustawienia pilota…", L"Uzaktan ayarlar…"),
+			LL14(L"URL表示・ブラウザ起動などの設定画面", L"Settings: URL, open in browser", L"Reglages: URL, navigateur", L"Impostazioni: URL, browser", L"Ajustes: URL, navegador",
+				L"URL/브라우저 설정", L"URL、浏览器设置", L"الإعدادات: الرابط والمتصفح", L"Настройки: URL, браузер", L"Einstellungen: URL, Browser",
+				L"Definicoes: URL, navegador", L"Instellingen: URL, browser", L"Ustawienia: URL, przegladarka", L"Ayarlar: URL, tarayici"));
+		menu.AddCommand(ID_MP_REMOTE_BROWSER,
+			LL14(L"ブラウザで開く", L"Open in browser", L"Ouvrir dans le navigateur", L"Apri nel browser", L"Abrir en el navegador",
+				L"브라우저에서 열기", L"在浏览器打开", L"فتح في المتصفح", L"Открыть в браузере", L"Im Browser öffnen",
+				L"Abrir no navegador", L"Openen in browser", L"Otworz w przegladarce", L"Tarayicida ac"),
+			LL14(L"既定ブラウザでリモコンページを開く（必要なら有効化）", L"Open remote page in default browser (enables if needed)", L"Ouvrir la page dans le navigateur (active si besoin)", L"Apri la pagina nel browser (attiva se serve)", L"Abrir la pagina en el navegador (activa si hace falta)",
+				L"기본 브라우저로 리모트 페이지(필요시 켜기)", L"用默认浏览器打开遥控页（必要时启用）", L"فتح صفحة التحكم (تفعيل إن لزم)", L"Открыть страницу пульта (включить при необходимости)", L"Remote-Seite im Browser (bei Bedarf aktivieren)",
+				L"Abrir pagina remota (ativa se preciso)", L"Remote-pagina openen (indien nodig aan)", L"Otworz strone pilota (wlacz gdy trzeba)", L"Uzaktan sayfasini ac (gerekirse ac)"));
 	}
 	menu.AddCheck(ID_MP_MIDI_IN,
 		LL14(L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI 输入", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In"),
@@ -9825,6 +9843,8 @@ void CMediaPlayerDlg::OnMpRemote()
 	MpPersistSavedataQuick();
 	MpRemoteEnsureRunning(GetSafeHwnd());
 }
+void CMediaPlayerDlg::OnMpRemoteDlg() { OpenMpRemoteDlgModeless(this); }
+void CMediaPlayerDlg::OnMpRemoteBrowser() { MpRemoteOpenInBrowser(); }
 void CMediaPlayerDlg::OnMpSsViz() { OpenMpSsVizModeless(this); }
 void CMediaPlayerDlg::OnMpVideoExtract() { MpOnVideoExtract(this); }
 void CMediaPlayerDlg::OnMpVideoReplace() { MpOnVideoReplaceAudio(this); }

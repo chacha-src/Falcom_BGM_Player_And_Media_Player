@@ -520,6 +520,8 @@ protected:
 	afx_msg void OnMpAlarm();
 	afx_msg void OnMpMirror();
 	afx_msg void OnMpRemote();
+	afx_msg void OnMpRemoteDlg();
+	afx_msg void OnMpRemoteBrowser();
 	afx_msg void OnMpSsViz();
 	afx_msg void OnMpVideoExtract();
 	afx_msg void OnMpVideoReplace();
