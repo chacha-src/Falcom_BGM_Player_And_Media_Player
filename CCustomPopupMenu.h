@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "CCustomControl.h"
 
 // ============================================================================
@@ -53,15 +53,35 @@ enum {
 	CCUSTOM_POPUP_CHECK_W = 24,     // レ点列（ラベル無し行も同幅で揃える）
 	CCUSTOM_POPUP_ARROW_W = 16,
 	CCUSTOM_POPUP_MIN_W = 200,
-	CCUSTOM_POPUP_ANIM_IN_MS = 140,
-	CCUSTOM_POPUP_ANIM_OUT_MS = 100,
-	CCUSTOM_POPUP_ANIM_SUB_MS = 120,
+	// 行アニメ（半分の速度＝時間ほぼ2倍。広がり・ゆれをはっきり）
+	CCUSTOM_POPUP_ANIM_IN_MS = 180,
+	CCUSTOM_POPUP_ANIM_OUT_MS = 140,
+	CCUSTOM_POPUP_ANIM_SUB_MS = 140,
+	CCUSTOM_POPUP_LINE_STAGGER_IN = 12,
+	CCUSTOM_POPUP_LINE_STAGGER_OUT = 10,
+	CCUSTOM_POPUP_LINE_STAGGER_SUB = 10,
+	CCUSTOM_POPUP_LINE_STAGGER_BUDGET = 280, // 項目が多くても合計遅延の上限(ms)
 	CCUSTOM_POPUP_SCROLL_STEP = 36,
 	// 骨格専用コマンド（呼び出し元へ返さない）
 	CCUSTOM_POPUP_ID_ACRYLIC = 0x00E00100,
 	CCUSTOM_POPUP_ID_FONT_BOLD = 0x00E00101,
 	CCUSTOM_POPUP_ID_FONT_ITALIC = 0x00E00102,
-	CCUSTOM_POPUP_ID_FONT_FACE = 0x00E00110
+	CCUSTOM_POPUP_ID_FONT_FACE = 0x00E00110,
+	// メニュー描画方法（アクリルの下の共通サブ）。0..4 = savedata.popupMenuAnim
+	CCUSTOM_POPUP_ID_ANIM0 = 0x00E00120,
+	CCUSTOM_POPUP_ID_ANIM1 = 0x00E00121,
+	CCUSTOM_POPUP_ID_ANIM2 = 0x00E00122,
+	CCUSTOM_POPUP_ID_ANIM3 = 0x00E00123,
+	CCUSTOM_POPUP_ID_ANIM4 = 0x00E00124
+};
+
+enum {
+	POPUP_ANIM_CLASSIC = 0, // 既存: 全体フェード
+	POPUP_ANIM_EXPAND = 1,  // クリックから上下伸び
+	POPUP_ANIM_CASCADE = 2, // 上から一行ずつ
+	POPUP_ANIM_SLIDE = 3,   // 左からスライド
+	POPUP_ANIM_POP = 4,     // 中央からポップ
+	POPUP_ANIM_COUNT = 5
 };
 
 enum CCustomPopupItemKind {
@@ -244,6 +264,10 @@ protected:
 	int m_stickyH;     // 固定ヘッダの高さ
 	BOOL m_asSubmenu;
 	int m_animTick;
+	int m_lineAnimPhase; // 0=idle 1=enter 2=exit
+	ULONGLONG m_lineAnimStart;
+	int m_lineAnimOrigin; // クリック位置に近い行（上下に広がる起点）
+	int m_lineAnimOriginY; // クライアントY（起点）
 	BOOL m_skipChrome;
 	BOOL m_chromeInjected;
 	wchar_t m_previewFace[32];
@@ -278,6 +302,8 @@ protected:
 	void RunModalLoop();
 	void AnimateIn();
 	void AnimateOut();
+	// phase中の行オフセット/フェード(ox,oy,fade0..256)。未出現は FALSE
+	BOOL CalcLineAnim(int idx, int* ox, int* oy, int* fade) const;
 	void NotifyEditFromHwnd(HWND hwnd);
 	void NotifyChoiceFromHwnd(HWND hwnd, BOOL fromList);
 	void NotifyRangeFromHwnd(HWND hwnd, UINT nSBCode);

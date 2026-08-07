@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
+#include "CImageBase.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -13224,6 +13225,38 @@ static const int CCC_MAINLOCK_MARGIN = 10;
 static void CCC_MainLockLayoutBtn(HWND hDlg);
 static void CCC_MainLockInvalidateOverlay(HWND hDlg);
 
+void CCC_ClampWindowPos(int& x, int& y, int w, int h)
+{
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    RECT wr;
+    wr.left = x;
+    wr.top = y;
+    wr.right = x + w;
+    wr.bottom = y + h;
+    // いずれかのモニタに載っていればそのまま(左/上サブモニタの負座標も可)
+    if (::MonitorFromRect(&wr, MONITOR_DEFAULTTONULL))
+        return;
+    HMONITOR hMon = ::MonitorFromRect(&wr, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
+    RECT rcWork;
+    if (hMon && ::GetMonitorInfo(hMon, &mi))
+        rcWork = mi.rcWork;
+    else if (!::SystemParametersInfo(SPI_GETWORKAREA, 0, &rcWork, 0))
+        return;
+    int nw = w;
+    int nh = h;
+    const int mw = rcWork.right - rcWork.left;
+    const int mh = rcWork.bottom - rcWork.top;
+    if (nw > mw) nw = mw;
+    if (nh > mh) nh = mh;
+    if (x < rcWork.left) x = rcWork.left;
+    if (y < rcWork.top) y = rcWork.top;
+    if (x + nw > rcWork.right) x = rcWork.right - nw;
+    if (y + nh > rcWork.bottom) y = rcWork.bottom - nh;
+}
+
 static void CCC_MainLockReleaseOverlayCache(CCC_MainLockEntry* e)
 {
     if (!e || !e->pOverlay)
@@ -13327,6 +13360,7 @@ static void CCC_MainLockPlaceChild(CCC_MainLockEntry& e, const RECT* pMainRect)
         y = pMainRect->bottom + e.gapY;
     else if (e.dockV == 2)
         y = pMainRect->top - h - e.gapY;
+    CCC_ClampWindowPos(x, y, w, h);
     ::SetWindowPos(e.hWnd, NULL, x, y, 0, 0,
         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 }
@@ -14194,26 +14228,431 @@ void CCC_MainLockOnMainMoving(LPRECT pMainRect)
     g_mainLockInternalMove = FALSE;
 }
 
+// ---- 右/下辺リサイズ時の隣窓連鎖押し出し（追従フラグ無関係）----
+// ENTERSIZEMOVE 無しでも pOld→pNew の差分で動く（増分）。密着は広め＋最近傍フォールバック。
+// SINK: Winの不可視リサイズ枠で「見た目密着」が gap=-7〜-20 になりがちなので深めに許容。
+enum { CCC_CASCADE_MAX = 16, CCC_CASCADE_GAP = 280, CCC_CASCADE_NEAR = 1600, CCC_CASCADE_SINK = 56 };
+
+struct CCC_CascadeSnap {
+    BOOL active;
+    HWND hMain;
+    RECT mainRc;
+    HWND hWnd[CCC_CASCADE_MAX];
+    RECT rc[CCC_CASCADE_MAX];
+    BYTE locked[CCC_CASCADE_MAX];
+    BYTE dockH[CCC_CASCADE_MAX];
+    BYTE dockV[CCC_CASCADE_MAX];
+    int n;
+};
+static CCC_CascadeSnap g_cascadeSnap = {};
+
+static BOOL CCC_CascadeVertOverlap(const RECT& a, const RECT& b)
+{
+    return a.top < b.bottom && b.top < a.bottom;
+}
+static BOOL CCC_CascadeHorzOverlap(const RECT& a, const RECT& b)
+{
+    return a.left < b.right && b.left < a.right;
+}
+// a の右辺に b が密着／めり込み／すぐ右
+static BOOL CCC_CascadeTouchRight(const RECT& a, const RECT& b)
+{
+    if (!CCC_CascadeVertOverlap(a, b)) return FALSE;
+    const int gap = b.left - a.right;
+    if (gap >= -CCC_CASCADE_SINK && gap <= CCC_CASCADE_GAP)
+        return TRUE;
+    return FALSE;
+}
+// a の下辺に b が密着／めり込み／すぐ下
+static BOOL CCC_CascadeTouchBottom(const RECT& a, const RECT& b)
+{
+    if (!CCC_CascadeHorzOverlap(a, b)) return FALSE;
+    const int gap = b.top - a.bottom;
+    if (gap >= -CCC_CASCADE_SINK && gap <= CCC_CASCADE_GAP)
+        return TRUE;
+    return FALSE;
+}
+
+static void CCC_CascadeCollect(HWND hMain, CCC_CascadeSnap& snap, const RECT* pMainRcOpt)
+{
+    ZeroMemory(&snap, sizeof(snap));
+    if (!hMain || !::IsWindow(hMain))
+        return;
+    snap.hMain = hMain;
+    if (pMainRcOpt)
+        snap.mainRc = *pMainRcOpt;
+    else
+        ::GetWindowRect(hMain, &snap.mainRc);
+    for (int i = 0; i < g_mainLockCount && snap.n < CCC_CASCADE_MAX; ++i) {
+        CCC_MainLockEntry& e = g_mainLocks[i];
+        if (!::IsWindow(e.hWnd) || e.hWnd == hMain)
+            continue;
+        if (!::IsWindowVisible(e.hWnd) || ::IsIconic(e.hWnd))
+            continue;
+        const int idx = snap.n++;
+        snap.hWnd[idx] = e.hWnd;
+        ::GetWindowRect(e.hWnd, &snap.rc[idx]);
+        snap.locked[idx] = e.locked ? 1 : 0;
+        snap.dockH[idx] = (BYTE)e.dockH;
+        snap.dockV[idx] = (BYTE)e.dockV;
+    }
+}
+
+void CCC_NeighborCascadeBegin(HWND hMain)
+{
+    CCC_CascadeCollect(hMain, g_cascadeSnap, NULL);
+    g_cascadeSnap.active = TRUE;
+}
+
+void CCC_NeighborCascadeEnd()
+{
+    g_cascadeSnap.active = FALSE;
+    g_cascadeSnap.hMain = NULL;
+    g_cascadeSnap.n = 0;
+}
+
+void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain)
+{
+    if (!pNewMain)
+        return;
+
+    if (!pOldMain) {
+        CCC_MainLockOnMainMoving((LPRECT)pNewMain);
+        return;
+    }
+
+    const int oldW = pOldMain->right - pOldMain->left;
+    const int oldH = pOldMain->bottom - pOldMain->top;
+    const int newW = pNewMain->right - pNewMain->left;
+    const int newH = pNewMain->bottom - pNewMain->top;
+    if (oldW == newW && oldH == newH) {
+        CCC_MainLockOnMainMoving((LPRECT)pNewMain);
+        return;
+    }
+
+    // 増分（毎 OnSize の旧→新）。Begin の絶対基準に依存しないので ENTERSIZEMOVE 欠落でも動く
+    const int dxR = pNewMain->right - pOldMain->right;
+    const int dyB = pNewMain->bottom - pOldMain->bottom;
+    if (dxR == 0 && dyB == 0) {
+        CCC_MainLockOnMainMoving((LPRECT)pNewMain);
+        return;
+    }
+
+    HWND hMain = g_cascadeSnap.active ? g_cascadeSnap.hMain : NULL;
+    if (!hMain || !::IsWindow(hMain)) {
+        CWnd* pActive = CCC_GetActiveMainWindow();
+        hMain = (pActive && ::IsWindow(pActive->GetSafeHwnd())) ? pActive->GetSafeHwnd() : NULL;
+    }
+    if (!hMain || !::IsWindow(hMain))
+        return;
+
+    // 毎回「いまの隣窓」を採取（スナップ固定だと途中で開いた窓が落ちる）
+    CCC_CascadeSnap live = {};
+    CCC_CascadeCollect(hMain, live, pOldMain);
+    if (live.n <= 0) {
+        CCC_MainLockOnMainMoving((LPRECT)pNewMain);
+        return;
+    }
+
+    BYTE reachR[CCC_CASCADE_MAX];
+    BYTE reachB[CCC_CASCADE_MAX];
+    ZeroMemory(reachR, sizeof(reachR));
+    ZeroMemory(reachB, sizeof(reachB));
+    const int n = live.n;
+
+    if (dxR != 0) {
+        // 旧右辺のすぐ右／密着／めり込み → 種。無ければ右方向の最近傍を種に。
+        BOOL any = FALSE;
+        for (int i = 0; i < n; ++i) {
+            if (CCC_CascadeTouchRight(*pOldMain, live.rc[i])) {
+                reachR[i] = 1; any = TRUE;
+            }
+        }
+        if (!any) {
+            int best = -1, bestGap = CCC_CASCADE_NEAR + 1;
+            for (int i = 0; i < n; ++i) {
+                const RECT& wi = live.rc[i];
+                const int gap = wi.left - pOldMain->right;
+                if (gap < -CCC_CASCADE_SINK || gap > CCC_CASCADE_NEAR) continue;
+                if (!CCC_CascadeVertOverlap(*pOldMain, wi)) continue;
+                if (gap < bestGap) { bestGap = gap; best = i; }
+            }
+            if (best >= 0) { reachR[best] = 1; any = TRUE; }
+        }
+        if (any) {
+            BOOL grew = TRUE;
+            while (grew) {
+                grew = FALSE;
+                for (int i = 0; i < n; ++i) {
+                    if (reachR[i]) continue;
+                    for (int j = 0; j < n; ++j) {
+                        if (!reachR[j]) continue;
+                        if (CCC_CascadeTouchRight(live.rc[j], live.rc[i])) {
+                            reachR[i] = 1; grew = TRUE; break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (dyB != 0) {
+        BOOL any = FALSE;
+        for (int i = 0; i < n; ++i) {
+            if (CCC_CascadeTouchBottom(*pOldMain, live.rc[i])) {
+                reachB[i] = 1; any = TRUE;
+            }
+        }
+        if (!any) {
+            int best = -1, bestGap = CCC_CASCADE_NEAR + 1;
+            for (int i = 0; i < n; ++i) {
+                const RECT& wi = live.rc[i];
+                const int gap = wi.top - pOldMain->bottom;
+                if (gap < -CCC_CASCADE_SINK || gap > CCC_CASCADE_NEAR) continue;
+                if (!CCC_CascadeHorzOverlap(*pOldMain, wi)) continue;
+                if (gap < bestGap) { bestGap = gap; best = i; }
+            }
+            if (best >= 0) { reachB[best] = 1; any = TRUE; }
+        }
+        if (any) {
+            BOOL grew = TRUE;
+            while (grew) {
+                grew = FALSE;
+                for (int i = 0; i < n; ++i) {
+                    if (reachB[i]) continue;
+                    for (int j = 0; j < n; ++j) {
+                        if (!reachB[j]) continue;
+                        if (CCC_CascadeTouchBottom(live.rc[j], live.rc[i])) {
+                            reachB[i] = 1; grew = TRUE; break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (g_mainLockInternalMove)
+        return;
+    g_mainLockInternalMove = TRUE;
+    g_mainLockQuickPresentUntil = GetTickCount() + 200;
+
+    for (int i = 0; i < n; ++i) {
+        if (!reachR[i] && !reachB[i])
+            continue;
+        HWND h = live.hWnd[i];
+        if (!::IsWindow(h))
+            continue;
+        const int ox = reachR[i] ? dxR : 0;
+        const int oy = reachB[i] ? dyB : 0;
+        if (ox == 0 && oy == 0)
+            continue;
+        // 増分: 現座標 + デルタ（毎フレーム積み上がる）
+        RECT cur;
+        ::GetWindowRect(h, &cur);
+        ::SetWindowPos(h, NULL, cur.left + ox, cur.top + oy, 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+        if (live.locked[i]) {
+            CCC_MainLockEntry* e = CCC_FindMainLockEntry(h);
+            if (e)
+                CCC_ComputeMainLockAttach(h, e);
+        }
+    }
+
+    for (int i = 0; i < g_mainLockCount; ++i) {
+        CCC_MainLockEntry& e = g_mainLocks[i];
+        if (!e.locked || !::IsWindow(e.hWnd))
+            continue;
+        int snapIdx = -1;
+        for (int s = 0; s < n; ++s) {
+            if (live.hWnd[s] == e.hWnd) { snapIdx = s; break; }
+        }
+        if (snapIdx >= 0 && (reachR[snapIdx] || reachB[snapIdx]))
+            continue;
+        if (dxR != 0 && e.dockH == 1)
+            continue;
+        if (dyB != 0 && e.dockV == 1)
+            continue;
+        CCC_MainLockPlaceChild(e, pNewMain);
+    }
+
+    g_mainLockInternalMove = FALSE;
+}
+
 BOOL CCC_MainLockPreferQuickPresent()
 {
     return GetTickCount() < g_mainLockQuickPresentUntil;
 }
 
-void CCC_MainLockRefreshOffsetsFor(CWnd* pMain)
+void CCC_MainLockRefreshOffsetsFor(CWnd* pMain, const RECT* pOldMain)
 {
     if (!pMain || !::IsWindow(pMain->GetSafeHwnd()))
         return;
+
+    // オフセット再計算のみ。起動時やメイン確定後に使い、絶対座標は触らない。
+    // (PlaceChild すると og 基準で付けた offset のまま mp へ飛んでドリフトする)
+    if (!pOldMain) {
+        for (int i = 0; i < g_mainLockCount; ++i) {
+            CCC_MainLockEntry& e = g_mainLocks[i];
+            if (!e.locked || !::IsWindow(e.hWnd) || e.hWnd == pMain->GetSafeHwnd())
+                continue;
+            CCC_ComputeMainLockAttach(e.hWnd, &e);
+        }
+        return;
+    }
+
+    CRect newMainRc;
+    pMain->GetWindowRect(&newMainRc);
+    const HWND hMain = pMain->GetSafeHwnd();
+
+    // 追随ON: 旧メインで保持している offset/dock を新メインへ適用して実窓を動かす。
+    // SWP_NOREDRAW でまとめ移動し、最後に一括再描画してちらつきを防ぐ。
+    HWND moved[16];
+    int nMoved = 0;
+    BOOL liveEq = FALSE, livePiano = FALSE, liveAn = FALSE, livePl = FALSE;
+    BOOL livePrompt = FALSE, liveTune = FALSE, liveCmd = FALSE;
+
+    extern CImageBase* playbase;
+    extern CImageBase* renderbase;
+    extern CImageBase* folderbase;
+    CImageBase* aeroBacks[3];
+    aeroBacks[0] = playbase;
+    aeroBacks[1] = renderbase;
+    aeroBacks[2] = folderbase;
+
+    if (g_mainLockInternalMove)
+        return;
+    g_mainLockInternalMove = TRUE;
+    g_mainLockQuickPresentUntil = GetTickCount() + 200;
     for (int i = 0; i < g_mainLockCount; ++i) {
         CCC_MainLockEntry& e = g_mainLocks[i];
-        if (!e.locked || !::IsWindow(e.hWnd))
+        if (!e.locked || !::IsWindow(e.hWnd) || e.hWnd == hMain)
             continue;
-        CCC_ComputeMainLockAttach(e.hWnd, &e);
+        CRect before;
+        ::GetWindowRect(e.hWnd, &before);
+        CCC_MainLockPlaceChild(e, &newMainRc);
+        CRect after;
+        ::GetWindowRect(e.hWnd, &after);
+        if ((before.left != after.left || before.top != after.top) && nMoved < (int)_countof(moved))
+            moved[nMoved++] = e.hWnd;
+
+        // PlaceChild は WM_MOVING を飛ばない → aero==2 グラス背面を親に追従
+        for (int bi = 0; bi < 3; ++bi) {
+            CImageBase* b = aeroBacks[bi];
+            if (!b || !::IsWindow(b->GetSafeHwnd()) || !b->oya)
+                continue;
+            if (b->oya->GetSafeHwnd() != e.hWnd)
+                continue;
+            b->MoveWindow(&after);
+        }
+
+        // 開いている追随窓は実座標を savedata へ同期(密着辺+サイズ差も反映済み)
+        if (e.pSaveFlag == &savedata.eqMainLock) {
+            savedata.eqx = after.left;
+            savedata.eqy = after.top;
+            liveEq = TRUE;
+        }
+        else if (e.pSaveFlag == &savedata.pianorollMainLock) {
+            savedata.pianorollx = after.left;
+            savedata.pianorolly = after.top;
+            livePiano = TRUE;
+        }
+        else if (e.pSaveFlag == &savedata.analyzerMainLock) {
+            savedata.analyzerx = after.left;
+            savedata.analyzery = after.top;
+            liveAn = TRUE;
+        }
+        else if (e.pSaveFlag == &savedata.playlistMainLock) {
+            savedata.p.left = after.left;
+            savedata.p.top = after.top;
+            savedata.p.right = after.right;
+            savedata.p.bottom = after.bottom;
+            livePl = TRUE;
+        }
+        else if (e.pSaveFlag == &savedata.mpPromptMainLock) {
+            savedata.mpPromptX = after.left;
+            savedata.mpPromptY = after.top;
+            savedata.mpPromptHasPos = 1;
+            livePrompt = TRUE;
+        }
+        else if (e.pSaveFlag == &savedata.prTuneMainLock) {
+            savedata.prTunex = after.left;
+            savedata.prTuney = after.top;
+            liveTune = TRUE;
+        }
+        else if (e.pSaveFlag == &savedata.mpCmdRollMainLock) {
+            savedata.mpCmdRollX = after.left;
+            savedata.mpCmdRollY = after.top;
+            savedata.mpCmdRollHasPos = 1;
+            liveCmd = TRUE;
+        }
+    }
+    g_mainLockInternalMove = FALSE;
+
+    for (int i = 0; i < nMoved; ++i) {
+        ::RedrawWindow(moved[i], NULL, NULL,
+            RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
+    }
+
+    // 閉じている追随ON窓: 旧メイン→新メインのデルタで保存座標だけ変換
+    const int dx = newMainRc.left - pOldMain->left;
+    const int dy = newMainRc.top - pOldMain->top;
+    if (dx == 0 && dy == 0)
+        return;
+    if (savedata.eqMainLock && !liveEq && savedata.eqx != -1) {
+        savedata.eqx += dx;
+        savedata.eqy += dy;
+        CCC_ClampWindowPos(savedata.eqx, savedata.eqy, 320, 240);
+    }
+    if (savedata.pianorollMainLock && !livePiano && savedata.pianorollx != -1) {
+        savedata.pianorollx += dx;
+        savedata.pianorolly += dy;
+        int pw = savedata.pianorollw > 0 ? savedata.pianorollw : 800;
+        int ph = savedata.pianorollh > 0 ? savedata.pianorollh : 450;
+        CCC_ClampWindowPos(savedata.pianorollx, savedata.pianorolly, pw, ph);
+    }
+    if (savedata.analyzerMainLock && !liveAn && savedata.analyzerx != -1) {
+        savedata.analyzerx += dx;
+        savedata.analyzery += dy;
+        CCC_ClampWindowPos(savedata.analyzerx, savedata.analyzery, 400, 300);
+    }
+    if (savedata.playlistMainLock && !livePl) {
+        const int pw = savedata.p.right - savedata.p.left;
+        const int ph = savedata.p.bottom - savedata.p.top;
+        savedata.p.left += dx;
+        savedata.p.right += dx;
+        savedata.p.top += dy;
+        savedata.p.bottom += dy;
+        int px = savedata.p.left, py = savedata.p.top;
+        CCC_ClampWindowPos(px, py, pw > 0 ? pw : 400, ph > 0 ? ph : 300);
+        savedata.p.left = px;
+        savedata.p.top = py;
+        savedata.p.right = px + (pw > 0 ? pw : 400);
+        savedata.p.bottom = py + (ph > 0 ? ph : 300);
+    }
+    if (savedata.mpPromptMainLock && !livePrompt && savedata.mpPromptHasPos) {
+        savedata.mpPromptX += dx;
+        savedata.mpPromptY += dy;
+        int pw = savedata.mpPromptW > 0 ? savedata.mpPromptW : 480;
+        int ph = savedata.mpPromptH > 0 ? savedata.mpPromptH : 360;
+        CCC_ClampWindowPos(savedata.mpPromptX, savedata.mpPromptY, pw, ph);
+    }
+    if (savedata.prTuneMainLock && !liveTune && savedata.prTunex != -1) {
+        savedata.prTunex += dx;
+        savedata.prTuney += dy;
+        CCC_ClampWindowPos(savedata.prTunex, savedata.prTuney, 360, 280);
+    }
+    if (savedata.mpCmdRollMainLock && !liveCmd && savedata.mpCmdRollHasPos) {
+        savedata.mpCmdRollX += dx;
+        savedata.mpCmdRollY += dy;
+        int pw = savedata.mpCmdRollW > 0 ? savedata.mpCmdRollW : 900;
+        int ph = savedata.mpCmdRollH > 0 ? savedata.mpCmdRollH : 560;
+        CCC_ClampWindowPos(savedata.mpCmdRollX, savedata.mpCmdRollY, pw, ph);
     }
 }
 
 void CCC_MainLockRefreshOffsets()
 {
-    CCC_MainLockRefreshOffsetsFor(CCC_GetActiveMainWindow());
+    CCC_MainLockRefreshOffsetsFor(CCC_GetActiveMainWindow(), NULL);
 }
 
 void CCC_MainLockOnChildMoving(CWnd* pDlg, LPRECT pRect)

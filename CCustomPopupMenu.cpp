@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomPopupMenu.h"
 #include <uxtheme.h>
 #include <math.h>
@@ -74,6 +74,16 @@ namespace {
 		savedata.popupMenuBold = savedata.popupMenuBold ? 1 : 0;
 		savedata.popupMenuItalic = savedata.popupMenuItalic ? 1 : 0;
 		savedata.popupMenuFace[_countof(savedata.popupMenuFace) - 1] = 0;
+	}
+	static void ClampPopupAnimSave()
+	{
+		if (savedata.popupMenuAnim < 0 || savedata.popupMenuAnim >= POPUP_ANIM_COUNT)
+			savedata.popupMenuAnim = POPUP_ANIM_CLASSIC;
+	}
+	static int PopupAnimStyle()
+	{
+		ClampPopupAnimSave();
+		return savedata.popupMenuAnim;
 	}
 
 	static void EnsurePopupClass()
@@ -368,7 +378,8 @@ CCustomPopupMenu::CCustomPopupMenu()
 	, m_tipHot(-1), m_memW(0), m_memH(0), m_font(NULL), m_fontOwned(NULL)
 	, m_menuW(0), m_menuH(0), m_contentH(0), m_scrollY(0), m_scrollMax(0)
 	, m_stickyCount(0), m_stickyH(0)
-	, m_asSubmenu(FALSE), m_animTick(0)
+	, m_asSubmenu(FALSE), m_animTick(0), m_lineAnimPhase(0), m_lineAnimStart(0)
+	, m_lineAnimOrigin(0), m_lineAnimOriginY(0)
 	, m_skipChrome(FALSE), m_chromeInjected(FALSE), m_previewing(FALSE)
 	, m_bounceIdx(-1), m_nBounce(0), m_suppressEditNotify(FALSE)
 {
@@ -425,7 +436,8 @@ BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
 	return id == CCUSTOM_POPUP_ID_ACRYLIC
 		|| id == CCUSTOM_POPUP_ID_FONT_BOLD
 		|| id == CCUSTOM_POPUP_ID_FONT_ITALIC
-		|| id == CCUSTOM_POPUP_ID_FONT_FACE;
+		|| id == CCUSTOM_POPUP_ID_FONT_FACE
+		|| (id >= CCUSTOM_POPUP_ID_ANIM0 && id <= CCUSTOM_POPUP_ID_ANIM4);
 }
 
 BOOL CCustomPopupMenu::AddItemBase(int kind, UINT id, LPCTSTR text, LPCTSTR tip, BOOL enabled, BOOL checked)
@@ -776,6 +788,51 @@ void CCustomPopupMenu::EnsureChromePrefix()
 			L"Размытие Win10+. Переключение без настроек", L"Unschärfe Win10+. Umschalten ohne Einstellungen",
 			L"Desfoque Win10+. Alternar sem ajustes", L"Vervaging Win10+. Schakelen zonder instellingen",
 			L"Rozmycie Win10+. Przelacz bez ustawien", L"Win10+ bulaniklik. Ayar acmadan degistir"));
+
+	ClampPopupAnimSave();
+	CCustomPopupMenu* animSub = AddSubMenu(
+		LL14(L"メニュー描画方法", L"Menu animation", L"Animation du menu", L"Animazione menu", L"Animacion del menu",
+			L"메뉴 표시 방식", L"菜单显示方式", L"طريقة عرض القائمة", L"Отображение меню", L"Menü-Darstellung",
+			L"Exibicao do menu", L"Menuweergave", L"Wyswietlanie menu", L"Menu gosterimi"),
+		LL14(L"コンテキストメニューの出現／消失アニメ", L"Context menu show/hide animation",
+			L"Animation d'apparition du menu", L"Animazione comparsa menu", L"Animacion de aparicion",
+			L"컨텍스트 메뉴 등장/퇴장 애니메이션", L"右键菜单出现/消失动画", L"حركة ظهور/اختفاء القائمة",
+			L"Анимация появления меню", L"Ein-/Ausblendanimation", L"Animacao de exibicao",
+			L"Animatie tonen/verbergen", L"Animacja pojawiania", L"Acilma/kapanma animasyonu"));
+	if (animSub) {
+		animSub->SetSkipChrome(TRUE);
+		static const UINT animIds[POPUP_ANIM_COUNT] = {
+			CCUSTOM_POPUP_ID_ANIM0, CCUSTOM_POPUP_ID_ANIM1, CCUSTOM_POPUP_ID_ANIM2,
+			CCUSTOM_POPUP_ID_ANIM3, CCUSTOM_POPUP_ID_ANIM4
+		};
+		const wchar_t* names[POPUP_ANIM_COUNT] = {
+			LL14(L"クラシック（フェード）", L"Classic (fade)", L"Classique (fondu)", L"Classica (dissolvenza)", L"Clasica (fundido)",
+				L"클래식(페이드)", L"经典（淡入）", L"كلاسيكي (تلاشي)", L"Классика (затухание)", L"Klassisch (Fade)",
+				L"Classica (fade)", L"Klassiek (fade)", L"Klasyczna (fade)", L"Klasik (fade)"),
+			LL14(L"上下に伸びる", L"Expand up/down", L"Expansion haut/bas", L"Espansione su/giu", L"Expandir arriba/abajo",
+				L"위아래로 펼침", L"上下展开", L"توسيع لأعلى/أسفل", L"Раскрытие вверх/вниз", L"Auf/Ab aufklappen",
+				L"Expandir cima/baixo", L"Uitklappen omhoog/omlaag", L"Rozwin w gore/dol", L"Yukari/asagi acilim"),
+			LL14(L"上から順に", L"Cascade from top", L"Cascade depuis le haut", L"Cascata dall'alto", L"Cascada desde arriba",
+				L"위에서 차례로", L"从上落下", L"تتساقط من الأعلى", L"Каскад сверху", L"Kaskade von oben",
+				L"Cascata de cima", L"Cascade van boven", L"Kaskada z gory", L"Yukaridan kademeli"),
+			LL14(L"左からスライド", L"Slide from left", L"Glissement a gauche", L"Scivola da sinistra", L"Deslizar desde la izquierda",
+				L"왼쪽에서 슬라이드", L"从左滑入", L"انزلاق من اليسار", L"Слайд слева", L"Von links einschieben",
+				L"Deslizar da esquerda", L"Schuiven van links", L"Wsuniecie z lewej", L"Soldan kayma"),
+			LL14(L"中央からポップ", L"Pop from center", L"Pop depuis le centre", L"Pop dal centro", L"Pop desde el centro",
+				L"중앙에서 팝", L"从中央弹出", L"ظهور من الوسط", L"Поп из центра", L"Pop aus der Mitte",
+				L"Pop do centro", L"Pop vanuit midden", L"Pop ze srodka", L"Merkezden pop")
+		};
+		for (int i = 0; i < POPUP_ANIM_COUNT; ++i) {
+			animSub->AddCheck(animIds[i], names[i],
+				(savedata.popupMenuAnim == i) ? TRUE : FALSE,
+				LL14(L"次回以降のメニュー表示に反映", L"Applies to menus from next open",
+					L"S'applique aux prochains menus", L"Si applica ai prossimi menu", L"Se aplica a los proximos menus",
+					L"다음 메뉴부터 적용", L"下次打开菜单起生效", L"يُطبق من الفتح التالي",
+					L"Применяется со следующего открытия", L"Gilt ab dem nächsten Öffnen",
+					L"Vale para os proximos menus", L"Geldt vanaf volgende open",
+					L"Od kolejnego otwarcia", L"Sonraki actmadan itibaren"));
+		}
+	}
 	AddSeparator();
 
 	for (int i = 0; i < savedN && m_itemCount < CCUSTOM_POPUP_MAX_ITEMS; ++i)
@@ -989,21 +1046,182 @@ void CCustomPopupMenu::RefreshEmbeddedChildren()
 	}
 }
 
+BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
+{
+	if (ox) *ox = 0;
+	if (oy) *oy = 0;
+	if (fade) *fade = 256;
+	if (m_lineAnimPhase == 0 || idx < 0 || idx >= m_itemCount)
+		return TRUE;
+	const int style = PopupAnimStyle();
+	if (style == POPUP_ANIM_CLASSIC)
+		return TRUE;
+
+	const ULONGLONG now = GetTickCount64();
+	const int elapsed = (int)(now - m_lineAnimStart);
+	const int dist = (idx > m_lineAnimOrigin) ? (idx - m_lineAnimOrigin) : (m_lineAnimOrigin - idx);
+	auto pickStag = [](int baseStag, int itemCount) -> int {
+		if (itemCount <= 1) return baseStag;
+		const int budget = CCUSTOM_POPUP_LINE_STAGGER_BUDGET;
+		if (baseStag * (itemCount - 1) <= budget) return baseStag;
+		int s = budget / (itemCount - 1);
+		if (s < 1) s = 1;
+		return s;
+	};
+
+	if (m_lineAnimPhase == 1) {
+		const int stag = pickStag(m_asSubmenu ? CCUSTOM_POPUP_LINE_STAGGER_SUB : CCUSTOM_POPUP_LINE_STAGGER_IN, m_itemCount);
+		const int dur = m_asSubmenu ? CCUSTOM_POPUP_ANIM_SUB_MS : CCUSTOM_POPUP_ANIM_IN_MS;
+		int delay = dist * stag;
+		if (!m_asSubmenu) {
+			if (style == POPUP_ANIM_CASCADE || style == POPUP_ANIM_SLIDE)
+				delay = idx * stag;
+			else if (style == POPUP_ANIM_POP) {
+				const int mid = m_itemCount / 2;
+				const int d2 = (idx > mid) ? (idx - mid) : (mid - idx);
+				delay = d2 * stag;
+			}
+		} else {
+			delay = idx * pickStag(CCUSTOM_POPUP_LINE_STAGGER_SUB, m_itemCount);
+		}
+		if (elapsed < delay) {
+			if (fade) *fade = 0;
+			return FALSE;
+		}
+		float t = (float)(elapsed - delay) / (float)dur;
+		if (t > 1.f) t = 1.f;
+		if (t < 0.f) t = 0.f;
+		const float tPos = t * t * t * (t * (t * 6.f - 15.f) + 10.f);
+		const float wobAmp = (1.f - tPos);
+		const float wob = sinf((float)idx * 0.85f + tPos * 7.5f) * 36.f * wobAmp
+			+ sinf((float)dist * 0.55f + tPos * 5.2f) * 16.f * wobAmp;
+
+		if (m_asSubmenu) {
+			if (ox) *ox = (int)(-44.f * (1.f - tPos) + wob * 0.65f);
+			if (oy) *oy = (int)(sinf((float)idx * 0.7f + tPos * 6.f) * 10.f * wobAmp);
+		} else if (style == POPUP_ANIM_EXPAND) {
+			CRect vr = ItemViewRect(idx);
+			const int itemY = (vr.top + vr.bottom) / 2;
+			const float rest = (float)(itemY - m_lineAnimOriginY);
+			const float yWob = sinf((float)idx * 0.5f + tPos * 6.8f) * 20.f * wobAmp
+				+ sinf((float)dist * 0.75f + tPos * 4.4f) * 9.f * wobAmp;
+			if (ox) *ox = (int)(wob);
+			if (oy) *oy = (int)(-rest * (1.f - tPos) + yWob);
+		} else if (style == POPUP_ANIM_CASCADE) {
+			if (ox) *ox = (int)(wob * 0.45f);
+			if (oy) *oy = (int)(-28.f * (1.f - tPos) + sinf((float)idx * 0.6f + tPos * 5.f) * 8.f * wobAmp);
+		} else if (style == POPUP_ANIM_SLIDE) {
+			if (ox) *ox = (int)(-52.f * (1.f - tPos) + wob * 0.7f);
+			if (oy) *oy = (int)(sinf((float)idx * 0.55f + tPos * 6.f) * 10.f * wobAmp);
+		} else {
+			CRect vr = ItemViewRect(idx);
+			const int itemY = (vr.top + vr.bottom) / 2;
+			const int midY = (m_itemCount > 0)
+				? ((ItemViewRect(0).top + ItemViewRect(m_itemCount - 1).bottom) / 2)
+				: m_lineAnimOriginY;
+			const float rest = (float)(itemY - midY);
+			float pop = tPos;
+			if (tPos > 0.75f) {
+				const float u = (tPos - 0.75f) / 0.25f;
+				pop = 1.f + 0.08f * (1.f - u) * sinf(u * 3.1415926f);
+			}
+			if (ox) *ox = (int)(wob * (1.f - tPos) * 0.5f);
+			if (oy) *oy = (int)(-rest * (1.f - pop));
+		}
+		if (fade) {
+			int f = (int)(256.f * (t < 0.18f ? (t / 0.18f) : 1.f));
+			if (f < 0) f = 0; if (f > 256) f = 256;
+			*fade = f;
+		}
+		return TRUE;
+	}
+
+	const int stag = pickStag(CCUSTOM_POPUP_LINE_STAGGER_OUT, m_itemCount);
+	const int dur = CCUSTOM_POPUP_ANIM_OUT_MS;
+	int delay = dist * stag;
+	if (style == POPUP_ANIM_CASCADE || style == POPUP_ANIM_SLIDE)
+		delay = (m_itemCount - 1 - idx) * stag;
+	if (elapsed < delay) {
+		if (fade) *fade = 256;
+		return TRUE;
+	}
+	float t = (float)(elapsed - delay) / (float)dur;
+	if (t > 1.f) t = 1.f;
+	if (t < 0.f) t = 0.f;
+	const float p = t * t * (3.f - 2.f * t);
+	const float wob = sinf((float)idx * 0.9f + t * 7.f) * 28.f * p
+		+ sinf((float)dist * 0.6f + t * 5.f) * 12.f * p;
+	if (m_asSubmenu || style == POPUP_ANIM_SLIDE) {
+		if (ox) *ox = (int)(36.f * p + wob);
+		if (oy) *oy = (int)(-6.f * p);
+	} else if (style == POPUP_ANIM_CASCADE) {
+		if (ox) *ox = (int)(wob * 0.4f);
+		if (oy) *oy = (int)(-22.f * p);
+	} else if (style == POPUP_ANIM_POP) {
+		CRect vr = ItemViewRect(idx);
+		const int itemY = (vr.top + vr.bottom) / 2;
+		const int midY = (m_itemCount > 0)
+			? ((ItemViewRect(0).top + ItemViewRect(m_itemCount - 1).bottom) / 2)
+			: m_lineAnimOriginY;
+		if (ox) *ox = (int)(wob);
+		if (oy) *oy = (int)((float)(midY - itemY) * p);
+	} else {
+		CRect vr = ItemViewRect(idx);
+		const int itemY = (vr.top + vr.bottom) / 2;
+		if (ox) *ox = (int)(wob);
+		if (oy) *oy = (int)((float)(m_lineAnimOriginY - itemY) * p
+			+ sinf((float)idx * 0.55f + t * 6.5f) * 14.f * p);
+	}
+	if (fade) {
+		int f = (int)(256.f * (1.f - p));
+		if (f < 0) f = 0;
+		*fade = f;
+	}
+	return (fade ? *fade : 256) > 8;
+}
+
 void CCustomPopupMenu::AnimateIn()
 {
 	if (!GetSafeHwnd()) return;
-	DWORD flags = AW_BLEND;
-	const DWORD ms = m_asSubmenu ? CCUSTOM_POPUP_ANIM_SUB_MS : CCUSTOM_POPUP_ANIM_IN_MS;
-	flags |= m_asSubmenu ? (AW_SLIDE | AW_HOR_POSITIVE) : (AW_SLIDE | AW_VER_POSITIVE);
-	if (!::AnimateWindow(m_hWnd, ms, flags)) {
-		ShowWindow(SW_SHOWNA); InvalidateBgOnly(); UpdateWindow();
-	}
-	// AW_BLEND が WS_EX_LAYERED を残すと、子（特に自前 BitBlt）が消えて見える
+	ShowEmbedded(FALSE);
 	if (GetExStyle() & WS_EX_LAYERED)
 		ModifyStyleEx(WS_EX_LAYERED, 0);
 	m_animTick = 0;
-	RefreshEmbeddedChildren();
-	SetTimer(kAnimTimer, 50, NULL); // 再描画は控えめ、位置は GetTickCount でスムーズ
+
+	const int style = PopupAnimStyle();
+	if (style == POPUP_ANIM_CLASSIC && !m_asSubmenu) {
+		::SetWindowRgn(m_hWnd, NULL, FALSE);
+		ShowWindow(SW_SHOWNA);
+		// 旧来の全体フェード（失敗時はそのまま表示）
+		::AnimateWindow(m_hWnd, 160, AW_BLEND);
+		ShowEmbedded(TRUE);
+		RefreshEmbeddedChildren();
+		InvalidateBgOnly();
+		SetTimer(kAnimTimer, 50, NULL);
+		m_lineAnimPhase = 0;
+		return;
+	}
+
+	// 上下伸びのみ: 起点の細い帯から RGN を広げる（他方式は全面パネル＋行アニメ）
+	if (style == POPUP_ANIM_EXPAND && !m_asSubmenu) {
+		CRect rc; GetClientRect(&rc);
+		int y0 = m_lineAnimOriginY - 3;
+		int y1 = m_lineAnimOriginY + 3;
+		if (y0 < 0) y0 = 0;
+		if (y1 > rc.bottom) y1 = rc.bottom;
+		if (y1 <= y0) { y0 = 0; y1 = 4; }
+		HRGN hSeed = ::CreateRectRgn(rc.left, y0, rc.right, y1);
+		::SetWindowRgn(m_hWnd, hSeed, TRUE);
+	} else {
+		::SetWindowRgn(m_hWnd, NULL, FALSE);
+	}
+
+	ShowWindow(SW_SHOWNA);
+	m_lineAnimPhase = 1;
+	m_lineAnimStart = GetTickCount64();
+	InvalidateBgOnly();
+	UpdateWindow();
+	SetTimer(kAnimTimer, 16, NULL);
 }
 
 void CCustomPopupMenu::AnimateOut()
@@ -1011,9 +1229,60 @@ void CCustomPopupMenu::AnimateOut()
 	if (!GetSafeHwnd() || !IsWindowVisible()) return;
 	ShowEmbedded(FALSE);
 	if (m_tip.GetSafeHwnd()) m_tip.Activate(FALSE);
+
+	const int style = PopupAnimStyle();
+	if (style == POPUP_ANIM_CLASSIC && !m_asSubmenu) {
+		::SetWindowRgn(m_hWnd, NULL, TRUE);
+		m_lineAnimPhase = 0;
+		if (!::AnimateWindow(m_hWnd, 120, AW_BLEND | AW_HIDE))
+			ShowWindow(SW_HIDE);
+		return;
+	}
+
+	::SetWindowRgn(m_hWnd, NULL, TRUE);
+	{
+		CClientDC dc(this);
+		CRect rc; GetClientRect(&rc);
+		dc.FillSolidRect(&rc, PopupBg());
+	}
+	m_lineAnimPhase = 2;
+	m_lineAnimStart = GetTickCount64();
+	SetTimer(kAnimTimer, 16, NULL);
+	int stag = CCUSTOM_POPUP_LINE_STAGGER_OUT;
+	if (m_itemCount > 1) {
+		const int need = stag * (m_itemCount - 1);
+		if (need > CCUSTOM_POPUP_LINE_STAGGER_BUDGET)
+			stag = max(1, CCUSTOM_POPUP_LINE_STAGGER_BUDGET / (m_itemCount - 1));
+	}
+	const int maxDist = max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin);
+	const int total = maxDist * stag + CCUSTOM_POPUP_ANIM_OUT_MS + 40;
+	const ULONGLONG endAt = m_lineAnimStart + (ULONGLONG)total;
+	MSG msg;
+	while (GetSafeHwnd() && GetTickCount64() < endAt) {
+		while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT) {
+				::PostQuitMessage((int)msg.wParam);
+				break;
+			}
+			::TranslateMessage(&msg);
+			::DispatchMessage(&msg);
+		}
+		InvalidateBgOnly();
+		UpdateWindow();
+		::MsgWaitForMultipleObjects(0, NULL, FALSE, 8, QS_ALLINPUT);
+	}
 	KillTimer(kAnimTimer);
-	if (!::AnimateWindow(m_hWnd, CCUSTOM_POPUP_ANIM_OUT_MS, AW_HIDE | AW_BLEND))
-		ShowWindow(SW_HIDE);
+	m_lineAnimPhase = 0;
+	if (GetSafeHwnd()) {
+		::SetWindowRgn(m_hWnd, NULL, TRUE);
+		{
+			CClientDC dc(this);
+			CRect rc; GetClientRect(&rc);
+			dc.FillSolidRect(&rc, PopupBg());
+		}
+		RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+	}
+	ShowWindow(SW_HIDE);
 }
 
 BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMenu, CCustomPopupMenu* root)
@@ -1021,6 +1290,8 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 	EnsurePopupClass();
 	RebuildMenuFont();
 	MeasureLayout();
+
+	const CPoint clickPt = screenPt; // クランプ前＝コンテキスト位置（広がり起点）
 
 	m_scrollY = 0;
 	m_scrollMax = 0;
@@ -1049,6 +1320,8 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 	m_root = root ? root : this;
 	m_asSubmenu = (parentMenu != NULL);
 	m_hot = -1; m_openSub = -1; m_done = FALSE; m_result = 0; m_animTick = 0;
+	m_lineAnimPhase = 0; m_lineAnimStart = 0;
+	m_lineAnimOrigin = 0; m_lineAnimOriginY = 0;
 	m_bounceIdx = -1; m_nBounce = 0;
 	if (GetSafeHwnd()) DestroyWindow();
 
@@ -1056,6 +1329,25 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 		WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
 		screenPt.x, screenPt.y, m_menuW, m_menuH, m_owner ? m_owner->GetSafeHwnd() : NULL, NULL))
 		return FALSE;
+
+	// クリック位置に最も近い行を起点に（上下へ広がる）
+	{
+		CPoint c = clickPt;
+		ScreenToClient(&c);
+		m_lineAnimOriginY = c.y;
+		int best = 0x7fffffff;
+		m_lineAnimOrigin = 0;
+		for (int i = 0; i < m_itemCount; ++i) {
+			CRect vr = ItemViewRect(i);
+			const int cy = (vr.top + vr.bottom) / 2;
+			const int d = (cy > c.y) ? (cy - c.y) : (c.y - cy);
+			if (d < best) { best = d; m_lineAnimOrigin = i; m_lineAnimOriginY = cy; }
+		}
+		if (m_itemCount <= 0) {
+			m_lineAnimOrigin = 0;
+			m_lineAnimOriginY = 0;
+		}
+	}
 
 	SyncEmbeddedChildren();
 	ShowEmbedded(FALSE);
@@ -1070,7 +1362,7 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 	if (CCC_IsInwoman()) { CCC_StartInwomanTimer(); SetTimer(kInwomanTimer, 50, NULL); }
 	SetWindowPos(&wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	AnimateIn();
-	ShowEmbedded(TRUE);
+	// 内包コントロールは行アニメ完了後に OnTimer で表示（出現中のちらつき防止）
 	return TRUE;
 }
 
@@ -1319,22 +1611,32 @@ int CCustomPopupMenu::HitTest(CPoint pt) const
 void CCustomPopupMenu::PaintToDC(CDC& dc)
 {
 	CRect rc; GetClientRect(&rc);
-	DrawJkBackdrop(dc, rc, m_animTick);
-	DrawTornRibbon(dc, rc, m_animTick);
-
 	HFONT oldFont = (HFONT)dc.SelectObject(m_font ? m_font : (HFONT)::GetStockObject(DEFAULT_GUI_FONT));
 	dc.SetBkMode(TRANSPARENT);
 
 	auto paintItem = [&](int i) {
 		const CCustomPopupItem& it = m_items[i];
+		int ox = 0, oy = 0, fade = 256;
+		if (!CalcLineAnim(i, &ox, &oy, &fade))
+			return;
 		CRect vr = ItemViewRect(i);
+		vr.OffsetRect(ox, oy);
 		if (vr.bottom < 0 || vr.top > rc.bottom) return;
 
-		if (it.kind == CCUSTOM_POPUP_SEP) { DrawCuteSep(dc, vr); return; }
+		if (it.kind == CCUSTOM_POPUP_SEP) {
+			if (fade >= 48) DrawCuteSep(dc, vr);
+			return;
+		}
 
 		const BOOL interactive = IsInteractiveKind(it.kind);
-		const BOOL hot = (i == m_hot && it.enabled && !interactive);
+		const BOOL hot = (i == m_hot && it.enabled && !interactive && m_lineAnimPhase == 0);
 		if (hot) DrawHotPill(dc, vr);
+
+		const COLORREF bgRef = PopupBg();
+		auto faded = [&](COLORREF c) -> COLORREF {
+			if (fade >= 250) return c;
+			return BlendRGB(bgRef, c, fade);
+		};
 
 		CRect tr = vr;
 		tr.left += CCUSTOM_POPUP_PAD_X;
@@ -1342,7 +1644,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 
 		{
 			CRect cr(tr.left, tr.top, tr.left + CCUSTOM_POPUP_CHECK_W, tr.bottom);
-			if (it.kind == CCUSTOM_POPUP_CHECK && it.checked) {
+			if (it.kind == CCUSTOM_POPUP_CHECK && it.checked && fade >= 80) {
 				CRect bounce = cr;
 				bounce.InflateRect(2, 2);
 				if (i == m_bounceIdx && m_nBounce > 0) {
@@ -1356,7 +1658,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 
 		if (interactive) {
 			if (it.kind == CCUSTOM_POPUP_BUTTON)
-				return; // 文言は CCustomStandardButton 側
+				return;
 			CRect lr = vr;
 			lr.left = vr.left + CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W;
 			lr.right = vr.right - CCUSTOM_POPUP_PAD_RIGHT;
@@ -1372,7 +1674,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 				_snwprintf_s(line, _TRUNCATE, L"%s  (%d)", it.text, it.sliderPos);
 			else
 				_snwprintf_s(line, _TRUNCATE, L"%s", it.text);
-			DrawSoftShadowText(dc, line, lr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, PopupText(TRUE), TRUE);
+			DrawSoftShadowText(dc, line, lr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS, faded(PopupText(TRUE)), TRUE);
 			return;
 		}
 
@@ -1394,13 +1696,13 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		UINT dt = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
 		if (it.kind == CCUSTOM_POPUP_SUB)
 			tr.right -= CCUSTOM_POPUP_ARROW_W;
-		DrawSoftShadowText(dc, it.text, tr, dt, PopupText(it.enabled), it.enabled);
+		DrawSoftShadowText(dc, it.text, tr, dt, faded(PopupText(it.enabled)), it.enabled);
 		if (it.kind == CCUSTOM_POPUP_SUB) {
 			CRect ar = vr;
 			ar.left = vr.right - CCUSTOM_POPUP_PAD_RIGHT - CCUSTOM_POPUP_ARROW_W;
 			ar.right = vr.right - CCUSTOM_POPUP_PAD_RIGHT;
 			DrawSoftShadowText(dc, hot ? L"▹" : L"▸", ar, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-				hot ? RGB(130, 70, 160) : PopupText(it.enabled), it.enabled);
+				faded(hot ? RGB(130, 70, 160) : PopupText(it.enabled)), it.enabled);
 		}
 
 		if (rowFont) {
@@ -1409,7 +1711,105 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		}
 	};
 
-	// 固定ヘッダ — 背景は共通のまま、下端に細い区切りだけ
+	// ---- 行アニメ中: 見える行の外接だけ描く（全面ピンク枠は出さない）----
+	if (m_lineAnimPhase != 0) {
+		// 未描画領域は黒くならないよう一旦背景色で埋めるが、表示は RGN で外接に制限
+		dc.FillSolidRect(&rc, PopupBg());
+
+		CRect hull(0, 0, 0, 0);
+		BOOL hasHull = FALSE;
+		const int stag = (m_lineAnimPhase == 2) ? CCUSTOM_POPUP_LINE_STAGGER_OUT
+			: (m_asSubmenu ? CCUSTOM_POPUP_LINE_STAGGER_SUB : CCUSTOM_POPUP_LINE_STAGGER_IN);
+		const int elapsed = (int)(GetTickCount64() - m_lineAnimStart);
+		int front = elapsed / max(1, stag);
+		if (m_lineAnimPhase == 2)
+			front = m_itemCount - 1 - front;
+		if (front < 0) front = 0;
+		if (m_itemCount > 0 && front >= m_itemCount) front = m_itemCount - 1;
+		// 起点からの距離で front を取り直す（広がりの先端）
+		{
+			int best = 0;
+			for (int i = 0; i < m_itemCount; ++i) {
+				int ox = 0, oy = 0, fade = 0;
+				if (!CalcLineAnim(i, &ox, &oy, &fade) || fade < 8) continue;
+				const int d = (i > m_lineAnimOrigin) ? (i - m_lineAnimOrigin) : (m_lineAnimOrigin - i);
+				if (d >= best) { best = d; front = i; }
+			}
+		}
+
+		for (int i = 0; i < m_itemCount; ++i) {
+			int ox = 0, oy = 0, fade = 256;
+			if (!CalcLineAnim(i, &ox, &oy, &fade))
+				continue;
+			CRect vr = ItemViewRect(i);
+			CRect band(rc.left + ox, vr.top + oy, rc.right + ox, vr.bottom + oy);
+			band.InflateRect(2, 2);
+			CRect clip = band;
+			if (!clip.IntersectRect(&clip, &rc) || clip.Height() <= 0)
+				continue;
+			if (!hasHull) { hull = clip; hasHull = TRUE; }
+			else hull.UnionRect(&hull, &clip);
+
+			const int clipSave = dc.SaveDC();
+			dc.IntersectClipRect(&clip);
+			POINT oldOrg = {};
+			::SetViewportOrgEx(dc.GetSafeHdc(), ox, oy, &oldOrg);
+			DrawJkBackdrop(dc, rc, m_animTick);
+			DrawTornRibbon(dc, rc, m_animTick);
+			if (i == front) {
+				const int cy = (vr.top + vr.bottom) / 2;
+				const int glow = 8;
+				for (int dy = -glow; dy <= glow; ++dy) {
+					const int y = cy + dy;
+					if (y < vr.top || y >= vr.bottom) continue;
+					const int a = 200 - (abs(dy) * 200) / max(1, glow);
+					dc.FillSolidRect(rc.left + 1, y, CCUSTOM_POPUP_RIBBON_W - 3, 1,
+						BlendRGB(RGB(255, 255, 255), CCC_IsInwoman() ? RGB(255, 160, 200) : RGB(200, 190, 255), 256 - a));
+				}
+			}
+			// 行の細い区切りだけ（全幅ピンク枠線は張らない）
+			dc.FillSolidRect(rc.left + CCUSTOM_POPUP_RIBBON_W + 4, vr.bottom - 1,
+				rc.Width() - CCUSTOM_POPUP_RIBBON_W - 10, 1,
+				BlendRGB(PopupBg(), RGB(220, 160, 200), 90));
+			::SetViewportOrgEx(dc.GetSafeHdc(), oldOrg.x, oldOrg.y, NULL);
+			dc.RestoreDC(clipSave);
+
+			paintItem(i);
+		}
+
+		if (hasHull) {
+			hull.InflateRect(1, 1);
+			hull.IntersectRect(&hull, &rc);
+			// 上下伸びは外接枠のみ。他方式は全面パネル枠（伸び見え用に枠が先に出ないのはEXPANDのみ）
+			if (PopupAnimStyle() == POPUP_ANIM_EXPAND && !m_asSubmenu)
+				DrawPanelChrome(dc, hull);
+			else
+				DrawPanelChrome(dc, rc);
+		}
+
+		if (m_stickyCount > 0 && m_stickyH > 0) {
+			int ox0 = 0, oy0 = 0, fade0 = 0;
+			if (CalcLineAnim(0, &ox0, &oy0, &fade0) && fade0 > 180) {
+				dc.FillSolidRect(rc.left + CCUSTOM_POPUP_RIBBON_W + 6 + ox0, m_stickyH - 2 + oy0,
+					rc.Width() - CCUSTOM_POPUP_RIBBON_W - 14, 1, RGB(255, 255, 255));
+				dc.FillSolidRect(rc.left + CCUSTOM_POPUP_RIBBON_W + 6 + ox0, m_stickyH - 1 + oy0,
+					rc.Width() - CCUSTOM_POPUP_RIBBON_W - 14, 1, RGB(240, 170, 200));
+			}
+		}
+		if (hasHull) {
+			const int iwSave = dc.SaveDC();
+			dc.IntersectClipRect(&hull);
+			CCC_DrawInwoman(&dc, rc, FALSE);
+			dc.RestoreDC(iwSave);
+		}
+		dc.SelectObject(oldFont);
+		return;
+	}
+
+	// ---- 通常: 一枚のパネル ----
+	DrawJkBackdrop(dc, rc, m_animTick);
+	DrawTornRibbon(dc, rc, m_animTick);
+
 	if (m_stickyCount > 0 && m_stickyH > 0) {
 		for (int i = 0; i < m_stickyCount; ++i)
 			paintItem(i);
@@ -1417,7 +1817,6 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		dc.FillSolidRect(rc.left + CCUSTOM_POPUP_RIBBON_W + 6, m_stickyH - 1, rc.Width() - CCUSTOM_POPUP_RIBBON_W - 14, 1, RGB(240, 170, 200));
 	}
 
-	// スクロール本体
 	{
 		const int clipSave = dc.SaveDC();
 		CRect bodyClip(rc.left, m_stickyH, rc.right, rc.bottom);
@@ -1476,6 +1875,9 @@ void CCustomPopupMenu::OnPaint()
 		m_memW = r.Width(); m_memH = r.Height();
 	}
 	CBitmap* ob = mDC.SelectObject(&m_memBmp);
+	// アニメ中の未描画帯が黒く出ないよう、先にメニュー色で全面を埋める
+	if (m_lineAnimPhase != 0)
+		mDC.FillSolidRect(&r, PopupBg());
 	PaintToDC(mDC);
 
 	// Win11 では素の BitBlt が α=0 になり得る → BufferedPaint で不透明化
@@ -1571,6 +1973,21 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 	if (it.id == CCUSTOM_POPUP_ID_FONT_FACE) {
 		CommitFace(it.text);
 		CloseChain(0);
+		return TRUE;
+	}
+	if (it.id >= CCUSTOM_POPUP_ID_ANIM0 && it.id <= CCUSTOM_POPUP_ID_ANIM4) {
+		const int style = (int)(it.id - CCUSTOM_POPUP_ID_ANIM0);
+		savedata.popupMenuAnim = style;
+		ClampPopupAnimSave();
+		// 同サブ内のチェックを付け替え
+		for (int i = 0; i < m_itemCount; ++i) {
+			if (m_items[i].id >= CCUSTOM_POPUP_ID_ANIM0 && m_items[i].id <= CCUSTOM_POPUP_ID_ANIM4) {
+				m_items[i].checked = (m_items[i].id == it.id) ? TRUE : FALSE;
+			}
+		}
+		it.checked = TRUE;
+		StartCheckBounce(idx);
+		InvalidateBgOnly();
 		return TRUE;
 	}
 	return FALSE;
@@ -1776,7 +2193,59 @@ void CCustomPopupMenu::OnTimer(UINT_PTR nIDEvent)
 	}
 	if (nIDEvent == kAnimTimer) {
 		++m_animTick;
-		InvalidateBgOnly(); // 斜め背景のみ。内包コントロールは触らない
+		if (m_lineAnimPhase == 1 && GetSafeHwnd()
+			&& PopupAnimStyle() == POPUP_ANIM_EXPAND && !m_asSubmenu) {
+			// 上下伸び: 外接 RGN を広げつつメニュー色で埋める（黒抜け防止）
+			CRect rc; GetClientRect(&rc);
+			CRect hull(0, 0, 0, 0);
+			BOOL any = FALSE;
+			for (int i = 0; i < m_itemCount; ++i) {
+				int ox = 0, oy = 0, fade = 256;
+				if (!CalcLineAnim(i, &ox, &oy, &fade) || fade < 4)
+					continue;
+				CRect vr = ItemViewRect(i);
+				CRect band(rc.left + ox, vr.top + oy, rc.right + ox, vr.bottom + oy);
+				band.InflateRect(4, 4);
+				if (!band.IntersectRect(&band, &rc) || band.Height() <= 0)
+					continue;
+				if (!any) { hull = band; any = TRUE; }
+				else hull.UnionRect(&hull, &band);
+			}
+			if (!any) {
+				int y0 = m_lineAnimOriginY - 4, y1 = m_lineAnimOriginY + 4;
+				if (y0 < 0) y0 = 0;
+				if (y1 > rc.bottom) y1 = rc.bottom;
+				hull.SetRect(rc.left, y0, rc.right, max(y1, y0 + 2));
+			} else {
+				hull.InflateRect(2, 2);
+				hull.IntersectRect(&hull, &rc);
+			}
+			HRGN hUnion = ::CreateRectRgn(hull.left, hull.top, hull.right, hull.bottom);
+			::SetWindowRgn(m_hWnd, hUnion, TRUE);
+		}
+		if (m_lineAnimPhase == 1) {
+			int stag = m_asSubmenu ? CCUSTOM_POPUP_LINE_STAGGER_SUB : CCUSTOM_POPUP_LINE_STAGGER_IN;
+			if (m_itemCount > 1) {
+				const int need = stag * (m_itemCount - 1);
+				if (need > CCUSTOM_POPUP_LINE_STAGGER_BUDGET)
+					stag = max(1, CCUSTOM_POPUP_LINE_STAGGER_BUDGET / (m_itemCount - 1));
+			}
+			const int dur = m_asSubmenu ? CCUSTOM_POPUP_ANIM_SUB_MS : CCUSTOM_POPUP_ANIM_IN_MS;
+			const int maxDist = max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin);
+			const int total = maxDist * stag + dur + 20;
+			if ((int)(GetTickCount64() - m_lineAnimStart) >= total) {
+				m_lineAnimPhase = 0;
+				if (GetSafeHwnd()) {
+					::SetWindowRgn(m_hWnd, NULL, TRUE);
+					RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_FRAME);
+				}
+				ShowEmbedded(TRUE);
+				RefreshEmbeddedChildren();
+				KillTimer(kAnimTimer);
+				SetTimer(kAnimTimer, 50, NULL);
+			}
+		}
+		InvalidateBgOnly();
 		return;
 	}
 	if (nIDEvent == kBounceTimer) {

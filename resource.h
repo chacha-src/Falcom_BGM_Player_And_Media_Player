@@ -1,4 +1,4 @@
-﻿//{{NO_DEPENDENCIES}}
+//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ ??????????C???N???[?h ?t?@?C???B
 // ogg.rc ??g?p
 //
@@ -1394,14 +1394,30 @@
 #define IDC_DJPAD_BPM_DET               3964
 #define IDC_DJPAD_BEAT_BK               3965
 #define IDC_DJPAD_BEAT_FW               3966
+#define IDC_MP_BOT_DJ                   3969
+#define IDC_MP_BOT_TAG                  3970
+#define IDC_MP_BOT_BPM                  3971
+#define IDC_MP_BOT_SLEEP                3972
+#define IDC_MP_BOT_MIRROR               3973
+#define IDC_MP_BOT_SSVIZ                3974
+#define IDC_MP_BOT_ALARM                3975
+#define IDC_MP_BOT_REMOTE               3976
+#define ID_MP_BOTVIS_DJ                 33124
+#define ID_MP_BOTVIS_TAG                33125
+#define ID_MP_BOTVIS_BPM                33126
+#define ID_MP_BOTVIS_SLEEP              33127
+#define ID_MP_BOTVIS_MIRROR             33128
+#define ID_MP_BOTVIS_SSVIZ              33129
+#define ID_MP_BOTVIS_ALARM              33130
+#define ID_MP_BOTVIS_REMOTE             33131
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        250
-#define _APS_NEXT_COMMAND_VALUE         33124
-#define _APS_NEXT_CONTROL_VALUE         3969
+#define _APS_NEXT_COMMAND_VALUE         33132
+#define _APS_NEXT_CONTROL_VALUE         3977
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

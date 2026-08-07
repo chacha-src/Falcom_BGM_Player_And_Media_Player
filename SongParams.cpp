@@ -1,4 +1,4 @@
-﻿// SongParams.cpp : 曲ごとのオーディオ/DSP パラメータ 保持・復元
+// SongParams.cpp : 曲ごとのオーディオ/DSP パラメータ 保持・復元
 #include "stdafx.h"
 #include "SongParams.h"
 #include "ProAudio.h"
@@ -356,7 +356,7 @@ void SongParams_LoadFile()
 	CSingleLock lk(&g_cs, TRUE);
 	g_tbl.clear();
 	g_prim.clear();
-	CString ss = karento2; ss += SONGPARAM_DAT_NAME;
+	CString ss = DatArc_Path(SONGPARAM_DAT_NAME);
 	CFile f;
 	if (f.Open(ss, CFile::modeRead | CFile::shareDenyWrite, NULL) != TRUE) {
 		s_featLatch = savedata.saveSongParams ? 1 : 0;
@@ -417,7 +417,7 @@ void SongParams_SaveFile()
 		g_dirty = false;
 		g_lastWriteTick = GetTickCount();
 	}
-	CString ss = karento2; ss += SONGPARAM_DAT_NAME;
+	CString ss = DatArc_Path(SONGPARAM_DAT_NAME);
 	CFile f;
 	if (f.Open(ss, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) != TRUE)
 		return;
@@ -431,6 +431,7 @@ void SongParams_SaveFile()
 	catch (...) {
 	}
 	f.Close();
+	DatArc_Commit(SONGPARAM_DAT_NAME);
 }
 
 // savedata だけ書き戻す(audioDataVersion 更新用)
@@ -438,7 +439,7 @@ static void SongParams_PersistSaveData()
 {
 	TCHAR tmp[1024];
 	_tgetcwd(tmp, 1000);
-	_tchdir(karento2);
+	DatArc_Chdir();
 	CFile ab;
 #if _UNICODE
 	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -447,6 +448,11 @@ static void SongParams_PersistSaveData()
 #endif
 		ab.Write(&savedata, sizeof(save));
 		ab.Close();
+#if _UNICODE
+		DatArc_Commit(L"oggYSEDbgmu.dat");
+#else
+		DatArc_Commit("oggYSEDbgm.dat");
+#endif
 	}
 	_tchdir(tmp);
 }
@@ -479,7 +485,7 @@ static void SpCollectAllPlaylistTracks(std::vector<SpPlTrack>& out)
 	out.clear();
 	TCHAR tmp[1024];
 	_tgetcwd(tmp, 1000);
-	_tchdir(karento2);
+	DatArc_Chdir();
 	for (int plIdx = 0; plIdx < 1000; plIdx++) {
 		CString fname = SpPlaylistFileName(plIdx);
 		CFile f;
@@ -759,7 +765,8 @@ void SongParams_ResetAll()
 		g_prim.clear();
 		g_dirty = false;
 	}
-	CString ss = karento2; ss += SONGPARAM_DAT_NAME;
+	CString ss = DatArc_Path(SONGPARAM_DAT_NAME);
+	DatArc_Delete(SONGPARAM_DAT_NAME);
 	::DeleteFile(ss);
 	// 追跡状態もクリア(次の同一曲でも復元しない)
 	s_curPath.Empty();

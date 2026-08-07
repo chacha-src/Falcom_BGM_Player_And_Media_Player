@@ -1,4 +1,4 @@
-﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -583,6 +583,15 @@ struct save{
 	// --- 一時プレイリスト(末尾追記。旧.datは0) ---
 	// 1=一時モードON(曲は非保存・アプリ終了で破棄)。ON/OFFのみ永続。
 	int mpTempOpen;
+
+	// --- MP底バー: ツール由来ショートカットボタン(末尾追記。旧.datは0→起動時既定) ---
+	// mpBotToolsInited=1 なら mpBotToolsFlags 有効。bit: DJ/Tag/BPM/Sleep/Mirror/SsViz/Alarm/Remote
+	int mpBotToolsInited;
+	int mpBotToolsFlags;
+
+	// --- コンテキストメニュー描画方法(末尾追記。旧.datは0=クラシック) ---
+	// 0=クラシック(フェード) 1=上下伸び 2=上から Cascade 3=左からスライド 4=中央ポップ
+	int popupMenuAnim;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */
@@ -616,8 +625,16 @@ CWnd* CCC_GetActiveMainWindow();
 void CCC_MainLockSetup(CWnd* pDlg, int* pSavedLockFlag, BOOL bOverlayPaint = FALSE);
 void CCC_MainLockUnregister(HWND hWnd);
 void CCC_MainLockOnMainMoving(LPRECT pMainRect);
+// メインの右/下辺リサイズで隣接サブ窓を連鎖移動（追従ON/OFF無関係）。Enter/Exitと対で使う。
+void CCC_NeighborCascadeBegin(HWND hMain);
+void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain);
+void CCC_NeighborCascadeEnd();
+// pOldMain==NULL: 現位置からオフセットだけ取り直す(窓は動かさない)
+// pOldMain!=NULL: 旧メイン相対を保って新メインへ再配置し、閉じた追随ONの savedata もデルタ変換
+void CCC_MainLockRefreshOffsetsFor(CWnd* pMain, const RECT* pOldMain = NULL);
+// 窓座標をモニタ作業領域内へ。サブモニタ上の x<0/y<0 は許可。どのモニタにも無ければ最近傍へ。
+void CCC_ClampWindowPos(int& x, int& y, int w, int h);
 void CCC_MainLockRefreshOffsets();
-void CCC_MainLockRefreshOffsetsFor(CWnd* pMain);
 void CCC_MainLockOnChildMoving(CWnd* pDlg, LPRECT pRect);
 void CCC_MainLockPaintClient(CDC& dc, HWND hDlg);
 BOOL CCC_MainLockOverlayHitTest(HWND hDlg, CPoint ptClient);
@@ -833,6 +850,8 @@ inline CString GameTrackTitle(LPCTSTR wide)
 #pragma comment(linker,"/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #endif
 #endif
+
+#include "DatArchive.h"
 
 //{{AFX_INSERT_LOCATION}}
 // Microsoft Visual C++ は前行の直前に追加の宣言を挿入します。

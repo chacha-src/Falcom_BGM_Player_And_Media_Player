@@ -129,8 +129,7 @@ void ProAudio_Init()
 void ProAudio_LoadExtras()
 {
 	g_extraCount = 0;
-	CString ss = karento2;
-	ss += PRO_EXTRA_DAT_NAME;
+	CString ss = DatArc_Path(PRO_EXTRA_DAT_NAME);
 	CFile f;
 	if (f.Open(ss, CFile::modeRead | CFile::shareDenyWrite, NULL) != TRUE)
 		return;
@@ -184,8 +183,7 @@ void ProAudio_LoadExtras()
 void ProAudio_SaveExtras()
 {
 	if (!g_extraDirty) return;
-	CString ss = karento2;
-	ss += PRO_EXTRA_DAT_NAME;
+	CString ss = DatArc_Path(PRO_EXTRA_DAT_NAME);
 	CFile f;
 	if (f.Open(ss, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) != TRUE)
 		return;
@@ -201,6 +199,7 @@ void ProAudio_SaveExtras()
 	catch (...) {
 	}
 	f.Close();
+	DatArc_Commit(PRO_EXTRA_DAT_NAME);
 }
 
 bool ProAudio_GetExtra(LPCTSTR list, LPCTSTR path, int mode, int ret2, ProSongExtra& out)

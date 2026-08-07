@@ -1,4 +1,4 @@
-﻿// CMediaPlayerDlg.h : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+// CMediaPlayerDlg.h : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // このソフトは元々ファルコム特化型再生ソフトだが、メディアプレイヤーの側面も持つ。
 // CMediaPlayerDlg は「張りぼて(ファサード)」であり、実体は COggDlg(og->) と
@@ -194,6 +194,10 @@ public:
 	CCustomStandardButton m_resetdata; // 保存ファイル削除でリセット
 	CCustomStandardButton m_record;    // デバイス録音 UI
 	CCustomStandardButton m_capture;   // 画面キャプチャ UI
+	// キャプチャ右〜終了左のツールショートカット（コンテキストでON/OFF）
+	CCustomStandardButton m_botDj, m_botTag, m_botBpm, m_botSleep;
+	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote;
+	int m_mpBotShort; // 底バー短縮段階 0=フル 1=中 2=短
 	CCustomStatic m_kaisuuL;
 	CCustomEdit m_kaisuu;
 	// グループ枠は WS_CLIPSIBLINGS + 最背面で、内側コントロールを塗り潰さない
@@ -218,6 +222,8 @@ public:
 	int  m_savedPianoVisible;    // 最小化連動: 最小化前に簡易ピアノロールが表示されていたか
 	int  m_savedAnalyzerVisible; // 最小化連動: 最小化前にアナライザーが表示されていたか
 	bool m_inSizeMove;        // ユーザーが枠をドラッグしてリサイズ中(重い同期再描画を抑制)
+	bool m_cascadePrevValid;  // 隣窓連鎖用の直前矩形が有効
+	CRect m_cascadePrevRc;    // リサイズ中の直前メイン矩形
 	bool m_uiReady;           // OnInitDialog 完了前の WM_SIZE では GetCheck/DoLayout しない
 	float hD2;           // DPI スケール係数(96dpi = 1.0)
 
@@ -441,6 +447,16 @@ protected:
 	afx_msg void OnMicLevRelease(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnRecord();
 	afx_msg void OnCapture();
+	afx_msg void OnBotSleep();
+	void ToggleBotVisFlag(int bit);
+	afx_msg void OnBotVisDj();
+	afx_msg void OnBotVisTag();
+	afx_msg void OnBotVisBpm();
+	afx_msg void OnBotVisSleep();
+	afx_msg void OnBotVisMirror();
+	afx_msg void OnBotVisSsViz();
+	afx_msg void OnBotVisAlarm();
+	afx_msg void OnBotVisRemote();
 	afx_msg void OnSaveParam();
 	afx_msg void OnResetData();
 	afx_msg void OnKaisuuKillFocus();
@@ -607,5 +623,6 @@ protected:
 extern CMediaPlayerDlg* mp;
 
 // モード切替: ファルコム特化型 <-> メディアプレイヤー
-void EnterMediaPlayerMode();
+// bConvertCoords: 中途切替時のみ TRUE。起動時に TRUE にすると保存座標がドリフトする。
+void EnterMediaPlayerMode(BOOL bConvertCoords = FALSE);
 void EnterFalcomMode();

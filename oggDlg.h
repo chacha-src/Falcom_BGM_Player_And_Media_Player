@@ -1,4 +1,4 @@
-﻿// oggDlg.h : ヘッダー ファイル
+// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -161,6 +161,8 @@ public:
 	CPianoRoll* m_PianoRollDlg = nullptr;
 	CPianoRollTuneDlg* m_PianoRollTuneDlg = nullptr;
 	CAnalyzerDlg* m_AnalyzerDlg = nullptr;
+	bool m_cascadePrevValid = false;
+	CRect m_cascadePrevRc;
 	// SyncAnalyzerFromPlayCursor: bufwav3 上の前回終端バイト位置
 	BOOL m_analyzerSyncValid = FALSE;
 	ULONG m_analyzerSyncEndPos = 0;
@@ -357,6 +359,8 @@ public:
 	LRESULT OnHotKey(WPARAM wp, LPARAM);
 	afx_msg void OnKillFocus(CWnd* pNewWnd);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnEnterSizeMove();
+	afx_msg void OnExitSizeMove();
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);

@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "MpSidecar.h"
 
 extern save savedata;
@@ -25,9 +25,7 @@ static bool g_smartDirty = false;
 
 static CString MpSidePath(LPCTSTR leaf)
 {
-	CString ss = karento2;
-	ss += leaf;
-	return ss;
+	return DatArc_Path(leaf);
 }
 
 void MpHist_Init()
@@ -106,6 +104,7 @@ void MpHist_Save()
 	catch (...) {
 	}
 	f.Close();
+	DatArc_Commit(MP_HIST_DAT);
 }
 
 int MpHist_Count() { return g_histCnt; }
@@ -243,6 +242,7 @@ void MpSmart_Save()
 	catch (...) {
 	}
 	f.Close();
+	DatArc_Commit(MP_SMART_DAT);
 }
 
 int MpSmart_Count() { return g_smartCnt; }

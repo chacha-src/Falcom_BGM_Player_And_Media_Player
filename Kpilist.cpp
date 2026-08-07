@@ -715,16 +715,22 @@ static void KpiMigrateLegacyToSavedata()
 // 現在の savedata(=最新)を .dat へ書き出し、チェック変更を即座に永続化する。
 static void KpiPersistSavedata()
 {
-	CString ss = karento2;
+	CString ss = DatArc_Path(
 #if _UNICODE
-	ss += L"oggYSEDbgmu.dat";
+		L"oggYSEDbgmu.dat"
 #else
-	ss += "oggYSEDbgm.dat";
+		"oggYSEDbgm.dat"
 #endif
+	);
 	CFile ab;
 	if (ab.Open(ss, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 		ab.Write(&savedata, sizeof(save));
 		ab.Close();
+#if _UNICODE
+		DatArc_Commit(L"oggYSEDbgmu.dat");
+#else
+		DatArc_Commit("oggYSEDbgm.dat");
+#endif
 	}
 }
 

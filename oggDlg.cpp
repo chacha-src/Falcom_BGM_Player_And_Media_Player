@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -1518,6 +1518,8 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_HOTKEY, OnHotKey)
 	ON_WM_KILLFOCUS()
 	ON_WM_SIZE()
+	ON_WM_ENTERSIZEMOVE()
+	ON_WM_EXITSIZEMOVE()
 	ON_WM_SHOWWINDOW()
 	ON_WM_ERASEBKGND()
 	ON_WM_CTLCOLOR()
@@ -1918,7 +1920,7 @@ void MpPersistSavedataQuick()
 {
 	TCHAR tmp[1024];
 	_tgetcwd(tmp, 1000);
-	_tchdir(karento2);
+	DatArc_Chdir();
 	CFile ab;
 #if _UNICODE
 	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -1927,6 +1929,7 @@ void MpPersistSavedataQuick()
 #endif
 		ab.Write(&savedata, sizeof(save));
 		ab.Close();
+		DatArc_Commit(L"oggYSEDbgmu.dat");
 	}
 	_tchdir(tmp);
 }
@@ -3669,7 +3672,14 @@ BOOL COggDlg::OnInitDialog()
 
 	//画面位置
 	if (savedata.xx != -10000) {
-		MoveWindow(savedata.xx, savedata.yy, 1, 1);
+		int x = savedata.xx, y = savedata.yy;
+		CCC_ClampWindowPos(x, y, 200, 200);
+		MoveWindow(x, y, 1, 1);
+		// 画面外だったときだけ保存値を回収(通常起動では dat を書き換えない)
+		if (x != savedata.xx || y != savedata.yy) {
+			savedata.xx = x;
+			savedata.yy = y;
+		}
 	}
 
 	Resize();
@@ -7514,7 +7524,7 @@ void COggDlg::play()
 	{
 		TCHAR tmp_savedir[1024];
 		_tgetcwd(tmp_savedir, 1000);
-		_tchdir(karento2);
+		DatArc_Chdir();
 		CFile ab;
 #if _UNICODE
 		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -7523,6 +7533,7 @@ void COggDlg::play()
 #endif
 			ab.Write(&savedata, sizeof(save));
 			ab.Close();
+			DatArc_Commit(L"oggYSEDbgmu.dat");
 		}
 		_tchdir(tmp_savedir);
 	}
@@ -19018,7 +19029,7 @@ void COggDlg::dp(CString a)
 
 		TCHAR tmp_savedir[1024];
 		_tgetcwd(tmp_savedir, 1000);
-		_tchdir(karento2);
+		DatArc_Chdir();
 		CFile ab;
 #if _UNICODE
 		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -19027,6 +19038,7 @@ void COggDlg::dp(CString a)
 #endif
 			ab.Write(&savedata, sizeof(save));
 			ab.Close();
+			DatArc_Commit(L"oggYSEDbgmu.dat");
 		}
 		_tchdir(tmp_savedir);
 
@@ -19752,8 +19764,10 @@ BOOL COggDlg::DestroyWindow()
 	RECT r;
 	ShowWindow(SW_SHOWNORMAL);
 	GetWindowRect(&r);
-	savedata.xx = r.left;
-	savedata.yy = r.top;
+	int x = r.left, y = r.top;
+	CCC_ClampWindowPos(x, y, r.right - r.left, r.bottom - r.top);
+	savedata.xx = x;
+	savedata.yy = y;
 	DeleteObject(hFont);
 	bmp.DeleteObject();
 	dc.DeleteDC();
@@ -19763,7 +19777,7 @@ BOOL COggDlg::DestroyWindow()
 	{
 		TCHAR tmp_savedir[1024];
 		_tgetcwd(tmp_savedir, 1000);
-		_tchdir(karento2);
+		DatArc_Chdir();
 		CFile ab;
 #if _UNICODE
 		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -19772,6 +19786,7 @@ BOOL COggDlg::DestroyWindow()
 #endif
 			ab.Write(&savedata, sizeof(save));
 			ab.Close();
+			DatArc_Commit(L"oggYSEDbgmu.dat");
 		}
 		_tchdir(tmp_savedir);
 	}
@@ -26123,7 +26138,7 @@ void COggDlg::OnButton9_Folder()
 	Modec();
 	char tmp[1024];
 	_getcwd(tmp, 1000);
-	_tchdir(karento2);
+	DatArc_Chdir();
 	CFile ab;
 #if _UNICODE
 	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -26132,6 +26147,7 @@ void COggDlg::OnButton9_Folder()
 #endif
 		ab.Write(&savedata, sizeof(save));
 		ab.Close();
+		DatArc_Commit(L"oggYSEDbgmu.dat");
 	}
 	_chdir(tmp);
 	delete a;
@@ -26152,7 +26168,7 @@ void COggDlg::OnCheck5()
 	{
 		TCHAR tmp_savedir[1024];
 		_tgetcwd(tmp_savedir, 1000);
-		_tchdir(karento2);
+		DatArc_Chdir();
 		CFile ab;
 #if _UNICODE
 		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -26161,6 +26177,7 @@ void COggDlg::OnCheck5()
 #endif
 			ab.Write(&savedata, sizeof(save));
 			ab.Close();
+			DatArc_Commit(L"oggYSEDbgmu.dat");
 		}
 		_tchdir(tmp_savedir);
 	}
@@ -26175,7 +26192,7 @@ void COggDlg::OnCheck6()
 	{
 		TCHAR tmp_savedir[1024];
 		_tgetcwd(tmp_savedir, 1000);
-		_tchdir(karento2);
+		DatArc_Chdir();
 		CFile ab;
 #if _UNICODE
 		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -26184,6 +26201,7 @@ void COggDlg::OnCheck6()
 #endif
 			ab.Write(&savedata, sizeof(save));
 			ab.Close();
+			DatArc_Commit(L"oggYSEDbgmu.dat");
 		}
 		_tchdir(tmp_savedir);
 	}
@@ -26477,7 +26495,7 @@ void COggDlg::OnButton21()
 	int ret = r->DoModal();
 	char tmp[1024];
 	_getcwd(tmp, 1000);
-	_tchdir(karento2);
+	DatArc_Chdir();
 	CFile ab;
 #if _UNICODE
 	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -26486,6 +26504,7 @@ void COggDlg::OnButton21()
 #endif
 		ab.Write(&savedata, sizeof(save));
 		ab.Close();
+		DatArc_Commit(L"oggYSEDbgmu.dat");
 	}
 	_chdir(tmp);
 	delete r;
@@ -26824,11 +26843,45 @@ void COggDlg::OnSize(UINT nType, int cx, int cy)
 	if (nType != SIZE_MINIMIZED && ::IsWindow(m_hWnd)) {
 		CRect wr;
 		GetWindowRect(&wr);
-		CCC_MainLockOnMainMoving(&wr);
+		// 初回 OnSize で PlaceChild しない(起動時のオフセット取り違え→座標ドリフト防止)
+		if (m_cascadePrevValid) {
+			const int dw = wr.Width() - m_cascadePrevRc.Width();
+			const int dh = wr.Height() - m_cascadePrevRc.Height();
+			if (dw != 0 || dh != 0)
+				CCC_NeighborCascadeOnMainResize(&m_cascadePrevRc, &wr);
+			else if (wr.left != m_cascadePrevRc.left || wr.top != m_cascadePrevRc.top)
+				CCC_MainLockOnMainMoving(&wr);
+		}
+		m_cascadePrevRc = wr;
+		m_cascadePrevValid = true;
 		CCC_CaptionLayout(m_hWnd);
 		LayoutHelpBtn();
 	}
 
+}
+
+void COggDlg::OnEnterSizeMove()
+{
+	GetWindowRect(&m_cascadePrevRc);
+	m_cascadePrevValid = true;
+	CCC_NeighborCascadeBegin(m_hWnd);
+	Default();
+}
+
+void COggDlg::OnExitSizeMove()
+{
+	if (::IsWindow(m_hWnd) && !IsIconic()) {
+		CRect wr;
+		GetWindowRect(&wr);
+		if (m_cascadePrevValid)
+			CCC_NeighborCascadeOnMainResize(&m_cascadePrevRc, &wr);
+		else
+			CCC_MainLockOnMainMoving(&wr);
+		m_cascadePrevRc = wr;
+	}
+	CCC_NeighborCascadeEnd();
+	m_cascadePrevValid = false;
+	Default();
 }
 
 #if _UNICODE
@@ -26956,7 +27009,7 @@ void COggDlg::OnPlayList()
 
 	char tmp[1024];
 	_getcwd(tmp, 1000);
-	_tchdir(karento2);
+	DatArc_Chdir();
 	CFile ab;
 #if _UNICODE
 	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -26965,14 +27018,15 @@ void COggDlg::OnPlayList()
 #endif
 		ab.Write(&savedata, sizeof(save));
 		ab.Close();
+		DatArc_Commit(L"oggYSEDbgmu.dat");
 	}
 	_chdir(tmp);
 	}
 
 void COggDlg::OnSwitchMode()
 {
-	// メディアプレイヤーモードへ切替
-	EnterMediaPlayerMode();
+	// メディアプレイヤーモードへ切替(表示中メインからの座標変換あり)
+	EnterMediaPlayerMode(TRUE);
 }
 
 LRESULT COggDlg::OnEnterFalcomMsg(WPARAM, LPARAM)

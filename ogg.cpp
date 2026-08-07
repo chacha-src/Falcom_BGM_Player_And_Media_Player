@@ -1,4 +1,4 @@
-﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
+// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -167,6 +167,8 @@ BOOL COggApp::InitInstance()
 			}
 	}
 	_tchdir(karento2);
+	if (DatArc_Init(karento2))
+		DatArc_Chdir();
 	ZeroMemory(&savedata,sizeof(save));
 	savedata.supe=1;
 	savedata.xx=-10000;
@@ -430,6 +432,7 @@ BOOL COggApp::InitInstance()
 	savedata.popupMenuPoint = 9;
 	savedata.popupMenuBold = 0;
 	savedata.popupMenuItalic = 0;
+	savedata.popupMenuAnim = 0;
 	savedata.deskLrcFontAuto = 1;
 	savedata.deskLrcFontPt = 140;
 	savedata.deskLrcLines = 10;
@@ -1324,6 +1327,10 @@ BOOL COggApp::InitInstance()
 	}
 	if (datFileSize < (int)(offsetof(save, updateAttemptExeTime) + sizeof(savedata.updateAttemptExeTime)))
 		savedata.updateAttemptExeTime = 0;
+	if (datFileSize < (int)(offsetof(save, popupMenuAnim) + sizeof(savedata.popupMenuAnim)))
+		savedata.popupMenuAnim = 0;
+	else if (savedata.popupMenuAnim < 0 || savedata.popupMenuAnim > 4)
+		savedata.popupMenuAnim = 0;
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {
 		savedata.cap_fx_n = 1;
@@ -1424,6 +1431,7 @@ BOOL COggApp::InitInstance()
 		}
 	}
 	_tchdir(karento2);
+	DatArc_Chdir();
 #if _UNICODE
 	if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 #else
@@ -1431,6 +1439,11 @@ BOOL COggApp::InitInstance()
 #endif
 		ab.Write(&savedata, sizeof(save));
 		ab.Close();
+#if _UNICODE
+		DatArc_Commit(L"oggYSEDbgmu.dat");
+#else
+		DatArc_Commit("oggYSEDbgm.dat");
+#endif
 	}
 
 	// 曲ごとのオーディオ/DSP パラメータ(別ファイル)を読み込む
@@ -1451,7 +1464,7 @@ BOOL COggApp::InitInstance()
 		CModeSelectDlg msd;
 		msd.DoModal();   // savedata.playerMode / savedata.startupAsk を更新
 		// 選択結果を即保存
-		_tchdir(karento2);
+		DatArc_Chdir();
 		CFile sf;
 #if _UNICODE
 		if (sf.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
@@ -1460,6 +1473,11 @@ BOOL COggApp::InitInstance()
 #endif
 			sf.Write(&savedata, sizeof(save));
 			sf.Close();
+#if _UNICODE
+			DatArc_Commit(L"oggYSEDbgmu.dat");
+#else
+			DatArc_Commit("oggYSEDbgm.dat");
+#endif
 		}
 	}
 
@@ -1469,7 +1487,7 @@ BOOL COggApp::InitInstance()
 	int nResponse = dlg.DoModal();
 	// 曲ごとパラメータの未書き込み分を確定
 	SongParams_SaveFile();
-	_tchdir(karento2);
+	DatArc_Chdir();
 #if _UNICODE
 		if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive,NULL)==TRUE){
 #else
@@ -1477,7 +1495,13 @@ BOOL COggApp::InitInstance()
 #endif
 		ab.Write(&savedata,sizeof(save));
 		ab.Close();
+#if _UNICODE
+		DatArc_Commit(L"oggYSEDbgmu.dat");
+#else
+		DatArc_Commit("oggYSEDbgm.dat");
+#endif
 	}
+	DatArc_Shutdown();
 	if (nResponse == IDOK)
 	{
 		// TODO: ダイアログが <OK> で消された時のコードを
@@ -1604,7 +1628,7 @@ struct playlistdatanew{
 void COggApp::convert()
 {
 	save1 saveold;
-	_tchdir(karento2);
+	DatArc_Chdir();
 	CFile ab;
 	if(ab.Open(_T("oggYSEDbgm.dat"),CFile::modeRead | CFile::shareDenyWrite,NULL)!=TRUE){
 		return;
@@ -1706,6 +1730,7 @@ void COggApp::convert()
 	if(ab.Open(L"oggYSEDbgmu.dat",CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive,NULL)==TRUE){
 		ab.Write(&savedata,sizeof(save));
 		ab.Close();
+		DatArc_Commit(L"oggYSEDbgmu.dat");
 	}
 
 	//プレイリスト移植
@@ -1758,6 +1783,7 @@ void COggApp::convert()
 		g.Write(&c[3],4);
 		f.Close();
 		g.Close();
+		DatArc_FlushAll();
 	}else return;
 }
 #else

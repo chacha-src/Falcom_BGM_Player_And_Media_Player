@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -1964,7 +1964,7 @@ static bool PlReadPlaylistTracks(int plIdx, std::vector<playlistdata0>& tracks)
 	tracks.clear();
 	TCHAR tmp[1024];
 	_tgetcwd(tmp, 1000);
-	_tchdir(karento2);
+	DatArc_Chdir();
 	CString fname = PlPlaylistFileName(plIdx);
 	CFile f;
 	if (!f.Open(fname, CFile::modeRead | CFile::shareDenyWrite, NULL)) {
@@ -1999,7 +1999,7 @@ static bool PlWritePlaylistTracks(int plIdx, const std::vector<playlistdata0>& t
 {
 	TCHAR tmp[1024];
 	_tgetcwd(tmp, 1000);
-	_tchdir(karento2);
+	DatArc_Chdir();
 	CString fname = PlPlaylistFileName(plIdx);
 
 	int x = -10000, y = 0, cx = 800, cy = 600;
@@ -2058,6 +2058,7 @@ static bool PlWritePlaylistTracks(int plIdx, const std::vector<playlistdata0>& t
 	wf.Write(&col[6], 4);
 	wf.Write(&pntSaved, 4);
 	wf.Close();
+	DatArc_Commit(fname);
 	_tchdir(tmp);
 	return true;
 }
@@ -8700,7 +8701,7 @@ void CPlayList::Save()
 	int cx,cy,x,y;RECT r;
 	int c;
 	_tgetcwd(tmp,1000);
-	_tchdir(karento2);
+	DatArc_Chdir();
 	if(IsIconic()){
 		ShowWindow(SW_RESTORE);
 		GetWindowRect(&r);
@@ -8767,6 +8768,7 @@ void CPlayList::Save()
 			ab.Write(&savedata, sizeof(save));
 			ab.Close();
 		}
+		DatArc_FlushAll();
 	}
 	_tchdir(tmp);
 }
@@ -8782,7 +8784,7 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		pc = NULL;
 	}
 	_tgetcwd(tmp,1000);
-	_tchdir(karento2);
+	DatArc_Chdir();
 #if _UNICODE
 	int lcnt = savedata.playlistnum;
 	CString s;
@@ -10195,20 +10197,18 @@ void CPlayList::loadplaylistname()
 
 CString CPlayList::GetModulePath()
 {
-	// 実行ファイルのパス
+	// プレイリスト .dat はアーカイブ展開先(ステージ)を参照する
+	LPCTSTR stage = DatArc_StageDir();
+	if (stage && stage[0])
+		return CString(stage);
+	// フォールバック: 実行ファイルのパス
 	CString modulePath = _T("");
-	// ドライブ名、ディレクトリ名、ファイル名、拡張子
 	wchar_t path[_MAX_PATH], drive[_MAX_PATH], dir[_MAX_PATH], fname[_MAX_PATH], ext[_MAX_PATH];
-
-	// 実行ファイルのファイルパスを取得
 	if (::GetModuleFileName(NULL, path, _MAX_PATH) != 0)
 	{
-		// ファイルパスを分割
 		::_wsplitpath_s(path, drive, dir, fname, ext);
-		// ドライブとディレクトリ名を結合して実行ファイルパスとする
 		modulePath = CString(drive) + CString(dir);
 	}
-
 	return modulePath;
 }
 
@@ -10346,6 +10346,7 @@ void CPlayList::OnBnClickedPlaydelete()
 		s.Format(L"playlistu.dat");
 		savedata.playlistname[0][0] = 0;
 		CFile::Remove(GetModulePath() + s);
+		DatArc_FlushAll();
 		savedata.playlistnum = 0;
 		Load();
 		savedata.playlistnum = 0;
@@ -10376,6 +10377,7 @@ void CPlayList::OnBnClickedPlaydelete()
 			CFile::Rename(GetModulePath() + s2, GetModulePath() + s1);
 			wcscpy(savedata.playlistname[j], savedata.playlistname[jj]);
 		}
+		DatArc_FlushAll();
 		lcnt = 0;
 		for (lcnt = 0;; lcnt++) {
 			CString s;
