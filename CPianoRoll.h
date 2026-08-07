@@ -113,6 +113,16 @@ public:
     void LayoutHelpBtn();
     void ShowHelpSheet();
 
+    // ローカルリモート用スナップショット（UIスレッドから呼ぶ）
+    // keyLevels108: MIDI0..107 の表示強度 0..100（非活性は0）
+    // keyExpr108: 表現記号フラグ（marks OFF なら全て0）
+    // histBits: 行あたり14バイトの活性ビットマスク×maxRows（0=最新）
+    // histExpr: 行あたり108バイトの expr フラグ×maxRows（marks OFF なら未使用可）
+    // outExprOn: 表現記号表示がONなら1
+    void ExportRemoteSnapshot(BYTE keyLevels108[108], BYTE keyExpr108[108],
+        BYTE* histBits, BYTE* histExpr, int maxRows, int& outRows, int& outExprOn,
+        WCHAR* chordOut, int chordCch) const;
+
 protected:
     virtual void DoDataExchange(CDataExchange* pDX);
     virtual BOOL OnInitDialog();

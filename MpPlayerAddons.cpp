@@ -5,6 +5,7 @@
 #include "ProAudio.h"
 #include "oggDlg.h"
 #include "CPianoRoll.h"
+#include "CAnalyzerDlg.h"
 #include "DeviceRecordDlg.h"
 #include "ScreenCaptureDlg.h"
 #include "CCustomPopupMenu.h"
@@ -1037,7 +1038,7 @@ void MpMirrorWritePcm(const BYTE* pcm, int bytes)
 }
 
 // ---- Remote HTTP (LAN / Wi-Fi、最大3クライアント同時) ----
-enum { kMpRemoteMaxClients = 3 };
+enum { kMpRemoteMaxClients = 6 };
 static SOCKET g_mpRemoteListen = INVALID_SOCKET;
 static HANDLE g_mpRemoteThread = NULL;
 static volatile LONG g_mpRemoteStop = 0;
@@ -1063,6 +1064,19 @@ extern int plcnt;
 extern int gameon;
 extern void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName);
 extern void equaliser(void* data, int len, BOOL reset);
+
+static BYTE g_mpRemoteSpec[8][64];
+static int g_mpRemoteSpecCh = 1;
+static BYTE g_mpRemoteNotes[108];
+static BYTE g_mpRemoteNoteExpr[108];
+static BYTE g_mpRemoteHist[72][14]; // 行0=最新、各14B=MIDI0..107 活性ビット
+static BYTE g_mpRemoteHistExpr[72][108];
+static int g_mpRemoteHistRows = 0;
+static int g_mpRemoteExprOn = 0;
+static WCHAR g_mpRemoteChord[48] = L"-";
+static volatile LONG g_mpRemoteVizSeq = 0;
+static volatile LONG g_mpRemoteWantPianoMs = 0; // GetTickCount 相当を格納
+static volatile LONG g_mpRemoteWantAnaMs = 0;
 
 static void MpRemoteCsEnsure()
 {
@@ -1254,8 +1268,15 @@ static void MpRemoteSendAll(SOCKET s, const char* data, int len)
 	int off = 0;
 	while (off < len) {
 		const int n = send(s, data + off, len - off, 0);
-		if (n <= 0) break;
-		off += n;
+		if (n > 0) { off += n; continue; }
+		const int err = WSAGetLastError();
+		if (n < 0 && (err == WSAEWOULDBLOCK || err == WSAEINTR)) {
+			fd_set wf; FD_ZERO(&wf); FD_SET(s, &wf);
+			timeval tv; tv.tv_sec = 5; tv.tv_usec = 0;
+			if (select(0, NULL, &wf, NULL, &tv) <= 0) break;
+			continue;
+		}
+		break;
 	}
 }
 
@@ -1341,6 +1362,8 @@ static void MpRemoteHandleRequest(SOCKET s)
 			const int v = MpRemoteQueryInt(q, "v=", 0);
 			MpRemoteSendCmd(17, (LPARAM)((w << 16) | (v & 0xFFFF)));
 		}
+		else if (MpRemoteHasQueryParam(q, "c=eqreset")) MpRemoteSendCmd(18);
+		else if (MpRemoteHasQueryParam(q, "c=eqresetg")) MpRemoteSendCmd(19);
 		else if (MpRemoteHasQueryParam(q, "c=scrbeg")) MpRemoteSendCmd(20);
 		else if (MpRemoteHasQueryParam(q, "c=scrend")) MpRemoteSendCmd(21);
 		else if (MpRemoteHasQueryParam(q, "c=scr") && q) {
@@ -1525,6 +1548,133 @@ static void MpRemoteHandleRequest(SOCKET s)
 		return;
 	}
 
+	if (strstr(line, "GET /api/analyzer")) {
+		InterlockedExchange(&g_mpRemoteWantAnaMs, (LONG)GetTickCount());
+		const int nch = (g_mpRemoteSpecCh < 1) ? 1 : ((g_mpRemoteSpecCh > 8) ? 8 : g_mpRemoteSpecCh);
+		CStringW json;
+		json.Format(L"{\"n\":%d,\"b\":[", nch);
+		for (int c = 0; c < nch; ++c) {
+			if (c) json += L",";
+			json += L"[";
+			for (int i = 0; i < 64; ++i) {
+				wchar_t b[16];
+				_snwprintf_s(b, _TRUNCATE, L"%s%d", (i ? L"," : L""), (int)g_mpRemoteSpec[c][i]);
+				json += b;
+			}
+			json += L"]";
+		}
+		json += L"],\"lab\":[";
+		static const wchar_t* stereo[] = { L"L", L"R" };
+		static const wchar_t* ch51[] = { L"L", L"R", L"C", L"LFE", L"SL", L"SR" };
+		static const wchar_t* ch71[] = { L"L", L"R", L"C", L"LFE", L"SL", L"SR", L"BL", L"BR" };
+		for (int c = 0; c < nch; ++c) {
+			if (c) json += L",";
+			json += L"\"";
+			if (nch == 2 && c < 2) json += stereo[c];
+			else if (nch == 6 && c < 6) json += ch51[c];
+			else if (nch >= 8 && c < 8) json += ch71[c];
+			else {
+				wchar_t lb[16];
+				_snwprintf_s(lb, _TRUNCATE, L"Ch%d", c + 1);
+				json += lb;
+			}
+			json += L"\"";
+		}
+		json += L"]}";
+		CStringA utf8;
+		{
+			const int nbytes = ::WideCharToMultiByte(CP_UTF8, 0, json, -1, NULL, 0, NULL, NULL);
+			if (nbytes > 1) {
+				char* pb = utf8.GetBufferSetLength(nbytes - 1);
+				::WideCharToMultiByte(CP_UTF8, 0, json, -1, pb, nbytes, NULL, NULL);
+				utf8.ReleaseBuffer(nbytes - 1);
+			}
+		}
+		CStringA hdr;
+		hdr.Format("HTTP/1.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nConnection: close\r\nCache-Control: no-store\r\nContent-Length: %d\r\n\r\n",
+			utf8.GetLength());
+		MpRemoteSendAll(s, hdr, hdr.GetLength());
+		MpRemoteSendAll(s, utf8, utf8.GetLength());
+		return;
+	}
+
+	if (strstr(line, "GET /api/piano")) {
+		InterlockedExchange(&g_mpRemoteWantPianoMs, (LONG)GetTickCount());
+		CStringW chordEsc;
+		MpRemoteEscJson(g_mpRemoteChord, chordEsc);
+		CStringW json = L"{\"c\":\"";
+		json += chordEsc;
+		json += L"\",\"xm\":";
+		{
+			wchar_t b[16];
+			_snwprintf_s(b, _TRUNCATE, L"%d,\"k\":[", g_mpRemoteExprOn ? 1 : 0);
+			json += b;
+		}
+		for (int i = 0; i < 108; ++i) {
+			wchar_t b[16];
+			_snwprintf_s(b, _TRUNCATE, L"%s%d", (i ? L"," : L""), (int)g_mpRemoteNotes[i]);
+			json += b;
+		}
+		json += L"],\"h\":[";
+		const int rows = g_mpRemoteHistRows;
+		const int xm = g_mpRemoteExprOn ? 1 : 0;
+		for (int r = 0; r < rows; ++r) {
+			if (r) json += L",";
+			json += L"[";
+			int first = 1;
+			for (int k = 0; k < 108; ++k) {
+				if (g_mpRemoteHist[r][k >> 3] & (BYTE)(1u << (k & 7))) {
+					wchar_t b[16];
+					_snwprintf_s(b, _TRUNCATE, L"%s%d", (first ? L"" : L","), k);
+					json += b;
+					first = 0;
+				}
+			}
+			json += L"]";
+		}
+		json += L"]";
+		if (xm) {
+			json += L",\"x\":[";
+			for (int r = 0; r < rows; ++r) {
+				if (r) json += L",";
+				json += L"[";
+				int first = 1;
+				for (int k = 0; k < 108; ++k) {
+					if (g_mpRemoteHist[r][k >> 3] & (BYTE)(1u << (k & 7))) {
+						wchar_t b[16];
+						_snwprintf_s(b, _TRUNCATE, L"%s%d", (first ? L"" : L","), (int)g_mpRemoteHistExpr[r][k]);
+						json += b;
+						first = 0;
+					}
+				}
+				json += L"]";
+			}
+			json += L"],\"kx\":[";
+			for (int i = 0; i < 108; ++i) {
+				wchar_t b[16];
+				_snwprintf_s(b, _TRUNCATE, L"%s%d", (i ? L"," : L""), (int)g_mpRemoteNoteExpr[i]);
+				json += b;
+			}
+			json += L"]";
+		}
+		json += L"}";
+		CStringA utf8;
+		{
+			const int nbytes = ::WideCharToMultiByte(CP_UTF8, 0, json, -1, NULL, 0, NULL, NULL);
+			if (nbytes > 1) {
+				char* pb = utf8.GetBufferSetLength(nbytes - 1);
+				::WideCharToMultiByte(CP_UTF8, 0, json, -1, pb, nbytes, NULL, NULL);
+				utf8.ReleaseBuffer(nbytes - 1);
+			}
+		}
+		CStringA hdr;
+		hdr.Format("HTTP/1.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nConnection: close\r\nCache-Control: no-store\r\nContent-Length: %d\r\n\r\n",
+			utf8.GetLength());
+		MpRemoteSendAll(s, hdr, hdr.GetLength());
+		MpRemoteSendAll(s, utf8, utf8.GetLength());
+		return;
+	}
+
 	CStringW ht, ha, hb;
 	MpRemoteEscHtml(title.IsEmpty() ? L"—" : (LPCWSTR)title, ht);
 	MpRemoteEscHtml(artist.IsEmpty() ? L"" : (LPCWSTR)artist, ha);
@@ -1548,7 +1698,9 @@ static void MpRemoteHandleRequest(SOCKET s)
 	const wchar_t* labTabList = LL14(L"リスト", L"List", L"Liste", L"Lista", L"Lista", L"목록", L"列表", L"قائمة", L"Список", L"Liste", L"Lista", L"Lijst", L"Lista", L"Liste");
 	const wchar_t* labTabLrc = LL14(L"歌詞", L"Lyrics", L"Paroles", L"Testi", L"Letra", L"가사", L"歌词", L"كلمات", L"Текст", L"Text", L"Letra", L"Tekst", L"Tekst", L"Soz");
 	const wchar_t* labTabDj = LL14(L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ", L"DJ");
-	const wchar_t* labHint = LL14(L"Wi-Fi / LAN · 同時最大3台", L"Wi-Fi / LAN · up to 3 clients", L"Wi-Fi / LAN · max 3 clients", L"Wi-Fi / LAN · max 3 client", L"Wi-Fi / LAN · max. 3 clientes",
+	const wchar_t* labTabPiano = LL14(L"ピアノ", L"Piano", L"Piano", L"Piano", L"Piano", L"피아노", L"钢琴", L"بيانو", L"Пиано", L"Piano", L"Piano", L"Piano", L"Piano", L"Piyano");
+	const wchar_t* labTabAna = LL14(L"アナ", L"Ana", L"Ana", L"Ana", L"Ana", L"아나", L"分析", L"محلل", L"Ана", L"Ana", L"Ana", L"Ana", L"Ana", L"Ana");
+	const wchar_t* labHint = LL14(L"Wi-Fi / LAN · 同時最大6台", L"Wi-Fi / LAN · up to 6 clients", L"Wi-Fi / LAN · max 3 clients", L"Wi-Fi / LAN · max 3 client", L"Wi-Fi / LAN · max. 3 clientes",
 		L"Wi-Fi / LAN · 최대 3대", L"Wi-Fi / LAN · 最多3台", L"Wi-Fi / LAN · حد 3", L"Wi-Fi / LAN · до 3", L"WLAN / LAN · max. 3",
 		L"Wi-Fi / LAN · max. 3", L"Wi-Fi / LAN · max 3", L"Wi-Fi / LAN · max 3", L"Wi-Fi / LAN · en fazla 3");
 	const wchar_t* labPre = LL14(L"プリセット", L"Preset", L"Preset", L"Preset", L"Preajuste", L"프리셋", L"预设", L"إعداد مسبق", L"Пресет", L"Preset", L"Preset", L"Preset", L"Preset", L"Onayar");
@@ -1557,6 +1709,8 @@ static void MpRemoteHandleRequest(SOCKET s)
 	const wchar_t* labCho = LL14(L"コーラス", L"Chorus", L"Chorus", L"Chorus", L"Chorus", L"코러스", L"合唱", L"جوقة", L"Хорус", L"Chorus", L"Chorus", L"Chorus", L"Chorus", L"Kor");
 	const wchar_t* labDel = LL14(L"ディレイ", L"Delay", L"Delay", L"Delay", L"Delay", L"딜레이", L"延迟", L"تأخير", L"Дилей", L"Delay", L"Delay", L"Delay", L"Delay", L"Gecikme");
 	const wchar_t* labEff = LL14(L"効果量", L"Effect", L"Effet", L"Effetto", L"Efecto", L"효과", L"效果", L"تأثير", L"Эффект", L"Effekt", L"Efeito", L"Effect", L"Efekt", L"Efekt");
+	const wchar_t* labEqReset = LL14(L"イコライザーリセット", L"EQ reset", L"Reset EQ", L"Reset EQ", L"Reset EQ", L"EQ 초기화", L"均衡器重置", L"إعادة EQ", L"Сброс EQ", L"EQ-Reset", L"Reset EQ", L"EQ reset", L"Reset EQ", L"EQ sifirla");
+	const wchar_t* labEqResetG = LL14(L"グローバルリセット", L"Global reset", L"Reset global", L"Reset globale", L"Reset global", L"전역 초기화", L"全局重置", L"إعادة عامة", L"Глоб. сброс", L"Global-Reset", L"Reset global", L"Globaal reset", L"Reset globalny", L"Genel sifirla");
 	const wchar_t* labLrcSave = LL14(L"LRC保存", L"Save LRC", L"Sauver LRC", L"Salva LRC", L"Guardar LRC", L"LRC 저장", L"保存LRC", L"حفظ LRC", L"Сохранить LRC", L"LRC speichern", L"Salvar LRC", L"LRC opslaan", L"Zapisz LRC", L"LRC kaydet");
 	const wchar_t* labScratch = LL14(L"ドラッグでスクラッチ", L"Drag to scratch", L"Glisser pour scratch", L"Trascina per scratch", L"Arrastrar para scratch",
 		L"드래그로 스크래치", L"拖动刮盘", L"اسحب للخدش", L"Тяните для скретча", L"Ziehen zum Scratchen", L"Arrastar para scratch", L"Slepen om te scratchen", L"Przeciagnij aby scratch", L"Surukle scratch");
@@ -1564,8 +1718,7 @@ static void MpRemoteHandleRequest(SOCKET s)
 	const wchar_t* tipLrcP100 = LL14(L"歌詞を +100ms", L"Lyrics +100ms", L"Paroles +100ms", L"Testi +100ms", L"Letra +100ms", L"가사 +100ms", L"歌词 +100ms", L"كلمات +100ms", L"Текст +100ms", L"Text +100ms", L"Letra +100ms", L"Tekst +100ms", L"Tekst +100ms", L"Soz +100ms");
 
 	CStringW page;
-	page = L"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n";
-	page += L"<!DOCTYPE html><html lang=\"ja\"><head><meta charset=\"utf-8\">"
+	page = L"<!DOCTYPE html><html lang=\"ja\"><head><meta charset=\"utf-8\">"
 		L"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">"
 		L"<meta name=\"apple-mobile-web-app-capable\" content=\"yes\">"
 		L"<meta name=\"theme-color\" content=\"#ff9ec8\">"
@@ -1576,11 +1729,11 @@ static void MpRemoteHandleRequest(SOCKET s)
 		L"<style>";
 	page += L":root{--bg1:#fff5fb;--bg2:#eef3ff;--card:#fffffff2;--ink:#3a2a3a;--muted:#8a6a80;--pink:#ff69b4;--pink2:#c45ad0;--play1:#c8f0c8;--play2:#8cd296;--pause1:#fff0c8;--pause2:#ffd28c;--stop1:#ffd7dc;--stop2:#ffaab9;--nav1:#d7ebff;--nav2:#a5cdf5;--shadow:0 12px 40px #ff69b433}*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;min-height:100%;font-family:\"Segoe UI\",\"Yu Gothic UI\",\"Meiryo\",sans-serif;color:var(--ink);background:radial-gradient(1200px 600px at 10% -10%,#ffd6ec 0%,transparent 55%),radial-gradient(900px 500px at 100% 0%,#d6e6ff 0%,transparent 50%),linear-gradient(160deg,var(--bg1),var(--bg2));}body{padding:18px 16px 28px}.shell{max-width:560px;margin:0 a";
 	page += L"uto}.brand{display:flex;align-items:center;gap:10px;margin-bottom:14px}.brand i{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,var(--pink),var(--pink2));color:#fff;box-shadow:var(--shadow);font-size:18px}.brand h1{margin:0;font-size:1.15rem;background:linear-gradient(90deg,var(--pink),var(--pink2));-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:800}.card{background:var(--card);backdrop-filter:blur(14px);border:1px solid #ffffffaa;border-radius:22px;padding:18px 16px;box-shadow:var(--shadow);margin-bottom:14px}.now-label{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted";
-	page += L");margin:0 0 6px}#title{margin:0;font-size:1.25rem;font-weight:750;line-height:1.35;word-break:break-word;background:linear-gradient(90deg,#ff69b4,#963ca0);-webkit-background-clip:text;background-clip:text;color:transparent}#artist,#album{margin:6px 0 0;color:var(--muted);font-size:.95rem;word-break:break-word}#album{font-size:.85rem;opacity:.9}.state{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:4px 10px;border-radius:999px;background:#ffe6f3;color:#b03070;font-size:.75rem;font-weight:700}.state.play{background:#e4ffe8;color:#2d7a3e}.state.pause{background:#fff3d6;color:#9a6a10}.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;padding:4px;background:#ffffffc";
-	page += L"c;border-radius:16px;border:1px solid #ffffffaa;box-shadow:var(--shadow)}.tab{flex:1 1 auto;min-width:64px;appearance:none;border:0;cursor:pointer;border-radius:12px;padding:10px 8px;font-weight:750;font-size:.78rem;color:#6a4a60;background:transparent}.tab.on{background:linear-gradient(135deg,var(--pink),var(--pink2));color:#fff;box-shadow:0 4px 14px #ff69b455}.panel{display:none}.panel.on{display:block}.vinyl-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;margin-top:4px}#vinyl{width:min(100%,320px);aspect-ratio:1;border-radius:50%;touch-action:none;cursor:grab;display:block;box-shadow:0 10px 28px #00000033,inset 0 0 0 2px #ffffff22}#vinyl:active{cursor:grabbing}.vinyl-tip{font-size:.82rem;color:var(--muted);font-weight:650;text-align:center}.pad{display:grid;grid-template-columns:1fr 1.15fr 1fr;gap:10px;margin-top:4px}.btn{appearance:none;border:0;cursor:pointer;user-select:none;border-radius:18px;min-height:64px;padding:12px 8px;font-wei";
+	page += L");margin:0 0 6px}#title{margin:0;font-size:1.25rem;font-weight:750;line-height:1.35;word-break:break-word;background:linear-gradient(90deg,#ff69b4,#963ca0);-webkit-background-clip:text;background-clip:text;color:transparent}#artist,#album{margin:6px 0 0;color:var(--muted);font-size:.95rem;word-break:break-word}#album{font-size:.85rem;opacity:.9}.state{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:4px 10px;border-radius:999px;background:#ffe6f3;color:#b03070;font-size:.75rem;font-weight:700}.state.play{background:#e4ffe8;color:#2d7a3e}.state.pause{background:#fff3d6;color:#9a6a10}.tabs{display:flex;flex-direction:column;gap:6px;margin:0 0 12px;padding:4px;background:#ffffffcc;";
+	page += L"border-radius:16px;border:1px solid #ffffffaa;box-shadow:var(--shadow)}.tabrow{display:grid;gap:6px}.tabrow.r4{grid-template-columns:repeat(4,1fr)}.tabrow.r3{grid-template-columns:repeat(3,1fr)}.tab{appearance:none;border:0;cursor:pointer;border-radius:12px;padding:10px 6px;font-weight:750;font-size:.76rem;color:#6a4a60;background:transparent}.tab.on{background:linear-gradient(135deg,var(--pink),var(--pink2));color:#fff;box-shadow:0 4px 14px #ff69b455}.panel{display:none}.panel.on{display:block}.vinyl-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;margin-top:4px}#vinyl{width:min(100%,320px);aspect-ratio:1;border-radius:50%;touch-action:none;cursor:grab;display:block;box-shadow:0 10px 28px #00000033,inset 0 0 0 2px #ffffff22}#vinyl:active{cursor:grabbing}.vinyl-tip{font-size:.82rem;color:var(--muted);font-weight:650;text-align:center}.pad{display:grid;grid-template-columns:1fr 1.15fr 1fr;gap:10px;margin-top:4px}.btn{appearance:none;border:0;cursor:pointer;user-select:none;border-radius:18px;min-height:64px;padding:12px 8px;font-wei";
 	page += L"ght:750;font-size:.92rem;color:#2a2030;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;box-shadow:0 6px 16px #00000014;transition:transform .12s ease,filter .12s ease,box-shadow .12s ease}.btn i{font-size:1.25rem}.btn:active{transform:scale(.96);filter:brightness(.97)}.btn.busy{opacity:.65;pointer-events:none}.btn.sm{min-height:44px;border-radius:14px;font-size:.8rem;flex-direction:row;gap:8px}.b-prev,.b-next{background:linear-gradient(180deg,var(--nav1),var(--nav2))}.b-play{background:linear-gradient(180deg,var(--play1),var(--play2));min-height:76px;font-size:1rem}.b-pause{background:linear-gradient(180deg,var(--pause1),var(--pause2))}.b-stop{background:";
 	page += L"linear-gradient(180deg,var(--stop1),var(--stop2))}.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}.row4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:10px}.b-seek{background:linear-gradient(180deg,#efe7ff,#d5c8f8);min-height:54px}.b-mute{background:linear-gradient(180deg,#ffe8f1,#ffc1d8);min-height:48px;width:100%;margin-top:10px}.b-mute.on{background:linear-gradient(180deg,#ff9eb8,#ff5a8a);color:#fff;box-shadow:0 0 0 2px #ff69b466}.b-soft{background:linear-gradient(180deg,#f5f0ff,#e2d6f8);min-height:48px}.b-kill.on{background:linear-gradient(180deg,#ff9eb8,#ff5a8a);";
-	page += L"color:#fff}.vol-wrap{margin-top:8px}.vol-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.vol-top span{font-weight:700;font-size:.9rem}#volVal,.vnum{color:var(--pink);font-variant-numeric:tabular-nums}input[type=range]{width:100%;accent-color:var(--pink);height:28px}.eq-grid{display:flex;flex-direction:column;gap:6px;margin-top:10px}.eq-band{display:grid;grid-template-columns:42px 1fr 36px;align-items:center;gap:8px}.eq-band label{font-size:.75rem;color:var(--muted);font-weight:700;text-align:right}.eq-band input{width:100%;height:28px;writing-mode:horizontal-tb;-webkit-appearance:auto;appearance:auto}select.sel{width:100%;margin-top:8px;padding:10px;border-radius:12px;border:1px ";
+	page += L"color:#fff}.vol-wrap{margin-top:8px}.vol-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.vol-top span{font-weight:700;font-size:.9rem}#volVal,.vnum{color:var(--pink);font-variant-numeric:tabular-nums}input[type=range]{width:100%;accent-color:var(--pink);height:28px}#tab-eq{padding-bottom:20px}#tab-eq input[type=range]{touch-action:manipulation}.eq-reset{position:sticky;top:0;z-index:2;background:linear-gradient(180deg,#fffffff8,#fffffff0);padding:8px 0 10px;margin:4px 0 8px}.eq-grid{display:flex;flex-direction:column;gap:6px;margin-top:10px}.eq-band{display:grid;grid-template-columns:42px 1fr 36px;align-items:center;gap:8px}.eq-band label{font-size:.75rem;color:var(--muted);font-weight:700;text-align:right}.eq-band input{width:100%;height:28px;writing-mode:horizontal-tb;-webkit-appearance:auto;appearance:auto}.viz-wrap{margin-top:6px}.viz-chord{text-align:center;font-weight:800;font-size:1.05rem;color:var(--pink2);margin:0 0 8px;min-height:1.4em}#pianoCan,#anaCan{width:100%;height:auto;display:block;border-radius:14px;background:#0e1018;box-shadow:inset 0 0 0 1px #ffffff18}#pianoCan{min-height:220px}#anaCan{min-height:140px}select.sel{width:100%;margin-top:8px;padding:10px;border-radius:12px;border:1px ";
 	page += L"solid #e8d0e0;background:#fff;font-weight:650;color:var(--ink)}.list{max-height:360px;overflow:auto;margin-top:8px;-webkit-overflow-scrolling:touch}.li{display:block;width:100%;text-align:left;padding:12px 12px;border:0;border-radius:14px;background:transparent;cursor:pointer;margin-bottom:4px}.li:active{background:#ffe6f3}.li.cur{background:linear-gradient(90deg,#ffe6f3,#f0e6ff);font-weight:750}.li .t{display:block;font-size:.95rem}.li .m{display:block;font-size:.78rem;color:var(--muted);margin-top:2px}.pager{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px}.lrc{max-height:min(52vh,380px);min-height:220px;overflow:auto;margin:0 0 12px;line-height:1.55;padding:8px 0 28%}.lrc .ln{padding:6px 8px;bord";
 	page += L"er-radius:10px;color:var(--muted);font-size:.92rem}.lrc .ln.cur{background:#ffe6f3;color:#3a2a3a;font-weight:750}.sec-lab{font-size:.78rem;font-weight:750;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.06em}.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;background:#3a2a3add;color:#fff;padding:10px 16px;border-radius:999px;font-size:.85rem;pointer-events:none;transition:opacity .2s,transform .2s;z-index:9}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.hint{text-align:center;color:var(--muted);font-size:.75rem;margin-top:12px}";
 	page += L"</style></head><body><div class=\"shell\">"
@@ -1599,6 +1752,7 @@ static void MpRemoteHandleRequest(SOCKET s)
 	page += L"</p><div id=\"state\" class=\"state\">—</div></section>";
 
 	page += L"<div class=\"tabs\" role=\"tablist\">"
+		L"<div class=\"tabrow r4\">"
 		L"<button type=\"button\" class=\"tab on\" data-tab=\"play\" title=\"";
 	page += labTabPlay; page += L"\">"; page += labTabPlay;
 	page += L"</button><button type=\"button\" class=\"tab\" data-tab=\"eq\" title=\"";
@@ -1607,9 +1761,14 @@ static void MpRemoteHandleRequest(SOCKET s)
 	page += labTabList; page += L"\">"; page += labTabList;
 	page += L"</button><button type=\"button\" class=\"tab\" data-tab=\"lrc\" title=\"";
 	page += labTabLrc; page += L"\">"; page += labTabLrc;
-	page += L"</button><button type=\"button\" class=\"tab tab-dj\" data-tab=\"dj\" title=\"";
+	page += L"</button></div><div class=\"tabrow r3\">";
+	page += L"<button type=\"button\" class=\"tab tab-dj\" data-tab=\"dj\" title=\"";
 	page += labTabDj; page += L"\">"; page += labTabDj;
-	page += L"</button></div>";
+	page += L"</button><button type=\"button\" class=\"tab\" data-tab=\"piano\" title=\"";
+	page += labTabPiano; page += L"\">"; page += labTabPiano;
+	page += L"</button><button type=\"button\" class=\"tab\" data-tab=\"ana\" title=\"";
+	page += labTabAna; page += L"\">"; page += labTabAna;
+	page += L"</button></div></div>";
 
 	page += L"<section class=\"card panel on\" id=\"tab-play\">"
 		L"<div class=\"pad\">"
@@ -1654,7 +1813,13 @@ static void MpRemoteHandleRequest(SOCKET s)
 	page += L"\"38\">Cinema</option><option value=\"39\">Karaoke</option><option value=\"40\">#40</option><option value=\"41\">#41</option><option value=\"42\">#42</option><option value=\"43\">#43</option><option value=\"44\">#44</option><option value=\"45\">#45</option><option value=\"46\">#46</option><option value=\"47\">#47</option><option value=\"48\">#48</option><option value=\"49\">#49</option><option value=\"50\">#50</option><option value=\"51\">#51</option><option value=\"52\">#52</option><option value=\"53\">#53</option><option value=\"54\">#54</option><option value=\"55\">#55</option><option value=\"56\">#56</option><option value=\"57\">#57</option><option value=\"58\">#58</option><option value=\"59\">#59</option><option value=\"60\">#60</o";
 	page += L"ption><option value=\"61\">#61</option><option value=\"62\">#62</option><option value=\"63\">#63</option><option value=\"64\">#64</option><option value=\"65\">#65</option><option value=\"66\">#66</option><option value=\"67\">#67</option><option value=\"68\">#68</option><option value=\"69\">#69</option><option value=\"70\">#70</option><option value=\"71\">#71</option><option value=\"72\">#72</option><option value=\"73\">#73</option><option value=\"74\">#74</option><option value=\"75\">#75</option><option value=\"76\">#76</option><option value=\"77\">#77</option><option value=\"78\">#78</option><option value=\"79\">#79</option><option value=\"80\">#80</option><option value=\"81\">#81</option><option value=\"82\">#82</option><option valu";
 	page += L"e=\"83\">#83</option><option value=\"84\">#84</option><option value=\"85\">#85</option><option value=\"86\">#86</option><option value=\"87\">#87</option><option value=\"88\">#88</option><option value=\"89\">#89</option><option value=\"90\">#90</option><option value=\"91\">#91</option><option value=\"92\">#92</option><option value=\"93\">#93</option><option value=\"94\">#94</option><option value=\"95\">#95</option><option value=\"96\">#96</option><option value=\"97\">#97</option><option value=\"98\">#98</option><option value=\"99\">#99</option><option value=\"100\">#100</option>";
-	page += L"</select><div class=\"sec-lab\">"; page += labEnv; page += L"</div><select id=\"eqEnv\" class=\"sel\">";
+	page += L"</select><div class=\"row2 eq-reset\">";
+	page += L"<button type=\"button\" class=\"btn sm b-soft\" id=\"eqReset\"><i class=\"fa-solid fa-rotate-left\"></i><span>";
+	page += labEqReset;
+	page += L"</span></button>";
+	page += L"<button type=\"button\" class=\"btn sm b-soft\" id=\"eqResetG\"><i class=\"fa-solid fa-broom\"></i><span>";
+	page += labEqResetG;
+	page += L"</span></button></div><div class=\"sec-lab\">"; page += labEnv; page += L"</div><select id=\"eqEnv\" class=\"sel\">";
 	{
 		int envNum = 0;
 		for (int ei = 0; ei < MP_REMOTE_EQ_ENV_COUNT; ++ei) {
@@ -1670,11 +1835,11 @@ static void MpRemoteHandleRequest(SOCKET s)
 			}
 			CStringW esc;
 			MpRemoteEscHtml(shown, esc);
-			wchar_t opt[384];
+			CStringW opt;
 			if (isSep)
-				_snwprintf_s(opt, _TRUNCATE, L"<option value=\"%d\" disabled>%s</option>", ei, (LPCWSTR)esc);
+				opt.Format(L"<option value=\"%d\" disabled>%s</option>", ei, (LPCWSTR)esc);
 			else
-				_snwprintf_s(opt, _TRUNCATE, L"<option value=\"%d\">%s</option>", ei, (LPCWSTR)esc);
+				opt.Format(L"<option value=\"%d\">%s</option>", ei, (LPCWSTR)esc);
 			page += opt;
 		}
 	}
@@ -1690,7 +1855,8 @@ static void MpRemoteHandleRequest(SOCKET s)
 	page += L"<div class=\"sec-lab\">"; page += labDel; page += L" <span class=\"vnum\" id=\"eqDelV\">0</span></div>";
 	page += L"<input id=\"eqDel\" type=\"range\" min=\"0\" max=\"200\" value=\"0\">";
 	page += L"<div class=\"sec-lab\">"; page += labEff; page += L" <span class=\"vnum\" id=\"eqEffV\">0</span></div>";
-	page += L"<input id=\"eqEff\" type=\"range\" min=\"0\" max=\"200\" value=\"0\"></section>";
+	page += L"<input id=\"eqEff\" type=\"range\" min=\"0\" max=\"200\" value=\"0\">";
+	page += L"</section>";
 
 	page += L"<section class=\"card panel\" id=\"tab-list\"><div id=\"plList\" class=\"list\"></div>";
 	page += L"<div class=\"pager\"><button type=\"button\" class=\"btn sm b-soft\" id=\"plPrev\"><i class=\"fa-solid fa-chevron-left\"></i></button>";
@@ -1717,10 +1883,13 @@ static void MpRemoteHandleRequest(SOCKET s)
 	page += labScratch;
 	page += L"</div></div></section>";
 
+	page += L"<section class=\"card panel\" id=\"tab-piano\"><div class=\"viz-wrap\"><div class=\"viz-chord\" id=\"pianoChord\">—</div><canvas id=\"pianoCan\" width=\"720\" height=\"360\"></canvas></div></section>";
+	page += L"<section class=\"card panel\" id=\"tab-ana\"><div class=\"viz-wrap\"><canvas id=\"anaCan\" width=\"720\" height=\"220\"></canvas></div></section>";
+
 	page += L"<p class=\"hint\">"; page += labHint; page += L"</p></div><div id=\"toast\" class=\"toast\"></div>";
 	page += L"<script src=\"https://code.jquery.com/jquery-3.7.1.min.js\"></script><script>";
 	page += L"var _st={title:'',artist:'',album:'',vol:-1,state:'',muted:-1,index:-1,lrccur:-1};var _tab='play',_plOff=0,_plPage=40,_eqReady=0,_djReady=0,_lrcSig='',_userEq=0,_userDj=0,_userVol=0;function toast(m){var $t=$('#toast');$t.text(m).addClass('show');clearTimeout(window._tt);window._tt=setTimeout(function(){$t.removeClass('show')},900)}function setState(s){var $s=$('#state');if($s.data('s')===s)return;$s.data('s',s);$s.removeClass('play pause stop');if(s==='play'){$s.addClass('play').html('<i class=\"fa-solid fa-play\"></i> PLAY')}else if(s==='pause'){$s.addClass('pause').html('<i class=\"fa-solid fa-pause\"></i> PAUSE')}else{$s.addClass('stop').html('<i class=\"fa-solid fa-stop\"></i> STOP')}}functio";
-	page += L"n showTab(id){_tab=id;$('.tab').removeClass('on');$('.tab[data-tab=\"'+id+'\"]').addClass('on');$('.panel').removeClass('on');$('#tab-'+id).addClass('on');if(id==='list')loadPlaylist();if(id==='lrc')loadLyrics(true);if(id==='eq')loadEq(false);if(id==='dj')loadDj(false)}function sendCmd(c,extra){var q='/cmd?c='+encodeURIComponent(c)+(extra||'');return $.ajax({url:q,method:'GET',timeout:2500})}function applyStatus(d){if(!d)return;if(d.title!==_st.title){_st.title=d.title;$('#title').text(d.title&&d.title.length?d.title:'—')}if(d.artist!==_st.artist){_st.artist=d.artist;$('#artist').text(d.artist||'').toggle(!!(d.artist&&d.artist.length))}if(d.album!==_st.album){_st.album=d.album;$('#album').text";
+	page += L"n showTab(id){_tab=id;$('.tab').removeClass('on');$('.tab[data-tab=\"'+id+'\"]').addClass('on');$('.panel').removeClass('on');$('#tab-'+id).addClass('on');if(id==='list')loadPlaylist();if(id==='lrc')loadLyrics(true);if(id==='eq')loadEq(false);if(id==='dj')loadDj(false);if(id==='piano')loadPiano();if(id==='ana')loadAna()}function sendCmd(c,extra){var q='/cmd?c='+encodeURIComponent(c)+(extra||'');return $.ajax({url:q,method:'GET',timeout:2500})}function applyStatus(d){if(!d)return;if(d.title!==_st.title){_st.title=d.title;$('#title').text(d.title&&d.title.length?d.title:'—')}if(d.artist!==_st.artist){_st.artist=d.artist;$('#artist').text(d.artist||'').toggle(!!(d.artist&&d.artist.length))}if(d.album!==_st.album){_st.album=d.album;$('#album').text";
 	page += L"(d.album||'').toggle(!!(d.album&&d.album.length))}if(!_userVol&&typeof d.vol==='number'&&d.vol!==_st.vol){_st.vol=d.vol;$('#vol').val(d.vol);$('#volVal').text(d.vol)}if(!!d.muted!==!!_st.muted){_st.muted=d.muted;$('.b-mute').toggleClass('on',!!d.muted)}if(d.state!==_st.state){_st.state=d.state;setState(d.state||'stop')}if(typeof d.index==='number'&&d.index!==_st.index){_st.index=d.index;if(_tab==='list')markPlCur()}if(typeof d.lrccur==='number'&&d.lrccur!==_st.lrccur){_st.lrccur=d.lrccur;markLrcCur(true)}}function refresh(){$.getJSON('/api/status').done(applyStatus).fail(function(){})}function loadPlaylist(){$.getJSON('/api/playlist?o='+_plOff+'&n='+_plPage).done(function(d){if(!d)return;va";
 	page += L"r h='',i,it;for(i=0;i<(d.items||[]).length;i++){it=d.items[i];h+='<button type=\"button\" class=\"li'+(it.i===_st.index?' cur':'')+'\" data-i=\"'+it.i+'\"><span class=\"t\"></span><span class=\"m\"></span></button>'}var $l=$('#plList');$l.html(h);$l.children().each(function(idx){var it=d.items[idx];$(this).find('.t').text(it.title||('#'+it.i));$(this).find('.m').text([(it.artist||''),(it.album||'')].filter(Boolean).join(' · '))});$('#plInfo').text((_plOff+1)+'-'+Math.min(_plOff+_plPage,d.total)+' / '+d.total);$('#plPrev').prop('disabled',_plOff<=0);$('#plNext').prop('disabled',_plOff+_plPage>=d.total)}).fail(function(){})}function markPlCur(){$('#plList .li').each(function(){$(this).toggleClass('cur',";
 	page += L"(+$(this).data('i'))===_st.index)})}function loadLyrics(force){$.getJSON('/api/lyrics').done(function(d){if(!d)return;var sig=(d.n||0)+':'+(d.lines&&d.lines[0]?d.lines[0].t:'');if(!force&&sig===_lrcSig){if(typeof d.cur==='number'){var ch=(d.cur!==_st.lrccur);_st.lrccur=d.cur;markLrcCur(ch)}return}_lrcSig=sig;var h='',i;for(i=0;i<(d.lines||[]).length;i++){h+='<div class=\"ln\" data-i=\"'+i+'\"></div>'}$('#lrcBox').html(h);$('#lrcBox .ln').each(function(idx){$(this).text(d.lines[idx].x||'')});_st.lrccur=(typeof d.cur==='number')?d.cur:-1;markLrcCur(true)}).fail(function(){})}function markLrcCur(scroll){var $b=$('#lrcBox');if(!$b.length)return;$b.find('.ln').removeClass('cur');if(_st.lrccur<0)return;var $c=$b.find('.ln[data";
@@ -1728,10 +1897,10 @@ static void MpRemoteHandleRequest(SOCKET s)
 	page += L"{$('#eqDel').val(d.del);$('#eqDelV').text(d.del)}if(typeof d.eff==='number'){$('#eqEff').val(d.eff);$('#eqEffV').text(d.eff)}_eqReady=1}).fail(function(){})}var _vinyl={drag:0,lastA:0,spin:0,head:0,pending:0,raf:0};function vinylAng(e,el){var r=el.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;var x=(e.clientX!=null?e.clientX:(e.touches&&e.touches[0]?e.touches[0].clientX:0))-cx;var y=(e.clientY!=null?e.clientY:(e.touches&&e.touches[0]?e.touches[0].clientY:0))-cy;return Math.atan2(y,x)*180/Math.PI}function drawVinyl(){var c=document.getElementById('vinyl');if(!c)return;var ctx=c.getContext('2d'),W=c.width,H=c.height,cx=W/2,cy=H/2,R=Math.min(W,H)/2-8;ctx.clearRect(0,0,W,H);ctx.save();ctx.translate(cx,cy);ctx.rotate(((_vinyl.spin+_vinyl.head)%360)*Math.PI/180);ctx.beginPath();ctx.arc(0,0,R,0,Math.PI*2);ctx.fillStyle='#1c1e26';ctx.fill();for(var i=0;i<18;i++){ctx.beginPath();ctx.arc(0,0,R*(0.92-i*0.035),0,Math.PI*2);ctx.strokeStyle='rgba(255,255,255,'+(0.04+(i%2)*0.03)+')';ctx.lineWidth=2;ctx.stroke()}ctx.beginPath();ctx.arc(0,0,R*0.22,0,Math.PI*2);ctx.fillStyle='#ff69b4';ctx.fill();ctx.beginPath();ctx.arc(0,0,R*0.08,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#ffd28c';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(0,-R*0.22);ctx.lineTo(0,-R*0.92);ctx.stroke();ctx.restore()}function loadDj(force){$.getJSON('/api/dj').done(function(d){if(!d)return;if(_vinyl.drag)return;if(typeof d.head==='number')_vinyl.head=d.head;if(d.playing){_vinyl.spin=(_vinyl.spin+2.2)%360}drawVinyl();_djReady=1}).fail(function(){})}function flushScratch(){if(!_vinyl.pending)return;var d=Math.round(_vinyl.pending*100);_vinyl.pending=0;if(d===0)return;sendCmd('scr','&d='+d)}$(function(){setState('";
 	page += state;
 	page += L"');$('#artist').toggle(!!$('#artist').text());$('#album').toggle(!!$('#album').text());$(document).on('click','.tab',function(){showTab($(this).data('tab'))});$(document).on('click','.btn[data-cmd]',function(){var $b=$(this),c=$b.data('cmd');$b.addClass('busy');sendCmd(c).always(function(){$b.removeClass('busy');setTimeout(refresh,80);toast(c)})});var volTimer=null;$('#vol').on('input',function(){_userVol=1;$('#volVal').text(this.value)});$('#vol').on('change input',function(){var v=+this.value;clearTimeout(volTimer);volTimer=setTimeout(function(){sendCmd('vol','&v='+v).always(function(){_userVol=0;refresh()})},120)});$(document).on('click','#plList .li',function(){var i=+$(this).data('i');s";
-	page += L"endCmd('playidx','&i='+i).always(function(){setTimeout(function(){refresh();loadPlaylist()},100);toast('play')})});$('#plPrev').on('click',function(){if(_plOff<=0)return;_plOff=Math.max(0,_plOff-_plPage);loadPlaylist()});$('#plNext').on('click',function(){_plOff+=_plPage;loadPlaylist()});$('.lrcbtn').on('click',function(){var d=+$(this).data('d');sendCmd('lrc','&delta='+d).always(function(){setTimeout(function(){loadLyrics(true)},80);toast('lrc')})});$('#lrcSave').on('click',function(){sendCmd('lrcsave').always(function(){toast('save')})});var eqT=null;$(document).on('input change','.eqb',function(){_userEq=1;var b=+$(this).attr('data-b'),v=+this.value;$('#eqv'+b).text(v);clearTimeout(eqT);eqT=setTimeou";
-	page += L"t(function(){sendCmd('eqband','&b='+b+'&v='+v).always(function(){_userEq=0})},80)});$('#eqPre').on('change',function(){_userEq=1;sendCmd('eqpreset','&p='+this.value).always(function(){setTimeout(function(){_userEq=0;loadEq(true)},120)})});$('#eqEnv').on('change',function(){_userEq=1;sendCmd('eqenv','&p='+this.value).always(function(){_userEq=0})});var fxT=null;function fxSend(which,v){_userEq=1;clearTimeout(fxT);fxT=setTimeout(function(){sendCmd('eqfx','&w='+which+'&v='+v).always(function(){_userEq=0})},80)}$('#eqRev').on('input change',function(){$('#eqRevV').text(this.value);fxSend(0,+this.value)});$('#eqCho').on('input change',function(){$('#eqChoV').text(this.value);fxSend(1,+this.value)});$('#eqDel";
-	page += L"').on('input change',function(){$('#eqDelV').text(this.value);fxSend(2,+this.value)});$('#eqEff').on('input change',function(){$('#eqEffV').text(this.value);fxSend(3,+this.value)});function onVinylDown(e){var el=document.getElementById('vinyl');if(!el)return;e.preventDefault();_vinyl.drag=1;_vinyl.lastA=vinylAng(e,el);_vinyl.pending=0;sendCmd('scrbeg');if(el.setPointerCapture&&e.pointerId!=null)el.setPointerCapture(e.pointerId)}function onVinylMove(e){if(!_vinyl.drag)return;e.preventDefault();var el=document.getElementById('vinyl');var a=vinylAng(e,el);var d=a-_vinyl.lastA;if(d>180)d-=360;if(d<-180)d+=360;_vinyl.lastA=a;_vinyl.spin=(_vinyl.spin+d)%360;_vinyl.pending+=d;drawVinyl();if(!_vinyl.raf)_vinyl.raf=requestAnimationFrame(function(){_vinyl.raf=0;flushScratch()})}";
-	page += L"function onVinylUp(e){if(!_vinyl.drag)return;_vinyl.drag=0;flushScratch();sendCmd('scrend')}var vv=document.getElementById('vinyl');if(vv){vv.addEventListener('pointerdown',onVinylDown);vv.addEventListener('pointermove',onVinylMove);vv.addEventListener('pointerup',onVinylUp);vv.addEventListener('pointercancel',onVinylUp);drawVinyl()}showTab('play');setInterval(function(){refresh();if(_tab==='lrc')loadLyrics(false);if(_tab==='dj')loadDj(false)},2000);refresh();});";
+	page += L"endCmd('playidx','&i='+i).always(function(){setTimeout(function(){refresh();loadPlaylist()},100);toast('play')})});$('#plPrev').on('click',function(){if(_plOff<=0)return;_plOff=Math.max(0,_plOff-_plPage);loadPlaylist()});$('#plNext').on('click',function(){_plOff+=_plPage;loadPlaylist()});$('.lrcbtn').on('click',function(){var d=+$(this).data('d');sendCmd('lrc','&delta='+d).always(function(){setTimeout(function(){loadLyrics(true)},80);toast('lrc')})});$('#lrcSave').on('click',function(){sendCmd('lrcsave').always(function(){toast('save')})});var eqT=null;function eqIsScroll(el){return !!(el&&el._eqScroll)}function eqRevert(el){if(!el)return;el.value=String(el._eqV);var id=el.id;if(el.classList.contains('eqb'))$('#eqv'+$(el).attr('data-b')).text(el._eqV);else if(id==='eqRev')$('#eqRevV').text(el._eqV);else if(id==='eqCho')$('#eqChoV').text(el._eqV);else if(id==='eqDel')$('#eqDelV').text(el._eqV);else if(id==='eqEff')$('#eqEffV').text(el._eqV)}function eqBindGate(sel){$(document).on('pointerdown',sel,function(e){this._eqX=e.clientX;this._eqY=e.clientY;this._eqV=+this.value;this._eqScroll=0;this._eqMoved=0;this._eqDown=1;this._eqPend=0});$(document).on('pointermove',sel,function(e){if(!this._eqDown||this._eqScroll)return;var dx=e.clientX-this._eqX,dy=e.clientY-this._eqY;if(!this._eqMoved&&Math.abs(dy)>10&&Math.abs(dy)>Math.abs(dx)*1.1){this._eqScroll=1;eqRevert(this);this._eqPend=0;return}if(Math.abs(dx)>8)this._eqMoved=1});$(document).on('pointerup pointercancel',sel,function(){if(!this._eqDown)return;this._eqDown=0;if(this._eqScroll){eqRevert(this);return}if(!this._eqPend)return;var el=this;if(el.classList.contains('eqb')){var b=+$(el).attr('data-b'),v=+el.value;_userEq=1;clearTimeout(eqT);eqT=setTimeout(function(){sendCmd('eqband','&b='+b+'&v='+v).always(function(){_userEq=0})},40)}else if(el.id==='eqRev')fxSend(0,+el.value);else if(el.id==='eqCho')fxSend(1,+el.value);else if(el.id==='eqDel')fxSend(2,+el.value);else if(el.id==='eqEff')fxSend(3,+el.value)})}eqBindGate('.eqb,#eqRev,#eqCho,#eqDel,#eqEff');$(document).on('input','.eqb',function(){if(eqIsScroll(this)){eqRevert(this);return}var b=+$(this).attr('data-b'),v=+this.value;$('#eqv'+b).text(v);if(this._eqDown){this._eqPend=1;return}_userEq=1;clearTimeout(eqT);eqT=setTimeou";
+	page += L"t(function(){sendCmd('eqband','&b='+b+'&v='+v).always(function(){_userEq=0})},80)});$('#eqPre').on('change',function(){_userEq=1;sendCmd('eqpreset','&p='+this.value).always(function(){setTimeout(function(){_userEq=0;loadEq(true)},120)})});$('#eqEnv').on('change',function(){_userEq=1;sendCmd('eqenv','&p='+this.value).always(function(){_userEq=0})});$('#eqReset').on('click',function(){_userEq=1;sendCmd('eqreset').always(function(){setTimeout(function(){_userEq=0;loadEq(true)},80);toast('eq')})});$('#eqResetG').on('click',function(){_userEq=1;sendCmd('eqresetg').always(function(){setTimeout(function(){_userEq=0;loadEq(true)},80);toast('eq')})});var fxT=null;function fxSend(which,v){_userEq=1;clearTimeout(fxT);fxT=setTimeout(function(){sendCmd('eqfx','&w='+which+'&v='+v).always(function(){_userEq=0})},80)}$('#eqRev').on('input',function(){if(eqIsScroll(this)){eqRevert(this);return}$('#eqRevV').text(this.value);if(this._eqDown){this._eqPend=1;return}fxSend(0,+this.value)});$('#eqCho').on('input',function(){if(eqIsScroll(this)){eqRevert(this);return}$('#eqChoV').text(this.value);if(this._eqDown){this._eqPend=1;return}fxSend(1,+this.value)});$('#eqDel";
+	page += L"').on('input',function(){if(eqIsScroll(this)){eqRevert(this);return}$('#eqDelV').text(this.value);if(this._eqDown){this._eqPend=1;return}fxSend(2,+this.value)});$('#eqEff').on('input',function(){if(eqIsScroll(this)){eqRevert(this);return}$('#eqEffV').text(this.value);if(this._eqDown){this._eqPend=1;return}fxSend(3,+this.value)});function fitCan(c,aspect){if(!c)return null;var r=c.getBoundingClientRect(),d=window.devicePixelRatio||1,aw=Math.max(1,r.width),ah=Math.max(1,aw*(aspect||0.42)),w=Math.max(1,Math.floor(aw*d)),h=Math.max(1,Math.floor(ah*d));if(c.width!==w||c.height!==h){c.width=w;c.height=h}return c.getContext('2d')}function smoothBins(bins,outN){var n=(bins&&bins.length)?bins.length:0,dst=new Array(outN),i,t,a,b,c,d,p,u,u2,u3;if(!n){for(i=0;i<outN;i++)dst[i]=0;return dst}function at(j){j=j<0?0:(j>=n?n-1:j);var v=+bins[j]||0;return v<0?0:(v>96?96:v)}for(i=0;i<outN;i++){t=i*(n-1)/Math.max(1,outN-1);p=Math.floor(t);u=t-p;a=at(p-1);b=at(p);c=at(p+1);d=at(p+2);u2=u*u;u3=u2*u;dst[i]=0.5*((2*b)+(-a+c)*u+(2*a-5*b+4*c-d)*u2+(-a+3*b-3*c+d)*u3);if(dst[i]<0)dst[i]=0;if(dst[i]>96)dst[i]=96}return dst}function drawAna(payload){var chs=[],labs=[],c=document.getElementById('anaCan'),ctx=fitCan(c,0.48);if(!ctx||!c)return;if(payload&&payload.b){if(payload.b.length&&typeof payload.b[0]==='object'){chs=payload.b;labs=payload.lab||[]}else{chs=[payload.b]}}else if(payload&&payload.length){chs=[payload]}var n=chs.length;if(!n){ctx.fillStyle='#0e1018';ctx.fillRect(0,0,c.width,c.height);return}var cols=['rgba(80,200,255,','rgba(255,140,180,','rgba(120,230,140,','rgba(255,200,80,','rgba(180,140,255,','rgba(80,220,200,','rgba(255,160,100,','rgba(200,200,220,'];var W=c.width,H=c.height,pad=Math.max(2,W*0.01),gap=Math.max(3,Math.floor(H*0.012));var bandH=Math.max(28,Math.floor((H-pad*2-gap*(n-1))/n));ctx.fillStyle='#0e1018';ctx.fillRect(0,0,W,H);for(var ci=0;ci<n;ci++){var yBase=pad+ci*(bandH+gap),y0=yBase+2,y1=yBase+bandH-2,plotW=W-pad*2,plotH=Math.max(8,y1-y0);var sm=smoothBins(chs[ci]||[],Math.max(64,Math.floor(plotW/2))),N=sm.length,i,x,y;ctx.strokeStyle='rgba(255,255,255,0.05)';ctx.lineWidth=1;for(i=1;i<=3;i++){y=y0+plotH*i/4;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(W-pad,y);ctx.stroke()}var g=ctx.createLinearGradient(0,y0,0,y1);g.addColorStop(0,cols[ci%8]+'0.5)');g.addColorStop(1,cols[ci%8]+'0.06)');ctx.beginPath();ctx.moveTo(pad,y1);for(i=0;i<N;i++){x=pad+(i/Math.max(1,N-1))*plotW;y=y1-(sm[i]/96)*plotH;ctx.lineTo(x,y)}ctx.lineTo(W-pad,y1);ctx.closePath();ctx.fillStyle=g;ctx.fill();ctx.beginPath();for(i=0;i<N;i++){x=pad+(i/Math.max(1,N-1))*plotW;y=y1-(sm[i]/96)*plotH;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.strokeStyle=cols[ci%8]+'1)';ctx.lineWidth=Math.max(1.2,W/420);ctx.lineJoin='round';ctx.stroke();if(labs[ci]){ctx.fillStyle=cols[ci%8]+'0.95)';ctx.font='bold '+Math.max(10,Math.floor(W/42))+'px sans-serif';ctx.textAlign='right';ctx.fillText(labs[ci],W-pad-2,y0+Math.max(11,bandH*0.28))}}}var _pianoHist=[],_pianoHistX=[],_pianoHistMax=96,_pianoOff=0,_pianoLastT=0;function isBlack(m){var k=m%12;return k===1||k===3||k===6||k===8||k===10}function exprColor(e){if(e&2)return 'rgba(255,220,80,0.95)';if(e&1)return 'rgba(255,100,100,0.95)';if(e&4)return 'rgba(120,255,180,0.95)';if(e&8)return 'rgba(120,160,255,0.95)';if(e&16)return 'rgba(255,170,90,0.95)';if(e&64)return 'rgba(120,230,255,0.95)';if(e&128)return 'rgba(200,150,255,0.95)';if(e&32)return 'rgba(190,190,210,0.9)';return null}function exprGlyph(e){if(e&2)return '↗';if(e&1)return '▸';if(e&4)return '~';if(e&8)return '→';if(e&16)return '↘';if(e&64)return '<';if(e&128)return '>';if(e&32)return '―';return ''}function drawPiano(keys,chord,hist,histX,exprOn,keyExpr){if(hist&&hist.length){_pianoHist=hist.slice(0,_pianoHistMax);_pianoHistX=(histX&&histX.length)?histX.slice(0,_pianoHistMax):[]}else if(keys){var act=[],ax=[];for(var i=0;i<108;i++)if((+keys[i]|0)>=1){act.push(i);ax.push((keyExpr&&keyExpr[i])?(+keyExpr[i]|0):0)}_pianoHist.unshift(act);_pianoHistX.unshift(ax);if(_pianoHist.length>_pianoHistMax){_pianoHist.length=_pianoHistMax;_pianoHistX.length=_pianoHistMax}}var now=performance.now();if(_pianoLastT){var dt=Math.min(50,now-_pianoLastT);_pianoOff+=dt/45}else _pianoOff=0;_pianoLastT=now;if(_pianoOff>1)_pianoOff-=Math.floor(_pianoOff);var c=document.getElementById('pianoCan');var ctx=fitCan(c,0.62);if(!ctx||!c)return;var W=c.width,H=c.height;ctx.fillStyle='#0e1018';ctx.fillRect(0,0,W,H);if(chord)$('#pianoChord').text(chord);var keyH=Math.floor(H*0.22),rollH=H-keyH,lo=21,hi=107,wh=[],m,i;for(m=lo;m<=hi;m++)if(!isBlack(m))wh.push(m);var ww=W/Math.max(1,wh.length);function whiteIdx(midi){var k=wh.indexOf(midi);return k<0?0:k}function noteX(midi){if(!isBlack(midi))return whiteIdx(midi)*ww;var left=midi-1;while(left>=lo&&isBlack(left))left--;return (whiteIdx(left)+1)*ww-ww*0.32}function noteW(midi){return isBlack(midi)?ww*0.55:Math.max(1,ww-1.5)}var rowH=Math.max(2,Math.floor(rollH/Math.max(48,_pianoHist.length||48)));var rows=Math.min(_pianoHist.length,Math.floor(rollH/rowH)+2),off=(_pianoOff%1)*rowH;ctx.save();ctx.beginPath();ctx.rect(0,0,W,rollH);ctx.clip();ctx.fillStyle='#12151e';ctx.fillRect(0,0,W,rollH);ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.lineWidth=1;for(i=0;i<wh.length;i++){var gx=i*ww;ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,rollH);ctx.stroke()}var fs=Math.max(8,Math.min(14,Math.floor(rowH*0.9)));for(var r=0;r<rows;r++){var fr=_pianoHist[r];if(!fr||!fr.length)continue;var fx=_pianoHistX[r]||[];var y=rollH-(r+1)*rowH+off;if(y+rowH<0||y>rollH)continue;for(i=0;i<fr.length;i++){m=+fr[i]|0;if(m<lo||m>hi)continue;var ex=exprOn?(+fx[i]|0):0;ctx.fillStyle=isBlack(m)?'rgba(196,90,208,0.85)':'rgba(255,105,180,0.9)';ctx.fillRect(noteX(m)+0.5,y+0.5,noteW(m),Math.max(1,rowH-1));if(ex){var ec=exprColor(ex);if(ec){ctx.fillStyle=ec;ctx.fillRect(noteX(m)+0.5,y+0.5,Math.max(1,noteW(m)*0.35),Math.max(1,rowH-1));if(rowH>=8&&noteW(m)>=6){var g=exprGlyph(ex);if(g){ctx.fillStyle='#fff';ctx.font='bold '+fs+'px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(g,noteX(m)+1,y+rowH/2)}}}}}}ctx.restore();var yK=rollH;for(i=0;i<wh.length;i++){m=wh[i];var v=(keys&&keys[m])?(+keys[m]|0):0;ctx.fillStyle=v>=1?('rgba(255,105,180,'+(0.35+v/100*0.65)+')'):'#f2efe8';ctx.fillRect(i*ww,yK,Math.max(1,ww-1),keyH);ctx.strokeStyle='#c8c0b8';ctx.strokeRect(i*ww,yK,Math.max(1,ww-1),keyH);if(exprOn&&keyExpr&&(+keyExpr[m]|0)){var e2=+keyExpr[m]|0,ec2=exprColor(e2);if(ec2){ctx.fillStyle=ec2;ctx.fillRect(i*ww+1,yK+1,Math.max(1,ww-3),3)}}}for(m=lo;m<=hi;m++){if(!isBlack(m))continue;v=(keys&&keys[m])?(+keys[m]|0):0;ctx.fillStyle=v>=1?('rgba(196,90,208,'+(0.45+v/100*0.55)+')'):'#1a1a22';ctx.fillRect(noteX(m),yK,noteW(m),keyH*0.62);if(exprOn&&keyExpr&&(+keyExpr[m]|0)){var e3=+keyExpr[m]|0,ec3=exprColor(e3);if(ec3){ctx.fillStyle=ec3;ctx.fillRect(noteX(m),yK,noteW(m),2)}}}ctx.fillStyle='rgba(255,210,140,0.9)';ctx.fillRect(0,rollH-2,W,2)}function loadAna(){$.getJSON('/api/analyzer').done(function(d){if(d)drawAna(d)}).fail(function(){})}function loadPiano(){$.getJSON('/api/piano').done(function(d){if(!d)return;drawPiano(d.k||[],d.c||'-',d.h||null,d.x||null,!!d.xm,d.kx||null)}).fail(function(){})}function onVinylDown(e){var el=document.getElementById('vinyl');if(!el)return;e.preventDefault();_vinyl.drag=1;_vinyl.lastA=vinylAng(e,el);_vinyl.pending=0;sendCmd('scrbeg');if(el.setPointerCapture&&e.pointerId!=null)el.setPointerCapture(e.pointerId)}function onVinylMove(e){if(!_vinyl.drag)return;e.preventDefault();var el=document.getElementById('vinyl');var a=vinylAng(e,el);var d=a-_vinyl.lastA;if(d>180)d-=360;if(d<-180)d+=360;_vinyl.lastA=a;_vinyl.spin=(_vinyl.spin+d)%360;_vinyl.pending+=d;drawVinyl();if(!_vinyl.raf)_vinyl.raf=requestAnimationFrame(function(){_vinyl.raf=0;flushScratch()})}";
+	page += L"function onVinylUp(e){if(!_vinyl.drag)return;_vinyl.drag=0;flushScratch();sendCmd('scrend')}var vv=document.getElementById('vinyl');if(vv){vv.addEventListener('pointerdown',onVinylDown);vv.addEventListener('pointermove',onVinylMove);vv.addEventListener('pointerup',onVinylUp);vv.addEventListener('pointercancel',onVinylUp);drawVinyl()}showTab('play');setInterval(function(){refresh();if(_tab==='lrc')loadLyrics(false);if(_tab==='dj')loadDj(false)},2000);setInterval(function(){if(_tab==='piano')loadPiano();if(_tab==='ana')loadAna()},50);refresh();});";
 	page += L"</script></body></html>";
 
 	CStringA bodyA;
@@ -1743,6 +1912,16 @@ static void MpRemoteHandleRequest(SOCKET s)
 			bodyA.ReleaseBuffer(nbytes - 1);
 		}
 	}
+	CStringA hdr;
+	hdr.Format(
+		"HTTP/1.0 200 OK\r\n"
+		"Content-Type: text/html; charset=utf-8\r\n"
+		"Connection: close\r\n"
+		"Cache-Control: no-store\r\n"
+		"Content-Length: %d\r\n"
+		"\r\n",
+		bodyA.GetLength());
+	MpRemoteSendAll(s, hdr, hdr.GetLength());
 	MpRemoteSendAll(s, bodyA, bodyA.GetLength());
 }
 
@@ -1948,6 +2127,51 @@ void MpRemoteUiTick(CMediaPlayerDlg* mpDlg)
 	InterlockedExchange(&g_mpRemotePlayCnt, (LONG)cnt);
 	if (mpDlg && mpDlg->m_vol.GetSafeHwnd())
 		MpRemoteCacheVol(mpDlg->m_vol.GetPos());
+
+	const DWORD nowTick = GetTickCount();
+	const LONG pianoWant = InterlockedCompareExchange(&g_mpRemoteWantPianoMs, 0, 0);
+	const LONG anaWant = InterlockedCompareExchange(&g_mpRemoteWantAnaMs, 0, 0);
+	const bool needPiano = (pianoWant != 0) && ((DWORD)(nowTick - (DWORD)pianoWant) < 4000u);
+	const bool needAna = (anaWant != 0) && ((DWORD)(nowTick - (DWORD)anaWant) < 4000u);
+
+	if (needPiano && og && og->m_PianoRollDlg) {
+		if (!::IsWindow(og->m_PianoRollDlg->GetSafeHwnd())) {
+			if (og->m_PianoRollDlg->Create(IDD_PIANOROLL, og))
+				og->m_PianoRollDlg->ShowWindow(SW_SHOWNOACTIVATE);
+		}
+		else if (!::IsWindowVisible(og->m_PianoRollDlg->GetSafeHwnd())) {
+			og->m_PianoRollDlg->ShowWindow(SW_SHOWNOACTIVATE);
+		}
+		if (::IsWindow(og->m_PianoRollDlg->GetSafeHwnd())) {
+			og->m_PianoRollDlg->ResumePlaybackFeed();
+			int rows = 0;
+			int exprOn = 0;
+			og->m_PianoRollDlg->ExportRemoteSnapshot(
+				g_mpRemoteNotes, g_mpRemoteNoteExpr,
+				&g_mpRemoteHist[0][0], &g_mpRemoteHistExpr[0][0],
+				72, rows, exprOn, g_mpRemoteChord, 48);
+			g_mpRemoteHistRows = rows;
+			g_mpRemoteExprOn = exprOn;
+			InterlockedIncrement(&g_mpRemoteVizSeq);
+		}
+	}
+
+	if (needAna && og && og->m_AnalyzerDlg) {
+		if (!::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd())) {
+			if (og->m_AnalyzerDlg->Create(IDD_ANALYZER, og))
+				og->m_AnalyzerDlg->ShowWindow(SW_SHOWNOACTIVATE);
+		}
+		else if (!::IsWindowVisible(og->m_AnalyzerDlg->GetSafeHwnd())) {
+			og->m_AnalyzerDlg->ShowWindow(SW_SHOWNOACTIVATE);
+		}
+		if (::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd())) {
+			og->m_AnalyzerDlg->ResumePlaybackFeed();
+			int nch = 1;
+			og->m_AnalyzerDlg->ExportRemoteBars(g_mpRemoteSpec, 8, nch);
+			g_mpRemoteSpecCh = nch;
+			InterlockedIncrement(&g_mpRemoteVizSeq);
+		}
+	}
 	(void)mpDlg;
 }
 
@@ -2205,6 +2429,28 @@ LRESULT MpAddonsOnTransportCmd(CMediaPlayerDlg* mpDlg, WPARAM wParam, LPARAM lPa
 			else if (w == 1) savedata.eq_chorus = v;
 			else if (w == 2) savedata.eq_delay = v;
 			else if (w == 3) savedata.eqsoundeffect = v / 2;
+			MpPersistSavedataQuick();
+			MpRemoteSyncEqUi();
+		}
+		break;
+	case 18: // equalizer reset (bands 0-14) — same as CEqualizer::OnBnClickedOk3
+		{
+			for (int i = 0; i < 15; ++i)
+				savedata.eq[i] = 100;
+			MpPersistSavedataQuick();
+			MpRemoteSyncEqUi();
+		}
+		break;
+	case 19: // global reset (15-19 + FX) — same as CEqualizer::OnBnClickedOk4
+		{
+			savedata.eq[15] = 100;
+			savedata.eq[16] = 100;
+			savedata.eq[17] = 100;
+			savedata.eq[18] = 100;
+			savedata.eq[19] = 100;
+			savedata.eq_reverb = 0;
+			savedata.eq_chorus = 0;
+			savedata.eq_delay = 0;
 			MpPersistSavedataQuick();
 			MpRemoteSyncEqUi();
 		}

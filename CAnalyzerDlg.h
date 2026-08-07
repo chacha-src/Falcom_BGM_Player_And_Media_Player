@@ -79,6 +79,8 @@ public:
 	void RequestSyncFromMainUi();
 	// 曲ごと保存パラメータからの周波数表示モード適用(外部から)
 	void ApplySpecStyleExternal(int style) { SetSpecStyle(style); }
+	// ローカルリモート用: スペクトルを ch×64 バー(0..96)へ間引き。ch は 1..8
+	void ExportRemoteBars(BYTE outCh64[][64], int maxCh, int& outCh) const;
 
 	void LayoutHelpBtn();
 	void ShowHelpSheet();

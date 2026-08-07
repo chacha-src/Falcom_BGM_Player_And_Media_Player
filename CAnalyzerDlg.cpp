@@ -863,6 +863,33 @@ BOOL CAnalyzerDlg::OnInitDialog()
 void CAnalyzerDlg::ResumePlaybackFeed() { m_feedEnabled = true; }
 void CAnalyzerDlg::PauseFeed() { m_feedEnabled = false; }
 
+void CAnalyzerDlg::ExportRemoteBars(BYTE outCh64[][64], int maxCh, int& outCh) const
+{
+	outCh = 0;
+	if (!outCh64 || maxCh < 1) return;
+	int n = m_channels;
+	if (n < 1) n = 1;
+	if (n > CH_MAX) n = CH_MAX;
+	if (n > maxCh) n = maxCh;
+	outCh = n;
+	const float (*src)[SPEC_BINS] = m_peakHold ? m_specPeakDb : m_specDb;
+	for (int c = 0; c < n; ++c) {
+		for (int o = 0; o < 64; ++o) {
+			const int b0 = o * SPEC_BINS / 64;
+			const int b1 = (o + 1) * SPEC_BINS / 64;
+			float db = -96.0f;
+			for (int b = b0; b < b1 && b < SPEC_BINS; ++b) {
+				const float v = src[c][b];
+				if (v > db) db = v;
+			}
+			int h = (int)((db + 96.0f) + 0.5f);
+			if (h < 0) h = 0;
+			if (h > 96) h = 96;
+			outCh64[c][o] = (BYTE)h;
+		}
+	}
+}
+
 void CAnalyzerDlg::ResetPlaybackState()
 {
 	EnterCriticalSection(&m_cs);

@@ -99,7 +99,8 @@ public:
 	void dougaplay(int uu, CString str = L"");
 	DWORD GetVol();
 	// bPaintBars=FALSE なら PCM→EQコード供給のみ（メイン GDI pending 中でも呼ぶ）
-	void Speana(BOOL bPaintBars = TRUE);
+	// bFillLevels=TRUE なら描画せず spelv のみ更新（ローカルリモート用。bPaintBars と併用可）
+	void Speana(BOOL bPaintBars = TRUE, BOOL bFillLevels = FALSE);
 	void SyncPianoRollFromPlayCursor();
 	void SyncPianoRollFast();
 	void SyncAnalyzerFromPlayCursor();

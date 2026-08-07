@@ -20751,7 +20751,8 @@ void COggDlg::timerp()
 	// 非同期(WM_SPEANA_TICK)化すると Speana() が文字の後に不透明の棒を上書きし、
 	// XOR 合成が棒に覆われて無効化される（バナー文字が見えなくなるデグレ）。
 	// ここで TRUE 指定すると EQ 供給も同梱（上の Speana(FALSE) と二重にならない）。
-	// SSビジュアライザは spelv 依存のため、スペアナOFFでも解析を回す。
+	// SSビジュアライザは spelv 依存のためスペアナOFFでも解析を回す。
+	// ローカルリモートは !bGdiFrame 側で Speana(FALSE,TRUE) のみ（GDI二重実行で UI ハングしない）。
 	{
 		extern BOOL MpSsVizIsOpen();
 		if ((m_supe.GetCheck() == TRUE || MpSsVizIsOpen()) && plf == 1 && (wav || ogg || m_dsb))
@@ -25132,11 +25133,14 @@ void SpeanaEnsureBandCache(int cacheKey, bool mode1_Low, bool mode3_High, int ff
 	memcpy(band_bins, s_bins, sizeof(s_bins));
 }
 
+static int g_speanaDrawEnable = 1;
+
 inline void SpeanaDrawBar(CDC& dc, int x, int bar_w, int idx, int d)
 {
 	if (savedata.mpSpeanaStyle == 2)
 		return; // 波形モードは別経路
 	if (spelv[idx] < d) { spelv[idx] = d; spetm[idx] = 0; }
+	if (!g_speanaDrawEnable) return;
 	if (spelv[idx] <= 0 && d <= 0) return;
 
 	if (savedata.mpSpeanaStyle == 1) {
@@ -25531,11 +25535,15 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	}
 }
 
-void COggDlg::Speana(BOOL bPaintBars)
+void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 {
 	int i, j, d;
 	double dt = 0.0, dta = 0.0;
 	locs = loc;
+
+	const BOOL needLevels = (bPaintBars || bFillLevels) ? TRUE : FALSE;
+	const int prevDrawEnable = g_speanaDrawEnable;
+	g_speanaDrawEnable = bPaintBars ? 1 : 0;
 
 	// ---------------------------------------------------------
 	// 共通定数・変数
@@ -25555,6 +25563,9 @@ void COggDlg::Speana(BOOL bPaintBars)
 	bool mode1_Low = (savedata.speanamode == 1 && savedata.speananum == 1);
 	bool mode3_High = (savedata.speanamode == 1 && savedata.speananum == 3);
 	bool mode4_Vox = (savedata.speanamode == 1 && savedata.speananum == 4);
+	// リモート用レベル更新は長窓ノート検出を避け、常に軽量 FFT バーにする
+	if (bFillLevels && !bPaintBars)
+		mode0_Note = false;
 	bool mode2_Std = (!mode0_Note && !mode1_Low && !mode3_High && !mode4_Vox);
 
 	// ---------------------------------------------------------
@@ -25589,9 +25600,12 @@ void COggDlg::Speana(BOOL bPaintBars)
 	// 伸ばしても末尾(同期点)はlatencySettingで決まり、表示タイミングは不変。
 	int analysisSize = 4096;
 	// EQ コード供給のみのときは長窓不要（読み取りコストと揺らぎを抑える）
-	if (bPaintBars) {
+	if (needLevels) {
 		if (mode1_Low) analysisSize = 8192;
 		if (mode0_Note) analysisSize = 16384;
+		// リモート専用パスは 4096 固定（UI を塞がない）
+		if (bFillLevels && !bPaintBars)
+			analysisSize = 4096;
 	}
 
 	// タイミング調整 (Latency) — ユーザー調整値。低音長窓→-1600ms / 4096→-800ms
@@ -25629,8 +25643,10 @@ void COggDlg::Speana(BOOL bPaintBars)
 	static double bufL[kSpeanaMaxFrames], bufR[kSpeanaMaxFrames], bufM[kSpeanaMaxFrames];
 	static double bufResampled[kSpeanaMaxFrames], bufResampledR[kSpeanaMaxFrames];
 	static char rawBuf[kSpeanaMaxRaw];
-	if (framesToRead > kSpeanaMaxFrames || fftSize > kSpeanaMaxFrames || bytesTotalToRead > kSpeanaMaxRaw)
+	if (framesToRead > kSpeanaMaxFrames || fftSize > kSpeanaMaxFrames || bytesTotalToRead > kSpeanaMaxRaw) {
+		g_speanaDrawEnable = prevDrawEnable;
 		return;
+	}
 
 	// ---------------------------------------------------------
 	// データ読み込み (完全過去データ取得)
@@ -25746,11 +25762,13 @@ void COggDlg::Speana(BOOL bPaintBars)
 		}
 	}
 	// EQ 供給のみのとき FFT 用リサンプルは不要（UI スレッドコスト削減）
-	if (!bPaintBars)
+	if (!needLevels) {
+		g_speanaDrawEnable = prevDrawEnable;
 		return;
+	}
 
-	// 波形モード: FFTせず振幅タイムラインを描画
-	if (savedata.mpSpeanaStyle == 2) {
+	// 波形モード: FFTせず振幅タイムラインを描画（レベルのみ要求時は簡易スペクトルへ）
+	if (savedata.mpSpeanaStyle == 2 && bPaintBars) {
 		const int x0 = (21 * 8) * 4;
 		const int wPx = stereoSpeana ? (178 * 4) : (176 * 4);
 		const int y0 = 20;
@@ -25779,6 +25797,7 @@ void COggDlg::Speana(BOOL bPaintBars)
 			plot(bufR, penR);
 		dc.SelectObject(old);
 		dc.FillSolidRect(x0, mid, wPx, 1, RGB(0, 180, 180));
+		g_speanaDrawEnable = prevDrawEnable;
 		return;
 	}
 
@@ -25874,7 +25893,8 @@ void COggDlg::Speana(BOOL bPaintBars)
 				SpeanaDrawBar(dc, (21 * 8 + i) * 4, 4, 100 + i, dtbl[i]);
 				SpeanaDrawBar(dc, (21 * 8 + 89 + i) * 4, 4, 200 + i, dtatbl[i]);
 			}
-			dc.FillSolidRect((21 * 8 + 88) * 4, 20, 4, 368, RGB(0, 255, 255));
+			if (g_speanaDrawEnable)
+				dc.FillSolidRect((21 * 8 + 88) * 4, 20, 4, 368, RGB(0, 255, 255));
 		}
 	}
 
@@ -25931,9 +25951,11 @@ void COggDlg::Speana(BOOL bPaintBars)
 			s_detR.Process(bufR, framesToRead);
 			DrawDetected(s_detL, 100, false);
 			DrawDetected(s_detR, 200, true);
-			dc.FillSolidRect((21 * 8 + 88) * 4, 20, 4, 368, RGB(0, 255, 255));
+			if (g_speanaDrawEnable)
+				dc.FillSolidRect((21 * 8 + 88) * 4, 20, 4, 368, RGB(0, 255, 255));
 		}
 	}
+	g_speanaDrawEnable = prevDrawEnable;
 }
 
 // ========================================

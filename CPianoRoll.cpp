@@ -3050,6 +3050,61 @@ void CPianoRoll::CopyHistorySnapshot(NoteFrame* out, int maxOut, int& outCount) 
     outCount = n;
 }
 
+void CPianoRoll::ExportRemoteSnapshot(BYTE keyLevels108[108], BYTE keyExpr108[108],
+    BYTE* histBits, BYTE* histExpr, int maxRows, int& outRows, int& outExprOn,
+    WCHAR* chordOut, int chordCch) const
+{
+    outRows = 0;
+    outExprOn = m_showExprMarks ? 1 : 0;
+    if (keyLevels108) {
+        float mx = 0.0f;
+        for (int i = 0; i < KEY_COUNT; ++i) {
+            if (m_activeKeys[i] && m_noteStrength[i] > mx)
+                mx = m_noteStrength[i];
+        }
+        for (int i = 0; i < KEY_COUNT; ++i) {
+            int v = 0;
+            if (m_activeKeys[i] && mx > 1e-8f) {
+                v = (int)(m_noteStrength[i] / mx * 100.0f + 0.5f);
+                if (v < 1) v = 1;
+                if (v > 100) v = 100;
+            }
+            keyLevels108[i] = (BYTE)v;
+        }
+        for (int i = KEY_COUNT; i < 108; ++i)
+            keyLevels108[i] = 0;
+    }
+    if (keyExpr108) {
+        memset(keyExpr108, 0, 108);
+        if (outExprOn) {
+            for (int i = 0; i < KEY_COUNT; ++i)
+                keyExpr108[i] = m_activeKeys[i] ? m_exprFlags[i] : 0;
+        }
+    }
+    if (histBits && maxRows > 0 && m_historyCount > 0) {
+        const int n = (m_historyCount < maxRows) ? m_historyCount : maxRows;
+        for (int r = 0; r < n; ++r) {
+            BYTE* dst = histBits + r * 14;
+            memset(dst, 0, 14);
+            BYTE* ex = (histExpr && outExprOn) ? (histExpr + r * 108) : NULL;
+            if (ex) memset(ex, 0, 108);
+            const NoteFrame& fr = HistoryAt(r);
+            for (int k = 0; k < KEY_COUNT; ++k) {
+                if (!fr.active[k]) continue;
+                dst[k >> 3] |= (BYTE)(1u << (k & 7));
+                if (ex) ex[k] = fr.expr[k];
+            }
+        }
+        outRows = n;
+    }
+    if (chordOut && chordCch > 0) {
+        if (m_chordLast[0])
+            wcsncpy_s(chordOut, chordCch, m_chordLast, _TRUNCATE);
+        else
+            wcsncpy_s(chordOut, chordCch, L"-", _TRUNCATE);
+    }
+}
+
 bool CPianoRoll::IsBlackKey(int midiNote) const
 {
     const int r = midiNote % 12;
