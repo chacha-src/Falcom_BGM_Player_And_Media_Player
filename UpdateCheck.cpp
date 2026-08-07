@@ -3,11 +3,11 @@
 #include "UpdateCheck.h"
 #include "oggDlg.h"
 #include <wininet.h>
-#include <thread>
+#include <ShlObj.h>
 #include <ctime>
-#include <sys/stat.h> // ファイル情報を取得するために追加いたしましたわ
 
 #pragma comment(lib, "wininet.lib")
+#pragma comment(lib, "shell32.lib")
 
 #include "minizip/unzip.h"  // ioapi.h を経由して zlib_filefunc64_def 等を定義
 #ifdef USEWIN32IOAPI
@@ -19,6 +19,10 @@ static const TCHAR* UPDATE_URL_PRIMARY = _T("https://ppp.oohara.jp/download/oggY
 static const TCHAR* UPDATE_URL_FALLBACK = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.zip");
 static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 static const TCHAR* TARGET_HOST_EXE_NAME = _T("KpiHost64.exe");
+
+// 配布 ZIP / 展開 EXE の下限（空・404 HTML・途中切断を弾く）
+static const ULONGLONG UPDATE_ZIP_MIN_BYTES = 200000ULL;
+static const ULONGLONG UPDATE_EXE_MIN_BYTES = 100000ULL;
 
 // コンパイル時間ではなく、現在動いている実行ファイルの実際の更新日時を取得するように変更いたしましたわ
 // これにより、ファイルの一部だけをビルドした際の「時間が過去のままになる落とし穴」を完全に回避いたします
@@ -41,6 +45,33 @@ static time_t GetExecutableModificationTimeUtc()
 	ull.LowPart = ftWrite.dwLowDateTime;
 	ull.HighPart = ftWrite.dwHighDateTime;
 	return (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+}
+
+static ULONGLONG GetPathFileSize(LPCTSTR path)
+{
+	WIN32_FILE_ATTRIBUTE_DATA fad;
+	if (!GetFileAttributesEx(path, GetFileExInfoStandard, &fad))
+		return 0;
+	ULARGE_INTEGER ull;
+	ull.LowPart = fad.nFileSizeLow;
+	ull.HighPart = fad.nFileSizeHigh;
+	return ull.QuadPart;
+}
+
+// PE 先頭 MZ と最低サイズを確認（展開破損・HTML誤保存を弾く）
+static bool IsLikelyPeExe(LPCTSTR path, ULONGLONG minBytes)
+{
+	const ULONGLONG sz = GetPathFileSize(path);
+	if (sz < minBytes)
+		return false;
+	HANDLE h = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (h == INVALID_HANDLE_VALUE)
+		return false;
+	unsigned char mz[2] = { 0, 0 };
+	DWORD rd = 0;
+	const BOOL ok = ReadFile(h, mz, 2, &rd, NULL);
+	CloseHandle(h);
+	return ok && rd == 2 && mz[0] == 'M' && mz[1] == 'Z';
 }
 
 // HTTP HEAD で Last-Modified を取得、失敗時は 0
@@ -126,16 +157,19 @@ static CString ResolveUpdateUrl(time_t* outModified)
 	return CString();
 }
 
-// ZIP をダウンロード、成功時はパスを返す
+// ZIP をダウンロード。HTTP 200・最低サイズを満たさない場合は失敗（途中ファイルは削除）
 static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 {
+	DeleteFile(localPath);
+
 	// プロキシ環境下の方でもダウンロードできるよう、システムのプロキシ設定を使用いたしますわ
 	HINTERNET hInternet = InternetOpen(_T("oggUpdateCheck/1.0"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (!hInternet) return false;
 
-	DWORD timeout = 60000; // 60秒
+	DWORD timeout = 120000; // 大容量 ZIP 向けに 120 秒
 	InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+	InternetSetOption(hInternet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
 
 	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_PRAGMA_NOCACHE;
 	if (url.Find(_T("https://")) == 0) flags |= INTERNET_FLAG_SECURE;
@@ -147,6 +181,32 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 	HINTERNET hConnect = InternetOpenUrl(hInternet, noCacheUrl, NULL, 0, flags, 0);
 	if (!hConnect) { InternetCloseHandle(hInternet); return false; }
 
+	DWORD statusCode = 0;
+	DWORD statusCodeLen = sizeof(statusCode);
+	if (!HttpQueryInfo(hConnect, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &statusCode, &statusCodeLen, NULL)
+		|| statusCode != 200)
+	{
+		InternetCloseHandle(hConnect);
+		InternetCloseHandle(hInternet);
+		return false;
+	}
+
+	ULONGLONG contentLen = 0;
+	{
+		char lenBuf[64] = { 0 };
+		DWORD lenBufLen = sizeof(lenBuf);
+		if (HttpQueryInfoA(hConnect, HTTP_QUERY_CONTENT_LENGTH, lenBuf, &lenBufLen, NULL))
+		{
+			contentLen = (ULONGLONG)_atoi64(lenBuf);
+			if (contentLen > 0 && contentLen < UPDATE_ZIP_MIN_BYTES)
+			{
+				InternetCloseHandle(hConnect);
+				InternetCloseHandle(hInternet);
+				return false;
+			}
+		}
+	}
+
 	CFile f;
 	if (!f.Open(localPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
 	{
@@ -156,17 +216,36 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 	}
 
 	char buf[8192];
-	DWORD bytesRead;
-	while (InternetReadFile(hConnect, buf, sizeof(buf), &bytesRead) && bytesRead > 0)
-		f.Write(buf, bytesRead);
+	DWORD bytesRead = 0;
+	ULONGLONG total = 0;
+	BOOL readOk = TRUE;
+	while ((readOk = InternetReadFile(hConnect, buf, sizeof(buf), &bytesRead)) != FALSE && bytesRead > 0)
+	{
+		try {
+			f.Write(buf, (UINT)bytesRead);
+		}
+		catch (CFileException* e) {
+			e->Delete();
+			readOk = FALSE;
+			break;
+		}
+		total += bytesRead;
+	}
 
 	f.Close();
 	InternetCloseHandle(hConnect);
 	InternetCloseHandle(hInternet);
+
+	if (!readOk || total < UPDATE_ZIP_MIN_BYTES || (contentLen > 0 && total != contentLen))
+	{
+		DeleteFile(localPath);
+		return false;
+	}
 	return true;
 }
 
 // ZIP から特定のファイル（targetFileName）だけを抽出し、destDir直下に展開する
+// 展開バイト数が ZIP 内 uncompressed_size と一致し、PE(MZ)なら成功
 static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, const CString& targetFileName)
 {
 	zlib_filefunc64_def ffunc;
@@ -215,17 +294,45 @@ static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, cons
 
 			// 目的のファイルを destDir の直下に展開
 			CString outPath = destDir + _T("\\") + currentFileName;
+			DeleteFile(outPath);
+
 			CFile outFile;
+			bool writeOk = false;
+			ULONGLONG written = 0;
 			if (outFile.Open(outPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
 			{
 				char buf[8192];
 				int n;
+				writeOk = true;
 				while ((n = unzReadCurrentFile(uf, buf, sizeof(buf))) > 0)
-					outFile.Write(buf, n);
+				{
+					try {
+						outFile.Write(buf, (UINT)n);
+					}
+					catch (CFileException* e) {
+						e->Delete();
+						writeOk = false;
+						break;
+					}
+					written += (ULONGLONG)n;
+				}
+				if (n < 0)
+					writeOk = false;
 				outFile.Close();
-				bFound = true;
 			}
 			unzCloseCurrentFile(uf);
+
+			if (writeOk
+				&& written == (ULONGLONG)fi.uncompressed_size
+				&& written >= UPDATE_EXE_MIN_BYTES
+				&& IsLikelyPeExe(outPath, UPDATE_EXE_MIN_BYTES))
+			{
+				bFound = true;
+			}
+			else
+			{
+				DeleteFile(outPath);
+			}
 			break; // 見つかったら他のファイルは展開せずにループを抜ける
 		}
 
@@ -234,6 +341,173 @@ static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, cons
 	}
 	unzClose(uf);
 	return bFound;
+}
+
+// 前回の自動更新が成功していればフラグを消し、失敗のままなら true
+static bool UpdateAttemptStillFailed(time_t exeTime)
+{
+	extern save savedata;
+	if (savedata.updateAttemptExeTime == 0 || exeTime == 0)
+		return false;
+	if ((__int64)exeTime != savedata.updateAttemptExeTime)
+	{
+		savedata.updateAttemptExeTime = 0;
+		MpPersistSavedataQuick();
+		return false;
+	}
+	return true;
+}
+
+// 自動上書き失敗時: 「ダウンロード」へ ZIP→EXE 展開しエクスプローラを開く（アプリは継続）
+static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTime)
+{
+	extern save savedata;
+
+	PWSTR downloadsW = NULL;
+	TCHAR destDir[MAX_PATH] = { 0 };
+	if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, 0, NULL, &downloadsW)) && downloadsW)
+	{
+		_stprintf_s(destDir, _T("%s\\oggYSEDbgm_update"), downloadsW);
+		CoTaskMemFree(downloadsW);
+	}
+	else
+	{
+		TCHAR profile[MAX_PATH] = { 0 };
+		if (FAILED(SHGetFolderPath(NULL, CSIDL_PROFILE, NULL, SHGFP_TYPE_CURRENT, profile)) || profile[0] == 0)
+			return false;
+		_stprintf_s(destDir, _T("%s\\Downloads\\oggYSEDbgm_update"), profile);
+	}
+
+	CreateDirectory(destDir, NULL);
+
+	TCHAR zipPath[MAX_PATH];
+	_stprintf_s(zipPath, _T("%s\\ogg_update.zip"), destDir);
+
+	if (!HttpDownloadToFile(updateUrl, zipPath))
+	{
+		AfxMessageBox(LL14(
+			L"ダウンロードに失敗しました。\nネットワーク接続を確認してください。",
+			L"Download failed.\nPlease check your network connection.",
+			L"Telechargement echoue.\nVerifiez votre connexion reseau.",
+			L"Download fallito.\nControlla la connessione di rete.",
+			L"Descarga fallida.\nCompruebe su conexion de red.",
+			L"다운로드에 실패했습니다.\n네트워크 연결을 확인하세요.",
+			L"下载失败。\n请检查网络连接。",
+			L"فشل التنزيل.\nيرجى التحقق من اتصال الشبكة.",
+			L"Не удалось загрузить.\nПроверьте подключение к сети.",
+			L"Download fehlgeschlagen.\nBitte Netzwerkverbindung prufen.",
+			L"Download falhou.\nVerifique sua conexao de rede.",
+			L"Download mislukt.\nControleer uw netwerkverbinding.",
+			L"Pobieranie nie powiodlo sie.\nSprawdz polaczenie sieciowe.",
+			L"Indirme basarisiz.\nAg baglantisini kontrol edin."));
+		return false;
+	}
+
+	if (!ExtractZipToDir(zipPath, destDir, TARGET_EXE_NAME)
+		|| !ExtractZipToDir(zipPath, destDir, TARGET_HOST_EXE_NAME))
+	{
+		AfxMessageBox(LL14(
+			L"ZIPの展開に失敗しました。\nダウンロードフォルダのファイルを確認してください。",
+			L"Failed to extract the ZIP.\nPlease check the files in the Downloads folder.",
+			L"Echec de l'extraction du ZIP.\nVerifiez les fichiers du dossier Telechargements.",
+			L"Estrazione ZIP non riuscita.\nControlla i file nella cartella Download.",
+			L"Error al extraer el ZIP.\nCompruebe los archivos en Descargas.",
+			L"ZIP 압축 해제에 실패했습니다.\n다운로드 폴더의 파일을 확인하세요.",
+			L"ZIP 解压失败。\n请检查下载文件夹中的文件。",
+			L"فشل استخراج ZIP.\nيرجى التحقق من الملفات في مجلد التنزيلات.",
+			L"Не удалось распаковать ZIP.\nПроверьте файлы в папке Загрузки.",
+			L"ZIP-Entpacken fehlgeschlagen.\nBitte Dateien im Ordner Downloads prufen.",
+			L"Falha ao extrair o ZIP.\nVerifique os arquivos na pasta Downloads.",
+			L"Uitpakken van ZIP mislukt.\nControleer de bestanden in Downloads.",
+			L"Nie udalo sie rozpakowac ZIP.\nSprawdz pliki w folderze Pobrane.",
+			L"ZIP acma basarisiz.\nIndirilenler klasorundeki dosyalari kontrol edin."));
+		return false;
+	}
+
+	// 展開済み EXE の時刻をサーバーに合わせ（手動コピー後の再検知用）
+	if (serverTime > 0)
+	{
+		time_t newTime = serverTime + 1;
+		ULARGE_INTEGER ull;
+		ull.QuadPart = ((ULONGLONG)newTime * 10000000ULL) + 116444736000000000ULL;
+		FILETIME ft;
+		ft.dwLowDateTime = ull.LowPart;
+		ft.dwHighDateTime = ull.HighPart;
+
+		TCHAR exeOut[MAX_PATH], hostOut[MAX_PATH];
+		_stprintf_s(exeOut, _T("%s\\%s"), destDir, TARGET_EXE_NAME);
+		_stprintf_s(hostOut, _T("%s\\%s"), destDir, TARGET_HOST_EXE_NAME);
+		HANDLE h1 = CreateFile(exeOut, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+		if (h1 != INVALID_HANDLE_VALUE) { SetFileTime(h1, &ft, &ft, &ft); CloseHandle(h1); }
+		HANDLE h2 = CreateFile(hostOut, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+		if (h2 != INVALID_HANDLE_VALUE) { SetFileTime(h2, &ft, &ft, &ft); CloseHandle(h2); }
+	}
+
+	savedata.updateAttemptExeTime = 0;
+	if (serverTime > 0)
+		savedata.lastUpdateCheck = (__int64)serverTime;
+	MpPersistSavedataQuick();
+
+	ShellExecute(NULL, _T("open"), destDir, NULL, NULL, SW_SHOWNORMAL);
+
+	AfxMessageBox(LL14(
+		L"自動更新に失敗したため、更新ファイルを「ダウンロード」フォルダへ展開しました。\n"
+		L"本プログラムを終了し、展開先の oggYSEDbgm_uni_avx2.exe と KpiHost64.exe を\n"
+		L"インストールフォルダへ上書きコピーしてください。\n"
+		L"（エクスプローラでフォルダを開きました）",
+		L"Automatic update failed, so the update files were extracted to your Downloads folder.\n"
+		L"Please quit this program, then copy oggYSEDbgm_uni_avx2.exe and KpiHost64.exe\n"
+		L"over the ones in the install folder.\n"
+		L"(The folder was opened in Explorer.)",
+		L"La mise a jour automatique a echoue ; les fichiers ont ete extraits dans Telechargements.\n"
+		L"Quittez ce programme, puis copiez oggYSEDbgm_uni_avx2.exe et KpiHost64.exe\n"
+		L"par-dessus ceux du dossier d'installation.\n"
+		L"(Le dossier a ete ouvert dans l'Explorateur.)",
+		L"Aggiornamento automatico non riuscito; i file sono stati estratti in Download.\n"
+		L"Chiudi questo programma, quindi copia oggYSEDbgm_uni_avx2.exe e KpiHost64.exe\n"
+		L"sopra quelli nella cartella di installazione.\n"
+		L"(La cartella e stata aperta in Esplora risorse.)",
+		L"La actualizacion automatica fallo; los archivos se extrajeron en Descargas.\n"
+		L"Cierre este programa y copie oggYSEDbgm_uni_avx2.exe y KpiHost64.exe\n"
+		L"sobre los del folder de instalacion.\n"
+		L"(Se abrio la carpeta en el Explorador.)",
+		L"자동 업데이트에 실패하여 업데이트 파일을 다운로드 폴더에 풀었습니다.\n"
+		L"이 프로그램을 종료한 뒤 oggYSEDbgm_uni_avx2.exe 와 KpiHost64.exe 를\n"
+		L"설치 폴더에 덮어쓰기로 복사하세요.\n"
+		L"(탐색기에서 폴더를 열었습니다)",
+		L"自动更新失败，已将更新文件解压到“下载”文件夹。\n"
+		L"请退出本程序，然后将 oggYSEDbgm_uni_avx2.exe 与 KpiHost64.exe\n"
+		L"覆盖复制到安装文件夹。\n"
+		L"（已在资源管理器中打开该文件夹）",
+		L"فشل التحديث التلقائي، وتم استخراج ملفات التحديث إلى مجلد التنزيلات.\n"
+		L"يرجى إنهاء هذا البرنامج ثم نسخ oggYSEDbgm_uni_avx2.exe و KpiHost64.exe\n"
+		L"فوق الملفات في مجلد التثبيت.\n"
+		L"(تم فتح المجلد في المستكشف)",
+		L"Автообновление не удалось; файлы распакованы в папку Загрузки.\n"
+		L"Закройте программу и скопируйте oggYSEDbgm_uni_avx2.exe и KpiHost64.exe\n"
+		L"поверх файлов в папке установки.\n"
+		L"(Папка открыта в Проводнике.)",
+		L"Automatisches Update fehlgeschlagen; Dateien wurden nach Downloads entpackt.\n"
+		L"Beenden Sie das Programm und kopieren Sie oggYSEDbgm_uni_avx2.exe und KpiHost64.exe\n"
+		L"uber die Dateien im Installationsordner.\n"
+		L"(Der Ordner wurde im Explorer geoffnet.)",
+		L"A atualizacao automatica falhou; os arquivos foram extraidos em Downloads.\n"
+		L"Encerre este programa e copie oggYSEDbgm_uni_avx2.exe e KpiHost64.exe\n"
+		L"sobre os da pasta de instalacao.\n"
+		L"(A pasta foi aberta no Explorer.)",
+		L"Automatische update mislukt; bestanden zijn uitgepakt in Downloads.\n"
+		L"Sluit dit programma en kopieer oggYSEDbgm_uni_avx2.exe en KpiHost64.exe\n"
+		L"over die in de installatiemap.\n"
+		L"(De map is geopend in Verkenner.)",
+		L"Automatyczna aktualizacja nie powiodla sie; pliki rozpakowano do Pobrane.\n"
+		L"Zamknij program i skopiuj oggYSEDbgm_uni_avx2.exe oraz KpiHost64.exe\n"
+		L"na pliki w folderze instalacji.\n"
+		L"(Folder otwarto w Eksploratorze.)",
+		L"Otomatik guncelleme basarisiz; dosyalar Indirilenler klasorune acildi.\n"
+		L"Bu programi kapatip oggYSEDbgm_uni_avx2.exe ve KpiHost64.exe dosyalarini\n"
+		L"kurulum klasorundekilerin uzerine kopyalayin.\n"
+		L"(Klasor Gezgin'de acildi.)"));
+	return true;
 }
 
 static const DWORD CHECK_INTERVAL_SEC = 600;  // 10分
@@ -255,6 +529,9 @@ void RunStartupUpdateCheck()
 	if (exeTime == 0)
 		return;
 
+	// 前回試行後に exe が新しくなっていれば成功扱い。同一なら失敗フラグを残す。
+	const bool prevFailed = UpdateAttemptStillFailed(exeTime);
+
 	time_t serverModified = 0;
 	const CString updateUrl = ResolveUpdateUrl(&serverModified);
 	if (updateUrl.IsEmpty() ||
@@ -269,25 +546,72 @@ void RunStartupUpdateCheck()
 	// 保存データには書かないため、次回起動時には再度確認メッセージが出る。
 	UpdateCheckDismissVersion((__int64)serverModified);
 
-	const int ret = AfxMessageBox(LL14(
-		L"アップデートファイルがあります。\n今すぐ更新しますか？\n(いいえ = 次回起動時まで保留)",
-		L"An update file is available.\nWould you like to update now?\n(No = postpone until next launch)",
-		L"Un fichier de mise à jour est disponible.\nMettre à jour maintenant ?\n(Non = reporter au prochain démarrage)",
-		L"È disponibile un file di aggiornamento.\nAggiornare ora?\n(No = rimanda al prossimo avvio)",
-		L"Hay un archivo de actualización disponible.\n¿Actualizar ahora?\n(No = posponer hasta el próximo inicio)",
-		L"업데이트 파일이 있습니다.\n지금 업데이트하시겠습니까?\n(아니요 = 다음 실행 시까지 보류)",
-		L"有更新文件。\n是否立即更新？\n(否 = 推迟到下次启动)",
-		L"يتوفر ملف تحديث.\nهل تريد التحديث الآن؟\n(لا = التأجيل حتى التشغيل التالي)",
-		L"Доступен файл обновления.\nОбновить сейчас?\n(Нет = отложить до следующего запуска)",
-		L"Eine Aktualisierungsdatei ist verfügbar.\nJetzt aktualisieren?\n(Nein = bis zum nächsten Start aufschieben)",
-		L"Um arquivo de atualização está disponível.\nAtualizar agora?\n(Não = adiar até a próxima inicialização)",
-		L"Er is een updatebestand beschikbaar.\nNu bijwerken?\n(Nee = uitstellen tot volgende start)",
-		L"Dostępny jest plik aktualizacji.\nCzy zaktualizować teraz?\n(Nie = odłóż do następnego uruchomienia)",
-		L"Güncelleme dosyası mevcut.\nŞimdi güncellemek istiyor musunuz?\n(Hayır = sonraki başlatmaya ertele)"
-	), MB_YESNO);
+	const wchar_t* msg;
+	if (prevFailed) {
+		msg = LL14(
+			L"前回の自動更新が完了していないようです。\n"
+			L"更新ファイルを「ダウンロード」フォルダへ展開し、手動で上書きしますか？\n"
+			L"(いいえ = 次回起動時まで保留)",
+			L"The previous automatic update does not appear to have completed.\n"
+			L"Extract the update files to Downloads for a manual overwrite?\n"
+			L"(No = postpone until next launch)",
+			L"La precedente mise a jour automatique ne semble pas terminee.\n"
+			L"Extraire les fichiers vers Telechargements pour un remplacement manuel ?\n"
+			L"(Non = reporter au prochain demarrage)",
+			L"Il precedente aggiornamento automatico non sembra completato.\n"
+			L"Estrarre i file in Download per la sovrascrittura manuale?\n"
+			L"(No = rimanda al prossimo avvio)",
+			L"La actualizacion automatica anterior no parece haberse completado.\n"
+			L"¿Extraer los archivos en Descargas para sobrescribir manualmente?\n"
+			L"(No = posponer hasta el proximo inicio)",
+			L"이전 자동 업데이트가 완료되지 않은 것 같습니다.\n"
+			L"다운로드 폴더에 풀어 수동으로 덮어쓰시겠습니까?\n"
+			L"(아니요 = 다음 실행 시까지 보류)",
+			L"上次自动更新似乎未完成。\n"
+			L"是否解压到“下载”文件夹以便手动覆盖？\n"
+			L"(否 = 推迟到下次启动)",
+			L"يبدو أن التحديث التلقائي السابق لم يكتمل.\n"
+			L"هل تريد استخراج الملفات إلى التنزيلات للكتابة اليدوية؟\n"
+			L"(لا = التأجيل حتى التشغيل التالي)",
+			L"Предыдущее автообновление, похоже, не завершилось.\n"
+			L"Распаковать файлы в Загрузки для ручной замены?\n"
+			L"(Нет = отложить до следующего запуска)",
+			L"Das vorherige automatische Update scheint nicht abgeschlossen.\n"
+			L"Dateien nach Downloads entpacken und manuell uberschreiben?\n"
+			L"(Nein = bis zum nachsten Start aufschieben)",
+			L"A atualizacao automatica anterior parece nao ter sido concluida.\n"
+			L"Extrair os arquivos em Downloads para substituir manualmente?\n"
+			L"(Nao = adiar ate a proxima inicializacao)",
+			L"De vorige automatische update lijkt niet voltooid.\n"
+			L"Bestanden uitpakken naar Downloads voor handmatig overschrijven?\n"
+			L"(Nee = uitstellen tot volgende start)",
+			L"Poprzednia automatyczna aktualizacja wyglada na niedokonczona.\n"
+			L"Rozpakowac pliki do Pobrane w celu recznego nadpisania?\n"
+			L"(Nie = odloz do nastepnego uruchomienia)",
+			L"Onceki otomatik guncelleme tamamlanmamis gorunuyor.\n"
+			L"Manuel uzerine yazma icin Indirilenler klasorune acilsin mi?\n"
+			L"(Hayir = sonraki baslatmaya ertele)");
+	} else {
+		msg = LL14(
+			L"アップデートファイルがあります。\n今すぐ更新しますか？\n(いいえ = 次回起動時まで保留)",
+			L"An update file is available.\nWould you like to update now?\n(No = postpone until next launch)",
+			L"Un fichier de mise a jour est disponible.\nMettre a jour maintenant ?\n(Non = reporter au prochain demarrage)",
+			L"E disponibile un file di aggiornamento.\nAggiornare ora?\n(No = rimanda al prossimo avvio)",
+			L"Hay un archivo de actualizacion disponible.\n¿Actualizar ahora?\n(No = posponer hasta el proximo inicio)",
+			L"업데이트 파일이 있습니다.\n지금 업데이트하시겠습니까?\n(아니요 = 다음 실행 시까지 보류)",
+			L"有更新文件。\n是否立即更新？\n(否 = 推迟到下次启动)",
+			L"يتوفر ملف تحديث.\nهل تريد التحديث الآن؟\n(لا = التأجيل حتى التشغيل التالي)",
+			L"Доступен файл обновления.\nОбновить сейчас?\n(Нет = отложить до следующего запуска)",
+			L"Eine Aktualisierungsdatei ist verfugbar.\nJetzt aktualisieren?\n(Nein = bis zum nachsten Start aufschieben)",
+			L"Um arquivo de atualizacao esta disponivel.\nAtualizar agora?\n(Nao = adiar ate a proxima inicializacao)",
+			L"Er is een updatebestand beschikbaar.\nNu bijwerken?\n(Nee = uitstellen tot volgende start)",
+			L"Dostepny jest plik aktualizacji.\nCzy zaktualizowac teraz?\n(Nie = odloz do nastepnego uruchomienia)",
+			L"Guncelleme dosyasi mevcut.\nSimdi guncellemek istiyor musunuz?\n(Hayir = sonraki baslatmaya ertele)");
+	}
+	const int ret = AfxMessageBox(msg, MB_YESNO);
 
 	if (ret == IDYES)
-		DoUpdateAndRestart();  // 成功時はプロセス終了、失敗時はそのまま通常起動を続ける
+		DoUpdateAndRestart();  // 成功時はプロセス終了、手動展開時/失敗時はそのまま通常起動を続ける
 }
 
 void UpdateCheckDismissVersion(__int64 serverModified)
@@ -318,6 +642,9 @@ static DWORD WINAPI UpdateCheckThreadProc(LPVOID param)
 	// コンパイル時間ではなく、現在動いているプログラムの実際の更新時間を見ますわ
 	time_t exeTime = GetExecutableModificationTimeUtc();
 	if (exeTime == 0) return 0;
+
+	// 起動直後に成功/失敗フラグを一度整理（成功ならクリア）
+	UpdateAttemptStillFailed(exeTime);
 
 	// プログラムの更新時刻 + 2分（120秒）に変更いたしましたわ
 	time_t threshold = exeTime + 120;
@@ -370,10 +697,17 @@ void StartUpdateCheckThread(HWND hNotifyWnd)
 	CreateThread(NULL, 0, UpdateCheckThreadProc, hNotifyWnd, 0, NULL);
 }
 
-// 更新実行：ダウンロード→展開→バッチで置換→再起動
+// 更新実行：ダウンロード→展開確認→バッチで置換→再起動
+// 前回自動更新が失敗していた場合は「ダウンロード」へ手動展開してアプリは継続
 bool DoUpdateAndRestart()
 {
 	extern TCHAR karento2[1024];
+	extern save savedata;
+
+	const time_t exeTimeNow = GetExecutableModificationTimeUtc();
+	const bool prevFailed = (savedata.updateAttemptExeTime != 0
+		&& exeTimeNow != 0
+		&& (__int64)exeTimeNow == savedata.updateAttemptExeTime);
 
 	// 現在実行しているファイルの名前を取得いたしますわ
 	TCHAR exePath[MAX_PATH] = { 0 };
@@ -408,6 +742,36 @@ bool DoUpdateAndRestart()
 		_tcscpy_s(targetHostExePath, MAX_PATH, TARGET_HOST_EXE_NAME);
 	}
 
+	// ダウンロード直前にも再解決（09a 優先）。チェック時は 08g だけでも、この時点で 09a があれば 09a を取る。
+	time_t serverTime = 0;
+	const CString updateUrl = ResolveUpdateUrl(&serverTime);
+	if (updateUrl.IsEmpty())
+	{
+		AfxMessageBox(LL14(
+			L"ダウンロードに失敗しました。\nネットワーク接続を確認してください。",
+			L"Download failed.\nPlease check your network connection.",
+			L"Telechargement echoue.\nVerifiez votre connexion reseau.",
+			L"Download fallito.\nControlla la connessione di rete.",
+			L"Descarga fallida.\nCompruebe su conexion de red.",
+			L"다운로드에 실패했습니다.\n네트워크 연결을 확인하세요.",
+			L"下载失败。\n请检查网络连接。",
+			L"فشل التنزيل.\nيرجى التحقق من اتصال الشبكة.",
+			L"Не удалось загрузить.\nПроверьте подключение к сети.",
+			L"Download fehlgeschlagen.\nBitte Netzwerkverbindung prufen.",
+			L"Download falhou.\nVerifique sua conexao de rede.",
+			L"Download mislukt.\nControleer uw netwerkverbinding.",
+			L"Pobieranie nie powiodlo sie.\nSprawdz polaczenie sieciowe.",
+			L"Indirme basarisiz.\nAg baglantisini kontrol edin."));
+		return false;
+	}
+
+	// 前回の自動上書きが失敗していた → 手動展開フォールバック（アプリは終了しない）
+	if (prevFailed)
+	{
+		DoManualUpdateToDownloads(updateUrl, serverTime);
+		return false;
+	}
+
 	TCHAR tempPath[MAX_PATH], zipPath[MAX_PATH], extractDir[MAX_PATH], batPath[MAX_PATH];
 	GetTempPath(MAX_PATH, tempPath);
 	_stprintf_s(zipPath, _T("%sogg_update.zip"), tempPath);
@@ -416,22 +780,46 @@ bool DoUpdateAndRestart()
 
 	CreateDirectory(extractDir, NULL);
 
-	// ダウンロード直前にも再解決（09a 優先）。チェック時は 08g だけでも、この時点で 09a があれば 09a を取る。
-	time_t serverTime = 0;
-	const CString updateUrl = ResolveUpdateUrl(&serverTime);
-	if (updateUrl.IsEmpty() || !HttpDownloadToFile(updateUrl, zipPath))
+	if (!HttpDownloadToFile(updateUrl, zipPath))
 	{
-		AfxMessageBox(LL14(L"ダウンロードに失敗しました。\nネットワーク接続を確認してください。", L"Download failed.\nPlease check your network connection.", L"Telechargement echoue.\nVerifiez votre connexion reseau.", L"Download fallito.\nControlla la connessione di rete.", L"Descarga fallida.\nCompruebe su conexion de red.", L"다운로드에 실패했습니다.\n네트워크 연결을 확인하세요.", L"下载失败。\n请检查网络连接。", L"فشل التنزيل.\nيرجى التحقق من اتصال الشبكة.", L"Не удалось загрузить.\nПроверьте подключение к сети.", L"Download fehlgeschlagen.\nBitte Netzwerkverbindung prufen.", L"Download falhou.\nVerifique sua conexao de rede.", L"Download mislukt.\nControleer uw netwerkverbinding.", L"Pobieranie nie powiodlo sie.\nSprawdz polaczenie sieciowe.", L"Indirme basarisiz.\nAg baglantisini kontrol edin."));
+		AfxMessageBox(LL14(
+			L"ダウンロードに失敗しました。\nネットワーク接続を確認してください。",
+			L"Download failed.\nPlease check your network connection.",
+			L"Telechargement echoue.\nVerifiez votre connexion reseau.",
+			L"Download fallito.\nControlla la connessione di rete.",
+			L"Descarga fallida.\nCompruebe su conexion de red.",
+			L"다운로드에 실패했습니다.\n네트워크 연결을 확인하세요.",
+			L"下载失败。\n请检查网络连接。",
+			L"فشل التنزيل.\nيرجى التحقق من اتصال الشبكة.",
+			L"Не удалось загрузить.\nПроверьте подключение к сети.",
+			L"Download fehlgeschlagen.\nBitte Netzwerkverbindung prufen.",
+			L"Download falhou.\nVerifique sua conexao de rede.",
+			L"Download mislukt.\nControleer uw netwerkverbinding.",
+			L"Pobieranie nie powiodlo sie.\nSprawdz polaczenie sieciowe.",
+			L"Indirme basarisiz.\nAg baglantisini kontrol edin."));
 		return false;
 	}
 
-	// ZIPから oggYSEDbgm_uni_avx2.exe と KpiHost64.exe を取り出して extractDir に展開しますわ
-	if (!ExtractZipToDir(zipPath, extractDir, TARGET_EXE_NAME))
+	// 終了前に展開して内容を確認（ZIP破損・サイズ不一致・非PEはここで弾く）
+	if (!ExtractZipToDir(zipPath, extractDir, TARGET_EXE_NAME)
+		|| !ExtractZipToDir(zipPath, extractDir, TARGET_HOST_EXE_NAME))
 	{
-		return false;
-	}
-	if (!ExtractZipToDir(zipPath, extractDir, TARGET_HOST_EXE_NAME))
-	{
+		DeleteFile(zipPath);
+		AfxMessageBox(LL14(
+			L"ZIPの展開に失敗しました。\n一時フォルダへの書き込み権限やディスク容量を確認してください。",
+			L"Failed to extract the ZIP.\nCheck write permission and disk space in the temp folder.",
+			L"Echec de l'extraction du ZIP.\nVerifiez les droits d'ecriture et l'espace disque du dossier temporaire.",
+			L"Estrazione ZIP non riuscita.\nControlla autorizzazioni e spazio nel folder temporaneo.",
+			L"Error al extraer el ZIP.\nCompruebe permisos y espacio en la carpeta temporal.",
+			L"ZIP 압축 해제에 실패했습니다.\n임시 폴더의 쓰기 권한과 디스크 용량을 확인하세요.",
+			L"ZIP 解压失败。\n请检查临时文件夹的写入权限和磁盘空间。",
+			L"فشل استخراج ZIP.\nيرجى التحقق من أذونات الكتابة ومساحة القرص في المجلد المؤقت.",
+			L"Не удалось распаковать ZIP.\nПроверьте права записи и место на диске во временной папке.",
+			L"ZIP-Entpacken fehlgeschlagen.\nBitte Schreibrechte und Speicherplatz im Temp-Ordner prufen.",
+			L"Falha ao extrair o ZIP.\nVerifique permissao de escrita e espaco na pasta temporaria.",
+			L"Uitpakken van ZIP mislukt.\nControleer schrijfrechten en schijfruimte in de temp-map.",
+			L"Nie udalo sie rozpakowac ZIP.\nSprawdz uprawnienia i miejsce w folderze tymczasowym.",
+			L"ZIP acma basarisiz.\nGecici klasorde yazma izni ve disk alanini kontrol edin."));
 		return false;
 	}
 
@@ -439,6 +827,31 @@ bool DoUpdateAndRestart()
 	extractedPath.Format(_T("%s\\%s"), extractDir, TARGET_EXE_NAME);
 	CString extractedHostPath;
 	extractedHostPath.Format(_T("%s\\%s"), extractDir, TARGET_HOST_EXE_NAME);
+
+	// 二重確認（展開直後の PE / サイズ）
+	if (!IsLikelyPeExe(extractedPath, UPDATE_EXE_MIN_BYTES)
+		|| !IsLikelyPeExe(extractedHostPath, UPDATE_EXE_MIN_BYTES))
+	{
+		DeleteFile(zipPath);
+		DeleteFile(extractedPath);
+		DeleteFile(extractedHostPath);
+		AfxMessageBox(LL14(
+			L"展開した更新ファイルが不正です。\nもう一度更新を試すか、ネットワークを確認してください。",
+			L"The extracted update files are invalid.\nPlease retry the update or check your network.",
+			L"Les fichiers extraits sont invalides.\nReessayez la mise a jour ou verifiez le reseau.",
+			L"I file estratti non sono validi.\nRiprova l'aggiornamento o controlla la rete.",
+			L"Los archivos extraidos no son validos.\nReintente la actualizacion o compruebe la red.",
+			L"풀린 업데이트 파일이 올바르지 않습니다.\n다시 시도하거나 네트워크를 확인하세요.",
+			L"解压后的更新文件无效。\n请重试更新或检查网络。",
+			L"ملفات التحديث المستخرجة غير صالحة.\nأعد المحاولة أو تحقق من الشبكة.",
+			L"Распакованные файлы обновления недействительны.\nПовторите обновление или проверьте сеть.",
+			L"Die entpackten Update-Dateien sind ungultig.\nBitte erneut versuchen oder Netzwerk prufen.",
+			L"Os arquivos extraidos sao invalidos.\nTente novamente ou verifique a rede.",
+			L"De uitgepakte updatebestanden zijn ongeldig.\nProbeer opnieuw of controleer het netwerk.",
+			L"Rozpakowane pliki aktualizacji sa nieprawidlowe.\nSprobuj ponownie lub sprawdz siec.",
+			L"Acilan guncelleme dosyalari gecersiz.\nYeniden deneyin veya agi kontrol edin."));
+		return false;
+	}
 
 	// 展開したファイルの時刻をサーバー時刻に合わせておきますわ。
 	// copy コマンドは元ファイルの時刻を引き継ぐため、上書きが「実際に成功したファイルだけ」が
@@ -475,7 +888,24 @@ bool DoUpdateAndRestart()
 	// 命令書（バッチファイル）の作成
 	CFile bat;
 	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
+	{
+		AfxMessageBox(LL14(
+			L"更新用スクリプトの作成に失敗しました。\n一時フォルダへの書き込み権限を確認してください。",
+			L"Failed to create the update script.\nCheck write permission in the temp folder.",
+			L"Echec de la creation du script de mise a jour.\nVerifiez les droits d'ecriture du dossier temporaire.",
+			L"Creazione dello script di aggiornamento non riuscita.\nControlla i permessi della cartella temporanea.",
+			L"No se pudo crear el script de actualizacion.\nCompruebe permisos de la carpeta temporal.",
+			L"업데이트 스크립트 작성에 실패했습니다.\n임시 폴더 쓰기 권한을 확인하세요.",
+			L"无法创建更新脚本。\n请检查临时文件夹的写入权限。",
+			L"فشل إنشاء برنامج التحديث.\nيرجى التحقق من أذونات المجلد المؤقت.",
+			L"Не удалось создать скрипт обновления.\nПроверьте права записи во временной папке.",
+			L"Update-Skript konnte nicht erstellt werden.\nBitte Schreibrechte im Temp-Ordner prufen.",
+			L"Falha ao criar o script de atualizacao.\nVerifique a permissao na pasta temporaria.",
+			L"Kan updatescript niet maken.\nControleer schrijfrechten in de temp-map.",
+			L"Nie udalo sie utworzyc skryptu aktualizacji.\nSprawdz uprawnienia folderu tymczasowego.",
+			L"Guncelleme betigi olusturulamadi.\nGecici klasor yazma iznini kontrol edin."));
 		return false;
+	}
 
 	// 文字化けを起こさないよう変換いたします
 	CStringA extractDirA(extractDir);
@@ -511,13 +941,16 @@ bool DoUpdateAndRestart()
 	//                                 最後に必ず通常権限でアプリを再起動して自身を削除。
 	//   worker 部（昇格され得る）  … 対象の停止と上書きのみを担当し、再起動も削除も行いません。
 	// これにより Program Files 等でも上書きでき、昇格を断られた場合でも必ず起動し直します。
+	// 本体 exe も taskkill 対象に含め、ロック残存による上書き失敗を減らします。
 	CStringA batContentA;
 	batContentA.Format(
 		"@echo off\r\n"
 		"setlocal\r\n"
 		"if \"%%~1\"==\"worker\" goto worker\r\n"
 		"taskkill /IM %s /F >nul 2>&1\r\n"
+		"taskkill /IM %s /F >nul 2>&1\r\n"
 		"ping -n 4 127.0.0.1 >nul\r\n"
+		"taskkill /IM %s /F >nul 2>&1\r\n"
 		"taskkill /IM %s /F >nul 2>&1\r\n"
 		"set \"PROBE=%s\\ogg_upd_probe.tmp\"\r\n"
 		"type nul > \"%%PROBE%%\" 2>nul\r\n"
@@ -536,20 +969,24 @@ bool DoUpdateAndRestart()
 		":wait\r\n"
 		"ping -n 4 127.0.0.1 >nul\r\n"
 		"taskkill /IM %s /F >nul 2>&1\r\n"
+		"taskkill /IM %s /F >nul 2>&1\r\n"
 		"copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
 		"if errorlevel 1 goto retry\r\n"
 		"copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
 		"if not errorlevel 1 goto :eof\r\n"
 		":retry\r\n"
 		"set /a RETRY+=1\r\n"
-		"if %%RETRY%% geq 15 goto :eof\r\n"
+		"if %%RETRY%% geq 20 goto :eof\r\n"
 		"goto wait\r\n",
+		(LPCSTR)targetExeA,                                           // 起動直後の停止（本体）
 		(LPCSTR)targetHostExeA,                                       // 起動直後の停止（host）
+		(LPCSTR)targetExeA,                                           // 再度の停止（本体）
 		(LPCSTR)targetHostExeA,                                       // 再度の停止（host）
 		(LPCSTR)exeDirA,                                              // 書込可否テスト先フォルダ
 		(LPCSTR)exeDirA,                                              // 再起動前の移動先
 		(LPCSTR)targetExePathA,                                       // 再起動する本体
 		(LPCSTR)cmdArgsA,                                             // 元の起動引数（関連付けファイル等）
+		(LPCSTR)targetExeA,                                           // worker内の停止（本体）
 		(LPCSTR)targetHostExeA,                                       // worker内の停止（host）
 		(LPCSTR)extractDirA, (LPCSTR)targetHostExeA, (LPCSTR)targetHostExePathA, // host 上書き
 		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA          // 本体 上書き
@@ -558,8 +995,36 @@ bool DoUpdateAndRestart()
 	bat.Write(batContentA, batContentA.GetLength());
 	bat.Close();
 
+	// 終了前に「試行直前の exe 日時」を保存。次回起動で日時が変わっていなければ上書き失敗。
+	if (exeTimeNow != 0)
+	{
+		savedata.updateAttemptExeTime = (__int64)exeTimeNow;
+		MpPersistSavedataQuick();
+	}
+
 	// 命令書（バッチファイル）の実行
-	ShellExecute(NULL, _T("open"), batPath, NULL, tempPath, SW_HIDE);
+	const HINSTANCE hShell = ShellExecute(NULL, _T("open"), batPath, NULL, tempPath, SW_HIDE);
+	if ((INT_PTR)hShell <= 32)
+	{
+		savedata.updateAttemptExeTime = 0;
+		MpPersistSavedataQuick();
+		AfxMessageBox(LL14(
+			L"更新用スクリプトの起動に失敗しました。",
+			L"Failed to start the update script.",
+			L"Echec du demarrage du script de mise a jour.",
+			L"Avvio dello script di aggiornamento non riuscito.",
+			L"No se pudo iniciar el script de actualizacion.",
+			L"업데이트 스크립트를 시작하지 못했습니다.",
+			L"无法启动更新脚本。",
+			L"فشل تشغيل برنامج التحديث.",
+			L"Не удалось запустить скрипт обновления.",
+			L"Update-Skript konnte nicht gestartet werden.",
+			L"Falha ao iniciar o script de atualizacao.",
+			L"Kan updatescript niet starten.",
+			L"Nie udalo sie uruchomic skryptu aktualizacji.",
+			L"Guncelleme betigi baslatilamadi."));
+		return false;
+	}
 
 	// アプリケーションを終了させますわ
 	exit(0);

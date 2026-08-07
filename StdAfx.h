@@ -573,6 +573,12 @@ struct save{
 	int mpDjEqKill;      // bit0=Low kill / bit1=Mid / bit2=High
 	int mpDjPadMainLock; // 1=メインに追随
 	int mpDjPadTopMost;  // 1=最前面
+
+	// --- 自動アップデート失敗検知(末尾追記。旧.datは0) ---
+	// 更新試行直前の exe 更新日時(UTC time_t)。0=未試行。
+	// 次回起動で exe の更新日時がこれと同一なら上書き失敗とみなし、
+	// 「ダウンロード」フォルダへ手動展開フォールバックする。
+	__int64 updateAttemptExeTime;
 };
 extern save savedata;
 /* コード間隔(ms)。16..500。旧.dat や未設定は 25。 */

@@ -295,6 +295,7 @@ BOOL COggApp::InitInstance()
 	savedata.upscale_enable = 1;
 	savedata.speaker_layout = 0;
 	savedata.lastUpdateCheck = 0;
+	savedata.updateAttemptExeTime = 0;
 	savedata.pianorollwindow = 0;
 	savedata.pianorollx = -1;
 	savedata.pianorolly = -1;
@@ -1313,6 +1314,8 @@ BOOL COggApp::InitInstance()
 		if (savedata.mpDjPadMainLock != 0) savedata.mpDjPadMainLock = 1;
 		if (savedata.mpDjPadTopMost != 0) savedata.mpDjPadTopMost = 1;
 	}
+	if (datFileSize < (int)(offsetof(save, updateAttemptExeTime) + sizeof(savedata.updateAttemptExeTime)))
+		savedata.updateAttemptExeTime = 0;
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {
 		savedata.cap_fx_n = 1;

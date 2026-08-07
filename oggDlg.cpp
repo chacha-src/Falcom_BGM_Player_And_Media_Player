@@ -21669,7 +21669,48 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 LRESULT COggDlg::OnUpdateAvailable(WPARAM wParam, LPARAM)
 {
 	UpdateCheckBeginPrompt();
-	int ret = AfxMessageBox(LL14(
+	// 前回自動更新の上書きが失敗したまま（試行時 exe 日時 == 現在）なら手動展開向け文言
+	bool prevFailed = false;
+	if (savedata.updateAttemptExeTime != 0) {
+		TCHAR exePath[MAX_PATH] = { 0 };
+		GetModuleFileName(NULL, exePath, MAX_PATH);
+		HANDLE hFile = CreateFile(exePath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+		if (hFile != INVALID_HANDLE_VALUE) {
+			FILETIME ftWrite;
+			if (GetFileTime(hFile, NULL, NULL, &ftWrite)) {
+				ULARGE_INTEGER ull;
+				ull.LowPart = ftWrite.dwLowDateTime;
+				ull.HighPart = ftWrite.dwHighDateTime;
+				const __int64 exeTime = (__int64)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+				if (exeTime == savedata.updateAttemptExeTime)
+					prevFailed = true;
+				else {
+					savedata.updateAttemptExeTime = 0;
+					MpPersistSavedataQuick();
+				}
+			}
+			CloseHandle(hFile);
+		}
+	}
+	const wchar_t* updMsg;
+	if (prevFailed) {
+		updMsg = LL14(
+			L"前回の自動更新が完了していないようです。\n更新ファイルを「ダウンロード」フォルダへ展開し、手動で上書きしますか？",
+			L"The previous automatic update does not appear to have completed.\nExtract the update files to Downloads for a manual overwrite?",
+			L"La precedente mise a jour automatique ne semble pas terminee.\nExtraire les fichiers vers Telechargements pour un remplacement manuel ?",
+			L"Il precedente aggiornamento automatico non sembra completato.\nEstrarre i file in Download per la sovrascrittura manuale?",
+			L"La actualizacion automatica anterior no parece haberse completado.\n¿Extraer los archivos en Descargas para sobrescribir manualmente?",
+			L"이전 자동 업데이트가 완료되지 않은 것 같습니다.\n다운로드 폴더에 풀어 수동으로 덮어쓰시겠습니까?",
+			L"上次自动更新似乎未完成。\n是否解压到“下载”文件夹以便手动覆盖？",
+			L"يبدو أن التحديث التلقائي السابق لم يكتمل.\nهل تريد استخراج الملفات إلى التنزيلات للكتابة اليدوية؟",
+			L"Предыдущее автообновление, похоже, не завершилось.\nРаспаковать файлы в Загрузки для ручной замены?",
+			L"Das vorherige automatische Update scheint nicht abgeschlossen.\nDateien nach Downloads entpacken und manuell uberschreiben?",
+			L"A atualizacao automatica anterior parece nao ter sido concluida.\nExtrair os arquivos em Downloads para substituir manualmente?",
+			L"De vorige automatische update lijkt niet voltooid.\nBestanden uitpakken naar Downloads voor handmatig overschrijven?",
+			L"Poprzednia automatyczna aktualizacja wyglada na niedokonczona.\nRozpakowac pliki do Pobrane w celu recznego nadpisania?",
+			L"Onceki otomatik guncelleme tamamlanmamis gorunuyor.\nManuel uzerine yazma icin Indirilenler klasorune acilsin mi?");
+	} else {
+		updMsg = LL14(
 		L"アップデートファイルがあります。\n今すぐ更新しますか？", /* 日本語 */
 		L"An update file is available.\nWould you like to update now?", /* 英語 */
 		L"Un fichier de mise à jour est disponible.\nMettre à jour maintenant ?", /* フランス語 */
@@ -21684,7 +21725,9 @@ LRESULT COggDlg::OnUpdateAvailable(WPARAM wParam, LPARAM)
 		L"Er is een updatebestand beschikbaar.\nNu bijwerken?", /* オランダ語 */
 		L"Dostępny jest plik aktualizacji.\nCzy zaktualizować teraz?", /* ポーランド語 */
 		L"Güncelleme dosyası mevcut.\nŞimdi güncellemek istiyor musunuz?" /* トルコ語 */
-	), MB_YESNO);
+		);
+	}
+	int ret = AfxMessageBox(updMsg, MB_YESNO);
 	if (ret == IDYES && DoUpdateAndRestart())
 	{
 		UpdateCheckEndPrompt(false, 0);
