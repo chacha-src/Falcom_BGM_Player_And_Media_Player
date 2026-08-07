@@ -21,8 +21,10 @@ static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 static const TCHAR* TARGET_HOST_EXE_NAME = _T("KpiHost64.exe");
 
 // 配布 ZIP / 展開 EXE の下限（空・404 HTML・途中切断を弾く）
+// 本体は数MB級、KpiHost64 は ~100KB 未満もあり得るので別閾値
 static const ULONGLONG UPDATE_ZIP_MIN_BYTES = 200000ULL;
-static const ULONGLONG UPDATE_EXE_MIN_BYTES = 100000ULL;
+static const ULONGLONG UPDATE_MAIN_EXE_MIN_BYTES = 1000000ULL; // oggYSEDbgm_uni_avx2.exe
+static const ULONGLONG UPDATE_HOST_EXE_MIN_BYTES = 20000ULL;   // KpiHost64.exe
 
 // コンパイル時間ではなく、現在動いている実行ファイルの実際の更新日時を取得するように変更いたしましたわ
 // これにより、ファイルの一部だけをビルドした際の「時間が過去のままになる落とし穴」を完全に回避いたします
@@ -246,7 +248,7 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 
 // ZIP から特定のファイル（targetFileName）だけを抽出し、destDir直下に展開する
 // 展開バイト数が ZIP 内 uncompressed_size と一致し、PE(MZ)なら成功
-static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, const CString& targetFileName)
+static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, const CString& targetFileName, ULONGLONG minBytes)
 {
 	zlib_filefunc64_def ffunc;
 #ifdef USEWIN32IOAPI
@@ -324,8 +326,8 @@ static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, cons
 
 			if (writeOk
 				&& written == (ULONGLONG)fi.uncompressed_size
-				&& written >= UPDATE_EXE_MIN_BYTES
-				&& IsLikelyPeExe(outPath, UPDATE_EXE_MIN_BYTES))
+				&& written >= minBytes
+				&& IsLikelyPeExe(outPath, minBytes))
 			{
 				bFound = true;
 			}
@@ -403,8 +405,8 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 		return false;
 	}
 
-	if (!ExtractZipToDir(zipPath, destDir, TARGET_EXE_NAME)
-		|| !ExtractZipToDir(zipPath, destDir, TARGET_HOST_EXE_NAME))
+	if (!ExtractZipToDir(zipPath, destDir, TARGET_EXE_NAME, UPDATE_MAIN_EXE_MIN_BYTES)
+		|| !ExtractZipToDir(zipPath, destDir, TARGET_HOST_EXE_NAME, UPDATE_HOST_EXE_MIN_BYTES))
 	{
 		AfxMessageBox(LL14(
 			L"ZIPの展開に失敗しました。\nダウンロードフォルダのファイルを確認してください。",
@@ -801,8 +803,8 @@ bool DoUpdateAndRestart()
 	}
 
 	// 終了前に展開して内容を確認（ZIP破損・サイズ不一致・非PEはここで弾く）
-	if (!ExtractZipToDir(zipPath, extractDir, TARGET_EXE_NAME)
-		|| !ExtractZipToDir(zipPath, extractDir, TARGET_HOST_EXE_NAME))
+	if (!ExtractZipToDir(zipPath, extractDir, TARGET_EXE_NAME, UPDATE_MAIN_EXE_MIN_BYTES)
+		|| !ExtractZipToDir(zipPath, extractDir, TARGET_HOST_EXE_NAME, UPDATE_HOST_EXE_MIN_BYTES))
 	{
 		DeleteFile(zipPath);
 		AfxMessageBox(LL14(
@@ -829,8 +831,8 @@ bool DoUpdateAndRestart()
 	extractedHostPath.Format(_T("%s\\%s"), extractDir, TARGET_HOST_EXE_NAME);
 
 	// 二重確認（展開直後の PE / サイズ）
-	if (!IsLikelyPeExe(extractedPath, UPDATE_EXE_MIN_BYTES)
-		|| !IsLikelyPeExe(extractedHostPath, UPDATE_EXE_MIN_BYTES))
+	if (!IsLikelyPeExe(extractedPath, UPDATE_MAIN_EXE_MIN_BYTES)
+		|| !IsLikelyPeExe(extractedHostPath, UPDATE_HOST_EXE_MIN_BYTES))
 	{
 		DeleteFile(zipPath);
 		DeleteFile(extractedPath);
