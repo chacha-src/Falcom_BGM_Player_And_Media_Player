@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -437,6 +437,65 @@ static BOOL ResumeModeUsesPlayb(int m)
 	if (m >= 1 && m <= 21) return TRUE;
 	if (m == -11 || m == -12 || m == -13 || m == -14 || m == -15) return TRUE;
 	return FALSE;
+}
+
+// 動画グラフ構築(play/plays)の前に呼ぶ。.save が無ければ 0、途中再生なら 1、はじめからなら 0（.save 削除）
+static int PromptResumePlaybackIfSaveExists(CWnd* wnd, LPCTSTR mediaPath)
+{
+	if (!wnd || !mediaPath || !*mediaPath) return 0;
+	CString path = ResumeSavePathRead(mediaPath);
+	if (!ResumeSaveFileExists(path)) return 0;
+	if (IDYES == wnd->MessageBox(LL14(
+		L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", /* 日本語 */
+		L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start", /* 英語 */
+		L"Des données de reprise existent.\nReprendre là où vous vous êtes arrêté ?\nOui = Reprendre\nNon = Jouer depuis le début", /* フランス語 */
+		L"Esistono dati di ripresa.\nRiprendere da dove ci si è fermati?\nSì = Riprendi\nNo = Riproduci dall'inizio", /* イタリア語 */
+		L"Existen datos de reanudación.\n¿Reanudar desde donde lo dejó?\nSí = Reanudar\nNo = Reproducir desde el inicio", /* スペイン語 */
+		L"중간 재생 데이터가 존재합니다.\n지난번 중단한 부분부터 재생하시겠습니까?\n예 = 중간부터 재생\n아니요 = 처음부터 재생", /* 韓国語 */
+		L"存在中途播放数据。\n是否从上次中断处播放？\n是 = 从中途播放\n否 = 从头播放", /* 中国語 */
+		L"بيانات الاستئناف موجودة.\nهل تريد الاستئناف من حيث توقفت؟\nنعم = استئناف\nلا = تشغيل من البداية", /* アラビア語 */
+		L"Данные возобновления существуют.\nПродолжить с места остановки?\nДа = Продолжить\nНет = Играть с начала", /* ロシア語 */
+		L"Fortsetzungsdaten vorhanden.\nVon der Unterbrechungsstelle fortfahren?\nJa = Fortsetzen\nNein = Von Anfang abspielen", /* ドイツ語 */
+		L"Dados de retomada existem.\nRetomar de onde parou?\nSim = Retomar\nNão = Reproduzir do início", /* ポルトガル語 */
+		L"Hervatgegevens aanwezig.\nHervatten waar u gebleven was?\nJa = Hervatten\nNee = Afspelen vanaf het begin", /* オランダ語 */
+		L"Istnieją dane wznowienia.\nWznowić od miejsca przerwania?\nTak = Wznów\nNie = Odtwórz od początku", /* ポーランド語 */
+		L"Devam verisi mevcut.\nKaldığınız yerden devam edilsin mi?\nEvet = Devam et\nHayır = Baştan oynat"), /* トルコ語 */
+		LL14(
+			L"再生確認", /* 日本語タイトル */
+			L"Playback confirmation",
+			L"Confirmation de lecture",
+			L"Conferma riproduzione",
+			L"Confirmación de reproducción",
+			L"재생 확인",
+			L"播放确认",
+			L"تأكيد التشغيل",
+			L"Подтверждение воспроизведения",
+			L"Wiedergabebestätigung",
+			L"Confirmação de reprodução",
+			L"Afspeelbevestiging",
+			L"Potwierdzenie odtwarzania",
+			L"Oynatma onayı"), /* トルコ語タイトル */
+		MB_YESNO)) {
+		return 1;
+	}
+	ResumeSaveRemove(mediaPath);
+	return 0;
+}
+
+// plays2 直後の Run。先に即試行し、失敗時のみ短いリトライ（従来の無条件 Sleep 450ms を避ける）
+static void TryRunMediaControlQuick()
+{
+	extern IMediaControl* pMediaControl;
+	extern void DoEvent();
+	if (!pMediaControl) return;
+	HRESULT hr = pMediaControl->Run();
+	if (SUCCEEDED(hr)) return;
+	for (int y = 0; y < 30; ++y) {
+		Sleep(10);
+		DoEvent();
+		hr = pMediaControl->Run();
+		if (SUCCEEDED(hr)) break;
+	}
 }
 
 static void ResumeApplyPlaybSeek(__int64 pb);
@@ -11002,46 +11061,8 @@ void COggDlg::play()
 			pMainFrame1->plays2();
 	}
 	else if (ResumeModeUsesPlayb(mode) || mode == -2) {
-		if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-			f123.Close();
-			if (IDYES == MessageBox(LL14(
-				L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", /* 日本語 */
-				L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start", /* 英語 */
-				L"Des données de reprise existent.\nReprendre là où vous vous êtes arrêté ?\nOui = Reprendre\nNon = Jouer depuis le début", /* フランス語 */
-				L"Esistono dati di ripresa.\nRiprendere da dove ci si è fermati?\nSì = Riprendi\nNo = Riproduci dall'inizio", /* イタリア語 */
-				L"Existen datos de reanudación.\n¿Reanudar desde donde lo dejó?\nSí = Reanudar\nNo = Reproducir desde el inicio", /* スペイン語 */
-				L"중간 재생 데이터가 존재합니다.\n지난번 중단한 부분부터 재생하시겠습니까?\n예 = 중간부터 재생\n아니요 = 처음부터 재생", /* 韓国語 */
-				L"存在中途播放数据。\n是否从上次中断处播放？\n是 = 从中途播放\n否 = 从头播放", /* 中国語 */
-				L"بيانات الاستئناف موجودة.\nهل تريد الاستئناف من حيث توقفت؟\nنعم = استئناف\nلا = تشغيل من البداية", /* アラبيا語 */
-				L"Данные возобновления существуют.\nПродолжить с места остановки?\nДа = Продолжить\nНет = Играть с начала", /* ロシア語 */
-				L"Fortsetzungsdaten vorhanden.\nVon der Unterbrechungsstelle fortfahren?\nJa = Fortsetzen\nNein = Von Anfang abspielen", /* ドイツ語 */
-				L"Dados de retomada existem.\nRetomar de onde parou?\nSim = Retomar\nNão = Reproduzir do início", /* ポルトガル語 */
-				L"Hervatgegevens aanwezig.\nHervatten waar u gebleven was?\nJa = Hervatten\nNee = Afspelen vanaf het begin", /* オランダ語 */
-				L"Istnieją dane wznowienia.\nWznowić od miejsca przerwania?\nTak = Wznów\nNie = Odtwórz od początku", /* ポーランド語 */
-				L"Devam verisi mevcut.\nKaldığınız yerden devam edilsin mi?\nEvet = Devam et\nHayır = Baştan oynat"), /* トルコ語 */
-				LL14(
-					L"再生確認", /* 日本語タイトル */
-					L"Playback confirmation",
-					L"Confirmation de lecture",
-					L"Conferma riproduzione",
-					L"Confirmación de reproducción",
-					L"재생 확인",
-					L"播放确认",
-					L"تأكيد التشغيل",
-					L"Подтверждение воспроизведения",
-					L"Wiedergabebestätigung",
-					L"Confirmação de reprodução",
-					L"Afspeelbevestiging",
-					L"Potwierdzenie odtwarzania",
-					L"Oynatma onayı"), /* トルコ語タイトル */
-				MB_YESNO)) {
-				flggg = 1;
-			}
-			else {
-				ResumeSaveRemove(filen);
-			}
-		}
-		if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
+		flggg = PromptResumePlaybackIfSaveExists(this, filen);
+		if (flggg == 1 && f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 			f123.Close();
 			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
 			if (ResumeModeUsesPlayb(mode)) {
@@ -15894,6 +15915,21 @@ float PitchScaleFromPos(int pitchPos)
 	return TempoPercentFromPos(pitchPos) / 100.0f;
 }
 
+// TempoPercentFromPos の逆写像（表示% → スライダー位置）
+int TempoPosFromPercent(float percent)
+{
+	if (percent < 5.0f) percent = 5.0f;
+	if (percent > 800.0f) percent = 800.0f;
+	int pos;
+	if (percent >= 100.0f)
+		pos = (int)(percent + 100.0f + 0.5f);
+	else
+		pos = (int)((percent - 33.3f) * 3.0f + 0.5f);
+	if (pos < 0) pos = 0;
+	if (pos > 400) pos = 400;
+	return pos;
+}
+
 // ---------------------------------------------------------------------------
 // テンポ可変の壁時計予測（区間履歴は累積変数のみ。vector 不要）
 //   経過 = 実壁時計（一時停止を除く）
@@ -18925,55 +18961,17 @@ void COggDlg::dp(CString a)
 		}
 		fnn = ti;
 		mode = -2; modesub = -2;
+		// グラフ構築(play)の前に確認 → ダイアログ表示までの待ちを短縮
+		const int flggg = PromptResumePlaybackIfSaveExists(this, filen);
 		pMainFrame1 = new CDouga;
 		pMainFrame1->Create(GetSafeHwnd());
 		pMainFrame1->ShowWindow(SW_HIDE);
 		pMainFrame1->play(0);
 		CFile f123;
-		int flggg = 0;
-		if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-			f123.Close();
-			if (IDYES == MessageBox(LL14(
-				L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", /* 日本語 */
-				L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start", /* 英語 */
-				L"Des données de reprise existent.\nReprendre là où vous vous êtes arrêté ?\nOui = Reprendre\nNon = Jouer depuis le début", /* フランス語 */
-				L"Esistono dati di ripresa.\nRiprendere da dove ci si è fermati?\nSì = Riprendi\nNo = Riproduci dall'inizio", /* イタリア語 */
-				L"Existen datos de reanudación.\n¿Reanudar desde donde lo dejó?\nSí = Reanudar\nNo = Reproducir desde el inicio", /* スペイン語 */
-				L"중간 재생 데이터가 존재합니다.\n지난번 중단한 부분부터 재생하시겠습니까?\n예 = 중간부터 재생\n아니요 = 처음부터 재생", /* 韓国語 */
-				L"存在中途播放数据。\n是否从上次中断处播放？\n是 = 从中途播放\n否 = 从头播放", /* 中国語 */
-				L"بيانات الاستئناف موجودة.\nهل تريد الاستئناف من حيث توقفت؟\nنعم = استئناف\nلا = تشغيل من البداية", /* アラビア語 */
-				L"Данные возобновления существуют.\nПродолжить с места остановки?\nДа = Продолжить\nНет = Играть с начала", /* ロシア語 */
-				L"Fortsetzungsdaten vorhanden.\nVon der Unterbrechungsstelle fortfahren?\nJa = Fortsetzen\nNein = Von Anfang abspielen", /* ドイツ語 */
-				L"Dados de retomada existem.\nRetomar de onde parou?\nSim = Retomar\nNão = Reproduzir do início", /* ポルトガル語 */
-				L"Hervatgegevens aanwezig.\nHervatten waar u gebleven was?\nJa = Hervatten\nNee = Afspelen vanaf het begin", /* オランダ語 */
-				L"Istnieją dane wznowienia.\nWznowić od miejsca przerwania?\nTak = Wznów\nNie = Odtwórz od początku", /* ポーランド語 */
-				L"Devam verisi mevcut.\nKaldığınız yerden devam edilsin mi?\nEvet = Devam et\nHayır = Baştan oynat"), /* トルコ語 */
-				LL14(
-					L"再生確認", /* 日本語タイトル */
-					L"Playback confirmation",
-					L"Confirmation de lecture",
-					L"Conferma riproduzione",
-					L"Confirmación de reproducción",
-					L"재생 확인",
-					L"播放确认",
-					L"تأكيد التشغيل",
-					L"Подтверждение воспроизведения",
-					L"Wiedergabebestätigung",
-					L"Confirmação de reprodução",
-					L"Afspeelbevestiging",
-					L"Potwierdzenie odtwarzania",
-					L"Oynatma onayı"), /* トルコ語タイトル */
-				MB_YESNO)) {
-				flggg = 1;
-			}
-			else {
-				ResumeSaveRemove(filen);
-			}
-		}
-		if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
+		if (flggg == 1 && f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 			f123.Close();
 			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
-			if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
+			if (pMediaControl) { TryRunMediaControlQuick(); }
 			if (mode == -10) {
 				if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 					f123.Read(&playb, sizeof(__int64));
@@ -18998,7 +18996,7 @@ void COggDlg::dp(CString a)
 		}
 		else {
 			if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
-			if (pMediaControl) { for (int y = 0; y < 45; y++) { Sleep(10); DoEvent(); }pMediaControl->Run(); }
+			if (pMediaControl) { TryRunMediaControlQuick(); }
 			if (pMainFrame1) { pMainFrame1->seek(0); }
 		}
 		//		if(pGraphBuilder)pMainFrame1->plays2();
@@ -20611,6 +20609,8 @@ void COggDlg::timerp()
 			}
 		}
 	}
+	// 動画(mode=-2) / ゲーム+動画合成: テンポ → DirectShow 再生速度
+	DougaApplyTempoToVideoRate();
 	if (!(mode == -2 || videoonly == TRUE)) {
 		const double tempoRate = TempoPlaybackRateFromPos(tempo);
 		const double totalSrc = (double)(ta * 60 + tb) + (double)tc * 0.01;
@@ -21840,7 +21840,9 @@ void COggDlg::timerp()
 			m_dsb->SetVolume((savedata.dsvol - 1) * 7);
 	}
 	if (drawth == TRUE) return;
-	if (pBasicAudio) {
+	if (DougaPitchCorrect_IsActive()) {
+		DougaPitchCorrect_SetVolumeDsPos(savedata.dsvol);
+	} else if (pBasicAudio) {
 		if (savedata.dsvol == -498)
 			pBasicAudio->put_Volume(-10000);
 		else
@@ -24914,63 +24916,17 @@ void COggDlg::OnRestart()
 			fnn = ti;
 			stflg = FALSE;
 			modesub = -2; mode = -2;
+			// グラフ構築(play)の前に確認 → ダイアログ表示までの待ちを短縮
+			const int flggg = PromptResumePlaybackIfSaveExists(this, filen);
 			pMainFrame1 = new CDouga;
 			pMainFrame1->Create(GetSafeHwnd());
 			pMainFrame1->ShowWindow(SW_HIDE);
 			pMainFrame1->play(0);
 			CFile f123;
-			int flggg = 0;
-			if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
-				f123.Close();
-				if (IDYES == MessageBox(LL14(
-					L"途中再生データが存在します。\n前回中断した部分から再生しますか？\nはい = 途中から再生\nいいえ = はじめから再生", /* 日本語 */
-					L"Resume data exists.\nResume from where you left off?\nYes = Resume\nNo = Play from start", /* 英語 */
-					L"Des données de reprise existent.\nReprendre là où vous vous êtes arrêté ?\nOui = Reprendre\nNon = Jouer depuis le début", /* フランス語 */
-					L"Esistono dati di ripresa.\nRiprendere da dove ci si è fermati?\nSì = Riprendi\nNo = Riproduci dall'inizio", /* イタリア語 */
-					L"Existen datos de reanudación.\n¿Reanudar desde donde lo dejó?\nSí = Reanudar\nNo = Reproducir desde el inicio", /* スペイン語 */
-					L"중간 재생 데이터가 존재합니다.\n지난번 중단한 부분부터 재생하시겠습니까?\n예 = 중간부터 재생\n아니요 = 처음부터 재생", /* 韓国語 */
-					L"存在中途播放数据。\n是否从上次中断处播放？\n是 = 从中途播放\n否 = 从头播放", /* 中国語 */
-					L"توجد بيانات استئناف.\nهل تريد الاستئناف من حيث توقفت؟\nنعم = استئناف\nلا = تشغيل من البداية", /* アラビア語 */
-					L"Данные возобновления существуют.\nПродолжить с места остановки?\nДа = Продолжить\nНет = Играть с начала", /* ロシア語 */
-					L"Fortsetzungsdaten vorhanden.\nVon der Unterbrechungsstelle fortfahren?\nJa = Fortsetzen\nNein = Von Anfang abspielen", /* ドイツ語 */
-					L"Dados de retomada existem.\nRetomar de onde parou?\nSim = Retomar\nNão = Reproduzir do início", /* ポルトガル語 */
-					L"Hervatgegevens aanwezig.\nHervatten waar u gebleven was?\nJa = Hervatten\nNee = Afspelen vanaf het begin", /* オランダ語 */
-					L"Istnieją dane wznowienia.\nWznowić od miejsca przerwania?\nTak = Wznów\nNie = Odtwórz od początku", /* ポーランド語 */
-					L"Devam verisi mevcut.\nKaldığınız yerden devam edilsin mi?\nEvet = Devam et\nHayır = Baştan oynat"), /* トルコ語 */
-					LL14(
-						L"再生確認", /* 日本語タイトル */
-						L"Playback confirmation",
-						L"Confirmation de lecture",
-						L"Conferma riproduzione",
-						L"Confirmación de reproducción",
-						L"재생 확인",
-						L"播放确认",
-						L"تأكيد التشغيل",
-						L"Подтверждение воспроизведения",
-						L"Wiedergabebestätigung",
-						L"Confirmação de reprodução",
-						L"Afspeelbevestiging",
-						L"Potwierdzenie odtwarzania",
-						L"Oynatma onayı"), /* トルコ語タイトル */
-					MB_YESNO)) {
-					flggg = 1;
-				}
-				else {
-					ResumeSaveRemove(filen);
-				}
-			}
-			if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE && flggg == 1) {
+			if (flggg == 1 && f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 				f123.Close();
 				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
-				if (pMediaControl) {
-					for (int y = 0; y < 45; y++) {
-						Sleep(10); DoEvent();
-						long eventCode;
-						pMediaEvent->WaitForCompletion(-1, &eventCode);
-						HRESULT hr = pMediaControl->Run();
-						if (hr == S_OK) break;
-					}
-				}
+				TryRunMediaControlQuick();
 				if (mode == -10) {
 					if (f123.Open(ResumeSavePathRead(filen), CFile::modeRead | CFile::shareDenyWrite, NULL) == TRUE) {
 						f123.Read(&playb, sizeof(__int64));
@@ -24995,13 +24951,7 @@ void COggDlg::OnRestart()
 			}
 			else {
 				if (pMainFrame1 && pGraphBuilder)pMainFrame1->plays2();
-				if (pMediaControl) {
-					for (int y = 0; y < 45; y++) {
-						Sleep(10); DoEvent();
-						HRESULT hr = pMediaControl->Run();
-						if (hr == S_OK) break;
-					}
-				}
+				TryRunMediaControlQuick();
 				if (pMainFrame1) { pMainFrame1->seek(0); }
 			}
 			//			if(pGraphBuilder)pMainFrame1->plays2();

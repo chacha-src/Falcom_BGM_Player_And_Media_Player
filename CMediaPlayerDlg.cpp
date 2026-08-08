@@ -1,4 +1,4 @@
-﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -30,6 +30,7 @@
 #include "DeviceRecordDlg.h"
 #include "ScreenCaptureDlg.h"
 #include "CDesktopLyricsWnd.h"
+#include "Douga.h"
 #include "MpPlayerAddons.h"
 #include "TagEditDlg.h"
 #include "FileTagInfo.h"
@@ -5446,6 +5447,7 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			const int p = m_tempo.GetPos();
 			og->m_tempo_sl.SetPos(p);
 			tempo = p; // timerp 待ちにせず RB/予想時間と一致させる
+			DougaApplyTempoToVideoRate();
 		}
 		else if (h == m_pitch.GetSafeHwnd()) {
 			const int p = m_pitch.GetPos();
@@ -6847,6 +6849,7 @@ void CMediaPlayerDlg::ApplyPracticeTempoPercent(int pct)
 	if (m_tempo.GetSafeHwnd())
 		m_tempo.SetPos(pos);
 	tempo = pos;
+	DougaApplyTempoToVideoRate();
 }
 
 void CMediaPlayerDlg::OnPracticeTempo50() { ApplyPracticeTempoPercent(50); }

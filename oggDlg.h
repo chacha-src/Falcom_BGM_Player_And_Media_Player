@@ -457,6 +457,7 @@ float TempoPercentFromPos(int tempoPos);
 double TempoPlaybackRateFromPos(int tempoPos);
 float TempoTimeRatioFromPos(int tempoPos);
 float PitchScaleFromPos(int pitchPos);
+int TempoPosFromPercent(float percent); // 表示% → スライダー 0..400
 void OggResetRubberBandStretcher();
 void RequestPlaybackRestart(HWND hwnd = NULL);
 // タグ編集など: 現再生位置を .save に書き、次回 play で確認なし復帰する

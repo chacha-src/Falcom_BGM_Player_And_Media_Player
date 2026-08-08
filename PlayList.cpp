@@ -3086,6 +3086,61 @@ static bool IsDougaVideoFile(const CString& path)
 	return false;
 }
 
+// D&D / Fol: 音声・動画・ゲーム系のみ許可（Office/画像/テキスト等は拒否）
+static bool IsPlaylistDropAllowedExt(const CString& pathOrName)
+{
+	const int dot = pathOrName.ReverseFind(_T('.'));
+	if (dot < 0)
+		return false;
+	CString e = pathOrName.Mid(dot);
+	e.MakeLower();
+
+	if (IsDougaVideoFile(pathOrName))
+		return true;
+
+	static const LPCTSTR kAudioGame[] = {
+		// ネイティブ音声
+		_T(".mp3"), _T(".mp2"), _T(".mp1"), _T(".rmp"),
+		_T(".ogg"), _T(".oga"), _T(".opus"), _T(".qull3"), _T(".qull3h"),
+		_T(".flac"), _T(".wav"), _T(".wave"),
+		_T(".m4a"), _T(".aac"), _T(".wma"),
+		_T(".aif"), _T(".aiff"), _T(".aifc"),
+		_T(".dsf"), _T(".dff"), _T(".wsd"),
+		_T(".tta"), _T(".tak"), _T(".ape"), _T(".wv"),
+		// チップ / マルチ曲ヘルパ
+		_T(".kss"), _T(".nsf"), _T(".nsfe"), _T(".gbs"), _T(".hes"), _T(".nes"),
+		_T(".spc"), _T(".vgm"), _T(".vgz"), _T(".gym"), _T(".s98"),
+		_T(".ovi"), _T(".opi"), _T(".ozi"), _T(".m"), _T(".mz"),
+		_T(".psf"), _T(".psf2"), _T(".minipsf"), _T(".minipsf2"),
+		_T(".ssf"), _T(".dsf"), _T(".usf"), _T(".gsf"), _T(".2sf"),
+		_T(".ncsf"), _T(".snsf"),
+		_T(".adx"), _T(".ahx"), _T(".hca"), _T(".awb"), _T(".acb"),
+		_T(".at3"), _T(".at9"), _T(".vag"), _T(".xa"), _T(".nub"),
+		_T(".bgm"), _T(".bms"), _T(".bme"), _T(".bml"),
+		// ゲーム系コンテナ（ISO/IMG 系は不可。KPI 宣言分は下で許可）
+		_T(".dat"),
+		_T(".bik"), _T(".bk2"), _T(".bks"),
+	};
+	for (int i = 0; i < _countof(kAudioGame); ++i) {
+		if (e == kAudioGame[i])
+			return true;
+	}
+
+	// 読み込み済み KPI が宣言する拡張子（チェック OFF でも「対応形式」として許可）
+	for (int i = 0; i < kpicnt; ++i) {
+		for (int j = 0; j < 300; ++j) {
+			if (ext[i][j].IsEmpty()) break;
+			CString ke = ext[i][j];
+			ke.MakeLower();
+			if (!ke.IsEmpty() && ke[0] != _T('.'))
+				ke = _T(".") + ke;
+			if (ke == e)
+				return true;
+		}
+	}
+	return false;
+}
+
 int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f,BOOL ff)
 {
 	// 旧プレイリストに KPI 再生として保存された動画も CDouga 再生へ移行する。
@@ -8646,8 +8701,8 @@ if (fff == 0)
 				}
 				CString sL = s;
 				s.MakeLower();
-				if (s.Right(4) == ".png" || s.Right(4) == ".url" || s.Right(4) == ".jpg" || s.Right(4) == ".bmp" || s.Right(4) == ".cue" || s.Right(4) == ".iso" || s.Right(4) == ".bin" || s.Right(4) == ".img" || s.Right(4) == ".mds" || s.Right(4) == ".mdf" || s.Right(4) == ".ccd" || s.Right(4) == ".sub" || s.Right(4) == ".pdf" || s.Right(4) == ".com" || s.Right(4) == ".exe" || s.Right(4) == ".dll" || s.Right(4) == ".bat" || s.Right(4) == ".reg" || s.Right(4) == ".msi" || s.Right(4) == ".nfo" || s.Right(4) == ".diz" || s.Right(4) == ".gif" || s.Right(4) == ".ico" ||
-					s.Right(4) == ".lrc" || s.Right(4) == ".zip" || s.Right(4) == ".lzh" || s.Right(4) == ".cab" || s.Right(4) == ".rar" || s.Right(4) == ".txt" || s.Right(4) == ".doc" || s.Right(4) == "html" || s.Right(4) == ".htm" || s.Right(4) == ".ini" || s.Right(4) == ".xml" || s.Right(4) == ".kar" || s.Right(4) == ".hed" || s.Right(4) == ".mzi" || s.Right(4) == ".mag" || s.Right(4) == ".mvi" || s.Right(4) == ".lvi" || s.Right(4) == ".mpi" || s.Right(4) == ".pvi" || s.Right(4) == ".pzi" || s.Right(4) == ".p86" || s.Right(4) == ".mml" || s.Right(4) == ".m3u" || s.Right(4) == ".frm" || s.Right(7) == ".psflib" || s.Right(8) == ".psf2lib" || s.Right(7) == ".usflib" || s.Right(7) == ".2sflib" || s.Right(3) == ".gb" || s.Right(7) == ".gsflib" || s.Right(4) == ".pdx") {
+				// 許可: 音声 / 動画 / .dat 等ゲーム系 / KPI 宣言拡張子。それ以外(Office・画像・テキスト等)は入れない
+				if (!IsPlaylistDropAllowedExt(sL) && !IsPlaylistDropAllowedExt(s)) {
 				}
 				else {
 					if (syo == 0) {

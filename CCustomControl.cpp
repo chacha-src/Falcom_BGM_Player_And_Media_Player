@@ -4765,7 +4765,22 @@ void CCustomListBox::PostNcDestroy()
 void CCustomListBox::PreSubclassWindow()
 {
     CListBox::PreSubclassWindow();
+    // 作成後の ModifyStyle では MeasureItem が走らないことがあるので SetItemHeight も併用
     ModifyStyle(0, LBS_OWNERDRAWFIXED | LBS_HASSTRINGS);
+    const UINT dpi = CCC_GetControlDpi(m_hWnd);
+    int h = CCC_ScaleDpi(24, dpi);
+    CDC* pDC = GetDC();
+    if (pDC) {
+        CFont* pf = GetFont();
+        CFont* old = pf ? pDC->SelectObject(pf) : NULL;
+        TEXTMETRIC tm = {};
+        pDC->GetTextMetrics(&tm);
+        if (old) pDC->SelectObject(old);
+        ReleaseDC(pDC);
+        const int fromFont = tm.tmHeight + CCC_ScaleDpi(8, dpi);
+        if (fromFont > h) h = fromFont;
+    }
+    SetItemHeight(0, h);
 }
 
 HBRUSH CCustomListBox::CtlColor(CDC* pDC, UINT)
@@ -4868,7 +4883,10 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
 
 void CCustomListBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
 {
-    lp->itemHeight = 24;
+    UINT dpi = 96;
+    if (GetSafeHwnd())
+        dpi = CCC_GetControlDpi(m_hWnd);
+    lp->itemHeight = (UINT)CCC_ScaleDpi(24, dpi);
 }
 
 // ============================================================================
@@ -5191,7 +5209,10 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
 
 void CCustomComboBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
 {
-    lp->itemHeight = 28;
+    UINT dpi = 96;
+    if (GetSafeHwnd())
+        dpi = CCC_GetControlDpi(m_hWnd);
+    lp->itemHeight = (UINT)CCC_ScaleDpi(28, dpi);
 }
 
 void CCustomComboBox::OnDropdown()

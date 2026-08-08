@@ -45,10 +45,13 @@ public:
 
 	CCustomRangeSliderCtrl m_seek;
 	CCustomSliderCtrl m_vol;
+	CCustomSliderCtrl m_rate;
 	CCustomStatic m_time, m_volL, m_volVal, m_info;
+	CCustomStatic m_rateL, m_rateVal;
 	CCustomStandardButton m_prev, m_rew, m_play, m_pause, m_stop, m_ff, m_next;
 	CCustomStandardButton m_fade, m_mute, m_fs, m_sz1, m_sz15, m_sz2, m_help;
 	CToolTipCtrl m_tip;
+	int m_rateDrag; // 速度スライダー操作中は Sync で上書きしない
 
 	void OnBnPrev();
 	void OnBnRew();
@@ -64,6 +67,7 @@ public:
 	void OnBnSz15();
 	void OnBnSz2();
 	void OnBnHelp();
+	void OnStnRateReset();
 
 protected:
 	CDouga* m_owner;
@@ -314,6 +318,7 @@ public:
 	afx_msg void OnDougaMenuMute();
 	afx_msg void OnDougaMenuFs();
 	afx_msg void OnDougaMenuFade();
+	afx_msg void OnDougaMenuDsFilters();
 	afx_msg void OnDougaMenuTopmost();
 	afx_msg void OnDougaMenuAspect();
 	afx_msg void OnDougaMenuSpeed(UINT nID);
@@ -322,6 +327,13 @@ public:
 	void DestroyHelpSheet();
 	afx_msg void OnHelpShowSheet();
 };
+
+// 動画再生速度(0.1x〜4.0x)。テンポ連携付き。Douga / timerp / MP から呼ぶ
+void DougaSetPlaybackRate(double rate, BOOL pushTempo);
+void DougaApplyTempoToVideoRate();
+BOOL DougaVideoRateActive();
+BOOL DougaPitchCorrect_IsActive();
+void DougaPitchCorrect_SetVolumeDsPos(int dsPos);
 
 /////////////////////////////////////////////////////////////////////////////
 

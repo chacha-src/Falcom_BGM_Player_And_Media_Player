@@ -7,6 +7,35 @@
 #include "ogg.h"
 #include "oggDlg.h"
 #include "Douga.h"
+#include "CMediaPlayerDlg.h"
+#include "Graph.h"
+#include "dsound.h"
+#include "rubberband/RubberBandStretcher.h"
+#include <vector>
+#include <cmath>
+#include <algorithm>
+#include <mmreg.h>
+#if _MSC_VER >= 1950
+#pragma comment(lib, "rubberband-library_2026")
+#else
+#pragma comment(lib, "rubberband-library")
+#endif
+#pragma comment(lib, "dsound.lib")
+#pragma comment(lib, "dxguid.lib")
+
+extern IMediaSeeking* pMediaSeeking;
+extern CDouga* pMainFrame1;
+extern int mode;
+
+BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner);
+void DougaPitchCorrect_Shutdown();
+BOOL DougaPitchCorrect_IsActive();
+void DougaPitchCorrect_SetVolumeDsPos(int dsPos);
+void DougaPitchCorrect_SetPlaybackRate(double rate);
+void DougaPitchCorrect_SetPaused(BOOL paused);
+void DougaPitchCorrect_Poll();
+void DougaPitchCorrect_PauseForGraphSeek();
+void DougaPitchCorrect_OnSeek();
 //#include "vfw.h"
 //#include <digitalv.h>
 //#include "resource.h"
@@ -80,6 +109,13 @@ public:
 		long WhichMethodToCallback) = 0;
 
 };
+
+// qedit Sample Grabber / Null Renderer（この環境の CLSID は登録済み）
+static const GUID CLSID_SampleGrabber =
+{ 0xC1F400A0, 0x3F08, 0x11D3, { 0x9F, 0x0B, 0x00, 0x60, 0x08, 0x03, 0x9E, 0x37 } };
+static const GUID CLSID_NullRenderer =
+{ 0xC1F400A4, 0x3F08, 0x11D3, { 0x9F, 0x0B, 0x00, 0x60, 0x08, 0x03, 0x9E, 0x37 } };
+
 typedef interface IMediaDet IMediaDet;
 EXTERN_C const IID IID_IMediaDet;
 EXTERN_C const CLSID CLSID_MediaDet;
@@ -305,10 +341,10 @@ void CDougaHelpDlg::OnPaint()
 		L"· Siempre visible …… clic der. Sobre otras ventanas", L"· 항상 위에 …… 우클릭. 다른 창 위에 고정", L"· 总在最前 …… 右键。固定在其他窗口之上", L"· دائماً في المقدمة …… يمين. فوق النوافذ الأخرى",
 		L"· Поверх всех …… ПКМ. Над другими окнами", L"· Immer im Vordergrund …… Rechtsklick. Über anderen Fenstern", L"· Sempre visível …… direito. Acima das outras janelas", L"· Altijd op voorgrond …… rechtsklik. Boven andere vensters",
 		L"· Zawsze na wierzchu …… PPM. Nad innymi oknami", L"· Her zaman üstte …… sağ tık. Diğer pencerelerin üstünde")); y += lh;
-	body(L, y, LL14(L"・再生速度 …… 右クリック（対応グラフ時）。0.5x〜2.0x", L"· Playback speed …… right-click (when supported). 0.5x–2.0x", L"· Vitesse …… clic droit (si pris en charge). 0,5x–2,0x", L"· Velocità …… destro (se supportato). 0.5x–2.0x",
-		L"· Velocidad …… clic der. (si se admite). 0.5x–2.0x", L"· 재생 속도 …… 우클릭(지원 시). 0.5x–2.0x", L"· 播放速度 …… 右键（支持时）。0.5x–2.0x", L"· سرعة التشغيل …… يمين (إن دعم). 0.5x–2.0x",
-		L"· Скорость …… ПКМ (если есть). 0.5x–2.0x", L"· Geschwindigkeit …… Rechtsklick (falls unterstützt). 0.5x–2.0x", L"· Velocidade …… direito (se suportado). 0.5x–2.0x", L"· Snelheid …… rechtsklik (indien ondersteund). 0.5x–2.0x",
-		L"· Prędkość …… PPM (jeśli obsługiwane). 0.5x–2.0x", L"· Hız …… sağ tık (desteklenirse). 0.5x–2.0x")); y += lh + 4;
+	body(L, y, LL14(L"・再生速度 …… バー右のスライダー／右クリック。0.1x〜4.0x（テンポ連動）", L"· Playback speed …… bar slider / right-click. 0.1x–4.0x (tempo sync)", L"· Vitesse …… curseur / clic droit. 0,1x–4,0x (tempo)", L"· Velocità …… cursore / destro. 0.1x–4.0x (tempo)",
+		L"· Velocidad …… control / clic der. 0.1x–4.0x (tempo)", L"· 재생 속도 …… 바 슬라이더/우클릭. 0.1x–4.0x (템포 연동)", L"· 播放速度 …… 栏滑块/右键。0.1x–4.0x（速度联动）", L"· السرعة …… شريط / يمين. 0.1x–4.0x",
+		L"· Скорость …… слайдер / ПКМ. 0.1x–4.0x (темп)", L"· Geschwindigkeit …… Leiste / RMB. 0,1x–4,0x", L"· Velocidade …… barra / direito. 0,1x–4,0x", L"· Snelheid …… balk / rechtsklik. 0,1x–4,0x",
+		L"· Predkosc …… pasek / PPM. 0,1x–4,0x", L"· Hiz …… cubuk / sag tik. 0.1x–4.0x")); y += lh;
 
 	title(L, y, LL14(L"音量 / 消音 / フェード", L"Volume / Mute / Fade", L"Volume / Muet / Fondu", L"Volume / Mute / Fade",
 		L"Volumen / Silencio / Fade", L"음량 / 음소거 / 페이드", L"音量 / 静音 / 淡出", L"الصوت / كتم / تلاشي",
@@ -439,6 +475,7 @@ CDougaBarHost::CDougaBarHost()
 	, m_short(0)
 	, m_laidShort(-1)
 	, m_seekDrag(0)
+	, m_rateDrag(0)
 	, m_muted(0)
 	, m_mutePos(0)
 {
@@ -461,6 +498,8 @@ BEGIN_MESSAGE_MAP(CDougaBarHost, CWnd)
 	ON_BN_CLICKED(IDC_DOUGA_SZ15, OnBnSz15)
 	ON_BN_CLICKED(IDC_DOUGA_SZ2, OnBnSz2)
 	ON_BN_CLICKED(IDC_DOUGA_HELP, OnBnHelp)
+	ON_STN_CLICKED(IDC_DOUGA_RATE_L, OnStnRateReset)
+	ON_STN_CLICKED(IDC_DOUGA_RATEVAL, OnStnRateReset)
 END_MESSAGE_MAP()
 
 // ファイル後方で定義されるグローバルへの前方参照
@@ -475,6 +514,7 @@ extern IAMStreamSelect* iam;
 extern CString streamname[40];
 extern int audionum;
 extern long width, height;
+extern int tempo;
 extern void MpTaskbarReplay();
 extern void MpTaskbarNextTrack();
 extern void MpTaskbarPrevTrack();
@@ -508,6 +548,13 @@ BOOL CDougaBarHost::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_tip.GetSafeHwnd())
 		m_tip.RelayEvent(pMsg);
+	// 速度つまみ: HSCROLL より先にドラッグ中フラグを立て、タイマー同期の上書きを防ぐ
+	if (pMsg && m_rate.GetSafeHwnd() && pMsg->hwnd == m_rate.m_hWnd) {
+		if (pMsg->message == WM_LBUTTONDOWN || pMsg->message == WM_LBUTTONDBLCLK)
+			m_rateDrag = 1;
+		else if (pMsg->message == WM_LBUTTONUP)
+			m_rateDrag = 0;
+	}
 	return CWnd::PreTranslateMessage(pMsg);
 }
 
@@ -536,6 +583,7 @@ BOOL CDougaBarHost::CreateBar(CDouga* owner)
 	CRect z(0, 0, 1, 1);
 	const DWORD btnStyle = WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP;
 	const DWORD stStyle = WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS;
+	const DWORD stClickStyle = stStyle | SS_NOTIFY;
 	const DWORD slStyle = WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS | TBS_BOTH;
 
 	m_seek.Create(slStyle | TBS_ENABLESELRANGE, z, this, IDC_DOUGA_SEEK);
@@ -559,13 +607,26 @@ BOOL CDougaBarHost::CreateBar(CDouga* owner)
 	m_volL.Create(_T(""), stStyle, z, this, IDC_DOUGA_VOL_L);
 	m_vol.Create(slStyle, z, this, IDC_DOUGA_VOL);
 	m_volVal.Create(_T(""), stStyle, z, this, IDC_DOUGA_VOLVAL);
+	m_rateL.Create(_T(""), stClickStyle, z, this, IDC_DOUGA_RATE_L);
+	m_rate.Create(slStyle, z, this, IDC_DOUGA_RATE);
+	m_rateVal.Create(_T(""), stClickStyle, z, this, IDC_DOUGA_RATEVAL);
 	m_info.Create(_T(""), stStyle | SS_ENDELLIPSIS, z, this, IDC_DOUGA_INFO);
 
 	m_vol.SetRange(-498, 1);
+	m_rate.SetRange(10, 400);
+	m_rate.SetPos(100);
 	m_seek.ModifyStyle(0, TBS_ENABLESELRANGE);
 	m_time.SetNoParentInvalidate(TRUE);
 	m_volVal.SetNoParentInvalidate(TRUE);
+	m_rateVal.SetNoParentInvalidate(TRUE);
 	m_info.SetNoParentInvalidate(TRUE);
+	// バーは親がピンク以外。無効化時に白抜けしないようラベルは不透明ピンク固定
+	m_rateL.SetSolidFill(TRUE, COLOR_DIALOG_BG);
+	m_volL.SetSolidFill(TRUE, COLOR_DIALOG_BG);
+	m_rateVal.SetSolidFill(TRUE, COLOR_DIALOG_BG);
+	m_volVal.SetSolidFill(TRUE, COLOR_DIALOG_BG);
+	m_time.SetSolidFill(TRUE, COLOR_DIALOG_BG);
+	m_info.SetSolidFill(TRUE, COLOR_DIALOG_BG);
 
 	m_prev.SetWindowText(LL14(L"前へ", L"Prev", L"Prec", L"Prec", L"Ant", L"이전", L"上一首", L"السابق", L"Пред", L"Zurück", L"Ant", L"Vorige", L"Poprz", L"Onceki"));
 	m_rew.SetWindowText(LL14(L"戻す", L"Rew", L"Recul", L"Ind", L"Retr", L"되감기", L"快退", L"ترجيع", L"Назад", L"Zurück", L"Voltar", L"Terug", L"Wstecz", L"Geri"));
@@ -581,8 +642,10 @@ BOOL CDougaBarHost::CreateBar(CDouga* owner)
 	m_sz15.SetWindowText(L"1.5x");
 	m_sz2.SetWindowText(L"2x");
 	m_volL.SetWindowText(LL14(L"音量", L"Vol", L"Vol", L"Vol", L"Vol", L"음량", L"音量", L"صوت", L"Громк.", L"Laut", L"Vol", L"Vol", L"Głośn.", L"Ses"));
+	m_rateL.SetWindowText(LL14(L"速度", L"Spd", L"Vit", L"Vel", L"Vel", L"속도", L"速度", L"سرعة", L"Скор.", L"Geschw", L"Vel", L"Snel", L"Pręd", L"Hiz"));
 	m_time.SetWindowText(L"00:00 / 00:00");
-	m_volVal.SetWindowText(L"0");
+	m_volVal.SetWindowText(L"0%");
+	m_rateVal.SetWindowText(L"1.00x");
 
 	if (m_tip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX)) {
 		m_tip.Activate(TRUE);
@@ -601,6 +664,9 @@ BOOL CDougaBarHost::CreateBar(CDouga* owner)
 		DougaAddTip(m_tip, m_sz2, LL14(L"倍サイズ (2x)", L"Large size (2x)", L"Grande taille (2x)", L"Dimensione grande (2x)", L"Tamaño grande (2x)", L"2배 크기 (2x)", L"双倍尺寸 (2x)", L"الحجم الكبير (2x)", L"Двойной размер (2x)", L"Doppelte Größe (2x)", L"Tamanho grande (2x)", L"Grote maat (2x)", L"Duży rozmiar (2x)", L"Büyük boyut (2x)"));
 		DougaAddTip(m_tip, m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 		DougaAddTip(m_tip, m_vol, LL14(L"DirectShow 音量", L"DirectShow volume", L"Volume DirectShow", L"Volume DirectShow", L"Volumen DirectShow", L"DirectShow 음량", L"DirectShow 音量", L"صوت DirectShow", L"Громкость DirectShow", L"DirectShow-Lautstärke", L"Volume DirectShow", L"DirectShow-volume", L"Głośność DirectShow", L"DirectShow sesi"));
+		DougaAddTip(m_tip, m_rate, LL14(L"再生速度 0.1x〜4.0x（テンポと連動）", L"Playback speed 0.1x–4.0x (syncs with tempo)", L"Vitesse 0,1x–4,0x (liee au tempo)", L"Velocita 0.1x–4.0x (collegata al tempo)", L"Velocidad 0.1x–4.0x (sincronizada con tempo)", L"재생 속도 0.1x–4.0x (템포 연동)", L"播放速度 0.1x–4.0x（与速度联动）", L"سرعة 0.1x–4.0x (متزامنة مع الإيقاع)", L"Скорость 0.1x–4.0x (связана с темпом)", L"Geschwindigkeit 0,1x–4,0x (mit Tempo)", L"Velocidade 0,1x–4,0x (ligada ao tempo)", L"Snelheid 0,1x–4,0x (gekoppeld aan tempo)", L"Predkosc 0,1x–4,0x (zsynchronizowana z tempo)", L"Hiz 0.1x–4.0x (tempo ile bagli)"));
+		DougaAddTip(m_tip, m_rateL, LL14(L"クリックで 1.00x（100%）に戻す", L"Click to reset to 1.00x (100%)", L"Clic pour revenir a 1,00x (100%)", L"Clic per tornare a 1.00x (100%)", L"Clic para volver a 1.00x (100%)", L"클릭 시 1.00x(100%)로 복귀", L"点击恢复为 1.00x（100%）", L"انقر لإعادة 1.00x (100%)", L"Щелчок: сброс на 1.00x (100%)", L"Klick setzt auf 1,00x (100%)", L"Clique para voltar a 1.00x (100%)", L"Klik voor reset naar 1.00x (100%)", L"Kliknij, aby wrócić do 1.00x (100%)", L"Tikla: 1.00x (100%)"));
+		DougaAddTip(m_tip, m_rateVal, LL14(L"クリックで 1.00x（100%）に戻す", L"Click to reset to 1.00x (100%)", L"Clic pour revenir a 1,00x (100%)", L"Clic per tornare a 1.00x (100%)", L"Clic para volver a 1.00x (100%)", L"클릭 시 1.00x(100%)로 복귀", L"点击恢复为 1.00x（100%）", L"انقر لإعادة 1.00x (100%)", L"Щелчок: сброс на 1.00x (100%)", L"Klick setzt auf 1,00x (100%)", L"Clique para voltar a 1.00x (100%)", L"Klik voor reset naar 1.00x (100%)", L"Kliknij, aby wrócić do 1.00x (100%)", L"Tikla: 1.00x (100%)"));
 		DougaAddTip(m_tip, m_seek, LL14(L"シーク", L"Seek", L"Position", L"Posizione", L"Posición", L"탐색", L"定位", L"تقديم", L"Перемотка", L"Suche", L"Busca", L"Zoeken", L"Przewijanie", L"Sar"));
 	}
 
@@ -668,26 +734,37 @@ void CDougaBarHost::LayoutBar()
 		x += btns[i].ww + gap;
 	}
 
-	// 音量は右端固定。ボタンとの間の空きにメディア情報
+	// 速度＋音量は右端固定。ボタンとの間の空きにメディア情報
+	int rateLW = DougaDpiScale(m_hWnd, m_short ? 28 : 36);
+	int rateVW = DougaDpiScale(m_hWnd, m_short ? 36 : 44);
+	int rateW = DougaDpiScale(m_hWnd, m_short ? 56 : 80);
 	int volLW = DougaDpiScale(m_hWnd, m_short ? 28 : 36);
-	int volVW = DougaDpiScale(m_hWnd, m_short ? 28 : 36);
-	int volW = DougaDpiScale(m_hWnd, m_short ? 70 : 100);
+	int volVW = DougaDpiScale(m_hWnd, m_short ? 32 : 40);
+	int volW = DougaDpiScale(m_hWnd, m_short ? 60 : 90);
+	int rateArea = rateLW + gap + rateW + gap + rateVW;
 	int volArea = volLW + gap + volW + gap + volVW;
+	int rightArea = rateArea + gap + volArea;
 	int volX = W - pad - volArea;
-	if (volX < x + DougaDpiScale(m_hWnd, 8)) {
-		volW = W - pad - x - volLW - volVW - gap * 3;
-		if (volW < 40) volW = 40;
+	int rateX = volX - gap - rateArea;
+	if (rateX < x + DougaDpiScale(m_hWnd, 8)) {
+		rateW = 48; volW = 48;
+		rateArea = rateLW + gap + rateW + gap + rateVW;
 		volArea = volLW + gap + volW + gap + volVW;
+		rightArea = rateArea + gap + volArea;
 		volX = W - pad - volArea;
+		rateX = volX - gap - rateArea;
 	}
 	int infoX = x + gap;
-	int infoW = volX - gap - infoX;
+	int infoW = rateX - gap - infoX;
 	if (infoW >= DougaDpiScale(m_hWnd, 40) && m_info.GetSafeHwnd()) {
 		move(m_info, infoX, y2, infoW, bh);
 		m_info.ShowWindow(SW_SHOWNA);
 	} else if (m_info.GetSafeHwnd()) {
 		m_info.ShowWindow(SW_HIDE);
 	}
+	move(m_rateL, rateX, y2, rateLW, bh); rateX += rateLW + gap;
+	move(m_rate, rateX, y2, rateW, bh); rateX += rateW + gap;
+	move(m_rateVal, rateX, y2, rateVW, bh);
 	move(m_volL, volX, y2, volLW, bh); volX += volLW + gap;
 	move(m_vol, volX, y2, volW, bh); volX += volW + gap;
 	move(m_volVal, volX, y2, volVW, bh);
@@ -720,6 +797,15 @@ void CDougaBarHost::LayoutBar()
 	}
 	// 移動後の残像を消す
 	Invalidate(TRUE);
+}
+
+static void DougaFormatDsVolPct(int dsPos, WCHAR* buf, size_t n)
+{
+	// MP と同じ換算: (-498..1) → 約 0%..100%
+	double pct = (dsPos + 499) * 2.0 / 10.0;
+	if (pct < 0.0) pct = 0.0;
+	if (pct > 100.0) pct = 100.0;
+	swprintf_s(buf, n, L"%.0f%%", pct);
 }
 
 void CDougaBarHost::SyncSeekVol()
@@ -759,9 +845,37 @@ void CDougaBarHost::SyncSeekVol()
 			int v = og->m_dsval.GetPos();
 			m_vol.SetPos(v);
 			WCHAR vs[32];
-			swprintf_s(vs, L"%d", v);
+			DougaFormatDsVolPct(v, vs, 32);
 			m_volVal.SetWindowText(vs);
 		}
+	}
+	if (m_rate.GetSafeHwnd() && DougaVideoRateActive()) {
+		m_rate.EnableWindow(TRUE);
+		// ラベルは無効化しない（WS_DISABLED だと Win11 で白背景に戻る）
+		m_rateL.EnableWindow(TRUE);
+		m_rateVal.EnableWindow(TRUE);
+		// ドラッグ中は GetRate/テンポ同期でつまみが戻るのを防ぐ（音量は m_dsval 即時反映なので問題になりにくい）
+		HWND hf = ::GetFocus();
+		HWND cap = ::GetCapture();
+		const BOOL busy = m_rateDrag
+			|| (hf && hf == m_rate.GetSafeHwnd())
+			|| (cap && cap == m_rate.GetSafeHwnd());
+		if (!busy && pMediaSeeking) {
+			double cur = 1.0;
+			if (FAILED(pMediaSeeking->GetRate(&cur)) || cur <= 0.0)
+				cur = TempoPlaybackRateFromPos(tempo);
+			if (cur < 0.1) cur = 0.1;
+			if (cur > 4.0) cur = 4.0;
+			m_rate.SetPos((int)(cur * 100.0 + 0.5));
+			WCHAR vs[32];
+			swprintf_s(vs, L"%.2fx", cur);
+			m_rateVal.SetWindowText(vs);
+		}
+	} else if (m_rate.GetSafeHwnd()) {
+		m_rate.EnableWindow(FALSE);
+		// ラベルは常に有効のまま（見た目の白抜け防止）。文字色はスライダー無効で十分伝わる
+		m_rateL.EnableWindow(TRUE);
+		m_rateVal.EnableWindow(TRUE);
 	}
 }
 
@@ -786,23 +900,58 @@ void CDougaBarHost::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	}
 	HWND h = pScrollBar->GetSafeHwnd();
 	if (h == m_seek.GetSafeHwnd()) {
+		int p = m_seek.GetPos();
 		if (nSBCode == TB_THUMBTRACK || nSBCode == TB_THUMBPOSITION)
 			m_seekDrag = 1;
-		if (nSBCode == TB_ENDTRACK || nSBCode == TB_THUMBPOSITION) {
-			int p = m_seek.GetPos();
-			og->m_time.SetPos(p);
+		og->m_time.SetPos(p);
+		// 本体 OnHScroll へ SendMessage しない（cl2 / RubberBand_DestroyBank で UI が永久待ちになる）
+		if (nSBCode == TB_THUMBPOSITION || nSBCode == TB_ENDTRACK
+			|| nSBCode == TB_PAGEUP || nSBCode == TB_PAGEDOWN
+			|| nSBCode == TB_LINEUP || nSBCode == TB_LINEDOWN
+			|| nSBCode == TB_TOP || nSBCode == TB_BOTTOM) {
+			extern IMediaPosition* pMediaPosition;
+			extern BOOL videoonly;
+			extern __int64 playb;
+			extern int poss;
+			extern int poss5;
+			if (pMediaPosition && (mode == -2 || (mode > 0 && videoonly == TRUE))) {
+				int mn = 0, mx = 1;
+				og->m_time.GetRange(mn, mx);
+				if (p < mn) p = mn;
+				if (p > mx) p = mx;
+				og->m_time.SetPos(p);
+				playb = (__int64)p;
+				poss = 0;
+				poss5 = p;
+				if (m_owner)
+					m_owner->seek((LONGLONG)((float)p * 100000.0f));
+			}
 			m_seekDrag = 0;
-		} else if (nSBCode == TB_THUMBTRACK) {
-			int p = m_seek.GetPos();
-			og->m_time.SetPos(p);
 		}
 	} else if (h == m_vol.GetSafeHwnd()) {
 		int v = m_vol.GetPos();
 		og->m_dsval.SetPos(v);
 		m_muted = 0;
+		if (DougaPitchCorrect_IsActive())
+			DougaPitchCorrect_SetVolumeDsPos(v);
 		WCHAR vs[32];
-		swprintf_s(vs, L"%d", v);
+		DougaFormatDsVolPct(v, vs, 32);
 		m_volVal.SetWindowText(vs);
+	} else if (h == m_rate.GetSafeHwnd()) {
+		if (nSBCode == TB_THUMBTRACK || nSBCode == TB_THUMBPOSITION || nSBCode == TB_ENDTRACK)
+			m_rateDrag = 1;
+		int v = m_rate.GetPos();
+		if (nSBCode == TB_THUMBTRACK && nPos != 0)
+			v = (int)nPos; // track 中はメッセージ側の値が新しいことがある
+		if (v < 10) v = 10;
+		if (v > 400) v = 400;
+		DougaSetPlaybackRate((double)v / 100.0, TRUE);
+		WCHAR vs[32];
+		swprintf_s(vs, L"%.2fx", (double)v / 100.0);
+		m_rateVal.SetWindowText(vs);
+		// 解除は PreTranslate の LBUTTONUP（THUMBPOSITION で落とすとドラッグ中に同期が割り込む）
+		if (nSBCode == TB_ENDTRACK && ::GetCapture() != m_rate.GetSafeHwnd())
+			m_rateDrag = 0;
 	}
 	CWnd::OnHScroll(nSBCode, nPos, pScrollBar);
 }
@@ -851,6 +1000,15 @@ void CDougaBarHost::OnBnSz1() { if (m_owner) m_owner->OnMenuitem32771(); }
 void CDougaBarHost::OnBnSz15() { if (m_owner) m_owner->OnMenuitem32773(); }
 void CDougaBarHost::OnBnSz2() { if (m_owner) m_owner->OnMenuitem32772(); }
 void CDougaBarHost::OnBnHelp() { if (m_owner) m_owner->ShowHelpSheet(); }
+void CDougaBarHost::OnStnRateReset()
+{
+	// テンポ／ピッチラベルと同様: クリックで 100%（1.00x）へ
+	DougaSetPlaybackRate(1.0, TRUE);
+	if (m_rate.GetSafeHwnd())
+		m_rate.SetPos(100);
+	if (m_rateVal.GetSafeHwnd())
+		m_rateVal.SetWindowText(L"1.00x");
+}
 
 /////////////////////////////////////////////////////////////////////////////
 // CDouga — 動画配置(バーと競合しないよう videoSite に限定)
@@ -1347,6 +1505,10 @@ void CDouga::ApplyVideoDest()
 	}
 	if (hdwp)
 		::EndDeferWindowPos(hdwp);
+	// 動画HWND/レンダラ再配置後もバーを最前面に（クリックが動画側へ吸われるのを防ぐ）
+	if (!savedata.fs && m_bar.IsBarReady() && m_bar.GetSafeHwnd())
+		::SetWindowPos(m_bar.m_hWnd, HWND_TOP, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
 	// ドラッグ中は子コントロール再配置しない(残像の主因)。枠だけ追従。
 	if (!savedata.fs && m_bar.IsBarReady() && !m_inSizeMove)
@@ -1512,6 +1674,7 @@ BEGIN_MESSAGE_MAP(CDouga, CFrameWnd)
 	ON_COMMAND(ID_DOUGA_MUTE, OnDougaMenuMute)
 	ON_COMMAND(ID_DOUGA_FS, OnDougaMenuFs)
 	ON_COMMAND(ID_DOUGA_FADE, OnDougaMenuFade)
+	ON_COMMAND(ID_DOUGA_DSFILTERS, OnDougaMenuDsFilters)
 	ON_COMMAND(ID_DOUGA_TOPMOST, OnDougaMenuTopmost)
 	ON_COMMAND(ID_DOUGA_ASPECT, OnDougaMenuAspect)
 	ON_COMMAND_RANGE(ID_DOUGA_SPEED_FIRST, ID_DOUGA_SPEED_LAST, OnDougaMenuSpeed)
@@ -2920,20 +3083,19 @@ void CDouga::plays(TCHAR* s)
 	}
 
 
-	rate = GetFrameRate(pGraphBuilder);
-
-	// ファイル拡張子による推測をフォールバックとして使用
-	if (rate == 0.0)
+	rate = 0.0;
+	// 空グラフでの MediaDet 走査はファイルを二重オープンして重い。
+	// 拡張子で仮置きし、RenderFile 後にグラフから取り直す。
 	{
-		s2.MakeLower();
-		if (s2.Right(4) == ".vob" || s2.Right(4) == ".mpg" || s2.Right(3) == ".ts")
-		{
+		CString ext = s2;
+		ext.MakeLower();
+		if (ext.Right(4) == ".vob" || ext.Right(4) == ".mpg" || ext.Right(3) == ".ts")
 			rate = 29.97;
-		}
-		else if (s2.Right(4) == ".mp4" || s2.Right(4) == ".mkv")
-		{
-			rate = 23.976; // 一般的なデフォルト
-		}
+		else if (ext.Right(4) == ".mp4" || ext.Right(4) == ".mkv" || ext.Right(4) == ".m4v"
+			|| ext.Right(4) == ".mov" || ext.Right(5) == ".webm")
+			rate = 23.976;
+		else if (ext.Right(4) == ".avi" || ext.Right(4) == ".wmv")
+			rate = 29.97;
 	}
 
 	rateflg = 0;
@@ -3035,6 +3197,15 @@ void CDouga::plays(TCHAR* s)
 	HRESULT hr2 = pGraphBuilder->RenderFile(ss, NULL);
 	ConnectSubtitleWithDirectVobSub(pGraphBuilder);
 	DumpFilterGraph();
+
+	// RenderFile 後に実際の FPS を取得（失敗時は拡張子推定のまま）
+	{
+		const double r2 = GetFrameRate(pGraphBuilder);
+		if (r2 > 0.0) {
+			rate = (float)((int)(r2 * 1000.0f)) / 1000.0f;
+			rateflg = 0;
+		}
+	}
 
 	//if(prend)
 	//	pGraphBuilder->AddFilter(prend, L"Enhanced Video Renderer");
@@ -4391,12 +4562,30 @@ void CDouga::plays2()
 	IBasicVideo2* pBasicVideo2 = NULL;
 	if (pGraphBuilder)pGraphBuilder->QueryInterface(IID_IBasicVideo2, (LPVOID*)&pBasicVideo2);
 
-	// 音量設定
-	if (savedata.dsvol == -498) {
-		if (pBasicAudio)pBasicAudio->put_Volume(-10000);
+	// mode=-2: SetRate 後の音声を Grabber→Stretcher(pitch=1/R)→専用 DS へ（Run 前に張り替え）
+	if (mode == -2 && pGraphBuilder) {
+		HWND hwndOwner = GetSafeHwnd();
+		if (DougaPitchCorrect_Install(pGraphBuilder, hwndOwner)) {
+			if (pBasicAudio) { pBasicAudio->Release(); pBasicAudio = NULL; }
+			DougaPitchCorrect_SetVolumeDsPos(savedata.dsvol);
+			if (pMediaSeeking) {
+				double r = 1.0;
+				if (SUCCEEDED(pMediaSeeking->GetRate(&r)))
+					DougaPitchCorrect_SetPlaybackRate(r);
+			}
+		} else {
+			OutputDebugStringW(L"[DougaPitch] Install failed at plays2\n");
+		}
 	}
-	else {
-		if (pBasicAudio)pBasicAudio->put_Volume((savedata.dsvol - 1) * 7);
+
+	// 音量設定（ピッチ補正経路は専用 DS、それ以外は IBasicAudio）
+	if (!DougaPitchCorrect_IsActive()) {
+		if (savedata.dsvol == -498) {
+			if (pBasicAudio)pBasicAudio->put_Volume(-10000);
+		}
+		else {
+			if (pBasicAudio)pBasicAudio->put_Volume((savedata.dsvol - 1) * 7);
+		}
 	}
 
 	width = 0;
@@ -4492,17 +4681,13 @@ void CDouga::plays2()
 extern REFTIME aa2,aa;
 void CDouga::seek(LONGLONG l)
 {
+	// SetPositions より先に Grabber CB を止める（再生中シーク／途中再生のデッドロック防止）
+	DougaPitchCorrect_PauseForGraphSeek();
 	if(pMediaSeeking)pMediaSeeking->SetTimeFormat(&TIME_FORMAT_MEDIA_TIME);
 	REFERENCE_TIME rtpos = l;
-/*	if(aa2==0){}else{
-		REFTIME t;
-		pMediaPosition->get_CurrentPosition(&t);
-		LONGLONG te=(LONGLONG)SeekPoint(filesize,(float)(t*100/aa));
-//		pMediaSeeking->ConvertTimeFormat(&rtpos,NULL,te,&TIME_FORMAT_SAMPLE);
-		rtpos=te*100;
-	}*/
 	if(pMediaSeeking)pMediaSeeking->SetPositions(&rtpos,AM_SEEKING_AbsolutePositioning,NULL,AM_SEEKING_NoPositioning);
-
+	// ピッチ補正 DS / Stretcher の古い PCM を捨てて再開
+	DougaPitchCorrect_OnSeek();
 }
 
 extern int ps;
@@ -4511,10 +4696,12 @@ void CDouga::pause(int a)
 	if(a==0)
 	{
 		pMediaControl->Pause();
+		DougaPitchCorrect_SetPaused(TRUE);
 		ps=1;og->m_ps.SetWindowText(LL14(L"再開", L"Resume", L"Reprendre", L"Riprendi", L"Reanudar", L"재개", L"恢复", L"استئناف", L"Продолжить", L"Fortsetzen", L"Retomar", L"Hervatten", L"Wznów", L"Sürdür"));
 		og->SyncPauseButtonUi();
 	}else{
 		pMediaControl->Run();
+		DougaPitchCorrect_SetPaused(FALSE);
 		ps=0;og->m_ps.SetWindowText(LL14(L"一時停止", L"Pause", L"Pause", L"Pausa", L"Pausa", L"일시 정지", L"暂停", L"إيقاف مؤقت", L"Пауза", L"Pause", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"));
 		og->SyncPauseButtonUi();
 	}
@@ -4535,6 +4722,7 @@ void CDouga::stops()
 		savedata.p.right+=rr.left;
 	}
 	if(pMediaControl)pMediaControl->Stop();
+	DougaPitchCorrect_Shutdown();
 	REFERENCE_TIME rtpos = 0;
 	if(pMediaSeeking)pMediaSeeking->SetPositions(&rtpos,AM_SEEKING_AbsolutePositioning,NULL,AM_SEEKING_NoPositioning);
 //	pMediaControl->Pause();
@@ -4878,6 +5066,7 @@ void CDouga::OnTimer(UINT nIDEvent)
 		}
 		if (m_bar.IsBarReady())
 			m_bar.SyncSeekVol();
+		DougaPitchCorrect_Poll();
 	}
 	if(nIDEvent==155){
 		KillTimer(155);
@@ -5035,12 +5224,1076 @@ void CDouga::OnNcRButtonDown(UINT nHitTest, CPoint point)
 	CFrameWnd::OnNcRButtonDown(nHitTest, point);
 }
 
+// ============================================================================
+// mode=-2 音程維持: SetRate(R) + Stretcher(timeRatio=1/R, pitchScale=1) + 専用 DirectSound
+//
+// SampleGrabber は SetRate(R) 後、壁時計あたり約 R 倍の原音程 PCM を渡す。
+// timeRatio=1 のまま DS(Fs) に書くと書込速度≠再生速度になり、繰り返し／ノイズになる。
+// timeRatio=1/R で壁時計あたり Fs サンプルに直し、pitchScale=1 で音程を維持する。
+// （計画の「速度 R・音程 1」を Grabber 地点に合わせた実装。ゲーム合成は触らない）
+// ============================================================================
+namespace {
+
+static const double kDougaPitchEps = 0.02;
+static const DWORD kDougaPcPrebufferMs = 60;   // Play 開始前に少しだけ貯める
+static const DWORD kDougaPcMaxAheadMs = 1000;  // これ以上は書き込みを捨てる
+static const DWORD kDougaPcGapFlushMs = 350;   // PCM 途切れ → flush＋ドレイン開始
+
+struct DougaPcState {
+	LONG refCb;
+	IBaseFilter* grabberF;
+	IBaseFilter* nullF;
+	IBaseFilter* oldRenderer;
+	ISampleGrabber* grabber;
+	IDirectSound8* ds;
+	IDirectSoundBuffer* dsb;
+	RubberBand::RubberBandStretcher* shifter;
+	CRITICAL_SECTION cs;   // 状態（rate/shifter/playing）のみ。DS 操作では握らない
+	CRITICAL_SECTION dsCs; // DS バッファ書き込み専用。UI は inCallback==0 のときだけ触る
+	BOOL csInit;
+	BOOL dsCsInit;
+	BOOL installed;
+	BOOL playing;
+	BOOL dsRunning;
+	BOOL endFlushed;
+	BOOL draining;       // EOS 後、残量だけ再生して Stop
+	DWORD lastPcmTick;
+	DWORD drainTick;
+	DWORD drainAheadBytes; // flush 時点の残りバイト（ループ防止の上限）
+	double rate;
+	int sampleRate;
+	int channels;
+	int bits;
+	int blockAlign;
+	DWORD bufBytes;
+	DWORD writePos;
+	BOOL writePosValid;
+	DWORD prebufferBytes;
+	volatile LONG inCallback; // BufferCB 滞在中（UI は Stop 前に待つ）
+	std::vector<float> inFlat;
+	std::vector<float> outFlat;
+	std::vector<float> interleavedTmp;
+	std::vector<float*> inPtrs;
+	std::vector<float*> outPtrs;
+	std::vector<BYTE> pcmOut;
+};
+
+static DougaPcState g_pc = {};
+
+static void DougaPcFreeMediaType(AM_MEDIA_TYPE& mt)
+{
+	if (mt.cbFormat) {
+		CoTaskMemFree(mt.pbFormat);
+		mt.cbFormat = 0;
+		mt.pbFormat = NULL;
+	}
+	if (mt.pUnk) {
+		mt.pUnk->Release();
+		mt.pUnk = NULL;
+	}
+}
+
+static LONG DougaPcDsVolFromPos(int dsPos)
+{
+	if (dsPos <= -498) return -10000;
+	LONG v = (dsPos - 1) * 7;
+	if (v < -10000) v = -10000;
+	if (v > 0) v = 0;
+	return v;
+}
+
+static void DougaPcApplyVolume_NoLock(int dsPos)
+{
+	if (!g_pc.dsb) return;
+	g_pc.dsb->SetVolume(DougaPcDsVolFromPos(dsPos));
+}
+
+static DWORD DougaPcBytesAhead(DWORD writePos, DWORD playPos, DWORD bufBytes)
+{
+	if (bufBytes == 0) return 0;
+	if (writePos >= playPos)
+		return writePos - playPos;
+	return bufBytes - playPos + writePos;
+}
+
+static DWORD DougaPcMsToBytes(DWORD ms)
+{
+	if (g_pc.sampleRate <= 0 || g_pc.blockAlign <= 0) return 0;
+	DWORD b = (DWORD)(((__int64)g_pc.sampleRate * g_pc.blockAlign * ms) / 1000);
+	// blockAlign に揃える
+	if (g_pc.blockAlign > 0)
+		b -= b % (DWORD)g_pc.blockAlign;
+	return b;
+}
+
+static void DougaPcSilenceAll_NoLock()
+{
+	if (!g_pc.dsb || g_pc.bufBytes == 0) return;
+	void* p1 = NULL; void* p2 = NULL;
+	DWORD b1 = 0, b2 = 0;
+	HRESULT hr = g_pc.dsb->Lock(0, g_pc.bufBytes, &p1, &b1, &p2, &b2, 0);
+	if (hr == DSERR_BUFFERLOST) {
+		g_pc.dsb->Restore();
+		hr = g_pc.dsb->Lock(0, g_pc.bufBytes, &p1, &b1, &p2, &b2, 0);
+	}
+	if (FAILED(hr) || !p1) return;
+	memset(p1, 0, b1);
+	if (p2 && b2) memset(p2, 0, b2);
+	g_pc.dsb->Unlock(p1, b1, p2, b2);
+	g_pc.writePos = 0;
+	g_pc.writePosValid = TRUE;
+	g_pc.prebufferBytes = 0;
+}
+
+static void DougaPcWaitCallbackGone()
+{
+	// RubberBand process は数百 ms かかることがある。短すぎると Stop と競合する
+	for (int i = 0; i < 2000; ++i) {
+		if (InterlockedCompareExchange(&g_pc.inCallback, 0, 0) == 0)
+			break;
+		Sleep(1);
+	}
+}
+
+static void DougaPcStopDsOutsideCallback()
+{
+	DougaPcWaitCallbackGone();
+	if (g_pc.dsCsInit)
+		EnterCriticalSection(&g_pc.dsCs);
+	if (g_pc.dsb)
+		g_pc.dsb->Stop();
+	DougaPcSilenceAll_NoLock();
+	g_pc.dsRunning = FALSE;
+	g_pc.draining = FALSE;
+	g_pc.drainAheadBytes = 0;
+	if (g_pc.dsCsInit)
+		LeaveCriticalSection(&g_pc.dsCs);
+}
+
+// [writePos → play) を無音化（有効区間は残す）— 呼び出し元が dsCs 保持
+static void DougaPcSilenceStaleKeepValid_NoLock()
+{
+	if (!g_pc.dsb || !g_pc.writePosValid || g_pc.bufBytes == 0) return;
+	DWORD play = 0, dsWrite = 0;
+	if (FAILED(g_pc.dsb->GetCurrentPosition(&play, &dsWrite)))
+		return;
+	const DWORD ahead = DougaPcBytesAhead(g_pc.writePos, play, g_pc.bufBytes);
+	if (ahead >= g_pc.bufBytes) return;
+	DWORD stale = g_pc.bufBytes - ahead;
+	if (stale <= (DWORD)g_pc.blockAlign * 8) return;
+	stale -= (DWORD)g_pc.blockAlign * 4;
+	void* p1 = NULL; void* p2 = NULL;
+	DWORD b1 = 0, b2 = 0;
+	HRESULT hr = g_pc.dsb->Lock(g_pc.writePos, stale, &p1, &b1, &p2, &b2, 0);
+	if (hr == DSERR_BUFFERLOST) {
+		g_pc.dsb->Restore();
+		hr = g_pc.dsb->Lock(g_pc.writePos, stale, &p1, &b1, &p2, &b2, 0);
+	}
+	if (FAILED(hr) || !p1) return;
+	memset(p1, 0, b1);
+	if (p2 && b2) memset(p2, 0, b2);
+	g_pc.dsb->Unlock(p1, b1, p2, b2);
+}
+
+// 呼び出し元が dsCs を保持すること
+static BOOL DougaPcWritePcm_NoLock(const BYTE* data, DWORD bytes)
+{
+	if (!g_pc.dsb || !data || bytes == 0) return FALSE;
+	if (g_pc.blockAlign > 0)
+		bytes -= bytes % (DWORD)g_pc.blockAlign;
+	if (bytes == 0) return FALSE;
+
+	if (!g_pc.writePosValid)
+		DougaPcSilenceAll_NoLock();
+
+	if (g_pc.dsRunning) {
+		DWORD play = 0, dsWrite = 0;
+		if (FAILED(g_pc.dsb->GetCurrentPosition(&play, &dsWrite)))
+			return FALSE;
+		const DWORD ahead = DougaPcBytesAhead(g_pc.writePos, play, g_pc.bufBytes);
+		const DWORD maxAhead = DougaPcMsToBytes(kDougaPcMaxAheadMs);
+		if (maxAhead > 0 && ahead + bytes > maxAhead)
+			return FALSE;
+		if (ahead + bytes >= g_pc.bufBytes - (DWORD)g_pc.blockAlign * 8)
+			return FALSE;
+	}
+
+	void* p1 = NULL; void* p2 = NULL;
+	DWORD b1 = 0, b2 = 0;
+	HRESULT hr = g_pc.dsb->Lock(g_pc.writePos, bytes, &p1, &b1, &p2, &b2, 0);
+	if (hr == DSERR_BUFFERLOST) {
+		g_pc.dsb->Restore();
+		hr = g_pc.dsb->Lock(g_pc.writePos, bytes, &p1, &b1, &p2, &b2, 0);
+	}
+	if (FAILED(hr) || !p1) return FALSE;
+	memcpy(p1, data, b1);
+	if (p2 && b2) memcpy(p2, data + b1, b2);
+	g_pc.dsb->Unlock(p1, b1, p2, b2);
+	g_pc.writePos = (g_pc.writePos + bytes) % g_pc.bufBytes;
+
+	if (!g_pc.dsRunning && g_pc.playing) {
+		g_pc.prebufferBytes += bytes;
+		const DWORD need = DougaPcMsToBytes(kDougaPcPrebufferMs);
+		if (g_pc.prebufferBytes >= need) {
+			g_pc.dsb->SetCurrentPosition(0);
+			if (SUCCEEDED(g_pc.dsb->Play(0, 0, DSBPLAY_LOOPING)))
+				g_pc.dsRunning = TRUE;
+		}
+	}
+	return TRUE;
+}
+
+static void DougaPcApplyRateToShifter_NoLock()
+{
+	if (!g_pc.shifter) return;
+	const double r = (g_pc.rate > 0.05) ? g_pc.rate : 1.0;
+	g_pc.shifter->setTimeRatio(1.0 / r);
+	g_pc.shifter->setPitchScale(1.0);
+}
+
+static void DougaPcEnsureShifter_NoLock()
+{
+	if (g_pc.shifter) return;
+	if (g_pc.sampleRate < 8000 || g_pc.channels < 1) return;
+	try {
+		const double r = (g_pc.rate > 0.05) ? g_pc.rate : 1.0;
+		// 実時間向け Faster を優先（Finer はコールバックが長く UI を圧迫しやすい）
+		g_pc.shifter = new RubberBand::RubberBandStretcher(
+			(size_t)g_pc.sampleRate, (size_t)g_pc.channels,
+			RubberBand::RubberBandStretcher::OptionProcessRealTime |
+			RubberBand::RubberBandStretcher::OptionEngineFaster |
+			RubberBand::RubberBandStretcher::OptionTransientsMixed |
+			RubberBand::RubberBandStretcher::OptionPhaseLaminar |
+			RubberBand::RubberBandStretcher::OptionFormantPreserved |
+			RubberBand::RubberBandStretcher::OptionChannelsTogether,
+			1.0 / r,
+			1.0);
+		g_pc.shifter->setDebugLevel(0);
+		g_pc.shifter->setMaxProcessSize(8192);
+		g_pc.inPtrs.resize((size_t)g_pc.channels);
+		g_pc.outPtrs.resize((size_t)g_pc.channels);
+	}
+	catch (...) {
+		g_pc.shifter = NULL;
+		OutputDebugStringW(L"[DougaPitch] Stretcher create failed\n");
+	}
+}
+
+static void DougaPcFloatToPcm16(const float* interleaved, size_t frames, int ch, BYTE* dst)
+{
+	const size_t n = frames * (size_t)ch;
+	INT16* out = (INT16*)dst;
+	for (size_t i = 0; i < n; ++i) {
+		float s = interleaved[i];
+		if (s > 1.f) s = 1.f;
+		if (s < -1.f) s = -1.f;
+		const int v = (int)floorf(s * 32767.f + 0.5f);
+		out[i] = (INT16)((v > 32767) ? 32767 : (v < -32768 ? -32768 : v));
+	}
+}
+
+static void DougaPcRetrieveAndWrite_NoLock()
+{
+	// 注意: 呼び出し元は cs を握らないこと。dsCs のみ使用。
+	if (!g_pc.shifter) return;
+	const size_t maxFramesTotal = (size_t)(std::max)(1, g_pc.sampleRate / 5);
+	size_t wroteFrames = 0;
+	for (;;) {
+		int avail = g_pc.shifter->available();
+		if (avail <= 0) break;
+
+		if (g_pc.dsCsInit)
+			EnterCriticalSection(&g_pc.dsCs);
+		BOOL canWrite = TRUE;
+		if (g_pc.dsRunning && g_pc.dsb && g_pc.writePosValid) {
+			DWORD play = 0, dsWrite = 0;
+			if (SUCCEEDED(g_pc.dsb->GetCurrentPosition(&play, &dsWrite))) {
+				const DWORD ahead = DougaPcBytesAhead(g_pc.writePos, play, g_pc.bufBytes);
+				const DWORD maxAhead = DougaPcMsToBytes(kDougaPcMaxAheadMs);
+				if (maxAhead > 0 && ahead + DougaPcMsToBytes(40) > maxAhead)
+					canWrite = FALSE;
+			}
+		}
+		if (g_pc.dsCsInit)
+			LeaveCriticalSection(&g_pc.dsCs);
+		if (!canWrite) break;
+
+		size_t frames = (size_t)(std::min)(avail, g_pc.sampleRate / 25);
+		if (frames == 0) break;
+		if (wroteFrames + frames > maxFramesTotal)
+			frames = maxFramesTotal - wroteFrames;
+		if (frames == 0) break;
+
+		g_pc.outFlat.resize(frames * (size_t)g_pc.channels);
+		for (int c = 0; c < g_pc.channels; ++c)
+			g_pc.outPtrs[c] = g_pc.outFlat.data() + (size_t)c * frames;
+		const size_t got = g_pc.shifter->retrieve(g_pc.outPtrs.data(), frames);
+		if (got == 0) break;
+		g_pc.interleavedTmp.resize(got * (size_t)g_pc.channels);
+		for (size_t i = 0; i < got; ++i) {
+			for (int c = 0; c < g_pc.channels; ++c)
+				g_pc.interleavedTmp[i * (size_t)g_pc.channels + (size_t)c] = g_pc.outPtrs[c][i];
+		}
+		if (g_pc.bits == 16) {
+			g_pc.pcmOut.resize(got * (size_t)g_pc.blockAlign);
+			DougaPcFloatToPcm16(g_pc.interleavedTmp.data(), got, g_pc.channels, g_pc.pcmOut.data());
+			if (g_pc.dsCsInit)
+				EnterCriticalSection(&g_pc.dsCs);
+			const BOOL ok = DougaPcWritePcm_NoLock(g_pc.pcmOut.data(), (DWORD)(got * (size_t)g_pc.blockAlign));
+			if (g_pc.dsCsInit)
+				LeaveCriticalSection(&g_pc.dsCs);
+			if (!ok) break;
+		}
+		wroteFrames += got;
+		if (wroteFrames >= maxFramesTotal) break;
+	}
+}
+
+static void DougaPcOnPcm(const BYTE* p, long len)
+{
+	if (!p || len <= 0 || !g_pc.installed) return;
+	InterlockedExchange(&g_pc.inCallback, 1);
+
+	BOOL playing = FALSE;
+	int channels = 0, bits = 0, bpf = 0;
+	double rate = 1.0;
+	RubberBand::RubberBandStretcher* shifter = NULL;
+
+	if (g_pc.csInit)
+		EnterCriticalSection(&g_pc.cs);
+	playing = g_pc.playing;
+	channels = g_pc.channels;
+	bits = g_pc.bits;
+	bpf = g_pc.blockAlign;
+	rate = g_pc.rate;
+	if (playing && channels >= 1 && bits == 16 && bpf >= 1 && (len % bpf) == 0) {
+		g_pc.lastPcmTick = GetTickCount();
+		g_pc.endFlushed = FALSE;
+		g_pc.draining = FALSE;
+		g_pc.drainAheadBytes = 0;
+	} else {
+		playing = FALSE;
+	}
+	if (g_pc.csInit)
+		LeaveCriticalSection(&g_pc.cs);
+
+	if (!playing) {
+		InterlockedExchange(&g_pc.inCallback, 0);
+		return;
+	}
+
+	const long frames = len / bpf;
+	const INT16* src = (const INT16*)p;
+
+	// rate≈1: CS を持たずに DS へ
+	if (fabs(rate - 1.0) < kDougaPitchEps) {
+		if (g_pc.dsCsInit)
+			EnterCriticalSection(&g_pc.dsCs);
+		if (g_pc.playing)
+			DougaPcWritePcm_NoLock(p, (DWORD)len);
+		if (g_pc.dsCsInit)
+			LeaveCriticalSection(&g_pc.dsCs);
+		InterlockedExchange(&g_pc.inCallback, 0);
+		return;
+	}
+
+	if (g_pc.csInit)
+		EnterCriticalSection(&g_pc.cs);
+	if (!g_pc.playing) {
+		if (g_pc.csInit)
+			LeaveCriticalSection(&g_pc.cs);
+		InterlockedExchange(&g_pc.inCallback, 0);
+		return;
+	}
+	DougaPcEnsureShifter_NoLock();
+	shifter = g_pc.shifter;
+	if (!shifter) {
+		if (g_pc.csInit)
+			LeaveCriticalSection(&g_pc.cs);
+		InterlockedExchange(&g_pc.inCallback, 0);
+		return;
+	}
+	if (g_pc.csInit)
+		LeaveCriticalSection(&g_pc.cs);
+
+	const size_t samplesIn = (size_t)frames;
+	g_pc.inFlat.resize(samplesIn * (size_t)channels);
+	g_pc.inPtrs.resize((size_t)channels);
+	for (int c = 0; c < channels; ++c)
+		g_pc.inPtrs[c] = g_pc.inFlat.data() + (size_t)c * samplesIn;
+	for (long i = 0; i < frames; ++i) {
+		for (int c = 0; c < channels; ++c)
+			g_pc.inPtrs[c][i] = (float)src[i * channels + c] / 32768.f;
+	}
+
+	const size_t maxChunk = 8192;
+	size_t done = 0;
+	while (done < samplesIn) {
+		if (!g_pc.playing || !g_pc.installed)
+			break;
+		const size_t n = (std::min)(maxChunk, samplesIn - done);
+		float* ptrs[32];
+		const int chUse = (std::min)(channels, 32);
+
+		if (g_pc.csInit)
+			EnterCriticalSection(&g_pc.cs);
+		if (!g_pc.shifter || g_pc.shifter != shifter || !g_pc.playing) {
+			if (g_pc.csInit)
+				LeaveCriticalSection(&g_pc.cs);
+			break;
+		}
+		for (int c = 0; c < chUse; ++c)
+			ptrs[c] = g_pc.inPtrs[c] + done;
+		RubberBand::RubberBandStretcher* sh = g_pc.shifter;
+		if (g_pc.csInit)
+			LeaveCriticalSection(&g_pc.cs);
+
+		try {
+			sh->process(ptrs, n, false);
+		} catch (...) {
+			break;
+		}
+
+		// retrieve/write は cs なし（dsCs のみ）
+		if (g_pc.playing && g_pc.shifter == sh)
+			DougaPcRetrieveAndWrite_NoLock();
+		done += n;
+	}
+	InterlockedExchange(&g_pc.inCallback, 0);
+}
+
+class DougaPcGrabberCB : public ISampleGrabberCB
+{
+public:
+	STDMETHODIMP QueryInterface(REFIID riid, void** ppv)
+	{
+		if (!ppv) return E_POINTER;
+		if (riid == IID_IUnknown || riid == IID_ISampleGrabberCB) {
+			*ppv = static_cast<ISampleGrabberCB*>(this);
+			AddRef();
+			return S_OK;
+		}
+		*ppv = NULL;
+		return E_NOINTERFACE;
+	}
+	STDMETHODIMP_(ULONG) AddRef() { return (ULONG)InterlockedIncrement(&g_pc.refCb); }
+	STDMETHODIMP_(ULONG) Release()
+	{
+		LONG n = InterlockedDecrement(&g_pc.refCb);
+		return (ULONG)n;
+	}
+	STDMETHODIMP SampleCB(double, IMediaSample*) { return S_OK; }
+	STDMETHODIMP BufferCB(double, BYTE* pBuffer, long BufferLen)
+	{
+		DougaPcOnPcm(pBuffer, BufferLen);
+		return S_OK;
+	}
+};
+
+static DougaPcGrabberCB g_pcCb;
+
+static BOOL DougaPcIsAudioRendererName(const WCHAR* name)
+{
+	if (!name) return FALSE;
+	CString s(name);
+	s.MakeLower();
+	if (s.Find(L"directsound") >= 0) return TRUE;
+	if (s.Find(L"default wave") >= 0) return TRUE;
+	if (s.Find(L"audio renderer") >= 0) return TRUE;
+	if (s.Find(L"wasapi") >= 0) return TRUE;
+	return FALSE;
+}
+
+static HRESULT DougaPcGetPin(IBaseFilter* f, PIN_DIRECTION dir, IPin** pp)
+{
+	*pp = NULL;
+	if (!f) return E_POINTER;
+	IEnumPins* e = NULL;
+	if (FAILED(f->EnumPins(&e)) || !e) return E_FAIL;
+	IPin* pin = NULL;
+	while (e->Next(1, &pin, NULL) == S_OK) {
+		PIN_DIRECTION d;
+		if (SUCCEEDED(pin->QueryDirection(&d)) && d == dir) {
+			*pp = pin;
+			e->Release();
+			return S_OK;
+		}
+		pin->Release();
+	}
+	e->Release();
+	return E_FAIL;
+}
+
+static BOOL DougaPcFindAudioRenderer(IGraphBuilder* graph, IBaseFilter** ppRenderer, IPin** ppIn, IPin** ppUp)
+{
+	*ppRenderer = NULL; *ppIn = NULL; *ppUp = NULL;
+	if (!graph) return FALSE;
+	IEnumFilters* en = NULL;
+	if (FAILED(graph->EnumFilters(&en)) || !en) return FALSE;
+	IBaseFilter* f = NULL;
+	while (en->Next(1, &f, NULL) == S_OK) {
+		FILTER_INFO fi = {};
+		f->QueryFilterInfo(&fi);
+		if (fi.pGraph) fi.pGraph->Release();
+		if (DougaPcIsAudioRendererName(fi.achName)) {
+			IPin* inPin = NULL;
+			if (SUCCEEDED(DougaPcGetPin(f, PINDIR_INPUT, &inPin)) && inPin) {
+				IPin* up = NULL;
+				if (SUCCEEDED(inPin->ConnectedTo(&up)) && up) {
+					*ppRenderer = f;
+					*ppIn = inPin;
+					*ppUp = up;
+					en->Release();
+					return TRUE;
+				}
+				inPin->Release();
+			}
+		}
+		f->Release();
+	}
+	en->Release();
+	return FALSE;
+}
+
+static BOOL DougaPcCreateDs(HWND hwnd, const WAVEFORMATEX* wfx)
+{
+	if (!wfx || wfx->nChannels < 1 || wfx->nSamplesPerSec < 8000) return FALSE;
+	HRESULT hr = DirectSoundCreate8(NULL, &g_pc.ds, NULL);
+	if (FAILED(hr) || !g_pc.ds) {
+		OutputDebugStringW(L"[DougaPitch] DirectSoundCreate8 failed\n");
+		return FALSE;
+	}
+	HWND owner = hwnd ? hwnd : GetDesktopWindow();
+	if (FAILED(g_pc.ds->SetCooperativeLevel(owner, DSSCL_PRIORITY))) {
+		OutputDebugStringW(L"[DougaPitch] SetCooperativeLevel failed\n");
+		g_pc.ds->Release(); g_pc.ds = NULL;
+		return FALSE;
+	}
+	WAVEFORMATEX fmt = *wfx;
+	fmt.wFormatTag = WAVE_FORMAT_PCM;
+	fmt.wBitsPerSample = 16;
+	fmt.nBlockAlign = (WORD)(fmt.nChannels * fmt.wBitsPerSample / 8);
+	fmt.nAvgBytesPerSec = fmt.nSamplesPerSec * fmt.nBlockAlign;
+	fmt.cbSize = 0;
+	g_pc.sampleRate = (int)fmt.nSamplesPerSec;
+	g_pc.channels = (int)fmt.nChannels;
+	g_pc.bits = 16;
+	g_pc.blockAlign = (int)fmt.nBlockAlign;
+	g_pc.bufBytes = fmt.nAvgBytesPerSec * 3; // 3 sec
+	if (g_pc.bufBytes < 32768) g_pc.bufBytes = 32768;
+	DSBUFFERDESC desc = {};
+	desc.dwSize = sizeof(desc);
+	desc.dwFlags = DSBCAPS_CTRLVOLUME | DSBCAPS_GLOBALFOCUS | DSBCAPS_GETCURRENTPOSITION2;
+	desc.dwBufferBytes = g_pc.bufBytes;
+	desc.lpwfxFormat = &fmt;
+	IDirectSoundBuffer* pPrim = NULL;
+	hr = g_pc.ds->CreateSoundBuffer(&desc, &pPrim, NULL);
+	if (FAILED(hr) || !pPrim) {
+		OutputDebugStringW(L"[DougaPitch] CreateSoundBuffer failed\n");
+		g_pc.ds->Release(); g_pc.ds = NULL;
+		return FALSE;
+	}
+	g_pc.dsb = pPrim;
+	g_pc.writePos = 0;
+	g_pc.writePosValid = FALSE;
+	{
+		void* p1 = NULL; void* p2 = NULL;
+		DWORD b1 = 0, b2 = 0;
+		if (SUCCEEDED(g_pc.dsb->Lock(0, g_pc.bufBytes, &p1, &b1, &p2, &b2, 0))) {
+			if (p1 && b1) memset(p1, 0, b1);
+			if (p2 && b2) memset(p2, 0, b2);
+			g_pc.dsb->Unlock(p1, b1, p2, b2);
+		}
+	}
+	return TRUE;
+}
+
+} // namespace
+
+BOOL DougaPitchCorrect_IsActive()
+{
+	return g_pc.installed ? TRUE : FALSE;
+}
+
+void DougaPitchCorrect_SetVolumeDsPos(int dsPos)
+{
+	if (!g_pc.installed || !g_pc.dsb) return;
+	// SetVolume は CS 不要（DS 自身がスレッドセーフ寄り）。待たない。
+	g_pc.dsb->SetVolume(DougaPcDsVolFromPos(dsPos));
+}
+
+void DougaPitchCorrect_SetPaused(BOOL paused)
+{
+	if (!g_pc.installed || !g_pc.csInit) return;
+	EnterCriticalSection(&g_pc.cs);
+	g_pc.playing = paused ? FALSE : TRUE;
+	if (paused) {
+		LeaveCriticalSection(&g_pc.cs);
+		DougaPcStopDsOutsideCallback();
+		return;
+	}
+	g_pc.lastPcmTick = GetTickCount();
+	g_pc.endFlushed = FALSE;
+	g_pc.writePosValid = FALSE;
+	g_pc.dsRunning = FALSE;
+	g_pc.prebufferBytes = 0;
+	LeaveCriticalSection(&g_pc.cs);
+}
+
+void DougaPitchCorrect_PauseForGraphSeek()
+{
+	if (!g_pc.installed || !g_pc.csInit) return;
+	EnterCriticalSection(&g_pc.cs);
+	g_pc.playing = FALSE;
+	LeaveCriticalSection(&g_pc.cs);
+	DougaPcWaitCallbackGone();
+}
+
+void DougaPitchCorrect_OnSeek()
+{
+	if (!g_pc.installed || !g_pc.csInit) return;
+	// コールバック中に reset すると RubberBand 内で永久待ちになり得る
+	EnterCriticalSection(&g_pc.cs);
+	g_pc.playing = FALSE;
+	LeaveCriticalSection(&g_pc.cs);
+
+	DougaPcStopDsOutsideCallback(); // inCallback==0 まで待ってから DS Stop
+
+	EnterCriticalSection(&g_pc.cs);
+	if (g_pc.shifter)
+		g_pc.shifter->reset();
+	g_pc.endFlushed = FALSE;
+	g_pc.draining = FALSE;
+	g_pc.drainAheadBytes = 0;
+	g_pc.writePosValid = FALSE;
+	g_pc.dsRunning = FALSE;
+	g_pc.prebufferBytes = 0;
+	g_pc.lastPcmTick = GetTickCount();
+	g_pc.playing = TRUE;
+	LeaveCriticalSection(&g_pc.cs);
+}
+
+void DougaPitchCorrect_Poll()
+{
+	if (!g_pc.installed || !g_pc.csInit) return;
+	// UI スレッドをブロックしない
+	if (!TryEnterCriticalSection(&g_pc.cs))
+		return;
+	if (!g_pc.playing || !g_pc.dsb || g_pc.lastPcmTick == 0) {
+		LeaveCriticalSection(&g_pc.cs);
+		return;
+	}
+	const DWORD now = GetTickCount();
+	const DWORD gap = now - g_pc.lastPcmTick;
+	BOOL doStop = FALSE;
+
+	if (gap >= kDougaPcGapFlushMs && g_pc.dsRunning) {
+		// UI では重い flush をしない。ギャップ後は残響ループ防止のため停止のみ。
+		if (!g_pc.draining) {
+			g_pc.draining = TRUE;
+			g_pc.drainTick = now;
+		}
+		const DWORD since = now - g_pc.drainTick;
+		// 0.75x でも末尾が二度鳴らないよう、短めに止める
+		if (since >= 200)
+			doStop = TRUE;
+	}
+	LeaveCriticalSection(&g_pc.cs);
+
+	if (doStop) {
+		DougaPcStopDsOutsideCallback();
+		OutputDebugStringW(L"[DougaPitch] DS stopped after PCM gap (EOS)\n");
+	}
+}
+
+void DougaPitchCorrect_SetPlaybackRate(double rate)
+{
+	if (rate < 0.1) rate = 0.1;
+	if (rate > 4.0) rate = 4.0;
+	if (!g_pc.csInit) return;
+	EnterCriticalSection(&g_pc.cs);
+	const double old = g_pc.rate;
+	const BOOL rateChanged = (fabs(old - rate) > 0.005);
+	const BOOL needReset = (g_pc.shifter && fabs(old - rate) > 0.05);
+	g_pc.rate = rate;
+	if (g_pc.shifter && !needReset)
+		DougaPcApplyRateToShifter_NoLock();
+	BOOL wasPlaying = g_pc.playing;
+	if (needReset || rateChanged)
+		g_pc.playing = FALSE; // コールバックを抜けさせる
+	LeaveCriticalSection(&g_pc.cs);
+
+	if (needReset || rateChanged)
+		DougaPcStopDsOutsideCallback();
+
+	EnterCriticalSection(&g_pc.cs);
+	if (g_pc.shifter) {
+		DougaPcApplyRateToShifter_NoLock();
+		if (needReset)
+			g_pc.shifter->reset();
+	}
+	if (rateChanged) {
+		g_pc.writePosValid = FALSE;
+		g_pc.dsRunning = FALSE;
+		g_pc.prebufferBytes = 0;
+	}
+	g_pc.playing = wasPlaying;
+	LeaveCriticalSection(&g_pc.cs);
+}
+
+void DougaPitchCorrect_Shutdown()
+{
+	if (!g_pc.csInit && !g_pc.installed && !g_pc.dsb && !g_pc.grabber)
+		return;
+
+	ISampleGrabber* grab = NULL;
+	IDirectSoundBuffer* dsb = NULL;
+	IDirectSound8* ds = NULL;
+	RubberBand::RubberBandStretcher* shifter = NULL;
+	IBaseFilter* grabberF = NULL;
+	IBaseFilter* nullF = NULL;
+	IBaseFilter* oldRenderer = NULL;
+
+	if (g_pc.csInit)
+		EnterCriticalSection(&g_pc.cs);
+	g_pc.playing = FALSE;
+	g_pc.installed = FALSE;
+	g_pc.dsRunning = FALSE;
+	g_pc.endFlushed = FALSE;
+	g_pc.lastPcmTick = 0;
+	grab = g_pc.grabber; g_pc.grabber = NULL;
+	dsb = g_pc.dsb; g_pc.dsb = NULL;
+	ds = g_pc.ds; g_pc.ds = NULL;
+	shifter = g_pc.shifter; g_pc.shifter = NULL;
+	grabberF = g_pc.grabberF; g_pc.grabberF = NULL;
+	nullF = g_pc.nullF; g_pc.nullF = NULL;
+	oldRenderer = g_pc.oldRenderer; g_pc.oldRenderer = NULL;
+	g_pc.inFlat.clear();
+	g_pc.outFlat.clear();
+	g_pc.rate = 1.0;
+	g_pc.writePosValid = FALSE;
+	if (g_pc.csInit)
+		LeaveCriticalSection(&g_pc.cs);
+
+	// コールバック終了を待つ（CS 外）。SetCallback(NULL) は完了待ちするため CS 保持禁止。
+	DougaPcWaitCallbackGone();
+	if (grab) {
+		grab->SetCallback(NULL, 0);
+		grab->Release();
+	}
+	if (dsb) {
+		dsb->Stop();
+		dsb->Release();
+	}
+	if (ds) ds->Release();
+	if (shifter) delete shifter;
+	if (grabberF) grabberF->Release();
+	if (nullF) nullF->Release();
+	if (oldRenderer) oldRenderer->Release();
+
+	if (g_pc.dsCsInit) {
+		DeleteCriticalSection(&g_pc.dsCs);
+		g_pc.dsCsInit = FALSE;
+	}
+	if (g_pc.csInit) {
+		DeleteCriticalSection(&g_pc.cs);
+		g_pc.csInit = FALSE;
+	}
+}
+
+BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
+{
+	DougaPitchCorrect_Shutdown();
+	if (!graph || mode != -2) return FALSE;
+
+	IBaseFilter* renderer = NULL;
+	IPin* renIn = NULL;
+	IPin* upOut = NULL;
+	if (!DougaPcFindAudioRenderer(graph, &renderer, &renIn, &upOut)) {
+		OutputDebugStringW(L"[DougaPitch] audio renderer not found\n");
+		return FALSE;
+	}
+
+	IBaseFilter* grabF = NULL;
+	IBaseFilter* nullF = NULL;
+	ISampleGrabber* grab = NULL;
+	HRESULT hr = CoCreateInstance(CLSID_SampleGrabber, NULL, CLSCTX_INPROC_SERVER,
+		IID_IBaseFilter, (void**)&grabF);
+	if (FAILED(hr) || !grabF) {
+		OutputDebugStringW(L"[DougaPitch] CLSID_SampleGrabber CoCreate failed\n");
+		renIn->Release(); upOut->Release(); renderer->Release();
+		return FALSE;
+	}
+	hr = CoCreateInstance(CLSID_NullRenderer, NULL, CLSCTX_INPROC_SERVER,
+		IID_IBaseFilter, (void**)&nullF);
+	if (FAILED(hr) || !nullF) {
+		OutputDebugStringW(L"[DougaPitch] CLSID_NullRenderer CoCreate failed\n");
+		grabF->Release();
+		renIn->Release(); upOut->Release(); renderer->Release();
+		return FALSE;
+	}
+	hr = grabF->QueryInterface(IID_ISampleGrabber, (void**)&grab);
+	if (FAILED(hr) || !grab) {
+		OutputDebugStringW(L"[DougaPitch] IID_ISampleGrabber QI failed\n");
+		nullF->Release(); grabF->Release();
+		renIn->Release(); upOut->Release(); renderer->Release();
+		return FALSE;
+	}
+
+	AM_MEDIA_TYPE mtWant = {};
+	mtWant.majortype = MEDIATYPE_Audio;
+	mtWant.subtype = MEDIASUBTYPE_PCM;
+	mtWant.formattype = FORMAT_WaveFormatEx;
+	grab->SetMediaType(&mtWant);
+	grab->SetOneShot(FALSE);
+	grab->SetBufferSamples(TRUE);
+
+	// グラフ停止中を想定（plays2 は Run 前）
+	BOOL rewired = FALSE;
+	hr = renIn->Disconnect();
+	hr = upOut->Disconnect();
+	hr = graph->RemoveFilter(renderer);
+	hr = graph->AddFilter(grabF, L"Douga Pitch Grabber");
+	hr = graph->AddFilter(nullF, L"Douga Pitch Null");
+	rewired = TRUE;
+
+	IPin* grabIn = NULL; IPin* grabOut = NULL; IPin* nullIn = NULL;
+	DougaPcGetPin(grabF, PINDIR_INPUT, &grabIn);
+	DougaPcGetPin(grabF, PINDIR_OUTPUT, &grabOut);
+	DougaPcGetPin(nullF, PINDIR_INPUT, &nullIn);
+
+	auto failCleanup = [&](LPCWSTR why) {
+		OutputDebugStringW(why);
+		if (grabIn) { grabIn->Release(); grabIn = NULL; }
+		if (grabOut) { grabOut->Release(); grabOut = NULL; }
+		if (nullIn) { nullIn->Release(); nullIn = NULL; }
+		if (grab) { grab->SetCallback(NULL, 0); grab->Release(); grab = NULL; }
+		if (rewired) {
+			graph->RemoveFilter(grabF);
+			graph->RemoveFilter(nullF);
+			graph->AddFilter(renderer, L"Default DirectSound Device");
+			IPin* rin = NULL;
+			DougaPcGetPin(renderer, PINDIR_INPUT, &rin);
+			if (rin && upOut) {
+				if (FAILED(graph->ConnectDirect(upOut, rin, NULL)))
+					graph->Connect(upOut, rin);
+			}
+			if (rin) rin->Release();
+		}
+		if (nullF) { nullF->Release(); nullF = NULL; }
+		if (grabF) { grabF->Release(); grabF = NULL; }
+		if (renIn) { renIn->Release(); renIn = NULL; }
+		if (upOut) { upOut->Release(); upOut = NULL; }
+		if (renderer) { renderer->Release(); renderer = NULL; }
+	};
+
+	if (!grabIn || !grabOut || !nullIn) {
+		failCleanup(L"[DougaPitch] grabber/null pins missing\n");
+		return FALSE;
+	}
+	hr = graph->ConnectDirect(upOut, grabIn, NULL);
+	if (FAILED(hr)) hr = graph->Connect(upOut, grabIn);
+	if (FAILED(hr)) {
+		CString msg; msg.Format(L"[DougaPitch] Connect upstream->grabber failed 0x%08X\n", hr);
+		failCleanup(msg);
+		return FALSE;
+	}
+	hr = graph->ConnectDirect(grabOut, nullIn, NULL);
+	if (FAILED(hr)) hr = graph->Connect(grabOut, nullIn);
+	if (FAILED(hr)) {
+		CString msg; msg.Format(L"[DougaPitch] Connect grabber->null failed 0x%08X\n", hr);
+		failCleanup(msg);
+		return FALSE;
+	}
+	grabIn->Release(); grabIn = NULL;
+	grabOut->Release(); grabOut = NULL;
+	nullIn->Release(); nullIn = NULL;
+	renIn->Release(); renIn = NULL;
+	upOut->Release(); upOut = NULL;
+
+	AM_MEDIA_TYPE mt = {};
+	WAVEFORMATEX wfx = {};
+	wfx.wFormatTag = WAVE_FORMAT_PCM;
+	wfx.nChannels = 2;
+	wfx.nSamplesPerSec = 44100;
+	wfx.wBitsPerSample = 16;
+	wfx.nBlockAlign = 4;
+	wfx.nAvgBytesPerSec = 44100 * 4;
+	if (SUCCEEDED(grab->GetConnectedMediaType(&mt))) {
+		if (mt.formattype == FORMAT_WaveFormatEx && mt.pbFormat && mt.cbFormat >= sizeof(WAVEFORMATEX)) {
+			WAVEFORMATEX* pwf = (WAVEFORMATEX*)mt.pbFormat;
+			wfx = *pwf;
+			if (wfx.wFormatTag == WAVE_FORMAT_EXTENSIBLE && mt.cbFormat >= sizeof(WAVEFORMATEXTENSIBLE)) {
+				WAVEFORMATEXTENSIBLE* we = (WAVEFORMATEXTENSIBLE*)mt.pbFormat;
+				wfx = we->Format;
+				wfx.wFormatTag = WAVE_FORMAT_PCM;
+			}
+		}
+		DougaPcFreeMediaType(mt);
+	}
+	if (wfx.wBitsPerSample != 16) {
+		CString msg; msg.Format(L"[DougaPitch] unexpected bits=%u (need 16)\n", wfx.wBitsPerSample);
+		OutputDebugStringW(msg);
+	}
+
+	InitializeCriticalSection(&g_pc.cs);
+	g_pc.csInit = TRUE;
+	InitializeCriticalSection(&g_pc.dsCs);
+	g_pc.dsCsInit = TRUE;
+	g_pc.rate = 1.0;
+	g_pc.refCb = 1;
+	if (!DougaPcCreateDs(hwndOwner, &wfx)) {
+		DeleteCriticalSection(&g_pc.dsCs);
+		g_pc.dsCsInit = FALSE;
+		DeleteCriticalSection(&g_pc.cs);
+		g_pc.csInit = FALSE;
+		// re-acquire pins for rollback path: upOut already released — reconnect via failCleanup needs upOut
+		// Reconstruct: grab still connected; tear grab and restore renderer from current grab input
+		IPin* gIn = NULL; IPin* upstream = NULL;
+		DougaPcGetPin(grabF, PINDIR_INPUT, &gIn);
+		if (gIn) {
+			gIn->ConnectedTo(&upstream);
+			gIn->Disconnect();
+			if (upstream) upstream->Disconnect();
+		}
+		if (gIn) gIn->Release();
+		grab->SetCallback(NULL, 0);
+		grab->Release(); grab = NULL;
+		graph->RemoveFilter(grabF);
+		graph->RemoveFilter(nullF);
+		nullF->Release(); nullF = NULL;
+		grabF->Release(); grabF = NULL;
+		graph->AddFilter(renderer, L"Default DirectSound Device");
+		IPin* rin = NULL;
+		DougaPcGetPin(renderer, PINDIR_INPUT, &rin);
+		if (rin && upstream) {
+			if (FAILED(graph->ConnectDirect(upstream, rin, NULL)))
+				graph->Connect(upstream, rin);
+		}
+		if (rin) rin->Release();
+		if (upstream) upstream->Release();
+		renderer->Release();
+		OutputDebugStringW(L"[DougaPitch] CreateDs failed; restored DS renderer\n");
+		return FALSE;
+	}
+
+	g_pc.grabberF = grabF;
+	g_pc.nullF = nullF;
+	g_pc.oldRenderer = renderer; // 所有して stops で Release
+	g_pc.grabber = grab;
+	InterlockedExchange(&g_pc.refCb, 1);
+	grab->SetCallback(&g_pcCb, 1); // BufferCB
+	g_pc.installed = TRUE;
+	g_pc.playing = TRUE;
+	g_pc.dsRunning = FALSE;
+	g_pc.endFlushed = FALSE;
+	g_pc.draining = FALSE;
+	g_pc.drainAheadBytes = 0;
+	g_pc.lastPcmTick = GetTickCount();
+	DougaPcApplyVolume_NoLock(savedata.dsvol);
+	DougaPcSilenceAll_NoLock();
+	// Play はプリバッファ後。Stretcher は非 1.0x 到達時に生成
+	OutputDebugStringW(L"[DougaPitch] installed OK\n");
+	return TRUE;
+}
+
+static LONG s_dougaRateTempoGate = 0;
+extern BOOL videoonly;
+extern int tempo;
+extern CMediaPlayerDlg* mp;
+
+BOOL DougaVideoRateActive()
+{
+	// コンテキストメニューの速度スライダーと同じ: GetRate できるとき有効。
+	if (!pMediaSeeking)
+		return FALSE;
+	double cur = 0.0;
+	return SUCCEEDED(pMediaSeeking->GetRate(&cur)) ? TRUE : FALSE;
+}
+
+void DougaSetPlaybackRate(double rate, BOOL pushTempo)
+{
+	if (rate < 0.1) rate = 0.1;
+	if (rate > 4.0) rate = 4.0;
+	if (pMediaSeeking)
+		pMediaSeeking->SetRate(rate);
+	// mode=-2: SetRate の音程変化を Stretcher(pitch=1/R) で打ち消す
+	if (mode == -2 && DougaPitchCorrect_IsActive())
+		DougaPitchCorrect_SetPlaybackRate(rate);
+
+	if (pMainFrame1 && pMainFrame1->m_bar.IsBarReady()
+		&& pMainFrame1->m_bar.m_rate.GetSafeHwnd()) {
+		const int pos = (int)(rate * 100.0 + 0.5);
+		HWND hf = ::GetFocus();
+		HWND cap = ::GetCapture();
+		const BOOL busy = pMainFrame1->m_bar.m_rateDrag
+			|| (hf && hf == pMainFrame1->m_bar.m_rate.GetSafeHwnd())
+			|| (cap && cap == pMainFrame1->m_bar.m_rate.GetSafeHwnd());
+		if (!busy)
+			pMainFrame1->m_bar.m_rate.SetPos(pos);
+		WCHAR vs[32];
+		swprintf_s(vs, L"%.2fx", rate);
+		pMainFrame1->m_bar.m_rateVal.SetWindowText(vs);
+	}
+
+	if (!pushTempo) return;
+	if (InterlockedCompareExchange(&s_dougaRateTempoGate, 1, 0) != 0)
+		return;
+	const int tpos = TempoPosFromPercent((float)(rate * 100.0));
+	tempo = tpos;
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->m_tempo_sl.SetPos(tpos);
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_tempo.GetSafeHwnd())
+		mp->m_tempo.SetPos(tpos, FALSE);
+	InterlockedExchange(&s_dougaRateTempoGate, 0);
+}
+
+void DougaApplyTempoToVideoRate()
+{
+	if (!DougaVideoRateActive() || !pMediaSeeking)
+		return;
+	// バー速度ドラッグ中はテンポ→速度の上書きをしない
+	if (pMainFrame1 && pMainFrame1->m_bar.IsBarReady()) {
+		HWND cap = ::GetCapture();
+		if (pMainFrame1->m_bar.m_rateDrag
+			|| (cap && cap == pMainFrame1->m_bar.m_rate.GetSafeHwnd()))
+			return;
+	}
+	if (InterlockedCompareExchange(&s_dougaRateTempoGate, 1, 0) != 0)
+		return;
+	double rate = TempoPlaybackRateFromPos(tempo);
+	if (rate < 0.1) rate = 0.1;
+	if (rate > 4.0) rate = 4.0;
+	double cur = 1.0;
+	if (FAILED(pMediaSeeking->GetRate(&cur)) || cur <= 0.0)
+		cur = 1.0;
+	if (fabs(cur - rate) > 0.005) {
+		pMediaSeeking->SetRate(rate);
+		if (mode == -2 && DougaPitchCorrect_IsActive())
+			DougaPitchCorrect_SetPlaybackRate(rate);
+	}
+	if (pMainFrame1 && pMainFrame1->m_bar.IsBarReady()
+		&& pMainFrame1->m_bar.m_rate.GetSafeHwnd()) {
+		HWND hf = ::GetFocus();
+		HWND cap = ::GetCapture();
+		const BOOL busy = pMainFrame1->m_bar.m_rateDrag
+			|| (hf && hf == pMainFrame1->m_bar.m_rate.GetSafeHwnd())
+			|| (cap && cap == pMainFrame1->m_bar.m_rate.GetSafeHwnd());
+		const int pos = (int)(rate * 100.0 + 0.5);
+		if (!busy)
+			pMainFrame1->m_bar.m_rate.SetPos(pos);
+		WCHAR vs[32];
+		swprintf_s(vs, L"%.2fx", rate);
+		pMainFrame1->m_bar.m_rateVal.SetWindowText(vs);
+	}
+	InterlockedExchange(&s_dougaRateTempoGate, 0);
+}
+
 static void DougaRateSliderCb(void* /*ctx*/, int value)
 {
-	if (!pMediaSeeking) return;
-	if (value < 50) value = 50;
-	if (value > 200) value = 200;
-	pMediaSeeking->SetRate((double)value / 100.0);
+	if (value < 10) value = 10;
+	if (value > 400) value = 400;
+	DougaSetPlaybackRate((double)value / 100.0, TRUE);
 }
 
 void CDouga::ShowDougaContextMenu(CPoint point)
@@ -5175,30 +6428,38 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 			L"Zachowaj proporcje", L"En-boy oranini koru"),
 		savedata.dougaaspect != 0);
 
-	// 再生速度: IMediaSeeking がレートを返せるときだけスライダー(0.5x..2.0x、ドラッグ中ライブ)
+	menu.AddSeparator();
+	menu.AddCommand(ID_DOUGA_DSFILTERS,
+		LL14(L"DirectShowフィルタ一覧", L"DirectShow Filter List", L"Liste des filtres DirectShow", L"Elenco filtri DirectShow",
+			L"Lista de filtros DirectShow", L"DirectShow 필터 목록", L"DirectShow 过滤器列表", L"قائمة مرشحات DirectShow",
+			L"Список фильтров DirectShow", L"DirectShow-Filterliste", L"Lista de filtros DirectShow", L"DirectShow-filterlijst",
+			L"Lista filtrów DirectShow", L"DirectShow Filtre Listesi"),
+		NULL, pGraphBuilder != NULL);
+
+	// 再生速度: IMediaSeeking がレートを返せるときだけスライダー(0.1x..4.0x、ドラッグ中ライブ)
 	{
 		double cur = 1.0;
 		if (pMediaSeeking && SUCCEEDED(pMediaSeeking->GetRate(&cur))) {
 			if (cur <= 0.0) cur = 1.0;
 			int pos = (int)(cur * 100.0 + 0.5);
-			if (pos < 50) pos = 50;
-			if (pos > 200) pos = 200;
+			if (pos < 10) pos = 10;
+			if (pos > 400) pos = 400;
 			menu.AddSlider(
 				LL14(L"再生速度", L"Playback speed", L"Vitesse de lecture", L"Velocita di riproduzione",
 					L"Velocidad de reproduccion", L"재생 속도", L"播放速度", L"سرعة التشغيل",
 					L"Скорость воспроизведения", L"Wiedergabegeschwindigkeit", L"Velocidade de reproducao",
 					L"Afspeelsnelheid", L"Predkosc odtwarzania", L"Oynatma hizi"),
-				50, 200, pos, DougaRateSliderCb, NULL,
-				LL14(L"0.5x〜2.0x（ドラッグ中に即反映）", L"0.5x–2.0x (live while dragging)",
-					L"0,5x–2,0x (en direct)", L"0,5x–2,0x (in tempo reale)",
-					L"0,5x–2,0x (en vivo)", L"0.5x–2.0x (드래그 중 즉시)", L"0.5x–2.0x（拖动即时）",
-					L"0.5x–2.0x (مباشر أثناء السحب)", L"0.5x–2.0x (сразу при перетаскивании)",
-					L"0,5x–2,0x (live beim Ziehen)", L"0,5x–2,0x (ao arrastar)",
-					L"0,5x–2,0x (live tijdens slepen)", L"0,5x–2,0x (na zywo)", L"0.5x–2.0x (suruklerken anlik)"));
+				10, 400, pos, DougaRateSliderCb, NULL,
+				LL14(L"0.1x〜4.0x（ドラッグ中に即反映）。ゲーム合成時はテンポと連動", L"0.1x–4.0x (live while dragging). Syncs with tempo in game+video",
+					L"0,1x–4,0x (en direct). Lie au tempo en jeu+video", L"0,1x–4,0x (in tempo reale). Collegato al tempo",
+					L"0,1x–4,0x (en vivo). Sincroniza con tempo", L"0.1x–4.0x (드래그 중 즉시). 게임+영상 시 템포 연동", L"0.1x–4.0x（拖动即时）。游戏合成时与速度联动",
+					L"0.1x–4.0x (مباشر). يتزامن مع الإيقاع", L"0.1x–4.0x (сразу). Связано с темпом",
+					L"0,1x–4,0x (live). Mit Tempo gekoppelt", L"0,1x–4,0x (ao arrastar). Liga ao tempo",
+					L"0,1x–4,0x (live). Gekoppeld aan tempo", L"0,1x–4,0x (na zywo). Zsynchronizowane z tempo", L"0.1x–4.0x (suruklerken). Tempo ile bagli"));
 			{
-				static const double kRates[6] = { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
-				static const wchar_t* const kRateLabels[6] = {
-					L"0.5x", L"0.75x", L"1.0x", L"1.25x", L"1.5x", L"2.0x"
+				static const double kRates[8] = { 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0 };
+				static const wchar_t* const kRateLabels[8] = {
+					L"0.25x", L"0.5x", L"0.75x", L"1.0x", L"1.25x", L"1.5x", L"2.0x", L"4.0x"
 				};
 				CCustomPopupMenu* spdSub = menu.AddSubMenu(
 					LL14(L"再生速度プリセット", L"Speed presets", L"Presets de vitesse", L"Preset velocita",
@@ -5206,7 +6467,7 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 						L"Пресеты скорости", L"Geschwindigkeits-Presets", L"Presets de velocidade",
 						L"Snelheidpresets", L"Presety predkosci", L"Hiz onayarlari"));
 				if (spdSub) {
-					for (int i = 0; i < 6; ++i) {
+					for (int i = 0; i < 8; ++i) {
 						const BOOL on = (cur > kRates[i] - 0.01 && cur < kRates[i] + 0.01);
 						spdSub->AddCheck(ID_DOUGA_SPEED_FIRST + i, kRateLabels[i], on);
 					}
@@ -5952,6 +7213,16 @@ void CDouga::OnDougaMenuMute() { m_bar.OnBnMute(); }
 void CDouga::OnDougaMenuFs() { m_bar.OnBnFs(); }
 void CDouga::OnDougaMenuFade() { m_bar.OnBnFade(); }
 
+void CDouga::OnDougaMenuDsFilters()
+{
+	// CRender::OnBnClickedCancel2 と同じ CGraph（再生中グラフのフィルタ一覧）
+	if (!pGraphBuilder) return;
+	CGraph* dlg = new CGraph(this);
+	::SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	dlg->DoModal();
+	delete dlg;
+}
+
 void CDouga::ShowHelpSheet()
 {
 	if (g_dougaHelpDlg && ::IsWindow(g_dougaHelpDlg->GetSafeHwnd())) {
@@ -5994,10 +7265,10 @@ void CDouga::OnDougaMenuAspect()
 
 void CDouga::OnDougaMenuSpeed(UINT nID)
 {
-	static const double kRates[6] = { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
+	static const double kRates[8] = { 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0 };
 	const int i = (int)nID - ID_DOUGA_SPEED_FIRST;
-	if (i < 0 || i >= 6 || !pMediaSeeking) return;
-	pMediaSeeking->SetRate(kRates[i]);
+	if (i < 0 || i >= 8) return;
+	DougaSetPlaybackRate(kRates[i], TRUE);
 }
 
 // 常に手前の適用。ウィンドウ生成時とメニュー切替の両方から呼ぶ。

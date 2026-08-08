@@ -57,11 +57,38 @@ BOOL CGraph::OnInitDialog()
 		}
 		//		fg->Release();
 	}else EndDialog(0);
-	RECT r;
-	GetWindowRect(&r);
-	r.top += 600;
-	r.bottom += 600;
-	MoveWindow(&r);
+
+	// 旧: r.top+=600; r.bottom+=600 → 高さは増えず下へ移動するだけ（縦が潰れて見えた主因）
+	UINT dpi = 96;
+	if (HDC hdc = ::GetDC(m_hWnd)) {
+		dpi = (UINT)::GetDeviceCaps(hdc, LOGPIXELSX);
+		::ReleaseDC(m_hWnd, hdc);
+	}
+	if (dpi == 0) dpi = 96;
+
+	CRect wr, cr;
+	GetWindowRect(&wr);
+	GetClientRect(&cr);
+	const int borderW = wr.Width() - cr.Width();
+	const int borderH = wr.Height() - cr.Height();
+	const int clientW = MulDiv(520, (int)dpi, 96);
+	const int clientH = MulDiv(420, (int)dpi, 96);
+	SetWindowPos(NULL, 0, 0, clientW + borderW, clientH + borderH,
+		SWP_NOMOVE | SWP_NOZORDER);
+	CenterWindow();
+
+	GetClientRect(&cr);
+	const int pad = MulDiv(8, (int)dpi, 96);
+	const int gap = MulDiv(8, (int)dpi, 96);
+	const int btnH = MulDiv(28, (int)dpi, 96);
+	const int btnW = MulDiv(90, (int)dpi, 96);
+	if (m_l.GetSafeHwnd()) {
+		m_l.MoveWindow(pad, pad, cr.Width() - 2 * pad, cr.Height() - 2 * pad - btnH - gap);
+		m_l.SetItemHeight(0, MulDiv(24, (int)dpi, 96));
+	}
+	if (m_ok.GetSafeHwnd())
+		m_ok.MoveWindow((cr.Width() - btnW) / 2, cr.Height() - pad - btnH, btnW, btnH);
+
 	return TRUE;  // return TRUE unless you set the focus to a control
 	// 例外 : OCX プロパティ ページは必ず FALSE を返します。
 }
