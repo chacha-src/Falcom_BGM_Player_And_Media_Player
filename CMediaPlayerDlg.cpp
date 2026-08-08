@@ -1487,7 +1487,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			};
 			for (int bi = 0; bi < 8; ++bi) {
 				if (!bots[bi]->GetSafeHwnd()) continue;
-				bots[bi]->SetFlat(TRUE);
+				// Flat にすると DrawDecorations/キラキラが消える。キャプチャ等と同系の飾りを残す
 				bots[bi]->SetGradation(botGrad[bi][0], botGrad[bi][1], 0, TRUE);
 			}
 		}
@@ -1502,8 +1502,6 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_abB.SetGradation(RGB(220, 245, 255), RGB(160, 210, 240), 0, TRUE);
 		m_abClr.SetGradation(RGB(255, 230, 230), RGB(255, 180, 180), 0, TRUE);
 		m_lrcExpand.SetGradation(RGB(240, 235, 255), RGB(210, 200, 245), 0, TRUE);
-		if (m_deskLrc.GetSafeHwnd())
-			m_deskLrc.SetFlat(TRUE);
 		UpdateDeskLrcBtnChrome();
 		m_toolsToggle.SetGradation(RGB(220, 240, 255), RGB(180, 215, 250), 0, TRUE); // m3u と同系
 		m_toolsToggle.SetFlat(TRUE); // 2px 白枠がメニュー後に白抜けに見えるのを防ぐ（Lib/Hist と同じ）
