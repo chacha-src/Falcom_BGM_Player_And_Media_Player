@@ -1402,6 +1402,7 @@
 #define IDC_MP_BOT_SSVIZ                3974
 #define IDC_MP_BOT_ALARM                3975
 #define IDC_MP_BOT_REMOTE               3976
+#define IDC_MP_DESKLRC                  3977
 #define ID_MP_BOTVIS_DJ                 33124
 #define ID_MP_BOTVIS_TAG                33125
 #define ID_MP_BOTVIS_BPM                33126
@@ -1410,14 +1411,61 @@
 #define ID_MP_BOTVIS_SSVIZ              33129
 #define ID_MP_BOTVIS_ALARM              33130
 #define ID_MP_BOTVIS_REMOTE             33131
+#define ID_MP_SET_OPEN                  33132
+#define ID_MP_SET_UPSCALE               33133
+#define ID_MP_SET_BIT16                 33134
+#define ID_MP_SET_BIT24                 33135
+#define ID_MP_SET_BIT32                 33136
+#define ID_MP_SET_SPK0                  33137
+#define ID_MP_SET_SPK1                  33138
+#define ID_MP_SET_SPK2                  33139
+#define ID_MP_SET_SPK3                  33140
+#define ID_MP_SET_SPK4                  33141
+#define ID_MP_SET_SPK5                  33142
+#define ID_MP_SET_RATE_44100            33143
+#define ID_MP_SET_RATE_48000            33144
+#define ID_MP_SET_RATE_96000            33145
+#define ID_MP_SET_RATE_192000           33146
+#define ID_MP_SET_AERO                  33147
+#define ID_MP_SET_LRC_NET               33148
+#define ID_MP_SET_SPEANA                33149
+#define ID_MP_SET_M4A                   33150
+#define ID_MP_SET_MP3ORIG               33151
+#define ID_MP_SET_MP3_1                 33152
+#define ID_MP_SET_MP3_2                 33153
+#define ID_MP_SET_MP3_3                 33154
+#define ID_MP_SET_MP3_4                 33155
+#define ID_MP_SET_MP3_5                 33156
+#define ID_MP_SET_SPC_1                 33157
+#define ID_MP_SET_SPC_2                 33158
+#define ID_MP_SET_SPC_4                 33159
+#define ID_MP_SET_SPC_8                 33160
+#define ID_MP_SET_SPC_16                33161
+#define ID_MP_SET_KPI_1                 33162
+#define ID_MP_SET_KPI_2                 33163
+#define ID_MP_SET_KPI_3                 33164
+#define ID_MP_SET_KPI_4                 33165
+#define ID_MP_SET_KPI_5                 33166
+#define ID_MP_FOLDER_OPEN               33167
+#define ID_MP_FOLDER_ADD                33168
+#define ID_MP_FOLDER_SYNC               33169
+#define ID_MP_EQBTN_FLAT                33170
+#define ID_MP_EQBTN_SUGGEST             33171
+#define ID_MP_EQBTN_AUTO                33172
+#define ID_MP_MODE_CONT                 33173
+#define ID_MP_MODE_LOOP                 33174
+#define ID_MP_MODE_RAND                 33175
+#define ID_MP_MIRROR_TOGGLE             33176
+#define ID_MP_MIRROR_OPEN               33177
+#define ID_MP_FADE_NOW                  33178
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        250
-#define _APS_NEXT_COMMAND_VALUE         33132
-#define _APS_NEXT_CONTROL_VALUE         3977
+#define _APS_NEXT_COMMAND_VALUE         33179
+#define _APS_NEXT_CONTROL_VALUE         3978
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

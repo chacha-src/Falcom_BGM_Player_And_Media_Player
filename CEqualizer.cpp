@@ -7,6 +7,9 @@
 #include "CEqualizer.h"
 #include "ProAudio.h"
 #include "CPromptEngine.h"
+#include "oggDlg.h"
+
+extern COggDlg* og;
 
 
 
@@ -22,7 +25,10 @@ namespace {
 		IDM_EQ_ABTOG = 42224,
 		IDM_EQ_EFF_SLIDER = 42225,
 		IDM_EQ_MASTER_SLIDER = 42226,
-		IDM_EQ_REVERB_SLIDER = 42227
+		IDM_EQ_REVERB_SLIDER = 42227,
+		IDM_EQ_PRESET_BASE = 42300, // +preset index (m_pre)
+		IDM_EQ_OPEN_ANALYZER = 42390,
+		IDM_EQ_OPEN_PIANO = 42391
 	};
 
 	static void EqEffSliderCb(void* ctx, int value)
@@ -1276,6 +1282,35 @@ void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			L"Alternar A ↔ B", L"Wissel A ↔ B", L"Przelacz A ↔ B", L"A ↔ B gec"));
 	menu.AddSeparator();
 	{
+		static const int kQuickPresets[] = {
+			0, 1, 2, 3, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16
+		};
+		CCustomPopupMenu* preSub = menu.AddSubMenu(
+			LL14(L"プリセット", L"Preset", L"Preset", L"Preset", L"Preset",
+				L"프리셋", L"预设", L"إعداد مسبق", L"Пресет", L"Preset",
+				L"Preset", L"Preset", L"Preset", L"Onayar"),
+			LL14(L"よく使うEQカーブをすぐ適用", L"Apply a common EQ curve quickly",
+				L"Appliquer rapidement une courbe EQ courante", L"Applica subito una curva EQ comune",
+				L"Aplicar rapido una curva EQ comun", L"자주 쓰는 EQ 커브를 바로 적용",
+				L"快速应用常用 EQ 曲线", L"تطبيق منحنى EQ شائع بسرعة",
+				L"Быстро применить частую кривую EQ", L"Häufige EQ-Kurve schnell anwenden",
+				L"Aplicar rapidamente uma curva EQ comum", L"Snel een gangbare EQ-curve toepassen",
+				L"Szybko zastosuj czesta krzywa EQ", L"Sik kullanilan EQ egirisini uygula"));
+		if (preSub && m_pre.GetSafeHwnd()) {
+			const int cur = m_pre.GetCurSel();
+			const int n = m_pre.GetCount();
+			for (int i = 0; i < (int)(sizeof(kQuickPresets) / sizeof(kQuickPresets[0])); ++i) {
+				const int idx = kQuickPresets[i];
+				if (idx < 0 || idx >= n) continue;
+				CString name;
+				m_pre.GetLBText(idx, name);
+				if (name.IsEmpty()) continue;
+				preSub->AddCheck(IDM_EQ_PRESET_BASE + idx, name, cur == idx);
+			}
+		}
+	}
+	menu.AddSeparator();
+	{
 		int eff = savedata.eqsoundeffect * 2;
 		if (eff < 0) eff = 0;
 		if (eff > 200) eff = 200;
@@ -1333,6 +1368,15 @@ void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 				L"Quantidade de delay (ao vivo)", L"Delayhoeveelheid (live)", L"Ilosc delay (na zywo)", L"Delay miktari (anlik)"));
 	}
 	menu.AddSeparator();
+	menu.AddCommand(IDM_EQ_OPEN_ANALYZER,
+		LL14(L"アナライザを開く", L"Open analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore", L"Abrir analizador",
+			L"분석기 열기", L"打开分析器", L"فتح المحلل", L"Открыть анализатор", L"Analyzer öffnen",
+			L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"));
+	menu.AddCommand(IDM_EQ_OPEN_PIANO,
+		LL14(L"ピアノロールを開く", L"Open piano roll", L"Ouvrir le piano roll", L"Apri piano roll", L"Abrir piano roll",
+			L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen",
+			L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"));
+	menu.AddSeparator();
 	menu.AddCommand(ID_HELP_SHOWSHEET,
 		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
 			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
@@ -1346,6 +1390,21 @@ void CEqualizer::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 	if (cmd == IDM_EQ_ABA) OnBnClickedAbA();
 	else if (cmd == IDM_EQ_ABB) OnBnClickedAbB();
 	else if (cmd == IDM_EQ_ABTOG) OnBnClickedAbTog();
+	else if (cmd >= IDM_EQ_PRESET_BASE && cmd < IDM_EQ_PRESET_BASE + 200) {
+		const int idx = (int)cmd - IDM_EQ_PRESET_BASE;
+		if (m_pre.GetSafeHwnd() && idx >= 0 && idx < m_pre.GetCount()) {
+			m_pre.SetCurSel(idx);
+			OnCbnSelchangeCombo5();
+		}
+	}
+	else if (cmd == IDM_EQ_OPEN_ANALYZER) {
+		if (og && ::IsWindow(og->GetSafeHwnd()))
+			og->PostMessage(WM_OGG_TOGGLE_SUBUI, 2, 0);
+	}
+	else if (cmd == IDM_EQ_OPEN_PIANO) {
+		if (og && ::IsWindow(og->GetSafeHwnd()))
+			og->PostMessage(WM_OGG_TOGGLE_SUBUI, 1, 0);
+	}
 	else if (cmd == ID_HELP_SHOWSHEET) ShowHelpSheet();
 	else if (cmd)
 		SendMessage(WM_COMMAND, cmd);

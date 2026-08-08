@@ -2364,6 +2364,40 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 	menu.AddCommand(PL_CTX_AB_CLEAR,
 		LL14(L"A-Bリピート解除", L"Clear A-B repeat", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B", L"A-B 반복 해제", L"清除A-B重复", L"مسح تكرار A-B", L"Сбросить A-B", L"A-B aufheben", L"Limpar A-B", L"A-B wissen", L"Wyczysc A-B", L"A-B temizle"));
 	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		CCustomPopupMenu* seekSub = menu.AddSubMenu(
+			LL14(L"シーク / 練習 / キュー", L"Seek / practice / cues", L"Seek / pratique / cues", L"Seek / pratica / cue",
+				L"Seek / practica / cues", L"시크 / 연습 / 큐", L"定位 / 练习 / 标记", L"تقديم / تدريب / إشارات",
+				L"Поиск / практика / метки", L"Suche / Ubung / Cues", L"Seek / pratica / cues", L"Zoek / oefenen / cues",
+				L"Seek / cwiczenie / cue", L"Seek / alistirma / cue"),
+			LL14(L"シークバー右クリックと同系統の操作", L"Same family of actions as seek-bar RMB", L"Memes actions que le clic droit de la barre", L"Stesse azioni del tasto destro sulla barra",
+				L"Mismas acciones que el clic der. de la barra", L"시크바 우클릭과 같은 계열", L"与定位条右键同类操作", L"نفس عمليات زر يمين شريط التقديم",
+				L"Те же действия, что ПКМ по полосе", L"Wie RMB auf der Suchleiste", L"Mesmas acoes do botao dir. da barra", L"Zelfde als RMB op zoekbalk",
+				L"Jak PPM na pasku seek", L"Seek cubugu sag tik ile ayni"));
+		if (seekSub)
+			mp->AppendSeekExtrasToMenu(*seekSub, CMediaPlayerDlg::MP_SEEK_MENU_LIST);
+		menu.AddCommand(ID_MP_QUEUE_SHOW,
+			LL14(L"Up Next を表示", L"Show Up Next", L"Afficher Up Next", L"Mostra Up Next", L"Mostrar Up Next",
+				L"Up Next 표시", L"显示 Up Next", L"عرض Up Next", L"Показать Up Next", L"Up Next anzeigen",
+				L"Mostrar Up Next", L"Up Next tonen", L"Pokaz Up Next", L"Up Next goster"));
+		CCustomPopupMenu* lrcSub = menu.AddSubMenu(
+			LL14(L"歌詞タイミング", L"Lyrics timing", L"Timing paroles", L"Timing testi", L"Temporizacion letra",
+				L"가사 타이밍", L"歌词时序", L"توقيت الكلمات", L"Тайминг текста", L"Text-Timing",
+				L"Timing da letra", L"Songtekst-timing", L"Timing tekstu", L"Soz zamanlama"));
+		if (lrcSub) {
+			lrcSub->AddCommand(ID_MP_LRC_MINUS100, L"-100 ms");
+			lrcSub->AddCommand(ID_MP_LRC_MINUS50, L"-50 ms");
+			lrcSub->AddCommand(ID_MP_LRC_MINUS10, L"-10 ms");
+			lrcSub->AddCommand(ID_MP_LRC_PLUS10, L"+10 ms");
+			lrcSub->AddCommand(ID_MP_LRC_PLUS50, L"+50 ms");
+			lrcSub->AddCommand(ID_MP_LRC_PLUS100, L"+100 ms");
+			lrcSub->AddSeparator();
+			lrcSub->AddCommand(ID_MP_LRC_SAVE,
+				LL14(L"LRC を保存", L"Save LRC", L"Enregistrer LRC", L"Salva LRC", L"Guardar LRC",
+					L"LRC 저장", L"保存 LRC", L"حفظ LRC", L"Сохранить LRC", L"LRC speichern",
+					L"Salvar LRC", L"LRC opslaan", L"Zapisz LRC", L"LRC kaydet"));
+		}
+	}
+	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
 		menu.AddSeparator();
 		menu.AddCommand(PL_CTX_QUEUE_ADD,
 			LL14(L"Up Next に追加", L"Add to Up Next", L"Ajouter a Up Next", L"Aggiungi a Up Next", L"Anadir a Up Next", L"Up Next에 추가", L"加入 Up Next", L"إضافة إلى Up Next", L"В Up Next", L"Zu Up Next", L"Adicionar a Up Next", L"Toevoegen aan Up Next", L"Dodaj do Up Next", L"Up Next'e ekle"));
@@ -2438,6 +2472,13 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 
 void CPlayList::HandleTrackContextCmd(int cmd)
 {
+	extern CMediaPlayerDlg* mp;
+	if (cmd != 0 && CMediaPlayerDlg::IsSeekExtrasCommand((UINT)cmd)) {
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SendMessage(WM_COMMAND, (WPARAM)cmd, 0);
+		return;
+	}
+
 	if (cmd == ID_HELP_SHOWSHEET) { ShowHelpSheet(); return; }
 	if (cmd == PL_CTX_TEMP_CLEAR) {
 		extern CMediaPlayerDlg* mp;

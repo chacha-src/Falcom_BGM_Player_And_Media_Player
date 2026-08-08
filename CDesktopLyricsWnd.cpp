@@ -2,9 +2,12 @@
 #include "CDesktopLyricsWnd.h"
 #include "CCustomPopupMenu.h"
 #include "oggDlg.h"
+#include "CMediaPlayerDlg.h"
+#include "resource.h"
 
 extern save savedata;
 extern COggDlg* og;
+extern CMediaPlayerDlg* mp;
 extern void MpPersistSavedataQuick();
 
 static CDesktopLyricsWnd* g_desktopLyricsWnd = NULL;
@@ -663,6 +666,55 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 		NULL, canCopy);
 
 	menu.AddSeparator();
+	{
+		CCustomPopupMenu* lrcSub = menu.AddSubMenu(
+			LL14(L"LRC 微調整", L"LRC fine adjust", L"Reglage fin LRC", L"Regolazione fine LRC",
+				L"Ajuste fino LRC", L"LRC 미세 조정", L"LRC 微调", L"ضبط دقيق LRC",
+				L"Тонкая настройка LRC", L"LRC Feineinstellung", L"Ajuste fino LRC", L"LRC fijnafstellen",
+				L"Dostrojenie LRC", L"LRC ince ayar"),
+			LL14(L"タイミングをミリ秒単位でずらします（プレイヤーへ転送）", L"Nudge timing in ms (forwarded to player)",
+				L"Decaler le timing en ms (vers le lecteur)", L"Sposta il timing in ms (al player)",
+				L"Ajustar timing en ms (al reproductor)", L"타이밍을 ms 단위로 이동(플레이어로 전달)",
+				L"按毫秒微调时机（转发到播放器）", L"إزاحة التوقيت بالميلي ثانية (إلى المشغّل)",
+				L"Сдвинуть тайминг в мс (в плеер)", L"Timing in ms verschieben (an Player)",
+				L"Ajustar timing em ms (para o player)", L"Timing in ms verschuiven (naar speler)",
+				L"Przesun timing w ms (do odtwarzacza)", L"Zamanlamayi ms kaydir (oynaticiya)"));
+		if (lrcSub) {
+			lrcSub->AddCommand(ID_MP_LRC_MINUS100, L"-100 ms");
+			lrcSub->AddCommand(ID_MP_LRC_MINUS50, L"-50 ms");
+			lrcSub->AddCommand(ID_MP_LRC_MINUS10, L"-10 ms");
+			lrcSub->AddCommand(ID_MP_LRC_PLUS10, L"+10 ms");
+			lrcSub->AddCommand(ID_MP_LRC_PLUS50, L"+50 ms");
+			lrcSub->AddCommand(ID_MP_LRC_PLUS100, L"+100 ms");
+		}
+	}
+	menu.AddCommand(ID_MP_LRC_SAVE,
+		LL14(L"LRC を保存…", L"Save LRC…", L"Enregistrer LRC…", L"Salva LRC…", L"Guardar LRC…",
+			L"LRC 저장…", L"保存 LRC…", L"حفظ LRC…", L"Сохранить LRC…", L"LRC speichern…",
+			L"Salvar LRC…", L"LRC opslaan…", L"Zapisz LRC…", L"LRC kaydet…"));
+	menu.AddSeparator();
+	menu.AddCommand(ID_MP_PHRASE_AB,
+		LL14(L"フレーズA-B [R]", L"Phrase A-B [R]", L"Phrase A-B [R]", L"Frase A-B [R]", L"Frase A-B [R]",
+			L"프레이즈 A-B [R]", L"乐句A-B [R]", L"عبارة A-B [R]", L"Фраза A-B [R]", L"Phrase A-B [R]",
+			L"Frase A-B [R]", L"Frase A-B [R]", L"Fraza A-B [R]", L"Cumle A-B [R]"),
+		LL14(L"現在フレーズを A-B ループに設定", L"Set current phrase as A-B loop",
+			L"Definir la phrase actuelle en boucle A-B", L"Imposta la frase corrente come loop A-B",
+			L"Definir la frase actual como bucle A-B", L"현재 프레이즈를 A-B 루프로",
+			L"将当前乐句设为 A-B 循环", L"تعيين العبارة الحالية كحلقة A-B",
+			L"Сделать текущую фразу петлёй A-B", L"Aktuelle Phrase als A-B-Schleife",
+			L"Definir a frase atual como loop A-B", L"Huidige frase als A-B-lus",
+			L"Ustaw biezaca fraze jako petle A-B", L"Gecerli cumleyi A-B dongusu yap"));
+	menu.AddCommand(ID_MP_SEEK_ABCLR,
+		LL14(L"A-B解除", L"Clear A-B", L"Effacer A-B", L"Cancella A-B", L"Borrar A-B",
+			L"A-B 해제", L"清除A-B", L"مسح A-B", L"Сброс A-B", L"A-B aus",
+			L"Limpar A-B", L"A-B uit", L"Wyczysc A-B", L"A-B sil"));
+	menu.AddCommand(ID_MP_SEEK_CUEADD,
+		LL14(L"キューを現在位置に追加", L"Add cue at now", L"Ajouter cue ici", L"Aggiungi cue qui",
+			L"Anadir cue aqui", L"현재 위치에 큐 추가", L"在当前位置添加标记", L"إضافة إشارة هنا",
+			L"Добавить метку здесь", L"Cue hier hinzufugen", L"Adicionar cue aqui",
+			L"Cue hier toevoegen", L"Dodaj cue tutaj", L"Buraya cue ekle"));
+
+	menu.AddSeparator();
 	menu.AddCommand(ID_DLRC_CLOSE,
 		LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar",
 			L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen",
@@ -708,6 +760,13 @@ void CDesktopLyricsWnd::ShowDeskLrcMenu(CPoint screenPt)
 	else if (cmd == ID_DLRC_CLOSE) {
 		savedata.deskLrcOn = 0;
 		DestroyWindow();
+	}
+	else if (cmd == ID_MP_LRC_MINUS100 || cmd == ID_MP_LRC_MINUS50 || cmd == ID_MP_LRC_MINUS10
+		|| cmd == ID_MP_LRC_PLUS10 || cmd == ID_MP_LRC_PLUS50 || cmd == ID_MP_LRC_PLUS100
+		|| cmd == ID_MP_LRC_SAVE || cmd == ID_MP_PHRASE_AB
+		|| cmd == ID_MP_SEEK_ABCLR || cmd == ID_MP_SEEK_CUEADD) {
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->PostMessage(WM_COMMAND, cmd);
 	}
 }
 
@@ -825,6 +884,9 @@ void CDesktopLyricsWnd::PostNcDestroy()
 	CCustomBlurDialogBase::PostNcDestroy();
 	if (g_desktopLyricsWnd == this)
 		g_desktopLyricsWnd = NULL;
+	// HWND 破棄後にボタン表示を更新（OnDestroy 時点では IsDesktopLyricsOpen がまだ真）
+	if (!s_deskLrcAppExit && mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->UpdateDeskLrcBtnChrome();
 	delete this;
 }
 
@@ -838,6 +900,8 @@ void OpenDesktopLyricsModeless(CWnd* pParent)
 		g_desktopLyricsWnd->SyncFromOg();
 		savedata.deskLrcOn = 1;
 		MpPersistSavedataQuick();
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->UpdateDeskLrcBtnChrome();
 		return;
 	}
 	CWnd* parent = pParent;
@@ -851,6 +915,8 @@ void OpenDesktopLyricsModeless(CWnd* pParent)
 	}
 	g_desktopLyricsWnd->ShowWindow(SW_SHOW);
 	g_desktopLyricsWnd->SetForegroundWindow();
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->UpdateDeskLrcBtnChrome();
 }
 
 void CloseDesktopLyricsIfOpen()

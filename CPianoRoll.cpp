@@ -10,6 +10,8 @@
 #include "MpPlayerAddons.h"
 #include "CEqualizer.h"
 #include "DeviceRecordDlg.h"
+#include "oggDlg.h"
+#include "CMediaPlayerDlg.h"
 
 class COggDlg;
 extern COggDlg* og;
@@ -3007,6 +3009,15 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
     menu.AddCommand(IDM_ROLL_CLEAR,
         LL14(L"表示をクリア", L"Clear display", L"Effacer l'affichage", L"Cancella visualizzazione", L"Borrar pantalla", L"표시 지우기", L"清除显示", L"مسح العرض", L"Очистить экран", L"Anzeige leeren", L"Limpar exibicao", L"Weergave wissen", L"Wyczysc wyswietlacz", L"Goruntuyu temizle"));
     menu.AddSeparator();
+    menu.AddCommand(ID_MP_OPEN_EQ,
+        LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador",
+            L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل", L"Открыть эквалайзер", L"Equalizer öffnen",
+            L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"));
+    menu.AddCommand(ID_MP_OPEN_ANALYZER,
+        LL14(L"アナライザを開く", L"Open analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore", L"Abrir analizador",
+            L"분석기 열기", L"打开分析器", L"فتح المحلل", L"Открыть анализатор", L"Analyzer öffnen",
+            L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"));
+    menu.AddSeparator();
     menu.AddCommand(ID_HELP_SHOWSHEET,
         LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
             L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
@@ -3018,7 +3029,18 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
         point = CPoint(rc.left + 8, rc.top + 8);
     }
     const UINT cmd = menu.Track(point, this);
-    if (cmd != 0)
+    if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_ANALYZER) {
+        extern CMediaPlayerDlg* mp;
+        if (mp && ::IsWindow(mp->GetSafeHwnd()))
+            mp->PostMessage(WM_COMMAND, cmd);
+        else if (og && ::IsWindow(og->GetSafeHwnd())) {
+            if (cmd == ID_MP_OPEN_EQ)
+                og->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON59, BN_CLICKED), 0);
+            else
+                og->PostMessage(WM_OGG_TOGGLE_SUBUI, 2, 0);
+        }
+    }
+    else if (cmd != 0)
         SendMessage(WM_COMMAND, cmd);
 }
 int CPianoRoll::HistoryCountLocked() const

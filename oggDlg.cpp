@@ -24260,6 +24260,27 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 		extern CMediaPlayerDlg* mp;
 		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->RelayPreTranslateMessage(pMsg))
 			return TRUE;
+	} else if (m_setteiii.GetSafeHwnd()
+		&& (pMsg->message == WM_RBUTTONUP || pMsg->message == WM_CONTEXTMENU)
+		&& pMsg->hwnd == m_setteiii.GetSafeHwnd()) {
+		// ファルコムUIの設定ボタン: フルダイアログなしでクイック変更
+		extern CMediaPlayerDlg* mp;
+		CPoint sp;
+		if (pMsg->message == WM_CONTEXTMENU) {
+			sp.x = (short)LOWORD(pMsg->lParam);
+			sp.y = (short)HIWORD(pMsg->lParam);
+			if (sp.x == -1 && sp.y == -1)
+				::GetCursorPos(&sp);
+		} else {
+			sp.x = (short)LOWORD(pMsg->lParam);
+			sp.y = (short)HIWORD(pMsg->lParam);
+			m_setteiii.ClientToScreen(&sp);
+		}
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->ShowSettingsExtrasMenu(sp);
+		else
+			MpShowSettingsExtrasMenu(this, sp);
+		return TRUE;
 	}
 	if (CCC_InwomanHotkey(pMsg, this))
 		return TRUE; // 隠し: F12を5回で淫女モード切替

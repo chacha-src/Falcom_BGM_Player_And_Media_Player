@@ -410,6 +410,12 @@ static void RenderRecreateSecondarySound(COggDlg* og)
 	}
 }
 
+void MpRecreatePlaybackOutput()
+{
+	extern COggDlg* og;
+	RenderRecreateSecondarySound(og);
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // CRender ダイアログ
 

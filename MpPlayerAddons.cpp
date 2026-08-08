@@ -4440,6 +4440,67 @@ protected:
 				L"BPM 측정", L"检测 BPM", L"اكتشاف BPM", L"Определить BPM", L"BPM erkennen",
 				L"Detectar BPM", L"BPM detecteren", L"Wykryj BPM", L"BPM algila"));
 		menu.AddSeparator();
+		{
+			CCustomPopupMenu* vocalSub = menu.AddSubMenu(
+				LL14(L"ボーカル / M-S", L"Vocal / M-S", L"Vocal / M-S", L"Vocal / M-S", L"Vocal / M-S",
+					L"보컬 / M-S", L"人声 / M-S", L"صوت / M-S", L"Вокал / M-S", L"Gesang / M-S",
+					L"Vocal / M-S", L"Vocaal / M-S", L"Wokal / M-S", L"Vokal / M-S"));
+			if (vocalSub) {
+				vocalSub->AddCommand(16,
+					LL14(L"ボーカル +", L"Vocal +", L"Vocal +", L"Vocal +", L"Vocal +",
+						L"보컬 +", L"人声 +", L"صوت +", L"Вокал +", L"Gesang +",
+						L"Vocal +", L"Vocaal +", L"Wokal +", L"Vokal +"));
+				vocalSub->AddCommand(17,
+					LL14(L"ボーカル −", L"Vocal −", L"Vocal −", L"Vocal −", L"Vocal −",
+						L"보컬 −", L"人声 −", L"صوت −", L"Вокал −", L"Gesang −",
+						L"Vocal −", L"Vocaal −", L"Wokal −", L"Vokal −"));
+				vocalSub->AddCommand(18,
+					LL14(L"ボーカル リセット", L"Reset vocal", L"Reinit vocal", L"Reset vocal", L"Restablecer vocal",
+						L"보컬 초기화", L"重置人声", L"إعادة الصوت", L"Сброс вокала", L"Gesang zurücksetzen",
+						L"Redefinir vocal", L"Vocaal resetten", L"Reset wokalu", L"Vokal sifirla"));
+				vocalSub->AddSeparator();
+				vocalSub->AddCommand(19,
+					LL14(L"M-S 狭め", L"M-S narrow", L"M-S etroit", L"M-S stretto", L"M-S estrecho",
+						L"M-S 좁게", L"M-S 窄", L"M-S ضيق", L"M-S узко", L"M-S schmal",
+						L"M-S estreito", L"M-S smal", L"M-S wasko", L"M-S dar"));
+				vocalSub->AddCommand(20,
+					LL14(L"M-S 広げ", L"M-S wide", L"M-S large", L"M-S ampio", L"M-S ancho",
+						L"M-S 넓게", L"M-S 宽", L"M-S واسع", L"M-S широко", L"M-S breit",
+						L"M-S largo", L"M-S breed", L"M-S szeroko", L"M-S genis"));
+				vocalSub->AddCommand(21,
+					LL14(L"M-S リセット", L"Reset M-S", L"Reinit M-S", L"Reset M-S", L"Restablecer M-S",
+						L"M-S 초기화", L"重置 M-S", L"إعادة M-S", L"Сброс M-S", L"M-S zurücksetzen",
+						L"Redefinir M-S", L"M-S resetten", L"Reset M-S", L"M-S sifirla"));
+			}
+		}
+		{
+			CCustomPopupMenu* killSub = menu.AddSubMenu(
+				LL14(L"EQ Kill", L"EQ Kill", L"EQ Kill", L"EQ Kill", L"EQ Kill",
+					L"EQ Kill", L"EQ Kill", L"EQ Kill", L"EQ Kill", L"EQ Kill",
+					L"EQ Kill", L"EQ Kill", L"EQ Kill", L"EQ Kill"));
+			if (killSub) {
+				killSub->AddCheck(22,
+					LL14(L"Low Kill", L"Low Kill", L"Low Kill", L"Low Kill", L"Low Kill",
+						L"Low Kill", L"Low Kill", L"Low Kill", L"Low Kill", L"Low Kill",
+						L"Low Kill", L"Low Kill", L"Low Kill", L"Low Kill"),
+					(savedata.mpDjEqKill & 1) != 0);
+				killSub->AddCheck(23,
+					LL14(L"Mid Kill", L"Mid Kill", L"Mid Kill", L"Mid Kill", L"Mid Kill",
+						L"Mid Kill", L"Mid Kill", L"Mid Kill", L"Mid Kill", L"Mid Kill",
+						L"Mid Kill", L"Mid Kill", L"Mid Kill", L"Mid Kill"),
+					(savedata.mpDjEqKill & 2) != 0);
+				killSub->AddCheck(24,
+					LL14(L"High Kill", L"High Kill", L"High Kill", L"High Kill", L"High Kill",
+						L"High Kill", L"High Kill", L"High Kill", L"High Kill", L"High Kill",
+						L"High Kill", L"High Kill", L"High Kill", L"High Kill"),
+					(savedata.mpDjEqKill & 4) != 0);
+			}
+		}
+		menu.AddCommand(25,
+			LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador",
+				L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل", L"Открыть эквалайзер", L"Equalizer öffnen",
+				L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"));
+		menu.AddSeparator();
 		menu.AddCommand(1,
 			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 		const UINT cmd = menu.Track(point, this);
@@ -4478,6 +4539,27 @@ protected:
 			MpPersistSavedataQuick();
 		} else if (cmd == 15) {
 			if (mp) MpOnBpmDetect(mp);
+		} else if (cmd == 16) {
+			OnVocal();
+		} else if (cmd == 17) {
+			OnVocalDn();
+		} else if (cmd == 18) {
+			OnVocalRst();
+		} else if (cmd == 19) {
+			OnMsNarrow();
+		} else if (cmd == 20) {
+			OnMsWide();
+		} else if (cmd == 21) {
+			OnMsRst();
+		} else if (cmd == 22) {
+			OnKillL();
+		} else if (cmd == 23) {
+			OnKillM();
+		} else if (cmd == 24) {
+			OnKillH();
+		} else if (cmd == 25) {
+			if (mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->PostMessage(WM_COMMAND, ID_MP_OPEN_EQ);
 		}
 	}
 	afx_msg void OnRButtonUp(UINT, CPoint point)
@@ -5104,6 +5186,79 @@ protected:
 		if (mp) MpRemoteEnsureRunning(mp->GetSafeHwnd());
 		::ShellExecute(NULL, L"open", url, NULL, NULL, SW_SHOWNORMAL);
 	}
+	afx_msg void OnContextMenu(CWnd*, CPoint point)
+	{
+		if (point.x == -1 && point.y == -1) {
+			CRect r; GetWindowRect(&r);
+			point.x = r.left + 40; point.y = r.top + 40;
+		}
+		const BOOL enabled = m_enable.GetCheck() == BST_CHECKED;
+		CCustomPopupMenu menu;
+		menu.SetAeroMode(FALSE);
+		menu.AddCheck(10,
+			LL14(L"リモート有効", L"Enable remote", L"Activer le remote", L"Abilita remote", L"Activar remoto",
+				L"리모트 사용", L"启用遥控", L"تفعيل التحكم", L"Включить пульт", L"Remote aktivieren",
+				L"Ativar remoto", L"Remote inschakelen", L"Wlacz pilota", L"Uzaktan etkin"),
+			enabled);
+		menu.AddCommand(11,
+			LL14(L"URL をコピー", L"Copy URL", L"Copier l'URL", L"Copia URL", L"Copiar URL",
+				L"URL 복사", L"复制 URL", L"نسخ الرابط", L"Копировать URL", L"URL kopieren",
+				L"Copiar URL", L"URL kopieren", L"Kopiuj URL", L"URL kopyala"));
+		menu.AddCommand(12,
+			LL14(L"ブラウザで開く", L"Open in browser", L"Ouvrir dans le navigateur", L"Apri nel browser", L"Abrir en el navegador",
+				L"브라우저에서 열기", L"在浏览器打开", L"فتح في المتصفح", L"Открыть в браузере", L"Im Browser öffnen",
+				L"Abrir no navegador", L"Openen in browser", L"Otworz w przegladarce", L"Tarayicida ac"));
+		menu.AddSeparator();
+		menu.AddCommand(1,
+			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
+		const UINT cmd = menu.Track(point, this);
+		if (cmd == 1) {
+			DestroyWindow();
+		} else if (cmd == 10) {
+			const BOOL next = !enabled;
+			m_enable.SetCheck(next ? BST_CHECKED : BST_UNCHECKED);
+			savedata.mpRemoteOn = next ? 1 : 0;
+			MpPersistSavedataQuick();
+			if (mp) MpRemoteEnsureRunning(mp->GetSafeHwnd());
+			RefreshUrlLabel();
+		} else if (cmd == 11) {
+			RefreshUrlLabel();
+			int port = savedata.mpRemotePort;
+			CString p; m_port.GetWindowText(p);
+			const int typed = _ttoi(p);
+			if (typed >= 1024 && typed <= 65535) port = typed;
+			if (port < 1024 || port > 65535) port = 8765;
+			wchar_t lan[64] = {};
+			CString url;
+			if (MpRemoteGetLanIpv4(lan, 64))
+				url.Format(L"http://%s:%d/", lan, port);
+			else
+				url.Format(L"http://127.0.0.1:%d/", port);
+			if (::OpenClipboard(m_hWnd)) {
+				::EmptyClipboard();
+				const size_t bytes = (size_t)(url.GetLength() + 1) * sizeof(wchar_t);
+				HGLOBAL h = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
+				if (h) {
+					wchar_t* buf = (wchar_t*)::GlobalLock(h);
+					if (buf) {
+						memcpy(buf, (LPCWSTR)url, bytes);
+						::GlobalUnlock(h);
+						::SetClipboardData(CF_UNICODETEXT, h);
+					} else {
+						::GlobalFree(h);
+					}
+				}
+				::CloseClipboard();
+			}
+		} else if (cmd == 12) {
+			OnOpenBrowser();
+		}
+	}
+	afx_msg void OnRButtonUp(UINT, CPoint point)
+	{
+		ClientToScreen(&point);
+		OnContextMenu(this, point);
+	}
 	DECLARE_MESSAGE_MAP()
 };
 
@@ -5111,6 +5266,8 @@ BEGIN_MESSAGE_MAP(CMpRemoteDlg, CCustomBlurDialogBase)
 	ON_WM_DESTROY()
 	ON_EN_CHANGE(IDC_REMOTE_PORT, &CMpRemoteDlg::OnEnChangePort)
 	ON_BN_CLICKED(IDC_REMOTE_OPEN, &CMpRemoteDlg::OnOpenBrowser)
+	ON_WM_CONTEXTMENU()
+	ON_WM_RBUTTONUP()
 END_MESSAGE_MAP()
 
 void CloseMpRemoteDlgIfOpen()
@@ -5192,6 +5349,35 @@ protected:
 				L"Развернуть", L"Maximieren", L"Maximizar", L"Maximaliseren", L"Maksymalizuj", L"Buyut"),
 			maximized);
 		menu.AddSeparator();
+		{
+			CCustomPopupMenu* styleSub = menu.AddSubMenu(
+				LL14(L"スペアナ様式", L"Speana style", L"Style speana", L"Stile speana", L"Estilo speana",
+					L"스펙애너 스타일", L"频谱样式", L"نمط speana", L"Стиль speana", L"Speana-Stil",
+					L"Estilo speana", L"Speana-stijl", L"Styl speana", L"Speana stili"),
+				LL14(L"メインのスペアナ表示様式を切替（本窓は棒グラフ固定）", L"Switch main speana style (this window stays bars)",
+					L"Changer le style speana principal", L"Cambia lo stile speana principale",
+					L"Cambiar el estilo speana principal", L"메인 스펙애너 스타일 전환",
+					L"切换主频谱样式", L"تبديل نمط speana الرئيسي",
+					L"Сменить стиль speana в плеере", L"Haupt-Speana-Stil wechseln",
+					L"Alternar estilo speana principal", L"Hoofd-speana-stijl wisselen",
+					L"Przelacz styl speana w odtwarzaczu", L"Ana speana stilini degistir"));
+			if (styleSub) {
+				styleSub->AddCheck(10,
+					LL14(L"棒", L"Bars", L"Barres", L"Barre", L"Barras", L"막대", L"柱状", L"أعمدة", L"Столбцы", L"Balken", L"Barras", L"Balken", L"Slupki", L"Cubuk"),
+					savedata.mpSpeanaStyle == 0);
+				styleSub->AddCheck(11,
+					LL14(L"ミラー", L"Mirror", L"Miroir", L"Specchio", L"Espejo", L"미러", L"镜像", L"مرآة", L"Зеркало", L"Spiegel", L"Espelho", L"Spiegel", L"Lustrzane", L"Ayna"),
+					savedata.mpSpeanaStyle == 1);
+				styleSub->AddCheck(12,
+					LL14(L"波形", L"Wave", L"Onde", L"Onda", L"Onda", L"파형", L"波形", L"موجة", L"Волна", L"Welle", L"Onda", L"Golf", L"Fala", L"Dalga"),
+					savedata.mpSpeanaStyle == 2);
+			}
+		}
+		menu.AddCommand(13,
+			LL14(L"アナライザを開く", L"Open analyzer", L"Ouvrir l'analyseur", L"Apri analizzatore", L"Abrir analizador",
+				L"분석기 열기", L"打开分析器", L"فتح المحلل", L"Открыть анализатор", L"Analyzer öffnen",
+				L"Abrir analisador", L"Analyzer openen", L"Otworz analizator", L"Analizoru ac"));
+		menu.AddSeparator();
 		menu.AddCommand(1,
 			LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schliessen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 		const UINT cmd = menu.Track(point, this);
@@ -5204,6 +5390,19 @@ protected:
 		}
 		else if (cmd == 3) {
 			ShowWindow(maximized ? SW_RESTORE : SW_SHOWMAXIMIZED);
+		}
+		else if (cmd == 10 || cmd == 11 || cmd == 12) {
+			savedata.mpSpeanaStyle = (cmd == 10) ? 0 : (cmd == 11) ? 1 : 2;
+			MpPersistSavedataQuick();
+			if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+				if (cmd == 10) mp->PostMessage(WM_COMMAND, ID_MP_SPEANA_BAR);
+				else if (cmd == 11) mp->PostMessage(WM_COMMAND, ID_MP_SPEANA_MIRROR);
+				else mp->PostMessage(WM_COMMAND, ID_MP_SPEANA_WAVE);
+			}
+		}
+		else if (cmd == 13) {
+			if (mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->PostMessage(WM_COMMAND, ID_MP_OPEN_ANALYZER);
 		}
 	}
 	afx_msg void OnRButtonUp(UINT, CPoint point)

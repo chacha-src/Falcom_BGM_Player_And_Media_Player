@@ -5195,6 +5195,23 @@ void CDouga::ShowDougaContextMenu(CPoint point)
 					L"0.5x–2.0x (مباشر أثناء السحب)", L"0.5x–2.0x (сразу при перетаскивании)",
 					L"0,5x–2,0x (live beim Ziehen)", L"0,5x–2,0x (ao arrastar)",
 					L"0,5x–2,0x (live tijdens slepen)", L"0,5x–2,0x (na zywo)", L"0.5x–2.0x (suruklerken anlik)"));
+			{
+				static const double kRates[6] = { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
+				static const wchar_t* const kRateLabels[6] = {
+					L"0.5x", L"0.75x", L"1.0x", L"1.25x", L"1.5x", L"2.0x"
+				};
+				CCustomPopupMenu* spdSub = menu.AddSubMenu(
+					LL14(L"再生速度プリセット", L"Speed presets", L"Presets de vitesse", L"Preset velocita",
+						L"Presets de velocidad", L"재생 속도 프리셋", L"播放速度预设", L"إعدادات السرعة",
+						L"Пресеты скорости", L"Geschwindigkeits-Presets", L"Presets de velocidade",
+						L"Snelheidpresets", L"Presety predkosci", L"Hiz onayarlari"));
+				if (spdSub) {
+					for (int i = 0; i < 6; ++i) {
+						const BOOL on = (cur > kRates[i] - 0.01 && cur < kRates[i] + 0.01);
+						spdSub->AddCheck(ID_DOUGA_SPEED_FIRST + i, kRateLabels[i], on);
+					}
+				}
+			}
 		}
 	}
 

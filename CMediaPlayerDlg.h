@@ -15,6 +15,7 @@
 
 class COggDlg;
 class CPlayList;
+class CCustomPopupMenu;
 
 // メディアプレイヤー → ファルコム特化型 への切替を og 側で遅延実行するためのメッセージ
 // (mp の操作ハンドラ内で mp 自身を破棄しないようにするため)
@@ -103,6 +104,7 @@ public:
 	void NotifyPlayIconChanged();          // SIconTimer 直後に♪点滅を即反映(250ms待ちしない)
 	void InitListScrollPosition();          // 起動/表示確定時にリスト位置を復元
 	void SyncFromMain();         // og/pl の状態をUIへ反映
+	void UpdateDeskLrcBtnChrome(); // 歌詞窓ボタンの文言・色を開閉状態に合わせる
 	void ApplyPauseButtonLabel(); // m_mpBtnShort と ps に応じた一時停止/再開ラベル
 	void MirrorSeekVol();        // 再生位置(playb追従)/時間/音量を高速ミラー
 	void SavePos();              // 座標を savedata に保存
@@ -138,6 +140,7 @@ public:
 	CCustomStandardButton m_abA, m_abB, m_abClr; // A-Bリピート
 	CCustomCheckBox m_seekLock; // シーク左: loop1/2つまみロック(既定ON)
 	CCustomStandardButton m_lrcExpand; // 歌詞パネル拡大/縮小
+	CCustomStandardButton m_deskLrc;   // 歌詞ウィンドウ(常時最前面)の開閉
 	CCustomStandardButton m_toolsToggle; // ツールメニュー（並べ替えパネル含む）
 	CCustomStandardButton m_cheatBtn;    // 操作ガイド(?)
 	CCustomStandardButton m_sortName, m_sortArt, m_sortAlb, m_sortTime;
@@ -310,6 +313,36 @@ public:
 	void UpdateQueueChrome();                // ツール▾は記号のみ。状態はツールチップ
 	void ShowToolsExtrasMenu(CPoint screenPt);
 	void ShowLyricsExtrasMenu(CPoint screenPt);
+	void ShowSettingsExtrasMenu(CPoint screenPt);
+	void ShowFolderExtrasMenu(CPoint screenPt);
+	void ShowEqButtonExtrasMenu(CPoint screenPt);
+	void ShowFadeExtrasMenu(CPoint screenPt);
+	void ShowPlayModeExtrasMenu(CPoint screenPt);
+	void ShowMirrorExtrasMenu(CPoint screenPt);
+	// シークバー／リスト／ツールで共有するシーク・練習・キュー系メニュー項目
+	enum {
+		MP_SEEK_MENU_VIDEO = 0x001,
+		MP_SEEK_MENU_LOCK = 0x002,
+		MP_SEEK_MENU_AB_POINTS = 0x004,
+		MP_SEEK_MENU_WAVE = 0x008,
+		MP_SEEK_MENU_CUES = 0x010,
+		MP_SEEK_MENU_PRACTICE = 0x020,
+		MP_SEEK_MENU_MIC = 0x040,
+		MP_SEEK_MENU_GRID = 0x080,
+		MP_SEEK_MENU_SNAPS = 0x100,
+		MP_SEEK_MENU_RANGE = 0x200,
+		MP_SEEK_MENU_EXPORT = 0x400,
+		MP_SEEK_MENU_BAR = MP_SEEK_MENU_VIDEO | MP_SEEK_MENU_LOCK | MP_SEEK_MENU_AB_POINTS
+			| MP_SEEK_MENU_WAVE | MP_SEEK_MENU_CUES | MP_SEEK_MENU_PRACTICE
+			| MP_SEEK_MENU_MIC | MP_SEEK_MENU_GRID | MP_SEEK_MENU_SNAPS,
+		MP_SEEK_MENU_LIST = MP_SEEK_MENU_LOCK | MP_SEEK_MENU_WAVE | MP_SEEK_MENU_CUES
+			| MP_SEEK_MENU_PRACTICE | MP_SEEK_MENU_SNAPS | MP_SEEK_MENU_GRID
+			| MP_SEEK_MENU_RANGE | MP_SEEK_MENU_EXPORT,
+		MP_SEEK_MENU_TOOLS_MORE = MP_SEEK_MENU_LOCK | MP_SEEK_MENU_WAVE | MP_SEEK_MENU_CUES
+			| MP_SEEK_MENU_PRACTICE | MP_SEEK_MENU_GRID
+	};
+	void AppendSeekExtrasToMenu(CCustomPopupMenu& menu, UINT flags);
+	static BOOL IsSeekExtrasCommand(UINT cmd);
 	void ApplySleepTimer(int minutes);       // 0=Off
 	void OpenTagEditForSelection();
 	void CycleRatingForDisp(int disp);
@@ -621,6 +654,9 @@ protected:
 
 // グローバル(他ファイルから extern で参照)
 extern CMediaPlayerDlg* mp;
+
+// 設定クイックメニュー（MP/ファルコム設定ボタン共用。owner は Track 親）
+void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt);
 
 // モード切替: ファルコム特化型 <-> メディアプレイヤー
 // bConvertCoords: 中途切替時のみ TRUE。起動時に TRUE にすると保存座標がドリフトする。

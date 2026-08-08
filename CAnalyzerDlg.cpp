@@ -6,6 +6,7 @@
 #include "oggDlg.h"
 #include "CEqualizer.h"
 #include "CProToolsDlg.h"
+#include "CMediaPlayerDlg.h"
 #include <cmath>
 #include <algorithm>
 
@@ -1832,6 +1833,15 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		LL14(L"常に手前に表示", L"Always on top", L"Toujours au premier plan", L"Sempre in primo piano", L"Siempre visible", L"항상 위에 표시", L"始终置顶", L"دائما في المقدمة", L"Поверх всех окон", L"Immer im Vordergrund", L"Sempre no topo", L"Altijd op voorgrond", L"Zawsze na wierzchu", L"Her zaman ustte"),
 		m_alwaysOnTop);
 	menu.AddSeparator();
+	menu.AddCommand(ID_MP_OPEN_EQ,
+		LL14(L"イコライザを開く", L"Open equalizer", L"Ouvrir l'egaliseur", L"Apri equalizzatore", L"Abrir ecualizador",
+			L"이퀄라이저 열기", L"打开均衡器", L"فتح المعادل", L"Открыть эквалайзер", L"Equalizer öffnen",
+			L"Abrir equalizador", L"Equalizer openen", L"Otworz equalizer", L"Equalizeri ac"));
+	menu.AddCommand(ID_MP_OPEN_PIANOROLL,
+		LL14(L"ピアノロールを開く", L"Open piano roll", L"Ouvrir le piano roll", L"Apri piano roll", L"Abrir piano roll",
+			L"피아노 롤 열기", L"打开钢琴卷帘", L"فتح لفافة البيانو", L"Открыть пианоролл", L"Piano-Roll öffnen",
+			L"Abrir piano roll", L"Piano-roll openen", L"Otworz piano roll", L"Piyano rolunu ac"));
+	menu.AddSeparator();
 	menu.AddCommand(ID_HELP_SHOWSHEET,
 		LL14(L"操作ガイド", L"Operation guide", L"Guide d'utilisation", L"Guida operativa",
 			L"Guía de operación", L"조작 가이드", L"操作指南", L"دليل التشغيل",
@@ -1843,7 +1853,18 @@ void CAnalyzerDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		point = CPoint(rc.left + 8, rc.top + 8);
 	}
 	const UINT cmd = menu.Track(point, this);
-	if (cmd != 0)
+	if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_PIANOROLL) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->PostMessage(WM_COMMAND, cmd);
+		else if (og && ::IsWindow(og->GetSafeHwnd())) {
+			if (cmd == ID_MP_OPEN_EQ)
+				og->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON59, BN_CLICKED), 0);
+			else
+				og->PostMessage(WM_OGG_TOGGLE_SUBUI, 1, 0);
+		}
+	}
+	else if (cmd != 0)
 		SendMessage(WM_COMMAND, cmd);
 }
 LPCTSTR CAnalyzerDlg::ChannelLabel(int ch, int channels)
