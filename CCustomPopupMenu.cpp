@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCustomPopupMenu.h"
 #include <uxtheme.h>
 #include <math.h>
@@ -91,16 +91,49 @@ namespace {
 	// 行ごとのチップ飛行（ULW）。クラシック／上下伸び面は除外
 	static BOOL UsesRowChipFlight(int style)
 	{
-		return style == POPUP_ANIM_CASCADE
-			|| style == POPUP_ANIM_SLIDE
-			|| style == POPUP_ANIM_POP
-			|| style == POPUP_ANIM_BIGBANG;
+		return style >= POPUP_ANIM_CASCADE && style < POPUP_ANIM_COUNT;
 	}
 	static int FlightPadForStyle(int style)
 	{
-		return (style == POPUP_ANIM_BIGBANG)
-			? CCUSTOM_POPUP_FLIGHT_PAD_BIG
-			: CCUSTOM_POPUP_FLIGHT_PAD_ROW;
+		if (style == POPUP_ANIM_BIGBANG || style == POPUP_ANIM_SPIRAL)
+			return CCUSTOM_POPUP_FLIGHT_PAD_BIG;
+		if (style == POPUP_ANIM_ZIPPER || style == POPUP_ANIM_AURORA)
+			return CCUSTOM_POPUP_FLIGHT_PAD_MID;
+		return CCUSTOM_POPUP_FLIGHT_PAD_ROW;
+	}
+	// 起点からの距離で遅延（放射系）
+	static BOOL UsesRadialStagger(int style)
+	{
+		return style == POPUP_ANIM_BIGBANG
+			|| style == POPUP_ANIM_POP
+			|| style == POPUP_ANIM_SPIRAL;
+	}
+	// 上から順（または交互）で遅延
+	static BOOL UsesIndexStagger(int style)
+	{
+		return style == POPUP_ANIM_CASCADE
+			|| style == POPUP_ANIM_SLIDE
+			|| style == POPUP_ANIM_PETAL
+			|| style == POPUP_ANIM_ZIPPER
+			|| style == POPUP_ANIM_AURORA;
+	}
+	static int ChipInDurMs(int style, BOOL asSub)
+	{
+		if (style == POPUP_ANIM_BIGBANG || style == POPUP_ANIM_SPIRAL)
+			return asSub ? 220 : 280;
+		if (style == POPUP_ANIM_PETAL || style == POPUP_ANIM_AURORA)
+			return asSub ? 200 : 260;
+		if (style == POPUP_ANIM_ZIPPER)
+			return asSub ? 180 : 240;
+		return asSub ? CCUSTOM_POPUP_ANIM_SUB_MS : CCUSTOM_POPUP_ANIM_IN_MS;
+	}
+	static int ChipOutDurMs(int style)
+	{
+		if (style == POPUP_ANIM_BIGBANG || style == POPUP_ANIM_SPIRAL)
+			return 200;
+		if (style == POPUP_ANIM_PETAL || style == POPUP_ANIM_AURORA)
+			return 180;
+		return CCUSTOM_POPUP_ANIM_OUT_MS;
 	}
 
 	static void EnsurePopupClass()
@@ -880,7 +913,19 @@ void CCustomPopupMenu::EnsureChromePrefix()
 				L"Ondulacao (clique)", L"Rimpel (klik)", L"Fala (klik)", L"Dalga (tik)"),
 			LL14(L"ビッグバン／ブラックホール", L"Big Bang / Black Hole", L"Big Bang / Trou noir", L"Big Bang / Buco nero", L"Big Bang / Agujero negro",
 				L"빅뱅/블랙홀", L"大爆炸／黑洞", L"الانفجار العظيم / ثقب أسود", L"Большой взрыв / Чёрная дыра", L"Urknall / Schwarzes Loch",
-				L"Big Bang / Buraco negro", L"Big Bang / Zwart gat", L"Big Bang / Czarna dziura", L"Buyuk Patlama / Kara Delik")
+				L"Big Bang / Buraco negro", L"Big Bang / Zwart gat", L"Big Bang / Czarna dziura", L"Buyuk Patlama / Kara Delik"),
+			LL14(L"螺旋（スパイラル）", L"Spiral", L"Spirale", L"Spirale", L"Espiral",
+				L"스파이럴", L"螺旋", L"حلزوني", L"Спираль", L"Spirale",
+				L"Espiral", L"Spiraal", L"Spirala", L"Spiral"),
+			LL14(L"花びら", L"Petals", L"Petales", L"Petali", L"Petalos",
+				L"꽃잎", L"花瓣", L"بتلات", L"Лепестки", L"Blütenblätter",
+				L"Petalas", L"Bloemblaadjes", L"Platki", L"Yapraklar"),
+			LL14(L"ジッパー（左右交互）", L"Zipper (L/R)", L"Fermeture (G/D)", L"Cerniera (S/D)", L"Cremallera (I/D)",
+				L"지퍼(좌우)", L"拉链（左右）", L"سحاب (يسار/يمين)", L"Молния (Л/П)", L"Reißverschluss (L/R)",
+				L"Ziper (E/D)", L"Rits (L/R)", L"Zamek (L/P)", L"Fermuar (S/S)"),
+			LL14(L"オーロラ（波）", L"Aurora (wave)", L"Aurore (onde)", L"Aurora (onda)", L"Aurora (onda)",
+				L"오로라(파도)", L"极光（波浪）", L"شفق (موجة)", L"Полярное сияние", L"Polarlicht (Welle)",
+				L"Aurora (onda)", L"Noorderlicht (golf)", L"Zorza (fala)", L"Aurora (dalga)")
 		};
 		for (int i = 0; i < POPUP_ANIM_COUNT; ++i) {
 			animSub->AddCheck(animIds[i], names[i],
@@ -1166,20 +1211,21 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 		*sx = cosf(ang) * rad;
 		*sy = sinf(ang) * rad;
 	};
+	auto easeInOutSine = [](float t) -> float {
+		if (t <= 0.f) return 0.f;
+		if (t >= 1.f) return 1.f;
+		return 0.5f * (1.f - cosf(t * 3.14159265f));
+	};
 
 	if (m_lineAnimPhase == 1) {
 		const int stag = pickStag(m_asSubmenu ? CCUSTOM_POPUP_LINE_STAGGER_SUB : CCUSTOM_POPUP_LINE_STAGGER_IN, m_itemCount);
-		const int dur = (style == POPUP_ANIM_BIGBANG)
-			? (m_asSubmenu ? 220 : 280)
-			: (m_asSubmenu ? CCUSTOM_POPUP_ANIM_SUB_MS : CCUSTOM_POPUP_ANIM_IN_MS);
+		const int dur = ChipInDurMs(style, m_asSubmenu);
 		int delay = dist * stag;
-		if (style == POPUP_ANIM_BIGBANG)
-			delay = dist * stag;
-		else if (m_asSubmenu)
+		if (m_asSubmenu && !UsesRadialStagger(style))
 			delay = idx * stag;
-		else if (style == POPUP_ANIM_CASCADE || style == POPUP_ANIM_SLIDE)
+		else if (UsesIndexStagger(style))
 			delay = idx * stag;
-		else if (style == POPUP_ANIM_POP)
+		else if (UsesRadialStagger(style))
 			delay = dist * stag;
 
 		if (elapsed < delay) {
@@ -1197,6 +1243,41 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 			if (ox) *ox = (int)(sx * (1.f - e));
 			if (oy) *oy = (int)(sy * (1.f - e));
 			if (fade) *fade = fadeIn(t);
+			return TRUE;
+		}
+		if (style == POPUP_ANIM_SPIRAL) {
+			const float e = easeOutBack(t);
+			const float ang0 = (float)idx * 2.3999632f + (float)m_lineAnimOrigin * 0.37f;
+			const float spin = (1.f - min(e, 1.f)) * 2.6f;
+			const float ang = ang0 + spin;
+			const float rad = (125.f + (float)((idx * 37) % 90)) * (1.f - min(e, 1.f));
+			if (ox) *ox = (int)(cosf(ang) * rad);
+			if (oy) *oy = (int)(sinf(ang) * rad);
+			if (fade) *fade = fadeIn(t);
+			return TRUE;
+		}
+		if (style == POPUP_ANIM_PETAL) {
+			const float e = easeInOutSine(t);
+			const float sway = sinf((float)idx * 1.71f + t * 2.4f) * 24.f * (1.f - e);
+			if (ox) *ox = (int)sway;
+			if (oy) *oy = (int)(52.f * (1.f - e)); // 下からふわり
+			if (fade) *fade = fadeIn(t * 0.9f);
+			return TRUE;
+		}
+		if (style == POPUP_ANIM_ZIPPER) {
+			const float e = easeOutBack(t);
+			const float side = (idx & 1) ? 1.f : -1.f;
+			if (ox) *ox = (int)(side * 96.f * (1.f - min(e, 1.f)));
+			if (oy) *oy = (int)(side * -10.f * (1.f - min(e, 1.f)));
+			if (fade) *fade = fadeIn(t);
+			return TRUE;
+		}
+		if (style == POPUP_ANIM_AURORA) {
+			const float e = easeInOutSine(t);
+			const float wave = sinf((float)idx * 0.62f + t * 3.6f) * 30.f;
+			if (ox) *ox = (int)((-68.f + wave) * (1.f - e));
+			if (oy) *oy = (int)(sinf((float)idx * 0.95f) * 18.f * (1.f - e));
+			if (fade) *fade = fadeIn(t * 0.85f);
 			return TRUE;
 		}
 		if (style == POPUP_ANIM_CASCADE) {
@@ -1248,18 +1329,15 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 
 	// ---- exit ----
 	const int stag = pickStag(CCUSTOM_POPUP_LINE_STAGGER_OUT, m_itemCount);
-	const int dur = (style == POPUP_ANIM_BIGBANG) ? 200 : CCUSTOM_POPUP_ANIM_OUT_MS;
-	int delay = dist * stag;
-	if (style == POPUP_ANIM_BIGBANG)
-		delay = (max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin) - dist) * stag;
-	else if (m_asSubmenu)
+	const int dur = ChipOutDurMs(style);
+	const int maxDist = max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin);
+	int delay = (maxDist - dist) * stag;
+	if (m_asSubmenu && !UsesRadialStagger(style))
 		delay = (m_itemCount - 1 - idx) * stag;
-	else if (style == POPUP_ANIM_CASCADE || style == POPUP_ANIM_SLIDE)
+	else if (UsesIndexStagger(style))
 		delay = (m_itemCount - 1 - idx) * stag;
-	else if (style == POPUP_ANIM_POP)
-		delay = (max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin) - dist) * stag;
-	else
-		delay = (max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin) - dist) * stag;
+	else if (UsesRadialStagger(style))
+		delay = (maxDist - dist) * stag;
 
 	if (elapsed < delay) {
 		if (fade) *fade = 256;
@@ -1275,6 +1353,23 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade) const
 		scatterXY(idx, m_lineAnimOrigin, &sx, &sy);
 		if (ox) *ox = (int)(sx * e * 1.25f);
 		if (oy) *oy = (int)(sy * e * 1.25f);
+	} else if (style == POPUP_ANIM_SPIRAL) {
+		const float ang0 = (float)idx * 2.3999632f + (float)m_lineAnimOrigin * 0.37f;
+		const float ang = ang0 + e * 3.1f;
+		const float rad = (140.f + (float)((idx * 37) % 90)) * e;
+		if (ox) *ox = (int)(cosf(ang) * rad);
+		if (oy) *oy = (int)(sinf(ang) * rad);
+	} else if (style == POPUP_ANIM_PETAL) {
+		if (ox) *ox = (int)(sinf((float)idx * 1.71f) * 32.f * e);
+		if (oy) *oy = (int)(-44.f * e); // 上へ散る
+	} else if (style == POPUP_ANIM_ZIPPER) {
+		const float side = (idx & 1) ? 1.f : -1.f;
+		if (ox) *ox = (int)(side * 88.f * e);
+		if (oy) *oy = (int)(side * 12.f * e);
+	} else if (style == POPUP_ANIM_AURORA) {
+		const float wave = sinf((float)idx * 0.62f + t * 4.f) * 36.f;
+		if (ox) *ox = (int)((72.f + wave) * e);
+		if (oy) *oy = (int)(sinf((float)idx * 0.95f) * 22.f * e);
 	} else if (style == POPUP_ANIM_SLIDE) {
 		if (ox) *ox = (int)(64.f * e);
 		if (oy) *oy = 0;
@@ -1402,14 +1497,14 @@ void CCustomPopupMenu::AnimateOut()
 			stag = max(1, CCUSTOM_POPUP_LINE_STAGGER_BUDGET / (m_itemCount - 1));
 	}
 	int span = 0;
-	if (style == POPUP_ANIM_BIGBANG || style == POPUP_ANIM_POP
+	if (UsesRadialStagger(style)
 		|| (!m_asSubmenu && style == POPUP_ANIM_EXPAND))
 		span = max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin);
-	else if (style == POPUP_ANIM_CASCADE || style == POPUP_ANIM_SLIDE || m_asSubmenu)
+	else if (UsesIndexStagger(style) || m_asSubmenu)
 		span = (m_itemCount > 0) ? (m_itemCount - 1) : 0;
 	else
 		span = max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin);
-	const int outDur = (style == POPUP_ANIM_BIGBANG) ? 200 : CCUSTOM_POPUP_ANIM_OUT_MS;
+	const int outDur = ChipOutDurMs(style);
 	const int total = span * stag + outDur + 40;
 	const ULONGLONG endAt = m_lineAnimStart + (ULONGLONG)total;
 	MSG msg;
@@ -1428,22 +1523,19 @@ void CCustomPopupMenu::AnimateOut()
 	}
 	KillTimer(kAnimTimer);
 	m_lineAnimPhase = 0;
+	// 先に隠す。レイヤ解除や EndChipFlight を見える状態でやると
+	// 透明ULW→不透明GDI が一フレ出てチラつく。
+	if (GetSafeHwnd())
+		ShowWindow(SW_HIDE);
 	if (GetSafeHwnd()) {
 		if (UsesRowChipFlight(style)) {
 			EndChipFlight();
 			if (GetExStyle() & WS_EX_LAYERED)
 				ModifyStyleEx(WS_EX_LAYERED, 0);
 		} else {
-			::SetWindowRgn(m_hWnd, NULL, TRUE);
-			{
-				CClientDC dc(this);
-				CRect rc; GetClientRect(&rc);
-				dc.FillSolidRect(&rc, PopupBg());
-			}
-			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+			::SetWindowRgn(m_hWnd, NULL, FALSE);
 		}
 	}
-	ShowWindow(SW_HIDE);
 }
 
 BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMenu, CCustomPopupMenu* root)
@@ -1554,13 +1646,14 @@ void CCustomPopupMenu::AbortAnimAndHide()
 	m_nBounce = 0;
 	ShowEmbedded(FALSE);
 	if (m_tip.GetSafeHwnd()) m_tip.Activate(FALSE);
+	// レイヤ解除より先に隠す（透明→不透明の最終フレ防止）
+	ShowWindow(SW_HIDE);
 	if (m_flightPad > 0 || (GetExStyle() & WS_EX_LAYERED)) {
 		EndChipFlight();
 		if (GetExStyle() & WS_EX_LAYERED)
 			ModifyStyleEx(WS_EX_LAYERED, 0);
 	}
 	::SetWindowRgn(m_hWnd, NULL, FALSE);
-	ShowWindow(SW_HIDE);
 }
 
 void CCustomPopupMenu::DestroyPopupTree(BOOL animateOut)
@@ -2816,14 +2909,12 @@ void CCustomPopupMenu::OnTimer(UINT_PTR nIDEvent)
 					stag = max(1, CCUSTOM_POPUP_LINE_STAGGER_BUDGET / (m_itemCount - 1));
 			}
 			const int style = styleNow;
-			const int dur = (style == POPUP_ANIM_BIGBANG)
-				? (m_asSubmenu ? 220 : 280)
-				: (m_asSubmenu ? CCUSTOM_POPUP_ANIM_SUB_MS : CCUSTOM_POPUP_ANIM_IN_MS);
+			const int dur = ChipInDurMs(style, m_asSubmenu);
 			int span = 0;
-			if (style == POPUP_ANIM_BIGBANG || style == POPUP_ANIM_POP
+			if (UsesRadialStagger(style)
 				|| (!m_asSubmenu && style == POPUP_ANIM_EXPAND))
 				span = max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin);
-			else if (style == POPUP_ANIM_CASCADE || style == POPUP_ANIM_SLIDE || m_asSubmenu)
+			else if (UsesIndexStagger(style) || m_asSubmenu)
 				span = (m_itemCount > 0) ? (m_itemCount - 1) : 0;
 			else
 				span = max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin);

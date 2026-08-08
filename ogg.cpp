@@ -1,4 +1,4 @@
-// ogg.cpp : アプリケーション用クラスの定義を行います。
+﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -1329,7 +1329,7 @@ BOOL COggApp::InitInstance()
 		savedata.updateAttemptExeTime = 0;
 	if (datFileSize < (int)(offsetof(save, popupMenuAnim) + sizeof(savedata.popupMenuAnim)))
 		savedata.popupMenuAnim = 0;
-	else if (savedata.popupMenuAnim < 0 || savedata.popupMenuAnim > 5)
+	else if (savedata.popupMenuAnim < 0 || savedata.popupMenuAnim > 9)
 		savedata.popupMenuAnim = 0;
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "CCustomControl.h"
 
 // ============================================================================
@@ -63,6 +63,7 @@ enum {
 	CCUSTOM_POPUP_LINE_STAGGER_BUDGET = 260, // 項目が多くても合計遅延の上限(ms)
 	// 行チップ飛行の余白（ULW α抜き用。BigBangは散乱半径、他はスライド量）
 	CCUSTOM_POPUP_FLIGHT_PAD_BIG = 280,
+	CCUSTOM_POPUP_FLIGHT_PAD_MID = 140,
 	CCUSTOM_POPUP_FLIGHT_PAD_ROW = 80,
 	CCUSTOM_POPUP_SCROLL_STEP = 36,
 	// 骨格専用コマンド（呼び出し元へ返さない）
@@ -76,7 +77,11 @@ enum {
 	CCUSTOM_POPUP_ID_ANIM2 = 0x00E00122,
 	CCUSTOM_POPUP_ID_ANIM3 = 0x00E00123,
 	CCUSTOM_POPUP_ID_ANIM4 = 0x00E00124,
-	CCUSTOM_POPUP_ID_ANIM5 = 0x00E00125
+	CCUSTOM_POPUP_ID_ANIM5 = 0x00E00125,
+	CCUSTOM_POPUP_ID_ANIM6 = 0x00E00126,
+	CCUSTOM_POPUP_ID_ANIM7 = 0x00E00127,
+	CCUSTOM_POPUP_ID_ANIM8 = 0x00E00128,
+	CCUSTOM_POPUP_ID_ANIM9 = 0x00E00129
 };
 
 enum {
@@ -86,7 +91,11 @@ enum {
 	POPUP_ANIM_SLIDE = 3,   // 行チップ: 横から滑る
 	POPUP_ANIM_POP = 4,     // 行チップ: 起点から波紋
 	POPUP_ANIM_BIGBANG = 5, // 行チップ: 寄せ集め／弾け（行き過ぎ整列）
-	POPUP_ANIM_COUNT = 6
+	POPUP_ANIM_SPIRAL = 6,  // 行チップ: 螺旋（派手）
+	POPUP_ANIM_PETAL = 7,   // 行チップ: 花びら（可憐）
+	POPUP_ANIM_ZIPPER = 8,  // 行チップ: ジッパー交互（派手）
+	POPUP_ANIM_AURORA = 9,  // 行チップ: オーロラ波（可憐）
+	POPUP_ANIM_COUNT = 10
 };
 
 enum CCustomPopupItemKind {
