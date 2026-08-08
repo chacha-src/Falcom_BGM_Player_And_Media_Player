@@ -1855,9 +1855,15 @@ BOOL CCustomPopupMenu::IsHwndRelated(HWND h) const
 	if (!h || !::IsWindow(h)) return FALSE;
 	if (GetSafeHwnd() && (h == m_hWnd || ::IsChild(m_hWnd, h)))
 		return TRUE;
-	if (m_owner && m_owner->GetSafeHwnd()
-		&& (h == m_owner->GetSafeHwnd() || ::IsChild(m_owner->GetSafeHwnd(), h)))
-		return TRUE;
+	if (m_owner && m_owner->GetSafeHwnd()) {
+		HWND ow = m_owner->GetSafeHwnd();
+		if (h == ow || ::IsChild(ow, h))
+			return TRUE;
+		// Track(子コントロール) 時、フォアグラウンドはトップレベルになる
+		HWND root = ::GetAncestor(ow, GA_ROOT);
+		if (root && root != ow && (h == root || ::IsChild(root, h)))
+			return TRUE;
+	}
 	for (int i = 0; i < m_comboCount; ++i) {
 		if (!m_combos[i].GetSafeHwnd()) continue;
 		COMBOBOXINFO cbi = { sizeof(cbi) };
@@ -1873,12 +1879,25 @@ BOOL CCustomPopupMenu::IsHwndRelated(HWND h) const
 	return FALSE;
 }
 
+static BOOL PopupOwnerRelaxesDismiss(CWnd* owner)
+{
+	if (!owner || !owner->GetSafeHwnd()) return FALSE;
+	HWND root = ::GetAncestor(owner->GetSafeHwnd(), GA_ROOT);
+	if (!root) root = owner->GetSafeHwnd();
+	return (::GetProp(root, CCUSTOM_POPUP_RELAX_DISMISS_PROP) != NULL) ? TRUE : FALSE;
+}
+
 BOOL CCustomPopupMenu::IsForegroundOurs() const
 {
 	HWND fg = ::GetForegroundWindow();
 	if (!fg) return TRUE;
 	const CCustomPopupMenu* root = m_root ? m_root : this;
-	return root->IsHwndRelated(fg);
+	if (root->IsHwndRelated(fg))
+		return TRUE;
+	// 画面キャプチャ等: PrintWindow/WGC が他窓を前面化してもメニューを維持
+	if (PopupOwnerRelaxesDismiss(root->m_owner))
+		return TRUE;
+	return FALSE;
 }
 
 CRect CCustomPopupMenu::ItemViewRect(int idx) const
@@ -2818,8 +2837,10 @@ void CCustomPopupMenu::OnKillFocus(CWnd* pNewWnd)
 	if (!m_tracking) return;
 	HWND nh = pNewWnd ? pNewWnd->GetSafeHwnd() : NULL;
 	if (nh && IsHwndRelated(nh)) return;
-	// 他ウィンドウへフォーカスが移ったら閉じる
 	CCustomPopupMenu* root = RootMenu();
+	// 画面キャプチャ等: 合成副作用の偽 KillFocus では閉じない（外側クリック/Esc で閉じる）
+	if (root && PopupOwnerRelaxesDismiss(root->m_owner))
+		return;
 	if (root && root->m_tracking)
 		root->CloseChain(0);
 }

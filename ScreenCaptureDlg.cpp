@@ -2077,7 +2077,9 @@ void CScFxWireCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 			L"Wyczyść całe okablowanie", L"Tüm kablolamayı temizle"));
 	CPoint sp = point;
 	ClientToScreen(&sp);
-	const UINT cmd = menu.Track(sp, this);
+	CWnd* trackOwner = m_owner ? (CWnd*)m_owner : GetParent();
+	if (!trackOwner) trackOwner = this;
+	const UINT cmd = menu.Track(sp, trackOwner);
 	if (cmd == ID_SC_FX_CLEAR_SLOT) {
 		for (int i = slot; i < m_slotN - 1; ++i) {
 			m_slots[i] = m_slots[i + 1];
@@ -4966,6 +4968,8 @@ BOOL CScreenCaptureDlg::OnInitDialog()
 	// 待機中は Win+Shift+S 等でスクショできるよう affinity なし。
 	// 録画開始時だけ WDA_EXCLUDEFROMCAPTURE（写り込み防止）。停止で戻す。
 	::SetWindowDisplayAffinity(m_hWnd, WDA_NONE);
+	// PrintWindow/WGC が他窓を前面化してもコンテキストメニューを即閉じしない
+	::SetProp(m_hWnd, CCUSTOM_POPUP_RELAX_DISMISS_PROP, (HANDLE)1);
 	if (!m_snapCsInit) {
 		InitializeCriticalSection(&m_snapCs);
 		m_snapCsInit = TRUE;
@@ -6928,6 +6932,7 @@ void CScreenCaptureDlg::OnTimer(UINT_PTR nIDEvent)
 
 void CScreenCaptureDlg::OnDestroy()
 {
+	::RemoveProp(m_hWnd, CCUSTOM_POPUP_RELAX_DISMISS_PROP);
 	KillTimer(SC_TIMER_PREV);
 	KillTimer(SC_TIMER_UI);
 	StopPeakMonitor();

@@ -14,6 +14,8 @@
 //         AddSlider / AddEdit / AddCombo / AddList
 //         AddRangeSlider / AddProgress / AddButton
 //   表示: Track(screenPt, owner) → 選択コマンド ID（骨格IDは 0）
+//   特殊UI: トップレベルに CCUSTOM_POPUP_RELAX_DISMISS_PROP を付けると
+//           FG/KillFocus での自動閉じを抑止（外側クリック・Esc・アプリ非アクティブは有効）
 //   照会: FindItemById / GetItemCount / GetItemKind / GetItemId
 //         GetSliderPos / SetSliderPos / GetEditText / GetChoiceSel
 //         GetRangeValues / SetProgressPos / GetProgressPos
@@ -21,6 +23,11 @@
 //         GetRangeSliderCtrl / GetProgressCtrl / GetButtonCtrl
 //   オプション: SetSkipChrome / SetStickyLeading / SetAeroMode
 // ============================================================================
+
+// 画面キャプチャ等: PrintWindow/WGC が他窓を前面化してもメニューを即閉じしない
+#ifndef CCUSTOM_POPUP_RELAX_DISMISS_PROP
+#define CCUSTOM_POPUP_RELAX_DISMISS_PROP L"Ogg.CCustomPopup.RelaxDismiss"
+#endif
 
 enum {
 	CCUSTOM_POPUP_MAX_ITEMS = 110,
