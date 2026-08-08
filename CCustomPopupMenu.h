@@ -53,35 +53,40 @@ enum {
 	CCUSTOM_POPUP_CHECK_W = 24,     // レ点列（ラベル無し行も同幅で揃える）
 	CCUSTOM_POPUP_ARROW_W = 16,
 	CCUSTOM_POPUP_MIN_W = 200,
-	// 行アニメ（半分の速度＝時間ほぼ2倍。広がり・ゆれをはっきり）
-	CCUSTOM_POPUP_ANIM_IN_MS = 180,
-	CCUSTOM_POPUP_ANIM_OUT_MS = 140,
-	CCUSTOM_POPUP_ANIM_SUB_MS = 140,
-	CCUSTOM_POPUP_LINE_STAGGER_IN = 12,
-	CCUSTOM_POPUP_LINE_STAGGER_OUT = 10,
+	// 行アニメ（スムーズ／ちらつき無し。ゆれ無し）
+	CCUSTOM_POPUP_ANIM_IN_MS = 210,
+	CCUSTOM_POPUP_ANIM_OUT_MS = 160,
+	CCUSTOM_POPUP_ANIM_SUB_MS = 150,
+	CCUSTOM_POPUP_LINE_STAGGER_IN = 14,
+	CCUSTOM_POPUP_LINE_STAGGER_OUT = 11,
 	CCUSTOM_POPUP_LINE_STAGGER_SUB = 10,
-	CCUSTOM_POPUP_LINE_STAGGER_BUDGET = 280, // 項目が多くても合計遅延の上限(ms)
+	CCUSTOM_POPUP_LINE_STAGGER_BUDGET = 260, // 項目が多くても合計遅延の上限(ms)
+	// 行チップ飛行の余白（ULW α抜き用。BigBangは散乱半径、他はスライド量）
+	CCUSTOM_POPUP_FLIGHT_PAD_BIG = 280,
+	CCUSTOM_POPUP_FLIGHT_PAD_ROW = 80,
 	CCUSTOM_POPUP_SCROLL_STEP = 36,
 	// 骨格専用コマンド（呼び出し元へ返さない）
 	CCUSTOM_POPUP_ID_ACRYLIC = 0x00E00100,
 	CCUSTOM_POPUP_ID_FONT_BOLD = 0x00E00101,
 	CCUSTOM_POPUP_ID_FONT_ITALIC = 0x00E00102,
 	CCUSTOM_POPUP_ID_FONT_FACE = 0x00E00110,
-	// メニュー描画方法（アクリルの下の共通サブ）。0..4 = savedata.popupMenuAnim
+	// メニュー描画方法（アクリルの下の共通サブ）。0..N-1 = savedata.popupMenuAnim
 	CCUSTOM_POPUP_ID_ANIM0 = 0x00E00120,
 	CCUSTOM_POPUP_ID_ANIM1 = 0x00E00121,
 	CCUSTOM_POPUP_ID_ANIM2 = 0x00E00122,
 	CCUSTOM_POPUP_ID_ANIM3 = 0x00E00123,
-	CCUSTOM_POPUP_ID_ANIM4 = 0x00E00124
+	CCUSTOM_POPUP_ID_ANIM4 = 0x00E00124,
+	CCUSTOM_POPUP_ID_ANIM5 = 0x00E00125
 };
 
 enum {
-	POPUP_ANIM_CLASSIC = 0, // 既存: 全体フェード
-	POPUP_ANIM_EXPAND = 1,  // クリックから上下伸び
-	POPUP_ANIM_CASCADE = 2, // 上から一行ずつ
-	POPUP_ANIM_SLIDE = 3,   // 左からスライド
-	POPUP_ANIM_POP = 4,     // 中央からポップ
-	POPUP_ANIM_COUNT = 5
+	POPUP_ANIM_CLASSIC = 0, // 全体フェード（据え置き）
+	POPUP_ANIM_EXPAND = 1,  // 上下にパネルRGNが開く（面）
+	POPUP_ANIM_CASCADE = 2, // 行チップ: 上から落ちる
+	POPUP_ANIM_SLIDE = 3,   // 行チップ: 横から滑る
+	POPUP_ANIM_POP = 4,     // 行チップ: 起点から波紋
+	POPUP_ANIM_BIGBANG = 5, // 行チップ: 寄せ集め／弾け（行き過ぎ整列）
+	POPUP_ANIM_COUNT = 6
 };
 
 enum CCustomPopupItemKind {
@@ -268,6 +273,8 @@ protected:
 	ULONGLONG m_lineAnimStart;
 	int m_lineAnimOrigin; // クリック位置に近い行（上下に広がる起点）
 	int m_lineAnimOriginY; // クライアントY（起点）
+	int m_flightPad; // 行チップ飛行余白（0=通常。コンテンツは (pad,pad) 起点）
+	BOOL m_bridgePanel; // 飛行⇔定着の橋渡しで一枚パネルを強制（点滅防止）
 	BOOL m_skipChrome;
 	BOOL m_chromeInjected;
 	wchar_t m_previewFace[32];
@@ -281,7 +288,10 @@ protected:
 	int AllocChoiceSet(const LPCTSTR* items, int count);
 	void MeasureLayout();
 	BOOL CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMenu, CCustomPopupMenu* root);
-	void DestroyPopupTree();
+	// animateOut=FALSE: ホバー離脱など。退出アニメ無しで即消す（誤ってサブ退場が引きずられるのを防ぐ）
+	void DestroyPopupTree(BOOL animateOut = TRUE);
+	void AbortAnimAndHide(); // 飛行／RGN／タイマを止めて非表示
+	void SyncHotFromCursor(); // z-order無視で親行ホバーを同期（開サブの即閉じ用）
 	void CloseChain(UINT result);
 	void PaintToDC(CDC& dc);
 	CRect ItemViewRect(int idx) const;
@@ -302,6 +312,15 @@ protected:
 	void RunModalLoop();
 	void AnimateIn();
 	void AnimateOut();
+	// 行チップ飛行: 余白HWND + UpdateLayeredWindow(α)。橋渡しは m_bridgePanel
+	void BeginChipFlight();
+	void EndChipFlight();
+	void CommitChipFlightSettle();
+	void ForceChipPresent();
+	// optDst!=NULL ならその画面座標に w*h で出す（畳む前に最終サイズへ先送りできる）
+	BOOL PresentChipLayered(HDC hdcSrc, int w, int h, const POINT* optDst = NULL);
+	void BlitOpaqueToWindow(HDC hdcSrc, int w, int h); // ULW解除後の同期焼き込み
+	void SnapAnimToIdle(); // 出現アニメ中断→一枚状態（サブ遷移・クリック用）
 	// phase中の行オフセット/フェード(ox,oy,fade0..256)。未出現は FALSE
 	BOOL CalcLineAnim(int idx, int* ox, int* oy, int* fade) const;
 	void NotifyEditFromHwnd(HWND hwnd);
@@ -326,6 +345,7 @@ protected:
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnNcHitTest(CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
 	afx_msg void OnMouseLeave();
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);

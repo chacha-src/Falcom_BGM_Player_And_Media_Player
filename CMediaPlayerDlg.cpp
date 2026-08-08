@@ -1466,13 +1466,24 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		if (!m_botRemote.GetSafeHwnd())
 			m_botRemote.Create(_T("Remote"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_REMOTE);
 		{
+			// ショートカットは色で役割が分かるようにする（水色一色は避ける）
 			CCustomStandardButton* bots[8] = {
 				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote
+			};
+			const COLORREF botGrad[8][2] = {
+				{ RGB(240, 225, 255), RGB(200, 170, 245) }, // DJ: 紫
+				{ RGB(255, 235, 220), RGB(250, 195, 160) }, // Tag: 桃
+				{ RGB(220, 250, 235), RGB(155, 220, 190) }, // BPM: ミント
+				{ RGB(230, 225, 255), RGB(185, 180, 235) }, // Sleep: 薄藍紫
+				{ RGB(220, 245, 255), RGB(160, 210, 240) }, // Mirror: 空
+				{ RGB(255, 250, 220), RGB(240, 215, 150) }, // SS: 金
+				{ RGB(255, 230, 240), RGB(245, 180, 205) }, // Alarm: 薔薇
+				{ RGB(225, 250, 250), RGB(160, 215, 220) }, // Remote: 青緑
 			};
 			for (int bi = 0; bi < 8; ++bi) {
 				if (!bots[bi]->GetSafeHwnd()) continue;
 				bots[bi]->SetFlat(TRUE);
-				bots[bi]->SetGradation(RGB(235, 245, 255), RGB(195, 220, 245), 0, TRUE);
+				bots[bi]->SetGradation(botGrad[bi][0], botGrad[bi][1], 0, TRUE);
 			}
 		}
 		if (!m_findFilter.GetSafeHwnd())
@@ -1799,6 +1810,33 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_toolsToggle.SetFont(&m_fontChk, TRUE);
 	if (m_plrename.GetSafeHwnd())
 		m_plrename.SetFont(&m_fontChk, TRUE);
+	// Create() 動的ボタンはダイアログフォントを継がない → システム既定になり見た目がずれる
+	if (m_sortName.GetSafeHwnd()) m_sortName.SetFont(&m_fontChk, TRUE);
+	if (m_sortArt.GetSafeHwnd()) m_sortArt.SetFont(&m_fontChk, TRUE);
+	if (m_sortAlb.GetSafeHwnd()) m_sortAlb.SetFont(&m_fontChk, TRUE);
+	if (m_sortTime.GetSafeHwnd()) m_sortTime.SetFont(&m_fontChk, TRUE);
+	if (m_addFolder.GetSafeHwnd()) m_addFolder.SetFont(&m_fontChk, TRUE);
+	if (m_libToggle.GetSafeHwnd()) m_libToggle.SetFont(&m_fontChk, TRUE);
+	if (m_histToggle.GetSafeHwnd()) m_histToggle.SetFont(&m_fontChk, TRUE);
+	if (m_tempToggle.GetSafeHwnd()) m_tempToggle.SetFont(&m_fontChk, TRUE);
+	if (m_botDj.GetSafeHwnd()) m_botDj.SetFont(&m_fontChk, TRUE);
+	if (m_botTag.GetSafeHwnd()) m_botTag.SetFont(&m_fontChk, TRUE);
+	if (m_botBpm.GetSafeHwnd()) m_botBpm.SetFont(&m_fontChk, TRUE);
+	if (m_botSleep.GetSafeHwnd()) m_botSleep.SetFont(&m_fontChk, TRUE);
+	if (m_botMirror.GetSafeHwnd()) m_botMirror.SetFont(&m_fontChk, TRUE);
+	if (m_botSsViz.GetSafeHwnd()) m_botSsViz.SetFont(&m_fontChk, TRUE);
+	if (m_botAlarm.GetSafeHwnd()) m_botAlarm.SetFont(&m_fontChk, TRUE);
+	if (m_botRemote.GetSafeHwnd()) m_botRemote.SetFont(&m_fontChk, TRUE);
+	if (m_abA.GetSafeHwnd()) m_abA.SetFont(&m_fontChk, TRUE);
+	if (m_abB.GetSafeHwnd()) m_abB.SetFont(&m_fontChk, TRUE);
+	if (m_abClr.GetSafeHwnd()) m_abClr.SetFont(&m_fontChk, TRUE);
+	if (m_lrcExpand.GetSafeHwnd()) m_lrcExpand.SetFont(&m_fontChk, TRUE);
+	if (m_cheatBtn.GetSafeHwnd()) m_cheatBtn.SetFont(&m_fontChk, TRUE);
+	if (m_libAddRoot.GetSafeHwnd()) m_libAddRoot.SetFont(&m_fontChk, TRUE);
+	if (m_libAddPl.GetSafeHwnd()) m_libAddPl.SetFont(&m_fontChk, TRUE);
+	if (m_emptyFolder.GetSafeHwnd()) m_emptyFolder.SetFont(&m_fontChk, TRUE);
+	if (m_emptyM3u.GetSafeHwnd()) m_emptyM3u.SetFont(&m_fontChk, TRUE);
+	if (m_findFilter.GetSafeHwnd()) m_findFilter.SetFont(&m_fontChk, TRUE);
 	// タイトル/アーティスト/アルバムはバナーGDIに表示されるのでスタティックは隠す(縦幅節約)
 	m_title.ShowWindow(SW_HIDE);
 	m_artist.ShowWindow(SW_HIDE);
@@ -5944,9 +5982,12 @@ void CMediaPlayerDlg::OnBotSleep()
 	CCustomPopupMenu menu;
 	menu.SetAeroMode(FALSE);
 	menu.SetSkipChrome(TRUE);
-	menu.AddCommand(ID_MP_SLEEP_15, L"15 min");
-	menu.AddCommand(ID_MP_SLEEP_30, L"30 min");
-	menu.AddCommand(ID_MP_SLEEP_60, L"60 min");
+	menu.AddCommand(ID_MP_SLEEP_15,
+		LL14(L"15 分", L"15 min", L"15 min", L"15 min", L"15 min", L"15분", L"15 分钟", L"15 د", L"15 мин", L"15 Min", L"15 min", L"15 min", L"15 min", L"15 dk"));
+	menu.AddCommand(ID_MP_SLEEP_30,
+		LL14(L"30 分", L"30 min", L"30 min", L"30 min", L"30 min", L"30분", L"30 分钟", L"30 د", L"30 мин", L"30 Min", L"30 min", L"30 min", L"30 min", L"30 dk"));
+	menu.AddCommand(ID_MP_SLEEP_60,
+		LL14(L"60 分", L"60 min", L"60 min", L"60 min", L"60 min", L"60분", L"60 分钟", L"60 د", L"60 мин", L"60 Min", L"60 min", L"60 min", L"60 min", L"60 dk"));
 	menu.AddCommand(ID_MP_SLEEP_CUSTOM,
 		LL14(L"カスタム…", L"Custom…", L"Perso…", L"Personalizzato…", L"Personalizado…",
 			L"사용자…", L"自定义…", L"مخصص…", L"Своё…", L"Eigene…",
@@ -6893,11 +6934,19 @@ void CMediaPlayerDlg::EnsureLibControls()
 		m_emptyM3u.SetGradation(RGB(230, 240, 255), RGB(180, 205, 240), 0, TRUE);
 		createdLibChild = TRUE;
 	}
+	if (m_fontChk.GetSafeHandle()) {
+		if (m_libToggle.GetSafeHwnd()) m_libToggle.SetFont(&m_fontChk);
+		if (m_histToggle.GetSafeHwnd()) m_histToggle.SetFont(&m_fontChk);
+		if (m_tempToggle.GetSafeHwnd()) m_tempToggle.SetFont(&m_fontChk);
+		if (m_libAddRoot.GetSafeHwnd()) m_libAddRoot.SetFont(&m_fontChk);
+		if (m_libAddPl.GetSafeHwnd()) m_libAddPl.SetFont(&m_fontChk);
+		if (m_emptyFolder.GetSafeHwnd()) m_emptyFolder.SetFont(&m_fontChk);
+		if (m_emptyM3u.GetSafeHwnd()) m_emptyM3u.SetFont(&m_fontChk);
+	}
 	if (m_fontList.GetSafeHandle()) {
 		if (m_libTree.GetSafeHwnd()) m_libTree.SetFont(&m_fontList);
 		if (m_libAlbums.GetSafeHwnd()) m_libAlbums.SetFont(&m_fontList);
 		if (m_histList.GetSafeHwnd()) m_histList.SetFont(&m_fontList);
-		if (m_tempToggle.GetSafeHwnd()) m_tempToggle.SetFont(&m_fontList);
 	}
 	// FinishBlur/CaptionApply より後に作られる子は OpaqueFixer が乗らない。
 	// 再適用しないと Win11 アクリル上でツリー/アルバム/履歴が透ける。
@@ -8654,9 +8703,12 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			LL14(L"スリープ解除", L"Sleep off", L"Veille off", L"Sleep off", L"Suspensión off",
 				L"슬립 해제", L"关闭睡眠", L"إيقاف النوم", L"Сон выкл", L"Schlaf aus",
 				L"Sono off", L"Slaap uit", L"Sen wyl", L"Uyku kapat"));
-		menu.AddCommand(ID_MP_SLEEP_15, L"15 min");
-		menu.AddCommand(ID_MP_SLEEP_30, L"30 min");
-		menu.AddCommand(ID_MP_SLEEP_60, L"60 min");
+		menu.AddCommand(ID_MP_SLEEP_15,
+			LL14(L"15 分", L"15 min", L"15 min", L"15 min", L"15 min", L"15분", L"15 分钟", L"15 د", L"15 мин", L"15 Min", L"15 min", L"15 min", L"15 min", L"15 dk"));
+		menu.AddCommand(ID_MP_SLEEP_30,
+			LL14(L"30 分", L"30 min", L"30 min", L"30 min", L"30 min", L"30분", L"30 分钟", L"30 د", L"30 мин", L"30 Min", L"30 min", L"30 min", L"30 min", L"30 dk"));
+		menu.AddCommand(ID_MP_SLEEP_60,
+			LL14(L"60 分", L"60 min", L"60 min", L"60 min", L"60 min", L"60분", L"60 分钟", L"60 د", L"60 мин", L"60 Min", L"60 min", L"60 min", L"60 min", L"60 dk"));
 	}
 	menu.AddSeparator();
 	{
