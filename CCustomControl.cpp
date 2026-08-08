@@ -60,6 +60,20 @@ BOOL CCC_IsBlurDialogChild(HWND hWnd)
     return FALSE;
 }
 
+// CCustomPopupMenu 配下（不透明ストライプ）。親ダイアログがアクリルでも子は透過描画しない。
+static BOOL CCC_IsCustomPopupChild(HWND hWnd)
+{
+    for (HWND h = hWnd ? ::GetParent(hWnd) : NULL; h; h = ::GetParent(h))
+    {
+        TCHAR cls[64];
+        if (::GetClassName(h, cls, _countof(cls)) <= 0) continue;
+        if (_tcscmp(cls, _T("CCustomPopupMenuClass")) == 0
+            || _tcscmp(cls, _T("CCustomPopupMenuChipClass")) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
 static BOOL CCC_IsCaptionChromeCtrl(HWND hWnd);
 static BOOL CCC_CaptionOnlyHostGlass(HWND hWnd);
 
@@ -67,16 +81,17 @@ static BOOL CCC_CaptionOnlyHostGlass(HWND hWnd);
 static BOOL CCC_HostNeedsChildOpaque(HWND hWnd)
 {
 #if CCUSTOM_AERO_SUPPORT
+    if (CCC_IsCustomPopupChild(hWnd)) return TRUE;
     return CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(hWnd));
 #else
-    UNREFERENCED_PARAMETER(hWnd);
-    return FALSE;
+    return CCC_IsCustomPopupChild(hWnd);
 #endif
 }
 
 // キャプション帯コントロールは AcrylicCaption 時は常に透過（本文 aero と独立）
 static BOOL CCC_UseTransPaint(HWND hWnd, BOOL bAeroMode)
 {
+    if (CCC_IsCustomPopupChild(hWnd)) return FALSE;
     if (hWnd) {
         HWND hParent = ::GetParent(hWnd);
         if (hParent && CCC_AcrylicCaption(hParent) && CCC_IsCaptionChromeCtrl(hWnd))

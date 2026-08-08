@@ -13,6 +13,7 @@ BEGIN_MESSAGE_MAP(CCustomPopupMenu, CWnd)
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()
 	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
+	ON_MESSAGE(WM_APP + 0x51C, OnRefreshEmbedded)
 	ON_WM_NCHITTEST()
 	ON_WM_MOUSEMOVE()
 	ON_WM_MOUSELEAVE()
@@ -28,7 +29,7 @@ BEGIN_MESSAGE_MAP(CCustomPopupMenu, CWnd)
 END_MESSAGE_MAP()
 
 namespace {
-	enum { kTipTimer = 7701, kInwomanTimer = 7702, kAnimTimer = 7703, kBounceTimer = 7704 };
+	enum { kTipTimer = 7701, kInwomanTimer = 7702, kAnimTimer = 7703, kBounceTimer = 7704, kSettleTimer = 7705 };
 	// BigBang内部マーカー（画面には出さない。ULWでα=0へ変換）
 	static const COLORREF kChipChromaKey = RGB(255, 0, 255);
 
@@ -149,6 +150,26 @@ namespace {
 		if (style == POPUP_ANIM_PETAL || style == POPUP_ANIM_AURORA)
 			return 180;
 		return CCUSTOM_POPUP_ANIM_OUT_MS;
+	}
+
+	// 入場アニメの想定所要(ms)。超過したら強制定着。
+	static int ChipEnterTotalMs(int style, BOOL asSub, int itemCount, int origin)
+	{
+		int stag = asSub ? CCUSTOM_POPUP_LINE_STAGGER_SUB : CCUSTOM_POPUP_LINE_STAGGER_IN;
+		if (itemCount > 1) {
+			const int need = stag * (itemCount - 1);
+			if (need > CCUSTOM_POPUP_LINE_STAGGER_BUDGET)
+				stag = max(1, CCUSTOM_POPUP_LINE_STAGGER_BUDGET / (itemCount - 1));
+		}
+		const int dur = ChipInDurMs(style, asSub);
+		int span = 0;
+		if (UsesRadialStagger(style) || (!asSub && style == POPUP_ANIM_EXPAND))
+			span = max(origin, itemCount - 1 - origin);
+		else if (UsesIndexStagger(style) || asSub)
+			span = (itemCount > 0) ? (itemCount - 1) : 0;
+		else
+			span = max(origin, itemCount - 1 - origin);
+		return span * stag + dur + 40;
 	}
 
 	static void EnsurePopupClass()
@@ -1109,14 +1130,18 @@ void CCustomPopupMenu::SyncEmbeddedChildren()
 		wnd.GetWindowRect(&old);
 		ScreenToClient(&old);
 		const BOOL moved = (old != dest);
+		const BOOL wasVisible = wnd.IsWindowVisible();
 		if (moved)
 			wnd.MoveWindow(&dest, FALSE);
 		if (onScreen) {
-			wnd.ShowWindow(SW_SHOWNA);
-			// MoveWindow(FALSE) のあと親は子領域を塗らない → 必ず子自身を描き直す
-			wnd.Invalidate(FALSE);
-			wnd.UpdateWindow();
-		} else {
+			if (!wasVisible)
+				wnd.ShowWindow(SW_SHOWNA);
+			// 初回表示／移動時だけ描く。毎回 UpdateWindow すると定着直後に点滅する
+			if (moved || !wasVisible) {
+				wnd.Invalidate(FALSE);
+				wnd.UpdateWindow();
+			}
+		} else if (wasVisible) {
 			wnd.ShowWindow(SW_HIDE);
 		}
 	};
@@ -1262,22 +1287,18 @@ void CCustomPopupMenu::RefreshEmbeddedChildren()
 	if (!GetSafeHwnd()) return;
 	for (HWND h = ::GetWindow(m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
 		if (!::IsWindowVisible(h)) continue;
-		::RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
+		// ERASE 無し: 白フラッシュ→再描画の点滅を避ける
+		::RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
 	}
 }
 
 void CCustomPopupMenu::RevealEmbeddedAfterAnim()
 {
 	if (!GetSafeHwnd()) return;
-	// レイヤ解除／一枚化の直後は子が消えたまま残りやすいので位置同期＋強制再描画
-	ShowEmbedded(TRUE);
-	SyncEmbeddedChildren();
-	for (HWND h = ::GetWindow(m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
-		if (!::IsWindow(h)) continue;
-		if (!::IsWindowVisible(h)) continue;
-		::RedrawWindow(h, NULL, NULL,
-			RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
-	}
+	ShowEmbedded(TRUE); // 内で Sync（位置合わせ＋Show）
+	RefreshEmbeddedChildren();
+	// 親 BufferedPaint 後の潰し対策（マウスを動かさなくても着地させる）
+	PostMessage(WM_APP + 0x51C, 0, 0);
 }
 
 BOOL CCustomPopupMenu::ChipFlightRowsAtRest() const
@@ -1562,8 +1583,11 @@ void CCustomPopupMenu::AnimateIn()
 		if (style == POPUP_ANIM_CLASSIC && !m_asSubmenu)
 			::AnimateWindow(m_hWnd, 160, AW_BLEND);
 		ShowEmbedded(TRUE);
-		RefreshEmbeddedChildren();
+		SyncEmbeddedChildren();
 		InvalidateBgOnly();
+		UpdateWindow();
+		RefreshEmbeddedChildren();
+		PostMessage(WM_APP + 0x51C, 0, 0);
 		SetTimer(kAnimTimer, 50, NULL);
 		m_lineAnimPhase = 0;
 		return;
@@ -1595,6 +1619,8 @@ void CCustomPopupMenu::AnimateIn()
 		UpdateWindow();
 	}
 	SetTimer(kAnimTimer, 16, NULL);
+	// WM_TIMER(16ms) だけに頼らず、所要時間後に必ず定着（マウス未移動でも子が出る）
+	SetTimer(kSettleTimer, (UINT)max(50, ChipEnterTotalMs(style, m_asSubmenu, m_itemCount, m_lineAnimOrigin) + 30), NULL);
 }
 
 void CCustomPopupMenu::AnimateOut()
@@ -1668,6 +1694,7 @@ void CCustomPopupMenu::AnimateOut()
 		::MsgWaitForMultipleObjects(0, NULL, FALSE, 8, QS_ALLINPUT);
 	}
 	KillTimer(kAnimTimer);
+	KillTimer(kSettleTimer);
 	m_lineAnimPhase = 0;
 	// 先に隠す。レイヤ解除や EndChipFlight を見える状態でやると
 	// 透明ULW→不透明GDI が一フレ出てチラつく。
@@ -1786,6 +1813,7 @@ void CCustomPopupMenu::AbortAnimAndHide()
 {
 	if (!GetSafeHwnd()) return;
 	KillTimer(kAnimTimer);
+	KillTimer(kSettleTimer);
 	KillTimer(kBounceTimer);
 	m_lineAnimPhase = 0;
 	m_bridgePanel = FALSE;
@@ -1826,7 +1854,7 @@ void CCustomPopupMenu::DestroyPopupTree(BOOL animateOut)
 		if (m_buttons[i].GetSafeHwnd()) m_buttons[i].DestroyWindow();
 	if (m_tip.GetSafeHwnd()) m_tip.DestroyWindow();
 	if (GetSafeHwnd()) {
-		KillTimer(kTipTimer); KillTimer(kInwomanTimer); KillTimer(kAnimTimer); KillTimer(kBounceTimer);
+		KillTimer(kTipTimer); KillTimer(kInwomanTimer); KillTimer(kAnimTimer); KillTimer(kSettleTimer); KillTimer(kBounceTimer);
 		if (animateOut)
 			AnimateOut();
 		else
@@ -2138,14 +2166,14 @@ void CCustomPopupMenu::CommitChipFlightSettle()
 		return;
 	}
 
-	// 行→全体: 畳む前に最終サイズで ULW を差し替え、窓は後から合わせる（空フレを作らない）
+	// 定着描画は必ず phase=0（オフセット無し）で焼く。旧実装は phase=1 のまま
+	// 焼いてから 0 にしていたため、ULW解除後も「アニメ終了に見えるが操作不能」になった。
 	m_bridgePanel = TRUE;
-	ForceChipPresent();
+	m_lineAnimPhase = 0;
 
 	const int pad = m_flightPad;
 	const int fw = m_menuW;
 	const int fh = m_menuH;
-	CRect wr; GetWindowRect(&wr);
 	CRect rc; GetClientRect(&rc);
 	CClientDC dc(this);
 	CDC largeDC; largeDC.CreateCompatibleDC(&dc);
@@ -2166,28 +2194,20 @@ void CCustomPopupMenu::CommitChipFlightSettle()
 		haveFinal = TRUE;
 	}
 
-	m_lineAnimPhase = 0;
 	m_bridgePanel = FALSE;
 
-	if (haveFinal) {
-		if (!(GetExStyle() & WS_EX_LAYERED))
-			ModifyStyleEx(0, WS_EX_LAYERED);
-		const POINT dst = { wr.left + pad, wr.top + pad };
-		PresentChipLayered(finalDC.GetSafeHdc(), fw, fh, &dst);
-		EndChipFlight();
+	// ULW のまま Present→解除だと GDI 面が空のまま残り、代理描画（白コンボ等）が
+	// マウス移動まで張り付く。先に畳んでレイヤを外し、不透明 GDI へ同期焼き込みする。
+	EndChipFlight();
+	if (GetExStyle() & WS_EX_LAYERED)
 		ModifyStyleEx(WS_EX_LAYERED, 0);
-	} else {
-		EndChipFlight();
-		if (GetExStyle() & WS_EX_LAYERED)
-			ModifyStyleEx(WS_EX_LAYERED, 0);
-	}
+	if (haveFinal)
+		BlitOpaqueToWindow(finalDC.GetSafeHdc(), fw, fh);
 
 	if (obF) finalDC.SelectObject(obF);
 	if (obL) largeDC.SelectObject(obL);
 
-	// 飛行ビットマップの焼き込みではなく、通常の一枚パネルを描き直す（行枠の残留防止）
-	Invalidate(FALSE);
-	UpdateWindow();
+	// レイヤ解除 → 子表示 → 親背景のみ1回。全窓 RedrawWindow は点滅の元なので使わない。
 	RevealEmbeddedAfterAnim();
 	InvalidateBgOnly();
 	UpdateWindow();
@@ -2266,6 +2286,7 @@ void CCustomPopupMenu::SnapAnimToIdle()
 {
 	if (!GetSafeHwnd() || m_lineAnimPhase == 0) return;
 	KillTimer(kAnimTimer);
+	KillTimer(kSettleTimer);
 	if (UsesRowChipFlight(PopupAnimStyle())
 		&& (m_flightPad > 0 || (GetExStyle() & WS_EX_LAYERED))) {
 		CommitChipFlightSettle();
@@ -2273,10 +2294,20 @@ void CCustomPopupMenu::SnapAnimToIdle()
 		m_lineAnimPhase = 0;
 		m_bridgePanel = FALSE;
 		::SetWindowRgn(m_hWnd, NULL, TRUE);
+		RevealEmbeddedAfterAnim();
 		InvalidateBgOnly();
 		UpdateWindow();
+		RefreshEmbeddedChildren();
 	}
-	RevealEmbeddedAfterAnim();
+	// マウスを動かさなくても、現在カーソル下の行をホバー同期（OnMouseMove 相当）
+	{
+		CPoint sp;
+		::GetCursorPos(&sp);
+		ScreenToClient(&sp);
+		const int idx = HitTest(sp);
+		if (idx != m_hot)
+			SetHot(idx);
+	}
 	SetTimer(kAnimTimer, 50, NULL);
 }
 
@@ -2383,7 +2414,8 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		}
 
 		const BOOL interactive = IsInteractiveKind(it.kind);
-		const BOOL hot = (i == m_hot && it.enabled && !interactive && m_lineAnimPhase == 0);
+		const BOOL hot = (i == m_hot && it.enabled && !interactive
+			&& (m_lineAnimPhase == 0 || ChipFlightRowsAtRest()));
 		if (hot) DrawHotPill(dc, vr);
 
 		const COLORREF bgRef = PopupBg();
@@ -2691,6 +2723,15 @@ void CCustomPopupMenu::OnPaint()
 
 BOOL CCustomPopupMenu::OnEraseBkgnd(CDC*) { return TRUE; }
 
+LRESULT CCustomPopupMenu::OnRefreshEmbedded(WPARAM, LPARAM)
+{
+	if (!GetSafeHwnd() || m_lineAnimPhase != 0)
+		return 0;
+	// Sync は MoveWindow/Invalidate 連打で点滅するので、潰された子の再描画だけ
+	RefreshEmbeddedChildren();
+	return 0;
+}
+
 LRESULT CCustomPopupMenu::OnPrintClient(WPARAM wParam, LPARAM)
 {
 	if (HDC hdc = (HDC)wParam) {
@@ -2749,6 +2790,14 @@ LRESULT CCustomPopupMenu::OnNcHitTest(CPoint point)
 
 void CCustomPopupMenu::OnMouseMove(UINT nFlags, CPoint point)
 {
+	// タイマ定着が遅れても、操作開始で入場アニメを終わらせる（ホバーハイライト不能の防止）
+	if (m_lineAnimPhase == 1) {
+		const int style = PopupAnimStyle();
+		const int total = ChipEnterTotalMs(style, m_asSubmenu, m_itemCount, m_lineAnimOrigin);
+		const int elapsed = (int)(GetTickCount64() - m_lineAnimStart);
+		if (elapsed >= total || ChipFlightRowsAtRest())
+			SnapAnimToIdle();
+	}
 	TRACKMOUSEEVENT tme = { sizeof(tme) };
 	tme.dwFlags = TME_LEAVE; tme.hwndTrack = m_hWnd; ::_TrackMouseEvent(&tme);
 	SetHot(HitTest(point));
@@ -3091,49 +3140,40 @@ void CCustomPopupMenu::OnTimer(UINT_PTR nIDEvent)
 			::SetWindowRgn(m_hWnd, hUnion, TRUE);
 		}
 		if (m_lineAnimPhase == 1) {
-			int stag = m_asSubmenu ? CCUSTOM_POPUP_LINE_STAGGER_SUB : CCUSTOM_POPUP_LINE_STAGGER_IN;
-			if (m_itemCount > 1) {
-				const int need = stag * (m_itemCount - 1);
-				if (need > CCUSTOM_POPUP_LINE_STAGGER_BUDGET)
-					stag = max(1, CCUSTOM_POPUP_LINE_STAGGER_BUDGET / (m_itemCount - 1));
-			}
 			const int style = styleNow;
-			const int dur = ChipInDurMs(style, m_asSubmenu);
-			int span = 0;
-			if (UsesRadialStagger(style)
-				|| (!m_asSubmenu && style == POPUP_ANIM_EXPAND))
-				span = max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin);
-			else if (UsesIndexStagger(style) || m_asSubmenu)
-				span = (m_itemCount > 0) ? (m_itemCount - 1) : 0;
-			else
-				span = max(m_lineAnimOrigin, m_itemCount - 1 - m_lineAnimOrigin);
-			const int total = span * stag + dur + 40;
-			BOOL settled = FALSE;
-			const BOOL timeUp = ((int)(GetTickCount64() - m_lineAnimStart) >= total);
+			const int total = ChipEnterTotalMs(style, m_asSubmenu, m_itemCount, m_lineAnimOrigin);
+			const int elapsed = (int)(GetTickCount64() - m_lineAnimStart);
+			const BOOL timeUp = (elapsed >= total);
 			const BOOL atRest = (UsesRowChipFlight(style) && ChipFlightRowsAtRest());
 			if (timeUp || atRest) {
-				if (GetSafeHwnd() && UsesRowChipFlight(style)) {
-					CommitChipFlightSettle();
-					settled = TRUE;
-				} else {
-					if (GetSafeHwnd())
-						::SetWindowRgn(m_hWnd, NULL, TRUE);
-					m_lineAnimPhase = 0;
-					if (GetSafeHwnd()) {
-						InvalidateBgOnly();
-						UpdateWindow();
-					}
-					RevealEmbeddedAfterAnim();
-				}
-				KillTimer(kAnimTimer);
-				SetTimer(kAnimTimer, 50, NULL);
+				// サブ行ホバーの SnapAnimToIdle と同じ定着経路に統一
+				SnapAnimToIdle();
+				return;
 			}
-			// 直後の再Invalidateでキー色が一フレ挟まるのを避ける
-			if (!settled)
+			// UpdateLayeredWindow 使用中は Invalidate だけではコマが進まない
+			if (UsesRowChipFlight(style))
+				ForceChipPresent();
+			else
 				InvalidateBgOnly();
 			return;
 		}
-		InvalidateBgOnly();
+		// idle: ホバー追従は冒頭の SyncHotFromCursor のみ。
+		// 毎ティック Invalidate すると BufferedPaint が子を潰して点滅する。
+		if (CCC_IsInwoman())
+			InvalidateBgOnly();
+		return;
+	}
+	if (nIDEvent == kSettleTimer) {
+		KillTimer(kSettleTimer);
+		if (m_lineAnimPhase != 0) {
+			SnapAnimToIdle();
+		} else {
+			// 既に phase=0 でも、マウス未移動だと子が潰れたまま残ることがある
+			InvalidateBgOnly();
+			UpdateWindow();
+			RefreshEmbeddedChildren();
+			PostMessage(WM_APP + 0x51C, 0, 0);
+		}
 		return;
 	}
 	if (nIDEvent == kBounceTimer) {
@@ -3153,39 +3193,73 @@ void CCustomPopupMenu::RunModalLoop()
 	m_tracking = TRUE; m_done = FALSE; m_result = 0;
 	HWND hCap = (m_owner && m_owner->GetSafeHwnd()) ? m_owner->GetSafeHwnd() : NULL;
 	MSG msg;
+
+	auto dispatchOne = [&](MSG& m) -> BOOL {
+		if (m.message == WM_QUIT) {
+			m_done = TRUE; m_result = 0;
+			::PostQuitMessage((int)m.wParam);
+			return FALSE;
+		}
+		if (m.message == WM_ACTIVATEAPP && m.wParam == FALSE) {
+			m_done = TRUE; m_result = 0; return TRUE;
+		}
+		if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) {
+			CWnd* f = GetFocus();
+			if (!(f && IsChild(f) && f->IsKindOf(RUNTIME_CLASS(CCustomEdit)))) {
+				m_done = TRUE; m_result = 0; return TRUE;
+			}
+		}
+		if (m.message == WM_MOUSEWHEEL || m.message == WM_MOUSEHWHEEL) {
+			DWORD pos = ::GetMessagePos();
+			CPoint sp(GET_X_LPARAM(pos), GET_Y_LPARAM(pos));
+			const int delta = GET_WHEEL_DELTA_WPARAM(m.wParam);
+			if (HandleWheelInChain(sp, delta))
+				return TRUE;
+		}
+		if (m.message == WM_LBUTTONDOWN || m.message == WM_RBUTTONDOWN
+			|| m.message == WM_NCLBUTTONDOWN || m.message == WM_NCRBUTTONDOWN
+			|| m.message == WM_LBUTTONDBLCLK) {
+			DWORD pos = ::GetMessagePos();
+			CPoint sp(GET_X_LPARAM(pos), GET_Y_LPARAM(pos));
+			if (!IsPointInChain(sp)) { m_done = TRUE; m_result = 0; return TRUE; }
+		}
+		if (m_tip.GetSafeHwnd()) m_tip.RelayEvent(&m);
+		TranslateMessage(&m);
+		DispatchMessage(&m);
+		return TRUE;
+	};
+
 	while (!m_done) {
+		// 出現／退場アニメ中は長待ち禁止。
+		// MsgWait の長い timeout だと Peek されず WM_TIMER(16ms) が合成されず、
+		// 背景チップがマウス移動まで止まる。
+		if (m_lineAnimPhase == 1 || m_lineAnimPhase == 2) {
+			::MsgWaitForMultipleObjects(0, NULL, FALSE, 16, QS_ALLINPUT);
+			while (!m_done && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+				if (!dispatchOne(msg))
+					break;
+			}
+			if (m_lineAnimPhase == 1) {
+				const int style = PopupAnimStyle();
+				const int total = ChipEnterTotalMs(style, m_asSubmenu, m_itemCount, m_lineAnimOrigin);
+				const int elapsed = (int)(GetTickCount64() - m_lineAnimStart);
+				const BOOL atRest = (UsesRowChipFlight(style) && ChipFlightRowsAtRest());
+				if (elapsed >= total || atRest)
+					SnapAnimToIdle();
+			}
+			if (!m_done && !IsForegroundOurs()) {
+				m_done = TRUE; m_result = 0;
+			}
+			continue;
+		}
+
+		// 定着後は GetMessage（WM_TIMER を正しく起こす）
 		if (!::GetMessage(&msg, NULL, 0, 0)) {
 			m_done = TRUE; m_result = 0;
 			::PostQuitMessage((int)msg.wParam); break;
 		}
-		if (msg.message == WM_ACTIVATEAPP && msg.wParam == FALSE) {
-			m_done = TRUE; m_result = 0; continue;
-		}
-		if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE) {
-			CWnd* f = GetFocus();
-			if (!(f && IsChild(f) && f->IsKindOf(RUNTIME_CLASS(CCustomEdit)))) {
-				m_done = TRUE; m_result = 0; continue;
-			}
-		}
-		if (msg.message == WM_MOUSEWHEEL || msg.message == WM_MOUSEHWHEEL) {
-			DWORD pos = ::GetMessagePos();
-			CPoint sp(GET_X_LPARAM(pos), GET_Y_LPARAM(pos));
-			const int delta = GET_WHEEL_DELTA_WPARAM(msg.wParam);
-			if (HandleWheelInChain(sp, delta))
-				continue;
-		}
-		if (msg.message == WM_LBUTTONDOWN || msg.message == WM_RBUTTONDOWN
-			|| msg.message == WM_NCLBUTTONDOWN || msg.message == WM_NCRBUTTONDOWN
-			|| msg.message == WM_LBUTTONDBLCLK) {
-			DWORD pos = ::GetMessagePos();
-			CPoint sp(GET_X_LPARAM(pos), GET_Y_LPARAM(pos));
-			if (!IsPointInChain(sp)) { m_done = TRUE; m_result = 0; continue; }
-		}
-		if (m_tip.GetSafeHwnd()) m_tip.RelayEvent(&msg);
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
-
-		// 他ウィンドウへ移ったら閉じる（NOACTIVATE でもフォアグラウンド監視）
+		if (!dispatchOne(msg))
+			break;
 		if (!m_done && !IsForegroundOurs()) {
 			m_done = TRUE; m_result = 0;
 		}
