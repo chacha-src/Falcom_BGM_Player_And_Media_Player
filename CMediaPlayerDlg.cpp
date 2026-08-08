@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -624,7 +624,10 @@ LRESULT CMediaPlayerDlg::OnJakLoadDone(WPARAM wParam, LPARAM lParam)
 		if (didImage && ::IsWindow(m_list.GetSafeHwnd()) && job->disp >= 0) {
 			CRect rIcon;
 			if (m_list.GetItemRect(job->disp, &rIcon, LVIR_BOUNDS)) {
-				rIcon.right = rIcon.left + kMpJakPx + 28;
+				const int strip = m_list.m_mpJacketPx > 0
+					? m_list.m_mpJacketPx + (int)(28 * hD2 + 0.5f)
+					: (int)((kMpJakPx + 28) * hD2 + 0.5f);
+				rIcon.right = rIcon.left + strip;
 				m_list.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_NOERASE);
 			}
 		}
@@ -776,13 +779,16 @@ BOOL CModeSelectDlg::OnInitDialog()
 	m_btnFalcom.SetWindowText(LL14(L"ファルコムbgm特化型画面", L"Falcom BGM dedicated screen", L"Ecran dedie BGM Falcom", L"Schermata BGM Falcom", L"Pantalla dedicada BGM Falcom", L"팔콤 BGM 전용 화면", L"Falcom BGM 专用画面", L"شاشة Falcom BGM المخصصة", L"Экран Falcom BGM", L"Falcom-BGM-Bildschirm", L"Tela dedicada Falcom BGM", L"Falcom BGM-scherm", L"Ekran Falcom BGM", L"Falcom BGM ekranı"));
 	m_btnMedia.SetWindowText(LL14(L"メディアプレイヤー画面", L"Media player screen", L"Ecran lecteur multimedia", L"Schermata lettore multimediale", L"Pantalla reproductor multimedia", L"미디어 플레이어 화면", L"媒体播放器画面", L"شاشة مشغل الوسائط", L"Экран медиаплеера", L"Media-Player-Bildschirm", L"Tela do reprodutor de midia", L"Mediaspeler-scherm", L"Ekran odtwarzacza multimediow", L"Medya oynatıcı ekranı"));
 	m_ask.SetWindowText(LL14(L"次回も起動時に確認する", L"Ask again next startup", L"Demander au prochain demarrage", L"Chiedi al prossimo avvio", L"Preguntar en el proximo inicio", L"다음에도 시작 시 확인", L"下次启动时也询问", L"اسأل في المرة القادمة", L"Спрашивать при следующем запуске", L"Beim nachsten Start fragen", L"Perguntar no proximo inicio", L"Volgende keer opnieuw vragen", L"Zapytaj przy następnym starcie", L"Sonraki açılışta tekrar sor"));
-	m_ask.SetCheck(savedata.startupAsk ? 1 : 0);
+	// 既定はオフ（選んだら次回から出さない）。必要ならユーザーが付ける。
+	m_ask.SetCheck(0);
 
 	// 少し可愛い系: ボタンを大きめのフォントに
 	m_btnFalcom.SetGradation(RGB(255, 210, 230), RGB(255, 170, 205), 0, TRUE);
 	m_btnMedia.SetGradation(RGB(205, 230, 255), RGB(170, 205, 255), 0, TRUE);
 
-	return TRUE;
+	if (m_btnMedia.GetSafeHwnd())
+		m_btnMedia.SetFocus();
+	return FALSE; // TRUE だとフォーカスを既定コントロールへ戻す
 }
 
 void CModeSelectDlg::OnFalcom()
@@ -1704,7 +1710,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	// Create 失敗後の Add は ENSURE→CInvalidArgException（「引数が正しくありません」）
 	if (il.m_hImageList)
 		il.DeleteImageList();
-	if (il.Create(24, 24, ILC_COLOR32 | ILC_MASK, 0, 1)) {
+	const int jakPx = max(16, (int)(kMpJakPx * hD2 + 0.5f));
+	if (il.Create(jakPx, jakPx, ILC_COLOR32 | ILC_MASK, 0, 1)) {
 		HICON h1 = AfxGetApp()->LoadIcon(IDI_ICON1);
 		HICON h2 = AfxGetApp()->LoadIcon(IDI_ICON2);
 		HICON h3 = AfxGetApp()->LoadIcon(IDI_ICON3);
@@ -1713,7 +1720,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		if (h3) il.Add(h3);
 		m_list.SetImageList(&il, LVSIL_SMALL);
 	}
-	m_list.m_mpJacketPx = kMpJakPx;
+	m_list.m_mpJacketPx = jakPx;
 	m_list.m_mpJacketGet = MpJacketGetCb;
 	m_list.m_mpJacketCtx = this;
 	m_list.m_mpNoteIconGet = MpNoteIconGetCb;
@@ -2342,15 +2349,27 @@ static int MpPlselClosedH(float s)
 	return max(1, (int)(19 * s + 0.5f));
 }
 
-static const int kMpPlselListRowH = 28;
+static int MpPlselListRowH(float s)
+{
+	return max(1, (int)(28 * s + 0.5f));
+}
 
 static int MpPlselQueryRowH(HWND hCombo)
 {
 	int h = (int)(INT_PTR)::SendMessage(hCombo, CB_GETITEMHEIGHT, 0, 0);
 	if (h <= 1)
 		h = (int)(INT_PTR)::SendMessage(hCombo, CB_GETITEMHEIGHT, (WPARAM)-1, 0);
-	if (h <= 1)
-		h = kMpPlselListRowH;
+	if (h <= 1) {
+		UINT dpi = 96;
+		if (hCombo) {
+			if (HDC hdc = ::GetDC(hCombo)) {
+				dpi = (UINT)::GetDeviceCaps(hdc, LOGPIXELSX);
+				::ReleaseDC(hCombo, hdc);
+			}
+		}
+		if (dpi == 0) dpi = 96;
+		h = max(1, MulDiv(28, (int)dpi, 96));
+	}
 	return h;
 }
 
@@ -2411,19 +2430,20 @@ void CMediaPlayerDlg::LayoutPlselCombo(int x, int y, int w, int tbH, float s)
 		m_plselDropExtent = 0;
 
 	const int closedH = MpPlselClosedH(s);
-	const int dropExt = max((int)(182 * s + 0.5f), kMpPlselListRowH * 12);
+	const int listRowH = MpPlselListRowH(s);
+	const int dropExt = max((int)(182 * s + 0.5f), listRowH * 12);
 
 	if (m_plselDropExtent <= 0)
 	{
 		m_plsel.MoveWindow(x, y, w, dropExt);
 		m_plselDropExtent = dropExt;
 		m_plselLayoutDpi = s;
-		FixPlselDropList(m_plsel, kMpPlselListRowH, closedH);
+		FixPlselDropList(m_plsel, listRowH, closedH);
 	}
 	else
 	{
 		m_plsel.SetWindowPos(NULL, x, y, w, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
-		FixPlselDropList(m_plsel, kMpPlselListRowH, closedH);
+		FixPlselDropList(m_plsel, listRowH, closedH);
 	}
 
 	CRect cr;
@@ -3498,7 +3518,7 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 			m_list.RedrawItems(d, d);
 			return;
 		}
-		r.right = r.left + kMpJakPx + 42;
+		r.right = r.left + (m_list.m_mpJacketPx > 0 ? m_list.m_mpJacketPx : kMpJakPx) + (int)(42 * hD2 + 0.5f);
 		// UPDATENOW 禁止: スクロール中の Opaque 描画と競合し名前列だけ黒ちらつきする
 		m_list.RedrawWindow(&r, NULL, RDW_INVALIDATE | RDW_NOERASE);
 	};
@@ -3571,7 +3591,7 @@ void CMediaPlayerDlg::NotifyPlayIconChanged()
 			m_list.RedrawItems(d, d);
 			return;
 		}
-		r.right = r.left + kMpJakPx + 42;
+		r.right = r.left + (m_list.m_mpJacketPx > 0 ? m_list.m_mpJacketPx : kMpJakPx) + (int)(42 * hD2 + 0.5f);
 		// UPDATENOW 禁止(名前列の Opaque 描画と競合してちらつく)
 		m_list.RedrawWindow(&r, NULL, RDW_INVALIDATE | RDW_NOERASE);
 	};
@@ -5647,13 +5667,13 @@ void CMediaPlayerDlg::ReloadPlaylistCombo()
 		m_plsel.AddString(s);
 	}
 	m_plsel.SetCurSel(savedata.playlistnum);
-	FixPlselDropList(m_plsel, kMpPlselListRowH, MpPlselClosedH(hD2));
+	FixPlselDropList(m_plsel, MpPlselListRowH(hD2), MpPlselClosedH(hD2));
 	m_lastComboCount = n;
 }
 
 void CMediaPlayerDlg::OnPlselDropdown()
 {
-	FixPlselDropList(m_plsel, kMpPlselListRowH, MpPlselClosedH(hD2));
+	FixPlselDropList(m_plsel, MpPlselListRowH(hD2), MpPlselClosedH(hD2));
 	ExpandPlselDropListPopup(m_plsel.GetSafeHwnd());
 	PostMessage(WM_MP_PLSEL_EXPAND, 0, 0);
 }

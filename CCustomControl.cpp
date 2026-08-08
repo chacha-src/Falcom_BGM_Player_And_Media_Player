@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
@@ -4850,8 +4850,8 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
         DrawGlossHighlight(pDC, r, 6);
 
     int it = lp->itemID % 4;
-    int is = 8;
-    int ix = r.left + 5;
+    int is = max(8, r.Height() / 3);
+    int ix = r.left + max(4, is / 2);
     int iy = r.top + (r.Height() - is) / 2;
 
     switch (it)
@@ -4862,12 +4862,12 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     case 3: DrawRibbon(pDC, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
     }
 
-    if (lp->itemState & ODS_SELECTED) DrawStar(pDC, r.right - 12, r.top + r.Height() / 2, 3, RGB(255, 215, 0));
+    if (lp->itemState & ODS_SELECTED) DrawStar(pDC, r.right - max(10, is + 4), r.top + r.Height() / 2, max(3, is / 3), RGB(255, 215, 0));
 
     CString st;
     GetText(lp->itemID, st);
     CRect rt = r;
-    rt.left += 20;
+    rt.left += max(20, is * 2 + 4);
     rt.DeflateRect(1, 1);
 
     COLORREF tc = m_bAeroMode ? RGB(1, 1, 1) : COLOR_EDIT_TEXT;
@@ -4987,6 +4987,9 @@ void CCustomComboBox::PreSubclassWindow()
     dw |= CBS_OWNERDRAWFIXED | CBS_HASSTRINGS;
     ModifyStyle(0, CBS_OWNERDRAWFIXED | CBS_HASSTRINGS);
     SetWindowLong(GetSafeHwnd(), GWL_STYLE, dw);
+    const UINT dpi = CCC_GetControlDpi(m_hWnd);
+    SetItemHeight(-1, CCC_ScaleDpi(22, dpi)); // 閉じた状態の表示部
+    SetItemHeight(0, CCC_ScaleDpi(28, dpi));  // ドロップダウン行
 }
 
 HBRUSH CCustomComboBox::CtlColor(CDC* pDC, UINT nC)
@@ -5038,10 +5041,13 @@ void CCustomComboBox::PaintClient(CDC& dc)
     CPen pF(PS_SOLID, 2, COLOR_VINE_DECO);
     CPen* op = mDC.SelectObject(&pF);
     mDC.SelectStockObject(NULL_BRUSH);
-    mDC.RoundRect(&r, CPoint(10, 10));
+    const UINT dpi = CCC_GetControlDpi(m_hWnd);
+    const int roundR = CCC_ScaleDpi(10, dpi);
+    mDC.RoundRect(&r, CPoint(roundR, roundR));
 
-    int nb = GetSystemMetrics(SM_CXVSCROLL);
-    CRect rB(r.right - nb - 4, r.top + 4, r.right - 4, r.bottom - 4);
+    int nb = ::GetSystemMetricsForDpi(SM_CXVSCROLL, dpi);
+    const int btnPad = CCC_ScaleDpi(4, dpi);
+    CRect rB(r.right - nb - btnPad, r.top + btnPad, r.right - btnPad, r.bottom - btnPad);
     mDC.FillSolidRect(&rB, RGB(255, 200, 220));
     DrawGlossHighlight(&mDC, rB, 6);
 
@@ -5049,18 +5055,20 @@ void CCustomComboBox::PaintClient(CDC& dc)
         CPen pb(PS_SOLID, 1, RGB(200, 150, 180));
         mDC.SelectObject(&pb);
         mDC.SelectStockObject(NULL_BRUSH);
-        mDC.RoundRect(&rB, CPoint(6, 6));
+        const int br = CCC_ScaleDpi(6, dpi);
+        mDC.RoundRect(&rB, CPoint(br, br));
         mDC.SelectObject(op);
     }
 
     // ハート3つはやめ、ひとつのリボンで上品に
     {
         int cy2 = rB.Height() / 2 + rB.top;
-        int bw = min(rB.Width() - 4, 16);
-        DrawBow(&mDC, CRect(rB.CenterPoint().x - bw / 2, cy2 - 5, rB.CenterPoint().x + bw / 2, cy2 + 5), COLOR_BOW);
+        int bw = min(rB.Width() - 4, CCC_ScaleDpi(16, dpi));
+        const int bh = CCC_ScaleDpi(5, dpi);
+        DrawBow(&mDC, CRect(rB.CenterPoint().x - bw / 2, cy2 - bh, rB.CenterPoint().x + bw / 2, cy2 + bh), COLOR_BOW);
     }
 
-    DrawSparkle(&mDC, r.right - 8, r.top + 8, 4, COLOR_SPARKLE);
+    DrawSparkle(&mDC, r.right - CCC_ScaleDpi(8, dpi), r.top + CCC_ScaleDpi(8, dpi), CCC_ScaleDpi(4, dpi), COLOR_SPARKLE);
 
     int nPS = CComboBox::GetCurSel();
     CString st;
@@ -5071,15 +5079,15 @@ void CCustomComboBox::PaintClient(CDC& dc)
 
     CFont* pOF = mDC.SelectObject(GetFont());
     CRect rt = r;
-    rt.left += 12;
-    rt.right = rB.left - 4;
+    rt.left += CCC_ScaleDpi(12, dpi);
+    rt.right = rB.left - btnPad;
 
     BOOL bIL = (nPS >= 0 && nPS < (int)m_vDisabledItems.size() && m_vDisabledItems[nPS]);
     if (nPS != CB_ERR && !bIL)
     {
-        int cs = (rt.Height() - 8) / 2;
+        int cs = max(4, (rt.Height() - CCC_ScaleDpi(8, dpi)) / 2);
         DrawCrown(&mDC, rt.left + cs, rt.Height() / 2, cs, RGB(255, 215, 0));
-        rt.left += cs * 2 + 4;
+        rt.left += cs * 2 + CCC_ScaleDpi(4, dpi);
     }
 
     mDC.SetBkMode(TRANSPARENT);
@@ -5151,8 +5159,8 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     if (!bD)
     {
         int it = lp->itemID % 4;
-        int is = 8;
-        int ix = r.left + 6;
+        int is = max(8, r.Height() / 3);
+        int ix = r.left + max(4, is / 2);
         int iy = r.top + (r.Height() - is) / 2;
         switch (it)
         {
@@ -5197,14 +5205,18 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     pOF = pDC->SelectObject(&fc);
     pDC->SetBkMode(TRANSPARENT);
     CRect rt = r;
-    rt.left += bD ? 4 : 20;
+    const int iconPad = max(20, r.Height() * 2 / 3 + 4);
+    rt.left += bD ? max(4, r.Height() / 6) : iconPad;
     pDC->DrawText(st, &rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     if (pOF)
     {
         pDC->SelectObject(pOF);
         fc.DeleteObject();
     }
-    if (bS && !bD) DrawCrown(pDC, r.right - 14, r.top + r.Height() / 2, 6, RGB(255, 215, 0));
+    if (bS && !bD) {
+        const int cr = max(6, r.Height() / 4);
+        DrawCrown(pDC, r.right - cr * 2 - 2, r.top + r.Height() / 2, cr, RGB(255, 215, 0));
+    }
 }
 
 void CCustomComboBox::MeasureItem(LPMEASUREITEMSTRUCT lp)
@@ -5269,7 +5281,7 @@ void CCustomComboBox::UpdateDropDownWidth()
         mW = max(mW, dc.GetTextExtent(s).cx);
     }
 
-    mW += GetSystemMetrics(SM_CXVSCROLL) + 40;
+    mW += ::GetSystemMetricsForDpi(SM_CXVSCROLL, CCC_GetControlDpi(m_hWnd)) + CCC_ScaleDpi(40, CCC_GetControlDpi(m_hWnd));
     CRect r;
     GetWindowRect(&r);
     SetDroppedWidth(max(mW, r.Width()));
@@ -7319,22 +7331,23 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 }
             }
             // ♪描画位置(ジャケ有無で切替)。♡ は従来どおり ♪ と同位置・奥に重ねる。
-            const int iw = 16, ih = 16;
+            const UINT dpiNote = CCC_GetControlDpi(m_hWnd);
+            const int iw = CCC_ScaleDpi(16, dpiNote), ih = CCC_ScaleDpi(16, dpiNote);
             int noteX;
             int noteY = r.top + ((int)r.Height() - ih) / 2;
             if (m_mpJacketPx > 0)
-                noteX = jacketRight + 3;
+                noteX = jacketRight + CCC_ScaleDpi(3, dpiNote);
             else if (hasIconRect)
                 noteX = ri.left + (ri.Width() - iw) / 2;
             else
-                noteX = r.left + 2;
+                noteX = r.left + CCC_ScaleDpi(2, dpiNote);
             if (bS)
-                DrawHeart(pDC, CRect(noteX, noteY + 2, noteX + 14, noteY + 16), COLOR_HEART);
+                DrawHeart(pDC, CRect(noteX, noteY + CCC_ScaleDpi(2, dpiNote), noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih), COLOR_HEART);
             if (pIL && noteImg >= 0 && noteImg != 1) {
-                // ImageList は行高確保で 24px。♪自体は従来どおり 16x16。
+                // ImageList は行高確保でジャケ相当。♪自体は 16x16@96dpi。
                 HICON hNote = ImageList_GetIcon(pIL->GetSafeHandle(), noteImg, ILD_TRANSPARENT);
                 if (hNote) {
-                    ::DrawIconEx(pDC->GetSafeHdc(), noteX, noteY, hNote, 16, 16, 0, NULL, DI_NORMAL);
+                    ::DrawIconEx(pDC->GetSafeHdc(), noteX, noteY, hNote, iw, ih, 0, NULL, DI_NORMAL);
                     ::DestroyIcon(hNote);
                 }
             }
@@ -7344,10 +7357,10 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 #if CCUSTOM_AERO_SUPPORT
                 if (bCapGlass)
                     CCC_FillRectOpaqueBits(pDC->GetSafeHdc(),
-                        CRect(r.left, r.top, r.left + 3, r.bottom), RGB(90, 150, 220));
+                        CRect(r.left, r.top, r.left + CCC_ScaleDpi(3, dpiNote), r.bottom), RGB(90, 150, 220));
                 else
 #endif
-                    pDC->FillSolidRect(r.left, r.top, 3, r.Height(), RGB(90, 150, 220));
+                    pDC->FillSolidRect(r.left, r.top, CCC_ScaleDpi(3, dpiNote), r.Height(), RGB(90, 150, 220));
             }
         }
 
@@ -7361,22 +7374,23 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         CRect rt = r;
         if (ns == 0)
         {
-            int tl = r.left + 36;
+            const UINT dpiTxt = CCC_GetControlDpi(m_hWnd);
+            int tl = r.left + CCC_ScaleDpi(36, dpiTxt);
             if (m_mpJacketPx > 0)
-                tl = r.left + m_mpJacketPx + 24;
+                tl = r.left + m_mpJacketPx + CCC_ScaleDpi(24, dpiTxt);
             CRect ri2;
             if (GetItemRect(ni, &ri2, LVIR_ICON))
             {
                 if (noteImg >= 0 && noteImg != 1) {
                     if (m_mpJacketPx > 0)
-                        tl = (std::max)(tl, (int)r.left + m_mpJacketPx + 3 + 16 + 4);
+                        tl = (std::max)(tl, (int)r.left + m_mpJacketPx + CCC_ScaleDpi(3, dpiTxt) + CCC_ScaleDpi(16, dpiTxt) + CCC_ScaleDpi(4, dpiTxt));
                     else if (ri2.Width() > 0)
-                        tl = (std::max)(tl, (int)ri2.right + 4);
+                        tl = (std::max)(tl, (int)ri2.right + CCC_ScaleDpi(4, dpiTxt));
                 }
             }
-            tl = (std::min)(tl, (int)r.right - 4);
-            rt.left = (std::max)(tl, (int)r.left + 4);
-            rt.DeflateRect(2, 0);
+            tl = (std::min)(tl, (int)r.right - CCC_ScaleDpi(4, dpiTxt));
+            rt.left = (std::max)(tl, (int)r.left + CCC_ScaleDpi(4, dpiTxt));
+            rt.DeflateRect(CCC_ScaleDpi(2, dpiTxt), 0);
         }
         else if (uColFmt == DT_RIGHT) {
             rt.DeflateRect(4, 0);
@@ -8113,14 +8127,16 @@ void CCustomTabCtrl::LayoutEqualTabs(int nSlots)
 	if (rc.Height() < 8 || rc.Width() < 8) return;
 
 	if (IsVertical()) {
-		const int usable = max(24, rc.Height() - 6);
-		const int tabAlong = max(20, usable / nSlots);
-		SetItemSize(CSize(tabAlong, 40));
+		const UINT dpi = CCC_GetControlDpi(m_hWnd);
+		const int usable = max(CCC_ScaleDpi(24, dpi), rc.Height() - CCC_ScaleDpi(6, dpi));
+		const int tabAlong = max(CCC_ScaleDpi(20, dpi), usable / nSlots);
+		SetItemSize(CSize(tabAlong, CCC_ScaleDpi(40, dpi)));
 	}
 	else {
-		const int usable = max(48, rc.Width() - 6);
-		const int tabW = max(48, usable / nSlots);
-		SetItemSize(CSize(tabW, 26));
+		const UINT dpi = CCC_GetControlDpi(m_hWnd);
+		const int usable = max(CCC_ScaleDpi(48, dpi), rc.Width() - CCC_ScaleDpi(6, dpi));
+		const int tabW = max(CCC_ScaleDpi(48, dpi), usable / nSlots);
+		SetItemSize(CSize(tabW, CCC_ScaleDpi(26, dpi)));
 	}
 	Invalidate(FALSE);
 }

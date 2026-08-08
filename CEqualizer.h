@@ -30,6 +30,7 @@ public:
 	CToolTipCtrl m_tooltip;
 	int mod = 0;
 	void LayoutHelpBtn();
+	void LayoutToneColumns();
 	void ShowHelpSheet();
 
 protected:

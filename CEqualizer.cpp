@@ -1029,6 +1029,7 @@ BOOL CEqualizer::OnInitDialog()
 	CCC_MainLockBringToFront(m_hWnd);
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
+	LayoutToneColumns();
 	return TRUE;
 }
 void CEqualizer::ApplyTitleFont()
@@ -1209,6 +1210,100 @@ void CEqualizer::OnSize(UINT nType, int cx, int cy)
 void CEqualizer::LayoutHelpBtn()
 {
 	CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help);
+}
+
+// マスター〜ディレイ列: 帯域スライダーと同じ上端・高さに揃え、ラベル／数値も同 Y に統一する。
+// RC 上の狭いラベル幅だと「バランス」等が折り返して縦位置が崩れる。
+void CEqualizer::LayoutToneColumns()
+{
+	CWnd* pRefSl = GetDlgItem(IDC_SLIDER7);
+	CWnd* pRefLb = GetDlgItem(IDC_EQ_FREQ_25);
+	CWnd* pRefVl = GetDlgItem(IDC_STATIC_e0);
+	if (!pRefSl || !::IsWindow(pRefSl->GetSafeHwnd())) return;
+
+	CRect rs;
+	pRefSl->GetWindowRect(&rs);
+	ScreenToClient(&rs);
+
+	int labTop = rs.top;
+	int labH = max(8, rs.Height() / 12);
+	if (pRefLb && ::IsWindow(pRefLb->GetSafeHwnd())) {
+		CRect rl;
+		pRefLb->GetWindowRect(&rl);
+		ScreenToClient(&rl);
+		labTop = rl.top;
+		labH = max(rl.Height(), labH);
+	}
+	CRect rv;
+	BOOL haveVal = FALSE;
+	if (pRefVl && ::IsWindow(pRefVl->GetSafeHwnd())) {
+		pRefVl->GetWindowRect(&rv);
+		ScreenToClient(&rv);
+		haveVal = TRUE;
+	}
+
+	struct Col { int sliderId; int labelId; int valueId; };
+	static const Col cols[] = {
+		{ IDC_SLIDER23, IDC_STATIC_EQ_SPECTRUM, IDC_STATIC_e15 },
+		{ IDC_SLIDER24, IDC_STATIC_EQ_FREQ,     IDC_STATIC_e16 },
+		{ IDC_SLIDER25, IDC_STATIC_EQ_BAND,     IDC_STATIC_e17 },
+		{ IDC_SLIDER26, IDC_STATIC_EQ_LOUDNESS, IDC_STATIC_e18 },
+		{ IDC_SLIDER27, IDC_STATIC_EQ_WARMTH,   IDC_STATIC_e19 },
+		{ IDC_SLIDER28, IDC_STATIC_EQ_REVERB,   IDC_STATIC_e20 },
+		{ IDC_SLIDER29, IDC_STATIC_EQ_CHORUS,   IDC_STATIC_e21 },
+		{ IDC_SLIDER30, IDC_STATIC_EQ_DELAY,    IDC_STATIC_e22 },
+	};
+	const int n = (int)(sizeof(cols) / sizeof(cols[0]));
+
+	CClientDC dc(this);
+	CFont* pFont = GetFont();
+	CFont* pOld = pFont ? dc.SelectObject(pFont) : NULL;
+
+	for (int i = 0; i < n; ++i) {
+		CWnd* ps = GetDlgItem(cols[i].sliderId);
+		if (!ps || !::IsWindow(ps->GetSafeHwnd())) continue;
+
+		CRect s;
+		ps->GetWindowRect(&s);
+		ScreenToClient(&s);
+		ps->SetWindowPos(NULL, s.left, rs.top, s.Width(), rs.Height(),
+			SWP_NOZORDER | SWP_NOACTIVATE);
+		s.top = rs.top;
+		s.bottom = rs.top + rs.Height();
+		const int cx = (s.left + s.right) / 2;
+
+		CWnd* pl = GetDlgItem(cols[i].labelId);
+		if (pl && ::IsWindow(pl->GetSafeHwnd())) {
+			pl->ModifyStyle(SS_TYPEMASK, SS_CENTER);
+			CString text;
+			pl->GetWindowText(text);
+			CSize sz = dc.GetTextExtent(text);
+			int pitch = s.Width() + 8;
+			if (i + 1 < n) {
+				CWnd* pn = GetDlgItem(cols[i + 1].sliderId);
+				if (pn && ::IsWindow(pn->GetSafeHwnd())) {
+					CRect sn;
+					pn->GetWindowRect(&sn);
+					ScreenToClient(&sn);
+					pitch = max(pitch, sn.left - s.left);
+				}
+			}
+			int lw = max(s.Width() + 4, min(sz.cx + 4, pitch));
+			pl->SetWindowPos(NULL, cx - lw / 2, labTop, lw, labH,
+				SWP_NOZORDER | SWP_NOACTIVATE);
+		}
+
+		CWnd* pv = GetDlgItem(cols[i].valueId);
+		if (haveVal && pv && ::IsWindow(pv->GetSafeHwnd())) {
+			CRect v;
+			pv->GetWindowRect(&v);
+			ScreenToClient(&v);
+			pv->SetWindowPos(NULL, cx - v.Width() / 2, rv.top, v.Width(), rv.Height(),
+				SWP_NOZORDER | SWP_NOACTIVATE);
+		}
+	}
+
+	if (pOld) dc.SelectObject(pOld);
 }
 
 void CEqualizer::ShowHelpSheet()

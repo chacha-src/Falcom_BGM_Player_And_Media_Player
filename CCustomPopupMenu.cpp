@@ -2,6 +2,7 @@
 #include "CCustomPopupMenu.h"
 #include <uxtheme.h>
 #include <math.h>
+#include <algorithm>
 #pragma comment(lib, "uxtheme.lib")
 
 extern void MpPersistSavedataQuick();
@@ -81,7 +82,7 @@ namespace {
 	static void ClampPopupAnimSave()
 	{
 		if (savedata.popupMenuAnim < 0 || savedata.popupMenuAnim >= POPUP_ANIM_COUNT)
-			savedata.popupMenuAnim = POPUP_ANIM_CLASSIC;
+			savedata.popupMenuAnim = POPUP_ANIM_AURORA;
 	}
 	static int PopupAnimStyle()
 	{
@@ -100,6 +101,20 @@ namespace {
 		if (style == POPUP_ANIM_ZIPPER || style == POPUP_ANIM_AURORA)
 			return CCUSTOM_POPUP_FLIGHT_PAD_MID;
 		return CCUSTOM_POPUP_FLIGHT_PAD_ROW;
+	}
+	static UINT PopupDpiFromHwnd(HWND hWnd)
+	{
+		UINT dpi = 96;
+		HWND h = hWnd ? hWnd : ::GetDesktopWindow();
+		if (HDC hdc = ::GetDC(h)) {
+			dpi = (UINT)::GetDeviceCaps(hdc, LOGPIXELSX);
+			::ReleaseDC(h, hdc);
+		}
+		return dpi ? dpi : 96;
+	}
+	static int PopupSx(UINT dpi, int v96)
+	{
+		return MulDiv(v96, (int)dpi, 96);
 	}
 	// 起点からの距離で遅延（放射系）
 	static BOOL UsesRadialStagger(int style)
@@ -228,17 +243,20 @@ namespace {
 	}
 
 	// アニメ中（子HWNDは隠す）でもスライダー等が見えるよう代理描画
-	static void DrawInteractiveProxy(CDC& dc, const CCustomPopupItem& it, const CRect& vr, int fade, COLORREF bgRef)
+	static void DrawInteractiveProxy(CDC& dc, const CCustomPopupItem& it, const CRect& vr, int fade, COLORREF bgRef, UINT dpi)
 	{
 		auto faded = [&](COLORREF c) -> COLORREF {
 			if (fade >= 250) return c;
 			return BlendRGB(bgRef, c, fade);
 		};
+		const int padX = PopupSx(dpi, CCUSTOM_POPUP_PAD_X);
+		const int padR = PopupSx(dpi, CCUSTOM_POPUP_PAD_RIGHT);
+		const int checkW = PopupSx(dpi, CCUSTOM_POPUP_CHECK_W);
 		CRect box = vr;
 		if (it.kind == CCUSTOM_POPUP_BUTTON)
-			box.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 6, CCUSTOM_POPUP_PAD_RIGHT, 6);
+			box.DeflateRect(padX + checkW, PopupSx(dpi, 6), padR, PopupSx(dpi, 6));
 		else
-			box.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			box.DeflateRect(padX + checkW, PopupSx(dpi, 20), padR, PopupSx(dpi, 5));
 		if (box.Width() < 8 || box.Height() < 4) return;
 
 		const COLORREF face = faded(RGB(255, 248, 252));
@@ -258,7 +276,7 @@ namespace {
 			dc.Draw3dRect(&box, edge, edge);
 			if (it.kind == CCUSTOM_POPUP_COMBO) {
 				CRect ar = box;
-				ar.left = max(box.left + 4, box.right - 18);
+				ar.left = max(box.left + PopupSx(dpi, 4), box.right - PopupSx(dpi, 18));
 				dc.FillSolidRect(&ar, faded(RGB(255, 236, 245)));
 				DrawPopupItemText(dc, L"▾", ar, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
 					faded(PopupText(TRUE)), TRUE, fade);
@@ -281,17 +299,20 @@ namespace {
 		}
 		// SLIDER / RANGE
 		const int cy = (box.top + box.bottom) / 2;
-		dc.FillSolidRect(box.left, cy - 2, box.Width(), 4, track);
-		dc.Draw3dRect(CRect(box.left, cy - 2, box.right, cy + 2), edge, edge);
+		const int trackH = max(2, PopupSx(dpi, 4));
+		const int thumbR = PopupSx(dpi, 6);
+		const int thumbH = PopupSx(dpi, 8);
+		dc.FillSolidRect(box.left, cy - trackH / 2, box.Width(), trackH, track);
+		dc.Draw3dRect(CRect(box.left, cy - trackH / 2, box.right, cy + trackH / 2), edge, edge);
 		if (it.kind == CCUSTOM_POPUP_RANGE && it.sliderMax > it.sliderMin) {
 			int x0 = box.left + MulDiv(it.rangeSelMin - it.sliderMin, box.Width(), it.sliderMax - it.sliderMin);
 			int x1 = box.left + MulDiv(it.rangeSelMax - it.sliderMin, box.Width(), it.sliderMax - it.sliderMin);
 			if (x1 < x0) { const int tmp = x0; x0 = x1; x1 = tmp; }
-			dc.FillSolidRect(x0, cy - 2, max(1, x1 - x0), 4, faded(RGB(255, 190, 215)));
+			dc.FillSolidRect(x0, cy - trackH / 2, max(1, x1 - x0), trackH, faded(RGB(255, 190, 215)));
 		}
 		if (it.sliderMax > it.sliderMin) {
 			const int x = box.left + MulDiv(it.sliderPos - it.sliderMin, box.Width(), it.sliderMax - it.sliderMin);
-			CRect th(x - 6, cy - 8, x + 6, cy + 8);
+			CRect th(x - thumbR, cy - thumbH, x + thumbR, cy + thumbH);
 			CBrush br(accent);
 			CPen pen(PS_SOLID, 1, edge);
 			CBrush* ob = dc.SelectObject(&br);
@@ -302,13 +323,13 @@ namespace {
 		}
 	}
 
-	static void DrawCuteSep(CDC& dc, const CRect& rc)
+	static void DrawCuteSep(CDC& dc, const CRect& rc, UINT dpi)
 	{
 		const int y = (rc.top + rc.bottom) / 2;
-		const int L = rc.left + CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W;
-		const int R = rc.right - CCUSTOM_POPUP_PAD_RIGHT;
+		const int L = rc.left + PopupSx(dpi, CCUSTOM_POPUP_PAD_X) + PopupSx(dpi, CCUSTOM_POPUP_CHECK_W);
+		const int R = rc.right - PopupSx(dpi, CCUSTOM_POPUP_PAD_RIGHT);
 		const int mid = (L + R) / 2;
-		const int gap = 14;
+		const int gap = PopupSx(dpi, 14);
 		FillHGrad(dc, CRect(L, y, mid - gap, y + 1), RGB(255, 246, 250), RGB(228, 150, 186));
 		FillHGrad(dc, CRect(mid + gap, y, R, y + 1), RGB(228, 150, 186), RGB(255, 246, 250));
 		dc.FillSolidRect(L, y + 1, mid - gap - L, 1, RGB(255, 255, 255));
@@ -827,8 +848,9 @@ void CCustomPopupMenu::RelayoutOpenChain()
 			const int maxH = mi.rcWork.bottom - mi.rcWork.top - 8;
 			if (menu->m_contentH > maxH) {
 				menu->m_menuH = maxH;
-				if (menu->m_stickyH > 0 && menu->m_menuH < menu->m_stickyH + CCUSTOM_POPUP_ITEM_H * 3)
-					menu->m_menuH = min(maxH, menu->m_stickyH + CCUSTOM_POPUP_ITEM_H * 3);
+			const int stickyMin = PopupSx(PopupDpiFromHwnd(menu->m_hWnd), CCUSTOM_POPUP_ITEM_H) * 3;
+			if (menu->m_stickyH > 0 && menu->m_menuH < menu->m_stickyH + stickyMin)
+				menu->m_menuH = min(maxH, menu->m_stickyH + stickyMin);
 				const int bodyView = max(0, menu->m_menuH - menu->m_stickyH);
 				const int bodyContent = max(0, menu->m_contentH - menu->m_stickyH);
 				menu->m_scrollMax = max(0, bodyContent - bodyView);
@@ -1021,6 +1043,9 @@ void CCustomPopupMenu::EnsureChromePrefix()
 
 void CCustomPopupMenu::MeasureLayout()
 {
+	UINT dpi = PopupDpiFromHwnd(m_hWnd);
+	auto SH = [dpi](int v) { return PopupSx(dpi, v); };
+
 	CDC dc; dc.Attach(::GetDC(NULL));
 	HFONT font = m_font ? m_font : (HFONT)::GetStockObject(DEFAULT_GUI_FONT);
 	HFONT old = (HFONT)dc.SelectObject(font);
@@ -1031,36 +1056,37 @@ void CCustomPopupMenu::MeasureLayout()
 		CSize sz = dc.GetTextExtent(it.text, (int)wcslen(it.text));
 		int w = sz.cx;
 		// レ点列は常に確保（チェック無し行もラベル位置を揃える）
-		w += CCUSTOM_POPUP_CHECK_W;
-		if (it.kind == CCUSTOM_POPUP_SUB) w += CCUSTOM_POPUP_ARROW_W;
-		if (IsInteractiveKind(it.kind)) w = max(w, 160);
+		w += SH(CCUSTOM_POPUP_CHECK_W);
+		if (it.kind == CCUSTOM_POPUP_SUB) w += SH(CCUSTOM_POPUP_ARROW_W);
+		if (IsInteractiveKind(it.kind)) w = max(w, SH(160));
 		if (w > maxTw) maxTw = w;
 	}
 	dc.SelectObject(old);
 	::ReleaseDC(NULL, dc.Detach());
 
-	m_menuW = max(CCUSTOM_POPUP_MIN_W,
-		maxTw + CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_PAD_RIGHT + CCUSTOM_POPUP_RIBBON_W + 12);
+	m_menuW = max(SH(CCUSTOM_POPUP_MIN_W),
+		maxTw + SH(CCUSTOM_POPUP_PAD_X) + SH(CCUSTOM_POPUP_PAD_RIGHT) + SH(CCUSTOM_POPUP_RIBBON_W) + SH(12));
 	if (m_stickyCount > m_itemCount) m_stickyCount = m_itemCount;
-	int y = 8;
+	int y = SH(8);
 	m_stickyH = 0;
 	for (int i = 0; i < m_itemCount; ++i) {
 		CCustomPopupItem& it = m_items[i];
-		int h = CCUSTOM_POPUP_ITEM_H;
-		if (it.kind == CCUSTOM_POPUP_SEP) h = CCUSTOM_POPUP_SEP_H;
-		else if (it.kind == CCUSTOM_POPUP_SLIDER) h = CCUSTOM_POPUP_SLIDER_H;
-		else if (it.kind == CCUSTOM_POPUP_EDIT) h = CCUSTOM_POPUP_EDIT_H;
-		else if (it.kind == CCUSTOM_POPUP_COMBO) h = CCUSTOM_POPUP_COMBO_H;
-		else if (it.kind == CCUSTOM_POPUP_LIST) h = CCUSTOM_POPUP_LIST_H;
-		else if (it.kind == CCUSTOM_POPUP_RANGE) h = CCUSTOM_POPUP_RANGE_H;
-		else if (it.kind == CCUSTOM_POPUP_PROGRESS) h = CCUSTOM_POPUP_PROGRESS_H;
-		else if (it.kind == CCUSTOM_POPUP_BUTTON) h = CCUSTOM_POPUP_BUTTON_H;
-		it.rc.SetRect(CCUSTOM_POPUP_RIBBON_W + 2, y, m_menuW - 6, y + h);
+		// 行高・幅定数とも DPI スケール（描画側と共有）
+		int h = SH(CCUSTOM_POPUP_ITEM_H);
+		if (it.kind == CCUSTOM_POPUP_SEP) h = SH(CCUSTOM_POPUP_SEP_H);
+		else if (it.kind == CCUSTOM_POPUP_SLIDER) h = SH(CCUSTOM_POPUP_SLIDER_H);
+		else if (it.kind == CCUSTOM_POPUP_EDIT) h = SH(CCUSTOM_POPUP_EDIT_H);
+		else if (it.kind == CCUSTOM_POPUP_COMBO) h = SH(CCUSTOM_POPUP_COMBO_H);
+		else if (it.kind == CCUSTOM_POPUP_LIST) h = SH(CCUSTOM_POPUP_LIST_H);
+		else if (it.kind == CCUSTOM_POPUP_RANGE) h = SH(CCUSTOM_POPUP_RANGE_H);
+		else if (it.kind == CCUSTOM_POPUP_PROGRESS) h = SH(CCUSTOM_POPUP_PROGRESS_H);
+		else if (it.kind == CCUSTOM_POPUP_BUTTON) h = SH(CCUSTOM_POPUP_BUTTON_H);
+		it.rc.SetRect(SH(CCUSTOM_POPUP_RIBBON_W) + SH(2), y, m_menuW - SH(6), y + h);
 		y += h;
 		if (i + 1 == m_stickyCount)
 			m_stickyH = y;
 	}
-	m_contentH = y + 8;
+	m_contentH = y + SH(8);
 	m_menuH = m_contentH;
 	m_scrollY = 0;
 	m_scrollMax = 0;
@@ -1068,6 +1094,15 @@ void CCustomPopupMenu::MeasureLayout()
 
 void CCustomPopupMenu::SyncEmbeddedChildren()
 {
+	UINT dpi = PopupDpiFromHwnd(m_hWnd);
+	const int padTop = PopupSx(dpi, 20);
+	const int padBot = PopupSx(dpi, 5);
+	const int comboEditH = PopupSx(dpi, 22);
+	const int comboListH = PopupSx(dpi, 28);
+	const int padX = PopupSx(dpi, CCUSTOM_POPUP_PAD_X);
+	const int padR = PopupSx(dpi, CCUSTOM_POPUP_PAD_RIGHT);
+	const int checkW = PopupSx(dpi, CCUSTOM_POPUP_CHECK_W);
+
 	auto placeChild = [&](CWnd& wnd, const CRect& dest, BOOL onScreen) {
 		if (!wnd.GetSafeHwnd()) return;
 		CRect old;
@@ -1097,7 +1132,7 @@ void CCustomPopupMenu::SyncEmbeddedChildren()
 
 		if (it.kind == CCUSTOM_POPUP_SLIDER && it.sliderIndex >= 0) {
 			CCustomSliderCtrl& sl = m_sliders[it.sliderIndex];
-			CRect sr = vr; sr.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect sr = vr; sr.DeflateRect(padX + checkW, padTop, padR, padBot);
 			CRect hit;
 			const BOOL onScreen = rowVisible && hit.IntersectRect(&sr, &body) && hit.Height() > 2;
 			if (!sl.GetSafeHwnd()) {
@@ -1107,7 +1142,7 @@ void CCustomPopupMenu::SyncEmbeddedChildren()
 			placeChild(sl, sr, onScreen);
 		} else if (it.kind == CCUSTOM_POPUP_EDIT && it.editIndex >= 0) {
 			CCustomEdit& ed = m_edits[it.editIndex];
-			CRect er = vr; er.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect er = vr; er.DeflateRect(padX + checkW, padTop, padR, padBot);
 			CRect hit;
 			const BOOL onScreen = rowVisible && hit.IntersectRect(&er, &body) && hit.Height() > 2;
 			LPCTSTR init = L"";
@@ -1123,7 +1158,7 @@ void CCustomPopupMenu::SyncEmbeddedChildren()
 			placeChild(ed, er, onScreen);
 		} else if (it.kind == CCUSTOM_POPUP_COMBO && it.comboIndex >= 0 && it.choiceSet >= 0) {
 			CCustomComboBox& cb = m_combos[it.comboIndex];
-			CRect cr = vr; cr.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect cr = vr; cr.DeflateRect(padX + checkW, padTop, padR, padBot);
 			CRect hit;
 			const BOOL onScreen = rowVisible && hit.IntersectRect(&cr, &body) && hit.Height() > 2;
 			const CCustomPopupChoiceSet& set = m_choiceSets[it.choiceSet];
@@ -1134,10 +1169,14 @@ void CCustomPopupMenu::SyncEmbeddedChildren()
 				for (int k = 0; k < set.count; ++k) cb.AddString(set.items[k]);
 				if (set.count > 0) cb.SetCurSelPhysical(it.choiceSel);
 			}
+			// -1 = 閉じた状態の表示部、-1以外 = ドロップダウン行
+			const int editH = (std::max)(comboEditH, cr.Height() - 2);
+			cb.SetItemHeight(-1, editH);
+			cb.SetItemHeight(0, comboListH);
 			placeChild(cb, cr, onScreen);
 		} else if (it.kind == CCUSTOM_POPUP_LIST && it.listIndex >= 0 && it.choiceSet >= 0) {
 			CCustomListBox& lb = m_lists[it.listIndex];
-			CRect lr = vr; lr.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect lr = vr; lr.DeflateRect(padX + checkW, padTop, padR, padBot);
 			CRect hit;
 			const BOOL onScreen = rowVisible && hit.IntersectRect(&lr, &body) && hit.Height() > 2;
 			const CCustomPopupChoiceSet& set = m_choiceSets[it.choiceSet];
@@ -1152,7 +1191,7 @@ void CCustomPopupMenu::SyncEmbeddedChildren()
 			placeChild(lb, lr, onScreen);
 		} else if (it.kind == CCUSTOM_POPUP_RANGE && it.rangeIndex >= 0) {
 			CCustomRangeSliderCtrl& rs = m_ranges[it.rangeIndex];
-			CRect rr = vr; rr.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect rr = vr; rr.DeflateRect(padX + checkW, padTop, padR, padBot);
 			CRect hit;
 			const BOOL onScreen = rowVisible && hit.IntersectRect(&rr, &body) && hit.Height() > 2;
 			if (!rs.GetSafeHwnd()) {
@@ -1167,7 +1206,7 @@ void CCustomPopupMenu::SyncEmbeddedChildren()
 			placeChild(rs, rr, onScreen);
 		} else if (it.kind == CCUSTOM_POPUP_PROGRESS && it.progressIndex >= 0) {
 			CCustomProgressCtrl& pg = m_progresses[it.progressIndex];
-			CRect pr = vr; pr.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 20, CCUSTOM_POPUP_PAD_RIGHT, 5);
+			CRect pr = vr; pr.DeflateRect(padX + checkW, padTop, padR, padBot);
 			CRect hit;
 			const BOOL onScreen = rowVisible && hit.IntersectRect(&pr, &body) && hit.Height() > 2;
 			if (!pg.GetSafeHwnd()) {
@@ -1180,7 +1219,8 @@ void CCustomPopupMenu::SyncEmbeddedChildren()
 			placeChild(pg, pr, onScreen);
 		} else if (it.kind == CCUSTOM_POPUP_BUTTON && it.buttonIndex >= 0) {
 			CCustomStandardButton& bt = m_buttons[it.buttonIndex];
-			CRect br = vr; br.DeflateRect(CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W, 6, CCUSTOM_POPUP_PAD_RIGHT, 6);
+			const int btnPad = PopupSx(dpi, 6);
+			CRect br = vr; br.DeflateRect(padX + checkW, btnPad, padR, btnPad);
 			CRect hit;
 			const BOOL onScreen = rowVisible && hit.IntersectRect(&br, &body) && hit.Height() > 2;
 			if (!bt.GetSafeHwnd()) {
@@ -1660,8 +1700,9 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 		const int maxH = mi.rcWork.bottom - mi.rcWork.top - 8;
 		if (m_contentH > maxH) {
 			m_menuH = maxH;
-			if (m_stickyH > 0 && m_menuH < m_stickyH + CCUSTOM_POPUP_ITEM_H * 3)
-				m_menuH = min(maxH, m_stickyH + CCUSTOM_POPUP_ITEM_H * 3);
+			const int stickyMin = PopupSx(PopupDpiFromHwnd(m_hWnd), CCUSTOM_POPUP_ITEM_H) * 3;
+			if (m_stickyH > 0 && m_menuH < m_stickyH + stickyMin)
+				m_menuH = min(maxH, m_stickyH + stickyMin);
 			const int bodyView = max(0, m_menuH - m_stickyH);
 			const int bodyContent = max(0, m_contentH - m_stickyH);
 			m_scrollMax = max(0, bodyContent - bodyView);
@@ -2188,7 +2229,8 @@ void CCustomPopupMenu::SetScrollY(int y)
 BOOL CCustomPopupMenu::OnWheelDelta(int delta)
 {
 	if (m_scrollMax <= 0) return FALSE;
-	const int steps = (delta > 0) ? -CCUSTOM_POPUP_SCROLL_STEP : CCUSTOM_POPUP_SCROLL_STEP;
+	const int step = PopupSx(PopupDpiFromHwnd(m_hWnd), CCUSTOM_POPUP_SCROLL_STEP);
+	const int steps = (delta > 0) ? -step : step;
 	// 複数ノッチ
 	const int notches = max(1, abs(delta) / WHEEL_DELTA);
 	SetScrollY(m_scrollY + steps * notches);
@@ -2313,6 +2355,13 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 	CRect rc; GetClientRect(&rc);
 	HFONT oldFont = (HFONT)dc.SelectObject(m_font ? m_font : (HFONT)::GetStockObject(DEFAULT_GUI_FONT));
 	dc.SetBkMode(TRANSPARENT);
+	const UINT dpi = PopupDpiFromHwnd(m_hWnd);
+	const int padX = PopupSx(dpi, CCUSTOM_POPUP_PAD_X);
+	const int padR = PopupSx(dpi, CCUSTOM_POPUP_PAD_RIGHT);
+	const int checkW = PopupSx(dpi, CCUSTOM_POPUP_CHECK_W);
+	const int arrowW = PopupSx(dpi, CCUSTOM_POPUP_ARROW_W);
+	const int labelBand = PopupSx(dpi, 18);
+	const int labelTop = PopupSx(dpi, 2);
 
 	auto paintItem = [&](int i) {
 		const CCustomPopupItem& it = m_items[i];
@@ -2329,7 +2378,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		if (vr.bottom < 0 || vr.top > rc.bottom) return;
 
 		if (it.kind == CCUSTOM_POPUP_SEP) {
-			if (fade >= 48) DrawCuteSep(dc, vr);
+			if (fade >= 48) DrawCuteSep(dc, vr, dpi);
 			return;
 		}
 
@@ -2344,30 +2393,30 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		};
 
 		CRect tr = vr;
-		tr.left += CCUSTOM_POPUP_PAD_X;
-		tr.right -= CCUSTOM_POPUP_PAD_RIGHT;
+		tr.left += padX;
+		tr.right -= padR;
 
 		{
-			CRect cr(tr.left, tr.top, tr.left + CCUSTOM_POPUP_CHECK_W, tr.bottom);
+			CRect cr(tr.left, tr.top, tr.left + checkW, tr.bottom);
 			if (it.kind == CCUSTOM_POPUP_CHECK && it.checked && fade >= 80) {
 				CRect bounce = cr;
-				bounce.InflateRect(2, 2);
+				bounce.InflateRect(PopupSx(dpi, 2), PopupSx(dpi, 2));
 				if (i == m_bounceIdx && m_nBounce > 0) {
 					const double bf = sin(3.14159265 * (8 - m_nBounce) / 8.0);
 					bounce.InflateRect((int)(bounce.Width() * 0.20 * bf), (int)(bounce.Height() * 0.20 * bf));
 				}
 				DrawRedCheck(dc, bounce);
 			}
-			tr.left += CCUSTOM_POPUP_CHECK_W;
+			tr.left += checkW;
 		}
 
 		if (interactive) {
 			if (it.kind != CCUSTOM_POPUP_BUTTON) {
 				CRect lr = vr;
-				lr.left = vr.left + CCUSTOM_POPUP_PAD_X + CCUSTOM_POPUP_CHECK_W;
-				lr.right = vr.right - CCUSTOM_POPUP_PAD_RIGHT;
-				lr.top = vr.top + 2;
-				lr.bottom = vr.top + 18;
+				lr.left = vr.left + padX + checkW;
+				lr.right = vr.right - padR;
+				lr.top = vr.top + labelTop;
+				lr.bottom = vr.top + labelBand;
 				wchar_t line[CCUSTOM_POPUP_TEXT_LEN + 32];
 				if (it.kind == CCUSTOM_POPUP_RANGE && it.sliderMax > it.sliderMin) {
 					const int pct = MulDiv(it.sliderPos - it.sliderMin, 100, it.sliderMax - it.sliderMin);
@@ -2383,7 +2432,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 			}
 			// 飛行／退場中は子HWNDを隠すので、チップ内にコントロール外形を描く
 			if (m_lineAnimPhase != 0)
-				DrawInteractiveProxy(dc, it, vr, fade, bgRef);
+				DrawInteractiveProxy(dc, it, vr, fade, bgRef, dpi);
 			return;
 		}
 
@@ -2404,12 +2453,12 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 
 		UINT dt = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
 		if (it.kind == CCUSTOM_POPUP_SUB)
-			tr.right -= CCUSTOM_POPUP_ARROW_W;
+			tr.right -= arrowW;
 		DrawPopupItemText(dc, it.text, tr, dt, faded(PopupText(it.enabled)), it.enabled, fade);
 		if (it.kind == CCUSTOM_POPUP_SUB) {
 			CRect ar = vr;
-			ar.left = vr.right - CCUSTOM_POPUP_PAD_RIGHT - CCUSTOM_POPUP_ARROW_W;
-			ar.right = vr.right - CCUSTOM_POPUP_PAD_RIGHT;
+			ar.left = vr.right - padR - arrowW;
+			ar.right = vr.right - padR;
 			DrawPopupItemText(dc, hot ? L"▹" : L"▸", ar, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
 				faded(hot ? RGB(130, 70, 160) : PopupText(it.enabled)), it.enabled, fade);
 		}

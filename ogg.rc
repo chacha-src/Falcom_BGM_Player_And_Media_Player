@@ -1647,11 +1647,11 @@ BEGIN
     LTEXT           "100",IDC_STATIC_e18,452,151,13,8
     CONTROL         "",IDC_SLIDER27,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,473,43,16,106
     LTEXT           "100",IDC_STATIC_e19,475,151,13,8
-    LTEXT           "マスター",IDC_STATIC_EQ_SPECTRUM,379,35,22,8
-    LTEXT           "明瞭",IDC_STATIC_EQ_FREQ,405,35,18,8
-    LTEXT           "バランス",IDC_STATIC_EQ_BAND,428,35,20,8
-    LTEXT           "密度",IDC_STATIC_EQ_LOUDNESS,451,35,19,8
-    LTEXT           "立体",IDC_STATIC_EQ_WARMTH,470,35,22,8
+    LTEXT           "マスター",IDC_STATIC_EQ_SPECTRUM,371,35,30,8,SS_CENTER
+    LTEXT           "明瞭",IDC_STATIC_EQ_FREQ,399,35,26,8,SS_CENTER
+    LTEXT           "バランス",IDC_STATIC_EQ_BAND,420,35,30,8,SS_CENTER
+    LTEXT           "密度",IDC_STATIC_EQ_LOUDNESS,445,35,26,8,SS_CENTER
+    LTEXT           "立体",IDC_STATIC_EQ_WARMTH,468,35,26,8,SS_CENTER
     DEFPUSHBUTTON   "グローバルリセット",IDOK4,453,164,96,14
     LTEXT           "",IDC_STATIC_key,230,5,130,8
     LTEXT           "",IDC_STATIC_key2,386,5,130,8
@@ -1659,13 +1659,13 @@ BEGIN
     LTEXT           "",IDC_STATIC_key4,386,20,130,8
     CONTROL         "",IDC_SLIDER28,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,494,43,16,106
     LTEXT           "100",IDC_STATIC_e20,496,151,13,8
-    LTEXT           "リバーブ",IDC_STATIC_EQ_REVERB,491,35,22,8
+    LTEXT           "リバーブ",IDC_STATIC_EQ_REVERB,487,35,30,8,SS_CENTER
     CONTROL         "",IDC_SLIDER29,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,515,43,16,106
     LTEXT           "100",IDC_STATIC_e21,517,151,13,8
-    LTEXT           "コーラス",IDC_STATIC_EQ_CHORUS,512,35,22,8
+    LTEXT           "コーラス",IDC_STATIC_EQ_CHORUS,508,35,30,8,SS_CENTER
     CONTROL         "",IDC_SLIDER30,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,535,43,16,106
     LTEXT           "100",IDC_STATIC_e22,537,151,13,8
-    LTEXT           "ディレイ",IDC_STATIC_EQ_DELAY,532,35,22,8
+    LTEXT           "ディレイ",IDC_STATIC_EQ_DELAY,528,35,30,8,SS_CENTER
 END
 
 IDD_PIANOROLL DIALOGEX 0, 0, 400, 200
@@ -1749,7 +1749,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,655
+ FILEVERSION 0,9,1,657
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -1768,7 +1768,7 @@ BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
             VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.08.08"
-            VALUE "FileVersion", "0.9.1.655"
+            VALUE "FileVersion", "0.9.1.657"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.08.08"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"

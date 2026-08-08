@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -782,7 +782,7 @@ BOOL CPlayList::OnInitDialog()
 	DWORD dwExStyle = m_lc.GetExtendedStyle();
 	dwExStyle |= LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES;//|LVS_EX_INFOTIP;
 	m_lc.SetExtendedStyle(dwExStyle);
-	if (il.Create(16, 16, ILC_COLOR32 | ILC_MASK, 0, 3)) {
+	if (il.Create(max(16, (int)(16 * hD2 + 0.5f)), max(16, (int)(16 * hD2 + 0.5f)), ILC_COLOR32 | ILC_MASK, 0, 3)) {
 		HICON h1 = ::AfxGetApp()->LoadIcon(IDI_ICON1);
 		HICON h2 = ::AfxGetApp()->LoadIcon(IDI_ICON2);
 		HICON h3 = ::AfxGetApp()->LoadIcon(IDI_ICON3);
@@ -796,16 +796,16 @@ BOOL CPlayList::OnInitDialog()
 	// 受け取ったドロップは CCustomListCtrl::OnDropFiles が親(本ダイアログ)へ中継する。
 	m_lc.DragAcceptFiles(TRUE);
 	m_lc.ModifyStyle ( 0, LVS_REPORT );
-	m_lc.InsertColumn ( 0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, 200, 0 );
+	m_lc.InsertColumn ( 0, LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"), LVCFMT_LEFT, (int)(200 * hD2), 0 );
 	m_lc.InsertColumn ( 1, LL14(L"印", L"Mark", L"Marq.", L"Segno", L"Marca", L"표시", L"标记", L"علامة", L"Метка", L"Zchn", L"Marca", L"Teken", L"Znak", L"Isaret"), LVCFMT_CENTER, (int)(88 * hD2), 0 ); // [SAV]=曲ごと保存 / [LRC]=歌詞(.lrc)
-	m_lc.InsertColumn ( 2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, 50, 0 );
-	m_lc.InsertColumn ( 3, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, 72, 0 );
-	m_lc.InsertColumn ( 4, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatçı"), LVCFMT_LEFT, 200, 0 );
-	m_lc.InsertColumn ( 5, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Commentaire", L"Album/Commento", L"Album/Comentario", L"앨범/댓글", L"专辑/注释", L"الألبوم/التعليق", L"Альбом/Комментарий", L"Album/Kommentar", L"Album/Comentario", L"Album/Opmerking", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, 200, 0 );
-	m_lc.InsertColumn ( 6, LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"المجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"), LVCFMT_LEFT, 50, 0 );
+	m_lc.InsertColumn ( 2, LL14(L"ゲーム", L"Game", L"Jeu", L"Gioco", L"Juego", L"게임", L"游戏", L"لعبة", L"Игра", L"Spiel", L"Jogo", L"Spel", L"Gra", L"Oyun"), LVCFMT_LEFT, (int)(50 * hD2), 0 );
+	m_lc.InsertColumn ( 3, LL14(L"時間", L"Time", L"Duree", L"Durata", L"Duracion", L"시간", L"时间", L"الوقت", L"Время", L"Zeit", L"Duracao", L"Tijd", L"Czas", L"Sure"), LVCFMT_RIGHT, (int)(72 * hD2), 0 );
+	m_lc.InsertColumn ( 4, LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"الفنان", L"Исполнитель", L"Kunstler", L"Artista", L"Artiest", L"Artysta", L"Sanatçı"), LVCFMT_LEFT, (int)(200 * hD2), 0 );
+	m_lc.InsertColumn ( 5, LL14(L"アルバム/コメント", L"Album/Comment", L"Album/Commentaire", L"Album/Commento", L"Album/Comentario", L"앨범/댓글", L"专辑/注释", L"الألبوم/التعليق", L"Альбом/Комментарий", L"Album/Kommentar", L"Album/Comentario", L"Album/Opmerking", L"Album/Komentarz", L"Album/Yorum"), LVCFMT_LEFT, (int)(200 * hD2), 0 );
+	m_lc.InsertColumn ( 6, LL14(L"フォルダ", L"Folder", L"Dossier", L"Cartella", L"Carpeta", L"폴더", L"文件夹", L"المجلد", L"Папка", L"Ordner", L"Pasta", L"Map", L"Folder", L"Klasor"), LVCFMT_LEFT, (int)(50 * hD2), 0 );
 	m_lc.pc = pc;
 	m_lc.m_bSongParamTip = true; // 曲ごと保存パラメータをツールチップに付記
-	m_lc.m_mpJacketPx = kPlJakPx;
+	m_lc.m_mpJacketPx = max(16, (int)(kPlJakPx * hD2 + 0.5f));
 	m_lc.m_mpJacketGet = PlJacketGetCb;
 	m_lc.m_mpJacketCtx = this;
 	m_lc.m_mpNoteIconGet = PlNoteIconGetCb;
@@ -1723,7 +1723,7 @@ static BOOL PlJacketLoadVisible(CPlayList* self, BOOL allowExtract, BOOL bulkDis
 			if (last >= self->playcnt) last = self->playcnt - 1;
 			if (self->m_lc.GetItemRect(last, &rc1, LVIR_BOUNDS))
 				rc0.bottom = rc1.bottom;
-			rc0.right = rc0.left + kPlJakPx + 28;
+			rc0.right = rc0.left + (self->m_lc.m_mpJacketPx > 0 ? self->m_lc.m_mpJacketPx : kPlJakPx) + (int)(28 * hD2 + 0.5f);
 			self->m_lc.RedrawWindow(&rc0, NULL, RDW_INVALIDATE | RDW_NOERASE);
 		}
 	}
@@ -8953,13 +8953,13 @@ void CPlayList::SIcon(int i){
 	pc[i].icon=0; if(pnt>=0&&pnt<playcnt){ pc[pnt].icon=1;
 			// 名前列(ジャケ+♪)。UPDATENOW/ERASE 禁止: Opaque と競合して名前列だけちらつく
 			if (m_lc.GetItemRect(pnt, &r, LVIR_BOUNDS)) {
-				r.right = r.left + kPlJakPx + 42;
+				r.right = r.left + (m_lc.m_mpJacketPx > 0 ? m_lc.m_mpJacketPx : kPlJakPx) + (int)(42 * hD2 + 0.5f);
 				m_lc.RedrawWindow(&r, NULL, RDW_INVALIDATE | RDW_NOERASE);
 			}
 	}
 	pnt=i;
 	if (m_lc.GetItemRect(pnt, &r, LVIR_BOUNDS)) {
-		r.right = r.left + kPlJakPx + 42;
+		r.right = r.left + (m_lc.m_mpJacketPx > 0 ? m_lc.m_mpJacketPx : kPlJakPx) + (int)(42 * hD2 + 0.5f);
 		m_lc.RedrawWindow(&r, NULL, RDW_INVALIDATE | RDW_NOERASE);
 	}
 	m_lc.EnsureVisible(i,FALSE);
@@ -8981,7 +8981,7 @@ void CPlayList::SIconTimer(int i){
 	{
 		RECT r;
 		if (m_lc.GetItemRect(pnt, &r, LVIR_BOUNDS)) {
-			r.right = r.left + kPlJakPx + 42;
+			r.right = r.left + (m_lc.m_mpJacketPx > 0 ? m_lc.m_mpJacketPx : kPlJakPx) + (int)(42 * hD2 + 0.5f);
 			m_lc.RedrawWindow(&r, NULL, RDW_INVALIDATE | RDW_NOERASE);
 		}
 	}
@@ -10086,7 +10086,7 @@ LRESULT CPlayList::OnPlJakDone(WPARAM wParam, LPARAM lParam)
 		if (didImage && ::IsWindow(m_lc.GetSafeHwnd()) && job->row >= 0) {
 			CRect rIcon;
 			if (m_lc.GetItemRect(job->row, &rIcon, LVIR_BOUNDS)) {
-				rIcon.right = rIcon.left + kPlJakPx + 28;
+				rIcon.right = rIcon.left + (m_lc.m_mpJacketPx > 0 ? m_lc.m_mpJacketPx : kPlJakPx) + (int)(28 * hD2 + 0.5f);
 				m_lc.RedrawWindow(&rIcon, NULL, RDW_INVALIDATE | RDW_NOERASE);
 			}
 		}

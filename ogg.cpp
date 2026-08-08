@@ -432,7 +432,7 @@ BOOL COggApp::InitInstance()
 	savedata.popupMenuPoint = 9;
 	savedata.popupMenuBold = 0;
 	savedata.popupMenuItalic = 0;
-	savedata.popupMenuAnim = 0;
+	savedata.popupMenuAnim = 9;
 	savedata.deskLrcFontAuto = 1;
 	savedata.deskLrcFontPt = 140;
 	savedata.deskLrcLines = 10;
@@ -1328,9 +1328,9 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, updateAttemptExeTime) + sizeof(savedata.updateAttemptExeTime)))
 		savedata.updateAttemptExeTime = 0;
 	if (datFileSize < (int)(offsetof(save, popupMenuAnim) + sizeof(savedata.popupMenuAnim)))
-		savedata.popupMenuAnim = 0;
+		savedata.popupMenuAnim = 9; // 既定: オーロラ
 	else if (savedata.popupMenuAnim < 0 || savedata.popupMenuAnim > 9)
-		savedata.popupMenuAnim = 0;
+		savedata.popupMenuAnim = 9;
 	// 旧: cap_effect のみ → チェーン1段へ移行
 	if (savedata.cap_fx_n <= 0 && savedata.cap_effect > 0) {
 		savedata.cap_fx_n = 1;

@@ -747,7 +747,7 @@ void CDougaBarHost::LayoutBar()
 	int volX = W - pad - volArea;
 	int rateX = volX - gap - rateArea;
 	if (rateX < x + DougaDpiScale(m_hWnd, 8)) {
-		rateW = 48; volW = 48;
+		rateW = DougaDpiScale(m_hWnd, 48); volW = DougaDpiScale(m_hWnd, 48);
 		rateArea = rateLW + gap + rateW + gap + rateVW;
 		volArea = volLW + gap + volW + gap + volVW;
 		rightArea = rateArea + gap + volArea;
