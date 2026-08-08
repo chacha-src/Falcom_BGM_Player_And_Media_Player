@@ -16,7 +16,7 @@
 
 ### 環境モデル・イコライザー機能
 イコライザー機能が追加され100種類の環境モデルや15バンドのイコライザーも実装されました。
-イコライザープリセットも100個用意されています、
+イコライザープリセットも100個用意されています。
 環境モデルで音割れ防止のため、楽曲が既に大きいボリュームの場合、ダイナミックコンプレッサーにより音割れしないよう処理が施されております。
 
 グローバルパラメータとして、鮮明さ、低音域高音域バランス、音の密度、音の立体感、リバーブ、コーラス、ディレイも用意してあります。
@@ -24,9 +24,11 @@
 リバーブ／コーラス／ディレイは、スライダー後半でパンリバーブ、コーラスディストーション、マルチディレイ側にも振り分けられます。
 
 また環境モデルのかかり方の度合いの変更できるため、かなり自由度が高くなっています。
+現在のEQ／グローバル一式を **A/B スナップショット**として保存・適用・切替できます。
 
 ### ピアノロール機能
-108鍵盤の簡易ピアノロールが実装されました。右クリックメニューから操作でき、検出パラメータの微調整や、再生中のコード・メロディ表示にも対応しています。再生（またはPC音譜面化）中の MIDI / MusicXML 録り（実験的）もできます。
+108鍵盤（表示レンジは 88／108 切替）の簡易ピアノロールが実装されました。右クリックメニューから操作でき、検出パラメータの微調整や、再生中のコード・メロディ表示、ノート名表示にも対応しています。再生（またはPC音譜面化）中の MIDI / MusicXML 録り（実験的）もできます。
+表示は通常の2Dに加え **簡易3D**（視点ドラッグ・ホイールズーム）も選べます。
 
 ### 波形・周波数アナライザー
 Ozone風のリアルタイムアナライザーを追加しました。
@@ -44,31 +46,45 @@ Ozone風のリアルタイムアナライザーを追加しました。
 メディアプレイヤー画面モードの再生中アイコン（♪点滅2コマ）と選択♡の描画順も整備しました。
 
 ### メディアプレイヤー画面モード搭載
-普通のメディアプレイヤーのようなモード「らいら」を搭載。起動時にファルコムBGM画面との切り替えもできます。
+普通のメディアプレイヤーのようなモード「らいら」を搭載。起動時にファルコムBGM画面との切り替えもできます（起動モード確認ダイアログで「次回も確認」も選べます）。
 
 シークバーまわりを強化しています。
 
 - **波形オーバービュー:** シークバー上に波形を表示（再生しながらリアルタイムで埋まり、WAVはファイル全体の概観に差し替え）。右クリックでON/OFF
 - **ループとA-Bの分離:** ピンク帯／つまみがループ範囲、青がA-B。ロックチェックでループつまみを固定（既定ロック）
-- **キュー / フレーズA-B / 練習テンポ:** キュー追加・1〜8でジャンプ、Rで現在±秒をA-B、テンポ50/75/100%
-- **ジャケット残時間リング**、バナー相関メーター、シーク上の細いスペアナリボン
-- **Up Next キュー**（一覧・並替）、**スマートプレイリスト**（名前付きルール／Libツリー）、欠損ヒート＋整理、重複ダイアログ、フォルダ同期リスト、★レーティング
-- **書き出しクロスフェード帯プレビュー**、拍グリッド、LRC微調整、スリープ（カスタム分＋残り表示）、操作ガイド（？）
+- **キュー / フレーズA-B / 練習テンポ:** キュー追加・1〜8でジャンプ、Rで現在±秒をA-B、テンポは 50/75/100% プリセットに加え **50〜200%** の連続調整
+- **ジャケット残時間リング**、バナー（バー／ミラー／波形）と位相相関メーター（φ/LR）、シーク上の細いスペアナリボン
+- **シーク右クリック:** シーク／ループ／A-B の調整、A/B 点セット、キュー追加など
+- **Up Next キュー**（一覧・並替）、**スマートプレイリスト**／**Lib（書庫）ツリー**（ルート追加・PC／スマートPLノード）、一時プレイリスト、欠損ヒート＋整理、重複ダイアログ、フォルダ同期リスト、★レーティング
+- **書き出しクロスフェード帯プレビュー**、拍グリッド、LRC微調整、スリープ（カスタム分＋残り表示）
 - **再生履歴タイムライン**（日付ヘッダ・最大64件）
 - シークホバーで時刻チップ、A-B周回回数表示（L%d）
+- プレイヤー内の **カラオケ風歌詞パネル**（スクロール表示。別窓の歌詞ウィンドウとは独立）
 
 ### テンポ・ピッチ変更
 再生中のテンポとピッチを、それぞれ独立して変えられます。
 
 ### 歌詞表示
-.lrc形式の歌詞表示に対応しています。ネットからの歌詞取得もできます。常時最前面の歌詞ウィンドウや、LRCの細かいずれ補正・保存も使えます。
+.lrc形式の歌詞表示に対応しています。ネットからの歌詞取得（LRCLib／NetEase など）もできます。常時最前面の歌詞ウィンドウや、LRCの細かいずれ補正・保存も使えます。
 
 ### ジャケット・プレイリスト
 アルバムジャケットの表示と、プレイリスト機能（m3u / m3u8 / pls / xspf の取り込みなど）があります。曲ごとの音量やEQなどの設定も覚えます。
 「曲ごとに設定保存」のチェックを入れると、★付きの曲は保存済みパラメータを読み直して反映します。チェックを外すときは、その時点の設定をその曲へ保存してから無効化します。
+フォルダの `cover.jpg` や代替ジャケットの再読込・画像保存にも対応しています。
 
 ### アクリル（ぼかし）UI
-Windows 11のアクリル風ぼかし表示に対応しています。
+Windows 11のアクリル風ぼかし表示に対応しています。コンテキストメニューの「アクリルモード」から、設定を開かずに ON/OFF できます。
+
+### コンテキストメニュー（描画・フォント）
+カスタムコンテキストメニューの **メニュー描画方法**（出現／消失アニメ）を選べます。選んだ内容は保存され、次に開くメニューから反映されます。
+
+- クラシック（フェード）／上下に伸びる／カーテン（上から）／ワイプ（横）／リップル（起点）
+- ビッグバン／ブラックホール／螺旋（スパイラル）／花びら／ジッパー（左右交互）／オーロラ（波・既定）
+
+メニュー用フォント（8–24pt、太字／斜体）もホバープレビュー付きで変更できます。
+
+### 操作ガイド
+メディアプレイヤーの「？」に加え、EQ・プレイリスト・動画・レンダリング・キャプチャ・アナライザ・ピアノロール・メイン画面など、各 UI から **操作ガイド**（GDIヘルプ）を開けます。コンテキストメニューの「操作ガイド」からも到達できます。
 
 ### PCMアップスケール
 サンプリングレートやビット深度のアップスケール、マルチチャンネル出力に対応しています。
@@ -135,12 +151,12 @@ Windows 11のアクリル風ぼかし表示に対応しています。
 - **M/S プリセット:** 相関まわりから狭める／広げる／モノをワンクリック
 - **キー→EQ提案:** 検出キーからプリセットを提案
 - **BPM計測:** 再生またはPC音を聴きながらチェックONで計測し、OFFで拍グリッドや書き出しクロスフェード秒に反映
-- **DJパッド:** ピッチ／テンポ／ボーカル／M/S をワンタッチ
+- **DJパッド:** ピッチ／テンポ／ボーカル／M/S に加え、レコードスクラッチ、Kill（低／中／高）、±拍、ホットキュー、A-B、フィルタ／FX／速度、3バンドEQ などをワンタッチ
 - **MIDIキーボード操作:** ノート／CC で再生・次曲・音量など
 - **動画の音声抽出／差し替え:** 選択動画から WAV 抽出、または外部 WAV で音声を差し替えて MP4 へ書き出し
 - **出力ミラー:** 別再生デバイスへ同じミックスをミラー（音量のみ別）
 - **スクリーンセーバー風ビジュアライザ:** フルスクリーン表示（ESCで解除）
-- **ローカルリモート:** 同じ Wi-Fi / LAN 上の PC・スマホ（同時最大3台）からブラウザで再生操作。操作／EQ／プレイリスト／歌詞／DJスクラッチ（レコード盤）のタブ。設定に表示される `http://（LANのIP）:ポート/` を開く（PC では `127.0.0.1` でも可）。インターネットへの公開はしません。初回は Windows ファイアウォールの許可が必要なことがあります
+- **ローカルリモート:** 同じ Wi-Fi / LAN 上の PC・スマホ（同時最大6台）からブラウザで再生操作。操作／EQ／プレイリスト／歌詞／DJスクラッチ（レコード盤）／ピアノ／アナ のタブ。設定に表示される `http://（LANのIP）:ポート/` を開く（PC では `127.0.0.1` でも可）。インターネットへの公開はしません。初回は Windows ファイアウォールの許可が必要なことがあります
 - **アラーム:** 指定時刻に再生開始（スリープタイマーは従来どおり）
 - **ゲーム配信プリセット:** 画面キャプチャ＋デバイス録音を所定設定でまとめて開く
 
@@ -230,24 +246,28 @@ avi, mpgなどのDirectShow対応動画を再生可能です。Windows Vista以�
 - 音声書き出し（WAV / mp3 / FLAC。ループ／フェード／先頭無音揃え／クロスフェード／同時ミックス／サンプリング指定）
 - WAV書き出し時の2GB超対応（RF64）
 - マイクミックス（WAVへ保存時）、デバイス録音（ループバック→WAV/mp3/FLAC）、画面キャプチャ（MP4）
-- 歌詞ウィンドウ、LRC微調整／保存、ピアノロールのMIDI・MusicXML録り、PC音譜面化
+- 歌詞ウィンドウ、LRC微調整／保存、ピアノロールのMIDI・MusicXML録り、PC音譜面化、簡易3D表示
 - A-B／キュー素材パック、音量正規化バッチ、MusicBrainz自動タグ、ボーカルMid、M/Sプリセット、キーEQ提案
-- BPM計測、DJパッド、MIDI操作、動画音声抽出、出力ミラー、SS風ビジュアライザ、ローカルリモート（LAN／同時3台・タブ：操作/EQ/リスト/歌詞/DJスクラッチ）、アラーム、ゲーム配信プリセット
-- ピアノロールの検出パラメータ調整ダイアログ（多数スライダー）
+- BPM計測、DJパッド（スクラッチ／Kill／ホットキュー等）、MIDI操作、動画音声抽出、出力ミラー、SS風ビジュアライザ
+- ローカルリモート（LAN／同時6台・タブ：操作/EQ/リスト/歌詞/DJスクラッチ/ピアノ/アナ）、アラーム、ゲーム配信プリセット
+- ピアノロールの検出パラメータ調整ダイアログ（多数スライダー）、88／108鍵レンジ
 - プレイリストからアナライザー／ピアノロールを直接開く
-- 並べ替え、他プレイリストへの移動・コピー、選択曲のジャケ再取得
+- 並べ替え、他プレイリストへの移動・コピー、選択曲のジャケ再取得、一時プレイリスト
 - 欠損ファイル確認（パス修正・適用・インライン編集）と欠損マークの再スキャン
 - プレイリスト取り込み（m3u / m3u8 / pls / xspf。UTF-8、相対パス、欠損／重複スキップなど）
-- レンダリング設定（デバイス、バッファ、ビット深度、フォント、ファイル関連付けなど）
+- レンダリング設定（デバイス、バッファ、ビット深度、フォント、ファイル関連付け、**言語（14言語）**、スペアナ音階モードなど）
 - ファイル関連付けは音声に加え動画（avi/mp4/mkv/wmv/mov/webm 等）とプレイリスト（m3u 等）にも対応
-- タスクバーのジャンプリスト（再生／停止、EQ、ジャケット、プレイリストなど）
+- タスクバーのジャンプリスト（最近再生した曲、再演奏／停止／前後曲、EQ、ジャケット、レンダ、フォルダなど）
+- タスクバーサムネイルツールバー（再演奏／一時停止／停止／次曲など）
+- コンテキストメニューの描画アニメ・フォント、アクリル即切替、各窓の操作ガイド
 - 起動時・定期の更新チェック
 - Windowsミキサーでアプリがミュートされているときの警告
 - メディアプレイヤー側の最小化連動やツールチップ表示など
-- メイン画面を動かすと関連ウィンドウが追随
+- メイン画面を動かすと関連ウィンドウが追随（各サブ窓の追随ロック）
 - 曲ごと設定のON/OFF時の復元・保存、ファイル情報／タグ編集画面の操作
 - タグ書き込み（MP3 / FLAC / WAV / M4A / Ogg Vorbis）
 - kpi一覧の拡張子絞り込み
+- 拡張音量（主音量／EQマスターとは別系統）
 
 ## 注意事項
 - **Brandish4 および ガガーブトリロジー**については、WAVファイルをHDDへコピーする必要があります（フォルダ名は `WAVE`, `WAVEDV`, `WAVEDVD` などゲームにより異なります）。
@@ -288,9 +308,11 @@ These operate independently of the environmental models.
 For Reverb / Chorus / Delay, the upper half of each slider switches to pan reverb, chorus distortion, and multi delay.
 
 Additionally, the intensity of the environmental effects can be adjusted, offering a high degree of acoustic freedom.
+You can store and recall the current EQ / global set as **A/B snapshots**.
 
 ### Piano Roll Feature
-A simplified **108-key** piano roll has been implemented. Use the right-click menu for controls, detection tuning, and chord/melody display during playback. MIDI / MusicXML capture while playing (or PC-audio score) is experimental, and PC loopback audio can feed the roll.
+A simplified piano roll with an **88 / 108-key** display range has been implemented. Use the right-click menu for controls, detection tuning, chord/melody display, and note-name labels during playback. MIDI / MusicXML capture while playing (or PC-audio score) is experimental, and PC loopback audio can feed the roll.
+Besides flat 2D, a **simple 3D** view (drag to orbit, wheel to zoom) is available.
 
 ### Waveform & Spectrum Analyzer
 An Ozone-inspired real-time analyzer has been added.
@@ -308,32 +330,45 @@ An Ozone-inspired real-time analyzer has been added.
 Playback note icon blinking (two frames) and heart (♡) draw order on the media-player list were also fixed.
 
 ### Media Player Screen Mode Included
-Includes a media-player mode called **Raira**. You can choose between the Falcom BGM screen and this mode at startup.
+Includes a media-player mode called **Raira**. You can choose between the Falcom BGM screen and this mode at startup (optional “ask again next time” on the startup-mode dialog).
 
 The seek bar area has been expanded:
 
 - **Waveform overview:** Waveform on the seek bar (fills in real time during playback; WAV can be replaced by a full-file overview). Toggle via right-click
 - **Separate loop vs A-B:** Pink band/thumbs are the loop range; blue is A-B. A lock checkbox freezes the loop thumbs (locked by default)
-- **Cues / phrase A-B / practice tempo:** Add cues and jump with 1–8, R sets A-B around now ±seconds, tempo 50/75/100%
-- **Jacket remaining-time ring**, banner correlation meters, and a thin spectrum ribbon on the seek bar
-- **Up Next queue** (panel + reorder), **smart playlists** (named rules / Lib tree), missing heat + manage, dupes dialog, folder sync lists, and ★ ratings
-- Export crossfade-band preview, beat grid, LRC nudge, sleep timer (custom minutes + countdown), and the ? cheat sheet
+- **Cues / phrase A-B / practice tempo:** Add cues and jump with 1–8, R sets A-B around now ±seconds; tempo presets 50/75/100% plus continuous **50–200%**
+- **Jacket remaining-time ring**, banner modes (bars / mirror / wave) with phase correlation (φ/LR), and a thin spectrum ribbon on the seek bar
+- **Seek right-click menu:** adjust seek / loop / A-B, set A/B points, add cues, and more
+- **Up Next queue** (panel + reorder), **smart playlists** / **Lib (library) tree** (roots, PC / smart-PL nodes), temporary playlists, missing heat + manage, dupes dialog, folder sync lists, and ★ ratings
+- Export crossfade-band preview, beat grid, LRC nudge, sleep timer (custom minutes + countdown)
 - Play-history timeline (date headers, up to 64 entries)
-- **Export crossfade-band preview**, beat grid, LRC nudge, sleep timer, and an operation guide (?)
 - Seek hover time tip and A-B loop count display (L%d)
+- In-player **karaoke-style lyrics panel** (scrolling; independent from the separate lyrics window)
 
 ### Tempo & Pitch Control
 Tempo and pitch can be adjusted independently during playback.
 
 ### Lyrics Display
-Supports .lrc lyrics display, including optional online lyric lookup. An always-on-top lyrics window and fine LRC timing shift/save are also available.
+Supports .lrc lyrics display, including optional online lyric lookup (LRCLib / NetEase, etc.). An always-on-top lyrics window and fine LRC timing shift/save are also available.
 
 ### Jacket Art & Playlist
 Album jacket display and playlists are supported (import m3u / m3u8 / pls / xspf, among other features). Per-track settings such as volume and EQ are remembered.
 Turning **Save per-song** on reloads and applies saved parameters for tracks marked with ★. Turning it off saves the current settings for that track before disabling the feature.
+Folder `cover.jpg`, alternate jacket reload, and saving jacket images are also supported.
 
 ### Acrylic (Blur) UI
-Supports Windows 11 acrylic-style blur for the interface.
+Supports Windows 11 acrylic-style blur for the interface. Toggle it from the context-menu **Acrylic mode** item without opening Settings.
+
+### Context Menu (animation & font)
+Custom context menus offer **menu animation** styles for show/hide. The choice is saved and applies from the next menu open.
+
+- Classic (fade) / Expand up-down / Curtain (from top) / Wipe (horizontal) / Ripple (from click)
+- Big Bang / Black Hole / Spiral / Petals / Zipper (L/R) / Aurora (wave, default)
+
+Menu font (8–24 pt, bold/italic) can be changed with hover preview.
+
+### Operation Guides
+Besides the media player **?**, GDI operation guides are available from EQ, playlist, video, rendering, capture, analyzer, piano roll, main window, and more—also via each window’s context-menu **Operation guide** item.
 
 ### PCM Upscaling
 Supports sample-rate / bit-depth upscaling and multi-channel output.
@@ -400,12 +435,12 @@ Handy media-player add-ons from the Tools right-click menu and each window’s c
 - **M/S presets:** One-click narrow / wide / mono from correlation tools
 - **Key → EQ suggest:** Propose an EQ preset from detected key
 - **BPM measure:** Check while playing or with PC audio; uncheck to apply to beat grid and export crossfade seconds
-- **DJ pad:** One-touch pitch / tempo / vocal / M/S
+- **DJ pad:** Pitch / tempo / vocal / M/S plus vinyl scratch, Kill (low/mid/high), ±beat, hot cues, A-B, filter/FX/speed, and a 3-band EQ
 - **MIDI keyboard control:** Notes / CC for play, next, volume, etc.
 - **Video audio extract / replace:** Export audio from a selected video to WAV, or replace the video’s audio with an external WAV and write MP4
 - **Output mirror:** Mirror the same mix to another playback device (separate volume only)
 - **Screensaver-style visualizer:** Fullscreen display (ESC to exit)
-- **Local remote:** Browser transport control from PCs/phones on the same Wi-Fi / LAN (up to 3 clients). Open the `http://(LAN IP):port/` shown in settings (on the PC, `127.0.0.1` also works). Not exposed to the public Internet; Windows Firewall may prompt once
+- **Local remote:** Browser transport from PCs/phones on the same Wi-Fi / LAN (up to 6 clients). Tabs: transport / EQ / playlist / lyrics / DJ scratch / piano / analyzer. Open the `http://(LAN IP):port/` shown in settings (on the PC, `127.0.0.1` also works). Not exposed to the public Internet; Windows Firewall may prompt once
 - **Alarm:** Start playback at a set time (sleep timer remains as before)
 - **Game-stream preset:** Open screen capture + device record with preset settings
 
@@ -495,24 +530,28 @@ Plays avi, mpg, and other DirectShow-compatible formats. On Windows Vista and la
 - Audio export (WAV / mp3 / FLAC; loop / fade / leading-silence align / crossfade / concurrent mix / sample-rate)
 - WAV export larger than 2GB (RF64)
 - Mic mix (with Save to WAV), device recording (loopback → WAV/mp3/FLAC), screen capture (MP4)
-- Lyrics window, LRC nudge/save, piano-roll MIDI/MusicXML capture, score from PC audio
+- Lyrics window, LRC nudge/save, piano-roll MIDI/MusicXML capture, score from PC audio, simple 3D view
 - A-B/cue pack export, loudness normalize batch, MusicBrainz auto-tag, vocal Mid, M/S presets, key→EQ suggest
-- BPM measure, DJ pad, MIDI control, video audio extract, output mirror, screensaver visualizer, local remote (LAN / up to 3 clients), alarm, game-stream preset
-- Piano-roll detection tuning dialog (many sliders)
+- BPM measure, DJ pad (scratch / Kill / hot cues, etc.), MIDI control, video audio extract, output mirror, screensaver visualizer
+- Local remote (LAN / up to 6 clients; tabs: transport/EQ/list/lyrics/DJ scratch/piano/analyzer), alarm, game-stream preset
+- Piano-roll detection tuning dialog (many sliders), 88 / 108-key range
 - Open analyzer / piano roll directly from the playlist
-- Sort, move/copy to another playlist, refresh jacket for selection
+- Sort, move/copy to another playlist, refresh jacket for selection, temporary playlists
 - Missing-file review (path fix / apply / inline edit) and missing-mark rescan
 - Playlist import (m3u / m3u8 / pls / xspf; UTF-8, relative paths, skip missing/duplicates)
-- Rendering options (device, buffer, bit depth, fonts, file associations, etc.)
+- Rendering options (device, buffer, bit depth, fonts, file associations, **language (14 locales)**, spectrum scale mode, etc.)
 - File associations cover audio plus video (avi/mp4/mkv/wmv/mov/webm, etc.) and playlists (m3u, etc.)
-- Taskbar jump list (play/pause, EQ, jacket, playlist, and more)
+- Taskbar jump list (recent tracks, replay/stop/prev/next, EQ, jacket, render, folder, and more)
+- Taskbar thumbnail toolbar (replay / pause / stop / next, etc.)
+- Context-menu animation & font, acrylic quick toggle, per-window operation guides
 - Startup and periodic update checks
 - Warning when the app is muted in the Windows volume mixer
 - Media-player extras such as minimize sync and tooltips
-- Related windows follow when the main window is moved
+- Related windows follow when the main window is moved (per-window follow lock)
 - Per-song settings restore/save on feature toggle; File Info / Tag Edit tools
 - Tag writing (MP3 / FLAC / WAV / M4A / Ogg Vorbis)
 - kpi list extension filter
+- Extended volume (separate from main volume / EQ master)
 
 ## Important Notes
 - **For Brandish 4 and the Gagharv Trilogy:** WAV files must be copied to your HDD (Folder names like `WAVE`, `WAVEDV`, or `WAVEDVD` vary by game).
