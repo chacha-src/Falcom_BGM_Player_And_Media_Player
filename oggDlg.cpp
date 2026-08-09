@@ -3517,6 +3517,9 @@ static void TempoPredReset(double srcSec, double wallSec, double rate);
 static void TempoPredOnLoopTo(int samplePos, double rate);
 static void TempoPredNotifyLoop(int samplePos);
 static void PlaybackNoteLoop(int toSample);
+static bool WantPlaybackLoop();
+static int PlaybackSrcTotalSamples();
+static bool PlaybackShortMeansEof(int gotBytes);
 static void TempoPredAdvanceTo(double wallSec, double rateNow, double totalSrcSec);
 static void TempoPredSyncSourcePos(double wallSec, double rateNow, double totalSrcSec);
 CString tagname, tagfile, tagalbum;
@@ -15965,11 +15968,16 @@ BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2)
 	int rrr = readBuffwav((char*)bw + old, l1);
 	if (l1 != rrr) {
 		if (endf == 1) {
+			// 途中の短読みは終端にしない（ゲーム音源でも RB/デコード端数がある）
+			if (rrr < l1)
+				ZeroMemory((char*)bw + old + rrr, (SIZE_T)(l1 - rrr));
 			l1 = rrr;
-			if (savedata.saverenzoku == 0)
-				fade1 = 1;
-			else
-				endflg = 1;
+			if (PlaybackShortMeansEof(rrr)) {
+				if (savedata.saverenzoku == 0)
+					fade1 = 1;
+				else
+					endflg = 1;
+			}
 		}
 		else {
 			// 壊れた loop 点で 0 バイト→seek(loop1)→また 0 の永久回りを止める
@@ -15996,11 +16004,15 @@ BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2)
 		rrr = readBuffwav((char*)bw, l2);
 		if (l2 != rrr) {
 			if (endf == 1) {
+				if (rrr < l2)
+					ZeroMemory((char*)bw + rrr, (SIZE_T)(l2 - rrr));
 				l2 = rrr;
-				if (savedata.saverenzoku == 0)
-					fade1 = 1;
-				else
-					endflg = 1;
+				if (PlaybackShortMeansEof(rrr)) {
+					if (savedata.saverenzoku == 0)
+						fade1 = 1;
+					else
+						endflg = 1;
+				}
 			}
 			else {
 				if (rrr == 0 && (loop2 <= 0 || loop1 == loop2
@@ -16130,9 +16142,43 @@ static void AdvanceOutAndSrcPos(int outSamples)
 }
 
 // ループ再生ON、またはゲームループ(endf==0)のとき true
-static inline bool WantPlaybackLoop()
+static bool WantPlaybackLoop()
 {
 	return (savedata.saveloop != 0) || (endf == 0);
+}
+
+// ソース総PCMサンプル数（loop点 / loop3保存総長 / oggsize）。不明は 0。
+static int PlaybackSrcTotalSamples()
+{
+	if (loop2 > 0)
+		return loop1 + loop2;
+	if (loop3 > 0)
+		return loop3;
+	const int dm = ActiveDecodeMode();
+	// MP3: oggsize / playb は PCM フレーム数
+	if (dm == -10 && oggsize > 0)
+		return oggsize;
+	if (oggsize > 0 && wavchannel > 0 && wavsam_depth >= 8) {
+		const int bps = wavsam_depth / 8;
+		if (bps > 0)
+			return oggsize / (wavchannel * bps);
+	}
+	return 0;
+}
+
+// 短読みを曲終端にしてよいか。途中の RB待ち・デコード端数では false（誤停止防止）。
+// gotBytes<=0 は真の欠落/EOF。総長が信頼できるときだけ位置で判定（DSD/MP3既存方針と揃える）。
+static bool PlaybackShortMeansEof(int gotBytes)
+{
+	if (gotBytes <= 0)
+		return true;
+	const int total = PlaybackSrcTotalSamples();
+	const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+	if (total < hz)
+		return false;
+	const int margin = hz / 2; // ~0.5s
+	const int pos = (poss5 > 0) ? poss5 : (int)playb;
+	return (pos + margin >= total);
 }
 
 // 予測用ソースは壁時計積分のみ（poss5/decode を毎フレ入れると総時間がゆれる）。
@@ -16877,12 +16923,15 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 	if (l1 != rrr) {
 		// 書き出し中は秒数上限で止める。短い返却を即 EOF にすると RB プライミングで失敗する。
 		if (endf == 1 && !exporting) {
+			if (rrr < l1)
+				ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
 			l1 = rrr;
-			if (savedata.saverenzoku == 0)
-				fade1 = 1;
-			else
-				endflg = 1;
-
+			if (PlaybackShortMeansEof(rrr)) {
+				if (savedata.saverenzoku == 0)
+					fade1 = 1;
+				else
+					endflg = 1;
+			}
 		}
 		else if (endf == 1 && exporting && rrr <= 0 && fade1) {
 			l1 = rrr;
@@ -16926,12 +16975,15 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 		}
 		if (l2 != rrr) {
 			if (endf == 1 && !exporting) {
+				if (rrr < l2)
+					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
 				l2 = rrr;
-				if (savedata.saverenzoku == 0)
-					fade1 = 1;
-				else
-					endflg = 1;
-
+				if (PlaybackShortMeansEof(rrr)) {
+					if (savedata.saverenzoku == 0)
+						fade1 = 1;
+					else
+						endflg = 1;
+				}
 			}
 			else if (endf == 1 && exporting && rrr <= 0 && fade1) {
 				l2 = rrr;
@@ -17387,6 +17439,8 @@ int readkpi(BYTE* bw, int cnt)
 int playwavm4a(BYTE* bw, int old, int l1, int l2)
 {
 	//データ読み込み
+	const int l1req = l1;
+	const int l2req = l2;
 	int rrr = readm4a(bw + old, l1);
 	{
 		const int bpf = PcmOutBytesPerFrame();
@@ -17397,10 +17451,12 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 	if (l1 != rrr) {
 		if (!WantPlaybackLoop()) {
 			l1 = rrr;
-			if (savedata.saverenzoku == 0)
-				fade1 = 1;
-			else
-				endflg = 1;
+			if (PlaybackShortMeansEof(rrr)) {
+				if (savedata.saverenzoku == 0)
+					fade1 = 1;
+				else
+					endflg = 1;
+			}
 		}
 		else {
 			const int loopEnd = (loop1 == 0 && loop2 == 0) ? 0 : (loop1 + loop2);
@@ -17411,19 +17467,27 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 				RubberBand_DestroyBank(0);
 				reset = TRUE;
-				readm4a(bw + old + rrr, l1 - rrr);
+				readm4a(bw + old + rrr, l1req - rrr);
+				l1 = l1req;
+			}
+			else {
+				l1 = rrr;
 			}
 		}
 	}
-	if (l2) {
-		rrr = readm4a(bw, l2);
-		if (l2 != rrr) {
+	if (l1 < l1req)
+		ZeroMemory(bw + old + l1, (SIZE_T)(l1req - l1));
+	if (l2req) {
+		rrr = readm4a(bw, l2req);
+		if (l2req != rrr) {
 			if (!WantPlaybackLoop()) {
 				l2 = rrr;
-				if (savedata.saverenzoku == 0)
-					fade1 = 1;
-				else
-					endflg = 1;
+				if (PlaybackShortMeansEof(rrr)) {
+					if (savedata.saverenzoku == 0)
+						fade1 = 1;
+					else
+						endflg = 1;
+				}
 			}
 			else {
 				const int loopEnd = (loop1 == 0 && loop2 == 0) ? 0 : (loop1 + loop2);
@@ -17434,10 +17498,19 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 					poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 					RubberBand_DestroyBank(0);
 					reset = TRUE;
-					readm4a(bw + rrr, (int)l2 - rrr);
+					readm4a(bw + rrr, (int)l2req - rrr);
+					l2 = l2req;
+				}
+				else {
+					l2 = rrr;
 				}
 			}
 		}
+		else {
+			l2 = l2req;
+		}
+		if (l2 < l2req)
+			ZeroMemory(bw + l2, (SIZE_T)(l2req - l2));
 	}
 	return l1 + l2;
 }
@@ -17602,41 +17675,21 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 	const int l2req = l2;
 	int rrr = readflac(bw + old, l1);
 	if (l1 != rrr) {
+		const bool flacEos = (og && og->kmp && flac_.IsEndOfStream(og->kmp)) ? true : false;
 		if (!WantPlaybackLoop() && flacmode == 0) {
+			// 得た分だけ有効（余りは下でゼロ埋め）。終端判定は別。
 			l1 = rrr;
-			if (savedata.saverenzoku == 0)
-				fade1 = 1;
-			else
-				endflg = 1;
-		}
-		else {
-			PlaybackNoteLoop(loop1);
-			if (flacmode == 0)
-				flac_.SetPosition(og->kmp, (LONGLONG)((double)loop1 / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
-			else
-				flac_.SetPosition(og->kmp, loop1);
-			::rrr = 1;  // シーク後は Render を再開（グローバル）
-			poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
-			RubberBand_DestroyBank(0);
-			reset = TRUE;
-			readflac(bw + old + rrr, l1req - rrr);
-			l1 = l1req;
-		}
-	}
-	if (l1 < l1req)
-		ZeroMemory(bw + old + l1, (SIZE_T)(l1req - l1));
-	int l2out = l2req;
-	if (l2req) {
-		rrr = readflac(bw, l2req);
-		if (l2req != rrr) {
-			if (!WantPlaybackLoop() && flacmode == 0) {
-				l2out = rrr;
+			if (flacEos || PlaybackShortMeansEof(rrr)) {
 				if (savedata.saverenzoku == 0)
 					fade1 = 1;
 				else
 					endflg = 1;
 			}
-			else {
+		}
+		else if (WantPlaybackLoop() || flacmode != 0) {
+			const bool nearEnd = flacEos || PlaybackShortMeansEof(rrr)
+				|| ((loop1 == 0 && loop2 == 0) && rrr == 0);
+			if (nearEnd) {
 				PlaybackNoteLoop(loop1);
 				if (flacmode == 0)
 					flac_.SetPosition(og->kmp, (LONGLONG)((double)loop1 / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
@@ -17646,8 +17699,49 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 				RubberBand_DestroyBank(0);
 				reset = TRUE;
-				readflac(bw + rrr, (int)l2req - rrr);
-				l2out = l2req;
+				readflac(bw + old + rrr, l1req - rrr);
+				l1 = l1req;
+			}
+			else {
+				l1 = rrr; // 途中短読み: 余りはゼロ埋め
+			}
+		}
+	}
+	if (l1 < l1req)
+		ZeroMemory(bw + old + l1, (SIZE_T)(l1req - l1));
+	int l2out = l2req;
+	if (l2req) {
+		rrr = readflac(bw, l2req);
+		if (l2req != rrr) {
+			const bool flacEos2 = (og && og->kmp && flac_.IsEndOfStream(og->kmp)) ? true : false;
+			if (!WantPlaybackLoop() && flacmode == 0) {
+				l2out = rrr;
+				if (flacEos2 || PlaybackShortMeansEof(rrr)) {
+					if (savedata.saverenzoku == 0)
+						fade1 = 1;
+					else
+						endflg = 1;
+				}
+			}
+			else if (WantPlaybackLoop() || flacmode != 0) {
+				const bool nearEnd2 = flacEos2 || PlaybackShortMeansEof(rrr)
+					|| ((loop1 == 0 && loop2 == 0) && rrr == 0);
+				if (nearEnd2) {
+					PlaybackNoteLoop(loop1);
+					if (flacmode == 0)
+						flac_.SetPosition(og->kmp, (LONGLONG)((double)loop1 / (((double)wavbit_sample_Hz * (double)wavchannel) / 2000.0)));
+					else
+						flac_.SetPosition(og->kmp, loop1);
+					::rrr = 1;  // シーク後は Render を再開（グローバル）
+					poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
+					RubberBand_DestroyBank(0);
+					reset = TRUE;
+					readflac(bw + rrr, (int)l2req - rrr);
+					l2out = l2req;
+				}
+				else {
+					l2out = rrr;
+				}
 			}
 		}
 		if (l2out < l2req)
@@ -17698,7 +17792,9 @@ int readflac(BYTE* bw, int cnt)
 						lenl = r;
 					}
 				}
-				if (r != lenl && savedata.saveloop == 0)
+				// 真の EOS のときだけ Render 停止。途中短読みで rrr=0 にすると以降永久無音→誤終端になる。
+				if (r != lenl && savedata.saveloop == 0
+					&& og && og->kmp && flac_.IsEndOfStream(og->kmp))
 					rrr = 0;
 				// EOF の場合は muon を使わず部分読みを返す（曲終了検出のため）。通常のドロップアウト時のみ muon でゼロ埋め
 				if (fade1 == 1 && muon != 0) {
@@ -17833,38 +17929,60 @@ int playwavopus(BYTE* bw, int old, int l1, int l2)
 	}
 	if (l1 != rrr) {
 		if (!WantPlaybackLoop()) {
-			l1 = rrr;
-			if (savedata.saverenzoku == 0)
-				fade1 = 1;
-			else
-				endflg = 1;
+			const int got = rrr;
+			if (PlaybackShortMeansEof(rrr)) {
+				if (savedata.saverenzoku == 0)
+					fade1 = 1;
+				else
+					endflg = 1;
+			}
+			if (got < l1)
+				ZeroMemory(bw + old + got, (SIZE_T)(l1 - got));
+			l1 = got;
 		}
 		else {
-			PlaybackNoteLoop(loop1);
-			opus_.SetPosition(og->kmp, (DWORD)loop1);
-			poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
-			RubberBand_DestroyBank(0);
-			reset = TRUE;
-			readopus(bw + old + rrr, l1 - rrr);
+			if (PlaybackShortMeansEof(rrr) || rrr == 0) {
+				PlaybackNoteLoop(loop1);
+				opus_.SetPosition(og->kmp, (DWORD)loop1);
+				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
+				RubberBand_DestroyBank(0);
+				reset = TRUE;
+				readopus(bw + old + rrr, l1 - rrr);
+			}
+			else if (rrr < l1) {
+				ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
+				l1 = rrr;
+			}
 		}
 	}
 	if (l2) {
 		rrr = readopus(bw, l2);
 		if (l2 != rrr) {
 			if (!WantPlaybackLoop()) {
-				l2 = rrr;
-				if (savedata.saverenzoku == 0)
-					fade1 = 1;
-				else
-					endflg = 1;
+				const int got = rrr;
+				if (PlaybackShortMeansEof(rrr)) {
+					if (savedata.saverenzoku == 0)
+						fade1 = 1;
+					else
+						endflg = 1;
+				}
+				if (got < l2)
+					ZeroMemory(bw + got, (SIZE_T)(l2 - got));
+				l2 = got;
 			}
 			else {
-				PlaybackNoteLoop(loop1);
-				opus_.SetPosition(og->kmp, (DWORD)loop1);
-				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
-				RubberBand_DestroyBank(0);
-				reset = TRUE;
-				readopus(bw + rrr, (int)l2 - rrr);
+				if (PlaybackShortMeansEof(rrr) || rrr == 0) {
+					PlaybackNoteLoop(loop1);
+					opus_.SetPosition(og->kmp, (DWORD)loop1);
+					poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
+					RubberBand_DestroyBank(0);
+					reset = TRUE;
+					readopus(bw + rrr, (int)l2 - rrr);
+				}
+				else if (rrr < l2) {
+					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
+					l2 = rrr;
+				}
 			}
 		}
 	}
@@ -17886,7 +18004,8 @@ int readopus(BYTE* bw, int cnt)
 					break;
 				if (rrr == 1) {
 					r = opus_.Render(og->kmp, (BYTE*)bufkpi, cnt);
-					if (r != cnt && savedata.saveloop == 0)
+					// 0バイト(=真EOF)のときだけ停止。途中短読みで rrr=0 にすると誤終端になる。
+					if (r == 0 && savedata.saveloop == 0)
 						rrr = 0;
 					if (fade1 == 1 && muon != 0) {
 						r = cnt;
@@ -18026,15 +18145,17 @@ int playwavdsd(BYTE* bw, int old, int l1, int l2)
 		}
 	}
 	if (l1 != r1) {
-		// フレーム端数の短読みは無視。真の欠落（半分未満）だけ EOF 扱い
+		// フレーム端数の短読みは無視。真の欠落（半分未満）だけ EOF 候補
 		const int dsdFrame = (wavchannel > 0 && wavsam_depth >= 8) ? (wavchannel * (wavsam_depth / 8)) : 4;
 		const bool realShort = (r1 <= 0) || (r1 + dsdFrame <= l1 && r1 * 2 < l1);
 		if (realShort) {
 			if (!WantPlaybackLoop()) {
-				if (savedata.saverenzoku == 0)
-					fade1 = 1;
-				else
-					endflg = 1;
+				if (PlaybackShortMeansEof(r1)) {
+					if (savedata.saverenzoku == 0)
+						fade1 = 1;
+					else
+						endflg = 1;
+				}
 			}
 			else {
 				PlaybackNoteLoop(loop1);
@@ -18052,10 +18173,12 @@ int playwavdsd(BYTE* bw, int old, int l1, int l2)
 		const bool realShort = (r2 <= 0) || (r2 + dsdFrame <= l2 && r2 * 2 < l2);
 		if (realShort) {
 			if (!WantPlaybackLoop()) {
-				if (savedata.saverenzoku == 0)
-					fade1 = 1;
-				else
-					endflg = 1;
+				if (PlaybackShortMeansEof(r2)) {
+					if (savedata.saverenzoku == 0)
+						fade1 = 1;
+					else
+						endflg = 1;
+				}
 			}
 			else {
 				PlaybackNoteLoop(loop1);
@@ -18209,12 +18332,18 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 	rrr = ReadMp3Accumulate(bw + old, l1);
 	if (l1 != rrr) {
 		if (!WantPlaybackLoop()) {
-			if (savedata.saverenzoku == 0) {
-				if(fade1 == 0) readme = rrr;
-				fade1 = 1;
+			// 途中の RB 待ち短読みは終端にしない（DSD/FLAC と同じ）
+			if (PlaybackShortMeansEof(rrr)) {
+				if (savedata.saverenzoku == 0) {
+					if (fade1 == 0) readme = rrr;
+					fade1 = 1;
+				}
+				else	endflg = 1;
 			}
-			else	endflg = 1;
-
+			else if (fade1 == 0 && rrr >= 0) {
+				// 余りを無音埋め（終端確定はしない）
+				readme = rrr;
+			}
 		}
 		else {
 			// 終端前の短読みは RB 待ちのことが多い。poss5 が loop 終端近くのときだけループ。
@@ -18235,11 +18364,16 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 		rrr2 = ReadMp3Accumulate(bw, l2);
 		if (l2 != rrr2) {
 			if (!WantPlaybackLoop()) {
-				if (savedata.saverenzoku == 0) {
-					if (fade1 == 0)readme = rrr + rrr2;
-					fade1 = 1;
+				if (PlaybackShortMeansEof(rrr2)) {
+					if (savedata.saverenzoku == 0) {
+						if (fade1 == 0)readme = rrr + rrr2;
+						fade1 = 1;
+					}
+					else endflg = 1;
 				}
-				else endflg = 1;
+				else if (fade1 == 0 && rrr2 >= 0) {
+					readme = rrr + rrr2;
+				}
 			}
 			else {
 				const int loopEnd2 = (loop1 == 0 && loop2 == 0) ? 0 : (loop1 + loop2);
@@ -18270,9 +18404,14 @@ int playwavwav(BYTE* bw, int old, int l1, int l2)
 	int rrr = readwav(bw + old, l1);
 	if (l1 != rrr) {
 		if (!WantPlaybackLoop()) {
-			l1 = rrr;
-			if (savedata.saverenzoku == 0) fade1 = 1;
-			else endflg = 1;
+			const int got = rrr;
+			if (PlaybackShortMeansEof(rrr)) {
+				if (savedata.saverenzoku == 0) fade1 = 1;
+				else endflg = 1;
+			}
+			if (got < l1)
+				ZeroMemory(bw + old + got, (SIZE_T)(l1 - got));
+			l1 = got;
 		}
 		else {
 			PlaybackNoteLoop(loop1);
@@ -18287,9 +18426,14 @@ int playwavwav(BYTE* bw, int old, int l1, int l2)
 		rrr = readwav(bw, l2);
 		if (l2 != rrr) {
 			if (!WantPlaybackLoop()) {
-				l2 = rrr;
-				if (savedata.saverenzoku == 0) fade1 = 1;
-				else endflg = 1;
+				const int got = rrr;
+				if (PlaybackShortMeansEof(rrr)) {
+					if (savedata.saverenzoku == 0) fade1 = 1;
+					else endflg = 1;
+				}
+				if (got < l2)
+					ZeroMemory(bw + got, (SIZE_T)(l2 - got));
+				l2 = got;
 			}
 			else {
 				PlaybackNoteLoop(loop1);
@@ -18843,7 +18987,13 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 
 	if (l1 != rrr) {
 		if (!WantPlaybackLoop()) {
-			l1 = rrr; fade1 = 1;
+			if (PlaybackShortMeansEof(rrr)) {
+				l1 = rrr; fade1 = 1;
+			}
+			else if (rrr < l1) {
+				ZeroMemory((char*)bw + old + rrr, (SIZE_T)(l1 - rrr));
+				l1 = rrr;
+			}
 		}
 		else {
 			loopcnt++;
@@ -18867,7 +19017,13 @@ void playwavds2(BYTE* bw, int old, int l1, int l2)
 		rrr = McopyAccumulate((char*)bw, l2);
 		if (l2 != rrr) {
 			if (!WantPlaybackLoop()) {
-				l2 = rrr; fade1 = 1;
+				if (PlaybackShortMeansEof(rrr)) {
+					l2 = rrr; fade1 = 1;
+				}
+				else if (rrr < l2) {
+					ZeroMemory((char*)bw + rrr, (SIZE_T)(l2 - rrr));
+					l2 = rrr;
+				}
 			}
 			else {
 				loopcnt++;
@@ -20836,17 +20992,25 @@ void COggDlg::timerp()
 		const double wallSec = (plf == 1) ? TempoPredWallNow() : 0.0;
 		TempoPredSyncSourcePos(wallSec, tempoRate, totalSrc);
 
-		double remainSrc = totalSrc - g_tpSrcSec;
-		if (remainSrc < 0.0) remainSrc = 0.0;
 		const double rateDiv = (tempoRate > 0.05) ? tempoRate : 1.0;
-		// 総時間は「現在レート一定」なら totalSrc/rate に一致。表示のゆれを抑えるため
-		// 予測値を軽い平滑化（テンポ変更・ループ直後は即座に追従）。
-		double totalWall = wallSec + remainSrc / rateDiv;
+		double totalWall;
+		if (plf == 0) {
+			// 停止中: 経過は 0。総尺はソース総長（残り秒を総尺に見せない＝誤停止時に 0:23/5:10 が崩れるのを防ぐ）
+			totalWall = totalSrc / rateDiv;
+		}
+		else {
+			double remainSrc = totalSrc - g_tpSrcSec;
+			if (remainSrc < 0.0) remainSrc = 0.0;
+			// 総時間は「現在レート一定」なら totalSrc/rate に一致。表示のゆれを抑えるため
+			// 予測値を軽い平滑化（テンポ変更・ループ直後は即座に追従）。
+			totalWall = wallSec + remainSrc / rateDiv;
+		}
 		{
 			static double s_smoothTotal = -1.0;
 			static double s_smoothRate = -1.0;
 			static int s_smoothLoop = -1;
-			const bool hardSnap = (s_smoothTotal < 0.0)
+			const bool hardSnap = (plf == 0)
+				|| (s_smoothTotal < 0.0)
 				|| (fabs(tempoRate - s_smoothRate) > 0.0005)
 				|| (loopcnt != s_smoothLoop)
 				|| (fabs(totalWall - s_smoothTotal) > 0.75);
